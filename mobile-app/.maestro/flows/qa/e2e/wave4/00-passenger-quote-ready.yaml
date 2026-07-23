@@ -1,3 +1,4 @@
+# LEGACY_COMPAT_ONLY: do not use as evidence for the current passenger product.
 appId: br.com.leaf.ride
 ---
 - openLink: "leafapp://robotaxi/destination?qaAutomation=1&qaAutoFlow=quote&qaPresetQuery=Ferry%20Building"

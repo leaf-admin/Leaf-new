@@ -4,6 +4,8 @@ npm-debug.log
 .gitignore
 README.md
 .env
+firebase-credentials.json
+leaf-reactnative-firebase-adminsdk-*.json
 .nyc_output
 coverage
 .docker

@@ -211,6 +211,39 @@ export const markRideEventIntentAcked = (options = {}) =>
 export const markRideEventIntentRejected = (options = {}) =>
   markRideEventIntent({ ...options, status: 'rejected' });
 
+export const rejectPendingRideEventIntentsForBooking = async ({
+  bookingId,
+  actorId,
+  error,
+} = {}) => {
+  const normalizedBookingId = normalizeText(bookingId);
+  const normalizedActorId = normalizeText(actorId);
+  if (!normalizedBookingId) return 0;
+
+  const events = await readOutbox();
+  const now = Date.now();
+  let rejectedCount = 0;
+  const nextEvents = events.map((event) => {
+    if (event.status !== 'pending') return event;
+    if (event.bookingId !== normalizedBookingId) return event;
+    if (normalizedActorId && event.actorId !== normalizedActorId) return event;
+
+    rejectedCount += 1;
+    return {
+      ...event,
+      status: 'rejected',
+      updatedAt: now,
+      rejectedAt: now,
+      lastError: normalizeText(error) || 'Backend reconciled this ride as terminal',
+    };
+  });
+
+  if (rejectedCount > 0) {
+    await writeOutbox(nextEvents);
+  }
+  return rejectedCount;
+};
+
 export const clearRideEventOutbox = async () => {
   await AsyncStorage.removeItem(STORAGE_KEY);
 };
@@ -223,4 +256,5 @@ export default {
   listPendingRideEventIntents,
   markRideEventIntentAcked,
   markRideEventIntentRejected,
+  rejectPendingRideEventIntentsForBooking,
 };

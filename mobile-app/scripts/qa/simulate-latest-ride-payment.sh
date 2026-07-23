@@ -6,6 +6,7 @@ API_BASE_URL="${API_BASE_URL:-https://api.leaf.app.br}"
 WATCH_TIMEOUT_SEC="${WATCH_TIMEOUT_SEC:-180}"
 POLL_INTERVAL_SEC="${POLL_INTERVAL_SEC:-2}"
 PASSENGER_UID_FILTER="${PASSENGER_UID_FILTER:-}"
+PAYMENT_INTENT_ID="${PAYMENT_INTENT_ID:-}"
 PAYMENT_EVIDENCE_PATH="${PAYMENT_EVIDENCE_PATH:-}"
 DASHBOARD_SESSION_PATH="${DASHBOARD_SESSION_PATH:-${HOME}/.leaf/dashboard-session.json}"
 ADMIN_ENV_PATH="${ADMIN_ENV_PATH:-${HOME}/.leaf/dashboard-admin.env}"
@@ -50,17 +51,34 @@ if [[ -z "${ADMIN_TOKEN}" ]]; then
   exit 2
 fi
 
+if [[ -z "${PASSENGER_UID_FILTER}" || -z "${PAYMENT_INTENT_ID}" ]]; then
+  echo "[simulate-latest-ride-payment] PASSENGER_UID_FILTER and PAYMENT_INTENT_ID are required." >&2
+  echo "[simulate-latest-ride-payment] Refusing ambiguous lookup by passenger." >&2
+  exit 2
+fi
+
 deadline=$(( $(date +%s) + WATCH_TIMEOUT_SEC ))
 
-echo "[simulate-latest-ride-payment] watching sandbox payment intents on ${API_BASE_URL}"
+echo "[simulate-latest-ride-payment] confirming exact sandbox payment intent on ${API_BASE_URL}"
 
 while [[ $(date +%s) -lt ${deadline} ]]; do
-  response_json="$(
-    curl -sS -X POST "${API_BASE_URL}/api/woovi/test-confirm-sandbox-payment" \
+  response_with_status="$(
+    curl -sS -w $'\n%{http_code}' -X POST "${API_BASE_URL}/api/woovi/test-confirm-sandbox-payment" \
       -H "authorization: Bearer ${ADMIN_TOKEN}" \
       -H 'content-type: application/json' \
-      -d "$(jq -n --arg passengerId "${PASSENGER_UID_FILTER}" '{ passengerId: $passengerId }')" || true
+      -d "$(jq -n \
+        --arg passengerId "${PASSENGER_UID_FILTER}" \
+        --arg paymentIntentId "${PAYMENT_INTENT_ID}" \
+        '{ passengerId: $passengerId, paymentIntentId: $paymentIntentId }')" || true
   )"
+  http_status="${response_with_status##*$'\n'}"
+  response_json="${response_with_status%$'\n'*}"
+
+  if [[ "${http_status}" == "401" || "${http_status}" == "403" ]]; then
+    code="$(jq -r '.code // .error // "AUTHENTICATION_FAILED"' <<< "${response_json}" 2>/dev/null || true)"
+    echo "[simulate-latest-ride-payment] authentication failed: ${code}" >&2
+    exit 3
+  fi
 
   if [[ "$(jq -r '.success // false' <<< "${response_json}" 2>/dev/null || true)" == "true" ]]; then
     charge_id="$(jq -r '.chargeId' <<< "${response_json}")"

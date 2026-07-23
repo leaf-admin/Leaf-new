@@ -1,5 +1,6 @@
 const firebaseConfig = require('../firebase-config');
 const { logStructured } = require('../utils/logger');
+const { normalizeVehicleOcrPayload } = require('../utils/vehicle-ocr-data');
 
 const DRIVER_ACTIVATION_STATES = Object.freeze({
   PRE_REGISTERED: 'PRE_REGISTERED',
@@ -25,16 +26,11 @@ const STATE_LABELS = Object.freeze({
   [DRIVER_ACTIVATION_STATES.REJECTED]: 'Rejeitado'
 });
 
-const KYC_BLOCKING_STATUSES = new Set([
+const KYC_TERMINAL_STATUSES = new Set([
   'blocked',
   'rejected',
   'failed',
-  'denied',
-  'pending',
-  'pending_review',
-  'pending_reverify',
-  'in_review',
-  'review'
+  'denied'
 ]);
 
 function boolish(value) {
@@ -61,22 +57,36 @@ function isRejectedStatus(status) {
 }
 
 function resolveKycApproval(userData = {}) {
-  const status = normalizeStatus(userData?.kycStatus || userData?.kyc_status || userData?.kyc?.status || '');
-  const blocked = boolish(userData?.kycBlocked) || boolish(userData?.kyc?.blocked) || boolish(userData?.kycReverifyRequired);
-  const approved = status === 'approved' || boolish(userData?.kyc?.approved);
+  const normalizedStatus = normalizeStatus(
+    userData?.kycStatus || userData?.kyc_status || userData?.kyc?.status || '',
+    'missing'
+  );
+  const explicitlyBlocked = boolish(userData?.kycBlocked) || boolish(userData?.kyc?.blocked);
+  const reverifyRequired = boolish(userData?.kycReverifyRequired);
 
-  if (blocked || KYC_BLOCKING_STATUSES.has(status)) {
+  if (explicitlyBlocked || KYC_TERMINAL_STATUSES.has(normalizedStatus)) {
     return {
       approved: false,
       blocked: true,
-      status: status || 'blocked'
+      pending: false,
+      status: KYC_TERMINAL_STATUSES.has(normalizedStatus) ? normalizedStatus : 'blocked',
+      reverifyRequired
     };
   }
+
+  const status = reverifyRequired ? 'pending_reverify' : normalizedStatus;
+  const approved = !reverifyRequired &&
+    (
+      status === 'approved' ||
+      (status === 'missing' && boolish(userData?.kyc?.approved))
+    );
 
   return {
     approved,
     blocked: false,
-    status: status || (approved ? 'approved' : 'missing')
+    pending: !approved,
+    status,
+    reverifyRequired
   };
 }
 
@@ -100,6 +110,35 @@ function hasBackgroundConsent(activationNode = {}, userData = {}) {
     boolish(userData?.backgroundCheckConsent);
 }
 
+function firstText(...values) {
+  for (const value of values) {
+    const normalized = String(value || '').trim();
+    if (normalized) return normalized;
+  }
+  return '';
+}
+
+function resolveCrlvDocumentIdentity(activationNode = {}, crlvStatus = 'pending') {
+  const documentData =
+    activationNode?.documents?.crlv?.data ||
+    activationNode?.documents?.crlv?.extractedData ||
+    {};
+  const normalized = normalizeVehicleOcrPayload(documentData);
+  const hasIdentity = Boolean(normalized.plate || normalized.model || normalized.color);
+  const canonicalApproval = normalizeStatus(crlvStatus) === 'approved';
+
+  return {
+    plate: normalized.plate || '',
+    model: normalized.model || '',
+    color: normalized.color || '',
+    year: normalized.year || '',
+    source: hasIdentity
+      ? (canonicalApproval ? 'crlv_pdf_ocr' : 'crlv_document_analysis')
+      : 'unavailable',
+    verified: Boolean(normalized.plate) && canonicalApproval
+  };
+}
+
 function resolveLivenessEvidence(userData = {}) {
   const candidates = [
     userData?.driverActivation?.firstLivenessPassedAt,
@@ -116,8 +155,6 @@ function resolveLivenessEvidence(userData = {}) {
     boolish(userData?.driverActivation?.firstLivenessPassed) ||
     boolish(userData?.kyc?.passed) ||
     boolish(userData?.liveness?.passed) ||
-    boolish(userData?.kycStatus) ||
-    boolish(userData?.kyc_status) ||
     candidates.length > 0;
 
   return {
@@ -144,32 +181,209 @@ async function readUserVehicles(db, driverId) {
   }
 }
 
-function resolveVehicleStatusFromEntries(userData = {}, entries = []) {
-  const approvedEntries = entries.filter((vehicle) =>
-    isApprovedStatus(vehicle?.status) ||
-    boolish(vehicle?.approved) ||
-    boolish(vehicle?.carApproved) ||
-    boolish(vehicle?.vehicleApproved)
+function isCanonicalVehicleApproved(vehicle = {}) {
+  const status = normalizeStatus(vehicle?.status, '');
+  return Boolean(firstText(vehicle?.vehicleId)) &&
+    vehicle?.approved === true &&
+    (status === 'approved' || status === 'active');
+}
+
+async function readActiveVehicleRecord(db, driverId, entries = []) {
+  const activeEntry = entries.find((vehicle) =>
+    vehicle?.isActive === true && isCanonicalVehicleApproved(vehicle)
   );
+  const vehicleId = firstText(activeEntry?.vehicleId);
+
+  if (!vehicleId) {
+    return {
+      attempted: false,
+      resolved: false,
+      found: false,
+      vehicleId: null,
+      data: null
+    };
+  }
+
+  try {
+    const snapshot = await db.ref(`vehicles/${vehicleId}`).once('value');
+    const data = snapshot.val();
+    return {
+      attempted: true,
+      resolved: true,
+      found: data !== null && data !== undefined,
+      vehicleId,
+      data: data || null
+    };
+  } catch (error) {
+    logStructured('warn', 'Falha ao ler veiculo ativo para vinculo canonico do CRLV', {
+      service: 'driver-activation-state-service',
+      driverId,
+      vehicleId,
+      error: error?.message || String(error)
+    });
+    return {
+      attempted: true,
+      resolved: false,
+      found: false,
+      vehicleId,
+      data: null
+    };
+  }
+}
+
+function resolveVehicleStatusFromEntries(
+  userData = {},
+  entries = [],
+  crlvIdentity = {},
+  activeVehicleRead = {}
+) {
+  const approvedEntries = entries.filter(isCanonicalVehicleApproved);
   const activeApprovedEntry = approvedEntries.find((vehicle) => vehicle?.isActive === true);
   const inReviewEntry = entries.find((vehicle) =>
-    isReviewStatus(vehicle?.status) && !isApprovedStatus(vehicle?.status)
+    normalizeStatus(vehicle?.status, '') &&
+    isReviewStatus(vehicle?.status) &&
+    !isApprovedStatus(vehicle?.status)
   );
 
-  const profileHasApprovedVehicle =
-    Boolean(userData?.vehicleNumber || userData?.vehiclePlate || userData?.carPlate) &&
-    boolish(userData?.vehicleApproved ?? userData?.carApproved ?? true);
-
-  const approved = Boolean(activeApprovedEntry || approvedEntries.length > 0 || profileHasApprovedVehicle);
-  const active = Boolean(activeApprovedEntry || (profileHasApprovedVehicle && userData?.activeVehicleId));
-  const inReview = Boolean(inReviewEntry || userData?.vehicleStatus === 'pending' || userData?.vehicleStatus === 'in_review');
+  // Only user_vehicles is authoritative for operational vehicle approval/activity.
+  // Profile fields remain display-only fallbacks below.
+  const approved = approvedEntries.length > 0;
+  const active = Boolean(activeApprovedEntry);
+  const inReview = Boolean(inReviewEntry);
+  const selectedEntry = activeApprovedEntry || approvedEntries[0] || inReviewEntry || {};
+  const canonicalRecordReady = Boolean(
+    activeApprovedEntry &&
+    activeVehicleRead?.resolved &&
+    activeVehicleRead?.found
+  );
+  const activeCatalogIdentity = canonicalRecordReady
+    ? (activeVehicleRead?.data || {})
+    : {};
+  const activeCatalogOcrIdentity = activeCatalogIdentity?.ocrData?.data || {};
+  const activeLinkIdentity = canonicalRecordReady ? selectedEntry : {};
+  const canonicalIdentity = normalizeVehicleOcrPayload({
+    plate: firstText(
+      activeCatalogIdentity?.plate,
+      activeCatalogIdentity?.plateNormalized,
+      activeCatalogIdentity?.vehiclePlate,
+      activeCatalogOcrIdentity?.plate,
+      activeCatalogOcrIdentity?.placa,
+      activeLinkIdentity?.plate,
+      activeLinkIdentity?.plateNormalized,
+      activeLinkIdentity?.vehiclePlate,
+      activeLinkIdentity?.vehicleNumber
+    ),
+    model: firstText(
+      activeCatalogIdentity?.model,
+      activeCatalogIdentity?.vehicleModel,
+      activeCatalogOcrIdentity?.model,
+      activeCatalogOcrIdentity?.modelo,
+      activeLinkIdentity?.model,
+      activeLinkIdentity?.vehicleModel,
+      activeLinkIdentity?.carModel
+    ),
+    color: firstText(
+      activeCatalogIdentity?.color,
+      activeCatalogIdentity?.vehicleColor,
+      activeCatalogOcrIdentity?.color,
+      activeCatalogOcrIdentity?.cor,
+      activeLinkIdentity?.color,
+      activeLinkIdentity?.vehicleColor,
+      activeLinkIdentity?.carColor
+    ),
+    year: firstText(
+      activeCatalogIdentity?.year,
+      activeCatalogIdentity?.anoModelo,
+      activeCatalogOcrIdentity?.year,
+      activeCatalogOcrIdentity?.anoModelo,
+      activeLinkIdentity?.year,
+      activeLinkIdentity?.anoModelo
+    )
+  });
+  const linkDisplayIdentity = normalizeVehicleOcrPayload({
+    plate: firstText(
+      selectedEntry?.plate,
+      selectedEntry?.plateNormalized,
+      selectedEntry?.vehiclePlate,
+      selectedEntry?.vehicleNumber
+    ),
+    model: firstText(selectedEntry?.model, selectedEntry?.vehicleModel, selectedEntry?.carModel),
+    color: firstText(selectedEntry?.color, selectedEntry?.vehicleColor, selectedEntry?.carColor),
+    year: firstText(selectedEntry?.year, selectedEntry?.anoModelo)
+  });
+  const legacyDisplayIdentity = normalizeVehicleOcrPayload({
+    plate: firstText(userData?.vehiclePlate, userData?.vehicleNumber, userData?.carPlate),
+    model: firstText(userData?.vehicleModel, userData?.carModel),
+    color: firstText(userData?.vehicleColor, userData?.carColor),
+    year: firstText(userData?.vehicleYear, userData?.carYear)
+  });
+  const canonicalPlate = canonicalIdentity?.plate || '';
+  const crlvPlateMatch = Boolean(
+    activeApprovedEntry &&
+    crlvIdentity?.verified &&
+    canonicalPlate &&
+    canonicalPlate === crlvIdentity?.plate
+  );
+  const plate = firstText(
+    canonicalPlate,
+    linkDisplayIdentity?.plate,
+    crlvIdentity?.plate,
+    legacyDisplayIdentity?.plate
+  );
+  const model = firstText(
+    canonicalIdentity?.model,
+    linkDisplayIdentity?.model,
+    crlvIdentity?.model,
+    legacyDisplayIdentity?.model
+  );
+  const color = firstText(
+    canonicalIdentity?.color,
+    linkDisplayIdentity?.color,
+    crlvIdentity?.color,
+    legacyDisplayIdentity?.color
+  );
+  const year = firstText(
+    canonicalIdentity?.year,
+    linkDisplayIdentity?.year,
+    crlvIdentity?.year,
+    legacyDisplayIdentity?.year
+  );
+  const operationalModel = firstText(canonicalIdentity?.model, crlvPlateMatch && crlvIdentity?.model);
+  const operationalColor = firstText(canonicalIdentity?.color, crlvPlateMatch && crlvIdentity?.color);
+  const identityComplete = Boolean(canonicalPlate && operationalModel && operationalColor);
+  const displayIdentityComplete = Boolean(plate && model && color);
+  const usesDocumentIdentity = Boolean(crlvIdentity?.verified && !canonicalIdentity?.model && !canonicalIdentity?.color);
+  const usesLegacyDisplayIdentity = Boolean(
+    !canonicalPlate &&
+    !crlvIdentity?.plate &&
+    legacyDisplayIdentity?.plate
+  );
 
   return {
     approved,
     active,
     inReview,
-    vehicleId: activeApprovedEntry?.vehicleId || activeApprovedEntry?.id || approvedEntries[0]?.vehicleId || approvedEntries[0]?.id || userData?.activeVehicleId || null,
-    count: entries.length
+    vehicleId: activeApprovedEntry?.vehicleId || activeApprovedEntry?.id || approvedEntries[0]?.vehicleId || approvedEntries[0]?.id || null,
+    count: entries.length,
+    status: selectedEntry?.status || (approved ? 'approved' : inReview ? 'in_review' : 'pending'),
+    plate,
+    model,
+    color,
+    year,
+    documentStatus: crlvIdentity?.verified ? 'approved' : null,
+    identitySource: usesDocumentIdentity
+      ? 'crlv_pdf_ocr'
+      : usesLegacyDisplayIdentity
+        ? 'legacy_profile_display'
+        : (plate || model || color ? 'vehicle_record' : 'unavailable'),
+    identityComplete,
+    displayIdentityComplete,
+    canonicalPlate,
+    crlvPlateMatch,
+    canonicalRecordReady,
+    catalogReadAttempted: activeVehicleRead?.attempted === true,
+    catalogResolved: activeVehicleRead?.resolved === true,
+    catalogFound: activeVehicleRead?.found === true
   };
 }
 
@@ -197,7 +411,20 @@ async function resolveDriverActivationState({
   const resolvedActivationNode = activationNode || resolvedActivationSnapshot?.val?.() || {};
   const resolvedUserData = userData || resolvedUserSnapshot?.val?.() || {};
   const vehicles = await readUserVehicles(realtimeDb, safeDriverId);
-  const vehicle = resolveVehicleStatusFromEntries(resolvedUserData, vehicles);
+  const activeVehicleRead = await readActiveVehicleRecord(realtimeDb, safeDriverId, vehicles);
+  const canonicalCrlvNode = resolvedActivationNode?.documents?.crlv || null;
+  const crlvPresent = Boolean(canonicalCrlvNode);
+  const crlvStatus = normalizeStatus(canonicalCrlvNode?.status || 'pending');
+  const crlvIdentity = resolveCrlvDocumentIdentity(
+    resolvedActivationNode,
+    crlvStatus
+  );
+  const vehicle = resolveVehicleStatusFromEntries(
+    resolvedUserData,
+    vehicles,
+    crlvIdentity,
+    activeVehicleRead
+  );
 
   const accountStatus = normalizeStatus(
     resolvedUserData?.accountStatus ||
@@ -223,32 +450,31 @@ async function resolveDriverActivationState({
   }
 
   const cnhStatus = extractDocumentStatus(resolvedActivationNode, resolvedUserData, 'cnh');
-  const crlvStatus = extractDocumentStatus(resolvedActivationNode, resolvedUserData, 'crlv');
   const meiStatus = extractDocumentStatus(resolvedActivationNode, resolvedUserData, 'mei');
   const backgroundCheckConsent = hasBackgroundConsent(resolvedActivationNode, resolvedUserData);
   const meiRequired = requiresMeiDocument();
   const cnhApproved = isApprovedStatus(cnhStatus);
+  const crlvApproved = crlvStatus === 'approved';
+  const crlvInReview = crlvPresent && isReviewStatus(crlvStatus);
   const meiApproved = !meiRequired || isApprovedStatus(meiStatus);
   const docsRejected = isRejectedStatus(cnhStatus) || (meiRequired && isRejectedStatus(meiStatus));
   const docsInReview = isReviewStatus(cnhStatus) || (meiRequired && isReviewStatus(meiStatus));
-  const explicitApprovedFlag = boolish(
-    resolvedUserData?.approved ??
-      resolvedUserData?.isApproved ??
-      resolvedUserData?.profileApproved ??
-      false
-  );
-  const approvedStatusFlag = ['approved', 'active'].includes(accountStatus);
-  const approvedByLegacyFlow = explicitApprovedFlag || approvedStatusFlag;
-  const allowLegacyDocsBypass = approvedByLegacyFlow && !docsRejected;
-  const effectiveBackgroundConsent = backgroundCheckConsent || allowLegacyDocsBypass;
-  const effectiveCnhApproved = cnhApproved || allowLegacyDocsBypass;
-  const effectiveMeiApproved = meiApproved || allowLegacyDocsBypass;
+  const effectiveBackgroundConsent = backgroundCheckConsent;
+  const effectiveCnhApproved = cnhApproved;
+  const effectiveMeiApproved = meiApproved;
   const driverDocsApproved =
     effectiveCnhApproved &&
     effectiveMeiApproved &&
     effectiveBackgroundConsent;
   const kycApproval = resolveKycApproval(resolvedUserData);
   const liveness = resolveLivenessEvidence(resolvedUserData);
+  const vehicleActivationComplete =
+    crlvApproved &&
+    vehicle.approved &&
+    vehicle.active &&
+    vehicle.canonicalRecordReady &&
+    vehicle.crlvPlateMatch &&
+    vehicle.identityComplete;
 
   const meta = {
     driverId: safeDriverId,
@@ -262,7 +488,7 @@ async function resolveDriverActivationState({
       cnhEar: effectiveCnhApproved,
       inssOrMei: effectiveMeiApproved,
       backgroundCheckConsent: effectiveBackgroundConsent,
-      vehicleRegistration: vehicle.approved
+      vehicleRegistration: vehicleActivationComplete
     },
     vehicle,
     kyc: kycApproval,
@@ -272,17 +498,16 @@ async function resolveDriverActivationState({
   if (kycApproval.blocked) {
     return buildStatePayload(DRIVER_ACTIVATION_STATES.REJECTED, {
       ...meta,
-      reason: kycApproval.status === 'rejected'
+      reason: ['rejected', 'failed', 'denied'].includes(kycApproval.status)
         ? 'KYC do motorista reprovado.'
-        : 'KYC do motorista bloqueado ou aguardando revisao.'
+        : 'KYC do motorista bloqueado.'
     });
   }
 
   if (
     !resolvedActivationNode?.documents &&
     !cnhApproved &&
-    !backgroundCheckConsent &&
-    !allowLegacyDocsBypass
+    !backgroundCheckConsent
   ) {
     return buildStatePayload(DRIVER_ACTIVATION_STATES.PRE_REGISTERED, {
       ...meta,
@@ -302,14 +527,43 @@ async function resolveDriverActivationState({
     );
   }
 
-  if (!vehicle.approved) {
+  if (!kycApproval.approved) {
+    return buildStatePayload(DRIVER_ACTIVATION_STATES.DRIVER_DOCS_IN_REVIEW, {
+      ...meta,
+      reason: kycApproval.reverifyRequired || kycApproval.status === 'pending_reverify'
+        ? 'KYC do motorista aguardando revalidacao.'
+        : kycApproval.status === 'missing'
+          ? 'KYC do motorista ainda nao foi iniciado ou aprovado.'
+          : 'KYC do motorista aguardando analise.'
+    });
+  }
+
+  if (!vehicleActivationComplete) {
     return buildStatePayload(
-      vehicle.inReview ? DRIVER_ACTIVATION_STATES.VEHICLE_IN_REVIEW : DRIVER_ACTIVATION_STATES.VEHICLE_PENDING,
+      crlvInReview || (crlvApproved && vehicle.inReview)
+        ? DRIVER_ACTIVATION_STATES.VEHICLE_IN_REVIEW
+        : DRIVER_ACTIVATION_STATES.VEHICLE_PENDING,
       {
         ...meta,
-        reason: vehicle.inReview
-          ? 'Veiculo enviado e aguardando analise.'
-          : 'Veiculo aprovado e ativo e obrigatorio para ficar online.'
+        reason: !crlvApproved
+          ? (!crlvPresent
+            ? 'Envie o CRLV e aguarde a aprovacao para ficar online.'
+            : crlvInReview
+              ? 'CRLV enviado e aguardando analise.'
+              : isRejectedStatus(crlvStatus)
+                ? 'CRLV rejeitado; reenvie o documento para nova analise.'
+                : 'O CRLV deve ter status aprovado para ficar online.')
+          : !vehicle.approved
+            ? (vehicle.inReview
+              ? 'Veiculo enviado e aguardando analise.'
+              : 'Veiculo aprovado e obrigatorio para ficar online.')
+            : !vehicle.active
+              ? 'Veiculo aprovado deve estar ativo para ficar online.'
+              : !vehicle.canonicalRecordReady
+                ? 'Cadastro canonico do veiculo ativo indisponivel para validacao.'
+                : !vehicle.crlvPlateMatch
+                  ? 'A placa do CRLV aprovado deve corresponder ao veiculo ativo.'
+                  : 'Identidade completa do veiculo e obrigatoria para ficar online.'
       }
     );
   }

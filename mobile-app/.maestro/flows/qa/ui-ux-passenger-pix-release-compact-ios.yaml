@@ -1,0 +1,41 @@
+appId: br.com.leaf.ride
+---
+- runFlow:
+    when:
+      visible:
+        id: "passenger-home-destination-input"
+    commands:
+      - tapOn:
+          id: "passenger-home-destination-input"
+
+- extendedWaitUntil:
+    visible:
+      id: "passenger-home-destination-search-input"
+    timeout: 30000
+
+- tapOn:
+    id: "passenger-home-destination-search-input"
+- eraseText
+- inputText: "Leblon"
+
+- extendedWaitUntil:
+    visible:
+      id: "passenger-home-destination-result-0"
+    timeout: 30000
+
+- tapOn:
+    id: "passenger-home-destination-result-0"
+
+- extendedWaitUntil:
+    visible:
+      id: "passenger-home-category-confirm"
+    timeout: 120000
+
+- tapOn:
+    id: "passenger-home-category-confirm"
+
+- extendedWaitUntil:
+    visible: ".*(Aguardando PIX|Não foi possível gerar o Pix).*"
+    timeout: 120000
+
+- takeScreenshot: "qa-artifacts/ui-ux-simulator-2026-07-11/remaining/release/passenger/pix-pending-compact"

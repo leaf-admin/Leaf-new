@@ -2,11 +2,14 @@ const express = require('express');
 const router = express.Router();
 const redisPool = require('../utils/redis-pool');
 const driverLockManager = require('../services/driver-lock-manager');
-const PaymentService = require('../services/payment-service');
 const { getPolicyForDriver } = require('../services/driver-destination-mode-service');
+const { validateAuthoritativeFinancialSnapshot } = require('../services/ride-financial-contract');
 const { requireFirebaseUser } = require('../middleware/firebase-user-auth');
+const { authenticateJWT, requireRole } = require('../middleware/jwt-auth');
 const { logger, logStructured, logError } = require('../utils/logger');
-const paymentService = new PaymentService();
+const DRIVER_APPLICATION_ADMIN_ROLES = ['admin', 'super-admin', 'manager', 'support', 'development'];
+const requireDriverApplicationAdmin = [authenticateJWT, requireRole(DRIVER_APPLICATION_ADMIN_ROLES)];
+const LEGACY_DRIVER_APPLICATION_MUTATIONS_ENABLED = false;
 
 // Firebase integration
 let firebaseConfig = null;
@@ -64,6 +67,59 @@ async function updateRealtimeRoot(updates) {
   return runRealtimeDbQuery((db) => db.ref().update(updates));
 }
 
+function parseObjectCandidate(value) {
+  if (!value) {
+    return null;
+  }
+
+  if (typeof value === 'object' && !Array.isArray(value)) {
+    return value;
+  }
+
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null;
+  } catch (_error) {
+    return null;
+  }
+}
+
+function firstObjectCandidate(...values) {
+  for (const value of values) {
+    const candidate = parseObjectCandidate(value);
+    if (candidate) {
+      return candidate;
+    }
+  }
+  return null;
+}
+
+function resolveBackendFinalFinancialSnapshot(booking = {}) {
+  const financialBreakdown = parseObjectCandidate(booking.financialBreakdown) || {};
+  const paymentDistribution = parseObjectCandidate(booking.paymentDistribution) || {};
+  const paymentCalculation = parseObjectCandidate(paymentDistribution.calculation) || {};
+  const candidate = firstObjectCandidate(
+    booking.financialSnapshot,
+    booking.financialContract,
+    financialBreakdown.financialSnapshot,
+    financialBreakdown.financialContract,
+    paymentDistribution.financialSnapshot,
+    paymentCalculation.financialContract,
+    paymentCalculation.financialSnapshot
+  );
+  const validation = validateAuthoritativeFinancialSnapshot(candidate || {});
+  return validation.valid ? validation.snapshot : null;
+}
+
+function centsToBrl(cents) {
+  const amount = Number(cents);
+  return Number.isFinite(amount) ? Math.max(0, amount) / 100 : 0;
+}
+
 // 🚗 DRIVER APPROVAL APIs
 
 router.get('/api/drivers/me/destination-policy', requireFirebaseUser, async (req, res) => {
@@ -92,7 +148,7 @@ router.get('/api/drivers/me/destination-policy', requireFirebaseUser, async (req
 });
 
 // GET /api/drivers/applications - Listar aplicações de motoristas
-router.get('/api/drivers/applications', requireFirebase, async (req, res) => {
+router.get('/api/drivers/applications', requireDriverApplicationAdmin, requireFirebase, async (req, res) => {
   try {
     const { page = 1, limit = 20, status = 'all', search = '' } = req.query;
 
@@ -256,7 +312,15 @@ router.get('/api/drivers/applications', requireFirebase, async (req, res) => {
 });
 
 // POST /api/drivers/applications/:id/approve - Aprovar motorista
-router.post('/api/drivers/applications/:id/approve', requireFirebase, async (req, res) => {
+router.post('/api/drivers/applications/:id/approve', requireDriverApplicationAdmin, requireFirebase, async (req, res) => {
+  if (!LEGACY_DRIVER_APPLICATION_MUTATIONS_ENABLED) {
+    return res.status(410).json({
+      success: false,
+      code: 'LEGACY_DRIVER_APPLICATION_MUTATION_DISABLED',
+      error: 'Aprovação em massa legada está desativada. Revise documentos individualmente e use o fluxo canônico de ativação.'
+    });
+  }
+
   try {
     const { id } = req.params;
     const { notes, adminNotes } = req.body;
@@ -326,7 +390,15 @@ router.post('/api/drivers/applications/:id/approve', requireFirebase, async (req
 });
 
 // POST /api/drivers/applications/:id/reject - Rejeitar motorista
-router.post('/api/drivers/applications/:id/reject', requireFirebase, async (req, res) => {
+router.post('/api/drivers/applications/:id/reject', requireDriverApplicationAdmin, requireFirebase, async (req, res) => {
+  if (!LEGACY_DRIVER_APPLICATION_MUTATIONS_ENABLED) {
+    return res.status(410).json({
+      success: false,
+      code: 'LEGACY_DRIVER_APPLICATION_MUTATION_DISABLED',
+      error: 'Rejeição em massa legada está desativada. Use a revisão individual de documentos com motivo auditável.'
+    });
+  }
+
   try {
     const { id } = req.params;
     const { notes, rejectionReasons, adminNotes } = req.body;
@@ -400,7 +472,7 @@ router.post('/api/drivers/applications/:id/reject', requireFirebase, async (req,
 });
 
 // GET /api/drivers/applications/:id - Buscar aplicação específica
-router.get('/api/drivers/applications/:id', requireFirebase, async (req, res) => {
+router.get('/api/drivers/applications/:id', requireDriverApplicationAdmin, requireFirebase, async (req, res) => {
   try {
     const { id } = req.params;
 
@@ -660,9 +732,15 @@ router.get('/api/drivers/nearby', async (req, res) => {
                 isOnline: user.isOnline || false,
                 status: user.status || 'OFFLINE',
                 rating: parseFloat(user.driverRating || user.rating || 5.0),
-                carType: user.carType || null,
-                vehicleNumber: user.vehicleNumber || null
-              };
+	                carType: user.carType || null,
+	                vehicleNumber: user.vehicleNumber || null,
+	                vehicleColor:
+	                  user.vehicleColor ||
+	                  user.carColor ||
+	                  user.vehicle?.color ||
+	                  user.car?.color ||
+	                  null
+	              };
               logger.debug(`✅ [DriversRoute] Driver ${driverId} encontrado no Firebase:`, {
                 isOnline: driverInfo.isOnline,
                 status: driverInfo.status
@@ -682,10 +760,16 @@ router.get('/api/drivers/nearby', async (req, res) => {
           lastName: driverData.lastName || '',
           isOnline: driverData.isOnline === 'true' || driverData.isOnline === true,
           status: driverData.status || 'OFFLINE',
-          rating: parseFloat(driverData.rating || 5.0),
-          carType: driverData.carType || null,
-          vehicleNumber: driverData.vehicleNumber || null
-        };
+	          rating: parseFloat(driverData.rating || 5.0),
+	          carType: driverData.carType || null,
+	          vehicleNumber: driverData.vehicleNumber || null,
+	          vehicleColor:
+	            driverData.vehicleColor ||
+	            driverData.carColor ||
+	            driverData.vehicle_color ||
+	            driverData.car_color ||
+	            null
+	        };
         logger.debug(`✅ [DriversRoute] Driver ${driverId} usando dados do Redis:`, {
           isOnline: driverInfo.isOnline,
           status: driverInfo.status,
@@ -719,10 +803,11 @@ router.get('/api/drivers/nearby', async (req, res) => {
         distance: parseFloat((distance * 1000).toFixed(2)), // Converter km para metros
         firstName: driverInfo.firstName,
         lastName: driverInfo.lastName,
-        rating: driverInfo.rating,
-        carType: driverInfo.carType,
-        vehicleNumber: driverInfo.vehicleNumber,
-        source: 'redis_geo',
+	        rating: driverInfo.rating,
+	        carType: driverInfo.carType,
+	        vehicleNumber: driverInfo.vehicleNumber,
+	        vehicleColor: driverInfo.vehicleColor || null,
+	        source: 'redis_geo',
         geoKey: activeGeoKey
       });
 
@@ -785,10 +870,6 @@ router.get('/api/drivers/:id/earnings', requireFirebase, async (req, res) => {
     const now = new Date();
     const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     const dailyWindowDays = 30;
-    const safeNumber = value => {
-      const numeric = Number(value);
-      return Number.isFinite(numeric) ? numeric : NaN;
-    };
 
     const toDateKey = date => {
       const year = date.getFullYear();
@@ -820,6 +901,7 @@ router.get('/api/drivers/:id/earnings', requireFirebase, async (req, res) => {
     let totalGrossAmount = 0;
     let totalNetAmount = 0;
     let totalFeeAmount = 0;
+    let financialSnapshotPendingCount = 0;
 
     allDriverBookings.forEach(booking => {
       const status = String(booking?.status || '').toUpperCase();
@@ -853,38 +935,16 @@ router.get('/api/drivers/:id/earnings', requireFirebase, async (req, res) => {
         return;
       }
 
-      const grossAmountRaw = safeNumber(
-        booking?.estimate ??
-          booking?.finalFare ??
-          booking?.fare ??
-          booking?.grossAmount ??
-          booking?.totalAmount ??
-          booking?.trip_cost ??
-          booking?.amount ??
-          booking?.customer_paid ??
-          booking?.finalPrice ??
-          0
-      );
-      const grossAmount = Number.isFinite(grossAmountRaw) ? Math.max(0, grossAmountRaw) : 0;
-      const tollFeeRaw = safeNumber(booking?.tollFee ?? booking?.toll_fee ?? booking?.pedagio ?? 0);
-      const tollFee = Number.isFinite(tollFeeRaw) ? Math.max(0, tollFeeRaw) : 0;
-
-      let netAmount = safeNumber(booking?.driverNetAmount ?? booking?.driver_share ?? booking?.netAmount);
-      let feeAmount = safeNumber(booking?.totalFees ?? booking?.feeAmount ?? booking?.fees?.total);
-
-      if (!Number.isFinite(netAmount) || !Number.isFinite(feeAmount)) {
-        const breakdown = paymentService.calculateFareBreakdownFromReais(grossAmount, tollFee);
-        if (!Number.isFinite(netAmount)) {
-          netAmount = safeNumber(breakdown?.driverNetAmount);
-        }
-        if (!Number.isFinite(feeAmount)) {
-          feeAmount = safeNumber(breakdown?.totalFees);
-        }
+      const finalFinancialSnapshot = resolveBackendFinalFinancialSnapshot(booking);
+      if (!finalFinancialSnapshot) {
+        financialSnapshotPendingCount += 1;
+        seriesSlot.financialSnapshotPendingCount = (seriesSlot.financialSnapshotPendingCount || 0) + 1;
+        return;
       }
 
-      netAmount = Number.isFinite(netAmount) ? Math.max(0, netAmount) : 0;
-      feeAmount = Number.isFinite(feeAmount) ? Math.max(0, feeAmount) : 0;
-      const effectiveGrossAmount = grossAmount > 0 ? grossAmount : Math.max(0, netAmount + feeAmount);
+      const netAmount = centsToBrl(finalFinancialSnapshot.driverNetAmountCents);
+      const feeAmount = centsToBrl(finalFinancialSnapshot.retainedTotalCents);
+      const effectiveGrossAmount = centsToBrl(finalFinancialSnapshot.passengerPaidCents);
 
       seriesSlot.amount += netAmount;
       seriesSlot.grossAmount += effectiveGrossAmount;
@@ -928,6 +988,7 @@ router.get('/api/drivers/:id/earnings', requireFirebase, async (req, res) => {
       totalNetAmount,
       totalFeeAmount,
       effectiveFeePct,
+      financialSnapshotPendingCount,
       dailySeriesWindowDays: dailyWindowDays
     };
 

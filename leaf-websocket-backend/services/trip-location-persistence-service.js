@@ -3,6 +3,127 @@ const redisPool = require('../utils/redis-pool');
 const firebaseConfig = require('../firebase-config');
 const RedisScan = require('../utils/redis-scan');
 const { logStructured, logError } = require('../utils/logger');
+const {
+    SandboxPersistenceContextError,
+    resolveRidePersistenceScope
+} = require('./sandbox-persistence-context');
+
+const EARTH_RADIUS_KM = 6371;
+
+function normalizePointLocation(value = {}) {
+    const lat = Number(value.lat ?? value.latitude);
+    const lng = Number(value.lng ?? value.longitude);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+    if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return null;
+    return { lat, lng };
+}
+
+function normalizeTimestampMs(value) {
+    const numeric = Number(value);
+    if (Number.isFinite(numeric) && numeric > 0) return numeric;
+    const parsed = Date.parse(String(value || ''));
+    return Number.isFinite(parsed) ? parsed : null;
+}
+
+function haversineDistanceKm(origin, destination) {
+    const toRadians = (value) => (Number(value) * Math.PI) / 180;
+    const latDelta = toRadians(destination.lat - origin.lat);
+    const lngDelta = toRadians(destination.lng - origin.lng);
+    const originLat = toRadians(origin.lat);
+    const destinationLat = toRadians(destination.lat);
+    const a =
+        Math.sin(latDelta / 2) ** 2 +
+        Math.cos(originLat) * Math.cos(destinationLat) * Math.sin(lngDelta / 2) ** 2;
+    const normalizedA = Math.min(1, Math.max(0, a));
+    return EARTH_RADIUS_KM * 2 * Math.atan2(
+        Math.sqrt(normalizedA),
+        Math.sqrt(1 - normalizedA)
+    );
+}
+
+function normalizeScopeInput(input = {}) {
+    const source = input && typeof input === 'object' ? input : {};
+    const normalized = { ...source };
+    if (
+        Object.prototype.hasOwnProperty.call(source, 'testUserSandbox') &&
+        source.testUserSandbox !== undefined &&
+        source.testUserSandbox !== null &&
+        source.testUserSandbox !== ''
+    ) {
+        normalized.testUserSandbox =
+            source.testUserSandbox === true ||
+            String(source.testUserSandbox || '').trim().toLowerCase() === 'true';
+    } else {
+        delete normalized.testUserSandbox;
+    }
+    return normalized;
+}
+
+function hasPersistenceEnvelope(input = {}) {
+    return Boolean(
+        input?.financialContext ||
+        input?.financialNamespace ||
+        input?.financialContextId ||
+        input?.providerEnvironment ||
+        input?.paymentProviderEnvironment ||
+        input?.paymentProfileId ||
+        input?.testUserSandbox === true ||
+        String(input?.testUserSandbox || '').trim().toLowerCase() === 'true'
+    );
+}
+
+function buildPersistenceEnvelope(scope, { redis = false } = {}) {
+    if (!scope || scope.source === 'legacy_operational') {
+        return {};
+    }
+
+    const financialContext = scope.financialContext;
+    return {
+        financialContext: redis ? JSON.stringify(financialContext) : financialContext,
+        financialNamespace: scope.namespace,
+        financialContextId: scope.financialContextId,
+        providerEnvironment: financialContext.providerEnvironment,
+        paymentProfileId: financialContext.paymentProfileId || (redis ? '' : null),
+        testUserSandbox: redis
+            ? String(financialContext.testUserSandbox === true)
+            : financialContext.testUserSandbox === true
+    };
+}
+
+function assertScopeMatchesStoredEnvelope(scope, stored = {}, source = 'trip_location_metadata') {
+    if (!stored || Object.keys(stored).length === 0) return;
+
+    const storedScope = resolveRidePersistenceScope(normalizeScopeInput(stored));
+    const namespaceMismatch = storedScope.namespace !== scope.namespace;
+    const sandboxContextMismatch =
+        scope.namespace === 'sandbox' &&
+        storedScope.financialContextId !== scope.financialContextId;
+
+    if (namespaceMismatch || sandboxContextMismatch) {
+        throw new SandboxPersistenceContextError(
+            'TRIP_LOCATION_PERSISTENCE_SCOPE_MISMATCH',
+            `Contexto de persistência divergente em ${source}`
+        );
+    }
+}
+
+function resolveTripPersistenceScope(primaryInput = {}, storedMetadata = {}) {
+    const normalizedPrimary = normalizeScopeInput(primaryInput);
+    const normalizedStored = normalizeScopeInput(storedMetadata);
+    const scopeInput = hasPersistenceEnvelope(normalizedPrimary)
+        ? normalizedPrimary
+        : normalizedStored;
+    const scope = resolveRidePersistenceScope(scopeInput);
+
+    if (storedMetadata && Object.keys(storedMetadata).length > 0) {
+        assertScopeMatchesStoredEnvelope(scope, normalizedStored);
+    }
+    return scope;
+}
+
+const DEFAULT_WORKER_HEALTH_KEY = 'leaf:runtime:trip-location-worker:health';
+const DEFAULT_WORKER_HEALTH_TTL_SECONDS = 90;
+const WORKER_HEALTH_STATUSES = new Set(['healthy', 'idle', 'degraded']);
 
 class TripLocationPersistenceService {
     constructor() {
@@ -15,6 +136,17 @@ class TripLocationPersistenceService {
         this.chunkRetentionDays = Number.parseInt(process.env.TRIP_LOCATION_CHUNK_RETENTION_DAYS || '30', 10);
         this.chunkRetentionMs = this.chunkRetentionDays * 24 * 60 * 60 * 1000;
         this.enableFirestorePersistence = process.env.ENABLE_TRIP_LOCATION_FIRESTORE_PERSISTENCE !== 'false';
+        this.workerHealthKey = String(
+            process.env.TRIP_LOCATION_WORKER_HEALTH_KEY || DEFAULT_WORKER_HEALTH_KEY
+        ).trim() || DEFAULT_WORKER_HEALTH_KEY;
+        this.workerHealthTtlSeconds = Math.max(
+            30,
+            Number.parseInt(
+                process.env.TRIP_LOCATION_WORKER_HEALTH_TTL_SECONDS
+                    || String(DEFAULT_WORKER_HEALTH_TTL_SECONDS),
+                10
+            ) || DEFAULT_WORKER_HEALTH_TTL_SECONDS
+        );
     }
 
     getBufferKey(tripId) {
@@ -43,6 +175,46 @@ class TripLocationPersistenceService {
         return redisPool.getConnection();
     }
 
+    async publishWorkerHealth(status, counters = {}, redisClient = null) {
+        const normalizedStatus = String(status || '').trim().toLowerCase();
+        if (!WORKER_HEALTH_STATUSES.has(normalizedStatus)) {
+            throw new Error('Status de saúde inválido para trip-location-worker');
+        }
+
+        const redis = redisClient || await this.getRedis();
+        const payload = {
+            status: normalizedStatus,
+            heartbeatAt: String(Date.now()),
+            processedTrips: String(Math.max(0, Number(counters.processedTrips) || 0)),
+            flushedPoints: String(Math.max(0, Number(counters.flushedPoints) || 0)),
+            failures: String(Math.max(0, Number(counters.failures) || 0))
+        };
+
+        await redis.hset(this.workerHealthKey, payload);
+        await redis.expire(this.workerHealthKey, this.workerHealthTtlSeconds);
+
+        return payload;
+    }
+
+    async tryMarkWorkerDegraded(counters = {}, redisClient = null) {
+        try {
+            await this.publishWorkerHealth('degraded', {
+                ...counters,
+                failures: Math.max(1, Number(counters.failures) || 0)
+            }, redisClient);
+            return true;
+        } catch (healthError) {
+            logStructured('warn', 'Não foi possível publicar saúde degradada do trip-location-worker', {
+                service: 'trip-location-persistence',
+                operation: 'worker-health-heartbeat',
+                errorCode: /^[A-Z0-9_-]{1,64}$/.test(String(healthError?.code || ''))
+                    ? String(healthError.code)
+                    : null
+            });
+            return false;
+        }
+    }
+
     getFirestore() {
         if (!this.enableFirestorePersistence) {
             return null;
@@ -64,6 +236,8 @@ class TripLocationPersistenceService {
             throw new Error('Evento de localização inválido: tripId/driverId/lat/lng obrigatórios');
         }
 
+        const persistenceScope = resolveRidePersistenceScope(normalizeScopeInput(eventData));
+
         return {
             tripId,
             driverId,
@@ -82,13 +256,21 @@ class TripLocationPersistenceService {
                 : null,
             lastAcceptedSeq: Number.isInteger(Number(eventData.lastAcceptedSeq))
                 ? Number(eventData.lastAcceptedSeq)
-                : null
+                : null,
+            ...buildPersistenceEnvelope(persistenceScope)
         };
     }
 
     async bufferLocationEvent(eventData = {}) {
         const point = this.normalizeLocationEvent(eventData);
+        const persistenceScope = resolveRidePersistenceScope(point);
         const redis = await this.getRedis();
+        const bufferKey = this.getBufferKey(point.tripId);
+        const metaKey = this.getMetaKey(point.tripId);
+        const previousMeta = typeof redis.hgetall === 'function'
+            ? await redis.hgetall(metaKey)
+            : {};
+        assertScopeMatchesStoredEnvelope(persistenceScope, previousMeta);
 
         if (point.seq !== null) {
             const workerDedupKey = this.getWorkerDedupKey(point.tripId, point.driverId, point.seq, point.capturedAt);
@@ -98,9 +280,51 @@ class TripLocationPersistenceService {
             }
         }
 
-        const bufferKey = this.getBufferKey(point.tripId);
-        const metaKey = this.getMetaKey(point.tripId);
         const bufferLength = await redis.rpush(bufferKey, JSON.stringify(point));
+        const sameCanonicalDriver =
+            String(previousMeta?.canonicalDriverId || '').trim() === point.driverId;
+        const previousLocation = normalizePointLocation({
+            lat: previousMeta?.canonicalLastLat,
+            lng: previousMeta?.canonicalLastLng
+        });
+        const previousReceivedAt = normalizeTimestampMs(previousMeta?.canonicalLastReceivedAt);
+        const canAppendCanonicalMetric = Boolean(
+            sameCanonicalDriver &&
+            previousLocation &&
+            previousReceivedAt &&
+            point.receivedAt >= previousReceivedAt
+        );
+        const previousDistanceKm = Number(previousMeta?.canonicalDistanceKm);
+        const isStaleCanonicalPoint = Boolean(
+            sameCanonicalDriver &&
+            previousLocation &&
+            previousReceivedAt &&
+            point.receivedAt < previousReceivedAt
+        );
+        const canonicalDistanceKm = isStaleCanonicalPoint
+            ? Math.max(0, Number.isFinite(previousDistanceKm) ? previousDistanceKm : 0)
+            : canAppendCanonicalMetric
+                ? Math.max(0, Number.isFinite(previousDistanceKm) ? previousDistanceKm : 0) +
+                    haversineDistanceKm(previousLocation, point)
+                : 0;
+        const canonicalPointsCount = isStaleCanonicalPoint
+            ? Math.max(1, Number.parseInt(previousMeta?.canonicalPointsCount || '1', 10) || 1)
+            : canAppendCanonicalMetric
+                ? Math.max(1, Number.parseInt(previousMeta?.canonicalPointsCount || '1', 10) || 1) + 1
+                : 1;
+        const canonicalFirstLocation = canAppendCanonicalMetric || isStaleCanonicalPoint
+            ? normalizePointLocation({
+                lat: previousMeta?.canonicalFirstLat,
+                lng: previousMeta?.canonicalFirstLng
+            }) || point
+            : point;
+        const canonicalFirstReceivedAt = canAppendCanonicalMetric || isStaleCanonicalPoint
+            ? normalizeTimestampMs(previousMeta?.canonicalFirstReceivedAt) || point.receivedAt
+            : point.receivedAt;
+        const canonicalLastLocation = isStaleCanonicalPoint ? previousLocation : point;
+        const canonicalLastReceivedAt = isStaleCanonicalPoint
+            ? previousReceivedAt
+            : point.receivedAt;
 
         await redis.expire(bufferKey, this.bufferTtlSeconds);
         await redis.hset(metaKey, {
@@ -110,7 +334,17 @@ class TripLocationPersistenceService {
             lastSeq: point.seq !== null ? String(point.seq) : '',
             lastCapturedAt: String(point.capturedAt),
             lastBufferedAt: String(Date.now()),
-            bufferedCount: String(bufferLength)
+            bufferedCount: String(bufferLength),
+            canonicalDriverId: point.driverId,
+            canonicalDistanceKm: canonicalDistanceKm.toFixed(6),
+            canonicalPointsCount: String(canonicalPointsCount),
+            canonicalFirstLat: String(canonicalFirstLocation.lat),
+            canonicalFirstLng: String(canonicalFirstLocation.lng),
+            canonicalFirstReceivedAt: String(canonicalFirstReceivedAt),
+            canonicalLastLat: String(canonicalLastLocation.lat),
+            canonicalLastLng: String(canonicalLastLocation.lng),
+            canonicalLastReceivedAt: String(canonicalLastReceivedAt),
+            ...buildPersistenceEnvelope(persistenceScope, { redis: true })
         });
         await redis.expire(metaKey, this.bufferTtlSeconds);
 
@@ -118,7 +352,8 @@ class TripLocationPersistenceService {
             await this.flushTripChunks(point.tripId, {
                 force: false,
                 maxChunks: 1,
-                reason: 'threshold'
+                reason: 'threshold',
+                ...buildPersistenceEnvelope(persistenceScope)
             });
         }
 
@@ -126,6 +361,140 @@ class TripLocationPersistenceService {
             success: true,
             tripId: point.tripId,
             bufferedCount: bufferLength
+        };
+    }
+
+    async resolveCanonicalTripMetrics(options = {}) {
+        const tripId = String(options.tripId || options.bookingId || '').trim();
+        const driverId = String(options.driverId || '').trim();
+        if (!tripId || !driverId) {
+            return {
+                success: false,
+                code: 'CANONICAL_TRIP_IDENTITY_REQUIRED'
+            };
+        }
+
+        const redis = options.redis || await this.getRedis();
+        const startedAtMs = normalizeTimestampMs(options.startedAt);
+        const metadata = typeof redis?.hgetall === 'function'
+            ? await redis.hgetall(this.getMetaKey(tripId))
+            : {};
+        const canonicalFirstLocation = normalizePointLocation({
+            lat: metadata?.canonicalFirstLat,
+            lng: metadata?.canonicalFirstLng
+        });
+        const canonicalLastLocation = normalizePointLocation({
+            lat: metadata?.canonicalLastLat,
+            lng: metadata?.canonicalLastLng
+        });
+        const canonicalFirstReceivedAt = normalizeTimestampMs(
+            metadata?.canonicalFirstReceivedAt
+        );
+        const canonicalLastReceivedAt = normalizeTimestampMs(
+            metadata?.canonicalLastReceivedAt
+        );
+        const canonicalDistanceKm = Number(metadata?.canonicalDistanceKm);
+        const hasCanonicalMetadata = Boolean(
+            String(metadata?.canonicalDriverId || '').trim() === driverId &&
+            canonicalFirstLocation &&
+            canonicalLastLocation &&
+            canonicalFirstReceivedAt &&
+            canonicalLastReceivedAt &&
+            Number.isFinite(canonicalDistanceKm) &&
+            (!startedAtMs || canonicalFirstReceivedAt >= startedAtMs)
+        );
+
+        if (hasCanonicalMetadata) {
+            const startLocation = normalizePointLocation(options.startLocation);
+            const startDistanceKm = startLocation
+                ? haversineDistanceKm(startLocation, canonicalFirstLocation)
+                : 0;
+            const nowMs = normalizeTimestampMs(options.nowMs) || Date.now();
+            const durationStartMs = startedAtMs || canonicalFirstReceivedAt;
+            return {
+                success: true,
+                source: 'server_trip_location_telemetry',
+                distanceKm: Number((startDistanceKm + canonicalDistanceKm).toFixed(3)),
+                durationSecs: Math.max(0, Math.round((nowMs - durationStartMs) / 1000)),
+                endLocation: canonicalLastLocation,
+                startedAtMs: durationStartMs,
+                lastReceivedAtMs: canonicalLastReceivedAt,
+                pointsCount: Math.max(
+                    1,
+                    Number.parseInt(metadata?.canonicalPointsCount || '1', 10) || 1
+                )
+            };
+        }
+
+        const rawPoints = typeof redis?.lrange === 'function'
+            ? await redis.lrange(this.getBufferKey(tripId), 0, -1)
+            : [];
+        const candidates = (rawPoints || []).map((raw) => {
+            try {
+                return typeof raw === 'string' ? JSON.parse(raw) : raw;
+            } catch (_error) {
+                return null;
+            }
+        }).filter(Boolean);
+
+        const points = candidates
+            .map((point) => {
+                const location = normalizePointLocation(point);
+                const receivedAt = normalizeTimestampMs(point.receivedAt);
+                if (!location || !receivedAt) return null;
+                if (String(point.driverId || '').trim() !== driverId) return null;
+                if (startedAtMs && receivedAt < startedAtMs) return null;
+                return {
+                    ...location,
+                    receivedAt,
+                    seq: Number.isFinite(Number(point.seq)) ? Number(point.seq) : null
+                };
+            })
+            .filter(Boolean)
+            .sort((left, right) => left.receivedAt - right.receivedAt);
+
+        const deduplicatedPoints = [];
+        const seen = new Set();
+        points.forEach((point) => {
+            const key = [point.seq ?? '', point.receivedAt, point.lat, point.lng].join('|');
+            if (seen.has(key)) return;
+            seen.add(key);
+            deduplicatedPoints.push(point);
+        });
+
+        if (deduplicatedPoints.length === 0) {
+            return {
+                success: false,
+                code: 'CANONICAL_TRIP_TELEMETRY_UNAVAILABLE'
+            };
+        }
+
+        const startLocation = normalizePointLocation(options.startLocation);
+        const routePoints = startLocation
+            ? [{ ...startLocation, receivedAt: startedAtMs || deduplicatedPoints[0].receivedAt }, ...deduplicatedPoints]
+            : deduplicatedPoints;
+        let distanceKm = 0;
+        for (let index = 1; index < routePoints.length; index += 1) {
+            distanceKm += haversineDistanceKm(routePoints[index - 1], routePoints[index]);
+        }
+
+        const nowMs = normalizeTimestampMs(options.nowMs) || Date.now();
+        const durationStartMs = startedAtMs || deduplicatedPoints[0].receivedAt;
+        const durationSecs = Math.max(0, Math.round((nowMs - durationStartMs) / 1000));
+        const latestPoint = deduplicatedPoints[deduplicatedPoints.length - 1];
+
+        return {
+            success: true,
+            source: 'server_trip_location_telemetry',
+            distanceKm: Number(distanceKm.toFixed(3)),
+            durationSecs,
+            endLocation: {
+                lat: latestPoint.lat,
+                lng: latestPoint.lng
+            },
+            startedAtMs: durationStartMs,
+            lastReceivedAtMs: latestPoint.receivedAt,
+            pointsCount: deduplicatedPoints.length
         };
     }
 
@@ -137,6 +506,10 @@ class TripLocationPersistenceService {
             : this.flushMaxChunksPerTrip;
 
         const redis = await this.getRedis();
+        const storedMetadata = typeof redis.hgetall === 'function'
+            ? await redis.hgetall(this.getMetaKey(tripId))
+            : {};
+        const persistenceScope = resolveTripPersistenceScope(options, storedMetadata);
         const firestore = this.getFirestore();
         const lockKey = this.getFlushLockKey(tripId);
         const lockValue = `${process.pid}:${Date.now()}`;
@@ -177,6 +550,14 @@ class TripLocationPersistenceService {
                     continue;
                 }
 
+                points.forEach((point) => {
+                    assertScopeMatchesStoredEnvelope(
+                        persistenceScope,
+                        point,
+                        'trip_location_buffer_point'
+                    );
+                });
+
                 if (!firestore) {
                     return {
                         success: false,
@@ -199,10 +580,13 @@ class TripLocationPersistenceService {
                     createdAt: admin.firestore.FieldValue.serverTimestamp(),
                     expiresAt: this.buildRetentionTimestamp(points[points.length - 1].capturedAt),
                     source: 'trip-location-worker',
-                    reason
+                    reason,
+                    ...buildPersistenceEnvelope(persistenceScope)
                 };
 
-                await firestore.collection('trip_location_chunks').add(chunkDoc);
+                await firestore
+                    .collection(persistenceScope.collections.tripLocationChunks)
+                    .add(chunkDoc);
                 await redis.ltrim(this.getBufferKey(tripId), currentChunkSize, -1);
                 await redis.hincrby(this.getMetaKey(tripId), 'persistedPoints', points.length);
                 await redis.hset(this.getMetaKey(tripId), {
@@ -232,16 +616,18 @@ class TripLocationPersistenceService {
     }
 
     async writeTripSummary(tripId, summaryData = {}) {
+        const persistenceScope = resolveRidePersistenceScope(normalizeScopeInput(summaryData));
         const firestore = this.getFirestore();
         if (!firestore) {
             return { success: false, reason: 'firestore_unavailable' };
         }
 
-        await firestore.collection('trip_location_summaries').doc(String(tripId)).set({
+        await firestore.collection(persistenceScope.collections.tripLocationSummaries).doc(String(tripId)).set({
             tripId: String(tripId),
             retentionDays: this.chunkRetentionDays,
             expiresAt: summaryData.expiresAt || this.buildRetentionTimestamp(Date.now()),
             ...summaryData,
+            ...buildPersistenceEnvelope(persistenceScope),
             updatedAt: admin.firestore.FieldValue.serverTimestamp()
         }, { merge: true });
 
@@ -249,6 +635,7 @@ class TripLocationPersistenceService {
     }
 
     async forceFinalizeTrip(tripId, metadata = {}) {
+        const persistenceScope = resolveRidePersistenceScope(normalizeScopeInput(metadata));
         const redis = await this.getRedis();
         let totalFlushedPoints = 0;
         let totalFlushedChunks = 0;
@@ -262,7 +649,8 @@ class TripLocationPersistenceService {
             const result = await this.flushTripChunks(tripId, {
                 force: true,
                 maxChunks: this.flushMaxChunksPerTrip,
-                reason: metadata.reason || 'finalization'
+                reason: metadata.reason || 'finalization',
+                ...buildPersistenceEnvelope(persistenceScope)
             });
 
             if (!result.success) {
@@ -284,6 +672,7 @@ class TripLocationPersistenceService {
         }
 
         const meta = await redis.hgetall(this.getMetaKey(tripId));
+        assertScopeMatchesStoredEnvelope(persistenceScope, meta);
         const summary = {
             status: metadata.status || 'finalized',
             finalizeReason: metadata.reason || 'finalization',
@@ -294,7 +683,8 @@ class TripLocationPersistenceService {
             lastSeq: meta.lastSeq || null,
             lastCapturedAt: meta.lastCapturedAt ? Number(meta.lastCapturedAt) : null,
             retentionDays: this.chunkRetentionDays,
-            expiresAt: this.buildRetentionTimestamp(meta.lastCapturedAt || Date.now())
+            expiresAt: this.buildRetentionTimestamp(meta.lastCapturedAt || Date.now()),
+            ...buildPersistenceEnvelope(persistenceScope)
         };
 
         await this.writeTripSummary(tripId, summary);
@@ -310,46 +700,78 @@ class TripLocationPersistenceService {
     }
 
     async flushPendingTrips(maxTrips = this.flushMaxTripsPerCycle) {
-        const redis = await this.getRedis();
-        const keys = await RedisScan.scanKeys(redis, 'trip_loc_buffer:*', 200);
-        const selectedKeys = keys.slice(0, maxTrips);
-
+        let redis = null;
         let processedTrips = 0;
         let flushedPoints = 0;
         let failures = 0;
 
-        for (const key of selectedKeys) {
-            const tripId = key.replace('trip_loc_buffer:', '');
-            if (!tripId) {
-                continue;
+        try {
+            redis = await this.getRedis();
+
+            if (this.enableFirestorePersistence && !this.getFirestore()) {
+                failures = 1;
+                const result = {
+                    success: false,
+                    processedTrips,
+                    flushedPoints,
+                    failures,
+                    reason: 'firestore_unavailable'
+                };
+
+                await this.publishWorkerHealth('degraded', result, redis);
+                return result;
             }
-            processedTrips += 1;
-            try {
-                const result = await this.flushTripChunks(tripId, {
-                    force: false,
-                    maxChunks: 1,
-                    reason: 'periodic'
-                });
-                if (!result.success) {
-                    failures += 1;
+
+            const keys = await RedisScan.scanKeys(redis, 'trip_loc_buffer:*', 200);
+            const selectedKeys = keys.slice(0, maxTrips);
+
+            for (const key of selectedKeys) {
+                const tripId = key.replace('trip_loc_buffer:', '');
+                if (!tripId) {
                     continue;
                 }
-                flushedPoints += result.flushedPoints || 0;
-            } catch (error) {
-                failures += 1;
-                logError(error, 'Falha ao flush periódico de trip location', {
-                    service: 'trip-location-persistence',
-                    tripId
-                });
+                processedTrips += 1;
+                try {
+                    const result = await this.flushTripChunks(tripId, {
+                        force: false,
+                        maxChunks: 1,
+                        reason: 'periodic'
+                    });
+                    if (!result.success) {
+                        failures += 1;
+                        continue;
+                    }
+                    flushedPoints += result.flushedPoints || 0;
+                } catch (error) {
+                    failures += 1;
+                    logError(error, 'Falha ao flush periódico de trip location', {
+                        service: 'trip-location-persistence',
+                        tripId
+                    });
+                }
             }
-        }
 
-        return {
-            success: true,
-            processedTrips,
-            flushedPoints,
-            failures
-        };
+            const success = failures === 0;
+            const status = success
+                ? (processedTrips === 0 ? 'idle' : 'healthy')
+                : 'degraded';
+            const result = {
+                success,
+                processedTrips,
+                flushedPoints,
+                failures
+            };
+
+            await this.publishWorkerHealth(status, result, redis);
+            return result;
+        } catch (error) {
+            await this.tryMarkWorkerDegraded({
+                processedTrips,
+                flushedPoints,
+                failures
+            }, redis);
+            throw error;
+        }
     }
 }
 

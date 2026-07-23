@@ -116,7 +116,7 @@ router.post('/chat/:userId/mark-read', authenticateSupport, async (req, res) => 
 router.post('/chat/:userId/message', authenticateSupport, async (req, res) => {
     try {
         const { userId } = req.params;
-        const { message, senderType = 'user' } = req.body;
+        const { message } = req.body;
 
         if (!message || !message.trim()) {
             return res.status(400).json({ error: 'Mensagem é obrigatória' });
@@ -139,7 +139,7 @@ router.post('/chat/:userId/message', authenticateSupport, async (req, res) => {
         const result = await supportChatService.sendMessage(
             userId,
             message.trim(),
-            isSupportAgent(req.user) ? 'agent' : senderType
+            isSupportAgent(req.user) ? 'agent' : 'user'
         );
 
         res.json({

@@ -90,7 +90,7 @@ O runner deve capturar screenshot, XML, eventos backend e relatorio JSON por eta
 - Cotacao backend original
 - Valor bruto, taxa Leaf, liquido do motorista e recibo final
 - Eventos de pagamento, aceite, inicio, fim e avaliacao
-- Resultado de reconciliacao do dashboard, quando a credencial tiver permissao financeira
+- Consistencia canonica do dashboard para o mesmo ride id, quando a credencial tiver permissao financeira
 
 ## Falhas P0
 

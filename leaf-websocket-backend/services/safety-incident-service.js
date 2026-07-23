@@ -2,6 +2,9 @@ const firebaseConfig = require('../firebase-config');
 const redisPool = require('../utils/redis-pool');
 const supportQueueService = require('./support-queue-service');
 const passengerTrustService = require('./passenger-trust-service');
+const {
+  resolvePersistenceScope
+} = require('./sandbox-persistence-context');
 
 const INCIDENT_COLLECTION = 'ops_incidents';
 const OPEN_INCIDENTS_KEY = 'ops:incidents:open';
@@ -69,7 +72,10 @@ function normalizeIncident(incidentId, raw = {}) {
     closedAt: toIso(raw.closedAt, null),
     openedAt,
     updatedAt,
-    timeline: Array.isArray(raw.timeline) ? raw.timeline : []
+    timeline: Array.isArray(raw.timeline) ? raw.timeline : [],
+    financialContext: raw.financialContext || null,
+    financialNamespace: raw.financialNamespace || raw.financialContext?.namespace || null,
+    financialContextId: raw.financialContextId || raw.financialContext?.contextId || null
   };
 }
 
@@ -98,18 +104,30 @@ class SafetyIncidentService {
     return this.redisPool?.getConnection ? this.redisPool.getConnection() : null;
   }
 
-  incidentDoc(incidentId) {
+  incidentDoc(incidentId, persistenceContext = null) {
     const firestore = this.getFirestore();
     if (!firestore) return null;
-    return firestore.collection(INCIDENT_COLLECTION).doc(String(incidentId));
+    const persistenceScope = resolvePersistenceScope(persistenceContext || {}, {
+      allowLegacyOperational: true,
+      allowExplicitSandboxAccess: true
+    });
+    return firestore.collection(
+      persistenceScope.collections.incidents || INCIDENT_COLLECTION
+    ).doc(String(incidentId));
   }
 
-  async updateRedisIndexes(incident) {
+  async updateRedisIndexes(incident, persistenceContext = null) {
     const redis = this.getRedis();
     if (!redis || !incident?.incidentId) return;
+    const persistenceScope = resolvePersistenceScope(persistenceContext || incident, {
+      allowLegacyOperational: true,
+      allowExplicitSandboxAccess: true
+    });
 
     const score = Date.parse(incident.openedAt || new Date().toISOString()) || Date.now();
-    const incidentKey = `${INCIDENT_HASH_PREFIX}:${incident.incidentId}`;
+    const namespacePrefix = persistenceScope.namespace === 'sandbox' ? 'sandbox:' : '';
+    const incidentKey = `${namespacePrefix}${INCIDENT_HASH_PREFIX}:${incident.incidentId}`;
+    const openIncidentsKey = `${namespacePrefix}${OPEN_INCIDENTS_KEY}`;
     await Promise.resolve(redis.hset(incidentKey, {
       incidentId: incident.incidentId,
       bookingId: incident.bookingId || '',
@@ -126,20 +144,26 @@ class SafetyIncidentService {
     await Promise.resolve(redis.expire(incidentKey, 7 * 24 * 3600)).catch(() => null);
 
     if (OPEN_STATUSES.has(incident.status)) {
-      await Promise.resolve(redis.zadd(OPEN_INCIDENTS_KEY, score, incident.incidentId)).catch(() => null);
+      await Promise.resolve(redis.zadd(openIncidentsKey, score, incident.incidentId)).catch(() => null);
     } else {
-      await Promise.resolve(redis.zrem(OPEN_INCIDENTS_KEY, incident.incidentId)).catch(() => null);
+      await Promise.resolve(redis.zrem(openIncidentsKey, incident.incidentId)).catch(() => null);
     }
   }
 
-  async markBookingForOpsReview(bookingId, incident) {
+  async markBookingForOpsReview(bookingId, incident, persistenceContext = null) {
     if (!bookingId) return;
 
+    const persistenceScope = resolvePersistenceScope(persistenceContext || incident, {
+      allowLegacyOperational: true,
+      allowExplicitSandboxAccess: true
+    });
     const now = new Date().toISOString();
     const redis = this.getRedis();
     const realtimeDb = this.getRealtimeDb();
 
-    if (redis) {
+    // O lifecycle sandbox ainda usa Redis efêmero compartilhado no runtime.
+    // Não anexamos flags operacionais nele; a evidência fica no root RTDB isolado.
+    if (redis && persistenceScope.namespace === 'operational') {
       await redis.hset(`booking:${bookingId}`, {
         opsReviewRequired: 'true',
         opsReviewIncidentId: incident.incidentId,
@@ -149,7 +173,7 @@ class SafetyIncidentService {
     }
 
     if (realtimeDb) {
-      await realtimeDb.ref(`bookings/${bookingId}`).update({
+      await realtimeDb.ref(`${persistenceScope.collections.bookings}/${bookingId}`).update({
         opsReviewRequired: true,
         opsReviewIncidentId: incident.incidentId,
         opsReviewReason: incident.category,
@@ -169,10 +193,16 @@ class SafetyIncidentService {
     description,
     evidence = [],
     location = null,
-    actorId = null
+    actorId = null,
+    persistenceContext = null
   } = {}) {
     if (!userId) throw new Error('userId é obrigatório');
     if (!description) throw new Error('description é obrigatória');
+
+    const persistenceScope = resolvePersistenceScope(persistenceContext || {}, {
+      allowLegacyOperational: true,
+      allowExplicitSandboxAccess: true
+    });
 
     const incidentId = `INC-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
     const openedAt = new Date().toISOString();
@@ -198,10 +228,13 @@ class SafetyIncidentService {
         action: 'opened',
         actorId: actorId || userId,
         at: openedAt
-      }]
+      }],
+      financialContext: persistenceScope.financialContext,
+      financialNamespace: persistenceScope.namespace,
+      financialContextId: persistenceScope.financialContextId
     });
 
-    const docRef = this.incidentDoc(incidentId);
+    const docRef = this.incidentDoc(incidentId, persistenceScope);
     if (!docRef) {
       throw new Error('Firestore indisponível para incidentes operacionais');
     }
@@ -221,17 +254,18 @@ class SafetyIncidentService {
           bookingId,
           city,
           regionHash
-        }
+        },
+        persistenceContext: persistenceScope
       });
       ticket = created.ticket;
       incident.ticketId = ticket.id;
     }
 
     await docRef.set(incident, { merge: true });
-    await this.updateRedisIndexes(incident);
+    await this.updateRedisIndexes(incident, persistenceScope);
 
     if (bookingId) {
-      await this.markBookingForOpsReview(bookingId, incident);
+      await this.markBookingForOpsReview(bookingId, incident, persistenceScope);
     }
 
     return {

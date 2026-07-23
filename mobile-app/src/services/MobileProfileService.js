@@ -28,10 +28,13 @@ class MobileProfileService {
   }
 
   async getCurrentProfile(options = {}) {
-    const { suppressErrors = false } = options;
+    const { suppressErrors = false, timeoutMs = 5000 } = options;
 
     try {
-      const payload = await this.requestProfile('/account/profile', { method: 'GET' });
+      const payload = await this.requestProfile('/account/profile', {
+        method: 'GET',
+        timeoutMs,
+      });
       return payload?.profile || null;
     } catch (error) {
       if (error?.status === 404) {
@@ -45,6 +48,14 @@ class MobileProfileService {
     }
   }
 
+  async getCurrentProfileOrThrow(options = {}) {
+    const payload = await this.requestProfile('/account/profile', {
+      method: 'GET',
+      timeoutMs: options.timeoutMs || 8000,
+    });
+    return payload?.profile || null;
+  }
+
   async upsertCurrentProfile(profile) {
     try {
       const payload = await this.requestProfile('/account/profile', {
@@ -56,6 +67,15 @@ class MobileProfileService {
       Logger.error('❌ MobileProfileService - erro ao atualizar perfil atual:', error);
       return null;
     }
+  }
+
+
+  async upsertCurrentProfileOrThrow(profile) {
+    const payload = await this.requestProfile('/account/profile', {
+      method: 'PUT',
+      body: JSON.stringify({ profile }),
+    });
+    return payload?.profile || null;
   }
 }
 

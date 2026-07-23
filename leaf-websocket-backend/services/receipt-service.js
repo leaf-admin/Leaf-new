@@ -13,6 +13,35 @@ const { logger } = require('../utils/logger');
 const crypto = require('crypto');
 const PDFDocument = require('pdfkit');
 const PaymentService = require('./payment-service');
+const {
+    resolveFinancialContext
+} = require('./financial-runtime-context');
+const {
+    resolvePersistenceScope,
+    resolveRidePersistenceScope,
+    assertStoredRecordMatchesScope
+} = require('./sandbox-persistence-context');
+
+class ReceiptFinancialSnapshotIncompleteError extends Error {
+    constructor(message, details = {}) {
+        super(message);
+        this.name = 'ReceiptFinancialSnapshotIncompleteError';
+        this.code = 'RECEIPT_FINANCIAL_SNAPSHOT_INCOMPLETE';
+        this.statusCode = 409;
+        this.details = details;
+    }
+}
+
+class ReceiptPersistenceError extends Error {
+    constructor(message, details = {}, cause = null) {
+        super(message);
+        this.name = 'ReceiptPersistenceError';
+        this.code = 'RECEIPT_PERSIST_FAILED';
+        this.statusCode = 503;
+        this.details = details;
+        if (cause) this.cause = cause;
+    }
+}
 
 class ReceiptService {
     constructor() {
@@ -92,6 +121,232 @@ class ReceiptService {
         return { date: dateFormatted, time: timeFormatted };
     }
 
+    parseMoneyValue(value, fallback = null) {
+        if (value === null || value === undefined || value === '') {
+            return fallback;
+        }
+
+        if (typeof value === 'string') {
+            const sanitized = value
+                .replace(/[^\d,.-]/g, '')
+                .trim();
+            if (!sanitized) {
+                return fallback;
+            }
+            const normalized = sanitized.includes(',')
+                ? sanitized.replace(/\./g, '').replace(',', '.')
+                : sanitized;
+            const parsed = Number(normalized);
+            return Number.isFinite(parsed) ? parsed : fallback;
+        }
+
+        const parsed = Number(value);
+        return Number.isFinite(parsed) ? parsed : fallback;
+    }
+
+    firstPresentMoney(...values) {
+        for (const value of values) {
+            const parsed = this.parseMoneyValue(value, null);
+            if (parsed !== null) {
+                return parsed;
+            }
+        }
+        return null;
+    }
+
+    firstFiniteNumber(...values) {
+        for (const value of values) {
+            if (value === null || value === undefined || value === '') {
+                continue;
+            }
+            const parsed = Number(value);
+            if (Number.isFinite(parsed)) {
+                return parsed;
+            }
+        }
+        return null;
+    }
+
+    normalizeDistanceKm(value, unit = '') {
+        const parsed = this.firstFiniteNumber(value);
+        if (parsed === null || parsed < 0) {
+            return null;
+        }
+
+        const normalizedUnit = String(unit || '').trim().toLowerCase();
+        if (normalizedUnit === 'm' || normalizedUnit === 'meter' || normalizedUnit === 'meters' || normalizedUnit === 'metros') {
+            return parsed / 1000;
+        }
+
+        return parsed > 1000 ? parsed / 1000 : parsed;
+    }
+
+    resolveReceiptDistanceKm(rideData = {}) {
+        return this.normalizeDistanceKm(
+            this.firstFiniteNumber(
+                rideData.distanceKm,
+                rideData.tripDistanceKm,
+                rideData.estimatedTripDistanceKm,
+                rideData.routeDistanceKm,
+                rideData.distance,
+                rideData.estimateDistance
+            ),
+            rideData.distanceUnit || rideData.distance_unit
+        ) || 0;
+    }
+
+    isTruthyFlag(value) {
+        if (value === true) {
+            return true;
+        }
+        const normalized = String(value || '').trim().toLowerCase();
+        return ['1', 'true', 'yes', 'sim'].includes(normalized);
+    }
+
+    resolveFinalReceiptFinancialSnapshot(rideId, rideData = {}) {
+        const fareBreakdown = rideData.fareBreakdown || {};
+        const paymentBreakdown = rideData.paymentBreakdown || {};
+        const financialBreakdown = rideData.financialBreakdown || {};
+        const nestedFinancial = rideData.financial || {};
+        const calculationBreakdown =
+            rideData.calculation?.breakdown ||
+            fareBreakdown.calculation?.breakdown ||
+            paymentBreakdown.calculation?.breakdown ||
+            {};
+        const snapshotSource = String(
+            rideData.financialSnapshotSource ||
+            fareBreakdown.financialSnapshotSource ||
+            paymentBreakdown.financialSnapshotSource ||
+            financialBreakdown.financialSnapshotSource ||
+            ''
+        ).trim();
+        const authoritativeSnapshot =
+            this.isTruthyFlag(rideData.authoritativeSnapshot) ||
+            this.isTruthyFlag(fareBreakdown.authoritativeSnapshot) ||
+            this.isTruthyFlag(paymentBreakdown.authoritativeSnapshot) ||
+            this.isTruthyFlag(financialBreakdown.authoritativeSnapshot);
+
+        const grossAmount = this.firstPresentMoney(
+            rideData.finalPrice,
+            rideData.finalFare,
+            rideData.grossAmount,
+            rideData.grossFare,
+            rideData.totalPaid,
+            rideData.totalAmount,
+            rideData.customer_paid,
+            rideData.customerPaid,
+            rideData.paymentAmount,
+            nestedFinancial.totalPaid?.amount,
+            fareBreakdown.finalFare,
+            fareBreakdown.grossAmount,
+            paymentBreakdown.finalFare,
+            paymentBreakdown.grossAmount,
+            financialBreakdown.finalFare,
+            financialBreakdown.grossAmount
+        );
+        const operationalFee = this.firstPresentMoney(
+            rideData.operationalFee,
+            fareBreakdown.operationalFee,
+            paymentBreakdown.operationalFee,
+            financialBreakdown.operationalFee,
+            calculationBreakdown.operationalFee
+        );
+        const paymentIntermediationFee = this.firstPresentMoney(
+            rideData.paymentIntermediationFee,
+            rideData.wooviFee,
+            fareBreakdown.paymentIntermediationFee,
+            fareBreakdown.wooviFee,
+            paymentBreakdown.paymentIntermediationFee,
+            paymentBreakdown.wooviFee,
+            financialBreakdown.paymentIntermediationFee,
+            financialBreakdown.wooviFee,
+            calculationBreakdown.paymentIntermediationFee,
+            calculationBreakdown.wooviFee
+        );
+        const driverNetAmount = this.firstPresentMoney(
+            rideData.driverNetAmount,
+            rideData.netAmount,
+            fareBreakdown.driverNetAmount,
+            fareBreakdown.netAmount,
+            paymentBreakdown.driverNetAmount,
+            paymentBreakdown.netAmount,
+            financialBreakdown.driverNetAmount,
+            financialBreakdown.netAmount
+        );
+        const tollFee = this.firstPresentMoney(
+            rideData.tollFee,
+            rideData.toll_fee,
+            rideData.pedagio,
+            fareBreakdown.tollFee,
+            fareBreakdown.toll_fee,
+            fareBreakdown.driverTollPassThrough,
+            paymentBreakdown.tollFee,
+            paymentBreakdown.toll_fee,
+            paymentBreakdown.driverTollPassThrough,
+            financialBreakdown.tollFee,
+            financialBreakdown.toll_fee,
+            financialBreakdown.driverTollPassThrough
+        ) ?? 0;
+        const totalFees = this.firstPresentMoney(
+            rideData.totalFees,
+            rideData.retainedFees,
+            fareBreakdown.totalFees,
+            fareBreakdown.retainedFees,
+            paymentBreakdown.totalFees,
+            paymentBreakdown.retainedFees,
+            financialBreakdown.totalFees,
+            financialBreakdown.retainedFees
+        );
+        const missing = [];
+        if (!authoritativeSnapshot) missing.push('authoritativeSnapshot');
+        if (snapshotSource !== 'backend_final') missing.push('financialSnapshotSource=backend_final');
+        if (!(grossAmount > 0)) missing.push('finalGrossAmount');
+        if (!(operationalFee >= 0)) missing.push('operationalFee');
+        if (!(paymentIntermediationFee >= 0)) missing.push('paymentIntermediationFee');
+        if (!(driverNetAmount >= 0)) missing.push('driverNetAmount');
+        if (!(totalFees >= 0)) {
+            missing.push('totalFees');
+        }
+        if (grossAmount !== null && totalFees !== null && driverNetAmount !== null) {
+            const grossAmountCents = Math.round(grossAmount * 100);
+            const allocatedAmountCents = Math.round((driverNetAmount + totalFees) * 100);
+            if (allocatedAmountCents !== grossAmountCents) {
+                missing.push('driverNetAmount+totalFees=grossAmount');
+            }
+        }
+
+        if (missing.length > 0) {
+            throw new ReceiptFinancialSnapshotIncompleteError(
+                `Recibo ${rideId} sem snapshot financeiro final completo`,
+                {
+                    rideId,
+                    missing,
+                    financialSnapshotSource: snapshotSource || null,
+                    authoritativeSnapshot,
+                    grossAmount,
+                    operationalFee,
+                    paymentIntermediationFee,
+                    driverNetAmount,
+                    totalFees
+                }
+            );
+        }
+
+        return {
+            finalPrice: grossAmount,
+            finalFare: grossAmount,
+            grossAmount,
+            tollFee,
+            driverTollPassThrough: tollFee,
+            operationalFee,
+            paymentIntermediationFee,
+            driverNetAmount,
+            ...(totalFees !== null ? { totalFees } : {}),
+            authoritativeSnapshot: true,
+            financialSnapshotSource: 'backend_final'
+        };
+    }
+
     /**
      * Gera recibo completo da corrida
      * @param {string} rideId - ID da corrida
@@ -100,45 +355,70 @@ class ReceiptService {
      */
     async generateReceipt(rideId, rideData) {
         try {
+            const persistenceScope = resolveRidePersistenceScope(rideData);
+            const financialContext = persistenceScope.financialContext;
             logger.info(`📋 Gerando recibo para corrida: ${rideId}`);
+            const finalFinancialSnapshot = this.resolveFinalReceiptFinancialSnapshot(rideId, rideData);
+            const receiptRideData = {
+                ...rideData,
+                ...finalFinancialSnapshot,
+                fareBreakdown: {
+                    ...(rideData.fareBreakdown || {}),
+                    ...finalFinancialSnapshot
+                }
+            };
 
             // 1. Calcular valores financeiros
-            const financialBreakdown = this.calculateFinancialBreakdown(rideData);
+            const financialBreakdown = this.calculateFinancialBreakdown(receiptRideData);
 
             // 2. Calcular métricas da viagem
-            const tripMetrics = this.calculateTripMetrics(rideData);
+            const tripMetrics = this.calculateTripMetrics(receiptRideData);
+            const actualDistanceKm = this.resolveReceiptDistanceKm(receiptRideData);
+            const estimatedDistanceKm =
+                this.normalizeDistanceKm(
+                    this.firstFiniteNumber(
+                        receiptRideData.estimateDistance,
+                        receiptRideData.estimatedTripDistanceKm,
+                        receiptRideData.routeDistanceKm,
+                        actualDistanceKm
+                    ),
+                    receiptRideData.distanceUnit || receiptRideData.distance_unit
+                ) || actualDistanceKm;
 
             // 3. Gerar URL da imagem estática do mapa
-            const mapImageUrl = this.generateStaticMapImage(rideData);
+            const mapImageUrl = this.generateStaticMapImage(receiptRideData);
 
             // 4. Gerar hash único de identificação
-            const receiptHash = this.generateReceiptHash(rideId, rideData);
+            const receiptHash = this.generateReceiptHash(rideId, receiptRideData);
 
             // 5. Formatar data e horário
             const tripDate =
                 this.parseDateValue(
-                    rideData.endTime ||
-                    rideData.completedAt ||
-                    rideData.tripStartTime ||
-                    rideData.startedAt ||
-                    rideData.bookingDate ||
-                    rideData.createdAt,
+                    receiptRideData.endTime ||
+                    receiptRideData.completedAt ||
+                    receiptRideData.tripStartTime ||
+                    receiptRideData.startedAt ||
+                    receiptRideData.bookingDate ||
+                    receiptRideData.createdAt,
                     new Date()
                 )?.toISOString() || new Date().toISOString();
             const { date: tripDateFormatted, time: tripTimeFormatted } = this.formatDateTime(tripDate);
 
             // 6. Obter destino para título
-            const destination = rideData.drop?.add || 'destino';
+            const destination = receiptRideData.drop?.add || 'destino';
 
             // 7. Formatar dados do recibo conforme estrutura solicitada
             const receipt = {
                 // === IDENTIFICAÇÃO E HASH ===
                 receiptId: `LEAF-${rideId}`,
                 rideId: rideId,
-                reference: rideData.reference || rideId.substring(0, 6).toUpperCase(),
+                reference: receiptRideData.reference || rideId.substring(0, 6).toUpperCase(),
                 hash: receiptHash, // Hash único para validação
                 issueDate: new Date().toISOString(),
                 issueTimestamp: Date.now(),
+                financialContext,
+                financialNamespace: financialContext.namespace,
+                financialContextId: financialContext.contextId,
 
                 // === TÍTULO DO RECIBO ===
                 title: `Sua corrida para ${destination}, em ${tripDateFormatted} ${tripTimeFormatted}`,
@@ -152,32 +432,32 @@ class ReceiptService {
 
                     // Local de partida
                         pickup: {
-                            address: rideData.pickup?.add || 'Endereço de origem',
+                            address: receiptRideData.pickup?.add || 'Endereço de origem',
                             coordinates: {
-                                lat: rideData.pickup?.lat || 0,
-                                lng: rideData.pickup?.lng || 0
+                                lat: receiptRideData.pickup?.lat || 0,
+                                lng: receiptRideData.pickup?.lng || 0
                             },
-                            timestamp: this.parseDateValue(rideData.tripStartTime || rideData.startedAt || rideData.startTime)?.toISOString() || null
+                            timestamp: this.parseDateValue(receiptRideData.tripStartTime || receiptRideData.startedAt || receiptRideData.startTime)?.toISOString() || null
                         },
 
                     // Local de destino
                         dropoff: {
-                            address: rideData.drop?.add || 'Endereço de destino',
+                            address: receiptRideData.drop?.add || 'Endereço de destino',
                             coordinates: {
-                                lat: rideData.drop?.lat || 0,
-                                lng: rideData.drop?.lng || 0
+                                lat: receiptRideData.drop?.lat || 0,
+                                lng: receiptRideData.drop?.lng || 0
                             },
-                            timestamp: this.parseDateValue(rideData.endTime || rideData.completedAt || rideData.endDate)?.toISOString() || null
+                            timestamp: this.parseDateValue(receiptRideData.endTime || receiptRideData.completedAt || receiptRideData.endDate)?.toISOString() || null
                         },
 
                     // Tempo de viagem e distância
                     duration: tripMetrics.duration, // em minutos
                     durationFormatted: tripMetrics.durationFormatted,
                     distance: {
-                        estimated: parseFloat(rideData.estimateDistance || 0),
-                        actual: parseFloat(rideData.distance || rideData.estimateDistance || 0),
+                        estimated: estimatedDistanceKm,
+                        actual: actualDistanceKm,
                         unit: 'km',
-                        formatted: `${(parseFloat(rideData.distance || rideData.estimateDistance || 0) / 1000).toFixed(2)} km`
+                        formatted: `${actualDistanceKm.toFixed(2)} km`
                     },
 
                     // Mapa do trajeto
@@ -190,23 +470,23 @@ class ReceiptService {
 
                 // === DADOS DO PASSAGEIRO ===
                 customer: {
-                    name: rideData.customer_name || 'Passageiro',
-                    email: rideData.customer_email || '',
-                    phone: rideData.customer_contact || '',
-                    id: rideData.customer || ''
+                    name: receiptRideData.customer_name || receiptRideData.passengerName || 'Passageiro',
+                    email: receiptRideData.customer_email || receiptRideData.passengerEmail || '',
+                    phone: receiptRideData.customer_contact || receiptRideData.passengerPhone || '',
+                    id: receiptRideData.customer || receiptRideData.customerId || receiptRideData.passengerId || receiptRideData.userId || ''
                 },
 
                 // === DADOS DO MOTORISTA ===
                 driver: {
-                    name: rideData.driver_name || 'Motorista Parceiro',
-                    fullName: rideData.driver_name || 'Motorista Parceiro', // Nome completo
-                    id: rideData.driver || '',
+                    name: receiptRideData.driver_name || receiptRideData.driverName || 'Motorista Parceiro',
+                    fullName: receiptRideData.driver_name || receiptRideData.driverName || 'Motorista Parceiro', // Nome completo
+                    id: receiptRideData.driver || receiptRideData.driverId || '',
                     vehicle: {
-                        type: rideData.carType || 'Veículo',
-                        plate: rideData.vehicle_plate || 'N/A',
-                        brand: rideData.vehicleMake || '',
-                        model: rideData.vehicleModel || '',
-                        brandModel: `${rideData.vehicleMake || ''} ${rideData.vehicleModel || ''}`.trim() || 'Veículo'
+                        type: receiptRideData.carType || 'Veículo',
+                        plate: receiptRideData.vehicle_plate || receiptRideData.vehiclePlate || receiptRideData.carPlate || 'N/A',
+                        brand: receiptRideData.vehicleMake || '',
+                        model: receiptRideData.vehicleModel || receiptRideData.carModel || '',
+                        brandModel: `${receiptRideData.vehicleMake || ''} ${receiptRideData.vehicleModel || receiptRideData.carModel || ''}`.trim() || 'Veículo'
                     }
                 },
 
@@ -215,10 +495,10 @@ class ReceiptService {
 
                 // === FORMA DE PAGAMENTO ===
                 payment: {
-                    method: this.getPaymentMethodName(rideData.payment_mode),
-                    status: rideData.payment_status || 'completed',
-                    transactionId: rideData.txnId || '',
-                    processedAt: rideData.paymentDate || rideData.completedAt
+                    method: this.getPaymentMethodName(receiptRideData.payment_mode),
+                    status: receiptRideData.payment_status || 'completed',
+                    transactionId: receiptRideData.txnId || '',
+                    processedAt: receiptRideData.paymentDate || receiptRideData.completedAt
                 },
 
                 // === INFORMAÇÕES LEGAIS ===
@@ -233,7 +513,9 @@ class ReceiptService {
                 metadata: {
                     version: '2.0',
                     generatedBy: 'Leaf Receipt Service',
-                    status: rideData.status || 'COMPLETED'
+                    status: receiptRideData.status || 'COMPLETED',
+                    authoritativeSnapshot: finalFinancialSnapshot.authoritativeSnapshot,
+                    financialSnapshotSource: finalFinancialSnapshot.financialSnapshotSource
                 }
             };
 
@@ -242,6 +524,16 @@ class ReceiptService {
 
         } catch (error) {
             logger.error(`❌ Erro ao gerar recibo para corrida ${rideId}:`, error);
+            if (error?.code === 'RECEIPT_FINANCIAL_SNAPSHOT_INCOMPLETE') {
+                throw error;
+            }
+            if (
+                String(error?.code || '').startsWith('PERSISTENCE_') ||
+                String(error?.code || '').startsWith('FINANCIAL_') ||
+                String(error?.code || '').startsWith('SANDBOX_')
+            ) {
+                throw error;
+            }
             throw new Error(`Falha ao gerar recibo: ${error.message}`);
         }
     }
@@ -250,15 +542,45 @@ class ReceiptService {
      * Calcula breakdown financeiro detalhado
      */
     calculateFinancialBreakdown(rideData) {
-        const totalFare = parseFloat(rideData.finalPrice || rideData.customer_paid || rideData.estimate || 0);
-        const tollFee = parseFloat(rideData.tollFee || rideData.toll_fee || rideData.pedagio || 0);
+        const totalFare = this.firstPresentMoney(
+            rideData.finalPrice,
+            rideData.finalFare,
+            rideData.grossAmount,
+            rideData.grossFare,
+            rideData.totalPaid,
+            rideData.totalAmount,
+            rideData.customer_paid,
+            rideData.customerPaid,
+            rideData.paymentAmount,
+            rideData.financial?.totalPaid?.amount,
+            rideData.fareBreakdown?.finalFare,
+            rideData.fareBreakdown?.grossAmount,
+            rideData.paymentBreakdown?.finalFare,
+            rideData.paymentBreakdown?.grossAmount,
+            rideData.financialBreakdown?.finalFare,
+            rideData.financialBreakdown?.grossAmount
+        ) ?? 0;
+        const tollFee = this.firstPresentMoney(
+            rideData.tollFee,
+            rideData.toll_fee,
+            rideData.pedagio,
+            rideData.driverTollPassThrough,
+            rideData.fareBreakdown?.tollFee,
+            rideData.fareBreakdown?.toll_fee,
+            rideData.fareBreakdown?.driverTollPassThrough,
+            rideData.paymentBreakdown?.tollFee,
+            rideData.paymentBreakdown?.toll_fee,
+            rideData.paymentBreakdown?.driverTollPassThrough,
+            rideData.financialBreakdown?.tollFee,
+            rideData.financialBreakdown?.toll_fee,
+            rideData.financialBreakdown?.driverTollPassThrough
+        ) ?? 0;
         const breakdown = this.paymentService.calculateFareBreakdownFromReais(totalFare, tollFee);
         const explicitBreakdown = rideData.fareBreakdown || rideData.paymentBreakdown || {};
         const firstFinite = (...values) => {
             for (const value of values) {
-                if (value === null || value === undefined || value === '') continue;
-                const numeric = Number(value);
-                if (Number.isFinite(numeric)) return numeric;
+                const numeric = this.parseMoneyValue(value, null);
+                if (numeric !== null) return numeric;
             }
             return null;
         };
@@ -311,6 +633,18 @@ class ReceiptService {
                     formatted: `R$ ${wooviFee.toFixed(2).replace('.', ',')}`
                 },
 
+                tollPassThrough: {
+                    amount: tollFee,
+                    formatted: `R$ ${tollFee.toFixed(2).replace('.', ',')}`,
+                    passThrough: true
+                },
+
+                driverTollPassThrough: {
+                    amount: tollFee,
+                    formatted: `R$ ${tollFee.toFixed(2).replace('.', ',')}`,
+                    passThrough: true
+                },
+
                 driverAmount: {
                     amount: driverAmount,
                     formatted: `R$ ${driverAmount.toFixed(2).replace('.', ',')}`
@@ -323,6 +657,8 @@ class ReceiptService {
                 driverReceived: driverAmount,
                 leafOperational: operationalFee,
                 wooviFee: wooviFee,
+                tollPassThrough: tollFee,
+                driverTollPassThrough: tollFee,
                 retainedFees: totalFees
             }
         };
@@ -454,9 +790,19 @@ class ReceiptService {
     /**
      * Busca e gera recibo para uma corrida específica
      */
-    async getReceiptByRideId(rideId, redis, firebaseDb) {
+    async getReceiptByRideId(rideId, redis, firebaseDb, scopeInput = {}) {
         try {
             logger.info(`🔍 Buscando dados da corrida: ${rideId}`);
+
+            const persistenceScope = resolveRidePersistenceScope(scopeInput);
+            const storedReceipt = await this.getReceiptFromFirestore(
+                rideId,
+                firebaseDb,
+                persistenceScope
+            );
+            if (storedReceipt) {
+                return storedReceipt;
+            }
 
             // Tentar buscar do Redis primeiro
             let rideData = null;
@@ -464,17 +810,23 @@ class ReceiptService {
                 const redisData = await redis.hget('bookings:active', rideId);
                 if (redisData) {
                     rideData = JSON.parse(redisData);
+                    assertStoredRecordMatchesScope(rideData, persistenceScope);
                 }
             }
 
             // Se não encontrou no Redis, buscar no Firebase
             if (!rideData && firebaseDb) {
-                const snapshot = await firebaseDb.ref(`bookings/${rideId}`).once('value');
+                const snapshot = await firebaseDb
+                    .ref(`${persistenceScope.collections.bookings}/${rideId}`)
+                    .once('value');
                 rideData = snapshot.val();
+                if (rideData) {
+                    assertStoredRecordMatchesScope(rideData, persistenceScope);
+                }
             }
 
             if (!rideData) {
-                throw new Error(`Corrida ${rideId} não encontrada`);
+                return null;
             }
 
             // Gerar recibo
@@ -486,6 +838,129 @@ class ReceiptService {
         }
     }
 
+    resolveStoredReceiptOwnerId(receipt = {}, role = 'customer') {
+        if (role === 'driver') {
+            return String(
+                receipt.driver?.id ||
+                receipt.driverId ||
+                receipt.driver_id ||
+                ''
+            ).trim();
+        }
+
+        return String(
+            receipt.customer?.id ||
+            receipt.customerId ||
+            receipt.customer_id ||
+            receipt.passengerId ||
+            receipt.passenger_id ||
+            receipt.userId ||
+            ''
+        ).trim();
+    }
+
+    resolveStoredReceiptTimestamp(receipt = {}) {
+        const value =
+            receipt.trip?.dateTime ||
+            receipt.completedAt ||
+            receipt.endTime ||
+            receipt.savedAt ||
+            receipt.issueDate ||
+            receipt.savedTimestamp ||
+            receipt.issueTimestamp ||
+            0;
+        const parsed = this.parseDateValue(value);
+        return parsed ? parsed.getTime() : 0;
+    }
+
+    /**
+     * Lista somente recibos já persistidos no namespace financeiro resolvido.
+     * Não consulta nem regenera dados a partir de bookings.
+     */
+    async listStoredReceiptsByUser({
+        firebaseDb,
+        userId,
+        role = 'customer',
+        financialContext,
+        limit = 10,
+        offset = 0
+    } = {}) {
+        if (!firebaseDb) {
+            const error = new Error('Serviço de database não disponível');
+            error.code = 'RECEIPT_DATABASE_UNAVAILABLE';
+            error.statusCode = 503;
+            throw error;
+        }
+
+        const normalizedUserId = String(userId || '').trim();
+        if (!normalizedUserId) {
+            const error = new Error('userId é obrigatório');
+            error.code = 'RECEIPT_USER_ID_REQUIRED';
+            error.statusCode = 400;
+            throw error;
+        }
+
+        if (!['customer', 'driver'].includes(role)) {
+            const error = new Error('Role deve ser "customer" ou "driver"');
+            error.code = 'RECEIPT_ROLE_INVALID';
+            error.statusCode = 400;
+            throw error;
+        }
+
+        const requestedContextResult = resolveFinancialContext({ financialContext });
+        if (!requestedContextResult.ok) {
+            const error = new Error(requestedContextResult.error);
+            error.code = requestedContextResult.code;
+            error.statusCode = 400;
+            throw error;
+        }
+
+        const requestedContext = requestedContextResult.context;
+        const persistenceScope = resolvePersistenceScope({ financialContext: requestedContext });
+        const ownerPath = role === 'driver' ? 'driver/id' : 'customer/id';
+        const safeLimit = Math.min(50, Math.max(1, Number.parseInt(limit, 10) || 10));
+        const safeOffset = Math.max(0, Number.parseInt(offset, 10) || 0);
+        const snapshot = await firebaseDb
+            .ref(persistenceScope.collections.receipts)
+            .orderByChild(ownerPath)
+            .equalTo(normalizedUserId)
+            .once('value');
+
+        const receipts = Object.entries(snapshot.val() || {})
+            .map(([rideId, receipt]) => ({
+                ...(receipt || {}),
+                rideId: receipt?.rideId || rideId
+            }))
+            .filter((receipt) => {
+                if (this.resolveStoredReceiptOwnerId(receipt, role) !== normalizedUserId) {
+                    return false;
+                }
+
+                // Legado operacional permanece legível apenas dentro de `receipts`.
+                // Sandbox exige o mesmo contexto selado, nunca apenas o mesmo namespace.
+                try {
+                    assertStoredRecordMatchesScope(receipt, persistenceScope);
+                    return true;
+                } catch (_error) {
+                    return false;
+                }
+            })
+            .sort((left, right) =>
+                this.resolveStoredReceiptTimestamp(right) - this.resolveStoredReceiptTimestamp(left)
+            );
+        const page = receipts.slice(safeOffset, safeOffset + safeLimit);
+
+        return {
+            receipts: page,
+            total: receipts.length,
+            limit: safeLimit,
+            offset: safeOffset,
+            nextOffset: safeOffset + page.length,
+            hasMore: safeOffset + page.length < receipts.length,
+            financialNamespace: requestedContext.namespace
+        };
+    }
+
     /**
      * Salva recibo no Firestore
      * @param {Object} receipt - Recibo gerado
@@ -495,32 +970,65 @@ class ReceiptService {
     async saveReceiptToFirestore(receipt, firebaseDb) {
         try {
             if (!firebaseDb) {
-                logger.warn('⚠️ Firebase Database não disponível para salvar recibo');
-                return false;
+                throw new ReceiptPersistenceError(
+                    'Firebase Database não disponível para salvar recibo',
+                    { rideId: receipt?.rideId || null, stage: 'database_unavailable' }
+                );
             }
 
+            let persistenceScope;
+            try {
+                persistenceScope = resolveRidePersistenceScope(receipt);
+            } catch (error) {
+                throw new ReceiptPersistenceError(
+                    error.message,
+                    {
+                        rideId: receipt?.rideId || null,
+                        stage: 'financial_context',
+                        contextCode: error.code
+                    }
+                );
+            }
+            const financialContext = persistenceScope.financialContext;
             const receiptData = {
                 ...receipt,
+                financialContext,
+                financialNamespace: financialContext.namespace,
+                financialContextId: financialContext.contextId,
                 savedAt: new Date().toISOString(),
                 savedTimestamp: Date.now()
             };
 
             // Salvar na coleção receipts
-            await firebaseDb.ref(`receipts/${receipt.rideId}`).set(receiptData);
+            await firebaseDb
+                .ref(`${persistenceScope.collections.receipts}/${receipt.rideId}`)
+                .set(receiptData);
 
             // Também salvar referência na corrida para fácil acesso
-            await firebaseDb.ref(`bookings/${receipt.rideId}/receipt`).set({
-                receiptId: receipt.receiptId,
-                hash: receipt.hash,
-                savedAt: receiptData.savedAt
-            });
+            await firebaseDb
+                .ref(`${persistenceScope.collections.bookings}/${receipt.rideId}/receipt`)
+                .set({
+                    receiptId: receipt.receiptId,
+                    hash: receipt.hash,
+                    savedAt: receiptData.savedAt,
+                    financialContext,
+                    financialNamespace: financialContext.namespace,
+                    financialContextId: financialContext.contextId
+                });
 
             logger.info(`✅ Recibo salvo no Firestore: ${receipt.receiptId}`);
             return true;
 
         } catch (error) {
             logger.error(`❌ Erro ao salvar recibo no Firestore:`, error);
-            return false;
+            if (error?.code === 'RECEIPT_PERSIST_FAILED') {
+                throw error;
+            }
+            throw new ReceiptPersistenceError(
+                `Falha ao persistir recibo ${receipt?.rideId || 'sem rideId'}`,
+                { rideId: receipt?.rideId || null, stage: 'database_write' },
+                error
+            );
         }
     }
 
@@ -530,17 +1038,33 @@ class ReceiptService {
      * @param {Object} firebaseDb - Instância do Firebase Database
      * @returns {Promise<Object|null>} - Recibo encontrado ou null
      */
-    async getReceiptFromFirestore(rideId, firebaseDb) {
+    async getReceiptFromFirestore(rideId, firebaseDb, scopeInput = {}) {
         try {
             if (!firebaseDb) {
                 return null;
             }
 
-            const snapshot = await firebaseDb.ref(`receipts/${rideId}`).once('value');
-            return snapshot.val();
+            const persistenceScope = resolveRidePersistenceScope(scopeInput);
+            const snapshot = await firebaseDb
+                .ref(`${persistenceScope.collections.receipts}/${rideId}`)
+                .once('value');
+            const value = snapshot.val();
+            if (!value) return null;
+
+            const financialContext = assertStoredRecordMatchesScope(value, persistenceScope);
+            return financialContext
+                ? { ...value, financialContext }
+                : value;
 
         } catch (error) {
             logger.error(`❌ Erro ao buscar recibo do Firestore:`, error);
+            if (
+                String(error?.code || '').startsWith('PERSISTENCE_') ||
+                String(error?.code || '').startsWith('FINANCIAL_') ||
+                String(error?.code || '').startsWith('SANDBOX_')
+            ) {
+                throw error;
+            }
             return null;
         }
     }
@@ -556,25 +1080,16 @@ class ReceiptService {
         try {
             // Gerar recibo
             const receipt = await this.generateReceipt(rideId, rideData);
-            let receiptTelemetry = {
+            const receiptTelemetry = {
                 firebase: {
                     reads: 0,
-                    writes: 0
+                    writes: 2
                 }
             };
 
-            // Salvar no Firestore se disponível
-            if (firebaseDb) {
-                const saved = await this.saveReceiptToFirestore(receipt, firebaseDb);
-                if (saved) {
-                    receiptTelemetry = {
-                        firebase: {
-                            reads: 0,
-                            writes: 2
-                        }
-                    };
-                }
-            }
+            // O método possui semântica de geração + persistência: ausência/falha de
+            // database deve propagar erro tipado, nunca parecer sucesso parcial.
+            await this.saveReceiptToFirestore(receipt, firebaseDb);
 
             Object.defineProperty(receipt, '__telemetry', {
                 value: receiptTelemetry,

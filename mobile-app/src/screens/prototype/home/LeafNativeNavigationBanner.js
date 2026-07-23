@@ -91,9 +91,11 @@ export default function LeafNativeNavigationBanner({
   routeKey,
   insetsTop = 0,
   navigationModel = null,
+  onOpenNavigation,
   onHide,
 }) {
-  const isVisible = Boolean(navigationModel?.isVisible);
+  const isOffRoute = navigationModel?.isOffRoute === true;
+  const isVisible = Boolean(navigationModel?.isVisible) && !isOffRoute;
 
   usePrototypeMapOcclusion({
     routeKey,
@@ -105,13 +107,10 @@ export default function LeafNativeNavigationBanner({
     return null;
   }
 
-  const isOffRoute = navigationModel?.isOffRoute === true;
-  const title = isOffRoute ? 'Fora da rota' : navigationModel.currentInstruction;
-  const subtitle = isOffRoute
-    ? navigationModel.offRouteMessage
-    : `${navigationModel.maneuverDistanceLabel} até ${
-        navigationModel.maneuverDistanceTargetLabel || 'o destino'
-      }`;
+  const title = navigationModel.currentInstruction;
+  const subtitle = `${navigationModel.maneuverDistanceLabel} até ${
+    navigationModel.maneuverDistanceTargetLabel || 'o destino'
+  }`;
   const maneuverType = resolveManeuverType(title, isOffRoute);
 
   return (
@@ -140,6 +139,17 @@ export default function LeafNativeNavigationBanner({
         <View style={styles.meta}>
           <Text style={styles.metaDistance}>{navigationModel.remainingDistanceLabel}</Text>
           <Text style={styles.metaEta}>{navigationModel.etaLabel}</Text>
+          {typeof onOpenNavigation === 'function' ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Navegar com Waze ou Google Maps"
+              hitSlop={10}
+              onPress={onOpenNavigation}
+              style={styles.navigationButton}
+            >
+              <Text style={styles.navigationButtonText}>Navegar</Text>
+            </Pressable>
+          ) : null}
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="Ocultar navegação LEAF"
@@ -211,7 +221,7 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   meta: {
-    width: 78,
+    width: 88,
     alignItems: 'flex-end',
     gap: 2,
   },
@@ -225,11 +235,23 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#667180',
   },
-  hideButton: {
+  navigationButton: {
     marginTop: 8,
     paddingHorizontal: 8,
     paddingVertical: 5,
-    borderRadius: 999,
+    borderRadius: 12,
+    backgroundColor: '#111A27',
+  },
+  navigationButtonText: {
+    fontFamily: fonts.SemiBold,
+    fontSize: 11,
+    color: '#FFFFFF',
+  },
+  hideButton: {
+    marginTop: 3,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: 12,
     backgroundColor: 'rgba(17,26,39,0.06)',
   },
   hideButtonText: {

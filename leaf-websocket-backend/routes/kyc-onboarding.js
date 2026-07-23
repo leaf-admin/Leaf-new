@@ -15,6 +15,7 @@ try {
   logStructured('warn', '⚠️ Firebase config não encontrado', { service: 'kyc-onboarding-routes' });
 }
 const kycDriverStatusService = require('../services/kyc-driver-status-service');
+const { evaluateDeviceVerificationTrust } = require('../services/kyc-biometric-production-policy');
 
 // Configurar multer para upload de imagens
 // ✅ CORREÇÃO: Aumentar limite de tamanho e adicionar timeout
@@ -57,8 +58,21 @@ router.post(
       });
     }
 
-    // Device-first mode: comparação já calculada no app, backend só persiste + aplica regra
+    // This is a legacy, client-declared comparison. It is never an identity authority in production.
     if (isDeviceFirst) {
+      const trustGate = evaluateDeviceVerificationTrust({
+        mode: 'device_signature_v1',
+        provider: 'device_signature_v1'
+      });
+      if (!trustGate.allowed) {
+        return res.status(409).json({
+          success: false,
+          code: trustGate.code,
+          error: 'Validação facial no dispositivo não pode aprovar cadastro neste ambiente.',
+          message: 'Envie os documentos pelo fluxo de ativação e conclua a validação biométrica canônica.'
+        });
+      }
+
       const similarity = Number(req.body?.similarityScore || 0);
       const approveThreshold = Number(req.body?.approveThreshold || 0.5);
       const reviewThreshold = Number(req.body?.reviewThreshold || 0.4);

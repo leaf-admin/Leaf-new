@@ -92,6 +92,24 @@ describe('Logger Utility', () => {
     }));
   });
 
+  test('logStructured redacts credentials while preserving safe fingerprints', () => {
+    loggerModule.logStructured('info', 'Authorization: Bearer raw-secret', {
+      apiToken: 'raw-api-token',
+      nested: { clientSecret: 'raw-client-secret' },
+      tokenFingerprint: 'abc123def456'
+    });
+
+    expect(loggerModule.logger.log).toHaveBeenCalledWith(
+      'info',
+      'Authorization: [REDACTED]',
+      expect.objectContaining({
+        apiToken: '[REDACTED]',
+        nested: { clientSecret: '[REDACTED]' },
+        tokenFingerprint: 'abc123def456'
+      })
+    );
+  });
+
   test('logEvent should keep event metadata', () => {
     loggerModule.logEvent('ride_requested', 'emit', { bookingId: 'b1' });
 

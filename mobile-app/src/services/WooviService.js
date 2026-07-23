@@ -2,6 +2,77 @@ import Logger from '../utils/Logger';
 import { getSelfHostedApiUrl } from '../config/ApiConfig';
 import { createAxiosInstance } from '../utils/axiosInterceptor';
 
+function getPaymentErrorSource(error) {
+    return error?.originalError || error;
+}
+
+function getPaymentErrorResponseData(error) {
+    const source = getPaymentErrorSource(error);
+    return error?.response?.data || source?.response?.data || null;
+}
+
+function getPaymentErrorStatus(error) {
+    const source = getPaymentErrorSource(error);
+    return error?.status || source?.response?.status || error?.response?.status || null;
+}
+
+function getPaymentErrorCode(error) {
+    const responseData = getPaymentErrorResponseData(error);
+    return String(
+        responseData?.code ||
+        responseData?.error?.code ||
+        error?.code ||
+        getPaymentErrorSource(error)?.code ||
+        ''
+    ).trim().toUpperCase();
+}
+
+function resolvePaymentAdvanceMessage(error) {
+    const status = getPaymentErrorStatus(error);
+    const code = getPaymentErrorCode(error);
+    const responseData = getPaymentErrorResponseData(error);
+    const backendMessage = String(responseData?.message || responseData?.error || '').trim();
+
+    if (status === 401 || code === 'PAYMENT_AUTH_TOKEN_MISSING' || code === 'PAYMENT_AUTH_TOKEN_INVALID') {
+        return 'Sua sessão expirou. Entre novamente para continuar.';
+    }
+    if (status === 403 || code === 'PAYMENT_PASSENGER_SCOPE_MISMATCH') {
+        return 'Não foi possível validar sua sessão para este pagamento.';
+    }
+    if (code === 'NO_DRIVERS_AVAILABLE') {
+        return 'Não há motorista disponível para essa corrida agora.';
+    }
+    if (code.startsWith('QUOTE_LOCK_')) {
+        return responseData?.message || 'Atualize a cotação antes de gerar o Pix desta corrida.';
+    }
+    if (
+        code === 'PAYMENT_PROVIDER_CHARGE_FAILED' ||
+        code === 'PAYMENT_PROVIDER_CHARGE_ID_MISSING' ||
+        code === 'PAYMENT_PROFILE_CREDENTIALS_MISSING'
+    ) {
+        return 'Não foi possível gerar o Pix agora. Tente novamente em instantes.';
+    }
+    if (backendMessage && backendMessage.length < 160 && !/[{}[\]<>]/.test(backendMessage)) {
+        return backendMessage;
+    }
+    return error?.friendlyMessage || error?.message || 'Não foi possível gerar o pagamento PIX no momento.';
+}
+
+function normalizePaymentAdvanceError(error) {
+    const source = getPaymentErrorSource(error);
+    const normalized = new Error(resolvePaymentAdvanceMessage(error));
+    const status = getPaymentErrorStatus(error);
+    const code = getPaymentErrorCode(error);
+    normalized.name = 'PaymentAdvanceError';
+    normalized.friendlyMessage = normalized.message;
+    normalized.rawMessage = source?.message || error?.rawMessage || normalized.message;
+    normalized.originalError = source;
+    if (status) normalized.status = status;
+    if (code) normalized.code = code;
+    if (source?.response || error?.response) normalized.response = source?.response || error?.response;
+    return normalized;
+}
+
 
 class WooviService {
     constructor() {
@@ -15,6 +86,32 @@ class WooviService {
             baseURL: apiBaseUrl, // Usa a configuração do ApiConfig
             timeout: 30000
         });
+    }
+
+    async resolvePaymentRuntimeProfile({ passengerId, phone, phoneNumber } = {}) {
+        const headers = {};
+        const safePassengerId = String(passengerId || '').trim();
+        const safePhone = String(phone || phoneNumber || '').trim();
+
+        if (safePassengerId) {
+            headers['x-leaf-user-id'] = safePassengerId;
+            headers['x-passenger-id'] = safePassengerId;
+        }
+        if (safePhone) {
+            headers['x-leaf-phone'] = safePhone;
+            headers['x-phone'] = safePhone;
+        }
+
+        const response = await this.backendApi.get('/api/app/runtime-config', { headers });
+        const paymentRuntime = response?.data?.paymentRuntime || {};
+        return {
+            success: true,
+            provider: paymentRuntime.provider || 'woovi',
+            defaultEnvironment: paymentRuntime.defaultEnvironment || null,
+            canarySandboxEnabled: paymentRuntime.canarySandboxEnabled === true,
+            globalSandboxEnabled: paymentRuntime.globalSandboxEnabled === true,
+            effectiveProfile: paymentRuntime.effectiveProfile || null,
+        };
     }
 
     // NOVO SISTEMA: Processar pagamento antecipado
@@ -42,6 +139,7 @@ class WooviService {
                 paymentSessionId: paymentData.paymentSessionId,
                 paymentContextKey: paymentData.paymentContextKey,
                 quoteSessionId: paymentData.quoteSessionId,
+                quoteLockId: paymentData.quoteLockId,
                 rideDetails: paymentData.rideDetails,
                 pickupLocation: paymentData.pickupLocation,
                 destinationLocation: paymentData.destinationLocation,
@@ -65,15 +163,17 @@ class WooviService {
             return response.data;
         } catch (error) {
             Logger.error('❌ [Woovi] Erro ao processar pagamento antecipado:', error);
+            const sourceError = getPaymentErrorSource(error);
+            const responseData = getPaymentErrorResponseData(error);
             Logger.error('❌ [Woovi] Detalhes do erro:', {
                 message: error.message,
-                code: error.code,
-                response: error.response?.data,
-                status: error.response?.status,
-                url: error.config?.url,
-                baseURL: error.config?.baseURL,
-                fullUrl: error.config ? `${error.config.baseURL}${error.config.url}` : 'N/A',
-                method: error.config?.method
+                code: getPaymentErrorCode(error) || error.code,
+                response: responseData,
+                status: getPaymentErrorStatus(error),
+                url: sourceError?.config?.url || error.config?.url,
+                baseURL: sourceError?.config?.baseURL || error.config?.baseURL,
+                fullUrl: sourceError?.config ? `${sourceError.config.baseURL}${sourceError.config.url}` : 'N/A',
+                method: sourceError?.config?.method || error.config?.method
             });
             
             // ✅ Melhorar mensagem de erro
@@ -91,8 +191,8 @@ class WooviService {
             } else if (error.response) {
                 error.message = error.response.data?.error || error.response.data?.message || error.message;
             }
-            
-            throw error;
+
+            throw normalizePaymentAdvanceError(error);
         }
     }
 
@@ -116,7 +216,8 @@ class WooviService {
             const response = await this.backendApi.get(`/api/payment/status/${chargeId}`);
             return response.data;
         } catch (error) {
-            Logger.error('Erro ao verificar status do pagamento:', error);
+            // Status polling is best-effort; callers decide whether a failure is terminal.
+            Logger.debug('Status do pagamento temporariamente indisponível:', error?.message || error);
             throw error;
         }
     }
@@ -157,7 +258,14 @@ class WooviService {
                 }
             };
 
-            const response = await this.backendApi.post('/api/woovi/test-webhook', payload);
+            const response = await this.backendApi.post('/api/woovi/test-confirm-sandbox-payment-app', {
+                passengerId,
+                paymentIntentId,
+                chargeId,
+                rideId,
+                amountInCents,
+                webhookPayload: payload
+            });
             return response.data;
         } catch (error) {
             Logger.error('Erro ao simular webhook de pagamento:', error);

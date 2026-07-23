@@ -667,9 +667,53 @@ describe('FCMNotificationService initialization', () => {
     });
 
     expect(navigationRef.navigate).toHaveBeenCalledWith(
-      'Notifications',
+      'RobotaxiPrototype',
       expect.objectContaining({
         originalScreen: 'DangerousInternalRoute',
+      })
+    );
+  });
+
+  it('maps legacy push screen names to canonical Robotaxi routes when the notification type is known', () => {
+    const navigationRef = {
+      isReady: jest.fn(() => true),
+      navigate: jest.fn(),
+    };
+    globalThis.navigationRef = navigationRef;
+
+    const paymentTarget = FCMNotificationService.navigateToScreen({
+      data: {
+        screen: 'PaymentSuccess',
+        type: 'payment_success',
+        bookingId: 'booking_payment_success',
+      },
+    });
+    const searchTarget = FCMNotificationService.navigateToScreen({
+      data: {
+        routeName: 'DriverSearch',
+        type: 'trip_update',
+        bookingId: 'booking_trip_update',
+        status: 'accepted',
+      },
+    });
+
+    expect(paymentTarget.routeName).toBe('RobotaxiPrototypePaymentSuccess');
+    expect(searchTarget.routeName).toBe('RobotaxiPrototypeTrip');
+    expect(navigationRef.navigate).toHaveBeenNthCalledWith(
+      1,
+      'RobotaxiPrototypePaymentSuccess',
+      expect.objectContaining({
+        bookingId: 'booking_payment_success',
+        source: 'push',
+      })
+    );
+    expect(navigationRef.navigate).toHaveBeenNthCalledWith(
+      2,
+      'RobotaxiPrototypeTrip',
+      expect.objectContaining({
+        bookingId: 'booking_trip_update',
+        status: 'accepted',
+        source: 'push',
       })
     );
   });

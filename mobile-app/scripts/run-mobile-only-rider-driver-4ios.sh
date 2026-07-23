@@ -1234,7 +1234,7 @@ ensure_driver_online_via_queue "${DRIVER_B_UDID}" "${DRIVER_B_UID}" "driver-b" "
 ensure_driver_online_via_queue "${DRIVER_C_UDID}" "${DRIVER_C_UID}" "driver-c" "01-driver-c-online-primary" "01-driver-c-online-ui-fallback" "01-driver-c-online-fallback"
 append_timeline "drivers_online" "{\"driverA\":\"${DRIVER_A_UID}\",\"driverB\":\"${DRIVER_B_UID}\",\"driverC\":\"${DRIVER_C_UID}\"}"
 
-run_flow "${PASSENGER_UDID}" "${MOBILE_DIR}/.maestro/flows/qa/e2e/lifecycle/02-passenger-request-copacabana.yaml" "02-passenger-request"
+run_flow "${PASSENGER_UDID}" "${MOBILE_DIR}/.maestro/flows/qa/e2e/lifecycle/02-passenger-request-current-home.yaml" "02-passenger-request"
 PASSENGER_BOOKING_ID="$(read_runtime_field "${PASSENGER_UDID}" "activeBookingId")"
 append_timeline "ride_requested" "{\"bookingId\":\"${PASSENGER_BOOKING_ID}\"}"
 capture_stage "02-request-dispatched"

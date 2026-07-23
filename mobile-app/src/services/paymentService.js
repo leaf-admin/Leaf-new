@@ -22,20 +22,55 @@ function normalizeAmountToCents(valueOrAmount) {
   return n > 999 ? Math.round(n) : Math.round(n * 100);
 }
 
-export const createPixCharge = async (chargeData) => {
-  try {
-    const amountInCents = normalizeAmountToCents(chargeData?.value ?? chargeData?.amount ?? 0);
-    const rideId = chargeData?.rideId || `legacy_ride_${Date.now()}`;
-    const passengerId = chargeData?.passengerId || 'legacy_passenger';
-    const rideDetails = chargeData?.rideDetails || {
-      origin: chargeData?.origin || 'Origem',
-      destination: chargeData?.destination || 'Destino'
-    };
+const QUOTE_LOCK_REQUIRED_MESSAGE =
+  'Cotação expirada ou ausente. Recalcule a tarifa antes de pagar.';
 
+function normalizeId(value) {
+  return String(value || '').trim();
+}
+
+function resolveQuoteLockId(chargeData = {}, rideDetails = {}) {
+  return normalizeId(
+    chargeData?.quoteLockId ||
+      chargeData?.quoteLock?.quoteLockId ||
+      chargeData?.paymentQuoteLock?.quoteLockId ||
+      chargeData?.initialPricingQuote?.quoteLockId ||
+      chargeData?.pricingQuote?.quoteLockId ||
+      chargeData?.quote?.quoteLockId ||
+      rideDetails?.quoteLockId ||
+      rideDetails?.quoteLock?.quoteLockId ||
+      rideDetails?.pricingQuote?.quoteLockId ||
+      rideDetails?.quote?.quoteLockId
+  );
+}
+
+function createQuoteLockRequiredError() {
+  const error = new Error(QUOTE_LOCK_REQUIRED_MESSAGE);
+  error.code = 'QUOTE_LOCK_REQUIRED';
+  return error;
+}
+
+export const createPixCharge = async (chargeData = {}) => {
+  const amountInCents = normalizeAmountToCents(chargeData?.value ?? chargeData?.amount ?? 0);
+  const rideId = chargeData?.rideId || `legacy_ride_${Date.now()}`;
+  const passengerId = chargeData?.passengerId || 'legacy_passenger';
+  const rideDetails = chargeData?.rideDetails || {
+    origin: chargeData?.origin || 'Origem',
+    destination: chargeData?.destination || 'Destino'
+  };
+  const quoteLockId = resolveQuoteLockId(chargeData, rideDetails);
+
+  if (!quoteLockId) {
+    throw createQuoteLockRequiredError();
+  }
+
+  try {
     const response = await api.post('/api/payment/advance', {
       passengerId,
       amount: amountInCents,
       rideId,
+      quoteSessionId: chargeData?.quoteSessionId || null,
+      quoteLockId,
       rideDetails,
       pickupLocation: chargeData?.pickupLocation || rideDetails?.pickupLocation || null,
       destinationLocation: chargeData?.destinationLocation || rideDetails?.destinationLocation || null,

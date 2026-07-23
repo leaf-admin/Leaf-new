@@ -90,6 +90,7 @@ describe('PhoneInputStep', () => {
     apiClient.post.mockReset();
 
     const runtimeAccessPolicy = require('../src/config/runtimeAccessPolicy');
+    const reviewAccounts = require('../src/config/reviewAccounts');
     runtimeAccessPolicy.allowQaOtpForceFlow.mockReset();
     runtimeAccessPolicy.allowCustomOtpFallback.mockReset();
     runtimeAccessPolicy.allowReviewAccess.mockReset();
@@ -100,6 +101,10 @@ describe('PhoneInputStep', () => {
     runtimeAccessPolicy.allowReviewAccess.mockReturnValue(false);
     runtimeAccessPolicy.isE2ETestBuild.mockReturnValue(false);
     runtimeAccessPolicy.isSimulatorBuild.mockReturnValue(false);
+    reviewAccounts.isReviewAccount.mockReset();
+    reviewAccounts.getReviewAccountInfo.mockReset();
+    reviewAccounts.isReviewAccount.mockReturnValue(false);
+    reviewAccounts.getReviewAccountInfo.mockReturnValue(null);
 
     const UserAuthService = require('../src/services/UserAuthService').default;
     UserAuthService.resolvePhoneAuthFlow.mockReset();
@@ -250,6 +255,36 @@ describe('PhoneInputStep', () => {
         true,
       );
       expect(queryByText('Esse passo ajuda a manter sua conta segura.')).not.toBeNull();
+    });
+  });
+
+  test('routes controlled review account to inline password login without OTP preflight', async () => {
+    const UserAuthService = require('../src/services/UserAuthService').default;
+    const reviewAccounts = require('../src/config/reviewAccounts');
+
+    reviewAccounts.getReviewAccountInfo.mockReturnValue({
+      phoneNumber: '21123456789',
+      fullPhoneNumber: '+5521123456789',
+      userType: 'driver',
+      skipOTP: true,
+    });
+
+    const { getByTestId, queryByText, getByPlaceholderText } = render(
+      <PhoneInputStep
+        onSwitchToRegister={jest.fn()}
+        onVerificationSent={jest.fn()}
+      />,
+    );
+
+    fireEvent.changeText(getByTestId('auth-phone-input'), '21123456789');
+    fireEvent.press(getByTestId('auth-continue-btn'));
+
+    await waitFor(() => {
+      expect(UserAuthService.resolvePhoneAuthFlow).not.toHaveBeenCalled();
+      expect(mockSignInWithPhoneNumber).not.toHaveBeenCalled();
+      expect(queryByText('Ja tenho senha')).toBeNull();
+      expect(queryByText('Entrar')).not.toBeNull();
+      expect(getByPlaceholderText('Senha')).toBeTruthy();
     });
   });
 

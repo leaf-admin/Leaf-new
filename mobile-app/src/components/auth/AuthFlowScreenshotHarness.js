@@ -153,8 +153,17 @@ function resolveScenarioFromUrl(url) {
   return scenarios[rawScenario] ? rawScenario : fallback;
 }
 
-export default function AuthFlowScreenshotHarness() {
-  const [scenarioName, setScenarioName] = useState('passenger-phone');
+export default function AuthFlowScreenshotHarness({ route }) {
+  const routeScenario = route?.params?.scenario || route?.params?.case;
+  const [scenarioName, setScenarioName] = useState(
+    scenarios[routeScenario] ? routeScenario : 'passenger-phone'
+  );
+
+  useEffect(() => {
+    if (scenarios[routeScenario]) {
+      setScenarioName(routeScenario);
+    }
+  }, [routeScenario]);
 
   useEffect(() => {
     let isMounted = true;

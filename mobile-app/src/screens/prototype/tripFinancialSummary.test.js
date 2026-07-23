@@ -4,6 +4,7 @@ import {
   resolveTripNetAmountOrNull,
   resolveTripPassengerPaidAmount,
   resolveTripTollAmount,
+  resolveTripTollAmountOrNull,
 } from "./tripFinancialSummary";
 
 describe("tripFinancialSummary", () => {
@@ -31,6 +32,23 @@ describe("tripFinancialSummary", () => {
         },
       }),
     ).toBe(4.9);
+  });
+
+  it("preserva zero explicito sem reaproveitar uma estimativa antiga", () => {
+    const receipt = {
+      tollFee: 0,
+      fareBreakdown: {
+        tollFee: 8.95,
+      },
+    };
+
+    expect(resolveTripTollAmountOrNull(receipt)).toBe(0);
+    expect(resolveTripTollAmount(receipt)).toBe(0);
+  });
+
+  it("distingue pedagio ausente de pedagio zero", () => {
+    expect(resolveTripTollAmountOrNull({})).toBeNull();
+    expect(resolveTripTollAmount({})).toBe(0);
   });
 
   it("nao trata bruto isolado como liquido do motorista", () => {

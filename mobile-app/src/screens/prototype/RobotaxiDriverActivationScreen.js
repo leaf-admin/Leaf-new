@@ -10,7 +10,9 @@ import PrototypeDismissibleSheet from '../../components/prototype/PrototypeDismi
 import { usePrototypeMapOcclusion } from './prototypeMapOcclusion';
 import { usePrototypeRideRuntime } from './prototypeRideRuntime';
 import { DRIVER_ONBOARDING_STAGE_KEYS } from '../../services/DriverOnboardingService';
+import { normalizeErrorMessage } from '../../services/DriverActivationService';
 import Logger from '../../utils/Logger';
+import { resolveCanonicalLivenessGate } from './driverActivationCanonicalContract';
 
 const { color, typography } = robotaxiPrototypeTokens;
 const SURFACE_TOP_PADDING = 28;
@@ -36,6 +38,7 @@ const FIELD_STATUS = {
   APPROVED: 'approved',
   FAILED: 'failed'
 };
+const EMPTY_ACTIVATION_STAGES = Object.freeze({});
 
 const STAGE_META = {
   [DRIVER_ONBOARDING_STAGE_KEYS.DRIVER_DATA]: {
@@ -82,13 +85,13 @@ const STAGE_META = {
   },
   [DRIVER_ONBOARDING_STAGE_KEYS.VEHICLE_DATA]: {
     title: 'Validação do veículo',
-    description: 'Atualizado automaticamente após o envio do CRLV.',
+    description: 'Status operacional confirmado pela plataforma.',
     fields: [
       {
         key: 'crlv',
         label: 'CRLV validado pela plataforma',
-        helper: 'Após envio, o documento entra em análise automatizada com IA.',
-        actionLabel: 'Envio pendente',
+        helper: 'A liberação depende do cadastro canônico do veículo.',
+        actionLabel: 'Pendente',
         kind: 'readonly'
       }
     ]
@@ -127,13 +130,83 @@ function resolveActivationRowTitle(field) {
   return field?.label || 'Etapa';
 }
 
-function resolveActivationRowSubtitle(field, fieldState) {
+function pickFirstNonEmptyString(...values) {
+  return values
+    .map(value => String(value || '').trim())
+    .find(Boolean) || '';
+}
+
+function resolveActivationVehicleLabel({ driverActivationRemote, documentAnalysisState } = {}) {
+  const crlvAnalysis =
+    documentAnalysisState?.byType?.crlv ||
+    documentAnalysisState?.crlv ||
+    {};
+  const crlvDocument =
+    driverActivationRemote?.documents?.crlv ||
+    {};
+  const remoteVehicle =
+    driverActivationRemote?.vehicle ||
+    driverActivationRemote?.summary?.vehicle ||
+    crlvDocument?.vehicle ||
+    {};
+  const crlvData =
+    crlvAnalysis?.data ||
+    crlvAnalysis?.extractedData ||
+    crlvDocument?.data ||
+    crlvDocument?.extractedData ||
+    {};
+
+  const model = pickFirstNonEmptyString(
+    remoteVehicle?.model,
+    remoteVehicle?.modelo,
+    remoteVehicle?.vehicleModel,
+    crlvData?.model,
+    crlvData?.modelo,
+    crlvData?.vehicleModel,
+  );
+  const colorLabel = pickFirstNonEmptyString(
+    remoteVehicle?.color,
+    remoteVehicle?.cor,
+    remoteVehicle?.vehicleColor,
+    remoteVehicle?.carColor,
+    crlvData?.color,
+    crlvData?.cor,
+    crlvData?.vehicleColor,
+    crlvData?.carColor,
+  );
+  const plate = pickFirstNonEmptyString(
+    remoteVehicle?.plate,
+    remoteVehicle?.placa,
+    remoteVehicle?.vehiclePlate,
+    crlvData?.plate,
+    crlvData?.placa,
+    crlvData?.vehiclePlate,
+  );
+  const modelAndColor = [model, colorLabel].filter(Boolean).join(' ');
+
+  if (modelAndColor && plate) {
+    return `${modelAndColor} · ${plate}`;
+  }
+
+  return modelAndColor || plate;
+}
+
+function resolveActivationRowSubtitle(field, fieldState, vehicleLabel = '') {
   const status = fieldState?.status || FIELD_STATUS.PENDING;
   if (fieldState?.fileName) {
     return fieldState.fileName;
   }
   if (field?.kind === 'readonly') {
-    return status === FIELD_STATUS.APPROVED ? 'Honda City branco' : 'Atualizado após CRLV';
+    if (status === FIELD_STATUS.APPROVED) {
+      return vehicleLabel || 'Veículo aprovado';
+    }
+    if (status === FIELD_STATUS.IN_REVIEW) {
+      return 'Veículo em análise';
+    }
+    if (status === FIELD_STATUS.FAILED) {
+      return 'Veículo requer atenção';
+    }
+    return 'Cadastro do veículo pendente';
   }
   return mapFieldStatusLabel(status);
 }
@@ -147,10 +220,6 @@ function resolveActivationRowIcon(field) {
   return 'checkmark-circle-outline';
 }
 
-function waitMs(delay) {
-  return new Promise(resolve => setTimeout(resolve, delay));
-}
-
 function resolveDocumentTypeByField(field) {
   if (field?.validator === 'cnh') return 'cnh';
   if (field?.validator === 'crlv') return 'crlv';
@@ -160,9 +229,52 @@ function resolveDocumentTypeByField(field) {
 function mapRemoteStatusToFieldStatus(status) {
   const normalized = String(status || '').trim().toLowerCase();
   if (normalized === 'approved') return FIELD_STATUS.APPROVED;
-  if (normalized === 'failed') return FIELD_STATUS.FAILED;
-  if (normalized === 'in_review') return FIELD_STATUS.IN_REVIEW;
+  if (['failed', 'rejected', 'needs_attention', 'requires_attention', 'review_required'].includes(normalized)) {
+    return FIELD_STATUS.FAILED;
+  }
+  if (['in_review', 'analyzing', 'analysis', 'under_review', 'pending_review'].includes(normalized)) {
+    return FIELD_STATUS.IN_REVIEW;
+  }
   return FIELD_STATUS.PENDING;
+}
+
+function resolveCanonicalVehicleFieldState(driverActivationRemote = null) {
+  const activationState = String(
+    driverActivationRemote?.activationState || driverActivationRemote?.state || '',
+  ).trim().toUpperCase();
+  const canonicalVehicleApproved =
+    driverActivationRemote?.checklist?.vehicleRegistration === true;
+  const canonicalVehicleInReview =
+    activationState === 'VEHICLE_IN_REVIEW' ||
+    driverActivationRemote?.vehicle?.inReview === true;
+  const vehicleScopedReason = ['VEHICLE_PENDING', 'VEHICLE_IN_REVIEW'].includes(activationState)
+    ? String(driverActivationRemote?.blockingReason || '')
+    : '';
+
+  if (canonicalVehicleApproved) {
+    return {
+      status: FIELD_STATUS.APPROVED,
+      reason: '',
+      fileName: '',
+      summaryRows: [],
+    };
+  }
+
+  if (canonicalVehicleInReview) {
+    return {
+      status: FIELD_STATUS.IN_REVIEW,
+      reason: vehicleScopedReason,
+      fileName: '',
+      summaryRows: [],
+    };
+  }
+
+  return {
+    status: FIELD_STATUS.PENDING,
+    reason: vehicleScopedReason,
+    fileName: '',
+    summaryRows: [],
+  };
 }
 
 function toFieldKey(stageKey, fieldKey) {
@@ -215,8 +327,6 @@ export default function RobotaxiDriverActivationScreen({ navigation, route }) {
     driverActivationRemote,
     documentAnalysisState,
     driverCanGoOnline,
-    updateDriverActivationChecklist,
-    completeDriverActivationStage,
     refreshDriverActivationRemote,
     submitDriverActivationDocument,
     submitDriverBackgroundCheckConsent
@@ -227,14 +337,27 @@ export default function RobotaxiDriverActivationScreen({ navigation, route }) {
   const [busyFieldKey, setBusyFieldKey] = useState('');
   const lastInitialRefreshUidRef = useRef('');
   const activation = driverActivation || {};
-  const stages = activation?.stages || {};
+  const stages = activation?.stages || EMPTY_ACTIVATION_STAGES;
+  const canonicalLivenessGate = useMemo(
+    () => resolveCanonicalLivenessGate(driverActivationRemote),
+    [driverActivationRemote],
+  );
 
   useEffect(() => {
     const hideStatusBar = () => StatusBar.setHidden(true, 'fade');
     const showStatusBar = () => StatusBar.setHidden(false, 'fade');
+    const handleFocus = () => {
+      hideStatusBar();
+      if (!String(profile?.uid || '').trim()) {
+        return;
+      }
+      refreshDriverActivationRemote().catch(error => {
+        Logger.warn('⚠️ [DriverActivationScreen] Sync remoto no foco falhou:', error?.message || error);
+      });
+    };
 
     hideStatusBar();
-    const removeFocusListener = navigation?.addListener?.('focus', hideStatusBar);
+    const removeFocusListener = navigation?.addListener?.('focus', handleFocus);
     const removeBlurListener = navigation?.addListener?.('blur', showStatusBar);
 
     return () => {
@@ -242,13 +365,13 @@ export default function RobotaxiDriverActivationScreen({ navigation, route }) {
       removeBlurListener?.();
       showStatusBar();
     };
-  }, [navigation]);
+  }, [navigation, profile?.uid, refreshDriverActivationRemote]);
 
   const stageKeys = useMemo(
     () => [
       DRIVER_ONBOARDING_STAGE_KEYS.DRIVER_DATA,
-      DRIVER_ONBOARDING_STAGE_KEYS.FACE_VALIDATION,
-      DRIVER_ONBOARDING_STAGE_KEYS.VEHICLE_DATA
+      DRIVER_ONBOARDING_STAGE_KEYS.VEHICLE_DATA,
+      DRIVER_ONBOARDING_STAGE_KEYS.FACE_VALIDATION
     ],
     []
   );
@@ -283,11 +406,26 @@ export default function RobotaxiDriverActivationScreen({ navigation, route }) {
         if (stageKey === DRIVER_ONBOARDING_STAGE_KEYS.DRIVER_DATA) {
           return true;
         }
+        if (stageKey === DRIVER_ONBOARDING_STAGE_KEYS.FACE_VALIDATION) {
+          return canonicalLivenessGate.visible;
+        }
         return stages?.[stageKey]?.status && stages?.[stageKey]?.status !== 'locked';
       }),
-    [stageKeys, stages]
+    [canonicalLivenessGate.visible, stageKeys, stages]
   );
   const hiddenLockedStageCount = Math.max(0, stageKeys.length - visibleStageKeys.length);
+  const activationVehicleLabel = useMemo(
+    () =>
+      resolveActivationVehicleLabel({
+        driverActivationRemote,
+        documentAnalysisState,
+      }),
+    [documentAnalysisState, driverActivationRemote],
+  );
+  const canonicalVehicleFieldState = useMemo(
+    () => resolveCanonicalVehicleFieldState(driverActivationRemote),
+    [driverActivationRemote],
+  );
 
   usePrototypeMapOcclusion({
     routeKey: route?.key,
@@ -298,6 +436,7 @@ export default function RobotaxiDriverActivationScreen({ navigation, route }) {
   useEffect(() => {
     setFieldStates(previous => {
       const next = { ...previous };
+      let changed = false;
 
       stageKeys.forEach(stageKey => {
         const stage = stages?.[stageKey] || { checklist: {} };
@@ -329,6 +468,18 @@ export default function RobotaxiDriverActivationScreen({ navigation, route }) {
               fileName: nextFileName,
               summaryRows: nextSummaryRows
             };
+            changed = true;
+            return;
+          }
+
+          const hasSameSummaryRows =
+            JSON.stringify(existing.summaryRows || []) === JSON.stringify(nextSummaryRows || []);
+          if (
+            existing.status === nextStatus &&
+            existing.reason === nextReason &&
+            existing.fileName === nextFileName &&
+            hasSameSummaryRows
+          ) {
             return;
           }
 
@@ -339,10 +490,11 @@ export default function RobotaxiDriverActivationScreen({ navigation, route }) {
             fileName: nextFileName,
             summaryRows: nextSummaryRows
           };
+          changed = true;
         });
       });
 
-      return next;
+      return changed ? next : previous;
     });
   }, [documentAnalysisState?.byType, driverActivationRemote?.documents, stageKeys, stages]);
 
@@ -394,21 +546,6 @@ export default function RobotaxiDriverActivationScreen({ navigation, route }) {
     [fieldStates, stages]
   );
 
-  const markChecklistAndMaybeComplete = useCallback(
-    async (stageKey, fieldKey, value) => {
-      const nextState = await updateDriverActivationChecklist(stageKey, fieldKey, value);
-      const stage = nextState?.stages?.[stageKey];
-      const checklist = stage?.checklist || {};
-      const keys = Object.keys(checklist);
-      const allChecked = keys.length === 0 || keys.every(key => Boolean(checklist[key]));
-      if (allChecked) {
-        await completeDriverActivationStage(stageKey);
-      }
-      return nextState;
-    },
-    [completeDriverActivationStage, updateDriverActivationChecklist]
-  );
-
   const pickPdfAsset = useCallback(async () => {
     const picked = await DocumentPicker.getDocumentAsync({
       type: 'application/pdf',
@@ -439,7 +576,10 @@ export default function RobotaxiDriverActivationScreen({ navigation, route }) {
       }
 
       if (field.kind === 'readonly') {
-        Alert.alert('Validação do veículo', 'O status será atualizado automaticamente após o envio do CRLV.');
+        Alert.alert(
+          'Validação do veículo',
+          'A liberação é confirmada pela plataforma após validar o cadastro do veículo e o CRLV.',
+        );
         return;
       }
 
@@ -456,14 +596,13 @@ export default function RobotaxiDriverActivationScreen({ navigation, route }) {
                   setBusyFieldKey(stateKey);
                   await submitDriverBackgroundCheckConsent(true);
                   await refreshDriverActivationRemote();
-                  upsertFieldState(stageKey, field.key, {
-                    status: FIELD_STATUS.APPROVED,
-                    reason: ''
-                  });
                 } catch (error) {
                   upsertFieldState(stageKey, field.key, {
                     status: FIELD_STATUS.FAILED,
-                    reason: error?.message || 'Não foi possível registrar o aceite agora.'
+                    reason: normalizeErrorMessage(
+                      error,
+                      'Não foi possível registrar o aceite agora.'
+                    )
                   });
                 } finally {
                   setBusyFieldKey('');
@@ -476,26 +615,19 @@ export default function RobotaxiDriverActivationScreen({ navigation, route }) {
       }
 
       if (field.kind === 'task') {
-        try {
-          setBusyFieldKey(stateKey);
-          upsertFieldState(stageKey, field.key, {
-            status: FIELD_STATUS.IN_REVIEW,
-            reason: ''
-          });
-          await waitMs(1000);
-          await markChecklistAndMaybeComplete(stageKey, field.key, true);
-          upsertFieldState(stageKey, field.key, {
-            status: FIELD_STATUS.APPROVED,
-            reason: ''
-          });
-        } catch (error) {
-          upsertFieldState(stageKey, field.key, {
-            status: FIELD_STATUS.FAILED,
-            reason: error?.message || 'Não foi possível concluir a validação facial.'
-          });
-        } finally {
-          setBusyFieldKey('');
+        if (!canonicalLivenessGate.canStart) {
+          Alert.alert(
+            'Validação facial indisponível',
+            'Conclua primeiro a validação do veículo para liberar esta etapa.',
+          );
+          return;
         }
+        navigation.navigate('RobotaxiPrototype', {
+          notificationType: 'kyc_activation_required',
+          requirement: 'LIVENESS_REQUIRED',
+          reason: 'Conclua a validação facial para finalizar sua ativação.',
+          source: 'driver_activation'
+        });
         return;
       }
 
@@ -510,6 +642,15 @@ export default function RobotaxiDriverActivationScreen({ navigation, route }) {
         }
 
         setBusyFieldKey(stateKey);
+        const assetForValidation = {
+          uri: pdfAsset.uri,
+          mimeType: pdfAsset.mimeType || 'application/pdf',
+          type: pdfAsset.mimeType || 'application/pdf',
+          name: pdfAsset.name || `${field.key}-${Date.now()}.pdf`,
+          size: Number(pdfAsset.size || 0)
+        };
+        await submitDriverActivationDocument(field.key, assetForValidation);
+
         upsertFieldState(stageKey, field.key, {
           status: FIELD_STATUS.IN_REVIEW,
           reason: '',
@@ -519,19 +660,15 @@ export default function RobotaxiDriverActivationScreen({ navigation, route }) {
 
         Alert.alert('Documento enviado', `Status: Em análise. Prazo da análise: ${DOC_ANALYSIS_SLA_TEXT}.`);
 
-        const assetForValidation = {
-          uri: pdfAsset.uri,
-          mimeType: pdfAsset.mimeType || 'application/pdf',
-          type: pdfAsset.mimeType || 'application/pdf',
-          name: pdfAsset.name || `${field.key}-${Date.now()}.pdf`,
-          size: Number(pdfAsset.size || 0)
-        };
-        await submitDriverActivationDocument(field.key, assetForValidation);
-        await refreshDriverActivationRemote();
+        try {
+          await refreshDriverActivationRemote();
+        } catch {
+          // O upload já foi confirmado; a próxima sincronização recupera o estado canônico.
+        }
       } catch (error) {
         upsertFieldState(stageKey, field.key, {
           status: FIELD_STATUS.FAILED,
-          reason: error?.message || 'Não foi possível enviar o documento.',
+          reason: normalizeErrorMessage(error, 'Não foi possível enviar o documento.'),
           summaryRows: []
         });
       } finally {
@@ -540,7 +677,8 @@ export default function RobotaxiDriverActivationScreen({ navigation, route }) {
     },
     [
       getFieldState,
-      markChecklistAndMaybeComplete,
+      canonicalLivenessGate.canStart,
+      navigation,
       pickPdfAsset,
       refreshDriverActivationRemote,
       submitDriverActivationDocument,
@@ -556,7 +694,9 @@ export default function RobotaxiDriverActivationScreen({ navigation, route }) {
       const isLocked = stage.status === 'locked';
 
       return (meta?.fields || []).map(field => {
-        const fieldState = getFieldState(stageKey, field.key);
+        const fieldState = field.kind === 'readonly'
+          ? canonicalVehicleFieldState
+          : getFieldState(stageKey, field.key);
         const fieldStatus = fieldState?.status || FIELD_STATUS.PENDING;
         const isReadonly = field.kind === 'readonly';
         const stageBlocked = isLocked && !isReadonly;
@@ -569,9 +709,11 @@ export default function RobotaxiDriverActivationScreen({ navigation, route }) {
               : fieldStatus === FIELD_STATUS.IN_REVIEW
                 ? 'Em análise'
                 : fieldStatus === FIELD_STATUS.FAILED
-                  ? 'Reenviar'
+                  ? isReadonly
+                    ? 'Atenção'
+                    : 'Reenviar'
                   : isReadonly
-                    ? 'Automático'
+                    ? 'Pendente'
                     : field.actionLabel || 'Enviar';
 
         return {
@@ -582,12 +724,12 @@ export default function RobotaxiDriverActivationScreen({ navigation, route }) {
           stageBlocked,
           isReadonly,
           title: resolveActivationRowTitle(field),
-          subtitle: resolveActivationRowSubtitle(field, fieldState),
+          subtitle: resolveActivationRowSubtitle(field, fieldState, activationVehicleLabel),
           actionLabel,
         };
       });
     });
-  }, [getFieldState, stages, visibleStageKeys]);
+  }, [activationVehicleLabel, canonicalVehicleFieldState, getFieldState, stages, visibleStageKeys]);
 
   const firstActionableRow = activationRows.find(row => {
     const status = row.fieldState?.status || FIELD_STATUS.PENDING;
@@ -701,9 +843,12 @@ export default function RobotaxiDriverActivationScreen({ navigation, route }) {
             </ScrollView>
 
             <TouchableOpacity
+              testID="driver-activation-continue-button"
               activeOpacity={0.88}
               style={styles.activationButton}
               onPress={handleContinueUpload}
+              accessibilityRole="button"
+              accessibilityLabel="Continuar envio"
             >
               <Text style={styles.activationButtonText}>Continuar envio</Text>
             </TouchableOpacity>

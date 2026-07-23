@@ -51,6 +51,10 @@ const PAYMENT_PASSENGER_UID =
   process.env.FIREBASE_TEST_UID ||
   process.env.PAYMENT_RUNTIME_UID ||
   "";
+const PAYMENT_INTENT_ID =
+  process.env.REAL_SMOKE_PAYMENT_INTENT_ID ||
+  process.env.PAYMENT_INTENT_ID ||
+  "";
 const TEST_DRIVER_UID = process.env.TEST_DRIVER_UID || "";
 const MANAGED_DRIVER_RIDE_REQUEST_TIMEOUT_MS = String(
   Math.max(180000, Number(process.env.DRIVER_RIDE_REQUEST_TIMEOUT_MS || 600000)),
@@ -61,6 +65,13 @@ const QUOTE_STABILITY_WAIT_MS = Number(process.env.QUOTE_STABILITY_WAIT_MS || 18
 const PAYMENT_WAIT_MS = Number(process.env.REAL_SMOKE_PAYMENT_WAIT_MS || 30000);
 const CAPTURE_XML_SETTLE_MS = Number(process.env.REAL_SMOKE_CAPTURE_XML_SETTLE_MS || 700);
 const CAPTURE_XML_RETRY_MS = Number(process.env.REAL_SMOKE_CAPTURE_XML_RETRY_MS || 1200);
+const EXPECTED_PICKUP_LAT = Number(process.env.TEST_PICKUP_LAT);
+const EXPECTED_PICKUP_LNG = Number(process.env.TEST_PICKUP_LNG);
+const EXPECTED_PICKUP_SOURCE_CERTIFIED =
+  process.env.REAL_SMOKE_EXPECTED_PICKUP_SOURCE_CERTIFIED === "true";
+const CANONICAL_PICKUP_TOLERANCE_M = Number(
+  process.env.REAL_SMOKE_CANONICAL_PICKUP_TOLERANCE_M || 300,
+);
 const RUN_ID = new Date().toISOString().replace(/[-:]/g, "").replace(/\..+/, "").replace("T", "_");
 const artifactsDir = path.join(mobileDir, "test-results", `android_real_smoke_${RUN_ID}`);
 const phoneScreenshotPath = "/sdcard/leaf-real-smoke-screen.png";
@@ -134,6 +145,251 @@ function adbText(args, options = {}) {
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function coordinateDistanceMeters(first, second) {
+  const firstLat = Number(first?.lat ?? first?.latitude);
+  const firstLng = Number(first?.lng ?? first?.longitude);
+  const secondLat = Number(second?.lat ?? second?.latitude);
+  const secondLng = Number(second?.lng ?? second?.longitude);
+  if (
+    !Number.isFinite(firstLat) ||
+    !Number.isFinite(firstLng) ||
+    !Number.isFinite(secondLat) ||
+    !Number.isFinite(secondLng)
+  ) {
+    return null;
+  }
+
+  const toRadians = (value) => (Number(value) * Math.PI) / 180;
+  const earthRadiusMeters = 6371000;
+  const dLat = toRadians(secondLat - firstLat);
+  const dLng = toRadians(secondLng - firstLng);
+  const lat1 = toRadians(firstLat);
+  const lat2 = toRadians(secondLat);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
+  return 2 * earthRadiusMeters * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function validateCanonicalPickupAgainstExpected(pickup) {
+  if (!Number.isFinite(EXPECTED_PICKUP_LAT) || !Number.isFinite(EXPECTED_PICKUP_LNG)) {
+    return {
+      requested: false,
+      ok: true,
+      skippedReason: "TEST_PICKUP_LAT/LNG not provided",
+    };
+  }
+
+  const expected = {
+    lat: EXPECTED_PICKUP_LAT,
+    lng: EXPECTED_PICKUP_LNG,
+  };
+  const distanceMeters = coordinateDistanceMeters(pickup, expected);
+  const toleranceMeters =
+    Number.isFinite(CANONICAL_PICKUP_TOLERANCE_M) && CANONICAL_PICKUP_TOLERANCE_M > 0
+      ? CANONICAL_PICKUP_TOLERANCE_M
+      : 300;
+
+  return {
+    requested: true,
+    ok: Number.isFinite(distanceMeters) && distanceMeters <= toleranceMeters,
+    expected,
+    sourceCertified: EXPECTED_PICKUP_SOURCE_CERTIFIED,
+    observed: pickup || null,
+    distanceMeters: Number.isFinite(distanceMeters)
+      ? Number(distanceMeters.toFixed(1))
+      : null,
+    toleranceMeters,
+  };
+}
+
+function classifySmokeFailure(message) {
+  const text = String(message || "");
+  const lower = text.toLowerCase();
+  const blockedMatch = text.match(/blocked_precondition:([a-z0-9_:-]+)/i);
+  const base = {
+    message: text,
+    status: blockedMatch ? "blocked_precondition" : "failed",
+    reason: blockedMatch ? blockedMatch[1] : "",
+    domain: "product",
+    severity: "P1",
+    owner: "product_engineering",
+  };
+
+  if (blockedMatch) {
+    if (
+      lower.includes("driver_unavailable") ||
+      lower.includes("geofence") ||
+      lower.includes("payment_sandbox") ||
+      lower.includes("driver_vehicle_identity")
+    ) {
+      return {
+        ...base,
+        domain: "business_rule",
+        severity: "P0",
+        owner: "backend_policy_or_test_data",
+      };
+    }
+    if (lower.includes("android_location_provider_divergence")) {
+      return {
+        ...base,
+        domain: "execution_environment",
+        severity: "P0",
+        owner: "qa_device_location",
+      };
+    }
+    if (
+      lower.includes("device") ||
+      lower.includes("toolchain") ||
+      lower.includes("existing_active_ride")
+    ) {
+      return {
+        ...base,
+        domain: "execution_environment",
+        severity: "P1",
+        owner: "qa_environment",
+      };
+    }
+    if (
+      lower.includes("destination_query_input_failed") ||
+      lower.includes("app_canonical_pickup_unavailable") ||
+      lower.includes("expected_pickup_source_uncertified")
+    ) {
+      return {
+        ...base,
+        domain: "test_harness",
+        severity: "P1",
+        owner: "qa_automation",
+      };
+    }
+    if (
+      lower.includes("app_canonical_pickup_mismatch") ||
+      lower.includes("stale_quote_state")
+    ) {
+      if (lower.includes("app_canonical_pickup_mismatch") && !EXPECTED_PICKUP_SOURCE_CERTIFIED) {
+        return {
+          ...base,
+          domain: "test_harness",
+          severity: "P1",
+          owner: "qa_automation",
+        };
+      }
+      return {
+        ...base,
+        domain: "product",
+        severity: "P0",
+        owner: "mobile_runtime",
+      };
+    }
+  }
+
+  if (
+    lower.includes("tarifa") ||
+    lower.includes("fare consistency") ||
+    lower.includes("consistência de tarifa")
+  ) {
+    return {
+      ...base,
+      domain: "business_rule",
+      severity: "P0",
+      owner: "financial_policy",
+    };
+  }
+
+  if (lower.includes("payment_profile_credentials_missing")) {
+    return {
+      ...base,
+      domain: "execution_environment",
+      severity: "P0",
+      owner: "payment_runtime_config",
+    };
+  }
+
+  if (
+    lower.includes("payment_provider_charge_failed") ||
+    lower.includes("payment_provider_charge_id_missing")
+  ) {
+    return {
+      ...base,
+      domain: "product",
+      severity: "P0",
+      owner: "payment_integration",
+    };
+  }
+
+  if (
+    lower.includes("pix") ||
+    lower.includes("payment") ||
+    lower.includes("pagamento") ||
+    lower.includes("sandbox")
+  ) {
+    return {
+      ...base,
+      domain: lower.includes("baixa automática sandbox")
+        ? "test_harness"
+        : "product",
+      severity: "P0",
+      owner: lower.includes("baixa automática sandbox")
+        ? "qa_automation_or_payment_sandbox"
+        : "payment_integration",
+    };
+  }
+
+  if (
+    lower.includes("dashboard") ||
+    lower.includes("evidência dashboard")
+  ) {
+    return {
+      ...base,
+      domain: "test_harness",
+      severity: "P1",
+      owner: "dashboard_qa_automation",
+    };
+  }
+
+  if (
+    lower.includes("logcat") ||
+    lower.includes("state regression") ||
+    lower.includes("estado")
+  ) {
+    return {
+      ...base,
+      domain: "product",
+      severity: "P0",
+      owner: "mobile_runtime",
+    };
+  }
+
+  return base;
+}
+
+function buildFailureClassification(failureMessages) {
+  const items = (Array.isArray(failureMessages) ? failureMessages : [])
+    .filter(Boolean)
+    .map(classifySmokeFailure);
+  const byDomain = items.reduce((acc, item) => {
+    acc[item.domain] = (acc[item.domain] || 0) + 1;
+    return acc;
+  }, {});
+  const blocked = items.filter((item) => item.status === "blocked_precondition");
+  const failed = items.filter((item) => item.status !== "blocked_precondition");
+  return {
+    finalStatus:
+      items.length === 0
+        ? "passed"
+        : failed.length === 0
+          ? `blocked_precondition:${blocked[0]?.reason || "unknown"}`
+          : "failed",
+    counts: {
+      total: items.length,
+      blockedPreconditions: blocked.length,
+      failed: failed.length,
+      byDomain,
+    },
+    items,
+  };
 }
 
 function writeArtifact(name, content) {
@@ -253,6 +509,73 @@ function extractPrices(nodes) {
   return [...values];
 }
 
+function extractVisiblePaymentError(nodes) {
+  const texts = [];
+  for (const node of nodes || []) {
+    for (const value of [node.text, node["content-desc"]]) {
+      const text = String(value || "").replace(/\s+/g, " ").trim();
+      if (!text || texts.includes(text)) continue;
+      texts.push(text);
+    }
+  }
+
+  const titleIndex = texts.findIndex((text) => /falha ao gerar pagamento/i.test(text));
+  if (titleIndex >= 0) {
+    const subtitle = texts
+      .slice(titleIndex + 1)
+      .find((text) => !/tentar novamente|fechar/i.test(text));
+    return subtitle || texts[titleIndex] || null;
+  }
+
+  return (
+    texts.find((text) =>
+      /sess[aã]o expirou|n[aã]o h[aá] motorista|atualize a cota[cç][aã]o|n[aã]o foi poss[ií]vel gerar o pix/i.test(text),
+    ) || null
+  );
+}
+
+function parsePaymentErrorDiagnosticsValue(value) {
+  const text = String(value || "").trim();
+  const match = text.match(/payment-error:([^\s"]+)/i);
+  if (!match) return null;
+  return match[1]
+    .split(";")
+    .map((entry) => entry.split("="))
+    .reduce((acc, [key, ...valueParts]) => {
+      const normalizedKey = String(key || "").trim();
+      const normalizedValue = valueParts.join("=").trim();
+      if (normalizedKey && normalizedValue) acc[normalizedKey] = normalizedValue;
+      return acc;
+    }, {});
+}
+
+function extractPaymentErrorDiagnostics(nodes) {
+  for (const node of nodes || []) {
+    for (const value of [node.text, node["content-desc"], node["resource-id"]]) {
+      const diagnostics = parsePaymentErrorDiagnosticsValue(value);
+      if (diagnostics && Object.keys(diagnostics).length > 0) return diagnostics;
+    }
+  }
+  return null;
+}
+
+function formatPaymentErrorDiagnostics(diagnostics) {
+  return diagnostics && Object.keys(diagnostics).length > 0
+    ? JSON.stringify(diagnostics)
+    : "not captured";
+}
+
+function paymentErrorDiagnosticSuffix(diagnostics) {
+  if (!diagnostics || Object.keys(diagnostics).length === 0) return "";
+  const parts = [
+    diagnostics.code,
+    diagnostics.status ? `status=${diagnostics.status}` : null,
+    diagnostics.providerEnvironment ? `env=${diagnostics.providerEnvironment}` : null,
+    diagnostics.paymentProfileId ? `profile=${diagnostics.paymentProfileId}` : null,
+  ].filter(Boolean);
+  return parts.length ? ` (${parts.join(";")})` : "";
+}
+
 function parseBrlPriceLabel(value) {
   const match = String(value || "").match(/R\$\s*(\d+(?:[.,]\d{2})?)/);
   if (!match) return null;
@@ -277,11 +600,35 @@ function pricesMatch(left, right) {
   );
 }
 
-function buildFareConsistencyReport({ steps, initialQuote, laterQuote, sandboxPaymentConfirmation }) {
+function buildFareConsistencyReport({
+  steps,
+  initialQuote,
+  laterQuote,
+  sandboxPaymentConfirmation,
+  managedDriverBot,
+}) {
   const entries = [];
+  const driverNetEntries = [];
+  const driverFeeEntries = [];
   const add = (stage, amount, source = null) => {
     if (!Number.isFinite(Number(amount)) || Number(amount) <= 0) return;
     entries.push({
+      stage,
+      amount: Number(Number(amount).toFixed(2)),
+      source,
+    });
+  };
+  const addDriverNet = (stage, amount, source = null) => {
+    if (!Number.isFinite(Number(amount)) || Number(amount) <= 0) return;
+    driverNetEntries.push({
+      stage,
+      amount: Number(Number(amount).toFixed(2)),
+      source,
+    });
+  };
+  const addDriverFee = (stage, amount, source = null) => {
+    if (!Number.isFinite(Number(amount)) || Number(amount) < 0) return;
+    driverFeeEntries.push({
       stage,
       amount: Number(Number(amount).toFixed(2)),
       source,
@@ -308,6 +655,15 @@ function buildFareConsistencyReport({ steps, initialQuote, laterQuote, sandboxPa
   if (Number.isFinite(chargeValue) && chargeValue > 0) {
     add("sandbox_charge", chargeValue / 100, "sandbox-payment-confirmation.json");
   }
+  for (const entry of extractManagedDriverFareEvidence(managedDriverBot)) {
+    if (entry.kind === "driver_net") {
+      addDriverNet(entry.stage, entry.amount, entry.source);
+    } else if (entry.kind === "driver_fee") {
+      addDriverFee(entry.stage, entry.amount, entry.source);
+    } else {
+      add(entry.stage, entry.amount, entry.source);
+    }
+  }
 
   const quoteEntry =
     entries.find((entry) => entry.stage === "quote_after_wait") ||
@@ -321,8 +677,118 @@ function buildFareConsistencyReport({ steps, initialQuote, laterQuote, sandboxPa
     ok: Boolean(quoteEntry) && mismatches.length === 0,
     quote: quoteEntry,
     entries,
+    driverNetEntries,
+    driverFeeEntries,
     mismatches,
   };
+}
+
+function parseJsonPayloadFromLogLine(line = "") {
+  const start = String(line).indexOf("{");
+  if (start < 0) return null;
+  try {
+    return JSON.parse(String(line).slice(start));
+  } catch (_) {
+    return null;
+  }
+}
+
+function extractManagedDriverFareEvidence(managedDriverBot) {
+  const logPath = managedDriverBot?.logPath;
+  if (!logPath || !fs.existsSync(logPath)) return [];
+  const entries = [];
+  const lines = fs.readFileSync(logPath, "utf8").split(/\r?\n/);
+  for (const line of lines) {
+    if (line.includes("ride_accepted")) {
+      const payload = parseJsonPayloadFromLogLine(line);
+      const estimatedFare = Number(payload?.estimatedFare);
+      const operationalFee = Number(payload?.estimatedOperationalFee);
+      const intermediationFee = Number(payload?.estimatedPaymentIntermediationFee);
+      const totalFees = Number(payload?.estimatedTotalFees);
+      const driverNet = Number(payload?.estimatedDriverNetAmount);
+      if (Number.isFinite(estimatedFare) && estimatedFare > 0) {
+        entries.push({
+          kind: "gross",
+          stage: "driver_offer_gross",
+          amount: estimatedFare,
+          source: "managed-driver-bot.log:ride_accepted",
+        });
+      }
+      if (Number.isFinite(driverNet) && driverNet > 0) {
+        entries.push({
+          kind: "driver_net",
+          stage: "driver_offer_net",
+          amount: driverNet,
+          source: "managed-driver-bot.log:ride_accepted",
+        });
+      }
+      if (Number.isFinite(operationalFee) && operationalFee >= 0) {
+        entries.push({
+          kind: "driver_fee",
+          stage: "driver_offer_operational_fee",
+          amount: operationalFee,
+          source: "managed-driver-bot.log:ride_accepted",
+        });
+      }
+      if (Number.isFinite(intermediationFee) && intermediationFee >= 0) {
+        entries.push({
+          kind: "driver_fee",
+          stage: "driver_offer_intermediation_fee",
+          amount: intermediationFee,
+          source: "managed-driver-bot.log:ride_accepted",
+        });
+      }
+      if (Number.isFinite(totalFees) && totalFees >= 0) {
+        entries.push({
+          kind: "driver_fee",
+          stage: "driver_offer_total_fees",
+          amount: totalFees,
+          source: "managed-driver-bot.log:ride_accepted",
+        });
+      }
+    }
+    if (line.includes("trip_completed")) {
+      const payload = parseJsonPayloadFromLogLine(line);
+      const grossFare = Number(
+        payload?.grossAmount ??
+          payload?.totalPaid ??
+          payload?.totalFare ??
+          payload?.fare,
+      );
+      const passengerPaidCents = Number(payload?.financialSnapshot?.passengerPaidCents);
+      const driverNet = Number(
+        payload?.driverNetAmount ??
+          (Number.isFinite(Number(payload?.financialSnapshot?.driverNetCents))
+            ? Number(payload.financialSnapshot.driverNetCents) / 100
+            : NaN),
+      );
+      if (Number.isFinite(grossFare) && grossFare > 0) {
+        entries.push({
+          kind: "gross",
+          stage: "driver_completion_gross",
+          amount: grossFare,
+          source: "managed-driver-bot.log:trip_completed",
+        });
+      }
+      if (Number.isFinite(passengerPaidCents) && passengerPaidCents > 0) {
+        entries.push({
+          kind: "gross",
+          stage: "driver_completion_passenger_paid",
+          amount: passengerPaidCents / 100,
+          source: "managed-driver-bot.log:trip_completed",
+        });
+      }
+      if (Number.isFinite(driverNet) && driverNet > 0) {
+        entries.push({
+          kind: "driver_net",
+          stage: "driver_completion_net",
+          amount: driverNet,
+          source: "managed-driver-bot.log:trip_completed",
+        });
+      }
+    }
+  }
+  return entries;
 }
 
 function extractDriverSearchElapsed(nodes) {
@@ -447,6 +913,15 @@ function detectScreen(nodes) {
     return "payment_loading";
   }
   if (
+    allText.includes("passenger-preference-countdown-modal") ||
+    allText.includes("passenger-preference-confirm-button") ||
+    allText.includes("preferências da viagem") ||
+    allText.includes("preferencias da viagem") ||
+    allText.includes("antes de buscar")
+  ) {
+    return "passenger_ride_preferences";
+  }
+  if (
     allText.includes("passenger-booking-finalizing-sheet") ||
     allText.includes("finalizando solicitação") ||
     allText.includes("finalizando solicitacao")
@@ -531,6 +1006,14 @@ function runSandboxPaymentConfirmation() {
     };
   }
 
+  if (!PAYMENT_INTENT_ID) {
+    return {
+      requested: true,
+      ok: false,
+      error: "REAL_SMOKE_PAYMENT_INTENT_ID is required for exact sandbox confirmation",
+    };
+  }
+
   const scriptPath = path.join(__dirname, "simulate-latest-ride-payment.sh");
   const evidencePath = path.join(artifactsDir, "sandbox-payment-confirmation.json");
   const result = spawnSync("bash", [scriptPath], {
@@ -541,6 +1024,7 @@ function runSandboxPaymentConfirmation() {
       ...process.env,
       API_BASE_URL: BACKEND_URL,
       PASSENGER_UID_FILTER: PAYMENT_PASSENGER_UID,
+      PAYMENT_INTENT_ID,
       PAYMENT_EVIDENCE_PATH: evidencePath,
       WATCH_TIMEOUT_SEC: process.env.REAL_SMOKE_PAYMENT_CONFIRM_TIMEOUT_SEC || "180",
     },
@@ -561,6 +1045,23 @@ function runSandboxPaymentConfirmation() {
   };
   writeArtifact("sandbox-payment-confirmation-process.json", JSON.stringify(payload, null, 2));
   return payload;
+}
+
+function buildAppFlowPaymentConfirmationEvidence() {
+  const payload = {
+    requested: AUTO_CONFIRM_SANDBOX_PAYMENT,
+    ok: true,
+    skippedReason: "payment_already_confirmed_by_app_flow",
+    source: "app_payment_flow",
+  };
+  const evidencePath = writeArtifact(
+    "sandbox-payment-confirmation-app-flow.json",
+    JSON.stringify(payload, null, 2),
+  );
+  return {
+    ...payload,
+    evidencePath,
+  };
 }
 
 function readJsonFile(filePath) {
@@ -845,12 +1346,14 @@ async function prepareCanonicalPickupForPayment(current) {
     ]) ||
     lastCanonicalPickup;
   const carType = extractSelectedCarType(current.nodes);
+  const expectedPickupValidation = validateCanonicalPickupAgainstExpected(pickup);
   const pickupPayload = {
     ok: Boolean(pickup),
     pickup,
     carType,
     requireCanonicalPickup: REQUIRE_CANONICAL_PICKUP,
     syncDriverToAppPickup: SYNC_DRIVER_TO_APP_PICKUP,
+    expectedPickupValidation,
   };
   writeArtifact("app-canonical-pickup.json", JSON.stringify(pickupPayload, null, 2));
 
@@ -880,6 +1383,30 @@ async function prepareCanonicalPickupForPayment(current) {
     };
   }
 
+  if (expectedPickupValidation.requested && !expectedPickupValidation.ok) {
+    const mismatchReason = expectedPickupValidation.sourceCertified
+      ? "blocked_precondition:app_canonical_pickup_mismatch"
+      : "blocked_precondition:expected_pickup_source_uncertified";
+    failures.push(mismatchReason);
+    warnings.push(
+      [
+        "Smoke bloqueado antes do pagamento: a origem canônica exibida pelo app diverge da origem esperada do device/teste.",
+        `observed=${pickup.lat},${pickup.lng}`,
+        `expected=${expectedPickupValidation.expected.lat},${expectedPickupValidation.expected.lng}`,
+        `distanceMeters=${expectedPickupValidation.distanceMeters}`,
+        `toleranceMeters=${expectedPickupValidation.toleranceMeters}`,
+        `sourceCertified=${expectedPickupValidation.sourceCertified}`,
+      ].join(" "),
+    );
+    return {
+      ok: false,
+      pickup,
+      carType,
+      managedDriverBot: null,
+      availability: null,
+    };
+  }
+
   const managedDriverBot = await startManagedDriverBotAtPickup(pickup);
   if (managedDriverBot.requested && !managedDriverBot.ok) {
     failures.push(managedDriverBlockFailure(managedDriverBot.error));
@@ -894,8 +1421,10 @@ async function prepareCanonicalPickupForPayment(current) {
 
   const availability = await checkSocketAvailabilityAtPickup(pickup, carType);
   if (!availability.ok) {
-    failures.push(
-      `blocked_precondition:canonical_app_pickup_no_driver:${availability.result?.code || availability.error || "unknown"}`,
+    const unavailableReason = availability.result?.code || availability.error || "unknown";
+    failures.push("blocked_precondition:driver_unavailable");
+    warnings.push(
+      `Driver availability failed for canonical app pickup before payment: ${unavailableReason}.`,
     );
     return {
       ok: false,
@@ -1027,6 +1556,26 @@ async function tapConfirmUntilPayment(current, steps) {
     current = await captureStep(`07-payment-after-confirm-${attempt}`);
     steps.push(current);
     let status = detectPaymentStatus(current.nodes);
+    if (current.screen === "passenger_ride_preferences") {
+      const preferenceButton = findNodeByPriority(current.nodes, [
+        ["passenger-preference-confirm-button"],
+        ["Continuar com preferências"],
+        ["Continuar"],
+      ]);
+      if (tapNode(preferenceButton, "botão continuar preferências")) {
+        await sleep(6500);
+        current = await captureStep(`08-preferences-confirmed-${attempt}`);
+        steps.push(current);
+        status = detectPaymentStatus(current.nodes);
+        if (
+          current.screen === "passenger_active_trip" ||
+          current.screen === "passenger_searching_driver" ||
+          current.screen === "passenger_booking_finalizing"
+        ) {
+          return { current, opened: true, status: "confirmed_via_ride_flow" };
+        }
+      }
+    }
     if (status === "not_visible" && looksLikePixModalScreenshot(current.screenshot)) {
       return { current, opened: true, status: "pix_visual_detected" };
     }
@@ -1035,6 +1584,13 @@ async function tapConfirmUntilPayment(current, steps) {
     }
     if (status !== "not_visible" || current.screen.startsWith("payment_")) {
       return { current, opened: true, status };
+    }
+    if (
+      current.screen === "passenger_active_trip" ||
+      current.screen === "passenger_searching_driver" ||
+      current.screen === "passenger_booking_finalizing"
+    ) {
+      return { current, opened: true, status: "confirmed_via_ride_flow" };
     }
     if (attempt === 5) {
       await sleep(6000);
@@ -1049,6 +1605,13 @@ async function tapConfirmUntilPayment(current, steps) {
       }
       if (status !== "not_visible" || current.screen.startsWith("payment_")) {
         return { current, opened: true, status };
+      }
+      if (
+        current.screen === "passenger_active_trip" ||
+        current.screen === "passenger_searching_driver" ||
+        current.screen === "passenger_booking_finalizing"
+      ) {
+        return { current, opened: true, status: "confirmed_via_ride_flow" };
       }
     }
   }
@@ -1357,11 +1920,9 @@ async function captureStep(name) {
     if (fs.existsSync(dump)) fs.unlinkSync(dump);
     const dumpResult = adbRun(["shell", "uiautomator", "dump", phoneDumpPath], { allowFailure: true });
     lastDumpStatus = dumpResult.status;
-    if (dumpResult.status === 0) {
-      adbRun(["pull", phoneDumpPath, dump], { allowFailure: true });
-      xml = fs.existsSync(dump) ? fs.readFileSync(dump, "utf8") : "";
-      if (xml.trim()) break;
-    }
+    adbRun(["pull", phoneDumpPath, dump], { allowFailure: true });
+    xml = fs.existsSync(dump) ? fs.readFileSync(dump, "utf8") : "";
+    if (xml.trim()) break;
     if (attempt < 3) {
       await sleep(CAPTURE_XML_RETRY_MS);
     }
@@ -1394,6 +1955,8 @@ async function captureStep(name) {
   const screen = detectScreen(nodes);
   const vehicleIdentity = extractRenderedVehicleIdentity(nodes, screen);
   const driverSearchElapsed = extractDriverSearchElapsed(nodes);
+  const paymentErrorMessage = extractVisiblePaymentError(nodes);
+  const paymentErrorDiagnostics = extractPaymentErrorDiagnostics(nodes);
   return {
     name,
     screenshot,
@@ -1405,6 +1968,8 @@ async function captureStep(name) {
     screen,
     vehicleIdentity,
     driverSearchElapsed,
+    paymentErrorMessage,
+    paymentErrorDiagnostics,
   };
 }
 
@@ -1554,6 +2119,8 @@ async function main() {
   let paymentStatus = OPEN_PAYMENT ? "not_reached" : "skipped";
   let paymentOpened = false;
   let paymentPrices = null;
+  let paymentErrorMessage = null;
+  let paymentErrorDiagnostics = null;
   let sandboxPaymentConfirmation = { requested: AUTO_CONFIRM_SANDBOX_PAYMENT, ok: null, skippedReason: "not_reached" };
   let dashboardEvidenceCollection = { requested: COLLECT_DASHBOARD_EVIDENCE, ok: null, skippedReason: "not_reached" };
   let appCanonicalPickup = null;
@@ -1688,24 +2255,39 @@ async function main() {
               paymentStatus = managedDriverPaymentBlockStatus(
                 canonicalReadiness.managedDriverBot?.error,
               );
-            } else {
-              const paymentOpen = await tapConfirmUntilPayment(current, steps);
-              current = paymentOpen.current;
-              paymentOpened = paymentOpen.opened;
-              paymentStatus = paymentOpen.status;
-            }
-            if (paymentOpened) {
-              const paymentReady = await waitForPaymentReady(current, steps);
-              current = paymentReady.current;
-              paymentStatus = paymentReady.status;
-              paymentPrices = current.prices;
-              if (["pix_copy_available", "pix_modal_content", "pix_visual_detected"].includes(paymentStatus)) {
-                sandboxPaymentConfirmation = runSandboxPaymentConfirmation();
-                dashboardEvidenceCollection = runDashboardEvidenceCollection(sandboxPaymentConfirmation);
-                if (sandboxPaymentConfirmation.ok) {
-                  await sleep(8000);
-                  current = await captureStep("09-payment-after-sandbox-confirmation");
-                  steps.push(current);
+	          } else {
+	            const paymentOpen = await tapConfirmUntilPayment(current, steps);
+	            current = paymentOpen.current;
+	            paymentOpened = paymentOpen.opened;
+	            paymentStatus = paymentOpen.status;
+	            paymentErrorMessage = current.paymentErrorMessage || paymentErrorMessage;
+	            paymentErrorDiagnostics = current.paymentErrorDiagnostics || paymentErrorDiagnostics;
+	          }
+	          if (paymentOpened) {
+	            if (paymentStatus === "confirmed_via_ride_flow") {
+	              paymentPrices = current.prices;
+	              sandboxPaymentConfirmation = buildAppFlowPaymentConfirmationEvidence();
+	              postTripValidation = await verifyPostPaymentTripFlow(
+	                current,
+	                steps,
+	                true,
+	              );
+	              current = postTripValidation.current || current;
+	            } else {
+	              const paymentReady = await waitForPaymentReady(current, steps);
+	              current = paymentReady.current;
+	              paymentStatus = paymentReady.status;
+	              paymentPrices = current.prices;
+	              paymentErrorMessage = current.paymentErrorMessage || paymentErrorMessage;
+	              paymentErrorDiagnostics = current.paymentErrorDiagnostics || paymentErrorDiagnostics;
+	            }
+	            if (["pix_copy_available", "pix_modal_content", "pix_visual_detected"].includes(paymentStatus)) {
+	              sandboxPaymentConfirmation = runSandboxPaymentConfirmation();
+	              dashboardEvidenceCollection = runDashboardEvidenceCollection(sandboxPaymentConfirmation);
+	              if (sandboxPaymentConfirmation.ok) {
+	                await sleep(8000);
+	                current = await captureStep("09-payment-after-sandbox-confirmation");
+	                steps.push(current);
                   paymentStatus = resolvePostSandboxPaymentStatus({
                     confirmationOk: sandboxPaymentConfirmation.ok,
                     paymentStatus: detectPaymentStatus(current.nodes),
@@ -1757,16 +2339,31 @@ async function main() {
             current = paymentOpen.current;
             paymentOpened = paymentOpen.opened;
             paymentStatus = paymentOpen.status;
-          }
-          if (paymentOpened) {
-            const paymentReady = await waitForPaymentReady(current, steps);
-            current = paymentReady.current;
-            paymentStatus = paymentReady.status;
-            paymentPrices = current.prices;
-            if (["pix_copy_available", "pix_modal_content", "pix_visual_detected"].includes(paymentStatus)) {
-              sandboxPaymentConfirmation = runSandboxPaymentConfirmation();
-              dashboardEvidenceCollection = runDashboardEvidenceCollection(sandboxPaymentConfirmation);
-              if (sandboxPaymentConfirmation.ok) {
+            paymentErrorMessage = current.paymentErrorMessage || paymentErrorMessage;
+            paymentErrorDiagnostics = current.paymentErrorDiagnostics || paymentErrorDiagnostics;
+	          }
+	          if (paymentOpened) {
+	            if (paymentStatus === "confirmed_via_ride_flow") {
+	              paymentPrices = current.prices;
+	              sandboxPaymentConfirmation = buildAppFlowPaymentConfirmationEvidence();
+	              postTripValidation = await verifyPostPaymentTripFlow(
+	                current,
+	                steps,
+	                true,
+	              );
+	              current = postTripValidation.current || current;
+	            } else {
+	              const paymentReady = await waitForPaymentReady(current, steps);
+	              current = paymentReady.current;
+	              paymentStatus = paymentReady.status;
+	              paymentPrices = current.prices;
+	              paymentErrorMessage = current.paymentErrorMessage || paymentErrorMessage;
+	              paymentErrorDiagnostics = current.paymentErrorDiagnostics || paymentErrorDiagnostics;
+	            }
+	            if (["pix_copy_available", "pix_modal_content", "pix_visual_detected"].includes(paymentStatus)) {
+	              sandboxPaymentConfirmation = runSandboxPaymentConfirmation();
+	              dashboardEvidenceCollection = runDashboardEvidenceCollection(sandboxPaymentConfirmation);
+	              if (sandboxPaymentConfirmation.ok) {
                 await sleep(8000);
                 current = await captureStep("09-payment-after-sandbox-confirmation");
                 steps.push(current);
@@ -1817,6 +2414,7 @@ async function main() {
     initialQuote,
     laterQuote,
     sandboxPaymentConfirmation,
+    managedDriverBot,
   });
   const driverVehicleConsistency = compareRenderedVehicleIdentity(
     managedDriverBot?.vehicleIdentity?.identity || {},
@@ -1837,13 +2435,14 @@ async function main() {
   if (STRICT_QUOTE && quoteStable !== true) {
     failures.push(`STRICT_QUOTE=true exige cotação estável; status atual: ${quoteStatus}.`);
   }
-  if (OPEN_PAYMENT && !paymentOpened) {
+  const paymentBlockedByPrecondition = String(paymentStatus || "").startsWith("blocked_precondition");
+  if (OPEN_PAYMENT && !paymentOpened && !paymentBlockedByPrecondition) {
     failures.push(`REAL_SMOKE_OPEN_PAYMENT=true exige abertura do modal Pix; status atual: ${paymentStatus}.`);
   }
-  if (OPEN_PAYMENT && paymentOpened && !["pix_copy_available", "pix_modal_content", "pix_visual_detected", "confirmed"].includes(paymentStatus)) {
-    failures.push(`Modal Pix abriu, mas não chegou a um estado pronto; status atual: ${paymentStatus}.`);
+  if (OPEN_PAYMENT && paymentOpened && !paymentBlockedByPrecondition && !["pix_copy_available", "pix_modal_content", "pix_visual_detected", "confirmed", "confirmed_via_ride_flow"].includes(paymentStatus)) {
+    failures.push(`Modal Pix abriu, mas não chegou a um estado pronto; status atual: ${paymentStatus}${paymentErrorDiagnosticSuffix(paymentErrorDiagnostics)}.`);
   }
-  if (AUTO_CONFIRM_SANDBOX_PAYMENT && !sandboxPaymentConfirmation.ok) {
+  if (AUTO_CONFIRM_SANDBOX_PAYMENT && !paymentBlockedByPrecondition && !sandboxPaymentConfirmation.ok) {
     failures.push(`Baixa automática sandbox falhou: ${sandboxPaymentConfirmation.error || sandboxPaymentConfirmation.stderr || "unknown"}`);
   }
   if (
@@ -1879,12 +2478,14 @@ async function main() {
   ) {
     failures.push("driver_vehicle_identity_receipt_evidence_missing");
   }
-  if (COLLECT_DASHBOARD_EVIDENCE && !dashboardEvidenceCollection.ok) {
+  if (COLLECT_DASHBOARD_EVIDENCE && !paymentBlockedByPrecondition && !dashboardEvidenceCollection.ok) {
     failures.push(`Evidência dashboard falhou: ${dashboardEvidenceCollection.error || dashboardEvidenceCollection.stderr || "unknown"}`);
   }
 
+  const failureClassification = buildFailureClassification(failures);
   const result = {
     ok: failures.length === 0,
+    finalStatus: failureClassification.finalStatus,
     runId: RUN_ID,
     artifactsDir,
     deviceInfo,
@@ -1901,6 +2502,8 @@ async function main() {
         screen: step.screen,
         prices: step.prices,
         driverSearchElapsed: step.driverSearchElapsed,
+        paymentErrorMessage: step.paymentErrorMessage || null,
+        paymentErrorDiagnostics: step.paymentErrorDiagnostics || null,
         canonicalPickup: step.canonicalPickup
           ? {
               lat: step.canonicalPickup.lat,
@@ -1920,6 +2523,8 @@ async function main() {
         opened: paymentOpened,
         status: paymentStatus,
         prices: paymentPrices,
+        errorMessage: paymentErrorMessage,
+        errorDiagnostics: paymentErrorDiagnostics,
         appCanonicalPickup,
         appPickupAvailability,
         managedDriverBot,
@@ -1935,6 +2540,7 @@ async function main() {
     },
     warnings,
     failures,
+    failureClassification,
     evidence,
     commands,
   };
@@ -1950,6 +2556,7 @@ async function main() {
     `- Socket.IO client: ${socketRealtime.ok ? "OK" : "FAIL"}${socketRealtime.transport ? ` (${socketRealtime.transport})` : ""}`,
     `- Socket.IO polling probe: ${socketPoll.ok ? "OK" : "FAIL"}${socketPoll.status ? ` (${socketPoll.status})` : ""}`,
     `- Payment runtime config probe: ${paymentRuntimeConfig ? (paymentRuntimeConfig.ok ? "OK" : "FAIL") : "not requested"}${paymentRuntimeConfig?.status ? ` (${paymentRuntimeConfig.status})` : ""}`,
+    `- Final status: ${failureClassification.finalStatus}`,
     `- App screens: ${steps.map((step) => `${step.name}:${step.screen}`).join(", ")}`,
     `- Quote status: ${quoteStatus}`,
     `- Quote initial: ${(initialQuote || []).join(", ") || "not captured"}`,
@@ -1958,6 +2565,8 @@ async function main() {
     `- Payment opened: ${paymentOpened ? "yes" : "no"}`,
     `- Payment status: ${paymentStatus}`,
     `- Payment prices: ${(paymentPrices || []).join(", ") || "not captured"}`,
+    `- Payment error: ${paymentErrorMessage || "not captured"}`,
+    `- Payment error diagnostics: ${formatPaymentErrorDiagnostics(paymentErrorDiagnostics)}`,
     `- App canonical pickup: ${appCanonicalPickup ? `${appCanonicalPickup.lat}, ${appCanonicalPickup.lng}` : "not captured"}`,
     `- App pickup availability: ${appPickupAvailability ? (appPickupAvailability.ok ? "OK" : "FAIL") : "not captured"}`,
     `- Managed driver bot: ${managedDriverBot?.requested ? (managedDriverBot.ok ? "OK" : "FAIL") : "not requested"}`,
@@ -1966,6 +2575,9 @@ async function main() {
     `- Sandbox payment auto-confirm: ${AUTO_CONFIRM_SANDBOX_PAYMENT ? (sandboxPaymentConfirmation.ok ? "OK" : "FAIL") : "not requested"}`,
     `- Post-trip validation: ${postTripValidation?.requested ? (postTripValidation.ok ? "OK" : postTripValidation.ok === false ? "FAIL" : "not reached") : "not requested"}`,
     `- Fare consistency: ${fareConsistency.ok ? "OK" : "FAIL"}${fareConsistency.quote ? ` (quote R$ ${fareConsistency.quote.amount.toFixed(2)})` : ""}`,
+    `- Fare gross evidence: ${fareConsistency.entries.map((entry) => `${entry.stage}=R$ ${entry.amount.toFixed(2)}`).join(", ") || "not captured"}`,
+    `- Driver net evidence: ${fareConsistency.driverNetEntries.map((entry) => `${entry.stage}=R$ ${entry.amount.toFixed(2)}`).join(", ") || "not captured"}`,
+    `- Driver fee evidence: ${fareConsistency.driverFeeEntries.map((entry) => `${entry.stage}=R$ ${entry.amount.toFixed(2)}`).join(", ") || "not captured"}`,
     `- Dashboard evidence: ${COLLECT_DASHBOARD_EVIDENCE ? (dashboardEvidenceCollection.ok ? "OK" : "FAIL") : "not requested"}`,
     `- Pricing quote log lines: ${logAnalysis.pricingQuote.length}`,
     `- Routing log lines: ${logAnalysis.routing.length}`,
@@ -1976,6 +2588,13 @@ async function main() {
     "",
     "## Failures",
     failures.length ? failures.map((item) => `- ${item}`).join("\n") : "- None",
+    "",
+    "## Failure Classification",
+    failureClassification.items.length
+      ? failureClassification.items
+          .map((item) => `- [${item.domain}/${item.status}/${item.severity}] ${item.message} (owner: ${item.owner})`)
+          .join("\n")
+      : "- None",
     "",
     "## Evidence",
     ...evidence.map((filePath) => `- ${filePath}`),
@@ -1995,9 +2614,23 @@ async function main() {
 
 main().catch((error) => {
   failures.push(error.message);
+  const failureClassification = buildFailureClassification(failures);
   writeArtifact(
     "real-smoke-failure.json",
-    JSON.stringify({ error: error.message, stack: error.stack, failures, warnings, evidence, commands }, null, 2),
+    JSON.stringify(
+      {
+        error: error.message,
+        stack: error.stack,
+        finalStatus: failureClassification.finalStatus,
+        failures,
+        failureClassification,
+        warnings,
+        evidence,
+        commands,
+      },
+      null,
+      2,
+    ),
   );
   console.error(`[real-smoke][error] ${error.message}`);
   process.exitCode = 1;

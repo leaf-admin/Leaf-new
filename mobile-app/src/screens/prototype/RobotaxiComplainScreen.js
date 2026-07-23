@@ -21,28 +21,107 @@ import { CardHandle, PrototypeCard, PrototypePrimaryButton } from '../../compone
 import robotaxiPrototypeTokens from '../../components/design-system/robotaxiPrototypeTokens';
 import { usePrototypeMapOcclusion } from './prototypeMapOcclusion';
 import { usePrototypeRideRuntime } from './prototypeRideRuntime';
+import { normalizeRuntimeRideStatus } from './rideLifecycleContract';
 
 const { color, typography } = robotaxiPrototypeTokens;
 const SHEET_BOTTOM_OFFSET = 0;
 const FALLBACK_CARD_HEIGHT = 418;
 const ISSUE_TYPES = [
-  { id: 'trip', label: 'Problema na corrida', icon: 'car-sport-outline' },
-  { id: 'driver', label: 'Conduta do motorista', icon: 'person-outline' },
-  { id: 'payment', label: 'Cobrança e pagamento', icon: 'card-outline' }
+  {
+    id: 'trip',
+    label: 'Problema na corrida',
+    icon: 'car-sport-outline',
+    priority: 'N2',
+    severity: 'ride_issue',
+  },
+  {
+    id: 'driver',
+    label: 'Conduta do motorista',
+    icon: 'person-outline',
+    priority: 'N2',
+    severity: 'safety',
+  },
+  {
+    id: 'payment',
+    label: 'Cobrança e pagamento',
+    icon: 'card-outline',
+    priority: 'N2',
+    severity: 'payment',
+  }
 ];
+
+function pickComplainContextText(...values) {
+  return values
+    .map(value => String(value || '').trim())
+    .find(Boolean) || '';
+}
+
+function resolveInitialIssueTypeId(routeParams = {}) {
+  const requestedType = pickComplainContextText(
+    routeParams?.type,
+    routeParams?.initialTopicId,
+    routeParams?.severity,
+  ).toLowerCase();
+
+  if (requestedType.includes('payment') || requestedType.includes('billing') || requestedType.includes('pix')) {
+    return 'payment';
+  }
+  if (requestedType.includes('driver') || requestedType.includes('safety')) {
+    return 'driver';
+  }
+  return 'trip';
+}
+
+function resolveComplainReturnRoute({ bookingId, bookingStatus, source } = {}) {
+  const normalizedSource = String(source || '').toLowerCase();
+  const normalizedStatus = normalizeRuntimeRideStatus(bookingStatus);
+
+  if (normalizedSource === 'receipt' || normalizedStatus === 'completed') {
+    return 'RobotaxiPrototypeReceipt';
+  }
+  if (normalizedSource === 'driver-trip') {
+    return 'RobotaxiPrototype';
+  }
+  if (bookingId) {
+    return 'RobotaxiPrototypeTrip';
+  }
+  return 'RobotaxiPrototype';
+}
 
 export default function RobotaxiComplainScreen({ navigation, route }) {
   const { openSupportTicket, supportLoading, supportError, supportLastTicket, lastReceipt } = usePrototypeRideRuntime();
   const insets = useSafeAreaInsets();
   const { height: windowHeight } = useWindowDimensions();
   const [cardHeight, setCardHeight] = useState(FALLBACK_CARD_HEIGHT);
-  const [selectedTypeId, setSelectedTypeId] = useState(ISSUE_TYPES[0].id);
+  const [selectedTypeId, setSelectedTypeId] = useState(() => resolveInitialIssueTypeId(route?.params));
   const [subject, setSubject] = useState(route?.params?.subject || 'Relato sobre esta corrida');
   const [description, setDescription] = useState('');
   const [localHistory, setLocalHistory] = useState([]);
   const sheetBottom = insets.bottom + SHEET_BOTTOM_OFFSET;
   const cardMaxHeight = Math.max(390, windowHeight - insets.top - insets.bottom - 82);
   const receipt = route?.params?.receipt || lastReceipt || null;
+  const bookingId = pickComplainContextText(
+    route?.params?.bookingId,
+    route?.params?.rideId,
+    route?.params?.tripId,
+    route?.params?.activeBookingId,
+    receipt?.bookingId,
+    receipt?.id,
+  );
+  const bookingStatus = normalizeRuntimeRideStatus(pickComplainContextText(
+    route?.params?.bookingStatus,
+    route?.params?.status,
+    receipt?.status,
+  ));
+  const supportSource = pickComplainContextText(route?.params?.source, bookingId ? 'complain' : '');
+  const complainContext = useMemo(
+    () => ({
+      ...(bookingId ? { bookingId, rideId: bookingId, tripId: bookingId } : {}),
+      ...(bookingStatus ? { bookingStatus } : {}),
+      ...(supportSource ? { source: supportSource } : {}),
+    }),
+    [bookingId, bookingStatus, supportSource],
+  );
 
   usePrototypeMapOcclusion({
     routeKey: route?.key,
@@ -79,7 +158,7 @@ export default function RobotaxiComplainScreen({ navigation, route }) {
       navigation.goBack();
       return;
     }
-    navigation.navigate('RobotaxiPrototype');
+    navigation.navigate(resolveComplainReturnRoute(complainContext), complainContext);
   };
 
   const handleSubmit = useCallback(async () => {
@@ -96,8 +175,11 @@ export default function RobotaxiComplainScreen({ navigation, route }) {
     try {
       await openSupportTicket({
         type: `complaint-${selectedType.id}`,
-        priority: 'N2',
-        description: `${normalizedSubject}: ${normalizedDescription}${routeDescription}`
+        priority: selectedType.priority,
+        severity: selectedType.severity,
+        subject: normalizedSubject,
+        description: `${normalizedSubject}: ${normalizedDescription}${routeDescription}`,
+        ...complainContext,
       });
 
       const localTicket = {
@@ -111,7 +193,16 @@ export default function RobotaxiComplainScreen({ navigation, route }) {
     } catch (error) {
       Alert.alert('Não conseguimos enviar', error?.message || 'Tente novamente em instantes.');
     }
-  }, [description, openSupportTicket, receipt?.route, selectedType.id, subject]);
+  }, [
+    complainContext,
+    description,
+    openSupportTicket,
+    receipt?.route,
+    selectedType.id,
+    selectedType.priority,
+    selectedType.severity,
+    subject,
+  ]);
 
   return (
     <PrototypeScreenTransition>
@@ -161,6 +252,8 @@ export default function RobotaxiComplainScreen({ navigation, route }) {
                     placeholder="Descreva o tema principal"
                     placeholderTextColor={color.text.muted}
                     style={styles.input}
+                    testID="robotaxi-complain-subject"
+                    accessibilityLabel="robotaxi-complain-subject"
                   />
                 </View>
 
@@ -172,6 +265,8 @@ export default function RobotaxiComplainScreen({ navigation, route }) {
                     placeholder={`Detalhe o ocorrido (${selectedType.label.toLowerCase()})`}
                     placeholderTextColor={color.text.muted}
                     style={[styles.input, styles.textarea]}
+                    testID="robotaxi-complain-description"
+                    accessibilityLabel="robotaxi-complain-description"
                     multiline
                     textAlignVertical="top"
                   />
@@ -182,6 +277,8 @@ export default function RobotaxiComplainScreen({ navigation, route }) {
                   icon="document-text-outline"
                   onPress={supportLoading ? undefined : handleSubmit}
                   style={styles.submitButton}
+                  testID="robotaxi-complain-submit"
+                  accessibilityLabel="robotaxi-complain-submit"
                 />
 
                 {ticketRows.length > 0 ? (

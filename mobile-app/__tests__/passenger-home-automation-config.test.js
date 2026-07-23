@@ -78,4 +78,19 @@ describe("passengerHomeAutomationConfig", () => {
     expect(config.bookingId).toBe("booking_123");
     expect(config.nonce).toBe("rate-once");
   });
+
+  test("enables passenger automation in simulator release contexts", () => {
+    const config = resolvePassengerHomeAutomationConfig(
+      {
+        qaAutomation: "1",
+        qaPassengerAction: "cleanup_active",
+        qaNonce: "sim-cleanup",
+      },
+      { isDriverRole: false, isHomeRoute: true, isDev: false, isE2E: false, isSimulator: true },
+    );
+
+    expect(config.automationEnabled).toBe(true);
+    expect(config.action).toBe("cleanup_active");
+    expect(config.nonce).toBe("sim-cleanup");
+  });
 });

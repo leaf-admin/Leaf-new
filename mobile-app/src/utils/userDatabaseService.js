@@ -1,10 +1,6 @@
 import Logger from './Logger';
 import auth from '@react-native-firebase/auth';
 import mobileProfileService from '../services/MobileProfileService';
-import {
-  computeDriverOnboardingState,
-  createInitialDriverOnboardingState
-} from '../services/DriverOnboardingService';
 import { resolveCityLabel } from '../config/onboardingConfig';
 
 function normalizeUserType(userType) {
@@ -155,15 +151,9 @@ export class UserDatabaseService {
     const documentData = userData?.documentData || {};
     const documentEmail = documentData?.email || userData?.email || '';
     const cnhExtraction = documentData?.cnhExtraction || null;
-    const vehicleExtraction = documentData?.vehicleExtraction || null;
     const extractedCpf = cnhExtraction?.data?.cpf || '';
     const cnhIdentity = resolveCnhIdentity(documentData, userData);
     const credentials = userData?.credentials || {};
-
-    const driverActivation =
-      normalizedUserType === 'driver'
-        ? computeDriverOnboardingState(userData?.driverActivation || createInitialDriverOnboardingState())
-        : null;
 
     const now = new Date().toISOString();
 
@@ -212,34 +202,6 @@ export class UserDatabaseService {
             genderLabel: cnhIdentity.genderLabel
           }
         : {}),
-      ...(normalizedUserType === 'driver'
-        ? {
-            approved: false,
-            isApproved: false,
-            driverActivation,
-            canGoOnline: Boolean(driverActivation?.canGoOnline),
-            driverProfileStatus: driverActivation?.driverProfileStatus || 'pending',
-            vehicleProfileStatus: driverActivation?.vehicleProfileStatus || 'pending',
-            activationCurrentStage: driverActivation?.currentStage || null,
-            onboardingDocuments: {
-              cnhUploaded: Boolean(cnhExtraction?.success),
-              vehicleUploaded: Boolean(vehicleExtraction?.success),
-              extractionSource: {
-                cnh: cnhExtraction?.source || null,
-                vehicle: vehicleExtraction?.source || null
-              },
-              cnhIdentity: {
-                birthDate: cnhIdentity.birthDate || null,
-                motherName: cnhIdentity.motherName || null,
-                gender: cnhIdentity.genderCode || null
-              }
-            }
-          }
-        : {
-            approved: true,
-            isApproved: true,
-            canGoOnline: true
-          })
     };
   }
 
@@ -267,91 +229,7 @@ export class UserDatabaseService {
         fallbackPhone: currentUser?.phoneNumber || existingProfile?.mobile || ''
       });
 
-      const mergedProfile = {
-        ...existingProfile,
-        ...payload,
-        uid: resolvedUid,
-        createdAt: existingProfile?.createdAt || payload.createdAt,
-        updatedAt: new Date().toISOString()
-      };
-
-      const onboardingDocumentData = userData?.documentData || {};
-      const cnhExtraction = onboardingDocumentData?.cnhExtraction || null;
-      const vehicleExtraction = onboardingDocumentData?.vehicleExtraction || null;
-      const cnhPdfMeta = onboardingDocumentData?.cnhPdfMeta || null;
-      const vehiclePdfMeta = onboardingDocumentData?.vehiclePdfMeta || null;
-      const profileUserType = normalizeUserType(mergedProfile?.userType || mergedProfile?.usertype);
-
-      if (profileUserType === 'driver') {
-        const now = new Date().toISOString();
-        const cnhIdentity = resolveCnhIdentity(onboardingDocumentData, mergedProfile);
-        const nextDocuments = { ...(existingProfile?.documents || {}) };
-        const nextVehicles = { ...(existingProfile?.vehicles || {}) };
-
-        if (cnhExtraction?.success && cnhExtraction?.data) {
-          nextDocuments.cnh = {
-            type: 'cnh',
-            status: 'analyzing',
-            fileType: 'application/pdf',
-            source: cnhExtraction?.source || 'unknown',
-            model: cnhExtraction?.model || null,
-            usedFallback: Boolean(cnhExtraction?.usedFallback),
-            extractedData: cnhExtraction?.data || null,
-            confidence: Number(cnhExtraction?.data?.confidence || 0),
-            uploadedAt: cnhPdfMeta?.updatedAt || now,
-            updatedAt: now,
-            extractedIdentity: {
-              birthDate: cnhIdentity.birthDate || null,
-              motherName: cnhIdentity.motherName || null,
-              gender: cnhIdentity.genderCode || null
-            },
-            fileMeta: cnhPdfMeta
-              ? {
-                  name: cnhPdfMeta?.name || null,
-                  size: Number(cnhPdfMeta?.size || 0),
-                  mimeType: cnhPdfMeta?.mimeType || 'application/pdf'
-                }
-              : null
-          };
-        }
-
-        if (vehicleExtraction?.success && vehicleExtraction?.data) {
-          nextVehicles.current = {
-            type: 'crlv',
-            status: 'analyzing',
-            fileType: 'application/pdf',
-            source: vehicleExtraction?.source || 'unknown',
-            extractionModel: vehicleExtraction?.model || null,
-            usedFallback: Boolean(vehicleExtraction?.usedFallback),
-            extractedData: vehicleExtraction?.data || null,
-            confidence: Number(vehicleExtraction?.data?.confidence || 0),
-            plate: vehicleExtraction?.data?.placa || null,
-            brand: vehicleExtraction?.data?.marca || null,
-            model: vehicleExtraction?.data?.modelo || null,
-            color: vehicleExtraction?.data?.cor || null,
-            year: vehicleExtraction?.data?.anoModelo || vehicleExtraction?.data?.anoFabricacao || null,
-            uploadedAt: vehiclePdfMeta?.updatedAt || now,
-            updatedAt: now,
-            fileMeta: vehiclePdfMeta
-              ? {
-                  name: vehiclePdfMeta?.name || null,
-                  size: Number(vehiclePdfMeta?.size || 0),
-                  mimeType: vehiclePdfMeta?.mimeType || 'application/pdf'
-                }
-              : null
-          };
-        }
-
-        if (Object.keys(nextDocuments).length > 0) {
-          mergedProfile.documents = nextDocuments;
-        }
-
-        if (Object.keys(nextVehicles).length > 0) {
-          mergedProfile.vehicles = nextVehicles;
-        }
-      }
-
-      const savedProfile = await mobileProfileService.upsertCurrentProfile(mergedProfile);
+      const savedProfile = await mobileProfileService.upsertCurrentProfile(payload);
 
       if (!savedProfile) {
         Logger.error('❌ Falha ao persistir perfil no backend moderno');

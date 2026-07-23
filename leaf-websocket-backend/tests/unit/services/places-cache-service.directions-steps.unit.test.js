@@ -17,12 +17,15 @@ jest.mock('../../../utils/logger', () => ({
 }));
 
 describe('places-cache-service directions steps', () => {
+  const VALID_POLYLINE = '_p~iF~ps|U_ulLnnqC_mqNvxq`@';
+  const VALID_LEG_POLYLINE = '_p~iF~ps|U_ulLnnqC';
   const originalFetch = global.fetch;
   const originalApiKey = process.env.GOOGLE_MAPS_API_KEY;
   const originalPlacesDirectionsTtl = process.env.PLACES_DIRECTIONS_CACHE_TTL_SECONDS;
   const originalDirectionsTtl = process.env.DIRECTIONS_CACHE_TTL_SECONDS;
   const originalPlacesDirectionsTrafficTtl = process.env.PLACES_DIRECTIONS_TRAFFIC_CACHE_TTL_SECONDS;
   const originalDirectionsTrafficTtl = process.env.DIRECTIONS_TRAFFIC_CACHE_TTL_SECONDS;
+  const originalRoutesTrafficPolyline = process.env.ENABLE_ROUTES_API_TRAFFIC_POLYLINE;
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -31,6 +34,7 @@ describe('places-cache-service directions steps', () => {
     delete process.env.DIRECTIONS_CACHE_TTL_SECONDS;
     delete process.env.PLACES_DIRECTIONS_TRAFFIC_CACHE_TTL_SECONDS;
     delete process.env.DIRECTIONS_TRAFFIC_CACHE_TTL_SECONDS;
+    delete process.env.ENABLE_ROUTES_API_TRAFFIC_POLYLINE;
     mockRedisConnection.get.mockResolvedValue(null);
     mockRedisConnection.setex.mockResolvedValue('OK');
     mockRedisConnection.ping.mockResolvedValue('PONG');
@@ -63,6 +67,11 @@ describe('places-cache-service directions steps', () => {
     } else {
       process.env.DIRECTIONS_TRAFFIC_CACHE_TTL_SECONDS = originalDirectionsTrafficTtl;
     }
+    if (originalRoutesTrafficPolyline === undefined) {
+      delete process.env.ENABLE_ROUTES_API_TRAFFIC_POLYLINE;
+    } else {
+      process.env.ENABLE_ROUTES_API_TRAFFIC_POLYLINE = originalRoutesTrafficPolyline;
+    }
   });
 
   function loadService() {
@@ -81,7 +90,7 @@ describe('places-cache-service directions steps', () => {
         status: 'OK',
         routes: [
           {
-            overview_polyline: { points: 'overview_polyline' },
+            overview_polyline: { points: VALID_POLYLINE },
             legs: [
               {
                 distance: { value: 2500 },
@@ -91,6 +100,7 @@ describe('places-cache-service directions steps', () => {
                 end_location: { lat: -22.9673, lng: -43.179 },
                 start_address: 'Origem',
                 end_address: 'Destino',
+                polyline: { points: VALID_LEG_POLYLINE },
                 steps: [
                   {
                     html_instructions: 'Vire <b>à direita</b> na Av. Atlântica',
@@ -128,6 +138,7 @@ describe('places-cache-service directions steps', () => {
         endLocation: { lat: -22.9701, lng: -43.1811 },
       }),
     );
+    expect(result.data.legs[0].polylinePoints).toBe(VALID_LEG_POLYLINE);
     expect(result.data).toMatchObject({
       time_in_secs: 480,
       duration_without_traffic: 420,
@@ -150,7 +161,7 @@ describe('places-cache-service directions steps', () => {
       data: {
         distance_in_km: 1.4,
         time_in_secs: 180,
-        polylinePoints: 'cached_overview',
+        polylinePoints: VALID_POLYLINE,
         legs: [
           {
             steps: [
@@ -198,6 +209,144 @@ describe('places-cache-service directions steps', () => {
     expect(global.fetch).not.toHaveBeenCalled();
   });
 
+  it('serves a valid directions cache hit when the Google API key is absent', async () => {
+    delete process.env.GOOGLE_MAPS_API_KEY;
+    const placesCacheService = loadService();
+    placesCacheService.googleApiKey = '';
+    placesCacheService.isInitialized = true;
+    mockRedisConnection.get.mockResolvedValue(JSON.stringify({
+      cached: false,
+      routeCount: 1,
+      waypointsCount: 0,
+      data: {
+        distance_in_km: 1.4,
+        time_in_secs: 180,
+        polylinePoints: VALID_POLYLINE,
+        legs: [],
+        steps: [],
+      },
+    }));
+    global.fetch = jest.fn();
+
+    const result = await placesCacheService.fetchDirectionsRoute({
+      startLoc: '-22.9712,-43.1822',
+      destLoc: '-22.9673,-43.1790',
+    });
+
+    expect(result).toEqual(expect.objectContaining({
+      cached: true,
+      routeCount: 1,
+      data: expect.objectContaining({
+        polylinePoints: VALID_POLYLINE,
+      }),
+      stats: expect.objectContaining({
+        redisReads: 1,
+        googleRequests: 0,
+      }),
+    }));
+    expect(mockRedisConnection.get).toHaveBeenCalledTimes(1);
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  it('fails closed on a directions cache miss without Google API key and never calls fetch', async () => {
+    delete process.env.GOOGLE_MAPS_API_KEY;
+    const placesCacheService = loadService();
+    placesCacheService.googleApiKey = '';
+    placesCacheService.isInitialized = true;
+    mockRedisConnection.get.mockResolvedValue(null);
+    global.fetch = jest.fn();
+
+    const result = await placesCacheService.fetchDirectionsRoute({
+      startLoc: '-22.9712,-43.1822',
+      destLoc: '-22.9673,-43.1790',
+    });
+
+    expect(result).toBeNull();
+    expect(mockRedisConnection.get).toHaveBeenCalledTimes(1);
+    expect(global.fetch).not.toHaveBeenCalled();
+    expect(mockRedisConnection.setex).not.toHaveBeenCalled();
+  });
+
+  it('bypasses a cached payload without valid geometry and replaces it with a valid route', async () => {
+    const placesCacheService = loadService();
+    placesCacheService.googleApiKey = 'test-google-key';
+    placesCacheService.isInitialized = true;
+    mockRedisConnection.get.mockResolvedValue(JSON.stringify({
+      cached: false,
+      routeCount: 1,
+      data: {
+        distance_in_km: 1.4,
+        time_in_secs: 180,
+        polylinePoints: null,
+        legs: [],
+        steps: [],
+      },
+    }));
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        status: 'OK',
+        routes: [{
+          overview_polyline: { points: VALID_POLYLINE },
+          legs: [{
+            distance: { value: 1400 },
+            duration: { value: 180 },
+            start_location: { lat: -22.9712, lng: -43.1822 },
+            end_location: { lat: -22.9673, lng: -43.179 },
+            steps: [],
+          }],
+        }],
+      }),
+    });
+
+    const result = await placesCacheService.fetchDirectionsRoute({
+      startLoc: '-22.9712,-43.1822',
+      destLoc: '-22.9673,-43.1790',
+    });
+
+    expect(result.cached).toBe(false);
+    expect(result.data.polylinePoints).toBe(VALID_POLYLINE);
+    expect(result.cachePolicy.invalidGeometryCacheBypassed).toBe(true);
+    expect(result.stats.cacheBypasses).toBe(1);
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    expect(mockRedisConnection.setex).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects a fresh response without a valid polyline and does not cache it', async () => {
+    const placesCacheService = loadService();
+    placesCacheService.googleApiKey = 'test-google-key';
+    placesCacheService.isInitialized = true;
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        status: 'OK',
+        routes: [{
+          overview_polyline: { points: '!' },
+          legs: [{
+            distance: { value: 1400 },
+            duration: { value: 180 },
+            start_location: { lat: -22.9712, lng: -43.1822 },
+            end_location: { lat: -22.9673, lng: -43.179 },
+            steps: [],
+          }],
+        }],
+      }),
+    });
+
+    const result = await placesCacheService.fetchDirectionsRoute({
+      startLoc: '-22.9712,-43.1822',
+      destLoc: '-22.9673,-43.1790',
+    });
+
+    expect(result).toEqual(expect.objectContaining({
+      data: null,
+      status: 'invalid_polyline',
+    }));
+    expect(mockRedisConnection.setex).not.toHaveBeenCalled();
+  });
+
   it('bypasses directions cache when forceFresh is requested and stores with short traffic TTL', async () => {
     const cachedPayload = {
       cached: false,
@@ -206,7 +355,7 @@ describe('places-cache-service directions steps', () => {
       data: {
         distance_in_km: 1.4,
         time_in_secs: 180,
-        polylinePoints: 'cached_overview',
+        polylinePoints: VALID_POLYLINE,
         legs: [],
         steps: [],
       },
@@ -222,7 +371,7 @@ describe('places-cache-service directions steps', () => {
         status: 'OK',
         routes: [
           {
-            overview_polyline: { points: 'fresh_overview' },
+            overview_polyline: { points: VALID_POLYLINE },
             legs: [
               {
                 distance: { value: 2500 },
@@ -248,7 +397,7 @@ describe('places-cache-service directions steps', () => {
     });
 
     expect(result.cached).toBe(false);
-    expect(result.data.polylinePoints).toBe('fresh_overview');
+    expect(result.data.polylinePoints).toBe(VALID_POLYLINE);
     expect(result.cachePolicy).toEqual({
       forceFresh: true,
       ttlSeconds: 90,
@@ -259,7 +408,7 @@ describe('places-cache-service directions steps', () => {
     expect(mockRedisConnection.setex).toHaveBeenCalledWith(
       expect.stringContaining('maps:directions:'),
       90,
-      expect.stringContaining('fresh_overview'),
+      expect.stringContaining(VALID_POLYLINE),
     );
   });
 
@@ -273,7 +422,7 @@ describe('places-cache-service directions steps', () => {
         time_in_secs: 180,
         duration_without_traffic: null,
         duration_in_traffic: null,
-        polylinePoints: 'stale_overview',
+        polylinePoints: VALID_POLYLINE,
         legs: [
           {
             time_in_secs: 180,
@@ -296,7 +445,7 @@ describe('places-cache-service directions steps', () => {
         status: 'OK',
         routes: [
           {
-            overview_polyline: { points: 'fresh_traffic_overview' },
+            overview_polyline: { points: VALID_POLYLINE },
             legs: [
               {
                 distance: { value: 2500 },
@@ -321,7 +470,7 @@ describe('places-cache-service directions steps', () => {
     });
 
     expect(result.cached).toBe(false);
-    expect(result.data.polylinePoints).toBe('fresh_traffic_overview');
+    expect(result.data.polylinePoints).toBe(VALID_POLYLINE);
     expect(result.data.duration_without_traffic).toBe(420);
     expect(result.data.duration_in_traffic).toBe(600);
     expect(result.cachePolicy).toEqual({
@@ -335,8 +484,186 @@ describe('places-cache-service directions steps', () => {
     expect(mockRedisConnection.setex).toHaveBeenCalledWith(
       expect.stringContaining('traffic:1'),
       90,
-      expect.stringContaining('fresh_traffic_overview'),
+      expect.stringContaining(VALID_POLYLINE),
     );
+  });
+
+  it('uses Routes API traffic-aware polyline segments when enabled', async () => {
+    process.env.ENABLE_ROUTES_API_TRAFFIC_POLYLINE = 'true';
+    const placesCacheService = loadService();
+    placesCacheService.googleApiKey = 'test-google-key';
+    placesCacheService.isInitialized = true;
+    mockRedisConnection.get.mockResolvedValue(null);
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        routes: [
+          {
+            distanceMeters: 2500,
+            duration: '600s',
+            staticDuration: '420s',
+            polyline: {
+              encodedPolyline: '_p~iF~ps|U_ulLnnqC_mqNvxq`@',
+            },
+            travelAdvisory: {
+              speedReadingIntervals: [
+                {
+                  endPolylinePointIndex: 1,
+                  speed: 'NORMAL',
+                },
+                {
+                  startPolylinePointIndex: 1,
+                  endPolylinePointIndex: 2,
+                  speed: 'SLOW',
+                },
+              ],
+            },
+            legs: [
+              {
+                distanceMeters: 2500,
+                duration: '600s',
+                staticDuration: '420s',
+                polyline: {
+                  encodedPolyline: VALID_POLYLINE,
+                },
+                travelAdvisory: {
+                  speedReadingIntervals: [
+                    {
+                      endPolylinePointIndex: 1,
+                      speed: 'NORMAL',
+                    },
+                    {
+                      startPolylinePointIndex: 1,
+                      endPolylinePointIndex: 2,
+                      speed: 'TRAFFIC_JAM',
+                    },
+                  ],
+                },
+              },
+              {
+                distanceMeters: 900,
+                duration: '180s',
+                staticDuration: '150s',
+                polyline: {
+                  encodedPolyline: VALID_LEG_POLYLINE,
+                },
+                travelAdvisory: {
+                  speedReadingIntervals: [],
+                },
+              },
+            ],
+          },
+        ],
+      }),
+    });
+
+    const result = await placesCacheService.fetchDirectionsRoute({
+      startLoc: '-22.9712,-43.1822',
+      destLoc: '-22.9673,-43.1790',
+      trafficEnabled: true,
+    });
+
+    expect(global.fetch).toHaveBeenCalledWith(
+      'https://routes.googleapis.com/directions/v2:computeRoutes',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({
+          'X-Goog-Api-Key': 'test-google-key',
+          'X-Goog-FieldMask': expect.stringContaining('routes.travelAdvisory.speedReadingIntervals'),
+        }),
+      }),
+    );
+    expect(result.provider).toBe('routes_api');
+    expect(result.data).toMatchObject({
+      distance_in_km: 2.5,
+      time_in_secs: 600,
+      duration_without_traffic: 420,
+      duration_in_traffic: 600,
+      polylinePoints: '_p~iF~ps|U_ulLnnqC_mqNvxq`@',
+      routeProvider: 'routes_api',
+    });
+    expect(result.data.trafficSegments).toEqual([
+      expect.objectContaining({
+        level: 'normal',
+        color: '#198754',
+        coordinates: expect.arrayContaining([
+          expect.objectContaining({ latitude: 38.5, longitude: -120.2 }),
+        ]),
+      }),
+      expect.objectContaining({
+        level: 'moderate',
+        color: '#F59E0B',
+      }),
+    ]);
+    expect(result.data.legs[0].trafficSegments[1]).toEqual(
+      expect.objectContaining({
+        level: 'heavy',
+        color: '#DC2626',
+      }),
+    );
+    expect(result.data.legs.map((leg) => leg.polylinePoints)).toEqual([
+      VALID_POLYLINE,
+      VALID_LEG_POLYLINE,
+    ]);
+    expect(result.stats.googleRequests).toBe(1);
+    expect(mockRedisConnection.setex).toHaveBeenCalledWith(
+      expect.stringContaining('provider:routes_api'),
+      90,
+      expect.stringContaining('trafficSegments'),
+    );
+  });
+
+  it('calcula pedágio da Linha Amarela pela polyline retornada pelo Routes API', async () => {
+    process.env.ENABLE_ROUTES_API_TRAFFIC_POLYLINE = 'true';
+    const placesCacheService = loadService();
+    placesCacheService.googleApiKey = 'test-google-key';
+    placesCacheService.isInitialized = true;
+    mockRedisConnection.get.mockResolvedValue(null);
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        routes: [
+          {
+            distanceMeters: 9000,
+            duration: '1200s',
+            staticDuration: '900s',
+            polyline: {
+              encodedPolyline: 'nuujC~|kgG_|B_|B_|B_|B',
+            },
+            travelAdvisory: {
+              speedReadingIntervals: [
+                {
+                  endPolylinePointIndex: 2,
+                  speed: 'NORMAL',
+                },
+              ],
+            },
+            legs: [],
+          },
+        ],
+      }),
+    });
+
+    const result = await placesCacheService.fetchDirectionsRoute({
+      startLoc: '-22.890000,-43.320000',
+      destLoc: '-22.850000,-43.280000',
+      trafficEnabled: true,
+    });
+
+    expect(result.provider).toBe('routes_api');
+    expect(result.data.tollFee).toBe(4);
+    expect(result.data.tolls).toEqual([
+      expect.objectContaining({
+        id: 'p09_linha_amarela',
+        amount: 4,
+      }),
+    ]);
+    expect(result.data.tollDetection).toEqual(expect.objectContaining({
+      source: 'leaf_toll_catalog',
+      tollCount: 1,
+    }));
   });
 
   it('returns cached place details by place_id without calling Google', async () => {

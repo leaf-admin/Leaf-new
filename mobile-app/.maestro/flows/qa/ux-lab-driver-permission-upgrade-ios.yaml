@@ -1,0 +1,15 @@
+appId: br.com.leaf.ride
+---
+- runFlow:
+    when:
+      visible: "Alterar para Sempre Permitir"
+    commands:
+      - tapOn: "Alterar para Sempre Permitir"
+
+- runFlow:
+    when:
+      visible: "Change to Always Allow"
+    commands:
+      - tapOn: "Change to Always Allow"
+
+- waitForAnimationToEnd

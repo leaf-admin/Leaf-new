@@ -348,7 +348,11 @@ const PrivacyPolicyScreen = ({ navigation, route }) => {
   }
 
   return (
-    <View style={styles.container}>
+    <View
+      style={styles.container}
+      testID="privacy-policy-screen"
+      accessibilityLabel="privacy-policy-screen"
+    >
       <StatusBar translucent backgroundColor="transparent" barStyle="dark-content" />
 
       <PrototypeMenuSurface

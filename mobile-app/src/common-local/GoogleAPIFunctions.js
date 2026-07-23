@@ -89,6 +89,30 @@ const sanitizeLocalPlaceCacheEntry = (entry = null) => {
     return sanitized;
 };
 
+const isBroadAreaAutocompleteCacheEntry = (entry = null) => {
+    const types = Array.isArray(entry?.types)
+        ? entry.types
+            .map((type) => String(type || '').trim().toLowerCase())
+            .filter(Boolean)
+        : [];
+
+    if (types.length === 0) {
+        return false;
+    }
+
+    return types.every((type) => (
+        type === 'political' ||
+        type === 'geocode' ||
+        type === 'locality' ||
+        type === 'neighborhood' ||
+        type === 'colloquial_area' ||
+        type === 'country' ||
+        type === 'sublocality' ||
+        type.startsWith('sublocality_level_') ||
+        type.startsWith('administrative_area_level_')
+    ));
+};
+
 const buildBackendRideTelemetryPayload = (telemetryContext = null, fallbackSurface = 'mobile_google_functions') => {
     if (!telemetryContext || typeof telemetryContext !== 'object') {
         return null;
@@ -119,7 +143,16 @@ const getFromLocalCache = async (query) => {
     try {
         const cacheKey = getLocalCacheKey(query);
         const cached = await AsyncStorage.getItem(cacheKey);
-        return cached ? sanitizeLocalPlaceCacheEntry(JSON.parse(cached)) : null;
+        const entry = cached
+            ? sanitizeLocalPlaceCacheEntry(JSON.parse(cached))
+            : null;
+        if (isBroadAreaAutocompleteCacheEntry(entry)) {
+            Logger.log(
+                '↩️ [PlacesCache] Cache local amplo ignorado; buscando destinos específicos.',
+            );
+            return null;
+        }
+        return entry;
     } catch (error) {
         Logger.log('⚠️ [PlacesCache] Erro ao ler cache local:', error.message);
         return null;
@@ -1098,8 +1131,6 @@ export const getDirectionsApi = (startLoc, destLoc, waypoints, telemetryContext 
             }
         }
         
-        Logger.log('🌐 URL da API Google Directions:', sanitizeSensitiveUrl(url));
-        
         withInFlight(cacheKey, async () => {
             // 1) Backend autoritativo (com cache + telemetria por booking)
             try {
@@ -1168,6 +1199,7 @@ export const getDirectionsApi = (startLoc, destLoc, waypoints, telemetryContext 
             }
 
             // 2) Fallback permitido somente em desenvolvimento/teste
+            Logger.log('🌐 URL da API Google Directions fallback:', sanitizeSensitiveUrl(url));
             const controller = new AbortController();
             const timeoutId = setTimeout(() => controller.abort(), DIRECTIONS_REQUEST_TIMEOUT_MS);
             return await fetch(url, { signal: controller.signal })

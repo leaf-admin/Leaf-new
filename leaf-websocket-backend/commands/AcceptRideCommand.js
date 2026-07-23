@@ -19,12 +19,22 @@ const RideAcceptedEvent = require('../events/ride.accepted');
 const RideStateManager = require('../services/ride-state-manager');
 const redisPool = require('../utils/redis-pool');
 const driverLockManager = require('../services/driver-lock-manager');
+const driverEligibilityService = require('../services/driver-eligibility-service');
 const { logger, logStructured } = require('../utils/logger');
 const eventSourcing = require('../services/event-sourcing');
+const redisCriticalAuthorityService = require('../services/redis-critical-authority-service');
 const traceContext = require('../utils/trace-context');
 const { metrics } = require('../utils/prometheus-metrics');
 const { validateAndEnsureTraceIdInCommand } = require('../utils/trace-validator');
-const { setActiveTripForDriver } = require('../utils/active-trip-index');
+const {
+    ACTIVE_TRIP_TTL_SECONDS,
+    ACTIVE_TRIP_LEASE_UNTIL_FIELD,
+    activeTripKey,
+    activeTripCustomerKey,
+    identityVerificationKey,
+    identityPolicyMutationKey,
+    activeStepUpChallengeKey
+} = require('../utils/active-trip-index');
 const { resolveAcceptRidePayload } = require('../utils/accept-ride-payload');
 const {
     rehydratePrimaryBooking,
@@ -32,6 +42,7 @@ const {
 } = require('../services/booking-visibility-service');
 const {
     hasOfferReservation,
+    getOfferReservationKey,
     clearOfferReservationsForBooking
 } = require('../services/offer-reservation-service');
 
@@ -113,6 +124,19 @@ class AcceptRideCommand extends Command {
         const startTime = Date.now();
         // ✅ OBSERVABILIDADE: Executar com traceId
         return await traceContext.runWithTraceId(this.traceId, async () => {
+            let driverRideLockManaged = false;
+            let bookingAcceptanceCommitted = false;
+            const releaseManagedRideLock = async () => {
+                if (!driverRideLockManaged || bookingAcceptanceCommitted) return;
+                try {
+                    const lockedBooking = await driverLockManager.getLockedBooking(this.driverId);
+                    if (lockedBooking === this.bookingId) {
+                        await driverLockManager.releaseLock(this.driverId);
+                    }
+                } finally {
+                    driverRideLockManaged = false;
+                }
+            };
             try {
                 logStructured('info', 'AcceptRideCommand.execute iniciado', {
                     driverId: this.driverId,
@@ -122,6 +146,25 @@ class AcceptRideCommand extends Command {
 
                 // Validar
                 this.validate();
+
+                const criticalAuthorityMode = String(
+                    process.env.KYC_ACTIVE_TRIP_AUTHORITY_MODE || ''
+                ).trim().toLowerCase();
+                if (
+                    criticalAuthorityMode !== ''
+                    && criticalAuthorityMode !== 'redis_noeviction'
+                ) {
+                    logStructured('error', 'AcceptRideCommand bloqueado por modo de autoridade Redis inválido', {
+                        command: 'AcceptRideCommand',
+                        driverId: this.driverId,
+                        bookingId: this.bookingId,
+                        errorCode: 'REDIS_CRITICAL_AUTHORITY_MODE_INVALID'
+                    });
+                    metrics.recordCommand('AcceptRide', (Date.now() - startTime) / 1000, false);
+                    return CommandResult.failure(
+                        'Sistema temporariamente indisponível para aceitar novas corridas. Tente novamente em instantes.'
+                    );
+                }
 
                 // Garantir conexão Redis
                 await redisPool.ensureConnection();
@@ -140,24 +183,143 @@ class AcceptRideCommand extends Command {
                 const activeNotificationKey = `driver_active_notification:${this.driverId}`;
                 const [activeBookingId, bookingTuple] = await Promise.all([
                     redis.get(activeNotificationKey),
-                    redis.hmget(bookingKey, 'driverId', 'state', 'status')
+                    redis.hmget(
+                        bookingKey,
+                        'driverId',
+                        'state',
+                        'status',
+                        'carType',
+                        'requestedCarType',
+                        'vehicleCategory',
+                        'vehicleType'
+                    )
                 ]);
                 const reservationActive = await hasOfferReservation(redis, this.bookingId, this.driverId);
                 const currentDriverId = String(bookingTuple?.[0] || '');
                 const currentStateUpper = normalizeState(bookingTuple?.[1]);
                 const currentStatusUpper = normalizeState(bookingTuple?.[2]);
+                const requestedCategory =
+                    bookingTuple?.[3] ||
+                    bookingTuple?.[4] ||
+                    bookingTuple?.[5] ||
+                    bookingTuple?.[6] ||
+                    null;
+                const requiredDatasetGeneration = criticalAuthorityMode === 'redis_noeviction'
+                    ? String(process.env.REDIS_CRITICAL_DATASET_GENERATION || '').trim()
+                    : '';
+                const datasetGenerationKey = String(
+                    process.env.REDIS_CRITICAL_DATASET_GENERATION_KEY
+                        || 'leaf:runtime:critical-dataset:generation'
+                ).trim();
                 const alreadyOwnedBySameDriver =
                     (
                         currentStateUpper === 'ACCEPTED' ||
                         currentStatusUpper === 'ACCEPTED' ||
+                        currentStateUpper === 'ARRIVED' ||
+                        currentStatusUpper === 'ARRIVED' ||
+                        currentStateUpper === 'STARTED' ||
+                        currentStatusUpper === 'STARTED' ||
                         currentStateUpper === 'IN_PROGRESS' ||
                         currentStatusUpper === 'IN_PROGRESS' ||
-                        currentStatusUpper === 'STARTED'
+                        currentStateUpper === 'REASSIGNED_IN_PROGRESS' ||
+                        currentStatusUpper === 'REASSIGNED_IN_PROGRESS'
                     ) &&
                     currentDriverId === String(this.driverId);
+                let newOwnershipAuthorityAuthorized = criticalAuthorityMode !== 'redis_noeviction';
 
                 if (
                     !alreadyOwnedBySameDriver &&
+                    criticalAuthorityMode === 'redis_noeviction'
+                ) {
+                    try {
+                        // Novo ownership nunca usa o cache de health: restart ou
+                        // perda do dataset deve colocar o aceite em fail-closed.
+                        await redisCriticalAuthorityService.assertReady({ forceRefresh: true });
+                    } catch (authorityError) {
+                        logStructured('warn', 'AcceptRideCommand bloqueado por autoridade Redis em quarentena', {
+                            command: 'AcceptRideCommand',
+                            driverId: this.driverId,
+                            bookingId: this.bookingId,
+                            errorCode: authorityError?.code || 'REDIS_CRITICAL_AUTHORITY_NOT_READY',
+                            blockers: authorityError?.attestation?.blockers || []
+                        });
+                        metrics.recordCommand('AcceptRide', (Date.now() - startTime) / 1000, false);
+                        return CommandResult.failure(
+                            'Sistema temporariamente indisponível para aceitar novas corridas. Tente novamente em instantes.'
+                        );
+                    }
+                    newOwnershipAuthorityAuthorized = true;
+                }
+
+                // O snapshot acima serve apenas para decidir se vale executar a prova
+                // atômica. Ele nunca autoriza, sozinho, pular oferta/elegibilidade.
+                let atomicallyConfirmedIdempotentResult = null;
+                if (alreadyOwnedBySameDriver) {
+                    const idempotencyProbeScript = `
+                        local bookingKey = KEYS[1]
+                        local activeTripKey = KEYS[2]
+                        local activeTripCustomerKey = KEYS[3]
+                        local driverKey = KEYS[4]
+                        local driverId = ARGV[1]
+                        local bookingId = ARGV[2]
+                        local activeTripTtl = ARGV[3]
+                        local updatedAt = ARGV[4]
+                        if redis.call('EXISTS', bookingKey) == 0 then
+                            return 'ERR_NOT_FOUND'
+                        end
+                        local state = string.upper(redis.call('HGET', bookingKey, 'state') or '')
+                        local status = string.upper(redis.call('HGET', bookingKey, 'status') or '')
+                        local currentDriverId = tostring(redis.call('HGET', bookingKey, 'driverId') or '')
+                        local alreadyOwned = (
+                            state == 'ACCEPTED' or
+                            status == 'ACCEPTED' or
+                            state == 'ARRIVED' or
+                            status == 'ARRIVED' or
+                            state == 'STARTED' or
+                            status == 'STARTED' or
+                            state == 'IN_PROGRESS' or
+                            status == 'IN_PROGRESS' or
+                            state == 'REASSIGNED_IN_PROGRESS' or
+                            status == 'REASSIGNED_IN_PROGRESS'
+                        ) and currentDriverId == tostring(driverId)
+                        if not alreadyOwned then
+                            return 'NOT_ALREADY_OWNED'
+                        end
+                        local customerId = redis.call('HGET', bookingKey, 'customerId')
+                        local pickupLoc = redis.call('HGET', bookingKey, 'pickupLocation')
+                        redis.call('SET', activeTripKey, bookingId, 'EX', activeTripTtl)
+                        if customerId and customerId ~= '' then
+                            redis.call('SET', activeTripCustomerKey, customerId, 'EX', activeTripTtl)
+                        end
+                        redis.call('HSET', driverKey,
+                            'activeTripId', bookingId,
+                            'activeTripUpdatedAt', updatedAt
+                        )
+                        return 'OK_ALREADY_ACCEPTED|||' .. (customerId or '') .. '|||' .. (pickupLoc or '')
+                    `;
+                    const probeResult = await redis.eval(
+                        idempotencyProbeScript,
+                        4,
+                        bookingKey,
+                        activeTripKey(this.driverId),
+                        activeTripCustomerKey(this.driverId),
+                        `driver:${this.driverId}`,
+                        this.driverId,
+                        this.bookingId,
+                        String(ACTIVE_TRIP_TTL_SECONDS),
+                        new Date().toISOString()
+                    );
+                    if (
+                        typeof probeResult === 'string' &&
+                        probeResult.startsWith('OK_ALREADY_ACCEPTED|||')
+                    ) {
+                        atomicallyConfirmedIdempotentResult = probeResult;
+                        bookingAcceptanceCommitted = true;
+                    }
+                }
+
+                if (
+                    !atomicallyConfirmedIdempotentResult &&
                     activeBookingId !== this.bookingId &&
                     !reservationActive
                 ) {
@@ -172,7 +334,38 @@ class AcceptRideCommand extends Command {
                         currentStatus: currentStatusUpper || null
                     });
                     metrics.recordCommand('AcceptRide', (Date.now() - startTime) / 1000, false);
-                    return CommandResult.failure('A corrida já foi aceita por outro motorista ou não está mais disponível.');
+                    return CommandResult.failure('Oferta expirada para este motorista. Aguarde uma nova solicitação.');
+                }
+
+                if (!atomicallyConfirmedIdempotentResult) {
+                    let canonicalEligibility;
+                    try {
+                        canonicalEligibility = await driverEligibilityService.isDriverEligibleForRide(
+                            this.driverId,
+                            requestedCategory
+                        );
+                    } catch (error) {
+                        logStructured('error', 'AcceptRideCommand falhou ao revalidar elegibilidade canônica', {
+                            command: 'AcceptRideCommand',
+                            driverId: this.driverId,
+                            bookingId: this.bookingId,
+                            error: error?.message || String(error)
+                        });
+                        metrics.recordCommand('AcceptRide', (Date.now() - startTime) / 1000, false);
+                        return CommandResult.failure('Não foi possível validar a elegibilidade do motorista agora.');
+                    }
+
+                    if (!canonicalEligibility?.eligible) {
+                        logStructured('warn', 'AcceptRideCommand bloqueado por elegibilidade canônica', {
+                            command: 'AcceptRideCommand',
+                            driverId: this.driverId,
+                            bookingId: this.bookingId,
+                            requestedCategory,
+                            eligibilityCode: canonicalEligibility?.code || 'NOT_ELIGIBLE'
+                        });
+                        metrics.recordCommand('AcceptRide', (Date.now() - startTime) / 1000, false);
+                        return CommandResult.failure('Motorista não está elegível para receber esta corrida.');
+                    }
                 }
 
                 // Garantir lock da corrida aceita (evita re-oferta até completeTrip/cancelRide).
@@ -225,15 +418,40 @@ class AcceptRideCommand extends Command {
                     return CommandResult.failure('Motorista já está em outra corrida');
                 }
 
+                const acceptedRideLockTtlSeconds = 3600;
+                let rideLockReady = false;
                 if (lockStatusAfterRecovery.isLocked && lockStatusAfterRecovery.bookingId === this.bookingId) {
-                    await driverLockManager.renewLock(this.driverId, 3600);
-                } else if (!lockStatusAfterRecovery.isLocked) {
-                    const lockAcquired = await driverLockManager.acquireLock(this.driverId, this.bookingId, 3600);
-                    if (!lockAcquired) {
-                        metrics.recordCommand('AcceptRide', (Date.now() - startTime) / 1000, false);
-                        return CommandResult.failure('Motorista já está em outra corrida');
-                    }
+                    rideLockReady = await driverLockManager.renewLock(
+                        this.driverId,
+                        acceptedRideLockTtlSeconds
+                    );
                 }
+                if (!rideLockReady) {
+                    rideLockReady = await driverLockManager.acquireLock(
+                        this.driverId,
+                        this.bookingId,
+                        acceptedRideLockTtlSeconds
+                    );
+                }
+
+                if (!rideLockReady) {
+                    // Dois aceites concorrentes da mesma corrida podem observar o lock
+                    // em momentos diferentes. Só prosseguir se o lock atual for desta
+                    // corrida e seu TTL puder ser renovado de forma explícita.
+                    const lockAfterRace = await driverLockManager.getLockedBooking(this.driverId);
+                    rideLockReady = lockAfterRace === this.bookingId
+                        ? await driverLockManager.renewLock(
+                            this.driverId,
+                            acceptedRideLockTtlSeconds
+                        )
+                        : false;
+                }
+
+                if (!rideLockReady) {
+                    metrics.recordCommand('AcceptRide', (Date.now() - startTime) / 1000, false);
+                    return CommandResult.failure('Motorista já está em outra corrida');
+                }
+                driverRideLockManaged = true;
 
                 const newState = RideStateManager.STATES.ACCEPTED;
                 const updatedAt = new Date().toISOString();
@@ -242,9 +460,23 @@ class AcceptRideCommand extends Command {
                 // LUA Script Atômico para garantir lock transacional absoluto do Booking
                 const luaScript = `
                     local bookingKey = KEYS[1]
+                    local activeTripKey = KEYS[2]
+                    local activeTripCustomerKey = KEYS[3]
+                    local driverKey = KEYS[4]
+                    local identityVerificationKey = KEYS[5]
+                    local identityPolicyMutationKey = KEYS[6]
+                    local activeStepUpChallengeKey = KEYS[7]
+                    local datasetGenerationKey = KEYS[8]
+                    local offerReservationKey = KEYS[9]
+                    local activeNotificationKey = KEYS[10]
                     local driverId = ARGV[1]
                     local newState = ARGV[2]
                     local updatedAt = ARGV[3]
+                    local bookingId = ARGV[5]
+                    local activeTripTtl = ARGV[6]
+                    local requiredDatasetGeneration = ARGV[7]
+                    local newOwnershipAuthorityAuthorized = ARGV[8] == '1'
+                    local criticalAuthorityRequired = ARGV[9] == '1'
 
                     if redis.call('EXISTS', bookingKey) == 0 then
                         return 'ERR_NOT_FOUND'
@@ -255,13 +487,119 @@ class AcceptRideCommand extends Command {
                     local currentDriverId = redis.call('HGET', bookingKey, 'driverId')
                     local currentStateUpper = string.upper(currentState or '')
                     local currentStatusUpper = string.upper(currentStatus or '')
+                    local alreadyOwnedBySameDriver = (
+                        currentStateUpper == 'ACCEPTED' or
+                        currentStatusUpper == 'ACCEPTED' or
+                        currentStateUpper == 'ARRIVED' or
+                        currentStatusUpper == 'ARRIVED' or
+                        currentStateUpper == 'STARTED' or
+                        currentStatusUpper == 'STARTED' or
+                        currentStateUpper == 'IN_PROGRESS' or
+                        currentStatusUpper == 'IN_PROGRESS' or
+                        currentStateUpper == 'REASSIGNED_IN_PROGRESS' or
+                        currentStatusUpper == 'REASSIGNED_IN_PROGRESS'
+                    ) and tostring(currentDriverId or '') == tostring(driverId)
 
+                    if criticalAuthorityRequired and not alreadyOwnedBySameDriver then
+                        -- Se o snapshot JS parecia idempotente, ele não executou a
+                        -- atestação completa. O CAS nunca pode transformar essa
+                        -- continuação em ownership novo por uma corrida concorrente.
+                        if not newOwnershipAuthorityAuthorized then
+                            return 'ERR_REDIS_AUTHORITY_RECHECK_REQUIRED'
+                        end
+                        if requiredDatasetGeneration == '' then
+                            return 'ERR_REDIS_DATASET_QUARANTINED'
+                        end
+                        local observedDatasetGeneration = redis.call('GET', datasetGenerationKey)
+                        local datasetGenerationTtl = redis.call('TTL', datasetGenerationKey)
+                        if observedDatasetGeneration ~= requiredDatasetGeneration or datasetGenerationTtl ~= -1 then
+                            return 'ERR_REDIS_DATASET_QUARANTINED'
+                        end
+                    end
+
+                    if not alreadyOwnedBySameDriver then
+                        local activeNotification = redis.call('GET', activeNotificationKey)
+                        local reservationExists = redis.call('EXISTS', offerReservationKey)
+                        if tostring(activeNotification or '') ~= tostring(bookingId) and reservationExists ~= 1 then
+                            return 'ERR_OFFER_EXPIRED'
+                        end
+                    end
+
+                    local redisTime = redis.call('TIME')
+                    local nowMs = (tonumber(redisTime[1]) * 1000) + math.floor(tonumber(redisTime[2]) / 1000)
+                    local currentActiveTrip = redis.call('GET', activeTripKey)
+                    if not currentActiveTrip then
+                        local hashedActiveTrip = redis.call('HGET', driverKey, 'activeTripId')
+                        local hashedLeaseUntilMs = tonumber(redis.call('HGET', driverKey, '${ACTIVE_TRIP_LEASE_UNTIL_FIELD}') or '0')
+                        if hashedActiveTrip and hashedLeaseUntilMs > nowMs then
+                            currentActiveTrip = hashedActiveTrip
+                        elseif hashedActiveTrip then
+                            redis.call('HDEL', driverKey, 'activeTripId', 'activeTripUpdatedAt', '${ACTIVE_TRIP_LEASE_UNTIL_FIELD}')
+                        end
+                    end
+                    if currentActiveTrip and tostring(currentActiveTrip) ~= tostring(bookingId) then
+                        return 'ERR_DRIVER_ACTIVE_TRIP_CONFLICT'
+                    end
+                    local identityVerification = redis.call('GET', identityVerificationKey)
+                    local identityPolicyMutation = redis.call('GET', identityPolicyMutationKey)
+                    if (identityVerification or identityPolicyMutation) and (not currentActiveTrip or tostring(currentActiveTrip) ~= tostring(bookingId)) and not alreadyOwnedBySameDriver then
+                        return 'ERR_KYC_VERIFICATION_IN_PROGRESS'
+                    end
+
+                    local activeStepUpChallenge = redis.call('GET', activeStepUpChallengeKey)
+                    if activeStepUpChallenge and (not currentActiveTrip or tostring(currentActiveTrip) ~= tostring(bookingId)) and not alreadyOwnedBySameDriver then
+                        return 'ERR_KYC_CHALLENGE_ACTIVE'
+                    end
+
+                    local kycReverifyRequired = string.lower(tostring(redis.call('HGET', driverKey, 'kyc_reverify_required') or 'false'))
+                    local identityDeferred = string.lower(tostring(redis.call('HGET', driverKey, 'identity_reverification_pending_after_trip') or redis.call('HGET', driverKey, 'identityReverificationPendingAfterTrip') or 'false'))
+                    local kycDeferred = string.lower(tostring(redis.call('HGET', driverKey, 'kyc_recheck_pending_after_trip') or redis.call('HGET', driverKey, 'kycRecheckPendingAfterTrip') or 'false'))
+                    local kycBlocked = string.lower(tostring(redis.call('HGET', driverKey, 'kyc_blocked') or 'false'))
+                    local kycStatus = string.lower(tostring(redis.call('HGET', driverKey, 'kyc_status') or ''))
                     if (
-                        (currentStateUpper == 'ACCEPTED' or currentStatusUpper == 'ACCEPTED' or currentStateUpper == 'IN_PROGRESS' or currentStatusUpper == 'IN_PROGRESS' or currentStatusUpper == 'STARTED')
-                        and tostring(currentDriverId or '') == tostring(driverId)
-                    ) then
+                        kycReverifyRequired == 'true' or
+                        kycReverifyRequired == '1' or
+                        identityDeferred == 'true' or
+                        identityDeferred == '1' or
+                        kycDeferred == 'true' or
+                        kycDeferred == '1' or
+                        kycBlocked == 'true' or
+                        kycBlocked == '1' or
+                        kycStatus == 'blocked' or
+                        kycStatus == 'rejected' or
+                        kycStatus == 'failed' or
+                        kycStatus == 'denied' or
+                        kycStatus == 'pending' or
+                        kycStatus == 'pending_review' or
+                        kycStatus == 'pending_reverify' or
+                        kycStatus == 'in_review' or
+                        kycStatus == 'review'
+                    ) and (not currentActiveTrip or tostring(currentActiveTrip) ~= tostring(bookingId)) and not alreadyOwnedBySameDriver then
+                        return 'ERR_KYC_REVERIFICATION_REQUIRED'
+                    end
+
+                    local dispatchEligible = string.lower(tostring(redis.call('HGET', driverKey, 'dispatchEligible') or ''))
+                    if dispatchEligible == 'false' and (not currentActiveTrip or tostring(currentActiveTrip) ~= tostring(bookingId)) and not alreadyOwnedBySameDriver then
+                        return 'ERR_DRIVER_NOT_DISPATCH_ELIGIBLE'
+                    end
+
+                    local function persistActiveTripIndex(customerId)
+                        local leaseUntilMs = nowMs + (tonumber(activeTripTtl) * 1000)
+                        redis.call('SET', activeTripKey, bookingId, 'EX', activeTripTtl)
+                        if customerId and customerId ~= '' then
+                            redis.call('SET', activeTripCustomerKey, customerId, 'EX', activeTripTtl)
+                        end
+                        redis.call('HSET', driverKey,
+                            'activeTripId', bookingId,
+                            'activeTripUpdatedAt', updatedAt,
+                            '${ACTIVE_TRIP_LEASE_UNTIL_FIELD}', tostring(leaseUntilMs)
+                        )
+                    end
+
+                    if alreadyOwnedBySameDriver then
                         local customerId = redis.call('HGET', bookingKey, 'customerId')
                         local pickupLoc = redis.call('HGET', bookingKey, 'pickupLocation')
+                        persistActiveTripIndex(customerId)
                         return 'OK_ALREADY_ACCEPTED|||' .. (customerId or '') .. '|||' .. (pickupLoc or '')
                     end
 
@@ -303,21 +641,44 @@ class AcceptRideCommand extends Command {
                     -- Retorna dados complementares concatenados (customerId|||pickupLocation)
                     local customerId = redis.call('HGET', bookingKey, 'customerId')
                     local pickupLoc = redis.call('HGET', bookingKey, 'pickupLocation')
+                    persistActiveTripIndex(customerId)
                     return (customerId or '') .. '|||' .. (pickupLoc or '')
                 `;
 
-                // Executar o LUA no redis
-                const redisResult = await redis.eval(
-                    luaScript,
-                    1,
-                    bookingKey,
-                    this.driverId,
-                    newState,
-                    updatedAt,
-                    bookingOwnershipToken
-                );
+                // Executar o CAS apenas quando a posse idempotente ainda não foi
+                // confirmada atomicamente. Assim um snapshot stale nunca pula gates.
+                let redisResult = atomicallyConfirmedIdempotentResult;
+                if (!redisResult) {
+                    redisResult = await redis.eval(
+                        luaScript,
+                        10,
+                        bookingKey,
+                        activeTripKey(this.driverId),
+                        activeTripCustomerKey(this.driverId),
+                        `driver:${this.driverId}`,
+                        identityVerificationKey(this.driverId),
+                        identityPolicyMutationKey(this.driverId),
+                        activeStepUpChallengeKey(this.driverId),
+                        datasetGenerationKey,
+                        getOfferReservationKey(this.bookingId, this.driverId),
+                        activeNotificationKey,
+                        this.driverId,
+                        newState,
+                        updatedAt,
+                        bookingOwnershipToken,
+                        this.bookingId,
+                        String(ACTIVE_TRIP_TTL_SECONDS),
+                        requiredDatasetGeneration,
+                        newOwnershipAuthorityAuthorized ? '1' : '0',
+                        criticalAuthorityMode === 'redis_noeviction' ? '1' : '0'
+                    );
+                }
 
-                if (typeof redisResult === 'string' && redisResult.startsWith('ERR_')) {
+                if (typeof redisResult !== 'string' || redisResult.length === 0) {
+                    throw new Error('Resposta inválida do CAS de aceite da corrida');
+                }
+
+                if (redisResult.startsWith('ERR_')) {
                     logStructured('warn', 'AcceptRideCommand rejeitado no CAS do booking', {
                         command: 'AcceptRideCommand',
                         driverId: this.driverId,
@@ -327,12 +688,44 @@ class AcceptRideCommand extends Command {
                         currentState: currentStateUpper || null,
                         currentStatus: currentStatusUpper || null
                     });
+                    await releaseManagedRideLock().catch(() => null);
                     metrics.recordCommand('AcceptRide', (Date.now() - startTime) / 1000, false);
                     if (redisResult === 'ERR_NOT_FOUND') {
                         return CommandResult.failure('Corrida não encontrada');
                     }
+                    if (
+                        redisResult === 'ERR_REDIS_DATASET_QUARANTINED'
+                        || redisResult === 'ERR_REDIS_AUTHORITY_RECHECK_REQUIRED'
+                    ) {
+                        return CommandResult.failure(
+                            'Sistema temporariamente indisponível para aceitar novas corridas. Tente novamente em instantes.'
+                        );
+                    }
+                    if (redisResult === 'ERR_OFFER_EXPIRED') {
+                        return CommandResult.failure('Oferta expirada para este motorista. Aguarde uma nova solicitação.');
+                    }
+                    if (redisResult === 'ERR_KYC_VERIFICATION_IN_PROGRESS') {
+                        return CommandResult.failure('Validação de identidade em andamento. Conclua antes de aceitar uma corrida.');
+                    }
+                    if (redisResult === 'ERR_KYC_REVERIFICATION_REQUIRED') {
+                        return CommandResult.failure('Validação de identidade pendente. Conclua antes de aceitar uma corrida.');
+                    }
+                    if (redisResult === 'ERR_KYC_CHALLENGE_ACTIVE') {
+                        return CommandResult.failure('Validação de identidade pendente. Conclua antes de aceitar uma corrida.');
+                    }
+                    if (redisResult === 'ERR_DRIVER_NOT_DISPATCH_ELIGIBLE') {
+                        return CommandResult.failure('Motorista não está elegível para receber esta corrida.');
+                    }
+                    if (redisResult === 'ERR_DRIVER_ACTIVE_TRIP_CONFLICT') {
+                        return CommandResult.failure('Motorista já está em outra corrida');
+                    }
                     return CommandResult.failure(`A corrida já foi aceita por outro motorista ou não está mais disponível.`);
                 }
+
+                // A partir daqui a corrida já estava ou acabou de ser aceita no Redis.
+                // Falhas de enriquecimento/persistência secundária não devem liberar
+                // o lock de uma corrida efetivamente comprometida.
+                bookingAcceptanceCommitted = true;
 
                 const alreadyAcceptedBySameDriver =
                     typeof redisResult === 'string' &&
@@ -460,9 +853,6 @@ class AcceptRideCommand extends Command {
                 await redis.del(`driver_active_notification:${this.driverId}`);
                 await clearOfferReservationsForBooking(redis, this.bookingId).catch(() => null);
 
-                // Indexar corrida ativa por motorista para lookup O(1) no tracking
-                await setActiveTripForDriver(redis, this.driverId, this.bookingId, customerId);
-
                 // Registrar histórico fora do caminho crítico de latência.
                 if (!alreadyAcceptedBySameDriver) {
                     setImmediate(() => {
@@ -514,6 +904,7 @@ class AcceptRideCommand extends Command {
                 });
 
             } catch (error) {
+                await releaseManagedRideLock().catch(() => null);
                 logStructured('error', 'AcceptRideCommand falhou', {
                     driverId: this.driverId,
                     bookingId: this.bookingId,

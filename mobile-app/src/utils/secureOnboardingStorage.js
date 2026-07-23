@@ -1,6 +1,16 @@
 import Logger from './Logger';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import firebaseAuth from '@react-native-firebase/auth';
 import * as Crypto from 'expo-crypto';
+import {
+  allowTestUserTools,
+  isE2ETestBuild,
+  isSimulatorBuild,
+} from '../config/runtimeAccessPolicy';
+import {
+  ONBOARDING_SESSION_STORAGE_KEYS,
+  validateOnboardingStorageOwner,
+} from './onboardingSessionState';
 
 
 const STORAGE_KEYS = {
@@ -20,6 +30,29 @@ const SENSITIVE_FIELDS = {
   profile_data: ['fullName', 'firstName', 'lastName'],
   document_data: ['cpf', 'email'],
   credentials: ['acceptTerms', 'acceptPrivacy', 'consentBackgroundCheck', 'marketingOptIn']
+};
+
+const resolveAuthoritativeFirebaseUid = () => {
+  const divergentQaSessionAllowed =
+    allowTestUserTools() && isSimulatorBuild() && isE2ETestBuild();
+  if (divergentQaSessionAllowed) {
+    return null;
+  }
+
+  return firebaseAuth().currentUser?.uid || null;
+};
+
+const canAccessCurrentOnboarding = async operation => {
+  const ownership = await validateOnboardingStorageOwner({
+    activeAuthUid: resolveAuthoritativeFirebaseUid(),
+  });
+  if (!ownership.valid) {
+    Logger.warn(`🚫 Onboarding ${operation} bloqueado por divergência de sessão:`, {
+      reason: ownership.reason,
+    });
+    return false;
+  }
+  return true;
 };
 
 // Função para verificar se dados estão criptografados
@@ -121,16 +154,23 @@ const decryptData = async (encryptedData) => {
 // Salvar dados sensíveis de forma criptografada
 export const saveSensitiveData = async (step, data) => {
   try {
+    if (!(await canAccessCurrentOnboarding(`saveSensitiveData:${step}`))) {
+      return false;
+    }
     Logger.log(`🔒 Salvando dados sensíveis do step ${step}:`, data);
     
     // Carregar dados existentes
     const existingData = await AsyncStorage.getItem(STORAGE_KEYS.ENCRYPTED_DATA);
     let parsedData = {};
     
-    // Tentar parsear dados existentes de forma segura
+    // Preservar os dados sensíveis das etapas anteriores. O valor armazenado
+    // normalmente já está codificado; JSON.parse direto descartava o blob
+    // inteiro sempre que uma nova etapa era salva.
     if (existingData) {
       try {
-        parsedData = JSON.parse(existingData);
+        parsedData = isDataEncrypted(existingData)
+          ? (await decryptData(existingData)) || {}
+          : JSON.parse(existingData);
       } catch (parseError) {
         Logger.warn(`⚠️ Dados existentes corrompidos para ${step}, criando novo:`, parseError);
         parsedData = {};
@@ -170,6 +210,9 @@ export const saveSensitiveData = async (step, data) => {
 // Carregar dados sensíveis criptografados
 export const loadSensitiveData = async (step) => {
   try {
+    if (!(await canAccessCurrentOnboarding(`loadSensitiveData:${step}`))) {
+      return {};
+    }
     const encryptedData = await AsyncStorage.getItem(STORAGE_KEYS.ENCRYPTED_DATA);
     if (encryptedData) {
       // Verificar se os dados estão criptografados
@@ -200,6 +243,9 @@ export const loadSensitiveData = async (step) => {
 // Salvar dados não sensíveis
 export const saveNonSensitiveData = async (key, value) => {
   try {
+    if (!(await canAccessCurrentOnboarding(`saveNonSensitiveData:${key}`))) {
+      return false;
+    }
     await AsyncStorage.setItem(key, JSON.stringify(value));
     return true;
   } catch (error) {
@@ -211,6 +257,9 @@ export const saveNonSensitiveData = async (key, value) => {
 // Carregar dados não sensíveis
 export const loadNonSensitiveData = async (key) => {
   try {
+    if (!(await canAccessCurrentOnboarding(`loadNonSensitiveData:${key}`))) {
+      return null;
+    }
     const data = await AsyncStorage.getItem(key);
     return data ? JSON.parse(data) : null;
   } catch (error) {
@@ -230,7 +279,10 @@ export const completeStep = async (step) => {
       [step]: true
     };
 
-    await saveNonSensitiveData(STORAGE_KEYS.PROGRESS, updatedProgress);
+    const saved = await saveNonSensitiveData(STORAGE_KEYS.PROGRESS, updatedProgress);
+    if (!saved) {
+      return false;
+    }
     Logger.log(`✅ Step ${step} marcado como completo`);
     return true;
   } catch (error) {
@@ -242,8 +294,7 @@ export const completeStep = async (step) => {
 // Salvar step atual
 export const saveCurrentStep = async (step) => {
   try {
-    await saveNonSensitiveData(STORAGE_KEYS.CURRENT_STEP, step);
-    return true;
+    return await saveNonSensitiveData(STORAGE_KEYS.CURRENT_STEP, step);
   } catch (error) {
     Logger.error('❌ Erro ao salvar step atual:', error);
     return false;
@@ -275,11 +326,7 @@ export const loadCurrentStep = async () => {
 // Limpar todos os dados
 export const clearAllOnboardingData = async () => {
   try {
-    await Promise.all([
-      AsyncStorage.removeItem(STORAGE_KEYS.ENCRYPTED_DATA),
-      AsyncStorage.removeItem(STORAGE_KEYS.PROGRESS),
-      AsyncStorage.removeItem(STORAGE_KEYS.CURRENT_STEP)
-    ]);
+    await AsyncStorage.multiRemove(ONBOARDING_SESSION_STORAGE_KEYS);
     Logger.log('✅ Todos os dados do onboarding limpos');
     return true;
   } catch (error) {
@@ -306,9 +353,10 @@ export const saveStepData = async (step, data) => {
     // Verificar se o step tem campos sensíveis
     const hasSensitiveFields = SENSITIVE_FIELDS[step] && SENSITIVE_FIELDS[step].length > 0;
     
+    let sensitiveDataSaved = true;
     if (hasSensitiveFields) {
       // Salvar dados sensíveis criptografados
-      await saveSensitiveData(step, data);
+      sensitiveDataSaved = await saveSensitiveData(step, data);
     }
     
     // Salvar dados não sensíveis (sempre)
@@ -319,9 +367,14 @@ export const saveStepData = async (step, data) => {
       }
     });
     
+    let nonSensitiveDataSaved = true;
     if (Object.keys(nonSensitiveData).length > 0) {
       Logger.log(`📝 Salvando dados não sensíveis do step ${step}:`, nonSensitiveData);
-      await saveNonSensitiveData(`onboarding_${step}`, nonSensitiveData);
+      nonSensitiveDataSaved = await saveNonSensitiveData(`onboarding_${step}`, nonSensitiveData);
+    }
+
+    if (!sensitiveDataSaved || !nonSensitiveDataSaved) {
+      return false;
     }
     
     Logger.log(`✅ Dados do step ${step} salvos com sucesso`);

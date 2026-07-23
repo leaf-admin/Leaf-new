@@ -58,6 +58,18 @@ function pickMoney(...values) {
   return null;
 }
 
+function pickFirstMoney(...values) {
+  for (const value of values) {
+    const parsed =
+      typeof value === 'string' ? parseCurrencyText(value) : toFiniteMoney(value, null);
+    if (parsed !== null) {
+      return roundMoney(Math.max(0, parsed));
+    }
+  }
+
+  return null;
+}
+
 function pickCentsAsMoney(...values) {
   for (const value of values) {
     const parsed = toFiniteMoney(value, null);
@@ -78,8 +90,8 @@ export function formatCurrencyBRL(value) {
   return `R$ ${signal}${groupedInteger},${decimalPart}`;
 }
 
-export function resolveTripTollAmount(item = {}) {
-  const direct = pickMoney(
+export function resolveTripTollAmountOrNull(item = {}) {
+  const direct = pickFirstMoney(
     item?.tollFee,
     item?.tollAmount,
     item?.tollFeeReais,
@@ -92,7 +104,7 @@ export function resolveTripTollAmount(item = {}) {
     item?.fareBreakdown?.calculation?.breakdown?.tollFee,
   );
 
-  if (direct !== null && direct > 0) {
+  if (direct !== null) {
     return direct;
   }
 
@@ -104,7 +116,11 @@ export function resolveTripTollAmount(item = {}) {
     item?.financialBreakdown?.calculation?.tollFee,
   );
 
-  return cents ?? direct ?? 0;
+  return cents;
+}
+
+export function resolveTripTollAmount(item = {}) {
+  return resolveTripTollAmountOrNull(item) ?? 0;
 }
 
 export function resolveTripPassengerPaidAmount(item = {}) {

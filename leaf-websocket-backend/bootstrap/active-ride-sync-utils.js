@@ -1,14 +1,8 @@
-const { resolveActiveTripForDriver } = require('../utils/active-trip-index');
-
-const TERMINAL_BOOKING_STATES = new Set([
-    'COMPLETED',
-    'CANCELLED',
-    'CANCELED',
-    'REJECTED',
-    'NO_DRIVERS_AVAILABLE',
-    'EXPIRED',
-    'SUPERSEDED'
-]);
+const {
+    clearActiveTripForDriver,
+    resolveActiveTripForDriver
+} = require('../utils/active-trip-index');
+const RideStateManager = require('../services/ride-state-manager');
 
 function parseJsonSafe(value, fallback = null) {
     if (!value) {
@@ -33,6 +27,59 @@ function parseNumericValue(value) {
 
 function normalizeStatus(value) {
     return String(value || '').trim().toUpperCase();
+}
+
+function isTerminalBookingStatus(value) {
+    return RideStateManager.isTerminalStateValue(normalizeStatus(value));
+}
+
+async function clearStaleTerminalActiveIndex(redis, {
+    bookingId,
+    userId,
+    userType,
+    driverId
+} = {}) {
+    if (!redis || !bookingId || !userId || !userType) {
+        return false;
+    }
+
+    let cleared = false;
+    if (userType === 'customer' || userType === 'passenger') {
+        const activeKey = `customer_active_booking:${userId}`;
+        const indexedBookingId = await redis.get(activeKey).catch(() => null);
+        if (String(indexedBookingId || '') === String(bookingId)) {
+            await redis.del(activeKey).catch(() => null);
+            cleared = true;
+        }
+    }
+
+    if (userType === 'driver') {
+        const notificationKey = `driver_active_notification:${userId}`;
+        const notificationBookingId = await redis.get(notificationKey).catch(() => null);
+        if (String(notificationBookingId || '') === String(bookingId)) {
+            await redis.del(notificationKey).catch(() => null);
+            cleared = true;
+        }
+
+        const clearedDriverTrip = await clearActiveTripForDriver(
+            redis,
+            userId,
+            bookingId
+        ).catch(() => false);
+        cleared = Boolean(clearedDriverTrip) || cleared;
+
+        const bookingDriverId = String(driverId || '').trim();
+        if (bookingDriverId && bookingDriverId !== String(userId)) {
+            const clearedBookingDriverTrip = await clearActiveTripForDriver(
+                redis,
+                bookingDriverId,
+                bookingId
+            ).catch(() => false);
+            cleared = Boolean(clearedBookingDriverTrip) || cleared;
+        }
+    }
+
+    return cleared;
 }
 
 function parseBookingParticipant(value) {
@@ -176,9 +223,11 @@ async function buildActiveRideSnapshotForUser(redis, userId, userType) {
     const status = normalizeStatus(
         bookingData.status ||
         bookingData.state ||
+        bookingData.bookingStatus ||
         bookingData.tripStatus
     );
-    const hasActiveRide = !TERMINAL_BOOKING_STATES.has(status);
+    const terminal = isTerminalBookingStatus(status);
+    const hasActiveRide = !terminal;
     const passengerName = bookingData.customerName ||
         bookingData.passengerName ||
         parseBookingParticipant(bookingData.passenger) ||
@@ -186,6 +235,31 @@ async function buildActiveRideSnapshotForUser(redis, userId, userType) {
     const driverName = bookingData.driverName ||
         parseBookingParticipant(bookingData.driverData) ||
         null;
+    const driverId =
+        bookingData.driverId ||
+        bookingData.driver ||
+        parseBookingParticipant(bookingData.driverData) ||
+        null;
+
+    if (terminal) {
+        const clearedActiveIndex = await clearStaleTerminalActiveIndex(redis, {
+            bookingId,
+            userId,
+            userType,
+            driverId
+        });
+
+        return {
+            hasActiveRide: false,
+            source: snapshotSource,
+            bookingId: null,
+            terminal: true,
+            terminalBookingId: bookingId,
+            status: status || 'UNKNOWN',
+            terminalStatus: status || 'UNKNOWN',
+            clearedActiveIndex
+        };
+    }
 
     return {
         hasActiveRide,
@@ -201,10 +275,7 @@ async function buildActiveRideSnapshotForUser(redis, userId, userType) {
         customerName: passengerName,
         passengerName,
         driverId:
-            bookingData.driverId ||
-            bookingData.driver ||
-            parseBookingParticipant(bookingData.driverData) ||
-            null,
+            driverId,
         driverName,
         pickupLocation: parseBookingLocation(bookingData.pickupLocation || bookingData.pickup),
         destinationLocation: parseBookingLocation(bookingData.destinationLocation || bookingData.drop),
@@ -224,6 +295,8 @@ async function buildActiveRideSnapshotForUser(redis, userId, userType) {
         pricingSnapshotLockedAt: bookingData.pricingSnapshotLockedAt || null,
         vehicleCategory: bookingData.carType || bookingData.vehicleType || null,
         paymentStatus: bookingData.paymentStatus || bookingData.payment_status || null,
+        recoveryMode: bookingData.recoveryMode || null,
+        operationalContinuation: parseJsonSafe(bookingData.operationalContinuation, null),
         activeExtensionRequest: parseActiveExtensionRequest(bookingData.activeExtensionRequest),
         extensionPaymentStatus: bookingData.extensionPaymentStatus || null,
         extensionChargeId: bookingData.extensionChargeId || null,
@@ -237,5 +310,6 @@ async function buildActiveRideSnapshotForUser(redis, userId, userType) {
 }
 
 module.exports = {
-    buildActiveRideSnapshotForUser
+    buildActiveRideSnapshotForUser,
+    isTerminalBookingStatus
 };

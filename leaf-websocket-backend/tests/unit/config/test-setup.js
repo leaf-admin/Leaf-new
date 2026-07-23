@@ -25,8 +25,25 @@ beforeAll(() => {
   // Manter console.error para ver erros reais
 });
 
+async function shutdownLoadedRedisPool() {
+  try {
+    const redisPoolPath = require.resolve('../../../utils/redis-pool');
+    if (!require.cache[redisPoolPath]) {
+      return;
+    }
+
+    const redisPool = require('../../../utils/redis-pool');
+    if (typeof redisPool?.shutdown === 'function') {
+      await redisPool.shutdown({ timeoutMs: 100 });
+    }
+  } catch (_error) {
+    // Unit cleanup is best-effort; individual suites own behavior assertions.
+  }
+}
+
 // Restaurar console após todos os testes
-afterAll(() => {
+afterAll(async () => {
+  await shutdownLoadedRedisPool();
   Object.assign(console, originalConsole);
 });
 

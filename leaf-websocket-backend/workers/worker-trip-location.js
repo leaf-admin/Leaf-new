@@ -24,9 +24,10 @@ if (!WORKER_ENABLED) {
 }
 
 const workerManager = new WorkerManager({
-    streamName: 'trip_location_events',
+    streamName: process.env.TRIP_LOCATION_STREAM_NAME || 'trip_location_events',
     groupName: process.env.TRIP_LOCATION_WORKER_GROUP || 'trip-location-workers',
-    consumerName: process.env.TRIP_LOCATION_WORKER_CONSUMER || `trip-location-worker-${process.pid}`,
+    consumerName: process.env.TRIP_LOCATION_WORKER_CONSUMER || 'trip-location-worker-1',
+    dlqStreamName: process.env.TRIP_LOCATION_WORKER_DLQ_STREAM_NAME || 'trip_location_events_dlq',
     batchSize: Number.parseInt(process.env.TRIP_LOCATION_WORKER_BATCH_SIZE || '40', 10),
     blockTime: Number.parseInt(process.env.TRIP_LOCATION_WORKER_BLOCK_TIME || '1000', 10),
     maxRetries: Number.parseInt(process.env.TRIP_LOCATION_WORKER_MAX_RETRIES || '4', 10),
@@ -47,7 +48,14 @@ workerManager.registerListener('trip.location.v1', async (event) => {
         receivedAt: payload.receivedAt,
         accuracy: payload.accuracy,
         heading: payload.heading,
-        speed: payload.speed
+        speed: payload.speed,
+        financialContext: payload.financialContext,
+        financialNamespace: payload.financialNamespace,
+        financialContextId: payload.financialContextId,
+        providerEnvironment:
+            payload.paymentProviderEnvironment || payload.providerEnvironment,
+        paymentProfileId: payload.paymentProfileId,
+        testUserSandbox: payload.testUserSandbox
     };
 
     return await tripLocationPersistenceService.bufferLocationEvent(normalized);

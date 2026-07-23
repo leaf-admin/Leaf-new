@@ -11,6 +11,11 @@ APP_CONFIG="${ROOT_DIR}/app.config.js"
 
 FAIL=0
 
+if [[ -n "$(git -C "$ROOT_DIR" status --porcelain)" ]]; then
+  echo "[release-preflight][fail] release bloqueado: worktree contém alterações não commitadas" >&2
+  exit 2
+fi
+
 fail() {
   echo "[release-preflight][fail] $1" >&2
   FAIL=1
@@ -68,6 +73,7 @@ DANGEROUS_FLAGS=(
   EXPO_PUBLIC_ENABLE_QA_OTP_FORCE_FLOW
   EXPO_PUBLIC_ALLOW_CLIENT_DIRECT_GOOGLE_FALLBACK
   EXPO_PUBLIC_ALLOW_INSECURE_HTTP
+  EXPO_PUBLIC_FORCE_LEGACY_MAP_UI
 )
 
 for flag in "${DANGEROUS_FLAGS[@]}"; do

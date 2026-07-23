@@ -237,6 +237,12 @@ function estimatePickupEtaMinFromCells({ pickupLocation, trackedCells = [], cell
   return clamp(etaMin, 2, 12);
 }
 
+function resolveHeuristicPickupEtaSource({ trackedDrivers = [] } = {}) {
+  return Array.isArray(trackedDrivers) && trackedDrivers.length > 0
+    ? 'haversine_available_drivers'
+    : 'h3_cell_heuristic';
+}
+
 function deriveBehaviorRates({ activeRequests5m, idleDrivers, busyDrivers, avgPickupEtaMin }) {
   const pressureGap = Math.max(0, activeRequests5m - idleDrivers);
   const demandShare = safeDivide(activeRequests5m, activeRequests5m + idleDrivers + busyDrivers, 0);
@@ -317,6 +323,7 @@ function buildDerivedCurrent({ trackedCells, cellMap, snapshot, pickupLocation, 
   const trackedDrivers = Array.isArray(snapshot?.drivers)
     ? snapshot.drivers.filter((driver) => trackedCells.includes(h3.latLngToCell(driver.location.lat, driver.location.lng, PRICING_H3_RESOLUTION)))
     : [];
+  const avgPickupEtaSource = resolveHeuristicPickupEtaSource({ trackedDrivers });
   const avgPickupEtaMin = trackedDrivers.length > 0
     ? estimatePickupEtaMin({
         pickupLocation,
@@ -341,6 +348,8 @@ function buildDerivedCurrent({ trackedCells, cellMap, snapshot, pickupLocation, 
     active_requests_5m: activeRequests5m,
     idle_drivers: idleDrivers,
     avg_pickup_eta_min: Number(avgPickupEtaMin.toFixed(2)),
+    avg_pickup_eta_source: avgPickupEtaSource,
+    avg_pickup_eta_authoritative: false,
     trip_time_inflation: Number(traffic.tripTimeInflation.toFixed(3)),
     cancel_rate: Number(behavior.cancelRate.toFixed(3)),
     accept_rate: Number(behavior.acceptRate.toFixed(3)),
@@ -525,7 +534,14 @@ async function buildDerivedPricingContext({
         trip: {
           distance_km: toNumber(routeDistanceKm, 0),
           duration_min_traffic: Math.max(0, toNumber(routeDurationSecs, 0) / 60),
-          eta_pickup_min: explicitPricingContext?.trip?.eta_pickup_min || 0
+          eta_pickup_min: explicitPricingContext?.trip?.eta_pickup_min || 0,
+          eta_pickup_source:
+            explicitPricingContext?.trip?.eta_pickup_source ||
+            explicitPricingContext?.trip?.pickup_eta_source ||
+            'unavailable',
+          eta_pickup_authoritative:
+            explicitPricingContext?.trip?.eta_pickup_authoritative === true ||
+            explicitPricingContext?.trip?.pickup_eta_authoritative === true
         },
         operational: {
           current: {},
@@ -652,7 +668,9 @@ async function buildDerivedPricingContext({
     trip: {
       distance_km: toNumber(routeDistanceKm, 0),
       duration_min_traffic: Math.max(0, toNumber(routeDurationSecs, 0) / 60),
-      eta_pickup_min: derivedCurrent.avg_pickup_eta_min
+      eta_pickup_min: derivedCurrent.avg_pickup_eta_min,
+      eta_pickup_source: derivedCurrent.avg_pickup_eta_source,
+      eta_pickup_authoritative: false
     },
     operational: {
       current: derivedCurrent,
@@ -665,7 +683,9 @@ async function buildDerivedPricingContext({
         recent_exception_history: cachedState.recent_exception_history,
         degraded_neighbor_count: degradedNeighborCount,
         is_special_zone: Boolean(zoneType),
-        zone_type: zoneType
+        zone_type: zoneType,
+        pickup_eta_source: derivedCurrent.avg_pickup_eta_source,
+        pickup_eta_authoritative: false
       }, redisSnapshots.state)
     }
   };
@@ -682,6 +702,8 @@ async function buildDerivedPricingContext({
       trackedCells,
       degradedNeighborCount,
       derivedCurrent,
+      pickupEtaSource: derivedCurrent.avg_pickup_eta_source,
+      pickupEtaAuthoritative: false,
       derivedBaseline: derivedContext.operational.baseline,
       baselineSource: redisSnapshots.baselineSource || 'derived_heuristic',
       stateSource: redisSnapshots.stateSource || 'derived_fallback',

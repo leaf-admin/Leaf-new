@@ -1,6 +1,12 @@
 const crypto = require('crypto');
 const admin = require('firebase-admin');
 const firebaseConfig = require('../firebase-config');
+const { validateAuthoritativeFinancialSnapshot } = require('./ride-financial-contract');
+const {
+  FINANCIAL_COLLECTIONS,
+  getFinancialCollections,
+  resolveFinancialContext
+} = require('./financial-runtime-context');
 const { logStructured, logError } = require('../utils/logger');
 
 class FinancialLedgerService {
@@ -21,6 +27,12 @@ class FinancialLedgerService {
 
   normalizeBoolean(value) {
     return ['true', '1', 'yes', 'sim'].includes(String(value || '').toLowerCase());
+  }
+
+  sumLedgerLineAmounts(event = {}, account) {
+    return (Array.isArray(event?.lines) ? event.lines : [])
+      .filter((line) => line?.account === account && line?.direction === 'credit')
+      .reduce((sum, line) => sum + this.toCents(line.amountCents), 0);
   }
 
   normalizeLine(line = {}, index = 0) {
@@ -112,6 +124,16 @@ class FinancialLedgerService {
       };
     }
 
+    const contextResult = resolveFinancialContext(event, { allowLegacyOperational: true });
+    if (!contextResult.ok) {
+      return {
+        success: false,
+        code: contextResult.code,
+        error: contextResult.error
+      };
+    }
+    const financialContext = contextResult.context;
+    const { collections } = getFinancialCollections(financialContext);
     const firestore = firebaseConfig.getFirestore();
     if (!firestore) {
       return {
@@ -134,14 +156,25 @@ class FinancialLedgerService {
       ...event,
       lines: validation.lines
     });
-    const eventRef = firestore.collection('financial_ledger_events').doc(eventId);
-    const lineCollection = firestore.collection('financial_ledger_lines');
+    const eventRef = firestore.collection(collections.ledgerEvents).doc(eventId);
+    const lineCollection = firestore.collection(collections.ledgerLines);
 
     try {
       const result = await firestore.runTransaction(async (transaction) => {
         const eventDoc = await transaction.get(eventRef);
         if (eventDoc.exists) {
           const existing = eventDoc.data() || {};
+          if (
+            (existing.financialContextId && existing.financialContextId !== financialContext.contextId) ||
+            (financialContext.namespace === 'sandbox' && !existing.financialContextId)
+          ) {
+            return {
+              success: false,
+              code: 'LEDGER_FINANCIAL_CONTEXT_CONFLICT',
+              error: 'Evento contábil já existe com outro contexto financeiro',
+              eventId
+            };
+          }
           if (existing.balanceHash && existing.balanceHash !== balanceHash) {
             return {
               success: false,
@@ -180,6 +213,9 @@ class FinancialLedgerService {
           balanceHash,
           lines: validation.lines,
           metadata: event.metadata || {},
+          financialContext,
+          financialNamespace: financialContext.namespace,
+          financialContextId: financialContext.contextId,
           createdAt: admin.firestore.FieldValue.serverTimestamp(),
           createdAtIso: nowIso,
           updatedAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -199,6 +235,9 @@ class FinancialLedgerService {
             withdrawalId: event.withdrawalId || null,
             refundId: event.refundId || null,
             currency: 'BRL',
+            financialContext,
+            financialNamespace: financialContext.namespace,
+            financialContextId: financialContext.contextId,
             createdAt: admin.firestore.FieldValue.serverTimestamp(),
             createdAtIso: nowIso
           });
@@ -218,6 +257,7 @@ class FinancialLedgerService {
           eventId,
           eventType: event.eventType || 'ledger_event',
           rideId: event.rideId || null,
+          financialNamespace: financialContext.namespace,
           idempotentReplay: Boolean(result.idempotentReplay)
         });
       }
@@ -239,7 +279,7 @@ class FinancialLedgerService {
     }
   }
 
-  recordPaymentReceived({ rideId, chargeId, amountCents, passengerId, metadata = {} }) {
+  recordPaymentReceived({ rideId, chargeId, amountCents, passengerId, metadata = {}, financialContext = null }) {
     const amount = this.toCents(amountCents);
     return this.recordBalancedEvent({
       eventId: this.buildEventId('payment_received', [rideId, chargeId, amount]),
@@ -248,6 +288,7 @@ class FinancialLedgerService {
       rideId,
       chargeId,
       passengerId,
+      financialContext,
       metadata,
       lines: [
         {
@@ -270,7 +311,7 @@ class FinancialLedgerService {
     });
   }
 
-  recordRideSettlement({ rideId, driverId, totalAmountCents, netAmountCents, operationalFeeCents, wooviFeeCents, retainedFeeCents = 0, metadata = {} }) {
+  recordRideSettlement({ rideId, driverId, totalAmountCents, netAmountCents, operationalFeeCents, wooviFeeCents, retainedFeeCents = 0, metadata = {}, financialContext = null }) {
     const totalAmount = this.toCents(totalAmountCents);
     const netAmount = this.toCents(netAmountCents);
     const operationalFee = this.toCents(operationalFeeCents);
@@ -337,12 +378,13 @@ class FinancialLedgerService {
       source: 'billing_worker',
       rideId,
       driverId,
+      financialContext,
       metadata,
       lines
     });
   }
 
-  recordCancellationSettlement({ rideId, driverId, cancellationFeeCents, netAmountCents, wooviFeeCents, metadata = {} }) {
+  recordCancellationSettlement({ rideId, driverId, cancellationFeeCents, netAmountCents, wooviFeeCents, metadata = {}, financialContext = null }) {
     const cancellationFee = this.toCents(cancellationFeeCents);
     const netAmount = this.toCents(netAmountCents);
     const wooviFee = this.toCents(wooviFeeCents);
@@ -353,6 +395,7 @@ class FinancialLedgerService {
       source: 'billing_worker',
       rideId,
       driverId,
+      financialContext,
       metadata,
       lines: [
         {
@@ -383,7 +426,7 @@ class FinancialLedgerService {
     });
   }
 
-  recordRefund({ rideId, chargeId, refundId, amountCents, passengerId, reason, metadata = {} }) {
+  recordRefund({ rideId, chargeId, refundId, amountCents, passengerId, reason, metadata = {}, financialContext = null }) {
     const amount = this.toCents(amountCents);
     return this.recordBalancedEvent({
       eventId: this.buildEventId('refund_processed', [rideId, chargeId, refundId, amount]),
@@ -393,6 +436,7 @@ class FinancialLedgerService {
       chargeId,
       refundId,
       passengerId,
+      financialContext,
       metadata: {
         ...metadata,
         reason: reason || null
@@ -511,9 +555,9 @@ class FinancialLedgerService {
     });
   }
 
-  async listLedgerEventsByRide(firestore, rideId) {
+  async listLedgerEventsByRide(firestore, rideId, collections) {
     const snapshot = await firestore
-      .collection('financial_ledger_events')
+      .collection(collections.ledgerEvents)
       .where('rideId', '==', rideId)
       .limit(100)
       .get();
@@ -552,9 +596,9 @@ class FinancialLedgerService {
     return Array.from(rideIds);
   }
 
-  async listLedgerEventsByRideIds(firestore, rideIds = []) {
+  async listLedgerEventsByRideIds(firestore, rideIds = [], collections) {
     const eventGroups = await Promise.all(
-      rideIds.map((currentRideId) => this.listLedgerEventsByRide(firestore, currentRideId))
+      rideIds.map((currentRideId) => this.listLedgerEventsByRide(firestore, currentRideId, collections))
     );
     const eventsById = new Map();
     eventGroups.flat().forEach((event) => {
@@ -698,7 +742,7 @@ class FinancialLedgerService {
     }
   }
 
-  async reconcileRideFinancials({ rideId } = {}) {
+  async reconcileRideFinancials({ rideId, financialContext = null, providerEnvironment = null } = {}) {
     const firestore = firebaseConfig.getFirestore();
     if (!firestore || !rideId) {
       return {
@@ -707,18 +751,27 @@ class FinancialLedgerService {
       };
     }
 
+    const contextResult = resolveFinancialContext(
+      { financialContext, providerEnvironment },
+      { allowLegacyOperational: true }
+    );
+    if (!contextResult.ok) {
+      return { success: false, code: contextResult.code, error: contextResult.error, rideId };
+    }
+    const { collections } = getFinancialCollections(contextResult.context);
+
     try {
       const [paymentDoc, holdingDoc, distributionDoc] = await Promise.all([
-        firestore.collection('ride_payments').doc(rideId).get(),
-        firestore.collection('payment_holdings').doc(rideId).get(),
-        firestore.collection('payment_distributions').doc(rideId).get()
+        firestore.collection(collections.ridePayments).doc(rideId).get(),
+        firestore.collection(collections.paymentHoldings).doc(rideId).get(),
+        firestore.collection(collections.paymentDistributions).doc(rideId).get()
       ]);
       const issues = [];
       const payment = paymentDoc.exists ? paymentDoc.data() : null;
       const holding = holdingDoc.exists ? holdingDoc.data() : null;
       const distribution = distributionDoc.exists ? distributionDoc.data() : null;
       const ledgerRideIds = this.resolveLedgerRideIds({ rideId, payment, holding });
-      const ledgerEvents = await this.listLedgerEventsByRideIds(firestore, ledgerRideIds);
+      const ledgerEvents = await this.listLedgerEventsByRideIds(firestore, ledgerRideIds, collections);
 
       const paymentAmount = this.toCents(payment?.amount || holding?.amount || 0);
       const distributionTotal = this.toCents(distribution?.calculation?.totalAmount || distribution?.totalAmount || 0);
@@ -765,15 +818,120 @@ class FinancialLedgerService {
         });
       }
 
+      const isManualOrMultiLegDistribution = ['manual_settlement_required', 'multi_leg']
+        .includes(String(distribution?.mode || '').toLowerCase());
+      const shouldRequireFinancialSnapshot = Boolean(distribution && distributionTotal > 0 && !isManualOrMultiLegDistribution);
+      let financialSnapshot = null;
+      if (shouldRequireFinancialSnapshot) {
+        const snapshotValidation = validateAuthoritativeFinancialSnapshot(
+          distribution?.calculation?.financialContract || distribution?.financialSnapshot || {},
+          { passengerPaidCents: distributionTotal }
+        );
+        if (!snapshotValidation.valid) {
+          issues.push({
+            code: 'DISTRIBUTION_FINANCIAL_SNAPSHOT_INVALID',
+            severity: 'high',
+            message: 'Distribuição concluída sem snapshot financeiro backend_final válido',
+            snapshotCode: snapshotValidation.code
+          });
+        } else {
+          financialSnapshot = snapshotValidation.snapshot;
+          const distributionNetAmount = this.toCents(distribution?.netAmount);
+          const distributionOperationalFee = this.toCents(distribution?.retainedFees?.operationalFee);
+          const distributionWooviFee = this.toCents(distribution?.retainedFees?.wooviFee);
+          const distributionSubscriptionFee = this.toCents(distribution?.subscriptionRetainedFee);
+
+          if (distributionNetAmount !== financialSnapshot.driverNetAmountCents) {
+            issues.push({
+              code: 'DISTRIBUTION_DRIVER_NET_MISMATCH',
+              severity: 'high',
+              message: 'Valor líquido da distribuição diverge do snapshot final',
+              distributionNetAmountCents: distributionNetAmount,
+              snapshotDriverNetAmountCents: financialSnapshot.driverNetAmountCents
+            });
+          }
+          if (
+            distributionOperationalFee !== financialSnapshot.operationalFeeCents ||
+            distributionWooviFee !== financialSnapshot.paymentIntermediationFeeCents ||
+            distributionSubscriptionFee !== financialSnapshot.subscriptionRetainedFeeCents
+          ) {
+            issues.push({
+              code: 'DISTRIBUTION_RETAINED_FEES_MISMATCH',
+              severity: 'high',
+              message: 'Taxas retidas na distribuição divergem do snapshot final',
+              distributionOperationalFeeCents: distributionOperationalFee,
+              distributionWooviFeeCents: distributionWooviFee,
+              distributionSubscriptionFeeCents: distributionSubscriptionFee,
+              snapshotOperationalFeeCents: financialSnapshot.operationalFeeCents,
+              snapshotWooviFeeCents: financialSnapshot.paymentIntermediationFeeCents,
+              snapshotSubscriptionFeeCents: financialSnapshot.subscriptionRetainedFeeCents
+            });
+          }
+          if (settlementEvent) {
+            const ledgerDriverNetAmount = this.sumLedgerLineAmounts(
+              settlementEvent,
+              'liability:driver_balance_payable'
+            );
+            const ledgerOperationalFee = this.sumLedgerLineAmounts(
+              settlementEvent,
+              'revenue:leaf_operational_fee'
+            );
+            const ledgerWooviFee = this.sumLedgerLineAmounts(
+              settlementEvent,
+              'contra_revenue:payment_intermediation_fee'
+            );
+            const ledgerSubscriptionFee = this.sumLedgerLineAmounts(
+              settlementEvent,
+              'revenue:driver_subscription_settlement'
+            );
+
+            if (ledgerDriverNetAmount !== financialSnapshot.driverNetAmountCents) {
+              issues.push({
+                code: 'SETTLEMENT_DRIVER_NET_MISMATCH',
+                severity: 'high',
+                message: 'Valor líquido do ledger diverge do snapshot final',
+                ledgerDriverNetAmountCents: ledgerDriverNetAmount,
+                snapshotDriverNetAmountCents: financialSnapshot.driverNetAmountCents
+              });
+            }
+            if (
+              ledgerOperationalFee !== financialSnapshot.operationalFeeCents ||
+              ledgerWooviFee !== financialSnapshot.paymentIntermediationFeeCents ||
+              ledgerSubscriptionFee !== financialSnapshot.subscriptionRetainedFeeCents
+            ) {
+              issues.push({
+                code: 'SETTLEMENT_RETAINED_FEES_MISMATCH',
+                severity: 'high',
+                message: 'Taxas do ledger divergem do snapshot final',
+                ledgerOperationalFeeCents: ledgerOperationalFee,
+                ledgerWooviFeeCents: ledgerWooviFee,
+                ledgerSubscriptionFeeCents: ledgerSubscriptionFee,
+                snapshotOperationalFeeCents: financialSnapshot.operationalFeeCents,
+                snapshotWooviFeeCents: financialSnapshot.paymentIntermediationFeeCents,
+                snapshotSubscriptionFeeCents: financialSnapshot.subscriptionRetainedFeeCents
+              });
+            }
+          }
+        }
+      }
+
       const report = {
         rideId,
         ok: issues.length === 0,
-        testData: this.isTestRideId(rideId),
+        testData: contextResult.context.namespace === 'sandbox' || this.isTestRideId(rideId),
+        financialContext: contextResult.context,
+        financialNamespace: contextResult.context.namespace,
+        financialContextId: contextResult.context.contextId,
         issues,
         totals: {
           paymentAmountCents: paymentAmount,
           distributionTotalCents: distributionTotal,
-          ledgerEventCount: ledgerEvents.length
+          ledgerEventCount: ledgerEvents.length,
+          passengerGrossCents: financialSnapshot?.passengerPaidCents || null,
+          driverNetAmountCents: financialSnapshot?.driverNetAmountCents || null,
+          operationalFeeCents: financialSnapshot?.operationalFeeCents || null,
+          wooviFeeCents: financialSnapshot?.paymentIntermediationFeeCents || null,
+          subscriptionRetainedFeeCents: financialSnapshot?.subscriptionRetainedFeeCents || null
         },
         references: {
           ledgerRideIds,
@@ -783,7 +941,7 @@ class FinancialLedgerService {
         checkedAtIso: new Date().toISOString()
       };
 
-      await firestore.collection('financial_reconciliation_reports').doc(rideId).set(report, { merge: true });
+      await firestore.collection(collections.reconciliationReports).doc(rideId).set(report, { merge: true });
 
       return {
         success: true,
@@ -823,7 +981,13 @@ class FinancialLedgerService {
     return docs;
   }
 
-  async reconcileRecentRideFinancials({ rideId = null, limit = 100, includeTestData = false } = {}) {
+  async reconcileRecentRideFinancials({
+    rideId = null,
+    limit = 100,
+    includeTestData = false,
+    financialContext = null,
+    providerEnvironment = null
+  } = {}) {
     const firestore = firebaseConfig.getFirestore();
     if (!firestore) {
       return {
@@ -834,14 +998,42 @@ class FinancialLedgerService {
 
     const safeLimit = Math.min(Math.max(Number.parseInt(limit, 10) || 100, 1), 500);
     const shouldIncludeTestData = this.normalizeBoolean(includeTestData);
+    const contextResult = resolveFinancialContext(
+      { financialContext, providerEnvironment },
+      { allowLegacyOperational: true }
+    );
+    if (!contextResult.ok) {
+      return { success: false, code: contextResult.code, error: contextResult.error };
+    }
+    const { collections } = getFinancialCollections(contextResult.context);
 
     try {
       const rideIds = [];
       let skippedTestRideCount = 0;
       if (rideId) {
+        if (contextResult.legacy === true) {
+          const [operationalDoc, sandboxDoc] = await Promise.all([
+            firestore.collection(FINANCIAL_COLLECTIONS.operational.ridePayments).doc(String(rideId)).get(),
+            firestore.collection(FINANCIAL_COLLECTIONS.sandbox.ridePayments).doc(String(rideId)).get()
+          ]);
+          if (!operationalDoc.exists && sandboxDoc.exists) {
+            return {
+              success: false,
+              code: 'SANDBOX_RECONCILIATION_CONTEXT_REQUIRED',
+              error: 'Reconciliação sandbox exige contexto financeiro explícito'
+            };
+          }
+          if (operationalDoc.exists && sandboxDoc.exists) {
+            return {
+              success: false,
+              code: 'FINANCIAL_NAMESPACE_CONFLICT',
+              error: 'Corrida existe nos namespaces operacional e sandbox'
+            };
+          }
+        }
         rideIds.push(String(rideId));
       } else {
-        let query = firestore.collection('ride_payments');
+        let query = firestore.collection(collections.ridePayments);
         if (typeof query.limit === 'function') {
           query = query.limit(shouldIncludeTestData ? safeLimit : Math.min(safeLimit * 5, 500));
         }
@@ -862,7 +1054,10 @@ class FinancialLedgerService {
       const results = [];
 
       for (const currentRideId of uniqueRideIds) {
-        const result = await this.reconcileRideFinancials({ rideId: currentRideId });
+        const result = await this.reconcileRideFinancials({
+          rideId: currentRideId,
+          financialContext: contextResult.context
+        });
         results.push({
           rideId: currentRideId,
           success: Boolean(result.success),
@@ -884,6 +1079,7 @@ class FinancialLedgerService {
         failedRideCount: failed.length,
         skippedTestRideCount,
         includeTestData: shouldIncludeTestData,
+        financialNamespace: contextResult.context.namespace,
         results
       };
     } catch (error) {

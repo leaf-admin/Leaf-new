@@ -6,6 +6,20 @@ cd "$BACKEND_DIR"
 
 RUNTIME_MODE="${LEAF_SERVER_RUNTIME:-modular}"
 CUSTOM_ENTRY="${LEAF_SERVER_ENTRY:-}"
+NODE_ENV_NORMALIZED="$(printf '%s' "${NODE_ENV:-development}" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
+
+# Production has one executable surface: the modular runtime. Legacy/custom
+# entrypoints remain available for local forensic work, but no environment flag
+# may reopen them (or skip config validation) in a production process.
+if [[ "$NODE_ENV_NORMALIZED" == "production" ]] && [[ "$RUNTIME_MODE" != "modular" ]]; then
+  echo "[runtime][error] Produção aceita somente LEAF_SERVER_RUNTIME=modular"
+  exit 2
+fi
+
+if [[ "$NODE_ENV_NORMALIZED" == "production" ]] && [[ "${LEAF_SKIP_RUNTIME_CONFIG_VALIDATION:-false}" == "true" ]]; then
+  echo "[runtime][error] Validação de configuração não pode ser ignorada em produção"
+  exit 2
+fi
 
 case "$RUNTIME_MODE" in
   modular)
@@ -33,7 +47,7 @@ if [[ ! -f "$ENTRY_FILE" ]]; then
   exit 2
 fi
 
-if [[ "${LEAF_SKIP_RUNTIME_CONFIG_VALIDATION:-false}" != "true" ]] && [[ "${NODE_ENV:-development}" == "production" ]]; then
+if [[ "${LEAF_SKIP_RUNTIME_CONFIG_VALIDATION:-false}" != "true" ]] && [[ "$NODE_ENV_NORMALIZED" == "production" ]]; then
   echo "[runtime] validando configuração de runtime (produção)"
   node "$BACKEND_DIR/scripts/deploy/validate-runtime-config.js"
 fi

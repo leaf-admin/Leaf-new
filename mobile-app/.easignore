@@ -2,8 +2,16 @@ node_modules
 # package-lock.json
 .git
 .expo
+QA/
+dist/
 
 # Monorepo/workspace artifacts outside the mobile build surface
+../QA/
+../test-results/
+../artifacts/
+../qa-artifacts/
+../generated-assets/
+../emulator/
 .local-tools/
 .venv/
 .venv_*/

@@ -29,6 +29,7 @@ import { complainreducer } from './reducers/complainreducer';
 import { usedreferralreducer } from "./reducers/usedreferralreducer";
 import { fleetadminearningreducer } from "./reducers/fleetadminearningreducer";
 import profileToggleReducer from "./reducers/profileToggleReducer";
+import onboardingReducer from "../../common/common-packages/src/reducers/onboardingReducer";
 
 const rootReducer = {
   auth: authreducer,
@@ -60,6 +61,7 @@ const rootReducer = {
   usedreferralid:usedreferralreducer,
   fleetadminearningdata: fleetadminearningreducer,
   profileToggle: profileToggleReducer,
+  onboarding: onboardingReducer,
 };
 
 const store = configureStore({

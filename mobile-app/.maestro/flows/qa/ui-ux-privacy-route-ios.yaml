@@ -1,0 +1,15 @@
+appId: br.com.leaf.ride
+---
+- extendedWaitUntil:
+    visible:
+      id: "robotaxi-menu-item-privacy-account-deletion"
+    timeout: 30000
+
+- tapOn:
+    id: "robotaxi-menu-item-privacy-account-deletion"
+
+- extendedWaitUntil:
+    visible: "Dados, preferências e direitos da sua conta."
+    timeout: 30000
+
+- takeScreenshot: "qa-artifacts/ui-ux-simulator-2026-07-11/p0-route-audit/release/passenger/privacy"

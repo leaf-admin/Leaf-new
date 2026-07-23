@@ -9,9 +9,15 @@ const {
   driverDocumentAnalysisQueue,
   ALLOWED_DRIVER_DOCUMENT_TYPES,
   sanitizeDocumentType,
-  recomputeDriverActivationStatus
+  recomputeDriverActivationStatus,
+  commitDocumentSubmissionState
 } = require('../services/driver-document-analysis-queue');
 const driverApplicationService = require('../services/driver-application-service');
+const canonicalDriverDocumentApprovalService = require('../services/canonical-driver-document-approval-service');
+const {
+  sha256Buffer
+} = require('../services/canonical-driver-document-approval-service');
+const { resolveKycRuntimeForUser } = require('../services/kyc-runtime-scope-service');
 
 const router = express.Router();
 
@@ -30,6 +36,11 @@ const upload = multer({
     cb(new Error('Apenas PDFs são aceitos para ativação de motorista.'), false);
   }
 });
+
+const DRIVER_DOCUMENT_SIGNED_URL_TTL_MS = Math.max(
+  5 * 60 * 1000,
+  Number.parseInt(process.env.DRIVER_DOCUMENT_SIGNED_URL_TTL_MS || `${24 * 60 * 60 * 1000}`, 10) || 24 * 60 * 60 * 1000
+);
 
 function ensureFirebaseInitialized() {
   if (Array.isArray(admin.apps) && admin.apps.length > 0) {
@@ -55,6 +66,110 @@ function parseBoolean(value, fallback = false) {
     return fallback;
   }
   return normalized === '1' || normalized === 'true' || normalized === 'sim' || normalized === 'yes';
+}
+
+function createActivationStorageError(message, cause = null) {
+  const error = new Error(message);
+  error.code = 'DRIVER_ACTIVATION_STORAGE_UPLOAD_FAILED';
+  if (cause) {
+    error.cause = cause;
+  }
+  return error;
+}
+
+function normalizeUserType(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function resolveProfileUserType(profile = {}) {
+  return normalizeUserType(
+    profile?.usertype ||
+      profile?.userType ||
+      profile?.role ||
+      profile?.profileSelection?.userType ||
+      ''
+  );
+}
+
+function resolveClaimsUserType(decoded = {}) {
+  return normalizeUserType(
+    decoded?.usertype ||
+      decoded?.userType ||
+      decoded?.user_type ||
+      decoded?.role ||
+      ''
+  );
+}
+
+function createDriverProfileLookupError(message, cause = null) {
+  const error = new Error(message);
+  error.code = 'DRIVER_PROFILE_LOOKUP_FAILED';
+  if (cause) {
+    error.cause = cause;
+  }
+  return error;
+}
+
+async function resolveDriverAuthProfile(uid, decoded) {
+  let firestore = null;
+  try {
+    firestore = firebaseConfig?.getFirestore?.() || admin.firestore?.();
+  } catch (cause) {
+    throw createDriverProfileLookupError(
+      'Falha ao obter o Firestore para validar o perfil do motorista.',
+      cause
+    );
+  }
+
+  if (!firestore) {
+    throw createDriverProfileLookupError(
+      'Firestore indisponível para validar o perfil do motorista.'
+    );
+  }
+
+  let firestoreProfile = null;
+  try {
+    const userDoc = await firestore.collection('users').doc(uid).get();
+    firestoreProfile = userDoc?.exists ? userDoc.data() || {} : null;
+  } catch (cause) {
+    throw createDriverProfileLookupError(
+      'Falha ao consultar o perfil canônico do motorista.',
+      cause
+    );
+  }
+
+  const firestoreUserType = resolveProfileUserType(firestoreProfile || {});
+  const claimsUserType = resolveClaimsUserType(decoded);
+  const userType = firestoreUserType || claimsUserType;
+
+  // O RTDB legado pode complementar dados de exibição quando o documento canônico
+  // ainda não existe, mas nunca participa da decisão de autorização.
+  let compatibilityProfile = null;
+  if (!firestoreProfile) {
+    try {
+      const db = firebaseConfig?.getRealtimeDB?.();
+      if (db) {
+        const userSnapshot = await db.ref(`users/${uid}`).once('value');
+        compatibilityProfile = userSnapshot?.val?.() || null;
+      }
+    } catch (error) {
+      logStructured('warn', 'Perfil legado indisponível durante autenticação de ativação', {
+        service: 'driver-activation-routes',
+        driverId: uid,
+        error: error?.message || String(error)
+      });
+    }
+  }
+
+  return {
+    profile: firestoreProfile || compatibilityProfile || {},
+    profileSource: firestoreProfile
+      ? 'firestore'
+      : compatibilityProfile
+        ? 'rtdb_compatibility'
+        : 'claims',
+    userType
+  };
 }
 
 async function requireDriverAuth(req, res, next) {
@@ -87,26 +202,11 @@ async function requireDriverAuth(req, res, next) {
       });
     }
 
-    const db = firebaseConfig?.getRealtimeDB?.();
-    if (!db) {
-      return res.status(503).json({
-        success: false,
-        message: 'Realtime Database indisponível.'
-      });
-    }
-
-    const userSnapshot = await db.ref(`users/${uid}`).once('value');
-    const userProfile = userSnapshot.val() || {};
-    const userType = String(
-      userProfile?.usertype ||
-        userProfile?.userType ||
-        userProfile?.profileSelection?.userType ||
-        decoded?.usertype ||
-        decoded?.userType ||
-        ''
-    )
-      .trim()
-      .toLowerCase();
+    const {
+      profile: userProfile,
+      profileSource,
+      userType
+    } = await resolveDriverAuthProfile(uid, decoded);
 
     if (userType !== 'driver') {
       return res.status(403).json({
@@ -120,6 +220,7 @@ async function requireDriverAuth(req, res, next) {
       token,
       decoded,
       profile: userProfile,
+      profileSource,
       userType
     };
 
@@ -128,6 +229,15 @@ async function requireDriverAuth(req, res, next) {
     logError(error, 'Falha na autenticação do motorista para ativação', {
       service: 'driver-activation-routes'
     });
+
+    if (error?.code === 'DRIVER_PROFILE_LOOKUP_FAILED') {
+      return res.status(503).json({
+        success: false,
+        code: 'DRIVER_PROFILE_LOOKUP_FAILED',
+        message: 'Não foi possível validar o perfil do motorista agora. Tente novamente.'
+      });
+    }
+
     return res.status(401).json({
       success: false,
       message: 'Token inválido ou expirado.'
@@ -137,10 +247,7 @@ async function requireDriverAuth(req, res, next) {
 
 async function uploadActivationPdfToStorage({ driverId, documentType, file }) {
   if (!file?.buffer || !driverId || !documentType) {
-    return {
-      fileUrl: null,
-      filePath: null
-    };
+    throw createActivationStorageError('Arquivo de ativação inválido para armazenamento.');
   }
 
   try {
@@ -153,6 +260,7 @@ async function uploadActivationPdfToStorage({ driverId, documentType, file }) {
     const objectPath = `driver-activation/${driverId}/${documentType}/${Date.now()}_${originalName.replace(extension, '')}${extension}`;
 
     const storageFile = bucket.file(objectPath);
+    const signedUrlExpiresAt = new Date(Date.now() + DRIVER_DOCUMENT_SIGNED_URL_TTL_MS);
     await storageFile.save(file.buffer, {
       resumable: false,
       metadata: {
@@ -164,15 +272,27 @@ async function uploadActivationPdfToStorage({ driverId, documentType, file }) {
         }
       }
     });
+    const [storedMetadata] = await storageFile.getMetadata();
+    const storageGeneration = String(storedMetadata?.generation || '').trim();
+    if (!/^\d+$/.test(storageGeneration)) {
+      throw createActivationStorageError('Firebase Storage não retornou generation do documento.');
+    }
 
     const [signedUrl] = await storageFile.getSignedUrl({
       action: 'read',
-      expires: '2035-01-01'
+      expires: signedUrlExpiresAt
     });
+
+    if (!String(signedUrl || '').trim()) {
+      throw createActivationStorageError('Firebase Storage não retornou URL assinada para o documento.');
+    }
 
     return {
       fileUrl: signedUrl,
-      filePath: objectPath
+      filePath: objectPath,
+      fileUrlExpiresAt: signedUrlExpiresAt.toISOString(),
+      documentSha256: sha256Buffer(file.buffer),
+      storageGeneration
     };
   } catch (error) {
     logStructured('warn', 'Falha ao enviar PDF de ativação para o Firebase Storage', {
@@ -182,16 +302,187 @@ async function uploadActivationPdfToStorage({ driverId, documentType, file }) {
       error: error?.message || String(error)
     });
 
+    throw createActivationStorageError(
+      'Não foi possível armazenar o documento de ativação. Tente novamente.',
+      error
+    );
+  }
+}
+
+async function deleteActivationStorageObject(filePath, { driverId, reason } = {}) {
+  const safePath = String(filePath || '').trim();
+  if (!safePath) return false;
+  try {
+    const bucket = admin.storage().bucket();
+    await bucket.file(safePath).delete({ ignoreNotFound: true });
+    return true;
+  } catch (error) {
+    logStructured('warn', 'Falha ao remover upload de CNH que perdeu o guard KYC', {
+      service: 'driver-activation-routes',
+      driverId: driverId || null,
+      reason: reason || null,
+      error: error?.message || String(error)
+    });
+    return false;
+  }
+}
+
+function createCnhUploadVerificationLease({ kycRuntime, driverId, claim, res }) {
+  let released = false;
+  let lost = false;
+  let renewalInFlight = null;
+
+  const renew = async () => {
+    if (released || lost) return false;
+    if (renewalInFlight) return renewalInFlight;
+    renewalInFlight = Promise.resolve()
+      .then(() => kycRuntime.trust.renewVerificationWindow(claim))
+      .then((held) => {
+        if (held !== true) lost = true;
+        return held === true;
+      })
+      .catch(() => {
+        lost = true;
+        return false;
+      })
+      .finally(() => {
+        renewalInFlight = null;
+      });
+    return renewalInFlight;
+  };
+
+  const timer = setInterval(() => {
+    void renew();
+  }, 10 * 1000);
+  timer.unref?.();
+
+  const release = async () => {
+    if (released) return;
+    released = true;
+    clearInterval(timer);
+    await kycRuntime.trust.releaseVerificationWindow(claim).catch(() => null);
+  };
+  res.once('finish', () => { void release(); });
+  res.once('close', () => { void release(); });
+
+  return {
+    async assertHeld() {
+      if (lost || !(await renew())) {
+        const error = new Error('A janela segura para troca da CNH foi perdida');
+        error.code = 'KYC_VERIFICATION_LEASE_LOST';
+        throw error;
+      }
+      return true;
+    },
+    release
+  };
+}
+
+function sendCnhUploadGuardError(res, error) {
+  const permanentlyBlocked = error?.code === 'KYC_IDENTITY_FRAUD_PERMANENT_BLOCK';
+  const reviewHold = error?.code === 'KYC_IDENTITY_REVIEW_HOLD';
+  const verificationBusy = error?.code === 'KYC_VERIFICATION_IN_PROGRESS';
+  const leaseLost = error?.code === 'KYC_VERIFICATION_LEASE_LOST';
+  const statusCode = permanentlyBlocked || reviewHold
+    ? 423
+    : verificationBusy
+      ? 409
+      : 503;
+  return res.status(statusCode).json({
+    success: false,
+    code: error?.code || 'KYC_IDENTITY_REVIEW_GUARD_UNAVAILABLE',
+    message: permanentlyBlocked
+      ? 'Esta conta nao pode substituir a CNH.'
+      : reviewHold
+        ? 'A CNH nao pode ser alterada enquanto sua solicitacao de analise estiver em andamento.'
+        : verificationBusy
+          ? 'Outra validacao de identidade esta em andamento. Tente novamente depois.'
+          : leaseLost
+            ? 'Nao foi possivel concluir a troca da CNH com seguranca. Tente novamente.'
+            : 'Nao foi possivel validar a troca da CNH agora.'
+  });
+}
+
+const DOCUMENT_CONFLICT_CODES = new Set([
+  'DRIVER_DOCUMENT_MUTATION_BUSY',
+  'DRIVER_DOCUMENT_MUTATION_LEASE_LOST',
+  'DRIVER_ACTIVATION_DOCUMENT_BINDING_MISMATCH',
+  'DRIVER_DOCUMENT_SUBMISSION_BINDING_MISMATCH',
+  'KYC_VERIFICATION_IN_PROGRESS',
+  'KYC_VERIFICATION_LEASE_LOST'
+]);
+
+function publicDriverActivationFailure(error, operation = 'document') {
+  const code = String(error?.code || '').trim();
+  if (DOCUMENT_CONFLICT_CODES.has(code)) {
     return {
-      fileUrl: null,
-      filePath: null
+      status: 409,
+      code: 'DRIVER_ACTIVATION_DOCUMENT_CONFLICT',
+      message: 'Outro envio está sendo finalizado. Aguarde alguns instantes e tente novamente.',
+      retryable: true
     };
   }
+  if (code === 'DRIVER_ACTIVATION_STORAGE_UPLOAD_FAILED') {
+    return {
+      status: 503,
+      code,
+      message: 'Não foi possível armazenar o documento agora. Tente novamente.',
+      retryable: true
+    };
+  }
+  const copies = {
+    consent: 'Não foi possível atualizar sua autorização agora. Tente novamente.',
+    status: 'Não foi possível atualizar o status do cadastro agora.',
+    documents: 'Não foi possível carregar seus documentos agora.',
+    document: 'Não foi possível enviar o documento agora. Tente novamente.'
+  };
+  return {
+    status: 503,
+    code: `DRIVER_ACTIVATION_${String(operation || 'document').toUpperCase()}_UNAVAILABLE`,
+    message: copies[operation] || copies.document,
+    retryable: true
+  };
+}
+
+function sendPublicDriverActivationFailure(res, error, operation) {
+  const { status, ...payload } = publicDriverActivationFailure(error, operation);
+  return res.status(status).json({ success: false, ...payload });
 }
 
 router.post(
   '/api/drivers/me/activation/documents/:type',
   requireDriverAuth,
+  async (req, res, next) => {
+    const documentType = sanitizeDocumentType(req.params.type);
+    if (documentType !== 'cnh') return next();
+    try {
+      const kycRuntime = await resolveKycRuntimeForUser({
+        userId: req.user.uid,
+        actor: { uid: req.user.uid, id: req.user.uid, role: 'driver' }
+      });
+      const verificationWindowClaim = await kycRuntime.trust
+        .claimVerificationWindow(req.user.uid, {
+          scope: 'canonical_cnh_replacement'
+        });
+      if (!verificationWindowClaim?.acquired) {
+        return sendCnhUploadGuardError(res, {
+          code: 'KYC_VERIFICATION_IN_PROGRESS'
+        });
+      }
+      const lease = createCnhUploadVerificationLease({
+        kycRuntime,
+        driverId: req.user.uid,
+        claim: verificationWindowClaim,
+        res
+      });
+      req.cnhUploadKycGuard = { kycRuntime, lease };
+      await lease.assertHeld();
+      await kycRuntime.workflow.assertCnhUploadAllowed(req.user.uid);
+      return next();
+    } catch (error) {
+      return sendCnhUploadGuardError(res, error);
+    }
+  },
   (req, res, next) => {
     upload.single('pdf')(req, res, err => {
       if (!err) {
@@ -200,7 +491,8 @@ router.post(
 
       return res.status(400).json({
         success: false,
-        message: err?.message || 'Falha no upload do documento.'
+        code: 'DRIVER_ACTIVATION_PDF_REQUIRED',
+        message: 'Envie um arquivo PDF válido de até 20 MB.'
       });
     });
   },
@@ -234,11 +526,41 @@ router.post(
       const nowIso = new Date().toISOString();
       const submissionId = `${nowIso.replace(/[^0-9]/g, '')}_${Math.random().toString(16).slice(2, 8)}`;
 
-      const { fileUrl, filePath } = await uploadActivationPdfToStorage({
+      const {
+        fileUrl,
+        filePath,
+        fileUrlExpiresAt,
+        documentSha256,
+        storageGeneration
+      } = await uploadActivationPdfToStorage({
         driverId,
         documentType,
         file: req.file
       });
+
+      if (!fileUrl || !filePath) {
+        throw createActivationStorageError('Documento de ativação não foi armazenado corretamente.');
+      }
+
+      if (documentType === 'cnh') {
+        try {
+          const guard = req.cnhUploadKycGuard;
+          if (!guard?.kycRuntime || !guard?.lease) {
+            const guardError = new Error('Guard canonico da troca de CNH indisponivel');
+            guardError.code = 'KYC_IDENTITY_REVIEW_GUARD_UNAVAILABLE';
+            throw guardError;
+          }
+          await guard.lease.assertHeld();
+          await guard.kycRuntime.workflow.assertCnhUploadAllowed(driverId);
+          await guard.lease.assertHeld();
+        } catch (guardError) {
+          await deleteActivationStorageObject(filePath, {
+            driverId,
+            reason: guardError?.code || 'cnh_guard_revalidation_failed'
+          });
+          throw guardError;
+        }
+      }
 
       const metadata = {
         fileName: sanitizeFilename(req.file.originalname || `${documentType}.pdf`),
@@ -246,9 +568,25 @@ router.post(
         fileSize: Number(req.file.size || 0),
         fileUrl,
         filePath,
+        fileUrlExpiresAt,
+        documentSha256,
+        storageGeneration,
         uploadedAt: nowIso,
         createdAt: nowIso
       };
+
+      if (documentType === 'cnh') {
+        await canonicalDriverDocumentApprovalService.markPending({
+          driverId,
+          documentType,
+          submissionId,
+          filePath,
+          documentSha256,
+          storageGeneration,
+          uploadedAt: nowIso,
+          fileSize: Number(req.file.size || 0)
+        });
+      }
 
       const activationDocPayload = {
         documentType,
@@ -260,25 +598,32 @@ router.post(
         ...metadata
       };
 
-      await db.ref().update({
-        [`driver_activation/${driverId}/documents/${documentType}`]: activationDocPayload,
-        [`driver_activation/${driverId}/documents_history/${submissionId}`]: activationDocPayload,
-        [`driver_activation/${driverId}/updatedAt`]: nowIso,
-        [`users/${driverId}/documents/${documentType}`]: {
-          type: documentType,
-          status: 'pending',
-          analysisStatus: 'in_review',
-          analysisReason: '',
-          reviewedAt: null,
-          updatedAt: nowIso,
-          uploadedAt: nowIso,
-          fileName: metadata.fileName,
-          fileType: metadata.fileType,
-          fileSize: metadata.fileSize,
-          fileUrl,
-          filePath,
-          lastSubmissionId: submissionId
-        }
+      const userDocumentPayload = {
+        type: documentType,
+        status: 'pending',
+        analysisStatus: 'in_review',
+        analysisReason: '',
+        reviewedAt: null,
+        updatedAt: nowIso,
+        uploadedAt: nowIso,
+        fileName: metadata.fileName,
+        fileType: metadata.fileType,
+        fileSize: metadata.fileSize,
+        fileUrl,
+        filePath,
+        fileUrlExpiresAt,
+        documentSha256,
+        storageGeneration,
+        lastSubmissionId: submissionId
+      };
+
+      await commitDocumentSubmissionState({
+        db,
+        driverId,
+        documentType,
+        activationDocument: activationDocPayload,
+        userDocument: userDocumentPayload,
+        updatedAt: nowIso
       });
       try {
         await driverApplicationService.syncDriverApplication(driverId, {
@@ -341,15 +686,35 @@ router.post(
         }
       });
     } catch (error) {
+      if (
+        String(req.params?.type || '').trim().toLowerCase() === 'cnh'
+        && [
+          'KYC_IDENTITY_FRAUD_PERMANENT_BLOCK',
+          'KYC_IDENTITY_REVIEW_HOLD',
+          'KYC_VERIFICATION_IN_PROGRESS',
+          'KYC_VERIFICATION_LEASE_LOST',
+          'KYC_IDENTITY_REVIEW_GUARD_UNAVAILABLE'
+        ].includes(error?.code)
+      ) {
+        return sendCnhUploadGuardError(res, error);
+      }
+      if (error?.code === 'DRIVER_ACTIVATION_STORAGE_UPLOAD_FAILED') {
+        logStructured('warn', 'Upload de documento de ativação rejeitado antes de persistência', {
+          service: 'driver-activation-routes',
+          driverId: req.user?.uid || null,
+          documentType: req.params?.type || null,
+          error: error.message
+        });
+
+        return sendPublicDriverActivationFailure(res, error, 'document');
+      }
+
       logError(error, 'Erro ao enviar documento de ativação', {
         service: 'driver-activation-routes',
         driverId: req.user?.uid || null,
         documentType: req.params?.type || null
       });
-      return res.status(500).json({
-        success: false,
-        message: `Erro ao processar documento: ${error.message}`
-      });
+      return sendPublicDriverActivationFailure(res, error, 'document');
     }
   }
 );
@@ -357,7 +722,15 @@ router.post(
 router.post('/api/drivers/me/activation/consent/background-check', requireDriverAuth, async (req, res) => {
   try {
     const driverId = req.user.uid;
-    const accepted = parseBoolean(req.body?.accepted, true);
+    if (typeof req.body?.accepted !== 'boolean') {
+      return res.status(400).json({
+        success: false,
+        code: 'BACKGROUND_CHECK_CONSENT_BOOLEAN_REQUIRED',
+        message: 'O consentimento deve ser informado explicitamente como verdadeiro ou falso.'
+      });
+    }
+
+    const accepted = req.body.accepted;
     const io = req.app.get('io') || req.app.locals?.io || null;
 
     const snapshot = await driverDocumentAnalysisQueue.setConsentBackgroundCheck({
@@ -379,10 +752,7 @@ router.post('/api/drivers/me/activation/consent/background-check', requireDriver
       driverId: req.user?.uid || null
     });
 
-    return res.status(500).json({
-      success: false,
-      message: `Erro ao atualizar consentimento: ${error.message}`
-    });
+    return sendPublicDriverActivationFailure(res, error, 'consent');
   }
 });
 
@@ -401,10 +771,7 @@ router.get('/api/drivers/me/activation/status', requireDriverAuth, async (req, r
       driverId: req.user?.uid || null
     });
 
-    return res.status(500).json({
-      success: false,
-      message: `Erro ao obter status de ativação: ${error.message}`
-    });
+    return sendPublicDriverActivationFailure(res, error, 'status');
   }
 });
 
@@ -436,10 +803,7 @@ router.get('/api/drivers/me/activation/documents', requireDriverAuth, async (req
       driverId: req.user?.uid || null
     });
 
-    return res.status(500).json({
-      success: false,
-      message: `Erro ao listar documentos de ativação: ${error.message}`
-    });
+    return sendPublicDriverActivationFailure(res, error, 'documents');
   }
 });
 

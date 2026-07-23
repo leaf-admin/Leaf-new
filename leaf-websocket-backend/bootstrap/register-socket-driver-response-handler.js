@@ -1,3 +1,18 @@
+const RideStateManager = require('../services/ride-state-manager');
+
+function boolEnv(name, fallback = false) {
+    const raw = process.env[name];
+    if (raw === undefined || raw === null || raw === '') return fallback;
+    return ['true', '1', 'yes', 'on'].includes(String(raw).trim().toLowerCase());
+}
+
+function isLegacyDriverResponseAcceptEnabled() {
+    if (String(process.env.NODE_ENV || '').trim().toLowerCase() === 'production') {
+        return false;
+    }
+    return boolEnv('ENABLE_LEGACY_DRIVER_RESPONSE_ACCEPT', false);
+}
+
 function registerSocketDriverResponseHandler({ socket, io, logStructured }) {
     // Resposta do motorista
     socket.on('driverResponse', async (data) => {
@@ -18,6 +33,22 @@ function registerSocketDriverResponseHandler({ socket, io, logStructured }) {
             }
 
             if (accepted) {
+                if (!isLegacyDriverResponseAcceptEnabled()) {
+                    socket.emit('driverResponseError', {
+                        code: 'LEGACY_DRIVER_RESPONSE_ACCEPT_DISABLED',
+                        error: 'Aceite legado desabilitado; use o fluxo acceptRide',
+                        bookingId
+                    });
+                    logStructured('warn', 'Aceite legado via driverResponse bloqueado', {
+                        service: 'websocket',
+                        socketId: socket.id,
+                        userId: socket.userId,
+                        bookingId,
+                        eventType: 'driverResponse'
+                    });
+                    return;
+                }
+
                 const activeBooking = io.activeBookings?.get(bookingId) || null;
                 const customerId =
                     activeBooking?.customerId ||
@@ -26,7 +57,7 @@ function registerSocketDriverResponseHandler({ socket, io, logStructured }) {
                     activeBooking?.passenger ||
                     null;
                 const normalizedStatus = String(activeBooking?.status || '').trim().toUpperCase();
-                const isTerminalBooking = ['COMPLETED', 'CANCELLED', 'CANCELED'].includes(normalizedStatus);
+                const isTerminalBooking = RideStateManager.isTerminalStateValue(normalizedStatus);
 
                 if (isTerminalBooking) {
                     socket.emit('driverResponseError', {
@@ -108,3 +139,4 @@ function registerSocketDriverResponseHandler({ socket, io, logStructured }) {
 }
 
 module.exports = registerSocketDriverResponseHandler;
+module.exports.isLegacyDriverResponseAcceptEnabled = isLegacyDriverResponseAcceptEnabled;

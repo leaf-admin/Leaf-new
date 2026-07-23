@@ -9,15 +9,7 @@
 
 const redisPool = require('../utils/redis-pool');
 const { logger } = require('../utils/logger');
-
-const TERMINAL_BOOKING_STATES = new Set([
-    'COMPLETED',
-    'CANCELED',
-    'CANCELLED',
-    'REJECTED',
-    'EXPIRED',
-    'NO_DRIVERS_FOUND'
-]);
+const RideStateManager = require('./ride-state-manager');
 
 function normalizeBookingState(value) {
     return String(value || '').trim().toUpperCase();
@@ -115,8 +107,8 @@ class DriverLockManager {
             const bookingStatus = normalizeBookingState(bookingStatusRaw);
             const staleLockDetected = (
                 (!bookingState && !bookingStatus) ||
-                TERMINAL_BOOKING_STATES.has(bookingState) ||
-                TERMINAL_BOOKING_STATES.has(bookingStatus)
+                RideStateManager.isTerminalStateValue(bookingState) ||
+                RideStateManager.isTerminalStateValue(bookingStatus)
             );
 
             if (staleLockDetected) {
@@ -256,4 +248,3 @@ class DriverLockManager {
 const driverLockManager = new DriverLockManager();
 
 module.exports = driverLockManager;
-

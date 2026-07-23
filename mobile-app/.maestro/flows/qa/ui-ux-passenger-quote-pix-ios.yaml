@@ -1,0 +1,12 @@
+appId: br.com.leaf.ride
+---
+- takeScreenshot: "qa-artifacts/ui-ux-simulator-2026-07-11/interaction/debug/passenger-quote"
+
+- tapOn:
+    point: "50%,89%"
+
+- extendedWaitUntil:
+    visible: ".*(Pagamento PIX|Gerando cobrança PIX...|Realize seu pagamento|Não foi possível gerar o Pix).*"
+    timeout: 120000
+
+- takeScreenshot: "qa-artifacts/ui-ux-simulator-2026-07-11/interaction/debug/passenger-pix"

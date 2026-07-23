@@ -29,7 +29,7 @@ class OpsOverviewService {
     return this.redisPool?.getConnection ? this.redisPool.getConnection() : null;
   }
 
-  async getOverview({ hours = 1, city = null, regionHash = null, autoEscalate = true } = {}) {
+  async getOverview({ hours = 1, city = null, regionHash = null, autoEscalate = false } = {}) {
     const redis = this.getRedis();
     const [
       metrics,
@@ -81,8 +81,10 @@ class OpsOverviewService {
     const rideHealthAlerts = [];
     const reassignmentAlert = this.rideHealthMonitor.buildReassignmentAlert(overview.rideHealth);
     const reviewAlert = this.rideHealthMonitor.buildReviewAlert(overview.rideHealth);
+    const driverSignalAlert = this.rideHealthMonitor.buildDriverSignalAlert(overview.rideHealth);
     if (reassignmentAlert) rideHealthAlerts.push(reassignmentAlert);
     if (reviewAlert) rideHealthAlerts.push(reviewAlert);
+    if (driverSignalAlert) rideHealthAlerts.push(driverSignalAlert);
     alerts.push(...rideHealthAlerts);
 
     if (overview.supportQueue.overdueAckCount > 0) {

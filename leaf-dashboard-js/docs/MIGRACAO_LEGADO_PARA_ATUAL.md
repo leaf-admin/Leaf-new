@@ -3,6 +3,8 @@
 ## Escopo
 - Origem legada: `leaf-dashboard/src/pages/*`
 - Destino atual: `leaf-dashboard-js/app/*` + `leaf-dashboard-js/src/*`
+- Dashboard ativo do produto: `leaf-dashboard-js`, servido por Next (`npm run dev`, `npm run build`, `npm run start`) e validado por `npm --prefix leaf-dashboard-js run qa:backoffice`.
+- Arquivos de manutenção como `scripts/maintenance/dashboard-server.js`, `scripts/maintenance/leaf-dashboard.service` e `scripts/maintenance/dashboard-nginx*.conf` pertencem à trilha estática legada/operacional e não são fonte de evidência para QA do dashboard atual.
 
 ## Status de Base (concluido)
 - [x] Auth JWT (`src/services/auth-service.js`)
@@ -33,4 +35,5 @@
 ## Regras
 - Nao adicionar nova funcionalidade no `leaf-dashboard` (apenas referencia).
 - Toda feature nova deve nascer no `leaf-dashboard-js`.
+- Evidência de dashboard só é aceita quando o DOM renderizado contém `data-leaf-dashboard-generation="current-next"`.
 - Ao concluir 100% da matriz, iniciar plano de descomissionamento do legado.

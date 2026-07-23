@@ -31,6 +31,10 @@ const {
     hasRideDispatchPreferences
 } = require('./ride-dispatch-preference-service');
 const driverEligibilityService = require('./driver-eligibility-service');
+const {
+    getDriverPaymentReservation,
+    reservationMatchesContext
+} = require('./payment-driver-reservation-service');
 
 const DISPATCHABLE_SEARCH_STATES = new Set([
     'PENDING',
@@ -47,7 +51,11 @@ const TERMINAL_LOCK_BOOKING_STATES = new Set([
     'CANCELLED',
     'REJECTED',
     'EXPIRED',
-    'NO_DRIVERS_FOUND'
+    'NO_DRIVERS_AVAILABLE',
+    'NO_DRIVERS_FOUND',
+    'EARLY_ENDED_BY_RIDER',
+    'INTERRUPTED_OPERATIONAL_ENDED',
+    'EARLY_ENDED_REVIEW'
 ]);
 const ELIGIBLE_DRIVER_GEO_KEY = process.env.ELIGIBLE_DRIVER_GEO_KEY || 'driver_locations_eligible';
 const ALL_DRIVER_GEO_KEY = process.env.ALL_DRIVER_GEO_KEY || 'driver_locations';
@@ -63,6 +71,57 @@ const incrementCounter = (target, key) => {
     const normalizedKey = String(key || 'UNKNOWN').trim() || 'UNKNOWN';
     target[normalizedKey] = Number.parseInt(target[normalizedKey] || 0, 10) + 1;
 };
+function parseMaybeJson(value, fallback) {
+    if (!value) return fallback;
+    if (typeof value === 'object') return value;
+    try {
+        return JSON.parse(value);
+    } catch (_error) {
+        return fallback;
+    }
+}
+function resolveRequestedCategory(value = {}) {
+    return value?.carType ||
+        value?.requestedCarType ||
+        value?.vehicleCategory ||
+        value?.vehicleType ||
+        null;
+}
+function normalizeRouteCoordinate(value) {
+    const lat = Number(value?.lat ?? value?.latitude);
+    const lng = Number(value?.lng ?? value?.longitude);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+    if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return null;
+    return { lat, lng };
+}
+function normalizeRouteCoordinatesPayload(value = []) {
+    const parsed = parseMaybeJson(value, []);
+    const source = Array.isArray(parsed)
+        ? parsed
+        : Array.isArray(parsed?.coordinates)
+            ? parsed.coordinates
+            : [];
+    return source
+        .map(normalizeRouteCoordinate)
+        .filter(Boolean)
+        .slice(0, 800);
+}
+function normalizeTrafficSegmentsPayload(value = []) {
+    const parsed = parseMaybeJson(value, []);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+        .slice(0, 80)
+        .map((segment) => {
+            const coordinates = normalizeRouteCoordinatesPayload(segment?.coordinates);
+            if (coordinates.length < 2) return null;
+            return {
+                level: String(segment?.level || segment?.trafficLevel || 'normal').trim().slice(0, 32),
+                color: String(segment?.color || '').trim().slice(0, 32),
+                coordinates
+            };
+        })
+        .filter(Boolean);
+}
 const DISPATCH_GEO_CANDIDATE_MIN = parsePositiveInt(process.env.DISPATCH_GEO_CANDIDATE_MIN, 200);
 const DISPATCH_GEO_CANDIDATE_MAX = parsePositiveInt(process.env.DISPATCH_GEO_CANDIDATE_MAX, 800);
 const DISPATCH_SCORE_POOL_MIN = parsePositiveInt(process.env.DISPATCH_SCORE_POOL_MIN, 48);
@@ -238,22 +297,24 @@ class DriverNotificationDispatcher {
 
     /**
      * Prefetch de estado transitório por motorista para reduzir N+1 no matching.
-     * Busca em lote: driver_active_notification + driver_lock.
+     * Busca em lote: driver_active_notification + driver_lock + dispatchEligible.
      * @private
      */
     async prefetchDriverTransientState(driverIds = []) {
         const uniqueIds = [...new Set((driverIds || []).filter(Boolean))];
         const activeNotificationByDriver = new Map();
         const lockByDriver = new Map();
+        const dispatchEligibleByDriver = new Map();
 
         if (uniqueIds.length === 0) {
-            return { activeNotificationByDriver, lockByDriver };
+            return { activeNotificationByDriver, lockByDriver, dispatchEligibleByDriver };
         }
 
         const pipeline = this.redis.pipeline();
         for (const driverId of uniqueIds) {
             pipeline.get(`driver_active_notification:${driverId}`);
             pipeline.get(`driver_lock:${driverId}`);
+            pipeline.hget(`driver:${driverId}`, 'dispatchEligible');
         }
 
         const results = await pipeline.exec();
@@ -262,11 +323,20 @@ class DriverNotificationDispatcher {
 
         for (let i = 0; i < uniqueIds.length; i++) {
             const driverId = uniqueIds[i];
-            const activeResult = results[i * 2];
-            const lockResult = results[i * 2 + 1];
+            const activeResult = results[i * 3];
+            const lockResult = results[i * 3 + 1];
+            const dispatchEligibleResult = results[i * 3 + 2];
 
             const activeBookingId = activeResult && !activeResult[0] ? activeResult[1] : null;
             const lockBookingId = lockResult && !lockResult[0] ? lockResult[1] : null;
+            const dispatchEligibleRaw = dispatchEligibleResult && !dispatchEligibleResult[0]
+                ? dispatchEligibleResult[1]
+                : null;
+
+            dispatchEligibleByDriver.set(
+                driverId,
+                String(dispatchEligibleRaw ?? '').trim().toLowerCase() === 'true'
+            );
 
             if (activeBookingId) {
                 activeNotificationByDriver.set(driverId, activeBookingId);
@@ -320,7 +390,7 @@ class DriverNotificationDispatcher {
             }
         }
 
-        return { activeNotificationByDriver, lockByDriver };
+        return { activeNotificationByDriver, lockByDriver, dispatchEligibleByDriver };
     }
 
     /**
@@ -330,9 +400,17 @@ class DriverNotificationDispatcher {
      */
     async getDispatchability(bookingId, bookingData = null) {
         const bookingKey = `booking:${bookingId}`;
-        const snapshot = bookingData && Object.keys(bookingData).length > 0
-            ? bookingData
-            : await this.redis.hgetall(bookingKey);
+        const providedSnapshot =
+            bookingData && Object.keys(bookingData).length > 0
+                ? bookingData
+                : null;
+        const persistedSnapshot = await this.redis.hgetall(bookingKey).catch(() => null);
+        const snapshot = {
+            ...(providedSnapshot || {}),
+            ...(persistedSnapshot && Object.keys(persistedSnapshot).length > 0
+                ? persistedSnapshot
+                : {})
+        };
 
         if (!snapshot || Object.keys(snapshot).length === 0) {
             return { ok: false, reason: 'BOOKING_NOT_FOUND' };
@@ -346,7 +424,7 @@ class DriverNotificationDispatcher {
             return { ok: false, reason: 'STATE_NOT_DISPATCHABLE', state, status };
         }
 
-        if (status === 'SUPERSEDED' || status === 'NO_DRIVERS_AVAILABLE' || status === 'CANCELED' || status === 'COMPLETED') {
+        if (RideStateManager.isTerminalStateValue(status)) {
             return { ok: false, reason: 'BOOKING_STATUS_BLOCKED', state, status };
         }
 
@@ -481,12 +559,17 @@ class DriverNotificationDispatcher {
                 this.scoreWeights.acceptanceRate === 0 &&
                 this.scoreWeights.responseTime === 0;
             const shouldApplyRidePreferences = hasRideDispatchPreferences(rideRequirements);
-            const requestedCategory =
-                rideRequirements.carType ||
-                rideRequirements.requestedCarType ||
-                rideRequirements.vehicleCategory ||
-                null;
-            const shouldApplyDriverEligibility = Boolean(requestedCategory);
+            const bookingData =
+                rideRequirements?.bookingData && typeof rideRequirements.bookingData === 'object'
+                    ? rideRequirements.bookingData
+                    : (rideRequirements && typeof rideRequirements === 'object' ? rideRequirements : {});
+            const paymentReservationContext = {
+                bookingId,
+                rideId: bookingData?.paymentReferenceRideId,
+                paymentSessionId: bookingData?.paymentSessionId,
+                quoteLockId: bookingData?.paymentQuoteLockId,
+                reservationId: bookingData?.paymentDriverReservationId
+            };
 
             // 3. Buscar dados completos e calcular scores
             const scoredDrivers = [];
@@ -529,10 +612,27 @@ class DriverNotificationDispatcher {
                     continue; // Motorista ocupado com outra corrida
                 }
 
+                // O shortlist usa exclusivamente o espelho operacional barato no Redis.
+                // A autoridade canônica é revalidada imediatamente antes da oferta e
+                // novamente no aceite; evitar RTDB por candidato mantém o hot path O(1).
+                if (transientState.dispatchEligibleByDriver.get(driverId) !== true) {
+                    logger.debug(`⏭️ [Dispatcher] Driver ${driverId} ignorado: dispatchEligible ausente ou falso no Redis`);
+                    continue;
+                }
+
+                const paymentReservation = await getDriverPaymentReservation(this.redis, driverId);
+                if (
+                    paymentReservation &&
+                    !reservationMatchesContext(paymentReservation, paymentReservationContext)
+                ) {
+                    logger.debug(`⏭️ [Dispatcher] Driver ${driverId} ignorado: reservado para outro pagamento`);
+                    continue;
+                }
+
                 let driverData = null;
                 let score = 0;
 
-                if (useDistanceOnlyScoring && !shouldApplyRidePreferences && !shouldApplyDriverEligibility) {
+                if (useDistanceOnlyScoring && !shouldApplyRidePreferences) {
                     // Em produção a ordenação é 100% por proximidade, então evitamos round-trips extras.
                     score = Math.max(0.01, (1 - (distance / (radius + 0.1))) * 100);
                     driverData = {
@@ -558,18 +658,6 @@ class DriverNotificationDispatcher {
                     if (!isAvailable) {
                         logger.debug(`⚠️ [Dispatcher] Driver ${driverId} ignorado: não disponível (isOnline=${driverData?.isOnline}, status=${driverData?.status})`);
                         continue; // Motorista offline ou não disponível
-                    }
-
-                    if (shouldApplyDriverEligibility) {
-                        const eligibility = await driverEligibilityService.isDriverEligibleForRide(
-                            driverId,
-                            requestedCategory,
-                            driverData
-                        );
-                        if (!eligibility?.eligible) {
-                            logger.debug(`⏭️ [Dispatcher] Driver ${driverId} ignorado por categoria: ${eligibility?.code || 'NOT_ELIGIBLE'}`);
-                            continue;
-                        }
                     }
 
                     const preferenceMatch = driverMatchesRidePreferences(
@@ -782,10 +870,25 @@ class DriverNotificationDispatcher {
      * @returns {Promise<boolean>} true se notificado com sucesso
      */
     async notifyDriver(driverId, bookingId, bookingData, options = {}) {
+        let lockManagedForOffer = false;
+        const releaseManagedOfferLock = async () => {
+            if (!lockManagedForOffer) {
+                return;
+            }
+            try {
+                const lockedBooking = await driverLockManager.getLockedBooking(driverId);
+                if (lockedBooking === bookingId) {
+                    await driverLockManager.releaseLock(driverId);
+                }
+            } finally {
+                lockManagedForOffer = false;
+            }
+        };
+
         try {
             const finish = (ok, reason, extra = {}) =>
                 this.finishNotificationOutcome(options, ok, reason, extra);
-            const responseTimeoutSeconds = DISPATCH_DRIVER_RESPONSE_TIMEOUT_SECONDS;
+            const responseTimeoutSeconds = getDriverResponseTimeoutSeconds(bookingData);
             const skipInitialDispatchabilityCheck = options?.skipInitialDispatchabilityCheck === true;
             let dispatchabilitySnapshot = options?.precomputedDispatchability || null;
 
@@ -832,7 +935,7 @@ class DriverNotificationDispatcher {
             const rawLastUpdate = driverStatusTuple?.[3];
             const rawLastSeen = driverStatusTuple?.[4];
             const isDriverOnline = String(rawIsOnline || '').toLowerCase() === 'true';
-            const isDriverDispatchEligible = String(rawDispatchEligible || '').toLowerCase() !== 'false';
+            const isDriverDispatchEligible = String(rawDispatchEligible ?? '').trim().toLowerCase() === 'true';
             const normalizedDriverStatus = String(rawDriverStatus || 'available').toLowerCase();
             const isDriverStatusEligible =
                 normalizedDriverStatus === '' ||
@@ -902,9 +1005,27 @@ class DriverNotificationDispatcher {
                 logger.info(`🔄 [Dispatcher] Driver ${driverId} já foi notificado para ${bookingId}, mas não está na tela - re-notificando`);
             }
 
+            const eligibilityBookingData = dispatchabilitySnapshot?.bookingData || bookingData || {};
+            const requestedCategory = resolveRequestedCategory(eligibilityBookingData);
+            let canonicalEligibility;
+            try {
+                canonicalEligibility = await driverEligibilityService.isDriverEligibleForRide(
+                    driverId,
+                    requestedCategory
+                );
+            } catch (error) {
+                logger.warn(`⏭️ [Dispatcher] Driver ${driverId} ignorado: falha na validação canônica antes da oferta`, error);
+                return finish(false, 'DRIVER_ELIGIBILITY_CHECK_FAILED');
+            }
+            if (!canonicalEligibility?.eligible) {
+                return finish(false, canonicalEligibility?.code || 'DRIVER_NOT_CANONICALLY_ELIGIBLE');
+            }
+
             // ✅ Lock após validações rápidas para reduzir lock órfão
             const lockAcquired = await driverLockManager.acquireLock(driverId, bookingId, responseTimeoutSeconds);
-            if (!lockAcquired) {
+            if (lockAcquired) {
+                lockManagedForOffer = true;
+            } else {
                 const currentLock = await driverLockManager.getLockedBooking(driverId);
                 if (currentLock !== bookingId) {
                     logger.info(`⚠️ [Dispatcher] NOTIFY_FALSE: Driver ${driverId} já tem lock para outra corrida (${currentLock})`);
@@ -912,7 +1033,33 @@ class DriverNotificationDispatcher {
                         currentLock
                     });
                 }
-                logger.debug(`🔄 [Dispatcher] Driver ${driverId} já tem lock para ${bookingId}, permitindo re-notificação`);
+
+                let renewed = await driverLockManager.renewLock(
+                    driverId,
+                    responseTimeoutSeconds
+                );
+                if (!renewed) {
+                    // O lock pode ter expirado entre GET e EXPIRE. Tentar readquirir;
+                    // se outro dispatcher recriou o mesmo lock, renovar uma última vez.
+                    const reacquired = await driverLockManager.acquireLock(
+                        driverId,
+                        bookingId,
+                        responseTimeoutSeconds
+                    );
+                    if (!reacquired) {
+                        const lockAfterRace = await driverLockManager.getLockedBooking(driverId);
+                        renewed = lockAfterRace === bookingId
+                            ? await driverLockManager.renewLock(driverId, responseTimeoutSeconds)
+                            : false;
+                    } else {
+                        renewed = true;
+                    }
+                }
+                if (!renewed) {
+                    return finish(false, 'DRIVER_LOCK_RENEWAL_FAILED');
+                }
+                lockManagedForOffer = true;
+                logger.debug(`🔄 [Dispatcher] Lock de ${driverId} para ${bookingId} renovado para re-notificação`);
             }
 
             // Revalidar tela ativa após lock para evitar corrida entre dispatchers paralelos
@@ -930,9 +1077,7 @@ class DriverNotificationDispatcher {
             });
 
             if (activeAfterLock && activeAfterLock !== bookingId) {
-                if (lockAcquired) {
-                    await driverLockManager.releaseLock(driverId);
-                }
+                await releaseManagedOfferLock();
                 logger.info(`⚠️ [Dispatcher] NOTIFY_FALSE: Driver ${driverId} ficou ocupado na tela (${activeAfterLock}) durante lock`);
                 return finish(false, 'DRIVER_BECAME_ACTIVE_DURING_LOCK', {
                     activeBookingId: activeAfterLock
@@ -940,9 +1085,7 @@ class DriverNotificationDispatcher {
             }
 
             if (postLockRejectionMeta.permanentlyExcluded) {
-                if (lockAcquired) {
-                    await driverLockManager.releaseLock(driverId);
-                }
+                await releaseManagedOfferLock();
                 logger.info(`🚫 [Dispatcher] NOTIFY_FALSE: Driver ${driverId} foi excluído para ${bookingId} durante lock`);
                 return finish(false, 'DRIVER_EXCLUDED_DURING_LOCK', {
                     rejectionCount: postLockRejectionMeta.rejectionCount
@@ -950,9 +1093,7 @@ class DriverNotificationDispatcher {
             }
 
             if (postLockRejectionMeta.cooldownActive) {
-                if (lockAcquired) {
-                    await driverLockManager.releaseLock(driverId);
-                }
+                await releaseManagedOfferLock();
                 logger.info(`⏳ [Dispatcher] NOTIFY_FALSE: Driver ${driverId} entrou em cooldown (${postLockRejectionMeta.cooldownTtlSeconds}s) para ${bookingId} durante lock`);
                 return finish(false, 'DRIVER_COOLDOWN_DURING_LOCK', {
                     ttlSeconds: postLockRejectionMeta.cooldownTtlSeconds
@@ -964,16 +1105,17 @@ class DriverNotificationDispatcher {
                 dispatchabilitySnapshot?.bookingData || bookingData
             );
             if (!finalDispatchability.ok) {
-                if (lockAcquired) {
-                    await driverLockManager.releaseLock(driverId);
-                }
+                await releaseManagedOfferLock();
                 logger.info(`⚠️ [Dispatcher] NOTIFY_FALSE: booking ${bookingId} invalidado antes do envio (${finalDispatchability.reason})`);
                 return finish(false, finalDispatchability.reason || 'BOOKING_INVALIDATED_BEFORE_SEND');
             }
 
             const effectiveBookingData = {
-                ...finalDispatchability.bookingData,
-                ...bookingData
+                ...(bookingData || {}),
+                ...(finalDispatchability.bookingData || {}),
+                driverDistanceToPickupKm: bookingData?.driverDistanceToPickupKm,
+                estimatedArrivalToPickupMin: bookingData?.estimatedArrivalToPickupMin,
+                score: bookingData?.score
             };
             const pickupLocationParsed = this.safeJSONParse(effectiveBookingData.pickupLocation);
             const destinationLocationParsed = this.safeJSONParse(effectiveBookingData.destinationLocation);
@@ -981,13 +1123,21 @@ class DriverNotificationDispatcher {
                 effectiveBookingData.operationalContinuation || effectiveBookingData.reassignmentContext,
                 null
             );
+            const routeCoordinates = normalizeRouteCoordinatesPayload(effectiveBookingData.routeCoordinates);
+            const trafficSegments = normalizeTrafficSegmentsPayload(effectiveBookingData.trafficSegments);
 
             const pickupLat = Number(pickupLocationParsed?.lat);
             const pickupLng = Number(pickupLocationParsed?.lng);
             const destinationLat = Number(destinationLocationParsed?.lat);
             const destinationLng = Number(destinationLocationParsed?.lng);
-            let estimatedTripDistanceKm = null;
+            const routeDistanceKmFromBooking = Number(effectiveBookingData.routeDistanceKm);
+            const routeDurationSecsFromBooking = Number(effectiveBookingData.routeDurationSecs);
+            let estimatedTripDistanceKm =
+                Number.isFinite(routeDistanceKmFromBooking) && routeDistanceKmFromBooking > 0
+                    ? Number(routeDistanceKmFromBooking.toFixed(2))
+                    : null;
             if (
+                estimatedTripDistanceKm === null &&
                 Number.isFinite(pickupLat) &&
                 Number.isFinite(pickupLng) &&
                 Number.isFinite(destinationLat) &&
@@ -1011,8 +1161,18 @@ class DriverNotificationDispatcher {
             const estimatedArrivalToPickupMin = Number.isFinite(Number(effectiveBookingData.estimatedArrivalToPickupMin))
                 ? Number(effectiveBookingData.estimatedArrivalToPickupMin)
                 : estimatedArrivalToPickupMinFromDistance;
+            const estimatedTripDurationMin =
+                Number.isFinite(routeDurationSecsFromBooking) && routeDurationSecsFromBooking > 0
+                    ? Math.max(1, Math.round(routeDurationSecsFromBooking / 60))
+                    : null;
 
-            // 3. Preparar dados da notificação
+            // 3. Preparar dados da notificação. O mesmo instante autoritativo
+            // alimenta payload e persistência para não criar deadlines divergentes.
+            const notificationTimestampMs = Date.now();
+            const notificationTimestamp = new Date(notificationTimestampMs).toISOString();
+            const notificationExpiresAt = new Date(
+                notificationTimestampMs + responseTimeoutSeconds * 1000
+            ).toISOString();
             const notificationData = {
                 rideId: bookingId,
                 bookingId: bookingId,
@@ -1025,6 +1185,14 @@ class DriverNotificationDispatcher {
                 pickupAddress: pickupLocationParsed?.add || pickupLocationParsed?.address || null,
                 destinationAddress: destinationLocationParsed?.add || destinationLocationParsed?.address || null,
                 ...(Number.isFinite(estimatedTripDistanceKm) ? { estimatedTripDistanceKm } : {}),
+                ...(Number.isFinite(estimatedTripDurationMin) ? { estimatedTripDurationMin } : {}),
+                ...(routeCoordinates.length >= 2
+                    ? {
+                        routeCoordinates,
+                        tripRouteCoordinates: routeCoordinates
+                    }
+                    : {}),
+                ...(trafficSegments.length > 0 ? { trafficSegments } : {}),
                 ...(Number.isFinite(estimatedArrivalToPickupMin) ? { estimatedArrivalToPickupMin } : {}),
                 ...(Number.isFinite(driverDistanceToPickupKm) ? { driverDistanceToPickupKm } : {}),
                 ...(operationalContinuation
@@ -1038,7 +1206,9 @@ class DriverNotificationDispatcher {
                     }
                     : {}),
                 timeout: responseTimeoutSeconds,
-                timestamp: new Date().toISOString()
+                expiresInSec: responseTimeoutSeconds,
+                expiresAt: notificationExpiresAt,
+                timestamp: notificationTimestamp
             };
 
             const estimatedFare = Number(
@@ -1069,9 +1239,7 @@ class DriverNotificationDispatcher {
                 const socketsInRoom = await this.io.in(driverRoom).fetchSockets();
                 socketsInRoomCount = socketsInRoom.length;
                 if (socketsInRoomCount === 0) {
-                    if (lockAcquired) {
-                        await driverLockManager.releaseLock(driverId);
-                    }
+                    await releaseManagedOfferLock();
                     logger.info(`⚠️ [Dispatcher] NOTIFY_FALSE: Driver ${driverId} não está conectado (nenhum socket na room ${driverRoom})`);
                     return finish(false, 'DRIVER_SOCKET_OFFLINE');
                 }
@@ -1101,9 +1269,9 @@ class DriverNotificationDispatcher {
             ) {
                 writePipeline.hset(`booking:${bookingId}`, {
                     notifiedDriverId: driverId,
-                    notifiedAt: new Date().toISOString(),
+                    notifiedAt: notificationTimestamp,
                     awaitingResponseDriverId: driverId,
-                    awaitingResponseAt: new Date().toISOString(),
+                    awaitingResponseAt: notificationTimestamp,
                     awaitingResponsePreviousState: resumeState
                 });
                 logger.info(
@@ -1197,10 +1365,7 @@ class DriverNotificationDispatcher {
             try {
                 await this.redis.del(`driver_active_notification:${driverId}`);
                 await clearOfferReservation(this.redis, bookingId, driverId).catch(() => null);
-                const lockedBooking = await driverLockManager.getLockedBooking(driverId);
-                if (lockedBooking === bookingId) {
-                    await driverLockManager.releaseLock(driverId);
-                }
+                await releaseManagedOfferLock();
             } catch (cleanupError) {
                 logger.error(`❌ Erro ao limpar corrida ativa após falha de notificação:`, cleanupError);
             }
@@ -1417,6 +1582,8 @@ class DriverNotificationDispatcher {
                     currentState === RideStateManager.STATES.AWAITING_RESPONSE
                 ) {
 
+                    const timeoutAt = new Date().toISOString();
+
                     // ✅ Limpar corrida ativa na tela do motorista (timeout)
                     await this.redis.del(`driver_active_notification:${driverId}`);
                     await clearOfferReservation(this.redis, bookingId, driverId).catch(() => null);
@@ -1442,15 +1609,15 @@ class DriverNotificationDispatcher {
                             resumeState,
                             {
                                 timeoutDriverId: driverId,
-                                timeoutAt: new Date().toISOString()
+                                timeoutAt
                             }
                         );
                     }
 
                     await this.redis.hset(`booking:${bookingId}`, {
                         timeoutDriverId: driverId,
-                        timeoutAt: new Date().toISOString(),
-                        awaitingResponseResolvedAt: new Date().toISOString()
+                        timeoutAt,
+                        awaitingResponseResolvedAt: timeoutAt
                     });
                     await this.redis.hdel(
                         bookingKey,
@@ -1467,9 +1634,20 @@ class DriverNotificationDispatcher {
                         {
                             bookingId,
                             driverId,
-                            timeoutAt: new Date().toISOString()
+                            timeoutAt
                         }
                     );
+
+                    if (this.io) {
+                        this.io.to(`driver_${driverId}`).emit('clearRideRequest', {
+                            bookingId,
+                            rideId: bookingId,
+                            code: 'DRIVER_RESPONSE_TIMEOUT',
+                            reason: 'offer_timeout',
+                            message: 'O tempo para responder terminou.',
+                            timeoutAt
+                        });
+                    }
                 } else {
                     // Estado já mudou (corrida aceita, cancelada, etc.)
                     logger.debug(`ℹ️ [Dispatcher] Timeout para driver ${driverId} (booking: ${bookingId}), mas estado já é ${currentState}`);

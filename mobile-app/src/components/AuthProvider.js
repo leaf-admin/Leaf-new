@@ -7,7 +7,11 @@ import interactiveNotificationService from '../services/InteractiveNotificationS
 import persistentRideNotificationService from '../services/PersistentRideNotificationService';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ActivityIndicator, Platform, StyleSheet, Text, View } from 'react-native';
-import { allowTestUserTools } from '../config/runtimeAccessPolicy';
+import {
+  allowTestUserTools,
+  isE2ETestBuild,
+  isSimulatorBuild,
+} from '../config/runtimeAccessPolicy';
 import mobileProfileService from '../services/MobileProfileService';
 import { restoreQaSeedProfile } from '../utils/qaSeedProfile';
 import {
@@ -18,6 +22,8 @@ import {
 const AUTH_UID_STORAGE_KEY = '@auth_uid';
 const USER_DATA_STORAGE_KEY = '@user_data';
 const TEST_MODE_STORAGE_KEY = '@test_mode';
+const PROFILE_BOOTSTRAP_TIMEOUT_MS = 4500;
+const PROFILE_BACKGROUND_REFRESH_TIMEOUT_MS = 8000;
 
 const normalizeUserType = (userType) => {
   if (userType === 'passenger') {
@@ -56,6 +62,25 @@ const resolveStoredProfileRole = (profile) =>
       profile?.profile?.userType ||
       profile?.profile?.role
   );
+
+const isExplicitTestProfile = (profile) => Boolean(
+  profile?.isTestUser ||
+    profile?.isTestCustomer ||
+    profile?.profile?.isTestUser ||
+    profile?.profile?.isTestCustomer
+);
+
+const allowDivergentQaProfile = () =>
+  allowTestUserTools() && isSimulatorBuild() && isE2ETestBuild();
+
+const getMultiGetValue = (entries, key) => {
+  if (!Array.isArray(entries)) {
+    return null;
+  }
+
+  const pair = entries.find((entry) => Array.isArray(entry) && entry[0] === key);
+  return pair ? pair[1] : null;
+};
 
 const normalizePhoneDigits = (phone) => String(phone || '').replace(/\D/g, '');
 
@@ -172,8 +197,81 @@ const AuthProvider = ({ children }) => {
   const { user, loading } = useAuth();
   const dispatch = useDispatch();
   const [isSyncing, setIsSyncing] = useState(false);
+  const [hasLocalBootstrapSession, setHasLocalBootstrapSession] = useState(false);
   const hasSynced = useRef(false);
   const lastSyncedUid = useRef(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const hydrateLocalBootstrapSession = async () => {
+      try {
+        const localEntries = await AsyncStorage.multiGet([
+          AUTH_UID_STORAGE_KEY,
+          USER_DATA_STORAGE_KEY,
+        ]);
+        const storedUidValue = getMultiGetValue(localEntries, AUTH_UID_STORAGE_KEY);
+        const cachedProfileRaw = getMultiGetValue(localEntries, USER_DATA_STORAGE_KEY);
+        const storedUid = String(storedUidValue || '').trim();
+        const cachedProfile = cachedProfileRaw
+          ? normalizePersistedProfile(JSON.parse(cachedProfileRaw))
+          : null;
+        const cachedRole = resolveStoredProfileRole(cachedProfile);
+        const cachedTestProfileAllowed =
+          !isExplicitTestProfile(cachedProfile) || allowTestUserTools();
+        const firebaseUid = String(user?.uid || '').trim();
+        const cacheMatchesFirebase = Boolean(
+          firebaseUid && cachedProfile?.uid === firebaseUid
+        );
+        const divergentQaProfileAllowed = Boolean(
+          isExplicitTestProfile(cachedProfile) && allowDivergentQaProfile()
+        );
+        const cacheMatchesStoredUid = Boolean(
+          cachedProfile?.uid &&
+            cachedRole &&
+            cachedTestProfileAllowed &&
+            (!storedUid || cachedProfile.uid === storedUid) &&
+            (cacheMatchesFirebase || divergentQaProfileAllowed)
+        );
+
+        if (cancelled) {
+          return;
+        }
+
+        setHasLocalBootstrapSession(cacheMatchesStoredUid);
+
+        if (cacheMatchesStoredUid) {
+          const cachedUserData = buildCompleteUserDataFromProfile(null, cachedProfile);
+          if (cachedUserData) {
+            dispatch({
+              type: FETCH_USER_SUCCESS,
+              payload: cachedUserData
+            });
+          }
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setHasLocalBootstrapSession(false);
+        }
+        Logger.warn(
+          '⚠️ AuthProvider - falha ao hidratar sessão local de bootstrap:',
+          error?.message || error
+        );
+      }
+    };
+
+    hydrateLocalBootstrapSession();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [dispatch, user?.uid]);
+
+  useEffect(() => {
+    if (!loading && !user) {
+      setHasLocalBootstrapSession(false);
+    }
+  }, [loading, user]);
 
   // ✅ Otimização: Memoizar função para evitar recriações desnecessárias
   const syncUserData = useCallback(async (firebaseUser) => {
@@ -254,20 +352,24 @@ const AuthProvider = ({ children }) => {
 
       let cachedProfile = null;
       let testModeEnabled = false;
+      const firebaseUid = String(firebaseUser?.uid || '').trim();
+      const divergentQaProfilesAllowed = allowDivergentQaProfile();
       try {
-        const [[, storedUidValue], [, cachedProfileRaw], [, testModeValue]] =
-          await AsyncStorage.multiGet([
-            AUTH_UID_STORAGE_KEY,
-            USER_DATA_STORAGE_KEY,
-            TEST_MODE_STORAGE_KEY,
-          ]);
+        const profileEntries = await AsyncStorage.multiGet([
+          AUTH_UID_STORAGE_KEY,
+          USER_DATA_STORAGE_KEY,
+          TEST_MODE_STORAGE_KEY,
+        ]);
+        const storedUidValue = getMultiGetValue(profileEntries, AUTH_UID_STORAGE_KEY);
+        const cachedProfileRaw = getMultiGetValue(profileEntries, USER_DATA_STORAGE_KEY);
+        const testModeValue = getMultiGetValue(profileEntries, TEST_MODE_STORAGE_KEY);
         const storedUid = String(storedUidValue || '').trim();
         testModeEnabled = String(testModeValue || '').trim() === 'true';
         cachedProfile = cachedProfileRaw
           ? normalizePersistedProfile(JSON.parse(cachedProfileRaw))
           : null;
 
-        if (!cachedProfile && storedUid) {
+        if (!cachedProfile && storedUid && divergentQaProfilesAllowed) {
           const rebuiltQaProfile = await restoreQaSeedProfile({
             AsyncStorage,
             authUidKey: AUTH_UID_STORAGE_KEY,
@@ -289,7 +391,11 @@ const AuthProvider = ({ children }) => {
       }
 
       const cachedProfileRole = resolveStoredProfileRole(cachedProfile);
-      const firebaseUid = String(firebaseUser?.uid || '').trim();
+      const qaLocalProfileEnabled =
+        allowTestUserTools() &&
+        Boolean(testModeEnabled || isExplicitTestProfile(cachedProfile));
+      const divergentQaProfileEnabled =
+        qaLocalProfileEnabled && divergentQaProfilesAllowed;
       const firebasePhoneDigits = normalizePhoneDigits(firebaseUser?.phoneNumber);
       const cachedPhoneDigits = normalizePhoneDigits(
         cachedProfile?.phone ||
@@ -307,6 +413,21 @@ const AuthProvider = ({ children }) => {
         (!firebasePhoneDigits || !cachedPhoneDigits || cachedPhoneDigits === firebasePhoneDigits);
 
       const dispatchProfileUserData = async (profile, source) => {
+        const profileUid = String(profile?.uid || '').trim();
+        if (
+          profileUid &&
+          firebaseUid &&
+          profileUid !== firebaseUid &&
+          !divergentQaProfileEnabled
+        ) {
+          Logger.warn('⚠️ AuthProvider - perfil local divergente ignorado', {
+            source,
+            firebaseUid,
+            profileUid,
+          });
+          return null;
+        }
+
         const completeUserData = buildCompleteUserDataFromProfile(firebaseUser, profile);
         if (!completeUserData) {
           return null;
@@ -334,7 +455,10 @@ const AuthProvider = ({ children }) => {
       const refreshCachedProfileInBackground = () => {
         void (async () => {
           try {
-            const remoteProfile = await mobileProfileService.getCurrentProfile({ suppressErrors: true });
+            const remoteProfile = await mobileProfileService.getCurrentProfile({
+              suppressErrors: true,
+              timeoutMs: PROFILE_BACKGROUND_REFRESH_TIMEOUT_MS,
+            });
             const normalizedRemoteProfile = normalizePersistedProfile(remoteProfile);
             const remoteProfileRole = resolveStoredProfileRole(normalizedRemoteProfile);
             const remotePhoneDigits = normalizePhoneDigits(
@@ -365,7 +489,7 @@ const AuthProvider = ({ children }) => {
       };
 
       if (
-        testModeEnabled &&
+        divergentQaProfileEnabled &&
         cachedProfile?.uid &&
         cachedProfileRole &&
         firebaseUid &&
@@ -377,16 +501,11 @@ const AuthProvider = ({ children }) => {
           seededRole: cachedProfileRole,
         });
 
-        const seededUserData = buildCompleteUserDataFromProfile(firebaseUser, cachedProfile);
+        const seededUserData = await dispatchProfileUserData(
+          cachedProfile,
+          'qa-simulator-e2e-cache'
+        );
         if (seededUserData) {
-          dispatch({
-            type: FETCH_USER_SUCCESS,
-            payload: seededUserData
-          });
-          await AsyncStorage.multiSet([
-            [AUTH_UID_STORAGE_KEY, seededUserData.uid],
-            [USER_DATA_STORAGE_KEY, JSON.stringify(seededUserData)]
-          ]);
           hasSynced.current = true;
           setIsSyncing(false);
           return;
@@ -404,20 +523,51 @@ const AuthProvider = ({ children }) => {
         }
       }
 
-      const remoteProfile = await mobileProfileService.getCurrentProfile({ suppressErrors: true });
+      const remoteProfile = await mobileProfileService.getCurrentProfile({
+        suppressErrors: true,
+        timeoutMs: PROFILE_BOOTSTRAP_TIMEOUT_MS,
+      });
       const normalizedRemoteProfile = normalizePersistedProfile(remoteProfile);
-      const remoteProfileRole = resolveStoredProfileRole(normalizedRemoteProfile);
+      const normalizedRemoteProfileRole = resolveStoredProfileRole(normalizedRemoteProfile);
+      const remotePhoneDigits = normalizePhoneDigits(
+        normalizedRemoteProfile?.phone ||
+          normalizedRemoteProfile?.mobile ||
+          normalizedRemoteProfile?.phoneNumber ||
+          normalizedRemoteProfile?.profile?.phone ||
+          normalizedRemoteProfile?.profile?.mobile ||
+          normalizedRemoteProfile?.profile?.phoneNumber
+      );
+      const remoteProfileMatchesFirebase = Boolean(
+        normalizedRemoteProfile?.uid &&
+          normalizedRemoteProfileRole &&
+          firebaseUid &&
+          normalizedRemoteProfile.uid === firebaseUid &&
+          (!firebasePhoneDigits || !remotePhoneDigits || remotePhoneDigits === firebasePhoneDigits)
+      );
+      const authoritativeRemoteProfile = remoteProfileMatchesFirebase
+        ? normalizedRemoteProfile
+        : null;
+      const remoteProfileRole = resolveStoredProfileRole(authoritativeRemoteProfile);
+
+      if (normalizedRemoteProfile?.uid && !remoteProfileMatchesFirebase) {
+        Logger.warn('⚠️ AuthProvider - perfil remoto divergente da sessão Firebase ignorado', {
+          firebaseUid,
+          remoteUid: normalizedRemoteProfile.uid,
+        });
+      }
+
       const shouldPreferCachedProfile =
-        testModeEnabled &&
+        qaLocalProfileEnabled &&
         cachedProfile?.uid &&
         cachedProfileRole &&
-        (!normalizedRemoteProfile?.uid ||
-          normalizedRemoteProfile.uid !== cachedProfile.uid ||
+        (cachedProfileMatchesFirebase || divergentQaProfileEnabled) &&
+        (!authoritativeRemoteProfile?.uid ||
+          authoritativeRemoteProfile.uid !== cachedProfile.uid ||
           (remoteProfileRole && remoteProfileRole !== cachedProfileRole));
 
       const userData = shouldPreferCachedProfile
         ? cachedProfile
-        : normalizedRemoteProfile || cachedProfile;
+        : authoritativeRemoteProfile || (cachedProfileMatchesFirebase ? cachedProfile : null);
 
       const userDataRole = resolveStoredProfileRole(userData);
 
@@ -545,7 +695,11 @@ const AuthProvider = ({ children }) => {
     }
   }, [user, loading, syncUserData]);
 
-  const shouldRenderBootstrapShell = loading || (Boolean(user) && isSyncing);
+  const shouldRenderBootstrapShell = Boolean(
+    loading &&
+      !user &&
+      !hasLocalBootstrapSession
+  );
 
   if (shouldRenderBootstrapShell) {
     return <AuthBootstrapShell user={user} />;

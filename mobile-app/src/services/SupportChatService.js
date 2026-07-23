@@ -15,6 +15,24 @@ import auth from '@react-native-firebase/auth';
 import WebSocketManager from './WebSocketManager';
 import AuthService from './AuthService';
 
+const MAX_SUPPORT_CHAT_MESSAGE_LENGTH = 2000;
+
+function normalizeSupportChatMessage(message) {
+    if (typeof message !== 'string') {
+        throw new Error('Mensagem obrigatória');
+    }
+
+    const text = message.trim();
+    if (!text) {
+        throw new Error('Mensagem obrigatória');
+    }
+
+    if (text.length > MAX_SUPPORT_CHAT_MESSAGE_LENGTH) {
+        throw new Error(`Mensagem muito longa (máximo ${MAX_SUPPORT_CHAT_MESSAGE_LENGTH} caracteres)`);
+    }
+
+    return text;
+}
 
 class SupportChatService {
     constructor() {
@@ -23,6 +41,7 @@ class SupportChatService {
         this.messageListeners = [];
         this.isConnected = false;
         this.messageHistory = [];
+        this.lastError = null;
     }
 
     /**
@@ -32,6 +51,7 @@ class SupportChatService {
      */
     async initialize(userId) {
         try {
+            this.lastError = null;
             if (!userId) {
                 const user = auth().currentUser;
                 if (!user) {
@@ -61,6 +81,7 @@ class SupportChatService {
         } catch (error) {
             Logger.error('❌ Erro ao inicializar chat:', error);
             this.isConnected = false;
+            this.lastError = error;
             return false;
         }
     }
@@ -110,17 +131,22 @@ class SupportChatService {
                 `/support/chat/${this.userId}/history?limit=50`
             );
 
-            if (response.ok) {
-                const data = await response.json();
-                this.messageHistory = data.messages || [];
-                Logger.log(`✅ Histórico carregado: ${this.messageHistory.length} mensagens`);
-            } else {
-                Logger.warn('⚠️ Erro ao carregar histórico:', response.status);
-                this.messageHistory = [];
+            if (!response.ok) {
+                const errorData = await response.json().catch(() => null);
+                const errorMessage =
+                    errorData?.error ||
+                    errorData?.message ||
+                    `Não foi possível carregar o chat de suporte (HTTP ${response.status}).`;
+                throw new Error(errorMessage);
             }
+
+            const data = await response.json();
+            this.messageHistory = data.messages || [];
+            Logger.log(`✅ Histórico carregado: ${this.messageHistory.length} mensagens`);
         } catch (error) {
             Logger.error('❌ Erro ao carregar histórico:', error);
             this.messageHistory = [];
+            throw error;
         }
     }
 
@@ -132,6 +158,8 @@ class SupportChatService {
      */
     async sendMessage(message, userId = null) {
         try {
+            const messageText = normalizeSupportChatMessage(message);
+
             if (!userId) {
                 if (!this.userId) {
                     const user = auth().currentUser;
@@ -158,7 +186,7 @@ class SupportChatService {
                     // Enviar mensagem via WebSocket
                     this.wsManager.socket.emit('support:chat:message', {
                         userId,
-                        message: message.trim(),
+                        message: messageText,
                         senderType: 'user'
                     });
 
@@ -173,7 +201,7 @@ class SupportChatService {
                             const messageData = {
                                 id: data.messageId,
                                 userId,
-                                message: message.trim(),
+                                message: messageText,
                                 senderType: 'user',
                                 timestamp: new Date().toISOString()
                             };
@@ -206,7 +234,7 @@ class SupportChatService {
                     {
                         method: 'POST',
                         body: JSON.stringify({
-                            message: message.trim(),
+                            message: messageText,
                             senderType: 'user'
                         })
                     }
@@ -217,7 +245,7 @@ class SupportChatService {
                     const messageData = {
                         id: data.message.id,
                         userId,
-                        message: message.trim(),
+                        message: messageText,
                         senderType: 'user',
                         timestamp: data.message.timestamp
                     };
@@ -258,7 +286,10 @@ class SupportChatService {
             }
 
             if (!this.isConnected) {
-                await this.initialize(userId);
+                const initialized = await this.initialize(userId);
+                if (!initialized) {
+                    throw this.lastError || new Error('Não foi possível carregar o chat de suporte.');
+                }
             }
 
             // ✅ Retornar histórico local (já carregado do Firestore)
@@ -266,7 +297,7 @@ class SupportChatService {
 
         } catch (error) {
             Logger.error('❌ Erro ao buscar mensagens:', error);
-            return [];
+            throw error;
         }
     }
 
@@ -365,8 +396,8 @@ class SupportChatService {
         this.isConnected = false;
         this.userId = null;
         this.messageHistory = [];
+        this.lastError = null;
     }
 }
 
 export default new SupportChatService();
-

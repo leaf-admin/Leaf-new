@@ -1,10 +1,53 @@
 const admin = require('firebase-admin');
 const firebaseConfig = require('../firebase-config');
 const { logStructured } = require('../utils/logger');
+const { resolveUserPersistenceScope } = require('./sandbox-persistence-context');
 
 const COLLECTION = 'driver_applications';
 const REVIEWABLE_DOCUMENT_TYPES = new Set(['cnh', 'crlv', 'antecedentes_criminais']);
 const REVIEWABLE_DOCUMENT_STATUSES = new Set(['pending', 'approved', 'rejected']);
+const DASHBOARD_PROVIDER_URL_KEYS = new Set([
+  'fileUrl',
+  'fileUrlExpiresAt',
+  'url',
+  'downloadUrl',
+  'front',
+  'back',
+  'registration',
+  'insurance'
+]);
+
+function projectDashboardApplication(value) {
+  if (Array.isArray(value)) return value.map((item) => projectDashboardApplication(item));
+  if (!value || typeof value !== 'object') return value;
+  return Object.entries(value).reduce((projection, [key, item]) => {
+    if (!DASHBOARD_PROVIDER_URL_KEYS.has(key)) {
+      projection[key] = projectDashboardApplication(item);
+    }
+    return projection;
+  }, {});
+}
+
+function isDocumentContentAvailable(driverId, documentType, document = {}) {
+  const safeDriverId = normalizeId(driverId);
+  const safeType = String(documentType || '').trim().toLowerCase();
+  const filePath = String(document?.filePath || '').trim();
+  const expectedPrefix = safeType === 'antecedentes_criminais'
+    ? `documents/${safeDriverId}/${safeType}/`
+    : `driver-activation/${safeDriverId}/${safeType}/`;
+  if (!safeDriverId || !REVIEWABLE_DOCUMENT_TYPES.has(safeType)) return false;
+  if (!filePath.startsWith(expectedPrefix) || filePath.includes('..')) return false;
+  return /^[a-f0-9]{64}$/i.test(String(document?.documentSha256 || '').trim())
+    && /^\d+$/.test(String(document?.storageGeneration || '').trim());
+}
+
+function normalizeApplicationPersistenceScope(value = {}) {
+  const namespace = String(value?.namespace || '').trim().toLowerCase();
+  if (!['operational', 'sandbox'].includes(namespace)) return null;
+  const financialContextId = String(value?.financialContextId || '').trim() || null;
+  if (namespace === 'sandbox' && !financialContextId) return null;
+  return { namespace, financialContextId };
+}
 
 function getFirestoreOrThrow() {
   const firestore = firebaseConfig?.getFirestore ? firebaseConfig.getFirestore() : null;
@@ -29,6 +72,27 @@ function parseRatingValue(value) {
 
 function normalizeId(value) {
   return String(value || '').trim();
+}
+
+function firstText(...values) {
+  for (const value of values) {
+    const normalized = String(value ?? '').trim();
+    if (normalized) return normalized;
+  }
+  return '';
+}
+
+function normalizeProfileUserType(profile = {}) {
+  const normalized = firstText(
+    profile?.usertype,
+    profile?.userType,
+    profile?.role,
+    profile?.user_role,
+    profile?.accountType
+  ).toLowerCase();
+
+  if (normalized === 'passenger') return 'customer';
+  return ['customer', 'driver'].includes(normalized) ? normalized : '';
 }
 
 function toIso(value, fallback = null) {
@@ -96,6 +160,96 @@ function genderCodeToLabel(code) {
   if (code === 'M') return 'Masculino';
   if (code === 'X') return 'Outro';
   return null;
+}
+
+function resolveDriverProfileProjection({
+  canonicalProfile = {},
+  realtimeUser = {},
+  documents = {},
+  canonicalCnhData = null
+} = {}) {
+  const mirroredCnhData =
+    documents?.cnh?.extractedData ||
+    documents?.cnh?.analysisData ||
+    {};
+  const cnhData = canonicalCnhData && typeof canonicalCnhData === 'object'
+    ? canonicalCnhData
+    : mirroredCnhData;
+
+  const canonicalFirstName = firstText(canonicalProfile?.firstName);
+  const canonicalLastName = firstText(canonicalProfile?.lastName);
+  const realtimeFirstName = firstText(realtimeUser?.firstName);
+  const realtimeLastName = firstText(realtimeUser?.lastName);
+
+  return {
+    name: firstText(
+      canonicalProfile?.name,
+      canonicalProfile?.fullName,
+      canonicalProfile?.displayName,
+      [canonicalFirstName, canonicalLastName].filter(Boolean).join(' '),
+      realtimeUser?.name,
+      realtimeUser?.fullName,
+      realtimeUser?.displayName,
+      [realtimeFirstName, realtimeLastName].filter(Boolean).join(' '),
+      cnhData?.nome,
+      cnhData?.name
+    ),
+    email: firstText(canonicalProfile?.email, realtimeUser?.email),
+    phone: firstText(
+      canonicalProfile?.mobile,
+      canonicalProfile?.phone,
+      canonicalProfile?.phoneNumber,
+      realtimeUser?.mobile,
+      realtimeUser?.phone,
+      realtimeUser?.phoneNumber
+    ),
+    cpf: firstText(
+      canonicalProfile?.cpf,
+      canonicalProfile?.document,
+      canonicalProfile?.documentNumber,
+      realtimeUser?.cpf,
+      realtimeUser?.document,
+      realtimeUser?.documentNumber,
+      cnhData?.cpf
+    ),
+    birthDate: firstText(
+      canonicalProfile?.birthDate,
+      canonicalProfile?.dateOfBirth,
+      canonicalProfile?.dob,
+      canonicalProfile?.dataNascimento,
+      realtimeUser?.birthDate,
+      realtimeUser?.dateOfBirth,
+      realtimeUser?.dob,
+      realtimeUser?.dataNascimento,
+      cnhData?.dataNascimento,
+      cnhData?.birthDate,
+      cnhData?.dateOfBirth
+    ),
+    motherName: firstText(
+      canonicalProfile?.motherName,
+      canonicalProfile?.nomeMae,
+      canonicalProfile?.nomeDaMae,
+      realtimeUser?.motherName,
+      realtimeUser?.nomeMae,
+      realtimeUser?.nomeDaMae,
+      cnhData?.nomeMae,
+      cnhData?.nomeDaMae,
+      cnhData?.motherName
+    ),
+    gender: firstText(
+      canonicalProfile?.gender,
+      canonicalProfile?.genero,
+      realtimeUser?.gender,
+      realtimeUser?.genero,
+      cnhData?.genero,
+      cnhData?.sexo,
+      cnhData?.gender,
+      cnhData?.sex
+    ),
+    city: firstText(canonicalProfile?.city, realtimeUser?.city),
+    state: firstText(canonicalProfile?.state, realtimeUser?.state),
+    registrationDate: toIso(canonicalProfile?.createdAt) || toIso(realtimeUser?.createdAt)
+  };
 }
 
 function resolveDriverIdentityData(userData = {}, documents = {}) {
@@ -240,9 +394,35 @@ class DriverApplicationService {
     return this.getFirestore().collection(COLLECTION);
   }
 
+  async ensureApplicationPersistenceScope(application = {}) {
+    const driverId = normalizeId(application.driverId || application.id || application.driver?.id);
+    if (!driverId) {
+      throw new Error('Driver application sem identificador para classificação de persistência');
+    }
+    const scope = await resolveUserPersistenceScope({ userId: driverId });
+    const persistenceScope = normalizeApplicationPersistenceScope({
+      namespace: scope?.namespace,
+      financialContextId: scope?.financialContextId
+    });
+    if (!persistenceScope) {
+      throw new Error('Classificação de persistência indisponível para driver application');
+    }
+    const existing = normalizeApplicationPersistenceScope(application.persistenceScope);
+    if (
+      !existing ||
+      existing.namespace !== persistenceScope.namespace ||
+      existing.financialContextId !== persistenceScope.financialContextId
+    ) {
+      await this.collection().doc(driverId).set({ persistenceScope }, { merge: true });
+    }
+    return { ...application, persistenceScope };
+  }
+
   async buildApplication(driverId, {
     db = null,
     userData = null,
+    canonicalProfileData = null,
+    canonicalCnhData = null,
     carsByDriverId = null,
     userVehiclesRaw = null,
     vehiclesRaw = null,
@@ -254,7 +434,11 @@ class DriverApplicationService {
 
     const user = userData || (await realtimeDb.ref(`users/${safeDriverId}`).once('value')).val();
     if (!user || typeof user !== 'object') return null;
-    if (String(user.usertype || user.userType || '').toLowerCase() !== 'driver') return null;
+    const canonicalProfile = canonicalProfileData && typeof canonicalProfileData === 'object'
+      ? canonicalProfileData
+      : {};
+    const userType = normalizeProfileUserType(canonicalProfile) || normalizeProfileUserType(user);
+    if (userType !== 'driver') return null;
 
     let carsIndex = carsByDriverId;
     if (!carsIndex) {
@@ -341,6 +525,11 @@ class DriverApplicationService {
       },
       backgroundCheck: {
         fileUrl: documents.antecedentes_criminais?.fileUrl || null,
+        contentAvailable: isDocumentContentAvailable(
+          safeDriverId,
+          'antecedentes_criminais',
+          documents.antecedentes_criminais
+        ),
         status: documents.antecedentes_criminais?.status || 'missing',
         uploadedAt: documents.antecedentes_criminais?.uploadedAt || null,
         type: documents.antecedentes_criminais?.fileType || null
@@ -348,6 +537,7 @@ class DriverApplicationService {
       all_documents: Object.keys(documents).map((docType) => ({
         type: docType,
         fileUrl: documents[docType]?.fileUrl || null,
+        contentAvailable: isDocumentContentAvailable(safeDriverId, docType, documents[docType]),
         status: documents[docType]?.status || 'pending',
         uploadedAt: documents[docType]?.uploadedAt || null,
         fileType: documents[docType]?.fileType || null,
@@ -357,7 +547,13 @@ class DriverApplicationService {
       }))
     };
 
-    const driverIdentity = resolveDriverIdentityData(user, documents);
+    const profileProjection = resolveDriverProfileProjection({
+      canonicalProfile,
+      realtimeUser: user,
+      documents,
+      canonicalCnhData
+    });
+    const driverIdentity = resolveDriverIdentityData(profileProjection, documents);
 
     const userVehicleEntries = Object.keys(resolvedUserVehiclesRaw).map((userVehicleId) => {
       const userVehicle = resolvedUserVehiclesRaw[userVehicleId] || {};
@@ -452,17 +648,17 @@ class DriverApplicationService {
       driverId: safeDriverId,
       driver: {
         id: safeDriverId,
-        name: `${user.firstName || ''} ${user.lastName || ''}`.trim(),
-        email: user.email || '',
-        phone: user.mobile || '',
-        cpf: user.cpf || user.document || user.documentNumber || '',
+        name: profileProjection.name,
+        email: profileProjection.email,
+        phone: profileProjection.phone,
+        cpf: profileProjection.cpf,
         birthDate: driverIdentity.birthDate,
         motherName: driverIdentity.motherName,
         gender: driverIdentity.gender,
         genderLabel: driverIdentity.genderLabel,
-        city: user.city || '',
-        state: user.state || '',
-        registrationDate: user.createdAt ? new Date(user.createdAt).toISOString() : null,
+        city: profileProjection.city,
+        state: profileProjection.state,
+        registrationDate: profileProjection.registrationDate,
         rating: resolvedRating != null ? Number(resolvedRating).toFixed(1) : null,
         ratingCount,
         approved: user.approved === true,
@@ -471,7 +667,7 @@ class DriverApplicationService {
       vehicle: dashboardVehicle,
       documents: normalizedDocuments,
       status: applicationStatus,
-      submissionDate: user.createdAt ? new Date(user.createdAt).toISOString() : new Date().toISOString(),
+      submissionDate: profileProjection.registrationDate || new Date().toISOString(),
       reviewDate: user.approvedAt ? new Date(user.approvedAt).toISOString() : null,
       reviewedBy: user.approvedBy || null,
       rejectionReason: user.rejectionReason || null,
@@ -504,20 +700,35 @@ class DriverApplicationService {
         vehicles: userVehicleEntries
       },
       totalDocuments: Object.keys(normalizedDocuments).length,
-      source: 'rtdb_mirror',
+      source: canonicalProfileData ? 'firestore_profile_rtdb_activation' : 'rtdb_mirror',
       syncedAt: new Date().toISOString()
     };
   }
 
   async syncDriverApplication(driverId, { db = null, includeRatings = false } = {}) {
     const realtimeDb = db || this.getRealtimeDb();
-    const ratingsRaw = includeRatings
-      ? (await realtimeDb.ref(`user_ratings/${driverId}`).once('value')).val() || {}
-      : null;
-    const application = await this.buildApplication(driverId, { db: realtimeDb, ratingsRaw });
+    const safeDriverId = normalizeId(driverId);
+    if (!safeDriverId) return null;
+
+    const [ratingsSnapshot, canonicalProfileSnapshot, canonicalCnhSnapshot] = await Promise.all([
+      includeRatings
+        ? realtimeDb.ref(`user_ratings/${safeDriverId}`).once('value')
+        : Promise.resolve(null),
+      this.getFirestore().collection('users').doc(safeDriverId).get(),
+      realtimeDb.ref(`driver_activation/${safeDriverId}/documents/cnh`).once('value')
+    ]);
+    const canonicalCnhNode = canonicalCnhSnapshot?.val?.() || {};
+    const application = await this.buildApplication(safeDriverId, {
+      db: realtimeDb,
+      ratingsRaw: ratingsSnapshot?.val?.() || null,
+      canonicalProfileData: canonicalProfileSnapshot?.exists
+        ? canonicalProfileSnapshot.data() || {}
+        : null,
+      canonicalCnhData: canonicalCnhNode?.data || canonicalCnhNode?.extractedData || null
+    });
     if (!application) return null;
 
-    await this.collection().doc(String(driverId)).set({
+    await this.collection().doc(safeDriverId).set({
       ...application,
       syncedAt: admin.firestore.FieldValue.serverTimestamp()
     }, { merge: true });
@@ -575,13 +786,32 @@ class DriverApplicationService {
     return applications;
   }
 
-  async listApplications({ status, dateRange, sortBy = 'submissionDate', sortOrder = 'desc', page = 1, limit = 20 } = {}) {
+  async listApplications({
+    status,
+    dateRange,
+    sortBy = 'submissionDate',
+    sortOrder = 'desc',
+    page = 1,
+    limit = 20,
+    persistenceScope = 'operational'
+  } = {}) {
     let snapshot = await this.collection().get();
     let applications = snapshot.docs.map((doc) => doc.data() || {});
 
     if (applications.length === 0) {
       applications = await this.syncAllDriverApplications({});
     }
+    const requestedPersistenceScope = String(persistenceScope || '').trim().toLowerCase();
+    if (!['operational', 'sandbox'].includes(requestedPersistenceScope)) {
+      throw new Error('Escopo de persistência inválido para aplicações de motoristas');
+    }
+    const classifiedApplications = [];
+    for (const application of applications) {
+      classifiedApplications.push(await this.ensureApplicationPersistenceScope(application));
+    }
+    applications = classifiedApplications.filter(
+      (application) => application.persistenceScope?.namespace === requestedPersistenceScope
+    );
 
     applications = filterApplications(applications, { status, dateRange });
     applications = sortApplications(applications, sortBy, sortOrder);
@@ -593,7 +823,7 @@ class DriverApplicationService {
     const endIndex = startIndex + numericLimit;
 
     return {
-      applications: applications.slice(startIndex, endIndex),
+      applications: projectDashboardApplication(applications.slice(startIndex, endIndex)),
       pagination: {
         page: numericPage,
         limit: numericLimit,
@@ -608,15 +838,17 @@ class DriverApplicationService {
     if (!safeDriverId) return null;
 
     if (refresh) {
-      return this.syncDriverApplication(safeDriverId, { includeRatings });
+      const application = await this.syncDriverApplication(safeDriverId, { includeRatings });
+      return application ? projectDashboardApplication(application) : null;
     }
 
     const snapshot = await this.collection().doc(safeDriverId).get();
     if (snapshot.exists) {
-      return snapshot.data() || null;
+      return projectDashboardApplication(snapshot.data() || null);
     }
 
-    return this.syncDriverApplication(safeDriverId, { includeRatings });
+    const application = await this.syncDriverApplication(safeDriverId, { includeRatings });
+    return application ? projectDashboardApplication(application) : null;
   }
 
   async listReviewQueue({
@@ -626,7 +858,8 @@ class DriverApplicationService {
     page = 1,
     limit = 25,
     sortBy = 'uploadedAt',
-    sortOrder = 'desc'
+    sortOrder = 'desc',
+    persistenceScope = 'operational'
   } = {}) {
     let snapshot = await this.collection().get();
     let applications = snapshot.docs.map((doc) => doc.data() || {});
@@ -634,6 +867,17 @@ class DriverApplicationService {
     if (applications.length === 0) {
       applications = await this.syncAllDriverApplications({});
     }
+    const requestedPersistenceScope = String(persistenceScope || '').trim().toLowerCase();
+    if (!['operational', 'sandbox'].includes(requestedPersistenceScope)) {
+      throw new Error('Escopo de persistência inválido para fila documental');
+    }
+    const classifiedApplications = [];
+    for (const application of applications) {
+      classifiedApplications.push(await this.ensureApplicationPersistenceScope(application));
+    }
+    applications = classifiedApplications.filter(
+      (application) => application.persistenceScope?.namespace === requestedPersistenceScope
+    );
 
     const selectedTypes = String(documentType || '').toLowerCase() === 'all'
       ? [...REVIEWABLE_DOCUMENT_TYPES]
@@ -684,7 +928,7 @@ class DriverApplicationService {
           requiredUpdate: doc.requiredUpdate === true,
           requestedAt: doc.requestedAt || null,
           requestReason: doc.requestReason || null,
-          fileUrl: doc.fileUrl || null,
+          contentAvailable: doc.contentAvailable === true,
           sortTs: parseTimestampValue(doc[safeSortBy])
         });
       }
@@ -743,7 +987,8 @@ class DriverApplicationService {
         status: safeStatus,
         sortBy: safeSortBy,
         sortOrder: safeSortOrder,
-        search: searchText
+        search: searchText,
+        persistenceScope: requestedPersistenceScope
       },
       summary
     };

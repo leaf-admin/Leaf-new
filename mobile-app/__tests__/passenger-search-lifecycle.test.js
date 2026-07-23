@@ -17,7 +17,7 @@ describe("passenger search lifecycle", () => {
     ).toBe(true);
   });
 
-  it("treats the canonical deadline as terminal instead of preserving stale search", () => {
+  it("keeps a paid search preserved at the deadline so the passenger can decide", () => {
     expect(
       isPassengerSearchExpired({
         role: "customer",
@@ -34,6 +34,27 @@ describe("passenger search lifecycle", () => {
         activeBookingId: "booking_stale",
         paymentStatus: "confirmed",
       }),
+    ).toBe(true);
+  });
+
+  it("does not treat booking creation as driver-search timeout", () => {
+    expect(
+      isPassengerSearchExpired({
+        role: "customer",
+        bookingStatus: "requesting",
+        elapsedSeconds: 180,
+      }),
     ).toBe(false);
+    expect(
+      shouldPreservePassengerSearchOnIdleSync({
+        role: "customer",
+        syncedStatus: "idle",
+        bookingStatus: "requesting",
+        elapsedSeconds: 180,
+        activeBookingId: "",
+        activeBooking: { status: "REQUESTING" },
+        paymentStatus: "processing",
+      }),
+    ).toBe(true);
   });
 });

@@ -1,0 +1,6 @@
+appId: br.com.leaf.ride
+---
+- swipe:
+    start: "50%,82%"
+    end: "50%,28%"
+    duration: 450

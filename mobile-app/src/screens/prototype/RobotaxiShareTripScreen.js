@@ -82,6 +82,7 @@ export default function RobotaxiShareTripScreen({ navigation, route }) {
   const { height: windowHeight } = useWindowDimensions();
   const [panelHeight, setPanelHeight] = useState(windowHeight);
   const [copied, setCopied] = useState(false);
+  const [showMoreActions, setShowMoreActions] = useState(false);
   const runtime = usePrototypeRideRuntime();
 
   usePrototypeMapOcclusion({
@@ -200,16 +201,33 @@ export default function RobotaxiShareTripScreen({ navigation, route }) {
                 </Text>
               </View>
 
-              <View style={styles.actionGrid}>
+              <View style={styles.primaryActionBlock}>
                 <LeafButton
                   label={copied ? 'Copiado' : 'Copiar link'}
                   icon={copied ? 'checkmark-outline' : 'copy-outline'}
                   tone="primary"
                   onPress={handleCopy}
-                  style={styles.actionButton}
+                  style={styles.primaryActionButton}
                   testID="robotaxi-share-copy-link"
                   accessibilityLabel="robotaxi-share-copy-link"
                 />
+                <LeafButton
+                  label={showMoreActions ? 'Ocultar opções' : 'Mais opções'}
+                  icon={showMoreActions ? 'chevron-up-outline' : 'ellipsis-horizontal'}
+                  tone="ghost"
+                  onPress={() => setShowMoreActions(value => !value)}
+                  style={styles.moreActionsButton}
+                  testID="robotaxi-share-more-actions"
+                  accessibilityLabel="robotaxi-share-more-actions"
+                />
+              </View>
+
+              {showMoreActions ? (
+                <View
+                  style={styles.actionGrid}
+                  testID="robotaxi-share-secondary-actions"
+                  accessibilityLabel="robotaxi-share-secondary-actions"
+                >
                 <LeafButton
                   label="WhatsApp"
                   icon="logo-whatsapp"
@@ -237,7 +255,8 @@ export default function RobotaxiShareTripScreen({ navigation, route }) {
                   testID="robotaxi-share-preview"
                   accessibilityLabel="robotaxi-share-preview"
                 />
-              </View>
+                </View>
+              ) : null}
 
               <PrototypeMenuSection title="O que aparece para a pessoa">
                 <PrototypeMenuInfoRow label="Destino" value={destination} />
@@ -294,7 +313,17 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 20,
   },
+  primaryActionBlock: {
+    gap: 10,
+  },
+  primaryActionButton: {
+    width: '100%',
+  },
+  moreActionsButton: {
+    width: '100%',
+  },
   actionGrid: {
+    marginTop: 2,
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 10,

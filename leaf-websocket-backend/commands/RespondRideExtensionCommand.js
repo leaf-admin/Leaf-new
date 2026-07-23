@@ -15,6 +15,8 @@ const {
   buildRideExtensionExpiresAt
 } = require('../services/ride-lifecycle-service');
 
+const EXTENSION_FARE_AUTHORITY = 'backend_extension_estimate';
+
 class RespondRideExtensionCommand extends Command {
   constructor(data) {
     super(data);
@@ -102,11 +104,23 @@ class RespondRideExtensionCommand extends Command {
           });
         }
 
+        if (activeExtensionRequest.fareAuthority !== EXTENSION_FARE_AUTHORITY) {
+          return CommandResult.failure('Extensão sem cotação financeira backend. Passageiro deve refazer a solicitação.');
+        }
+
         const extendRideCommand = new ExtendRideCommand({
           bookingId: this.bookingId,
           customerId: activeExtensionRequest.requestedBy,
           newEndLocation: activeExtensionRequest.newEndLocation,
           newFare: activeExtensionRequest.newFare,
+          fareDelta: activeExtensionRequest.fareDelta,
+          diffFare: activeExtensionRequest.diffFare,
+          extensionChargeAmount: activeExtensionRequest.extensionChargeAmount || activeExtensionRequest.diffFare,
+          extensionChargeAmountCents: activeExtensionRequest.extensionChargeAmountCents,
+          extensionOperationalCost: activeExtensionRequest.extensionOperationalCost,
+          routeRecalculationCost: activeExtensionRequest.routeRecalculationCost,
+          paymentIntermediationFee: activeExtensionRequest.paymentIntermediationFee,
+          roundingBuffer: activeExtensionRequest.roundingBuffer,
           mockPayment: this.mockPayment,
           correlationId: this.correlationId,
           eventType: 'EXTENSION_PAYMENT_REQUIRED'

@@ -209,6 +209,13 @@ const websocketConnectionsCurrent = new promClient.Gauge({
     registers: [register]
 });
 
+const operationalEventsTotal = new promClient.Counter({
+    name: 'leaf_operational_event_total',
+    help: 'Eventos operacionais canônicos sem PII por domínio, evento e resultado',
+    labelNames: ['domain', 'event', 'result'],
+    registers: [register]
+});
+
 // ==================== HOTPATH / REALTIME ====================
 
 // Event loop lag (ms)
@@ -559,6 +566,14 @@ const metrics = {
         websocketConnectionsCurrent.set({
             runtime_role: sanitizeLabelValue(runtimeRole, 'gateway')
         }, Number.isFinite(count) && count >= 0 ? count : 0);
+    },
+
+    recordOperationalEvent: (domain = 'unknown', event = 'unknown', result = 'unknown', count = 1) => {
+        operationalEventsTotal.inc({
+            domain: sanitizeLabelValue(domain, 'unknown'),
+            event: sanitizeLabelValue(event, 'unknown'),
+            result: sanitizeLabelValue(result, 'unknown')
+        }, Number.isFinite(count) && count > 0 ? count : 1);
     },
 
     // Event loop lag

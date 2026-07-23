@@ -73,20 +73,23 @@ assert_exported_ipa() {
   fi
 
   expected_build_number="$(node -e "console.log(require('./config/AppConfig').AppConfig.ios_build_number)")"
+  expected_runtime_version="${LEAF_RUNTIME_VERSION:-${EXPO_RUNTIME_VERSION:-$(node -e "console.log(require('./config/AppConfig').AppConfig.ios_app_version)")}}"
 
   LEAF_EXPECTED_IOS_VERSION="$(node -e "console.log(require('./config/AppConfig').AppConfig.ios_app_version)")" \
-  LEAF_EXPECTED_IOS_BUILD_NUMBER="${expected_build_number}" node - "${app_config_path}" <<'NODE'
+  LEAF_EXPECTED_IOS_BUILD_NUMBER="${expected_build_number}" \
+  LEAF_EXPECTED_RUNTIME_VERSION="${expected_runtime_version}" node - "${app_config_path}" <<'NODE'
 const fs = require('fs');
 
 const config = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
 const failures = [];
 const expectedVersion = process.env.LEAF_EXPECTED_IOS_VERSION;
 const expectedBuildNumber = process.env.LEAF_EXPECTED_IOS_BUILD_NUMBER;
+const expectedRuntimeVersion = process.env.LEAF_EXPECTED_RUNTIME_VERSION || expectedVersion;
 const expected = {
   name: 'Leaf',
   slug: 'leafapp-reactnative',
   version: expectedVersion,
-  runtimeVersion: expectedVersion,
+  runtimeVersion: expectedRuntimeVersion,
 };
 
 for (const [key, value] of Object.entries(expected)) {

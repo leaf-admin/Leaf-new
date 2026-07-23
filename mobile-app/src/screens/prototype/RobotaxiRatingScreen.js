@@ -13,14 +13,16 @@ import {
   useWindowDimensions,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { StackActions } from "@react-navigation/native";
 import { Ionicons } from "@expo/vector-icons";
 import { fonts } from "../../theme/runtimeTokens";
 import PrototypeScreenTransition from "../../components/prototype/PrototypeScreenTransition";
 import {
-  CardHandle,
-  PrototypeCard,
-  PrototypePrimaryButton,
-} from "../../components/prototype/PrototypeUI";
+  RobotaxiLifecycleButton,
+  RobotaxiLifecycleCard,
+  RobotaxiLifecycleDisclosure,
+  robotaxiLifecycleMetrics,
+} from "../../components/prototype/RobotaxiLifecycleUI";
 import robotaxiPrototypeTokens from "../../components/design-system/robotaxiPrototypeTokens";
 import { usePrototypeMapOcclusion } from "./prototypeMapOcclusion";
 import { usePrototypeRideRuntime } from "./prototypeRideRuntime";
@@ -79,6 +81,29 @@ function normalizeAutoBoolean(value, fallback = null) {
   return fallback;
 }
 
+function resolveSubmittedRatingValue(result, fallbackRating) {
+  const rawRating =
+    result?.rating && typeof result.rating === "object"
+      ? result.rating.rating
+      : result?.rating;
+  const numeric = Number(rawRating);
+  if (Number.isFinite(numeric) && numeric >= 1 && numeric <= 5) {
+    return numeric;
+  }
+  return fallbackRating;
+}
+
+function resolveSubmittedComment(result, fallbackComment) {
+  const rawComment =
+    result?.rating && typeof result.rating === "object"
+      ? result.rating.comment
+      : result?.comment;
+  if (typeof rawComment === "string") {
+    return rawComment.trim();
+  }
+  return fallbackComment.trim();
+}
+
 export default function RobotaxiRatingScreen({ navigation, route }) {
   const {
     activeRole,
@@ -119,16 +144,18 @@ export default function RobotaxiRatingScreen({ navigation, route }) {
   );
   const [airConditioningOk, setAirConditioningOk] = useState(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [secondaryActionsVisible, setSecondaryActionsVisible] = useState(false);
   const qaAutoSubmitStartedRef = useRef(false);
-  const sheetBottom = insets.bottom + SHEET_BOTTOM_OFFSET;
+  const sheetBottom =
+    insets.bottom + SHEET_BOTTOM_OFFSET + robotaxiLifecycleMetrics.cardBottomGap;
   const cardMaxHeight = Math.max(
     340,
     windowHeight - insets.top - insets.bottom - 86,
   );
-  const fromReceipt = Boolean(route?.params?.fromReceipt);
   const qaAutoSubmit = isTruthyRouteParam(
     route?.params?.qaAutoSubmit || route?.params?.autoSubmit,
   );
+  const terminalExitRef = useRef(false);
   const qaAutoComment = String(
     route?.params?.qaComment || route?.params?.comment || "",
   ).trim();
@@ -154,21 +181,49 @@ export default function RobotaxiRatingScreen({ navigation, route }) {
     }
   }, []);
 
-  const handleDismiss = () => {
-    if (fromReceipt) {
-      navigation.navigate("RobotaxiPrototypeReceipt", {
-        fromTrip: true,
-        fromRating: true,
-      });
+  const replaceWithPrototypeHome = useCallback(() => {
+    terminalExitRef.current = true;
+    const resetParams = {
+      resetPassengerHomeSearch: true,
+      resetPassengerHomeSearchAt: new Date().toISOString(),
+      source: "rating_completed",
+    };
+
+    if (typeof navigation.replace === "function") {
+      navigation.replace("RobotaxiPrototype", resetParams);
       return;
     }
 
-    if (navigation.canGoBack()) {
-      navigation.goBack();
+    if (typeof navigation.dispatch === "function") {
+      navigation.dispatch(StackActions.replace("RobotaxiPrototype", resetParams));
       return;
     }
-    navigation.navigate("RobotaxiPrototype");
-  };
+
+    navigation.navigate("RobotaxiPrototype", resetParams);
+  }, [navigation]);
+
+  const handleDismiss = useCallback(() => {
+    dismissCompletedReceipt();
+    replaceWithPrototypeHome();
+  }, [dismissCompletedReceipt, replaceWithPrototypeHome]);
+
+  useEffect(() => {
+    if (typeof navigation?.addListener !== "function") {
+      return undefined;
+    }
+
+    const unsubscribe = navigation.addListener("beforeRemove", event => {
+      if (terminalExitRef.current) {
+        terminalExitRef.current = false;
+        return;
+      }
+
+      event?.preventDefault?.();
+      handleDismiss();
+    });
+
+    return typeof unsubscribe === "function" ? unsubscribe : undefined;
+  }, [handleDismiss, navigation]);
 
   const toggleTag = useCallback((tag) => {
     setSelectedTags((previous) => {
@@ -245,7 +300,7 @@ export default function RobotaxiRatingScreen({ navigation, route }) {
                 : [`Ar-condicionado: ${airConditioningOk ? "Sim" : "Não"}`]),
             ];
 
-      await RatingService.submitRating({
+      const submitResult = await RatingService.submitRating({
         tripId,
         userId: profile.uid,
         reviewerId: profile.uid,
@@ -263,24 +318,26 @@ export default function RobotaxiRatingScreen({ navigation, route }) {
             ? { passengerId: targetUserId, passenger: targetUserId }
             : { driverId: targetUserId, driver: targetUserId },
       });
+      const committedRating = resolveSubmittedRatingValue(submitResult, rating);
+      const committedComment = resolveSubmittedComment(submitResult, comment);
 
       markTripRating(
         tripId,
         reviewerType === "driver"
           ? {
               driverRatedPassengerAt: new Date().toISOString(),
-              driverRatedPassengerValue: rating,
-              driverRatedPassengerComment: comment.trim(),
+              driverRatedPassengerValue: committedRating,
+              driverRatedPassengerComment: committedComment,
             }
           : {
               passengerRatedDriverAt: new Date().toISOString(),
-              passengerRatedDriverValue: rating,
-              passengerRatedDriverComment: comment.trim(),
+              passengerRatedDriverValue: committedRating,
+              passengerRatedDriverComment: committedComment,
             },
       );
 
       dismissCompletedReceipt();
-      navigation.navigate("RobotaxiPrototype");
+      replaceWithPrototypeHome();
       Alert.alert(
         "Avaliação enviada",
         `Sua nota para ${targetName} foi registrada com sucesso.`,
@@ -298,9 +355,9 @@ export default function RobotaxiRatingScreen({ navigation, route }) {
     comment,
     dismissCompletedReceipt,
     markTripRating,
-    navigation,
     profile?.uid,
     rating,
+    replaceWithPrototypeHome,
     reviewerType,
     reviewTargetLabel,
     selectedTags,
@@ -357,7 +414,7 @@ export default function RobotaxiRatingScreen({ navigation, route }) {
           keyboardVerticalOffset={Math.max(0, insets.top - 4)}
           style={[styles.sheetWrap, { bottom: sheetBottom }]}
         >
-          <PrototypeCard
+          <RobotaxiLifecycleCard
             onLayout={handleCardLayout}
             style={[styles.card, { maxHeight: cardMaxHeight }]}
             testID={
@@ -376,8 +433,6 @@ export default function RobotaxiRatingScreen({ navigation, route }) {
               keyboardShouldPersistTaps="handled"
               contentContainerStyle={styles.cardScroll}
             >
-              <CardHandle />
-
               <Text style={styles.title}>
               {reviewerType === "driver"
                 ? "Avalie o passageiro"
@@ -499,17 +554,36 @@ export default function RobotaxiRatingScreen({ navigation, route }) {
                 : "Selecione uma opção ou escreva um comentário."}
             </Text>
 
-            <PrototypePrimaryButton
+            <RobotaxiLifecycleButton
               label={isSubmitting ? "Enviando..." : "Enviar avaliação"}
               icon="checkmark-outline"
+              tone="primary"
               onPress={handleSubmit}
               disabled={isSubmitting}
               style={styles.submitButton}
               testID="passenger-rating-submit-button"
               accessibilityLabel="passenger-rating-submit-button"
             />
+            <RobotaxiLifecycleDisclosure
+              expanded={secondaryActionsVisible}
+              onPress={() => setSecondaryActionsVisible((visible) => !visible)}
+              style={styles.ratingMoreOptions}
+              label="Mais opções"
+              expandedLabel="Ocultar opções"
+              testID="rating-more-options-button"
+            />
+            {secondaryActionsVisible ? (
+              <RobotaxiLifecycleButton
+                label="Agora não"
+                disabled={isSubmitting}
+                onPress={handleDismiss}
+                style={styles.skipButton}
+                testID="rating-skip-to-map-button"
+                accessibilityLabel="rating-skip-to-map-button"
+              />
+            ) : null}
             </ScrollView>
-          </PrototypeCard>
+          </RobotaxiLifecycleCard>
         </KeyboardAvoidingView>
       </View>
     </PrototypeScreenTransition>
@@ -527,13 +601,7 @@ const styles = StyleSheet.create({
     right: 0,
   },
   card: {
-    borderTopLeftRadius: 28,
-    borderTopRightRadius: 28,
-    borderBottomLeftRadius: 0,
-    borderBottomRightRadius: 0,
-    paddingHorizontal: 24,
-    paddingTop: 14,
-    paddingBottom: 16,
+    marginHorizontal: robotaxiLifecycleMetrics.cardHorizontalMargin,
   },
   cardScroll: {
     paddingBottom: 2,
@@ -541,8 +609,8 @@ const styles = StyleSheet.create({
   title: {
     color: color.text.primary,
     fontFamily: fonts.SemiBold,
-    fontSize: 18,
-    lineHeight: 24,
+    fontSize: 15.5,
+    lineHeight: 20,
     textAlign: "center",
   },
   subtitle: {
@@ -656,5 +724,11 @@ const styles = StyleSheet.create({
   },
   submitButton: {
     marginTop: 10,
+  },
+  ratingMoreOptions: {
+    marginTop: 8,
+  },
+  skipButton: {
+    marginTop: 8,
   },
 });

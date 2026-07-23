@@ -70,6 +70,22 @@ describe('prototypeConnectionStatus', () => {
     );
   });
 
+  test('does not surface recovered connection noise during quote preview', () => {
+    const model = buildPrototypeConnectionIndicatorModel({
+      activeRole: 'customer',
+      bookingStatus: 'quote',
+      driverOnline: false,
+      driverOnlinePending: false,
+      connecting: false,
+      isSocketConnected: true,
+      isSocketAuthenticated: true,
+      requiresAuthentication: true,
+      recentlyRecovered: true,
+    });
+
+    expect(model).toBeNull();
+  });
+
   test('resolves QA automation config for a frontend-only drop and recover scenario', () => {
     const config = resolvePrototypeConnectionAutomationConfig(
       {

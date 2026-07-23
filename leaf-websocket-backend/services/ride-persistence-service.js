@@ -2,6 +2,10 @@ const { logger } = require('../utils/logger');
 const redisPool = require('../utils/redis-pool');
 const firebaseConfig = require('../firebase-config');
 const admin = require('firebase-admin');
+const {
+    resolveRidePersistenceScope,
+    assertStoredRecordMatchesScope
+} = require('./sandbox-persistence-context');
 
 /**
  * Serviço de Persistência de Corridas
@@ -79,6 +83,32 @@ class RidePersistenceService {
     getFinalizationOutboxKey() {
         return 'rides:finalization_outbox';
     }
+
+    resolvePersistenceScope(input = {}) {
+        return resolveRidePersistenceScope(input);
+    }
+
+    buildPersistenceEnvelope(scope) {
+        if (!scope?.financialContext || scope.source === 'legacy_operational') {
+            return {};
+        }
+        return {
+            financialContext: scope.financialContext,
+            financialNamespace: scope.namespace,
+            financialContextId: scope.financialContextId
+        };
+    }
+
+    async getScopedRideDocument(rideId, scope, { validateStoredRecord = false } = {}) {
+        const docRef = this.firestore.collection(scope.collections.rides).doc(rideId);
+        if (!validateStoredRecord) return { docRef, snapshot: null };
+
+        const snapshot = await docRef.get();
+        if (snapshot.exists) {
+            assertStoredRecordMatchesScope(snapshot.data() || {}, scope);
+        }
+        return { docRef, snapshot };
+    }
     
     /**
      * Inicializar Firestore
@@ -139,6 +169,8 @@ class RidePersistenceService {
     async saveRide(rideData) {
         try {
             const telemetry = this.createOperationTelemetry();
+            const persistenceScope = this.resolvePersistenceScope(rideData || {});
+            const persistenceEnvelope = this.buildPersistenceEnvelope(persistenceScope);
             const {
                 rideId,
                 bookingId,
@@ -219,13 +251,17 @@ class RidePersistenceService {
                 cancelledAt: null,
                 // Metadados
                 source: 'websocket-backend',
-                version: '1.0'
+                version: '1.0',
+                ...persistenceEnvelope
             };
             
             // Salvar com retry
             await this.retryOperation(
                 async () => {
-                    await this.firestore.collection('rides').doc(rideId).set(rideDoc, { merge: false });
+                    await this.firestore
+                        .collection(persistenceScope.collections.rides)
+                        .doc(rideId)
+                        .set(rideDoc, { merge: false });
                 },
                 'saveRide (Firestore)'
             );
@@ -236,6 +272,7 @@ class RidePersistenceService {
             return {
                 success: true,
                 rideId: rideId,
+                financialNamespace: persistenceScope.namespace,
                 telemetry
             };
             
@@ -244,6 +281,7 @@ class RidePersistenceService {
             return {
                 success: false,
                 error: error.message,
+                code: error.code || null,
                 telemetry: this.createOperationTelemetry()
             };
         }
@@ -304,6 +342,9 @@ class RidePersistenceService {
     async saveFinalRideData(rideId, finalData) {
         try {
             const telemetry = this.createOperationTelemetry();
+            const persistenceScope = this.resolvePersistenceScope(finalData || {});
+            const persistenceEnvelope = this.buildPersistenceEnvelope(persistenceScope);
+            const finalStatus = finalData.completionType || 'completed';
             if (!rideId) {
                 return {
                     success: false,
@@ -318,7 +359,7 @@ class RidePersistenceService {
                 if (redis && (redis.status === 'ready' || redis.status === 'connect')) {
                     const bookingKey = `booking:${rideId}`;
                     await redis.hset(bookingKey, {
-                        status: 'completed',
+                        status: finalStatus,
                         finalPrice: finalData.fare || null,
                         netFare: finalData.netFare || null,
                         distance: finalData.distance || null,
@@ -342,15 +383,34 @@ class RidePersistenceService {
             }
             
             const updateData = {
-                status: 'completed',
+                status: finalStatus,
                 finalPrice: finalData.fare || null,
                 netFare: finalData.netFare || null,
                 distance: finalData.distance || null,
+                routeDistanceKm: finalData.routeDistanceKm || finalData.distance || null,
                 duration: finalData.duration || null,
+                routeDurationSecs: finalData.routeDurationSecs || finalData.duration || null,
                 completedAt: admin.firestore.FieldValue.serverTimestamp(),
                 driverEarnings: finalData.driverEarnings || null,
-                financialBreakdown: finalData.financialBreakdown || null
+                financialBreakdown: finalData.financialBreakdown || null,
+                ...persistenceEnvelope
             };
+
+            [
+                'completionType',
+                'settlement',
+                'operationalContinuation',
+                'reviewContext',
+                'fareBreakdown',
+                'financialSnapshot',
+                'financialSnapshotSource',
+                'authoritativeSnapshot',
+                'tollFee'
+            ].forEach((field) => {
+                if (finalData[field] !== undefined) {
+                    updateData[field] = finalData[field];
+                }
+            });
             
             // Adicionar endLocation se fornecido
             if (finalData.endLocation) {
@@ -364,7 +424,12 @@ class RidePersistenceService {
             // Atualizar com retry
             await this.retryOperation(
                 async () => {
-                    await this.firestore.collection('rides').doc(rideId).update(updateData);
+                    const { docRef } = await this.getScopedRideDocument(
+                        rideId,
+                        persistenceScope,
+                        { validateStoredRecord: persistenceScope.namespace === 'sandbox' }
+                    );
+                    await docRef.update(updateData);
                 },
                 'saveFinalRideData (Firestore)'
             );
@@ -375,6 +440,7 @@ class RidePersistenceService {
             return {
                 success: true,
                 rideId: rideId,
+                financialNamespace: persistenceScope.namespace,
                 telemetry
             };
             
@@ -383,6 +449,7 @@ class RidePersistenceService {
             return {
                 success: false,
                 error: error.message,
+                code: error.code || null,
                 telemetry: this.createOperationTelemetry()
             };
         }
@@ -391,16 +458,22 @@ class RidePersistenceService {
     async queueFinalizationOutbox(rideId, finalData, errorMessage = 'unknown_error') {
         try {
             const telemetry = this.createOperationTelemetry();
+            const persistenceScope = this.resolvePersistenceScope(finalData || {});
             const redis = redisPool.getConnection();
             if (!redis || (redis.status !== 'ready' && redis.status !== 'connect')) {
                 return { success: false, error: 'Redis indisponivel para outbox', telemetry };
             }
 
             const outboxKey = this.getFinalizationOutboxKey();
+            const outboxEntryId = persistenceScope.namespace === 'sandbox'
+                ? `sandbox:${rideId}`
+                : rideId;
             const now = Date.now();
             const payload = {
                 rideId,
                 finalData,
+                financialNamespace: persistenceScope.namespace,
+                financialContextId: persistenceScope.financialContextId,
                 attempts: 0,
                 status: 'pending',
                 createdAt: now,
@@ -409,7 +482,7 @@ class RidePersistenceService {
                 lastError: errorMessage
             };
 
-            await redis.hset(outboxKey, rideId, JSON.stringify(payload));
+            await redis.hset(outboxKey, outboxEntryId, JSON.stringify(payload));
             this.incrementOperationTelemetry(telemetry, 'redis', 'write', 1);
             logger.warn(`⚠️ Finalizacao da corrida ${rideId} enviada para outbox`);
             return { success: true, telemetry };
@@ -474,7 +547,7 @@ class RidePersistenceService {
             let failed = 0;
             let scanned = 0;
 
-            for (const [rideId, raw] of Object.entries(items || {})) {
+            for (const [outboxEntryId, raw] of Object.entries(items || {})) {
                 if (scanned >= limit) break;
                 scanned += 1;
 
@@ -482,13 +555,15 @@ class RidePersistenceService {
                 try {
                     payload = JSON.parse(raw);
                 } catch (parseError) {
-                    await redis.hdel(outboxKey, rideId);
+                    await redis.hdel(outboxKey, outboxEntryId);
                     failed += 1;
                     continue;
                 }
 
+                const rideId = payload?.rideId || outboxEntryId;
+
                 if (!payload || payload.status === 'completed') {
-                    await redis.hdel(outboxKey, rideId);
+                    await redis.hdel(outboxKey, outboxEntryId);
                     continue;
                 }
 
@@ -498,7 +573,7 @@ class RidePersistenceService {
 
                 const result = await this.saveFinalRideData(rideId, payload.finalData || {});
                 if (result.success) {
-                    await redis.hdel(outboxKey, rideId);
+                    await redis.hdel(outboxKey, outboxEntryId);
                     processed += 1;
                     continue;
                 }
@@ -509,7 +584,7 @@ class RidePersistenceService {
                     payload.attempts = attempts;
                     payload.updatedAt = now;
                     payload.lastError = result.error || 'retry_failed';
-                    await redis.hset(outboxKey, rideId, JSON.stringify(payload));
+                    await redis.hset(outboxKey, outboxEntryId, JSON.stringify(payload));
                     failed += 1;
                     continue;
                 }
@@ -518,7 +593,7 @@ class RidePersistenceService {
                 payload.updatedAt = now;
                 payload.lastError = result.error || 'retry_failed';
                 payload.nextRetryAt = now + Math.min(60000, 2000 * attempts);
-                await redis.hset(outboxKey, rideId, JSON.stringify(payload));
+                await redis.hset(outboxKey, outboxEntryId, JSON.stringify(payload));
                 retried += 1;
             }
 
@@ -537,18 +612,26 @@ class RidePersistenceService {
      * @param {string} driverId - ID do motorista
      * @returns {Promise<{success: boolean}>}
      */
-    async updateRideDriver(rideId, driverId) {
+    async updateRideDriver(rideId, driverId, persistenceInput = {}) {
         try {
+            const persistenceScope = this.resolvePersistenceScope(persistenceInput);
+            const persistenceEnvelope = this.buildPersistenceEnvelope(persistenceScope);
             if (!this.firestore) {
                 return { success: false };
             }
             
             await this.retryOperation(
                 async () => {
-                    await this.firestore.collection('rides').doc(rideId).update({
+                    const { docRef } = await this.getScopedRideDocument(
+                        rideId,
+                        persistenceScope,
+                        { validateStoredRecord: persistenceScope.namespace === 'sandbox' }
+                    );
+                    await docRef.update({
                         driverId: driverId,
                         status: 'accepted',
-                        acceptedAt: admin.firestore.FieldValue.serverTimestamp()
+                        acceptedAt: admin.firestore.FieldValue.serverTimestamp(),
+                        ...persistenceEnvelope
                     });
                 },
                 'updateRideDriver (Firestore)'
@@ -556,11 +639,11 @@ class RidePersistenceService {
             
             logger.info(`✅ Motorista ${driverId} associado à corrida ${rideId} no Firestore`);
             
-            return { success: true };
+            return { success: true, financialNamespace: persistenceScope.namespace };
             
         } catch (error) {
             logger.error(`❌ Erro ao atualizar motorista da corrida ${rideId}: ${error.message}`);
-            return { success: false };
+            return { success: false, error: error.message, code: error.code || null };
         }
     }
     
@@ -570,17 +653,25 @@ class RidePersistenceService {
      * @param {string} rideId - ID da corrida
      * @returns {Promise<{success: boolean}>}
      */
-    async markRideStarted(rideId) {
+    async markRideStarted(rideId, persistenceInput = {}) {
         try {
+            const persistenceScope = this.resolvePersistenceScope(persistenceInput);
+            const persistenceEnvelope = this.buildPersistenceEnvelope(persistenceScope);
             if (!this.firestore) {
                 return { success: false };
             }
             
             await this.retryOperation(
                 async () => {
-                    await this.firestore.collection('rides').doc(rideId).update({
+                    const { docRef } = await this.getScopedRideDocument(
+                        rideId,
+                        persistenceScope,
+                        { validateStoredRecord: persistenceScope.namespace === 'sandbox' }
+                    );
+                    await docRef.update({
                         status: 'in_progress',
-                        startedAt: admin.firestore.FieldValue.serverTimestamp()
+                        startedAt: admin.firestore.FieldValue.serverTimestamp(),
+                        ...persistenceEnvelope
                     });
                 },
                 'markRideStarted (Firestore)'
@@ -588,11 +679,11 @@ class RidePersistenceService {
             
             logger.info(`✅ Corrida ${rideId} marcada como iniciada no Firestore`);
             
-            return { success: true };
+            return { success: true, financialNamespace: persistenceScope.namespace };
             
         } catch (error) {
             logger.error(`❌ Erro ao marcar corrida como iniciada ${rideId}: ${error.message}`);
-            return { success: false };
+            return { success: false, error: error.message, code: error.code || null };
         }
     }
     
@@ -603,8 +694,10 @@ class RidePersistenceService {
      * @param {string} reason - Motivo do cancelamento (opcional)
      * @returns {Promise<{success: boolean}>}
      */
-    async markRideCancelled(rideId, reason = null) {
+    async markRideCancelled(rideId, reason = null, persistenceInput = {}) {
         try {
+            const persistenceScope = this.resolvePersistenceScope(persistenceInput);
+            const persistenceEnvelope = this.buildPersistenceEnvelope(persistenceScope);
             if (!this.firestore) {
                 return { success: false };
             }
@@ -617,21 +710,27 @@ class RidePersistenceService {
             if (reason) {
                 updateData.cancellationReason = reason;
             }
+            Object.assign(updateData, persistenceEnvelope);
             
             await this.retryOperation(
                 async () => {
-                    await this.firestore.collection('rides').doc(rideId).update(updateData);
+                    const { docRef } = await this.getScopedRideDocument(
+                        rideId,
+                        persistenceScope,
+                        { validateStoredRecord: persistenceScope.namespace === 'sandbox' }
+                    );
+                    await docRef.update(updateData);
                 },
                 'markRideCancelled (Firestore)'
             );
             
             logger.info(`✅ Corrida ${rideId} marcada como cancelada no Firestore`);
             
-            return { success: true };
+            return { success: true, financialNamespace: persistenceScope.namespace };
             
         } catch (error) {
             logger.error(`❌ Erro ao marcar corrida como cancelada ${rideId}: ${error.message}`);
-            return { success: false };
+            return { success: false, error: error.message, code: error.code || null };
         }
     }
     
@@ -641,16 +740,22 @@ class RidePersistenceService {
      * @param {string} rideId - ID da corrida
      * @returns {Promise<Object|null>}
      */
-    async getRide(rideId) {
+    async getRide(rideId, persistenceInput = {}) {
         try {
+            const persistenceScope = this.resolvePersistenceScope(persistenceInput);
             if (!this.firestore) {
                 return null;
             }
             
-            const doc = await this.firestore.collection('rides').doc(rideId).get();
+            const doc = await this.firestore
+                .collection(persistenceScope.collections.rides)
+                .doc(rideId)
+                .get();
             
             if (doc.exists) {
-                return doc.data();
+                const ride = doc.data();
+                assertStoredRecordMatchesScope(ride || {}, persistenceScope);
+                return ride;
             }
             
             return null;
@@ -675,4 +780,3 @@ class RidePersistenceService {
 const ridePersistenceService = new RidePersistenceService();
 
 module.exports = ridePersistenceService;
-

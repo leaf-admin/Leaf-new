@@ -123,7 +123,8 @@ export const findRecoverableRidePaymentSession = async ({ passengerId, routeCont
   return sessions.find(
     (session) =>
       session.contextKey.startsWith(`${normalizedRouteContextKey}|`) &&
-      normalizeText(session?.paymentData?.chargeId),
+      normalizeText(session?.paymentData?.chargeId) &&
+      normalizeText(session?.paymentData?.quoteLockId),
   ) || null;
 };
 

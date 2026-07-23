@@ -100,4 +100,103 @@ describe('qaSeedProfile', () => {
       ['@user_data', JSON.stringify(restored)],
     ]);
   });
+
+  it('restores the current QA driver profile by known uid when local test mode flag is missing', async () => {
+    const AsyncStorage = {
+      multiGet: jest.fn().mockResolvedValue([
+        ['@auth_uid', 'DV4cwZvql3T3pI3lnKYQwQVALKZ2'],
+        ['@user_data', null],
+        ['@test_mode', null],
+        [
+          '@prototype_driver_activation_DV4cwZvql3T3pI3lnKYQwQVALKZ2',
+          JSON.stringify({ canGoOnline: true, currentStage: 'vehicle_activation' }),
+        ],
+      ]),
+      multiSet: jest.fn().mockResolvedValue(undefined),
+    };
+
+    const restored = await restoreQaSeedProfile({
+      AsyncStorage,
+      authUidKey: '@auth_uid',
+      userDataKey: '@user_data',
+      driverActivationKey: '@prototype_driver_activation_DV4cwZvql3T3pI3lnKYQwQVALKZ2',
+    });
+
+    expect(restored).toEqual(
+      expect.objectContaining({
+        uid: 'DV4cwZvql3T3pI3lnKYQwQVALKZ2',
+        usertype: 'driver',
+        userType: 'driver',
+        canGoOnline: true,
+        carPlate: 'TES6789',
+        carModel: 'Toyota Prius',
+        carType: 'Leaf Plus',
+      }),
+    );
+    expect(AsyncStorage.multiSet).toHaveBeenCalledWith([
+      ['@auth_uid', 'DV4cwZvql3T3pI3lnKYQwQVALKZ2'],
+      ['@user_data', JSON.stringify(restored)],
+    ]);
+  });
+
+  it('restores the current QA passenger profile by known uid when local test mode flag is missing', async () => {
+    const AsyncStorage = {
+      multiGet: jest.fn().mockResolvedValue([
+        ['@auth_uid', '3tEQ8pQ2QzeWbMKhLGsXHHhnOGL2'],
+        ['@user_data', null],
+        ['@test_mode', null],
+      ]),
+      multiSet: jest.fn().mockResolvedValue(undefined),
+    };
+
+    const restored = await restoreQaSeedProfile({
+      AsyncStorage,
+      authUidKey: '@auth_uid',
+      userDataKey: '@user_data',
+    });
+
+    expect(restored).toEqual(
+      expect.objectContaining({
+        uid: '3tEQ8pQ2QzeWbMKhLGsXHHhnOGL2',
+        usertype: 'customer',
+        userType: 'customer',
+        email: 'passageiro.qa.vilakosmos@leafapp.com',
+      }),
+    );
+    expect(AsyncStorage.multiSet).toHaveBeenCalledWith([
+      ['@auth_uid', '3tEQ8pQ2QzeWbMKhLGsXHHhnOGL2'],
+      ['@user_data', JSON.stringify(restored)],
+    ]);
+  });
+
+  it('restores the preflight smoke passenger profile by known uid when local test mode flag is missing', async () => {
+    const AsyncStorage = {
+      multiGet: jest.fn().mockResolvedValue([
+        ['@auth_uid', 'juYe4nF4TyOzFTnIzW91Qo0sXtz1'],
+        ['@user_data', null],
+        ['@test_mode', null],
+      ]),
+      multiSet: jest.fn().mockResolvedValue(undefined),
+    };
+
+    const restored = await restoreQaSeedProfile({
+      AsyncStorage,
+      authUidKey: '@auth_uid',
+      userDataKey: '@user_data',
+    });
+
+    expect(restored).toEqual(
+      expect.objectContaining({
+        uid: 'juYe4nF4TyOzFTnIzW91Qo0sXtz1',
+        usertype: 'customer',
+        userType: 'customer',
+        email: 'passageiro.teste@leafapp.com',
+        phone: '+5521102938475',
+      }),
+    );
+    expect(AsyncStorage.multiSet).toHaveBeenCalledWith([
+      ['@auth_uid', 'juYe4nF4TyOzFTnIzW91Qo0sXtz1'],
+      ['@user_data', JSON.stringify(restored)],
+    ]);
+  });
 });

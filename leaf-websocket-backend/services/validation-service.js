@@ -256,11 +256,10 @@ class ValidationService {
         '<': '&lt;',
         '>': '&gt;',
         '"': '&quot;',
-        "'": '&#x27;',
-        '/': '&#x2F;'
+        "'": '&#x27;'
       };
       
-      sanitized = sanitized.replace(/[&<>"'/]/g, (match) => htmlEscapes[match]);
+      sanitized = sanitized.replace(/[&<>"']/g, (match) => htmlEscapes[match]);
     }
     
     return sanitized;
@@ -461,6 +460,71 @@ class ValidationService {
           max: 60 * 60 * 24 * 3, // 72h (limite de segurança)
           label: 'Duração da rota em segundos'
         },
+        routeCoordinates: {
+          type: 'array',
+          required: false,
+          label: 'Geometria da rota',
+          itemSchema: {
+            lat: {
+              type: 'number',
+              required: true,
+              min: -90,
+              max: 90,
+              label: 'Latitude da rota'
+            },
+            lng: {
+              type: 'number',
+              required: true,
+              min: -180,
+              max: 180,
+              label: 'Longitude da rota'
+            }
+          }
+        },
+        trafficSegments: {
+          type: 'array',
+          required: false,
+          label: 'Segmentos de trânsito',
+          itemSchema: {
+            level: {
+              type: 'string',
+              required: false,
+              min: 1,
+              max: 32,
+              label: 'Nível de trânsito',
+              sanitize: { trim: true, removeHtml: true, escapeHtml: true }
+            },
+            color: {
+              type: 'string',
+              required: false,
+              min: 1,
+              max: 32,
+              label: 'Cor do segmento',
+              sanitize: { trim: true, removeHtml: true, escapeHtml: true }
+            },
+            coordinates: {
+              type: 'array',
+              required: true,
+              label: 'Coordenadas do segmento',
+              itemSchema: {
+                lat: {
+                  type: 'number',
+                  required: true,
+                  min: -90,
+                  max: 90,
+                  label: 'Latitude do segmento'
+                },
+                lng: {
+                  type: 'number',
+                  required: true,
+                  min: -180,
+                  max: 180,
+                  label: 'Longitude do segmento'
+                }
+              }
+            }
+          }
+        },
         tollFee: {
           type: 'number',
           required: false,
@@ -526,6 +590,27 @@ class ValidationService {
               min: 0,
               max: this.limits.fare.max * 100,
               label: 'Valor do pagamento em centavos'
+            },
+            grossAmountInCents: {
+              type: 'number',
+              required: false,
+              min: 0,
+              max: this.limits.fare.max * 100,
+              label: 'Valor bruto do pagamento em centavos'
+            },
+            quoteSessionId: {
+              type: 'string',
+              required: false,
+              min: 1,
+              max: 200,
+              label: 'Sessão da cotação'
+            },
+            quoteLockId: {
+              type: 'string',
+              required: false,
+              min: 1,
+              max: 200,
+              label: 'Lock da cotação'
             },
             paymentStatus: {
               type: 'string',

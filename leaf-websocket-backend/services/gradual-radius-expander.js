@@ -19,7 +19,15 @@ const DriverNotificationDispatcher = require('./driver-notification-dispatcher')
 const { logger } = require('../utils/logger');
 const { clearOfferReservationsForBooking } = require('./offer-reservation-service');
 const { recordDispatchWave } = require('./dispatch-wave-trace-service');
-const { getDriverResponseTimeoutSeconds } = require('../utils/dispatch-config');
+const { resolveRidePersistenceScope } = require('./sandbox-persistence-context');
+const {
+    getDriverResponseTimeoutSeconds,
+    getDriverSearchDriversPerWave,
+    getDriverSearchExpansionStepKm,
+    getDriverSearchInitialRadiusKm,
+    getDriverSearchMaxRadiusKm
+} = require('../utils/dispatch-config');
+const PaymentService = require('./payment-service');
 
 // ✅ Compartilhar intervalos entre instâncias para permitir cancelamento global
 const globalExpansionIntervals = new Map();
@@ -33,12 +41,17 @@ const ACTIVE_SEARCH_STATES = new Set([
     'REASSIGNMENT_PENDING'
 ]);
 const TERMINAL_SEARCH_STATUSES = new Set([
+    'COMPLETE',
+    'COMPLETED',
     'CANCELED',
     'CANCELLED',
     'NO_DRIVERS_AVAILABLE',
     'NO_DRIVERS_FOUND',
     'EXPIRED',
-    'SUPERSEDED'
+    'SUPERSEDED',
+    'EARLY_ENDED_BY_RIDER',
+    'INTERRUPTED_OPERATIONAL_ENDED',
+    'EARLY_ENDED_REVIEW'
 ]);
 const ELIGIBLE_DRIVER_GEO_KEY = process.env.ELIGIBLE_DRIVER_GEO_KEY || 'driver_locations_eligible';
 
@@ -63,9 +76,9 @@ class GradualRadiusExpander {
         const isTest = process.env.NODE_ENV === 'test';
         this.config = {
             // Regras padrão de busca: 2.5km inicial -> 5km em 8s (alinhado com UX do passageiro).
-            initialRadius: parsePositiveNumber(process.env.MATCH_INITIAL_RADIUS_KM, isTest ? 5.0 : 2.5),
-            maxRadius: parsePositiveNumber(process.env.MATCH_MAX_RADIUS_KM, isTest ? 30 : 5.0),
-            expansionStep: parsePositiveNumber(process.env.MATCH_EXPANSION_STEP_KM, isTest ? 5.0 : 2.5),
+            initialRadius: isTest ? 5.0 : getDriverSearchInitialRadiusKm(),
+            maxRadius: isTest ? 30 : getDriverSearchMaxRadiusKm(),
+            expansionStep: isTest ? 5.0 : getDriverSearchExpansionStepKm(),
             expansionInterval: parsePositiveNumber(process.env.MATCH_EXPANSION_INTERVAL_MS, isTest ? 1000 : 8000),
             emptyWaveExpansionInterval: parsePositiveNumber(
                 process.env.MATCH_EMPTY_WAVE_INTERVAL_MS,
@@ -81,7 +94,7 @@ class GradualRadiusExpander {
                 process.env.MATCH_MINIMUM_SEARCH_DURATION_MS,
                 isTest ? 0 : 180000
             ),
-            driversPerWave: Number.parseInt(process.env.MATCH_DRIVERS_PER_WAVE || (isTest ? '1' : '12'), 10),
+            driversPerWave: isTest ? 1 : getDriverSearchDriversPerWave(),
             responsePauseMinUniqueDrivers: parsePositiveInt(
                 process.env.MATCH_RESPONSE_PAUSE_MIN_UNIQUE_DRIVERS,
                 1
@@ -283,7 +296,7 @@ class GradualRadiusExpander {
             return { ok: false, reason: 'STATE_NOT_SEARCHABLE', state, status, bookingData: booking };
         }
 
-        if (status === 'SUPERSEDED' || status === 'CANCELED' || status === 'COMPLETED' || status === 'NO_DRIVERS_AVAILABLE') {
+        if (RideStateManager.isTerminalStateValue(status)) {
             return { ok: false, reason: 'BOOKING_STATUS_BLOCKED', state, status, bookingData: booking };
         }
 
@@ -488,6 +501,7 @@ class GradualRadiusExpander {
                 limit,
                 bookingId,
                 {
+                    bookingData: safeBookingData,
                     pickupLocation,
                     destinationLocation: this.safeJSONParse(
                         safeBookingData.destinationLocation,
@@ -825,6 +839,143 @@ class GradualRadiusExpander {
     }
 
 
+    async processNoDriversRefund(bookingId, bookingData = {}, reasonCode = 'NO_DRIVERS_AVAILABLE') {
+        const baseSummary = {
+            status: 'NO_PAYMENT_FOUND',
+            refundId: null,
+            refundAmountInCents: 0,
+            refundAmountInReais: '0.00',
+            ledgerRecorded: false,
+            error: null
+        };
+
+        try {
+            const parsedFinancialContext = this.safeJSONParse(
+                bookingData.financialContext,
+                null
+            );
+            const persistenceScope = resolveRidePersistenceScope({
+                financialContext: parsedFinancialContext,
+                financialNamespace: bookingData.financialNamespace || null,
+                financialContextId: bookingData.financialContextId || null,
+                providerEnvironment:
+                    bookingData.paymentProviderEnvironment ||
+                    bookingData.providerEnvironment ||
+                    null,
+                paymentProfileId: bookingData.paymentProfileId || null,
+                testUserSandbox:
+                    bookingData.testUserSandbox === true ||
+                    String(bookingData.testUserSandbox || '').trim().toLowerCase() === 'true'
+            });
+            const financialContext = persistenceScope.financialContext;
+            const paymentService = new PaymentService();
+            const paymentRecord = await paymentService.getStoredPayment(
+                bookingId,
+                financialContext
+            );
+            if (!paymentRecord) {
+                return baseSummary;
+            }
+
+            if (paymentRecord.credited || String(paymentRecord.status || '').toUpperCase() === 'CREDITED') {
+                return {
+                    ...baseSummary,
+                    status: 'CREDITED_SUPPORT_REQUIRED',
+                    error: 'Pagamento já creditado; reembolso exige suporte financeiro.'
+                };
+            }
+
+            const alreadyRefunded =
+                paymentRecord.refunded ||
+                (typeof PaymentService.isRefundedPaymentStatus === 'function' &&
+                    PaymentService.isRefundedPaymentStatus(paymentRecord.status));
+            if (alreadyRefunded) {
+                const amount = paymentService.normalizePaymentAmountCents(paymentRecord.refundAmount || 0);
+                return {
+                    ...baseSummary,
+                    status: 'ALREADY_REFUNDED',
+                    refundId: paymentRecord.refundId || null,
+                    refundAmountInCents: amount,
+                    refundAmountInReais: (amount / 100).toFixed(2),
+                    ledgerRecorded: paymentRecord.refundLedgerStatus === 'recorded'
+                };
+            }
+
+            const estimatedFareCents = Math.round((Number.parseFloat(
+                bookingData.estimatedFare || bookingData.totalAmount || 0
+            ) || 0) * 100);
+            const refundAmount = paymentService.normalizePaymentAmountCents(
+                paymentRecord.amount ||
+                    paymentRecord.paymentAmount ||
+                    paymentRecord.totalAmount ||
+                    bookingData.paymentAmountCents ||
+                    bookingData.amountPaidCents ||
+                    estimatedFareCents
+            );
+            const chargeId = String(
+                paymentRecord.chargeId ||
+                    paymentRecord.paymentId ||
+                    bookingData.paymentChargeId ||
+                    bookingData.chargeId ||
+                    ''
+            ).trim();
+
+            if (!chargeId || refundAmount <= 0) {
+                return {
+                    ...baseSummary,
+                    status: 'REFUND_PENDING',
+                    refundAmountInCents: refundAmount,
+                    refundAmountInReais: (Math.max(0, refundAmount) / 100).toFixed(2),
+                    error: !chargeId ? 'PAYMENT_CHARGE_NOT_FOUND' : 'REFUND_AMOUNT_REQUIRED'
+                };
+            }
+
+            const result = await paymentService.processRideRefund({
+                rideId: bookingId,
+                chargeId,
+                amount: refundAmount,
+                reason: reasonCode,
+                status: 'REFUNDED_FULL',
+                passengerId: bookingData.customerId || bookingData.passengerId || null,
+                financialContext,
+                metadata: {
+                    source: 'gradual_radius_expander',
+                    reasonCode
+                }
+            });
+
+            if (!result.success) {
+                return {
+                    ...baseSummary,
+                    status: 'REFUND_PENDING',
+                    refundAmountInCents: refundAmount,
+                    refundAmountInReais: (refundAmount / 100).toFixed(2),
+                    error: result.error || result.code || 'REFUND_FAILED'
+                };
+            }
+
+            return {
+                ...baseSummary,
+                status: result.alreadyRefunded ? 'ALREADY_REFUNDED' : 'REFUNDED',
+                refundId: result.refundId || null,
+                refundAmountInCents: refundAmount,
+                refundAmountInReais: (refundAmount / 100).toFixed(2),
+                ledgerRecorded: result.ledgerRecorded === true,
+                error: result.ledgerRecorded === false
+                    ? (result.ledgerError || 'LEDGER_PENDING')
+                    : null
+            };
+        } catch (error) {
+            logger.warn(`⚠️ [GradualExpander] Falha ao processar reembolso de noDriversFound para ${bookingId}: ${error.message}`);
+            return {
+                ...baseSummary,
+                status: 'REFUND_PENDING',
+                error: error.message
+            };
+        }
+    }
+
+
     /**
      * Handler quando raio máximo é atingido
      * @private
@@ -972,6 +1123,8 @@ class GradualRadiusExpander {
             }
         }
 
+        const refundSummary = await this.processNoDriversRefund(bookingId, bookingData, reasonCode);
+
         // Notificar customer sobre busca expandida + finalização sem motoristas
         if (this.io && bookingData.customerId) {
             this.io.to(`customer_${bookingData.customerId}`).emit('rideSearchExpanded', {
@@ -985,7 +1138,11 @@ class GradualRadiusExpander {
                 bookingId,
                 message: userMessage,
                 code: reasonCode,
-                searchedRadius
+                searchedRadius,
+                refundStatus: refundSummary.status,
+                refundId: refundSummary.refundId || null,
+                refundAmountInCents: refundSummary.refundAmountInCents || 0,
+                refundAmountInReais: refundSummary.refundAmountInReais || '0.00'
             });
         }
 
@@ -994,7 +1151,13 @@ class GradualRadiusExpander {
             await this.redis.hset(bookingKey, {
                 noDriversFoundAt: new Date().toISOString(),
                 noDriversFoundReason: reasonCode,
-                status: 'NO_DRIVERS_AVAILABLE'
+                status: 'NO_DRIVERS_AVAILABLE',
+                refundStatus: refundSummary.status,
+                refundId: refundSummary.refundId || '',
+                refundAmountInCents: String(refundSummary.refundAmountInCents || 0),
+                refundAmountInReais: refundSummary.refundAmountInReais || '0.00',
+                refundLedgerRecorded: refundSummary.ledgerRecorded === true ? 'true' : 'false',
+                refundError: refundSummary.error || ''
             });
             await RideStateManager.updateBookingState(
                 this.redis,
@@ -1016,6 +1179,26 @@ class GradualRadiusExpander {
             }
         } catch (error) {
             logger.warn(`⚠️ [GradualExpander] Falha ao persistir metadata de noDriversFound para ${bookingId}: ${error.message}`);
+        }
+
+        // Espelhar no Firestore a mesma transição terminal já confirmada no Redis.
+        // O serviço resolve o namespace pelo contexto selado do booking, inclusive sandbox.
+        try {
+            const ridePersistenceService = require('./ride-persistence-service');
+            const persistenceResult = await ridePersistenceService.markRideCancelled(
+                bookingId,
+                reasonCode,
+                bookingData
+            );
+            if (!persistenceResult?.success) {
+                logger.warn(
+                    `⚠️ [GradualExpander] Falha ao espelhar noDriversFound no Firestore para ${bookingId}: ${persistenceResult?.error || 'persist_failed'}`
+                );
+            }
+        } catch (persistError) {
+            logger.warn(
+                `⚠️ [GradualExpander] Erro ao espelhar noDriversFound no Firestore para ${bookingId}: ${persistError.message}`
+            );
         }
 
         try {

@@ -72,6 +72,28 @@ describe('fcm-service', () => {
     expect(result).toHaveProperty('success', false);
   });
 
+  test('sendNotificationToUser exposes only a token fingerprint in results and logs', async () => {
+    const rawToken = 'fcm-secret-token-that-must-not-be-logged';
+    fcmService.resolveUserTokens = jest.fn().mockResolvedValue([{ fcmToken: rawToken }]);
+
+    const result = await fcmService.sendNotificationToUser('u1', {
+      title: 'Ride update',
+      body: 'Driver accepted'
+    });
+
+    expect(result).toEqual(expect.objectContaining({ success: true }));
+    expect(result.results).toEqual([
+      expect.objectContaining({
+        tokenFingerprint: expect.stringMatching(/^[a-f0-9]{12}$/),
+        success: true
+      })
+    ]);
+    expect(JSON.stringify(result)).not.toContain(rawToken);
+
+    const { logStructured } = require('../../../utils/logger');
+    expect(JSON.stringify(logStructured.mock.calls)).not.toContain(rawToken);
+  });
+
   test('sendRideStatusUpdate should fail when no token sends successfully', async () => {
     admin.messaging.mockReturnValue({
       send: jest.fn().mockRejectedValue(new Error('send failed'))

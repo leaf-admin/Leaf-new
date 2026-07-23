@@ -119,6 +119,41 @@ async function readUser(userId) {
   };
 }
 
+async function assertDriverIdentityNotPermanentlyBlocked(driverId) {
+  const safeDriverId = normalizeId(driverId);
+  if (!safeDriverId) {
+    throw new DashboardUserManagementError('driverId invalido', 400, 'INVALID_DRIVER_ID');
+  }
+
+  let snapshot;
+  try {
+    snapshot = await admin.firestore()
+      .collection('driver_identity_enforcement')
+      .doc(safeDriverId)
+      .get();
+  } catch (error) {
+    throw new DashboardUserManagementError(
+      'Nao foi possivel validar o bloqueio canonico de identidade.',
+      503,
+      'KYC_IDENTITY_ENFORCEMENT_UNAVAILABLE'
+    );
+  }
+
+  const enforcement = snapshot.exists ? (snapshot.data() || {}) : null;
+  const permanentlyBlocked = enforcement?.active === true && (
+    enforcement?.permanent === true ||
+    String(enforcement?.status || '').toUpperCase() === 'PERMANENTLY_BLOCKED'
+  );
+  if (permanentlyBlocked) {
+    throw new DashboardUserManagementError(
+      'Conta bloqueada permanentemente por fraude de identidade confirmada.',
+      423,
+      'KYC_IDENTITY_FRAUD_PERMANENT_BLOCK'
+    );
+  }
+  return enforcement;
+}
+
 async function clearDriverRuntimeState(userId, status, reasonCode) {
   let redis = null;
   try {
@@ -300,6 +335,9 @@ async function updateUserOperationalStatus(userId, payload = {}, options = {}) {
   }
 
   const record = await readUser(userId);
+  if (status === 'active' && record.userType === 'driver') {
+    await assertDriverIdentityNotPermanentlyBlocked(record.userId);
+  }
   const operator = options.operator || {};
   const { updates, expiresAt, reasonCode } = buildOperationalUpdates(status, record.userType, record.data, {
     reason: payload.reason,
@@ -396,6 +434,18 @@ async function requestDriverDocument(driverId, documentType, payload = {}, optio
   if (!DRIVER_DOCUMENT_TYPES.has(safeDocumentType)) {
     throw new DashboardUserManagementError('Tipo de documento invalido', 400, 'INVALID_DOCUMENT_TYPE');
   }
+  const auditIntentId = String(options.auditIntentId || '').trim();
+  const auditMutationId = String(options.auditMutationId || '').trim();
+  const auditEnvelope = options.auditEnvelope && typeof options.auditEnvelope === 'object'
+    ? options.auditEnvelope
+    : null;
+  if (!auditIntentId || !auditMutationId || !auditEnvelope) {
+    throw new DashboardUserManagementError(
+      'Auditoria obrigatoria indisponivel para solicitar documento',
+      503,
+      'DOCUMENT_REQUEST_AUDIT_INTENT_REQUIRED'
+    );
+  }
 
   const record = await readUser(safeDriverId);
   if (record.userType !== 'driver') {
@@ -423,6 +473,8 @@ async function requestDriverDocument(driverId, documentType, payload = {}, optio
     requestedAt: nowIso,
     requestedBy: operator.id || null,
     requestedByEmail: operator.email || null,
+    requestAuditIntentId: auditIntentId,
+    requestMutationId: auditMutationId,
     requestReason: reason || 'Documento solicitado pelo time Leaf',
     updatedAt: nowIso
   };
@@ -439,6 +491,8 @@ async function requestDriverDocument(driverId, documentType, payload = {}, optio
         status: requestStatus,
         requestedAt: nowIso,
         requestedBy: operator.id || null,
+        requestAuditIntentId: auditIntentId,
+        requestMutationId: auditMutationId,
         requestReason: documentPayload.requestReason
       }
     },
@@ -449,12 +503,14 @@ async function requestDriverDocument(driverId, documentType, payload = {}, optio
     ? { success: false, skipped: true }
     : await sendDocumentRequestPush(safeDriverId, safeDocumentType, documentPayload.requestReason);
 
-  await auditService.logEvent({
+  await auditService.requireEvent({
     userId: operator?.id || 'dashboard',
     action: 'dashboard.driver.document.request',
     resource: 'driver_document',
     severity: 'WARNING',
     details: {
+      mutationId: auditMutationId,
+      auditIntentId,
       targetDriverId: safeDriverId,
       documentType: safeDocumentType,
       reason: documentPayload.requestReason,
@@ -465,13 +521,9 @@ async function requestDriverDocument(driverId, documentType, payload = {}, optio
       pushRequested: payload.sendPush !== false,
       pushSuccess: pushResult?.success === true
     },
-    success: true
-  }).catch((error) => {
-    logError(error, 'Erro ao registrar auditoria de solicitacao de documento', {
-      service: 'dashboard-user-management-service',
-      driverId: safeDriverId,
-      documentType: safeDocumentType
-    });
+    success: true,
+    ...(options.auditMetadata || {}),
+    ...auditEnvelope
   });
 
   return {
@@ -489,6 +541,7 @@ module.exports = {
   DashboardUserManagementError,
   updateUserOperationalStatus,
   requestDriverDocument,
+  assertDriverIdentityNotPermanentlyBlocked,
   resolveDriverReactivationState,
   sanitizeDocumentType,
   OPERATIONAL_STATUSES,

@@ -92,8 +92,15 @@ jest.mock('../../../utils/admin-user-cache', () => ({
 }));
 
 jest.mock('../../../utils/logger', () => ({
+  logger: {
+    debug: jest.fn(),
+    error: jest.fn(),
+    info: jest.fn(),
+    warn: jest.fn()
+  },
   logStructured: jest.fn(),
-  logError: jest.fn()
+  logError: jest.fn(),
+  logRedis: jest.fn()
 }));
 
 const admin = require('firebase-admin');

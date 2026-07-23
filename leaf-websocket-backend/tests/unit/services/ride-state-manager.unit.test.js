@@ -29,6 +29,13 @@ describe('RideStateManager state machine', () => {
         RideStateManager.STATES.REASSIGNED_IN_PROGRESS
       )
     ).toBe(true);
+
+    expect(
+      RideStateManager.isValidTransition(
+        RideStateManager.STATES.REASSIGNED_IN_PROGRESS,
+        RideStateManager.STATES.CANCELED
+      )
+    ).toBe(true);
   });
 
   it('accepts the waiting-response pause during driver offer dispatch', () => {
@@ -75,5 +82,20 @@ describe('RideStateManager state machine', () => {
         RideStateManager.STATES.REASSIGNMENT_PENDING
       )
     ).toBe(false);
+  });
+
+  it('normalizes every terminal runtime status used by socket and dispatch guards', () => {
+    expect(RideStateManager.isTerminalStateValue('completed')).toBe(true);
+    expect(RideStateManager.isTerminalStateValue('trip_completed')).toBe(true);
+    expect(RideStateManager.isTerminalStateValue('cancelled')).toBe(true);
+    expect(RideStateManager.isTerminalStateValue('trip_cancelled')).toBe(true);
+    expect(RideStateManager.isTerminalStateValue('trip_canceled')).toBe(true);
+    expect(RideStateManager.isTerminalStateValue('NO_DRIVERS')).toBe(true);
+    expect(RideStateManager.isTerminalStateValue('NO_DRIVERS_AVAILABLE')).toBe(true);
+    expect(RideStateManager.isTerminalStateValue('EARLY_ENDED_BY_RIDER')).toBe(true);
+    expect(RideStateManager.isTerminalStateValue('INTERRUPTED_OPERATIONAL_ENDED')).toBe(true);
+    expect(RideStateManager.isTerminalStateValue('EARLY_ENDED_REVIEW')).toBe(true);
+    expect(RideStateManager.isTerminalStateValue('IN_PROGRESS')).toBe(false);
+    expect(RideStateManager.isTerminalStateValue('ARRIVED')).toBe(false);
   });
 });

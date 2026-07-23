@@ -1,5 +1,5 @@
-import React, { useCallback, useEffect, useState } from "react";
-import { Alert, StatusBar, StyleSheet, Text, View } from "react-native";
+import React, { useCallback, useEffect, useRef, useState } from "react";
+import { Alert, StatusBar, StyleSheet, Text, View, useWindowDimensions } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { fonts } from "../../theme/runtimeTokens";
 import PrototypeScreenTransition from "../../components/prototype/PrototypeScreenTransition";
@@ -19,9 +19,13 @@ import SecurePaymentBadge from "../../components/payment/SecurePaymentBadge";
 import { usePrototypeMapOcclusion } from "./prototypeMapOcclusion";
 import { usePrototypeRideRuntime } from "./prototypeRideRuntime";
 import { resolveMeaningfulAddress } from "./addressLabelUtils";
+import { buildOverlaySheetViewportMetrics } from "./prototypeRouteViewport";
 
 const SHEET_BOTTOM_OFFSET = 0;
 const FALLBACK_CARD_HEIGHT = 356;
+const STATE_HEADER_TOP_OFFSET = 50;
+const STATE_HEADER_FALLBACK_HEIGHT = 76;
+const MIN_VISIBLE_ROUTE_MAP_HEIGHT = 220;
 
 function formatCurrency(value) {
   return `R$ ${Number(value || 0)
@@ -62,6 +66,82 @@ function normalizeCoordinateParam(value) {
   return { latitude, longitude };
 }
 
+function resolveAvailabilityNotice(availability) {
+  return String(
+    availability?.message ||
+      availability?.error ||
+      "Não há motoristas disponíveis",
+  ).trim();
+}
+
+function resolveQuoteLockParam(params = {}) {
+  const initialPricingQuote = params?.initialPricingQuote || params?.pricingQuote || {};
+  const quote = initialPricingQuote?.quote || {};
+  const lock = params?.paymentQuoteLock || params?.quoteLock || {};
+
+  const quoteLockId =
+    String(
+      params?.quoteLockId ||
+        lock?.quoteLockId ||
+        initialPricingQuote?.quoteLockId ||
+        quote?.quoteLockId ||
+        "",
+    ).trim() || null;
+  const quoteSessionId =
+    String(
+      params?.quoteSessionId ||
+        lock?.quoteSessionId ||
+        initialPricingQuote?.quoteSessionId ||
+        quote?.quoteSessionId ||
+        "",
+    ).trim() || null;
+  const quoteLockExpiresAt =
+    String(
+      params?.quoteLockExpiresAt ||
+        lock?.quoteLockExpiresAt ||
+        initialPricingQuote?.quoteLockExpiresAt ||
+        quote?.quoteLockExpiresAt ||
+        "",
+    ).trim() || null;
+
+  return {
+    quoteLockId,
+    quoteSessionId,
+    quoteLockExpiresAt,
+  };
+}
+
+function normalizePositiveMoney(value) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) && numeric > 0 ? numeric : null;
+}
+
+function resolveLockedFareParam(params = {}) {
+  const initialPricingQuote = params?.initialPricingQuote || params?.pricingQuote || {};
+  const quote = initialPricingQuote?.quote || {};
+  const lock = params?.paymentQuoteLock || params?.quoteLock || {};
+
+  return normalizePositiveMoney(
+    lock?.fare ??
+      lock?.estimatedFare ??
+      quote?.fare ??
+      quote?.estimatedFare ??
+      initialPricingQuote?.fare ??
+      initialPricingQuote?.estimatedFare ??
+      params?.fare ??
+      params?.selectedFare,
+  );
+}
+
+function isQuoteLockExpired(value) {
+  if (!value) {
+    return false;
+  }
+
+  const expiresAtMs = Date.parse(String(value));
+  return Number.isFinite(expiresAtMs) && expiresAtMs <= Date.now();
+}
+
 export default function RobotaxiPaymentScreen({ navigation, route }) {
   const {
     selectedDestination,
@@ -75,14 +155,27 @@ export default function RobotaxiPaymentScreen({ navigation, route }) {
     requestRide,
   } = usePrototypeRideRuntime();
   const insets = useSafeAreaInsets();
+  const { height: windowHeight } = useWindowDimensions();
   const [cardHeight, setCardHeight] = useState(FALLBACK_CARD_HEIGHT);
-  const [isPixModalVisible, setPixModalVisible] = useState(
-    Boolean(route?.params?.autoOpenPix),
-  );
+  const [isPixModalVisible, setPixModalVisible] = useState(false);
   const [checkingAvailability, setCheckingAvailability] = useState(false);
   const [availabilityNotice, setAvailabilityNotice] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [stateHeaderHeight, setStateHeaderHeight] = useState(
+    STATE_HEADER_FALLBACK_HEIGHT,
+  );
+  const autoOpenPixAttemptedRef = useRef(false);
   const sheetBottom = insets.bottom + SHEET_BOTTOM_OFFSET;
+  const stateHeaderTop = insets.top + STATE_HEADER_TOP_OFFSET;
+  const stateHeaderOcclusion = stateHeaderTop + stateHeaderHeight + 14;
+  const sheetViewport = buildOverlaySheetViewportMetrics({
+    windowHeight,
+    topOcclusion: stateHeaderOcclusion,
+    bottomOffset: sheetBottom,
+    measuredHeight: cardHeight,
+    fallbackHeight: FALLBACK_CARD_HEIGHT,
+    minVisibleMapHeight: MIN_VISIBLE_ROUTE_MAP_HEIGHT,
+  });
 
   const destination =
     route?.params?.destination ||
@@ -103,7 +196,13 @@ export default function RobotaxiPaymentScreen({ navigation, route }) {
     resolveMeaningfulAddress(route?.params?.originAddress, currentAddress) ||
     "Origem atual";
   const vehicle = route?.params?.vehicle || "Leaf Plus";
-  const fare = route?.params?.fare || 22.43;
+  const { quoteLockId, quoteSessionId, quoteLockExpiresAt } =
+    resolveQuoteLockParam(route?.params);
+  const quoteLockReady =
+    Boolean(quoteLockId) && !isQuoteLockExpired(quoteLockExpiresAt);
+  const fare = quoteLockReady ? resolveLockedFareParam(route?.params) : null;
+  const fareReady = Number.isFinite(Number(fare)) && Number(fare) > 0;
+  const paymentQuoteReady = quoteLockReady && fareReady;
   const canRequestRide = Boolean(
     destinationCoordinate &&
     Number.isFinite(destinationCoordinate?.latitude) &&
@@ -115,7 +214,8 @@ export default function RobotaxiPaymentScreen({ navigation, route }) {
   usePrototypeMapOcclusion({
     routeKey: route?.key,
     layerId: route?.key || "prototype-payment",
-    occludedBottom: sheetBottom + cardHeight,
+    occludedTop: stateHeaderOcclusion,
+    occludedBottom: sheetViewport.occludedBottom,
   });
 
   const handleDismiss = () => {
@@ -133,17 +233,12 @@ export default function RobotaxiPaymentScreen({ navigation, route }) {
     }
   }, []);
 
-  useEffect(() => {
-    if (!route?.params?.autoOpenPix) {
-      return;
+  const handleStateHeaderLayout = useCallback((event) => {
+    const nextHeight = event?.nativeEvent?.layout?.height;
+    if (Number.isFinite(nextHeight) && nextHeight > 0) {
+      setStateHeaderHeight(nextHeight);
     }
-
-    if (!canRequestRide) {
-      return;
-    }
-
-    setPixModalVisible(true);
-  }, [canRequestRide, route?.params?.autoOpenPix]);
+  }, []);
 
   useEffect(() => {
     if (!destinationCoordinate || typeof selectDestination !== "function") {
@@ -184,22 +279,23 @@ export default function RobotaxiPaymentScreen({ navigation, route }) {
 
   const handleOpenPixModal = useCallback(async () => {
     if (!canRequestRide) {
-      navigation.navigate("RobotaxiPrototypeDestination", {
-        initialSelectedDestination:
-          destination && destination !== "Destino"
-            ? {
-                name: destination,
-                address: destinationAddress || destination,
-                coordinate: destinationCoordinate,
-              }
-            : null,
-        initialSelectedPlan: route?.params?.initialSelectedPlan || "plus",
-        initialPickupAddress: originAddress,
-      });
+      navigation.navigate("RobotaxiPrototype");
       return;
     }
 
     if (checkingAvailability || submitting) {
+      return;
+    }
+
+    if (!paymentQuoteReady) {
+      setAvailabilityNotice(
+        "Cotação expirada, ausente ou sem valor. Recalcule a tarifa antes de pagar.",
+      );
+      return;
+    }
+
+    if (typeof checkRideAvailability !== "function") {
+      setAvailabilityNotice("Não foi possível validar disponibilidade agora.");
       return;
     }
 
@@ -217,7 +313,7 @@ export default function RobotaxiPaymentScreen({ navigation, route }) {
       });
 
       if (!availability?.available) {
-        setAvailabilityNotice("Não há motoristas disponíveis");
+        setAvailabilityNotice(resolveAvailabilityNotice(availability));
         return;
       }
 
@@ -238,9 +334,27 @@ export default function RobotaxiPaymentScreen({ navigation, route }) {
     destinationCoordinate,
     navigation,
     originAddress,
+    paymentQuoteReady,
     route?.params?.initialSelectedPlan,
     submitting,
     vehicle,
+  ]);
+
+  useEffect(() => {
+    if (
+      !route?.params?.autoOpenPix ||
+      autoOpenPixAttemptedRef.current ||
+      !canRequestRide
+    ) {
+      return;
+    }
+
+    autoOpenPixAttemptedRef.current = true;
+    handleOpenPixModal();
+  }, [
+    canRequestRide,
+    handleOpenPixModal,
+    route?.params?.autoOpenPix,
   ]);
 
   const handleClosePixModal = useCallback(() => {
@@ -360,15 +474,29 @@ export default function RobotaxiPaymentScreen({ navigation, route }) {
           rightLabel="Pix"
           rightTone="dark"
           insetsTop={insets.top}
+          onLayout={handleStateHeaderLayout}
         />
         <PrototypeDismissibleSheet
           onClose={handleDismiss}
+          backdropDismissEnabled={false}
+          dragEnabled={false}
           sheetStyle={[styles.sheetWrap, { bottom: sheetBottom }]}
         >
-          <LeafRideSheet onLayout={handleCardLayout} style={styles.paymentCard}>
+          <LeafRideSheet
+            onLayout={handleCardLayout}
+            style={[
+              styles.paymentCard,
+              { maxHeight: sheetViewport.maxSheetHeight },
+            ]}
+            scrollEnabled
+            scrollStyle={styles.paymentScroll}
+            scrollContentContainerStyle={styles.paymentScrollContent}
+          >
             <View style={styles.headerRow}>
               <Text style={styles.title}>Código Pix</Text>
-              <Text style={styles.price}>{formatCurrency(fare)}</Text>
+              <Text style={styles.price}>
+                {fareReady ? formatCurrency(fare) : "Cotação pendente"}
+              </Text>
             </View>
 
             <LeafDivider style={styles.divider} />
@@ -459,6 +587,8 @@ export default function RobotaxiPaymentScreen({ navigation, route }) {
             estimatedFare: Number(fare),
           }}
           estimates={{ estimateFare: Number(fare) }}
+          quoteSessionId={quoteSessionId}
+          quoteLockId={quoteLockId}
           passengerId={profileUid || riderProfile?.uid || riderProfile?.id || ""}
           passengerName={riderProfile?.name || "Passageira Leaf"}
           passengerEmail={riderProfile?.email || "passageiro@leaf.app.br"}
@@ -487,6 +617,12 @@ const styles = StyleSheet.create({
     borderBottomRightRadius: 0,
     paddingHorizontal: 24,
     paddingTop: 14,
+  },
+  paymentScroll: {
+    flexGrow: 0,
+  },
+  paymentScrollContent: {
+    paddingBottom: 4,
   },
   headerRow: {
     flexDirection: "row",

@@ -14,6 +14,13 @@ class ReportService {
         this.ensureTemplatesDir();
     }
 
+    isExcelExportEnabled() {
+        if (String(process.env.NODE_ENV || '').trim().toLowerCase() === 'production') {
+            return false;
+        }
+        return String(process.env.ENABLE_XLSX_REPORT_EXPORT || 'true').trim().toLowerCase() === 'true';
+    }
+
     async ensureTemplatesDir() {
         try {
             await fs.mkdir(this.templatesDir, { recursive: true });
@@ -49,6 +56,11 @@ class ReportService {
      */
     async generateExcelReport(reportData, template = 'default') {
         try {
+            if (!this.isExcelExportEnabled()) {
+                const error = new Error('Exportação XLSX desabilitada até substituição da dependência vulnerável.');
+                error.code = 'XLSX_EXPORT_DISABLED_SECURITY';
+                throw error;
+            }
             const XLSX = require('xlsx');
             const category = reportData.category || template || 'default';
             
@@ -524,4 +536,3 @@ class ReportService {
 }
 
 module.exports = ReportService;
-

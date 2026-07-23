@@ -66,7 +66,7 @@ run_flow() {
   local log="${ARTIFACTS_DIR}/${name}.log"
 
   echo "[ideal] Running ${name} on ${device}"
-  if maestro test "${flow}" --device "${device}" --format junit --output "${junit}" > "${log}" 2>&1; then
+  if maestro test --udid "${device}" --format junit --output "${junit}" "${flow}" > "${log}" 2>&1; then
     echo "[ideal] PASS ${name}"
   else
     echo "[ideal] FAIL ${name}"

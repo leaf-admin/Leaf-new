@@ -4,7 +4,7 @@ global:
   # Configuração de alertas
   external_labels:
     cluster: 'leaf-production'
-    environment: 'development'
+    environment: 'production'
 
 # Carregar regras de alertas
 rule_files:
@@ -26,5 +26,5 @@ scrape_configs:
       - targets: ['host.docker.internal:3001']
         labels:
           service: 'leaf-websocket-backend'
-          environment: 'development'
+          environment: 'production'
     metrics_path: '/api/metrics/prometheus'

@@ -12,6 +12,7 @@ const paymentService = new PaymentService();
 function mapAcceptRideReason(errorMessage = '') {
     const normalized = String(errorMessage || '').toLowerCase();
     if (normalized.includes('outra corrida')) return 'driver_already_busy';
+    if (normalized.includes('oferta expirada')) return 'offer_expired';
     if (normalized.includes('não encontrada') || normalized.includes('nao encontrada')) return 'booking_not_found';
     if (normalized.includes('já foi aceita') || normalized.includes('nao esta mais disponivel') || normalized.includes('não está mais disponível')) {
         return 'duplicate_rejected';
@@ -353,7 +354,14 @@ function registerSocketAcceptRideHandler({
                 // ✅ NOVO: Atualizar motorista da corrida no Firestore
                 try {
                     const ridePersistenceService = require('../services/ride-persistence-service');
-                    await ridePersistenceService.updateRideDriver(bookingIdToUse, driverId);
+                    const persistenceBookingData = await redisPool
+                        .getConnection()
+                        .hgetall(`booking:${bookingIdToUse}`);
+                    await ridePersistenceService.updateRideDriver(
+                        bookingIdToUse,
+                        driverId,
+                        persistenceBookingData
+                    );
                 } catch (persistError) {
                     logStructured('error', 'Erro ao atualizar motorista da corrida no Firestore', {
                         bookingId: bookingIdToUse,
@@ -392,14 +400,14 @@ function registerSocketAcceptRideHandler({
                     socket
                 });
                 const acceptedLat = toFiniteNumber(
+                    driverAcceptedLocation?.lat ??
                     driverData?.driver?.location?.lat ??
-                    driverData?.location?.lat ??
-                    driverAcceptedLocation?.lat
+                    driverData?.location?.lat
                 );
                 const acceptedLng = toFiniteNumber(
+                    driverAcceptedLocation?.lng ??
                     driverData?.driver?.location?.lng ??
-                    driverData?.location?.lng ??
-                    driverAcceptedLocation?.lng
+                    driverData?.location?.lng
                 );
                 const acceptedLocation = (acceptedLat !== null && acceptedLng !== null)
                     ? { lat: acceptedLat, lng: acceptedLng }

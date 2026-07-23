@@ -115,7 +115,12 @@ class SupportTicketService {
      */
     async addMessage(ticketId, messageData) {
         try {
-            Logger.log('📤 Enviando mensagem para ticket:', ticketId);
+            const normalizedTicketId = String(ticketId || '').trim();
+            if (!normalizedTicketId) {
+                throw new Error('Ticket inválido');
+            }
+
+            Logger.log('📤 Enviando mensagem para ticket:', normalizedTicketId);
             Logger.log('📝 Dados da mensagem:', { 
                 message: messageData.message?.substring(0, 50) + '...',
                 messageType: messageData.messageType 
@@ -124,11 +129,12 @@ class SupportTicketService {
             // ✅ Adicionar timeout explícito e melhor tratamento de erro
             // Nota: React Native pode não suportar AbortController da mesma forma
             // Vamos usar Promise.race para timeout
+            let timeoutId = null;
             const timeoutPromise = new Promise((_, reject) => {
-                setTimeout(() => reject(new Error('Send message timeout')), 30000);
+                timeoutId = setTimeout(() => reject(new Error('Send message timeout')), 30000);
             });
 
-            const requestPromise = AuthService.supportRequest(`/tickets/${ticketId}/messages`, {
+            const requestPromise = AuthService.supportRequest(`/tickets/${encodeURIComponent(normalizedTicketId)}/messages`, {
                 method: 'POST',
                 body: JSON.stringify({
                     message: messageData.message,
@@ -146,7 +152,7 @@ class SupportTicketService {
                 }
 
                 const result = await AuthService.handleApiResponse(response);
-                Logger.log('✅ Mensagem adicionada ao ticket:', ticketId, 'ID:', result.message?.id);
+                Logger.log('✅ Mensagem adicionada ao ticket:', normalizedTicketId, 'ID:', result.message?.id);
                 return result.message;
 
             } catch (fetchError) {
@@ -156,6 +162,10 @@ class SupportTicketService {
                 }
                 
                 throw fetchError;
+            } finally {
+                if (timeoutId) {
+                    clearTimeout(timeoutId);
+                }
             }
 
         } catch (error) {
@@ -213,7 +223,32 @@ class SupportTicketService {
 
         } catch (error) {
             Logger.error('❌ Erro ao buscar tickets do usuário:', error);
-            return [];
+            throw error;
+        }
+    }
+
+    /**
+     * Buscar um ticket do usuário autenticado.
+     * A API valida ownership; o cliente não acessa Firebase diretamente.
+     * @param {string} ticketId - ID do ticket
+     * @returns {Promise<Object>} Ticket atualizado
+     */
+    async getTicket(ticketId) {
+        try {
+            const normalizedTicketId = String(ticketId || '').trim();
+            if (!normalizedTicketId) {
+                throw new Error('Ticket inválido');
+            }
+
+            const response = await AuthService.supportRequest(`/tickets/${encodeURIComponent(normalizedTicketId)}`, {
+                method: 'GET'
+            });
+            const result = await AuthService.handleApiResponse(response);
+            return result.ticket || null;
+
+        } catch (error) {
+            Logger.error('❌ Erro ao buscar ticket:', error);
+            throw error;
         }
     }
 
@@ -239,7 +274,7 @@ class SupportTicketService {
 
         } catch (error) {
             Logger.error('❌ Erro ao buscar tickets para agentes:', error);
-            return [];
+            throw error;
         }
     }
 
@@ -250,7 +285,12 @@ class SupportTicketService {
      */
     async getTicketMessages(ticketId) {
         try {
-            const response = await AuthService.supportRequest(`/tickets/${ticketId}/messages`, {
+            const normalizedTicketId = String(ticketId || '').trim();
+            if (!normalizedTicketId) {
+                throw new Error('Ticket inválido');
+            }
+
+            const response = await AuthService.supportRequest(`/tickets/${encodeURIComponent(normalizedTicketId)}/messages`, {
                 method: 'GET'
             });
 
@@ -259,7 +299,7 @@ class SupportTicketService {
 
         } catch (error) {
             Logger.error('❌ Erro ao buscar mensagens do ticket:', error);
-            return [];
+            throw error;
         }
     }
 

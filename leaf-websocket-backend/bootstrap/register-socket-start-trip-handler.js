@@ -1,5 +1,26 @@
 const { metrics } = require('../utils/prometheus-metrics');
 const pricingH3ReadModelService = require('../services/pricing-h3-read-model-service');
+const {
+    collectPaymentReferences,
+    isSocketMockPaymentAllowed,
+    normalizePaymentAmountCents,
+    resolveAuthoritativePaymentConfirmation
+} = require('../services/authoritative-payment-confirmation-service');
+const {
+    hasRideOfflineIntentPayload,
+    markRideOfflineIntentProcessed,
+    markRideOfflineIntentRejected,
+    validateAndReserveRideOfflineIntent
+} = require('../services/ride-offline-intent-validator');
+
+function getFirestoreSafely() {
+    try {
+        const firebaseConfig = require('../firebase-config');
+        return firebaseConfig.getFirestore?.() || null;
+    } catch (_error) {
+        return null;
+    }
+}
 
 function mapStartTripReason(errorMessage = '') {
     const normalized = String(errorMessage || '').toLowerCase();
@@ -79,10 +100,7 @@ function registerSocketStartTripHandler({
 
                 // Usar dados sanitizados
                 const { bookingId, startLocation } = validation.sanitized;
-                const paymentMockEnabled =
-                    data?.mockPayment === true ||
-                    data?.__mockPayment === true ||
-                    String(process.env.MOCK_PAYMENT_FOR_TESTS || '').toLowerCase() === 'true';
+                const paymentMockEnabled = isSocketMockPaymentAllowed(data);
 
                 // ✅ Obter conexão Redis
                 const redis = redisPool.getConnection();
@@ -127,6 +145,7 @@ function registerSocketStartTripHandler({
                     return;
                 }
                 outerIdempotencyOwner = true;
+                let offlineIntentValidation = null;
 
                 const rateLimitCheck = await rateLimiterService.checkRateLimit(driverId, 'startTrip');
 
@@ -149,135 +168,104 @@ function registerSocketStartTripHandler({
                     return;
                 }
 
+                if (hasRideOfflineIntentPayload(data)) {
+                    offlineIntentValidation = await validateAndReserveRideOfflineIntent({
+                        redis,
+                        bookingId,
+                        actorId: driverId,
+                        role: 'driver',
+                        eventType: 'start_trip',
+                        idempotencyKey,
+                        clientSequence: data.clientSequence,
+                        clientCreatedAt: data.clientCreatedAt,
+                        payload: {
+                            startLocation
+                        },
+                        data
+                    });
+
+                    if (!offlineIntentValidation.accepted) {
+                        socket.emit('tripStartError', {
+                            error: offlineIntentValidation.message || 'Intencao offline rejeitada',
+                            message: offlineIntentValidation.message || 'O backend rejeitou esta acao offline.',
+                            code: offlineIntentValidation.code || 'OFFLINE_INTENT_REJECTED'
+                        });
+                        outerIdempotencyOwner = false;
+                        await idempotencyService.releaseInflight(idempotencyKey);
+                        return;
+                    }
+
+                    if (offlineIntentValidation.replay && offlineIntentValidation.cachedResult) {
+                        await idempotencyService.cacheResult(idempotencyKey, offlineIntentValidation.cachedResult);
+                        outerIdempotencyOwner = false;
+                        socket.emit('tripStarted', offlineIntentValidation.cachedResult);
+                        return;
+                    }
+                }
+
                 // ✅ VALIDAÇÃO CRÍTICA: Verificar se pagamento está confirmado
-                // Primeiro tenta fast-path no Redis (booking hash), fallback para serviço externo.
                 if (!paymentMockEnabled) {
                     try {
-                        const normalizeStatus = (value) => String(value || '').trim().toLowerCase();
-                        const parsePositiveAmount = (value) => {
-                            const parsed = Number.parseFloat(value);
-                            return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
-                        };
-                        const validStatuses = new Set(['in_holding', 'confirmed', 'paid']);
-
-                        let paymentStatus = null;
                         const bookingSnapshot = await redis.hgetall(`booking:${bookingId}`);
-                        if (bookingSnapshot && Object.keys(bookingSnapshot).length > 0) {
-                            const redisStatus = normalizeStatus(
-                                bookingSnapshot.paymentStatus ||
-                                bookingSnapshot.payment_status ||
-                                bookingSnapshot.statusPagamento
-                            );
-                            if (validStatuses.has(redisStatus)) {
-                                paymentStatus = {
-                                    success: true,
-                                    status: redisStatus,
-                                    amount:
-                                        parsePositiveAmount(bookingSnapshot.amount) ||
-                                        parsePositiveAmount(bookingSnapshot.finalFare) ||
-                                        parsePositiveAmount(bookingSnapshot.estimatedFare)
-                                };
-                            }
-                        }
+                        const paymentReferences = collectPaymentReferences(
+                            data?.paymentId,
+                            data?.chargeId,
+                            data?.paymentChargeId,
+                            bookingSnapshot?.paymentChargeId,
+                            bookingSnapshot?.chargeId,
+                            bookingSnapshot?.paymentId,
+                            bookingSnapshot?.paymentIntentId,
+                            bookingSnapshot?.paymentReferenceRideId,
+                            bookingSnapshot?.temporaryRideId,
+                            bookingSnapshot?.rideId
+                        );
+                        const expectedAmountInCents = normalizePaymentAmountCents(
+                            bookingSnapshot?.paymentAmountInCents ||
+                            bookingSnapshot?.amountInCents ||
+                            bookingSnapshot?.amount ||
+                            bookingSnapshot?.finalFare ||
+                            bookingSnapshot?.estimatedFare
+                        );
+                        const PaymentService = require('../services/payment-service');
+                        const paymentService = new PaymentService();
+                        const paymentProof = await resolveAuthoritativePaymentConfirmation({
+                            paymentService,
+                            firestore: getFirestoreSafely(),
+                            bookingId,
+                            references: paymentReferences,
+                            expectedAmountInCents,
+                            paymentContext: bookingSnapshot
+                        });
 
-                        if (!paymentStatus) {
-                            const PaymentService = require('../services/payment-service');
-                            const paymentService = new PaymentService();
-                            paymentStatus = await paymentService.getPaymentStatus(bookingId);
-                        }
-
-                        if (!paymentStatus?.success) {
-                            const isNotFound = paymentStatus?.error && (
-                                paymentStatus.error.includes('não encontrado') ||
-                                paymentStatus.error.includes('not found') ||
-                                paymentStatus.error.includes('não existe') ||
-                                paymentStatus.status === null ||
-                                paymentStatus.status === undefined
-                            );
-
-                            if (isNotFound) {
-                                logStructured('warn', 'Tentativa de iniciar corrida sem pagamento', {
-                                    driverId,
-                                    bookingId,
-                                    eventType: 'startTrip'
-                                });
-
-                                socket.emit('tripStartError', {
-                                    error: 'Pagamento não encontrado',
-                                    message: 'Nenhum pagamento foi encontrado para esta corrida. A corrida não pode ser iniciada sem pagamento confirmado.',
-                                    code: 'PAYMENT_NOT_FOUND',
-                                    paymentStatus: null
-                                });
-                                return;
-                            }
-
-                            logStructured('error', 'Erro ao verificar status do pagamento', {
+                        if (!paymentProof?.success) {
+                            logStructured('warn', 'Tentativa de iniciar corrida sem prova provider-backed de pagamento', {
                                 driverId,
                                 bookingId,
                                 eventType: 'startTrip',
-                                error: paymentStatus?.error || 'unknown_payment_validation_error'
+                                code: paymentProof?.code || 'PAYMENT_NOT_PROVIDER_CONFIRMED',
+                                references: paymentReferences
                             });
 
                             socket.emit('tripStartError', {
-                                error: 'Erro ao verificar pagamento',
-                                message: 'Não foi possível verificar o status do pagamento. Tente novamente.',
-                                code: 'PAYMENT_VERIFICATION_ERROR'
+                                error: paymentProof?.code === 'PAYMENT_PROVIDER_REFERENCE_REQUIRED'
+                                    ? 'Referência de pagamento ausente'
+                                    : 'Pagamento não confirmado pelo provedor',
+                                message: paymentProof?.message || 'A corrida só pode ser iniciada após confirmação autoritativa do pagamento.',
+                                code: paymentProof?.code || 'PAYMENT_NOT_PROVIDER_CONFIRMED'
                             });
-                            return;
-                        }
-
-                        const normalizedStatus = normalizeStatus(paymentStatus.status);
-                        if (!normalizedStatus) {
-                            logStructured('warn', 'Tentativa de iniciar corrida sem status de pagamento válido', {
-                                driverId,
-                                bookingId,
-                                eventType: 'startTrip'
-                            });
-
-                            socket.emit('tripStartError', {
-                                error: 'Pagamento não encontrado',
-                                message: 'Nenhum pagamento foi encontrado para esta corrida. A corrida não pode ser iniciada sem pagamento confirmado.',
-                                code: 'PAYMENT_NOT_FOUND',
-                                paymentStatus: null
-                            });
-                            return;
-                        }
-
-                        if (!validStatuses.has(normalizedStatus)) {
-                            logStructured('warn', 'Tentativa de iniciar corrida com pagamento em status inválido', {
-                                driverId,
-                                bookingId,
-                                eventType: 'startTrip',
-                                currentStatus: normalizedStatus,
-                                requiredStatus: 'in_holding|confirmed|paid'
-                            });
-
-                            socket.emit('tripStartError', {
-                                error: 'Pagamento não confirmado',
-                                message: `A corrida só pode ser iniciada após confirmação do pagamento. Status atual: ${normalizedStatus}.`,
-                                code: 'PAYMENT_NOT_CONFIRMED',
-                                paymentStatus: normalizedStatus,
-                                requiredStatus: 'in_holding|confirmed|paid',
-                                amount: paymentStatus.amount || null
-                            });
-                            return;
-                        }
-
-                        if (paymentStatus.amount && Number(paymentStatus.amount) <= 0) {
-                            logStructured('warn', 'Tentativa de iniciar corrida com valor de pagamento inválido', {
-                                service: 'websocket',
-                                operation: 'startTrip',
-                                bookingId,
-                                driverId,
-                                amount: paymentStatus.amount
-                            });
-
-                            socket.emit('tripStartError', {
-                                error: 'Valor de pagamento inválido',
-                                message: 'O valor do pagamento é inválido. Entre em contato com o suporte.',
-                                code: 'INVALID_PAYMENT_AMOUNT',
-                                paymentStatus: normalizedStatus
-                            });
+                            if (outerIdempotencyOwner && outerIdempotencyKey) {
+                                outerIdempotencyOwner = false;
+                                if (offlineIntentValidation && !offlineIntentValidation.skipped) {
+                                    await markRideOfflineIntentRejected({
+                                        redis,
+                                        bookingId,
+                                        idempotencyKey,
+                                        error: paymentProof?.message || 'Pagamento nao confirmado pelo provedor',
+                                        code: paymentProof?.code || 'PAYMENT_NOT_PROVIDER_CONFIRMED'
+                                    }).catch(() => null);
+                                }
+                                await idempotencyService.releaseInflight(outerIdempotencyKey).catch(() => null);
+                            }
                             return;
                         }
 
@@ -286,9 +274,8 @@ function registerSocketStartTripHandler({
                             operation: 'startTrip',
                             bookingId,
                             driverId,
-                            paymentStatus: normalizedStatus,
-                            source: paymentStatus?.success ? 'redis_or_payment_service' : 'unknown',
-                            amount: paymentStatus.amount || null
+                            source: paymentProof.source || 'unknown',
+                            expectedAmountInCents
                         });
                     } catch (paymentCheckError) {
                         logStructured('error', 'Erro crítico ao verificar pagamento para corrida', {
@@ -305,6 +292,19 @@ function registerSocketStartTripHandler({
                             message: 'Não foi possível verificar o status do pagamento. A corrida não pode ser iniciada por segurança.',
                             code: 'PAYMENT_VERIFICATION_CRITICAL_ERROR'
                         });
+                        if (outerIdempotencyOwner && outerIdempotencyKey) {
+                            outerIdempotencyOwner = false;
+                            if (offlineIntentValidation && !offlineIntentValidation.skipped) {
+                                await markRideOfflineIntentRejected({
+                                    redis,
+                                    bookingId,
+                                    idempotencyKey,
+                                    error: paymentCheckError.message || 'Erro ao verificar pagamento',
+                                    code: 'PAYMENT_VERIFICATION_CRITICAL_ERROR'
+                                }).catch(() => null);
+                            }
+                            await idempotencyService.releaseInflight(outerIdempotencyKey).catch(() => null);
+                        }
                         return;
                     }
                 } else {
@@ -345,7 +345,8 @@ function registerSocketStartTripHandler({
                         bookingId,
                         startLocation,
                         traceId, // ✅ Passar traceId para o command
-                        correlationId // ✅ Passar correlationId para o command
+                        correlationId, // ✅ Passar correlationId para o command
+                        skipProviderPaymentProof: paymentMockEnabled
                     });
 
                     result = await runInSpan(commandSpan, async () => {
@@ -378,6 +379,15 @@ function registerSocketStartTripHandler({
                     socket.emit('tripStartError', {
                         error: result.error || 'Erro ao iniciar viagem'
                     });
+                    if (offlineIntentValidation && !offlineIntentValidation.skipped) {
+                        await markRideOfflineIntentRejected({
+                            redis,
+                            bookingId,
+                            idempotencyKey,
+                            error: result.error || 'Erro ao iniciar viagem',
+                            code: 'START_TRIP_COMMAND_FAILED'
+                        }).catch(() => null);
+                    }
                     metrics.recordHotpathReason(hotpathPath, mapStartTripReason(result.error));
                     metrics.recordHotpathStageLatency(hotpathPath, 'command', Math.max(0, (Date.now() - commandStartTime) / 1000), false);
                     metrics.recordHotpathLatency(hotpathPath, Math.max(0, (Date.now() - startTime) / 1000), false);
@@ -428,10 +438,10 @@ function registerSocketStartTripHandler({
                 // ✅ NOVO: Marcar corrida como iniciada no Firestore
                 try {
                     const ridePersistenceService = require('../services/ride-persistence-service');
-                    await ridePersistenceService.markRideStarted(bookingId);
+                    const bookingDataRaw = await redis.hgetall(`booking:${bookingId}`);
+                    await ridePersistenceService.markRideStarted(bookingId, bookingDataRaw);
 
                     // ✅ NOVO: Atualizar estado em bookings:active e activeBookings
-                    const bookingDataRaw = await redis.hgetall(`booking:${bookingId}`);
                     if (bookingDataRaw && Object.keys(bookingDataRaw).length > 0) {
                         const activeBookingData = {
                             ...bookingDataRaw,
@@ -504,6 +514,14 @@ function registerSocketStartTripHandler({
                     timestamp: new Date().toISOString()
                 };
                 await idempotencyService.cacheResult(idempotencyKey, tripStartedData);
+                if (offlineIntentValidation && !offlineIntentValidation.skipped) {
+                    await markRideOfflineIntentProcessed({
+                        redis,
+                        bookingId,
+                        idempotencyKey,
+                        result: tripStartedData
+                    }).catch(() => null);
+                }
                 outerIdempotencyOwner = false;
 
                 // ✅ Notificar driver via room (escalável e confiável)

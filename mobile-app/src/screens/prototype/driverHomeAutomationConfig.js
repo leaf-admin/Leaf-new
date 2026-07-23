@@ -121,7 +121,7 @@ function normalizeDriverAction(value) {
 
 function resolveDriverHomeAutomationConfig(
   routeParams = {},
-  { isDriverRole = false, isHomeRoute = false, isDev = false, isE2E = false } = {},
+  { isDriverRole = false, isHomeRoute = false, isDev = false, isE2E = false, isSimulator = false } = {},
 ) {
   if (!isDriverRole) {
     return {
@@ -137,7 +137,7 @@ function resolveDriverHomeAutomationConfig(
     isTruthyRouteParam(routeParams?.automation) ||
     isTruthyRouteParam(routeParams?.qaAutomation);
 
-  const allowAutomationParams = (isDev || isE2E) && automationRequested;
+  const allowAutomationParams = (isDev || isE2E || isSimulator) && automationRequested;
   const action = allowAutomationParams
     ? normalizeDriverAction(
         routeParams?.qaDriverAction || routeParams?.driverAction || routeParams?.action,
@@ -158,7 +158,7 @@ function resolveDriverHomeAutomationConfig(
 
 function resolveDriverHomeAutomationCommandConfig(
   command = null,
-  { isDriverRole = false, isHomeRoute = false, isDev = false, isE2E = false } = {},
+  { isDriverRole = false, isHomeRoute = false, isDev = false, isE2E = false, isSimulator = false } = {},
 ) {
   if (!command || typeof command !== "object") {
     return {
@@ -181,6 +181,7 @@ function resolveDriverHomeAutomationCommandConfig(
       isHomeRoute,
       isDev,
       isE2E,
+      isSimulator,
     },
   );
 }
@@ -192,13 +193,14 @@ function resolveEffectiveDriverHomeAutomationConfig(
     liveCommand = null,
     persistedCommand = null,
   } = {},
-  { isDriverRole = false, isHomeRoute = false, isDev = false, isE2E = false } = {},
+  { isDriverRole = false, isHomeRoute = false, isDev = false, isE2E = false, isSimulator = false } = {},
 ) {
   const context = {
     isDriverRole,
     isHomeRoute,
     isDev,
     isE2E,
+    isSimulator,
   };
   const normalizedRouteConfig =
     routeConfig || resolveDriverHomeAutomationConfig(routeParams, context);

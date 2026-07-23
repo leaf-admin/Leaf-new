@@ -1,7 +1,12 @@
 'use strict';
 
-const DEFAULT_RADIUS_KM = Number.parseFloat(process.env.PAYMENT_AVAILABILITY_RADIUS_KM || '5');
-const DEFAULT_LIMIT = Number.parseInt(process.env.PAYMENT_AVAILABILITY_LIMIT || '12', 10);
+const {
+  getPaymentAvailabilityLimit,
+  getPaymentAvailabilityRadiusKm
+} = require('../utils/dispatch-config');
+
+const DEFAULT_RADIUS_KM = getPaymentAvailabilityRadiusKm();
+const DEFAULT_LIMIT = getPaymentAvailabilityLimit();
 const ELIGIBLE_DRIVER_GEO_KEY = process.env.ELIGIBLE_DRIVER_GEO_KEY || 'driver_locations_eligible';
 
 function getRedisPool() {
@@ -18,6 +23,14 @@ function getDriverEligibilityService() {
 
 function getRideDispatchPreferenceService() {
   return require('./ride-dispatch-preference-service');
+}
+
+function getPaymentDriverReservationService() {
+  return require('./payment-driver-reservation-service');
+}
+
+function getDriverSocketPresenceService() {
+  return require('./driver-socket-presence-service');
 }
 
 function normalizeFiniteNumber(value) {
@@ -94,6 +107,99 @@ function isDriverOnlineAvailable(driverData = {}) {
   return isOnline && dispatchEligible && available;
 }
 
+function getSocketRooms(socket) {
+  return Array.from(socket?.rooms || []);
+}
+
+function isDriverSocket(socket, driverId) {
+  return Boolean(
+    socket &&
+    socket.userId === driverId &&
+    socket.userType === 'driver' &&
+    socket.connected !== false
+  );
+}
+
+function isDriverSocketInDispatchRoom(socket, driverId) {
+  if (!isDriverSocket(socket, driverId)) return false;
+  const rooms = getSocketRooms(socket);
+  return rooms.includes('drivers_room') || rooms.includes(`driver_${driverId}`);
+}
+
+async function isDriverDispatchReachable(io, driverId, redis = null) {
+  if (!driverId) {
+    return {
+      reachable: false,
+      code: 'DRIVER_ID_REQUIRED'
+    };
+  }
+
+  let socketCode = io ? 'DRIVER_SOCKET_OFFLINE' : 'SOCKET_CONTEXT_UNAVAILABLE';
+  let socketError = null;
+
+  if (io) {
+    const cachedSocket = io?.connectedUsers?.get?.(driverId);
+    if (isDriverSocketInDispatchRoom(cachedSocket, driverId)) {
+      return {
+        reachable: true,
+        code: 'LOCAL_CONNECTED_USER'
+      };
+    }
+
+    try {
+      const socketsInRoom = await io.in(`driver_${driverId}`).fetchSockets();
+      const reachable = Array.isArray(socketsInRoom) &&
+        socketsInRoom.some((socket) => isDriverSocketInDispatchRoom(socket, driverId));
+      if (reachable) {
+        return {
+          reachable: true,
+          code: 'ROOM_SOCKET_REACHABLE'
+        };
+      }
+    } catch (error) {
+      socketCode = 'SOCKET_REACHABILITY_CHECK_FAILED';
+      socketError = error.message;
+    }
+  }
+
+  if (redis) {
+    try {
+      const { readDriverSocketPresence } = getDriverSocketPresenceService();
+      const presence = await readDriverSocketPresence(redis, driverId);
+      if (presence.reachable) {
+        return {
+          reachable: true,
+          code: presence.code,
+          presence
+        };
+      }
+      socketCode = presence.code || socketCode;
+    } catch (error) {
+      socketCode = 'SOCKET_PRESENCE_CHECK_FAILED';
+      socketError = error.message;
+    }
+  }
+
+  return {
+    reachable: false,
+    code: socketCode,
+    error: socketError
+  };
+}
+
+function estimatePickupEtaMinFromDistance(distanceKm) {
+  const normalizedDistanceKm = normalizeFiniteNumber(distanceKm);
+  if (normalizedDistanceKm === null || normalizedDistanceKm < 0) {
+    return null;
+  }
+
+  const averageUrbanPickupKmPerMin = Math.max(
+    0.2,
+    normalizeFiniteNumber(process.env.PAYMENT_AVAILABILITY_PICKUP_KM_PER_MIN) || 0.35
+  );
+  return Math.max(2, Math.ceil(normalizedDistanceKm / averageUrbanPickupKmPerMin));
+}
+
 async function hasPaymentEligibleDriver({
   pickupLocation,
   destinationLocation = null,
@@ -103,6 +209,12 @@ async function hasPaymentEligibleDriver({
   radiusKm = DEFAULT_RADIUS_KM,
   limit = DEFAULT_LIMIT,
   eligibleGeoKey = ELIGIBLE_DRIVER_GEO_KEY,
+  reserveDriver = false,
+  reservationContext = {},
+  reservationTtlSeconds = null,
+  io = null,
+  requireDispatchReachability = Boolean(io) &&
+    String(process.env.PAYMENT_AVAILABILITY_REQUIRE_DISPATCH_REACHABILITY || 'true').toLowerCase() !== 'false',
   logStructured = () => {},
   logContext = {}
   } = {}) {
@@ -124,6 +236,11 @@ async function hasPaymentEligibleDriver({
     const driverLockManager = getDriverLockManager();
     const driverEligibilityService = getDriverEligibilityService();
     const { driverMatchesRidePreferences } = getRideDispatchPreferenceService();
+    const {
+      getDriverPaymentReservation,
+      reservePaymentDriver,
+      reservationMatchesContext
+    } = getPaymentDriverReservationService();
 
     await redisPool.ensureConnection();
     const redisClient = redis || redisPool.getConnection();
@@ -154,14 +271,25 @@ async function hasPaymentEligibleDriver({
     let eligible = 0;
     const rejections = {
       locked: 0,
+      paymentReserved: 0,
       missingState: 0,
       offlineOrIneligible: 0,
+      socketUnreachable: 0,
       preferenceMismatch: 0,
       categoryMismatch: 0
     };
     for (const driverEntry of nearbyDrivers) {
       const driverId = Array.isArray(driverEntry) ? driverEntry[0] : driverEntry;
+      const driverDistanceKm = Array.isArray(driverEntry)
+        ? normalizeFiniteNumber(driverEntry[1])
+        : null;
       if (!driverId) continue;
+
+      const paymentReservation = await getDriverPaymentReservation(redisClient, driverId);
+      if (paymentReservation && !reservationMatchesContext(paymentReservation, reservationContext)) {
+        rejections.paymentReserved += 1;
+        continue;
+      }
 
       const lockStatus = await driverLockManager.isDriverLocked(driverId);
       if (lockStatus?.isLocked) {
@@ -177,6 +305,20 @@ async function hasPaymentEligibleDriver({
       if (!isDriverOnlineAvailable(driverData)) {
         rejections.offlineOrIneligible += 1;
         continue;
+      }
+
+      if (requireDispatchReachability) {
+        const reachability = await isDriverDispatchReachable(io, driverId, redisClient);
+        if (!reachability.reachable) {
+          rejections.socketUnreachable += 1;
+          logStructured('warn', 'payment driver availability rejected unreachable driver', {
+            ...logContext,
+            code: reachability.code,
+            driverId,
+            reachabilityError: reachability.error || null
+          });
+          continue;
+        }
       }
 
       const preferenceMatch = driverMatchesRidePreferences(driverData, {
@@ -201,6 +343,46 @@ async function hasPaymentEligibleDriver({
       }
 
       eligible += 1;
+      if (reserveDriver) {
+        const reservationResult = await reservePaymentDriver({
+          redis: redisClient,
+          driverId,
+          passengerId: reservationContext.passengerId,
+          rideId: reservationContext.rideId,
+          paymentSessionId: reservationContext.paymentSessionId,
+          paymentContextKey: reservationContext.paymentContextKey,
+          quoteSessionId: reservationContext.quoteSessionId,
+          quoteLockId: reservationContext.quoteLockId,
+          pickupLocation: normalizedPickup,
+          destinationLocation: normalizedDestination,
+          carType,
+          ttlSeconds: reservationTtlSeconds
+        });
+
+        if (!reservationResult.success) {
+          rejections.paymentReserved += 1;
+          continue;
+        }
+
+        return {
+          success: true,
+          hasDrivers: true,
+          code: 'DRIVER_RESERVED_FOR_PAYMENT',
+          candidates: nearbyDrivers.length,
+          eligible,
+          rejections,
+          radiusKm: safeRadiusKm,
+          driverDistanceKm,
+          estimatedPickupEtaMin: estimatePickupEtaMinFromDistance(driverDistanceKm),
+          driverId,
+          reservationId: reservationResult.reservationId,
+          reservationExpiresAt: reservationResult.expiresAtIso,
+          reservationTtlSeconds: reservationResult.ttlSeconds,
+          reservationReused: reservationResult.reused === true,
+          reservation: reservationResult.reservation
+        };
+      }
+
       return {
         success: true,
         hasDrivers: true,
@@ -209,6 +391,8 @@ async function hasPaymentEligibleDriver({
         eligible,
         rejections,
         radiusKm: safeRadiusKm,
+        driverDistanceKm,
+        estimatedPickupEtaMin: estimatePickupEtaMinFromDistance(driverDistanceKm),
         driverId
       };
     }
@@ -240,6 +424,8 @@ async function hasPaymentEligibleDriver({
 module.exports = {
   buildPaymentAvailabilityInput,
   hasPaymentEligibleDriver,
+  estimatePickupEtaMinFromDistance,
   normalizeLocation,
-  isDriverOnlineAvailable
+  isDriverOnlineAvailable,
+  isDriverDispatchReachable
 };

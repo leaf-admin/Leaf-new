@@ -52,8 +52,8 @@ const authenticateJWT = async (req, res, next) => {
     req.user = {
       id: decoded.userId,
       email: decoded.email || userData.email,
-      role: decoded.role || userData.role || 'viewer',
-      permissions: decoded.permissions || userData.permissions || []
+      role: userData.role || 'viewer',
+      permissions: Array.isArray(userData.permissions) ? userData.permissions : []
     };
 
     next();

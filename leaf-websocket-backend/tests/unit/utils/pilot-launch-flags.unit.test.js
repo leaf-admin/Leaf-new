@@ -40,4 +40,16 @@ describe('pilot-launch-flags', () => {
     expect(snapshot.referralProgramsEnabled).toBe(false);
     expect(snapshot.campaignCenterEnabled).toBe(false);
   });
+
+  it('normalizes ride validation aliases into a controlled profile', () => {
+    process.env.LEAF_LAUNCH_PROFILE = 'ride_validation';
+
+    const { getPilotLaunchFlags, isRideFlowValidationLaunch } = require('../../../utils/pilot-launch-flags');
+    const snapshot = getPilotLaunchFlags();
+
+    expect(snapshot.launchProfile).toBe('ride_flow_validation');
+    expect(snapshot.pilotControlled).toBe(true);
+    expect(snapshot.driverWithdrawalsEnabled).toBe(false);
+    expect(isRideFlowValidationLaunch()).toBe(true);
+  });
 });

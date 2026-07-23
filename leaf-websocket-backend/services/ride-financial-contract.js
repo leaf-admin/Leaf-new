@@ -1,4 +1,5 @@
 const DEFAULT_POLICY = Object.freeze({
+  policyId: 'runtime_tiered_percent_above_50_v1',
   operationalFeeUpTo10Cents: 79,
   operationalFee10To25Cents: 99,
   operationalFee25To50Cents: 149,
@@ -55,6 +56,81 @@ function resolvePaymentIntermediationFee(grossFareCents, policy = DEFAULT_POLICY
     Math.round(grossFare * policy.paymentIntermediationPercentage),
     policy.paymentIntermediationMinimumCents
   );
+}
+
+function buildPaymentInclusiveCharge({
+  baseAmountCents = 0,
+  operationalCostCents = 0,
+  policy = DEFAULT_POLICY
+} = {}) {
+  const baseAmount = toCents(baseAmountCents);
+  const operationalCost = toCents(operationalCostCents);
+  const netAmountToCover = baseAmount + operationalCost;
+
+  if (netAmountToCover <= 0) {
+    return {
+      currency: 'BRL',
+      baseAmountCents: baseAmount,
+      operationalCostCents: operationalCost,
+      paymentIntermediationFeeCents: 0,
+      passengerChargeCents: 0,
+      netCoveredCents: 0,
+      roundingBufferCents: 0,
+      balanced: true
+    };
+  }
+
+  let passengerChargeCents = netAmountToCover;
+  for (let attempts = 0; attempts < 1000; attempts += 1) {
+    const paymentIntermediationFeeCents = resolvePaymentIntermediationFee(passengerChargeCents, policy);
+    const netCoveredCents = passengerChargeCents - paymentIntermediationFeeCents;
+    if (netCoveredCents >= netAmountToCover) {
+      break;
+    }
+    passengerChargeCents += Math.max(1, netAmountToCover - netCoveredCents);
+  }
+
+  while (passengerChargeCents > 0) {
+    const previousCharge = passengerChargeCents - 1;
+    const previousFee = resolvePaymentIntermediationFee(previousCharge, policy);
+    if (previousCharge - previousFee < netAmountToCover) {
+      break;
+    }
+    passengerChargeCents = previousCharge;
+  }
+
+  const paymentIntermediationFeeCents = resolvePaymentIntermediationFee(passengerChargeCents, policy);
+  const netCoveredCents = Math.max(0, passengerChargeCents - paymentIntermediationFeeCents);
+  const roundingBufferCents = Math.max(0, netCoveredCents - netAmountToCover);
+
+  return {
+    currency: 'BRL',
+    baseAmountCents: baseAmount,
+    operationalCostCents: operationalCost,
+    paymentIntermediationFeeCents,
+    passengerChargeCents,
+    netCoveredCents,
+    roundingBufferCents,
+    balanced: netCoveredCents >= netAmountToCover
+  };
+}
+
+function describeFinancialPolicy(policy = DEFAULT_POLICY) {
+  return {
+    policyId: String(policy.policyId || '').trim() || 'unidentified_financial_policy',
+    currency: 'BRL',
+    operationalFee: {
+      upTo10Cents: toCents(policy.operationalFeeUpTo10Cents),
+      from10To25Cents: toCents(policy.operationalFee10To25Cents),
+      from25To50Cents: toCents(policy.operationalFee25To50Cents),
+      above50Model: 'percentage',
+      above50Percentage: Number(policy.operationalFeeAbove50Percentage)
+    },
+    paymentIntermediation: {
+      percentage: Number(policy.paymentIntermediationPercentage),
+      minimumCents: toCents(policy.paymentIntermediationMinimumCents)
+    }
+  };
 }
 
 function buildRideFinancialContract({
@@ -124,10 +200,110 @@ function buildRideFinancialContract({
   };
 }
 
+function resolveRequiredCents(value, fieldName) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric < 0 || !Number.isInteger(numeric)) {
+    const error = new Error(`${fieldName} deve ser um inteiro não negativo em centavos`);
+    error.code = 'FINANCIAL_SNAPSHOT_INVALID_AMOUNT';
+    throw error;
+  }
+  return numeric;
+}
+
+function isTruthyFlag(value) {
+  if (value === true) return true;
+  return ['1', 'true', 'yes', 'sim'].includes(String(value || '').trim().toLowerCase());
+}
+
+function buildAuthoritativeFinancialSnapshot({
+  passengerPaidCents,
+  tollFeeCents = 0,
+  operationalFeeCents,
+  paymentIntermediationFeeCents,
+  subscriptionRetainedFeeCents = 0,
+  driverNetAmountCents
+} = {}) {
+  const passengerPaid = resolveRequiredCents(passengerPaidCents, 'passengerPaidCents');
+  const tollPassThrough = resolveRequiredCents(tollFeeCents, 'tollFeeCents');
+  const operationalFee = resolveRequiredCents(operationalFeeCents, 'operationalFeeCents');
+  const paymentIntermediationFee = resolveRequiredCents(
+    paymentIntermediationFeeCents,
+    'paymentIntermediationFeeCents'
+  );
+  const subscriptionRetainedFee = resolveRequiredCents(
+    subscriptionRetainedFeeCents,
+    'subscriptionRetainedFeeCents'
+  );
+  const driverNetAmount = resolveRequiredCents(driverNetAmountCents, 'driverNetAmountCents');
+  const retainedTotalCents = operationalFee + paymentIntermediationFee + subscriptionRetainedFee;
+  const allocatedTotalCents = driverNetAmount + retainedTotalCents;
+
+  if (tollPassThrough > passengerPaid || allocatedTotalCents !== passengerPaid) {
+    const error = new Error('Snapshot financeiro final não fecha em centavos');
+    error.code = 'FINANCIAL_SNAPSHOT_UNBALANCED';
+    throw error;
+  }
+
+  return {
+    version: 'ride_financial_snapshot_v1',
+    currency: 'BRL',
+    authoritativeSnapshot: true,
+    financialSnapshotSource: 'backend_final',
+    passengerPaidCents: passengerPaid,
+    grossFareCents: passengerPaid - tollPassThrough,
+    tollFeeCents: tollPassThrough,
+    driverTollPassThroughCents: tollPassThrough,
+    operationalFeeCents: operationalFee,
+    paymentIntermediationFeeCents: paymentIntermediationFee,
+    subscriptionRetainedFeeCents: subscriptionRetainedFee,
+    retainedTotalCents,
+    driverNetAmountCents: driverNetAmount,
+    allocatedTotalCents,
+    balanced: true
+  };
+}
+
+function validateAuthoritativeFinancialSnapshot(snapshot = {}, expected = {}) {
+  try {
+    if (!isTruthyFlag(snapshot.authoritativeSnapshot)) {
+      return { valid: false, code: 'FINANCIAL_SNAPSHOT_NOT_AUTHORITATIVE' };
+    }
+    if (snapshot.financialSnapshotSource !== 'backend_final') {
+      return { valid: false, code: 'FINANCIAL_SNAPSHOT_INVALID_SOURCE' };
+    }
+
+    const normalized = buildAuthoritativeFinancialSnapshot(snapshot);
+    if (
+      expected.passengerPaidCents !== undefined &&
+      normalized.passengerPaidCents !== resolveRequiredCents(expected.passengerPaidCents, 'expectedPassengerPaidCents')
+    ) {
+      return { valid: false, code: 'FINANCIAL_SNAPSHOT_PASSENGER_AMOUNT_MISMATCH' };
+    }
+    if (
+      expected.tollFeeCents !== undefined &&
+      normalized.tollFeeCents !== resolveRequiredCents(expected.tollFeeCents, 'expectedTollFeeCents')
+    ) {
+      return { valid: false, code: 'FINANCIAL_SNAPSHOT_TOLL_MISMATCH' };
+    }
+
+    return { valid: true, snapshot: normalized };
+  } catch (error) {
+    return {
+      valid: false,
+      code: error.code || 'FINANCIAL_SNAPSHOT_INVALID',
+      error: error.message
+    };
+  }
+}
+
 module.exports = {
   DEFAULT_POLICY,
+  buildAuthoritativeFinancialSnapshot,
+  buildPaymentInclusiveCharge,
   buildRideFinancialContract,
+  describeFinancialPolicy,
   resolveOperationalFee,
   resolvePaymentIntermediationFee,
-  toCents
+  toCents,
+  validateAuthoritativeFinancialSnapshot
 };

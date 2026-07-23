@@ -11,6 +11,9 @@ const { logger } = require('../utils/logger');
 const redisPool = require('../utils/redis-pool');
 const connectionMonitor = require('./connection-monitor');
 const websocketRateLimiter = require('../middleware/websocket-rate-limiter');
+const {
+    closeDriverOnlineSessionAt
+} = require('./driver-online-time-policy-service');
 
 class ConnectionCleanupService {
     constructor(io) {
@@ -139,7 +142,44 @@ class ConnectionCleanupService {
 
                 if (timeSinceHeartbeat > timeout) {
                     logger.warn(`⚠️ [ConnectionCleanupService] Conexão sem heartbeat há ${Math.round(timeSinceHeartbeat / 1000)}s: ${socket.id}`);
-                    
+
+                    const driverId = socket.userId || socket.driverId;
+                    const closedAtMs = lastHeartbeat + timeout;
+                    if (driverId) {
+                        try {
+                            const transition = await closeDriverOnlineSessionAt(this.redis, {
+                                driverId,
+                                closedAtMs
+                            });
+                            await this.redis
+                                .multi()
+                                .hset(`driver:${driverId}`, {
+                                    status: 'OFFLINE',
+                                    isOnline: 'false',
+                                    dispatchEligible: 'false',
+                                    dispatchEligibilityCode: 'STALE_HEARTBEAT',
+                                    dispatchEligibilityCheckedAt: new Date(closedAtMs).toISOString(),
+                                    updatedAt: new Date(closedAtMs).toISOString()
+                                })
+                                .srem('online_drivers', driverId)
+                                .zrem('driver_locations', driverId)
+                                .zrem(process.env.ELIGIBLE_DRIVER_GEO_KEY || 'driver_locations_eligible', driverId)
+                                .exec();
+                            socket.emit?.('driverStatusUpdated', {
+                                success: true,
+                                driverId,
+                                status: 'OFFLINE',
+                                isOnline: false,
+                                dispatchEligible: false,
+                                code: 'STALE_HEARTBEAT',
+                                driverOnlineDaily: transition.snapshot,
+                                checkedAt: new Date(closedAtMs).toISOString()
+                            });
+                        } catch (error) {
+                            logger.error(`❌ [ConnectionCleanupService] Erro ao fechar tempo online stale do motorista ${driverId}:`, error);
+                        }
+                    }
+
                     // Desconectar socket
                     socket.disconnect(true);
                     removed++;

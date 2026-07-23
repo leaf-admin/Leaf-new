@@ -3,10 +3,18 @@ const admin = require('firebase-admin');
 const redisPool = require('../utils/redis-pool');
 const fareEstimationService = require('../services/fare-estimation-service');
 const passengerDiscountBenefitService = require('../services/passenger-discount-benefit-service');
+const paymentRuntimeProfileService = require('../services/payment-runtime-profile-service');
 const { getPublicRateCards, RATE_CARD_VERSION } = require('../services/pricing/calculateFare');
 const { metrics } = require('../utils/prometheus-metrics');
 const { logStructured } = require('../utils/logger');
 const geofenceService = require('../services/geofence-service');
+const { hasPaymentEligibleDriver } = require('../services/payment-driver-availability-guard');
+const routeTollService = require('../services/route-toll-service');
+const placesCacheService = require('../services/places-cache-service');
+const {
+  createQuoteLock,
+  getQuoteLockTtlSeconds
+} = require('../services/quote-lock-service');
 
 const router = express.Router();
 const MAX_OPERATIONAL_ROUTE_DISTANCE_KM = Math.max(
@@ -18,6 +26,18 @@ const QUOTE_SESSION_COUNTER_TTL_SECONDS = Math.max(
   Number.parseInt(process.env.PRICING_QUOTE_SESSION_COUNTER_TTL_SECONDS || '900', 10) || 900
 );
 
+function isSandboxQuoteLockTtlExtensionEnabled() {
+  return String(process.env.PRICING_SANDBOX_LONG_QUOTE_LOCK_TTL || 'true').toLowerCase() !== 'false';
+}
+
+function shouldRequireQuoteLockForPayment() {
+  const configured = process.env.REQUIRE_PAYMENT_QUOTE_LOCK;
+  if (configured !== undefined) {
+    return String(configured).toLowerCase() === 'true';
+  }
+  return process.env.NODE_ENV !== 'test';
+}
+
 function toNumber(value, fallback = 0) {
   const parsed = Number(
     typeof value === 'string'
@@ -25,6 +45,16 @@ function toNumber(value, fallback = 0) {
       : value
   );
   return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function toBoolean(value, fallback = false) {
+  if (value === true || value === false) {
+    return value;
+  }
+  if (value === null || value === undefined || value === '') {
+    return fallback;
+  }
+  return ['1', 'true', 'yes', 'sim'].includes(String(value).trim().toLowerCase());
 }
 
 function hasCoordinate(location = {}) {
@@ -37,6 +67,14 @@ function hasCoordinate(location = {}) {
     return false;
   }
   return Number.isFinite(toNumber(latRaw, NaN)) && Number.isFinite(toNumber(lngRaw, NaN));
+}
+
+function hasCanonicalRouteGeometry(route = {}) {
+  const coordinates = routeTollService.decodePolyline(route?.polylinePoints || '');
+  return coordinates.length >= 2 && coordinates.every((coordinate) => (
+    Number.isFinite(Number(coordinate?.latitude)) &&
+    Number.isFinite(Number(coordinate?.longitude))
+  ));
 }
 
 function normalizeQuoteSessionId(value) {
@@ -81,6 +119,70 @@ async function incrementQuoteSessionCounter(redis, quoteSessionId) {
   }
 }
 
+async function resolveQuoteDriverAvailability({
+  redis,
+  io,
+  pickupLocation,
+  destinationLocation,
+  carType,
+  quoteSessionId,
+  quoteLockId,
+  passengerId
+}) {
+  const availability = await hasPaymentEligibleDriver({
+    redis,
+    io,
+    pickupLocation,
+    destinationLocation,
+    carType,
+    reserveDriver: false,
+    reservationContext: {
+      passengerId,
+      quoteSessionId,
+      quoteLockId
+    },
+    logStructured,
+    logContext: {
+      service: 'pricing-routes',
+      operation: 'pricing_quote_driver_availability',
+      quoteSessionId: quoteSessionId || null
+    }
+  });
+
+  if (!availability?.success) {
+    return {
+      status: 'unknown',
+      hasDrivers: null,
+      code: availability?.code || 'DRIVER_AVAILABILITY_UNKNOWN',
+      pickupEtaMin: null,
+      radiusKm: availability?.radiusKm || null,
+      source: 'payment_driver_availability_guard'
+    };
+  }
+
+  return {
+    status: availability.hasDrivers ? 'available' : 'unavailable',
+    hasDrivers: Boolean(availability.hasDrivers),
+    code: availability.code || (availability.hasDrivers ? 'DRIVERS_AVAILABLE' : 'NO_DRIVERS_AVAILABLE'),
+    pickupEtaMin: Number.isFinite(Number(availability.estimatedPickupEtaMin))
+      ? Number(availability.estimatedPickupEtaMin)
+      : null,
+    driverDistanceKm: Number.isFinite(Number(availability.driverDistanceKm))
+      ? Number(availability.driverDistanceKm)
+      : null,
+    candidates: Number.isFinite(Number(availability.candidates))
+      ? Number(availability.candidates)
+      : 0,
+    eligible: Number.isFinite(Number(availability.eligible))
+      ? Number(availability.eligible)
+      : 0,
+    radiusKm: Number.isFinite(Number(availability.radiusKm))
+      ? Number(availability.radiusKm)
+      : null,
+    source: 'payment_driver_availability_guard'
+  };
+}
+
 function haversineDistanceKm(lat1, lng1, lat2, lng2) {
   const toRad = (value) => (value * Math.PI) / 180;
   const earthRadiusKm = 6371;
@@ -104,6 +206,49 @@ async function resolveOptionalFirebaseUserId(req) {
   } catch (_error) {
     return '';
   }
+}
+
+async function resolveQuoteLockTtlPolicy({ passengerId = '', body = {} } = {}) {
+  const baseTtlSeconds = getQuoteLockTtlSeconds();
+  const safePassengerId = String(passengerId || '').trim();
+  if (!safePassengerId) {
+    return {
+      ttlSeconds: baseTtlSeconds,
+      reason: 'default'
+    };
+  }
+
+  try {
+    const paymentProfile = await paymentRuntimeProfileService.resolveProfile({
+      passengerId: safePassengerId,
+      userId: safePassengerId,
+      phone: body.passengerPhone || body.phone || body.phoneNumber,
+      phoneNumber: body.passengerPhone || body.phone || body.phoneNumber,
+      appReview: String(process.env.APP_REVIEW || '').toLowerCase() === 'true'
+    });
+    if (
+      isSandboxQuoteLockTtlExtensionEnabled() &&
+      String(paymentProfile?.environment || '').toLowerCase() === 'sandbox'
+    ) {
+      return {
+        ttlSeconds: getQuoteLockTtlSeconds({ longLived: true }),
+        reason: 'sandbox_payment_profile',
+        paymentProfileId: paymentProfile.profileId || null
+      };
+    }
+  } catch (error) {
+    logStructured('warn', 'Falha ao resolver perfil de pagamento para TTL da cotação', {
+      service: 'pricing-routes',
+      operation: 'pricing_quote_lock_ttl_policy',
+      passengerId: safePassengerId,
+      error: error.message
+    });
+  }
+
+  return {
+    ttlSeconds: baseTtlSeconds,
+    reason: 'default'
+  };
 }
 
 router.get('/pricing/categories', (_req, res) => {
@@ -147,7 +292,9 @@ router.post('/pricing/quote', async (req, res) => {
     if (!geofenceValidation.valid) {
       metrics.recordPricingQuoteRequest?.({ success: false, source: quoteSessionId ? 'session' : 'anonymous' });
       return res.status(422).json({
-        error: 'route_out_of_coverage',
+        error: geofenceValidation.code || 'route_out_of_coverage',
+        code: geofenceValidation.code || 'ROUTE_OUT_OF_COVERAGE',
+        retryable: geofenceValidation.retryable === true,
         message: geofenceValidation.error || 'Origem ou destino fora da área de operação da Leaf.'
       });
     }
@@ -171,16 +318,54 @@ router.post('/pricing/quote', async (req, res) => {
   try {
     const redis = redisPool.getConnection();
     const quoteRequestCount = await incrementQuoteSessionCounter(redis, quoteSessionId);
+    const canonicalRouteResult = await placesCacheService.fetchDirectionsRoute({
+      startLoc: `${normalizedPickupLocation.lat},${normalizedPickupLocation.lng}`,
+      destLoc: `${normalizedDestinationLocation.lat},${normalizedDestinationLocation.lng}`,
+      trafficEnabled: toBoolean(process.env.ENABLE_TRAFFIC_AWARE_ROUTES, true),
+      alternativesEnabled: false,
+      cacheOnly: true
+    });
+    const canonicalRoute = canonicalRouteResult?.data || null;
+    const canonicalRouteDistanceKm = toNumber(canonicalRoute?.distance_in_km, 0);
+    const canonicalRouteDurationSecs = toNumber(
+      canonicalRoute?.duration_in_traffic ?? canonicalRoute?.time_in_secs,
+      0
+    );
+    const hasCanonicalRoute = Boolean(
+      canonicalRoute &&
+      hasCanonicalRouteGeometry(canonicalRoute) &&
+      canonicalRouteDistanceKm > 0 &&
+      canonicalRouteDurationSecs > 0
+    );
+
+    if (!hasCanonicalRoute) {
+      metrics.recordPricingQuoteRequest?.({ success: false, source: quoteSessionId ? 'session' : 'anonymous' });
+      return res.status(503).json({
+        error: 'canonical_route_required',
+        code: 'CANONICAL_ROUTE_REQUIRED',
+        retryable: true,
+        message: 'Rota canônica indisponível para cotação. Atualize a rota e tente novamente.'
+      });
+    }
+
+    const canonicalPricingPayload = {
+      routePolyline: canonicalRoute.polylinePoints,
+      polylinePoints: canonicalRoute.polylinePoints,
+      routeDetails: canonicalRoute
+    };
+    const tollEstimate = routeTollService.resolveTollFeeFromPricingPayload(
+      canonicalPricingPayload
+    );
     const result = await fareEstimationService.estimateRideFare({
       redis,
       pickupLocation: normalizedPickupLocation,
       destinationLocation: normalizedDestinationLocation,
       carType: body.carType,
-      routeDistanceKm: body.routeDistanceKm,
-      routeDurationSecs: body.routeDurationSecs,
-      tollFee: body.tollFee,
+      routeDistanceKm: canonicalRouteDistanceKm,
+      routeDurationSecs: canonicalRouteDurationSecs,
+      tollFee: tollEstimate.tollFee,
       clientEstimatedFare: body.clientEstimatedFare,
-      pricingContext: body.pricingContext || body.operational || null
+      pricingContext: null
     });
 
     const passengerId =
@@ -195,6 +380,59 @@ router.post('/pricing/quote', async (req, res) => {
     const estimatedFare = discountPreview.applied
       ? discountPreview.payableFare
       : result.estimatedFare;
+    const quoteLockTtlPolicy = await resolveQuoteLockTtlPolicy({
+      passengerId,
+      body
+    });
+
+    const quoteLockResult = await createQuoteLock({
+      redis,
+      quoteSessionId,
+      passengerId,
+      pickupLocation: normalizedPickupLocation,
+      destinationLocation: normalizedDestinationLocation,
+      carType: result.normalizedCarType,
+      estimatedFare,
+      grossEstimatedFare: result.estimatedFare,
+      passengerPayableFare: estimatedFare,
+      discountBenefit: discountPreview.applied ? discountPreview : null,
+      routeDistanceKm: result.routeMetrics?.distanceKm || 0,
+      routeDurationSecs: result.routeMetrics?.durationSecs || 0,
+      routePolyline: canonicalRoute.polylinePoints,
+      trafficSegments: canonicalRoute.trafficSegments || [],
+      tollFee: result.tollFee || 0,
+      rateCardVersion: result.rateCardVersion,
+      pricingPayload: result.pricingPayload || null,
+      pricingAudit: result.pricingAudit || null,
+      ttlSeconds: quoteLockTtlPolicy.ttlSeconds
+    });
+
+    if (!quoteLockResult.success && shouldRequireQuoteLockForPayment()) {
+      metrics.recordPricingQuoteRequest?.({ success: false, source: quoteSessionId ? 'session' : 'anonymous' });
+      logStructured('error', 'Falha ao criar quote lock obrigatório', {
+        service: 'pricing-routes',
+        operation: 'pricing_quote_lock',
+        quoteSessionId: quoteSessionId || null,
+        code: quoteLockResult.code,
+        error: quoteLockResult.error
+      });
+      return res.status(503).json({
+        error: 'quote_lock_unavailable',
+        message: 'Não foi possível travar a cotação agora. Tente novamente em instantes.',
+        code: quoteLockResult.code || 'QUOTE_LOCK_UNAVAILABLE'
+      });
+    }
+
+    const driverAvailability = await resolveQuoteDriverAvailability({
+      redis,
+      io: req.app.get('io'),
+      pickupLocation: normalizedPickupLocation,
+      destinationLocation: normalizedDestinationLocation,
+      carType: result.normalizedCarType,
+      quoteSessionId,
+      quoteLockId: quoteLockResult.success ? quoteLockResult.quoteLockId : null,
+      passengerId
+    });
 
     metrics.recordPricingQuoteRequest?.({ success: true, source: quoteSessionId ? 'session' : 'anonymous' });
 
@@ -211,11 +449,21 @@ router.post('/pricing/quote', async (req, res) => {
       quoteSessionId: quoteSessionId || null,
       quoteRequestCount: quoteRequestCount || null,
       carType: result.normalizedCarType,
-      estimatedFare
+      estimatedFare,
+      quoteLockTtlSeconds: quoteLockResult.success ? quoteLockResult.ttlSeconds : null,
+      quoteLockTtlReason: quoteLockTtlPolicy.reason,
+      paymentProfileId: quoteLockTtlPolicy.paymentProfileId || null,
+      tollFee: result.tollFee || 0,
+      tollDetectionSource: tollEstimate.source || null,
+      driverAvailabilityStatus: driverAvailability.status,
+      driverAvailabilityCode: driverAvailability.code
     });
 
     return res.json({
       quoteSessionId: quoteSessionId || null,
+      quoteLockId: quoteLockResult.success ? quoteLockResult.quoteLockId : null,
+      quoteLockExpiresAt: quoteLockResult.success ? quoteLockResult.expiresAtIso : null,
+      quoteLockTtlSeconds: quoteLockResult.success ? quoteLockResult.ttlSeconds : null,
       quoteRequestCount: quoteRequestCount || null,
       estimatedFare,
       grossEstimatedFare: result.estimatedFare,
@@ -226,8 +474,15 @@ router.post('/pricing/quote', async (req, res) => {
       routeDistanceKm: result.routeMetrics?.distanceKm || 0,
       routeDurationSecs: result.routeMetrics?.durationSecs || 0,
       tollFee: result.tollFee || 0,
+      tolls: tollEstimate.tolls || [],
+      tollDetection: {
+        source: tollEstimate.source || null,
+        toleranceKm: tollEstimate.toleranceKm || null,
+        tollCount: tollEstimate.tollCount || 0
+      },
       pricingPayload: result.pricingPayload || null,
       pricingAudit: result.pricingAudit || null,
+      driverAvailability,
       operationalState: result.operationalState || 'NORMAL',
       scorePressao: result.scorePressao || 0,
       scoreExcecao: result.scoreExcecao || 0,

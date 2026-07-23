@@ -12,9 +12,18 @@ import firebaseAuth from '@react-native-firebase/auth';
 import featureFlagService from '../services/FeatureFlagService';
 import WebSocketManager from '../services/WebSocketManager';
 import realtimeConnectionOrchestrator from '../services/RealtimeConnectionOrchestrator';
-import { isE2ETestBuild, isSimulatorBuild } from '../config/runtimeAccessPolicy';
+import {
+  allowTestUserTools,
+  isE2ETestBuild,
+  isSimulatorBuild,
+} from '../config/runtimeAccessPolicy';
 import { getPilotLaunchFeatureSnapshot } from '../config/pilotLaunchProfile';
 import { USER_SIGN_OUT } from '../services/runtime/authTypesBridge';
+import { normalizeManifestDeepLinkPath } from './surfaceManifestContract';
+import {
+  isPersistedProfileOnboardingComplete,
+  isProfileIdentityConsistent,
+} from '../components/auth/authFlowRecovery';
 
 // Telas de Autenticação
 import OTPScreen from '../screens/OTPScreen';
@@ -24,6 +33,7 @@ import CompleteRegistrationScreen from '../screens/CompleteRegistrationScreen';
 import DriverTermsScreen from '../screens/DriverTermsScreen';
 import CNHUploadScreen from '../screens/CNHUploadScreen';
 import CRLVUploadScreen from '../screens/CRLVUploadScreen';
+import AuthFlowScreenshotHarness from '../components/auth/AuthFlowScreenshotHarness';
 
 // Telas Principais
 import NewMapScreen from '../screens/NewMapScreen';
@@ -44,7 +54,6 @@ import PilotFeatureUnavailableScreen from '../screens/PilotFeatureUnavailableScr
 
 // Telas de Motorista
 import DriverDashboardScreen from '../screens/DriverDashboardScreen';
-import DriverTrips from '../screens/DriverTrips';
 import DriverRating from '../screens/DriverRating';
 import DriverDocumentsScreen from '../screens/DriverDocumentsScreen';
 import DriverSearchScreen from '../screens/DriverSearchScreen';
@@ -84,20 +93,19 @@ import AuthLoadingScreen from '../screens/AuthLoadingScreen';
 
 import RobotaxiPrototypeScreen from '../screens/RobotaxiPrototypeScreen';
 import RobotaxiDestinationScreen from '../screens/prototype/RobotaxiDestinationScreen';
-import RobotaxiBookingScreen from '../screens/prototype/RobotaxiBookingScreen';
 import RobotaxiDriverSearchScreen from '../screens/prototype/RobotaxiDriverSearchScreen';
 import RobotaxiTripScreen from '../screens/prototype/RobotaxiTripScreen';
 import RobotaxiProfileScreen from '../screens/prototype/RobotaxiProfileScreen';
 import RobotaxiSettingsScreen from '../screens/prototype/RobotaxiSettingsScreen';
 import RobotaxiMenuScreen from '../screens/prototype/RobotaxiMenuScreen';
 import RobotaxiTripHistoryScreen from '../screens/prototype/RobotaxiTripHistoryScreen';
-import RobotaxiPaymentScreen from '../screens/prototype/RobotaxiPaymentScreen';
 import RobotaxiPaymentSuccessScreen from '../screens/prototype/RobotaxiPaymentSuccessScreen';
 import RobotaxiPaymentFailedScreen from '../screens/prototype/RobotaxiPaymentFailedScreen';
 import RobotaxiNoDriversScreen from '../screens/prototype/RobotaxiNoDriversScreen';
 import RobotaxiChatScreen from '../screens/prototype/RobotaxiChatScreen';
 import RobotaxiSupportScreen from '../screens/prototype/RobotaxiSupportScreen';
 import RobotaxiReceiptScreen from '../screens/prototype/RobotaxiReceiptScreen';
+import RobotaxiSupportThreadScreen from '../screens/prototype/RobotaxiSupportThreadScreen';
 import RobotaxiCancellationScreen from '../screens/prototype/RobotaxiCancellationScreen';
 import RobotaxiRatingScreen from '../screens/prototype/RobotaxiRatingScreen';
 import RobotaxiComplainScreen from '../screens/prototype/RobotaxiComplainScreen';
@@ -107,8 +115,6 @@ import RobotaxiInvitesScreen from '../screens/prototype/RobotaxiInvitesScreen';
 import RobotaxiSupportTicketScreen from '../screens/prototype/RobotaxiSupportTicketScreen';
 import RobotaxiDriverDocumentsScreen from '../screens/prototype/RobotaxiDriverDocumentsScreen';
 import RobotaxiVehiclesScreen from '../screens/prototype/RobotaxiVehiclesScreen';
-import RobotaxiDriverOfferScreen from '../screens/prototype/RobotaxiDriverOfferScreen';
-import RobotaxiDriverTripScreen from '../screens/prototype/RobotaxiDriverTripScreen';
 import RobotaxiDriverActivationScreen from '../screens/prototype/RobotaxiDriverActivationScreen';
 import RobotaxiDriverWaitlistScreen from '../screens/prototype/RobotaxiDriverWaitlistScreen';
 import RobotaxiDriverWaitlistStatusScreen from '../screens/prototype/RobotaxiDriverWaitlistStatusScreen';
@@ -118,6 +124,20 @@ import RobotaxiDriverWaitlistStatusScreen from '../screens/prototype/RobotaxiDri
 
 const Stack = createStackNavigator();
 const rootNavigationRef = createNavigationContainerRef();
+
+function RobotaxiDriverSearchMapScreen(props) {
+  return (
+    <View style={{ flex: 1 }}>
+      <RobotaxiPrototypeScreen {...props} />
+      <View
+        pointerEvents="box-none"
+        style={{ position: 'absolute', top: 0, right: 0, bottom: 0, left: 0 }}
+      >
+        <RobotaxiDriverSearchScreen {...props} />
+      </View>
+    </View>
+  );
+}
 
 if (typeof globalThis !== 'undefined') {
   globalThis.navigationRef = rootNavigationRef;
@@ -313,18 +333,14 @@ const legacyPlanScreenParams = {
   targetRoute: 'Map'
 };
 
+const legacyDriverTripsScreenParams = {
+  title: 'Aceite antigo desativado',
+  message: 'Aceite de corrida e repasse financeiro acontecem somente pelo fluxo Robotaxi com backend canonico.',
+  targetRoute: 'RobotaxiPrototype'
+};
+
 function normalizeLeafAppLinkPath(path) {
-  const normalizedPath = String(path || '').replace(/^\/+/, '');
-
-  if (normalizedPath === 'viagem') {
-    return 'robotaxi/trip/public';
-  }
-
-  if (normalizedPath.startsWith('viagem/')) {
-    return normalizedPath.replace(/^viagem\//, 'robotaxi/trip/public/');
-  }
-
-  return path;
+  return normalizeManifestDeepLinkPath(path);
 }
 
 const appLinking = {
@@ -337,6 +353,8 @@ const appLinking = {
           automation: String,
           e2e: String,
           qaAutomation: String,
+          qaAutoFlow: String,
+          qaAutoConfirmPix: String,
           qaDriverAction: String,
           qaBookingId: String,
           qaPassengerAction: String,
@@ -348,16 +366,15 @@ const appLinking = {
         },
       },
       RobotaxiPrototypeDestination: 'robotaxi/destination',
-      RobotaxiPrototypeBooking: 'robotaxi/booking',
       RobotaxiPrototypeDriverSearch: 'robotaxi/driver/search',
       RobotaxiPrototypeTrip: 'robotaxi/trip',
-      RobotaxiPrototypePayment: 'robotaxi/payment',
       RobotaxiPrototypePaymentSuccess: 'robotaxi/payment/success',
       RobotaxiPrototypePaymentFailed: 'robotaxi/payment/failed',
       RobotaxiPrototypeNoDrivers: 'robotaxi/no-drivers',
       RobotaxiPrototypeChat: 'robotaxi/chat',
       RobotaxiPrototypeSupport: 'robotaxi/support',
       RobotaxiPrototypeSupportTicket: 'robotaxi/support/ticket',
+      RobotaxiPrototypeSupportThread: 'robotaxi/support/ticket/:ticketId',
       RobotaxiPrototypeReceipt: 'robotaxi/receipt',
       RobotaxiPrototypeCancellation: 'robotaxi/cancellation',
       RobotaxiPrototypeRating: 'robotaxi/rating',
@@ -392,8 +409,7 @@ const appLinking = {
           cityLabel: String,
         },
       },
-      RobotaxiPrototypeDriverOffer: 'robotaxi/driver/offer',
-      RobotaxiPrototypeDriverTrip: 'robotaxi/driver/trip',
+      AuthFlowScreenshotHarness: 'auth/screenshots',
       RobotaxiPrototypeProfile: 'robotaxi/profile',
       RobotaxiPrototypeSettings: 'robotaxi/settings',
       RobotaxiPrototypeMenu: 'robotaxi/menu',
@@ -402,7 +418,9 @@ const appLinking = {
       RobotaxiMenuMessages: 'robotaxi/menu/messages',
       RobotaxiMenuHelp: 'robotaxi/menu/help',
       RobotaxiMenuSettings: 'robotaxi/menu/settings',
-      EarningsReport: 'driver/earnings'
+      EarningsReport: 'driver/earnings',
+      Legal: 'legal',
+      PrivacyPolicy: 'privacy',
     }
   },
   getStateFromPath(path, options) {
@@ -413,7 +431,7 @@ const appLinking = {
 const PROTOTYPE_QA_DEEP_LINK_ROUTES = {
   'robotaxi/trip': 'RobotaxiPrototypeTrip',
   'robotaxi/receipt': 'RobotaxiPrototypeReceipt',
-  'robotaxi/driver/offer': 'RobotaxiPrototypeDriverOffer',
+  'robotaxi/driver/offer': 'RobotaxiPrototype',
   'robotaxi/driver/trip': 'RobotaxiPrototype',
 };
 
@@ -560,11 +578,18 @@ function renderPublicScreens(allowPrototypeQaScreens = false) {
         options={{ headerShown: false }}
       />
       {allowPrototypeQaScreens ? (
-        <Stack.Screen
-          name="RobotaxiPrototype"
-          component={RobotaxiPrototypeScreen}
-          options={{ keyboardHandlingEnabled: false }}
-        />
+        <>
+          <Stack.Screen
+            name="RobotaxiPrototype"
+            component={RobotaxiPrototypeScreen}
+            options={{ keyboardHandlingEnabled: false }}
+          />
+          <Stack.Screen
+            name="AuthFlowScreenshotHarness"
+            component={AuthFlowScreenshotHarness}
+            options={{ headerShown: false }}
+          />
+        </>
       ) : null}
       <Stack.Screen name="AuthLoading" component={AuthLoadingScreen} options={{ headerShown: false }} />
       <Stack.Screen name="AuthLoadingScreen" component={AuthLoadingScreen} options={{ headerShown: false }} />
@@ -792,8 +817,9 @@ function renderDriverPrivateScreens() {
       <Stack.Screen name="Dashboard" component={DriverDashboardScreen} />
       <Stack.Screen
         name="Trips"
-        component={DriverTrips}
-        options={{ headerShown: true }}
+        component={PilotFeatureUnavailableScreen}
+        initialParams={legacyDriverTripsScreenParams}
+        options={{ headerShown: false }}
       />
       <Stack.Screen
         name="DriverBalance"
@@ -822,7 +848,12 @@ function renderDriverPrivateScreens() {
       <Stack.Screen name="CarEdit" component={CarEditScreen} />
       <Stack.Screen name="Cars" component={CarsScreen} />
       <Stack.Screen name="DriverDashboard" component={DriverDashboardScreen} />
-      <Stack.Screen name="DriverTrips" component={DriverTrips} />
+      <Stack.Screen
+        name="DriverTrips"
+        component={PilotFeatureUnavailableScreen}
+        initialParams={legacyDriverTripsScreenParams}
+        options={{ headerShown: false }}
+      />
       <Stack.Screen name="MyEarning" component={EarningsReportScreen} />
       <Stack.Screen
         name="UpdateBankInfo"
@@ -872,6 +903,11 @@ function renderSharedPrototypeScreens() {
         options={prototypeTransparentOverlayScreenOptions}
       />
       <Stack.Screen
+        name="RobotaxiPrototypeSupportThread"
+        component={RobotaxiSupportThreadScreen}
+        options={prototypeTransparentOverlayScreenOptions}
+      />
+      <Stack.Screen
         name="RobotaxiPrototypeReceipt"
         component={RobotaxiReceiptScreen}
         options={prototypeTransparentOverlayScreenOptions}
@@ -879,6 +915,11 @@ function renderSharedPrototypeScreens() {
       <Stack.Screen
         name="RobotaxiPrototypeRating"
         component={RobotaxiRatingScreen}
+        options={prototypeTransparentOverlayScreenOptions}
+      />
+      <Stack.Screen
+        name="RobotaxiPrototypeCancellation"
+        component={RobotaxiCancellationScreen}
         options={prototypeTransparentOverlayScreenOptions}
       />
       <Stack.Screen
@@ -962,23 +1003,13 @@ function renderCustomerPrototypeScreens() {
         options={prototypeTransparentOverlayScreenOptions}
       />
       <Stack.Screen
-        name="RobotaxiPrototypeBooking"
-        component={RobotaxiBookingScreen}
-        options={prototypeTransparentOverlayScreenOptions}
-      />
-      <Stack.Screen
         name="RobotaxiPrototypeDriverSearch"
-        component={RobotaxiDriverSearchScreen}
-        options={prototypeTransparentOverlayScreenOptions}
+        component={RobotaxiDriverSearchMapScreen}
+        options={prototypeOverlayScreenOptions}
       />
       <Stack.Screen
         name="RobotaxiPrototypeTrip"
         component={RobotaxiTripScreen}
-        options={prototypeTransparentOverlayScreenOptions}
-      />
-      <Stack.Screen
-        name="RobotaxiPrototypePayment"
-        component={RobotaxiPaymentScreen}
         options={prototypeTransparentOverlayScreenOptions}
       />
       <Stack.Screen
@@ -994,11 +1025,6 @@ function renderCustomerPrototypeScreens() {
       <Stack.Screen
         name="RobotaxiPrototypeNoDrivers"
         component={RobotaxiNoDriversScreen}
-        options={prototypeTransparentOverlayScreenOptions}
-      />
-      <Stack.Screen
-        name="RobotaxiPrototypeCancellation"
-        component={RobotaxiCancellationScreen}
         options={prototypeTransparentOverlayScreenOptions}
       />
       <Stack.Screen
@@ -1046,16 +1072,6 @@ function renderDriverPrototypeScreens() {
       <Stack.Screen
         name="DriverInvite"
         component={driverInviteEntryComponent}
-        options={prototypeTransparentOverlayScreenOptions}
-      />
-      <Stack.Screen
-        name="RobotaxiPrototypeDriverOffer"
-        component={RobotaxiDriverOfferScreen}
-        options={prototypeTransparentOverlayScreenOptions}
-      />
-      <Stack.Screen
-        name="RobotaxiPrototypeDriverTrip"
-        component={RobotaxiDriverTripScreen}
         options={prototypeTransparentOverlayScreenOptions}
       />
     </>
@@ -1153,6 +1169,19 @@ function RealtimeConnectionGuard() {
   const lastSessionKeyRef = useRef('');
 
   useEffect(() => {
+    const firebaseUser = firebaseAuth().currentUser;
+    const explicitSimulatorE2EProfile = Boolean(
+      allowTestUserTools() &&
+      isSimulatorBuild() &&
+      isE2ETestBuild() &&
+      (profile?.isTestUser || profile?.isTestCustomer),
+    );
+    const profileAuthorized =
+      (
+        isProfileIdentityConsistent({ profile, firebaseUser }) ||
+        explicitSimulatorE2EProfile
+      ) &&
+      isPersistedProfileOnboardingComplete(profile);
     const userId = String(profile?.uid || profile?.id || '').trim();
     const role = normalizeNavigatorRole(
       profile?.usertype ||
@@ -1161,7 +1190,7 @@ function RealtimeConnectionGuard() {
         profile?.user_role ||
         profile?.accountType
     );
-    const sessionKey = userId && role ? `${userId}:${role}` : '';
+    const sessionKey = profileAuthorized && userId && role ? `${userId}:${role}` : '';
 
     if (!sessionKey) {
       if (lastSessionKeyRef.current) {
@@ -1207,7 +1236,10 @@ function MainNavigator() {
   const [prototypeUiEnabled, setPrototypeUiEnabled] = useState(true);
   const [flagsReady, setFlagsReady] = useState(true);
   const isReviewEnv = Constants?.expoConfig?.extra?.isReview === true;
+  const legacyMapOptOutAllowed =
+    __DEV__ && !isReviewEnv && !isE2ETestBuild() && !isSimulatorBuild();
   const forceLegacyMapUi =
+    legacyMapOptOutAllowed &&
     String(process.env.EXPO_PUBLIC_FORCE_LEGACY_MAP_UI || '').trim().toLowerCase() === 'true';
 
   useEffect(() => {
@@ -1230,7 +1262,10 @@ function MainNavigator() {
     const loadPrototypeFlag = async () => {
       try {
         await featureFlagService.initialize();
-        const enabled = await featureFlagService.getFlag('PROTOTYPE_ROBOTAXI_UI_ENABLED', false);
+        // The Robotaxi flow is the canonical production lifecycle. A missing
+        // cached flag must never silently route a signed-in rider to the
+        // legacy map flow, which does not share its lifecycle safeguards.
+        const enabled = await featureFlagService.getFlag('PROTOTYPE_ROBOTAXI_UI_ENABLED', true);
 
         if (isMounted) {
           setPrototypeUiEnabled(Boolean(enabled));
@@ -1245,7 +1280,7 @@ function MainNavigator() {
       } catch (error) {
         Logger.error('❌ [AppNavigator] Erro ao carregar flag de protótipo:', error);
         if (isMounted) {
-          setPrototypeUiEnabled(false);
+          setPrototypeUiEnabled(true);
           setFlagsReady(true);
         }
       }
@@ -1261,8 +1296,11 @@ function MainNavigator() {
     };
   }, []);
 
+  const effectivePrototypeUiEnabled = legacyMapOptOutAllowed
+    ? prototypeUiEnabled
+    : true;
   const allowPrototypePrivateScreens =
-    !forceLegacyMapUi && (isReviewEnv || isE2ETestBuild() || prototypeUiEnabled);
+    !forceLegacyMapUi && (isReviewEnv || isE2ETestBuild() || effectivePrototypeUiEnabled);
   const allowPublicPrototypeQaScreens =
     !forceLegacyMapUi && (isReviewEnv || isE2ETestBuild() || isSimulatorBuild());
   const mapComponent = allowPrototypePrivateScreens ? RobotaxiPrototypeScreen : NewMapScreen;
@@ -1304,9 +1342,20 @@ function MainNavigator() {
     auth.profile.accountType ??
     null;
   const normalizedProfileRole = normalizeNavigatorRole(profileRoleSource);
+  const profileOnboardingComplete = isPersistedProfileOnboardingComplete(auth.profile);
+  const profileIdentityAuthorized = isProfileIdentityConsistent({
+    profile: auth.profile,
+    firebaseUser: firebaseAuth().currentUser,
+  }) || Boolean(
+    allowTestUserTools() &&
+    isSimulatorBuild() &&
+    isE2ETestBuild() &&
+    (auth.profile?.isTestUser || auth.profile?.isTestCustomer),
+  );
 
-  // 🔍 VERIFICAR SE USUÁRIO ESTÁ COMPLETO (tem role válida)
-  if (!normalizedProfileRole) {
+  // Perfil, consentimentos e identidade Firebase precisam estar completos antes
+  // de montar mapa, socket ou qualquer superfície privada.
+  if (!normalizedProfileRole || !profileOnboardingComplete || !profileIdentityAuthorized) {
     Logger.log('AppNavigator - 🔍 Usuário autenticado mas incompleto, mostrando SplashScreen');
     return (
       <Stack.Navigator screenOptions={verticalScreenOptions}>
@@ -1333,6 +1382,14 @@ function MainNavigator() {
         component={mapComponent}
         options={{ keyboardHandlingEnabled: false }}
       />
+
+      {allowPublicPrototypeQaScreens ? (
+        <Stack.Screen
+          name="AuthFlowScreenshotHarness"
+          component={AuthFlowScreenshotHarness}
+          options={{ headerShown: false }}
+        />
+      ) : null}
 
       {renderSharedLegacyAliases(mapComponent)}
 

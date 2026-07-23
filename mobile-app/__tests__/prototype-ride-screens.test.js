@@ -16,9 +16,15 @@ import RobotaxiTripScreen, {
 import RobotaxiReceiptScreen from '../src/screens/prototype/RobotaxiReceiptScreen';
 import RobotaxiRatingScreen from '../src/screens/prototype/RobotaxiRatingScreen';
 import RobotaxiTripHistoryScreen from '../src/screens/prototype/RobotaxiTripHistoryScreen';
+import RobotaxiChatScreen from '../src/screens/prototype/RobotaxiChatScreen';
+import RobotaxiCancellationScreen from '../src/screens/prototype/RobotaxiCancellationScreen';
 import RatingService from '../src/services/RatingService';
 import { usePrototypeRideRuntime } from '../src/screens/prototype/prototypeRideRuntime';
 import { resolveMeaningfulAddress } from '../src/screens/prototype/addressLabelUtils';
+import {
+  clearPrototypeMapRoute,
+  setPrototypeMapRoute,
+} from '../src/screens/prototype/prototypeMapRoute';
 import {
   allowForcedPaymentBypass,
   allowTestUserTools,
@@ -28,6 +34,15 @@ import {
   RIDE_CARD_STATES,
   validateRideCardRenderedFields,
 } from '../src/screens/prototype/rideCardContract';
+
+const mockGetBookingHistory = jest.fn();
+
+jest.mock('../src/services/BookingHistoryService', () => ({
+  __esModule: true,
+  default: {
+    getBookingHistory: (...args) => mockGetBookingHistory(...args),
+  },
+}));
 
 jest.mock('@react-navigation/native', () => ({
   StackActions: {
@@ -53,6 +68,43 @@ jest.mock('../src/components/prototype/DriverSearchRadar', () => {
   const React = require('react');
   const { View } = require('react-native');
   return () => <View />;
+});
+
+jest.mock('../src/components/prototype/PrototypeMapLayer', () => {
+  const React = require('react');
+  const MapView = require('react-native-maps').default;
+
+  const MockPrototypeMapLayer = ({
+    interactionEnabled = true,
+    onMapLayout,
+    routeCoordinates,
+    routeTrafficSegments,
+    showTraffic,
+    routeViewportRegion,
+    viewportPadding,
+    animateRoute,
+  }) => (
+    <MapView
+      testID="prototype-map-view"
+      accessibilityLabel="prototype-map-view"
+      mapPadding={viewportPadding}
+      routeCoordinates={routeCoordinates}
+      routeTrafficSegments={routeTrafficSegments}
+      routeViewportRegion={routeViewportRegion}
+      showTraffic={showTraffic}
+      animateRoute={animateRoute}
+      onLayout={onMapLayout}
+      pitchEnabled={interactionEnabled}
+      rotateEnabled={interactionEnabled}
+      scrollEnabled={interactionEnabled}
+      zoomEnabled={interactionEnabled}
+    />
+  );
+
+  return {
+    __esModule: true,
+    default: MockPrototypeMapLayer,
+  };
 });
 
 jest.mock('../src/components/prototype/PrototypeDismissibleSheet', () => {
@@ -111,6 +163,222 @@ jest.mock('../src/components/payment/WooviPaymentModal', () => {
   return () => null;
 });
 
+jest.mock('../src/components/prototype/LeafRideUI', () => {
+  const React = require('react');
+  const { Text, TouchableOpacity, View } = require('react-native');
+
+  const leafRideColors = {
+    bg: '#F7F8F4',
+    sheet: '#FFFFFF',
+    sheetTranslucent: '#FFFFFF',
+    text: '#171412',
+    secondary: '#756F68',
+    muted: '#827B73',
+    line: '#E9E2D8',
+    borderStrong: '#E2DAD0',
+    field: '#F7F8F4',
+    leaf: '#1A330E',
+    leafLight: '#EEF3EA',
+    accent: '#1A330E',
+    accentDark: '#102307',
+    accentSoft: '#EEF3EA',
+    accentBorder: '#D9E3D3',
+    blue: '#F3F5F2',
+    blueText: '#514B45',
+    warning: '#F7F8F4',
+    warningText: '#7A6337',
+    danger: '#FFF1F2',
+    dangerText: '#D7153A',
+  };
+
+  const leafButtonMetrics = Object.freeze({
+    height: 48,
+    radius: 24,
+    iconSize: 16,
+    iconGap: 6,
+  });
+
+  const renderText = (value, props = {}) => (
+    value ? <Text {...props}>{value}</Text> : null
+  );
+
+  const LeafAnimatedPressable = ({
+    children,
+    disabled = false,
+    onPress,
+    testID,
+    accessibilityLabel,
+    accessibilityRole,
+    accessibilityState,
+    style,
+  }) => (
+    <TouchableOpacity
+      disabled={disabled}
+      onPress={disabled ? undefined : onPress}
+      testID={testID}
+      accessibilityLabel={accessibilityLabel}
+      accessibilityRole={accessibilityRole}
+      accessibilityState={accessibilityState || { disabled }}
+      style={style}
+    >
+      {children}
+    </TouchableOpacity>
+  );
+
+  return {
+    leafRideColors,
+    leafButtonMetrics,
+    LeafAnimatedPressable,
+    LeafButton: ({
+      label,
+      onPress,
+      disabled = false,
+      testID,
+      accessibilityLabel,
+      style,
+      textStyle,
+    }) => (
+      <LeafAnimatedPressable
+        disabled={disabled}
+        onPress={onPress}
+        testID={testID}
+        accessibilityLabel={accessibilityLabel}
+        accessibilityRole="button"
+        accessibilityState={{ disabled }}
+        style={style}
+      >
+        <Text style={textStyle}>{label}</Text>
+      </LeafAnimatedPressable>
+    ),
+    LeafDivider: ({ style }) => <View style={style} />,
+    LeafDriverIdentity: ({
+      name,
+      rating,
+      vehicle,
+      plate,
+      style,
+      testID,
+      fieldTestIDs = {},
+    }) => (
+      <View style={style} testID={testID}>
+        <View testID={fieldTestIDs.avatar} />
+        {renderText(name, { testID: fieldTestIDs.name })}
+        {renderText(rating, { testID: fieldTestIDs.meta })}
+        {renderText(plate || '--', { testID: fieldTestIDs.plate })}
+        {renderText(vehicle, { testID: fieldTestIDs.vehicle })}
+      </View>
+    ),
+    LeafEmptyState: ({
+      title,
+      message,
+      loading = false,
+      actionLabel,
+      onActionPress,
+      testID,
+    }) => (
+      <View testID={testID}>
+        {loading ? <Text>loading</Text> : null}
+        {renderText(title)}
+        {renderText(message)}
+        {actionLabel ? (
+          <TouchableOpacity onPress={onActionPress}>
+            <Text>{actionLabel}</Text>
+          </TouchableOpacity>
+        ) : null}
+      </View>
+    ),
+    LeafInfoRow: ({ title, subtitle, right, style }) => (
+      <View style={style}>
+        {renderText(title)}
+        {renderText(subtitle)}
+        {renderText(right)}
+      </View>
+    ),
+    LeafMetric: ({ value, label, style }) => (
+      <View style={style}>
+        {renderText(value)}
+        {renderText(label)}
+      </View>
+    ),
+    LeafMetricRow: ({ metrics = [], style }) => (
+      <View style={style}>
+        {metrics.map((metric) => (
+          <View key={`${metric.label}-${metric.value}`}>
+            {renderText(metric.value)}
+            {renderText(metric.label)}
+          </View>
+        ))}
+      </View>
+    ),
+    LeafPersonIdentity: ({
+      name,
+      meta,
+      right,
+      style,
+      testID,
+      fieldTestIDs = {},
+    }) => (
+      <View style={style} testID={testID}>
+        <View testID={fieldTestIDs.avatar} />
+        {renderText(name, { testID: fieldTestIDs.name })}
+        {renderText(meta, { testID: fieldTestIDs.meta })}
+        {renderText(right, { testID: fieldTestIDs.right })}
+      </View>
+    ),
+    LeafPill: ({ label, style, testID }) => (
+      <Text style={style} testID={testID}>
+        {label}
+      </Text>
+    ),
+    LeafProgressBar: ({ progress = 0, fillTestID }) => (
+      <View>
+        <View
+          testID={fillTestID}
+          style={[{ width: `${Math.round(Math.max(0, Math.min(1, Number(progress) || 0)) * 100)}%` }]}
+        />
+      </View>
+    ),
+    LeafRideSheet: ({
+      children,
+      onLayout,
+      style,
+      testID,
+      accessibilityLabel,
+    }) => (
+      <View
+        onLayout={onLayout}
+        style={style}
+        testID={testID}
+        accessibilityLabel={accessibilityLabel}
+      >
+        {children}
+      </View>
+    ),
+    LeafRouteProgress: ({
+      originLabel,
+      destinationLabel,
+      arrivalLabel,
+      style,
+      testID,
+      fieldTestIDs = {},
+    }) => (
+      <View style={style} testID={testID}>
+        {renderText(originLabel, { testID: fieldTestIDs.origin })}
+        {renderText(destinationLabel, { testID: fieldTestIDs.destination })}
+        <View testID={fieldTestIDs.progress} />
+        {renderText(arrivalLabel)}
+      </View>
+    ),
+    LeafStateHeader: ({ title, subtitle, rightLabel, insetsTop = 0 }) => (
+      <View testID="leaf-state-header" insetsTop={insetsTop}>
+        {renderText(title)}
+        {renderText(subtitle)}
+        {renderText(rightLabel)}
+      </View>
+    ),
+  };
+});
+
 jest.mock('react-native-maps', () => {
   const React = require('react');
   const { View } = require('react-native');
@@ -118,12 +386,18 @@ jest.mock('react-native-maps', () => {
   const MockMapView = React.forwardRef(
     (
       {
-        accessibilityLabel,
-        children,
-        mapPadding,
-        pitchEnabled,
+	        accessibilityLabel,
+	        animateRoute,
+	        children,
+	        mapPadding,
+	        onLayout,
+	        pitchEnabled,
+	        routeCoordinates,
+	        routeTrafficSegments,
+        routeViewportRegion,
         rotateEnabled,
         scrollEnabled,
+        showTraffic,
         testID,
         zoomEnabled,
       },
@@ -135,11 +409,17 @@ jest.mock('react-native-maps', () => {
       }));
       return (
         <View
-          accessibilityLabel={accessibilityLabel}
-          mapPadding={mapPadding}
-          pitchEnabled={pitchEnabled}
+	          accessibilityLabel={accessibilityLabel}
+	          animateRoute={animateRoute}
+	          mapPadding={mapPadding}
+	          onLayout={onLayout}
+	          pitchEnabled={pitchEnabled}
+	          routeCoordinates={routeCoordinates}
+          routeTrafficSegments={routeTrafficSegments}
+          routeViewportRegion={routeViewportRegion}
           rotateEnabled={rotateEnabled}
           scrollEnabled={scrollEnabled}
+          showTraffic={showTraffic}
           testID={testID}
           zoomEnabled={zoomEnabled}
         >
@@ -224,6 +504,26 @@ function buildDriverRuntime(overrides = {}) {
   };
 }
 
+function buildSyntheticActiveRouteFixtures(origin, destination) {
+  const latitudeDelta = destination.latitude - origin.latitude;
+  const longitudeDelta = destination.longitude - origin.longitude;
+  return [
+    [origin, destination],
+    [
+      origin,
+      {
+        latitude: origin.latitude + latitudeDelta * 0.34 - longitudeDelta * 0.14,
+        longitude: origin.longitude + longitudeDelta * 0.34 + latitudeDelta * 0.14,
+      },
+      {
+        latitude: origin.latitude + latitudeDelta * 0.68 - longitudeDelta * 0.14 * 0.55,
+        longitude: origin.longitude + longitudeDelta * 0.68 + latitudeDelta * 0.14 * 0.55,
+      },
+      destination,
+    ],
+  ];
+}
+
 function buildReceiptRuntime(overrides = {}) {
   return {
     tripHistory: [
@@ -233,6 +533,8 @@ function buildReceiptRuntime(overrides = {}) {
         value: 'R$ 38,40',
         driverNetAmount: 31.8,
         totalFees: 6.6,
+        authoritativeSnapshot: true,
+        financialSnapshotSource: 'backend_final',
         route: 'Rua A -> Aeroporto Santos Dumont',
         pickupAddress: 'Rua A, 10, Centro, Rio de Janeiro',
         destinationAddress: 'Praça Senador Salgado Filho, Centro, Rio de Janeiro',
@@ -249,6 +551,8 @@ function buildReceiptRuntime(overrides = {}) {
       value: 'R$ 38,40',
       driverNetAmount: 31.8,
       totalFees: 6.6,
+      authoritativeSnapshot: true,
+      financialSnapshotSource: 'backend_final',
       route: 'Rua A -> Aeroporto Santos Dumont',
       pickupAddress: 'Rua A, 10, Centro, Rio de Janeiro',
       destinationAddress: 'Praça Senador Salgado Filho, Centro, Rio de Janeiro',
@@ -265,11 +569,60 @@ function buildReceiptRuntime(overrides = {}) {
   };
 }
 
-function expectCriticalRideCardFieldsRendered(screen, role, state, renderedFields) {
+function projectViewportY({ coordinate, region, mapHeight }) {
+  return mapHeight / 2 - ((coordinate.latitude - region.latitude) / region.latitudeDelta) * mapHeight;
+}
+
+function projectViewportX({ coordinate, region, mapWidth }) {
+  return mapWidth / 2 + ((coordinate.longitude - region.longitude) / region.longitudeDelta) * mapWidth;
+}
+
+function expectRouteInsideVisibleMapViewport({ coordinates, mapView, mapWidth, mapHeight }) {
+  const routeViewportRegion = mapView.props.routeViewportRegion;
+  const mapPadding = mapView.props.mapPadding || {};
+  const top = Number(mapPadding.top) || 0;
+  const bottom = Number(mapPadding.bottom) || 0;
+  const left = Number(mapPadding.left) || 0;
+  const right = Number(mapPadding.right) || 0;
+
+  expect(routeViewportRegion).toEqual(expect.objectContaining({
+    latitude: expect.any(Number),
+    latitudeDelta: expect.any(Number),
+    longitude: expect.any(Number),
+    longitudeDelta: expect.any(Number),
+  }));
+
+  coordinates.forEach(coordinate => {
+    const x = projectViewportX({ coordinate, region: routeViewportRegion, mapWidth });
+    const y = projectViewportY({ coordinate, region: routeViewportRegion, mapHeight });
+    expect(x).toBeGreaterThanOrEqual(left);
+    expect(x).toBeLessThanOrEqual(mapWidth - right);
+    expect(y).toBeGreaterThanOrEqual(top);
+    expect(y).toBeLessThanOrEqual(mapHeight - bottom);
+  });
+}
+
+function captureRenderedRideCardTestIDs(screen, renderedFields) {
+  return new Set(
+    renderedFields
+      .map((field) => field.testID)
+      .filter((testID) => testID && screen.queryByTestId(testID)),
+  );
+}
+
+function expectCriticalRideCardFieldsRendered(
+  screen,
+  role,
+  state,
+  renderedFields,
+  previouslyRenderedTestIDs = new Set(),
+) {
   const result = validateRideCardRenderedFields(role, state, renderedFields, {
     includeImportant: false,
     requireTestIDs: true,
-    queryByTestId: screen.queryByTestId,
+    queryByTestId: (testID) =>
+      screen.queryByTestId(testID) ||
+      (previouslyRenderedTestIDs.has(testID) ? { testID } : null),
   });
 
   expect({
@@ -287,9 +640,16 @@ describe('prototype ride screens', () => {
   beforeEach(() => {
     jest.useRealTimers();
     jest.clearAllMocks();
+    clearPrototypeMapRoute();
     allowForcedPaymentBypass.mockReturnValue(false);
     allowTestUserTools.mockReturnValue(false);
     require('@react-navigation/native').useIsFocused.mockReturnValue(true);
+    mockGetBookingHistory.mockResolvedValue({
+      success: true,
+      bookings: [],
+      pageInfo: { hasNextPage: false, endCursor: null },
+      totalCount: 0,
+    });
   });
 
   afterEach(() => {
@@ -353,31 +713,49 @@ describe('prototype ride screens', () => {
 
     usePrototypeRideRuntime.mockReturnValue(buildPassengerRuntime({ bookingStatus: 'accepted' }));
     const passengerAccepted = render(<RobotaxiTripScreen navigation={navigation} route={{ params: {} }} />);
+    const passengerAcceptedCompactFields = captureRenderedRideCardTestIDs(
+      passengerAccepted,
+      PASSENGER_TRIP_RENDERED_CARD_FIELDS.accepted,
+    );
+    fireEvent.press(passengerAccepted.getByTestId('passenger-trip-accepted-more-options-button'));
     expectCriticalRideCardFieldsRendered(
       passengerAccepted,
       RIDE_CARD_ROLES.PASSENGER,
       RIDE_CARD_STATES.PASSENGER_DRIVER_ACCEPTED,
-      PASSENGER_TRIP_RENDERED_CARD_FIELDS.accepted
+      PASSENGER_TRIP_RENDERED_CARD_FIELDS.accepted,
+      passengerAcceptedCompactFields,
     );
     passengerAccepted.unmount();
 
     usePrototypeRideRuntime.mockReturnValue(buildPassengerRuntime({ bookingStatus: 'arrived' }));
     const passengerArrived = render(<RobotaxiTripScreen navigation={navigation} route={{ params: {} }} />);
+    const passengerArrivedCompactFields = captureRenderedRideCardTestIDs(
+      passengerArrived,
+      PASSENGER_TRIP_RENDERED_CARD_FIELDS.arrived,
+    );
+    fireEvent.press(passengerArrived.getByTestId('passenger-trip-arrived-more-options-button'));
     expectCriticalRideCardFieldsRendered(
       passengerArrived,
       RIDE_CARD_ROLES.PASSENGER,
       RIDE_CARD_STATES.PASSENGER_DRIVER_ARRIVED,
-      PASSENGER_TRIP_RENDERED_CARD_FIELDS.arrived
+      PASSENGER_TRIP_RENDERED_CARD_FIELDS.arrived,
+      passengerArrivedCompactFields,
     );
     passengerArrived.unmount();
 
     usePrototypeRideRuntime.mockReturnValue(buildPassengerRuntime({ bookingStatus: 'started' }));
     const passengerStarted = render(<RobotaxiTripScreen navigation={navigation} route={{ params: {} }} />);
+    const passengerStartedCompactFields = captureRenderedRideCardTestIDs(
+      passengerStarted,
+      PASSENGER_TRIP_RENDERED_CARD_FIELDS.started,
+    );
+    fireEvent.press(passengerStarted.getByTestId('passenger-trip-more-actions-button'));
     expectCriticalRideCardFieldsRendered(
       passengerStarted,
       RIDE_CARD_ROLES.PASSENGER,
       RIDE_CARD_STATES.PASSENGER_IN_TRIP,
-      PASSENGER_TRIP_RENDERED_CARD_FIELDS.started
+      PASSENGER_TRIP_RENDERED_CARD_FIELDS.started,
+      passengerStartedCompactFields,
     );
     passengerStarted.unmount();
 
@@ -402,6 +780,7 @@ describe('prototype ride screens', () => {
       lastError: '',
     });
     const driverOffer = render(<RobotaxiDriverOfferScreen navigation={navigation} route={{ params: {} }} />);
+    fireEvent.press(driverOffer.getByTestId('driver-offer-details-button'));
     expectCriticalRideCardFieldsRendered(
       driverOffer,
       RIDE_CARD_ROLES.DRIVER,
@@ -412,6 +791,7 @@ describe('prototype ride screens', () => {
 
     usePrototypeRideRuntime.mockReturnValue(buildDriverRuntime({ bookingStatus: 'accepted' }));
     const driverAccepted = render(<RobotaxiDriverTripScreen navigation={navigation} route={{ params: {} }} />);
+    fireEvent.press(driverAccepted.getByTestId('driver-trip-more-actions-button'));
     expectCriticalRideCardFieldsRendered(
       driverAccepted,
       RIDE_CARD_ROLES.DRIVER,
@@ -422,6 +802,7 @@ describe('prototype ride screens', () => {
 
     usePrototypeRideRuntime.mockReturnValue(buildDriverRuntime({ bookingStatus: 'arrived' }));
     const driverArrived = render(<RobotaxiDriverTripScreen navigation={navigation} route={{ params: {} }} />);
+    fireEvent.press(driverArrived.getByTestId('driver-trip-more-actions-button'));
     expectCriticalRideCardFieldsRendered(
       driverArrived,
       RIDE_CARD_ROLES.DRIVER,
@@ -432,13 +813,37 @@ describe('prototype ride screens', () => {
 
     usePrototypeRideRuntime.mockReturnValue(buildDriverRuntime({ bookingStatus: 'started' }));
     const driverStarted = render(<RobotaxiDriverTripScreen navigation={navigation} route={{ params: {} }} />);
-    fireEvent.press(driverStarted.getByText('Detalhes'));
+    fireEvent.press(driverStarted.getByTestId('driver-trip-more-actions-button'));
     expectCriticalRideCardFieldsRendered(
       driverStarted,
       RIDE_CARD_ROLES.DRIVER,
       RIDE_CARD_STATES.DRIVER_IN_TRIP,
       DRIVER_TRIP_RENDERED_CARD_FIELDS.started
     );
+  });
+
+  it('renders accepted passenger trip without pickup distance or ETA instead of blanking', () => {
+    usePrototypeRideRuntime.mockReturnValue(
+      buildPassengerRuntime({
+        bookingStatus: 'accepted',
+        activeBooking: {},
+        driverInfo: { id: 'driver_1', name: 'Motorista Leaf' },
+        tripDistanceKm: null,
+        tripDurationMin: null,
+      })
+    );
+
+    const navigation = {
+      navigate: jest.fn(),
+      replace: jest.fn(),
+      canGoBack: jest.fn(() => false),
+      goBack: jest.fn(),
+    };
+    const screen = render(<RobotaxiTripScreen navigation={navigation} route={{ params: {} }} />);
+
+    expect(screen.getByTestId('passenger-trip-screen')).toBeTruthy();
+    expect(screen.getByText('MOTORISTA A CAMINHO')).toBeTruthy();
+    expect(screen.getByText('Motorista Leaf')).toBeTruthy();
   });
 
   it('drives the offer screen into the driver trip surface on acceptance', async () => {
@@ -468,16 +873,22 @@ describe('prototype ride screens', () => {
       lastError: '',
     });
 
-    const navigation = { navigate: jest.fn(), canGoBack: jest.fn(() => false), goBack: jest.fn() };
-    const { getByText } = render(
+    const navigation = {
+      navigate: jest.fn(),
+      canGoBack: jest.fn(() => false),
+      goBack: jest.fn(),
+    };
+    const { getByText, getByTestId, queryByText } = render(
       <RobotaxiDriverOfferScreen navigation={navigation} route={{ params: {} }} />
     );
 
+    expect(queryByText('Preferências')).toBeNull();
+    expect(queryByText('Recusar')).toBeNull();
+    fireEvent.press(getByTestId('driver-offer-details-button'));
     expect(getByText('Preferências')).toBeTruthy();
-    expect(getByText('Ar-condicionado ligado')).toBeTruthy();
-    expect(getByText('Pouca conversa')).toBeTruthy();
+    expect(getByText('Ar-condicionado ligado · Pouca conversa')).toBeTruthy();
     expect(getByText('14 min · 8,2 km de viagem')).toBeTruthy();
-    expect(getByText('PIX confirmado')).toBeTruthy();
+    expect(getByText('Pagamento confirmado')).toBeTruthy();
 
     fireEvent.press(getByText('Aceitar corrida'));
 
@@ -491,6 +902,257 @@ describe('prototype ride screens', () => {
         })
       );
     });
+  });
+
+  it('renders driver offer passenger and route context from authoritative nested payload fields', () => {
+    usePrototypeRideRuntime.mockReturnValue({
+      currentCoordinate: { latitude: -22.857, longitude: -43.309 },
+      driverCoordinate: { latitude: -22.857, longitude: -43.309 },
+      driverOffers: [
+        {
+          bookingId: 'booking_nested_offer_context',
+          passenger: 'Motorista',
+          customer: { name: 'Leaf Passageira Teste' },
+          pickup: 'Local combinado',
+          pickupLocation: {
+            add: 'Av. Meriti, 9 - Vila Kosmos',
+            lat: -22.858,
+            lng: -43.309,
+          },
+          dropoff: 'Local combinado',
+          destinationLocation: {
+            add: 'Av. das Américas, 4666 - Barra da Tijuca',
+            lat: -22.999,
+            lng: -43.358,
+          },
+          fare: 54.71,
+          grossFare: 54.71,
+          estimatedDriverNetAmount: 51.31,
+          pickupEtaMin: 3,
+          tripDurationMin: 31,
+          pickupRouteCoordinates: [
+            { latitude: -22.857, longitude: -43.309 },
+            { latitude: -22.858, longitude: -43.309 },
+          ],
+          routeCoordinates: [
+            { latitude: -22.858, longitude: -43.309 },
+            { latitude: -22.925, longitude: -43.334 },
+            { latitude: -22.999, longitude: -43.358 },
+          ],
+          pricingSnapshotLocked: true,
+        },
+      ],
+      driverTripMeta: {},
+      profile: {},
+      acceptDriverOffer: jest.fn(),
+      rejectDriverOffer: jest.fn(),
+      lastError: '',
+    });
+
+    const navigation = {
+      navigate: jest.fn(),
+      canGoBack: jest.fn(() => false),
+      goBack: jest.fn(),
+    };
+    const screen = render(
+      <RobotaxiDriverOfferScreen navigation={navigation} route={{ params: {} }} />,
+    );
+
+    expect(screen.getByText('Leaf Passageira Teste')).toBeTruthy();
+    expect(screen.getByText('Av. Meriti, 9 - Vila Kosmos')).toBeTruthy();
+    expect(screen.getByText('Av. das Américas, 4666 - Barra da Tijuca')).toBeTruthy();
+    expect(screen.getByText(/3 min · (?!.*--).* até o embarque/)).toBeTruthy();
+    expect(screen.getByText(/31 min · (?!.*--).* de viagem/)).toBeTruthy();
+    expect(screen.queryByText('Motorista')).toBeNull();
+    expect(screen.queryByText('Local combinado')).toBeNull();
+  });
+
+  it('keeps paid driver offers locked until explicit accept, reject, or timeout', () => {
+    const rejectDriverOffer = jest.fn();
+    usePrototypeRideRuntime.mockReturnValue({
+      driverOffers: [
+        {
+          bookingId: 'booking_1',
+          pickupAddress: 'Rua A, 10',
+          dropoffAddress: 'Aeroporto Santos Dumont',
+          fare: 38.4,
+          estimatedDriverNetAmount: 31.8,
+          distanceKm: 0.7,
+          tripDistanceKm: 8.2,
+          pickupEtaMin: 4,
+          tripDurationMin: 14,
+          pricingSnapshotLocked: true,
+          payout: 'R$ 31,80',
+        },
+      ],
+      acceptDriverOffer: jest.fn(),
+      rejectDriverOffer,
+      lastError: '',
+    });
+
+    const navigation = {
+      navigate: jest.fn(),
+      canGoBack: jest.fn(() => true),
+      goBack: jest.fn(),
+    };
+    const { getByTestId } = render(
+      <RobotaxiDriverOfferScreen navigation={navigation} route={{ params: {} }} />
+    );
+
+    expect(getByTestId('prototype-map-view').props.routeCoordinates).toEqual([]);
+    expect(getByTestId('prototype-dismissible-sheet').props.backdropDismissEnabled).toBe(false);
+    expect(getByTestId('prototype-dismissible-sheet').props.dragEnabled).toBe(false);
+    expect(getByTestId('prototype-dismissible-sheet-backdrop').props.pointerEvents).toBe('none');
+
+    fireEvent.press(getByTestId('prototype-dismissible-sheet-backdrop'));
+
+    expect(navigation.goBack).not.toHaveBeenCalled();
+    expect(navigation.navigate).not.toHaveBeenCalledWith('RobotaxiPrototype');
+    expect(rejectDriverOffer).not.toHaveBeenCalled();
+  });
+
+  it('shows 00:00 and blocks driver offer actions after the authoritative deadline', () => {
+    const acceptDriverOffer = jest.fn();
+    const rejectDriverOffer = jest.fn();
+    usePrototypeRideRuntime.mockReturnValue({
+      driverOffers: [
+        {
+          bookingId: 'booking_expired_offer',
+          pickupAddress: 'Rua A, 10',
+          dropoffAddress: 'Aeroporto Santos Dumont',
+          fare: 38.4,
+          estimatedDriverNetAmount: 31.8,
+          pricingSnapshotLocked: true,
+          expiresAt: new Date(Date.now() - 1000).toISOString(),
+        },
+      ],
+      acceptDriverOffer,
+      rejectDriverOffer,
+      lastError: '',
+    });
+
+    const screen = render(
+      <RobotaxiDriverOfferScreen
+        navigation={{
+          navigate: jest.fn(),
+          canGoBack: jest.fn(() => true),
+          goBack: jest.fn(),
+        }}
+        route={{ params: {} }}
+      />,
+    );
+
+    expect(screen.getByText('00:00 para responder')).toBeTruthy();
+    expect(
+      screen.getByTestId('driver-offer-screen-accept-button').props
+        .accessibilityState.disabled,
+    ).toBe(true);
+    fireEvent.press(screen.getByTestId('driver-offer-details-button'));
+    expect(
+      screen.getByTestId('driver-offer-screen-reject-button').props
+        .accessibilityState.disabled,
+    ).toBe(true);
+    fireEvent.press(screen.getByTestId('driver-offer-screen-accept-button'));
+    fireEvent.press(screen.getByTestId('driver-offer-screen-reject-button'));
+    expect(acceptDriverOffer).not.toHaveBeenCalled();
+    expect(rejectDriverOffer).not.toHaveBeenCalled();
+  });
+
+  it('blocks navigator removal while a paid driver offer is pending', () => {
+    let beforeRemoveListener = null;
+    const unsubscribe = jest.fn();
+    usePrototypeRideRuntime.mockReturnValue({
+      driverOffers: [
+        {
+          bookingId: 'booking_1',
+          pickupAddress: 'Rua A, 10',
+          dropoffAddress: 'Aeroporto Santos Dumont',
+          fare: 38.4,
+          estimatedDriverNetAmount: 31.8,
+          pricingSnapshotLocked: true,
+        },
+      ],
+      acceptDriverOffer: jest.fn(),
+      rejectDriverOffer: jest.fn(),
+      lastError: '',
+    });
+    const navigation = {
+      navigate: jest.fn(),
+      replace: jest.fn(),
+      canGoBack: jest.fn(() => true),
+      goBack: jest.fn(),
+      addListener: jest.fn((eventName, listener) => {
+        if (eventName === 'beforeRemove') {
+          beforeRemoveListener = listener;
+        }
+        return unsubscribe;
+      }),
+    };
+    const screen = render(
+      <RobotaxiDriverOfferScreen navigation={navigation} route={{ params: {} }} />,
+    );
+    const event = { preventDefault: jest.fn() };
+
+    expect(navigation.addListener).toHaveBeenCalledWith(
+      'beforeRemove',
+      expect.any(Function),
+    );
+    beforeRemoveListener(event);
+
+    expect(event.preventDefault).toHaveBeenCalledTimes(1);
+    expect(navigation.goBack).not.toHaveBeenCalled();
+    screen.unmount();
+    expect(unsubscribe).toHaveBeenCalledTimes(1);
+  });
+
+  it('permits only the acknowledged driver-offer rejection action', async () => {
+    let beforeRemoveListener = null;
+    const rejectDriverOffer = jest.fn().mockResolvedValue({ ok: true });
+    usePrototypeRideRuntime.mockReturnValue({
+      driverOffers: [
+        {
+          bookingId: 'booking_1',
+          pickupAddress: 'Rua A, 10',
+          dropoffAddress: 'Aeroporto Santos Dumont',
+          fare: 38.4,
+          estimatedDriverNetAmount: 31.8,
+          pricingSnapshotLocked: true,
+        },
+      ],
+      acceptDriverOffer: jest.fn(),
+      rejectDriverOffer,
+      lastError: '',
+    });
+    const navigation = {
+      navigate: jest.fn(),
+      replace: jest.fn(),
+      canGoBack: jest.fn(() => true),
+      goBack: jest.fn(),
+      addListener: jest.fn((eventName, listener) => {
+        if (eventName === 'beforeRemove') {
+          beforeRemoveListener = listener;
+        }
+        return jest.fn();
+      }),
+    };
+    const screen = render(
+      <RobotaxiDriverOfferScreen navigation={navigation} route={{ params: {} }} />,
+    );
+
+    expect(screen.queryByTestId('driver-offer-screen-reject-button')).toBeNull();
+    fireEvent.press(screen.getByTestId('driver-offer-details-button'));
+    fireEvent.press(screen.getByTestId('driver-offer-screen-reject-button'));
+    await waitFor(() => expect(navigation.goBack).toHaveBeenCalledTimes(1));
+
+    const canonicalEvent = { preventDefault: jest.fn(), data: { action: { type: 'GO_BACK' } } };
+    beforeRemoveListener(canonicalEvent);
+
+    expect(rejectDriverOffer).toHaveBeenCalledWith(
+      expect.any(Object),
+      'Recusada pelo motorista.',
+    );
+    expect(canonicalEvent.preventDefault).not.toHaveBeenCalled();
+    screen.unmount();
   });
 
   it('auto-dismisses the driver offer screen when only a stale route request remains', async () => {
@@ -542,6 +1204,9 @@ describe('prototype ride screens', () => {
     );
 
     expect(acceptedScreen.getByText('Indo buscar')).toBeTruthy();
+    expect(acceptedScreen.queryByText(/Preferências padrão/)).toBeNull();
+    expect(acceptedScreen.queryByLabelText('Cancelar')).toBeNull();
+    fireEvent.press(acceptedScreen.getByTestId('driver-trip-more-actions-button'));
     expect(acceptedScreen.getByText(/Preferências padrão/)).toBeTruthy();
     expect(acceptedScreen.getByLabelText('Cancelar')).toBeTruthy();
     fireEvent.press(
@@ -558,13 +1223,37 @@ describe('prototype ride screens', () => {
 
     expect(arrivedScreen.getByText('Código da corrida')).toBeTruthy();
     expect(arrivedScreen.queryByText(/Aguard/i)).toBeNull();
+    expect(arrivedScreen.queryByLabelText('Chat')).toBeNull();
+    fireEvent.press(arrivedScreen.getByTestId('driver-trip-more-actions-button'));
     expect(arrivedScreen.getByLabelText('Chat')).toBeTruthy();
     fireEvent.press(
       arrivedScreen.getByLabelText('driver-live-primary-action-start-button')
     );
     await waitFor(() => expect(arrivedRuntime.startTripFlow).toHaveBeenCalled());
 
-    const startedRuntime = buildDriverRuntime({ bookingStatus: 'started' });
+    const backendFinalDriverReceipt = {
+      ...buildReceiptRuntime().lastReceipt,
+      id: 'booking_1',
+      bookingId: 'booking_1',
+      rideId: 'booking_1',
+      tripId: 'booking_1',
+      viewerRole: 'driver',
+      receiptRole: 'driver',
+      driverId: 'driver_1',
+      passengerId: 'customer_1',
+    };
+    const startedRuntime = buildDriverRuntime({
+      bookingStatus: 'started',
+      driverActiveRide: {
+        ...buildDriverRuntime().driverActiveRide,
+        driverId: 'driver_1',
+        passengerId: 'customer_1',
+      },
+      completeTripFlow: jest.fn().mockResolvedValue({
+        success: true,
+        receipt: backendFinalDriverReceipt,
+      }),
+    });
     usePrototypeRideRuntime.mockReturnValue(startedRuntime);
     const startedNavigation = { navigate: jest.fn(), canGoBack: jest.fn(() => false), goBack: jest.fn() };
     const startedScreen = render(
@@ -572,13 +1261,526 @@ describe('prototype ride screens', () => {
     );
 
     expect(startedScreen.getByText('A caminho de Aeroporto Santos Dumont')).toBeTruthy();
+    expect(startedScreen.queryByTestId('driver-trip-chat-button')).toBeNull();
+    fireEvent.press(startedScreen.getByTestId('driver-trip-more-actions-button'));
+    fireEvent.press(startedScreen.getByTestId('driver-trip-chat-button'));
+    expect(startedNavigation.navigate).toHaveBeenCalledWith(
+      'RobotaxiPrototypeChat',
+      expect.objectContaining({
+        bookingId: 'booking_1',
+        source: 'driver-trip',
+        bookingStatus: 'started',
+      })
+    );
+    fireEvent.press(startedScreen.getByTestId('driver-trip-report-button'));
+    expect(startedNavigation.navigate).toHaveBeenCalledWith(
+      'RobotaxiPrototypeSupport',
+      expect.objectContaining({
+        bookingId: 'booking_1',
+        source: 'driver-trip',
+        bookingStatus: 'started',
+      })
+    );
     fireEvent.press(
       startedScreen.getByLabelText('driver-live-primary-action-complete-button')
     );
     await waitFor(() => {
       expect(startedRuntime.completeTripFlow).toHaveBeenCalled();
-      expect(startedNavigation.navigate).toHaveBeenCalledWith('RobotaxiPrototypeReceipt', { fromTrip: true });
+      expect(startedNavigation.navigate).toHaveBeenCalledWith(
+        'RobotaxiPrototypeReceipt',
+        expect.objectContaining({
+          bookingId: 'booking_1',
+          fare: 38.4,
+          fromTrip: true,
+          grossAmount: 38.4,
+          receipt: expect.objectContaining({
+            id: 'booking_1',
+            viewerRole: 'driver',
+            receiptRole: 'driver',
+            driverId: 'driver_1',
+            passengerId: 'customer_1',
+            authoritativeSnapshot: true,
+            financialSnapshotSource: 'backend_final',
+          }),
+          viewerRole: 'driver',
+          receiptRole: 'driver',
+          driverId: 'driver_1',
+          passengerId: 'customer_1',
+        })
+      );
     });
+
+    const receiptParams = startedNavigation.navigate.mock.calls.find(
+      ([routeName]) => routeName === 'RobotaxiPrototypeReceipt',
+    )?.[1];
+    startedScreen.unmount();
+
+    usePrototypeRideRuntime.mockReturnValue(
+      buildReceiptRuntime({
+        activeRole: 'driver',
+        profileUid: 'customer_1',
+        lastReceipt: null,
+        tripHistory: [],
+      }),
+    );
+    const receiptScreen = render(
+      <RobotaxiReceiptScreen
+        navigation={{ navigate: jest.fn(), replace: jest.fn(), canGoBack: jest.fn(() => false), goBack: jest.fn() }}
+        route={{ params: receiptParams }}
+      />,
+    );
+
+    expect(receiptScreen.getByTestId('driver-receipt-rate-passenger-button').props.accessibilityState).toEqual({ disabled: false });
+  });
+
+  it('passes passenger active ride context when opening chat during an active trip', () => {
+    usePrototypeRideRuntime.mockReturnValue(buildPassengerRuntime({ bookingStatus: 'started' }));
+    const navigation = { navigate: jest.fn(), canGoBack: jest.fn(() => false), goBack: jest.fn() };
+    const screen = render(
+      <RobotaxiTripScreen navigation={navigation} route={{ params: {} }} />
+    );
+
+    expect(screen.queryByTestId('passenger-trip-message-button')).toBeNull();
+    fireEvent.press(screen.getByTestId('passenger-trip-more-actions-button'));
+    fireEvent.press(screen.getAllByTestId('passenger-trip-message-button')[0]);
+
+    expect(navigation.navigate).toHaveBeenCalledWith(
+      'RobotaxiPrototypeChat',
+      expect.objectContaining({
+        bookingId: 'booking_1',
+        source: 'passenger-trip',
+        bookingStatus: 'started',
+      })
+    );
+  });
+
+  it('passes passenger active ride context when opening cancellation during an active trip', () => {
+    usePrototypeRideRuntime.mockReturnValue(buildPassengerRuntime({ bookingStatus: 'accepted' }));
+    const navigation = { navigate: jest.fn(), canGoBack: jest.fn(() => false), goBack: jest.fn() };
+    const screen = render(
+      <RobotaxiTripScreen navigation={navigation} route={{ params: {} }} />
+    );
+
+    fireEvent.press(screen.getByTestId('passenger-trip-accepted-more-options-button'));
+    fireEvent.press(screen.getAllByTestId('passenger-trip-cancel-button')[0]);
+
+    expect(navigation.navigate).toHaveBeenCalledWith(
+      'RobotaxiPrototypeCancellation',
+      expect.objectContaining({
+        bookingId: 'booking_1',
+        source: 'passenger-trip',
+        bookingStatus: 'accepted',
+      })
+    );
+  });
+
+  it('passes driver active ride context when opening cancellation during pickup', () => {
+    usePrototypeRideRuntime.mockReturnValue(buildDriverRuntime({ bookingStatus: 'accepted' }));
+    const navigation = { navigate: jest.fn(), canGoBack: jest.fn(() => false), goBack: jest.fn() };
+    const screen = render(
+      <RobotaxiDriverTripScreen navigation={navigation} route={{ params: {} }} />
+    );
+
+    fireEvent.press(screen.getByTestId('driver-trip-more-actions-button'));
+    fireEvent.press(screen.getAllByTestId('driver-trip-cancel-button')[0]);
+
+    expect(navigation.navigate).toHaveBeenCalledWith(
+      'RobotaxiPrototypeCancellation',
+      expect.objectContaining({
+        bookingId: 'booking_1',
+        source: 'driver-trip',
+        bookingStatus: 'accepted',
+      })
+    );
+  });
+
+  it('uses the driver cancellation flow with scoped booking context', async () => {
+    const cancelRideSearch = jest.fn();
+    const cancelActiveRideFlow = jest.fn().mockResolvedValue({ success: true });
+    usePrototypeRideRuntime.mockReturnValue({
+      activeBookingId: null,
+      bookingStatus: 'accepted',
+      driverActiveRide: {
+        bookingId: 'booking_driver_cancel',
+        status: 'accepted',
+      },
+      cancelRideSearch,
+      cancelActiveRideFlow,
+    });
+    const navigation = {
+      navigate: jest.fn(),
+      replace: jest.fn(),
+      canGoBack: jest.fn(() => false),
+      goBack: jest.fn(),
+    };
+    const screen = render(
+      <RobotaxiCancellationScreen
+        navigation={navigation}
+        route={{
+          key: 'driver-cancel',
+          params: {
+            bookingId: 'booking_driver_cancel',
+            bookingStatus: 'accepted',
+            source: 'driver-trip',
+          },
+        }}
+      />
+    );
+
+    expect(screen.queryByTestId('passenger-cancellation-confirm-button')).toBeNull();
+    fireEvent.press(screen.getByTestId('passenger-cancellation-more-options-button'));
+    fireEvent.press(screen.getByTestId('passenger-cancellation-confirm-button'));
+
+    await waitFor(() => {
+      expect(cancelActiveRideFlow).toHaveBeenCalledWith(
+        expect.objectContaining({
+          bookingId: 'booking_driver_cancel',
+          source: 'driver-trip',
+          bookingStatus: 'accepted',
+          reason: 'Cancelado pelo motorista.',
+        })
+      );
+    });
+    expect(cancelRideSearch).not.toHaveBeenCalled();
+    expect(navigation.replace).toHaveBeenCalledWith('RobotaxiPrototype');
+  });
+
+  it('renders completed search cancellation as terminal without sending another cancel command', () => {
+    const cancelRideSearch = jest.fn();
+    const cancelActiveRideFlow = jest.fn();
+    usePrototypeRideRuntime.mockReturnValue({
+      bookingStatus: 'idle',
+      cancelRideSearch,
+      cancelActiveRideFlow,
+    });
+    const navigation = {
+      navigate: jest.fn(),
+      replace: jest.fn(),
+      canGoBack: jest.fn(() => false),
+      goBack: jest.fn(),
+    };
+    const screen = render(
+      <RobotaxiCancellationScreen
+        navigation={navigation}
+        route={{
+          key: 'search-cancelled',
+          params: {
+            bookingId: 'booking_search_cancelled',
+            bookingStatus: 'canceled',
+            completed: true,
+            source: 'search',
+          },
+        }}
+      />
+    );
+
+    expect(screen.getByText('Corrida cancelada')).toBeTruthy();
+    expect(screen.queryByText('Continuar corrida')).toBeNull();
+
+    fireEvent.press(screen.getByTestId('passenger-cancellation-keep-button'));
+
+    expect(cancelRideSearch).not.toHaveBeenCalled();
+    expect(cancelActiveRideFlow).not.toHaveBeenCalled();
+    expect(navigation.replace).toHaveBeenCalledWith('RobotaxiPrototype');
+  });
+
+  it('shows the authoritative full-refund outcome without losing the original Pix amount', () => {
+    usePrototypeRideRuntime.mockReturnValue({
+      bookingStatus: 'idle',
+      paymentState: {
+        amount: 13.42,
+        originalPaidAmount: 13.42,
+        refundAmount: 13.42,
+        cancellationFee: 0,
+        refundStatus: 'ALREADY_REFUNDED',
+      },
+      cancelRideSearch: jest.fn(),
+      cancelActiveRideFlow: jest.fn(),
+    });
+    const navigation = {
+      navigate: jest.fn(),
+      replace: jest.fn(),
+      canGoBack: jest.fn(() => false),
+      goBack: jest.fn(),
+    };
+    const screen = render(
+      <RobotaxiCancellationScreen
+        navigation={navigation}
+        route={{
+          key: 'search-cancelled-refund',
+          params: {
+            bookingId: 'booking_search_cancelled_refund',
+            bookingStatus: 'canceled',
+            completed: true,
+            source: 'search',
+            cancellationOutcome: {
+              originalPaidAmount: 13.42,
+              refundAmount: 13.42,
+              cancellationFee: 0,
+              refundStatus: 'ALREADY_REFUNDED',
+            },
+          },
+        }}
+      />
+    );
+
+    expect(screen.getByTestId('cancellation-financial-summary')).toBeTruthy();
+    expect(screen.getByText('Pix pago')).toBeTruthy();
+    expect(screen.getByText('Reembolso')).toBeTruthy();
+    expect(screen.getByText('Taxa de cancelamento')).toBeTruthy();
+    expect(screen.getAllByText('R$ 13,42')).toHaveLength(2);
+    expect(screen.getByText('R$ 0,00')).toBeTruthy();
+    expect(screen.getByLabelText('Voltar ao mapa')).toBeTruthy();
+  });
+
+  it('treats completed cancellation aliases as terminal without sending another cancel command', () => {
+    const cancelRideSearch = jest.fn();
+    const cancelActiveRideFlow = jest.fn();
+    usePrototypeRideRuntime.mockReturnValue({
+      activeBookingId: 'booking_completed_alias',
+      bookingStatus: 'trip_completed',
+      cancelRideSearch,
+      cancelActiveRideFlow,
+    });
+    const navigation = {
+      navigate: jest.fn(),
+      replace: jest.fn(),
+      canGoBack: jest.fn(() => false),
+      goBack: jest.fn(),
+    };
+    const screen = render(
+      <RobotaxiCancellationScreen
+        navigation={navigation}
+        route={{
+          key: 'trip-completed-cancellation-alias',
+          params: {
+            bookingId: 'booking_completed_alias',
+            bookingStatus: 'trip_completed',
+            source: 'passenger-trip',
+          },
+        }}
+      />
+    );
+
+    expect(screen.getByText('Corrida encerrada')).toBeTruthy();
+
+    fireEvent.press(screen.getByTestId('passenger-cancellation-keep-button'));
+
+    expect(cancelRideSearch).not.toHaveBeenCalled();
+    expect(cancelActiveRideFlow).not.toHaveBeenCalled();
+    expect(navigation.replace).toHaveBeenCalledWith('RobotaxiPrototype');
+  });
+
+  it('never dismisses terminal cancellation back to a previous active ride surface', () => {
+    const cancelRideSearch = jest.fn();
+    const cancelActiveRideFlow = jest.fn();
+    usePrototypeRideRuntime.mockReturnValue({
+      activeBookingId: 'booking_terminal_cancel',
+      bookingStatus: 'completed',
+      cancelRideSearch,
+      cancelActiveRideFlow,
+    });
+    const navigation = {
+      navigate: jest.fn(),
+      replace: jest.fn(),
+      canGoBack: jest.fn(() => true),
+      goBack: jest.fn(),
+    };
+    const screen = render(
+      <RobotaxiCancellationScreen
+        navigation={navigation}
+        route={{
+          key: 'terminal-cancellation-dismiss',
+          params: {
+            bookingId: 'booking_terminal_cancel',
+            bookingStatus: 'completed',
+            source: 'passenger-trip',
+          },
+        }}
+      />
+    );
+
+    fireEvent.press(screen.getByTestId('prototype-dismissible-sheet-backdrop-pressable'));
+
+    expect(cancelRideSearch).not.toHaveBeenCalled();
+    expect(cancelActiveRideFlow).not.toHaveBeenCalled();
+    expect(navigation.goBack).not.toHaveBeenCalled();
+    expect(navigation.replace).toHaveBeenCalledWith('RobotaxiPrototype');
+  });
+
+  it('shows chat load failures as an error state instead of an empty conversation', async () => {
+    const loadChatSession = jest.fn().mockRejectedValue(new Error('socket down'));
+    usePrototypeRideRuntime.mockReturnValue({
+      loadChatSession,
+      sendChatMessage: jest.fn(),
+      chatMessages: [],
+      chatLoading: false,
+      chatSending: false,
+      chatError: 'Serviço de chat indisponível.',
+    });
+
+    const navigation = { navigate: jest.fn(), canGoBack: jest.fn(() => false), goBack: jest.fn() };
+    const screen = render(
+      <RobotaxiChatScreen
+        navigation={navigation}
+        route={{
+          key: 'chat-test',
+          params: {
+            bookingId: 'booking_1',
+            bookingStatus: 'started',
+            source: 'passenger-trip',
+          },
+        }}
+      />
+    );
+
+    expect(loadChatSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bookingId: 'booking_1',
+        source: 'passenger-trip',
+        bookingStatus: 'started',
+      })
+    );
+
+    expect(screen.getByTestId('prototype-chat-error-state')).toBeTruthy();
+    expect(screen.getByText('Serviço de chat indisponível.')).toBeTruthy();
+    expect(screen.queryByText('Sem mensagens para esta corrida.')).toBeNull();
+    expect(screen.getByTestId('prototype-chat-send-button').props.accessibilityState).toEqual({
+      disabled: true,
+    });
+    expect(screen.getByPlaceholderText('Enviar mensagem...').props.editable).toBe(false);
+
+    fireEvent.press(screen.getByTestId('prototype-chat-retry-button'));
+
+    await waitFor(() => {
+      expect(loadChatSession).toHaveBeenCalledWith(
+        expect.objectContaining({
+          bookingId: 'booking_1',
+          forceReload: true,
+          source: 'passenger-trip',
+        })
+      );
+    });
+
+    fireEvent.press(screen.getByLabelText('robotaxi-chat-close-button'));
+
+    expect(navigation.navigate).toHaveBeenCalledWith(
+      'RobotaxiPrototypeTrip',
+      expect.objectContaining({
+        bookingId: 'booking_1',
+        source: 'passenger-trip',
+        bookingStatus: 'started',
+      })
+    );
+  });
+
+  it('routes completed chat aliases back to receipt with canonical status', () => {
+    const loadChatSession = jest.fn().mockResolvedValue({ messages: [] });
+    usePrototypeRideRuntime.mockReturnValue({
+      loadChatSession,
+      sendChatMessage: jest.fn(),
+      chatMessages: [],
+      chatLoading: false,
+      chatSending: false,
+      chatError: '',
+    });
+
+    const navigation = { navigate: jest.fn(), canGoBack: jest.fn(() => false), goBack: jest.fn() };
+    const screen = render(
+      <RobotaxiChatScreen
+        navigation={navigation}
+        route={{
+          key: 'chat-completed-alias',
+          params: {
+            bookingId: 'booking_1',
+            bookingStatus: 'trip_completed',
+            source: 'passenger-trip',
+          },
+        }}
+      />
+    );
+
+    expect(loadChatSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bookingId: 'booking_1',
+        source: 'passenger-trip',
+        bookingStatus: 'completed',
+      })
+    );
+
+    fireEvent.press(screen.getByLabelText('robotaxi-chat-close-button'));
+
+    expect(navigation.navigate).toHaveBeenCalledWith(
+      'RobotaxiPrototypeReceipt',
+      expect.objectContaining({
+        bookingId: 'booking_1',
+        source: 'passenger-trip',
+        bookingStatus: 'completed',
+      })
+    );
+  });
+
+  it('returns driver ride chat to the current driver home surface', () => {
+    const loadChatSession = jest.fn().mockResolvedValue({ messages: [] });
+    usePrototypeRideRuntime.mockReturnValue({
+      activeRole: 'driver',
+      loadChatSession,
+      sendChatMessage: jest.fn(),
+      chatMessages: [
+        {
+          id: 'driver_message_1',
+          author: 'you',
+          text: 'Cheguei ao embarque',
+          timestamp: '2026-07-13T12:00:00.000Z',
+        },
+      ],
+      chatLoading: false,
+      chatSending: false,
+      chatError: '',
+    });
+
+    const navigation = {
+      navigate: jest.fn(),
+      canGoBack: jest.fn(() => false),
+      goBack: jest.fn(),
+    };
+    const screen = render(
+      <RobotaxiChatScreen
+        navigation={navigation}
+        route={{
+          key: 'driver-chat-current',
+          params: {
+            bookingId: 'booking_driver_chat',
+            bookingStatus: 'started',
+            source: 'driver-home',
+            role: 'driver',
+          },
+        }}
+      />,
+    );
+
+    expect(screen.getByTestId('robotaxi-chat-screen')).toBeTruthy();
+    expect(screen.getByTestId('prototype-chat-message-list')).toBeTruthy();
+    expect(screen.getByTestId('prototype-chat-message-input')).toBeTruthy();
+    expect(screen.getByText('Chat com passageiro')).toBeTruthy();
+    expect(loadChatSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bookingId: 'booking_driver_chat',
+        role: 'driver',
+        source: 'driver-home',
+      }),
+    );
+
+    fireEvent.press(screen.getByLabelText('robotaxi-chat-close-button'));
+
+    expect(navigation.navigate).toHaveBeenCalledWith(
+      'RobotaxiPrototype',
+      expect.objectContaining({
+        bookingId: 'booking_driver_chat',
+        role: 'driver',
+        source: 'driver-home',
+      }),
+    );
   });
 
   it('labels a driver trip gross fallback as bruto instead of líquido', () => {
@@ -598,15 +1800,252 @@ describe('prototype ride screens', () => {
       })
     );
 
-    const navigation = { navigate: jest.fn(), canGoBack: jest.fn(() => false), goBack: jest.fn() };
+    const navigation = {
+      navigate: jest.fn(),
+      replace: jest.fn(),
+      canGoBack: jest.fn(() => false),
+      goBack: jest.fn(),
+    };
     const screen = render(
       <RobotaxiDriverTripScreen navigation={navigation} route={{ params: {} }} />
     );
 
+    expect(screen.queryByText('R$ 38,40')).toBeNull();
+    fireEvent.press(screen.getByTestId('driver-trip-more-actions-button'));
     expect(screen.getAllByText('R$ 38,40').length).toBeGreaterThan(0);
     expect(screen.getByText('bruto')).toBeTruthy();
     expect(screen.queryByText('líquido')).toBeNull();
   });
+
+  it.each(['accepted', 'driver_arrived', 'arrived', 'trip_started', 'started', 'operational_interrupted', 'searching_replacement'])(
+    'keeps driver trip state %s from regressing through sheet backdrop actions',
+    (bookingStatus) => {
+      usePrototypeRideRuntime.mockReturnValue(buildDriverRuntime({ bookingStatus }));
+
+      const navigation = { navigate: jest.fn(), replace: jest.fn(), canGoBack: jest.fn(() => true), goBack: jest.fn() };
+      const { getByTestId } = render(
+        <RobotaxiDriverTripScreen navigation={navigation} route={{ params: {} }} />
+      );
+
+      expect(getByTestId('prototype-dismissible-sheet').props.backdropDismissEnabled).toBe(false);
+      expect(getByTestId('prototype-dismissible-sheet').props.dragEnabled).toBe(false);
+      expect(getByTestId('prototype-dismissible-sheet-backdrop').props.pointerEvents).toBe('none');
+
+      fireEvent.press(getByTestId('prototype-dismissible-sheet-backdrop'));
+
+      expect(navigation.goBack).not.toHaveBeenCalled();
+      expect(navigation.replace).not.toHaveBeenCalledWith('RobotaxiPrototype');
+      expect(navigation.navigate).not.toHaveBeenCalledWith('RobotaxiPrototype');
+    }
+  );
+
+  it('keeps driver active trip visible when rehydrated from activeBooking with an active alias status', () => {
+    usePrototypeRideRuntime.mockReturnValue(
+      buildDriverRuntime({
+        bookingStatus: 'in_trip',
+        activeBookingId: 'booking_driver_alias_only',
+        activeBooking: {
+          bookingId: 'booking_driver_alias_only',
+          pickupAddress: 'Carioca Shopping',
+          dropoffAddress: 'Mercadão de Madureira',
+          fare: 38.4,
+          estimatedDriverNetAmount: 31.8,
+          destinationCoordinate: { latitude: -22.9, longitude: -43.17 },
+        },
+        driverActiveRide: null,
+      }),
+    );
+
+    const navigation = {
+      navigate: jest.fn(),
+      replace: jest.fn(),
+      canGoBack: jest.fn(() => true),
+      goBack: jest.fn(),
+    };
+    const screen = render(
+      <RobotaxiDriverTripScreen navigation={navigation} route={{ params: {} }} />,
+    );
+
+    expect(screen.queryByText('Nenhuma corrida ativa')).toBeNull();
+    expect(screen.getByTestId('prototype-dismissible-sheet').props.backdropDismissEnabled).toBe(false);
+    expect(screen.getByTestId('prototype-dismissible-sheet').props.dragEnabled).toBe(false);
+  });
+
+  it('keeps a protected driver trip fail-visible when active status arrives without booking identity', () => {
+    usePrototypeRideRuntime.mockReturnValue(
+      buildDriverRuntime({
+        bookingStatus: 'trip_started',
+        activeBookingId: null,
+        activeBooking: null,
+        driverActiveRide: null,
+        driverTripMeta: null,
+      }),
+    );
+
+    const navigation = {
+      navigate: jest.fn(),
+      replace: jest.fn(),
+      canGoBack: jest.fn(() => true),
+      goBack: jest.fn(),
+    };
+    const screen = render(
+      <RobotaxiDriverTripScreen navigation={navigation} route={{ params: {} }} />,
+    );
+
+    expect(screen.getByTestId('driver-trip-missing-identity-title')).toBeTruthy();
+    expect(screen.getByText('Sincronizando corrida')).toBeTruthy();
+    expect(screen.queryByText('Nenhuma corrida ativa')).toBeNull();
+    expect(screen.getByTestId('driver-trip-missing-identity-button').props.accessibilityState).toEqual({ disabled: true });
+    expect(screen.getByTestId('prototype-dismissible-sheet').props.backdropDismissEnabled).toBe(false);
+    expect(screen.getByTestId('prototype-dismissible-sheet').props.dragEnabled).toBe(false);
+
+    fireEvent.press(screen.getByTestId('prototype-dismissible-sheet-backdrop'));
+
+    expect(navigation.goBack).not.toHaveBeenCalled();
+    expect(navigation.navigate).not.toHaveBeenCalledWith('RobotaxiPrototype');
+  });
+
+  it('keeps a protected passenger trip fail-visible when active status arrives without ride identity', () => {
+    usePrototypeRideRuntime.mockReturnValue(
+      buildPassengerRuntime({
+        bookingStatus: 'trip_started',
+        activeBookingId: null,
+        activeBooking: null,
+        driverActiveRide: null,
+        driverInfo: null,
+      }),
+    );
+
+    const navigation = {
+      navigate: jest.fn(),
+      replace: jest.fn(),
+      canGoBack: jest.fn(() => true),
+      goBack: jest.fn(),
+    };
+    const screen = render(
+      <RobotaxiTripScreen navigation={navigation} route={{ params: {} }} />,
+    );
+
+    expect(screen.getByTestId('passenger-trip-missing-identity-title')).toBeTruthy();
+    expect(screen.getByText('Validando dados do motorista')).toBeTruthy();
+    expect(screen.queryByTestId('passenger-trip-driver-identity')).toBeNull();
+    expect(screen.queryByTestId('passenger-trip-message-button')).toBeNull();
+    expect(screen.queryByTestId('passenger-trip-cancel-button')).toBeNull();
+    expect(screen.getByTestId('passenger-trip-missing-identity-button').props.accessibilityState).toEqual({ disabled: true });
+    expect(screen.getByTestId('prototype-dismissible-sheet').props.backdropDismissEnabled).toBe(false);
+    expect(screen.getByTestId('prototype-dismissible-sheet').props.dragEnabled).toBe(false);
+
+    fireEvent.press(screen.getByTestId('prototype-dismissible-sheet-backdrop'));
+
+    expect(navigation.goBack).not.toHaveBeenCalled();
+    expect(navigation.navigate).not.toHaveBeenCalledWith('RobotaxiPrototype');
+  });
+
+  it('does not regress the driver trip surface when the ride payload status is stale', () => {
+    usePrototypeRideRuntime.mockReturnValue(
+      buildDriverRuntime({
+        bookingStatus: 'started',
+        driverActiveRide: {
+          bookingId: 'booking_started_with_stale_payload',
+          status: 'accepted',
+          pickupAddress: 'Carioca Shopping',
+          dropoffAddress: 'Mercadão de Madureira',
+          fare: 38.4,
+          estimatedDriverNetAmount: 31.8,
+          destinationCoordinate: { latitude: -22.9, longitude: -43.17 },
+        },
+      }),
+    );
+
+    const navigation = {
+      navigate: jest.fn(),
+      replace: jest.fn(),
+      canGoBack: jest.fn(() => true),
+      goBack: jest.fn(),
+    };
+    const screen = render(
+      <RobotaxiDriverTripScreen navigation={navigation} route={{ params: {} }} />,
+    );
+
+    expect(screen.getByText('A caminho de Aeroporto Santos Dumont')).toBeTruthy();
+    expect(screen.getByTestId('driver-trip-route-progress')).toBeTruthy();
+    expect(screen.getByLabelText('driver-live-primary-action-complete-button')).toBeTruthy();
+    expect(screen.queryByLabelText('driver-live-primary-action-arrive-button')).toBeNull();
+  });
+
+  it.each(['accepted', 'arrived', 'started', 'operational_interrupted', 'searching_replacement'])(
+    'blocks navigator removal while the driver trip is %s',
+    (bookingStatus) => {
+      let beforeRemoveListener = null;
+      const unsubscribe = jest.fn();
+      const navigation = {
+        navigate: jest.fn(),
+        replace: jest.fn(),
+        canGoBack: jest.fn(() => true),
+        goBack: jest.fn(),
+        addListener: jest.fn((eventName, listener) => {
+          if (eventName === 'beforeRemove') {
+            beforeRemoveListener = listener;
+          }
+          return unsubscribe;
+        }),
+      };
+      usePrototypeRideRuntime.mockReturnValue(
+        buildDriverRuntime({ bookingStatus }),
+      );
+
+      const screen = render(
+        <RobotaxiDriverTripScreen navigation={navigation} route={{ params: {} }} />,
+      );
+      const event = { preventDefault: jest.fn() };
+
+      expect(navigation.addListener).toHaveBeenCalledWith(
+        'beforeRemove',
+        expect.any(Function),
+      );
+      expect(beforeRemoveListener).toEqual(expect.any(Function));
+      beforeRemoveListener(event);
+
+      expect(event.preventDefault).toHaveBeenCalledTimes(1);
+      expect(navigation.goBack).not.toHaveBeenCalled();
+      screen.unmount();
+      expect(unsubscribe).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it.each([
+    ['operational_interrupted', 'Corrida interrompida'],
+    ['searching_replacement', 'Continuidade em andamento'],
+  ])(
+    'keeps the driver on a protected holding surface during %s',
+    (bookingStatus, expectedTitle) => {
+      usePrototypeRideRuntime.mockReturnValue(
+        buildDriverRuntime({
+          bookingStatus,
+          operationalContinuation: {
+            message: 'Aguardando a confirmação canônica da corrida.',
+          },
+        }),
+      );
+      const navigation = {
+        navigate: jest.fn(),
+        replace: jest.fn(),
+        canGoBack: jest.fn(() => true),
+        goBack: jest.fn(),
+      };
+
+      const screen = render(
+        <RobotaxiDriverTripScreen navigation={navigation} route={{ params: {} }} />,
+      );
+
+      expect(screen.getByTestId('driver-trip-operational-hold-title')).toHaveTextContent(expectedTitle);
+      expect(screen.getByText('Aguardando a confirmação canônica da corrida.')).toBeTruthy();
+      expect(screen.getByTestId('driver-trip-operational-hold-button').props.accessibilityState.disabled).toBe(true);
+      expect(screen.queryByText('Nenhuma corrida ativa')).toBeNull();
+      expect(screen.getByTestId('prototype-dismissible-sheet').props.backdropDismissEnabled).toBe(false);
+      expect(screen.getByTestId('prototype-dismissible-sheet').props.dragEnabled).toBe(false);
+    },
+  );
 
   it('moves the passenger trip surface to receipt when the trip is completed', async () => {
     usePrototypeRideRuntime.mockReturnValue(buildPassengerRuntime({ bookingStatus: 'completed' }));
@@ -615,7 +2054,86 @@ describe('prototype ride screens', () => {
     render(<RobotaxiTripScreen navigation={navigation} route={{ params: {} }} />);
 
     await waitFor(() => {
-      expect(navigation.replace).toHaveBeenCalledWith('RobotaxiPrototypeReceipt', { fromTrip: true });
+      expect(navigation.replace).toHaveBeenCalledWith(
+        'RobotaxiPrototypeReceipt',
+        expect.objectContaining({
+          bookingId: 'booking_1',
+          fare: 38.4,
+          fromTrip: true,
+          grossAmount: 38.4,
+        }),
+      );
+    });
+  });
+
+  it('moves the passenger trip surface to receipt when completion arrives as an alias', async () => {
+    usePrototypeRideRuntime.mockReturnValue(buildPassengerRuntime({ bookingStatus: 'TRIP_COMPLETED' }));
+
+    const navigation = { navigate: jest.fn(), replace: jest.fn(), canGoBack: jest.fn(() => false), goBack: jest.fn() };
+    render(<RobotaxiTripScreen navigation={navigation} route={{ params: {} }} />);
+
+    await waitFor(() => {
+      expect(navigation.replace).toHaveBeenCalledWith(
+        'RobotaxiPrototypeReceipt',
+        expect.objectContaining({
+          bookingId: 'booking_1',
+          fare: 38.4,
+          fromTrip: true,
+          grossAmount: 38.4,
+        }),
+      );
+    });
+  });
+
+  it('replaces the completed driver trip surface with its receipt', async () => {
+    usePrototypeRideRuntime.mockReturnValue(
+      buildDriverRuntime({ bookingStatus: 'completed' }),
+    );
+    const navigation = {
+      navigate: jest.fn(),
+      replace: jest.fn(),
+      canGoBack: jest.fn(() => true),
+      goBack: jest.fn(),
+    };
+
+    render(<RobotaxiDriverTripScreen navigation={navigation} route={{ params: {} }} />);
+
+    await waitFor(() => {
+      expect(navigation.replace).toHaveBeenCalledWith(
+        'RobotaxiPrototypeReceipt',
+        expect.objectContaining({
+          bookingId: 'booking_1',
+          fromTrip: true,
+        }),
+      );
+      expect(navigation.navigate).not.toHaveBeenCalledWith(
+        'RobotaxiPrototypeReceipt',
+        expect.any(Object),
+      );
+    });
+  });
+
+  it('replaces the completed driver trip surface with its receipt when completion arrives as an alias', async () => {
+    usePrototypeRideRuntime.mockReturnValue(
+      buildDriverRuntime({ bookingStatus: 'early_ended_by_rider' }),
+    );
+    const navigation = {
+      navigate: jest.fn(),
+      replace: jest.fn(),
+      canGoBack: jest.fn(() => true),
+      goBack: jest.fn(),
+    };
+
+    render(<RobotaxiDriverTripScreen navigation={navigation} route={{ params: {} }} />);
+
+    await waitFor(() => {
+      expect(navigation.replace).toHaveBeenCalledWith(
+        'RobotaxiPrototypeReceipt',
+        expect.objectContaining({
+          bookingId: 'booking_1',
+          fromTrip: true,
+        }),
+      );
     });
   });
 
@@ -635,6 +2153,34 @@ describe('prototype ride screens', () => {
     expect(navigation.goBack).not.toHaveBeenCalled();
     expect(navigation.navigate).not.toHaveBeenCalledWith('RobotaxiPrototype');
   });
+
+  it.each(['accepted', 'arrived', 'started', 'operational_interrupted', 'searching_replacement'])(
+    'keeps passenger trip state %s from regressing when the map itself is tapped',
+    (bookingStatus) => {
+      usePrototypeRideRuntime.mockReturnValue(buildPassengerRuntime({ bookingStatus }));
+
+      const navigation = {
+        navigate: jest.fn(),
+        replace: jest.fn(),
+        canGoBack: jest.fn(() => true),
+        goBack: jest.fn(),
+      };
+      const screen = render(
+        <RobotaxiTripScreen navigation={navigation} route={{ params: {} }} />
+      );
+
+      fireEvent.press(screen.getByTestId('prototype-map-view'));
+
+      expect(screen.getByLabelText('passenger-trip-screen')).toBeTruthy();
+      expect(screen.queryByTestId('passenger-home-destination-input')).toBeNull();
+      expect(navigation.goBack).not.toHaveBeenCalled();
+      expect(navigation.navigate).not.toHaveBeenCalledWith('RobotaxiPrototype');
+      expect(navigation.replace).not.toHaveBeenCalledWith(
+        'RobotaxiPrototype',
+        expect.any(Object),
+      );
+    }
+  );
 
   it('shows a passenger ride sync warning without dismissing the active trip surface', () => {
     usePrototypeRideRuntime.mockReturnValue(
@@ -657,6 +2203,28 @@ describe('prototype ride screens', () => {
     expect(screen.getByLabelText('passenger-trip-screen')).toBeTruthy();
   });
 
+  it('shows a passenger driver signal warning without dismissing the active trip surface', () => {
+    usePrototypeRideRuntime.mockReturnValue(
+      buildPassengerRuntime({
+        bookingStatus: 'started',
+        driverLocationHeartbeat: {
+          bookingId: 'booking_1',
+          lastReceivedAt: Date.now() - 76000,
+          stale: true,
+          ageSeconds: 76,
+        },
+      })
+    );
+
+    const navigation = { navigate: jest.fn(), replace: jest.fn(), canGoBack: jest.fn(() => true), goBack: jest.fn() };
+    const screen = render(<RobotaxiTripScreen navigation={navigation} route={{ params: {} }} />);
+
+    expect(screen.getByTestId('passenger-trip-driver-signal-pill')).toBeTruthy();
+    expect(screen.getByText('Sinal do motorista instável')).toBeTruthy();
+    expect(screen.getByText('Última localização há 1 min. Mantendo o último ponto confirmado.')).toBeTruthy();
+    expect(screen.getByLabelText('passenger-trip-screen')).toBeTruthy();
+  });
+
   it('shows a driver ride sync warning on an active lifecycle state', () => {
     usePrototypeRideRuntime.mockReturnValue(
       buildDriverRuntime({
@@ -675,6 +2243,40 @@ describe('prototype ride screens', () => {
     expect(screen.getByTestId('driver-trip-local-sync-pill')).toBeTruthy();
     expect(screen.getByText('Sem conexão')).toBeTruthy();
     expect(screen.getByLabelText('driver-live-trip-screen')).toBeTruthy();
+  });
+
+  it('keeps the driver active trip surface during partial ride rehydration', () => {
+    usePrototypeRideRuntime.mockReturnValue(
+      buildDriverRuntime({
+        bookingStatus: 'started',
+        activeBookingId: 'booking_partial',
+        driverActiveRide: null,
+        activeBooking: {
+          bookingId: 'booking_partial',
+          pickupAddress: 'Rua A, 10',
+          dropoffAddress: 'Aeroporto Santos Dumont',
+          customerName: 'Passageira Leaf',
+          grossFare: 38.4,
+          estimatedDriverNetAmount: 31.8,
+          tripDistanceKm: 8.2,
+          tripDurationMin: 14,
+        },
+        selectedDestination: {
+          name: 'Aeroporto Santos Dumont',
+          coordinate: { latitude: -22.9, longitude: -43.17 },
+        },
+      })
+    );
+
+    const navigation = { navigate: jest.fn(), replace: jest.fn(), canGoBack: jest.fn(() => true), goBack: jest.fn() };
+    const screen = render(<RobotaxiDriverTripScreen navigation={navigation} route={{ params: {} }} />);
+
+    expect(screen.getByLabelText('driver-live-trip-screen')).toBeTruthy();
+    expect(screen.queryByText('Nenhuma corrida ativa')).toBeNull();
+    expect(screen.getByText('A caminho de Aeroporto Santos Dumont')).toBeTruthy();
+    expect(screen.getByLabelText('driver-live-primary-action-complete-button')).toBeTruthy();
+    expect(screen.getByTestId('prototype-dismissible-sheet').props.backdropDismissEnabled).toBe(false);
+    expect(screen.getByTestId('prototype-dismissible-sheet').props.dragEnabled).toBe(false);
   });
 
   it.each(['accepted', 'arrived', 'started'])(
@@ -699,33 +2301,819 @@ describe('prototype ride screens', () => {
     }
   );
 
+  it.each(['accepted', 'arrived', 'started', 'operational_interrupted', 'searching_replacement'])(
+    'blocks navigator removal while the passenger trip is %s',
+    (bookingStatus) => {
+      let beforeRemoveListener = null;
+      const unsubscribe = jest.fn();
+      const navigation = {
+        navigate: jest.fn(),
+        replace: jest.fn(),
+        canGoBack: jest.fn(() => true),
+        goBack: jest.fn(),
+        addListener: jest.fn((eventName, listener) => {
+          if (eventName === 'beforeRemove') {
+            beforeRemoveListener = listener;
+          }
+          return unsubscribe;
+        }),
+      };
+      usePrototypeRideRuntime.mockReturnValue(
+        buildPassengerRuntime({ bookingStatus }),
+      );
+
+      const screen = render(
+        <RobotaxiTripScreen navigation={navigation} route={{ params: {} }} />,
+      );
+      const event = { preventDefault: jest.fn() };
+
+      expect(navigation.addListener).toHaveBeenCalledWith(
+        'beforeRemove',
+        expect.any(Function),
+      );
+      expect(beforeRemoveListener).toEqual(expect.any(Function));
+      beforeRemoveListener(event);
+
+      expect(event.preventDefault).toHaveBeenCalledTimes(1);
+      expect(navigation.goBack).not.toHaveBeenCalled();
+      screen.unmount();
+      expect(unsubscribe).toHaveBeenCalledTimes(1);
+    },
+  );
+
   it('renders the passenger trip as a compact summary while the driver is on the way', () => {
     usePrototypeRideRuntime.mockReturnValue(buildPassengerRuntime({ bookingStatus: 'accepted' }));
 
-    const navigation = { navigate: jest.fn(), canGoBack: jest.fn(() => false), goBack: jest.fn() };
+    const navigation = {
+      navigate: jest.fn(),
+      replace: jest.fn(),
+      canGoBack: jest.fn(() => false),
+      goBack: jest.fn(),
+    };
     const screen = render(<RobotaxiTripScreen navigation={navigation} route={{ params: {} }} />);
 
     expect(screen.getByLabelText('passenger-trip-compact-summary')).toBeTruthy();
-    expect(screen.getByText('14 min até chegar')).toBeTruthy();
-    expect(screen.getByText('Motorista está a caminho')).toBeTruthy();
+    expect(screen.getAllByText('14 min').length).toBeGreaterThan(0);
+    expect(screen.getByText('até chegar')).toBeTruthy();
+    expect(screen.getByText('MOTORISTA A CAMINHO')).toBeTruthy();
     expect(screen.getByText('Motorista Leaf')).toBeTruthy();
     expect(screen.getByText('LEF-2042')).toBeTruthy();
     expect(screen.getByText('Leaf Plus')).toBeTruthy();
     expect(screen.getByText('Cor não informada')).toBeTruthy();
     expect(screen.getByText('8 km até o embarque')).toBeTruthy();
-    expect(screen.getByText('Rua A, 10')).toBeTruthy();
-    expect(screen.getByText('Aeroporto Santos Dumont')).toBeTruthy();
-    expect(screen.getByLabelText('Mensagem')).toBeTruthy();
-    expect(screen.getByLabelText('Ligar')).toBeTruthy();
-    expect(screen.getByText('Compartilhar')).toBeTruthy();
-    expect(screen.getByLabelText('Cancelar corrida')).toBeTruthy();
-    expect(screen.queryByText('Cancelar corrida')).toBeNull();
+    expect(screen.getByText('Rua A')).toBeTruthy();
+    expect(
+      screen.queryByTestId(
+        'ride-card-field-passenger-passenger_driver_accepted-destination_address',
+      ),
+    ).toBeNull();
+    expect(screen.queryByLabelText('Mensagem')).toBeNull();
+    expect(screen.getByLabelText('Mais opções')).toBeTruthy();
+    expect(screen.queryByLabelText('Segurança')).toBeNull();
+    expect(screen.queryByLabelText('Ligar')).toBeNull();
+    expect(screen.queryByLabelText('Cancelar corrida')).toBeNull();
+
+    fireEvent.press(screen.getByTestId('passenger-trip-accepted-more-options-button'));
+    expect(screen.getByLabelText('passenger-trip-collapse-button')).toBeTruthy();
+    expect(screen.getByLabelText('SOS')).toBeTruthy();
+    expect(
+      screen.getByTestId(
+        'ride-card-field-passenger-passenger_driver_accepted-destination_address',
+      ),
+    ).toBeTruthy();
+    expect(screen.getByLabelText('Compartilhar viagem')).toBeTruthy();
+    expect(screen.getByText('Cancelar corrida')).toBeTruthy();
   });
 
-  it('keeps the started passenger trip compact with visible route progress and icon-only actions', () => {
-    usePrototypeRideRuntime.mockReturnValue(buildPassengerRuntime({ bookingStatus: 'started' }));
+  it.each(['accepted', 'arrived', 'started', 'operational_interrupted', 'searching_replacement'])(
+    'keeps the active passenger map interactive and padded above the sheet in %s',
+    (bookingStatus) => {
+      const shortRouteCoordinates = [
+        { latitude: -22.9836, longitude: -43.2192 },
+        { latitude: -22.98395, longitude: -43.22015 },
+        { latitude: -22.9844, longitude: -43.2211 },
+        { latitude: -22.98488, longitude: -43.22215 },
+      ];
+      const isPickupPhase = bookingStatus === 'accepted' || bookingStatus === 'arrived';
+      usePrototypeRideRuntime.mockReturnValue(
+        buildPassengerRuntime({
+          bookingStatus,
+          driverCoordinate: shortRouteCoordinates[0],
+          driverInfo: {
+            id: 'driver_1',
+            name: 'Motorista Leaf',
+            coordinate: shortRouteCoordinates[0],
+          },
+          selectedDestination: {
+            name: 'Aeroporto Santos Dumont',
+            address: 'Centro, Rio de Janeiro',
+            coordinate: shortRouteCoordinates[shortRouteCoordinates.length - 1],
+          },
+          activeBooking: {
+            driverDistanceToPickupKm: 0.7,
+            estimatedArrivalToPickupMin: 4,
+            pickupLocation: isPickupPhase
+              ? shortRouteCoordinates[shortRouteCoordinates.length - 1]
+              : shortRouteCoordinates[0],
+            destinationLocation: shortRouteCoordinates[shortRouteCoordinates.length - 1],
+            driverToPickupRouteCoordinates: shortRouteCoordinates,
+            routeCoordinates: shortRouteCoordinates,
+          },
+        }),
+      );
+
+      const navigation = { navigate: jest.fn(), canGoBack: jest.fn(() => false), goBack: jest.fn() };
+      const screen = render(<RobotaxiTripScreen navigation={navigation} route={{ params: {} }} />);
+      const mapWidth = 360;
+      const mapHeight = 640;
+      const mapView = screen.getByTestId('prototype-map-view');
+      fireEvent(mapView, 'layout', {
+        nativeEvent: { layout: { width: mapWidth, height: mapHeight } },
+      });
+      const measuredMapView = screen.getByTestId('prototype-map-view');
+
+      expect(measuredMapView.props.scrollEnabled).toBe(true);
+      expect(measuredMapView.props.zoomEnabled).toBe(true);
+      expect(measuredMapView.props.rotateEnabled).toBe(true);
+      expect(measuredMapView.props.mapPadding.top).toBeGreaterThanOrEqual(72);
+      expect(measuredMapView.props.mapPadding.bottom).toBeGreaterThanOrEqual(300);
+      expectRouteInsideVisibleMapViewport({
+        coordinates: shortRouteCoordinates,
+        mapView: measuredMapView,
+        mapWidth,
+        mapHeight,
+      });
+	    }
+	  );
+
+  it('caps tall active passenger sheets before they can hide the route viewport', () => {
+    const shortRouteCoordinates = [
+      { latitude: -22.9836, longitude: -43.2192 },
+      { latitude: -22.98395, longitude: -43.22015 },
+      { latitude: -22.9844, longitude: -43.2211 },
+      { latitude: -22.98488, longitude: -43.22215 },
+    ];
+    usePrototypeRideRuntime.mockReturnValue(
+      buildPassengerRuntime({
+        bookingStatus: 'operational_interrupted',
+        driverCoordinate: shortRouteCoordinates[0],
+        selectedDestination: {
+          name: 'Aeroporto Santos Dumont',
+          address: 'Centro, Rio de Janeiro',
+          coordinate: shortRouteCoordinates[shortRouteCoordinates.length - 1],
+        },
+        activeBooking: {
+          bookingId: 'booking_passenger_tall_sheet',
+          pickupLocation: shortRouteCoordinates[0],
+          destinationLocation: shortRouteCoordinates[shortRouteCoordinates.length - 1],
+          routeCoordinates: shortRouteCoordinates,
+        },
+        operationalContinuation: {
+          status: 'passenger_decision_pending',
+          bookingId: 'booking_passenger_tall_sheet',
+          message: 'Aguardando decisão do passageiro.',
+        },
+      }),
+    );
 
     const navigation = { navigate: jest.fn(), canGoBack: jest.fn(() => false), goBack: jest.fn() };
+    const screen = render(<RobotaxiTripScreen navigation={navigation} route={{ params: {} }} />);
+    const mapWidth = 360;
+    const mapHeight = 640;
+    const mapView = screen.getByTestId('prototype-map-view');
+    fireEvent(mapView, 'layout', {
+      nativeEvent: { layout: { width: mapWidth, height: mapHeight } },
+    });
+    fireEvent(screen.getByTestId('passenger-trip-screen'), 'layout', {
+      nativeEvent: { layout: { width: mapWidth, height: 560 } },
+    });
+
+    const measuredMapView = screen.getByTestId('prototype-map-view');
+    expect(measuredMapView.props.mapPadding.bottom).toBeLessThanOrEqual(420);
+    expectRouteInsideVisibleMapViewport({
+      coordinates: shortRouteCoordinates,
+      mapView: measuredMapView,
+      mapWidth,
+      mapHeight,
+    });
+  });
+
+  it('keeps the operational passenger decision compact with canonical driver identity and one primary action', () => {
+    usePrototypeRideRuntime.mockReturnValue(
+      buildPassengerRuntime({
+        bookingStatus: 'operational_interrupted',
+        driverInfo: {
+          id: 'driver_operational',
+          name: 'Carlos Almeida',
+          model: 'Toyota Corolla',
+          plate: 'RIO-7A21',
+          color: 'Prata',
+          rating: 4.9,
+        },
+        operationalContinuation: {
+          status: 'passenger_decision_pending',
+          bookingId: 'booking_operational_decision',
+          message: 'Seu motorista não consegue continuar. Deseja seguir com outro parceiro?',
+          pickupLocation: { add: 'Av. Atlântica, 1000' },
+          estimatedRefund: 8.2,
+          remainingReservedAmount: 12.4,
+        },
+      }),
+    );
+    const navigation = {
+      navigate: jest.fn(),
+      replace: jest.fn(),
+      canGoBack: jest.fn(() => false),
+      goBack: jest.fn(),
+    };
+
+    const screen = render(
+      <RobotaxiTripScreen
+        navigation={navigation}
+        route={{
+          params: {
+            driverName: 'Motorista Leaf',
+            vehicleModel: 'Leaf Plus',
+            vehiclePlate: 'Placa não informada',
+          },
+        }}
+      />,
+    );
+
+    expect(screen.getByTestId('passenger-trip-compact-summary')).toBeTruthy();
+    expect(screen.getByTestId('passenger-trip-operational-title')).toHaveTextContent(
+      'Como deseja continuar?',
+    );
+    expect(screen.getByText('Carlos Almeida')).toBeTruthy();
+    expect(screen.getByText('RIO-7A21')).toBeTruthy();
+    expect(screen.getByTestId('passenger-trip-operational-continue-button')).toBeTruthy();
+    expect(screen.queryByTestId('passenger-trip-operational-end-button')).toBeNull();
+
+    fireEvent.press(screen.getByTestId('passenger-trip-operational-details-button'));
+
+    expect(screen.getByTestId('passenger-trip-operational-expanded-summary')).toBeTruthy();
+    expect(screen.getByTestId('passenger-trip-operational-end-button')).toBeTruthy();
+    expect(screen.getAllByText('Carlos Almeida').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('RIO-7A21').length).toBeGreaterThan(0);
+  });
+
+  it('does not render a synthetic active passenger route while waiting for canonical route coordinates', () => {
+    usePrototypeRideRuntime.mockReturnValue(
+      buildPassengerRuntime({
+        bookingStatus: 'accepted',
+        currentCoordinate: { latitude: -22.881, longitude: -43.343 },
+        driverInfo: {
+          id: 'driver_1',
+          name: 'Motorista Leaf',
+          coordinate: { latitude: -22.882, longitude: -43.344 },
+        },
+        activeBooking: {
+          pickupLocation: { latitude: -22.883, longitude: -43.345 },
+          driverDistanceToPickupKm: 0.7,
+          estimatedArrivalToPickupMin: 4,
+        },
+      }),
+    );
+
+    const navigation = {
+      navigate: jest.fn(),
+      replace: jest.fn(),
+      canGoBack: jest.fn(() => false),
+      goBack: jest.fn(),
+    };
+    const screen = render(<RobotaxiTripScreen navigation={navigation} route={{ params: {} }} />);
+    const mapView = screen.getByTestId('prototype-map-view');
+
+    expect(mapView.props.routeCoordinates).toEqual([]);
+    expect(mapView.props.routeViewportRegion).toBeNull();
+    expect(mapView.props.showTraffic).toBe(false);
+  });
+
+  it.each([0, 1])(
+    'rejects synthetic passenger route fixture %s before it reaches the map polyline',
+    (fixtureIndex) => {
+      const origin = { latitude: -22.9836, longitude: -43.2192 };
+      const destination = { latitude: -22.98488, longitude: -43.22215 };
+      const routeCoordinates = buildSyntheticActiveRouteFixtures(
+        origin,
+        destination,
+      )[fixtureIndex];
+      usePrototypeRideRuntime.mockReturnValue(
+        buildPassengerRuntime({
+          bookingStatus: 'accepted',
+          driverCoordinate: origin,
+          driverInfo: {
+            id: 'driver_1',
+            name: 'Motorista Leaf',
+            coordinate: origin,
+          },
+          activeBooking: {
+            pickupLocation: destination,
+            driverToPickupRouteCoordinates: routeCoordinates,
+            driverToPickupTrafficSegments: [{
+              level: 'heavy',
+              coordinates: routeCoordinates,
+            }],
+          },
+        }),
+      );
+
+      const screen = render(
+        <RobotaxiTripScreen
+          navigation={{ navigate: jest.fn(), replace: jest.fn(), canGoBack: jest.fn(() => false), goBack: jest.fn() }}
+          route={{ params: {} }}
+        />,
+      );
+      const mapView = screen.getByTestId('prototype-map-view');
+
+      expect(mapView.props.routeCoordinates).toEqual([]);
+      expect(mapView.props.routeTrafficSegments).toEqual([]);
+      expect(mapView.props.showTraffic).toBe(false);
+    },
+  );
+
+  it('passes canonical traffic-colored route segments to the active passenger map', () => {
+    const routeCoordinates = [
+      { latitude: -22.881, longitude: -43.343 },
+      { latitude: -22.882, longitude: -43.344 },
+      { latitude: -22.883, longitude: -43.345 },
+    ];
+    const routeTrafficSegments = [
+      {
+        level: 'moderate',
+        color: '#F59E0B',
+        coordinates: [routeCoordinates[0], routeCoordinates[1]],
+      },
+      {
+        level: 'heavy',
+        color: '#DC2626',
+        coordinates: [routeCoordinates[1], routeCoordinates[2]],
+      },
+    ];
+    usePrototypeRideRuntime.mockReturnValue(
+      buildPassengerRuntime({
+        bookingStatus: 'accepted',
+        driverCoordinate: routeCoordinates[0],
+        driverInfo: {
+          id: 'driver_1',
+          name: 'Motorista Leaf',
+          coordinate: routeCoordinates[0],
+        },
+        activeBooking: {
+          pickupLocation: routeCoordinates[routeCoordinates.length - 1],
+          driverToPickupRouteCoordinates: routeCoordinates,
+          driverToPickupTrafficSegments: routeTrafficSegments,
+        },
+      }),
+    );
+
+    const navigation = {
+      navigate: jest.fn(),
+      replace: jest.fn(),
+      canGoBack: jest.fn(() => false),
+      goBack: jest.fn(),
+    };
+    const screen = render(<RobotaxiTripScreen navigation={navigation} route={{ params: {} }} />);
+    const mapView = screen.getByTestId('prototype-map-view');
+
+    expect(mapView.props.routeCoordinates).toEqual(routeCoordinates);
+    expect(mapView.props.routeTrafficSegments).toEqual(routeTrafficSegments);
+    expect(mapView.props.showTraffic).toBe(true);
+    expect(mapView.props.routeViewportRegion).toEqual(expect.objectContaining({
+      latitude: expect.any(Number),
+      longitude: expect.any(Number),
+    }));
+  });
+
+  it('renders and fits the complete sealed STARTED route ahead of a provisional published route', () => {
+    const pickupCoordinate = { latitude: -22.97045, longitude: -43.18276 };
+    const destinationCoordinate = { latitude: -22.9842698, longitude: -43.223168 };
+    const sealedRoute = [
+      pickupCoordinate,
+      { latitude: -22.9718, longitude: -43.1882 },
+      { latitude: -22.9742, longitude: -43.1958 },
+      { latitude: -22.9771, longitude: -43.2035 },
+      { latitude: -22.9804, longitude: -43.2121 },
+      { latitude: -22.9829, longitude: -43.2184 },
+      destinationCoordinate,
+    ];
+    const provisionalPublishedRoute = [
+      pickupCoordinate,
+      { latitude: -22.9706, longitude: -43.1831 },
+      destinationCoordinate,
+    ];
+
+    setPrototypeMapRoute({
+      origin: pickupCoordinate,
+      destination: destinationCoordinate,
+      coordinates: provisionalPublishedRoute,
+    });
+    usePrototypeRideRuntime.mockReturnValue(
+      buildPassengerRuntime({
+        bookingStatus: 'started',
+        currentCoordinate: pickupCoordinate,
+        driverCoordinate: pickupCoordinate,
+        selectedDestination: {
+          name: 'Destino',
+          address: 'Leblon, Rio de Janeiro',
+          coordinate: destinationCoordinate,
+        },
+        activeBooking: {
+          bookingId: 'booking_started_sealed_route',
+          pickupLocation: pickupCoordinate,
+          destinationLocation: destinationCoordinate,
+        },
+        driverTripMeta: {
+          routePlan: {
+            destinationCoordinates: sealedRoute,
+          },
+        },
+      }),
+    );
+
+    const screen = render(
+      <RobotaxiTripScreen
+        navigation={{ navigate: jest.fn(), replace: jest.fn(), canGoBack: jest.fn(() => false), goBack: jest.fn() }}
+        route={{ params: {} }}
+      />,
+    );
+    const initialMapView = screen.getByTestId('prototype-map-view');
+    fireEvent(initialMapView, 'layout', {
+      nativeEvent: { layout: { width: 360, height: 640 } },
+    });
+
+    const measuredMapView = screen.getByTestId('prototype-map-view');
+    expect(measuredMapView.props.routeCoordinates).toEqual(sealedRoute);
+    expect(measuredMapView.props.animateRoute).toBe(false);
+    expectRouteInsideVisibleMapViewport({
+      coordinates: sealedRoute,
+      mapView: measuredMapView,
+      mapWidth: 360,
+      mapHeight: 640,
+    });
+  });
+
+  it('keeps the paid driver offer route inside the visible map viewport above the sheet', () => {
+    const routeCoordinates = [
+      { latitude: -22.881, longitude: -43.343 },
+      { latitude: -22.887, longitude: -43.331 },
+      { latitude: -22.893, longitude: -43.32 },
+    ];
+    usePrototypeRideRuntime.mockReturnValue({
+      currentCoordinate: routeCoordinates[0],
+      driverCoordinate: routeCoordinates[0],
+      driverOffers: [
+        {
+          bookingId: 'booking_offer_route',
+          pickupAddress: 'Carioca Shopping',
+          dropoffAddress: 'Mercadão de Madureira',
+          fare: 38.4,
+          estimatedDriverNetAmount: 31.8,
+          pickupCoordinate: routeCoordinates[routeCoordinates.length - 1],
+          pickupRouteCoordinates: routeCoordinates,
+          distanceKm: 0.7,
+          tripDistanceKm: 8.2,
+          pickupEtaMin: 4,
+          tripDurationMin: 14,
+          pricingSnapshotLocked: true,
+          payout: 'R$ 31,80',
+        },
+      ],
+      driverTripMeta: {},
+      profile: {},
+      acceptDriverOffer: jest.fn(),
+      rejectDriverOffer: jest.fn(),
+      lastError: '',
+    });
+
+    const navigation = {
+      navigate: jest.fn(),
+      replace: jest.fn(),
+      canGoBack: jest.fn(() => false),
+      goBack: jest.fn(),
+    };
+    const screen = render(<RobotaxiDriverOfferScreen navigation={navigation} route={{ params: {} }} />);
+    const mapView = screen.getByTestId('prototype-map-view');
+
+    expect(mapView.props.routeCoordinates).toEqual(routeCoordinates);
+    expect(mapView.props.routeViewportRegion).toEqual(expect.objectContaining({
+      latitude: expect.any(Number),
+      longitude: expect.any(Number),
+    }));
+    expect(mapView.props.mapPadding.top).toBeGreaterThanOrEqual(72);
+    expect(mapView.props.mapPadding.bottom).toBeGreaterThan(300);
+    expect(mapView.props.scrollEnabled).toBe(false);
+  });
+
+  it('recalculates the paid driver offer route viewport from the measured map layout', () => {
+    const routeCoordinates = [
+      { latitude: -22.881, longitude: -43.343 },
+      { latitude: -22.887, longitude: -43.331 },
+      { latitude: -22.893, longitude: -43.32 },
+    ];
+    usePrototypeRideRuntime.mockReturnValue({
+      currentCoordinate: routeCoordinates[0],
+      driverCoordinate: routeCoordinates[0],
+      driverOffers: [
+        {
+          bookingId: 'booking_offer_measured_route',
+          pickupAddress: 'Carioca Shopping',
+          dropoffAddress: 'Mercadão de Madureira',
+          fare: 38.4,
+          estimatedDriverNetAmount: 31.8,
+          pickupCoordinate: routeCoordinates[routeCoordinates.length - 1],
+          pickupRouteCoordinates: routeCoordinates,
+          distanceKm: 0.7,
+          tripDistanceKm: 8.2,
+          pickupEtaMin: 4,
+          tripDurationMin: 14,
+          pricingSnapshotLocked: true,
+          payout: 'R$ 31,80',
+        },
+      ],
+      driverTripMeta: {},
+      profile: {},
+      acceptDriverOffer: jest.fn(),
+      rejectDriverOffer: jest.fn(),
+      lastError: '',
+    });
+
+    const navigation = {
+      navigate: jest.fn(),
+      replace: jest.fn(),
+      canGoBack: jest.fn(() => false),
+      goBack: jest.fn(),
+    };
+    const screen = render(<RobotaxiDriverOfferScreen navigation={navigation} route={{ params: {} }} />);
+    const initialMapView = screen.getByTestId('prototype-map-view');
+    const initialViewportRegion = initialMapView.props.routeViewportRegion;
+
+    fireEvent(initialMapView, 'layout', {
+      nativeEvent: { layout: { width: 360, height: 640 } },
+    });
+
+    const measuredMapView = screen.getByTestId('prototype-map-view');
+    expect(measuredMapView.props.routeViewportRegion).toEqual(expect.objectContaining({
+      latitude: expect.any(Number),
+      longitude: expect.any(Number),
+    }));
+    expect(measuredMapView.props.routeViewportRegion).not.toEqual(initialViewportRegion);
+    expect(measuredMapView.props.mapPadding.bottom).toBeGreaterThanOrEqual(356);
+    expectRouteInsideVisibleMapViewport({
+      coordinates: routeCoordinates,
+      mapView: measuredMapView,
+      mapWidth: 360,
+      mapHeight: 640,
+    });
+  });
+
+  it('restores the driver in-trip map with canonical route viewport and traffic segments', () => {
+    const routeCoordinates = [
+      { latitude: -22.881, longitude: -43.343 },
+      { latitude: -22.887, longitude: -43.331 },
+      { latitude: -22.9, longitude: -43.17 },
+    ];
+    const routeTrafficSegments = [
+      {
+        level: 'moderate',
+        color: '#F59E0B',
+        coordinates: [routeCoordinates[0], routeCoordinates[1]],
+      },
+      {
+        level: 'heavy',
+        color: '#DC2626',
+        coordinates: [routeCoordinates[1], routeCoordinates[2]],
+      },
+    ];
+    usePrototypeRideRuntime.mockReturnValue(
+      buildDriverRuntime({
+        bookingStatus: 'started',
+        currentCoordinate: routeCoordinates[0],
+        driverCoordinate: routeCoordinates[0],
+        driverActiveRide: {
+          bookingId: 'booking_driver_route',
+          status: 'started',
+          pickupAddress: 'Carioca Shopping',
+          dropoffAddress: 'Mercadão de Madureira',
+          destinationCoordinate: routeCoordinates[routeCoordinates.length - 1],
+          routeCoordinates,
+          routeTrafficSegments,
+          fare: 38.4,
+          estimatedDriverNetAmount: 31.8,
+        },
+        selectedDestination: {
+          name: 'Mercadão de Madureira',
+          coordinate: routeCoordinates[routeCoordinates.length - 1],
+        },
+      }),
+    );
+
+    const navigation = {
+      navigate: jest.fn(),
+      replace: jest.fn(),
+      canGoBack: jest.fn(() => false),
+      goBack: jest.fn(),
+    };
+    const screen = render(<RobotaxiDriverTripScreen navigation={navigation} route={{ params: {} }} />);
+    const mapView = screen.getByTestId('prototype-map-view');
+
+    expect(mapView.props.routeCoordinates).toEqual(routeCoordinates);
+    expect(mapView.props.routeTrafficSegments).toEqual(routeTrafficSegments);
+    expect(mapView.props.showTraffic).toBe(true);
+    expect(mapView.props.routeViewportRegion).toEqual(expect.objectContaining({
+      latitude: expect.any(Number),
+      longitude: expect.any(Number),
+    }));
+    expect(mapView.props.mapPadding.top).toBeGreaterThanOrEqual(72);
+    expect(mapView.props.mapPadding.bottom).toBeGreaterThan(300);
+    expect(mapView.props.scrollEnabled).toBe(true);
+    expect(screen.getByTestId('driver-trip-route-progress')).toBeTruthy();
+  });
+
+  it.each([0, 1])(
+    'rejects synthetic driver route fixture %s before it reaches the map polyline',
+    (fixtureIndex) => {
+      const origin = { latitude: -22.9836, longitude: -43.2192 };
+      const destination = { latitude: -22.98488, longitude: -43.22215 };
+      const routeCoordinates = buildSyntheticActiveRouteFixtures(
+        origin,
+        destination,
+      )[fixtureIndex];
+      usePrototypeRideRuntime.mockReturnValue(
+        buildDriverRuntime({
+          bookingStatus: 'accepted',
+          currentCoordinate: origin,
+          driverCoordinate: origin,
+          driverActiveRide: {
+            bookingId: 'booking_driver_synthetic_route',
+            status: 'accepted',
+            pickupAddress: 'Rua A, 10',
+            dropoffAddress: 'Aeroporto Santos Dumont',
+            pickupCoordinate: destination,
+            pickupRouteCoordinates: routeCoordinates,
+            pickupTrafficSegments: [{
+              level: 'heavy',
+              coordinates: routeCoordinates,
+            }],
+            fare: 38.4,
+            estimatedDriverNetAmount: 31.8,
+          },
+        }),
+      );
+
+      const screen = render(
+        <RobotaxiDriverTripScreen
+          navigation={{ navigate: jest.fn(), replace: jest.fn(), canGoBack: jest.fn(() => false), goBack: jest.fn() }}
+          route={{ params: {} }}
+        />,
+      );
+      const mapView = screen.getByTestId('prototype-map-view');
+
+      expect(mapView.props.routeCoordinates).toEqual([]);
+      expect(mapView.props.routeTrafficSegments).toEqual([]);
+      expect(mapView.props.showTraffic).toBe(false);
+    },
+  );
+
+  it.each(['accepted', 'arrived'])(
+    'keeps the driver-to-pickup route interactive, traffic-colored, and fitted above the sheet in %s',
+    (bookingStatus) => {
+      const pickupRouteCoordinates = [
+        { latitude: -22.881, longitude: -43.343 },
+        { latitude: -22.887, longitude: -43.331 },
+        { latitude: -22.893, longitude: -43.32 },
+      ];
+      const pickupTrafficSegments = [
+        {
+          level: 'moderate',
+          color: '#F59E0B',
+          coordinates: [pickupRouteCoordinates[0], pickupRouteCoordinates[1]],
+        },
+        {
+          level: 'heavy',
+          color: '#DC2626',
+          coordinates: [pickupRouteCoordinates[1], pickupRouteCoordinates[2]],
+        },
+      ];
+      usePrototypeRideRuntime.mockReturnValue(
+        buildDriverRuntime({
+          bookingStatus,
+          currentCoordinate: pickupRouteCoordinates[0],
+          driverCoordinate: pickupRouteCoordinates[0],
+          driverActiveRide: {
+            bookingId: 'booking_driver_pickup_route',
+            status: bookingStatus,
+            pickupAddress: 'Carioca Shopping',
+            dropoffAddress: 'Mercadão de Madureira',
+            pickupCoordinate: pickupRouteCoordinates[pickupRouteCoordinates.length - 1],
+            pickupRouteCoordinates,
+            driverToPickupTrafficSegments: pickupTrafficSegments,
+            fare: 38.4,
+            estimatedDriverNetAmount: 31.8,
+          },
+        }),
+      );
+
+      const navigation = {
+        navigate: jest.fn(),
+        replace: jest.fn(),
+        canGoBack: jest.fn(() => false),
+        goBack: jest.fn(),
+      };
+      const screen = render(<RobotaxiDriverTripScreen navigation={navigation} route={{ params: {} }} />);
+      const mapView = screen.getByTestId('prototype-map-view');
+      fireEvent(mapView, 'layout', {
+        nativeEvent: { layout: { width: 360, height: 640 } },
+      });
+
+      const measuredMapView = screen.getByTestId('prototype-map-view');
+      expect(measuredMapView.props.routeCoordinates).toEqual(pickupRouteCoordinates);
+      expect(measuredMapView.props.routeTrafficSegments).toEqual(pickupTrafficSegments);
+      expect(measuredMapView.props.showTraffic).toBe(true);
+      expect(measuredMapView.props.scrollEnabled).toBe(true);
+      expect(measuredMapView.props.zoomEnabled).toBe(true);
+      expect(measuredMapView.props.mapPadding.top).toBeGreaterThanOrEqual(72);
+      expect(measuredMapView.props.mapPadding.bottom).toBeGreaterThan(300);
+      expectRouteInsideVisibleMapViewport({
+        coordinates: pickupRouteCoordinates,
+        mapView: measuredMapView,
+        mapWidth: 360,
+        mapHeight: 640,
+      });
+    },
+  );
+
+  it.each(['started', 'operational_interrupted', 'searching_replacement'])(
+    'recalculates the active driver trip route viewport from the measured map layout in %s',
+    (bookingStatus) => {
+    const routeCoordinates = [
+      { latitude: -22.881, longitude: -43.343 },
+      { latitude: -22.887, longitude: -43.331 },
+      { latitude: -22.9, longitude: -43.17 },
+    ];
+    usePrototypeRideRuntime.mockReturnValue(
+      buildDriverRuntime({
+        bookingStatus,
+        currentCoordinate: routeCoordinates[0],
+        driverCoordinate: routeCoordinates[0],
+        driverActiveRide: {
+          bookingId: 'booking_driver_measured_route',
+          status: bookingStatus,
+          pickupAddress: 'Carioca Shopping',
+          dropoffAddress: 'Mercadão de Madureira',
+          destinationCoordinate: routeCoordinates[routeCoordinates.length - 1],
+          routeCoordinates,
+          routeTrafficSegments: [],
+          fare: 38.4,
+          estimatedDriverNetAmount: 31.8,
+        },
+        selectedDestination: {
+          name: 'Mercadão de Madureira',
+          coordinate: routeCoordinates[routeCoordinates.length - 1],
+        },
+      }),
+    );
+
+    const navigation = {
+      navigate: jest.fn(),
+      replace: jest.fn(),
+      canGoBack: jest.fn(() => false),
+      goBack: jest.fn(),
+    };
+    const screen = render(<RobotaxiDriverTripScreen navigation={navigation} route={{ params: {} }} />);
+    const initialMapView = screen.getByTestId('prototype-map-view');
+    const initialViewportRegion = initialMapView.props.routeViewportRegion;
+
+    fireEvent(initialMapView, 'layout', {
+      nativeEvent: { layout: { width: 360, height: 640 } },
+    });
+
+    const measuredMapView = screen.getByTestId('prototype-map-view');
+    expect(measuredMapView.props.routeViewportRegion).toEqual(expect.objectContaining({
+      latitude: expect.any(Number),
+      longitude: expect.any(Number),
+    }));
+    expect(measuredMapView.props.routeViewportRegion).not.toEqual(initialViewportRegion);
+    expect(measuredMapView.props.mapPadding.bottom).toBeGreaterThanOrEqual(318);
+    expect(measuredMapView.props.scrollEnabled).toBe(true);
+    expectRouteInsideVisibleMapViewport({
+      coordinates: routeCoordinates,
+      mapView: measuredMapView,
+      mapWidth: 360,
+      mapHeight: 640,
+    });
+    }
+	  );
+
+  it('keeps the started passenger trip compact with route progress and progressive trip options', () => {
+    usePrototypeRideRuntime.mockReturnValue(buildPassengerRuntime({ bookingStatus: 'started' }));
+
+    const navigation = {
+      navigate: jest.fn(),
+      replace: jest.fn(),
+      canGoBack: jest.fn(() => false),
+      goBack: jest.fn(),
+    };
     const screen = render(<RobotaxiTripScreen navigation={navigation} route={{ params: {} }} />);
 
     expect(screen.getByLabelText('passenger-trip-compact-summary')).toBeTruthy();
@@ -733,13 +3121,16 @@ describe('prototype ride screens', () => {
     expect(mapView.props.scrollEnabled).toBe(true);
     expect(mapView.props.zoomEnabled).toBe(true);
     expect(mapView.props.rotateEnabled).toBe(true);
-    expect(mapView.props.mapPadding.bottom).toBeGreaterThanOrEqual(320);
+    expect(mapView.props.mapPadding.top).toBeGreaterThanOrEqual(72);
+    expect(mapView.props.mapPadding.bottom).toBeGreaterThanOrEqual(420);
     expect(screen.getByTestId('passenger-trip-route-progress')).toBeTruthy();
     expect(screen.getByTestId('passenger-trip-started-action-dock')).toBeTruthy();
-    expect(screen.getByLabelText('Chat')).toBeTruthy();
-    expect(screen.getByLabelText('Compartilhar')).toBeTruthy();
-    expect(screen.getByLabelText('Alterar destino')).toBeTruthy();
-    expect(screen.getByLabelText('Encerrar agora')).toBeTruthy();
+    expect(screen.queryByLabelText('Segurança')).toBeNull();
+    expect(screen.getByLabelText('Mais opções')).toBeTruthy();
+    expect(screen.queryByLabelText('Chat')).toBeNull();
+    expect(screen.queryByLabelText('Compartilhar')).toBeNull();
+    expect(screen.queryByLabelText('Alterar destino')).toBeNull();
+    expect(screen.queryByLabelText('Encerrar agora')).toBeNull();
     expect(screen.queryByLabelText('passenger-trip-collapse-button')).toBeNull();
     expect(screen.getByLabelText('passenger-trip-screen')).toBeTruthy();
     expect(screen.queryByText('Chat')).toBeNull();
@@ -747,6 +3138,24 @@ describe('prototype ride screens', () => {
     expect(screen.queryByText('Compartilhar')).toBeNull();
     expect(screen.queryByText('Alterar destino')).toBeNull();
     expect(screen.queryByText('Encerrar agora')).toBeNull();
+
+    fireEvent.press(screen.getByTestId('passenger-trip-more-actions-button'));
+    expect(screen.getByLabelText('SOS')).toBeTruthy();
+    fireEvent.press(screen.getByLabelText('SOS'));
+    expect(navigation.navigate).toHaveBeenCalledWith(
+      'RobotaxiPrototypeSupport',
+      expect.objectContaining({
+        bookingId: 'booking_1',
+        source: 'passenger-trip',
+        bookingStatus: 'started',
+      })
+    );
+
+    expect(screen.getByLabelText('passenger-trip-collapse-button')).toBeTruthy();
+    expect(screen.getByLabelText('Falar no chat')).toBeTruthy();
+    expect(screen.getByLabelText('Compartilhar viagem')).toBeTruthy();
+    expect(screen.getByLabelText('Alterar destino')).toBeTruthy();
+    expect(screen.getByLabelText('Encerrar corrida')).toBeTruthy();
   });
 
   it('hydrates accepted passenger vehicle and pickup ETA from active ride aliases', () => {
@@ -768,10 +3177,16 @@ describe('prototype ride screens', () => {
       })
     );
 
-    const navigation = { navigate: jest.fn(), canGoBack: jest.fn(() => false), goBack: jest.fn() };
+    const navigation = {
+      navigate: jest.fn(),
+      replace: jest.fn(),
+      canGoBack: jest.fn(() => false),
+      goBack: jest.fn(),
+    };
     const screen = render(<RobotaxiTripScreen navigation={navigation} route={{ params: {} }} />);
 
-    expect(screen.getByText('3 min até o embarque')).toBeTruthy();
+    expect(screen.getAllByText('3 min').length).toBeGreaterThan(0);
+    expect(screen.getByText('até chegar')).toBeTruthy();
     expect(screen.getByText('420 m até o embarque')).toBeTruthy();
     expect(screen.getByText('RJA2D41')).toBeTruthy();
     expect(screen.getByText('Honda City')).toBeTruthy();
@@ -791,10 +3206,39 @@ describe('prototype ride screens', () => {
       })
     );
 
-    const navigation = { navigate: jest.fn(), canGoBack: jest.fn(() => false), goBack: jest.fn() };
+    const navigation = {
+      navigate: jest.fn(),
+      replace: jest.fn(),
+      canGoBack: jest.fn(() => false),
+      goBack: jest.fn(),
+    };
     const screen = render(<RobotaxiTripScreen navigation={navigation} route={{ params: {} }} />);
 
-    expect(screen.getAllByText('3 min até o embarque').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('3 min').length).toBeGreaterThan(0);
+    expect(screen.queryByText('8 km até o embarque')).toBeNull();
+  });
+
+  it('renders zero pickup distance without falling back to the full trip distance', () => {
+    usePrototypeRideRuntime.mockReturnValue(
+      buildPassengerRuntime({
+        bookingStatus: 'accepted',
+        tripDistanceKm: 8,
+        activeBooking: {
+          driverDistanceToPickupKm: 0,
+          estimatedArrivalToPickupMin: 1,
+        },
+      })
+    );
+
+    const navigation = {
+      navigate: jest.fn(),
+      replace: jest.fn(),
+      canGoBack: jest.fn(() => false),
+      goBack: jest.fn(),
+    };
+    const screen = render(<RobotaxiTripScreen navigation={navigation} route={{ params: {} }} />);
+
+    expect(screen.getAllByText('0 m até o embarque').length).toBeGreaterThan(0);
     expect(screen.queryByText('8 km até o embarque')).toBeNull();
   });
 
@@ -803,7 +3247,7 @@ describe('prototype ride screens', () => {
 
     usePrototypeRideRuntime.mockReturnValue(buildPassengerRuntime({ bookingStatus: 'arrived', boardingRemainingSec: 90 }));
     const activeTimer = render(<RobotaxiTripScreen navigation={navigation} route={{ params: {} }} />);
-    expect(activeTimer.getByText('Motorista chegou')).toBeTruthy();
+    expect(activeTimer.getByText('MOTORISTA CHEGOU')).toBeTruthy();
     expect(activeTimer.getAllByText('1:30').length).toBeGreaterThan(0);
     expect(activeTimer.getByText('Prossiga para o embarque')).toBeTruthy();
     activeTimer.unmount();
@@ -823,7 +3267,12 @@ describe('prototype ride screens', () => {
   it('opens rating from the passenger receipt with the real trip payload', async () => {
     usePrototypeRideRuntime.mockReturnValue(buildReceiptRuntime());
 
-    const navigation = { navigate: jest.fn(), canGoBack: jest.fn(() => false), goBack: jest.fn() };
+    const navigation = {
+      navigate: jest.fn(),
+      replace: jest.fn(),
+      canGoBack: jest.fn(() => false),
+      goBack: jest.fn(),
+    };
     const { getByTestId, getByText, queryByText } = render(
       <RobotaxiReceiptScreen navigation={navigation} route={{ params: {} }} />
     );
@@ -840,7 +3289,7 @@ describe('prototype ride screens', () => {
 
     fireEvent.press(getByTestId('passenger-receipt-rate-trip-button'));
 
-    expect(navigation.navigate).toHaveBeenCalledWith(
+    expect(navigation.replace).toHaveBeenCalledWith(
       'RobotaxiPrototypeRating',
       expect.objectContaining({
         fromReceipt: true,
@@ -849,6 +3298,53 @@ describe('prototype ride screens', () => {
         targetUserId: 'driver_1',
       })
     );
+    expect(navigation.navigate).not.toHaveBeenCalledWith(
+      'RobotaxiPrototypeRating',
+      expect.any(Object)
+    );
+  });
+
+  it('does not let the from-trip receipt beforeRemove guard cancel rating navigation', () => {
+    const dismissCompletedReceipt = jest.fn();
+    let beforeRemoveListener = null;
+    usePrototypeRideRuntime.mockReturnValue(
+      buildReceiptRuntime({ dismissCompletedReceipt })
+    );
+
+    const navigation = {
+      navigate: jest.fn(),
+      replace: jest.fn(),
+      canGoBack: jest.fn(() => false),
+      goBack: jest.fn(),
+      addListener: jest.fn((eventName, listener) => {
+        if (eventName === 'beforeRemove') {
+          beforeRemoveListener = listener;
+        }
+        return jest.fn();
+      }),
+    };
+    const { getByTestId } = render(
+      <RobotaxiReceiptScreen
+        navigation={navigation}
+        route={{ params: { fromTrip: true } }}
+      />
+    );
+
+    fireEvent.press(getByTestId('passenger-receipt-rate-trip-button'));
+    expect(navigation.replace).toHaveBeenCalledWith(
+      'RobotaxiPrototypeRating',
+      expect.objectContaining({
+        fromReceipt: true,
+        reviewerType: 'passenger',
+        tripId: 'trip_1',
+      }),
+    );
+
+    const event = { preventDefault: jest.fn() };
+    beforeRemoveListener(event);
+
+    expect(event.preventDefault).not.toHaveBeenCalled();
+    expect(dismissCompletedReceipt).not.toHaveBeenCalled();
   });
 
   it('renders canonical vehicle model, color and plate on the passenger receipt', () => {
@@ -877,6 +3373,89 @@ describe('prototype ride screens', () => {
     expect(getByTestId('passenger-receipt-vehicle-plate').props.children).toBe('RJA2D41');
   });
 
+  it('renders nested driver vehicle identity on the passenger receipt', () => {
+    const baseRuntime = buildReceiptRuntime();
+    const receiptWithNestedDriver = {
+      ...baseRuntime.lastReceipt,
+      driverName: '',
+      vehicleLabel: '',
+      vehicleColor: '',
+      vehiclePlate: '',
+      driver: {
+        name: 'Carlos Motorista',
+        vehicle: {
+          model: 'Toyota Corolla',
+          color: 'PRETO',
+          plate: 'RJA2D41',
+        },
+      },
+    };
+    usePrototypeRideRuntime.mockReturnValue(
+      buildReceiptRuntime({
+        lastReceipt: receiptWithNestedDriver,
+        tripHistory: [receiptWithNestedDriver],
+      })
+    );
+
+    const navigation = { navigate: jest.fn(), canGoBack: jest.fn(() => false), goBack: jest.fn() };
+    const { getByTestId, getByText } = render(
+      <RobotaxiReceiptScreen navigation={navigation} route={{ params: {} }} />
+    );
+
+    expect(getByText('Carlos Motorista')).toBeTruthy();
+    expect(getByTestId('passenger-receipt-vehicle-model-color').props.children).toBe(
+      'Toyota Corolla · PRETO'
+    );
+    expect(getByTestId('passenger-receipt-vehicle-plate').props.children).toBe('RJA2D41');
+  });
+
+  it('uses receipt owner scope instead of stale activeRole when selecting receipt surface', () => {
+    usePrototypeRideRuntime.mockReturnValue(
+      buildReceiptRuntime({
+        activeRole: 'driver',
+        profileUid: 'customer_1',
+        profile: { uid: 'customer_1' },
+      })
+    );
+
+    const navigation = { navigate: jest.fn(), canGoBack: jest.fn(() => false), goBack: jest.fn() };
+    const { getByTestId, getByText, queryByTestId, queryByText } = render(
+      <RobotaxiReceiptScreen navigation={navigation} route={{ params: {} }} />
+    );
+
+    expect(getByTestId('passenger-receipt-screen')).toBeTruthy();
+    expect(queryByTestId('driver-receipt-screen')).toBeNull();
+    expect(getByText('Total pago')).toBeTruthy();
+    expect(getByText('Avaliar viagem')).toBeTruthy();
+    expect(queryByText('Valor recebido')).toBeNull();
+    expect(queryByTestId('driver-receipt-rate-passenger-button')).toBeNull();
+  });
+
+  it('shows an explicit zero toll from the backend-final passenger receipt', () => {
+    const receipt = {
+      ...buildReceiptRuntime().lastReceipt,
+      tollFee: 0,
+      fareBreakdown: {
+        tollFee: 8.95,
+      },
+    };
+    usePrototypeRideRuntime.mockReturnValue(
+      buildReceiptRuntime({
+        lastReceipt: receipt,
+        tripHistory: [receipt],
+      }),
+    );
+
+    const navigation = { navigate: jest.fn(), canGoBack: jest.fn(() => false), goBack: jest.fn() };
+    const { getAllByText, queryByText } = render(
+      <RobotaxiReceiptScreen navigation={navigation} route={{ params: {} }} />
+    );
+
+    expect(getAllByText('Pedágio').length).toBeGreaterThan(0);
+    expect(getAllByText('R$ 0,00').length).toBeGreaterThan(0);
+    expect(queryByText('R$ 8,95')).toBeNull();
+  });
+
   it('keeps passenger rating available when the completed receipt is missing driverId but runtime still has it', () => {
     const fallbackDriverId = 'driver_fallback_1';
     const completedReceiptWithoutDriverId = {
@@ -900,8 +3479,13 @@ describe('prototype ride screens', () => {
       })
     );
 
-    const navigation = { navigate: jest.fn(), canGoBack: jest.fn(() => false), goBack: jest.fn() };
-    const { getByTestId, getByText } = render(
+    const navigation = {
+      navigate: jest.fn(),
+      replace: jest.fn(),
+      canGoBack: jest.fn(() => false),
+      goBack: jest.fn(),
+    };
+	    const { getAllByText, getByTestId, getByText } = render(
       <RobotaxiReceiptScreen navigation={navigation} route={{ params: {} }} />
     );
     const rateButton = getByTestId('passenger-receipt-rate-trip-button');
@@ -912,7 +3496,7 @@ describe('prototype ride screens', () => {
 
     fireEvent.press(rateButton);
 
-    expect(navigation.navigate).toHaveBeenCalledWith(
+    expect(navigation.replace).toHaveBeenCalledWith(
       'RobotaxiPrototypeRating',
       expect.objectContaining({
         fromReceipt: true,
@@ -920,6 +3504,10 @@ describe('prototype ride screens', () => {
         tripId: 'trip_without_driver_id',
         targetUserId: fallbackDriverId,
       })
+    );
+    expect(navigation.navigate).not.toHaveBeenCalledWith(
+      'RobotaxiPrototypeRating',
+      expect.any(Object)
     );
   });
 
@@ -962,6 +3550,466 @@ describe('prototype ride screens', () => {
     expect(navigation.goBack).toHaveBeenCalled();
   });
 
+  it('closes a completed-trip passenger receipt directly to the map even with stack history', () => {
+    const dismissCompletedReceipt = jest.fn();
+    usePrototypeRideRuntime.mockReturnValue(
+      buildReceiptRuntime({ dismissCompletedReceipt })
+    );
+
+    const navigation = {
+      navigate: jest.fn(),
+      canGoBack: jest.fn(() => true),
+      goBack: jest.fn(),
+    };
+
+    const { getByTestId } = render(
+      <RobotaxiReceiptScreen
+        navigation={navigation}
+        route={{ params: { fromTrip: true } }}
+      />
+    );
+
+    fireEvent.press(getByTestId('passenger-receipt-back-to-map-button'));
+
+    expect(dismissCompletedReceipt).toHaveBeenCalled();
+    expect(navigation.navigate).toHaveBeenCalledWith('RobotaxiPrototype');
+    expect(navigation.goBack).not.toHaveBeenCalled();
+  });
+
+  it('handles Android back on a completed-trip receipt as a terminal close', () => {
+    const dismissCompletedReceipt = jest.fn();
+    let beforeRemoveListener = null;
+    usePrototypeRideRuntime.mockReturnValue(
+      buildReceiptRuntime({ dismissCompletedReceipt })
+    );
+
+    const navigation = {
+      navigate: jest.fn(),
+      canGoBack: jest.fn(() => true),
+      goBack: jest.fn(),
+      addListener: jest.fn((eventName, listener) => {
+        if (eventName === 'beforeRemove') {
+          beforeRemoveListener = listener;
+        }
+        return jest.fn();
+      }),
+    };
+
+    render(
+      <RobotaxiReceiptScreen
+        navigation={navigation}
+        route={{ params: { fromTrip: true } }}
+      />
+    );
+
+    expect(navigation.addListener).toHaveBeenCalledWith(
+      'beforeRemove',
+      expect.any(Function),
+    );
+
+    const event = { preventDefault: jest.fn(), data: { action: { type: 'GO_BACK' } } };
+    beforeRemoveListener(event);
+
+    expect(event.preventDefault).toHaveBeenCalled();
+    expect(dismissCompletedReceipt).toHaveBeenCalledTimes(1);
+    expect(navigation.navigate).toHaveBeenCalledWith('RobotaxiPrototype');
+    expect(navigation.goBack).not.toHaveBeenCalled();
+  });
+
+  it('preserves the completed receipt during route reset or replacement', () => {
+    const dismissCompletedReceipt = jest.fn();
+    let beforeRemoveListener = null;
+    usePrototypeRideRuntime.mockReturnValue(
+      buildReceiptRuntime({ dismissCompletedReceipt })
+    );
+
+    const navigation = {
+      navigate: jest.fn(),
+      canGoBack: jest.fn(() => true),
+      goBack: jest.fn(),
+      addListener: jest.fn((eventName, listener) => {
+        if (eventName === 'beforeRemove') {
+          beforeRemoveListener = listener;
+        }
+        return jest.fn();
+      }),
+    };
+
+    render(
+      <RobotaxiReceiptScreen
+        navigation={navigation}
+        route={{ params: { fromTrip: true } }}
+      />
+    );
+
+    const resetEvent = {
+      preventDefault: jest.fn(),
+      data: { action: { type: 'RESET' } },
+    };
+    const replaceEvent = {
+      preventDefault: jest.fn(),
+      data: { action: { type: 'REPLACE' } },
+    };
+
+    beforeRemoveListener(resetEvent);
+    beforeRemoveListener(replaceEvent);
+
+    expect(resetEvent.preventDefault).not.toHaveBeenCalled();
+    expect(replaceEvent.preventDefault).not.toHaveBeenCalled();
+    expect(dismissCompletedReceipt).not.toHaveBeenCalled();
+    expect(navigation.navigate).not.toHaveBeenCalled();
+  });
+
+  it('shows an explicit recovery state when a completed passenger receipt has not hydrated yet', async () => {
+    const dismissCompletedReceipt = jest.fn();
+    const recoverCompletedReceipt = jest.fn(() => new Promise(() => {}));
+    usePrototypeRideRuntime.mockReturnValue(
+      buildReceiptRuntime({
+        tripHistory: [],
+        lastReceipt: null,
+        dismissCompletedReceipt,
+        recoverCompletedReceipt,
+      })
+    );
+
+    const navigation = {
+      navigate: jest.fn(),
+      canGoBack: jest.fn(() => false),
+      goBack: jest.fn(),
+    };
+
+    const { getByTestId, getByText, getAllByText, queryByText } = render(
+      <RobotaxiReceiptScreen
+        navigation={navigation}
+        route={{ params: { fromTrip: true } }}
+      />
+    );
+
+    expect(getByTestId('receipt-recovery-state-card')).toBeTruthy();
+    expect(getByText('Recibo final pendente')).toBeTruthy();
+    expect(getByText('Recibo pendente')).toBeTruthy();
+    expect(queryByText(/reconciliação/i)).toBeNull();
+    expect(getAllByText('--').length).toBeGreaterThan(0);
+
+    const rateButton = getByTestId('passenger-receipt-rate-trip-button');
+    expect(rateButton.props.accessibilityState?.disabled).toBe(true);
+    fireEvent.press(rateButton);
+    expect(navigation.navigate).not.toHaveBeenCalledWith(
+      'RobotaxiPrototypeRating',
+      expect.any(Object)
+    );
+
+    await waitFor(() => {
+      expect(recoverCompletedReceipt).toHaveBeenCalledWith({
+        reason: 'receipt_screen_missing_payload',
+      });
+    });
+
+    fireEvent.press(getByTestId('passenger-receipt-back-to-map-button'));
+
+    expect(dismissCompletedReceipt).toHaveBeenCalled();
+    expect(navigation.navigate).toHaveBeenCalledWith('RobotaxiPrototype');
+    expect(navigation.goBack).not.toHaveBeenCalled();
+  });
+
+  it('uses the route booking id when recovering a completed receipt without payload', async () => {
+    const recoverCompletedReceipt = jest.fn(() => new Promise(() => {}));
+    usePrototypeRideRuntime.mockReturnValue(
+      buildReceiptRuntime({
+        tripHistory: [],
+        lastReceipt: null,
+        recoverCompletedReceipt,
+      })
+    );
+
+    const navigation = {
+      navigate: jest.fn(),
+      canGoBack: jest.fn(() => false),
+      goBack: jest.fn(),
+    };
+
+    render(
+      <RobotaxiReceiptScreen
+        navigation={navigation}
+        route={{ params: { fromTrip: true, bookingId: 'booking_receipt_recovery' } }}
+      />
+    );
+
+    await waitFor(() => {
+      expect(recoverCompletedReceipt).toHaveBeenCalledWith(
+        expect.objectContaining({
+          explicitBookingId: 'booking_receipt_recovery',
+        }),
+      );
+    });
+  });
+
+  it('prefers a backend-final runtime receipt over minimal route receipt params', () => {
+    const recoverCompletedReceipt = jest.fn();
+    const backendFinalReceipt = {
+      ...buildReceiptRuntime().lastReceipt,
+      id: 'booking_backend_final_receipt',
+      bookingId: 'booking_backend_final_receipt',
+      fare: 83.4,
+      grossAmount: 83.4,
+      value: 'R$ 83,40',
+      driverNetAmount: 78.08,
+      totalFees: 5.32,
+      pickupAddress: 'Carioca Shopping',
+      destinationAddress: 'Mercadão de Madureira',
+      authoritativeSnapshot: true,
+      financialSnapshotSource: 'backend_final',
+    };
+    usePrototypeRideRuntime.mockReturnValue(
+      buildReceiptRuntime({
+        tripHistory: [backendFinalReceipt],
+        lastReceipt: backendFinalReceipt,
+        recoverCompletedReceipt,
+      }),
+    );
+
+    const navigation = {
+      navigate: jest.fn(),
+      canGoBack: jest.fn(() => false),
+      goBack: jest.fn(),
+    };
+
+    const { getByTestId, getByText, queryByText } = render(
+      <RobotaxiReceiptScreen
+        navigation={navigation}
+        route={{
+          params: {
+            fromTrip: true,
+            bookingId: 'booking_backend_final_receipt',
+            fare: 27.5,
+            grossAmount: 27.5,
+            pickupAddress: 'Origem local antiga',
+            destinationAddress: 'Destino local antigo',
+          },
+        }}
+      />,
+    );
+
+    expect(getByText('R$ 83,40')).toBeTruthy();
+    expect(getByText('Carioca Shopping')).toBeTruthy();
+    expect(getByText('Mercadão de Madureira')).toBeTruthy();
+    expect(queryByText('R$ 27,50')).toBeNull();
+    expect(queryByText('Origem local antiga')).toBeNull();
+    expect(getByTestId('passenger-receipt-rate-trip-button').props.accessibilityState?.disabled).toBe(false);
+    expect(recoverCompletedReceipt).not.toHaveBeenCalled();
+  });
+
+  it('matches a prefixed API receipt id to the backend-final runtime receipt', () => {
+    const recoverCompletedReceipt = jest.fn();
+    const backendFinalReceipt = {
+      ...buildReceiptRuntime().lastReceipt,
+      id: 'booking_api_receipt_prefix_match',
+      bookingId: 'booking_api_receipt_prefix_match',
+      fare: 58.19,
+      grossAmount: 58.19,
+      value: 'R$ 58,19',
+      pickupAddress: 'Av. Meriti, 9 - Vila Kosmos',
+      destinationAddress: 'Av. das Americas, 4666 - Barra da Tijuca',
+      authoritativeSnapshot: true,
+      financialSnapshotSource: 'backend_final',
+    };
+    usePrototypeRideRuntime.mockReturnValue(
+      buildReceiptRuntime({
+        tripHistory: [backendFinalReceipt],
+        lastReceipt: backendFinalReceipt,
+        recoverCompletedReceipt,
+      }),
+    );
+
+    const navigation = {
+      navigate: jest.fn(),
+      canGoBack: jest.fn(() => false),
+      goBack: jest.fn(),
+    };
+
+    const { getByTestId, getByText, queryByTestId, queryByText } = render(
+      <RobotaxiReceiptScreen
+        navigation={navigation}
+        route={{
+          params: {
+            fromTrip: true,
+            receipt: {
+              receiptId: 'LEAF-booking_api_receipt_prefix_match',
+              driverName: 'Motorista Leaf',
+            },
+          },
+        }}
+      />,
+    );
+
+    expect(getByText('R$ 58,19')).toBeTruthy();
+    expect(getByText('Av. Meriti')).toBeTruthy();
+    expect(getByText('Av. das Americas')).toBeTruthy();
+    expect(queryByTestId('receipt-recovery-state-card')).toBeNull();
+    expect(queryByText('Recibo pendente')).toBeNull();
+    expect(getByTestId('passenger-receipt-rate-trip-button').props.accessibilityState?.disabled).toBe(false);
+    expect(recoverCompletedReceipt).not.toHaveBeenCalled();
+  });
+
+  it('uses the latest backend-final runtime receipt after trip completion when route params are incomplete', () => {
+    const recoverCompletedReceipt = jest.fn();
+    const backendFinalReceipt = {
+      ...buildReceiptRuntime().lastReceipt,
+      id: 'booking_completed_runtime_only',
+      fare: 58.19,
+      grossAmount: 58.19,
+      value: 'R$ 58,19',
+      pickupAddress: 'Av. Meriti, 9 - Vila Kosmos',
+      destinationAddress: 'Av. das Americas, 4666 - Barra da Tijuca',
+      authoritativeSnapshot: true,
+      financialSnapshotSource: 'backend_final',
+    };
+    usePrototypeRideRuntime.mockReturnValue(
+      buildReceiptRuntime({
+        tripHistory: [backendFinalReceipt],
+        lastReceipt: backendFinalReceipt,
+        recoverCompletedReceipt,
+      }),
+    );
+
+    const navigation = {
+      navigate: jest.fn(),
+      canGoBack: jest.fn(() => false),
+      goBack: jest.fn(),
+    };
+
+    const { getByTestId, getByText, queryByTestId, queryByText } = render(
+      <RobotaxiReceiptScreen
+        navigation={navigation}
+        route={{
+          params: {
+            fromTrip: true,
+            receipt: {
+              driverName: 'Motorista Leaf',
+              pickupAddress: 'Avenida Meriti, 9',
+              destinationAddress: 'BarraShopping',
+            },
+          },
+        }}
+      />,
+    );
+
+    expect(getByText('R$ 58,19')).toBeTruthy();
+    expect(getByText('Av. Meriti')).toBeTruthy();
+    expect(getByText('Av. das Americas')).toBeTruthy();
+    expect(queryByTestId('receipt-recovery-state-card')).toBeNull();
+    expect(queryByText('Recibo final indisponível')).toBeNull();
+    expect(getByTestId('passenger-receipt-rate-trip-button').props.accessibilityState?.disabled).toBe(false);
+    expect(recoverCompletedReceipt).not.toHaveBeenCalled();
+  });
+
+  it('does not present a zero-value receipt as final when the financial snapshot is incomplete', async () => {
+    const dismissCompletedReceipt = jest.fn();
+    const recoverCompletedReceipt = jest.fn(() => new Promise(() => {}));
+    const incompleteReceipt = {
+      id: 'trip_incomplete_financial',
+      driverId: 'driver_1',
+      driverName: 'Motorista Leaf',
+      passengerId: 'customer_1',
+      passengerName: 'Passageira Leaf',
+      paymentMethod: 'pix',
+    };
+    usePrototypeRideRuntime.mockReturnValue(
+      buildReceiptRuntime({
+        tripHistory: [incompleteReceipt],
+        lastReceipt: incompleteReceipt,
+        dismissCompletedReceipt,
+        recoverCompletedReceipt,
+      })
+    );
+
+    const navigation = {
+      navigate: jest.fn(),
+      canGoBack: jest.fn(() => false),
+      goBack: jest.fn(),
+    };
+
+    const { getByTestId, getByText, getAllByText, queryByText } = render(
+      <RobotaxiReceiptScreen
+        navigation={navigation}
+        route={{ params: { fromTrip: true } }}
+      />
+    );
+
+    expect(getByTestId('receipt-recovery-state-card')).toBeTruthy();
+    expect(getByText('Recibo final indisponível')).toBeTruthy();
+    expect(getByText('Recibo pendente')).toBeTruthy();
+    expect(queryByText(/reconciliação/i)).toBeNull();
+    expect(getByText('Origem em verificação')).toBeTruthy();
+    expect(getByText('Destino em verificação')).toBeTruthy();
+    expect(getAllByText('--').length).toBeGreaterThan(0);
+    expect(queryByText('R$ 0,00')).toBeNull();
+
+    const rateButton = getByTestId('passenger-receipt-rate-trip-button');
+    expect(rateButton.props.accessibilityState?.disabled).toBe(true);
+    fireEvent.press(rateButton);
+    expect(navigation.navigate).not.toHaveBeenCalledWith(
+      'RobotaxiPrototypeRating',
+      expect.any(Object)
+    );
+
+    await waitFor(() => {
+      expect(recoverCompletedReceipt).toHaveBeenCalledWith({
+        reason: 'receipt_screen_incomplete_financial_contract',
+        explicitBookingId: 'trip_incomplete_financial',
+      });
+    });
+  });
+
+  it('does not present a gross-valued receipt as final without backend-final provenance', async () => {
+    const dismissCompletedReceipt = jest.fn();
+    const recoverCompletedReceipt = jest.fn(() => new Promise(() => {}));
+    const untrustedReceipt = {
+      ...buildReceiptRuntime().lastReceipt,
+      id: 'trip_untrusted_snapshot',
+      fare: 38.4,
+      grossAmount: 38.4,
+      driverNetAmount: 31.8,
+      totalFees: 6.6,
+      authoritativeSnapshot: false,
+      financialSnapshotSource: 'socket_fallback',
+    };
+    usePrototypeRideRuntime.mockReturnValue(
+      buildReceiptRuntime({
+        tripHistory: [untrustedReceipt],
+        lastReceipt: untrustedReceipt,
+        dismissCompletedReceipt,
+        recoverCompletedReceipt,
+      }),
+    );
+    const navigation = {
+      navigate: jest.fn(),
+      canGoBack: jest.fn(() => false),
+      goBack: jest.fn(),
+    };
+
+    const { getByTestId, getByText, queryByText } = render(
+      <RobotaxiReceiptScreen
+        navigation={navigation}
+        route={{ params: { fromTrip: true } }}
+      />,
+    );
+
+    expect(getByTestId('receipt-recovery-state-card')).toBeTruthy();
+    expect(getByText('Recibo final indisponível')).toBeTruthy();
+    expect(getByText('Recibo pendente')).toBeTruthy();
+    expect(queryByText(/reconciliação/i)).toBeNull();
+    expect(queryByText('R$ 38,40')).toBeNull();
+    expect(getByTestId('passenger-receipt-rate-trip-button').props.accessibilityState?.disabled).toBe(true);
+
+    await waitFor(() => {
+      expect(recoverCompletedReceipt).toHaveBeenCalledWith({
+        reason: 'receipt_screen_incomplete_financial_contract',
+        explicitBookingId: 'trip_untrusted_snapshot',
+      });
+    });
+  });
+
   it('closes the passenger receipt after rating without navigating back into itself', () => {
     const dismissCompletedReceipt = jest.fn();
     usePrototypeRideRuntime.mockReturnValue(
@@ -996,6 +4044,7 @@ describe('prototype ride screens', () => {
       <RobotaxiReceiptScreen navigation={navigation} route={{ params: {} }} />
     );
 
+    fireEvent.press(getByTestId('passenger-receipt-more-options-button'));
     fireEvent.press(getByTestId('passenger-receipt-report-issue-button'));
 
     expect(navigation.navigate).toHaveBeenCalledWith(
@@ -1003,6 +4052,9 @@ describe('prototype ride screens', () => {
       expect.objectContaining({
         fromReceipt: true,
         initialTopicId: 'billing',
+        bookingId: 'trip_1',
+        source: 'receipt',
+        bookingStatus: 'completed',
         receipt: expect.objectContaining({ id: 'trip_1' }),
       })
     );
@@ -1041,7 +4093,7 @@ describe('prototype ride screens', () => {
     );
 
     const navigation = { navigate: jest.fn(), canGoBack: jest.fn(() => false), goBack: jest.fn() };
-    const { getByTestId, getByText } = render(
+	    const { getAllByText, getByTestId, getByText } = render(
       <RobotaxiReceiptScreen navigation={navigation} route={{ params: {} }} />
     );
 
@@ -1074,51 +4126,75 @@ describe('prototype ride screens', () => {
     expect(navigation.goBack).toHaveBeenCalled();
   });
 
-  it('renders the dedicated trip history screen with the modern trip summary layout', () => {
+  it('renders the dedicated trip history screen with the modern trip summary layout', async () => {
+    mockGetBookingHistory.mockResolvedValueOnce({
+      success: true,
+      bookings: [
+        {
+          id: 'trip_1',
+          date: '02 abr 2026',
+          fare: 16.5,
+          driverNetAmount: 15.01,
+          totalFees: 1.49,
+          value: 'R$ 15,01',
+          pickupAddress: '1540 Mission St',
+          dropoffAddress: '1 Ferry Building',
+        },
+      ],
+      pageInfo: { hasNextPage: false, endCursor: null },
+      totalCount: 1,
+    });
     usePrototypeRideRuntime.mockReturnValue(
       buildReceiptRuntime({
         activeRole: 'driver',
-        tripHistory: [
-          {
-            id: 'trip_1',
-            date: '02 abr 2026',
-            fare: 16.5,
-            driverNetAmount: 15.01,
-            totalFees: 1.49,
-            value: 'R$ 15,01',
-            pickupAddress: '1540 Mission St',
-            dropoffAddress: '1 Ferry Building',
-          },
-        ],
+        profileUid: 'customer_1',
       })
     );
 
     const navigation = { navigate: jest.fn(), canGoBack: jest.fn(() => false), goBack: jest.fn() };
-    const { getAllByText, getByText } = render(
+    const { getAllByText, getByText, getByTestId } = render(
       <RobotaxiTripHistoryScreen navigation={navigation} route={{ key: 'trip-history' }} />
     );
 
-    expect(getByText('Corridas concluidas')).toBeTruthy();
+    expect(getByText('Corridas concluídas')).toBeTruthy();
     expect(getByText('Viagens')).toBeTruthy();
-    expect(getByText('Recibos, trajetos e valores liquidos em uma leitura direta.')).toBeTruthy();
-    expect(getByText('1540 Mission St')).toBeTruthy();
-    expect(getByText('1 Ferry Building')).toBeTruthy();
-    expect(getAllByText('R$ 15,01')).toHaveLength(2);
+    expect(getByText('Recibos, trajetos e valores líquidos em uma leitura direta.')).toBeTruthy();
+    await waitFor(() => {
+      expect(getByText('1540 Mission St')).toBeTruthy();
+      expect(getByText('1 Ferry Building')).toBeTruthy();
+      expect(getAllByText('R$ 15,01')).toHaveLength(2);
+    });
+    expect(mockGetBookingHistory).toHaveBeenCalledWith('customer_1', 'DRIVER', { first: 10, after: null });
+    fireEvent.press(getByTestId('robotaxi-history-row-trip_1'));
+    expect(navigation.navigate).toHaveBeenCalledWith(
+      'RobotaxiPrototypeReceipt',
+      expect.objectContaining({
+        bookingId: 'trip_1',
+        viewerRole: 'driver',
+        fromHistory: true,
+      }),
+    );
   });
 
-  it('prefers destinationAddress in trip history rows when dropoffAddress is absent', () => {
+  it('prefers destinationAddress in trip history rows when dropoffAddress is absent', async () => {
+    mockGetBookingHistory.mockResolvedValueOnce({
+      success: true,
+      bookings: [
+        {
+          id: 'trip_2',
+          date: '07 abr 2026',
+          value: 'R$ 22,40',
+          pickupAddress: 'Rua A, 10',
+          destinationAddress: 'Praça Senador Salgado Filho, Centro, Rio de Janeiro',
+        },
+      ],
+      pageInfo: { hasNextPage: false, endCursor: null },
+      totalCount: 1,
+    });
     usePrototypeRideRuntime.mockReturnValue(
       buildReceiptRuntime({
         activeRole: 'customer',
-        tripHistory: [
-          {
-            id: 'trip_2',
-            date: '07 abr 2026',
-            value: 'R$ 22,40',
-            pickupAddress: 'Rua A, 10',
-            destinationAddress: 'Praça Senador Salgado Filho, Centro, Rio de Janeiro',
-          },
-        ],
+        profileUid: 'customer_1',
       })
     );
 
@@ -1127,8 +4203,10 @@ describe('prototype ride screens', () => {
       <RobotaxiTripHistoryScreen navigation={navigation} route={{ key: 'trip-history' }} />
     );
 
-    expect(getByText('Praça Senador Salgado Filho, Centro, Rio de Janeiro')).toBeTruthy();
-    expect(queryByText('Destino indisponivel')).toBeNull();
+    await waitFor(() => {
+      expect(getByText('Praça Senador Salgado Filho, Centro, Rio de Janeiro')).toBeTruthy();
+      expect(queryByText('Destino indisponivel')).toBeNull();
+    });
   });
 
   it('renders the passenger search card with time progress, rotating status and route summary', () => {
@@ -1142,22 +4220,27 @@ describe('prototype ride screens', () => {
           address: '1 Ferry Building, San Francisco',
         },
         currentAddress: '1540 Mission St, San Francisco',
+        activeBooking: {
+          pickupLocation: { add: '1540 Mission St, San Francisco' },
+          destinationLocation: { add: 'Ferry Building, San Francisco' },
+          routeDurationSecs: 1920,
+        },
         cancelRideSearch: jest.fn(),
         lastError: '',
       })
     );
 
     const navigation = { navigate: jest.fn(), replace: jest.fn(), canGoBack: jest.fn(() => false), goBack: jest.fn() };
-    const { getByText, getByTestId } = render(
+    const { getAllByText, getByText, getByTestId, queryByText } = render(
       <RobotaxiDriverSearchScreen navigation={navigation} route={{ params: {} }} />
     );
 
-    expect(getByText('Detalhes da corrida')).toBeTruthy();
+    expect(getByTestId('passenger-driver-search-sheet')).toBeTruthy();
+    expect(queryByText('Detalhes da corrida')).toBeNull();
     expect(getByTestId('passenger-driver-search-elapsed').props.children).toBe('00:12');
-    expect(getByText('Buscando motorista')).toBeTruthy();
-    expect(getByText('Buscando em 6 km de diâmetro neste momento')).toBeTruthy();
-    expect(getByText('Raio de busca expandido')).toBeTruthy();
-    expect(getByText('Preço protegido')).toBeTruthy();
+    expect(getByText('BUSCANDO MOTORISTA')).toBeTruthy();
+    expect(getByText('tempo de busca')).toBeTruthy();
+    expect(getByText('valor protegido')).toBeTruthy();
     expect(getByTestId('passenger-driver-search-progress-fill').props.style).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -1165,10 +4248,120 @@ describe('prototype ride screens', () => {
         }),
       ])
     );
-    expect(getByText('Ponto de partida')).toBeTruthy();
-    expect(getByText('Destino')).toBeTruthy();
-    expect(getByText('1540 Mission St')).toBeTruthy();
-    expect(getByText('Ferry Building')).toBeTruthy();
+    expect(queryByText('PARTIDA')).toBeNull();
+    expect(queryByText('DESTINO')).toBeNull();
+    expect(queryByText(/chegada estimada --/i)).toBeNull();
+    expect(queryByText(/Ferry Building - chegada estimada \d{2}:\d{2}/)).toBeNull();
+
+    fireEvent.press(getByTestId('passenger-driver-search-details-toggle'));
+    expect(getByTestId('passenger-driver-search-route-details')).toBeTruthy();
+    expect(getByText('PARTIDA')).toBeTruthy();
+    expect(getByText('DESTINO')).toBeTruthy();
+    expect(getAllByText('1540 Mission St').length).toBeGreaterThan(0);
+    expect(getAllByText(/Ferry Building/).length).toBeGreaterThan(0);
+    expect(getByText(/Chegada estimada \d{2}:\d{2}/)).toBeTruthy();
+  });
+
+  it('keeps the passenger on driver search while createBooking is pending', () => {
+    const cancelRideSearch = jest.fn();
+    usePrototypeRideRuntime.mockReturnValue(
+      buildPassengerRuntime({
+        bookingStatus: 'requesting',
+        searchingElapsedSeconds: 44,
+        selectedVehicle: 'Leaf Plus',
+        selectedDestination: {
+          name: 'Ferry Building',
+          address: '1 Ferry Building, San Francisco',
+        },
+        currentAddress: '1540 Mission St, San Francisco',
+        activeBookingId: '',
+        activeBooking: {
+          status: 'REQUESTING',
+          pickupLocation: { add: '1540 Mission St, San Francisco' },
+          destinationLocation: { add: 'Ferry Building, San Francisco' },
+        },
+        paymentState: {
+          status: 'processing',
+          paymentId: 'pix_pending_create',
+          chargeId: 'pix_pending_create',
+        },
+        cancelRideSearch,
+        lastError: '',
+      })
+    );
+
+    const navigation = { navigate: jest.fn(), replace: jest.fn(), canGoBack: jest.fn(() => false), goBack: jest.fn() };
+    const { getByText, getByTestId, queryByTestId, queryByText } = render(
+      <RobotaxiDriverSearchScreen navigation={navigation} route={{ params: {} }} />
+    );
+
+    expect(queryByTestId('passenger-booking-finalizing-sheet')).toBeNull();
+    expect(getByTestId('passenger-driver-search-sheet')).toBeTruthy();
+    expect(getByText('BUSCANDO MOTORISTA')).toBeTruthy();
+    expect(queryByText('Criando corrida')).toBeNull();
+    expect(queryByText('Pagamento confirmado. Estamos criando sua corrida com segurança.')).toBeNull();
+    expect(getByTestId('passenger-driver-search-elapsed').props.children).toBe('00:44');
+
+    expect(queryByTestId('passenger-driver-search-cancel-button')).toBeNull();
+    fireEvent.press(getByTestId('passenger-driver-search-details-toggle'));
+    fireEvent.press(getByTestId('passenger-driver-search-cancel-button'));
+
+    expect(cancelRideSearch).not.toHaveBeenCalled();
+    expect(navigation.replace).not.toHaveBeenCalled();
+  });
+
+  it('does not promote the passenger to driver-on-way before the driver accepts', () => {
+    usePrototypeRideRuntime.mockReturnValue(
+      buildPassengerRuntime({
+        bookingStatus: 'AWAITING_RESPONSE',
+        searchingElapsedSeconds: 18,
+        selectedDestination: {
+          name: 'Ferry Building',
+          address: '1 Ferry Building, San Francisco',
+        },
+        currentAddress: '1540 Mission St, San Francisco',
+        activeBookingId: 'booking_pre_accept',
+        paymentState: {
+          status: 'confirmed',
+          paymentId: 'pix_pre_accept',
+          confirmedAt: '2026-06-22T20:00:00.000Z',
+        },
+        activeBooking: {
+          bookingId: 'booking_pre_accept',
+          status: 'AWAITING_RESPONSE',
+          pickupLocation: { add: '1540 Mission St, San Francisco' },
+          destinationLocation: { add: 'Ferry Building, San Francisco' },
+          driver: {
+            id: 'driver_notified_1',
+            name: 'Motorista Notificado',
+          },
+          paymentData: { confirmedAt: '2026-06-22T20:00:00.000Z' },
+        },
+        driverInfo: {
+          id: 'driver_notified_1',
+          name: 'Motorista Notificado',
+          model: 'Leaf Plus',
+          plate: 'LEF-2042',
+        },
+        lastError: '',
+      })
+    );
+
+    const navigation = {
+      navigate: jest.fn(),
+      replace: jest.fn(),
+      canGoBack: jest.fn(() => false),
+      goBack: jest.fn(),
+    };
+    const { getByText, getByTestId } = render(
+      <RobotaxiDriverSearchScreen navigation={navigation} route={{ params: {} }} />
+    );
+
+    expect(getByTestId('passenger-driver-search-elapsed')).toBeTruthy();
+    expect(navigation.replace).not.toHaveBeenCalledWith(
+      'RobotaxiPrototypeTrip',
+      expect.any(Object)
+    );
   });
 
   it('keeps the passenger search surface locked against passive backdrop dismissal', () => {
@@ -1224,23 +4417,48 @@ describe('prototype ride screens', () => {
       canGoBack: jest.fn(() => true),
       goBack: jest.fn(),
     };
-    const { getByTestId, getByText } = render(
-      <RobotaxiDriverSearchScreen navigation={navigation} route={{ params: {} }} />
-    );
+	    const { getAllByText, getByTestId, getByText } = render(
+	      <RobotaxiDriverSearchScreen navigation={navigation} route={{ params: {} }} />
+	    );
 
+    fireEvent.press(getByTestId('passenger-driver-search-details-toggle'));
     fireEvent.press(getByTestId('passenger-driver-search-cancel-button'));
 
-    expect(cancelRideSearch).toHaveBeenCalledTimes(1);
+    expect(cancelRideSearch).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bookingId: 'booking_cancel_ack',
+        source: 'search',
+        bookingStatus: 'searching',
+      })
+    );
     expect(getByText('Cancelando...')).toBeTruthy();
     expect(navigation.goBack).not.toHaveBeenCalled();
     expect(navigation.replace).not.toHaveBeenCalled();
 
-    resolveCancellation({ success: true });
+    resolveCancellation({
+      success: true,
+      data: {
+        originalPaidAmount: 13.42,
+        refundAmount: 13.42,
+        cancellationFee: 0,
+        refundStatus: 'ALREADY_REFUNDED',
+      },
+    });
 
     await waitFor(() => {
       expect(navigation.replace).toHaveBeenCalledWith(
         'RobotaxiPrototypeCancellation',
-        { source: 'search' }
+        expect.objectContaining({
+          bookingId: 'booking_cancel_ack',
+          source: 'search',
+          bookingStatus: 'searching',
+          cancellationOutcome: expect.objectContaining({
+            originalPaidAmount: 13.42,
+            refundAmount: 13.42,
+            cancellationFee: 0,
+            refundStatus: 'ALREADY_REFUNDED',
+          }),
+        })
       );
     });
   });
@@ -1252,8 +4470,47 @@ describe('prototype ride screens', () => {
     usePrototypeRideRuntime.mockReturnValue(
       buildPassengerRuntime({
         bookingStatus: 'searching',
-        searchingElapsedSeconds: 180,
+        searchingElapsedSeconds: 120,
         activeBooking: { bookingId: 'booking_cancel_failed' },
+        cancelRideSearch,
+        lastError: '',
+      })
+    );
+
+	    const navigation = {
+	      navigate: jest.fn(),
+	      replace: jest.fn(),
+	      canGoBack: jest.fn(() => true),
+	      goBack: jest.fn(),
+	    };
+	    const { getAllByText, getByTestId, getByText } = render(
+	      <RobotaxiDriverSearchScreen navigation={navigation} route={{ params: {} }} />
+	    );
+
+    fireEvent.press(getByTestId('passenger-driver-search-details-toggle'));
+    fireEvent.press(getByTestId('passenger-driver-search-cancel-button'));
+
+    await waitFor(() => {
+      expect(getByText('Servidor não confirmou o cancelamento.')).toBeTruthy();
+    });
+    expect(getByText('BUSCANDO MOTORISTA')).toBeTruthy();
+    expect(navigation.goBack).not.toHaveBeenCalled();
+    expect(navigation.replace).not.toHaveBeenCalled();
+
+    fireEvent.press(getByTestId('passenger-driver-search-support-button'));
+    expect(navigation.navigate).toHaveBeenCalledWith('RobotaxiMenuHelp', {
+      source: 'driver_search',
+      bookingId: 'booking_cancel_failed',
+    });
+  });
+
+  it('asks the passenger to continue or cancel when driver search reaches the timeout', () => {
+    const cancelRideSearch = jest.fn();
+    usePrototypeRideRuntime.mockReturnValue(
+      buildPassengerRuntime({
+        bookingStatus: 'searching',
+        searchingElapsedSeconds: 180,
+        activeBooking: { bookingId: 'booking_timeout_decision' },
         cancelRideSearch,
         lastError: '',
       })
@@ -1265,24 +4522,115 @@ describe('prototype ride screens', () => {
       canGoBack: jest.fn(() => true),
       goBack: jest.fn(),
     };
-    const { getByTestId, getByText } = render(
+    const { getByTestId, getByText, queryByTestId, queryByText } = render(
       <RobotaxiDriverSearchScreen navigation={navigation} route={{ params: {} }} />
     );
 
-    fireEvent.press(getByTestId('passenger-driver-search-cancel-button'));
+    expect(getByTestId('passenger-driver-search-timeout-decision')).toBeTruthy();
+    expect(getByText('Continuar busca?')).toBeTruthy();
+    expect(queryByTestId('passenger-driver-search-cancel-button')).toBeNull();
+    expect(queryByTestId('passenger-driver-search-timeout-cancel-button')).toBeNull();
+
+    fireEvent.press(getByTestId('passenger-driver-search-timeout-continue-button'));
+
+    expect(cancelRideSearch).not.toHaveBeenCalled();
+    expect(navigation.replace).not.toHaveBeenCalled();
+    expect(queryByText('Continuar busca?')).toBeNull();
+    fireEvent.press(getByTestId('passenger-driver-search-details-toggle'));
+    expect(getByTestId('passenger-driver-search-cancel-button')).toBeTruthy();
+    expect(getByTestId('passenger-driver-search-support-button')).toBeTruthy();
+  });
+
+  it('cancels through the timeout decision and returns to the empty map', async () => {
+    const cancelRideSearch = jest.fn().mockResolvedValue({
+      success: true,
+      data: {
+        refundStatus: 'requested',
+        refundAmount: 44.95,
+      },
+    });
+    usePrototypeRideRuntime.mockReturnValue(
+      buildPassengerRuntime({
+        bookingStatus: 'searching',
+        searchingElapsedSeconds: 180,
+        activeBooking: { bookingId: 'booking_timeout_cancel' },
+        cancelRideSearch,
+        lastError: '',
+      })
+    );
+
+    const navigation = {
+      navigate: jest.fn(),
+      replace: jest.fn(),
+      canGoBack: jest.fn(() => true),
+      goBack: jest.fn(),
+    };
+    const { getByTestId } = render(
+      <RobotaxiDriverSearchScreen navigation={navigation} route={{ params: {} }} />
+    );
+
+    fireEvent.press(getByTestId('passenger-driver-search-details-toggle'));
+    fireEvent.press(getByTestId('passenger-driver-search-timeout-cancel-button'));
+
+    expect(cancelRideSearch).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bookingId: 'booking_timeout_cancel',
+        source: 'search_timeout_prompt',
+        reason: 'Passageiro desistiu após o tempo de busca.',
+        suppressReason: 'passenger_search_timeout_prompt',
+        clearLastError: true,
+      })
+    );
 
     await waitFor(() => {
-      expect(getByText('Servidor não confirmou o cancelamento.')).toBeTruthy();
+      expect(navigation.replace).toHaveBeenCalledWith(
+        'RobotaxiPrototype',
+        expect.objectContaining({
+          source: 'driver_search_timeout_cancelled',
+          searchCancelled: true,
+          refundRequested: true,
+        })
+      );
     });
-    expect(getByText('Buscando motorista')).toBeTruthy();
-    expect(navigation.goBack).not.toHaveBeenCalled();
-    expect(navigation.replace).not.toHaveBeenCalled();
+  });
 
-    fireEvent.press(getByTestId('passenger-driver-search-support-button'));
-    expect(navigation.navigate).toHaveBeenCalledWith('RobotaxiMenuHelp', {
-      source: 'driver_search',
-      bookingId: 'booking_cancel_failed',
-    });
+  it('blocks navigator removal while a confirmed passenger search is active', () => {
+    let beforeRemoveListener = null;
+    const unsubscribe = jest.fn();
+    usePrototypeRideRuntime.mockReturnValue(
+      buildPassengerRuntime({
+        bookingStatus: 'searching',
+        activeBooking: { bookingId: 'booking_search_1' },
+        paymentState: { status: 'confirmed', paymentId: 'pix_1' },
+      }),
+    );
+    const navigation = {
+      navigate: jest.fn(),
+      replace: jest.fn(),
+      canGoBack: jest.fn(() => true),
+      goBack: jest.fn(),
+      addListener: jest.fn((eventName, listener) => {
+        if (eventName === 'beforeRemove') {
+          beforeRemoveListener = listener;
+        }
+        return unsubscribe;
+      }),
+    };
+    const screen = render(
+      <RobotaxiDriverSearchScreen navigation={navigation} route={{ params: {} }} />,
+    );
+    const event = { preventDefault: jest.fn() };
+
+    expect(navigation.addListener).toHaveBeenCalledWith(
+      'beforeRemove',
+      expect.any(Function),
+    );
+    beforeRemoveListener(event);
+
+    expect(event.preventDefault).toHaveBeenCalledTimes(1);
+    expect(navigation.goBack).not.toHaveBeenCalled();
+    screen.unmount();
+    expect(unsubscribe).toHaveBeenCalledTimes(1);
   });
 
   it('uses persisted booking labels when the search screen is rehydrated without selectedDestination', () => {
@@ -1302,15 +4650,16 @@ describe('prototype ride screens', () => {
     );
 
     const navigation = { navigate: jest.fn(), replace: jest.fn(), canGoBack: jest.fn(() => false), goBack: jest.fn() };
-    const { getByText } = render(
+    const { getAllByText, getByTestId } = render(
       <RobotaxiDriverSearchScreen
         navigation={navigation}
         route={{ params: { destination: 'Destino', originAddress: '' } }}
       />
     );
 
-    expect(getByText('1540 Mission St')).toBeTruthy();
-    expect(getByText('Ferry Building')).toBeTruthy();
+    fireEvent.press(getByTestId('passenger-driver-search-details-toggle'));
+    expect(getAllByText('1540 Mission St').length).toBeGreaterThan(0);
+    expect(getAllByText(/Ferry Building/).length).toBeGreaterThan(0);
   });
 
   it('forwards pickup and destination labels from payment success into the search route', async () => {
@@ -1393,6 +4742,146 @@ describe('prototype ride screens', () => {
     expect(navigation.goBack).not.toHaveBeenCalled();
   });
 
+  it('routes payment success to receipt when completion arrives before search transition', async () => {
+    usePrototypeRideRuntime.mockReturnValue(
+      buildPassengerRuntime({ bookingStatus: 'trip_completed' }),
+    );
+
+    const navigation = {
+      replace: jest.fn(),
+      navigate: jest.fn(),
+      canGoBack: jest.fn(() => true),
+      goBack: jest.fn(),
+    };
+    const { queryByText } = render(
+      <RobotaxiPaymentSuccessScreen
+        navigation={navigation}
+        route={{ params: { autoAdvance: false } }}
+      />,
+    );
+
+    expect(queryByText('Voltar ao mapa')).toBeNull();
+    await waitFor(() => {
+      expect(navigation.replace).toHaveBeenCalledWith(
+        'RobotaxiPrototypeReceipt',
+        expect.objectContaining({
+          bookingId: 'booking_1',
+          fromTrip: true,
+        }),
+      );
+    });
+  });
+
+  it.each([
+    ['cancelled', 'RobotaxiPrototypeCancellation'],
+    ['no_drivers_available', 'RobotaxiPrototypeNoDrivers'],
+  ])('routes payment success terminal status %s to %s', async (bookingStatus, expectedRoute) => {
+    usePrototypeRideRuntime.mockReturnValue(
+      buildPassengerRuntime({ bookingStatus }),
+    );
+
+    const navigation = {
+      replace: jest.fn(),
+      navigate: jest.fn(),
+      canGoBack: jest.fn(() => true),
+      goBack: jest.fn(),
+    };
+    const { queryByText } = render(
+      <RobotaxiPaymentSuccessScreen
+        navigation={navigation}
+        route={{ params: { autoAdvance: false } }}
+      />,
+    );
+
+    expect(queryByText('Voltar ao mapa')).toBeNull();
+    await waitFor(() => {
+      expect(navigation.replace).toHaveBeenCalledWith(
+        expectedRoute,
+        expect.any(Object),
+      );
+    });
+  });
+
+  it.each([
+    'operational_interrupted',
+    'passenger_decision_pending',
+    'searching_replacement',
+    'reassignment_pending',
+    'searching_replacement_driver',
+  ])('routes payment success operational status %s to the active trip surface', async (bookingStatus) => {
+    usePrototypeRideRuntime.mockReturnValue(
+      buildPassengerRuntime({ bookingStatus }),
+    );
+
+    const navigation = {
+      replace: jest.fn(),
+      navigate: jest.fn(),
+      canGoBack: jest.fn(() => true),
+      goBack: jest.fn(),
+    };
+    render(
+      <RobotaxiPaymentSuccessScreen
+        navigation={navigation}
+        route={{ params: { autoAdvance: false } }}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(navigation.replace).toHaveBeenCalledWith(
+        'RobotaxiPrototypeTrip',
+        expect.objectContaining({
+          driverName: expect.any(String),
+        }),
+      );
+    });
+  });
+
+  it('blocks passive payment-success removal but permits the canonical search transition', () => {
+    let beforeRemoveListener = null;
+    const unsubscribe = jest.fn();
+    usePrototypeRideRuntime.mockReturnValue(
+      buildPassengerRuntime({ bookingStatus: 'searching' }),
+    );
+    const navigation = {
+      replace: jest.fn(),
+      navigate: jest.fn(),
+      canGoBack: jest.fn(() => true),
+      goBack: jest.fn(),
+      addListener: jest.fn((eventName, listener) => {
+        if (eventName === 'beforeRemove') {
+          beforeRemoveListener = listener;
+        }
+        return unsubscribe;
+      }),
+    };
+    const screen = render(
+      <RobotaxiPaymentSuccessScreen
+        navigation={navigation}
+        route={{ params: { autoAdvance: false } }}
+      />,
+    );
+    const passiveEvent = { preventDefault: jest.fn(), data: { action: { type: 'GO_BACK' } } };
+
+    beforeRemoveListener(passiveEvent);
+    expect(passiveEvent.preventDefault).toHaveBeenCalledTimes(1);
+
+    fireEvent.press(screen.getByTestId('passenger-payment-success-continue-button'));
+    expect(navigation.replace).toHaveBeenCalledWith(
+      'RobotaxiPrototypeDriverSearch',
+      expect.any(Object),
+    );
+
+    const canonicalEvent = {
+      preventDefault: jest.fn(),
+      data: { action: { type: 'REPLACE', payload: { name: 'RobotaxiPrototypeDriverSearch' } } },
+    };
+    beforeRemoveListener(canonicalEvent);
+
+    expect(canonicalEvent.preventDefault).not.toHaveBeenCalled();
+    screen.unmount();
+    expect(unsubscribe).toHaveBeenCalledTimes(1);
+  });
+
   it('ignores generic placeholder labels when resolving an address', () => {
     expect(resolveMeaningfulAddress('Sua localização atual', '1540 Mission St, San Francisco')).toBe(
       '1540 Mission St, San Francisco'
@@ -1426,6 +4915,336 @@ describe('prototype ride screens', () => {
     expect(queryByText('Buscando motorista')).toBeNull();
   });
 
+  it('carries the organic no-drivers refund outcome through current navigation into the refund box', async () => {
+    usePrototypeRideRuntime.mockReturnValue(
+      buildPassengerRuntime({
+        bookingStatus: 'idle',
+        searchingElapsedSeconds: 31,
+        activeBooking: null,
+        activeBookingId: null,
+        paymentState: {
+          status: 'idle',
+          errorCode: 'NO_DRIVERS_FOUND',
+          refundStatus: 'REFUNDED',
+          refundAmount: 19.15,
+        },
+        lastError: 'Nenhum motorista disponível no momento.',
+      }),
+    );
+    const navigation = {
+      navigate: jest.fn(),
+      replace: jest.fn(),
+      canGoBack: jest.fn(() => false),
+      goBack: jest.fn(),
+    };
+    const searchScreen = render(
+      <RobotaxiDriverSearchScreen navigation={navigation} route={{ params: {} }} />,
+    );
+
+    await waitFor(() => {
+      expect(navigation.replace).toHaveBeenCalledWith(
+        'RobotaxiPrototypeNoDrivers',
+        expect.objectContaining({
+          refundStatus: 'REFUNDED',
+          refundAmount: 19.15,
+        }),
+      );
+    });
+
+    const noDriversParams = navigation.replace.mock.calls.find(
+      ([routeName]) => routeName === 'RobotaxiPrototypeNoDrivers',
+    )[1];
+    searchScreen.unmount();
+    usePrototypeRideRuntime.mockReturnValue(
+      buildPassengerRuntime({
+        bookingStatus: 'idle',
+        activeBooking: null,
+        activeBookingId: null,
+      }),
+    );
+    const noDriversScreen = render(
+      <RobotaxiNoDriversScreen
+        navigation={navigation}
+        route={{ params: noDriversParams }}
+      />,
+    );
+
+    expect(
+      noDriversScreen.getByText('Estorno de R$ 19,15 iniciado automaticamente.'),
+    ).toBeTruthy();
+  });
+
+  it('routes an exhausted paid booking creation failure to the current payment-failed surface', async () => {
+    usePrototypeRideRuntime.mockReturnValue(
+      buildPassengerRuntime({
+        bookingStatus: 'idle',
+        searchingElapsedSeconds: 0,
+        activeBooking: null,
+        activeBookingId: null,
+        paymentState: {
+          status: 'confirmed',
+          paymentId: 'pix_queue_backpressure',
+          chargeId: 'pix_queue_backpressure',
+          amount: 19.38,
+        },
+        confirmedBookingRetryAvailable: true,
+        lastError: 'Estamos com alta demanda na sua região. Tente novamente em alguns segundos.',
+      }),
+    );
+    const navigation = {
+      navigate: jest.fn(),
+      replace: jest.fn(),
+      canGoBack: jest.fn(() => false),
+      goBack: jest.fn(),
+    };
+
+    render(
+      <RobotaxiDriverSearchScreen navigation={navigation} route={{ params: {} }} />,
+    );
+
+    await waitFor(() => {
+      expect(navigation.replace).toHaveBeenCalledWith(
+        'RobotaxiPrototypePaymentFailed',
+        expect.objectContaining({
+          title: 'Corrida não solicitada',
+          retryConfirmedBooking: true,
+          retryRouteName: 'RobotaxiPrototype',
+        }),
+      );
+    });
+    expect(navigation.replace).not.toHaveBeenCalledWith(
+      'RobotaxiPrototypeNoDrivers',
+      expect.anything(),
+    );
+  });
+
+  it('routes a terminal completed passenger search directly to receipt', async () => {
+    usePrototypeRideRuntime.mockReturnValue(
+      buildPassengerRuntime({
+        bookingStatus: 'trip_completed',
+        activeBookingId: 'booking_search_completed',
+        activeBooking: {
+          bookingId: 'booking_search_completed',
+          pickupLocation: { add: '1540 Mission St, San Francisco' },
+          destinationLocation: { add: 'Ferry Building, San Francisco' },
+        },
+        lastError: '',
+      }),
+    );
+
+    const navigation = {
+      navigate: jest.fn(),
+      replace: jest.fn(),
+      canGoBack: jest.fn(() => false),
+      goBack: jest.fn(),
+    };
+    const { queryByText } = render(
+      <RobotaxiDriverSearchScreen navigation={navigation} route={{ params: {} }} />,
+    );
+
+    expect(queryByText('Buscando motorista')).toBeNull();
+    await waitFor(() => {
+      expect(navigation.replace).toHaveBeenCalledWith(
+        'RobotaxiPrototypeReceipt',
+        expect.objectContaining({
+          bookingId: 'booking_search_completed',
+          fare: 38.4,
+          fromTrip: true,
+          grossAmount: 38.4,
+        }),
+      );
+    });
+  });
+
+  it.each([
+    'operational_interrupted',
+    'passenger_decision_pending',
+    'searching_replacement',
+    'reassignment_pending',
+    'searching_replacement_driver',
+  ])('routes passenger search operational status %s to the active trip surface', async (bookingStatus) => {
+    usePrototypeRideRuntime.mockReturnValue(
+      buildPassengerRuntime({
+        bookingStatus,
+        activeBookingId: 'booking_operational_search',
+        activeBooking: {
+          bookingId: 'booking_operational_search',
+          pickupLocation: { add: '1540 Mission St, San Francisco' },
+          destinationLocation: { add: 'Ferry Building, San Francisco' },
+        },
+        lastError: '',
+      }),
+    );
+
+    const navigation = {
+      navigate: jest.fn(),
+      replace: jest.fn(),
+      canGoBack: jest.fn(() => false),
+      goBack: jest.fn(),
+    };
+    render(<RobotaxiDriverSearchScreen navigation={navigation} route={{ params: {} }} />);
+
+    await waitFor(() => {
+      expect(navigation.replace).toHaveBeenCalledWith(
+        'RobotaxiPrototypeTrip',
+        expect.objectContaining({
+          driverName: expect.any(String),
+        }),
+      );
+    });
+  });
+
+  it('keeps a paid active passenger search visible during transient idle hydration', () => {
+    const cancelRideSearch = jest.fn();
+    usePrototypeRideRuntime.mockReturnValue(
+      buildPassengerRuntime({
+        bookingStatus: 'idle',
+        activeBookingId: 'booking_paid_sync',
+        searchingElapsedSeconds: 31,
+        selectedDestination: null,
+        currentAddress: '',
+        paymentState: {
+          status: 'confirmed',
+          paymentId: 'pix_paid_1',
+          confirmedAt: '2026-06-22T20:00:00.000Z',
+          paymentAmount: 27.5,
+        },
+        selectedFare: 80,
+        activeBooking: {
+          bookingId: 'booking_paid_sync',
+          pickupLocation: { add: '1540 Mission St, San Francisco' },
+          destinationLocation: { add: 'Ferry Building, San Francisco' },
+          estimatedFare: 80,
+          paymentData: { confirmedAt: '2026-06-22T20:00:00.000Z', paymentAmount: 27.5 },
+        },
+        cancelRideSearch,
+        lastError: '',
+      })
+    );
+
+    const navigation = {
+      navigate: jest.fn(),
+      replace: jest.fn(),
+      canGoBack: jest.fn(() => true),
+      goBack: jest.fn(),
+    };
+    const { getAllByText, getByTestId, getByText } = render(
+      <RobotaxiDriverSearchScreen navigation={navigation} route={{ params: {} }} />
+    );
+
+    expect(getByText('BUSCANDO MOTORISTA')).toBeTruthy();
+    expect(getByText('sincronizando estado')).toBeTruthy();
+    expect(() => getByText('Sincronizando...')).toThrow();
+    fireEvent.press(getByTestId('passenger-driver-search-details-toggle'));
+    expect(getAllByText('1540 Mission St').length).toBeGreaterThan(0);
+    expect(getAllByText(/Ferry Building/).length).toBeGreaterThan(0);
+    expect(getAllByText('R$ 27,50').length).toBeGreaterThan(0);
+    expect(() => getByText('R$ 80,00')).toThrow();
+
+    fireEvent.press(getByTestId('passenger-driver-search-cancel-button'));
+    fireEvent.press(getByTestId('passenger-driver-search-support-button'));
+
+    expect(cancelRideSearch).not.toHaveBeenCalled();
+    expect(navigation.replace).not.toHaveBeenCalled();
+    expect(navigation.goBack).not.toHaveBeenCalled();
+    expect(navigation.navigate).toHaveBeenCalledWith('RobotaxiMenuHelp', {
+      source: 'driver_search',
+      bookingId: 'booking_paid_sync',
+    });
+  });
+
+  it('routes a paid active passenger search to no-drivers on terminal no-driver aliases', async () => {
+    usePrototypeRideRuntime.mockReturnValue(
+      buildPassengerRuntime({
+        bookingStatus: 'no_drivers_available',
+        activeBookingId: 'booking_no_driver_terminal',
+        searchingElapsedSeconds: 31,
+        selectedDestination: null,
+        currentAddress: '',
+        paymentState: {
+          status: 'confirmed',
+          paymentId: 'pix_paid_no_driver',
+          confirmedAt: '2026-06-22T20:00:00.000Z',
+          paymentAmount: 27.5,
+        },
+        activeBooking: {
+          bookingId: 'booking_no_driver_terminal',
+          pickupLocation: { add: '1540 Mission St, San Francisco' },
+          destinationLocation: { add: 'Ferry Building, San Francisco' },
+          paymentData: {
+            paymentAmount: 27.5,
+            confirmedAt: '2026-06-22T20:00:00.000Z',
+          },
+        },
+        lastError: '',
+      })
+    );
+
+    const navigation = {
+      navigate: jest.fn(),
+      replace: jest.fn(),
+      canGoBack: jest.fn(() => false),
+      goBack: jest.fn(),
+    };
+
+    const { queryByText } = render(
+      <RobotaxiDriverSearchScreen navigation={navigation} route={{ params: {} }} />
+    );
+
+    expect(queryByText('Buscando motorista')).toBeNull();
+    await waitFor(() => {
+      expect(navigation.replace).toHaveBeenCalledWith(
+        'RobotaxiPrototypeNoDrivers',
+        expect.objectContaining({
+          reason: expect.stringMatching(/motoristas disponíveis/i),
+        }),
+      );
+    });
+  });
+
+	  it('passes the paid gross fare, not stale estimates, when search advances to active trip', async () => {
+	    usePrototypeRideRuntime.mockReturnValue(
+	      buildPassengerRuntime({
+	        bookingStatus: 'accepted',
+	        selectedFare: 80,
+	        paymentState: {
+	          status: 'confirmed',
+	          paymentAmount: 'R$ 27,50',
+	          confirmedAt: '2026-06-22T20:00:00.000Z',
+	        },
+	        activeBooking: {
+	          bookingId: 'booking_paid_accept',
+	          pickupLocation: { add: '1540 Mission St, San Francisco' },
+	          destinationLocation: { add: 'Ferry Building, San Francisco' },
+	          estimatedFare: 80,
+	          fare: 80,
+	          paymentData: {
+	            paymentAmount: 27.5,
+	            confirmedAt: '2026-06-22T20:00:00.000Z',
+	          },
+	        },
+	        lastError: '',
+	      })
+	    );
+
+	    const navigation = {
+	      navigate: jest.fn(),
+	      replace: jest.fn(),
+	      canGoBack: jest.fn(() => false),
+	      goBack: jest.fn(),
+	    };
+	    render(<RobotaxiDriverSearchScreen navigation={navigation} route={{ params: {} }} />);
+
+	    await waitFor(() => {
+	      expect(navigation.replace).toHaveBeenCalledWith(
+	        'RobotaxiPrototypeTrip',
+	        expect.objectContaining({
+	          selectedFare: 27.5,
+	        }),
+	      );
+	    });
+	  });
+
   it('clears the preview route when leaving the no drivers screen back to the map', () => {
     const clearFlowPreview = jest.fn();
     usePrototypeRideRuntime.mockReturnValue(
@@ -1438,17 +5257,38 @@ describe('prototype ride screens', () => {
     );
 
     const navigation = { navigate: jest.fn(), replace: jest.fn(), canGoBack: jest.fn(() => false), goBack: jest.fn() };
-    const { getByText } = render(
+    const { getByTestId } = render(
       <RobotaxiNoDriversScreen
         navigation={navigation}
         route={{ params: { reason: 'Nenhum motorista disponível no momento.' } }}
       />
     );
 
-    fireEvent.press(getByText('Voltar ao mapa'));
+    fireEvent.press(getByTestId('passenger-no-drivers-more-options-button'));
+    fireEvent.press(getByTestId('passenger-no-drivers-back-to-map-button'));
 
     expect(clearFlowPreview).toHaveBeenCalled();
     expect(navigation.navigate).toHaveBeenCalledWith('RobotaxiPrototype');
+  });
+
+  it('does not expose an internal no-drivers reason code to the passenger', () => {
+    usePrototypeRideRuntime.mockReturnValue(
+      buildPassengerRuntime({
+        bookingStatus: 'idle',
+        selectedDestination: { name: 'Ferry Building' },
+        selectedVehicle: 'Leaf Plus',
+      })
+    );
+
+    const screen = render(
+      <RobotaxiNoDriversScreen
+        navigation={{ navigate: jest.fn(), replace: jest.fn() }}
+        route={{ params: { reason: 'no_drivers_available' } }}
+      />
+    );
+
+    expect(screen.queryByText('no_drivers_available')).toBeNull();
+    expect(screen.getByText('Ainda não encontramos um motorista disponível perto de você.')).toBeTruthy();
   });
 
   it('clears the preview route before retrying another destination from no drivers', () => {
@@ -1463,17 +5303,263 @@ describe('prototype ride screens', () => {
     );
 
     const navigation = { navigate: jest.fn(), replace: jest.fn(), canGoBack: jest.fn(() => false), goBack: jest.fn() };
-    const { getByText } = render(
+    const { getByTestId } = render(
       <RobotaxiNoDriversScreen
         navigation={navigation}
         route={{ params: { reason: 'Nenhum motorista disponível no momento.' } }}
       />
     );
 
-    fireEvent.press(getByText('Tentar com outro destino'));
+    fireEvent.press(getByTestId('passenger-no-drivers-retry-button'));
 
     expect(clearFlowPreview).toHaveBeenCalled();
-    expect(navigation.replace).toHaveBeenCalledWith('RobotaxiPrototypeDestination');
+    expect(navigation.replace).toHaveBeenCalledWith('RobotaxiPrototype');
+  });
+
+  it.each(['notified', 'pending_driver', 'waiting_driver'])(
+    'does not flash the no-drivers terminal sheet while search alias %s is active',
+    async (bookingStatus) => {
+      const clearFlowPreview = jest.fn();
+      usePrototypeRideRuntime.mockReturnValue(
+        buildPassengerRuntime({
+          bookingStatus,
+          clearFlowPreview,
+          selectedDestination: { name: 'Ferry Building' },
+          selectedVehicle: 'Leaf Plus',
+        }),
+      );
+
+      const navigation = {
+        navigate: jest.fn(),
+        replace: jest.fn(),
+        canGoBack: jest.fn(() => false),
+        goBack: jest.fn(),
+      };
+      const { queryByTestId } = render(
+        <RobotaxiNoDriversScreen
+          navigation={navigation}
+          route={{ params: { reason: 'Nenhum motorista disponível no momento.' } }}
+        />,
+      );
+
+      expect(queryByTestId('passenger-no-drivers-screen')).toBeNull();
+      await waitFor(() => {
+        expect(navigation.replace).toHaveBeenCalledWith(
+          'RobotaxiPrototypeDriverSearch',
+          expect.any(Object),
+        );
+      });
+    },
+  );
+
+  it('routes a completed no-drivers surface to receipt with canonical ride context', async () => {
+    const clearFlowPreview = jest.fn();
+    usePrototypeRideRuntime.mockReturnValue(
+      buildPassengerRuntime({
+        bookingStatus: 'trip_completed',
+        activeBookingId: 'booking_no_drivers_completed',
+        activeBooking: {
+          bookingId: 'booking_no_drivers_completed',
+          pickupLocation: { add: '1540 Mission St, San Francisco' },
+          destinationLocation: { add: 'Ferry Building, San Francisco' },
+          grossFare: 42.25,
+        },
+        clearFlowPreview,
+        selectedDestination: {
+          name: 'Ferry Building',
+          address: '1 Ferry Building, San Francisco',
+        },
+        selectedFare: 42.25,
+        selectedVehicle: 'Leaf Plus',
+      }),
+    );
+
+    const navigation = {
+      navigate: jest.fn(),
+      replace: jest.fn(),
+      canGoBack: jest.fn(() => false),
+      goBack: jest.fn(),
+    };
+    render(
+      <RobotaxiNoDriversScreen
+        navigation={navigation}
+        route={{ params: { reason: 'Nenhum motorista disponível no momento.' } }}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(navigation.replace).toHaveBeenCalledWith(
+        'RobotaxiPrototypeReceipt',
+        expect.objectContaining({
+          bookingId: 'booking_no_drivers_completed',
+          fare: 42.25,
+          fromTrip: true,
+          grossAmount: 42.25,
+        }),
+      );
+    });
+  });
+
+  it('submits the driver rating, closes the completed cycle, and returns to the map', async () => {
+    const markTripRating = jest.fn();
+    const dismissCompletedReceipt = jest.fn();
+    usePrototypeRideRuntime.mockReturnValue({
+      activeRole: 'driver',
+      profile: { uid: 'driver_1' },
+      lastReceipt: buildReceiptRuntime().lastReceipt,
+      markTripRating,
+      dismissCompletedReceipt,
+    });
+
+    const navigation = {
+      navigate: jest.fn(),
+      replace: jest.fn(),
+      canGoBack: jest.fn(() => false),
+      goBack: jest.fn(),
+    };
+    const receipt = buildReceiptRuntime().lastReceipt;
+    const { getByTestId } = render(
+      <RobotaxiRatingScreen
+        navigation={navigation}
+        route={{
+          params: {
+            fromReceipt: true,
+            reviewerType: 'driver',
+            tripId: 'trip_1',
+            targetUserId: 'customer_1',
+            targetName: 'Passageira Leaf',
+            receipt,
+          },
+        }}
+      />,
+    );
+
+    fireEvent.press(getByTestId('passenger-rating-submit-button'));
+
+    await waitFor(() => {
+      expect(RatingService.submitRating).toHaveBeenCalledWith(
+        expect.objectContaining({
+          tripId: 'trip_1',
+          reviewerType: 'driver',
+          targetUserId: 'customer_1',
+          passengerId: 'customer_1',
+          rating: 5,
+        }),
+      );
+      expect(markTripRating).toHaveBeenCalledWith(
+        'trip_1',
+        expect.objectContaining({
+          driverRatedPassengerValue: 5,
+        }),
+      );
+      expect(dismissCompletedReceipt).toHaveBeenCalledTimes(1);
+      expect(navigation.replace).toHaveBeenCalledWith(
+        'RobotaxiPrototype',
+        expect.objectContaining({
+          resetPassengerHomeSearch: true,
+          source: 'rating_completed',
+        }),
+      );
+      expect(navigation.navigate).not.toHaveBeenCalledWith('RobotaxiPrototype');
+    });
+  });
+
+  it('skips driver rating into a clean map instead of reopening the receipt', () => {
+    const markTripRating = jest.fn();
+    const dismissCompletedReceipt = jest.fn();
+    usePrototypeRideRuntime.mockReturnValue({
+      activeRole: 'driver',
+      profile: { uid: 'driver_1' },
+      lastReceipt: buildReceiptRuntime().lastReceipt,
+      markTripRating,
+      dismissCompletedReceipt,
+    });
+
+    const navigation = {
+      navigate: jest.fn(),
+      replace: jest.fn(),
+      canGoBack: jest.fn(() => true),
+      goBack: jest.fn(),
+    };
+    const { getByTestId } = render(
+      <RobotaxiRatingScreen
+        navigation={navigation}
+        route={{
+          params: {
+            fromReceipt: true,
+            reviewerType: 'driver',
+            tripId: 'trip_1',
+            targetUserId: 'customer_1',
+            targetName: 'Passageira Leaf',
+            receipt: buildReceiptRuntime().lastReceipt,
+          },
+        }}
+      />,
+    );
+
+    fireEvent.press(getByTestId('rating-more-options-button'));
+    fireEvent.press(getByTestId('rating-skip-to-map-button'));
+
+    expect(RatingService.submitRating).not.toHaveBeenCalled();
+    expect(markTripRating).not.toHaveBeenCalled();
+    expect(dismissCompletedReceipt).toHaveBeenCalledTimes(1);
+    expect(navigation.replace).toHaveBeenCalledWith(
+      'RobotaxiPrototype',
+      expect.objectContaining({
+        resetPassengerHomeSearch: true,
+        source: 'rating_completed',
+      }),
+    );
+    expect(navigation.navigate).not.toHaveBeenCalledWith(
+      'RobotaxiPrototypeReceipt',
+      expect.any(Object),
+    );
+    expect(navigation.goBack).not.toHaveBeenCalled();
+  });
+
+  it('keeps the driver rating surface open when submission fails', async () => {
+    RatingService.submitRating.mockRejectedValueOnce(new Error('rating unavailable'));
+    const markTripRating = jest.fn();
+    const dismissCompletedReceipt = jest.fn();
+    usePrototypeRideRuntime.mockReturnValue({
+      activeRole: 'driver',
+      profile: { uid: 'driver_1' },
+      lastReceipt: buildReceiptRuntime().lastReceipt,
+      markTripRating,
+      dismissCompletedReceipt,
+    });
+
+    const navigation = {
+      navigate: jest.fn(),
+      replace: jest.fn(),
+      canGoBack: jest.fn(() => false),
+      goBack: jest.fn(),
+    };
+    const { getByTestId } = render(
+      <RobotaxiRatingScreen
+        navigation={navigation}
+        route={{
+          params: {
+            fromReceipt: true,
+            reviewerType: 'driver',
+            tripId: 'trip_1',
+            targetUserId: 'customer_1',
+            targetName: 'Passageira Leaf',
+            receipt: buildReceiptRuntime().lastReceipt,
+          },
+        }}
+      />,
+    );
+
+    fireEvent.press(getByTestId('passenger-rating-submit-button'));
+
+    await waitFor(() => {
+      expect(RatingService.submitRating).toHaveBeenCalled();
+    });
+    expect(markTripRating).not.toHaveBeenCalled();
+    expect(dismissCompletedReceipt).not.toHaveBeenCalled();
+    expect(navigation.replace).not.toHaveBeenCalledWith('RobotaxiPrototype');
+    expect(navigation.navigate).not.toHaveBeenCalledWith('RobotaxiPrototype');
   });
 
   it('submits the passenger rating, closes the completed cycle, and returns to the map', async () => {
@@ -1488,7 +5574,12 @@ describe('prototype ride screens', () => {
       dismissCompletedReceipt,
     });
 
-    const navigation = { navigate: jest.fn(), canGoBack: jest.fn(() => false), goBack: jest.fn() };
+    const navigation = {
+      navigate: jest.fn(),
+      replace: jest.fn(),
+      canGoBack: jest.fn(() => false),
+      goBack: jest.fn(),
+    };
     const receipt = buildReceiptRuntime().lastReceipt;
     const { getByTestId } = render(
       <RobotaxiRatingScreen
@@ -1525,8 +5616,196 @@ describe('prototype ride screens', () => {
         })
       );
       expect(dismissCompletedReceipt).toHaveBeenCalledTimes(1);
-      expect(navigation.navigate).toHaveBeenCalledWith('RobotaxiPrototype');
+      expect(navigation.replace).toHaveBeenCalledWith(
+        'RobotaxiPrototype',
+        expect.objectContaining({
+          resetPassengerHomeSearch: true,
+          source: 'rating_completed',
+        }),
+      );
+      expect(navigation.navigate).not.toHaveBeenCalledWith('RobotaxiPrototype');
     });
+  });
+
+  it('marks the passenger receipt with the backend-confirmed rating on idempotent replay', async () => {
+    RatingService.submitRating.mockResolvedValueOnce({
+      success: true,
+      ratingId: 'rating_existing',
+      idempotentReplay: true,
+      rating: 4,
+      comment: 'Persistida no backend',
+    });
+    const markTripRating = jest.fn();
+    const dismissCompletedReceipt = jest.fn();
+    usePrototypeRideRuntime.mockReturnValue({
+      activeRole: 'customer',
+      profile: { uid: 'customer_1' },
+      driverInfo: { id: 'driver_1', name: 'Motorista Leaf' },
+      lastReceipt: buildReceiptRuntime().lastReceipt,
+      markTripRating,
+      dismissCompletedReceipt,
+    });
+
+    const navigation = {
+      navigate: jest.fn(),
+      replace: jest.fn(),
+      canGoBack: jest.fn(() => false),
+      goBack: jest.fn(),
+    };
+    const receipt = buildReceiptRuntime().lastReceipt;
+    const { getByTestId } = render(
+      <RobotaxiRatingScreen
+        navigation={navigation}
+        route={{
+          params: {
+            fromReceipt: true,
+            reviewerType: 'passenger',
+            tripId: 'trip_1',
+            targetUserId: 'driver_1',
+            targetName: 'Motorista Leaf',
+            receipt,
+          },
+        }}
+      />
+    );
+
+    fireEvent.press(getByTestId('passenger-rating-air-conditioning-yes'));
+    fireEvent.press(getByTestId('passenger-rating-submit-button'));
+
+    await waitFor(() => {
+      expect(markTripRating).toHaveBeenCalledWith(
+        'trip_1',
+        expect.objectContaining({
+          passengerRatedDriverValue: 4,
+          passengerRatedDriverComment: 'Persistida no backend',
+        })
+      );
+      expect(dismissCompletedReceipt).toHaveBeenCalledTimes(1);
+      expect(navigation.replace).toHaveBeenCalledWith(
+        'RobotaxiPrototype',
+        expect.objectContaining({
+          resetPassengerHomeSearch: true,
+          source: 'rating_completed',
+        }),
+      );
+    });
+  });
+
+  it('skips receipt-launched rating into a clean map instead of reopening the receipt', () => {
+    const markTripRating = jest.fn();
+    const dismissCompletedReceipt = jest.fn();
+    usePrototypeRideRuntime.mockReturnValue({
+      activeRole: 'customer',
+      profile: { uid: 'customer_1' },
+      driverInfo: { id: 'driver_1', name: 'Motorista Leaf' },
+      lastReceipt: buildReceiptRuntime().lastReceipt,
+      markTripRating,
+      dismissCompletedReceipt,
+    });
+
+    const navigation = {
+      navigate: jest.fn(),
+      replace: jest.fn(),
+      canGoBack: jest.fn(() => true),
+      goBack: jest.fn(),
+    };
+    const receipt = buildReceiptRuntime().lastReceipt;
+    const { getByTestId } = render(
+      <RobotaxiRatingScreen
+        navigation={navigation}
+        route={{
+          params: {
+            fromReceipt: true,
+            reviewerType: 'passenger',
+            tripId: 'trip_1',
+            targetUserId: 'driver_1',
+            targetName: 'Motorista Leaf',
+            receipt,
+          },
+        }}
+      />
+    );
+
+    fireEvent.press(getByTestId('rating-more-options-button'));
+    fireEvent.press(getByTestId('rating-skip-to-map-button'));
+
+    expect(RatingService.submitRating).not.toHaveBeenCalled();
+    expect(markTripRating).not.toHaveBeenCalled();
+    expect(dismissCompletedReceipt).toHaveBeenCalledTimes(1);
+    expect(navigation.replace).toHaveBeenCalledWith(
+      'RobotaxiPrototype',
+      expect.objectContaining({
+        resetPassengerHomeSearch: true,
+        source: 'rating_completed',
+      }),
+    );
+    expect(navigation.navigate).not.toHaveBeenCalledWith(
+      'RobotaxiPrototypeReceipt',
+      expect.any(Object)
+    );
+    expect(navigation.goBack).not.toHaveBeenCalled();
+  });
+
+  it('handles Android back on rating as a terminal close to the map', () => {
+    const markTripRating = jest.fn();
+    const dismissCompletedReceipt = jest.fn();
+    let beforeRemoveListener = null;
+    usePrototypeRideRuntime.mockReturnValue({
+      activeRole: 'customer',
+      profile: { uid: 'customer_1' },
+      driverInfo: { id: 'driver_1', name: 'Motorista Leaf' },
+      lastReceipt: buildReceiptRuntime().lastReceipt,
+      markTripRating,
+      dismissCompletedReceipt,
+    });
+
+    const navigation = {
+      navigate: jest.fn(),
+      replace: jest.fn(),
+      canGoBack: jest.fn(() => true),
+      goBack: jest.fn(),
+      addListener: jest.fn((eventName, listener) => {
+        if (eventName === 'beforeRemove') {
+          beforeRemoveListener = listener;
+        }
+        return jest.fn();
+      }),
+    };
+
+    render(
+      <RobotaxiRatingScreen
+        navigation={navigation}
+        route={{
+          params: {
+            fromReceipt: true,
+            reviewerType: 'passenger',
+            tripId: 'trip_1',
+            targetUserId: 'driver_1',
+            targetName: 'Motorista Leaf',
+            receipt: buildReceiptRuntime().lastReceipt,
+          },
+        }}
+      />
+    );
+
+    expect(navigation.addListener).toHaveBeenCalledWith(
+      'beforeRemove',
+      expect.any(Function),
+    );
+
+    const event = { preventDefault: jest.fn(), data: { action: { type: 'GO_BACK' } } };
+    beforeRemoveListener(event);
+
+    expect(event.preventDefault).toHaveBeenCalled();
+    expect(dismissCompletedReceipt).toHaveBeenCalledTimes(1);
+    expect(navigation.replace).toHaveBeenCalledWith(
+      'RobotaxiPrototype',
+      expect.objectContaining({
+        resetPassengerHomeSearch: true,
+        source: 'rating_completed',
+      }),
+    );
+    expect(navigation.goBack).not.toHaveBeenCalled();
   });
 
   it('auto-submits the passenger rating when qa params request it', async () => {
@@ -1543,7 +5822,12 @@ describe('prototype ride screens', () => {
       dismissCompletedReceipt,
     });
 
-    const navigation = { navigate: jest.fn(), canGoBack: jest.fn(() => false), goBack: jest.fn() };
+    const navigation = {
+      navigate: jest.fn(),
+      replace: jest.fn(),
+      canGoBack: jest.fn(() => false),
+      goBack: jest.fn(),
+    };
     const receipt = buildReceiptRuntime().lastReceipt;
     render(
       <RobotaxiRatingScreen
@@ -1580,7 +5864,14 @@ describe('prototype ride screens', () => {
         })
       );
       expect(dismissCompletedReceipt).toHaveBeenCalledTimes(1);
-      expect(navigation.navigate).toHaveBeenCalledWith('RobotaxiPrototype');
+      expect(navigation.replace).toHaveBeenCalledWith(
+        'RobotaxiPrototype',
+        expect.objectContaining({
+          resetPassengerHomeSearch: true,
+          source: 'rating_completed',
+        }),
+      );
+      expect(navigation.navigate).not.toHaveBeenCalledWith('RobotaxiPrototype');
     });
   });
 
@@ -1597,7 +5888,12 @@ describe('prototype ride screens', () => {
       dismissCompletedReceipt,
     });
 
-    const navigation = { navigate: jest.fn(), canGoBack: jest.fn(() => false), goBack: jest.fn() };
+    const navigation = {
+      navigate: jest.fn(),
+      replace: jest.fn(),
+      canGoBack: jest.fn(() => false),
+      goBack: jest.fn(),
+    };
     const { getByTestId } = render(
       <RobotaxiRatingScreen
         navigation={navigation}
@@ -1622,6 +5918,7 @@ describe('prototype ride screens', () => {
     });
     expect(markTripRating).not.toHaveBeenCalled();
     expect(dismissCompletedReceipt).not.toHaveBeenCalled();
+    expect(navigation.replace).not.toHaveBeenCalledWith('RobotaxiPrototype');
     expect(navigation.navigate).not.toHaveBeenCalledWith('RobotaxiPrototype');
   });
 });

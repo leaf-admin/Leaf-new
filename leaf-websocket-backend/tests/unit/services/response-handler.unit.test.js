@@ -20,7 +20,21 @@ jest.mock('../../../services/ride-state-manager', () => ({
     REASSIGNMENT_PENDING: 'REASSIGNMENT_PENDING'
   },
   getBookingState: jest.fn(),
-  updateBookingState: jest.fn().mockResolvedValue(true)
+  updateBookingState: jest.fn().mockResolvedValue(true),
+  isTerminalStateValue: jest.fn((value) => [
+    'COMPLETE',
+    'COMPLETED',
+    'CANCELED',
+    'CANCELLED',
+    'REJECTED',
+    'EXPIRED',
+    'SUPERSEDED',
+    'NO_DRIVERS_AVAILABLE',
+    'NO_DRIVERS_FOUND',
+    'EARLY_ENDED_BY_RIDER',
+    'INTERRUPTED_OPERATIONAL_ENDED',
+    'EARLY_ENDED_REVIEW'
+  ].includes(String(value || '').trim().toUpperCase()))
 }));
 
 jest.mock('../../../services/ride-queue-manager', () => ({
@@ -147,5 +161,19 @@ describe('response-handler rejection cooldown', () => {
       'awaitingResponseDriverId',
       'awaitingResponseAt'
     );
+  });
+
+  it('does not dispatch terminal alternate bookings to drivers', async () => {
+    const handler = new ResponseHandler({
+      to: jest.fn(() => ({ emit: jest.fn() }))
+    });
+    redis.get = jest.fn().mockResolvedValue(null);
+
+    const current = await handler.isBookingCurrentForCustomer('booking_review', {
+      customerId: 'customer_1',
+      status: 'EARLY_ENDED_REVIEW'
+    });
+
+    expect(current).toBe(false);
   });
 });

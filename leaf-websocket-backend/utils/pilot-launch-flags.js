@@ -24,12 +24,16 @@ function resolveLaunchProfile() {
     return 'pilot_controlled';
   }
 
+  if (['ride_flow_validation', 'ride_validation', 'flow_validation'].includes(normalized)) {
+    return 'ride_flow_validation';
+  }
+
   return normalized || 'full';
 }
 
 function isPilotControlledLaunch() {
   return (
-    resolveLaunchProfile() === 'pilot_controlled' ||
+    ['pilot_controlled', 'geofence_validation', 'ride_flow_validation'].includes(resolveLaunchProfile()) ||
     normalizeFlag(firstDefined(process.env.LEAF_PILOT_CONTROLLED, process.env.EXPO_PUBLIC_PILOT_CONTROLLED), false)
   );
 }
@@ -53,6 +57,7 @@ function getPilotLaunchFlags() {
     smartPushEnabled: resolvePilotFeature('ENABLE_SMART_PUSH', false),
     softBanEnforcementEnabled: resolvePilotFeature('ENABLE_SOFT_BAN_ENFORCEMENT', true),
     adminMutationsEnabled: resolvePilotFeature('ENABLE_ADMIN_MUTATIONS', true),
+    financialSimulatorEnabled: resolvePilotFeature('ENABLE_FINANCIAL_SIMULATOR', false),
   };
 }
 
@@ -79,5 +84,7 @@ module.exports = {
   getPilotLaunchFlags,
   isPilotControlledLaunch,
   isLaunchFeatureEnabled,
-  buildLaunchFeatureDisabledPayload
+  buildLaunchFeatureDisabledPayload,
+  resolveLaunchProfile,
+  isRideFlowValidationLaunch: () => resolveLaunchProfile() === 'ride_flow_validation'
 };

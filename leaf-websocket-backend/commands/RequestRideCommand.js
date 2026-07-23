@@ -29,6 +29,7 @@ const fareEstimationService = require('../services/fare-estimation-service');
 const PaymentService = require('../services/payment-service');
 const passengerDiscountBenefitService = require('../services/passenger-discount-benefit-service');
 const { resolveEstimatedFareSnapshot } = require('../utils/fare-snapshot-utils');
+const { resolveFinancialContext } = require('../services/financial-runtime-context');
 
 const paymentService = new PaymentService();
 const PAID_PAYMENT_STATUSES = new Set(['confirmed', 'paid', 'in_holding']);
@@ -42,8 +43,15 @@ class RequestRideCommand extends Command {
         this.estimatedFare = data.estimatedFare || 0;
         this.routeDistanceKm = data.routeDistanceKm || 0;
         this.routeDurationSecs = data.routeDurationSecs || 0;
+        this.routeCoordinates = Array.isArray(data.routeCoordinates)
+            ? data.routeCoordinates
+            : [];
+        this.trafficSegments = Array.isArray(data.trafficSegments)
+            ? data.trafficSegments
+            : [];
         this.tollFee = data.tollFee || 0;
         this.carType = data.carType || null;
+        this.passengerName = String(data.passengerName || data.customerName || '').trim();
         this.paymentMethod = data.paymentMethod || 'pix';
         this.paymentStatus = data.paymentStatus || 'pending_payment';
         this.paymentId = data.paymentId || null;
@@ -221,6 +229,67 @@ class RequestRideCommand extends Command {
                     this.paymentData?.rideId ||
                     ''
                 ).trim();
+                const paymentSessionId = String(
+                    this.paymentData?.paymentSessionId ||
+                    ''
+                ).trim();
+                const paymentContextKey = String(
+                    this.paymentData?.paymentContextKey ||
+                    this.paymentData?.contextKey ||
+                    ''
+                ).trim();
+                const paymentQuoteSessionId = String(
+                    this.paymentData?.quoteSessionId ||
+                    ''
+                ).trim();
+                const paymentQuoteLockId = String(
+                    this.paymentData?.quoteLockId ||
+                    ''
+                ).trim();
+                const paymentDriverReservationId = String(
+                    this.paymentData?.paymentDriverReservationId ||
+                    ''
+                ).trim();
+                const paymentDriverReservationDriverId = String(
+                    this.paymentData?.paymentDriverReservationDriverId ||
+                    ''
+                ).trim();
+                const paymentDriverReservationExpiresAt = String(
+                    this.paymentData?.paymentDriverReservationExpiresAt ||
+                    ''
+                ).trim();
+                const paymentDriverReservationTtlSeconds = Number.parseInt(
+                    String(this.paymentData?.paymentDriverReservationTtlSeconds || ''),
+                    10
+                );
+                const paymentProviderEnvironment = String(
+                    this.paymentData?.paymentProviderEnvironment ||
+                    this.paymentData?.providerEnvironment ||
+                    ''
+                ).trim();
+                const paymentProfileId = String(
+                    this.paymentData?.paymentProfileId ||
+                    ''
+                ).trim();
+                const paymentProfileReason = String(
+                    this.paymentData?.paymentProfileReason ||
+                    ''
+                ).trim();
+                const paymentProfileSource = String(
+                    this.paymentData?.paymentProfileSource ||
+                    ''
+                ).trim();
+                const financialContextResult = resolveFinancialContext({
+                    financialContext: this.paymentData?.financialContext,
+                    financialNamespace: this.paymentData?.financialNamespace,
+                    providerEnvironment: paymentProviderEnvironment
+                }, { allowLegacyOperational: true });
+                if (!financialContextResult.ok) {
+                    const financialContextError = new Error(financialContextResult.error);
+                    financialContextError.code = financialContextResult.code;
+                    throw financialContextError;
+                }
+                const financialContext = financialContextResult.context;
                 const parsedPaymentAmountInCents = Number.parseInt(
                     String(this.paymentData?.amountInCents ?? ''),
                     10
@@ -250,6 +319,17 @@ class RequestRideCommand extends Command {
                     lockedEstimatedFareFromPayment !== null
                         ? lockedEstimatedFareFromPayment
                         : fareEstimation.estimatedFare;
+                const hasLockedRouteMetrics =
+                    hasConfirmedPayment &&
+                    Number(this.routeDistanceKm) > 0 &&
+                    Number(this.routeDurationSecs) > 0;
+                const bookingRouteMetrics = hasLockedRouteMetrics
+                    ? {
+                        distanceKm: Number(this.routeDistanceKm),
+                        durationSecs: Math.max(0, Math.round(Number(this.routeDurationSecs))),
+                        source: 'payment_quote_lock'
+                    }
+                    : fareEstimation.routeMetrics;
                 const pricingPayloadForBooking =
                     fareEstimation.pricingPayload &&
                     typeof fareEstimation.pricingPayload === 'object'
@@ -296,6 +376,8 @@ class RequestRideCommand extends Command {
                 const bookingData = {
                     bookingId,
                     customerId: this.customerId,
+                    passengerName: this.passengerName || null,
+                    customerName: this.passengerName || null,
                     pickupLocation: this.pickupLocation,
                     destinationLocation: this.destinationLocation,
                     estimatedFare: estimatedFareForBooking,
@@ -310,10 +392,12 @@ class RequestRideCommand extends Command {
                             : 0,
                     passengerDiscountBenefit: paymentDiscountBenefit || null,
                     passengerDiscountUsage: consumedDiscount?.usage || null,
-                    routeDistanceKm: fareEstimation.routeMetrics.distanceKm,
-                    routeDurationSecs: fareEstimation.routeMetrics.durationSecs,
+                    routeDistanceKm: bookingRouteMetrics.distanceKm,
+                    routeDurationSecs: bookingRouteMetrics.durationSecs,
+                    routeCoordinates: this.routeCoordinates,
+                    trafficSegments: this.trafficSegments,
                     tollFee: fareEstimation.tollFee,
-                    fareSource: fareEstimation.routeMetrics.source,
+                    fareSource: bookingRouteMetrics.source,
                     pricingPayload: pricingPayloadForBooking,
                     pricingAudit: fareEstimation.pricingAudit,
                     operationalState: fareEstimation.operationalState,
@@ -324,7 +408,28 @@ class RequestRideCommand extends Command {
                     paymentStatus: normalizedPaymentStatus,
                     paymentChargeId,
                     paymentReferenceRideId,
+                    paymentSessionId,
+                    paymentContextKey,
                     paymentAmountInCents: paymentAmountInCents || '',
+                    paymentGrossAmountInCents: paymentGrossAmountInCents || '',
+                    paymentQuoteSessionId,
+                    paymentQuoteLockId,
+                    paymentDriverReservationId,
+                    paymentDriverReservationDriverId,
+                    paymentDriverReservationExpiresAt,
+                    paymentDriverReservationTtlSeconds:
+                        Number.isFinite(paymentDriverReservationTtlSeconds) &&
+                        paymentDriverReservationTtlSeconds > 0
+                            ? paymentDriverReservationTtlSeconds
+                            : '',
+                    paymentProviderEnvironment,
+                    providerEnvironment: paymentProviderEnvironment,
+                    paymentProfileId,
+                    paymentProfileReason,
+                    paymentProfileSource,
+                    financialContext: JSON.stringify(financialContext),
+                    financialNamespace: financialContext.namespace,
+                    financialContextId: financialContext.contextId,
                     paymentConfirmedAt,
                     preferences: { ...(this.preferences || {}) },
                     femaleDriverOnly: this.preferences?.femaleDriverOnly === true ||
@@ -375,6 +480,9 @@ class RequestRideCommand extends Command {
                     carType: this.carType,
                     paymentMethod: this.paymentMethod,
                     paymentStatus: normalizedPaymentStatus,
+                    financialContext,
+                    financialNamespace: financialContext.namespace,
+                    financialContextId: financialContext.contextId,
                     ...(estimatedFareSnapshot || {}),
                     pricingSnapshotLocked: Boolean(estimatedFareSnapshot),
                     pricingSnapshotLockedAt,

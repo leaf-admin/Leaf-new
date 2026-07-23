@@ -1,5 +1,12 @@
 describe('runtimeAccessPolicy payment bypass gates', () => {
-  const loadPolicy = ({ extra = {}, isDevice = true, dev = false, env = {} } = {}) => {
+  const loadPolicy = ({
+    extra = {},
+    currentExtra,
+    classicExtra,
+    isDevice = true,
+    dev = false,
+    env = {},
+  } = {}) => {
     jest.resetModules();
 
     Object.keys(process.env)
@@ -15,9 +22,13 @@ describe('runtimeAccessPolicy payment bypass gates', () => {
       isDevice,
     }));
     jest.doMock('expo-constants', () => ({
-      expoConfig: {
-        extra,
-      },
+      expoConfig: { extra },
+      ...(currentExtra === undefined
+        ? {}
+        : { manifest2: { extra: { expoClient: { extra: currentExtra } } } }),
+      ...(classicExtra === undefined
+        ? {}
+        : { manifest: { extra: classicExtra } }),
     }));
 
     return require('../src/config/runtimeAccessPolicy');
@@ -44,6 +55,7 @@ describe('runtimeAccessPolicy payment bypass gates', () => {
 
   it('allows forced payment bypass only with explicit QA tools and payment flags', () => {
     const policy = loadPolicy({
+      isDevice: false,
       dev: true,
       env: {
         EXPO_PUBLIC_ENABLE_TEST_USER_TOOLS: 'true',
@@ -53,6 +65,57 @@ describe('runtimeAccessPolicy payment bypass gates', () => {
 
     expect(policy.allowTestUserTools()).toBe(true);
     expect(policy.allowForcedPaymentBypass()).toBe(true);
+  });
+
+  it('does not enable QA tools on a physical debug device', () => {
+    const policy = loadPolicy({
+      isDevice: true,
+      dev: true,
+      env: {
+        EXPO_PUBLIC_ENABLE_TEST_USER_TOOLS: 'true',
+      },
+    });
+
+    expect(policy.hasExplicitTestUserToolsFlag()).toBe(true);
+    expect(policy.allowTestUserTools()).toBe(false);
+  });
+
+  it('lets a current manifest without the flag shadow stale embedded QA tools', () => {
+    const policy = loadPolicy({
+      extra: { enableTestUserTools: true },
+      currentExtra: {},
+      isDevice: false,
+      dev: true,
+    });
+
+    expect(policy.hasExplicitTestUserToolsFlag()).toBe(false);
+    expect(policy.allowTestUserTools()).toBe(false);
+  });
+
+  it('lets an explicit current manifest false shadow stale embedded QA tools', () => {
+    const policy = loadPolicy({
+      extra: { enableTestUserTools: true },
+      currentExtra: { enableTestUserTools: false },
+      isDevice: false,
+      dev: true,
+    });
+
+    expect(policy.hasExplicitTestUserToolsFlag()).toBe(false);
+    expect(policy.allowTestUserTools()).toBe(false);
+  });
+
+  it('lets an explicit current bundle false shadow stale embedded QA tools', () => {
+    const policy = loadPolicy({
+      extra: { enableTestUserTools: true },
+      isDevice: false,
+      dev: true,
+      env: {
+        EXPO_PUBLIC_ENABLE_TEST_USER_TOOLS: 'false',
+      },
+    });
+
+    expect(policy.hasExplicitTestUserToolsFlag()).toBe(false);
+    expect(policy.allowTestUserTools()).toBe(false);
   });
 
   it('does not allow direct Google fallback on simulator without explicit flag', () => {

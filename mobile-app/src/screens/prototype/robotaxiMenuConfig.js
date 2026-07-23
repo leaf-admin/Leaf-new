@@ -1,6 +1,9 @@
+import { CURRENT_SURFACE_STATUS } from './currentSurfaceStatus';
+
 const COMMON_ITEMS = [
   {
     key: 'privacy-account-deletion',
+    status: CURRENT_SURFACE_STATUS.CURRENT,
     title: 'Privacidade',
     icon: 'shield-checkmark-outline',
     route: 'PrivacyPolicy',
@@ -10,17 +13,8 @@ const COMMON_ITEMS = [
     subtitle: 'Dados e preferências da conta'
   },
   {
-    key: 'messages',
-    title: 'Mensagens',
-    icon: 'chatbubbles-outline',
-    route: 'RobotaxiPrototypeChat',
-    detailRoute: 'RobotaxiMenuMessages',
-    openDirect: true,
-    section: 'support',
-    subtitle: 'Canal com suporte e passageiros'
-  },
-  {
     key: 'settings',
+    status: CURRENT_SURFACE_STATUS.CURRENT,
     title: 'Configurações',
     icon: 'settings-outline',
     route: 'RobotaxiPrototypeSettings',
@@ -31,6 +25,7 @@ const COMMON_ITEMS = [
   },
   {
     key: 'help',
+    status: CURRENT_SURFACE_STATUS.CURRENT,
     title: 'Ajuda',
     icon: 'help-circle-outline',
     route: 'RobotaxiPrototypeSupport',
@@ -51,6 +46,7 @@ function withRole(items, role) {
 const PASSENGER_ITEMS = [
   {
     key: 'edit-profile',
+    status: CURRENT_SURFACE_STATUS.CURRENT,
     title: 'Editar perfil',
     icon: 'person-outline',
     route: 'RobotaxiPrototypeProfile',
@@ -62,6 +58,7 @@ const PASSENGER_ITEMS = [
   },
   {
     key: 'trip-history',
+    status: CURRENT_SURFACE_STATUS.CURRENT,
     title: 'Histórico de viagens',
     icon: 'time-outline',
     route: 'RobotaxiPrototypeReceipt',
@@ -73,6 +70,7 @@ const PASSENGER_ITEMS = [
   },
   {
     key: 'passenger-invites',
+    status: CURRENT_SURFACE_STATUS.CURRENT,
     title: 'Convites',
     icon: 'people-outline',
     route: 'RobotaxiPrototypeInvites',
@@ -87,6 +85,7 @@ const PASSENGER_ITEMS = [
 const DRIVER_ITEMS = [
   {
     key: 'driver-earnings',
+    status: CURRENT_SURFACE_STATUS.CURRENT,
     title: 'Ganhos',
     icon: 'wallet-outline',
     route: 'EarningsReport',
@@ -97,6 +96,7 @@ const DRIVER_ITEMS = [
   },
   {
     key: 'driver-history',
+    status: CURRENT_SURFACE_STATUS.CURRENT,
     title: 'Corridas concluídas',
     icon: 'time-outline',
     route: 'RobotaxiPrototypeReceipt',
@@ -108,6 +108,7 @@ const DRIVER_ITEMS = [
   },
   {
     key: 'driver-activation',
+    status: CURRENT_SURFACE_STATUS.CURRENT,
     title: 'Ativação do motorista',
     icon: 'shield-checkmark-outline',
     route: 'RobotaxiPrototypeDriverActivation',
@@ -118,6 +119,7 @@ const DRIVER_ITEMS = [
   },
   {
     key: 'driver-documents',
+    status: CURRENT_SURFACE_STATUS.CURRENT,
     title: 'Documentos',
     icon: 'document-text-outline',
     route: 'RobotaxiPrototypeDriverDocuments',
@@ -128,6 +130,7 @@ const DRIVER_ITEMS = [
   },
   {
     key: 'driver-vehicles',
+    status: CURRENT_SURFACE_STATUS.CURRENT,
     title: 'Veículos',
     icon: 'car-outline',
     route: 'RobotaxiPrototypeVehicles',
@@ -138,6 +141,7 @@ const DRIVER_ITEMS = [
   },
   {
     key: 'driver-waitlist-invites',
+    status: CURRENT_SURFACE_STATUS.CURRENT,
     title: 'Waitlist e convites',
     icon: 'people-outline',
     route: 'RobotaxiPrototypeDriverWaitlist',
@@ -148,6 +152,7 @@ const DRIVER_ITEMS = [
   },
   {
     key: 'edit-profile',
+    status: CURRENT_SURFACE_STATUS.CURRENT,
     title: 'Perfil do motorista',
     icon: 'person-outline',
     route: 'RobotaxiPrototypeProfile',
@@ -197,19 +202,39 @@ export function getMenuItemByRoute(routeName, role) {
   );
 }
 
-export function getMenuItemsByRole(role) {
+export function getMenuItemsByRole(role, options = {}) {
   const normalizedRole = role === 'driver' ? 'driver' : 'customer';
+  const referralProgramsEnabled = options.referralProgramsEnabled !== false;
   return ROBOTAXI_MENU_ITEMS.filter(item => {
     if (!Array.isArray(item?.roles) || item.roles.length === 0) {
       return true;
     }
 
     return item.roles.includes(normalizedRole);
+  }).map(item => {
+    if (!referralProgramsEnabled && item.key === 'passenger-invites') {
+      return {
+        ...item,
+        status: CURRENT_SURFACE_STATUS.OUT_OF_PILOT,
+        subtitle: 'Fora do piloto controlado',
+      };
+    }
+
+    if (!referralProgramsEnabled && item.key === 'driver-waitlist-invites') {
+      return {
+        ...item,
+        title: 'Waitlist',
+        subtitle: 'Fila de ativação da cidade',
+        status: CURRENT_SURFACE_STATUS.CURRENT,
+      };
+    }
+
+    return item;
   });
 }
 
-export function getMenuSectionsByRole(role) {
-  const items = getMenuItemsByRole(role);
+export function getMenuSectionsByRole(role, options = {}) {
+  const items = getMenuItemsByRole(role, options);
   const bucket = new Map();
 
   items.forEach(item => {

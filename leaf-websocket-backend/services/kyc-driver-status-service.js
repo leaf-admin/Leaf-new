@@ -30,6 +30,99 @@ class KYCDriverStatusService {
     };
   }
 
+  normalizeManualAuditEvidence(value) {
+    if (Array.isArray(value)) {
+      return value
+        .map((item) => {
+          if (typeof item === 'string') return { ref: item };
+          if (item && typeof item === 'object') return item;
+          return null;
+        })
+        .filter(Boolean);
+    }
+
+    if (value && typeof value === 'object') {
+      return [value];
+    }
+
+    if (typeof value === 'string' && value.trim()) {
+      return [{ ref: value.trim() }];
+    }
+
+    return [];
+  }
+
+  normalizeManualKycAudit(driverId, action, options = {}) {
+    const audit = options.audit || options.auditTrail || {};
+    const actorId = String(
+      audit.actorId ||
+        options.actorId ||
+        audit.actor?.id ||
+        ''
+    ).trim();
+    const actorRole = String(
+      audit.actorRole ||
+        options.actorRole ||
+        audit.actor?.role ||
+        'admin'
+    ).trim();
+    const reason = String(
+      audit.reason ||
+        options.reason ||
+        options.reviewReason ||
+        options.justification ||
+        ''
+    ).trim();
+    const provenance = String(
+      audit.provenance ||
+        options.provenance ||
+        options.source ||
+        ''
+    ).trim();
+    const evidence = this.normalizeManualAuditEvidence(
+      audit.evidence ||
+        audit.evidenceRefs ||
+        options.evidence ||
+        options.evidenceRefs
+    );
+
+    if (!actorId || !actorRole || !reason || !provenance || evidence.length === 0) {
+      const error = new Error('KYC manual override exige actorId, actorRole, reason, provenance e evidence.');
+      error.code = `${action.toUpperCase()}_AUDIT_REQUIRED`;
+      throw error;
+    }
+
+    return {
+      action,
+      driverId,
+      actorId,
+      actorRole,
+      reason,
+      provenance,
+      evidence,
+      createdAt: new Date().toISOString()
+    };
+  }
+
+  async getKycPreviousState(driverId) {
+    const firestore = admin.firestore();
+    const [driverDoc, userDoc] = await Promise.all([
+      firestore.collection('drivers').doc(driverId).get(),
+      firestore.collection('users').doc(driverId).get()
+    ]);
+    const driverData = driverDoc.exists ? (driverDoc.data() || {}) : {};
+    const userData = userDoc.exists ? (userDoc.data() || {}) : {};
+    const source = userDoc.exists ? userData : driverData;
+
+    return {
+      exists: Boolean(driverDoc.exists || userDoc.exists),
+      kycStatus: source.kycStatus || source.kyc_status || null,
+      kycBlocked: source.kycBlocked ?? source.kyc_blocked ?? null,
+      kycBlockedReason: source.kycBlockedReason || source.kyc_blocked_reason || null,
+      kycReverifyRequired: source.kycReverifyRequired ?? source.kyc_reverify_required ?? null
+    };
+  }
+
   /**
    * Bloquear motorista por falha no KYC
    * @param {string} driverId - ID do motorista
@@ -126,6 +219,15 @@ class KYCDriverStatusService {
       });
 
       const timestamp = new Date().toISOString();
+      let manualAudit = null;
+      if (options.manualOverride === true) {
+        manualAudit = this.normalizeManualKycAudit(driverId, 'kyc_unblock', options);
+        manualAudit.previousState = await this.getKycPreviousState(driverId);
+        manualAudit.nextState = {
+          kycStatus: 'approved',
+          kycBlocked: false
+        };
+      }
 
       // 1. Atualizar Redis
       await this.updateRedisStatus(driverId, {
@@ -147,7 +249,13 @@ class KYCDriverStatusService {
         kycBlockedAt: admin.firestore.FieldValue.delete(),
         kycBlockedReason: admin.firestore.FieldValue.delete(),
         similarityScore: options.similarityScore || null,
-        confidence: options.confidence || null
+        confidence: options.confidence || null,
+        ...(manualAudit ? {
+          kycManualOverrideAudit: manualAudit,
+          kycManualOverrideAt: admin.firestore.FieldValue.serverTimestamp(),
+          kycManualOverrideActorId: manualAudit.actorId,
+          kycManualOverrideReason: manualAudit.reason
+        } : {})
       });
 
       // 4. Enviar notificação
@@ -238,9 +346,10 @@ class KYCDriverStatusService {
         service: 'kyc-driver-status-service',
         driverId
       });
-      // Em caso de erro, assumir não bloqueado (fail-open)
       return {
-        blocked: false,
+        blocked: true,
+        reason: 'KYC indisponivel para validacao operacional',
+        code: 'KYC_STATUS_UNAVAILABLE',
         error: error.message,
         source: 'error'
       };
@@ -272,8 +381,7 @@ class KYCDriverStatusService {
         service: 'kyc-driver-status-service',
         driverId
       });
-      // Em caso de erro, permitir (fail-open)
-      return true;
+      return false;
     }
   }
 

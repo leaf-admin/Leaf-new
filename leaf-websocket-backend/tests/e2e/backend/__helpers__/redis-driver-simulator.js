@@ -150,6 +150,18 @@ class RedisDriverSimulator {
     return value;
   }
 
+  resolveDriverTtlSeconds(isOnline, isInTrip) {
+    const overrideRaw = isOnline
+      ? process.env.E2E_DRIVER_ONLINE_TTL_SECONDS
+      : process.env.E2E_DRIVER_OFFLINE_TTL_SECONDS;
+    const override = Number.parseInt(overrideRaw || '', 10);
+    if (Number.isFinite(override) && override >= 0) {
+      return override;
+    }
+
+    return isOnline ? (isInTrip ? 60 : 120) : 86400;
+  }
+
   assertNoAuth(rawOutput) {
     if (/\bNOAUTH\b/i.test(String(rawOutput || ''))) {
       throw new Error('NOAUTH ao acessar Redis remoto. Verifique E2E_REMOTE_REDIS_PASSWORD e permissões do container.');
@@ -438,7 +450,7 @@ class RedisDriverSimulator {
         const headingNum = this.sanitizeNumber(heading, 'heading');
         const speedNum = this.sanitizeNumber(speed, 'speed');
         const timestamp = Date.now();
-        const ttl = isOnline ? (isInTrip ? 60 : 120) : 86400;
+        const ttl = this.resolveDriverTtlSeconds(isOnline, isInTrip);
         const status = isOnline ? 'AVAILABLE' : 'OFFLINE';
         const redisCli = this.buildRemoteRedisCli();
         const key = `driver:${safeDriverId}`;
@@ -448,7 +460,9 @@ class RedisDriverSimulator {
         const clearActiveTripFieldsCmd = `${redisCli} HDEL ${key} activeTripId activeTripUpdatedAt >/dev/null`;
         const onlineGeoCmd = `${redisCli} GEOADD driver_locations ${lngNum} ${latNum} ${safeDriverId} >/dev/null && ${redisCli} GEOADD driver_locations_eligible ${lngNum} ${latNum} ${safeDriverId} >/dev/null && ${redisCli} ZREM driver_offline_locations ${safeDriverId} >/dev/null`;
         const offlineGeoCmd = `${redisCli} GEOADD driver_offline_locations ${lngNum} ${latNum} ${safeDriverId} >/dev/null && ${redisCli} ZREM driver_locations ${safeDriverId} >/dev/null && ${redisCli} ZREM driver_locations_eligible ${safeDriverId} >/dev/null`;
-        const expireCmd = `${redisCli} EXPIRE ${key} ${ttl} >/dev/null`;
+        const expireCmd = ttl > 0
+          ? `${redisCli} EXPIRE ${key} ${ttl} >/dev/null`
+          : `${redisCli} PERSIST ${key} >/dev/null`;
 
         const script = isOnline
           ? `${clearLocksCmd} && ${setHashCmd} && ${clearActiveTripFieldsCmd} && ${onlineGeoCmd} && ${expireCmd}`
@@ -456,7 +470,7 @@ class RedisDriverSimulator {
 
         await this.runRemoteShell(script);
 
-        console.log(`✅ [RedisDriverSimulator] Motorista ${safeDriverId} ${isInTrip ? 'EM VIAGEM' : (isOnline ? 'ONLINE' : 'OFFLINE')} salvo no Redis remoto (Contabo): ${latNum}, ${lngNum}, TTL: ${ttl}s`);
+        console.log(`✅ [RedisDriverSimulator] Motorista ${safeDriverId} ${isInTrip ? 'EM VIAGEM' : (isOnline ? 'ONLINE' : 'OFFLINE')} salvo no Redis remoto (Contabo): ${latNum}, ${lngNum}, TTL: ${ttl > 0 ? `${ttl}s` : 'persistente'}`);
         return { success: true, driverId: safeDriverId, lat: latNum, lng: lngNum, isOnline };
       }
 
@@ -505,10 +519,14 @@ class RedisDriverSimulator {
         await redis.zrem('driver_offline_locations', driverId);
         
         // 4. TTL diferenciado por estado
-        const ttl = isInTrip ? 60 : 120;
-        await redis.expire(`driver:${driverId}`, ttl);
+        const ttl = this.resolveDriverTtlSeconds(true, isInTrip);
+        if (ttl > 0) {
+          await redis.expire(`driver:${driverId}`, ttl);
+        } else {
+          await redis.persist(`driver:${driverId}`);
+        }
         
-        console.log(`✅ [RedisDriverSimulator] Motorista ${driverId} ${isInTrip ? 'EM VIAGEM' : 'ONLINE'} salvo no Redis (GEO ativo): ${lat}, ${lng}, TTL: ${ttl}s`);
+        console.log(`✅ [RedisDriverSimulator] Motorista ${driverId} ${isInTrip ? 'EM VIAGEM' : 'ONLINE'} salvo no Redis (GEO ativo): ${lat}, ${lng}, TTL: ${ttl > 0 ? `${ttl}s` : 'persistente'}`);
       } else {
         // 2. Motorista OFFLINE: adicionar no GEO offline
         await redis.geoadd('driver_offline_locations', lng, lat, driverId);
@@ -518,7 +536,12 @@ class RedisDriverSimulator {
         await redis.zrem('driver_locations_eligible', driverId);
         
         // 4. TTL longo para offline (24 horas)
-        await redis.expire(`driver:${driverId}`, 86400);
+        const ttl = this.resolveDriverTtlSeconds(false, false);
+        if (ttl > 0) {
+          await redis.expire(`driver:${driverId}`, ttl);
+        } else {
+          await redis.persist(`driver:${driverId}`);
+        }
         
         console.log(`✅ [RedisDriverSimulator] Motorista ${driverId} OFFLINE salvo no Redis (GEO offline): ${lat}, ${lng}`);
       }

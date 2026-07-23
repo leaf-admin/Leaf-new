@@ -1,3 +1,8 @@
+const {
+    getPaymentAvailabilityLimit,
+    getPaymentAvailabilityRadiusKm
+} = require('../utils/dispatch-config');
+
 function sanitizeDiagnosticToken(value, fallback = 'none') {
     const normalized = String(value || '')
         .trim()
@@ -56,6 +61,7 @@ function registerSocketSearchDriversHandler({
             carType: options.carType || null,
             radiusKm: options.radiusKm,
             limit: options.limit,
+            io: socket?.nsp || socket?.server || null,
             logStructured,
             logContext: {
                 service: 'socket-search-drivers-handler',
@@ -75,7 +81,7 @@ function registerSocketSearchDriversHandler({
             };
             const requestedCarType = data?.carType || data?.vehicle || null;
             const requestedRadiusKm = Number.parseFloat(
-                data?.radiusKm || process.env.PAYMENT_AVAILABILITY_RADIUS_KM || '5'
+                data?.radiusKm || getPaymentAvailabilityRadiusKm()
             );
 
             const availability = await checkCanonicalPaymentAvailability(pickupLocation, {
@@ -83,7 +89,7 @@ function registerSocketSearchDriversHandler({
                 destinationLocation: data?.destinationLocation || data?.destination || null,
                 preferences: data?.preferences || {},
                 radiusKm: Number.isFinite(requestedRadiusKm) ? requestedRadiusKm : 5,
-                limit: Number.parseInt(data?.limit || process.env.PAYMENT_AVAILABILITY_LIMIT || '12', 10)
+                limit: Number.parseInt(data?.limit || getPaymentAvailabilityLimit(), 10)
             });
 
             if (!availability?.success) {
@@ -112,7 +118,12 @@ function registerSocketSearchDriversHandler({
                     ? 'Há motoristas disponíveis para esta corrida.'
                     : 'Não há motoristas disponíveis',
                 carType: requestedCarType,
-                radiusKm
+                radiusKm,
+                candidates: availability.candidates ?? availability.summary?.candidates ?? null,
+                eligible: availability.eligible ?? availability.summary?.eligible ?? null,
+                rejections: availability.rejections || null,
+                estimatedPickupEtaMin: availability.estimatedPickupEtaMin ?? null,
+                driverId: availability.driverId || null
             });
 
             logStructured('info', buildAvailabilityDiagnosticMessage({
@@ -192,13 +203,13 @@ function registerSocketSearchDriversHandler({
                 return;
             }
 
-            const radiusFromPreferences = Number.parseFloat(preferences?.radiusKm || preferences?.searchRadiusKm || process.env.PAYMENT_AVAILABILITY_RADIUS_KM || '5');
+            const radiusFromPreferences = Number.parseFloat(preferences?.radiusKm || preferences?.searchRadiusKm || getPaymentAvailabilityRadiusKm());
             const availability = await findAvailableDriversForPickup(pickupLocation, {
                 destinationLocation,
                 preferences,
                 carType: carType || preferences?.carType || null,
                 radiusKm: Number.isFinite(radiusFromPreferences) ? radiusFromPreferences : 5,
-                limit: Number.parseInt(preferences?.limit || '10', 10)
+                limit: Number.parseInt(preferences?.limit || getPaymentAvailabilityLimit(), 10)
             });
 
             if (!availability.success) {

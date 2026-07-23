@@ -2723,7 +2723,8 @@ function DriverUI(props) {
                 livenessPassed: true,
                 awsSessionId: currentAwsSessionId || undefined,
                 mode: 'device_signature_v1',
-                allowRawSelfieFallback: true
+                allowRawSelfieFallback: true,
+                preferServerSideSelfieVerification: Boolean(currentAwsSessionId)
             });
             const isMatch = !!(result?.success && result?.data?.isMatch);
 

@@ -1,4 +1,19 @@
+function isLegacyGraphqlEnabled() {
+    // Produção não possui escape hatch: reativar o legado exige mudança de
+    // código revisada, não apenas drift de variável de ambiente.
+    return String(process.env.NODE_ENV || '').trim().toLowerCase() !== 'production';
+}
+
 async function initializeGraphQL({ app, applyMiddleware, logStructured, logError }) {
+    if (!isLegacyGraphqlEnabled()) {
+        logStructured('info', 'GraphQL legado desabilitado neste runtime', {
+            service: 'graphql',
+            endpoint: 'disabled',
+            reason: 'ENABLE_LEGACY_GRAPHQL=false'
+        });
+        return false;
+    }
+
     try {
         logStructured('info', 'Inicializando GraphQL', { service: 'graphql' });
 
@@ -12,9 +27,12 @@ async function initializeGraphQL({ app, applyMiddleware, logStructured, logError
             playground: playgroundEnabled
         });
 
+        return true;
+
     } catch (error) {
         logError(error, 'Erro ao inicializar GraphQL', { service: 'graphql' });
         // Continuar sem GraphQL se houver erro
+        return false;
     }
 }
 
@@ -96,8 +114,11 @@ function startHttpServer({
     (async () => {
         try {
             logStructured('info', 'Iniciando processo de inicialização do servidor', { service: 'server' });
-            await initializeGraphQL({ app, applyMiddleware, logStructured, logError });
-            logStructured('info', 'GraphQL inicializado, iniciando servidor HTTP', { service: 'server' });
+            const graphqlMounted = await initializeGraphQL({ app, applyMiddleware, logStructured, logError });
+            logStructured('info', 'Etapa GraphQL concluída, iniciando servidor HTTP', {
+                service: 'server',
+                graphqlMounted
+            });
 
             // Iniciar servidor
             const PORT = process.env.PORT || 3001;
@@ -124,7 +145,7 @@ function startHttpServer({
                 logStructured('info', 'Servidor iniciado', {
                     service: 'server',
                     port: PORT,
-                    graphqlEndpoint: `http://localhost:${PORT}/graphql`,
+                    graphqlEndpoint: graphqlMounted ? `http://localhost:${PORT}/graphql` : 'disabled',
                     websocketEndpoint: `ws://localhost:${PORT}`
                 });
 
@@ -214,3 +235,5 @@ function startHttpServer({
 }
 
 module.exports = startHttpServer;
+module.exports.initializeGraphQL = initializeGraphQL;
+module.exports.isLegacyGraphqlEnabled = isLegacyGraphqlEnabled;

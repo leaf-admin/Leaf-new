@@ -2,6 +2,7 @@ const { Command, CommandResult } = require('./index');
 const redisPool = require('../utils/redis-pool');
 const RideStateManager = require('../services/ride-state-manager');
 const eventSourcing = require('../services/event-sourcing');
+const fareEstimationService = require('../services/fare-estimation-service');
 const traceContext = require('../utils/trace-context');
 const { metrics } = require('../utils/prometheus-metrics');
 const { logStructured } = require('../utils/logger');
@@ -9,10 +10,95 @@ const { validateAndEnsureTraceIdInCommand } = require('../utils/trace-validator'
 const {
   buildExtensionRequest,
   loadBookingContext,
+  normalizeLocation,
   parseJsonMaybe,
   persistBookingPatch,
   roundMoney
 } = require('../services/ride-lifecycle-service');
+
+const EXTENSION_FARE_AUTHORITY = 'backend_extension_estimate';
+const EXTENSION_FARE_TOLERANCE_REAIS = Math.max(
+  0.01,
+  Number.parseFloat(process.env.RIDE_EXTENSION_FARE_TOLERANCE_REAIS || '1') || 1
+);
+const EXTENSION_FARE_TOLERANCE_RATIO = Math.max(
+  0,
+  Number.parseFloat(process.env.RIDE_EXTENSION_FARE_TOLERANCE_RATIO || '0.05') || 0.05
+);
+
+function parseJsonSafe(value, fallback = null) {
+  if (!value) return fallback;
+  if (typeof value === 'object') return value;
+  try {
+    return JSON.parse(value);
+  } catch (_error) {
+    return fallback;
+  }
+}
+
+function normalizeMoney(value) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? roundMoney(parsed) : null;
+}
+
+function resolveContextValue(context = {}, aliases = []) {
+  const sources = [
+    context.activeBooking || {},
+    context.bookingHash || {}
+  ];
+
+  for (const source of sources) {
+    for (const alias of aliases) {
+      const value = source?.[alias];
+      if (value !== undefined && value !== null && value !== '') {
+        return value;
+      }
+    }
+  }
+
+  return null;
+}
+
+function resolveExtensionQuoteOrigin(context = {}) {
+  const rawOrigin = resolveContextValue(context, [
+    'currentLocation',
+    'driverLocation',
+    'lastKnownLocation',
+    'pickupLocation',
+    'pickup'
+  ]);
+  const parsedOrigin = parseJsonSafe(rawOrigin, rawOrigin);
+  return normalizeLocation(parsedOrigin);
+}
+
+function resolveExtensionCarType(context = {}) {
+  const rawCarType = resolveContextValue(context, [
+    'carType',
+    'vehicleType',
+    'vehicleCategory',
+    'category',
+    'carDetails'
+  ]);
+
+  if (rawCarType && typeof rawCarType === 'object') {
+    return rawCarType.name || rawCarType.title || rawCarType.type || null;
+  }
+
+  const parsed = parseJsonSafe(rawCarType, null);
+  if (parsed && typeof parsed === 'object') {
+    return parsed.name || parsed.title || parsed.type || null;
+  }
+
+  return rawCarType;
+}
+
+function resolveExtensionTollFee(context = {}) {
+  return normalizeMoney(resolveContextValue(context, ['tollFee', 'tolls', 'tollAmount'])) || 0;
+}
+
+function buildExtensionFareMismatchMessage() {
+  return 'Tarifa da extensão diverge da cotação backend. Refaça a cotação para alterar o destino.';
+}
 
 class RequestRideExtensionCommand extends Command {
   constructor(data) {
@@ -79,18 +165,66 @@ class RequestRideExtensionCommand extends Command {
           return CommandResult.failure('Já existe uma extensão pendente para esta corrida');
         }
 
+        const requestedClientFare = normalizeMoney(this.newFare);
+        const extensionOrigin = resolveExtensionQuoteOrigin(context);
+        const normalizedNewEndLocation = normalizeLocation(this.newEndLocation);
+
+        if (!extensionOrigin || !normalizedNewEndLocation) {
+          return CommandResult.failure('Não foi possível validar a rota da extensão no backend');
+        }
+
+        const backendFareQuote = await fareEstimationService.estimateRideFare({
+          redis,
+          pickupLocation: extensionOrigin,
+          destinationLocation: normalizedNewEndLocation,
+          carType: resolveExtensionCarType(context),
+          routeDistanceKm: this.routeDistanceKm,
+          routeDurationSecs: this.routeDurationSecs,
+          tollFee: resolveExtensionTollFee(context),
+          clientEstimatedFare: requestedClientFare,
+          pricingContext: null
+        });
+        const serverEstimatedFare = normalizeMoney(backendFareQuote?.estimatedFare);
+        if (!serverEstimatedFare || serverEstimatedFare <= 0) {
+          return CommandResult.failure('Não foi possível calcular a tarifa da extensão no backend');
+        }
+
+        const fareDiff = roundMoney(Math.abs((requestedClientFare || 0) - serverEstimatedFare));
+        const allowedDiff = roundMoney(Math.max(
+          EXTENSION_FARE_TOLERANCE_REAIS,
+          serverEstimatedFare * EXTENSION_FARE_TOLERANCE_RATIO
+        ));
+        if (requestedClientFare && fareDiff > allowedDiff) {
+          logStructured('warn', 'Tarifa de extensão divergente bloqueada', {
+            bookingId: this.bookingId,
+            customerId: this.customerId,
+            requestedClientFare,
+            serverEstimatedFare,
+            fareDiff,
+            allowedDiff,
+            routeDistanceKm: this.routeDistanceKm,
+            routeDurationSecs: this.routeDurationSecs
+          });
+          return CommandResult.failure(buildExtensionFareMismatchMessage());
+        }
+
         const extensionRequest = buildExtensionRequest({
           bookingHash: context.bookingHash,
           customerId: this.customerId,
-          newEndLocation: this.newEndLocation,
-          newFare: this.newFare,
-          routeDistanceKm: this.routeDistanceKm,
-          routeDurationSecs: this.routeDurationSecs,
+          newEndLocation: normalizedNewEndLocation,
+          newFare: serverEstimatedFare,
+          routeDistanceKm: backendFareQuote.routeMetrics?.distanceKm ?? this.routeDistanceKm,
+          routeDurationSecs: backendFareQuote.routeMetrics?.durationSecs ?? this.routeDurationSecs,
+          requestedClientFare,
+          serverEstimatedFare,
+          fareAuthority: EXTENSION_FARE_AUTHORITY,
+          pricingPayload: backendFareQuote.pricingPayload || null,
+          pricingAudit: backendFareQuote.pricingAudit || null,
           traceId: this.traceId,
           correlationId: this.correlationId
         });
 
-        if (extensionRequest.diffFare <= 0) {
+        if (extensionRequest.fareDelta <= 0) {
           return CommandResult.failure('O novo destino não aumenta o valor da corrida. Use alteração direta de destino.');
         }
 
@@ -113,8 +247,13 @@ class RequestRideExtensionCommand extends Command {
           bookingId: this.bookingId,
           requestId: extensionRequest.requestId,
           diffFare: roundMoney(extensionRequest.diffFare),
+          fareDelta: roundMoney(extensionRequest.fareDelta),
           currentFare: roundMoney(extensionRequest.currentFare),
           newFare: roundMoney(extensionRequest.newFare),
+          passengerPayableFare: roundMoney(extensionRequest.passengerPayableFare),
+          extensionOperationalCost: roundMoney(extensionRequest.extensionOperationalCost),
+          routeRecalculationCost: roundMoney(extensionRequest.routeRecalculationCost),
+          paymentIntermediationFee: roundMoney(extensionRequest.paymentIntermediationFee),
           status: extensionRequest.status,
           newEndLocation: extensionRequest.newEndLocation
         });

@@ -1,26 +1,58 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import { StatusBar, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { fonts } from '../../theme/runtimeTokens';
 import PrototypeScreenTransition from '../../components/prototype/PrototypeScreenTransition';
 import PrototypeDismissibleSheet from '../../components/prototype/PrototypeDismissibleSheet';
-import { CardHandle, PrototypeCard, PrototypePrimaryButton } from '../../components/prototype/PrototypeUI';
+import {
+  RobotaxiLifecycleButton,
+  RobotaxiLifecycleCard,
+  robotaxiLifecycleMetrics,
+} from '../../components/prototype/RobotaxiLifecycleUI';
 import robotaxiPrototypeTokens from '../../components/design-system/robotaxiPrototypeTokens';
+import { clearRidePaymentSession } from '../../services/RidePaymentSessionService';
 import { usePrototypeMapOcclusion } from './prototypeMapOcclusion';
+import { usePrototypeRideRuntime } from './prototypeRideRuntime';
 
 const { color, typography } = robotaxiPrototypeTokens;
 const SHEET_BOTTOM_OFFSET = 0;
 const FALLBACK_CARD_HEIGHT = 244;
 
 export default function RobotaxiPaymentFailedScreen({ navigation, route }) {
+  const {
+    confirmedBookingRetryAvailable,
+    retryConfirmedBookingMaterialization,
+  } = usePrototypeRideRuntime();
   const insets = useSafeAreaInsets();
   const [cardHeight, setCardHeight] = useState(FALLBACK_CARD_HEIGHT);
-  const sheetBottom = insets.bottom + SHEET_BOTTOM_OFFSET;
+  const [retrying, setRetrying] = useState(false);
+  const [retryError, setRetryError] = useState('');
+  const retryGuardRef = useRef(false);
+  const sheetBottom =
+    insets.bottom + SHEET_BOTTOM_OFFSET + robotaxiLifecycleMetrics.cardBottomGap;
 
+  const title = route?.params?.title || 'Pagamento não confirmado';
   const errorMessage = route?.params?.errorMessage || 'Não conseguimos confirmar o pagamento desta vez.';
-  const retryRouteName = route?.params?.retryRouteName || 'RobotaxiPrototypeDestination';
-  const retryParams = route?.params?.retryParams || {};
+  const requestedRetryRouteName = route?.params?.retryRouteName || 'RobotaxiPrototype';
+  const retryRouteName = requestedRetryRouteName === 'RobotaxiPrototype'
+    ? requestedRetryRouteName
+    : 'RobotaxiPrototype';
+  const retryParams =
+    retryRouteName === 'RobotaxiPrototype' ? {} : route?.params?.retryParams || {};
+  const confirmedRetryRequested = route?.params?.retryConfirmedBooking === true;
+  const confirmedRetryReady = Boolean(
+    confirmedRetryRequested &&
+      confirmedBookingRetryAvailable &&
+      typeof retryConfirmedBookingMaterialization === 'function',
+  );
+  const confirmedRetryUnavailable = confirmedRetryRequested && !confirmedRetryReady;
+  const visibleMessage = retrying
+    ? 'Pagamento já confirmado. Estamos reenviando somente a solicitação da corrida.'
+    : retryError ||
+      (confirmedRetryUnavailable
+        ? 'Não foi possível recuperar com segurança a confirmação deste Pix. Não iniciaremos uma nova cobrança.'
+        : errorMessage);
 
   usePrototypeMapOcclusion({
     routeKey: route?.key,
@@ -36,39 +68,99 @@ export default function RobotaxiPaymentFailedScreen({ navigation, route }) {
   }, []);
 
   const handleDismiss = () => {
+    if (confirmedRetryRequested) {
+      return;
+    }
     navigation.navigate('RobotaxiPrototype');
   };
+
+  const handleRetry = useCallback(async () => {
+    if (!confirmedRetryRequested) {
+      navigation.replace(retryRouteName, retryParams);
+      return;
+    }
+
+    if (!confirmedRetryReady || retryGuardRef.current) {
+      return;
+    }
+
+    retryGuardRef.current = true;
+    setRetrying(true);
+    setRetryError('');
+    try {
+      const retryResult = await retryConfirmedBookingMaterialization();
+      const bookingPayload = retryResult?.bookingPayload || {};
+      const destination = bookingPayload?.destination || {};
+      const fare = Number(bookingPayload?.fare);
+      const paymentSession = retryResult?.paymentSession || {};
+
+      await clearRidePaymentSession({
+        passengerId: retryResult?.passengerId || '',
+        paymentSessionId: paymentSession.paymentSessionId,
+        contextKey: paymentSession.contextKey,
+        chargeId: paymentSession.chargeId,
+      }).catch(() => false);
+
+      navigation.replace('RobotaxiPrototypePaymentSuccess', {
+        destination: destination.name || 'Destino',
+        destinationAddress: destination.address || destination.name || 'Destino',
+        destinationCoordinate: destination.coordinate || null,
+        initialSelectedDestination: destination,
+        selectedFare: Number.isFinite(fare) && fare > 0 ? fare : undefined,
+        fare: Number.isFinite(fare) && fare > 0 ? fare : undefined,
+        originAddress: bookingPayload.originAddress || 'Origem atual',
+        vehicle: bookingPayload.vehicle || 'Leaf Plus',
+        autoAdvance: true,
+      });
+    } catch (error) {
+      setRetryError(
+        error?.message ||
+          'Não foi possível solicitar a corrida. Nenhum novo Pix foi iniciado.',
+      );
+    } finally {
+      retryGuardRef.current = false;
+      setRetrying(false);
+    }
+  }, [
+    confirmedRetryReady,
+    confirmedRetryRequested,
+    navigation,
+    retryConfirmedBookingMaterialization,
+    retryParams,
+    retryRouteName,
+  ]);
 
   return (
     <PrototypeScreenTransition>
       <View style={styles.container} pointerEvents="box-none">
         <StatusBar translucent backgroundColor="transparent" barStyle="dark-content" />
 
-        <PrototypeDismissibleSheet onClose={handleDismiss} sheetStyle={[styles.sheetWrap, { bottom: sheetBottom }]}>
-          <PrototypeCard onLayout={handleCardLayout} style={styles.card}>
-            <CardHandle />
+        <PrototypeDismissibleSheet
+          onClose={handleDismiss}
+          sheetStyle={[styles.sheetWrap, { bottom: sheetBottom }]}
+          dragEnabled={!confirmedRetryRequested}
+          backdropDismissEnabled={!confirmedRetryRequested}
+        >
+          <RobotaxiLifecycleCard onLayout={handleCardLayout} style={styles.card}>
 
             <View style={styles.iconWrap}>
               <Ionicons name="warning-outline" size={30} color="#FFFFFF" />
             </View>
 
-            <Text style={styles.title}>Pagamento não confirmado</Text>
-            <Text style={styles.subtitle}>{errorMessage}</Text>
+            <Text style={styles.title}>{title}</Text>
+            <Text style={styles.subtitle}>{visibleMessage}</Text>
 
-            <PrototypePrimaryButton
-              label="Tentar novamente"
-              icon="refresh-outline"
-              onPress={() => navigation.replace(retryRouteName, retryParams)}
+            <RobotaxiLifecycleButton
+              label={retrying ? 'Reenviando corrida' : 'Tentar novamente'}
+              icon={retrying ? 'time-outline' : 'refresh-outline'}
+              tone="primary"
+              disabled={retrying || confirmedRetryUnavailable}
+              onPress={handleRetry}
               style={styles.primaryButton}
+              testID="payment-failed-button-Tentar novamente"
             />
 
-            <PrototypePrimaryButton
-              label="Voltar ao mapa"
-              icon="map-outline"
-              onPress={() => navigation.navigate('RobotaxiPrototype')}
-              style={styles.secondaryButton}
-            />
-          </PrototypeCard>
+          </RobotaxiLifecycleCard>
         </PrototypeDismissibleSheet>
       </View>
     </PrototypeScreenTransition>
@@ -86,13 +178,7 @@ const styles = StyleSheet.create({
     right: 0
   },
   card: {
-    borderTopLeftRadius: 28,
-    borderTopRightRadius: 28,
-    borderBottomLeftRadius: 0,
-    borderBottomRightRadius: 0,
-    paddingHorizontal: 24,
-    paddingTop: 14,
-    paddingBottom: 16
+    marginHorizontal: robotaxiLifecycleMetrics.cardHorizontalMargin,
   },
   iconWrap: {
     alignSelf: 'center',
@@ -112,8 +198,8 @@ const styles = StyleSheet.create({
     marginTop: 10,
     color: color.text.primary,
     fontFamily: fonts.SemiBold,
-    fontSize: 18,
-    lineHeight: 24,
+    fontSize: 15.5,
+    lineHeight: 20,
     textAlign: 'center'
   },
   subtitle: {
@@ -126,10 +212,5 @@ const styles = StyleSheet.create({
   },
   primaryButton: {
     marginTop: 12
-  },
-  secondaryButton: {
-    marginTop: 8,
-    backgroundColor: color.surface.secondary,
-    borderColor: color.border.strong
   }
 });

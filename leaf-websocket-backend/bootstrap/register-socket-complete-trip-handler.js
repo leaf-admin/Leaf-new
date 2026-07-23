@@ -1,3 +1,110 @@
+function parseMaybeJsonObject(value) {
+    if (!value || typeof value !== 'string') {
+        return value && typeof value === 'object' ? value : {};
+    }
+
+    try {
+        const parsed = JSON.parse(value);
+        return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch (_) {
+        return {};
+    }
+}
+
+function firstFiniteNumber(...values) {
+    for (const value of values) {
+        if (value === null || value === undefined || value === '') {
+            continue;
+        }
+        const parsed = Number(value);
+        if (Number.isFinite(parsed)) {
+            return parsed;
+        }
+    }
+    return null;
+}
+
+function normalizeDistanceKm(value) {
+    const parsed = firstFiniteNumber(value);
+    if (parsed === null || parsed < 0) {
+        return null;
+    }
+    return parsed > 1000 ? parsed / 1000 : parsed;
+}
+
+function resolveBookingPricingPayload(bookingData = {}) {
+    return parseMaybeJsonObject(
+        bookingData.pricingPayload ||
+        bookingData.pricing_payload ||
+        bookingData.fareBreakdown ||
+        bookingData.fare_breakdown
+    );
+}
+
+function resolveCanonicalTollFee(bookingData = {}, fallback = 0) {
+    const pricingPayload = resolveBookingPricingPayload(bookingData);
+    const parsed = firstFiniteNumber(
+        bookingData.tollFee,
+        bookingData.toll_fee,
+        bookingData.pedagio,
+        pricingPayload.tollFee,
+        pricingPayload.toll_fee,
+        pricingPayload.toll,
+        pricingPayload.toll_amount,
+        fallback
+    );
+    return parsed !== null && parsed >= 0 ? parsed : 0;
+}
+
+function resolveCanonicalDistanceKm(bookingData = {}, fallback = null) {
+    const pricingPayload = resolveBookingPricingPayload(bookingData);
+    return normalizeDistanceKm(
+        firstFiniteNumber(
+            bookingData.estimatedTripDistanceKm,
+            bookingData.tripDistanceKm,
+            bookingData.routeDistanceKm,
+            bookingData.distanceKm,
+            bookingData.distance_km,
+            pricingPayload.distanceKm,
+            pricingPayload.distance_km,
+            fallback
+        )
+    );
+}
+
+function resolveCanonicalDurationSeconds(bookingData = {}, fallbackSeconds = null) {
+    const pricingPayload = resolveBookingPricingPayload(bookingData);
+    const explicitSeconds = firstFiniteNumber(
+        bookingData.tripDurationSecs,
+        bookingData.routeDurationSecs,
+        bookingData.durationSeconds,
+        bookingData.duration_seconds,
+        pricingPayload.durationSeconds,
+        pricingPayload.duration_seconds,
+        pricingPayload.duration_secs
+    );
+    if (explicitSeconds !== null && explicitSeconds >= 0) {
+        return Math.round(explicitSeconds);
+    }
+
+    const explicitMinutes = firstFiniteNumber(
+        bookingData.tripDurationMin,
+        bookingData.tripDurationMinutes,
+        bookingData.routeDurationMinutes,
+        bookingData.durationMinutes,
+        bookingData.duration_min,
+        pricingPayload.durationMin,
+        pricingPayload.duration_min,
+        pricingPayload.durationMinutes
+    );
+    if (explicitMinutes !== null && explicitMinutes >= 0) {
+        return Math.round(explicitMinutes * 60);
+    }
+
+    const fallback = firstFiniteNumber(fallbackSeconds);
+    return fallback !== null && fallback >= 0 ? Math.round(fallback) : null;
+}
+
 function registerSocketCompleteTripHandler({
     socket,
     io,
@@ -23,6 +130,12 @@ function registerSocketCompleteTripHandler({
 }) {
     const { buildTripCompletedPayload } = require('../utils/trip-completion-payload');
     const { scheduleMapH3Refresh } = require('../utils/map-h3-refresh-broadcaster');
+    const {
+        hasRideOfflineIntentPayload,
+        markRideOfflineIntentProcessed,
+        markRideOfflineIntentRejected,
+        validateAndReserveRideOfflineIntent
+    } = require('../services/ride-offline-intent-validator');
     const rideIdempotencyService = idempotencyService || require('../services/idempotency-service');
     const {
         recordDriverDestinationDailyRideCompletion
@@ -123,6 +236,46 @@ function registerSocketCompleteTripHandler({
                     return;
                 }
                 outerIdempotencyOwner = true;
+                const redis = redisPool.getConnection();
+                const bookingSnapshotBeforeComplete = await redis.hgetall(`booking:${bookingId}`);
+                let offlineIntentValidation = null;
+
+                if (hasRideOfflineIntentPayload(data)) {
+                    offlineIntentValidation = await validateAndReserveRideOfflineIntent({
+                        redis,
+                        bookingId,
+                        actorId: driverId,
+                        role: 'driver',
+                        eventType: 'complete_trip',
+                        idempotencyKey,
+                        clientSequence: data.clientSequence,
+                        clientCreatedAt: data.clientCreatedAt,
+                        payload: {
+                            endLocation,
+                            distance,
+                            fare
+                        },
+                        data
+                    });
+
+                    if (!offlineIntentValidation.accepted) {
+                        socket.emit('tripCompleteError', {
+                            error: offlineIntentValidation.message || 'Intencao offline rejeitada',
+                            message: offlineIntentValidation.message || 'O backend rejeitou esta acao offline.',
+                            code: offlineIntentValidation.code || 'OFFLINE_INTENT_REJECTED'
+                        });
+                        outerIdempotencyOwner = false;
+                        await rideIdempotencyService.releaseInflight(idempotencyKey);
+                        return;
+                    }
+
+                    if (offlineIntentValidation.replay && offlineIntentValidation.cachedResult) {
+                        await rideIdempotencyService.cacheResult(idempotencyKey, offlineIntentValidation.cachedResult);
+                        outerIdempotencyOwner = false;
+                        socket.emit('tripCompleted', offlineIntentValidation.cachedResult);
+                        return;
+                    }
+                }
 
                 const paymentMockEnabled =
                     data?.mockPayment === true ||
@@ -137,11 +290,18 @@ function registerSocketCompleteTripHandler({
                 });
 
                 // Calcular duração se necessário (pode ser obtido do timer iniciado pelo listener)
-                const redis = redisPool.getConnection();
                 const timerKey = `trip_timer:${bookingId}`;
                 const timerData = await redis.hgetall(timerKey);
                 const duration = timerData.startTimestamp ?
                     Math.floor((Date.now() - parseInt(timerData.startTimestamp)) / 1000) : 0;
+                const commandTollFee = resolveCanonicalTollFee(bookingSnapshotBeforeComplete, data.tollFee || 0);
+                const commandDistanceKm =
+                    resolveCanonicalDistanceKm(bookingSnapshotBeforeComplete, parseFloat(distance) || 0) ||
+                    parseFloat(distance) ||
+                    0;
+                const commandDurationSeconds =
+                    resolveCanonicalDurationSeconds(bookingSnapshotBeforeComplete, duration) ||
+                    duration;
 
                 // ✅ FASE 1.3: Criar span para Command
                 const tracer = getTracer();
@@ -166,8 +326,9 @@ function registerSocketCompleteTripHandler({
                         bookingId,
                         endLocation,
                         finalFare: parseFloat(fare) || 0,
-                        distance: parseFloat(distance) || 0,
-                        duration: duration,
+                        tollFee: commandTollFee,
+                        distance: commandDistanceKm,
+                        duration: commandDurationSeconds,
                         traceId, // ✅ Passar traceId para o command
                         correlationId // ✅ Passar correlationId para o command
                     });
@@ -203,6 +364,15 @@ function registerSocketCompleteTripHandler({
                         outerIdempotencyOwner = false;
                         await rideIdempotencyService.releaseInflight(outerIdempotencyKey).catch(() => null);
                     }
+                    if (offlineIntentValidation && !offlineIntentValidation.skipped) {
+                        await markRideOfflineIntentRejected({
+                            redis,
+                            bookingId,
+                            idempotencyKey,
+                            error: result.error || 'Erro ao finalizar viagem',
+                            code: 'COMPLETE_TRIP_COMMAND_FAILED'
+                        }).catch(() => null);
+                    }
                     socket.emit('tripCompleteError', {
                         error: result.error || 'Erro ao finalizar viagem'
                     });
@@ -229,7 +399,25 @@ function registerSocketCompleteTripHandler({
                 const paymentService = new PaymentService();
                 const fareReais = Number(finalFare || fare || 0);
                 const tollFeeReais = Number(resultTollFee || 0);
-                const fareBreakdown = paymentService.calculateFareBreakdownFromReais(fareReais, tollFeeReais);
+                const calculatedFareBreakdown = paymentService.calculateFareBreakdownFromReais(fareReais, tollFeeReais);
+                const fareBreakdown = {
+                    ...calculatedFareBreakdown,
+                    ...(Number.isFinite(Number(result.data?.operationalFee))
+                        ? { operationalFee: Number(result.data.operationalFee) }
+                        : {}),
+                    ...(Number.isFinite(Number(result.data?.paymentIntermediationFee))
+                        ? { paymentIntermediationFee: Number(result.data.paymentIntermediationFee) }
+                        : {}),
+                    ...(Number.isFinite(Number(result.data?.totalFees))
+                        ? { totalFees: Number(result.data.totalFees) }
+                        : {}),
+                    ...(Number.isFinite(Number(result.data?.driverNetAmount))
+                        ? { driverNetAmount: Number(result.data.driverNetAmount) }
+                        : {}),
+                    authoritativeSnapshot: result.data?.authoritativeSnapshot === true,
+                    financialSnapshotSource: result.data?.financialSnapshotSource || 'backend_final',
+                    financialSnapshot: result.data?.financialSnapshot || null
+                };
 
                 metrics.recordRideCompleted(city, serviceType || 'standard');
                 if (Number.isFinite(Number(resultDuration)) && Number(resultDuration) >= 0) {
@@ -287,14 +475,23 @@ function registerSocketCompleteTripHandler({
                 }
 
                 // Emitir confirmação imediatamente para reduzir latência no caminho crítico
-                const bookingSnapshot = await redis.hgetall(`booking:${bookingId}`);
+                const bookingSnapshot = {
+                    ...(bookingSnapshotBeforeComplete || {}),
+                    ...(await redis.hgetall(`booking:${bookingId}`))
+                };
+                const receiptDistanceKm =
+                    resolveCanonicalDistanceKm(bookingSnapshot, resultDistance || distance) ||
+                    commandDistanceKm;
+                const receiptDurationSeconds =
+                    resolveCanonicalDurationSeconds(bookingSnapshot, resultDuration || duration) ||
+                    commandDurationSeconds;
                 const tripCompletedData = buildTripCompletedPayload({
                     bookingId,
                     bookingData: bookingSnapshot,
                     resultEndLocation,
                     endLocation,
-                    distance: resultDistance || distance,
-                    duration: resultDuration,
+                    distance: receiptDistanceKm,
+                    duration: receiptDurationSeconds,
                     fareBreakdown,
                     paymentDistribution,
                     rideLegs: bookingSnapshot?.rideLegs ? JSON.parse(bookingSnapshot.rideLegs) : null,
@@ -304,6 +501,14 @@ function registerSocketCompleteTripHandler({
                     persistence: 'accepted_background'
                 });
                 await rideIdempotencyService.cacheResult(idempotencyKey, tripCompletedData);
+                if (offlineIntentValidation && !offlineIntentValidation.skipped) {
+                    await markRideOfflineIntentProcessed({
+                        redis,
+                        bookingId,
+                        idempotencyKey,
+                        result: tripCompletedData
+                    }).catch(() => null);
+                }
                 outerIdempotencyOwner = false;
 
                 io.to(`driver_${driverId}`).emit('tripCompleted', tripCompletedData);
@@ -338,12 +543,25 @@ function registerSocketCompleteTripHandler({
                             fare: finalFare || fare,
                             tollFee: tollFeeReais,
                             netFare: null,
-                            distance: resultDistance || distance,
-                            duration: resultDuration || duration || null,
+                            distance: receiptDistanceKm,
+                            routeDistanceKm: receiptDistanceKm,
+                            duration: receiptDurationSeconds,
+                            routeDurationSecs: receiptDurationSeconds,
                             endLocation: resultEndLocation || endLocation,
                             driverEarnings: null,
                             fareBreakdown,
-                            financialBreakdown: paymentDistribution || null
+                            financialBreakdown: paymentDistribution || null,
+                            authoritativeSnapshot: result.data?.authoritativeSnapshot === true,
+                            financialSnapshotSource: result.data?.financialSnapshotSource || 'backend_final',
+                            financialSnapshot: result.data?.financialSnapshot || null,
+                            financialContext: bookingSnapshot?.financialContext || null,
+                            financialNamespace: bookingSnapshot?.financialNamespace || null,
+                            financialContextId: bookingSnapshot?.financialContextId || null,
+                            providerEnvironment: bookingSnapshot?.providerEnvironment || null,
+                            paymentProviderEnvironment: bookingSnapshot?.paymentProviderEnvironment || null,
+                            paymentProfileId: bookingSnapshot?.paymentProfileId || null,
+                            testUserSandbox: bookingSnapshot?.testUserSandbox === true
+                                || bookingSnapshot?.testUserSandbox === 'true'
                         };
 
                         if (paymentMockEnabled) {
@@ -399,29 +617,48 @@ function registerSocketCompleteTripHandler({
 
                         try {
                             const ReceiptService = require('../services/receipt-service');
+                            const firebaseConfig = require('../firebase-config');
                             const receiptService = new ReceiptService();
-                            const bookingDataForReceipt = io.activeBookings?.get(bookingId);
-                            if (bookingDataForReceipt) {
-                                const receiptData = {
-                                    ...bookingDataForReceipt,
-                                    finalPrice: finalFare || fare,
-                                    grossAmount: fareBreakdown.grossAmount,
-                                    operationalFee: fareBreakdown.operationalFee,
-                                    paymentIntermediationFee: fareBreakdown.paymentIntermediationFee,
-                                    totalFees: fareBreakdown.totalFees,
-                                    driverNetAmount: fareBreakdown.driverNetAmount,
-                                    tollFee: fareBreakdown.tollFee,
-                                    fareBreakdown,
-                                    financialSnapshotSource: 'backend_final',
-                                    authoritativeSnapshot: true,
-                                    distance: resultDistance || distance,
-                                    endTime: new Date().toISOString(),
-                                    completedAt: new Date().toISOString(),
-                                    status: 'COMPLETED'
-                                };
-                                const firebaseDb = firebaseConfig?.getRealtimeDB?.();
-                                await receiptService.generateAndSaveReceipt(bookingId, receiptData, firebaseDb);
-                            }
+                            const bookingDataForReceipt = {
+                                ...(io.activeBookings?.get(bookingId) || {}),
+                                ...(bookingSnapshot || {})
+                            };
+                            const completionTimestamp = new Date().toISOString();
+                            const receiptData = {
+                                ...bookingDataForReceipt,
+                                bookingId,
+                                driverId: resultDriverId || driverId || bookingDataForReceipt.driverId,
+                                customerId: customerIdToNotify || customerId || bookingDataForReceipt.customerId,
+                                finalPrice: finalFare || fare,
+                                finalFare: finalFare || fare,
+                                grossAmount: fareBreakdown.grossAmount,
+                                operationalFee: fareBreakdown.operationalFee,
+                                paymentIntermediationFee: fareBreakdown.paymentIntermediationFee,
+                                totalFees: fareBreakdown.totalFees,
+                                driverNetAmount: fareBreakdown.driverNetAmount,
+                                tollFee: fareBreakdown.tollFee,
+                                payment_mode: bookingDataForReceipt.paymentMethod || bookingDataForReceipt.payment_mode || 'pix',
+                                payment_status: bookingDataForReceipt.paymentStatus || bookingDataForReceipt.payment_status || 'completed',
+                                fareBreakdown,
+                                financialBreakdown: paymentDistribution || bookingDataForReceipt.financialBreakdown || null,
+                                paymentDistribution,
+                                financialSnapshot: result.data?.financialSnapshot || bookingDataForReceipt.financialSnapshot || null,
+                                financialSnapshotSource: result.data?.financialSnapshotSource || 'backend_final',
+                                authoritativeSnapshot: result.data?.authoritativeSnapshot === true,
+                                distance: receiptDistanceKm,
+                                routeDistanceKm: receiptDistanceKm,
+                                distanceKm: receiptDistanceKm,
+                                estimateDistance: receiptDistanceKm,
+                                duration: receiptDurationSeconds,
+                                durationSeconds: receiptDurationSeconds,
+                                routeDurationSecs: receiptDurationSeconds,
+                                endLocation: resultEndLocation || endLocation,
+                                endTime: completionTimestamp,
+                                completedAt: completionTimestamp,
+                                status: 'COMPLETED'
+                            };
+                            const firebaseDb = firebaseConfig?.getRealtimeDB?.();
+                            await receiptService.generateAndSaveReceipt(bookingId, receiptData, firebaseDb);
                         } catch (receiptError) {
                             logStructured('warn', 'Erro ao gerar recibo', {
                                 bookingId,

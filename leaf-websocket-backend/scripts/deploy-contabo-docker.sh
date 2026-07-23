@@ -4,7 +4,9 @@ set -euo pipefail
 # Modular production rollout for the Contabo host.
 #
 # This script never tears down the compose project, Redis, or named volumes.
-# It replaces gateways one at a time, waits for health, then updates workers.
+# It never converts or restarts Redis. The Redis authority must be activated
+# separately through the reviewed runbook; this script validates it live before
+# replacing gateways, waits for readiness, then updates workers.
 #
 # Required:
 #   CONFIRM_PRODUCTION_DEPLOY=true
@@ -20,6 +22,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BACKEND_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+REPO_ROOT="$(cd "$BACKEND_DIR/.." && pwd)"
 
 CONTABO_HOST="${CONTABO_HOST:-${VPS_HOST:-}}"
 CONTABO_KEY="${CONTABO_KEY:-${VPS_KEY:-$HOME/.ssh/leaf_contabo_20260412_ed25519}}"
@@ -40,6 +43,12 @@ REMOTE_OPS_COMPOSE="docker-compose.ops-workers.yml"
 
 if [[ "$CONFIRM_PRODUCTION_DEPLOY" != "true" ]]; then
   echo "[deploy][error] Set CONFIRM_PRODUCTION_DEPLOY=true to authorize the production rollout." >&2
+  exit 2
+fi
+
+if [[ -n "$(git -C "$REPO_ROOT" status --porcelain)" ]]; then
+  echo "[deploy][error] Production deploy bloqueado: worktree contém alterações não commitadas." >&2
+  echo "[deploy][error] Crie a RC em um commit imutável e execute novamente." >&2
   exit 2
 fi
 
@@ -103,10 +112,17 @@ remote "
   command -v docker >/dev/null
   docker compose version >/dev/null
   mkdir -p '$REMOTE_BACKUP_DIR'
+  chmod 700 '$REMOTE_BACKUP_DIR'
   cd '$REMOTE_BACKEND_DIR'
+  cp .env '$REMOTE_BACKUP_DIR/.env.before'
+  chmod 600 '$REMOTE_BACKUP_DIR/.env.before'
   docker compose -f '$REMOTE_BASE_COMPOSE' -f '$REMOTE_SCALE_COMPOSE' ps \
     > '$REMOTE_BACKUP_DIR/compose-ps-before.txt'
   docker image ls --digests > '$REMOTE_BACKUP_DIR/docker-images-before.txt'
+  previous_backend_image=\$(docker inspect --format '{{.Image}}' leaf-websocket)
+  test -n "\$previous_backend_image"
+  docker image tag "\$previous_backend_image" 'leaf-app-websocket:rollback-$STAMP'
+  printf '%s\n' "\$previous_backend_image" > '$REMOTE_BACKUP_DIR/backend-image-before.txt'
   cp '$REMOTE_BASE_COMPOSE' '$REMOTE_BACKUP_DIR/$REMOTE_BASE_COMPOSE'
   cp '$REMOTE_SCALE_COMPOSE' '$REMOTE_BACKUP_DIR/$REMOTE_SCALE_COMPOSE'
   cp '$REMOTE_OPS_COMPOSE' '$REMOTE_BACKUP_DIR/$REMOTE_OPS_COMPOSE'
@@ -120,6 +136,122 @@ remote "
     --exclude='./.env' \
     --exclude='./firebase-credentials.json' \
     -czf '$REMOTE_BACKUP_DIR/source-before.tar.gz' .
+
+  authority_mode=\$(awk -F= '\$1==\"KYC_ACTIVE_TRIP_AUTHORITY_MODE\" {print substr(\$0,index(\$0,\"=\")+1)}' .env | tail -n1 | tr -d '\r')
+  case \"\$authority_mode\" in
+    ''|redis_noeviction)
+      ;;
+    *)
+      echo '[deploy][error] KYC_ACTIVE_TRIP_AUTHORITY_MODE must be empty or redis_noeviction.' >&2
+      exit 1
+      ;;
+  esac
+  if [ \"\$authority_mode\" = redis_noeviction ]; then
+    expected_generation=\$(awk -F= '\$1==\"REDIS_CRITICAL_DATASET_GENERATION\" {print substr(\$0,index(\$0,\"=\")+1)}' .env | tail -n1 | tr -d '\r')
+    generation_key=\$(awk -F= '\$1==\"REDIS_CRITICAL_DATASET_GENERATION_KEY\" {print substr(\$0,index(\$0,\"=\")+1)}' .env | tail -n1 | tr -d '\r')
+    trip_stream_enabled=\$(awk -F= '\$1==\"ENABLE_TRIP_LOCATION_STREAM\" {print substr(\$0,index(\$0,\"=\")+1)}' .env | tail -n1 | tr -d '\r')
+    trip_stream_name=\$(awk -F= '\$1==\"TRIP_LOCATION_STREAM_NAME\" {print substr(\$0,index(\$0,\"=\")+1)}' .env | tail -n1 | tr -d '\r')
+    trip_group=\$(awk -F= '\$1==\"TRIP_LOCATION_WORKER_GROUP\" {print substr(\$0,index(\$0,\"=\")+1)}' .env | tail -n1 | tr -d '\r')
+    trip_consumer_max_idle_ms=\$(awk -F= '\$1==\"TRIP_LOCATION_CONSUMER_MAX_IDLE_MS\" {print substr(\$0,index(\$0,\"=\")+1)}' .env | tail -n1 | tr -d '\r')
+    trip_worker_health_key=\$(awk -F= '\$1==\"TRIP_LOCATION_WORKER_HEALTH_KEY\" {print substr(\$0,index(\$0,\"=\")+1)}' .env | tail -n1 | tr -d '\r')
+    trip_worker_health_max_age_ms=\$(awk -F= '\$1==\"TRIP_LOCATION_WORKER_HEALTH_MAX_AGE_MS\" {print substr(\$0,index(\$0,\"=\")+1)}' .env | tail -n1 | tr -d '\r')
+    generation_key=\${generation_key:-leaf:runtime:critical-dataset:generation}
+    trip_stream_enabled=\${trip_stream_enabled:-true}
+    trip_stream_name=\${trip_stream_name:-trip_location_events}
+    trip_group=\${trip_group:-trip-location-workers}
+    trip_consumer_max_idle_ms=\${trip_consumer_max_idle_ms:-30000}
+    trip_worker_health_key=\${trip_worker_health_key:-leaf:runtime:trip-location-worker:health}
+    trip_worker_health_max_age_ms=\${trip_worker_health_max_age_ms:-45000}
+    test -n \"\$expected_generation\"
+    test \"\$(sysctl -n vm.overcommit_memory)\" = 1
+
+    redis_cmd() {
+      docker exec leaf-redis sh -ec 'REDISCLI_AUTH=\"\$REDIS_PASSWORD\" exec redis-cli --no-auth-warning --raw \"\$@\"' sh \"\$@\"
+    }
+
+    test \"\$(redis_cmd CONFIG GET maxmemory-policy | tail -n1)\" = noeviction
+    test \"\$(redis_cmd CONFIG GET appendonly | tail -n1)\" = yes
+    test \"\$(redis_cmd CONFIG GET appendfsync | tail -n1)\" = everysec
+    test \"\$(redis_cmd CONFIG GET maxmemory | tail -n1)\" = 2415919104
+    redis_cmd INFO persistence | tr -d '\r' | grep -qx 'aof_enabled:1'
+    redis_cmd INFO persistence | tr -d '\r' | grep -qx 'aof_last_write_status:ok'
+    redis_cmd INFO stats | tr -d '\r' | grep -qx 'evicted_keys:0'
+    test \"\$(redis_cmd GET \"\$generation_key\")\" = \"\$expected_generation\"
+    test \"\$(redis_cmd TTL \"\$generation_key\")\" = -1
+    trip_stream_enabled_normalized=\$(printf '%s' \"\$trip_stream_enabled\" | tr '[:upper:]' '[:lower:]')
+    case \"\$trip_stream_enabled_normalized\" in
+      1|true|yes|on|sim)
+        case \"\$trip_consumer_max_idle_ms\" in
+          ''|*[!0-9]*)
+            echo '[deploy][error] TRIP_LOCATION_CONSUMER_MAX_IDLE_MS must be an integer.' >&2
+            exit 1
+            ;;
+        esac
+        if [ \"\$trip_consumer_max_idle_ms\" -lt 1000 ] || [ \"\$trip_consumer_max_idle_ms\" -gt 300000 ]; then
+          echo '[deploy][error] TRIP_LOCATION_CONSUMER_MAX_IDLE_MS must be between 1000 and 300000ms.' >&2
+          exit 1
+        fi
+        case \"\$trip_worker_health_max_age_ms\" in
+          ''|*[!0-9]*)
+            echo '[deploy][error] TRIP_LOCATION_WORKER_HEALTH_MAX_AGE_MS must be an integer.' >&2
+            exit 1
+            ;;
+        esac
+        if [ \"\$trip_worker_health_max_age_ms\" -lt 1000 ] || [ \"\$trip_worker_health_max_age_ms\" -gt 300000 ]; then
+          echo '[deploy][error] TRIP_LOCATION_WORKER_HEALTH_MAX_AGE_MS must be between 1000 and 300000ms.' >&2
+          exit 1
+        fi
+        redis_cmd XINFO GROUPS \"\$trip_stream_name\" | grep -Fxq \"\$trip_group\"
+        trip_consumers=\$(redis_cmd XINFO CONSUMERS \"\$trip_stream_name\" \"\$trip_group\")
+        printf '%s\n' \"\$trip_consumers\" | awk -v max_idle=\"\$trip_consumer_max_idle_ms\" '
+          previous == \"idle\" && \$0 ~ /^[0-9]+\$/ && (\$0 + 0) <= max_idle { active = 1 }
+          { previous = \$0 }
+          END { exit(active ? 0 : 1) }
+        '
+        trip_worker_health_status=\$(redis_cmd HGET \"\$trip_worker_health_key\" status)
+        case \"\$trip_worker_health_status\" in
+          healthy|idle)
+            ;;
+          *)
+            echo '[deploy][error] Trip-location persistence heartbeat is missing, invalid or degraded.' >&2
+            exit 1
+            ;;
+        esac
+        trip_worker_heartbeat_at=\$(redis_cmd HGET \"\$trip_worker_health_key\" heartbeatAt)
+        case \"\$trip_worker_heartbeat_at\" in
+          ''|*[!0-9]*)
+            echo '[deploy][error] Trip-location persistence heartbeatAt is invalid.' >&2
+            exit 1
+            ;;
+        esac
+        trip_worker_health_ttl=\$(redis_cmd TTL \"\$trip_worker_health_key\")
+        case \"\$trip_worker_health_ttl\" in
+          ''|*[!0-9]*)
+            echo '[deploy][error] Trip-location persistence heartbeat TTL is invalid.' >&2
+            exit 1
+            ;;
+        esac
+        if [ \"\$trip_worker_health_ttl\" -le 0 ]; then
+          echo '[deploy][error] Trip-location persistence heartbeat TTL must be positive.' >&2
+          exit 1
+        fi
+        trip_worker_heartbeat_age_ms=\$((\$(date +%s%3N) - trip_worker_heartbeat_at))
+        if [ \"\$trip_worker_heartbeat_age_ms\" -lt 0 ] || [ \"\$trip_worker_heartbeat_age_ms\" -gt \"\$trip_worker_health_max_age_ms\" ]; then
+          echo '[deploy][error] Trip-location persistence heartbeat is stale.' >&2
+          exit 1
+        fi
+        echo '[deploy][preflight] Trip-location consumer and persistence heartbeat validated.'
+        ;;
+      0|false|no|off|nao|não)
+        echo '[deploy][preflight] Trip-location stream disabled; consumer liveness gate skipped.'
+        ;;
+      *)
+        echo '[deploy][error] ENABLE_TRIP_LOCATION_STREAM must be an explicit boolean.' >&2
+        exit 1
+        ;;
+    esac
+    echo '[deploy][preflight] Redis critical authority validated.'
+  fi
 "
 echo "[deploy] Backup: $REMOTE_BACKUP_DIR"
 
@@ -134,6 +266,7 @@ rsync -az --delete-delay \
   --exclude ".env" \
   --exclude ".env.*" \
   --exclude "firebase-credentials.json" \
+  --exclude "leaf-reactnative-firebase-adminsdk-*.json" \
   --exclude "ssl" \
   --exclude "certbot" \
   -e "$RSYNC_SSH" \
@@ -152,6 +285,18 @@ remote "
   if [ '$OPS_COMPOSE' != '$REMOTE_OPS_COMPOSE' ]; then
     cp '$OPS_COMPOSE' '$REMOTE_OPS_COMPOSE'
   fi
+  validator_image=\$(docker inspect --format '{{.Image}}' leaf-websocket)
+  test -n \"\$validator_image\"
+  docker run --rm \
+    --env-file .env \
+    -e ENV_FILE=/dev/null \
+    -e NODE_ENV=production \
+    -e NODE_PATH=/app/node_modules \
+    -v \"\$PWD:/workspace:ro\" \
+    -w /workspace \
+    --entrypoint node \
+    \"\$validator_image\" \
+    scripts/deploy/validate-runtime-config.js
   docker compose --env-file .env -f '$REMOTE_BASE_COMPOSE' -f '$REMOTE_SCALE_COMPOSE' -f '$REMOTE_OPS_COMPOSE' config --services \
     > '$REMOTE_BACKUP_DIR/compose-services-after-sync.txt'
 "
@@ -160,10 +305,21 @@ echo "[deploy] 4/7 Building modular services"
 remote "
   set -e
   cd '$REMOTE_BACKEND_DIR'
-  docker compose -f '$REMOTE_BASE_COMPOSE' -f '$REMOTE_SCALE_COMPOSE' -f '$REMOTE_OPS_COMPOSE' build \
+  compose='docker compose -f $REMOTE_BASE_COMPOSE -f $REMOTE_SCALE_COMPOSE -f $REMOTE_OPS_COMPOSE'
+  \$compose build \
     websocket websocket-gateway-2 websocket-gateway-3 \
     sideeffects-worker billing-worker queue-worker \
-    pricing-baseline-worker ride-health-monitor-worker
+    trip-location-worker pricing-baseline-worker ride-health-monitor-worker
+  candidate_image=\$(\$compose images -q websocket | head -n1)
+  test -n "\$candidate_image"
+  docker run --rm \
+    --env-file .env \
+    -e ENV_FILE=/dev/null \
+    -e NODE_ENV=production \
+    --entrypoint node \
+    "\$candidate_image" \
+    scripts/deploy/validate-runtime-config.js
+  printf '%s\n' "\$candidate_image" > '$REMOTE_BACKUP_DIR/backend-image-candidate.txt'
 "
 
 echo "[deploy] 5/7 Rolling gateways"
@@ -195,14 +351,38 @@ remote "
     return 1
   }
 
+  wait_ready() {
+    container=\"\$1\"
+    elapsed=0
+    while [ \"\$elapsed\" -lt '$HEALTH_TIMEOUT_SECONDS' ]; do
+      if docker exec \"\$container\" curl -fsS --max-time 10 http://127.0.0.1:3001/health/readiness >/dev/null 2>&1; then
+        echo \"[deploy][ready] \$container\"
+        return 0
+      fi
+      sleep 3
+      elapsed=\$((elapsed + 3))
+    done
+    echo \"[deploy][error] Readiness timeout for \$container\" >&2
+    docker logs --tail=120 \"\$container\" >&2 || true
+    return 1
+  }
+
+  # Readiness dos gateways depende deste consumer. Suba-o primeiro para evitar
+  # deadlock no primeiro rollout do runtime canônico.
+  \$compose up -d --no-deps trip-location-worker
+  wait_healthy trip-location-worker leaf-trip-location-worker
+
   \$compose up -d --no-deps websocket-gateway-2
   wait_healthy websocket-gateway-2 leaf-websocket-gateway-2
+  wait_ready leaf-websocket-gateway-2
 
   \$compose up -d --no-deps websocket-gateway-3
   wait_healthy websocket-gateway-3 leaf-websocket-gateway-3
+  wait_ready leaf-websocket-gateway-3
 
   \$compose up -d --no-deps websocket
   wait_healthy websocket leaf-websocket
+  wait_ready leaf-websocket
 
   docker exec leaf-nginx nginx -t
   docker exec leaf-nginx nginx -s reload
@@ -256,12 +436,14 @@ remote "
   cd '$REMOTE_BACKEND_DIR'
   docker compose -f '$REMOTE_BASE_COMPOSE' -f '$REMOTE_SCALE_COMPOSE' -f '$REMOTE_OPS_COMPOSE' ps
   curl -fsS --max-time 15 http://127.0.0.1:3001/health/liveness >/dev/null
+  curl -fsS --max-time 15 http://127.0.0.1:3001/health/readiness >/dev/null
   docker exec leaf-nginx nginx -t
 "
 
 if [[ "$RUN_PUBLIC_SMOKE" == "true" ]]; then
   curl -fsS --max-time 20 https://api.leaf.app.br/health >/dev/null
   curl -fsS --max-time 20 https://socket.leaf.app.br/health/liveness >/dev/null
+  curl -fsS --max-time 20 https://socket.leaf.app.br/health/readiness >/dev/null
 fi
 
 echo "[deploy][done] Modular rollout completed without compose teardown."

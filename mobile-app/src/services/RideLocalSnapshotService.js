@@ -3,7 +3,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 const STORAGE_KEY = '@leaf:ride-local-snapshots:v1';
 const MAX_SNAPSHOTS = 8;
 
-const TERMINAL_STATUSES = new Set(['completed', 'cancelled', 'canceled']);
+const TERMINAL_STATUSES = new Set(['completed', 'cancelled', 'canceled', 'no_drivers', 'rejected']);
 const LIFECYCLE_ORDER = Object.freeze({
   idle: 0,
   requesting: 1,
@@ -16,9 +16,110 @@ const LIFECYCLE_ORDER = Object.freeze({
   completed: 100,
   cancelled: 100,
   canceled: 100,
+  no_drivers: 100,
+  rejected: 100,
 });
 
 const normalizeText = (value) => String(value || '').trim();
+const normalizeRole = (value) => {
+  const normalized = normalizeText(value).toLowerCase();
+  if (normalized === 'customer') return 'passenger';
+  return normalized;
+};
+
+const parseTimestampMs = (value) => {
+  if (!value) return null;
+  if (value instanceof Date) {
+    const dateMs = value.getTime();
+    return Number.isFinite(dateMs) ? dateMs : null;
+  }
+
+  const raw = normalizeText(value);
+  if (!raw) return null;
+
+  if (/^\d+$/.test(raw)) {
+    const numeric = Number(raw);
+    if (Number.isFinite(numeric) && numeric > 0) {
+      return numeric < 10_000_000_000 ? numeric * 1000 : numeric;
+    }
+  }
+
+  const parsed = Date.parse(raw);
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
+const hasServerVersion = (snapshot = {}) =>
+  snapshot.serverVersion !== null &&
+  snapshot.serverVersion !== undefined &&
+  Number.isFinite(Number(snapshot.serverVersion));
+
+const isTruthyFlag = (value) => {
+  if (value === true) return true;
+  return ['1', 'true', 'yes', 'sim'].includes(normalizeText(value).toLowerCase());
+};
+
+const parseFiniteNumber = (value) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
+const pickMoneyLike = (source = {}, keys = []) => {
+  for (const key of keys) {
+    const parsed = parseFiniteNumber(source?.[key]);
+    if (parsed !== null) return parsed;
+  }
+  return null;
+};
+
+const sanitizeFinancialSnapshot = (financialSnapshot = null) => {
+  if (!financialSnapshot || typeof financialSnapshot !== 'object') {
+    return null;
+  }
+
+  const financialSnapshotSource = normalizeText(financialSnapshot.financialSnapshotSource);
+  const authoritativeSnapshot = isTruthyFlag(financialSnapshot.authoritativeSnapshot);
+  const backendFinal = authoritativeSnapshot && financialSnapshotSource === 'backend_final';
+  const base = {
+    paymentStatus: financialSnapshot.paymentStatus || null,
+    paymentId: financialSnapshot.paymentId || null,
+    chargeId: financialSnapshot.chargeId || null,
+  };
+
+  if (backendFinal) {
+    return {
+      ...financialSnapshot,
+      authoritativeSnapshot: true,
+      financialSnapshotSource: 'backend_final',
+    };
+  }
+
+  const fare = pickMoneyLike(financialSnapshot, [
+    'fare',
+    'grossAmount',
+    'finalFare',
+    'passengerPaid',
+    'passengerPaidAmount',
+  ]);
+
+  return {
+    ...base,
+    ...(fare !== null ? { fare } : {}),
+    authoritativeSnapshot: false,
+    financialSnapshotSource: financialSnapshotSource || 'local_last_known',
+  };
+};
+
+const sanitizeRouteSnapshot = (routeSnapshot = null) => {
+  if (!routeSnapshot || typeof routeSnapshot !== 'object') {
+    return null;
+  }
+
+  return {
+    ...routeSnapshot,
+    routeSynthetic: routeSnapshot.routeSynthetic === true,
+    polylineSource: normalizeText(routeSnapshot.polylineSource || routeSnapshot.source || ''),
+  };
+};
 
 export const normalizeRideSnapshotStatus = (status) => {
   const normalized = normalizeText(status).toLowerCase().replace(/-/g, '_');
@@ -26,7 +127,18 @@ export const normalizeRideSnapshotStatus = (status) => {
   if (normalized === 'cancelled') return 'canceled';
   if (normalized === 'driver_arrived') return 'arrived';
   if (normalized === 'in_trip' || normalized === 'trip_started') return 'started';
-  if (normalized === 'finished' || normalized === 'trip_completed') return 'completed';
+  if (
+    normalized === 'finished' ||
+    normalized === 'trip_completed' ||
+    normalized === 'early_ended_by_rider' ||
+    normalized === 'interrupted_operational_ended' ||
+    normalized === 'early_ended_review'
+  ) return 'completed';
+  if (
+    normalized === 'no_driver' ||
+    normalized === 'no_drivers_found' ||
+    normalized === 'no_drivers_available'
+  ) return 'no_drivers';
   return normalized;
 };
 
@@ -61,7 +173,7 @@ const writeRegistry = async (snapshots) => {
 const resolveSnapshotIdentity = (snapshot = {}) => ({
   bookingId: normalizeText(snapshot.bookingId || snapshot.activeBookingId || snapshot.id),
   userId: normalizeText(snapshot.userId || snapshot.profileUid || snapshot.actorId),
-  role: normalizeText(snapshot.role || snapshot.activeRole).toLowerCase(),
+  role: normalizeRole(snapshot.role || snapshot.activeRole),
 });
 
 const sameSnapshotScope = (left = {}, right = {}) => {
@@ -103,6 +215,10 @@ const normalizeSnapshot = (snapshot = {}, now = Date.now()) => {
       ? Number(snapshot.serverVersion)
       : null,
     lastServerEventAt: snapshot.lastServerEventAt || null,
+    lastServerEventAtMs: parseTimestampMs(snapshot.lastServerEventAt),
+    lastLocalSeenAt: snapshot.lastLocalSeenAt || new Date(now).toISOString(),
+    financialSnapshot: sanitizeFinancialSnapshot(snapshot.financialSnapshot),
+    routeSnapshot: sanitizeRouteSnapshot(snapshot.routeSnapshot),
     updatedAt: now,
   };
 };
@@ -119,11 +235,23 @@ export const shouldAcceptRideLocalSnapshot = (previous, incoming) => {
   const currentVersion = Number(current.serverVersion);
   const nextVersion = Number(next.serverVersion);
   if (
-    Number.isFinite(currentVersion) &&
-    Number.isFinite(nextVersion) &&
-    nextVersion > currentVersion
+    hasServerVersion(current) &&
+    hasServerVersion(next)
   ) {
-    return true;
+    if (nextVersion > currentVersion) return true;
+    if (nextVersion < currentVersion) return false;
+  }
+
+  if (
+    Number.isFinite(Number(current.lastServerEventAtMs)) &&
+    Number.isFinite(Number(next.lastServerEventAtMs))
+  ) {
+    if (Number(next.lastServerEventAtMs) > Number(current.lastServerEventAtMs)) {
+      return true;
+    }
+    if (Number(next.lastServerEventAtMs) < Number(current.lastServerEventAtMs)) {
+      return false;
+    }
   }
 
   if (current.terminal && !next.terminal) return false;

@@ -29,6 +29,13 @@ class ExtendRideCommand extends Command {
         this.customerId = data.customerId;
         this.newEndLocation = data.newEndLocation;
         this.newFare = data.newFare;
+        this.fareDelta = data.fareDelta ?? data.baseFareDelta ?? null;
+        this.extensionChargeAmount = data.extensionChargeAmount ?? data.diffFare ?? null;
+        this.extensionChargeAmountCents = data.extensionChargeAmountCents ?? null;
+        this.extensionOperationalCost = data.extensionOperationalCost ?? null;
+        this.routeRecalculationCost = data.routeRecalculationCost ?? null;
+        this.paymentIntermediationFee = data.paymentIntermediationFee ?? null;
+        this.roundingBuffer = data.roundingBuffer ?? null;
         this.mockPayment = data.mockPayment === true || data.__mockPayment === true;
         this.eventType = data.eventType || 'EXTENSION_REQUESTED';
         this.skipEventRecord = data.skipEventRecord === true;
@@ -92,7 +99,19 @@ class ExtendRideCommand extends Command {
                     return CommandResult.failure('O novo destino é mais barato ou igual ao atual. Estorno será feito no fim da viagem.');
                 }
 
-                const diffFare = Number((newFareNumber - currentFare).toFixed(2));
+                const fareDelta = Number(
+                    (Number.isFinite(Number(this.fareDelta)) && Number(this.fareDelta) > 0
+                        ? Number(this.fareDelta)
+                        : newFareNumber - currentFare
+                    ).toFixed(2)
+                );
+                const requestedChargeAmountCents = Number.isFinite(Number(this.extensionChargeAmountCents))
+                    ? Math.round(Number(this.extensionChargeAmountCents))
+                    : Math.round(Number(this.extensionChargeAmount || fareDelta) * 100);
+                const diffFare = Number((Math.max(requestedChargeAmountCents, Math.round(fareDelta * 100)) / 100).toFixed(2));
+                if (diffFare < fareDelta) {
+                    return CommandResult.failure('Cobrança da extensão não cobre o delta positivo da corrida');
+                }
                 const shouldForceQaMockPayment =
                     isQaSeedIdentity(this.customerId) ||
                     isQaSeedIdentity(bookingCustomerId) ||
@@ -134,7 +153,13 @@ class ExtendRideCommand extends Command {
                             { key: 'passenger_id', value: this.customerId },
                             { key: 'ride_id', value: this.bookingId },
                             { key: 'payment_type', value: 'ride_extension' },
-                            { key: 'new_fare', value: String(newFareNumber) }
+                            { key: 'new_fare', value: String(newFareNumber) },
+                            { key: 'fare_delta', value: String(fareDelta) },
+                            { key: 'extension_charge_amount', value: String(diffFare) },
+                            { key: 'route_recalculation_cost', value: String(this.routeRecalculationCost || 0) },
+                            { key: 'payment_intermediation_fee', value: String(this.paymentIntermediationFee || 0) },
+                            { key: 'extension_operational_cost', value: String(this.extensionOperationalCost || 0) },
+                            { key: 'rounding_buffer', value: String(this.roundingBuffer || 0) }
                         ],
                         customer: {
                             name: bookingData.passengerName || 'Passageiro Leaf',
@@ -186,7 +211,11 @@ class ExtendRideCommand extends Command {
                         type: this.eventType,
                         newEndLocation: this.newEndLocation,
                         newFare: newFareNumber,
+                        fareDelta,
                         diffFare,
+                        extensionOperationalCost: this.extensionOperationalCost,
+                        routeRecalculationCost: this.routeRecalculationCost,
+                        paymentIntermediationFee: this.paymentIntermediationFee,
                         chargeId,
                         correlationId: this.correlationId
                     });
@@ -207,7 +236,11 @@ class ExtendRideCommand extends Command {
                     bookingId: this.bookingId,
                     paymentRequired: true,
                     diffFare,
+                    fareDelta,
                     newFare: Number(newFareNumber.toFixed(2)),
+                    extensionOperationalCost: Number(Number(this.extensionOperationalCost || 0).toFixed(2)),
+                    routeRecalculationCost: Number(Number(this.routeRecalculationCost || 0).toFixed(2)),
+                    paymentIntermediationFee: Number(Number(this.paymentIntermediationFee || 0).toFixed(2)),
                     chargeId,
                     pixQRCode,
                     paymentLink,

@@ -31,6 +31,9 @@ class FeatureFlagService {
       // Protótipo UI/UX Robotaxi (agora é a interface principal do app)
       PROTOTYPE_ROBOTAXI_UI_ENABLED: true,
 
+      // iOS Live Activities para status de corrida na Lock Screen / Dynamic Island
+      PILOT_RIDE_LIVE_ACTIVITIES_REQUIRED: true,
+
       // Perfil de lancamento do piloto controlado
       ...pilotFeatureDefaults,
       

@@ -133,7 +133,7 @@ function buildPrototypeConnectionIndicatorModel({
     driverOnlinePending,
   });
 
-  if (!forceVisible && !shouldSurface && !recentlyRecovered) {
+  if (!forceVisible && !shouldSurface) {
     return null;
   }
 

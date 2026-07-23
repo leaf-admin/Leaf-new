@@ -14,7 +14,7 @@ env:
       - waitForAnimationToEnd
 
 - extendedWaitUntil:
-    visible: ".*(DEVELOPMENT SERVERS|Sign in to view updates|No development servers found|auth-phone-input|Bem-vindo\\(a\\) à Leaf|Número|Verificação|Como você quer usar a Leaf\\?|Quero ser parceiro|Ganhos de hoje|Ficar Online|Ficar Offline|Ativação pendente).*"
+    visible: ".*(DEVELOPMENT SERVERS|Sign in to view updates|No development servers found|Bem-vindo.*Leaf|Número|Verificação|Como você quer usar a Leaf\\?|Quero ser parceiro|Ganhos de hoje|Ficar Online|Ficar Offline|Ativação pendente).*"
     timeout: 120000
 
 - runFlow:
@@ -67,7 +67,7 @@ env:
           point: "88%,44%"
 
 - extendedWaitUntil:
-    visible: ".*(auth-phone-input|Bem-vindo\\(a\\) à Leaf|Número|Verificação|Como você quer usar a Leaf\\?|Quero ser parceiro|Ganhos de hoje|Ficar Online|Ficar Offline|Ativação pendente).*"
+    visible: ".*(Bem-vindo.*Leaf|Número|Verificação|Como você quer usar a Leaf\\?|Quero ser parceiro|Ganhos de hoje|Ficar Online|Ficar Offline|Ativação pendente).*"
     timeout: 90000
 
 - runFlow:
@@ -79,16 +79,17 @@ env:
           id: "auth-phone-input"
       - eraseText
       - inputText: ${DRIVER_PHONE}
-      - pressKey: Enter
+      - tapOn: "Done"
 
 - runFlow:
     when:
-      visible: "Bem-vindo(a) à Leaf"
+      visible: "Bem-vindo.*Leaf"
     commands:
-      - tapOn: "Número"
+      - tapOn:
+          id: "auth-phone-input"
       - eraseText
       - inputText: ${DRIVER_PHONE}
-      - tapOn: "Continuar"
+      - tapOn: "Done"
 
 - runFlow:
     when:

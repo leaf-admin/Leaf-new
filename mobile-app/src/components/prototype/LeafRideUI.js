@@ -1,5 +1,5 @@
 import React from "react";
-import { ActivityIndicator, Animated, Easing, Image, Platform, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { ActivityIndicator, Animated, Easing, Image, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { fonts } from "../../theme/runtimeTokens";
 
@@ -121,6 +121,7 @@ export function LeafStateHeader({
   rightLabel,
   rightTone = "leaf",
   insetsTop = 0,
+  onLayout,
 }) {
   const top = insetsTop + 50;
   const entrance = React.useRef(new Animated.Value(0)).current;
@@ -183,7 +184,11 @@ export function LeafStateHeader({
   };
 
   return (
-    <Animated.View pointerEvents="box-none" style={[styles.stateHeader, { top }, animatedStyle]}>
+    <Animated.View
+      pointerEvents="box-none"
+      onLayout={onLayout}
+      style={[styles.stateHeader, { top }, animatedStyle]}
+    >
       <View style={styles.stateHeaderCopy}>
         <Text style={styles.stateHeaderTitle} numberOfLines={2}>
           {title}
@@ -201,7 +206,17 @@ export function LeafStateHeader({
   );
 }
 
-export function LeafRideSheet({ children, style, onLayout, testID, accessibilityLabel }) {
+export function LeafRideSheet({
+  children,
+  style,
+  onLayout,
+  testID,
+  accessibilityLabel,
+  scrollEnabled = false,
+  scrollStyle,
+  scrollContentContainerStyle,
+  showsVerticalScrollIndicator = false,
+}) {
   const entrance = React.useRef(new Animated.Value(0)).current;
 
   React.useEffect(() => {
@@ -245,7 +260,20 @@ export function LeafRideSheet({ children, style, onLayout, testID, accessibility
       testID={testID}
       accessibilityLabel={accessibilityLabel}
     >
-      {children}
+      {scrollEnabled ? (
+        <ScrollView
+          bounces={false}
+          keyboardShouldPersistTaps="handled"
+          nestedScrollEnabled
+          showsVerticalScrollIndicator={showsVerticalScrollIndicator}
+          style={[styles.sheetScroll, scrollStyle]}
+          contentContainerStyle={[styles.sheetScrollContent, scrollContentContainerStyle]}
+        >
+          {children}
+        </ScrollView>
+      ) : (
+        children
+      )}
     </Animated.View>
   );
 }
@@ -358,7 +386,7 @@ export function LeafProgressBar({ progress = 0, tone = "leaf", fillTestID }) {
 export function LeafRouteProgress({
   originLabel = "Partida",
   destinationLabel = "Chegada",
-  progress = 0.48,
+  progress = 0,
   progressKey,
   arrivalLabel,
   style,
@@ -366,7 +394,10 @@ export function LeafRouteProgress({
   fieldTestIDs = {},
 }) {
   const pulse = React.useRef(new Animated.Value(0)).current;
-  const normalizedProgress = Math.max(0.08, Math.min(0.94, Number(progress) || 0.48));
+  const numericProgress = Number(progress);
+  const normalizedProgress = Number.isFinite(numericProgress)
+    ? Math.max(0, Math.min(0.94, numericProgress))
+    : 0;
   const routeIdentity = String(progressKey || `${originLabel}|${destinationLabel}`);
   const progressAnim = React.useRef(new Animated.Value(normalizedProgress)).current;
   const previousRouteIdentityRef = React.useRef(routeIdentity);
@@ -859,6 +890,12 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.07,
     shadowRadius: 24,
     elevation: Platform.OS === "android" ? 1 : 10,
+  },
+  sheetScroll: {
+    flexGrow: 0,
+  },
+  sheetScrollContent: {
+    flexGrow: 0,
   },
   pill: {
     height: 26,

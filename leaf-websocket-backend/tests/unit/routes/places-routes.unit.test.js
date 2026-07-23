@@ -7,6 +7,7 @@ const mockSearchPlace = jest.fn();
 const mockFetchAutocompletePredictions = jest.fn();
 const mockGetPlaceDetails = jest.fn();
 const mockFetchDirectionsRoute = jest.fn();
+const mockHasUsableDirectionsGeometry = jest.fn();
 const mockSavePlace = jest.fn();
 const mockReverseGeocode = jest.fn();
 const mockIngestGoogleSkuUsage = jest.fn();
@@ -18,6 +19,7 @@ jest.mock('../../../services/places-cache-service', () => ({
   fetchAutocompletePredictions: (...args) => mockFetchAutocompletePredictions(...args),
   getPlaceDetails: (...args) => mockGetPlaceDetails(...args),
   fetchDirectionsRoute: (...args) => mockFetchDirectionsRoute(...args),
+  hasUsableDirectionsGeometry: (...args) => mockHasUsableDirectionsGeometry(...args),
   savePlace: (...args) => mockSavePlace(...args),
   reverseGeocode: (...args) => mockReverseGeocode(...args),
 }));
@@ -53,6 +55,7 @@ describe('places routes', () => {
     mockFetchAutocompletePredictions.mockResolvedValue([]);
     mockGetPlaceDetails.mockResolvedValue(null);
     mockFetchDirectionsRoute.mockResolvedValue(null);
+    mockHasUsableDirectionsGeometry.mockImplementation((data) => Boolean(data?.polylinePoints));
     mockSavePlace.mockResolvedValue(true);
     mockReverseGeocode.mockResolvedValue(null);
     mockIngestGoogleSkuUsage.mockResolvedValue({});
@@ -512,5 +515,158 @@ describe('places routes', () => {
         backendCommand: 'places_directions_route',
       }),
     );
+  });
+
+  it('blocks estimated route fallback for passenger quote preview when canonical route is unavailable', async () => {
+    const app = createApp();
+    mockGetReport.mockResolvedValue({
+      totals: {
+        google: {
+          directions: {
+            requestCount: 6,
+            estimatedCostUsd: 0.031,
+          },
+        },
+      },
+    });
+    mockFetchDirectionsRoute.mockResolvedValue({
+      cached: false,
+      cacheOnly: true,
+      routeCount: 0,
+      waypointsCount: 0,
+      data: null,
+      status: 'cache_miss',
+      stats: {
+        redisReads: 1,
+        redisWrites: 0,
+        googleRequests: 0,
+      },
+    });
+
+    const response = await request(app)
+      .post('/api/places/directions')
+      .send({
+        startLoc: '-22.8570,-43.3090',
+        destLoc: '-22.9977,-43.3581',
+        routeScope: 'passenger_home_preview',
+        telemetry: {
+          bookingId: 'booking_budget_quote_1',
+          sourceMeta: {
+            userId: 'customer_1',
+            userType: 'customer',
+            surface: 'passenger_home_category_preview',
+          },
+        },
+      });
+
+    expect(response.status).toBe(503);
+    expect(response.body).toEqual(
+      expect.objectContaining({
+        status: 'unavailable',
+        code: 'canonical_route_required',
+        telemetryCaptured: false,
+        budgetGuard: expect.objectContaining({
+          fallback: 'blocked_for_canonical_route',
+        }),
+      }),
+    );
+    expect(mockFetchDirectionsRoute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cacheOnly: true,
+      }),
+    );
+    expect(mockIngestGoogleSkuUsage).not.toHaveBeenCalled();
+    expect(mockIngestOperationalUsage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bookingId: 'booking_budget_quote_1',
+        backendCommand: 'places_directions_route',
+      }),
+    );
+  });
+
+  it('never returns an estimated route for active ride navigation when the budget guard blocks Google', async () => {
+    const app = createApp();
+    mockGetReport.mockResolvedValue({
+      totals: {
+        google: {
+          directions: {
+            requestCount: 6,
+            estimatedCostUsd: 0.031,
+          },
+        },
+      },
+    });
+    mockFetchDirectionsRoute.mockResolvedValue({
+      cached: false,
+      cacheOnly: true,
+      routeCount: 0,
+      waypointsCount: 1,
+      data: null,
+      status: 'cache_miss',
+      stats: {
+        redisReads: 1,
+        redisWrites: 0,
+        googleRequests: 0,
+      },
+    });
+
+    const response = await request(app)
+      .post('/api/places/directions')
+      .send({
+        startLoc: '-22.9712,-43.1822',
+        destLoc: '-22.9848,-43.2220',
+        waypoints: '-22.9730,-43.1900',
+        routeScope: 'active_ride_navigation',
+        telemetry: {
+          bookingId: 'booking_active_navigation_1',
+          sourceMeta: {
+            userId: 'driver_1',
+            userType: 'driver',
+            surface: 'driver_live_route_prefetch',
+          },
+        },
+      });
+
+    expect(response.status).toBe(503);
+    expect(response.body).toEqual(expect.objectContaining({
+      status: 'unavailable',
+      code: 'canonical_route_required',
+    }));
+    expect(response.body.source).not.toBe('budget_guard_estimated');
+    expect(mockFetchDirectionsRoute).toHaveBeenCalledTimes(1);
+    expect(mockFetchDirectionsRoute).toHaveBeenCalledWith(
+      expect.objectContaining({ cacheOnly: true }),
+    );
+    expect(mockIngestGoogleSkuUsage).not.toHaveBeenCalled();
+  });
+
+  it('rejects invalid geometry from the service before reporting route success', async () => {
+    const app = createApp();
+    mockFetchDirectionsRoute.mockResolvedValue({
+      cached: false,
+      routeCount: 1,
+      waypointsCount: 0,
+      data: {
+        distance_in_km: 2.4,
+        time_in_secs: 300,
+        polylinePoints: null,
+      },
+      stats: { redisReads: 0, redisWrites: 0, googleRequests: 1 },
+    });
+    mockHasUsableDirectionsGeometry.mockReturnValue(false);
+
+    const response = await request(app)
+      .post('/api/places/directions')
+      .send({
+        startLoc: '-22.9712,-43.1822',
+        destLoc: '-22.9848,-43.2220',
+      });
+
+    expect(response.status).toBe(404);
+    expect(response.body).toEqual(expect.objectContaining({
+      status: 'not_found',
+      code: 'invalid_route_geometry',
+    }));
+    expect(mockIngestGoogleSkuUsage).not.toHaveBeenCalled();
   });
 });

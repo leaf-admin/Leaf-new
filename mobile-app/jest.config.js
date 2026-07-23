@@ -8,6 +8,7 @@ module.exports = {
     },
     modulePathIgnorePatterns: [
         "<rootDir>/common/common-packages/",
+        "<rootDir>/ios/build/",
         "<rootDir>/test-build-final-success/",
         "<rootDir>/playwright-report/",
     ],

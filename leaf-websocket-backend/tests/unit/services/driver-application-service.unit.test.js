@@ -38,6 +38,13 @@ jest.mock('../../../utils/logger', () => ({
   logStructured: jest.fn()
 }));
 
+jest.mock('../../../services/sandbox-persistence-context', () => ({
+  resolveUserPersistenceScope: jest.fn(async () => ({
+    namespace: 'operational',
+    financialContextId: 'operational-test-context'
+  }))
+}));
+
 function mockFirestoreApplications(applications = []) {
   mockCollectionGet.mockResolvedValue({
     docs: applications.map((application) => ({
@@ -123,6 +130,10 @@ describe('driver-application-service', () => {
               type: 'antecedentes_criminais',
               status: 'pending',
               fileUrl: 'https://storage.test/background.pdf',
+              filePath: 'documents/driver_mei/antecedentes_criminais/123_background.pdf',
+              documentSha256: 'a'.repeat(64),
+              storageGeneration: '1234567890',
+              contentAvailable: true,
               fileName: 'background.pdf',
               fileType: 'application/pdf',
               uploadedAt: '2026-05-21T10:00:00.000Z'
@@ -142,8 +153,10 @@ describe('driver-application-service', () => {
       driverId: 'driver_mei',
       documentType: 'antecedentes_criminais',
       status: 'pending',
-      fileName: 'background.pdf'
+      fileName: 'background.pdf',
+      contentAvailable: true
     });
+    expect(result.items[0]).not.toHaveProperty('fileUrl');
     expect(result.summary).toMatchObject({
       total: 1,
       byStatus: {
@@ -152,6 +165,39 @@ describe('driver-application-service', () => {
         rejected: 0
       }
     });
+  });
+
+  it('removes persisted provider URLs recursively from the applications response', async () => {
+    mockFirestoreApplications([{
+      id: 'driver_safe_projection',
+      driverId: 'driver_safe_projection',
+      status: 'pending',
+      documents: {
+        license: {
+          front: 'https://storage.test/cnh.pdf',
+          status: 'pending'
+        },
+        vehicle: {
+          registration: 'https://storage.test/crlv.pdf'
+        },
+        all_documents: [{
+          type: 'cnh',
+          fileUrl: 'https://storage.test/cnh.pdf',
+          fileUrlExpiresAt: '2026-07-22T00:00:00.000Z',
+          contentAvailable: true
+        }]
+      }
+    }]);
+
+    const result = await service.listApplications({});
+    const serialized = JSON.stringify(result);
+
+    expect(serialized).not.toContain('https://storage.test');
+    expect(result.applications[0].documents.all_documents[0]).toMatchObject({
+      type: 'cnh',
+      contentAvailable: true
+    });
+    expect(result.applications[0].documents.all_documents[0]).not.toHaveProperty('fileUrl');
   });
 
   it('builds a lightweight review queue summary from denormalized counters', async () => {
@@ -234,5 +280,74 @@ describe('driver-application-service', () => {
       activeVehicleColor: 'BRANCO',
       activeVehicleIdentitySource: 'crlv_pdf_ocr',
     }));
+  });
+
+  it('enriches a partial RTDB activation user from the allowlisted canonical Firestore profile', async () => {
+    mockCollectionDocGet.mockResolvedValue({
+      exists: true,
+      data: () => ({
+        usertype: 'driver',
+        name: 'Motorista Canônico',
+        mobile: '+5500000000000',
+        cpf: '00000000000',
+        createdAt: '2026-07-14T18:00:00.000Z',
+        internalOnlyMarker: 'do-not-project',
+      }),
+    });
+    mockRealtimeOnce
+      .mockResolvedValueOnce({
+        val: () => ({
+          status: 'approved',
+          data: {
+            nome: 'Nome CNH',
+            cpf: '11111111111',
+            dataNascimento: '01/02/1990',
+          },
+        }),
+      })
+      .mockResolvedValueOnce({
+        val: () => ({
+          usertype: 'driver',
+          userType: 'driver',
+          role: 'driver',
+          documents: {
+            cnh: {
+              status: 'approved',
+              fileUrl: 'https://storage.test/cnh.pdf',
+            },
+          },
+          driverActivation: { activationState: 'APPROVED_NEEDS_LIVENESS' },
+        }),
+      })
+      .mockResolvedValueOnce({ val: () => ({}) })
+      .mockResolvedValueOnce({ val: () => ({}) });
+
+    const application = await service.syncDriverApplication('driver_partial', {
+      includeRatings: false,
+    });
+
+    expect(mockFirestoreCollection).toHaveBeenCalledWith('users');
+    expect(application).toMatchObject({
+      driverId: 'driver_partial',
+      source: 'firestore_profile_rtdb_activation',
+      driver: {
+        name: 'Motorista Canônico',
+        phone: '+5500000000000',
+        cpf: '00000000000',
+        birthDate: '1990-02-01',
+        registrationDate: '2026-07-14T18:00:00.000Z',
+      },
+    });
+    expect(JSON.stringify(application.driver)).not.toContain('do-not-project');
+    expect(mockCollectionDocSet).toHaveBeenCalledWith(
+      expect.objectContaining({
+        driver: expect.objectContaining({
+          name: 'Motorista Canônico',
+          phone: '+5500000000000',
+          cpf: '00000000000',
+        }),
+      }),
+      { merge: true },
+    );
   });
 });

@@ -1,0 +1,12 @@
+appId: br.com.leaf.ride
+---
+- tapOn:
+    point: "38%,94%"
+
+- runFlow:
+    when:
+      visible: "Abrir"
+    commands:
+      - tapOn: "Abrir"
+
+- waitForAnimationToEnd

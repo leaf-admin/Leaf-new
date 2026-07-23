@@ -130,6 +130,7 @@ const {
     ensureDriverOnlineReady
 } = require('./services/driver-dispatch-availability-service');
 const FCMService = require('./services/fcm-service');
+const RideLiveActivityService = require('./services/ride-live-activity-service');
 const { clearActiveTripForDriver, resolveActiveTripForDriver } = require('./utils/active-trip-index');
 const { assessDriverArrivalAtPickup } = require('./utils/pickup-arrival-policy');
 const { buildTripCompletedPayload } = require('./utils/trip-completion-payload');
@@ -143,6 +144,7 @@ const driverEligibilityService = require('./services/driver-eligibility-service'
 const { buildDriverVehicleIdentity } = require('./utils/driver-vehicle-identity');
 const { resolveAcceptedDriverIdentity } = require('./utils/accepted-driver-identity');
 const fcmService = new FCMService(); // Singleton local ao worker
+const rideLiveActivityService = new RideLiveActivityService(); // ActivityKit/Live Activities
 // =========================================================================================
 
 // ==================== IMPORTAÇÕES REFATORAÇÃO: COMMANDS E LISTENERS ====================
@@ -264,6 +266,7 @@ const authTokenVerifyInFlight = new Map();
 const integratedKYCService = new IntegratedKYCService();
 const paymentServiceSingleton = new PaymentService();
 const paymentDispatchService = require('./services/payment-dispatch-service');
+const { evaluatePilotAccess } = require('./services/pilot-access-control-service');
 const {
     getRideLifecycleFeatureFlags,
     isRideExtensionFlowEnabled,
@@ -1746,7 +1749,10 @@ logStructured('info', 'Rotas de Autenticação Admin (JWT) registradas', { servi
 app.use('/api/kyc', kycRoutes.getRouter());
 
 // Rotas KYC Proxy (para microserviço)
-app.use('/api/kyc-proxy', kycProxyRoutes.getRouter());
+if (String(process.env.ENABLE_LEGACY_KYC_PROXY || 'false').toLowerCase() === 'true') {
+    app.use('/api/kyc-proxy', kycProxyRoutes.getRouter());
+    logStructured('warn', 'Proxy KYC legado habilitado por flag explicita no runtime VPS', { service: 'server' });
+}
 
 // Rotas KYC Analytics
 app.use('/api/kyc-analytics', kycAnalyticsRoutes.getRouter());
@@ -3670,9 +3676,19 @@ io.on('connection', async (socket) => {
     // REGISTRAR IMEDIATAMENTE PARA NÃO PERDER EVENTOS DO CLIENTE
     socket.on('registerFCMToken', async (data) => {
         try {
-            logStructured('info', `Token FCM registrado`, { service: 'registerFCMToken', userId: data.userId, userType: data.userType, platform: data.platform });
-
-            const { userId, userType, fcmToken, platform, timestamp } = data;
+            const payload = data || {};
+            const { fcmToken, platform, deviceId } = payload;
+            const isAuthenticated = Boolean(socket.userId);
+            const effectiveUserId = isAuthenticated ? socket.userId : `temp_${socket.id}`;
+            const effectiveUserType = isAuthenticated ? (socket.userType || 'customer') : 'temporary';
+            logStructured('info', 'Token FCM registrado', {
+                service: 'registerFCMToken',
+                socketId: socket.id,
+                authenticated: isAuthenticated,
+                userId: isAuthenticated ? socket.userId : null,
+                userType: isAuthenticated ? socket.userType : null,
+                platform
+            });
 
             if (!fcmToken) {
                 logStructured('error', `Token FCM não fornecido`, { service: 'registerFCMToken' });
@@ -3680,30 +3696,19 @@ io.on('connection', async (socket) => {
                 return;
             }
 
-            const effectiveUserId = userId || `temp_${socket.id}`;
-            const effectiveUserType = userType || 'customer';
-
-            if (!userId) {
-                logStructured('warn', `Token FCM registrado sem userId, usando temporário`, { service: 'registerFCMToken', effectiveUserId });
-            }
-
             const redis = redisPool.getConnection();
+            const legacyKey = isAuthenticated && effectiveUserType === 'driver'
+                ? `driver:${effectiveUserId}`
+                : `user:${effectiveUserId}`;
 
-            if (effectiveUserType === 'driver') {
-                await redis.hset(`driver:${effectiveUserId}`, {
-                    fcmToken: fcmToken,
-                    fcmTokenUpdated: new Date().toISOString(),
-                    fcmPlatform: platform || 'unknown',
-                    isTemporary: (!userId).toString()
-                });
-            } else {
-                await redis.hset(`user:${effectiveUserId}`, {
-                    fcmToken: fcmToken,
-                    fcmTokenUpdated: new Date().toISOString(),
-                    fcmPlatform: platform || 'unknown',
-                    isTemporary: (!userId).toString()
-                });
-            }
+            await redis.hset(legacyKey, {
+                fcmToken,
+                fcmTokenUpdated: new Date().toISOString(),
+                fcmPlatform: platform || 'unknown',
+                fcmDeviceId: String(deviceId || '').trim(),
+                isTemporary: (!isAuthenticated).toString(),
+                socketId: socket.id
+            });
 
             try {
                 if (!fcmService.isServiceAvailable()) {
@@ -3714,8 +3719,11 @@ io.on('connection', async (socket) => {
 
                 const saved = await fcmService.saveUserFCMToken(effectiveUserId, effectiveUserType, fcmToken, {
                     platform,
-                    isTemporary: !userId,
-                    socketId: socket.id
+                    deviceId: String(deviceId || '').trim() || null,
+                    isTemporary: !isAuthenticated,
+                    socketId: socket.id,
+                    authenticated: isAuthenticated,
+                    authenticatedAt: isAuthenticated ? new Date().toISOString() : null
                 });
             } catch (fcmError) {
                 logStructured('error', 'Erro ao salvar token no FCMService', { service: 'websocket', operation: 'registerFCMToken', error: fcmError.message });
@@ -3727,20 +3735,62 @@ io.on('connection', async (socket) => {
                 message: 'Token FCM registrado com sucesso'
             });
         } catch (error) {
-            logError(error, 'Erro ao registrar token FCM', { service: 'registerFCMToken', userId: data.userId });
+            logError(error, 'Erro ao registrar token FCM', { service: 'registerFCMToken', userId: socket.userId || null });
             socket.emit('fcmTokenError', { error: 'Erro interno do servidor: ' + error.message });
         }
     });
 
     socket.on('unregisterFCMToken', async (data) => {
         try {
-            const { userId, fcmToken } = data;
-            if (!userId || !fcmToken) return;
-            const redis = redisPool.getConnection();
-            await fcmService.removeUserFCMToken(userId, fcmToken);
-            socket.emit('fcmTokenUnregistered', { success: true });
+            const payload = data || {};
+            const { fcmToken } = payload;
+            if (!fcmToken) {
+                socket.emit('fcmTokenError', { error: 'Token FCM não fornecido' });
+                return;
+            }
+            const effectiveUserId = socket.userId || `temp_${socket.id}`;
+            await fcmService.removeUserFCMToken(effectiveUserId, fcmToken);
+            socket.emit('fcmTokenUnregistered', { success: true, userId: effectiveUserId });
         } catch (error) {
             logError(error, 'Erro ao desregistrar token FCM', { service: 'unregisterFCMToken' });
+        }
+    });
+
+    socket.on('registerRideLiveActivityToken', async (data) => {
+        try {
+            const payload = data || {};
+            const { pushToken, platform } = payload;
+
+            if (!pushToken) {
+                socket.emit('rideLiveActivityTokenError', { error: 'Token Live Activity é obrigatório' });
+                return;
+            }
+
+            const isAuthenticated = Boolean(socket.userId);
+            const effectiveUserId = isAuthenticated ? socket.userId : `temp_${socket.id}`;
+            const effectiveUserType = isAuthenticated ? (socket.userType || 'customer') : 'temporary';
+            const redis = redisPool.getConnection();
+            rideLiveActivityService.setRedis(redis);
+
+            const result = await rideLiveActivityService.saveToken(effectiveUserId, effectiveUserType, {
+                ...payload,
+                platform: platform || 'ios'
+            });
+
+            if (!result.success) {
+                socket.emit('rideLiveActivityTokenError', { error: result.error || 'Falha ao registrar Live Activity' });
+                return;
+            }
+
+            socket.emit('rideLiveActivityTokenRegistered', {
+                success: true,
+                userId: effectiveUserId,
+                activityId: result.activityId,
+                bookingId: result.bookingId
+            });
+        } catch (error) {
+            logError(error, 'Erro ao registrar token Live Activity', { service: 'registerRideLiveActivityToken', userId: socket.userId || null });
+            socket.emit('rideLiveActivityTokenError', { error: 'Erro interno do servidor: ' + error.message });
         }
     });
     // ==========================================================================
@@ -4599,7 +4649,12 @@ io.on('connection', async (socket) => {
                     ? 'Há motoristas disponíveis para esta corrida.'
                     : 'Não há motoristas disponíveis',
                 carType: requestedCarType,
-                radiusKm: availability.radiusKm || requestedRadiusKm
+                radiusKm: availability.radiusKm || requestedRadiusKm,
+                candidates: availability.candidates ?? availability.summary?.candidates ?? null,
+                eligible: availability.eligible ?? availability.summary?.eligible ?? null,
+                rejections: availability.rejections || null,
+                estimatedPickupEtaMin: availability.estimatedPickupEtaMin ?? null,
+                driverId: availability.driverId || null
             });
 
             logStructured('info', 'Pré-check de disponibilidade concluído', {
@@ -4727,6 +4782,26 @@ io.on('connection', async (socket) => {
                     // ✅ NOVO: Rate Limiting
                     const userId = socket.userId || data.customerId || socket.id;
                     const metadata = getSocketMetadata(socket);
+                    const pilotAccess = evaluatePilotAccess({
+                        userId,
+                        role: 'passenger',
+                        operation: 'booking'
+                    });
+                    if (!pilotAccess.allowed) {
+                        emitBookingError({
+                            error: pilotAccess.message,
+                            message: pilotAccess.message,
+                            code: pilotAccess.code,
+                            retryable: pilotAccess.retryable === true
+                        }, pilotAccess.code);
+                        logStructured('warn', 'createBooking bloqueado pelo controle do piloto', {
+                            userId,
+                            eventType: 'createBooking',
+                            code: pilotAccess.code
+                        });
+                        return;
+                    }
+
                     const rateLimitCheck = await rateLimiterService.checkRateLimit(userId, 'createBooking', {
                         ip: metadata.ip
                     });
@@ -6209,12 +6284,8 @@ io.on('connection', async (socket) => {
 
                 // Usar dados sanitizados
                 const { bookingId, paymentMethod, paymentId, amount } = validation.sanitized;
-                const paymentMockEnabled =
-                    data?.mockPayment === true ||
-                    data?.__mockPayment === true ||
-                    String(process.env.MOCK_PAYMENT_FOR_TESTS || '').toLowerCase() === 'true';
                 const skipAvailabilityCheck =
-                    String(process.env.CONFIRM_PAYMENT_SKIP_AVAILABILITY_CHECK || 'true').toLowerCase() === 'true';
+                    String(process.env.CONFIRM_PAYMENT_SKIP_AVAILABILITY_CHECK || 'false').toLowerCase() === 'true';
 
                 // ✅ NOVO: Idempotency - Verificar se requisição já foi processada
                 const idempotencyKey = data.idempotencyKey || idempotencyService.generateKey(
@@ -6252,8 +6323,8 @@ io.on('connection', async (socket) => {
                     }
                 }
 
-                // Guarda de negócio:
-                // A elegibilidade já é garantida no pool ativo de dispatch; aqui só validamos em modo best-effort.
+                // Guarda de negócio: confirmação de pagamento só avança se ainda houver
+                // motorista elegível no momento da confirmação.
                 let bookingPickupLocation = null;
                 let bookingDestinationLocation = null;
                 let bookingPreferences = {};
@@ -6290,40 +6361,78 @@ io.on('connection', async (socket) => {
 
                 const pickupLocationToValidate = payloadPickupLocation || bookingPickupLocation;
 
-                if (!paymentMockEnabled && !skipAvailabilityCheck && pickupLocationToValidate?.lat && pickupLocationToValidate?.lng) {
-                    try {
-                        const availabilityTimeoutMs = Number.parseInt(
-                            process.env.CONFIRM_PAYMENT_AVAILABILITY_TIMEOUT_MS || '800',
-                            10
-                        );
-                        const availability = await Promise.race([
-                            findAvailableDriversForPickup(pickupLocationToValidate, {
-                                carType: bookingCarType,
-                                destinationLocation: bookingDestinationLocation,
-                                preferences: bookingPreferences
-                            }),
-                            new Promise((_, reject) => setTimeout(() => reject(new Error('availability_check_timeout')), availabilityTimeoutMs))
-                        ]);
+                if (skipAvailabilityCheck) {
+                    logStructured('warn', 'confirmPayment: pre-check de disponibilidade ignorado por flag explícita', {
+                        bookingId,
+                        eventType: 'confirmPayment',
+                        code: 'AVAILABILITY_CHECK_SKIPPED'
+                    });
+                } else {
+                    const availabilityTimeoutMs = Number.parseInt(
+                        process.env.CONFIRM_PAYMENT_AVAILABILITY_TIMEOUT_MS || '800',
+                        10
+                    );
+                    const availability = await performCreateBookingAvailabilityPrecheck({
+                        hasConfirmedPayment: true,
+                        pickupLocation: pickupLocationToValidate,
+                        destinationLocation: bookingDestinationLocation,
+                        preferences: bookingPreferences,
+                        requestedCarType: bookingCarType,
+                        checkAvailability: findAvailableDriversForPickup,
+                        logStructured,
+                        logContext: {
+                            userId,
+                            bookingId,
+                            eventType: 'confirmPayment'
+                        },
+                        timeoutMs: availabilityTimeoutMs,
+                        operationLabel: 'confirmPayment'
+                    });
 
-                        if (!availability?.success) {
-                            logStructured('warn', 'confirmPayment: pre-check de disponibilidade indisponível (seguindo fluxo)', {
-                                bookingId,
-                                eventType: 'confirmPayment',
-                                code: 'AVAILABILITY_CHECK_FAILED'
-                            });
-                        } else if ((availability.drivers || []).length === 0) {
-                            logStructured('warn', 'confirmPayment: sem motoristas no pre-check (seguindo fluxo)', {
-                                bookingId,
-                                eventType: 'confirmPayment',
-                                code: 'NO_DRIVERS_AVAILABLE'
-                            });
-                        }
-                    } catch (availabilityError) {
-                        logStructured('warn', 'confirmPayment: erro no pre-check de disponibilidade (seguindo fluxo)', {
+                    if (availability.code === 'NO_DRIVERS_AVAILABLE') {
+                        await auditService.logPaymentAction(userId, 'confirmPayment', bookingId || null, paymentId || null, {
+                            error: 'Sem motorista elegível antes de confirmar pagamento',
+                            code: 'NO_DRIVERS_AVAILABLE',
+                            radiusKm: availability.radiusKm || null
+                        }, false, 'Sem motorista elegível para confirmar pagamento', metadata);
+
+                        socket.emit('paymentError', {
+                            error: 'Não há motorista disponível',
+                            message: 'Não há motorista disponível para essa corrida agora. O pagamento não será confirmado.',
+                            code: 'NO_DRIVERS_AVAILABLE',
+                            retryAfterSec: 15
+                        });
+                        logStructured('warn', 'confirmPayment bloqueado por ausência de motorista elegível', {
                             bookingId,
                             eventType: 'confirmPayment',
-                            error: availabilityError.message
+                            code: 'NO_DRIVERS_AVAILABLE'
                         });
+                        await idempotencyService.releaseInflight(idempotencyKey).catch(() => null);
+                        return;
+                    }
+
+                    if (!availability.success || availability.skipped) {
+                        const availabilityCode = availability.code || 'AVAILABILITY_CHECK_FAILED';
+                        await auditService.logPaymentAction(userId, 'confirmPayment', bookingId || null, paymentId || null, {
+                            error: 'Falha ao validar motorista elegível antes de confirmar pagamento',
+                            code: availabilityCode,
+                            reason: availability.reason || null
+                        }, false, 'Falha no guard de disponibilidade antes do pagamento', metadata);
+
+                        socket.emit('paymentError', {
+                            error: 'Não foi possível validar disponibilidade agora',
+                            message: 'Não foi possível validar motorista disponível agora. Tente novamente em instantes.',
+                            code: availabilityCode,
+                            retryAfterSec: 5
+                        });
+                        logStructured('warn', 'confirmPayment bloqueado por falha no guard de disponibilidade', {
+                            bookingId,
+                            eventType: 'confirmPayment',
+                            code: availabilityCode,
+                            error: availability.error || null
+                        });
+                        await idempotencyService.releaseInflight(idempotencyKey).catch(() => null);
+                        return;
                     }
                 }
 
@@ -9811,6 +9920,28 @@ io.on('connection', async (socket) => {
             // ✅ FASE 0: Verificar se motorista está bloqueado por KYC
             const newIsOnline = isOnline !== undefined ? isOnline : (status === 'online' || status === 'available');
             if (newIsOnline) {
+                const pilotAccess = evaluatePilotAccess({
+                    userId: driverId,
+                    role: 'driver',
+                    operation: 'driver_online'
+                });
+                if (!pilotAccess.allowed) {
+                    logStructured('warn', 'Motorista fora do cohort tentou ficar online no piloto', {
+                        service: 'websocket',
+                        operation: 'setDriverStatus',
+                        driverId,
+                        code: pilotAccess.code,
+                        socketId: socket.id
+                    });
+                    emitDriverStatusError({
+                        error: pilotAccess.message,
+                        reason: pilotAccess.message,
+                        code: pilotAccess.code,
+                        retryable: pilotAccess.retryable === true
+                    }, pilotAccess.code);
+                    return;
+                }
+
                 try {
                     const kycDriverStatusService = require('./services/kyc-driver-status-service');
                     const canWork = await kycDriverStatusService.canDriverWork(driverId);
@@ -11756,22 +11887,28 @@ io.on('connection', async (socket) => {
                         const refundReason = reason || 'Cancelado pelo passageiro';
 
                         if (refundAmountCents > 0 && chargeId) {
-                            const refundResult = await paymentService.processRefund(chargeId, refundAmountCents, refundReason);
+                            const refundStatus = feeCents > 0 ? 'REFUNDED_PARTIAL' : 'REFUNDED_FULL';
+                            const refundResult = await paymentService.processRideRefund({
+                                rideId: bookingId,
+                                chargeId,
+                                amount: refundAmountCents,
+                                cancellationFee: feeCents,
+                                reason: refundReason,
+                                status: refundStatus,
+                                passengerId,
+                                metadata: {
+                                    source: 'server.vps.cancelRide',
+                                    cancelledBy: userId || passengerId || null,
+                                    userType: 'customer'
+                                }
+                            });
                             if (!refundResult.success) {
                                 socket.emit('rideCancellationError', { error: 'Falha ao processar reembolso PIX' });
                                 return;
                             }
 
-                            await paymentService.markPaymentRefunded(bookingId, {
-                                refundId: refundResult.refundId,
-                                refundAmount: refundAmountCents,
-                                cancellationFee: feeCents,
-                                reason: refundReason,
-                                status: 'REFUNDED'
-                            });
-
                             refundSummary = {
-                                status: 'REFUNDED',
+                                status: refundStatus,
                                 refundId: refundResult.refundId,
                                 refundAmountInCents: refundAmountCents,
                                 refundAmountInReais: (refundAmountCents / 100).toFixed(2),

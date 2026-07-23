@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const geofenceService = require('../services/geofence-service');
 const { logStructured, logError } = require('../utils/logger');
+const { isPilotControlledLaunch } = require('../utils/pilot-launch-flags');
 const { authenticateJWT, requireRole } = require('../middleware/jwt-auth');
 
 let firebaseConfig = null;
@@ -87,6 +88,18 @@ function normalizeGeofenceAdminConfig(rawConfig) {
 function applyGeofenceAdminConfig(configToApply) {
     const config = normalizeGeofenceAdminConfig(configToApply);
 
+    // The versioned polygon deployed with the RC is the production contract
+    // during controlled launches. A stale mutable admin record must never
+    // disable it or replace it with a legacy region during bootstrap.
+    if (isPilotControlledLaunch()) {
+        geofenceService.setEnabled(true);
+        return {
+            ...config,
+            enabled: true,
+            region: geofenceService.getCurrentRegion() || []
+        };
+    }
+
     if (Array.isArray(config.region) && config.region.length > 0) {
         const updated = geofenceService.updateRegion(config.region);
         if (!updated) {
@@ -110,13 +123,26 @@ function applyGeofenceAdminConfig(configToApply) {
 
 function buildGeofenceResponse(config) {
     const currentRegion = geofenceService.getCurrentRegion() || [];
+    const operationalStatus = geofenceService.getOperationalStatus();
 
     return {
         version: Number(config?.version || 1),
         enabled: geofenceService.isEnabled(),
         active: geofenceService.isActive(),
         bypassEnabled: geofenceService.isBypassEnabled(),
-        regionPoints: Array.isArray(currentRegion) ? currentRegion.length : 0,
+        available: operationalStatus.available,
+        configured: operationalStatus.configured,
+        failClosed: operationalStatus.failClosed,
+        statusCode: operationalStatus.code,
+        regionSource: operationalStatus.regionSource,
+        regionVersion: operationalStatus.regionVersion,
+        regionUpdatedAt: operationalStatus.regionUpdatedAt,
+        regionName: operationalStatus.regionName,
+        regionPolygons: operationalStatus.regionPolygons,
+        regionPoints: operationalStatus.regionPoints,
+        destinationInsideRegionRequired: operationalStatus.destinationInsideRegionRequired,
+        policyLocked: isPilotControlledLaunch(),
+        policyLockCode: isPilotControlledLaunch() ? 'GEOFENCE_POLICY_LOCKED' : null,
         region: currentRegion,
         updatedAt: config?.updatedAt || null,
         updatedBy: config?.updatedBy || null
@@ -404,12 +430,28 @@ router.get('/check', (req, res) => {
             });
         }
 
-        // ✅ Manter consistência com a validação usada no createBooking.
+        // Manter consistência com quote/createBooking. Em produção/piloto,
+        // configuração ausente ou desabilitada deve falhar fechada.
         if (!geofenceService.isActive()) {
             return res.json({
                 success: true,
                 isAllowed: true,
-                reason: 'Geofence desativado (sem região configurada)',
+                code: 'GEOFENCE_NOT_ENFORCED',
+                reason: 'Geofence não aplicado neste ambiente',
+                coordinates: { lat: latitude, lng: longitude }
+            });
+        }
+
+        const operationalStatus = geofenceService.getOperationalStatus();
+        if (!operationalStatus.available) {
+            return res.status(503).json({
+                success: false,
+                isAllowed: false,
+                code: operationalStatus.code,
+                retryable: true,
+                reason: operationalStatus.code === 'GEOFENCE_DISABLED'
+                    ? 'Região de operação temporariamente indisponível'
+                    : 'Região de operação não configurada',
                 coordinates: { lat: latitude, lng: longitude }
             });
         }
@@ -419,6 +461,7 @@ router.get('/check', (req, res) => {
         res.json({
             success: true,
             isAllowed,
+            code: isAllowed ? 'GEOFENCE_ALLOWED' : 'GEOFENCE_OUTSIDE_REGION',
             reason: isAllowed ? 'Dentro da área de operação' : 'Fora da área de operação permitida',
             coordinates: { lat: latitude, lng: longitude }
         });
@@ -502,6 +545,15 @@ router.get('/admin/config', authenticateJWT, requireRole(ADMIN_ROLES), async (re
  */
 router.patch('/admin/config', authenticateJWT, requireRole(ADMIN_ROLES), async (req, res) => {
     try {
+        if (isPilotControlledLaunch()) {
+            return res.status(409).json({
+                success: false,
+                code: 'GEOFENCE_POLICY_LOCKED',
+                message: 'O polígono versionado da RC está bloqueado durante o piloto controlado.',
+                geofence: buildGeofenceResponse(await loadGeofenceAdminConfig().then(({ config }) => config))
+            });
+        }
+
         const { enabled, region } = req.body || {};
         const hasEnabled = typeof enabled === 'boolean';
         const hasRegion = region !== undefined;

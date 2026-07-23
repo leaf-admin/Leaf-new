@@ -24,12 +24,15 @@ Usage:
 
 Options:
   --doctor         Run non-mutating environment doctor only.
+  --ios-only       Restrict doctor/build/install/open to iOS simulators.
   --metro          Restart Metro on port 8081 with current-flow debug env.
   --build-android  Build Android debug APK.
   --build-ios      Build iOS Debug simulator app.
   --build          Build Android and iOS debug artifacts.
   --install        Install existing debug artifacts on detected/declared devices.
+  --install-ios    Install the existing debug artifact only on the declared iOS simulators.
   --open           Launch installed apps after install.
+  --open-ios       Launch only the declared iOS simulators.
   --all            Doctor, Metro, build, install and open.
 
 Device overrides:
@@ -71,7 +74,11 @@ second_ios_udid() {
 
 run_doctor() {
   mkdir -p "${RUN_DIR}"
-  node "${QA_SCRIPT_DIR}/current-flow-e2e-lab.cjs" --out-dir "${RUN_DIR}/doctor"
+  local doctor_args=(--out-dir "${RUN_DIR}/doctor")
+  if [[ "${IOS_ONLY:-0}" == "1" ]]; then
+    doctor_args+=(--ios-only)
+  fi
+  node "${QA_SCRIPT_DIR}/current-flow-e2e-lab.cjs" "${doctor_args[@]}"
 }
 
 restart_metro() {
@@ -87,8 +94,8 @@ restart_metro() {
   log "starting Metro with debug E2E flags"
   (
     cd "${MOBILE_DIR}"
-    nohup script -q /dev/null bash -lc 'env -u CI npx expo start --dev-client --localhost --port 8081 --clear' \
-      > "${RUN_DIR}/metro/metro.log" 2>&1 &
+    nohup env -u CI npx expo start --dev-client --localhost --port 8081 --clear \
+      </dev/null > "${RUN_DIR}/metro/metro.log" 2>&1 &
     echo "$!" > "${RUN_DIR}/metro/metro.pid"
   )
 
@@ -234,6 +241,20 @@ install_all() {
   install_ios "${driver_ios}"
 }
 
+install_ios_only() {
+  local passenger_ios="${PASSENGER_IOS_UDID:-$(first_ios_udid)}"
+  local driver_ios="${DRIVER_IOS_UDID:-$(second_ios_udid)}"
+
+  mkdir -p "${RUN_DIR}"
+  {
+    echo "PASSENGER_IOS_UDID=${passenger_ios}"
+    echo "DRIVER_IOS_UDID=${driver_ios}"
+  } > "${RUN_DIR}/devices.env"
+
+  install_ios "${passenger_ios}"
+  install_ios "${driver_ios}"
+}
+
 open_all() {
   local passenger_android="${PASSENGER_ANDROID_SERIAL:-$(first_android_serial)}"
   local driver_android="${DRIVER_ANDROID_SERIAL:-$(second_android_serial)}"
@@ -246,10 +267,22 @@ open_all() {
   open_ios "${driver_ios}" "driver"
 }
 
+open_ios_only() {
+  local passenger_ios="${PASSENGER_IOS_UDID:-$(first_ios_udid)}"
+  local driver_ios="${DRIVER_IOS_UDID:-$(second_ios_udid)}"
+
+  open_ios "${passenger_ios}" "passenger"
+  open_ios "${driver_ios}" "driver"
+}
+
 main() {
   if [[ "$#" -eq 0 || "$1" == "--help" || "$1" == "-h" ]]; then
     usage
     exit 0
+  fi
+
+  if has_arg "--ios-only" "$@"; then
+    IOS_ONLY=1
   fi
 
   if has_arg "--doctor" "$@"; then
@@ -260,7 +293,8 @@ main() {
     restart_metro
   fi
 
-  if has_arg "--all" "$@" || has_arg "--build" "$@" || has_arg "--build-android" "$@"; then
+  if [[ "${IOS_ONLY:-0}" != "1" ]] &&
+    { has_arg "--all" "$@" || has_arg "--build" "$@" || has_arg "--build-android" "$@"; }; then
     build_android
   fi
 
@@ -269,11 +303,27 @@ main() {
   fi
 
   if has_arg "--all" "$@" || has_arg "--install" "$@"; then
-    install_all
+    if [[ "${IOS_ONLY:-0}" == "1" ]]; then
+      install_ios_only
+    else
+      install_all
+    fi
+  fi
+
+  if has_arg "--install-ios" "$@"; then
+    install_ios_only
   fi
 
   if has_arg "--all" "$@" || has_arg "--open" "$@"; then
-    open_all
+    if [[ "${IOS_ONLY:-0}" == "1" ]]; then
+      open_ios_only
+    else
+      open_all
+    fi
+  fi
+
+  if has_arg "--open-ios" "$@"; then
+    open_ios_only
   fi
 
   log "run dir: ${RUN_DIR}"

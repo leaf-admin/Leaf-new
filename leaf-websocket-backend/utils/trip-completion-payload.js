@@ -15,6 +15,13 @@ function parseJsonMaybe(value) {
   }
 }
 
+function asObject(value) {
+  const parsed = parseJsonMaybe(value);
+  return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+    ? parsed
+    : {};
+}
+
 function normalizeCoordinate(value) {
   const candidate = parseJsonMaybe(value);
   if (!candidate || typeof candidate !== 'object') {
@@ -85,6 +92,101 @@ function resolveText(...values) {
   return '';
 }
 
+function resolveVehicleIdentity(bookingData = {}) {
+  const driverData = asObject(bookingData.driverData);
+  const driver = asObject(bookingData.driver);
+  const driverVehicle = asObject(driver.vehicle);
+  const storedVehicle = asObject(bookingData.vehicle || bookingData.driverVehicle);
+  const driverDataVehicle = asObject(driverData.vehicle);
+  const vehicleMake = resolveText(
+    bookingData.vehicleMake,
+    bookingData.carMake,
+    storedVehicle.make,
+    storedVehicle.brand,
+    driverVehicle.make,
+    driverVehicle.brand,
+    driverDataVehicle.make,
+    driverDataVehicle.brand,
+    driverData.vehicleMake,
+    driverData.carMake
+  );
+  const vehicleModel = resolveText(
+    bookingData.vehicleLabel,
+    bookingData.vehicleModel,
+    bookingData.driverVehicle,
+    bookingData.carModel,
+    storedVehicle.model,
+    storedVehicle.category,
+    driverVehicle.model,
+    driverVehicle.category,
+    driverDataVehicle.model,
+    driverDataVehicle.category,
+    driverData.vehicleModel,
+    driverData.carModel
+  );
+  const vehicleLabel =
+    vehicleMake &&
+    vehicleModel &&
+    !vehicleModel.toLowerCase().startsWith(vehicleMake.toLowerCase())
+      ? `${vehicleMake} ${vehicleModel}`
+      : vehicleModel || vehicleMake;
+  const vehiclePlate = resolveText(
+    bookingData.vehiclePlate,
+    bookingData.vehicleNumber,
+    bookingData.vehicle_plate,
+    bookingData.carPlate,
+    storedVehicle.plate,
+    storedVehicle.vehiclePlate,
+    driverVehicle.plate,
+    driverVehicle.vehiclePlate,
+    driverDataVehicle.plate,
+    driverDataVehicle.vehiclePlate,
+    driverData.vehiclePlate,
+    driverData.vehicleNumber,
+    driverData.carPlate
+  );
+  const vehicleColor = resolveText(
+    bookingData.vehicleColor,
+    bookingData.carColor,
+    bookingData.color,
+    storedVehicle.color,
+    storedVehicle.vehicleColor,
+    driverVehicle.color,
+    driverVehicle.vehicleColor,
+    driverDataVehicle.color,
+    driverDataVehicle.vehicleColor,
+    driverData.vehicleColor,
+    driverData.carColor
+  );
+  const vehicleCategory = resolveText(
+    bookingData.vehicleCategory,
+    bookingData.carType,
+    storedVehicle.category,
+    driverVehicle.category,
+    driverDataVehicle.category,
+    driverData.vehicleCategory,
+    driverData.carType
+  );
+
+  return {
+    ...(vehicleLabel ? { vehicleLabel, vehicleModel: vehicleLabel } : {}),
+    ...(vehiclePlate ? { vehiclePlate } : {}),
+    ...(vehicleColor ? { vehicleColor } : {}),
+    ...(vehicleCategory ? { vehicleCategory } : {}),
+    ...(vehicleLabel || vehiclePlate || vehicleColor || vehicleCategory
+      ? {
+          vehicle: {
+            ...(vehicleMake ? { make: vehicleMake } : {}),
+            ...(vehicleModel ? { model: vehicleModel } : {}),
+            ...(vehiclePlate ? { plate: vehiclePlate } : {}),
+            ...(vehicleColor ? { color: vehicleColor } : {}),
+            ...(vehicleCategory ? { category: vehicleCategory } : {})
+          }
+        }
+      : {})
+  };
+}
+
 function buildTripCompletedPayload({
   bookingId,
   message = 'Viagem finalizada com sucesso',
@@ -124,10 +226,17 @@ function buildTripCompletedPayload({
     bookingData.customerName,
     bookingData.customerFullName
   );
+  const driverData = asObject(bookingData.driverData);
+  const driver = asObject(bookingData.driver);
   const driverName = resolveText(
     bookingData.driverName,
-    bookingData.driverFullName
+    bookingData.driverFullName,
+    driver.name,
+    driver.driverName,
+    driverData.name,
+    driverData.driverName
   );
+  const vehicleIdentity = resolveVehicleIdentity(bookingData);
 
   return {
     success: true,
@@ -136,6 +245,7 @@ function buildTripCompletedPayload({
     ...(driverId ? { driverId } : {}),
     ...(passengerName ? { passengerName, customerName: passengerName } : {}),
     ...(driverName ? { driverName } : {}),
+    ...vehicleIdentity,
     message,
     endLocation: resultEndLocation || endLocation,
     distance: normalizedDistance !== null ? normalizedDistance : 0,

@@ -9,16 +9,15 @@ jest.mock('../../../utils/logger', () => ({
   logError: jest.fn()
 }));
 
-const ENV_KEYS = [
-  'NODE_ENV',
-  'WOOVI_ENVIRONMENT',
-  'WOOVI_API_TOKEN',
-  'WOOVI_SANDBOX_API_TOKEN',
-  'PAYMENT_SANDBOX_USER_IDS',
-  'PAYMENT_SANDBOX_PHONE_NUMBERS',
-  'PAYMENT_SANDBOX_EXPIRES_AT',
-  'PAYMENT_ALLOW_GLOBAL_SANDBOX_PROFILE'
-];
+const TEST_ENV_PREFIXES = ['WOOVI_', 'PAYMENT_SANDBOX_'];
+
+function clearPaymentRuntimeEnvironment() {
+  for (const key of Object.keys(process.env)) {
+    if (key === 'NODE_ENV' || TEST_ENV_PREFIXES.some((prefix) => key.startsWith(prefix))) {
+      delete process.env[key];
+    }
+  }
+}
 
 describe('PaymentRuntimeProfileService', () => {
   const originalEnv = process.env;
@@ -26,7 +25,7 @@ describe('PaymentRuntimeProfileService', () => {
   beforeEach(() => {
     jest.resetModules();
     process.env = { ...originalEnv };
-    for (const key of ENV_KEYS) delete process.env[key];
+    clearPaymentRuntimeEnvironment();
   });
 
   afterAll(() => {
@@ -47,6 +46,7 @@ describe('PaymentRuntimeProfileService', () => {
 
     expect(profile.profileId).toBe('env-default');
     expect(profile.environment).toBe('production');
+    expect(profile.classificationUnavailable).toBe(true);
     expect(profile.wooviConfig.apiToken).toBe('production-token');
   });
 
@@ -63,6 +63,7 @@ describe('PaymentRuntimeProfileService', () => {
 
     expect(profile.profileId).toBe('env-sandbox-allowlist');
     expect(profile.environment).toBe('sandbox');
+    expect(profile.classificationUnavailable).toBe(false);
     expect(profile.wooviConfig.apiToken).toBe('sandbox-token');
     expect(profile.wooviConfig.baseUrl).toContain('sandbox');
   });
@@ -96,5 +97,32 @@ describe('PaymentRuntimeProfileService', () => {
       scope: 'global',
       expiresAtIso: new Date(Date.now() + 60 * 60 * 1000).toISOString()
     })).toEqual({ ok: false, error: 'Sandbox global bloqueado por segurança' });
+  });
+
+  it('allows durable sandbox profiles only for explicit test users', () => {
+    const PaymentRuntimeProfileService = loadClass();
+    const service = new PaymentRuntimeProfileService({ cacheTtlMs: 1 });
+
+    expect(service.validateProfilePayload({
+      environment: 'sandbox',
+      scope: 'users',
+      testUserSandbox: true,
+      userIds: ['passenger-a']
+    })).toEqual({ ok: true, environment: 'sandbox', status: 'paused', scope: 'users' });
+
+    expect(service.validateProfilePayload({
+      environment: 'sandbox',
+      scope: 'canary',
+      testUserSandbox: true,
+      userIds: ['passenger-a']
+    })).toEqual({ ok: false, error: 'Perfis sandbox precisam de expiresAtIso' });
+
+    expect(service.validateProfilePayload({
+      environment: 'sandbox',
+      scope: 'users',
+      testUserSandbox: true,
+      userIds: ['passenger-a'],
+      phones: ['5521102938475']
+    })).toEqual({ ok: false, error: 'Perfis sandbox precisam de expiresAtIso' });
   });
 });

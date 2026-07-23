@@ -11,6 +11,8 @@ import { usePrototypeRideRuntime } from './prototypeRideRuntime';
 import { useAccountDeletionFlow } from '../../hooks/useAccountDeletionFlow';
 import { useAccountSessionReset } from '../../hooks/useAccountSessionReset';
 import Logger from '../../utils/Logger';
+import { isCurrentSurfaceUnavailable } from './currentSurfaceStatus';
+import { ROBOTAXI_SETTINGS_ITEMS } from './robotaxiSettingsConfig';
 
 const SURFACE_TOP_PADDING = 28;
 const SURFACE_BOTTOM_PADDING = 18;
@@ -21,7 +23,6 @@ const SETTINGS_COLOR = {
   title: '#171412',
   secondary: '#756F68',
   line: '#E9E2D8',
-  dot: '#1A330E',
   danger: '#9F2424',
   icon: '#514B45',
   chevron: '#827B73',
@@ -36,7 +37,7 @@ function SettingRow({
   switchTestID,
   showChevron = false,
   tone = 'default',
-  last = false
+  last = false,
 }) {
   return (
     <TouchableOpacity
@@ -44,7 +45,10 @@ function SettingRow({
       onPress={onPress}
       activeOpacity={0.78}
       testID={rowTestID}
-      accessibilityLabel={rowTestID}
+      accessibilityLabel={title}
+      accessibilityHint={subtitle}
+      accessibilityRole="button"
+      accessibilityState={{ disabled: false }}
     >
       <View style={styles.rowIconSlot}>
         <Ionicons
@@ -59,7 +63,7 @@ function SettingRow({
         </Text>
         <Text style={styles.settingSubtitle}>{subtitle}</Text>
       </View>
-      <View testID={switchTestID} accessibilityLabel={switchTestID} style={styles.hiddenSwitchTarget} />
+      <View testID={switchTestID} accessible={false} style={styles.hiddenSwitchTarget} />
       {showChevron ? (
         <Ionicons
           name="chevron-forward"
@@ -75,8 +79,7 @@ export default function RobotaxiSettingsScreen({ navigation, route }) {
   const authProfile = useSelector(state => state?.auth?.profile);
   const insets = useSafeAreaInsets();
   const { height: windowHeight } = useWindowDimensions();
-  const { riderProfile, notificationsEnabled, trafficLayerEnabled, voiceGuidanceEnabled, updateSettings } =
-    usePrototypeRideRuntime();
+  const { riderProfile } = usePrototypeRideRuntime();
   const [panelHeight, setPanelHeight] = useState(windowHeight);
   const deletionProfile = authProfile || riderProfile;
   const { promptAccountDeletion } = useAccountDeletionFlow({
@@ -142,16 +145,77 @@ export default function RobotaxiSettingsScreen({ navigation, route }) {
     );
   }, [resetSessionToStart]);
 
-  const toggleNotifications = useCallback(() => {
-    updateSettings({ notificationsEnabled: !notificationsEnabled });
-  }, [notificationsEnabled, updateSettings]);
-
-  const toggleTrafficAndVoice = useCallback(() => {
-    updateSettings({
-      trafficLayerEnabled: !trafficLayerEnabled,
-      voiceGuidanceEnabled: !voiceGuidanceEnabled,
-    });
-  }, [trafficLayerEnabled, updateSettings, voiceGuidanceEnabled]);
+  const visibleSettingRows = [
+    {
+      item: ROBOTAXI_SETTINGS_ITEMS.notifications,
+      icon: 'notifications-outline',
+      title: 'Notificações',
+      subtitle: 'Viagens, pagamentos e segurança',
+      rowTestID: 'robotaxi-settings-row-notifications',
+      switchTestID: 'robotaxi-settings-switch-notifications',
+    },
+    {
+      item: ROBOTAXI_SETTINGS_ITEMS.language,
+      icon: 'language-outline',
+      title: 'Idioma',
+      subtitle: 'Português do Brasil',
+      rowTestID: 'robotaxi-settings-row-language',
+    },
+    {
+      item: ROBOTAXI_SETTINGS_ITEMS.traffic,
+      icon: 'map-outline',
+      title: 'Trânsito no mapa',
+      subtitle: 'Condições de trânsito',
+      rowTestID: 'robotaxi-settings-row-traffic',
+      switchTestID: 'robotaxi-settings-switch-traffic',
+    },
+    {
+      item: ROBOTAXI_SETTINGS_ITEMS.voice,
+      icon: 'volume-medium-outline',
+      title: 'Instruções por voz',
+      subtitle: 'Orientações de áudio',
+      rowTestID: 'robotaxi-settings-row-voice',
+      switchTestID: 'robotaxi-settings-switch-voice',
+    },
+    {
+      item: ROBOTAXI_SETTINGS_ITEMS.privacy,
+      icon: 'shield-checkmark-outline',
+      title: 'Privacidade',
+      subtitle: 'Dados, permissões e exclusão',
+      onPress: () => navigation.navigate('PrivacyPolicy'),
+      rowTestID: 'robotaxi-settings-row-privacy',
+      showChevron: true,
+    },
+    {
+      item: ROBOTAXI_SETTINGS_ITEMS.logout,
+      icon: 'log-out-outline',
+      title: 'Sair da conta',
+      subtitle: 'Voltar para inserir telefone',
+      onPress: promptLogout,
+      rowTestID: 'robotaxi-settings-row-logout',
+      showChevron: true,
+    },
+    {
+      item: ROBOTAXI_SETTINGS_ITEMS.deleteAccount,
+      icon: 'trash-outline',
+      title: 'Excluir conta',
+      subtitle: 'Iniciar exclusão permanente',
+      onPress: promptAccountDeletion,
+      rowTestID: 'robotaxi-settings-row-delete-account',
+      showChevron: true,
+      tone: 'danger',
+    },
+    {
+      item: ROBOTAXI_SETTINGS_ITEMS.support,
+      icon: 'help-circle-outline',
+      title: 'Falar com suporte',
+      subtitle: 'Ajuda sem sair do fluxo atual',
+      onPress: () => navigation.replace('RobotaxiPrototypeSupport'),
+      rowTestID: 'robotaxi-settings-open-support',
+      showChevron: true,
+      last: true,
+    },
+  ].filter(({ item }) => !isCurrentSurfaceUnavailable(item.status));
 
   return (
     <PrototypeScreenTransition>
@@ -182,7 +246,7 @@ export default function RobotaxiSettingsScreen({ navigation, route }) {
               <View style={styles.headerCopy}>
                 <Text style={styles.screenTitle}>Configurações</Text>
                 <Text style={styles.screenSubtitle}>
-                  Preferências da conta sem complicação.
+                  Conta, privacidade e suporte.
                 </Text>
               </View>
               <TouchableOpacity
@@ -190,7 +254,7 @@ export default function RobotaxiSettingsScreen({ navigation, route }) {
                 onPress={handleDismiss}
                 activeOpacity={0.78}
                 testID="robotaxi-settings-close-button"
-                accessibilityLabel="robotaxi-settings-close-button"
+                accessibilityLabel="Fechar configurações"
               >
                 <Ionicons name="close" size={18} color={SETTINGS_COLOR.text} />
               </TouchableOpacity>
@@ -200,77 +264,9 @@ export default function RobotaxiSettingsScreen({ navigation, route }) {
               showsVerticalScrollIndicator={false}
               contentContainerStyle={styles.rowsContent}
             >
-              <SettingRow
-                icon="notifications-outline"
-                title="Notificacoes"
-                subtitle={
-                  notificationsEnabled
-                    ? 'Viagens, pagamentos e seguranca · ligadas'
-                    : 'Viagens, pagamentos e seguranca · desligadas'
-                }
-                onPress={toggleNotifications}
-                rowTestID="robotaxi-settings-row-notifications"
-                switchTestID="robotaxi-settings-switch-notifications"
-              />
-              <SettingRow
-                icon="language-outline"
-                title="Idioma"
-                subtitle="Português do Brasil"
-                onPress={() => Alert.alert('Idioma', 'Português do Brasil está ativo.')}
-                rowTestID="robotaxi-settings-row-language"
-              />
-              <SettingRow
-                icon="map-outline"
-                title="Mapa e voz"
-                subtitle={
-                  trafficLayerEnabled || voiceGuidanceEnabled
-                    ? 'Transito e instrucoes de rota ativos'
-                    : 'Transito e instrucoes de rota pausados'
-                }
-                onPress={toggleTrafficAndVoice}
-                rowTestID="robotaxi-settings-row-traffic"
-                switchTestID="robotaxi-settings-switch-traffic"
-              />
-              <SettingRow
-                icon="volume-medium-outline"
-                title="Instrucoes por voz"
-                subtitle={voiceGuidanceEnabled ? 'Orientacoes de audio ligadas' : 'Orientacoes de audio desligadas'}
-                onPress={() => updateSettings({ voiceGuidanceEnabled: !voiceGuidanceEnabled })}
-                rowTestID="robotaxi-settings-row-voice"
-                switchTestID="robotaxi-settings-switch-voice"
-              />
-              <SettingRow
-                icon="shield-checkmark-outline"
-                title="Privacidade"
-                subtitle="Dados, permissões e exclusão"
-                onPress={() => navigation.navigate('PrivacyPolicy')}
-                rowTestID="robotaxi-settings-row-privacy"
-              />
-              <SettingRow
-                icon="log-out-outline"
-                title="Sair da conta"
-                subtitle="Voltar para inserir telefone"
-                onPress={promptLogout}
-                rowTestID="robotaxi-settings-row-logout"
-              />
-              <SettingRow
-                icon="trash-outline"
-                title="Excluir conta"
-                subtitle="Iniciar exclusão permanente"
-                onPress={promptAccountDeletion}
-                rowTestID="robotaxi-settings-row-delete-account"
-                showChevron
-                tone="danger"
-              />
-              <SettingRow
-                icon="help-circle-outline"
-                title="Falar com suporte"
-                subtitle="Ajuda sem sair do fluxo atual"
-                last
-                onPress={() => navigation.replace('RobotaxiPrototypeSupport')}
-                rowTestID="robotaxi-settings-open-support"
-                showChevron
-              />
+              {visibleSettingRows.map(({ item, ...row }) => (
+                <SettingRow key={item.key} {...row} />
+              ))}
             </ScrollView>
           </View>
         </PrototypeDismissibleSheet>

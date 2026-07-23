@@ -36,7 +36,10 @@ const routes = [
   { path: "/support", heading: "Suporte" },
   { path: "/campaign-center", heading: "Campanhas in-app" },
   { path: "/drivers/review-queue", heading: "Fila de Revisão de Documentos" },
+  { path: "/metrics", heading: "Métricas" },
+  { path: "/observability", heading: "Console operacional" },
   { path: "/financial-reconciliation", heading: "Reconciliação financeira" },
+  { path: "/reports", heading: "Relatórios" },
   { path: "/runtime-flags", heading: "Perfil de pagamento" },
 ];
 
@@ -58,6 +61,54 @@ function getFreePort() {
       server.close(() => resolve(address.port));
     });
   });
+}
+
+function waitForChildExit(child, timeoutMs) {
+  if (child.exitCode !== null || child.signalCode !== null) {
+    return Promise.resolve(true);
+  }
+
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (exited) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      child.off("exit", onExit);
+      resolve(exited);
+    };
+    const onExit = () => finish(true);
+    const timer = setTimeout(() => finish(false), timeoutMs);
+    timer.unref();
+    child.once("exit", onExit);
+  });
+}
+
+function signalServerTree(server, signal) {
+  try {
+    if (process.platform === "win32") {
+      server.kill(signal);
+    } else {
+      process.kill(-server.pid, signal);
+    }
+  } catch (error) {
+    if (error?.code !== "ESRCH") throw error;
+  }
+}
+
+async function stopServerTree(server) {
+  const gracefulExit = waitForChildExit(server, 5000);
+  signalServerTree(server, "SIGTERM");
+  const exitedGracefully = await gracefulExit;
+
+  if (!exitedGracefully) {
+    const forcedExit = waitForChildExit(server, 2000);
+    signalServerTree(server, "SIGKILL");
+    await forcedExit;
+  }
+
+  server.stdout?.destroy();
+  server.stderr?.destroy();
 }
 
 function waitForServer(url, authorization, timeoutMs = 60000) {
@@ -100,6 +151,15 @@ function json(body, status = 200) {
     status,
     contentType: "application/json",
     body: JSON.stringify(body),
+  };
+}
+
+function file(body, contentType, headers = {}) {
+  return {
+    status: 200,
+    contentType,
+    headers,
+    body,
   };
 }
 
@@ -261,6 +321,88 @@ function commandCenterFixture() {
   };
 }
 
+function opsOverviewFixture() {
+  return {
+    success: true,
+    overview: {
+      timestamp: new Date().toISOString(),
+      scope: { hours: 1, city: null, regionHash: null },
+      metrics: {
+        rides: {
+          requested: 4,
+          accepted: 3,
+          completed: 2,
+          timeToAcceptAvgSec: 7.5,
+        },
+      },
+      rideHealth: {
+        reassignmentPending: {
+          total: 1,
+          stuck: 1,
+          oldestAgeMs: 420000,
+          oldestBookingId: "booking-reassign-stuck",
+          bookingIds: ["booking-reassign-stuck"],
+          stuckThresholdMs: 300000,
+        },
+        earlyEndedReview: {
+          total: 1,
+          recent: 1,
+          oldestAgeMs: 180000,
+          oldestBookingId: "booking-review-open",
+          bookingIds: ["booking-review-open"],
+          recentWindowMs: 3600000,
+        },
+        driverSignal: {
+          total: 2,
+          stale: 1,
+          oldestAgeMs: 180000,
+          oldestBookingId: "booking-signal-stale",
+          bookingIds: ["booking-signal-stale"],
+          staleThresholdMs: 60000,
+        },
+      },
+      incidents: {
+        openCount: 0,
+        bySeverity: { critical: 0, high: 0, medium: 0, low: 0 },
+      },
+      supportQueue: {
+        totalOpenTickets: 1,
+        backlogByPriority: { N1: 0, N2: 1, N3: 0 },
+        overdueAckCount: 0,
+        overdueFirstResponseCount: 0,
+        ticketsWithoutOwner: 0,
+        criticalBacklogCount: 0,
+        medianFirstResponseMinutes: 4,
+      },
+      disputes: {
+        openCount: 0,
+        byStatus: {},
+      },
+      activePolicies: [],
+    },
+  };
+}
+
+function opsAlertsFixture() {
+  return {
+    success: true,
+    alerts: [
+      {
+        severity: "warning",
+        metric: "driver_signal_stale",
+        value: 1,
+        threshold: 1,
+        service: "ride-health-monitor",
+        message: "1 corrida ativa sem sinal recente do motorista acima de 1min. Mais antiga: 3min.",
+        details: {
+          bookingIds: ["booking-signal-stale"],
+          oldestBookingId: "booking-signal-stale",
+        },
+      },
+    ],
+  };
+}
+
 function runtimeFlagsFixture() {
   return {
     success: true,
@@ -273,6 +415,106 @@ function runtimeFlagsFixture() {
     paymentRuntime: {
       provider: "woovi",
       environment: "sandbox",
+    },
+  };
+}
+
+function supportTicketsFixture() {
+  const createdAt = new Date().toISOString();
+  return [
+    {
+      id: "ticket-smoke-payment-stuck",
+      subject: "Pagamento confirmado, corrida travada",
+      description: "Passageiro pagou Pix sandbox e a corrida ficou travada procurando motorista.",
+      status: "open",
+      priority: "N2",
+      category: "payment",
+      userId: "user-smoke",
+      userType: "customer",
+      user: {
+        id: "user-smoke",
+        name: "Passageiro Smoke",
+        email: "smoke-passenger@leaf.app.br",
+      },
+      createdAt,
+      updatedAt: createdAt,
+      metadata: {
+        bookingId: "booking-smoke-1",
+        supportClassification: {
+          priority: "N2",
+          severity: "elevated",
+          computedPriority: "N2",
+          requestedPriority: "N3",
+          requestedPriorityTrusted: false,
+          prioritySource: "classifier",
+          reasons: [
+            "payment_account_document_or_stuck_flow_keyword",
+            "payment_category_minimum",
+          ],
+        },
+        queue: {
+          ackTargetAt: createdAt,
+          firstResponseTargetAt: createdAt,
+        },
+      },
+      queue: {
+        ageMs: 8 * 60 * 1000,
+        ackTargetAt: createdAt,
+        firstResponseTargetAt: createdAt,
+        overdueAck: false,
+        overdueFirstResponse: false,
+      },
+    },
+  ];
+}
+
+function financialReconciliationReportFixture() {
+  const checkedAt = new Date().toISOString();
+  return {
+    id: "financial-smoke-ride-1",
+    rideId: "ride-financial-smoke-1",
+    ok: true,
+    severity: "info",
+    checkedAt,
+    checkedAtIso: checkedAt,
+    totals: {
+      paymentAmountCents: 2750,
+      passengerGrossCents: 2750,
+      distributionTotalCents: 2750,
+      driverNetAmountCents: 2601,
+      operationalFeeCents: 84,
+      wooviFeeCents: 65,
+      ledgerEventCount: 4,
+    },
+    issues: [],
+    source: "backend_final",
+  };
+}
+
+function financialReconciliationDetailFixture() {
+  return {
+    success: true,
+    report: financialReconciliationReportFixture(),
+    ledgerEvents: [
+      { id: "evt-payment", type: "payment_captured", amountCents: 2750 },
+      { id: "evt-driver", type: "driver_net_reserved", amountCents: 2601 },
+      { id: "evt-leaf", type: "leaf_operational_fee_reserved", amountCents: 84 },
+      { id: "evt-woovi", type: "woovi_fee_reserved", amountCents: 65 },
+    ],
+    sourceDocuments: {
+      payment: {
+        provider: "woovi",
+        environment: "sandbox",
+        amountCents: 2750,
+      },
+      staleEstimate: {
+        estimatedFareCents: 8000,
+        ignoredByReconciliation: true,
+      },
+      financialSnapshot: {
+        financialSnapshotSource: "backend_final",
+        authoritativeSnapshot: true,
+      },
     },
   };
 }
@@ -293,7 +535,39 @@ function fixtureForApiPath(apiPath, method) {
   }
   if (apiPath === "/admin/auth/logout") return json({ success: true });
   if (apiPath === "/health/runtime-flags") return json(runtimeFlagsFixture());
+  if (apiPath.startsWith("/ops/overview")) return json(opsOverviewFixture());
+  if (apiPath.startsWith("/ops/alerts")) return json(opsAlertsFixture());
   if (apiPath.startsWith("/ops/command-center")) return json(commandCenterFixture());
+  if (apiPath.startsWith("/metrics/overview")) {
+    return json({
+      waitlistCount: 3,
+      calculatorSimulations: 2,
+      totalUsers: 12,
+      totalDrivers: 4,
+      totalCustomers: 8,
+    });
+  }
+  if (apiPath.startsWith("/metrics/rides/daily")) {
+    return json({
+      totalToday: 1,
+      completedToday: 1,
+      cancelledAfterAcceptance: 0,
+      cancellationRate: 0,
+      averagePickupMinutes: 4,
+      averageWaitMinutes: 2,
+      averagePaymentApprovalToPickupMinutes: 3,
+    });
+  }
+  if (apiPath.startsWith("/metrics/financial/rides")) {
+    return json({
+      totalValue: 27.5,
+      averageValue: 27.5,
+      totalRides: 1,
+      reconciledRides: 1,
+      pendingReconciliationRides: 0,
+      reserveFundLosses: 0,
+    });
+  }
 
   if (apiPath.startsWith("/support/chat/inbox")) {
     return json({
@@ -330,19 +604,20 @@ function fixtureForApiPath(apiPath, method) {
   if (apiPath.startsWith("/support/admin/tickets") || apiPath.startsWith("/support/tickets")) {
     return json({
       success: true,
-      tickets: [],
+      tickets: supportTicketsFixture(),
       messages: [],
-      pagination: { page: 1, limit: 25, total: 0, pages: 0 },
+      pagination: { page: 1, limit: 25, total: 1, pages: 1 },
     });
   }
   if (apiPath.startsWith("/support/queue/summary")) {
     return json({
       success: true,
       summary: {
-        totalOpenTickets: 0,
+        totalOpenTickets: 1,
         n1: 0,
-        n2: 0,
+        n2: 1,
         n3: 0,
+        backlogByPriority: { N1: 0, N2: 1, N3: 0 },
         overdueAckCount: 0,
         ticketsWithoutOwner: 0,
         medianFirstResponseMinutes: 0,
@@ -350,7 +625,12 @@ function fixtureForApiPath(apiPath, method) {
     });
   }
   if (apiPath.startsWith("/support/queue/backlog")) {
-    return json({ success: true, backlog: [] });
+    return json({
+      success: true,
+      tickets: supportTicketsFixture(),
+      total: 1,
+      hasMore: false,
+    });
   }
   if (apiPath.startsWith("/support-orchestrator/v1/status")) {
     return json({ success: true, status: "disabled", mode: "copilot" });
@@ -391,14 +671,41 @@ function fixtureForApiPath(apiPath, method) {
   }
 
   if (apiPath.startsWith("/financial/reconciliation/reports")) {
+    const report = financialReconciliationReportFixture();
     return json({
       success: true,
-      reports: [],
-      summary: { totalInPage: 0, divergentCount: 0, okCount: 0, issueCount: 0 },
+      reports: [report],
+      summary: {
+        totalInPage: 1,
+        divergentInPage: 0,
+        okInPage: 1,
+        totalIssueCount: 0,
+        divergentCount: 0,
+        okCount: 1,
+        issueCount: 0,
+      },
     });
   }
   if (apiPath.startsWith("/financial/reconciliation")) {
-    return json({ success: true, report: null, issues: [] });
+    return json(financialReconciliationDetailFixture());
+  }
+
+  if (apiPath.startsWith("/reports/predefined")) {
+    return json({
+      success: true,
+      reports: [
+        {
+          id: "smoke-financial-report",
+          name: "Relatório financeiro operacional",
+          description: "Fixture autenticada do smoke backoffice",
+        },
+      ],
+    });
+  }
+  if (apiPath.startsWith("/reports/generate/smoke-financial-report")) {
+    return file("%PDF-1.4\n% leaf smoke report\n", "application/pdf", {
+      "content-disposition": 'attachment; filename="smoke-financial-report.pdf"',
+    });
   }
 
   if (apiPath.startsWith("/payment/runtime-profiles/resolve")) {
@@ -434,6 +741,12 @@ async function installRoutes(context, observed) {
 
     if (url.pathname.startsWith("/api/")) {
       const apiPath = url.pathname.replace(/^\/api/, "") || "/";
+      if (observed.apiPaths) {
+        observed.apiPaths.push(apiPath);
+      }
+      if (apiPath.startsWith("/reports/generate/")) {
+        observed.reportDownloadAuthorization = request.headers().authorization || "";
+      }
       await route.fulfill(fixtureForApiPath(apiPath, request.method()));
       return;
     }
@@ -442,14 +755,102 @@ async function installRoutes(context, observed) {
   });
 }
 
+function assertNoDeprecatedFinancialApiUse(observed) {
+  const deprecatedPaths = (observed.apiPaths || []).filter((apiPath) =>
+    apiPath === "/metrics/financial" ||
+    apiPath.startsWith("/metrics/financial/advanced") ||
+    apiPath.startsWith("/metrics/simulation/run")
+  );
+
+  if (deprecatedPaths.length) {
+    throw new Error(
+      `Current dashboard called deprecated financial/simulation endpoints: ${[...new Set(deprecatedPaths)].join(", ")}`,
+    );
+  }
+}
+
 async function assertVisibleHeading(page, routeConfig) {
   await page.goto(routeConfig.path, { waitUntil: "domcontentloaded" });
+  const dashboardGeneration = await page.locator("html").getAttribute("data-leaf-dashboard-generation");
+  if (dashboardGeneration !== "current-next") {
+    throw new Error(
+      `${routeConfig.path} did not render the current Next dashboard generation; received ${dashboardGeneration || "missing"}`,
+    );
+  }
   await page.locator("h1", { hasText: routeConfig.heading }).waitFor({ timeout: 15000 });
   const bodyText = await page.locator("body").innerText({ timeout: 5000 });
   if (/Application error|Unhandled Runtime Error|Internal Server Error/i.test(bodyText)) {
     throw new Error(`${routeConfig.path} rendered an application error`);
   }
   log(`${routeConfig.path} ok`);
+}
+
+async function assertFinancialReconciliationContract(page) {
+  await page.goto("/financial-reconciliation", { waitUntil: "domcontentloaded" });
+  await page.locator("h1", { hasText: "Reconciliação financeira" }).waitFor({ timeout: 15000 });
+  await page.locator("body", { hasText: "ride-financial-smoke-1" }).waitFor({ timeout: 15000 });
+  await page.locator(".metric-list .row", { hasText: "Bruto passageiro" }).waitFor({ timeout: 15000 });
+  await page.locator(".metric-list .row", { hasText: "R$ 27,50" }).first().waitFor({ timeout: 15000 });
+  await page.locator(".metric-list .row", { hasText: "Líquido motorista" }).waitFor({ timeout: 15000 });
+  await page.locator(".metric-list .row", { hasText: "R$ 26,01" }).waitFor({ timeout: 15000 });
+  await page.locator(".metric-list .row", { hasText: "Taxa operacional Leaf" }).waitFor({ timeout: 15000 });
+  await page.locator(".metric-list .row", { hasText: "R$ 0,84" }).waitFor({ timeout: 15000 });
+  await page.locator(".metric-list .row", { hasText: "Taxa Woovi" }).waitFor({ timeout: 15000 });
+  await page.locator(".metric-list .row", { hasText: "R$ 0,65" }).waitFor({ timeout: 15000 });
+
+  const bodyText = await page.locator("body").innerText({ timeout: 5000 });
+  if (bodyText.includes("R$ 80,00")) {
+    throw new Error("Financial reconciliation rendered a stale quote estimate as money evidence");
+  }
+
+  log("financial reconciliation renders backend money contract ok");
+}
+
+async function assertMetricsFinancialContract(page) {
+  await page.goto("/metrics", { waitUntil: "domcontentloaded" });
+  await page.locator("h1", { hasText: "Métricas" }).waitFor({ timeout: 15000 });
+  await page.locator("body", { hasText: "Receita total" }).waitFor({ timeout: 15000 });
+  await page.locator("body", { hasText: "R$ 27,50" }).waitFor({ timeout: 15000 });
+  await page.locator("body", { hasText: "Corridas reconciliadas" }).waitFor({ timeout: 15000 });
+  log("metrics page renders current financial fields ok");
+}
+
+async function assertFinancialSimulatorRequiresExplicitFlag(page) {
+  await page.goto("/financial-simulator", { waitUntil: "domcontentloaded" });
+  await page.locator("h1", { hasText: "Simulador Financeiro" }).waitFor({ timeout: 15000 });
+  await page.locator("body", { hasText: "Simulador desativado" }).waitFor({ timeout: 15000 });
+  log("financial simulator requires explicit launch flag ok");
+}
+
+async function assertObservabilityRideHealthContract(page) {
+  await page.goto("/observability", { waitUntil: "domcontentloaded" });
+  await page.locator("h1", { hasText: "Console operacional" }).waitFor({ timeout: 15000 });
+  await page.locator("body", { hasText: "Sinal motorista stale" }).waitFor({ timeout: 15000 });
+  await page.locator("body", { hasText: "driver_signal_stale" }).waitFor({ timeout: 15000 });
+  await page.locator("body", { hasText: "booking-signal-stale" }).waitFor({ timeout: 15000 });
+  log("observability renders ride health driver signal alert ok");
+}
+
+async function assertReportsDownloadContract(page, observed) {
+  await page.goto("/reports", { waitUntil: "domcontentloaded" });
+  await page.locator("h1", { hasText: "Relatórios" }).waitFor({ timeout: 15000 });
+  await page.locator("body", { hasText: "Relatório financeiro operacional" }).waitFor({ timeout: 15000 });
+
+  const responsePromise = page.waitForResponse((response) =>
+    response.url().includes("/api/reports/generate/smoke-financial-report") &&
+    response.status() === 200
+  );
+  await page.getByTestId("report-smoke-financial-report-pdf").click();
+  await responsePromise;
+  await page
+    .locator("body", { hasText: "Relatório gerado com autenticação do dashboard." })
+    .waitFor({ timeout: 15000 });
+
+  if (observed.reportDownloadAuthorization !== "Bearer smoke-access-token") {
+    throw new Error("Report export did not use the authenticated dashboard API client");
+  }
+
+  log("reports export uses authenticated dashboard API client ok");
 }
 
 async function main() {
@@ -476,6 +877,7 @@ async function main() {
         NEXT_PUBLIC_SUPPORT_ORCHESTRATOR_URL: `${baseURL}/api/support-orchestrator`,
       },
       stdio: ["ignore", "pipe", "pipe"],
+      detached: process.platform !== "win32",
     },
   );
 
@@ -500,7 +902,7 @@ async function main() {
       baseURL,
       httpCredentials: { username: basicUser, password: basicPassword },
     });
-    const unauthObserved = { forbiddenRequests: [] };
+    const unauthObserved = { forbiddenRequests: [], apiPaths: [] };
     await installRoutes(unauthContext, unauthObserved);
     const unauthPage = await unauthContext.newPage();
     await unauthPage.goto("/dashboard", { waitUntil: "domcontentloaded" });
@@ -518,7 +920,7 @@ async function main() {
       window.sessionStorage.setItem("leaf_admin_user", JSON.stringify(user));
     }, adminUser);
 
-    const observed = { forbiddenRequests: [] };
+    const observed = { forbiddenRequests: [], apiPaths: [] };
     const pageErrors = [];
     await installRoutes(context, observed);
     const page = await context.newPage();
@@ -528,8 +930,35 @@ async function main() {
       await assertVisibleHeading(page, routeConfig);
     }
 
+    await assertFinancialReconciliationContract(page);
+    await assertMetricsFinancialContract(page);
+    await assertFinancialSimulatorRequiresExplicitFlag(page);
+    await assertObservabilityRideHealthContract(page);
+    await assertReportsDownloadContract(page, observed);
+    assertNoDeprecatedFinancialApiUse(observed);
+    log("dashboard avoids deprecated financial metrics endpoints");
+
     await page.getByRole("link", { name: "Suporte" }).first().click();
     await page.locator("h1", { hasText: "Suporte" }).waitFor({ timeout: 15000 });
+    await page
+      .locator("[data-testid='support-freshness-status']", { hasText: "Dados: atualizados" })
+      .waitFor({ timeout: 15000 });
+    await page
+      .locator("[data-testid='support-freshness-detail']", { hasText: "Tickets atualizado" })
+      .waitFor({ timeout: 15000 });
+    const classifiedTicketRow = page
+      .locator(".support-thread-row", { hasText: /N2 .* elevated .* classifier/ })
+      .first();
+    await classifiedTicketRow.waitFor({ timeout: 15000 });
+    await classifiedTicketRow.click();
+    await page
+      .locator(".support-conversation-panel", { hasText: "N2 · elevated · classifier" })
+      .waitFor({ timeout: 15000 });
+    await page
+      .locator(".support-conversation-panel", {
+        hasText: "payment_account_document_or_stuck_flow_keyword, payment_category_minimum",
+      })
+      .waitFor({ timeout: 15000 });
     await page.getByRole("link", { name: "Campanhas" }).first().click();
     await page.locator("h1", { hasText: "Campanhas in-app" }).waitFor({ timeout: 15000 });
     log("top navigation between core areas ok");
@@ -558,7 +987,7 @@ async function main() {
     throw error;
   } finally {
     if (browser) await browser.close().catch(() => {});
-    server.kill("SIGTERM");
+    await stopServerTree(server);
   }
 }
 

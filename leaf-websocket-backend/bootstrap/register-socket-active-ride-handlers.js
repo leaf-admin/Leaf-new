@@ -2,7 +2,182 @@ const {
     isRideExtensionFlowEnabled,
     isOperationalReassignmentEnabled
 } = require('../utils/ride-lifecycle-feature-flags');
-const { buildActiveRideSnapshotForUser } = require('./active-ride-sync-utils');
+const {
+    buildActiveRideSnapshotForUser,
+    isTerminalBookingStatus
+} = require('./active-ride-sync-utils');
+const {
+    getSocketIdentity,
+    normalizeId,
+    normalizeUserType
+} = require('../services/socket-scope-guard');
+
+function parseJsonSafe(value, fallback = null) {
+    if (!value) {
+        return fallback;
+    }
+
+    if (typeof value === 'object') {
+        return value;
+    }
+
+    try {
+        return JSON.parse(value);
+    } catch (_error) {
+        return fallback;
+    }
+}
+
+function normalizeStatus(value) {
+    return String(value || '').trim().toUpperCase();
+}
+
+function buildTerminalRidePersistenceSnapshot(bookingSnapshot = {}, finalData = {}) {
+    return {
+        ...finalData,
+        financialContext: bookingSnapshot.financialContext || null,
+        financialNamespace: bookingSnapshot.financialNamespace || null,
+        financialContextId: bookingSnapshot.financialContextId || null,
+        providerEnvironment: bookingSnapshot.providerEnvironment || null,
+        paymentProviderEnvironment: bookingSnapshot.paymentProviderEnvironment || null,
+        paymentProfileId: bookingSnapshot.paymentProfileId || null,
+        testUserSandbox: bookingSnapshot.testUserSandbox === true
+            || bookingSnapshot.testUserSandbox === 'true'
+    };
+}
+
+function resolveParticipantId(source = {}, aliases = []) {
+    for (const alias of aliases) {
+        const rawValue = source?.[alias];
+        if (!rawValue) {
+            continue;
+        }
+
+        const parsed = parseJsonSafe(rawValue, rawValue);
+        const candidate = normalizeId(parsed);
+        if (candidate) {
+            return candidate;
+        }
+    }
+
+    return '';
+}
+
+async function resolveLegacyActiveBookingForCommand({
+    socket,
+    redis,
+    bookingId,
+    allowedRoles = ['passenger', 'driver'],
+    errorEvent,
+    notFoundMessage = 'Corrida não encontrada'
+}) {
+    const rawBooking = await redis.hget('bookings:active', bookingId);
+    if (!rawBooking) {
+        socket.emit(errorEvent, {
+            success: false,
+            code: 'RIDE_NOT_ACTIVE',
+            error: notFoundMessage
+        });
+        return null;
+    }
+
+    const booking = parseJsonSafe(rawBooking, null);
+    if (!booking || typeof booking !== 'object') {
+        socket.emit(errorEvent, {
+            success: false,
+            code: 'RIDE_DATA_INVALID',
+            error: 'Dados da corrida inválidos'
+        });
+        return null;
+    }
+
+    const canonicalBooking = typeof redis.hgetall === 'function'
+        ? await redis.hgetall(`booking:${bookingId}`).catch(() => null)
+        : null;
+    const status = normalizeStatus(
+        canonicalBooking?.status ||
+        canonicalBooking?.state ||
+        canonicalBooking?.tripStatus ||
+        booking.status ||
+        booking.state ||
+        booking.tripStatus
+    );
+
+    if (isTerminalBookingStatus(status)) {
+        if (typeof redis.hdel === 'function') {
+            await Promise.resolve(redis.hdel('bookings:active', bookingId)).catch(() => null);
+        }
+        socket.emit(errorEvent, {
+            success: false,
+            code: 'RIDE_TERMINAL',
+            error: 'Corrida já encerrada',
+            terminalStatus: status
+        });
+        return null;
+    }
+
+    const identity = getSocketIdentity(socket);
+    if (!identity.userId) {
+        socket.emit(errorEvent, {
+            success: false,
+            code: 'AUTH_REQUIRED',
+            error: 'Autenticação obrigatória'
+        });
+        return null;
+    }
+
+    const scopeSource = {
+        ...booking,
+        ...(canonicalBooking && typeof canonicalBooking === 'object' ? canonicalBooking : {})
+    };
+    const customerId = resolveParticipantId(scopeSource, [
+        'customerId',
+        'customer',
+        'passengerId',
+        'passenger',
+        'userId'
+    ]);
+    const driverId = resolveParticipantId(scopeSource, [
+        'driverId',
+        'driver',
+        'assignedDriverId',
+        'acceptedDriverId',
+        'driverData'
+    ]);
+    const normalizedAllowedRoles = allowedRoles.map(normalizeUserType);
+    const participantRole = identity.userId === customerId
+        ? 'passenger'
+        : identity.userId === driverId
+            ? 'driver'
+            : null;
+
+    if (!participantRole) {
+        socket.emit(errorEvent, {
+            success: false,
+            code: 'RIDE_SCOPE_DENIED',
+            error: 'Usuário não participa desta corrida'
+        });
+        return null;
+    }
+
+    if (!normalizedAllowedRoles.includes(participantRole)) {
+        socket.emit(errorEvent, {
+            success: false,
+            code: 'RIDE_ROLE_DENIED',
+            error: 'Perfil não autorizado para esta ação'
+        });
+        return null;
+    }
+
+    return {
+        booking,
+        canonicalBooking,
+        customerId,
+        driverId,
+        participantRole,
+        status
+    };
+}
 
 function registerSocketActiveRideHandlers({
     socket,
@@ -103,10 +278,14 @@ function registerSocketActiveRideHandlers({
 
             const redis = redisPool.getConnection();
 
-            // Buscar dados da corrida
-            const bookingData = await redis.hget('bookings:active', bookingId);
-            if (!bookingData) {
-                socket.emit('problemReportError', { error: 'Corrida não encontrada' });
+            const resolvedBooking = await resolveLegacyActiveBookingForCommand({
+                socket,
+                redis,
+                bookingId,
+                allowedRoles: ['passenger', 'driver'],
+                errorEvent: 'problemReportError'
+            });
+            if (!resolvedBooking) {
                 return;
             }
 
@@ -152,14 +331,18 @@ function registerSocketActiveRideHandlers({
 
             const redis = redisPool.getConnection();
 
-            // Buscar dados da corrida
-            const bookingData = await redis.hget('bookings:active', bookingId);
-            if (!bookingData) {
-                socket.emit('partialPaymentError', { error: 'Corrida não encontrada' });
+            const resolvedBooking = await resolveLegacyActiveBookingForCommand({
+                socket,
+                redis,
+                bookingId,
+                allowedRoles: ['passenger'],
+                errorEvent: 'partialPaymentError'
+            });
+            if (!resolvedBooking) {
                 return;
             }
 
-            const booking = JSON.parse(bookingData);
+            const booking = resolvedBooking.booking;
 
             // Calcular valor percorrido (metade do valor total estimado)
             const originalFare = parseFloat(booking.estimate || 0);
@@ -216,14 +399,18 @@ function registerSocketActiveRideHandlers({
 
             const redis = redisPool.getConnection();
 
-            // Buscar dados da corrida
-            const bookingData = await redis.hget('bookings:active', bookingId);
-            if (!bookingData) {
-                socket.emit('findNewDriverError', { error: 'Corrida não encontrada' });
+            const resolvedBooking = await resolveLegacyActiveBookingForCommand({
+                socket,
+                redis,
+                bookingId,
+                allowedRoles: ['passenger'],
+                errorEvent: 'findNewDriverError'
+            });
+            if (!resolvedBooking) {
                 return;
             }
 
-            const booking = JSON.parse(bookingData);
+            const booking = resolvedBooking.booking;
 
             // Liberar lock do motorista anterior
             if (booking.driverId) {
@@ -280,14 +467,18 @@ function registerSocketActiveRideHandlers({
 
             const redis = redisPool.getConnection();
 
-            // Buscar dados da corrida
-            const bookingData = await redis.hget('bookings:active', bookingId);
-            if (!bookingData) {
-                socket.emit('changeDestinationError', { error: 'Corrida não encontrada' });
+            const resolvedBooking = await resolveLegacyActiveBookingForCommand({
+                socket,
+                redis,
+                bookingId,
+                allowedRoles: ['passenger'],
+                errorEvent: 'changeDestinationError'
+            });
+            if (!resolvedBooking) {
                 return;
             }
 
-            const booking = JSON.parse(bookingData);
+            const booking = resolvedBooking.booking;
 
             // Obter localização atual do passageiro (usar pickup atual ou localização do motorista)
             const currentLocation = booking.currentLocation || booking.pickup;
@@ -532,14 +723,12 @@ function registerSocketActiveRideHandlers({
             const driverId = socket.userId || data.driverId || socket.id;
             const bookingId = data.bookingId;
             const interruptionLocation = data.interruptionLocation || data.endLocation;
-            const distanceKm = Number.parseFloat(data.distanceKm ?? data.distance ?? 0) || 0;
-            const durationSecs = Number.parseFloat(data.durationSecs ?? data.duration ?? 0) || 0;
             const reason = String(data.reason || 'VEHICLE_BREAKDOWN').trim() || 'VEHICLE_BREAKDOWN';
             const note = String(data.note || '').trim();
 
-            if (!bookingId || !interruptionLocation?.lat || !interruptionLocation?.lng) {
+            if (!bookingId) {
                 socket.emit('rideOperationalInterruptionError', {
-                    error: 'bookingId e interruptionLocation são obrigatórios'
+                    error: 'bookingId é obrigatório'
                 });
                 return;
             }
@@ -549,8 +738,6 @@ function registerSocketActiveRideHandlers({
                 bookingId,
                 driverId,
                 interruptionLocation,
-                distanceKm,
-                durationSecs,
                 reason,
                 note,
                 correlationId: bookingId
@@ -705,6 +892,30 @@ function registerSocketActiveRideHandlers({
                 bookingId,
                 driverId: result.data.driverId || null
             });
+            setImmediate(async () => {
+                try {
+                    const ridePersistenceService = require('../services/ride-persistence-service');
+                    await ridePersistenceService.persistFinalRideDataWithOutbox(
+                        bookingId,
+                        buildTerminalRidePersistenceSnapshot(bookingSnapshot, {
+                            fare: result.data.finalFare || 0,
+                            netFare: null,
+                            distance: result.data.distance || 0,
+                            duration: result.data.duration || 0,
+                            endLocation,
+                            driverEarnings: null,
+                            financialBreakdown: null,
+                            completionType: 'INTERRUPTED_OPERATIONAL_ENDED',
+                            settlement: result.data.settlement || null,
+                            operationalContinuation: result.data.interruption || null
+                        })
+                    );
+                } catch (persistenceError) {
+                    logError(persistenceError, 'Falha ao persistir encerramento por interrupção operacional', {
+                        bookingId
+                    });
+                }
+            });
         } catch (error) {
             logError(error, 'Erro em respondOperationalContinuation', { bookingId: data.bookingId });
             socket.emit('rideOperationalContinuationError', {
@@ -800,6 +1011,31 @@ function registerSocketActiveRideHandlers({
                 reason: 'trip_review_completed',
                 bookingId,
                 driverId: result.data.driverId || null
+            });
+            setImmediate(async () => {
+                try {
+                    const ridePersistenceService = require('../services/ride-persistence-service');
+                    await ridePersistenceService.persistFinalRideDataWithOutbox(
+                        bookingId,
+                        buildTerminalRidePersistenceSnapshot(bookingSnapshot, {
+                            fare: result.data.finalFare || 0,
+                            netFare: null,
+                            distance: result.data.distance || 0,
+                            duration: result.data.duration || 0,
+                            endLocation: result.data.endLocation,
+                            driverEarnings: null,
+                            financialBreakdown: result.data.paymentDistribution || null,
+                            completionType: 'EARLY_ENDED_REVIEW',
+                            settlement: result.data.settlement || null,
+                            reviewContext: result.data.reviewContext || null,
+                            operationalContinuation: result.data.interruption || null
+                        })
+                    );
+                } catch (persistenceError) {
+                    logError(persistenceError, 'Falha ao persistir encerramento para revisão', {
+                        bookingId
+                    });
+                }
             });
         } catch (error) {
             logError(error, 'Erro em endRideWithReview', { bookingId: data.bookingId });

@@ -186,7 +186,10 @@ export default function AWSLivenessWebViewScreen({
       return;
     }
 
-    const credentialsResult = await kycService.getAwsLivenessCredentials(driverId);
+    const credentialsResult = await kycService.getAwsLivenessCredentials(
+      driverId,
+      createResult.data?.sessionId,
+    );
     if (!credentialsResult.success || !credentialsResult.data?.credentials) {
       setStatus(STATUS.ERROR);
       setErrorMessage(credentialsResult.error || 'Nao foi possivel preparar credenciais seguras de liveness');

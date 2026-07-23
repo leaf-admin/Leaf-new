@@ -6,6 +6,11 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Platform } from "react-native";
 import { toUserFriendlyError } from "../utils/friendlyErrorMessages";
 import rideCostTelemetryService from "./RideCostTelemetryService";
+import {
+  allowTestUserTools,
+  isE2ETestBuild,
+  isSimulatorBuild,
+} from "../config/runtimeAccessPolicy";
 
 const CREATE_BOOKING_TIMEOUT_MS = 120000; // 2 minutos mínimo para evitar timeout prematuro em cenários de alta latência
 const CREATE_BOOKING_MAX_RETRIES = 4;
@@ -23,6 +28,26 @@ const AUTH_UID_STORAGE_KEY = "@auth_uid";
 const USER_DATA_STORAGE_KEY = "@user_data";
 const QA_SOCKET_ID_TOKEN_STORAGE_KEY = "@qa_socket_id_token";
 const QA_SOCKET_ID_TOKEN_MIN_TTL_MS = 60000;
+const QA_SOCKET_BYPASS_TRUTHY_VALUES = new Set(["1", "true", "yes", "on"]);
+const TERMINAL_ACTIVE_RIDE_SYNC_STATUSES = new Set([
+  "CANCELED",
+  "CANCELLED",
+  "COMPLETE",
+  "COMPLETED",
+  "COMPLETED_AFTER_REASSIGNMENT",
+  "EARLY_ENDED_BY_RIDER",
+  "EARLY_ENDED_REVIEW",
+  "EXPIRED",
+  "INTERRUPTED_OPERATIONAL_ENDED",
+  "NO_DRIVERS",
+  "NO_DRIVERS_AVAILABLE",
+  "NO_DRIVERS_FOUND",
+  "REJECTED",
+  "SUPERSEDED",
+  "TRIP_CANCELED",
+  "TRIP_CANCELLED",
+  "TRIP_COMPLETED",
+]);
 
 // ✅ CORREÇÃO: Calcular URL dinamicamente para evitar problemas em builds de release
 // Não armazenar como constante, calcular sempre que necessário
@@ -57,6 +82,24 @@ const buildSocketError = (
 const sleepMs = (delayMs) =>
   new Promise((resolve) => setTimeout(resolve, delayMs));
 
+const isTruthyQaSocketFlag = (value) =>
+  QA_SOCKET_BYPASS_TRUTHY_VALUES.has(
+    String(value ?? "")
+      .trim()
+      .toLowerCase(),
+  );
+
+const getProcessEnvValue = (key) =>
+  typeof process !== "undefined" ? process?.env?.[key] : undefined;
+
+const canUseClientQaSocketBypass = () =>
+  allowTestUserTools() &&
+  isSimulatorBuild() &&
+  (isE2ETestBuild() ||
+    isTruthyQaSocketFlag(
+      getProcessEnvValue("EXPO_PUBLIC_ENABLE_QA_SOCKET_BYPASS"),
+    ));
+
 const CREATE_BOOKING_RETRYABLE_CODES = new Set([
   "BOOKING_TIMEOUT",
   "WS_DISCONNECTED",
@@ -70,6 +113,84 @@ const CREATE_BOOKING_RETRYABLE_CODES = new Set([
 
 function createSocketRequestId(prefix = "req") {
   return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function buildRideLifecycleCommandMetadata(options = {}) {
+  const metadata = {};
+  [
+    "idempotencyKey",
+    "offlineIntent",
+    "rideEventOutbox",
+    "source",
+    "eventType",
+    "clientSequence",
+    "clientCreatedAt",
+  ].forEach((key) => {
+    const value = options?.[key];
+    if (value !== undefined && value !== null && String(value).trim() !== "") {
+      metadata[key] = value;
+    }
+  });
+  return metadata;
+}
+
+const SAFE_SUPPORT_OPAQUE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/;
+const SAFE_SUPPORT_REQUIREMENT_PATTERN = /^[A-Z][A-Z0-9_]{0,63}$/;
+
+function normalizeSupportOpaqueId(value) {
+  const normalized = String(value ?? "").trim();
+  return SAFE_SUPPORT_OPAQUE_ID_PATTERN.test(normalized) ? normalized : "";
+}
+
+function normalizeSupportRequirement(value) {
+  const normalized = String(value ?? "").trim().toUpperCase();
+  return SAFE_SUPPORT_REQUIREMENT_PATTERN.test(normalized) ? normalized : "";
+}
+
+function buildSupportScopePayload(context = {}) {
+  if (!context || typeof context !== "object") {
+    return {};
+  }
+
+  const scopedPayload = {};
+  [
+    "bookingId",
+    "rideId",
+    "tripId",
+    "subject",
+    "source",
+    "bookingStatus",
+    "city",
+    "regionHash",
+    "severity",
+  ].forEach((key) => {
+    const value = String(context[key] ?? "").trim();
+    if (value) {
+      scopedPayload[key] = value;
+    }
+  });
+
+  [
+    "kycEvidenceId",
+    "kycReviewCaseId",
+    "kycChallengeId",
+  ].forEach((key) => {
+    const value = normalizeSupportOpaqueId(context[key]);
+    if (value) {
+      scopedPayload[key] = value;
+    }
+  });
+
+  const requirement = normalizeSupportRequirement(context.requirement);
+  if (requirement) {
+    scopedPayload.requirement = requirement;
+  }
+
+  if (typeof context.reviewAvailable === "boolean") {
+    scopedPayload.reviewAvailable = context.reviewAvailable;
+  }
+
+  return scopedPayload;
 }
 
 function roundCoordinateForCache(value, precision = 4) {
@@ -100,6 +221,40 @@ function cloneSocketPayload(payload) {
   } catch (_error) {
     return payload;
   }
+}
+
+function normalizeSocketRideStatus(...values) {
+  for (const value of values) {
+    const normalized = String(value || "")
+      .trim()
+      .replace(/[\s-]+/g, "_")
+      .toUpperCase();
+    if (normalized) {
+      return normalized;
+    }
+  }
+
+  return "";
+}
+
+function isTerminalActiveRideSyncSnapshot(snapshot = {}) {
+  if (!snapshot || typeof snapshot !== "object") {
+    return false;
+  }
+
+  if (snapshot.terminal === true) {
+    return true;
+  }
+
+  const status = normalizeSocketRideStatus(
+    snapshot.status,
+    snapshot.bookingStatus,
+    snapshot.state,
+    snapshot.tripStatus,
+    snapshot.terminalStatus,
+  );
+
+  return TERMINAL_ACTIVE_RIDE_SYNC_STATUSES.has(status);
 }
 
 function decodeBase64UrlJson(segment) {
@@ -134,6 +289,20 @@ function getJwtExpirationMs(token) {
     return expSeconds * 1000;
   } catch (_error) {
     return null;
+  }
+}
+
+function getJwtSubject(token) {
+  const parts = String(token || "").split(".");
+  if (parts.length < 2) {
+    return "";
+  }
+
+  try {
+    const payload = decodeBase64UrlJson(parts[1]);
+    return String(payload?.user_id || payload?.sub || "").trim();
+  } catch (_error) {
+    return "";
   }
 }
 
@@ -291,6 +460,7 @@ class WebSocketManager {
       this.isAuthenticating = false; // ✅ Flag para evitar autenticação duplicada
       this.reconnectTimer = null; // Evitar agendamento duplicado de reconexão manual
       this.lastActiveRideSnapshot = null; // Snapshot de corrida ativa para reidratação pós-reconexão
+      this.lastAuthenticatedPayload = null; // Snapshot do último auth confirmado pelo backend
       this._lastActiveRideSyncAt = 0;
       this.authAckInFlight = null;
       this.authAckInFlightKey = null;
@@ -368,6 +538,15 @@ class WebSocketManager {
   }
 
   _setCachedAvailabilityResult(cacheKey, data) {
+    const hasDrivers =
+      data?.available === true ||
+      data?.hasDrivers === true ||
+      String(data?.code || "").toUpperCase() === "DRIVERS_AVAILABLE";
+    if (!hasDrivers) {
+      this.availabilityRequestCache.delete(cacheKey);
+      return;
+    }
+
     this.availabilityRequestCache.set(cacheKey, {
       createdAt: Date.now(),
       data: cloneSocketPayload(data),
@@ -381,17 +560,34 @@ class WebSocketManager {
 
   _resolveLifecycleBookingId(eventName, payload = {}) {
     const normalizedEvent = String(eventName || "").trim();
+    const lastActiveSnapshotBookingId = this._getLifecycleSnapshotBookingFallback();
     const bookingId = String(
       payload?.bookingId ||
         payload?.rideId ||
         payload?.booking?.bookingId ||
         payload?.booking?.id ||
-        this.lastActiveRideSnapshot?.bookingId ||
+        lastActiveSnapshotBookingId ||
         this.lastLifecycleBookingByEvent.get(normalizedEvent) ||
         "",
     ).trim();
 
     return bookingId || null;
+  }
+
+  _getLifecycleSnapshotBookingFallback() {
+    if (!this.lastActiveRideSnapshot) {
+      return "";
+    }
+
+    if (this.lastActiveRideSnapshot.hasActiveRide === false) {
+      return "";
+    }
+
+    if (isTerminalActiveRideSyncSnapshot(this.lastActiveRideSnapshot)) {
+      return "";
+    }
+
+    return String(this.lastActiveRideSnapshot.bookingId || "").trim();
   }
 
   _payloadMatchesBookingId(payload = {}, expectedBookingId = null) {
@@ -686,7 +882,9 @@ class WebSocketManager {
       return this.lastSocketAuthPayload;
     }
 
-    const qaBypassPayload = await this._resolveQaSocketBypassPayload();
+    const qaBypassPayload = canUseClientQaSocketBypass()
+      ? await this._resolveQaSocketBypassPayload()
+      : null;
     if (qaBypassPayload) {
       this.qaSocketBypassState = { enabled: true, uid: qaBypassPayload.uid };
       this.lastSocketAuthPayload = {
@@ -699,26 +897,72 @@ class WebSocketManager {
     }
 
     this.qaSocketBypassState = { enabled: false, uid: null };
-    this.lastSocketAuthPayload = { token: null };
+    this.lastSocketAuthPayload = {
+      token: null,
+      authUnavailable: true,
+    };
     return this.lastSocketAuthPayload;
   }
 
   async _resolveQaSocketIdToken() {
+    if (!canUseClientQaSocketBypass()) {
+      return null;
+    }
+
     try {
-      const [testModeRaw, qaSocketIdTokenRaw] = await Promise.all([
+      const [testModeRaw, qaSocketIdTokenRaw, persistedUidRaw, storedUserDataRaw] = await Promise.all([
         AsyncStorage.getItem(TEST_MODE_STORAGE_KEY),
         AsyncStorage.getItem(QA_SOCKET_ID_TOKEN_STORAGE_KEY),
+        AsyncStorage.getItem(AUTH_UID_STORAGE_KEY),
+        AsyncStorage.getItem(USER_DATA_STORAGE_KEY),
       ]);
+
+      let storedUserData = null;
+      if (storedUserDataRaw) {
+        try {
+          storedUserData = JSON.parse(storedUserDataRaw);
+        } catch (_error) {
+          storedUserData = null;
+        }
+      }
 
       const qaSocketTokenEnabled =
         String(testModeRaw || "")
           .trim()
           .toLowerCase() === "true";
       const qaSocketIdToken = String(qaSocketIdTokenRaw || "").trim();
+      const tokenSubject = getJwtSubject(qaSocketIdToken);
+      const persistedUid = String(
+        storedUserData?.uid ||
+          storedUserData?.id ||
+          persistedUidRaw ||
+          "",
+      ).trim();
+      const isPersistedTestUser =
+        storedUserData?.isTestUser === true ||
+        storedUserData?.qaUser === true ||
+        storedUserData?.testUser === true;
+      const canUsePersistedTestUserToken =
+        Boolean(qaSocketIdToken) &&
+        isPersistedTestUser &&
+        Boolean(tokenSubject) &&
+        Boolean(persistedUid) &&
+        tokenSubject === persistedUid;
+
       if (qaSocketTokenEnabled && qaSocketIdToken) {
         if (isJwtExpiredOrNearExpiry(qaSocketIdToken)) {
           Logger.warn(
             "⚠️ [WebSocketManager] Token QA do socket expirado ou próximo de expirar; usando autenticação alternativa.",
+          );
+          return null;
+        }
+        return qaSocketIdToken;
+      }
+
+      if (canUsePersistedTestUserToken) {
+        if (isJwtExpiredOrNearExpiry(qaSocketIdToken)) {
+          Logger.warn(
+            "⚠️ [WebSocketManager] Token QA do usuário de teste expirado; usando autenticação alternativa.",
           );
           return null;
         }
@@ -732,6 +976,106 @@ class WebSocketManager {
     }
 
     return null;
+  }
+
+  async _resolveQaSocketIdentityOverride(requestedUserId = "", requestedUserType = "") {
+    if (!canUseClientQaSocketBypass()) {
+      return null;
+    }
+
+    try {
+      const [testModeRaw, qaSocketIdTokenRaw, persistedUidRaw, storedUserDataRaw] =
+        await Promise.all([
+          AsyncStorage.getItem(TEST_MODE_STORAGE_KEY),
+          AsyncStorage.getItem(QA_SOCKET_ID_TOKEN_STORAGE_KEY),
+          AsyncStorage.getItem(AUTH_UID_STORAGE_KEY),
+          AsyncStorage.getItem(USER_DATA_STORAGE_KEY),
+        ]);
+
+      const qaModeEnabled =
+        String(testModeRaw || "")
+          .trim()
+          .toLowerCase() === "true";
+      const qaSocketIdToken = String(qaSocketIdTokenRaw || "").trim();
+      if (!qaModeEnabled || !qaSocketIdToken || isJwtExpiredOrNearExpiry(qaSocketIdToken)) {
+        return null;
+      }
+
+      let storedUserData = null;
+      if (storedUserDataRaw) {
+        try {
+          storedUserData = JSON.parse(storedUserDataRaw);
+        } catch (_error) {
+          storedUserData = null;
+        }
+      }
+
+      const tokenSubject = getJwtSubject(qaSocketIdToken);
+      const persistedUid = String(
+        storedUserData?.uid ||
+          storedUserData?.id ||
+          persistedUidRaw ||
+          "",
+      ).trim();
+      if (!tokenSubject || !persistedUid || tokenSubject !== persistedUid) {
+        return null;
+      }
+
+      const persistedUserType = String(
+        storedUserData?.usertype ||
+          storedUserData?.userType ||
+          storedUserData?.type ||
+          requestedUserType ||
+          "",
+      ).trim();
+      const normalizedRequestedUserId = String(requestedUserId || "").trim();
+      const normalizedRequestedUserType = String(requestedUserType || "").trim();
+
+      if (
+        normalizedRequestedUserId === persistedUid &&
+        (!persistedUserType || normalizedRequestedUserType === persistedUserType)
+      ) {
+        return null;
+      }
+
+      return {
+        userId: persistedUid,
+        userType: persistedUserType || normalizedRequestedUserType,
+      };
+    } catch (identityError) {
+      Logger.warn(
+        "⚠️ [WebSocketManager] Erro ao resolver identidade QA do socket:",
+        identityError,
+      );
+      return null;
+    }
+  }
+
+  async _resolveSocketAuthIdentity(userId = "", userType = "") {
+    const normalizedUserId = String(userId || "").trim();
+    const normalizedUserType = String(userType || "").trim();
+    const qaIdentityOverride = await this._resolveQaSocketIdentityOverride(
+      normalizedUserId,
+      normalizedUserType,
+    );
+
+    if (qaIdentityOverride?.userId) {
+      Logger.warn(
+        "⚠️ [WebSocketManager] Substituindo identidade de socket pela identidade QA assinada.",
+        {
+          requestedUserId: normalizedUserId || null,
+          requestedUserType: normalizedUserType || null,
+          qaUserId: qaIdentityOverride.userId,
+          qaUserType: qaIdentityOverride.userType || null,
+        },
+      );
+      return qaIdentityOverride;
+    }
+
+    return {
+      userId: normalizedUserId,
+      userType: normalizedUserType,
+    };
   }
 
   async _resolveQaSocketBypassPayload(preferredUserId = "") {
@@ -953,6 +1297,17 @@ class WebSocketManager {
     const socketAuth = await this._buildSocketAuthPayload({
       forceRefresh: options?.forceRefreshAuth === true,
     });
+    if (socketAuth?.authUnavailable && !socketAuth?.token) {
+      throw buildSocketError(
+        {
+          code: "AUTH_TOKEN_UNAVAILABLE",
+          message:
+            "Sessão expirada. Reabra o app para restabelecer os serviços em tempo real.",
+        },
+        "Sessão expirada. Reabra o app para restabelecer os serviços em tempo real.",
+        "websocket",
+      );
+    }
     const socketQuery = this._buildSocketQueryPayload(socketAuth);
     const candidateUrls = buildSocketCandidateUrls();
     let lastError = null;
@@ -1278,7 +1633,10 @@ class WebSocketManager {
       "boardingStatusError",
       "activeRideSync",
       "sessionTerminated",
+      "newMessage",
+      "messageReceived",
       "locationUpdated",
+      "locationBatchUpdated",
       "mapH3Refresh",
       "map_h3_refresh",
       "error",
@@ -1304,6 +1662,9 @@ class WebSocketManager {
             "⚠️ [WebSocketManager] Servidor não retornou userType no evento authenticated",
           );
         }
+        this.lastAuthenticatedPayload = data && typeof data === "object"
+          ? { ...data }
+          : null;
         // ✅ FASE 2: Retransmitir através do EventEmitter
         this.eventEmitter.emit("authenticated", data);
 
@@ -1336,7 +1697,10 @@ class WebSocketManager {
       this.socket.on("activeRideSync", (snapshot) => {
         if (snapshot?.success) {
           this.lastActiveRideSnapshot = snapshot;
-          if (snapshot?.hasActiveRide !== true) {
+          if (
+            snapshot?.hasActiveRide !== true ||
+            isTerminalActiveRideSyncSnapshot(snapshot)
+          ) {
             this._clearRehydratedRideLifecycle(snapshot?.bookingId);
             this._clearLifecycleDispatchForBooking(snapshot?.bookingId);
           }
@@ -1356,6 +1720,7 @@ class WebSocketManager {
               const activeSocketId = String(this.socket?.id || "");
               const sourceSocketId = String(listenerSocket?.id || "");
               const previousSocketId = String(data?.previousSocketId || "");
+              const replacementSocketId = String(data?.newSocketId || "");
 
               const fromStaleSocket =
                 Boolean(activeSocketId && sourceSocketId) &&
@@ -1363,15 +1728,22 @@ class WebSocketManager {
               const targetsDifferentSocket =
                 Boolean(previousSocketId && activeSocketId) &&
                 previousSocketId !== activeSocketId;
+              const replacedByActiveSocket =
+                Boolean(replacementSocketId && activeSocketId) &&
+                replacementSocketId === activeSocketId;
 
-              if (fromStaleSocket || targetsDifferentSocket) {
+              if (
+                fromStaleSocket ||
+                targetsDifferentSocket ||
+                replacedByActiveSocket
+              ) {
                 Logger.warn(
                   "⚠️ [WebSocketManager] Ignorando sessionTerminated de socket obsoleto",
                   {
                     activeSocketId,
                     sourceSocketId,
                     previousSocketId,
-                    newSocketId: data?.newSocketId || null,
+                    newSocketId: replacementSocketId || null,
                   },
                 );
                 return;
@@ -1487,6 +1859,7 @@ class WebSocketManager {
         this.isAuthenticated = false;
         this.authenticatedUserId = null;
         this.authenticatedUserType = null;
+        this.lastAuthenticatedPayload = null;
       }
       this.isAuthenticating = false;
 
@@ -1503,6 +1876,7 @@ class WebSocketManager {
       // Resetar estado de autenticação (mas MANTER authCredentials para reconexão)
       this.isAuthenticated = false;
       this.isAuthenticating = false;
+      this.lastAuthenticatedPayload = null;
 
       // ✅ FASE 2: Emitir através do EventEmitter
       this.eventEmitter.emit("disconnect", reason);
@@ -1567,6 +1941,7 @@ class WebSocketManager {
     this.authenticatedUserType = null;
     this.qaSocketBypassState = { enabled: false, uid: null };
     this.lastSocketAuthPayload = null;
+    this.lastAuthenticatedPayload = null;
 
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
@@ -1715,7 +2090,62 @@ class WebSocketManager {
       socketId: this.socket?.id || null,
       userId: this.authenticatedUserId,
       userType: this.authenticatedUserType,
+      authPayload: this.isAuthenticated ? this.lastAuthenticatedPayload : null,
       isConnecting: this.isConnecting,
+    };
+  }
+
+  _mergeDriverStatusIntoAuthPayload(payload = {}) {
+    if (!payload || typeof payload !== "object") {
+      return;
+    }
+
+    const payloadDriverId = String(
+      payload.driverId || payload.uid || payload.userId || "",
+    ).trim();
+    const authenticatedDriverId = String(this.authenticatedUserId || "").trim();
+
+    if (
+      payloadDriverId &&
+      authenticatedDriverId &&
+      payloadDriverId !== authenticatedDriverId
+    ) {
+      return;
+    }
+
+    const hasExplicitOnline =
+      typeof payload.isOnline === "boolean" ||
+      typeof payload.driverOnline === "boolean";
+    const nextOnline = hasExplicitOnline
+      ? payload.isOnline === true || payload.driverOnline === true
+      : null;
+
+    if (!hasExplicitOnline && !payload.driverOnlineDaily && !payload.status) {
+      return;
+    }
+
+    this.lastAuthenticatedPayload = {
+      ...(this.lastAuthenticatedPayload || {}),
+      uid: authenticatedDriverId || payloadDriverId || this.lastAuthenticatedPayload?.uid || null,
+      userId:
+        authenticatedDriverId ||
+        payloadDriverId ||
+        this.lastAuthenticatedPayload?.userId ||
+        null,
+      userType:
+        this.authenticatedUserType ||
+        this.lastAuthenticatedPayload?.userType ||
+        "driver",
+      ...(hasExplicitOnline
+        ? {
+            isOnline: nextOnline,
+            driverOnline: nextOnline,
+          }
+        : {}),
+      ...(payload.status ? { status: payload.status } : {}),
+      ...(payload.driverOnlineDaily
+        ? { driverOnlineDaily: payload.driverOnlineDaily }
+        : {}),
     };
   }
 
@@ -1794,12 +2224,15 @@ class WebSocketManager {
 
     const force = options?.force === true;
     const forceRefreshToken = options?.forceRefreshToken === true;
+    const authIdentity = await this._resolveSocketAuthIdentity(userId, userType);
+    const resolvedUserId = authIdentity.userId;
+    const resolvedUserType = authIdentity.userType;
 
     // ✅ Evitar autenticação duplicada se já está autenticado com os mesmos dados
     if (
       this.isAuthenticated &&
-      this.authenticatedUserId === userId &&
-      this.authenticatedUserType === userType
+      this.authenticatedUserId === resolvedUserId &&
+      this.authenticatedUserType === resolvedUserType
     ) {
       Logger.log(
         "✅ [WebSocketManager] Já autenticado com esses dados, ignorando",
@@ -1817,20 +2250,22 @@ class WebSocketManager {
 
     this.isAuthenticating = true;
     Logger.log(
-      `🔐 [WebSocketManager] Autenticando usuário: ${userId} como ${userType}`,
+      `🔐 [WebSocketManager] Autenticando usuário: ${resolvedUserId} como ${resolvedUserType}`,
     );
 
     // ✅ Salvar credenciais para auto-reautenticação em caso de queda
-    this.authCredentials = { userId, userType };
+    this.authCredentials = { userId: resolvedUserId, userType: resolvedUserType };
 
     // ✅ Definir dados locais
-    this.authenticatedUserType = userType;
-    this.authenticatedUserId = userId;
+    this.authenticatedUserType = resolvedUserType;
+    this.authenticatedUserId = resolvedUserId;
 
-    const qaBypassPayload = await this._resolveQaSocketBypassPayload(userId);
+    const qaBypassPayload = canUseClientQaSocketBypass()
+      ? await this._resolveQaSocketBypassPayload(resolvedUserId)
+      : null;
     const shouldUseQaSocketBypass = Boolean(
       qaBypassPayload?.qaAuthBypass &&
-      String(qaBypassPayload?.uid || "") === String(userId || ""),
+      String(qaBypassPayload?.uid || "") === String(resolvedUserId || ""),
     );
     const socketAuthPayload = await this._buildSocketAuthPayload({
       forceRefresh: forceRefreshToken,
@@ -1839,13 +2274,13 @@ class WebSocketManager {
     if (shouldUseQaSocketBypass) {
       this.qaSocketBypassState = {
         enabled: true,
-        uid: String(userId || "").trim(),
+        uid: String(resolvedUserId || "").trim(),
       };
     }
 
     const authenticatePayload = {
-      uid: userId,
-      userType: userType,
+      uid: resolvedUserId,
+      userType: resolvedUserType,
       ...(shouldUseQaSocketBypass
         ? {
             qaAuthBypass: true,
@@ -1875,7 +2310,10 @@ class WebSocketManager {
     timeoutMs = AUTH_ACK_DEFAULT_TIMEOUT_MS,
     options = {},
   ) {
-    const requestKey = `${userId || ""}:${userType || ""}`;
+    const authIdentity = await this._resolveSocketAuthIdentity(userId, userType);
+    const resolvedUserId = authIdentity.userId;
+    const resolvedUserType = authIdentity.userType;
+    const requestKey = `${resolvedUserId || ""}:${resolvedUserType || ""}`;
     if (this.authAckInFlight && this.authAckInFlightKey === requestKey) {
       return this.authAckInFlight;
     }
@@ -1893,8 +2331,8 @@ class WebSocketManager {
         attempt += 1;
         try {
           const authData = await this._authenticateSingleAttempt(
-            userId,
-            userType,
+            resolvedUserId,
+            resolvedUserType,
             timeoutMs,
             { forceRefreshToken },
           );
@@ -3139,7 +3577,7 @@ class WebSocketManager {
       const requestId =
         String(options?.requestId || "").trim() ||
         createSocketRequestId("arrive_at_pickup");
-      const idempotencyKey = String(options?.idempotencyKey || "").trim();
+      const lifecycleMetadata = buildRideLifecycleCommandMetadata(options);
 
       const cleanup = () => {
         clearTimeout(timeout);
@@ -3238,7 +3676,7 @@ class WebSocketManager {
         bookingId,
         location,
         requestId,
-        ...(idempotencyKey ? { idempotencyKey } : {}),
+        ...lifecycleMetadata,
       });
     });
   }
@@ -3348,7 +3786,7 @@ class WebSocketManager {
     const requestId =
       String(options?.requestId || "").trim() ||
       createSocketRequestId("start_trip");
-    const idempotencyKey = String(options?.idempotencyKey || "").trim();
+    const lifecycleMetadata = buildRideLifecycleCommandMetadata(options);
     return this._emitLifecycleCommandWithAck({
       commandName: "startTrip",
       eventName: "startTrip",
@@ -3361,7 +3799,7 @@ class WebSocketManager {
         bookingId,
         startLocation,
         requestId,
-        ...(idempotencyKey ? { idempotencyKey } : {}),
+        ...lifecycleMetadata,
       },
     });
   }
@@ -3393,7 +3831,7 @@ class WebSocketManager {
     const requestId =
       String(options?.requestId || "").trim() ||
       createSocketRequestId("complete_trip");
-    const idempotencyKey = String(options?.idempotencyKey || "").trim();
+    const lifecycleMetadata = buildRideLifecycleCommandMetadata(options);
     return this._emitLifecycleCommandWithAck({
       commandName: "completeTrip",
       eventName: "completeTrip",
@@ -3408,7 +3846,7 @@ class WebSocketManager {
         distance,
         fare,
         requestId,
-        ...(idempotencyKey ? { idempotencyKey } : {}),
+        ...lifecycleMetadata,
       },
     });
   }
@@ -3559,12 +3997,22 @@ class WebSocketManager {
   // Submeter avaliação
   async submitRating(ratingData) {
     if (!this.socket?.connected) {
-      throw new Error("WebSocket não conectado");
+      throw buildSocketError(
+        { code: "WS_DISCONNECTED", error: "WebSocket não conectado" },
+        "WebSocket não conectado",
+        "rating",
+      );
     }
 
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
-        reject(new Error("Submit rating timeout"));
+        reject(
+          buildSocketError(
+            { code: "RATING_SUBMIT_TIMEOUT", error: "Submit rating timeout" },
+            "Não foi possível enviar a avaliação agora.",
+            "rating",
+          ),
+        );
       }, 15000);
 
       this.socket.emit("submitRating", ratingData);
@@ -3573,7 +4021,7 @@ class WebSocketManager {
         if (data.success) {
           resolve(data);
         } else {
-          reject(new Error(data.error || "Submit rating failed"));
+          reject(buildSocketError(data, "Não foi possível enviar a avaliação agora.", "rating"));
         }
       });
     });
@@ -3658,24 +4106,49 @@ class WebSocketManager {
 
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
+        cleanup();
         reject(new Error("Create chat timeout"));
       }, 10000);
 
-      const onSuccess = (data) => {
+      const expectedChatId =
+        chatData?.chatId || chatData?.bookingId || chatData?.tripId || chatData?.rideId || null;
+      const matchesRequest = (data = {}) => {
+        if (!expectedChatId || !data || typeof data !== "object") {
+          return true;
+        }
+        const receivedId = data.chatId || data.bookingId || data.tripId || data.rideId;
+        return !receivedId || String(receivedId) === String(expectedChatId);
+      };
+      const cleanup = () => {
         clearTimeout(timeout);
         this.socket.off("chat_created", onSuccess);
         this.socket.off("chatCreated", onSuccess);
+        this.socket.off("chatError", onError);
+      };
+      const onSuccess = (data) => {
+        if (!matchesRequest(data)) {
+          return;
+        }
+        cleanup();
         if (data.success) {
           resolve(data);
         } else {
-          reject(new Error(data.error || "Create chat failed"));
+          reject(buildSocketError(data, "Create chat failed", "chat"));
         }
       };
+      const onError = (data) => {
+        if (!matchesRequest(data)) {
+          return;
+        }
+        cleanup();
+        reject(buildSocketError(data, "Create chat failed", "chat"));
+      };
 
-      this.socket.emit("createChat", chatData);
       this.socket.once("chatCreated", onSuccess);
       // Compatibilidade com payload/evento legado
       this.socket.once("chat_created", onSuccess);
+      this.socket.once("chatError", onError);
+      this.socket.emit("createChat", chatData);
     });
   }
 
@@ -3687,24 +4160,51 @@ class WebSocketManager {
 
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
+        cleanup();
         reject(new Error("Send message timeout"));
       }, 10000);
 
-      const onSuccess = (data) => {
+      const expectedChatId =
+        messageData?.chatId || messageData?.bookingId || messageData?.tripId || messageData?.rideId || null;
+      const matchesRequest = (data = {}) => {
+        if (!expectedChatId || !data || typeof data !== "object") {
+          return true;
+        }
+        const receivedId = data.chatId || data.bookingId || data.tripId || data.rideId;
+        return !receivedId || String(receivedId) === String(expectedChatId);
+      };
+      const cleanup = () => {
         clearTimeout(timeout);
         this.socket.off("message_sent", onSuccess);
         this.socket.off("messageSent", onSuccess);
+        this.socket.off("messageError", onError);
+        this.socket.off("chatError", onError);
+      };
+      const onSuccess = (data) => {
+        if (!matchesRequest(data)) {
+          return;
+        }
+        cleanup();
         if (data.success) {
           resolve(data);
         } else {
-          reject(new Error(data.error || "Send message failed"));
+          reject(buildSocketError(data, "Send message failed", "chat"));
         }
       };
+      const onError = (data) => {
+        if (!matchesRequest(data)) {
+          return;
+        }
+        cleanup();
+        reject(buildSocketError(data, "Send message failed", "chat"));
+      };
 
-      this.socket.emit("sendMessage", messageData);
       this.socket.once("messageSent", onSuccess);
       // Compatibilidade com payload/evento legado
       this.socket.once("message_sent", onSuccess);
+      this.socket.once("messageError", onError);
+      this.socket.once("chatError", onError);
+      this.socket.emit("sendMessage", messageData);
     });
   }
 
@@ -3719,15 +4219,25 @@ class WebSocketManager {
         reject(new Error("Load messages timeout"));
       }, 10000);
 
-      this.socket.emit("load_messages", { chatId, page, limit });
-      this.socket.once("messages_loaded", (data) => {
+      const cleanup = () => {
+        clearTimeout(timeout);
+        this.socket.off("messages_loaded", onLoaded);
+      };
+      const onLoaded = (data) => {
+        const responseChatId = data?.chatId || data?.bookingId || data?.tripId || data?.rideId;
+        if (responseChatId && String(responseChatId) !== String(chatId)) {
+          return;
+        }
+        cleanup();
         clearTimeout(timeout);
         if (data.success) {
           resolve(data);
         } else {
-          reject(new Error(data.error || "Load messages failed"));
+          reject(buildSocketError(data, "Load messages failed", "chat"));
         }
-      });
+      };
+      this.socket.once("messages_loaded", onLoaded);
+      this.socket.emit("load_messages", { chatId, page, limit });
     });
   }
 
@@ -3742,15 +4252,25 @@ class WebSocketManager {
         reject(new Error("Mark messages read timeout"));
       }, 10000);
 
-      this.socket.emit("mark_messages_read", { chatId, messageIds });
-      this.socket.once("messages_marked_read", (data) => {
+      const cleanup = () => {
+        clearTimeout(timeout);
+        this.socket.off("messages_marked_read", onMarked);
+      };
+      const onMarked = (data) => {
+        const responseChatId = data?.chatId || data?.bookingId || data?.tripId || data?.rideId;
+        if (responseChatId && String(responseChatId) !== String(chatId)) {
+          return;
+        }
+        cleanup();
         clearTimeout(timeout);
         if (data.success) {
           resolve(data);
         } else {
-          reject(new Error(data.error || "Mark messages read failed"));
+          reject(buildSocketError(data, "Mark messages read failed", "chat"));
         }
-      });
+      };
+      this.socket.once("messages_marked_read", onMarked);
+      this.socket.emit("mark_messages_read", { chatId, messageIds });
     });
   }
 
@@ -4023,6 +4543,13 @@ class WebSocketManager {
         }
         cleanup();
         if (data.success) {
+          this._mergeDriverStatusIntoAuthPayload({
+            driverId,
+            status: data.status || status,
+            isOnline:
+              typeof data.isOnline === "boolean" ? data.isOnline : isOnline,
+            driverOnlineDaily: data.driverOnlineDaily || null,
+          });
           resolve(data);
         } else {
           reject(buildDriverStatusError(data));
@@ -4124,6 +4651,96 @@ class WebSocketManager {
   // Compatibilidade temporária para chamadas legadas no app.
   async updateDriverLocation(driverId, lat, lng, heading = 0, speed = 0, metadata = {}) {
     return this.updateLocation(driverId, lat, lng, heading, speed, metadata);
+  }
+
+  async updateLocationBatch({
+    driverId,
+    bookingId,
+    tripId,
+    tripStatus = "started",
+    isInTrip = true,
+    source = "location_buffer_batch",
+    locations = [],
+    batchId = null,
+  } = {}) {
+    if (!this.socket?.connected) {
+      throw new Error("WebSocket não conectado");
+    }
+
+    const normalizedLocations = Array.isArray(locations)
+      ? locations
+          .map((item) => {
+            const lat = Number(item?.lat ?? item?.latitude);
+            const lng = Number(item?.lng ?? item?.longitude);
+            if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+              return null;
+            }
+            return {
+              eventId: item.eventId || null,
+              lat,
+              lng,
+              accuracy: item.accuracy ?? null,
+              heading: item.heading ?? null,
+              speed: item.speed ?? null,
+              timestamp: item.timestamp || item.capturedAt || Date.now(),
+              capturedAt: item.capturedAt || item.timestamp || Date.now(),
+              seq: Number.isInteger(Number(item.seq)) ? Number(item.seq) : null,
+              source: item.source || source,
+              tripStatus: item.tripStatus || tripStatus,
+              isInTrip: item.isInTrip !== undefined ? Boolean(item.isInTrip) : Boolean(isInTrip),
+              bookingId: item.bookingId || bookingId || tripId || null,
+              tripId: item.tripId || tripId || bookingId || null,
+            };
+          })
+          .filter(Boolean)
+      : [];
+
+    if (normalizedLocations.length === 0) {
+      throw new Error("Nenhuma localização válida para sincronizar");
+    }
+
+    return new Promise((resolve, reject) => {
+      const resolvedBatchId =
+        String(batchId || "").trim() || createSocketRequestId("location_batch");
+      const timeout = setTimeout(() => {
+        cleanup();
+        reject(new Error("Update location batch timeout"));
+      }, 15000);
+
+      const cleanup = () => {
+        clearTimeout(timeout);
+        this.off("locationBatchUpdated", onBatchUpdated);
+      };
+
+      const onBatchUpdated = (payload = {}) => {
+        if (
+          payload?.batchId &&
+          resolvedBatchId &&
+          String(payload.batchId) !== String(resolvedBatchId)
+        ) {
+          return;
+        }
+        cleanup();
+        if (payload?.success === false) {
+          reject(buildSocketError(payload, "Não foi possível sincronizar localizações.", "location_batch"));
+          return;
+        }
+        resolve(payload);
+      };
+
+      this.on("locationBatchUpdated", onBatchUpdated);
+      this.socket.emit("updateLocationBatch", {
+        batchId: resolvedBatchId,
+        driverId,
+        uid: driverId,
+        bookingId: bookingId || tripId || null,
+        tripId: tripId || bookingId || null,
+        tripStatus,
+        isInTrip,
+        source,
+        locations: normalizedLocations,
+      });
+    });
   }
 
   // Localização do passageiro durante corrida ativa (monitoramento de tripulação)
@@ -4376,7 +4993,7 @@ class WebSocketManager {
       const requestId =
         String(options?.requestId || "").trim() ||
         createSocketRequestId("cancel_ride");
-      const idempotencyKey = String(options?.idempotencyKey || "").trim();
+      const lifecycleMetadata = buildRideLifecycleCommandMetadata(options);
 
       this._recordRideTelemetryCommand(
         "cancelRide",
@@ -4392,7 +5009,7 @@ class WebSocketManager {
         reason,
         cancellationFee,
         requestId,
-        ...(idempotencyKey ? { idempotencyKey } : {}),
+        ...lifecycleMetadata,
       });
     });
   }
@@ -4400,29 +5017,52 @@ class WebSocketManager {
   // ==================== NOVOS MÉTODOS - SISTEMA DE SEGURANÇA ====================
 
   // Reportar incidente
-  async reportIncident(type, description, evidence = [], location = null) {
+  async reportIncident(
+    type,
+    description,
+    evidence = [],
+    location = null,
+    context = {},
+  ) {
     if (!this.socket?.connected) {
       throw new Error("WebSocket não conectado");
     }
 
     return new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => {
+      let timeout = null;
+      const cleanup = () => {
+        if (timeout) {
+          clearTimeout(timeout);
+        }
+        this.socket?.off?.("incidentReported", onReported);
+        this.socket?.off?.("incidentReportError", onError);
+      };
+      const onReported = (data) => {
+        cleanup();
+        if (data.success) {
+          resolve(data);
+        } else {
+          reject(buildSocketError(data, "Report incident failed", "websocket"));
+        }
+      };
+      const onError = (data) => {
+        cleanup();
+        reject(buildSocketError(data, "Report incident failed", "websocket"));
+      };
+
+      timeout = setTimeout(() => {
+        cleanup();
         reject(new Error("Report incident timeout"));
       }, 10000);
 
+      this.socket.once("incidentReported", onReported);
+      this.socket.once("incidentReportError", onError);
       this.socket.emit("reportIncident", {
         type,
         description,
         evidence,
         location,
-      });
-      this.socket.once("incidentReported", (data) => {
-        clearTimeout(timeout);
-        if (data.success) {
-          resolve(data);
-        } else {
-          reject(new Error(data.error || "Report incident failed"));
-        }
+        ...buildSupportScopePayload(context),
       });
     });
   }
@@ -4432,24 +5072,46 @@ class WebSocketManager {
     contactType,
     location = null,
     message = "Solicitação de emergência",
+    context = {},
   ) {
     if (!this.socket?.connected) {
       throw new Error("WebSocket não conectado");
     }
 
     return new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        reject(new Error("Emergency contact timeout"));
-      }, 10000);
-
-      this.socket.emit("emergencyContact", { contactType, location, message });
-      this.socket.once("emergencyContacted", (data) => {
-        clearTimeout(timeout);
+      let timeout = null;
+      const cleanup = () => {
+        if (timeout) {
+          clearTimeout(timeout);
+        }
+        this.socket?.off?.("emergencyContacted", onContacted);
+        this.socket?.off?.("emergencyError", onError);
+      };
+      const onContacted = (data) => {
+        cleanup();
         if (data.success) {
           resolve(data);
         } else {
-          reject(new Error(data.error || "Emergency contact failed"));
+          reject(buildSocketError(data, "Emergency contact failed", "websocket"));
         }
+      };
+      const onError = (data) => {
+        cleanup();
+        reject(buildSocketError(data, "Emergency contact failed", "websocket"));
+      };
+
+      timeout = setTimeout(() => {
+        cleanup();
+        reject(new Error("Emergency contact timeout"));
+      }, 10000);
+
+      this.socket.once("emergencyContacted", onContacted);
+      this.socket.once("emergencyError", onError);
+      this.socket.emit("emergencyContact", {
+        contactType,
+        location,
+        message,
+        ...buildSupportScopePayload(context),
       });
     });
   }
@@ -4462,29 +5124,48 @@ class WebSocketManager {
     priority = "N3",
     description,
     attachments = [],
+    context = {},
   ) {
     if (!this.socket?.connected) {
       throw new Error("WebSocket não conectado");
     }
 
     return new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => {
+      let timeout = null;
+      const cleanup = () => {
+        if (timeout) {
+          clearTimeout(timeout);
+        }
+        this.socket?.off?.("supportTicketCreated", onCreated);
+        this.socket?.off?.("supportTicketError", onError);
+      };
+      const onCreated = (data) => {
+        cleanup();
+        if (data.success) {
+          resolve(data);
+        } else {
+          reject(buildSocketError(data, "Create support ticket failed", "websocket"));
+        }
+      };
+      const onError = (data) => {
+        cleanup();
+        reject(buildSocketError(data, "Create support ticket failed", "websocket"));
+      };
+
+      timeout = setTimeout(() => {
+        cleanup();
         reject(new Error("Create support ticket timeout"));
       }, 10000);
+      timeout.unref?.();
 
+      this.socket.once("supportTicketCreated", onCreated);
+      this.socket.once("supportTicketError", onError);
       this.socket.emit("createSupportTicket", {
         type,
         priority,
         description,
         attachments,
-      });
-      this.socket.once("supportTicketCreated", (data) => {
-        clearTimeout(timeout);
-        if (data.success) {
-          resolve(data);
-        } else {
-          reject(new Error(data.error || "Create support ticket failed"));
-        }
+        ...buildSupportScopePayload(context),
       });
     });
   }
@@ -4636,6 +5317,43 @@ class WebSocketManager {
     });
   }
 
+  async registerRideLiveActivityToken(tokenData) {
+    if (!this.socket?.connected) {
+      throw new Error("WebSocket não conectado");
+    }
+
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        cleanup();
+        reject(new Error("Register ride Live Activity token timeout"));
+      }, 10000);
+
+      const onRegistered = (data) => {
+        cleanup();
+        if (data.success) {
+          resolve(data);
+        } else {
+          reject(new Error(data.error || "Register ride Live Activity token failed"));
+        }
+      };
+
+      const onError = (error) => {
+        cleanup();
+        reject(new Error(error.error || "Register ride Live Activity token error event"));
+      };
+
+      const cleanup = () => {
+        clearTimeout(timeout);
+        this.socket.off("rideLiveActivityTokenRegistered", onRegistered);
+        this.socket.off("rideLiveActivityTokenError", onError);
+      };
+
+      this.socket.once("rideLiveActivityTokenRegistered", onRegistered);
+      this.socket.once("rideLiveActivityTokenError", onError);
+      this.socket.emit("registerRideLiveActivityToken", tokenData);
+    });
+  }
+
   // Enviar notificação
   async sendNotification(notificationData) {
     if (!this.socket?.connected) {
@@ -4719,7 +5437,7 @@ class WebSocketManager {
    * @param {object} newDrop {lat, lng, add}
    * @param {number} newFare
    */
-  async requestRideExtension(rideId, newDrop, newFare) {
+  async requestRideExtension(rideId, newDrop, newFare, options = {}) {
     if (!this.socket?.connected) {
       throw new Error("WebSocket não conectado");
     }
@@ -4760,6 +5478,12 @@ class WebSocketManager {
         bookingId: rideId,
         newEndLocation: newDrop,
         newFare,
+        routeDistanceKm:
+          options.routeDistanceKm ?? options.routeDistance ?? null,
+        routeDurationSecs:
+          options.routeDurationSecs ?? options.routeDuration ?? null,
+        quoteLockId: options.quoteLockId || null,
+        quoteSessionId: options.quoteSessionId || null,
       });
     });
   }
@@ -5097,7 +5821,18 @@ class WebSocketManager {
       return;
     }
 
-    const status = String(snapshot.status || "").toUpperCase();
+    if (isTerminalActiveRideSyncSnapshot(snapshot)) {
+      this._clearRehydratedRideLifecycle(snapshot?.bookingId);
+      this._clearLifecycleDispatchForBooking(snapshot?.bookingId);
+      return;
+    }
+
+    const status = normalizeSocketRideStatus(
+      snapshot.status,
+      snapshot.bookingStatus,
+      snapshot.state,
+      snapshot.tripStatus,
+    );
     if (!this._shouldEmitRehydratedRideLifecycle(snapshot, status)) {
       return;
     }

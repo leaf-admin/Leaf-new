@@ -1,6 +1,7 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
   dismissCampaign,
+  isCampaignCenterDisabledResponse,
   normalizeCampaign,
   refreshEligibleCampaigns,
 } from "../src/services/runtime/campaignCenterService";
@@ -169,5 +170,20 @@ describe("campaignCenterService", () => {
         hideTextOverlay: true,
       }),
     );
+  });
+
+  it("treats the pilot launch disabled response as an expected empty surface", () => {
+    expect(
+      isCampaignCenterDisabledResponse({
+        status: 503,
+        data: { code: "FEATURE_DISABLED_IN_LAUNCH_PROFILE" },
+      }),
+    ).toBe(true);
+    expect(
+      isCampaignCenterDisabledResponse({
+        status: 503,
+        data: { code: "UPSTREAM_UNAVAILABLE" },
+      }),
+    ).toBe(false);
   });
 });

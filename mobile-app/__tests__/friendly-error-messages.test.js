@@ -78,4 +78,60 @@ describe('friendlyErrorMessages', () => {
     expect(err.status).toBe(401);
     expect(err.code).toBe('TOKEN_EXPIRED');
   });
+
+  test('maps canonical document review errors without exposing internal terms', () => {
+    const msg = toUserFriendlyMessage({
+      code: 'KYC_CANONICAL_APPROVED_CNH_REQUIRED',
+      message: 'CNH precisa de aprovacao manual canonica antes da comparacao facial',
+    }, { context: 'kyc' });
+
+    expect(msg).toBe('Sua documentação ainda está em análise. Avisaremos quando você puder continuar.');
+    expect(msg).not.toMatch(/canonic|comparacao facial|aws|redis|firestore|liveness/i);
+  });
+
+  test('maps an undetectable CNH portrait without exposing provider terms', () => {
+    const msg = toUserFriendlyMessage({
+      code: 'AWS_COMPARE_FACES_CNH_FACE_NOT_DETECTED',
+      message: 'InvalidParameterException from CompareFaces',
+    }, { context: 'kyc' });
+
+    expect(msg).toBe(
+      'Não conseguimos identificar sua foto na CNH enviada. Envie uma nova versão do documento.'
+    );
+    expect(msg).not.toMatch(/aws|compare.?faces|invalidparameter/i);
+  });
+
+  test('maps a rejected identity challenge before the generic 403 permission fallback', () => {
+    const msg = toUserFriendlyMessage({
+      code: 'KYC_CHALLENGE_NOT_PASSED',
+      status: 403,
+      message: 'Verificação facial não aprovada para este desafio',
+    }, { context: 'kyc' });
+
+    expect(msg).toBe(
+      'Por segurança, não foi possível liberar o modo motorista. Se você acredita que houve um engano, solicite uma análise.'
+    );
+    expect(msg).not.toMatch(/permiss[aã]o|forbidden|challenge|compare.?faces|trocar|reenviar|tentar novamente/i);
+  });
+
+  test('sanitizes the legacy canonical review message even when the error code is missing', () => {
+    const msg = toUserFriendlyMessage(
+      'CNH precisa de aprovacao manual canonica antes da comparacao facial',
+      { context: 'kyc' }
+    );
+
+    expect(msg).toBe('Sua documentação ainda está em análise. Avisaremos quando você puder continuar.');
+  });
+
+  test('never exposes an internal session identifier requirement', () => {
+    const withCode = toUserFriendlyMessage({
+      code: 'KYC_AWS_LIVENESS_SESSION_REQUIRED',
+      message: 'sessionId é obrigatório',
+    }, { context: 'kyc' });
+    const withoutCode = toUserFriendlyMessage('SessionID é obrigatório', { context: 'kyc' });
+
+    expect(withCode).toBe('Não foi possível preparar a validação agora. Tente novamente em alguns minutos.');
+    expect(withoutCode).toBe(withCode);
+    expect(`${withCode} ${withoutCode}`).not.toMatch(/session\s*id|sessionid|aws|liveness/i);
+  });
 });

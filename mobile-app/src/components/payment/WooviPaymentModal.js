@@ -15,11 +15,17 @@ import {
 import * as Clipboard from 'expo-clipboard';
 import { Icon } from 'react-native-elements';
 import auth from '@react-native-firebase/auth';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { WooviService, PaymentBypassService } from '../../services/canonical/paymentService';
 import WebSocketManager from '../../services/WebSocketManager';
 import QRCode from 'react-native-qrcode-svg';
 import { fonts } from '../../theme/runtimeTokens';
-import { allowForcedPaymentBypass } from '../../config/runtimeAccessPolicy';
+import {
+    allowForcedPaymentBypass,
+    allowTestUserTools,
+    isE2ETestBuild,
+    isSimulatorBuild,
+} from '../../config/runtimeAccessPolicy';
 import robotaxiPrototypeTokens from '../design-system/robotaxiPrototypeTokens';
 import { formatCurrencyBRL } from '../../screens/prototype/tripFinancialSummary';
 import SecurePaymentBadge from './SecurePaymentBadge';
@@ -36,8 +42,27 @@ const { color, typography, radius, spacing, elevation } = robotaxiPrototypeToken
 
 // Tempo de expiração: 5 minutos (300 segundos)
 const PAYMENT_TIMEOUT = 300;
+const PAYMENT_CREATE_MAX_ATTEMPTS = 3;
+const PAYMENT_CREATE_RETRY_DELAYS_MS = [700, 1400];
+const TEST_MODE_STORAGE_KEY = '@test_mode';
+const AUTH_UID_STORAGE_KEY = '@auth_uid';
+const QA_SOCKET_ID_TOKEN_STORAGE_KEY = '@qa_socket_id_token';
 const CONFIRMED_PAYMENT_STATUSES = new Set(['completed', 'confirmed', 'paid', 'in_holding']);
 const TERMINAL_PAYMENT_STATUSES = new Set(['cancelled', 'canceled', 'expired', 'refunded']);
+const PAYMENT_ERROR_DIAGNOSTIC_PREFIX = 'payment-error:';
+const QA_PAYMENT_PROGRESS_LABELS = Object.freeze({
+    idle: 'Confirmando pagamento',
+    opening: 'Confirmando pagamento',
+    scheduled: 'Confirmando pagamento',
+    confirming: 'Confirmando pagamento',
+    awaiting_backend: 'Confirmando pagamento',
+    confirmed: 'Pagamento confirmado',
+    webhook_error: 'Aguardando confirmação',
+    closed: 'Aguardando pagamento',
+    disabled: 'Aguardando pagamento',
+});
+const canUseDivergentQaPaymentIdentity = () =>
+    allowTestUserTools() && isSimulatorBuild() && isE2ETestBuild();
 const PIX_SURFACE = {
     bg: '#F8FBF9',
     sheet: 'rgba(255,255,255,0.97)',
@@ -51,6 +76,152 @@ const PIX_SURFACE = {
     danger: '#B5533E',
     progress: '#1FA76F'
 };
+
+function isSandboxPaymentRuntimeProfile(runtimeProfile) {
+    const effectiveProfile = runtimeProfile?.effectiveProfile || {};
+    const environment = String(
+        effectiveProfile.environment ||
+        runtimeProfile?.providerEnvironment ||
+        runtimeProfile?.defaultEnvironment ||
+        '',
+    ).trim().toLowerCase();
+    return environment === 'sandbox';
+}
+
+export function getQaPaymentProgressLabel(status) {
+    return QA_PAYMENT_PROGRESS_LABELS[String(status || '').trim()] || 'Aguardando pagamento';
+}
+
+function sanitizePaymentDiagnosticValue(value) {
+    if (value === null || value === undefined) return null;
+    const text = String(value)
+        .replace(/[;\n\r\t]/g, '_')
+        .replace(/\s+/g, '_')
+        .trim();
+    return text ? text.slice(0, 120) : null;
+}
+
+function buildPaymentErrorDiagnostics(error) {
+    const response = error?.response || error?.originalError?.response || null;
+    const responseData = response?.data || error?.response?.data || error?.originalError?.response?.data || {};
+    const providerDetails = responseData?.details && typeof responseData.details === 'object'
+        ? responseData.details
+        : {};
+    const providerData = providerDetails?.data && typeof providerDetails.data === 'object'
+        ? providerDetails.data
+        : {};
+    const providerFirstError = Array.isArray(providerData?.errors) && providerData.errors[0]
+        ? providerData.errors[0]
+        : {};
+    const diagnostics = {
+        status: error?.status || response?.status || null,
+        code: error?.code || responseData?.code || responseData?.error?.code || null,
+        provider: responseData?.provider || null,
+        providerEnvironment: responseData?.providerEnvironment || null,
+        paymentProfileId: responseData?.paymentProfileId || null,
+        paymentIntentId: responseData?.paymentIntentId || null,
+        chargeId: responseData?.chargeId || null,
+        providerStatus: providerDetails?.status || providerData?.status || null,
+        providerStatusText: providerDetails?.statusText || providerData?.statusText || null,
+        providerCode: providerData?.code || providerFirstError?.code || providerDetails?.code || null,
+        providerError: providerData?.error || providerFirstError?.error || providerDetails?.error || null,
+        providerMessage: providerData?.message || providerFirstError?.message || providerDetails?.message || null,
+    };
+
+    return Object.entries(diagnostics).reduce((acc, [key, value]) => {
+        const sanitized = sanitizePaymentDiagnosticValue(value);
+        if (sanitized) acc[key] = sanitized;
+        return acc;
+    }, {});
+}
+
+function decodeBase64UrlJson(segment) {
+    const normalized = String(segment || '').replace(/-/g, '+').replace(/_/g, '/');
+    const padded = normalized.padEnd(
+        normalized.length + ((4 - (normalized.length % 4)) % 4),
+        '=',
+    );
+
+    if (typeof globalThis?.atob === 'function') {
+        return JSON.parse(globalThis.atob(padded));
+    }
+
+    if (typeof Buffer !== 'undefined') {
+        return JSON.parse(Buffer.from(padded, 'base64').toString('utf8'));
+    }
+
+    return null;
+}
+
+function getJwtSubject(token) {
+    const parts = String(token || '').split('.');
+    if (parts.length < 2) {
+        return '';
+    }
+
+    try {
+        const payload = decodeBase64UrlJson(parts[1]);
+        return String(payload?.user_id || payload?.sub || '').trim();
+    } catch (_error) {
+        return '';
+    }
+}
+
+function serializePaymentErrorDiagnostics(diagnostics) {
+    const entries = Object.entries(diagnostics || {});
+    if (!entries.length) return null;
+    return `${PAYMENT_ERROR_DIAGNOSTIC_PREFIX}${entries
+        .map(([key, value]) => `${key}=${value}`)
+        .join(';')}`;
+}
+
+function sleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function getPaymentErrorStatus(error) {
+    return Number(
+        error?.status ||
+        error?.response?.status ||
+        error?.originalError?.status ||
+        error?.originalError?.response?.status ||
+        0
+    );
+}
+
+function getPaymentErrorCode(error) {
+    return String(
+        error?.code ||
+        error?.response?.data?.code ||
+        error?.response?.data?.error?.code ||
+        error?.originalError?.code ||
+        error?.originalError?.response?.data?.code ||
+        ''
+    ).trim().toUpperCase();
+}
+
+function isTransientPaymentCreationError(error) {
+    const status = getPaymentErrorStatus(error);
+    const code = getPaymentErrorCode(error);
+    if (
+        code.startsWith('PAYMENT_AUTH_') ||
+        code.startsWith('QUOTE_LOCK_') ||
+        code === 'NO_DRIVERS_AVAILABLE' ||
+        code === 'PAYMENT_PASSENGER_SCOPE_MISMATCH' ||
+        code === 'PAYMENT_SESSION_CONSUMED' ||
+        code === 'PAYMENT_INTENT_CONFLICT'
+    ) {
+        return false;
+    }
+
+    return (
+        code === 'ERR_NETWORK' ||
+        code === 'ECONNABORTED' ||
+        status === 408 ||
+        status === 429 ||
+        (status >= 500 && status <= 599)
+    );
+}
 
 export default function WooviPaymentModal({ 
     visible, 
@@ -68,31 +239,104 @@ export default function WooviPaymentModal({
     qaAutoConfirm = false,
     discountBenefit = null,
     grossEstimatedFare = null,
-    quoteSessionId = null
+    quoteSessionId = null,
+    quoteLockId = null,
+    onPaymentExpired = null,
+    onPaymentAborted = null,
+    robotaxiLifecycleCard = false
 }) {
     const qaAutoConfirmEnabled = Boolean(qaAutoConfirm);
     // Estados
     const [loading, setLoading] = useState(false);
     const [paymentData, setPaymentData] = useState(null);
     const [paymentGenerationError, setPaymentGenerationError] = useState(null);
+    const [paymentGenerationDiagnostics, setPaymentGenerationDiagnostics] = useState(null);
     const [countdown, setCountdown] = useState(PAYMENT_TIMEOUT); // 5 minutos
     const [isCheckingPayment, setIsCheckingPayment] = useState(false);
     const [paymentStatus, setPaymentStatus] = useState('pending'); // pending, confirmed, expired, cancelled
     const [qaDebugStatus, setQaDebugStatus] = useState('idle');
+    const [bankActionVisible, setBankActionVisible] = useState(false);
+    const qaPaymentProgressLabel = getQaPaymentProgressLabel(qaDebugStatus);
+    const normalizedQuoteLockId = String(quoteLockId || '').trim();
     
     // Refs
     const countdownIntervalRef = useRef(null);
     const paymentCheckIntervalRef = useRef(null);
     const timeoutRef = useRef(null);
+    const paymentDataRef = useRef(null);
     const paymentStatusRef = useRef(paymentStatus); // ✅ Ref para acessar status atualizado no intervalo
     const paymentConfirmedRef = useRef(false);
     const autoConfirmTimerRef = useRef(null);
     const qaAutoConfirmStartedRef = useRef(false);
+    const isCheckingPaymentRef = useRef(false);
+    const visibleRef = useRef(Boolean(visible));
+    const paymentLifecycleRef = useRef(0);
+    const timeoutHandledRef = useRef(false);
+    const terminalClosePendingRef = useRef(false);
+    const timeoutExpiredNotifiedRef = useRef(false);
+
+    visibleRef.current = Boolean(visible);
+
+    const beginPaymentLifecycle = () => {
+        paymentLifecycleRef.current += 1;
+        timeoutHandledRef.current = false;
+        timeoutExpiredNotifiedRef.current = false;
+        return paymentLifecycleRef.current;
+    };
+
+    const invalidatePaymentLifecycle = () => {
+        paymentLifecycleRef.current += 1;
+        timeoutHandledRef.current = true;
+        return paymentLifecycleRef.current;
+    };
+
+    const isPaymentLifecycleCurrent = (lifecycleToken) => (
+        visibleRef.current && lifecycleToken === paymentLifecycleRef.current
+    );
+
+    const closeWithoutConfirmation = (payload = {}) => {
+        invalidatePaymentLifecycle();
+        cleanup();
+        if (typeof onPaymentAborted === 'function') {
+            onPaymentAborted(payload);
+            return;
+        }
+        onClose(payload);
+    };
+
+    const notifyPaymentExpired = (timedOutPaymentData = null) => {
+        if (timeoutExpiredNotifiedRef.current) {
+            return;
+        }
+
+        timeoutExpiredNotifiedRef.current = true;
+        const payload = {
+            reason: 'timeout',
+            chargeId: timedOutPaymentData?.chargeId || null
+        };
+
+        if (typeof onPaymentExpired === 'function') {
+            onPaymentExpired(payload);
+            return;
+        }
+
+        closeWithoutConfirmation(payload);
+    };
 
     // ✅ Sincronizar ref com estado
     useEffect(() => {
         paymentStatusRef.current = paymentStatus;
     }, [paymentStatus]);
+
+    useEffect(() => {
+        if (!visible) {
+            setBankActionVisible(false);
+        }
+    }, [visible]);
+
+    useEffect(() => {
+        paymentDataRef.current = paymentData;
+    }, [paymentData]);
 
     const clearAutoConfirmTimer = () => {
         if (autoConfirmTimerRef.current) {
@@ -117,7 +361,12 @@ export default function WooviPaymentModal({
         clearAutoConfirmTimer();
     };
 
-    const shouldBypassPayment = async () => {
+    const shouldBypassPayment = async (runtimeProfile = null) => {
+        if (isSandboxPaymentRuntimeProfile(runtimeProfile)) {
+            Logger.log('✅ [WooviPaymentModal] Bypass desativado: perfil de pagamento sandbox deve usar Woovi sandbox.');
+            return false;
+        }
+
         if (allowForcedPaymentBypass()) {
             return true;
         }
@@ -133,17 +382,109 @@ export default function WooviPaymentModal({
         }
     };
 
-    const resolveAuthenticatedPassengerId = () => {
-        const directPassengerId = String(passengerId || '').trim();
-        if (directPassengerId) {
-            return directPassengerId;
+    const isQaTestModeEnabled = async () => {
+        try {
+            const testModeRaw = await AsyncStorage.getItem(TEST_MODE_STORAGE_KEY);
+            return String(testModeRaw || '').trim().toLowerCase() === 'true';
+        } catch (_error) {
+            return false;
+        }
+    };
+
+    const assertQaSandboxPaymentRuntime = async ({ resolvedPassengerId, passengerPhone }) => {
+        if (!(await isQaTestModeEnabled())) {
+            return null;
         }
 
-        try {
-            return String(auth()?.currentUser?.uid || '').trim();
-        } catch (_error) {
-            return '';
+        const runtimeProfile = await WooviService.resolvePaymentRuntimeProfile({
+            passengerId: resolvedPassengerId,
+            phone: passengerPhone,
+            phoneNumber: passengerPhone,
+        });
+        const effectiveProfile = runtimeProfile?.effectiveProfile || {};
+        const effectiveEnvironment = String(effectiveProfile.environment || '').trim().toLowerCase();
+
+        if (effectiveEnvironment === 'sandbox') {
+            Logger.log('✅ [WooviPaymentModal] Perfil de pagamento QA confirmado em sandbox', {
+                passengerId: resolvedPassengerId,
+                paymentProfileId: effectiveProfile.profileId || null,
+            });
+            return runtimeProfile;
         }
+
+        const paymentProfileId = effectiveProfile.profileId || null;
+        const error = new Error(
+            'Ambiente de pagamento QA não está em sandbox para este usuário. Verifique o perfil de pagamento antes de gerar o Pix.',
+        );
+        error.code = 'PAYMENT_QA_SANDBOX_PROFILE_REQUIRED';
+        error.response = {
+            status: 503,
+            data: {
+                success: false,
+                code: 'PAYMENT_QA_SANDBOX_PROFILE_REQUIRED',
+                error: error.message,
+                message: error.message,
+                provider: runtimeProfile?.provider || 'woovi',
+                providerEnvironment: effectiveEnvironment || runtimeProfile?.defaultEnvironment || 'unknown',
+                paymentProfileId,
+            },
+        };
+        throw error;
+    };
+
+    const resolveAuthenticatedPassengerId = async () => {
+        const directPassengerId = String(passengerId || '').trim();
+        let firebasePassengerId = '';
+        try {
+            firebasePassengerId = String(auth()?.currentUser?.uid || '').trim();
+        } catch (_error) {
+            firebasePassengerId = '';
+        }
+
+        if (directPassengerId && firebasePassengerId && directPassengerId !== firebasePassengerId) {
+            if (canUseDivergentQaPaymentIdentity()) {
+                try {
+                    const [testModeRaw, qaSocketIdTokenRaw, persistedUidRaw] = await Promise.all([
+                        AsyncStorage.getItem(TEST_MODE_STORAGE_KEY),
+                        AsyncStorage.getItem(QA_SOCKET_ID_TOKEN_STORAGE_KEY),
+                        AsyncStorage.getItem(AUTH_UID_STORAGE_KEY),
+                    ]);
+                    const qaModeEnabled = String(testModeRaw || '').trim().toLowerCase() === 'true';
+                    const qaTokenSubject = getJwtSubject(qaSocketIdTokenRaw);
+                    const persistedUid = String(persistedUidRaw || '').trim();
+                    const qaIdentityMatchesPassenger =
+                        qaModeEnabled &&
+                        qaTokenSubject === directPassengerId &&
+                        (!persistedUid || persistedUid === directPassengerId);
+
+                    if (qaIdentityMatchesPassenger) {
+                        Logger.warn(
+                            '⚠️ [WooviPaymentModal] Firebase currentUser diverge, mas token QA assinado corresponde ao passageiro; usando identidade QA.',
+                        );
+                        return directPassengerId;
+                    }
+                } catch (qaIdentityError) {
+                    Logger.warn('⚠️ [WooviPaymentModal] Falha ao validar identidade QA:', qaIdentityError);
+                }
+            }
+
+            const mismatchError = new Error('Sua sessão mudou. Entre novamente para gerar o Pix desta corrida.');
+            mismatchError.code = 'PAYMENT_PASSENGER_SCOPE_MISMATCH';
+            mismatchError.response = {
+                status: 403,
+                data: {
+                    success: false,
+                    code: 'PAYMENT_PASSENGER_SCOPE_MISMATCH',
+                    error: 'Passageiro não autorizado para esta operação',
+                    message: 'Sua sessão mudou. Entre novamente para gerar o Pix desta corrida.',
+                    passengerId: directPassengerId,
+                    authenticatedPassengerId: firebasePassengerId,
+                },
+            };
+            throw mismatchError;
+        }
+
+        return directPassengerId || firebasePassengerId;
     };
 
     const confirmPaymentOnce = (confirmationPayload = null, source = 'unknown') => {
@@ -164,6 +505,7 @@ export default function WooviPaymentModal({
 
         paymentConfirmedRef.current = true;
         paymentStatusRef.current = 'confirmed';
+        timeoutHandledRef.current = true;
 
         cleanup();
         setPaymentStatus('confirmed');
@@ -176,9 +518,27 @@ export default function WooviPaymentModal({
             amountInCents: normalizedPayload.amountInCents,
             grossAmount: normalizedPayload.grossAmount,
             grossAmountInCents: normalizedPayload.grossAmountInCents,
+            tollFee: normalizedPayload.tollFee ?? paymentData?.tollFee ?? 0,
+            tollFeeCents: normalizedPayload.tollFeeCents ?? paymentData?.tollFeeCents ?? 0,
             discountBenefit: normalizedPayload.discountBenefit || null,
-            paymentSessionId: normalizedPayload.paymentSessionId || null,
-            paymentContextKey: normalizedPayload.paymentContextKey || null,
+            paymentSessionId:
+                normalizedPayload.paymentSessionId ||
+                paymentData?.paymentSessionId ||
+                null,
+            paymentContextKey:
+                normalizedPayload.paymentContextKey ||
+                paymentData?.paymentContextKey ||
+                null,
+            quoteSessionId:
+                normalizedPayload.quoteSessionId ||
+                paymentData?.quoteSessionId ||
+                quoteSessionId ||
+                null,
+            quoteLockId:
+                normalizedPayload.quoteLockId ||
+                paymentData?.quoteLockId ||
+                normalizedQuoteLockId ||
+                null,
             bypassed: normalizedPayload.bypassed === true,
             mockPayment:
                 normalizedPayload.mockPayment === true ||
@@ -203,9 +563,81 @@ export default function WooviPaymentModal({
         return true;
     };
 
+    const buildConfirmationPayload = (sourcePaymentData = null, statusResult = null) => {
+        const resolvedPaymentData = sourcePaymentData || paymentData || {};
+        return {
+            ...resolvedPaymentData,
+            amount: resolvedPaymentData.amount,
+            amountInCents: resolvedPaymentData.amountInCents,
+            grossAmount: resolvedPaymentData.grossAmount,
+            grossAmountInCents: resolvedPaymentData.grossAmountInCents,
+            discountBenefit: resolvedPaymentData.discountBenefit || null,
+            providerStatus: statusResult?.status || null,
+            providerSource: statusResult?.source || null,
+        };
+    };
+
+    const resolvePaymentStatus = async (sourcePaymentData = null, source = 'chargeId') => {
+        const resolvedPaymentData = sourcePaymentData || paymentData;
+        const reference = resolvedPaymentData?.chargeId;
+        if (!reference) {
+            return null;
+        }
+
+        Logger.log(`🔍 [Woovi] Verificando status do pagamento via ${source}:`, reference);
+        const statusResult = await WooviService.getPaymentStatus(reference);
+        const normalizedStatus = String(statusResult?.status || '').trim().toLowerCase();
+
+        Logger.log('📊 [Woovi] Status recebido:', {
+            source,
+            reference,
+            statusResult,
+        });
+
+        return {
+            source,
+            reference,
+            statusResult,
+            normalizedStatus,
+            isPaymentCompleted:
+                statusResult?.success === true &&
+                CONFIRMED_PAYMENT_STATUSES.has(normalizedStatus),
+        };
+    };
+
+    const confirmIfPaymentAlreadyCompleted = async (
+        sourcePaymentData = null,
+        source = 'status_check',
+    ) => {
+        const statusEntry = await resolvePaymentStatus(sourcePaymentData, source);
+        if (!statusEntry?.isPaymentCompleted) {
+            return false;
+        }
+
+        Logger.log('✅ [WooviPaymentModal] Pagamento confirmado por leitura autoritativa', {
+            status: statusEntry.normalizedStatus,
+            source: statusEntry.source,
+            chargeId: sourcePaymentData?.chargeId || paymentData?.chargeId,
+            rideId: sourcePaymentData?.rideId || paymentData?.rideId,
+        });
+
+        return confirmPaymentOnce(
+            buildConfirmationPayload(sourcePaymentData, statusEntry.statusResult),
+            source,
+        );
+    };
+
     // Reabre a sessão canônica antes de considerar uma nova cobrança.
     useEffect(() => {
         if (visible) {
+            if (terminalClosePendingRef.current) {
+                Logger.log('ℹ️ [WooviPaymentModal] Modal em expiração terminal; aguardando fechamento do pai');
+                cleanup();
+                setLoading(false);
+                return undefined;
+            }
+
+            beginPaymentLifecycle();
             Logger.log('🔄 [WooviPaymentModal] Modal aberto, recuperando sessão de pagamento...');
             // ✅ Limpar estado anterior completamente
             cleanup();
@@ -247,6 +679,11 @@ export default function WooviPaymentModal({
                             ? Math.round(Number(prefilledPaymentData.grossAmountInCents))
                             : Math.round(Number(prefilledPaymentData.grossAmount || amountValue || 0) * 100),
                     discountBenefit: prefilledPaymentData.discountBenefit || null,
+                    passengerId: prefilledPaymentData.passengerId || passengerId || null,
+                    paymentSessionId: prefilledPaymentData.paymentSessionId || null,
+                    paymentContextKey: prefilledPaymentData.paymentContextKey || null,
+                    quoteSessionId: prefilledPaymentData.quoteSessionId || quoteSessionId || null,
+                    quoteLockId: prefilledPaymentData.quoteLockId || normalizedQuoteLockId || null,
                     expiresAt:
                         prefilledPaymentData.expiresAt ||
                         new Date(Date.now() + PAYMENT_TIMEOUT * 1000)
@@ -272,6 +709,9 @@ export default function WooviPaymentModal({
         } else {
             // Limpar tudo quando modal fecha
             Logger.log('🔄 [WooviPaymentModal] Modal fechado, limpando recursos...');
+            invalidatePaymentLifecycle();
+            terminalClosePendingRef.current = false;
+            timeoutExpiredNotifiedRef.current = false;
             cleanup();
             paymentConfirmedRef.current = false;
             qaAutoConfirmStartedRef.current = false;
@@ -302,10 +742,11 @@ export default function WooviPaymentModal({
         grossEstimatedFare,
         tripData?.estimatedFare,
         tripData?.grossEstimatedFare,
-        tripData?.rideId,
-        quoteSessionId,
-        visible
-    ]);
+	        tripData?.rideId,
+	        normalizedQuoteLockId,
+	        quoteSessionId,
+	        visible
+	    ]);
 
     // Countdown timer
     useEffect(() => {
@@ -322,6 +763,7 @@ export default function WooviPaymentModal({
         // ✅ Só iniciar timer se modal está visível, tem paymentData, countdown > 0 e status é pending
         if (visible && paymentData && countdown > 0 && paymentStatus === 'pending') {
             Logger.log('⏱️ [Timer] Iniciando timer de pagamento, countdown:', countdown);
+            const lifecycleToken = paymentLifecycleRef.current;
             
             // Limpar intervalo anterior se existir
             if (countdownIntervalRef.current) {
@@ -343,7 +785,7 @@ export default function WooviPaymentModal({
                     
                     if (prev <= 1) {
                         Logger.log('⏰ [Timer] Countdown chegou a zero, chamando handleTimeout');
-                        handleTimeout();
+                        handleTimeout(lifecycleToken);
                         return 0;
                     }
                     return prev - 1;
@@ -370,8 +812,9 @@ export default function WooviPaymentModal({
     // Verificação automática de pagamento a cada 3 segundos
     useEffect(() => {
         if (visible && paymentData && paymentStatus === 'pending') {
+            checkPaymentStatus(paymentData);
             paymentCheckIntervalRef.current = setInterval(() => {
-                checkPaymentStatus();
+                checkPaymentStatus(paymentData);
             }, 3000); // Verificar a cada 3 segundos
         } else {
             if (paymentCheckIntervalRef.current) {
@@ -461,7 +904,13 @@ export default function WooviPaymentModal({
                     chargeId: paymentData.chargeId,
                     rideId: paymentData.rideId,
                     amount: paymentData.amount,
-                    amountInCents: paymentData.amountInCents
+                    amountInCents: paymentData.amountInCents,
+                    grossAmount: paymentData.grossAmount,
+                    grossAmountInCents: paymentData.grossAmountInCents,
+                    tollFee: paymentData.tollFee || 0,
+                    tollFeeCents: paymentData.tollFeeCents || 0,
+                    quoteSessionId: paymentData.quoteSessionId || quoteSessionId || null,
+                    quoteLockId: paymentData.quoteLockId || normalizedQuoteLockId || null
                 },
                 'websocket'
             );
@@ -515,20 +964,40 @@ export default function WooviPaymentModal({
 
     // Recupera a sessão persistida antes de criar uma cobrança no backend.
     const generatePayment = async () => {
+        if (terminalClosePendingRef.current || !visibleRef.current) {
+            Logger.log('ℹ️ [WooviPaymentModal] Geração de PIX ignorada por ciclo terminal/fechado');
+            return;
+        }
+
         let paymentRequest = null;
         try {
             setLoading(true);
             setPaymentGenerationError(null);
+            setPaymentGenerationDiagnostics(null);
             Logger.log('💳 Preparando sessão de pagamento PIX...');
 
-            const resolvedPassengerId = resolveAuthenticatedPassengerId();
+            const resolvedPassengerId = await resolveAuthenticatedPassengerId();
             if (!resolvedPassengerId) {
                 throw new Error('Sessão de pagamento ainda não está pronta. Tente novamente em alguns segundos.');
             }
+            if (!normalizedQuoteLockId) {
+                throw new Error('Cotação expirada ou ausente. Recalcule a tarifa antes de pagar.');
+            }
+            const qaPaymentRuntimeProfile = await assertQaSandboxPaymentRuntime({
+                resolvedPassengerId,
+                passengerPhone,
+            });
             
-            // Calcular valor em centavos - usar o mesmo valor do card selecionado
-            const amount = estimates?.estimateFare || tripData?.estimatedFare || 25.00;
+            // Calcular valor em centavos - usar apenas a cotação travada enviada pelo fluxo.
+            const amount = Number(estimates?.estimateFare ?? tripData?.estimatedFare);
+            if (!Number.isFinite(amount) || amount <= 0) {
+                throw new Error('Valor da cotação indisponível. Recalcule a tarifa antes de pagar.');
+            }
             const amountInCents = Math.round(amount * 100);
+            const tollFee = Number(estimates?.tollFee ?? tripData?.tollFee ?? 0);
+            const tollFeeCents = Number.isFinite(tollFee) && tollFee > 0
+                ? Math.round(tollFee * 100)
+                : 0;
             const grossAmount = Number(
                 grossEstimatedFare ||
                 discountBenefit?.grossFare ||
@@ -581,19 +1050,14 @@ export default function WooviPaymentModal({
                     return;
                 }
 
-                if (!TERMINAL_PAYMENT_STATUSES.has(restoredStatus)) {
-                    const expiresAtMs = Date.parse(restoredPaymentData.expiresAt || '');
-                    const remainingSeconds = Number.isFinite(expiresAtMs)
-                        ? Math.ceil((expiresAtMs - Date.now()) / 1000)
-                        : PAYMENT_TIMEOUT;
-                    const resumedPaymentData = remainingSeconds > 0
-                        ? restoredPaymentData
-                        : {
-                            ...restoredPaymentData,
-                            expiresAt: new Date(Date.now() + PAYMENT_TIMEOUT * 1000).toISOString(),
-                        };
-                    setPaymentData(resumedPaymentData);
-                    setCountdown(Math.max(1, remainingSeconds > 0 ? remainingSeconds : PAYMENT_TIMEOUT));
+                const expiresAtMs = Date.parse(restoredPaymentData.expiresAt || '');
+                const remainingSeconds = Number.isFinite(expiresAtMs)
+                    ? Math.ceil((expiresAtMs - Date.now()) / 1000)
+                    : PAYMENT_TIMEOUT;
+
+                if (!TERMINAL_PAYMENT_STATUSES.has(restoredStatus) && remainingSeconds > 0) {
+                    setPaymentData(restoredPaymentData);
+                    setCountdown(remainingSeconds);
                     setPaymentStatus('pending');
                     setLoading(false);
                     return;
@@ -604,6 +1068,9 @@ export default function WooviPaymentModal({
                     paymentSessionId: paymentSession.paymentSessionId,
                     chargeId: restoredPaymentData.chargeId,
                 });
+                if (!TERMINAL_PAYMENT_STATUSES.has(restoredStatus) && remainingSeconds <= 0) {
+                    Logger.log('ℹ️ [WooviPaymentModal] Cobrança local expirada descartada antes de gerar novo PIX:', restoredPaymentData.chargeId);
+                }
                 paymentSession = await getOrCreateRidePaymentSession({
                     passengerId: resolvedPassengerId,
                     contextKey: paymentContextKey,
@@ -613,7 +1080,7 @@ export default function WooviPaymentModal({
             const tempRideId = `temp_ride_session_${paymentSession.paymentSessionId}`;
             Logger.log('🆔 [WooviPaymentModal] Sessão canônica preparada:', paymentSession.paymentSessionId);
 
-            const bypassEnabled = await shouldBypassPayment();
+            const bypassEnabled = await shouldBypassPayment(qaPaymentRuntimeProfile);
             if (bypassEnabled) {
                 const timestamp = Date.now();
                 const bypassPaymentInfo = {
@@ -626,12 +1093,15 @@ export default function WooviPaymentModal({
                     amountInCents: amountInCents,
                     grossAmount: grossAmountInCents / 100,
                     grossAmountInCents,
+                    tollFee: tollFeeCents / 100,
+                    tollFeeCents,
                     discountBenefit,
                     expiresAt: new Date(Date.now() + (PAYMENT_TIMEOUT * 1000)),
                     passengerId: resolvedPassengerId,
                     paymentSessionId: paymentSession.paymentSessionId,
                     paymentContextKey,
                     quoteSessionId,
+                    quoteLockId: normalizedQuoteLockId,
                     bypassed: true,
                     mockPayment: true
                 };
@@ -662,17 +1132,23 @@ export default function WooviPaymentModal({
                 amount: amountInCents,
                 grossAmountInCents,
                 grossAmount: grossAmountInCents / 100,
+                tollFee: tollFeeCents / 100,
+                tollFeeCents,
                 discountBenefit,
                 rideId: tempRideId,
                 paymentSessionId: paymentSession.paymentSessionId,
                 paymentContextKey,
                 quoteSessionId,
+                quoteLockId: normalizedQuoteLockId,
                 rideDetails: {
                     origin: tripData?.pickup?.add || 'Origem',
                     destination: tripData?.drop?.add || 'Destino',
                     pickupLocation: tripData?.pickup || null,
                     destinationLocation: tripData?.drop || null,
                     carType: tripData?.carType || null,
+                    quoteLockId: normalizedQuoteLockId,
+                    tollFee: tollFeeCents / 100,
+                    tollFeeCents,
                     preferences: tripData?.preferences || {}
                 },
                 pickupLocation: tripData?.pickup || null,
@@ -684,11 +1160,53 @@ export default function WooviPaymentModal({
                 passengerEmail: passengerEmail || 'passenger@leaf.com'
             };
             
-            // Chamar API do backend para criar cobrança PIX
-            const result = await WooviService.processAdvancePayment(paymentRequest);
-            
+            // Chamar API do backend para criar cobrança PIX. O payload é idempotente
+            // por paymentSessionId/rideId; repetir cobre falhas transitórias de rede.
+            let result = null;
+            let lastPaymentError = null;
+            for (let attempt = 1; attempt <= PAYMENT_CREATE_MAX_ATTEMPTS; attempt += 1) {
+                try {
+                    result = await WooviService.processAdvancePayment(paymentRequest);
+                    lastPaymentError = null;
+                    break;
+                } catch (attemptError) {
+                    lastPaymentError = attemptError;
+                    const canRetry =
+                        attempt < PAYMENT_CREATE_MAX_ATTEMPTS &&
+                        isTransientPaymentCreationError(attemptError);
+
+                    if (!canRetry) {
+                        throw attemptError;
+                    }
+
+                    const retryDelay =
+                        PAYMENT_CREATE_RETRY_DELAYS_MS[attempt - 1] ||
+                        PAYMENT_CREATE_RETRY_DELAYS_MS[PAYMENT_CREATE_RETRY_DELAYS_MS.length - 1];
+                    Logger.warn('⚠️ [WooviPaymentModal] Falha transitória ao criar PIX; tentando novamente', {
+                        attempt,
+                        nextAttempt: attempt + 1,
+                        retryDelay,
+                        code: getPaymentErrorCode(attemptError) || null,
+                        status: getPaymentErrorStatus(attemptError) || null,
+                    });
+                    await sleep(retryDelay);
+                }
+            }
+
+            if (!result && lastPaymentError) {
+                throw lastPaymentError;
+            }
+
+            if (terminalClosePendingRef.current || !visibleRef.current) {
+                Logger.log('ℹ️ [WooviPaymentModal] Resultado de PIX descartado por ciclo terminal/fechado');
+                return;
+            }
+
             if (!result.success) {
-                throw new Error(result.error || 'Falha ao gerar pagamento');
+                const resultError = new Error(result.error || 'Falha ao gerar pagamento');
+                resultError.code = result.code || null;
+                resultError.response = { status: result.status || 400, data: result };
+                throw resultError;
             }
             
             Logger.log('✅ Pagamento gerado com sucesso:', result.chargeId);
@@ -705,12 +1223,15 @@ export default function WooviPaymentModal({
                 amountInCents: amountInCents,
                 grossAmount: grossAmountInCents / 100,
                 grossAmountInCents,
+                tollFee: tollFeeCents / 100,
+                tollFeeCents,
                 discountBenefit: result.discountBenefit || discountBenefit || null,
                 expiresAt: new Date(Date.now() + (PAYMENT_TIMEOUT * 1000)).toISOString(),
                 passengerId: resolvedPassengerId,
                 paymentSessionId: paymentSession.paymentSessionId,
                 paymentContextKey: result.paymentContextKey || paymentContextKey,
                 quoteSessionId: result.quoteSessionId || quoteSessionId || null,
+                quoteLockId: result.quoteLockId || normalizedQuoteLockId || null,
             };
 
             await saveRidePaymentSessionData({
@@ -725,17 +1246,20 @@ export default function WooviPaymentModal({
             setPaymentStatus('pending');
 
             // Agendar timeout automático
+            const lifecycleToken = paymentLifecycleRef.current;
             timeoutRef.current = setTimeout(() => {
-                handleTimeout();
+                handleTimeout(lifecycleToken);
             }, PAYMENT_TIMEOUT * 1000);
             
         } catch (error) {
             const serverResponse = error?.response?.data;
+            const diagnostics = buildPaymentErrorDiagnostics(error);
             Logger.error('❌ Erro ao gerar pagamento:', serverResponse || error);
             if (paymentRequest) {
                 Logger.log('📦 Payload enviado para /api/payment/advance:', paymentRequest);
             }
             setPaymentData(null);
+            setPaymentGenerationDiagnostics(diagnostics);
             setPaymentGenerationError(
                 error?.message || 'Não foi possível gerar o pagamento PIX no momento.'
             );
@@ -768,41 +1292,17 @@ export default function WooviPaymentModal({
     };
 
     // Função para verificar status do pagamento
-    const checkPaymentStatus = async () => {
-        if ((!paymentData?.chargeId && !paymentData?.rideId) || isCheckingPayment || paymentStatus !== 'pending') {
+    const checkPaymentStatus = async (sourcePaymentData = paymentData) => {
+        const activePaymentData = sourcePaymentData || paymentData;
+        if ((!activePaymentData?.chargeId && !activePaymentData?.rideId) || isCheckingPaymentRef.current || paymentStatusRef.current !== 'pending') {
             return;
         }
         
         try {
+            isCheckingPaymentRef.current = true;
             setIsCheckingPayment(true);
             
-            const resolveStatus = async (reference, source) => {
-                if (!reference) {
-                    return null;
-                }
-
-                Logger.log(`🔍 [Woovi] Verificando status do pagamento via ${source}:`, reference);
-                const statusResult = await WooviService.getPaymentStatus(reference);
-                const normalizedStatus = String(statusResult?.status || '').trim().toLowerCase();
-
-                Logger.log('📊 [Woovi] Status recebido:', {
-                    source,
-                    reference,
-                    statusResult,
-                });
-
-                return {
-                    source,
-                    reference,
-                    statusResult,
-                    normalizedStatus,
-                    isPaymentCompleted:
-                        statusResult?.success === true &&
-                        CONFIRMED_PAYMENT_STATUSES.has(normalizedStatus),
-                };
-            };
-
-            const chargeStatus = await resolveStatus(paymentData.chargeId, 'chargeId');
+            const chargeStatus = await resolvePaymentStatus(activePaymentData, 'chargeId');
             const confirmedStatus = [chargeStatus].find(
                 (entry) => entry?.isPaymentCompleted,
             );
@@ -812,20 +1312,12 @@ export default function WooviPaymentModal({
                 Logger.log('✅ [WooviPaymentModal] Pagamento confirmado via checkPaymentStatus!', {
                     status: confirmedStatus.normalizedStatus,
                     source: confirmedStatus.source,
-                    chargeId: paymentData.chargeId,
-                    rideId: paymentData.rideId,
+                    chargeId: activePaymentData.chargeId,
+                    rideId: activePaymentData.rideId,
                 });
 
                 confirmPaymentOnce(
-                    {
-                        chargeId: paymentData.chargeId,
-                        rideId: paymentData.rideId,
-                        amount: paymentData.amount,
-                        amountInCents: paymentData.amountInCents,
-                        grossAmount: paymentData.grossAmount,
-                        grossAmountInCents: paymentData.grossAmountInCents,
-                        discountBenefit: paymentData.discountBenefit || null
-                    },
+                    buildConfirmationPayload(activePaymentData, confirmedStatus.statusResult),
                     'polling'
                 );
             } else if (qaAutoConfirmEnabled) {
@@ -834,52 +1326,112 @@ export default function WooviPaymentModal({
             
         } catch (error) {
             const serverResponse = error?.response?.data;
-            Logger.error('❌ Erro ao verificar pagamento:', serverResponse || error);
-            Logger.log('🔍 [Woovi] Referências usadas:', {
-                chargeId: paymentData?.chargeId,
-                rideId: paymentData?.rideId,
+            Logger.debug('ℹ️ [WooviPaymentModal] Verificação silenciosa indisponível:', {
+                error: serverResponse || error?.message || error,
+                chargeId: activePaymentData?.chargeId,
+                rideId: activePaymentData?.rideId,
+                lifecycleActive: visibleRef.current,
+                paymentStatus: paymentStatusRef.current,
             });
             // Não mostrar erro para o usuário (verificação silenciosa)
         } finally {
+            isCheckingPaymentRef.current = false;
             setIsCheckingPayment(false);
         }
     };
 
     // Função para lidar com timeout (5 minutos)
-    const handleTimeout = async () => {
+    const handleTimeout = async (lifecycleToken = paymentLifecycleRef.current) => {
+        if (
+            !isPaymentLifecycleCurrent(lifecycleToken) ||
+            timeoutHandledRef.current ||
+            paymentStatusRef.current !== 'pending'
+        ) {
+            Logger.log('ℹ️ [WooviPaymentModal] Timeout ignorado por ciclo inativo ou já tratado');
+            return;
+        }
+
+        timeoutHandledRef.current = true;
+        terminalClosePendingRef.current = true;
         Logger.log('⏰ Tempo de pagamento expirado');
+        const currentPaymentData = paymentDataRef.current || paymentData;
+        const timedOutPaymentData = currentPaymentData ? { ...currentPaymentData } : null;
+        if (timedOutPaymentData?.chargeId) {
+            try {
+                const confirmed = await confirmIfPaymentAlreadyCompleted(
+                    timedOutPaymentData,
+                    'timeout_final_status',
+                );
+                if (confirmed) {
+                    return;
+                }
+            } catch (statusError) {
+                Logger.warn(
+                    '⚠️ [WooviPaymentModal] Status final indisponível no timeout:',
+                    statusError?.message || statusError,
+                );
+            }
+        }
+
+        if (!isPaymentLifecycleCurrent(lifecycleToken) || paymentStatusRef.current !== 'pending') {
+            Logger.log('ℹ️ [WooviPaymentModal] Timeout abandonado após checagem final de status');
+            return;
+        }
+
+        paymentStatusRef.current = 'expired';
         setPaymentStatus('expired');
         setCountdown(0);
         
-        if (paymentData?.chargeId) {
+        if (timedOutPaymentData?.chargeId) {
             if (preserveChargeOnClose) {
-                Logger.log('ℹ️ [WooviPaymentModal] Preservando cobrança ao expirar:', paymentData.chargeId);
+                Logger.log('ℹ️ [WooviPaymentModal] Preservando cobrança ao expirar:', timedOutPaymentData.chargeId);
             } else {
-                Logger.log('ℹ️ [WooviPaymentModal] Pagamento expirou; cobrança será abandonada sem chamada administrativa.', paymentData.chargeId);
+                Logger.log('ℹ️ [WooviPaymentModal] Pagamento expirou; cobrança será abandonada sem chamada administrativa.', timedOutPaymentData.chargeId);
             }
         }
         
         // ✅ Limpar estado completamente antes de fechar
         cleanup();
-        setPaymentData(null);
         setLoading(false);
+
+        if (timedOutPaymentData?.chargeId) {
+            try {
+                await clearRidePaymentSession({
+                    passengerId: timedOutPaymentData.passengerId,
+                    paymentSessionId: timedOutPaymentData.paymentSessionId,
+                    contextKey: timedOutPaymentData.paymentContextKey,
+                    chargeId: timedOutPaymentData.chargeId,
+                });
+            } catch (clearError) {
+                Logger.warn(
+                    '⚠️ [WooviPaymentModal] Falha ao limpar sessão PIX expirada:',
+                    clearError?.message || clearError,
+                );
+            }
+        }
+
+        notifyPaymentExpired(timedOutPaymentData);
         
         Alert.alert(
             '⏰ Tempo Esgotado',
-            'O tempo para realizar o pagamento expirou. Gere um novo PIX para continuar.',
+            'O tempo para realizar o pagamento expirou. Faça uma nova cotação para continuar.',
             [{ 
                 text: 'OK', 
                 onPress: () => {
-                    // ✅ Limpar estado ao fechar após expiração
-                    setPaymentStatus('pending');
-                    onClose();
+                    if (!isPaymentLifecycleCurrent(lifecycleToken)) {
+                        return;
+                    }
+                    terminalClosePendingRef.current = true;
+                    paymentStatusRef.current = 'expired';
+                    setPaymentData(null);
+                    setLoading(false);
                 }
             }]
         );
     };
 
     // Função para cancelar manualmente
-    const handleCancel = () => {
+    const handleCancel = async () => {
         Logger.log('🚫 [WooviPaymentModal] handleCancel chamado, status:', paymentStatus);
         
         if (paymentStatus === 'confirmed') {
@@ -890,11 +1442,31 @@ export default function WooviPaymentModal({
             );
             return;
         }
+
+        if (paymentStatus === 'pending' && paymentData?.chargeId) {
+            try {
+                const confirmed = await confirmIfPaymentAlreadyCompleted(
+                    { ...paymentData },
+                    'manual_close_status',
+                );
+                if (confirmed) {
+                    return;
+                }
+            } catch (statusError) {
+                Logger.warn(
+                    '⚠️ [WooviPaymentModal] Status indisponível antes de fechar:',
+                    statusError?.message || statusError,
+                );
+            }
+        }
         
         if (countdown > 0 && paymentStatus === 'pending') {
             if (preserveChargeOnClose) {
                 Logger.log('🚪 [WooviPaymentModal] Fechando modal e preservando cobrança ativa');
-                onClose();
+                closeWithoutConfirmation({
+                    reason: 'dismissed_preserving_charge',
+                    chargeId: paymentData?.chargeId || null
+                });
                 return;
             }
             Alert.alert(
@@ -906,28 +1478,57 @@ export default function WooviPaymentModal({
                         text: 'Sim, Cancelar', 
                         style: 'destructive',
                         onPress: async () => {
-                            Logger.log('🚫 [WooviPaymentModal] Usuário confirmou cancelamento');
-                            setPaymentStatus('cancelled');
-                            cleanup();
+	                            Logger.log('🚫 [WooviPaymentModal] Usuário confirmou cancelamento');
+	                            timeoutHandledRef.current = true;
+	                            paymentStatusRef.current = 'cancelled';
+	                            setPaymentStatus('cancelled');
+	                            cleanup();
                             
                             Logger.log('ℹ️ [WooviPaymentModal] Cancelamento local; cobrança ativa não chama rota administrativa.', {
                                 chargeId: paymentData?.chargeId || null
                             });
                             
                             Logger.log('🚪 [WooviPaymentModal] Fechando modal após cancelamento');
-                            onClose();
+                            closeWithoutConfirmation({
+                                reason: 'cancelled',
+                                chargeId: paymentData?.chargeId || null
+                            });
                         }
                     }
                 ]
             );
         } else {
             Logger.log('🚪 [WooviPaymentModal] Fechando modal sem confirmação (countdown:', countdown, ', status:', paymentStatus + ')');
-            onClose();
+            closeWithoutConfirmation({
+                reason: paymentGenerationError ? 'generation_failed' : 'dismissed',
+                error: paymentGenerationError || null,
+                diagnostics: paymentGenerationDiagnostics || null,
+                chargeId: paymentData?.chargeId || null
+            });
         }
     };
 
     // Renderizar conteúdo do modal
     const renderContent = () => {
+        const paymentErrorDiagnosticsLabel = serializePaymentErrorDiagnostics(paymentGenerationDiagnostics);
+
+        if (terminalClosePendingRef.current && paymentStatus === 'expired') {
+            return (
+                <View
+                    style={styles.loadingContainer}
+                    testID="payment-modal-expired-terminal"
+                    accessibilityLabel="Pagamento PIX expirado"
+                >
+                    <Text style={[styles.loadingText, { color: color.text.primary }]}>
+                        Tempo esgotado
+                    </Text>
+                    <Text style={[styles.loadingSubtext, { color: color.text.secondary }]}>
+                        Faça uma nova cotação para continuar.
+                    </Text>
+                </View>
+            );
+        }
+
         if (loading) {
             return (
                 <View
@@ -959,6 +1560,15 @@ export default function WooviPaymentModal({
                         <Text style={[styles.errorSubtitle, { color: color.text.secondary }]}>
                             {paymentGenerationError}
                         </Text>
+                        {paymentErrorDiagnosticsLabel ? (
+                            <Text
+                                style={styles.qaHiddenText}
+                                testID="payment-modal-error-diagnostics"
+                                accessibilityLabel={paymentErrorDiagnosticsLabel}
+                            >
+                                {paymentErrorDiagnosticsLabel}
+                            </Text>
+                        ) : null}
 
                         <View style={styles.errorActions}>
                             <TouchableOpacity
@@ -972,7 +1582,12 @@ export default function WooviPaymentModal({
                             </TouchableOpacity>
                             <TouchableOpacity
                                 style={styles.dismissButton}
-                                onPress={onClose}
+                                onPress={() => closeWithoutConfirmation({
+                                    reason: 'generation_failed',
+                                    error: paymentGenerationError,
+                                    diagnostics: paymentGenerationDiagnostics || null,
+                                    chargeId: null
+                                })}
                                 activeOpacity={0.8}
                             >
                                 <Text style={[styles.dismissButtonText, { color: color.text.secondary }]}>
@@ -1007,7 +1622,10 @@ export default function WooviPaymentModal({
                 <View style={styles.paymentHeader}>
                     <View>
                         <Text
-                            style={styles.paymentTitle}
+                            style={[
+                                styles.paymentTitle,
+                                robotaxiLifecycleCard && styles.robotaxiPaymentTitle,
+                            ]}
                             testID="payment-modal-title"
                             accessibilityLabel="Pague com PIX"
                         >
@@ -1036,7 +1654,10 @@ export default function WooviPaymentModal({
                     </View>
                     <View style={styles.paymentRightColumn}>
                         <Text
-                            style={styles.paymentAmount}
+                            style={[
+                                styles.paymentAmount,
+                                robotaxiLifecycleCard && styles.robotaxiPaymentAmount,
+                            ]}
                             testID="payment-modal-amount"
                             accessibilityLabel={`Valor PIX ${formatCurrencyBRL(paymentData.amount)}`}
                         >
@@ -1109,40 +1730,74 @@ export default function WooviPaymentModal({
                     Escaneie o QR Code ou copie o código PIX abaixo.
                 </Text>
 
-                <TouchableOpacity
+                <View
                     style={styles.pixCopyField}
-                    onPress={copyPixCode}
-                    activeOpacity={0.86}
-                    testID="payment-modal-copy-pix-button"
-                    accessibilityLabel="payment-modal-copy-pix-button"
+                    testID="payment-modal-pix-code"
+                    accessibilityLabel="Código PIX pronto para copiar"
                 >
                     <Text style={styles.pixCodeText} numberOfLines={1}>
                         {getPixSnippet()}
                     </Text>
-                    <Text style={styles.pixCopyText}>
-                        Copiar
-                    </Text>
-                </TouchableOpacity>
+                </View>
 
-                <View style={styles.actionButtons}>
+                <View style={[
+                    styles.actionButtons,
+                    robotaxiLifecycleCard && styles.robotaxiActionButtons,
+                ]}>
                     <TouchableOpacity
-                        style={styles.primaryAction}
+                        style={[
+                            styles.primaryAction,
+                            robotaxiLifecycleCard && styles.robotaxiAction,
+                        ]}
                         onPress={copyPixCode}
                         activeOpacity={0.88}
                         testID="payment-modal-copy-code-button"
                         accessibilityLabel="Copiar código PIX"
                     >
-                        <Text style={styles.primaryActionText}>Copiar código</Text>
+                        <Text style={[
+                            styles.primaryActionText,
+                            robotaxiLifecycleCard && styles.robotaxiActionText,
+                        ]}>Copiar código</Text>
                     </TouchableOpacity>
-                    <TouchableOpacity
-                        style={styles.secondaryAction}
-                        onPress={openPaymentLink}
-                        activeOpacity={0.88}
-                        testID="payment-modal-open-bank-button"
-                        accessibilityLabel="Abrir banco"
-                    >
-                        <Text style={styles.secondaryActionText}>Abrir banco</Text>
-                    </TouchableOpacity>
+                    {robotaxiLifecycleCard ? (
+                        <>
+                            <TouchableOpacity
+                                style={[styles.secondaryAction, styles.robotaxiAction]}
+                                onPress={() => setBankActionVisible((visible) => !visible)}
+                                activeOpacity={0.88}
+                                testID="payment-modal-more-options-button"
+                                accessibilityLabel={bankActionVisible ? 'Ocultar opções' : 'Mais opções'}
+                                accessibilityState={{ expanded: bankActionVisible }}
+                            >
+                                <Text style={[styles.secondaryActionText, styles.robotaxiActionText]}>
+                                    {bankActionVisible ? 'Ocultar opções' : 'Mais opções'}
+                                </Text>
+                            </TouchableOpacity>
+                            {bankActionVisible ? (
+                                <TouchableOpacity
+                                    style={[styles.secondaryAction, styles.robotaxiAction]}
+                                    onPress={openPaymentLink}
+                                    activeOpacity={0.88}
+                                    testID="payment-modal-open-bank-button"
+                                    accessibilityLabel="Abrir banco"
+                                >
+                                    <Text style={[styles.secondaryActionText, styles.robotaxiActionText]}>
+                                        Abrir banco
+                                    </Text>
+                                </TouchableOpacity>
+                            ) : null}
+                        </>
+                    ) : (
+                        <TouchableOpacity
+                            style={styles.secondaryAction}
+                            onPress={openPaymentLink}
+                            activeOpacity={0.88}
+                            testID="payment-modal-open-bank-button"
+                            accessibilityLabel="Abrir banco"
+                        >
+                            <Text style={styles.secondaryActionText}>Abrir banco</Text>
+                        </TouchableOpacity>
+                    )}
                 </View>
 
                 <View style={styles.countdownContainer}>
@@ -1176,16 +1831,19 @@ export default function WooviPaymentModal({
             onRequestClose={handleCancel}
         >
             <View style={styles.modalOverlay}>
-                <View style={styles.modalContent}>
-                    <View style={styles.handle} />
+                <View style={[
+                    styles.modalContent,
+                    robotaxiLifecycleCard && styles.robotaxiModalContent,
+                ]}>
+                    {robotaxiLifecycleCard ? null : <View style={styles.handle} />}
                     <View style={styles.modalHeader}>
-                        {qaAutoConfirmEnabled ? (
+                        {__DEV__ && qaAutoConfirmEnabled ? (
                             <Text
                                 style={[styles.qaDebugBadge, { color: color.feedback.success }]}
                                 testID="payment-modal-qa-debug"
-                                accessibilityLabel="payment-modal-qa-debug"
+                                accessibilityLabel={qaPaymentProgressLabel}
                             >
-                                QA {qaDebugStatus}
+                                {qaPaymentProgressLabel}
                             </Text>
                         ) : null}
                         <TouchableOpacity
@@ -1231,6 +1889,15 @@ const styles = StyleSheet.create({
         shadowRadius: 42,
         elevation: 8,
     },
+    robotaxiModalContent: {
+        width: width - 48,
+        maxWidth: width - 48,
+        maxHeight: height - 64,
+        marginBottom: 16,
+        paddingHorizontal: 18,
+        paddingTop: 10,
+        paddingBottom: 18,
+    },
     handle: {
         width: 54,
         height: 4,
@@ -1256,6 +1923,13 @@ const styles = StyleSheet.create({
         fontFamily: fonts.Medium,
         fontSize: typography.micro.size,
         lineHeight: typography.micro.lineHeight,
+    },
+    qaHiddenText: {
+        position: 'absolute',
+        width: 1,
+        height: 1,
+        opacity: 0.01,
+        overflow: 'hidden',
     },
     closeButton: {
         width: 30,
@@ -1371,6 +2045,11 @@ const styles = StyleSheet.create({
         fontSize: 20,
         lineHeight: 31,
     },
+    robotaxiPaymentTitle: {
+        fontFamily: fonts.SemiBold,
+        fontSize: 15.5,
+        lineHeight: 20,
+    },
     securePaymentBadge: {
         marginTop: 1,
     },
@@ -1400,6 +2079,11 @@ const styles = StyleSheet.create({
         fontSize: 20,
         lineHeight: 31,
         textAlign: 'right',
+    },
+    robotaxiPaymentAmount: {
+        fontFamily: fonts.SemiBold,
+        fontSize: 17,
+        lineHeight: 22,
     },
     expiryText: {
         marginTop: 8,
@@ -1489,14 +2173,6 @@ const styles = StyleSheet.create({
         flex: 1,
         marginRight: 12,
     },
-    pixCopyText: {
-        color: PIX_SURFACE.leaf,
-        fontFamily: fonts.Medium,
-        fontSize: 12,
-        lineHeight: 19,
-        textAlign: 'right',
-    },
-
     countdownContainer: {
         alignItems: 'center',
         marginTop: 8,
@@ -1523,6 +2199,23 @@ const styles = StyleSheet.create({
         marginTop: 18,
         flexDirection: 'row',
         gap: 14,
+    },
+    robotaxiActionButtons: {
+        flexDirection: 'column',
+        gap: 10,
+    },
+    robotaxiAction: {
+        flex: 0,
+        width: '100%',
+        height: 48,
+        borderRadius: 24,
+        borderWidth: 1,
+        borderColor: PIX_SURFACE.line,
+    },
+    robotaxiActionText: {
+        fontFamily: fonts.SemiBold,
+        fontSize: 13,
+        lineHeight: 17,
     },
     primaryAction: {
         flex: 1,

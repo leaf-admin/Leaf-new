@@ -10,6 +10,7 @@ const documentAIExtractionService = require('../services/document-ai-extraction-
 const { validateCnhDocumentIdentity } = require('../services/cnh-document-identity-validator');
 const { logger } = require('../utils/logger');
 const rateLimit = require('express-rate-limit');
+const { requireFirebaseUser } = require('../middleware/firebase-user-auth');
 
 const router = express.Router();
 
@@ -68,6 +69,36 @@ const ocrLimiter = rateLimit({
   }
 });
 
+function requireOcrUserScope(req, res, next) {
+  const authenticatedUid = String(
+    req.authenticatedUser?.uid ||
+    req.firebaseUser?.uid ||
+    req.firebaseUser?.user_id ||
+    ''
+  ).trim();
+  const requestedUserId = String(req.body?.userId || '').trim();
+
+  if (!authenticatedUid) {
+    return res.status(401).json({
+      success: false,
+      error: 'Usuário autenticado não identificado.'
+    });
+  }
+
+  if (requestedUserId && requestedUserId !== authenticatedUid) {
+    return res.status(403).json({
+      success: false,
+      error: 'Acesso negado para este usuário.'
+    });
+  }
+
+  if (req.body && typeof req.body === 'object') {
+    req.body.userId = authenticatedUid;
+  }
+
+  return next();
+}
+
 function hasUsefulCnhText(text) {
   const raw = String(text || '').trim();
   if (!raw) return false;
@@ -98,7 +129,7 @@ function hasUsefulVehicleText(text) {
  * - image: arquivo de imagem da CNH
  * - userId: (opcional) ID do usuário para rastreamento
  */
-router.post('/cnh', ocrLimiter, upload.single('image'), async (req, res) => {
+router.post('/cnh', ocrLimiter, requireFirebaseUser, upload.single('image'), requireOcrUserScope, async (req, res) => {
   try {
     // Validar arquivo
     if (!req.file) {
@@ -163,7 +194,7 @@ router.post('/cnh', ocrLimiter, upload.single('image'), async (req, res) => {
  * Extrai dados da CNH a partir de PDF (CNH Digital).
  * Fluxo: OCR/PDF text -> GPT-5.4-mini (ou multimodal com imagem).
  */
-router.post('/cnh/pdf', ocrLimiter, upload.single('pdf'), async (req, res) => {
+router.post('/cnh/pdf', ocrLimiter, requireFirebaseUser, upload.single('pdf'), requireOcrUserScope, async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({
@@ -295,7 +326,7 @@ router.post('/cnh/pdf', ocrLimiter, upload.single('pdf'), async (req, res) => {
  * Body (multipart/form-data):
  * - pdf: arquivo PDF do CRLV
  */
-router.post('/vehicle/extract-text', ocrLimiter, upload.single('pdf'), async (req, res) => {
+router.post('/vehicle/extract-text', ocrLimiter, requireFirebaseUser, upload.single('pdf'), requireOcrUserScope, async (req, res) => {
   try {
     logger.info('📥 Requisição recebida em /vehicle/extract-text', {
       hasFile: !!req.file,
@@ -375,7 +406,7 @@ router.post('/vehicle/extract-text', ocrLimiter, upload.single('pdf'), async (re
  * - userId: (opcional) ID do usuário para rastreamento
  * - vehicleId: (opcional) ID do veículo para rastreamento
  */
-router.post('/vehicle', ocrLimiter, upload.single('image'), async (req, res) => {
+router.post('/vehicle', ocrLimiter, requireFirebaseUser, upload.single('image'), requireOcrUserScope, async (req, res) => {
   try {
     // Validar arquivo
     if (!req.file) {
@@ -426,7 +457,7 @@ router.post('/vehicle', ocrLimiter, upload.single('image'), async (req, res) => 
  * Extrai dados do documento do veículo (CRLV) via PDF.
  * Fluxo: OCR/PDF text -> GPT-5.4-mini (ou multimodal com imagem).
  */
-router.post('/vehicle/pdf', ocrLimiter, upload.single('pdf'), async (req, res) => {
+router.post('/vehicle/pdf', ocrLimiter, requireFirebaseUser, upload.single('pdf'), requireOcrUserScope, async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({
@@ -591,7 +622,6 @@ router.use((req, res) => {
 });
 
 module.exports = router;
-
 
 
 

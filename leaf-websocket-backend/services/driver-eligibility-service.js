@@ -9,6 +9,10 @@ const {
     buildDriverVehicleIdentity,
     resolveVehicleIdentitySource
 } = require('../utils/driver-vehicle-identity');
+const {
+    DRIVER_ACTIVATION_STATES,
+    resolveDriverActivationState
+} = require('./driver-activation-state-service');
 
 const PROFILE_CACHE_TTL_SECONDS = 90;
 const PROFILE_CACHE_FALLBACK_TTL_SECONDS = Number.parseInt(
@@ -61,6 +65,53 @@ class DriverEligibilityService {
         this.redis = redisPool.getConnection();
         this.catalogCache = null;
         this.catalogLoadedAt = 0;
+    }
+
+    async _resolveActivationGate(driverId) {
+        try {
+            return await resolveDriverActivationState({ driverId });
+        } catch (error) {
+            logStructured('error', 'DriverEligibility: falha ao resolver estado canonico de ativacao', {
+                service: 'driver-eligibility-service',
+                driverId,
+                error: error?.message || String(error)
+            });
+            return {
+                state: 'DRIVER_ACTIVATION_STATE_UNAVAILABLE',
+                label: 'Status indisponivel',
+                canGoOnline: false,
+                canAttemptOnline: false,
+                requiresLiveness: false,
+                blockingReason: 'Nao foi possivel validar cadastro, documentos e KYC agora.'
+            };
+        }
+    }
+
+    _getActivationBlockCode(activationState = {}) {
+        if (activationState.state === DRIVER_ACTIVATION_STATES.APPROVED_NEEDS_LIVENESS) {
+            return 'KYC_LIVENESS_REQUIRED';
+        }
+
+        const checklist = activationState.checklist || {};
+        const driverDocumentsReady =
+            checklist.cnhEar === true &&
+            checklist.inssOrMei === true &&
+            checklist.backgroundCheckConsent === true;
+        if (
+            activationState.state === DRIVER_ACTIVATION_STATES.DRIVER_DOCS_IN_REVIEW &&
+            driverDocumentsReady &&
+            activationState.kyc?.pending === true &&
+            activationState.kyc?.blocked !== true
+        ) {
+            return 'DRIVER_ACTIVATION_PRE_REGISTERED';
+        }
+
+        const state = String(activationState.state || 'DRIVER_ACTIVATION_BLOCKED')
+            .trim()
+            .toUpperCase();
+        return state.startsWith('DRIVER_ACTIVATION_')
+            ? state
+            : `DRIVER_ACTIVATION_${state}`;
     }
 
     _buildCatalogKey({ brand, model, year }) {
@@ -150,6 +201,10 @@ class DriverEligibilityService {
             return null;
         }
 
+        if (!userSnapshot?.exists?.() && !userVehiclesSnapshot?.exists?.()) {
+            return null;
+        }
+
         const user = userSnapshot?.val() || {};
         const userVehicles = userVehiclesSnapshot?.val() || {};
 
@@ -166,28 +221,21 @@ class DriverEligibilityService {
         });
 
         let vehicle = null;
-        let activeAssignment = null;
         if (activeUserVehicle?.vehicleId) {
             try {
-                const [vehicleSnapshot, assignmentSnapshot] = await Promise.race([
-                    Promise.all([
-                        db.ref(`vehicles/${activeUserVehicle.vehicleId}`).once('value'),
-                        db.ref(`vehicle_active_assignment/${activeUserVehicle.vehicleId}`).once('value')
-                    ]),
-                    timeoutPromise('vehicle_and_assignment')
+                const vehicleSnapshot = await Promise.race([
+                    db.ref(`vehicles/${activeUserVehicle.vehicleId}`).once('value'),
+                    timeoutPromise('vehicle')
                 ]);
                 if (vehicleSnapshot?.exists()) {
                     vehicle = vehicleSnapshot.val();
                 }
-                if (assignmentSnapshot?.exists()) {
-                    activeAssignment = assignmentSnapshot.val();
-                }
             } catch (error) {
-                logStructured('warn', 'DriverEligibility: timeout/falha ao consultar veículo/assignment no Firebase (fallback local)', {
+                logStructured('warn', 'DriverEligibility: timeout/falha ao consultar veículo no Firebase (fallback local)', {
                     service: 'driver-eligibility-service',
                     driverId,
                     vehicleId: activeUserVehicle.vehicleId,
-                    stage: 'vehicle_and_assignment',
+                    stage: 'vehicle',
                     timeoutMs: FIREBASE_PROFILE_TIMEOUT_MS,
                     error: error.message
                 });
@@ -197,8 +245,7 @@ class DriverEligibilityService {
         return {
             user,
             activeUserVehicle,
-            vehicle,
-            activeAssignment
+            vehicle
         };
     }
 
@@ -210,8 +257,8 @@ class DriverEligibilityService {
         if (cached && cached.driverId) {
             const cachedProfile = {
                 driverId,
-                driverApproved: toBoolean(cached.driverApproved, true),
-                vehicleApproved: toBoolean(cached.vehicleApproved, true),
+                driverApproved: toBoolean(cached.driverApproved, false),
+                vehicleApproved: toBoolean(cached.vehicleApproved, false),
                 vehicleCategory: normalizeCategory(cached.vehicleCategory || cached.carType || fallbackDriverData.carType),
                 carType: cached.carType || fallbackDriverData.carType || null,
                 acceptsPlusWithElite: toBoolean(cached.acceptsPlusWithElite, true),
@@ -223,7 +270,7 @@ class DriverEligibilityService {
                 vehicleColor: cached.vehicleColor || fallbackDriverData.vehicleColor || fallbackDriverData.carColor || null,
                 vehicleIdentitySource: cached.vehicleIdentitySource || 'eligibility_cache_legacy',
                 vehicleIdentityCanonical: toBoolean(cached.vehicleIdentityCanonical, false),
-                assignmentConflict: toBoolean(cached.assignmentConflict, false)
+                assignmentConflict: false
             };
             const cachedIdentity = buildDriverVehicleIdentity(cachedProfile);
             return {
@@ -237,8 +284,8 @@ class DriverEligibilityService {
         if (!firebaseProfile) {
             const fallbackProfile = {
                 driverId,
-                driverApproved: true,
-                vehicleApproved: true,
+                driverApproved: false,
+                vehicleApproved: false,
                 vehicleCategory: normalizeCategory(fallbackDriverData.carType),
                 carType: fallbackDriverData.carType || null,
                 acceptsPlusWithElite: true,
@@ -278,24 +325,16 @@ class DriverEligibilityService {
             return fallbackProfile;
         }
 
-        const { user, activeUserVehicle, vehicle, activeAssignment } = firebaseProfile;
+        const { user, activeUserVehicle, vehicle } = firebaseProfile;
 
         const userApprovedFlag = user?.approved ?? user?.isApproved ?? user?.profileApproved ?? null;
         const userStatus = String(user?.status || '').toLowerCase();
-        const driverApproved = userApprovedFlag === null ? (userStatus ? userStatus === 'approved' : true) : toBoolean(userApprovedFlag, false);
+        const driverApproved = userApprovedFlag === null ? userStatus === 'approved' : toBoolean(userApprovedFlag, false);
 
-        const assignedUserId = activeAssignment
-            ? String(activeAssignment.userId || activeAssignment.driverId || '')
-            : '';
-        const assignmentConflict = Boolean(
-            activeUserVehicle?.vehicleId &&
-            assignedUserId &&
-            assignedUserId !== String(driverId)
-        );
         const uvStatus = String(activeUserVehicle?.status || '').toLowerCase();
         const vehicleApproved = activeUserVehicle
-            ? ((toBoolean(activeUserVehicle?.approved, false) || uvStatus === 'approved' || uvStatus === 'active') && !assignmentConflict)
-            : true;
+            ? (toBoolean(activeUserVehicle?.approved, false) || uvStatus === 'approved' || uvStatus === 'active')
+            : false;
 
         const catalogCategory = await this._resolveCategoryFromCatalog(vehicle);
         const rawCarType =
@@ -387,7 +426,7 @@ class DriverEligibilityService {
             vehicleIdentityCanonical: ['crlv_pdf_ocr', 'qa_crlv_fixture', 'vehicles_catalog', 'user_vehicles'].includes(
                 vehicleIdentitySource
             ),
-            assignmentConflict
+            assignmentConflict: false
         };
         profile.vehicleIdentityComplete = buildDriverVehicleIdentity(profile).complete;
 
@@ -415,44 +454,54 @@ class DriverEligibilityService {
     }
 
     async isDriverEligibleForRide(driverId, requestedCategory, fallbackDriverData = {}) {
-        const profile = await this.resolveDriverProfile(driverId, fallbackDriverData);
-        const normalizedRequested = normalizeCategory(requestedCategory);
-
-        if (!profile.driverApproved) {
-            return { eligible: false, code: 'DRIVER_NOT_APPROVED', profile };
+        const activationState = await this._resolveActivationGate(driverId);
+        if (!activationState?.canGoOnline) {
+            return {
+                eligible: false,
+                code: this._getActivationBlockCode(activationState),
+                activationState,
+                profile: null
+            };
         }
 
-        if (profile.assignmentConflict) {
-            return { eligible: false, code: 'VEHICLE_ASSIGNED_TO_ANOTHER_DRIVER', profile };
+        const profile = await this.resolveDriverProfile(driverId, fallbackDriverData);
+        const normalizedRequested = normalizeCategory(requestedCategory);
+        const profileWithActivation = {
+            ...profile,
+            activationState
+        };
+
+        if (!profile.driverApproved) {
+            return { eligible: false, code: 'DRIVER_NOT_APPROVED', profile: profileWithActivation };
         }
 
         if (!profile.vehicleApproved) {
-            return { eligible: false, code: 'VEHICLE_NOT_APPROVED', profile };
+            return { eligible: false, code: 'VEHICLE_NOT_APPROVED', profile: profileWithActivation };
         }
 
         if (!normalizedRequested) {
-            return { eligible: true, code: 'NO_CATEGORY_REQUIRED', profile };
+            return { eligible: true, code: 'NO_CATEGORY_REQUIRED', profile: profileWithActivation };
         }
 
         if (!profile.vehicleCategory) {
-            return { eligible: false, code: 'UNKNOWN_VEHICLE_CATEGORY', profile };
+            return { eligible: false, code: 'UNKNOWN_VEHICLE_CATEGORY', profile: profileWithActivation };
         }
 
         if (normalizedRequested === 'plus') {
             if (profile.vehicleCategory === 'plus') {
-                return { eligible: true, code: 'PLUS_MATCH', profile };
+                return { eligible: true, code: 'PLUS_MATCH', profile: profileWithActivation };
             }
 
             if (profile.vehicleCategory === 'elite' && profile.acceptsPlusWithElite) {
-                return { eligible: true, code: 'ELITE_WITH_PLUS_OPT_IN', profile };
+                return { eligible: true, code: 'ELITE_WITH_PLUS_OPT_IN', profile: profileWithActivation };
             }
 
-            return { eligible: false, code: 'PLUS_NOT_ALLOWED', profile };
+            return { eligible: false, code: 'PLUS_NOT_ALLOWED', profile: profileWithActivation };
         }
 
         if (normalizedRequested === 'elite') {
             if (profile.vehicleCategory !== 'elite') {
-                return { eligible: false, code: 'NOT_ELITE_VEHICLE', profile };
+                return { eligible: false, code: 'NOT_ELITE_VEHICLE', profile: profileWithActivation };
             }
 
             const recoveryRaw = await this.redis.hgetall(`driver_elite_recovery:${driverId}`);
@@ -465,7 +514,7 @@ class DriverEligibilityService {
                     eligible: false,
                     code: 'ELITE_RATING_BLOCKED',
                     profile: {
-                        ...profile,
+                        ...profileWithActivation,
                         eliteRecoveryProgress: recoveredRides
                     }
                 };
@@ -475,7 +524,7 @@ class DriverEligibilityService {
                 eligible: true,
                 code: rating >= ELITE_MIN_RATING ? 'ELITE_RATING_OK' : 'ELITE_RECOVERED',
                 profile: {
-                    ...profile,
+                    ...profileWithActivation,
                     eliteRecoveryProgress: recoveredRides
                 }
             };
@@ -483,13 +532,13 @@ class DriverEligibilityService {
 
         if (normalizedRequested === 'moto') {
             if (profile.vehicleCategory !== 'moto') {
-                return { eligible: false, code: 'NOT_MOTO_VEHICLE', profile };
+                return { eligible: false, code: 'NOT_MOTO_VEHICLE', profile: profileWithActivation };
             }
 
-            return { eligible: true, code: 'MOTO_MATCH', profile };
+            return { eligible: true, code: 'MOTO_MATCH', profile: profileWithActivation };
         }
 
-        return { eligible: false, code: 'UNSUPPORTED_CATEGORY', profile };
+        return { eligible: false, code: 'UNSUPPORTED_CATEGORY', profile: profileWithActivation };
     }
 
     async recordEliteRecoveryRide(driverId, rideCategory, ratingValue) {
@@ -526,8 +575,8 @@ class DriverEligibilityService {
         const cacheKey = `driver_eligibility_profile:${driverId}`;
         await this.redis.hset(cacheKey, {
             driverId,
-            driverApproved: String(profileData.driverApproved ?? true),
-            vehicleApproved: String(profileData.vehicleApproved ?? true),
+            driverApproved: String(profileData.driverApproved ?? false),
+            vehicleApproved: String(profileData.vehicleApproved ?? false),
             vehicleCategory: normalizeCategory(profileData.vehicleCategory || profileData.carType) || '',
             carType: profileData.carType || '',
             acceptsPlusWithElite: String(profileData.acceptsPlusWithElite ?? true),

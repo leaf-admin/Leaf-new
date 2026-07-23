@@ -2,7 +2,8 @@ import React from 'react';
 import { Alert } from 'react-native';
 import { fireEvent, render, waitFor } from '@testing-library/react-native';
 
-import OTPStep from '../src/components/auth/steps/OTPStep';
+import OTPStep, { assertVerifiedOtpIdentity } from '../src/components/auth/steps/OTPStep';
+import { saveStepData } from '../src/utils/secureOnboardingStorage';
 
 jest.mock('../src/utils/Logger', () => ({
   __esModule: true,
@@ -13,9 +14,14 @@ jest.mock('../src/utils/Logger', () => ({
   },
 }));
 
+const mockSignInWithCustomToken = jest.fn();
+const mockSignInWithPhoneNumber = jest.fn();
+let mockCurrentUser = null;
+
 jest.mock('@react-native-firebase/auth', () => () => ({
-  signInWithCustomToken: jest.fn(),
-  signInWithPhoneNumber: jest.fn(),
+  currentUser: mockCurrentUser,
+  signInWithCustomToken: mockSignInWithCustomToken,
+  signInWithPhoneNumber: mockSignInWithPhoneNumber,
 }));
 
 jest.mock('../src/utils/secureOnboardingStorage', () => ({
@@ -68,6 +74,7 @@ jest.mock('../src/utils/friendlyErrorMessages', () => ({
 describe('OTPStep', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    mockCurrentUser = null;
     jest.spyOn(Alert, 'alert').mockImplementation(() => {});
   });
 
@@ -98,6 +105,7 @@ describe('OTPStep', () => {
     await fillOtp(getByTestId, '123456');
 
     await waitFor(() => {
+      expect(saveStepData).not.toHaveBeenCalled();
       expect(Alert.alert).toHaveBeenCalledWith(
         'Código não confirmado',
         'Código inválido. Verifique o código recebido por SMS e tente novamente.',
@@ -157,5 +165,34 @@ describe('OTPStep', () => {
         undefined,
       );
     });
+  });
+
+  test('accepts the verified user only when UID and phone match the native Firebase session', () => {
+    const credentialUser = {
+      uid: 'uid-a',
+      phoneNumber: '+5521998991886',
+    };
+
+    expect(assertVerifiedOtpIdentity({
+      requestedPhone: '+55 (21) 99899-1886',
+      credentialUser,
+      currentUser: { ...credentialUser },
+    })).toBe(credentialUser);
+  });
+
+  test('fails closed when OTP result and native Firebase session have different UIDs', () => {
+    expect(() => assertVerifiedOtpIdentity({
+      requestedPhone: '+5521998991886',
+      credentialUser: { uid: 'uid-a', phoneNumber: '+5521998991886' },
+      currentUser: { uid: 'uid-b', phoneNumber: '+5521998991886' },
+    })).toThrow('A sessão autenticada não corresponde ao telefone confirmado.');
+  });
+
+  test('fails closed when the authenticated phone differs from the requested phone', () => {
+    expect(() => assertVerifiedOtpIdentity({
+      requestedPhone: '+5521998991886',
+      credentialUser: { uid: 'uid-a', phoneNumber: '+5521123456789' },
+      currentUser: { uid: 'uid-a', phoneNumber: '+5521123456789' },
+    })).toThrow('O telefone autenticado não corresponde ao número informado.');
   });
 });

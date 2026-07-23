@@ -25,18 +25,39 @@ async function performCreateBookingAvailabilityPrecheck({
     checkAvailability,
     logStructured = () => {},
     logContext = {},
-    timeoutMs = null
+    timeoutMs = null,
+    operationLabel = 'createBooking'
 }) {
+    const safeOperationLabel = String(operationLabel || 'createBooking').trim() || 'createBooking';
+
     if (!hasConfirmedPayment) {
         return { skipped: true, reason: 'payment_not_confirmed' };
     }
 
     if (!pickupLocation?.lat || !pickupLocation?.lng) {
-        return { skipped: true, reason: 'pickup_location_invalid' };
+        logStructured('warn', `${safeOperationLabel}: pickup inválido no pre-check de disponibilidade`, {
+            ...logContext,
+            code: 'PICKUP_LOCATION_REQUIRED'
+        });
+        return {
+            skipped: false,
+            success: false,
+            code: 'PICKUP_LOCATION_REQUIRED',
+            hasDrivers: false
+        };
     }
 
     if (typeof checkAvailability !== 'function') {
-        return { skipped: true, reason: 'checker_missing' };
+        logStructured('warn', `${safeOperationLabel}: checker de disponibilidade ausente`, {
+            ...logContext,
+            code: 'AVAILABILITY_CHECKER_MISSING'
+        });
+        return {
+            skipped: false,
+            success: false,
+            code: 'AVAILABILITY_CHECKER_MISSING',
+            hasDrivers: false
+        };
     }
 
     try {
@@ -53,7 +74,7 @@ async function performCreateBookingAvailabilityPrecheck({
             : await availabilityPromise;
 
         if (!availability?.success) {
-            logStructured('warn', 'createBooking: validação de disponibilidade falhou', {
+            logStructured('warn', `${safeOperationLabel}: validação de disponibilidade falhou`, {
                 ...logContext,
                 code: 'AVAILABILITY_CHECK_FAILED'
             });
@@ -67,7 +88,7 @@ async function performCreateBookingAvailabilityPrecheck({
 
         const hasDrivers = resolveHasDrivers(availability);
         if (!hasDrivers) {
-            logStructured('warn', 'createBooking: sem motoristas no pre-check', {
+            logStructured('warn', `${safeOperationLabel}: sem motoristas no pre-check`, {
                 ...logContext,
                 code: 'NO_DRIVERS_AVAILABLE'
             });
@@ -80,7 +101,7 @@ async function performCreateBookingAvailabilityPrecheck({
             hasDrivers
         };
     } catch (error) {
-        logStructured('warn', 'createBooking: erro no pre-check de disponibilidade', {
+        logStructured('warn', `${safeOperationLabel}: erro no pre-check de disponibilidade`, {
             ...logContext,
             error: error.message
         });

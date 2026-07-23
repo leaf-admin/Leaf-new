@@ -30,6 +30,20 @@ const {
     rehydratePrimaryBooking,
     writeVisibleBookingSnapshot
 } = require('../services/booking-visibility-service');
+const {
+    collectPaymentReferences,
+    normalizePaymentAmountCents,
+    resolveAuthoritativePaymentConfirmation
+} = require('../services/authoritative-payment-confirmation-service');
+
+function getFirestoreSafely() {
+    try {
+        const firebaseConfig = require('../firebase-config');
+        return firebaseConfig.getFirestore?.() || null;
+    } catch (_error) {
+        return null;
+    }
+}
 
 class StartTripCommand extends Command {
     constructor(data) {
@@ -37,6 +51,7 @@ class StartTripCommand extends Command {
         this.driverId = data.driverId;
         this.bookingId = data.bookingId;
         this.startLocation = data.startLocation;
+        this.skipProviderPaymentProof = data.skipProviderPaymentProof === true;
         // ✅ VALIDAÇÃO: Garantir traceId válido
         this.traceId = validateAndEnsureTraceIdInCommand(data, 'StartTrip');
         this.correlationId = data.correlationId || this.bookingId; // ✅ Adicionar correlationId
@@ -183,33 +198,50 @@ class StartTripCommand extends Command {
                 )
             }
 
-            // Verificar status do pagamento (fast-path Redis -> fallback payment service)
+            // Verificar prova autoritativa do pagamento.
             span.addEvent('Checking payment status');
-            const normalizePaymentStatus = (status) => String(status || '').trim().toLowerCase();
-            const validPaymentStatuses = new Set(['in_holding', 'paid', 'confirmed']);
-            let paymentStatus = {
-                success: false,
-                status: normalizePaymentStatus(
-                    bookingData.paymentStatus ||
-                    bookingData.payment_status ||
-                    bookingData.statusPagamento
-                )
-            };
-
-            if (!validPaymentStatuses.has(paymentStatus.status)) {
+            if (!this.skipProviderPaymentProof) {
                 const paymentService = new PaymentService();
-                paymentStatus = await paymentService.getPaymentStatus(this.bookingId);
-                paymentStatus.status = normalizePaymentStatus(paymentStatus?.status);
-            } else {
-                paymentStatus.success = true;
-            }
+                const paymentReferences = collectPaymentReferences(
+                    bookingData.paymentChargeId,
+                    bookingData.chargeId,
+                    bookingData.paymentId,
+                    bookingData.paymentIntentId,
+                    bookingData.paymentReferenceRideId,
+                    bookingData.temporaryRideId,
+                    bookingData.rideId,
+                    bookingData.paymentData?.chargeId,
+                    bookingData.paymentData?.paymentId
+                );
+                const expectedAmountInCents = normalizePaymentAmountCents(
+                    bookingData.paymentAmountInCents ||
+                    bookingData.amountInCents ||
+                    bookingData.amount ||
+                    bookingData.finalFare ||
+                    bookingData.estimatedFare
+                );
+                const paymentProof = await resolveAuthoritativePaymentConfirmation({
+                    paymentService,
+                    firestore: getFirestoreSafely(),
+                    bookingId: this.bookingId,
+                    references: paymentReferences,
+                    expectedAmountInCents,
+                    paymentContext: bookingData
+                });
 
-            if (!paymentStatus?.success || !validPaymentStatuses.has(paymentStatus.status)) {
-                span.setStatus({ code: SpanStatusCode.ERROR, message: 'Pagamento não confirmado' });
-                span.setAttribute('payment.status', paymentStatus?.status || 'unknown');
-                span.end();
-                metrics.recordCommand('StartTrip', (Date.now() - startTime) / 1000, false);
-                return CommandResult.failure('Pagamento não confirmado. A corrida não pode ser iniciada sem pagamento.')
+                if (!paymentProof?.success) {
+                    span.setStatus({ code: SpanStatusCode.ERROR, message: 'Pagamento não confirmado pelo provedor' });
+                    span.setAttribute('payment.proof_code', paymentProof?.code || 'unknown');
+                    span.end();
+                    metrics.recordCommand('StartTrip', (Date.now() - startTime) / 1000, false);
+                    return CommandResult.failure(
+                        paymentProof?.code === 'PAYMENT_PROVIDER_REFERENCE_REQUIRED'
+                            ? 'Referência de pagamento ausente. A corrida não pode ser iniciada sem confirmação do provedor.'
+                            : 'Pagamento não confirmado pelo provedor. A corrida não pode ser iniciada sem pagamento confirmado.'
+                    );
+                }
+
+                span.setAttribute('payment.proof_source', paymentProof.source || 'unknown');
             }
 
             // Parsear dados da corrida

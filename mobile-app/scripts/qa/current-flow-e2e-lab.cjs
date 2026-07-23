@@ -103,6 +103,15 @@ function loadMobileEnv() {
   const values = {};
   const sources = {};
 
+  // Explicit shell values describe the target of this run and must win over
+  // checked-in/local env files. This is especially important for the local
+  // E2E doctor, where localhost endpoints are exported immediately before the
+  // probe.
+  for (const [key, value] of Object.entries(process.env)) {
+    values[key] = value;
+    sources[key] = 'process';
+  }
+
   for (const fileName of ENV_FILES) {
     const filePath = path.join(MOBILE_DIR, fileName);
     const parsed = parseEnvFile(filePath);
@@ -114,19 +123,63 @@ function loadMobileEnv() {
     }
   }
 
-  for (const [key, value] of Object.entries(process.env)) {
-    if (values[key] === undefined) {
-      values[key] = value;
-      sources[key] = 'process';
-    }
-  }
-
   if (!values.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY && values.GOOGLE_MAPS_API_KEY) {
     values.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY = values.GOOGLE_MAPS_API_KEY;
     sources.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY = sources.GOOGLE_MAPS_API_KEY || 'derived';
   }
 
   return { values, sources };
+}
+
+function readQaPassengerPaymentContext() {
+  const usersPath = path.join(
+    MOBILE_DIR,
+    'test-results',
+    'qa-preflight',
+    'ensure-users.json',
+  );
+  if (!fs.existsSync(usersPath)) {
+    return { userId: '', phone: '', source: null };
+  }
+
+  try {
+    const users = JSON.parse(fs.readFileSync(usersPath, 'utf8'));
+    return {
+      userId: String(users?.passenger?.uid || '').trim(),
+      phone: String(
+        users?.passenger?.phone || users?.passenger?.phoneNumber || '',
+      ).replace(/\D/g, ''),
+      source: path.relative(MOBILE_DIR, usersPath),
+    };
+  } catch (_error) {
+    return { userId: '', phone: '', source: null };
+  }
+}
+
+function summarizePaymentRuntimeProbe(probe, context) {
+  const paymentRuntime = probe?.json?.paymentRuntime || {};
+  const effectiveProfile = paymentRuntime.effectiveProfile || {};
+  return {
+    ok: probe?.ok === true,
+    status: probe?.status || null,
+    contextSource: context?.source || null,
+    json: {
+      paymentRuntime: {
+        defaultEnvironment: paymentRuntime.defaultEnvironment || null,
+        canarySandboxEnabled: paymentRuntime.canarySandboxEnabled === true,
+        globalSandboxEnabled: paymentRuntime.globalSandboxEnabled === true,
+        activeProfileCount: Number(paymentRuntime.activeProfileCount || 0),
+        effectiveProfile: {
+          profileId: effectiveProfile.profileId || null,
+          environment: effectiveProfile.environment || null,
+          scope: effectiveProfile.scope || null,
+          source: effectiveProfile.source || null,
+          reason: effectiveProfile.reason || null,
+          contextMatched: effectiveProfile.contextMatched === true,
+        },
+      },
+    },
+  };
 }
 
 function summarizeEnv(env, keys) {
@@ -357,11 +410,13 @@ function extractPrototypeTestIds() {
   return [...ids].sort();
 }
 
-function buildFindings({ envSummary, backend, devices, artifacts, metro }) {
+function buildFindings({ envSummary, backend, devices, artifacts, metro, iosOnly = false }) {
   const findings = [];
   const envByKey = new Map(envSummary.map((item) => [item.key, item]));
   const runtimeFlags = backend.runtimeFlags?.json || {};
   const guards = runtimeFlags.guards || {};
+  const effectivePaymentEnvironment =
+    backend.paymentRuntime?.json?.paymentRuntime?.effectiveProfile?.environment || '';
 
   for (const key of REQUIRED_ENDPOINT_KEYS) {
     if (!envByKey.get(key)?.present) {
@@ -381,7 +436,12 @@ function buildFindings({ envSummary, backend, devices, artifacts, metro }) {
     });
   }
 
-  if (guards.requirePaymentBeforeBooking && !guards.mockPaymentForTests && !guards.paymentForceBypass) {
+  if (
+    guards.requirePaymentBeforeBooking &&
+    !guards.mockPaymentForTests &&
+    !guards.paymentForceBypass &&
+    effectivePaymentEnvironment !== 'sandbox'
+  ) {
     findings.push({
       severity: 'decision',
       code: 'payment_strategy_required',
@@ -399,7 +459,7 @@ function buildFindings({ envSummary, backend, devices, artifacts, metro }) {
     });
   }
 
-  if (!devices.android.some((device) => device.state === 'device')) {
+  if (!iosOnly && !devices.android.some((device) => device.state === 'device')) {
     findings.push({ severity: 'warn', code: 'no_android_device', message: 'Nenhum Android em estado device foi detectado.' });
   }
 
@@ -407,7 +467,7 @@ function buildFindings({ envSummary, backend, devices, artifacts, metro }) {
     findings.push({ severity: 'warn', code: 'no_ios_booted', message: 'Nenhum simulador iOS bootado foi detectado.' });
   }
 
-  if (!artifacts.androidDebug.exists) {
+  if (!iosOnly && !artifacts.androidDebug.exists) {
     findings.push({ severity: 'blocker', code: 'missing_android_debug_apk', message: 'APK debug local ainda nao existe.' });
   }
 
@@ -450,18 +510,34 @@ function writeReport(report, outDir) {
   lines.push('- `EXPO_PUBLIC_ENABLE_CUSTOM_OTP_FALLBACK=1`');
   lines.push('- `LEAF_DISABLE_UPDATES_FOR_SIMULATOR=1`');
   lines.push('- `LEAF_INCLUDE_DEV_CLIENT=1`');
-  lines.push('- Payment: escolher explicitamente `Pix sandbox real` ou `EXPO_PUBLIC_FORCE_PAYMENT_BYPASS=1` com backend QA preparado.');
+  const effectivePaymentProfile =
+    report.backend?.paymentRuntime?.json?.paymentRuntime?.effectiveProfile;
+  if (effectivePaymentProfile?.environment === 'sandbox') {
+    lines.push(
+      `- Payment: Pix sandbox por perfil QA backend (` +
+        `${effectivePaymentProfile.profileId || 'profile unknown'}, escopo ` +
+        `${effectivePaymentProfile.scope || 'unknown'}).`,
+    );
+  } else {
+    lines.push('- Payment: perfil sandbox QA nao confirmado; nao criar cobranca antes de resolver este gate.');
+  }
   lines.push('');
   lines.push('## Devices');
   lines.push('');
-  lines.push(`- Android: ${report.devices.android.map((d) => `${d.id} (${d.state})`).join(', ') || 'nenhum'}`);
+  lines.push(`- Execution target: ${report.executionTarget || 'cross-platform'}`);
+  lines.push(`- Android: ${report.executionTarget === 'ios-simulator' ? 'fora do escopo' : report.devices.android.map((d) => `${d.id} (${d.state})`).join(', ') || 'nenhum'}`);
   lines.push(`- iOS booted: ${report.devices.ios.map((d) => `${d.name || 'iPhone'} ${d.udid}`).join(', ') || 'nenhum'}`);
   lines.push('');
   lines.push('## Next Manual E2E Sequence');
   lines.push('');
   lines.push('1. Parar Metro antigo e iniciar Metro com as flags canonicas de debug.');
-  lines.push('2. Gerar build debug Android e iOS a partir da arvore atual.');
-  lines.push('3. Instalar APK debug no Android e `.app` debug nos simuladores iOS.');
+  if (report.executionTarget === 'ios-simulator') {
+    lines.push('2. Gerar a build Debug para iOS Simulator a partir da arvore atual.');
+    lines.push('3. Instalar a `.app` Debug nos simuladores iOS selecionados.');
+  } else {
+    lines.push('2. Gerar build debug Android e iOS a partir da arvore atual.');
+    lines.push('3. Instalar APK debug no Android e `.app` debug nos simuladores iOS.');
+  }
   lines.push('4. Abrir passageiro e motorista com contas QA distintas.');
   lines.push('5. Interagir via simulador/computer-use: login, motorista online, passageiro escolhe destino, categoria, Pix, busca, aceite, chegada, embarque, finalizacao, recibo e avaliacao.');
   lines.push('6. Gravar tela e capturar runtime state entre estados; sem Maestro como orquestrador principal.');
@@ -473,19 +549,34 @@ function writeReport(report, outDir) {
 async function main() {
   const timestamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\..+$/, '');
   const outDir = path.resolve(readArg('--out-dir', path.join(MOBILE_DIR, 'test-results', 'current-flow-e2e', timestamp)));
+  const iosOnly = hasFlag('--ios-only');
   const env = loadMobileEnv();
   const adbBin = resolveAdbBin();
   const simctlBin = resolveSimctlBin();
   const apiBaseUrl = String(env.values.EXPO_PUBLIC_API_URL || env.values.EXPO_PUBLIC_BACKEND_URL || '').replace(/\/+$/, '');
   const socketBaseUrl = String(env.values.EXPO_PUBLIC_WS_URL || env.values.EXPO_PUBLIC_SOCKET_URL || '').replace(/\/+$/, '');
 
-  const androidDevices = parseAndroidDevices(run(adbBin, ['devices']).stdout);
+  const androidDevices = iosOnly ? [] : parseAndroidDevices(run(adbBin, ['devices']).stdout);
   const iosDevices = parseBootedIosDevices(run(simctlBin, ['list', 'devices', 'booted']).stdout);
   const metro = await requestUrl('http://127.0.0.1:8081/status', 3000);
   const health = apiBaseUrl ? await requestUrl(`${apiBaseUrl}/health`) : { ok: false, error: 'missing api url' };
   const runtimeFlags = apiBaseUrl
     ? await requestUrl(`${apiBaseUrl}/health/runtime-flags`)
     : { ok: false, error: 'missing api url' };
+  const paymentContext = readQaPassengerPaymentContext();
+  const paymentRuntimeQuery = new URLSearchParams();
+  if (paymentContext.userId) paymentRuntimeQuery.set('userId', paymentContext.userId);
+  if (paymentContext.phone) paymentRuntimeQuery.set('phone', paymentContext.phone);
+  const paymentRuntimeRaw =
+    apiBaseUrl && paymentRuntimeQuery.size > 0
+      ? await requestUrl(
+          `${apiBaseUrl}/api/app/runtime-config?${paymentRuntimeQuery.toString()}`,
+        )
+      : { ok: false, error: 'missing QA passenger payment context' };
+  const paymentRuntime = summarizePaymentRuntimeProbe(
+    paymentRuntimeRaw,
+    paymentContext,
+  );
   const socketProbe = socketBaseUrl
     ? await requestUrl(`${socketBaseUrl}/socket.io/?EIO=4&transport=polling`)
     : { ok: false, error: 'missing socket url' };
@@ -506,11 +597,13 @@ async function main() {
   const backend = {
     health,
     runtimeFlags,
+    paymentRuntime,
     socketProbe,
   };
   const report = {
     generatedAt: new Date().toISOString(),
     appId: APP_ID,
+    executionTarget: iosOnly ? 'ios-simulator' : 'cross-platform',
     tools: {
       adbBin: adbBin || null,
       simctlBin: simctlBin || null,
@@ -524,7 +617,7 @@ async function main() {
     prototypeTestIds: extractPrototypeTestIds(),
     findings: [],
   };
-  report.findings = buildFindings({ envSummary, backend, devices, artifacts, metro });
+  report.findings = buildFindings({ envSummary, backend, devices, artifacts, metro, iosOnly });
 
   const paths = writeReport(report, outDir);
   const strict = hasFlag('--strict');
@@ -543,7 +636,15 @@ async function main() {
   }
 }
 
-main().catch((error) => {
-  console.error(error?.stack || error?.message || error);
-  process.exit(1);
-});
+if (require.main === module) {
+  main().catch((error) => {
+    console.error(error?.stack || error?.message || error);
+    process.exit(1);
+  });
+}
+
+module.exports = {
+  buildFindings,
+  loadMobileEnv,
+  summarizePaymentRuntimeProbe,
+};

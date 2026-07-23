@@ -19,13 +19,9 @@ const POST_NOTIFICATIONS_PERMISSION =
     PermissionsAndroid?.PERMISSIONS?.POST_NOTIFICATIONS || 'android.permission.POST_NOTIFICATIONS';
 const ANDROID_13_API_LEVEL = 33;
 const ALLOWED_NOTIFICATION_ROUTES = new Set([
-    'Notifications',
     'RobotaxiPrototype',
     'RobotaxiPrototypeTrip',
-    'RobotaxiPrototypeDriverTrip',
-    'RobotaxiPrototypeDriverOffer',
     'RobotaxiPrototypeDriverSearch',
-    'RobotaxiPrototypePayment',
     'RobotaxiPrototypePaymentSuccess',
     'RobotaxiPrototypePaymentFailed',
     'RobotaxiPrototypeReceipt',
@@ -49,9 +45,12 @@ const NOTIFICATION_SCREEN_ALIASES = {
     ride_status: 'RobotaxiPrototypeTrip',
     trip_update: 'RobotaxiPrototypeTrip',
     driver_trip: 'RobotaxiPrototype',
-    driver_offer: 'RobotaxiPrototypeDriverOffer',
-    new_ride_offer: 'RobotaxiPrototypeDriverOffer',
-    payment: 'RobotaxiPrototypePayment',
+    driver_offer: 'RobotaxiPrototype',
+    new_ride_offer: 'RobotaxiPrototype',
+    robotaxiprototypedriveroffer: 'RobotaxiPrototype',
+    robotaxiprototypedrivertrip: 'RobotaxiPrototype',
+    payment: 'RobotaxiPrototype',
+    robotaxiprototypepayment: 'RobotaxiPrototype',
     payment_confirmation: 'RobotaxiPrototypePaymentSuccess',
     payment_success: 'RobotaxiPrototypePaymentSuccess',
     payment_failed: 'RobotaxiPrototypePaymentFailed',
@@ -372,7 +371,7 @@ class FCMNotificationService {
 
             if (savedToken) {
                 this.fcmToken = savedToken;
-                Logger.log('📱 Token FCM recuperado do cache:', savedToken);
+                Logger.log('📱 Token FCM recuperado do cache.');
             }
 
             // Obter novo token
@@ -381,7 +380,7 @@ class FCMNotificationService {
             if (token) {
                 this.fcmToken = token;
                 await AsyncStorage.setItem('fcmToken', token);
-                Logger.log('🆕 Novo token FCM obtido:', token);
+                Logger.log('🆕 Novo token FCM obtido.');
 
                 // Registrar no backend em background. Push não deve segurar o bootstrap do app.
                 this.scheduleTokenBackendUpdate(token);
@@ -452,7 +451,7 @@ class FCMNotificationService {
                 return;
             }
 
-            Logger.log('📤 Enviando token FCM para backend:', token);
+            Logger.log('📤 Enviando token FCM para backend.');
 
             // Obter userId do Redux store ou TestUserService
             const userState = store.getState().auth;
@@ -512,7 +511,7 @@ class FCMNotificationService {
                     this.ensureWebSocketConnectListener(wsManager);
                 }
             } catch (wsError) {
-                Logger.error('❌ Erro ao registrar token FCM via WebSocket:', wsError);
+                Logger.warn('⚠️ Erro ao registrar token FCM via WebSocket; app seguirá com retry pendente:', wsError?.message || wsError);
                 // Salvar token pendente apenas se token válido
                 if (token) {
                     this.pendingTokenRegistration = { token, userId, userType };
@@ -799,11 +798,11 @@ class FCMNotificationService {
                 ? 'RobotaxiPrototype'
                 : data.bookingId
                     ? 'RobotaxiPrototypeTrip'
-                    : 'Notifications');
+                    : 'RobotaxiPrototype');
 
         if (!ALLOWED_NOTIFICATION_ROUTES.has(resolvedRouteName)) {
             return {
-                routeName: 'Notifications',
+                routeName: 'RobotaxiPrototype',
                 params: { source: 'push', originalScreen: explicitScreen || null }
             };
         }
@@ -1031,7 +1030,7 @@ class FCMNotificationService {
                     const newToken = await messaging().getToken();
 
                     if (newToken && newToken !== this.fcmToken) {
-                        Logger.log('🆕 Novo token FCM detectado:', newToken);
+                        Logger.log('🆕 Novo token FCM detectado.');
                         this.fcmToken = newToken;
                         await AsyncStorage.setItem('fcmToken', newToken);
                         await this.scheduleTokenBackendUpdate(newToken);

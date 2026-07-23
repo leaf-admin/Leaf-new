@@ -5,6 +5,36 @@ import {
 } from "../src/screens/prototype/liveRouteTiming";
 
 describe("live route timing", () => {
+  it("allows a just-started live route to begin at zero progress", () => {
+    expect(
+      resolveRouteProgress({
+        remainingMinutes: 20,
+        totalMinutes: 20,
+        nowMs: 0,
+      }),
+    ).toBe(0);
+
+    expect(
+      resolveRouteProgress({
+        remainingMinutes: 20,
+        totalMinutes: 20,
+        startedAt: new Date(0).toISOString(),
+        nowMs: 0,
+      }),
+    ).toBe(0);
+  });
+
+  it("does not default an incomplete live route to the middle of the progress line", () => {
+    expect(
+      resolveRouteProgress({
+        remainingMinutes: 20,
+        totalMinutes: null,
+        startedAt: null,
+        nowMs: 0,
+      }),
+    ).toBe(0);
+  });
+
   it("advances route progress between ETA updates", () => {
     const startedAt = new Date(0).toISOString();
     const firstProgress = resolveRouteProgress({

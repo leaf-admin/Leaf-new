@@ -24,6 +24,21 @@ scripts/
 - `leaf-dashboard-js`
 - `mobile-app`
 
+## Dashboard
+
+O dashboard ativo do produto é `leaf-dashboard-js` (Next). Use apenas:
+
+```bash
+npm run dev:dashboard
+npm run lint:dashboard
+npm run build:dashboard
+npm --prefix leaf-dashboard-js run qa:backoffice
+```
+
+Arquivos antigos como `dashboard-server.js`, `leaf-dashboard.service` e
+`dashboard-nginx*.conf` ficam nesta pasta só como referência operacional legada.
+Eles não devem ser usados como evidência de QA nem como base para novas features.
+
 Use os scripts do `package.json` raiz sempre que possivel:
 
 ```bash

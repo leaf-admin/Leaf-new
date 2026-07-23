@@ -185,4 +185,28 @@ describe('driver home automation config', () => {
       bookingId: '',
     });
   });
+
+  it('enables route-param automation in simulator release contexts only for driver role', () => {
+    expect(
+      resolveDriverHomeAutomationConfig(
+        {
+          qaAutomation: '1',
+          qaDriverAction: 'set_online',
+          qaNonce: 'sim-online',
+        },
+        {
+          isDriverRole: true,
+          isHomeRoute: true,
+          isDev: false,
+          isE2E: false,
+          isSimulator: true,
+        }
+      )
+    ).toEqual({
+      automationEnabled: true,
+      action: 'set_online',
+      nonce: 'sim-online',
+      bookingId: '',
+    });
+  });
 });

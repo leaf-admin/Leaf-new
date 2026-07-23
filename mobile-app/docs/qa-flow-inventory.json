@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-05-15T04:32:18.408Z",
+  "generatedAt": "2026-06-22T20:09:07.275Z",
   "releasePreconditions": [
     "Executar somente build release instalado (`br.com.leaf.ride`), sem Expo Go/dev-client como alvo.",
     "Backend deve responder `/health/runtime-flags` com `realSandbox.ready=true`.",
@@ -13,22 +13,22 @@
       "label": "Cadastro passageiro",
       "status": "GAP",
       "missing": [
-        "platform:android",
-        "platform:ios",
-        "role:passenger"
+        "platform:ios"
       ],
-      "flows": []
+      "flows": [
+        ".maestro/flows/qa/e2e/20-passenger-signup-real-android.yaml"
+      ]
     },
     {
       "id": "driver_signup",
       "label": "Cadastro motorista",
       "status": "GAP",
       "missing": [
-        "platform:android",
-        "platform:ios",
-        "role:driver"
+        "platform:ios"
       ],
-      "flows": []
+      "flows": [
+        ".maestro/flows/qa/e2e/21-driver-signup-docs-real-android.yaml"
+      ]
     },
     {
       "id": "login",
@@ -39,6 +39,8 @@
         ".maestro/flows/auth/01-login-customer.yaml",
         ".maestro/flows/auth/02-login-driver.yaml",
         ".maestro/flows/qa/10-passenger-voice-after-login.yaml",
+        ".maestro/flows/qa/e2e/20-passenger-signup-real-android.yaml",
+        ".maestro/flows/qa/e2e/21-driver-signup-docs-real-android.yaml",
         ".maestro/flows/rides/01-request-ride-real.yaml",
         ".maestro/flows/rides/01-request-ride.yaml",
         ".maestro/flows/screenshots-for-stores.yaml"
@@ -55,6 +57,7 @@
         ".maestro/flows/qa/91-play-video-driver-location-android.yaml",
         ".maestro/flows/qa/e2e/04-driver-offer-trip-complete.yaml",
         ".maestro/flows/qa/e2e/07-driver-navigation-audit.yaml",
+        ".maestro/flows/qa/e2e/21-driver-signup-docs-real-android.yaml",
         ".maestro/flows/qa/e2e/lifecycle/00-driver-offline-home.yaml",
         ".maestro/flows/qa/e2e/lifecycle/01-driver-online-home.yaml",
         ".maestro/flows/qa/e2e/lifecycle/01-driver-toggle-online.yaml",
@@ -70,6 +73,7 @@
         ".maestro/flows/auth/01-login-customer.yaml",
         ".maestro/flows/qa/e2e/03-passenger-request-ride.yaml",
         ".maestro/flows/qa/e2e/05-passenger-post-trip-verify.yaml",
+        ".maestro/flows/qa/e2e/20-passenger-signup-real-android.yaml",
         ".maestro/flows/qa/e2e/ideal/13-passenger-request-ideal.yaml",
         ".maestro/flows/qa/e2e/lifecycle/02-passenger-request-copacabana-release-direct.yaml",
         ".maestro/flows/qa/e2e/lifecycle/02-passenger-request-copacabana.yaml",
@@ -102,6 +106,7 @@
       "status": "GO",
       "missing": [],
       "flows": [
+        ".maestro/flows/account-deletion-direct-smoke.yaml",
         ".maestro/flows/auth/02-login-driver.yaml",
         ".maestro/flows/qa/03-passenger-final-view.yaml",
         ".maestro/flows/qa/04-driver-final-view.yaml",
@@ -138,7 +143,8 @@
       "status": "GO",
       "missing": [],
       "flows": [
-        ".maestro/flows/qa/11-passenger-menu-support-settings-audit.yaml"
+        ".maestro/flows/qa/11-passenger-menu-support-settings-audit.yaml",
+        ".maestro/flows/qa/e2e/20-passenger-signup-real-android.yaml"
       ]
     },
     {
@@ -148,6 +154,7 @@
       "missing": [],
       "flows": [
         ".maestro/flows/qa/12-passenger-rating-screen-audit.yaml",
+        ".maestro/flows/qa/e2e/20-passenger-signup-real-android.yaml",
         ".maestro/flows/qa/e2e/ideal/15-passenger-receipt-rating-ideal.yaml",
         ".maestro/flows/qa/e2e/lifecycle/07-passenger-rate-trip.yaml",
         ".maestro/flows/qa/e2e/lifecycle/08-driver-rate-passenger.yaml",
@@ -177,15 +184,15 @@
       "category": "wallet-finance"
     },
     {
-      "name": "AddPaymentMethod",
-      "category": "ride-lifecycle"
-    },
-    {
       "name": "AddVehicle",
       "category": "driver-ops"
     },
     {
       "name": "AuthLoading",
+      "category": "auth-onboarding"
+    },
+    {
+      "name": "AuthLoadingScreen",
       "category": "auth-onboarding"
     },
     {
@@ -274,6 +281,10 @@
     },
     {
       "name": "DriverIncome",
+      "category": "driver-ops"
+    },
+    {
+      "name": "DriverInvite",
       "category": "driver-ops"
     },
     {
@@ -378,10 +389,6 @@
     },
     {
       "name": "PaymentFailed",
-      "category": "ride-lifecycle"
-    },
-    {
-      "name": "paymentMethod",
       "category": "ride-lifecycle"
     },
     {
@@ -509,6 +516,10 @@
       "category": "driver-ops"
     },
     {
+      "name": "RobotaxiPrototypeDriverDocuments",
+      "category": "driver-ops"
+    },
+    {
       "name": "RobotaxiPrototypeDriverOffer",
       "category": "driver-ops"
     },
@@ -523,6 +534,18 @@
     {
       "name": "RobotaxiPrototypeDriverTrip",
       "category": "ride-lifecycle"
+    },
+    {
+      "name": "RobotaxiPrototypeDriverWaitlist",
+      "category": "driver-ops"
+    },
+    {
+      "name": "RobotaxiPrototypeDriverWaitlistStatus",
+      "category": "driver-ops"
+    },
+    {
+      "name": "RobotaxiPrototypeInvites",
+      "category": "prototype"
     },
     {
       "name": "RobotaxiPrototypeMenu",
@@ -549,6 +572,10 @@
       "category": "account-support"
     },
     {
+      "name": "RobotaxiPrototypePublicTracking",
+      "category": "prototype"
+    },
+    {
       "name": "RobotaxiPrototypeRating",
       "category": "prototype"
     },
@@ -561,12 +588,24 @@
       "category": "account-support"
     },
     {
+      "name": "RobotaxiPrototypeShareTrip",
+      "category": "ride-lifecycle"
+    },
+    {
       "name": "RobotaxiPrototypeSupport",
+      "category": "account-support"
+    },
+    {
+      "name": "RobotaxiPrototypeSupportTicket",
       "category": "account-support"
     },
     {
       "name": "RobotaxiPrototypeTrip",
       "category": "ride-lifecycle"
+    },
+    {
+      "name": "RobotaxiPrototypeVehicles",
+      "category": "driver-ops"
     },
     {
       "name": "Search",
@@ -666,6 +705,28 @@
     }
   ],
   "flows": [
+    {
+      "path": ".maestro/flows/account-deletion-direct-smoke.yaml",
+      "category": "other",
+      "platforms": [
+        "android",
+        "ios"
+      ],
+      "roles": [
+        "unknown"
+      ],
+      "capabilities": [
+        "navigation"
+      ],
+      "releaseBlockers": [],
+      "releaseOnly": true,
+      "hasScreenshots": true,
+      "expectedEvidence": [
+        "junit:account-deletion-direct-smoke.xml",
+        "log:account-deletion-direct-smoke.log",
+        "screenshots:takeScreenshot outputs"
+      ]
+    },
     {
       "path": ".maestro/flows/auth.yaml",
       "category": "other",
@@ -1416,16 +1477,13 @@
       ],
       "capabilities": [
         "login",
-        "navigation",
         "rating",
         "request-ride",
         "signup",
         "support"
       ],
-      "releaseBlockers": [
-        "dev-server-marker"
-      ],
-      "releaseOnly": false,
+      "releaseBlockers": [],
+      "releaseOnly": true,
       "hasScreenshots": true,
       "expectedEvidence": [
         "junit:20-passenger-signup-real-android.xml",
@@ -1475,13 +1533,10 @@
       "capabilities": [
         "driver-online",
         "login",
-        "navigation",
         "signup"
       ],
-      "releaseBlockers": [
-        "dev-server-marker"
-      ],
-      "releaseOnly": false,
+      "releaseBlockers": [],
+      "releaseOnly": true,
       "hasScreenshots": true,
       "expectedEvidence": [
         "junit:21-driver-signup-docs-real-android.xml",

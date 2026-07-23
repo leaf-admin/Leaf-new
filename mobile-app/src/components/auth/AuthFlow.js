@@ -1,6 +1,6 @@
 import Logger from '../../utils/Logger';
 import React, { useState, useCallback } from 'react';
-import { StatusBar, View, StyleSheet } from 'react-native';
+import { Alert, StatusBar, View, StyleSheet } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { FETCH_USER_SUCCESS } from '../../state/actionTypes';
 import store from '../../state/appStore';
@@ -8,16 +8,25 @@ import { saveStepData, completeStep, saveCurrentStep, loadStepData } from '../..
 import testUserService from '../../services/TestUserService';
 import UserAuthService from '../../services/UserAuthService';
 import UserDatabaseService from '../../utils/userDatabaseService';
+import driverActivationService from '../../services/DriverActivationService';
 import { createInitialDriverOnboardingState } from '../../services/DriverOnboardingService';
 import { allowReviewAccess } from '../../config/runtimeAccessPolicy';
 import onboardingTheme from './common/onboardingTheme';
 import { resolveEditorialProgressMeta } from './common/EditorialOnboardingLayout';
 import {
   buildRestoredAuthFlowData,
+  buildSerializableConfirmationMeta,
+  hasRequiredDriverConsents,
   normalizeAuthFlowProfileData,
   normalizeAuthFlowUserType,
   resolveAuthFlowInitialStep,
+  unwrapAuthFlowStepData,
 } from './authFlowRecovery';
+import {
+  createDriverActivationSubmissionTracker,
+  resolveDriverActivationBlockingAlert,
+  submitDriverOnboardingActivation,
+} from './authFlowDriverActivation';
 import {
   persistPhoneValidatedOnboardingSession,
   sanitizeAuthUserForOnboarding,
@@ -49,6 +58,9 @@ const AuthFlow = ({
     Number.isInteger(screenshotStep) ? screenshotStep : 0
   ));
   const [authData, setAuthData] = useState(() => screenshotAuthData || {});
+  const driverActivationSubmissionTracker = React.useRef(
+    createDriverActivationSubmissionTracker(),
+  );
   const isReviewEnv = allowReviewAccess();
   const editorialProgressMeta = React.useMemo(
     () => resolveEditorialProgressMeta(currentStep, authData?.profileSelection?.userType),
@@ -112,16 +124,26 @@ const AuthFlow = ({
           Logger.log('AuthFlow - 🧭 Iniciando fluxo do zero (ordem padrão do onboarding)');
         }
 
-        let resolvedUserType = null;
-        if (completedSteps.includes('profile_selection')) {
-          const profileSelectionData = await loadStepData('profile_selection');
-          resolvedUserType = normalizeAuthFlowUserType(profileSelectionData?.userType);
-        }
+        const profileSelectionData = completedSteps.includes('profile_selection')
+          ? await loadStepData('profile_selection')
+          : null;
+        const normalizedProfileSelectionData = unwrapAuthFlowStepData(
+          'profile_selection',
+          profileSelectionData,
+        );
+        const resolvedUserType = normalizedProfileSelectionData?.userType
+          ? normalizeAuthFlowUserType(normalizedProfileSelectionData.userType)
+          : null;
+        const rawCredentialsData = completedSteps.includes('credentials')
+          ? await loadStepData('credentials')
+          : null;
+        const credentialsData = unwrapAuthFlowStepData('credentials', rawCredentialsData);
 
         const initialStep = resolveAuthFlowInitialStep(
           completedSteps,
           fallbackStep,
           resolvedUserType,
+          credentialsData,
         );
         if (!isMounted) {
           return;
@@ -133,9 +155,6 @@ const AuthFlow = ({
 
         const phoneData = completedSteps.includes('phone_validation')
           ? await loadStepData('phone_validation')
-          : null;
-        const profileSelectionData = completedSteps.includes('profile_selection')
-          ? await loadStepData('profile_selection')
           : null;
         const profileData = completedSteps.includes('profile_data')
           ? await loadStepData('profile_data')
@@ -158,6 +177,7 @@ const AuthFlow = ({
           profileSelectionData,
           profileData,
           documentData,
+          credentialsData,
           driverContactData,
         });
 
@@ -227,7 +247,22 @@ const AuthFlow = ({
     // Salvar no AsyncStorage
     const stepName = getStepNameByIndex(currentStep);
     if (stepName) {
-      await saveStepData(stepName, data);
+      const stepFields = {
+        profile_selection: 'profileSelection',
+        profile_data: 'profileData',
+        document_data: 'documentData',
+        credentials: 'credentials',
+        driver_contact: 'driverContactData',
+      };
+      const writes = Object.entries(stepFields)
+        .filter(([, fieldName]) => data?.[fieldName] && typeof data[fieldName] === 'object')
+        .map(([targetStep, fieldName]) => saveStepData(targetStep, data[fieldName]));
+
+      if (stepName === 'phone_validation' || writes.length === 0) {
+        writes.push(saveStepData(stepName, data));
+      }
+
+      await Promise.all(writes);
     }
   }, [currentStep]);
 
@@ -501,12 +536,18 @@ const AuthFlow = ({
       // Continuar com fluxo normal de OTP
     }
 
-      // ✅ Fluxo normal: seguir para tela de OTP
-      await saveStepDataLocal({ phoneNumber, confirmation, isExistingUser });
+    // ✅ Fluxo normal: seguir para tela de OTP.
+    // O objeto confirmation do Firebase pode conter métodos/ciclos; ele fica só em memória.
+    setAuthData(prev => ({ ...prev, phoneNumber, confirmation, isExistingUser }));
+    await saveStepData('phone_validation', {
+      phoneNumber,
+      isExistingUser,
+      confirmation: buildSerializableConfirmationMeta(confirmation)
+    });
     // Marcar telefone como validado
     await completeStep('phone_validation');
     goToNextStep();
-  }, [saveStepDataLocal, completeStep, goToNextStep, handleOTPVerified]);
+  }, [completeStep, goToNextStep, handleOTPVerified]);
 
   const handlePasswordLoginSuccess = useCallback(async (userData) => {
     const normalizedUserType = normalizeAuthFlowUserType(userData?.userType || userData?.usertype || 'customer');
@@ -653,6 +694,19 @@ const AuthFlow = ({
       onboardingData.driverActivation = driverActivation;
     }
 
+    if (
+      normalizedUserType === 'driver' &&
+      !hasRequiredDriverConsents(onboardingData.credentials)
+    ) {
+      setCurrentStep(5);
+      await saveCurrentStep(5);
+      Alert.alert(
+        'Permissões obrigatórias',
+        'Aceite os Termos de Uso, a Política de Privacidade e a checagem de antecedentes para continuar.',
+      );
+      return false;
+    }
+
     let savedProfilePayload = null;
     try {
       const result = await UserDatabaseService.saveUserProfile(onboardingData);
@@ -663,22 +717,74 @@ const AuthFlow = ({
       Logger.warn('⚠️ Falha ao salvar perfil completo no banco durante onboarding:', error?.message || error);
     }
 
-    const fallbackPayload = UserDatabaseService.buildProfilePayload(onboardingData);
-    const profilePayload = savedProfilePayload || fallbackPayload;
-	    const persistedProfilePayload =
-	      await persistAuthenticatedProfile(profilePayload, normalizedUserType) || profilePayload;
+    if (!savedProfilePayload) {
+      Alert.alert(
+        'Cadastro não confirmado',
+        'Não foi possível salvar seu cadastro agora. Verifique sua conexão e tente novamente.',
+      );
+      return false;
+    }
 
-	    if (normalizedUserType === 'customer' && onboardingData?.credentials?.password) {
-	      try {
-	        await UserAuthService.setupPassword(
-	          onboardingData.phoneNumber || profilePayload.phoneNumber || profilePayload.mobile,
-	          onboardingData.credentials.password
-	        );
-	      } catch (error) {
-	        Logger.error('❌ Falha ao configurar senha do passageiro:', error);
-	        throw error;
-	      }
-	    }
+    let driverActivationSubmission = null;
+    if (normalizedUserType === 'driver') {
+      try {
+        driverActivationSubmission = await submitDriverOnboardingActivation({
+          activationService: driverActivationService,
+          credentials: onboardingData.credentials,
+          documentData: mergedDocumentData,
+          tracker: driverActivationSubmissionTracker.current,
+        });
+      } catch (error) {
+        Logger.error(
+          '❌ Falha na submissão canônica obrigatória do motorista:',
+          error?.cause?.message || error?.message || error,
+        );
+        const blockingAlert = resolveDriverActivationBlockingAlert(error);
+        Alert.alert(blockingAlert.title, blockingAlert.message);
+        return false;
+      }
+    }
+
+    const persistedProfilePayload =
+      await persistAuthenticatedProfile(savedProfilePayload, normalizedUserType);
+    if (!persistedProfilePayload) {
+      Alert.alert(
+        'Sessão não preparada',
+        'Seu cadastro foi salvo, mas não foi possível preparar a sessão neste aparelho. Tente entrar novamente.',
+      );
+      return false;
+    }
+
+    if (driverActivationSubmission?.crlvError) {
+      Logger.warn(
+        '⚠️ CNH enviada, mas o CRLV opcional ficou pendente:',
+        driverActivationSubmission.crlvError?.message || driverActivationSubmission.crlvError,
+      );
+      Alert.alert(
+        'CRLV pendente',
+        'Seu cadastro foi criado e você pode acessar o mapa, mas o CRLV não foi enviado. Envie-o em Documentos para poder ficar online.',
+      );
+    }
+
+    if (normalizedUserType === 'customer' && onboardingData?.credentials?.password) {
+      const passwordPhoneNumber =
+        onboardingData.phoneNumber ||
+        normalizedProfile.phoneNumber ||
+        normalizedProfile.mobile ||
+        persistedProfilePayload.phoneNumber ||
+        persistedProfilePayload.mobile ||
+        savedProfilePayload.phoneNumber ||
+        savedProfilePayload.mobile;
+      try {
+        await UserAuthService.setupPassword(
+          passwordPhoneNumber,
+          onboardingData.credentials.password
+        );
+      } catch (error) {
+        Logger.error('❌ Falha ao configurar senha do passageiro:', error);
+        throw error;
+      }
+    }
 
     if (persistedProfilePayload?.uid) {
       store.dispatch({
@@ -688,19 +794,42 @@ const AuthFlow = ({
     }
 
     if (onComplete) {
+      const driverActivationSubmissionPayload = driverActivationSubmission
+        ? {
+            requiredComplete: driverActivationSubmission.requiredComplete === true,
+            cnhSubmitted: driverActivationSubmission.cnhSubmitted === true,
+            crlvSubmitted: driverActivationSubmission.crlvSubmitted === true,
+            pendingCrlvAsset: driverActivationSubmission.pendingCrlvAsset || null,
+          }
+        : null;
+
       onComplete({
         ...onboardingData,
         usertype: normalizedUserType,
         userType: normalizedUserType,
         persistedProfile: persistedProfilePayload,
-        needsDocumentUpload: normalizedUserType === 'driver'
+        needsDocumentUpload: normalizedUserType === 'driver',
+        ...(driverActivationSubmissionPayload
+          ? { driverActivationSubmission: driverActivationSubmissionPayload }
+          : {})
       });
     }
+
+    return true;
   }
 
   // Função para lidar com a criação das credenciais
   const handleCredentialsCreated = useCallback(async (credentials) => {
     const normalizedUserType = normalizeAuthFlowUserType(authData?.profileSelection?.userType);
+
+    if (normalizedUserType === 'driver' && !hasRequiredDriverConsents(credentials)) {
+      Alert.alert(
+        'Permissões obrigatórias',
+        'Aceite os três consentimentos obrigatórios para continuar.',
+      );
+      return;
+    }
+
     await saveStepDataLocal({ credentials });
 
     // Marcar credenciais como completo

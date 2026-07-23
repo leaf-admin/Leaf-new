@@ -84,6 +84,7 @@ class LocationBufferService {
                 tripStatus: location.tripStatus || null,
                 isInTrip: location.isInTrip === true,
                 tripId: location.tripId || bookingId,
+                driverId: location.driverId || options.driverId || null,
                 seq: Number.isFinite(Number(location.seq)) ? Number(location.seq) : null,
                 capturedAt: location.capturedAt || location.timestamp || Date.now(),
                 source: location.source || 'foreground'
@@ -280,6 +281,7 @@ class LocationBufferService {
                 webSocketManager.emitToServer('updateLocation', {
                     lat: locationData.lat,
                     lng: locationData.lng,
+                    bookingId: locationData.bookingId,
                     accuracy: locationData.accuracy,
                     heading: locationData.heading,
                     speed: locationData.speed,
@@ -308,6 +310,91 @@ class LocationBufferService {
         }
     }
 
+    async sendDriverLocationBatch(locations = []) {
+        if (!Array.isArray(locations) || locations.length === 0) {
+            return false;
+        }
+
+        try {
+            const WebSocketManager = require('./WebSocketManager').default;
+            const webSocketManager = WebSocketManager.getInstance();
+            const status = webSocketManager.getConnectionStatus();
+
+            if (!webSocketManager.isConnected() || !status?.authenticated) {
+                return false;
+            }
+
+            if (typeof webSocketManager.updateLocationBatch !== 'function') {
+                for (const locationData of locations) {
+                    const sent = await this.sendLocation(locationData);
+                    if (!sent) return false;
+                }
+                return true;
+            }
+
+            const first = locations[0];
+            const context = await this.getActiveTripContext();
+            const contextMatchesBooking =
+                context?.bookingId && String(context.bookingId) === String(first.bookingId);
+            const tripStatus = first.tripStatus || (contextMatchesBooking ? context.tripStatus : null) || 'started';
+            const terminalTripStatuses = new Set(['completed', 'cancelled', 'canceled', 'failed']);
+            const isInTrip = first.isInTrip === true || (contextMatchesBooking && !terminalTripStatuses.has(String(tripStatus)));
+            const driverId =
+                first.driverId ||
+                context?.driverId ||
+                webSocketManager.authenticatedUserId ||
+                null;
+            const normalizedLocations = locations.map((locationData) => ({
+                ...locationData,
+                driverId: locationData.driverId || driverId,
+                tripId: locationData.tripId || first.tripId || first.bookingId,
+                tripStatus: locationData.tripStatus || tripStatus,
+                isInTrip: locationData.isInTrip === true || isInTrip,
+            }));
+            await webSocketManager.updateLocationBatch({
+                driverId,
+                bookingId: first.bookingId,
+                tripId: first.tripId || first.bookingId,
+                tripStatus,
+                isInTrip,
+                source: 'location_buffer_batch',
+                locations: normalizedLocations,
+            });
+            return true;
+        } catch (error) {
+            Logger.error('❌ Erro ao enviar lote de localizações:', error);
+            return false;
+        }
+    }
+
+    groupDriverLocationsForBatch(buffer = []) {
+        const groups = new Map();
+        buffer
+            .filter((locationData) => locationData?.userType === 'driver')
+            .forEach((locationData) => {
+                const key = [
+                    locationData.bookingId || '',
+                    locationData.tripId || locationData.bookingId || '',
+                    locationData.driverId || '',
+                ].join(':');
+                const current = groups.get(key) || [];
+                current.push(locationData);
+                groups.set(key, current);
+            });
+
+        return Array.from(groups.values())
+            .map((items) =>
+                [...items].sort((left, right) => {
+                    const leftSeq = Number(left.seq);
+                    const rightSeq = Number(right.seq);
+                    if (Number.isInteger(leftSeq) && Number.isInteger(rightSeq)) {
+                        return leftSeq - rightSeq;
+                    }
+                    return Number(left.capturedAt || left.timestamp || 0) - Number(right.capturedAt || right.timestamp || 0);
+                })
+            );
+    }
+
     /**
      * Sincronizar localizações do buffer
      */
@@ -327,8 +414,27 @@ class LocationBufferService {
 
             const synced = [];
             const failed = [];
+            const processedEventIds = new Set();
+
+            const driverBatches = this.groupDriverLocationsForBatch(buffer);
+            for (const batch of driverBatches) {
+                const success = await this.sendDriverLocationBatch(batch);
+                if (success) {
+                    batch.forEach((locationData) => {
+                        synced.push(locationData);
+                        processedEventIds.add(locationData.eventId);
+                    });
+                }
+            }
 
             for (const locationData of buffer) {
+                if (processedEventIds.has(locationData.eventId)) {
+                    continue;
+                }
+                if (locationData.userType === 'driver') {
+                    failed.push(locationData);
+                    continue;
+                }
                 const success = await this.sendLocation(locationData);
 
                 if (success) {

@@ -22,6 +22,7 @@ const {
   backfillRideHealthIndex,
   evaluateRideOperationsAlerts,
   getRideOperationsSnapshot,
+  syncDriverSignalForRide,
   syncTrackedRideState
 } = require('../../../services/ride-health-monitor');
 
@@ -214,6 +215,72 @@ describe('ride-health-monitor', () => {
     expect(snapshot.earlyEndedReview.bookingIds).toEqual(['booking-review']);
     expect(metrics.setRideHealthStateCount).toHaveBeenCalledWith('reassignment_pending', 1);
     expect(metrics.setRideHealthRecentCount).toHaveBeenCalledWith('early_ended_review', 1);
+  });
+
+  it('monitora corridas ativas sem sinal recente do motorista', async () => {
+    const redis = createRedisMock();
+
+    await syncDriverSignalForRide(redis, {
+      bookingId: 'booking-signal-stale',
+      lastLocationAt: Date.parse('2026-03-30T11:57:00.000Z')
+    });
+    await syncDriverSignalForRide(redis, {
+      bookingId: 'booking-signal-fresh',
+      lastLocationAt: Date.parse('2026-03-30T11:59:30.000Z')
+    });
+
+    const snapshot = await getRideOperationsSnapshot(redis, {
+      nowIso: '2026-03-30T12:00:00.000Z',
+      driverSignalStaleMs: 60 * 1000
+    });
+
+    expect(snapshot.driverSignal.total).toBe(2);
+    expect(snapshot.driverSignal.stale).toBe(1);
+    expect(snapshot.driverSignal.bookingIds).toEqual(['booking-signal-stale']);
+    expect(metrics.setRideHealthStateCount).toHaveBeenCalledWith('driver_signal_active', 2);
+    expect(metrics.setRideHealthStuckCount).toHaveBeenCalledWith('driver_signal_stale', 1);
+  });
+
+  it('alerta e limpa o índice de sinal do motorista quando a corrida termina', async () => {
+    const redis = createRedisMock();
+
+    await syncDriverSignalForRide(redis, {
+      bookingId: 'booking-signal-stale',
+      lastLocationAt: Date.parse('2026-03-30T11:57:00.000Z')
+    });
+
+    const result = await evaluateRideOperationsAlerts(redis, {
+      nowIso: '2026-03-30T12:00:00.000Z',
+      driverSignalStaleMs: 60 * 1000,
+      driverSignalCriticalCount: 1
+    });
+
+    expect(result.alerts).toEqual([
+      expect.objectContaining({
+        metric: 'driver_signal_stale',
+        severity: 'critical',
+        value: 1,
+        details: expect.objectContaining({
+          bookingIds: ['booking-signal-stale']
+        })
+      })
+    ]);
+    expect(metrics.recordRideHealthAlert).toHaveBeenCalledWith('driver_signal_stale', 'critical');
+
+    await syncTrackedRideState(redis, {
+      bookingId: 'booking-signal-stale',
+      previousState: 'IN_PROGRESS',
+      newState: 'COMPLETED',
+      updatedAt: '2026-03-30T12:01:00.000Z'
+    });
+
+    const snapshot = await getRideOperationsSnapshot(redis, {
+      nowIso: '2026-03-30T12:02:00.000Z',
+      driverSignalStaleMs: 60 * 1000
+    });
+
+    expect(snapshot.driverSignal.total).toBe(0);
+    expect(snapshot.driverSignal.stale).toBe(0);
   });
 
   it('envia alertas quando reassignments presos e reviews recentes ultrapassam thresholds', async () => {

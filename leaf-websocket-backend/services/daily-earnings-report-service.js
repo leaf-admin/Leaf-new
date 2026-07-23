@@ -2,6 +2,7 @@ const axios = require('axios');
 const cron = require('node-cron');
 const redisPool = require('../utils/redis-pool');
 const { logStructured, logError } = require('../utils/logger');
+const { validateAuthoritativeFinancialSnapshot } = require('./ride-financial-contract');
 
 const ROLLUP_PREFIX = 'daily_earnings_report';
 const DEFAULT_TIME_ZONE = 'America/Sao_Paulo';
@@ -17,6 +18,7 @@ function roundMoney(value) {
 
 function parseJson(value, fallback = null) {
   if (!value) return fallback;
+  if (typeof value === 'object') return value;
   try {
     return JSON.parse(value);
   } catch (_error) {
@@ -74,15 +76,6 @@ function isCompletedStatus(status) {
   return ['COMPLETED', 'COMPLETE', 'FINISHED', 'FINALIZED', 'DONE'].includes(normalized);
 }
 
-function operationalFeeFallback(grossFareReais, tollFeeReais = 0) {
-  const grossCents = Math.max(0, Math.round((safeNumber(grossFareReais, 0) - safeNumber(tollFeeReais, 0)) * 100));
-  if (grossCents <= 0) return 0;
-  if (grossCents <= 1000) return 0.79;
-  if (grossCents <= 2500) return 0.99;
-  if (grossCents <= 5000) return 1.49;
-  return roundMoney(grossCents * 0.03 / 100);
-}
-
 function firstPositiveNumber(...values) {
   for (const value of values) {
     const parsed = safeNumber(value, NaN);
@@ -91,6 +84,47 @@ function firstPositiveNumber(...values) {
     }
   }
   return 0;
+}
+
+function firstObject(...values) {
+  for (const value of values) {
+    const parsed = parseJson(value, null);
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      return parsed;
+    }
+  }
+  return null;
+}
+
+function centsToBrl(value) {
+  return roundMoney(safeNumber(value, 0) / 100);
+}
+
+function resolveBackendFinalFinancialSnapshot(report = {}, bookingHash = {}) {
+  const bookingSnapshot = report.bookingSnapshot || {};
+  const paymentDistribution = firstObject(
+    report.paymentDistribution,
+    bookingSnapshot.paymentDistribution,
+    bookingHash.paymentDistribution,
+  ) || {};
+  const candidate = firstObject(
+    report.financialSnapshot,
+    report.financialContract,
+    report.financialBreakdown?.financialSnapshot,
+    report.financialBreakdown?.financialContract,
+    bookingSnapshot.financialSnapshot,
+    bookingSnapshot.financialContract,
+    bookingSnapshot.financialBreakdown?.financialSnapshot,
+    bookingSnapshot.financialBreakdown?.financialContract,
+    paymentDistribution.financialSnapshot,
+    paymentDistribution.calculation?.financialContract,
+    paymentDistribution.calculation?.financialSnapshot,
+    bookingHash.financialSnapshot,
+    bookingHash.financialContract,
+  );
+  const validation = validateAuthoritativeFinancialSnapshot(candidate || {});
+
+  return validation.valid ? validation.snapshot : null;
 }
 
 function allowedRideCostTotalBrl(report = {}, exchangeRate = 0) {
@@ -122,6 +156,11 @@ function snapshotFromReportAndBooking(report = {}, bookingHash = {}, timeZone = 
     return null;
   }
 
+  const finalFinancialSnapshot = resolveBackendFinalFinancialSnapshot(report, bookingHash);
+  if (!finalFinancialSnapshot) {
+    return null;
+  }
+
   const completedAt =
     parseTimestamp(bookingHash.completedAt) ||
     parseTimestamp(bookingHash.tripend) ||
@@ -148,21 +187,8 @@ function snapshotFromReportAndBooking(report = {}, bookingHash = {}, timeZone = 
   const firebaseCostTotalBrl = roundMoney(
     safeNumber(report.totals?.infrastructure?.firebase?.estimatedCostUsd, 0) * exchangeRate,
   );
-  const grossFareTotalBrl = roundMoney(firstPositiveNumber(
-    bookingHash.finalFare,
-    bookingHash.trip_cost,
-    bookingHash.estimate,
-    bookingHash.estimatedFare,
-    report.bookingSnapshot?.finalFare,
-    report.bookingSnapshot?.estimatedFare,
-  ));
-  const tollFeeBrl = roundMoney(safeNumber(bookingHash.tollFee, 0));
-  const operationalFeeTotalBrl = roundMoney(firstPositiveNumber(
-    bookingHash.operationalFee,
-    bookingHash.estimatedOperationalFee,
-    parseJson(bookingHash.fareBreakdown, {})?.operationalFee,
-    operationalFeeFallback(grossFareTotalBrl, tollFeeBrl),
-  ));
+  const grossFareTotalBrl = centsToBrl(finalFinancialSnapshot.passengerPaidCents);
+  const operationalFeeTotalBrl = centsToBrl(finalFinancialSnapshot.operationalFeeCents);
 
   return {
     bookingId: report.bookingId || bookingHash.bookingId,
@@ -430,6 +456,6 @@ module.exports._private = {
   normalizeSummary,
   buildDiscordPayload,
   formatBrl,
-  operationalFeeFallback,
   allowedRideCostTotalBrl,
+  resolveBackendFinalFinancialSnapshot,
 };

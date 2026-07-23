@@ -23,6 +23,66 @@ describe('create-booking-availability-precheck', () => {
     expect(logStructured).not.toHaveBeenCalled();
   });
 
+  it('fails closed when confirmed payment has no pickup coordinates', async () => {
+    const checkAvailability = jest.fn();
+    const logStructured = jest.fn();
+
+    const result = await performCreateBookingAvailabilityPrecheck({
+      hasConfirmedPayment: true,
+      pickupLocation: null,
+      requestedCarType: 'leaf_plus',
+      checkAvailability,
+      logStructured,
+      logContext: { userId: 'customer_1', eventType: 'createBooking' }
+    });
+
+    expect(result).toMatchObject({
+      skipped: false,
+      success: false,
+      code: 'PICKUP_LOCATION_REQUIRED',
+      hasDrivers: false
+    });
+    expect(checkAvailability).not.toHaveBeenCalled();
+    expect(logStructured).toHaveBeenCalledWith(
+      'warn',
+      'createBooking: pickup inválido no pre-check de disponibilidade',
+      expect.objectContaining({
+        userId: 'customer_1',
+        eventType: 'createBooking',
+        code: 'PICKUP_LOCATION_REQUIRED'
+      })
+    );
+  });
+
+  it('fails closed when confirmed payment cannot run the availability checker', async () => {
+    const logStructured = jest.fn();
+
+    const result = await performCreateBookingAvailabilityPrecheck({
+      hasConfirmedPayment: true,
+      pickupLocation: { lat: 1, lng: 2 },
+      requestedCarType: 'leaf_plus',
+      checkAvailability: null,
+      logStructured,
+      logContext: { userId: 'customer_1', eventType: 'createBooking' }
+    });
+
+    expect(result).toMatchObject({
+      skipped: false,
+      success: false,
+      code: 'AVAILABILITY_CHECKER_MISSING',
+      hasDrivers: false
+    });
+    expect(logStructured).toHaveBeenCalledWith(
+      'warn',
+      'createBooking: checker de disponibilidade ausente',
+      expect.objectContaining({
+        userId: 'customer_1',
+        eventType: 'createBooking',
+        code: 'AVAILABILITY_CHECKER_MISSING'
+      })
+    );
+  });
+
   it('returns failure when availability check fails', async () => {
     const checkAvailability = jest.fn().mockResolvedValue({
       success: false
@@ -91,6 +151,40 @@ describe('create-booking-availability-precheck', () => {
       expect.objectContaining({
         customerId: 'customer_1',
         eventType: 'createBooking',
+        code: 'NO_DRIVERS_AVAILABLE'
+      })
+    );
+  });
+
+  it('uses the provided operation label in guard logs', async () => {
+    const checkAvailability = jest.fn().mockResolvedValue({
+      success: true,
+      hasDrivers: false
+    });
+    const logStructured = jest.fn();
+
+    const result = await performCreateBookingAvailabilityPrecheck({
+      hasConfirmedPayment: true,
+      pickupLocation: { lat: 1, lng: 2 },
+      requestedCarType: 'leaf_plus',
+      checkAvailability,
+      logStructured,
+      operationLabel: 'confirmPayment',
+      logContext: { customerId: 'customer_1', eventType: 'confirmPayment' }
+    });
+
+    expect(result).toMatchObject({
+      skipped: false,
+      success: true,
+      code: 'NO_DRIVERS_AVAILABLE',
+      hasDrivers: false
+    });
+    expect(logStructured).toHaveBeenCalledWith(
+      'warn',
+      'confirmPayment: sem motoristas no pre-check',
+      expect.objectContaining({
+        customerId: 'customer_1',
+        eventType: 'confirmPayment',
         code: 'NO_DRIVERS_AVAILABLE'
       })
     );

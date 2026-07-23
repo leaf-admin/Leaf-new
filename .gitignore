@@ -129,8 +129,13 @@ mobile-app/07-*.png
 
 # Workspace-level test artifacts
 /artifacts/
+/qa-artifacts/
 /reports/
 /test-results/
+QA/*
+!QA/current-e2e/
+!QA/current-e2e/**
+mobile-app/QA/*
 docs/architecture/E2E_DRIVER_DOCFLOW_DASHBOARD*.json
 mobile-app/builds/
 book_20_imagens/

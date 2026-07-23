@@ -3,13 +3,46 @@
  * Remove logs em produção, mantém apenas em desenvolvimento
  */
 
+const REDACTED_VALUE = '[REDACTED]';
+const SENSITIVE_KEY_PATTERN = /(?:authorization|api[_-]?(?:key|token)|access[_-]?token|refresh[_-]?token|fcm[_-]?token|id[_-]?token|token$|password|private[_-]?key|client[_-]?secret|credential|cookie)/i;
+
+function sanitizeLogValue(value, key = '', seen = new WeakSet()) {
+  if (SENSITIVE_KEY_PATTERN.test(String(key || '')) && !/fingerprint$/i.test(String(key || ''))) {
+    return REDACTED_VALUE;
+  }
+  if (typeof value === 'string') {
+    return value
+      .replace(/(Authorization\s*:\s*)(?:Bearer\s+)?[^\s,;]+/gi, `$1${REDACTED_VALUE}`)
+      .replace(/(Bearer\s+)[^\s,;]+/gi, `$1${REDACTED_VALUE}`)
+      .replace(
+        /((?:api[_ -]?(?:key|token)|access[_ -]?token|refresh[_ -]?token|fcm[_ -]?token|id[_ -]?token|password|private[_ -]?key|client[_ -]?secret|credential|cookie)\s*[:=]\s*)("[^"]*"|'[^']*'|[^\s,;]+)/gi,
+        `$1${REDACTED_VALUE}`,
+      );
+  }
+  if (value === null || value === undefined || typeof value !== 'object') return value;
+  if (seen.has(value)) return '[CIRCULAR]';
+  seen.add(value);
+  if (Array.isArray(value)) return value.map(item => sanitizeLogValue(item, '', seen));
+
+  return Object.fromEntries(
+    Object.entries(value).map(([childKey, childValue]) => [
+      childKey,
+      sanitizeLogValue(childValue, childKey, seen),
+    ]),
+  );
+}
+
+function sanitizeLogArgs(args) {
+  return args.map(arg => sanitizeLogValue(arg));
+}
+
 class Logger {
   /**
    * Log de informação (apenas em desenvolvimento)
    */
   static log(...args) {
     if (__DEV__) {
-      console.log(...args);
+      console.log(...sanitizeLogArgs(args));
     }
   }
 
@@ -18,7 +51,7 @@ class Logger {
    */
   static warn(...args) {
     if (__DEV__) {
-      console.warn(...args);
+      console.warn(...sanitizeLogArgs(args));
     }
   }
 
@@ -29,7 +62,7 @@ class Logger {
    */
   static error(...args) {
     if (__DEV__) {
-      console.error(...args);
+      console.error(...sanitizeLogArgs(args));
     } else {
       // Em produção: apenas logar erros críticos tratados
       // Não expor dados do usuário
@@ -48,7 +81,7 @@ class Logger {
    */
   static debug(...args) {
     if (__DEV__) {
-      console.debug(...args);
+      console.debug(...sanitizeLogArgs(args));
     }
   }
 
@@ -58,12 +91,10 @@ class Logger {
    */
   static info(...args) {
     if (__DEV__) {
-      console.log('[INFO]', ...args);
+      console.log('[INFO]', ...sanitizeLogArgs(args));
     }
     // Em produção: pode enviar para analytics sem dados sensíveis
   }
 }
 
 export default Logger;
-
-

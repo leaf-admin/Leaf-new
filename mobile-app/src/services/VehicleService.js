@@ -73,13 +73,9 @@ class VehicleService {
                 throw new Error('Usuário já possui este veículo cadastrado');
             }
 
-            // 3. Verificar se veículo já está ativo com outro motorista
-            const activeUserVehicle = await this.getActiveUserVehicleByVehicle(vehicleId);
-            if (activeUserVehicle) {
-                throw new Error(`Veículo já está ativo com motorista ${activeUserVehicle.userId}`);
-            }
-
-            // 4. Upload dos documentos para Firebase Storage
+            // 3. Upload dos documentos para Firebase Storage. O mesmo veículo
+            // pode estar vinculado a mais de um perfil; exclusividade só existe
+            // enquanto um motorista está online, via lock canônico no backend.
             const uploadedDocuments = {};
             for (const [docType, uri] of Object.entries(documents)) {
                 if (uri) {
@@ -93,7 +89,7 @@ class VehicleService {
                 }
             }
 
-            // 5. Criar relacionamento usuário-veículo
+            // 4. Criar relacionamento usuário-veículo
             const userVehicleId = `${userId}_${vehicleId}_${Date.now()}`;
             const userVehicleRef = database().ref(`${this.USER_VEHICLES_PATH}/${userId}/${userVehicleId}`);
             
@@ -568,53 +564,8 @@ class VehicleService {
 
             const nowIso = new Date().toISOString();
 
-            // 1) Liberar locks antigos do mesmo usuário
-            const previousActiveVehicles = userVehicles
-                .filter(uv => uv.isActive === true && uv.vehicleId && uv.vehicleId !== vehicleId)
-                .map(uv => String(uv.vehicleId));
-
-            for (const previousVehicleId of previousActiveVehicles) {
-                await database()
-                    .ref(`${this.VEHICLE_ACTIVE_ASSIGNMENT_PATH}/${previousVehicleId}`)
-                    .transaction(current => {
-                        if (!current) return current;
-                        const currentUserId = String(current.userId || current.driverId || '');
-                        if (currentUserId !== String(userId)) return current;
-                        return null;
-                    });
-            }
-
-            // 2) Reservar lock do veículo alvo (bloqueia dois usuários com mesmo carro ativo)
-            const lockRef = database().ref(`${this.VEHICLE_ACTIVE_ASSIGNMENT_PATH}/${vehicleId}`);
-            const lockPayload = {
-                userId,
-                driverId: userId,
-                vehicleId,
-                userVehicleId: targetUserVehicle.id,
-                source: 'mobile_app',
-                assignedAt: nowIso,
-                updatedAt: nowIso
-            };
-            const tx = await lockRef.transaction(current => {
-                if (!current) return lockPayload;
-                const currentUserId = String(current.userId || current.driverId || '');
-                if (currentUserId === String(userId)) {
-                    return {
-                        ...current,
-                        ...lockPayload,
-                        assignedAt: current.assignedAt || nowIso
-                    };
-                }
-                return;
-            });
-
-            if (!tx.committed) {
-                const conflict = tx?.snapshot?.val() || {};
-                const conflictUser = conflict.userId || conflict.driverId || 'outro motorista';
-                throw new Error(`Veículo já está ativo com ${conflictUser}`);
-            }
-
-            // 3) Atualizar vínculos do usuário
+            // Seleção é uma preferência do perfil. A exclusividade operacional
+            // do veículo é adquirida somente quando o motorista fica online.
             const updates = {};
             for (const userVehicle of userVehicles) {
                 updates[`${this.USER_VEHICLES_PATH}/${userId}/${userVehicle.id}/isActive`] = false;
@@ -627,19 +578,6 @@ class VehicleService {
             updates[`${this.USER_VEHICLES_PATH}/${userId}/${targetUserVehicle.id}/updatedAt`] = nowIso;
             updates[`${this.USERS_PATH}/${userId}/activeVehicleId`] = vehicleId;
             updates[`${this.USERS_PATH}/${userId}/updatedAt`] = nowIso;
-
-            const lockVehicleIds = [...new Set([...previousActiveVehicles, String(vehicleId)])];
-            for (const lockVehicleId of lockVehicleIds) {
-                const assignmentSnapshot = await database()
-                    .ref(`${this.VEHICLE_ACTIVE_ASSIGNMENT_PATH}/${lockVehicleId}`)
-                    .once('value');
-                const assignment = assignmentSnapshot.val() || null;
-                const assignedUserId = assignment ? (assignment.userId || assignment.driverId || null) : null;
-                updates[`${this.VEHICLES_PATH}/${lockVehicleId}/activeDriverId`] = assignedUserId;
-                updates[`${this.VEHICLES_PATH}/${lockVehicleId}/activeUserVehicleId`] = assignment?.userVehicleId || null;
-                updates[`${this.VEHICLES_PATH}/${lockVehicleId}/isInUseByDriver`] = Boolean(assignedUserId);
-                updates[`${this.VEHICLES_PATH}/${lockVehicleId}/updatedAt`] = nowIso;
-            }
 
             await database().ref().update(updates);
 
@@ -703,6 +641,8 @@ class VehicleService {
             await userVehicleRef.remove();
 
             if (userVehicle.isActive === true && userVehicle.vehicleId) {
+                // Limpa apenas um assignment legado que ainda pertença ao próprio
+                // perfil. O catálogo global não representa mais seleção/online.
                 await database()
                     .ref(`${this.VEHICLE_ACTIVE_ASSIGNMENT_PATH}/${userVehicle.vehicleId}`)
                     .transaction(current => {
@@ -713,10 +653,6 @@ class VehicleService {
                     });
 
                 await database().ref().update({
-                    [`${this.VEHICLES_PATH}/${userVehicle.vehicleId}/activeDriverId`]: null,
-                    [`${this.VEHICLES_PATH}/${userVehicle.vehicleId}/activeUserVehicleId`]: null,
-                    [`${this.VEHICLES_PATH}/${userVehicle.vehicleId}/isInUseByDriver`]: false,
-                    [`${this.VEHICLES_PATH}/${userVehicle.vehicleId}/updatedAt`]: new Date().toISOString(),
                     [`${this.USERS_PATH}/${userId}/activeVehicleId`]: '',
                     [`${this.USERS_PATH}/${userId}/updatedAt`]: new Date().toISOString()
                 });

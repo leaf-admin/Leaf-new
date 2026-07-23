@@ -8,6 +8,13 @@ import robotaxiPrototypeTokens from '../design-system/robotaxiPrototypeTokens';
 const { color, motion } = robotaxiPrototypeTokens;
 const ROUTE_ANIMATION_DURATION = Math.min(Number(motion.timing.map) || 840, 840);
 const POINTS_PER_SEGMENT = 26;
+const MIN_ANIMATED_ROUTE_POINTS = 6;
+const ZERO_VIEWPORT_PADDING = Object.freeze({
+  top: 0,
+  right: 0,
+  bottom: 0,
+  left: 0,
+});
 const DRIVER_MARKER_SMOOTH_MS = 850;
 const DRIVER_MARKER_HEADING_SMOOTH_MS = 520;
 const DRIVER_MARKER_SMOOTH_SNAP_METERS = 3000;
@@ -114,7 +121,7 @@ function normalizeMapCoordinate(value) {
   return { latitude, longitude };
 }
 
-function resolveVehicleColorToken(value) {
+function resolveSingleVehicleColorToken(value) {
   const normalized = String(value || '')
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
@@ -209,6 +216,37 @@ function resolveVehicleColorToken(value) {
   }
 
   return null;
+}
+
+export function resolveVehicleColorToken(...values) {
+  for (const value of values) {
+    const token = resolveSingleVehicleColorToken(value);
+    if (token) {
+      return token;
+    }
+  }
+
+  return null;
+}
+
+export function resolveScreenRelativeVehicleHeading(vehicleHeading, mapCameraHeading = 0) {
+  if (vehicleHeading === null || vehicleHeading === undefined || vehicleHeading === '') {
+    return 0;
+  }
+
+  const normalizedVehicleHeading = normalizeHeadingDegrees(vehicleHeading);
+  const normalizedMapCameraHeading = normalizeHeadingDegrees(mapCameraHeading);
+
+  if (normalizedVehicleHeading === null) {
+    return 0;
+  }
+
+  // Projected vehicle overlays live in screen coordinates, unlike a native
+  // flat marker. When navigation rotates the map to keep the route upright,
+  // compensate for that camera bearing so the vehicle keeps facing its route.
+  return normalizeHeadingDegrees(
+    normalizedVehicleHeading - (normalizedMapCameraHeading ?? 0),
+  ) ?? 0;
 }
 
 function resolveVehicleMarkerBodyColor(token) {
@@ -313,6 +351,27 @@ function normalizeTrafficRouteSegments(segments = []) {
       };
     })
     .filter(Boolean);
+}
+
+export function resolveRouteRenderCoordinates({
+  hasRoute,
+  displayedRouteCoordinates = [],
+  staticRouteCoordinates = [],
+  shouldAnimateRoute = false,
+} = {}) {
+  if (!hasRoute) {
+    return [];
+  }
+
+  if (Array.isArray(displayedRouteCoordinates) && displayedRouteCoordinates.length >= 2) {
+    return displayedRouteCoordinates;
+  }
+
+  if (shouldAnimateRoute) {
+    return [];
+  }
+
+  return Array.isArray(staticRouteCoordinates) ? staticRouteCoordinates : [];
 }
 
 function buildRouteMotionMetrics(path = []) {
@@ -1163,6 +1222,8 @@ function PrototypeMapLayer({
   nearbyVehicles = [],
   routeCoordinates,
   routeTrafficSegments = [],
+  routeSynthetic = false,
+  routeSource = '',
   originCoordinate,
   destinationCoordinate,
   destinationLabel,
@@ -1192,7 +1253,10 @@ function PrototypeMapLayer({
   destinationMarkerMode = 'place',
   destinationMarkerLetter = 'P',
   viewportPadding = null,
-  forceRegionUpdate = false
+  routeViewportRegion = null,
+  forceRegionUpdate = false,
+  manualCameraHoldMs = 0,
+  mapCameraHeading = 0,
 }) {
   const mapProvider =
     Platform.OS === 'ios' || Platform.OS === 'android'
@@ -1210,7 +1274,25 @@ function PrototypeMapLayer({
       windowLayout.width,
     ],
   );
+  const resolvedRouteViewportRegion = useMemo(
+    () => (isValidMapRegion(routeViewportRegion) ? routeViewportRegion : null),
+    [
+      routeViewportRegion?.latitude,
+      routeViewportRegion?.latitudeDelta,
+      routeViewportRegion?.longitude,
+      routeViewportRegion?.longitudeDelta,
+    ],
+  );
+  // routeViewportRegion already accounts for the bottomsheet. Applying native
+  // map padding as well would shift the camera twice on Google Maps.
+  const resolvedMapPadding = resolvedRouteViewportRegion
+    ? ZERO_VIEWPORT_PADDING
+    : resolvedViewportPadding;
   const markerCoordinate = userCoordinate || region;
+  const normalizedManualCameraHoldMs = Math.max(0, Number(manualCameraHoldMs) || 0);
+  const manualCameraHoldUntilRef = useRef(0);
+  const manualCameraResumeTimeoutRef = useRef(null);
+  const [manualCameraControlHeld, setManualCameraControlHeld] = useState(false);
   const normalizedDriverCoordinate = useMemo(
     () => normalizeMapCoordinate(driverCoordinate),
     [
@@ -1234,6 +1316,10 @@ function PrototypeMapLayer({
       driverCoordinate?.heading,
       driverHeading,
     ],
+  );
+  const normalizedMapCameraHeading = useMemo(
+    () => normalizeHeadingDegrees(mapCameraHeading) ?? 0,
+    [mapCameraHeading],
   );
   const hasDriverCoordinate = Boolean(normalizedDriverCoordinate);
   const hasSearchCenter =
@@ -1259,7 +1345,9 @@ function PrototypeMapLayer({
     return normalized < 0 ? normalized + 360 : normalized;
   }, [userHeading]);
   const hasRoute = Array.isArray(routeCoordinates) && routeCoordinates.length >= 2;
-  const isSyntheticRoutePreview = hasRoute && routeCoordinates.length <= 4;
+  const isSyntheticRoutePreview =
+    hasRoute &&
+    (routeSynthetic === true || String(routeSource || '').trim().toLowerCase() === 'fallback');
   const normalizedOriginCoordinate = useMemo(
     () => normalizeMapCoordinate(originCoordinate),
     [
@@ -1347,6 +1435,7 @@ function PrototypeMapLayer({
   const [activeNearbyRequestIndex, setActiveNearbyRequestIndex] = useState(0);
   const [androidMapLayout, setAndroidMapLayout] = useState({ width: 0, height: 0 });
   const [androidVisibleRegion, setAndroidVisibleRegion] = useState(region);
+  const [nativeMapReadyVersion, setNativeMapReadyVersion] = useState(0);
   const [userAvatarFailed, setUserAvatarFailed] = useState(false);
   const [smoothedDriverCoordinate, setSmoothedDriverCoordinate] = useState(targetDriverCoordinate);
   const [smoothedDriverHeading, setSmoothedDriverHeading] = useState(
@@ -1354,6 +1443,7 @@ function PrototypeMapLayer({
   );
   const androidPendingRegionRef = useRef(region);
   const androidRegionFrameRef = useRef(null);
+  const nativeMapLayoutKeyRef = useRef('');
   const driverSmoothFrameRef = useRef(null);
   const driverPredictionFrameRef = useRef(null);
   const driverPredictionBaseRef = useRef(null);
@@ -1381,17 +1471,15 @@ function PrototypeMapLayer({
   const displayedRouteCoordinates = shouldAnimateRoute
     ? animatedRouteCoordinates
     : staticRouteCoordinates;
-  const routeRenderCoordinates = useMemo(() => {
-    if (!hasRoute) {
-      return [];
-    }
-
-    if (displayedRouteCoordinates.length >= 2) {
-      return displayedRouteCoordinates;
-    }
-
-    return staticRouteCoordinates.slice(0, 2);
-  }, [displayedRouteCoordinates, hasRoute, staticRouteCoordinates]);
+  const routeRenderCoordinates = useMemo(
+    () => resolveRouteRenderCoordinates({
+      hasRoute,
+      displayedRouteCoordinates,
+      staticRouteCoordinates,
+      shouldAnimateRoute,
+    }),
+    [displayedRouteCoordinates, hasRoute, shouldAnimateRoute, staticRouteCoordinates],
+  );
   const routeViewportFitCoordinates = useMemo(() => {
     if (staticRouteCoordinates.length >= 2) {
       return staticRouteCoordinates;
@@ -1416,6 +1504,10 @@ function PrototypeMapLayer({
     normalizeHeadingDegrees(smoothedDriverHeading) ??
     normalizedDriverHeading ??
     normalizedUserHeading;
+  const displayedDriverScreenHeading = resolveScreenRelativeVehicleHeading(
+    displayedDriverHeading,
+    normalizedMapCameraHeading,
+  );
   const driverMarkerCampaignImageSource = useMemo(
     () => resolveRemoteMarkerImageSource(driverMarkerAssetUrl),
     [driverMarkerAssetUrl],
@@ -1460,10 +1552,11 @@ function PrototypeMapLayer({
   );
   const effectiveRouteShadowColor =
     routeShadowColor || '#FFFFFF';
+  const hasExplicitTrafficRouteSegments = normalizedTrafficRouteSegments.length > 0;
   const effectiveRouteMainColor =
     routeMainColor || '#1A330E';
   const effectiveRouteHighlightColor =
-    routeHighlightColor === undefined
+    hasExplicitTrafficRouteSegments || routeHighlightColor === undefined
       ? null
       : routeHighlightColor;
   const trafficRouteSegmentCount = normalizedTrafficRouteSegments.length;
@@ -1477,6 +1570,7 @@ function PrototypeMapLayer({
       hasRenderableRoute
         ? 1 +
           (!useSimplifiedIosMap ? 1 : 0) +
+          (hasExplicitTrafficRouteSegments ? 0 : 1) +
           trafficRouteSegmentCount +
           (!useSimplifiedIosMap && effectiveRouteHighlightColor ? 1 : 0)
         : 0;
@@ -1495,6 +1589,7 @@ function PrototypeMapLayer({
     ].join('|');
   }, [
     effectiveRouteHighlightColor,
+    hasExplicitTrafficRouteSegments,
     hasDestination,
     hasDestinationMarker,
     hasDisplayedDriverCoordinate,
@@ -1793,54 +1888,155 @@ function PrototypeMapLayer({
     });
   }, []);
 
+  const markNativeMapReady = useCallback(() => {
+    setNativeMapReadyVersion(previous => previous + 1);
+  }, []);
+
+  const applyForcedRegionUpdate = useCallback((duration = Platform.OS === 'android' ? 0 : 180) => {
+    const targetViewportRegion = resolvedRouteViewportRegion || region;
+    if (!forceRegionUpdate || !mapRef?.current || !isValidMapRegion(targetViewportRegion)) {
+      return false;
+    }
+
+    if (Date.now() < manualCameraHoldUntilRef.current) {
+      return false;
+    }
+
+    scheduleAndroidVisibleRegionUpdate(targetViewportRegion);
+
+    if (
+      resolvedRouteViewportRegion &&
+      typeof mapRef.current.animateToRegion === 'function'
+    ) {
+      mapRef.current.animateToRegion(resolvedRouteViewportRegion, duration);
+      return true;
+    }
+
+    if (
+      routeViewportFitCoordinates.length >= 2 &&
+      typeof mapRef.current.fitToCoordinates === 'function'
+    ) {
+      try {
+        mapRef.current.fitToCoordinates(routeViewportFitCoordinates, {
+          edgePadding: resolvedViewportPadding,
+          animated: Platform.OS !== 'android' && duration > 0,
+        });
+        return true;
+      } catch (_error) {
+        // Fallback to direct region animation below.
+      }
+    }
+
+    if (typeof mapRef.current.animateToRegion === 'function') {
+      mapRef.current.animateToRegion(region, duration);
+      return true;
+    }
+
+    return false;
+  }, [
+    forceRegionUpdate,
+    mapRef,
+    region,
+    resolvedRouteViewportRegion,
+    resolvedViewportPadding,
+    routeViewportFitCoordinates,
+    scheduleAndroidVisibleRegionUpdate,
+  ]);
+
+  const handleNativeMapLoaded = useCallback((event) => {
+    markNativeMapReady();
+    applyForcedRegionUpdate(0);
+    if (typeof onMapLoaded === 'function') {
+      onMapLoaded(event);
+    }
+  }, [applyForcedRegionUpdate, markNativeMapReady, onMapLoaded]);
+
+  const handleNativeMapReady = useCallback((event) => {
+    markNativeMapReady();
+    applyForcedRegionUpdate(0);
+    if (typeof onMapReady === 'function') {
+      onMapReady(event);
+    }
+  }, [applyForcedRegionUpdate, markNativeMapReady, onMapReady]);
+
+  const handleNativeMapLayout = useCallback((event) => {
+    onMapLayout?.(event);
+    const width = event?.nativeEvent?.layout?.width;
+    const height = event?.nativeEvent?.layout?.height;
+    if (Number.isFinite(width) && Number.isFinite(height) && width > 0 && height > 0) {
+      const layoutKey = `${Math.round(width)}x${Math.round(height)}`;
+      if (nativeMapLayoutKeyRef.current !== layoutKey) {
+        nativeMapLayoutKeyRef.current = layoutKey;
+        markNativeMapReady();
+      }
+
+      setAndroidMapLayout(previous => {
+        if (previous.width === width && previous.height === height) {
+          return previous;
+        }
+
+        return { width, height };
+      });
+    }
+  }, [markNativeMapReady, onMapLayout]);
+
+  const handleMapPanDrag = useCallback((event) => {
+    if (normalizedManualCameraHoldMs > 0) {
+      manualCameraHoldUntilRef.current = Date.now() + normalizedManualCameraHoldMs;
+      setManualCameraControlHeld(true);
+      if (manualCameraResumeTimeoutRef.current) {
+        clearTimeout(manualCameraResumeTimeoutRef.current);
+      }
+      // A manual pan must feel respected, but it cannot permanently hide the
+      // route behind a card. Re-frame the latest route once the hold expires.
+      manualCameraResumeTimeoutRef.current = setTimeout(() => {
+        manualCameraResumeTimeoutRef.current = null;
+        setManualCameraControlHeld(false);
+        applyForcedRegionUpdate(Platform.OS === 'android' ? 0 : 180);
+      }, normalizedManualCameraHoldMs + 20);
+    }
+    onMapPanDrag?.(event);
+  }, [applyForcedRegionUpdate, normalizedManualCameraHoldMs, onMapPanDrag]);
+
+  useEffect(() => () => {
+    if (manualCameraResumeTimeoutRef.current) {
+      clearTimeout(manualCameraResumeTimeoutRef.current);
+    }
+  }, []);
+
   useEffect(() => {
-    if (!forceRegionUpdate || !mapRef?.current || !isValidMapRegion(region)) {
+    if (!forceRegionUpdate || normalizedManualCameraHoldMs <= 0) {
+      setManualCameraControlHeld(false);
+    }
+  }, [forceRegionUpdate, normalizedManualCameraHoldMs]);
+
+  useEffect(() => {
+    if (!applyForcedRegionUpdate(0)) {
       return undefined;
     }
 
-    scheduleAndroidVisibleRegionUpdate(region);
     const timeoutId = setTimeout(() => {
-      if (!mapRef?.current) {
-        return;
-      }
-
-      if (
-        routeViewportFitCoordinates.length >= 2 &&
-        typeof mapRef.current.fitToCoordinates === 'function'
-      ) {
-        try {
-          mapRef.current.fitToCoordinates(routeViewportFitCoordinates, {
-            edgePadding: resolvedViewportPadding,
-            animated: Platform.OS !== 'android',
-          });
-          return;
-        } catch (_error) {
-          // Fallback to the previous region behavior if the native map is not ready yet.
-        }
-      }
-
-      mapRef.current.animateToRegion(region, Platform.OS === 'android' ? 0 : 180);
+      applyForcedRegionUpdate(Platform.OS === 'android' ? 0 : 180);
     }, Platform.OS === 'android' ? 420 : 80);
 
     return () => clearTimeout(timeoutId);
   }, [
+    applyForcedRegionUpdate,
     forceRegionUpdate,
-    mapRef,
-    region?.latitude,
-    region?.latitudeDelta,
-    region?.longitude,
-    region?.longitudeDelta,
-    resolvedViewportPadding.bottom,
-    resolvedViewportPadding.left,
-    resolvedViewportPadding.right,
-    resolvedViewportPadding.top,
-    routeViewportFitCoordinates,
-    scheduleAndroidVisibleRegionUpdate,
+    nativeMapReadyVersion,
   ]);
 
   // Keep the user avatar tied to the real map coordinate on iOS.
   // The projected overlay is only needed for the Android screen-space marker path.
   const shouldRenderProjectedUserOverlay = Platform.OS === 'android';
+  const forcedTargetViewportRegion = resolvedRouteViewportRegion || region;
+  const iosControlledRegion =
+    Platform.OS === 'ios' &&
+    forceRegionUpdate &&
+    !manualCameraControlHeld &&
+    isValidMapRegion(forcedTargetViewportRegion)
+      ? forcedTargetViewportRegion
+      : undefined;
   const androidProjectionLayout = useMemo(() => {
     const width =
       Number.isFinite(androidMapLayout.width) && androidMapLayout.width > 0
@@ -2165,10 +2361,15 @@ function PrototypeMapLayer({
     searchingMode,
     useSimplifiedIosMap,
   ]);
+  const shouldRenderProjectedNearbyVehicleOverlays = Boolean(
+    searchingMode &&
+      androidProjectionLayout.hasLayout &&
+      collisionSafeNearbyVehicles.length > 0 &&
+      (Platform.OS === 'android' || (Platform.OS === 'ios' && useSimplifiedIosMap))
+  );
   const projectedNearbyVehicleOverlayItems = useMemo(() => {
     if (
-      Platform.OS !== 'ios' ||
-      !useSimplifiedIosMap ||
+      !shouldRenderProjectedNearbyVehicleOverlays ||
       !searchingMode ||
       !androidProjectionLayout.hasLayout ||
       collisionSafeNearbyVehicles.length === 0
@@ -2223,7 +2424,7 @@ function PrototypeMapLayer({
     driverMarkerCampaignImageSource,
     region,
     searchingMode,
-    useSimplifiedIosMap,
+    shouldRenderProjectedNearbyVehicleOverlays,
   ]);
 
   useEffect(() => {
@@ -2246,16 +2447,21 @@ function PrototypeMapLayer({
       const eased = progress < 0.5
         ? 4 * progress * progress * progress
         : 1 - Math.pow(-2 * progress + 2, 3) / 2;
-      const visibleCount = Math.max(2, Math.floor(denseRoute.length * eased));
+      const minimumVisibleCount = Math.min(MIN_ANIMATED_ROUTE_POINTS, denseRoute.length);
+      const visibleCount = Math.floor(denseRoute.length * eased);
 
-      setAnimatedRouteCoordinates(denseRoute.slice(0, visibleCount));
+      setAnimatedRouteCoordinates(
+        visibleCount >= minimumVisibleCount
+          ? denseRoute.slice(0, Math.max(minimumVisibleCount, visibleCount))
+          : [],
+      );
 
       if (progress < 1) {
         frameId = requestAnimationFrame(animateStep);
       }
     };
 
-    setAnimatedRouteCoordinates(denseRoute.slice(0, 2));
+    setAnimatedRouteCoordinates([]);
     frameId = requestAnimationFrame(animateStep);
 
     return () => {
@@ -2270,20 +2476,7 @@ function PrototypeMapLayer({
       <View
         pointerEvents={interactionEnabled ? 'auto' : 'none'}
         style={StyleSheet.absoluteFillObject}
-        onLayout={event => {
-          onMapLayout?.(event);
-          const width = event?.nativeEvent?.layout?.width;
-          const height = event?.nativeEvent?.layout?.height;
-          if (Number.isFinite(width) && Number.isFinite(height) && width > 0 && height > 0) {
-            setAndroidMapLayout(previous => {
-              if (previous.width === width && previous.height === height) {
-                return previous;
-              }
-
-              return { width, height };
-            });
-          }
-        }}
+        onLayout={handleNativeMapLayout}
       >
         <MapView
           // iOS Google Maps can abort in AIRGoogleMap when React inserts/removes
@@ -2294,7 +2487,7 @@ function PrototypeMapLayer({
           testID="prototype-map-view"
           accessibilityLabel="prototype-map-view"
           style={StyleSheet.absoluteFillObject}
-          mapPadding={resolvedViewportPadding}
+          mapPadding={iosControlledRegion ? ZERO_VIEWPORT_PADDING : resolvedMapPadding}
           onRegionChange={scheduleAndroidVisibleRegionUpdate}
           onRegionChangeComplete={nextRegion => {
             scheduleAndroidVisibleRegionUpdate(nextRegion);
@@ -2302,13 +2495,14 @@ function PrototypeMapLayer({
               onRegionChangeComplete(nextRegion);
             }
           }}
-          onPanDrag={interactionEnabled ? onMapPanDrag : undefined}
+          onPanDrag={interactionEnabled ? handleMapPanDrag : undefined}
           provider={mapProvider}
           initialRegion={region}
+          region={iosControlledRegion}
           mapType="standard"
           customMapStyle={mapStyleAppleLike}
-          onMapLoaded={onMapLoaded}
-          onMapReady={onMapReady}
+          onMapLoaded={handleNativeMapLoaded}
+          onMapReady={handleNativeMapReady}
           scrollEnabled={interactionEnabled}
           zoomEnabled={interactionEnabled}
           rotateEnabled={interactionEnabled}
@@ -2353,7 +2547,7 @@ function PrototypeMapLayer({
             />
           ) : null}
 
-          {hasRenderableRoute ? (
+          {hasRenderableRoute && !hasExplicitTrafficRouteSegments ? (
             <Polyline
               key={`route-main-${effectiveRouteMainColor}`}
               coordinates={routeRenderCoordinates}
@@ -2398,7 +2592,7 @@ function PrototypeMapLayer({
               coordinate={normalizedOriginCoordinate}
               zIndex={17}
               anchor={{ x: 0.5, y: 0.9 }}
-              tracksViewChanges={Platform.OS === 'android'}
+              tracksViewChanges={false}
               pinColor={undefined}
             >
               {Platform.OS === 'android' ? (
@@ -2415,7 +2609,7 @@ function PrototypeMapLayer({
               coordinate={normalizedDestinationCoordinate}
               zIndex={18}
               anchor={{ x: 0.5, y: destinationMarkerMode === 'avatar' ? 0.5 : 0.9 }}
-              tracksViewChanges={Platform.OS === 'android' && destinationMarkerMode !== 'avatar'}
+              tracksViewChanges={false}
               pinColor={undefined}
             >
               <View collapsable={false}>
@@ -2455,7 +2649,7 @@ function PrototypeMapLayer({
               anchor={{ x: 0.5, y: 0.5 }}
               flat={driverMarkerMode === 'car'}
               rotation={driverMarkerMode === 'car' ? displayedDriverHeading : 0}
-              tracksViewChanges={shouldRenderDriverVehicleMarkerChild}
+              tracksViewChanges={Platform.OS !== 'android' && shouldRenderDriverVehicleMarkerChild}
               pinColor={undefined}
             >
               {driverMarkerMode === 'avatar' ? (
@@ -2469,7 +2663,7 @@ function PrototypeMapLayer({
             </Marker>
           ) : null}
 
-          {!useSimplifiedIosMap && searchingMode
+          {!useSimplifiedIosMap && searchingMode && !shouldRenderProjectedNearbyVehicleOverlays
             ? collisionSafeNearbyVehicles.map((vehicle, index) => {
                 const id = String(vehicle.id || '');
                 const isOuterVehicle = id.startsWith('outer');
@@ -2564,7 +2758,7 @@ function PrototypeMapLayer({
         <ProjectedVehicleOverlay
           pointX={projectedDriverVehicleOverlayPoint.x}
           pointY={projectedDriverVehicleOverlayPoint.y}
-          heading={displayedDriverHeading}
+          heading={displayedDriverScreenHeading}
           source={driverVehicleMarkerImageSource}
           colorToken={driverVehicleMarkerColorToken}
         />
@@ -2603,7 +2797,7 @@ function PrototypeMapLayer({
         </View>
       ) : null}
 
-      {Platform.OS === 'ios' && projectedNearbyVehicleOverlayItems.length > 0 ? (
+      {projectedNearbyVehicleOverlayItems.length > 0 ? (
         <View pointerEvents="none" style={styles.iosNearbyVehicleOverlayLayer}>
           {projectedNearbyVehicleOverlayItems.map(item => (
             <React.Fragment key={`ios-nearby-${item.id}-${item.index}`}>
@@ -2669,7 +2863,7 @@ function PrototypeMapLayer({
           <ProjectedVehicleOverlay
             pointX={projectedUserOverlayPoint.x}
             pointY={projectedUserOverlayPoint.y}
-            heading={displayedDriverHeading}
+            heading={displayedDriverScreenHeading}
             source={driverVehicleMarkerImageSource}
             colorToken={driverVehicleMarkerColorToken}
           />
@@ -2841,40 +3035,35 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(26,51,14,0.08)'
   },
   currentLocationWrap: {
-    width: 42,
-    height: 42,
+    width: 32,
+    height: 32,
     alignItems: 'center',
     justifyContent: 'center',
     overflow: 'visible'
   },
   currentLocationBadge: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(255,255,255,0.96)',
-    borderWidth: 2,
-    borderColor: 'rgba(26,51,14,0.14)',
-    shadowColor: color.shadow.base,
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.16,
-    shadowRadius: 9,
-    elevation: 6
+    backgroundColor: 'rgba(255, 214, 10, 0.34)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.92)'
   },
   currentLocationBadgeInner: {
-    width: 23,
-    height: 23,
-    borderRadius: 11.5,
+    width: 16,
+    height: 16,
+    borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#E8F1E3'
+    backgroundColor: '#FFFFFF'
   },
   currentLocationDot: {
     width: 10,
     height: 10,
     borderRadius: 5,
-    backgroundColor: '#1A330E'
+    backgroundColor: '#1FA64A'
   },
   destinationMarkerWrap: {
     alignItems: 'center'

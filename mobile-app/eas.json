@@ -72,7 +72,8 @@
         "EXPO_PUBLIC_ENABLE_CUSTOM_OTP_FALLBACK": "false",
         "EXPO_PUBLIC_ENABLE_QA_OTP_FORCE_FLOW": "false",
         "EXPO_PUBLIC_ALLOW_CLIENT_DIRECT_GOOGLE_FALLBACK": "false",
-        "EXPO_PUBLIC_ALLOW_INSECURE_HTTP": "false"
+        "EXPO_PUBLIC_ALLOW_INSECURE_HTTP": "false",
+        "EXPO_PUBLIC_FORCE_LEGACY_MAP_UI": "false"
       },
       "android": {
         "buildType": "apk",
@@ -101,7 +102,8 @@
         "EXPO_PUBLIC_ENABLE_CUSTOM_OTP_FALLBACK": "false",
         "EXPO_PUBLIC_ENABLE_QA_OTP_FORCE_FLOW": "false",
         "EXPO_PUBLIC_ALLOW_CLIENT_DIRECT_GOOGLE_FALLBACK": "false",
-        "EXPO_PUBLIC_ALLOW_INSECURE_HTTP": "false"
+        "EXPO_PUBLIC_ALLOW_INSECURE_HTTP": "false",
+        "EXPO_PUBLIC_FORCE_LEGACY_MAP_UI": "false"
       },
       "ios": {
         "image": "macos-sequoia-15.6-xcode-26.2",
@@ -130,7 +132,8 @@
         "EXPO_PUBLIC_ENABLE_CUSTOM_OTP_FALLBACK": "false",
         "EXPO_PUBLIC_ENABLE_QA_OTP_FORCE_FLOW": "false",
         "EXPO_PUBLIC_ALLOW_CLIENT_DIRECT_GOOGLE_FALLBACK": "false",
-        "EXPO_PUBLIC_ALLOW_INSECURE_HTTP": "false"
+        "EXPO_PUBLIC_ALLOW_INSECURE_HTTP": "false",
+        "EXPO_PUBLIC_FORCE_LEGACY_MAP_UI": "false"
       },
       "android": {
         "buildType": "apk",
@@ -153,7 +156,8 @@
         "EXPO_PUBLIC_ENABLE_TRAFFIC_ROUTE": "true",
         "EXPO_PUBLIC_FORCE_PAYMENT_BYPASS": "false",
         "EXPO_PUBLIC_ALLOW_CLIENT_DIRECT_GOOGLE_FALLBACK": "false",
-        "EXPO_PUBLIC_ALLOW_INSECURE_HTTP": "false"
+        "EXPO_PUBLIC_ALLOW_INSECURE_HTTP": "false",
+        "EXPO_PUBLIC_FORCE_LEGACY_MAP_UI": "false"
       },
       "android": {
         "buildType": "apk",

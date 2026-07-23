@@ -4,6 +4,23 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { execFileSync } = require('child_process');
+const FIREBASE_ID_TOKEN_HELPER_PATH = path.join(
+  __dirname,
+  '..',
+  '..',
+  '..',
+  'leaf-websocket-backend',
+  'tests',
+  'e2e',
+  'backend',
+  '__helpers__',
+  'firebase-id-token.js',
+);
+
+async function getIdTokenForUid(uid) {
+  const tokenHelper = require(FIREBASE_ID_TOKEN_HELPER_PATH);
+  return tokenHelper.getIdTokenForUid(uid);
+}
 
 const APP_ID = 'br.com.leaf.ride';
 const ROOT_DIR = path.resolve(__dirname, '../../..');
@@ -16,6 +33,13 @@ const DEVICE_MAP = {
   'driver': '2E44BC8E-9AA8-43BE-BD5E-D0B5A73E543C',
   '16e': '2E44BC8E-9AA8-43BE-BD5E-D0B5A73E543C'
 };
+const DEVICE_NAME_MAP = {
+  '17pro': 'iPhone 17 Pro',
+  '17promax': 'iPhone 17 Pro Max',
+  'driver': 'iPhone 17e',
+  '17e': 'iPhone 17e',
+  '16e': 'iPhone 17e',
+};
 const PREFIX = '@prototype_runtime_session_';
 const QA_PREFIX = '@prototype_runtime_qa_seed_';
 const DRIVER_ACTIVATION_STORAGE_PREFIX = '@prototype_driver_activation_';
@@ -23,7 +47,9 @@ const CONFIRMED_DESTINATIONS_STORAGE_KEY = 'confirmedDestinations';
 const AUTH_UID_STORAGE_KEY = '@auth_uid';
 const USER_DATA_STORAGE_KEY = '@user_data';
 const TEST_MODE_STORAGE_KEY = '@test_mode';
+const QA_SOCKET_ID_TOKEN_STORAGE_KEY = '@qa_socket_id_token';
 const DEFAULT_QA_FREEZE_MS = 600000;
+const REALTIME_DRIVER_SCENARIOS = new Set(['driver-home']);
 
 function readJsonIfExists(filePath, fallbackValue = {}) {
   try {
@@ -138,6 +164,12 @@ function arg(name, fallback = '') {
 
 function hasFlag(name) {
   return process.argv.includes(name);
+}
+
+function defaultFreezeMsForScenario(scenario) {
+  return REALTIME_DRIVER_SCENARIOS.has(String(scenario || '').trim())
+    ? 0
+    : DEFAULT_QA_FREEZE_MS;
 }
 
 function parseCoordinateOverride(latitudeArg, longitudeArg) {
@@ -259,6 +291,29 @@ function runSimctlBestEffort(args) {
 
 function runSimctlIgnoringFailure(args) {
   return runIgnoringFailure(SIMCTL_BIN, args);
+}
+
+function resolveSimulatorDeviceId(deviceKey, explicitDevice = '') {
+  const normalizedKey = String(deviceKey || '').trim().toLowerCase();
+  const targetName = DEVICE_NAME_MAP[normalizedKey];
+  if (!targetName) {
+    return String(explicitDevice || deviceKey || '').trim();
+  }
+
+  try {
+    const parsed = JSON.parse(runSimctl(['list', 'devices', 'available', '--json']));
+    const devices = Object.values(parsed?.devices || {}).flat();
+    const bootedMatch = devices.find(
+      (device) => device?.name === targetName && device?.state === 'Booted',
+    );
+    if (bootedMatch?.udid) {
+      return bootedMatch.udid;
+    }
+  } catch (_error) {
+    // Fall back to the stable mapping when CoreSimulator cannot be queried.
+  }
+
+  return DEVICE_MAP[normalizedKey] || String(explicitDevice || '').trim();
 }
 
 function latestCrashReport(appName = 'Leaf') {
@@ -623,6 +678,58 @@ function saveAsyncStorageValue(dataContainer, key, value) {
   const manifest = loadManifest(manifestFilePath);
   manifest[String(key)] = serialized;
   fs.writeFileSync(manifestFilePath, JSON.stringify(manifest));
+}
+
+function getPersistedQaUid(dataContainer) {
+  const manifest = loadManifest(getManifestFilePath(dataContainer));
+  const rawUserData = manifest[USER_DATA_STORAGE_KEY];
+  let userData = null;
+  try {
+    userData = rawUserData ? JSON.parse(rawUserData) : null;
+  } catch (_error) {
+    userData = null;
+  }
+
+  return String(
+    userData?.uid ||
+      userData?.id ||
+      manifest[AUTH_UID_STORAGE_KEY] ||
+      '',
+  ).trim();
+}
+
+async function seedSocketTokenOnly({
+  deviceId,
+  uid,
+  getDataContainer = getContainerData,
+  getPersistedUid = getPersistedQaUid,
+  getToken = getIdTokenForUid,
+  saveValue = saveAsyncStorageValue,
+} = {}) {
+  const normalizedDeviceId = String(deviceId || '').trim();
+  const normalizedUid = String(uid || '').trim();
+
+  if (!normalizedDeviceId || !normalizedUid) {
+    throw new Error('--socket-token-only requires explicit --device and --uid values.');
+  }
+
+  const dataContainer = getDataContainer(normalizedDeviceId);
+  const persistedUid = String(getPersistedUid(dataContainer) || '').trim();
+  if (persistedUid && persistedUid !== normalizedUid) {
+    throw new Error(
+      `QA_UID_MISMATCH: token uid ${normalizedUid} does not match persisted app uid ${persistedUid}.`,
+    );
+  }
+  const qaSocketIdToken = await getToken(normalizedUid);
+  saveValue(dataContainer, QA_SOCKET_ID_TOKEN_STORAGE_KEY, qaSocketIdToken);
+
+  return {
+    ok: true,
+    mode: 'socket-token-only',
+    deviceId: normalizedDeviceId,
+    uid: normalizedUid,
+    storageKey: QA_SOCKET_ID_TOKEN_STORAGE_KEY,
+  };
 }
 
 function buildDriverReceipt() {
@@ -1001,9 +1108,13 @@ function buildPassengerTripBase(status = 'started') {
   const isAccepted = normalizedStatus === 'accepted';
   const isArrived = normalizedStatus === 'arrived';
   const isPickupPhase = isAccepted || isArrived;
+  const routePlan = buildDriverRoutePlan();
+  const activeRouteCoordinates = isPickupPhase
+    ? routePlan.pickupCoordinates
+    : routePlan.destinationCoordinates;
   const driverCoordinate = isPickupPhase
     ? { latitude: -22.9746, longitude: -43.1903 }
-    : BASE_COORDS.inTransit;
+    : BASE_COORDS.pickup;
   const tripDistanceKm = isArrived ? 0.1 : isAccepted ? 1.2 : 5.1;
   const tripDurationMin = isArrived ? 2 : isAccepted ? 4 : 16;
 
@@ -1015,8 +1126,11 @@ function buildPassengerTripBase(status = 'started') {
       id: 'booking-proof-passenger-1',
       driverId: DRIVER_UID,
       driverName: 'Carlos Motorista Teste',
+      status: normalizedStatus,
       pickupLocation: { ...BASE_COORDS.pickup, add: LABELS.pickupAddress },
       destinationLocation: { ...BASE_COORDS.destination, add: LABELS.destinationAddress },
+      routePlan,
+      routeCoordinates: activeRouteCoordinates,
       estimatedFare: 27.5,
       paymentMethod: 'pix',
       boardingPin: '4821'
@@ -1033,7 +1147,11 @@ function buildPassengerTripBase(status = 'started') {
     tripArrivalText: `Chegada estimada em ${tripDurationMin} min`,
     paymentMethod: 'pix',
     driverCoordinate,
-    driverActiveRide: buildDriverActiveRide(normalizedStatus),
+    driverActiveRide: {
+      ...buildDriverActiveRide(normalizedStatus),
+      routePlan,
+      routeCoordinates: activeRouteCoordinates,
+    },
     driverInfo: {
       id: DRIVER_UID,
       name: 'Carlos Motorista Teste',
@@ -1050,6 +1168,7 @@ function buildPassengerQuoteBase() {
     bookingStatus: 'idle',
     activeBookingId: null,
     activeBooking: null,
+    quoteLock: null,
     selectedDestination: {
       name: 'Leblon',
       address: LABELS.destinationAddress,
@@ -1079,6 +1198,7 @@ function scenarioPatch(name) {
         bookingStatus: 'idle',
         activeBookingId: null,
         activeBooking: null,
+        quoteLock: null,
         selectedDestination: null,
         tripDistanceKm: null,
         tripDurationMin: null,
@@ -1168,6 +1288,32 @@ function scenarioPatch(name) {
         rideExtension: { status: 'idle' },
         operationalContinuation: { status: 'idle' }
       };
+    case 'passenger-cancelled-refund':
+      return {
+        bookingStatus: 'idle',
+        activeBookingId: null,
+        activeBooking: null,
+        driverOffers: [],
+        driverActiveRide: null,
+        driverInfo: null,
+        searchingElapsedSeconds: 0,
+        paymentState: {
+          status: 'refunded',
+          paymentId: 'charge-cancellation-proof-1',
+          chargeId: 'charge-cancellation-proof-1',
+          amount: 13.42,
+          originalPaidAmount: 13.42,
+          method: 'pix',
+          error: '',
+          refundStatus: 'ALREADY_REFUNDED',
+          refundAmount: 13.42,
+          cancellationFee: 0,
+          refundId: 'refund-cancellation-proof-1',
+        },
+        currentCoordinate: BASE_COORDS.pickup,
+        currentAddress: LABELS.pickupAddress,
+        lastError: 'Corrida cancelada e reembolso processado',
+      };
     case 'passenger-accepted':
       return deepMerge(buildPassengerTripBase('accepted'), {
         rideExtension: { status: 'idle' },
@@ -1221,7 +1367,7 @@ function scenarioPatch(name) {
       return deepMerge(buildDriverRideContext('accepted'), {
         bookingStatus: 'searching',
         activeBookingId: 'booking-proof-offer-1',
-        driverOnline: false,
+        driverOnline: true,
         driverOnlinePending: false,
         driverOnlineMutationSource: 'qa_seed',
         driverOffers: [buildDriverOffer()],
@@ -1235,7 +1381,7 @@ function scenarioPatch(name) {
       return deepMerge(buildDriverRideContext('accepted'), {
         bookingStatus: 'accepted',
         activeBookingId: 'booking-proof-driver-1',
-        driverOnline: false,
+        driverOnline: true,
         driverOnlinePending: false,
         driverOnlineMutationSource: 'qa_seed',
         driverOffers: [],
@@ -1247,7 +1393,7 @@ function scenarioPatch(name) {
       return deepMerge(buildDriverRideContext('arrived'), {
         bookingStatus: 'arrived',
         activeBookingId: 'booking-proof-driver-1',
-        driverOnline: false,
+        driverOnline: true,
         driverOnlinePending: false,
         driverOnlineMutationSource: 'qa_seed',
         driverOffers: [],
@@ -1259,7 +1405,7 @@ function scenarioPatch(name) {
       return deepMerge(buildDriverRideContext('started'), {
         bookingStatus: 'started',
         activeBookingId: 'booking-proof-driver-1',
-        driverOnline: false,
+        driverOnline: true,
         driverOnlinePending: false,
         driverOnlineMutationSource: 'qa_seed',
         driverOffers: [],
@@ -1356,54 +1502,14 @@ function scenarioRoute(name) {
     return params.toString();
   };
 
-  const driverTripParams = (status, bookingId = 'booking-proof-driver-1', extra = {}) => {
-    const isStartedTrip = String(status || '').trim().toLowerCase() === 'started';
-    const qaDriverCoordinate = isStartedTrip
-      ? BASE_COORDS.inTransit
-      : { latitude: -22.9746, longitude: -43.1903 };
-    const qaRouteCoordinates = isStartedTrip
-      ? [BASE_COORDS.inTransit, BASE_COORDS.destination]
-      : [qaDriverCoordinate, BASE_COORDS.pickup];
-    const request = {
-      bookingId,
-      id: bookingId,
-      status,
-      passengerName: 'Leaf Passageiro Teste',
-      passenger: 'Leaf Passageiro Teste',
-      pickupAddress: LABELS.pickupAddress,
-      pickup: LABELS.pickupAddress,
-      pickupCoordinate: BASE_COORDS.pickup,
-      dropoffAddress: LABELS.destinationAddress,
-      dropoff: LABELS.destinationAddress,
-      destinationCoordinate: BASE_COORDS.destination,
-      driverCoordinate: qaDriverCoordinate,
-      routeCoordinates: qaRouteCoordinates,
-      fare: 12.5,
-      grossFare: 12.5,
-      driverNetAmount: 10.8,
-      estimatedDriverNetAmount: 10.8,
-      estimatedOperationalFee: 0.99,
-      estimatedPaymentIntermediationFee: 0.71,
-      estimatedTotalFees: 1.7,
-      distanceKm: 1.3,
-      tripDistanceKm: 6.7,
-      pickupEtaMin: 5,
-      tripDurationMin: 20,
-      passengerRating: 4.9,
-      pricingSnapshotLocked: true,
-      ...extra
-    };
-    return `request=${encodeURIComponent(JSON.stringify(request))}`;
-  };
-
   if (name === 'passenger-home' || name === 'driver-home') {
     return 'leafapp://robotaxi/home';
   }
-  if (name === 'passenger-booking') {
-    return `leafapp://robotaxi/booking?${passengerQuoteParams()}`;
-  }
-  if (name === 'passenger-payment') {
-    return `leafapp://robotaxi/payment?${passengerQuoteParams()}`;
+  if (name === 'passenger-booking' || name === 'passenger-payment') {
+    // Booking/payment deep links still resolve to standalone legacy surfaces.
+    // QA must start from the current home runtime and reach the next surface
+    // through the canonical interaction, never through those stale routes.
+    return 'leafapp://robotaxi/home';
   }
   if (
     name === 'passenger-searching' ||
@@ -1414,15 +1520,15 @@ function scenarioRoute(name) {
     name === 'passenger-arrived' ||
     name === 'passenger-started'
   ) {
-    const status = name.replace('passenger-', '');
-    return `leafapp://robotaxi/trip?${passengerTripParams(status)}`;
+    // Passenger lifecycle state is rendered by the current home runtime.
+    // Opening robotaxi/trip would bypass it for the standalone legacy screen.
+    return 'leafapp://robotaxi/home';
   }
   if (name === 'driver-offer') {
-    return `leafapp://robotaxi/driver/offer?${driverTripParams('searching', 'booking-proof-offer-1', { expiresInSec: 18 })}&qaKeepVisible=1`;
+    return 'leafapp://robotaxi/home';
   }
   if (name === 'driver-accepted' || name === 'driver-arrived' || name === 'driver-started') {
-    const status = name.replace('driver-', '');
-    return `leafapp://robotaxi/driver/trip?${driverTripParams(status)}`;
+    return 'leafapp://robotaxi/home';
   }
   if (name === 'passenger-receipt') {
     return `leafapp://robotaxi/receipt?${passengerReceiptParams('customer')}`;
@@ -1430,11 +1536,41 @@ function scenarioRoute(name) {
   if (name === 'driver-receipt') {
     return `leafapp://robotaxi/receipt?${passengerReceiptParams('driver')}`;
   }
+  if (name === 'passenger-cancelled-refund') {
+    const params = new URLSearchParams({
+      bookingId: 'booking-cancellation-proof-1',
+      bookingStatus: 'canceled',
+      completed: 'true',
+      source: 'search',
+      originalPaidAmount: '13.42',
+      refundAmount: '13.42',
+      cancellationFee: '0',
+      refundStatus: 'ALREADY_REFUNDED',
+    });
+    return `leafapp://robotaxi/cancellation?${params.toString()}`;
+  }
   return null;
 }
 
-function main() {
-  const deviceKey = String(arg('--device', '17pro')).toLowerCase();
+async function main() {
+  const rawDeviceArg = String(arg('--device', '17pro')).trim();
+  const deviceKey = rawDeviceArg.toLowerCase();
+  const socketTokenOnly = hasFlag('--socket-token-only');
+  if (socketTokenOnly) {
+    const explicitDevice = String(arg('--device', '')).trim();
+    const explicitUid = String(arg('--uid', '')).trim();
+    if (!explicitDevice || !explicitUid) {
+      throw new Error('--socket-token-only requires explicit --device and --uid values.');
+    }
+
+    const result = await seedSocketTokenOnly({
+      deviceId: resolveSimulatorDeviceId(deviceKey, explicitDevice),
+      uid: explicitUid,
+    });
+    process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+    return;
+  }
+
   const scenario = String(arg('--scenario', 'passenger-home')).trim();
   const screenshotPath = arg('--screenshot', '');
   const skipLaunch = hasFlag('--skip-launch');
@@ -1455,17 +1591,19 @@ function main() {
       screenshotPath ? path.dirname(path.resolve(screenshotPath)) : process.cwd()
     )
   );
-  const rawFreezeMs = arg('--freeze-ms', String(DEFAULT_QA_FREEZE_MS));
+  const defaultFreezeMs = defaultFreezeMsForScenario(scenario);
+  const rawFreezeMs = arg('--freeze-ms', String(defaultFreezeMs));
   const parsedFreezeMs = Number(rawFreezeMs);
   const freezeMs = Math.max(
     0,
-    Number.isFinite(parsedFreezeMs) ? parsedFreezeMs : DEFAULT_QA_FREEZE_MS
+    Number.isFinite(parsedFreezeMs) ? parsedFreezeMs : defaultFreezeMs
   );
   const postLaunchWaitMs = Math.max(
     0,
     Number(arg('--post-launch-wait-ms', '0')) || 0
   );
-  const deviceId = DEVICE_MAP[deviceKey] || deviceKey;
+  const skipSocketToken = hasFlag('--skip-socket-token');
+  const deviceId = resolveSimulatorDeviceId(deviceKey, rawDeviceArg);
   const isDriverScenario = scenario.startsWith('driver-');
   const defaultUid = isDriverScenario ? DRIVER_UID : PASSENGER_UID;
   const uid = String(arg('--uid', defaultUid)).trim() || defaultUid;
@@ -1528,6 +1666,14 @@ function main() {
     buildSeedUserData(uid, isDriverScenario)
   );
   saveAsyncStorageValue(dataContainer, TEST_MODE_STORAGE_KEY, 'true');
+  if (!skipSocketToken) {
+    const qaSocketIdToken = await getIdTokenForUid(uid);
+    saveAsyncStorageValue(
+      dataContainer,
+      QA_SOCKET_ID_TOKEN_STORAGE_KEY,
+      qaSocketIdToken
+    );
+  }
   fs.mkdirSync(artifactDir, { recursive: true });
 
   let launchPid = null;
@@ -1615,7 +1761,13 @@ function main() {
       sleep(postLaunchWaitMs);
     }
     fs.mkdirSync(path.dirname(path.resolve(screenshotPath)), { recursive: true });
-    runSimctl(['io', deviceId, 'screenshot', path.resolve(screenshotPath)]);
+    runSimctl([
+      'io',
+      deviceId,
+      'screenshot',
+      '--mask=ignored',
+      path.resolve(screenshotPath),
+    ]);
   }
 
   process.stdout.write(
@@ -1623,4 +1775,13 @@ function main() {
   );
 }
 
-main();
+if (require.main === module) {
+  main().catch((error) => {
+    console.error(error?.stack || error?.message || String(error));
+    process.exit(1);
+  });
+}
+
+module.exports = {
+  seedSocketTokenOnly,
+};

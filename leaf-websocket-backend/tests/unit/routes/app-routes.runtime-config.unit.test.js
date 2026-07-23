@@ -17,6 +17,7 @@ jest.mock('../../../services/h3-visual-policy-service', () => ({
 }));
 
 jest.mock('../../../utils/pilot-launch-flags', () => ({
+  isPilotControlledLaunch: jest.fn(() => false),
   getPilotLaunchFlags: jest.fn(() => ({
     launchProfile: 'test',
     leafDelasEnabled: true,
@@ -28,6 +29,11 @@ jest.mock('../../../utils/pilot-launch-flags', () => ({
 }));
 
 jest.mock('../../../utils/logger', () => ({
+  logger: {
+    info: jest.fn(),
+    warn: jest.fn(),
+    error: jest.fn()
+  },
   logStructured: jest.fn(),
   logError: jest.fn()
 }));
@@ -129,6 +135,15 @@ describe('app routes runtime config', () => {
       version: 2
     });
     expect(response.body.notificationPolicy.configured).toBe(true);
+    expect(response.body.launchControl).toEqual(expect.objectContaining({
+      pilotControlled: expect.any(Boolean),
+      passengerCohortSize: expect.any(Number),
+      driverCohortSize: expect.any(Number),
+      geofence: expect.objectContaining({
+        code: expect.any(String),
+        failClosed: expect.any(Boolean)
+      })
+    }));
     expect(response.body.pricingPolicy).toMatchObject({
       mode: 'dry_run',
       trafficPricing: 'traffic_aware_time_component',

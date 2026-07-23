@@ -1,12 +1,11 @@
-import React, { useCallback, useMemo, useState } from 'react';
-import { ScrollView, StatusBar, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { ActivityIndicator, ScrollView, StatusBar, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import PrototypeScreenTransition from '../../components/prototype/PrototypeScreenTransition';
 import PrototypeDismissibleSheet from '../../components/prototype/PrototypeDismissibleSheet';
 import {
   PrototypeMenuCloseButton,
-  PrototypeMenuRow,
   PrototypeMenuSection,
   PrototypeMenuSurface,
 } from '../../components/prototype/PrototypeMenuSurface';
@@ -19,36 +18,49 @@ import {
   formatCurrencyBRL,
   resolveTripDisplayLabel,
 } from './tripFinancialSummary';
+import { LeafButton, LeafEmptyState } from '../../components/prototype/LeafRideUI';
+import BookingHistoryService from '../../services/BookingHistoryService';
 
 const { color, typography } = robotaxiPrototypeTokens;
 const SURFACE_TOP_PADDING = 16;
 const SURFACE_BOTTOM_PADDING = 18;
 const BACKDROP_COLOR = 'transparent';
 
-function splitRouteLabel(item) {
-  const pickup = String(item?.pickup || item?.pickupAddress || '').trim();
+export function splitRouteLabel(item) {
+  const pickup = String(
+    item?.pickup ||
+      item?.pickupAddress ||
+      item?.pickupLocation?.add ||
+      item?.originAddress ||
+      '',
+  ).trim();
   const dropoff = String(
-    item?.destinationAddress || item?.dropoff || item?.dropoffAddress || ''
+    item?.destinationAddress ||
+      item?.dropoff ||
+      item?.dropoffAddress ||
+      item?.drop ||
+      item?.destinationLocation?.add ||
+      '',
   ).trim();
   if (pickup || dropoff) {
     return {
-      pickup: pickup || 'Origem indisponivel',
-      dropoff: dropoff || 'Destino indisponivel',
+      pickup: pickup || 'Origem indisponível',
+      dropoff: dropoff || 'Destino indisponível',
     };
   }
 
   const routeLabel = String(item?.route || '').trim();
-  if (routeLabel.includes('→')) {
-    const [origin, destination] = routeLabel.split('→');
+  if (/→|->/.test(routeLabel)) {
+    const [origin, destination] = routeLabel.split(/\s*(?:→|->)\s*/);
     return {
-      pickup: String(origin || '').trim() || 'Origem indisponivel',
-      dropoff: String(destination || '').trim() || 'Destino indisponivel',
+      pickup: String(origin || '').trim() || 'Origem indisponível',
+      dropoff: String(destination || '').trim() || 'Destino indisponível',
     };
   }
 
   return {
-    pickup: routeLabel || 'Origem indisponivel',
-    dropoff: 'Destino indisponivel',
+    pickup: routeLabel || 'Origem indisponível',
+    dropoff: 'Destino indisponível',
   };
 }
 
@@ -68,18 +80,18 @@ function buildHistoryStats(history, isDriverRole) {
   return [
     {
       key: 'rides',
-      label: isDriverRole ? 'Concluidas' : 'Viagens',
+      label: isDriverRole ? 'Concluídas' : 'Viagens',
       value: String(totalTrips),
     },
     {
       key: 'amount',
-      label: isDriverRole ? 'Total liquido' : 'Total pago',
+      label: isDriverRole ? 'Total líquido' : 'Total pago',
       value: totalTrips > 0 ? formatCurrencyBRL(totalAmount) : '--',
     },
   ];
 }
 
-function HistoryRow({ item, isDriverRole = false, last = false }) {
+function HistoryRow({ item, isDriverRole = false, last = false, onPress }) {
   const routeLabels = splitRouteLabel(item);
   const valueLabel = formatHistoryValue(item, isDriverRole);
   const counterpartyLabel = isDriverRole
@@ -88,7 +100,12 @@ function HistoryRow({ item, isDriverRole = false, last = false }) {
   const counterpartyTitle = isDriverRole ? 'Passageiro' : 'Motorista';
 
   return (
-    <View style={[styles.historyRow, last && styles.historyRowLast]}>
+    <TouchableOpacity
+      activeOpacity={0.82}
+      onPress={onPress}
+      style={[styles.historyRow, last && styles.historyRowLast]}
+      testID={`robotaxi-history-row-${item?.id || item?.rideId || 'receipt'}`}
+    >
       <View style={styles.historyHeader}>
         <View style={styles.historyHeaderMeta}>
           <View style={styles.historyDateWrap}>
@@ -96,7 +113,7 @@ function HistoryRow({ item, isDriverRole = false, last = false }) {
             <Text style={styles.historyDate}>{String(item?.date || 'Registro recente').trim()}</Text>
           </View>
           <View style={styles.historyStatusPill}>
-            <Text style={styles.historyStatusPillText}>Concluida</Text>
+            <Text style={styles.historyStatusPillText}>Concluída</Text>
           </View>
         </View>
         <View style={styles.historyAmountPill}>
@@ -137,17 +154,21 @@ function HistoryRow({ item, isDriverRole = false, last = false }) {
           </View>
         </View>
       </View>
-    </View>
+    </TouchableOpacity>
   );
 }
 
 export default function RobotaxiTripHistoryScreen({ navigation, route }) {
   const insets = useSafeAreaInsets();
   const { height: windowHeight } = useWindowDimensions();
-  const { activeRole, tripHistory } = usePrototypeRideRuntime();
+  const { activeRole, profileUid } = usePrototypeRideRuntime();
   const [panelHeight, setPanelHeight] = useState(windowHeight);
   const isDriverRole = activeRole === 'driver';
-  const history = useMemo(() => (Array.isArray(tripHistory) ? tripHistory : []), [tripHistory]);
+  const [history, setHistory] = useState([]);
+  const [loadingHistory, setLoadingHistory] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [historyError, setHistoryError] = useState('');
+  const [pageInfo, setPageInfo] = useState({ hasNextPage: false, endCursor: null });
   const stats = useMemo(() => buildHistoryStats(history, isDriverRole), [history, isDriverRole]);
   const primaryStat = stats[0] || null;
   const secondaryStat = stats[1] || null;
@@ -169,9 +190,59 @@ export default function RobotaxiTripHistoryScreen({ navigation, route }) {
     }
   }, []);
 
+  const loadHistory = useCallback(async ({ append = false, after = null } = {}) => {
+    if (!profileUid) {
+      setHistoryError('Entre na sua conta para consultar o histórico.');
+      setLoadingHistory(false);
+      return;
+    }
+
+    try {
+      append ? setLoadingMore(true) : setLoadingHistory(true);
+      setHistoryError('');
+      const result = await BookingHistoryService.getBookingHistory(
+        profileUid,
+        isDriverRole ? 'DRIVER' : 'CUSTOMER',
+        { first: 10, after },
+      );
+      if (!result?.success) {
+        throw new Error(result?.error || 'Não foi possível carregar o histórico.');
+      }
+      const nextBookings = Array.isArray(result.bookings) ? result.bookings : [];
+      setHistory(previous => append ? [...previous, ...nextBookings] : nextBookings);
+      setPageInfo(result.pageInfo || { hasNextPage: false, endCursor: null });
+    } catch (error) {
+      setHistoryError(error?.message || 'Não foi possível carregar o histórico.');
+    } finally {
+      setLoadingHistory(false);
+      setLoadingMore(false);
+    }
+  }, [isDriverRole, profileUid]);
+
+  useEffect(() => {
+    loadHistory();
+    const removeFocus = navigation?.addListener?.('focus', () => loadHistory());
+    return () => removeFocus?.();
+  }, [loadHistory, navigation]);
+
+  const openReceipt = useCallback((item) => {
+    navigation.navigate('RobotaxiPrototypeReceipt', {
+      receipt: item,
+      receiptId: item?.receiptId || item?.id,
+      bookingId: item?.rideId || item?.id,
+      viewerRole: isDriverRole ? 'driver' : 'passenger',
+      fromTrip: false,
+      fromHistory: true,
+    });
+  }, [isDriverRole, navigation]);
+
   return (
     <PrototypeScreenTransition>
-      <View style={styles.container} pointerEvents="box-none">
+      <View
+        style={styles.container}
+        pointerEvents="box-none"
+        testID="robotaxi-trip-history-screen"
+      >
         <StatusBar translucent backgroundColor="transparent" barStyle="dark-content" />
         <PrototypeDismissibleSheet
           onClose={handleDismiss}
@@ -181,12 +252,12 @@ export default function RobotaxiTripHistoryScreen({ navigation, route }) {
         >
           <PrototypeMenuSurface
             onLayout={handlePanelLayout}
-            eyebrow={isDriverRole ? 'Corridas concluidas' : 'Historico de viagens'}
-            title={isDriverRole ? 'Viagens' : 'Historico'}
+            eyebrow={isDriverRole ? 'Corridas concluídas' : 'Histórico de viagens'}
+            title={isDriverRole ? 'Viagens' : 'Histórico'}
             subtitle={
               isDriverRole
-                ? 'Recibos, trajetos e valores liquidos em uma leitura direta.'
-                : 'Origem, destino e comprovantes das suas ultimas viagens.'
+                ? 'Recibos, trajetos e valores líquidos em uma leitura direta.'
+                : 'Origem, destino e comprovantes das suas últimas viagens.'
             }
             fullScreen
             style={{
@@ -215,26 +286,49 @@ export default function RobotaxiTripHistoryScreen({ navigation, route }) {
 
             <PrototypeMenuSection title={isDriverRole ? 'Recibos recentes' : 'Viagens recentes'}>
               <ScrollView style={styles.scroll} showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
-                {history.length > 0 ? (
-                  history.map((item, index) => (
+                {loadingHistory ? (
+                  <View style={styles.centerState} testID="robotaxi-history-loading">
+                    <ActivityIndicator color="#1A330E" />
+                  </View>
+                ) : historyError ? (
+                  <LeafEmptyState
+                    icon="cloud-offline-outline"
+                    title="Histórico indisponível"
+                    message={historyError}
+                    actionLabel="Tentar novamente"
+                    onAction={() => loadHistory()}
+                    testID="robotaxi-history-error"
+                  />
+                ) : history.length > 0 ? (
+                  <>
+                  {history.map((item, index) => (
                     <HistoryRow
                       key={item?.id || `trip-history-${index}`}
                       item={item}
                       isDriverRole={isDriverRole}
                       last={index === history.length - 1}
+                      onPress={() => openReceipt(item)}
                     />
-                  ))
+                  ))}
+                  {pageInfo.hasNextPage ? (
+                    <LeafButton
+                      label={loadingMore ? 'Carregando...' : 'Carregar mais'}
+                      tone="secondary"
+                      disabled={loadingMore}
+                      onPress={() => loadHistory({ append: true, after: pageInfo.endCursor })}
+                    />
+                  ) : null}
+                  </>
                 ) : (
-                  <PrototypeMenuRow
+                  <LeafEmptyState
                     icon="receipt-outline"
-                    title="Nenhuma corrida concluida ainda"
-                    subtitle={
+                    title="Nenhuma corrida concluída ainda"
+                    message={
                       isDriverRole
                         ? 'Assim que a primeira viagem terminar, ela aparece aqui com valor e trajeto.'
-                        : 'Suas viagens encerradas vao aparecer aqui com origem, destino e comprovante.'
+                        : 'Suas viagens encerradas vão aparecer aqui com origem, destino e comprovante.'
                     }
-                    trailing={null}
-                    last
+                    testID="robotaxi-history-empty"
                   />
                 )}
               </ScrollView>
@@ -300,6 +394,11 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     paddingBottom: 6,
+  },
+  centerState: {
+    minHeight: 180,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   historyRow: {
     borderRadius: 18,

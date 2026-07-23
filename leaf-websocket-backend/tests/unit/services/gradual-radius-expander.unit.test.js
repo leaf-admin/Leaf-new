@@ -13,7 +13,21 @@ jest.mock('../../../services/ride-state-manager', () => ({
     CANCELED: 'CANCELED'
   },
   getBookingState: jest.fn(),
-  updateBookingState: jest.fn().mockResolvedValue(undefined)
+  updateBookingState: jest.fn().mockResolvedValue(undefined),
+  isTerminalStateValue: jest.fn((value) => [
+    'COMPLETE',
+    'COMPLETED',
+    'CANCELED',
+    'CANCELLED',
+    'REJECTED',
+    'EXPIRED',
+    'SUPERSEDED',
+    'NO_DRIVERS_AVAILABLE',
+    'NO_DRIVERS_FOUND',
+    'EARLY_ENDED_BY_RIDER',
+    'INTERRUPTED_OPERATIONAL_ENDED',
+    'EARLY_ENDED_REVIEW'
+  ].includes(String(value || '').trim().toUpperCase()))
 }));
 
 jest.mock('../../../services/event-sourcing', () => ({
@@ -32,11 +46,26 @@ jest.mock('../../../services/ride-queue-manager', () => ({
   dequeueRide: jest.fn().mockResolvedValue(undefined)
 }));
 
+const mockMarkRideCancelled = jest.fn().mockResolvedValue({
+  success: true,
+  financialNamespace: 'sandbox'
+});
+
+jest.mock('../../../services/ride-persistence-service', () => ({
+  markRideCancelled: (...args) => mockMarkRideCancelled(...args)
+}));
+
 jest.mock('../../../services/driver-lock-manager', () => ({}));
 
 const mockNotifyMultipleDrivers = jest.fn().mockResolvedValue({ notified: 1 });
 const mockClearAllTimeouts = jest.fn();
 const mockFindAndScoreDrivers = jest.fn().mockResolvedValue([]);
+const mockGetStoredPayment = jest.fn();
+const mockProcessRideRefund = jest.fn();
+const mockNormalizePaymentAmountCents = jest.fn((value) => {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? Math.round(numeric) : 0;
+});
 
 jest.mock('../../../services/driver-notification-dispatcher', () => {
   return jest.fn().mockImplementation(() => ({
@@ -44,6 +73,28 @@ jest.mock('../../../services/driver-notification-dispatcher', () => {
     clearAllTimeouts: mockClearAllTimeouts,
     findAndScoreDrivers: mockFindAndScoreDrivers
   }));
+});
+
+jest.mock('../../../services/payment-service', () => {
+  return class MockPaymentService {
+    static isRefundedPaymentStatus(value) {
+      return ['REFUNDED', 'REFUNDED_FULL', 'REFUNDED_PARTIAL'].includes(
+        String(value || '').trim().toUpperCase()
+      );
+    }
+
+    getStoredPayment(...args) {
+      return mockGetStoredPayment(...args);
+    }
+
+    processRideRefund(...args) {
+      return mockProcessRideRefund(...args);
+    }
+
+    normalizePaymentAmountCents(...args) {
+      return mockNormalizePaymentAmountCents(...args);
+    }
+  };
 });
 
 jest.mock('../../../utils/logger', () => ({
@@ -58,6 +109,7 @@ jest.mock('../../../utils/logger', () => ({
 const redisPool = require('../../../utils/redis-pool');
 const RideStateManager = require('../../../services/ride-state-manager');
 const eventSourcing = require('../../../services/event-sourcing');
+const { sealFinancialContext } = require('../../../services/financial-runtime-context');
 const GradualRadiusExpander = require('../../../services/gradual-radius-expander');
 
 describe('gradual-radius-expander', () => {
@@ -74,6 +126,20 @@ describe('gradual-radius-expander', () => {
     delete process.env.MATCH_MINIMUM_SEARCH_DURATION_MS;
     delete process.env.MATCH_MAX_RADIUS_RETRY_INTERVAL_MS;
     delete process.env.MATCH_RESPONSE_PAUSE_MIN_UNIQUE_DRIVERS;
+    mockGetStoredPayment.mockResolvedValue(null);
+    mockProcessRideRefund.mockResolvedValue({
+      success: true,
+      refundId: 'refund_default',
+      ledgerRecorded: true
+    });
+    mockMarkRideCancelled.mockResolvedValue({
+      success: true,
+      financialNamespace: 'sandbox'
+    });
+    mockNormalizePaymentAmountCents.mockImplementation((value) => {
+      const numeric = Number(value);
+      return Number.isFinite(numeric) ? Math.round(numeric) : 0;
+    });
 
     redis = {
       hgetall: jest.fn(async (key) => {
@@ -235,7 +301,6 @@ describe('gradual-radius-expander', () => {
   it('uses the configured empty wave interval when a radius returns no eligible drivers', async () => {
     jest.useFakeTimers();
     process.env.MATCH_EMPTY_WAVE_INTERVAL_MS = '1500';
-    process.env.MATCH_EXPANSION_STEP_KM = '1';
     expander = new GradualRadiusExpander(io);
 
     jest.spyOn(expander, 'getSearchDispatchability').mockResolvedValue({
@@ -275,7 +340,7 @@ describe('gradual-radius-expander', () => {
     expect(scheduleSpy).toHaveBeenCalledWith(
       'booking_3',
       { lat: -23.55, lng: -46.63 },
-      3,
+      2 + expander.config.expansionStep,
       5,
       1500,
       1
@@ -358,6 +423,174 @@ describe('gradual-radius-expander', () => {
         bookingId: 'booking_4',
         code: 'NO_DRIVERS_AVAILABLE'
       })
+    );
+  });
+
+  it('processes a canonical refund before terminalizing a paid no-driver search', async () => {
+    mockGetStoredPayment.mockResolvedValue({
+      rideId: 'booking_paid_no_driver',
+      chargeId: 'charge_paid_no_driver',
+      amount: 8785,
+      passengerId: 'customer_1',
+      status: 'PAID'
+    });
+    mockProcessRideRefund.mockResolvedValue({
+      success: true,
+      refundId: 'refund_no_driver_1',
+      ledgerRecorded: true
+    });
+
+    await expander.handleMaxRadiusReached('booking_paid_no_driver', {
+      searchedRadius: 30,
+      pickupLocation: { lat: -23.55, lng: -46.63 },
+      limit: 1
+    });
+
+    expect(mockProcessRideRefund).toHaveBeenCalledTimes(1);
+    expect(mockProcessRideRefund).toHaveBeenCalledWith(expect.objectContaining({
+      rideId: 'booking_paid_no_driver',
+      chargeId: 'charge_paid_no_driver',
+      amount: 8785,
+      reason: 'NO_DRIVERS_AVAILABLE',
+      status: 'REFUNDED_FULL',
+      passengerId: 'customer_1',
+      metadata: expect.objectContaining({
+        source: 'gradual_radius_expander'
+      })
+    }));
+    expect(roomEmitter.emit).toHaveBeenCalledWith(
+      'noDriversFound',
+      expect.objectContaining({
+        bookingId: 'booking_paid_no_driver',
+        refundStatus: 'REFUNDED',
+        refundId: 'refund_no_driver_1',
+        refundAmountInCents: 8785,
+        refundAmountInReais: '87.85'
+      })
+    );
+    expect(redis.hset).toHaveBeenCalledWith(
+      'booking:booking_paid_no_driver',
+      expect.objectContaining({
+        status: 'NO_DRIVERS_AVAILABLE',
+        refundStatus: 'REFUNDED',
+        refundId: 'refund_no_driver_1',
+        refundAmountInCents: '8785',
+        refundAmountInReais: '87.85',
+        refundLedgerRecorded: 'true'
+      })
+    );
+  });
+
+  it('keeps an operational payment poison out of a sandbox no-driver refund', async () => {
+    const financialContext = sealFinancialContext({
+      providerEnvironment: 'sandbox',
+      paymentProfileId: 'qa-sandbox-profile',
+      paymentProfileSource: 'test',
+      testUserSandbox: true
+    });
+    const sandboxPayment = {
+      rideId: 'booking_sandbox_no_driver',
+      chargeId: 'charge_sandbox_no_driver',
+      amount: 8785,
+      passengerId: 'customer_sandbox',
+      status: 'PAID',
+      financialContext
+    };
+    const operationalPoison = {
+      rideId: 'booking_sandbox_no_driver',
+      chargeId: 'charge_operational_poison',
+      amount: 99999,
+      passengerId: 'customer_sandbox',
+      status: 'PAID'
+    };
+
+    mockGetStoredPayment.mockImplementation(async (_bookingId, receivedContext) => (
+      receivedContext?.contextId === financialContext.contextId
+        ? sandboxPayment
+        : operationalPoison
+    ));
+    mockProcessRideRefund.mockResolvedValue({
+      success: true,
+      refundId: 'refund_sandbox_no_driver',
+      ledgerRecorded: true
+    });
+
+    const result = await expander.processNoDriversRefund(
+      'booking_sandbox_no_driver',
+      {
+        customerId: 'customer_sandbox',
+        estimatedFare: '87.85',
+        financialContext: JSON.stringify(financialContext),
+        financialNamespace: financialContext.namespace,
+        financialContextId: financialContext.contextId,
+        providerEnvironment: financialContext.providerEnvironment,
+        paymentProfileId: financialContext.paymentProfileId,
+        testUserSandbox: 'true'
+      }
+    );
+
+    expect(mockGetStoredPayment).toHaveBeenCalledWith(
+      'booking_sandbox_no_driver',
+      financialContext
+    );
+    expect(mockProcessRideRefund).toHaveBeenCalledWith(expect.objectContaining({
+      rideId: 'booking_sandbox_no_driver',
+      chargeId: 'charge_sandbox_no_driver',
+      amount: 8785,
+      financialContext
+    }));
+    expect(mockProcessRideRefund).not.toHaveBeenCalledWith(expect.objectContaining({
+      chargeId: 'charge_operational_poison'
+    }));
+    expect(result).toMatchObject({
+      status: 'REFUNDED',
+      refundId: 'refund_sandbox_no_driver'
+    });
+  });
+
+  it('terminalizes a sandbox no-driver ride through scoped persistence', async () => {
+    const financialContext = sealFinancialContext({
+      providerEnvironment: 'sandbox',
+      paymentProfileId: 'qa-sandbox-profile',
+      paymentProfileSource: 'test',
+      testUserSandbox: true
+    });
+    const bookingData = {
+      customerId: 'customer_sandbox',
+      status: 'SEARCHING',
+      pickupLocation: JSON.stringify({ lat: -23.55, lng: -46.63 }),
+      destinationLocation: JSON.stringify({ lat: -23.56, lng: -46.64 }),
+      estimatedFare: '87.85',
+      paymentMethod: 'pix',
+      financialContext: JSON.stringify(financialContext),
+      financialNamespace: financialContext.namespace,
+      financialContextId: financialContext.contextId,
+      providerEnvironment: financialContext.providerEnvironment,
+      paymentProfileId: financialContext.paymentProfileId,
+      testUserSandbox: 'true'
+    };
+    redis.hgetall.mockImplementation(async (key) => (
+      key === 'booking:booking_sandbox_terminal'
+        ? bookingData
+        : {}
+    ));
+
+    await expander.handleMaxRadiusReached('booking_sandbox_terminal', {
+      searchedRadius: 30,
+      pickupLocation: { lat: -23.55, lng: -46.63 },
+      limit: 1
+    });
+
+    expect(mockMarkRideCancelled).toHaveBeenCalledTimes(1);
+    expect(mockMarkRideCancelled).toHaveBeenCalledWith(
+      'booking_sandbox_terminal',
+      'NO_DRIVERS_AVAILABLE',
+      bookingData
+    );
+    expect(mockMarkRideCancelled).not.toHaveBeenCalledWith(
+      expect.any(String),
+      expect.any(String),
+      expect.objectContaining({ financialNamespace: 'operational' })
     );
   });
 
@@ -508,5 +741,27 @@ describe('gradual-radius-expander', () => {
       bookingId: 'booking_terminal'
     }));
     expect(redis.del).toHaveBeenCalledWith('customer_active_booking:customer_1');
+  });
+
+  it('clears a stale customer active index that points to a completed booking without restarting search', async () => {
+    redis.get.mockResolvedValue('booking_completed');
+    redis.hgetall.mockResolvedValue({
+      customerId: 'customer_1',
+      driverId: 'driver_1',
+      status: 'COMPLETED',
+      completedAt: '2026-06-23T12:00:00.000Z'
+    });
+    const finalizeSpy = jest.spyOn(expander, 'handleMaxRadiusReached');
+
+    const result = await expander.reconcileExpiredSearchForCustomer('customer_1');
+
+    expect(result).toEqual(expect.objectContaining({
+      reconciled: true,
+      reason: 'TERMINAL_ACTIVE_INDEX_CLEARED',
+      bookingId: 'booking_completed',
+      status: 'COMPLETED'
+    }));
+    expect(redis.del).toHaveBeenCalledWith('customer_active_booking:customer_1');
+    expect(finalizeSpy).not.toHaveBeenCalled();
   });
 });

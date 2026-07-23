@@ -14,6 +14,8 @@ const DriverApprovalService = require('../services/driver-approval-service');
 const idempotencyService = require('../services/idempotency-service');
 const { EVENT_TYPES } = require('../events');
 const { isMultiLegBillingEnabled } = require('../utils/ride-lifecycle-feature-flags');
+const { validateAuthoritativeFinancialSnapshot } = require('../services/ride-financial-contract');
+const { resolveFinancialContext } = require('../services/financial-runtime-context');
 
 const driverApprovalService = typeof DriverApprovalService === 'function'
     ? new DriverApprovalService()
@@ -50,10 +52,27 @@ function unwrapCanonicalEventPayload(event = {}) {
         customerId: firstPresent(event.customerId, payload.customerId, nestedPayload.customerId),
         finalFare: firstPresent(payload.finalFare, nestedPayload.finalFare, payload.totalFare, nestedPayload.totalFare),
         tollFee: firstPresent(payload.tollFee, nestedPayload.tollFee, 0),
+        paymentDistribution: firstPresent(payload.paymentDistribution, nestedPayload.paymentDistribution, null),
+        financialSnapshot: firstPresent(payload.financialSnapshot, nestedPayload.financialSnapshot, null),
+        settlementReviewRequired:
+            payload.settlementReviewRequired === true ||
+            nestedPayload.settlementReviewRequired === true ||
+            String(payload.settlementReviewRequired || nestedPayload.settlementReviewRequired || '').toLowerCase() === 'true',
+        offlineSettlementReview: firstPresent(payload.offlineSettlementReview, nestedPayload.offlineSettlementReview, null),
         rideLegSettlements: Array.isArray(nestedPayload.rideLegSettlements)
             ? nestedPayload.rideLegSettlements
             : (Array.isArray(payload.rideLegSettlements) ? payload.rideLegSettlements : [])
     };
+}
+
+function requiresManualSettlementReview(rideCompleted = {}) {
+    const paymentDistribution = rideCompleted.paymentDistribution || {};
+    const offlineSettlementReview = rideCompleted.offlineSettlementReview || {};
+    return (
+        rideCompleted.settlementReviewRequired === true ||
+        paymentDistribution.status === 'UNDER_REVIEW' ||
+        offlineSettlementReview.requiresExplicitLedgerSettlement === true
+    );
 }
 
 function buildRideBillingIdempotencyScope(bookingId, eventId = null) {
@@ -87,6 +106,12 @@ const workerManager = new WorkerManager({
 workerManager.registerListener(EVENT_TYPES.RIDE_COMPLETED, async (event) => {
     const rideCompleted = unwrapCanonicalEventPayload(event);
     const { bookingId, driverId, finalFare, tollFee } = rideCompleted;
+    const financialContextResult = resolveFinancialContext(rideCompleted, { allowLegacyOperational: true });
+    if (!financialContextResult.ok) {
+        throw new Error(`${financialContextResult.code}: ${financialContextResult.error}`);
+    }
+    const financialContext = financialContextResult.context;
+    const shouldPropagateFinancialContext = financialContextResult.legacy !== true;
     const eventId = rideCompleted.eventId || event.eventId || bookingId; // Fallback to bookingId if eventId is missing
 
     logStructured('info', 'Iniciando processamento contábil (Billing) da corrida', {
@@ -121,6 +146,56 @@ workerManager.registerListener(EVENT_TYPES.RIDE_COMPLETED, async (event) => {
         ? rideCompleted.rideLegSettlements.filter(Boolean)
         : [];
 
+    if (requiresManualSettlementReview(rideCompleted)) {
+        const reviewedAt = new Date().toISOString();
+        const distributionSummary = {
+            rideId: bookingId,
+            driverId,
+            status: 'under_review',
+            mode: 'manual_settlement_required',
+            reviewedAt,
+            totalAmount: normalizeMoneyToCents(finalFare),
+            tollFee: normalizeMoneyToCents(tollFee || 0),
+            paymentDistribution: rideCompleted.paymentDistribution || null,
+            offlineSettlementReview: rideCompleted.offlineSettlementReview || null,
+            reason:
+                rideCompleted.paymentDistribution?.reason ||
+                rideCompleted.offlineSettlementReview?.settlementType ||
+                'MANUAL_SETTLEMENT_REQUIRED',
+            ...(shouldPropagateFinancialContext ? { financialContext } : {})
+        };
+
+        if (shouldPropagateFinancialContext) {
+            await paymentService.saveDistributionToFirestore(distributionSummary, financialContext);
+        } else {
+            await paymentService.saveDistributionToFirestore(distributionSummary);
+        }
+        await paymentService.updatePaymentHolding(bookingId, {
+            status: 'under_review',
+            reviewedAt,
+            distributionData: distributionSummary,
+            ...(shouldPropagateFinancialContext ? { financialContext } : {})
+        }).catch((error) => {
+            logStructured('warn', 'Falha ao atualizar payment holding da distribuição em revisão', {
+                bookingId,
+                error: error.message
+            });
+            return null;
+        });
+
+        logStructured('warn', 'Billing worker bloqueou crédito automático por settlement manual pendente', {
+            bookingId,
+            driverId,
+            reason: distributionSummary.reason
+        });
+
+        await idempotencyService.cacheResult(idempotencyKey, distributionSummary, 604800);
+        return {
+            success: true,
+            data: distributionSummary
+        };
+    }
+
     if (rideLegSettlements.length > 1) {
         if (!isMultiLegBillingEnabled()) {
             await idempotencyService.releaseInflight?.(idempotencyKey);
@@ -148,11 +223,13 @@ workerManager.registerListener(EVENT_TYPES.RIDE_COMPLETED, async (event) => {
                 continue;
             }
 
-            const creditResult = await paymentService.creditDriverBalance(
+            const creditArgs = [
                 legDriverId,
                 driverNetAmountCents,
                 `${bookingId}:leg:${leg?.legNumber || 'x'}`
-            );
+            ];
+            if (shouldPropagateFinancialContext) creditArgs.push(financialContext);
+            const creditResult = await paymentService.creditDriverBalance(...creditArgs);
 
             if (!creditResult.success) {
                 await idempotencyService.releaseInflight?.(idempotencyKey);
@@ -198,14 +275,20 @@ workerManager.registerListener(EVENT_TYPES.RIDE_COMPLETED, async (event) => {
             totalPlatformAbsorbedPaymentIntermediationFee: rideLegSettlements.reduce(
                 (accumulator, leg) => accumulator + Number(leg?.platformAbsorbedPaymentIntermediationFee || 0),
                 0
-            )
+            ),
+            ...(shouldPropagateFinancialContext ? { financialContext } : {})
         };
 
-        await paymentService.saveDistributionToFirestore(distributionSummary);
+        if (shouldPropagateFinancialContext) {
+            await paymentService.saveDistributionToFirestore(distributionSummary, financialContext);
+        } else {
+            await paymentService.saveDistributionToFirestore(distributionSummary);
+        }
         await paymentService.updatePaymentHolding(bookingId, {
             status: 'distributed',
             distributedAt,
-            distributionData: distributionSummary
+            distributionData: distributionSummary,
+            ...(shouldPropagateFinancialContext ? { financialContext } : {})
         }).catch((error) => {
             logStructured('warn', 'Falha ao atualizar payment holding da distribuição multi-leg', {
                 bookingId,
@@ -246,14 +329,32 @@ workerManager.registerListener(EVENT_TYPES.RIDE_COMPLETED, async (event) => {
         });
     }
 
+    const expectedPassengerPaidCents = normalizeMoneyToCents(finalFare);
+    const expectedTollFeeCents = normalizeMoneyToCents(tollFee || 0);
+    const financialSnapshotValidation = validateAuthoritativeFinancialSnapshot(
+        rideCompleted.financialSnapshot || {},
+        {
+            passengerPaidCents: expectedPassengerPaidCents,
+            tollFeeCents: expectedTollFeeCents
+        }
+    );
+    if (!financialSnapshotValidation.valid) {
+        await idempotencyService.releaseInflight?.(idempotencyKey);
+        throw new Error(
+            `Snapshot financeiro final ausente ou inválido para ${bookingId}: ${financialSnapshotValidation.code}`
+        );
+    }
+
     // Processar distribuição de valor líquido para o motorista
     const distributionResult = await paymentService.processNetDistribution({
         rideId: bookingId,
         driverId: driverId,
         totalAmount: normalizeMoneyToCents(finalFare),
         tollFee: normalizeMoneyToCents(tollFee || 0),
+        financialSnapshot: financialSnapshotValidation.snapshot,
         wooviAccountId: accountData?.accountId || null,
-        driverPixKey: accountData?.wooviSubaccountPixKey || accountData?.driverPixKey || accountData?.pixKey || null
+        driverPixKey: accountData?.wooviSubaccountPixKey || accountData?.driverPixKey || accountData?.pixKey || null,
+        ...(shouldPropagateFinancialContext ? { financialContext } : {})
     });
 
     if (!distributionResult.success) {
@@ -311,7 +412,9 @@ workerManager.registerListener(EVENT_TYPES.RIDE_CANCELED, async (event) => {
     const distributionResult = await paymentService.processCancellationDistribution({
         rideId: bookingId,
         driverId: driverId,
-        cancellationFee: cancellationFee
+        cancellationFee: cancellationFee,
+        financialContext: event.data?.financialContext || null,
+        providerEnvironment: event.data?.providerEnvironment || event.data?.paymentProviderEnvironment || null
     });
 
     if (!distributionResult.success) {

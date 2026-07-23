@@ -1,0 +1,24 @@
+{
+  "journeyId": "",
+  "stateId": "",
+  "role": "",
+  "platform": "",
+  "device": "",
+  "buildType": "debug",
+  "participantId": "internal-01",
+  "status": "not_run",
+  "metrics": {
+    "completionTimeMs": null,
+    "misTaps": 0,
+    "backtracks": 0,
+    "hesitationsOver3s": 0,
+    "confidence1to5": null
+  },
+  "scores": {},
+  "findings": [],
+  "evidence": {
+    "video": "",
+    "screenshots": [],
+    "notes": ""
+  }
+}

@@ -40,6 +40,20 @@ function normalizeText(value, fallback = '') {
   return normalized.length > 0 ? normalized : fallback;
 }
 
+function requiresCanonicalDirectionsRoute(routeScope = '') {
+  const normalizedScope = normalizeText(routeScope, 'unknown').toLowerCase();
+  return [
+    'passenger_home_preview',
+    'passenger_home_category_preview',
+    'passenger_quote_preview',
+    'pricing_quote',
+    'payment_quote',
+    'active_ride_navigation',
+  ].includes(normalizedScope) ||
+    normalizedScope.startsWith('active_ride_navigation:') ||
+    normalizedScope.startsWith('passenger_active:');
+}
+
 function isTrafficAwareRoutingEnabled() {
   return normalizeBoolean(process.env.ENABLE_TRAFFIC_AWARE_ROUTES, true);
 }
@@ -154,8 +168,8 @@ function encodePolylinePath(points = []) {
     }
     const scaledLat = Math.round(latitude * 1e5);
     const scaledLng = Math.round(longitude * 1e5);
-    const deltaLat = (scaledLat - previousLat) / 1e5;
-    const deltaLng = (scaledLng - previousLng) / 1e5;
+    const deltaLat = latitude - previousLat / 1e5;
+    const deltaLng = longitude - previousLng / 1e5;
     encoded += encodePolylineCoordinate(deltaLat);
     encoded += encodePolylineCoordinate(deltaLng);
     previousLat = scaledLat;
@@ -793,8 +807,39 @@ router.post('/api/places/directions', async (req, res) => {
         cacheOnly: true,
       });
 
-      if (cacheOnlyResult?.data) {
+      if (
+        cacheOnlyResult?.data &&
+        placesCacheService.hasUsableDirectionsGeometry(cacheOnlyResult.data)
+      ) {
         result = cacheOnlyResult;
+      } else if (requiresCanonicalDirectionsRoute(routeScope)) {
+        const operationalTelemetryCaptured = await captureBookingOperationalTelemetry({
+          bookingId: telemetry.bookingId,
+          sourceKey: telemetrySourceKey,
+          sourceMeta: telemetrySourceMeta,
+          requestMeta: telemetry.requestMeta,
+          backendCommand,
+          backend: {
+            attempts: 1,
+            errors: 1,
+          },
+          redis: {
+            reads: Number(cacheOnlyResult?.stats?.redisReads || 0),
+            writes: Number(cacheOnlyResult?.stats?.redisWrites || 0),
+          },
+        });
+
+        return res.status(503).json({
+          status: 'unavailable',
+          code: 'canonical_route_required',
+          message: 'Rota canônica indisponível para cotação. Tente novamente em instantes.',
+          telemetryCaptured: false,
+          operationalTelemetryCaptured,
+          budgetGuard: {
+            ...budgetGuard,
+            fallback: 'blocked_for_canonical_route',
+          },
+        });
       } else {
         const approximateData = buildApproximateDirectionsPayload({
           startLoc,
@@ -849,7 +894,10 @@ router.post('/api/places/directions', async (req, res) => {
       });
     }
 
-    if (!result || !result.data) {
+    const hasUsableGeometry = Boolean(
+      result?.data && placesCacheService.hasUsableDirectionsGeometry(result.data),
+    );
+    if (!result || !hasUsableGeometry) {
       await captureBookingOperationalTelemetry({
         bookingId: telemetry.bookingId,
         sourceKey: telemetrySourceKey,
@@ -865,20 +913,32 @@ router.post('/api/places/directions', async (req, res) => {
           writes: Number(result?.stats?.redisWrites || 0),
         },
       });
+      if (requiresCanonicalDirectionsRoute(routeScope)) {
+        return res.status(503).json({
+          status: 'unavailable',
+          code: 'canonical_route_required',
+          message: 'Rota canônica indisponível para navegação. Tente novamente em instantes.',
+          telemetryCaptured: false,
+        });
+      }
       return res.status(404).json({
         status: 'not_found',
-        message: 'Não foi possível obter rota para os pontos informados.',
+        code: 'invalid_route_geometry',
+        message: 'Não foi possível obter rota válida para os pontos informados.',
       });
     }
 
     const billedGoogleRequest = Number(result?.stats?.googleRequests || 0) > 0;
+    const directionsSkuKey = result?.provider === 'routes_api'
+      ? 'routesPreferredTrafficAwarePolyline'
+      : trafficEnabled ? 'directionsAdvancedLegacy' : 'directionsLegacy';
     const telemetryCaptured = result.cached !== true && billedGoogleRequest
       ? await captureBookingGoogleTelemetry({
         bookingId: telemetry.bookingId,
         sourceKey: telemetrySourceKey,
         sourceMeta: telemetrySourceMeta,
         requestMeta: telemetry.requestMeta,
-        skuKey: trafficEnabled ? 'directionsAdvancedLegacy' : 'directionsLegacy',
+        skuKey: directionsSkuKey,
         requestCount: 1,
         billableUnits: 1,
         metadata: {

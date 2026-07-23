@@ -78,7 +78,8 @@ jest.mock('../../../services/fcm-service', () => jest.fn(() => ({
 })));
 
 jest.mock('../../../services/audit-service', () => ({
-  logEvent: (...args) => mockAuditLogEvent(...args)
+  logEvent: (...args) => mockAuditLogEvent(...args),
+  requireEvent: (...args) => mockAuditLogEvent(...args)
 }));
 
 jest.mock('../../../utils/logger', () => ({
@@ -116,7 +117,16 @@ describe('dashboard-user-management-service', () => {
     const result = await service.updateUserOperationalStatus(
       'driver_1',
       { status: 'blocked', reason: 'Risco operacional' },
-      { operator: { id: 'admin_1', email: 'admin@leaf.test' } }
+      {
+        operator: { id: 'admin_1', email: 'admin@leaf.test' },
+        auditIntentId: 'audit_intent_1',
+        auditMutationId: 'document_request_1',
+        auditEnvelope: {
+          financialContext: { namespace: 'operational' },
+          financialNamespace: 'operational',
+          financialContextId: 'operational-test-context'
+        }
+      }
     );
 
     expect(result).toMatchObject({ success: true, userId: 'driver_1', userType: 'driver', status: 'blocked' });
@@ -155,6 +165,59 @@ describe('dashboard-user-management-service', () => {
         operatorEmail: 'admin@leaf.test'
       }),
       success: true
+    }));
+  });
+
+  it('suspends drivers with an expiry and removes dispatch eligibility immediately', async () => {
+    mockMakeFirestoreUserRef('driver_suspended').get.mockResolvedValue({
+      exists: true,
+      data: () => ({ usertype: 'driver', approved: true, status: 'approved' })
+    });
+    mockRealtimeSnapshots.set('users/driver_suspended', {
+      usertype: 'driver',
+      approved: true,
+      status: 'approved'
+    });
+
+    const result = await service.updateUserOperationalStatus(
+      'driver_suspended',
+      { status: 'suspended', reason: 'Revisao de seguranca', durationDays: 7 },
+      { operator: { id: 'admin_1', email: 'admin@leaf.test' } }
+    );
+
+    expect(result).toMatchObject({
+      success: true,
+      userId: 'driver_suspended',
+      userType: 'driver',
+      status: 'suspended',
+      reason: 'Revisao de seguranca'
+    });
+    expect(result.expiresAt).toEqual(expect.any(String));
+    expect(mockMakeFirestoreUserRef('driver_suspended').set).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'suspended',
+        accountStatus: 'suspended',
+        operationalBlocked: true,
+        suspended: true,
+        suspendedUntil: result.expiresAt
+      }),
+      { merge: true }
+    );
+    expect(mockRedisMulti.hset).toHaveBeenCalledWith('driver:driver_suspended', expect.objectContaining({
+      status: 'OFFLINE',
+      dispatchEligible: 'false',
+      dispatchEligibilityCode: 'USER_STATUS_SUSPENDED'
+    }));
+    expect(mockAuditLogEvent).toHaveBeenCalledWith(expect.objectContaining({
+      userId: 'admin_1',
+      action: 'dashboard.user.operational_status.update',
+      details: expect.objectContaining({
+        targetUserId: 'driver_suspended',
+        status: 'suspended',
+        reason: 'Revisao de seguranca',
+        durationDays: 7,
+        reasonCode: 'USER_STATUS_SUSPENDED'
+      })
     }));
   });
 
@@ -246,7 +309,16 @@ describe('dashboard-user-management-service', () => {
       'driver_2',
       'cnh',
       { reason: 'Envie uma CNH mais recente' },
-      { operator: { id: 'admin_1', email: 'admin@leaf.test' } }
+      {
+        operator: { id: 'admin_1', email: 'admin@leaf.test' },
+        auditIntentId: 'audit_intent_1',
+        auditMutationId: 'document_request_1',
+        auditEnvelope: {
+          financialContext: { namespace: 'operational' },
+          financialNamespace: 'operational',
+          financialContextId: 'operational-test-context'
+        }
+      }
     );
 
     expect(result).toMatchObject({
@@ -264,6 +336,7 @@ describe('dashboard-user-management-service', () => {
             status: 'approved',
             requestStatus: 'requested',
             requiredUpdate: true,
+            requestAuditIntentId: 'audit_intent_1',
             requestReason: 'Envie uma CNH mais recente'
           })
         })

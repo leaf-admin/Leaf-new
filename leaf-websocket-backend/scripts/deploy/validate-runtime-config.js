@@ -15,6 +15,17 @@ const {
 const {
   getDefaultWooviWebhookPublicKey
 } = require('../../config/woovi-webhook-public-key');
+const {
+  DEFAULT_POLICY: DEFAULT_RIDE_FINANCIAL_POLICY,
+  describeFinancialPolicy
+} = require('../../services/ride-financial-contract');
+const {
+  getDriverSearchMaxRadiusKm,
+  getOperationsPolicyRadiusKm,
+  getPaymentAvailabilityRadiusKm
+} = require('../../utils/dispatch-config');
+const { resolveLaunchProfile } = require('../../utils/pilot-launch-flags');
+const { parseAllowlist } = require('../../services/pilot-access-control-service');
 
 const REQUIRED_BASE = [
   'NODE_ENV'
@@ -63,6 +74,9 @@ const PAYMENT_BYPASS_FLAGS = [
 ];
 
 const LEGACY_RUNTIME_FLAGS = [
+  'ENABLE_LEGACY_GRAPHQL',
+  'ENABLE_LEGACY_DRIVER_RESPONSE_ACCEPT',
+  'ENABLE_LEGACY_KYC_PROXY',
   'ENABLE_LEGACY_RUNTIME_ENDPOINTS',
   'ENABLE_LEGACY_SOCKET_BRIDGE',
   'ENABLE_LEGACY_SOCKET_NOTIFICATIONS',
@@ -71,12 +85,68 @@ const LEGACY_RUNTIME_FLAGS = [
   'ENABLE_LEGACY_DRIVER_BAAS_FALLBACK'
 ];
 
+const CORE_RIDE_PAYMENT_GUARD_FLAGS = [
+  {
+    key: 'REQUIRE_PAYMENT_QUOTE_LOCK',
+    expected: true,
+    fallback: true,
+    blocker: 'REQUIRE_PAYMENT_QUOTE_LOCK=false bloqueado em produção'
+  },
+  {
+    key: 'REQUIRE_PAYMENT_BEFORE_BOOKING',
+    expected: true,
+    fallback: true,
+    blocker: 'REQUIRE_PAYMENT_BEFORE_BOOKING=false bloqueado em produção'
+  },
+  {
+    key: 'VERIFY_PAYMENT_BEFORE_BOOKING',
+    expected: true,
+    fallback: true,
+    blocker: 'VERIFY_PAYMENT_BEFORE_BOOKING=false bloqueado em produção'
+  },
+  {
+    key: 'REQUIRE_PAYMENT_CHARGE_REF_BEFORE_BOOKING',
+    expected: true,
+    fallback: true,
+    blocker: 'REQUIRE_PAYMENT_CHARGE_REF_BEFORE_BOOKING=false bloqueado em produção'
+  },
+  {
+    key: 'CONFIRM_PAYMENT_SKIP_AVAILABILITY_CHECK',
+    expected: false,
+    fallback: false,
+    blocker: 'CONFIRM_PAYMENT_SKIP_AVAILABILITY_CHECK=true bloqueado em produção'
+  },
+  {
+    key: 'ENFORCE_PAYMENT_FARE_LOCK',
+    expected: true,
+    fallback: true,
+    blocker: 'ENFORCE_PAYMENT_FARE_LOCK=false bloqueado em produção'
+  },
+  {
+    key: 'REQUIRE_PAYMENT_LEDGER_BEFORE_DISPATCH',
+    expected: true,
+    fallback: true,
+    blocker: 'REQUIRE_PAYMENT_LEDGER_BEFORE_DISPATCH=false bloqueado em produção'
+  }
+];
+
 const PAYMENT_PROVIDER_ROLES = new Set([
   'gateway',
   'billing',
   'payment',
   'payments'
 ]);
+const DEFAULT_AWS_LIVENESS_CHALLENGE_TYPE = 'FaceMovementChallenge';
+const ALLOWED_AWS_LIVENESS_CHALLENGE_TYPES = [
+  'FaceMovementChallenge',
+  'FaceMovementAndLightChallenge'
+];
+const APPROVED_DRIVER_SEARCH_RADIUS_KM = 5;
+const APPROVED_REDIS_CRITICAL_MEMORY_THRESHOLDS = Object.freeze({
+  warningPercent: 60,
+  highPercent: 75,
+  criticalPercent: 85
+});
 
 function presence(value) {
   const raw = String(value || '').trim();
@@ -121,11 +191,148 @@ function booleanDiagnostic(name, fallback = false) {
   };
 }
 
+function isStrictBooleanLike(value) {
+  if (value == null || String(value).trim() === '') return true;
+  const normalized = String(value).trim().toLowerCase();
+  return [
+    'true', '1', 'yes', 'on', 'sim',
+    'false', '0', 'no', 'off', 'nao', 'não'
+  ].includes(normalized);
+}
+
 function requiresPaymentProviderConfig(runtimeRole) {
   if (boolEnv('RUNTIME_REQUIRES_PAYMENT_CONFIG', false)) {
     return true;
   }
   return PAYMENT_PROVIDER_ROLES.has(String(runtimeRole || '').trim().toLowerCase());
+}
+
+function resolveFinancialPolicyApproval() {
+  const activePolicy = describeFinancialPolicy(DEFAULT_RIDE_FINANCIAL_POLICY);
+  const approvedPolicyId = String(process.env.LEAF_APPROVED_FINANCIAL_POLICY_ID || '').trim();
+  const approvalReference = String(process.env.LEAF_FINANCIAL_POLICY_APPROVAL_REF || '').trim();
+  const approvalActor = String(process.env.LEAF_FINANCIAL_POLICY_APPROVAL_ACTOR || '').trim();
+
+  return {
+    activePolicy,
+    approvedPolicyId: approvedPolicyId || '(empty)',
+    approvalReferenceConfigured: presence(approvalReference),
+    approvalActorConfigured: presence(approvalActor),
+    approved:
+      approvedPolicyId === activePolicy.policyId &&
+      Boolean(approvalReference)
+  };
+}
+
+function numberMatches(value, expected) {
+  return Math.abs(Number(value) - Number(expected)) < 0.000001;
+}
+
+function collectGeofenceRings(value) {
+  if (!value) return [];
+  if (value.type === 'FeatureCollection') {
+    return (value.features || []).flatMap((feature) => collectGeofenceRings(feature));
+  }
+  if (value.type === 'Feature') return collectGeofenceRings(value.geometry);
+  if (value.type === 'Polygon') return value.coordinates?.[0] ? [value.coordinates[0]] : [];
+  if (value.type === 'MultiPolygon') {
+    return (value.coordinates || []).map((polygon) => polygon?.[0]).filter(Boolean);
+  }
+  if (!Array.isArray(value) || value.length === 0) return [];
+  if (Array.isArray(value[0]) && Number.isFinite(Number(value[0][0]))) return [value];
+  return value;
+}
+
+function resolveGeofenceRegionDiagnostic() {
+  const raw = String(process.env.GEOFENCE_REGION || '').trim();
+  const configuredFile = String(process.env.GEOFENCE_REGION_FILE || '').trim();
+  const defaultFile = path.resolve(__dirname, '../../config/geofence.json');
+  const filePath = configuredFile
+    ? path.resolve(__dirname, '../..', configuredFile)
+    : defaultFile;
+
+  try {
+    const parsed = raw
+      ? JSON.parse(raw)
+      : (fs.existsSync(filePath) ? JSON.parse(fs.readFileSync(filePath, 'utf8')) : null);
+    if (!parsed) {
+      return { configured: false, valid: false, polygons: 0, points: 0, source: 'none' };
+    }
+
+    const rings = collectGeofenceRings(parsed);
+    const valid = rings.length > 0 && rings.every((ring) => {
+      if (!Array.isArray(ring) || ring.length < 3) return false;
+      return ring.every((point) => {
+        const lng = Array.isArray(point) ? Number(point[0]) : Number(point?.lng);
+        const lat = Array.isArray(point) ? Number(point[1]) : Number(point?.lat);
+        return Number.isFinite(lng) && Number.isFinite(lat) && lng >= -180 && lng <= 180 && lat >= -90 && lat <= 90;
+      });
+    });
+    const metadata = parsed.metadata || parsed.features?.[0]?.properties || parsed.properties || {};
+    return {
+      configured: true,
+      valid,
+      polygons: rings.length,
+      points: rings.reduce((total, ring) => total + ring.length, 0),
+      source: raw ? 'env' : 'file',
+      file: raw ? null : path.relative(path.resolve(__dirname, '../..'), filePath),
+      version: metadata.policyId || metadata.version || null,
+      updatedAt: metadata.generatedAt || metadata.updatedAt || null
+    };
+  } catch (_error) {
+    return {
+      configured: Boolean(raw || configuredFile),
+      valid: false,
+      polygons: 0,
+      points: 0,
+      source: raw ? 'env' : (configuredFile ? 'file' : 'none')
+    };
+  }
+}
+
+function resolveLaunchControlDiagnostic() {
+  const launchProfile = resolveLaunchProfile();
+  const geofenceValidation = launchProfile === 'geofence_validation';
+  const rideFlowValidation = launchProfile === 'ride_flow_validation';
+  const pilotControlled = ['pilot_controlled', 'geofence_validation', 'ride_flow_validation'].includes(launchProfile) || boolEnv('LEAF_PILOT_CONTROLLED', false);
+  const passengerCohortSize = parseAllowlist(
+    process.env.PILOT_ALLOWED_PASSENGER_IDS || process.env.LEAF_PILOT_ALLOWED_PASSENGER_IDS
+  ).size;
+  const driverCohortSize = parseAllowlist(
+    process.env.PILOT_ALLOWED_DRIVER_IDS || process.env.LEAF_PILOT_ALLOWED_DRIVER_IDS
+  ).size;
+
+  return {
+    launchProfile,
+    pilotControlled,
+    geofenceValidation,
+    rideFlowValidation,
+    broadLaunchApproved: boolEnv('LEAF_BROAD_LAUNCH_APPROVED', false),
+    passengerCohortSize,
+    driverCohortSize,
+    acceptNewPix: booleanDiagnostic('LEAF_ACCEPT_NEW_PIX', true),
+    acceptNewBookings: booleanDiagnostic('LEAF_ACCEPT_NEW_BOOKINGS', true),
+    geofenceFailClosed: booleanDiagnostic('GEOFENCE_FAIL_CLOSED', true),
+    geofenceRegion: resolveGeofenceRegionDiagnostic(),
+    runtimePolicyVersionConfigured: presence(process.env.LEAF_RUNTIME_POLICY_VERSION)
+  };
+}
+
+function resolveDriverSearchRadiusPolicy() {
+  const dispatchMaxRadiusKm = getDriverSearchMaxRadiusKm();
+  const paymentAvailabilityRadiusKm = getPaymentAvailabilityRadiusKm();
+  const operationsPolicyRadiusKm = getOperationsPolicyRadiusKm();
+
+  return {
+    approvedRadiusKm: APPROVED_DRIVER_SEARCH_RADIUS_KM,
+    dispatchMaxRadiusKm,
+    paymentAvailabilityRadiusKm,
+    operationsPolicyRadiusKm,
+    ok:
+      numberMatches(dispatchMaxRadiusKm, APPROVED_DRIVER_SEARCH_RADIUS_KM) &&
+      numberMatches(paymentAvailabilityRadiusKm, APPROVED_DRIVER_SEARCH_RADIUS_KM) &&
+      numberMatches(operationsPolicyRadiusKm, APPROVED_DRIVER_SEARCH_RADIUS_KM)
+  };
 }
 
 function resolveEnvPath(filePath) {
@@ -190,6 +397,17 @@ function hasFirebaseServiceAccountConfigured({ allowLocalDefault = false } = {})
   );
 }
 
+function hasLegacyFcmServerKeyConfigured() {
+  return Boolean(String(process.env.FCM_SERVER_KEY || '').trim());
+}
+
+function hasApnsPrivateKeyConfigured() {
+  return Boolean(
+    String(process.env.LEAF_APNS_PRIVATE_KEY || '').trim() ||
+      String(process.env.LEAF_APNS_PRIVATE_KEY_PATH || '').trim()
+  );
+}
+
 function main() {
   const envFilesLoaded = loadRuntimeEnv();
   const nodeEnv = String(process.env.NODE_ENV || 'development').toLowerCase();
@@ -197,6 +415,11 @@ function main() {
   const baseUrl = String(process.env.WOOVI_BASE_URL || '');
   const wooviBaseUrlIsSandbox = /sandbox/i.test(baseUrl);
   const runtimeRole = String(process.env.RUNTIME_ROLE || 'gateway').trim().toLowerCase();
+  const serverRuntime = String(process.env.LEAF_SERVER_RUNTIME || 'modular').trim().toLowerCase();
+  const skipRuntimeConfigValidation = booleanDiagnostic(
+    'LEAF_SKIP_RUNTIME_CONFIG_VALIDATION',
+    false
+  );
   const allowLocalFirebaseDefaults = !process.env.ENV_FILE;
   const firebaseDatabaseUrl = resolveFirebaseDatabaseUrl({
     allowDefault: allowLocalFirebaseDefaults
@@ -204,9 +427,19 @@ function main() {
   const firebaseServiceAccountConfigured = hasFirebaseServiceAccountConfigured({
     allowLocalDefault: allowLocalFirebaseDefaults
   });
+  const legacyFcmServerKeyConfigured = hasLegacyFcmServerKeyConfigured();
+  const fcmConfigured = firebaseServiceAccountConfigured || legacyFcmServerKeyConfigured;
+  const apnsLiveActivityConfigured = Boolean(
+    String(process.env.LEAF_APNS_KEY_ID || '').trim() &&
+      String(process.env.LEAF_APNS_TEAM_ID || '').trim() &&
+      hasApnsPrivateKeyConfigured()
+  );
   const paymentProviderConfigRequired = requiresPaymentProviderConfig(runtimeRole);
   const paymentProviderSandboxRuntime =
     paymentProviderConfigRequired && (wooviEnv === 'sandbox' || wooviBaseUrlIsSandbox);
+  const financialPolicyApproval = resolveFinancialPolicyApproval();
+  const driverSearchRadiusPolicy = resolveDriverSearchRadiusPolicy();
+  const launchControlDiagnostic = resolveLaunchControlDiagnostic();
 
   const missingCommon = checkRequired([
     ...REQUIRED_BASE,
@@ -246,8 +479,117 @@ function main() {
     return acc;
   }, {});
   const biometricReadiness = evaluateProductionReadiness(process.env);
+  const adaptiveKycCadence = booleanDiagnostic('KYC_TRUST_CADENCE_ENABLED', false);
+  const onlineKycGate = booleanDiagnostic('DAILY_KYC_ONLINE_GATE_ENABLED', false);
+  const activeTripIndex = booleanDiagnostic('ENABLE_ACTIVE_TRIP_INDEX', true);
+  const activeTripAuthorityMode = String(
+    process.env.KYC_ACTIVE_TRIP_AUTHORITY_MODE || ''
+  ).trim().toLowerCase();
+  const activeTripAuthorityModeValid = activeTripAuthorityMode === ''
+    || activeTripAuthorityMode === 'redis_noeviction';
+  const redisCriticalAuthorityAttestation = booleanDiagnostic(
+    'REDIS_CRITICAL_AUTHORITY_ATTESTATION_ENABLED',
+    false
+  );
+  const redisCriticalDatasetQuarantine = booleanDiagnostic(
+    'REDIS_CRITICAL_DATASET_QUARANTINE_ENABLED',
+    false
+  );
+  const redisCriticalDatasetGeneration = String(
+    process.env.REDIS_CRITICAL_DATASET_GENERATION || ''
+  ).trim();
+  const redisCriticalDatasetGenerationKey = String(
+    process.env.REDIS_CRITICAL_DATASET_GENERATION_KEY
+      || 'leaf:runtime:critical-dataset:generation'
+  ).trim();
+  const redisCriticalMemoryThresholds = {
+    warningPercent: Number(process.env.REDIS_CRITICAL_MEMORY_WARNING_PERCENT ?? 60),
+    highPercent: Number(process.env.REDIS_CRITICAL_MEMORY_HIGH_PERCENT ?? 75),
+    criticalPercent: Number(process.env.REDIS_CRITICAL_MEMORY_CRITICAL_PERCENT ?? 85)
+  };
+  const redisCriticalMemoryThresholdsApproved = Object.entries(
+    APPROVED_REDIS_CRITICAL_MEMORY_THRESHOLDS
+  ).every(([key, expected]) => redisCriticalMemoryThresholds[key] === expected);
+  const redisCriticalAttestationCacheTtlMs = Number(
+    process.env.REDIS_CRITICAL_ATTESTATION_CACHE_TTL_MS ?? 5000
+  );
+  const tripLocationStream = booleanDiagnostic('ENABLE_TRIP_LOCATION_STREAM', true);
+  const tripLocationPersistenceWorker = booleanDiagnostic(
+    'ENABLE_TRIP_LOCATION_PERSISTENCE_WORKER',
+    true
+  );
+  const tripLocationFirestorePersistence = booleanDiagnostic(
+    'ENABLE_TRIP_LOCATION_FIRESTORE_PERSISTENCE',
+    true
+  );
+  const tripLocationStreamBooleanValid = isStrictBooleanLike(
+    process.env.ENABLE_TRIP_LOCATION_STREAM
+  );
+  const tripLocationWorkerGroup = String(
+    process.env.TRIP_LOCATION_WORKER_GROUP || 'trip-location-workers'
+  ).trim();
+  const tripLocationConsumerMaxIdleMs = Number(
+    process.env.TRIP_LOCATION_CONSUMER_MAX_IDLE_MS ?? 30000
+  );
+  const tripLocationStreamTrimThreshold = Number(
+    process.env.TRIP_LOCATION_STREAM_SAFE_TRIM_THRESHOLD ?? 500000
+  );
+  // This authority protects AcceptRide independently from the KYC rollout.
+  // Once redis_noeviction is selected, its static contract must be complete
+  // even while AWS biometrics/cadence remain intentionally dormant.
+  const redisCriticalAuthorityRequired =
+    activeTripAuthorityMode === 'redis_noeviction';
+  const kycStrictReadinessRequired =
+    launchControlDiagnostic.launchProfile === 'pilot_controlled'
+    || boolEnv('LEAF_PILOT_CONTROLLED', false)
+    || biometricReadiness.enabled
+    || biometricReadiness.policy.strictProductionMode
+    || boolEnv('KYC_AWS_LIVENESS_ENABLED', false)
+    || boolEnv('AWS_LIVENESS_ENABLED', false)
+    || boolEnv('KYC_AWS_LIVENESS_CREDENTIALS_ENABLED', false)
+    || boolEnv('KYC_AWS_COMPARE_FACES_ENABLED', false)
+    || adaptiveKycCadence.value
+    || onlineKycGate.value;
+  const trustPolicyVersion = String(
+    process.env.KYC_TRUST_POLICY_VERSION || (
+      adaptiveKycCadence.value
+        ? 'driver_identity_recurring_v2'
+        : 'driver_identity_recurring_v1'
+    )
+  ).trim();
+  const newMaxAgeHours = Number(process.env.KYC_TRUST_T0_MAX_AGE_HOURS || 24);
+  const observedMaxAgeHours = Number(process.env.KYC_TRUST_T1_MAX_AGE_HOURS || 72);
+  const trustedMaxAgeHours = Number(process.env.KYC_TRUST_T2_MAX_AGE_HOURS || 168);
+  const trustedRandomAuditPercent = Number(process.env.KYC_TRUSTED_RANDOM_AUDIT_PERCENT || 10);
+  const observedMinDistinctSuccessDays = Number(
+    process.env.KYC_TRUST_T1_MIN_DISTINCT_SUCCESS_DAYS || 7
+  );
+  const trustedMinAgeDays = Number(process.env.KYC_TRUST_T2_MIN_AGE_DAYS || 30);
+  const trustedMinSuccessCount = Number(process.env.KYC_TRUST_T2_MIN_SUCCESS_COUNT || 14);
+  const trustedMinDistinctSuccessDays = Number(
+    process.env.KYC_TRUST_T2_MIN_DISTINCT_SUCCESS_DAYS || 14
+  );
+  const awsLivenessS3Bucket = String(
+    process.env.KYC_AWS_LIVENESS_S3_BUCKET || process.env.AWS_LIVENESS_S3_BUCKET || ''
+  ).trim();
+  const awsCostGuard = booleanDiagnostic('KYC_AWS_COST_GUARD_ENABLED', false);
+  const awsCostDailyLimitUsd = Number(process.env.KYC_AWS_COST_DAILY_LIMIT_USD);
+  const awsCostMonthlyLimitUsd = Number(process.env.KYC_AWS_COST_MONTHLY_LIMIT_USD);
+  const awsCostTimeZone = String(process.env.KYC_AWS_COST_TIME_ZONE || '').trim().toUpperCase();
+  const awsCostLimitsValid = Number.isFinite(awsCostDailyLimitUsd)
+    && Number.isFinite(awsCostMonthlyLimitUsd)
+    && awsCostDailyLimitUsd > 0
+    && awsCostMonthlyLimitUsd > 0
+    && awsCostDailyLimitUsd <= awsCostMonthlyLimitUsd;
   const legacyRuntimeDiagnostics = LEGACY_RUNTIME_FLAGS.reduce((acc, key) => {
     acc[key] = booleanDiagnostic(key, false);
+    return acc;
+  }, {});
+  const coreRidePaymentGuardDiagnostics = CORE_RIDE_PAYMENT_GUARD_FLAGS.reduce((acc, guard) => {
+    acc[guard.key] = {
+      ...booleanDiagnostic(guard.key, guard.fallback),
+      expected: guard.expected
+    };
     return acc;
   }, {});
   const socketRedisAdapterDiagnostic = booleanDiagnostic('ENABLE_SOCKETIO_REDIS_ADAPTER', true);
@@ -255,6 +597,146 @@ function main() {
     'REQUIRE_SOCKETIO_REDIS_ADAPTER',
     nodeEnv === 'production' && runtimeRole === 'gateway'
   );
+  const authOtpDiagnostics = {
+    customOtpRouteMounted: true,
+    productionNonBypassMode:
+      nodeEnv === 'production'
+        ? 'fail_closed_without_real_provider'
+        : 'redis_simulated_delivery',
+    debugOtp: booleanDiagnostic('DEBUG_OTP', false),
+    testBypass: booleanDiagnostic('AUTH_TEST_OTP_BYPASS_ENABLED', false),
+    reviewBypass: booleanDiagnostic('AUTH_REVIEW_OTP_BYPASS_ENABLED', false)
+  };
+
+  if (adaptiveKycCadence.value && !onlineKycGate.value) {
+    blockers.push('KYC_TRUST_CADENCE_ENABLED=true exige DAILY_KYC_ONLINE_GATE_ENABLED=true');
+  }
+  if (nodeEnv === 'production' && adaptiveKycCadence.value && !biometricReadiness.enabled) {
+    blockers.push('KYC_TRUST_CADENCE_ENABLED=true em produção exige KYC_PRODUCTION_BIOMETRICS_ENABLED=true');
+  }
+  if (nodeEnv === 'production' && biometricReadiness.enabled && !adaptiveKycCadence.value) {
+    blockers.push('KYC_PRODUCTION_BIOMETRICS_ENABLED=true exige KYC_TRUST_CADENCE_ENABLED=true em produção');
+  }
+  if (nodeEnv === 'production' && biometricReadiness.enabled && !onlineKycGate.value) {
+    blockers.push('KYC_PRODUCTION_BIOMETRICS_ENABLED=true exige DAILY_KYC_ONLINE_GATE_ENABLED=true em produção');
+  }
+  if (nodeEnv === 'production' && biometricReadiness.enabled && !activeTripIndex.value) {
+    blockers.push('KYC_PRODUCTION_BIOMETRICS_ENABLED=true exige ENABLE_ACTIVE_TRIP_INDEX=true em produção');
+  }
+  if (!activeTripAuthorityModeValid) {
+    blockers.push('KYC_ACTIVE_TRIP_AUTHORITY_MODE deve ser vazio ou redis_noeviction');
+  }
+  if (redisCriticalAuthorityRequired) {
+    if (!tripLocationPersistenceWorker.value) {
+      blockers.push('ENABLE_TRIP_LOCATION_PERSISTENCE_WORKER=true obrigatório para redis_noeviction');
+    }
+    if (!tripLocationFirestorePersistence.value) {
+      blockers.push('ENABLE_TRIP_LOCATION_FIRESTORE_PERSISTENCE=true obrigatório para redis_noeviction');
+    }
+    if (!tripLocationStreamBooleanValid) {
+      blockers.push('ENABLE_TRIP_LOCATION_STREAM deve ser booleano explícito em redis_noeviction');
+    }
+    if (!redisCriticalAuthorityAttestation.value) {
+      blockers.push('REDIS_CRITICAL_AUTHORITY_ATTESTATION_ENABLED=true obrigatório para redis_noeviction');
+    }
+    if (!redisCriticalDatasetQuarantine.value) {
+      blockers.push('REDIS_CRITICAL_DATASET_QUARANTINE_ENABLED=true obrigatório para redis_noeviction');
+    }
+    if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(redisCriticalDatasetGeneration)) {
+      blockers.push('REDIS_CRITICAL_DATASET_GENERATION deve identificar a geração persistente esperada');
+    }
+    if (
+      !redisCriticalDatasetGenerationKey
+      || redisCriticalDatasetGenerationKey.length > 256
+    ) {
+      blockers.push('REDIS_CRITICAL_DATASET_GENERATION_KEY deve identificar um marker Redis válido');
+    }
+    if (!redisCriticalMemoryThresholdsApproved) {
+      blockers.push('Thresholds Redis críticos devem permanecer exatamente em 60/75/85');
+    }
+    if (
+      !Number.isInteger(redisCriticalAttestationCacheTtlMs)
+      || redisCriticalAttestationCacheTtlMs < 0
+      || redisCriticalAttestationCacheTtlMs > 5000
+    ) {
+      blockers.push('REDIS_CRITICAL_ATTESTATION_CACHE_TTL_MS deve ficar entre 0 e 5000ms');
+    }
+    if (tripLocationStream.value && !tripLocationWorkerGroup) {
+      blockers.push('TRIP_LOCATION_WORKER_GROUP deve identificar o consumer group quando o stream de localização está ativo');
+    }
+    if (
+      tripLocationStream.value
+      && (
+        !Number.isInteger(tripLocationConsumerMaxIdleMs)
+        || tripLocationConsumerMaxIdleMs < 1000
+        || tripLocationConsumerMaxIdleMs > 300000
+      )
+    ) {
+      blockers.push('TRIP_LOCATION_CONSUMER_MAX_IDLE_MS deve ser inteiro entre 1000 e 300000ms');
+    }
+    if (
+      tripLocationStream.value
+      && (
+        !Number.isInteger(tripLocationStreamTrimThreshold)
+        || tripLocationStreamTrimThreshold < 100000
+      )
+    ) {
+      blockers.push('TRIP_LOCATION_STREAM_SAFE_TRIM_THRESHOLD deve ser inteiro e no mínimo 100000');
+    }
+    warnings.push(
+      'redis_noeviction exige vm.overcommit_memory=1 no host; o validator estático não altera nem atesta o kernel'
+    );
+    if (tripLocationStream.value) {
+      warnings.push(
+        `readiness exige consumer vivo no grupo ${tripLocationWorkerGroup} com idle máximo de ${tripLocationConsumerMaxIdleMs}ms; o validator estático não inicia workers`
+      );
+    }
+  }
+  if (
+    adaptiveKycCadence.value
+    && trustedRandomAuditPercent !== 10
+  ) {
+    blockers.push('KYC_TRUSTED_RANDOM_AUDIT_PERCENT deve ser exatamente 10 na política driver_identity_recurring_v2');
+  }
+  if (adaptiveKycCadence.value && trustPolicyVersion !== 'driver_identity_recurring_v2') {
+    blockers.push('KYC_TRUST_POLICY_VERSION deve ser driver_identity_recurring_v2 quando a cadência adaptativa estiver ativa');
+  }
+  if (adaptiveKycCadence.value && newMaxAgeHours !== 24) {
+    blockers.push('KYC_TRUST_T0_MAX_AGE_HOURS deve ser exatamente 24 na política driver_identity_recurring_v2');
+  }
+  if (adaptiveKycCadence.value && observedMaxAgeHours !== 72) {
+    blockers.push('KYC_TRUST_T1_MAX_AGE_HOURS deve ser exatamente 72 na política driver_identity_recurring_v2');
+  }
+  if (adaptiveKycCadence.value && trustedMaxAgeHours !== 168) {
+    blockers.push('KYC_TRUST_T2_MAX_AGE_HOURS deve ser exatamente 168 na política driver_identity_recurring_v2');
+  }
+  if (
+    adaptiveKycCadence.value
+    && observedMinDistinctSuccessDays !== 7
+  ) {
+    blockers.push('KYC_TRUST_T1_MIN_DISTINCT_SUCCESS_DAYS deve ser exatamente 7 na política driver_identity_recurring_v2');
+  }
+  if (
+    adaptiveKycCadence.value
+    && trustedMinAgeDays !== 30
+  ) {
+    blockers.push('KYC_TRUST_T2_MIN_AGE_DAYS deve ser exatamente 30 na política driver_identity_recurring_v2');
+  }
+  if (
+    adaptiveKycCadence.value
+    && trustedMinSuccessCount !== 14
+  ) {
+    blockers.push('KYC_TRUST_T2_MIN_SUCCESS_COUNT deve ser exatamente 14 na política driver_identity_recurring_v2');
+  }
+  if (
+    adaptiveKycCadence.value
+    && trustedMinDistinctSuccessDays !== 14
+  ) {
+    blockers.push('KYC_TRUST_T2_MIN_DISTINCT_SUCCESS_DAYS deve ser exatamente 14 na política driver_identity_recurring_v2');
+  }
+  if (adaptiveKycCadence.value && awsLivenessS3Bucket) {
+    blockers.push('KYC_AWS_LIVENESS_S3_BUCKET deve permanecer vazio com cadência adaptativa até o backend suportar ReferenceImage.S3Object');
+  }
   const webhookProviderVerificationFallback =
     !hasWebhookVerifier &&
     (hasWebhookAuthorization || paymentProviderSandboxRuntime) &&
@@ -275,11 +757,62 @@ function main() {
   }
 
   if (nodeEnv === 'production') {
+    if (serverRuntime !== 'modular') {
+      blockers.push('LEAF_SERVER_RUNTIME deve ser modular em produção');
+    }
+    if (skipRuntimeConfigValidation.value) {
+      blockers.push('LEAF_SKIP_RUNTIME_CONFIG_VALIDATION=true bloqueado em produção');
+    }
     const geofenceRadiusKm = Number.parseFloat(process.env.GEOFENCE_RADIUS_KM || '');
     const corsOrigin = String(process.env.CORS_ORIGIN || '').trim();
 
     if (boolEnv('APP_REVIEW')) {
       blockers.push('APP_REVIEW=true não pode ir para produção pública normal');
+    }
+    if (!launchControlDiagnostic.pilotControlled && !launchControlDiagnostic.broadLaunchApproved) {
+      blockers.push('Produção exige perfil pilot_controlled ou LEAF_BROAD_LAUNCH_APPROVED=true após o GO formal');
+    }
+    if (launchControlDiagnostic.pilotControlled) {
+      if (launchControlDiagnostic.passengerCohortSize < 1) {
+        blockers.push('PILOT_ALLOWED_PASSENGER_IDS deve conter o cohort autorizado do piloto');
+      }
+      if (launchControlDiagnostic.driverCohortSize < 1) {
+        blockers.push('PILOT_ALLOWED_DRIVER_IDS deve conter o cohort autorizado do piloto');
+      }
+      if (!launchControlDiagnostic.geofenceFailClosed.value) {
+        blockers.push('GEOFENCE_FAIL_CLOSED=false bloqueado no perfil piloto');
+      }
+      if (!launchControlDiagnostic.geofenceRegion.valid) {
+        blockers.push('GEOFENCE_REGION ausente ou inválido: o piloto exige polígono operacional aprovado');
+      }
+      if (launchControlDiagnostic.runtimePolicyVersionConfigured === '(empty)') {
+        blockers.push('LEAF_RUNTIME_POLICY_VERSION obrigatório no perfil piloto');
+      }
+    }
+    if (launchControlDiagnostic.geofenceValidation) {
+      if (launchControlDiagnostic.acceptNewPix.value) {
+        blockers.push('LEAF_ACCEPT_NEW_PIX=true bloqueado no perfil geofence_validation');
+      }
+      if (launchControlDiagnostic.acceptNewBookings.value) {
+        blockers.push('LEAF_ACCEPT_NEW_BOOKINGS=true bloqueado no perfil geofence_validation');
+      }
+    }
+    if (launchControlDiagnostic.rideFlowValidation) {
+      if (!boolEnv('LEAF_RIDE_FLOW_VALIDATION_ACK', false)) {
+        blockers.push('LEAF_RIDE_FLOW_VALIDATION_ACK=true obrigatório no perfil ride_flow_validation');
+      }
+      if (launchControlDiagnostic.passengerCohortSize !== 1) {
+        blockers.push('ride_flow_validation exige exatamente 1 passageiro na allowlist');
+      }
+      if (launchControlDiagnostic.driverCohortSize !== 1) {
+        blockers.push('ride_flow_validation exige exatamente 1 motorista na allowlist');
+      }
+      if (!launchControlDiagnostic.acceptNewPix.value) {
+        blockers.push('LEAF_ACCEPT_NEW_PIX=true obrigatório no perfil ride_flow_validation');
+      }
+      if (!launchControlDiagnostic.acceptNewBookings.value) {
+        blockers.push('LEAF_ACCEPT_NEW_BOOKINGS=true obrigatório no perfil ride_flow_validation');
+      }
     }
     if (boolEnv('BYPASS_GEOFENCE')) {
       blockers.push('BYPASS_GEOFENCE=true bloqueado em produção');
@@ -369,8 +902,29 @@ function main() {
         blockers.push(`${key}=true bloqueado em produção`);
       }
     }
+    for (const guard of CORE_RIDE_PAYMENT_GUARD_FLAGS) {
+      if (coreRidePaymentGuardDiagnostics[guard.key].value !== guard.expected) {
+        blockers.push(guard.blocker);
+      }
+    }
     if (boolEnv('MOCK_PAYMENT_FOR_TESTS')) {
       blockers.push('MOCK_PAYMENT_FOR_TESTS=true bloqueado em produção');
+    }
+    if (!driverSearchRadiusPolicy.ok) {
+      blockers.push(
+        `Raio de busca de motorista deve permanecer em ${APPROVED_DRIVER_SEARCH_RADIUS_KM}km geográficos em produção (dispatch=${driverSearchRadiusPolicy.dispatchMaxRadiusKm}, payment=${driverSearchRadiusPolicy.paymentAvailabilityRadiusKm}, operations=${driverSearchRadiusPolicy.operationsPolicyRadiusKm})`
+      );
+    }
+    if (
+      paymentProviderConfigRequired &&
+      !financialPolicyApproval.approved
+    ) {
+      blockers.push(
+        `Política financeira ativa sem aprovação explícita: defina LEAF_APPROVED_FINANCIAL_POLICY_ID=${financialPolicyApproval.activePolicy.policyId} e LEAF_FINANCIAL_POLICY_APPROVAL_REF antes de produção`
+      );
+    }
+    if (authOtpDiagnostics.debugOtp.value) {
+      blockers.push('DEBUG_OTP=true bloqueado em produção');
     }
     if (boolEnv('AUTH_TEST_OTP_BYPASS_ENABLED')) {
       blockers.push('AUTH_TEST_OTP_BYPASS_ENABLED=true bloqueado em produção');
@@ -447,6 +1001,61 @@ function main() {
     },
     diagnostics: {
       biometricReadiness,
+      adaptiveKycCadence: {
+        enabled: adaptiveKycCadence,
+        onlineGate: onlineKycGate,
+        activeTripIndex,
+        policyVersion: trustPolicyVersion,
+        cadenceHours: {
+          new: newMaxAgeHours,
+          observed: observedMaxAgeHours,
+          trusted: trustedMaxAgeHours
+        },
+        promotionRequirements: {
+          observedMinDistinctSuccessDays,
+          trustedMinAgeDays,
+          trustedMinSuccessCount,
+          trustedMinDistinctSuccessDays
+        },
+        randomAuditPercent: trustedRandomAuditPercent,
+        verificationDuringActiveRide: false,
+        referenceImageMode: awsLivenessS3Bucket ? 's3_unsupported' : 'inline_bytes'
+      },
+      redisCriticalAuthority: {
+        required: redisCriticalAuthorityRequired,
+        requiredForAcceptRide: redisCriticalAuthorityRequired,
+        requiredForKycStrict: kycStrictReadinessRequired,
+        mode: activeTripAuthorityMode || null,
+        modeValid: activeTripAuthorityModeValid,
+        attestationEnabled: redisCriticalAuthorityAttestation,
+        quarantineEnabled: redisCriticalDatasetQuarantine,
+        datasetGenerationConfigured: /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/
+          .test(redisCriticalDatasetGeneration),
+        datasetGenerationKeyConfigured: Boolean(redisCriticalDatasetGenerationKey),
+        memoryThresholds: redisCriticalMemoryThresholds,
+        memoryThresholdsApproved: redisCriticalMemoryThresholdsApproved,
+        attestationCacheTtlMs: redisCriticalAttestationCacheTtlMs,
+        tripLocationStream: {
+          enabled: tripLocationStream,
+          booleanValid: tripLocationStreamBooleanValid,
+          persistenceWorkerEnabled: tripLocationPersistenceWorker,
+          firestorePersistenceEnabled: tripLocationFirestorePersistence,
+          requiredConsumerGroup: tripLocationWorkerGroup || null,
+          maxConsumerIdleMs: tripLocationConsumerMaxIdleMs,
+          safeTrimThreshold: tripLocationStreamTrimThreshold,
+          liveConsumerAttestation: tripLocationStream.value
+            ? 'required_at_runtime'
+            : 'not_required'
+        },
+        liveAttestation: redisCriticalAuthorityRequired
+          ? 'required_at_runtime'
+          : 'not_required'
+      },
+      awsKycCostGuard: {
+        enabled: awsCostGuard,
+        limitsValid: awsCostLimitsValid,
+        timeZoneUtc: awsCostTimeZone === 'UTC'
+      },
       webhookSignature: {
         verifierKeysPresent: effectiveWebhookVerifierKeysPresent,
         hasVerifier: hasWebhookVerifier,
@@ -467,6 +1076,8 @@ function main() {
         }
       },
       paymentBypass: paymentBypassDiagnostics,
+      coreRidePaymentGuards: coreRidePaymentGuardDiagnostics,
+      driverSearchRadiusPolicy,
       legacyRuntime: legacyRuntimeDiagnostics,
       firebase: {
         databaseUrlConfigured: presence(firebaseDatabaseUrl),
@@ -479,15 +1090,32 @@ function main() {
           boolEnv('EXPO_PUBLIC_ALLOW_CLIENT_DIRECT_GOOGLE_FALLBACK', false) ||
           boolEnv('ALLOW_CLIENT_DIRECT_GOOGLE_FALLBACK', false),
         placesCacheEnabled: booleanDiagnostic('ENABLE_PLACES_CACHE', true),
-        receiptMapImagesConfigured: Boolean(String(process.env.GEO_KEY || '').trim())
+        receiptMapImagesConfigured: Boolean(
+          String(process.env.GOOGLE_MAPS_API_KEY || process.env.GEO_KEY || '').trim()
+        )
       },
       push: {
-        fcmConfigured: Boolean(String(process.env.FCM_SERVER_KEY || '').trim()),
+        fcmConfigured,
+        provider: firebaseServiceAccountConfigured
+          ? 'firebase-admin'
+          : legacyFcmServerKeyConfigured
+            ? 'legacy-fcm-server-key'
+            : null,
         allowPublicDirectFcmSend: booleanDiagnostic('ALLOW_PUBLIC_DIRECT_FCM_SEND', false),
-        demandNotificationServiceEnabled: booleanDiagnostic('ENABLE_RUNTIME_DEMAND_NOTIFICATION_SERVICE', false)
+        demandNotificationServiceEnabled: booleanDiagnostic('ENABLE_RUNTIME_DEMAND_NOTIFICATION_SERVICE', false),
+        liveActivity: {
+          apnsConfigured: apnsLiveActivityConfigured,
+          keyIdConfigured: Boolean(String(process.env.LEAF_APNS_KEY_ID || '').trim()),
+          teamIdConfigured: Boolean(String(process.env.LEAF_APNS_TEAM_ID || '').trim()),
+          privateKeyConfigured: hasApnsPrivateKeyConfigured(),
+          bundleId: presence(process.env.LEAF_APNS_BUNDLE_ID),
+          environment: String(process.env.LEAF_APNS_ENV || process.env.NODE_ENV || '').trim().toLowerCase() || 'development'
+        }
       },
       runtime: {
         runtimeRole,
+        serverRuntime,
+        skipRuntimeConfigValidation,
         paymentProviderConfigRequired,
         socketRedisAdapter: {
           ...socketRedisAdapterDiagnostic,
@@ -497,6 +1125,11 @@ function main() {
           ...socketRedisAdapterRequiredDiagnostic,
           expected: nodeEnv === 'production' && runtimeRole === 'gateway'
         }
+      },
+      launchControl: launchControlDiagnostic,
+      financialPolicy: financialPolicyApproval,
+      authOtp: {
+        ...authOtpDiagnostics
       }
     },
     optionalRecommended: OPTIONAL_RECOMMENDED.filter((k) => !String(process.env[k] || '').trim())

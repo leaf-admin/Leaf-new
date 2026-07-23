@@ -189,6 +189,7 @@ const ProfileDataStep = ({ onSubmitted, onBack, initialData = {}, progressMeta }
       description="Confirme seu nome, e-mail e senha para deixar sua conta pronta."
       onBack={onBack}
       progressMeta={progressMeta}
+      stickyFooter={false}
       footer={(
         <ContinueButton
           onPress={handleSubmit}

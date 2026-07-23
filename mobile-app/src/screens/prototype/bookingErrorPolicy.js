@@ -9,6 +9,42 @@ const TRANSIENT_BOOKING_ERROR_CODES = new Set([
   "PAYMENT_NOT_CONFIRMED",
 ]);
 
+const NO_DRIVERS_BOOKING_ERROR_CODES = new Set([
+  "NO_DRIVERS",
+  "NO_DRIVERS_AVAILABLE",
+  "NO_DRIVERS_FOUND",
+]);
+
+export function isNoDriversBookingError(payload = {}) {
+  const nestedPayload =
+    payload?.payload && typeof payload.payload === "object"
+      ? payload.payload
+      : {};
+  const code = String(payload?.code || nestedPayload?.code || "")
+    .trim()
+    .toUpperCase();
+
+  if (NO_DRIVERS_BOOKING_ERROR_CODES.has(code)) {
+    return true;
+  }
+
+  const message = String(
+    payload?.message ||
+      payload?.error ||
+      payload?.rawMessage ||
+      nestedPayload?.message ||
+      nestedPayload?.error ||
+      "",
+  ).toLowerCase();
+
+  return (
+    /no[_\s-]?drivers/.test(message) ||
+    /nenhum motorista/.test(message) ||
+    /n[aã]o (?:h[aá]|encontramos) motoristas?/.test(message) ||
+    /sem motoristas?/.test(message)
+  );
+}
+
 export function shouldIgnoreTransientBookingError(
   payload = {},
   runtimeSnapshot = {},
@@ -33,4 +69,4 @@ export function shouldIgnoreTransientBookingError(
   return retryAfterSec > 0 && paymentStatus === "processing";
 }
 
-export { TRANSIENT_BOOKING_ERROR_CODES };
+export { NO_DRIVERS_BOOKING_ERROR_CODES, TRANSIENT_BOOKING_ERROR_CODES };

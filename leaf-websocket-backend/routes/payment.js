@@ -7,18 +7,33 @@ const PaymentService = require('../services/payment-service');
 const paymentRuntimeProfileService = require('../services/payment-runtime-profile-service');
 const kycPolicyService = require('../services/kyc-policy-service');
 const firebaseConfig = require('../firebase-config');
+const redisPool = require('../utils/redis-pool');
 const passengerDiscountBenefitService = require('../services/passenger-discount-benefit-service');
 const {
   buildPaymentAvailabilityInput,
   hasPaymentEligibleDriver
 } = require('../services/payment-driver-availability-guard');
+const {
+  DEFAULT_PAYMENT_DRIVER_RESERVATION_TTL_SECONDS
+} = require('../services/payment-driver-reservation-service');
+const {
+  validateQuoteLock,
+  validateQuoteLockPayload
+} = require('../services/quote-lock-service');
 const { logStructured, logError } = require('../utils/logger');
+const { metrics } = require('../utils/prometheus-metrics');
 const { resolveJwtSecret } = require('../utils/jwt-secret-resolver');
 const { getAdminUser } = require('../utils/admin-user-cache');
 const {
   isLaunchFeatureEnabled,
   buildLaunchFeatureDisabledPayload
 } = require('../utils/pilot-launch-flags');
+const { evaluatePilotAccess } = require('../services/pilot-access-control-service');
+const { getFinancialCollections } = require('../services/financial-runtime-context');
+const {
+  assertStoredRecordMatchesScope,
+  resolveUserPersistenceScope
+} = require('../services/sandbox-persistence-context');
 const router = express.Router();
 
 const paymentService = new PaymentService();
@@ -40,10 +55,168 @@ function isLegacyManualPaymentDistributionEnabled() {
   return String(process.env.ENABLE_LEGACY_MANUAL_PAYMENT_DISTRIBUTION || 'false').toLowerCase() === 'true';
 }
 
+function shouldRequireQuoteLockForPayment() {
+  const configured = process.env.REQUIRE_PAYMENT_QUOTE_LOCK;
+  if (configured !== undefined) {
+    return String(configured).toLowerCase() === 'true';
+  }
+  return process.env.NODE_ENV !== 'test';
+}
+
+function resolveQuoteLockFailureStatus(code) {
+  if (code === 'QUOTE_LOCK_REQUIRED') return 400;
+  if (code === 'QUOTE_LOCK_STORE_UNAVAILABLE') return 503;
+  if (code === 'QUOTE_LOCK_NOT_FOUND_OR_EXPIRED' || code === 'QUOTE_LOCK_EXPIRED') return 409;
+  if (String(code || '').includes('MISMATCH')) return 409;
+  return 400;
+}
+
+function resolveAdvancePaymentFailureStatus(code) {
+  const normalized = String(code || '').toUpperCase();
+  if (normalized === 'PAYMENT_SESSION_CONSUMED' || normalized === 'PAYMENT_INTENT_CONFLICT') return 409;
+  if (
+    normalized === 'PAYMENT_PROFILE_CREDENTIALS_MISSING' ||
+    normalized === 'PAYMENT_INTENT_STORE_UNAVAILABLE'
+  ) {
+    return 503;
+  }
+  if (normalized.includes('WOOVI') || normalized.includes('PROVIDER')) return 502;
+  return 400;
+}
+
+function canRecoverQuoteLockFromIntentSnapshot(code) {
+  return code === 'QUOTE_LOCK_NOT_FOUND_OR_EXPIRED' || code === 'QUOTE_LOCK_EXPIRED';
+}
+
+function buildPaymentPersistenceEnvelope(persistenceScope) {
+  const financialContext = persistenceScope?.financialContext;
+  if (!financialContext || !persistenceScope?.namespace) {
+    const error = new Error('Contexto de persistência de pagamento indisponível');
+    error.code = 'PERSISTENCE_USER_CLASSIFICATION_UNAVAILABLE';
+    throw error;
+  }
+
+  return {
+    financialContext,
+    financialNamespace: persistenceScope.namespace,
+    financialContextId: financialContext.contextId,
+    providerEnvironment: financialContext.providerEnvironment,
+    paymentProfileId: financialContext.paymentProfileId || null,
+    paymentProfileSource: financialContext.paymentProfileSource || null,
+    testUserSandbox: financialContext.testUserSandbox === true
+  };
+}
+
+async function validateQuoteLockFromPaymentIntentSnapshot({
+  rideId,
+  quoteLockId,
+  quoteSessionId,
+  passengerId,
+  persistenceScope,
+  amountInCents,
+  grossAmountInCents,
+  pickupLocation,
+  destinationLocation,
+  carType,
+  toleranceInCents
+} = {}) {
+  const safeRideId = String(rideId || '').trim();
+  const safeQuoteLockId = String(quoteLockId || '').trim();
+  const safePassengerId = String(passengerId || '').trim();
+  if (!safeRideId || !safeQuoteLockId || !safePassengerId) return null;
+
+  const firestore = firebaseConfig.getFirestore();
+  if (!firestore) return null;
+
+  const persistenceEnvelope = buildPaymentPersistenceEnvelope(persistenceScope);
+  const { collections } = getFinancialCollections(persistenceEnvelope.financialContext);
+  const paymentIntentsCollection = firestore.collection(collections.paymentIntents);
+  const paymentIntentId = paymentService.buildAdvancePaymentIntentId(safeRideId);
+  let paymentIntentSnapshot = await paymentIntentsCollection.doc(paymentIntentId).get();
+  let recoveredPaymentIntentId = paymentIntentId;
+
+  if (!paymentIntentSnapshot.exists) {
+    const candidates = await paymentIntentsCollection
+      .where('passengerId', '==', safePassengerId)
+      .where('quoteLockId', '==', safeQuoteLockId)
+      .limit(20)
+      .get();
+    const candidateDoc = candidates.docs
+      .map((doc) => {
+        const data = doc.data() || {};
+        assertStoredRecordMatchesScope(data, persistenceEnvelope);
+        return { id: doc.id, data };
+      })
+      .filter(({ data }) => data.quoteLockSnapshot)
+      .sort((left, right) => {
+        const leftTime = Date.parse(left.data.updatedAtIso || left.data.createdAtIso || '') || 0;
+        const rightTime = Date.parse(right.data.updatedAtIso || right.data.createdAtIso || '') || 0;
+        return rightTime - leftTime;
+      })[0];
+    if (!candidateDoc) return null;
+    recoveredPaymentIntentId = candidateDoc.id;
+    paymentIntentSnapshot = {
+      exists: true,
+      data: () => candidateDoc.data
+    };
+  }
+
+  const intent = paymentIntentSnapshot.data() || {};
+  assertStoredRecordMatchesScope(intent, persistenceEnvelope);
+  const intentPassengerId = String(intent.passengerId || '').trim();
+  const intentRideId = String(intent.rideId || '').trim();
+  const intentQuoteLockId = String(intent.quoteLockId || intent.quoteLockSnapshot?.quoteLockId || '').trim();
+  const status = String(intent.status || '').trim().toLowerCase();
+
+  if (status === 'consumed') return null;
+  if (recoveredPaymentIntentId === paymentIntentId && intentRideId && intentRideId !== safeRideId) return null;
+  if (intentPassengerId && intentPassengerId !== safePassengerId) return null;
+  if (intentQuoteLockId && intentQuoteLockId !== safeQuoteLockId) return null;
+  if (!intent.quoteLockSnapshot) return null;
+
+  const validation = validateQuoteLockPayload({
+    quoteLock: intent.quoteLockSnapshot,
+    quoteSessionId,
+    passengerId,
+    amountInCents,
+    grossAmountInCents,
+    pickupLocation,
+    destinationLocation,
+    carType,
+    toleranceInCents,
+    allowExpired: true
+  });
+
+  if (!validation.success) return validation;
+  return {
+    ...validation,
+    recoveredFromPaymentIntentSnapshot: true,
+    paymentIntentId: recoveredPaymentIntentId
+  };
+}
+
 function extractBearerToken(req) {
   const header = req.headers.authorization || '';
   if (!header.startsWith('Bearer ')) return null;
   return header.slice('Bearer '.length).trim();
+}
+
+function buildPaymentRequestLogContext(req, extra = {}) {
+  const body = req.body || {};
+  return {
+    service: 'payment-routes',
+    method: req.method,
+    path: req.originalUrl || req.path,
+    requestId: req.headers['x-request-id'] || req.headers['x-correlation-id'] || null,
+    passengerId: body.passengerId || null,
+    rideId: body.rideId || body.paymentSessionId || null,
+    paymentSessionId: body.paymentSessionId || null,
+    quoteSessionId: body.quoteSessionId || null,
+    quoteLockId: body.quoteLockId || null,
+    actorId: req.paymentActor?.uid || req.paymentActor?.id || null,
+    actorType: req.paymentActor?.type || null,
+    ...extra
+  };
 }
 
 function normalizeDigits(value) {
@@ -95,12 +268,17 @@ function isPaymentAdmin(actor, roles = PAYMENT_ADMIN_ROLES) {
 async function authenticatePaymentActor(req, res, next) {
   const token = extractBearerToken(req);
   if (!token) {
+    logStructured('warn', 'payment auth bloqueado por token ausente', buildPaymentRequestLogContext(req, {
+      code: 'PAYMENT_AUTH_TOKEN_MISSING'
+    }));
     return res.status(401).json({
       success: false,
-      error: 'Token não fornecido'
+      error: 'Token não fornecido',
+      code: 'PAYMENT_AUTH_TOKEN_MISSING'
     });
   }
 
+  let firebaseAuthError = null;
   try {
     const decoded = await admin.auth().verifyIdToken(token);
     const actor = {
@@ -115,6 +293,7 @@ async function authenticatePaymentActor(req, res, next) {
     req.user = req.user || actor;
     return next();
   } catch (firebaseError) {
+    firebaseAuthError = firebaseError;
     // Admin dashboard uses its own JWT. We only fall through to that verifier here.
   }
 
@@ -122,9 +301,13 @@ async function authenticatePaymentActor(req, res, next) {
     const decoded = jwt.verify(token, PAYMENT_JWT_SECRET);
     const userId = decoded.userId || decoded.id || decoded.sub;
     if (!userId) {
+      logStructured('warn', 'payment auth bloqueado por JWT sem usuário', buildPaymentRequestLogContext(req, {
+        code: 'PAYMENT_AUTH_JWT_USER_MISSING'
+      }));
       return res.status(401).json({
         success: false,
-        error: 'Token inválido'
+        error: 'Token inválido',
+        code: 'PAYMENT_AUTH_TOKEN_INVALID'
       });
     }
 
@@ -133,9 +316,14 @@ async function authenticatePaymentActor(req, res, next) {
       maxAgeMs: 15 * 1000
     });
     if (!userRecord.exists || userRecord.data?.active === false) {
+      logStructured('warn', 'payment auth bloqueado por admin inexistente ou inativo', buildPaymentRequestLogContext(req, {
+        code: 'PAYMENT_AUTH_ADMIN_INACTIVE',
+        adminUserId: userId
+      }));
       return res.status(403).json({
         success: false,
-        error: 'Usuário não encontrado ou inativo'
+        error: 'Usuário não encontrado ou inativo',
+        code: 'PAYMENT_AUTH_ADMIN_INACTIVE'
       });
     }
 
@@ -152,9 +340,15 @@ async function authenticatePaymentActor(req, res, next) {
     req.user = actor;
     return next();
   } catch (jwtError) {
+    logStructured('warn', 'payment auth bloqueado por token inválido', buildPaymentRequestLogContext(req, {
+      code: 'PAYMENT_AUTH_TOKEN_INVALID',
+      firebaseAuthCode: firebaseAuthError?.code || null,
+      jwtError: jwtError?.name || null
+    }));
     return res.status(401).json({
       success: false,
-      error: 'Token inválido ou expirado'
+      error: 'Token inválido ou expirado',
+      code: 'PAYMENT_AUTH_TOKEN_INVALID'
     });
   }
 }
@@ -187,9 +381,14 @@ function requirePassengerScope(req, res, next) {
     return next();
   }
 
+  logStructured('warn', 'payment auth bloqueado por passageiro divergente', buildPaymentRequestLogContext(req, {
+    code: 'PAYMENT_PASSENGER_SCOPE_MISMATCH',
+    passengerId: passengerId || null
+  }));
   return res.status(403).json({
     success: false,
-    error: 'Passageiro não autorizado para esta operação'
+    error: 'Passageiro não autorizado para esta operação',
+    code: 'PAYMENT_PASSENGER_SCOPE_MISMATCH'
   });
 }
 
@@ -315,6 +514,65 @@ function normalizePaymentAmountCents(value) {
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) return 0;
   return Math.max(0, Math.round(parsed));
+}
+
+function normalizeMoneyReais(value) {
+  if (value === undefined || value === null || value === '') return null;
+  const normalized = typeof value === 'string'
+    ? value.replace(/[^\d,.-]/g, '').replace(',', '.')
+    : value;
+  const parsed = Number(normalized);
+  if (!Number.isFinite(parsed)) return null;
+  return Math.max(0, Number(parsed.toFixed(2)));
+}
+
+function resolvePaymentTollAmounts({
+  quoteLockValidation = null,
+  tollFee = null,
+  tollFeeCents = null,
+  rideDetails = null
+} = {}) {
+  const quoteLock = quoteLockValidation?.success ? quoteLockValidation.quoteLock : null;
+  if (quoteLock) {
+    const lockedCents = normalizePaymentAmountCents(quoteLock.tollFeeCents);
+    if (Number.isFinite(Number(quoteLock.tollFeeCents))) {
+      return {
+        tollFee: Number((lockedCents / 100).toFixed(2)),
+        tollFeeCents: lockedCents
+      };
+    }
+
+    const lockedReais = normalizeMoneyReais(
+      quoteLock.tollFee ??
+        quoteLock.tollAmount ??
+        quoteLock.pricingPayload?.toll_fee ??
+        quoteLock.pricingPayload?.tollFee
+    ) ?? 0;
+    return {
+      tollFee: lockedReais,
+      tollFeeCents: normalizePaymentAmountCents(lockedReais * 100)
+    };
+  }
+
+  if (Number.isFinite(Number(tollFeeCents))) {
+    const cents = normalizePaymentAmountCents(tollFeeCents);
+    return {
+      tollFee: Number((cents / 100).toFixed(2)),
+      tollFeeCents: cents
+    };
+  }
+
+  const incomingReais = normalizeMoneyReais(
+    tollFee ??
+      rideDetails?.tollFee ??
+      rideDetails?.tollAmount ??
+      rideDetails?.pricingPayload?.toll_fee ??
+      rideDetails?.pricingPayload?.tollFee
+  ) ?? 0;
+  return {
+    tollFee: incomingReais,
+    tollFeeCents: normalizePaymentAmountCents(incomingReais * 100)
+  };
 }
 
 async function validatePassengerDiscountPayload({
@@ -574,6 +832,7 @@ router.post('/payment/advance', authenticatePaymentActor, requirePassengerScope,
       paymentSessionId,
       paymentContextKey,
       quoteSessionId,
+      quoteLockId,
       pickupLocation,
       destinationLocation,
       preferences,
@@ -598,6 +857,53 @@ router.post('/payment/advance', authenticatePaymentActor, requirePassengerScope,
       });
     }
 
+    const pilotAccess = evaluatePilotAccess({
+      userId: passengerId,
+      role: 'passenger',
+      operation: 'payment'
+    });
+    if (!pilotAccess.allowed) {
+      metrics.recordOperationalEvent?.('payment', 'pix_create', pilotAccess.code);
+      logStructured('warn', 'payment/advance bloqueado pelo controle do piloto', {
+        service: 'payment-routes',
+        passengerId,
+        rideId: rideId || paymentSessionId || null,
+        code: pilotAccess.code
+      });
+      return res.status(pilotAccess.retryable ? 503 : 403).json({
+        success: false,
+        code: pilotAccess.code,
+        retryable: pilotAccess.retryable === true,
+        error: pilotAccess.message
+      });
+    }
+
+    let paymentPersistenceScope;
+    let paymentPersistenceEnvelope;
+    try {
+      paymentPersistenceScope = await resolveUserPersistenceScope({
+        userId: passengerId,
+        phone: passengerPhone || phone || phoneNumber || req.paymentActor?.phoneNumber || null,
+        actor: req.paymentActor || null,
+        appReview: String(process.env.APP_REVIEW || '').toLowerCase() === 'true'
+      });
+      paymentPersistenceEnvelope = buildPaymentPersistenceEnvelope(paymentPersistenceScope);
+    } catch (persistenceScopeError) {
+      const code = persistenceScopeError.code || 'PERSISTENCE_USER_CLASSIFICATION_UNAVAILABLE';
+      logStructured('error', 'payment/advance bloqueado por classificação de persistência indisponível', {
+        service: 'payment-routes',
+        passengerId,
+        rideId: rideId || paymentSessionId || null,
+        code,
+        error: persistenceScopeError.message
+      });
+      return res.status(503).json({
+        success: false,
+        error: 'Não foi possível classificar o ambiente de pagamento com segurança',
+        code
+      });
+    }
+
     const availabilityInput = buildPaymentAvailabilityInput({
       pickupLocation,
       destinationLocation,
@@ -607,8 +913,125 @@ router.post('/payment/advance', authenticatePaymentActor, requirePassengerScope,
       vehicleCategory,
       rideDetails
     });
+
+    let quoteLockValidation = null;
+    let authoritativeAmountInCents = normalizePaymentAmountCents(amount);
+    let authoritativeGrossAmountInCents =
+      grossAmountInCents !== undefined && grossAmountInCents !== null
+        ? normalizePaymentAmountCents(grossAmountInCents)
+        : normalizePaymentAmountCents(Number(grossAmount || 0) * 100);
+    const enforceQuoteLock =
+      req.body?.enforceQuoteLock === true ||
+      req.body?.requireQuoteLock === true ||
+      shouldRequireQuoteLockForPayment();
+
+    if (enforceQuoteLock || quoteLockId) {
+      try {
+        const redis = redisPool.getConnection();
+        quoteLockValidation = await validateQuoteLock({
+          redis,
+          quoteLockId,
+          quoteSessionId,
+          passengerId,
+          amountInCents: authoritativeAmountInCents,
+          grossAmountInCents: authoritativeGrossAmountInCents,
+          pickupLocation: availabilityInput.pickupLocation,
+          destinationLocation: availabilityInput.destinationLocation,
+          carType: availabilityInput.carType,
+          toleranceInCents: Number.parseInt(process.env.PAYMENT_QUOTE_LOCK_TOLERANCE_CENTS || '1', 10) || 1
+        });
+      } catch (quoteLockError) {
+        quoteLockValidation = {
+          success: false,
+          code: 'QUOTE_LOCK_STORE_UNAVAILABLE',
+          error: quoteLockError.message
+        };
+      }
+
+      if (
+        !quoteLockValidation?.success &&
+        canRecoverQuoteLockFromIntentSnapshot(quoteLockValidation?.code)
+      ) {
+        try {
+          const recoveredQuoteLockValidation = await validateQuoteLockFromPaymentIntentSnapshot({
+            rideId,
+            quoteLockId,
+            quoteSessionId,
+            passengerId,
+            persistenceScope: paymentPersistenceScope,
+            amountInCents: authoritativeAmountInCents,
+            grossAmountInCents: authoritativeGrossAmountInCents,
+            pickupLocation: availabilityInput.pickupLocation,
+            destinationLocation: availabilityInput.destinationLocation,
+            carType: availabilityInput.carType,
+            toleranceInCents: Number.parseInt(process.env.PAYMENT_QUOTE_LOCK_TOLERANCE_CENTS || '1', 10) || 1
+          });
+
+          if (recoveredQuoteLockValidation?.success) {
+            quoteLockValidation = recoveredQuoteLockValidation;
+            logStructured('warn', 'payment/advance recuperou quote lock expirado via payment intent snapshot', {
+              service: 'payment-routes',
+              passengerId,
+              rideId: rideId || paymentSessionId || null,
+              quoteSessionId: quoteSessionId || null,
+              quoteLockId: quoteLockId || null,
+              paymentIntentId: recoveredQuoteLockValidation.paymentIntentId || null,
+              quoteLockExpirationBypassed: recoveredQuoteLockValidation.quoteLockExpirationBypassed === true
+            });
+          } else if (recoveredQuoteLockValidation) {
+            quoteLockValidation = recoveredQuoteLockValidation;
+          }
+        } catch (recoveryError) {
+          logStructured('warn', 'payment/advance falhou ao recuperar quote lock expirado via payment intent snapshot', {
+            service: 'payment-routes',
+            passengerId,
+            rideId: rideId || paymentSessionId || null,
+            quoteLockId: quoteLockId || null,
+            error: recoveryError.message
+          });
+        }
+      }
+
+      if (!quoteLockValidation?.success) {
+        const statusCode = resolveQuoteLockFailureStatus(quoteLockValidation?.code);
+        logStructured(statusCode >= 500 ? 'error' : 'warn', 'payment/advance bloqueado por quote lock inválido', {
+          service: 'payment-routes',
+          passengerId,
+          rideId: rideId || paymentSessionId || null,
+          quoteSessionId: quoteSessionId || null,
+          quoteLockId: quoteLockId || null,
+          code: quoteLockValidation?.code || 'QUOTE_LOCK_INVALID',
+          incomingAmountInCents: authoritativeAmountInCents,
+          expectedAmountInCents: quoteLockValidation?.expectedAmountInCents || null
+        });
+
+        return res.status(statusCode).json({
+          success: false,
+          error: 'Cotação expirada ou divergente',
+          message: 'Atualize a cotação antes de gerar o Pix desta corrida.',
+          code: quoteLockValidation?.code || 'QUOTE_LOCK_INVALID',
+          expectedAmountInCents: quoteLockValidation?.expectedAmountInCents || null,
+          incomingAmountInCents: quoteLockValidation?.incomingAmountInCents || authoritativeAmountInCents
+        });
+      }
+
+      authoritativeAmountInCents = quoteLockValidation.payableAmountInCents || authoritativeAmountInCents;
+      authoritativeGrossAmountInCents = quoteLockValidation.grossAmountInCents || authoritativeGrossAmountInCents;
+    }
+
     const availability = await hasPaymentEligibleDriver({
       ...availabilityInput,
+      io: req.app.get('io'),
+      reserveDriver: true,
+      reservationTtlSeconds: DEFAULT_PAYMENT_DRIVER_RESERVATION_TTL_SECONDS,
+      reservationContext: {
+        passengerId,
+        rideId: rideId || null,
+        paymentSessionId: paymentSessionId || null,
+        paymentContextKey: paymentContextKey || null,
+        quoteSessionId: quoteSessionId || null,
+        quoteLockId: quoteLockValidation?.quoteLock?.quoteLockId || quoteLockId || null
+      },
       logStructured,
       logContext: {
         service: 'payment-routes',
@@ -638,11 +1061,20 @@ router.post('/payment/advance', authenticatePaymentActor, requirePassengerScope,
       });
     }
 
+    if (!availability.reservationId) {
+      return res.status(503).json({
+        success: false,
+        error: 'Não foi possível reservar motorista antes do Pix. Tente novamente em instantes.',
+        code: 'PAYMENT_DRIVER_RESERVATION_FAILED',
+        radiusKm: availability.radiusKm || null
+      });
+    }
+
     const discountValidation = await validatePassengerDiscountPayload({
       passengerId,
-      amount,
+      amount: authoritativeAmountInCents,
       discountBenefit,
-      grossAmountInCents,
+      grossAmountInCents: authoritativeGrossAmountInCents,
       grossAmount,
     });
 
@@ -650,13 +1082,26 @@ router.post('/payment/advance', authenticatePaymentActor, requirePassengerScope,
       return res.status(discountValidation.statusCode || 400).json(discountValidation.payload);
     }
 
+    const authoritativeTollAmounts = resolvePaymentTollAmounts({
+      quoteLockValidation,
+      tollFee,
+      tollFeeCents,
+      rideDetails
+    });
+
     const paymentData = {
       passengerId,
-      amount,
+      amount: authoritativeAmountInCents,
       rideId,
       paymentSessionId,
       paymentContextKey,
       quoteSessionId,
+      quoteLockId: quoteLockValidation?.quoteLock?.quoteLockId || quoteLockId || null,
+      quoteLockSnapshot: quoteLockValidation?.quoteLock || null,
+      paymentDriverReservationId: availability.reservationId,
+      paymentDriverReservationDriverId: availability.driverId || null,
+      paymentDriverReservationExpiresAt: availability.reservationExpiresAt || null,
+      paymentDriverReservationTtlSeconds: availability.reservationTtlSeconds || DEFAULT_PAYMENT_DRIVER_RESERVATION_TTL_SECONDS,
       rideDetails,
       pickupLocation: availabilityInput.pickupLocation,
       destinationLocation: availabilityInput.destinationLocation,
@@ -669,18 +1114,20 @@ router.post('/payment/advance', authenticatePaymentActor, requirePassengerScope,
       driverSubaccountPixKey,
       wooviSubaccountPixKey,
       subaccountPixKey,
-      tollFee,
-      tollFeeCents,
+      tollFee: authoritativeTollAmounts.tollFee,
+      tollFeeCents: authoritativeTollAmounts.tollFeeCents,
       passengerPhone: passengerPhone || phone || phoneNumber || req.paymentActor?.phoneNumber || req.paymentActor?.phone || null,
       grossAmountInCents: discountValidation.grossAmountInCents,
       payableAmountInCents: discountValidation.payableAmountInCents,
       discountBenefit: discountValidation.discountBenefit,
-      actor: req.paymentActor || null
+      actor: req.paymentActor || null,
+      ...paymentPersistenceEnvelope
     };
 
     const result = await paymentService.processAdvancePayment(paymentData);
 
     if (result.success) {
+      metrics.recordOperationalEvent?.('payment', 'pix_create', 'success');
       const chargeId =
         result.chargeId ||
         result?.charge?.id ||
@@ -708,10 +1155,33 @@ router.post('/payment/advance', authenticatePaymentActor, requirePassengerScope,
         charge: result.charge || (chargeId ? { id: chargeId, correlationID: chargeId } : undefined)
       });
     } else {
-      res.status(400).json(result);
+      const failureCode = result.code || 'PAYMENT_ADVANCE_FAILED';
+      metrics.recordOperationalEvent?.('payment', 'pix_create', 'failure');
+      const statusCode = resolveAdvancePaymentFailureStatus(failureCode);
+      logStructured(statusCode >= 500 ? 'error' : 'warn', 'payment/advance recusado pelo serviço de pagamento', {
+        service: 'payment-routes',
+        passengerId,
+        rideId: paymentData.rideId || paymentData.paymentSessionId || null,
+        paymentSessionId: paymentData.paymentSessionId || null,
+        quoteSessionId: paymentData.quoteSessionId || null,
+        quoteLockId: paymentData.quoteLockId || null,
+        code: failureCode,
+        provider: result.provider || 'woovi',
+        providerEnvironment: result.providerEnvironment || null,
+        paymentProfileId: result.paymentProfileId || null,
+        paymentIntentId: result.paymentIntentId || null,
+        chargeId: result.chargeId || null,
+        error: result.error || null,
+        providerStatus: result.details?.status || result.details?.data?.status || null
+      });
+      res.status(statusCode).json({
+        ...result,
+        code: failureCode
+      });
     }
 
   } catch (error) {
+    metrics.recordOperationalEvent?.('payment', 'pix_create', 'exception');
     logError(error, '❌ Erro na rota de pagamento antecipado:', { service: 'payment-routes' });
     res.status(500).json({
       success: false,
@@ -766,16 +1236,28 @@ router.post(
  */
 router.post('/payment/refund', authenticatePaymentActor, requirePaymentAdmin(), async (req, res) => {
   try {
-    const { chargeId, amount, reason } = req.body;
+    const { rideId, bookingId, chargeId, amount, reason } = req.body;
 
-    if (!chargeId || !amount) {
+    if ((!rideId && !bookingId && !chargeId) || !amount) {
       return res.status(400).json({
         success: false,
-        error: 'chargeId e amount são obrigatórios'
+        error: 'rideId/bookingId ou chargeId e amount são obrigatórios'
       });
     }
 
-    const result = await paymentService.processRefund(chargeId, amount, reason || 'No driver found');
+    const result = await paymentService.processRideRefund({
+      rideId,
+      bookingId,
+      chargeId,
+      amount,
+      reason: reason || 'No driver found',
+      status: 'REFUNDED',
+      metadata: {
+        source: 'admin_payment_refund_route',
+        actorId: req.user?.uid || req.user?.id || req.user?.email || null,
+        actorRole: req.user?.role || null
+      }
+    });
 
     if (result.success) {
       res.status(200).json(result);
@@ -857,7 +1339,35 @@ router.get('/payment/status/:chargeId', authenticatePaymentActor, async (req, re
       });
     }
 
-    const result = await paymentService.getPaymentStatus(chargeId);
+    let paymentPersistenceEnvelope;
+    try {
+      const paymentPersistenceScope = await resolveUserPersistenceScope({
+        userId: req.paymentActor?.uid || req.paymentActor?.id,
+        phone: req.paymentActor?.phoneNumber || req.paymentActor?.phone || null,
+        actor: req.paymentActor || null,
+        appReview: String(process.env.APP_REVIEW || '').toLowerCase() === 'true'
+      });
+      paymentPersistenceEnvelope = buildPaymentPersistenceEnvelope(paymentPersistenceScope);
+    } catch (persistenceScopeError) {
+      const code = persistenceScopeError.code || 'PERSISTENCE_USER_CLASSIFICATION_UNAVAILABLE';
+      logStructured('error', 'payment/status bloqueado por classificação de persistência indisponível', {
+        service: 'payment-routes',
+        chargeId,
+        actorId: req.paymentActor?.uid || req.paymentActor?.id || null,
+        code,
+        error: persistenceScopeError.message
+      });
+      return res.status(503).json({
+        success: false,
+        error: 'Não foi possível classificar o ambiente de pagamento com segurança',
+        code
+      });
+    }
+
+    const result = await paymentService.getPaymentStatus(
+      chargeId,
+      paymentPersistenceEnvelope
+    );
 
     if (result.success) {
       res.status(200).json(result);

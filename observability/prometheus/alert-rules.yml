@@ -243,6 +243,36 @@ groups:
           summary: "Error rate is high"
           description: "Error rate is above 5 errors/sec for more than 5 minutes. Current value: {{ $value }}"
 
+      - alert: PixCreationFailureSpike
+        expr: sum(increase(leaf_operational_event_total{domain="payment",event="pix_create",result=~"failure|exception"}[5m])) > 2
+        for: 1m
+        labels:
+          severity: critical
+          service: payment
+        annotations:
+          summary: "Pix creation failures detected"
+          description: "More than two Pix creation failures occurred in five minutes. Current value: {{ $value }}"
+
+      - alert: FcmFailureSpike
+        expr: sum(increase(leaf_operational_event_total{domain="fcm",event="send",result=~"failure|exception|service_unavailable"}[5m])) > 5
+        for: 2m
+        labels:
+          severity: critical
+          service: fcm
+        annotations:
+          summary: "FCM delivery failures spiking"
+          description: "FCM delivery failures exceeded the pilot threshold in five minutes. Current value: {{ $value }}"
+
+      - alert: GeofenceConfigurationUnavailable
+        expr: sum(increase(leaf_operational_event_total{domain="geofence",event="ride_validation",result=~"disabled|not_configured"}[5m])) > 0
+        for: 30s
+        labels:
+          severity: critical
+          service: geofence
+        annotations:
+          summary: "Geofence configuration unavailable"
+          description: "A quote or booking was blocked because the production geofence is disabled or missing."
+
   - name: leaf_solo_operations
     interval: 30s
     rules:

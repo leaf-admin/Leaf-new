@@ -887,14 +887,15 @@ class WooviDriverService {
    * @param {string} reason - Motivo do reembolso
    * @returns {Promise<Object>} - Resultado do reembolso
    */
-  async processRefund(chargeId, amount, reason) {
+  async processRefund(chargeId, amount, reason, options = {}) {
     try {
+      const api = options.wooviConfig ? this.createApi(options.wooviConfig) : this.api;
       const refundData = {
         value: amount, // Se não informado, reembolsa total
         ...(reason && { comment: reason })
       };
 
-      const response = await this.api.post(`/charge/${chargeId}/refund`, refundData);
+      const response = await api.post(`/charge/${chargeId}/refund`, refundData);
       
       return {
         success: true,

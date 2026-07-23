@@ -93,7 +93,7 @@ function normalizePassengerAction(value) {
 
 function resolvePassengerHomeAutomationConfig(
   routeParams = {},
-  { isDriverRole = false, isHomeRoute = false, isDev = false, isE2E = false } = {},
+  { isDriverRole = false, isHomeRoute = false, isDev = false, isE2E = false, isSimulator = false } = {},
 ) {
   if (isDriverRole || !isHomeRoute) {
     return {
@@ -109,7 +109,7 @@ function resolvePassengerHomeAutomationConfig(
     isTruthyRouteParam(routeParams?.automation) ||
     isTruthyRouteParam(routeParams?.qaAutomation);
 
-  const allowAutomationParams = (isDev || isE2E) && automationRequested;
+  const allowAutomationParams = (isDev || isE2E || isSimulator) && automationRequested;
   const action = allowAutomationParams
     ? normalizePassengerAction(
         routeParams?.qaPassengerAction ||

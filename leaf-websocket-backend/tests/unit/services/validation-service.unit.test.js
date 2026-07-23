@@ -37,6 +37,34 @@ describe('validation-service', () => {
     );
   });
 
+  it('preserves address slashes while removing and escaping HTML payloads', () => {
+    const result = validationService.validateEndpoint('createBooking', {
+      customerId: 'customer_1',
+      pickupLocation: {
+        lat: -22.97045,
+        lng: -43.18276,
+        address: 'Av. Atlântica, s/n <img src=x onerror=alert(1)> & Copacabana',
+      },
+      destinationLocation: {
+        lat: -22.9068,
+        lng: -43.1729,
+        name: 'Terminal / Sul <script>alert("xss")</script>',
+      },
+      paymentMethod: 'pix',
+    });
+
+    expect(result.valid).toBe(true);
+    expect(result.sanitized.pickupLocation.address).toBe(
+      'Av. Atlântica, s/n  &amp; Copacabana'
+    );
+    expect(result.sanitized.destinationLocation.name).toBe(
+      'Terminal / Sul alert(&quot;xss&quot;)'
+    );
+    expect(result.sanitized.pickupLocation.address).not.toContain('<');
+    expect(result.sanitized.pickupLocation.address).not.toContain('onerror');
+    expect(result.sanitized.destinationLocation.name).not.toContain('<script>');
+  });
+
   it('accepts embedded payment metadata on createBooking for payment-first flows', () => {
     const result = validationService.validateEndpoint('createBooking', {
       customerId: 'customer_1',

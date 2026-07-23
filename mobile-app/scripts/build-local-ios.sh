@@ -103,12 +103,59 @@ ensure_pods() {
   (cd "${ios_dir}" && pod install --repo-update)
 }
 
+ensure_smithy_codegen_cli_alias() {
+  local configuration="$1"
+  local products_dir="${PROJECT_DIR}/ios/build/Build/Products"
+  local smithy_package_dir="${PROJECT_DIR}/ios/build/SourcePackages/checkouts/smithy-swift"
+  local host_cli="${smithy_package_dir}/.build/release/SmithyCodegenCLI"
+  local expected_dir="${products_dir}/${configuration}"
+  local expected_cli="${expected_dir}/SmithyCodegenCLI"
+
+  if [[ ! -f "${smithy_package_dir}/Package.swift" ]]; then
+    return 1
+  fi
+
+  (cd "${smithy_package_dir}" && swift build -c release --product SmithyCodegenCLI >/dev/null)
+  if [[ ! -x "${host_cli}" ]]; then
+    return 1
+  fi
+
+  mkdir -p "${expected_dir}"
+  rm -f "${expected_cli}"
+  cp "${host_cli}" "${expected_cli}"
+  chmod +x "${expected_cli}"
+  echo "✅ SmithyCodegenCLI host preparado para SPM/AWS: ${expected_cli}"
+  return 0
+}
+
+run_xcodebuild_with_smithy_retry() {
+  local configuration="$1"
+  shift
+  local -a command=("$@")
+
+  ensure_smithy_codegen_cli_alias "${configuration}" || true
+  if "${command[@]}"; then
+    return 0
+  fi
+
+  local exit_code=$?
+  if ensure_smithy_codegen_cli_alias "${configuration}"; then
+    echo "↻ Reexecutando xcodebuild após corrigir caminho do SmithyCodegenCLI..."
+    "${command[@]}"
+    return $?
+  fi
+
+  return "${exit_code}"
+}
+
 sync_native_ios_version() {
   local info_plist_path="${PROJECT_DIR}/ios/Leaf/Info.plist"
   local expected_version
   local expected_build_number
   local microphone_usage="A Leaf usa o microfone para capturar o destino por voz quando você tocar no ícone de microfone."
   local speech_usage="A Leaf converte sua fala em texto para preencher o destino com mais rapidez."
+  local allow_insecure_http
+  local ats_bool_value="false"
 
   if [[ ! -f "${info_plist_path}" ]]; then
     echo "❌ Info.plist nativo do iOS não encontrado: ${info_plist_path}"
@@ -117,6 +164,10 @@ sync_native_ios_version() {
 
   expected_version="$(node -e "console.log(require('./config/AppConfig').AppConfig.ios_app_version)")"
   expected_build_number="$(node -e "console.log(require('./config/AppConfig').AppConfig.ios_build_number)")"
+  allow_insecure_http="$(printf '%s' "${EXPO_PUBLIC_ALLOW_INSECURE_HTTP:-false}" | tr '[:upper:]' '[:lower:]')"
+  if [[ "${allow_insecure_http}" == "1" || "${allow_insecure_http}" == "true" || "${allow_insecure_http}" == "yes" || "${allow_insecure_http}" == "on" ]]; then
+    ats_bool_value="true"
+  fi
 
   /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString ${expected_version}" "${info_plist_path}" >/dev/null 2>&1 \
     || /usr/libexec/PlistBuddy -c "Add :CFBundleShortVersionString string ${expected_version}" "${info_plist_path}"
@@ -128,10 +179,10 @@ sync_native_ios_version() {
     || /usr/libexec/PlistBuddy -c "Add :NSSpeechRecognitionUsageDescription string ${speech_usage}" "${info_plist_path}"
   /usr/libexec/PlistBuddy -c "Print :NSAppTransportSecurity" "${info_plist_path}" >/dev/null 2>&1 \
     || /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity dict" "${info_plist_path}"
-  /usr/libexec/PlistBuddy -c "Set :NSAppTransportSecurity:NSAllowsArbitraryLoads false" "${info_plist_path}" >/dev/null 2>&1 \
-    || /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity:NSAllowsArbitraryLoads bool false" "${info_plist_path}"
-  /usr/libexec/PlistBuddy -c "Set :NSAppTransportSecurity:NSAllowsLocalNetworking false" "${info_plist_path}" >/dev/null 2>&1 \
-    || /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity:NSAllowsLocalNetworking bool false" "${info_plist_path}"
+  /usr/libexec/PlistBuddy -c "Set :NSAppTransportSecurity:NSAllowsArbitraryLoads ${ats_bool_value}" "${info_plist_path}" >/dev/null 2>&1 \
+    || /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity:NSAllowsArbitraryLoads bool ${ats_bool_value}" "${info_plist_path}"
+  /usr/libexec/PlistBuddy -c "Set :NSAppTransportSecurity:NSAllowsLocalNetworking ${ats_bool_value}" "${info_plist_path}" >/dev/null 2>&1 \
+    || /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity:NSAllowsLocalNetworking bool ${ats_bool_value}" "${info_plist_path}"
   /usr/libexec/PlistBuddy -c "Delete :NSAppTransportSecurity:NSExceptionDomains" "${info_plist_path}" >/dev/null 2>&1 || true
 
   echo "✅ Info.plist iOS sincronizado: ${expected_version} (${expected_build_number})."
@@ -198,20 +249,23 @@ assert_ios_app_artifact() {
   fi
 
   expected_build_number="$(node -e "console.log(require('./config/AppConfig').AppConfig.ios_build_number)")"
+  expected_runtime_version="${LEAF_RUNTIME_VERSION:-${EXPO_RUNTIME_VERSION:-$(node -e "console.log(require('./config/AppConfig').AppConfig.ios_app_version)")}}"
 
   LEAF_EXPECTED_IOS_VERSION="$(node -e "console.log(require('./config/AppConfig').AppConfig.ios_app_version)")" \
-  LEAF_EXPECTED_IOS_BUILD_NUMBER="${expected_build_number}" node - "${app_config_path}" <<'NODE'
+  LEAF_EXPECTED_IOS_BUILD_NUMBER="${expected_build_number}" \
+  LEAF_EXPECTED_RUNTIME_VERSION="${expected_runtime_version}" node - "${app_config_path}" <<'NODE'
 const fs = require('fs');
 
 const appConfigPath = process.argv[2];
 const config = JSON.parse(fs.readFileSync(appConfigPath, 'utf8'));
 const expectedVersion = process.env.LEAF_EXPECTED_IOS_VERSION;
 const expectedBuildNumber = process.env.LEAF_EXPECTED_IOS_BUILD_NUMBER;
+const expectedRuntimeVersion = process.env.LEAF_EXPECTED_RUNTIME_VERSION || expectedVersion;
 const expected = {
   name: 'Leaf',
   slug: 'leafapp-reactnative',
   version: expectedVersion,
-  runtimeVersion: expectedVersion,
+  runtimeVersion: expectedRuntimeVersion,
 };
 
 const failures = [];
@@ -336,6 +390,7 @@ main() {
 
   mkdir -p "${PROJECT_DIR}/ios/build"
   sim_destination="$(resolve_simulator_destination)"
+  xcode_common_args=("-skipPackagePluginValidation")
   sim_extra_args=("ONLY_ACTIVE_ARCH=YES")
   if [[ "$(uname -m)" == "arm64" ]]; then
     sim_extra_args+=("EXCLUDED_ARCHS=x86_64")
@@ -347,23 +402,27 @@ main() {
       local expo_plist_path="${built_app_path}/Expo.plist"
       mkdir -p "${PROJECT_DIR}/ios/build/Build/Products/${IOS_SIMULATOR_CONFIGURATION}-iphonesimulator/EXUpdates.bundle"
       if [[ -n "${workspace}" ]]; then
-        xcodebuild \
+        run_xcodebuild_with_smithy_retry "${IOS_SIMULATOR_CONFIGURATION}" \
+          xcodebuild \
           -workspace "${workspace}" \
           -scheme "${scheme}" \
           -configuration "${IOS_SIMULATOR_CONFIGURATION}" \
           -sdk iphonesimulator \
           -destination "${sim_destination}" \
           -derivedDataPath "${PROJECT_DIR}/ios/build" \
+          "${xcode_common_args[@]}" \
           "${sim_extra_args[@]}" \
           build
       else
-        xcodebuild \
+        run_xcodebuild_with_smithy_retry "${IOS_SIMULATOR_CONFIGURATION}" \
+          xcodebuild \
           -project "${project}" \
           -scheme "${scheme}" \
           -configuration "${IOS_SIMULATOR_CONFIGURATION}" \
           -sdk iphonesimulator \
           -destination "${sim_destination}" \
           -derivedDataPath "${PROJECT_DIR}/ios/build" \
+          "${xcode_common_args[@]}" \
           "${sim_extra_args[@]}" \
           build
       fi
@@ -406,6 +465,7 @@ main() {
           -configuration Release \
           -destination "generic/platform=iOS" \
           -archivePath "${archive_path}" \
+          "${xcode_common_args[@]}" \
           "${provisioning_flags[@]}" \
           "${archive_signing_args[@]}" \
           archive
@@ -416,6 +476,7 @@ main() {
           -configuration Release \
           -destination "generic/platform=iOS" \
           -archivePath "${archive_path}" \
+          "${xcode_common_args[@]}" \
           "${provisioning_flags[@]}" \
           "${archive_signing_args[@]}" \
           archive

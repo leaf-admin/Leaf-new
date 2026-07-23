@@ -116,6 +116,60 @@ describe('WebSocketManager activeRideSync rehydration', () => {
     expect(tripStartedSpy).toHaveBeenCalledTimes(2);
   });
 
+  it('does not rehydrate terminal activeRideSync snapshots as active lifecycle', () => {
+    const manager = WebSocketManager.getInstance();
+    const socket = createSocketMock();
+    manager.socket = socket;
+    manager.setupListeners();
+
+    const activeRideRehydratedSpy = jest.fn();
+    const rideAcceptedSpy = jest.fn();
+    const tripStartedSpy = jest.fn();
+    const activeRideSyncSpy = jest.fn();
+    manager.on('activeRideRehydrated', activeRideRehydratedSpy);
+    manager.on('rideAccepted', rideAcceptedSpy);
+    manager.on('tripStarted', tripStartedSpy);
+    manager.on('activeRideSync', activeRideSyncSpy);
+
+    manager.rehydratedRideLifecycleByBooking.set(
+      'booking_terminal_sync',
+      'booking_terminal_sync:ACCEPTED',
+    );
+    manager.dispatchedLifecycleEventsByBooking.set(
+      'booking_terminal_sync:tripStarted',
+      Date.now(),
+    );
+    manager.lastLifecycleBookingByEvent.set(
+      'tripStarted',
+      'booking_terminal_sync',
+    );
+
+    socket.trigger('activeRideSync', {
+      success: true,
+      hasActiveRide: true,
+      terminal: true,
+      bookingId: 'booking_terminal_sync',
+      status: 'COMPLETED',
+      pickupLocation: { lat: -23.56, lng: -46.65, add: 'Origem' },
+      destinationLocation: { lat: -23.57, lng: -46.66, add: 'Destino' },
+    });
+
+    expect(activeRideRehydratedSpy).not.toHaveBeenCalled();
+    expect(rideAcceptedSpy).not.toHaveBeenCalled();
+    expect(tripStartedSpy).not.toHaveBeenCalled();
+    expect(activeRideSyncSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        terminal: true,
+        status: 'COMPLETED',
+        bookingId: 'booking_terminal_sync',
+      }),
+    );
+    expect(manager.rehydratedRideLifecycleByBooking.has('booking_terminal_sync')).toBe(false);
+    expect(manager.dispatchedLifecycleEventsByBooking.has('booking_terminal_sync:tripStarted')).toBe(false);
+    expect(manager.lastLifecycleBookingByEvent.has('tripStarted')).toBe(false);
+    expect(manager._getLifecycleSnapshotBookingFallback()).toBe('');
+  });
+
   it('deduplicates repeated tripStarted server events for the same booking until the booking is cleared', () => {
     const manager = WebSocketManager.getInstance();
     const socket = createSocketMock();

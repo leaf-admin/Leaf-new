@@ -70,9 +70,9 @@ function formatInviteStatus(status) {
   return 'Pendente';
 }
 
-function formatCriteriaValue(value) {
-  if (value === true) return 'ok';
-  if (value === false) return 'pendente';
+function formatCriteriaValue(value, readyLabel = 'Pronto', pendingLabel = 'Pendente') {
+  if (value === true) return readyLabel;
+  if (value === false) return pendingLabel;
   return '--';
 }
 
@@ -126,6 +126,7 @@ export default function RobotaxiDriverWaitlistScreen({ navigation, route }) {
   const { height: windowHeight } = useWindowDimensions();
   const [panelHeight, setPanelHeight] = useState(windowHeight);
   const [loading, setLoading] = useState(true);
+  const [statusUnavailable, setStatusUnavailable] = useState(false);
   const [waitlistStatus, setWaitlistStatus] = useState(null);
   const [sentInvites, setSentInvites] = useState([]);
   const [inviteTarget, setInviteTarget] = useState('');
@@ -149,7 +150,9 @@ export default function RobotaxiDriverWaitlistScreen({ navigation, route }) {
   const latestInvite = createdInvite || driverInvites[0] || null;
   const latestCode = latestInvite?.code || '';
   const latestLink = useMemo(() => buildDriverInviteLink(latestCode), [latestCode]);
-  const statusLabel = resolveWaitlistStatusLabel(waitlistStatus?.waitListStatus);
+  const statusLabel = statusUnavailable
+    ? 'Indisponível'
+    : resolveWaitlistStatusLabel(waitlistStatus?.waitListStatus);
   const positionLabel = waitlistStatus?.position ? `#${waitlistStatus.position}` : '--';
   const cityLabel =
     waitlistStatus?.city?.cityLabel ||
@@ -160,6 +163,12 @@ export default function RobotaxiDriverWaitlistScreen({ navigation, route }) {
     () =>
       `Dirija comigo na Leaf. Use o convite ${latestCode || ''} para entrar na lista: ${latestLink}`,
     [latestCode, latestLink],
+  );
+  const canJoinWaitlist = Boolean(
+    waitlistStatus &&
+      waitlistStatus?.criteria?.cityActive === true &&
+      waitlistStatus?.criteria?.waitListEnabled === true &&
+      waitlistStatus?.waitListStatus !== 'pending',
   );
 
   const handleDismiss = useCallback(() => {
@@ -183,6 +192,7 @@ export default function RobotaxiDriverWaitlistScreen({ navigation, route }) {
         setWaitlistStatus(statusResult);
         setCity(statusResult?.city?.cityLabel || statusResult?.city?.cityKey || 'Rio de Janeiro');
       }
+      setStatusUnavailable(!statusResult);
       setSentInvites(invitesResult?.sent || []);
     } finally {
       setLoading(false);
@@ -310,8 +320,12 @@ export default function RobotaxiDriverWaitlistScreen({ navigation, route }) {
           <PrototypeMenuSurface
             onLayout={handlePanelLayout}
             eyebrow="Motoristas"
-            title="Waitlist e convites"
-            subtitle="Acompanhe sua posição e convide motoristas para a próxima leva da Leaf."
+            title={referralProgramsEnabled ? 'Waitlist e convites' : 'Waitlist'}
+            subtitle={
+              referralProgramsEnabled
+                ? 'Acompanhe sua posição e convide motoristas para a próxima leva da Leaf.'
+                : 'Acompanhe sua posição na fila de ativação da cidade.'
+            }
             fullScreen
             style={{
               paddingTop: insets.top + SURFACE_TOP_PADDING,
@@ -321,7 +335,7 @@ export default function RobotaxiDriverWaitlistScreen({ navigation, route }) {
               <PrototypeMenuCloseButton
                 onPress={handleDismiss}
                 testID="robotaxi-driver-waitlist-close-button"
-                accessibilityLabel="robotaxi-driver-waitlist-close-button"
+                accessibilityLabel="Fechar waitlist"
               />
             )}
           >
@@ -330,14 +344,25 @@ export default function RobotaxiDriverWaitlistScreen({ navigation, route }) {
                 items={[
                   { key: 'status', label: 'status', value: statusLabel, loading },
                   { key: 'position', label: 'posição', value: positionLabel, loading },
-                  {
+                  ...(referralProgramsEnabled ? [{
                     key: 'invites',
                     label: 'convites',
-                    value: referralProgramsEnabled ? String(driverInvites.length) : 'off',
+                    value: String(driverInvites.length),
                     loading,
-                  },
+                  }] : []),
                 ]}
               />
+
+              {statusUnavailable ? (
+                <LeafEmptyState
+                  icon="cloud-offline-outline"
+                  title="Waitlist indisponível"
+                  message="Não foi possível confirmar os critérios da cidade. Tente novamente antes de entrar na fila."
+                  actionLabel="Tentar novamente"
+                  onAction={loadData}
+                  testID="robotaxi-driver-waitlist-unavailable-state"
+                />
+              ) : null}
 
               <View style={styles.inputBlock}>
                 <Text style={styles.inputLabel}>Cidade de operação</Text>
@@ -348,15 +373,17 @@ export default function RobotaxiDriverWaitlistScreen({ navigation, route }) {
                   placeholderTextColor="rgba(93,106,99,0.55)"
                   style={styles.input}
                   testID="robotaxi-driver-waitlist-city-input"
-                  accessibilityLabel="robotaxi-driver-waitlist-city-input"
+                  accessibilityLabel="Cidade de operação"
                 />
                 <LeafButton
                   label={busy ? 'Atualizando...' : 'Entrar na waitlist'}
                   icon="hourglass-outline"
                   tone="primary"
                   onPress={handleJoinWaitlist}
-                  disabled={busy || waitlistStatus?.waitListStatus === 'pending'}
+                  disabled={busy || !canJoinWaitlist}
                   style={styles.fullButton}
+                  testID="robotaxi-driver-waitlist-join-button"
+                  accessibilityLabel="Entrar na waitlist"
                 />
               </View>
 
@@ -378,17 +405,17 @@ export default function RobotaxiDriverWaitlistScreen({ navigation, route }) {
               <PrototypeMenuSection title="Critérios de liberação">
                 <PrototypeMenuInfoRow
                   label="Cidade ativa"
-                  value={formatCriteriaValue(waitlistStatus?.criteria?.cityActive)}
+                  value={formatCriteriaValue(waitlistStatus?.criteria?.cityActive, 'Ativa', 'Inativa')}
                   loading={loading}
                 />
                 <PrototypeMenuInfoRow
                   label="Fila habilitada"
-                  value={formatCriteriaValue(waitlistStatus?.criteria?.waitListEnabled)}
+                  value={formatCriteriaValue(waitlistStatus?.criteria?.waitListEnabled, 'Habilitada', 'Desabilitada')}
                   loading={loading}
                 />
                 <PrototypeMenuInfoRow
                   label="Documentos completos"
-                  value={formatCriteriaValue(waitlistStatus?.criteria?.documentsComplete)}
+                  value={formatCriteriaValue(waitlistStatus?.criteria?.documentsComplete, 'Completos')}
                   loading={loading}
                   last
                 />
@@ -418,14 +445,7 @@ export default function RobotaxiDriverWaitlistScreen({ navigation, route }) {
                     accessibilityLabel="robotaxi-driver-invite-create-button"
                   />
                 </View>
-              ) : (
-                <LeafEmptyState
-                  icon="people-outline"
-                  title="Convites fora do piloto"
-                  message="A waitlist segue ativa, mas convites de motoristas ficam bloqueados neste perfil de lançamento."
-                  testID="robotaxi-driver-invites-disabled-state"
-                />
-              )}
+              ) : null}
 
               {referralProgramsEnabled ? (
                 <View style={styles.inputBlock}>

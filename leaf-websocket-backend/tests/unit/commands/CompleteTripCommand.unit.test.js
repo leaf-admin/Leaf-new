@@ -66,7 +66,7 @@ jest.mock('../../../utils/trace-validator', () => ({
 }));
 
 jest.mock('../../../utils/active-trip-index', () => ({
-  clearActiveTripForDriver: jest.fn().mockResolvedValue(undefined)
+  clearActiveTripForDriver: jest.fn().mockResolvedValue(true)
 }));
 
 jest.mock('../../../services/trip-location-persistence-service', () => ({
@@ -88,6 +88,21 @@ jest.mock('../../../services/ride-lifecycle-service', () => ({
   buildContinuationRideLeg: jest.fn()
 }));
 
+jest.mock('../../../services/driver-referral-reward-service', () => ({
+  evaluateDriverRewardsForDriver: jest.fn().mockResolvedValue({
+    success: true,
+    evaluated: 0,
+    rewardsGranted: 0
+  })
+}));
+
+jest.mock('../../../services/kyc-policy-service', () => ({
+  applyDeferredIdentityReverificationIfSafe: jest.fn().mockResolvedValue({
+    success: true,
+    applied: false
+  })
+}));
+
 const RideCompletedEvent = require('../../../events/ride.completed');
 const RideStateManager = require('../../../services/ride-state-manager');
 const driverLockManager = require('../../../services/driver-lock-manager');
@@ -98,14 +113,19 @@ const traceContext = require('../../../utils/trace-context');
 const { getTracer } = require('../../../utils/tracer');
 const lifecycleService = require('../../../services/ride-lifecycle-service');
 const heartbeatService = require('../../../services/heartbeat-service');
+const driverReferralRewardService = require('../../../services/driver-referral-reward-service');
+const kycPolicyService = require('../../../services/kyc-policy-service');
+const { sealFinancialContext } = require('../../../services/financial-runtime-context');
 const CompleteTripCommand = require('../../../commands/CompleteTripCommand');
 
 describe('CompleteTripCommand', () => {
   let redis;
   let setImmediateSpy;
+  let immediateTasks;
 
   beforeEach(() => {
     jest.clearAllMocks();
+    immediateTasks = [];
 
     redis = {
       hgetall: jest.fn().mockResolvedValue({
@@ -138,9 +158,14 @@ describe('CompleteTripCommand', () => {
         end: jest.fn()
       }))
     });
-    setImmediateSpy = jest.spyOn(global, 'setImmediate').mockImplementation((fn) => {
-      fn();
-      return 0;
+    setImmediateSpy = jest.spyOn(global, 'setImmediate').mockImplementation((fn, ...args) => {
+      const task = Promise.resolve().then(() => fn(...args));
+      immediateTasks.push(task);
+      return {
+        hasRef: () => false,
+        ref: jest.fn(),
+        unref: jest.fn()
+      };
     });
     driverLockManager.isDriverLocked.mockResolvedValue({
       isLocked: true,
@@ -149,7 +174,8 @@ describe('CompleteTripCommand', () => {
     RideStateManager.isValidTransition.mockReturnValue(true);
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    await Promise.allSettled(immediateTasks);
     setImmediateSpy?.mockRestore();
   });
 
@@ -185,7 +211,23 @@ describe('CompleteTripCommand', () => {
       finalFare: '42',
       tollFee: '0',
       distance: '12.4',
-      duration: '1320'
+      duration: '1320',
+      operationalFee: '1.2',
+      paymentIntermediationFee: '0.6',
+      totalFees: '1.8',
+      driverNetAmount: '40.2',
+      authoritativeSnapshot: 'true',
+      financialSnapshotSource: 'backend_final',
+      financialSnapshot: JSON.stringify({
+        authoritativeSnapshot: true,
+        financialSnapshotSource: 'backend_final',
+        passengerPaidCents: 4200,
+        tollFeeCents: 0,
+        operationalFeeCents: 120,
+        paymentIntermediationFeeCents: 60,
+        totalFeesCents: 180,
+        driverNetAmountCents: 4020
+      })
     });
 
     const command = new CompleteTripCommand({
@@ -204,7 +246,18 @@ describe('CompleteTripCommand', () => {
       bookingId: 'booking_1',
       driverId: 'driver_1',
       idempotentReplay: true,
-      finalFare: 42
+      finalFare: 42,
+      operationalFee: 1.2,
+      paymentIntermediationFee: 0.6,
+      totalFees: 1.8,
+      driverNetAmount: 40.2,
+      authoritativeSnapshot: true,
+      financialSnapshotSource: 'backend_final',
+      financialSnapshot: expect.objectContaining({
+        authoritativeSnapshot: true,
+        passengerPaidCents: 4200,
+        driverNetAmountCents: 4020
+      })
     });
     expect(RideStateManager.isValidTransition).not.toHaveBeenCalled();
     expect(RideStateManager.updateBookingState).not.toHaveBeenCalled();
@@ -259,21 +312,97 @@ describe('CompleteTripCommand', () => {
       'driver_1',
       'booking_1'
     );
+    expect(kycPolicyService.applyDeferredIdentityReverificationIfSafe).toHaveBeenCalledWith(
+      'driver_1',
+      {
+        source: 'ride_completed',
+        tripId: 'booking_1'
+      }
+    );
     expect(RideCompletedEvent).toHaveBeenCalledWith(
       expect.objectContaining({
         bookingId: 'booking_1',
         driverId: 'driver_1',
         customerId: 'customer_1',
-        finalFare: 42
+        finalFare: 42,
+        financialSnapshot: expect.objectContaining({
+          authoritativeSnapshot: true,
+          financialSnapshotSource: 'backend_final',
+          passengerPaidCents: 4200,
+          driverNetAmountCents: 4020
+        })
       })
     );
     expect(result.data.paymentDistribution).toEqual(
       expect.objectContaining({ status: 'PENDING' })
     );
+    expect(result.data).toMatchObject({
+      operationalFee: 1.2,
+      paymentIntermediationFee: 0.6,
+      totalFees: 1.8,
+      driverNetAmount: 40.2,
+      authoritativeSnapshot: true,
+      financialSnapshotSource: 'backend_final',
+      financialSnapshot: expect.objectContaining({
+        authoritativeSnapshot: true,
+        financialSnapshotSource: 'backend_final',
+        passengerPaidCents: 4200,
+        driverNetAmountCents: 4020
+      })
+    });
     expect(metrics.recordCommand).toHaveBeenCalledWith('CompleteTrip', expect.any(Number), true);
   });
 
-  it('applies offline adjustment in reais and recalculates the financial snapshot', async () => {
+  it('does not evaluate operational referral rewards when completing a sandbox trip', async () => {
+    RideStateManager.getBookingState.mockResolvedValue('IN_PROGRESS');
+    const financialContext = sealFinancialContext({
+      providerEnvironment: 'sandbox',
+      paymentProfileId: 'sandbox-test-user',
+      paymentProfileSource: 'test',
+      testUserSandbox: true
+    });
+    redis.hgetall.mockResolvedValue({
+      driverId: 'driver_1',
+      customerId: 'customer_1',
+      city: 'rio-de-janeiro',
+      carType: 'leaf_plus',
+      estimatedFare: '42',
+      paymentAmountInCents: '4200',
+      financialContext: JSON.stringify(financialContext),
+      financialNamespace: financialContext.namespace,
+      financialContextId: financialContext.contextId,
+      paymentProviderEnvironment: financialContext.providerEnvironment,
+      testUserSandbox: 'true'
+    });
+
+    const command = new CompleteTripCommand({
+      driverId: 'driver_1',
+      bookingId: 'booking_1',
+      endLocation: { lat: -23.57, lng: -46.66 },
+      finalFare: 42,
+      distance: 12.4,
+      duration: 1320
+    });
+
+    const result = await command.execute();
+    await Promise.allSettled(immediateTasks);
+
+    expect(result.success).toBe(true);
+    expect(RideStateManager.updateBookingState).toHaveBeenCalledWith(
+      redis,
+      'booking_1',
+      'COMPLETED',
+      expect.objectContaining({
+        financialContext,
+        financialNamespace: 'sandbox',
+        financialContextId: financialContext.contextId
+      })
+    );
+    expect(kycPolicyService.applyDeferredIdentityReverificationIfSafe).not.toHaveBeenCalled();
+    expect(driverReferralRewardService.evaluateDriverRewardsForDriver).not.toHaveBeenCalled();
+  });
+
+  it('keeps paid gross fare immutable and sends driver offline adjustment to explicit settlement review', async () => {
     RideStateManager.getBookingState.mockResolvedValue('IN_PROGRESS');
     heartbeatService.getAndResetOfflineTime.mockResolvedValue(60000);
 
@@ -294,23 +423,51 @@ describe('CompleteTripCommand', () => {
       'booking_1',
       'COMPLETED',
       expect.objectContaining({
-        finalFare: 41.5,
-        duration: 1260,
-        driverNetAmount: 39.7
+        finalFare: 42,
+        duration: 1320,
+        driverNetAmount: 40.2,
+        settlementReviewRequired: true,
+        paymentDistribution: expect.objectContaining({
+          status: 'UNDER_REVIEW',
+          settlementReviewRequired: true
+        }),
+        offlineSettlementReview: expect.objectContaining({
+          settlementType: 'DRIVER_OFFLINE_TIME_ADJUSTMENT_REVIEW',
+          status: 'PENDING_EXPLICIT_LEDGER_SETTLEMENT',
+          grossFareLocked: 42,
+          estimatedAdjustmentAmount: 0.5,
+          requiresExplicitLedgerSettlement: true
+        })
       })
     );
     expect(redis.hset).toHaveBeenCalledWith(
       'booking:booking_1',
       expect.objectContaining({
-        finalFare: '41.5',
-        duration: '1260',
-        driverNetAmount: '39.7'
+        finalFare: '42',
+        duration: '1320',
+        driverNetAmount: '40.2',
+        settlementReviewRequired: 'true',
+        paymentDistribution: expect.any(String),
+        offlineSettlementReview: expect.any(String)
       })
     );
     expect(RideCompletedEvent).toHaveBeenCalledWith(
       expect.objectContaining({
-        finalFare: 41.5,
-        duration: 1260
+        finalFare: 42,
+        duration: 1320,
+        settlementReviewRequired: true,
+        paymentDistribution: expect.objectContaining({
+          status: 'UNDER_REVIEW'
+        }),
+        offlineSettlementReview: expect.objectContaining({
+          estimatedAdjustmentAmount: 0.5
+        })
+      })
+    );
+    expect(result.data.paymentDistribution).toEqual(
+      expect.objectContaining({
+        status: 'UNDER_REVIEW',
+        settlementReviewRequired: true
       })
     );
   });

@@ -5,7 +5,17 @@ import {
 } from '../services/DriverOnboardingService';
 
 const QA_DRIVER_UID = '8vg2kxxqi3TYKlpD6eBlWgYseIq2';
+const QA_DRIVER_CURRENT_UID = 'DV4cwZvql3T3pI3lnKYQwQVALKZ2';
 const QA_PASSENGER_UID = 'OjML1wSzdNRaynjqMRlSW1Y0LVy2';
+const QA_PASSENGER_CURRENT_UID = '3tEQ8pQ2QzeWbMKhLGsXHHhnOGL2';
+const QA_PASSENGER_PREFLIGHT_UID = 'juYe4nF4TyOzFTnIzW91Qo0sXtz1';
+
+const QA_DRIVER_UIDS = new Set([QA_DRIVER_UID, QA_DRIVER_CURRENT_UID]);
+const QA_PASSENGER_UIDS = new Set([
+  QA_PASSENGER_UID,
+  QA_PASSENGER_CURRENT_UID,
+  QA_PASSENGER_PREFLIGHT_UID,
+]);
 
 const normalizeUserType = (value) => {
   if (value === 'passenger') {
@@ -115,45 +125,54 @@ export const buildQaSeedProfile = ({ uid, driverActivation = null }) => {
     return null;
   }
 
-  if (normalizedUid === QA_DRIVER_UID) {
+  if (QA_DRIVER_UIDS.has(normalizedUid)) {
     const resolvedDriverActivation = buildApprovedQaDriverActivation(driverActivation);
+    const isCurrentDriver = normalizedUid === QA_DRIVER_CURRENT_UID;
     const baseProfile = buildBaseProfile({
       uid: normalizedUid,
       role: 'driver',
-      phone: '+5521123456789',
-      email: 'motorista.teste@leafapp.com',
-      name: 'Motorista',
+      phone: isCurrentDriver ? '+5521987654321' : '+5521123456789',
+      email: isCurrentDriver ? 'motorista.qa.vilakosmos@leafapp.com' : 'motorista.teste@leafapp.com',
+      name: isCurrentDriver ? 'Motorista QA' : 'Motorista',
       firstName: 'Leaf',
       lastName: 'Motorista Teste',
     });
+    const vehicleId = isCurrentDriver ? 'test_vehicle_DV4cwZvql3T3' : 'test_vehicle_8vg2kxxqi3TY';
+    const userVehicleId = isCurrentDriver ? 'uv_test_vehicle_DV4cwZvql3T3' : 'uv_test_vehicle_8vg2kxxqi3TY';
+    const carPlate = isCurrentDriver ? 'TES6789' : 'TES8888';
+    const carModel = isCurrentDriver ? 'Toyota Prius' : 'Tesla Model 3';
+    const carType = isCurrentDriver ? 'Leaf Plus' : 'standard';
 
     return {
       ...baseProfile,
-      vehicleId: 'test_vehicle_8vg2kxxqi3TY',
-      userVehicleId: 'uv_test_vehicle_8vg2kxxqi3TY',
-      carPlate: 'TES8888',
-      carModel: 'Tesla Model 3',
-      carType: 'standard',
+      vehicleId,
+      userVehicleId,
+      carPlate,
+      carModel,
+      carType,
       driverActivation: resolvedDriverActivation,
       profile: {
         ...baseProfile,
         canGoOnline: true,
-        vehicleId: 'test_vehicle_8vg2kxxqi3TY',
-        userVehicleId: 'uv_test_vehicle_8vg2kxxqi3TY',
-        carPlate: 'TES8888',
-        carModel: 'Tesla Model 3',
-        carType: 'standard',
+        vehicleId,
+        userVehicleId,
+        carPlate,
+        carModel,
+        carType,
         driverActivation: resolvedDriverActivation,
       },
     };
   }
 
-  if (normalizedUid === QA_PASSENGER_UID) {
+  if (QA_PASSENGER_UIDS.has(normalizedUid)) {
     const baseProfile = buildBaseProfile({
       uid: normalizedUid,
       role: 'customer',
-      phone: '+5521102938475',
-      email: 'passageiro.teste@leafapp.com',
+      phone: normalizedUid === QA_PASSENGER_CURRENT_UID ? '+5521102938476' : '+5521102938475',
+      email:
+        normalizedUid === QA_PASSENGER_CURRENT_UID
+          ? 'passageiro.qa.vilakosmos@leafapp.com'
+          : 'passageiro.teste@leafapp.com',
       name: 'Leaf Passageiro Teste',
       firstName: 'Leaf',
       lastName: 'Passageiro Teste',
@@ -190,13 +209,13 @@ export const restoreQaSeedProfile = async ({
 
   const entries = await AsyncStorage.multiGet(keys);
   const values = Object.fromEntries(entries);
-  const testModeEnabled = String(values[testModeKey] || '').trim() === 'true';
-  if (!testModeEnabled) {
-    return null;
-  }
-
   const authUid = String(values[authUidKey] || '').trim();
   if (!authUid) {
+    return null;
+  }
+  const canRestoreKnownQaUid = QA_DRIVER_UIDS.has(authUid) || QA_PASSENGER_UIDS.has(authUid);
+  const testModeEnabled = String(values[testModeKey] || '').trim() === 'true';
+  if (!testModeEnabled && !canRestoreKnownQaUid) {
     return null;
   }
 

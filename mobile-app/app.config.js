@@ -6,9 +6,11 @@ const GoogleMapApiConfig = require('./config/GoogleMapApiConfig').GoogleMapApiCo
 const fs = require('fs');
 const path = require('path');
 const TRUTHY_VALUES = new Set(['1', 'true', 'yes', 'on']);
+const DEFAULT_API_BASE_URL = 'https://api.leaf.app.br';
+const DEFAULT_WS_BASE_URL = 'https://socket.leaf.app.br';
 const allowInsecureHttp = String(process.env.EXPO_PUBLIC_ALLOW_INSECURE_HTTP || 'false').toLowerCase() === 'true';
 const disableUpdatesForLocalSimulator =
-    String(process.env.LEAF_DISABLE_UPDATES_FOR_SIMULATOR || 'false').toLowerCase() === 'true';
+    TRUTHY_VALUES.has(String(process.env.LEAF_DISABLE_UPDATES_FOR_SIMULATOR || 'false').trim().toLowerCase());
 const normalizeFlag = (value, defaultValue = false) => {
     if (value === undefined || value === null || value === '') {
         return defaultValue;
@@ -17,10 +19,54 @@ const normalizeFlag = (value, defaultValue = false) => {
     return TRUTHY_VALUES.has(String(value).trim().toLowerCase());
 };
 const firstDefined = (...values) => values.find(value => value !== undefined && value !== null && value !== '');
+const normalizeBaseUrl = (rawUrl, fallbackUrl = DEFAULT_API_BASE_URL) => {
+    const raw = String(rawUrl || '').trim();
+    if (!raw) return fallbackUrl;
+    return raw.replace(/\/+$/, '').replace(/\/api$/i, '');
+};
+const deriveSocketBaseUrlFromApi = (rawUrl, fallbackUrl = DEFAULT_WS_BASE_URL) => {
+    const normalized = normalizeBaseUrl(rawUrl, fallbackUrl);
+    try {
+        const parsed = new URL(normalized);
+        if (/^api(?=[.-])/i.test(parsed.hostname)) {
+            parsed.hostname = parsed.hostname.replace(/^api(?=[.-])/i, 'socket');
+        }
+        parsed.pathname = '';
+        parsed.search = '';
+        parsed.hash = '';
+        return parsed.toString().replace(/\/$/, '');
+    } catch (_error) {
+        return fallbackUrl;
+    }
+};
+const normalizeSocketBaseUrl = (rawUrl, fallbackUrl = DEFAULT_WS_BASE_URL) => {
+    const normalized = normalizeBaseUrl(rawUrl, fallbackUrl);
+    try {
+        const parsed = new URL(normalized);
+        parsed.pathname = '';
+        parsed.search = '';
+        parsed.hash = '';
+        return parsed.toString().replace(/\/$/, '');
+    } catch (_error) {
+        return fallbackUrl;
+    }
+};
 const resolveNumber = (value, defaultValue) => {
     const parsed = Number(value);
     return Number.isFinite(parsed) ? parsed : defaultValue;
 };
+const configuredApiUrl = normalizeBaseUrl(
+    firstDefined(process.env.EXPO_PUBLIC_API_URL, process.env.EXPO_PUBLIC_BACKEND_URL),
+    DEFAULT_API_BASE_URL
+);
+const configuredWsUrl = normalizeSocketBaseUrl(
+    firstDefined(
+        process.env.EXPO_PUBLIC_WS_URL,
+        process.env.EXPO_PUBLIC_SOCKET_URL,
+        process.env.MOBILE_TEST_WS_URL
+    ),
+    deriveSocketBaseUrlFromApi(configuredApiUrl, DEFAULT_WS_BASE_URL)
+);
 const resolveLaunchProfile = () => {
     const rawProfile = firstDefined(
         process.env.EXPO_PUBLIC_LEAF_LAUNCH_PROFILE,
@@ -33,6 +79,10 @@ const resolveLaunchProfile = () => {
 
     if (['pilot', 'pilot_controlled', 'controlled_pilot'].includes(normalized)) {
         return 'pilot_controlled';
+    }
+
+    if (['ride_flow_validation', 'ride_validation', 'flow_validation'].includes(normalized)) {
+        return 'ride_flow_validation';
     }
 
     return normalized || 'full';
@@ -93,7 +143,7 @@ const expoUpdatesConfig = disableUpdatesForLocalSimulator || !otaUpdatesEnabled
             : undefined,
     };
 const pilotControlled =
-    launchProfile === 'pilot_controlled' ||
+    ['pilot_controlled', 'geofence_validation', 'ride_flow_validation'].includes(launchProfile) ||
     normalizeFlag(firstDefined(process.env.EXPO_PUBLIC_PILOT_CONTROLLED, process.env.LEAF_PILOT_CONTROLLED), false);
 const resolvePilotFeature = (publicKey, privateKey, enabledOutsidePilot = true) => {
     const fallback = pilotControlled ? false : enabledOutsidePilot;
@@ -110,6 +160,13 @@ const pilotFeatureFlags = {
     adminMutationsEnabled: resolvePilotFeature('EXPO_PUBLIC_ENABLE_ADMIN_MUTATIONS', 'LEAF_ENABLE_ADMIN_MUTATIONS', true),
 };
 const prototypePlayback = {
+    enabled: normalizeFlag(
+        firstDefined(
+            process.env.EXPO_PUBLIC_PROTOTYPE_ROUTE_PLAYBACK_ENABLED,
+            process.env.LEAF_PROTOTYPE_ROUTE_PLAYBACK_ENABLED
+        ),
+        false
+    ),
     tickMs: resolveNumber(
         firstDefined(
             process.env.EXPO_PUBLIC_PROTOTYPE_ROUTE_PLAYBACK_TICK_MS,
@@ -189,6 +246,11 @@ module.exports = {
         refundPolicyUrl: AppConfig.refund_policy_url,
         accountDeletionUrl: AppConfig.account_deletion_url,
         supportEmail: AppConfig.support_email,
+        apiUrl: configuredApiUrl,
+        backendUrl: configuredApiUrl,
+        wsUrl: configuredWsUrl,
+        socketUrl: configuredWsUrl,
+        updatesDisabledForLocalSimulator: disableUpdatesForLocalSimulator,
         isReview: process.env.APP_REVIEW === 'true',
         e2eTest: process.env.EXPO_PUBLIC_E2E_TEST === 'true' || process.env.EXPO_PUBLIC_E2E_TEST === '1',
         forcePaymentBypass:
@@ -290,6 +352,9 @@ module.exports = {
             "UISupportedInterfaceOrientations~ipad": ["UIInterfaceOrientationPortrait"],
             NSAppTransportSecurity: iosTransportSecurity,
             UIBackgroundModes: ["fetch", "location", "remote-notification"],
+            NSSupportsLiveActivities: true,
+            NSSupportsLiveActivitiesFrequentUpdates: true,
+            NSLocalNetworkUsageDescription: "A Leaf usa a rede local apenas em builds de desenvolvimento para carregar o app pelo Metro durante testes.",
             NSMicrophoneUsageDescription: "A Leaf usa o microfone para capturar o destino por voz quando você tocar no ícone de microfone.",
             NSSpeechRecognitionUsageDescription: "A Leaf converte sua fala em texto para preencher o destino com mais rapidez."
         }
@@ -341,6 +406,7 @@ module.exports = {
         "./plugins/withNetworkSecurityConfig",
         "./plugins/withLeafAwsLiveness",
         "./plugins/withLeafFaceEmbedding",
+        "./plugins/withLeafRideLiveActivity",
         [
             "expo-notifications",
             {

@@ -7,6 +7,49 @@
 
 const firebaseConfig = require('../firebase-config');
 const { logStructured, logError } = require('../utils/logger');
+const {
+  resolveRidePersistenceScope,
+  resolveUserPersistenceScope
+} = require('./sandbox-persistence-context');
+
+async function resolveAuditPersistenceScope(eventData = {}, details = {}) {
+  const source = details && typeof details === 'object' ? details : {};
+  const input = {
+    financialContext: eventData.financialContext || source.financialContext || null,
+    financialNamespace: eventData.financialNamespace || source.financialNamespace || null,
+    financialContextId: eventData.financialContextId || source.financialContextId || null,
+    providerEnvironment:
+      eventData.providerEnvironment ||
+      source.providerEnvironment ||
+      source.paymentProviderEnvironment ||
+      null,
+    paymentProfileId: eventData.paymentProfileId || source.paymentProfileId || null
+  };
+  const testUserSandbox = Object.prototype.hasOwnProperty.call(eventData, 'testUserSandbox')
+    ? eventData.testUserSandbox
+    : source.testUserSandbox;
+  if (typeof testUserSandbox === 'boolean') input.testUserSandbox = testUserSandbox;
+
+  const hasExplicitPersistenceEnvelope = Boolean(
+    input.financialContext ||
+    input.financialNamespace ||
+    input.financialContextId ||
+    input.providerEnvironment ||
+    input.paymentProfileId ||
+    typeof input.testUserSandbox === 'boolean'
+  );
+  if (hasExplicitPersistenceEnvelope) {
+    return resolveRidePersistenceScope(input);
+  }
+
+  return resolveUserPersistenceScope({
+    userId: eventData.userId,
+    actor: {
+      uid: eventData.userId,
+      id: eventData.userId
+    }
+  });
+}
 
 class AuditService {
   constructor() {
@@ -61,6 +104,8 @@ class AuditService {
         return { success: false, error: 'Firestore não disponível' };
       }
 
+      const persistenceScope = await resolveAuditPersistenceScope(eventData, details);
+
       // Criar documento de log
       const logDocument = {
         userId: userId,
@@ -79,11 +124,18 @@ class AuditService {
         // Índices para consultas rápidas
         date: new Date().toISOString().split('T')[0], // YYYY-MM-DD
         hour: new Date().getHours(),
-        dayOfWeek: new Date().getDay()
+        dayOfWeek: new Date().getDay(),
+        ...(persistenceScope.source === 'legacy_operational'
+          ? {}
+          : {
+              financialContext: persistenceScope.financialContext,
+              financialNamespace: persistenceScope.namespace,
+              financialContextId: persistenceScope.financialContextId
+            })
       };
 
       // Salvar no Firestore
-      const auditRef = firestore.collection(this.collectionName);
+      const auditRef = firestore.collection(persistenceScope.collections.auditLogs);
       const docRef = await auditRef.add(logDocument);
 
       // Log no console para desenvolvimento
@@ -123,6 +175,20 @@ class AuditService {
         error: error.message
       };
     }
+  }
+
+  async requireEvent(eventData, { attempts = 3 } = {}) {
+    const maxAttempts = Math.min(5, Math.max(1, Number.parseInt(attempts, 10) || 3));
+    let lastResult = null;
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      lastResult = await this.logEvent(eventData);
+      if (lastResult?.success === true && lastResult?.logId) return lastResult;
+    }
+
+    const error = new Error('Auditoria obrigatória indisponível');
+    error.code = 'AUDIT_WRITE_UNAVAILABLE';
+    error.auditResult = lastResult;
+    throw error;
   }
 
   /**
@@ -470,4 +536,3 @@ class AuditService {
 }
 
 module.exports = new AuditService();
-

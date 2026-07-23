@@ -8,6 +8,34 @@ const normalizeFlag = (value) => TRUTHY_VALUES.has(String(value ?? '').trim().to
 const expoExtra = () => Constants?.expoConfig?.extra || {};
 const normalizeExtraFlag = (key) => normalizeFlag(expoExtra()?.[key]);
 
+const isRuntimeExtra = (value) => (
+    value !== null &&
+    typeof value === 'object' &&
+    !Array.isArray(value)
+);
+
+const resolveTestUserToolsFlag = () => {
+    // The manifest/bundle currently running must shadow values embedded in an
+    // older dev-client. An absent flag in a current manifest is intentionally
+    // treated as disabled instead of falling through to expoConfig.
+    const currentUpdateExtra = Constants?.manifest2?.extra?.expoClient?.extra;
+    if (isRuntimeExtra(currentUpdateExtra)) {
+        return currentUpdateExtra.enableTestUserTools;
+    }
+
+    const currentBundleFlag = process.env.EXPO_PUBLIC_ENABLE_TEST_USER_TOOLS;
+    if (currentBundleFlag !== undefined) {
+        return currentBundleFlag;
+    }
+
+    const currentClassicManifestExtra = Constants?.manifest?.extra;
+    if (isRuntimeExtra(currentClassicManifestExtra)) {
+        return currentClassicManifestExtra.enableTestUserTools;
+    }
+
+    return expoExtra().enableTestUserTools;
+};
+
 export const isDevelopmentBuild = () => __DEV__ === true;
 export const isSimulatorBuild = () => Device.isDevice === false;
 
@@ -27,8 +55,7 @@ export const hasExplicitQaOtpForceFlag = () =>
     normalizeFlag(process.env.EXPO_PUBLIC_ENABLE_QA_OTP_FORCE_FLOW);
 
 export const hasExplicitTestUserToolsFlag = () =>
-    normalizeFlag(process.env.EXPO_PUBLIC_ENABLE_TEST_USER_TOOLS) ||
-    normalizeExtraFlag('enableTestUserTools');
+    normalizeFlag(resolveTestUserToolsFlag());
 
 export const allowCustomOtpFallback = () =>
     isReviewBuild() ||
@@ -44,7 +71,7 @@ export const allowQaOtpForceFlow = () =>
 
 export const allowTestUserTools = () =>
     hasExplicitTestUserToolsFlag() &&
-    (isDevelopmentBuild() || isE2ETestBuild() || isSimulatorBuild());
+    isSimulatorBuild();
 
 export const hasExplicitPaymentBypassFlag = () =>
     normalizeFlag(process.env.EXPO_PUBLIC_FORCE_PAYMENT_BYPASS) ||

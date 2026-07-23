@@ -12,9 +12,13 @@ const { authenticateSupport, requireSupportRoles } = require('../middleware/supp
 
 const healthMonitor = new WorkerHealthMonitor();
 const WORKER_READ_ROLES = ['admin', 'manager', 'super-admin', 'viewer', 'development'];
+const requireWorkerReadAccess = [
+    authenticateSupport,
+    requireSupportRoles(WORKER_READ_ROLES)
+];
 
 // GET /api/workers/health - Health check dos workers
-router.get('/api/workers/health', async (req, res) => {
+router.get('/api/workers/health', ...requireWorkerReadAccess, async (req, res) => {
     try {
         const health = await healthMonitor.getHealth();
         res.json(health);
@@ -30,7 +34,7 @@ router.get('/api/workers/health', async (req, res) => {
 });
 
 // GET /api/workers/consumers - Listar consumers ativos
-router.get('/api/workers/consumers', async (req, res) => {
+router.get('/api/workers/consumers', ...requireWorkerReadAccess, async (req, res) => {
     try {
         const consumers = await healthMonitor.getConsumers();
         res.json({
@@ -50,7 +54,7 @@ router.get('/api/workers/consumers', async (req, res) => {
 });
 
 // GET /api/workers/lag - Obter lag do stream
-router.get('/api/workers/lag', async (req, res) => {
+router.get('/api/workers/lag', ...requireWorkerReadAccess, async (req, res) => {
     try {
         const lag = await healthMonitor.getStreamLag();
         res.json({
@@ -69,7 +73,7 @@ router.get('/api/workers/lag', async (req, res) => {
 });
 
 // GET /api/workers/pending - Obter eventos pendentes
-router.get('/api/workers/pending', async (req, res) => {
+router.get('/api/workers/pending', ...requireWorkerReadAccess, async (req, res) => {
     try {
         const { consumer, count = 10 } = req.query;
         const pending = await healthMonitor.getPendingEvents(consumer, parseInt(count));
@@ -90,7 +94,7 @@ router.get('/api/workers/pending', async (req, res) => {
 });
 
 // GET /api/workers/dlq - Obter tamanho da DLQ
-router.get('/api/workers/dlq/events', authenticateSupport, requireSupportRoles(WORKER_READ_ROLES), async (req, res) => {
+router.get('/api/workers/dlq/events', ...requireWorkerReadAccess, async (req, res) => {
     try {
         const events = await healthMonitor.getDLQEvents({
             limit: req.query.limit,
@@ -113,7 +117,7 @@ router.get('/api/workers/dlq/events', authenticateSupport, requireSupportRoles(W
     }
 });
 
-router.get('/api/workers/dlq', async (req, res) => {
+router.get('/api/workers/dlq', ...requireWorkerReadAccess, async (req, res) => {
     try {
         const dlqSize = await healthMonitor.getDLQSize();
         res.json({

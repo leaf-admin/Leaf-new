@@ -128,10 +128,8 @@ const QueueWorker = require('./services/queue-worker');
 // ==================== IMPORTAÇÕES FASE 10: OTIMIZAÇÕES E MONITORAMENTO ====================
 const metricsCollector = require('./services/metrics-collector');
 const queueMonitoringRoutes = require('./routes/queue-monitoring');
-const IntegratedKYCService = require('./services/IntegratedKYCService');
+const { resolveKycRuntimeForUser } = require('./services/kyc-runtime-scope-service');
 const kycPolicyService = require('./services/kyc-policy-service');
-const { resolveBiometricPolicy } = require('./services/kyc-biometric-production-policy');
-const driverActivationStateService = require('./services/driver-activation-state-service');
 const { recordIngest, getStatus: getOtelIngestStatus } = require('./utils/otel-ingest-monitor');
 // ============================================================================================
 
@@ -149,7 +147,6 @@ const AUTH_TOKEN_CACHE_TTL_MS = Number.parseInt(process.env.AUTH_TOKEN_CACHE_TTL
 const AUTH_TOKEN_CACHE_MAX = Number.parseInt(process.env.AUTH_TOKEN_CACHE_MAX || '5000', 10);
 const authTokenCache = new Map();
 const authTokenVerifyInFlight = new Map();
-const integratedKYCService = new IntegratedKYCService();
 
 // Admission control para reduzir picos de handshake/socket em bursts.
 const SOCKET_ADMISSION_ENABLED = process.env.SOCKET_ADMISSION_ENABLED !== 'false';
@@ -580,132 +577,65 @@ async function enforceSubscriptionForOnline(driverId) {
 }
 
 async function enforceDailyKYCForOnline(driverId) {
-    if (!driverId) {
-        return {
-            allowed: false,
-            reason: 'driverId ausente',
-            code: 'driverIdMissing'
-        };
-    }
+    const kycRuntime = await resolveKycRuntimeForUser({
+        userId: driverId,
+        actor: { uid: driverId, id: driverId, role: 'driver' }
+    });
 
-    try {
-        const activationState = await driverActivationStateService.resolveDriverActivationState({ driverId });
-        if (activationState?.canGoOnline && !activationState?.requiresLiveness) {
-            return {
-                allowed: true,
-                reason: 'Motorista apto pela politica canonica de ativacao.',
-                code: 'driverActivationActive',
-                details: activationState
-            };
-        }
-        if (activationState && !activationState.canAttemptOnline) {
+    // RTDB is a legacy operational source. It must never project an
+    // operational review hold into an authoritatively sandbox-scoped driver.
+    if (kycRuntime.namespace === 'operational') {
+        const deferredResult = await kycPolicyService
+            .applyDeferredIdentityReverificationIfSafe(driverId, {
+                source: 'online_gate_retry'
+            });
+        if (
+            deferredResult?.deferred === true
+            && !deferredResult?.activeTripId
+            && deferredResult?.code
+        ) {
             return {
                 allowed: false,
-                reason: activationState.blockingReason || 'Motorista nao apto para ficar online.',
-                code: activationState.requiresLiveness ? 'kycRequired' : 'driverActivationBlocked',
-                requirement: activationState.requiresLiveness ? 'LIVENESS_REQUIRED' : undefined,
-                details: activationState
+                retryRequired: true,
+                reason: 'A validacao de identidade pendente sera retomada antes de ficar online.',
+                code: deferredResult.code,
+                requirement: 'IDENTITY_REVERIFICATION'
             };
         }
+    }
 
-        const approvalGate = await kycPolicyService.requireApprovedKyc(driverId);
-        if (!approvalGate.allowed) {
-            return {
-                allowed: false,
-                reason: approvalGate.reason,
-                code: approvalGate.code,
-                details: approvalGate
-            };
-        }
-    } catch (error) {
-        logStructured('warn', 'Falha no gate de status KYC para online (fail-closed)', {
-            service: 'server',
-            operation: 'enforceDailyKYCForOnline',
-            driverId,
-            error: error.message
-        });
+    const identityReviewGate = await kycRuntime.workflow
+        .assertKycOperationAllowed(driverId);
+    if (identityReviewGate?.identityReviewHold === true) {
+        const reviewCaseId = typeof identityReviewGate.holdCaseId === 'string'
+            && identityReviewGate.holdCaseId.trim()
+            ? identityReviewGate.holdCaseId.trim()
+            : null;
+        const evidenceId = typeof identityReviewGate.holdEvidenceId === 'string'
+            && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/.test(identityReviewGate.holdEvidenceId.trim())
+            ? identityReviewGate.holdEvidenceId.trim()
+            : null;
+        const hasTraceableReview = Boolean(
+            (reviewCaseId || evidenceId) && identityReviewGate.reviewAvailable !== false
+        );
         return {
             allowed: false,
-            reason: 'Nao foi possivel validar o status KYC agora.',
-            code: 'KYC_STATUS_CHECK_FAILED'
+            retryRequired: false,
+            reason: reviewCaseId
+                ? 'Sua identidade esta sendo analisada. Avisaremos quando houver uma atualizacao.'
+                : hasTraceableReview
+                    ? 'Nao foi possivel confirmar sua identidade. Voce pode solicitar uma analise.'
+                    : 'Precisamos liberar uma nova tentativa. Fale com o suporte.',
+            code: hasTraceableReview
+                ? 'KYC_IDENTITY_REVIEW_HOLD'
+                : 'KYC_IDENTITY_RECOVERY_REQUIRED',
+            requirement: 'IDENTITY_REVERIFICATION',
+            reviewAvailable: hasTraceableReview,
+            reviewCaseId,
+            evidenceId
         };
     }
-
-    if (process.env.DAILY_KYC_ONLINE_GATE_ENABLED === 'false') {
-        return {
-            allowed: true,
-            reason: 'Gate KYC diário desabilitado',
-            code: 'kycGateDisabled'
-        };
-    }
-
-    const maxAgeHours = Number.parseInt(process.env.KYC_DAILY_MAX_AGE_HOURS || '24', 10);
-    const safeMaxAgeHours = Number.isFinite(maxAgeHours) && maxAgeHours > 0 ? maxAgeHours : 24;
-
-    try {
-        const verification = await integratedKYCService.hasValidVerification(driverId, safeMaxAgeHours);
-
-        if (verification?.hasValid) {
-            return {
-                allowed: true,
-                reason: 'KYC diário válido',
-                code: 'kycValid',
-                details: verification
-            };
-        }
-
-        return {
-            allowed: false,
-            reason: verification?.reason || 'Verificação facial diária necessária',
-            code: 'kycRequired',
-            requirement: 'LIVENESS_REQUIRED',
-            challenge: await kycPolicyService.createStepUpChallenge({
-                driverId,
-                requirement: 'LIVENESS_REQUIRED',
-                score: 100,
-                source: 'driver_online',
-                signals: [
-                    {
-                        code: 'KYC_STALE_OR_MISSING',
-                        weight: 100,
-                        message: verification?.reason || 'Verificação facial diária necessária',
-                        details: {
-                            maxAgeHours: safeMaxAgeHours
-                        }
-                    }
-                ]
-            }).catch((challengeError) => {
-                logStructured('warn', 'Falha ao criar challenge KYC para online', {
-                    service: 'server',
-                    operation: 'enforceDailyKYCForOnline',
-                    driverId,
-                    error: challengeError.message
-                });
-                return null;
-            })
-        };
-    } catch (error) {
-        const biometricPolicy = resolveBiometricPolicy(process.env);
-        const failClosed = biometricPolicy.productionBiometricsEnabled;
-        logStructured('warn', `Falha no gate KYC diário (${failClosed ? 'fail-closed' : 'fail-open'})`, {
-            service: 'server',
-            operation: 'enforceDailyKYCForOnline',
-            driverId,
-            error: error.message
-        });
-        if (failClosed) {
-            return {
-                allowed: false,
-                reason: 'Nao foi possivel validar KYC diario agora.',
-                code: 'KYC_DAILY_CHECK_FAILED'
-            };
-        }
-        return {
-            allowed: true,
-            reason: 'Falha ao validar KYC diário (fail-open)',
-            code: 'kycCheckFailedOpen'
-        };
-    }
+    return kycRuntime.trust.evaluateOnlineGate(driverId);
 }
 
 async function findAvailableDriversForPickup(pickupLocation, options = {}) {
@@ -1308,7 +1238,8 @@ io.on('connection', async (socket) => {
     registerSocketSafetySupportHandlers({
         socket,
         io,
-        logStructured
+        logStructured,
+        redisPool
     });
 
     registerSocketEngagementChatHandlers({
@@ -1335,7 +1266,8 @@ io.on('connection', async (socket) => {
         logStructured,
         idempotencyService,
         enforceSubscriptionForOnline,
-        enforceDailyKYCForOnline
+        enforceDailyKYCForOnline,
+        vehicleLockManager
     });
 
     if (ENABLE_LEGACY_SOCKET_NOTIFICATIONS) {
@@ -1360,6 +1292,7 @@ io.on('connection', async (socket) => {
         registerSocketRatingHandler({
             socket,
             io,
+            redisPool,
             logStructured
         });
     }

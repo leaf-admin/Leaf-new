@@ -17,6 +17,7 @@ jest.mock('../../../utils/logger', () => ({
 
 const firebaseConfig = require('../../../firebase-config');
 const FinancialLedgerService = require('../../../services/financial-ledger-service');
+const { sealFinancialContext } = require('../../../services/financial-runtime-context');
 
 function createInMemoryFirestore() {
   const docs = new Map();
@@ -146,6 +147,50 @@ describe('FinancialLedgerService', () => {
     });
   });
 
+  it('posts sandbox payment events only to the isolated ledger collections', async () => {
+    const firestore = createInMemoryFirestore();
+    firebaseConfig.getFirestore.mockReturnValue(firestore);
+    const service = new FinancialLedgerService();
+    const financialContext = sealFinancialContext({
+      providerEnvironment: 'sandbox',
+      paymentProfileId: 'qa-test-users-sandbox-durable',
+      paymentProfileSource: 'firestore',
+      testUserSandbox: true
+    });
+
+    const result = await service.recordPaymentReceived({
+      rideId: 'ride_sandbox_1',
+      chargeId: 'charge_sandbox_1',
+      amountCents: 2500,
+      passengerId: 'passenger_sandbox',
+      financialContext
+    });
+
+    expect(result.success).toBe(true);
+    expect(firestore.docs.has(`sandbox_financial_ledger_events/${result.eventId}`)).toBe(true);
+    expect(firestore.docs.has(`sandbox_financial_ledger_lines/${result.eventId}_0`)).toBe(true);
+    expect(firestore.docs.has(`financial_ledger_events/${result.eventId}`)).toBe(false);
+    expect(firestore.docs.has(`financial_ledger_lines/${result.eventId}_0`)).toBe(false);
+  });
+
+  it('refuses sandbox ledger writes after context loss', async () => {
+    const service = new FinancialLedgerService();
+
+    const result = await service.recordBalancedEvent({
+      eventType: 'sandbox_lost',
+      providerEnvironment: 'sandbox',
+      lines: [
+        { account: 'asset:cash', direction: 'debit', amountCents: 100 },
+        { account: 'liability:test', direction: 'credit', amountCents: 100 }
+      ]
+    });
+
+    expect(result).toMatchObject({
+      success: false,
+      code: 'FINANCIAL_SANDBOX_CONTEXT_LOST'
+    });
+  });
+
   it('rejects an existing ledger event with different balanced content', async () => {
     const firestore = createInMemoryFirestore();
     firebaseConfig.getFirestore.mockReturnValue(firestore);
@@ -256,8 +301,24 @@ describe('FinancialLedgerService', () => {
     });
     firestore.docs.set('payment_distributions/ride_reconcile_1', {
       rideId: 'ride_reconcile_1',
+      status: 'distributed',
+      netAmount: 2500,
+      retainedFees: {
+        operationalFee: 300,
+        wooviFee: 200
+      },
       calculation: {
-        totalAmount: 3000
+        totalAmount: 3000,
+        financialContract: {
+          authoritativeSnapshot: true,
+          financialSnapshotSource: 'backend_final',
+          passengerPaidCents: 3000,
+          tollFeeCents: 0,
+          operationalFeeCents: 300,
+          paymentIntermediationFeeCents: 200,
+          subscriptionRetainedFeeCents: 0,
+          driverNetAmountCents: 2500
+        }
       }
     });
 
@@ -288,6 +349,10 @@ describe('FinancialLedgerService', () => {
       totals: {
         paymentAmountCents: 3000,
         distributionTotalCents: 3000,
+        passengerGrossCents: 3000,
+        driverNetAmountCents: 2500,
+        operationalFeeCents: 300,
+        wooviFeeCents: 200,
         ledgerEventCount: 2
       }
     });
@@ -319,8 +384,24 @@ describe('FinancialLedgerService', () => {
     });
     firestore.docs.set('payment_distributions/booking_alias_1', {
       rideId: 'booking_alias_1',
+      status: 'distributed',
+      netAmount: 9420,
+      retainedFees: {
+        operationalFee: 294,
+        wooviFee: 78
+      },
       calculation: {
-        totalAmount: 9792
+        totalAmount: 9792,
+        financialContract: {
+          authoritativeSnapshot: true,
+          financialSnapshotSource: 'backend_final',
+          passengerPaidCents: 9792,
+          tollFeeCents: 0,
+          operationalFeeCents: 294,
+          paymentIntermediationFeeCents: 78,
+          subscriptionRetainedFeeCents: 0,
+          driverNetAmountCents: 9420
+        }
       }
     });
 
@@ -397,6 +478,68 @@ describe('FinancialLedgerService', () => {
     });
   });
 
+  it('flags a distributed driver net that diverges from the immutable financial snapshot', async () => {
+    const firestore = createInMemoryFirestore();
+    firebaseConfig.getFirestore.mockReturnValue(firestore);
+    const service = new FinancialLedgerService();
+
+    firestore.docs.set('ride_payments/ride_snapshot_mismatch', {
+      rideId: 'ride_snapshot_mismatch',
+      chargeId: 'charge_snapshot_mismatch',
+      amount: 3000,
+      status: 'CONFIRMED'
+    });
+    firestore.docs.set('payment_distributions/ride_snapshot_mismatch', {
+      rideId: 'ride_snapshot_mismatch',
+      status: 'distributed',
+      netAmount: 2400,
+      retainedFees: {
+        operationalFee: 300,
+        wooviFee: 200
+      },
+      calculation: {
+        totalAmount: 3000,
+        financialContract: {
+          authoritativeSnapshot: true,
+          financialSnapshotSource: 'backend_final',
+          passengerPaidCents: 3000,
+          tollFeeCents: 0,
+          operationalFeeCents: 300,
+          paymentIntermediationFeeCents: 200,
+          subscriptionRetainedFeeCents: 0,
+          driverNetAmountCents: 2500
+        }
+      }
+    });
+    await service.recordPaymentReceived({
+      rideId: 'ride_snapshot_mismatch',
+      chargeId: 'charge_snapshot_mismatch',
+      amountCents: 3000,
+      passengerId: 'passenger_1'
+    });
+    await service.recordRideSettlement({
+      rideId: 'ride_snapshot_mismatch',
+      driverId: 'driver_1',
+      totalAmountCents: 3000,
+      netAmountCents: 2500,
+      operationalFeeCents: 300,
+      wooviFeeCents: 200
+    });
+
+    const result = await service.reconcileRideFinancials({ rideId: 'ride_snapshot_mismatch' });
+
+    expect(result.report).toMatchObject({
+      ok: false,
+      issues: expect.arrayContaining([
+        expect.objectContaining({
+          code: 'DISTRIBUTION_DRIVER_NET_MISMATCH',
+          distributionNetAmountCents: 2400,
+          snapshotDriverNetAmountCents: 2500
+        })
+      ])
+    });
+  });
+
   it('reconciles a recent batch of ride payments into reports', async () => {
     const firestore = createInMemoryFirestore();
     firebaseConfig.getFirestore.mockReturnValue(firestore);
@@ -448,6 +591,41 @@ describe('FinancialLedgerService', () => {
     });
     expect(firestore.docs.has('financial_reconciliation_reports/ride_e2e_123_smoke')).toBe(false);
     expect(firestore.docs.has('financial_reconciliation_reports/ride_normal_1777175584964')).toBe(false);
+  });
+
+  it('never reconciles a sandbox ride into operational reports without explicit context', async () => {
+    const firestore = createInMemoryFirestore();
+    firebaseConfig.getFirestore.mockReturnValue(firestore);
+    const service = new FinancialLedgerService();
+    const financialContext = sealFinancialContext({
+      providerEnvironment: 'sandbox',
+      paymentProfileId: 'qa-test-users-sandbox-durable',
+      testUserSandbox: true
+    });
+    firestore.docs.set('sandbox_ride_payments/ride_sandbox_metrics', {
+      rideId: 'ride_sandbox_metrics',
+      amount: 1800,
+      financialContext
+    });
+
+    const operationalAttempt = await service.reconcileRecentRideFinancials({
+      rideId: 'ride_sandbox_metrics'
+    });
+    const sandboxResult = await service.reconcileRecentRideFinancials({
+      rideId: 'ride_sandbox_metrics',
+      financialContext
+    });
+
+    expect(operationalAttempt).toMatchObject({
+      success: false,
+      code: 'SANDBOX_RECONCILIATION_CONTEXT_REQUIRED'
+    });
+    expect(sandboxResult).toMatchObject({
+      financialNamespace: 'sandbox',
+      scannedRideCount: 1
+    });
+    expect(firestore.docs.has('financial_reconciliation_reports/ride_sandbox_metrics')).toBe(false);
+    expect(firestore.docs.has('sandbox_financial_reconciliation_reports/ride_sandbox_metrics')).toBe(true);
   });
 
   it('reconciles a posted withdrawal without issues', async () => {

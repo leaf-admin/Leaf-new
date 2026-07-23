@@ -215,12 +215,13 @@ POST /api/drivers/:driverId/suspend
   "success": true,
   "message": "Motorista suspenso com sucesso",
   "driverId": "driver-id",
-  "suspended": true,
-  "suspendedAt": "2025-01-20T10:00:00.000Z",
-  "suspendReason": "Violação dos termos de uso",
-  "suspendedUntil": "2025-01-27T10:00:00.000Z" // se duration foi fornecido
+  "status": "suspended",
+  "expiresAt": "2025-01-27T10:00:00.000Z",
+  "updatedAt": "2025-01-20T10:00:00.000Z"
 }
 ```
+
+**Garantia operacional:** esta rota usa a gestão canônica de status. Além de persistir o bloqueio, ela remove o motorista da elegibilidade no Redis e registra auditoria com o operador, motivo e duração.
 
 ---
 
@@ -234,9 +235,12 @@ POST /api/drivers/:driverId/unsuspend
 {
   "success": true,
   "message": "Motorista reativado com sucesso",
-  "driverId": "driver-id"
+  "driverId": "driver-id",
+  "status": "active"
 }
 ```
+
+**Garantia operacional:** reativar não aprova cadastro pendente. O motorista volta a `pending_review` quando ainda não tiver aprovação canônica.
 
 ---
 
@@ -338,4 +342,3 @@ Cada motorista na lista inclui:
 - A próxima renovação é calculada automaticamente (toda quarta-feira)
 - O status de assinatura considera o `billing_status` do motorista
 - Aprovação de motorista automaticamente verifica promoções elegíveis
-

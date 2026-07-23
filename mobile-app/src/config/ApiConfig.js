@@ -1,6 +1,11 @@
 import Logger from "../utils/Logger";
 // ApiConfig.js - Configuração centralizada para URLs da API
 import { Platform } from "react-native";
+import {
+  deriveRuntimeSocketBaseUrlFromApi,
+  getRuntimeApiBaseUrl,
+  getRuntimeSocketBaseUrl,
+} from "./runtimeEndpointConfig";
 
 const normalizeBaseUrl = (
   url,
@@ -44,6 +49,10 @@ const normalizeSocketBaseUrl = (url, fallback = DEFAULT_WS_BASE_URL) => {
 
 const DEFAULT_API_BASE_URL = "https://api.leaf.app.br";
 const DEFAULT_WS_BASE_URL = "https://socket.leaf.app.br";
+const RUNTIME_API_BASE_URL = getRuntimeApiBaseUrl(DEFAULT_API_BASE_URL);
+const RUNTIME_WS_BASE_URL = getRuntimeSocketBaseUrl(
+  deriveRuntimeSocketBaseUrlFromApi(RUNTIME_API_BASE_URL, DEFAULT_WS_BASE_URL),
+);
 const DEFAULT_DASHBOARD_URL = "https://dashboard.leaf.app.br";
 const DEFAULT_FIREBASE_FUNCTIONS_BASE_URL = normalizeBaseUrl(
   process.env.EXPO_PUBLIC_FIREBASE_FUNCTIONS_URL ||
@@ -66,27 +75,27 @@ const ENV = {
     // 🏠 SELF-HOSTED VPS - PRINCIPAL
     selfHostedApi: {
       web: normalizeBaseUrl(
-        process.env.EXPO_PUBLIC_API_URL,
-        DEFAULT_API_BASE_URL,
+        RUNTIME_API_BASE_URL,
+        RUNTIME_API_BASE_URL,
       ),
       mobile: normalizeBaseUrl(
-        process.env.EXPO_PUBLIC_API_URL,
-        DEFAULT_API_BASE_URL,
+        RUNTIME_API_BASE_URL,
+        RUNTIME_API_BASE_URL,
       ),
     },
     selfHostedWebSocket: {
       web: normalizeSocketBaseUrl(
-        process.env.EXPO_PUBLIC_WS_URL || process.env.EXPO_PUBLIC_SOCKET_URL,
+        RUNTIME_WS_BASE_URL,
         deriveSocketBaseUrlFromApi(
-          process.env.EXPO_PUBLIC_API_URL,
-          DEFAULT_WS_BASE_URL,
+          RUNTIME_API_BASE_URL,
+          RUNTIME_WS_BASE_URL,
         ),
       ),
       mobile: normalizeSocketBaseUrl(
-        process.env.EXPO_PUBLIC_WS_URL || process.env.EXPO_PUBLIC_SOCKET_URL,
+        RUNTIME_WS_BASE_URL,
         deriveSocketBaseUrlFromApi(
-          process.env.EXPO_PUBLIC_API_URL,
-          DEFAULT_WS_BASE_URL,
+          RUNTIME_API_BASE_URL,
+          RUNTIME_WS_BASE_URL,
         ),
       ),
     },
@@ -107,27 +116,27 @@ const ENV = {
     // 🏠 SELF-HOSTED VPS - PRODUÇÃO
     selfHostedApi: {
       web: normalizeBaseUrl(
-        process.env.EXPO_PUBLIC_API_URL,
-        DEFAULT_API_BASE_URL,
+        RUNTIME_API_BASE_URL,
+        RUNTIME_API_BASE_URL,
       ),
       mobile: normalizeBaseUrl(
-        process.env.EXPO_PUBLIC_API_URL,
-        DEFAULT_API_BASE_URL,
+        RUNTIME_API_BASE_URL,
+        RUNTIME_API_BASE_URL,
       ),
     },
     selfHostedWebSocket: {
       web: normalizeSocketBaseUrl(
-        process.env.EXPO_PUBLIC_WS_URL || process.env.EXPO_PUBLIC_SOCKET_URL,
+        RUNTIME_WS_BASE_URL,
         deriveSocketBaseUrlFromApi(
-          process.env.EXPO_PUBLIC_API_URL,
-          DEFAULT_WS_BASE_URL,
+          RUNTIME_API_BASE_URL,
+          RUNTIME_WS_BASE_URL,
         ),
       ),
       mobile: normalizeSocketBaseUrl(
-        process.env.EXPO_PUBLIC_WS_URL || process.env.EXPO_PUBLIC_SOCKET_URL,
+        RUNTIME_WS_BASE_URL,
         deriveSocketBaseUrlFromApi(
-          process.env.EXPO_PUBLIC_API_URL,
-          DEFAULT_WS_BASE_URL,
+          RUNTIME_API_BASE_URL,
+          RUNTIME_WS_BASE_URL,
         ),
       ),
     },
@@ -252,7 +261,7 @@ export const API_URLS = {
 
 export const getSelfHostedApiUrl = (endpoint) => {
   let baseUrl = normalizeBaseUrl(
-    process.env.EXPO_PUBLIC_API_URL || API_URLS.selfHostedApi,
+    RUNTIME_API_BASE_URL || API_URLS.selfHostedApi,
   );
   return `${baseUrl}${endpoint}`;
 };

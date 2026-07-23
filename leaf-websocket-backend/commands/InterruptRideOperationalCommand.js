@@ -7,6 +7,8 @@ const { metrics } = require('../utils/prometheus-metrics');
 const { logStructured, logger } = require('../utils/logger');
 const { validateAndEnsureTraceIdInCommand } = require('../utils/trace-validator');
 const { clearActiveTripForDriver } = require('../utils/active-trip-index');
+const tripLocationPersistenceService = require('../services/trip-location-persistence-service');
+const { resolveFinancialContext } = require('../services/financial-runtime-context');
 const {
   calculateOperationalInterruptionSettlement,
   loadBookingContext,
@@ -19,14 +21,27 @@ const {
   parseMoneyValue
 } = require('../services/ride-lifecycle-service');
 
+async function applyDeferredIdentityReverification(driverId, context = {}) {
+  try {
+    const kycPolicyService = require('../services/kyc-policy-service');
+    if (typeof kycPolicyService.applyDeferredIdentityReverificationIfSafe !== 'function') return;
+    await kycPolicyService.applyDeferredIdentityReverificationIfSafe(driverId, context);
+  } catch (error) {
+    logStructured('warn', 'Falha ao aplicar revalidacao KYC adiada apos interrupcao operacional', {
+      service: 'interrupt-ride-operational-command',
+      bookingId: context.tripId || null,
+      driverId,
+      error: error.message
+    });
+  }
+}
+
 class InterruptRideOperationalCommand extends Command {
   constructor(data) {
     super(data);
     this.bookingId = data.bookingId;
     this.driverId = data.driverId;
     this.interruptionLocation = data.interruptionLocation || data.endLocation;
-    this.distanceKm = data.distanceKm ?? data.distance ?? 0;
-    this.durationSecs = data.durationSecs ?? data.duration ?? 0;
     this.reason = data.reason || 'VEHICLE_BREAKDOWN';
     this.note = data.note || '';
     this.traceId = validateAndEnsureTraceIdInCommand(data, 'InterruptRideOperational');
@@ -39,9 +54,6 @@ class InterruptRideOperationalCommand extends Command {
     }
     if (!this.driverId) {
       throw new Error('InterruptRideOperationalCommand: driverId é obrigatório');
-    }
-    if (!this.interruptionLocation?.lat || !this.interruptionLocation?.lng) {
-      throw new Error('InterruptRideOperationalCommand: interruptionLocation com lat/lng é obrigatório');
     }
     return true;
   }
@@ -88,13 +100,40 @@ class InterruptRideOperationalCommand extends Command {
 
         const existingRideLegs = resolveRideLegs(context.bookingHash);
         const currentContinuation = resolveOperationalContinuation(context.bookingHash);
+        const currentLegStartedAt =
+          currentContinuation?.currentLegStartedAt ||
+          context.bookingHash.startedAt ||
+          context.bookingHash.acceptedAt ||
+          null;
+        const currentLegStartLocation =
+          context.bookingHash.startLocation ||
+          context.bookingHash.pickupLocation ||
+          context.activeBooking?.pickupLocation ||
+          null;
+        const canonicalMetrics = await tripLocationPersistenceService.resolveCanonicalTripMetrics({
+          redis,
+          tripId: this.bookingId,
+          driverId: this.driverId,
+          startedAt: currentLegStartedAt,
+          startLocation: currentLegStartLocation,
+          nowMs: Date.now()
+        });
+        if (!canonicalMetrics?.success) {
+          return CommandResult.failure(
+            'Telemetria canônica indisponível para liquidar a interrupção da corrida'
+          );
+        }
         const settlement = calculateOperationalInterruptionSettlement(context.bookingHash, {
-          distanceKm: this.distanceKm,
-          durationSecs: this.durationSecs
+          distanceKm: canonicalMetrics.distanceKm,
+          durationSecs: canonicalMetrics.durationSecs
         });
         const interruptedAt = new Date().toISOString();
-        const normalizedLocation =
-          normalizeLocation(this.interruptionLocation) || this.interruptionLocation;
+        const submittedLocation = normalizeLocation(this.interruptionLocation) || {};
+        const normalizedLocation = {
+          ...submittedLocation,
+          ...canonicalMetrics.endLocation,
+          source: canonicalMetrics.source
+        };
         const closedRideLeg = buildRideLegSettlement({
           bookingHash: context.bookingHash,
           existingRideLegs,
@@ -125,7 +164,9 @@ class InterruptRideOperationalCommand extends Command {
           metadata: {
             interruptionNote: String(this.note || '').trim(),
             settlementType: settlement.settlementType,
-            previousState: currentState
+            previousState: currentState,
+            metricsSource: canonicalMetrics.source,
+            telemetryPointsCount: canonicalMetrics.pointsCount
           }
         });
 
@@ -182,7 +223,23 @@ class InterruptRideOperationalCommand extends Command {
           logger.info(`🔓 [InterruptRideOperationalCommand] Lock de motorista ${this.driverId} liberado.`);
         }
 
-        await clearActiveTripForDriver(redis, this.driverId, this.bookingId);
+        const activeTripCleared = await clearActiveTripForDriver(
+          redis,
+          this.driverId,
+          this.bookingId
+        );
+        if (activeTripCleared) {
+          await applyDeferredIdentityReverification(this.driverId, {
+            source: 'ride_interrupted_operational',
+            tripId: this.bookingId
+          });
+        } else {
+          logStructured('warn', 'Revalidacao KYC adiada: indice ativo nao correspondia a corrida interrompida', {
+            service: 'interrupt-ride-operational-command',
+            bookingId: this.bookingId,
+            driverId: this.driverId
+          });
+        }
         await redis.hdel('bookings:active', this.bookingId);
 
         metrics.recordCommand('InterruptRideOperational', (Date.now() - startedAt) / 1000, true);
@@ -195,6 +252,7 @@ class InterruptRideOperationalCommand extends Command {
           closedRideLeg,
           rideLegs,
           settlement,
+          canonicalMetrics,
           nextAction: 'PASSENGER_DECISION_REQUIRED'
         });
       } catch (error) {

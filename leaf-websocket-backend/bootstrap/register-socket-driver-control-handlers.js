@@ -5,12 +5,27 @@ const RideStateManager = require('../services/ride-state-manager');
 const pricingH3ReadModelService = require('../services/pricing-h3-read-model-service');
 const { writeVisibleBookingSnapshot } = require('../services/booking-visibility-service');
 const {
+    hasRideOfflineIntentPayload,
+    markRideOfflineIntentProcessed,
+    markRideOfflineIntentRejected,
+    validateAndReserveRideOfflineIntent
+} = require('../services/ride-offline-intent-validator');
+const {
     resolveDriverActivationState
 } = require('../services/driver-activation-state-service');
+const driverEligibilityService = require('../services/driver-eligibility-service');
 const {
     resolveDestinationModeIntent
 } = require('../services/driver-destination-mode-service');
+const {
+    DRIVER_ONLINE_DAILY_LIMIT_MESSAGE,
+    resolveDriverOnlineTransition
+} = require('../services/driver-online-time-policy-service');
 const { buildDriverVehicleIdentity } = require('../utils/driver-vehicle-identity');
+const { resolveActiveTripForDriver } = require('../utils/active-trip-index');
+const {
+    buildPublicDriverKycSocketPayload
+} = require('../utils/driver-kyc-socket-projection');
 
 const DRIVER_BOARDING_WINDOW_SECONDS = Math.max(
     30,
@@ -19,6 +34,45 @@ const DRIVER_BOARDING_WINDOW_SECONDS = Math.max(
 
 function normalizeBooleanFlag(value) {
     return value === true || value === 'true' || value === '1' || value === 1;
+}
+
+function resolveVehicleLockIdentifier({ plate, vehicleId } = {}) {
+    const normalizedPlate = String(plate || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+    if (normalizedPlate) {
+        return normalizedPlate;
+    }
+
+    const normalizedVehicleId = String(vehicleId || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+    return normalizedVehicleId ? `VEHID${normalizedVehicleId}` : '';
+}
+
+function buildPublicDriverStatusFailure(error = {}) {
+    const errorCode = String(error?.code || '').trim().toUpperCase();
+
+    if (errorCode === 'KYC_IDENTITY_FRAUD_PERMANENT_BLOCK') {
+        return {
+            success: false,
+            error: 'Esta conta não pode usar o modo motorista.',
+            code: 'KYC_IDENTITY_FRAUD_PERMANENT_BLOCK',
+            retryable: false
+        };
+    }
+
+    if (errorCode.startsWith('KYC_') || errorCode.startsWith('PERSISTENCE_')) {
+        return {
+            success: false,
+            error: 'Não foi possível confirmar sua liberação agora. Tente novamente em alguns minutos.',
+            code: 'KYC_STATUS_UNAVAILABLE',
+            retryable: true
+        };
+    }
+
+    return {
+        success: false,
+        error: 'Não foi possível atualizar o status do motorista agora. Tente novamente.',
+        code: 'DRIVER_STATUS_UPDATE_FAILED',
+        retryable: true
+    };
 }
 
 function normalizeDriverDestinationModePayload(data = {}) {
@@ -86,7 +140,8 @@ function registerSocketDriverControlHandlers({
     logStructured,
     idempotencyService = null,
     enforceSubscriptionForOnline = null,
-    enforceDailyKYCForOnline = null
+    enforceDailyKYCForOnline = null,
+    vehicleLockManager = null
 }) {
     const ELIGIBLE_DRIVER_GEO_KEY = process.env.ELIGIBLE_DRIVER_GEO_KEY || 'driver_locations_eligible';
     const rideIdempotencyService = idempotencyService;
@@ -151,6 +206,59 @@ function registerSocketDriverControlHandlers({
             }
 
             const redis = redisPool.getConnection();
+            let offlineIntentValidation = null;
+            if (hasRideOfflineIntentPayload(data)) {
+                offlineIntentValidation = await validateAndReserveRideOfflineIntent({
+                    redis,
+                    bookingId: rideId,
+                    actorId: socket.userId || data.driverId,
+                    role: 'driver',
+                    eventType: 'arrived_at_pickup',
+                    idempotencyKey: outerIdempotencyKey || data.idempotencyKey,
+                    clientSequence: data.clientSequence,
+                    clientCreatedAt: data.clientCreatedAt,
+                    payload: {
+                        location
+                    },
+                    data
+                });
+
+                if (!offlineIntentValidation.accepted) {
+                    const errorPayload = {
+                        success: false,
+                        error: offlineIntentValidation.message || 'Intencao offline rejeitada',
+                        code: offlineIntentValidation.code || 'OFFLINE_INTENT_REJECTED',
+                        bookingId: rideId
+                    };
+                    socket.emit('arrivedAtPickup', errorPayload);
+                    if (transport === 'notificationAction') {
+                        socket.emit('notificationActionError', {
+                            ...errorPayload,
+                            action: 'arrived_at_pickup'
+                        });
+                    }
+                    if (outerIdempotencyOwner && outerIdempotencyKey && rideIdempotencyService) {
+                        outerIdempotencyOwner = false;
+                        await rideIdempotencyService.releaseInflight(outerIdempotencyKey).catch(() => null);
+                    }
+                    return;
+                }
+
+                if (offlineIntentValidation.replay && offlineIntentValidation.cachedResult) {
+                    if (rideIdempotencyService && outerIdempotencyKey) {
+                        await rideIdempotencyService.cacheResult(outerIdempotencyKey, offlineIntentValidation.cachedResult);
+                        outerIdempotencyOwner = false;
+                    }
+                    socket.emit('arrivedAtPickup', offlineIntentValidation.cachedResult);
+                    if (transport === 'notificationAction') {
+                        socket.emit('notificationActionSuccess', {
+                            ...offlineIntentValidation.cachedResult,
+                            action: 'arrived_at_pickup'
+                        });
+                    }
+                    return;
+                }
+            }
             const bookingData = await redis.hgetall(`booking:${rideId}`);
             const arrivalAssessment = await assessDriverArrivalAtPickup({
                 redis,
@@ -179,6 +287,15 @@ function registerSocketDriverControlHandlers({
                 }
                 if (outerIdempotencyOwner && outerIdempotencyKey && rideIdempotencyService) {
                     outerIdempotencyOwner = false;
+                    if (offlineIntentValidation && !offlineIntentValidation.skipped) {
+                        await markRideOfflineIntentRejected({
+                            redis,
+                            bookingId: rideId,
+                            idempotencyKey: outerIdempotencyKey,
+                            error: arrivalAssessment.message || 'Chegada rejeitada',
+                            code: arrivalAssessment.code || 'ARRIVAL_VALIDATION_FAILED'
+                        }).catch(() => null);
+                    }
                     await rideIdempotencyService.releaseInflight(outerIdempotencyKey).catch(() => null);
                 }
                 return;
@@ -302,6 +419,14 @@ function registerSocketDriverControlHandlers({
             };
             if (outerIdempotencyKey && rideIdempotencyService) {
                 await rideIdempotencyService.cacheResult(outerIdempotencyKey, successPayload);
+                if (offlineIntentValidation && !offlineIntentValidation.skipped) {
+                    await markRideOfflineIntentProcessed({
+                        redis,
+                        bookingId: rideId,
+                        idempotencyKey: outerIdempotencyKey,
+                        result: successPayload
+                    }).catch(() => null);
+                }
                 outerIdempotencyOwner = false;
             }
             socket.emit('arrivedAtPickup', successPayload);
@@ -355,6 +480,9 @@ function registerSocketDriverControlHandlers({
     });
 
     socket.on('setDriverStatus', async (data = {}) => {
+        let pendingVehicleLockIdentifier = null;
+        let pendingVehicleLeaseToken = null;
+        let vehicleLockCommitted = false;
         try {
             const redis = redisPool.getConnection();
             const driverId = data.driverId || socket.userId;
@@ -362,6 +490,8 @@ function registerSocketDriverControlHandlers({
             const requestedOnline = data.isOnline !== false && requestedStatus !== 'OFFLINE';
             const status = requestedOnline ? 'AVAILABLE' : 'OFFLINE';
             const isOnline = requestedOnline === true;
+            let driverOnlineDaily = null;
+            let activationState = null;
 
             if (!driverId) {
                 socket.emit('driverStatusError', {
@@ -373,7 +503,19 @@ function registerSocketDriverControlHandlers({
 
             const driverKey = `driver:${driverId}`;
             const existingDriverState = await redis.hgetall(driverKey);
-            const existingIsEligible = existingDriverState?.dispatchEligible === 'true';
+            let activeTripIndexResolved = false;
+            let canonicalActiveTrip = { tripId: null, customerId: null };
+            try {
+                canonicalActiveTrip = await resolveActiveTripForDriver(redis, driverId)
+                    || { tripId: null, customerId: null };
+                activeTripIndexResolved = true;
+            } catch (error) {
+                logStructured('warn', 'Falha ao consultar corrida ativa antes do gate online', {
+                    service: 'driver-control-handlers',
+                    driverId,
+                    error: error?.message || String(error)
+                });
+            }
             const requestedDestinationMode = normalizeDriverDestinationModePayload(data);
             let destinationIntent = {
                 allowed: true,
@@ -383,7 +525,83 @@ function registerSocketDriverControlHandlers({
                 policy: null
             };
 
+            if (!activeTripIndexResolved || canonicalActiveTrip?.tripId) {
+                const lat = Number(existingDriverState?.lat ?? data?.lat ?? data?.location?.lat);
+                const lng = Number(existingDriverState?.lng ?? data?.lng ?? data?.location?.lng);
+                const checkedAt = new Date().toISOString();
+                const continuityCode = !activeTripIndexResolved
+                    ? (isOnline
+                        ? 'ONLINE_DEFERRED_ACTIVE_TRIP_STATE_UNKNOWN'
+                        : 'OFFLINE_DEFERRED_ACTIVE_TRIP_STATE_UNKNOWN')
+                    : (isOnline
+                        ? 'IN_TRIP_KYC_DEFERRED'
+                        : 'OFFLINE_DEFERRED_ACTIVE_TRIP');
+                await redis.hset(driverKey, {
+                    driverId,
+                    status: existingDriverState?.status || 'IN_TRIP',
+                    isOnline: 'true',
+                    dispatchEligible: 'false',
+                    dispatchEligibilityCode: 'IN_TRIP_KYC_DEFERRED',
+                    dispatchEligibilityCheckedAt: checkedAt,
+                    kycRecheckPendingAfterTrip: 'true',
+                    ...(canonicalActiveTrip?.tripId
+                        ? { activeTripId: String(canonicalActiveTrip.tripId) }
+                        : {}),
+                    updatedAt: checkedAt
+                });
+                await redis.zrem(ELIGIBLE_DRIVER_GEO_KEY, driverId);
+                if (Number.isFinite(lat) && Number.isFinite(lng)) {
+                    await redis.geoadd('driver_locations', lng, lat, driverId);
+                    await redis.sadd('online_drivers', driverId);
+                    await pricingH3ReadModelService.applyDriverSnapshot(redis, {
+                        driverId,
+                        lat,
+                        lng,
+                        isOnline: true,
+                        available: false
+                    }).catch(() => null);
+                }
+                socket.emit('driverStatusUpdated', {
+                    success: true,
+                    driverId,
+                    status: existingDriverState?.status || 'IN_TRIP',
+                    isOnline: true,
+                    dispatchEligible: false,
+                    code: continuityCode,
+                    kycDeferred: true,
+                    offlineDeferred: !isOnline,
+                    activeTripId: canonicalActiveTrip?.tripId || null,
+                    activeTripStateUnknown: !activeTripIndexResolved,
+                    checkedAt
+                });
+                scheduleMapH3Refresh(io, {
+                    reason: 'driver_status_continuity_in_trip',
+                    driverId,
+                    status: existingDriverState?.status || 'IN_TRIP',
+                    isOnline: true
+                });
+                return;
+            }
+
             if (!isOnline) {
+                const currentVehicleLockIdentifier = resolveVehicleLockIdentifier({
+                    plate: socket.vehiclePlate || existingDriverState?.vehiclePlate,
+                    vehicleId: existingDriverState?.activeVehicleId
+                });
+                if (currentVehicleLockIdentifier && vehicleLockManager) {
+                    await vehicleLockManager.releaseLock(currentVehicleLockIdentifier, driverId, {
+                        leaseToken: socket.vehicleLockLeaseToken || socket.id
+                    });
+                }
+                socket.vehiclePlate = null;
+                socket.vehicleLockLeaseToken = null;
+                socket.vehicleLeaseSuperseded = false;
+
+                const transition = await resolveDriverOnlineTransition(redis, {
+                    driverId,
+                    isOnline: false
+                });
+                driverOnlineDaily = transition.snapshot;
                 await redis.zrem(ELIGIBLE_DRIVER_GEO_KEY, driverId);
                 await redis.zrem('driver_locations', driverId);
                 await redis.srem('online_drivers', driverId);
@@ -391,7 +609,39 @@ function registerSocketDriverControlHandlers({
             }
 
             if (isOnline) {
-                const activationState = await resolveDriverActivationState({ driverId }).catch((error) => {
+                const onlineTimeGate = await resolveDriverOnlineTransition(redis, {
+                    driverId,
+                    isOnline: true
+                });
+                driverOnlineDaily = onlineTimeGate.snapshot;
+                if (!onlineTimeGate.allowed) {
+                    await redis
+                        .multi()
+                        .hset(driverKey, {
+                            driverId,
+                            status: 'OFFLINE',
+                            isOnline: 'false',
+                            dispatchEligible: 'false',
+                            dispatchEligibilityCode: onlineTimeGate.code || 'DRIVER_ONLINE_DAILY_LIMIT_REACHED',
+                            dispatchEligibilityCheckedAt: new Date().toISOString(),
+                            updatedAt: new Date().toISOString()
+                        })
+                        .zrem(ELIGIBLE_DRIVER_GEO_KEY, driverId)
+                        .zrem('driver_locations', driverId)
+                        .srem('online_drivers', driverId)
+                        .exec();
+
+                    socket.emit('driverStatusError', {
+                        success: false,
+                        error: onlineTimeGate.message || DRIVER_ONLINE_DAILY_LIMIT_MESSAGE,
+                        message: onlineTimeGate.message || DRIVER_ONLINE_DAILY_LIMIT_MESSAGE,
+                        code: onlineTimeGate.code || 'DRIVER_ONLINE_DAILY_LIMIT_REACHED',
+                        driverOnlineDaily
+                    });
+                    return;
+                }
+
+                activationState = await resolveDriverActivationState({ driverId }).catch((error) => {
                     logStructured('warn', 'Falha ao resolver estado canonico do motorista para online', {
                         service: 'driver-control-handlers',
                         driverId,
@@ -450,15 +700,60 @@ function registerSocketDriverControlHandlers({
                 if (typeof enforceDailyKYCForOnline === 'function') {
                     const kycGate = await enforceDailyKYCForOnline(driverId);
                     if (!kycGate?.allowed) {
+                        const checkedAt = new Date().toISOString();
+                        await redis
+                            .multi()
+                            .hset(driverKey, {
+                                driverId,
+                                status: 'OFFLINE',
+                                isOnline: 'false',
+                                dispatchEligible: 'false',
+                                dispatchEligibilityCode: kycGate?.code || 'KYC_REQUIRED',
+                                dispatchEligibilityCheckedAt: checkedAt,
+                                kycRecheckPendingAfterTrip: kycGate?.retryRequired === true
+                                    ? 'true'
+                                    : 'false',
+                                updatedAt: checkedAt
+                            })
+                            .zrem(ELIGIBLE_DRIVER_GEO_KEY, driverId)
+                            .zrem('driver_locations', driverId)
+                            .srem('online_drivers', driverId)
+                            .exec();
                         socket.emit('driverStatusError', {
                             success: false,
-                            error: kycGate?.reason || 'Validacao facial obrigatoria para ficar online.',
-                            code: kycGate?.code || 'kycRequired',
-                            kycRequired: true,
                             activationState,
-                            requirement: kycGate?.requirement || 'LIVENESS_REQUIRED',
-                            challengeId: kycGate?.challenge?.challengeId || null,
-                            challenge: kycGate?.challenge || null
+                            ...buildPublicDriverKycSocketPayload(kycGate, {
+                                message: 'Validação facial necessária para ficar online.',
+                                fallbackCode: 'kycRequired'
+                            })
+                        });
+                        return;
+                    }
+                    if (kycGate?.continuityOnly || kycGate?.deferred) {
+                        const checkedAt = new Date().toISOString();
+                        const activeTripId = kycGate?.activeTripId || existingDriverState?.activeTripId || null;
+                        await redis.hset(driverKey, {
+                            driverId,
+                            status: existingDriverState?.status || 'IN_TRIP',
+                            isOnline: 'true',
+                            dispatchEligible: 'false',
+                            dispatchEligibilityCode: 'IN_TRIP_KYC_DEFERRED',
+                            dispatchEligibilityCheckedAt: checkedAt,
+                            kycRecheckPendingAfterTrip: 'true',
+                            ...(activeTripId ? { activeTripId: String(activeTripId) } : {}),
+                            updatedAt: checkedAt
+                        });
+                        await redis.zrem(ELIGIBLE_DRIVER_GEO_KEY, driverId);
+                        socket.emit('driverStatusUpdated', {
+                            success: true,
+                            driverId,
+                            status: existingDriverState?.status || 'IN_TRIP',
+                            isOnline: true,
+                            dispatchEligible: false,
+                            code: 'IN_TRIP_KYC_DEFERRED',
+                            kycDeferred: true,
+                            activeTripId,
+                            checkedAt
                         });
                         return;
                     }
@@ -483,52 +778,179 @@ function registerSocketDriverControlHandlers({
             }
             const shouldWriteDestinationMode = destinationIntent.shouldWrite === true;
 
-            await redis.hset(driverKey, {
-                driverId,
-                status,
-                isOnline: String(isOnline),
-                dispatchEligible: String(isOnline && existingIsEligible),
-                dispatchEligibilityCode: isOnline
-                    ? (existingDriverState?.dispatchEligibilityCode || 'AWAITING_LOCATION_SYNC')
-                    : 'OFFLINE',
-                dispatchEligibilityCheckedAt: new Date().toISOString(),
-                ...(shouldWriteDestinationMode ? destinationIntent.patch : {}),
-                updatedAt: new Date().toISOString()
-            });
+            let nextDispatchEligible = false;
+            let nextDispatchEligibilityCode = isOnline
+                ? (existingDriverState?.dispatchEligibilityCode || 'AWAITING_LOCATION_SYNC')
+                : 'OFFLINE';
+            const lat = Number(existingDriverState?.lat ?? data?.lat ?? data?.location?.lat);
+            const lng = Number(existingDriverState?.lng ?? data?.lng ?? data?.location?.lng);
+            const hasValidLocation = Number.isFinite(lat) && Number.isFinite(lng);
+            let vehicleIdentity = null;
+            let vehicleProfile = null;
 
-            if (isOnline && existingIsEligible) {
-                const lat = Number(existingDriverState?.lat);
-                const lng = Number(existingDriverState?.lng);
-                if (Number.isFinite(lat) && Number.isFinite(lng)) {
-                    await redis.geoadd(ELIGIBLE_DRIVER_GEO_KEY, lng, lat, driverId);
-                    await redis.geoadd('driver_locations', lng, lat, driverId);
-                    await redis.sadd('online_drivers', driverId);
-                    await pricingH3ReadModelService.applyDriverSnapshot(redis, {
-                        driverId,
-                        lat,
-                        lng,
-                        isOnline: true,
-                        available: true
-                    }).catch(() => null);
+            if (isOnline) {
+                if (hasValidLocation) {
+                    try {
+                        const eligibility = await driverEligibilityService.isDriverEligibleForRide(
+                            driverId,
+                            null,
+                            existingDriverState || {}
+                        );
+                        nextDispatchEligible = eligibility?.eligible === true;
+                        nextDispatchEligibilityCode = nextDispatchEligible
+                            ? (eligibility?.code || 'ELIGIBLE')
+                            : (eligibility?.code || 'NOT_ELIGIBLE');
+                    } catch (eligibilityError) {
+                        nextDispatchEligible = false;
+                        nextDispatchEligibilityCode = 'ELIGIBILITY_CHECK_FAILED';
+                        logStructured('warn', 'Falha ao recalcular elegibilidade no toggle online', {
+                            service: 'driver-control-handlers',
+                            driverId,
+                            error: eligibilityError?.message || String(eligibilityError)
+                        });
+                    }
+                } else {
+                    nextDispatchEligibilityCode = 'AWAITING_LOCATION_SYNC';
                 }
             }
 
-            let vehicleIdentity = null;
             if (isOnline) {
                 try {
-                    const driverEligibilityService = require('../services/driver-eligibility-service');
-                    const profile = await driverEligibilityService.resolveDriverProfile(
+                    vehicleProfile = await driverEligibilityService.resolveDriverProfile(
                         driverId,
                         existingDriverState || {}
                     );
-                    vehicleIdentity = buildDriverVehicleIdentity(profile);
+                    vehicleProfile = {
+                        ...vehicleProfile,
+                        activeVehicleId: activationState?.vehicle?.vehicleId || vehicleProfile?.activeVehicleId,
+                        vehiclePlate: activationState?.vehicle?.plate || vehicleProfile?.vehiclePlate,
+                        vehicleModel: activationState?.vehicle?.model || vehicleProfile?.vehicleModel,
+                        vehicleColor: activationState?.vehicle?.color || vehicleProfile?.vehicleColor,
+                        vehicleIdentitySource: activationState?.vehicle?.identitySource || vehicleProfile?.vehicleIdentitySource,
+                        vehicleIdentityCanonical: activationState?.vehicle?.identityComplete === true
+                            || vehicleProfile?.vehicleIdentityCanonical === true
+                    };
+                    vehicleIdentity = buildDriverVehicleIdentity(vehicleProfile);
                 } catch (identityError) {
-                    logStructured('warn', 'Status online continuou sem identidade veicular hidratada', {
+                    logStructured('warn', 'Falha ao hidratar identidade veicular antes do lock online', {
                         service: 'driver-control-handlers',
                         driverId,
                         error: identityError.message
                     });
                 }
+
+                const vehicleLockIdentifier = resolveVehicleLockIdentifier({
+                    plate: activationState?.vehicle?.plate || vehicleProfile?.vehiclePlate || existingDriverState?.vehiclePlate,
+                    vehicleId: activationState?.vehicle?.vehicleId || vehicleProfile?.activeVehicleId || existingDriverState?.activeVehicleId
+                });
+
+                if (!vehicleLockManager || !vehicleLockIdentifier) {
+                    await resolveDriverOnlineTransition(redis, {
+                        driverId,
+                        isOnline: false
+                    });
+                    await redis
+                        .multi()
+                        .hset(driverKey, {
+                            driverId,
+                            status: 'OFFLINE',
+                            isOnline: 'false',
+                            dispatchEligible: 'false',
+                            dispatchEligibilityCode: 'VEHICLE_IDENTITY_UNAVAILABLE',
+                            dispatchEligibilityCheckedAt: new Date().toISOString(),
+                            updatedAt: new Date().toISOString()
+                        })
+                        .zrem(ELIGIBLE_DRIVER_GEO_KEY, driverId)
+                        .zrem('driver_locations', driverId)
+                        .srem('online_drivers', driverId)
+                        .exec();
+                    socket.emit('driverStatusError', {
+                        success: false,
+                        error: 'Não foi possível validar o veículo selecionado para ficar online.',
+                        code: 'VEHICLE_IDENTITY_UNAVAILABLE'
+                    });
+                    return;
+                }
+
+                pendingVehicleLeaseToken = String(socket.id || '').trim();
+                const lockResult = await vehicleLockManager.acquireLock(vehicleLockIdentifier, driverId, {
+                    leaseToken: pendingVehicleLeaseToken
+                });
+                if (!lockResult?.success) {
+                    await resolveDriverOnlineTransition(redis, {
+                        driverId,
+                        isOnline: false
+                    });
+                    const lockFailureCode = lockResult?.currentDriver
+                        ? 'VEHICLE_ALREADY_ONLINE'
+                        : 'VEHICLE_LOCK_UNAVAILABLE';
+                    await redis
+                        .multi()
+                        .hset(driverKey, {
+                            driverId,
+                            status: 'OFFLINE',
+                            isOnline: 'false',
+                            dispatchEligible: 'false',
+                            dispatchEligibilityCode: lockFailureCode,
+                            dispatchEligibilityCheckedAt: new Date().toISOString(),
+                            updatedAt: new Date().toISOString()
+                        })
+                        .zrem(ELIGIBLE_DRIVER_GEO_KEY, driverId)
+                        .zrem('driver_locations', driverId)
+                        .srem('online_drivers', driverId)
+                        .exec();
+                    socket.emit('driverStatusError', {
+                        success: false,
+                        error: lockResult?.currentDriver
+                            ? 'Este veículo já está online em outro perfil.'
+                            : 'Não foi possível validar a disponibilidade do veículo agora.',
+                        code: lockFailureCode
+                    });
+                    return;
+                }
+
+                pendingVehicleLockIdentifier = vehicleLockIdentifier;
+                socket.vehiclePlate = vehicleLockIdentifier;
+                socket.vehicleLockLeaseToken = pendingVehicleLeaseToken;
+                socket.vehicleLeaseSuperseded = false;
+            }
+
+            await redis.hset(driverKey, {
+                driverId,
+                status,
+                isOnline: String(isOnline),
+                dispatchEligible: String(nextDispatchEligible),
+                dispatchEligibilityCode: nextDispatchEligibilityCode,
+                dispatchEligibilityCheckedAt: new Date().toISOString(),
+                ...(isOnline && pendingVehicleLockIdentifier
+                    ? {
+                        vehiclePlate: pendingVehicleLockIdentifier,
+                        vehicleLockValidated: 'true',
+                        vehicleLockValidatedAt: new Date().toISOString()
+                    }
+                    : {}),
+                ...(shouldWriteDestinationMode ? destinationIntent.patch : {}),
+                updatedAt: new Date().toISOString()
+            });
+            vehicleLockCommitted = isOnline && Boolean(pendingVehicleLockIdentifier);
+
+            if (isOnline && hasValidLocation) {
+                await redis.geoadd('driver_locations', lng, lat, driverId);
+                await redis.sadd('online_drivers', driverId);
+                if (nextDispatchEligible) {
+                    await redis.geoadd(ELIGIBLE_DRIVER_GEO_KEY, lng, lat, driverId);
+                } else {
+                    await redis.zrem(ELIGIBLE_DRIVER_GEO_KEY, driverId);
+                }
+                await pricingH3ReadModelService.applyDriverSnapshot(redis, {
+                    driverId,
+                    lat,
+                    lng,
+                    isOnline: true,
+                    available: nextDispatchEligible
+                }).catch(() => null);
+            } else if (isOnline) {
+                await redis.zrem(ELIGIBLE_DRIVER_GEO_KEY, driverId);
             }
 
             socket.emit('driverStatusUpdated', {
@@ -536,12 +958,13 @@ function registerSocketDriverControlHandlers({
                 driverId,
                 status,
                 isOnline,
-                dispatchEligible: isOnline && existingIsEligible,
+                dispatchEligible: nextDispatchEligible,
                 destinationMode: shouldWriteDestinationMode
                     ? destinationIntent.destinationMode
                     : undefined,
                 destinationModePolicy: destinationIntent.policy || null,
                 vehicleIdentity,
+                driverOnlineDaily,
                 checkedAt: new Date().toISOString()
             });
             scheduleMapH3Refresh(io, {
@@ -551,16 +974,22 @@ function registerSocketDriverControlHandlers({
                 isOnline
             });
         } catch (error) {
+            if (pendingVehicleLockIdentifier && !vehicleLockCommitted && vehicleLockManager) {
+                await vehicleLockManager
+                    .releaseLock(pendingVehicleLockIdentifier, data.driverId || socket.userId, {
+                        leaseToken: pendingVehicleLeaseToken
+                    })
+                    .catch(() => null);
+                socket.vehiclePlate = null;
+                socket.vehicleLockLeaseToken = null;
+            }
             logStructured('warn', 'Falha ao processar setDriverStatus', {
                 service: 'driver-control-handlers',
                 driverId: data.driverId || socket.userId || null,
-                error: error.message
+                error: error?.message || String(error)
             });
 
-            socket.emit('driverStatusError', {
-                error: error.message || 'Erro ao atualizar status do motorista',
-                code: 'DRIVER_STATUS_UPDATE_FAILED'
-            });
+            socket.emit('driverStatusError', buildPublicDriverStatusFailure(error));
         }
     });
 }

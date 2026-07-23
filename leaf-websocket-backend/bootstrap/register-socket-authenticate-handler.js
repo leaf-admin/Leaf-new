@@ -13,6 +13,13 @@ const QA_SOCKET_BYPASS_UIDS = new Set(
         .filter(Boolean)
 );
 const DRIVER_DISCONNECT_GRACE_TIMERS_KEY = '__driverDisconnectGraceTimers';
+const {
+    closeDriverOnlineSessionAt,
+    readDriverOnlineDailySnapshot
+} = require('../services/driver-online-time-policy-service');
+const {
+    upsertDriverSocketPresence
+} = require('../services/driver-socket-presence-service');
 
 const sleepMs = (delayMs) => new Promise((resolve) => setTimeout(resolve, delayMs));
 const isTruthyFlag = (value) => ['1', 'true', 'yes', 'on'].includes(String(value || '').trim().toLowerCase());
@@ -38,6 +45,147 @@ function canUseQaSocketBypass(data, socket) {
     ).trim();
 
     return !!requestedUid && QA_SOCKET_BYPASS_UIDS.has(requestedUid);
+}
+
+function normalizeDriverOnlineFromRedis(driverState = {}) {
+    const status = String(driverState.status || '').trim().toLowerCase();
+    const isOnlineRaw = String(driverState.isOnline || '').trim().toLowerCase();
+    if (['false', '0', 'no', 'off'].includes(isOnlineRaw)) {
+        return false;
+    }
+
+    return (
+        isOnlineRaw === 'true' ||
+        status === 'online' ||
+        status === 'available'
+    );
+}
+
+function parseDriverTimestampMs(rawValue) {
+    if (!rawValue) return 0;
+    if (typeof rawValue === 'number' && Number.isFinite(rawValue)) {
+        return rawValue;
+    }
+
+    const normalized = String(rawValue).trim();
+    if (/^\d+(\.\d+)?$/.test(normalized)) {
+        const numeric = Number.parseInt(normalized, 10);
+        if (Number.isFinite(numeric) && numeric > 0) {
+            return numeric;
+        }
+    }
+
+    const parsed = Date.parse(normalized);
+    return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function resolveOfflineClosureMs(driverState = {}, sessionStartedAtMs = 0, nowMs = Date.now()) {
+    const startedAtMs = Number(sessionStartedAtMs);
+    const maxClockSkewMs = 60 * 1000;
+    const preferredFields = [
+        'offlineAt',
+        'onlineEndedAt',
+        'wentOfflineAt',
+        'disconnectedAt',
+        'statusUpdatedAt',
+        'updatedAt'
+    ];
+    const fallbackFields = [
+        'lastHeartbeatAt',
+        'lastSeen',
+        'lastUpdate',
+        'timestamp'
+    ];
+
+    for (const field of [...preferredFields, ...fallbackFields]) {
+        const candidateMs = parseDriverTimestampMs(driverState[field]);
+        if (
+            candidateMs > 0 &&
+            candidateMs >= startedAtMs &&
+            candidateMs <= nowMs + maxClockSkewMs
+        ) {
+            return candidateMs;
+        }
+    }
+
+    return nowMs;
+}
+
+async function readDriverAuthSnapshotSafe(redisPool, driverId, logStructured, socketId) {
+    if (!driverId) {
+        return {
+            driverOnline: false,
+            driverOnlineDaily: null
+        };
+    }
+
+    try {
+        await redisPool.ensureConnection();
+        const redis = redisPool.getConnection();
+        const driverState = await redis.hgetall(`driver:${driverId}`).catch(() => ({}));
+        const driverOnline = normalizeDriverOnlineFromRedis(driverState);
+        let driverOnlineDaily = await readDriverOnlineDailySnapshot(redis, driverId);
+
+        if (!driverOnline && driverOnlineDaily?.sessionStartedAtMs) {
+            const closedAtMs = resolveOfflineClosureMs(
+                driverState,
+                driverOnlineDaily.sessionStartedAtMs
+            );
+            const transition = await closeDriverOnlineSessionAt(redis, {
+                driverId,
+                closedAtMs
+            });
+            driverOnlineDaily = transition.snapshot;
+            logStructured?.('info', 'Sessao diaria online stale fechada durante autenticacao offline', {
+                service: 'websocket',
+                socketId,
+                driverId,
+                closedAt: new Date(closedAtMs).toISOString()
+            });
+        }
+
+        return {
+            driverOnline,
+            driverOnlineDaily
+        };
+    } catch (error) {
+        logStructured?.('warn', 'Falha ao hidratar snapshot de estado online do motorista', {
+            service: 'websocket',
+            socketId,
+            driverId,
+            error: error?.message || String(error)
+        });
+        return {
+            driverOnline: false,
+            driverOnlineDaily: null
+        };
+    }
+}
+
+async function upsertDriverSocketPresenceSafe(redisPool, {
+    driverId,
+    socket,
+    source,
+    logStructured
+}) {
+    try {
+        await redisPool.ensureConnection();
+        const redis = redisPool.getConnection();
+        await upsertDriverSocketPresence(redis, {
+            driverId,
+            socket,
+            source,
+            fallbackRooms: ['drivers_room', `driver_${driverId}`]
+        });
+    } catch (error) {
+        logStructured?.('warn', 'Falha ao registrar presença distribuída do socket do motorista', {
+            service: 'websocket',
+            socketId: socket?.id,
+            driverId,
+            source,
+            error: error?.message || String(error)
+        });
+    }
 }
 
 function registerSocketAuthenticateHandler({
@@ -90,13 +238,35 @@ function registerSocketAuthenticateHandler({
                     (!authTokenDigest && socket.userId === data?.uid)
                 )
             ) {
+                if (socket.userType === 'driver') {
+                    await upsertDriverSocketPresenceSafe(redisPool, {
+                        driverId: socket.userId,
+                        socket,
+                        source: 'reauthenticate',
+                        logStructured
+                    });
+                }
+                const driverAuthSnapshot = socket.userType === 'driver'
+                    ? await readDriverAuthSnapshotSafe(redisPool, socket.userId, logStructured, socket.id)
+                    : null;
                 socket.emit('authenticated', {
                     uid: socket.userId,
                     userId: socket.userId,
                     success: true,
                     userType: socket.userType,
                     socketId: socket.id,
-                    reauthenticated: true
+                    reauthenticated: true,
+                    ...(driverAuthSnapshot
+                        ? {
+                            isOnline: driverAuthSnapshot.driverOnline,
+                            driverOnline: driverAuthSnapshot.driverOnline,
+                            status: driverAuthSnapshot.driverOnline ? 'online' : 'offline',
+                            initialStatus: driverAuthSnapshot.driverOnline ? 'online' : 'offline',
+                            ...(driverAuthSnapshot.driverOnlineDaily
+                                ? { driverOnlineDaily: driverAuthSnapshot.driverOnlineDaily }
+                                : {})
+                        }
+                        : {})
                 });
                 releaseAdmissionSlotIfNeeded();
                 return;
@@ -303,6 +473,12 @@ function registerSocketAuthenticateHandler({
             if (socket.userType === 'driver') {
                 socket.join('drivers_room');
                 socket.join(`driver_${authUserId}`); // ✅ Room específico para notificações diretas (usado pelo DriverNotificationDispatcher)
+                await upsertDriverSocketPresenceSafe(redisPool, {
+                    driverId: authUserId,
+                    socket,
+                    source: 'authenticate',
+                    logStructured
+                });
                 if (authDebugEnabled) {
                     logStructured('debug', 'Driver adicionado aos rooms', {
                         service: 'websocket',
@@ -428,8 +604,19 @@ function registerSocketAuthenticateHandler({
 
             // Adicionar status inicial para drivers (conforme política: Status inicial = offline)
             if (socket.userType === 'driver') {
-                authResponse.status = 'offline';
-                authResponse.initialStatus = 'offline';
+                const driverAuthSnapshot = await readDriverAuthSnapshotSafe(
+                    redisPool,
+                    authUserId,
+                    logStructured,
+                    socket.id
+                );
+                authResponse.isOnline = driverAuthSnapshot.driverOnline;
+                authResponse.driverOnline = driverAuthSnapshot.driverOnline;
+                authResponse.status = driverAuthSnapshot.driverOnline ? 'online' : 'offline';
+                authResponse.initialStatus = driverAuthSnapshot.driverOnline ? 'online' : 'offline';
+                if (driverAuthSnapshot.driverOnlineDaily) {
+                    authResponse.driverOnlineDaily = driverAuthSnapshot.driverOnlineDaily;
+                }
             }
 
             // ✅ GARANTIR que userId e userType estão setados no socket

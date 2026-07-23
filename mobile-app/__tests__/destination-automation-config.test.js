@@ -49,6 +49,23 @@ describe("destinationAutomationConfig", () => {
     expect(config.presetQuery).toBe("");
   });
 
+  test("enables destination automation in simulator release contexts", () => {
+    const config = resolveDestinationAutomationConfig(
+      {
+        qaAutomation: "1",
+        qaAutoFlow: "request",
+        initialQuery: "Mercadão de Madureira",
+      },
+      { isExtensionFlow: false, isDev: false, isE2E: false, isSimulator: true },
+    );
+
+    expect(config.automationEnabled).toBe(true);
+    expect(config.autoFlowMode).toBe("request");
+    expect(config.autoSelectFirst).toBe(true);
+    expect(config.autoOpenPix).toBe(true);
+    expect(config.presetQuery).toBe("Mercadão de Madureira");
+  });
+
   test("disables automation for extension mode", () => {
     const config = resolveDestinationAutomationConfig(
       {

@@ -1,21 +1,31 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Alert, StatusBar, StyleSheet, Text, View } from "react-native";
+import { Alert, StatusBar, StyleSheet, Text, View, useWindowDimensions } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { fonts } from "../../theme/runtimeTokens";
-import SecurePaymentBadge from "../../components/payment/SecurePaymentBadge";
 import PrototypeScreenTransition from "../../components/prototype/PrototypeScreenTransition";
 import PrototypeDismissibleSheet from "../../components/prototype/PrototypeDismissibleSheet";
 import PrototypeMapLayer from "../../components/prototype/PrototypeMapLayer";
 import {
   LeafButton,
-  LeafRideSheet,
-  LeafStateHeader,
   leafRideColors,
 } from "../../components/prototype/LeafRideUI";
+import {
+  RobotaxiLifecycleButton,
+  RobotaxiLifecycleCard,
+  RobotaxiLifecycleDisclosure,
+  RobotaxiLifecycleIdentity,
+  RobotaxiLifecycleSection,
+  RobotaxiLifecycleSummary,
+  robotaxiLifecycleMetrics,
+} from "../../components/prototype/RobotaxiLifecycleUI";
 import { usePrototypeMapOcclusion } from "./prototypeMapOcclusion";
 import { usePrototypeRideRuntime } from "./prototypeRideRuntime";
 import { PROTOTYPE_ORIGIN_COORDINATE, PROTOTYPE_REGION } from "./robotaxiPrototypeData";
+import {
+  buildRouteViewportRegion,
+  buildVisibleRouteEdgePadding,
+} from "./prototypeRouteViewport";
 import {
   getDriverOfferPayoutLabel,
   hasAuthoritativeDriverOfferPricing,
@@ -28,9 +38,14 @@ import {
   defineRideCardRenderedFields,
 } from "./rideCardContract";
 import useCampaignAssetOverride from "../../hooks/useCampaignAssetOverride";
+import { resolvePrototypeMapPresentation } from "./prototypeMapPresentation";
+import { useDriverOfferCountdown } from "./driverOfferCountdown";
 
 const SHEET_BOTTOM_OFFSET = 0;
 const FALLBACK_CARD_HEIGHT = 356;
+const DRIVER_OFFER_MAP_SIDE_PADDING = 24;
+const DRIVER_OFFER_MAP_TOP_PADDING = 72;
+const DRIVER_OFFER_MAP_MIN_VISIBLE_HEIGHT = 220;
 
 const DRIVER_OFFER_RENDERED_CARD_FIELD_IDS = Object.freeze([
   "net_payout",
@@ -64,6 +79,14 @@ const DRIVER_OFFER_FIELD_TEST_IDS = createRideCardFieldTestIDs(
   DRIVER_OFFER_RENDERED_CARD_FIELD_IDS,
   DRIVER_OFFER_FIELD_TEST_ID_OVERRIDES,
 );
+
+const GENERIC_OFFER_LABELS = new Set([
+  "local combinado",
+  "motorista",
+  "driver",
+  "null",
+  "undefined",
+]);
 
 export const DRIVER_OFFER_RENDERED_CARD_FIELDS = defineRideCardRenderedFields(
   RIDE_CARD_ROLES.DRIVER,
@@ -112,43 +135,21 @@ function formatCurrency(value) {
   return `R$ ${toNumber(value, 0).toFixed(2).replace(".", ",")}`;
 }
 
-function formatDistanceKm(valueMi) {
-  const numeric = Number(valueMi);
-  if (!Number.isFinite(numeric) || numeric <= 0) {
-    return "--";
-  }
-
-  const km = numeric * 1.60934;
-  const digits = km >= 10 ? 0 : 1;
-  return `${km.toFixed(digits).replace(".", ",")} km`;
-}
-
 function formatDistanceKmValue(valueKm) {
   const numeric = Number(valueKm);
-  if (!Number.isFinite(numeric) || numeric <= 0) {
+  if (!Number.isFinite(numeric) || numeric < 0) {
     return "--";
   }
 
   if (numeric < 1) {
-    return `${Math.max(10, Math.round((numeric * 1000) / 10) * 10)} m`;
+    const meters = numeric <= 0
+      ? 0
+      : Math.max(10, Math.round((numeric * 1000) / 10) * 10);
+    return `${meters} m`;
   }
 
   const digits = numeric >= 10 ? 0 : 1;
   return `${numeric.toFixed(digits).replace(".", ",")} km`;
-}
-
-function formatCountdown(value) {
-  const numeric = Number(value);
-  if (Number.isFinite(numeric) && numeric >= 0) {
-    return `${Math.round(numeric)}s`;
-  }
-
-  const normalized = String(value || "").trim();
-  if (!normalized) {
-    return "18s";
-  }
-
-  return normalized.endsWith("s") ? normalized : `${normalized}s`;
 }
 
 function resolveRidePreferenceItems(source = {}) {
@@ -185,6 +186,94 @@ function toRouteNumber(value, fallback = null) {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
+function toPositiveRouteNumber(value) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+function toNonNegativeRouteNumber(value) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
+}
+
+function pickPositiveRouteNumber(...values) {
+  for (const value of values) {
+    const parsed = toPositiveRouteNumber(value);
+    if (parsed !== null) {
+      return parsed;
+    }
+  }
+  return null;
+}
+
+function pickNonNegativeRouteNumber(...values) {
+  for (const value of values) {
+    const parsed = toNonNegativeRouteNumber(value);
+    if (parsed !== null) {
+      return parsed;
+    }
+  }
+  return null;
+}
+
+function normalizeOfferTextValue(value) {
+  if (typeof value === "object" && value !== null) {
+    return "";
+  }
+  return String(value ?? "").trim();
+}
+
+function isGenericOfferLabel(value) {
+  const normalized = normalizeOfferTextValue(value)
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+  return !normalized || GENERIC_OFFER_LABELS.has(normalized);
+}
+
+function pickOfferText(values = [], fallback = "") {
+  for (const value of values) {
+    const normalized = normalizeOfferTextValue(value);
+    if (normalized && !isGenericOfferLabel(normalized)) {
+      return normalized;
+    }
+  }
+
+  return fallback;
+}
+
+function toRadians(value) {
+  return (Number(value) * Math.PI) / 180;
+}
+
+function computeRouteDistanceKm(coordinates = []) {
+  if (!Array.isArray(coordinates) || coordinates.length < 2) {
+    return null;
+  }
+
+  let totalKm = 0;
+  for (let index = 1; index < coordinates.length; index += 1) {
+    const previous = normalizeMapCoordinate(coordinates[index - 1]);
+    const current = normalizeMapCoordinate(coordinates[index]);
+    if (!previous || !current) {
+      continue;
+    }
+
+    const deltaLatitude = toRadians(current.latitude - previous.latitude);
+    const deltaLongitude = toRadians(current.longitude - previous.longitude);
+    const startLatitude = toRadians(previous.latitude);
+    const endLatitude = toRadians(current.latitude);
+    const haversine =
+      Math.sin(deltaLatitude / 2) ** 2 +
+      Math.cos(startLatitude) *
+        Math.cos(endLatitude) *
+        Math.sin(deltaLongitude / 2) ** 2;
+    totalKm += 6371 * 2 * Math.atan2(Math.sqrt(haversine), Math.sqrt(1 - haversine));
+  }
+
+  return totalKm > 0 ? totalKm : null;
+}
+
 function normalizeMapCoordinate(value) {
   const latitude = Number(value?.latitude ?? value?.lat);
   const longitude = Number(value?.longitude ?? value?.lng);
@@ -192,6 +281,29 @@ function normalizeMapCoordinate(value) {
     return null;
   }
   return { latitude, longitude };
+}
+
+function normalizeMapTrafficSegments(value = []) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map((segment) => {
+      const coordinates = Array.isArray(segment?.coordinates)
+        ? segment.coordinates.map(normalizeMapCoordinate).filter(Boolean)
+        : [];
+      if (coordinates.length < 2) {
+        return null;
+      }
+
+      return {
+        level: String(segment?.level || segment?.trafficLevel || "normal").trim(),
+        color: String(segment?.color || "").trim(),
+        coordinates,
+      };
+    })
+    .filter(Boolean);
 }
 
 function buildFallbackOfferRegion(points = []) {
@@ -270,7 +382,13 @@ function buildDriverOfferFromRouteParams(params = {}) {
     pickupEtaMin: toRouteNumber(params.pickupEtaMin, undefined),
     tripDurationMin: toRouteNumber(params.tripDurationMin, undefined),
     passengerRating: toRouteNumber(params.passengerRating, undefined),
-    expiresInSec: toRouteNumber(params.expiresInSec, 18),
+    expiresInSec: toRouteNumber(
+      params.expiresInSec ?? params.expiresInSeconds ?? params.timeout,
+      18,
+    ),
+    expiresAt: params.expiresAt || params.offerExpiresAt || null,
+    timestamp: params.timestamp || params.notifiedAt || null,
+    timeout: toRouteNumber(params.timeout, undefined),
     paymentMethod: String(params.paymentMethod || "pix").trim(),
     pricingSnapshotLocked: String(params.pricingSnapshotLocked || "true") !== "false",
   };
@@ -290,10 +408,16 @@ export default function RobotaxiDriverOfferScreen({ navigation, route }) {
   } =
     usePrototypeRideRuntime();
   const insets = useSafeAreaInsets();
+  const { height: windowHeight, width: windowWidth } = useWindowDimensions();
+  const [mapWidth, setMapWidth] = useState(windowWidth);
+  const [mapHeight, setMapHeight] = useState(windowHeight);
   const [cardHeight, setCardHeight] = useState(FALLBACK_CARD_HEIGHT);
   const [busyAction, setBusyAction] = useState("");
+  const [detailsExpanded, setDetailsExpanded] = useState(false);
   const safeBottom = Math.max(0, Number(insets.bottom) || 0);
-  const sheetBottom = SHEET_BOTTOM_OFFSET;
+  const sheetBottom =
+    SHEET_BOTTOM_OFFSET + safeBottom + robotaxiLifecycleMetrics.cardBottomGap;
+  const offerCardMaxHeight = Math.max(352, Math.round(windowHeight * 0.66));
   const mapRef = useRef(null);
   const routeRequest = useMemo(() => {
     const candidate = buildDriverOfferFromRouteParams(route?.params);
@@ -312,6 +436,7 @@ export default function RobotaxiDriverOfferScreen({ navigation, route }) {
     route?.params?.qaKeepVisible || route?.params?.__qaKeepVisible,
   );
   const hadVisibleRequestRef = useRef(false);
+  const protectedOfferExitRef = useRef(false);
 
   const liveRequest = useMemo(
     () => selectDisplayableDriverOffer(driverOffers),
@@ -326,23 +451,35 @@ export default function RobotaxiDriverOfferScreen({ navigation, route }) {
   const visibleLastError =
     hasRequest && isActivationOrVehicleStatusError(lastError) ? "" : lastError;
 
-  const distanceMi = useMemo(() => {
+  const pickupDistanceKm = useMemo(() => {
     if (!hasRequest) {
       return null;
     }
 
-    const directMiles = toNumber(request?.distanceMi ?? request?.distance, NaN);
-    if (Number.isFinite(directMiles) && directMiles > 0) {
-      return directMiles;
+    const directKm = pickNonNegativeRouteNumber(
+      request?.driverDistanceToPickupKm,
+      request?.pickupDistanceKm,
+      request?.distanceToPickupKm,
+      request?.distanceKm,
+    );
+    if (directKm !== null) {
+      return directKm;
     }
 
-    const distanceKm = toNumber(request?.distanceKm, NaN);
-    if (Number.isFinite(distanceKm) && distanceKm > 0) {
-      return distanceKm * 0.621371;
-    }
-
-    return null;
-  }, [hasRequest, request?.distance, request?.distanceKm, request?.distanceMi]);
+    const directMiles = pickPositiveRouteNumber(
+      request?.distanceMi,
+      request?.distance,
+    );
+    return directMiles !== null ? directMiles * 1.60934 : null;
+  }, [
+    hasRequest,
+    request?.distance,
+    request?.distanceKm,
+    request?.distanceMi,
+    request?.distanceToPickupKm,
+    request?.driverDistanceToPickupKm,
+    request?.pickupDistanceKm,
+  ]);
 
   const passengerRating = useMemo(() => {
     if (!hasRequest) {
@@ -365,52 +502,85 @@ export default function RobotaxiDriverOfferScreen({ navigation, route }) {
     return getDriverOfferPayoutLabel(request) || "--";
   }, [hasRequest, request]);
 
-  const pickupLabel =
-    String(request?.pickup || request?.pickupAddress || "").trim() ||
-    "Origem indisponível";
-  const dropoffLabel =
-    String(request?.dropoff || request?.dropoffAddress || "").trim() ||
-    "Destino indisponível";
-  const pickupDistanceLabel = formatDistanceKm(distanceMi);
-  const tripDistanceLabel = formatDistanceKmValue(
-    request?.tripDistanceKm ||
-      request?.routeDistanceKm ||
-      request?.estimatedTripDistanceKm ||
-      route?.params?.tripDistanceKm,
+  const pickupLabel = pickOfferText(
+    [
+      request?.pickup,
+      request?.pickupAddress,
+      request?.pickupLocation?.add,
+      request?.pickupLocation?.address,
+      request?.originAddress,
+      request?.origin?.address,
+      request?.origin?.add,
+    ],
+    "Partida em confirmação",
   );
-  const pickupEtaLabel = `${Math.max(
-    1,
-    toNumber(
-      request?.pickupEtaMin ||
-        request?.pickupDurationMin ||
-        request?.etaMin ||
-        route?.params?.pickupEtaMin,
-      4,
-    ),
-  )} min`;
-  const tripDurationLabel = `${Math.max(
-    1,
-    toNumber(
-      request?.tripDurationMin ||
-        request?.durationMin ||
-        request?.durationMinutes ||
-        route?.params?.tripDurationMin,
-      12,
-    ),
-  )} min`;
+  const dropoffLabel = pickOfferText(
+    [
+      request?.dropoff,
+      request?.dropoffAddress,
+      request?.destinationAddress,
+      request?.destinationLocation?.add,
+      request?.destinationLocation?.address,
+      request?.destination?.address,
+      request?.destination?.add,
+      request?.destination?.name,
+      request?.destinationName,
+    ],
+    "Destino em confirmação",
+  );
+  const tripDistanceKm = pickPositiveRouteNumber(
+    request?.tripDistanceKm,
+    request?.routeDistanceKm,
+    request?.estimatedTripDistanceKm,
+    route?.params?.tripDistanceKm,
+  );
+  const pickupEtaMin = pickPositiveRouteNumber(
+    request?.pickupEtaMin,
+    request?.pickupDurationMin,
+    request?.estimatedArrivalToPickupMin,
+    request?.routeToPickupDurationMin,
+    request?.pickupRoute?.durationMin,
+    request?.pickupRoute?.durationMinutes,
+    request?.etaMin,
+    route?.params?.pickupEtaMin,
+  );
+  const pickupEtaLabel = pickupEtaMin
+    ? `${Math.max(1, Math.round(pickupEtaMin))} min`
+    : "ETA em cálculo";
+  const tripDurationMin = pickPositiveRouteNumber(
+    request?.tripDurationMin,
+    request?.durationMin,
+    request?.durationMinutes,
+    request?.estimatedTripDurationMin,
+    request?.estimatedDurationMin,
+    request?.route?.durationMin,
+    request?.route?.durationMinutes,
+    request?.tripRoute?.durationMin,
+    request?.tripRoute?.durationMinutes,
+    route?.params?.tripDurationMin,
+  );
+  const tripDurationLabel = tripDurationMin
+    ? `${Math.max(1, Math.round(tripDurationMin))} min`
+    : "tempo em cálculo";
   const passengerRatingLabel =
     passengerRating == null
       ? "4,9"
       : passengerRating.toFixed(1).replace(".", ",");
-  const passengerName =
-    String(request?.passengerName || request?.passenger || "Passageiro Leaf").trim() ||
-    "Passageiro Leaf";
-  const passengerInitial = passengerName.charAt(0).toUpperCase() || "P";
-  const countdownLabel = formatCountdown(
-    request?.expiresInSec ||
-      request?.expiresInSeconds ||
-      route?.params?.expiresInSec,
+  const passengerName = pickOfferText(
+    [
+      request?.passengerName,
+      request?.customerName,
+      request?.customer?.name,
+      request?.passenger?.name,
+      request?.riderName,
+      request?.rider?.name,
+      request?.passenger,
+    ],
+    "Passageiro Leaf",
   );
+  const passengerInitial = passengerName.charAt(0).toUpperCase() || "P";
+  const offerCountdown = useDriverOfferCountdown(request);
+  const offerExpired = Boolean(hasRequest && offerCountdown.expired);
   const grossFareLabel = formatCurrency(
     request?.grossFare ||
       request?.totalAmount ||
@@ -422,46 +592,111 @@ export default function RobotaxiDriverOfferScreen({ navigation, route }) {
     normalizeMapCoordinate(request?.driverCoordinate) ||
     normalizeMapCoordinate(request?.currentCoordinate) ||
     normalizeMapCoordinate(request?.originCoordinate);
-  const offerRouteCoordinates = useMemo(() => {
+  const pickupRouteCoordinates = useMemo(() => {
     const routePlan = driverTripMeta?.routePlan || {};
     const candidateRoute =
       routePlan.pickupCoordinates ||
       request?.pickupRouteCoordinates ||
+      [];
+    const normalizedCandidate = Array.isArray(candidateRoute)
+      ? candidateRoute.map(normalizeMapCoordinate).filter(Boolean)
+      : [];
+    return normalizedCandidate.length >= 2 ? normalizedCandidate : [];
+  }, [
+    driverTripMeta?.routePlan,
+    request?.pickupRouteCoordinates,
+  ]);
+  const pickupRouteTrafficSegments = useMemo(() => {
+    const routePlan = driverTripMeta?.routePlan || {};
+    return normalizeMapTrafficSegments(
+      routePlan.pickupTrafficSegments ||
+        request?.pickupTrafficSegments ||
+        [],
+    );
+  }, [
+    driverTripMeta?.routePlan,
+    request?.pickupTrafficSegments,
+  ]);
+  const tripRouteCoordinates = useMemo(() => {
+    const routePlan = driverTripMeta?.routePlan || {};
+    const candidateRoute =
+      routePlan.destinationCoordinates ||
+      request?.tripRouteCoordinates ||
+      request?.destinationRouteCoordinates ||
       request?.routeCoordinates ||
       [];
     const normalizedCandidate = Array.isArray(candidateRoute)
       ? candidateRoute.map(normalizeMapCoordinate).filter(Boolean)
       : [];
-    if (normalizedCandidate.length >= 2) {
-      return normalizedCandidate;
-    }
-
-    const origin =
-      routeDriverCoordinate ||
-      normalizeMapCoordinate(driverCoordinate) ||
-      normalizeMapCoordinate(currentCoordinate) ||
-      PROTOTYPE_ORIGIN_COORDINATE;
-    const pickup =
-      normalizeMapCoordinate(driverTripMeta?.pickupCoordinate) ||
-      normalizeMapCoordinate(request?.pickupCoordinate) ||
-      origin;
-    return [origin, pickup].filter(Boolean);
+    return normalizedCandidate.length >= 2 ? normalizedCandidate : [];
   }, [
-    currentCoordinate,
-    driverCoordinate,
-    driverTripMeta?.pickupCoordinate,
     driverTripMeta?.routePlan,
-    request?.pickupCoordinate,
-    request?.pickupRouteCoordinates,
+    request?.destinationRouteCoordinates,
     request?.routeCoordinates,
-    routeDriverCoordinate,
+    request?.tripRouteCoordinates,
   ]);
+  const tripRouteTrafficSegments = useMemo(() => {
+    const routePlan = driverTripMeta?.routePlan || {};
+    return normalizeMapTrafficSegments(
+      routePlan.destinationTrafficSegments ||
+        request?.trafficSegments ||
+        request?.tripTrafficSegments ||
+        [],
+    );
+  }, [
+    driverTripMeta?.routePlan,
+    request?.trafficSegments,
+    request?.tripTrafficSegments,
+  ]);
+  const resolvedPickupDistanceKm =
+    pickupDistanceKm ?? computeRouteDistanceKm(pickupRouteCoordinates);
+  const resolvedTripDistanceKm =
+    tripDistanceKm ?? computeRouteDistanceKm(tripRouteCoordinates);
+  const pickupDistanceLabel = formatDistanceKmValue(resolvedPickupDistanceKm);
+  const tripDistanceLabel = formatDistanceKmValue(resolvedTripDistanceKm);
+  const isTripRoutePreview =
+    pickupRouteCoordinates.length < 2 && tripRouteCoordinates.length >= 2;
+  const offerRouteCoordinates = isTripRoutePreview
+    ? tripRouteCoordinates
+    : pickupRouteCoordinates;
+  const offerRouteTrafficSegments = isTripRoutePreview
+    ? tripRouteTrafficSegments
+    : pickupRouteTrafficSegments;
   const offerOriginCoordinate =
     routeDriverCoordinate ||
     normalizeMapCoordinate(driverCoordinate) ||
     normalizeMapCoordinate(currentCoordinate) ||
-    offerRouteCoordinates[0] ||
+    pickupRouteCoordinates[0] ||
     PROTOTYPE_ORIGIN_COORDINATE;
+  const offerDestinationCoordinate =
+    normalizeMapCoordinate(driverTripMeta?.destinationCoordinate) ||
+    normalizeMapCoordinate(request?.destinationCoordinate) ||
+    normalizeMapCoordinate(request?.destinationLocation) ||
+    tripRouteCoordinates[tripRouteCoordinates.length - 1] ||
+    null;
+  const offerPickupCoordinate =
+    normalizeMapCoordinate(driverTripMeta?.pickupCoordinate) ||
+    normalizeMapCoordinate(request?.pickupCoordinate) ||
+    normalizeMapCoordinate(request?.pickupLocation) ||
+    pickupRouteCoordinates[pickupRouteCoordinates.length - 1] ||
+    tripRouteCoordinates[0] ||
+    offerOriginCoordinate;
+  const offerMapOriginCoordinate = isTripRoutePreview
+    ? offerPickupCoordinate
+    : offerOriginCoordinate;
+  const offerMapDestinationCoordinate = isTripRoutePreview
+    ? offerDestinationCoordinate || offerPickupCoordinate
+    : offerPickupCoordinate;
+  const offerMapOriginLabel = isTripRoutePreview ? "Partida" : "Você";
+  const offerMapDestinationLabel = isTripRoutePreview
+    ? "Chegada"
+    : passengerName;
+  const offerMapOriginAddress = isTripRoutePreview
+    ? pickupLabel
+    : "Sua localização atual";
+  const offerMapDestinationAddress = isTripRoutePreview
+    ? dropoffLabel
+    : pickupLabel;
   const offerVehicleColor = String(
     profile?.vehicleColor ||
       profile?.vehicle?.color ||
@@ -484,34 +719,140 @@ export default function RobotaxiDriverOfferScreen({ navigation, route }) {
       state: hasRequest ? 'offer_visible' : 'empty',
     },
   });
-  const offerPickupCoordinate =
-    normalizeMapCoordinate(driverTripMeta?.pickupCoordinate) ||
-    normalizeMapCoordinate(request?.pickupCoordinate) ||
-    offerRouteCoordinates[offerRouteCoordinates.length - 1] ||
-    offerOriginCoordinate;
+  const offerMapOcclusion = useMemo(
+    () => ({
+      top: 0,
+      bottom: sheetBottom + cardHeight,
+    }),
+    [cardHeight, sheetBottom],
+  );
+  const offerViewportPadding = useMemo(
+    () => buildVisibleRouteEdgePadding({
+      mapHeight: mapHeight || windowHeight,
+      activeOcclusion: offerMapOcclusion,
+      insets,
+      sidePadding: DRIVER_OFFER_MAP_SIDE_PADDING,
+      topExtraPadding: 28,
+      bottomExtraPadding: 26,
+      minVisibleHeight: DRIVER_OFFER_MAP_MIN_VISIBLE_HEIGHT,
+      topPaddingMin: insets.top + DRIVER_OFFER_MAP_TOP_PADDING,
+      overlayBiasRatio: 0.26,
+    }),
+    [
+      insets,
+      insets.top,
+      mapHeight,
+      offerMapOcclusion,
+      windowHeight,
+    ],
+  );
+  const offerViewportCoordinates = useMemo(
+    () => (
+      offerRouteCoordinates.length >= 2
+        ? [
+            ...offerRouteCoordinates,
+            offerOriginCoordinate,
+            offerMapOriginCoordinate,
+            offerMapDestinationCoordinate,
+          ]
+        : []
+    ),
+    [
+      offerMapDestinationCoordinate,
+      offerMapOriginCoordinate,
+      offerOriginCoordinate,
+      offerRouteCoordinates,
+    ],
+  );
+  const offerVisibleRouteRegion = useMemo(
+    () => buildRouteViewportRegion({
+      coordinates: offerViewportCoordinates,
+      mapWidth: mapWidth || windowWidth,
+      mapHeight: mapHeight || windowHeight,
+      activeOcclusion: offerMapOcclusion,
+      insets,
+      viewportPadding: offerViewportPadding,
+      minVisibleHeight: DRIVER_OFFER_MAP_MIN_VISIBLE_HEIGHT,
+      shortRouteLatitudeDeltaMultiplier: 1.55,
+      shortRouteLongitudeDeltaMultiplier: 1.6,
+      longRouteLatitudeDeltaMultiplier: 1.35,
+      longRouteLongitudeDeltaMultiplier: 1.4,
+    }),
+    [
+      insets,
+      mapHeight,
+      mapWidth,
+      offerMapOcclusion,
+      offerViewportCoordinates,
+      offerViewportPadding,
+      windowHeight,
+      windowWidth,
+    ],
+  );
   const offerMapRegion = useMemo(
     () =>
-      buildFallbackOfferRegion([
+      offerVisibleRouteRegion || buildFallbackOfferRegion([
         offerOriginCoordinate,
-        offerPickupCoordinate,
+        offerMapOriginCoordinate,
+        offerMapDestinationCoordinate,
         ...offerRouteCoordinates,
       ]),
-    [offerOriginCoordinate, offerPickupCoordinate, offerRouteCoordinates]
+    [
+      offerOriginCoordinate,
+      offerMapDestinationCoordinate,
+      offerMapOriginCoordinate,
+      offerRouteCoordinates,
+      offerVisibleRouteRegion,
+    ]
   );
 
   usePrototypeMapOcclusion({
     routeKey: route?.key,
     layerId: route?.key || "prototype-driver-offer",
-    occludedBottom: sheetBottom + cardHeight,
+    occludedBottom: offerMapOcclusion.bottom,
   });
 
   const handleDismiss = useCallback(() => {
+    if (hasRequest) {
+      return;
+    }
+
     if (navigation.canGoBack()) {
       navigation.goBack();
       return;
     }
     navigation.navigate("RobotaxiPrototype");
-  }, [navigation]);
+  }, [hasRequest, navigation]);
+
+  useEffect(() => {
+    if (
+      !hasRequest ||
+      typeof navigation?.addListener !== "function"
+    ) {
+      return undefined;
+    }
+
+    // A paid offer can only leave this surface through accept, reject, expiry,
+    // or a competitive resolution acknowledged by the runtime.
+    const unsubscribe = navigation.addListener("beforeRemove", event => {
+      const expectedExit = protectedOfferExitRef.current;
+      const action = event?.data?.action;
+      const actionRouteName = action?.payload?.name;
+      const isExpectedExit = Boolean(
+        expectedExit &&
+          ((expectedExit.routeName && actionRouteName === expectedExit.routeName) ||
+            (expectedExit.actionType && action?.type === expectedExit.actionType)),
+      );
+      if (isExpectedExit) {
+        protectedOfferExitRef.current = null;
+        return;
+      }
+
+      event?.preventDefault?.();
+    });
+
+    return typeof unsubscribe === "function" ? unsubscribe : undefined;
+  }, [hasRequest, navigation]);
 
   useEffect(() => {
     setAllowRouteFallback(Boolean(routeRequest));
@@ -552,15 +893,26 @@ export default function RobotaxiDriverOfferScreen({ navigation, route }) {
       setCardHeight(nextHeight);
     }
   }, []);
+  const handleMapLayout = useCallback((event) => {
+    const nextWidth = event?.nativeEvent?.layout?.width;
+    const nextHeight = event?.nativeEvent?.layout?.height;
+    if (Number.isFinite(nextWidth) && nextWidth > 0) {
+      setMapWidth(previous => (previous === nextWidth ? previous : nextWidth));
+    }
+    if (Number.isFinite(nextHeight) && nextHeight > 0) {
+      setMapHeight(previous => (previous === nextHeight ? previous : nextHeight));
+    }
+  }, []);
 
   const handleAccept = useCallback(async () => {
-    if (!hasRequest || !request) {
+    if (!hasRequest || !request || offerExpired) {
       return;
     }
 
     try {
       setBusyAction("accept");
       await acceptDriverOffer(request);
+      protectedOfferExitRef.current = { routeName: "RobotaxiPrototype" };
       if (typeof navigation.replace === "function") {
         navigation.replace("RobotaxiPrototype", {
           source: "driver-offer-accepted",
@@ -574,6 +926,7 @@ export default function RobotaxiDriverOfferScreen({ navigation, route }) {
       });
     } catch (error) {
       if (isCompetitiveAcceptLossMessage(error?.message || error)) {
+        protectedOfferExitRef.current = { actionType: "GO_BACK" };
         navigation.goBack();
         return;
       }
@@ -584,16 +937,17 @@ export default function RobotaxiDriverOfferScreen({ navigation, route }) {
     } finally {
       setBusyAction("");
     }
-  }, [acceptDriverOffer, hasRequest, navigation, request]);
+  }, [acceptDriverOffer, hasRequest, navigation, offerExpired, request]);
 
   const handleReject = useCallback(async () => {
-    if (!hasRequest || !request) {
+    if (!hasRequest || !request || offerExpired) {
       return;
     }
 
     try {
       setBusyAction("reject");
       await rejectDriverOffer(request, "Recusada pelo motorista.");
+      protectedOfferExitRef.current = { actionType: "GO_BACK" };
       navigation.goBack();
     } catch (error) {
       Alert.alert(
@@ -603,7 +957,11 @@ export default function RobotaxiDriverOfferScreen({ navigation, route }) {
     } finally {
       setBusyAction("");
     }
-  }, [hasRequest, navigation, rejectDriverOffer, request]);
+  }, [hasRequest, navigation, offerExpired, rejectDriverOffer, request]);
+  const offerMapPresentation = useMemo(
+    () => resolvePrototypeMapPresentation({ role: "driver", status: "offered" }),
+    [],
+  );
 
   return (
     <PrototypeScreenTransition>
@@ -623,16 +981,22 @@ export default function RobotaxiDriverOfferScreen({ navigation, route }) {
           driverCoordinate={offerOriginCoordinate}
           driverHeading={currentHeading}
           routeCoordinates={offerRouteCoordinates}
-          originCoordinate={offerOriginCoordinate}
-          destinationCoordinate={offerPickupCoordinate}
-          destinationLabel="Embarque"
-          destinationAddress={pickupLabel}
-          originLabel="Motorista"
-          originAddress="Sua localização atual"
-          interactionEnabled={false}
+          routeTrafficSegments={offerRouteTrafficSegments}
+          showTraffic={offerRouteTrafficSegments.length > 0}
+          originCoordinate={offerMapOriginCoordinate}
+          destinationCoordinate={offerMapDestinationCoordinate}
+          destinationLabel={offerMapDestinationLabel}
+          destinationAddress={offerMapDestinationAddress}
+          originLabel={offerMapOriginLabel}
+          originAddress={offerMapOriginAddress}
+          viewportPadding={offerViewportPadding}
+          routeViewportRegion={offerVisibleRouteRegion}
+          onMapLayout={handleMapLayout}
+          interactionEnabled={offerMapPresentation.interactionEnabled}
           hideRouteEndpointMarkers
           hideUserMarker
-          animateRoute
+          animateRoute={offerMapPresentation.animateRoute}
+          manualCameraHoldMs={offerMapPresentation.manualCameraHoldMs}
           driverMarkerMode="car"
           driverVehicleColor={offerVehicleColor}
           driverMarkerAssetUrl={vehicleMarkerCampaignAsset.imageUrl}
@@ -641,76 +1005,45 @@ export default function RobotaxiDriverOfferScreen({ navigation, route }) {
           destinationMarkerLetter={passengerInitial}
           mapSafetyProfile="driver"
         />
-        {hasRequest ? (
-          <LeafStateHeader
-            title="Nova corrida"
-            subtitle="Pagamento confirmado"
-            rightLabel={countdownLabel}
-            rightTone="dark"
-            insetsTop={insets.top}
-          />
-        ) : null}
         <PrototypeDismissibleSheet
           onClose={handleDismiss}
+          backdropDismissEnabled={!hasRequest}
+          dragEnabled={!hasRequest}
+          bottomGapFillColor={hasRequest ? "transparent" : "#FFFFFF"}
           sheetStyle={[styles.sheetWrap, { bottom: sheetBottom }]}
         >
-          <LeafRideSheet
+          <RobotaxiLifecycleCard
             onLayout={handleCardLayout}
-            style={[styles.offerCard, { paddingBottom: 18 + safeBottom }]}
+            style={[styles.offerCard, { maxHeight: offerCardMaxHeight }]}
+            scrollEnabled
+            showsVerticalScrollIndicator={detailsExpanded}
             testID="driver-offer-screen"
             accessibilityLabel="driver-offer-screen"
           >
             {hasRequest ? (
               <>
-                <View style={styles.sheetHandle} />
-                <View style={styles.offerHeader}>
-                  <View style={styles.offerHeaderCopy}>
-                    <Text style={styles.offerTitle} numberOfLines={1}>
-                      Nova solicitação
-                    </Text>
-                    <Text
-                      style={styles.offerTimer}
-                      numberOfLines={1}
-                      testID={DRIVER_OFFER_FIELD_TEST_IDS.response_timer}
-                    >
-                      {countdownLabel} para responder
-                    </Text>
-                  </View>
-                  <View
-                    style={styles.netPayout}
-                    testID={DRIVER_OFFER_FIELD_TEST_IDS.net_payout}
-                    accessibilityLabel={`Líquido ${fareLabel}`}
-                  >
-                    <Text style={styles.netPayoutValue} numberOfLines={1}>
-                      {fareLabel} líquido
-                    </Text>
-                  </View>
-                </View>
+                <RobotaxiLifecycleSummary
+                  eyebrow="NOVA CORRIDA"
+                  title="Corrida próxima"
+                  subtitle={`${offerCountdown.label} para responder`}
+                  value={fareLabel}
+                  valueLabel="líquido"
+                  subtitleTestID={DRIVER_OFFER_FIELD_TEST_IDS.response_timer}
+                  valueTestID={DRIVER_OFFER_FIELD_TEST_IDS.net_payout}
+                />
 
-                <View style={styles.passengerRow}>
-                  <View
-                    style={styles.passengerAvatar}
-                    testID={DRIVER_OFFER_FIELD_TEST_IDS.passenger_photo}
-                  >
-                    <Text style={styles.passengerAvatarText}>{passengerInitial}</Text>
-                  </View>
-                  <View style={styles.passengerCopy}>
-                    <Text
-                      style={styles.passengerName}
-                      numberOfLines={1}
-                      testID={DRIVER_OFFER_FIELD_TEST_IDS.passenger_name}
-                    >
-                      {passengerName}
-                    </Text>
-                    <Text
-                      style={styles.passengerMeta}
-                      numberOfLines={1}
-                      testID={DRIVER_OFFER_FIELD_TEST_IDS.passenger_rating}
-                    >
-                      Passageiro verificado · {passengerRatingLabel}
-                    </Text>
-                  </View>
-                </View>
+                <RobotaxiLifecycleIdentity
+                  name={passengerName}
+                  meta={`Passageiro verificado · ${passengerRatingLabel}`}
+                  initial={passengerInitial}
+                  style={styles.passengerIdentity}
+                  testID={DRIVER_OFFER_FIELD_TEST_IDS.passenger_verified_badge}
+                  fieldTestIDs={{
+                    avatar: DRIVER_OFFER_FIELD_TEST_IDS.passenger_photo,
+                    name: DRIVER_OFFER_FIELD_TEST_IDS.passenger_name,
+                    meta: DRIVER_OFFER_FIELD_TEST_IDS.passenger_rating,
+                  }}
+                />
 
                 <View
                   style={styles.routeSummary}
@@ -721,10 +1054,9 @@ export default function RobotaxiDriverOfferScreen({ navigation, route }) {
                     style={styles.routeStep}
                     testID={DRIVER_OFFER_FIELD_TEST_IDS.pickup_eta}
                   >
-                    <View style={styles.routeIcon}>
-                      <Ionicons name="locate-outline" size={15} color={leafRideColors.text} />
-                    </View>
+                    <Ionicons name="locate-outline" size={17} color={leafRideColors.text} />
                     <View style={styles.routeCopy}>
+                      <Text style={styles.routeLabel}>EMBARQUE</Text>
                       <Text
                         style={styles.routeAddress}
                         numberOfLines={1}
@@ -746,10 +1078,9 @@ export default function RobotaxiDriverOfferScreen({ navigation, route }) {
                     style={styles.routeStep}
                     testID={DRIVER_OFFER_FIELD_TEST_IDS.trip_duration}
                   >
-                    <View style={styles.routeIcon}>
-                      <Ionicons name="location-outline" size={15} color={leafRideColors.leaf} />
-                    </View>
+                    <Ionicons name="location-outline" size={17} color={leafRideColors.leaf} />
                     <View style={styles.routeCopy}>
+                      <Text style={styles.routeLabel}>DESTINO</Text>
                       <Text
                         style={styles.routeAddress}
                         numberOfLines={1}
@@ -768,60 +1099,72 @@ export default function RobotaxiDriverOfferScreen({ navigation, route }) {
                   </View>
                 </View>
 
-                <View
-                  style={styles.confirmedLine}
-                  testID={DRIVER_OFFER_FIELD_TEST_IDS.payment_confirmed}
-                >
-                  <Ionicons name="checkmark-circle" size={15} color={leafRideColors.leaf} />
-                  <Text style={styles.confirmedText} numberOfLines={1}>
-                    PIX confirmado
-                  </Text>
-                  <SecurePaymentBadge style={styles.confirmedSecurePaymentBadge} />
-                </View>
+                <RobotaxiLifecycleDisclosure
+                  expanded={detailsExpanded}
+                  onPress={() => setDetailsExpanded((current) => !current)}
+                  label="Ver detalhes"
+                  expandedLabel="Ocultar detalhes"
+                  style={styles.detailsButton}
+                  testID="driver-offer-details-button"
+                />
 
-                {ridePreferenceItems.length > 0 ? (
-                  <View
-                    style={styles.preferencePanel}
-                    testID={DRIVER_OFFER_FIELD_TEST_IDS.ride_preferences}
-                    accessibilityLabel="Preferências do passageiro"
-                  >
-                    <Text style={styles.hiddenText}>Preferências</Text>
-                    <View style={styles.preferenceRow}>
-                      {ridePreferenceItems.map((item) => (
-                        <View key={item.key} style={styles.preferenceChip}>
-                          <Text style={styles.preferenceChipText} numberOfLines={1}>
-                            {item.label}
-                          </Text>
-                        </View>
-                      ))}
+                {detailsExpanded ? (
+                  <RobotaxiLifecycleSection title="DETALHES DA CORRIDA">
+                    <View
+                      style={styles.confirmedLine}
+                      testID={DRIVER_OFFER_FIELD_TEST_IDS.payment_confirmed}
+                    >
+                      <Ionicons name="checkmark-circle-outline" size={17} color={leafRideColors.leaf} />
+                      <View style={styles.confirmedCopy}>
+                        <Text style={styles.confirmedTitle}>Pagamento confirmado</Text>
+                        <Text
+                          style={styles.confirmedText}
+                          testID={DRIVER_OFFER_FIELD_TEST_IDS.gross_fare}
+                        >
+                          Passageiro pagou {grossFareLabel} via Pix
+                        </Text>
+                      </View>
                     </View>
-                  </View>
+
+                    {ridePreferenceItems.length > 0 ? (
+                      <View
+                        style={styles.preferencePanel}
+                        testID={DRIVER_OFFER_FIELD_TEST_IDS.ride_preferences}
+                        accessibilityLabel="Preferências do passageiro"
+                      >
+                        <Text style={styles.preferenceLabel}>Preferências</Text>
+                        <Text style={styles.preferenceText}>
+                          {ridePreferenceItems.map((item) => item.label).join(" · ")}
+                        </Text>
+                      </View>
+                    ) : null}
+
+                    <RobotaxiLifecycleButton
+                      label={busyAction === "reject" ? "Recusando..." : "Recusar"}
+                      tone="danger"
+                      disabled={Boolean(busyAction) || offerExpired}
+                      onPress={handleReject}
+                      style={styles.rejectButton}
+                      testID={DRIVER_OFFER_FIELD_TEST_IDS.reject_action}
+                      accessibilityLabel="driver-offer-screen-reject-button"
+                    />
+                  </RobotaxiLifecycleSection>
                 ) : null}
 
-                <View style={styles.offerActionsRow}>
-                  <LeafButton
-                    label={busyAction === "reject" ? "Recusando..." : "Recusar"}
-                    tone="ghost"
-                    disabled={Boolean(busyAction)}
-                    onPress={handleReject}
-                    style={styles.rejectButton}
-                    testID={DRIVER_OFFER_FIELD_TEST_IDS.reject_action}
-                    accessibilityLabel="driver-offer-screen-reject-button"
-                  />
-                  <LeafButton
-                    label={
-                      busyAction === "accept"
-                        ? "Aceitando..."
-                        : "Aceitar corrida"
-                    }
-                    tone="primary"
-                    disabled={Boolean(busyAction)}
-                    onPress={handleAccept}
-                    style={styles.acceptButton}
-                    testID={DRIVER_OFFER_FIELD_TEST_IDS.accept_action}
-                    accessibilityLabel="driver-offer-screen-accept-button"
-                  />
-                </View>
+                <RobotaxiLifecycleButton
+                  label={
+                    busyAction === "accept"
+                      ? "Aceitando..."
+                      : "Aceitar corrida"
+                  }
+                  tone="primary"
+                  icon="checkmark-outline"
+                  disabled={Boolean(busyAction) || offerExpired}
+                  onPress={handleAccept}
+                  style={styles.acceptButton}
+                  testID={DRIVER_OFFER_FIELD_TEST_IDS.accept_action}
+                  accessibilityLabel="driver-offer-screen-accept-button"
+                />
               </>
             ) : (
               <View style={styles.emptyWrap}>
@@ -841,7 +1184,7 @@ export default function RobotaxiDriverOfferScreen({ navigation, route }) {
             {visibleLastError ? (
               <Text style={styles.errorText}>{visibleLastError}</Text>
             ) : null}
-          </LeafRideSheet>
+          </RobotaxiLifecycleCard>
         </PrototypeDismissibleSheet>
       </View>
     </PrototypeScreenTransition>
@@ -859,105 +1202,13 @@ const styles = StyleSheet.create({
     right: 0,
   },
   offerCard: {
-    minHeight: 318,
-    borderTopLeftRadius: 28,
-    borderTopRightRadius: 28,
-    borderBottomLeftRadius: 0,
-    borderBottomRightRadius: 0,
-    paddingTop: 12,
-    paddingBottom: 18,
+    marginHorizontal: robotaxiLifecycleMetrics.cardHorizontalMargin,
   },
-  sheetHandle: {
-    width: 50,
-    height: 4,
-    borderRadius: 3,
-    backgroundColor: "#D8D0C7",
-    alignSelf: "center",
-    marginBottom: 18,
-  },
-  offerHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "flex-start",
-    gap: 14,
-    marginBottom: 12,
-  },
-  offerHeaderCopy: {
-    flex: 1,
-    minWidth: 0,
-  },
-  offerTimer: {
-    color: leafRideColors.secondary,
-    fontFamily: fonts.Regular,
-    fontSize: 10.5,
-    lineHeight: 14,
-    marginTop: 2,
-  },
-  offerTitle: {
-    color: leafRideColors.text,
-    fontFamily: fonts.SemiBold,
-    fontSize: 18,
-    lineHeight: 23,
-  },
-  netPayout: {
-    minWidth: 108,
-    minHeight: 30,
-    borderRadius: 15,
-    borderWidth: 1,
-    borderColor: "#D9E3D3",
-    backgroundColor: "#EEF3EA",
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: 10,
-    marginTop: 2,
-  },
-  netPayoutValue: {
-    color: leafRideColors.leaf,
-    fontFamily: fonts.Medium,
-    fontSize: 11,
-    lineHeight: 14,
-  },
-  passengerRow: {
-    minHeight: 48,
-    flexDirection: "row",
-    alignItems: "center",
-    marginBottom: 16,
-  },
-  passengerAvatar: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    borderWidth: 1,
-    borderColor: "#E5DCD2",
-    backgroundColor: "#EFEAE2",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  passengerAvatarText: {
-    color: leafRideColors.text,
-    fontFamily: fonts.SemiBold,
-    fontSize: 16,
-    lineHeight: 20,
-  },
-  passengerCopy: {
-    flex: 1,
-    minWidth: 0,
-    marginLeft: 12,
-  },
-  passengerName: {
-    color: leafRideColors.text,
-    fontFamily: fonts.SemiBold,
-    fontSize: 15,
-    lineHeight: 20,
-  },
-  passengerMeta: {
-    marginTop: 2,
-    color: leafRideColors.secondary,
-    fontFamily: fonts.Regular,
-    fontSize: 12,
-    lineHeight: 16,
+  passengerIdentity: {
+    marginTop: 16,
   },
   routeSummary: {
+    marginTop: 16,
     borderTopWidth: 1,
     borderBottomWidth: 1,
     borderColor: leafRideColors.line,
@@ -967,13 +1218,7 @@ const styles = StyleSheet.create({
   routeStep: {
     flexDirection: "row",
     alignItems: "flex-start",
-  },
-  routeIcon: {
-    width: 24,
-    height: 24,
-    alignItems: "center",
-    justifyContent: "center",
-    marginRight: 12,
+    gap: 12,
   },
   routeCopy: {
     flex: 1,
@@ -988,65 +1233,65 @@ const styles = StyleSheet.create({
   },
   routeAddress: {
     color: leafRideColors.text,
-    fontFamily: fonts.SemiBold,
-    fontSize: 14,
+    fontFamily: fonts.Regular,
+    fontSize: 13,
     lineHeight: 18,
   },
-  confirmedLine: {
-    marginTop: 10,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
+  routeLabel: {
+    color: leafRideColors.muted,
+    fontFamily: fonts.Medium,
+    fontSize: 10,
+    lineHeight: 13,
+    letterSpacing: 0.5,
   },
-  confirmedText: {
+  detailsButton: {
+    marginTop: 16,
+  },
+  confirmedLine: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 10,
+  },
+  confirmedCopy: {
     flex: 1,
     minWidth: 0,
-    color: leafRideColors.secondary,
+  },
+  confirmedTitle: {
+    color: leafRideColors.text,
     fontFamily: fonts.Medium,
     fontSize: 12,
     lineHeight: 16,
   },
-  confirmedSecurePaymentBadge: {
-    marginLeft: 4,
-  },
-  preferencePanel: {
-    marginTop: 10,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-  },
-  preferenceRow: {
-    flex: 1,
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 6,
-  },
-  preferenceChip: {
-    minHeight: 24,
-    borderRadius: 12,
-    paddingHorizontal: 0,
-    justifyContent: "center",
-  },
-  preferenceChipText: {
+  confirmedText: {
+    marginTop: 2,
     color: leafRideColors.secondary,
     fontFamily: fonts.Regular,
     fontSize: 12,
     lineHeight: 16,
   },
-  offerActionsRow: {
+  preferencePanel: {
     marginTop: 14,
-    flexDirection: "row",
-    gap: 12,
+  },
+  preferenceLabel: {
+    color: leafRideColors.muted,
+    fontFamily: fonts.Medium,
+    fontSize: 11,
+    lineHeight: 14,
+  },
+  preferenceText: {
+    marginTop: 3,
+    color: leafRideColors.text,
+    fontFamily: fonts.Regular,
+    fontSize: 12,
+    lineHeight: 16,
   },
   rejectButton: {
-    width: 116,
-    height: 48,
-    borderRadius: 24,
+    marginTop: 14,
+    width: "100%",
   },
   acceptButton: {
-    flex: 1,
-    height: 48,
-    borderRadius: 24,
+    marginTop: 12,
+    width: "100%",
   },
   emptyWrap: {
     paddingTop: 6,
@@ -1067,12 +1312,6 @@ const styles = StyleSheet.create({
   emptyButton: {
     marginTop: 18,
     alignSelf: "flex-start",
-  },
-  hiddenText: {
-    position: "absolute",
-    width: 1,
-    height: 1,
-    opacity: 0,
   },
   errorText: {
     marginTop: 10,

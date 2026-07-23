@@ -1,0 +1,153 @@
+# CURRENT_PRODUCT_ONLY: passenger menu audit on an already-authenticated dedicated device.
+appId: br.com.leaf.ride
+name: Passenger CURRENT menu audit - dedicated device
+tags:
+  - current
+  - menu
+  - passenger
+  - dedicated-device
+---
+- openLink: "leafapp://robotaxi/home"
+
+- runFlow:
+    when:
+      visible: "Abrir com \".*Leaf.*\"\\?"
+    commands:
+      - tapOn: "Abrir"
+- runFlow:
+    when:
+      visible: "Abrir"
+    commands:
+      - tapOn: "Abrir"
+- runFlow:
+    when:
+      visible: "Open"
+    commands:
+      - tapOn: "Open"
+
+- extendedWaitUntil:
+    visible:
+      id: "passenger-home-destination-input"
+    timeout: 30000
+
+# Editar perfil: accept the CURRENT editor or its honest remote-error state.
+- tapOn:
+    id: "prototype-top-right-control"
+- assertVisible:
+    id: "robotaxi-menu-screen"
+- scrollUntilVisible:
+    element:
+      id: "robotaxi-menu-item-edit-profile"
+    direction: DOWN
+- tapOn:
+    id: "robotaxi-menu-item-edit-profile"
+- extendedWaitUntil:
+    visible:
+      id: "robotaxi-profile-screen"
+    timeout: 30000
+- runFlow:
+    when:
+      visible:
+        id: "robotaxi-profile-error"
+    commands:
+      - assertVisible:
+          id: "robotaxi-profile-error"
+- tapOn: "Fechar perfil"
+- extendedWaitUntil:
+    visible:
+      id: "passenger-home-destination-input"
+    timeout: 30000
+
+# Histórico: visit only the read-only summary exposed by the CURRENT menu.
+- tapOn:
+    id: "prototype-top-right-control"
+- assertVisible:
+    id: "robotaxi-menu-screen"
+- scrollUntilVisible:
+    element:
+      id: "robotaxi-menu-item-trip-history"
+    direction: DOWN
+- tapOn:
+    id: "robotaxi-menu-item-trip-history"
+- assertVisible: "Histórico"
+- assertVisible: "Viagens recentes"
+- tapOn: "Fechar"
+- extendedWaitUntil:
+    visible:
+      id: "passenger-home-destination-input"
+    timeout: 30000
+
+# Privacidade: never tap the account-deletion action.
+- tapOn:
+    id: "prototype-top-right-control"
+- assertVisible:
+    id: "robotaxi-menu-screen"
+- scrollUntilVisible:
+    element:
+      id: "robotaxi-menu-item-privacy-account-deletion"
+    direction: DOWN
+- tapOn:
+    id: "robotaxi-menu-item-privacy-account-deletion"
+- assertVisible:
+    id: "privacy-policy-screen"
+- tapOn: "Voltar"
+- extendedWaitUntil:
+    visible:
+      id: "passenger-home-destination-input"
+    timeout: 30000
+
+# Configurações: validate only the four CURRENT account actions, without invoking them.
+- tapOn:
+    id: "prototype-top-right-control"
+- assertVisible:
+    id: "robotaxi-menu-screen"
+- scrollUntilVisible:
+    element:
+      id: "robotaxi-menu-item-settings"
+    direction: DOWN
+- tapOn:
+    id: "robotaxi-menu-item-settings"
+- assertVisible:
+    id: "robotaxi-settings-screen"
+- assertVisible:
+    id: "robotaxi-settings-row-privacy"
+- assertVisible:
+    id: "robotaxi-settings-row-logout"
+- assertVisible:
+    id: "robotaxi-settings-row-delete-account"
+- assertVisible:
+    id: "robotaxi-settings-open-support"
+- assertNotVisible:
+    id: "robotaxi-settings-row-notifications"
+- assertNotVisible:
+    id: "robotaxi-settings-row-language"
+- assertNotVisible:
+    id: "robotaxi-settings-row-traffic"
+- assertNotVisible:
+    id: "robotaxi-settings-row-voice"
+- tapOn:
+    id: "robotaxi-settings-close-button"
+- extendedWaitUntil:
+    visible:
+      id: "passenger-home-destination-input"
+    timeout: 30000
+
+# Ajuda: visit the CURRENT support surface without opening tickets or incidents.
+- tapOn:
+    id: "prototype-top-right-control"
+- assertVisible:
+    id: "robotaxi-menu-screen"
+- scrollUntilVisible:
+    element:
+      id: "robotaxi-menu-item-help"
+    direction: DOWN
+- tapOn:
+    id: "robotaxi-menu-item-help"
+- assertVisible:
+    id: "robotaxi-support-screen"
+- tapOn:
+    id: "robotaxi-support-close-button"
+- extendedWaitUntil:
+    visible:
+      id: "passenger-home-destination-input"
+    timeout: 30000

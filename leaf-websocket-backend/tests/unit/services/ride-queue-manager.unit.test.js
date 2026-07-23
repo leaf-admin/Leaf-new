@@ -68,7 +68,35 @@ describe('ride-queue-manager', () => {
           conversation: 'quiet'
         },
         femaleDriverOnly: true,
-        paymentStatus: 'confirmed'
+        paymentStatus: 'confirmed',
+        paymentAmountInCents: 1840,
+        paymentGrossAmountInCents: 1960,
+        paymentQuoteSessionId: 'quote_session_123',
+        paymentQuoteLockId: 'ql_123',
+        paymentDriverReservationId: 'pdr_123',
+        paymentDriverReservationDriverId: 'driver_123',
+        paymentDriverReservationExpiresAt: '2026-06-27T14:00:00.000Z',
+        paymentDriverReservationTtlSeconds: 21600,
+        providerEnvironment: 'sandbox',
+        paymentProviderEnvironment: 'sandbox',
+        paymentProfileId: 'qa-test-users-sandbox-durable',
+        paymentProfileReason: 'durable_test_users_payment_sandbox_policy',
+        paymentProfileSource: 'firestore',
+        passengerName: 'Leaf Passageiro Teste',
+        customerName: 'Leaf Passageiro Teste',
+        routeCoordinates: [
+          { latitude: -22.97, longitude: -43.18 },
+          { latitude: -22.98, longitude: -43.22 }
+        ],
+        trafficSegments: [
+          {
+            level: 'normal',
+            coordinates: [
+              { latitude: -22.97, longitude: -43.18 },
+              { latitude: -22.98, longitude: -43.22 }
+            ]
+          }
+        ]
       },
       { deferEventSourcing: false }
     );
@@ -81,7 +109,35 @@ describe('ride-queue-manager', () => {
           temperature: 'cool',
           conversation: 'quiet'
         }),
-        femaleDriverOnly: 'true'
+        femaleDriverOnly: 'true',
+        paymentAmountInCents: '1840',
+        paymentGrossAmountInCents: '1960',
+        paymentQuoteSessionId: 'quote_session_123',
+        paymentQuoteLockId: 'ql_123',
+        paymentDriverReservationId: 'pdr_123',
+        paymentDriverReservationDriverId: 'driver_123',
+        paymentDriverReservationExpiresAt: '2026-06-27T14:00:00.000Z',
+        paymentDriverReservationTtlSeconds: '21600',
+        providerEnvironment: 'sandbox',
+        paymentProviderEnvironment: 'sandbox',
+        paymentProfileId: 'qa-test-users-sandbox-durable',
+        paymentProfileReason: 'durable_test_users_payment_sandbox_policy',
+        paymentProfileSource: 'firestore',
+        passengerName: 'Leaf Passageiro Teste',
+        customerName: 'Leaf Passageiro Teste',
+        routeCoordinates: JSON.stringify([
+          { latitude: -22.97, longitude: -43.18 },
+          { latitude: -22.98, longitude: -43.22 }
+        ]),
+        trafficSegments: JSON.stringify([
+          {
+            level: 'normal',
+            coordinates: [
+              { latitude: -22.97, longitude: -43.18 },
+              { latitude: -22.98, longitude: -43.22 }
+            ]
+          }
+        ])
       })
     );
     expect(pipeline.hset).toHaveBeenCalledWith(
@@ -92,7 +148,31 @@ describe('ride-queue-manager', () => {
           temperature: 'cool',
           conversation: 'quiet'
         }),
-        femaleDriverOnly: 'true'
+        femaleDriverOnly: 'true',
+        paymentAmountInCents: '1840',
+        paymentGrossAmountInCents: '1960',
+        paymentQuoteSessionId: 'quote_session_123',
+        paymentQuoteLockId: 'ql_123',
+        paymentDriverReservationId: 'pdr_123',
+        paymentDriverReservationDriverId: 'driver_123',
+        paymentDriverReservationExpiresAt: '2026-06-27T14:00:00.000Z',
+        paymentDriverReservationTtlSeconds: '21600',
+        providerEnvironment: 'sandbox',
+        paymentProviderEnvironment: 'sandbox',
+        paymentProfileId: 'qa-test-users-sandbox-durable',
+        routeCoordinates: JSON.stringify([
+          { latitude: -22.97, longitude: -43.18 },
+          { latitude: -22.98, longitude: -43.22 }
+        ]),
+        trafficSegments: JSON.stringify([
+          {
+            level: 'normal',
+            coordinates: [
+              { latitude: -22.97, longitude: -43.18 },
+              { latitude: -22.98, longitude: -43.22 }
+            ]
+          }
+        ])
       })
     );
   });

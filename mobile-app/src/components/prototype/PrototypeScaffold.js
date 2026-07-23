@@ -47,15 +47,36 @@ export function PrototypeTopControls({
   onPressRight,
   leftIcon = 'locate',
   rightIcon = 'menu',
-  showRightBadge = false
+  showRightBadge = false,
+  leftAccessibilityLabel,
+  rightAccessibilityLabel,
+  leftTestID = 'prototype-top-left-control',
+  rightTestID = 'prototype-top-right-control',
 }) {
+  const resolvedLeftLabel = leftAccessibilityLabel || (leftIcon === 'arrow-back' ? 'Voltar' : 'Centralizar mapa');
+  const resolvedRightLabel = rightAccessibilityLabel || (rightIcon === 'menu' ? 'Abrir menu' : 'Centralizar mapa');
+
   return (
     <View style={[styles.topRow, { top: insets.top + 18 }]}>
-      <TouchableOpacity style={styles.topButton} activeOpacity={0.85} onPress={onPressLeft}>
+      <TouchableOpacity
+        style={styles.topButton}
+        activeOpacity={0.85}
+        onPress={onPressLeft}
+        accessibilityRole="button"
+        accessibilityLabel={resolvedLeftLabel}
+        testID={leftTestID}
+      >
         <PrototypeTopControlGlyph name={leftIcon} tintColor={color.text.primary} />
       </TouchableOpacity>
 
-      <TouchableOpacity style={styles.topButton} activeOpacity={0.85} onPress={onPressRight}>
+      <TouchableOpacity
+        style={styles.topButton}
+        activeOpacity={0.85}
+        onPress={onPressRight}
+        accessibilityRole="button"
+        accessibilityLabel={resolvedRightLabel}
+        testID={rightTestID}
+      >
         <PrototypeTopControlGlyph name={rightIcon} tintColor={color.text.primary} />
         {showRightBadge ? <View style={styles.notificationDot} /> : null}
       </TouchableOpacity>

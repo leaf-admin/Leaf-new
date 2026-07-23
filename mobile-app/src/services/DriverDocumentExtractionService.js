@@ -1,6 +1,7 @@
 import Logger from '../utils/Logger';
+import auth from '@react-native-firebase/auth';
 import { getSelfHostedApiUrl } from '../config/ApiConfig';
-import { createAxiosInstance } from '../utils/axiosInterceptor';
+import { postMultipartJson } from '../utils/multipartJsonRequest';
 
 function ensurePdfAsset(asset = {}) {
   const uri = String(asset?.uri || '').trim();
@@ -32,11 +33,23 @@ function normalizeApiResult(payload = {}) {
 
 class DriverDocumentExtractionService {
   constructor() {
-    const apiBaseUrl = getSelfHostedApiUrl('');
-    this.api = createAxiosInstance({
-      baseURL: apiBaseUrl,
-      timeout: 60000
-    });
+    this.apiBaseUrl = String(getSelfHostedApiUrl('') || '').replace(/\/+$/, '');
+  }
+
+  async getAuthHeaders(forceRefresh = false) {
+    const user = auth().currentUser;
+    if (!user) {
+      throw new Error('Usuário não autenticado');
+    }
+
+    const token = await user.getIdToken(Boolean(forceRefresh));
+    if (!token) {
+      throw new Error('Token de autenticação indisponível');
+    }
+
+    return {
+      Authorization: `Bearer ${token}`
+    };
   }
 
   async extractCNHFromPDF({ pdfAsset, userId }) {
@@ -48,13 +61,12 @@ class DriverDocumentExtractionService {
     }
 
     Logger.log('📄 [DriverDocumentExtraction] Enviando CNH PDF para extração...');
-    const response = await this.api.post('/api/ocr/cnh/pdf', formData, {
-      headers: {
-        'Content-Type': 'multipart/form-data',
-        Accept: 'application/json'
-      }
+    const authHeaders = await this.getAuthHeaders(false);
+    const payload = await postMultipartJson(`${this.apiBaseUrl}/api/ocr/cnh/pdf`, formData, {
+      headers: authHeaders,
+      timeoutMs: 60000
     });
-    return normalizeApiResult(response?.data || {});
+    return normalizeApiResult(payload || {});
   }
 
   async extractVehicleFromPDF({ pdfAsset, userId }) {
@@ -66,13 +78,12 @@ class DriverDocumentExtractionService {
     }
 
     Logger.log('📄 [DriverDocumentExtraction] Enviando documento do veículo PDF para extração...');
-    const response = await this.api.post('/api/ocr/vehicle/pdf', formData, {
-      headers: {
-        'Content-Type': 'multipart/form-data',
-        Accept: 'application/json'
-      }
+    const authHeaders = await this.getAuthHeaders(false);
+    const payload = await postMultipartJson(`${this.apiBaseUrl}/api/ocr/vehicle/pdf`, formData, {
+      headers: authHeaders,
+      timeoutMs: 60000
     });
-    return normalizeApiResult(response?.data || {});
+    return normalizeApiResult(payload || {});
   }
 }
 

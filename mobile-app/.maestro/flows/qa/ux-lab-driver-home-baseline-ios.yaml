@@ -1,0 +1,15 @@
+appId: br.com.leaf.ride
+---
+- extendedWaitUntil:
+    visible:
+      id: "driver-home-toggle-online"
+    timeout: 30000
+
+- takeScreenshot: "qa-artifacts/ux-lab/driver-home-offline"
+
+- tapOn:
+    point: "38%,88%"
+
+- waitForAnimationToEnd
+
+- takeScreenshot: "qa-artifacts/ux-lab/driver-home-after-online-action"

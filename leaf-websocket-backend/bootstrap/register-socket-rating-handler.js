@@ -1,8 +1,17 @@
 const ratingService = require('../services/rating-service');
+const {
+    assertRideParticipant,
+    getSocketIdentity,
+    isSupportActor
+} = require('../services/socket-scope-guard');
+const {
+    resolveUserPersistenceScope
+} = require('../services/sandbox-persistence-context');
 
 function registerSocketRatingHandler({
     socket,
     io,
+    redisPool,
     logStructured
 }) {
     const logRatingEvent = (eventName, responseEvent = null) => {
@@ -17,15 +26,51 @@ function registerSocketRatingHandler({
     socket.on('submitRating', async (data = {}) => {
         try {
             logRatingEvent('submitRating', 'ratingSubmitted');
-            const result = await ratingService.submitRating(data, {
-                socketUserId: socket.userId,
-                socketUserType: socket.userType
+            const tripId = data.tripId || data.bookingId || data.rideId;
+            const participant = await assertRideParticipant({
+                socket,
+                io,
+                redisPool,
+                bookingId: tripId,
+                allowedRoles: ['passenger', 'driver'],
+                allowSupport: false,
+                preferPersistentTerminal: true
+            });
+
+            if (!participant.allowed) {
+                const errorPayload = {
+                    success: false,
+                    error: participant.error,
+                    code: participant.code,
+                    tripId: tripId || null
+                };
+                socket.emit('ratingSubmitted', errorPayload);
+                socket.emit('ratingError', errorPayload);
+                return;
+            }
+
+            const result = await ratingService.submitRating({
+                ...data,
+                tripId,
+                reviewerId: participant.identity.userId,
+                userId: participant.identity.userId,
+                reviewerType: participant.participantRole,
+                userType: participant.participantRole,
+                targetUserId: participant.participantRole === 'driver'
+                    ? participant.scope.customerId
+                    : participant.scope.driverId
+            }, {
+                socketUserId: participant.identity.userId,
+                socketUserType: participant.participantRole,
+                tripScope: participant.scope,
+                persistenceScope: participant.scope?.raw || participant.scope
             });
 
             if (!result.success) {
                 const errorPayload = {
                     success: false,
                     error: result.error || 'Falha ao enviar avaliação',
+                    code: result.code || null,
                     tripId: data.tripId || data.bookingId || data.rideId || null
                 };
                 socket.emit('ratingSubmitted', errorPayload);
@@ -43,6 +88,7 @@ function registerSocketRatingHandler({
                 reviewerType: result.rating.reviewerType,
                 targetUserId: result.rating.targetUserId,
                 timestamp: result.rating.createdAt,
+                idempotentReplay: result.idempotentReplay === true,
                 kycEscalation: result.kycEscalation || null
             };
 
@@ -70,16 +116,39 @@ function registerSocketRatingHandler({
         try {
             logRatingEvent('getTripRatings', 'tripRatings');
             const tripId = data.tripId || data.bookingId || data.rideId;
-            const result = await ratingService.getTripRatings(tripId);
+            const participant = await assertRideParticipant({
+                socket,
+                io,
+                redisPool,
+                bookingId: tripId,
+                allowedRoles: ['passenger', 'driver'],
+                allowSupport: true
+            });
+            if (!participant.allowed) {
+                socket.emit('tripRatings', {
+                    success: false,
+                    error: participant.error,
+                    code: participant.code,
+                    tripId
+                });
+                return;
+            }
+
+            const result = await ratingService.getTripRatings(
+                tripId,
+                participant.scope?.raw || participant.scope
+            );
             socket.emit('tripRatings', result.success ? result : {
                 success: false,
                 error: result.error || 'Erro ao buscar avaliações',
+                code: result.code || null,
                 tripId
             });
         } catch (error) {
             socket.emit('tripRatings', {
                 success: false,
-                error: error.message || 'Erro ao buscar avaliações'
+                error: error.message || 'Erro ao buscar avaliações',
+                code: error.code || null
             });
         }
     });
@@ -87,17 +156,43 @@ function registerSocketRatingHandler({
     socket.on('getUserRatings', async (data = {}) => {
         try {
             logRatingEvent('getUserRatings', 'userRatings');
-            const targetUserId = data.targetUserId || data.userId;
-            const result = await ratingService.getUserRatings(targetUserId);
+            const identity = getSocketIdentity(socket);
+            const targetUserId = data.targetUserId || data.userId || identity.userId;
+            if (!identity.userId) {
+                socket.emit('userRatings', {
+                    success: false,
+                    error: 'Autenticação obrigatória',
+                    code: 'AUTH_REQUIRED',
+                    targetUserId: targetUserId || null
+                });
+                return;
+            }
+            if (targetUserId !== identity.userId && !isSupportActor(socket)) {
+                socket.emit('userRatings', {
+                    success: false,
+                    error: 'Usuário não autorizado para consultar estas avaliações',
+                    code: 'RATING_SCOPE_DENIED',
+                    targetUserId
+                });
+                return;
+            }
+
+            const persistenceScope = await resolveUserPersistenceScope({
+                userId: targetUserId,
+                actor: identity
+            });
+            const result = await ratingService.getUserRatings(targetUserId, persistenceScope);
             socket.emit('userRatings', result.success ? result : {
                 success: false,
                 error: result.error || 'Erro ao buscar avaliações do usuário',
+                code: result.code || null,
                 targetUserId
             });
         } catch (error) {
             socket.emit('userRatings', {
                 success: false,
-                error: error.message || 'Erro ao buscar avaliações do usuário'
+                error: error.message || 'Erro ao buscar avaliações do usuário',
+                code: error.code || null
             });
         }
     });
@@ -106,18 +201,44 @@ function registerSocketRatingHandler({
         try {
             logRatingEvent('hasUserRatedTrip', 'userRatedTrip');
             const tripId = data.tripId || data.bookingId || data.rideId;
-            const reviewerId = data.reviewerId || data.userId || socket.userId;
-            const result = await ratingService.hasUserRatedTrip(tripId, reviewerId);
+            const participant = await assertRideParticipant({
+                socket,
+                io,
+                redisPool,
+                bookingId: tripId,
+                allowedRoles: ['passenger', 'driver'],
+                allowSupport: true
+            });
+            if (!participant.allowed) {
+                socket.emit('userRatedTrip', {
+                    success: false,
+                    error: participant.error,
+                    code: participant.code,
+                    tripId
+                });
+                return;
+            }
+
+            const reviewerId = participant.participantRole === 'support'
+                ? data.reviewerId || data.userId || socket.userId
+                : participant.identity.userId;
+            const result = await ratingService.hasUserRatedTrip(
+                tripId,
+                reviewerId,
+                participant.scope?.raw || participant.scope
+            );
             socket.emit('userRatedTrip', result.success ? result : {
                 success: false,
                 error: result.error || 'Erro ao verificar avaliação',
+                code: result.code || null,
                 tripId,
                 reviewerId
             });
         } catch (error) {
             socket.emit('userRatedTrip', {
                 success: false,
-                error: error.message || 'Erro ao verificar avaliação'
+                error: error.message || 'Erro ao verificar avaliação',
+                code: error.code || null
             });
         }
     });

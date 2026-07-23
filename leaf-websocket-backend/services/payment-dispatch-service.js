@@ -2,6 +2,15 @@ const redisPool = require('../utils/redis-pool');
 const RideStateManager = require('./ride-state-manager');
 const GradualRadiusExpander = require('./gradual-radius-expander');
 const { logStructured } = require('../utils/logger');
+const {
+  validatePaymentDriverReservation,
+  consumePaymentDriverReservationForBooking
+} = require('./payment-driver-reservation-service');
+const { getFinancialCollections } = require('./financial-runtime-context');
+const {
+  resolveRidePersistenceScope,
+  assertStoredRecordMatchesScope
+} = require('./sandbox-persistence-context');
 
 const PAYMENT_LINK_TTL_SECONDS = Number.parseInt(
   process.env.PAYMENT_BOOKING_LINK_TTL_SECONDS || '172800',
@@ -164,9 +173,26 @@ async function markBookingPaymentConfirmed({
   temporaryRideId,
   amountInCents,
   paymentStatus = 'in_holding',
-  source = 'unknown'
+  source = 'unknown',
+  financialContext = null,
+  financialNamespace = null,
+  financialContextId = null,
+  providerEnvironment = null,
+  testUserSandbox
 }) {
   if (!bookingId) return;
+
+  const persistenceInput = {
+    financialContext,
+    financialNamespace,
+    financialContextId,
+    providerEnvironment
+  };
+  if (typeof testUserSandbox === 'boolean') {
+    persistenceInput.testUserSandbox = testUserSandbox;
+  }
+  const persistenceScope = resolveRidePersistenceScope(persistenceInput);
+  const resolvedFinancialContext = persistenceScope.financialContext;
 
   await redisPool.ensureConnection();
   const redis = redisPool.getConnection();
@@ -181,7 +207,12 @@ async function markBookingPaymentConfirmed({
       : '',
     paymentReferenceRideId: temporaryRideId || '',
     paymentConfirmedAt: nowIso,
-    paymentUpdatedBy: source
+    paymentUpdatedBy: source,
+    financialContext: JSON.stringify(resolvedFinancialContext),
+    financialNamespace: resolvedFinancialContext.namespace,
+    financialContextId: resolvedFinancialContext.contextId,
+    providerEnvironment: resolvedFinancialContext.providerEnvironment,
+    testUserSandbox: String(resolvedFinancialContext.testUserSandbox === true)
   };
 
   pipeline.hset(`booking:${bookingId}`, payload);
@@ -202,7 +233,12 @@ async function materializePaymentForBooking({
   amountInCents,
   passengerId = null,
   paymentStatus = 'in_holding',
-  source = 'unknown'
+  source = 'unknown',
+  financialContext = null,
+  financialNamespace = null,
+  financialContextId = null,
+  providerEnvironment = null,
+  testUserSandbox
 }) {
   const safeBookingId = String(bookingId || '').trim();
   const safeChargeId = String(chargeId || '').trim();
@@ -219,6 +255,21 @@ async function materializePaymentForBooking({
     };
   }
 
+  const persistenceInput = {
+    financialContext,
+    financialNamespace,
+    financialContextId,
+    providerEnvironment
+  };
+  if (typeof testUserSandbox === 'boolean') {
+    persistenceInput.testUserSandbox = testUserSandbox;
+  }
+  const persistenceScope = resolveRidePersistenceScope(persistenceInput);
+  const { context: resolvedFinancialContext, collections } = getFinancialCollections(
+    persistenceScope.financialContext,
+    { allowLegacyOperational: true }
+  );
+
   await redisPool.ensureConnection();
   const redis = redisPool.getConnection();
 
@@ -233,15 +284,17 @@ async function materializePaymentForBooking({
 
   if (firestore && safeTemporaryRideId) {
     const [holdingDoc, ridePaymentDoc] = await Promise.all([
-      firestore.collection('payment_holdings').doc(safeTemporaryRideId).get().catch(() => null),
-      firestore.collection('ride_payments').doc(safeTemporaryRideId).get().catch(() => null)
+      firestore.collection(collections.paymentHoldings).doc(safeTemporaryRideId).get().catch(() => null),
+      firestore.collection(collections.ridePayments).doc(safeTemporaryRideId).get().catch(() => null)
     ]);
 
     if (holdingDoc?.exists) {
       sourceHolding = holdingDoc.data() || null;
+      assertStoredRecordMatchesScope(sourceHolding, persistenceScope);
     }
     if (ridePaymentDoc?.exists) {
       sourceRidePayment = ridePaymentDoc.data() || null;
+      assertStoredRecordMatchesScope(sourceRidePayment, persistenceScope);
     }
   }
 
@@ -281,10 +334,13 @@ async function materializePaymentForBooking({
       materializedFrom: safeTemporaryRideId || null,
       materializedAt: serverTimestamp,
       materializedAtIso: nowIso,
-      updatedAt: serverTimestamp
+      updatedAt: serverTimestamp,
+      financialContext: resolvedFinancialContext,
+      financialNamespace: resolvedFinancialContext.namespace,
+      financialContextId: resolvedFinancialContext.contextId
     };
 
-    await firestore.collection('payment_holdings').doc(safeBookingId).set({
+    await firestore.collection(collections.paymentHoldings).doc(safeBookingId).set({
       ...(sourceHolding || {}),
       ...basePaymentReference,
       paymentMethod: sourceHolding?.paymentMethod || 'pix',
@@ -292,7 +348,7 @@ async function materializePaymentForBooking({
       confirmedAt: sourceHolding?.confirmedAt || nowIso
     }, { merge: true });
 
-    await firestore.collection('ride_payments').doc(safeBookingId).set({
+    await firestore.collection(collections.ridePayments).doc(safeBookingId).set({
       ...(sourceRidePayment || {}),
       rideId: safeBookingId,
       canonicalRideId: safeBookingId,
@@ -308,8 +364,54 @@ async function materializePaymentForBooking({
       materializedFrom: safeTemporaryRideId || null,
       materializedAt: serverTimestamp,
       materializedAtIso: nowIso,
-      updatedAt: serverTimestamp
+      updatedAt: serverTimestamp,
+      financialContext: resolvedFinancialContext,
+      financialNamespace: resolvedFinancialContext.namespace,
+      financialContextId: resolvedFinancialContext.contextId
     }, { merge: true });
+
+    if (resolvedFinancialContext.namespace === 'sandbox' && safeTemporaryRideId) {
+      const aliasReference = {
+        canonicalRideId: safeBookingId,
+        bookingId: safeBookingId,
+        temporaryRideId: safeTemporaryRideId,
+        paymentReferenceRideId: safeTemporaryRideId,
+        materializedAt: serverTimestamp,
+        materializedAtIso: nowIso,
+        updatedAt: serverTimestamp,
+        financialContext: resolvedFinancialContext,
+        financialNamespace: resolvedFinancialContext.namespace,
+        financialContextId: resolvedFinancialContext.contextId
+      };
+      const aliasWrites = [];
+      if (sourceHolding) {
+        aliasWrites.push(
+          firestore
+            .collection(collections.paymentHoldings)
+            .doc(safeTemporaryRideId)
+            .set(aliasReference, { merge: true })
+        );
+      }
+      if (sourceRidePayment) {
+        aliasWrites.push(
+          firestore
+            .collection(collections.ridePayments)
+            .doc(safeTemporaryRideId)
+            .set(aliasReference, { merge: true })
+        );
+      }
+
+      const aliasWriteResults = await Promise.allSettled(aliasWrites);
+      const failedAliasWrites = aliasWriteResults.filter((result) => result.status === 'rejected');
+      if (failedAliasWrites.length > 0) {
+        logStructured('warn', 'Falha ao marcar referência canônica nos aliases sandbox de pagamento', {
+          service: 'payment-dispatch-service',
+          bookingId: safeBookingId,
+          temporaryRideId: safeTemporaryRideId,
+          failedWrites: failedAliasWrites.length
+        });
+      }
+    }
   }
 
   await markBookingPaymentConfirmed({
@@ -318,7 +420,12 @@ async function materializePaymentForBooking({
     temporaryRideId: safeTemporaryRideId,
     amountInCents: roundedAmount,
     paymentStatus: normalizedStatus,
-    source
+    source,
+    financialContext: resolvedFinancialContext,
+    financialNamespace: resolvedFinancialContext.namespace,
+    financialContextId: resolvedFinancialContext.contextId,
+    providerEnvironment: resolvedFinancialContext.providerEnvironment,
+    testUserSandbox: resolvedFinancialContext.testUserSandbox === true
   });
 
   if (roundedAmount > 0) {
@@ -344,7 +451,10 @@ async function materializePaymentForBooking({
     bookingId: safeBookingId,
     temporaryRideId: safeTemporaryRideId || null,
     chargeId: resolvedChargeId || null,
-    amountInCents: roundedAmount
+    amountInCents: roundedAmount,
+    financialContext: resolvedFinancialContext,
+    financialNamespace: resolvedFinancialContext.namespace,
+    financialContextId: resolvedFinancialContext.contextId
   };
 }
 
@@ -353,7 +463,12 @@ async function triggerDispatchAttempt({
   io,
   pickupLocation = null,
   source = 'unknown',
-  force = false
+  force = false,
+  financialContext = null,
+  financialNamespace = null,
+  financialContextId = null,
+  providerEnvironment = null,
+  testUserSandbox
 }) {
   if (!bookingId) {
     return { success: false, skipped: true, reason: 'BOOKING_ID_MISSING' };
@@ -377,6 +492,34 @@ async function triggerDispatchAttempt({
     return { success: false, skipped: true, reason: 'BOOKING_NOT_FOUND' };
   }
 
+  const persistenceInput = {
+    financialContext,
+    financialNamespace,
+    financialContextId,
+    providerEnvironment
+  };
+  if (typeof testUserSandbox === 'boolean') {
+    persistenceInput.testUserSandbox = testUserSandbox;
+  }
+  const persistenceScope = resolveRidePersistenceScope(persistenceInput);
+  assertStoredRecordMatchesScope(bookingData, persistenceScope);
+
+  const paymentStatus = String(bookingData.paymentStatus || '').trim().toLowerCase();
+  const paymentLedgerStatus = String(bookingData.paymentLedgerStatus || bookingData.ledgerStatus || '').trim().toLowerCase();
+  if (
+    paymentStatus === 'ledger_pending' ||
+    paymentLedgerStatus === 'pending_retry' ||
+    paymentLedgerStatus === 'failed'
+  ) {
+    return {
+      success: false,
+      skipped: true,
+      reason: 'PAYMENT_LEDGER_PENDING',
+      paymentStatus: paymentStatus || null,
+      paymentLedgerStatus: paymentLedgerStatus || null
+    };
+  }
+
   const customerActiveCheck = await ensureCustomerActiveBooking(redis, bookingId, bookingData);
   if (!customerActiveCheck.ok) {
     return {
@@ -386,6 +529,46 @@ async function triggerDispatchAttempt({
       customerId: customerActiveCheck.customerId,
       activeBookingId: customerActiveCheck.activeBookingId
     };
+  }
+
+  const paymentDriverReservationId = String(bookingData.paymentDriverReservationId || '').trim();
+  if (paymentDriverReservationId) {
+    const reservationValidation = await validatePaymentDriverReservation({
+      redis,
+      reservationId: paymentDriverReservationId,
+      passengerId: bookingData.customerId,
+      rideId: bookingData.paymentReferenceRideId,
+      paymentSessionId: bookingData.paymentSessionId,
+      quoteLockId: bookingData.paymentQuoteLockId,
+      bookingId
+    });
+
+    if (!reservationValidation.success) {
+      await redis.hset(bookingKey, {
+        paymentDispatchBlockedReason: reservationValidation.code || 'PAYMENT_DRIVER_RESERVATION_INVALID',
+        paymentDispatchBlockedAt: new Date().toISOString()
+      }).catch(() => null);
+
+      return {
+        success: false,
+        skipped: true,
+        reason: reservationValidation.code || 'PAYMENT_DRIVER_RESERVATION_INVALID',
+        paymentDriverReservationId
+      };
+    }
+
+    await consumePaymentDriverReservationForBooking({
+      redis,
+      reservationId: paymentDriverReservationId,
+      bookingId
+    }).catch((error) => {
+      logStructured('warn', 'Falha ao consumir reserva de motorista no dispatch pós-pagamento', {
+        service: 'payment-dispatch-service',
+        bookingId,
+        paymentDriverReservationId,
+        error: error.message
+      });
+    });
   }
 
   const state = await RideStateManager.getBookingState(redis, bookingId);

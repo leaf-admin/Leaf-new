@@ -1,4 +1,8 @@
-function registerSocketFcmHandlers({ socket, redisPool, fcmService, logStructured, logError }) {
+const RideLiveActivityService = require('../services/ride-live-activity-service');
+
+function registerSocketFcmHandlers({ socket, redisPool, fcmService, rideLiveActivityService = null, logStructured, logError }) {
+    const liveActivityService = rideLiveActivityService || new RideLiveActivityService();
+
     // ==================== NOVOS EVENTOS - NOTIFICAÇÕES FCM ====================
     // REGISTRAR IMEDIATAMENTE PARA NÃO PERDER EVENTOS DO CLIENTE
     socket.on('registerFCMToken', async (data) => {
@@ -13,7 +17,7 @@ function registerSocketFcmHandlers({ socket, redisPool, fcmService, logStructure
                 platform: payload.platform
             });
 
-            const { fcmToken, platform } = payload;
+            const { fcmToken, platform, deviceId } = payload;
 
             if (!fcmToken) {
                 logStructured('error', `Token FCM não fornecido`, { service: 'registerFCMToken' });
@@ -34,6 +38,7 @@ function registerSocketFcmHandlers({ socket, redisPool, fcmService, logStructure
                 fcmToken: fcmToken,
                 fcmTokenUpdated: new Date().toISOString(),
                 fcmPlatform: platform || 'unknown',
+                fcmDeviceId: String(deviceId || '').trim(),
                 isTemporary: (!isAuthenticated).toString(),
                 socketId: socket.id
             });
@@ -47,6 +52,7 @@ function registerSocketFcmHandlers({ socket, redisPool, fcmService, logStructure
 
                 await fcmService.saveUserFCMToken(effectiveUserId, effectiveUserType, fcmToken, {
                     platform,
+                    deviceId: String(deviceId || '').trim() || null,
                     isTemporary: !isAuthenticated,
                     socketId: socket.id,
                     authenticated: isAuthenticated,
@@ -82,6 +88,44 @@ function registerSocketFcmHandlers({ socket, redisPool, fcmService, logStructure
         } catch (error) {
             logError(error, 'Erro ao desregistrar token FCM', { service: 'unregisterFCMToken' });
             socket.emit('fcmTokenError', { error: 'Erro interno do servidor: ' + error.message });
+        }
+    });
+
+    socket.on('registerRideLiveActivityToken', async (data) => {
+        try {
+            const payload = data || {};
+            const { pushToken, platform } = payload;
+
+            if (!pushToken) {
+                socket.emit('rideLiveActivityTokenError', { error: 'Token Live Activity é obrigatório' });
+                return;
+            }
+
+            const isAuthenticated = Boolean(socket.userId);
+            const effectiveUserId = isAuthenticated ? socket.userId : `temp_${socket.id}`;
+            const effectiveUserType = isAuthenticated ? (socket.userType || 'customer') : 'temporary';
+            const redis = redisPool.getConnection();
+            liveActivityService.setRedis(redis);
+
+            const result = await liveActivityService.saveToken(effectiveUserId, effectiveUserType, {
+                ...payload,
+                platform: platform || 'ios'
+            });
+
+            if (!result.success) {
+                socket.emit('rideLiveActivityTokenError', { error: result.error || 'Falha ao registrar Live Activity' });
+                return;
+            }
+
+            socket.emit('rideLiveActivityTokenRegistered', {
+                success: true,
+                userId: effectiveUserId,
+                activityId: result.activityId,
+                bookingId: result.bookingId
+            });
+        } catch (error) {
+            logError(error, 'Erro ao registrar token Live Activity', { service: 'registerRideLiveActivityToken', userId: socket.userId || null });
+            socket.emit('rideLiveActivityTokenError', { error: 'Erro interno do servidor: ' + error.message });
         }
     });
     // ==========================================================================

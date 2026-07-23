@@ -49,6 +49,7 @@ function normalizeSkuLabel(key, entry = {}) {
     geocoding: 'Geocoding',
     directionsLegacy: 'Directions/Routes',
     directionsAdvancedLegacy: 'Directions/Routes com trânsito',
+    routesPreferredTrafficAwarePolyline: 'Routes com trânsito por segmento',
     distanceMatrixLegacyElement: 'Distance Matrix'
   };
   return labels[key] || key;

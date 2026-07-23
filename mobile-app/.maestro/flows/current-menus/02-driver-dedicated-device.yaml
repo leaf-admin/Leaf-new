@@ -1,0 +1,290 @@
+# CURRENT_PRODUCT_ONLY: driver menu audit on an already-authenticated dedicated device.
+appId: br.com.leaf.ride
+name: Driver CURRENT menu audit - dedicated device
+tags:
+  - current
+  - menu
+  - driver
+  - dedicated-device
+---
+- openLink: "leafapp://robotaxi/home"
+
+- runFlow:
+    when:
+      visible: "Abrir com \".*Leaf.*\"\\?"
+    commands:
+      - tapOn: "Abrir"
+- runFlow:
+    when:
+      visible: "Abrir"
+    commands:
+      - tapOn: "Abrir"
+- runFlow:
+    when:
+      visible: "Open"
+    commands:
+      - tapOn: "Open"
+
+- extendedWaitUntil:
+    visible:
+      id: "driver-home-toggle-online"
+    timeout: 30000
+
+# Ganhos: read-only visit; never open the withdrawal flow.
+- tapOn:
+    id: "prototype-top-right-control"
+- assertVisible:
+    id: "robotaxi-menu-screen"
+- scrollUntilVisible:
+    element:
+      id: "robotaxi-menu-item-driver-earnings"
+    direction: DOWN
+- tapOn:
+    id: "robotaxi-menu-item-driver-earnings"
+- extendedWaitUntil:
+    visible:
+      id: "driver-earnings-screen"
+    timeout: 30000
+- tapOn:
+    id: "driver-earnings-close-button"
+- assertVisible:
+    id: "robotaxi-menu-screen"
+- tapOn:
+    id: "robotaxi-menu-close-button"
+- extendedWaitUntil:
+    visible:
+      id: "driver-home-toggle-online"
+    timeout: 30000
+
+# Corridas concluídas: read-only CURRENT summary.
+- tapOn:
+    id: "prototype-top-right-control"
+- assertVisible:
+    id: "robotaxi-menu-screen"
+- scrollUntilVisible:
+    element:
+      id: "robotaxi-menu-item-driver-history"
+    direction: DOWN
+- tapOn:
+    id: "robotaxi-menu-item-driver-history"
+- assertVisible:
+    id: "robotaxi-trip-history-screen"
+- assertVisible: "Viagens"
+- assertVisible: "Recibos recentes"
+- tapOn: "Fechar"
+- extendedWaitUntil:
+    visible:
+      id: "driver-home-toggle-online"
+    timeout: 30000
+
+# Ativação: never continue document upload.
+- tapOn:
+    id: "prototype-top-right-control"
+- assertVisible:
+    id: "robotaxi-menu-screen"
+- scrollUntilVisible:
+    element:
+      id: "robotaxi-menu-item-driver-activation"
+    direction: DOWN
+- tapOn:
+    id: "robotaxi-menu-item-driver-activation"
+- assertVisible: "Ativação do motorista"
+- tapOn: "Fechar ativação"
+- extendedWaitUntil:
+    visible:
+      id: "driver-home-toggle-online"
+    timeout: 30000
+
+# Documentos: inspect synchronization/empty state only.
+- tapOn:
+    id: "prototype-top-right-control"
+- assertVisible:
+    id: "robotaxi-menu-screen"
+- scrollUntilVisible:
+    element:
+      id: "robotaxi-menu-item-driver-documents"
+    direction: DOWN
+- tapOn:
+    id: "robotaxi-menu-item-driver-documents"
+- assertVisible:
+    id: "robotaxi-driver-documents-screen"
+- extendedWaitUntil:
+    visible: "Resumo"
+    timeout: 30000
+- tapOn:
+    id: "robotaxi-driver-documents-close-button"
+- extendedWaitUntil:
+    visible:
+      id: "driver-home-toggle-online"
+    timeout: 30000
+
+# Veículos: accept data, empty, or the honest remote-error state; never mutate vehicles.
+- tapOn:
+    id: "prototype-top-right-control"
+- assertVisible:
+    id: "robotaxi-menu-screen"
+- scrollUntilVisible:
+    element:
+      id: "robotaxi-menu-item-driver-vehicles"
+    direction: DOWN
+- tapOn:
+    id: "robotaxi-menu-item-driver-vehicles"
+- assertVisible:
+    id: "robotaxi-vehicles-screen"
+- extendedWaitUntil:
+    visible:
+      id: "(robotaxi-vehicles-error|robotaxi-vehicles-empty-state|robotaxi-vehicle-.*)"
+    timeout: 30000
+- runFlow:
+    when:
+      visible:
+        id: "robotaxi-vehicles-error"
+    commands:
+      - assertVisible:
+          id: "robotaxi-vehicles-error"
+- tapOn:
+    id: "robotaxi-vehicles-close-button"
+- extendedWaitUntil:
+    visible:
+      id: "driver-home-toggle-online"
+    timeout: 30000
+
+# Waitlist: visit status only; never join, invite, copy, or share.
+- tapOn:
+    id: "prototype-top-right-control"
+- assertVisible:
+    id: "robotaxi-menu-screen"
+- scrollUntilVisible:
+    element:
+      id: "robotaxi-menu-item-driver-waitlist-invites"
+    direction: DOWN
+- tapOn:
+    id: "robotaxi-menu-item-driver-waitlist-invites"
+- assertVisible:
+    id: "robotaxi-driver-waitlist-screen"
+- extendedWaitUntil:
+    visible:
+      id: "(robotaxi-driver-waitlist-unavailable-state|robotaxi-driver-waitlist-city-input)"
+    timeout: 30000
+- runFlow:
+    when:
+      visible:
+        id: "robotaxi-driver-waitlist-unavailable-state"
+    commands:
+      - assertVisible:
+          id: "robotaxi-driver-waitlist-unavailable-state"
+- tapOn:
+    id: "robotaxi-driver-waitlist-close-button"
+- extendedWaitUntil:
+    visible:
+      id: "driver-home-toggle-online"
+    timeout: 30000
+
+# Perfil: accept the CURRENT editor or its honest remote-error state.
+- tapOn:
+    id: "prototype-top-right-control"
+- assertVisible:
+    id: "robotaxi-menu-screen"
+- scrollUntilVisible:
+    element:
+      id: "robotaxi-menu-item-edit-profile"
+    direction: DOWN
+- tapOn:
+    id: "robotaxi-menu-item-edit-profile"
+- extendedWaitUntil:
+    visible:
+      id: "robotaxi-profile-screen"
+    timeout: 30000
+- runFlow:
+    when:
+      visible:
+        id: "robotaxi-profile-error"
+    commands:
+      - assertVisible:
+          id: "robotaxi-profile-error"
+- tapOn: "Fechar perfil"
+- extendedWaitUntil:
+    visible:
+      id: "driver-home-toggle-online"
+    timeout: 30000
+
+# Privacidade: never tap the account-deletion action.
+- tapOn:
+    id: "prototype-top-right-control"
+- assertVisible:
+    id: "robotaxi-menu-screen"
+- scrollUntilVisible:
+    element:
+      id: "robotaxi-menu-item-privacy-account-deletion"
+    direction: DOWN
+- tapOn:
+    id: "robotaxi-menu-item-privacy-account-deletion"
+- assertVisible:
+    id: "privacy-policy-screen"
+- tapOn: "Voltar"
+- extendedWaitUntil:
+    visible:
+      id: "driver-home-toggle-online"
+    timeout: 30000
+
+# Configurações: assert current account actions without invoking logout/deletion/support.
+- tapOn:
+    id: "prototype-top-right-control"
+- assertVisible:
+    id: "robotaxi-menu-screen"
+- scrollUntilVisible:
+    element:
+      id: "robotaxi-menu-item-settings"
+    direction: DOWN
+- tapOn:
+    id: "robotaxi-menu-item-settings"
+- assertVisible:
+    id: "robotaxi-settings-screen"
+- assertVisible:
+    id: "robotaxi-settings-row-privacy"
+- assertVisible:
+    id: "robotaxi-settings-row-logout"
+- assertVisible:
+    id: "robotaxi-settings-row-delete-account"
+- assertVisible:
+    id: "robotaxi-settings-open-support"
+- assertNotVisible:
+    id: "robotaxi-settings-row-notifications"
+- assertNotVisible:
+    id: "robotaxi-settings-row-language"
+- assertNotVisible:
+    id: "robotaxi-settings-row-traffic"
+- assertNotVisible:
+    id: "robotaxi-settings-row-voice"
+- tapOn:
+    id: "robotaxi-settings-close-button"
+- extendedWaitUntil:
+    visible:
+      id: "driver-home-toggle-online"
+    timeout: 30000
+
+# Ajuda: visit the CURRENT surface without creating tickets or incidents.
+- tapOn:
+    id: "prototype-top-right-control"
+- assertVisible:
+    id: "robotaxi-menu-screen"
+- swipe:
+    direction: UP
+    duration: 500
+- swipe:
+    direction: UP
+    duration: 500
+- scrollUntilVisible:
+    element:
+      id: "robotaxi-menu-item-help"
+    direction: DOWN
+- tapOn:
+    id: "robotaxi-menu-item-help"
+- assertVisible:
+    id: "robotaxi-support-screen"
+- tapOn:
+    id: "robotaxi-support-close-button"
+- extendedWaitUntil:
+    visible:
+      id: "driver-home-toggle-online"
+    timeout: 30000

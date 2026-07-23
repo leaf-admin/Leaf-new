@@ -130,9 +130,14 @@ Expected result:
 - payment runtime canary confirms sandbox;
 - pickup/destination pass geofence;
 - generated artifacts include:
+  - `preflight-summary.json`
   - `smoke-env.sh`
+  - `start-driver-emulator.sh`
+  - `verify-android-role-runtimes.sh`
   - `start-driver-bot.sh`
   - `run-android-smoke.sh`
+- Android role runtime evidence records `ANDROID_EMULATOR_STABILITY_SECONDS`;
+  release L2 uses the default 60 seconds or stricter.
 
 If the payment runtime canary fails with `effectiveEnvironment=production`,
 stop here and reactivate a short-lived sandbox profile for the test passenger
@@ -142,27 +147,22 @@ Prepared command, only after explicit authorization for the backend runtime
 mutation:
 
 ```bash
-ADMIN_TOKEN="$(jq -r '.accessToken // .token // .adminAccessToken // .session.accessToken // .session.token // empty' ~/.leaf/dashboard-session.json)"
-EXPIRES_AT="$(node -e "console.log(new Date(Date.now() + 6 * 60 * 60 * 1000).toISOString())")"
+DRY_RUN=true \
+PASSENGER_UID=3tEQ8pQ2QzeWbMKhLGsXHHhnOGL2 \
+PASSENGER_PHONE=21102938475 \
+PAYMENT_RUNTIME_PROFILE_TTL_HOURS=6 \
+bash mobile-app/scripts/qa/activate-payment-runtime-sandbox-profile.sh
+```
 
-curl -fsS -X POST "https://api.leaf.app.br/api/payment/runtime-profiles" \
-  -H "authorization: Bearer ${ADMIN_TOKEN}" \
-  -H "content-type: application/json" \
-  -d "$(jq -n \
-    --arg expiresAtIso "${EXPIRES_AT}" \
-    '{
-      profileId: "real-smoke-passenger-sandbox",
-      name: "Real smoke passenger sandbox",
-      provider: "woovi",
-      environment: "sandbox",
-      status: "active",
-      scope: "canary",
-      priority: 100,
-      reason: "real_smoke_payment_runtime",
-      userIds: ["3tEQ8pQ2QzeWbMKhLGsXHHhnOGL2"],
-      phones: ["21102938475", "5521102938475"],
-      expiresAtIso: $expiresAtIso
-    }')" | jq .
+After checking the generated payload and receiving explicit authorization:
+
+```bash
+DRY_RUN=false \
+CONFIRM_PAYMENT_RUNTIME_MUTATION=true \
+PASSENGER_UID=3tEQ8pQ2QzeWbMKhLGsXHHhnOGL2 \
+PASSENGER_PHONE=21102938475 \
+PAYMENT_RUNTIME_PROFILE_TTL_HOURS=6 \
+bash mobile-app/scripts/qa/activate-payment-runtime-sandbox-profile.sh
 ```
 
 Then rerun:
@@ -175,6 +175,32 @@ bash mobile-app/scripts/qa/assert-backend-payment-runtime-canary.sh \
   https://api.leaf.app.br \
   /tmp/leaf-payment-runtime-canary.json
 ```
+
+Before L2 ride smoke, validate Android app-to-app runtimes with matching app
+versions:
+
+```bash
+cd mobile-app
+source scripts/source-local-build-env.sh
+bash scripts/build-local-android.sh debug
+
+cd ..
+OUTPUT_DIR=/tmp/leaf-android-role-runtime-ready \
+START_DRIVER_EMULATOR=true \
+REQUIRE_RUNNING_ANDROID_EMULATOR=true \
+FORCE_INSTALL_DRIVER_APK=true \
+ANDROID_DRIVER_APK=mobile-app/android/app/build/outputs/apk/debug/app-debug.apk \
+bash mobile-app/scripts/qa/verify-android-role-runtimes.sh
+```
+
+The verifier must record the physical passenger device and driver emulator in
+`android-role-runtime-verification.json` with the same `versionName` and
+`versionCode`. If passenger and driver differ, stop before smoke.
+
+`prepare-real-smoke-env.sh` also auto-detects a local driver APK that matches the
+connected passenger app version. When the match exists, generated smoke helpers
+export `ANDROID_DRIVER_APK` and default `FORCE_INSTALL_DRIVER_APK=true`, so the
+driver emulator is refreshed before the L2 runtime verifier runs.
 
 If the device location must be used instead of canonical Rio coordinates, set:
 

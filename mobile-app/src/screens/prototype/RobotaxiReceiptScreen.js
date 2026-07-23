@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ScrollView,
   StatusBar,
@@ -13,7 +13,6 @@ import { Ionicons } from "@expo/vector-icons";
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from "react-native-maps";
 import { StackActions, useIsFocused } from "@react-navigation/native";
 import { fonts } from "../../theme/runtimeTokens";
-import SecurePaymentBadge from "../../components/payment/SecurePaymentBadge";
 import PrototypeScreenTransition from "../../components/prototype/PrototypeScreenTransition";
 import {
   PrototypeCard,
@@ -78,6 +77,22 @@ function formatDurationMin(value) {
   return `${numeric} min`;
 }
 
+function asPlainObject(value) {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value
+    : {};
+}
+
+function firstNonEmptyText(...values) {
+  for (const value of values) {
+    const normalized = String(value || "").trim();
+    if (normalized) {
+      return normalized;
+    }
+  }
+  return "";
+}
+
 function formatPaymentMethod(method) {
   const normalized = String(method || "")
     .trim()
@@ -88,8 +103,12 @@ function formatPaymentMethod(method) {
   return "PIX confirmado";
 }
 
+function decodePersistedSlashEntities(value = "") {
+  return String(value || "").replace(/&#(?:x0*2f|0*47);/gi, "/");
+}
+
 function splitLocationLabel(label = "") {
-  const clean = String(label || "").trim();
+  const clean = decodePersistedSlashEntities(label).trim();
   if (!clean) {
     return {
       title: "Endereço indisponível",
@@ -255,7 +274,13 @@ function buildRouteReceiptFromParams(params = {}) {
     return null;
   }
 
-  const id = String(params.receiptId || "").trim();
+  const id = String(
+    params.receiptId ||
+      params.bookingId ||
+      params.rideId ||
+      params.tripId ||
+      "",
+  ).trim();
   const fare = toNumber(params.fare || params.grossAmount || params.value, NaN);
   const driverName = String(params.driverName || "").trim();
   const passengerName = String(params.passengerName || "").trim();
@@ -322,14 +347,283 @@ function buildRouteReceiptFromParams(params = {}) {
   };
 }
 
+function normalizeReceiptViewerRole(value) {
+  const normalized = String(value || "")
+    .trim()
+    .toLowerCase();
+
+  if (["driver", "motorista"].includes(normalized)) {
+    return "driver";
+  }
+
+  if (["passenger", "customer", "rider", "passageiro", "cliente"].includes(normalized)) {
+    return "passenger";
+  }
+
+  return "";
+}
+
+function isTruthySnapshotFlag(value) {
+  if (value === true) {
+    return true;
+  }
+
+  return ["1", "true", "yes", "sim"].includes(
+    String(value || "").trim().toLowerCase(),
+  );
+}
+
+function hasBackendFinalReceiptFinancialContract(receipt, grossAmount) {
+  return Boolean(
+    receipt?.id &&
+      grossAmount > 0 &&
+      isTruthySnapshotFlag(receipt?.authoritativeSnapshot) &&
+      String(receipt?.financialSnapshotSource || "").trim() === "backend_final",
+  );
+}
+
+function firstFiniteMoney(...values) {
+  for (const value of values) {
+    if (value === null || value === undefined || value === "") {
+      continue;
+    }
+    const numeric = Number(value);
+    if (Number.isFinite(numeric) && numeric >= 0) {
+      return numeric;
+    }
+  }
+
+  return null;
+}
+
+function resolveCanonicalOperationalInterruptionSettlement(receipt = {}) {
+  const continuationStatus = String(
+    receipt?.operationalContinuation?.status || "",
+  )
+    .trim()
+    .toUpperCase();
+  const rideLegs = Array.isArray(receipt?.rideLegs)
+    ? receipt.rideLegs
+    : Array.isArray(receipt?.settlement?.rideLegSettlements)
+      ? receipt.settlement.rideLegSettlements
+      : [];
+  const hasCanonicalInterruptedRideLeg = rideLegs.some((rideLeg) => {
+    const source = String(rideLeg?.source || "").trim().toLowerCase();
+    const settlementType = String(
+      rideLeg?.metadata?.settlementType || "",
+    )
+      .trim()
+      .toUpperCase();
+    return (
+      source === "operational_interrupt" &&
+      settlementType === "INTERRUPTED_OPERATIONAL"
+    );
+  });
+
+  if (
+    continuationStatus !== "PASSENGER_ENDED_RIDE" ||
+    !hasCanonicalInterruptedRideLeg
+  ) {
+    return null;
+  }
+
+  const originalPaidAmount = firstFiniteMoney(
+    receipt?.originalPaidAmount,
+    receipt?.settlement?.prepaidAmount,
+    receipt?.settlement?.originalFare,
+  );
+  const refundAmount = firstFiniteMoney(
+    receipt?.estimatedRefund,
+    receipt?.settlement?.estimatedRefund,
+    receipt?.operationalContinuation?.estimatedRefund,
+    receipt?.remainingReservedAmount,
+    receipt?.settlement?.remainingReservedAmount,
+    receipt?.operationalContinuation?.remainingReservedAmount,
+  );
+  const finalAmount = firstFiniteMoney(
+    receipt?.finalFare,
+    receipt?.fare,
+    receipt?.grossAmount,
+  );
+
+  if (
+    originalPaidAmount === null ||
+    refundAmount === null ||
+    finalAmount === null
+  ) {
+    return null;
+  }
+
+  const refundStatus = String(
+    receipt?.refundStatus ||
+      receipt?.settlement?.refundStatus ||
+      receipt?.operationalContinuation?.refundStatus ||
+      "",
+  )
+    .trim()
+    .toUpperCase();
+
+  return {
+    originalPaidAmount,
+    refundAmount,
+    finalAmount,
+    refundLabel: ["PENDING", "PROCESSING", "REQUESTED", "INITIATED"].includes(
+      refundStatus,
+    )
+      ? "Reembolso pendente"
+      : "Reembolso estimado",
+  };
+}
+
+function normalizeReceiptIdentityVariants(value) {
+  const raw = String(value || "").trim();
+  if (!raw) {
+    return [];
+  }
+
+  const variants = new Set([raw]);
+  if (raw.startsWith("LEAF-")) {
+    variants.add(raw.slice(5));
+  }
+
+  return Array.from(variants).filter(Boolean);
+}
+
+function collectReceiptIdentityIds(value = {}) {
+  return [
+    value?.id,
+    value?.bookingId,
+    value?.rideId,
+    value?.tripId,
+    value?.receiptId,
+  ]
+    .flatMap(normalizeReceiptIdentityVariants)
+    .filter(Boolean);
+}
+
+function findBackendFinalRuntimeReceipt({ routeReceipt, routeParams, lastReceipt, runtimeHistory }) {
+  const lookupIds = new Set([
+    ...collectReceiptIdentityIds(routeReceipt),
+    ...collectReceiptIdentityIds(routeParams),
+  ]);
+  const runtimeCandidates = [lastReceipt, ...(Array.isArray(runtimeHistory) ? runtimeHistory : [])]
+    .filter(Boolean);
+
+  if (lookupIds.size > 0) {
+    const matchedReceipt = runtimeCandidates.find((receipt) => {
+      const receiptIds = collectReceiptIdentityIds(receipt);
+      const sameReceipt = receiptIds.some((id) => lookupIds.has(id));
+      if (!sameReceipt) {
+        return false;
+      }
+
+      return hasBackendFinalReceiptFinancialContract(
+        receipt,
+        Math.max(0, resolveTripGrossAmount(receipt)),
+      );
+    });
+
+    if (matchedReceipt) {
+      return matchedReceipt;
+    }
+  }
+
+  if (routeParams?.fromTrip) {
+    return (
+      runtimeCandidates.find((receipt) =>
+        hasBackendFinalReceiptFinancialContract(
+          receipt,
+          Math.max(0, resolveTripGrossAmount(receipt)),
+        ),
+      ) || null
+    );
+  }
+
+  return null;
+}
+
+function resolveReceiptParticipantId(receipt = {}, keys = []) {
+  for (const key of keys) {
+    const value = key
+      .split(".")
+      .reduce((current, part) => (current && current[part] != null ? current[part] : null), receipt);
+    const normalized = String(value || "").trim();
+    if (normalized) {
+      return normalized;
+    }
+  }
+
+  return "";
+}
+
+function resolveReceiptViewerRole({
+  routeParams,
+  receipt,
+  profile,
+  profileUid,
+  activeRole,
+}) {
+  const explicitRouteRole = normalizeReceiptViewerRole(
+    routeParams?.receiptRole ||
+      routeParams?.viewerRole ||
+      routeParams?.activeRole ||
+      routeParams?.role ||
+      routeParams?.reviewerType,
+  );
+  if (explicitRouteRole) {
+    return explicitRouteRole;
+  }
+
+  const currentUid = String(profile?.uid || profileUid || "").trim();
+  if (currentUid && receipt) {
+    const receiptDriverId = resolveReceiptParticipantId(receipt, [
+      "driverId",
+      "driver.id",
+      "driver.uid",
+      "driver.userId",
+    ]);
+    if (receiptDriverId && receiptDriverId === currentUid) {
+      return "driver";
+    }
+
+    const receiptPassengerId = resolveReceiptParticipantId(receipt, [
+      "passengerId",
+      "customerId",
+      "riderId",
+      "passenger.id",
+      "passenger.uid",
+      "customer.id",
+      "customer.uid",
+    ]);
+    if (receiptPassengerId && receiptPassengerId === currentUid) {
+      return "passenger";
+    }
+  }
+
+  const receiptRole = normalizeReceiptViewerRole(
+    receipt?.viewerRole ||
+      receipt?.receiptRole ||
+      receipt?.ownerRole ||
+      receipt?.role,
+  );
+  if (receiptRole) {
+    return receiptRole;
+  }
+
+  return normalizeReceiptViewerRole(activeRole) || "passenger";
+}
+
 export default function RobotaxiReceiptScreen({ navigation, route }) {
   const {
     tripHistory,
     lastReceipt,
     activeRole,
+    profile,
+    profileUid,
     driverInfo,
     driverTripMeta,
     dismissCompletedReceipt,
+    recoverCompletedReceipt,
   } =
     usePrototypeRideRuntime();
   const insets = useSafeAreaInsets();
@@ -337,6 +631,8 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
   const { height: windowHeight } = useWindowDimensions();
   const [cardHeight, setCardHeight] = useState(FALLBACK_CARD_HEIGHT);
   const [showFeeBreakdown, setShowFeeBreakdown] = useState(false);
+  const [receiptOptionsVisible, setReceiptOptionsVisible] = useState(false);
+  const [receiptRecoveryState, setReceiptRecoveryState] = useState("idle");
   const runtimeHistory = Array.isArray(tripHistory) ? tripHistory : [];
   const routeReceipt =
     parseRouteReceipt(route?.params?.receipt) ||
@@ -345,13 +641,24 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
     routeReceipt?.id || lastReceipt?.id || runtimeHistory[0]?.id || null,
   );
   const fromTrip = Boolean(route?.params?.fromTrip);
-  const routeActiveRole = String(route?.params?.activeRole || "").trim();
-  const isDriverView = routeActiveRole
-    ? routeActiveRole === "driver"
-    : activeRole === "driver";
-  const compactDriverLayout = isDriverView && windowHeight <= 920;
+  const terminalExitRef = useRef(false);
+  const authoritativeRuntimeReceipt = useMemo(
+    () =>
+      findBackendFinalRuntimeReceipt({
+        routeReceipt,
+        routeParams: route?.params,
+        lastReceipt,
+        runtimeHistory,
+      }),
+    [lastReceipt, route?.params, routeReceipt, runtimeHistory],
+  );
 
   useEffect(() => {
+    if (authoritativeRuntimeReceipt?.id) {
+      setSelectedId(authoritativeRuntimeReceipt.id);
+      return;
+    }
+
     if (routeReceipt?.id) {
       setSelectedId(routeReceipt.id);
       return;
@@ -368,13 +675,23 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
     ) {
       setSelectedId(runtimeHistory[0].id);
     }
-  }, [lastReceipt?.id, routeReceipt?.id, runtimeHistory, selectedId]);
+  }, [
+    authoritativeRuntimeReceipt?.id,
+    lastReceipt?.id,
+    routeReceipt?.id,
+    runtimeHistory,
+    selectedId,
+  ]);
 
   useEffect(() => {
     setShowFeeBreakdown(false);
   }, [selectedId, lastReceipt?.id]);
 
   const selected = useMemo(() => {
+    if (authoritativeRuntimeReceipt?.id) {
+      return authoritativeRuntimeReceipt;
+    }
+
     if (routeReceipt?.id && selectedId === routeReceipt.id) {
       return routeReceipt;
     }
@@ -395,12 +712,100 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
     }
 
     return runtimeHistory[0] || routeReceipt || null;
-  }, [lastReceipt, routeReceipt, runtimeHistory, selectedId]);
+  }, [authoritativeRuntimeReceipt, lastReceipt, routeReceipt, runtimeHistory, selectedId]);
+  const viewerRole = resolveReceiptViewerRole({
+    routeParams: route?.params,
+    receipt: selected,
+    profile,
+    profileUid,
+    activeRole,
+  });
+  const isDriverView = viewerRole === "driver";
+  const compactDriverLayout = isDriverView && windowHeight <= 920;
+  const hasSelectedReceipt = Boolean(selected?.id);
+  const resolvedGrossAmount = Math.max(0, resolveTripGrossAmount(selected));
+  const hasReceiptFinancialContract = hasBackendFinalReceiptFinancialContract(
+    selected,
+    resolvedGrossAmount,
+  );
+  const operationalInterruptionSettlement = hasReceiptFinancialContract
+    ? resolveCanonicalOperationalInterruptionSettlement(selected)
+    : null;
+  const showPassengerOperationalSettlement = Boolean(
+    !isDriverView && operationalInterruptionSettlement,
+  );
+  const receiptNeedsRecovery = Boolean(
+    !hasSelectedReceipt || !hasReceiptFinancialContract,
+  );
+
+  useEffect(() => {
+    setReceiptRecoveryState("idle");
+  }, [selected?.id]);
+
+  useEffect(() => {
+    if (
+      (!fromTrip && !hasSelectedReceipt) ||
+      !receiptNeedsRecovery ||
+      receiptRecoveryState !== "idle" ||
+      typeof recoverCompletedReceipt !== "function"
+    ) {
+      return undefined;
+    }
+
+    let cancelled = false;
+    const recoveryReason = hasSelectedReceipt
+      ? "receipt_screen_incomplete_financial_contract"
+      : "receipt_screen_missing_payload";
+    setReceiptRecoveryState("loading");
+
+    const explicitBookingId = String(
+      selected?.bookingId ||
+        selected?.id ||
+        route?.params?.bookingId ||
+        route?.params?.rideId ||
+        route?.params?.tripId ||
+        route?.params?.receiptId ||
+        "",
+    ).trim();
+
+    recoverCompletedReceipt({
+      reason: recoveryReason,
+      ...(explicitBookingId ? { explicitBookingId } : {}),
+    })
+      .then((result) => {
+        if (cancelled) {
+          return;
+        }
+        setReceiptRecoveryState(result?.recovered ? "recovered" : "failed");
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setReceiptRecoveryState("failed");
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    fromTrip,
+    hasSelectedReceipt,
+    receiptNeedsRecovery,
+    receiptRecoveryState,
+    recoverCompletedReceipt,
+    route?.params?.bookingId,
+    route?.params?.receiptId,
+    route?.params?.rideId,
+    route?.params?.tripId,
+    selected?.id,
+    selected?.bookingId,
+  ]);
 
   const openRatingScreen = useCallback(
     (params) => {
-      if (typeof navigation.navigate === "function") {
-        navigation.navigate("RobotaxiPrototypeRating", params);
+      terminalExitRef.current = true;
+      if (typeof navigation.replace === "function") {
+        navigation.replace("RobotaxiPrototypeRating", params);
         return;
       }
 
@@ -456,7 +861,7 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
 
   const rawBaseFare = toNumber(selected?.baseFare, NaN);
   const rawVariableFare = toNumber(selected?.variableFare, NaN);
-  const totalAmount = Math.max(0, resolveTripGrossAmount(selected));
+  const totalAmount = hasReceiptFinancialContract ? resolvedGrossAmount : 0;
   const tollAmount = resolveTripTollAmount(selected);
   const hasExplicitBreakdown =
     Number.isFinite(rawBaseFare) &&
@@ -468,7 +873,9 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
   const variableAmount = hasExplicitBreakdown
     ? rawVariableFare
     : Number(Math.max(0, totalAmount - fareAmount).toFixed(2));
-  const totalAmountLabel = formatCurrency(totalAmount);
+  const totalAmountLabel = hasReceiptFinancialContract
+    ? formatCurrency(totalAmount)
+    : "--";
   const finalOperationalFee = toNumber(selected?.operationalFee, NaN);
   const finalIntermediationFee = toNumber(
     selected?.paymentIntermediationFee,
@@ -478,18 +885,24 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
   const finalTotalFees = toNumber(resolvedFeeAmount, NaN);
   const resolvedDriverNetAmount = resolveTripNetAmountOrNull(selected);
   const finalDriverNetAmount = toNumber(resolvedDriverNetAmount, NaN);
-  const hasDriverNetAmount = resolvedDriverNetAmount !== null;
+  const hasDriverNetAmount =
+    hasReceiptFinancialContract && resolvedDriverNetAmount !== null;
   const safeFeeAmount = Number.isFinite(finalTotalFees) ? finalTotalFees : 0;
   const safeTollAmount = Number.isFinite(tollAmount) ? tollAmount : 0;
   const passengerRideSubtotal = Math.max(
     0,
     Number((totalAmount - safeFeeAmount - safeTollAmount).toFixed(2)),
   );
+  const formatReceiptMoney = useCallback(
+    (value) => (hasReceiptFinancialContract ? formatCurrency(value) : "--"),
+    [hasReceiptFinancialContract],
+  );
   const hasFinalFeeBreakdown =
-    Number.isFinite(finalOperationalFee) ||
-    Number.isFinite(finalIntermediationFee) ||
-    Number.isFinite(finalTotalFees) ||
-    Number.isFinite(finalDriverNetAmount);
+    hasReceiptFinancialContract &&
+    (Number.isFinite(finalOperationalFee) ||
+      Number.isFinite(finalIntermediationFee) ||
+      Number.isFinite(finalTotalFees) ||
+      Number.isFinite(finalDriverNetAmount));
   const tripDuration = Math.max(
     0,
     Math.round(toNumber(selected?.durationMin || selected?.duration, 0)),
@@ -502,17 +915,23 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
     1,
     Math.round(toNumber(selected?.passengerCount, 1)),
   );
-  const pickupLabel =
+  const rawPickupLabel =
     selected?.pickupAddress ||
     selected?.pickup ||
     selected?.route?.split("->")?.[0]?.trim() ||
-    "Origem";
-  const dropoffLabel =
+    "";
+  const rawDropoffLabel =
     selected?.destinationAddress ||
     selected?.dropoffAddress ||
     selected?.drop ||
     selected?.route?.split("->")?.[1]?.trim() ||
-    "Destino";
+    "";
+  const pickupLabel =
+    rawPickupLabel ||
+    (hasSelectedReceipt ? "Origem em verificação" : "Origem");
+  const dropoffLabel =
+    rawDropoffLabel ||
+    (hasSelectedReceipt ? "Destino em verificação" : "Destino");
   const pickupLocation = splitLocationLabel(pickupLabel);
   const dropoffLocation = splitLocationLabel(dropoffLabel);
   const driverRouteDensity = [
@@ -530,9 +949,13 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
   const tripDurationLabel = formatDurationMin(tripDuration);
   const paymentStatusLabel = formatPaymentMethod(selected?.paymentMethod);
   const driverRatingSubmitted = Boolean(selected?.driverRatedPassengerAt);
-  const canDriverRatePassenger = Boolean(selected?.passengerId);
+  const canDriverRatePassenger = Boolean(
+    hasReceiptFinancialContract && selected?.passengerId,
+  );
   const passengerRatingSubmitted = Boolean(selected?.passengerRatedDriverAt);
-  const canPassengerRateDriver = Boolean(passengerRatingTargetDriverId);
+  const canPassengerRateDriver = Boolean(
+    hasReceiptFinancialContract && passengerRatingTargetDriverId,
+  );
   const pickupCoordinate = normalizeCoordinate(
     selected?.pickupCoordinate || driverTripMeta?.pickupCoordinate,
   );
@@ -578,11 +1001,13 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
       : tightDriverLayout
         ? "Indisponível"
         : "Avaliação indisponível";
-  const driverSummaryAsideSecondaryLabel = Number.isFinite(finalTotalFees)
+  const driverSummaryAsideSecondaryLabel =
+    hasReceiptFinancialContract && Number.isFinite(finalTotalFees)
     ? "Taxas"
     : "Passag.";
-  const driverSummaryAsideSecondaryValue = Number.isFinite(finalTotalFees)
-    ? formatCurrency(finalTotalFees)
+  const driverSummaryAsideSecondaryValue =
+    hasReceiptFinancialContract && Number.isFinite(finalTotalFees)
+    ? formatReceiptMoney(finalTotalFees)
     : `${passengersCount}`;
   const closeButtonTestId = isDriverView
     ? "driver-receipt-back-to-map-button"
@@ -621,6 +1046,7 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
   });
 
   const navigateBackToPrototype = useCallback(() => {
+    terminalExitRef.current = true;
     if (typeof navigation.dispatch === "function") {
       navigation.dispatch(StackActions.replace("RobotaxiPrototype"));
       return;
@@ -629,10 +1055,9 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
     navigation.navigate("RobotaxiPrototype");
   }, [navigation]);
 
-  const handleDismiss = () => {
-    const shouldReturnToPrototypeHome = isDriverView
-      ? fromTrip || Boolean(route?.params?.fromRating)
-      : fromTrip && Boolean(route?.params?.fromRating);
+  const handleDismiss = useCallback(() => {
+    const shouldReturnToPrototypeHome =
+      fromTrip || Boolean(route?.params?.fromRating);
 
     if (!isDriverView || shouldReturnToPrototypeHome) {
       dismissCompletedReceipt();
@@ -649,7 +1074,44 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
     }
 
     navigateBackToPrototype();
-  };
+  }, [
+    dismissCompletedReceipt,
+    fromTrip,
+    isDriverView,
+    navigateBackToPrototype,
+    navigation,
+    route?.params?.fromRating,
+  ]);
+
+  useEffect(() => {
+    const shouldReturnToPrototypeHome =
+      fromTrip || Boolean(route?.params?.fromRating);
+    if (!shouldReturnToPrototypeHome || typeof navigation?.addListener !== "function") {
+      return undefined;
+    }
+
+    const unsubscribe = navigation.addListener("beforeRemove", event => {
+      if (terminalExitRef.current) {
+        terminalExitRef.current = false;
+        return;
+      }
+
+      const actionType = String(event?.data?.action?.type || "")
+        .trim()
+        .toUpperCase();
+      const isExplicitBackAction = ["GO_BACK", "POP", "POP_TO_TOP"].includes(
+        actionType,
+      );
+      if (!isExplicitBackAction) {
+        return;
+      }
+
+      event?.preventDefault?.();
+      handleDismiss();
+    });
+
+    return typeof unsubscribe === "function" ? unsubscribe : undefined;
+  }, [fromTrip, handleDismiss, navigation, route?.params?.fromRating]);
 
   const handleCardLayout = useCallback((event) => {
     const nextHeight = event?.nativeEvent?.layout?.height;
@@ -840,6 +1302,9 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
               fromReceipt: true,
               initialTopicId: "billing",
               receipt: selected,
+              bookingId: selected?.bookingId || selected?.id,
+              source: "receipt",
+              bookingStatus: "completed",
             })
           }
         >
@@ -855,18 +1320,51 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
       </View>
     ) : null;
 
+  const selectedDriver = asPlainObject(selected?.driver);
+  const selectedDriverVehicle = asPlainObject(selectedDriver?.vehicle);
+  const selectedVehicle = asPlainObject(selected?.vehicle);
+  const selectedDriverInfo = asPlainObject(selected?.driverInfo);
+  const selectedDriverInfoVehicle = asPlainObject(selectedDriverInfo?.vehicle);
+  const selectedDriverData = asPlainObject(selected?.driverData);
+  const selectedDriverDataVehicle = asPlainObject(selectedDriverData?.vehicle);
   const receiptPersonName = isDriverView
     ? selected?.passengerName || "Passageiro Leaf"
-    : selected?.driverName || "Motorista Leaf";
+    : firstNonEmptyText(
+        selected?.driverName,
+        selectedDriver?.name,
+        selectedDriver?.driverName,
+        selectedDriverInfo?.name,
+        selectedDriverInfo?.driverName,
+        selectedDriverData?.name,
+        selectedDriverData?.driverName,
+        "Motorista Leaf",
+      );
   const receiptVehicleModel = !isDriverView
-    ? selected?.vehicleLabel ||
-      selected?.vehicleModel ||
-      selected?.vehicle ||
-      selected?.driverVehicle ||
-      ""
+    ? firstNonEmptyText(
+        selected?.vehicleLabel,
+        selected?.vehicleModel,
+        selected?.driverVehicle,
+        selectedVehicle?.label,
+        selectedVehicle?.model,
+        selectedVehicle?.brandModel,
+        selectedDriverVehicle?.model,
+        selectedDriverVehicle?.brandModel,
+        selectedDriverInfoVehicle?.model,
+        selectedDriverDataVehicle?.model,
+      )
     : "";
   const receiptVehicleColor = !isDriverView
-    ? selected?.vehicleColor || selected?.color || selected?.carColor || ""
+    ? firstNonEmptyText(
+        selected?.vehicleColor,
+        selected?.color,
+        selected?.carColor,
+        selectedVehicle?.color,
+        selectedVehicle?.vehicleColor,
+        selectedDriverVehicle?.color,
+        selectedDriverVehicle?.vehicleColor,
+        selectedDriverInfoVehicle?.color,
+        selectedDriverDataVehicle?.color,
+      )
     : "";
   const receiptVehicleLabel = isDriverView
     ? `${passengersCount} passageiro${passengersCount > 1 ? "s" : ""}`
@@ -874,10 +1372,31 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
         .filter(Boolean)
         .join(" · ") || "Veículo não informado";
   const receiptPlateLabel = !isDriverView
-    ? selected?.vehiclePlate || selected?.plate || "Placa não informada"
+    ? firstNonEmptyText(
+        selected?.vehiclePlate,
+        selected?.plate,
+        selected?.carPlate,
+        selectedVehicle?.plate,
+        selectedVehicle?.vehiclePlate,
+        selectedDriverVehicle?.plate,
+        selectedDriverVehicle?.vehiclePlate,
+        selectedDriverInfoVehicle?.plate,
+        selectedDriverDataVehicle?.plate,
+        "Placa não informada",
+      )
     : "";
-  const receiptTotalLabel = isDriverView ? driverReceivedAmount : totalAmountLabel;
-  const receiptPaymentPill = isDriverView ? "Concluída" : "PIX seguro";
+  const receiptTotalLabel = hasReceiptFinancialContract
+    ? isDriverView
+      ? driverReceivedAmount
+      : totalAmountLabel
+    : "--";
+  const receiptPaymentPill = hasReceiptFinancialContract
+    ? isDriverView
+      ? "Concluída"
+      : "PIX seguro"
+    : receiptRecoveryState === "failed"
+      ? "Verificar"
+      : "Recibo pendente";
   const ratingButtonLabel = isDriverView
     ? driverRateButtonLabel
     : passengerRatingSubmitted
@@ -886,8 +1405,8 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
         ? "Avaliar corrida"
         : "Avaliação indisponível";
   const receiptPrimaryDisabled = isDriverView
-    ? driverRatingSubmitted || !canDriverRatePassenger
-    : passengerRatingSubmitted || !canPassengerRateDriver;
+    ? !hasReceiptFinancialContract || driverRatingSubmitted || !canDriverRatePassenger
+    : !hasReceiptFinancialContract || passengerRatingSubmitted || !canPassengerRateDriver;
 
   const renderCleanMap = () => {
     if (routePreviewRegion && routePreviewCoordinates.length >= 2) {
@@ -996,13 +1515,25 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
     </>
   );
 
-  const renderCleanValueRow = ({ title, subtitle, value, muted }) => (
-    <View style={styles.receiptCleanValueRow}>
+  const renderCleanValueRow = ({
+    title,
+    subtitle,
+    value,
+    muted,
+    testID,
+    valueTestID,
+  }) => (
+    <View style={styles.receiptCleanValueRow} testID={testID}>
       <View style={styles.receiptCleanValueCopy}>
         <Text style={[styles.receiptCleanValueTitle, muted && styles.receiptCleanValueTitleMuted]}>{title}</Text>
         {subtitle ? <Text style={styles.receiptCleanValueSubtitle}>{subtitle}</Text> : null}
       </View>
-      <Text style={[styles.receiptCleanValueAmount, muted && styles.receiptCleanValueAmountMuted]}>{value}</Text>
+      <Text
+        style={[styles.receiptCleanValueAmount, muted && styles.receiptCleanValueAmountMuted]}
+        testID={valueTestID}
+      >
+        {value}
+      </Text>
     </View>
   );
 
@@ -1061,8 +1592,23 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
           <View style={styles.receiptCleanSheet}>
             <View style={styles.receiptCleanTotalRow}>
               <View>
-                <Text style={styles.receiptCleanTotalLabel}>{isDriverView ? driverReceiptAmountLabel : "Total pago"}</Text>
-                <Text style={styles.receiptCleanTotalValue}>{receiptTotalLabel}</Text>
+                <Text style={styles.receiptCleanTotalLabel}>
+                  {isDriverView
+                    ? driverReceiptAmountLabel
+                    : showPassengerOperationalSettlement
+                      ? "Pix pago original"
+                      : "Total pago"}
+                </Text>
+                <Text
+                  style={styles.receiptCleanTotalValue}
+                  testID={showPassengerOperationalSettlement
+                    ? "passenger-receipt-original-paid-amount"
+                    : undefined}
+                >
+                  {showPassengerOperationalSettlement
+                    ? formatCurrency(operationalInterruptionSettlement.originalPaidAmount)
+                    : receiptTotalLabel}
+                </Text>
               </View>
               <View style={styles.receiptCleanPillColumn}>
                 <TouchableOpacity
@@ -1077,11 +1623,44 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
                 <View style={styles.receiptCleanPill}>
                   <Text style={styles.receiptCleanPillText}>{receiptPaymentPill}</Text>
                 </View>
-                {!isDriverView ? (
-                  <SecurePaymentBadge style={styles.receiptSecurePaymentBadge} color="#6E7D72" />
-                ) : null}
               </View>
             </View>
+
+            {receiptNeedsRecovery ? (
+              <View
+                style={styles.receiptRecoveryCard}
+                testID="receipt-recovery-state-card"
+                accessibilityLabel="receipt-recovery-state-card"
+              >
+                <View style={styles.receiptRecoveryIcon}>
+                  <Ionicons
+                    name={
+                      receiptRecoveryState === "failed"
+                        ? "alert-circle-outline"
+                        : "sync-outline"
+                    }
+                    size={18}
+                    color="#1E6B34"
+                  />
+                </View>
+                <View style={styles.receiptRecoveryCopy}>
+                  <Text style={styles.receiptRecoveryTitle}>
+                    {!hasSelectedReceipt
+                      ? receiptRecoveryState === "failed"
+                        ? "Recibo em verificação"
+                        : "Recibo final pendente"
+                      : "Recibo final indisponível"}
+                  </Text>
+                  <Text style={styles.receiptRecoverySubtitle}>
+                    {!hasSelectedReceipt
+                      ? receiptRecoveryState === "failed"
+                        ? "A corrida foi encerrada, mas o recibo final autorizado ainda não foi carregado. Você pode voltar ao mapa sem reabrir a corrida."
+                        : "A corrida foi encerrada. O app aguarda o recibo final autorizado pelo servidor antes de liberar detalhes e avaliação."
+                      : "Este recibo não tem confirmação financeira final do servidor. Por segurança, não exibimos outro valor nem liberamos avaliação."}
+                  </Text>
+                </View>
+              </View>
+            ) : null}
 
             {renderCleanAvatarRow({
               marker: receiptPersonName.slice(0, 1).toUpperCase(),
@@ -1123,11 +1702,9 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
               </View>
               <View style={styles.receiptCleanMetricCell}>
                 <Text style={styles.receiptCleanMetricValue}>
-                  {formatCurrency(safeTollAmount > 0 ? safeTollAmount : safeFeeAmount)}
+                  {formatReceiptMoney(safeTollAmount)}
                 </Text>
-                <Text style={styles.receiptCleanMetricLabel}>
-                  {safeTollAmount > 0 ? "pedágio" : "taxa Leaf"}
-                </Text>
+                <Text style={styles.receiptCleanMetricLabel}>pedágio</Text>
               </View>
             </View>
 
@@ -1139,15 +1716,15 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
                     subtitle: "Total pago pelo passageiro",
                     value: totalAmountLabel,
                   })}
-                  {safeTollAmount > 0 ? renderCleanValueRow({
+                  {renderCleanValueRow({
                     title: "Pedágio",
                     subtitle: "Repassado integralmente",
-                    value: formatCurrency(safeTollAmount),
-                  }) : null}
+                    value: formatReceiptMoney(safeTollAmount),
+                  })}
                   {renderCleanValueRow({
-                    title: "Taxa operacional Leaf",
-                    subtitle: "Descontada antes do repasse",
-                    value: formatCurrency(safeFeeAmount),
+                    title: "Taxas Leaf",
+                    subtitle: "Operacional e processamento antes do repasse",
+                    value: formatReceiptMoney(safeFeeAmount),
                     muted: true,
                   })}
                   {renderCleanValueRow({
@@ -1159,23 +1736,42 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
                   })}
                 </>
               ) : (
-                <>
-                  {renderCleanValueRow({
-                    title: "Corrida",
-                    subtitle: "Trajeto e serviço",
-                    value: formatCurrency(passengerRideSubtotal),
-                  })}
-                  {safeTollAmount > 0 ? renderCleanValueRow({
-                    title: "Pedágio",
-                    subtitle: "Incluso no total pago",
-                    value: formatCurrency(safeTollAmount),
-                  }) : null}
-                  {renderCleanValueRow({
-                    title: "Taxa Leaf",
-                    subtitle: "Inclusa no total pago",
-                    value: formatCurrency(safeFeeAmount),
-                  })}
-                </>
+                showPassengerOperationalSettlement ? (
+                  <>
+                    {renderCleanValueRow({
+                      title: operationalInterruptionSettlement.refundLabel,
+                      subtitle: "Devolução referente ao trecho não realizado",
+                      value: formatCurrency(operationalInterruptionSettlement.refundAmount),
+                      testID: "passenger-receipt-refund-row",
+                      valueTestID: "passenger-receipt-refund-amount",
+                    })}
+                    {renderCleanValueRow({
+                      title: "Valor final",
+                      subtitle: "Trecho executado e taxas confirmadas",
+                      value: formatCurrency(operationalInterruptionSettlement.finalAmount),
+                      testID: "passenger-receipt-final-row",
+                      valueTestID: "passenger-receipt-final-amount",
+                    })}
+                  </>
+                ) : (
+                  <>
+                    {renderCleanValueRow({
+                      title: "Corrida",
+                      subtitle: "Trajeto e serviço",
+                      value: formatReceiptMoney(passengerRideSubtotal),
+                    })}
+                    {renderCleanValueRow({
+                      title: "Pedágio",
+                      subtitle: "Incluso no total pago",
+                      value: formatReceiptMoney(safeTollAmount),
+                    })}
+                    {renderCleanValueRow({
+                      title: "Taxa Leaf",
+                      subtitle: "Inclusa no total pago",
+                      value: formatReceiptMoney(safeFeeAmount),
+                    })}
+                  </>
+                )
               )}
             </View>
 
@@ -1198,21 +1794,18 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
             <View style={styles.receiptCleanActions}>
               {!isDriverView ? (
                 <TouchableOpacity
-                  style={styles.receiptCleanSecondaryButton}
+                  style={styles.receiptCleanMoreOptionsButton}
                   activeOpacity={0.86}
                   accessible
                   accessibilityRole="button"
-                  accessibilityLabel="passenger-receipt-report-issue-button"
-                  testID="passenger-receipt-report-issue-button"
-                  onPress={() =>
-                    navigation.navigate("RobotaxiPrototypeSupport", {
-                      fromReceipt: true,
-                      initialTopicId: "billing",
-                      receipt: selected,
-                    })
-                  }
+                  accessibilityLabel="passenger-receipt-more-options-button"
+                  accessibilityState={{ expanded: receiptOptionsVisible }}
+                  testID="passenger-receipt-more-options-button"
+                  onPress={() => setReceiptOptionsVisible((visible) => !visible)}
                 >
-                  <Text style={styles.receiptCleanSecondaryButtonText}>Ajuda</Text>
+                  <Text style={styles.receiptCleanMoreOptionsText}>
+                    {receiptOptionsVisible ? "Ocultar opções" : "Mais opções"}
+                  </Text>
                 </TouchableOpacity>
               ) : null}
 
@@ -1226,6 +1819,7 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
                 disabled={receiptPrimaryDisabled}
                 accessible
                 accessibilityRole="button"
+                accessibilityState={{ disabled: receiptPrimaryDisabled }}
                 testID={isDriverView ? "driver-receipt-rate-passenger-button" : "passenger-receipt-rate-trip-button"}
                 accessibilityLabel={ratingButtonLabel}
                 onPress={isDriverView ? openDriverReceiptRating : openPassengerReceiptRating}
@@ -1234,6 +1828,29 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
                 <Text style={styles.receiptCleanPrimaryButtonText}>{ratingButtonLabel}</Text>
               </TouchableOpacity>
             </View>
+
+            {!isDriverView && receiptOptionsVisible ? (
+              <TouchableOpacity
+                style={styles.receiptCleanSecondaryButton}
+                activeOpacity={0.86}
+                accessible
+                accessibilityRole="button"
+                accessibilityLabel="passenger-receipt-report-issue-button"
+                testID="passenger-receipt-report-issue-button"
+                onPress={() =>
+                  navigation.navigate("RobotaxiPrototypeSupport", {
+                    fromReceipt: true,
+                    initialTopicId: "billing",
+                    receipt: selected,
+                    bookingId: selected?.bookingId || selected?.id,
+                    source: "receipt",
+                    bookingStatus: "completed",
+                  })
+                }
+              >
+                <Text style={styles.receiptCleanSecondaryButtonText}>Reportar problema</Text>
+              </TouchableOpacity>
+            ) : null}
           </View>
         </ScrollView>
       </View>
@@ -1601,7 +2218,7 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
                               <Text
                                 style={styles.driverFeeDisclosureMetricValue}
                               >
-                                {formatCurrency(finalOperationalFee)}
+                                {formatReceiptMoney(finalOperationalFee)}
                               </Text>
                             </View>
                           ) : null}
@@ -1615,7 +2232,7 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
                               <Text
                                 style={styles.driverFeeDisclosureMetricValue}
                               >
-                                {formatCurrency(finalIntermediationFee)}
+                                {formatReceiptMoney(finalIntermediationFee)}
                               </Text>
                             </View>
                           ) : null}
@@ -1627,7 +2244,7 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
                               Total
                             </Text>
                             <Text style={styles.driverFeeDisclosureTotalValue}>
-                              {formatCurrency(finalTotalFees)}
+                              {formatReceiptMoney(finalTotalFees)}
                             </Text>
                           </View>
                         ) : null}
@@ -2202,7 +2819,7 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
                         <View style={styles.detailRow}>
                           <Text style={styles.detailLabel}>Tarifa inicial</Text>
                           <Text style={styles.detailValue}>
-                            {formatCurrency(fareAmount)}
+                            {formatReceiptMoney(fareAmount)}
                           </Text>
                         </View>
                         <View style={styles.detailRow}>
@@ -2210,7 +2827,7 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
                             Deslocamento e tempo
                           </Text>
                           <Text style={styles.detailValue}>
-                            {formatCurrency(variableAmount)}
+                            {formatReceiptMoney(variableAmount)}
                           </Text>
                         </View>
                         <View style={styles.detailRow}>
@@ -2473,6 +3090,41 @@ const styles = StyleSheet.create({
   receiptSecurePaymentBadge: {
     marginTop: 4,
   },
+  receiptRecoveryCard: {
+    marginTop: 18,
+    padding: 14,
+    borderRadius: 16,
+    backgroundColor: "#F4F8F1",
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: "#D9E8D0",
+    flexDirection: "row",
+    gap: 12,
+    alignItems: "flex-start",
+  },
+  receiptRecoveryIcon: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: "#E7F2DF",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  receiptRecoveryCopy: {
+    flex: 1,
+    gap: 4,
+  },
+  receiptRecoveryTitle: {
+    color: "#171412",
+    fontFamily: fonts.SemiBold,
+    fontSize: 14,
+    lineHeight: 18,
+  },
+  receiptRecoverySubtitle: {
+    color: "#5D6A63",
+    fontFamily: fonts.Regular,
+    fontSize: 12,
+    lineHeight: 17,
+  },
   receiptCleanDivider: {
     height: 1,
     backgroundColor: "#E9E2D8",
@@ -2639,7 +3291,24 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 10,
     marginTop: 24,
-    paddingBottom: 25,
+    paddingBottom: 12,
+  },
+  receiptCleanMoreOptionsButton: {
+    minWidth: 100,
+    minHeight: leafButtonMetrics.height,
+    paddingHorizontal: 12,
+    borderRadius: leafButtonMetrics.radius,
+    borderWidth: 1,
+    borderColor: "#E9E2D8",
+    backgroundColor: "#FFFFFF",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  receiptCleanMoreOptionsText: {
+    color: "#1A330E",
+    fontFamily: fonts.SemiBold,
+    fontSize: 12.5,
+    lineHeight: 17,
   },
   receiptCleanSecondaryButton: {
     width: 100,

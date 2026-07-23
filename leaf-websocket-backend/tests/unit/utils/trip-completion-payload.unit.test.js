@@ -37,7 +37,11 @@ describe('trip-completion-payload', () => {
         customerId: 'passenger_1',
         customerName: 'Passageiro Leaf',
         driverId: 'driver_1',
-        driverName: 'Carlos Motorista'
+        driverName: 'Carlos Motorista',
+        vehicleMake: 'Toyota',
+        vehicleModel: 'Corolla',
+        vehiclePlate: 'RJA2D41',
+        vehicleColor: 'PRETO'
       },
       endLocation: { lat: -22.9, lng: -43.1 },
       distance: 2,
@@ -58,7 +62,17 @@ describe('trip-completion-payload', () => {
         customerName: 'Passageiro Leaf',
         passengerName: 'Passageiro Leaf',
         driverId: 'driver_1',
-        driverName: 'Carlos Motorista'
+        driverName: 'Carlos Motorista',
+        vehicleLabel: 'Toyota Corolla',
+        vehicleModel: 'Toyota Corolla',
+        vehiclePlate: 'RJA2D41',
+        vehicleColor: 'PRETO',
+        vehicle: expect.objectContaining({
+          make: 'Toyota',
+          model: 'Corolla',
+          plate: 'RJA2D41',
+          color: 'PRETO'
+        })
       })
     );
   });

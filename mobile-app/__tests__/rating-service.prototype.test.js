@@ -2,7 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import RatingService from '../src/services/RatingService';
 import WebSocketManager from '../src/services/WebSocketManager';
 import { store } from '../src/state/appStore';
-import { isSimulatorBuild, canUseProfileBypass } from '../src/config/runtimeAccessPolicy';
+import { canUseProfileBypass } from '../src/config/runtimeAccessPolicy';
 
 const mockWebSocketInstance = {
   isConnected: jest.fn(() => false),
@@ -27,7 +27,6 @@ jest.mock('../src/state/appStore', () => ({
 }));
 
 jest.mock('../src/config/runtimeAccessPolicy', () => ({
-  isSimulatorBuild: jest.fn(() => false),
   canUseProfileBypass: jest.fn(() => false),
 }));
 
@@ -35,11 +34,11 @@ describe('RatingService prototype bypass', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockWebSocketInstance.isConnected.mockReturnValue(false);
+    canUseProfileBypass.mockReturnValue(false);
+    RatingService.webSocketManager = mockWebSocketInstance;
   });
 
-  it('confirma localmente a avaliacao no simulador sem depender do websocket', async () => {
-    isSimulatorBuild.mockReturnValue(true);
-
+  it('nao usa bypass local apenas por estar no simulador', async () => {
     const result = await RatingService.submitRating({
       tripId: 'trip-passenger-proof-1',
       userId: 'prototype-user',
@@ -51,10 +50,11 @@ describe('RatingService prototype bypass', () => {
       comment: 'Tudo certo',
     });
 
-    expect(result).toEqual({ success: true, localOnly: true });
+    expect(result).toEqual({ success: true });
     expect(AsyncStorage.setItem).toHaveBeenCalled();
     expect(store.dispatch).toHaveBeenCalled();
-    expect(mockWebSocketInstance.submitRating).not.toHaveBeenCalled();
+    expect(mockWebSocketInstance.connect).toHaveBeenCalled();
+    expect(mockWebSocketInstance.submitRating).toHaveBeenCalled();
   });
 
   it('tambem usa bypass local para perfil elegivel em corrida prototype', async () => {
@@ -74,5 +74,57 @@ describe('RatingService prototype bypass', () => {
     expect(result).toEqual({ success: true, localOnly: true });
     expect(AsyncStorage.setItem).toHaveBeenCalled();
     expect(store.dispatch).toHaveBeenCalled();
+  });
+
+  it('marca uma avaliacao confirmada pelo backend como enviada, sem recoloca-la na fila', async () => {
+    mockWebSocketInstance.isConnected.mockReturnValue(true);
+    mockWebSocketInstance.submitRating.mockResolvedValue({ success: true, ratingId: 'rating_1' });
+
+    await RatingService.submitRating({
+      tripId: 'ride_1',
+      userId: 'passenger_1',
+      reviewerType: 'passenger',
+      rating: 5,
+    });
+
+    expect(AsyncStorage.setItem).toHaveBeenCalledWith(
+      'localRatings',
+      expect.stringContaining('"status":"sent"'),
+    );
+  });
+
+  it('nao enfileira uma avaliacao recusada por regra de negocio', async () => {
+    mockWebSocketInstance.isConnected.mockReturnValue(true);
+    const error = new Error('A avaliação só pode ser enviada após a corrida ser concluída');
+    error.code = 'RATING_TRIP_NOT_COMPLETED';
+    mockWebSocketInstance.submitRating.mockRejectedValue(error);
+
+    await expect(RatingService.submitRating({
+      tripId: 'ride_1',
+      userId: 'passenger_1',
+      reviewerType: 'passenger',
+      rating: 5,
+    })).rejects.toThrow('A avaliação só pode ser enviada após a corrida ser concluída');
+
+    expect(AsyncStorage.setItem).not.toHaveBeenCalled();
+  });
+
+  it('enfileira retry somente para falha transitória de conexão', async () => {
+    mockWebSocketInstance.isConnected.mockReturnValue(true);
+    const error = new Error('WebSocket não conectado');
+    error.code = 'WS_DISCONNECTED';
+    mockWebSocketInstance.submitRating.mockRejectedValue(error);
+
+    await expect(RatingService.submitRating({
+      tripId: 'ride_1',
+      userId: 'passenger_1',
+      reviewerType: 'passenger',
+      rating: 5,
+    })).rejects.toThrow('WebSocket não conectado');
+
+    expect(AsyncStorage.setItem).toHaveBeenCalledWith(
+      'localRatings',
+      expect.stringContaining('"status":"pending"'),
+    );
   });
 });

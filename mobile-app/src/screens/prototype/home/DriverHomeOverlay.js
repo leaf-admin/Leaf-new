@@ -26,8 +26,13 @@ const DRIVER_HOME_CARD_RADIUS = 32;
 const DRIVER_HOME_PROMO_CARD_HEIGHT = 188;
 const DRIVER_HOME_STACK_GAP = 12;
 const DRIVER_GOAL_STORAGE_PREFIX = "@prototype_driver_daily_goal_";
+const DRIVER_DAY_SUMMARY_STORAGE_PREFIX = "@prototype_driver_day_summary_seen_";
 const DEFAULT_DAILY_GOAL = 200;
 const COMPETITOR_REFERENCE_TAKE_RATE = 0.3;
+const DRIVER_ONLINE_WARNING_MS = 10 * 60 * 60 * 1000;
+const DRIVER_ONLINE_LIMIT_MS = 12 * 60 * 60 * 1000;
+const DRIVER_DAY_SUMMARY_WINDOW_HOUR = 23;
+const DRIVER_DAY_SUMMARY_WINDOW_MINUTE = 50;
 const IS_TEST_ENV = typeof process !== "undefined" && process.env?.NODE_ENV === "test";
 const LEAF_WELCOME_RIO_BANNER_IMAGE_URL =
   "https://storage.googleapis.com/leaf-reactnative.firebasestorage.app/campaign-center/assets/asset_mpgam7le_f7f03d20_leaf-welcome-rio-1035x564.webp?GoogleAccessId=firebase-adminsdk-fbsvc%40leaf-reactnative.iam.gserviceaccount.com&Expires=2051222400&Signature=pgIHEiHVb5lkRxw9ca%2F9PR8jeIUe2kA03Tou08WveLCBJ%2B5wTYiDFpCW9v%2FXXMCCNUuPpNXVF7ZpHD9tK43x%2B71JC6u4Khq7hSQu9Nvkl3GIuWheGcO4K901olK9OgQJDw6HN4VmsWvvod%2BiE9pu%2B2%2BodJbth3FHwW5nieThVZtdW0QovD9E1SKsjWfpDnIWTw6STwC0fca33awqvQ7eO4tMwc8KQGrQswZIR2GGHChTgFApcKs7oArhjRk6jrlfua0B%2BYVFgr%2FJXXFoMUouY%2BUYuyoSQmqGeKQqItTdYjg2Utcm81bonilMyJ8%2B%2FGSi%2FpNBetSRasPoLPc2T%2F8MxA%3D%3D";
@@ -91,6 +96,169 @@ function roundMoney(value) {
     return 0;
   }
   return Number(numeric.toFixed(2));
+}
+
+function resolveTimestampMs(value) {
+  const direct = Number(value);
+  if (Number.isFinite(direct) && direct > 0) {
+    return direct;
+  }
+
+  const parsed = Date.parse(String(value || ""));
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+function getLocalDayKey(nowMs = Date.now()) {
+  const date = new Date(nowMs);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function isNearEndOfLocalDay(nowMs = Date.now()) {
+  const date = new Date(nowMs);
+  return (
+    date.getHours() === DRIVER_DAY_SUMMARY_WINDOW_HOUR &&
+    date.getMinutes() >= DRIVER_DAY_SUMMARY_WINDOW_MINUTE
+  );
+}
+
+function msUntilNextDaySummaryWindow(nowMs = Date.now()) {
+  const now = new Date(nowMs);
+  const target = new Date(nowMs);
+  target.setHours(
+    DRIVER_DAY_SUMMARY_WINDOW_HOUR,
+    DRIVER_DAY_SUMMARY_WINDOW_MINUTE,
+    0,
+    0,
+  );
+
+  if (target.getTime() <= nowMs) {
+    target.setDate(target.getDate() + 1);
+  }
+
+  return Math.max(1000, target.getTime() - now.getTime());
+}
+
+function hasDriverOnlineActivityForCurrentDay({
+  driverOnline,
+  driverOnlineStartedAt,
+  driverOnlineDaily,
+  nowMs = Date.now(),
+}) {
+  if (driverOnline) {
+    return true;
+  }
+
+  const daily = driverOnlineDaily && typeof driverOnlineDaily === "object"
+    ? driverOnlineDaily
+    : null;
+  const effectiveMs = Number(daily?.effectiveMs);
+  const totalMs = Number(daily?.totalMs);
+  const sessionStartedAtMs = Number(daily?.sessionStartedAtMs);
+  if (
+    (Number.isFinite(effectiveMs) && effectiveMs > 0) ||
+    (Number.isFinite(totalMs) && totalMs > 0) ||
+    (Number.isFinite(sessionStartedAtMs) && sessionStartedAtMs > 0)
+  ) {
+    return true;
+  }
+
+  const startedAtMs = resolveTimestampMs(driverOnlineStartedAt);
+  return Boolean(startedAtMs && getLocalDayKey(startedAtMs) === getLocalDayKey(nowMs));
+}
+
+function shouldShowDriverDaySummaryNow({
+  driverOnline,
+  driverOnlineStartedAt,
+  driverOnlineDaily,
+  nowMs = Date.now(),
+}) {
+  return (
+    isNearEndOfLocalDay(nowMs) &&
+    hasDriverOnlineActivityForCurrentDay({
+      driverOnline,
+      driverOnlineStartedAt,
+      driverOnlineDaily,
+      nowMs,
+    })
+  );
+}
+
+function formatOnlineDurationMs(durationMs) {
+  const elapsedMinutes = Math.max(0, Math.floor((Number(durationMs) || 0) / 60000));
+  const hours = Math.floor(elapsedMinutes / 60);
+  const minutes = elapsedMinutes % 60;
+
+  if (hours <= 0) {
+    return `${minutes}min`;
+  }
+
+  return `${hours}h${String(minutes).padStart(2, "0")}`;
+}
+
+function resolveDriverOnlineDailyDisplay({
+  driverOnline,
+  driverOnlineStartedAt,
+  driverOnlineDaily,
+  fallbackStartedAtMs,
+  nowMs,
+}) {
+  const daily = driverOnlineDaily && typeof driverOnlineDaily === "object"
+    ? driverOnlineDaily
+    : null;
+  const dailyTotalMs = Number(daily?.totalMs);
+  const dailySessionStartedAtMs = Number(daily?.sessionStartedAtMs);
+  const warningMs = Number(daily?.warningMs);
+  const limitMs = Number(daily?.limitMs);
+
+  if (daily) {
+    const baseTotalMs = Number.isFinite(dailyTotalMs) && dailyTotalMs > 0
+      ? dailyTotalMs
+      : 0;
+    const sessionElapsedMs =
+      driverOnline &&
+      Number.isFinite(dailySessionStartedAtMs) &&
+      dailySessionStartedAtMs > 0
+        ? Math.max(0, nowMs - dailySessionStartedAtMs)
+        : 0;
+    const effectiveMs = Math.max(
+      0,
+      baseTotalMs + sessionElapsedMs,
+      Number(daily.effectiveMs) || 0,
+    );
+    const resolvedWarningMs =
+      Number.isFinite(warningMs) && warningMs > 0
+        ? warningMs
+        : DRIVER_ONLINE_WARNING_MS;
+    const resolvedLimitMs =
+      Number.isFinite(limitMs) && limitMs > 0
+        ? limitMs
+        : DRIVER_ONLINE_LIMIT_MS;
+
+    return {
+      label: formatOnlineDurationMs(effectiveMs),
+      nearLimit: effectiveMs >= resolvedWarningMs || daily.nearLimit === true,
+      limitReached: effectiveMs >= resolvedLimitMs || daily.limitReached === true,
+    };
+  }
+
+  if (!driverOnline) {
+    return {
+      label: "--",
+      nearLimit: false,
+      limitReached: false,
+    };
+  }
+
+  const startedAtMs = fallbackStartedAtMs || resolveTimestampMs(driverOnlineStartedAt);
+  const elapsedMs = startedAtMs ? Math.max(0, nowMs - startedAtMs) : 0;
+  return {
+    label: startedAtMs ? formatOnlineDurationMs(elapsedMs) : "--",
+    nearLimit: elapsedMs >= DRIVER_ONLINE_WARNING_MS,
+    limitReached: elapsedMs >= DRIVER_ONLINE_LIMIT_MS,
+  };
 }
 
 function parseTripDate(value) {
@@ -218,13 +386,41 @@ function isDriverWorkLocked(value) {
   return Boolean(value);
 }
 
+function resolveBlockedActivationLabel(remoteActivation) {
+  const activationState = String(
+    remoteActivation?.activationState || remoteActivation?.state || "",
+  )
+    .trim()
+    .toUpperCase();
+  const hasFailedDocument = Object.values(
+    remoteActivation?.documents || {},
+  ).some((document) =>
+    ["failed", "rejected", "denied"].includes(
+      String(document?.status || "").trim().toLowerCase(),
+    ),
+  );
+
+  if (
+    hasFailedDocument ||
+    ["REJECTED", "SUSPENDED", "BLOCKED"].includes(activationState)
+  ) {
+    return "Ação necessária";
+  }
+
+  return "Em análise";
+}
+
 function DriverHomeOverlay({
   driverId = "",
   insetsBottom = 0,
   driverOnline = false,
   driverOnlinePending = false,
+  driverOnlineStartedAt = null,
+  driverOnlineDaily = null,
+  driverRealtimeAuthenticated = true,
   driverCanGoOnline = false,
   driverActivationResolved = false,
+  driverActivationRemote = null,
   driverWorkInProgress = false,
   suppressDaySummary = false,
   ridesCount = 0,
@@ -248,14 +444,23 @@ function DriverHomeOverlay({
   const [savingPreferences, setSavingPreferences] = useState(false);
   const [sliderWidth, setSliderWidth] = useState(0);
   const [daySummaryVisible, setDaySummaryVisible] = useState(false);
+  const [onlineClockTick, setOnlineClockTick] = useState(Date.now());
   const [displayedEarningsAmount, setDisplayedEarningsAmount] = useState(
     parseMoneyLabel(formattedDriverEarnings),
   );
   const [displayedGoalRatio, setDisplayedGoalRatio] = useState(
     Math.min(1, parseMoneyLabel(formattedDriverEarnings) / DEFAULT_DAILY_GOAL),
   );
-  const previousDriverOnlineRef = useRef(Boolean(driverOnline));
+  const onlineStartedAtRef = useRef(null);
   const hasDriverWorkInProgress = isDriverWorkLocked(driverWorkInProgress);
+  const shouldShowWelcomePromo = !hasDriverWorkInProgress &&
+    !hasDriverOnlineActivityForCurrentDay({
+      driverOnline,
+      driverOnlineStartedAt,
+      driverOnlineDaily,
+      nowMs: onlineClockTick,
+    }) &&
+    Number(ridesCount || 0) <= 0;
   const earningsAnimation = useRef(
     new Animated.Value(parseMoneyLabel(formattedDriverEarnings)),
   ).current;
@@ -271,6 +476,8 @@ function DriverHomeOverlay({
     !hasDriverWorkInProgress;
   const pendingOfflineActivation =
     driverOnlinePending && !driverOnline && !hasDriverWorkInProgress;
+  const pendingOnlineRealtime =
+    driverOnline && !driverRealtimeAuthenticated && !hasDriverWorkInProgress;
   const handleSliderPress = hasDriverWorkInProgress
     ? undefined
     : isActivationBlocked
@@ -280,7 +487,7 @@ function DriverHomeOverlay({
     ? "ride"
     : isActivationBlocked
     ? "blocked"
-    : pendingOfflineActivation
+    : pendingOfflineActivation || pendingOnlineRealtime
       ? "pending"
       : driverOnline
         ? "online"
@@ -288,15 +495,22 @@ function DriverHomeOverlay({
   const sliderLabel = hasDriverWorkInProgress
     ? "Em corrida"
     : isActivationBlocked
-    ? "Em análise"
-    : pendingOfflineActivation
-      ? "Ativando..."
+    ? resolveBlockedActivationLabel(driverActivationRemote)
+    : pendingOfflineActivation || pendingOnlineRealtime
+      ? pendingOnlineRealtime
+        ? "Reconectando"
+        : "Ativando..."
     : driverOnline
       ? "Online"
       : "Ficar online";
   const goalStorageKey = useMemo(
     () =>
       `${DRIVER_GOAL_STORAGE_PREFIX}${String(driverId || "anonymous").trim() || "anonymous"}`,
+    [driverId],
+  );
+  const daySummaryStorageKey = useMemo(
+    () =>
+      `${DRIVER_DAY_SUMMARY_STORAGE_PREFIX}${String(driverId || "anonymous").trim() || "anonymous"}`,
     [driverId],
   );
   const currentGoalAmount = parseMoneyLabel(formattedDriverEarnings);
@@ -309,7 +523,21 @@ function DriverHomeOverlay({
     Math.max(0, currentGoalAmount / (Number(dailyGoal) || DEFAULT_DAILY_GOAL)),
   );
   const goalProgressPercent = `${Math.round(displayedGoalRatio * 100)}%`;
-  const onlineDurationLabel = driverOnline ? "2h18" : "--";
+  const onlineDurationStartedAt =
+    onlineStartedAtRef.current || resolveTimestampMs(driverOnlineStartedAt);
+  const onlineDurationDisplay = resolveDriverOnlineDailyDisplay({
+    driverOnline,
+    driverOnlineStartedAt,
+    driverOnlineDaily,
+    fallbackStartedAtMs: onlineDurationStartedAt,
+    nowMs: onlineClockTick,
+  });
+  const onlineDurationLabel = onlineDurationDisplay.label;
+  const resolvedOnlineDurationLabel =
+    pendingOnlineRealtime && !driverOnlineDaily ? "--" : onlineDurationLabel;
+  const onlineLimitHintVisible =
+    driverOnline &&
+    (onlineDurationDisplay.nearLimit || onlineDurationDisplay.limitReached);
   const safeDriverGrossAmount =
     Number.isFinite(Number(driverGrossAmount)) && Number(driverGrossAmount) > 0
       ? Number(driverGrossAmount)
@@ -443,23 +671,77 @@ function DriverHomeOverlay({
   useEffect(() => {
     const shouldSuppressSummary =
       Boolean(suppressDaySummary) || hasDriverWorkInProgress;
-    const wasOnline = previousDriverOnlineRef.current;
-    previousDriverOnlineRef.current = Boolean(driverOnline);
+    let cancelled = false;
+    let timerId = null;
 
     if (shouldSuppressSummary) {
       setDaySummaryVisible(false);
-      return;
+      return undefined;
     }
 
-    if (wasOnline && !driverOnline && !driverOnlinePending) {
-      setDaySummaryVisible(true);
-    }
+    const evaluateDaySummaryWindow = async () => {
+      const nowMs = Date.now();
+      if (
+        shouldShowDriverDaySummaryNow({
+          driverOnline,
+          driverOnlineStartedAt,
+          driverOnlineDaily,
+          nowMs,
+        })
+      ) {
+        const todayKey = getLocalDayKey(nowMs);
+        const storedDayKey = await AsyncStorage.getItem(daySummaryStorageKey);
+        if (!cancelled && storedDayKey !== todayKey) {
+          await AsyncStorage.setItem(daySummaryStorageKey, todayKey);
+          if (!cancelled) {
+            setDaySummaryVisible(true);
+          }
+        }
+      }
+
+      if (!cancelled) {
+        timerId = setTimeout(
+          evaluateDaySummaryWindow,
+          msUntilNextDaySummaryWindow(Date.now()),
+        );
+      }
+    };
+
+    evaluateDaySummaryWindow();
+
+    return () => {
+      cancelled = true;
+      if (timerId) {
+        clearTimeout(timerId);
+      }
+    };
   }, [
+    daySummaryStorageKey,
     driverOnline,
-    driverOnlinePending,
+    driverOnlineDaily,
+    driverOnlineStartedAt,
     hasDriverWorkInProgress,
     suppressDaySummary,
   ]);
+
+  useEffect(() => {
+    if (!driverOnline) {
+      onlineStartedAtRef.current = null;
+      setOnlineClockTick(Date.now());
+      return undefined;
+    }
+
+    const resolvedStartedAt = resolveTimestampMs(driverOnlineStartedAt);
+    onlineStartedAtRef.current =
+      resolvedStartedAt || onlineStartedAtRef.current || Date.now();
+    setOnlineClockTick(Date.now());
+
+    const interval = setInterval(() => {
+      setOnlineClockTick(Date.now());
+    }, 60000);
+
+    return () => clearInterval(interval);
+  }, [driverOnline, driverOnlineStartedAt]);
 
   const handleOpenGoalModal = () => {
     setGoalInput(
@@ -589,10 +871,20 @@ function DriverHomeOverlay({
                 <Text style={styles.driverSideStatLabel}>corridas</Text>
               </View>
               <View style={styles.driverSideStatItem}>
-                <Text style={styles.driverSideStatValue}>
-                  {onlineDurationLabel}
+                <Text
+                  style={[
+                    styles.driverSideStatValue,
+                    onlineLimitHintVisible && styles.driverSideStatValueWarning,
+                  ]}
+                >
+                  {resolvedOnlineDurationLabel}
                 </Text>
                 <Text style={styles.driverSideStatLabel}>online</Text>
+                {onlineLimitHintVisible ? (
+                  <Text style={styles.driverOnlineLimitHint}>
+                    Próximo ao limite
+                  </Text>
+                ) : null}
               </View>
             </View>
           </View>
@@ -605,7 +897,13 @@ function DriverHomeOverlay({
               onPress={handleSliderPress}
               disabled={hasDriverWorkInProgress}
               testID="driver-home-toggle-online"
+              accessibilityRole="button"
               accessibilityLabel={`driver-home-toggle-online-${sliderStatus}`}
+              accessibilityHint={
+                driverOnline
+                  ? "Toca para sair do modo online"
+                  : "Toca para ficar online e receber corridas"
+              }
               accessibilityValue={{ text: sliderStatus }}
               onLayout={(event) => {
                 const nextWidth = event?.nativeEvent?.layout?.width;
@@ -681,18 +979,20 @@ function DriverHomeOverlay({
           </View>
         </View>
 
-        <LeafCampaignCarousel
-          userId={driverId}
-          role="driver"
-          surface="driver_home"
-          placement="below_home_card"
-          limit={3}
-          height={DRIVER_HOME_PROMO_CARD_HEIGHT}
-          borderRadius={DRIVER_HOME_CARD_RADIUS}
-          fallbackCampaigns={DRIVER_HOME_FALLBACK_CAMPAIGNS}
-          style={styles.driverPromoCard}
-          testID="driver-home-promo-carousel"
-        />
+        {shouldShowWelcomePromo ? (
+          <LeafCampaignCarousel
+            userId={driverId}
+            role="driver"
+            surface="driver_home"
+            placement="below_home_card"
+            limit={3}
+            height={DRIVER_HOME_PROMO_CARD_HEIGHT}
+            borderRadius={DRIVER_HOME_CARD_RADIUS}
+            fallbackCampaigns={DRIVER_HOME_FALLBACK_CAMPAIGNS}
+            style={styles.driverPromoCard}
+            testID="driver-home-promo-carousel"
+          />
+        ) : null}
       </View>
 
       <Modal
@@ -795,7 +1095,7 @@ function DriverHomeOverlay({
               <Text style={styles.summaryEyebrow}>Resumo do dia</Text>
               <Text style={styles.summaryTitle}>{summaryHeadline}</Text>
               <Text style={styles.summarySubtitle}>
-                Você ficou offline. Aqui está o fechamento até agora.
+                Fechamento do dia disponível para acompanhar seus ganhos.
               </Text>
             </View>
 
@@ -1041,11 +1341,22 @@ const styles = StyleSheet.create({
     minWidth: 30,
     textAlign: "left",
   },
+  driverSideStatValueWarning: {
+    color: DRIVER_HOME_COLOR.warningText,
+  },
   driverSideStatLabel: {
     color: DRIVER_HOME_COLOR.muted,
     fontFamily: fonts.Medium,
     fontSize: 10.5,
     lineHeight: 14,
+    textAlign: "left",
+  },
+  driverOnlineLimitHint: {
+    marginTop: 1,
+    color: DRIVER_HOME_COLOR.warningText,
+    fontFamily: fonts.Medium,
+    fontSize: 9.5,
+    lineHeight: 12,
     textAlign: "left",
   },
   driverBottomDivider: {

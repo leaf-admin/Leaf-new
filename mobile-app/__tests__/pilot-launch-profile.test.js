@@ -55,4 +55,23 @@ describe('pilotLaunchProfile', () => {
     expect(snapshot.dynamicPricingEnabled).toBe(true);
     expect(snapshot.referralProgramsEnabled).toBe(false);
   });
+
+  it('treats ride flow validation as a controlled launch profile', () => {
+    jest.doMock('expo-constants', () => ({
+      expoConfig: {
+        extra: {
+          launchProfile: 'ride_flow_validation',
+          pilotFeatureFlags: {}
+        }
+      }
+    }));
+
+    const { getPilotLaunchFeatureSnapshot } = require('../src/config/pilotLaunchProfile');
+    const snapshot = getPilotLaunchFeatureSnapshot();
+
+    expect(snapshot.launchProfile).toBe('ride_flow_validation');
+    expect(snapshot.pilotControlled).toBe(true);
+    expect(snapshot.driverWithdrawalsEnabled).toBe(false);
+    expect(snapshot.dynamicPricingEnabled).toBe(false);
+  });
 });

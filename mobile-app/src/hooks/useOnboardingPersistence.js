@@ -2,6 +2,16 @@ import Logger from '../utils/Logger';
 import { useEffect, useCallback } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import firebaseAuth from '@react-native-firebase/auth';
+import {
+  allowTestUserTools,
+  isE2ETestBuild,
+  isSimulatorBuild,
+} from '../config/runtimeAccessPolicy';
+import {
+  ONBOARDING_SESSION_STORAGE_KEYS,
+  validateOnboardingStorageOwner,
+} from '../utils/onboardingSessionState';
 import {
   saveOnboardingStepData as saveOnboardingData,
   completeOnboardingStep as completeOnboardingStepAction,
@@ -12,6 +22,21 @@ import {
 
 const ONBOARDING_STORAGE_KEY = '@onboarding_data';
 const ONBOARDING_PROGRESS_KEY = '@onboarding_progress';
+
+const resolveAuthoritativeFirebaseUid = () => {
+  const divergentQaSessionAllowed =
+    allowTestUserTools() && isSimulatorBuild() && isE2ETestBuild();
+  if (divergentQaSessionAllowed) {
+    return null;
+  }
+
+  return firebaseAuth().currentUser?.uid || null;
+};
+
+const validateCurrentOnboardingOwner = () =>
+  validateOnboardingStorageOwner({
+    activeAuthUid: resolveAuthoritativeFirebaseUid(),
+  });
 
 export const useOnboardingPersistence = () => {
   const dispatch = useDispatch();
@@ -33,6 +58,20 @@ export const useOnboardingPersistence = () => {
   const loadOnboardingData = useCallback(async () => {
     try {
       Logger.log('useOnboardingPersistence - 🔍 Carregando dados do onboarding...');
+
+      const ownership = await validateCurrentOnboardingOwner();
+      if (!ownership.valid) {
+        Logger.warn('useOnboardingPersistence - retomada bloqueada por divergência de sessão:', {
+          reason: ownership.reason,
+        });
+        dispatch(loadOnboardingFromStorage({
+          currentStep: 0,
+          stepData: {},
+          progress: {},
+          completedSteps: [],
+        }));
+        return { data: {}, progress: {} };
+      }
       
       const [dataString, progressString] = await Promise.all([
         AsyncStorage.getItem(ONBOARDING_STORAGE_KEY),
@@ -65,6 +104,11 @@ export const useOnboardingPersistence = () => {
   const saveStepData = useCallback(async (step, data) => {
     try {
       Logger.log(`useOnboardingPersistence - 💾 Salvando dados do step ${step}:`, data);
+
+      const ownership = await validateCurrentOnboardingOwner();
+      if (!ownership.valid) {
+        return { success: false, error: new Error('ONBOARDING_OWNER_UID_MISMATCH') };
+      }
       
       // Salvar no Redux
       dispatch(saveOnboardingData(step, data));
@@ -96,6 +140,11 @@ export const useOnboardingPersistence = () => {
   const completeStep = useCallback(async (step) => {
     try {
       Logger.log(`useOnboardingPersistence - ✅ Marcando step ${step} como completo`);
+
+      const ownership = await validateCurrentOnboardingOwner();
+      if (!ownership.valid) {
+        return { success: false, error: new Error('ONBOARDING_OWNER_UID_MISMATCH') };
+      }
       
       // Marcar como completo no Redux
       dispatch(completeOnboardingStepAction(step));
@@ -133,10 +182,7 @@ export const useOnboardingPersistence = () => {
       dispatch(resetOnboardingAction());
       
       // Limpar AsyncStorage
-      await Promise.all([
-        AsyncStorage.removeItem(ONBOARDING_STORAGE_KEY),
-        AsyncStorage.removeItem(ONBOARDING_PROGRESS_KEY)
-      ]);
+      await AsyncStorage.multiRemove(ONBOARDING_SESSION_STORAGE_KEYS);
       
       Logger.log('useOnboardingPersistence - ✅ Onboarding resetado com sucesso');
       return { success: true };

@@ -6,9 +6,19 @@ const { authenticateSupport, requireSupportRoles } = require('../middleware/supp
 const modernMetricsService = require('../services/modern-metrics-service');
 const driverSubscriptionService = require('../services/driver-subscription-service');
 const supportQueueService = require('../services/support-queue-service');
+const {
+  buildLaunchFeatureDisabledPayload,
+  isLaunchFeatureEnabled
+} = require('../utils/pilot-launch-flags');
+const {
+  isRideRevenuePendingFinalSnapshot,
+  resolveRideOperationalFee,
+  resolveRideRevenue
+} = require('../services/dashboard-ride-monitoring-service');
 
 const router = express.Router();
 const METRICS_READ_ROLES = ['admin', 'manager', 'super-admin', 'viewer'];
+const REPORT_READ_ROLES = ['admin', 'manager', 'super-admin'];
 const DASHBOARD_METRICS_CACHE_TTL_SECONDS = Math.max(
   15,
   Number.parseInt(process.env.DASHBOARD_METRICS_CACHE_TTL_SECONDS || '60', 10) || 60
@@ -460,14 +470,18 @@ router.get('/api/metrics/financial/rides', async (req, res) => {
 
     // Calcular valores
     stats.totalRides = completedBookings.length;
+    const reconciledBookings = completedBookings.filter(
+      (booking) => !isRideRevenuePendingFinalSnapshot(booking)
+    );
+    stats.reconciledRides = reconciledBookings.length;
+    stats.pendingReconciliationRides = completedBookings.length - reconciledBookings.length;
 
     stats.totalValue = completedBookings.reduce((sum, booking) => {
-      const value = parseFloat(booking.customer_paid || booking.total_fare || booking.fare || 0);
-      return sum + value;
+      return sum + resolveRideRevenue(booking);
     }, 0);
 
-    stats.averageValue = stats.totalRides > 0
-      ? parseFloat((stats.totalValue / stats.totalRides).toFixed(2))
+    stats.averageValue = stats.reconciledRides > 0
+      ? parseFloat((stats.totalValue / stats.reconciledRides).toFixed(2))
       : 0;
 
     try {
@@ -559,25 +573,18 @@ router.get('/api/metrics/financial/operational-fee', async (req, res) => {
     });
 
     stats.totalRides = completedBookings.length;
+    const reconciledBookings = completedBookings.filter(
+      (booking) => !isRideRevenuePendingFinalSnapshot(booking)
+    );
+    stats.reconciledRides = reconciledBookings.length;
+    stats.pendingReconciliationRides = completedBookings.length - reconciledBookings.length;
 
-    // Calcular taxa operacional (convenience_fees ou diferença entre customer_paid e driver_share)
     stats.totalOperationalFee = completedBookings.reduce((sum, booking) => {
-      // Prioridade: convenience_fees > (customer_paid - driver_share)
-      let fee = 0;
-
-      if (booking.convenience_fees) {
-        fee = parseFloat(booking.convenience_fees);
-      } else {
-        const customerPaid = parseFloat(booking.customer_paid || booking.total_fare || 0);
-        const driverShare = parseFloat(booking.driver_share || 0);
-        fee = customerPaid - driverShare;
-      }
-
-      return sum + fee;
+      return sum + resolveRideOperationalFee(booking);
     }, 0);
 
-    stats.averageFee = stats.totalRides > 0
-      ? parseFloat((stats.totalOperationalFee / stats.totalRides).toFixed(2))
+    stats.averageFee = stats.reconciledRides > 0
+      ? parseFloat((stats.totalOperationalFee / stats.reconciledRides).toFixed(2))
       : 0;
 
     res.json(stats);
@@ -650,8 +657,7 @@ router.get('/api/metrics/maps/rides-by-region', async (req, res) => {
 
       if (booking.status === 'COMPLETE' || booking.status === 'PAID' || booking.status === 'COMPLETED') {
         regions[regionKey].completedRides++;
-        const value = parseFloat(booking.customer_paid || booking.total_fare || 0);
-        regions[regionKey].totalValue += value;
+        regions[regionKey].totalValue += resolveRideRevenue(booking);
       } else if (booking.status === 'CANCELLED' || booking.status === 'CANCELED') {
         regions[regionKey].cancelledRides++;
       } else {
@@ -1490,7 +1496,8 @@ router.get('/api/metrics/marketplace', async (req, res) => {
       const status = String(b.status || '').toUpperCase();
       const driverId = b.driver || b.driverId || null;
       const customerId = b.customer || b.customerId || b.user || b.userId || null;
-      const fare = toNumber(b.customer_paid || b.total_fare || b.fare || b.estimate, 0);
+      const fare = resolveRideRevenue(b);
+      const farePendingReconciliation = isRideRevenuePendingFinalSnapshot(b);
       const convenienceFee = toNumber(b.convenience_fees, 0);
       const driverShare = toNumber(b.driver_share, 0);
       const pickupParsed = parseLatLng(b.pickup || b.pickupLocation || null);
@@ -1508,6 +1515,7 @@ router.get('/api/metrics/marketplace', async (req, res) => {
         driverId,
         customerId,
         fare,
+        farePendingReconciliation,
         convenienceFee,
         driverShare,
         pickupLat: pickupParsed.lat,
@@ -1601,9 +1609,12 @@ router.get('/api/metrics/marketplace', async (req, res) => {
       ? (activeDrivers / coverageAreaKm2)
       : null;
 
+    const completedFinancialCurrent = completedCurrent.filter((b) => !b.farePendingReconciliation);
     const revenueTotal = completedCurrent.reduce((sum, b) => sum + b.fare, 0);
-    const ridesForFinancial = Math.max(completed, 1);
-    const revenuePerRide = completed > 0 ? (revenueTotal / completed) : null;
+    const ridesForFinancial = Math.max(completedFinancialCurrent.length, 1);
+    const revenuePerRide = completedFinancialCurrent.length > 0
+      ? (revenueTotal / completedFinancialCurrent.length)
+      : null;
 
     // Custo estimado por corrida (mesmo racional do dashboard financeiro avançado)
     const apiUnitCost = 0.005 + 0.002;
@@ -1775,6 +1786,8 @@ router.get('/api/metrics/marketplace', async (req, res) => {
         marginPerRide,
         revenuePerDriver,
         totalRevenue: revenueTotal,
+        financiallyReconciledRides: completedFinancialCurrent.length,
+        pendingReconciliationRides: Math.max(0, completed - completedFinancialCurrent.length),
         driverAcquisitionCost,
         acquisitionSpend
       },
@@ -1814,6 +1827,7 @@ router.get('/api/metrics/marketplace', async (req, res) => {
           accepted: 0,
           completed: 0,
           cancelled: 0,
+          financiallyReconciled: 0,
           waitSamples: [],
           pickupSamples: [],
           paymentApprovalToPickupSamples: [],
@@ -1832,6 +1846,9 @@ router.get('/api/metrics/marketplace', async (req, res) => {
       if (COMPLETED_STATUSES.has(b.status)) {
         bucket.completed += 1;
         bucket.fareTotal += b.fare;
+        if (!b.farePendingReconciliation) {
+          bucket.financiallyReconciled += 1;
+        }
       }
       if (CANCELLED_STATUSES.has(b.status)) bucket.cancelled += 1;
       if (b.driverId) bucket.driverIds.add(b.driverId);
@@ -1881,7 +1898,9 @@ router.get('/api/metrics/marketplace', async (req, res) => {
         const cancelRateDay = bucket.requested > 0 ? bucket.cancelled / bucket.requested : null;
         const conversionDay = bucket.requested > 0 ? bucket.completed / bucket.requested : null;
         const ridesPerDriverDay = activeDriversDay > 0 ? bucket.requested / activeDriversDay : null;
-        const revenuePerRideDay = bucket.completed > 0 ? bucket.fareTotal / bucket.completed : null;
+        const revenuePerRideDay = bucket.financiallyReconciled > 0
+          ? bucket.fareTotal / bucket.financiallyReconciled
+          : null;
         const costPerRideDay = bucket.completed > 0
           ? (((bucket.completed * (0.005 + 0.002)) + (bucket.fareTotal * 0.029) + DAILY_INFRA_COST) / bucket.completed)
           : null;
@@ -1925,6 +1944,8 @@ router.get('/api/metrics/marketplace', async (req, res) => {
           },
           financial: {
             totalRevenue: bucket.fareTotal,
+            financiallyReconciledRides: bucket.financiallyReconciled,
+            pendingReconciliationRides: Math.max(0, bucket.completed - bucket.financiallyReconciled),
             revenuePerRide: revenuePerRideDay,
             costPerRide: costPerRideDay,
             marginPerRide: marginPerRideDay,
@@ -1997,7 +2018,7 @@ const ReportService = require('../services/report-service');
 const reportService = new ReportService();
 
 // GET /api/reports/predefined - Listar relatórios pré-configurados
-router.get('/api/reports/predefined', async (req, res) => {
+router.get('/api/reports/predefined', authenticateSupport, requireSupportRoles(REPORT_READ_ROLES), async (req, res) => {
   try {
     const reports = reportService.getPredefinedReports();
     res.json({
@@ -2011,7 +2032,7 @@ router.get('/api/reports/predefined', async (req, res) => {
 });
 
 // POST /api/reports/generate - Gerar relatório
-router.post('/api/reports/generate', async (req, res) => {
+router.post('/api/reports/generate', authenticateSupport, requireSupportRoles(REPORT_READ_ROLES), async (req, res) => {
   try {
     const { reportType, format = 'pdf', data, template = 'default' } = req.body;
 
@@ -2025,6 +2046,13 @@ router.post('/api/reports/generate', async (req, res) => {
     if (format === 'pdf') {
       result = await reportService.generatePDFReport(data, template);
     } else if (format === 'excel' || format === 'xlsx') {
+      if (!reportService.isExcelExportEnabled()) {
+        return res.status(503).json({
+          success: false,
+          code: 'XLSX_EXPORT_DISABLED_SECURITY',
+          error: 'Exportação XLSX temporariamente indisponível. Use PDF.'
+        });
+      }
       result = await reportService.generateExcelReport(data, template);
     } else {
       return res.status(400).json({
@@ -2047,7 +2075,7 @@ router.post('/api/reports/generate', async (req, res) => {
 });
 
 // GET /api/reports/generate/:reportId - Gerar relatório pré-configurado
-router.get('/api/reports/generate/:reportId', async (req, res) => {
+router.get('/api/reports/generate/:reportId', authenticateSupport, requireSupportRoles(REPORT_READ_ROLES), async (req, res) => {
   try {
     const { reportId } = req.params;
     const { format = 'pdf', startDate, endDate } = req.query;
@@ -2063,12 +2091,34 @@ router.get('/api/reports/generate/:reportId', async (req, res) => {
 
     // Buscar dados do relatório (implementar lógica específica para cada tipo)
     const reportData = await generateReportData(reportId, startDate, endDate);
+    if (!reportData?.implemented) {
+      return res.status(501).json({
+        success: false,
+        code: reportData?.code || 'REPORT_DATASET_NOT_IMPLEMENTED',
+        error: reportData?.message || 'Dataset do relatório ainda não está implementado para produção.',
+        reportId,
+        period: reportData?.period || null
+      });
+    }
 
     let result;
     if (format === 'pdf') {
       result = await reportService.generatePDFReport(reportData, 'default');
-    } else {
+    } else if (format === 'excel' || format === 'xlsx') {
+      if (!reportService.isExcelExportEnabled()) {
+        return res.status(503).json({
+          success: false,
+          code: 'XLSX_EXPORT_DISABLED_SECURITY',
+          error: 'Exportação XLSX temporariamente indisponível. Use PDF.'
+        });
+      }
       result = await reportService.generateExcelReport(reportData, 'default');
+    } else {
+      return res.status(400).json({
+        success: false,
+        code: 'REPORT_FORMAT_INVALID',
+        error: 'Formato inválido. Use "pdf".'
+      });
     }
 
     res.setHeader('Content-Type', format === 'pdf'
@@ -2086,13 +2136,12 @@ router.get('/api/reports/generate/:reportId', async (req, res) => {
 
 // Função auxiliar para gerar dados do relatório
 async function generateReportData(reportId, startDate, endDate) {
-  // Implementar lógica específica para cada tipo de relatório
-  // Por enquanto, retornar estrutura básica
   return {
+    implemented: false,
+    code: 'REPORT_DATASET_NOT_IMPLEMENTED',
     title: `Relatório ${reportId}`,
     period: startDate && endDate ? `${startDate} a ${endDate}` : 'Período não especificado',
-    summary: {},
-    data: []
+    message: 'Dataset do relatório ainda não está implementado para produção.'
   };
 }
 
@@ -2832,6 +2881,15 @@ router.get('/api/metrics/prometheus', prometheusMetricsHandler);
 
 // GET /api/metrics/simulation/run - Simula operações e faturamento da plataforma
 router.get('/api/metrics/simulation/run', async (req, res) => {
+  if (!isLaunchFeatureEnabled('financialSimulatorEnabled', false)) {
+    return res.status(403).json(
+      buildLaunchFeatureDisabledPayload(
+        'financialSimulatorEnabled',
+        'Simulador financeiro desativado no perfil atual.'
+      )
+    );
+  }
+
   try {
     const drivers = parseInt(req.query.drivers) || 250;
     const hours = parseFloat(req.query.hours) || 1;

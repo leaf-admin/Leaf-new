@@ -1,5 +1,10 @@
 import Logger from "../utils/Logger";
 import { Platform } from "react-native";
+import {
+  deriveRuntimeSocketBaseUrlFromApi,
+  getRuntimeApiBaseUrl,
+  getRuntimeSocketBaseUrl,
+} from "./runtimeEndpointConfig";
 
 const normalizeBaseUrl = (rawUrl, fallback) => {
   const raw = String(rawUrl || "").trim();
@@ -43,12 +48,12 @@ const normalizeSocketBaseUrl = (
 };
 
 const DEFAULT_WS_URL = normalizeSocketBaseUrl(
-  process.env.EXPO_PUBLIC_WS_URL ||
-    process.env.EXPO_PUBLIC_SOCKET_URL ||
-    process.env.MOBILE_TEST_WS_URL,
-  deriveSocketBaseUrlFromApi(
-    process.env.EXPO_PUBLIC_API_URL || process.env.MOBILE_TEST_BACKEND_URL,
-    "https://socket.leaf.app.br",
+  getRuntimeSocketBaseUrl(),
+  getRuntimeSocketBaseUrl(
+    deriveRuntimeSocketBaseUrlFromApi(
+      getRuntimeApiBaseUrl("https://api.leaf.app.br"),
+      "https://socket.leaf.app.br",
+    ),
   ),
 );
 

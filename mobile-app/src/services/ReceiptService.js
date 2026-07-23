@@ -1,4 +1,5 @@
 import Logger from '../utils/Logger';
+import { createAxiosInstance, setupAxiosInterceptor } from '../utils/axiosInterceptor';
 /**
  * 🧾 RECEIPT SERVICE - CLIENTE MOBILE
  * 
@@ -29,6 +30,11 @@ function getDatabaseModule() {
 }
 
 class ReceiptService {
+    constructor() {
+        this.axiosInstance = createAxiosInstance({ baseURL: `${BACKEND_BASE_URL}/api` });
+        setupAxiosInterceptor(this.axiosInstance);
+    }
+
     /**
      * Busca recibo do Firestore
      * @param {string} rideId - ID da corrida
@@ -37,12 +43,10 @@ class ReceiptService {
     async getReceiptByRideId(rideId) {
         try {
             try {
-                const response = await fetch(`${BACKEND_BASE_URL}/api/receipts/${rideId}`);
-                if (response.ok) {
-                    const data = await response.json();
-                    if (data.success && data.receipt) {
-                        return data.receipt;
-                    }
+                const response = await this.axiosInstance.get(`/receipts/${encodeURIComponent(rideId)}`);
+                const data = response?.data;
+                if (data?.success && data.receipt) {
+                    return data.receipt;
                 }
             } catch (apiError) {
                 Logger.warn('Erro ao buscar recibo via API:', apiError);

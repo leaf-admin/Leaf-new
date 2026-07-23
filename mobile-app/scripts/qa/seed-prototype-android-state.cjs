@@ -118,6 +118,7 @@ const TEST_MODE_STORAGE_KEY = '@test_mode';
 const QA_SOCKET_ID_TOKEN_STORAGE_KEY = '@qa_socket_id_token';
 const CONFIRMED_DESTINATIONS_STORAGE_KEY = 'confirmedDestinations';
 const DEFAULT_QA_FREEZE_MS = 600000;
+const REALTIME_DRIVER_SCENARIOS = new Set(['driver-home']);
 const ADB_BIN = resolveAdbBin();
 const AUTH_FLOW_STALE_STORAGE_KEYS = [
   '@onboarding_data',
@@ -163,6 +164,12 @@ function arg(name, fallback = '') {
 
 function hasFlag(name) {
   return process.argv.includes(name);
+}
+
+function defaultFreezeMsForScenario(scenario) {
+  return REALTIME_DRIVER_SCENARIOS.has(String(scenario || '').trim())
+    ? 0
+    : DEFAULT_QA_FREEZE_MS;
 }
 
 function resolveAdbBin() {
@@ -1075,6 +1082,7 @@ function buildPassengerQuoteBase() {
     bookingStatus: 'idle',
     activeBookingId: null,
     activeBooking: null,
+    quoteLock: null,
     selectedDestination: {
       name: 'Leblon',
       address: LABELS.destinationAddress,
@@ -1104,6 +1112,7 @@ function buildScenarioPatch(scenario) {
       bookingStatus: 'idle',
       activeBookingId: null,
       activeBooking: null,
+      quoteLock: null,
       selectedDestination: null,
       tripDistanceKm: null,
       tripDurationMin: null,
@@ -1194,7 +1203,7 @@ function buildScenarioPatch(scenario) {
         ...buildPassengerReceipt(),
         id: 'trip-driver-proof-1',
       },
-      driverOnline: true,
+      driverOnline: false,
       driverOnlinePending: false,
       driverOnlineMutationSource: 'qa_seed',
       driverActivation: buildApprovedDriverActivation(),
@@ -1221,7 +1230,7 @@ function buildScenarioPatch(scenario) {
       tripArrivalText: '',
       boardingDeadlineAt: null,
       boardingRemainingSec: 0,
-      driverOnline: false,
+      driverOnline: true,
       driverOnlinePending: false,
       driverOnlineMutationSource: '',
       driverActivation: buildApprovedDriverActivation(),
@@ -1252,7 +1261,7 @@ function buildScenarioPatch(scenario) {
       ...buildDriverRideContext('accepted'),
       bookingStatus: 'searching',
       activeBookingId: 'booking-proof-offer-1',
-      driverOnline: false,
+      driverOnline: true,
       driverOnlinePending: false,
       driverOnlineMutationSource: 'qa_seed',
       driverOffers: [buildDriverOffer()],
@@ -1275,7 +1284,7 @@ function buildScenarioPatch(scenario) {
     ...buildDriverRideContext(status),
     bookingStatus: status,
     activeBookingId: 'booking-proof-driver-1',
-    driverOnline: false,
+    driverOnline: true,
     driverOnlinePending: false,
     driverOnlineMutationSource: 'qa_seed',
     driverOffers: [],
@@ -1358,58 +1367,19 @@ function scenarioRoute(scenario) {
     return params.toString();
   };
 
-  const driverTripParams = (status, bookingId = 'booking-proof-driver-1', extra = {}) => {
-    const isStartedTrip = String(status || '').trim().toLowerCase() === 'started';
-    const qaDriverCoordinate = isStartedTrip
-      ? BASE_COORDS.inTransit
-      : { latitude: -22.9746, longitude: -43.1903 };
-    const qaRouteCoordinates = isStartedTrip
-      ? [BASE_COORDS.inTransit, BASE_COORDS.destination]
-      : [qaDriverCoordinate, BASE_COORDS.pickup];
-    const request = {
-      bookingId,
-      id: bookingId,
-      status,
-      passengerName: 'Leaf Passageiro Teste',
-      passenger: 'Leaf Passageiro Teste',
-      pickupAddress: LABELS.pickupAddress,
-      pickup: LABELS.pickupAddress,
-      pickupCoordinate: BASE_COORDS.pickup,
-      dropoffAddress: LABELS.destinationAddress,
-      dropoff: LABELS.destinationAddress,
-      destinationCoordinate: BASE_COORDS.destination,
-      driverCoordinate: qaDriverCoordinate,
-      routeCoordinates: qaRouteCoordinates,
-      fare: 12.5,
-      grossFare: 12.5,
-      driverNetAmount: 10.8,
-      estimatedDriverNetAmount: 10.8,
-      estimatedOperationalFee: 0.99,
-      estimatedPaymentIntermediationFee: 0.71,
-      estimatedTotalFees: 1.7,
-      distanceKm: 1.3,
-      tripDistanceKm: 6.7,
-      pickupEtaMin: 5,
-      tripDurationMin: 20,
-      passengerRating: 4.9,
-      pricingSnapshotLocked: true,
-      ...extra
-    };
-    return `request=${encodeURIComponent(JSON.stringify(request))}`;
-  };
-
   if (scenario === 'driver-offer') {
-    return `leafapp://robotaxi/driver/offer?${driverTripParams('searching', 'booking-proof-offer-1', { expiresInSec: 18 })}&qaKeepVisible=1`;
+    return 'leafapp://robotaxi/home';
   }
   if (scenario === 'passenger-accepted' || scenario === 'passenger-arrived' || scenario === 'passenger-started') {
-    const status = scenario.replace('passenger-', '');
-    return `leafapp://robotaxi/trip?${passengerTripParams(status)}`;
+    // Passenger lifecycle state is rendered by the current home runtime.
+    // Opening robotaxi/trip would bypass it for the standalone legacy screen.
+    return 'leafapp://robotaxi/home';
   }
-  if (scenario === 'passenger-booking') {
-    return `leafapp://robotaxi/booking?${passengerQuoteParams()}`;
-  }
-  if (scenario === 'passenger-payment') {
-    return `leafapp://robotaxi/payment?${passengerQuoteParams()}`;
+  if (scenario === 'passenger-booking' || scenario === 'passenger-payment') {
+    // Booking/payment deep links still resolve to standalone legacy surfaces.
+    // QA must start from the current home runtime and reach the next surface
+    // through the canonical interaction, never through those stale routes.
+    return 'leafapp://robotaxi/home';
   }
   if (scenario === 'passenger-receipt') {
     return `leafapp://robotaxi/receipt?${passengerReceiptParams('customer')}`;
@@ -1418,8 +1388,7 @@ function scenarioRoute(scenario) {
     return `leafapp://robotaxi/receipt?${passengerReceiptParams('driver')}`;
   }
   if (scenario === 'driver-accepted' || scenario === 'driver-arrived' || scenario === 'driver-started') {
-    const status = scenario.replace('driver-', '');
-    return `leafapp://robotaxi/driver/trip?${driverTripParams(status)}`;
+    return 'leafapp://robotaxi/home';
   }
   return 'leafapp://robotaxi/home';
 }
@@ -1679,10 +1648,11 @@ async function main() {
   const isDriverScenario = scenario.startsWith('driver-');
   const defaultUid = isDriverScenario ? DRIVER_UID : PASSENGER_UID;
   const screenshotPath = arg('--screenshot', '');
-  const parsedFreezeMs = Number(arg('--freeze-ms', String(DEFAULT_QA_FREEZE_MS)));
+  const defaultFreezeMs = defaultFreezeMsForScenario(scenario);
+  const parsedFreezeMs = Number(arg('--freeze-ms', String(defaultFreezeMs)));
   const freezeMs = Math.max(
     0,
-    Number.isFinite(parsedFreezeMs) ? parsedFreezeMs : DEFAULT_QA_FREEZE_MS
+    Number.isFinite(parsedFreezeMs) ? parsedFreezeMs : defaultFreezeMs
   );
   const artifactDir = path.resolve(
     arg(

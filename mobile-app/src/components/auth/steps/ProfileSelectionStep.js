@@ -30,7 +30,7 @@ function normalizeUserType(userType) {
 }
 
 const ProfileSelectionStep = ({ onProfileSelected, onBack, initialData = {}, progressMeta }) => {
-  const [selected, setSelected] = useState(options[0]);
+  const [selected, setSelected] = useState(null);
 
   useEffect(() => {
     const normalizedType = normalizeUserType(initialData?.userType);

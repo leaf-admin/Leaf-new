@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import config from "@/src/config";
 import ProtectedRoute from "@/src/components/ProtectedRoute";
 import AppNav from "@/src/components/AppNav";
 import { leafAPI } from "@/src/services/api";
@@ -13,6 +12,8 @@ export default function ReportsPage() {
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
+  const [generating, setGenerating] = useState("");
+  const [statusMessage, setStatusMessage] = useState("");
 
   useEffect(() => {
     let mounted = true;
@@ -36,9 +37,27 @@ export default function ReportsPage() {
     };
   }, []);
 
-  const generate = (reportId, format = "pdf") => {
-    const url = `${config.api.baseUrl}/reports/generate/${reportId}?format=${format}`;
-    window.open(url, "_blank", "noopener,noreferrer");
+  const generate = async (reportId, format = "pdf") => {
+    const generationKey = `${reportId}:${format}`;
+    try {
+      setError("");
+      setStatusMessage("");
+      setGenerating(generationKey);
+      const file = await leafAPI.downloadReport(reportId, format);
+      const objectUrl = URL.createObjectURL(file.blob);
+      const link = document.createElement("a");
+      link.href = objectUrl;
+      link.download = file.filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 0);
+      setStatusMessage("Relatório gerado com autenticação do dashboard.");
+    } catch (err) {
+      setError(err?.message || "Falha ao gerar relatório");
+    } finally {
+      setGenerating("");
+    }
   };
   const filteredReports = reports.filter((report) =>
     `${report?.id || ""} ${report?.name || ""} ${report?.title || ""} ${report?.description || ""}`
@@ -82,8 +101,20 @@ export default function ReportsPage() {
                     <h2>{report.name || report.title || report.id}</h2>
                     <p>{report.description || "Sem descrição"}</p>
                     <div className="filters">
-                      <button onClick={() => generate(report.id, "pdf")}>PDF</button>
-                      <button onClick={() => generate(report.id, "excel")}>Excel</button>
+                      <button
+                        disabled={Boolean(generating)}
+                        onClick={() => generate(report.id, "pdf")}
+                        data-testid={`report-${report.id}-pdf`}
+                      >
+                        {generating === `${report.id}:pdf` ? "Gerando PDF" : "PDF"}
+                      </button>
+                      <button
+                        disabled={Boolean(generating)}
+                        onClick={() => generate(report.id, "excel")}
+                        data-testid={`report-${report.id}-excel`}
+                      >
+                        {generating === `${report.id}:excel` ? "Gerando Excel" : "Excel"}
+                      </button>
                     </div>
                   </article>
                 ))
@@ -91,6 +122,7 @@ export default function ReportsPage() {
             </div>
           </Panel>
         </section>
+        {statusMessage ? <p className="success-text">{statusMessage}</p> : null}
         <ErrorText message={error} />
       </main>
     </ProtectedRoute>

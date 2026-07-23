@@ -6,6 +6,7 @@ const rateLimit = require('express-rate-limit');
 const router = express.Router();
 const redisPool = require('../utils/redis-pool');
 const connectionMonitor = require('../services/connection-monitor');
+const { readDriverSocketPresence } = require('../services/driver-socket-presence-service');
 const { logError, logSecurity } = require('../utils/logger');
 
 const toPositiveInt = (value, fallback) => {
@@ -30,7 +31,7 @@ const DRIVER_STATUS_ACCESS_TOKEN = String(
 const DRIVER_STATUS_INCLUDE_CONNECTION_MONITOR =
     String(process.env.DRIVER_STATUS_INCLUDE_CONNECTION_MONITOR || 'false').toLowerCase() === 'true';
 const DRIVER_STATUS_REQUIRE_LOCAL_SOCKET =
-    String(process.env.DRIVER_STATUS_REQUIRE_LOCAL_SOCKET || 'false').toLowerCase() === 'true';
+    String(process.env.DRIVER_STATUS_REQUIRE_LOCAL_SOCKET || 'true').toLowerCase() !== 'false';
 const ELIGIBLE_DRIVER_GEO_KEY = process.env.ELIGIBLE_DRIVER_GEO_KEY || 'driver_locations_eligible';
 
 const enforceDriverStatusAccess = (req, res, next) => {
@@ -228,6 +229,7 @@ router.get('/:driverId', async (req, res) => {
         let socketId = null;
         let isAuthenticated = false;
         let driverSocket = resolveDriverSocketFast(io, driverId);
+        let distributedPresence = null;
 
         // Fallback somente quando fast-path não encontrar conexão (caminho custoso).
         if (!driverSocket) {
@@ -240,6 +242,14 @@ router.get('/:driverId', async (req, res) => {
             isAuthenticated = true;
             const rooms = getSocketRooms(driverSocket);
             isInDriverRoom = rooms.includes('drivers_room') || rooms.includes(`driver_${driverId}`);
+        } else {
+            const presence = await readDriverSocketPresence(redis, driverId);
+            if (presence.reachable) {
+                distributedPresence = presence;
+                socketId = presence.socketId || null;
+                isAuthenticated = true;
+                isInDriverRoom = true;
+            }
         }
         
         // 4. Verificar status no Redis (modelo atual: hash driver:{id})
@@ -310,7 +320,15 @@ router.get('/:driverId', async (req, res) => {
                 dispatchEligibilityCode: driverHash?.dispatchEligibilityCode || null,
                 canReceiveRequestsByRedis,
                 canReceiveRequestsBySocket,
-                rooms: driverSocket ? getSocketRooms(driverSocket) : []
+                distributedPresence: distributedPresence
+                    ? {
+                        socketId: distributedPresence.socketId,
+                        workerId: distributedPresence.workerId,
+                        updatedAt: distributedPresence.updatedAt,
+                        ageMs: distributedPresence.ageMs
+                    }
+                    : null,
+                rooms: driverSocket ? getSocketRooms(driverSocket) : (distributedPresence?.rooms || [])
             }
         };
         
