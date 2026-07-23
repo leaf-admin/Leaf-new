@@ -490,6 +490,115 @@ class LeafApiService {
     return this.request(`/drivers/${driverId}/documents`);
   }
 
+  resolveKycScope(context = {}) {
+    const rawScope = typeof context === "string" ? context : context?.scope;
+    const normalized = String(rawScope || "operational").trim().toLowerCase();
+    if (normalized === "operational" || normalized === "sandbox") return normalized;
+    throw new Error(`Escopo KYC inválido: ${normalized}`);
+  }
+
+  buildScopedKycRequest(endpoint, options = {}, context = {}) {
+    const scope = this.resolveKycScope(context);
+    if (scope !== "sandbox") return { endpoint, options };
+    const separator = endpoint.includes("?") ? "&" : "?";
+    return {
+      endpoint: `${endpoint}${separator}scope=sandbox`,
+      options: {
+        ...options,
+        headers: {
+          ...(options.headers || {}),
+          "X-Leaf-KYC-Scope": "sandbox",
+        },
+      },
+    };
+  }
+
+  async requestKyc(endpoint, options = {}, context = {}) {
+    const request = this.buildScopedKycRequest(endpoint, options, context);
+    return this.request(request.endpoint, request.options);
+  }
+
+  async requestKycFile(endpoint, options = {}, context = {}) {
+    const request = this.buildScopedKycRequest(endpoint, options, context);
+    return this.requestFile(request.endpoint, request.options);
+  }
+
+  async getDriverKycIdentityReviews(driverId, context = {}) {
+    return this.requestKyc(
+      `/drivers/${encodeURIComponent(driverId)}/kyc/identity-reviews`,
+      {},
+      context,
+    );
+  }
+
+  async authorizeDriverKycOrphanHoldRecovery(driverId, payload = {}, context = {}) {
+    return this.requestKyc(
+      `/drivers/${encodeURIComponent(driverId)}/kyc/orphan-identity-hold/recovery`,
+      {
+        method: "POST",
+        body: JSON.stringify(payload),
+      },
+      context,
+    );
+  }
+
+  async reconcileDriverKycIdentityReview(driverId, payload = {}, context = {}) {
+    return this.requestKyc(
+      `/drivers/${encodeURIComponent(driverId)}/kyc/identity-reviews/reconcile`,
+      {
+        method: "POST",
+        body: JSON.stringify(payload),
+      },
+      context,
+    );
+  }
+
+  async getDriverKycIdentityEvidence(
+    driverId,
+    caseId,
+    evidenceKind,
+    { ticketId, justification, evidenceBindingHash, scope } = {},
+  ) {
+    return this.requestKycFile(
+      `/drivers/${encodeURIComponent(driverId)}/kyc/identity-reviews/${encodeURIComponent(caseId)}/evidence/${encodeURIComponent(evidenceKind)}`,
+      {
+        method: "POST",
+        headers: {
+          Accept: "image/jpeg,image/png,application/octet-stream",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          ticketId,
+          reason: justification,
+          evidenceBindingHash,
+        }),
+      },
+      { scope },
+    );
+  }
+
+  async startDriverKycIdentityReview(driverId, caseId, payload = {}, context = {}) {
+    return this.requestKyc(
+      `/drivers/${encodeURIComponent(driverId)}/kyc/identity-reviews/${encodeURIComponent(caseId)}/start`,
+      {
+        method: "POST",
+        body: JSON.stringify(payload),
+      },
+      context,
+    );
+  }
+
+  async decideDriverKycIdentityReview(driverId, caseId, payload = {}, context = {}) {
+    return this.requestKyc(
+      `/drivers/${encodeURIComponent(driverId)}/kyc/identity-reviews/${encodeURIComponent(caseId)}/decision`,
+      {
+        method: "POST",
+        body: JSON.stringify(payload),
+      },
+      context,
+    );
+  }
+
   async getDriverDocumentReviewQueue(params = {}) {
     const query = new URLSearchParams();
     Object.entries(params).forEach(([key, value]) => {
@@ -952,7 +1061,39 @@ class LeafApiService {
     return this.request(`/audit/stats${suffix ? `?${suffix}` : ""}`);
   }
 
-  async getSupportTickets(params = {}) {
+  resolveSupportScope(context = {}) {
+    const rawScope = typeof context === "string" ? context : context?.scope;
+    const normalized = String(rawScope || "operational").trim().toLowerCase();
+    if (normalized === "operational" || normalized === "sandbox") return normalized;
+    throw new Error(`Escopo de suporte inválido: ${normalized}`);
+  }
+
+  buildScopedSupportEndpoint(endpoint, context = {}) {
+    if (this.resolveSupportScope(context) !== "sandbox") return endpoint;
+    const separator = endpoint.includes("?") ? "&" : "?";
+    return `${endpoint}${separator}scope=sandbox`;
+  }
+
+  async requestSupport(endpoint, options = {}, context = {}) {
+    const scope = this.resolveSupportScope(context);
+    const headers = {
+      ...(options.headers || {}),
+      ...(scope === "sandbox" ? { "X-Leaf-Support-Scope": "sandbox" } : {}),
+    };
+    return this.request(this.buildScopedSupportEndpoint(endpoint, { scope }), {
+      ...options,
+      headers,
+    });
+  }
+
+  assertOperationalSupportChatScope(context = {}) {
+    if (this.resolveSupportScope(context) === "sandbox") {
+      throw new Error("Chats legados não estão disponíveis no escopo sandbox de suporte");
+    }
+  }
+
+  async getSupportTickets(params = {}, context = {}) {
+    const scope = this.resolveSupportScope(context);
     const query = new URLSearchParams();
     if (params.status) query.append("status", params.status);
     if (params.userId) query.append("userId", params.userId);
@@ -966,19 +1107,20 @@ class LeafApiService {
     if (params.category) query.append("category", params.category);
 
     try {
-      const response = await this.request(`/support/admin/tickets?${query.toString()}`);
+      const response = await this.requestSupport(`/support/admin/tickets?${query.toString()}`, {}, { scope });
       if (response && (response.tickets || response.success !== false)) return response;
       throw new Error("Resposta inválida da API");
-    } catch {
-      return this.request(`/support/tickets?${query.toString()}`);
+    } catch (error) {
+      if (scope === "sandbox") throw error;
+      return this.requestSupport(`/support/tickets?${query.toString()}`, {}, { scope });
     }
   }
 
-  async getSupportQueueSummary() {
-    return this.request("/support/queue/summary");
+  async getSupportQueueSummary(context = {}) {
+    return this.requestSupport("/support/queue/summary", {}, context);
   }
 
-  async getSupportQueueBacklog(params = {}) {
+  async getSupportQueueBacklog(params = {}, context = {}) {
     const query = new URLSearchParams();
     Object.entries(params).forEach(([key, value]) => {
       if (value !== undefined && value !== null && value !== "") {
@@ -986,39 +1128,39 @@ class LeafApiService {
       }
     });
     const suffix = query.toString();
-    return this.request(`/support/queue/backlog${suffix ? `?${suffix}` : ""}`);
+    return this.requestSupport(`/support/queue/backlog${suffix ? `?${suffix}` : ""}`, {}, context);
   }
 
-  async assignSupportTicket(ticketId, agentId, agentName) {
-    return this.request(`/support/admin/tickets/${ticketId}/assign`, {
+  async assignSupportTicket(ticketId, agentId, agentName, context = {}) {
+    return this.requestSupport(`/support/admin/tickets/${ticketId}/assign`, {
       method: "POST",
       body: JSON.stringify({ agentId, agentName }),
-    });
+    }, context);
   }
 
-  async escalateSupportTicket(ticketId, reason) {
-    return this.request(`/support/admin/tickets/${ticketId}/escalate`, {
+  async escalateSupportTicket(ticketId, reason, context = {}) {
+    return this.requestSupport(`/support/admin/tickets/${ticketId}/escalate`, {
       method: "POST",
       body: JSON.stringify({ reason }),
-    });
+    }, context);
   }
 
-  async resolveSupportTicket(ticketId, resolution = "") {
-    return this.request(`/support/admin/tickets/${ticketId}/resolve`, {
+  async resolveSupportTicket(ticketId, resolution = "", context = {}) {
+    return this.requestSupport(`/support/admin/tickets/${ticketId}/resolve`, {
       method: "POST",
       body: JSON.stringify({ resolution }),
-    });
+    }, context);
   }
 
-  async getSupportMessages(ticketId) {
-    return this.request(`/support/tickets/${ticketId}/messages`);
+  async getSupportMessages(ticketId, context = {}) {
+    return this.requestSupport(`/support/tickets/${ticketId}/messages`, {}, context);
   }
 
-  async sendSupportMessage(ticketId, message, messageType = "text", attachments = []) {
-    return this.request(`/support/tickets/${ticketId}/messages`, {
+  async sendSupportMessage(ticketId, message, messageType = "text", attachments = [], context = {}) {
+    return this.requestSupport(`/support/tickets/${ticketId}/messages`, {
       method: "POST",
       body: JSON.stringify({ message, messageType, attachments }),
-    });
+    }, context);
   }
 
   async createSupportTicket(
@@ -1028,39 +1170,45 @@ class LeafApiService {
     priority = "N3",
     userInfo = {},
     metadata = {},
+    context = {},
   ) {
-    return this.request("/support/tickets", {
+    return this.requestSupport("/support/tickets", {
       method: "POST",
       body: JSON.stringify({ subject, description, category, priority, userInfo, metadata }),
-    });
+    }, context);
   }
 
-  async getChatHistory(userId, limit = 50, { includeArchived = true } = {}) {
+  async getChatHistory(userId, limit = 50, { includeArchived = true, scope = "operational" } = {}) {
+    this.assertOperationalSupportChatScope({ scope });
     const params = new URLSearchParams();
     params.set("limit", String(limit));
     if (!includeArchived) params.set("includeArchived", "false");
     return this.request(`/support/chat/${userId}/history?${params.toString()}`);
   }
 
-  async getSupportChatInbox({ limit = 50, includeClosed = false } = {}) {
+  async getSupportChatInbox({ limit = 50, includeClosed = false, scope = "operational" } = {}) {
+    this.assertOperationalSupportChatScope({ scope });
     const params = new URLSearchParams();
     params.set("limit", String(limit));
     if (includeClosed) params.set("includeClosed", "true");
     return this.request(`/support/chat/inbox?${params.toString()}`);
   }
 
-  async getChatStatus(userId) {
+  async getChatStatus(userId, context = {}) {
+    this.assertOperationalSupportChatScope(context);
     return this.request(`/support/chat/${userId}/status`);
   }
 
-  async markChatRead(userId, messageIds = []) {
+  async markChatRead(userId, messageIds = [], context = {}) {
+    this.assertOperationalSupportChatScope(context);
     return this.request(`/support/chat/${userId}/mark-read`, {
       method: "POST",
       body: JSON.stringify({ messageIds }),
     });
   }
 
-  async sendChatMessage(userId, message) {
+  async sendChatMessage(userId, message, context = {}) {
+    this.assertOperationalSupportChatScope(context);
     return this.request(`/support/chat/${userId}/message`, {
       method: "POST",
       body: JSON.stringify({ message, senderType: "agent" }),
@@ -1068,6 +1216,7 @@ class LeafApiService {
   }
 
   async convertChatToTicket(userId, payload = {}, options = {}) {
+    this.assertOperationalSupportChatScope(options);
     const idempotencyKey = options.idempotencyKey || payload.idempotencyKey;
     const headers = idempotencyKey
       ? {
@@ -1082,7 +1231,8 @@ class LeafApiService {
     });
   }
 
-  async closeChat(userId, closedBy = "agent") {
+  async closeChat(userId, closedBy = "agent", context = {}) {
+    this.assertOperationalSupportChatScope(context);
     return this.request(`/support/chat/${userId}/close`, {
       method: "POST",
       body: JSON.stringify({ closedBy }),
