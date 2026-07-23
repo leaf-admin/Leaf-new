@@ -24,9 +24,7 @@ const {
 async function applyDeferredIdentityReverification(driverId, context = {}) {
   try {
     const kycPolicyService = require('../services/kyc-policy-service');
-    if (typeof kycPolicyService.applyDeferredIdentityReverificationIfSafe !== 'function') {
-      return;
-    }
+    if (typeof kycPolicyService.applyDeferredIdentityReverificationIfSafe !== 'function') return;
     await kycPolicyService.applyDeferredIdentityReverificationIfSafe(driverId, context);
   } catch (error) {
     logStructured('warn', 'Falha ao aplicar revalidacao KYC adiada apos interrupcao operacional', {
@@ -230,27 +228,13 @@ class InterruptRideOperationalCommand extends Command {
           this.driverId,
           this.bookingId
         );
-        const financialContextResult = resolveFinancialContext(
-          context.bookingHash,
-          { allowLegacyOperational: true }
-        );
-        if (
-          activeTripCleared
-          && financialContextResult.ok
-          && financialContextResult.context.namespace === 'operational'
-        ) {
+        if (activeTripCleared) {
           await applyDeferredIdentityReverification(this.driverId, {
             source: 'ride_interrupted_operational',
             tripId: this.bookingId
           });
-        } else if (!activeTripCleared) {
-          logStructured('warn', 'Revalidacao KYC adiada: indice ativo nao correspondia a corrida interrompida', {
-            service: 'interrupt-ride-operational-command',
-            bookingId: this.bookingId,
-            driverId: this.driverId
-          });
         } else {
-          logStructured('info', 'Revalidacao KYC adiada ignorada fora do namespace operacional', {
+          logStructured('warn', 'Revalidacao KYC adiada: indice ativo nao correspondia a corrida interrompida', {
             service: 'interrupt-ride-operational-command',
             bookingId: this.bookingId,
             driverId: this.driverId

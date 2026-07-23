@@ -1,5 +1,6 @@
 const AWS_LIVENESS_PROVIDER = 'aws_rekognition_face_liveness';
 const AWS_COMPARE_FACES_PROVIDER = 'aws_rekognition_compare_faces';
+const MIN_AWS_COMPARE_FACES_APPROVE_THRESHOLD = 0.95;
 const DEFAULT_TRUSTED_MATCH_PROVIDERS = Object.freeze([
   'biometric-face-service',
   'leaf_face_compare_service'
@@ -33,11 +34,13 @@ function isProductionRuntime(env = process.env) {
 function resolveBiometricPolicy(env = process.env) {
   const productionRuntime = isProductionRuntime(env);
   const productionBiometricsEnabled = readBooleanLike(env.KYC_PRODUCTION_BIOMETRICS_ENABLED, false);
+  const strictProductionMode = readBooleanLike(env.KYC_STRICT_PRODUCTION_MODE, false);
   const strictDefault = productionBiometricsEnabled;
 
   return {
     productionRuntime,
     productionBiometricsEnabled,
+    strictProductionMode,
     // A production runtime must never trust a client-declared identity match.
     // The rollout flag controls readiness diagnostics, not this authorization boundary.
     requireTrustedBiometricMatch: productionRuntime
@@ -149,13 +152,21 @@ function evaluateProductionReadiness(env = process.env) {
   const warnings = [];
   const enabled = policy.productionBiometricsEnabled;
   const launchProfile = String(env.LEAF_LAUNCH_PROFILE || '').trim().toLowerCase();
-  const pilotControlled =
-    readBooleanLike(env.LEAF_PILOT_CONTROLLED, false) ||
-    ['pilot', 'pilot_controlled', 'controlled_pilot'].includes(launchProfile);
+  const runtimeRole = String(env.RUNTIME_ROLE || 'gateway').trim().toLowerCase();
+  const preKycValidationProfile = [
+    'geofence_validation',
+    'ride_flow_validation'
+  ].includes(launchProfile);
+  const nonInteractiveWorker = [
+    'sideeffects',
+    'billing',
+    'trip-location',
+    'trip_location'
+  ].includes(runtimeRole);
 
   if (!enabled) {
     const message = 'KYC_PRODUCTION_BIOMETRICS_ENABLED=false: produção biométrica ainda não está travada em modo estrito.';
-    if (policy.productionRuntime && pilotControlled) {
+    if (policy.productionRuntime && !preKycValidationProfile && !nonInteractiveWorker) {
       blockers.push(message);
     } else {
       warnings.push(message);
@@ -172,18 +183,125 @@ function evaluateProductionReadiness(env = process.env) {
   if (!readBooleanLike(env.KYC_AWS_LIVENESS_ENABLED || env.AWS_LIVENESS_ENABLED, false)) {
     blockers.push('KYC_AWS_LIVENESS_ENABLED=true obrigatório para produção biométrica.');
   }
+  if (!policy.strictProductionMode) {
+    blockers.push('KYC_STRICT_PRODUCTION_MODE=true obrigatório para usar somente Firestore como autoridade KYC positiva.');
+  }
   if (!String(env.KYC_AWS_LIVENESS_ASSUME_ROLE_ARN || env.AWS_LIVENESS_ASSUME_ROLE_ARN || '').trim()) {
     blockers.push('KYC_AWS_LIVENESS_ASSUME_ROLE_ARN obrigatório para emitir credenciais temporárias AWS.');
+  }
+  if (!readBooleanLike(env.KYC_AWS_LIVENESS_CREDENTIALS_ENABLED, false)) {
+    blockers.push('KYC_AWS_LIVENESS_CREDENTIALS_ENABLED=true obrigatório para o streaming Liveness no dispositivo.');
+  }
+  const activeTripAuthorityMode = String(
+    env.KYC_ACTIVE_TRIP_AUTHORITY_MODE || ''
+  ).trim().toLowerCase();
+  if (activeTripAuthorityMode !== 'redis_noeviction') {
+    blockers.push('KYC_ACTIVE_TRIP_AUTHORITY_MODE deve ser redis_noeviction; durable_fallback permanece indisponível até existir uma implementação homologada.');
+  }
+  if (String(
+    env.KYC_AWS_LIVENESS_S3_BUCKET || env.AWS_LIVENESS_S3_BUCKET || ''
+  ).trim()) {
+    blockers.push('KYC_AWS_LIVENESS_S3_BUCKET deve permanecer vazio no fluxo biométrico canônico.');
+  }
+  const livenessRetryDelaySeconds = Number(
+    env.KYC_AWS_LIVENESS_IDEMPOTENT_RETRY_DELAY_SECONDS ?? 2
+  );
+  const livenessRetryWindowSeconds = Number(
+    env.KYC_AWS_LIVENESS_IDEMPOTENT_RETRY_WINDOW_SECONDS ?? 120
+  );
+  if (
+    !Number.isInteger(livenessRetryDelaySeconds)
+    || !Number.isInteger(livenessRetryWindowSeconds)
+    || livenessRetryDelaySeconds < 0
+    || livenessRetryDelaySeconds > 30
+    || livenessRetryWindowSeconds < 30
+    || livenessRetryWindowSeconds > 150
+    || livenessRetryDelaySeconds >= livenessRetryWindowSeconds
+  ) {
+    blockers.push('Retry idempotente do AWS Liveness exige delay 0-30s e janela 30-150s, com delay menor que a janela.');
+  }
+  const costGuardEnabled = readBooleanLike(env.KYC_AWS_COST_GUARD_ENABLED, false);
+  const dailyCostLimitUsd = Number(env.KYC_AWS_COST_DAILY_LIMIT_USD);
+  const monthlyCostLimitUsd = Number(env.KYC_AWS_COST_MONTHLY_LIMIT_USD);
+  const costOperationRetentionDays = Number(
+    env.KYC_AWS_COST_OPERATION_RETENTION_DAYS ?? 35
+  );
+  if (!costGuardEnabled) {
+    blockers.push('KYC_AWS_COST_GUARD_ENABLED=true obrigatório para limitar chamadas pagas AWS KYC.');
+  }
+  if (
+    !Number.isFinite(dailyCostLimitUsd)
+    || !Number.isFinite(monthlyCostLimitUsd)
+    || dailyCostLimitUsd <= 0
+    || monthlyCostLimitUsd <= 0
+    || dailyCostLimitUsd > monthlyCostLimitUsd
+  ) {
+    blockers.push('Limites diário/mensal do circuit breaker AWS KYC devem ser positivos e diário <= mensal.');
+  }
+  if (String(env.KYC_AWS_COST_TIME_ZONE || '').trim().toUpperCase() !== 'UTC') {
+    blockers.push('KYC_AWS_COST_TIME_ZONE=UTC obrigatório para o circuit breaker AWS KYC.');
+  }
+  if (
+    !Number.isInteger(costOperationRetentionDays)
+    || costOperationRetentionDays < 1
+    || costOperationRetentionDays > 400
+  ) {
+    blockers.push('KYC_AWS_COST_OPERATION_RETENTION_DAYS deve estar entre 1 e 400 dias.');
+  }
+  if (!String(
+    env.KYC_AWS_LIVENESS_ASSUME_ROLE_EXTERNAL_ID
+    || env.AWS_LIVENESS_ASSUME_ROLE_EXTERNAL_ID
+    || ''
+  ).trim()) {
+    blockers.push('KYC_AWS_LIVENESS_ASSUME_ROLE_EXTERNAL_ID obrigatório para o trust binding do Liveness.');
+  }
+  const stsSessionNamePrefix = String(
+    env.KYC_AWS_LIVENESS_STS_SESSION_NAME_PREFIX || ''
+  ).trim();
+  if (stsSessionNamePrefix !== 'leaf-liveness') {
+    blockers.push('KYC_AWS_LIVENESS_STS_SESSION_NAME_PREFIX=leaf-liveness obrigatório para a trust policy atual.');
+  }
+  const awsCredentialSource = String(env.KYC_AWS_CREDENTIAL_SOURCE || '').trim().toLowerCase();
+  if (!['static', 'ambient'].includes(awsCredentialSource)) {
+    blockers.push('KYC_AWS_CREDENTIAL_SOURCE deve ser static ou ambient em produção biométrica.');
+  }
+  if (
+    awsCredentialSource === 'static'
+    && (
+      !String(env.AWS_ACCESS_KEY_ID || '').trim()
+      || !String(env.AWS_SECRET_ACCESS_KEY || '').trim()
+    )
+  ) {
+    blockers.push('KYC_AWS_CREDENTIAL_SOURCE=static exige AWS_ACCESS_KEY_ID e AWS_SECRET_ACCESS_KEY.');
   }
   const faceCompareProvider = String(
     env.KYC_FACE_COMPARE_PROVIDER || 'leaf_face_compare_service'
   ).trim().toLowerCase();
   if (faceCompareProvider === AWS_COMPARE_FACES_PROVIDER) {
+    const compareResultPersistenceAttempts = Number(
+      env.KYC_AWS_COMPARE_RESULT_PERSIST_MAX_ATTEMPTS ?? 3
+    );
+    const compareSdkMaxAttempts = Number(
+      env.KYC_AWS_COMPARE_FACES_SDK_MAX_ATTEMPTS ?? 1
+    );
     if (!readBooleanLike(env.KYC_AWS_COMPARE_FACES_ENABLED, false)) {
       blockers.push('KYC_AWS_COMPARE_FACES_ENABLED=true obrigatório para usar AWS CompareFaces.');
     }
     if (!policy.canonicalTrustedMatchProviders.includes(AWS_COMPARE_FACES_PROVIDER)) {
       blockers.push('AWS CompareFaces precisa estar na allowlist biométrica canônica server-side.');
+    }
+    if (readBooleanLike(env.ENABLE_CNH_FACE_BIOMETRICS, false)) {
+      blockers.push('ENABLE_CNH_FACE_BIOMETRICS=false obrigatório no perfil AWS canônico para manter o embedding legado isolado.');
+    }
+    if (compareSdkMaxAttempts !== 1) {
+      blockers.push('KYC_AWS_COMPARE_FACES_SDK_MAX_ATTEMPTS=1 obrigatório para impedir cobrança duplicada sem idempotency token.');
+    }
+    if (
+      !Number.isInteger(compareResultPersistenceAttempts)
+      || compareResultPersistenceAttempts < 1
+      || compareResultPersistenceAttempts > 5
+    ) {
+      blockers.push('KYC_AWS_COMPARE_RESULT_PERSIST_MAX_ATTEMPTS deve estar entre 1 e 5.');
     }
   } else if (['leaf_face_compare_service', 'biometric-face-service'].includes(faceCompareProvider)) {
     if (!String(env.BIOMETRIC_FACE_SERVICE_URL || '').trim()) {
@@ -231,6 +349,13 @@ function evaluateProductionReadiness(env = process.env) {
     && !(reviewThreshold >= 0 && approveThreshold <= 1)
   ) {
     blockers.push('Thresholds do AWS CompareFaces devem estar normalizados entre 0 e 1.');
+  }
+  if (
+    faceCompareProvider === AWS_COMPARE_FACES_PROVIDER
+    && Number.isFinite(approveThreshold)
+    && approveThreshold < MIN_AWS_COMPARE_FACES_APPROVE_THRESHOLD
+  ) {
+    blockers.push('KYC_AWS_COMPARE_FACES_APPROVE_THRESHOLD deve ser pelo menos 0.95 no fluxo AWS canônico.');
   }
 
   return {

@@ -167,14 +167,10 @@ class SupportQueueService {
     };
   }
 
-  async getTicketWithMessages(ticketId, { persistenceContext = null } = {}) {
-    const ticket = persistenceContext
-      ? await this.ticketService.getTicket(ticketId, persistenceContext)
-      : await this.ticketService.getTicket(ticketId);
+  async getTicketWithMessages(ticketId, persistenceContext = null) {
+    const ticket = await this.ticketService.getTicket(ticketId, persistenceContext);
     if (!ticket) return null;
-    const messages = await this.ticketService.listMessages(ticketId, {
-      persistenceContext
-    });
+    const messages = await this.ticketService.listMessages(ticketId, { persistenceContext });
     return { ticket, messages };
   }
 
@@ -228,12 +224,7 @@ class SupportQueueService {
   }
 
   async markQueueMetadata(ticketId, patch = {}, persistenceContext = null) {
-    const docRef = this.ticketDoc(ticketId, persistenceContext);
-    if (!docRef) return null;
-
-    const current = persistenceContext
-      ? await this.ticketService.getTicket(ticketId, persistenceContext)
-      : await this.ticketService.getTicket(ticketId);
+    const current = await this.ticketService.getTicket(ticketId, persistenceContext);
     if (!current) return null;
 
     const nextMetadata = {
@@ -244,10 +235,19 @@ class SupportQueueService {
       }
     };
 
-    await docRef.set({
-      metadata: nextMetadata,
-      updatedAt: new Date().toISOString()
-    }, { merge: true });
+    if (typeof this.ticketService.updateTicketMetadata === 'function') {
+      await this.ticketService.updateTicketMetadata(
+        ticketId,
+        { queue: nextMetadata.queue },
+        persistenceContext
+      );
+    } else {
+      const docRef = this.ticketDoc(ticketId, persistenceContext);
+      if (!docRef || typeof docRef.set !== 'function') {
+        throw new Error('Store de metadados da fila de suporte indisponível');
+      }
+      await docRef.set({ metadata: nextMetadata }, { merge: true });
+    }
 
     return nextMetadata.queue;
   }
@@ -321,13 +321,15 @@ class SupportQueueService {
         persistenceContext
       });
 
-    let decorated = await Promise.all(result.tickets.map((ticket) =>
-      this.decorateTicket(ticket, new Date(), { persistenceContext })
-    ));
+    let decorated = await Promise.all(result.tickets.map((ticket) => this.decorateTicket(
+      ticket,
+      new Date(),
+      { persistenceContext }
+    )));
     if (autoEscalate) {
-      decorated = await Promise.all(decorated.map((ticket) =>
+      decorated = await Promise.all(decorated.map((ticket) => (
         this.maybeAutoEscalateTicket(ticket, persistenceContext)
-      ));
+      )));
     }
 
     decorated.sort((left, right) => {
@@ -392,24 +394,24 @@ class SupportQueueService {
   }
 
   async assignTicket(ticketId, { agentId, agentName, actorId }, persistenceContext = null) {
-    if (persistenceContext) {
-      await this.ticketService.assignTicket(ticketId, { agentId, agentName, actorId }, persistenceContext);
-    } else {
-      await this.ticketService.assignTicket(ticketId, { agentId, agentName, actorId });
-    }
+    await this.ticketService.assignTicket(
+      ticketId,
+      { agentId, agentName, actorId },
+      persistenceContext
+    );
     await this.markQueueMetadata(ticketId, {
       ackedAt: new Date().toISOString(),
       lastManualAction: 'assign'
     }, persistenceContext);
-    return persistenceContext
-      ? this.ticketService.getTicket(ticketId, persistenceContext)
-      : this.ticketService.getTicket(ticketId);
+    return this.ticketService.getTicket(ticketId, persistenceContext);
   }
 
   async escalateTicket(ticketId, { reason, actorId }, persistenceContext = null) {
-    const result = persistenceContext
-      ? await this.ticketService.escalateTicket(ticketId, { reason, actorId }, persistenceContext)
-      : await this.ticketService.escalateTicket(ticketId, { reason, actorId });
+    const result = await this.ticketService.escalateTicket(
+      ticketId,
+      { reason, actorId },
+      persistenceContext
+    );
     await this.markQueueMetadata(ticketId, {
       lastManualAction: 'escalate',
       lastEscalatedAt: new Date().toISOString()
@@ -418,9 +420,11 @@ class SupportQueueService {
   }
 
   async resolveTicket(ticketId, { resolution, actorId }, persistenceContext = null) {
-    const result = persistenceContext
-      ? await this.ticketService.resolveTicket(ticketId, { resolution, actorId }, persistenceContext)
-      : await this.ticketService.resolveTicket(ticketId, { resolution, actorId });
+    const result = await this.ticketService.resolveTicket(
+      ticketId,
+      { resolution, actorId },
+      persistenceContext
+    );
     await this.markQueueMetadata(ticketId, {
       resolvedAt: new Date().toISOString(),
       lastManualAction: 'resolve'

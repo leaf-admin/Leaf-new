@@ -5,7 +5,6 @@ import ProtectedRoute from "@/src/components/ProtectedRoute";
 import AppNav from "@/src/components/AppNav";
 import KpiCard from "@/src/components/ui/KpiCard";
 import Panel from "@/src/components/ui/Panel";
-import ConfirmActionDialog from "@/src/components/ui/ConfirmActionDialog";
 import { EmptyState, ErrorText, LoadingState } from "@/src/components/ui/PageFeedback";
 import { KeyValueGrid } from "@/src/components/ui/DataViews";
 import { leafAPI } from "@/src/services/api";
@@ -95,35 +94,6 @@ function buildProfilePayload(form) {
   };
 }
 
-function normalizeEnvironment(environment) {
-  return String(environment || "production").toLowerCase() === "sandbox" ? "sandbox" : "production";
-}
-
-function profileTargetSummary(profile = {}) {
-  const userIds = Array.from(new Set([
-    ...(Array.isArray(profile.userIds) ? profile.userIds : []),
-    ...(Array.isArray(profile.passengerIds) ? profile.passengerIds : []),
-  ].map((value) => String(value || "").trim()).filter(Boolean)));
-  const phones = Array.from(new Set(
-    (Array.isArray(profile.phones) ? profile.phones : [])
-      .map((value) => String(value || "").trim())
-      .filter(Boolean),
-  ));
-  const scope = String(profile.scope || "users");
-
-  if (userIds.length === 0 && phones.length === 0) {
-    return `${scope} · sem alvos explícitos`;
-  }
-
-  return `${scope} · ${userIds.length} ID(s) · ${phones.length} telefone(s)`;
-}
-
-function statusLabel(status) {
-  return String(status || "").toLowerCase() === "active" ? "ativo" : "pausado";
-}
-
-const PAYMENT_FALLBACK_LABEL = "Produção (default do backend quando nenhum perfil corresponde)";
-
 export default function PaymentRuntimePage() {
   const [profiles, setProfiles] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -136,8 +106,6 @@ export default function PaymentRuntimePage() {
   const [resolving, setResolving] = useState(false);
   const [h3Policy, setH3Policy] = useState(defaultH3Policy);
   const [h3Saving, setH3Saving] = useState(false);
-  const [statusUpdating, setStatusUpdating] = useState(false);
-  const [pendingAction, setPendingAction] = useState(null);
 
   const activeSandboxCount = useMemo(
     () => profiles.filter((profile) =>
@@ -198,26 +166,16 @@ export default function PaymentRuntimePage() {
     }
   };
 
-  const requestProfileSave = (event) => {
+  const saveProfile = async (event) => {
     event.preventDefault();
-    setError("");
-    setSuccess("");
-    setPendingAction({
-      type: "save",
-      payload: buildProfilePayload(form),
-    });
-  };
-
-  const saveProfile = async (payload) => {
     try {
       setSaving(true);
       setError("");
       setSuccess("");
-      await leafAPI.savePaymentRuntimeProfile(payload);
+      await leafAPI.savePaymentRuntimeProfile(buildProfilePayload(form));
       setSuccess("Perfil salvo. A troca passa a valer após o cache curto do backend.");
       setForm(defaultForm());
       await loadProfiles();
-      setPendingAction(null);
     } catch (err) {
       setError(err?.message || "Falha ao salvar perfil de pagamento");
     } finally {
@@ -225,42 +183,15 @@ export default function PaymentRuntimePage() {
     }
   };
 
-  const requestStatusUpdate = (profile, status) => {
-    const profileId = profile?.profileId || profile?.id;
-    if (!profileId) return;
-    setError("");
-    setSuccess("");
-    setPendingAction({
-      type: "status",
-      profile,
-      profileId,
-      status,
-    });
-  };
-
-  const updateStatus = async ({ profileId, status }) => {
+  const updateStatus = async (profileId, status) => {
     try {
-      setStatusUpdating(true);
       setError("");
       setSuccess("");
       await leafAPI.updatePaymentRuntimeProfileStatus(profileId, status);
       setSuccess(`Perfil ${status === "active" ? "ativado" : "pausado"}.`);
       await loadProfiles();
-      setPendingAction(null);
     } catch (err) {
       setError(err?.message || "Falha ao atualizar status do perfil");
-    } finally {
-      setStatusUpdating(false);
-    }
-  };
-
-  const confirmPendingAction = () => {
-    if (pendingAction?.type === "save") {
-      saveProfile(pendingAction.payload);
-      return;
-    }
-    if (pendingAction?.type === "status") {
-      updateStatus(pendingAction);
     }
   };
 
@@ -287,39 +218,16 @@ export default function PaymentRuntimePage() {
     loadProfiles();
   }, []);
 
-  const confirmationProfile = pendingAction?.type === "save"
-    ? pendingAction.payload
-    : pendingAction?.profile || {};
-  const confirmationEnvironment = normalizeEnvironment(confirmationProfile?.environment);
-  const confirmationStatus = pendingAction?.type === "status"
-    ? pendingAction.status
-    : confirmationProfile?.status;
-  const confirmationIsProduction = confirmationEnvironment === "production";
-  const confirmationBusy = pendingAction?.type === "save" ? saving : statusUpdating;
-  const confirmationTitle = pendingAction?.type === "status"
-    ? `${confirmationStatus === "active" ? "Ativar" : "Pausar"} perfil de pagamento`
-    : `Confirmar perfil ${confirmationIsProduction ? "de produção" : "sandbox"}`;
-  const confirmationDescription = confirmationIsProduction
-    ? "Confirmação reforçada: esta ação envolve o ambiente Woovi de produção. Revise os alvos e o resultado antes de continuar."
-    : "Revise o cohort e o comportamento de fallback antes de aplicar este perfil sandbox.";
-  const confirmationResult = pendingAction?.type === "status"
-    ? confirmationStatus === "active"
-      ? "O perfil passa a participar da resolução após o cache curto do backend."
-      : "O perfil deixa de participar da resolução; seus alvos retornam ao fallback."
-    : confirmationStatus === "active"
-      ? "O perfil será salvo ativo e participará da resolução após o cache curto."
-      : "O perfil será salvo pausado e não participará da resolução até ser ativado.";
-
   return (
     <ProtectedRoute>
-      <main className="page-shell payment-runtime-page">
+      <main className="page-shell">
         <header className="header">
           <div>
             <h1>Perfil de pagamento</h1>
             <p>Controle Woovi sandbox ou produção pelo backend, sem gerar nova build do app.</p>
           </div>
           <div className="filters">
-            <button type="button" className="button-secondary" onClick={loadProfiles} disabled={loading}>
+            <button type="button" onClick={loadProfiles} disabled={loading}>
               {loading ? "Atualizando..." : "Atualizar"}
             </button>
           </div>
@@ -333,18 +241,12 @@ export default function PaymentRuntimePage() {
           <KpiCard title="Cache" value="~30s" subtitle="sem rebuild e sem restart" />
         </section>
 
-        <details className="payment-map-policy-disclosure">
-          <summary>Apresentação do mapa de demanda</summary>
-          <p className="text-muted">
-            Esta política pertence à apresentação do mapa do motorista. O endpoint e a fonte de verdade
-            permanecem no backend; abra somente quando precisar ajustar o estilo visual.
-          </p>
-          <Panel
-            title="Mapa de pressão de demanda"
-            subtitle="Ajuste a aparência no mapa do motorista sem nova build. A cotação continua sendo a fonte de verdade para o adicional."
-            className="panel-span-full"
-          >
-            <form className="section-stack" onSubmit={saveH3Policy}>
+        <Panel
+          title="Mapa de pressão de demanda"
+          subtitle="Ajuste a aparência no mapa do motorista sem nova build. A cotação continua sendo a fonte de verdade para o adicional."
+          className="panel-span-full"
+        >
+          <form className="section-stack" onSubmit={saveH3Policy}>
             <div className="form-grid">
               <label className="form-field">
                 Exibição
@@ -476,28 +378,37 @@ export default function PaymentRuntimePage() {
             </div>
 
             <div className="row-actions">
-              <button type="submit" className="primary-action" disabled={h3Saving}>
+              <button type="submit" disabled={h3Saving}>
                 {h3Saving ? "Salvando..." : "Publicar estilo"}
               </button>
               <button type="button" className="button-secondary" onClick={() => setH3Policy(defaultH3Policy())}>
                 Restaurar padrão no formulário
               </button>
             </div>
-            </form>
-          </Panel>
-        </details>
+          </form>
+        </Panel>
 
-        <section className="grid payment-runtime-workspace">
+        <section className="grid">
           <Panel
-            title="Novo perfil de pagamento"
-            subtitle="Sandbox é o fluxo padrão. Use escopo por usuário ou telefone, com expiração curta."
-            className="payment-runtime-composer"
+            title="Novo perfil sandbox"
+            subtitle="Use sempre escopo por usuário ou telefone, com expiração curta."
           >
-            <form className="section-stack" onSubmit={requestProfileSave}>
+            <form className="section-stack" onSubmit={saveProfile}>
               <div className="form-grid">
                 <label className="form-field">
                   Nome
                   <input value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} />
+                </label>
+                <label className="form-field">
+                  ID técnico
+                  <input value={form.profileId} onChange={(event) => setForm({ ...form, profileId: event.target.value })} />
+                </label>
+                <label className="form-field">
+                  Ambiente
+                  <select value={form.environment} onChange={(event) => setForm({ ...form, environment: event.target.value })}>
+                    <option value="sandbox">sandbox</option>
+                    <option value="production">produção</option>
+                  </select>
                 </label>
                 <label className="form-field">
                   Status inicial
@@ -514,6 +425,10 @@ export default function PaymentRuntimePage() {
                     <option value="canary">canary</option>
                     <option value="app_review">revisão loja</option>
                   </select>
+                </label>
+                <label className="form-field">
+                  Prioridade
+                  <input type="number" value={form.priority} onChange={(event) => setForm({ ...form, priority: event.target.value })} />
                 </label>
               </div>
               <label className="form-field">
@@ -547,34 +462,8 @@ export default function PaymentRuntimePage() {
                   <input value={form.reason} onChange={(event) => setForm({ ...form, reason: event.target.value })} />
                 </label>
               </div>
-              <details className="payment-advanced-settings">
-                <summary>Configurações avançadas</summary>
-                <p className="text-muted">
-                  Sandbox permanece selecionado por padrão. Produção, prioridade e identificadores técnicos
-                  só devem ser alterados quando o escopo operacional exigir.
-                </p>
-                <div className="form-grid">
-                  <label className="form-field">
-                    Ambiente
-                    <select value={form.environment} onChange={(event) => setForm({ ...form, environment: event.target.value })}>
-                      <option value="sandbox">sandbox</option>
-                      <option value="production">produção</option>
-                    </select>
-                  </label>
-                  <label className="form-field">
-                    ID técnico
-                    <input value={form.profileId} onChange={(event) => setForm({ ...form, profileId: event.target.value })} />
-                  </label>
-                  <label className="form-field">
-                    Prioridade
-                    <input type="number" value={form.priority} onChange={(event) => setForm({ ...form, priority: event.target.value })} />
-                  </label>
-                </div>
-              </details>
               <div className="row-actions">
-                <button type="submit" className="primary-action" disabled={saving}>
-                  {saving ? "Salvando..." : "Revisar perfil"}
-                </button>
+                <button type="submit" disabled={saving}>{saving ? "Salvando..." : "Salvar perfil"}</button>
                 <button type="button" className="button-secondary" onClick={() => setForm(defaultForm())}>Limpar</button>
               </div>
             </form>
@@ -638,12 +527,7 @@ export default function PaymentRuntimePage() {
           {loading ? <LoadingState message="Carregando perfis..." /> : null}
           {!loading && profiles.length === 0 ? <EmptyState message="Nenhum perfil salvo. O backend usa produção por padrão." /> : null}
           {!loading && profiles.length > 0 ? (
-            <div
-              className="table-shell"
-              role="region"
-              tabIndex={0}
-              aria-label="Perfis salvos do runtime de pagamentos"
-            >
+            <div className="table-shell">
               <table className="table table-compact">
                 <thead>
                   <tr>
@@ -680,21 +564,11 @@ export default function PaymentRuntimePage() {
                         <td>
                           <div className="row-actions">
                             {status === "active" ? (
-                              <button
-                                type="button"
-                                className="button-secondary"
-                                disabled={statusUpdating}
-                                onClick={() => requestStatusUpdate(profile, "paused")}
-                              >
+                              <button type="button" className="button-secondary" onClick={() => updateStatus(profileId, "paused")}>
                                 Pausar
                               </button>
                             ) : (
-                              <button
-                                type="button"
-                                className="primary-action"
-                                disabled={statusUpdating}
-                                onClick={() => requestStatusUpdate(profile, "active")}
-                              >
+                              <button type="button" onClick={() => updateStatus(profileId, "active")}>
                                 Ativar
                               </button>
                             )}
@@ -708,48 +582,6 @@ export default function PaymentRuntimePage() {
             </div>
           ) : null}
         </Panel>
-
-        <ConfirmActionDialog
-          open={Boolean(pendingAction)}
-          title={confirmationTitle}
-          description={confirmationDescription}
-          confirmLabel={pendingAction?.type === "status"
-            ? confirmationStatus === "active" ? "Confirmar ativação" : "Confirmar pausa"
-            : "Salvar perfil"}
-          tone={confirmationIsProduction ? "danger" : "warning"}
-          busy={confirmationBusy}
-          onConfirm={confirmPendingAction}
-          onCancel={() => setPendingAction(null)}
-        >
-          {confirmationIsProduction ? (
-            <p className="error">
-              Produção pode direcionar pagamentos reais para os alvos elegíveis. Confirme somente após revisar todo o cohort.
-            </p>
-          ) : null}
-          <KeyValueGrid
-            data={{
-              ambiente: confirmationEnvironment === "sandbox" ? "sandbox" : "produção",
-              status: statusLabel(confirmationStatus),
-              profileId: confirmationProfile?.profileId || confirmationProfile?.id || "-",
-              cohort: profileTargetSummary(confirmationProfile),
-              expiracao: confirmationProfile?.expiresAtIso || confirmationProfile?.expiresAt
-                ? formatDate(confirmationProfile.expiresAtIso || confirmationProfile.expiresAt)
-                : confirmationIsProduction ? "sem expiração de sandbox" : "não informada",
-              resultado: confirmationResult,
-              fallback: PAYMENT_FALLBACK_LABEL,
-            }}
-            labels={{
-              ambiente: "Ambiente",
-              status: "Status resultante",
-              profileId: "ID técnico",
-              cohort: "Cohort / alvos",
-              expiracao: "Expiração",
-              resultado: "Resultado",
-              fallback: "Fallback",
-            }}
-            maxItems={7}
-          />
-        </ConfirmActionDialog>
 
         {success ? <p className="success-text">{success}</p> : null}
         <ErrorText message={error} />

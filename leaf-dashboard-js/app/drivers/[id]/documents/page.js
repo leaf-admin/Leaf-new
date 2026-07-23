@@ -53,24 +53,8 @@ function getReasonOptions(documentType) {
   return DOCUMENT_REJECTION_REASON_OPTIONS[normalized] || [];
 }
 
-function resolveDocumentUrl(doc) {
-  const candidates = [
-    doc?.fileUrl,
-    doc?.url,
-    doc?.downloadUrl,
-    doc?.front,
-    doc?.back,
-    doc?.registration,
-    doc?.insurance,
-    doc?.file?.url,
-    doc?.metadata?.fileUrl,
-  ];
-
-  for (const candidate of candidates) {
-    const value = String(candidate || "").trim();
-    if (value) return value;
-  }
-  return "";
+function hasDocumentStorageBinding(doc) {
+  return doc?.contentAvailable === true;
 }
 
 function formatDateTime(value) {
@@ -138,19 +122,6 @@ function documentStatusTone(doc) {
   return "status-warn";
 }
 
-function formatFileSize(size) {
-  const bytes = Number(size || 0);
-  if (!Number.isFinite(bytes) || bytes <= 0) return "-";
-  if (bytes < 1024 * 1024) return `${Math.ceil(bytes / 1024)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-function formatDocumentRequestMessage(result) {
-  if (result?.push?.success) return "Atualização solicitada e push enviado ao motorista.";
-  if (result?.push?.skipped) return "Atualização solicitada sem envio de push.";
-  return "Atualização solicitada; o backend não confirmou a entrega do push.";
-}
-
 function getSupportTicketId(ticket = {}) {
   return String(ticket.id || ticket.ticketId || "").trim();
 }
@@ -186,13 +157,11 @@ export default function DriverDocumentsPage({ params }) {
   const [error, setError] = useState("");
   const [actionMessage, setActionMessage] = useState("");
   const [reviewingType, setReviewingType] = useState(null);
-  const [requestingDocumentType, setRequestingDocumentType] = useState(null);
   const [vehicleBusy, setVehicleBusy] = useState(false);
   const [uploadingBackgroundDoc, setUploadingBackgroundDoc] = useState(false);
   const [backgroundDocFile, setBackgroundDocFile] = useState(null);
-  const [pendingAction, setPendingAction] = useState(null);
-  const [rejectionReasonDraft, setRejectionReasonDraft] = useState("");
-  const [documentRequestReasonDraft, setDocumentRequestReasonDraft] = useState("");
+  const [openingDocumentType, setOpeningDocumentType] = useState("");
+  const [selectedRejectionReasons, setSelectedRejectionReasons] = useState({});
   const [showRatingReviews, setShowRatingReviews] = useState(false);
   const [docSearch, setDocSearch] = useState("");
   const [docStatusFilter, setDocStatusFilter] = useState("all");
@@ -220,9 +189,11 @@ export default function DriverDocumentsPage({ params }) {
     acceptPlusWithElite: true,
   });
 
+  const busy = Boolean(reviewingType) || vehicleBusy || uploadingBackgroundDoc;
+
   const load = async () => {
     if (!id) return;
-    const response = await leafAPI.getDriverDocuments(id);
+    const response = await leafAPI.getDriverDocuments(id, kycRequestContext);
     setDocuments(response?.data || response);
   };
 
@@ -237,6 +208,31 @@ export default function DriverDocumentsPage({ params }) {
         : null,
     );
     setIdentityReviewError("");
+  };
+
+  const openDriverDocument = async (documentType) => {
+    const normalizedType = String(documentType || "").trim().toLowerCase();
+    if (!id || !OPERATIONAL_DOCUMENT_TYPES.has(normalizedType)) return;
+
+    try {
+      setOpeningDocumentType(normalizedType);
+      setError("");
+      const file = await leafAPI.getDriverDocumentFile(id, normalizedType, kycRequestContext);
+      const objectUrl = URL.createObjectURL(file.blob);
+      const anchor = document.createElement("a");
+      anchor.href = objectUrl;
+      anchor.target = "_blank";
+      anchor.rel = "noopener noreferrer";
+      anchor.style.display = "none";
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
+    } catch (err) {
+      setError(err?.message || "Não foi possível abrir o documento agora.");
+    } finally {
+      setOpeningDocumentType("");
+    }
   };
 
   const loadPendingIdentityReviewTickets = async () => {
@@ -261,7 +257,7 @@ export default function DriverDocumentsPage({ params }) {
       if (!id) return;
       try {
         const [documentsResult, reviewsResult, pendingTicketsResult] = await Promise.allSettled([
-          leafAPI.getDriverDocuments(id),
+          leafAPI.getDriverDocuments(id, kycRequestContext),
           leafAPI.getDriverKycIdentityReviews(id, kycRequestContext),
           leafAPI.getSupportTickets(
             { userId: id, limit: 100 },
@@ -340,26 +336,27 @@ export default function DriverDocumentsPage({ params }) {
     }));
   }, [documents]);
 
-  const requestDocumentReview = (doc, action) => {
-    const normalizedType = normalizeDocumentType(doc?.type);
-    if (!normalizedType) return;
-    setError("");
-    setActionMessage("");
-    setRejectionReasonDraft("");
-    setPendingAction({
-      type: "document-review",
-      action,
-      documentType: normalizedType,
-      doc,
-    });
+  const resolveRejectionReason = (documentType) => {
+    const selected = String(selectedRejectionReasons?.[documentType] || "").trim();
+    if (selected && selected !== "__custom__") {
+      return selected;
+    }
+
+    const options = getReasonOptions(documentType);
+    if (options.length > 0 && !selected) {
+      return "";
+    }
+
+    const customReason = window.prompt("Motivo da rejeição:");
+    return String(customReason || "").trim();
   };
 
-  const reviewSingle = async (documentType, action, reason = "") => {
+  const reviewSingle = async (documentType, action) => {
     const normalizedType = String(documentType || "").toLowerCase();
-    const normalizedReason = String(reason || "").trim();
+    const reason = action === "reject" ? resolveRejectionReason(normalizedType) : "";
 
-    if (action === "reject" && !normalizedReason) {
-      setError("Informe o motivo da rejeição antes de confirmar.");
+    if (action === "reject" && !reason) {
+      setError("Selecione um motivo padrão de rejeição ou informe um motivo personalizado.");
       return;
     }
 
@@ -367,13 +364,17 @@ export default function DriverDocumentsPage({ params }) {
       setError("");
       setActionMessage("");
       setReviewingType(normalizedType);
-      await leafAPI.reviewDriverDocument(id, normalizedType, action, normalizedReason);
+      await leafAPI.reviewDriverDocument(
+        id,
+        normalizedType,
+        action,
+        reason || "",
+        kycRequestContext,
+      );
       setActionMessage(
         `${resolveDocumentLabel(normalizedType)} ${action === "approve" ? "aprovado" : "rejeitado"} com sucesso.`,
       );
       await load();
-      setPendingAction(null);
-      setRejectionReasonDraft("");
     } catch (err) {
       setError(err?.message || "Falha ao revisar documento");
     } finally {
@@ -381,79 +382,25 @@ export default function DriverDocumentsPage({ params }) {
     }
   };
 
-  const requestDocumentUpdate = (doc) => {
-    const documentType = normalizeDocumentType(doc?.type);
-    if (!documentType) return;
-    const defaultReason = doc?.rejectionReason || doc?.requestReason ||
-      "Precisamos que você envie uma versão atualizada deste documento no app.";
-    setError("");
-    setActionMessage("");
-    setDocumentRequestReasonDraft(defaultReason);
-    setPendingAction({
-      type: "document-request",
-      documentType,
-      doc,
-    });
-  };
-
-  const sendDocumentUpdateRequest = async (documentType, reason) => {
-    const normalizedType = normalizeDocumentType(documentType);
-    const normalizedReason = String(reason || "").trim();
-    if (!normalizedType || !normalizedReason) {
-      setError("Informe a mensagem que será enviada ao motorista.");
-      return;
-    }
-
-    try {
-      setRequestingDocumentType(normalizedType);
-      setError("");
-      setActionMessage("");
-      const result = await leafAPI.requestDriverDocument(id, normalizedType, {
-        reason: normalizedReason,
-        sendPush: true,
-      });
-      setActionMessage(formatDocumentRequestMessage(result));
-      await load();
-      setPendingAction(null);
-      setDocumentRequestReasonDraft("");
-    } catch (err) {
-      setError(err?.message || "Falha ao solicitar atualização do documento");
-    } finally {
-      setRequestingDocumentType(null);
-    }
-  };
-
-  const requestVehicleConfigSave = () => {
+  const saveVehicleConfig = async () => {
     if (!vehicleForm.userVehicleId) {
       setError("Selecione um veículo para configurar.");
       return;
     }
 
-    const selectedVehicle = vehicleList.find((vehicle) => vehicle.userVehicleId === vehicleForm.userVehicleId) || null;
-    setError("");
-    setActionMessage("");
-    setPendingAction({
-      type: "vehicle-config",
-      vehicle: selectedVehicle,
-      payload: {
+    try {
+      setVehicleBusy(true);
+      setError("");
+      setActionMessage("");
+      await leafAPI.updateDriverVehicleConfig(id, {
         userVehicleId: vehicleForm.userVehicleId,
         category: vehicleForm.category,
         vehicleStatus: vehicleForm.vehicleStatus,
         setActive: vehicleForm.setActive,
         acceptPlusWithElite: vehicleForm.acceptPlusWithElite,
-      },
-    });
-  };
-
-  const saveVehicleConfig = async (payload) => {
-    try {
-      setVehicleBusy(true);
-      setError("");
-      setActionMessage("");
-      await leafAPI.updateDriverVehicleConfig(id, payload);
+      });
       setActionMessage("Configuração de veículo atualizada.");
       await load();
-      setPendingAction(null);
     } catch (err) {
       setError(err?.message || "Falha ao atualizar configuração de veículo");
     } finally {
@@ -461,53 +408,29 @@ export default function DriverDocumentsPage({ params }) {
     }
   };
 
-  const requestBackgroundDocumentUpload = () => {
+  const uploadBackgroundDocument = async () => {
     if (!backgroundDocFile) {
       setError("Selecione um arquivo PDF para anexar a certidão de antecedentes.");
       return;
     }
 
-    setError("");
-    setActionMessage("");
-    setPendingAction({
-      type: "background-upload",
-      file: backgroundDocFile,
-    });
-  };
-
-  const uploadBackgroundDocument = async (file) => {
     try {
       setUploadingBackgroundDoc(true);
       setError("");
       setActionMessage("");
-      await leafAPI.uploadDriverDocument(id, "antecedentes_criminais", file);
+      await leafAPI.uploadDriverDocument(
+        id,
+        "antecedentes_criminais",
+        backgroundDocFile,
+        kycRequestContext,
+      );
       setBackgroundDocFile(null);
       setActionMessage("Certidão de antecedentes anexada com sucesso.");
       await load();
-      setPendingAction(null);
     } catch (err) {
       setError(err?.message || "Falha ao anexar certidão de antecedentes");
     } finally {
       setUploadingBackgroundDoc(false);
-    }
-  };
-
-  const confirmPendingAction = () => {
-    if (pendingAction?.type === "document-review") {
-      const reason = pendingAction.action === "reject" ? rejectionReasonDraft : "";
-      reviewSingle(pendingAction.documentType, pendingAction.action, reason);
-      return;
-    }
-    if (pendingAction?.type === "document-request") {
-      sendDocumentUpdateRequest(pendingAction.documentType, documentRequestReasonDraft);
-      return;
-    }
-    if (pendingAction?.type === "vehicle-config") {
-      saveVehicleConfig(pendingAction.payload);
-      return;
-    }
-    if (pendingAction?.type === "background-upload") {
-      uploadBackgroundDocument(pendingAction.file);
     }
   };
 
@@ -555,51 +478,10 @@ export default function DriverDocumentsPage({ params }) {
   const latestNegativeReviews = Array.isArray(ratingInsights?.latestNegativeReviews)
     ? ratingInsights.latestNegativeReviews
     : [];
-  const backgroundCheckDoc = documents?.documents?.antecedentes_criminais || null;
-  const backgroundCheckUrl = resolveDocumentUrl(backgroundCheckDoc || {});
-  const documentsRequiringAttention = docsList.filter((doc) => {
-    const status = resolveDocumentStatus(doc);
-    return status !== "approved" || isDocumentRequested(doc);
-  }).length;
-  const mutationBusy = Boolean(reviewingType) || Boolean(requestingDocumentType) || vehicleBusy || uploadingBackgroundDoc;
-  const pendingDocument = ["document-review", "document-request"].includes(pendingAction?.type)
-    ? pendingAction.doc
-    : null;
-  const pendingDocumentAction = pendingAction?.type === "document-review" ? pendingAction.action : "";
-  const pendingVehicle = pendingAction?.type === "vehicle-config" ? pendingAction.vehicle : null;
-  const pendingDialogBusy = pendingAction?.type === "document-review"
-    ? Boolean(reviewingType)
-    : pendingAction?.type === "document-request"
-      ? Boolean(requestingDocumentType)
-    : pendingAction?.type === "vehicle-config"
-      ? vehicleBusy
-      : uploadingBackgroundDoc;
-  const pendingDialogTone = pendingAction?.type === "document-review" && pendingDocumentAction === "approve"
-    ? "warning"
-    : ["background-upload", "document-request"].includes(pendingAction?.type)
-      ? "warning"
-      : "danger";
-  const pendingDialogTitle = pendingAction?.type === "document-review"
-    ? `${pendingDocumentAction === "approve" ? "Aprovar" : "Rejeitar"} ${resolveDocumentLabel(pendingAction.documentType)}`
-    : pendingAction?.type === "document-request"
-      ? `Solicitar ${resolveDocumentLabel(pendingAction.documentType)}`
-    : pendingAction?.type === "vehicle-config"
-      ? "Confirmar veículo e categoria"
-      : "Confirmar anexo da certidão";
-  const pendingDialogDescription = pendingAction?.type === "document-review"
-    ? "Revise o motorista, o arquivo e a consequência desta decisão documental."
-    : pendingAction?.type === "document-request"
-      ? "Revise a mensagem antes de solicitar uma nova versão pelo app e tentar notificar o motorista."
-    : pendingAction?.type === "vehicle-config"
-      ? "Esta alteração muda a configuração operacional usada pelo perfil do motorista."
-      : "O PDF será anexado à ficha e seguirá para revisão; o upload não aprova o documento.";
-  const pendingConfirmLabel = pendingAction?.type === "document-review"
-    ? pendingDocumentAction === "approve" ? "Confirmar aprovação" : "Confirmar rejeição"
-    : pendingAction?.type === "document-request"
-      ? "Solicitar atualização"
-    : pendingAction?.type === "vehicle-config"
-      ? "Salvar configuração"
-      : "Anexar documento";
+  const backgroundCheckDoc = docsList.find(
+    (doc) => String(doc?.type || "").trim().toLowerCase() === "antecedentes_criminais",
+  ) || documents?.documents?.backgroundCheck || null;
+  const backgroundCheckAvailable = hasDocumentStorageBinding(backgroundCheckDoc || {});
 
   const selectedIdentityReview = identityReviews.find(
     (item) => item?.caseId === selectedIdentityReviewId,
@@ -814,10 +696,6 @@ export default function DriverDocumentsPage({ params }) {
               rating: averageRating,
               status: documents?.driver?.status || "pending",
               aprovado: documents?.driver?.approved || false,
-              kycStatus,
-              kycBloqueado: kyc.blocked || false,
-              kycNeedsReview: kyc.needsReview || false,
-              documentosAtencao: documentsRequiringAttention,
             }}
             labels={{
               id: "ID",
@@ -832,10 +710,6 @@ export default function DriverDocumentsPage({ params }) {
               rating: "Rating",
               status: "Status",
               aprovado: "Aprovado",
-              kycStatus: "Status KYC",
-              kycBloqueado: "KYC bloqueado",
-              kycNeedsReview: "KYC precisa revisão",
-              documentosAtencao: "Documentos que exigem atenção",
             }}
             valueFormatter={(key, value) => {
               if (key === "dataNascimento") {
@@ -888,12 +762,8 @@ export default function DriverDocumentsPage({ params }) {
           <TechnicalDetails title="Ver payload técnico do motorista" data={documents?.driver || {}} />
         </section>
 
-        <details className="driver-background-disclosure">
-          <summary>
-            Certidão de antecedentes · {formatDocumentStatus(backgroundCheckDoc || {})}
-          </summary>
-          <section className="card">
-            <h2>Certidão de antecedentes</h2>
+        <section className="card">
+          <h2>Certidão de antecedentes</h2>
           <div className="filters" style={{ display: "grid", gap: 6 }}>
             <p>
               <strong>Status:</strong>{" "}
@@ -913,13 +783,14 @@ export default function DriverDocumentsPage({ params }) {
             ) : null}
             <button
               type="button"
-              disabled={!backgroundCheckUrl}
-              onClick={() => {
-                if (!backgroundCheckUrl) return;
-                window.open(backgroundCheckUrl, "_blank", "noopener,noreferrer");
-              }}
+              disabled={!backgroundCheckAvailable || openingDocumentType === "antecedentes_criminais"}
+              onClick={() => openDriverDocument("antecedentes_criminais")}
             >
-              {backgroundCheckUrl ? "Visualizar certidão atual" : "Sem certidão anexada"}
+              {openingDocumentType === "antecedentes_criminais"
+                ? "Abrindo..."
+                : backgroundCheckAvailable
+                  ? "Visualizar certidão atual"
+                  : "Sem certidão anexada"}
             </button>
           </div>
           <div className="filters" style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center" }}>
@@ -931,19 +802,14 @@ export default function DriverDocumentsPage({ params }) {
                 setBackgroundDocFile(nextFile);
               }}
             />
-            <button
-              type="button"
-              onClick={requestBackgroundDocumentUpload}
-              disabled={mutationBusy || !backgroundDocFile}
-            >
+            <button onClick={uploadBackgroundDocument} disabled={busy || uploadingBackgroundDoc || !backgroundDocFile}>
               {uploadingBackgroundDoc ? "Enviando..." : "Anexar certidão (PDF)"}
             </button>
           </div>
           <p className="text-muted" style={{ marginTop: 8 }}>
             Documento anexado aqui fica disponível para revisão junto com CNH/CRLV.
           </p>
-          </section>
-        </details>
+        </section>
 
         <section className="card">
           <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
@@ -951,6 +817,13 @@ export default function DriverDocumentsPage({ params }) {
             <span className={kycPersistenceScope === "sandbox" ? "status-warn" : "status-ok"}>
               {kycPersistenceScope === "sandbox" ? "Sandbox KYC" : "Operacional"}
             </span>
+            <Link
+              href={kycPersistenceScope === "sandbox"
+                ? `/drivers/${encodeURIComponent(id)}/documents`
+                : `/drivers/${encodeURIComponent(id)}/documents?kycScope=sandbox`}
+            >
+              {kycPersistenceScope === "sandbox" ? "Voltar ao KYC operacional" : "Abrir KYC sandbox"}
+            </Link>
           </div>
           {kycPersistenceScope === "sandbox" ? (
             <p className="text-muted" style={{ marginTop: 6 }}>
@@ -1183,12 +1056,8 @@ export default function DriverDocumentsPage({ params }) {
           <p className="error-banner" role="alert">{identityReviewError}</p>
         ) : null}
 
-        <details className="driver-vehicle-disclosure">
-          <summary>
-            Veículo e categoria · {vehicleForm.category} · {vehicleForm.vehicleStatus}
-          </summary>
-          <section className="card">
-            <h2>Configuração de Veículo e Categoria</h2>
+        <section className="card">
+          <h2>Configuração de Veículo e Categoria</h2>
           {vehicleList.length === 0 ? (
             <p>Nenhum veículo encontrado para este motorista.</p>
           ) : (
@@ -1260,48 +1129,48 @@ export default function DriverDocumentsPage({ params }) {
               </label>
 
               <div>
-                <button type="button" onClick={requestVehicleConfigSave} disabled={mutationBusy}>
+                <button onClick={saveVehicleConfig} disabled={vehicleBusy || busy}>
                   {vehicleBusy ? "Salvando..." : "Salvar Configuração"}
                 </button>
               </div>
             </div>
           )}
-          </section>
-        </details>
+        </section>
 
-        <details className="driver-documents-disclosure" open>
-          <summary>Documentos operacionais · {documentsRequiringAttention} exigindo atenção</summary>
-          <section className="grid">
-            <article className="card">
-              <h2>Filtros de documentos</h2>
-              <div className="filters">
-                <input
-                  placeholder="Buscar por tipo ou arquivo"
-                  value={docSearch}
-                  onChange={(e) => setDocSearch(e.target.value)}
-                />
-                <select
-                  value={docStatusFilter}
-                  onChange={(e) => setDocStatusFilter(e.target.value)}
-                >
-                  <option value="all">Todos os status</option>
-                  <option value="requested">Solicitado</option>
-                  <option value="pending">Pendente</option>
-                  <option value="approved">Aprovado</option>
-                  <option value="rejected">Rejeitado</option>
-                </select>
-              </div>
-            </article>
-          </section>
+        <section className="grid">
+          <article className="card">
+            <h2>Filtros de documentos</h2>
+            <div className="filters">
+              <input
+                placeholder="Buscar por tipo ou arquivo"
+                value={docSearch}
+                onChange={(e) => setDocSearch(e.target.value)}
+              />
+              <select
+                value={docStatusFilter}
+                onChange={(e) => setDocStatusFilter(e.target.value)}
+              >
+                <option value="all">Todos os status</option>
+                <option value="requested">Solicitado</option>
+                <option value="pending">Pendente</option>
+                <option value="approved">Aprovado</option>
+                <option value="rejected">Rejeitado</option>
+              </select>
+            </div>
+          </article>
+        </section>
 
-          <section className="grid list-scroll list-scroll-tall">
+        <section className="grid list-scroll list-scroll-tall">
           {filteredDocsList.length === 0 ? (
             <article className="card">
               <p>Nenhum documento encontrado.</p>
             </article>
           ) : (
             filteredDocsList.map((doc, idx) => {
-              const docUrl = resolveDocumentUrl(doc);
+              const normalizedType = String(doc.type || "documento").toLowerCase();
+              const documentAvailable = hasDocumentStorageBinding(doc);
+              const reasonOptions = getReasonOptions(normalizedType);
+              const currentReasonSelection = selectedRejectionReasons[normalizedType] || "";
 
               return (
                 <article className="card" key={`${doc.type}-${idx}`}>
@@ -1315,52 +1184,62 @@ export default function DriverDocumentsPage({ params }) {
                   {doc.requestReason ? <p>Motivo da solicitação: {doc.requestReason}</p> : null}
                   {doc.rejectionReason ? <p className="error">{doc.rejectionReason}</p> : null}
 
+                  {reasonOptions.length > 0 ? (
+                    <div style={{ marginTop: 10 }}>
+                      <label>
+                        Motivo padrão de rejeição
+                        <select
+                          value={currentReasonSelection}
+                          onChange={(e) => {
+                            const nextValue = e.target.value;
+                            setSelectedRejectionReasons((prev) => ({
+                              ...prev,
+                              [normalizedType]: nextValue,
+                            }));
+                          }}
+                        >
+                          <option value="">Selecione um motivo</option>
+                          {reasonOptions.map((reason) => (
+                            <option key={reason} value={reason}>
+                              {reason}
+                            </option>
+                          ))}
+                          <option value="__custom__">Outro motivo (digitar)</option>
+                        </select>
+                      </label>
+                    </div>
+                  ) : null}
+
                   <div className="filters">
                     <button
                       type="button"
-                      className="primary-action"
-                      disabled={!docUrl}
-                      onClick={() => {
-                        if (!docUrl) return;
-                        window.open(docUrl, "_blank", "noopener,noreferrer");
-                      }}
+                      disabled={!documentAvailable || openingDocumentType === normalizedType}
+                      onClick={() => openDriverDocument(normalizedType)}
                     >
-                      {docUrl ? "Visualizar documento" : "Sem arquivo para visualizar"}
+                      {openingDocumentType === normalizedType
+                        ? "Abrindo..."
+                        : documentAvailable
+                          ? "Visualizar documento"
+                          : "Sem arquivo para visualizar"}
                     </button>
-                    <details className="driver-document-actions-disclosure">
-                      <summary>Decidir sobre o documento</summary>
-                      <div>
-                        <button
-                          type="button"
-                          disabled={mutationBusy}
-                          onClick={() => requestDocumentReview(doc, "approve")}
-                        >
-                          Aprovar documento
-                        </button>
-                        <button
-                          type="button"
-                          className="button-danger"
-                          disabled={mutationBusy}
-                          onClick={() => requestDocumentReview(doc, "reject")}
-                        >
-                          Rejeitar documento
-                        </button>
-                        <button
-                          type="button"
-                          disabled={mutationBusy}
-                          onClick={() => requestDocumentUpdate(doc)}
-                        >
-                          Solicitar atualização
-                        </button>
-                      </div>
-                    </details>
+                    <button
+                      disabled={reviewingType === normalizedType || busy}
+                      onClick={() => reviewSingle(normalizedType, "approve")}
+                    >
+                      Aprovar doc
+                    </button>
+                    <button
+                      disabled={reviewingType === normalizedType || busy}
+                      onClick={() => reviewSingle(normalizedType, "reject")}
+                    >
+                      Rejeitar doc
+                    </button>
                   </div>
                 </article>
               );
             })
           )}
-          </section>
-        </details>
+        </section>
 
         <ConfirmActionDialog
           open={orphanRecoveryDialogOpen}
@@ -1397,174 +1276,6 @@ export default function DriverDocumentsPage({ params }) {
               <p className="error-banner" role="alert">{orphanRecoveryError}</p>
             ) : null}
           </div>
-        </ConfirmActionDialog>
-
-        <ConfirmActionDialog
-          open={Boolean(pendingAction)}
-          title={pendingDialogTitle}
-          description={pendingDialogDescription}
-          confirmLabel={pendingConfirmLabel}
-          tone={pendingDialogTone}
-          busy={pendingDialogBusy}
-          onConfirm={confirmPendingAction}
-          onCancel={() => {
-            setPendingAction(null);
-            setRejectionReasonDraft("");
-            setDocumentRequestReasonDraft("");
-            setError("");
-          }}
-        >
-          {pendingAction?.type === "document-review" ? (
-            <div className="section-stack">
-              <KeyValueGrid
-                data={{
-                  motorista: documents?.driver?.name || id,
-                  motoristaId: documents?.driver?.id || id,
-                  documento: resolveDocumentLabel(pendingAction.documentType),
-                  arquivo: pendingDocument?.fileName || (resolveDocumentUrl(pendingDocument || {}) ? "arquivo disponível" : "arquivo não informado"),
-                  statusAtual: formatDocumentStatus(pendingDocument || {}),
-                }}
-                labels={{
-                  motorista: "Motorista",
-                  motoristaId: "ID do motorista",
-                  documento: "Documento revisado",
-                  arquivo: "Arquivo revisado",
-                  statusAtual: "Status atual",
-                }}
-                maxItems={5}
-              />
-              <p>
-                <strong>Consequência:</strong>{" "}
-                {pendingDocumentAction === "approve"
-                  ? "Registra somente este documento como aprovado. Elegibilidade e KYC continuam governados pelo backend."
-                  : "Registra este documento como rejeitado com o motivo informado. Elegibilidade e KYC continuam governados pelo backend."}
-              </p>
-              {pendingDocumentAction === "reject" ? (
-                <div className="section-stack">
-                  {getReasonOptions(pendingAction.documentType).length > 0 ? (
-                    <label className="form-field">
-                      Motivo sugerido
-                      <select
-                        value={getReasonOptions(pendingAction.documentType).includes(rejectionReasonDraft) ? rejectionReasonDraft : ""}
-                        onChange={(event) => setRejectionReasonDraft(event.target.value)}
-                      >
-                        <option value="">Escolha um motivo ou escreva abaixo</option>
-                        {getReasonOptions(pendingAction.documentType).map((reason) => (
-                          <option key={reason} value={reason}>{reason}</option>
-                        ))}
-                      </select>
-                    </label>
-                  ) : null}
-                  <label className="form-field">
-                    Motivo obrigatório da rejeição
-                    <textarea
-                      rows={4}
-                      value={rejectionReasonDraft}
-                      onChange={(event) => setRejectionReasonDraft(event.target.value)}
-                      placeholder="Explique objetivamente o que precisa ser corrigido."
-                      required
-                      aria-required="true"
-                    />
-                  </label>
-                </div>
-              ) : null}
-            </div>
-          ) : null}
-
-          {pendingAction?.type === "document-request" ? (
-            <div className="section-stack">
-              <KeyValueGrid
-                data={{
-                  motorista: documents?.driver?.name || id,
-                  motoristaId: documents?.driver?.id || id,
-                  documento: resolveDocumentLabel(pendingAction.documentType),
-                  statusAtual: formatDocumentStatus(pendingDocument || {}),
-                  canal: "App do motorista + tentativa de push",
-                }}
-                labels={{
-                  motorista: "Motorista",
-                  motoristaId: "ID do motorista",
-                  documento: "Documento solicitado",
-                  statusAtual: "Status atual",
-                  canal: "Canal",
-                }}
-                maxItems={5}
-              />
-              <label className="form-field">
-                Mensagem obrigatória para o motorista
-                <textarea
-                  rows={4}
-                  value={documentRequestReasonDraft}
-                  onChange={(event) => setDocumentRequestReasonDraft(event.target.value)}
-                  placeholder="Explique objetivamente qual documento precisa ser enviado ou corrigido."
-                  required
-                  aria-required="true"
-                />
-              </label>
-              <p>
-                <strong>Consequência:</strong> abre uma solicitação de atualização e tenta notificar o motorista;
-                não aprova, rejeita ou altera a política KYC.
-              </p>
-            </div>
-          ) : null}
-
-          {pendingAction?.type === "vehicle-config" ? (
-            <KeyValueGrid
-              data={{
-                motorista: documents?.driver?.name || id,
-                veiculo: pendingVehicle
-                  ? `${pendingVehicle.plate || "Sem placa"} · ${pendingVehicle.brand || "-"} ${pendingVehicle.model || ""}`
-                  : pendingAction.payload?.userVehicleId || "-",
-                categoria: pendingAction.payload?.category || "-",
-                status: pendingAction.payload?.vehicleStatus || "-",
-                ativarNoPerfil: pendingAction.payload?.setActive ? "sim" : "não",
-                eliteRecebePlus: pendingAction.payload?.acceptPlusWithElite ? "sim" : "não",
-              }}
-              labels={{
-                motorista: "Motorista",
-                veiculo: "Veículo",
-                categoria: "Categoria",
-                status: "Status resultante",
-                ativarNoPerfil: "Ativar no perfil",
-                eliteRecebePlus: "Elite recebe Plus",
-              }}
-              maxItems={6}
-            />
-          ) : null}
-
-          {pendingAction?.type === "vehicle-config" ? (
-            <p>
-              <strong>Consequência:</strong> Atualiza veículo, categoria e disponibilidade configurada; o backend
-              mantém as guardas de trabalho e KYC.
-            </p>
-          ) : null}
-
-          {pendingAction?.type === "background-upload" ? (
-            <KeyValueGrid
-              data={{
-                motorista: documents?.driver?.name || id,
-                documento: "Certidão de antecedentes",
-                arquivo: pendingAction.file?.name || "-",
-                tamanho: formatFileSize(pendingAction.file?.size),
-              }}
-              labels={{
-                motorista: "Motorista",
-                documento: "Documento",
-                arquivo: "Arquivo",
-                tamanho: "Tamanho",
-              }}
-              maxItems={4}
-            />
-          ) : null}
-
-          {pendingAction?.type === "background-upload" ? (
-            <p>
-              <strong>Consequência:</strong> Anexa o PDF à ficha para revisão. O upload não aprova a certidão nem
-              altera a política KYC.
-            </p>
-          ) : null}
-
-          {pendingAction && error ? <p className="error">{error}</p> : null}
         </ConfirmActionDialog>
 
         {actionMessage ? <p className="success-text">{actionMessage}</p> : null}

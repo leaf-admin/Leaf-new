@@ -29,6 +29,26 @@ const mockGetForegroundPermissionsAsync = jest.fn(() =>
 
 jest.mock('../src/screens/prototype/prototypeRideRuntime', () => ({
   usePrototypeRideRuntime: jest.fn(),
+  extractPrototypeDriverKycFailureContext: jest.fn((error = {}) => {
+    const payload = error?.payload && typeof error.payload === 'object' ? error.payload : {};
+    const responseData = error?.response?.data && typeof error.response.data === 'object'
+      ? error.response.data
+      : {};
+    const sources = [error, payload, responseData];
+    const firstValue = (field) => sources
+      .find((source) => source?.[field] !== undefined && source?.[field] !== null)
+      ?.[field] ?? null;
+    const reviewSource = sources.find(
+      (source) => typeof source?.reviewAvailable === 'boolean',
+    );
+    return {
+      challengeId: firstValue('challengeId'),
+      requirement: firstValue('requirement'),
+      evidenceId: firstValue('evidenceId'),
+      reviewCaseId: firstValue('reviewCaseId'),
+      reviewAvailable: reviewSource?.reviewAvailable ?? null,
+    };
+  }),
 }));
 
 jest.mock('expo-location', () => ({
@@ -254,9 +274,16 @@ jest.mock('../src/services/WebSocketManager', () => ({
 jest.mock('../src/services/KYCService', () => ({
   __esModule: true,
   default: {
-    getPreferredLivenessMode: jest.fn(() => Promise.resolve({ success: true, mode: 'local' })),
+    getPreferredLivenessMode: jest.fn(() => Promise.resolve({ success: true, mode: 'aws' })),
     verifyDriver: jest.fn(() => Promise.resolve({ success: true, data: { isMatch: true } })),
     getAwsProviderName: jest.fn(() => 'aws_rekognition_face_liveness'),
+  },
+}));
+
+jest.mock('../src/services/NativeAwsLivenessService', () => ({
+  __esModule: true,
+  default: {
+    isAvailable: jest.fn(() => true),
   },
 }));
 
@@ -270,14 +297,20 @@ jest.mock('../src/components/KYC/KYCCameraScreen', () => {
   );
 });
 
-jest.mock('../src/components/KYC/AWSLivenessWebViewScreen', () => {
+jest.mock('../src/components/KYC/AWSNativeLivenessScreen', () => {
   const React = require('react');
   const { Text, TouchableOpacity } = require('react-native');
-  return ({ onSuccess }) => (
-    <TouchableOpacity testID="driver-kyc-aws" onPress={() => onSuccess({ sessionId: 'aws-session-1' })}>
-      <Text>Validar identidade AWS</Text>
-    </TouchableOpacity>
-  );
+  return {
+    __esModule: true,
+    default: ({ onSuccess }) => (
+      <TouchableOpacity
+        testID="driver-kyc-aws-native"
+        onPress={() => onSuccess({ sessionId: 'aws-session-1' })}
+      >
+        <Text>Iniciar validação facial</Text>
+      </TouchableOpacity>
+    ),
+  };
 });
 
 function buildDriverRuntime(overrides = {}) {
@@ -557,9 +590,11 @@ describe('driver online toggle', () => {
     shouldAutoSyncPassengerRoute.mockReturnValue(false);
     mockGetForegroundPermissionsAsync.mockResolvedValue({ status: 'granted' });
     const kycServiceMock = require('../src/services/KYCService').default;
-    kycServiceMock.getPreferredLivenessMode.mockResolvedValue({ success: true, mode: 'local' });
+    kycServiceMock.getPreferredLivenessMode.mockResolvedValue({ success: true, mode: 'aws' });
     kycServiceMock.verifyDriver.mockResolvedValue({ success: true, data: { isMatch: true } });
     kycServiceMock.getAwsProviderName.mockReturnValue('aws_rekognition_face_liveness');
+    const nativeAwsLivenessServiceMock = require('../src/services/NativeAwsLivenessService').default;
+    nativeAwsLivenessServiceMock.isAvailable.mockReturnValue(true);
     fetchDynamicPricingQuote.mockReset();
     fetchDynamicPricingQuote.mockResolvedValue({
       estimatedFare: 20.23,
@@ -1109,7 +1144,7 @@ describe('driver online toggle', () => {
       goBack: jest.fn(),
     };
 
-    const { getByTestId, getByText } = render(
+    const { getByTestId, queryByTestId } = render(
       <RobotaxiHomeScreen navigation={navigation} route={{ params: {} }} />
     );
 
@@ -1117,13 +1152,52 @@ describe('driver online toggle', () => {
 
     await waitFor(() => {
       expect(kycServiceMock.getPreferredLivenessMode).toHaveBeenCalled();
-      expect(getByText(/Nenhuma verificação encontrada/)).toBeTruthy();
-      expect(getByText('Preparando validação facial...')).toBeTruthy();
+      expect(queryByTestId('driver-kyc-aws-native')).toBeTruthy();
       expect(Alert.alert).not.toHaveBeenCalledWith(
         'Modo motorista',
         expect.stringContaining('Nenhuma verificação')
       );
     });
+  });
+
+  it('keeps the driver offline without opening a new liveness while identity review is pending', async () => {
+    const kycServiceMock = require('../src/services/KYCService').default;
+    const setDriverOnline = jest.fn().mockResolvedValue({
+      success: false,
+      code: 'KYC_IDENTITY_REVIEW_HOLD',
+      kycRequired: true,
+      reviewAvailable: true,
+      evidenceId: 'evidence_01HZX9',
+      reviewCaseId: 'case_01HZX9',
+      error: 'Sua solicitação de análise de identidade está em andamento.',
+    });
+
+    usePrototypeRideRuntime.mockReturnValue(
+      buildDriverRuntime({ setDriverOnline })
+    );
+
+    const navigation = {
+      navigate: jest.fn(),
+      canGoBack: jest.fn(() => false),
+      goBack: jest.fn(),
+    };
+
+    const { getByTestId, queryByTestId } = render(
+      <RobotaxiHomeScreen navigation={navigation} route={{ params: {} }} />
+    );
+
+    fireEvent.press(getByTestId('driver-home-toggle-online'));
+
+    await waitFor(() => {
+      expect(setDriverOnline).toHaveBeenCalledWith(true);
+      expect(Alert.alert).toHaveBeenCalledWith(
+        'Análise em andamento',
+        'Sua identidade está sendo analisada. Avisaremos assim que houver uma atualização.',
+        undefined,
+      );
+    });
+    expect(kycServiceMock.getPreferredLivenessMode).not.toHaveBeenCalled();
+    expect(queryByTestId('driver-kyc-camera')).toBeNull();
   });
 
   it('opens the canonical KYC modal when activation explicitly requests liveness', async () => {
@@ -1135,7 +1209,7 @@ describe('driver online toggle', () => {
       goBack: jest.fn(),
     };
 
-    const { getByText } = render(
+    const { getByTestId } = render(
       <RobotaxiHomeScreen
         navigation={navigation}
         route={{
@@ -1150,7 +1224,7 @@ describe('driver online toggle', () => {
 
     await waitFor(() => {
       expect(kycServiceMock.getPreferredLivenessMode).toHaveBeenCalled();
-      expect(getByText('Conclua a validação facial para finalizar sua ativação.')).toBeTruthy();
+      expect(getByTestId('driver-kyc-aws-native')).toBeTruthy();
       expect(navigation.setParams).toHaveBeenCalledWith(
         expect.objectContaining({ notificationType: null, requirement: null })
       );
@@ -1221,12 +1295,12 @@ describe('driver online toggle', () => {
       },
     };
 
-    const { getByText, queryByText, queryByTestId, rerender } = render(
+    const { getByTestId, queryByText, queryByTestId, rerender } = render(
       <RobotaxiHomeScreen navigation={navigation} route={route} />
     );
 
     await waitFor(() => {
-      expect(getByText('Conclua a validação facial para finalizar sua ativação.')).toBeTruthy();
+      expect(getByTestId('driver-kyc-aws-native')).toBeTruthy();
     });
 
     runtime = buildDriverRuntime({
@@ -1248,6 +1322,7 @@ describe('driver online toggle', () => {
       expect(queryByText('Conclua a validação facial para finalizar sua ativação.')).toBeNull();
       expect(queryByText('Preparando validação facial...')).toBeNull();
       expect(queryByTestId('driver-kyc-camera')).toBeNull();
+      expect(queryByTestId('driver-kyc-aws-native')).toBeNull();
     });
   });
 

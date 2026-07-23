@@ -1,3 +1,4 @@
+const crypto = require('crypto');
 const firebaseConfig = require('../firebase-config');
 const ocrService = require('./ocr-service');
 const documentAIExtractionService = require('./document-ai-extraction-service');
@@ -18,7 +19,20 @@ const ALLOWED_DRIVER_DOCUMENT_TYPES = Object.freeze([
   'crlv',
   ...(MEI_DOCUMENTS_ENABLED ? ['mei'] : [])
 ]);
+const SERIALIZABLE_DRIVER_DOCUMENT_TYPES = Object.freeze([
+  ...ALLOWED_DRIVER_DOCUMENT_TYPES,
+  'antecedentes_criminais'
+]);
 const REVIEWABLE_INDEX_STATUSES = Object.freeze(['pending', 'approved', 'rejected']);
+const DOCUMENT_MUTATION_LOCK_ROOT = 'driver_document_mutation_locks';
+const DOCUMENT_MUTATION_LOCK_TTL_MS = Math.max(
+  30 * 1000,
+  Number.parseInt(process.env.DRIVER_DOCUMENT_MUTATION_LOCK_TTL_MS || `${2 * 60 * 1000}`, 10) || 2 * 60 * 1000
+);
+const DOCUMENT_MUTATION_LOCK_WAIT_MS = Math.max(
+  1000,
+  Number.parseInt(process.env.DRIVER_DOCUMENT_MUTATION_LOCK_WAIT_MS || '15000', 10) || 15000
+);
 const CNH_FACE_BIOMETRICS_ENABLED =
   String(process.env.ENABLE_CNH_FACE_BIOMETRICS || 'false').toLowerCase() === 'true';
 const CNH_FACE_BIOMETRICS_BLOCKING =
@@ -41,6 +55,11 @@ let cnhFaceBiometricService = null;
 function sanitizeDocumentType(value) {
   const normalized = String(value || '').trim().toLowerCase();
   return ALLOWED_DRIVER_DOCUMENT_TYPES.includes(normalized) ? normalized : null;
+}
+
+function sanitizeDocumentMutationType(value) {
+  const normalized = String(value || '').trim().toLowerCase();
+  return SERIALIZABLE_DRIVER_DOCUMENT_TYPES.includes(normalized) ? normalized : null;
 }
 
 function normalizeText(value) {
@@ -93,6 +112,283 @@ function getDbOrThrow() {
 
 function nowIso() {
   return new Date().toISOString();
+}
+
+function documentBindingError(code, message) {
+  const error = new Error(message);
+  error.code = code;
+  return error;
+}
+
+function normalizeDocumentBinding(input = {}) {
+  return {
+    submissionId: String(input?.submissionId || input?.lastSubmissionId || '').trim(),
+    filePath: String(input?.filePath || '').trim(),
+    documentSha256: String(input?.documentSha256 || '').trim().toLowerCase(),
+    storageGeneration: String(input?.storageGeneration || '').trim()
+  };
+}
+
+function requireCompleteDocumentBinding(input = {}) {
+  const binding = normalizeDocumentBinding(input);
+  if (
+    !binding.submissionId
+    || !binding.filePath
+    || !/^[a-f0-9]{64}$/.test(binding.documentSha256)
+    || !/^\d+$/.test(binding.storageGeneration)
+  ) {
+    throw documentBindingError(
+      'DRIVER_DOCUMENT_BINDING_INCOMPLETE',
+      'Submission, caminho, hash e generation sao obrigatorios para materializar o documento'
+    );
+  }
+  return binding;
+}
+
+function documentBindingsMatch(left = {}, right = {}) {
+  const normalizedLeft = normalizeDocumentBinding(left);
+  const normalizedRight = normalizeDocumentBinding(right);
+  return normalizedLeft.submissionId === normalizedRight.submissionId
+    && normalizedLeft.filePath === normalizedRight.filePath
+    && normalizedLeft.documentSha256 === normalizedRight.documentSha256
+    && normalizedLeft.storageGeneration === normalizedRight.storageGeneration;
+}
+
+function documentMutationLockPath(driverId, documentType) {
+  return `${DOCUMENT_MUTATION_LOCK_ROOT}/${driverId}/${documentType}`;
+}
+
+async function acquireDocumentMutationLease({ db, driverId, documentType, scope }) {
+  const safeDriverId = String(driverId || '').trim();
+  const safeType = sanitizeDocumentMutationType(documentType);
+  if (!db?.ref || !safeDriverId || !safeType) {
+    throw documentBindingError(
+      'DRIVER_DOCUMENT_MUTATION_INPUT_INVALID',
+      'Motorista e tipo sao obrigatorios para serializar a mutacao documental'
+    );
+  }
+
+  const token = crypto.randomUUID();
+  const lockRef = db.ref(documentMutationLockPath(safeDriverId, safeType));
+  const deadline = Date.now() + DOCUMENT_MUTATION_LOCK_WAIT_MS;
+
+  while (Date.now() <= deadline) {
+    const acquiredAtMs = Date.now();
+    const result = await lockRef.transaction((current) => {
+      const currentExpiresAtMs = Number(current?.expiresAtMs || 0);
+      if (
+        current?.token
+        && current.token !== token
+        && currentExpiresAtMs > acquiredAtMs
+      ) {
+        return undefined;
+      }
+      return {
+        token,
+        driverId: safeDriverId,
+        documentType: safeType,
+        scope: String(scope || 'document_mutation').trim(),
+        acquiredAt: new Date(acquiredAtMs).toISOString(),
+        acquiredAtMs,
+        expiresAtMs: acquiredAtMs + DOCUMENT_MUTATION_LOCK_TTL_MS
+      };
+    }, undefined, false);
+    const stored = result?.snapshot?.val?.() || null;
+    if (result?.committed === true && stored?.token === token) {
+      let released = false;
+      let lost = false;
+      let renewalInFlight = null;
+
+      const renew = async () => {
+        if (released || lost) return false;
+        if (renewalInFlight) return renewalInFlight;
+        const renewedAtMs = Date.now();
+        renewalInFlight = lockRef.transaction((current) => {
+          if (current?.token !== token) return undefined;
+          return {
+            ...current,
+            renewedAt: new Date(renewedAtMs).toISOString(),
+            renewedAtMs,
+            expiresAtMs: renewedAtMs + DOCUMENT_MUTATION_LOCK_TTL_MS
+          };
+        }, undefined, false)
+          .then((renewal) => {
+            const value = renewal?.snapshot?.val?.() || null;
+            const held = renewal?.committed === true && value?.token === token;
+            if (!held) lost = true;
+            return held;
+          })
+          .catch(() => {
+            lost = true;
+            return false;
+          })
+          .finally(() => {
+            renewalInFlight = null;
+          });
+        return renewalInFlight;
+      };
+
+      const heartbeat = setInterval(() => {
+        void renew();
+      }, Math.max(5000, Math.floor(DOCUMENT_MUTATION_LOCK_TTL_MS / 3)));
+      heartbeat.unref?.();
+
+      return {
+        token,
+        async assertHeld() {
+          if (lost || !(await renew())) {
+            throw documentBindingError(
+              'DRIVER_DOCUMENT_MUTATION_LEASE_LOST',
+              'A janela de serializacao documental foi perdida'
+            );
+          }
+          return true;
+        },
+        async release() {
+          if (released) return;
+          released = true;
+          clearInterval(heartbeat);
+          await lockRef.transaction((current) => (
+            current?.token === token ? null : undefined
+          ), undefined, false).catch(() => null);
+        }
+      };
+    }
+
+    await sleep(75);
+  }
+
+  throw documentBindingError(
+    'DRIVER_DOCUMENT_MUTATION_BUSY',
+    'Outra atualizacao deste documento ainda esta em andamento'
+  );
+}
+
+async function runWithDocumentMutationLease({
+  db = null,
+  driverId,
+  documentType,
+  scope
+}, callback) {
+  if (typeof callback !== 'function') {
+    throw documentBindingError(
+      'DRIVER_DOCUMENT_MUTATION_CALLBACK_REQUIRED',
+      'Callback obrigatorio para mutacao documental serializada'
+    );
+  }
+  const realtimeDb = db || getDbOrThrow();
+  const lease = await acquireDocumentMutationLease({
+    db: realtimeDb,
+    driverId,
+    documentType,
+    scope
+  });
+  try {
+    await lease.assertHeld();
+    return await callback({ db: realtimeDb, lease });
+  } finally {
+    await lease.release();
+  }
+}
+
+async function commitDocumentSubmissionState({
+  db = null,
+  driverId,
+  documentType,
+  activationDocument,
+  userDocument,
+  updatedAt = nowIso()
+} = {}) {
+  const safeDriverId = String(driverId || '').trim();
+  const safeType = sanitizeDocumentType(documentType);
+  const binding = requireCompleteDocumentBinding(activationDocument);
+  if (
+    !safeDriverId
+    || !safeType
+    || !documentBindingsMatch(binding, userDocument)
+  ) {
+    throw documentBindingError(
+      'DRIVER_DOCUMENT_SUBMISSION_BINDING_MISMATCH',
+      'As projecoes da submissao documental possuem bindings divergentes'
+    );
+  }
+
+  return runWithDocumentMutationLease({
+    db,
+    driverId: safeDriverId,
+    documentType: safeType,
+    scope: `submission_commit_${binding.submissionId}`
+  }, async ({ db: realtimeDb, lease }) => {
+    await lease.assertHeld();
+    await realtimeDb.ref().update({
+      [`driver_activation/${safeDriverId}/documents/${safeType}`]: activationDocument,
+      [`driver_activation/${safeDriverId}/documents_history/${binding.submissionId}`]: activationDocument,
+      [`driver_activation/${safeDriverId}/updatedAt`]: updatedAt,
+      [`users/${safeDriverId}/documents/${safeType}`]: userDocument
+    });
+    return { binding };
+  });
+}
+
+async function runWithCurrentDocumentBinding({
+  db = null,
+  driverId,
+  documentType,
+  expectedBinding,
+  scope = 'current_document_binding'
+} = {}, callback) {
+  const safeDriverId = String(driverId || '').trim();
+  const safeType = sanitizeDocumentMutationType(documentType);
+  let binding = null;
+  try {
+    binding = requireCompleteDocumentBinding(expectedBinding);
+  } catch (_error) {
+    throw documentBindingError(
+      'DRIVER_ACTIVATION_DOCUMENT_BINDING_MISMATCH',
+      'O documento mudou desde que esta operacao foi iniciada. Recarregue os dados antes de continuar.'
+    );
+  }
+  if (!safeDriverId || !safeType || typeof callback !== 'function') {
+    throw documentBindingError(
+      'DRIVER_ACTIVATION_DOCUMENT_BINDING_MISMATCH',
+      'Motorista, tipo e binding documental atual sao obrigatorios'
+    );
+  }
+
+  return runWithDocumentMutationLease({
+    db,
+    driverId: safeDriverId,
+    documentType: safeType,
+    scope: `${scope}_${binding.submissionId}`
+  }, async ({ db: realtimeDb, lease }) => {
+    const [activationSnapshot, userSnapshot, historySnapshot] = await Promise.all([
+      realtimeDb.ref(`driver_activation/${safeDriverId}/documents/${safeType}`).once('value'),
+      realtimeDb.ref(`users/${safeDriverId}/documents/${safeType}`).once('value'),
+      realtimeDb.ref(`driver_activation/${safeDriverId}/documents_history/${binding.submissionId}`).once('value')
+    ]);
+    const activationDocument = activationSnapshot.val() || {};
+    const userDocument = userSnapshot.val() || {};
+    const historyDocument = historySnapshot.val() || {};
+    if (
+      !documentBindingsMatch(binding, activationDocument)
+      || !documentBindingsMatch(binding, userDocument)
+      || !documentBindingsMatch(binding, historyDocument)
+    ) {
+      throw documentBindingError(
+        'DRIVER_ACTIVATION_DOCUMENT_BINDING_MISMATCH',
+        'O documento mudou desde que esta operacao foi iniciada. Recarregue os dados antes de continuar.'
+      );
+    }
+
+    return callback({
+      db: realtimeDb,
+      lease,
+      binding,
+      activationDocument,
+      userDocument,
+      historyDocument
+    });
+  });
 }
 
 function getCnhFaceBiometricService() {
@@ -205,11 +501,16 @@ async function generateCnhFaceBiometricShadow({ driverId, submissionId, fileBuff
       driverId: safeDriverId,
       submissionId: safeSubmissionId
     });
-    return {
+    const documentPayload = {
       status: 'skipped',
       provider: 'leaf_face_compare_service',
       reason: 'not_configured',
       createdAt: nowIso()
+    };
+    return {
+      documentPayload,
+      userPayload: null,
+      activationPayload: null
     };
   }
 
@@ -247,12 +548,6 @@ async function generateCnhFaceBiometricShadow({ driverId, submissionId, fileBuff
           attempts
         };
 
-        const db = getDbOrThrow();
-        await db.ref().update({
-          [`users/${safeDriverId}/biometrics/cnhFace`]: biometricPayload,
-          [`driver_activation/${safeDriverId}/biometrics/cnhFace`]: withoutEmbedding(biometricPayload)
-        });
-
         break;
       } catch (error) {
         lastError = error;
@@ -265,7 +560,7 @@ async function generateCnhFaceBiometricShadow({ driverId, submissionId, fileBuff
 
         const retryDelayMs = getCnhFaceBiometricRetryDelayMs(attempts);
         runtimeMetrics.recordRealtimeUpdate('cnh_face_biometric', 'retry');
-        logStructured('warn', 'Falha transitória ao gerar ou armazenar embedding facial da CNH; retry agendado', {
+        logStructured('warn', 'Falha transitória ao gerar embedding facial da CNH; retry agendado', {
           service: 'driver-activation-queue',
           driverId: safeDriverId,
           submissionId: safeSubmissionId,
@@ -280,7 +575,7 @@ async function generateCnhFaceBiometricShadow({ driverId, submissionId, fileBuff
       }
     }
 
-    logStructured('info', 'Embedding facial da CNH armazenado em shadow mode', {
+    logStructured('info', 'Embedding facial da CNH gerado em shadow mode', {
       service: 'driver-activation-queue',
       driverId: safeDriverId,
       submissionId: safeSubmissionId,
@@ -290,7 +585,12 @@ async function generateCnhFaceBiometricShadow({ driverId, submissionId, fileBuff
       detScore: biometricPayload.selectedFace?.detection_score || null
     });
 
-    return withoutEmbedding(biometricPayload);
+    const activationPayload = withoutEmbedding(biometricPayload);
+    return {
+      documentPayload: activationPayload,
+      userPayload: biometricPayload,
+      activationPayload
+    };
   } catch (error) {
     const retryable = isRetryableCnhFaceBiometricError(error);
     const failurePayload = {
@@ -321,18 +621,11 @@ async function generateCnhFaceBiometricShadow({ driverId, submissionId, fileBuff
       throw error;
     }
 
-    try {
-      const db = getDbOrThrow();
-      await db.ref(`driver_activation/${safeDriverId}/biometrics/cnhFace`).set(failurePayload);
-    } catch (statusError) {
-      logError(statusError, 'Falha ao registrar status de erro da biometria CNH', {
-        service: 'driver-activation-queue',
-        driverId: safeDriverId,
-        submissionId: safeSubmissionId
-      });
-    }
-
-    return failurePayload;
+    return {
+      documentPayload: failurePayload,
+      userPayload: null,
+      activationPayload: failurePayload
+    };
   }
 }
 
@@ -500,6 +793,7 @@ async function updateDocumentState({
   extractionSource = null,
   model = null,
   metadata = {},
+  biometricState = null,
   io = null
 }) {
   const safeDriverId = String(driverId || '').trim();
@@ -513,14 +807,14 @@ async function updateDocumentState({
   let normalizedStatus = String(status || 'pending').trim().toLowerCase();
   const statusUpdatedAt = nowIso();
   const db = getDbOrThrow();
+  const expectedBinding = requireCompleteDocumentBinding({
+    ...metadata,
+    submissionId: safeSubmissionId
+  });
 
   const activationDocPath = `driver_activation/${safeDriverId}/documents/${safeType}`;
   const activationHistoryPath = `driver_activation/${safeDriverId}/documents_history/${safeSubmissionId}`;
   const userDocumentPath = `users/${safeDriverId}/documents/${safeType}`;
-
-  const previousUserDocumentSnapshot = await db.ref(userDocumentPath).once('value');
-  const previousUserDocument = previousUserDocumentSnapshot.val() || {};
-  const previousReviewStatus = String(previousUserDocument?.status || '').toLowerCase();
 
   const normalizedDocumentData = safeType === 'crlv' && data
     ? normalizeVehicleOcrPayload(data)
@@ -533,129 +827,215 @@ async function updateDocumentState({
   }
   const reviewStatus = toReviewQueueStatus(normalizedStatus);
 
-  const basePayload = {
-    documentType: safeType,
-    status: normalizedStatus,
-    reason: effectiveReason,
-    updatedAt: statusUpdatedAt,
-    reviewedAt: normalizedStatus === 'approved' || normalizedStatus === 'failed' ? statusUpdatedAt : null,
-    model: model || null,
-    extractionSource: extractionSource || null,
-    data: normalizedDocumentData,
-    ...metadata
-  };
-
-  const historyPayload = {
-    ...basePayload,
-    submissionId: safeSubmissionId,
-    createdAt: metadata?.createdAt || previousUserDocument?.uploadedAt || statusUpdatedAt
-  };
-
-  const userDocumentPayload = {
-    ...(previousUserDocument || {}),
-    type: safeType,
-    status: reviewStatus,
-    analysisStatus: normalizedStatus,
-    analysisReason: effectiveReason,
-    analysisData: normalizedDocumentData,
-    // The dashboard review projection reads extractedData. Keep it aligned with
-    // analysisData so the CRLV identity cannot diverge between operational views.
-    extractedData: normalizedDocumentData,
-    reviewedAt: normalizedStatus === 'approved' || normalizedStatus === 'failed' ? statusUpdatedAt : null,
-    rejectionReason: normalizedStatus === 'failed' ? effectiveReason || 'Documento reprovado na análise.' : null,
-    updatedAt: statusUpdatedAt,
-    lastSubmissionId: safeSubmissionId,
-    model: model || null,
-    extractionSource: extractionSource || null
-  };
-
-  const indexPayload = {
+  return runWithDocumentMutationLease({
+    db,
     driverId: safeDriverId,
     documentType: safeType,
-    status: reviewStatus,
-    uploadedAt: userDocumentPayload.uploadedAt || metadata?.createdAt || statusUpdatedAt,
-    reviewedAt: userDocumentPayload.reviewedAt || null,
-    updatedAt: statusUpdatedAt,
-    fileName: userDocumentPayload.fileName || metadata?.fileName || null,
-    fileType: userDocumentPayload.fileType || metadata?.fileType || null
-  };
+    scope: `analysis_result_${safeSubmissionId}`
+  }, async ({ db: realtimeDb, lease }) => {
+    const currentDocumentSnapshot = await realtimeDb.ref(activationDocPath).once('value');
+    const currentDocument = currentDocumentSnapshot.val() || {};
+    const currentBinding = normalizeDocumentBinding(currentDocument);
 
-  const crlvVehicleLink = safeType === 'crlv' && normalizedStatus === 'approved'
-    ? await buildApprovedCrlvVehicleLinkUpdates({
-      db,
-      driverId: safeDriverId,
-      crlvData: normalizedDocumentData,
+    if (!documentBindingsMatch(expectedBinding, currentBinding)) {
+      const historySnapshot = await realtimeDb.ref(activationHistoryPath).once('value');
+      const existingHistory = historySnapshot.val() || {};
+      const supersededReason = 'Resultado ignorado porque uma submissao mais recente substituiu este documento.';
+      const supersededPayload = {
+        ...existingHistory,
+        ...metadata,
+        documentType: safeType,
+        submissionId: safeSubmissionId,
+        filePath: expectedBinding.filePath,
+        documentSha256: expectedBinding.documentSha256,
+        storageGeneration: expectedBinding.storageGeneration,
+        status: 'superseded',
+        reason: supersededReason,
+        resultStatus: normalizedStatus,
+        resultReason: effectiveReason,
+        result: {
+          status: normalizedStatus,
+          reason: effectiveReason,
+          data: normalizedDocumentData,
+          extractionSource: extractionSource || null,
+          model: model || null,
+          completedAt: statusUpdatedAt
+        },
+        supersededBySubmissionId: currentBinding.submissionId || null,
+        supersededBy: currentBinding,
+        supersededAt: statusUpdatedAt,
+        updatedAt: statusUpdatedAt,
+        createdAt: metadata?.createdAt || existingHistory?.createdAt || statusUpdatedAt
+      };
+
+      await lease.assertHeld();
+      await realtimeDb.ref(activationHistoryPath).set(supersededPayload);
+      runtimeMetrics.recordRealtimeUpdate('driver_activation_queue', 'result_superseded');
+      logStructured('info', 'Resultado documental antigo preservado apenas no historico', {
+        service: 'driver-activation-queue',
+        driverId: safeDriverId,
+        documentType: safeType,
+        submissionId: safeSubmissionId,
+        supersededBySubmissionId: currentBinding.submissionId || null
+      });
+
+      return {
+        stale: true,
+        superseded: true,
+        eventPayload: null,
+        aggregatedStatus: null,
+        documentPayload: supersededPayload,
+        vehicleLink: null
+      };
+    }
+
+    const previousUserDocumentSnapshot = await realtimeDb.ref(userDocumentPath).once('value');
+    const previousUserDocument = previousUserDocumentSnapshot.val() || {};
+    const previousReviewStatus = String(previousUserDocument?.status || '').toLowerCase();
+
+    const basePayload = {
+      ...metadata,
+      documentType: safeType,
       submissionId: safeSubmissionId,
-      extractionSource,
-      model,
-      updatedAt: statusUpdatedAt
-    })
-    : null;
+      filePath: expectedBinding.filePath,
+      documentSha256: expectedBinding.documentSha256,
+      storageGeneration: expectedBinding.storageGeneration,
+      status: normalizedStatus,
+      reason: effectiveReason,
+      updatedAt: statusUpdatedAt,
+      reviewedAt: normalizedStatus === 'approved' || normalizedStatus === 'failed' ? statusUpdatedAt : null,
+      model: model || null,
+      extractionSource: extractionSource || null,
+      data: normalizedDocumentData
+    };
 
-  await db.ref().update({
-    ...(crlvVehicleLink?.updates || {}),
-    [activationDocPath]: basePayload,
-    [activationHistoryPath]: historyPayload,
-    [userDocumentPath]: userDocumentPayload,
-    [`driver_documents_index/${safeType}/pending/${safeDriverId}`]: reviewStatus === 'pending' ? indexPayload : null,
-    [`driver_documents_index/${safeType}/approved/${safeDriverId}`]: reviewStatus === 'approved' ? indexPayload : null,
-    [`driver_documents_index/${safeType}/rejected/${safeDriverId}`]: reviewStatus === 'rejected' ? indexPayload : null,
-    [`driver_activation/${safeDriverId}/updatedAt`]: statusUpdatedAt
-  });
+    const historyPayload = {
+      ...basePayload,
+      createdAt: metadata?.createdAt || previousUserDocument?.uploadedAt || statusUpdatedAt
+    };
 
-  if (crlvVehicleLink) {
+    const userDocumentPayload = {
+      ...(previousUserDocument || {}),
+      type: safeType,
+      status: reviewStatus,
+      analysisStatus: normalizedStatus,
+      analysisReason: effectiveReason,
+      analysisData: normalizedDocumentData,
+      // The dashboard review projection reads extractedData. Keep it aligned with
+      // analysisData so the CRLV identity cannot diverge between operational views.
+      extractedData: normalizedDocumentData,
+      reviewedAt: normalizedStatus === 'approved' || normalizedStatus === 'failed' ? statusUpdatedAt : null,
+      rejectionReason: normalizedStatus === 'failed' ? effectiveReason || 'Documento reprovado na análise.' : null,
+      updatedAt: statusUpdatedAt,
+      lastSubmissionId: safeSubmissionId,
+      filePath: expectedBinding.filePath,
+      documentSha256: expectedBinding.documentSha256,
+      storageGeneration: expectedBinding.storageGeneration,
+      model: model || null,
+      extractionSource: extractionSource || null
+    };
+
+    const indexPayload = {
+      driverId: safeDriverId,
+      documentType: safeType,
+      submissionId: safeSubmissionId,
+      filePath: expectedBinding.filePath,
+      documentSha256: expectedBinding.documentSha256,
+      storageGeneration: expectedBinding.storageGeneration,
+      status: reviewStatus,
+      uploadedAt: userDocumentPayload.uploadedAt || metadata?.createdAt || statusUpdatedAt,
+      reviewedAt: userDocumentPayload.reviewedAt || null,
+      updatedAt: statusUpdatedAt,
+      fileName: userDocumentPayload.fileName || metadata?.fileName || null,
+      fileType: userDocumentPayload.fileType || metadata?.fileType || null
+    };
+
+    const crlvVehicleLink = safeType === 'crlv' && normalizedStatus === 'approved'
+      ? await buildApprovedCrlvVehicleLinkUpdates({
+        db: realtimeDb,
+        driverId: safeDriverId,
+        crlvData: normalizedDocumentData,
+        submissionId: safeSubmissionId,
+        extractionSource,
+        model,
+        updatedAt: statusUpdatedAt
+      })
+      : null;
+
+    await lease.assertHeld();
+    await realtimeDb.ref().update({
+      ...(crlvVehicleLink?.updates || {}),
+      ...(safeType === 'cnh' && biometricState?.userPayload
+        ? { [`users/${safeDriverId}/biometrics/cnhFace`]: biometricState.userPayload }
+        : {}),
+      ...(safeType === 'cnh' && biometricState?.activationPayload
+        ? { [`driver_activation/${safeDriverId}/biometrics/cnhFace`]: biometricState.activationPayload }
+        : {}),
+      [activationDocPath]: basePayload,
+      [activationHistoryPath]: historyPayload,
+      [userDocumentPath]: userDocumentPayload,
+      [`driver_documents_index/${safeType}/pending/${safeDriverId}`]: reviewStatus === 'pending' ? indexPayload : null,
+      [`driver_documents_index/${safeType}/approved/${safeDriverId}`]: reviewStatus === 'approved' ? indexPayload : null,
+      [`driver_documents_index/${safeType}/rejected/${safeDriverId}`]: reviewStatus === 'rejected' ? indexPayload : null,
+      [`driver_activation/${safeDriverId}/updatedAt`]: statusUpdatedAt
+    });
+
+    if (crlvVehicleLink) {
+      runtimeMetrics.recordRealtimeUpdate(
+        'driver_activation',
+        crlvVehicleLink.createdLink ? 'crlv_vehicle_link_created' : 'crlv_vehicle_link_reused'
+      );
+      logStructured('info', 'CRLV aprovado materializado no cadastro canonico de veiculo', {
+        service: 'driver-activation-queue',
+        driverId: safeDriverId,
+        submissionId: safeSubmissionId,
+        vehicleId: crlvVehicleLink.vehicleId,
+        userVehicleId: crlvVehicleLink.userVehicleId,
+        createdCatalog: crlvVehicleLink.createdCatalog,
+        createdLink: crlvVehicleLink.createdLink
+      });
+    }
+
+    await adjustDocumentIndexCounters(realtimeDb, safeType, previousReviewStatus, reviewStatus);
+
     runtimeMetrics.recordRealtimeUpdate(
       'driver_activation',
-      crlvVehicleLink.createdLink ? 'crlv_vehicle_link_created' : 'crlv_vehicle_link_reused'
+      normalizedStatus === 'failed' ? 'doc_failed' : normalizedStatus === 'in_review' ? 'doc_in_review' : `doc_${normalizedStatus}`
     );
-    logStructured('info', 'CRLV aprovado materializado no cadastro canonico de veiculo', {
-      service: 'driver-activation-queue',
+
+    if (normalizedStatus === 'failed') {
+      runtimeMetrics.recordRealtimeUpdate('doc_failed', 'total');
+    }
+    if (normalizedStatus === 'in_review') {
+      runtimeMetrics.recordRealtimeUpdate('doc_in_review', 'total');
+    }
+
+    const aggregatedStatus = await recomputeDriverActivationStatus(safeDriverId);
+    await syncDriverApplicationMirror(safeDriverId, realtimeDb);
+
+    const eventPayload = {
       driverId: safeDriverId,
+      documentType: safeType,
       submissionId: safeSubmissionId,
-      vehicleId: crlvVehicleLink.vehicleId,
-      userVehicleId: crlvVehicleLink.userVehicleId,
-      createdCatalog: crlvVehicleLink.createdCatalog,
-      createdLink: crlvVehicleLink.createdLink
-    });
-  }
+      status: normalizedStatus,
+      reason: effectiveReason,
+      updatedAt: statusUpdatedAt,
+      canGoOnline: Boolean(aggregatedStatus?.canGoOnline)
+    };
 
-  await adjustDocumentIndexCounters(db, safeType, previousReviewStatus, reviewStatus);
+    if (io) {
+      io.to(`driver_${safeDriverId}`).emit('driverDocumentStatusUpdated', eventPayload);
+    }
 
-  runtimeMetrics.recordRealtimeUpdate(
-    'driver_activation',
-    normalizedStatus === 'failed' ? 'doc_failed' : normalizedStatus === 'in_review' ? 'doc_in_review' : `doc_${normalizedStatus}`
-  );
-
-  if (normalizedStatus === 'failed') {
-    runtimeMetrics.recordRealtimeUpdate('doc_failed', 'total');
-  }
-  if (normalizedStatus === 'in_review') {
-    runtimeMetrics.recordRealtimeUpdate('doc_in_review', 'total');
-  }
-
-  const aggregatedStatus = await recomputeDriverActivationStatus(safeDriverId);
-  await syncDriverApplicationMirror(safeDriverId, db);
-
-  const eventPayload = {
-    driverId: safeDriverId,
-    documentType: safeType,
-    submissionId: safeSubmissionId,
-    status: normalizedStatus,
-    reason: effectiveReason,
-    updatedAt: statusUpdatedAt,
-    canGoOnline: Boolean(aggregatedStatus?.canGoOnline)
-  };
-
-  if (io) {
-    io.to(`driver_${safeDriverId}`).emit('driverDocumentStatusUpdated', eventPayload);
-  }
-
-  return {
-    eventPayload,
-    aggregatedStatus,
-    documentPayload: basePayload,
-    vehicleLink: crlvVehicleLink
-  };
+    return {
+      stale: false,
+      superseded: false,
+      eventPayload,
+      aggregatedStatus,
+      documentPayload: basePayload,
+      vehicleLink: crlvVehicleLink
+    };
+  });
 }
 
 async function analyzeCnhDocument(fileBuffer) {
@@ -820,6 +1200,21 @@ async function analyzeMeiDocument(fileBuffer) {
   };
 }
 
+function buildQueuedDocumentMetadata(job = {}) {
+  return {
+    fileName: job.fileName,
+    fileType: job.fileType,
+    fileSize: Number(job.fileSize || 0),
+    fileUrl: job.fileUrl || null,
+    filePath: job.filePath || null,
+    fileUrlExpiresAt: job.fileUrlExpiresAt || null,
+    documentSha256: job.documentSha256 || null,
+    storageGeneration: job.storageGeneration || null,
+    createdAt: job.createdAt || nowIso(),
+    uploadedAt: job.uploadedAt || nowIso()
+  };
+}
+
 class DriverDocumentAnalysisQueue {
   constructor() {
     this.jobs = [];
@@ -874,7 +1269,7 @@ class DriverDocumentAnalysisQueue {
         }
 
         if (!analysisResult?.success) {
-          await updateDocumentState({
+          const persistenceResult = await updateDocumentState({
             driverId: safeDriverId,
             documentType: safeDocumentType,
             submissionId: currentJob.submissionId,
@@ -883,19 +1278,14 @@ class DriverDocumentAnalysisQueue {
             data: analysisResult?.data || null,
             extractionSource: analysisResult?.extractionSource || null,
             model: analysisResult?.model || null,
-            metadata: {
-              fileName: currentJob.fileName,
-              fileType: currentJob.fileType,
-              fileSize: Number(currentJob.fileSize || 0),
-              fileUrl: currentJob.fileUrl || null,
-              filePath: currentJob.filePath || null,
-              createdAt: currentJob.createdAt || nowIso(),
-              uploadedAt: currentJob.uploadedAt || nowIso()
-            },
+            metadata: buildQueuedDocumentMetadata(currentJob),
             io: currentJob.io
           });
 
-          runtimeMetrics.recordRealtimeUpdate('driver_activation_queue', 'processed_failed');
+          runtimeMetrics.recordRealtimeUpdate(
+            'driver_activation_queue',
+            persistenceResult?.stale ? 'processed_superseded' : 'processed_failed'
+          );
           continue;
         }
 
@@ -907,7 +1297,7 @@ class DriverDocumentAnalysisQueue {
           })
           : null;
 
-        await updateDocumentState({
+        const persistenceResult = await updateDocumentState({
           driverId: safeDriverId,
           documentType: safeDocumentType,
           submissionId: currentJob.submissionId,
@@ -917,19 +1307,17 @@ class DriverDocumentAnalysisQueue {
           extractionSource: analysisResult.extractionSource || null,
           model: analysisResult.model || null,
           metadata: {
-            fileName: currentJob.fileName,
-            fileType: currentJob.fileType,
-            fileSize: Number(currentJob.fileSize || 0),
-            fileUrl: currentJob.fileUrl || null,
-            filePath: currentJob.filePath || null,
-            createdAt: currentJob.createdAt || nowIso(),
-            uploadedAt: currentJob.uploadedAt || nowIso(),
-            biometricFace: cnhFaceBiometric
+            ...buildQueuedDocumentMetadata(currentJob),
+            biometricFace: cnhFaceBiometric?.documentPayload || null
           },
+          biometricState: cnhFaceBiometric,
           io: currentJob.io
         });
 
-        runtimeMetrics.recordRealtimeUpdate('driver_activation_queue', 'processed_success');
+        runtimeMetrics.recordRealtimeUpdate(
+          'driver_activation_queue',
+          persistenceResult?.stale ? 'processed_superseded' : 'processed_success'
+        );
       } catch (error) {
         logError(error, 'Erro ao analisar documento de ativação', {
           service: 'driver-activation-queue',
@@ -939,7 +1327,7 @@ class DriverDocumentAnalysisQueue {
         });
 
         try {
-          await updateDocumentState({
+          const persistenceResult = await updateDocumentState({
             driverId: safeDriverId,
             documentType: safeDocumentType,
             submissionId: currentJob.submissionId,
@@ -948,17 +1336,12 @@ class DriverDocumentAnalysisQueue {
             data: null,
             extractionSource: null,
             model: null,
-            metadata: {
-              fileName: currentJob.fileName,
-              fileType: currentJob.fileType,
-              fileSize: Number(currentJob.fileSize || 0),
-              fileUrl: currentJob.fileUrl || null,
-              filePath: currentJob.filePath || null,
-              createdAt: currentJob.createdAt || nowIso(),
-              uploadedAt: currentJob.uploadedAt || nowIso()
-            },
+            metadata: buildQueuedDocumentMetadata(currentJob),
             io: currentJob.io
           });
+          if (persistenceResult?.stale) {
+            runtimeMetrics.recordRealtimeUpdate('driver_activation_queue', 'processed_superseded');
+          }
         } catch (nestedError) {
           logError(nestedError, 'Erro ao marcar documento como failed após exceção', {
             service: 'driver-activation-queue',
@@ -1179,6 +1562,9 @@ module.exports = {
   ALLOWED_DRIVER_DOCUMENT_TYPES,
   sanitizeDocumentType,
   recomputeDriverActivationStatus,
+  commitDocumentSubmissionState,
+  runWithDocumentMutationLease,
+  runWithCurrentDocumentBinding,
   updateDocumentState,
   isRetryableCnhFaceBiometricError,
   getCnhFaceBiometricRetryDelayMs

@@ -612,12 +612,61 @@ describe('kyc-identity-review-workflow-service', () => {
       reviewCase: caseRecord({ status: 'UNDER_REVIEW' })
     });
     await expect(underReview.service.assertKycOperationAllowed(DRIVER_ID))
-      .resolves.toMatchObject({ allowed: true });
+      .resolves.toMatchObject({
+        allowed: true,
+        identityReviewHold: true,
+        holdCaseId: CASE_ID,
+        holdEvidenceId: EVIDENCE_ID,
+        reviewAvailable: true
+      });
     await expect(underReview.service.assertCnhUploadAllowed(DRIVER_ID))
       .rejects.toMatchObject({
         code: 'KYC_IDENTITY_REVIEW_HOLD',
         caseId: CASE_ID,
         ticketId: TICKET_ID
+      });
+  });
+
+  it('recovers a traceable review from the canonical mismatch when the enforcement mirror is absent', async () => {
+    const harness = createHarness({ reviewCase: null });
+    harness.identityTrustService.readState = jest.fn().mockResolvedValue({
+      driverId: DRIVER_ID,
+      status: 'revoked',
+      revocationReason: 'canonical_face_compare_failed',
+      lastFailure: {
+        reviewEvidenceId: EVIDENCE_ID,
+        recordedAt: '2026-07-17T12:00:00.000Z'
+      }
+    });
+
+    await expect(harness.service.assertKycOperationAllowed(DRIVER_ID))
+      .resolves.toMatchObject({
+        identityReviewHold: true,
+        holdCaseId: null,
+        holdEvidenceId: EVIDENCE_ID,
+        reviewAvailable: true
+      });
+  });
+
+  it('never exposes canonical failure or retry evidence as reviewer-facing evidence', async () => {
+    const harness = createHarness({
+      reviewCase: null,
+      firestoreDocuments: {
+        [`driver_identity_enforcement/${DRIVER_ID}`]: {
+          active: true,
+          permanent: false,
+          status: 'IDENTITY_MISMATCH_HOLD',
+          failureEvidenceId: 'canonical-failure-evidence',
+          resultEvidenceId: 'retry-result-evidence'
+        }
+      }
+    });
+
+    await expect(harness.service.assertKycOperationAllowed(DRIVER_ID))
+      .resolves.toMatchObject({
+        identityReviewHold: true,
+        holdEvidenceId: null,
+        reviewAvailable: false
       });
   });
 
@@ -1680,29 +1729,217 @@ describe('kyc-identity-review-workflow-service orphan hold recovery', () => {
     )).toMatchObject({ status: 'CLAIMED', remainingAttempts: 0 });
   });
 
-  test('does not refresh or reopen an expired idempotent authorization', async () => {
+  test('explicitly renews an expired untouched authorization with one attempt and distinct audit', async () => {
     const harness = createOrphanHarness();
     const first = await authorize(harness);
     harness.setNow('2026-07-17T13:00:00.000Z');
 
-    const replay = await authorize(harness);
-    expect(replay).toMatchObject({
+    await expect(harness.service.getOrphanHoldRecoveryCandidate(
+      DRIVER_ID,
+      { reviewerContext }
+    )).resolves.toEqual({
+      available: true,
+      status: 'renewal_required',
+      renewalRequired: true,
+      failureEvidenceId: FAILURE_EVIDENCE_ID,
+      expectedStateRevision: STATE_REVISION,
+      expectedRevokedAt: REVOKED_AT
+    });
+
+    const renewed = await authorize(harness, {
+      reason: 'Renovacao administrativa explicita sem qualquer tentativa anterior.'
+    });
+    expect(renewed).toMatchObject({
       recoveryId: first.recoveryId,
-      idempotentReplay: true,
+      idempotentReplay: false,
+      renewed: true,
       authorization: {
         status: 'AVAILABLE',
+        allowedAttempts: 1,
         remainingAttempts: 1,
-        expiresAt: '2026-07-17T12:40:00.000Z'
+        expiresAt: '2026-07-17T13:30:00.000Z'
       }
     });
-    await expect(harness.service.assertKycOperationAllowed(DRIVER_ID)).resolves.toMatchObject({
-      identityReviewHold: true,
-      cleanRetryAuthorized: false,
-      cnhReplacementHold: true
+    const authorization = harness.firestore.documents.get(
+      `kyc_identity_retry_authorizations/${first.recoveryId}`
+    );
+    const enforcement = harness.firestore.documents.get(
+      `driver_identity_enforcement/${DRIVER_ID}`
+    );
+    expect(authorization).toMatchObject({
+      status: 'AVAILABLE',
+      allowedAttempts: 1,
+      remainingAttempts: 1,
+      renewalCount: 1,
+      expiresAt: '2026-07-17T13:30:00.000Z',
+      lastRenewedAt: '2026-07-17T13:00:00.000Z'
     });
+    expect(enforcement).toMatchObject({
+      status: 'ORPHAN_HOLD_RETRY_AUTHORIZED',
+      retryAllowed: true,
+      retryAttempts: 1,
+      expiresAt: '2026-07-17T13:30:00.000Z'
+    });
+    expect(harness.firestore.documents.get(
+      `kyc_identity_review_audit/${first.recoveryId}_000002_orphan_hold_recovery_renewed`
+    )).toMatchObject({
+      action: 'ORPHAN_HOLD_RECOVERY_AUTHORIZATION_RENEWED',
+      renewalCount: 1,
+      previousExpiresAt: '2026-07-17T12:40:00.000Z',
+      expiresAt: '2026-07-17T13:30:00.000Z',
+      immutable: true
+    });
+    expect(harness.firestore.documents.has(
+      `kyc_identity_review_audit/${first.recoveryId}_000001_orphan_hold_recovery_authorized`
+    )).toBe(true);
+
+    const claim = await harness.service.claimCleanRetryAuthorization(
+      DRIVER_ID,
+      first.attemptScope
+    );
+    expect(claim).toMatchObject({ recoveryId: first.recoveryId });
     await expect(harness.service.claimCleanRetryAuthorization(
       DRIVER_ID,
       first.attemptScope
     )).rejects.toMatchObject({ code: 'KYC_IDENTITY_REVIEW_RETRY_NOT_AVAILABLE' });
+  });
+
+  test('rolls back a failed post-renewal challenge setup without creating a dead end', async () => {
+    const harness = createOrphanHarness();
+    const first = await authorize(harness);
+    harness.setNow('2026-07-17T13:00:00.000Z');
+    await authorize(harness, {
+      reason: 'Renovacao explicita para preparar um novo challenge de identidade.'
+    });
+
+    const rollbackReason = 'Falha ao persistir o challenge depois da renovacao explicita.';
+    const rolledBack = await harness.service.abortOrphanHoldRecoverySetup({
+      driverId: DRIVER_ID,
+      recoveryId: first.recoveryId,
+      reason: rollbackReason
+    });
+    const replay = await harness.service.abortOrphanHoldRecoverySetup({
+      driverId: DRIVER_ID,
+      recoveryId: first.recoveryId,
+      reason: rollbackReason
+    });
+
+    expect(rolledBack).toMatchObject({
+      renewalRolledBack: true,
+      idempotentReplay: false,
+      authorization: {
+        status: 'AVAILABLE',
+        remainingAttempts: 1,
+        expiresAt: '2026-07-17T12:40:00.000Z'
+      },
+      enforcement: {
+        status: 'ORPHAN_HOLD_RETRY_AUTHORIZED',
+        retryAllowed: true,
+        retryAttempts: 1,
+        expiresAt: '2026-07-17T12:40:00.000Z'
+      }
+    });
+    expect(replay).toMatchObject({
+      renewalRolledBack: true,
+      idempotentReplay: true
+    });
+    expect(harness.firestore.documents.get(
+      `kyc_identity_review_audit/${first.recoveryId}_000002_orphan_hold_recovery_renewal_setup_rolled_back`
+    )).toMatchObject({
+      action: 'ORPHAN_HOLD_RECOVERY_RENEWAL_SETUP_ROLLED_BACK',
+      renewedExpiresAt: '2026-07-17T13:30:00.000Z',
+      restoredExpiresAt: '2026-07-17T12:40:00.000Z',
+      immutable: true
+    });
+    await expect(harness.service.getOrphanHoldRecoveryCandidate(
+      DRIVER_ID,
+      { reviewerContext }
+    )).resolves.toMatchObject({
+      available: true,
+      status: 'renewal_required',
+      renewalRequired: true
+    });
+
+    await expect(authorize(harness, {
+      reason: 'Nova renovacao explicita depois da compensacao atomica do setup.'
+    })).resolves.toMatchObject({
+      renewed: true,
+      idempotentReplay: false,
+      authorization: {
+        status: 'AVAILABLE',
+        remainingAttempts: 1,
+        expiresAt: '2026-07-17T13:30:00.000Z'
+      }
+    });
+  });
+
+  test.each([
+    [
+      'a claim was released before expiry',
+      async (harness, first) => {
+        const claim = await harness.service.claimCleanRetryAuthorization(
+          DRIVER_ID,
+          first.attemptScope
+        );
+        await harness.service.releaseCleanRetryAuthorization(claim, {
+          reason: 'provider_not_dispatched'
+        });
+      },
+      'KYC_ORPHAN_HOLD_RECOVERY_RENEWAL_NOT_ALLOWED'
+    ],
+    [
+      'the canonical CNH binding changed',
+      async (harness) => {
+        harness.canonicalApprovalService.requireApprovedCnh.mockResolvedValue({
+          submissionId: 'different_cnh_submission',
+          documentSha256: 'a'.repeat(64),
+          status: 'approved'
+        });
+      },
+      'KYC_ORPHAN_HOLD_RECOVERY_IDEMPOTENCY_CONFLICT'
+    ],
+    [
+      'the enforcement binding changed',
+      async (harness) => {
+        const path = `driver_identity_enforcement/${DRIVER_ID}`;
+        harness.firestore.documents.set(path, {
+          ...harness.firestore.documents.get(path),
+          retryAttempts: 2
+        });
+      },
+      'KYC_ORPHAN_HOLD_RECOVERY_RENEWAL_NOT_ALLOWED'
+    ],
+    [
+      'the canonical trust changed',
+      async (harness) => {
+        const path = `driver_identity_trust/${DRIVER_ID}`;
+        harness.firestore.documents.set(path, trustState({ stateRevision: STATE_REVISION + 1 }));
+      },
+      'KYC_ORPHAN_HOLD_RECOVERY_TRUST_CONFLICT'
+    ]
+  ])('does not offer or renew an expired authorization when %s', async (
+    _label,
+    mutate,
+    expectedCode
+  ) => {
+    const harness = createOrphanHarness();
+    const first = await authorize(harness);
+    await mutate(harness, first);
+    harness.setNow('2026-07-17T13:00:00.000Z');
+
+    await expect(harness.service.getOrphanHoldRecoveryCandidate(
+      DRIVER_ID,
+      { reviewerContext }
+    )).resolves.toBeNull();
+    await expect(authorize(harness, {
+      reason: 'Tentativa administrativa de renovar autorizacao expirada.'
+    })).rejects.toMatchObject({ code: expectedCode });
+
+    expect(harness.firestore.documents.get(
+      `kyc_identity_retry_authorizations/${first.recoveryId}`
+    )).toMatchObject({ expiresAt: '2026-07-17T12:40:00.000Z' });
+    expect([...harness.firestore.documents.values()].some(
+      (record) => record?.action === 'ORPHAN_HOLD_RECOVERY_AUTHORIZATION_RENEWED'
+    )).toBe(false);
   });
 });

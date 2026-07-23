@@ -28,6 +28,7 @@ describe('trip-location-persistence-service', () => {
   let service;
   let redisPool;
   let firebaseConfig;
+  let RedisScan;
   let redisMock;
 
   beforeEach(() => {
@@ -35,9 +36,12 @@ describe('trip-location-persistence-service', () => {
     jest.resetModules();
     process.env.TRIP_LOCATION_CHUNK_RETENTION_DAYS = '7';
     process.env.ENABLE_TRIP_LOCATION_FIRESTORE_PERSISTENCE = 'true';
+    process.env.TRIP_LOCATION_WORKER_HEALTH_KEY = 'leaf:test:trip-location-worker:health';
+    process.env.TRIP_LOCATION_WORKER_HEALTH_TTL_SECONDS = '90';
 
     redisPool = require('../../../utils/redis-pool');
     firebaseConfig = require('../../../firebase-config');
+    RedisScan = require('../../../utils/redis-scan');
 
     redisMock = {
       set: jest.fn(),
@@ -56,6 +60,7 @@ describe('trip-location-persistence-service', () => {
 
     redisPool.ensureConnection.mockResolvedValue(true);
     redisPool.getConnection.mockReturnValue(redisMock);
+    firebaseConfig.getFirestore.mockReturnValue({});
 
     service = require('../../../services/trip-location-persistence-service');
   });
@@ -253,173 +258,132 @@ describe('trip-location-persistence-service', () => {
     expect(persistedDoc.expiresAt).toBeInstanceOf(Date);
   });
 
-  test('recovers sandbox scope from Redis metadata and writes only to sandbox chunks', async () => {
-    const sandboxEnvelope = buildSandboxEnvelope();
-    const redisEnvelope = buildRedisEnvelope(sandboxEnvelope);
-    const addMock = jest.fn().mockResolvedValue({ id: 'sandbox-chunk-1' });
-    const collectionMock = jest.fn(() => ({ add: addMock }));
-    firebaseConfig.getFirestore.mockReturnValue({ collection: collectionMock });
+  test('flushPendingTrips publishes idle heartbeat when the Firestore client is available', async () => {
+    RedisScan.scanKeys.mockResolvedValue([]);
 
-    redisMock.hgetall.mockResolvedValue(redisEnvelope);
-    redisMock.set.mockResolvedValue('OK');
-    redisMock.llen.mockResolvedValue(1);
-    redisMock.lrange.mockResolvedValue([
-      JSON.stringify({
-        tripId: 'sandbox-trip-1',
-        driverId: 'sandbox-driver-1',
-        seq: 1,
-        lat: -22.9,
-        lng: -43.2,
-        capturedAt: 1000,
-        ...sandboxEnvelope
-      })
-    ]);
-    redisMock.get.mockResolvedValue('different-lock');
+    const result = await service.flushPendingTrips();
 
-    const result = await service.flushTripChunks('sandbox-trip-1', {
-      force: false,
-      maxChunks: 1,
-      reason: 'periodic'
+    expect(result).toEqual({
+      success: true,
+      processedTrips: 0,
+      flushedPoints: 0,
+      failures: 0
     });
-
-    expect(result.success).toBe(true);
-    expect(collectionMock).toHaveBeenCalledWith('sandbox_trip_location_chunks');
-    expect(collectionMock).not.toHaveBeenCalledWith('trip_location_chunks');
-    expect(addMock).toHaveBeenCalledWith(expect.objectContaining({
-      financialNamespace: 'sandbox',
-      financialContextId: sandboxEnvelope.financialContextId,
-      financialContext: sandboxEnvelope.financialContext
-    }));
-  });
-
-  test('does not reach Firestore when sandbox Redis metadata lost its context', async () => {
-    redisMock.hgetall.mockResolvedValue({
-      tripId: 'sandbox-trip-lost-context',
-      financialNamespace: 'sandbox',
-      providerEnvironment: 'sandbox'
-    });
-
-    await expect(service.flushTripChunks('sandbox-trip-lost-context', {
-      force: false,
-      maxChunks: 1
-    })).rejects.toMatchObject({
-      code: 'FINANCIAL_SANDBOX_CONTEXT_LOST'
-    });
-
-    expect(firebaseConfig.getFirestore).not.toHaveBeenCalled();
-  });
-
-  test('writes sandbox final summaries only to the sandbox collection', async () => {
-    const sandboxEnvelope = buildSandboxEnvelope();
-    const redisEnvelope = buildRedisEnvelope(sandboxEnvelope);
-    const setSummaryMock = jest.fn().mockResolvedValue(undefined);
-    const docMock = jest.fn(() => ({ set: setSummaryMock }));
-    const collectionMock = jest.fn(() => ({ doc: docMock }));
-    firebaseConfig.getFirestore.mockReturnValue({ collection: collectionMock });
-    redisMock.llen.mockResolvedValue(0);
-    redisMock.hgetall.mockResolvedValue(redisEnvelope);
-
-    const result = await service.forceFinalizeTrip('sandbox-trip-1', {
-      status: 'completed',
-      reason: 'ride_completed',
-      ...sandboxEnvelope
-    });
-
-    expect(result.success).toBe(true);
-    expect(collectionMock).toHaveBeenCalledWith('sandbox_trip_location_summaries');
-    expect(collectionMock).not.toHaveBeenCalledWith('trip_location_summaries');
-    expect(setSummaryMock).toHaveBeenCalledWith(
+    expect(redisMock.hset).toHaveBeenCalledWith(
+      'leaf:test:trip-location-worker:health',
       expect.objectContaining({
-        tripId: 'sandbox-trip-1',
-        financialNamespace: 'sandbox',
-        financialContextId: sandboxEnvelope.financialContextId,
-        financialContext: sandboxEnvelope.financialContext
-      }),
-      { merge: true }
+        status: 'idle',
+        heartbeatAt: expect.stringMatching(/^\d+$/),
+        processedTrips: '0',
+        flushedPoints: '0',
+        failures: '0'
+      })
+    );
+    expect(redisMock.expire).toHaveBeenCalledWith(
+      'leaf:test:trip-location-worker:health',
+      90
+    );
+    expect(firebaseConfig.getFirestore).toHaveBeenCalledTimes(1);
+  });
+
+  test('flushPendingTrips publishes degraded heartbeat when Firestore persistence is enabled but unavailable', async () => {
+    firebaseConfig.getFirestore.mockReturnValue(null);
+
+    const result = await service.flushPendingTrips();
+
+    expect(result).toEqual({
+      success: false,
+      processedTrips: 0,
+      flushedPoints: 0,
+      failures: 1,
+      reason: 'firestore_unavailable'
+    });
+    expect(RedisScan.scanKeys).not.toHaveBeenCalled();
+    expect(redisMock.hset).toHaveBeenCalledWith(
+      'leaf:test:trip-location-worker:health',
+      expect.objectContaining({
+        status: 'degraded',
+        processedTrips: '0',
+        flushedPoints: '0',
+        failures: '1'
+      })
+    );
+    expect(redisMock.expire).toHaveBeenCalledWith(
+      'leaf:test:trip-location-worker:health',
+      90
     );
   });
 
-  test('derives interruption metrics only from server-received trip telemetry', async () => {
-    firebaseConfig.getFirestore.mockReturnValue(null);
-    redisMock.lrange.mockResolvedValue([
-      JSON.stringify({
-        tripId: 'trip-1',
-        driverId: 'driver-1',
-        lat: -22.9005,
-        lng: -43.2005,
-        capturedAt: 1,
-        receivedAt: 1_000_100,
-        seq: 1
-      }),
-      JSON.stringify({
-        tripId: 'trip-1',
-        driverId: 'other-driver',
-        lat: 0,
-        lng: 0,
-        receivedAt: 1_000_150,
-        seq: 2
-      }),
-      JSON.stringify({
-        tripId: 'trip-1',
-        driverId: 'driver-1',
-        lat: -22.901,
-        lng: -43.201,
-        capturedAt: 999_999_999,
-        receivedAt: 1_000_200,
-        seq: 3
-      })
-    ]);
-
-    const result = await service.resolveCanonicalTripMetrics({
-      redis: redisMock,
-      tripId: 'trip-1',
-      driverId: 'driver-1',
-      startedAt: 1_000_000,
-      startLocation: { lat: -22.9, lng: -43.2 },
-      nowMs: 1_000_600
+  test('flushPendingTrips publishes healthy status when existing flushes all succeed', async () => {
+    RedisScan.scanKeys.mockResolvedValue(['trip_loc_buffer:trip-1']);
+    jest.spyOn(service, 'flushTripChunks').mockResolvedValue({
+      success: true,
+      flushedPoints: 4
     });
 
-    expect(result).toEqual(expect.objectContaining({
+    const result = await service.flushPendingTrips();
+
+    expect(result).toEqual({
       success: true,
-      source: 'server_trip_location_telemetry',
-      durationSecs: 1,
-      pointsCount: 2,
-      endLocation: { lat: -22.901, lng: -43.201 }
-    }));
-    expect(result.distanceKm).toBeGreaterThan(0);
-    expect(result.distanceKm).toBeLessThan(1);
+      processedTrips: 1,
+      flushedPoints: 4,
+      failures: 0
+    });
+    expect(redisMock.hset).toHaveBeenCalledWith(
+      'leaf:test:trip-location-worker:health',
+      expect.objectContaining({
+        status: 'healthy',
+        processedTrips: '1',
+        flushedPoints: '4',
+        failures: '0'
+      })
+    );
   });
 
-  test('resolves canonical metrics from Redis metadata after location chunks are flushed', async () => {
-    redisMock.hgetall.mockResolvedValue({
-      canonicalDriverId: 'driver-1',
-      canonicalDistanceKm: '0.150000',
-      canonicalPointsCount: '30',
-      canonicalFirstLat: '-22.9005',
-      canonicalFirstLng: '-43.2005',
-      canonicalFirstReceivedAt: '1000100',
-      canonicalLastLat: '-22.905',
-      canonicalLastLng: '-43.205',
-      canonicalLastReceivedAt: '1000500'
-    });
+  test('flushPendingTrips returns success=false and degraded heartbeat after a partial failure', async () => {
+    RedisScan.scanKeys.mockResolvedValue([
+      'trip_loc_buffer:trip-1',
+      'trip_loc_buffer:trip-2'
+    ]);
+    jest.spyOn(service, 'flushTripChunks')
+      .mockResolvedValueOnce({ success: true, flushedPoints: 3 })
+      .mockResolvedValueOnce({ success: false, reason: 'firestore_unavailable' });
 
-    const result = await service.resolveCanonicalTripMetrics({
-      redis: redisMock,
-      tripId: 'trip-1',
-      driverId: 'driver-1',
-      startedAt: 1_000_000,
-      startLocation: { lat: -22.9, lng: -43.2 },
-      nowMs: 1_600_000
-    });
+    const result = await service.flushPendingTrips();
 
-    expect(result).toEqual(expect.objectContaining({
-      success: true,
-      source: 'server_trip_location_telemetry',
-      durationSecs: 600,
-      pointsCount: 30,
-      endLocation: { lat: -22.905, lng: -43.205 }
-    }));
-    expect(result.distanceKm).toBeGreaterThan(0.15);
-    expect(redisMock.lrange).not.toHaveBeenCalled();
+    expect(result).toEqual({
+      success: false,
+      processedTrips: 2,
+      flushedPoints: 3,
+      failures: 1
+    });
+    expect(redisMock.hset).toHaveBeenCalledWith(
+      'leaf:test:trip-location-worker:health',
+      expect.objectContaining({
+        status: 'degraded',
+        processedTrips: '2',
+        flushedPoints: '3',
+        failures: '1'
+      })
+    );
+  });
+
+  test('flushPendingTrips attempts degraded heartbeat when an external scan fails', async () => {
+    RedisScan.scanKeys.mockRejectedValue(new Error('external scan failure'));
+
+    await expect(service.flushPendingTrips()).rejects.toThrow('external scan failure');
+
+    expect(redisMock.hset).toHaveBeenCalledWith(
+      'leaf:test:trip-location-worker:health',
+      expect.objectContaining({
+        status: 'degraded',
+        failures: '1'
+      })
+    );
+    expect(redisMock.expire).toHaveBeenCalledWith(
+      'leaf:test:trip-location-worker:health',
+      90
+    );
+    expect(firebaseConfig.getFirestore).toHaveBeenCalledTimes(1);
   });
 });

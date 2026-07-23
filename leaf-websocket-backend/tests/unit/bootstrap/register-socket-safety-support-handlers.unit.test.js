@@ -37,7 +37,8 @@ const kycRuntimeScopeService = require('../../../services/kyc-runtime-scope-serv
 const registerSocketSafetySupportHandlers = require('../../../bootstrap/register-socket-safety-support-handlers');
 const { sealFinancialContext } = require('../../../services/financial-runtime-context');
 const runtimeWorkflowService = {
-  openCaseFromTicket: jest.fn()
+  openCaseFromTicket: jest.fn(),
+  resumeExistingCaseRequest: jest.fn()
 };
 
 function createHarness(socketOverrides = {}, options = {}) {
@@ -112,6 +113,7 @@ describe('registerSocketSafetySupportHandlers support chat scope', () => {
     runtimeWorkflowService.openCaseFromTicket.mockReset().mockResolvedValue({
       case: { caseId: 'kyc_case_1' }
     });
+    runtimeWorkflowService.resumeExistingCaseRequest.mockReset().mockResolvedValue(null);
     kycRuntimeScopeService.resolveKycRuntimeForUser.mockResolvedValue({
       workflow: runtimeWorkflowService
     });
@@ -156,6 +158,29 @@ describe('registerSocketSafetySupportHandlers support chat scope', () => {
       expect.objectContaining({
         success: true,
         messageId: 'support_msg_1'
+      })
+    );
+  });
+
+  it('fails closed before the operational chat service for a sandbox user', async () => {
+    paymentRuntimeProfileService.resolveProfile.mockResolvedValue({
+      profileId: 'qa-test-users-sandbox-durable',
+      environment: 'sandbox',
+      source: 'firestore',
+      testUserSandbox: true
+    });
+    const { handlers, socket } = createHarness({
+      userId: 'driver-sandbox',
+      userType: 'driver'
+    });
+
+    await handlers['support:chat:message']({ message: 'Preciso de ajuda.' });
+
+    expect(supportChatService.sendMessage).not.toHaveBeenCalled();
+    expect(socket.emit).toHaveBeenCalledWith(
+      'support:chat:error',
+      expect.objectContaining({
+        code: 'KYC_SANDBOX_SUPPORT_CHAT_ISOLATION_REQUIRED'
       })
     );
   });
@@ -338,7 +363,7 @@ describe('registerSocketSafetySupportHandlers support chat scope', () => {
     expect(socket.emit).toHaveBeenCalledWith(
       'incidentReportError',
       expect.objectContaining({
-        code: 'SANDBOX_RECORD_OPERATIONAL_ACCESS_DENIED'
+        code: 'FINANCIAL_SANDBOX_CONTEXT_LOST'
       })
     );
   });
@@ -820,7 +845,7 @@ describe('registerSocketSafetySupportHandlers support chat scope', () => {
     expect(socket.emit).toHaveBeenCalledWith(
       'supportTicketError',
       expect.objectContaining({
-        code: 'SANDBOX_RECORD_OPERATIONAL_ACCESS_DENIED'
+        code: 'SANDBOX_PARTICIPANT_CONTEXT_MISMATCH'
       })
     );
   });

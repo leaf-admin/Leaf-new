@@ -92,6 +92,20 @@ class DriverEligibilityService {
             return 'KYC_LIVENESS_REQUIRED';
         }
 
+        const checklist = activationState.checklist || {};
+        const driverDocumentsReady =
+            checklist.cnhEar === true &&
+            checklist.inssOrMei === true &&
+            checklist.backgroundCheckConsent === true;
+        if (
+            activationState.state === DRIVER_ACTIVATION_STATES.DRIVER_DOCS_IN_REVIEW &&
+            driverDocumentsReady &&
+            activationState.kyc?.pending === true &&
+            activationState.kyc?.blocked !== true
+        ) {
+            return 'DRIVER_ACTIVATION_PRE_REGISTERED';
+        }
+
         const state = String(activationState.state || 'DRIVER_ACTIVATION_BLOCKED')
             .trim()
             .toUpperCase();

@@ -8,9 +8,12 @@ const {
     upsertDriverSocketPresence
 } = require('../services/driver-socket-presence-service');
 const {
-    resolveActiveTripForDriver,
-    setActiveTripForDriver
+    renewActiveTripForDriver,
+    resolveActiveTripForDriver
 } = require('../utils/active-trip-index');
+const {
+    buildPublicDriverKycSocketPayload
+} = require('../utils/driver-kyc-socket-projection');
 
 const parseTimestampMs = (rawValue) => {
     if (!rawValue) return 0;
@@ -43,7 +46,7 @@ function registerSocketDriverHeartbeatHandler({
     socket.on('driverHeartbeat', async (data) => {
         try {
             const driverId = socket.userId || data.uid || data.driverId;
-            const { lat, lng, tripStatus, isInTrip } = data;
+            const { lat, lng } = data;
             const latNum = Number(lat);
             const lngNum = Number(lng);
 
@@ -79,13 +82,35 @@ function registerSocketDriverHeartbeatHandler({
                     error: error.message
                 });
             }
-            // O payload do celular nunca e suficiente para dispensar KYC; o indice backend e autoritativo.
-            // Sem uma leitura conclusiva, preservar continuidade como se a corrida pudesse estar ativa.
+            if (activeTripIndexResolved && canonicalActiveTrip?.tripId) {
+                try {
+                    const leaseRenewed = await renewActiveTripForDriver(
+                        redis,
+                        driverId,
+                        canonicalActiveTrip.tripId
+                    );
+                    if (!leaseRenewed) {
+                        logStructured('warn', 'Heartbeat: lease de corrida ativa nao foi renovado', {
+                            service: 'driverHeartbeat',
+                            driverId,
+                            bookingId: canonicalActiveTrip.tripId,
+                            reason: 'backend_booking_not_confirmed'
+                        });
+                    }
+                } catch (error) {
+                    logStructured('warn', 'Heartbeat: falha ao renovar lease de corrida ativa', {
+                        service: 'driverHeartbeat',
+                        driverId,
+                        bookingId: canonicalActiveTrip.tripId,
+                        error: error.message
+                    });
+                }
+            }
+            // Sem leitura autoritativa conclusiva, o heartbeat preserva a corrida
+            // e nunca inicia uma verificacao biometrica paga. Quando a leitura
+            // conclui que nao ha corrida, flags do cliente nao podem suprimir KYC.
             let isInTripState = !activeTripIndexResolved
-                || Boolean(canonicalActiveTrip?.tripId)
-                || isInTrip === true
-                || tripStatus === 'started'
-                || tripStatus === 'accepted';
+                || Boolean(canonicalActiveTrip?.tripId);
             await upsertDriverSocketPresence(redis, {
                 driverId,
                 socket,
@@ -103,16 +128,11 @@ function registerSocketDriverHeartbeatHandler({
             // Aplicar validação KYC diária na transição offline -> online via updateLocation
             const existingDriverState = await redis.hgetall(`driver:${driverId}`);
             const wasOnline = existingDriverState?.isOnline === 'true';
-            let kycContinuityDeferred = !activeTripIndexResolved;
-            const applyKycContinuityState = async (gateResult) => {
-                const activeTripId = gateResult?.activeTripId || canonicalActiveTrip?.tripId || null;
-                canonicalActiveTrip = {
-                    tripId: activeTripId,
-                    customerId: canonicalActiveTrip?.customerId || null
-                };
+            let kycContinuityDeferred = !activeTripIndexResolved || Boolean(canonicalActiveTrip?.tripId);
+            const applyKycContinuityState = async (gateResult = {}) => {
+                const activeTripId = gateResult.activeTripId || canonicalActiveTrip?.tripId || null;
                 isInTripState = true;
                 kycContinuityDeferred = true;
-
                 const checkedAt = new Date().toISOString();
                 await redis.zrem(ELIGIBLE_DRIVER_GEO_KEY, driverId);
                 await redis.hset(`driver:${driverId}`, {
@@ -125,41 +145,12 @@ function registerSocketDriverHeartbeatHandler({
                     updatedAt: checkedAt
                 });
             };
-            if (!activeTripIndexResolved || canonicalActiveTrip?.tripId) {
-                if (canonicalActiveTrip?.tripId) {
-                    await setActiveTripForDriver(
-                        redis,
-                        driverId,
-                        canonicalActiveTrip.tripId,
-                        canonicalActiveTrip.customerId
-                    ).catch((error) => {
-                        logStructured('warn', 'Heartbeat: falha ao renovar indice de corrida ativa', {
-                            service: 'driverHeartbeat',
-                            driverId,
-                            activeTripId: canonicalActiveTrip.tripId,
-                            error: error.message
-                        });
-                    });
-                }
-                await redis.zrem(ELIGIBLE_DRIVER_GEO_KEY, driverId);
-                await redis.hset(`driver:${driverId}`, {
-                    isOnline: 'true',
-                    dispatchEligible: 'false',
-                    dispatchEligibilityCode: 'IN_TRIP_KYC_DEFERRED',
-                    dispatchEligibilityCheckedAt: new Date().toISOString(),
-                    kycRecheckPendingAfterTrip: 'true',
-                    ...(canonicalActiveTrip?.tripId
-                        ? { activeTripId: String(canonicalActiveTrip.tripId) }
-                        : {})
-                });
+
+            if (isInTripState) {
+                await applyKycContinuityState({ activeTripId: canonicalActiveTrip?.tripId || null });
             }
 
-            if (
-                !wasOnline
-                && activeTripIndexResolved
-                && !canonicalActiveTrip?.tripId
-                && !isInTripState
-            ) {
+            if (!wasOnline && !isInTripState) {
                 const subscriptionGate = await enforceSubscriptionForOnline(driverId);
                 if (!subscriptionGate.allowed) {
                     await redis.zrem(ELIGIBLE_DRIVER_GEO_KEY, driverId);
@@ -186,15 +177,10 @@ function registerSocketDriverHeartbeatHandler({
                             dispatchEligibilityCode: dailyKYC.code || 'KYC_REQUIRED',
                             dispatchEligibilityCheckedAt: new Date().toISOString()
                         });
-                        socket.emit('driverStatusError', {
-                            error: 'Verificação facial diária necessária para ficar online.',
-                            reason: dailyKYC.reason,
-                            code: dailyKYC.code,
-                            kycRequired: true,
-                            requirement: dailyKYC.requirement || 'LIVENESS_REQUIRED',
-                            challengeId: dailyKYC.challenge?.challengeId || null,
-                            challenge: dailyKYC.challenge || null
-                        });
+                        socket.emit('driverStatusError', buildPublicDriverKycSocketPayload(
+                            dailyKYC,
+                            { message: 'Verificação facial necessária para ficar online.' }
+                        ));
                         return;
                     }
                     if (dailyKYC.continuityOnly === true || dailyKYC.deferred === true) {
@@ -209,7 +195,7 @@ function registerSocketDriverHeartbeatHandler({
                     });
                     socket.emit('driverStatusError', {
                         error: 'Não foi possível validar KYC agora. Tente novamente.',
-                        reason: kycError.message,
+                        reason: 'Não foi possível validar KYC agora. Tente novamente.',
                         code: 'kycCheckFailed',
                         kycRequired: true
                     });
@@ -236,6 +222,8 @@ function registerSocketDriverHeartbeatHandler({
                 if (!postTripKyc?.allowed) {
                     const checkedAt = new Date().toISOString();
                     await redis.zrem(ELIGIBLE_DRIVER_GEO_KEY, driverId);
+                    await redis.zrem('driver_locations', driverId);
+                    await redis.srem('online_drivers', driverId);
                     await redis.hset(`driver:${driverId}`, {
                         status: 'OFFLINE',
                         isOnline: 'false',
@@ -247,15 +235,10 @@ function registerSocketDriverHeartbeatHandler({
                             : 'false',
                         updatedAt: checkedAt
                     });
-                    socket.emit('driverStatusError', {
-                        error: postTripKyc?.reason || 'Validacao facial necessaria para voltar a receber corridas.',
-                        reason: postTripKyc?.reason,
-                        code: postTripKyc?.code || 'KYC_REQUIRED',
-                        kycRequired: true,
-                        requirement: postTripKyc?.requirement || 'LIVENESS_REQUIRED',
-                        challengeId: postTripKyc?.challenge?.challengeId || null,
-                        challenge: postTripKyc?.challenge || null
-                    });
+                    socket.emit('driverStatusError', buildPublicDriverKycSocketPayload(
+                        postTripKyc,
+                        { message: 'Validação facial necessária para voltar a receber corridas.' }
+                    ));
                     return;
                 }
                 if (postTripKyc.continuityOnly === true || postTripKyc.deferred === true) {
@@ -269,7 +252,18 @@ function registerSocketDriverHeartbeatHandler({
             }
 
             if (wasOnline && !isInTripState) {
-                const onlineDailySnapshot = await readDriverOnlineDailySnapshot(redis, driverId);
+                let onlineDailySnapshot = await readDriverOnlineDailySnapshot(redis, driverId);
+                // Ao cruzar a meia-noite (ou perder apenas a chave diaria), o
+                // motorista segue online. Abrir a sessao do novo dia evita um
+                // contador zerado indefinidamente e garante nova transicao
+                // offline antes da proxima janela de KYC.
+                if (!onlineDailySnapshot.sessionStartedAtMs && !onlineDailySnapshot.limitReached) {
+                    const rollover = await resolveDriverOnlineTransition(redis, {
+                        driverId,
+                        isOnline: true
+                    });
+                    onlineDailySnapshot = rollover.snapshot;
+                }
                 if (onlineDailySnapshot.limitReached) {
                     const transition = await resolveDriverOnlineTransition(redis, {
                         driverId,
@@ -399,13 +393,11 @@ function registerSocketDriverHeartbeatHandler({
                     if (isInTripState) {
                         await redis.hset(`driver:${driverId}`, {
                             dispatchEligible: 'false',
-                            dispatchEligibilityCode: canonicalActiveTrip?.tripId || kycContinuityDeferred
+                            dispatchEligibilityCode: kycContinuityDeferred
                                 ? 'IN_TRIP_KYC_DEFERRED'
                                 : 'IN_TRIP',
                             dispatchEligibilityCheckedAt: new Date().toISOString(),
-                            ...(canonicalActiveTrip?.tripId || kycContinuityDeferred
-                                ? { kycRecheckPendingAfterTrip: 'true' }
-                                : {})
+                            ...(kycContinuityDeferred ? { kycRecheckPendingAfterTrip: 'true' } : {})
                         });
                     }
                 }

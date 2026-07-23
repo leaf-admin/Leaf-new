@@ -20,6 +20,10 @@ const apiSource = fs.readFileSync(
   path.join(__dirname, "..", "..", "src", "services", "api.js"),
   "utf8",
 );
+const reviewQueueSource = fs.readFileSync(
+  path.join(__dirname, "..", "..", "app", "drivers", "review-queue", "page.js"),
+  "utf8",
+);
 
 assert.match(source, /^"use client";/, "the identity review panel must be an interactive client component");
 
@@ -204,6 +208,41 @@ assert.match(
 );
 assert.match(
   apiSource,
+  /async getDriverDocumentFile[\s\S]*?return this\.requestKycFile\([\s\S]*?documents\/\$\{encodeURIComponent\(documentType\)\}\/content/,
+  "current driver documents must use the authenticated Leaf file transport",
+);
+assert.match(
+  pageSource,
+  /getDriverDocumentFile\(id, normalizedType, kycRequestContext\)/,
+  "the documents page must request the current object through the Leaf API",
+);
+assert.doesNotMatch(
+  pageSource,
+  /resolveDocumentUrl|window\.open\(backgroundCheckUrl|window\.open\(docUrl/,
+  "the documents page must not open persisted provider URLs",
+);
+assert.match(
+  reviewQueueSource,
+  /getDriverDocumentFile\(driverId, documentType, kycRequestContext\)/,
+  "the review queue must open documents through the authenticated Leaf file transport",
+);
+assert.doesNotMatch(
+  reviewQueueSource,
+  /\bfileUrl\b|window\.open\(item\.fileUrl/,
+  "the review queue must not consume or open persisted provider URLs",
+);
+assert.match(
+  apiSource,
+  /async getDriverDocumentReviewQueue[\s\S]*?return this\.requestKyc\(/,
+  "the review queue must propagate the explicit KYC runtime scope",
+);
+assert.match(
+  reviewQueueSource,
+  /searchParams\.get\("kycScope"\)[\s\S]*?Abrir fila sandbox/,
+  "the review queue must visibly separate operational and sandbox records",
+);
+assert.match(
+  apiSource,
   /"X-Leaf-KYC-Scope": "sandbox"/,
   "sandbox KYC requests must carry a dedicated explicit header",
 );
@@ -218,9 +257,24 @@ assert.match(
   "the documents page must opt into sandbox through an explicit URL scope",
 );
 assert.match(
+  apiSource,
+  /async reviewDriverDocument\(driverId, documentType, action, rejectionReason = "", context = \{\}\)[\s\S]*?return this\.requestKyc\(/,
+  "CNH review mutations must use the explicit KYC scope",
+);
+assert.match(
+  pageSource,
+  /reviewDriverDocument\([\s\S]*?reason \|\| "",[\s\S]*?kycRequestContext/,
+  "the documents page must propagate the selected KYC scope to CNH review",
+);
+assert.match(
   pageSource,
   /Sandbox KYC[\s\S]*?isolados do ambiente operacional/,
   "the selected sandbox context must be visibly identified to reviewers",
+);
+assert.match(
+  pageSource,
+  /documents\?kycScope=sandbox[\s\S]*?Abrir KYC sandbox/,
+  "the documents page must expose a visible explicit sandbox entrypoint",
 );
 assert.match(
   apiSource,

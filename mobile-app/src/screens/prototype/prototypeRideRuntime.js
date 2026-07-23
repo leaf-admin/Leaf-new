@@ -16275,10 +16275,10 @@ function buildRuntimeSupportScope(payload = {}) {
   const regionHash = sanitizeText(payload.regionHash, "");
   const severity = sanitizeText(payload.severity, "");
   const priority = sanitizeText(payload.priority, "");
-  const kycEvidenceId = sanitizeSupportOpaqueId(payload.kycEvidenceId);
-  const kycReviewCaseId = sanitizeSupportOpaqueId(payload.kycReviewCaseId);
-  const kycChallengeId = sanitizeSupportOpaqueId(payload.kycChallengeId);
-  const requirement = sanitizeSupportRequirement(payload.requirement);
+  const kycEvidenceId = sanitizeText(payload.kycEvidenceId, "");
+  const kycReviewCaseId = sanitizeText(payload.kycReviewCaseId, "");
+  const kycChallengeId = sanitizeText(payload.kycChallengeId, "");
+  const requirement = sanitizeText(payload.requirement, "");
 
   return {
     ...(bookingId ? { bookingId, rideId: bookingId, tripId: bookingId } : {}),
@@ -17910,6 +17910,30 @@ async function resolveDriverActivationForOnline(profile) {
   return mergedActivation;
 }
 
+export function extractPrototypeDriverKycFailureContext(error = {}) {
+  const payload =
+    error?.payload && typeof error.payload === "object" ? error.payload : {};
+  const responseData =
+    error?.response?.data && typeof error.response.data === "object"
+      ? error.response.data
+      : {};
+  const sources = [error, payload, responseData];
+  const firstValue = (field) =>
+    sources.find((source) => source?.[field] !== undefined && source?.[field] !== null)
+      ?.[field] ?? null;
+  const reviewSource = sources.find(
+    (source) => typeof source?.reviewAvailable === "boolean",
+  );
+
+  return {
+    challengeId: firstValue("challengeId"),
+    requirement: firstValue("requirement"),
+    evidenceId: firstValue("evidenceId"),
+    reviewCaseId: firstValue("reviewCaseId"),
+    reviewAvailable: reviewSource?.reviewAvailable ?? null,
+  };
+}
+
 async function enablePrototypeDriverOnline(profile, options = {}) {
   if (runtimeDriverOnlineEnablePromise) {
     return runtimeDriverOnlineEnablePromise;
@@ -18111,6 +18135,7 @@ async function enablePrototypeDriverOnline(profile, options = {}) {
         error?.payload && typeof error.payload === "object"
           ? error.payload
           : {};
+      const kycFailureContext = extractPrototypeDriverKycFailureContext(error);
       const isKycRequired =
         Boolean(error?.kycRequired) ||
         Boolean(errorPayload?.kycRequired) ||
@@ -18169,8 +18194,7 @@ async function enablePrototypeDriverOnline(profile, options = {}) {
         reason: errorPayload?.reason || null,
         code: error?.code || errorPayload?.code || null,
         kycRequired: isKycRequired,
-        challengeId: errorPayload?.challengeId || null,
-        requirement: errorPayload?.requirement || null,
+        ...kycFailureContext,
       };
     }
   })();

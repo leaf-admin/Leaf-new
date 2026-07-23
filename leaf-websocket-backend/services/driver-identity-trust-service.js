@@ -10,6 +10,8 @@ const {
 } = require('../utils/active-trip-index');
 const kycPolicyService = require('./kyc-policy-service');
 const driverActivationStateService = require('./driver-activation-state-service');
+const canonicalDriverDocumentApprovalService = require('./canonical-driver-document-approval-service');
+const redisCriticalAuthorityService = require('./redis-critical-authority-service');
 const { resolveBiometricPolicy } = require('./kyc-biometric-production-policy');
 const { logStructured } = require('../utils/logger');
 const {
@@ -25,16 +27,22 @@ const TRUST_TIERS = Object.freeze({
   TRUSTED: 'T2_TRUSTED'
 });
 
+const POLICY_VERSIONS = Object.freeze({
+  LEGACY: 'driver_identity_recurring_v1',
+  ADAPTIVE: 'driver_identity_recurring_v2'
+});
+
 const DEFAULTS = Object.freeze({
   cadenceEnabled: false,
-  policyVersion: 'driver_identity_recurring_v1',
+  policyVersion: POLICY_VERSIONS.LEGACY,
   newMaxAgeHours: 24,
   observedMaxAgeHours: 72,
   trustedMaxAgeHours: 168,
   observedMinDistinctSuccessDays: 7,
   trustedMinAgeDays: 30,
   trustedMinSuccessCount: 14,
-  randomAuditPercent: 5,
+  trustedMinDistinctSuccessDays: 14,
+  randomAuditPercent: 10,
   randomAuditTimeZone: 'America/Sao_Paulo',
   randomAuditDecisionTtlSeconds: 48 * 60 * 60,
   stateCacheTtlSeconds: 5 * 60,
@@ -58,6 +66,11 @@ function boundedNumber(value, fallback, min, max) {
 
 function boundedInteger(value, fallback, min, max) {
   return Math.round(boundedNumber(value, fallback, min, max));
+}
+
+function numberFromEnv(value, fallback) {
+  if (value == null || value === '') return fallback;
+  return Number(value);
 }
 
 function toMillis(value) {
@@ -100,10 +113,13 @@ class DriverIdentityTrustService {
     this.env = options.env || process.env;
     this.redis = options.redis || redisPool.getConnection();
     this.firestoreProvider = options.firestoreProvider || (() => firebaseConfig.getFirestore());
-    this.realtimeReader = options.realtimeReader || ((path) => firebaseConfig.getFromRealtimeDB(path));
+    this.canonicalDocumentApprovalService = options.canonicalDocumentApprovalService
+      || canonicalDriverDocumentApprovalService;
     this.activeTripResolver = options.activeTripResolver || resolveActiveTripForDriver;
     this.activationService = options.activationService || driverActivationStateService;
     this.kycPolicyService = options.kycPolicyService || kycPolicyService;
+    this.redisCriticalAuthorityService = options.redisCriticalAuthorityService
+      || redisCriticalAuthorityService;
     this.resolveBiometricPolicy = options.resolveBiometricPolicy || resolveBiometricPolicy;
     this.now = options.now || (() => new Date());
     this.randomInt = options.randomInt || ((maxExclusive) => crypto.randomInt(maxExclusive));
@@ -130,6 +146,11 @@ class DriverIdentityTrustService {
       resources.identityTrustEvidenceCollection,
       'Subcolecao de evidencias de confianca'
     );
+    this.failedEvidenceCollection = scopedResource(
+      options.failedEvidenceCollection,
+      collections.kycFailedBiometricEvidence,
+      'Colecao de evidencias biometricas rejeitadas'
+    );
     this.stepUpChallengeCollection = scopedResource(
       options.stepUpChallengeCollection,
       collections.kycStepUpChallenges,
@@ -145,6 +166,7 @@ class DriverIdentityTrustService {
       resources.identityTrustRandomAuditPrefix,
       'Prefixo Redis da amostragem KYC'
     );
+    this.randomAuditInFlight = new Map();
     this.canonicalSessionClaimPrefix = scopedResource(
       options.canonicalSessionClaimPrefix,
       resources.identityTrustCanonicalSessionClaimPrefix,
@@ -183,58 +205,100 @@ class DriverIdentityTrustService {
 
   getConfig() {
     const env = this.env;
+    const cadenceEnabled = boolFromEnv(
+      env.KYC_TRUST_CADENCE_ENABLED,
+      DEFAULTS.cadenceEnabled
+    );
+    const defaultPolicyVersion = cadenceEnabled
+      ? POLICY_VERSIONS.ADAPTIVE
+      : POLICY_VERSIONS.LEGACY;
+    const policyVersion = String(
+      env.KYC_TRUST_POLICY_VERSION || defaultPolicyVersion
+    ).trim() || defaultPolicyVersion;
+    const requestedPolicy = {
+      newMaxAgeHours: numberFromEnv(env.KYC_TRUST_T0_MAX_AGE_HOURS, DEFAULTS.newMaxAgeHours),
+      observedMaxAgeHours: numberFromEnv(
+        env.KYC_TRUST_T1_MAX_AGE_HOURS,
+        DEFAULTS.observedMaxAgeHours
+      ),
+      trustedMaxAgeHours: numberFromEnv(
+        env.KYC_TRUST_T2_MAX_AGE_HOURS,
+        DEFAULTS.trustedMaxAgeHours
+      ),
+      observedMinDistinctSuccessDays: numberFromEnv(
+        env.KYC_TRUST_T1_MIN_DISTINCT_SUCCESS_DAYS,
+        DEFAULTS.observedMinDistinctSuccessDays
+      ),
+      trustedMinAgeDays: numberFromEnv(
+        env.KYC_TRUST_T2_MIN_AGE_DAYS,
+        DEFAULTS.trustedMinAgeDays
+      ),
+      trustedMinSuccessCount: numberFromEnv(
+        env.KYC_TRUST_T2_MIN_SUCCESS_COUNT,
+        DEFAULTS.trustedMinSuccessCount
+      ),
+      trustedMinDistinctSuccessDays: numberFromEnv(
+        env.KYC_TRUST_T2_MIN_DISTINCT_SUCCESS_DAYS,
+        DEFAULTS.trustedMinDistinctSuccessDays
+      ),
+      randomAuditPercent: numberFromEnv(
+        env.KYC_TRUSTED_RANDOM_AUDIT_PERCENT,
+        DEFAULTS.randomAuditPercent
+      )
+    };
     const awsSessionTtlSeconds = boundedInteger(
       env.KYC_AWS_LIVENESS_SESSION_TTL_SECONDS || env.AWS_LIVENESS_SESSION_TTL_SECONDS,
       20 * 60,
       60,
       24 * 60 * 60
     );
-    return {
-      cadenceEnabled: boolFromEnv(
-        env.KYC_TRUST_CADENCE_ENABLED,
-        DEFAULTS.cadenceEnabled
-      ),
-      policyVersion: String(
-        env.KYC_TRUST_POLICY_VERSION || DEFAULTS.policyVersion
-      ).trim() || DEFAULTS.policyVersion,
+    const config = {
+      cadenceEnabled,
+      policyVersion,
       newMaxAgeHours: boundedInteger(
-        env.KYC_TRUST_T0_MAX_AGE_HOURS,
+        requestedPolicy.newMaxAgeHours,
         DEFAULTS.newMaxAgeHours,
         1,
         24
       ),
       observedMaxAgeHours: boundedInteger(
-        env.KYC_TRUST_T1_MAX_AGE_HOURS,
+        requestedPolicy.observedMaxAgeHours,
         DEFAULTS.observedMaxAgeHours,
         24,
         72
       ),
       trustedMaxAgeHours: boundedInteger(
-        env.KYC_TRUST_T2_MAX_AGE_HOURS,
+        requestedPolicy.trustedMaxAgeHours,
         DEFAULTS.trustedMaxAgeHours,
         72,
         168
       ),
       observedMinDistinctSuccessDays: boundedInteger(
-        env.KYC_TRUST_T1_MIN_DISTINCT_SUCCESS_DAYS,
+        requestedPolicy.observedMinDistinctSuccessDays,
         DEFAULTS.observedMinDistinctSuccessDays,
         2,
         30
       ),
       trustedMinAgeDays: boundedInteger(
-        env.KYC_TRUST_T2_MIN_AGE_DAYS,
+        requestedPolicy.trustedMinAgeDays,
         DEFAULTS.trustedMinAgeDays,
         7,
         365
       ),
       trustedMinSuccessCount: boundedInteger(
-        env.KYC_TRUST_T2_MIN_SUCCESS_COUNT,
+        requestedPolicy.trustedMinSuccessCount,
         DEFAULTS.trustedMinSuccessCount,
         2,
         365
       ),
+      trustedMinDistinctSuccessDays: boundedInteger(
+        requestedPolicy.trustedMinDistinctSuccessDays,
+        DEFAULTS.trustedMinDistinctSuccessDays,
+        2,
+        365
+      ),
       randomAuditPercent: boundedNumber(
-        env.KYC_TRUSTED_RANDOM_AUDIT_PERCENT,
+        requestedPolicy.randomAuditPercent,
         DEFAULTS.randomAuditPercent,
         0,
         100
@@ -267,6 +331,27 @@ class DriverIdentityTrustService {
         24 * 60 * 60
       )
     };
+    config.approvedAdaptivePolicyValid = !cadenceEnabled || (
+      policyVersion === POLICY_VERSIONS.ADAPTIVE
+      && requestedPolicy.newMaxAgeHours === DEFAULTS.newMaxAgeHours
+      && requestedPolicy.observedMaxAgeHours === DEFAULTS.observedMaxAgeHours
+      && requestedPolicy.trustedMaxAgeHours === DEFAULTS.trustedMaxAgeHours
+      && requestedPolicy.observedMinDistinctSuccessDays === DEFAULTS.observedMinDistinctSuccessDays
+      && requestedPolicy.trustedMinAgeDays === DEFAULTS.trustedMinAgeDays
+      && requestedPolicy.trustedMinSuccessCount === DEFAULTS.trustedMinSuccessCount
+      && requestedPolicy.trustedMinDistinctSuccessDays === DEFAULTS.trustedMinDistinctSuccessDays
+      && requestedPolicy.randomAuditPercent === DEFAULTS.randomAuditPercent
+    );
+    return config;
+  }
+
+  assertApprovedAdaptivePolicy(config = this.getConfig()) {
+    if (config.cadenceEnabled && !config.approvedAdaptivePolicyValid) {
+      const error = new Error('Configuracao da politica adaptativa diverge do contrato versionado');
+      error.code = 'KYC_TRUST_POLICY_CONFIG_INVALID';
+      throw error;
+    }
+    return config;
   }
 
   getTierMaxAgeHours(tier, config = this.getConfig()) {
@@ -298,6 +383,14 @@ class DriverIdentityTrustService {
 
   buildRandomAuditKey(driverId, dayKey) {
     return `${this.randomAuditPrefix}${driverId}:${dayKey}`;
+  }
+
+  buildRandomAuditRef(firestore, driverId, dayKey) {
+    return firestore
+      .collection(this.stateCollection)
+      .doc(driverId)
+      .collection('random_audits')
+      .doc(dayKey);
   }
 
   buildCanonicalSessionClaimKey(driverId, awsSessionId) {
@@ -343,6 +436,7 @@ class DriverIdentityTrustService {
     if (currentRaw) {
       try {
         const current = JSON.parse(currentRaw);
+        this.assertRecordScope(current);
         if (Number(current.stateRevision || 0) > revision) return;
       } catch (_error) {
         // Replace malformed cache entries with the durable Firestore projection.
@@ -385,6 +479,21 @@ class DriverIdentityTrustService {
   }
 
   async sampleRandomAuditOncePerDay(driverId, dayKey, config = this.getConfig()) {
+    const inFlightKey = `${driverId}:${dayKey}`;
+    const existing = this.randomAuditInFlight.get(inFlightKey);
+    if (existing) return existing;
+    const operation = this.sampleRandomAuditOncePerDayInternal(driverId, dayKey, config);
+    this.randomAuditInFlight.set(inFlightKey, operation);
+    try {
+      return await operation;
+    } finally {
+      if (this.randomAuditInFlight.get(inFlightKey) === operation) {
+        this.randomAuditInFlight.delete(inFlightKey);
+      }
+    }
+  }
+
+  async sampleRandomAuditOncePerDayInternal(driverId, dayKey, config = this.getConfig()) {
     if (config.randomAuditPercent <= 0) {
       return {
         selected: false,
@@ -392,52 +501,66 @@ class DriverIdentityTrustService {
         percentage: config.randomAuditPercent
       };
     }
-    if (!this.redis) {
-      const error = new Error('Redis indisponivel para decisao de auditoria aleatoria');
-      error.code = 'KYC_RANDOM_AUDIT_STORE_UNAVAILABLE';
-      throw error;
-    }
-
     const key = this.buildRandomAuditKey(driverId, dayKey);
     const parseDecision = (raw) => {
       if (!raw) return null;
-      let parsed;
       try {
-        parsed = JSON.parse(raw);
+        const parsed = JSON.parse(raw);
+        if (typeof parsed.selected !== 'boolean') return null;
+        this.assertRecordScope(parsed);
+        return parsed;
       } catch (_error) {
         return null;
       }
-      if (typeof parsed.selected !== 'boolean') return null;
-      this.assertRecordScope(parsed);
-      return parsed;
     };
 
     try {
-      const existing = parseDecision(await this.redis.get(key));
+      const existing = this.redis
+        ? parseDecision(await this.redis.get(key).catch(() => null))
+        : null;
       if (existing) return existing;
 
-      const selected = this.randomInt(10000) < Math.round(config.randomAuditPercent * 100);
-      const decision = {
-        ...this.persistenceEnvelope(),
-        selected,
-        dayKey,
-        percentage: config.randomAuditPercent,
-        sampledAt: this.now().toISOString()
-      };
-
-      const stored = await this.redis.set(
-        key,
-        JSON.stringify(decision),
-        'EX',
-        config.randomAuditDecisionTtlSeconds,
-        'NX'
-      );
-      if (stored === 'OK') return decision;
-      const winner = parseDecision(await this.redis.get(key));
-      if (winner) return winner;
-      const error = new Error('Decisao concorrente de auditoria nao pode ser recuperada');
-      error.code = 'KYC_RANDOM_AUDIT_DECISION_MISSING';
-      throw error;
+      const firestore = this.firestoreProvider();
+      if (!firestore || typeof firestore.runTransaction !== 'function') {
+        const error = new Error('Firestore indisponivel para decisao de auditoria aleatoria');
+        error.code = 'KYC_RANDOM_AUDIT_STORE_UNAVAILABLE';
+        throw error;
+      }
+      let candidate = null;
+      const auditRef = this.buildRandomAuditRef(firestore, driverId, dayKey);
+      const decision = await firestore.runTransaction(async (transaction) => {
+        const snapshot = await transaction.get(auditRef);
+        if (snapshot.exists) {
+          const storedDecision = parseDecision(JSON.stringify(snapshot.data() || {}));
+          if (!storedDecision) {
+            const error = new Error('Decisao duravel de auditoria esta invalida');
+            error.code = 'KYC_RANDOM_AUDIT_DECISION_INVALID';
+            throw error;
+          }
+          return storedDecision;
+        }
+        if (!candidate) {
+          candidate = {
+            ...this.persistenceEnvelope(),
+            selected: this.randomInt(10000) < Math.round(config.randomAuditPercent * 100),
+            dayKey,
+            percentage: config.randomAuditPercent,
+            sampledAt: this.now().toISOString(),
+            policyVersion: config.policyVersion
+          };
+        }
+        transaction.set(auditRef, candidate, { merge: false });
+        return candidate;
+      });
+      if (this.redis) {
+        await this.redis.set(
+          key,
+          JSON.stringify(decision),
+          'EX',
+          config.randomAuditDecisionTtlSeconds
+        ).catch(() => null);
+      }
+      return decision;
     } catch (error) {
       this.logger('warn', 'Falha ao persistir amostragem diaria de KYC', {
         service: 'driver-identity-trust-service',
@@ -535,8 +658,26 @@ class DriverIdentityTrustService {
 
   async evaluateAdaptiveCadence(driverId) {
     const config = this.getConfig();
+    this.assertApprovedAdaptivePolicy(config);
     const state = await this.readState(driverId);
-    const evaluation = this.evaluateState(state, config);
+    let evaluation = this.evaluateState(state, config);
+    if (evaluation.allowed) {
+      const referenceBinding = await this.evaluateCurrentApprovedReferenceBinding(
+        driverId,
+        state
+      );
+      if (!referenceBinding.valid) {
+        evaluation = {
+          allowed: false,
+          verificationRequired: true,
+          code: referenceBinding.code,
+          reason: referenceBinding.reason,
+          tier: TRUST_TIERS.NEW,
+          dueAt: evaluation.dueAt || null,
+          today: evaluation.today
+        };
+      }
+    }
     if (!evaluation.allowed || evaluation.tier !== TRUST_TIERS.TRUSTED) {
       return evaluation;
     }
@@ -571,6 +712,51 @@ class DriverIdentityTrustService {
       today: evaluation.today,
       randomAudit: audit
     };
+  }
+
+  async evaluateCurrentApprovedReferenceBinding(driverId, state = {}) {
+    const expectedSubmissionId = String(state.referenceSubmissionId || '').trim();
+    const expectedPathSha256 = String(state.referenceDocumentPathSha256 || '').trim();
+    const expectedDocumentSha256 = String(state.referenceDocumentSha256 || '').trim();
+    const expectedStorageGeneration = String(state.referenceStorageGeneration || '').trim();
+    if (
+      !expectedSubmissionId
+      || !/^[a-f0-9]{64}$/i.test(expectedPathSha256)
+      || !/^[a-f0-9]{64}$/i.test(expectedDocumentSha256)
+      || !/^\d+$/.test(expectedStorageGeneration)
+    ) {
+      return {
+        valid: false,
+        code: 'KYC_CANONICAL_REFERENCE_BINDING_MISSING',
+        reason: 'Nova validacao necessaria para vincular a CNH atual.'
+      };
+    }
+
+    let document;
+    try {
+      document = await this.canonicalDocumentApprovalService.requireApprovedCnh(driverId);
+    } catch (_error) {
+      return {
+        valid: false,
+        code: 'KYC_CANONICAL_REFERENCE_CHANGED',
+        reason: 'A CNH aprovada mudou; nova validacao de identidade necessaria.'
+      };
+    }
+    const submissionId = String(document.submissionId || '').trim();
+    const documentPath = String(document.filePath || '').trim();
+    const currentPathSha256 = sha256(documentPath);
+    const valid = submissionId === expectedSubmissionId
+      && currentPathSha256 === expectedPathSha256
+      && String(document.documentSha256 || '').toLowerCase() === expectedDocumentSha256.toLowerCase()
+      && String(document.storageGeneration || '') === expectedStorageGeneration;
+
+    return valid
+      ? { valid: true }
+      : {
+        valid: false,
+        code: 'KYC_CANONICAL_REFERENCE_CHANGED',
+        reason: 'A CNH aprovada mudou; nova validacao de identidade necessaria.'
+      };
   }
 
   async resolveActiveTrip(driverId) {
@@ -640,12 +826,65 @@ class DriverIdentityTrustService {
       error.code = 'KYC_VERIFICATION_WINDOW_BINDING_INVALID';
       throw error;
     }
-    const claimToken = token || crypto.randomBytes(24).toString('hex');
+    const providedToken = token ? String(token) : null;
+    const claimToken = providedToken || crypto.randomBytes(24).toString('hex');
+
+    // Uma etapa já iniciada pode renovar exatamente o mesmo token mesmo quando
+    // a autoridade entra em quarentena. O modo existingOnly nunca cria uma nova
+    // janela e mantém a exclusão atômica contra corrida/policy mutation.
+    if (providedToken) {
+      const reuseClaim = await claimIdentityVerificationWindow(
+        this.redis,
+        driverId,
+        claimToken,
+        this.getConfig().verificationWindowTtlSeconds,
+        { existingOnly: true }
+      );
+      if (reuseClaim.activeTripId) {
+        const error = new Error('Validacao de identidade adiada ate o fim da corrida ativa');
+        error.code = 'KYC_VERIFICATION_DEFERRED_ACTIVE_TRIP';
+        error.activeTripId = reuseClaim.activeTripId;
+        throw error;
+      }
+      if (!reuseClaim.missing) {
+        return {
+          ...reuseClaim,
+          driverId,
+          scope
+        };
+      }
+    }
+
+    if (
+      String(this.env.KYC_ACTIVE_TRIP_AUTHORITY_MODE || '').trim().toLowerCase()
+      === 'redis_noeviction'
+    ) {
+      await this.redisCriticalAuthorityService.assertReady({
+        env: this.env,
+        forceRefresh: true
+      });
+    }
+
+    const criticalAuthorityOptions =
+      String(this.env.KYC_ACTIVE_TRIP_AUTHORITY_MODE || '').trim().toLowerCase()
+        === 'redis_noeviction'
+        ? {
+            requiredDatasetGeneration: String(
+              this.env.REDIS_CRITICAL_DATASET_GENERATION || ''
+            ).trim(),
+            datasetGenerationKey: String(
+              this.env.REDIS_CRITICAL_DATASET_GENERATION_KEY
+                || 'leaf:runtime:critical-dataset:generation'
+            ).trim()
+          }
+        : {};
+
     const claim = await claimIdentityVerificationWindow(
       this.redis,
       driverId,
       claimToken,
-      this.getConfig().verificationWindowTtlSeconds
+      this.getConfig().verificationWindowTtlSeconds,
+      criticalAuthorityOptions
     );
     if (claim.activeTripId) {
       const error = new Error('Validacao de identidade adiada ate o fim da corrida ativa');
@@ -709,10 +948,10 @@ class DriverIdentityTrustService {
     let payload = null;
     try {
       payload = JSON.parse(raw);
+      this.assertRecordScope(payload);
     } catch (_error) {
       return { hasValid: false, reason: 'Evidencia canonica invalida.' };
     }
-    this.assertRecordScope(payload);
 
     const timestamp = Number(payload.timestamp || 0);
     const ageMs = this.now().getTime() - timestamp;
@@ -771,6 +1010,27 @@ class DriverIdentityTrustService {
         };
       }
 
+      const activationState = await this.activationService.resolveDriverActivationState({ driverId });
+      const config = this.getConfig();
+      this.assertApprovedAdaptivePolicy(config);
+      const biometricPolicy = this.resolveBiometricPolicy(this.env);
+      const providerDormant = this.env.DAILY_KYC_ONLINE_GATE_ENABLED === 'false'
+        && !config.cadenceEnabled
+        && biometricPolicy.productionBiometricsEnabled !== true;
+      if (
+        providerDormant
+        && activationState?.canGoOnline
+        && !activationState?.requiresLiveness
+      ) {
+        return {
+          allowed: true,
+          reason: 'Motorista apto pela politica canonica de ativacao.',
+          code: 'driverActivationActive',
+          details: activationState,
+          providerDormant: true
+        };
+      }
+
       gateWindowClaim = await this.claimVerificationWindow(driverId, {
         scope: 'driver_online_gate'
       });
@@ -780,7 +1040,6 @@ class DriverIdentityTrustService {
         throw error;
       }
 
-      const activationState = await this.activationService.resolveDriverActivationState({ driverId });
       if (activationState && !activationState.canAttemptOnline) {
         return await denyOnlineGate({
           allowed: false,
@@ -827,7 +1086,6 @@ class DriverIdentityTrustService {
         }
       }
 
-      const config = this.getConfig();
       if (!config.cadenceEnabled) {
         const requestedMaxAge = Number.parseInt(this.env.KYC_DAILY_MAX_AGE_HOURS || '24', 10);
         const maxAgeHours = Number.isFinite(requestedMaxAge) && requestedMaxAge > 0
@@ -905,42 +1163,32 @@ class DriverIdentityTrustService {
           retryRequired: true
         };
       }
-      const biometricPolicy = this.resolveBiometricPolicy(this.env);
-      const failClosed = biometricPolicy.productionBiometricsEnabled;
-      this.logger('warn', `Falha no gate KYC (${failClosed ? 'fail-closed' : 'fail-open'})`, {
+      this.logger('warn', 'Falha no gate KYC (fail-closed)', {
         service: 'driver-identity-trust-service',
         driverId,
         error: error.message
       });
-      if (failClosed) {
-        let dispatchBlockPersisted = false;
-        if (error?.code !== 'KYC_ONLINE_DISPATCH_BLOCK_PERSIST_FAILED') {
-          try {
-            await this.persistOnlineDispatchBlock(driverId, {
-              code: 'KYC_CHECK_FAILED'
-            });
-            dispatchBlockPersisted = true;
-          } catch (blockError) {
-            releaseGateWindow = false;
-            this.logger('error', 'Falha ao selar bloqueio fail-closed do KYC', {
-              service: 'driver-identity-trust-service',
-              driverId,
-              error: blockError.message
-            });
-          }
+      let dispatchBlockPersisted = false;
+      if (error?.code !== 'KYC_ONLINE_DISPATCH_BLOCK_PERSIST_FAILED') {
+        try {
+          await this.persistOnlineDispatchBlock(driverId, {
+            code: 'KYC_CHECK_FAILED'
+          });
+          dispatchBlockPersisted = true;
+        } catch (blockError) {
+          releaseGateWindow = false;
+          this.logger('error', 'Falha ao selar bloqueio fail-closed do KYC', {
+            service: 'driver-identity-trust-service',
+            driverId,
+            error: blockError.message
+          });
         }
-        return {
-          allowed: false,
-          reason: 'Nao foi possivel validar KYC agora.',
-          code: 'KYC_CHECK_FAILED',
-          dispatchBlockPersisted
-        };
       }
-      releaseGateWindow = true;
       return {
-        allowed: true,
-        reason: 'Falha ao validar KYC (fail-open).',
-        code: 'kycCheckFailedOpen'
+        allowed: false,
+        reason: 'Nao foi possivel validar KYC agora.',
+        code: 'KYC_CHECK_FAILED',
+        dispatchBlockPersisted
       };
     } finally {
       if (gateWindowClaim?.acquired && releaseGateWindow) {
@@ -951,14 +1199,19 @@ class DriverIdentityTrustService {
 
   buildReferenceFingerprint(evidence = {}) {
     const reference = evidence.reference || {};
-    if (Number(reference.bindingVersion) === 2) {
+    if (Number(reference.bindingVersion) === 3) {
       return sha256(JSON.stringify({
-        bindingVersion: 2,
+        bindingVersion: 3,
         source: reference.source || null,
         documentType: reference.documentType || null,
         model: reference.model || null,
         submissionId: reference.submissionId || null,
         documentPathSha256: reference.documentPathSha256 || null,
+        documentSha256: reference.documentSha256 || null,
+        storageGeneration: reference.storageGeneration || null,
+        approvalSource: reference.approvalSource || null,
+        reviewedByHash: reference.reviewedByHash || null,
+        reviewedAt: asIso(reference.reviewedAt, reference.reviewedAt || null),
         imageSha256: reference.imageSha256 || null,
         cropVersion: reference.cropVersion || null,
         createdAt: asIso(reference.createdAt, reference.createdAt || null)
@@ -1039,20 +1292,29 @@ class DriverIdentityTrustService {
     const comparisonProvider = faceMatch.comparisonProvider || faceMatch.provider || null;
     const hashPattern = /^[a-f0-9]{64}$/i;
     const expectedRequirement = requirement || 'IDENTITY_REVERIFICATION';
+    const identityReconciliation = Boolean(
+      challengeId
+      && expectedRequirement === 'IDENTITY_REVERIFICATION'
+      && storedEvidence.challengeSource === 'identity_reverification'
+    );
+    const firstAccessReconciliation = Boolean(
+      !challengeId
+      && expectedRequirement === 'LIVENESS_REQUIRED'
+      && storedEvidence.challengeSource === 'first_access'
+    );
 
     if (
       !driverId
       || !sessionHash
-      || !challengeId
+      || (!identityReconciliation && !firstAccessReconciliation)
       || storedEvidence.schemaVersion !== 1
       || storedEvidence.policyVersion !== this.getConfig().policyVersion
       || storedEvidence.driverId !== driverId
       || storedEvidence.evidenceId !== sessionHash
       || storedEvidence.sourcePath !== 'server_side_aws_reference_compare'
       || storedEvidence.status !== 'approved'
-      || storedEvidence.challengeId !== challengeId
+      || String(storedEvidence.challengeId || '') !== String(challengeId || '')
       || storedEvidence.requirement !== expectedRequirement
-      || expectedRequirement !== 'IDENTITY_REVERIFICATION'
       || !hashPattern.test(String(storedEvidence.evidenceHash || ''))
       || !hashPattern.test(String(storedEvidence.referenceFingerprint || ''))
       || !hashPattern.test(String(storedEvidence.modelFingerprint || ''))
@@ -1127,7 +1389,9 @@ class DriverIdentityTrustService {
       threshold,
       reviewThreshold,
       decision: faceMatch.decision,
-      mode: 'canonical_identity_reconciliation_v1',
+      mode: firstAccessReconciliation
+        ? 'canonical_first_access_reconciliation_v1'
+        : 'canonical_identity_reconciliation_v1',
       provider: faceMatch.provider || null,
       comparisonProvider: faceMatch.comparisonProvider || null,
       embeddingDimension: Number(faceMatch.embeddingDimension || 0) || null,
@@ -1142,6 +1406,12 @@ class DriverIdentityTrustService {
     storedEvidence = {},
     { challengeId = null, requirement = null } = {}
   ) {
+    try {
+      this.assertRecordScope(storedEvidence);
+    } catch (_error) {
+      return null;
+    }
+
     const expectedChallengeId = challengeId ? String(challengeId).trim() : null;
     const expectedRequirement = requirement ? String(requirement).trim() : null;
     const storedChallengeId = storedEvidence.challengeId
@@ -1153,6 +1423,11 @@ class DriverIdentityTrustService {
     const similarityScore = Number(storedEvidence.similarityScore);
     const decision = String(storedEvidence.decision || '').trim().toLowerCase();
     const hashPattern = /^[a-f0-9]{64}$/i;
+    const reviewEvidenceCandidate = String(storedEvidence.reviewEvidenceId || '').trim();
+    const reviewEvidenceId = /^[A-Za-z0-9_-]{16,128}$/
+      .test(reviewEvidenceCandidate)
+      ? reviewEvidenceCandidate
+      : null;
 
     if (
       !driverId
@@ -1184,7 +1459,8 @@ class DriverIdentityTrustService {
       mode: 'canonical_identity_failure_reconciliation_v1',
       requirement: expectedRequirement,
       challengeId: expectedChallengeId,
-      evidenceId: sessionHash
+      evidenceId: sessionHash,
+      reviewEvidenceId
     };
   }
 
@@ -1196,31 +1472,26 @@ class DriverIdentityTrustService {
       throw error;
     }
 
-    const document = await this.realtimeReader(`users/${driverId}/documents/cnh`);
-    const documentSubmissionId = String(
-      document?.lastSubmissionId || document?.submissionId || ''
-    ).trim();
-    const documentStatus = String(
-      document?.analysisStatus || document?.status || ''
-    ).trim().toLowerCase();
-    if (documentStatus !== 'approved') {
-      const error = new Error('CNH atual nao esta aprovada para comparacao canonica');
-      error.code = 'KYC_CANONICAL_CNH_NOT_APPROVED';
-      throw error;
-    }
+    const document = await this.canonicalDocumentApprovalService.requireApprovedCnh(driverId);
+    const documentSubmissionId = String(document.submissionId || '').trim();
     if (!documentSubmissionId || documentSubmissionId !== submissionId) {
       const error = new Error('Embedding facial nao corresponde a CNH atualmente aprovada');
       error.code = 'KYC_CANONICAL_CNH_SUBMISSION_MISMATCH';
       throw error;
     }
     const reference = evidence.reference || {};
-    if (Number(reference.bindingVersion) === 2) {
+    if (Number(reference.bindingVersion) === 3) {
       const documentPath = String(document?.filePath || '').trim();
       const documentPathSha256 = sha256(documentPath);
       if (
         !documentPath
         || !/^[a-f0-9]{64}$/i.test(String(reference.documentPathSha256 || ''))
         || reference.documentPathSha256 !== documentPathSha256
+        || reference.documentSha256 !== String(document.documentSha256 || '').toLowerCase()
+        || reference.storageGeneration !== String(document.storageGeneration || '')
+        || reference.approvalSource !== 'dashboard_manual_review'
+        || reference.reviewedByHash !== sha256(document.reviewedBy)
+        || asIso(reference.reviewedAt) !== asIso(document.reviewedAt)
         || !/^[a-f0-9]{64}$/i.test(String(reference.imageSha256 || ''))
         || !String(reference.cropVersion || '').trim()
         || reference.source !== 'approved_cnh_pdf_crop_v1'
@@ -1229,6 +1500,10 @@ class DriverIdentityTrustService {
         error.code = 'KYC_CANONICAL_CNH_REFERENCE_BINDING_INVALID';
         throw error;
       }
+    } else {
+      const error = new Error('Referencia canonica sem vinculo imutavel da CNH');
+      error.code = 'KYC_CANONICAL_CNH_REFERENCE_BINDING_INVALID';
+      throw error;
     }
   }
 
@@ -1269,11 +1544,11 @@ class DriverIdentityTrustService {
     let consumed = null;
     try {
       consumed = await evidenceRef.get();
+      if (consumed.exists) this.assertRecordScope(consumed.data() || {});
     } catch (error) {
       await this.releaseVerificationWindow(verificationWindowClaim).catch(() => null);
       throw error;
     }
-    if (consumed.exists) this.assertRecordScope(consumed.data() || {});
     if (!this.redis) {
       await this.releaseVerificationWindow(verificationWindowClaim).catch(() => null);
       const error = new Error('Redis indisponivel para exclusao mutua da sessao canonica');
@@ -1422,7 +1697,7 @@ class DriverIdentityTrustService {
     const ageDays = Math.floor((verifiedAtMs - firstVerifiedMs) / (24 * 60 * 60 * 1000));
     if (
       state.successCount >= config.trustedMinSuccessCount
-      && state.distinctSuccessDays >= config.observedMinDistinctSuccessDays
+      && state.distinctSuccessDays >= config.trustedMinDistinctSuccessDays
       && ageDays >= config.trustedMinAgeDays
     ) {
       nextTier = TRUST_TIERS.TRUSTED;
@@ -1435,6 +1710,7 @@ class DriverIdentityTrustService {
     await this.assertVerificationOutsideActiveTrip(driverId);
     await this.assertCurrentApprovedReference(driverId, evidence);
     const config = this.getConfig();
+    this.assertApprovedAdaptivePolicy(config);
     const verifiedAt = evidence.verifiedAt || this.now().toISOString();
     const verifiedAtMs = toMillis(verifiedAt);
     if (!verifiedAtMs) {
@@ -1556,7 +1832,7 @@ class DriverIdentityTrustService {
       const stateRevision = Number(previousState.stateRevision || 0) + 1;
 
       const canonicalEvidence = {
-        ...this.persistenceEnvelope(stateSnapshot.exists ? previousState : null),
+        ...this.persistenceEnvelope(),
         evidenceId: sessionHash,
         evidenceHash,
         schemaVersion: 1,
@@ -1611,6 +1887,13 @@ class DriverIdentityTrustService {
           previousState.lastRandomAuditSatisfiedDay || null
         ),
         referenceFingerprint,
+        referenceSubmissionId: evidence.reference?.submissionId || null,
+        referenceDocumentPathSha256: evidence.reference?.documentPathSha256 || null,
+        referenceDocumentSha256: evidence.reference?.documentSha256 || null,
+        referenceStorageGeneration: evidence.reference?.storageGeneration || null,
+        referenceApprovalSource: evidence.reference?.approvalSource || null,
+        referenceReviewedAt: evidence.reference?.reviewedAt || null,
+        referenceCropVersion: evidence.reference?.cropVersion || null,
         modelFingerprint,
         revokedAt: null,
         revocationReason: null,
@@ -1621,6 +1904,7 @@ class DriverIdentityTrustService {
       transaction.set(stateRef, nextState, { merge: false });
       if (challengeRef) {
         transaction.set(challengeRef, {
+          ...this.persistenceEnvelope(challengeSnapshot.data() || null),
           status: 'resolved',
           resolvedAt: nowIso,
           updatedAt: nowIso,
@@ -1666,7 +1950,7 @@ class DriverIdentityTrustService {
     }
     if (this.redis && !result.idempotentReplay && result.state?.lastVerifiedAt) {
       const legacyCompatibilityPayload = {
-        ...this.persistenceEnvelope(result.state),
+        ...this.persistenceEnvelope(),
         success: true,
         isMatch: true,
         timestamp: toMillis(result.state.lastVerifiedAt),
@@ -1761,7 +2045,7 @@ class DriverIdentityTrustService {
       transaction.set(stateRef, next, { merge: false });
       if (evidenceRef) {
         transaction.set(evidenceRef, {
-          ...this.persistenceEnvelope(snapshot.exists ? previous : null),
+          ...this.persistenceEnvelope(),
           schemaVersion: 1,
           evidenceId: sessionHash,
           driverId,
@@ -1799,14 +2083,109 @@ class DriverIdentityTrustService {
     }
     return { success: true, driverId, ...result };
   }
+
+  async linkReviewEvidenceToCanonicalFailure(driverId, {
+    failureEvidenceId,
+    reviewEvidenceId
+  } = {}) {
+    const safeDriverId = String(driverId || '').trim();
+    const safeFailureEvidenceId = String(failureEvidenceId || '').trim();
+    const safeReviewEvidenceId = String(reviewEvidenceId || '').trim();
+    if (!safeDriverId || !safeFailureEvidenceId || !safeReviewEvidenceId) {
+      const error = new Error('Binding da evidencia de revisao incompleto');
+      error.code = 'KYC_REVIEW_EVIDENCE_BINDING_REQUIRED';
+      throw error;
+    }
+
+    const firestore = this.firestoreProvider();
+    if (!firestore) {
+      const error = new Error('Firestore indisponivel para vincular evidencia de revisao');
+      error.code = 'KYC_TRUST_STORE_UNAVAILABLE';
+      throw error;
+    }
+    const stateRef = firestore.collection(this.stateCollection).doc(safeDriverId);
+    const failureRef = stateRef.collection(this.evidenceCollection).doc(safeFailureEvidenceId);
+    const reviewRef = firestore.collection(this.failedEvidenceCollection).doc(safeReviewEvidenceId);
+    const linkedAt = this.now().toISOString();
+
+    const state = await firestore.runTransaction(async (transaction) => {
+      const [stateSnapshot, failureSnapshot, reviewSnapshot] = await Promise.all([
+        transaction.get(stateRef),
+        transaction.get(failureRef),
+        transaction.get(reviewRef)
+      ]);
+      if (!stateSnapshot.exists || !failureSnapshot.exists || !reviewSnapshot.exists) {
+        const error = new Error('Evidencia canonica ou de revisao nao encontrada');
+        error.code = 'KYC_REVIEW_EVIDENCE_BINDING_NOT_FOUND';
+        throw error;
+      }
+      const current = stateSnapshot.data() || {};
+      const failure = failureSnapshot.data() || {};
+      const review = reviewSnapshot.data() || {};
+      this.assertRecordScope(current);
+      this.assertRecordScope(failure);
+      this.assertRecordScope(review);
+      if (
+        current.driverId !== safeDriverId
+        || failure.driverId !== safeDriverId
+        || review.driverId !== safeDriverId
+        || current.status !== 'revoked'
+        || ![
+          'canonical_face_compare_failed',
+          'identity_reverification_failed'
+        ].includes(current.revocationReason)
+        || current.lastFailure?.recordedAt !== failure.recordedAt
+        || failure.terminalOutcome !== 'face_compare_failed'
+        || review.state !== 'available'
+        || review.decision !== 'reject'
+        || failure.referenceImageSha256 !== review.referenceImageSha256
+      ) {
+        const error = new Error('Evidencia de revisao nao corresponde a falha canonica');
+        error.code = 'KYC_REVIEW_EVIDENCE_BINDING_INVALID';
+        throw error;
+      }
+      const existingStateLink = String(current.lastFailure?.reviewEvidenceId || '').trim();
+      const existingFailureLink = String(failure.reviewEvidenceId || '').trim();
+      if (
+        (existingStateLink && existingStateLink !== safeReviewEvidenceId)
+        || (existingFailureLink && existingFailureLink !== safeReviewEvidenceId)
+      ) {
+        const error = new Error('Falha canonica ja vinculada a outra evidencia de revisao');
+        error.code = 'KYC_REVIEW_EVIDENCE_BINDING_CONFLICT';
+        throw error;
+      }
+      const reviewEvidenceLinkedAt = current.lastFailure?.reviewEvidenceLinkedAt
+        || failure.reviewEvidenceLinkedAt
+        || linkedAt;
+      const next = {
+        ...current,
+        lastFailure: {
+          ...(current.lastFailure || {}),
+          reviewEvidenceId: safeReviewEvidenceId,
+          reviewEvidenceLinkedAt
+        },
+        updatedAt: linkedAt
+      };
+      transaction.set(stateRef, next, { merge: false });
+      transaction.set(failureRef, {
+        ...failure,
+        reviewEvidenceId: safeReviewEvidenceId,
+        reviewEvidenceLinkedAt
+      }, { merge: false });
+      return next;
+    });
+
+    await this.cacheState(safeDriverId, state, this.getConfig());
+    return {
+      success: true,
+      driverId: safeDriverId,
+      failureEvidenceId: safeFailureEvidenceId,
+      reviewEvidenceId: safeReviewEvidenceId
+    };
+  }
 }
 
 function createScopedDriverIdentityTrustService(persistenceContext, options = {}) {
-  if (!persistenceContext || typeof persistenceContext !== 'object') {
-    const error = new Error('Contexto de persistencia obrigatorio para factory de confianca KYC');
-    error.code = 'KYC_TRUST_PERSISTENCE_CONTEXT_REQUIRED';
-    throw error;
-  }
   return new DriverIdentityTrustService({
     ...options,
     persistenceContext

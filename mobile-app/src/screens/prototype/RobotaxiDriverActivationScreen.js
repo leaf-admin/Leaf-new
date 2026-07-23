@@ -10,8 +10,9 @@ import PrototypeDismissibleSheet from '../../components/prototype/PrototypeDismi
 import { usePrototypeMapOcclusion } from './prototypeMapOcclusion';
 import { usePrototypeRideRuntime } from './prototypeRideRuntime';
 import { DRIVER_ONBOARDING_STAGE_KEYS } from '../../services/DriverOnboardingService';
-import { resolveCanonicalLivenessGate } from './driverActivationCanonicalContract';
+import { normalizeErrorMessage } from '../../services/DriverActivationService';
 import Logger from '../../utils/Logger';
+import { resolveCanonicalLivenessGate } from './driverActivationCanonicalContract';
 
 const { color, typography } = robotaxiPrototypeTokens;
 const SURFACE_TOP_PADDING = 28;
@@ -598,7 +599,10 @@ export default function RobotaxiDriverActivationScreen({ navigation, route }) {
                 } catch (error) {
                   upsertFieldState(stageKey, field.key, {
                     status: FIELD_STATUS.FAILED,
-                    reason: error?.message || 'Não foi possível registrar o aceite agora.'
+                    reason: normalizeErrorMessage(
+                      error,
+                      'Não foi possível registrar o aceite agora.'
+                    )
                   });
                 } finally {
                   setBusyFieldKey('');
@@ -638,6 +642,15 @@ export default function RobotaxiDriverActivationScreen({ navigation, route }) {
         }
 
         setBusyFieldKey(stateKey);
+        const assetForValidation = {
+          uri: pdfAsset.uri,
+          mimeType: pdfAsset.mimeType || 'application/pdf',
+          type: pdfAsset.mimeType || 'application/pdf',
+          name: pdfAsset.name || `${field.key}-${Date.now()}.pdf`,
+          size: Number(pdfAsset.size || 0)
+        };
+        await submitDriverActivationDocument(field.key, assetForValidation);
+
         upsertFieldState(stageKey, field.key, {
           status: FIELD_STATUS.IN_REVIEW,
           reason: '',
@@ -647,19 +660,15 @@ export default function RobotaxiDriverActivationScreen({ navigation, route }) {
 
         Alert.alert('Documento enviado', `Status: Em análise. Prazo da análise: ${DOC_ANALYSIS_SLA_TEXT}.`);
 
-        const assetForValidation = {
-          uri: pdfAsset.uri,
-          mimeType: pdfAsset.mimeType || 'application/pdf',
-          type: pdfAsset.mimeType || 'application/pdf',
-          name: pdfAsset.name || `${field.key}-${Date.now()}.pdf`,
-          size: Number(pdfAsset.size || 0)
-        };
-        await submitDriverActivationDocument(field.key, assetForValidation);
-        await refreshDriverActivationRemote();
+        try {
+          await refreshDriverActivationRemote();
+        } catch {
+          // O upload já foi confirmado; a próxima sincronização recupera o estado canônico.
+        }
       } catch (error) {
         upsertFieldState(stageKey, field.key, {
           status: FIELD_STATUS.FAILED,
-          reason: error?.message || 'Não foi possível enviar o documento.',
+          reason: normalizeErrorMessage(error, 'Não foi possível enviar o documento.'),
           summaryRows: []
         });
       } finally {

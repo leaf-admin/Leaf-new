@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import ProtectedRoute from "@/src/components/ProtectedRoute";
 import AppNav from "@/src/components/AppNav";
 import { leafAPI } from "@/src/services/api";
@@ -19,21 +20,30 @@ const statusTone = {
 };
 const DRIVERS_REFRESH_MS = 120000;
 
-export default function DriversPage() {
+function DriversPageContent() {
+  const searchParams = useSearchParams();
+  const kycPersistenceScope = String(searchParams.get("kycScope") || "")
+    .trim()
+    .toLowerCase() === "sandbox"
+    ? "sandbox"
+    : "operational";
+  const kycRequestContext = useMemo(
+    () => ({ scope: kycPersistenceScope }),
+    [kycPersistenceScope],
+  );
   const [applications, setApplications] = useState([]);
   const [summary, setSummary] = useState(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
-  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [status, setStatus] = useState("all");
 
   const load = async () => {
     setLoading(true);
     setError("");
     try {
-      const response = await leafAPI.getDrivers(page, 20, status, debouncedSearch);
+      const response = await leafAPI.getDrivers(page, 20, status, search, kycRequestContext);
       setApplications(response?.applications || []);
       setSummary(response?.summary || null);
     } catch (err) {
@@ -42,15 +52,6 @@ export default function DriversPage() {
       setLoading(false);
     }
   };
-
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setPage(1);
-      setDebouncedSearch(search);
-    }, 350);
-
-    return () => clearTimeout(timer);
-  }, [search]);
 
   useEffect(() => {
     let mounted = true;
@@ -66,7 +67,7 @@ export default function DriversPage() {
       clearInterval(timer);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [debouncedSearch, page, status]);
+  }, [page, status, search, kycRequestContext]);
 
   const counters = useMemo(() => {
     const base = { all: applications.length, pending: 0, approved: 0, rejected: 0 };
@@ -84,77 +85,66 @@ export default function DriversPage() {
           <h1>Motoristas</h1>
           <div className="filters">
             <input
-              aria-label="Buscar motorista"
               placeholder="buscar motorista..."
               value={search}
-              onChange={(e) => setSearch(e.target.value)}
+              onChange={(e) => {
+                setPage(1);
+                setSearch(e.target.value);
+              }}
             />
+            <select
+              value={status}
+              onChange={(e) => {
+                setPage(1);
+                setStatus(e.target.value);
+              }}
+            >
+              <option value="all">Todos</option>
+              <option value="pending">Pendentes</option>
+              <option value="approved">Aprovados</option>
+              <option value="rejected">Rejeitados</option>
+            </select>
+            <Link href={kycPersistenceScope === "sandbox" ? "/drivers/review-queue?kycScope=sandbox" : "/drivers/review-queue"}>Fila de Documentos</Link>
+            <Link href={kycPersistenceScope === "sandbox" ? "/drivers" : "/drivers?kycScope=sandbox"}>
+              {kycPersistenceScope === "sandbox" ? "Voltar ao operacional" : "Abrir sandbox"}
+            </Link>
           </div>
         </header>
 
         <AppNav />
-        <details className="drivers-filter-disclosure">
-          <summary>Filtros e atalhos</summary>
-          <div className="filters">
-            <label>
-              Status
-              <select
-                value={status}
-                onChange={(e) => {
-                  setPage(1);
-                  setStatus(e.target.value);
-                }}
-              >
-                <option value="all">Todos</option>
-                <option value="pending">Pendentes</option>
-                <option value="approved">Aprovados</option>
-                <option value="rejected">Rejeitados</option>
-              </select>
-            </label>
-            <Link href="/drivers/review-queue">Abrir fila de documentos</Link>
-          </div>
-        </details>
         {loading ? <LoadingState message="Carregando motoristas..." /> : null}
 
         <section className="grid grid-kpi">
-          <KpiCard title="Itens carregados" value={counters.all} subtitle="nesta página" />
-          <KpiCard title="Pendentes" value={counters.pending} subtitle="nesta página" tone="warning" />
-          <KpiCard title="Aprovados" value={counters.approved} subtitle="nesta página" tone="positive" />
-          <KpiCard title="Rejeitados" value={counters.rejected} subtitle="nesta página" tone="danger" />
+          <KpiCard title="Lista atual" value={counters.all} />
+          <KpiCard title="Pendentes" value={counters.pending} tone="warning" />
+          <KpiCard title="Aprovados" value={counters.approved} tone="positive" />
+          <KpiCard title="Rejeitados" value={counters.rejected} tone="danger" />
         </section>
 
         <section className="grid">
-          <details className="drivers-summary-disclosure">
-            <summary>Resumo operacional do backend</summary>
-            <Panel
-              title="Resumo operacional"
-              subtitle="Sinais consolidados fornecidos pela API da listagem."
-            >
-              <KeyValueGrid
-                data={summary || {}}
-                labels={{
-                  totalApplications: "Aplicações no período",
-                  pending: "Pendentes",
-                  approved: "Aprovadas",
-                  rejected: "Rejeitadas",
-                  inReview: "Em revisão",
-                }}
-              />
-              <TechnicalDetails title="Ver detalhes técnicos da listagem" data={summary || {}} />
-            </Panel>
-          </details>
+          <Panel
+            title="Resumo operacional"
+            subtitle="Visão rápida de aprovação, pendências e status de análise."
+          >
+            <KeyValueGrid
+              data={summary || {}}
+              labels={{
+                totalApplications: "Aplicações no período",
+                pending: "Pendentes",
+                approved: "Aprovadas",
+                rejected: "Rejeitadas",
+                inReview: "Em revisão",
+              }}
+            />
+            <TechnicalDetails title="Ver detalhes técnicos da listagem" data={summary || {}} />
+          </Panel>
 
           <Panel
             className="panel-span-full"
             title="Aplicações"
-            subtitle="Workspace de consulta com acesso à ficha dedicada do motorista."
+            subtitle="Ações de revisão com acesso direto à ficha documental."
           >
-            <div
-              className="table-shell"
-              role="region"
-              tabIndex={0}
-              aria-label="Aplicações de motoristas"
-            >
+            <div className="table-shell">
               <table className="table table-compact">
                 <thead>
                   <tr>
@@ -162,7 +152,7 @@ export default function DriversPage() {
                     <th>Contato</th>
                     <th>Status</th>
                     <th>Score</th>
-                    <th>Ação</th>
+                    <th>Ações</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -192,7 +182,7 @@ export default function DriversPage() {
                           <td>{item?.score ?? "-"}</td>
                           <td>
                             <div className="actions-cell">
-                              {itemId ? <Link href={`/drivers/${itemId}/documents`}>Abrir ficha</Link> : null}
+                              {itemId ? <Link href={`/drivers/${itemId}/documents`}>Documentos</Link> : null}
                             </div>
                           </td>
                         </tr>
@@ -203,9 +193,9 @@ export default function DriversPage() {
               </table>
             </div>
             <div className="pager">
-              <button type="button" onClick={() => setPage((p) => Math.max(1, p - 1))}>Anterior</button>
+              <button onClick={() => setPage((p) => Math.max(1, p - 1))}>Anterior</button>
               <span>Pagina {page}</span>
-              <button type="button" onClick={() => setPage((p) => p + 1)}>Proxima</button>
+              <button onClick={() => setPage((p) => p + 1)}>Proxima</button>
             </div>
           </Panel>
         </section>
@@ -213,5 +203,13 @@ export default function DriversPage() {
         <ErrorText message={error} />
       </main>
     </ProtectedRoute>
+  );
+}
+
+export default function DriversPage() {
+  return (
+    <Suspense fallback={<LoadingState message="Carregando motoristas..." />}>
+      <DriversPageContent />
+    </Suspense>
   );
 }

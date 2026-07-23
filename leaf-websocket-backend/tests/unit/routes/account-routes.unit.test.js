@@ -138,9 +138,12 @@ describe('account deletion route', () => {
       exists: true,
       data: () => ({
         uid: 'review-user',
-        name: 'Leaf Passageiro',
         usertype: 'customer',
+        userType: 'customer',
         phone: '+5521102938475',
+        phoneNumber: '+5521102938475',
+        onboardingCompleted: true,
+        profileComplete: true,
       }),
     });
 

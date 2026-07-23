@@ -52,20 +52,30 @@ function operationalServices() {
   return {
     workflow: {
       openCaseFromTicket: jest.fn(),
+      resumeExistingCaseRequest: jest.fn(),
       assertKycOperationAllowed: jest.fn(),
       claimCleanRetryAuthorization: jest.fn(),
       consumeCleanRetryAuthorization: jest.fn(),
+      resumeCleanRetryAuthorization: jest.fn(),
       releaseCleanRetryAuthorization: jest.fn(),
-      finalizeCleanRetryAuthorization: jest.fn()
+      finalizeCleanRetryAuthorization: jest.fn(),
+      clearResolvedMismatchHold: jest.fn()
     },
     trust: {
       evaluateOnlineGate: jest.fn(),
       assertVerificationOutsideActiveTrip: jest.fn(),
       claimVerificationWindow: jest.fn(),
+      renewVerificationWindow: jest.fn(),
       releaseVerificationWindow: jest.fn(),
       claimCanonicalSession: jest.fn(),
       renewCanonicalSessionClaim: jest.fn(),
-      releaseCanonicalSessionClaim: jest.fn()
+      releaseCanonicalSessionClaim: jest.fn(),
+      readCanonicalCompatibilityVerification: jest.fn(),
+      recordCanonicalSuccess: jest.fn(),
+      recordCanonicalFailure: jest.fn(),
+      linkReviewEvidenceToCanonicalFailure: jest.fn(),
+      restoreApprovedIdentityVerification: jest.fn(),
+      restoreRejectedIdentityVerification: jest.fn()
     },
     evidence: { captureRejectedComparisonEvidence: jest.fn() },
     policy: {

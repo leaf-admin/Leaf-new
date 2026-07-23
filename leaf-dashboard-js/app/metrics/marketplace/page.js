@@ -14,16 +14,14 @@ function get(obj, path, fallback = null) {
 }
 
 function formatValue(value, format) {
-  if (value === null || value === undefined || value === "" || Number.isNaN(value)) return "-";
-  const numeric = Number(value);
-  if (!Number.isFinite(numeric)) return "-";
-  if (format === "percent") return `${(numeric * 100).toFixed(1)}%`;
-  if (format === "minutes") return `${numeric.toFixed(1)} min`;
+  if (value === null || value === undefined || Number.isNaN(value)) return "-";
+  if (format === "percent") return `${(Number(value) * 100).toFixed(1)}%`;
+  if (format === "minutes") return `${Number(value).toFixed(1)} min`;
   if (format === "brl") {
-    return `R$ ${numeric.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    return `R$ ${Number(value).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   }
-  if (format === "decimal") return numeric.toFixed(2);
-  return numeric.toLocaleString("pt-BR");
+  if (format === "decimal") return Number(value).toFixed(2);
+  return Number(value).toLocaleString("pt-BR");
 }
 
 function summarizeCalcBase(rawValue) {
@@ -147,7 +145,7 @@ export default function MarketplaceMetricsPage() {
   }, [data]);
 
   const selected = metrics.find((m) => m.id === selectedId) || metrics[0];
-  const priorityMetrics = metrics.filter((m) => m.critical).slice(0, 4);
+  const critical = metrics.filter((m) => m.critical);
   const byGroup = GROUP_ORDER.map((group) => ({
     group,
     items: metrics.filter((m) => m.group === group),
@@ -161,12 +159,9 @@ export default function MarketplaceMetricsPage() {
       value: get(row, selected.path.replace(/^metrics\./, ""), null),
     }));
   }, [data, selected]);
-  const timelineAvailable = Array.isArray(data?.timeline?.daily);
   const seriesMax = useMemo(() => {
     const values = series
-      .map((point) =>
-        point.value === null || point.value === undefined || point.value === "" ? Number.NaN : Number(point.value),
-      )
+      .map((point) => Number(point.value))
       .filter((value) => Number.isFinite(value));
     return values.length ? Math.max(...values) : 0;
   }, [series]);
@@ -180,7 +175,6 @@ export default function MarketplaceMetricsPage() {
   const driverRows = useMemo(() => {
     return Array.isArray(data?.breakdowns?.drivers) ? data.breakdowns.drivers : [];
   }, [data]);
-  const driverBreakdownAvailable = Array.isArray(data?.breakdowns?.drivers);
   const filteredDriverRows = useMemo(() => {
     const term = driverFilter.trim().toLowerCase();
     if (!term) return driverRows;
@@ -198,11 +192,7 @@ export default function MarketplaceMetricsPage() {
             <p className="kpi-subtitle">Aba dedicada com foco em liquidez, eficiência e crescimento</p>
           </div>
           <div className="filters">
-            <select
-              aria-label="Selecionar período do marketplace"
-              value={period}
-              onChange={(e) => setPeriod(e.target.value)}
-            >
+            <select value={period} onChange={(e) => setPeriod(e.target.value)}>
               <option value="today">Hoje</option>
               <option value="week">Últimos 7 dias</option>
               <option value="30d">Últimos 30 dias</option>
@@ -214,9 +204,9 @@ export default function MarketplaceMetricsPage() {
         <AppNav />
         {loading ? <LoadingState message="Carregando marketplace health..." /> : null}
 
-        <Panel title="Indicadores prioritários" subtitle="Até quatro sinais já classificados como críticos pelo contrato atual.">
+        <Panel title="Indicadores críticos" subtitle="A primeira leitura da saúde do marketplace.">
           <section className="grid grid-kpi">
-            {priorityMetrics.map((metric) => (
+            {critical.map((metric) => (
               <KpiCard
                 key={metric.id}
                 title={metric.title}
@@ -230,10 +220,7 @@ export default function MarketplaceMetricsPage() {
           </section>
         </Panel>
 
-        <details className="metrics-secondary-disclosure">
-          <summary>Indicadores secundários, fórmulas e bases de cálculo</summary>
-          <div className="grid">
-          <Panel title="Indicadores por área" subtitle="Use as abas para trocar a leitura sem alongar a página.">
+        <Panel title="Indicadores por área" subtitle="Use as abas para trocar a leitura sem alongar a página.">
           <div className="segmented-control">
             {GROUP_ORDER.map((group) => (
               <button
@@ -259,9 +246,9 @@ export default function MarketplaceMetricsPage() {
               />
             ))}
           </section>
-          </Panel>
+        </Panel>
 
-          <Panel title={`Detalhe da métrica: ${selected?.title || "-"}`}>
+        <Panel title={`Detalhe da métrica: ${selected?.title || "-"}`}>
           {selected ? (
             <div className="metric-list">
               <div className="row">
@@ -301,22 +288,16 @@ export default function MarketplaceMetricsPage() {
           ) : (
             <p className="text-muted">Selecione um card para ver o detalhe.</p>
           )}
-          </Panel>
-          </div>
-        </details>
+        </Panel>
 
         <section className="grid">
         <Panel title="Evolução temporal" subtitle={selected?.title || ""}>
-          {!timelineAvailable ? (
-            <p className="text-muted">Série histórica não disponível para esta resposta.</p>
-          ) : series.length === 0 ? (
+          {series.length === 0 ? (
             <p className="text-muted">Sem série histórica para o período selecionado.</p>
           ) : (
             <div className="bar-list compact-bars">
               {series.slice(-14).map((point) => {
-                const numericValue = point.value === null || point.value === undefined || point.value === ""
-                  ? Number.NaN
-                  : Number(point.value);
+                const numericValue = Number(point.value);
                 const valid = Number.isFinite(numericValue);
                 const pct = valid && seriesMax > 0 ? Math.min((numericValue / seriesMax) * 100, 100) : 0;
                 return (
@@ -338,23 +319,15 @@ export default function MarketplaceMetricsPage() {
         <Panel title="Corridas por motorista">
           <div className="filters">
             <input
-              aria-label="Filtrar corridas por motorista"
               placeholder="Filtrar por motorista, telefone ou ID"
               value={driverFilter}
               onChange={(e) => setDriverFilter(e.target.value)}
             />
           </div>
-          {!driverBreakdownAvailable ? (
-            <p className="text-muted">Detalhamento por motorista não disponível para esta resposta.</p>
-          ) : filteredDriverRows.length === 0 ? (
+          {filteredDriverRows.length === 0 ? (
             <p className="text-muted">Sem motoristas ativos no período.</p>
           ) : (
-            <div
-              className="table-shell"
-              role="region"
-              tabIndex={0}
-              aria-label="Desempenho por motorista no marketplace"
-            >
+            <div className="table-shell">
               <table className="table table-compact">
                 <thead>
                   <tr>
@@ -374,9 +347,9 @@ export default function MarketplaceMetricsPage() {
                         <div>{row.displayName || row.driverId}</div>
                         <div className="table-muted">{row.phone || row.driverId}</div>
                       </td>
-                      <td>{formatValue(row.rides, "number")}</td>
-                      <td>{formatValue(row.completedRides, "number")}</td>
-                      <td>{formatValue(row.cancelledRides, "number")}</td>
+                      <td>{Number(row.rides || 0).toLocaleString("pt-BR")}</td>
+                      <td>{Number(row.completedRides || 0).toLocaleString("pt-BR")}</td>
+                      <td>{Number(row.cancelledRides || 0).toLocaleString("pt-BR")}</td>
                       <td>{formatValue(row.ridesPerCalendarDay, "decimal")}</td>
                       <td>{formatValue(row.ridesPerActiveDay, "decimal")}</td>
                       <td>{formatValue(row.fareTotal, "brl")}</td>
@@ -389,12 +362,11 @@ export default function MarketplaceMetricsPage() {
         </Panel>
         </section>
 
-        <details className="technical-details metrics-secondary-disclosure">
+        <details className="technical-details">
           <summary>Tabela diária e notas técnicas</summary>
           <div className="technical-details-inner">
             <div className="filters">
               <input
-                aria-label="Filtrar série diária do marketplace"
                 placeholder="Filtrar por data ou valor"
                 value={seriesFilter}
                 onChange={(e) => setSeriesFilter(e.target.value)}
@@ -403,12 +375,7 @@ export default function MarketplaceMetricsPage() {
             {filteredSeries.length === 0 ? (
               <p className="text-muted">Sem dados.</p>
             ) : (
-              <div
-                className="table-shell table-shell-tight"
-                role="region"
-                tabIndex={0}
-                aria-label="Série temporal do marketplace"
-              >
+              <div className="table-shell table-shell-tight">
                 <table className="table table-compact">
                   <thead>
                     <tr>

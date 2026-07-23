@@ -170,7 +170,11 @@ function buildSupportScopePayload(context = {}) {
     }
   });
 
-  ["kycEvidenceId", "kycReviewCaseId", "kycChallengeId"].forEach((key) => {
+  [
+    "kycEvidenceId",
+    "kycReviewCaseId",
+    "kycChallengeId",
+  ].forEach((key) => {
     const value = normalizeSupportOpaqueId(context[key]);
     if (value) {
       scopedPayload[key] = value;
@@ -5152,6 +5156,7 @@ class WebSocketManager {
         cleanup();
         reject(new Error("Create support ticket timeout"));
       }, 10000);
+      timeout.unref?.();
 
       this.socket.once("supportTicketCreated", onCreated);
       this.socket.once("supportTicketError", onError);

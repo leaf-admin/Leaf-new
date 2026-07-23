@@ -1456,6 +1456,23 @@ function isDriverKycRequiredResult(result = {}) {
     /verifica[cç][aã]o.*(facial|kyc|di[aá]ria|encontrada)/i.test(message);
 }
 
+export function isDriverIdentityReviewHoldResult(result = {}) {
+  const payload = result?.payload && typeof result.payload === 'object'
+    ? result.payload
+    : {};
+  const responseData = result?.response?.data && typeof result.response.data === 'object'
+    ? result.response.data
+    : {};
+  const code = String(
+    result?.code || payload?.code || responseData?.code || ''
+  ).trim().toUpperCase();
+
+  return [
+    'KYC_IDENTITY_REVIEW_HOLD',
+    'KYC_IDENTITY_RECOVERY_REQUIRED',
+  ].includes(code);
+}
+
 const DRIVER_IDENTITY_REVERIFICATION_REASON = 'Por segurança, precisamos validar sua identidade.';
 const DRIVER_IDENTITY_REVIEW_SOURCE = 'kyc_identity_mismatch_appeal';
 const SAFE_KYC_REVIEW_CONTEXT_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/;
@@ -1476,10 +1493,10 @@ export function buildDriverIdentityReviewTicketParams(
 ) {
   const kycEvidenceId = normalizeKycReviewContextId(failure?.evidenceId);
   const kycReviewCaseId = normalizeKycReviewContextId(failure?.reviewCaseId);
-  const kycChallengeId = normalizeKycReviewContextId(failure?.challengeId) ||
-    normalizeKycReviewContextId(challengeContext?.challengeId);
-  const requirement = normalizeKycReviewRequirement(failure?.requirement) ||
-    normalizeKycReviewRequirement(challengeContext?.requirement);
+  const kycChallengeId = normalizeKycReviewContextId(failure?.challengeId)
+    || normalizeKycReviewContextId(challengeContext?.challengeId);
+  const requirement = normalizeKycReviewRequirement(failure?.requirement)
+    || normalizeKycReviewRequirement(challengeContext?.requirement);
 
   return {
     type: 'account',
@@ -1679,8 +1696,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     challengeId: null,
     requirement: null,
   });
-  const [driverKycLivenessMode, setDriverKycLivenessMode] = useState('local');
-  const [driverKycAwsSessionId, setDriverKycAwsSessionId] = useState(null);
+  const [driverKycLivenessMode, setDriverKycLivenessMode] = useState('unavailable');
   const [driverKycProviderLoading, setDriverKycProviderLoading] = useState(false);
   const [driverKycProcessing, setDriverKycProcessing] = useState(false);
   const [driverBackgroundDisclosureVisible, setDriverBackgroundDisclosureVisible] = useState(false);
@@ -6742,7 +6758,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     const resolveDriverKycLivenessMode = async () => {
       if (!driverKycModalVisible) {
         setDriverKycProviderLoading(false);
-        setDriverKycLivenessMode('local');
+        setDriverKycLivenessMode('unavailable');
         return;
       }
 
@@ -6754,10 +6770,13 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
 
       if (!providerResult?.success) {
         Logger.warn(
-          '⚠️ [PrototypeKYC] Provider indisponível, usando fallback local:',
+          '⚠️ [PrototypeKYC] Provider canônico indisponível:',
           providerResult?.error
         );
-        setDriverKycLivenessMode('local');
+        setDriverKycLivenessMode('unavailable');
+        setDriverKycPendingReason(
+          'Não foi possível preparar a validação agora. Tente novamente em alguns minutos.'
+        );
         setDriverKycProviderLoading(false);
         return;
       }
@@ -6770,14 +6789,20 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
 
       if (providerResult.mode === 'aws') {
         Logger.warn(
-          '⚠️ [PrototypeKYC] Provider AWS ativo, mas módulo nativo ausente nesta build; usando fallback local.'
+          '⚠️ [PrototypeKYC] Provider AWS ativo, mas módulo nativo ausente nesta build.'
         );
-        setDriverKycLivenessMode('local');
+        setDriverKycLivenessMode('unavailable');
+        setDriverKycPendingReason(
+          'Esta versão do app não consegue iniciar a validação. Atualize o app e tente novamente.'
+        );
         setDriverKycProviderLoading(false);
         return;
       }
 
-      setDriverKycLivenessMode('local');
+      setDriverKycLivenessMode('unavailable');
+      setDriverKycPendingReason(
+        'Não foi possível preparar a validação agora. Tente novamente em alguns minutos.'
+      );
       setDriverKycProviderLoading(false);
     };
 
@@ -6826,6 +6851,8 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
       challengeId: source?.challengeId || source?.payload?.challengeId || null,
       requirement,
     });
+    setDriverKycLivenessMode('unavailable');
+    setDriverKycProviderLoading(true);
     setDriverKycProcessing(false);
     setDriverKycModalVisible(true);
     return true;
@@ -6841,8 +6868,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   const handleDriverKycModalCancel = useCallback(() => {
     setDriverKycModalVisible(false);
     setDriverKycPendingReason('');
-    setDriverKycLivenessMode('local');
-    setDriverKycAwsSessionId(null);
+    setDriverKycLivenessMode('unavailable');
     setDriverKycProviderLoading(false);
     setDriverKycProcessing(false);
     setDriverKycChallengeContext({
@@ -6886,7 +6912,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
       return;
     }
 
-    Alert.alert(errorPresentation.title, errorPresentation.message);
+    Alert.alert(errorPresentation.title, errorPresentation.message, undefined);
   }, [
     driverKycChallengeContext,
     handleDriverKycModalCancel,
@@ -6964,6 +6990,54 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     route?.params?.requirement,
   ]);
 
+  const retryDriverOnlineAfterKycReconciliation = useCallback(async () => {
+    if (driverHasAcceptedOrActiveWork) {
+      Alert.alert(
+        'Validação registrada',
+        'Tente ficar online depois de concluir a corrida atual.',
+      );
+      return;
+    }
+
+    try {
+      const retryResult = await setDriverOnline(true);
+      if (retryResult?.success) {
+        return;
+      }
+
+      if (isDriverIdentityReviewHoldResult(retryResult)) {
+        presentDriverKycFailure(retryResult);
+        return;
+      }
+
+      if (isDriverKycRequiredResult(retryResult)) {
+        Alert.alert(
+          'Liberação em andamento',
+          'Sua validação já foi registrada. Aguarde alguns instantes e tente ficar online novamente.',
+        );
+        return;
+      }
+
+      Alert.alert(
+        'Não foi possível ficar online',
+        'Não foi possível confirmar sua liberação agora. Tente novamente em alguns instantes.',
+      );
+    } catch (error) {
+      Logger.warn(
+        '⚠️ [PrototypeKYC] Falha ao reconciliar liberação pós-validação:',
+        error?.message || error,
+      );
+      Alert.alert(
+        'Não foi possível ficar online',
+        'Não foi possível confirmar sua liberação agora. Tente novamente em alguns instantes.',
+      );
+    }
+  }, [
+    driverHasAcceptedOrActiveWork,
+    presentDriverKycFailure,
+    setDriverOnline,
+  ]);
+
   const handleDriverKycVerificationSuccess = useCallback(async () => {
     const onlineResult = await setDriverOnline(true);
     if (onlineResult?.success) {
@@ -6971,16 +7045,24 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
       return;
     }
 
+    if (isDriverIdentityReviewHoldResult(onlineResult)) {
+      presentDriverKycFailure(onlineResult);
+      return;
+    }
+
     if (isDriverKycRequiredResult(onlineResult)) {
-      const errorPresentation = resolveKycLivenessErrorPresentation({
-        ...onlineResult,
-        message:
-          onlineResult?.reason ||
-          onlineResult?.error ||
-          'A validação foi registrada, mas ainda não liberou o online. Tente novamente.',
-      });
       handleDriverKycModalCancel();
-      Alert.alert(errorPresentation.title, errorPresentation.message);
+      Alert.alert(
+        'Validação concluída',
+        'Sua identidade foi confirmada. Ainda estamos finalizando sua liberação para o modo motorista. Você pode tentar ficar online novamente sem refazer a validação.',
+        [
+          { text: 'Agora não', style: 'cancel' },
+          {
+            text: 'Tentar ficar online',
+            onPress: retryDriverOnlineAfterKycReconciliation,
+          },
+        ],
+      );
       return;
     }
 
@@ -6994,9 +7076,14 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     });
     Alert.alert(
       'Modo motorista',
-      onlineErrorPresentation.message
+      'Validação concluída, mas não foi possível ficar online agora. Tente novamente em alguns instantes.'
     );
-  }, [handleDriverKycModalCancel, setDriverOnline]);
+  }, [
+    handleDriverKycModalCancel,
+    presentDriverKycFailure,
+    retryDriverOnlineAfterKycReconciliation,
+    setDriverOnline,
+  ]);
 
   const handleDriverKycCapture = useCallback(async (selfieImageUri) => {
     const driverId = profile?.uid || profileUid;
@@ -7013,26 +7100,32 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
         challengeId: driverKycChallengeContext.challengeId || undefined,
         requirement: driverKycChallengeContext.requirement || undefined,
         livenessPassed: true,
-        awsSessionId: driverKycAwsSessionId || undefined,
       };
       const result = await kycService.verifyDriver(driverId, selfieImageUri, {
         ...kycOptions,
-        mode: driverKycAwsSessionId ? 'mobile_arcface_w600k_r50_v1' : 'device_signature_v1',
+        mode: 'device_signature_v1',
         allowRawSelfieFallback: true,
-        preferServerSideSelfieVerification: Boolean(driverKycAwsSessionId),
-        serverSideFallbackOnDeviceEmbeddingUnavailable: Boolean(driverKycAwsSessionId),
       });
-      const isMatch = Boolean(result?.success && result?.data?.isMatch);
+
+      if (!result?.success) {
+        const presentation = resolveKycLivenessErrorPresentation(result);
+        if (presentation.action === 'request_identity_review') {
+          presentDriverKycFailure(result);
+        } else {
+          handleDriverKycModalCancel();
+          Alert.alert(presentation.title, presentation.message);
+        }
+        return;
+      }
+
+      const isMatch = result?.data?.isMatch === true;
 
       if (!isMatch) {
-        const failure = result?.success
-          ? {
-              code: 'KYC_CHALLENGE_NOT_PASSED',
-              status: 403,
-              reviewAvailable: false,
-            }
-          : result;
-        presentDriverKycFailure(failure);
+        const presentation = resolveKycLivenessErrorPresentation({
+          ...result?.data,
+          code: result?.data?.code || 'KYC_CHALLENGE_NOT_PASSED',
+        });
+        presentDriverKycFailure({ ...result?.data, ...result });
         return;
       }
 
@@ -7047,7 +7140,6 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   }, [
     driverKycChallengeContext.challengeId,
     driverKycChallengeContext.requirement,
-    driverKycAwsSessionId,
     handleDriverKycModalCancel,
     handleDriverKycVerificationSuccess,
     presentDriverKycFailure,
@@ -7106,6 +7198,10 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   const runDriverOnlineMutation = useCallback(async (nextValue) => {
     try {
       const result = await setDriverOnline(nextValue);
+      if (nextValue && isDriverIdentityReviewHoldResult(result)) {
+        presentDriverKycFailure(result);
+        return;
+      }
       if (nextValue && isDriverKycRequiredResult(result)) {
         openDriverKycModal(result);
         return;
@@ -7153,13 +7249,17 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
         );
       }
     } catch (error) {
+      if (nextValue && isDriverIdentityReviewHoldResult(error)) {
+        presentDriverKycFailure(error);
+        return;
+      }
       if (nextValue && isDriverKycRequiredResult(error)) {
         openDriverKycModal(error);
         return;
       }
       Alert.alert('Modo motorista', error?.message || 'Não foi possível atualizar o status online agora.');
     }
-  }, [navigation, openDriverKycModal, setDriverOnline]);
+  }, [navigation, openDriverKycModal, presentDriverKycFailure, setDriverOnline]);
 
   const ensureDriverBackgroundLocationDisclosure = useCallback(async () => {
     appendPrototypeRuntimeDebugStep('driver_background_location_disclosure_check_start', {
@@ -8113,7 +8213,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   const DriverKycCameraScreen = driverKycModalVisible &&
     !driverKycProviderLoading &&
     !driverKycProcessing &&
-    driverKycLivenessMode !== 'aws'
+    driverKycLivenessMode === 'local_legacy'
     ? resolveKYCCameraScreen()
     : null;
   const DriverKycAWSNativeLivenessScreen = driverKycModalVisible &&
@@ -8564,7 +8664,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
               requirement={driverKycChallengeContext.requirement}
               onSuccess={handleDriverKycAwsSuccess}
               onCancel={handleDriverKycModalCancel}
-              onFallbackLocal={() => setDriverKycLivenessMode('local')}
+              onRequestReview={presentDriverKycFailure}
             />
           ) : DriverKycCameraScreen ? (
             <DriverKycCameraScreen
@@ -8574,18 +8674,18 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
             />
           ) : (
             <View style={styles.driverKycLoadingContainer}>
-              <ActivityIndicator size="large" color="#1A330E" />
-              <Text style={styles.driverKycLoadingText}>Preparando validação facial...</Text>
+              <Text style={styles.driverKycLoadingText}>Validação indisponível</Text>
+              <Text style={styles.driverKycReasonText}>
+                {driverKycPendingReason || 'Não foi possível preparar a validação agora. Tente novamente em alguns minutos.'}
+              </Text>
+              <TouchableOpacity
+                style={styles.driverKycUnavailableButton}
+                onPress={handleDriverKycModalCancel}
+              >
+                <Text style={styles.driverKycUnavailableButtonText}>Fechar</Text>
+              </TouchableOpacity>
             </View>
           )}
-
-          {driverKycPendingReason ? (
-            <View style={styles.driverKycReasonBanner}>
-              <Text style={styles.driverKycReasonText}>
-                {driverKycPendingReason}
-              </Text>
-            </View>
-          ) : null}
         </Modal>
 
         {effectiveHomeSurfaceLoadingVisible ? (
@@ -8832,11 +8932,28 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
   },
   driverKycReasonText: {
-    color: '#FFFFFF',
-    fontFamily: fonts.SemiBold,
+    marginTop: 10,
+    color: '#5E5955',
+    fontFamily: fonts.Regular,
     fontSize: 13,
     lineHeight: 18,
     textAlign: 'center',
+  },
+  driverKycUnavailableButton: {
+    minWidth: 176,
+    height: 48,
+    marginTop: 24,
+    borderRadius: 24,
+    backgroundColor: '#1A330E',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 24,
+  },
+  driverKycUnavailableButtonText: {
+    color: '#FFFFFF',
+    fontFamily: fonts.SemiBold,
+    fontSize: 14,
+    lineHeight: 19,
   },
   driverHomeSkeletonStack: {
     position: 'absolute',

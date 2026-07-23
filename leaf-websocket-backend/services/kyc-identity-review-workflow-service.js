@@ -798,6 +798,53 @@ class KycIdentityReviewWorkflowService {
     };
   }
 
+  async resumeExistingCaseRequest({
+    driverId,
+    evidenceId,
+    requestedBy
+  } = {}) {
+    const safeDriverId = requiredId(driverId, 'driverId');
+    const safeEvidenceId = requiredId(
+      evidenceId,
+      'evidenceId',
+      'KYC_IDENTITY_REVIEW_EVIDENCE_REQUIRED'
+    );
+    const evidence = await this.evidenceService.getMetadata(safeEvidenceId);
+    this.assertRecordScope(evidence);
+    this.assertEvidenceBelongsToDriver(evidence, safeDriverId);
+
+    let ticketId = optionalString(evidence.ticketId);
+    if (!ticketId) {
+      const service = this.caseService();
+      const caseId = service.caseIdFor(safeDriverId, safeEvidenceId);
+      const existingCase = await service.getCase(caseId);
+      if (existingCase) {
+        this.assertRecordScope(existingCase);
+        if (
+          optionalString(existingCase.driverId) !== safeDriverId
+          || optionalString(existingCase.evidenceBinding?.evidenceId) !== safeEvidenceId
+        ) {
+          throw domainError(
+            'KYC_IDENTITY_REVIEW_CASE_BINDING_INVALID',
+            'O caso existente nao pertence a evidencia informada'
+          );
+        }
+        ticketId = optionalString(existingCase.ticketId)
+          || (Array.isArray(existingCase.ticketIds)
+            ? optionalString(existingCase.ticketIds[0])
+            : null);
+      }
+    }
+
+    if (!ticketId) return null;
+    return this.openCaseFromTicket({
+      driverId: safeDriverId,
+      evidenceId: safeEvidenceId,
+      ticketId,
+      requestedBy
+    });
+  }
+
   async listCaseRecordsForDriver(driverId) {
     const safeDriverId = requiredId(driverId, 'driverId');
     const snapshot = await this.firestore()
@@ -921,7 +968,7 @@ class KycIdentityReviewWorkflowService {
     const cases = this.recordsFromQuerySnapshot(caseSnapshot);
     const failedEvidence = this.recordsFromQuerySnapshot(failedEvidenceSnapshot);
 
-    if (enforcement || cases.length > 0 || failedEvidence.length > 0 || evidenceRecords.length !== 1) {
+    if (cases.length > 0 || failedEvidence.length > 0 || evidenceRecords.length !== 1) {
       return null;
     }
 
@@ -930,6 +977,55 @@ class KycIdentityReviewWorkflowService {
       'failureEvidenceId',
       'KYC_ORPHAN_HOLD_RECOVERY_FAILURE_EVIDENCE_NOT_FOUND'
     );
+    const recoveryId = this.orphanRecoveryIdFor(
+      safeDriverId,
+      failureEvidenceId,
+      stateRevision
+    );
+    const authorization = await this.getRetryAuthorization(recoveryId);
+    if (enforcement || authorization) {
+      if (!enforcement || !authorization) return null;
+      const canonicalCnh = await this.canonicalApprovalService
+        .requireApprovedCnh(safeDriverId)
+        .catch(() => null);
+      const cnhSubmissionId = optionalString(canonicalCnh?.submissionId);
+      const cnhDocumentSha256 = String(canonicalCnh?.documentSha256 || '')
+        .trim()
+        .toLowerCase();
+      if (
+        !cnhSubmissionId
+        || !/^[a-f0-9]{64}$/.test(cnhDocumentSha256)
+        || !this.orphanRecoverySourceBindingMatches({
+          authorization,
+          driverId: safeDriverId,
+          recoveryId,
+          failureEvidenceId,
+          stateRevision,
+          revokedAt,
+          failureEvidence: evidenceRecords[0],
+          cnhSubmissionId,
+          cnhDocumentSha256
+        })
+        || !this.orphanRecoveryEnforcementMatches({
+          enforcement,
+          authorization,
+          driverId: safeDriverId,
+          recoveryId,
+          failureEvidenceId
+        })
+        || !this.isExpiredUntouchedOrphanRecoveryAuthorization(authorization)
+      ) {
+        return null;
+      }
+      return {
+        available: true,
+        status: 'renewal_required',
+        renewalRequired: true,
+        failureEvidenceId,
+        expectedStateRevision: stateRevision,
+        expectedRevokedAt: toIso(revokedAt)
+      };
+    }
     return {
       available: true,
       status: 'ready',
@@ -948,6 +1044,98 @@ class KycIdentityReviewWorkflowService {
       .update(`${safeDriverId}:${safeStateRevision}:${safeFailureEvidenceId}`)
       .digest('hex')
       .slice(0, 32)}`;
+  }
+
+  orphanFailureEvidenceBindingHash(driverId, failureEvidenceId, failureEvidence = {}) {
+    return crypto
+      .createHash('sha256')
+      .update(JSON.stringify({
+        driverId,
+        evidenceId: failureEvidenceId,
+        terminalOutcome: failureEvidence.terminalOutcome,
+        recordedAt: toIso(failureEvidence.recordedAt),
+        referenceImageSha256: optionalString(failureEvidence.referenceImageSha256)
+      }))
+      .digest('hex');
+  }
+
+  orphanRecoverySourceBindingMatches({
+    authorization,
+    driverId,
+    recoveryId,
+    failureEvidenceId,
+    stateRevision,
+    revokedAt,
+    failureEvidence,
+    cnhSubmissionId,
+    cnhDocumentSha256
+  } = {}) {
+    if (!authorization || !failureEvidence) return false;
+    return authorization.purpose === ORPHAN_RECOVERY_PURPOSE
+      && optionalString(authorization.authorizationId) === recoveryId
+      && optionalString(authorization.recoveryId) === recoveryId
+      && optionalString(authorization.caseId) == null
+      && optionalString(authorization.driverId) === driverId
+      && optionalString(authorization.sourceTrust?.failureEvidenceId) === failureEvidenceId
+      && Number(authorization.sourceTrust?.stateRevision || 0) === stateRevision
+      && sameIso(authorization.sourceTrust?.revokedAt, revokedAt)
+      && String(authorization.sourceTrust?.revocationReason || '').trim().toLowerCase()
+        === 'canonical_face_compare_failed'
+      && optionalString(authorization.sourceTrust?.failureEvidenceBindingHash)
+        === this.orphanFailureEvidenceBindingHash(
+          driverId,
+          failureEvidenceId,
+          failureEvidence
+        )
+      && optionalString(authorization.sourceCnh?.submissionId) === cnhSubmissionId
+      && String(authorization.sourceCnh?.documentSha256 || '').trim().toLowerCase()
+        === cnhDocumentSha256;
+  }
+
+  orphanRecoveryEnforcementMatches({
+    enforcement,
+    authorization,
+    driverId,
+    recoveryId,
+    failureEvidenceId
+  } = {}) {
+    return enforcement?.active === true
+      && enforcement?.permanent !== true
+      && String(enforcement.status || '').trim().toUpperCase()
+        === ORPHAN_RECOVERY_ENFORCEMENT_STATUS
+      && optionalString(enforcement.driverId) === driverId
+      && optionalString(enforcement.recoveryId) === recoveryId
+      && optionalString(enforcement.sourceFailureEvidenceId) === failureEvidenceId
+      && String(enforcement.reasonCode || '').trim().toUpperCase()
+        === 'ORPHAN_CANONICAL_FACE_COMPARE_HOLD'
+      && enforcement.retryAllowed === true
+      && Number(enforcement.retryAttempts) === 1
+      && enforcement.identityApproved !== true
+      && sameIso(enforcement.expiresAt, authorization?.expiresAt);
+  }
+
+  isExpiredUntouchedOrphanRecoveryAuthorization(authorization) {
+    const authorizedAtMs = Date.parse(authorization?.authorizedAt || '');
+    const expiresAtMs = Date.parse(authorization?.expiresAt || '');
+    const renewalCount = Number(authorization?.renewalCount || 0);
+    return authorization?.status === 'AVAILABLE'
+      && Number(authorization?.allowedAttempts) === 1
+      && Number(authorization?.remainingAttempts) === 1
+      && authorization?.identityApproved !== true
+      && Number.isFinite(authorizedAtMs)
+      && Number.isFinite(expiresAtMs)
+      && expiresAtMs > authorizedAtMs
+      && expiresAtMs <= this.nowDate().getTime()
+      && Number.isSafeInteger(renewalCount)
+      && renewalCount >= 0
+      && !optionalString(authorization?.claimedAt)
+      && !optionalString(authorization?.consumedAt)
+      && !optionalString(authorization?.terminalAt)
+      && !optionalString(authorization?.claimTokenHash)
+      && !optionalString(authorization?.consumedSessionIdHash)
+      && !optionalString(authorization?.lastReleasedAt)
+      && !optionalString(authorization?.lastReleaseReason)
+      && !optionalString(authorization?.recoveredSessionAt);
   }
 
   identityTrustStateRef(driverId) {
@@ -1116,17 +1304,17 @@ class KycIdentityReviewWorkflowService {
           this.assertNotPermanentlyBlocked(enforcement);
 
           if (existingAuthorization) {
-            const sameBinding = existingAuthorization.purpose === ORPHAN_RECOVERY_PURPOSE
-              && optionalString(existingAuthorization.driverId) === safeDriverId
-              && optionalString(existingAuthorization.recoveryId) === recoveryId
-              && optionalString(existingAuthorization.sourceTrust?.failureEvidenceId)
-                === safeFailureEvidenceId
-              && Number(existingAuthorization.sourceTrust?.stateRevision || 0)
-                === safeStateRevision
-              && sameIso(existingAuthorization.sourceTrust?.revokedAt, safeExpectedRevokedAt)
-              && optionalString(existingAuthorization.sourceCnh?.submissionId) === cnhSubmissionId
-              && String(existingAuthorization.sourceCnh?.documentSha256 || '').toLowerCase()
-                === cnhDocumentSha256;
+            const sameBinding = this.orphanRecoverySourceBindingMatches({
+              authorization: existingAuthorization,
+              driverId: safeDriverId,
+              recoveryId,
+              failureEvidenceId: safeFailureEvidenceId,
+              stateRevision: safeStateRevision,
+              revokedAt: safeExpectedRevokedAt,
+              failureEvidence,
+              cnhSubmissionId,
+              cnhDocumentSha256
+            });
             const ownEnforcement = enforcement?.permanent !== true
               && optionalString(enforcement?.recoveryId) === recoveryId
               && [
@@ -1140,6 +1328,96 @@ class KycIdentityReviewWorkflowService {
                 'KYC_ORPHAN_HOLD_RECOVERY_IDEMPOTENCY_CONFLICT',
                 'A recuperacao existente possui binding divergente'
               );
+            }
+            const expiresAtMs = Date.parse(existingAuthorization.expiresAt || '');
+            if (!Number.isFinite(expiresAtMs)) {
+              throw domainError(
+                'KYC_ORPHAN_HOLD_RECOVERY_IDEMPOTENCY_CONFLICT',
+                'A recuperacao existente possui expiracao invalida'
+              );
+            }
+            const authorizationExpired = expiresAtMs <= now.getTime();
+            if (authorizationExpired) {
+              if (
+                !this.orphanRecoveryEnforcementMatches({
+                  enforcement,
+                  authorization: existingAuthorization,
+                  driverId: safeDriverId,
+                  recoveryId,
+                  failureEvidenceId: safeFailureEvidenceId
+                })
+                || !this.isExpiredUntouchedOrphanRecoveryAuthorization(
+                  existingAuthorization
+                )
+              ) {
+                throw domainError(
+                  'KYC_ORPHAN_HOLD_RECOVERY_RENEWAL_NOT_ALLOWED',
+                  'A autorizacao expirada ja foi reclamada, consumida ou perdeu seu binding'
+                );
+              }
+              const renewalCount = Number(existingAuthorization.renewalCount || 0) + 1;
+              const renewedExpiresAt = new Date(
+                now.getTime() + this.orphanRecoveryTtlMs
+              ).toISOString();
+              const renewedAuthorization = this.scopedWriteRecord({
+                ...existingAuthorization,
+                status: 'AVAILABLE',
+                allowedAttempts: 1,
+                remainingAttempts: 1,
+                expiresAt: renewedExpiresAt,
+                renewalCount,
+                lastRenewedAt: nowIso,
+                lastRenewedBy: reviewer,
+                lastRenewalReason: safeReason,
+                renewalPreviousExpiresAt: existingAuthorization.expiresAt,
+                renewalSetupState: 'PENDING',
+                renewalRolledBackAt: null,
+                renewalRollbackReason: null,
+                updatedAt: nowIso
+              }, existingAuthorization);
+              const renewedEnforcement = this.scopedWriteRecord({
+                ...enforcement,
+                status: ORPHAN_RECOVERY_ENFORCEMENT_STATUS,
+                active: true,
+                permanent: false,
+                retryAllowed: true,
+                retryAttempts: 1,
+                identityApproved: false,
+                expiresAt: renewedExpiresAt,
+                lastRenewedAt: nowIso,
+                lastRenewedBy: reviewer,
+                renewalPreviousExpiresAt: enforcement.expiresAt,
+                renewalSetupState: 'PENDING',
+                renewalRolledBackAt: null,
+                updatedAt: nowIso
+              }, enforcement);
+              const auditSequence = String(renewalCount + 1).padStart(6, '0');
+              const renewalAuditRef = firestore
+                .collection(this.auditCollection)
+                .doc(`${recoveryId}_${auditSequence}_orphan_hold_recovery_renewed`);
+              transaction.set(authorizationRef, renewedAuthorization, { merge: false });
+              transaction.set(enforcementRef, renewedEnforcement, { merge: false });
+              transaction.set(renewalAuditRef, this.scopedWriteRecord({
+                schemaVersion: 1,
+                recoveryId,
+                driverId: safeDriverId,
+                action: 'ORPHAN_HOLD_RECOVERY_AUTHORIZATION_RENEWED',
+                actor: reviewer,
+                reason: safeReason,
+                renewalCount,
+                previousExpiresAt: toIso(existingAuthorization.expiresAt),
+                expiresAt: renewedExpiresAt,
+                sourceFailureEvidenceId: safeFailureEvidenceId,
+                sourceStateRevision: safeStateRevision,
+                occurredAt: nowIso,
+                immutable: true
+              }), { merge: false });
+              return {
+                authorization: renewedAuthorization,
+                enforcement: renewedEnforcement,
+                idempotentReplay: false,
+                renewed: true
+              };
             }
             return {
               authorization: existingAuthorization,
@@ -1155,16 +1433,11 @@ class KycIdentityReviewWorkflowService {
             );
           }
 
-          const failureEvidenceBindingHash = crypto
-            .createHash('sha256')
-            .update(JSON.stringify({
-              driverId: safeDriverId,
-              evidenceId: safeFailureEvidenceId,
-              terminalOutcome: failureEvidence.terminalOutcome,
-              recordedAt: toIso(failureEvidence.recordedAt),
-              referenceImageSha256: optionalString(failureEvidence.referenceImageSha256)
-            }))
-            .digest('hex');
+          const failureEvidenceBindingHash = this.orphanFailureEvidenceBindingHash(
+            safeDriverId,
+            safeFailureEvidenceId,
+            failureEvidence
+          );
           const authorization = this.scopedWriteRecord({
             schemaVersion: 1,
             authorizationId: recoveryId,
@@ -1241,7 +1514,8 @@ class KycIdentityReviewWorkflowService {
           attemptScope: `${ORPHAN_HOLD_RETRY_SCOPE_PREFIX}${recoveryId}`,
           authorization: safeRetryAuthorizationMetadata(result.authorization),
           enforcementStatus: result.enforcement?.status || null,
-          idempotentReplay: result.idempotentReplay === true
+          idempotentReplay: result.idempotentReplay === true,
+          ...(result.renewed === true ? { renewed: true } : {})
         };
       }
     );
@@ -1302,12 +1576,116 @@ class KycIdentityReviewWorkflowService {
           idempotentReplay: true
         };
       }
+      if (authorization.renewalSetupState === 'ROLLED_BACK') {
+        if (authorization.renewalRollbackReason !== safeReason) {
+          throw domainError(
+            'KYC_ORPHAN_HOLD_RECOVERY_ABORT_REASON_CONFLICT',
+            'A compensacao da renovacao existente possui outra justificativa'
+          );
+        }
+        return {
+          authorization: safeRetryAuthorizationMetadata(authorization),
+          enforcement,
+          idempotentReplay: true,
+          renewalRolledBack: true
+        };
+      }
+      if (authorization.renewalSetupState === 'PENDING') {
+        const previousExpiresAt = optionalString(
+          authorization.renewalPreviousExpiresAt
+        );
+        const previousExpiresAtMs = Date.parse(previousExpiresAt || '');
+        const currentExpiresAtMs = Date.parse(authorization.expiresAt || '');
+        const renewalCount = Number(authorization.renewalCount || 0);
+        const untouchedRenewal = authorization.status === 'AVAILABLE'
+          && Number(authorization.allowedAttempts) === 1
+          && Number(authorization.remainingAttempts) === 1
+          && !authorization.claimedAt
+          && !authorization.consumedAt
+          && !authorization.terminalAt
+          && !authorization.claimTokenHash
+          && !authorization.consumedSessionIdHash
+          && !authorization.lastReleasedAt
+          && Number.isSafeInteger(renewalCount)
+          && renewalCount > 0;
+        const exactRenewedEnforcement = enforcement.active === true
+          && enforcement.permanent !== true
+          && String(enforcement.status || '').trim().toUpperCase()
+            === ORPHAN_RECOVERY_ENFORCEMENT_STATUS
+          && enforcement.retryAllowed === true
+          && Number(enforcement.retryAttempts) === 1
+          && sameIso(enforcement.expiresAt, authorization.expiresAt)
+          && sameIso(enforcement.renewalPreviousExpiresAt, previousExpiresAt);
+        if (
+          !untouchedRenewal
+          || !exactRenewedEnforcement
+          || !Number.isFinite(previousExpiresAtMs)
+          || !Number.isFinite(currentExpiresAtMs)
+          || previousExpiresAtMs >= currentExpiresAtMs
+        ) {
+          throw domainError(
+            'KYC_ORPHAN_HOLD_RECOVERY_ALREADY_DISPATCHED',
+            'A renovacao ja foi reclamada, consumida ou perdeu seu binding de compensacao'
+          );
+        }
+        const rolledBackAuthorization = this.scopedWriteRecord({
+          ...authorization,
+          status: 'AVAILABLE',
+          allowedAttempts: 1,
+          remainingAttempts: 1,
+          expiresAt: previousExpiresAt,
+          renewalSetupState: 'ROLLED_BACK',
+          renewalRolledBackAt: abortedAt,
+          renewalRollbackReason: safeReason,
+          updatedAt: abortedAt
+        }, authorization);
+        const rolledBackEnforcement = this.scopedWriteRecord({
+          ...enforcement,
+          active: true,
+          permanent: false,
+          status: ORPHAN_RECOVERY_ENFORCEMENT_STATUS,
+          retryAllowed: true,
+          retryAttempts: 1,
+          identityApproved: false,
+          expiresAt: previousExpiresAt,
+          renewalSetupState: 'ROLLED_BACK',
+          renewalRolledBackAt: abortedAt,
+          updatedAt: abortedAt
+        }, enforcement);
+        const auditSequence = String(renewalCount + 1).padStart(6, '0');
+        const rollbackAuditRef = firestore
+          .collection(this.auditCollection)
+          .doc(`${safeRecoveryId}_${auditSequence}_orphan_hold_recovery_renewal_setup_rolled_back`);
+        transaction.set(authorizationRef, rolledBackAuthorization, { merge: false });
+        transaction.set(enforcementRef, rolledBackEnforcement, { merge: false });
+        transaction.set(rollbackAuditRef, this.scopedWriteRecord({
+          schemaVersion: 1,
+          recoveryId: safeRecoveryId,
+          driverId: safeDriverId,
+          action: 'ORPHAN_HOLD_RECOVERY_RENEWAL_SETUP_ROLLED_BACK',
+          actor: { uid: 'system:kyc-recovery-setup', type: 'system' },
+          reason: safeReason,
+          renewalCount,
+          renewedExpiresAt: authorization.expiresAt,
+          restoredExpiresAt: previousExpiresAt,
+          occurredAt: abortedAt,
+          immutable: true
+        }), { merge: false });
+        return {
+          authorization: safeRetryAuthorizationMetadata(rolledBackAuthorization),
+          enforcement: rolledBackEnforcement,
+          idempotentReplay: false,
+          renewalRolledBack: true
+        };
+      }
       if (
         authorization.status !== 'AVAILABLE'
         || Number(authorization.remainingAttempts) !== 1
         || authorization.claimedAt
         || authorization.consumedAt
         || authorization.claimTokenHash
+        || authorization.consumedSessionIdHash
+        || authorization.lastReleasedAt
       ) {
         throw domainError(
           'KYC_ORPHAN_HOLD_RECOVERY_ALREADY_DISPATCHED',
@@ -1622,6 +2000,11 @@ class KycIdentityReviewWorkflowService {
       || (trustMismatchHold && !retryAuthorized)
       || ((falsePositiveRetryState || orphanRecoveryState) && !retryAuthorized)
     );
+    const holdEvidenceId = optionalString(
+      holdCase?.evidenceBinding?.evidenceId
+      || enforcement?.evidenceId
+      || (trustMismatchHold ? trustState?.lastFailure?.reviewEvidenceId : null)
+    );
     return {
       allowed: true,
       driverId: safeDriverId,
@@ -1636,10 +2019,11 @@ class KycIdentityReviewWorkflowService {
       retryAuthorizationId: retryBinding?.authorizationId || null,
       retryAuthorizationKind: retryBinding?.kind || null,
       holdCaseId: holdCase?.caseId || enforcement?.caseId || null,
+      holdEvidenceId,
       holdRecoveryId: enforcement?.recoveryId || null,
       holdTicketId: holdCase?.ticketId || enforcement?.ticketId || null,
       holdStatus: holdCase?.status || (enforcementHold ? enforcementStatus : null),
-      reviewAvailable: Boolean(holdCase?.caseId)
+      reviewAvailable: Boolean(holdCase?.caseId || (identityReviewHold && holdEvidenceId))
     };
   }
 

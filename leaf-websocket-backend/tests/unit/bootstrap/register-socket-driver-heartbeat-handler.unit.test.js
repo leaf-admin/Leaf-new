@@ -1,19 +1,47 @@
-jest.mock('../../../utils/active-trip-index', () => ({
-  resolveActiveTripForDriver: jest.fn().mockResolvedValue({ tripId: null, customerId: null }),
-  setActiveTripForDriver: jest.fn().mockResolvedValue(true)
-}));
-
-jest.mock('../../../services/driver-eligibility-service', () => ({
-  isDriverEligibleForRide: jest.fn()
-}));
-
-const registerSocketDriverHeartbeatHandler = require('../../../bootstrap/register-socket-driver-heartbeat-handler');
-const activeTripIndex = require('../../../utils/active-trip-index');
-const driverEligibilityService = require('../../../services/driver-eligibility-service');
-
 jest.mock('../../../services/heartbeat-service', () => ({
   ping: jest.fn().mockResolvedValue(undefined),
 }));
+
+jest.mock('../../../utils/active-trip-index', () => ({
+  resolveActiveTripForDriver: jest.fn().mockResolvedValue(null),
+  renewActiveTripForDriver: jest.fn().mockResolvedValue(true),
+}));
+
+jest.mock('../../../services/driver-eligibility-service', () => ({
+  isDriverEligibleForRide: jest.fn(),
+}));
+
+const activeTripIndex = require('../../../utils/active-trip-index');
+const driverEligibilityService = require('../../../services/driver-eligibility-service');
+const registerSocketDriverHeartbeatHandler = require('../../../bootstrap/register-socket-driver-heartbeat-handler');
+
+const FORBIDDEN_MOBILE_KYC_FIELDS = new Set([
+  'challenge',
+  'score',
+  'signals',
+  'metadata',
+  'attemptState',
+  'supportTicketId',
+  'envelope',
+  'financialEnvelope',
+  'costEnvelope',
+  'estimatedUnitCostUsd',
+  'estimatedCostUsd',
+]);
+
+function findForbiddenMobileKycPaths(value, path = '$') {
+  if (!value || typeof value !== 'object') return [];
+  if (Array.isArray(value)) {
+    return value.flatMap((item, index) => findForbiddenMobileKycPaths(item, `${path}[${index}]`));
+  }
+  return Object.entries(value).flatMap(([key, nestedValue]) => {
+    const nestedPath = `${path}.${key}`;
+    return [
+      ...(FORBIDDEN_MOBILE_KYC_FIELDS.has(key) ? [nestedPath] : []),
+      ...findForbiddenMobileKycPaths(nestedValue, nestedPath),
+    ];
+  });
+}
 
 function createSocket() {
   const handlers = new Map();
@@ -30,18 +58,103 @@ function createSocket() {
 describe('register-socket-driver-heartbeat-handler', () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    activeTripIndex.resolveActiveTripForDriver.mockResolvedValue({ tripId: null, customerId: null });
-    activeTripIndex.setActiveTripForDriver.mockResolvedValue(true);
+    activeTripIndex.resolveActiveTripForDriver.mockResolvedValue(null);
+    activeTripIndex.renewActiveTripForDriver.mockResolvedValue(true);
     driverEligibilityService.isDriverEligibleForRide.mockResolvedValue({
       eligible: true,
-      code: 'ELIGIBLE'
+      code: 'ELIGIBLE',
     });
   });
 
-  it('keeps a backend-indexed active ride alive without running subscription or KYC gates', async () => {
+  it('does not trust client in-trip flags to bypass the outside-ride KYC gate', async () => {
+    const socket = createSocket();
+    const redis = {
+      hgetall: jest.fn().mockResolvedValue({ isOnline: 'false' }),
+      hset: jest.fn().mockResolvedValue(1),
+      zrem: jest.fn().mockResolvedValue(1),
+      srem: jest.fn().mockResolvedValue(1),
+    };
+    const enforceSubscriptionForOnline = jest.fn().mockResolvedValue({ allowed: true });
+    const enforceDailyKYCForOnline = jest.fn().mockResolvedValue({
+      allowed: false,
+      code: 'KYC_REQUIRED',
+      reason: 'internal provider diagnostic',
+      requirement: 'IDENTITY_REVERIFICATION',
+      challenge: {
+        challengeId: 'challenge_heartbeat_1',
+        score: 62,
+        signals: ['INTERNAL_SIGNAL'],
+        metadata: { attemptState: { started: 2 } },
+        envelope: { estimatedCostUsd: 0.115 },
+        supportTicketId: 'ticket_heartbeat_internal',
+      },
+      score: 62,
+      signals: ['INTERNAL_SIGNAL'],
+      metadata: { provider: 'internal-provider' },
+      attemptState: { started: 2 },
+      financialEnvelope: { estimatedUnitCostUsd: 0.115 },
+      supportTicketId: 'ticket_heartbeat_internal',
+      reviewAvailable: true,
+      reviewCaseId: 'case_heartbeat_1',
+      evidenceId: 'evidence_heartbeat_1',
+    });
+
+    registerSocketDriverHeartbeatHandler({
+      socket,
+      redisPool: { getConnection: jest.fn(() => redis) },
+      logStructured: jest.fn(),
+      enforceSubscriptionForOnline,
+      enforceDailyKYCForOnline,
+      saveDriverLocation: jest.fn(),
+      vehicleLockManager: { renewLock: jest.fn() },
+    });
+
+    await socket.trigger('driverHeartbeat', {
+      lat: -22.9,
+      lng: -43.2,
+      tripStatus: 'started',
+      isInTrip: true,
+      bookingId: 'forged_trip',
+    });
+
+    expect(activeTripIndex.resolveActiveTripForDriver).toHaveBeenCalledWith(redis, 'driver_1');
+    expect(enforceSubscriptionForOnline).toHaveBeenCalledWith('driver_1');
+    expect(enforceDailyKYCForOnline).toHaveBeenCalledWith('driver_1');
+    expect(redis.hset).toHaveBeenCalledWith(
+      'driver:driver_1',
+      expect.objectContaining({
+        dispatchEligible: 'false',
+        dispatchEligibilityCode: 'KYC_REQUIRED',
+      })
+    );
+    expect(redis.hset).not.toHaveBeenCalledWith(
+      'driver:driver_1',
+      expect.objectContaining({ dispatchEligibilityCode: 'IN_TRIP_KYC_DEFERRED' })
+    );
+    expect(socket.emit).toHaveBeenCalledWith(
+      'driverStatusError',
+      expect.objectContaining({
+        reviewAvailable: true,
+        reviewCaseId: 'case_heartbeat_1',
+        evidenceId: 'evidence_heartbeat_1',
+      })
+    );
+    const publicKycPayload = socket.emit.mock.calls.find(
+      ([eventName, payload]) => eventName === 'driverStatusError' && payload?.kycRequired === true
+    )?.[1];
+    expect(publicKycPayload).toEqual(expect.objectContaining({
+      error: 'Verificação facial necessária para ficar online.',
+      reason: 'Verificação facial necessária para ficar online.',
+      challengeId: 'challenge_heartbeat_1',
+      requirement: 'IDENTITY_REVERIFICATION',
+    }));
+    expect(findForbiddenMobileKycPaths(publicKycPayload)).toEqual([]);
+  });
+
+  it('keeps a backend-indexed active ride outside paid KYC gates', async () => {
     activeTripIndex.resolveActiveTripForDriver.mockResolvedValue({
       tripId: 'trip_active_1',
-      customerId: 'customer_1'
+      customerId: 'customer_1',
     });
     const socket = createSocket();
     const redis = {
@@ -50,7 +163,7 @@ describe('register-socket-driver-heartbeat-handler', () => {
         isOnline: 'false',
         dispatchEligible: 'true',
         lat: '-22.9',
-        lng: '-43.2'
+        lng: '-43.2',
       }),
       hset: jest.fn().mockResolvedValue(1),
       expire: jest.fn().mockResolvedValue(1),
@@ -58,10 +171,10 @@ describe('register-socket-driver-heartbeat-handler', () => {
       geoadd: jest.fn().mockResolvedValue(1),
       zrem: jest.fn().mockResolvedValue(1),
       sadd: jest.fn().mockResolvedValue(1),
-      srem: jest.fn().mockResolvedValue(1)
+      srem: jest.fn().mockResolvedValue(1),
     };
-    const enforceSubscriptionForOnline = jest.fn().mockResolvedValue({ allowed: false });
-    const enforceDailyKYCForOnline = jest.fn().mockResolvedValue({ allowed: false });
+    const enforceSubscriptionForOnline = jest.fn();
+    const enforceDailyKYCForOnline = jest.fn();
 
     registerSocketDriverHeartbeatHandler({
       socket,
@@ -70,57 +183,99 @@ describe('register-socket-driver-heartbeat-handler', () => {
       enforceSubscriptionForOnline,
       enforceDailyKYCForOnline,
       saveDriverLocation: jest.fn(),
-      vehicleLockManager: { renewLock: jest.fn() }
+      vehicleLockManager: { renewLock: jest.fn() },
     });
 
     await socket.trigger('driverHeartbeat', {
-      driverId: 'driver_1',
       lat: -22.9,
       lng: -43.2,
       tripStatus: 'available',
-      isInTrip: false
+      isInTrip: false,
     });
 
     expect(enforceSubscriptionForOnline).not.toHaveBeenCalled();
     expect(enforceDailyKYCForOnline).not.toHaveBeenCalled();
-    expect(activeTripIndex.setActiveTripForDriver).toHaveBeenCalledWith(
+    expect(activeTripIndex.renewActiveTripForDriver).toHaveBeenCalledWith(
       redis,
       'driver_1',
-      'trip_active_1',
-      'customer_1'
+      'trip_active_1'
     );
-    expect(redis.zrem).toHaveBeenCalledWith('driver_locations_eligible', 'driver_1');
     expect(redis.hset).toHaveBeenCalledWith(
       'driver:driver_1',
       expect.objectContaining({
         isOnline: 'true',
         dispatchEligible: 'false',
         dispatchEligibilityCode: 'IN_TRIP_KYC_DEFERRED',
-        kycRecheckPendingAfterTrip: 'true',
-        activeTripId: 'trip_active_1'
+        activeTripId: 'trip_active_1',
       })
-    );
-    expect(redis.geoadd).not.toHaveBeenCalledWith(
-      'driver_locations_eligible',
-      expect.anything(),
-      expect.anything(),
-      'driver_1'
     );
   });
 
-  it('fails safe when the active-trip index is unavailable without KYC or offline transitions', async () => {
-    activeTripIndex.resolveActiveTripForDriver.mockRejectedValueOnce(new Error('redis unavailable'));
+  it('fails closed when a resolved ride lease cannot be renewed', async () => {
+    activeTripIndex.resolveActiveTripForDriver.mockResolvedValue({
+      tripId: 'trip_stale_or_racing',
+      customerId: 'customer_1',
+    });
+    activeTripIndex.renewActiveTripForDriver.mockResolvedValue(false);
     const socket = createSocket();
     const redis = {
       hgetall: jest.fn().mockResolvedValue({
         id: 'driver_1',
-        status: 'IN_PROGRESS',
-        isOnline: 'true',
+        isOnline: 'false',
+        dispatchEligible: 'true',
+        lat: '-22.9',
+        lng: '-43.2',
+      }),
+      hset: jest.fn().mockResolvedValue(1),
+      expire: jest.fn().mockResolvedValue(1),
+      zscore: jest.fn().mockResolvedValue('1'),
+      geoadd: jest.fn().mockResolvedValue(1),
+      zrem: jest.fn().mockResolvedValue(1),
+      sadd: jest.fn().mockResolvedValue(1),
+      srem: jest.fn().mockResolvedValue(1),
+    };
+    const enforceSubscriptionForOnline = jest.fn();
+    const enforceDailyKYCForOnline = jest.fn();
+
+    registerSocketDriverHeartbeatHandler({
+      socket,
+      redisPool: { getConnection: jest.fn(() => redis) },
+      logStructured: jest.fn(),
+      enforceSubscriptionForOnline,
+      enforceDailyKYCForOnline,
+      saveDriverLocation: jest.fn(),
+      vehicleLockManager: { renewLock: jest.fn() },
+    });
+
+    await socket.trigger('driverHeartbeat', { lat: -22.9, lng: -43.2 });
+
+    expect(enforceSubscriptionForOnline).not.toHaveBeenCalled();
+    expect(enforceDailyKYCForOnline).not.toHaveBeenCalled();
+    expect(redis.hset).toHaveBeenCalledWith(
+      'driver:driver_1',
+      expect.objectContaining({
         dispatchEligible: 'false',
         dispatchEligibilityCode: 'IN_TRIP_KYC_DEFERRED',
-        lat: '-22.9',
-        lng: '-43.2'
-      }),
+      })
+    );
+  });
+
+  it('opens a new daily online session after the operational day rolls over', async () => {
+    const socket = createSocket();
+    const onlineDriver = {
+      id: 'driver_1',
+      isOnline: 'true',
+      dispatchEligible: 'true',
+      dispatchEligibilityCode: 'ELIGIBLE',
+      lat: '-22.9',
+      lng: '-43.2'
+    };
+    const redis = {
+      hgetall: jest.fn()
+        .mockResolvedValueOnce(onlineDriver)
+        .mockResolvedValueOnce({})
+        .mockResolvedValueOnce({})
+        .mockResolvedValueOnce(onlineDriver),
       hset: jest.fn().mockResolvedValue(1),
       expire: jest.fn().mockResolvedValue(1),
       zscore: jest.fn().mockResolvedValue('1'),
@@ -129,15 +284,13 @@ describe('register-socket-driver-heartbeat-handler', () => {
       sadd: jest.fn().mockResolvedValue(1),
       srem: jest.fn().mockResolvedValue(1)
     };
-    const enforceSubscriptionForOnline = jest.fn().mockResolvedValue({ allowed: false });
-    const enforceDailyKYCForOnline = jest.fn().mockResolvedValue({ allowed: false });
 
     registerSocketDriverHeartbeatHandler({
       socket,
       redisPool: { getConnection: jest.fn(() => redis) },
       logStructured: jest.fn(),
-      enforceSubscriptionForOnline,
-      enforceDailyKYCForOnline,
+      enforceSubscriptionForOnline: jest.fn(),
+      enforceDailyKYCForOnline: jest.fn(),
       saveDriverLocation: jest.fn(),
       vehicleLockManager: { renewLock: jest.fn() }
     });
@@ -149,23 +302,12 @@ describe('register-socket-driver-heartbeat-handler', () => {
       isInTrip: false
     });
 
-    expect(enforceSubscriptionForOnline).not.toHaveBeenCalled();
-    expect(enforceDailyKYCForOnline).not.toHaveBeenCalled();
-    expect(driverEligibilityService.isDriverEligibleForRide).not.toHaveBeenCalled();
-    expect(redis.zrem).not.toHaveBeenCalledWith('driver_locations', 'driver_1');
-    expect(redis.srem).not.toHaveBeenCalledWith('online_drivers', 'driver_1');
     expect(redis.hset).toHaveBeenCalledWith(
-      'driver:driver_1',
+      expect.stringMatching(/^driver_online_daily:\d{4}-\d{2}-\d{2}:driver_1$/),
       expect.objectContaining({
-        isOnline: 'true',
-        dispatchEligible: 'false',
-        dispatchEligibilityCode: 'IN_TRIP_KYC_DEFERRED',
-        kycRecheckPendingAfterTrip: 'true'
+        driverId: 'driver_1',
+        sessionStartedAtMs: expect.any(String)
       })
-    );
-    expect(socket.emit).not.toHaveBeenCalledWith(
-      'driverStatusError',
-      expect.anything()
     );
   });
 
@@ -547,7 +689,11 @@ describe('register-socket-driver-heartbeat-handler', () => {
     );
   });
 
-  it('does not run the post-trip KYC gate while the heartbeat still reports in-trip state', async () => {
+  it('does not run the post-trip KYC gate while the backend reports an active trip', async () => {
+    activeTripIndex.resolveActiveTripForDriver.mockResolvedValue({
+      tripId: 'trip_active_heartbeat',
+      customerId: 'customer_1',
+    });
     const socket = createSocket();
     const redis = {
       hgetall: jest.fn().mockResolvedValue({

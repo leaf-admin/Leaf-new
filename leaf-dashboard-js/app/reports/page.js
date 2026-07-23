@@ -14,7 +14,6 @@ export default function ReportsPage() {
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState("");
   const [statusMessage, setStatusMessage] = useState("");
-  const [reportFormats, setReportFormats] = useState({});
 
   useEffect(() => {
     let mounted = true;
@@ -76,7 +75,6 @@ export default function ReportsPage() {
           </div>
           <div className="filters">
             <input
-              aria-label="Buscar relatórios"
               placeholder="Buscar relatório"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
@@ -98,40 +96,28 @@ export default function ReportsPage() {
                   <p>Nenhum relatório disponível para os filtros atuais.</p>
                 </article>
               ) : (
-                filteredReports.map((report) => {
-                  const selectedFormat = reportFormats[report.id] || "pdf";
-                  const generationKey = `${report.id}:${selectedFormat}`;
-                  return (
-                    <article className="card" key={report.id}>
-                      <h2>{report.name || report.title || report.id}</h2>
-                      <p>{report.description || "Sem descrição"}</p>
-                      <div className="filters">
-                        <label>
-                          Formato
-                          <select
-                            value={selectedFormat}
-                            onChange={(event) => setReportFormats((current) => ({
-                              ...current,
-                              [report.id]: event.target.value,
-                            }))}
-                          >
-                            <option value="pdf">PDF</option>
-                            <option value="excel">Excel</option>
-                          </select>
-                        </label>
-                        <button
-                          type="button"
-                          className="primary-action"
-                          disabled={Boolean(generating)}
-                          onClick={() => generate(report.id, selectedFormat)}
-                          data-testid={`report-${report.id}-${selectedFormat}`}
-                        >
-                          {generating === generationKey ? "Gerando..." : "Gerar relatório"}
-                        </button>
-                      </div>
-                    </article>
-                  );
-                })
+                filteredReports.map((report) => (
+                  <article className="card" key={report.id}>
+                    <h2>{report.name || report.title || report.id}</h2>
+                    <p>{report.description || "Sem descrição"}</p>
+                    <div className="filters">
+                      <button
+                        disabled={Boolean(generating)}
+                        onClick={() => generate(report.id, "pdf")}
+                        data-testid={`report-${report.id}-pdf`}
+                      >
+                        {generating === `${report.id}:pdf` ? "Gerando PDF" : "PDF"}
+                      </button>
+                      <button
+                        disabled={Boolean(generating)}
+                        onClick={() => generate(report.id, "excel")}
+                        data-testid={`report-${report.id}-excel`}
+                      >
+                        {generating === `${report.id}:excel` ? "Gerando Excel" : "Excel"}
+                      </button>
+                    </div>
+                  </article>
+                ))
               )}
             </div>
           </Panel>

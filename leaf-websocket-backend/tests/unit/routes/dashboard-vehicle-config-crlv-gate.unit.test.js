@@ -9,6 +9,10 @@ const mockRedisHset = jest.fn();
 const mockRedisDel = jest.fn();
 const mockRedisZrem = jest.fn();
 const mockRedisSrem = jest.fn();
+const mockRedisEval = jest.fn(async () => {
+  if (mockActiveTripReadError) throw mockActiveTripReadError;
+  return [mockActiveTripId || '', ''];
+});
 const mockRedisGet = jest.fn(async (key) => {
   if (mockActiveTripReadError) throw mockActiveTripReadError;
   return key.startsWith('active_trip_by_driver:') ? mockActiveTripId : null;
@@ -110,6 +114,7 @@ jest.mock('../../../utils/redis-pool', () => ({
     del: mockRedisDel,
     zrem: mockRedisZrem,
     srem: mockRedisSrem,
+    eval: mockRedisEval,
     get: mockRedisGet,
     hget: mockRedisHget,
   })),

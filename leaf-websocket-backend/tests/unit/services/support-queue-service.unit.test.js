@@ -113,6 +113,63 @@ describe('support-queue-service', () => {
     }));
   });
 
+  it('propagates the sandbox persistence context through create, read and queue mutation paths', async () => {
+    const persistenceContext = Object.freeze({
+      namespace: 'sandbox',
+      profileId: 'qa-test-users-sandbox-durable',
+      financialContextId: 'ctx_sandbox_1'
+    });
+    const ticket = {
+      id: 'ticket-sandbox-1',
+      priority: 'N3',
+      status: 'open',
+      createdAt: '2026-07-21T18:00:00.000Z',
+      metadata: {}
+    };
+    const ticketService = {
+      createTicket: jest.fn(async () => ({ ticket })),
+      listTicketsByStatuses: jest.fn(async () => ({ tickets: [ticket] })),
+      listMessages: jest.fn(async () => []),
+      getTicket: jest.fn(async () => ticket),
+      assignTicket: jest.fn(async () => ticket),
+      updateTicketMetadata: jest.fn(async () => ticket)
+    };
+    const service = new SupportQueueService({ ticketService });
+
+    await service.createSupportTicket({
+      subject: 'Revisão de identidade',
+      description: 'Solicitação sandbox isolada.',
+      requesterId: 'driver-sandbox',
+      userType: 'driver',
+      persistenceContext
+    });
+    await service.getBacklog({ persistenceContext });
+    await service.assignTicket('ticket-sandbox-1', {
+      agentId: 'agent-1',
+      agentName: 'Agente',
+      actorId: 'agent-1'
+    }, persistenceContext);
+
+    expect(ticketService.createTicket).toHaveBeenCalledWith(expect.objectContaining({
+      persistenceContext
+    }));
+    expect(ticketService.listTicketsByStatuses).toHaveBeenCalledWith(
+      expect.any(Array),
+      expect.objectContaining({ persistenceContext })
+    );
+    expect(ticketService.assignTicket).toHaveBeenCalledWith(
+      'ticket-sandbox-1',
+      expect.any(Object),
+      persistenceContext
+    );
+    expect(ticketService.updateTicketMetadata).toHaveBeenCalledWith(
+      'ticket-sandbox-1',
+      expect.any(Object),
+      persistenceContext
+    );
+    expect(ticketService.getTicket).toHaveBeenCalledWith('ticket-sandbox-1', persistenceContext);
+  });
+
   it('computes backlog summary and auto-escalates SLA breach', async () => {
     const firestore = createFirestoreMock();
     const ticket = {
@@ -127,6 +184,7 @@ describe('support-queue-service', () => {
       listTickets: jest.fn(async () => ({ tickets: [ticket] })),
       listMessages: jest.fn(async () => []),
       getTicket: jest.fn(async () => ticket),
+      updateTicketMetadata: jest.fn(async () => ticket),
       escalateTicket: jest.fn(async () => ({ escalationLevel: 2 })),
       createTicket: jest.fn(),
       assignTicket: jest.fn(),

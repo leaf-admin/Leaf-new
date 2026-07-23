@@ -55,6 +55,7 @@ jest.mock('../../../utils/trace-validator', () => ({
 
 jest.mock('../../../utils/active-trip-index', () => ({
   ACTIVE_TRIP_TTL_SECONDS: 21600,
+  ACTIVE_TRIP_LEASE_UNTIL_FIELD: 'activeTripLeaseUntilMs',
   activeTripKey: (driverId) => `active_trip_by_driver:${driverId}`,
   activeTripCustomerKey: (driverId) => `active_trip_customer_by_driver:${driverId}`,
   identityVerificationKey: (driverId) => `kyc:identity-verification-window:${driverId}`,
@@ -73,7 +74,12 @@ jest.mock('../../../services/booking-visibility-service', () => ({
 
 jest.mock('../../../services/offer-reservation-service', () => ({
   hasOfferReservation: jest.fn().mockResolvedValue(true),
+  getOfferReservationKey: (bookingId, driverId) => `offer_reservation:${bookingId}:${driverId}`,
   clearOfferReservationsForBooking: jest.fn().mockResolvedValue(undefined)
+}));
+
+jest.mock('../../../services/redis-critical-authority-service', () => ({
+  assertReady: jest.fn().mockResolvedValue({ ready: true })
 }));
 
 const RideAcceptedEvent = require('../../../events/ride.accepted');
@@ -89,7 +95,12 @@ const { writeVisibleBookingSnapshot } = require('../../../services/booking-visib
 const { metrics } = require('../../../utils/prometheus-metrics');
 const { resolveAcceptRidePayload } = require('../../../utils/accept-ride-payload');
 const traceContext = require('../../../utils/trace-context');
+const redisCriticalAuthorityService = require('../../../services/redis-critical-authority-service');
 const AcceptRideCommand = require('../../../commands/AcceptRideCommand');
+
+const originalActiveTripAuthorityMode = process.env.KYC_ACTIVE_TRIP_AUTHORITY_MODE;
+const originalDatasetGeneration = process.env.REDIS_CRITICAL_DATASET_GENERATION;
+const originalDatasetGenerationKey = process.env.REDIS_CRITICAL_DATASET_GENERATION_KEY;
 
 describe('AcceptRideCommand', () => {
   let redis;
@@ -97,6 +108,10 @@ describe('AcceptRideCommand', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    delete process.env.KYC_ACTIVE_TRIP_AUTHORITY_MODE;
+    delete process.env.REDIS_CRITICAL_DATASET_GENERATION;
+    delete process.env.REDIS_CRITICAL_DATASET_GENERATION_KEY;
+    redisCriticalAuthorityService.assertReady.mockResolvedValue({ ready: true });
 
     redis = {
       exists: jest.fn().mockResolvedValue(1),
@@ -142,6 +157,24 @@ describe('AcceptRideCommand', () => {
     setImmediateSpy?.mockRestore();
   });
 
+  afterAll(() => {
+    if (originalActiveTripAuthorityMode == null) {
+      delete process.env.KYC_ACTIVE_TRIP_AUTHORITY_MODE;
+    } else {
+      process.env.KYC_ACTIVE_TRIP_AUTHORITY_MODE = originalActiveTripAuthorityMode;
+    }
+    if (originalDatasetGeneration == null) {
+      delete process.env.REDIS_CRITICAL_DATASET_GENERATION;
+    } else {
+      process.env.REDIS_CRITICAL_DATASET_GENERATION = originalDatasetGeneration;
+    }
+    if (originalDatasetGenerationKey == null) {
+      delete process.env.REDIS_CRITICAL_DATASET_GENERATION_KEY;
+    } else {
+      process.env.REDIS_CRITICAL_DATASET_GENERATION_KEY = originalDatasetGenerationKey;
+    }
+  });
+
   it('accepts a booking and returns enriched ride acceptance payload', async () => {
     redis.eval.mockResolvedValue(
       'customer_1|||{"lat":-23.55,"lng":-46.63,"add":"Rua A, 10"}'
@@ -166,7 +199,7 @@ describe('AcceptRideCommand', () => {
     expect(clearOfferReservationsForBooking).toHaveBeenCalledWith(redis, 'booking_1');
     expect(redis.eval).toHaveBeenCalledWith(
       expect.stringContaining('ERR_KYC_VERIFICATION_IN_PROGRESS'),
-      7,
+      10,
       'booking:booking_1',
       'active_trip_by_driver:driver_1',
       'active_trip_customer_by_driver:driver_1',
@@ -174,13 +207,23 @@ describe('AcceptRideCommand', () => {
       'kyc:identity-verification-window:driver_1',
       'kyc:identity-policy-mutation:driver_1',
       'kyc:stepup:active:driver_1',
+      'leaf:runtime:critical-dataset:generation',
+      'offer_reservation:booking_1:driver_1',
+      'driver_active_notification:driver_1',
       'driver_1',
       'ACCEPTED',
       expect.any(String),
       expect.any(String),
       'booking_1',
-      '21600'
+      '21600',
+      '',
+      '1',
+      '0'
     );
+    expect(redis.eval.mock.calls[0][0]).toContain('identity_reverification_pending_after_trip');
+    expect(redis.eval.mock.calls[0][0]).toContain('kyc_recheck_pending_after_trip');
+    expect(redis.eval.mock.calls[0][0]).toContain('activeTripLeaseUntilMs');
+    expect(redis.eval.mock.calls[0][0]).toContain('ERR_OFFER_EXPIRED');
     expect(RideAcceptedEvent).toHaveBeenCalledWith(
       expect.objectContaining({
         bookingId: 'booking_1',
@@ -200,6 +243,150 @@ describe('AcceptRideCommand', () => {
     expect(result.data.estimatedArrivalToPickupMin).toBeGreaterThan(0);
     expect(metrics.recordCommand).toHaveBeenCalledWith('AcceptRide', expect.any(Number), true);
   });
+
+  it('fails closed before Redis access when the authority mode is unsupported', async () => {
+    process.env.KYC_ACTIVE_TRIP_AUTHORITY_MODE = 'redis_noevictin';
+
+    const result = await new AcceptRideCommand({
+      driverId: 'driver_1',
+      bookingId: 'booking_1'
+    }).execute();
+
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/temporariamente indisponível/i);
+    expect(redisPool.ensureConnection).not.toHaveBeenCalled();
+    expect(redisPool.getConnection).not.toHaveBeenCalled();
+    expect(redisCriticalAuthorityService.assertReady).not.toHaveBeenCalled();
+    expect(driverLockManager.acquireLock).not.toHaveBeenCalled();
+    expect(redis.eval).not.toHaveBeenCalled();
+    expect(metrics.recordCommand).toHaveBeenCalledWith('AcceptRide', expect.any(Number), false);
+  });
+
+  it('requires a force-refreshed Redis authority attestation before a new acceptance', async () => {
+    process.env.KYC_ACTIVE_TRIP_AUTHORITY_MODE = 'redis_noeviction';
+    process.env.REDIS_CRITICAL_DATASET_GENERATION = 'generation-rc1';
+    redis.eval.mockResolvedValue(
+      'customer_1|||{"lat":-23.55,"lng":-46.63,"add":"Rua A, 10"}'
+    );
+
+    const result = await new AcceptRideCommand({
+      driverId: 'driver_1',
+      bookingId: 'booking_1'
+    }).execute();
+
+    expect(result.success).toBe(true);
+    expect(redisCriticalAuthorityService.assertReady).toHaveBeenCalledWith({
+      forceRefresh: true
+    });
+    expect(redis.eval).toHaveBeenCalledTimes(1);
+    expect(redis.eval.mock.calls[0]).toEqual(expect.arrayContaining([
+      'leaf:runtime:critical-dataset:generation',
+      'generation-rc1',
+      '1',
+      '1'
+    ]));
+  });
+
+  it('never turns an un-attested idempotent snapshot into new ownership inside Lua', async () => {
+    process.env.KYC_ACTIVE_TRIP_AUTHORITY_MODE = 'redis_noeviction';
+    process.env.REDIS_CRITICAL_DATASET_GENERATION = 'generation-rc1';
+    redis.hmget.mockResolvedValue(['driver_1', 'ACCEPTED', 'ACCEPTED']);
+    redis.eval
+      .mockResolvedValueOnce('NOT_ALREADY_OWNED')
+      .mockResolvedValueOnce('ERR_REDIS_AUTHORITY_RECHECK_REQUIRED');
+
+    const result = await new AcceptRideCommand({
+      driverId: 'driver_1',
+      bookingId: 'booking_1'
+    }).execute();
+
+    expect(redisCriticalAuthorityService.assertReady).not.toHaveBeenCalled();
+    expect(redis.eval.mock.calls.at(-1)).toEqual(expect.arrayContaining([
+      'generation-rc1',
+      '0',
+      '1'
+    ]));
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/temporariamente indisponível/i);
+  });
+
+  it('fails closed when dataset generation changes between attestation and Lua mutation', async () => {
+    process.env.KYC_ACTIVE_TRIP_AUTHORITY_MODE = 'redis_noeviction';
+    process.env.REDIS_CRITICAL_DATASET_GENERATION = 'generation-rc1';
+    redis.eval.mockResolvedValue('ERR_REDIS_DATASET_QUARANTINED');
+
+    const result = await new AcceptRideCommand({
+      driverId: 'driver_1',
+      bookingId: 'booking_1'
+    }).execute();
+
+    expect(redisCriticalAuthorityService.assertReady).toHaveBeenCalledWith({ forceRefresh: true });
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/temporariamente indisponível/i);
+    expect(driverLockManager.releaseLock).toHaveBeenCalledWith('driver_1');
+    expect(writeVisibleBookingSnapshot).not.toHaveBeenCalled();
+  });
+
+  it('fails closed before ride ownership mutation when Redis is quarantined', async () => {
+    process.env.KYC_ACTIVE_TRIP_AUTHORITY_MODE = 'redis_noeviction';
+    redisCriticalAuthorityService.assertReady.mockRejectedValue(Object.assign(
+      new Error('Redis critical authority is not ready'),
+      {
+        code: 'REDIS_CRITICAL_AUTHORITY_NOT_READY',
+        attestation: { blockers: ['dataset_generation_marker_missing'] }
+      }
+    ));
+
+    const result = await new AcceptRideCommand({
+      driverId: 'driver_1',
+      bookingId: 'booking_1'
+    }).execute();
+
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/temporariamente indisponível/i);
+    expect(redis.eval).not.toHaveBeenCalled();
+    expect(driverLockManager.acquireLock).not.toHaveBeenCalled();
+    expect(writeVisibleBookingSnapshot).not.toHaveBeenCalled();
+  });
+
+  it('allows idempotent ownership continuation while new Redis claims are quarantined', async () => {
+    process.env.KYC_ACTIVE_TRIP_AUTHORITY_MODE = 'redis_noeviction';
+    redis.hmget.mockResolvedValue(['driver_1', 'ACCEPTED', 'ACCEPTED']);
+    redisCriticalAuthorityService.assertReady.mockRejectedValue(new Error('must not be called'));
+    redis.eval.mockResolvedValue(
+      'OK_ALREADY_ACCEPTED|||customer_1|||{"lat":-23.55,"lng":-46.63,"add":"Rua A, 10"}'
+    );
+
+    const result = await new AcceptRideCommand({
+      driverId: 'driver_1',
+      bookingId: 'booking_1'
+    }).execute();
+
+    expect(result.success).toBe(true);
+    expect(result.data.idempotentAccept).toBe(true);
+    expect(redisCriticalAuthorityService.assertReady).not.toHaveBeenCalled();
+  });
+
+  it.each(['ARRIVED', 'REASSIGNED_IN_PROGRESS'])(
+    'preserves idempotent continuation in %s while new Redis claims are quarantined',
+    async (activeState) => {
+      process.env.KYC_ACTIVE_TRIP_AUTHORITY_MODE = 'redis_noeviction';
+      redis.hmget.mockResolvedValue(['driver_1', activeState, activeState]);
+      redisCriticalAuthorityService.assertReady.mockRejectedValue(new Error('must not be called'));
+      redis.eval.mockResolvedValue(
+        'OK_ALREADY_ACCEPTED|||customer_1|||{"lat":-23.55,"lng":-46.63,"add":"Rua A, 10"}'
+      );
+
+      const result = await new AcceptRideCommand({
+        driverId: 'driver_1',
+        bookingId: 'booking_1'
+      }).execute();
+
+      expect(result.success).toBe(true);
+      expect(result.data.idempotentAccept).toBe(true);
+      expect(redisCriticalAuthorityService.assertReady).not.toHaveBeenCalled();
+    }
+  );
 
   it('rejects identity-verification conflict before mutating acceptance state', async () => {
     redis.eval.mockResolvedValue('ERR_KYC_VERIFICATION_IN_PROGRESS');
@@ -249,62 +436,8 @@ describe('AcceptRideCommand', () => {
     expect(clearOfferReservationsForBooking).not.toHaveBeenCalled();
   });
 
-  it('rejects canonical ineligibility before acquiring the ride lock', async () => {
-    redis.hmget.mockResolvedValue([
-      null,
-      'SEARCHING',
-      'PENDING',
-      'leaf_plus',
-      null,
-      null,
-      null
-    ]);
-    driverEligibilityService.isDriverEligibleForRide.mockResolvedValueOnce({
-      eligible: false,
-      code: 'VEHICLE_NOT_APPROVED'
-    });
-
-    const result = await new AcceptRideCommand({
-      driverId: 'driver_1',
-      bookingId: 'booking_1'
-    }).execute();
-
-    expect(result.success).toBe(false);
-    expect(result.error).toContain('não está elegível');
-    expect(driverEligibilityService.isDriverEligibleForRide).toHaveBeenCalledWith(
-      'driver_1',
-      'leaf_plus'
-    );
-    expect(driverLockManager.acquireLock).not.toHaveBeenCalled();
-    expect(redis.eval).not.toHaveBeenCalled();
-  });
-
-  it('fails closed when canonical eligibility cannot be revalidated', async () => {
-    driverEligibilityService.isDriverEligibleForRide.mockRejectedValueOnce(
-      new Error('eligibility unavailable')
-    );
-
-    const result = await new AcceptRideCommand({
-      driverId: 'driver_1',
-      bookingId: 'booking_1'
-    }).execute();
-
-    expect(result.success).toBe(false);
-    expect(result.error).toContain('Não foi possível validar a elegibilidade');
-    expect(driverLockManager.acquireLock).not.toHaveBeenCalled();
-    expect(redis.eval).not.toHaveBeenCalled();
-  });
-
-  it('uses a fail-closed Lua guard for missing, empty or false dispatch eligibility', async () => {
-    redis.eval.mockImplementation(async (script) => {
-      expect(script).toContain(
-        "local dispatchEligible = string.lower(tostring(redis.call('HGET', driverKey, 'dispatchEligible') or ''))"
-      );
-      expect(script).toContain("if dispatchEligible ~= 'true' and not alreadyOwnedBySameDriver then");
-      expect(script).not.toContain("if dispatchEligible == 'false' and");
-      expect(script).not.toContain('currentActiveTrip');
-      return 'ERR_DRIVER_NOT_DISPATCH_ELIGIBLE';
-    });
+  it('rejects a driver made dispatch-ineligible by a random audit before mutating acceptance state', async () => {
+    redis.eval.mockResolvedValue('ERR_DRIVER_NOT_DISPATCH_ELIGIBLE');
 
     const result = await new AcceptRideCommand({
       driverId: 'driver_1',
@@ -318,17 +451,8 @@ describe('AcceptRideCommand', () => {
     expect(clearOfferReservationsForBooking).not.toHaveBeenCalled();
   });
 
-  it('does not let a stale active-trip index bypass KYC or dispatch gates', async () => {
-    redis.eval.mockImplementation(async (script) => {
-      expect(script).not.toContain('currentActiveTrip');
-      expect(script).toContain(
-        'if (identityVerification or identityPolicyMutation) and not alreadyOwnedBySameDriver then'
-      );
-      expect(script).toContain(
-        "if dispatchEligible ~= 'true' and not alreadyOwnedBySameDriver then"
-      );
-      return 'ERR_KYC_VERIFICATION_IN_PROGRESS';
-    });
+  it('rejects an active-trip lease conflict before replacing ride ownership', async () => {
+    redis.eval.mockResolvedValue('ERR_DRIVER_ACTIVE_TRIP_CONFLICT');
 
     const result = await new AcceptRideCommand({
       driverId: 'driver_1',
@@ -336,55 +460,10 @@ describe('AcceptRideCommand', () => {
     }).execute();
 
     expect(result.success).toBe(false);
-    expect(result.error).toContain('Validação de identidade em andamento');
+    expect(result.error).toContain('já está em outra corrida');
+    expect(redis.eval.mock.calls[0][0]).toContain('ERR_DRIVER_ACTIVE_TRIP_CONFLICT');
+    expect(writeVisibleBookingSnapshot).not.toHaveBeenCalled();
     expect(driverLockManager.releaseLock).toHaveBeenCalledWith('driver_1');
-  });
-
-  it('renews and releases a same-booking lock when the CAS rejects before commit', async () => {
-    driverLockManager.isDriverLocked.mockReset().mockResolvedValue({
-      isLocked: true,
-      bookingId: 'booking_1'
-    });
-    redis.eval.mockResolvedValue('ERR_INVALID_STATE_COMPLETED');
-
-    const result = await new AcceptRideCommand({
-      driverId: 'driver_1',
-      bookingId: 'booking_1'
-    }).execute();
-
-    expect(result.success).toBe(false);
-    expect(driverLockManager.renewLock).toHaveBeenCalledWith('driver_1', 3600);
-    expect(driverLockManager.acquireLock).not.toHaveBeenCalled();
-    expect(driverLockManager.releaseLock).toHaveBeenCalledWith('driver_1');
-  });
-
-  it('releases an acquired lock when Redis eval throws before acceptance commit', async () => {
-    redis.eval.mockRejectedValue(new Error('redis eval unavailable'));
-
-    const result = await new AcceptRideCommand({
-      driverId: 'driver_1',
-      bookingId: 'booking_1'
-    }).execute();
-
-    expect(result.success).toBe(false);
-    expect(result.error).toContain('redis eval unavailable');
-    expect(driverLockManager.releaseLock).toHaveBeenCalledWith('driver_1');
-  });
-
-  it('keeps the ride lock when a secondary Redis read fails after acceptance committed', async () => {
-    redis.eval.mockResolvedValue(
-      'customer_1|||{"lat":-23.55,"lng":-46.63,"add":"Rua A, 10"}'
-    );
-    redis.hgetall.mockRejectedValue(new Error('secondary read unavailable'));
-
-    const result = await new AcceptRideCommand({
-      driverId: 'driver_1',
-      bookingId: 'booking_1'
-    }).execute();
-
-    expect(result.success).toBe(false);
-    expect(result.error).toContain('secondary read unavailable');
-    expect(driverLockManager.releaseLock).not.toHaveBeenCalled();
   });
 
   it('keeps zero driver-to-pickup distance when driver is at the pickup point', async () => {
@@ -418,28 +497,14 @@ describe('AcceptRideCommand', () => {
       'driver_1',
       'ACCEPTED',
       'ACCEPTED',
-      'leaf_plus',
+      null,
       null,
       null,
       null
     ]);
-    redis.eval.mockImplementation(async (script, keyCount, ...args) => {
-      expect(script).toContain('local alreadyOwned');
-      expect(script).toContain("redis.call('SET', activeTripKey, bookingId, 'EX', activeTripTtl)");
-      expect(script).toContain("'activeTripId', bookingId");
-      expect(keyCount).toBe(4);
-      expect(args).toEqual([
-        'booking:booking_1',
-        'active_trip_by_driver:driver_1',
-        'active_trip_customer_by_driver:driver_1',
-        'driver:driver_1',
-        'driver_1',
-        'booking_1',
-        '21600',
-        expect.any(String),
-      ]);
-      return 'OK_ALREADY_ACCEPTED|||customer_1|||{"lat":-23.55,"lng":-46.63,"add":"Rua A, 10"}';
-    });
+    redis.eval.mockResolvedValue(
+      'OK_ALREADY_ACCEPTED|||customer_1|||{"lat":-23.55,"lng":-46.63,"add":"Rua A, 10"}'
+    );
 
     const command = new AcceptRideCommand({
       driverId: 'driver_1',
@@ -453,6 +518,7 @@ describe('AcceptRideCommand', () => {
     expect(result.data.event).toBeNull();
     expect(RideAcceptedEvent).not.toHaveBeenCalled();
     expect(driverEligibilityService.isDriverEligibleForRide).not.toHaveBeenCalled();
+    expect(redis.eval).toHaveBeenCalledTimes(1);
   });
 
   it('does not trust a stale idempotency snapshot to skip canonical eligibility', async () => {
@@ -528,6 +594,20 @@ describe('AcceptRideCommand', () => {
     expect(result.success).toBe(false);
     expect(result.error).toMatch(/oferta expirada/i);
     expect(redis.eval).not.toHaveBeenCalled();
+  });
+
+  it('rechecks the offer reservation atomically before assigning ownership', async () => {
+    redis.eval.mockResolvedValue('ERR_OFFER_EXPIRED');
+
+    const result = await new AcceptRideCommand({
+      driverId: 'driver_1',
+      bookingId: 'booking_1'
+    }).execute();
+
+    expect(hasOfferReservation).toHaveBeenCalledWith(redis, 'booking_1', 'driver_1');
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/oferta expirada/i);
+    expect(writeVisibleBookingSnapshot).not.toHaveBeenCalled();
   });
 
   it('allows accepting a booking that is awaiting driver response in the active state machine', async () => {

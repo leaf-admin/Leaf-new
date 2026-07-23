@@ -1,13 +1,49 @@
 describe('firebase-config legacy metrics', () => {
+  const credentialEnvKeys = [
+    'FIREBASE_SERVICE_ACCOUNT_JSON',
+    'GOOGLE_APPLICATION_CREDENTIALS_JSON',
+    'GOOGLE_APPLICATION_CREDENTIALS'
+  ];
+  const originalCredentialEnv = Object.fromEntries(
+    credentialEnvKeys.map((key) => [key, process.env[key]])
+  );
   let metricsMock;
   let refMock;
   let setMock;
   let updateMock;
   let rootUpdateMock;
   let onceMock;
+  let firebaseAdminMock;
+  let fsMock;
+  let logStructuredMock;
 
-  function loadModule({ snapshotExists = true, snapshotValue = { ok: true } } = {}) {
+  function loadModule({
+    snapshotExists = true,
+    snapshotValue = { ok: true },
+    serviceAccountJson,
+    googleCredentialsJson,
+    googleCredentialsPath,
+    credentialFileContent = JSON.stringify({
+      project_id: 'leaf-app',
+      client_email: 'firebase-admin@leaf-app.iam.gserviceaccount.com',
+      private_key: 'test-private-key'
+    }),
+    credentialFileExists = true
+  } = {}) {
     jest.resetModules();
+
+    for (const key of credentialEnvKeys) {
+      delete process.env[key];
+    }
+    if (serviceAccountJson !== undefined) {
+      process.env.FIREBASE_SERVICE_ACCOUNT_JSON = serviceAccountJson;
+    }
+    if (googleCredentialsJson !== undefined) {
+      process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON = googleCredentialsJson;
+    }
+    if (googleCredentialsPath !== undefined) {
+      process.env.GOOGLE_APPLICATION_CREDENTIALS = googleCredentialsPath;
+    }
 
     metricsMock = {
       recordLegacyDependencyAccess: jest.fn()
@@ -46,7 +82,7 @@ describe('firebase-config legacy metrics', () => {
       TIMESTAMP: 'server-ts'
     };
 
-    jest.doMock('firebase-admin', () => ({
+    firebaseAdminMock = {
       apps: [],
       app: jest.fn(() => ({})),
       initializeApp: jest.fn(() => ({})),
@@ -56,11 +92,14 @@ describe('firebase-config legacy metrics', () => {
       firestore: firestoreFn,
       database: databaseFn,
       storage: jest.fn(() => ({}))
-    }));
+    };
+    jest.doMock('firebase-admin', () => firebaseAdminMock);
 
-    jest.doMock('fs', () => ({
-      existsSync: jest.fn(() => true)
-    }));
+    fsMock = {
+      existsSync: jest.fn(() => credentialFileExists),
+      readFileSync: jest.fn(() => credentialFileContent)
+    };
+    jest.doMock('fs', () => fsMock);
 
     jest.doMock('../../utils/prometheus-metrics', () => ({
       metrics: metricsMock
@@ -70,8 +109,9 @@ describe('firebase-config legacy metrics', () => {
       execute: jest.fn(async (_name, run, _fallback) => run())
     }));
 
+    logStructuredMock = jest.fn();
     jest.doMock('../../utils/logger', () => ({
-      logStructured: jest.fn()
+      logStructured: logStructuredMock
     }));
 
     jest.doMock('../../utils/trace-context', () => ({}));
@@ -81,6 +121,66 @@ describe('firebase-config legacy metrics', () => {
 
   afterEach(() => {
     jest.clearAllMocks();
+    for (const key of credentialEnvKeys) {
+      const originalValue = originalCredentialEnv[key];
+      if (originalValue === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = originalValue;
+      }
+    }
+  });
+
+  test('prioriza GOOGLE_APPLICATION_CREDENTIALS antes do arquivo legado', () => {
+    const credentialsPath = '/app/firebase-credentials.json';
+    const serviceAccount = {
+      project_id: 'leaf-app-mounted',
+      client_email: 'mounted@leaf-app.iam.gserviceaccount.com',
+      private_key: 'mounted-private-key'
+    };
+    const firebaseConfig = loadModule({
+      googleCredentialsPath: credentialsPath,
+      credentialFileContent: JSON.stringify(serviceAccount)
+    });
+
+    expect(firebaseConfig.initializeFirebase()).toBeTruthy();
+    expect(fsMock.existsSync).toHaveBeenCalledWith(credentialsPath);
+    expect(fsMock.readFileSync).toHaveBeenCalledWith(credentialsPath, 'utf8');
+    expect(firebaseAdminMock.credential.cert).toHaveBeenCalledWith(serviceAccount);
+  });
+
+  test('mantém JSON inline prioritário sobre GOOGLE_APPLICATION_CREDENTIALS', () => {
+    const inlineServiceAccount = {
+      project_id: 'leaf-app-inline',
+      client_email: 'inline@leaf-app.iam.gserviceaccount.com',
+      private_key: 'inline-private-key'
+    };
+    const firebaseConfig = loadModule({
+      serviceAccountJson: JSON.stringify(inlineServiceAccount),
+      googleCredentialsPath: '/app/firebase-credentials.json'
+    });
+
+    expect(firebaseConfig.initializeFirebase()).toBeTruthy();
+    expect(firebaseAdminMock.credential.cert).toHaveBeenCalledWith(inlineServiceAccount);
+    expect(fsMock.readFileSync).not.toHaveBeenCalled();
+  });
+
+  test('não inclui conteúdo de credencial inválida nos logs', () => {
+    const secretMarker = 'DO-NOT-LOG-PRIVATE-KEY';
+    const firebaseConfig = loadModule({
+      googleCredentialsPath: '/app/firebase-credentials.json',
+      credentialFileContent: `{"private_key":"${secretMarker}",invalid-json}`
+    });
+
+    expect(firebaseConfig.initializeFirebase()).toBeNull();
+    expect(JSON.stringify(logStructuredMock.mock.calls)).not.toContain(secretMarker);
+    expect(logStructuredMock).toHaveBeenCalledWith(
+      'error',
+      'Erro ao inicializar Firebase',
+      expect.objectContaining({
+        error: 'Firebase credentials inválidas em GOOGLE_APPLICATION_CREDENTIALS'
+      })
+    );
   });
 
   test('registra acesso bem-sucedido ao obter Realtime DB', () => {

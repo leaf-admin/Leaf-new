@@ -1,5 +1,7 @@
 import config from "@/src/config";
 import { authService } from "@/src/services/auth-service";
+import FinanceApiClient from "@/src/services/finance-api";
+import GeofenceApiClient from "@/src/services/geofence-api";
 
 class LeafApiService {
   constructor() {
@@ -7,6 +9,8 @@ class LeafApiService {
     this.timeoutMs = config.api.timeoutMs;
     this.supportOrchestratorBaseURL = config.supportOrchestrator?.baseUrl || "";
     this.supportOrchestratorTimeoutMs = config.supportOrchestrator?.timeoutMs || this.timeoutMs;
+    this.financeApi = new FinanceApiClient({ request: this.request.bind(this) });
+    this.geofenceApi = new GeofenceApiClient({ request: this.request.bind(this) });
   }
 
   async request(endpoint, options = {}) {
@@ -443,6 +447,20 @@ class LeafApiService {
     });
   }
 
+  async getTollCatalog(options = {}) {
+    const params = new URLSearchParams();
+    if (options.refresh) params.set("refresh", "true");
+    const suffix = params.toString();
+    return this.request(`/pricing/toll-catalog${suffix ? `?${suffix}` : ""}`);
+  }
+
+  async updateTollCatalog(catalog = {}) {
+    return this.request("/pricing/toll-catalog", {
+      method: "PUT",
+      body: JSON.stringify(catalog),
+    });
+  }
+
   async getAlerts(limit = 20) {
     return this.request(`/alerts?limit=${encodeURIComponent(limit)}`);
   }
@@ -451,14 +469,14 @@ class LeafApiService {
     return this.request("/alerts/stats");
   }
 
-  async getDrivers(page = 1, limit = 20, status = "all", search = "") {
+  async getDrivers(page = 1, limit = 20, status = "all", search = "", context = {}) {
     const params = new URLSearchParams({
       page: String(page),
       limit: String(limit),
     });
     if (status !== "all") params.append("status", status);
     if (search) params.append("search", search);
-    return this.request(`/drivers/applications?${params.toString()}`);
+    return this.requestKyc(`/drivers/applications?${params.toString()}`, {}, context);
   }
 
   async getUsers(params = {}) {
@@ -486,8 +504,20 @@ class LeafApiService {
     return this.request(`/drivers/${driverId}/complete`);
   }
 
-  async getDriverDocuments(driverId) {
-    return this.request(`/drivers/${driverId}/documents`);
+  async getDriverDocuments(driverId, context = {}) {
+    return this.requestKyc(`/drivers/${driverId}/documents`, {}, context);
+  }
+
+  async getDriverDocumentFile(driverId, documentType, context = {}) {
+    return this.requestKycFile(
+      `/drivers/${encodeURIComponent(driverId)}/documents/${encodeURIComponent(documentType)}/content`,
+      {
+        headers: {
+          Accept: "application/pdf,image/*,application/octet-stream",
+        },
+      },
+      context,
+    );
   }
 
   resolveKycScope(context = {}) {
@@ -599,7 +629,7 @@ class LeafApiService {
     );
   }
 
-  async getDriverDocumentReviewQueue(params = {}) {
+  async getDriverDocumentReviewQueue(params = {}, context = {}) {
     const query = new URLSearchParams();
     Object.entries(params).forEach(([key, value]) => {
       if (value !== undefined && value !== null && value !== "") {
@@ -607,7 +637,11 @@ class LeafApiService {
       }
     });
     const suffix = query.toString();
-    return this.request(`/drivers/documents/review-queue${suffix ? `?${suffix}` : ""}`);
+    return this.requestKyc(
+      `/drivers/documents/review-queue${suffix ? `?${suffix}` : ""}`,
+      {},
+      context,
+    );
   }
 
   async updateDriverVehicleConfig(driverId, payload = {}) {
@@ -631,31 +665,39 @@ class LeafApiService {
     });
   }
 
-  async reviewDriverDocument(driverId, documentType, action, rejectionReason = "") {
-    return this.request(`/drivers/${driverId}/documents/${documentType}/review`, {
-      method: "POST",
-      body: JSON.stringify({
-        action,
-        rejectionReason,
-        reviewedBy: "admin",
-      }),
-    });
+  async reviewDriverDocument(driverId, documentType, action, rejectionReason = "", context = {}) {
+    return this.requestKyc(
+      `/drivers/${driverId}/documents/${documentType}/review`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          action,
+          rejectionReason,
+          reviewedBy: "admin",
+        }),
+      },
+      context,
+    );
   }
 
-  async uploadDriverDocument(driverId, documentType, file) {
+  async uploadDriverDocument(driverId, documentType, file, context = {}) {
     const formData = new FormData();
     formData.append("file", file);
-    return this.request(`/drivers/${driverId}/documents/${documentType}/upload`, {
-      method: "POST",
-      body: formData,
-    });
+    return this.requestKyc(
+      `/drivers/${driverId}/documents/${documentType}/upload`,
+      {
+        method: "POST",
+        body: formData,
+      },
+      context,
+    );
   }
 
-  async requestDriverDocument(driverId, documentType, payload = {}) {
-    return this.request(`/drivers/${driverId}/documents/${documentType}/request`, {
+  async requestDriverDocument(driverId, documentType, payload = {}, context = {}) {
+    return this.requestKyc(`/drivers/${driverId}/documents/${documentType}/request`, {
       method: "POST",
       body: JSON.stringify(payload),
-    });
+    }, context);
   }
 
   async getMetricsHistory(startDate, endDate, granularity = "hour") {
@@ -706,34 +748,19 @@ class LeafApiService {
   }
 
   async getGeofenceAdminConfig() {
-    return this.request("/geofence/admin/config");
+    return this.geofenceApi.getGeofenceAdminConfig();
   }
 
   async updateGeofenceConfig(payload = {}) {
-    return this.request("/geofence/admin/config", {
-      method: "PATCH",
-      body: JSON.stringify(payload),
-    });
+    return this.geofenceApi.updateGeofenceConfig(payload);
   }
 
   async updateGeofenceState(stateCode, enabled) {
-    return this.request(`/geofence/admin/states/${encodeURIComponent(stateCode)}`, {
-      method: "PATCH",
-      body: JSON.stringify({ enabled: Boolean(enabled) }),
-    });
+    return this.geofenceApi.updateGeofenceState(stateCode, enabled);
   }
 
   async updateGeofenceCity(stateCode, cityKey, payloadOrActive) {
-    const payload = (typeof payloadOrActive === "object" && payloadOrActive !== null)
-      ? payloadOrActive
-      : { active: Boolean(payloadOrActive) };
-    return this.request(
-      `/geofence/admin/cities/${encodeURIComponent(stateCode)}/${encodeURIComponent(cityKey)}`,
-      {
-        method: "PATCH",
-        body: JSON.stringify(payload),
-      },
-    );
+    return this.geofenceApi.updateGeofenceCity(stateCode, cityKey, payloadOrActive);
   }
 
   async getReferralProgramsSummary() {
@@ -837,10 +864,7 @@ class LeafApiService {
   }
 
   async createGeofenceCity(payload = {}) {
-    return this.request("/geofence/admin/cities", {
-      method: "POST",
-      body: JSON.stringify(payload),
-    });
+    return this.geofenceApi.createGeofenceCity(payload);
   }
 
   async getNotifications() {
@@ -985,31 +1009,19 @@ class LeafApiService {
   }
 
   async listFinancialReconciliationReports(params = {}) {
-    const query = new URLSearchParams();
-    Object.entries(params).forEach(([key, value]) => {
-      if (value !== undefined && value !== null && value !== "") {
-        query.append(key, String(value));
-      }
-    });
-    const suffix = query.toString();
-    return this.request(`/financial/reconciliation/reports${suffix ? `?${suffix}` : ""}`);
+    return this.financeApi.listFinancialReconciliationReports(params);
   }
 
   async getFinancialReconciliationRide(rideId) {
-    return this.request(`/financial/reconciliation/rides/${encodeURIComponent(rideId)}`);
+    return this.financeApi.getFinancialReconciliationRide(rideId);
   }
 
   async runFinancialReconciliation(payload = {}) {
-    return this.request("/financial/reconciliation/run", {
-      method: "POST",
-      body: JSON.stringify(payload),
-    });
+    return this.financeApi.runFinancialReconciliation(payload);
   }
 
   async runFinancialReconciliationRide(rideId) {
-    return this.request(`/financial/reconciliation/rides/${encodeURIComponent(rideId)}/run`, {
-      method: "POST",
-    });
+    return this.financeApi.runFinancialReconciliationRide(rideId);
   }
 
   async listPaymentRuntimeProfiles({ includeInactive = true } = {}) {

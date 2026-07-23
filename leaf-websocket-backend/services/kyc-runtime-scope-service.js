@@ -437,10 +437,16 @@ class SandboxKycPolicyAdapter {
       const multi = redis.multi();
       multi.del(`${this.challengePrefix}${challenge.challengeId}`);
       multi.del(`${this.activeChallengePrefix}${challenge.driverId}`);
-      await multi.exec().catch(() => null);
+      const result = await multi.exec();
+      if (!result) {
+        throw new KycRuntimeScopeError(
+          'KYC_SANDBOX_CHALLENGE_CACHE_RESOLVE_FAILED',
+          'Redis nao confirmou a conclusao do challenge KYC sandbox'
+        );
+      }
     } else {
-      await redis.del(`${this.challengePrefix}${challenge.challengeId}`).catch(() => null);
-      await redis.del(`${this.activeChallengePrefix}${challenge.driverId}`).catch(() => null);
+      await redis.del(`${this.challengePrefix}${challenge.challengeId}`);
+      await redis.del(`${this.activeChallengePrefix}${challenge.driverId}`);
     }
     return {
       success: true,
@@ -813,7 +819,63 @@ class SandboxKycPolicyAdapter {
   }
 
   async recordIdentityReverificationResult(driverId, payload = {}) {
-    return this.updateIdentityChallengeMetadata(driverId, payload, 'validation_result');
+    const result = await this.updateIdentityChallengeMetadata(
+      driverId,
+      payload,
+      'validation_result'
+    );
+    if (
+      result?.recorded !== true
+      || payload.isMatch !== true
+      || payload.needsReview === true
+    ) {
+      return result;
+    }
+
+    const challengeId = String(payload.challengeId || payload.payload?.challengeId || '').trim();
+    const resolved = await this.resolveStepUpChallenge({
+      challengeId,
+      driverId,
+      requirement: 'IDENTITY_REVERIFICATION',
+      verificationPayload: {
+        ...payload,
+        awsLivenessPassed: true,
+        provider: payload.provider || payload.comparisonProvider || 'aws_rekognition_compare_faces'
+      }
+    });
+    if (resolved?.success !== true) {
+      return {
+        ...result,
+        recorded: false,
+        stale: true,
+        code: resolved?.code || 'KYC_IDENTITY_REVERIFY_CHALLENGE_STALE'
+      };
+    }
+
+    if (typeof this.redis.hset === 'function') {
+      await this.redis.hset(`${this.driverHashPrefix}${driverId}`, {
+        kyc_reverify_required: String(false),
+        kyc_status: 'approved',
+        kyc_blocked: String(false),
+        identity_reverification_status: 'passed',
+        identity_reverification_pending_after_trip: String(false)
+      });
+    }
+    if (typeof this.redis.hdel === 'function') {
+      await this.redis.hdel(
+        `${this.driverHashPrefix}${driverId}`,
+        'dispatchEligible',
+        'dispatchEligibilityCode',
+        'identity_reverification_challenge_id',
+        'identity_reverification_attempt_scope',
+        'identity_reverification_requested_at'
+      );
+    }
+    return {
+      ...result,
+      challengeResolved: true,
+      resolvedAt: resolved.resolvedAt
+    };
   }
 
   async recordVerificationSuccess(driverId, options = {}) {
@@ -859,20 +921,30 @@ function wrapSandboxTrustFailClosed(trustService) {
 
 const REQUIRED_WORKFLOW_METHODS = Object.freeze([
   'openCaseFromTicket',
+  'resumeExistingCaseRequest',
   'assertKycOperationAllowed',
   'claimCleanRetryAuthorization',
   'consumeCleanRetryAuthorization',
+  'resumeCleanRetryAuthorization',
   'releaseCleanRetryAuthorization',
-  'finalizeCleanRetryAuthorization'
+  'finalizeCleanRetryAuthorization',
+  'clearResolvedMismatchHold'
 ]);
 const REQUIRED_TRUST_METHODS = Object.freeze([
   'evaluateOnlineGate',
   'assertVerificationOutsideActiveTrip',
   'claimVerificationWindow',
+  'renewVerificationWindow',
   'releaseVerificationWindow',
   'claimCanonicalSession',
   'renewCanonicalSessionClaim',
-  'releaseCanonicalSessionClaim'
+  'releaseCanonicalSessionClaim',
+  'readCanonicalCompatibilityVerification',
+  'recordCanonicalSuccess',
+  'recordCanonicalFailure',
+  'linkReviewEvidenceToCanonicalFailure',
+  'restoreApprovedIdentityVerification',
+  'restoreRejectedIdentityVerification'
 ]);
 const REQUIRED_EVIDENCE_METHODS = Object.freeze([
   'captureRejectedComparisonEvidence'

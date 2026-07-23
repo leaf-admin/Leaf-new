@@ -176,7 +176,10 @@ function registerSocketSafetySupportHandlers({
             redisPool,
             bookingId,
             allowedRoles: ['passenger', 'driver'],
-            allowSupport: true
+            allowSupport: true,
+            // This handler resolves the ride seal and both participant scopes
+            // immediately below so it can preserve the precise boundary error.
+            deferPersistenceBoundaryToCaller: true
         });
 
         if (!participant.allowed) {
@@ -428,6 +431,18 @@ function registerSocketSafetySupportHandlers({
 
             const userId = authz.userId;
             const senderType = authz.senderType;
+            const persistenceContext = await resolveUserPersistenceScope({
+                userId,
+                phone: authz.identity.phone || authz.identity.phoneNumber || null,
+                actor: authz.identity
+            });
+            if (persistenceContext.namespace === 'sandbox') {
+                socket.emit('support:chat:error', {
+                    error: 'O chat não está disponível neste ambiente de validação.',
+                    code: 'KYC_SANDBOX_SUPPORT_CHAT_ISOLATION_REQUIRED'
+                });
+                return;
+            }
 
             logStructured('info', 'Nova mensagem no chat de suporte', {
                 service: 'server',
@@ -548,6 +563,30 @@ function registerSocketSafetySupportHandlers({
                     expectedPersistenceContext: persistenceContext
                 });
                 identityReviewWorkflowService = kycRuntime.workflow;
+
+                const existingReview = await identityReviewWorkflowService
+                    .resumeExistingCaseRequest({
+                        driverId: identity.userId,
+                        evidenceId: identityReviewScope.kycEvidenceId,
+                        requestedBy: {
+                            uid: identity.userId,
+                            email: identity.email || null,
+                            type: 'driver'
+                        }
+                    });
+                if (existingReview?.case?.caseId && existingReview?.ticket?.id) {
+                    const publicTicket = serializeSupportTicket(existingReview.ticket, { isAgent: false });
+                    socket.emit('supportTicketCreated', {
+                        success: true,
+                        ticketId: existingReview.ticket.id,
+                        reviewCaseId: existingReview.case.caseId,
+                        identityReviewRegistered: true,
+                        idempotentReplay: true,
+                        message: 'Solicitacao de analise ja registrada',
+                        data: publicTicket
+                    });
+                    return;
+                }
             }
 
             const { ticket, queue } = await supportQueueService.createSupportTicket({

@@ -60,7 +60,8 @@ jest.mock('../../../services/kyc-biometric-production-policy', () => ({
 
 const {
   DriverIdentityTrustService,
-  TRUST_TIERS
+  TRUST_TIERS,
+  DEFAULTS
 } = require('../../../services/driver-identity-trust-service');
 
 function createRedis() {
@@ -121,6 +122,23 @@ function createFakeFirestore() {
   };
 }
 
+function approvedCanonicalCnh(driverId, overrides = {}) {
+  return {
+    driverId,
+    documentType: 'cnh',
+    status: 'approved',
+    analysisStatus: 'approved',
+    approvalSource: 'dashboard_manual_review',
+    reviewedBy: 'admin-1',
+    reviewedAt: '2026-06-01T12:00:00.000Z',
+    submissionId: 'cnh-submission-1',
+    filePath: `driver-activation/${driverId}/cnh/cnh-submission-1.pdf`,
+    documentSha256: crypto.createHash('sha256').update(`cnh-pdf-${driverId}`).digest('hex'),
+    storageGeneration: '1784000000000000',
+    ...overrides
+  };
+}
+
 function createHarness(overrides = {}) {
   let now = new Date('2026-07-01T15:00:00.000Z');
   const redis = overrides.redis || createRedis();
@@ -147,27 +165,24 @@ function createHarness(overrides = {}) {
     }))
   };
   const randomInt = overrides.randomInt || jest.fn(() => 9999);
-  const realtimeReader = overrides.realtimeReader || jest.fn(async (path) => {
-    if (path.endsWith('/documents/cnh')) {
-      return {
-        status: 'approved',
-        analysisStatus: 'approved',
-        lastSubmissionId: 'cnh-submission-1'
-      };
-    }
-    return null;
-  });
+  const canonicalDocumentApprovalService = overrides.canonicalDocumentApprovalService || {
+    requireApprovedCnh: jest.fn(async (driverId) => approvedCanonicalCnh(driverId))
+  };
+  const redisCriticalAuthorityService = overrides.redisCriticalAuthorityService || {
+    assertReady: jest.fn(async () => ({ ready: true }))
+  };
   const env = {
     DAILY_KYC_ONLINE_GATE_ENABLED: 'true',
     KYC_TRUST_CADENCE_ENABLED: 'true',
-    KYC_TRUST_POLICY_VERSION: 'driver_identity_recurring_v1',
+    KYC_TRUST_POLICY_VERSION: 'driver_identity_recurring_v2',
     KYC_TRUST_T0_MAX_AGE_HOURS: '24',
     KYC_TRUST_T1_MAX_AGE_HOURS: '72',
     KYC_TRUST_T2_MAX_AGE_HOURS: '168',
     KYC_TRUST_T1_MIN_DISTINCT_SUCCESS_DAYS: '7',
     KYC_TRUST_T2_MIN_AGE_DAYS: '30',
     KYC_TRUST_T2_MIN_SUCCESS_COUNT: '14',
-    KYC_TRUSTED_RANDOM_AUDIT_PERCENT: '5',
+    KYC_TRUST_T2_MIN_DISTINCT_SUCCESS_DAYS: '14',
+    KYC_TRUSTED_RANDOM_AUDIT_PERCENT: '10',
     KYC_TRUST_RANDOM_AUDIT_TIME_ZONE: 'America/Sao_Paulo',
     ...overrides.env
   };
@@ -176,7 +191,8 @@ function createHarness(overrides = {}) {
     env,
     redis,
     firestoreProvider: () => firestore,
-    realtimeReader,
+    canonicalDocumentApprovalService,
+    redisCriticalAuthorityService,
     activeTripResolver,
     activationService,
     kycPolicyService: kycPolicy,
@@ -200,7 +216,8 @@ function createHarness(overrides = {}) {
     activationService,
     kycPolicy,
     randomInt,
-    realtimeReader,
+    canonicalDocumentApprovalService,
+    redisCriticalAuthorityService,
     setNow(value) {
       now = new Date(value);
     }
@@ -208,6 +225,7 @@ function createHarness(overrides = {}) {
 }
 
 function canonicalEvidence(driverId, sessionId, verifiedAt, overrides = {}) {
+  const documentPath = `driver-activation/${driverId}/cnh/cnh-submission-1.pdf`;
   return {
     driverId,
     sourcePath: 'server_side_aws_reference_compare',
@@ -231,12 +249,22 @@ function canonicalEvidence(driverId, sessionId, verifiedAt, overrides = {}) {
     comparisonProvider: 'leaf_face_compare_service',
     embeddingDimension: 512,
     reference: {
-      source: 'cnh_face_embedding',
-      model: 'sface-v1',
+      bindingVersion: 3,
+      source: 'approved_cnh_pdf_crop_v1',
+      documentType: 'cnh',
+      model: 'aws_rekognition_compare_faces_managed',
       createdAt: '2026-06-01T12:00:00.000Z',
-      submissionId: 'cnh-submission-1'
+      submissionId: 'cnh-submission-1',
+      documentPathSha256: crypto.createHash('sha256').update(documentPath).digest('hex'),
+      documentSha256: crypto.createHash('sha256').update(`cnh-pdf-${driverId}`).digest('hex'),
+      storageGeneration: '1784000000000000',
+      approvalSource: 'dashboard_manual_review',
+      reviewedByHash: crypto.createHash('sha256').update('admin-1').digest('hex'),
+      reviewedAt: '2026-06-01T12:00:00.000Z',
+      imageSha256: crypto.createHash('sha256').update(`cnh-${driverId}`).digest('hex'),
+      cropVersion: 'cnh_digital_photo_crop_v1'
     },
-    currentModel: 'sface-v1',
+    currentModel: 'aws_rekognition_compare_faces_managed',
     verifiedAt,
     challengeId: null,
     requirement: null,
@@ -244,7 +272,56 @@ function canonicalEvidence(driverId, sessionId, verifiedAt, overrides = {}) {
   };
 }
 
+function canonicalStateReference(driverId) {
+  const documentPath = `driver-activation/${driverId}/cnh/cnh-submission-1.pdf`;
+  return {
+    referenceSubmissionId: 'cnh-submission-1',
+    referenceDocumentPathSha256: crypto
+      .createHash('sha256')
+      .update(documentPath)
+      .digest('hex'),
+    referenceDocumentSha256: crypto
+      .createHash('sha256')
+      .update(`cnh-pdf-${driverId}`)
+      .digest('hex'),
+    referenceStorageGeneration: '1784000000000000',
+    referenceCropVersion: 'cnh_digital_photo_crop_v1'
+  };
+}
+
 describe('driver-identity-trust-service', () => {
+  test('preserves legacy v1 by default and selects recurring-v2 only for adaptive cadence', () => {
+    expect(DEFAULTS).toEqual(expect.objectContaining({
+      policyVersion: 'driver_identity_recurring_v1',
+      observedMinDistinctSuccessDays: 7,
+      trustedMinAgeDays: 30,
+      trustedMinSuccessCount: 14,
+      trustedMinDistinctSuccessDays: 14,
+      randomAuditPercent: 10
+    }));
+
+    const legacyConfig = createHarness({
+      env: {
+        KYC_TRUST_CADENCE_ENABLED: 'false',
+        KYC_TRUST_POLICY_VERSION: undefined
+      }
+    }).service.getConfig();
+    const adaptiveConfig = createHarness({
+      env: { KYC_TRUST_POLICY_VERSION: undefined }
+    }).service.getConfig();
+
+    expect(legacyConfig).toEqual(expect.objectContaining({
+      cadenceEnabled: false,
+      policyVersion: 'driver_identity_recurring_v1',
+      approvedAdaptivePolicyValid: true
+    }));
+    expect(adaptiveConfig).toEqual(expect.objectContaining({
+      cadenceEnabled: true,
+      policyVersion: 'driver_identity_recurring_v2',
+      approvedAdaptivePolicyValid: true
+    }));
+  });
+
   beforeEach(() => {
     mockClaimIdentityVerificationWindow.mockReset().mockResolvedValue({
       acquired: true,
@@ -257,6 +334,118 @@ describe('driver-identity-trust-service', () => {
     });
     mockRenewIdentityVerificationWindow.mockReset().mockResolvedValue(true);
     mockReleaseIdentityVerificationWindow.mockReset().mockResolvedValue(true);
+  });
+
+  test('requires a live Redis authority attestation before creating a new KYC window', async () => {
+    const harness = createHarness({
+      env: {
+        KYC_ACTIVE_TRIP_AUTHORITY_MODE: 'redis_noeviction',
+        REDIS_CRITICAL_DATASET_GENERATION: 'generation-rc1',
+        REDIS_CRITICAL_DATASET_GENERATION_KEY: 'leaf:runtime:critical-dataset:generation'
+      }
+    });
+
+    await expect(harness.service.claimVerificationWindow('driver-new-window'))
+      .resolves.toEqual(expect.objectContaining({ acquired: true }));
+
+    expect(harness.redisCriticalAuthorityService.assertReady).toHaveBeenCalledWith({
+      env: expect.objectContaining({ KYC_ACTIVE_TRIP_AUTHORITY_MODE: 'redis_noeviction' }),
+      forceRefresh: true
+    });
+    expect(mockClaimIdentityVerificationWindow).toHaveBeenCalledWith(
+      harness.redis,
+      'driver-new-window',
+      expect.any(String),
+      25 * 60,
+      {
+        requiredDatasetGeneration: 'generation-rc1',
+        datasetGenerationKey: 'leaf:runtime:critical-dataset:generation'
+      }
+    );
+  });
+
+  test('fails closed before creating a new KYC window when Redis is quarantined', async () => {
+    const authorityError = Object.assign(new Error('quarantined'), {
+      code: 'REDIS_CRITICAL_AUTHORITY_NOT_READY'
+    });
+    const harness = createHarness({
+      env: { KYC_ACTIVE_TRIP_AUTHORITY_MODE: 'redis_noeviction' },
+      redisCriticalAuthorityService: {
+        assertReady: jest.fn(async () => { throw authorityError; })
+      }
+    });
+
+    await expect(harness.service.claimVerificationWindow('driver-blocked-window'))
+      .rejects.toMatchObject({ code: 'REDIS_CRITICAL_AUTHORITY_NOT_READY' });
+    expect(mockClaimIdentityVerificationWindow).not.toHaveBeenCalled();
+  });
+
+  test('renews an exact existing KYC token without depending on a new authority claim', async () => {
+    mockClaimIdentityVerificationWindow.mockResolvedValueOnce({
+      acquired: true,
+      reused: true,
+      missing: false,
+      busy: false,
+      activeTripId: null,
+      key: 'kyc:identity-verification-window:driver-existing-window',
+      token: 'existing-token',
+      ttlSeconds: 25 * 60
+    });
+    const harness = createHarness({
+      env: { KYC_ACTIVE_TRIP_AUTHORITY_MODE: 'redis_noeviction' },
+      redisCriticalAuthorityService: {
+        assertReady: jest.fn(async () => { throw new Error('must not be called'); })
+      }
+    });
+
+    await expect(harness.service.claimVerificationWindow('driver-existing-window', {
+      token: 'existing-token',
+      scope: 'aws_liveness_poll'
+    })).resolves.toEqual(expect.objectContaining({
+      acquired: true,
+      reused: true,
+      token: 'existing-token'
+    }));
+    expect(harness.redisCriticalAuthorityService.assertReady).not.toHaveBeenCalled();
+    expect(mockClaimIdentityVerificationWindow).toHaveBeenCalledWith(
+      harness.redis,
+      'driver-existing-window',
+      'existing-token',
+      25 * 60,
+      { existingOnly: true }
+    );
+  });
+
+  test('an unknown supplied KYC token cannot bypass attestation and create a window', async () => {
+    mockClaimIdentityVerificationWindow
+      .mockResolvedValueOnce({
+        acquired: false,
+        reused: false,
+        missing: true,
+        busy: false,
+        activeTripId: null,
+        token: 'unknown-token'
+      })
+      .mockResolvedValueOnce({
+        acquired: true,
+        reused: false,
+        missing: false,
+        busy: false,
+        activeTripId: null,
+        token: 'unknown-token'
+      });
+    const harness = createHarness({
+      env: { KYC_ACTIVE_TRIP_AUTHORITY_MODE: 'redis_noeviction' }
+    });
+
+    await expect(harness.service.claimVerificationWindow('driver-unknown-token', {
+      token: 'unknown-token'
+    })).resolves.toEqual(expect.objectContaining({ acquired: true }));
+    expect(harness.redisCriticalAuthorityService.assertReady).toHaveBeenCalledWith({
+      env: expect.any(Object),
+      forceRefresh: true
+    });
+    expect(mockClaimIdentityVerificationWindow).toHaveBeenCalledTimes(2);
   });
 
   test('defers every identity gate before touching KYC when a backend-indexed trip is active', async () => {
@@ -355,6 +544,46 @@ describe('driver-identity-trust-service', () => {
     );
     expect(harness.redis.hset.mock.invocationCallOrder[0])
       .toBeLessThan(mockReleaseIdentityVerificationWindow.mock.invocationCallOrder[0]);
+  });
+
+  test('hard-fails gate errors even when production biometrics are disabled', async () => {
+    const gateError = new Error('Firestore unavailable during KYC approval gate');
+    gateError.code = 'KYC_APPROVAL_STORE_UNAVAILABLE';
+    const kycPolicyService = {
+      requireApprovedKyc: jest.fn(async () => {
+        throw gateError;
+      }),
+      getStepUpChallenge: jest.fn(async () => null),
+      getOrCreateStepUpChallenge: jest.fn()
+    };
+    const resolveBiometricPolicy = jest.fn(() => ({
+      productionBiometricsEnabled: false,
+      trustedMatchProviders: []
+    }));
+    const harness = createHarness({
+      env: { KYC_PRODUCTION_BIOMETRICS_ENABLED: 'false' },
+      kycPolicyService,
+      resolveBiometricPolicy
+    });
+
+    const result = await harness.service.evaluateOnlineGate('driver-biometric-flag-disabled');
+
+    expect(resolveBiometricPolicy).toHaveBeenCalledWith(expect.objectContaining({
+      KYC_PRODUCTION_BIOMETRICS_ENABLED: 'false'
+    }));
+    expect(result).toEqual(expect.objectContaining({
+      allowed: false,
+      code: 'KYC_CHECK_FAILED',
+      dispatchBlockPersisted: true
+    }));
+    expect(result).not.toHaveProperty('providerDormant');
+    expect(harness.redis.hset).toHaveBeenCalledWith(
+      'driver:driver-biometric-flag-disabled',
+      expect.objectContaining({
+        dispatchEligible: 'false',
+        dispatchEligibilityCode: 'KYC_CHECK_FAILED'
+      })
+    );
   });
 
   test('retains the KYC window when the fail-closed dispatch seal cannot be persisted', async () => {
@@ -475,6 +704,27 @@ describe('driver-identity-trust-service', () => {
       .toBe(168 * 60 * 60 * 1000);
   });
 
+  test('does not promote 14 successes concentrated in only 7 distinct days to T2', () => {
+    const harness = createHarness();
+    const config = harness.service.getConfig();
+    const verifiedAtMs = Date.parse('2026-07-31T15:00:00.000Z');
+    const firstVerifiedAt = '2026-07-01T15:00:00.000Z';
+
+    expect(harness.service.promoteTier(
+      TRUST_TIERS.OBSERVED,
+      { successCount: 14, distinctSuccessDays: 7, firstVerifiedAt },
+      config,
+      verifiedAtMs
+    )).toBe(TRUST_TIERS.OBSERVED);
+
+    expect(harness.service.promoteTier(
+      TRUST_TIERS.OBSERVED,
+      { successCount: 14, distinctSuccessDays: 14, firstVerifiedAt },
+      config,
+      verifiedAtMs
+    )).toBe(TRUST_TIERS.TRUSTED);
+  });
+
   test('records an AWS session once even when the canonical callback is replayed', async () => {
     const harness = createHarness();
     const driverId = 'driver-idempotent';
@@ -491,16 +741,17 @@ describe('driver-identity-trust-service', () => {
   });
 
   test('binds AWS CompareFaces evidence to the exact approved CNH path and crop', async () => {
-    const driverId = 'driver-aws-binding-v2';
+    const driverId = 'driver-aws-binding-v3';
     const documentPath = `driver-activation/${driverId}/cnh/current.pdf`;
     const pathHash = crypto.createHash('sha256').update(documentPath).digest('hex');
+    const documentSha256 = crypto.createHash('sha256').update('approved-cnh-pdf').digest('hex');
     const harness = createHarness({
-      realtimeReader: jest.fn(async () => ({
-        status: 'approved',
-        analysisStatus: 'approved',
-        lastSubmissionId: 'cnh-submission-1',
-        filePath: documentPath
-      })),
+      canonicalDocumentApprovalService: {
+        requireApprovedCnh: jest.fn(async () => approvedCanonicalCnh(driverId, {
+          filePath: documentPath,
+          documentSha256
+        }))
+      },
       resolveBiometricPolicy: () => ({
         productionBiometricsEnabled: true,
         trustedMatchProviders: ['leaf_face_compare_service'],
@@ -511,19 +762,24 @@ describe('driver-identity-trust-service', () => {
       })
     });
     const reference = {
-      bindingVersion: 2,
+      bindingVersion: 3,
       source: 'approved_cnh_pdf_crop_v1',
       documentType: 'cnh',
       model: 'aws_rekognition_compare_faces_managed',
       submissionId: 'cnh-submission-1',
       documentPathSha256: pathHash,
+      documentSha256,
+      storageGeneration: '1784000000000000',
+      approvalSource: 'dashboard_manual_review',
+      reviewedByHash: crypto.createHash('sha256').update('admin-1').digest('hex'),
+      reviewedAt: '2026-06-01T12:00:00.000Z',
       imageSha256: 'a'.repeat(64),
       cropVersion: 'cnh_digital_photo_crop_v1',
       createdAt: '2026-07-01T12:00:00.000Z'
     };
     const evidence = canonicalEvidence(
       driverId,
-      'session-aws-binding-v2',
+      'session-aws-binding-v3',
       '2026-07-01T15:00:00.000Z',
       {
         provider: 'aws_rekognition_compare_faces',
@@ -564,6 +820,7 @@ describe('driver-identity-trust-service', () => {
       driverId,
       canonicalEvidence(driverId, sessionId, '2026-07-01T15:00:00.000Z', {
         challengeId,
+        challengeSource: 'identity_reverification',
         requirement: 'IDENTITY_REVERIFICATION'
       })
     );
@@ -664,10 +921,11 @@ describe('driver-identity-trust-service', () => {
 
   test('rejects canonical promotion when the embedding is not from the currently approved CNH', async () => {
     const harness = createHarness({
-      realtimeReader: jest.fn(async () => ({
-        status: 'approved',
-        lastSubmissionId: 'new-cnh-submission'
-      }))
+      canonicalDocumentApprovalService: {
+        requireApprovedCnh: jest.fn(async () => approvedCanonicalCnh('driver-stale-cnh', {
+          submissionId: 'new-cnh-submission'
+        }))
+      }
     });
 
     await expect(harness.service.recordCanonicalSuccess(
@@ -739,6 +997,93 @@ describe('driver-identity-trust-service', () => {
     );
   });
 
+  test('durably links private review evidence to the exact canonical identity failure', async () => {
+    const harness = createHarness();
+    const driverId = 'driver-review-binding';
+    const referenceImageSha256 = 'd'.repeat(64);
+    const failure = await harness.service.recordCanonicalFailure(driverId, {
+      awsSessionId: 'session-review-binding',
+      reason: 'identity_reverification_failed',
+      decision: 'reject',
+      similarityScore: 0.2,
+      referenceImageSha256
+    });
+    const reviewEvidenceId = 'private-review-evidence-1';
+    harness.firestore.documents.set(
+      `${harness.service.failedEvidenceCollection}/${reviewEvidenceId}`,
+      {
+        evidenceId: reviewEvidenceId,
+        driverId,
+        state: 'available',
+        decision: 'reject',
+        referenceImageSha256
+      }
+    );
+
+    await expect(harness.service.linkReviewEvidenceToCanonicalFailure(driverId, {
+      failureEvidenceId: failure.evidenceId,
+      reviewEvidenceId
+    })).resolves.toMatchObject({
+      success: true,
+      failureEvidenceId: failure.evidenceId,
+      reviewEvidenceId
+    });
+    await expect(harness.service.linkReviewEvidenceToCanonicalFailure(driverId, {
+      failureEvidenceId: failure.evidenceId,
+      reviewEvidenceId
+    })).resolves.toMatchObject({
+      success: true,
+      failureEvidenceId: failure.evidenceId,
+      reviewEvidenceId
+    });
+    expect(harness.firestore.documents.get(
+      `${harness.service.stateCollection}/${driverId}`
+    )).toEqual(expect.objectContaining({
+      lastFailure: expect.objectContaining({ reviewEvidenceId })
+    }));
+    const linkedFailure = harness.firestore.documents.get(
+      `${harness.service.stateCollection}/${driverId}/evidence/${failure.evidenceId}`
+    );
+    expect(linkedFailure).toEqual(expect.objectContaining({ reviewEvidenceId }));
+    expect(harness.service.restoreRejectedIdentityVerification(
+      driverId,
+      failure.evidenceId,
+      linkedFailure,
+      { challengeId: null, requirement: null }
+    )).toEqual(expect.objectContaining({ reviewEvidenceId }));
+  });
+
+  test('rejects a review evidence link whose captured face hash diverges', async () => {
+    const harness = createHarness();
+    const driverId = 'driver-review-binding-invalid';
+    const failure = await harness.service.recordCanonicalFailure(driverId, {
+      awsSessionId: 'session-review-binding-invalid',
+      reason: 'canonical_face_compare_failed',
+      decision: 'reject',
+      similarityScore: 0.2,
+      referenceImageSha256: 'e'.repeat(64)
+    });
+    const reviewEvidenceId = 'private-review-evidence-invalid';
+    harness.firestore.documents.set(
+      `${harness.service.failedEvidenceCollection}/${reviewEvidenceId}`,
+      {
+        evidenceId: reviewEvidenceId,
+        driverId,
+        state: 'available',
+        decision: 'reject',
+        referenceImageSha256: 'f'.repeat(64)
+      }
+    );
+
+    await expect(harness.service.linkReviewEvidenceToCanonicalFailure(driverId, {
+      failureEvidenceId: failure.evidenceId,
+      reviewEvidenceId
+    })).rejects.toMatchObject({ code: 'KYC_REVIEW_EVIDENCE_BINDING_INVALID' });
+    expect(harness.firestore.documents.get(
+      `${harness.service.stateCollection}/${driverId}`
+    )?.lastFailure?.reviewEvidenceId).toBeUndefined();
+  });
+
   test('restores only a session-bound canonical rejection for crash reconciliation', async () => {
     const harness = createHarness();
     const driverId = 'driver-rejected-reconciliation';
@@ -785,6 +1130,26 @@ describe('driver-identity-trust-service', () => {
     )).toBeNull();
   });
 
+  test('preserves the legacy ACTIVE decision while the provider rollout is explicitly dormant', async () => {
+    const harness = createHarness({
+      env: {
+        DAILY_KYC_ONLINE_GATE_ENABLED: 'false',
+        KYC_TRUST_CADENCE_ENABLED: 'false'
+      },
+      resolveBiometricPolicy: () => ({ productionBiometricsEnabled: false })
+    });
+
+    const result = await harness.service.evaluateOnlineGate('driver-dormant');
+
+    expect(result).toEqual(expect.objectContaining({
+      allowed: true,
+      code: 'driverActivationActive',
+      providerDormant: true
+    }));
+    expect(harness.kycPolicy.requireApprovedKyc).not.toHaveBeenCalled();
+    expect(mockClaimIdentityVerificationWindow).not.toHaveBeenCalled();
+  });
+
   test('does not revoke Redis trust when a failure replays an already successful AWS session', async () => {
     const harness = createHarness();
     const driverId = 'driver-success-replay';
@@ -811,7 +1176,10 @@ describe('driver-identity-trust-service', () => {
 
   test('accepts only canonical compatibility cache while adaptive cadence is disabled', async () => {
     const harness = createHarness({
-      env: { KYC_TRUST_CADENCE_ENABLED: 'false' }
+      env: {
+        KYC_TRUST_CADENCE_ENABLED: 'false',
+        KYC_TRUST_POLICY_VERSION: undefined
+      }
     });
     const driverId = 'driver-canonical-fallback';
     harness.redis.values.set(`kyc_verification:${driverId}`, JSON.stringify({
@@ -848,8 +1216,9 @@ describe('driver-identity-trust-service', () => {
     const harness = createHarness({ randomInt });
     const driverId = 'driver-random-audit';
     harness.firestore.documents.set(`driver_identity_trust/${driverId}`, {
+      ...canonicalStateReference(driverId),
       schemaVersion: 1,
-      policyVersion: 'driver_identity_recurring_v1',
+      policyVersion: 'driver_identity_recurring_v2',
       driverId,
       status: 'active',
       trustTier: TRUST_TIERS.TRUSTED,
@@ -864,6 +1233,9 @@ describe('driver-identity-trust-service', () => {
     harness.setNow('2026-07-13T15:00:00.000Z');
 
     const first = await harness.service.evaluateAdaptiveCadence(driverId);
+    harness.redis.values.delete(
+      harness.service.buildRandomAuditKey(driverId, first.today)
+    );
     const second = await harness.service.evaluateAdaptiveCadence(driverId);
 
     expect(first).toEqual(expect.objectContaining({
@@ -877,22 +1249,56 @@ describe('driver-identity-trust-service', () => {
       expect.stringContaining(`driver-random-audit:${first.today}`),
       expect.any(String),
       'EX',
-      expect.any(Number),
-      'NX'
+      expect.any(Number)
     );
+    expect(harness.firestore.documents.get(
+      `driver_identity_trust/${driverId}/random_audits/${first.today}`
+    )).toEqual(expect.objectContaining({ selected: true }));
+  });
+
+  test('invalidates future trust when the currently approved CNH changes', async () => {
+    const driverId = 'driver-cnh-changed';
+    const originalPath = `driver-activation/${driverId}/cnh/cnh-submission-1.pdf`;
+    const changedPath = `driver-activation/${driverId}/cnh/cnh-submission-2.pdf`;
+    const requireApprovedCnh = jest.fn()
+      .mockResolvedValueOnce(approvedCanonicalCnh(driverId, {
+        submissionId: 'cnh-submission-1',
+        filePath: originalPath
+      }))
+      .mockResolvedValueOnce(approvedCanonicalCnh(driverId, {
+        submissionId: 'cnh-submission-2',
+        filePath: changedPath,
+        documentSha256: crypto.createHash('sha256').update('new-cnh').digest('hex'),
+        storageGeneration: '1784000000000001'
+      }));
+    const harness = createHarness({
+      canonicalDocumentApprovalService: { requireApprovedCnh }
+    });
+
+    await harness.service.recordCanonicalSuccess(
+      driverId,
+      canonicalEvidence(driverId, 'session-before-cnh-change', '2026-07-01T15:00:00.000Z')
+    );
+
+    const result = await harness.service.evaluateAdaptiveCadence(driverId);
+
+    expect(result).toEqual(expect.objectContaining({
+      allowed: false,
+      code: 'KYC_CANONICAL_REFERENCE_CHANGED',
+      tier: TRUST_TIERS.NEW
+    }));
+    expect(requireApprovedCnh).toHaveBeenCalledTimes(2);
   });
 
   test('never samples a random audit before the weekly trust tier', async () => {
     const randomInt = jest.fn(() => 0);
-    const harness = createHarness({
-      randomInt,
-      env: { KYC_TRUSTED_RANDOM_AUDIT_PERCENT: '100' }
-    });
+    const harness = createHarness({ randomInt });
     const driverId = 'driver-observed-no-random';
     harness.firestore.documents.set(`driver_identity_trust/${driverId}`, {
+      ...canonicalStateReference(driverId),
       schemaVersion: 1,
       stateRevision: 1,
-      policyVersion: 'driver_identity_recurring_v1',
+      policyVersion: 'driver_identity_recurring_v2',
       driverId,
       status: 'active',
       trustTier: TRUST_TIERS.OBSERVED,
@@ -933,13 +1339,8 @@ describe('driver-identity-trust-service', () => {
   });
 
   test('fails closed when a weekly random-audit decision cannot be persisted', async () => {
-    const redisError = new Error('redis unavailable');
     const harness = createHarness({
-      redis: {
-        get: jest.fn(async () => { throw redisError; }),
-        set: jest.fn(async () => { throw redisError; }),
-        del: jest.fn(async () => 0)
-      }
+      firestore: {}
     });
 
     await expect(harness.service.sampleRandomAuditOncePerDay(
@@ -1062,8 +1463,9 @@ describe('driver-identity-trust-service', () => {
     const driverId = 'driver-random-satisfied';
     harness.setNow('2026-07-13T15:00:00.000Z');
     harness.firestore.documents.set(`driver_identity_trust/${driverId}`, {
+      ...canonicalStateReference(driverId),
       schemaVersion: 1,
-      policyVersion: 'driver_identity_recurring_v1',
+      policyVersion: 'driver_identity_recurring_v2',
       driverId,
       status: 'active',
       trustTier: TRUST_TIERS.TRUSTED,
@@ -1083,17 +1485,22 @@ describe('driver-identity-trust-service', () => {
     expect(randomInt).not.toHaveBeenCalled();
   });
 
-  test('caps weekly validity and random audit percentage in configuration', () => {
+  test('rejects stricter or broader cadence values without a new policy version', async () => {
     const harness = createHarness({
       env: {
-        KYC_TRUST_T2_MAX_AGE_HOURS: '720',
-        KYC_TRUSTED_RANDOM_AUDIT_PERCENT: '250'
+        KYC_TRUST_T0_MAX_AGE_HOURS: '12',
+        KYC_TRUST_T1_MAX_AGE_HOURS: '48',
+        KYC_TRUST_T2_MAX_AGE_HOURS: '120',
+        KYC_TRUST_T1_MIN_DISTINCT_SUCCESS_DAYS: '8',
+        KYC_TRUST_T2_MIN_AGE_DAYS: '31',
+        KYC_TRUST_T2_MIN_SUCCESS_COUNT: '15',
+        KYC_TRUST_T2_MIN_DISTINCT_SUCCESS_DAYS: '15',
+        KYC_TRUSTED_RANDOM_AUDIT_PERCENT: '100'
       }
     });
 
-    expect(harness.service.getConfig()).toEqual(expect.objectContaining({
-      trustedMaxAgeHours: 168,
-      randomAuditPercent: 100
-    }));
+    expect(harness.service.getConfig().approvedAdaptivePolicyValid).toBe(false);
+    await expect(harness.service.evaluateAdaptiveCadence('driver-policy-drift'))
+      .rejects.toMatchObject({ code: 'KYC_TRUST_POLICY_CONFIG_INVALID' });
   });
 });

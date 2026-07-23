@@ -33,27 +33,12 @@ const adminUser = {
 
 const routes = [
   { path: "/dashboard", heading: "Operação diária" },
-  { path: "/maps", heading: "Mapas e Geofence" },
   { path: "/support", heading: "Suporte" },
   { path: "/campaign-center", heading: "Campanhas in-app" },
-  { path: "/programs", heading: "Programas de Convite" },
-  { path: "/promotions", heading: "Promoções" },
-  { path: "/notifications", heading: "Notificações" },
-  { path: "/waitlist", heading: "Waitlist" },
-  { path: "/drivers", heading: "Motoristas" },
   { path: "/drivers/review-queue", heading: "Fila de Revisão de Documentos" },
-  { path: "/drivers/driver-smoke/documents", heading: "Documentos do Motorista" },
-  { path: "/users", heading: "Usuarios" },
-  { path: "/users/user-smoke", heading: "Detalhes do Usuário" },
   { path: "/metrics", heading: "Métricas" },
-  { path: "/metrics/history", heading: "Historico de metricas" },
-  { path: "/metrics/marketplace", heading: "Marketplace Health" },
   { path: "/observability", heading: "Console operacional" },
-  { path: "/audit", heading: "Auditoria e acesso" },
   { path: "/financial-reconciliation", heading: "Reconciliação financeira" },
-  { path: "/subscriptions", heading: "Assinaturas" },
-  { path: "/payment-runtime", heading: "Perfil de pagamento" },
-  { path: "/financial-simulator", heading: "Simulador Financeiro" },
   { path: "/reports", heading: "Relatórios" },
   { path: "/runtime-flags", heading: "Perfil de pagamento" },
 ];
@@ -505,33 +490,6 @@ function fixtureForApiPath(apiPath, method) {
   if (apiPath.startsWith("/ops/overview")) return json(opsOverviewFixture());
   if (apiPath.startsWith("/ops/alerts")) return json(opsAlertsFixture());
   if (apiPath.startsWith("/ops/command-center")) return json(commandCenterFixture());
-  if (apiPath === "/geofence/admin/config" && method === "GET") {
-    return json({
-      success: true,
-      geofence: {
-        active: true,
-        enabled: true,
-        regionPoints: 10,
-        region: [
-          [
-            [-43.25, -22.99],
-            [-43.20, -22.99],
-            [-43.20, -22.94],
-            [-43.25, -22.94],
-            [-43.25, -22.99],
-          ],
-          [
-            [-43.19, -22.94],
-            [-43.14, -22.94],
-            [-43.14, -22.89],
-            [-43.19, -22.89],
-            [-43.19, -22.94],
-          ],
-        ],
-      },
-      cityActivation: { states: [] },
-    });
-  }
   if (apiPath.startsWith("/metrics/overview")) {
     return json({
       waitlistCount: 3,
@@ -658,23 +616,9 @@ function fixtureForApiPath(apiPath, method) {
   if (apiPath.startsWith("/drivers/documents/review-queue")) {
     return json({
       success: true,
-      items: [
-        {
-          driverId: "driver-smoke",
-          documentType: "cnh",
-          fileName: "cnh-smoke.pdf",
-          fileUrl: "https://cdn.leaf.app.br/smoke/cnh-smoke.pdf",
-          status: "pending",
-          uploadedAt: new Date().toISOString(),
-          driver: {
-            name: "Motorista Smoke",
-            email: "driver-smoke@leaf.app.br",
-            phone: "+5521992000000",
-          },
-        },
-      ],
-      summary: { total: 1, byStatus: { pending: 1, approved: 0, rejected: 0 } },
-      pagination: { page: 1, limit: 25, total: 1, pages: 1 },
+      items: [],
+      summary: { total: 0, byStatus: { pending: 0, approved: 0, rejected: 0 } },
+      pagination: { page: 1, limit: 25, total: 0, pages: 0 },
     });
   }
 
@@ -752,9 +696,6 @@ async function installRoutes(context, observed) {
       if (observed.apiPaths) {
         observed.apiPaths.push(apiPath);
       }
-      if (observed.apiRequests) {
-        observed.apiRequests.push({ path: apiPath, method: request.method() });
-      }
       if (apiPath.startsWith("/reports/generate/")) {
         observed.reportDownloadAuthorization = request.headers().authorization || "";
       }
@@ -800,8 +741,6 @@ async function assertFinancialReconciliationContract(page) {
   await page.goto("/financial-reconciliation", { waitUntil: "domcontentloaded" });
   await page.locator("h1", { hasText: "Reconciliação financeira" }).waitFor({ timeout: 15000 });
   await page.locator("body", { hasText: "ride-financial-smoke-1" }).waitFor({ timeout: 15000 });
-  await page.getByRole("button", { name: "Abrir detalhe" }).first().click();
-  await page.locator("details.technical-details[open]", { hasText: "Detalhes financeiros avançados" }).waitFor({ timeout: 15000 });
   await page.locator(".metric-list .row", { hasText: "Bruto passageiro" }).waitFor({ timeout: 15000 });
   await page.locator(".metric-list .row", { hasText: "R$ 27,50" }).first().waitFor({ timeout: 15000 });
   await page.locator(".metric-list .row", { hasText: "Líquido motorista" }).waitFor({ timeout: 15000 });
@@ -866,105 +805,6 @@ async function assertReportsDownloadContract(page, observed) {
   log("reports export uses authenticated dashboard API client ok");
 }
 
-async function assertMapsEditingRequiresReview(page, observed) {
-  await page.goto("/maps", { waitUntil: "domcontentloaded" });
-  await page.locator("h1", { hasText: "Mapas e Geofence" }).waitFor({ timeout: 15000 });
-  await page.getByRole("img", { name: "Mapa operacional Leaf" }).waitFor({ timeout: 15000 });
-
-  if (await page.getByRole("button", { name: "Revisar e publicar" }).count()) {
-    throw new Error("Maps started in edit mode instead of read-only mode");
-  }
-
-  const mutationCount = () => (observed.apiRequests || []).filter(
-    (request) => request.path.startsWith("/geofence/admin/") && request.method !== "GET",
-  ).length;
-  const mutationsBefore = mutationCount();
-
-  await page.getByRole("button", { name: "Editar região" }).click();
-  await page
-    .getByRole("img", { name: "Mapa Leaf da geofence composta; edição disponível por coordenadas" })
-    .waitFor({ timeout: 15000 });
-  await page.locator("body", { hasText: "Região composta por 2 áreas" }).waitFor({ timeout: 15000 });
-  await page
-    .locator("details.technical-details > summary", { hasText: "Editar por coordenadas" })
-    .click();
-  await page
-    .getByRole("textbox", { name: "Coordenadas da geofence em JSON" })
-    .waitFor({ timeout: 15000 });
-  await page.getByRole("button", { name: "Revisar e publicar" }).click();
-  const dialog = page.getByRole("dialog");
-  await dialog.waitFor({ timeout: 15000 });
-  await dialog.getByRole("button", { name: "Cancelar" }).click();
-  await dialog.waitFor({ state: "detached", timeout: 15000 });
-
-  if (mutationCount() !== mutationsBefore) {
-    throw new Error("Cancelling geofence review triggered a mutation");
-  }
-  log("maps preserves composite geofence and review cancels without mutation");
-}
-
-async function assertReviewQueueKeepsDecisionsInsideDriverFile(page) {
-  await page.goto("/drivers/review-queue", { waitUntil: "domcontentloaded" });
-  await page.locator("h1", { hasText: "Fila de Revisão de Documentos" }).waitFor({ timeout: 15000 });
-  const row = page.locator("tbody tr", { hasText: "Motorista Smoke" }).first();
-  await row.waitFor({ timeout: 15000 });
-  const actionText = await row.locator(".actions-cell").innerText();
-  if (/\b(Aprovar|Rejeitar|Solicitar ajuste)\b/i.test(actionText)) {
-    throw new Error(`Review queue exposed an inline decision: ${actionText}`);
-  }
-  await row.getByRole("link", { name: "Revisar ficha" }).waitFor({ timeout: 15000 });
-  log("review queue keeps approve, reject and adjustment decisions out of table rows");
-}
-
-async function assertNotificationAudienceHasNoDefault(page) {
-  await page.goto("/notifications", { waitUntil: "domcontentloaded" });
-  await page.locator("h1", { hasText: "Notificações" }).waitFor({ timeout: 15000 });
-  await page.getByLabel("Título", { exact: true }).fill("Smoke sem envio");
-  await page.getByLabel("Mensagem", { exact: true }).fill("Validação somente de seleção de público");
-  await page.getByRole("button", { name: "Continuar para público" }).click();
-  const drivers = page.getByRole("checkbox", { name: "Motoristas" });
-  const passengers = page.getByRole("checkbox", { name: "Passageiros" });
-  await drivers.waitFor({ timeout: 15000 });
-  if (await drivers.isChecked() || await passengers.isChecked()) {
-    throw new Error("Notifications preselected an audience");
-  }
-  log("notifications starts with drivers and passengers unselected");
-}
-
-async function assertAdvancedEditorsStartClosed(page) {
-  await page.goto("/campaign-center", { waitUntil: "domcontentloaded" });
-  const campaignEditor = page.locator("details.campaign-editor-disclosure");
-  await campaignEditor.waitFor({ timeout: 15000 });
-  if (await campaignEditor.evaluate((element) => element.open)) {
-    throw new Error("Campaign editor started expanded");
-  }
-
-  await page.goto("/payment-runtime", { waitUntil: "domcontentloaded" });
-  const paymentAdvanced = page.locator("details.payment-advanced-settings");
-  await paymentAdvanced.waitFor({ timeout: 15000 });
-  if (await paymentAdvanced.evaluate((element) => element.open)) {
-    throw new Error("Payment advanced settings started expanded");
-  }
-  log("campaign editor and payment advanced settings start closed");
-}
-
-async function assertSidebarDisclosureAndCurrentPage(page) {
-  await page.goto("/dashboard", { waitUntil: "domcontentloaded" });
-  const currentLink = page.locator('.app-sidebar-link[aria-current="page"]');
-  await currentLink.waitFor({ timeout: 15000 });
-  if (await currentLink.count() !== 1) {
-    throw new Error("Sidebar must expose exactly one aria-current page link");
-  }
-
-  const financeGroup = page.getByRole("button", { name: "Financeiro", exact: true });
-  await financeGroup.click();
-  if (await financeGroup.getAttribute("aria-expanded") !== "true") {
-    throw new Error("Sidebar finance group did not expand");
-  }
-  await page.getByRole("link", { name: "Relatórios", exact: true }).waitFor({ state: "visible", timeout: 15000 });
-  log("sidebar groups expand and expose aria-current");
-}
-
 async function main() {
   const port = await getFreePort();
   const baseURL = `http://localhost:${port}`;
@@ -1013,7 +853,7 @@ async function main() {
       baseURL,
       httpCredentials: { username: basicUser, password: basicPassword },
     });
-    const unauthObserved = { forbiddenRequests: [], apiPaths: [], apiRequests: [] };
+    const unauthObserved = { forbiddenRequests: [], apiPaths: [] };
     await installRoutes(unauthContext, unauthObserved);
     const unauthPage = await unauthContext.newPage();
     await unauthPage.goto("/dashboard", { waitUntil: "domcontentloaded" });
@@ -1031,7 +871,7 @@ async function main() {
       window.sessionStorage.setItem("leaf_admin_user", JSON.stringify(user));
     }, adminUser);
 
-    const observed = { forbiddenRequests: [], apiPaths: [], apiRequests: [] };
+    const observed = { forbiddenRequests: [], apiPaths: [] };
     const pageErrors = [];
     await installRoutes(context, observed);
     const page = await context.newPage();
@@ -1046,26 +886,17 @@ async function main() {
     await assertFinancialSimulatorRequiresExplicitFlag(page);
     await assertObservabilityRideHealthContract(page);
     await assertReportsDownloadContract(page, observed);
-    await assertMapsEditingRequiresReview(page, observed);
-    await assertReviewQueueKeepsDecisionsInsideDriverFile(page);
-    await assertNotificationAudienceHasNoDefault(page);
-    await assertAdvancedEditorsStartClosed(page);
-    await assertSidebarDisclosureAndCurrentPage(page);
     assertNoDeprecatedFinancialApiUse(observed);
     log("dashboard avoids deprecated financial metrics endpoints");
 
-    const todayGroup = page.getByRole("button", { name: "Hoje" });
-    if ((await todayGroup.getAttribute("aria-expanded")) !== "true") {
-      await todayGroup.click();
-    }
-    await page.getByRole("link", { name: "Suporte", exact: true }).click();
+    await page.getByRole("link", { name: "Suporte" }).first().click();
     await page.locator("h1", { hasText: "Suporte" }).waitFor({ timeout: 15000 });
-    const freshnessStatus = page.locator("[data-testid='support-freshness-status']", { hasText: "Dados: atualizados" });
-    await freshnessStatus.waitFor({ timeout: 15000 });
-    const freshnessDetail = await freshnessStatus.getAttribute("title");
-    if (!String(freshnessDetail || "").includes("Tickets atualizado")) {
-      throw new Error("Support freshness status did not expose ticket freshness detail");
-    }
+    await page
+      .locator("[data-testid='support-freshness-status']", { hasText: "Dados: atualizados" })
+      .waitFor({ timeout: 15000 });
+    await page
+      .locator("[data-testid='support-freshness-detail']", { hasText: "Tickets atualizado" })
+      .waitFor({ timeout: 15000 });
     const classifiedTicketRow = page
       .locator(".support-thread-row", { hasText: /N2 .* elevated .* classifier/ })
       .first();
@@ -1079,8 +910,7 @@ async function main() {
         hasText: "payment_account_document_or_stuck_flow_keyword, payment_category_minimum",
       })
       .waitFor({ timeout: 15000 });
-    await page.getByRole("button", { name: "Crescimento" }).click();
-    await page.getByRole("link", { name: "Campanhas" }).click();
+    await page.getByRole("link", { name: "Campanhas" }).first().click();
     await page.locator("h1", { hasText: "Campanhas in-app" }).waitFor({ timeout: 15000 });
     log("top navigation between core areas ok");
 

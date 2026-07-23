@@ -282,9 +282,19 @@ describe('driver-eligibility-service', () => {
   it('blocks ride eligibility during manual KYC review without classifying the driver as rejected', async () => {
     firebaseConfig.getRealtimeDB.mockReturnValue(
       createRealtimeDB({
+        'driver_activation/driver_kyc_review': {
+          documents: {
+            cnh: { status: 'approved' },
+            crlv: { status: 'approved' }
+          },
+          consent: {
+            backgroundCheck: { accepted: true }
+          }
+        },
         'users/driver_kyc_review': {
           approved: true,
           kycStatus: 'pending_review',
+          kycFirstAccessVerifiedAt: '2026-07-21T20:00:00.000Z',
           carType: 'Leaf Plus'
         },
         'driver_activation/driver_kyc_review': {
@@ -323,7 +333,7 @@ describe('driver-eligibility-service', () => {
     );
 
     expect(eligibility.eligible).toBe(false);
-    expect(eligibility.code).toBe('DRIVER_ACTIVATION_DRIVER_DOCS_IN_REVIEW');
+    expect(eligibility.code).toBe('DRIVER_ACTIVATION_PRE_REGISTERED');
     expect(eligibility.activationState).toEqual(
       expect.objectContaining({
         canGoOnline: false,

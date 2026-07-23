@@ -21,7 +21,18 @@ describe('KYC runtime scope wiring', () => {
     );
     expect(onlineGate).toContain('const kycRuntime = await resolveKycRuntimeForUser({');
     expect(onlineGate).toContain("if (kycRuntime.namespace === 'operational')");
+    expect(onlineGate).toContain('kycRuntime.workflow');
+    expect(onlineGate).toContain('.assertKycOperationAllowed(driverId)');
+    expect(onlineGate).toContain("code: hasTraceableReview");
+    expect(onlineGate).toContain("? 'KYC_IDENTITY_REVIEW_HOLD'");
+    expect(onlineGate).toContain("reviewCaseId,");
+    expect(onlineGate).toContain("const evidenceId = typeof identityReviewGate.holdEvidenceId === 'string'");
+    expect(onlineGate).toContain(".test(identityReviewGate.holdEvidenceId.trim())");
+    expect(onlineGate).toContain("evidenceId\n");
+    expect(onlineGate).not.toContain("evidenceId: identityReviewGate.holdEvidenceId || null");
     expect(onlineGate).toContain('return kycRuntime.trust.evaluateOnlineGate(driverId);');
+    expect(onlineGate.indexOf('assertKycOperationAllowed'))
+      .toBeLessThan(onlineGate.indexOf('trust.evaluateOnlineGate'));
     expect(onlineGate.indexOf('resolveKycRuntimeForUser'))
       .toBeLessThan(onlineGate.indexOf('applyDeferredIdentityReverificationIfSafe'));
     expect(onlineGate).not.toContain('driverIdentityTrustService.evaluateOnlineGate');

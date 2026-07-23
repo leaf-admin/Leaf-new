@@ -5,7 +5,6 @@ import ProtectedRoute from "@/src/components/ProtectedRoute";
 import AppNav from "@/src/components/AppNav";
 import Panel from "@/src/components/ui/Panel";
 import KpiCard from "@/src/components/ui/KpiCard";
-import ConfirmActionDialog from "@/src/components/ui/ConfirmActionDialog";
 import { ErrorText, LoadingState } from "@/src/components/ui/PageFeedback";
 import { leafAPI } from "@/src/services/api";
 import { KeyValueGrid, TechnicalDetails } from "@/src/components/ui/DataViews";
@@ -75,30 +74,6 @@ function scopeEnabledForCampaign(config, type) {
   return config?.driver?.enabled !== false;
 }
 
-function campaignAudienceLabel(type) {
-  if (type === "passenger_referral") return "passageiros";
-  if (type === "founder_wave") return "founder wave";
-  return "motoristas";
-}
-
-function summarizeProgramConfig(config) {
-  if (!config) return "Sem configuração carregada";
-  return [
-    `Motorista ${config?.driver?.enabled !== false ? "habilitado" : "desabilitado"}: ${summarizeCampaignParams(config?.driver)}`,
-    `Passageiro ${config?.passenger?.enabled !== false ? "habilitado" : "desabilitado"}: ${summarizeCampaignParams(config?.passenger)}`,
-    `Founder ${config?.founder?.enabled !== false ? "habilitado" : "desabilitado"}: ${summarizeCampaignParams({ founderFreeMonths: config?.founder?.freeMonths })}`,
-  ].join(" | ");
-}
-
-function summarizeScopeStatuses(config) {
-  if (!config) return "-";
-  return [
-    `motorista: ${config?.driver?.enabled !== false ? "ativo" : "inativo"}`,
-    `passageiro: ${config?.passenger?.enabled !== false ? "ativo" : "inativo"}`,
-    `founder: ${config?.founder?.enabled !== false ? "ativo" : "inativo"}`,
-  ].join(" · ");
-}
-
 export default function ProgramsPage() {
   const { user } = useAuth();
   const [loading, setLoading] = useState(true);
@@ -109,13 +84,10 @@ export default function ProgramsPage() {
 
   const [summary, setSummary] = useState(null);
   const [config, setConfig] = useState(null);
-  const [savedConfig, setSavedConfig] = useState(null);
   const [campaigns, setCampaigns] = useState([]);
   const [runtimeFlags, setRuntimeFlags] = useState(null);
   const [campaignSearch, setCampaignSearch] = useState("");
   const [campaignStatusFilter, setCampaignStatusFilter] = useState("all");
-  const [pendingAction, setPendingAction] = useState(null);
-  const [updatingCampaignId, setUpdatingCampaignId] = useState("");
 
   const [campaignForm, setCampaignForm] = useState(defaultCampaignForm);
   const allowedRoles = useMemo(() => ["admin", "super-admin", "manager", "development"], []);
@@ -148,7 +120,6 @@ export default function ProgramsPage() {
       if (!hasAnyRole(user, allowedRoles)) {
         setSummary(null);
         setConfig(null);
-        setSavedConfig(null);
         setCampaigns([]);
         return;
       }
@@ -156,7 +127,6 @@ export default function ProgramsPage() {
       if (flags && !isLaunchFeatureEnabled(flags, "referralProgramsEnabled")) {
         setSummary(null);
         setConfig(null);
-        setSavedConfig(null);
         setCampaigns([]);
         return;
       }
@@ -169,7 +139,6 @@ export default function ProgramsPage() {
 
       setSummary(summaryData?.summary || null);
       setConfig(configData?.config || null);
-      setSavedConfig(configData?.config || null);
       setCampaigns(campaignsData?.campaigns || []);
     } catch (err) {
       setError(err?.message || "Falha ao carregar programas de convites");
@@ -292,7 +261,6 @@ export default function ProgramsPage() {
     }
 
     try {
-      setUpdatingCampaignId(campaignId);
       setError("");
       setNotice("");
       await leafAPI.updateReferralCampaign(campaignId, { status });
@@ -300,8 +268,6 @@ export default function ProgramsPage() {
       setNotice(`Campanha ${status === "active" ? "ativada" : "atualizada"} com sucesso.`);
     } catch (err) {
       setError(err?.message || "Falha ao atualizar status da campanha");
-    } finally {
-      setUpdatingCampaignId("");
     }
   };
 
@@ -334,110 +300,6 @@ export default function ProgramsPage() {
     });
   }, [campaigns, campaignSearch, campaignStatusFilter]);
 
-  const requestConfigConfirmation = () => {
-    if (!config) return;
-    if (!canMutatePrograms) {
-      setError(roleMessage || featureMessage || mutationMessage || "Configuração bloqueada para este perfil.");
-      return;
-    }
-
-    setPendingAction({
-      kind: "config",
-      title: "Salvar configuração global?",
-      confirmLabel: "Salvar configuração",
-      tone: "warning",
-      name: "Configuração global dos programas",
-      audience: "motoristas, passageiros e founder wave",
-      window: "Aplicação contínua",
-      currentStatus: summarizeScopeStatuses(savedConfig),
-      nextStatus: summarizeScopeStatuses(config),
-      beforeParams: summarizeProgramConfig(savedConfig),
-      afterParams: summarizeProgramConfig(config),
-      consequence: "O backend receberá os parâmetros exibidos. Feature flags, elegibilidade e regras atuais continuam como autoridade.",
-    });
-  };
-
-  const requestCreateCampaignConfirmation = () => {
-    if (!campaignForm.name.trim()) {
-      setError("Informe um nome para a campanha");
-      return;
-    }
-    if (!canMutatePrograms || (campaignForm.status === "active" && !selectedScopeEnabled)) {
-      setError(actionBlockedMessage || "Campanha bloqueada por permissão ou configuração global.");
-      return;
-    }
-
-    setPendingAction({
-      kind: "create",
-      title: campaignForm.status === "active" ? "Criar e ativar campanha?" : "Criar campanha?",
-      confirmLabel: campaignForm.status === "active" ? "Criar e ativar" : "Criar campanha",
-      tone: campaignForm.status === "active" ? "warning" : "neutral",
-      name: campaignForm.name.trim(),
-      audience: campaignAudienceLabel(campaignForm.type),
-      window: `${formatDate(campaignForm.startAt)} → ${formatDate(campaignForm.endAt)}`,
-      currentStatus: "não criada",
-      nextStatus: campaignForm.status,
-      beforeParams: "-",
-      afterParams: summarizeCampaignParams(campaignForm),
-      consequence: campaignForm.status === "active"
-        ? "A campanha será criada ativa e poderá gerar novos convites e benefícios quando as regras do backend forem atendidas."
-        : `A campanha será criada com status ${campaignForm.status}; nenhuma ativação adicional será feita pelo dashboard.`,
-    });
-  };
-
-  const requestCampaignStatusConfirmation = (campaign, nextStatus) => {
-    if (!campaign?.id || !nextStatus) return;
-    const campaignScopeEnabled = scopeEnabledForCampaign(config, campaign.type);
-    if (!canMutatePrograms || (nextStatus === "active" && !campaignScopeEnabled)) {
-      setError(
-        roleMessage ||
-          featureMessage ||
-          mutationMessage ||
-          "Este tipo de programa está desabilitado na configuração global. Não é possível ativar a campanha.",
-      );
-      return;
-    }
-
-    setPendingAction({
-      kind: "status",
-      title: nextStatus === "active"
-        ? "Ativar campanha?"
-        : nextStatus === "completed"
-          ? "Encerrar campanha?"
-          : "Pausar campanha?",
-      confirmLabel: nextStatus === "active" ? "Ativar" : nextStatus === "completed" ? "Encerrar" : "Pausar",
-      tone: nextStatus === "completed" ? "danger" : nextStatus === "active" ? "warning" : "neutral",
-      campaignId: campaign.id,
-      name: campaign.name || campaign.id,
-      audience: campaignAudienceLabel(campaign.type),
-      window: `${formatDate(campaign.startAt)} → ${formatDate(campaign.endAt)}`,
-      currentStatus: campaign.status || "-",
-      nextStatus,
-      beforeParams: summarizeCampaignParams(campaign.params),
-      afterParams: summarizeCampaignParams(campaign.params),
-      consequence: nextStatus === "active"
-        ? "A campanha poderá gerar novos convites e benefícios quando as regras de elegibilidade do backend forem atendidas."
-        : nextStatus === "completed"
-          ? "A campanha será encerrada e deixará de aceitar novas ativações conforme o lifecycle existente."
-          : "A campanha será pausada e deixará de aceitar novas ativações enquanto permanecer nesse estado.",
-    });
-  };
-
-  const confirmPendingAction = async () => {
-    const action = pendingAction;
-    if (!action) return;
-
-    if (action.kind === "config") {
-      await saveConfig();
-    } else if (action.kind === "create") {
-      await createCampaign();
-    } else if (action.kind === "status") {
-      await updateCampaignStatus(action.campaignId, action.nextStatus);
-    }
-
-    setPendingAction(null);
-  };
-
   return (
     <ProtectedRoute>
       <main className="page-shell">
@@ -445,6 +307,9 @@ export default function ProgramsPage() {
           <h1>Programas de Convite</h1>
           <div className="filters">
             <button onClick={load}>Atualizar</button>
+            <button onClick={saveConfig} disabled={savingConfig || !config || !canMutatePrograms} title={!canMutatePrograms ? (roleMessage || featureMessage || mutationMessage) : undefined}>
+              {savingConfig ? "Salvando..." : "Salvar configuração"}
+            </button>
           </div>
         </header>
 
@@ -493,12 +358,10 @@ export default function ProgramsPage() {
               }}
             />
           </Panel>
-          <details className="program-config-disclosure">
-            <summary>Configuração global</summary>
-            <Panel
-              title="Configuração Global"
-              subtitle="Parâmetros padrão para programas de motorista, passageiro e founder wave."
-            >
+          <Panel
+            title="Configuração Global"
+            subtitle="Parâmetros padrão para programas de motorista, passageiro e founder wave."
+          >
             {!config ? (
               <p>Sem configuração carregada.</p>
             ) : (
@@ -618,29 +481,18 @@ export default function ProgramsPage() {
                     />
                   </label>
                 </div>
-                <button
-                  type="button"
-                  onClick={requestConfigConfirmation}
-                  disabled={savingConfig || !config || !canMutatePrograms}
-                  title={!canMutatePrograms ? (roleMessage || featureMessage || mutationMessage) : undefined}
-                >
-                  {savingConfig ? "Salvando..." : "Revisar e salvar configuração"}
-                </button>
               </div>
             )}
-            </Panel>
-          </details>
+          </Panel>
 
-          <details className="program-campaign-editor-disclosure">
-            <summary>Criar nova campanha</summary>
-            <Panel
-              title="Nova Campanha"
-              subtitle={
-                canMutatePrograms
-                  ? "Criação rápida para campanhas sazonais e testes de incentivo."
-                  : "Criação bloqueada por permissão ou feature flag do backend."
-              }
-            >
+          <Panel
+            title="Nova Campanha"
+            subtitle={
+              canMutatePrograms
+                ? "Criação rápida para campanhas sazonais e testes de incentivo."
+                : "Criação bloqueada por permissão ou feature flag do backend."
+            }
+          >
             <div className="form-grid">
               <label className="form-field">
                 Nome
@@ -746,12 +598,11 @@ export default function ProgramsPage() {
               {!selectedScopeEnabled && campaignForm.status === "active" ? (
                 <p className="muted">Este tipo está desabilitado na configuração global; use status pausado.</p>
               ) : null}
-              <button onClick={requestCreateCampaignConfirmation} disabled={savingCampaign || !canMutatePrograms || (campaignForm.status === "active" && !selectedScopeEnabled)}>
+              <button onClick={createCampaign} disabled={savingCampaign || !canMutatePrograms || (campaignForm.status === "active" && !selectedScopeEnabled)}>
                 {savingCampaign ? "Criando..." : "Criar campanha"}
               </button>
             </div>
-            </Panel>
-          </details>
+          </Panel>
 
           <Panel
             className="panel-span-full"
@@ -771,12 +622,7 @@ export default function ProgramsPage() {
                 <option value="completed">completed</option>
               </select>
             </div>
-            <div
-              className="table-shell"
-              role="region"
-              tabIndex={0}
-              aria-label="Campanhas de indicação"
-            >
+            <div className="table-shell">
               <table className="table table-compact">
                 <thead>
                   <tr>
@@ -828,37 +674,16 @@ export default function ProgramsPage() {
                           <span className="table-muted">{formatDate(campaign.endAt)}</span>
                         </td>
                         <td>
-                          <details className="program-row-action-disclosure">
-                            <summary>Gerenciar</summary>
-                            <div className="actions-cell">
-                              <button
-                                type="button"
-                                onClick={() => requestCampaignStatusConfirmation(campaign, "active")}
-                                disabled={
-                                  !canMutatePrograms ||
-                                  !campaignScopeEnabled ||
-                                  campaign.status === "active" ||
-                                  updatingCampaignId === campaign.id
-                                }
-                              >
-                                Ativar
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => requestCampaignStatusConfirmation(campaign, "paused")}
-                                disabled={!canMutatePrograms || campaign.status === "paused" || updatingCampaignId === campaign.id}
-                              >
-                                Pausar
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => requestCampaignStatusConfirmation(campaign, "completed")}
-                                disabled={!canMutatePrograms || campaign.status === "completed" || updatingCampaignId === campaign.id}
-                              >
-                                Encerrar
-                              </button>
-                            </div>
-                          </details>
+                          <div className="actions-cell">
+                            <button
+                              onClick={() => updateCampaignStatus(campaign.id, "active")}
+                              disabled={!canMutatePrograms || !campaignScopeEnabled || campaign.status === "active"}
+                            >
+                              Ativar
+                            </button>
+                            <button onClick={() => updateCampaignStatus(campaign.id, "paused")} disabled={!canMutatePrograms || campaign.status === "paused"}>Pausar</button>
+                            <button onClick={() => updateCampaignStatus(campaign.id, "completed")} disabled={!canMutatePrograms || campaign.status === "completed"}>Encerrar</button>
+                          </div>
                         </td>
                       </tr>
                     );
@@ -875,12 +700,7 @@ export default function ProgramsPage() {
             title="Ciclo de vida dos convites"
             subtitle="Últimos convites criados, aceitos e qualificados pelo novo fluxo Leaf."
           >
-            <div
-              className="table-shell"
-              role="region"
-              tabIndex={0}
-              aria-label="Ciclo de vida dos convites de indicação"
-            >
+            <div className="table-shell">
               <table className="table table-compact">
                 <thead>
                   <tr>
@@ -917,57 +737,6 @@ export default function ProgramsPage() {
             </div>
           </Panel>
         </section>
-
-        <ConfirmActionDialog
-          open={Boolean(pendingAction)}
-          title={pendingAction?.title}
-          description="Revise o programa, o público, a janela e a mudança de estado antes de confirmar."
-          confirmLabel={pendingAction?.confirmLabel}
-          tone={pendingAction?.tone}
-          busy={pendingAction?.kind === "config"
-            ? savingConfig
-            : pendingAction?.kind === "create"
-              ? savingCampaign
-              : Boolean(pendingAction?.campaignId && updatingCampaignId === pendingAction.campaignId)}
-          onCancel={() => setPendingAction(null)}
-          onConfirm={confirmPendingAction}
-        >
-          {pendingAction ? (
-            <div className="confirm-action-review">
-              <dl>
-                <div>
-                  <dt>Programa / campanha</dt>
-                  <dd>{pendingAction.name}</dd>
-                </div>
-                <div>
-                  <dt>Público</dt>
-                  <dd>{pendingAction.audience}</dd>
-                </div>
-                <div>
-                  <dt>Janela</dt>
-                  <dd>{pendingAction.window}</dd>
-                </div>
-                <div>
-                  <dt>Estado atual</dt>
-                  <dd>{pendingAction.currentStatus}</dd>
-                </div>
-                <div>
-                  <dt>Novo estado</dt>
-                  <dd>{pendingAction.nextStatus}</dd>
-                </div>
-                <div>
-                  <dt>Parâmetros atuais</dt>
-                  <dd>{pendingAction.beforeParams}</dd>
-                </div>
-                <div>
-                  <dt>Parâmetros após confirmação</dt>
-                  <dd>{pendingAction.afterParams}</dd>
-                </div>
-              </dl>
-              <p>{pendingAction.consequence}</p>
-            </div>
-          ) : null}
-        </ConfirmActionDialog>
 
         <ErrorText message={error} />
       </main>

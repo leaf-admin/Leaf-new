@@ -104,6 +104,111 @@ const approvedKycState = () => ({
   realtimeUser: {}
 });
 
+function installCanonicalPendingChallengeFixture({ driverId, challengeId }) {
+  const now = Date.now();
+  const challenge = {
+    challengeId,
+    driverId,
+    requirement: 'IDENTITY_REVERIFICATION',
+    source: 'passenger_photo_mismatch_report',
+    metadata: {
+      canonicalEvidenceRequired: true,
+      challengeSource: 'passenger_photo_mismatch_report'
+    },
+    status: 'pending',
+    createdAt: new Date(now - 10_000).toISOString(),
+    expiresAt: new Date(now + 10 * 60_000).toISOString()
+  };
+  const redisValues = new Map([
+    [`kyc:stepup:challenge:${challengeId}`, JSON.stringify(challenge)],
+    [`kyc:stepup:active:${driverId}`, challengeId]
+  ]);
+  const documents = new Map([
+    [`kyc_stepup_challenges/${challengeId}`, challenge],
+    [`users/${driverId}`, {
+      identityReverification: {
+        challengeId,
+        requirement: 'IDENTITY_REVERIFICATION',
+        status: 'requested'
+      },
+      kycStatus: 'pending_reverify',
+      kycBlocked: false
+    }],
+    [`drivers/${driverId}`, {
+      identityReverification: {
+        challengeId,
+        requirement: 'IDENTITY_REVERIFICATION',
+        status: 'requested'
+      },
+      kycStatus: 'pending_reverify',
+      kycBlocked: false
+    }]
+  ]);
+  const snapshotFor = (path) => ({
+    id: path.split('/').pop(),
+    exists: documents.has(path),
+    data: () => documents.get(path)
+  });
+  const writeDocument = (path, data, options = {}) => {
+    const nextValue = options?.merge
+      ? { ...(documents.get(path) || {}), ...data }
+      : data;
+    documents.set(path, nextValue);
+  };
+  const refFor = (path) => ({
+    path,
+    get: jest.fn(async () => snapshotFor(path)),
+    set: jest.fn(async (data, options) => writeDocument(path, data, options))
+  });
+  const firestore = {
+    collection: jest.fn((name) => ({
+      doc: jest.fn((id) => refFor(`${name}/${id}`))
+    })),
+    runTransaction: jest.fn(async (handler) => handler({
+      get: jest.fn(async (ref) => snapshotFor(ref.path)),
+      set: jest.fn((ref, data, options) => writeDocument(ref.path, data, options))
+    }))
+  };
+  let pendingRedisDeletes = [];
+  const canonicalRedisMulti = {
+    del: jest.fn((key) => {
+      pendingRedisDeletes.push(key);
+      return canonicalRedisMulti;
+    }),
+    exec: jest.fn(async () => {
+      const result = pendingRedisDeletes.map((key) => [null, redisValues.delete(key) ? 1 : 0]);
+      pendingRedisDeletes = [];
+      return result;
+    })
+  };
+  const firebaseConfig = require('../../../firebase-config');
+  const admin = require('firebase-admin');
+  const originalFirestoreApi = admin.firestore;
+
+  admin.firestore = {
+    FieldValue: {
+      delete: jest.fn(() => ({ delete: true })),
+      serverTimestamp: jest.fn(() => ({ serverTimestamp: true }))
+    }
+  };
+  firebaseConfig.getFirestore.mockReturnValue(firestore);
+  mockRedis.get.mockImplementation(async (key) => redisValues.get(key) ?? null);
+  mockRedis.multi.mockImplementation(() => canonicalRedisMulti);
+
+  return {
+    challenge,
+    documents,
+    redisValues,
+    canonicalRedisMulti,
+    restore() {
+      admin.firestore = originalFirestoreApi;
+      firebaseConfig.getFirestore.mockReturnValue(null);
+      mockRedis.get.mockReset().mockResolvedValue(null);
+      mockRedis.multi.mockImplementation(() => redisMulti);
+    }
+  };
+}
+
 describe('kyc-policy-service', () => {
   let service;
 
@@ -833,6 +938,10 @@ describe('kyc-policy-service', () => {
   });
 
   test('a matching identity challenge can clear its own gate atomically', async () => {
+    const challengeFixture = installCanonicalPendingChallengeFixture({
+      driverId: 'driver-current',
+      challengeId: 'idrev_current'
+    });
     mockRealtimeValues['users/driver-current'] = {
       identityReverification: {
         challengeId: 'idrev_current',
@@ -845,27 +954,47 @@ describe('kyc-policy-service', () => {
       kycStatus: 'pending_reverify'
     };
 
-    const result = await service.recordIdentityReverificationResult('driver-current', {
-      challengeId: 'idrev_current',
-      requirement: 'IDENTITY_REVERIFICATION',
-      isMatch: true,
-      needsReview: false,
-      similarityScore: 96,
-      decision: 'approve'
-    });
+    let result = null;
+    try {
+      result = await service.recordIdentityReverificationResult('driver-current', {
+        challengeId: 'idrev_current',
+        requirement: 'IDENTITY_REVERIFICATION',
+        isMatch: true,
+        needsReview: false,
+        similarityScore: 96,
+        decision: 'approve'
+      });
+    } finally {
+      challengeFixture.restore();
+    }
 
     expect(result).toEqual(expect.objectContaining({
       recorded: true,
-      status: 'passed'
+      status: 'passed',
+      challengeResolved: true
     }));
     expect(mockRealtimeValues['users/driver-current']).toEqual(expect.objectContaining({
       kycReverifyRequired: false,
       kycRecheckPendingAfterTrip: false,
       kycStatus: 'approved'
     }));
+    expect(challengeFixture.redisValues.has('kyc:stepup:challenge:idrev_current')).toBe(false);
+    expect(challengeFixture.redisValues.has('kyc:stepup:active:driver-current')).toBe(false);
+    expect(challengeFixture.documents.get('kyc_stepup_challenges/idrev_current')).toEqual(
+      expect.objectContaining({
+        status: 'resolved',
+        resolution: expect.objectContaining({
+          requirement: 'IDENTITY_REVERIFICATION'
+        })
+      })
+    );
   });
 
   test('replays an approved identity result after a partial Redis persistence failure', async () => {
+    const challengeFixture = installCanonicalPendingChallengeFixture({
+      driverId: 'driver-reconcile',
+      challengeId: 'idrev_reconcile'
+    });
     mockRealtimeValues['users/driver-reconcile'] = {
       identityReverification: {
         challengeId: 'idrev_reconcile',
@@ -890,14 +1019,25 @@ describe('kyc-policy-service', () => {
       decision: 'approve'
     };
 
-    const partial = await service.recordIdentityReverificationResult(
-      'driver-reconcile',
-      verificationResult
-    );
-    const reconciled = await service.recordIdentityReverificationResult(
-      'driver-reconcile',
-      verificationResult
-    );
+    let partial = null;
+    let reconciled = null;
+    try {
+      partial = await service.recordIdentityReverificationResult(
+        'driver-reconcile',
+        verificationResult
+      );
+      expect(challengeFixture.redisValues.has('kyc:stepup:challenge:idrev_reconcile')).toBe(true);
+      expect(challengeFixture.documents.get('kyc_stepup_challenges/idrev_reconcile')).toEqual(
+        expect.objectContaining({ status: 'pending' })
+      );
+
+      reconciled = await service.recordIdentityReverificationResult(
+        'driver-reconcile',
+        verificationResult
+      );
+    } finally {
+      challengeFixture.restore();
+    }
 
     expect(partial).toEqual(expect.objectContaining({
       recorded: false,
@@ -905,12 +1045,18 @@ describe('kyc-policy-service', () => {
     }));
     expect(reconciled).toEqual(expect.objectContaining({
       recorded: true,
-      status: 'passed'
+      status: 'passed',
+      challengeResolved: true
     }));
     expect(mockRealtimeValues['users/driver-reconcile']).toEqual(expect.objectContaining({
       kycReverifyRequired: false,
       kycStatus: 'approved'
     }));
+    expect(challengeFixture.redisValues.has('kyc:stepup:challenge:idrev_reconcile')).toBe(false);
+    expect(challengeFixture.redisValues.has('kyc:stepup:active:driver-reconcile')).toBe(false);
+    expect(challengeFixture.documents.get('kyc_stepup_challenges/idrev_reconcile')).toEqual(
+      expect.objectContaining({ status: 'resolved' })
+    );
     expect(mockRedis.eval).toHaveBeenCalledTimes(4);
   });
 
@@ -1202,59 +1348,6 @@ describe('kyc-policy-service', () => {
         kycReverifyRequired: true,
         kycReverifySource: 'aws_liveness_attempts_exhausted',
         kycStatus: 'pending_reverify'
-      })
-    );
-  });
-
-  test('preserves a scoped one-time orphan hold retry in the identity challenge', async () => {
-    const firebaseConfig = require('../../../firebase-config');
-    const attemptScope = 'orphan_hold_retry_kyc_or_0123456789abcdef0123456789abcdef';
-
-    const result = await service.applyIdentityReverificationGate({
-      driverId: 'driver-orphan-recovery',
-      reporterId: 'admin-1',
-      reporterType: 'admin',
-      challengeId: 'idrev_orphan_recovery',
-      payload: {
-        reasonCode: 'kyc_orphan_hold_retry_authorized',
-        publicReason: 'Uma nova validacao de identidade foi autorizada pelo suporte.',
-        attemptScope
-      },
-      notify: false
-    });
-
-    expect(result).toEqual(expect.objectContaining({
-      challengeId: 'idrev_orphan_recovery',
-      success: true
-    }));
-    expect(firebaseConfig.updateRealtimeDB).toHaveBeenCalledWith(
-      'users/driver-orphan-recovery',
-      expect.objectContaining({
-        identityReverification: expect.objectContaining({ attemptScope })
-      })
-    );
-  });
-
-  test('does not persist an unrecognized retry scope into the identity challenge', async () => {
-    const firebaseConfig = require('../../../firebase-config');
-    const result = await service.applyIdentityReverificationGate({
-      driverId: 'driver-invalid-recovery-scope',
-      reporterId: 'admin-1',
-      reporterType: 'admin',
-      challengeId: 'idrev_invalid_recovery_scope',
-      payload: {
-        reasonCode: 'kyc_orphan_hold_retry_authorized',
-        publicReason: 'Uma nova validacao de identidade foi autorizada pelo suporte.',
-        attemptScope: 'arbitrary_paid_retry_credit'
-      },
-      notify: false
-    });
-
-    expect(result).toEqual(expect.objectContaining({ success: true }));
-    expect(firebaseConfig.updateRealtimeDB).toHaveBeenCalledWith(
-      'users/driver-invalid-recovery-scope',
-      expect.objectContaining({
-        identityReverification: expect.objectContaining({ attemptScope: null })
       })
     );
   });

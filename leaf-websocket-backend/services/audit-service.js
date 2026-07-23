@@ -177,6 +177,20 @@ class AuditService {
     }
   }
 
+  async requireEvent(eventData, { attempts = 3 } = {}) {
+    const maxAttempts = Math.min(5, Math.max(1, Number.parseInt(attempts, 10) || 3));
+    let lastResult = null;
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      lastResult = await this.logEvent(eventData);
+      if (lastResult?.success === true && lastResult?.logId) return lastResult;
+    }
+
+    const error = new Error('Auditoria obrigatória indisponível');
+    error.code = 'AUDIT_WRITE_UNAVAILABLE';
+    error.auditResult = lastResult;
+    throw error;
+  }
+
   /**
    * Logar no console (fallback)
    * @param {Object} eventData - Dados do evento

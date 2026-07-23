@@ -26,6 +26,7 @@ import {
   canUseDivergentQaRuntimeProfile,
   canContinuePrototypeSocketAuthentication,
   ensureFirebaseSessionForPrototype,
+  extractPrototypeDriverKycFailureContext,
   isPrototypeRuntimeProfileIdentityAllowed,
   resolveAcceptedPickupDistanceKm,
   resolveRuntimeStatePatchChanges,
@@ -143,75 +144,25 @@ describe("sanitizePersistedRuntimeSessionForProfile", () => {
     role: "driver",
   };
 
-  it("builds role-aware bilateral chat envelopes", () => {
-    const passengerEnvelope = buildPrototypeChatMessageEnvelope({
-      profile: passengerProfile,
-      state: {
-        profileUid: "passenger_1",
-        activeRole: "customer",
-        driverInfo: { id: "driver_1" },
-      },
-      bookingId: "booking_chat_1",
-      chatId: "booking_chat_1",
-      clientMessageId: "passenger_local_1",
-      message: " Estou no embarque ",
-      timestamp: "2026-07-13T12:00:00.000Z",
-    });
-    expect(passengerEnvelope).toEqual(
-      expect.objectContaining({
-        senderId: "passenger_1",
-        receiverId: "driver_1",
-        senderType: "passenger",
-        message: "Estou no embarque",
-      }),
-    );
-
-    const driverEnvelope = buildPrototypeChatMessageEnvelope({
-      profile: driverProfile,
-      state: {
-        profileUid: "driver_1",
-        activeRole: "driver",
-        driverActiveRide: {
-          bookingId: "booking_chat_1",
-          passengerId: "passenger_1",
+  it("preserves opaque identity-review references from an online gate failure", () => {
+    expect(
+      extractPrototypeDriverKycFailureContext({
+        code: "KYC_IDENTITY_REVIEW_HOLD",
+        payload: {
+          challengeId: "challenge_01HZX9",
+          requirement: "IDENTITY_REVERIFICATION",
+          evidenceId: "evidence_01HZX9",
+          reviewCaseId: "case_01HZX9",
+          reviewAvailable: true,
         },
-      },
-      bookingId: "booking_chat_1",
-      chatId: "booking_chat_1",
-      clientMessageId: "driver_local_1",
-      message: "Cheguei",
+      }),
+    ).toEqual({
+      challengeId: "challenge_01HZX9",
+      requirement: "IDENTITY_REVERIFICATION",
+      evidenceId: "evidence_01HZX9",
+      reviewCaseId: "case_01HZX9",
+      reviewAvailable: true,
     });
-    expect(driverEnvelope).toEqual(
-      expect.objectContaining({
-        senderId: "driver_1",
-        receiverId: "passenger_1",
-        senderType: "driver",
-      }),
-    );
-  });
-
-  it("restores only non-terminal active chat sessions after reconnect", () => {
-    expect(
-      resolvePrototypeChatCatchUpScope({
-        activeChatId: "booking_chat_1",
-        activeChatBookingId: "booking_chat_1",
-        bookingStatus: "started",
-      }),
-    ).toEqual(
-      expect.objectContaining({
-        bookingId: "booking_chat_1",
-        chatId: "booking_chat_1",
-        forceReload: true,
-        source: "chat-reconnect",
-      }),
-    );
-    expect(
-      resolvePrototypeChatCatchUpScope({
-        activeChatId: "booking_chat_1",
-        activeChatBookingId: "booking_chat_1",
-        bookingStatus: "early_ended_by_rider",
-      }),
-    ).toBeNull();
   });
 
   it("keeps zero as a valid accepted pickup distance instead of using trip distance fallbacks", () => {

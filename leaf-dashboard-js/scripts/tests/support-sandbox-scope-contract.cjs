@@ -17,6 +17,8 @@ const executableApiSource = apiSource
 
 const sandbox = {
   AbortController,
+  FinanceApiClient: class FinanceApiClient {},
+  GeofenceApiClient: class GeofenceApiClient {},
   URLSearchParams,
   clearTimeout,
   config: {

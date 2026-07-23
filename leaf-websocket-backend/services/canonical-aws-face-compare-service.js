@@ -132,7 +132,7 @@ class CanonicalAwsFaceCompareService {
     );
     this.sdkMaxAttempts = readInteger(
       options.sdkMaxAttempts ?? this.env.KYC_AWS_COMPARE_FACES_SDK_MAX_ATTEMPTS,
-      2,
+      1,
       1,
       5
     );
@@ -225,6 +225,15 @@ class CanonicalAwsFaceCompareService {
       throw createError(
         'Custo estimado AWS CompareFaces invalido',
         'AWS_COMPARE_FACES_COST_CONFIG_INVALID'
+      );
+    }
+    if (
+      readBoolean(this.env.KYC_PRODUCTION_BIOMETRICS_ENABLED, false)
+      && this.sdkMaxAttempts !== 1
+    ) {
+      throw createError(
+        'Retry automatico do AWS CompareFaces deve permanecer desabilitado em producao',
+        'AWS_COMPARE_FACES_SDK_RETRY_UNSAFE'
       );
     }
     if (

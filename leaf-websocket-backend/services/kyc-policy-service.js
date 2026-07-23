@@ -5,6 +5,7 @@ const redisPool = require('../utils/redis-pool');
 const IntegratedKYCService = require('./IntegratedKYCService');
 const KYCNotificationService = require('./KYCNotificationService');
 const supportTicketService = require('./support-ticket-service');
+const redisCriticalAuthorityService = require('./redis-critical-authority-service');
 const {
   resolveActiveTripForDriver,
   claimIdentityPolicyMutationWindow,
@@ -111,6 +112,25 @@ function getBoolEnv(name, fallback) {
   if (['true', '1', 'yes', 'y', 'on'].includes(normalized)) return true;
   if (['false', '0', 'no', 'n', 'off'].includes(normalized)) return false;
   return fallback;
+}
+
+async function assertRedisCriticalAuthorityForPolicyMutation() {
+  if (
+    String(process.env.KYC_ACTIVE_TRIP_AUTHORITY_MODE || '').trim().toLowerCase()
+    !== 'redis_noeviction'
+  ) {
+    return {};
+  }
+  await redisCriticalAuthorityService.assertReady({ forceRefresh: true });
+  return {
+    requiredDatasetGeneration: String(
+      process.env.REDIS_CRITICAL_DATASET_GENERATION || ''
+    ).trim(),
+    datasetGenerationKey: String(
+      process.env.REDIS_CRITICAL_DATASET_GENERATION_KEY
+        || 'leaf:runtime:critical-dataset:generation'
+    ).trim()
+  };
 }
 
 function toMillis(value) {
@@ -417,16 +437,22 @@ class KYCPolicyService {
   }
 
   resolveKycApprovalGate(kycState = {}) {
-    const statusCandidates = [
+    const durableStatusCandidates = [
       kycState.usersDoc?.kycStatus,
       kycState.usersDoc?.kyc_status,
       kycState.driversDoc?.kycStatus,
-      kycState.driversDoc?.kyc_status,
+      kycState.driversDoc?.kyc_status
+    ].map(normalizeKycStatus).filter(Boolean);
+    const replicaStatusCandidates = [
       kycState.realtimeUser?.kycStatus,
       kycState.realtimeUser?.kyc_status,
       kycState.redisDriver?.kycStatus,
       kycState.redisDriver?.kyc_status
     ].map(normalizeKycStatus).filter(Boolean);
+    const statusCandidates = [
+      ...durableStatusCandidates,
+      ...replicaStatusCandidates
+    ];
 
     const blocked = [
       kycState.usersDoc?.kycBlocked,
@@ -439,7 +465,17 @@ class KYCPolicyService {
       kycState.redisDriver?.kyc_blocked
     ].some(isTrueFlag);
 
-    const approved = statusCandidates.some((status) => status === 'approved');
+    // A canonical biometric rollout must fail safe even if its explicit strict
+    // authority flag is accidentally omitted. The readiness policy still
+    // requires KYC_STRICT_PRODUCTION_MODE=true so the deployment contract stays
+    // visible and auditable.
+    const strictProductionMode = (
+      getBoolEnv('KYC_STRICT_PRODUCTION_MODE', false)
+      || getBoolEnv('KYC_PRODUCTION_BIOMETRICS_ENABLED', false)
+    );
+    const approved = (
+      strictProductionMode ? durableStatusCandidates : statusCandidates
+    ).some((status) => status === 'approved');
     const blockingStatus = statusCandidates.find((status) => BLOCKING_KYC_STATUSES.has(status));
 
     if (blocked) {
@@ -1016,33 +1052,45 @@ class KYCPolicyService {
     }
 
     const nowIso = new Date().toISOString();
+    if (!this.redis || typeof this.redis.multi !== 'function') {
+      const error = new Error('Redis indisponivel para concluir challenge KYC');
+      error.code = 'KYC_CHALLENGE_CACHE_RESOLVE_FAILED';
+      throw error;
+    }
     const redisMulti = this.redis.multi();
     redisMulti.del(`${this.challengePrefix}${challenge.challengeId}`);
     redisMulti.del(`${this.activeChallengePrefix}${challenge.driverId}`);
-    await redisMulti.exec().catch(() => null);
+    const redisResult = await redisMulti.exec();
+    if (!redisResult) {
+      const error = new Error('Redis nao confirmou a conclusao do challenge KYC');
+      error.code = 'KYC_CHALLENGE_CACHE_RESOLVE_FAILED';
+      throw error;
+    }
 
     const firestore = firebaseConfig.getFirestore();
-    if (firestore) {
-      await firestore
-        .collection('kyc_stepup_challenges')
-        .doc(challenge.challengeId)
-        .set(
-          {
-            status: 'resolved',
-            resolvedAt: admin.firestore.FieldValue.serverTimestamp(),
-            resolution: {
-              requirement: effectiveRequirement,
-              provider: verificationPayload.provider || verificationPayload.mode || 'unknown',
-              livenessPassed: this.isLivenessSatisfied(verificationPayload),
-              similarityScore: Number(verificationPayload.similarityScore || 0),
-              confidence: Number(verificationPayload.confidence || 0)
-            },
-            updatedAt: admin.firestore.FieldValue.serverTimestamp()
-          },
-          { merge: true }
-        )
-        .catch(() => null);
+    if (!firestore) {
+      const error = new Error('Firestore indisponivel para concluir challenge KYC');
+      error.code = 'KYC_CHALLENGE_STORE_RESOLVE_FAILED';
+      throw error;
     }
+    await firestore
+      .collection('kyc_stepup_challenges')
+      .doc(challenge.challengeId)
+      .set(
+        {
+          status: 'resolved',
+          resolvedAt: admin.firestore.FieldValue.serverTimestamp(),
+          resolution: {
+            requirement: effectiveRequirement,
+            provider: verificationPayload.provider || verificationPayload.mode || 'unknown',
+            livenessPassed: this.isLivenessSatisfied(verificationPayload),
+            similarityScore: Number(verificationPayload.similarityScore || 0),
+            confidence: Number(verificationPayload.confidence || 0)
+          },
+          updatedAt: admin.firestore.FieldValue.serverTimestamp()
+        },
+        { merge: true }
+      );
 
     await this.recordVerificationSuccess(challenge.driverId, {
       source: `challenge:${effectiveRequirement}`,
@@ -1491,6 +1539,22 @@ class KYCPolicyService {
     const attemptScope = normalizeAuthorizedRetryScope(payload.attemptScope);
     const firestore = firebaseConfig.getFirestore();
 
+    if (!this.redis || typeof this.redis.hset !== 'function') {
+      const error = new Error('Redis indisponivel para selar revalidacao de identidade');
+      error.code = 'KYC_REVERIFY_STATE_UNAVAILABLE';
+      throw error;
+    }
+    await this.redis.hset(`driver:${driverId}`, {
+      kyc_reverify_required: String(true),
+      kyc_reverify_source: reasonCode,
+      kyc_status: 'pending_reverify',
+      kyc_blocked: String(false),
+      dispatchEligible: String(false),
+      dispatchEligibilityCode: 'KYC_REVERIFY_REQUIRED',
+      identity_reverification_challenge_id: effectiveChallengeId,
+      identity_reverification_requested_at: nowIso
+    });
+
     await this.persistIdentityReverificationEvent({
       driverId,
       tripId,
@@ -1638,6 +1702,24 @@ class KYCPolicyService {
       };
     }
 
+    if (challengeId) {
+      const currentIdentityState = await this.readRealtimeStrict(
+        `users/${driverId}/identityReverification`
+      ).catch(() => null);
+      if (
+        currentIdentityState?.challengeId
+        && currentIdentityState.challengeId !== challengeId
+      ) {
+        return {
+          success: true,
+          driverId,
+          softBlocked: false,
+          stale: true,
+          code: 'KYC_IDENTITY_REVERIFY_CHALLENGE_STALE'
+        };
+      }
+    }
+
     let supportTicketId = null;
     try {
       const { ticket } = await supportTicketService.createTicket({
@@ -1714,10 +1796,13 @@ class KYCPolicyService {
 
     if (!activeTripLookupFailed && !activeTrip?.tripId) {
       try {
+        const criticalAuthorityOptions = await assertRedisCriticalAuthorityForPolicyMutation();
         policyWindowClaim = await claimIdentityPolicyMutationWindow(
           this.redis,
           driverId,
-          crypto.randomBytes(24).toString('hex')
+          crypto.randomBytes(24).toString('hex'),
+          undefined,
+          criticalAuthorityOptions
         );
         if (policyWindowClaim.activeTripId) {
           activeTrip = { tripId: policyWindowClaim.activeTripId };
@@ -1855,10 +1940,13 @@ class KYCPolicyService {
 
     let policyWindowClaim = null;
     try {
+      const criticalAuthorityOptions = await assertRedisCriticalAuthorityForPolicyMutation();
       policyWindowClaim = await claimIdentityPolicyMutationWindow(
         this.redis,
         driverId,
-        crypto.randomBytes(24).toString('hex')
+        crypto.randomBytes(24).toString('hex'),
+        undefined,
+        criticalAuthorityOptions
       );
     } catch (error) {
       logStructured('warn', 'Revalidacao KYC mantida adiada: trava corrida-KYC indisponivel', {
@@ -2080,7 +2168,35 @@ class KYCPolicyService {
           code: 'KYC_IDENTITY_REVERIFY_CHALLENGE_STALE'
         };
       }
-      return { success: true, driverId, status, recorded: true };
+      const challengeResolution = await this.resolveStepUpChallenge({
+        challengeId,
+        driverId,
+        requirement: IDENTITY_REVERIFY_REQUIREMENT,
+        verificationPayload: {
+          ...verificationResult,
+          awsLivenessPassed: true,
+          provider: verificationResult.provider
+            || verificationResult.comparisonProvider
+            || 'aws_rekognition_compare_faces'
+        }
+      });
+      if (challengeResolution?.success !== true) {
+        return {
+          success: true,
+          driverId,
+          recorded: false,
+          stale: true,
+          code: challengeResolution?.code || 'KYC_IDENTITY_REVERIFY_CHALLENGE_STALE'
+        };
+      }
+      return {
+        success: true,
+        driverId,
+        status,
+        recorded: true,
+        challengeResolved: true,
+        resolvedAt: challengeResolution.resolvedAt
+      };
     }
 
     const firestore = firebaseConfig.getFirestore();

@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import ProtectedRoute from "@/src/components/ProtectedRoute";
 import AppNav from "@/src/components/AppNav";
 import Panel from "@/src/components/ui/Panel";
@@ -35,6 +36,25 @@ const statusTone = {
   rejected: "status-bad",
 };
 
+const REJECTION_REASON_OPTIONS = {
+  cnh: [
+    "CNH sem EAR - Exerce atividade remunerada",
+    "CNH vencida a mais de 30 dias",
+    "CNH inválida - enviar CNH-e digital em PDF",
+  ],
+  crlv: [
+    "CRLV inválido - enviar CRLV digital em PDF",
+    "CRLV - ano do veículo não permitido (apenas são aceitos veículos com no máximo 10 anos de fabricação)",
+    "CRLV - marca/modelo do veículo não permitido",
+    "CRLV - licenciamento pendente (verificar no campo Exercício se corresponde ao ano atual)",
+  ],
+  antecedentes_criminais: [
+    "Certidão inválida - enviar certidão oficial em PDF",
+    "Certidão fora do prazo de validade",
+    "Certidão não corresponde ao CPF do motorista",
+  ],
+};
+
 function formatDateTime(value) {
   if (!value) return "-";
   const parsed = new Date(value);
@@ -50,22 +70,62 @@ function resolveDocumentLabel(type) {
   return normalized || "-";
 }
 
+function resolveRejectionReason(documentType) {
+  const options = REJECTION_REASON_OPTIONS[String(documentType || "").toLowerCase()] || [];
+  if (options.length === 0) {
+    return String(window.prompt("Motivo da rejeição:") || "").trim();
+  }
+
+  const typed = String(
+    window.prompt(
+      `Motivo da rejeição:\n${options.map((item, index) => `${index + 1}. ${item}`).join("\n")}\n\nDigite o número ou escreva o motivo:`,
+    ) || "",
+  ).trim();
+  if (!typed) return "";
+
+  const parsedIndex = Number.parseInt(typed, 10);
+  if (Number.isFinite(parsedIndex) && parsedIndex >= 1 && parsedIndex <= options.length) {
+    return options[parsedIndex - 1];
+  }
+
+  return typed;
+}
+
+function formatDocumentRequestMessage(result) {
+  if (result?.push?.success) return "Ajuste solicitado e push enviado ao motorista.";
+  if (result?.push?.skipped) return "Ajuste solicitado sem envio de push.";
+  return "Ajuste solicitado. O backend não confirmou a entrega do push.";
+}
+
 function resolveNextAction(item) {
   const status = String(item?.status || "pending").toLowerCase();
   if (item?.requiredUpdate || item?.requestStatus === "requested") return "Aguardar reenvio do motorista";
-  if (!item?.fileUrl) return "Revisar ficha e solicitar envio";
-  if (status === "pending") return "Revisar ficha do motorista";
+  if (item?.contentAvailable !== true) return "Pedir reenvio pelo app";
+  if (status === "pending") return "Abrir documento e decidir";
   if (status === "rejected") return "Aguardar correção";
   if (status === "approved") return "Sem ação";
   return "Revisar cadastro";
 }
 
-export default function DriversReviewQueuePage() {
+function DriversReviewQueuePageContent() {
+  const searchParams = useSearchParams();
+  const kycPersistenceScope = String(searchParams.get("kycScope") || "")
+    .trim()
+    .toLowerCase() === "sandbox"
+    ? "sandbox"
+    : "operational";
+  const kycRequestContext = useMemo(
+    () => ({ scope: kycPersistenceScope }),
+    [kycPersistenceScope],
+  );
   const [items, setItems] = useState([]);
   const [summary, setSummary] = useState({ total: 0, byStatus: { pending: 0, approved: 0, rejected: 0 } });
   const [pagination, setPagination] = useState({ page: 1, limit: 25, total: 0, pages: 0 });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [actionMessage, setActionMessage] = useState("");
+  const [busyKey, setBusyKey] = useState("");
+  const [openingKey, setOpeningKey] = useState("");
   const [filters, setFilters] = useState({
     documentType: "all",
     status: "pending",
@@ -82,7 +142,7 @@ export default function DriversReviewQueuePage() {
         ...filters,
         page: pagination.page,
         limit: pagination.limit,
-      });
+      }, kycRequestContext);
       const payload = response?.data || response || {};
       setItems(Array.isArray(payload?.items) ? payload.items : []);
       setSummary(payload?.summary || { total: 0, byStatus: { pending: 0, approved: 0, rejected: 0 } });
@@ -120,25 +180,119 @@ export default function DriversReviewQueuePage() {
 
   const counters = useMemo(() => {
     const byStatus = summary?.byStatus || {};
-    const waitingResubmit = items.filter(
-      (item) => item?.requiredUpdate === true || item?.requestStatus === "requested",
-    ).length;
     return {
       total: Number(summary?.total || 0),
       pending: Number(byStatus.pending || 0),
       approved: Number(byStatus.approved || 0),
       rejected: Number(byStatus.rejected || 0),
-      ready: items.filter(
-        (item) =>
-          String(item?.status || "pending").toLowerCase() === "pending" &&
-          Boolean(item?.fileUrl) &&
-          item?.requiredUpdate !== true &&
-          item?.requestStatus !== "requested",
-      ).length,
-      requested: waitingResubmit,
-      missingFiles: items.filter((item) => !item?.fileUrl).length,
+      requested: items.filter((item) => item?.requiredUpdate === true || item?.requestStatus === "requested").length,
     };
   }, [items, summary]);
+  const reviewChecklist = useMemo(() => {
+    const missingFiles = items.filter((item) => item?.contentAvailable !== true).length;
+    const waitingResubmit = items.filter((item) => item?.requiredUpdate === true || item?.requestStatus === "requested").length;
+    const readyToReview = items.filter((item) => String(item?.status || "pending").toLowerCase() === "pending" && item?.contentAvailable === true).length;
+    return [
+      {
+        label: "Prontos para decisão",
+        value: readyToReview,
+        detail: "visualizar documento, aprovar ou rejeitar",
+      },
+      {
+        label: "Sem arquivo visível",
+        value: missingFiles,
+        detail: "pedir envio pelo app antes da análise",
+      },
+      {
+        label: "Aguardando reenvio",
+        value: waitingResubmit,
+        detail: "push já solicitado, esperar nova versão",
+      },
+    ];
+  }, [items]);
+
+  const openDocument = async (item) => {
+    const driverId = String(item?.driverId || "").trim();
+    const documentType = String(item?.documentType || "").trim().toLowerCase();
+    if (!driverId || !documentType || item?.contentAvailable !== true) return;
+    const actionKey = `${driverId}:${documentType}:open`;
+
+    try {
+      setOpeningKey(actionKey);
+      setError("");
+      const file = await leafAPI.getDriverDocumentFile(driverId, documentType, kycRequestContext);
+      const objectUrl = URL.createObjectURL(file.blob);
+      const anchor = document.createElement("a");
+      anchor.href = objectUrl;
+      anchor.target = "_blank";
+      anchor.rel = "noopener noreferrer";
+      anchor.style.display = "none";
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
+    } catch (err) {
+      setError(err?.message || "Não foi possível abrir o documento agora.");
+    } finally {
+      setOpeningKey("");
+    }
+  };
+
+  const reviewDocument = async (item, action) => {
+    const driverId = String(item?.driverId || "").trim();
+    const documentType = String(item?.documentType || "").trim().toLowerCase();
+    if (!driverId || !documentType) return;
+
+    const rejectionReason = action === "reject" ? resolveRejectionReason(documentType) : "";
+    if (action === "reject" && !rejectionReason) return;
+
+    try {
+      setBusyKey(`${driverId}:${documentType}`);
+      setError("");
+      setActionMessage("");
+      await leafAPI.reviewDriverDocument(
+        driverId,
+        documentType,
+        action,
+        rejectionReason || "",
+        kycRequestContext,
+      );
+      setActionMessage(
+        `${resolveDocumentLabel(documentType)} ${action === "approve" ? "aprovado" : "rejeitado"} com sucesso.`,
+      );
+      await load({ silent: true });
+    } catch (err) {
+      setError(err?.message || "Falha ao revisar documento");
+    } finally {
+      setBusyKey("");
+    }
+  };
+
+  const requestDocumentUpdate = async (item) => {
+    const driverId = String(item?.driverId || "").trim();
+    const documentType = String(item?.documentType || "").trim().toLowerCase();
+    if (!driverId || !documentType) return;
+
+    const defaultReason = item?.rejectionReason || "Precisamos que você envie uma versão atualizada deste documento no app.";
+    const reason = String(window.prompt("Mensagem para o motorista:", defaultReason) || "").trim();
+    if (!reason) return;
+
+    try {
+      setBusyKey(`${driverId}:${documentType}:request`);
+      setError("");
+      setActionMessage("");
+      const result = await leafAPI.requestDriverDocument(driverId, documentType, {
+        reason,
+        sendPush: true,
+      }, kycRequestContext);
+      setActionMessage(formatDocumentRequestMessage(result));
+      await load({ silent: true });
+    } catch (err) {
+      setError(err?.message || "Falha ao solicitar ajuste do documento");
+    } finally {
+      setBusyKey("");
+    }
+  };
 
   return (
     <ProtectedRoute>
@@ -151,130 +305,132 @@ export default function DriversReviewQueuePage() {
         </header>
 
         <AppNav />
+        <section className="card">
+          <span className={kycPersistenceScope === "sandbox" ? "status-warn" : "status-ok"}>
+            {kycPersistenceScope === "sandbox" ? "Sandbox KYC" : "Operacional"}
+          </span>
+          <div className="filters" style={{ marginTop: 8 }}>
+            <Link
+              href={kycPersistenceScope === "sandbox"
+                ? "/drivers/review-queue"
+                : "/drivers/review-queue?kycScope=sandbox"}
+            >
+              {kycPersistenceScope === "sandbox" ? "Voltar à fila operacional" : "Abrir fila sandbox"}
+            </Link>
+          </div>
+        </section>
         {loading ? <LoadingState message="Carregando fila de revisão..." /> : null}
 
         <section className="grid grid-kpi">
+          <KpiCard title="Total na fila" value={counters.total} />
           <KpiCard title="Pendentes" value={counters.pending} tone="warning" />
-          <KpiCard
-            title="Prontos para decisão"
-            value={counters.ready}
-            subtitle="na página atual"
-            tone="positive"
-          />
-          <KpiCard
-            title="Aguardando reenvio"
-            value={counters.requested}
-            subtitle="na página atual"
-            tone={counters.requested > 0 ? "warning" : "default"}
-          />
+          <KpiCard title="Aprovados" value={counters.approved} tone="positive" />
+          <KpiCard title="Rejeitados" value={counters.rejected} tone="danger" />
+          <KpiCard title="Ajuste solicitado" value={counters.requested} tone={counters.requested > 0 ? "warning" : "default"} />
         </section>
 
-        <details className="review-metrics-disclosure">
-          <summary>Métricas complementares</summary>
-          <section className="grid grid-kpi">
-            <KpiCard title="Total na fila" value={counters.total} />
-            <KpiCard title="Aprovados" value={counters.approved} tone="positive" />
-            <KpiCard title="Rejeitados" value={counters.rejected} tone="danger" />
-            <KpiCard title="Sem arquivo visível" value={counters.missingFiles} subtitle="na página atual" />
-          </section>
-        </details>
-
         <section className="grid">
-          <details className="review-filter-disclosure">
-            <summary>Filtros e ordenação</summary>
-            <Panel title="Refinar fila" subtitle="Refine por tipo, status, ordenação e busca textual.">
-              <div className="filters">
-                <label>
-                  Documento
-                  <select
-                    value={filters.documentType}
-                    onChange={(e) => {
-                      setPagination((prev) => ({ ...prev, page: 1 }));
-                      setFilters((prev) => ({ ...prev, documentType: e.target.value }));
-                    }}
-                  >
-                    {DOCUMENT_TYPE_OPTIONS.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+          <Panel title="Filtros" subtitle="Refine por tipo, status, ordenação e busca textual.">
+            <div className="filters">
+              <label>
+                Documento
+                <select
+                  value={filters.documentType}
+                  onChange={(e) => {
+                    setPagination((prev) => ({ ...prev, page: 1 }));
+                    setFilters((prev) => ({ ...prev, documentType: e.target.value }));
+                  }}
+                >
+                  {DOCUMENT_TYPE_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
 
-                <label>
-                  Status
-                  <select
-                    value={filters.status}
-                    onChange={(e) => {
-                      setPagination((prev) => ({ ...prev, page: 1 }));
-                      setFilters((prev) => ({ ...prev, status: e.target.value }));
-                    }}
-                  >
-                    {STATUS_OPTIONS.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+              <label>
+                Status
+                <select
+                  value={filters.status}
+                  onChange={(e) => {
+                    setPagination((prev) => ({ ...prev, page: 1 }));
+                    setFilters((prev) => ({ ...prev, status: e.target.value }));
+                  }}
+                >
+                  {STATUS_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
 
-                <label>
-                  Ordenar por
-                  <select
-                    value={filters.sortBy}
-                    onChange={(e) => {
-                      setPagination((prev) => ({ ...prev, page: 1 }));
-                      setFilters((prev) => ({ ...prev, sortBy: e.target.value }));
-                    }}
-                  >
-                    {sortByOptions.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+              <label>
+                Ordenar por
+                <select
+                  value={filters.sortBy}
+                  onChange={(e) => {
+                    setPagination((prev) => ({ ...prev, page: 1 }));
+                    setFilters((prev) => ({ ...prev, sortBy: e.target.value }));
+                  }}
+                >
+                  {sortByOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
 
-                <label>
-                  Direção
-                  <select
-                    value={filters.sortOrder}
-                    onChange={(e) => {
-                      setPagination((prev) => ({ ...prev, page: 1 }));
-                      setFilters((prev) => ({ ...prev, sortOrder: e.target.value }));
-                    }}
-                  >
-                    <option value="desc">Mais recentes primeiro</option>
-                    <option value="asc">Mais antigos primeiro</option>
-                  </select>
-                </label>
+              <label>
+                Direção
+                <select
+                  value={filters.sortOrder}
+                  onChange={(e) => {
+                    setPagination((prev) => ({ ...prev, page: 1 }));
+                    setFilters((prev) => ({ ...prev, sortOrder: e.target.value }));
+                  }}
+                >
+                  <option value="desc">Mais recentes primeiro</option>
+                  <option value="asc">Mais antigos primeiro</option>
+                </select>
+              </label>
 
-                <label>
-                  Buscar
-                  <input
-                    placeholder="nome, email, cpf, id..."
-                    value={filters.search}
-                    onChange={(e) => {
-                      setPagination((prev) => ({ ...prev, page: 1 }));
-                      setFilters((prev) => ({ ...prev, search: e.target.value }));
-                    }}
-                  />
-                </label>
-              </div>
-            </Panel>
-          </details>
+              <label>
+                Buscar
+                <input
+                  placeholder="nome, email, cpf, id..."
+                  value={filters.search}
+                  onChange={(e) => {
+                    setPagination((prev) => ({ ...prev, page: 1 }));
+                    setFilters((prev) => ({ ...prev, search: e.target.value }));
+                  }}
+                />
+              </label>
+            </div>
+          </Panel>
+
+          <Panel title="Checklist da fila" subtitle="Próxima ação por bloco, sem abrir cada ficha manualmente.">
+            <div className="metric-list">
+              {reviewChecklist.map((item) => (
+                <div className="row" key={item.label}>
+                  <div className="label">
+                    <span>{item.label}</span>
+                    <small>{item.detail}</small>
+                  </div>
+                  <div className="value">{item.value}</div>
+                </div>
+              ))}
+            </div>
+          </Panel>
 
           <Panel
             className="panel-span-full"
             title="Documentos"
-            subtitle="Fila de triagem; decisões e solicitações são feitas na ficha dedicada do motorista."
+            subtitle="Central de decisão para aprovação e rejeição de documentos enviados."
           >
-            <div
-              className="table-shell"
-              role="region"
-              tabIndex={0}
-              aria-label="Documentos na fila de revisão de motoristas"
-            >
+            <div className="table-shell">
               <table className="table table-compact">
                 <thead>
                   <tr>
@@ -284,7 +440,7 @@ export default function DriversReviewQueuePage() {
                     <th>Próxima ação</th>
                     <th>Atualização</th>
                     <th>Contato</th>
-                    <th>Ação</th>
+                    <th>Ações</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -297,6 +453,10 @@ export default function DriversReviewQueuePage() {
                       const rowKey = `${item?.driverId || "driver"}:${item?.documentType || "doc"}:${index}`;
                       const statusKey = String(item?.status || "pending").toLowerCase();
                       const badgeClass = statusTone[statusKey] || "status-warn";
+                      const actionKey = `${item?.driverId || ""}:${item?.documentType || ""}`;
+                      const requestKey = `${item?.driverId || ""}:${item?.documentType || ""}:request`;
+                      const openKey = `${item?.driverId || ""}:${item?.documentType || ""}:open`;
+                      const isBusy = busyKey === actionKey || busyKey === requestKey;
                       return (
                         <tr key={rowKey}>
                           <td>
@@ -335,16 +495,35 @@ export default function DriversReviewQueuePage() {
                           </td>
                           <td>
                             <div className="actions-cell">
-                              {item?.driverId ? (
-                                <Link href={`/drivers/${item.driverId}/documents`}>Revisar ficha</Link>
-                              ) : (
-                                <span className="table-muted">Ficha indisponível</span>
-                              )}
-                              {item?.fileUrl ? (
-                                <a href={item.fileUrl} target="_blank" rel="noreferrer">
-                                  Visualizar arquivo
-                                </a>
-                              ) : null}
+                              <Link href={`/drivers/${item?.driverId}/documents${kycPersistenceScope === "sandbox" ? "?kycScope=sandbox" : ""}`}>Abrir ficha</Link>
+                              <button
+                                type="button"
+                                disabled={item?.contentAvailable !== true || openingKey === openKey}
+                                onClick={() => openDocument(item)}
+                              >
+                                {openingKey === openKey ? "Abrindo..." : "Visualizar"}
+                              </button>
+                              <button
+                                type="button"
+                                disabled={isBusy}
+                                onClick={() => reviewDocument(item, "approve")}
+                              >
+                                Aprovar
+                              </button>
+                              <button
+                                type="button"
+                                disabled={isBusy}
+                                onClick={() => reviewDocument(item, "reject")}
+                              >
+                                Rejeitar
+                              </button>
+                              <button
+                                type="button"
+                                disabled={isBusy}
+                                onClick={() => requestDocumentUpdate(item)}
+                              >
+                                Solicitar ajuste
+                              </button>
                             </div>
                           </td>
                         </tr>
@@ -383,7 +562,16 @@ export default function DriversReviewQueuePage() {
         </section>
 
         <ErrorText message={error} />
+        {actionMessage ? <p className="success-text">{actionMessage}</p> : null}
       </main>
     </ProtectedRoute>
+  );
+}
+
+export default function DriversReviewQueuePage() {
+  return (
+    <Suspense fallback={<LoadingState message="Carregando fila de documentos..." />}>
+      <DriversReviewQueuePageContent />
+    </Suspense>
   );
 }

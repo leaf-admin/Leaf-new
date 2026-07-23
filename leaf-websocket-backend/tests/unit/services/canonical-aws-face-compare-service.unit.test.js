@@ -174,6 +174,18 @@ describe('canonical-aws-face-compare-service', () => {
     }));
   });
 
+  test('blocks automatic CompareFaces SDK retries in production biometrics', async () => {
+    const service = createService(jest.fn(), {
+      sdkMaxAttempts: 2,
+      env: {
+        KYC_PRODUCTION_BIOMETRICS_ENABLED: 'true'
+      }
+    });
+
+    await expect(service.verifyApprovedCnhAgainstLiveness(buildRequest()))
+      .rejects.toMatchObject({ code: 'AWS_COMPARE_FACES_SDK_RETRY_UNSAFE' });
+  });
+
   test('rejects when AWS returns no match at or above the provider query threshold', async () => {
     const send = jest.fn().mockResolvedValue({
       FaceMatches: [],

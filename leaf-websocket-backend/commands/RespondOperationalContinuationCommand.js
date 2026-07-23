@@ -25,9 +25,7 @@ const {
 async function applyDeferredIdentityReverification(driverId, context = {}) {
   try {
     const kycPolicyService = require('../services/kyc-policy-service');
-    if (typeof kycPolicyService.applyDeferredIdentityReverificationIfSafe !== 'function') {
-      return;
-    }
+    if (typeof kycPolicyService.applyDeferredIdentityReverificationIfSafe !== 'function') return;
     await kycPolicyService.applyDeferredIdentityReverificationIfSafe(driverId, context);
   } catch (error) {
     logStructured('warn', 'Falha ao aplicar revalidacao KYC adiada apos fim da interrupcao operacional', {
@@ -244,27 +242,13 @@ class RespondOperationalContinuationCommand extends Command {
             interruptedDriverId,
             this.bookingId
           );
-          const financialContextResult = resolveFinancialContext(
-            context.bookingHash,
-            { allowLegacyOperational: true }
-          );
-          if (
-            activeTripCleared
-            && financialContextResult.ok
-            && financialContextResult.context.namespace === 'operational'
-          ) {
+          if (activeTripCleared) {
             await applyDeferredIdentityReverification(interruptedDriverId, {
               source: 'ride_interrupted_operational_ended',
               tripId: this.bookingId
             });
-          } else if (!activeTripCleared) {
-            logStructured('warn', 'Revalidacao KYC adiada: indice ativo nao correspondia a corrida continuada', {
-              service: 'respond-operational-continuation-command',
-              bookingId: this.bookingId,
-              driverId: interruptedDriverId
-            });
           } else {
-            logStructured('info', 'Revalidacao KYC adiada ignorada fora do namespace operacional', {
+            logStructured('warn', 'Revalidacao KYC adiada: indice ativo nao correspondia a corrida continuada', {
               service: 'respond-operational-continuation-command',
               bookingId: this.bookingId,
               driverId: interruptedDriverId

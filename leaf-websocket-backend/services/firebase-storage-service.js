@@ -246,7 +246,10 @@ class FirebaseStorageService {
           generation: actualGeneration,
           size: String(metadata.size || buffer.length),
           contentType: metadata.contentType || null,
-          md5Hash: metadata.md5Hash || null
+          md5Hash: metadata.md5Hash || null,
+          customMetadata: metadata.metadata && typeof metadata.metadata === 'object'
+            ? { ...metadata.metadata }
+            : {}
         }
       };
     }

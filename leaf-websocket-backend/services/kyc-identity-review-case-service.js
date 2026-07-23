@@ -881,6 +881,28 @@ class KycIdentityReviewCaseService {
         };
         transaction.set(enforcementRef, enforcement, { merge: false });
       } else {
+        const previousEnforcement = enforcement || {};
+        enforcement = {
+          ...this.persistenceEnvelope(current),
+          schemaVersion: 1,
+          driverId: current.driverId,
+          status: 'FALSE_POSITIVE_RETRY_AUTHORIZED',
+          active: true,
+          permanent: false,
+          reasonCode: 'FALSE_POSITIVE_REVIEW',
+          revision: Number(previousEnforcement.revision || 0) + 1,
+          caseId: safeCaseId,
+          latestCaseId: safeCaseId,
+          ticketId: safeTicketId,
+          evidenceBindingHash: safeEvidenceHash,
+          retryAllowed: true,
+          retryAttempts: 1,
+          identityApproved: false,
+          decidedBy: actor,
+          decisionReason: safeReason,
+          decidedAt: previousEnforcement.decidedAt || nowIso,
+          updatedAt: nowIso
+        };
         retryAuthorization = {
           ...this.persistenceEnvelope(current),
           schemaVersion: 1,
@@ -907,6 +929,7 @@ class KycIdentityReviewCaseService {
           },
           identityApproved: false
         };
+        transaction.set(enforcementRef, enforcement, { merge: false });
         transaction.set(retryRef, retryAuthorization, { merge: false });
       }
 

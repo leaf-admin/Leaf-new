@@ -170,6 +170,73 @@ describe('aws-kyc-cost-guard-service', () => {
       .rejects.toMatchObject({ code: 'KYC_AWS_COMPARE_OUTCOME_UNKNOWN' });
   });
 
+  test('authorizes metadata recovery only for the exact completed paid session binding', async () => {
+    const { service, values } = createService();
+    const recoveryBinding = JSON.stringify([
+      'aws_rekognition_face_liveness',
+      'driver-recovery',
+      'sandbox',
+      'ctx_sandbox_recovery'
+    ]);
+    await service.reserveLivenessBundle({
+      userId: 'driver-recovery',
+      operationId: 'operation-recovery',
+      required: true
+    });
+    await service.markLivenessDispatched('operation-recovery');
+    await service.markLivenessCompleted('operation-recovery', 'session-recovery', {
+      recoveryBinding,
+      recoveryExpiresAt: '2026-07-13T20:03:00.000Z'
+    });
+    const operationPath = Array.from(values.keys())
+      .find((path) => path.startsWith('kyc_aws_cost_guard_operations/'));
+    const recoveryOperation = values.get(operationPath);
+    expect(recoveryOperation.livenessRecoverySession).toMatchObject({
+      version: 1,
+      algorithm: 'aes-256-gcm'
+    });
+    expect(JSON.stringify(recoveryOperation)).not.toContain('session-recovery');
+
+    await expect(service.recoverCompletedLivenessSession('operation-recovery', {
+      userId: 'driver-recovery',
+      recoveryBinding
+    })).resolves.toEqual({
+      operationId: 'operation-recovery',
+      sessionId: 'session-recovery'
+    });
+    await expect(service.recoverCompletedLivenessSession('operation-recovery', {
+      userId: 'driver-recovery',
+      recoveryBinding: `${recoveryBinding}:operational`
+    })).rejects.toMatchObject({ code: 'KYC_AWS_COST_OPERATION_MISMATCH' });
+
+    await expect(service.assertRecoverableLivenessSession('operation-recovery', {
+      userId: 'driver-recovery',
+      sessionId: 'session-recovery'
+    })).resolves.toMatchObject({
+      operationId: 'operation-recovery',
+      livenessStatus: 'completed'
+    });
+    await expect(service.assertRecoverableLivenessSession('operation-recovery', {
+      userId: 'driver-other',
+      sessionId: 'session-recovery'
+    })).rejects.toMatchObject({ code: 'KYC_AWS_COST_OPERATION_MISMATCH' });
+    await expect(service.assertRecoverableLivenessSession('operation-recovery', {
+      userId: 'driver-recovery',
+      sessionId: 'session-other'
+    })).rejects.toMatchObject({ code: 'KYC_AWS_COST_OPERATION_MISMATCH' });
+
+    await service.markLivenessMetadataPersisted('operation-recovery', 'session-recovery');
+    expect(values.get(operationPath)).toMatchObject({
+      livenessRecoverySession: null,
+      livenessRecoveryBindingHash: null,
+      livenessRecoveryExpiresAt: null
+    });
+    await expect(service.recoverCompletedLivenessSession('operation-recovery', {
+      userId: 'driver-recovery',
+      recoveryBinding
+    })).rejects.toMatchObject({ code: 'KYC_AWS_COST_OPERATION_MISMATCH' });
+  });
+
   test('records a provider input failure with CAS without deleting dispatch or reserved cost', async () => {
     const { service, values } = createService();
     await service.reserveLivenessBundle({

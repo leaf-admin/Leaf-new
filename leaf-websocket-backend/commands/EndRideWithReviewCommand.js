@@ -37,9 +37,7 @@ function createNoopSpan() {
 async function applyDeferredIdentityReverification(driverId, context = {}) {
   try {
     const kycPolicyService = require('../services/kyc-policy-service');
-    if (typeof kycPolicyService.applyDeferredIdentityReverificationIfSafe !== 'function') {
-      return;
-    }
+    if (typeof kycPolicyService.applyDeferredIdentityReverificationIfSafe !== 'function') return;
     await kycPolicyService.applyDeferredIdentityReverificationIfSafe(driverId, context);
   } catch (error) {
     logStructured('warn', 'Falha ao aplicar revalidacao KYC adiada apos encerramento em revisao', {

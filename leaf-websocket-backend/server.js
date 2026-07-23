@@ -603,6 +603,38 @@ async function enforceDailyKYCForOnline(driverId) {
             };
         }
     }
+
+    const identityReviewGate = await kycRuntime.workflow
+        .assertKycOperationAllowed(driverId);
+    if (identityReviewGate?.identityReviewHold === true) {
+        const reviewCaseId = typeof identityReviewGate.holdCaseId === 'string'
+            && identityReviewGate.holdCaseId.trim()
+            ? identityReviewGate.holdCaseId.trim()
+            : null;
+        const evidenceId = typeof identityReviewGate.holdEvidenceId === 'string'
+            && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/.test(identityReviewGate.holdEvidenceId.trim())
+            ? identityReviewGate.holdEvidenceId.trim()
+            : null;
+        const hasTraceableReview = Boolean(
+            (reviewCaseId || evidenceId) && identityReviewGate.reviewAvailable !== false
+        );
+        return {
+            allowed: false,
+            retryRequired: false,
+            reason: reviewCaseId
+                ? 'Sua identidade esta sendo analisada. Avisaremos quando houver uma atualizacao.'
+                : hasTraceableReview
+                    ? 'Nao foi possivel confirmar sua identidade. Voce pode solicitar uma analise.'
+                    : 'Precisamos liberar uma nova tentativa. Fale com o suporte.',
+            code: hasTraceableReview
+                ? 'KYC_IDENTITY_REVIEW_HOLD'
+                : 'KYC_IDENTITY_RECOVERY_REQUIRED',
+            requirement: 'IDENTITY_REVERIFICATION',
+            reviewAvailable: hasTraceableReview,
+            reviewCaseId,
+            evidenceId
+        };
+    }
     return kycRuntime.trust.evaluateOnlineGate(driverId);
 }
 

@@ -1,9 +1,33 @@
 import Logger from '../utils/Logger';
 import auth from '@react-native-firebase/auth';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
 import { toUserFriendlyError } from '../utils/friendlyErrorMessages';
 import { buildBackendUrl } from '../config/backendBaseUrl';
 import { resolveRequestAuthToken } from '../utils/axiosInterceptor';
+
+const TEST_MODE_STORAGE_KEY = '@test_mode';
+const QA_SOCKET_ID_TOKEN_STORAGE_KEY = '@qa_socket_id_token';
+
+async function resolveAuthServiceRequestToken({ forceRefresh = false } = {}) {
+    const authContext = await resolveRequestAuthToken({ forceRefresh });
+    if (authContext?.token) {
+        return authContext.token;
+    }
+
+    try {
+        const [testModeRaw, qaTokenRaw] = await Promise.all([
+            AsyncStorage.getItem(TEST_MODE_STORAGE_KEY),
+            AsyncStorage.getItem(QA_SOCKET_ID_TOKEN_STORAGE_KEY),
+        ]);
+        const qaModeEnabled = String(testModeRaw || '').trim().toLowerCase() === 'true';
+        const qaToken = String(qaTokenRaw || '').trim();
+        return qaModeEnabled && qaToken ? qaToken : null;
+    } catch (error) {
+        Logger.warn('⚠️ [Auth] Falha ao recuperar autenticação QA persistida:', error);
+        return null;
+    }
+}
 
 
 class AuthService {
@@ -117,8 +141,7 @@ class AuthService {
      */
     async authenticatedRequest(endpoint, options = {}) {
         try {
-            const initialAuth = await resolveRequestAuthToken({ forceRefresh: false });
-            const token = initialAuth?.token || null;
+            const token = await resolveAuthServiceRequestToken({ forceRefresh: false });
             if (!token) {
                 throw new Error('Usuário não autenticado');
             }
@@ -149,8 +172,7 @@ class AuthService {
                 // Se token expirou, tentar renovar
                 if (response.status === 401) {
                     Logger.log('🔄 Token expirado, renovando...');
-                    const refreshedAuth = await resolveRequestAuthToken({ forceRefresh: true });
-                    const newToken = refreshedAuth?.token || null;
+                    const newToken = await resolveAuthServiceRequestToken({ forceRefresh: true });
                     if (newToken) {
                         headers.Authorization = `Bearer ${newToken}`;
                         

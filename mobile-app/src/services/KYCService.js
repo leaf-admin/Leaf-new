@@ -12,79 +12,10 @@ import { getSelfHostedApiUrl } from '../config/ApiConfig';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import auth from '@react-native-firebase/auth';
 import * as ImageManipulator from 'expo-image-manipulator';
-import {
-  allowTestUserTools,
-  isE2ETestBuild,
-  isSimulatorBuild,
-} from '../config/runtimeAccessPolicy';
 
 const TEST_MODE_STORAGE_KEY = '@test_mode';
 const QA_SOCKET_ID_TOKEN_STORAGE_KEY = '@qa_socket_id_token';
 const QA_AUTH_TOKEN_MIN_TTL_MS = 60000;
-const EXPECTED_CANONICAL_VERIFICATION_FAILURE_CODES = new Set([
-  'AWS_COMPARE_FACES_INVALID_PARAMETER',
-  'AWS_COMPARE_FACES_CNH_FACE_NOT_DETECTED',
-  'AWS_COMPARE_FACES_LIVENESS_FACE_BOUNDS_REQUIRED',
-  'KYC_AWS_REFERENCE_IMAGE_REQUIRED',
-  'KYC_CNH_PORTRAIT_LAYOUT_UNSUPPORTED',
-  'KYC_CNH_PORTRAIT_EXTRACTION_FAILED',
-  'KYC_CHALLENGE_NOT_PASSED',
-]);
-
-const SAFE_KYC_OPAQUE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/;
-const SAFE_KYC_REQUIREMENT_PATTERN = /^[A-Z][A-Z0-9_]{0,63}$/;
-
-function normalizeSafeKycOpaqueId(value) {
-  const normalized = String(value || '').trim();
-  return SAFE_KYC_OPAQUE_ID_PATTERN.test(normalized) ? normalized : null;
-}
-
-function normalizeSafeKycRequirement(value) {
-  const normalized = String(value || '').trim().toUpperCase();
-  return SAFE_KYC_REQUIREMENT_PATTERN.test(normalized) ? normalized : null;
-}
-
-function createKycApiError(result = {}, response = {}, fallbackMessage) {
-  const error = new Error(
-    result?.error ||
-    result?.message ||
-    fallbackMessage ||
-    'Nao foi possivel concluir a solicitacao de validacao.'
-  );
-  error.code = String(result?.code || '').trim();
-  error.status = Number(response?.status) || null;
-  error.retryAt = result?.retryAt || result?.attemptState?.retryAt || null;
-  error.evidenceId = normalizeSafeKycOpaqueId(result?.evidenceId);
-  error.reviewCaseId = normalizeSafeKycOpaqueId(result?.reviewCaseId);
-  error.challengeId = normalizeSafeKycOpaqueId(result?.challengeId);
-  error.requirement = normalizeSafeKycRequirement(result?.requirement);
-  error.reviewAvailable = typeof result?.reviewAvailable === 'boolean'
-    ? result.reviewAvailable
-    : null;
-  return error;
-}
-
-function serializeKycFailure(error) {
-  const evidenceId = normalizeSafeKycOpaqueId(error?.evidenceId);
-  const reviewCaseId = normalizeSafeKycOpaqueId(error?.reviewCaseId);
-  const challengeId = normalizeSafeKycOpaqueId(error?.challengeId);
-  const requirement = normalizeSafeKycRequirement(error?.requirement);
-
-  return {
-    success: false,
-    error: error?.message || 'Nao foi possivel concluir a solicitacao de validacao.',
-    code: String(error?.code || '').trim() || null,
-    status: Number(error?.status || error?.response?.status) || null,
-    retryAt: error?.retryAt || null,
-    ...(evidenceId ? { evidenceId } : {}),
-    ...(reviewCaseId ? { reviewCaseId } : {}),
-    ...(challengeId ? { challengeId } : {}),
-    ...(requirement ? { requirement } : {}),
-    ...(typeof error?.reviewAvailable === 'boolean'
-      ? { reviewAvailable: error.reviewAvailable }
-      : {}),
-  };
-}
 
 function decodeBase64UrlJson(segment) {
   const normalized = String(segment || '').replace(/-/g, '+').replace(/_/g, '/');
@@ -132,10 +63,6 @@ async function resolveKycAuthToken({ forceRefresh = false } = {}) {
     Logger.warn('⚠️ [KYC] Falha ao obter token Firebase:', tokenError);
   }
 
-  if (!(allowTestUserTools() && isSimulatorBuild() && isE2ETestBuild())) {
-    return null;
-  }
-
   try {
     const [testModeRaw, qaSocketIdTokenRaw] = await Promise.all([
       AsyncStorage.getItem(TEST_MODE_STORAGE_KEY),
@@ -172,6 +99,36 @@ async function buildKycAuthHeaders({ json = true } = {}) {
   return headers;
 }
 
+function buildKycFailureResult(response, payload = {}, fallbackMessage) {
+  const data = payload && typeof payload === 'object' ? payload : {};
+  const statusCandidate = Number(response?.status ?? data.status);
+  const reviewAvailable = typeof data.reviewAvailable === 'boolean'
+    ? data.reviewAvailable
+    : undefined;
+
+  return {
+    success: false,
+    error: data.error || data.message || fallbackMessage || 'Não foi possível concluir a validação.',
+    code: data.code || '',
+    status: Number.isFinite(statusCandidate) ? statusCandidate : null,
+    retryAt: data.retryAt || null,
+    retryable: typeof data.retryable === 'boolean' ? data.retryable : undefined,
+    challengeId: data.challengeId || null,
+    requirement: data.requirement || null,
+    evidenceId: data.evidenceId || null,
+    reviewCaseId: data.reviewCaseId || null,
+    ...(reviewAvailable === undefined ? {} : { reviewAvailable }),
+  };
+}
+
+function buildKycCaughtFailure(error, fallbackMessage) {
+  return buildKycFailureResult(
+    { status: error?.status },
+    error,
+    error?.message || fallbackMessage,
+  );
+}
+
 class KYCService {
   getAwsProviderName() {
     return 'aws_rekognition_face_liveness';
@@ -186,10 +143,10 @@ class KYCService {
       });
       const result = await response.json().catch(() => ({}));
       if (!response.ok) {
-        throw createKycApiError(
-          result,
+        return buildKycFailureResult(
           response,
-          `Erro ${response.status}: ${response.statusText}`
+          result,
+          'Não foi possível preparar a validação agora.',
         );
       }
       return {
@@ -198,7 +155,7 @@ class KYCService {
       };
     } catch (error) {
       Logger.error('❌ Erro ao consultar provider de liveness:', error);
-      return serializeKycFailure(error);
+      return buildKycCaughtFailure(error, 'Não foi possível consultar a validação agora.');
     }
   }
 
@@ -210,10 +167,7 @@ class KYCService {
         mode: 'local',
         provider: null,
         config: null,
-        error: providerResult?.error || 'Falha ao consultar provider de liveness',
-        code: providerResult?.code || null,
-        status: providerResult?.status || null,
-        retryAt: providerResult?.retryAt || null,
+        error: providerResult?.error || 'Falha ao consultar provider de liveness'
       };
     }
 
@@ -248,10 +202,10 @@ class KYCService {
 
       const result = await response.json().catch(() => ({}));
       if (!response.ok) {
-        throw createKycApiError(
-          result,
+        return buildKycFailureResult(
           response,
-          `Erro ${response.status}: ${response.statusText}`
+          result,
+          'Não foi possível preparar a validação agora.',
         );
       }
 
@@ -261,22 +215,22 @@ class KYCService {
       };
     } catch (error) {
       Logger.error('❌ Erro ao criar sessão AWS liveness:', error);
-      return serializeKycFailure(error);
+      return buildKycCaughtFailure(error, 'Não foi possível preparar a validação agora.');
     }
   }
 
   async getAwsLivenessCredentials(driverId, sessionId) {
     try {
-      const normalizedSessionId = String(sessionId || '').trim();
-      if (!normalizedSessionId) {
-        const error = new Error('A sessão criada não foi vinculada à emissão de credenciais.');
-        error.code = 'KYC_AWS_LIVENESS_SESSION_REQUIRED';
-        error.status = 400;
-        throw error;
+      const safeSessionId = String(sessionId || '').trim();
+      if (!safeSessionId) {
+        return buildKycFailureResult(
+          { status: 400 },
+          { code: 'AWS_LIVENESS_CREDENTIALS_SESSION_BINDING_REQUIRED' },
+          'Não foi possível preparar a validação agora.',
+        );
       }
-
       const backendUrl = getSelfHostedApiUrl(
-        `/api/kyc/liveness/aws/credentials?userId=${encodeURIComponent(driverId)}&sessionId=${encodeURIComponent(normalizedSessionId)}`
+        `/api/kyc/liveness/aws/credentials?userId=${encodeURIComponent(driverId)}&sessionId=${encodeURIComponent(safeSessionId)}`
       );
       const response = await fetch(backendUrl, {
         method: 'GET',
@@ -285,10 +239,10 @@ class KYCService {
       const result = await response.json().catch(() => ({}));
 
       if (!response.ok) {
-        throw createKycApiError(
-          result,
+        return buildKycFailureResult(
           response,
-          `Erro ${response.status}: ${response.statusText}`
+          result,
+          'Não foi possível preparar a validação agora.',
         );
       }
 
@@ -298,7 +252,7 @@ class KYCService {
       };
     } catch (error) {
       Logger.error('❌ Erro ao buscar credenciais AWS liveness:', error);
-      return serializeKycFailure(error);
+      return buildKycCaughtFailure(error, 'Não foi possível preparar a validação agora.');
     }
   }
 
@@ -314,10 +268,10 @@ class KYCService {
       const result = await response.json().catch(() => ({}));
 
       if (!response.ok) {
-        throw createKycApiError(
-          result,
+        return buildKycFailureResult(
           response,
-          `Erro ${response.status}: ${response.statusText}`
+          result,
+          'Não foi possível confirmar a validação agora.',
         );
       }
 
@@ -327,45 +281,40 @@ class KYCService {
       };
     } catch (error) {
       Logger.error('❌ Erro ao buscar resultado AWS liveness:', error);
-      return serializeKycFailure(error);
+      return buildKycCaughtFailure(error, 'Não foi possível confirmar a validação agora.');
     }
   }
 
   async abandonAwsLivenessSession(driverId, sessionId) {
     try {
-      const normalizedSessionId = String(sessionId || '').trim();
-      if (!normalizedSessionId) {
-        const error = new Error('A sessão de validação não foi informada.');
-        error.code = 'KYC_AWS_LIVENESS_SESSION_REQUIRED';
-        error.status = 400;
-        throw error;
+      const safeSessionId = String(sessionId || '').trim();
+      if (!safeSessionId) {
+        return buildKycFailureResult(
+          { status: 400 },
+          { code: 'AWS_LIVENESS_SESSION_ID_REQUIRED' },
+          'Não foi possível encerrar a validação agora.',
+        );
       }
-
       const backendUrl = getSelfHostedApiUrl(
-        `/api/kyc/liveness/aws/session/${encodeURIComponent(normalizedSessionId)}/abandon`
+        `/api/kyc/liveness/aws/session/${encodeURIComponent(safeSessionId)}/abandon`,
       );
       const response = await fetch(backendUrl, {
         method: 'POST',
         headers: await buildKycAuthHeaders(),
-        body: JSON.stringify({ userId: driverId })
+        body: JSON.stringify({ userId: driverId }),
       });
       const result = await response.json().catch(() => ({}));
-
       if (!response.ok) {
-        throw createKycApiError(
-          result,
+        return buildKycFailureResult(
           response,
-          `Erro ${response.status}: ${response.statusText}`
+          result,
+          'Não foi possível encerrar a validação agora.',
         );
       }
-
-      return {
-        success: true,
-        data: result
-      };
+      return { success: true, data: result };
     } catch (error) {
       Logger.error('❌ Erro ao encerrar sessão AWS liveness:', error);
-      return serializeKycFailure(error);
+      return buildKycCaughtFailure(error, 'Não foi possível encerrar a validação agora.');
     }
   }
 
@@ -558,8 +507,15 @@ class KYCService {
       const allowRawSelfieFallback = options?.allowRawSelfieFallback === true;
       const serverSideFallbackOnDeviceEmbeddingUnavailable =
         options?.serverSideFallbackOnDeviceEmbeddingUnavailable === true;
-      const preferServerSideSelfieVerification =
-        options?.preferServerSideSelfieVerification === true;
+
+      if (awsSessionId) {
+        return this.verifyDriverWithAwsReference(driverId, {
+          ...options,
+          awsSessionId,
+          challengeId,
+          requirement,
+        });
+      }
 
       let similarity = null;
       let threshold = null;
@@ -568,15 +524,6 @@ class KYCService {
       let anchorSignatureHash = null;
       let deviceEmbeddingPayload = null;
       let effectiveVerificationMode = verificationMode;
-
-      if (awsSessionId && selfieImageUri && preferServerSideSelfieVerification) {
-        return this.verifyDriverServerSideSelfie(driverId, selfieImageUri, {
-          ...options,
-          awsSessionId,
-          challengeId,
-          requirement,
-        });
-      }
 
       if (!useAwsSessionOnly) {
         let signatureSourceUri = selfieImageUri;
@@ -686,7 +633,11 @@ class KYCService {
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error || `Erro ${response.status}: ${response.statusText}`);
+        return buildKycFailureResult(
+          response,
+          errorData,
+          'Não foi possível concluir a validação agora.',
+        );
       }
 
       const result = await response.json();
@@ -698,19 +649,19 @@ class KYCService {
       };
     } catch (error) {
       Logger.error('❌ Erro ao verificar identidade:', error);
-      return {
-        success: false,
-        error: error.message,
-      };
+      return buildKycCaughtFailure(error, 'Não foi possível concluir a validação agora.');
     }
   }
 
-  async verifyDriverServerSideSelfie(driverId, selfieImageUri, options = {}) {
+  async verifyDriverWithAwsReference(driverId, options = {}) {
     try {
-      Logger.log('🔐 Verificando identidade do motorista no backend:', driverId);
-      const awsSessionId = options?.awsSessionId || null;
+      const awsSessionId = String(options?.awsSessionId || '').trim();
       if (!awsSessionId) {
-        throw new Error('Sessão AWS de liveness é obrigatória para validar a selfie.');
+        return buildKycFailureResult(
+          { status: 400 },
+          { code: 'KYC_AWS_LIVENESS_SESSION_REQUIRED' },
+          'Inicie uma nova validação facial.',
+        );
       }
 
       const formData = new FormData();
@@ -725,13 +676,60 @@ class KYCService {
       if (options?.forceRecheck === true) {
         formData.append('forceRecheck', 'true');
       }
-      if (selfieImageUri) {
-        formData.append('currentImage', {
-          uri: selfieImageUri,
-          name: 'driver-selfie.jpg',
-          type: 'image/jpeg'
-        });
+
+      const backendUrl = getSelfHostedApiUrl('/api/kyc/verify-driver/server-side-selfie');
+      const response = await fetch(backendUrl, {
+        method: 'POST',
+        headers: await buildKycAuthHeaders({ json: false }),
+        body: formData,
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        return buildKycFailureResult(
+          response,
+          result,
+          'Não foi possível concluir a validação agora.',
+        );
       }
+
+      return {
+        success: true,
+        data: result,
+      };
+    } catch (error) {
+      Logger.error('❌ Erro na comparação canônica pós-liveness:', error);
+      return buildKycCaughtFailure(error, 'Não foi possível concluir a validação agora.');
+    }
+  }
+
+  async verifyDriverServerSideSelfie(driverId, selfieImageUri, options = {}) {
+    try {
+      Logger.log('🔐 Verificando identidade do motorista no backend:', driverId);
+      const awsSessionId = options?.awsSessionId || null;
+      if (!awsSessionId) {
+        throw new Error('Sessão AWS de liveness é obrigatória para validar a selfie.');
+      }
+      if (!selfieImageUri) {
+        throw new Error('Selfie é obrigatória para validar a identidade.');
+      }
+
+      const formData = new FormData();
+      formData.append('userId', driverId);
+      formData.append('awsSessionId', awsSessionId);
+      if (options?.challengeId) {
+        formData.append('challengeId', options.challengeId);
+      }
+      if (options?.requirement) {
+        formData.append('requirement', options.requirement);
+      }
+      if (options?.forceRecheck === true) {
+        formData.append('forceRecheck', 'true');
+      }
+      formData.append('currentImage', {
+        uri: selfieImageUri,
+        name: 'driver-selfie.jpg',
+        type: 'image/jpeg'
+      });
 
       const backendUrl = getSelfHostedApiUrl('/api/kyc/verify-driver/server-side-selfie');
       const response = await fetch(backendUrl, {
@@ -742,10 +740,10 @@ class KYCService {
 
       const result = await response.json().catch(() => ({}));
       if (!response.ok) {
-        throw createKycApiError(
-          result,
+        return buildKycFailureResult(
           response,
-          `Erro ${response.status}: ${response.statusText}`
+          result,
+          'Não foi possível concluir a validação agora.',
         );
       }
 
@@ -755,16 +753,8 @@ class KYCService {
         data: result
       };
     } catch (error) {
-      const logMetadata = {
-        code: error?.code || null,
-        status: error?.status || null,
-      };
-      if (EXPECTED_CANONICAL_VERIFICATION_FAILURE_CODES.has(error?.code)) {
-        Logger.warn('⚠️ Não foi possível concluir a verificação de identidade:', logMetadata);
-      } else {
-        Logger.error('❌ Erro inesperado ao verificar identidade no backend:', logMetadata);
-      }
-      return serializeKycFailure(error);
+      Logger.error('❌ Erro ao verificar identidade no backend:', error);
+      return buildKycCaughtFailure(error, 'Não foi possível concluir a validação agora.');
     }
   }
 }

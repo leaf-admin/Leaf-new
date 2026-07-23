@@ -74,6 +74,8 @@ const PAYMENT_BYPASS_FLAGS = [
 ];
 
 const LEGACY_RUNTIME_FLAGS = [
+  'ENABLE_LEGACY_GRAPHQL',
+  'ENABLE_LEGACY_DRIVER_RESPONSE_ACCEPT',
   'ENABLE_LEGACY_KYC_PROXY',
   'ENABLE_LEGACY_RUNTIME_ENDPOINTS',
   'ENABLE_LEGACY_SOCKET_BRIDGE',
@@ -140,6 +142,11 @@ const ALLOWED_AWS_LIVENESS_CHALLENGE_TYPES = [
   'FaceMovementAndLightChallenge'
 ];
 const APPROVED_DRIVER_SEARCH_RADIUS_KM = 5;
+const APPROVED_REDIS_CRITICAL_MEMORY_THRESHOLDS = Object.freeze({
+  warningPercent: 60,
+  highPercent: 75,
+  criticalPercent: 85
+});
 
 function presence(value) {
   const raw = String(value || '').trim();
@@ -184,17 +191,13 @@ function booleanDiagnostic(name, fallback = false) {
   };
 }
 
-function enumDiagnostic(name, fallback, allowedValues) {
-  const raw = process.env[name];
-  const configured = raw != null && String(raw).trim() !== '';
-  const value = configured ? String(raw).trim() : fallback;
-
-  return {
-    value,
-    source: configured ? 'env' : 'default',
-    valid: allowedValues.includes(value),
-    allowedValues
-  };
+function isStrictBooleanLike(value) {
+  if (value == null || String(value).trim() === '') return true;
+  const normalized = String(value).trim().toLowerCase();
+  return [
+    'true', '1', 'yes', 'on', 'sim',
+    'false', '0', 'no', 'off', 'nao', 'não'
+  ].includes(normalized);
 }
 
 function requiresPaymentProviderConfig(runtimeRole) {
@@ -412,6 +415,11 @@ function main() {
   const baseUrl = String(process.env.WOOVI_BASE_URL || '');
   const wooviBaseUrlIsSandbox = /sandbox/i.test(baseUrl);
   const runtimeRole = String(process.env.RUNTIME_ROLE || 'gateway').trim().toLowerCase();
+  const serverRuntime = String(process.env.LEAF_SERVER_RUNTIME || 'modular').trim().toLowerCase();
+  const skipRuntimeConfigValidation = booleanDiagnostic(
+    'LEAF_SKIP_RUNTIME_CONFIG_VALIDATION',
+    false
+  );
   const allowLocalFirebaseDefaults = !process.env.ENV_FILE;
   const firebaseDatabaseUrl = resolveFirebaseDatabaseUrl({
     allowDefault: allowLocalFirebaseDefaults
@@ -472,16 +480,107 @@ function main() {
   }, {});
   const biometricReadiness = evaluateProductionReadiness(process.env);
   const adaptiveKycCadence = booleanDiagnostic('KYC_TRUST_CADENCE_ENABLED', false);
-  const onlineKycGate = booleanDiagnostic('DAILY_KYC_ONLINE_GATE_ENABLED', true);
-  const trustedRandomAuditPercent = Number(process.env.KYC_TRUSTED_RANDOM_AUDIT_PERCENT || 5);
+  const onlineKycGate = booleanDiagnostic('DAILY_KYC_ONLINE_GATE_ENABLED', false);
+  const activeTripIndex = booleanDiagnostic('ENABLE_ACTIVE_TRIP_INDEX', true);
+  const activeTripAuthorityMode = String(
+    process.env.KYC_ACTIVE_TRIP_AUTHORITY_MODE || ''
+  ).trim().toLowerCase();
+  const activeTripAuthorityModeValid = activeTripAuthorityMode === ''
+    || activeTripAuthorityMode === 'redis_noeviction';
+  const redisCriticalAuthorityAttestation = booleanDiagnostic(
+    'REDIS_CRITICAL_AUTHORITY_ATTESTATION_ENABLED',
+    false
+  );
+  const redisCriticalDatasetQuarantine = booleanDiagnostic(
+    'REDIS_CRITICAL_DATASET_QUARANTINE_ENABLED',
+    false
+  );
+  const redisCriticalDatasetGeneration = String(
+    process.env.REDIS_CRITICAL_DATASET_GENERATION || ''
+  ).trim();
+  const redisCriticalDatasetGenerationKey = String(
+    process.env.REDIS_CRITICAL_DATASET_GENERATION_KEY
+      || 'leaf:runtime:critical-dataset:generation'
+  ).trim();
+  const redisCriticalMemoryThresholds = {
+    warningPercent: Number(process.env.REDIS_CRITICAL_MEMORY_WARNING_PERCENT ?? 60),
+    highPercent: Number(process.env.REDIS_CRITICAL_MEMORY_HIGH_PERCENT ?? 75),
+    criticalPercent: Number(process.env.REDIS_CRITICAL_MEMORY_CRITICAL_PERCENT ?? 85)
+  };
+  const redisCriticalMemoryThresholdsApproved = Object.entries(
+    APPROVED_REDIS_CRITICAL_MEMORY_THRESHOLDS
+  ).every(([key, expected]) => redisCriticalMemoryThresholds[key] === expected);
+  const redisCriticalAttestationCacheTtlMs = Number(
+    process.env.REDIS_CRITICAL_ATTESTATION_CACHE_TTL_MS ?? 5000
+  );
+  const tripLocationStream = booleanDiagnostic('ENABLE_TRIP_LOCATION_STREAM', true);
+  const tripLocationPersistenceWorker = booleanDiagnostic(
+    'ENABLE_TRIP_LOCATION_PERSISTENCE_WORKER',
+    true
+  );
+  const tripLocationFirestorePersistence = booleanDiagnostic(
+    'ENABLE_TRIP_LOCATION_FIRESTORE_PERSISTENCE',
+    true
+  );
+  const tripLocationStreamBooleanValid = isStrictBooleanLike(
+    process.env.ENABLE_TRIP_LOCATION_STREAM
+  );
+  const tripLocationWorkerGroup = String(
+    process.env.TRIP_LOCATION_WORKER_GROUP || 'trip-location-workers'
+  ).trim();
+  const tripLocationConsumerMaxIdleMs = Number(
+    process.env.TRIP_LOCATION_CONSUMER_MAX_IDLE_MS ?? 30000
+  );
+  const tripLocationStreamTrimThreshold = Number(
+    process.env.TRIP_LOCATION_STREAM_SAFE_TRIM_THRESHOLD ?? 500000
+  );
+  // This authority protects AcceptRide independently from the KYC rollout.
+  // Once redis_noeviction is selected, its static contract must be complete
+  // even while AWS biometrics/cadence remain intentionally dormant.
+  const redisCriticalAuthorityRequired =
+    activeTripAuthorityMode === 'redis_noeviction';
+  const kycStrictReadinessRequired =
+    launchControlDiagnostic.launchProfile === 'pilot_controlled'
+    || boolEnv('LEAF_PILOT_CONTROLLED', false)
+    || biometricReadiness.enabled
+    || biometricReadiness.policy.strictProductionMode
+    || boolEnv('KYC_AWS_LIVENESS_ENABLED', false)
+    || boolEnv('AWS_LIVENESS_ENABLED', false)
+    || boolEnv('KYC_AWS_LIVENESS_CREDENTIALS_ENABLED', false)
+    || boolEnv('KYC_AWS_COMPARE_FACES_ENABLED', false)
+    || adaptiveKycCadence.value
+    || onlineKycGate.value;
+  const trustPolicyVersion = String(
+    process.env.KYC_TRUST_POLICY_VERSION || (
+      adaptiveKycCadence.value
+        ? 'driver_identity_recurring_v2'
+        : 'driver_identity_recurring_v1'
+    )
+  ).trim();
+  const newMaxAgeHours = Number(process.env.KYC_TRUST_T0_MAX_AGE_HOURS || 24);
+  const observedMaxAgeHours = Number(process.env.KYC_TRUST_T1_MAX_AGE_HOURS || 72);
+  const trustedMaxAgeHours = Number(process.env.KYC_TRUST_T2_MAX_AGE_HOURS || 168);
+  const trustedRandomAuditPercent = Number(process.env.KYC_TRUSTED_RANDOM_AUDIT_PERCENT || 10);
+  const observedMinDistinctSuccessDays = Number(
+    process.env.KYC_TRUST_T1_MIN_DISTINCT_SUCCESS_DAYS || 7
+  );
+  const trustedMinAgeDays = Number(process.env.KYC_TRUST_T2_MIN_AGE_DAYS || 30);
+  const trustedMinSuccessCount = Number(process.env.KYC_TRUST_T2_MIN_SUCCESS_COUNT || 14);
+  const trustedMinDistinctSuccessDays = Number(
+    process.env.KYC_TRUST_T2_MIN_DISTINCT_SUCCESS_DAYS || 14
+  );
   const awsLivenessS3Bucket = String(
     process.env.KYC_AWS_LIVENESS_S3_BUCKET || process.env.AWS_LIVENESS_S3_BUCKET || ''
   ).trim();
-  const awsLivenessChallengeType = enumDiagnostic(
-    'KYC_AWS_LIVENESS_CHALLENGE_TYPE',
-    DEFAULT_AWS_LIVENESS_CHALLENGE_TYPE,
-    ALLOWED_AWS_LIVENESS_CHALLENGE_TYPES
-  );
+  const awsCostGuard = booleanDiagnostic('KYC_AWS_COST_GUARD_ENABLED', false);
+  const awsCostDailyLimitUsd = Number(process.env.KYC_AWS_COST_DAILY_LIMIT_USD);
+  const awsCostMonthlyLimitUsd = Number(process.env.KYC_AWS_COST_MONTHLY_LIMIT_USD);
+  const awsCostTimeZone = String(process.env.KYC_AWS_COST_TIME_ZONE || '').trim().toUpperCase();
+  const awsCostLimitsValid = Number.isFinite(awsCostDailyLimitUsd)
+    && Number.isFinite(awsCostMonthlyLimitUsd)
+    && awsCostDailyLimitUsd > 0
+    && awsCostMonthlyLimitUsd > 0
+    && awsCostDailyLimitUsd <= awsCostMonthlyLimitUsd;
   const legacyRuntimeDiagnostics = LEGACY_RUNTIME_FLAGS.reduce((acc, key) => {
     acc[key] = booleanDiagnostic(key, false);
     return acc;
@@ -515,21 +614,128 @@ function main() {
   if (nodeEnv === 'production' && adaptiveKycCadence.value && !biometricReadiness.enabled) {
     blockers.push('KYC_TRUST_CADENCE_ENABLED=true em produção exige KYC_PRODUCTION_BIOMETRICS_ENABLED=true');
   }
+  if (nodeEnv === 'production' && biometricReadiness.enabled && !adaptiveKycCadence.value) {
+    blockers.push('KYC_PRODUCTION_BIOMETRICS_ENABLED=true exige KYC_TRUST_CADENCE_ENABLED=true em produção');
+  }
+  if (nodeEnv === 'production' && biometricReadiness.enabled && !onlineKycGate.value) {
+    blockers.push('KYC_PRODUCTION_BIOMETRICS_ENABLED=true exige DAILY_KYC_ONLINE_GATE_ENABLED=true em produção');
+  }
+  if (nodeEnv === 'production' && biometricReadiness.enabled && !activeTripIndex.value) {
+    blockers.push('KYC_PRODUCTION_BIOMETRICS_ENABLED=true exige ENABLE_ACTIVE_TRIP_INDEX=true em produção');
+  }
+  if (!activeTripAuthorityModeValid) {
+    blockers.push('KYC_ACTIVE_TRIP_AUTHORITY_MODE deve ser vazio ou redis_noeviction');
+  }
+  if (redisCriticalAuthorityRequired) {
+    if (!tripLocationPersistenceWorker.value) {
+      blockers.push('ENABLE_TRIP_LOCATION_PERSISTENCE_WORKER=true obrigatório para redis_noeviction');
+    }
+    if (!tripLocationFirestorePersistence.value) {
+      blockers.push('ENABLE_TRIP_LOCATION_FIRESTORE_PERSISTENCE=true obrigatório para redis_noeviction');
+    }
+    if (!tripLocationStreamBooleanValid) {
+      blockers.push('ENABLE_TRIP_LOCATION_STREAM deve ser booleano explícito em redis_noeviction');
+    }
+    if (!redisCriticalAuthorityAttestation.value) {
+      blockers.push('REDIS_CRITICAL_AUTHORITY_ATTESTATION_ENABLED=true obrigatório para redis_noeviction');
+    }
+    if (!redisCriticalDatasetQuarantine.value) {
+      blockers.push('REDIS_CRITICAL_DATASET_QUARANTINE_ENABLED=true obrigatório para redis_noeviction');
+    }
+    if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(redisCriticalDatasetGeneration)) {
+      blockers.push('REDIS_CRITICAL_DATASET_GENERATION deve identificar a geração persistente esperada');
+    }
+    if (
+      !redisCriticalDatasetGenerationKey
+      || redisCriticalDatasetGenerationKey.length > 256
+    ) {
+      blockers.push('REDIS_CRITICAL_DATASET_GENERATION_KEY deve identificar um marker Redis válido');
+    }
+    if (!redisCriticalMemoryThresholdsApproved) {
+      blockers.push('Thresholds Redis críticos devem permanecer exatamente em 60/75/85');
+    }
+    if (
+      !Number.isInteger(redisCriticalAttestationCacheTtlMs)
+      || redisCriticalAttestationCacheTtlMs < 0
+      || redisCriticalAttestationCacheTtlMs > 5000
+    ) {
+      blockers.push('REDIS_CRITICAL_ATTESTATION_CACHE_TTL_MS deve ficar entre 0 e 5000ms');
+    }
+    if (tripLocationStream.value && !tripLocationWorkerGroup) {
+      blockers.push('TRIP_LOCATION_WORKER_GROUP deve identificar o consumer group quando o stream de localização está ativo');
+    }
+    if (
+      tripLocationStream.value
+      && (
+        !Number.isInteger(tripLocationConsumerMaxIdleMs)
+        || tripLocationConsumerMaxIdleMs < 1000
+        || tripLocationConsumerMaxIdleMs > 300000
+      )
+    ) {
+      blockers.push('TRIP_LOCATION_CONSUMER_MAX_IDLE_MS deve ser inteiro entre 1000 e 300000ms');
+    }
+    if (
+      tripLocationStream.value
+      && (
+        !Number.isInteger(tripLocationStreamTrimThreshold)
+        || tripLocationStreamTrimThreshold < 100000
+      )
+    ) {
+      blockers.push('TRIP_LOCATION_STREAM_SAFE_TRIM_THRESHOLD deve ser inteiro e no mínimo 100000');
+    }
+    warnings.push(
+      'redis_noeviction exige vm.overcommit_memory=1 no host; o validator estático não altera nem atesta o kernel'
+    );
+    if (tripLocationStream.value) {
+      warnings.push(
+        `readiness exige consumer vivo no grupo ${tripLocationWorkerGroup} com idle máximo de ${tripLocationConsumerMaxIdleMs}ms; o validator estático não inicia workers`
+      );
+    }
+  }
   if (
     adaptiveKycCadence.value
-    && (!Number.isFinite(trustedRandomAuditPercent)
-      || trustedRandomAuditPercent <= 0
-      || trustedRandomAuditPercent > 100)
+    && trustedRandomAuditPercent !== 10
   ) {
-    blockers.push('KYC_TRUSTED_RANDOM_AUDIT_PERCENT deve estar entre 0 (exclusivo) e 100 quando a cadência adaptativa estiver ativa');
+    blockers.push('KYC_TRUSTED_RANDOM_AUDIT_PERCENT deve ser exatamente 10 na política driver_identity_recurring_v2');
+  }
+  if (adaptiveKycCadence.value && trustPolicyVersion !== 'driver_identity_recurring_v2') {
+    blockers.push('KYC_TRUST_POLICY_VERSION deve ser driver_identity_recurring_v2 quando a cadência adaptativa estiver ativa');
+  }
+  if (adaptiveKycCadence.value && newMaxAgeHours !== 24) {
+    blockers.push('KYC_TRUST_T0_MAX_AGE_HOURS deve ser exatamente 24 na política driver_identity_recurring_v2');
+  }
+  if (adaptiveKycCadence.value && observedMaxAgeHours !== 72) {
+    blockers.push('KYC_TRUST_T1_MAX_AGE_HOURS deve ser exatamente 72 na política driver_identity_recurring_v2');
+  }
+  if (adaptiveKycCadence.value && trustedMaxAgeHours !== 168) {
+    blockers.push('KYC_TRUST_T2_MAX_AGE_HOURS deve ser exatamente 168 na política driver_identity_recurring_v2');
+  }
+  if (
+    adaptiveKycCadence.value
+    && observedMinDistinctSuccessDays !== 7
+  ) {
+    blockers.push('KYC_TRUST_T1_MIN_DISTINCT_SUCCESS_DAYS deve ser exatamente 7 na política driver_identity_recurring_v2');
+  }
+  if (
+    adaptiveKycCadence.value
+    && trustedMinAgeDays !== 30
+  ) {
+    blockers.push('KYC_TRUST_T2_MIN_AGE_DAYS deve ser exatamente 30 na política driver_identity_recurring_v2');
+  }
+  if (
+    adaptiveKycCadence.value
+    && trustedMinSuccessCount !== 14
+  ) {
+    blockers.push('KYC_TRUST_T2_MIN_SUCCESS_COUNT deve ser exatamente 14 na política driver_identity_recurring_v2');
+  }
+  if (
+    adaptiveKycCadence.value
+    && trustedMinDistinctSuccessDays !== 14
+  ) {
+    blockers.push('KYC_TRUST_T2_MIN_DISTINCT_SUCCESS_DAYS deve ser exatamente 14 na política driver_identity_recurring_v2');
   }
   if (adaptiveKycCadence.value && awsLivenessS3Bucket) {
     blockers.push('KYC_AWS_LIVENESS_S3_BUCKET deve permanecer vazio com cadência adaptativa até o backend suportar ReferenceImage.S3Object');
-  }
-  if (!awsLivenessChallengeType.valid) {
-    blockers.push(
-      'KYC_AWS_LIVENESS_CHALLENGE_TYPE deve ser FaceMovementChallenge ou FaceMovementAndLightChallenge'
-    );
   }
   const webhookProviderVerificationFallback =
     !hasWebhookVerifier &&
@@ -551,6 +757,12 @@ function main() {
   }
 
   if (nodeEnv === 'production') {
+    if (serverRuntime !== 'modular') {
+      blockers.push('LEAF_SERVER_RUNTIME deve ser modular em produção');
+    }
+    if (skipRuntimeConfigValidation.value) {
+      blockers.push('LEAF_SKIP_RUNTIME_CONFIG_VALIDATION=true bloqueado em produção');
+    }
     const geofenceRadiusKm = Number.parseFloat(process.env.GEOFENCE_RADIUS_KM || '');
     const corsOrigin = String(process.env.CORS_ORIGIN || '').trim();
 
@@ -789,18 +1001,60 @@ function main() {
     },
     diagnostics: {
       biometricReadiness,
-      awsLiveness: {
-        challengeType: awsLivenessChallengeType
-      },
       adaptiveKycCadence: {
         enabled: adaptiveKycCadence,
         onlineGate: onlineKycGate,
-        policyVersion: String(
-          process.env.KYC_TRUST_POLICY_VERSION || 'driver_identity_recurring_v1'
-        ),
+        activeTripIndex,
+        policyVersion: trustPolicyVersion,
+        cadenceHours: {
+          new: newMaxAgeHours,
+          observed: observedMaxAgeHours,
+          trusted: trustedMaxAgeHours
+        },
+        promotionRequirements: {
+          observedMinDistinctSuccessDays,
+          trustedMinAgeDays,
+          trustedMinSuccessCount,
+          trustedMinDistinctSuccessDays
+        },
         randomAuditPercent: trustedRandomAuditPercent,
         verificationDuringActiveRide: false,
         referenceImageMode: awsLivenessS3Bucket ? 's3_unsupported' : 'inline_bytes'
+      },
+      redisCriticalAuthority: {
+        required: redisCriticalAuthorityRequired,
+        requiredForAcceptRide: redisCriticalAuthorityRequired,
+        requiredForKycStrict: kycStrictReadinessRequired,
+        mode: activeTripAuthorityMode || null,
+        modeValid: activeTripAuthorityModeValid,
+        attestationEnabled: redisCriticalAuthorityAttestation,
+        quarantineEnabled: redisCriticalDatasetQuarantine,
+        datasetGenerationConfigured: /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/
+          .test(redisCriticalDatasetGeneration),
+        datasetGenerationKeyConfigured: Boolean(redisCriticalDatasetGenerationKey),
+        memoryThresholds: redisCriticalMemoryThresholds,
+        memoryThresholdsApproved: redisCriticalMemoryThresholdsApproved,
+        attestationCacheTtlMs: redisCriticalAttestationCacheTtlMs,
+        tripLocationStream: {
+          enabled: tripLocationStream,
+          booleanValid: tripLocationStreamBooleanValid,
+          persistenceWorkerEnabled: tripLocationPersistenceWorker,
+          firestorePersistenceEnabled: tripLocationFirestorePersistence,
+          requiredConsumerGroup: tripLocationWorkerGroup || null,
+          maxConsumerIdleMs: tripLocationConsumerMaxIdleMs,
+          safeTrimThreshold: tripLocationStreamTrimThreshold,
+          liveConsumerAttestation: tripLocationStream.value
+            ? 'required_at_runtime'
+            : 'not_required'
+        },
+        liveAttestation: redisCriticalAuthorityRequired
+          ? 'required_at_runtime'
+          : 'not_required'
+      },
+      awsKycCostGuard: {
+        enabled: awsCostGuard,
+        limitsValid: awsCostLimitsValid,
+        timeZoneUtc: awsCostTimeZone === 'UTC'
       },
       webhookSignature: {
         verifierKeysPresent: effectiveWebhookVerifierKeysPresent,
@@ -860,6 +1114,8 @@ function main() {
       },
       runtime: {
         runtimeRole,
+        serverRuntime,
+        skipRuntimeConfigValidation,
         paymentProviderConfigRequired,
         socketRedisAdapter: {
           ...socketRedisAdapterDiagnostic,

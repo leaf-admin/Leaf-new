@@ -1,5 +1,3 @@
-import { toUserFriendlyMessage } from '../../utils/friendlyErrorMessages';
-
 const DOCUMENT_REVIEW_CODES = new Set([
   'KYC_CANONICAL_APPROVED_CNH_REQUIRED',
   'KYC_CANONICAL_CNH_NOT_APPROVED',
@@ -39,15 +37,11 @@ const CAPTURE_INCOMPLETE_CODES = new Set([
   'KYC_AWS_REFERENCE_IMAGE_REQUIRED',
 ]);
 
-const IDENTITY_MISMATCH_CODES = new Set([
-  'KYC_CHALLENGE_NOT_PASSED',
-]);
-
+const IDENTITY_MISMATCH_CODES = new Set(['KYC_CHALLENGE_NOT_PASSED']);
 const IDENTITY_REVIEW_HOLD_CODES = new Set([
   'KYC_IDENTITY_REVIEW_HOLD',
   'KYC_IDENTITY_RECOVERY_REQUIRED',
 ]);
-
 const SAFE_REVIEW_CASE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/;
 
 const SESSION_SETUP_CODES = new Set([
@@ -61,19 +55,13 @@ const SESSION_SETUP_CODES = new Set([
   'KYC_IDENTITY_RETRY_BINDING_REQUIRED',
   'KYC_IDENTITY_RETRY_AUTHORIZATION_REQUIRED',
   'KYC_IDENTITY_RETRY_SESSION_BINDING_REQUIRED',
+  'KYC_CHALLENGE_NOT_FOUND',
+  'KYC_LIVENESS_REQUIRED',
 ]);
 
-const CAMERA_PERMISSION_CODES = new Set([
-  'KYC_CAMERA_PERMISSION_REQUIRED',
-]);
-
-const RESULT_TIMEOUT_CODES = new Set([
-  'KYC_AWS_LIVENESS_RESULT_TIMEOUT',
-]);
-
-const USER_CANCELLED_CODES = new Set([
-  'AWS_LIVENESS_CANCELLED',
-]);
+const CAMERA_PERMISSION_CODES = new Set(['KYC_CAMERA_PERMISSION_REQUIRED']);
+const RESULT_TIMEOUT_CODES = new Set(['KYC_AWS_LIVENESS_RESULT_TIMEOUT']);
+const USER_CANCELLED_CODES = new Set(['AWS_LIVENESS_CANCELLED']);
 
 function extractCode(errorOrResult) {
   return String(
@@ -95,12 +83,35 @@ function hasTraceableIdentityReviewCase(errorOrResult) {
   return SAFE_REVIEW_CASE_ID_PATTERN.test(reviewCaseId);
 }
 
+function hasTraceableIdentityReviewEvidence(errorOrResult) {
+  const evidenceId = String(
+    errorOrResult?.evidenceId ||
+    errorOrResult?.response?.data?.evidenceId ||
+    errorOrResult?.payload?.evidenceId ||
+    '',
+  ).trim();
+  const reviewAvailable = [
+    errorOrResult,
+    errorOrResult?.response?.data,
+    errorOrResult?.payload,
+  ].some((source) => source?.reviewAvailable === true);
+
+  return reviewAvailable && SAFE_REVIEW_CASE_ID_PATTERN.test(evidenceId);
+}
+
 function isInfrastructureCode(code) {
-  return /(?:AWS|REDIS|FIRESTORE|REKOGNITION|COMPARE_FACES|COST|STORE|CACHE|CONFIG|PROVIDER|THROTTL|UNAVAILABLE|DISABLED|ACCESS_DENIED)/.test(code);
+  return /(?:AWS|REDIS|FIRESTORE|REKOGNITION|COMPARE_FACES|COST|STORE|CACHE|CONFIG|PROVIDER|THROTTL|UNAVAILABLE|DISABLED|ACCESS_DENIED|RESOURCENOTFOUND|RESOURCE_NOT_FOUND)/.test(code);
 }
 
 export function resolveKycLivenessErrorPresentation(errorOrResult) {
   const code = extractCode(errorOrResult);
+  const rawMessage = String(
+    errorOrResult?.message ||
+    errorOrResult?.response?.data?.message ||
+    errorOrResult?.response?.data?.error ||
+    errorOrResult?.payload?.message ||
+    '',
+  ).trim();
 
   if (DOCUMENT_REVIEW_CODES.has(code)) {
     return {
@@ -172,14 +183,22 @@ export function resolveKycLivenessErrorPresentation(errorOrResult) {
   }
 
   if (IDENTITY_REVIEW_HOLD_CODES.has(code)) {
-    if (
-      code === 'KYC_IDENTITY_REVIEW_HOLD' &&
-      hasTraceableIdentityReviewCase(errorOrResult)
-    ) {
+    if (code === 'KYC_IDENTITY_REVIEW_HOLD' && hasTraceableIdentityReviewCase(errorOrResult)) {
       return {
         title: 'Análise em andamento',
         message: 'Sua identidade está sendo analisada. Avisaremos assim que houver uma atualização.',
         allowLocalFallback: false,
+      };
+    }
+
+    if (hasTraceableIdentityReviewEvidence(errorOrResult)) {
+      return {
+        title: 'Identidade não confirmada',
+        message: 'Por segurança, não foi possível liberar o modo motorista. Se você acredita que houve um engano, solicite uma análise.',
+        allowLocalFallback: false,
+        action: 'request_identity_review',
+        primaryActionLabel: 'Solicitar análise',
+        canRequestReview: true,
       };
     }
 
@@ -191,6 +210,14 @@ export function resolveKycLivenessErrorPresentation(errorOrResult) {
   }
 
   if (SESSION_SETUP_CODES.has(code)) {
+    return {
+      title: 'Não foi possível iniciar',
+      message: 'Não foi possível preparar a validação agora. Tente novamente em alguns minutos.',
+      allowLocalFallback: false,
+    };
+  }
+
+  if (/(?:session\s*id|sessionid|challenge\s*id|challengeid).*(?:obrigat|required|ausent|missing)/i.test(rawMessage)) {
     return {
       title: 'Não foi possível iniciar',
       message: 'Não foi possível preparar a validação agora. Tente novamente em alguns minutos.',
@@ -240,10 +267,7 @@ export function resolveKycLivenessErrorPresentation(errorOrResult) {
 
   return {
     title: 'Não foi possível continuar',
-    message: toUserFriendlyMessage(errorOrResult, {
-      context: 'kyc',
-      fallbackMessage: 'Não foi possível iniciar a validação agora. Tente novamente em alguns minutos.',
-    }),
+    message: 'Não foi possível iniciar a validação agora. Tente novamente em alguns minutos.',
     allowLocalFallback: false,
   };
 }

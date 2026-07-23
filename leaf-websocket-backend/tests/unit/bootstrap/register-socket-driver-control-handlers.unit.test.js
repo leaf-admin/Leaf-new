@@ -67,6 +67,34 @@ const { resolveDriverActivationState } = require('../../../services/driver-activ
 const driverEligibilityService = require('../../../services/driver-eligibility-service');
 const activeTripIndex = require('../../../utils/active-trip-index');
 
+const FORBIDDEN_MOBILE_KYC_FIELDS = new Set([
+  'challenge',
+  'score',
+  'signals',
+  'metadata',
+  'attemptState',
+  'supportTicketId',
+  'envelope',
+  'financialEnvelope',
+  'costEnvelope',
+  'estimatedUnitCostUsd',
+  'estimatedCostUsd',
+]);
+
+function findForbiddenMobileKycPaths(value, path = '$') {
+  if (!value || typeof value !== 'object') return [];
+  if (Array.isArray(value)) {
+    return value.flatMap((item, index) => findForbiddenMobileKycPaths(item, `${path}[${index}]`));
+  }
+  return Object.entries(value).flatMap(([key, nestedValue]) => {
+    const nestedPath = `${path}.${key}`;
+    return [
+      ...(FORBIDDEN_MOBILE_KYC_FIELDS.has(key) ? [nestedPath] : []),
+      ...findForbiddenMobileKycPaths(nestedValue, nestedPath),
+    ];
+  });
+}
+
 const createSocket = () => {
   const handlers = new Map();
 
@@ -648,6 +676,224 @@ describe('register-socket-driver-control-handlers notificationAction scope', () 
         driverId: 'driver_1',
         isOnline: true,
         dispatchEligible: true,
+      })
+    );
+  });
+
+  it('keeps a driver offline and outside dispatch while a random KYC audit is pending', async () => {
+    resolveDriverActivationState.mockResolvedValue({
+      canAttemptOnline: true,
+      canGoOnline: true,
+    });
+    redis.hgetall.mockResolvedValueOnce({
+      driverId: 'driver_1',
+      status: 'OFFLINE',
+      isOnline: 'false',
+      dispatchEligible: 'true',
+    });
+    enforceDailyKYCForOnline.mockResolvedValueOnce({
+      allowed: false,
+      code: 'KYC_TRUST_RANDOM_AUDIT_REQUIRED',
+      reason: 'internal risk score and provider details',
+      requirement: 'LIVENESS_REQUIRED',
+      challenge: {
+        challengeId: 'kyc_random_audit_1',
+        requirement: 'LIVENESS_REQUIRED',
+        score: 97,
+        signals: [{ code: 'INTERNAL_SIGNAL' }],
+        metadata: { source: 'driver_online_random_audit' },
+        attemptState: { started: 3 },
+        financialEnvelope: { estimatedUnitCostUsd: 0.115 },
+        supportTicketId: 'ticket_internal_1',
+      },
+      score: 97,
+      signals: [{ code: 'INTERNAL_SIGNAL' }],
+      metadata: { provider: 'internal-provider' },
+      attemptState: { started: 3 },
+      costEnvelope: { estimatedCostUsd: 0.115 },
+      supportTicketId: 'ticket_internal_1',
+      reviewAvailable: true,
+      reviewCaseId: 'case_random_audit_1',
+      evidenceId: 'evidence_random_audit_1',
+    });
+
+    await socket.trigger('setDriverStatus', {
+      status: 'online',
+      isOnline: true,
+    });
+
+    const transaction = redis.multi.mock.results.at(-1).value;
+    expect(transaction.hset).toHaveBeenCalledWith(
+      'driver:driver_1',
+      expect.objectContaining({
+        status: 'OFFLINE',
+        isOnline: 'false',
+        dispatchEligible: 'false',
+        dispatchEligibilityCode: 'KYC_TRUST_RANDOM_AUDIT_REQUIRED',
+      })
+    );
+    expect(transaction.zrem).toHaveBeenCalledWith('driver_locations_eligible', 'driver_1');
+    expect(socket.emit).toHaveBeenCalledWith(
+      'driverStatusError',
+      expect.objectContaining({
+        code: 'KYC_TRUST_RANDOM_AUDIT_REQUIRED',
+        challengeId: 'kyc_random_audit_1',
+        reviewAvailable: true,
+        reviewCaseId: 'case_random_audit_1',
+        evidenceId: 'evidence_random_audit_1',
+      })
+    );
+    const publicKycPayload = socket.emit.mock.calls.find(
+      ([eventName, payload]) => eventName === 'driverStatusError' && payload?.kycRequired === true
+    )?.[1];
+    expect(publicKycPayload).toEqual(expect.objectContaining({
+      error: 'Validação facial necessária para ficar online.',
+      reason: 'Validação facial necessária para ficar online.',
+      challengeId: 'kyc_random_audit_1',
+      requirement: 'LIVENESS_REQUIRED',
+    }));
+    expect(findForbiddenMobileKycPaths(publicKycPayload)).toEqual([]);
+    expect(driverEligibilityService.isDriverEligibleForRide).not.toHaveBeenCalled();
+  });
+
+  it('preserves the terminal fraud-block code without exposing review internals', async () => {
+    resolveDriverActivationState.mockResolvedValue({
+      canAttemptOnline: true,
+      canGoOnline: true,
+    });
+    redis.hgetall.mockResolvedValueOnce({
+      driverId: 'driver_1',
+      status: 'OFFLINE',
+      isOnline: 'false',
+      dispatchEligible: 'false',
+    });
+    enforceDailyKYCForOnline.mockRejectedValueOnce(Object.assign(
+      new Error('Bloqueio permanente confirmado no case_internal_1 ticket_internal_1'),
+      {
+        code: 'KYC_IDENTITY_FRAUD_PERMANENT_BLOCK',
+        caseId: 'case_internal_1',
+        ticketId: 'ticket_internal_1',
+      }
+    ));
+
+    await socket.trigger('setDriverStatus', {
+      status: 'online',
+      isOnline: true,
+    });
+
+    const publicFailure = socket.emit.mock.calls.find(
+      ([eventName]) => eventName === 'driverStatusError'
+    )?.[1];
+    expect(publicFailure).toEqual({
+      success: false,
+      error: 'Esta conta não pode usar o modo motorista.',
+      code: 'KYC_IDENTITY_FRAUD_PERMANENT_BLOCK',
+      retryable: false,
+    });
+    expect(JSON.stringify(publicFailure)).not.toMatch(/case_internal|ticket_internal|bloqueio permanente confirmado/i);
+    expect(socket.emit).not.toHaveBeenCalledWith('driverStatusUpdated', expect.anything());
+    expect(driverEligibilityService.isDriverEligibleForRide).not.toHaveBeenCalled();
+  });
+
+  it('projects classification-store failures as a retryable public KYC unavailability', async () => {
+    resolveDriverActivationState.mockResolvedValue({
+      canAttemptOnline: true,
+      canGoOnline: true,
+    });
+    redis.hgetall.mockResolvedValueOnce({
+      driverId: 'driver_1',
+      status: 'OFFLINE',
+      isOnline: 'false',
+      dispatchEligible: 'false',
+    });
+    enforceDailyKYCForOnline.mockRejectedValueOnce(Object.assign(
+      new Error('Firestore permission-denied in project leaf-prod for uid driver_1'),
+      { code: 'PERSISTENCE_USER_CLASSIFICATION_UNAVAILABLE' }
+    ));
+
+    await socket.trigger('setDriverStatus', {
+      status: 'online',
+      isOnline: true,
+    });
+
+    const publicFailure = socket.emit.mock.calls.find(
+      ([eventName]) => eventName === 'driverStatusError'
+    )?.[1];
+    expect(publicFailure).toEqual({
+      success: false,
+      error: 'Não foi possível confirmar sua liberação agora. Tente novamente em alguns minutos.',
+      code: 'KYC_STATUS_UNAVAILABLE',
+      retryable: true,
+    });
+    expect(JSON.stringify(publicFailure)).not.toMatch(/firestore|permission-denied|leaf-prod|driver_1/i);
+    expect(socket.emit).not.toHaveBeenCalledWith('driverStatusUpdated', expect.anything());
+    expect(driverEligibilityService.isDriverEligibleForRide).not.toHaveBeenCalled();
+  });
+
+  it('does not expose arbitrary technical failures from the online transition', async () => {
+    redis.hgetall.mockRejectedValueOnce(
+      new Error('ECONNRESET redis-primary.internal:6379 auth secret-123')
+    );
+
+    await socket.trigger('setDriverStatus', {
+      status: 'online',
+      isOnline: true,
+    });
+
+    const publicFailure = socket.emit.mock.calls.find(
+      ([eventName]) => eventName === 'driverStatusError'
+    )?.[1];
+    expect(publicFailure).toEqual({
+      success: false,
+      error: 'Não foi possível atualizar o status do motorista agora. Tente novamente.',
+      code: 'DRIVER_STATUS_UPDATE_FAILED',
+      retryable: true,
+    });
+    expect(JSON.stringify(publicFailure)).not.toMatch(/econnreset|redis-primary|secret-123/i);
+    expect(socket.emit).not.toHaveBeenCalledWith('driverStatusUpdated', expect.anything());
+  });
+
+  it('preserves active-ride continuity when the KYC gate sees a race', async () => {
+    resolveDriverActivationState.mockResolvedValue({
+      canAttemptOnline: true,
+      canGoOnline: true,
+    });
+    enforceDailyKYCForOnline.mockResolvedValueOnce({
+      allowed: true,
+      deferred: true,
+      continuityOnly: true,
+      activeTripId: 'booking_race_1',
+    });
+    redis.hgetall.mockResolvedValueOnce({
+      driverId: 'driver_1',
+      status: 'IN_PROGRESS',
+      isOnline: 'true',
+      dispatchEligible: 'false',
+    });
+
+    await socket.trigger('setDriverStatus', {
+      status: 'online',
+      isOnline: true,
+    });
+
+    expect(driverEligibilityService.isDriverEligibleForRide).not.toHaveBeenCalled();
+    expect(redis.zrem).toHaveBeenCalledWith('driver_locations_eligible', 'driver_1');
+    expect(redis.hset).toHaveBeenCalledWith(
+      'driver:driver_1',
+      expect.objectContaining({
+        status: 'IN_PROGRESS',
+        isOnline: 'true',
+        dispatchEligible: 'false',
+        dispatchEligibilityCode: 'IN_TRIP_KYC_DEFERRED',
+        activeTripId: 'booking_race_1',
+      })
+    );
+    expect(socket.emit).toHaveBeenCalledWith(
+      'driverStatusUpdated',
+      expect.objectContaining({
+        code: 'IN_TRIP_KYC_DEFERRED',
+        kycDeferred: true,
+        activeTripId: 'booking_race_1',
       })
     );
   });

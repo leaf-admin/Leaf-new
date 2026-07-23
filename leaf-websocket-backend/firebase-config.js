@@ -25,6 +25,39 @@ function recordRealtimeDbMetric(operation, result = 'success', source = 'firebas
     }
 }
 
+function parseServiceAccountJson(rawValue, source) {
+    try {
+        const parsed = JSON.parse(rawValue);
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+            throw new Error('invalid_service_account_shape');
+        }
+        return parsed;
+    } catch (_error) {
+        // Nunca propagar trechos do JSON da credencial no erro estruturado.
+        throw new Error(`Firebase credentials inválidas em ${source}`);
+    }
+}
+
+function readServiceAccountFile(configuredPath) {
+    const resolvedPath = path.isAbsolute(configuredPath)
+        ? configuredPath
+        : path.resolve(process.cwd(), configuredPath);
+
+    if (!fs.existsSync(resolvedPath)) {
+        throw new Error('Firebase credentials ausentes em GOOGLE_APPLICATION_CREDENTIALS');
+    }
+
+    try {
+        const rawValue = fs.readFileSync(resolvedPath, 'utf8');
+        return parseServiceAccountJson(rawValue, 'GOOGLE_APPLICATION_CREDENTIALS');
+    } catch (error) {
+        if (error?.message === 'Firebase credentials inválidas em GOOGLE_APPLICATION_CREDENTIALS') {
+            throw error;
+        }
+        throw new Error('Firebase credentials indisponíveis em GOOGLE_APPLICATION_CREDENTIALS');
+    }
+}
+
 // Inicializar Firebase Admin SDK
 function initializeFirebase() {
     try {
@@ -59,18 +92,31 @@ function initializeFirebase() {
         const serviceAccountJson =
             process.env.FIREBASE_SERVICE_ACCOUNT_JSON ||
             process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON;
+        const serviceAccountFile = String(
+            process.env.GOOGLE_APPLICATION_CREDENTIALS || ''
+        ).trim();
 
         if (serviceAccountJson) {
-            const parsed = JSON.parse(serviceAccountJson);
+            const parsed = parseServiceAccountJson(
+                serviceAccountJson,
+                'FIREBASE_SERVICE_ACCOUNT_JSON/GOOGLE_APPLICATION_CREDENTIALS_JSON'
+            );
+            firebaseApp = admin.initializeApp({
+                credential: admin.credential.cert(parsed),
+                databaseURL
+            });
+        } else if (serviceAccountFile) {
+            // 2) Em containers, lê o arquivo montado explicitamente pelo runtime.
+            const parsed = readServiceAccountFile(serviceAccountFile);
             firebaseApp = admin.initializeApp({
                 credential: admin.credential.cert(parsed),
                 databaseURL
             });
         } else {
-            // 2) Fallback para arquivo local (ambiente dev/VPS tradicional)
+            // 3) Fallback para arquivo local (ambiente dev/VPS tradicional)
             const serviceAccountPath = path.join(__dirname, 'leaf-reactnative-firebase-adminsdk-fbsvc-456a95e2fc.json');
             if (!fs.existsSync(serviceAccountPath)) {
-                throw new Error('Firebase credentials ausentes: defina FIREBASE_SERVICE_ACCOUNT_JSON');
+                throw new Error('Firebase credentials ausentes: configure JSON inline ou GOOGLE_APPLICATION_CREDENTIALS');
             }
 
             firebaseApp = admin.initializeApp({

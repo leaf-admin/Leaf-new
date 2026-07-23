@@ -23,6 +23,9 @@ const {
 } = require('../services/driver-online-time-policy-service');
 const { buildDriverVehicleIdentity } = require('../utils/driver-vehicle-identity');
 const { resolveActiveTripForDriver } = require('../utils/active-trip-index');
+const {
+    buildPublicDriverKycSocketPayload
+} = require('../utils/driver-kyc-socket-projection');
 
 const DRIVER_BOARDING_WINDOW_SECONDS = Math.max(
     30,
@@ -41,6 +44,35 @@ function resolveVehicleLockIdentifier({ plate, vehicleId } = {}) {
 
     const normalizedVehicleId = String(vehicleId || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
     return normalizedVehicleId ? `VEHID${normalizedVehicleId}` : '';
+}
+
+function buildPublicDriverStatusFailure(error = {}) {
+    const errorCode = String(error?.code || '').trim().toUpperCase();
+
+    if (errorCode === 'KYC_IDENTITY_FRAUD_PERMANENT_BLOCK') {
+        return {
+            success: false,
+            error: 'Esta conta não pode usar o modo motorista.',
+            code: 'KYC_IDENTITY_FRAUD_PERMANENT_BLOCK',
+            retryable: false
+        };
+    }
+
+    if (errorCode.startsWith('KYC_') || errorCode.startsWith('PERSISTENCE_')) {
+        return {
+            success: false,
+            error: 'Não foi possível confirmar sua liberação agora. Tente novamente em alguns minutos.',
+            code: 'KYC_STATUS_UNAVAILABLE',
+            retryable: true
+        };
+    }
+
+    return {
+        success: false,
+        error: 'Não foi possível atualizar o status do motorista agora. Tente novamente.',
+        code: 'DRIVER_STATUS_UPDATE_FAILED',
+        retryable: true
+    };
 }
 
 function normalizeDriverDestinationModePayload(data = {}) {
@@ -689,19 +721,17 @@ function registerSocketDriverControlHandlers({
                             .exec();
                         socket.emit('driverStatusError', {
                             success: false,
-                            error: kycGate?.reason || 'Validacao facial obrigatoria para ficar online.',
-                            code: kycGate?.code || 'kycRequired',
-                            kycRequired: true,
                             activationState,
-                            requirement: kycGate?.requirement || 'LIVENESS_REQUIRED',
-                            challengeId: kycGate?.challenge?.challengeId || null,
-                            challenge: kycGate?.challenge || null
+                            ...buildPublicDriverKycSocketPayload(kycGate, {
+                                message: 'Validação facial necessária para ficar online.',
+                                fallbackCode: 'kycRequired'
+                            })
                         });
                         return;
                     }
                     if (kycGate?.continuityOnly || kycGate?.deferred) {
                         const checkedAt = new Date().toISOString();
-                        const activeTripId = kycGate.activeTripId || null;
+                        const activeTripId = kycGate?.activeTripId || existingDriverState?.activeTripId || null;
                         await redis.hset(driverKey, {
                             driverId,
                             status: existingDriverState?.status || 'IN_TRIP',
@@ -956,13 +986,10 @@ function registerSocketDriverControlHandlers({
             logStructured('warn', 'Falha ao processar setDriverStatus', {
                 service: 'driver-control-handlers',
                 driverId: data.driverId || socket.userId || null,
-                error: error.message
+                error: error?.message || String(error)
             });
 
-            socket.emit('driverStatusError', {
-                error: error.message || 'Erro ao atualizar status do motorista',
-                code: 'DRIVER_STATUS_UPDATE_FAILED'
-            });
+            socket.emit('driverStatusError', buildPublicDriverStatusFailure(error));
         }
     });
 }

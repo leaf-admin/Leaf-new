@@ -195,7 +195,8 @@ async function resolveRideScope({
   redisPool,
   bookingId,
   preferPersistentTerminal = false,
-  actor = null
+  actor = null,
+  deferPersistenceBoundaryToCaller = false
 }) {
   const safeBookingId = normalizeId(bookingId);
   if (!safeBookingId) {
@@ -224,7 +225,7 @@ async function resolveRideScope({
   }
 
   const validateCachedScope = (record) => {
-    if (isSupportIdentity(actor || {})) {
+    if (deferPersistenceBoundaryToCaller || isSupportIdentity(actor || {})) {
       return null;
     }
     try {
@@ -275,19 +276,21 @@ async function resolveRideScope({
     `${persistenceScope.collections.bookings}/${safeBookingId}`
   );
   if (fromRealtime) {
-    try {
-      assertStoredRecordMatchesScope(fromRealtime, persistenceScope);
-    } catch (error) {
-      return {
-        found: false,
-        bookingId: safeBookingId,
-        customerId: '',
-        driverId: '',
-        status: '',
-        raw: null,
-        code: error.code || 'RIDE_SCOPE_CONTEXT_MISMATCH',
-        error: error.message || 'A corrida pertence a outro ambiente'
-      };
+    if (!deferPersistenceBoundaryToCaller) {
+      try {
+        assertStoredRecordMatchesScope(fromRealtime, persistenceScope);
+      } catch (error) {
+        return {
+          found: false,
+          bookingId: safeBookingId,
+          customerId: '',
+          driverId: '',
+          status: '',
+          raw: null,
+          code: error.code || 'RIDE_SCOPE_CONTEXT_MISMATCH',
+          error: error.message || 'A corrida pertence a outro ambiente'
+        };
+      }
     }
     return {
       found: true,
@@ -315,7 +318,8 @@ async function assertRideParticipant({
   bookingId,
   allowedRoles = ['passenger', 'driver'],
   allowSupport = true,
-  preferPersistentTerminal = false
+  preferPersistentTerminal = false,
+  deferPersistenceBoundaryToCaller = false
 }) {
   const identity = getSocketIdentity(socket);
   if (!identity.userId) {
@@ -332,7 +336,8 @@ async function assertRideParticipant({
     redisPool,
     bookingId,
     preferPersistentTerminal,
-    actor: identity
+    actor: identity,
+    deferPersistenceBoundaryToCaller
   });
   if (!scope.found) {
     return {
