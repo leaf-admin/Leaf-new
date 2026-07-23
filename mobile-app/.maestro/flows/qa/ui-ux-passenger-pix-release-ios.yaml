@@ -1,0 +1,15 @@
+appId: br.com.leaf.ride
+---
+- extendedWaitUntil:
+    visible:
+      id: "passenger-destination-confirm-button"
+    timeout: 30000
+
+- tapOn:
+    id: "passenger-destination-confirm-button"
+
+- extendedWaitUntil:
+    visible: ".*(Pagamento PIX|Gerando cobrança PIX...|Realize seu pagamento|Não foi possível gerar o Pix).*"
+    timeout: 120000
+
+- takeScreenshot: "qa-artifacts/ui-ux-simulator-2026-07-11/remaining/release/passenger/pix-pending"

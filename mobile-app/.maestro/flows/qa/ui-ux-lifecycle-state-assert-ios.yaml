@@ -1,0 +1,20 @@
+appId: br.com.leaf.ride
+---
+- runFlow:
+    when:
+      visible: "Abrir"
+    commands:
+      - tapOn: "Abrir"
+
+- extendedWaitUntil:
+    visible:
+      id: ${SCREEN_ID}
+    timeout: 30000
+
+- assertVisible:
+    id: ${SCREEN_ID}
+
+- assertVisible:
+    id: ${PRIMARY_ID}
+
+- takeScreenshot: ${SHOT_NAME}

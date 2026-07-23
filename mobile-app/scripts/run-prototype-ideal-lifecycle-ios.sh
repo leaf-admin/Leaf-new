@@ -825,10 +825,11 @@ run_passenger_request() {
   local name="$2"
   echo "[lifecycle] running ${name}"
   foreground_app "$PASSENGER_UDID" "$FLOW_SETTLE_SECONDS"
-  run_with_timeout 10 \
-    xcrun simctl openurl "$PASSENGER_UDID" \
-    "leafapp://robotaxi/destination?qaAutomation=1&qaAutoFlow=request&qaPresetQuery=Copacabana%20Palace&qaNonce=${nonce}" >/dev/null 2>&1 || true
-  sleep "$FLOW_SETTLE_SECONDS"
+  run_flow \
+    "$PASSENGER_UDID" \
+    "$MOBILE_DIR/.maestro/flows/qa/e2e/lifecycle/02-passenger-request-current-home.yaml" \
+    "$name" \
+    true
 }
 
 wait_for_passenger_booking_created() {
@@ -860,7 +861,10 @@ wait_for_passenger_booking_created() {
 capture_device() {
   local udid="$1"
   local output="$2"
-  xcrun simctl io "$udid" screenshot "$output" >/dev/null
+  # Preserve the rendered device frame as an opaque image. The simulator's
+  # default physical-screen alpha mask can make otherwise valid evidence look
+  # black or partially transparent in image viewers.
+  xcrun simctl io "$udid" screenshot --mask=ignored "$output" >/dev/null
 }
 
 capture_pair_after_stabilization() {

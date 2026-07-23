@@ -1,0 +1,27 @@
+appId: br.com.leaf.ride
+---
+- extendedWaitUntil:
+    visible:
+      id: "passenger-destination-search-input"
+    timeout: 30000
+
+- tapOn:
+    id: "passenger-destination-search-input"
+- eraseText
+- inputText: "Leblon"
+
+- extendedWaitUntil:
+    visible: ".*Leblon.*"
+    timeout: 30000
+
+- takeScreenshot: "qa-artifacts/ui-ux-simulator-2026-07-11/remaining/release/passenger/destination-results-keyboard-compact"
+
+- tapOn:
+    id: "passenger-destination-result-0"
+
+- extendedWaitUntil:
+    visible:
+      id: "passenger-destination-quote-price-.*"
+    timeout: 120000
+
+- takeScreenshot: "qa-artifacts/ui-ux-simulator-2026-07-11/remaining/release/passenger/quote-compact"

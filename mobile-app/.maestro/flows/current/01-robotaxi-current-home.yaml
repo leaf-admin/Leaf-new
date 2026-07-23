@@ -1,0 +1,34 @@
+# CURRENT_PRODUCT_ONLY: canonical acceptance entry; never reference standalone legacy flows.
+appId: br.com.leaf.ride
+name: Robotaxi current home acceptance
+tags:
+  - current
+  - acceptance
+---
+- openLink: "leafapp://robotaxi/home"
+
+- runFlow: ../qa/_accept-open-prompt-no-launch.yaml
+
+- extendedWaitUntil:
+    visible:
+      id: "prototype-map-view"
+    timeout: 30000
+
+- assertVisible:
+    id: "prototype-map-view"
+
+- runFlow:
+    when:
+      visible:
+        id: "passenger-home-destination-input"
+    commands:
+      - assertVisible:
+          id: "passenger-home-destination-input"
+
+- runFlow:
+    when:
+      visible:
+        id: "driver-home-toggle-online"
+    commands:
+      - assertVisible:
+          id: "driver-home-toggle-online"

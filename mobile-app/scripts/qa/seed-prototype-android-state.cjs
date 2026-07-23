@@ -1203,7 +1203,7 @@ function buildScenarioPatch(scenario) {
         ...buildPassengerReceipt(),
         id: 'trip-driver-proof-1',
       },
-      driverOnline: true,
+      driverOnline: false,
       driverOnlinePending: false,
       driverOnlineMutationSource: 'qa_seed',
       driverActivation: buildApprovedDriverActivation(),
@@ -1230,7 +1230,7 @@ function buildScenarioPatch(scenario) {
       tripArrivalText: '',
       boardingDeadlineAt: null,
       boardingRemainingSec: 0,
-      driverOnline: false,
+      driverOnline: true,
       driverOnlinePending: false,
       driverOnlineMutationSource: '',
       driverActivation: buildApprovedDriverActivation(),
@@ -1261,7 +1261,7 @@ function buildScenarioPatch(scenario) {
       ...buildDriverRideContext('accepted'),
       bookingStatus: 'searching',
       activeBookingId: 'booking-proof-offer-1',
-      driverOnline: false,
+      driverOnline: true,
       driverOnlinePending: false,
       driverOnlineMutationSource: 'qa_seed',
       driverOffers: [buildDriverOffer()],
@@ -1284,7 +1284,7 @@ function buildScenarioPatch(scenario) {
     ...buildDriverRideContext(status),
     bookingStatus: status,
     activeBookingId: 'booking-proof-driver-1',
-    driverOnline: false,
+    driverOnline: true,
     driverOnlinePending: false,
     driverOnlineMutationSource: 'qa_seed',
     driverOffers: [],
@@ -1367,48 +1367,8 @@ function scenarioRoute(scenario) {
     return params.toString();
   };
 
-  const driverTripParams = (status, bookingId = 'booking-proof-driver-1', extra = {}) => {
-    const isStartedTrip = String(status || '').trim().toLowerCase() === 'started';
-    const qaDriverCoordinate = isStartedTrip
-      ? BASE_COORDS.inTransit
-      : { latitude: -22.9746, longitude: -43.1903 };
-    const qaRouteCoordinates = isStartedTrip
-      ? [BASE_COORDS.inTransit, BASE_COORDS.destination]
-      : [qaDriverCoordinate, BASE_COORDS.pickup];
-    const request = {
-      bookingId,
-      id: bookingId,
-      status,
-      passengerName: 'Leaf Passageiro Teste',
-      passenger: 'Leaf Passageiro Teste',
-      pickupAddress: LABELS.pickupAddress,
-      pickup: LABELS.pickupAddress,
-      pickupCoordinate: BASE_COORDS.pickup,
-      dropoffAddress: LABELS.destinationAddress,
-      dropoff: LABELS.destinationAddress,
-      destinationCoordinate: BASE_COORDS.destination,
-      driverCoordinate: qaDriverCoordinate,
-      routeCoordinates: qaRouteCoordinates,
-      fare: 12.5,
-      grossFare: 12.5,
-      driverNetAmount: 10.8,
-      estimatedDriverNetAmount: 10.8,
-      estimatedOperationalFee: 0.99,
-      estimatedPaymentIntermediationFee: 0.71,
-      estimatedTotalFees: 1.7,
-      distanceKm: 1.3,
-      tripDistanceKm: 6.7,
-      pickupEtaMin: 5,
-      tripDurationMin: 20,
-      passengerRating: 4.9,
-      pricingSnapshotLocked: true,
-      ...extra
-    };
-    return `request=${encodeURIComponent(JSON.stringify(request))}`;
-  };
-
   if (scenario === 'driver-offer') {
-    return `leafapp://robotaxi/driver/offer?${driverTripParams('searching', 'booking-proof-offer-1', { expiresInSec: 18 })}&qaKeepVisible=1`;
+    return 'leafapp://robotaxi/home';
   }
   if (scenario === 'passenger-accepted' || scenario === 'passenger-arrived' || scenario === 'passenger-started') {
     // Passenger lifecycle state is rendered by the current home runtime.
@@ -1428,8 +1388,7 @@ function scenarioRoute(scenario) {
     return `leafapp://robotaxi/receipt?${passengerReceiptParams('driver')}`;
   }
   if (scenario === 'driver-accepted' || scenario === 'driver-arrived' || scenario === 'driver-started') {
-    const status = scenario.replace('driver-', '');
-    return `leafapp://robotaxi/driver/trip?${driverTripParams(status)}`;
+    return 'leafapp://robotaxi/home';
   }
   return 'leafapp://robotaxi/home';
 }

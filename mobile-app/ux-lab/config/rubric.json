@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "scale": {
+    "0": "bloqueia ou induz erro",
+    "1": "fraco, exige esforço ou ajuda",
+    "2": "funciona com hesitação menor",
+    "3": "claro, direto e consistente"
+  },
+  "criteria": [
+    { "id": "state_clarity", "label": "Clareza do estado", "weight": 2, "gate": true },
+    { "id": "primary_action", "label": "Ação principal inequívoca", "weight": 3, "gate": true },
+    { "id": "information_hierarchy", "label": "Hierarquia de informação", "weight": 2, "gate": true },
+    { "id": "decision_density", "label": "Uma decisão por estado", "weight": 3, "gate": true },
+    { "id": "visual_consistency", "label": "Consistência de card, botão e tipografia", "weight": 2, "gate": false },
+    { "id": "map_card_composition", "label": "Composição mapa e card", "weight": 2, "gate": false },
+    { "id": "feedback_and_latency", "label": "Feedback de carregamento e latência", "weight": 2, "gate": false },
+    { "id": "error_recovery", "label": "Recuperação de erro", "weight": 3, "gate": true },
+    { "id": "one_hand_reach", "label": "Alcance e área de toque", "weight": 1, "gate": false },
+    { "id": "accessibility", "label": "Legibilidade e acessibilidade", "weight": 2, "gate": false },
+    { "id": "leaf_personality", "label": "Personalidade Leaf sem ruído", "weight": 1, "gate": false },
+    { "id": "continuity", "label": "Continuidade com estados anterior e seguinte", "weight": 2, "gate": true }
+  ],
+  "severityToPriority": {
+    "critical": "P0",
+    "high": "P1",
+    "medium": "P2",
+    "low": "P3"
+  }
+}

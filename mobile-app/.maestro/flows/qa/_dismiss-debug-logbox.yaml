@@ -1,0 +1,22 @@
+appId: br.com.leaf.ride
+---
+# Debug-only helper. It never participates in product-state acceptance.
+- runFlow:
+    when:
+      visible: "Console Error"
+    commands:
+      - tapOn: "Dismiss"
+
+- runFlow:
+    when:
+      visible: "Open debugger to view warnings."
+    commands:
+      - tapOn:
+          point: "92%,84%"
+
+- runFlow:
+    when:
+      visible: '.*\[Axios\] Erro do servidor.*'
+    commands:
+      - tapOn:
+          point: "92%,91%"

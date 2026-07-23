@@ -1,0 +1,63 @@
+appId: br.com.leaf.ride
+---
+- openLink: "leafapp://robotaxi/home?qaAutomation=1&qaAutoFlow=request"
+
+- runFlow: ../../_accept-open-prompt-no-launch.yaml
+
+- extendedWaitUntil:
+    visible:
+      id: "passenger-home-destination-input"
+    timeout: 30000
+
+- tapOn:
+    id: "passenger-home-destination-input"
+
+- extendedWaitUntil:
+    visible:
+      id: "passenger-home-destination-search-input"
+    timeout: 30000
+
+- tapOn:
+    id: "passenger-home-destination-search-input"
+- eraseText
+- inputText: "Copacabana Palace"
+
+- extendedWaitUntil:
+    visible:
+      id: "passenger-home-destination-result-0"
+    timeout: 45000
+
+- tapOn:
+    id: "passenger-home-destination-result-0"
+
+- extendedWaitUntil:
+    visible:
+      id: "passenger-home-category-card"
+    timeout: 120000
+
+- assertNotVisible:
+    id: "passenger-destination-category-plus"
+
+- extendedWaitUntil:
+    visible:
+      id: "passenger-home-category-confirm"
+    timeout: 120000
+
+- tapOn:
+    id: "passenger-home-category-confirm"
+
+- extendedWaitUntil:
+    visible: ".*(Realize seu pagamento|Pagamento PIX|Gerando cobrança PIX...|Pagamento confirmado!|Procurando motorista|Corrida criada com sucesso|Continuar para busca).*"
+    timeout: 240000
+
+- runFlow: ../../_accept-open-prompt-no-launch.yaml
+
+- extendedWaitUntil:
+    visible:
+      id: "passenger-driver-search-elapsed"
+    timeout: 60000
+
+- extendedWaitUntil:
+    visible:
+      id: "passenger-driver-search-sheet"
+    timeout: 60000

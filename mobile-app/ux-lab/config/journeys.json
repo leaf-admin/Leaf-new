@@ -1,0 +1,53 @@
+{
+  "version": 1,
+  "canonicalStartDeepLink": "leafapp://robotaxi/home",
+  "forbiddenAcceptanceDeepLinks": [
+    "leafapp://robotaxi/destination",
+    "leafapp://robotaxi/booking",
+    "leafapp://robotaxi/payment"
+  ],
+  "forbiddenAcceptanceTestIds": [
+    "driver-offer-screen",
+    "driver-offer-screen-summary",
+    "driver-live-trip-screen",
+    "driver-trip-passenger-identity",
+    "driver-trip-route-progress",
+    "driver-trip-operational-hold-title"
+  ],
+  "journeys": [
+    {
+      "id": "passenger_request_and_ride",
+      "role": "passenger",
+      "objective": "Solicitar, pagar e acompanhar uma corrida sem ajuda externa.",
+      "states": [
+        { "id": "home", "question": "De onde saio e como informo o destino?", "primaryAction": "Informar destino", "requiredTestIds": ["passenger-home-destination-input"] },
+        { "id": "destination_search", "question": "Como encontro e confirmo o destino correto?", "primaryAction": "Selecionar destino", "requiredTestIds": ["passenger-home-destination-search-input"] },
+        { "id": "category", "question": "Qual viagem estou escolhendo, quanto custa e quando chega?", "primaryAction": "Confirmar categoria", "requiredTestIds": ["passenger-home-category-card", "passenger-home-category-confirm"] },
+        { "id": "pix_pending", "question": "O que preciso fazer para concluir a reserva?", "primaryAction": "Concluir Pix", "requiredTestIds": ["payment-modal-content"] },
+        { "id": "searching", "question": "O que está acontecendo depois do pagamento?", "primaryAction": "Acompanhar busca", "requiredTestIds": ["passenger-driver-search-sheet"] },
+        { "id": "driver_accepted", "question": "Quem vem me buscar e quando chega?", "primaryAction": "Acompanhar chegada", "requiredTestIds": ["passenger-trip-screen", "passenger-trip-driver-identity"] },
+        { "id": "driver_arrived", "question": "Como identifico e encontro o motorista?", "primaryAction": "Encontrar motorista", "requiredTestIds": ["passenger-trip-screen", "passenger-trip-driver-identity"] },
+        { "id": "ride_started", "question": "Quando chego e como acompanho a viagem?", "primaryAction": "Acompanhar viagem", "requiredTestIds": ["passenger-trip-screen", "passenger-trip-started-action-dock"] },
+        { "id": "operational_interruption", "question": "O que acontece se o motorista não puder continuar?", "primaryAction": "Escolher como continuar", "requiredTestIds": ["passenger-trip-screen", "passenger-trip-operational-title", "passenger-trip-operational-continue-button"] },
+        { "id": "completed", "question": "Quanto paguei e o que faço agora?", "primaryAction": "Avaliar viagem", "requiredTestIds": ["passenger-receipt-rate-trip-button"] },
+        { "id": "no_drivers", "question": "Estou protegido de cobrança quando não há motorista?", "primaryAction": "Tentar com outro destino", "requiredTestIds": ["passenger-no-drivers-screen"] },
+        { "id": "payment_failed", "question": "Como recupero a tentativa sem repetir decisões?", "primaryAction": "Tentar novamente", "requiredTestIds": ["payment-failed-button-Tentar novamente"] }
+      ]
+    },
+    {
+      "id": "driver_accept_and_complete",
+      "role": "driver",
+      "objective": "Receber, executar e concluir uma corrida com clareza operacional.",
+      "states": [
+        { "id": "offline", "question": "Como começo a dirigir?", "primaryAction": "Ficar online", "requiredTestIds": ["driver-home-toggle-online"] },
+        { "id": "online_waiting", "question": "Estou disponível e o que acontece agora?", "primaryAction": "Aguardar oferta", "requiredTestIds": ["driver-home-toggle-online"] },
+        { "id": "offer", "question": "Esta corrida vale aceitar?", "primaryAction": "Aceitar corrida", "requiredTestIds": ["driver-live-ride-overlay-wrap", "driver-live-offer-card", "driver-live-offer-accept-button"] },
+        { "id": "accepted", "question": "Onde busco o passageiro e qual é o próximo passo?", "primaryAction": "Cheguei ao embarque", "requiredTestIds": ["driver-live-ride-overlay-wrap", "driver-live-trip-card", "driver-live-trip-compact-summary", "driver-live-passenger-identity", "driver-live-primary-action-arrive-button"] },
+        { "id": "arrived", "question": "Posso iniciar a corrida com segurança?", "primaryAction": "Iniciar viagem", "requiredTestIds": ["driver-live-ride-overlay-wrap", "driver-live-trip-card", "driver-live-trip-compact-summary", "driver-live-passenger-identity", "driver-live-primary-action-start-button"] },
+        { "id": "started", "question": "Onde fica o destino e como acompanho o progresso?", "primaryAction": "Finalizar corrida", "requiredTestIds": ["driver-live-ride-overlay-wrap", "driver-live-trip-card", "driver-live-trip-compact-summary", "driver-live-passenger-identity", "driver-live-primary-action-complete-button"] },
+        { "id": "operational_interruption", "question": "Como resolvo a interrupção sem perder contexto?", "primaryAction": "Aguardar decisão do passageiro", "requiredTestIds": ["driver-live-ride-overlay-wrap", "driver-live-operational-hold-title", "driver-live-passenger-identity"] },
+        { "id": "completed", "question": "Quanto recebi e como volto a ficar disponível?", "primaryAction": "Voltar a ficar disponível", "requiredTestIds": ["driver-receipt-rate-passenger-button"] }
+      ]
+    }
+  ]
+}

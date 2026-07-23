@@ -1,0 +1,45 @@
+appId: br.com.leaf.ride
+---
+- openLink: "leafapp://robotaxi/home"
+
+- runFlow:
+    when:
+      visible: "Abrir"
+    commands:
+      - tapOn: "Abrir"
+
+- extendedWaitUntil:
+    visible:
+      id: "passenger-home-destination-input"
+    timeout: 30000
+
+- tapOn:
+    id: "passenger-home-destination-input"
+
+- extendedWaitUntil:
+    visible:
+      id: "passenger-home-destination-search-input"
+    timeout: 30000
+
+- tapOn:
+    id: "passenger-home-destination-search-input"
+- eraseText
+- inputText: "Leblon"
+
+- extendedWaitUntil:
+    visible:
+      id: "passenger-home-destination-result-0"
+    timeout: 30000
+
+- tapOn:
+    id: "passenger-home-destination-result-0"
+
+- extendedWaitUntil:
+    visible:
+      id: "passenger-home-category-card"
+    timeout: 120000
+
+- assertNotVisible:
+    id: "passenger-destination-category-plus"
+
+- takeScreenshot: "qa-artifacts/ui-ux-simulator-2026-07-11/e2e-typography-ios/passenger-category-current"

@@ -1,0 +1,25 @@
+appId: br.com.leaf.ride
+---
+- tapOn: "Entendi e continuar"
+
+- runFlow:
+    when:
+      visible: "Permitir Durante o Uso do App"
+    commands:
+      - tapOn: "Permitir Durante o Uso do App"
+
+- runFlow:
+    when:
+      visible: "Permitir Uma Vez"
+    commands:
+      - tapOn: "Permitir Uma Vez"
+
+- runFlow:
+    when:
+      visible: "Alterar para Sempre Permitir"
+    commands:
+      - tapOn: "Alterar para Sempre Permitir"
+
+- waitForAnimationToEnd
+
+- takeScreenshot: "qa-artifacts/ux-lab/driver-after-location-consent"
