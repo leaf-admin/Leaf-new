@@ -137,6 +137,8 @@ function buildQuoteLockPayload({
   discountBenefit = null,
   routeDistanceKm = 0,
   routeDurationSecs = 0,
+  routePolyline = null,
+  trafficSegments = [],
   tollFee = 0,
   rateCardVersion = null,
   pricingPayload = null,
@@ -164,6 +166,10 @@ function buildQuoteLockPayload({
     discountBenefit: discountBenefit || null,
     routeDistanceKm: normalizeNumber(routeDistanceKm, 0) || 0,
     routeDurationSecs: normalizeNumber(routeDurationSecs, 0) || 0,
+    routePolyline: normalizeText(routePolyline).slice(0, 100000) || null,
+    trafficSegments: Array.isArray(trafficSegments)
+      ? trafficSegments.slice(0, 80)
+      : [],
     tollFee: normalizeMoneyReais(tollFee, 0),
     rateCardVersion: normalizeText(rateCardVersion) || null,
     quoteVersion: normalizeText(rateCardVersion) || 'v1',

@@ -17,6 +17,8 @@ const { normalizeOperationalCarType } = require('../utils/operational-car-type')
 const {
     evaluateRideFlowValidationPaymentBinding
 } = require('../services/ride-flow-validation-guard');
+const { decodePolyline } = require('../services/route-toll-service');
+const { resolvePersistenceScope } = require('../services/sandbox-persistence-context');
 
 function normalizeText(value) {
     return String(value || '').trim();
@@ -25,6 +27,11 @@ function normalizeText(value) {
 function normalizePositiveNumber(value, fallback = 0) {
     const numericValue = Number(value);
     return Number.isFinite(numericValue) && numericValue > 0 ? numericValue : fallback;
+}
+
+function normalizeNonNegativeNumber(value, fallback = 0) {
+    const numericValue = Number(value);
+    return Number.isFinite(numericValue) && numericValue >= 0 ? numericValue : fallback;
 }
 
 function normalizeRouteCoordinate(value) {
@@ -427,6 +434,20 @@ function validateAdvancePaymentIntentBinding({
         };
     }
 
+    let paymentPersistenceScope;
+    try {
+        paymentPersistenceScope = resolvePersistenceScope(
+            advancePaymentIntent,
+            { allowLegacyOperational: true }
+        );
+    } catch (contextError) {
+        return {
+            success: false,
+            code: contextError.code || 'FINANCIAL_CONTEXT_INVALID',
+            message: 'Não foi possível validar o isolamento financeiro deste pagamento.'
+        };
+    }
+
     return {
         success: true,
         binding: {
@@ -443,6 +464,9 @@ function validateAdvancePaymentIntentBinding({
             paymentProfileId: normalizeText(advancePaymentIntent.paymentProfileId) || null,
             paymentProfileReason: normalizeText(advancePaymentIntent.paymentProfileReason) || null,
             paymentProfileSource: normalizeText(advancePaymentIntent.paymentProfileSource) || null,
+            financialContext: paymentPersistenceScope.financialContext,
+            financialNamespace: paymentPersistenceScope.financialContext.namespace,
+            financialContextId: paymentPersistenceScope.financialContext.contextId,
             payableAmountInCents: expectedPayableAmountInCents || incomingPayableAmountInCents || null,
             grossAmountInCents: expectedGrossAmountInCents || incoming.grossAmountInCents || null,
             passengerName: normalizeText(
@@ -470,6 +494,21 @@ function validateAdvancePaymentIntentBinding({
                 advancePaymentIntent.routeDurationSecs ||
                 advancePaymentIntent.durationSecs,
                 null
+            ),
+            routePolyline: normalizeText(
+                quoteLockSnapshot.routePolyline ||
+                quoteLockSnapshot.polylinePoints ||
+                advancePaymentIntent.routePolyline ||
+                advancePaymentIntent.polylinePoints
+            ) || null,
+            trafficSegments: normalizeTrafficSegments(
+                quoteLockSnapshot.trafficSegments ||
+                advancePaymentIntent.trafficSegments ||
+                []
+            ),
+            tollFee: normalizeNonNegativeNumber(
+                quoteLockSnapshot.tollFee ?? advancePaymentIntent.tollFee,
+                0
             ),
             routeSignature: expectedRouteSignature || incomingRouteSignature || null
         }
@@ -757,16 +796,9 @@ function registerSocketCreateBookingHandler({
                         pickupLocation,
                         destinationLocation,
                         estimatedFare,
-                        routeDistanceKm,
-                        routeDurationSecs,
-                        routeCoordinates,
-                        trafficSegments,
-                        tollFee,
                         carType: sanitizedCarType,
                         paymentMethod
                     } = validation.sanitized;
-                    const sanitizedRouteCoordinates = normalizeRouteCoordinates(routeCoordinates);
-                    const sanitizedTrafficSegments = normalizeTrafficSegments(trafficSegments);
                     const customerId = authCustomerId || sanitizedCustomerId;
                     const ridePreferences =
                         data?.preferences && typeof data.preferences === 'object'
@@ -948,6 +980,34 @@ function registerSocketCreateBookingHandler({
                         }
                     }
 
+                    let authoritativePaymentContext = null;
+                    if (advancePaymentIntent?.found) {
+                        try {
+                            resolvePersistenceScope(advancePaymentIntent, {
+                                allowLegacyOperational: true
+                            });
+                            authoritativePaymentContext = advancePaymentIntent;
+                        } catch (contextError) {
+                            socket.emit('bookingError', {
+                                error: 'Contexto financeiro inválido',
+                                message: 'Não foi possível validar o isolamento financeiro deste pagamento.',
+                                code: contextError.code || 'FINANCIAL_CONTEXT_INVALID',
+                                retryAfterSec: 0
+                            });
+                            recordFailure('active_guard', contextError.code || 'financial_context_invalid');
+                            return;
+                        }
+                    } else if (advancePaymentIntent?.code) {
+                        socket.emit('bookingError', {
+                            error: 'Vínculo financeiro inválido',
+                            message: advancePaymentIntent.error || 'Não foi possível validar o vínculo financeiro deste pagamento.',
+                            code: advancePaymentIntent.code,
+                            retryAfterSec: 0
+                        });
+                        recordFailure('active_guard', advancePaymentIntent.code);
+                        return;
+                    }
+
                     if (REQUIRE_PAYMENT_BEFORE_BOOKING && !clientRequestedConfirmedPayment) {
                         socket.emit('bookingError', {
                             error: 'Pagamento obrigatório',
@@ -992,7 +1052,12 @@ function registerSocketCreateBookingHandler({
                                 ALLOW_REVIEW_MOCK_PAYMENT_ON_CREATE_BOOKING;
 
                             if (isAllowedReviewMockPayment) {
-                                const paymentStatusCheck = await paymentServiceSingleton.getPaymentStatus(paymentChargeId);
+                                const paymentStatusCheck = authoritativePaymentContext
+                                    ? await paymentServiceSingleton.getPaymentStatus(
+                                        paymentChargeId,
+                                        authoritativePaymentContext
+                                    )
+                                    : await paymentServiceSingleton.getPaymentStatus(paymentChargeId);
                                 const verifiedPaymentStatus = String(paymentStatusCheck?.status || '').trim().toLowerCase();
 
                                 if (!paymentStatusCheck?.success || !PAID_PAYMENT_STATUSES.has(verifiedPaymentStatus)) {
@@ -1037,7 +1102,8 @@ function registerSocketCreateBookingHandler({
                                     firestore: getFirestoreSafely(),
                                     bookingId: paymentReferenceRideId || paymentChargeId,
                                     references: paymentReferences,
-                                    expectedAmountInCents
+                                    expectedAmountInCents,
+                                    paymentContext: authoritativePaymentContext
                                 });
 
                                 if (!providerConfirmation?.success) {
@@ -1140,6 +1206,35 @@ function registerSocketCreateBookingHandler({
                             retryAfterSec: 0
                         });
                         recordFailure('active_guard', rideFlowValidationGuard.code);
+                        return;
+                    }
+                    const canonicalRouteDistanceKm = normalizePositiveNumber(
+                        paymentIntentBinding.routeDistanceKm,
+                        null
+                    );
+                    const canonicalRouteDurationSecs = normalizePositiveNumber(
+                        paymentIntentBinding.routeDurationSecs,
+                        null
+                    );
+                    const canonicalRouteCoordinates = normalizeRouteCoordinates(
+                        decodePolyline(paymentIntentBinding.routePolyline || '')
+                    );
+                    if (
+                        hasConfirmedPayment &&
+                        advancePaymentIntent?.found &&
+                        (
+                            !canonicalRouteDistanceKm ||
+                            !canonicalRouteDurationSecs ||
+                            canonicalRouteCoordinates.length < 2
+                        )
+                    ) {
+                        socket.emit('bookingError', {
+                            error: 'Rota canônica ausente',
+                            message: 'Atualize a cotação e gere um novo Pix antes de solicitar a corrida.',
+                            code: 'PAYMENT_INTENT_CANONICAL_ROUTE_REQUIRED',
+                            retryAfterSec: 0
+                        });
+                        recordFailure('active_guard', 'payment_intent_canonical_route_required');
                         return;
                     }
                     if (
@@ -1646,6 +1741,9 @@ function registerSocketCreateBookingHandler({
                         'paymentProfileId',
                         'paymentProfileReason',
                         'paymentProfileSource',
+                        'financialContext',
+                        'financialNamespace',
+                        'financialContextId',
                         'passengerName',
                         'customerName',
                         'routeDistanceKm',
@@ -1655,6 +1753,28 @@ function registerSocketCreateBookingHandler({
                             commandPaymentData[key] = paymentIntentBinding[key];
                         }
                     });
+                    if (paymentIntentBinding.financialContext) {
+                        const authoritativeFinancialContext = paymentIntentBinding.financialContext;
+                        commandPaymentData.financialContext = authoritativeFinancialContext;
+                        commandPaymentData.financialNamespace = authoritativeFinancialContext.namespace;
+                        commandPaymentData.financialContextId = authoritativeFinancialContext.contextId;
+                        commandPaymentData.providerEnvironment =
+                            paymentIntentBinding.providerEnvironment ||
+                            authoritativeFinancialContext.providerEnvironment;
+                        commandPaymentData.paymentProviderEnvironment =
+                            paymentIntentBinding.paymentProviderEnvironment ||
+                            authoritativeFinancialContext.providerEnvironment;
+                        commandPaymentData.paymentProfileId =
+                            paymentIntentBinding.paymentProfileId ||
+                            authoritativeFinancialContext.paymentProfileId ||
+                            null;
+                        commandPaymentData.paymentProfileSource =
+                            paymentIntentBinding.paymentProfileSource ||
+                            authoritativeFinancialContext.paymentProfileSource ||
+                            null;
+                        commandPaymentData.paymentProfileReason =
+                            paymentIntentBinding.paymentProfileReason || null;
+                    }
                     commandPaymentData.paymentStatus = normalizedPaymentStatus;
                     commandPaymentData.serverValidated = paymentServerValidated;
                     if (paymentProviderProofSource) {
@@ -1671,14 +1791,12 @@ function registerSocketCreateBookingHandler({
                     ) {
                         commandPaymentData.grossAmountInCents = paymentIntentBinding.grossAmountInCents;
                     }
-                    const effectiveRouteDistanceKm =
-                        normalizePositiveNumber(paymentIntentBinding.routeDistanceKm) ||
-                        normalizePositiveNumber(routeDistanceKm) ||
-                        0;
-                    const effectiveRouteDurationSecs =
-                        normalizePositiveNumber(paymentIntentBinding.routeDurationSecs) ||
-                        normalizePositiveNumber(routeDurationSecs) ||
-                        0;
+                    const effectiveRouteDistanceKm = canonicalRouteDistanceKm || 0;
+                    const effectiveRouteDurationSecs = canonicalRouteDurationSecs || 0;
+                    const effectiveRouteCoordinates = canonicalRouteCoordinates;
+                    const effectiveTrafficSegments = normalizeTrafficSegments(
+                        paymentIntentBinding.trafficSegments || []
+                    );
                     const passengerDisplayName = normalizeText(
                         data?.passengerName ||
                         data?.customerName ||
@@ -1695,9 +1813,9 @@ function registerSocketCreateBookingHandler({
 	                            estimatedFare: estimatedFare || 0,
 	                            routeDistanceKm: effectiveRouteDistanceKm,
 	                            routeDurationSecs: effectiveRouteDurationSecs,
-	                            routeCoordinates: sanitizedRouteCoordinates,
-	                            trafficSegments: sanitizedTrafficSegments,
-	                            tollFee: tollFee || 0,
+	                            routeCoordinates: effectiveRouteCoordinates,
+	                            trafficSegments: effectiveTrafficSegments,
+	                            tollFee: paymentIntentBinding.tollFee || 0,
                             passengerName: passengerDisplayName || null,
                             customerName: passengerDisplayName || null,
                             carType: requestedCarType,
@@ -1706,7 +1824,7 @@ function registerSocketCreateBookingHandler({
                             paymentId: paymentChargeId || data?.paymentId || null,
                             paymentData: commandPaymentData,
                             preferences: ridePreferences,
-                            pricingContext: data.pricingContext || data.operational || null,
+                            pricingContext: null,
                             traceId, // ✅ Passar traceId para o command
                             correlationId // ✅ Passar correlationId para o command
                         });
@@ -1882,11 +2000,17 @@ function registerSocketCreateBookingHandler({
                         pickupLocation,
                         destinationLocation,
 	                        estimatedFare: commandBookingData?.estimatedFare || estimatedFare || 0,
-	                        routeDistanceKm: commandBookingData?.routeDistanceKm || routeDistanceKm || 0,
-	                        routeDurationSecs: commandBookingData?.routeDurationSecs || routeDurationSecs || 0,
-	                        routeCoordinates: commandBookingData?.routeCoordinates || sanitizedRouteCoordinates,
-	                        trafficSegments: commandBookingData?.trafficSegments || sanitizedTrafficSegments,
+	                        routeDistanceKm: commandBookingData?.routeDistanceKm || effectiveRouteDistanceKm || 0,
+	                        routeDurationSecs: commandBookingData?.routeDurationSecs || effectiveRouteDurationSecs || 0,
+	                        routeCoordinates: commandBookingData?.routeCoordinates || effectiveRouteCoordinates,
+	                        trafficSegments: commandBookingData?.trafficSegments || effectiveTrafficSegments,
 	                        paymentMethod,
+                        financialContext:
+                            commandBookingData?.financialContext || commandPaymentData.financialContext || null,
+                        financialNamespace:
+                            commandBookingData?.financialNamespace || commandPaymentData.financialNamespace || null,
+                        financialContextId:
+                            commandBookingData?.financialContextId || commandPaymentData.financialContextId || null,
                         status: 'requested'
                     });
 
@@ -2085,7 +2209,16 @@ function registerSocketCreateBookingHandler({
                                     amountInCents: resolvedPaymentAmountInCents,
                                     passengerId: customerId,
                                     paymentStatus: normalizedPaymentStatus || 'in_holding',
-                                    source: 'createBooking_paid_immediate'
+                                    source: 'createBooking_paid_immediate',
+                                    financialContext: commandPaymentData.financialContext || null,
+                                    financialNamespace: commandPaymentData.financialNamespace || null,
+                                    financialContextId: commandPaymentData.financialContextId || null,
+                                    providerEnvironment:
+                                        commandPaymentData.paymentProviderEnvironment ||
+                                        commandPaymentData.providerEnvironment ||
+                                        null,
+                                    testUserSandbox:
+                                        commandPaymentData.financialContext?.testUserSandbox === true
                                 });
 
                                 const intentConsumed = paymentReferenceRideId
@@ -2207,7 +2340,19 @@ function registerSocketCreateBookingHandler({
                                 destinationLocation,
                                 estimatedFare: commandBookingData?.estimatedFare || estimatedFare || 0,
                                 paymentMethod,
-                                regionHash
+                                regionHash,
+                                financialContext:
+                                    commandBookingData?.financialContext || commandPaymentData.financialContext || null,
+                                financialNamespace:
+                                    commandBookingData?.financialNamespace || commandPaymentData.financialNamespace || null,
+                                financialContextId:
+                                    commandBookingData?.financialContextId || commandPaymentData.financialContextId || null,
+                                providerEnvironment:
+                                    commandBookingData?.providerEnvironment ||
+                                    commandBookingData?.paymentProviderEnvironment ||
+                                    commandPaymentData.paymentProviderEnvironment ||
+                                    commandPaymentData.providerEnvironment ||
+                                    null
                             }, true, null, metadata);
                         } catch (auditError) {
                             logStructured('warn', 'Falha ao registrar auditoria createBooking (background)', {
@@ -2249,9 +2394,20 @@ function registerSocketCreateBookingHandler({
 	                                estimatedFare: commandBookingData?.estimatedFare || estimatedFare || 0,
 	                                routeDistanceKm: commandBookingData?.routeDistanceKm || effectiveRouteDistanceKm || 0,
 	                                routeDurationSecs: commandBookingData?.routeDurationSecs || effectiveRouteDurationSecs || 0,
-	                                routeCoordinates: commandBookingData?.routeCoordinates || sanitizedRouteCoordinates,
-	                                trafficSegments: commandBookingData?.trafficSegments || sanitizedTrafficSegments,
+	                                routeCoordinates: commandBookingData?.routeCoordinates || effectiveRouteCoordinates,
+	                                trafficSegments: commandBookingData?.trafficSegments || effectiveTrafficSegments,
 	                                paymentMethod: paymentMethod || 'pix',
+                                financialContext:
+                                    commandBookingData?.financialContext || commandPaymentData.financialContext || null,
+                                financialNamespace:
+                                    commandBookingData?.financialNamespace || commandPaymentData.financialNamespace || null,
+                                financialContextId:
+                                    commandBookingData?.financialContextId || commandPaymentData.financialContextId || null,
+                                providerEnvironment:
+                                    commandBookingData?.providerEnvironment ||
+                                    commandPaymentData.paymentProviderEnvironment ||
+                                    commandPaymentData.providerEnvironment ||
+                                    null,
                                 paymentStatus: data.paymentStatus || 'pending_payment',
                                 status: hasConfirmedPayment ? 'pending' : 'awaiting_payment',
                                 carType: data.carType || null

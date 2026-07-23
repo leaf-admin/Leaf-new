@@ -1,4 +1,5 @@
 const ReceiptService = require('../../../services/receipt-service');
+const { sealFinancialContext } = require('../../../services/financial-runtime-context');
 
 describe('ReceiptService financial snapshot', () => {
   const finalRideData = {
@@ -268,6 +269,276 @@ describe('ReceiptService financial snapshot', () => {
     await expect(service.getReceiptByRideId('ride_stored', redis, firebaseDb)).resolves.toBe(storedReceipt);
     expect(redis.hget).not.toHaveBeenCalled();
     expect(firebaseDb.ref).toHaveBeenCalledWith('receipts/ride_stored');
+  });
+
+  it('stores sandbox receipts only in the sandbox receipt namespace', async () => {
+    const service = createReceiptService();
+    const writes = new Map();
+    const financialContext = sealFinancialContext({
+      providerEnvironment: 'sandbox',
+      paymentProfileId: 'qa-test-users-sandbox-durable',
+      paymentProfileSource: 'firestore',
+      testUserSandbox: true
+    });
+    const firebaseDb = {
+      ref: jest.fn((path) => ({
+        set: jest.fn(async (value) => writes.set(path, value))
+      }))
+    };
+
+    const saved = await service.saveReceiptToFirestore({
+      receiptId: 'LEAF-ride_sandbox_receipt',
+      rideId: 'ride_sandbox_receipt',
+      hash: 'HASH_SANDBOX',
+      financialContext
+    }, firebaseDb);
+
+    expect(saved).toBe(true);
+    expect(writes.has('sandbox_receipts/ride_sandbox_receipt')).toBe(true);
+    expect(writes.has('sandbox_bookings/ride_sandbox_receipt/receipt')).toBe(true);
+    expect(writes.has('receipts/ride_sandbox_receipt')).toBe(false);
+    expect(writes.has('bookings/ride_sandbox_receipt/receipt')).toBe(false);
+  });
+
+  it('fails closed before writing when a sandbox signal has no sealed context', async () => {
+    const service = createReceiptService();
+    const firebaseDb = {
+      ref: jest.fn(() => ({ set: jest.fn() }))
+    };
+
+    await expect(service.saveReceiptToFirestore({
+      receiptId: 'LEAF-ride_sandbox_lost_context',
+      rideId: 'ride_sandbox_lost_context',
+      hash: 'HASH_SANDBOX',
+      financialNamespace: 'sandbox'
+    }, firebaseDb)).rejects.toMatchObject({
+      code: 'RECEIPT_PERSIST_FAILED',
+      details: expect.objectContaining({
+        stage: 'financial_context',
+        contextCode: 'FINANCIAL_SANDBOX_CONTEXT_LOST'
+      })
+    });
+    expect(firebaseDb.ref).not.toHaveBeenCalled();
+  });
+
+  it('reads a sandbox receipt only from its resolved namespace', async () => {
+    const service = createReceiptService();
+    const financialContext = sealFinancialContext({
+      providerEnvironment: 'sandbox',
+      paymentProfileId: 'qa-test-users-sandbox-durable',
+      paymentProfileSource: 'firestore',
+      testUserSandbox: true
+    });
+    const storedReceipt = {
+      receiptId: 'LEAF-ride_sandbox_read',
+      rideId: 'ride_sandbox_read',
+      financialContext,
+      financialNamespace: 'sandbox',
+      financialContextId: financialContext.contextId
+    };
+    const firebaseDb = {
+      ref: jest.fn((path) => ({
+        once: jest.fn(async () => ({
+          val: () => path === 'sandbox_receipts/ride_sandbox_read' ? storedReceipt : null
+        }))
+      }))
+    };
+
+    await expect(service.getReceiptFromFirestore(
+      'ride_sandbox_read',
+      firebaseDb,
+      { financialContext }
+    )).resolves.toEqual(storedReceipt);
+    expect(firebaseDb.ref).toHaveBeenCalledTimes(1);
+    expect(firebaseDb.ref).toHaveBeenCalledWith('sandbox_receipts/ride_sandbox_read');
+    expect(firebaseDb.ref).not.toHaveBeenCalledWith('receipts/ride_sandbox_read');
+  });
+
+  it('rejects an operational active-booking cache hit during sandbox receipt recovery', async () => {
+    const service = createReceiptService();
+    const sandboxContext = sealFinancialContext({
+      providerEnvironment: 'sandbox',
+      paymentProfileId: 'qa-test-users-sandbox-durable',
+      paymentProfileSource: 'firestore',
+      testUserSandbox: true
+    });
+    const firebaseDb = {
+      ref: jest.fn(() => ({
+        once: jest.fn(async () => ({ val: () => null }))
+      }))
+    };
+    const redis = {
+      hget: jest.fn(async () => JSON.stringify({
+        id: 'ride_cross_scope_cache',
+        customer: 'passenger_1',
+        status: 'completed'
+      }))
+    };
+
+    await expect(service.getReceiptByRideId(
+      'ride_cross_scope_cache',
+      redis,
+      firebaseDb,
+      sandboxContext
+    )).rejects.toMatchObject({
+      code: 'SANDBOX_RECORD_CONTEXT_INVALID'
+    });
+    expect(firebaseDb.ref).toHaveBeenCalledWith('sandbox_receipts/ride_cross_scope_cache');
+    expect(firebaseDb.ref).not.toHaveBeenCalledWith('receipts/ride_cross_scope_cache');
+    expect(firebaseDb.ref).not.toHaveBeenCalledWith('bookings/ride_cross_scope_cache');
+  });
+
+  it('lists only persisted passenger receipts from the resolved sandbox namespace', async () => {
+    const service = createReceiptService();
+    const sandboxContext = sealFinancialContext({
+      providerEnvironment: 'sandbox',
+      paymentProfileId: 'qa-test-users-sandbox-durable',
+      paymentProfileSource: 'firestore',
+      testUserSandbox: true
+    });
+    const operationalContext = sealFinancialContext({
+      providerEnvironment: 'production',
+      paymentProfileId: 'env-default',
+      paymentProfileSource: 'env'
+    });
+    const differentSandboxContext = sealFinancialContext({
+      providerEnvironment: 'sandbox',
+      paymentProfileId: 'another-sandbox-profile',
+      paymentProfileSource: 'firestore',
+      testUserSandbox: true
+    });
+    const orderByChild = jest.fn();
+    const equalTo = jest.fn();
+    const once = jest.fn(async () => ({
+      val: () => ({
+        ride_newer: {
+          receiptId: 'LEAF-ride_newer',
+          rideId: 'ride_newer',
+          customer: { id: 'passenger_1' },
+          driver: { id: 'driver_1' },
+          trip: { dateTime: '2026-07-12T12:00:00.000Z' },
+          financialContext: sandboxContext
+        },
+        ride_older: {
+          receiptId: 'LEAF-ride_older',
+          rideId: 'ride_older',
+          customer: { id: 'passenger_1' },
+          driver: { id: 'driver_1' },
+          trip: { dateTime: '2026-07-11T12:00:00.000Z' },
+          financialContext: sandboxContext
+        },
+        ride_wrong_owner: {
+          receiptId: 'LEAF-ride_wrong_owner',
+          rideId: 'ride_wrong_owner',
+          customer: { id: 'passenger_2' },
+          trip: { dateTime: '2026-07-13T12:00:00.000Z' },
+          financialContext: sandboxContext
+        },
+        ride_crossed_namespace: {
+          receiptId: 'LEAF-ride_crossed_namespace',
+          rideId: 'ride_crossed_namespace',
+          customer: { id: 'passenger_1' },
+          trip: { dateTime: '2026-07-14T12:00:00.000Z' },
+          financialContext: operationalContext
+        },
+        ride_crossed_sandbox_context: {
+          receiptId: 'LEAF-ride_crossed_sandbox_context',
+          rideId: 'ride_crossed_sandbox_context',
+          customer: { id: 'passenger_1' },
+          trip: { dateTime: '2026-07-15T12:00:00.000Z' },
+          financialContext: differentSandboxContext
+        }
+      })
+    }));
+    equalTo.mockReturnValue({ once });
+    orderByChild.mockReturnValue({ equalTo });
+    const firebaseDb = {
+      ref: jest.fn(() => ({ orderByChild }))
+    };
+
+    const result = await service.listStoredReceiptsByUser({
+      firebaseDb,
+      userId: 'passenger_1',
+      role: 'customer',
+      financialContext: sandboxContext,
+      limit: 1,
+      offset: 1
+    });
+
+    expect(firebaseDb.ref).toHaveBeenCalledTimes(1);
+    expect(firebaseDb.ref).toHaveBeenCalledWith('sandbox_receipts');
+    expect(firebaseDb.ref).not.toHaveBeenCalledWith('receipts');
+    expect(firebaseDb.ref).not.toHaveBeenCalledWith('bookings');
+    expect(orderByChild).toHaveBeenCalledWith('customer/id');
+    expect(equalTo).toHaveBeenCalledWith('passenger_1');
+    expect(result).toMatchObject({
+      total: 2,
+      limit: 1,
+      offset: 1,
+      nextOffset: 2,
+      hasMore: false,
+      financialNamespace: 'sandbox'
+    });
+    expect(result.receipts.map((receipt) => receipt.rideId)).toEqual(['ride_older']);
+  });
+
+  it('scopes persisted receipt listing by driver owner path', async () => {
+    const service = createReceiptService();
+    const sandboxContext = sealFinancialContext({
+      providerEnvironment: 'sandbox',
+      paymentProfileId: 'qa-test-users-sandbox-durable',
+      paymentProfileSource: 'firestore',
+      testUserSandbox: true
+    });
+    const once = jest.fn(async () => ({
+      val: () => ({
+        ride_driver: {
+          receiptId: 'LEAF-ride_driver',
+          rideId: 'ride_driver',
+          customer: { id: 'passenger_1' },
+          driver: { id: 'driver_1' },
+          trip: { dateTime: '2026-07-12T12:00:00.000Z' },
+          financialContext: sandboxContext
+        }
+      })
+    }));
+    const equalTo = jest.fn(() => ({ once }));
+    const orderByChild = jest.fn(() => ({ equalTo }));
+    const firebaseDb = { ref: jest.fn(() => ({ orderByChild })) };
+
+    const result = await service.listStoredReceiptsByUser({
+      firebaseDb,
+      userId: 'driver_1',
+      role: 'driver',
+      financialContext: sandboxContext
+    });
+
+    expect(orderByChild).toHaveBeenCalledWith('driver/id');
+    expect(equalTo).toHaveBeenCalledWith('driver_1');
+    expect(result.receipts.map((receipt) => receipt.rideId)).toEqual(['ride_driver']);
+  });
+
+  it('fails generation with a typed persistence error when the receipt write fails', async () => {
+    const service = createReceiptService();
+    const firebaseDb = {
+      ref: jest.fn(() => ({
+        set: jest.fn(async () => {
+          throw new Error('RTDB write unavailable');
+        })
+      }))
+    };
+
+    await expect(
+      service.generateAndSaveReceipt('ride_persist_failure', finalRideData, firebaseDb)
+    ).rejects.toMatchObject({
+      name: 'ReceiptPersistenceError',
+      code: 'RECEIPT_PERSIST_FAILED',
+      statusCode: 503,
+      details: {
+        rideId: 'ride_persist_failure',
+        stage: 'database_write'
+      }
+    });
   });
 
   it('returns null instead of throwing when neither stored receipt nor active booking exists', async () => {

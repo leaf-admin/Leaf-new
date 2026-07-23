@@ -4,7 +4,14 @@ const mockRedisSet = jest.fn();
 const mockRedisDel = jest.fn();
 
 jest.mock('axios', () => ({
-  get: jest.fn()
+  get: jest.fn(),
+  create: jest.fn(() => ({
+    get: jest.fn(),
+    post: jest.fn(),
+    put: jest.fn(),
+    patch: jest.fn(),
+    delete: jest.fn()
+  }))
 }));
 
 jest.mock('../../../config/woovi-config', () => ({
@@ -65,10 +72,21 @@ const {
   resolveSandboxTestWebhookPayload,
   requestWooviSandboxTestPayment,
   resolveSandboxPaymentIntentAsBooking,
+  processPaymentConfirmation,
   isRetryableWebhookEvent
 } = wooviRoutes.__private;
 const firebaseConfig = require('../../../firebase-config');
 const axios = require('axios');
+const PaymentService = require('../../../services/payment-service');
+const paymentDispatchService = require('../../../services/payment-dispatch-service');
+const rideLifecycleService = require('../../../services/ride-lifecycle-service');
+const { sealFinancialContext } = require('../../../services/financial-runtime-context');
+const sandboxFinancialContext = sealFinancialContext({
+  providerEnvironment: 'sandbox',
+  paymentProfileId: 'qa-test-users-sandbox-durable',
+  paymentProfileSource: 'firestore',
+  testUserSandbox: true
+});
 
 function createInMemoryFirestore() {
   const docs = new Map();
@@ -120,7 +138,7 @@ function createInMemoryFirestore() {
 
   return {
     docs,
-    collection,
+    collection: jest.fn(collection),
     runTransaction: async (handler) => {
       const pendingWrites = [];
       const transaction = {
@@ -181,6 +199,10 @@ describe('woovi webhook guards', () => {
     process.env.NODE_ENV = 'test';
     firebaseConfig.getFirestore.mockReturnValue(null);
     mockRedisDel.mockResolvedValue(1);
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
   });
 
   afterAll(() => {
@@ -505,9 +527,10 @@ describe('woovi webhook guards', () => {
     const firestore = createInMemoryFirestore();
     firebaseConfig.getFirestore.mockReturnValue(firestore);
 
-    await firestore.collection('payment_intents').doc('intent-123').set({
+    await firestore.collection('sandbox_payment_intents').doc('intent-123').set({
       status: 'charge_created',
       providerEnvironment: 'sandbox',
+      financialContext: sandboxFinancialContext,
       chargeId: 'charge-123',
       rideId: 'ride-123',
       passengerId: 'passenger-123',
@@ -539,7 +562,7 @@ describe('woovi webhook guards', () => {
     const firestore = createInMemoryFirestore();
     firebaseConfig.getFirestore.mockReturnValue(firestore);
 
-    await firestore.collection('payment_intents').doc('intent-production').set({
+    await firestore.collection('sandbox_payment_intents').doc('intent-production').set({
       status: 'charge_created',
       providerEnvironment: 'production',
       chargeId: 'charge-production',
@@ -549,9 +572,10 @@ describe('woovi webhook guards', () => {
       chargeCreatedAtIso: new Date().toISOString(),
       paymentDriverReservationExpiresAt: new Date(Date.now() + 5 * 60_000).toISOString()
     });
-    await firestore.collection('payment_intents').doc('intent-older').set({
+    await firestore.collection('sandbox_payment_intents').doc('intent-older').set({
       status: 'charge_created',
       providerEnvironment: 'sandbox',
+      financialContext: sandboxFinancialContext,
       chargeId: 'charge-older',
       rideId: 'ride-older',
       passengerId: 'passenger-latest',
@@ -559,10 +583,11 @@ describe('woovi webhook guards', () => {
       chargeCreatedAtIso: new Date(Date.now() - 60_000).toISOString(),
       paymentDriverReservationExpiresAt: new Date(Date.now() + 4 * 60_000).toISOString()
     });
-    await firestore.collection('payment_intents').doc('intent-latest').set({
+    await firestore.collection('sandbox_payment_intents').doc('intent-latest').set({
       paymentIntentId: 'intent-latest',
       status: 'charge_created',
       providerEnvironment: 'sandbox',
+      financialContext: sandboxFinancialContext,
       chargeId: 'charge-latest',
       rideId: 'ride-latest',
       passengerId: 'passenger-latest',
@@ -605,10 +630,11 @@ describe('woovi webhook guards', () => {
     firebaseConfig.getFirestore.mockReturnValue(firestore);
     const nowMs = Date.now();
 
-    await firestore.collection('payment_intents').doc('intent-expired').set({
+    await firestore.collection('sandbox_payment_intents').doc('intent-expired').set({
       paymentIntentId: 'intent-expired',
       status: 'charge_created',
       providerEnvironment: 'sandbox',
+      financialContext: sandboxFinancialContext,
       chargeId: 'charge-expired',
       rideId: 'ride-expired',
       passengerId: 'passenger-expired',
@@ -632,10 +658,11 @@ describe('woovi webhook guards', () => {
     const firestore = createInMemoryFirestore();
     firebaseConfig.getFirestore.mockReturnValue(firestore);
 
-    await firestore.collection('payment_intents').doc('intent-no-expiry').set({
+    await firestore.collection('sandbox_payment_intents').doc('intent-no-expiry').set({
       paymentIntentId: 'intent-no-expiry',
       status: 'charge_created',
       providerEnvironment: 'sandbox',
+      financialContext: sandboxFinancialContext,
       chargeId: 'charge-no-expiry',
       rideId: 'ride-no-expiry',
       passengerId: 'passenger-no-expiry',
@@ -767,9 +794,10 @@ describe('woovi webhook guards', () => {
     const firestore = createInMemoryFirestore();
     firebaseConfig.getFirestore.mockReturnValue(firestore);
 
-    await firestore.collection('payment_intents').doc('intent-owned').set({
+    await firestore.collection('sandbox_payment_intents').doc('intent-owned').set({
       status: 'charge_created',
       providerEnvironment: 'sandbox',
+      financialContext: sandboxFinancialContext,
       chargeId: 'charge-owned',
       rideId: 'ride-owned',
       passengerId: 'passenger-owner',
@@ -791,9 +819,10 @@ describe('woovi webhook guards', () => {
     const firestore = createInMemoryFirestore();
     firebaseConfig.getFirestore.mockReturnValue(firestore);
 
-    await firestore.collection('payment_intents').doc('intent-amount').set({
+    await firestore.collection('sandbox_payment_intents').doc('intent-amount').set({
       status: 'charge_created',
       providerEnvironment: 'sandbox',
+      financialContext: sandboxFinancialContext,
       chargeId: 'charge-amount',
       rideId: 'ride-amount',
       passengerId: 'passenger-amount',
@@ -824,9 +853,10 @@ describe('woovi webhook guards', () => {
     const firestore = createInMemoryFirestore();
     firebaseConfig.getFirestore.mockReturnValue(firestore);
 
-    await firestore.collection('payment_intents').doc('intent-prebooking').set({
+    await firestore.collection('sandbox_payment_intents').doc('intent-prebooking').set({
       status: 'charge_created',
       providerEnvironment: 'sandbox',
+      financialContext: sandboxFinancialContext,
       chargeId: 'charge-prebooking',
       rideId: 'ride-prebooking',
       passengerId: 'passenger-prebooking',
@@ -855,5 +885,179 @@ describe('woovi webhook guards', () => {
       rideId: 'ride-prebooking',
       chargeId: 'charge-prebooking'
     }).ok).toBe(true);
+  });
+
+  it('confirms sandbox payment from the authoritative intent without reading an operational poison booking', async () => {
+    const firestore = createInMemoryFirestore();
+    firebaseConfig.getFirestore.mockReturnValue(firestore);
+
+    await firestore.collection('sandbox_payment_intents').doc('intent-sandbox-poison').set({
+      paymentIntentId: 'intent-sandbox-poison',
+      status: 'charge_created',
+      providerEnvironment: 'sandbox',
+      financialContext: sandboxFinancialContext,
+      financialNamespace: sandboxFinancialContext.namespace,
+      financialContextId: sandboxFinancialContext.contextId,
+      chargeId: 'charge-sandbox-poison',
+      rideId: 'ride-sandbox-poison',
+      passengerId: 'passenger-sandbox-poison',
+      payableAmountInCents: 5511,
+      chargeCreatedAtIso: new Date().toISOString(),
+      paymentDriverReservationExpiresAt: new Date(Date.now() + 5 * 60_000).toISOString()
+    });
+    await firestore.collection('bookings').doc('ride-sandbox-poison').set({
+      rideId: 'ride-sandbox-poison',
+      passengerId: 'operational-passenger-poison',
+      driverId: 'operational-driver-poison',
+      paymentAmountInCents: 999999,
+      status: 'in_progress'
+    });
+    firestore.collection.mockClear();
+
+    const storeConfirmedPayment = jest
+      .spyOn(PaymentService.prototype, 'storeConfirmedPayment')
+      .mockResolvedValue({ success: true, ledgerPosted: true, ledgerStatus: 'posted' });
+    const savePaymentHolding = jest
+      .spyOn(PaymentService.prototype, 'savePaymentHolding')
+      .mockResolvedValue({ success: true });
+    const associateDriverToPayment = jest
+      .spyOn(PaymentService.prototype, 'associateDriverToPayment')
+      .mockResolvedValue({ success: true });
+    const resolveBookingIdFromPaymentRefs = jest
+      .spyOn(paymentDispatchService, 'resolveBookingIdFromPaymentRefs')
+      .mockResolvedValue('operational-poison-booking');
+    const markBookingPaymentConfirmed = jest
+      .spyOn(paymentDispatchService, 'markBookingPaymentConfirmed')
+      .mockResolvedValue(undefined);
+    const triggerDispatchAfterPayment = jest
+      .spyOn(paymentDispatchService, 'triggerDispatchAfterPayment')
+      .mockResolvedValue({ success: false, skipped: true, reason: 'BOOKING_NOT_FOUND' });
+    jest
+      .spyOn(rideLifecycleService, 'applyConfirmedRideExtension')
+      .mockResolvedValue({ success: true, skipped: true });
+
+    const result = await processPaymentConfirmation(
+      'charge-sandbox-poison',
+      'ride-sandbox-poison',
+      5511,
+      'passenger-sandbox-poison',
+      null,
+      {
+        providerEnvironment: 'sandbox',
+        providerConfirmation: { source: 'woovi_openpix_testing' },
+        source: 'sandbox_provider_verification',
+        additionalInfo: [
+          { key: 'payment_intent_id', value: 'intent-sandbox-poison' },
+          { key: 'provider_environment', value: 'sandbox' },
+          { key: 'financial_namespace', value: 'sandbox' }
+        ]
+      }
+    );
+    await Promise.resolve();
+
+    expect(result).toMatchObject({
+      success: true,
+      rideId: 'ride-sandbox-poison',
+      status: 'confirmed',
+      financialContext: sandboxFinancialContext,
+      financialNamespace: 'sandbox',
+      financialContextId: sandboxFinancialContext.contextId,
+      providerEnvironment: 'sandbox',
+      testUserSandbox: true
+    });
+    expect(firestore.collection.mock.calls.map(([collectionName]) => collectionName)).toEqual([
+      'sandbox_payment_intents'
+    ]);
+    expect(resolveBookingIdFromPaymentRefs).not.toHaveBeenCalled();
+    expect(associateDriverToPayment).not.toHaveBeenCalled();
+    expect(storeConfirmedPayment).toHaveBeenCalledWith(expect.objectContaining({
+      rideId: 'ride-sandbox-poison',
+      chargeId: 'charge-sandbox-poison',
+      financialContext: sandboxFinancialContext,
+      financialNamespace: 'sandbox',
+      financialContextId: sandboxFinancialContext.contextId,
+      providerEnvironment: 'sandbox',
+      testUserSandbox: true
+    }));
+    expect(savePaymentHolding).toHaveBeenCalledWith(
+      'ride-sandbox-poison',
+      expect.objectContaining({
+        financialContext: sandboxFinancialContext,
+        financialNamespace: 'sandbox',
+        financialContextId: sandboxFinancialContext.contextId,
+        providerEnvironment: 'sandbox',
+        testUserSandbox: true
+      })
+    );
+    expect(markBookingPaymentConfirmed).toHaveBeenCalledWith(expect.objectContaining({
+      bookingId: 'ride-sandbox-poison',
+      financialContext: sandboxFinancialContext,
+      financialNamespace: 'sandbox',
+      financialContextId: sandboxFinancialContext.contextId,
+      providerEnvironment: 'sandbox',
+      testUserSandbox: true
+    }));
+    expect(triggerDispatchAfterPayment).toHaveBeenCalledWith(expect.objectContaining({
+      bookingId: 'ride-sandbox-poison',
+      financialContext: sandboxFinancialContext,
+      financialNamespace: 'sandbox',
+      financialContextId: sandboxFinancialContext.contextId,
+      providerEnvironment: 'sandbox',
+      testUserSandbox: true
+    }));
+  });
+
+  it('fails closed on a divergent sandbox intent before any booking or dispatch lookup', async () => {
+    const firestore = createInMemoryFirestore();
+    firebaseConfig.getFirestore.mockReturnValue(firestore);
+
+    await firestore.collection('sandbox_payment_intents').doc('intent-divergent').set({
+      paymentIntentId: 'intent-divergent',
+      status: 'charge_created',
+      providerEnvironment: 'sandbox',
+      financialContext: sandboxFinancialContext,
+      chargeId: 'charge-divergent',
+      rideId: 'ride-divergent',
+      passengerId: 'passenger-owner',
+      payableAmountInCents: 5511
+    });
+    await firestore.collection('bookings').doc('ride-divergent').set({
+      driverId: 'operational-driver-poison',
+      passengerId: 'passenger-attacker',
+      paymentAmountInCents: 5511
+    });
+    firestore.collection.mockClear();
+
+    const associateDriverToPayment = jest.spyOn(PaymentService.prototype, 'associateDriverToPayment');
+    const resolveBookingIdFromPaymentRefs = jest.spyOn(
+      paymentDispatchService,
+      'resolveBookingIdFromPaymentRefs'
+    );
+
+    const result = await processPaymentConfirmation(
+      'charge-divergent',
+      'ride-divergent',
+      5511,
+      'passenger-attacker',
+      null,
+      {
+        providerEnvironment: 'sandbox',
+        source: 'sandbox_provider_verification',
+        additionalInfo: [
+          { key: 'payment_intent_id', value: 'intent-divergent' }
+        ]
+      }
+    );
+
+    expect(result).toEqual({
+      success: false,
+      error: 'SANDBOX_PAYMENT_INTENT_MISMATCH',
+      status: 'REJECTED'
+    });
+    expect(firestore.collection.mock.calls.map(([collectionName]) => collectionName)).toEqual([
+      'sandbox_payment_intents'
+    ]);
+    expect(resolveBookingIdFromPaymentRefs).not.toHaveBeenCalled();
+    expect(associateDriverToPayment).not.toHaveBeenCalled();
   });
 });

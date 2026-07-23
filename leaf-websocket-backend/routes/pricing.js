@@ -10,6 +10,7 @@ const { logStructured } = require('../utils/logger');
 const geofenceService = require('../services/geofence-service');
 const { hasPaymentEligibleDriver } = require('../services/payment-driver-availability-guard');
 const routeTollService = require('../services/route-toll-service');
+const placesCacheService = require('../services/places-cache-service');
 const {
   createQuoteLock,
   getQuoteLockTtlSeconds
@@ -68,25 +69,12 @@ function hasCoordinate(location = {}) {
   return Number.isFinite(toNumber(latRaw, NaN)) && Number.isFinite(toNumber(lngRaw, NaN));
 }
 
-function hasRouteGeometry(payload = {}) {
-  const polyline = String(
-    payload.routePolyline ||
-      payload.polylinePoints ||
-      payload.encodedPolyline ||
-      payload.routeDetails?.polylinePoints ||
-      payload.route?.polylinePoints ||
-      ''
-  ).trim();
-  if (polyline.length > 0) {
-    return true;
-  }
-
-  const coordinates =
-    payload.routeCoordinates ||
-    payload.route?.coordinates ||
-    payload.routeDetails?.coordinates ||
-    [];
-  return Array.isArray(coordinates) && coordinates.filter(hasCoordinate).length >= 2;
+function hasCanonicalRouteGeometry(route = {}) {
+  const coordinates = routeTollService.decodePolyline(route?.polylinePoints || '');
+  return coordinates.length >= 2 && coordinates.every((coordinate) => (
+    Number.isFinite(Number(coordinate?.latitude)) &&
+    Number.isFinite(Number(coordinate?.longitude))
+  ));
 }
 
 function normalizeQuoteSessionId(value) {
@@ -285,14 +273,6 @@ router.post('/pricing/quote', async (req, res) => {
     });
   }
 
-  if (toBoolean(body.requireRouteGeometry, false) && !hasRouteGeometry(body)) {
-    metrics.recordPricingQuoteRequest?.({ success: false, source: quoteSessionId ? 'session' : 'anonymous' });
-    return res.status(422).json({
-      error: 'route_geometry_required',
-      message: 'Rota canônica com geometria é obrigatória para cotação.'
-    });
-  }
-
   const normalizedPickupLocation = {
     ...pickupLocation,
     lat: toNumber(pickupLocation.lat, NaN),
@@ -338,17 +318,54 @@ router.post('/pricing/quote', async (req, res) => {
   try {
     const redis = redisPool.getConnection();
     const quoteRequestCount = await incrementQuoteSessionCounter(redis, quoteSessionId);
-    const tollEstimate = routeTollService.resolveTollFeeFromPricingPayload(body);
+    const canonicalRouteResult = await placesCacheService.fetchDirectionsRoute({
+      startLoc: `${normalizedPickupLocation.lat},${normalizedPickupLocation.lng}`,
+      destLoc: `${normalizedDestinationLocation.lat},${normalizedDestinationLocation.lng}`,
+      trafficEnabled: toBoolean(process.env.ENABLE_TRAFFIC_AWARE_ROUTES, true),
+      alternativesEnabled: false,
+      cacheOnly: true
+    });
+    const canonicalRoute = canonicalRouteResult?.data || null;
+    const canonicalRouteDistanceKm = toNumber(canonicalRoute?.distance_in_km, 0);
+    const canonicalRouteDurationSecs = toNumber(
+      canonicalRoute?.duration_in_traffic ?? canonicalRoute?.time_in_secs,
+      0
+    );
+    const hasCanonicalRoute = Boolean(
+      canonicalRoute &&
+      hasCanonicalRouteGeometry(canonicalRoute) &&
+      canonicalRouteDistanceKm > 0 &&
+      canonicalRouteDurationSecs > 0
+    );
+
+    if (!hasCanonicalRoute) {
+      metrics.recordPricingQuoteRequest?.({ success: false, source: quoteSessionId ? 'session' : 'anonymous' });
+      return res.status(503).json({
+        error: 'canonical_route_required',
+        code: 'CANONICAL_ROUTE_REQUIRED',
+        retryable: true,
+        message: 'Rota canônica indisponível para cotação. Atualize a rota e tente novamente.'
+      });
+    }
+
+    const canonicalPricingPayload = {
+      routePolyline: canonicalRoute.polylinePoints,
+      polylinePoints: canonicalRoute.polylinePoints,
+      routeDetails: canonicalRoute
+    };
+    const tollEstimate = routeTollService.resolveTollFeeFromPricingPayload(
+      canonicalPricingPayload
+    );
     const result = await fareEstimationService.estimateRideFare({
       redis,
       pickupLocation: normalizedPickupLocation,
       destinationLocation: normalizedDestinationLocation,
       carType: body.carType,
-      routeDistanceKm: body.routeDistanceKm,
-      routeDurationSecs: body.routeDurationSecs,
+      routeDistanceKm: canonicalRouteDistanceKm,
+      routeDurationSecs: canonicalRouteDurationSecs,
       tollFee: tollEstimate.tollFee,
       clientEstimatedFare: body.clientEstimatedFare,
-      pricingContext: body.pricingContext || body.operational || null
+      pricingContext: null
     });
 
     const passengerId =
@@ -381,6 +398,8 @@ router.post('/pricing/quote', async (req, res) => {
       discountBenefit: discountPreview.applied ? discountPreview : null,
       routeDistanceKm: result.routeMetrics?.distanceKm || 0,
       routeDurationSecs: result.routeMetrics?.durationSecs || 0,
+      routePolyline: canonicalRoute.polylinePoints,
+      trafficSegments: canonicalRoute.trafficSegments || [],
       tollFee: result.tollFee || 0,
       rateCardVersion: result.rateCardVersion,
       pricingPayload: result.pricingPayload || null,

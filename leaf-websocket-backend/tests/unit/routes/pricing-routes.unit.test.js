@@ -16,6 +16,8 @@ const mockIsActive = jest.fn(() => false);
 const mockValidateRideLocations = jest.fn(() => ({ valid: true }));
 const mockRecordPricingQuoteRequest = jest.fn();
 const mockResolveTollFeeFromPricingPayload = jest.fn();
+const mockFetchDirectionsRoute = jest.fn();
+const mockDecodePolyline = jest.fn();
 
 jest.mock('../../../utils/redis-pool', () => ({
   getConnection: () => mockGetConnection()
@@ -59,7 +61,12 @@ jest.mock('../../../services/geofence-service', () => ({
 }));
 
 jest.mock('../../../services/route-toll-service', () => ({
-  resolveTollFeeFromPricingPayload: (...args) => mockResolveTollFeeFromPricingPayload(...args)
+  resolveTollFeeFromPricingPayload: (...args) => mockResolveTollFeeFromPricingPayload(...args),
+  decodePolyline: (...args) => mockDecodePolyline(...args)
+}));
+
+jest.mock('../../../services/places-cache-service', () => ({
+  fetchDirectionsRoute: (...args) => mockFetchDirectionsRoute(...args)
 }));
 
 const pricingRoutes = require('../../../routes/pricing');
@@ -101,6 +108,19 @@ describe('pricing routes', () => {
       source: 'leaf_toll_catalog',
       toleranceKm: 2
     });
+    mockFetchDirectionsRoute.mockResolvedValue({
+      cached: true,
+      data: {
+        distance_in_km: 9.7,
+        time_in_secs: 920,
+        duration_in_traffic: 980,
+        polylinePoints: 'nuujC~|kgG_|B_|B_|B_|B'
+      }
+    });
+    mockDecodePolyline.mockReturnValue([
+      { latitude: -22.89, longitude: -43.32 },
+      { latitude: -22.85, longitude: -43.28 }
+    ]);
     mockEstimateRideFare.mockResolvedValue({
       estimatedFare: 22.15,
       normalizedCarType: 'leaf_plus',
@@ -133,7 +153,13 @@ describe('pricing routes', () => {
     expect(mockEstimateRideFare).not.toHaveBeenCalled();
   });
 
-  it('returns 422 when canonical quote requires route geometry but none is provided', async () => {
+  it('returns 503 without pricing when the server canonical route is not cached', async () => {
+    mockFetchDirectionsRoute.mockResolvedValue({
+      cached: false,
+      cacheOnly: true,
+      data: null,
+      status: 'cache_miss'
+    });
     const app = createApp();
     const response = await request(app)
       .post('/pricing/quote')
@@ -142,12 +168,18 @@ describe('pricing routes', () => {
         destinationLocation: { lat: -22.9976583, lng: -43.3581268 },
         routeDistanceKm: 24.4,
         routeDurationSecs: 2100,
-        carType: 'Leaf Plus',
-        requireRouteGeometry: true
+        carType: 'Leaf Plus'
       });
 
-    expect(response.status).toBe(422);
-    expect(response.body.error).toBe('route_geometry_required');
+    expect(response.status).toBe(503);
+    expect(response.body.error).toBe('canonical_route_required');
+    expect(mockFetchDirectionsRoute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        startLoc: '-22.857,-43.309',
+        destLoc: '-22.9976583,-43.3581268',
+        cacheOnly: true
+      })
+    );
     expect(mockResolveTollFeeFromPricingPayload).not.toHaveBeenCalled();
     expect(mockEstimateRideFare).not.toHaveBeenCalled();
   });
@@ -188,15 +220,21 @@ describe('pricing routes', () => {
     expect(mockEstimateRideFare).not.toHaveBeenCalled();
   });
 
-  it('returns quote for valid route and normalized coordinates', async () => {
+  it('ignores client route metrics, geometry and pricing context in favor of the server route', async () => {
     const app = createApp();
     const response = await request(app)
       .post('/pricing/quote')
       .send({
         pickupLocation: { lat: '-22.9660', lng: '-43.1820' },
         destinationLocation: { lat: '-22.9740', lng: '-43.2070' },
-        routeDistanceKm: 9.7,
-        routeDurationSecs: 920,
+        routeDistanceKm: 0.1,
+        routeDurationSecs: 1,
+        routePolyline: 'client_route_must_not_be_used',
+        pricingContext: {
+          trip: {
+            duration_min_traffic: 1
+          }
+        },
         carType: 'Leaf Plus'
       });
 
@@ -222,7 +260,15 @@ describe('pricing routes', () => {
     expect(mockEstimateRideFare).toHaveBeenCalledWith(
       expect.objectContaining({
         pickupLocation: expect.objectContaining({ lat: -22.966, lng: -43.182 }),
-        destinationLocation: expect.objectContaining({ lat: -22.974, lng: -43.207 })
+        destinationLocation: expect.objectContaining({ lat: -22.974, lng: -43.207 }),
+        routeDistanceKm: 9.7,
+        routeDurationSecs: 980,
+        pricingContext: null
+      })
+    );
+    expect(mockResolveTollFeeFromPricingPayload).toHaveBeenCalledWith(
+      expect.objectContaining({
+        routePolyline: 'nuujC~|kgG_|B_|B_|B_|B'
       })
     );
     expect(mockHasPaymentEligibleDriver).toHaveBeenCalledWith(
@@ -278,7 +324,7 @@ describe('pricing routes', () => {
         destinationLocation: { lat: -22.85, lng: -43.28 },
         routeDistanceKm: 9.7,
         routeDurationSecs: 920,
-        routePolyline: 'nuujC~|kgG_|B_|B_|B_|B',
+        routePolyline: 'client_geometry_must_be_ignored',
         carType: 'Leaf Plus'
       });
 

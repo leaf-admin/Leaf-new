@@ -64,6 +64,7 @@ jest.mock('../../../services/subscription-state-service', () => ({
 
 const PaymentService = require('../../../services/payment-service');
 const firebaseConfig = require('../../../firebase-config');
+const { sealFinancialContext } = require('../../../services/financial-runtime-context');
 const subscriptionStateService = require('../../../services/subscription-state-service');
 
 const createInMemoryFirestore = () => {
@@ -221,7 +222,129 @@ describe('PaymentService payment status cache', () => {
     });
   });
 
+  it('ignores an operational cache entry and reads only the sealed sandbox holding', async () => {
+    const firestore = createInMemoryFirestore();
+    firebaseConfig.getFirestore.mockReturnValue(firestore);
+    const service = new PaymentService();
+    const financialContext = sealFinancialContext({
+      providerEnvironment: 'sandbox',
+      paymentProfileId: 'qa-sandbox',
+      paymentProfileSource: 'payment_intent',
+      testUserSandbox: true
+    });
+    firestore.docs.set('payment_holdings/charge_scoped', {
+      status: 'in_holding',
+      amount: 9999,
+      chargeId: 'charge_scoped'
+    });
+    firestore.docs.set('sandbox_payment_holdings/charge_scoped', {
+      status: 'in_holding',
+      amount: 1342,
+      chargeId: 'charge_scoped',
+      financialContext,
+      financialNamespace: 'sandbox',
+      financialContextId: financialContext.contextId,
+      providerEnvironment: 'sandbox'
+    });
+    jest.spyOn(service, 'readPaymentStatusCache').mockResolvedValue({
+      status: 'in_holding',
+      amount: 9999,
+      chargeId: 'charge_scoped'
+    });
+
+    const result = await service.getPaymentStatus('charge_scoped', {
+      financialContext,
+      financialNamespace: 'sandbox',
+      financialContextId: financialContext.contextId,
+      providerEnvironment: 'sandbox'
+    });
+
+    expect(result).toMatchObject({
+      success: true,
+      status: 'in_holding',
+      amount: 1342,
+      source: 'payment_holding_doc'
+    });
+    expect(service.wooviDriverService.getChargeStatus).not.toHaveBeenCalled();
+  });
+
+  it('forces Woovi sandbox from the sealed intent after rejecting operational poison records', async () => {
+    const firestore = createInMemoryFirestore();
+    firebaseConfig.getFirestore.mockReturnValue(firestore);
+    const service = new PaymentService();
+    const financialContext = sealFinancialContext({
+      providerEnvironment: 'sandbox',
+      paymentProfileId: 'qa-sandbox',
+      paymentProfileSource: 'payment_intent',
+      testUserSandbox: true
+    });
+    firestore.docs.set('payment_holdings/charge_provider_scoped', {
+      status: 'in_holding',
+      amount: 9999,
+      chargeId: 'charge_provider_scoped'
+    });
+    jest.spyOn(service, 'readPaymentStatusCache').mockResolvedValue({
+      status: 'in_holding',
+      amount: 9999,
+      chargeId: 'charge_provider_scoped'
+    });
+    service.wooviDriverService.getChargeStatus.mockResolvedValue({
+      success: true,
+      status: 'COMPLETED',
+      amount: 1342,
+      paidAt: '2026-04-01T23:00:00.000Z'
+    });
+
+    const result = await service.getPaymentStatus('charge_provider_scoped', {
+      financialContext,
+      financialNamespace: 'sandbox',
+      financialContextId: financialContext.contextId,
+      providerEnvironment: 'sandbox'
+    });
+
+    expect(result).toMatchObject({
+      success: true,
+      source: 'woovi_provider',
+      providerEnvironment: 'sandbox',
+      paymentProfileId: 'qa-sandbox',
+      amount: 1342
+    });
+    expect(service.wooviDriverService.getChargeStatus).toHaveBeenCalledWith(
+      'charge_provider_scoped',
+      expect.objectContaining({
+        wooviConfig: expect.objectContaining({
+          environment: 'sandbox',
+          baseUrl: 'https://api.woovi-sandbox.com/api/v1'
+        })
+      })
+    );
+  });
+
+  it('fails before cache, Firestore or provider access when sandbox context is lost', async () => {
+    const firestore = createInMemoryFirestore();
+    firestore.collection = jest.fn(firestore.collection);
+    firebaseConfig.getFirestore.mockReturnValue(firestore);
+    const service = new PaymentService();
+    jest.spyOn(service, 'readPaymentStatusCache');
+
+    const result = await service.getPaymentStatus('charge_context_lost', {
+      providerEnvironment: 'sandbox',
+      financialNamespace: 'sandbox'
+    });
+
+    expect(result).toMatchObject({
+      success: false,
+      code: 'FINANCIAL_SANDBOX_CONTEXT_LOST',
+      status: null
+    });
+    expect(service.readPaymentStatusCache).not.toHaveBeenCalled();
+    expect(firestore.collection).not.toHaveBeenCalled();
+    expect(service.wooviDriverService.getChargeStatus).not.toHaveBeenCalled();
+  });
+
   it('writes cache entries for rideId and chargeId when saving payment holding', async () => {
+    const firestore = createInMemoryFirestore();
+    firebaseConfig.getFirestore.mockReturnValue(firestore);
     const service = new PaymentService();
 
     const result = await service.savePaymentHolding('temp_ride_123', {
@@ -233,9 +356,85 @@ describe('PaymentService payment status cache', () => {
       confirmedAt: '2026-04-01T23:00:00.000Z'
     });
 
-    expect(result.success).toBe(false);
+    expect(result.success).toBe(true);
     expect(mockCacheStore.has('payment_status_cache:temp_ride_123')).toBe(true);
     expect(mockCacheStore.has('payment_status_cache:charge_abc')).toBe(true);
+  });
+
+  it.each([
+    [
+      'lost',
+      {
+        providerEnvironment: 'sandbox',
+        financialNamespace: 'sandbox',
+        testUserSandbox: true
+      },
+      'FINANCIAL_SANDBOX_CONTEXT_LOST'
+    ],
+    [
+      'tampered',
+      (() => {
+        const financialContext = sealFinancialContext({
+          providerEnvironment: 'sandbox',
+          paymentProfileId: 'qa-sandbox',
+          testUserSandbox: true
+        });
+        return {
+          providerEnvironment: 'sandbox',
+          financialNamespace: 'sandbox',
+          financialContext: { ...financialContext, contextId: 'tampered' },
+          financialContextId: 'tampered',
+          testUserSandbox: true
+        };
+      })(),
+      'FINANCIAL_CONTEXT_TAMPERED'
+    ]
+  ])('does not write payment status cache when sandbox context is %s', async (_case, contextFields, code) => {
+    const firestore = createInMemoryFirestore();
+    firebaseConfig.getFirestore.mockReturnValue(firestore);
+    const service = new PaymentService();
+    const cacheWriteSpy = jest.spyOn(service, 'writePaymentStatusCache');
+
+    const result = await service.savePaymentHolding('booking_context_invalid', {
+      status: 'in_holding',
+      amount: 1342,
+      paymentId: 'charge_context_invalid',
+      chargeId: 'charge_context_invalid',
+      ...contextFields
+    });
+
+    expect(result).toMatchObject({ success: false, code });
+    expect(cacheWriteSpy).not.toHaveBeenCalled();
+    expect(mockCacheStore.size).toBe(0);
+    expect(firestore.docs.size).toBe(0);
+  });
+
+  it('rejects an environment mismatch before writing payment status cache', async () => {
+    const firestore = createInMemoryFirestore();
+    firebaseConfig.getFirestore.mockReturnValue(firestore);
+    const service = new PaymentService();
+    const operationalContext = sealFinancialContext({
+      providerEnvironment: 'production',
+      paymentProfileId: 'operational'
+    });
+    const cacheWriteSpy = jest.spyOn(service, 'writePaymentStatusCache');
+
+    const result = await service.savePaymentHolding('booking_context_mismatch', {
+      status: 'in_holding',
+      amount: 1342,
+      paymentId: 'charge_context_mismatch',
+      chargeId: 'charge_context_mismatch',
+      providerEnvironment: 'sandbox',
+      financialContext: operationalContext
+    });
+
+    expect(result).toMatchObject({
+      success: false,
+      code: 'PERSISTENCE_ENVIRONMENT_MISMATCH'
+    });
+    expect(cacheWriteSpy).not.toHaveBeenCalled();
+    expect(mockCacheStore.size).toBe(0);
+    expect(firestore.docs.size).toBe(0);
   });
 
   it('marks confirmed payment as ledger_pending when payment_received ledger fails', async () => {
@@ -339,12 +538,57 @@ describe('PaymentService payment status cache', () => {
     expect(mockCreateChargeWithSplit).not.toHaveBeenCalled();
   });
 
+  it('fails closed when the route scope and the freshly resolved payment profile diverge', async () => {
+    const service = new PaymentService();
+    jest.spyOn(service.paymentRuntimeProfileService, 'resolveProfile').mockResolvedValue({
+      profileId: 'qa-test-users-sandbox-durable',
+      environment: 'sandbox',
+      scope: 'users',
+      source: 'firestore',
+      testUserSandbox: true,
+      provider: 'woovi',
+      wooviConfig: {
+        apiToken: 'sandbox-token',
+        environment: 'sandbox',
+        baseUrl: 'https://api.woovi.com/api/v1'
+      }
+    });
+    const operationalContext = sealFinancialContext({
+      providerEnvironment: 'production',
+      paymentProfileId: 'env-default',
+      paymentProfileSource: 'env',
+      testUserSandbox: false
+    });
+
+    const result = await service.processAdvancePayment({
+      passengerId: 'passenger_scope_drift',
+      amount: 1506,
+      rideId: 'temp_ride_scope_drift',
+      rideDetails: { origin: 'Origem', destination: 'Destino' },
+      financialContext: operationalContext,
+      financialNamespace: operationalContext.namespace,
+      financialContextId: operationalContext.contextId,
+      providerEnvironment: operationalContext.providerEnvironment,
+      testUserSandbox: operationalContext.testUserSandbox
+    });
+
+    expect(result).toMatchObject({
+      success: false,
+      code: 'FINANCIAL_CONTEXT_CONFLICT',
+      providerEnvironment: 'sandbox',
+      paymentProfileId: 'qa-test-users-sandbox-durable'
+    });
+    expect(mockCreateCharge).not.toHaveBeenCalled();
+    expect(mockCreateChargeWithSplit).not.toHaveBeenCalled();
+  });
+
   it('routes allowlisted canary passengers through the sandbox Woovi profile without a mobile rebuild', async () => {
     process.env.WOOVI_ENVIRONMENT = 'production';
     process.env.WOOVI_API_TOKEN = 'production-token';
     process.env.WOOVI_SANDBOX_API_TOKEN = 'sandbox-token';
     process.env.PAYMENT_SANDBOX_USER_IDS = 'passenger_sandbox';
     process.env.PAYMENT_SANDBOX_EXPIRES_AT = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+    firebaseConfig.getFirestore.mockReturnValue(createInMemoryFirestore());
 
     const service = new PaymentService();
     const result = await service.processAdvancePayment({
@@ -1125,6 +1369,235 @@ describe('PaymentService financial rules', () => {
     });
   });
 
+  it('keeps sandbox confirmation, holding, settlement and driver balance outside operational collections', async () => {
+    const firestore = createInMemoryFirestore();
+    firebaseConfig.getFirestore.mockReturnValue(firestore);
+    const service = new PaymentService();
+    const rideId = 'booking_sandbox_isolated';
+    const chargeId = 'charge_sandbox_isolated';
+    const financialContext = sealFinancialContext({
+      providerEnvironment: 'sandbox',
+      paymentProfileId: 'qa-test-users-sandbox-durable',
+      paymentProfileSource: 'firestore',
+      testUserSandbox: true
+    });
+    firestore.docs.set(`sandbox_payment_intents/${service.buildAdvancePaymentIntentId(rideId)}`, {
+      paymentIntentId: service.buildAdvancePaymentIntentId(rideId),
+      rideId,
+      passengerId: 'passenger_sandbox',
+      chargeId,
+      amountCents: 1506,
+      status: 'charge_created',
+      providerEnvironment: 'sandbox',
+      financialContext,
+      financialNamespace: financialContext.namespace,
+      financialContextId: financialContext.contextId
+    });
+
+    const confirmation = await service.storeConfirmedPayment({
+      rideId,
+      chargeId,
+      amount: 1506,
+      passengerId: 'passenger_sandbox',
+      financialContext
+    });
+    const holding = await service.savePaymentHolding(rideId, {
+      status: 'in_holding',
+      amount: 1506,
+      paymentId: chargeId,
+      chargeId,
+      passengerId: 'passenger_sandbox',
+      financialContext
+    });
+    const settlement = await service.processNetDistribution({
+      rideId,
+      driverId: 'driver_sandbox',
+      totalAmount: 1506,
+      tollFee: 0,
+      financialContext,
+      financialSnapshot: {
+        authoritativeSnapshot: true,
+        financialSnapshotSource: 'backend_final',
+        passengerPaidCents: 1506,
+        tollFeeCents: 0,
+        operationalFeeCents: 99,
+        paymentIntermediationFeeCents: 50,
+        subscriptionRetainedFeeCents: 0,
+        driverNetAmountCents: 1357
+      }
+    });
+
+    expect(confirmation).toMatchObject({ success: true, ledgerPosted: true, financialContext });
+    expect(holding.success).toBe(true);
+    expect(settlement.success).toBe(true);
+    expect(firestore.docs.has(`sandbox_ride_payments/${rideId}`)).toBe(true);
+    expect(firestore.docs.has(`sandbox_payment_holdings/${rideId}`)).toBe(true);
+    expect(firestore.docs.has(`sandbox_payment_distributions/${rideId}`)).toBe(true);
+    expect(firestore.docs.has('sandbox_driver_balances/driver_sandbox')).toBe(true);
+    expect(firestore.docs.get(`sandbox_bookings/${rideId}`)).toMatchObject({
+      paymentStatus: 'confirmed',
+      paymentChargeId: chargeId,
+      financialContext,
+      financialNamespace: 'sandbox',
+      financialContextId: financialContext.contextId
+    });
+    expect(Array.from(firestore.docs.keys()).some((key) => key.startsWith('sandbox_financial_ledger_events/'))).toBe(true);
+    expect(firestore.docs.has(`ride_payments/${rideId}`)).toBe(false);
+    expect(firestore.docs.has(`payment_holdings/${rideId}`)).toBe(false);
+    expect(firestore.docs.has(`payment_distributions/${rideId}`)).toBe(false);
+    expect(firestore.docs.has('driver_balances/driver_sandbox')).toBe(false);
+    expect(firestore.docs.has(`bookings/${rideId}`)).toBe(false);
+    expect(Array.from(firestore.docs.keys()).some((key) => key.startsWith('financial_ledger_events/'))).toBe(false);
+  });
+
+  it('associates a driver to a sandbox payment without touching operational bookings', async () => {
+    const firestore = createInMemoryFirestore();
+    firebaseConfig.getFirestore.mockReturnValue(firestore);
+    const service = new PaymentService();
+    const rideId = 'booking_sandbox_driver_association';
+    const financialContext = sealFinancialContext({
+      providerEnvironment: 'sandbox',
+      paymentProfileId: 'qa-test-users-sandbox-durable',
+      paymentProfileSource: 'firestore',
+      testUserSandbox: true
+    });
+    firestore.docs.set(`sandbox_ride_payments/${rideId}`, {
+      rideId,
+      chargeId: 'charge_sandbox_driver_association',
+      amount: 1506,
+      status: 'CONFIRMED',
+      financialContext,
+      financialNamespace: 'sandbox',
+      financialContextId: financialContext.contextId
+    });
+    firestore.docs.set(`ride_payments/${rideId}`, {
+      rideId,
+      chargeId: 'charge_operational_poison',
+      amount: 999999,
+      status: 'CONFIRMED',
+      assignedDriverId: 'operational_driver_poison'
+    });
+    firestore.docs.set(`bookings/${rideId}`, {
+      driverId: 'operational_driver_poison',
+      paymentAmount: 999999
+    });
+
+    const result = await service.associateDriverToPayment(rideId, 'driver_sandbox', {
+      financialContext,
+      financialNamespace: financialContext.namespace,
+      financialContextId: financialContext.contextId,
+      providerEnvironment: financialContext.providerEnvironment,
+      testUserSandbox: true
+    });
+
+    expect(result).toEqual({ success: true });
+    expect(firestore.docs.get(`sandbox_ride_payments/${rideId}`)).toMatchObject({
+      assignedDriverId: 'driver_sandbox',
+      financialContext,
+      financialNamespace: 'sandbox'
+    });
+    expect(firestore.docs.get(`sandbox_bookings/${rideId}`)).toEqual({
+      driverId: 'driver_sandbox',
+      financialContext,
+      financialNamespace: 'sandbox',
+      financialContextId: financialContext.contextId
+    });
+    expect(firestore.docs.get(`bookings/${rideId}`)).toEqual({
+      driverId: 'operational_driver_poison',
+      paymentAmount: 999999
+    });
+    expect(firestore.docs.get(`ride_payments/${rideId}`)).toEqual({
+      rideId,
+      chargeId: 'charge_operational_poison',
+      amount: 999999,
+      status: 'CONFIRMED',
+      assignedDriverId: 'operational_driver_poison'
+    });
+  });
+
+  it('does not materialize a booking when a sandbox signal has no sealed context', async () => {
+    const firestore = createInMemoryFirestore();
+    firebaseConfig.getFirestore.mockReturnValue(firestore);
+    const service = new PaymentService();
+
+    const result = await service.storeConfirmedPayment({
+      rideId: 'booking_sandbox_context_lost',
+      chargeId: 'charge_sandbox_context_lost',
+      amount: 1506,
+      passengerId: 'passenger_sandbox',
+      providerEnvironment: 'sandbox',
+      testUserSandbox: true
+    });
+
+    expect(result).toMatchObject({
+      success: false,
+      code: 'FINANCIAL_SANDBOX_CONTEXT_LOST'
+    });
+    expect(Array.from(firestore.docs.keys()).some((key) => (
+      key.endsWith('/booking_sandbox_context_lost')
+    ))).toBe(false);
+  });
+
+  it('rejects a sandbox provider signal paired with an operational context before any write', async () => {
+    const firestore = createInMemoryFirestore();
+    firebaseConfig.getFirestore.mockReturnValue(firestore);
+    const service = new PaymentService();
+    const operationalContext = sealFinancialContext({
+      providerEnvironment: 'production',
+      paymentProfileId: 'operational-context'
+    });
+
+    const result = await service.storeConfirmedPayment({
+      rideId: 'booking_context_environment_mismatch',
+      chargeId: 'charge_context_environment_mismatch',
+      amount: 1506,
+      passengerId: 'passenger_sandbox',
+      financialContext: operationalContext,
+      providerEnvironment: 'sandbox'
+    });
+
+    expect(result).toMatchObject({
+      success: false,
+      code: 'PERSISTENCE_ENVIRONMENT_MISMATCH'
+    });
+    expect(firestore.docs.size).toBe(0);
+  });
+
+  it('fails sandbox settlement closed when the payment intent context is lost', async () => {
+    const firestore = createInMemoryFirestore();
+    firebaseConfig.getFirestore.mockReturnValue(firestore);
+    const service = new PaymentService();
+    const financialContext = sealFinancialContext({
+      providerEnvironment: 'sandbox',
+      paymentProfileId: 'qa-test-users-sandbox-durable',
+      paymentProfileSource: 'firestore',
+      testUserSandbox: true
+    });
+    firestore.docs.set('sandbox_ride_payments/booking_sandbox_lost_intent', {
+      rideId: 'booking_sandbox_lost_intent',
+      chargeId: 'charge_sandbox_lost_intent',
+      amount: 1506,
+      status: 'CONFIRMED',
+      financialContext,
+      financialNamespace: 'sandbox',
+      financialContextId: financialContext.contextId
+    });
+
+    const result = await service.processNetDistribution({
+      rideId: 'booking_sandbox_lost_intent',
+      driverId: 'driver_sandbox_lost_intent',
+      totalAmount: 1506,
+      financialContext
+    });
+
+    expect(result).toMatchObject({
+      success: false,
+      code: 'FINANCIAL_SANDBOX_INTENT_REQUIRED'
+    });
+    expect(firestore.docs.has('sandbox_driver_balances/driver_sandbox_lost_intent')).toBe(false);
+    expect(firestore.docs.has('driver_balances/driver_sandbox_lost_intent')).toBe(false);
+  });
+
   it('settles the backend-final snapshot without recalculating the driver amount', async () => {
     const firestore = createInMemoryFirestore();
     firebaseConfig.getFirestore.mockReturnValue(firestore);
@@ -1380,6 +1853,196 @@ describe('PaymentService refund terminal status handling', () => {
     });
   });
 
+  it('keeps a materialized sandbox holding alias aligned with canonical distribution without new financial records', async () => {
+    const firestore = createInMemoryFirestore();
+    firebaseConfig.getFirestore.mockReturnValue(firestore);
+    const service = new PaymentService();
+    const financialContext = sealFinancialContext({
+      providerEnvironment: 'sandbox',
+      paymentProfileId: 'qa-test-users-sandbox-durable',
+      paymentProfileSource: 'firestore',
+      testUserSandbox: true
+    });
+    const bookingId = 'booking_sandbox_alias_distribution';
+    const temporaryRideId = 'temp_ride_sandbox_alias_distribution';
+    const chargeId = 'charge_sandbox_alias_distribution';
+    const common = {
+      chargeId,
+      amount: 1915,
+      financialContext,
+      financialNamespace: 'sandbox',
+      financialContextId: financialContext.contextId
+    };
+    firestore.docs.set(`sandbox_payment_holdings/${temporaryRideId}`, {
+      ...common,
+      rideId: temporaryRideId,
+      canonicalRideId: bookingId,
+      bookingId,
+      temporaryRideId,
+      paymentReferenceRideId: temporaryRideId,
+      status: 'in_holding'
+    });
+    firestore.docs.set(`sandbox_payment_holdings/${bookingId}`, {
+      ...common,
+      rideId: bookingId,
+      canonicalRideId: bookingId,
+      bookingId,
+      temporaryRideId,
+      paymentReferenceRideId: temporaryRideId,
+      materializedFrom: temporaryRideId,
+      status: 'in_holding'
+    });
+    firestore.docs.set(`sandbox_ride_payments/${temporaryRideId}`, {
+      ...common,
+      rideId: temporaryRideId,
+      canonicalRideId: bookingId,
+      bookingId,
+      status: 'CONFIRMED'
+    });
+    firestore.docs.set(`sandbox_ride_payments/${bookingId}`, {
+      ...common,
+      rideId: bookingId,
+      canonicalRideId: bookingId,
+      bookingId,
+      temporaryRideId,
+      paymentReferenceRideId: temporaryRideId,
+      materializedFrom: temporaryRideId,
+      status: 'CONFIRMED'
+    });
+    const savePaymentEvent = jest.spyOn(service, 'savePaymentEvent').mockResolvedValue(true);
+
+    const result = await service.updatePaymentHolding(bookingId, {
+      status: 'distributed',
+      distributedAt: '2026-07-13T07:00:00.000Z',
+      financialContext
+    });
+
+    expect(result).toEqual({ success: true });
+    expect(firestore.docs.get(`sandbox_payment_holdings/${bookingId}`)).toMatchObject({
+      status: 'distributed',
+      distributedAt: '2026-07-13T07:00:00.000Z'
+    });
+    expect(firestore.docs.get(`sandbox_payment_holdings/${temporaryRideId}`)).toMatchObject({
+      status: 'distributed',
+      canonicalRideId: bookingId,
+      bookingId,
+      temporaryRideId,
+      paymentReferenceRideId: temporaryRideId
+    });
+    expect(firestore.docs.get(`sandbox_ride_payments/${bookingId}`).status).toBe('CONFIRMED');
+    expect(firestore.docs.get(`sandbox_ride_payments/${temporaryRideId}`).status).toBe('CONFIRMED');
+    expect(savePaymentEvent).toHaveBeenCalledTimes(1);
+    expect(savePaymentEvent).toHaveBeenCalledWith(
+      bookingId,
+      'payment_distributed',
+      expect.objectContaining({ previousStatus: 'in_holding', newStatus: 'distributed' })
+    );
+    expect(Array.from(firestore.docs.keys()).filter((path) => (
+      path.startsWith('sandbox_payment_holdings/') ||
+      path.startsWith('sandbox_ride_payments/')
+    ))).toHaveLength(4);
+    expect(Array.from(firestore.docs.keys()).some((path) => (
+      path.startsWith('payment_holdings/') ||
+      path.startsWith('ride_payments/') ||
+      path.startsWith('financial_ledger_')
+    ))).toBe(false);
+  });
+
+  it('closes materialized sandbox payment aliases on refund with one canonical ledger record and no operational write', async () => {
+    const firestore = createInMemoryFirestore();
+    firebaseConfig.getFirestore.mockReturnValue(firestore);
+    const service = new PaymentService();
+    const financialContext = sealFinancialContext({
+      providerEnvironment: 'sandbox',
+      paymentProfileId: 'qa-test-users-sandbox-durable',
+      paymentProfileSource: 'firestore',
+      testUserSandbox: true
+    });
+    const bookingId = 'booking_sandbox_alias_refund';
+    const temporaryRideId = 'temp_ride_sandbox_alias_refund';
+    const chargeId = 'charge_sandbox_alias_refund';
+    const common = {
+      chargeId,
+      amount: 1937,
+      passengerId: 'passenger_sandbox_alias_refund',
+      financialContext,
+      financialNamespace: 'sandbox',
+      financialContextId: financialContext.contextId
+    };
+    for (const rideId of [temporaryRideId, bookingId]) {
+      firestore.docs.set(`sandbox_ride_payments/${rideId}`, {
+        ...common,
+        rideId,
+        canonicalRideId: bookingId,
+        bookingId,
+        temporaryRideId,
+        paymentReferenceRideId: temporaryRideId,
+        ...(rideId === bookingId ? { materializedFrom: temporaryRideId } : {}),
+        status: 'CONFIRMED'
+      });
+      firestore.docs.set(`sandbox_payment_holdings/${rideId}`, {
+        ...common,
+        rideId,
+        canonicalRideId: bookingId,
+        bookingId,
+        temporaryRideId,
+        paymentReferenceRideId: temporaryRideId,
+        ...(rideId === bookingId ? { materializedFrom: temporaryRideId } : {}),
+        status: 'in_holding'
+      });
+    }
+    service.financialLedgerService.recordRefund = jest.fn().mockResolvedValue({
+      success: true,
+      eventId: 'refund_ledger_once'
+    });
+
+    const result = await service.markPaymentRefunded(bookingId, {
+      refundAmount: 1937,
+      cancellationFee: 0,
+      chargeId,
+      refundId: 'refund_sandbox_alias',
+      refundRequestId: 'refund_request_sandbox_alias',
+      status: 'REFUNDED_FULL',
+      reason: 'unit sandbox alias refund',
+      passengerId: 'passenger_sandbox_alias_refund',
+      financialContext
+    });
+
+    expect(result).toMatchObject({ success: true, ledgerRecorded: true });
+    for (const rideId of [temporaryRideId, bookingId]) {
+      expect(firestore.docs.get(`sandbox_ride_payments/${rideId}`)).toMatchObject({
+        status: 'REFUNDED_FULL',
+        refunded: true,
+        refundAmount: 1937,
+        canonicalRideId: bookingId
+      });
+      expect(firestore.docs.get(`sandbox_payment_holdings/${rideId}`)).toMatchObject({
+        status: 'refunded',
+        refunded: true,
+        refundAmount: 1937,
+        canonicalRideId: bookingId
+      });
+    }
+    expect(service.financialLedgerService.recordRefund).toHaveBeenCalledTimes(1);
+    expect(service.financialLedgerService.recordRefund).toHaveBeenCalledWith(
+      expect.objectContaining({
+        rideId: bookingId,
+        chargeId,
+        amountCents: 1937,
+        financialContext
+      })
+    );
+    expect(Array.from(firestore.docs.keys()).filter((path) => (
+      path.startsWith('sandbox_payment_holdings/') ||
+      path.startsWith('sandbox_ride_payments/')
+    ))).toHaveLength(4);
+    expect(Array.from(firestore.docs.keys()).some((path) => (
+      path.startsWith('payment_holdings/') ||
+      path.startsWith('ride_payments/') ||
+      path.startsWith('financial_ledger_events/')
+    ))).toBe(false);
+  });
+
   it('treats canonical confirmed payment records as captured for refunds', () => {
     expect(PaymentService.isCapturedPaymentStatus('PAID')).toBe(true);
     expect(PaymentService.isCapturedPaymentStatus('CONFIRMED')).toBe(true);
@@ -1446,6 +2109,105 @@ describe('PaymentService refund terminal status handling', () => {
       refundAmount: 1200,
       refundId: 'refund_provider_1'
     });
+  });
+
+  it('resolves a sandbox refund by charge without reading operational poison records', async () => {
+    const firestore = createInMemoryFirestore();
+    const sandboxFinancialContext = sealFinancialContext({
+      providerEnvironment: 'sandbox',
+      paymentProfileId: 'qa-test-users-sandbox-durable',
+      paymentProfileSource: 'payment_intent',
+      testUserSandbox: true
+    });
+    const operationalFinancialContext = sealFinancialContext({
+      providerEnvironment: 'production',
+      paymentProfileId: 'operational-default',
+      paymentProfileSource: 'runtime'
+    });
+    const rideId = 'booking_refund_scope_poison';
+    const temporaryRideId = 'temp_ride_refund_scope_poison';
+    const chargeId = 'charge_refund_scope_poison';
+    firestore.docs.set(`ride_payments/${rideId}`, {
+      rideId,
+      chargeId,
+      amount: 999999,
+      status: 'PAID',
+      financialContext: operationalFinancialContext,
+      financialNamespace: 'operational',
+      financialContextId: operationalFinancialContext.contextId,
+      providerEnvironment: 'production'
+    });
+    firestore.docs.set(`sandbox_ride_payments/${temporaryRideId}`, {
+      rideId: temporaryRideId,
+      canonicalRideId: rideId,
+      bookingId: rideId,
+      temporaryRideId,
+      paymentReferenceRideId: temporaryRideId,
+      chargeId,
+      amount: 1506,
+      status: 'PAID',
+      financialContext: sandboxFinancialContext,
+      financialNamespace: 'sandbox',
+      financialContextId: sandboxFinancialContext.contextId,
+      providerEnvironment: 'sandbox',
+      testUserSandbox: true
+    });
+    firestore.collection = jest.fn(firestore.collection);
+    firebaseConfig.getFirestore.mockReturnValue(firestore);
+    const service = new PaymentService();
+
+    const result = await service.resolveStoredPaymentForRefund({
+      chargeId,
+      financialContext: sandboxFinancialContext
+    });
+
+    expect(result).toMatchObject({
+      success: true,
+      rideId,
+      chargeId,
+      financialContext: sandboxFinancialContext,
+      paymentRecord: {
+        amount: 1506,
+        financialContext: sandboxFinancialContext
+      }
+    });
+    const collectionCalls = firestore.collection.mock.calls.map(([collectionName]) => collectionName);
+    expect(collectionCalls).toEqual(['sandbox_ride_payments']);
+    expect(collectionCalls).not.toContain('ride_payments');
+    expect(collectionCalls).not.toContain('payment_holdings');
+    expect(mockProcessRefund).not.toHaveBeenCalled();
+  });
+
+  it('fails a sandbox refund before Firestore or provider access when the seal is missing', async () => {
+    const firestore = createInMemoryFirestore();
+    firestore.collection = jest.fn(firestore.collection);
+    firebaseConfig.getFirestore.mockReturnValue(firestore);
+    const service = new PaymentService();
+    const processRefund = jest.spyOn(service, 'processRefund');
+    const claimRideRefund = jest.spyOn(service, 'claimRideRefund');
+
+    const result = await service.processRideRefund({
+      rideId: 'booking_refund_context_lost',
+      chargeId: 'charge_refund_context_lost',
+      amount: 1506,
+      financialContext: {
+        version: 1,
+        namespace: 'sandbox',
+        classification: 'sandbox_test_user',
+        providerEnvironment: 'sandbox',
+        paymentProfileId: 'qa-test-users-sandbox-durable',
+        testUserSandbox: true
+      }
+    });
+
+    expect(result).toMatchObject({
+      success: false,
+      code: 'FINANCIAL_SANDBOX_CONTEXT_LOST'
+    });
+    expect(firestore.collection).not.toHaveBeenCalled();
+    expect(processRefund).not.toHaveBeenCalled();
+    expect(claimRideRefund).not.toHaveBeenCalled();
+    expect(mockProcessRefund).not.toHaveBeenCalled();
   });
 
   it('does not report refund ledger evidence when ledger recording fails', async () => {

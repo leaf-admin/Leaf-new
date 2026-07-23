@@ -72,8 +72,10 @@ jest.mock('@opentelemetry/api', () => ({
 
 const registerSocketCreateBookingHandler = require('../../../bootstrap/register-socket-create-booking-handler');
 const paymentDispatchService = require('../../../services/payment-dispatch-service');
+const ridePersistenceService = require('../../../services/ride-persistence-service');
 const passengerTrustService = require('../../../services/passenger-trust-service');
 const operationalAreaPolicyService = require('../../../services/operational-area-policy-service');
+const { sealFinancialContext } = require('../../../services/financial-runtime-context');
 
 function createFirestoreWithDocs(seed = {}) {
   const docs = new Map(Object.entries(seed));
@@ -200,6 +202,10 @@ function createHarness({ availabilityResult, reservationPayload = null } = {}) {
     cacheResult: jest.fn().mockResolvedValue(undefined),
     releaseInflight: jest.fn().mockResolvedValue(undefined)
   };
+  const auditService = {
+    logRideAction: jest.fn().mockResolvedValue(undefined),
+    logSecurityAction: jest.fn().mockResolvedValue(undefined)
+  };
   const RequestRideCommand = jest.fn().mockImplementation(function RequestRideCommandMock(payload) {
     this.execute = jest.fn().mockResolvedValue({
       success: true,
@@ -248,10 +254,7 @@ function createHarness({ availabilityResult, reservationPayload = null } = {}) {
       checkRateLimit: jest.fn().mockResolvedValue({ allowed: true })
     },
     getSocketMetadata: jest.fn(() => ({ ip: '127.0.0.1' })),
-    auditService: {
-      logRideAction: jest.fn().mockResolvedValue(undefined),
-      logSecurityAction: jest.fn().mockResolvedValue(undefined)
-    },
+    auditService,
     validationService: {
       validateEndpoint: jest.fn((_endpoint, payload) => ({
         valid: true,
@@ -298,6 +301,7 @@ function createHarness({ availabilityResult, reservationPayload = null } = {}) {
     socket,
     redis,
     idempotencyService,
+    auditService,
     RequestRideCommand,
     findAvailableDriversForPickup
   };
@@ -330,7 +334,13 @@ describe('registerSocketCreateBookingHandler payment and availability guards', (
       paymentDriverReservationExpiresAt: '2026-06-24T20:00:00.000Z',
       paymentDriverReservationTtlSeconds: 180,
       paymentSessionId: 'pay_session_1',
-      quoteLockId: 'ql_bound_1'
+      quoteLockId: 'ql_bound_1',
+      quoteLockSnapshot: {
+        routeDistanceKm: 12.4,
+        routeDurationSecs: 1800,
+        routePolyline: 'nuujC~|kgG_|B_|B_|B_|B',
+        tollFee: 0
+      }
     });
     mockPaymentServiceInstance.getAdvancePaymentIntentByChargeId.mockReset().mockResolvedValue({
       found: false
@@ -484,7 +494,12 @@ describe('registerSocketCreateBookingHandler payment and availability guards', (
       found: true,
       status: 'charge_created',
       paymentSessionId: 'pay_session_1',
-      quoteLockId: 'ql_bound_1'
+      quoteLockId: 'ql_bound_1',
+      quoteLockSnapshot: {
+        routeDistanceKm: 12.4,
+        routeDurationSecs: 1800,
+        routePolyline: 'nuujC~|kgG_|B_|B_|B_|B'
+      }
     });
     const harness = createHarness({ reservationPayload: false });
 
@@ -499,6 +514,79 @@ describe('registerSocketCreateBookingHandler payment and availability guards', (
     expect(harness.findAvailableDriversForPickup).not.toHaveBeenCalled();
     expect(harness.RequestRideCommand).not.toHaveBeenCalled();
     expect(harness.idempotencyService.beginRequest).not.toHaveBeenCalled();
+  });
+
+  it('fails closed before creating a booking when a sandbox payment intent lost its sealed context', async () => {
+    mockFirestore.collection = jest.fn(mockFirestore.collection);
+    mockPaymentServiceInstance.getAdvancePaymentIntent.mockResolvedValue({
+      found: true,
+      status: 'charge_created',
+      providerEnvironment: 'sandbox',
+      paymentProfileId: 'qa-test-users-sandbox-durable',
+      paymentSessionId: 'pay_session_1',
+      quoteLockId: 'ql_bound_1',
+      paymentDriverReservationId: 'pdr_create_booking_1',
+      paymentDriverReservationDriverId: 'driver_1',
+      quoteLockSnapshot: {
+        routeDistanceKm: 12.4,
+        routeDurationSecs: 1800,
+        routePolyline: 'nuujC~|kgG_|B_|B_|B_|B'
+      }
+    });
+    const harness = createHarness();
+
+    await harness.handlers.createBooking(createRequestPayload());
+
+    expect(harness.socket.emit).toHaveBeenCalledWith(
+      'bookingError',
+      expect.objectContaining({
+        code: 'FINANCIAL_SANDBOX_CONTEXT_LOST'
+      })
+    );
+    expect(harness.RequestRideCommand).not.toHaveBeenCalled();
+    expect(paymentDispatchService.materializePaymentForBooking).not.toHaveBeenCalled();
+    expect(mockPaymentServiceInstance.getPaymentStatus).not.toHaveBeenCalled();
+    expect(mockFirestore.collection).not.toHaveBeenCalled();
+  });
+
+  it('fails before payment evidence reads when the sandbox intent context is tampered', async () => {
+    const financialContext = sealFinancialContext({
+      providerEnvironment: 'sandbox',
+      paymentProfileId: 'qa-test-users-sandbox-durable',
+      testUserSandbox: true
+    });
+    mockFirestore.collection = jest.fn(mockFirestore.collection);
+    mockPaymentServiceInstance.getAdvancePaymentIntent.mockResolvedValue({
+      found: true,
+      status: 'charge_created',
+      providerEnvironment: 'sandbox',
+      paymentProfileId: 'qa-test-users-sandbox-durable',
+      financialContext: { ...financialContext, contextId: 'tampered' },
+      financialNamespace: 'sandbox',
+      financialContextId: 'tampered',
+      paymentSessionId: 'pay_session_1',
+      quoteLockId: 'ql_bound_1',
+      paymentDriverReservationId: 'pdr_create_booking_1',
+      paymentDriverReservationDriverId: 'driver_1',
+      quoteLockSnapshot: {
+        routeDistanceKm: 12.4,
+        routeDurationSecs: 1800,
+        routePolyline: 'nuujC~|kgG_|B_|B_|B_|B'
+      }
+    });
+    const harness = createHarness();
+
+    await harness.handlers.createBooking(createRequestPayload());
+
+    expect(harness.socket.emit).toHaveBeenCalledWith(
+      'bookingError',
+      expect.objectContaining({
+        code: 'FINANCIAL_CONTEXT_TAMPERED'
+      })
+    );
+    expect(mockPaymentServiceInstance.getPaymentStatus).not.toHaveBeenCalled();
+    expect(mockFirestore.collection).not.toHaveBeenCalled();
+    expect(harness.RequestRideCommand).not.toHaveBeenCalled();
   });
 
   it('recovers an expired sandbox driver reservation when the same driver is still eligible', async () => {
@@ -516,10 +604,20 @@ describe('registerSocketCreateBookingHandler payment and availability guards', (
       status: 'charge_created',
       providerEnvironment: 'sandbox',
       paymentProfileId: 'real-smoke-passenger-sandbox',
+      financialContext: sealFinancialContext({
+        providerEnvironment: 'sandbox',
+        paymentProfileId: 'real-smoke-passenger-sandbox',
+        testUserSandbox: true
+      }),
       paymentSessionId: 'pay_session_1',
       quoteLockId: 'ql_bound_1',
       paymentDriverReservationId: 'pdr_create_booking_1',
-      paymentDriverReservationDriverId: 'driver_1'
+      paymentDriverReservationDriverId: 'driver_1',
+      quoteLockSnapshot: {
+        routeDistanceKm: 12.4,
+        routeDurationSecs: 1800,
+        routePolyline: 'nuujC~|kgG_|B_|B_|B_|B'
+      }
     });
     const harness = createHarness({ reservationPayload: false });
 
@@ -634,7 +732,10 @@ describe('registerSocketCreateBookingHandler payment and availability guards', (
         payableAmountInCents: 8785,
         grossAmountInCents: 8785,
         routeSignature: '-22.90000|-43.20000|-22.91000|-43.21000|leaf_plus',
-        carType: 'leaf_plus'
+        carType: 'leaf_plus',
+        routeDistanceKm: 12.4,
+        routeDurationSecs: 1800,
+        routePolyline: 'nuujC~|kgG_|B_|B_|B_|B'
       }
     });
     mockFirestore = createFirestoreWithDocs({
@@ -706,7 +807,8 @@ describe('registerSocketCreateBookingHandler payment and availability guards', (
         routeSignature: '-22.90000|-43.20000|-22.91000|-43.21000|leaf_plus',
         carType: 'leaf_plus',
         routeDistanceKm: 27,
-        routeDurationSecs: 1800
+        routeDurationSecs: 1800,
+        routePolyline: 'nuujC~|kgG_|B_|B_|B_|B'
       }
     });
     mockFirestore = createFirestoreWithDocs({
@@ -721,8 +823,9 @@ describe('registerSocketCreateBookingHandler payment and availability guards', (
     const harness = createHarness();
 
     await harness.handlers.createBooking(createRequestPayload({
-      routeDistanceKm: undefined,
-      routeDurationSecs: undefined,
+      routeDistanceKm: 0.1,
+      routeDurationSecs: 1,
+      routeCoordinates: [{ lat: 0, lng: 0 }, { lat: 1, lng: 1 }],
       passengerName: 'Leaf Passageiro Teste',
       paymentData: {
         chargeId: 'charge_1',
@@ -739,6 +842,11 @@ describe('registerSocketCreateBookingHandler payment and availability guards', (
       expect.objectContaining({
         routeDistanceKm: 27,
         routeDurationSecs: 1800,
+        routeCoordinates: [
+          { lat: -22.89, lng: -43.32 },
+          { lat: -22.87, lng: -43.3 },
+          { lat: -22.85, lng: -43.28 }
+        ],
         passengerName: 'Leaf Passageiro Teste',
         customerName: 'Leaf Passageiro Teste'
       })
@@ -752,7 +860,59 @@ describe('registerSocketCreateBookingHandler payment and availability guards', (
     );
   });
 
+  it('rejects a paid booking when the payment snapshot has no canonical route geometry', async () => {
+    mockPaymentServiceInstance.getAdvancePaymentIntent.mockResolvedValue({
+      found: true,
+      status: 'charge_created',
+      passengerId: 'customer_1',
+      amountCents: 8785,
+      payableAmountInCents: 8785,
+      paymentSessionId: 'pay_session_1',
+      quoteLockId: 'ql_bound_1',
+      paymentDriverReservationId: 'pdr_create_booking_1',
+      paymentDriverReservationDriverId: 'driver_1',
+      quoteLockSnapshot: {
+        quoteLockId: 'ql_bound_1',
+        passengerId: 'customer_1',
+        routeDistanceKm: 12.4,
+        routeDurationSecs: 1800
+      }
+    });
+    mockFirestore = createFirestoreWithDocs({
+      'payment_holdings/temp_ride_1': {
+        status: 'in_holding',
+        source: 'woovi_webhook',
+        chargeId: 'charge_1',
+        paymentId: 'charge_1',
+        amount: 8785
+      }
+    });
+    const harness = createHarness();
+
+    await harness.handlers.createBooking(createRequestPayload({
+      routeCoordinates: [{ lat: -22.9, lng: -43.2 }, { lat: -22.91, lng: -43.21 }]
+    }));
+
+    expect(harness.socket.emit).toHaveBeenCalledWith(
+      'bookingError',
+      expect.objectContaining({
+        code: 'PAYMENT_INTENT_CANONICAL_ROUTE_REQUIRED'
+      })
+    );
+    expect(harness.RequestRideCommand).not.toHaveBeenCalled();
+  });
+
   it('recovers payment quote metrics by chargeId when the temporary ride id is not canonical', async () => {
+    const sandboxFinancialContext = sealFinancialContext({
+      providerEnvironment: 'sandbox',
+      paymentProfileId: 'qa-test-users-sandbox-durable',
+      paymentProfileSource: 'firestore',
+      testUserSandbox: true
+    });
+    const untrustedOperationalContext = sealFinancialContext({
+      providerEnvironment: 'production',
+      paymentProfileId: 'client-supplied-context'
+    });
     mockPaymentServiceInstance.getAdvancePaymentIntent.mockResolvedValue({
       found: false,
       paymentIntentId: 'advance_wrong_temp_id'
@@ -767,6 +927,7 @@ describe('registerSocketCreateBookingHandler payment and availability guards', (
       paymentProfileId: 'qa-test-users-sandbox-durable',
       paymentProfileSource: 'firestore',
       paymentProfileReason: 'durable_test_users_payment_sandbox_policy',
+      financialContext: sandboxFinancialContext,
       amountCents: 8785,
       payableAmountInCents: 8785,
       paymentSessionId: 'pay_session_1',
@@ -784,7 +945,8 @@ describe('registerSocketCreateBookingHandler payment and availability guards', (
         routeSignature: '-22.90000|-43.20000|-22.91000|-43.21000|leaf_plus',
         carType: 'leaf_plus',
         routeDistanceKm: 27.1,
-        routeDurationSecs: 1800
+        routeDurationSecs: 1800,
+        routePolyline: 'nuujC~|kgG_|B_|B_|B_|B'
       }
     });
     mockFirestore = createFirestoreWithDocs({
@@ -809,9 +971,14 @@ describe('registerSocketCreateBookingHandler payment and availability guards', (
         quoteSessionId: 'quote_session_1',
         quoteLockId: 'ql_bound_1',
         paymentDriverReservationId: 'pdr_create_booking_1',
-        paymentStatus: 'confirmed'
+        paymentStatus: 'confirmed',
+        financialContext: untrustedOperationalContext,
+        financialNamespace: 'operational',
+        financialContextId: untrustedOperationalContext.contextId
       }
     }));
+
+    await flushImmediateCallbacks(immediateCallbacks);
 
     expect(mockPaymentServiceInstance.getAdvancePaymentIntentByChargeId)
       .toHaveBeenCalledWith('charge_1');
@@ -831,10 +998,46 @@ describe('registerSocketCreateBookingHandler payment and availability guards', (
           paymentProfileId: 'qa-test-users-sandbox-durable',
           paymentProfileSource: 'firestore',
           paymentProfileReason: 'durable_test_users_payment_sandbox_policy',
+          financialContext: sandboxFinancialContext,
+          financialNamespace: 'sandbox',
+          financialContextId: sandboxFinancialContext.contextId,
           routeDistanceKm: 27.1,
           routeDurationSecs: 1800
         })
       })
+    );
+    expect(paymentDispatchService.materializePaymentForBooking).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bookingId: 'booking_1',
+        financialContext: sandboxFinancialContext,
+        financialNamespace: 'sandbox',
+        financialContextId: sandboxFinancialContext.contextId,
+        providerEnvironment: 'sandbox',
+        testUserSandbox: true
+      })
+    );
+    expect(ridePersistenceService.saveRide).toHaveBeenCalledWith(
+      expect.objectContaining({
+        rideId: 'booking_1',
+        financialContext: sandboxFinancialContext,
+        financialNamespace: 'sandbox',
+        financialContextId: sandboxFinancialContext.contextId,
+        providerEnvironment: 'sandbox'
+      })
+    );
+    expect(harness.auditService.logRideAction).toHaveBeenCalledWith(
+      'customer_1',
+      'createBooking',
+      'booking_1',
+      expect.objectContaining({
+        financialContext: sandboxFinancialContext,
+        financialNamespace: 'sandbox',
+        financialContextId: sandboxFinancialContext.contextId,
+        providerEnvironment: 'sandbox'
+      }),
+      true,
+      null,
+      expect.any(Object)
     );
     expect(harness.socket.emit.mock.calls.filter(([event]) => event === 'bookingError')).toEqual([]);
   });

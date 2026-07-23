@@ -13,6 +13,14 @@ const { logger } = require('../utils/logger');
 const crypto = require('crypto');
 const PDFDocument = require('pdfkit');
 const PaymentService = require('./payment-service');
+const {
+    resolveFinancialContext
+} = require('./financial-runtime-context');
+const {
+    resolvePersistenceScope,
+    resolveRidePersistenceScope,
+    assertStoredRecordMatchesScope
+} = require('./sandbox-persistence-context');
 
 class ReceiptFinancialSnapshotIncompleteError extends Error {
     constructor(message, details = {}) {
@@ -21,6 +29,17 @@ class ReceiptFinancialSnapshotIncompleteError extends Error {
         this.code = 'RECEIPT_FINANCIAL_SNAPSHOT_INCOMPLETE';
         this.statusCode = 409;
         this.details = details;
+    }
+}
+
+class ReceiptPersistenceError extends Error {
+    constructor(message, details = {}, cause = null) {
+        super(message);
+        this.name = 'ReceiptPersistenceError';
+        this.code = 'RECEIPT_PERSIST_FAILED';
+        this.statusCode = 503;
+        this.details = details;
+        if (cause) this.cause = cause;
     }
 }
 
@@ -336,6 +355,8 @@ class ReceiptService {
      */
     async generateReceipt(rideId, rideData) {
         try {
+            const persistenceScope = resolveRidePersistenceScope(rideData);
+            const financialContext = persistenceScope.financialContext;
             logger.info(`📋 Gerando recibo para corrida: ${rideId}`);
             const finalFinancialSnapshot = this.resolveFinalReceiptFinancialSnapshot(rideId, rideData);
             const receiptRideData = {
@@ -395,6 +416,9 @@ class ReceiptService {
                 hash: receiptHash, // Hash único para validação
                 issueDate: new Date().toISOString(),
                 issueTimestamp: Date.now(),
+                financialContext,
+                financialNamespace: financialContext.namespace,
+                financialContextId: financialContext.contextId,
 
                 // === TÍTULO DO RECIBO ===
                 title: `Sua corrida para ${destination}, em ${tripDateFormatted} ${tripTimeFormatted}`,
@@ -501,6 +525,13 @@ class ReceiptService {
         } catch (error) {
             logger.error(`❌ Erro ao gerar recibo para corrida ${rideId}:`, error);
             if (error?.code === 'RECEIPT_FINANCIAL_SNAPSHOT_INCOMPLETE') {
+                throw error;
+            }
+            if (
+                String(error?.code || '').startsWith('PERSISTENCE_') ||
+                String(error?.code || '').startsWith('FINANCIAL_') ||
+                String(error?.code || '').startsWith('SANDBOX_')
+            ) {
                 throw error;
             }
             throw new Error(`Falha ao gerar recibo: ${error.message}`);
@@ -759,11 +790,16 @@ class ReceiptService {
     /**
      * Busca e gera recibo para uma corrida específica
      */
-    async getReceiptByRideId(rideId, redis, firebaseDb) {
+    async getReceiptByRideId(rideId, redis, firebaseDb, scopeInput = {}) {
         try {
             logger.info(`🔍 Buscando dados da corrida: ${rideId}`);
 
-            const storedReceipt = await this.getReceiptFromFirestore(rideId, firebaseDb);
+            const persistenceScope = resolveRidePersistenceScope(scopeInput);
+            const storedReceipt = await this.getReceiptFromFirestore(
+                rideId,
+                firebaseDb,
+                persistenceScope
+            );
             if (storedReceipt) {
                 return storedReceipt;
             }
@@ -774,13 +810,19 @@ class ReceiptService {
                 const redisData = await redis.hget('bookings:active', rideId);
                 if (redisData) {
                     rideData = JSON.parse(redisData);
+                    assertStoredRecordMatchesScope(rideData, persistenceScope);
                 }
             }
 
             // Se não encontrou no Redis, buscar no Firebase
             if (!rideData && firebaseDb) {
-                const snapshot = await firebaseDb.ref(`bookings/${rideId}`).once('value');
+                const snapshot = await firebaseDb
+                    .ref(`${persistenceScope.collections.bookings}/${rideId}`)
+                    .once('value');
                 rideData = snapshot.val();
+                if (rideData) {
+                    assertStoredRecordMatchesScope(rideData, persistenceScope);
+                }
             }
 
             if (!rideData) {
@@ -796,6 +838,129 @@ class ReceiptService {
         }
     }
 
+    resolveStoredReceiptOwnerId(receipt = {}, role = 'customer') {
+        if (role === 'driver') {
+            return String(
+                receipt.driver?.id ||
+                receipt.driverId ||
+                receipt.driver_id ||
+                ''
+            ).trim();
+        }
+
+        return String(
+            receipt.customer?.id ||
+            receipt.customerId ||
+            receipt.customer_id ||
+            receipt.passengerId ||
+            receipt.passenger_id ||
+            receipt.userId ||
+            ''
+        ).trim();
+    }
+
+    resolveStoredReceiptTimestamp(receipt = {}) {
+        const value =
+            receipt.trip?.dateTime ||
+            receipt.completedAt ||
+            receipt.endTime ||
+            receipt.savedAt ||
+            receipt.issueDate ||
+            receipt.savedTimestamp ||
+            receipt.issueTimestamp ||
+            0;
+        const parsed = this.parseDateValue(value);
+        return parsed ? parsed.getTime() : 0;
+    }
+
+    /**
+     * Lista somente recibos já persistidos no namespace financeiro resolvido.
+     * Não consulta nem regenera dados a partir de bookings.
+     */
+    async listStoredReceiptsByUser({
+        firebaseDb,
+        userId,
+        role = 'customer',
+        financialContext,
+        limit = 10,
+        offset = 0
+    } = {}) {
+        if (!firebaseDb) {
+            const error = new Error('Serviço de database não disponível');
+            error.code = 'RECEIPT_DATABASE_UNAVAILABLE';
+            error.statusCode = 503;
+            throw error;
+        }
+
+        const normalizedUserId = String(userId || '').trim();
+        if (!normalizedUserId) {
+            const error = new Error('userId é obrigatório');
+            error.code = 'RECEIPT_USER_ID_REQUIRED';
+            error.statusCode = 400;
+            throw error;
+        }
+
+        if (!['customer', 'driver'].includes(role)) {
+            const error = new Error('Role deve ser "customer" ou "driver"');
+            error.code = 'RECEIPT_ROLE_INVALID';
+            error.statusCode = 400;
+            throw error;
+        }
+
+        const requestedContextResult = resolveFinancialContext({ financialContext });
+        if (!requestedContextResult.ok) {
+            const error = new Error(requestedContextResult.error);
+            error.code = requestedContextResult.code;
+            error.statusCode = 400;
+            throw error;
+        }
+
+        const requestedContext = requestedContextResult.context;
+        const persistenceScope = resolvePersistenceScope({ financialContext: requestedContext });
+        const ownerPath = role === 'driver' ? 'driver/id' : 'customer/id';
+        const safeLimit = Math.min(50, Math.max(1, Number.parseInt(limit, 10) || 10));
+        const safeOffset = Math.max(0, Number.parseInt(offset, 10) || 0);
+        const snapshot = await firebaseDb
+            .ref(persistenceScope.collections.receipts)
+            .orderByChild(ownerPath)
+            .equalTo(normalizedUserId)
+            .once('value');
+
+        const receipts = Object.entries(snapshot.val() || {})
+            .map(([rideId, receipt]) => ({
+                ...(receipt || {}),
+                rideId: receipt?.rideId || rideId
+            }))
+            .filter((receipt) => {
+                if (this.resolveStoredReceiptOwnerId(receipt, role) !== normalizedUserId) {
+                    return false;
+                }
+
+                // Legado operacional permanece legível apenas dentro de `receipts`.
+                // Sandbox exige o mesmo contexto selado, nunca apenas o mesmo namespace.
+                try {
+                    assertStoredRecordMatchesScope(receipt, persistenceScope);
+                    return true;
+                } catch (_error) {
+                    return false;
+                }
+            })
+            .sort((left, right) =>
+                this.resolveStoredReceiptTimestamp(right) - this.resolveStoredReceiptTimestamp(left)
+            );
+        const page = receipts.slice(safeOffset, safeOffset + safeLimit);
+
+        return {
+            receipts: page,
+            total: receipts.length,
+            limit: safeLimit,
+            offset: safeOffset,
+            nextOffset: safeOffset + page.length,
+            hasMore: safeOffset + page.length < receipts.length,
+            financialNamespace: requestedContext.namespace
+        };
+    }
+
     /**
      * Salva recibo no Firestore
      * @param {Object} receipt - Recibo gerado
@@ -805,32 +970,65 @@ class ReceiptService {
     async saveReceiptToFirestore(receipt, firebaseDb) {
         try {
             if (!firebaseDb) {
-                logger.warn('⚠️ Firebase Database não disponível para salvar recibo');
-                return false;
+                throw new ReceiptPersistenceError(
+                    'Firebase Database não disponível para salvar recibo',
+                    { rideId: receipt?.rideId || null, stage: 'database_unavailable' }
+                );
             }
 
+            let persistenceScope;
+            try {
+                persistenceScope = resolveRidePersistenceScope(receipt);
+            } catch (error) {
+                throw new ReceiptPersistenceError(
+                    error.message,
+                    {
+                        rideId: receipt?.rideId || null,
+                        stage: 'financial_context',
+                        contextCode: error.code
+                    }
+                );
+            }
+            const financialContext = persistenceScope.financialContext;
             const receiptData = {
                 ...receipt,
+                financialContext,
+                financialNamespace: financialContext.namespace,
+                financialContextId: financialContext.contextId,
                 savedAt: new Date().toISOString(),
                 savedTimestamp: Date.now()
             };
 
             // Salvar na coleção receipts
-            await firebaseDb.ref(`receipts/${receipt.rideId}`).set(receiptData);
+            await firebaseDb
+                .ref(`${persistenceScope.collections.receipts}/${receipt.rideId}`)
+                .set(receiptData);
 
             // Também salvar referência na corrida para fácil acesso
-            await firebaseDb.ref(`bookings/${receipt.rideId}/receipt`).set({
-                receiptId: receipt.receiptId,
-                hash: receipt.hash,
-                savedAt: receiptData.savedAt
-            });
+            await firebaseDb
+                .ref(`${persistenceScope.collections.bookings}/${receipt.rideId}/receipt`)
+                .set({
+                    receiptId: receipt.receiptId,
+                    hash: receipt.hash,
+                    savedAt: receiptData.savedAt,
+                    financialContext,
+                    financialNamespace: financialContext.namespace,
+                    financialContextId: financialContext.contextId
+                });
 
             logger.info(`✅ Recibo salvo no Firestore: ${receipt.receiptId}`);
             return true;
 
         } catch (error) {
             logger.error(`❌ Erro ao salvar recibo no Firestore:`, error);
-            return false;
+            if (error?.code === 'RECEIPT_PERSIST_FAILED') {
+                throw error;
+            }
+            throw new ReceiptPersistenceError(
+                `Falha ao persistir recibo ${receipt?.rideId || 'sem rideId'}`,
+                { rideId: receipt?.rideId || null, stage: 'database_write' },
+                error
+            );
         }
     }
 
@@ -840,17 +1038,33 @@ class ReceiptService {
      * @param {Object} firebaseDb - Instância do Firebase Database
      * @returns {Promise<Object|null>} - Recibo encontrado ou null
      */
-    async getReceiptFromFirestore(rideId, firebaseDb) {
+    async getReceiptFromFirestore(rideId, firebaseDb, scopeInput = {}) {
         try {
             if (!firebaseDb) {
                 return null;
             }
 
-            const snapshot = await firebaseDb.ref(`receipts/${rideId}`).once('value');
-            return snapshot.val();
+            const persistenceScope = resolveRidePersistenceScope(scopeInput);
+            const snapshot = await firebaseDb
+                .ref(`${persistenceScope.collections.receipts}/${rideId}`)
+                .once('value');
+            const value = snapshot.val();
+            if (!value) return null;
+
+            const financialContext = assertStoredRecordMatchesScope(value, persistenceScope);
+            return financialContext
+                ? { ...value, financialContext }
+                : value;
 
         } catch (error) {
             logger.error(`❌ Erro ao buscar recibo do Firestore:`, error);
+            if (
+                String(error?.code || '').startsWith('PERSISTENCE_') ||
+                String(error?.code || '').startsWith('FINANCIAL_') ||
+                String(error?.code || '').startsWith('SANDBOX_')
+            ) {
+                throw error;
+            }
             return null;
         }
     }
@@ -866,25 +1080,16 @@ class ReceiptService {
         try {
             // Gerar recibo
             const receipt = await this.generateReceipt(rideId, rideData);
-            let receiptTelemetry = {
+            const receiptTelemetry = {
                 firebase: {
                     reads: 0,
-                    writes: 0
+                    writes: 2
                 }
             };
 
-            // Salvar no Firestore se disponível
-            if (firebaseDb) {
-                const saved = await this.saveReceiptToFirestore(receipt, firebaseDb);
-                if (saved) {
-                    receiptTelemetry = {
-                        firebase: {
-                            reads: 0,
-                            writes: 2
-                        }
-                    };
-                }
-            }
+            // O método possui semântica de geração + persistência: ausência/falha de
+            // database deve propagar erro tipado, nunca parecer sucesso parcial.
+            await this.saveReceiptToFirestore(receipt, firebaseDb);
 
             Object.defineProperty(receipt, '__telemetry', {
                 value: receiptTelemetry,

@@ -29,6 +29,11 @@ const {
   buildLaunchFeatureDisabledPayload
 } = require('../utils/pilot-launch-flags');
 const { evaluatePilotAccess } = require('../services/pilot-access-control-service');
+const { getFinancialCollections } = require('../services/financial-runtime-context');
+const {
+  assertStoredRecordMatchesScope,
+  resolveUserPersistenceScope
+} = require('../services/sandbox-persistence-context');
 const router = express.Router();
 
 const paymentService = new PaymentService();
@@ -83,11 +88,31 @@ function canRecoverQuoteLockFromIntentSnapshot(code) {
   return code === 'QUOTE_LOCK_NOT_FOUND_OR_EXPIRED' || code === 'QUOTE_LOCK_EXPIRED';
 }
 
+function buildPaymentPersistenceEnvelope(persistenceScope) {
+  const financialContext = persistenceScope?.financialContext;
+  if (!financialContext || !persistenceScope?.namespace) {
+    const error = new Error('Contexto de persistência de pagamento indisponível');
+    error.code = 'PERSISTENCE_USER_CLASSIFICATION_UNAVAILABLE';
+    throw error;
+  }
+
+  return {
+    financialContext,
+    financialNamespace: persistenceScope.namespace,
+    financialContextId: financialContext.contextId,
+    providerEnvironment: financialContext.providerEnvironment,
+    paymentProfileId: financialContext.paymentProfileId || null,
+    paymentProfileSource: financialContext.paymentProfileSource || null,
+    testUserSandbox: financialContext.testUserSandbox === true
+  };
+}
+
 async function validateQuoteLockFromPaymentIntentSnapshot({
   rideId,
   quoteLockId,
   quoteSessionId,
   passengerId,
+  persistenceScope,
   amountInCents,
   grossAmountInCents,
   pickupLocation,
@@ -103,19 +128,25 @@ async function validateQuoteLockFromPaymentIntentSnapshot({
   const firestore = firebaseConfig.getFirestore();
   if (!firestore) return null;
 
+  const persistenceEnvelope = buildPaymentPersistenceEnvelope(persistenceScope);
+  const { collections } = getFinancialCollections(persistenceEnvelope.financialContext);
+  const paymentIntentsCollection = firestore.collection(collections.paymentIntents);
   const paymentIntentId = paymentService.buildAdvancePaymentIntentId(safeRideId);
-  let paymentIntentSnapshot = await firestore.collection('payment_intents').doc(paymentIntentId).get();
+  let paymentIntentSnapshot = await paymentIntentsCollection.doc(paymentIntentId).get();
   let recoveredPaymentIntentId = paymentIntentId;
 
   if (!paymentIntentSnapshot.exists) {
-    const candidates = await firestore
-      .collection('payment_intents')
+    const candidates = await paymentIntentsCollection
       .where('passengerId', '==', safePassengerId)
       .where('quoteLockId', '==', safeQuoteLockId)
       .limit(20)
       .get();
     const candidateDoc = candidates.docs
-      .map((doc) => ({ id: doc.id, data: doc.data() || {} }))
+      .map((doc) => {
+        const data = doc.data() || {};
+        assertStoredRecordMatchesScope(data, persistenceEnvelope);
+        return { id: doc.id, data };
+      })
       .filter(({ data }) => data.quoteLockSnapshot)
       .sort((left, right) => {
         const leftTime = Date.parse(left.data.updatedAtIso || left.data.createdAtIso || '') || 0;
@@ -131,6 +162,7 @@ async function validateQuoteLockFromPaymentIntentSnapshot({
   }
 
   const intent = paymentIntentSnapshot.data() || {};
+  assertStoredRecordMatchesScope(intent, persistenceEnvelope);
   const intentPassengerId = String(intent.passengerId || '').trim();
   const intentRideId = String(intent.rideId || '').trim();
   const intentQuoteLockId = String(intent.quoteLockId || intent.quoteLockSnapshot?.quoteLockId || '').trim();
@@ -846,6 +878,32 @@ router.post('/payment/advance', authenticatePaymentActor, requirePassengerScope,
       });
     }
 
+    let paymentPersistenceScope;
+    let paymentPersistenceEnvelope;
+    try {
+      paymentPersistenceScope = await resolveUserPersistenceScope({
+        userId: passengerId,
+        phone: passengerPhone || phone || phoneNumber || req.paymentActor?.phoneNumber || null,
+        actor: req.paymentActor || null,
+        appReview: String(process.env.APP_REVIEW || '').toLowerCase() === 'true'
+      });
+      paymentPersistenceEnvelope = buildPaymentPersistenceEnvelope(paymentPersistenceScope);
+    } catch (persistenceScopeError) {
+      const code = persistenceScopeError.code || 'PERSISTENCE_USER_CLASSIFICATION_UNAVAILABLE';
+      logStructured('error', 'payment/advance bloqueado por classificação de persistência indisponível', {
+        service: 'payment-routes',
+        passengerId,
+        rideId: rideId || paymentSessionId || null,
+        code,
+        error: persistenceScopeError.message
+      });
+      return res.status(503).json({
+        success: false,
+        error: 'Não foi possível classificar o ambiente de pagamento com segurança',
+        code
+      });
+    }
+
     const availabilityInput = buildPaymentAvailabilityInput({
       pickupLocation,
       destinationLocation,
@@ -900,6 +958,7 @@ router.post('/payment/advance', authenticatePaymentActor, requirePassengerScope,
             quoteLockId,
             quoteSessionId,
             passengerId,
+            persistenceScope: paymentPersistenceScope,
             amountInCents: authoritativeAmountInCents,
             grossAmountInCents: authoritativeGrossAmountInCents,
             pickupLocation: availabilityInput.pickupLocation,
@@ -1061,7 +1120,8 @@ router.post('/payment/advance', authenticatePaymentActor, requirePassengerScope,
       grossAmountInCents: discountValidation.grossAmountInCents,
       payableAmountInCents: discountValidation.payableAmountInCents,
       discountBenefit: discountValidation.discountBenefit,
-      actor: req.paymentActor || null
+      actor: req.paymentActor || null,
+      ...paymentPersistenceEnvelope
     };
 
     const result = await paymentService.processAdvancePayment(paymentData);
@@ -1279,7 +1339,35 @@ router.get('/payment/status/:chargeId', authenticatePaymentActor, async (req, re
       });
     }
 
-    const result = await paymentService.getPaymentStatus(chargeId);
+    let paymentPersistenceEnvelope;
+    try {
+      const paymentPersistenceScope = await resolveUserPersistenceScope({
+        userId: req.paymentActor?.uid || req.paymentActor?.id,
+        phone: req.paymentActor?.phoneNumber || req.paymentActor?.phone || null,
+        actor: req.paymentActor || null,
+        appReview: String(process.env.APP_REVIEW || '').toLowerCase() === 'true'
+      });
+      paymentPersistenceEnvelope = buildPaymentPersistenceEnvelope(paymentPersistenceScope);
+    } catch (persistenceScopeError) {
+      const code = persistenceScopeError.code || 'PERSISTENCE_USER_CLASSIFICATION_UNAVAILABLE';
+      logStructured('error', 'payment/status bloqueado por classificação de persistência indisponível', {
+        service: 'payment-routes',
+        chargeId,
+        actorId: req.paymentActor?.uid || req.paymentActor?.id || null,
+        code,
+        error: persistenceScopeError.message
+      });
+      return res.status(503).json({
+        success: false,
+        error: 'Não foi possível classificar o ambiente de pagamento com segurança',
+        code
+      });
+    }
+
+    const result = await paymentService.getPaymentStatus(
+      chargeId,
+      paymentPersistenceEnvelope
+    );
 
     if (result.success) {
       res.status(200).json(result);

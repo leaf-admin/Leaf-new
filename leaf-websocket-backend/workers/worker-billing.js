@@ -15,6 +15,7 @@ const idempotencyService = require('../services/idempotency-service');
 const { EVENT_TYPES } = require('../events');
 const { isMultiLegBillingEnabled } = require('../utils/ride-lifecycle-feature-flags');
 const { validateAuthoritativeFinancialSnapshot } = require('../services/ride-financial-contract');
+const { resolveFinancialContext } = require('../services/financial-runtime-context');
 
 const driverApprovalService = typeof DriverApprovalService === 'function'
     ? new DriverApprovalService()
@@ -105,6 +106,12 @@ const workerManager = new WorkerManager({
 workerManager.registerListener(EVENT_TYPES.RIDE_COMPLETED, async (event) => {
     const rideCompleted = unwrapCanonicalEventPayload(event);
     const { bookingId, driverId, finalFare, tollFee } = rideCompleted;
+    const financialContextResult = resolveFinancialContext(rideCompleted, { allowLegacyOperational: true });
+    if (!financialContextResult.ok) {
+        throw new Error(`${financialContextResult.code}: ${financialContextResult.error}`);
+    }
+    const financialContext = financialContextResult.context;
+    const shouldPropagateFinancialContext = financialContextResult.legacy !== true;
     const eventId = rideCompleted.eventId || event.eventId || bookingId; // Fallback to bookingId if eventId is missing
 
     logStructured('info', 'Iniciando processamento contábil (Billing) da corrida', {
@@ -154,14 +161,20 @@ workerManager.registerListener(EVENT_TYPES.RIDE_COMPLETED, async (event) => {
             reason:
                 rideCompleted.paymentDistribution?.reason ||
                 rideCompleted.offlineSettlementReview?.settlementType ||
-                'MANUAL_SETTLEMENT_REQUIRED'
+                'MANUAL_SETTLEMENT_REQUIRED',
+            ...(shouldPropagateFinancialContext ? { financialContext } : {})
         };
 
-        await paymentService.saveDistributionToFirestore(distributionSummary);
+        if (shouldPropagateFinancialContext) {
+            await paymentService.saveDistributionToFirestore(distributionSummary, financialContext);
+        } else {
+            await paymentService.saveDistributionToFirestore(distributionSummary);
+        }
         await paymentService.updatePaymentHolding(bookingId, {
             status: 'under_review',
             reviewedAt,
-            distributionData: distributionSummary
+            distributionData: distributionSummary,
+            ...(shouldPropagateFinancialContext ? { financialContext } : {})
         }).catch((error) => {
             logStructured('warn', 'Falha ao atualizar payment holding da distribuição em revisão', {
                 bookingId,
@@ -210,11 +223,13 @@ workerManager.registerListener(EVENT_TYPES.RIDE_COMPLETED, async (event) => {
                 continue;
             }
 
-            const creditResult = await paymentService.creditDriverBalance(
+            const creditArgs = [
                 legDriverId,
                 driverNetAmountCents,
                 `${bookingId}:leg:${leg?.legNumber || 'x'}`
-            );
+            ];
+            if (shouldPropagateFinancialContext) creditArgs.push(financialContext);
+            const creditResult = await paymentService.creditDriverBalance(...creditArgs);
 
             if (!creditResult.success) {
                 await idempotencyService.releaseInflight?.(idempotencyKey);
@@ -260,14 +275,20 @@ workerManager.registerListener(EVENT_TYPES.RIDE_COMPLETED, async (event) => {
             totalPlatformAbsorbedPaymentIntermediationFee: rideLegSettlements.reduce(
                 (accumulator, leg) => accumulator + Number(leg?.platformAbsorbedPaymentIntermediationFee || 0),
                 0
-            )
+            ),
+            ...(shouldPropagateFinancialContext ? { financialContext } : {})
         };
 
-        await paymentService.saveDistributionToFirestore(distributionSummary);
+        if (shouldPropagateFinancialContext) {
+            await paymentService.saveDistributionToFirestore(distributionSummary, financialContext);
+        } else {
+            await paymentService.saveDistributionToFirestore(distributionSummary);
+        }
         await paymentService.updatePaymentHolding(bookingId, {
             status: 'distributed',
             distributedAt,
-            distributionData: distributionSummary
+            distributionData: distributionSummary,
+            ...(shouldPropagateFinancialContext ? { financialContext } : {})
         }).catch((error) => {
             logStructured('warn', 'Falha ao atualizar payment holding da distribuição multi-leg', {
                 bookingId,
@@ -332,7 +353,8 @@ workerManager.registerListener(EVENT_TYPES.RIDE_COMPLETED, async (event) => {
         tollFee: normalizeMoneyToCents(tollFee || 0),
         financialSnapshot: financialSnapshotValidation.snapshot,
         wooviAccountId: accountData?.accountId || null,
-        driverPixKey: accountData?.wooviSubaccountPixKey || accountData?.driverPixKey || accountData?.pixKey || null
+        driverPixKey: accountData?.wooviSubaccountPixKey || accountData?.driverPixKey || accountData?.pixKey || null,
+        ...(shouldPropagateFinancialContext ? { financialContext } : {})
     });
 
     if (!distributionResult.success) {
@@ -390,7 +412,9 @@ workerManager.registerListener(EVENT_TYPES.RIDE_CANCELED, async (event) => {
     const distributionResult = await paymentService.processCancellationDistribution({
         rideId: bookingId,
         driverId: driverId,
-        cancellationFee: cancellationFee
+        cancellationFee: cancellationFee,
+        financialContext: event.data?.financialContext || null,
+        providerEnvironment: event.data?.providerEnvironment || event.data?.paymentProviderEnvironment || null
     });
 
     if (!distributionResult.success) {

@@ -41,12 +41,20 @@ describe('quote-lock-service', () => {
       estimatedFare: 27.5,
       grossEstimatedFare: 27.5,
       passengerPayableFare: 27.5,
+      routeDistanceKm: 9.7,
+      routeDurationSecs: 920,
+      routePolyline: 'nuujC~|kgG_|B_|B_|B_|B',
       rateCardVersion: 'test-rate-card',
       ttlSeconds: 120
     });
 
     expect(created.success).toBe(true);
     expect(created.quoteLockId).toMatch(/^ql_/);
+    expect(created.quoteLock).toEqual(expect.objectContaining({
+      routeDistanceKm: 9.7,
+      routeDurationSecs: 920,
+      routePolyline: 'nuujC~|kgG_|B_|B_|B_|B'
+    }));
 
     const validation = await validateQuoteLock({
       redis,

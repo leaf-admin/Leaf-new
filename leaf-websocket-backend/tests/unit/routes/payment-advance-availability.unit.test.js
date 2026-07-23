@@ -51,7 +51,12 @@ jest.mock('../../../services/payment-runtime-profile-service', () => ({
   listProfiles: jest.fn(),
   upsertProfile: jest.fn(),
   updateProfileStatus: jest.fn(),
-  resolveProfile: jest.fn()
+  resolveProfile: jest.fn().mockResolvedValue({
+    environment: 'production',
+    profileId: 'unit-operational',
+    source: 'unit_test',
+    testUserSandbox: false
+  })
 }));
 
 jest.mock('../../../services/kyc-policy-service', () => ({

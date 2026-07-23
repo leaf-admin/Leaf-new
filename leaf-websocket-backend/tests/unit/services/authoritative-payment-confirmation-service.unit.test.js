@@ -1,12 +1,16 @@
 const {
   resolveAuthoritativePaymentConfirmation,
 } = require('../../../services/authoritative-payment-confirmation-service');
+const { sealFinancialContext } = require('../../../services/financial-runtime-context');
 
 function createFirestoreWithDocs(seed = {}) {
   const docs = new Map(Object.entries(seed));
+  const collectionsRead = [];
 
-  return {
+  const firestore = {
+    collectionsRead,
     collection(collectionName) {
+      collectionsRead.push(collectionName);
       return {
         doc(docId) {
           const path = `${collectionName}/${docId}`;
@@ -44,6 +48,7 @@ function createFirestoreWithDocs(seed = {}) {
       };
     },
   };
+  return firestore;
 }
 
 describe('authoritative-payment-confirmation-service', () => {
@@ -95,5 +100,139 @@ describe('authoritative-payment-confirmation-service', () => {
       success: false,
       code: 'PAYMENT_NOT_PROVIDER_CONFIRMED',
     });
+  });
+
+  it('uses only sandbox payment collections for a sealed sandbox intent', async () => {
+    const financialContext = sealFinancialContext({
+      providerEnvironment: 'sandbox',
+      paymentProfileId: 'qa-sandbox',
+      paymentProfileSource: 'payment_intent',
+      testUserSandbox: true,
+    });
+    const firestore = createFirestoreWithDocs({
+      'payment_holdings/booking_sandbox': {
+        status: 'in_holding',
+        source: 'woovi_webhook',
+        chargeId: 'charge_sandbox',
+        amount: 3840,
+      },
+      'sandbox_payment_holdings/booking_sandbox': {
+        status: 'in_holding',
+        source: 'sandbox_provider_verification',
+        chargeId: 'charge_sandbox',
+        paymentId: 'charge_sandbox',
+        amount: 3840,
+        financialContext,
+        financialNamespace: 'sandbox',
+        financialContextId: financialContext.contextId,
+        providerEnvironment: 'sandbox',
+      },
+    });
+    const paymentService = { getPaymentStatus: jest.fn() };
+
+    const result = await resolveAuthoritativePaymentConfirmation({
+      firestore,
+      paymentService,
+      bookingId: 'booking_sandbox',
+      references: ['charge_sandbox'],
+      expectedAmountInCents: 3840,
+      paymentContext: {
+        financialContext,
+        financialNamespace: 'sandbox',
+        financialContextId: financialContext.contextId,
+        providerEnvironment: 'sandbox',
+      },
+    });
+
+    expect(result).toMatchObject({
+      success: true,
+      source: 'sandbox_provider_verification',
+    });
+    expect(new Set(firestore.collectionsRead)).toEqual(new Set([
+      'sandbox_payment_holdings',
+      'sandbox_ride_payments',
+    ]));
+    expect(paymentService.getPaymentStatus).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [
+      'lost',
+      { providerEnvironment: 'sandbox', financialNamespace: 'sandbox' },
+      'FINANCIAL_SANDBOX_CONTEXT_LOST',
+    ],
+    [
+      'tampered',
+      (() => {
+        const context = sealFinancialContext({
+          providerEnvironment: 'sandbox',
+          paymentProfileId: 'qa-sandbox',
+          testUserSandbox: true,
+        });
+        return {
+          financialContext: { ...context, contextId: 'tampered' },
+          financialNamespace: 'sandbox',
+          providerEnvironment: 'sandbox',
+        };
+      })(),
+      'FINANCIAL_CONTEXT_TAMPERED',
+    ],
+  ])('fails before Firestore/provider reads when sandbox context is %s', async (_case, paymentContext, code) => {
+    const firestore = createFirestoreWithDocs();
+    const paymentService = { getPaymentStatus: jest.fn() };
+
+    const result = await resolveAuthoritativePaymentConfirmation({
+      firestore,
+      paymentService,
+      bookingId: 'booking_sandbox',
+      references: ['charge_sandbox'],
+      expectedAmountInCents: 3840,
+      paymentContext,
+    });
+
+    expect(result).toMatchObject({ success: false, code });
+    expect(firestore.collectionsRead).toEqual([]);
+    expect(paymentService.getPaymentStatus).not.toHaveBeenCalled();
+  });
+
+  it('passes the sealed intent context to provider status and rejects a production response', async () => {
+    const financialContext = sealFinancialContext({
+      providerEnvironment: 'sandbox',
+      paymentProfileId: 'qa-sandbox',
+      testUserSandbox: true,
+    });
+    const paymentContext = {
+      financialContext,
+      financialNamespace: 'sandbox',
+      financialContextId: financialContext.contextId,
+      providerEnvironment: 'sandbox',
+    };
+    const paymentService = {
+      getPaymentStatus: jest.fn().mockResolvedValue({
+        success: true,
+        status: 'in_holding',
+        source: 'woovi_provider',
+        amount: 3840,
+        providerEnvironment: 'production',
+      }),
+    };
+
+    const result = await resolveAuthoritativePaymentConfirmation({
+      firestore: createFirestoreWithDocs(),
+      paymentService,
+      bookingId: 'booking_sandbox',
+      references: ['charge_sandbox'],
+      expectedAmountInCents: 3840,
+      paymentContext,
+    });
+
+    expect(result).toMatchObject({
+      success: false,
+      code: 'PAYMENT_NOT_PROVIDER_CONFIRMED',
+    });
+    expect(paymentService.getPaymentStatus).toHaveBeenCalledWith(
+      'charge_sandbox',
+      paymentContext,
+    );
   });
 });

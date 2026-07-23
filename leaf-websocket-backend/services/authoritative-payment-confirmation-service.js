@@ -1,3 +1,9 @@
+const { getFinancialCollections } = require('./financial-runtime-context');
+const {
+  assertStoredRecordMatchesScope,
+  resolvePersistenceScope
+} = require('./sandbox-persistence-context');
+
 const PAID_PAYMENT_STATUSES = new Set([
   'approved',
   'completed',
@@ -159,6 +165,44 @@ function isAuthoritativeProviderStatus(status = {}, expectedAmountInCents = 0) {
   return source === 'woovi_provider' || Boolean(status.providerEnvironment || status.paymentProfileId);
 }
 
+function resolvePaymentConfirmationScope(paymentContext) {
+  const scopeInput = paymentContext || {};
+  const persistenceScope = resolvePersistenceScope(scopeInput, {
+    allowLegacyOperational: true
+  });
+  const { collections } = getFinancialCollections(persistenceScope.financialContext);
+  return {
+    scopeInput,
+    persistenceScope,
+    collections
+  };
+}
+
+function recordMatchesPaymentScope(record, confirmationScope) {
+  if (!record) return false;
+  if (confirmationScope.persistenceScope.namespace !== 'sandbox') return true;
+  try {
+    assertStoredRecordMatchesScope(record, confirmationScope.scopeInput);
+    return true;
+  } catch (_error) {
+    return false;
+  }
+}
+
+function providerStatusMatchesPaymentScope(status, confirmationScope) {
+  if (confirmationScope.persistenceScope.namespace !== 'sandbox') return true;
+  const expectedContext = confirmationScope.persistenceScope.financialContext;
+  if (String(status?.providerEnvironment || '').trim().toLowerCase() !== 'sandbox') {
+    return false;
+  }
+  const providerProfileId = String(status?.paymentProfileId || '').trim();
+  return !(
+    providerProfileId &&
+    expectedContext.paymentProfileId &&
+    providerProfileId !== expectedContext.paymentProfileId
+  );
+}
+
 async function getFirestoreDocData(firestore, collectionName, docId) {
   if (!firestore || !collectionName || !docId) {
     return null;
@@ -188,8 +232,20 @@ async function resolveAuthoritativePaymentConfirmation({
   firestore,
   bookingId,
   references = [],
-  expectedAmountInCents = 0
+  expectedAmountInCents = 0,
+  paymentContext = null
 } = {}) {
+  let confirmationScope;
+  try {
+    confirmationScope = resolvePaymentConfirmationScope(paymentContext);
+  } catch (error) {
+    return {
+      success: false,
+      code: error.code || 'FINANCIAL_CONTEXT_INVALID',
+      message: error.message || 'Contexto financeiro inválido para confirmar o pagamento.'
+    };
+  }
+
   const safeReferences = collectPaymentReferences(references);
   if (!safeReferences.length) {
     return {
@@ -202,18 +258,41 @@ async function resolveAuthoritativePaymentConfirmation({
   const localRecords = [];
   const localDocIds = collectPaymentReferences(bookingId, safeReferences);
   for (const docId of localDocIds) {
-    localRecords.push(await getFirestoreDocData(firestore, 'payment_holdings', docId));
-    localRecords.push(await getFirestoreDocData(firestore, 'ride_payments', docId));
+    localRecords.push(await getFirestoreDocData(
+      firestore,
+      confirmationScope.collections.paymentHoldings,
+      docId
+    ));
+    localRecords.push(await getFirestoreDocData(
+      firestore,
+      confirmationScope.collections.ridePayments,
+      docId
+    ));
   }
 
   for (const reference of safeReferences) {
-    localRecords.push(await queryFirstDocData(firestore, 'payment_holdings', 'paymentId', reference));
-    localRecords.push(await queryFirstDocData(firestore, 'payment_holdings', 'chargeId', reference));
-    localRecords.push(await queryFirstDocData(firestore, 'ride_payments', 'chargeId', reference));
+    localRecords.push(await queryFirstDocData(
+      firestore,
+      confirmationScope.collections.paymentHoldings,
+      'paymentId',
+      reference
+    ));
+    localRecords.push(await queryFirstDocData(
+      firestore,
+      confirmationScope.collections.paymentHoldings,
+      'chargeId',
+      reference
+    ));
+    localRecords.push(await queryFirstDocData(
+      firestore,
+      confirmationScope.collections.ridePayments,
+      'chargeId',
+      reference
+    ));
   }
 
   const authoritativeLocalRecord = localRecords.find((record) =>
-    record && isAuthoritativePaymentRecord(record, {
+    recordMatchesPaymentScope(record, confirmationScope) && isAuthoritativePaymentRecord(record, {
       references: safeReferences,
       expectedAmountInCents
     })
@@ -228,8 +307,13 @@ async function resolveAuthoritativePaymentConfirmation({
 
   if (paymentService && typeof paymentService.getPaymentStatus === 'function') {
     for (const reference of safeReferences) {
-      const providerStatus = await paymentService.getPaymentStatus(reference);
-      if (isAuthoritativeProviderStatus(providerStatus, expectedAmountInCents)) {
+      const providerStatus = paymentContext
+        ? await paymentService.getPaymentStatus(reference, paymentContext)
+        : await paymentService.getPaymentStatus(reference);
+      if (
+        providerStatusMatchesPaymentScope(providerStatus, confirmationScope) &&
+        isAuthoritativeProviderStatus(providerStatus, expectedAmountInCents)
+      ) {
         return {
           success: true,
           source: providerStatus.source || 'woovi_provider',
@@ -259,6 +343,7 @@ module.exports = {
   isSocketMockPaymentAllowed,
   normalizePaymentAmountCents,
   normalizePaymentStatus,
+  resolvePaymentConfirmationScope,
   resolveAuthoritativePaymentConfirmation,
   shouldRequireProviderPaymentConfirmation
 };

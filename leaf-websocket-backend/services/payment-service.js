@@ -7,6 +7,13 @@ const circuitBreakerService = require('./circuit-breaker-service');
 const subscriptionStateService = require('./subscription-state-service');
 const FinancialLedgerService = require('./financial-ledger-service');
 const {
+  FINANCIAL_COLLECTIONS,
+  sealFinancialContext,
+  resolveFinancialContext,
+  getFinancialCollections,
+  contextsMatch
+} = require('./financial-runtime-context');
+const {
   buildRideFinancialContract,
   validateAuthoritativeFinancialSnapshot
 } = require('./ride-financial-contract');
@@ -17,6 +24,18 @@ const redisPool = require('../utils/redis-pool');
 const {
   evaluateRideFlowValidationPaymentProfile
 } = require('./ride-flow-validation-guard');
+const {
+  assertStoredRecordMatchesScope,
+  resolveRidePersistenceScope
+} = require('./sandbox-persistence-context');
+
+function resolveBookingCompatibilityCollection(input = {}) {
+  const persistenceScope = resolveRidePersistenceScope(input);
+  return {
+    persistenceScope,
+    collectionName: persistenceScope.collections.bookings
+  };
+}
 
 function isRefundedPaymentStatus(status) {
   const normalized = String(status || '').trim().toUpperCase();
@@ -378,6 +397,9 @@ class PaymentService {
       provider: existing.provider || 'woovi',
       providerEnvironment: existing.providerEnvironment || existing.wooviEnvironment || null,
       paymentProfileId: existing.paymentProfileId || null,
+      financialContext: existing.financialContext || null,
+      financialNamespace: existing.financialNamespace || existing.financialContext?.namespace || null,
+      financialContextId: existing.financialContextId || existing.financialContext?.contextId || null,
       paymentSessionId: existing.paymentSessionId || null,
       paymentContextKey: existing.paymentContextKey || null,
       quoteSessionId: existing.quoteSessionId || null,
@@ -397,8 +419,71 @@ class PaymentService {
     };
   }
 
+  async resolveFinancialContextForPayment(input = {}) {
+    const explicitResult = input.financialContext
+      ? resolveFinancialContext({
+        financialContext: input.financialContext,
+        providerEnvironment: input.providerEnvironment,
+        testUserSandbox: input.testUserSandbox
+      })
+      : null;
+    if (explicitResult && !explicitResult.ok) return explicitResult;
+
+    let intent = null;
+    if (input.chargeId) {
+      intent = await this.getAdvancePaymentIntentByChargeId(input.chargeId);
+      if (intent?.code && intent.code !== 'PAYMENT_INTENT_LOOKUP_FAILED') {
+        return { ok: false, code: intent.code, error: intent.error || 'Payment intent inválida' };
+      }
+    }
+    if ((!intent || !intent.found) && input.rideId) {
+      intent = await this.getAdvancePaymentIntent(input.rideId);
+    }
+
+    if (intent?.found) {
+      const intentResult = resolveFinancialContext(intent, { allowLegacyOperational: true });
+      if (!intentResult.ok) return intentResult;
+      const legacyOperationalCompatible =
+        (intentResult.legacy === true || intent.financialContextLegacy === true) &&
+        explicitResult?.context?.namespace === 'operational';
+      if (
+        explicitResult &&
+        !legacyOperationalCompatible &&
+        !contextsMatch(explicitResult.context, intentResult.context)
+      ) {
+        return {
+          ok: false,
+          code: 'FINANCIAL_CONTEXT_CONFLICT',
+          error: 'Contexto financeiro diverge da payment intent'
+        };
+      }
+      return legacyOperationalCompatible ? explicitResult : intentResult;
+    }
+
+    if (intent?.code && intent.code !== 'PAYMENT_INTENT_LOOKUP_FAILED') {
+      return { ok: false, code: intent.code, error: intent.error || 'Payment intent inválida' };
+    }
+
+    if (explicitResult?.context?.namespace === 'sandbox') {
+      return {
+        ok: false,
+        code: 'FINANCIAL_SANDBOX_INTENT_REQUIRED',
+        error: 'Payment intent sandbox não encontrada para confirmar o contexto financeiro'
+      };
+    }
+    if (explicitResult) return explicitResult;
+    return resolveFinancialContext(input, { allowLegacyOperational: true });
+  }
+
   async beginAdvancePaymentIntent(paymentData = {}, paymentProfile = {}) {
     const firestore = firebaseConfig.getFirestore();
+    const financialContext = sealFinancialContext({
+      providerEnvironment: paymentProfile.environment || 'production',
+      paymentProfileId: paymentProfile.profileId || null,
+      paymentProfileSource: paymentProfile.source || null,
+      testUserSandbox: paymentProfile.testUserSandbox === true
+    });
+    const { collections } = getFinancialCollections(financialContext);
     const rideId = String(paymentData.rideId || '').trim();
     const passengerId = String(paymentData.passengerId || '').trim();
     const amountCents = this.normalizePaymentAmountCents(paymentData.amount);
@@ -449,7 +534,7 @@ class PaymentService {
     ) * 1000;
 
     if (!firestore) {
-      if (this.productionRuntime) {
+      if (this.productionRuntime || financialContext.namespace === 'sandbox') {
         return {
           success: false,
           code: 'PAYMENT_INTENT_STORE_UNAVAILABLE',
@@ -469,6 +554,9 @@ class PaymentService {
         providerEnvironment: paymentProfile.environment || 'production',
         paymentProfileId: paymentProfile.profileId || null,
         paymentProfileSource: paymentProfile.source || null,
+        financialContext,
+        financialNamespace: financialContext.namespace,
+        financialContextId: financialContext.contextId,
         paymentSessionId,
         paymentContextKey,
         quoteSessionId,
@@ -484,7 +572,7 @@ class PaymentService {
       };
     }
 
-    const intentRef = firestore.collection('payment_intents').doc(paymentIntentId);
+    const intentRef = firestore.collection(collections.paymentIntents).doc(paymentIntentId);
 
     try {
       return await firestore.runTransaction(async (transaction) => {
@@ -500,8 +588,15 @@ class PaymentService {
           const existingPaymentContextKey = String(existing.paymentContextKey || '').trim();
           const existingQuoteLockId = String(existing.quoteLockId || '').trim();
           const existingPaymentDriverReservationId = String(existing.paymentDriverReservationId || '').trim();
+          const existingContextResult = resolveFinancialContext(existing, { allowLegacyOperational: true });
+          const legacyOperationalCompatible =
+            existingContextResult.ok &&
+            existingContextResult.legacy === true &&
+            financialContext.namespace === 'operational';
 
           if (
+            !existingContextResult.ok ||
+            (!legacyOperationalCompatible && !contextsMatch(existingContextResult.context, financialContext)) ||
             existingRideId !== rideId ||
             existingAmountCents !== amountCents ||
             (existingPassengerId && existingPassengerId !== passengerId) ||
@@ -554,6 +649,9 @@ class PaymentService {
               providerEnvironment: existing.providerEnvironment || paymentProfile.environment || null,
               paymentProfileId: existing.paymentProfileId || paymentProfile.profileId || null,
               paymentProfileSource: existing.paymentProfileSource || paymentProfile.source || null,
+              financialContext: existingContextResult.context,
+              financialNamespace: existingContextResult.context.namespace,
+              financialContextId: existingContextResult.context.contextId,
               quoteLockId: existing.quoteLockId || quoteLockId || null,
               paymentDriverReservationId: existing.paymentDriverReservationId || paymentDriverReservationId || null,
               paymentDriverReservationDriverId: existing.paymentDriverReservationDriverId || paymentDriverReservationDriverId || null,
@@ -610,6 +708,9 @@ class PaymentService {
           paymentProfileId: paymentProfile.profileId || null,
           paymentProfileSource: paymentProfile.source || null,
           paymentProfileReason: paymentProfile.reason || null,
+          financialContext,
+          financialNamespace: financialContext.namespace,
+          financialContextId: financialContext.contextId,
           settlementPolicy: 'post_ride_ledger',
           driverSettlement: 'deferred_until_ride_completed',
           lastAttemptAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -650,6 +751,9 @@ class PaymentService {
           paymentProfileId: paymentProfile.profileId || null,
           paymentProfileSource: paymentProfile.source || null,
           paymentProfileReason: paymentProfile.reason || null,
+          financialContext,
+          financialNamespace: financialContext.namespace,
+          financialContextId: financialContext.contextId,
           quoteVersion
         };
       });
@@ -685,6 +789,9 @@ class PaymentService {
         paymentProfileId: paymentProfile.profileId || null,
         paymentProfileSource: paymentProfile.source || null,
         paymentProfileReason: paymentProfile.reason || null,
+        financialContext,
+        financialNamespace: financialContext.namespace,
+        financialContextId: financialContext.contextId,
         paymentSessionId,
         paymentContextKey,
         quoteSessionId,
@@ -710,7 +817,10 @@ class PaymentService {
     try {
       const firestore = firebaseConfig.getFirestore();
       if (!firestore) return false;
-      await firestore.collection('payment_intents').doc(intent.paymentIntentId).set({
+      const contextResult = resolveFinancialContext(intent, { allowLegacyOperational: true });
+      if (!contextResult.ok) return false;
+      const { collections } = getFinancialCollections(contextResult.context);
+      await firestore.collection(collections.paymentIntents).doc(intent.paymentIntentId).set({
         status: 'charge_failed',
         error: errorPayload?.message || errorPayload?.error || errorPayload || 'Falha ao criar cobrança',
         errorPayload,
@@ -736,6 +846,9 @@ class PaymentService {
     try {
       const firestore = firebaseConfig.getFirestore();
       if (!firestore) return false;
+      const contextResult = resolveFinancialContext(intent, { allowLegacyOperational: true });
+      if (!contextResult.ok) return false;
+      const { collections } = getFinancialCollections(contextResult.context);
       const chargeCreatedAtIso = chargeData.chargeCreatedAtIso || new Date().toISOString();
       const chargeExpiresInSeconds = Number.parseInt(chargeData.chargeExpiresInSeconds, 10);
       const chargeExpiresAtIso = chargeData.chargeExpiresAtIso || (
@@ -745,7 +858,7 @@ class PaymentService {
       );
       await this.retryOperation(
         async () => {
-          await firestore.collection('payment_intents').doc(intent.paymentIntentId).set({
+          await firestore.collection(collections.paymentIntents).doc(intent.paymentIntentId).set({
             status: 'charge_created',
             chargeId: chargeData.chargeId || null,
             qrCode: chargeData.qrCode || null,
@@ -755,6 +868,9 @@ class PaymentService {
             paymentProfileId: intent.paymentProfileId || null,
             paymentProfileSource: intent.paymentProfileSource || null,
             paymentProfileReason: intent.paymentProfileReason || null,
+            financialContext: contextResult.context,
+            financialNamespace: contextResult.context.namespace,
+            financialContextId: contextResult.context.contextId,
             chargeCreatedAt: admin.firestore.FieldValue.serverTimestamp(),
             chargeCreatedAtIso,
             chargeExpiresInSeconds: Number.isFinite(chargeExpiresInSeconds) && chargeExpiresInSeconds > 0
@@ -788,7 +904,10 @@ class PaymentService {
       const firestore = firebaseConfig.getFirestore();
       if (!firestore) return false;
       const paymentIntentId = this.buildAdvancePaymentIntentId(safeRideId);
-      const intentRef = firestore.collection('payment_intents').doc(paymentIntentId);
+      const resolvedIntent = await this.getAdvancePaymentIntent(safeRideId);
+      if (!resolvedIntent.found || !resolvedIntent.financialContext) return false;
+      const { collections } = getFinancialCollections(resolvedIntent.financialContext);
+      const intentRef = firestore.collection(collections.paymentIntents).doc(paymentIntentId);
       const safeChargeId = String(chargeId || '').trim();
       return await firestore.runTransaction(async (transaction) => {
         const intentDoc = await transaction.get(intentRef);
@@ -858,12 +977,33 @@ class PaymentService {
         };
       }
       const paymentIntentId = this.buildAdvancePaymentIntentId(safeRideId);
-      const intentDoc = await firestore.collection('payment_intents').doc(paymentIntentId).get();
-      if (!intentDoc.exists) return { found: false, paymentIntentId };
+      const matches = [];
+      for (const namespace of ['operational', 'sandbox']) {
+        const collectionName = FINANCIAL_COLLECTIONS[namespace].paymentIntents;
+        const intentDoc = await firestore.collection(collectionName).doc(paymentIntentId).get();
+        if (intentDoc.exists) matches.push({ namespace, intentDoc });
+      }
+      if (matches.length === 0) return { found: false, paymentIntentId };
+      if (matches.length > 1) {
+        return {
+          found: false,
+          code: 'PAYMENT_INTENT_NAMESPACE_CONFLICT',
+          error: 'Payment intent existe em mais de um namespace financeiro',
+          paymentIntentId
+        };
+      }
+      const [{ intentDoc }] = matches;
+      const data = intentDoc.data() || {};
+      const contextResult = resolveFinancialContext(data, { allowLegacyOperational: true });
+      if (!contextResult.ok) return { found: false, paymentIntentId, ...contextResult };
       return {
         found: true,
         paymentIntentId,
-        ...(intentDoc.data() || {})
+        ...data,
+        financialContext: contextResult.context,
+        financialNamespace: contextResult.context.namespace,
+        financialContextId: contextResult.context.contextId,
+        financialContextLegacy: contextResult.legacy === true
       };
     } catch (error) {
       logStructured('warn', 'Falha ao consultar payment intent', {
@@ -893,22 +1033,35 @@ class PaymentService {
         };
       }
 
-      const snapshot = await firestore
-        .collection('payment_intents')
-        .where('chargeId', '==', safeChargeId)
-        .limit(1)
-        .get();
-
-      if (snapshot.empty) {
-        return { found: false };
+      const matches = [];
+      for (const namespace of ['operational', 'sandbox']) {
+        const snapshot = await firestore
+          .collection(FINANCIAL_COLLECTIONS[namespace].paymentIntents)
+          .where('chargeId', '==', safeChargeId)
+          .limit(1)
+          .get();
+        if (!snapshot.empty && snapshot.docs?.length) matches.push(snapshot.docs[0]);
       }
-
-      const doc = snapshot.docs[0];
+      if (matches.length === 0) return { found: false };
+      if (matches.length > 1) {
+        return {
+          found: false,
+          code: 'PAYMENT_INTENT_NAMESPACE_CONFLICT',
+          error: 'Cobrança existe em mais de um namespace financeiro'
+        };
+      }
+      const doc = matches[0];
       const data = doc.data() || {};
+      const contextResult = resolveFinancialContext(data, { allowLegacyOperational: true });
+      if (!contextResult.ok) return { found: false, ...contextResult };
       return {
         found: true,
         paymentIntentId: data.paymentIntentId || doc.id,
-        ...data
+        ...data,
+        financialContext: contextResult.context,
+        financialNamespace: contextResult.context.namespace,
+        financialContextId: contextResult.context.contextId,
+        financialContextLegacy: contextResult.legacy === true
       };
     } catch (error) {
       logStructured('warn', 'Falha ao consultar payment intent por chargeId', {
@@ -1069,7 +1222,10 @@ class PaymentService {
         return false;
       }
 
-      const eventRef = firestore.collection('payment_history').doc();
+      const contextResult = resolveFinancialContext(eventData, { allowLegacyOperational: true });
+      if (!contextResult.ok) return false;
+      const { collections } = getFinancialCollections(contextResult.context);
+      const eventRef = firestore.collection(collections.paymentHistory).doc();
 
       const eventPayload = {
         rideId: rideId,
@@ -1080,6 +1236,9 @@ class PaymentService {
         timestamp: admin.firestore.FieldValue.serverTimestamp(),
         actor: eventData.actor || 'system', // system, passenger, driver, admin
         actorId: eventData.actorId || null,
+        financialContext: contextResult.context,
+        financialNamespace: contextResult.context.namespace,
+        financialContextId: contextResult.context.contextId,
         metadata: {
           previousStatus: eventData.previousStatus || null,
           newStatus: eventData.newStatus || null,
@@ -1133,19 +1292,132 @@ class PaymentService {
         return null;
       }
 
-      const holdingRef = firestore.collection('payment_holdings').doc(rideId);
-      const holdingDoc = await holdingRef.get();
-
-      if (!holdingDoc.exists) {
-        return null;
+      const matches = [];
+      for (const namespace of ['operational', 'sandbox']) {
+        const holdingDoc = await firestore
+          .collection(FINANCIAL_COLLECTIONS[namespace].paymentHoldings)
+          .doc(rideId)
+          .get();
+        if (holdingDoc.exists) matches.push(holdingDoc.data() || {});
       }
-
-      return holdingDoc.data();
+      if (matches.length !== 1) return null;
+      const contextResult = resolveFinancialContext(matches[0], { allowLegacyOperational: true });
+      if (!contextResult.ok) return null;
+      return {
+        ...matches[0],
+        financialContext: contextResult.context,
+        financialContextLegacy: contextResult.legacy === true
+      };
 
     } catch (error) {
       logError(error, 'Erro ao buscar payment holding', { service: 'PaymentService' });
       return null;
     }
+  }
+
+  resolveMaterializedPaymentAliasId(record = {}, canonicalRideId = null) {
+    const normalizedCanonicalRideId = String(canonicalRideId || '').trim();
+    const candidates = [
+      record.paymentReferenceRideId,
+      record.temporaryRideId,
+      record.materializedFrom
+    ]
+      .map((value) => String(value || '').trim())
+      .filter((value) => value && value !== normalizedCanonicalRideId);
+    const uniqueCandidates = Array.from(new Set(candidates));
+    return uniqueCandidates.length === 1 ? uniqueCandidates[0] : null;
+  }
+
+  async updateSandboxCanonicalRecordAndAlias({
+    firestore,
+    collectionName,
+    canonicalRideId,
+    updatePayload,
+    financialContext
+  }) {
+    const normalizedCanonicalRideId = String(canonicalRideId || '').trim();
+    if (!firestore || !collectionName || !normalizedCanonicalRideId) {
+      throw new Error('Referência canônica sandbox inválida para sincronização de alias');
+    }
+    if (financialContext?.namespace !== 'sandbox') {
+      throw new Error('Sincronização de alias restrita ao namespace sandbox');
+    }
+
+    const canonicalRef = firestore.collection(collectionName).doc(normalizedCanonicalRideId);
+    const result = await firestore.runTransaction(async (transaction) => {
+      const canonicalSnapshot = await transaction.get(canonicalRef);
+      const canonicalRecord = canonicalSnapshot.exists ? canonicalSnapshot.data() || {} : {};
+      const canonicalContextResult = canonicalSnapshot.exists
+        ? resolveFinancialContext(canonicalRecord)
+        : { ok: true, context: financialContext };
+      if (!canonicalContextResult.ok || !contextsMatch(canonicalContextResult.context, financialContext)) {
+        const error = new Error('Contexto financeiro do registro canônico sandbox diverge da atualização');
+        error.code = 'FINANCIAL_CONTEXT_CONFLICT';
+        throw error;
+      }
+
+      const aliasId = this.resolveMaterializedPaymentAliasId(
+        canonicalRecord,
+        normalizedCanonicalRideId
+      );
+      let aliasRef = null;
+      let aliasRecord = null;
+      let aliasSkippedReason = aliasId ? null : 'ALIAS_REFERENCE_MISSING_OR_AMBIGUOUS';
+
+      if (aliasId) {
+        aliasRef = firestore.collection(collectionName).doc(aliasId);
+        const aliasSnapshot = await transaction.get(aliasRef);
+        if (!aliasSnapshot.exists) {
+          aliasSkippedReason = 'ALIAS_DOCUMENT_MISSING';
+          aliasRef = null;
+        } else {
+          aliasRecord = aliasSnapshot.data() || {};
+          const aliasContextResult = resolveFinancialContext(aliasRecord);
+          const canonicalChargeId = String(
+            canonicalRecord.chargeId || canonicalRecord.paymentId || ''
+          ).trim();
+          const aliasChargeId = String(aliasRecord.chargeId || aliasRecord.paymentId || '').trim();
+          if (!aliasContextResult.ok || !contextsMatch(aliasContextResult.context, financialContext)) {
+            aliasSkippedReason = 'ALIAS_FINANCIAL_CONTEXT_MISMATCH';
+            aliasRef = null;
+          } else if (canonicalChargeId && aliasChargeId && canonicalChargeId !== aliasChargeId) {
+            aliasSkippedReason = 'ALIAS_CHARGE_MISMATCH';
+            aliasRef = null;
+          }
+        }
+      }
+
+      transaction.set(canonicalRef, updatePayload, { merge: true });
+      if (aliasRef) {
+        transaction.set(aliasRef, {
+          ...updatePayload,
+          canonicalRideId: normalizedCanonicalRideId,
+          bookingId: normalizedCanonicalRideId,
+          temporaryRideId: aliasId,
+          paymentReferenceRideId: aliasId,
+          financialContext,
+          financialNamespace: financialContext.namespace,
+          financialContextId: financialContext.contextId
+        }, { merge: true });
+      }
+
+      return {
+        aliasId: aliasId || null,
+        aliasUpdated: Boolean(aliasRef),
+        aliasSkippedReason
+      };
+    });
+
+    if (result.aliasSkippedReason && result.aliasSkippedReason !== 'ALIAS_REFERENCE_MISSING_OR_AMBIGUOUS') {
+      logStructured('warn', 'Alias sandbox de pagamento não foi sincronizado', {
+        service: 'payment-service',
+        collectionName,
+        canonicalRideId: normalizedCanonicalRideId,
+        aliasId: result.aliasId,
+        reason: result.aliasSkippedReason
+      });
+    }
+    return result;
   }
 
   async writePaymentStatusCache(reference, payload = {}) {
@@ -1217,26 +1489,17 @@ class PaymentService {
     if (!normalizedChargeId) return null;
 
     try {
-      const firestore = firebaseConfig.getFirestore();
-      if (!firestore) return null;
-
-      const snapshot = await firestore
-        .collection('payment_intents')
-        .where('chargeId', '==', normalizedChargeId)
-        .limit(1)
-        .get();
-
-      if (snapshot.empty) return null;
-
-      const paymentIntent = snapshot.docs[0].data() || {};
+      const paymentIntent = await this.getAdvancePaymentIntentByChargeId(normalizedChargeId);
+      if (!paymentIntent.found) return null;
       const providerEnvironment = String(paymentIntent.providerEnvironment || '').trim().toLowerCase();
       if (!providerEnvironment) return null;
 
       return {
         wooviConfig: getWooviConfig({ environment: providerEnvironment }),
-        paymentIntentId: paymentIntent.paymentIntentId || snapshot.docs[0].id,
+        paymentIntentId: paymentIntent.paymentIntentId,
         providerEnvironment,
-        paymentProfileId: paymentIntent.paymentProfileId || null
+        paymentProfileId: paymentIntent.paymentProfileId || null,
+        financialContext: paymentIntent.financialContext
       };
     } catch (error) {
       logStructured('debug', 'Falha ao resolver ambiente Woovi da cobrança', {
@@ -1280,17 +1543,6 @@ class PaymentService {
         passengerEmail: paymentData.passengerEmail
       });
 
-      if (this.shouldForceBypass(paymentData)) {
-        const bypassResult = this.buildBypassAdvancePaymentResult(paymentData, 'force_bypass_enabled');
-        logStructured('warn', 'Bypass de pagamento forçado por configuração', {
-          service: 'PaymentService',
-          rideId: paymentData.rideId,
-          passengerId: paymentData.passengerId,
-          chargeId: bypassResult.chargeId
-        });
-        return bypassResult;
-      }
-
       const paymentProfile = await this.paymentRuntimeProfileService.resolveProfile({
         passengerId: paymentData.passengerId,
         userId: paymentData.passengerId,
@@ -1300,6 +1552,36 @@ class PaymentService {
         actor: paymentData.actor || null,
         appReview: String(process.env.APP_REVIEW || '').toLowerCase() === 'true'
       });
+
+      if (paymentData.financialContext) {
+        let incomingScope;
+        try {
+          incomingScope = resolveRidePersistenceScope(paymentData);
+        } catch (contextError) {
+          return {
+            success: false,
+            code: contextError.code || 'FINANCIAL_CONTEXT_INVALID',
+            error: contextError.message || 'Contexto financeiro inválido'
+          };
+        }
+
+        const profileContext = sealFinancialContext({
+          providerEnvironment: paymentProfile.environment,
+          paymentProfileId: paymentProfile.profileId || null,
+          paymentProfileSource: paymentProfile.source || null,
+          testUserSandbox: paymentProfile.testUserSandbox === true
+        });
+        if (!contextsMatch(incomingScope.financialContext, profileContext)) {
+          return {
+            success: false,
+            code: 'FINANCIAL_CONTEXT_CONFLICT',
+            error: 'Perfil de pagamento diverge do contexto classificado pela rota',
+            provider: paymentProfile.provider || 'woovi',
+            providerEnvironment: paymentProfile.environment,
+            paymentProfileId: paymentProfile.profileId || null
+          };
+        }
+      }
 
       logStructured('info', 'Perfil de pagamento resolvido', {
         service: 'PaymentService',
@@ -1311,6 +1593,25 @@ class PaymentService {
         paymentProfileSource: paymentProfile.source,
         paymentProfileReason: paymentProfile.reason
       });
+
+      if (this.shouldForceBypass(paymentData) && paymentProfile.environment !== 'sandbox') {
+        const bypassResult = this.buildBypassAdvancePaymentResult(paymentData, 'force_bypass_enabled');
+        logStructured('warn', 'Bypass de pagamento forçado por configuração', {
+          service: 'PaymentService',
+          rideId: paymentData.rideId,
+          passengerId: paymentData.passengerId,
+          chargeId: bypassResult.chargeId
+        });
+        return bypassResult;
+      }
+      if (this.shouldForceBypass(paymentData) && paymentProfile.environment === 'sandbox') {
+        logStructured('warn', 'Bypass ignorado para preservar isolamento financeiro sandbox', {
+          service: 'PaymentService',
+          rideId: paymentData.rideId,
+          passengerId: paymentData.passengerId,
+          paymentProfileId: paymentProfile.profileId
+        });
+      }
 
       const rideFlowValidationGuard = evaluateRideFlowValidationPaymentProfile(paymentProfile);
       if (!rideFlowValidationGuard.allowed) {
@@ -1416,6 +1717,8 @@ class PaymentService {
           { key: 'payment_type', value: 'advance_payment' },
           { key: 'provider_environment', value: paymentIntent.providerEnvironment || paymentProfile.environment || 'production' },
           { key: 'payment_profile_id', value: paymentIntent.paymentProfileId || paymentProfile.profileId || '' },
+          { key: 'financial_namespace', value: paymentIntent.financialNamespace || '' },
+          { key: 'financial_context_id', value: paymentIntent.financialContextId || '' },
           { key: 'service', value: 'ride_sharing' },
           { key: 'settlement_model', value: 'post_ride_ledger' },
           { key: 'driver_settlement', value: 'deferred_until_ride_completed' }
@@ -1496,7 +1799,10 @@ class PaymentService {
           wooviMessage.includes('feature is not enabled') ||
           wooviMessage.includes('não estão habilitados');
 
-        if (this.PAYMENT_BYPASS_ON_WOOVI_FAILURE) {
+        if (
+          this.PAYMENT_BYPASS_ON_WOOVI_FAILURE &&
+          paymentProfile.environment !== 'sandbox'
+        ) {
           const bypassResult = this.buildBypassAdvancePaymentResult(
             paymentData,
             'woovi_feature_or_auth_unavailable'
@@ -1588,6 +1894,9 @@ class PaymentService {
         provider: paymentIntent.provider || 'woovi',
         providerEnvironment: paymentIntent.providerEnvironment || paymentProfile.environment,
         paymentProfileId: paymentIntent.paymentProfileId || paymentProfile.profileId || null,
+        financialContext: paymentIntent.financialContext,
+        financialNamespace: paymentIntent.financialNamespace,
+        financialContextId: paymentIntent.financialContextId,
         paymentSessionId: paymentIntent.paymentSessionId || null,
         paymentContextKey: paymentIntent.paymentContextKey || null,
         quoteSessionId: paymentIntent.quoteSessionId || null,
@@ -1719,10 +2028,60 @@ class PaymentService {
         return { success: false, error: 'rideId e chargeId são obrigatórios' };
       }
 
-      const paymentsCollection = firestore.collection('ride_payments');
+      const contextResult = await this.resolveFinancialContextForPayment({
+        rideId,
+        chargeId,
+        financialContext: paymentInfo.financialContext || metadata.financialContext,
+        providerEnvironment: paymentInfo.providerEnvironment || metadata.providerEnvironment,
+        testUserSandbox: paymentInfo.testUserSandbox === true || metadata.testUserSandbox === true
+      });
+      if (!contextResult.ok) {
+        return { success: false, code: contextResult.code, error: contextResult.error };
+      }
+      const financialContext = contextResult.context;
+      const { collections } = getFinancialCollections(financialContext);
+      const bookingCompatibility = resolveBookingCompatibilityCollection({
+        financialContext,
+        financialNamespace:
+          paymentInfo.financialNamespace ||
+          metadata.financialNamespace ||
+          financialContext.namespace,
+        financialContextId:
+          paymentInfo.financialContextId ||
+          metadata.financialContextId ||
+          financialContext.contextId,
+        providerEnvironment:
+          paymentInfo.providerEnvironment ||
+          metadata.providerEnvironment ||
+          financialContext.providerEnvironment,
+        testUserSandbox: Object.prototype.hasOwnProperty.call(paymentInfo, 'testUserSandbox')
+          ? paymentInfo.testUserSandbox
+          : (Object.prototype.hasOwnProperty.call(metadata, 'testUserSandbox')
+            ? metadata.testUserSandbox
+            : financialContext.testUserSandbox)
+      });
+
+      const paymentsCollection = firestore.collection(collections.ridePayments);
       const paymentRef = paymentsCollection.doc(rideId);
       const existingDoc = await paymentRef.get();
       const existingData = existingDoc.exists ? existingDoc.data() : {};
+      if (existingDoc.exists) {
+        const existingContextResult = resolveFinancialContext(existingData, { allowLegacyOperational: true });
+        const legacyOperationalCompatible =
+          existingContextResult.ok &&
+          existingContextResult.legacy === true &&
+          financialContext.namespace === 'operational';
+        if (
+          !existingContextResult.ok ||
+          (!legacyOperationalCompatible && !contextsMatch(existingContextResult.context, financialContext))
+        ) {
+          return {
+            success: false,
+            code: 'FINANCIAL_CONTEXT_CONFLICT',
+            error: 'Pagamento confirmado já existe com outro contexto financeiro'
+          };
+        }
+      }
 
       const now = admin.firestore.FieldValue.serverTimestamp();
 
@@ -1733,6 +2092,7 @@ class PaymentService {
         chargeId,
         amountCents: resolvedAmount,
         passengerId: resolvedPassengerId,
+        financialContext,
         metadata: {
           source: 'storeConfirmedPayment',
           webhookEvent: metadata?.event || null,
@@ -1750,6 +2110,9 @@ class PaymentService {
         status: ledgerPosted ? 'CONFIRMED' : 'LEDGER_PENDING',
         credited: typeof existingData.credited === 'boolean' ? existingData.credited : false,
         metadata: metadata || {},
+        financialContext,
+        financialNamespace: financialContext.namespace,
+        financialContextId: financialContext.contextId,
         ledgerStatus,
         ledgerEventId: ledgerResult.eventId || null,
         ledgerError: ledgerPosted ? null : ledgerResult.error || ledgerResult.code || 'Falha ao registrar ledger de pagamento',
@@ -1765,7 +2128,7 @@ class PaymentService {
       logStructured('debug', 'Registro/atualização em ride_payments', { service: 'PaymentService', paymentPayload });
 
       // Atualizar documento da corrida para refletir status do pagamento
-      const bookingsRef = firestore.collection('bookings').doc(rideId);
+      const bookingsRef = firestore.collection(bookingCompatibility.collectionName).doc(rideId);
       await bookingsRef.set({
         paymentStatus: ledgerPosted ? 'confirmed' : 'ledger_pending',
         paymentChargeId: chargeId,
@@ -1774,7 +2137,10 @@ class PaymentService {
         paymentLedgerStatus: ledgerStatus,
         paymentLedgerEventId: ledgerResult.eventId || null,
         paymentLedgerError: ledgerPosted ? null : ledgerResult.error || ledgerResult.code || 'Falha ao registrar ledger de pagamento',
-        paymentDispatchBlockedReason: ledgerPosted ? null : 'PAYMENT_LEDGER_PENDING'
+        paymentDispatchBlockedReason: ledgerPosted ? null : 'PAYMENT_LEDGER_PENDING',
+        financialContext,
+        financialNamespace: financialContext.namespace,
+        financialContextId: financialContext.contextId
       }, { merge: true });
 
       if (!ledgerResult.success) {
@@ -1790,7 +2156,8 @@ class PaymentService {
         service: 'PaymentService',
         rideId,
         chargeId,
-        ledgerStatus
+        ledgerStatus,
+        financialNamespace: financialContext.namespace
       });
 
       return {
@@ -1799,6 +2166,7 @@ class PaymentService {
         ledgerStatus,
         ledgerEventId: ledgerResult.eventId || null,
         ledgerError: ledgerPosted ? null : ledgerResult.error || ledgerResult.code || null,
+        financialContext,
         payment: {
           ...existingData,
           ...paymentPayload
@@ -1808,6 +2176,7 @@ class PaymentService {
       logError(error, 'Erro ao armazenar pagamento confirmado', { service: 'PaymentService' });
       return {
         success: false,
+        code: error.code || undefined,
         error: error.message
       };
     }
@@ -1817,31 +2186,49 @@ class PaymentService {
    * Obtém dados do pagamento armazenado
    * @param {string} rideId
    */
-  async getStoredPayment(rideId) {
+  async getStoredPayment(rideId, financialContext = null) {
     try {
       const firestore = firebaseConfig.getFirestore();
       if (!firestore) {
         return null;
       }
 
-      const paymentRef = firestore.collection('ride_payments').doc(rideId);
-      const paymentDoc = await paymentRef.get();
-      if (!paymentDoc.exists) {
-        return null;
+      const collectionNames = financialContext
+        ? [getFinancialCollections(financialContext).collections.ridePayments]
+        : [
+          FINANCIAL_COLLECTIONS.operational.ridePayments,
+          FINANCIAL_COLLECTIONS.sandbox.ridePayments
+        ];
+      const matches = [];
+      for (const collectionName of collectionNames) {
+        const paymentDoc = await firestore.collection(collectionName).doc(rideId).get();
+        if (paymentDoc.exists) matches.push(paymentDoc.data() || {});
       }
-
-      return paymentDoc.data();
+      if (matches.length !== 1) return null;
+      const contextResult = resolveFinancialContext(matches[0], { allowLegacyOperational: true });
+      if (!contextResult.ok) return null;
+      return {
+        ...matches[0],
+        financialContext: contextResult.context,
+        financialContextLegacy: contextResult.legacy === true
+      };
     } catch (error) {
       logError(error, 'Erro ao buscar pagamento armazenado', { service: 'PaymentService' });
       return null;
     }
   }
 
-  async findStoredPaymentByChargeId(chargeId) {
+  async findStoredPaymentByChargeId(chargeId, financialContext = null) {
     const normalizedChargeId = String(chargeId || '').trim();
     if (!normalizedChargeId) return null;
 
     try {
+      const contextResult = resolveFinancialContext(
+        { financialContext },
+        { allowLegacyOperational: true }
+      );
+      if (!contextResult.ok) return null;
+      const { collections } = getFinancialCollections(contextResult.context);
       const firestore = firebaseConfig.getFirestore();
       if (!firestore) return null;
 
@@ -1858,18 +2245,26 @@ class PaymentService {
 
         const doc = snapshot.docs[0];
         const data = doc.data() || {};
+        const resolvedRideId = contextResult.context.namespace === 'sandbox'
+          ? (
+            data.canonicalRideId ||
+            data.bookingId ||
+            data.rideId ||
+            doc.id
+          )
+          : (data.rideId || data.bookingId || doc.id);
         return {
           ...data,
-          rideId: data.rideId || data.bookingId || doc.id,
+          rideId: resolvedRideId,
           chargeId: data.chargeId || data.paymentId || normalizedChargeId
         };
       };
 
       return (
-        await searchCollection('ride_payments', 'chargeId') ||
-        await searchCollection('ride_payments', 'paymentId') ||
-        await searchCollection('payment_holdings', 'chargeId') ||
-        await searchCollection('payment_holdings', 'paymentId')
+        await searchCollection(collections.ridePayments, 'chargeId') ||
+        await searchCollection(collections.ridePayments, 'paymentId') ||
+        await searchCollection(collections.paymentHoldings, 'chargeId') ||
+        await searchCollection(collections.paymentHoldings, 'paymentId')
       );
     } catch (error) {
       logStructured('warn', 'Falha ao resolver pagamento por chargeId para refund', {
@@ -1881,15 +2276,28 @@ class PaymentService {
     }
   }
 
-  async resolveStoredPaymentForRefund({ rideId, chargeId } = {}) {
+  async resolveStoredPaymentForRefund({ rideId, chargeId, financialContext = null } = {}) {
     const normalizedRideId = String(rideId || '').trim();
     const normalizedChargeId = String(chargeId || '').trim();
+    const contextResult = resolveFinancialContext(
+      { financialContext },
+      { allowLegacyOperational: true }
+    );
+    if (!contextResult.ok) {
+      return { success: false, ...contextResult };
+    }
+    const sealedFinancialContext = contextResult.context;
 
-    let paymentRecord = normalizedRideId ? await this.getStoredPayment(normalizedRideId) : null;
+    let paymentRecord = normalizedRideId
+      ? await this.getStoredPayment(normalizedRideId, sealedFinancialContext)
+      : null;
     let resolvedRideId = normalizedRideId;
 
     if (!paymentRecord && normalizedChargeId) {
-      paymentRecord = await this.findStoredPaymentByChargeId(normalizedChargeId);
+      paymentRecord = await this.findStoredPaymentByChargeId(
+        normalizedChargeId,
+        sealedFinancialContext
+      );
       resolvedRideId = paymentRecord?.rideId || paymentRecord?.bookingId || null;
     }
 
@@ -1898,6 +2306,27 @@ class PaymentService {
         success: false,
         code: 'PAYMENT_RECORD_NOT_FOUND',
         error: 'Pagamento da corrida não encontrado para reembolso canônico'
+      };
+    }
+
+    const paymentContextResult = resolveFinancialContext(
+      paymentRecord,
+      { allowLegacyOperational: true }
+    );
+    if (!paymentContextResult.ok) {
+      return { success: false, ...paymentContextResult };
+    }
+    const legacyOperationalCompatible =
+      paymentContextResult.legacy === true &&
+      sealedFinancialContext.namespace === 'operational';
+    if (
+      !legacyOperationalCompatible &&
+      !contextsMatch(paymentContextResult.context, sealedFinancialContext)
+    ) {
+      return {
+        success: false,
+        code: 'FINANCIAL_CONTEXT_CONFLICT',
+        error: 'Contexto financeiro do pagamento diverge do reembolso'
       };
     }
 
@@ -1914,7 +2343,12 @@ class PaymentService {
       success: true,
       rideId: resolvedRideId,
       chargeId: normalizedChargeId || recordChargeId,
-      paymentRecord
+      paymentRecord: {
+        ...paymentRecord,
+        financialContext: paymentContextResult.context,
+        financialContextLegacy: paymentContextResult.legacy === true
+      },
+      financialContext: sealedFinancialContext
     };
   }
 
@@ -1932,15 +2366,21 @@ class PaymentService {
       .slice(0, 32);
   }
 
-  async claimRideRefund({ rideId, chargeId, amount, reason, status }) {
+  async claimRideRefund({ rideId, chargeId, amount, reason, status, financialContext = null }) {
     try {
       const firestore = firebaseConfig.getFirestore();
       if (!firestore) {
         return { success: false, code: 'FIRESTORE_UNAVAILABLE', error: 'Firestore não disponível' };
       }
 
+      const contextResult = resolveFinancialContext(
+        { financialContext },
+        { allowLegacyOperational: true }
+      );
+      if (!contextResult.ok) return { success: false, ...contextResult };
+      const { collections } = getFinancialCollections(contextResult.context);
       const refundRequestId = this.buildRefundRequestId({ rideId, chargeId, amount, reason, status });
-      const paymentRef = firestore.collection('ride_payments').doc(rideId);
+      const paymentRef = firestore.collection(collections.ridePayments).doc(rideId);
 
       return await firestore.runTransaction(async (transaction) => {
         const paymentDoc = await transaction.get(paymentRef);
@@ -1983,12 +2423,18 @@ class PaymentService {
     }
   }
 
-  async clearRideRefundClaim({ rideId, refundRequestId, status = 'FAILED', error = null } = {}) {
+  async clearRideRefundClaim({ rideId, refundRequestId, status = 'FAILED', error = null, financialContext = null } = {}) {
     try {
       const firestore = firebaseConfig.getFirestore();
       if (!firestore || !rideId) return;
 
-      await firestore.collection('ride_payments').doc(rideId).set({
+      const contextResult = resolveFinancialContext(
+        { financialContext },
+        { allowLegacyOperational: true }
+      );
+      if (!contextResult.ok) return;
+      const { collections } = getFinancialCollections(contextResult.context);
+      await firestore.collection(collections.ridePayments).doc(rideId).set({
         refundInProgress: false,
         refundStatus: status,
         refundRequestId,
@@ -2009,7 +2455,7 @@ class PaymentService {
    * @param {string} rideId
    * @param {string} driverId
    */
-  async associateDriverToPayment(rideId, driverId) {
+  async associateDriverToPayment(rideId, driverId, financialScopeInput = null) {
     try {
       const firestore = firebaseConfig.getFirestore();
       if (!firestore) {
@@ -2021,15 +2467,53 @@ class PaymentService {
         return { success: false, error: 'rideId e driverId são obrigatórios' };
       }
 
-      await firestore.collection('ride_payments').doc(rideId).set({
+      let requestedScope = null;
+      if (financialScopeInput && typeof financialScopeInput === 'object') {
+        try {
+          requestedScope = resolveRidePersistenceScope(financialScopeInput);
+        } catch (contextError) {
+          return {
+            success: false,
+            code: contextError.code || 'FINANCIAL_CONTEXT_INVALID',
+            error: contextError.message || 'Contexto financeiro inválido'
+          };
+        }
+      }
+
+      const paymentRecord = await this.getStoredPayment(
+        rideId,
+        requestedScope?.financialContext || null
+      );
+      if (!paymentRecord) return { success: false, error: 'Pagamento não encontrado' };
+      const contextResult = resolveFinancialContext(paymentRecord, { allowLegacyOperational: true });
+      if (!contextResult.ok) return { success: false, ...contextResult };
+      if (
+        requestedScope?.financialContext &&
+        !contextsMatch(requestedScope.financialContext, contextResult.context)
+      ) {
+        return {
+          success: false,
+          code: 'FINANCIAL_CONTEXT_CONFLICT',
+          error: 'Contexto financeiro diverge do pagamento armazenado'
+        };
+      }
+      const { collections } = getFinancialCollections(contextResult.context);
+      const bookingCompatibility = resolveBookingCompatibilityCollection(paymentRecord);
+      await firestore.collection(collections.ridePayments).doc(rideId).set({
         rideId,
         assignedDriverId: driverId,
-        driverAssociatedAt: admin.firestore.FieldValue.serverTimestamp()
+        driverAssociatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        financialContext: contextResult.context,
+        financialNamespace: contextResult.context.namespace,
+        financialContextId: contextResult.context.contextId
       }, { merge: true });
       logStructured('info', 'driverId associado ao pagamento confirmado', { service: 'PaymentService', rideId, driverId });
 
-      await firestore.collection('bookings').doc(rideId).set({
-        driverId
+      await firestore.collection(bookingCompatibility.collectionName).doc(rideId).set({
+        driverId,
+        financialContext: contextResult.context,
+        financialNamespace: contextResult.context.namespace,
+        financialContextId: contextResult.context.contextId
       }, { merge: true });
 
       logStructured('info', 'Driver associado ao pagamento', { service: 'PaymentService', rideId, driverId });
@@ -2074,6 +2558,15 @@ class PaymentService {
           success: false,
           error: 'Pagamento não encontrado',
           details: 'Nenhum pagamento confirmado para esta corrida'
+        };
+      }
+      const paymentContextResult = resolveFinancialContext(paymentRecord, { allowLegacyOperational: true });
+      if (!paymentContextResult.ok) return { success: false, ...paymentContextResult };
+      if (paymentContextResult.context.namespace === 'sandbox') {
+        return {
+          success: false,
+          code: 'SANDBOX_LEGACY_DIRECT_CREDIT_DISABLED',
+          error: 'Crédito direto legado não é permitido no sandbox'
         };
       }
 
@@ -2255,7 +2748,14 @@ class PaymentService {
       const status = refundData.status || 'REFUNDED';
       const refundAmount = refundData.refundAmount || 0;
       const cancellationFee = refundData.cancellationFee || 0;
-      const paymentRef = firestore.collection('ride_payments').doc(rideId);
+      const contextResult = resolveFinancialContext(
+        { financialContext: refundData.financialContext },
+        { allowLegacyOperational: true }
+      );
+      if (!contextResult.ok) return { success: false, ...contextResult };
+      const financialContext = contextResult.context;
+      const { collections } = getFinancialCollections(financialContext);
+      const paymentRef = firestore.collection(collections.ridePayments).doc(rideId);
       const existingPaymentDoc = await paymentRef.get();
       const existingPayment = existingPaymentDoc.exists ? existingPaymentDoc.data() : {};
       const chargeId = refundData.chargeId || existingPayment.chargeId || existingPayment.paymentId || null;
@@ -2275,7 +2775,10 @@ class PaymentService {
         refundId: refundData.refundId || null,
         refundReason: refundData.reason || null,
         refundMetadata: refundData.metadata || null,
-        refundClosedAt: closedAt
+        refundClosedAt: closedAt,
+        financialContext,
+        financialNamespace: financialContext.namespace,
+        financialContextId: financialContext.contextId
       };
       if (hasProviderRefund) {
         updates.refundedAt = closedAt;
@@ -2283,7 +2786,20 @@ class PaymentService {
         updates.noRefundRequiredAt = closedAt;
       }
 
-      await paymentRef.set(updates, { merge: true });
+      if (financialContext.namespace === 'sandbox') {
+        await this.retryOperation(
+          () => this.updateSandboxCanonicalRecordAndAlias({
+            firestore,
+            collectionName: collections.ridePayments,
+            canonicalRideId: rideId,
+            updatePayload: updates,
+            financialContext
+          }),
+          'markPaymentRefundedSandboxAlias'
+        );
+      } else {
+        await paymentRef.set(updates, { merge: true });
+      }
 
       // ✅ NOVO: Atualizar payment_holdings também
       const holdingUpdate = {
@@ -2317,6 +2833,7 @@ class PaymentService {
           refundId: refundData.refundId || null,
           amountCents: refundAmount,
           passengerId: refundData.passengerId || existingPayment.passengerId || null,
+          financialContext,
           reason: refundData.reason || null,
           metadata: refundData.metadata || {}
         });
@@ -2367,6 +2884,7 @@ class PaymentService {
     status = 'REFUNDED',
     cancellationFee = 0,
     passengerId = null,
+    financialContext = null,
     metadata = {}
   } = {}) {
     const resolvedRideInput = String(rideId || bookingId || '').trim();
@@ -2382,7 +2900,8 @@ class PaymentService {
 
     const resolvedPayment = await this.resolveStoredPaymentForRefund({
       rideId: resolvedRideInput,
-      chargeId
+      chargeId,
+      financialContext
     });
 
     if (!resolvedPayment.success) {
@@ -2392,6 +2911,20 @@ class PaymentService {
     const canonicalRideId = resolvedPayment.rideId;
     const canonicalChargeId = resolvedPayment.chargeId;
     const paymentRecord = resolvedPayment.paymentRecord || {};
+    const contextResult = resolveFinancialContext({
+      financialContext: resolvedPayment.financialContext
+    });
+    if (!contextResult.ok) return { success: false, ...contextResult };
+    const legacyOperationalCompatible =
+      paymentRecord.financialContextLegacy === true &&
+      contextResult.context.namespace === 'operational';
+    if (!legacyOperationalCompatible && !contextsMatch(paymentRecord.financialContext, contextResult.context)) {
+      return {
+        success: false,
+        code: 'FINANCIAL_CONTEXT_CONFLICT',
+        error: 'Contexto financeiro do reembolso diverge do pagamento'
+      };
+    }
 
     if (!canonicalChargeId) {
       return {
@@ -2418,7 +2951,8 @@ class PaymentService {
       chargeId: canonicalChargeId,
       amount: refundAmount,
       reason,
-      status
+      status,
+      financialContext: contextResult.context
     });
 
     if (!claim.success || claim.alreadyRefunded) {
@@ -2430,13 +2964,19 @@ class PaymentService {
       };
     }
 
-    const refundResult = await this.processRefund(canonicalChargeId, refundAmount, reason);
+    const refundResult = await this.processRefund(
+      canonicalChargeId,
+      refundAmount,
+      reason,
+      contextResult.context
+    );
     if (!refundResult.success) {
       await this.clearRideRefundClaim({
         rideId: canonicalRideId,
         refundRequestId: claim.refundRequestId,
         status: 'FAILED',
-        error: refundResult.error || refundResult.details || 'Falha ao processar reembolso'
+        error: refundResult.error || refundResult.details || 'Falha ao processar reembolso',
+        financialContext: contextResult.context
       });
       return refundResult;
     }
@@ -2450,6 +2990,7 @@ class PaymentService {
       reason,
       passengerId: passengerId || paymentRecord.passengerId || null,
       refundRequestId: claim.refundRequestId,
+      financialContext: contextResult.context,
       metadata: {
         ...metadata,
         refundRequestId: claim.refundRequestId,
@@ -2490,7 +3031,7 @@ class PaymentService {
    * @param {string} reason - Motivo do reembolso
    * @returns {Promise<Object>} - Resultado do reembolso
    */
-  async processRefund(chargeId, amount, reason = 'No driver found') {
+  async processRefund(chargeId, amount, reason = 'No driver found', financialContext = null) {
     try {
       logStructured('info', 'Processando reembolso', { service: 'PaymentService', chargeId, amount, reason });
 
@@ -2528,14 +3069,30 @@ class PaymentService {
       }
 
       // Processar reembolso diretamente na Woovi (com circuit breaker)
+      const contextResult = resolveFinancialContext(
+        { financialContext },
+        { allowLegacyOperational: true }
+      );
+      if (!contextResult.ok) return { success: false, ...contextResult };
+      const chargeRuntime = await this.resolveWooviConfigForCharge(chargeId);
+      if (
+        contextResult.context.namespace === 'sandbox' &&
+        (!chargeRuntime?.financialContext || !contextsMatch(chargeRuntime.financialContext, contextResult.context))
+      ) {
+        return {
+          success: false,
+          code: 'FINANCIAL_SANDBOX_CONTEXT_LOST',
+          error: 'Não foi possível confirmar o ambiente sandbox do reembolso'
+        };
+      }
       const refundResult = await circuitBreakerService.execute(
         'woovi_refund',
         async () => {
-          return await this.wooviDriverService.processRefund(
-            chargeId,
-            amount,
-            `Reembolso Leaf - ${reason}`
-          );
+          const refundArgs = [chargeId, amount, `Reembolso Leaf - ${reason}`];
+          if (contextResult.context.namespace === 'sandbox') {
+            refundArgs.push({ wooviConfig: chargeRuntime.wooviConfig });
+          }
+          return await this.wooviDriverService.processRefund(...refundArgs);
         },
         async () => {
           // Fallback: retornar erro se circuit breaker aberto
@@ -2725,6 +3282,39 @@ class PaymentService {
    */
   async processNetDistribution(rideData) {
     try {
+      const storedPayment = await this.getStoredPayment(rideData.rideId, rideData.financialContext || null);
+      const contextResult = await this.resolveFinancialContextForPayment({
+        rideId: rideData.rideId,
+        chargeId: storedPayment?.chargeId || storedPayment?.paymentId,
+        financialContext: rideData.financialContext || storedPayment?.financialContext,
+        providerEnvironment: rideData.providerEnvironment || storedPayment?.providerEnvironment
+      });
+      if (!contextResult.ok) {
+        return { success: false, code: contextResult.code, error: contextResult.error };
+      }
+      const financialContext = contextResult.context;
+      if (!storedPayment && financialContext.namespace === 'sandbox') {
+        return {
+          success: false,
+          code: 'PAYMENT_RECORD_NOT_FOUND',
+          error: 'Pagamento sandbox não encontrado para liquidação'
+        };
+      }
+      const legacyOperationalCompatible =
+        storedPayment?.financialContextLegacy === true &&
+        financialContext.namespace === 'operational';
+      if (
+        storedPayment &&
+        !legacyOperationalCompatible &&
+        !contextsMatch(storedPayment.financialContext, financialContext)
+      ) {
+        return {
+          success: false,
+          code: 'FINANCIAL_CONTEXT_CONFLICT',
+          error: 'Contexto financeiro da corrida diverge do pagamento confirmado'
+        };
+      }
+
       logStructured('info', 'Processando distribuição líquida', {
         service: 'PaymentService',
         rideId: rideData.rideId,
@@ -2737,7 +3327,7 @@ class PaymentService {
       let passengerRefundAmount = 0;
       let passengerRefundResult = null;
       try {
-        const paymentRecord = await this.getStoredPayment(rideData.rideId);
+        const paymentRecord = storedPayment;
         const chargeIdToRefund = paymentRecord?.chargeId || paymentRecord?.paymentId;
         if (paymentRecord && isCapturedPaymentStatus(paymentRecord.status) && chargeIdToRefund && paymentRecord.amount > rideData.totalAmount) {
           passengerRefundAmount = paymentRecord.amount - rideData.totalAmount;
@@ -2756,6 +3346,7 @@ class PaymentService {
             reason: 'Estorno de Encerramento Antecipado (recalculo de rota)',
             status: 'REFUNDED_PARTIAL',
             passengerId: paymentRecord.passengerId || rideData.passengerId || null,
+            financialContext,
             metadata: {
               source: 'processNetDistribution',
               originalAmountCents: paymentRecord.amount,
@@ -2814,7 +3405,11 @@ class PaymentService {
           code: 'FINANCIAL_SNAPSHOT_SUBSCRIPTION_RETENTION_UNSUPPORTED'
         };
       }
-      if (this.SUBSCRIPTION_SPLIT_RETENTION_ENABLED && rideData.driverId) {
+      if (
+        financialContext.namespace === 'operational' &&
+        this.SUBSCRIPTION_SPLIT_RETENTION_ENABLED &&
+        rideData.driverId
+      ) {
         try {
           const subscriptionBilling = await subscriptionStateService.getBillingData(rideData.driverId);
           if (subscriptionBilling.subscriptionStatus === 'grace_period' && subscriptionBilling.pendingFeeCents > 0) {
@@ -2877,7 +3472,7 @@ class PaymentService {
       let driverPixKey = rideData.driverPixKey || null;
 
       // Se não tiver chave Pix, tentar buscar do banco de dados
-      if (!driverPixKey && rideData.driverId) {
+      if (financialContext.namespace === 'operational' && !driverPixKey && rideData.driverId) {
         try {
           const DriverApprovalService = require('./driver-approval-service');
           const driverApprovalService = new DriverApprovalService();
@@ -2905,6 +3500,7 @@ class PaymentService {
       // Se não estiver, usar apenas crédito no Firestore
       if (
         this.isWooviDirectTransferOnRideCompletionEnabled() &&
+        financialContext.namespace === 'operational' &&
         driverPixKey &&
         this.LEAF_PIX_KEY &&
         this.LEAF_PIX_KEY !== 'test@leaf.app.br'
@@ -2968,6 +3564,7 @@ class PaymentService {
         operationalFeeCents: netCalculation.operationalFee,
         wooviFeeCents: netCalculation.wooviFee,
         retainedFeeCents: retainedFees,
+        financialContext,
         metadata: {
           transferId: transferId || null,
           balanceCreditId: plannedBalanceCreditId,
@@ -2995,7 +3592,8 @@ class PaymentService {
       const creditResult = await this.creditDriverBalance(
         rideData.driverId,
         netCalculation.netAmount,
-        rideData.rideId
+        rideData.rideId,
+        financialContext
       );
 
       if (!creditResult.success) {
@@ -3029,6 +3627,9 @@ class PaymentService {
         balanceCreditId: creditResult.transactionId || plannedBalanceCreditId,
         ledgerEventId: ledgerResult.eventId || null,
         calculation: netCalculation,
+        financialContext,
+        financialNamespace: financialContext.namespace,
+        financialContextId: financialContext.contextId,
         // Taxas retidas na conta Leaf (não transferidas)
         retainedFees: {
           operationalFee: netCalculation.operationalFee,
@@ -3039,7 +3640,7 @@ class PaymentService {
       };
 
       // ✅ Salvar distribuição no Firestore
-      await this.saveDistributionToFirestore(distributionData);
+      await this.saveDistributionToFirestore(distributionData, financialContext);
 
       // ✅ NOVO: Atualizar status do payment_holding para distributed
       await this.updatePaymentHolding(rideData.rideId, {
@@ -3051,10 +3652,16 @@ class PaymentService {
           balanceCreditId: creditResult.transactionId || plannedBalanceCreditId,
           ledgerEventId: ledgerResult.eventId || null,
           retainedFees: distributionData.retainedFees
-        }
+        },
+        financialContext,
+        financialNamespace: financialContext.namespace,
+        financialContextId: financialContext.contextId
       });
 
-      this.financialLedgerService.reconcileRideFinancials({ rideId: rideData.rideId })
+      this.financialLedgerService.reconcileRideFinancials({
+        rideId: rideData.rideId,
+        financialContext
+      })
         .catch((reconciliationError) => {
           logStructured('warn', 'Falha ao reconciliar corrida após settlement', {
             service: 'PaymentService',
@@ -3068,7 +3675,8 @@ class PaymentService {
         rideId: distributionData.rideId,
         netAmount: distributionData.netAmount,
         driverAmount: distributionData.driverAmount,
-        retainedFees: distributionData.retainedFees
+        retainedFees: distributionData.retainedFees,
+        financialNamespace: financialContext.namespace
       });
 
       return {
@@ -3080,7 +3688,8 @@ class PaymentService {
         balanceCreditId: creditResult.balanceId || rideData.driverId, // ID do crédito no Firestore
         balance: creditResult.newBalance || null, // Novo saldo do motorista
         calculation: netCalculation,
-        retainedFees: distributionData.retainedFees
+        retainedFees: distributionData.retainedFees,
+        financialContext
       };
 
     } catch (error) {
@@ -3104,6 +3713,22 @@ class PaymentService {
    */
   async processCancellationDistribution(rideData) {
     try {
+      const paymentRecord = await this.getStoredPayment(rideData.rideId, rideData.financialContext || null);
+      const contextResult = await this.resolveFinancialContextForPayment({
+        rideId: rideData.rideId,
+        chargeId: paymentRecord?.chargeId || paymentRecord?.paymentId,
+        financialContext: rideData.financialContext || paymentRecord?.financialContext,
+        providerEnvironment: rideData.providerEnvironment || paymentRecord?.providerEnvironment
+      });
+      if (!contextResult.ok) return { success: false, ...contextResult };
+      const financialContext = contextResult.context;
+      if (!paymentRecord && financialContext.namespace === 'sandbox') {
+        return {
+          success: false,
+          code: 'PAYMENT_RECORD_NOT_FOUND',
+          error: 'Pagamento sandbox não encontrado para liquidação de cancelamento'
+        };
+      }
       logStructured('info', 'Processando distribuição de Multa de Cancelamento/No-Show', {
         service: 'PaymentService',
         rideId: rideData.rideId,
@@ -3133,6 +3758,7 @@ class PaymentService {
         cancellationFeeCents: rideData.cancellationFee,
         netAmountCents: netAmount,
         wooviFeeCents: this.WOOVI_FEE_MINIMUM,
+        financialContext,
         metadata: {
           balanceCreditId: plannedBalanceCreditId
         }
@@ -3157,7 +3783,8 @@ class PaymentService {
       const creditResult = await this.creditDriverBalance(
         rideData.driverId,
         netAmount,
-        cancellationCreditRideId
+        cancellationCreditRideId,
+        financialContext
       );
 
       if (!creditResult.success) {
@@ -3173,6 +3800,9 @@ class PaymentService {
         netAmount: netAmount,
         balanceCreditId: creditResult.transactionId || plannedBalanceCreditId,
         ledgerEventId: ledgerResult.eventId || null,
+        financialContext,
+        financialNamespace: financialContext.namespace,
+        financialContextId: financialContext.contextId,
         calculation: {
           totalAmount: rideData.cancellationFee,
           operationalFee: 0,
@@ -3186,7 +3816,7 @@ class PaymentService {
         }
       };
 
-      await this.saveDistributionToFirestore(distributionData);
+      await this.saveDistributionToFirestore(distributionData, financialContext);
 
       logStructured('info', 'Distribuição de multa processada com sucesso', {
         service: 'payment-service',
@@ -3326,7 +3956,7 @@ class PaymentService {
    * @param {string} rideId - ID da corrida (para histórico)
    * @returns {Promise<Object>} - Resultado do crédito
    */
-  async creditDriverBalance(driverId, amount, rideId) {
+  async creditDriverBalance(driverId, amount, rideId, financialContext = null) {
     try {
       const firestore = firebaseConfig.getFirestore();
 
@@ -3359,7 +3989,15 @@ class PaymentService {
         };
       }
 
-      const balanceRef = firestore.collection('driver_balances').doc(driverId);
+      const contextResult = resolveFinancialContext(
+        { financialContext },
+        { allowLegacyOperational: true }
+      );
+      if (!contextResult.ok) {
+        return { success: false, code: contextResult.code, error: contextResult.error };
+      }
+      const { collections } = getFinancialCollections(contextResult.context);
+      const balanceRef = firestore.collection(collections.driverBalances).doc(driverId);
       const amountInReais = amountInCents / 100; // Converter centavos para reais
       const creditTransactionId = this.buildDriverBalanceCreditId(driverId, rideId, amountInCents);
       const creditTransactionRef = balanceRef.collection('transactions').doc(creditTransactionId);
@@ -3412,7 +4050,10 @@ class PaymentService {
           lastUpdated: admin.firestore.FieldValue.serverTimestamp(),
           lastRideId: rideId,
           lastCreditAmount: amountInReais,
-          lastCreditAmountCents: amountInCents
+          lastCreditAmountCents: amountInCents,
+          financialContext: contextResult.context,
+          financialNamespace: contextResult.context.namespace,
+          financialContextId: contextResult.context.contextId
         }, { merge: true });
 
         transaction.set(creditTransactionRef, {
@@ -3426,7 +4067,10 @@ class PaymentService {
           newBalanceCents,
           createdAt: admin.firestore.FieldValue.serverTimestamp(),
           description: `Ganhos da corrida ${rideId}`,
-          idempotencyKey: creditTransactionId
+          idempotencyKey: creditTransactionId,
+          financialContext: contextResult.context,
+          financialNamespace: contextResult.context.namespace,
+          financialContextId: contextResult.context.contextId
         });
 
         return {
@@ -3476,7 +4120,7 @@ class PaymentService {
    * Salva dados de distribuição no Firestore
    * @param {Object} distributionData - Dados da distribuição
    */
-  async saveDistributionToFirestore(distributionData) {
+  async saveDistributionToFirestore(distributionData, financialContext = null) {
     try {
       const firestore = firebaseConfig.getFirestore();
 
@@ -3485,12 +4129,21 @@ class PaymentService {
         return false;
       }
 
+      const contextResult = resolveFinancialContext(
+        { financialContext: financialContext || distributionData.financialContext },
+        { allowLegacyOperational: true }
+      );
+      if (!contextResult.ok) return false;
+      const { collections } = getFinancialCollections(contextResult.context);
       const distributionRef = firestore
-        .collection('payment_distributions')
+        .collection(collections.paymentDistributions)
         .doc(distributionData.rideId);
 
       await distributionRef.set({
         ...distributionData,
+        financialContext: contextResult.context,
+        financialNamespace: contextResult.context.namespace,
+        financialContextId: contextResult.context.contextId,
         createdAt: admin.firestore.FieldValue.serverTimestamp()
       }, { merge: true });
 
@@ -4315,7 +4968,7 @@ class PaymentService {
    * @param {string} chargeId - ID da cobrança na Woovi (ou bookingId para testes)
    * @returns {Promise<Object>} - Status do pagamento
    */
-  async getPaymentStatus(chargeId) {
+  async getPaymentStatus(chargeId, paymentContext = null) {
     try {
       if (String(chargeId || '').startsWith('mock_review_')) {
         if (String(process.env.APP_REVIEW || '').toLowerCase() !== 'true') {
@@ -4345,8 +4998,38 @@ class PaymentService {
         };
       }
 
+      let persistenceScope;
+      let paymentCollections;
+      const paymentScopeInput = paymentContext || {};
+      try {
+        persistenceScope = resolveRidePersistenceScope(paymentScopeInput);
+        paymentCollections = getFinancialCollections(
+          persistenceScope.financialContext
+        ).collections;
+      } catch (contextError) {
+        return {
+          success: false,
+          error: contextError.message || 'Contexto financeiro inválido',
+          code: contextError.code || 'FINANCIAL_CONTEXT_INVALID',
+          status: null,
+          chargeId
+        };
+      }
+
+      const sandboxScope = persistenceScope.namespace === 'sandbox';
+      const recordMatchesPaymentScope = (record) => {
+        if (!record) return false;
+        if (!sandboxScope) return true;
+        try {
+          assertStoredRecordMatchesScope(record, paymentScopeInput);
+          return true;
+        } catch (_error) {
+          return false;
+        }
+      };
+
       const cachedPaymentStatus = await this.readPaymentStatusCache(chargeId);
-      if (cachedPaymentStatus) {
+      if (recordMatchesPaymentScope(cachedPaymentStatus)) {
         const cachedAmountInCents = Number.isFinite(Number(cachedPaymentStatus.amount))
           ? Math.round(Number(cachedPaymentStatus.amount))
           : 0;
@@ -4372,7 +5055,11 @@ class PaymentService {
         await redisPool.ensureConnection();
         const redis = redisPool.getConnection();
         const bookingHash = await redis.hgetall(`booking:${chargeId}`);
-        if (bookingHash && Object.keys(bookingHash).length > 0) {
+        if (
+          bookingHash &&
+          Object.keys(bookingHash).length > 0 &&
+          recordMatchesPaymentScope(bookingHash)
+        ) {
           const bookingPaymentStatus = String(bookingHash.paymentStatus || '').toLowerCase();
           const amountInCents = Number.parseInt(bookingHash.paymentAmountInCents || '0', 10);
 
@@ -4417,30 +5104,33 @@ class PaymentService {
       try {
         const firestore = firebaseConfig.getFirestore();
         if (firestore) {
-          const holdingRef = firestore.collection('payment_holdings').doc(chargeId);
+          const holdingRef = firestore
+            .collection(paymentCollections.paymentHoldings)
+            .doc(chargeId);
           const holdingDoc = await holdingRef.get();
 
-          if (holdingDoc.exists) {
+          if (holdingDoc.exists && recordMatchesPaymentScope(holdingDoc.data())) {
             const holdingData = holdingDoc.data();
             logStructured('info', 'Payment holding encontrado no Firestore', { service: 'payment-service', chargeId, status: holdingData.status });
             return buildPaymentStatusResponseFromRecord(holdingData, 'payment_holding_doc');
           } else {
             const [holdingByPaymentIdSnapshot, holdingByChargeIdSnapshot] = await Promise.all([
               firestore
-                .collection('payment_holdings')
+                .collection(paymentCollections.paymentHoldings)
                 .where('paymentId', '==', chargeId)
                 .limit(1)
                 .get(),
               firestore
-                .collection('payment_holdings')
+                .collection(paymentCollections.paymentHoldings)
                 .where('chargeId', '==', chargeId)
                 .limit(1)
                 .get()
             ]);
 
-            const holdingByFieldDoc = !holdingByPaymentIdSnapshot.empty
-              ? holdingByPaymentIdSnapshot.docs[0]
-              : (!holdingByChargeIdSnapshot.empty ? holdingByChargeIdSnapshot.docs[0] : null);
+            const holdingByFieldDoc = [
+              ...(holdingByPaymentIdSnapshot.docs || []),
+              ...(holdingByChargeIdSnapshot.docs || [])
+            ].find((candidate) => recordMatchesPaymentScope(candidate?.data?.())) || null;
 
             if (holdingByFieldDoc) {
               const holdingData = holdingByFieldDoc.data();
@@ -4454,7 +5144,7 @@ class PaymentService {
             }
 
             const ridePaymentSnapshot = await firestore
-              .collection('ride_payments')
+              .collection(paymentCollections.ridePayments)
               .where('chargeId', '==', chargeId)
               .limit(1)
               .get();
@@ -4462,7 +5152,10 @@ class PaymentService {
             if (!ridePaymentSnapshot.empty) {
               const ridePaymentData = ridePaymentSnapshot.docs[0].data();
               const normalizedRidePaymentStatus = String(ridePaymentData.status || '').trim().toUpperCase();
-              if (['CONFIRMED', 'CREDITED', 'DISTRIBUTED', 'IN_HOLDING'].includes(normalizedRidePaymentStatus)) {
+              if (
+                recordMatchesPaymentScope(ridePaymentData) &&
+                ['CONFIRMED', 'CREDITED', 'DISTRIBUTED', 'IN_HOLDING'].includes(normalizedRidePaymentStatus)
+              ) {
                 logStructured('info', 'Pagamento confirmado encontrado em ride_payments', {
                   service: 'payment-service',
                   chargeId,
@@ -4488,7 +5181,16 @@ class PaymentService {
       // Verificar status diretamente na Woovi (produção)
       // ✅ Se Woovi falhar, não retornar erro se não for crítico
       try {
-        const chargeRuntime = await this.resolveWooviConfigForCharge(chargeId);
+        const chargeRuntime = sandboxScope
+          ? {
+            wooviConfig: getWooviConfig({
+              environment: persistenceScope.financialContext.providerEnvironment
+            }),
+            providerEnvironment: persistenceScope.financialContext.providerEnvironment,
+            paymentProfileId: persistenceScope.financialContext.paymentProfileId || null,
+            financialContext: persistenceScope.financialContext
+          }
+          : await this.resolveWooviConfigForCharge(chargeId);
         const chargeStatus = await this.wooviDriverService.getChargeStatus(chargeId, {
           wooviConfig: chargeRuntime?.wooviConfig
         });
@@ -4521,10 +5223,12 @@ class PaymentService {
         try {
           const firestore = firebaseConfig.getFirestore();
           if (firestore) {
-            const holdingRef = firestore.collection('payment_holdings').doc(chargeId);
+            const holdingRef = firestore
+              .collection(paymentCollections.paymentHoldings)
+              .doc(chargeId);
             const holdingDoc = await holdingRef.get();
 
-            if (holdingDoc.exists) {
+            if (holdingDoc.exists && recordMatchesPaymentScope(holdingDoc.data())) {
               const holdingData = holdingDoc.data();
               logStructured('info', 'Payment holding encontrado no Firestore (retry)', { service: 'payment-service', chargeId, status: holdingData.status });
               return {
@@ -4570,6 +5274,31 @@ class PaymentService {
    */
   async savePaymentHolding(rideId, holdingData) {
     try {
+      const contextResult = await this.resolveFinancialContextForPayment({
+        rideId,
+        chargeId: holdingData.chargeId || holdingData.paymentId,
+        financialContext: holdingData.financialContext,
+        providerEnvironment: holdingData.providerEnvironment,
+        testUserSandbox: holdingData.testUserSandbox === true
+      });
+      if (!contextResult.ok) {
+        return { success: false, code: contextResult.code, error: contextResult.error };
+      }
+      let paymentPersistenceScope;
+      try {
+        paymentPersistenceScope = resolveRidePersistenceScope({
+          ...holdingData,
+          financialContext: contextResult.context
+        });
+      } catch (contextError) {
+        return {
+          success: false,
+          code: contextError.code || 'FINANCIAL_CONTEXT_INVALID',
+          error: contextError.message || 'Contexto financeiro inválido'
+        };
+      }
+      const financialContext = paymentPersistenceScope.financialContext;
+      const { collections } = getFinancialCollections(financialContext);
       const cachePayload = {
         status: holdingData.status || this.PAYMENT_STATES.PENDING,
         amount: Number.isFinite(Number(holdingData.amount))
@@ -4579,7 +5308,10 @@ class PaymentService {
         chargeId: holdingData.chargeId || holdingData.paymentId || null,
         paidAt: holdingData.paidAt || null,
         confirmedAt: holdingData.confirmedAt || null,
-        rideId
+        rideId,
+        financialContext,
+        financialNamespace: financialContext.namespace,
+        financialContextId: financialContext.contextId
       };
 
       await Promise.allSettled([
@@ -4603,12 +5335,15 @@ class PaymentService {
         return { success: false, error: 'rideId é obrigatório' };
       }
 
-      const holdingRef = firestore.collection('payment_holdings').doc(rideId);
+      const holdingRef = firestore.collection(collections.paymentHoldings).doc(rideId);
 
       // Preparar dados completos
       const holdingPayload = {
         ...holdingData,
         rideId: rideId,
+        financialContext,
+        financialNamespace: financialContext.namespace,
+        financialContextId: financialContext.contextId,
         amountInReais: holdingData.amount ? (holdingData.amount / 100) : null,
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
         updatedAt: admin.firestore.FieldValue.serverTimestamp()
@@ -4632,6 +5367,7 @@ class PaymentService {
         newStatus: holdingData.status,
         chargeId: holdingData.paymentId,
         paymentId: holdingData.paymentId,
+        financialContext,
         actor: 'system',
         actorId: holdingData.passengerId || null
       });
@@ -4679,11 +5415,33 @@ class PaymentService {
         }
       }
 
-      const holdingRef = firestore.collection('payment_holdings').doc(rideId);
+      const contextResult = resolveFinancialContext(currentHolding, { allowLegacyOperational: true });
+      if (!contextResult.ok) {
+        return { success: false, code: contextResult.code, error: contextResult.error };
+      }
+      const legacyOperationalCompatible =
+        currentHolding.financialContextLegacy === true &&
+        contextResult.context.namespace === 'operational';
+      if (
+        updateData.financialContext &&
+        !legacyOperationalCompatible &&
+        !contextsMatch(updateData.financialContext, contextResult.context)
+      ) {
+        return {
+          success: false,
+          code: 'FINANCIAL_CONTEXT_CONFLICT',
+          error: 'Contexto financeiro diverge do payment holding'
+        };
+      }
+      const { collections } = getFinancialCollections(contextResult.context);
+      const holdingRef = firestore.collection(collections.paymentHoldings).doc(rideId);
 
       // Preparar dados de atualização
       const updatePayload = {
         ...updateData,
+        financialContext: contextResult.context,
+        financialNamespace: contextResult.context.namespace,
+        financialContextId: contextResult.context.contextId,
         updatedAt: admin.firestore.FieldValue.serverTimestamp()
       };
 
@@ -4692,13 +5450,27 @@ class PaymentService {
         updatePayload.amountInReais = updateData.amount / 100;
       }
 
-      // Atualizar com retry
-      await this.retryOperation(
-        async () => {
-          await holdingRef.update(updatePayload);
-        },
-        'updatePaymentHolding'
-      );
+      // Atualizar com retry. No sandbox, o alias temporário acompanha o estado
+      // terminal do booking canônico sem gerar um segundo evento financeiro.
+      if (contextResult.context.namespace === 'sandbox') {
+        await this.retryOperation(
+          () => this.updateSandboxCanonicalRecordAndAlias({
+            firestore,
+            collectionName: collections.paymentHoldings,
+            canonicalRideId: rideId,
+            updatePayload,
+            financialContext: contextResult.context
+          }),
+          'updatePaymentHoldingSandboxAlias'
+        );
+      } else {
+        await this.retryOperation(
+          async () => {
+            await holdingRef.update(updatePayload);
+          },
+          'updatePaymentHolding'
+        );
+      }
 
       logStructured('info', 'Payment holding atualizado no Firestore', { service: 'payment-service', rideId });
 
@@ -4726,7 +5498,8 @@ class PaymentService {
           actor: 'system',
           actorId: updateData.actorId || null,
           reason: updateData.reason || null,
-          metadata: updateData.metadata || {}
+          metadata: updateData.metadata || {},
+          financialContext: contextResult.context
         });
       }
 

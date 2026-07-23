@@ -86,7 +86,9 @@ const STRICT_VEHICLE_NOTE_PATTERNS = [
 
 const STRICT_TEST_RIDE_ID_PATTERN = /(^|_)ride_e2e_|^ride_normal_|dispatch_smoke|_smoke$|(^|_)test(_|$)|(^|_)mock(_|$)/i;
 
-const FINANCIAL_TEST_COLLECTIONS = [
+// Coleções operacionais são apenas auditadas. Nunca são apagadas por este script:
+// remover ledger operacional sem compensar o saldo quebraria a trilha contábil.
+const LEGACY_OPERATIONAL_FINANCIAL_COLLECTIONS = [
   'ride_payments',
   'payment_holdings',
   'payment_distributions',
@@ -94,6 +96,21 @@ const FINANCIAL_TEST_COLLECTIONS = [
   'financial_reconciliation_reports',
   'financial_ledger_events',
   'financial_ledger_lines'
+];
+
+// Namespace financeiro descartável e isolado. A ordem de remoção é intencional:
+// saldos sandbox saem antes do ledger, portanto uma falha parcial nunca deixa saldo
+// creditado sem o evento contábil correspondente.
+const SANDBOX_FINANCIAL_COLLECTIONS = [
+  'sandbox_driver_balances',
+  'sandbox_payment_distributions',
+  'sandbox_payment_holdings',
+  'sandbox_ride_payments',
+  'sandbox_payment_history',
+  'sandbox_payment_intents',
+  'sandbox_financial_reconciliation_reports',
+  'sandbox_financial_ledger_lines',
+  'sandbox_financial_ledger_events'
 ];
 
 function matchesAny(value, patterns) {
@@ -177,7 +194,9 @@ async function collectTargets() {
     rtdbVehicles: [],
     firestoreUsers: [],
     firestoreAdminUsers: [],
-    firestoreFinancialDocs: []
+    firestoreFinancialDocs: [],
+    legacyOperationalFinancialDocs: [],
+    rtdbSandboxReceipts: []
   };
   const knownTestUIDs = new Set();
 
@@ -279,17 +298,14 @@ async function collectTargets() {
   }
 
   if (!identityOnly) {
-    for (const collectionName of FINANCIAL_TEST_COLLECTIONS) {
+    for (const collectionName of SANDBOX_FINANCIAL_COLLECTIONS) {
       const snapshot = await firestore.collection(collectionName).get();
       snapshot.forEach((doc) => {
         const data = doc.data() || {};
-        const rideId = resolveRideIdFromFinancialDoc(doc.id, data, knownTestUIDs);
-        if (!rideId) return;
-
         targets.firestoreFinancialDocs.push({
           collection: collectionName,
           id: doc.id,
-          rideId,
+          rideId: data.rideId || data.bookingId || null,
           amount: data.amount || data.amountCents || data.totalAmount || data.totalDebitCents || null,
           status: data.status || null,
           eventType: data.eventType || null,
@@ -298,6 +314,27 @@ async function collectTargets() {
         });
       });
     }
+
+    for (const collectionName of LEGACY_OPERATIONAL_FINANCIAL_COLLECTIONS) {
+      const snapshot = await firestore.collection(collectionName).get();
+      snapshot.forEach((doc) => {
+        const data = doc.data() || {};
+        const rideId = resolveRideIdFromFinancialDoc(doc.id, data, knownTestUIDs);
+        if (!rideId) return;
+        targets.legacyOperationalFinancialDocs.push({
+          collection: collectionName,
+          id: doc.id,
+          rideId,
+          reason: 'AUDIT_ONLY_REQUIRES_COMPENSATING_FINANCIAL_MIGRATION'
+        });
+      });
+    }
+
+    const sandboxReceiptsSnapshot = await rtdb.ref('sandbox_receipts').once('value');
+    const sandboxReceipts = sandboxReceiptsSnapshot.val() || {};
+    Object.keys(sandboxReceipts).forEach((rideId) => {
+      targets.rtdbSandboxReceipts.push({ rideId });
+    });
   }
 
   return { targets, deleteUIDs: Array.from(deleteUIDs) };
@@ -328,6 +365,9 @@ async function applyCleanup({ targets, deleteUIDs }) {
     firestoreUsersDeleted: 0,
     firestoreAdminUsersDeleted: 0,
     firestoreFinancialDocsDeleted: 0,
+    sandboxBalanceTransactionsDeleted: 0,
+    rtdbSandboxReceiptsDeleted: 0,
+    legacyOperationalFinancialDocsSkipped: targets.legacyOperationalFinancialDocs.length,
     rtdbAuxDeleted: 0,
     errors: []
   };
@@ -376,6 +416,39 @@ async function applyCleanup({ targets, deleteUIDs }) {
     else stats.errors.push({ scope: 'firestore.adminUsers', id: row.id, error: r.message });
   }
 
+  // Subcoleções não são removidas ao apagar o documento pai no Firestore.
+  // Neutralizamos primeiro todas as transações de saldo do namespace sandbox.
+  const sandboxBalanceRows = targets.firestoreFinancialDocs.filter(
+    (row) => row.collection === 'sandbox_driver_balances'
+  );
+  for (const row of sandboxBalanceRows) {
+    const transactionsSnapshot = await firestore
+      .collection('sandbox_driver_balances')
+      .doc(row.id)
+      .collection('transactions')
+      .get();
+    const transactionDocs = [];
+    transactionsSnapshot.forEach((doc) => transactionDocs.push(doc));
+    for (const transactionDoc of transactionDocs) {
+      const r = await removeWithIgnore(() => transactionDoc.ref.delete());
+      if (r.ok) stats.sandboxBalanceTransactionsDeleted += 1;
+      else stats.errors.push({
+        scope: 'firestore.sandbox_driver_balances.transactions',
+        driverId: row.id,
+        id: transactionDoc.id,
+        error: r.message
+      });
+    }
+  }
+
+  if (stats.errors.some((error) => error.scope === 'firestore.sandbox_driver_balances.transactions')) {
+    stats.errors.push({
+      scope: 'firestore.sandboxFinancialCleanup',
+      error: 'Abortado antes de apagar saldo/ledger porque a neutralização de transações falhou'
+    });
+    return stats;
+  }
+
   if (targets.firestoreFinancialDocs.length > 0 && typeof firestore.batch === 'function') {
     const batchSize = 400;
     for (let index = 0; index < targets.firestoreFinancialDocs.length; index += batchSize) {
@@ -395,6 +468,9 @@ async function applyCleanup({ targets, deleteUIDs }) {
           count: rows.length,
           error: r.message
         });
+        // Fail closed: não avance para lotes que podem conter o ledger se a
+        // neutralização/remoção anterior do saldo sandbox não foi confirmada.
+        break;
       }
     }
   } else {
@@ -408,8 +484,15 @@ async function applyCleanup({ targets, deleteUIDs }) {
           rideId: row.rideId,
           error: r.message
         });
+        break;
       }
     }
+  }
+
+  for (const row of targets.rtdbSandboxReceipts) {
+    const r = await removeWithIgnore(() => rtdb.ref(`sandbox_receipts/${row.rideId}`).remove());
+    if (r.ok) stats.rtdbSandboxReceiptsDeleted += 1;
+    else stats.errors.push({ scope: 'rtdb.sandbox_receipts', rideId: row.rideId, error: r.message });
   }
 
   return stats;
@@ -430,6 +513,8 @@ async function main() {
       firestoreUsers: targets.firestoreUsers.length,
       firestoreAdminUsers: targets.firestoreAdminUsers.length,
       firestoreFinancialDocs: targets.firestoreFinancialDocs.length,
+      legacyOperationalFinancialDocsAuditOnly: targets.legacyOperationalFinancialDocs.length,
+      rtdbSandboxReceipts: targets.rtdbSandboxReceipts.length,
       distinctUIDs: deleteUIDs.length
     },
     samples: {
@@ -438,7 +523,9 @@ async function main() {
       rtdbVehicles: targets.rtdbVehicles.slice(0, 15),
       firestoreUsers: targets.firestoreUsers.slice(0, 15),
       firestoreAdminUsers: targets.firestoreAdminUsers.slice(0, 15),
-      firestoreFinancialDocs: targets.firestoreFinancialDocs.slice(0, 20)
+      firestoreFinancialDocs: targets.firestoreFinancialDocs.slice(0, 20),
+      legacyOperationalFinancialDocs: targets.legacyOperationalFinancialDocs.slice(0, 20),
+      rtdbSandboxReceipts: targets.rtdbSandboxReceipts.slice(0, 20)
     },
     targetIds: {
       authUsers: targets.authUsers.map((row) => row.uid),
@@ -450,7 +537,13 @@ async function main() {
         collection: row.collection,
         id: row.id,
         rideId: row.rideId
-      }))
+      })),
+      legacyOperationalFinancialDocs: targets.legacyOperationalFinancialDocs.map((row) => ({
+        collection: row.collection,
+        id: row.id,
+        rideId: row.rideId
+      })),
+      rtdbSandboxReceipts: targets.rtdbSandboxReceipts.map((row) => row.rideId)
     }
   };
 

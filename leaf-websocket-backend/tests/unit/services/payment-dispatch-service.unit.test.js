@@ -103,8 +103,10 @@ jest.mock('../../../services/gradual-radius-expander', () => jest.fn());
 const GradualRadiusExpander = require('../../../services/gradual-radius-expander');
 const {
   materializePaymentForBooking,
+  markBookingPaymentConfirmed,
   triggerDispatchAfterPayment
 } = require('../../../services/payment-dispatch-service');
+const { sealFinancialContext } = require('../../../services/financial-runtime-context');
 
 describe('payment-dispatch-service', () => {
   beforeEach(() => {
@@ -186,6 +188,156 @@ describe('payment-dispatch-service', () => {
     expect(mockRedisState.strings.has('payment_status_cache:booking_1')).toBe(true);
   });
 
+  it('materializes sandbox payment only inside sandbox financial collections', async () => {
+    const financialContext = sealFinancialContext({
+      providerEnvironment: 'sandbox',
+      paymentProfileId: 'qa-test-users-sandbox-durable',
+      paymentProfileSource: 'firestore',
+      testUserSandbox: true
+    });
+    writeDoc('sandbox_payment_holdings/temp_ride_sandbox', {
+      status: 'in_holding',
+      amount: 5407,
+      chargeId: 'charge_sandbox',
+      paymentId: 'charge_sandbox',
+      passengerId: 'passenger_sandbox',
+      financialContext,
+      financialNamespace: financialContext.namespace,
+      financialContextId: financialContext.contextId
+    });
+    writeDoc('sandbox_ride_payments/temp_ride_sandbox', {
+      status: 'CONFIRMED',
+      amount: 5407,
+      chargeId: 'charge_sandbox',
+      passengerId: 'passenger_sandbox',
+      credited: false,
+      financialContext,
+      financialNamespace: financialContext.namespace,
+      financialContextId: financialContext.contextId
+    });
+
+    const result = await materializePaymentForBooking({
+      bookingId: 'booking_sandbox',
+      chargeId: 'charge_sandbox',
+      temporaryRideId: 'temp_ride_sandbox',
+      passengerId: 'passenger_sandbox',
+      source: 'unit_test',
+      financialContext,
+      financialNamespace: financialContext.namespace,
+      financialContextId: financialContext.contextId,
+      providerEnvironment: 'sandbox',
+      testUserSandbox: true
+    });
+
+    expect(result).toMatchObject({
+      success: true,
+      bookingId: 'booking_sandbox',
+      amountInCents: 5407,
+      financialNamespace: 'sandbox',
+      financialContextId: financialContext.contextId
+    });
+    expect(mockDocs.get('sandbox_payment_holdings/booking_sandbox')).toMatchObject({
+      rideId: 'booking_sandbox',
+      financialContext,
+      financialNamespace: 'sandbox',
+      financialContextId: financialContext.contextId
+    });
+    expect(mockDocs.get('sandbox_ride_payments/booking_sandbox')).toMatchObject({
+      rideId: 'booking_sandbox',
+      financialContext,
+      financialNamespace: 'sandbox',
+      financialContextId: financialContext.contextId
+    });
+    expect(mockDocs.get('sandbox_payment_holdings/temp_ride_sandbox')).toMatchObject({
+      canonicalRideId: 'booking_sandbox',
+      bookingId: 'booking_sandbox',
+      temporaryRideId: 'temp_ride_sandbox',
+      paymentReferenceRideId: 'temp_ride_sandbox',
+      status: 'in_holding'
+    });
+    expect(mockDocs.get('sandbox_ride_payments/temp_ride_sandbox')).toMatchObject({
+      canonicalRideId: 'booking_sandbox',
+      bookingId: 'booking_sandbox',
+      temporaryRideId: 'temp_ride_sandbox',
+      paymentReferenceRideId: 'temp_ride_sandbox',
+      status: 'CONFIRMED'
+    });
+    expect(Array.from(mockDocs.keys()).filter((path) => (
+      path.startsWith('sandbox_payment_holdings/') ||
+      path.startsWith('sandbox_ride_payments/')
+    ))).toHaveLength(4);
+    expect(mockDocs.has('payment_holdings/booking_sandbox')).toBe(false);
+    expect(mockDocs.has('ride_payments/booking_sandbox')).toBe(false);
+    expect(mockRedisState.hashes.get('booking:booking_sandbox')).toMatchObject({
+      financialNamespace: 'sandbox',
+      financialContextId: financialContext.contextId,
+      providerEnvironment: 'sandbox',
+      testUserSandbox: 'true'
+    });
+  });
+
+  it('marks a sandbox booking with its sealed context and rejects a lost sandbox seal', async () => {
+    const financialContext = sealFinancialContext({
+      providerEnvironment: 'sandbox',
+      paymentProfileId: 'qa-test-users-sandbox-durable',
+      paymentProfileSource: 'firestore',
+      testUserSandbox: true
+    });
+
+    await markBookingPaymentConfirmed({
+      bookingId: 'booking_sandbox_mark',
+      chargeId: 'charge_sandbox_mark',
+      amountInCents: 5511,
+      source: 'unit_test',
+      financialContext,
+      financialNamespace: 'sandbox',
+      financialContextId: financialContext.contextId,
+      providerEnvironment: 'sandbox',
+      testUserSandbox: true
+    });
+
+    expect(mockRedisState.hashes.get('booking:booking_sandbox_mark')).toMatchObject({
+      paymentChargeId: 'charge_sandbox_mark',
+      paymentAmountInCents: '5511',
+      financialNamespace: 'sandbox',
+      financialContextId: financialContext.contextId,
+      providerEnvironment: 'sandbox',
+      testUserSandbox: 'true'
+    });
+    expect(JSON.parse(
+      mockRedisState.hashes.get('booking:booking_sandbox_mark').financialContext
+    )).toEqual(financialContext);
+
+    await expect(markBookingPaymentConfirmed({
+      bookingId: 'booking_sandbox_lost',
+      chargeId: 'charge_sandbox_lost',
+      financialNamespace: 'sandbox',
+      providerEnvironment: 'sandbox',
+      testUserSandbox: true
+    })).rejects.toMatchObject({
+      code: 'FINANCIAL_SANDBOX_CONTEXT_LOST'
+    });
+    expect(mockRedisState.hashes.has('booking:booking_sandbox_lost')).toBe(false);
+  });
+
+  it('fails closed before materialization when a sandbox signal lost its sealed context', async () => {
+    await expect(materializePaymentForBooking({
+      bookingId: 'booking_sandbox_context_lost',
+      chargeId: 'charge_sandbox_context_lost',
+      temporaryRideId: 'temp_ride_sandbox_context_lost',
+      financialNamespace: 'sandbox',
+      providerEnvironment: 'sandbox',
+      source: 'unit_test'
+    })).rejects.toMatchObject({
+      code: 'FINANCIAL_SANDBOX_CONTEXT_LOST'
+    });
+
+    expect(Array.from(mockDocs.keys()).some((path) => (
+      path.endsWith('/booking_sandbox_context_lost')
+    ))).toBe(false);
+    expect(mockRedisState.hashes.has('booking:booking_sandbox_context_lost')).toBe(false);
+  });
+
   it('does not dispatch a booking whose payment ledger is pending', async () => {
     mockRedisState.hashes.set('booking:booking_ledger_pending', {
       bookingId: 'booking_ledger_pending',
@@ -211,6 +363,41 @@ describe('payment-dispatch-service', () => {
       paymentStatus: 'ledger_pending',
       paymentLedgerStatus: 'pending_retry'
     });
+  });
+
+  it('rejects an operational poison booking before sandbox dispatch', async () => {
+    const financialContext = sealFinancialContext({
+      providerEnvironment: 'sandbox',
+      paymentProfileId: 'qa-test-users-sandbox-durable',
+      paymentProfileSource: 'firestore',
+      testUserSandbox: true
+    });
+    const startGradualSearch = jest.fn(async () => undefined);
+    GradualRadiusExpander.mockImplementation(() => ({ startGradualSearch }));
+    mockRedisState.hashes.set('booking:booking_sandbox_dispatch_poison', {
+      bookingId: 'booking_sandbox_dispatch_poison',
+      customerId: 'operational_passenger_poison',
+      paymentStatus: 'in_holding',
+      paymentLedgerStatus: 'posted',
+      pickupLocation: JSON.stringify({ lat: -22.853586, lng: -43.318168 })
+    });
+
+    await expect(triggerDispatchAfterPayment({
+      bookingId: 'booking_sandbox_dispatch_poison',
+      io: {},
+      pickupLocation: { lat: -22.853586, lng: -43.318168 },
+      source: 'unit_test',
+      force: true,
+      maxAttempts: 1,
+      financialContext,
+      financialNamespace: 'sandbox',
+      financialContextId: financialContext.contextId,
+      providerEnvironment: 'sandbox',
+      testUserSandbox: true
+    })).rejects.toMatchObject({
+      code: 'SANDBOX_RECORD_CONTEXT_INVALID'
+    });
+    expect(startGradualSearch).not.toHaveBeenCalled();
   });
 
   it('does not dispatch a paid booking when the payment driver reservation is missing', async () => {

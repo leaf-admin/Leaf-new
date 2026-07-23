@@ -9,6 +9,10 @@ const router = express.Router();
 const ReceiptService = require('../services/receipt-service');
 const firebaseConfig = require('../firebase-config');
 const {
+    resolveUserPersistenceScope,
+    assertStoredRecordMatchesScope
+} = require('../services/sandbox-persistence-context');
+const {
     authenticateSupport,
     requireSupportRoles,
     isSupportAgent,
@@ -97,6 +101,15 @@ function requireReceiptUserScope(req, res, next) {
     return next();
 }
 
+async function resolveAuthenticatedReceiptScope(req, targetUserId = null) {
+    const actorId = normalizeId(req.user?.uid || req.user?.id);
+    const userId = normalizeId(targetUserId || actorId);
+    return resolveUserPersistenceScope({
+        userId,
+        actor: req.user
+    });
+}
+
 function isReceiptFinancialSnapshotIncomplete(error) {
     return error?.code === 'RECEIPT_FINANCIAL_SNAPSHOT_INCOMPLETE' || error?.statusCode === 409;
 }
@@ -111,10 +124,87 @@ function sendReceiptRouteError(res, error) {
         });
     }
 
+    if (error?.code === 'PERSISTENCE_USER_CLASSIFICATION_UNAVAILABLE') {
+        return res.status(503).json({
+            success: false,
+            code: error.code,
+            error: 'Classificação do ambiente do usuário indisponível'
+        });
+    }
+
     return res.status(500).json({
         success: false,
         error: 'Erro interno do servidor'
     });
+}
+
+function formatReceiptMoney(value) {
+    const numeric = Number(value);
+    return `R$ ${(Number.isFinite(numeric) ? numeric : 0).toFixed(2).replace('.', ',')}`;
+}
+
+function buildStoredReceiptSummary(receipt = {}, role = 'customer') {
+    const financial = receipt.financial || {};
+    const breakdown = financial.breakdown || {};
+    const grossAmount = Number(financial.totalPaid?.amount || 0);
+    const driverNetAmount = Number(
+        breakdown.driverAmount?.amount ||
+        financial.totals?.driverReceived ||
+        0
+    );
+    const operationalFee = Number(
+        breakdown.operationalCost?.amount ||
+        financial.totals?.leafOperational ||
+        0
+    );
+    const paymentIntermediationFee = Number(
+        breakdown.wooviFee?.amount ||
+        financial.totals?.wooviFee ||
+        0
+    );
+    const totalFees = Number(
+        financial.totals?.retainedFees ||
+        operationalFee + paymentIntermediationFee
+    );
+    const tollAmount = Number(
+        breakdown.tollPassThrough?.amount ||
+        financial.totals?.tollPassThrough ||
+        0
+    );
+    const completedAt = receipt.trip?.dateTime || receipt.completedAt || receipt.savedAt || receipt.issueDate || null;
+    const distanceKm = Number(receipt.trip?.distance?.actual || 0);
+    const durationMinutes = Number(receipt.trip?.duration || 0);
+
+    return {
+        receiptId: receipt.receiptId,
+        rideId: receipt.rideId,
+        status: 'completed',
+        date: completedAt,
+        completedAt,
+        totalAmount: financial.totalPaid?.formatted || formatReceiptMoney(grossAmount),
+        grossAmount,
+        ...(role === 'driver' ? { driverNetAmount } : {}),
+        operationalFee,
+        paymentIntermediationFee,
+        totalFees,
+        tollAmount,
+        pickup: receipt.trip?.pickup?.address || 'Origem indisponível',
+        dropoff: receipt.trip?.dropoff?.address || 'Destino indisponível',
+        pickupAddress: receipt.trip?.pickup?.address || 'Origem indisponível',
+        destinationAddress: receipt.trip?.dropoff?.address || 'Destino indisponível',
+        distance: distanceKm,
+        distanceKm,
+        duration: durationMinutes,
+        durationMinutes,
+        driverId: receipt.driver?.id || null,
+        driverName: receipt.driver?.name || null,
+        passengerId: receipt.customer?.id || null,
+        passengerName: receipt.customer?.name || null,
+        vehicleLabel: receipt.driver?.vehicle?.brandModel || null,
+        vehiclePlate: receipt.driver?.vehicle?.plate || null,
+        authoritativeSnapshot: receipt.metadata?.authoritativeSnapshot === true,
+        financialSnapshotSource: receipt.metadata?.financialSnapshotSource || null
+    };
 }
 
 /**
@@ -146,11 +236,14 @@ router.get('/api/receipts/:rideId', authenticateSupport, async (req, res) => {
 
         logger.info(`📋 Solicitação de recibo para corrida: ${rideId}`);
 
+        const persistenceScope = await resolveAuthenticatedReceiptScope(req);
+
         // Buscar dados da corrida e gerar recibo
         const receipt = await receiptService.getReceiptByRideId(
             rideId,
             req.app.locals.redis,
-            resolveRealtimeDb(req)
+            resolveRealtimeDb(req),
+            persistenceScope.financialContext
         );
 
         if (!receipt) {
@@ -238,6 +331,15 @@ router.get('/api/receipts/user/:userId', authenticateSupport, requireReceiptUser
     try {
         const { userId } = req.params;
         const { limit = 10, offset = 0, role = 'customer' } = req.query;
+        const safeLimit = Math.min(50, Math.max(1, Number.parseInt(limit, 10) || 10));
+        const safeOffset = Math.max(0, Number.parseInt(offset, 10) || 0);
+
+        if (!['customer', 'driver'].includes(role)) {
+            return res.status(400).json({
+                success: false,
+                error: 'Role deve ser "customer" ou "driver"'
+            });
+        }
 
         logger.info(`📋 Listando recibos do usuário: ${userId} (${role})`);
 
@@ -249,70 +351,34 @@ router.get('/api/receipts/user/:userId', authenticateSupport, requireReceiptUser
             });
         }
 
-        // Buscar corridas do usuário
-        let query;
-        if (role === 'customer') {
-            query = firebaseDb.ref('bookings').orderByChild('customer').equalTo(userId);
-        } else if (role === 'driver') {
-            query = firebaseDb.ref('bookings').orderByChild('driver').equalTo(userId);
-        } else {
-            return res.status(400).json({
-                success: false,
-                error: 'Role deve ser "customer" ou "driver"'
-            });
-        }
-
-        const snapshot = await query.limitToLast(parseInt(limit)).once('value');
-        const bookings = snapshot.val() || {};
-
-        // Filtrar apenas corridas concluídas
-        const completedRides = Object.entries(bookings)
-            .filter(([_, booking]) =>
-                booking.status === 'COMPLETE' ||
-                booking.status === 'PAID' ||
-                booking.status === 'completed'
-            )
-            .slice(parseInt(offset));
-
-        // Gerar recibos resumidos
-        const receipts = await Promise.all(
-            completedRides.map(async ([rideId, rideData]) => {
-                try {
-                    const receipt = await receiptService.generateReceipt(rideId, rideData);
-
-                    // Retornar versão resumida
-                    return {
-                        receiptId: receipt.receiptId,
-                        rideId: rideId,
-                        date: receipt.trip.endTime,
-                        totalAmount: receipt.financial.totalPaid.formatted,
-                        pickup: receipt.trip.pickup.address,
-                        dropoff: receipt.trip.dropoff.address,
-                        distance: receipt.trip.distance.actual,
-                        duration: receipt.trip.durationFormatted
-                    };
-                } catch (error) {
-                    logger.warn(`⚠️ Erro ao gerar recibo resumido para ${rideId}:`, error.message);
-                    return null;
-                }
-            })
-        );
-
-        // Filtrar recibos válidos
-        const validReceipts = receipts.filter(receipt => receipt !== null);
+        const persistenceScope = await resolveAuthenticatedReceiptScope(req, userId);
+        const result = await receiptService.listStoredReceiptsByUser({
+            firebaseDb,
+            userId,
+            role,
+            financialContext: persistenceScope.financialContext,
+            limit: safeLimit,
+            offset: safeOffset
+        });
+        const receipts = result.receipts.map((receipt) => buildStoredReceiptSummary(receipt, role));
 
         res.json({
             success: true,
-            receipts: validReceipts,
-            total: validReceipts.length,
-            hasMore: completedRides.length === parseInt(limit)
+            receipts,
+            total: result.total,
+            limit: result.limit,
+            offset: result.offset,
+            nextOffset: result.nextOffset,
+            hasMore: result.hasMore
         });
 
     } catch (error) {
         logger.error(`❌ Erro ao listar recibos do usuário:`, error);
-        res.status(500).json({
+        res.status(error?.statusCode || 500).json({
             success: false,
-            error: 'Erro interno do servidor'
+            error: error?.statusCode && error.statusCode < 500
+                ? error.message
+                : 'Erro interno do servidor'
         });
     }
 });
@@ -330,6 +396,7 @@ router.get('/api/receipts/:rideId/map', authenticateSupport, async (req, res) =>
         // Buscar dados da corrida
         const firebaseDb = resolveRealtimeDb(req);
         const redis = req.app.locals.redis;
+        const persistenceScope = await resolveAuthenticatedReceiptScope(req);
 
         let rideData = null;
 
@@ -338,13 +405,19 @@ router.get('/api/receipts/:rideId/map', authenticateSupport, async (req, res) =>
             const redisData = await redis.hget('bookings:active', rideId);
             if (redisData) {
                 rideData = JSON.parse(redisData);
+                assertStoredRecordMatchesScope(rideData, persistenceScope);
             }
         }
 
         // Buscar no Firebase se não encontrou no Redis
         if (!rideData && firebaseDb) {
-            const snapshot = await firebaseDb.ref(`bookings/${rideId}`).once('value');
+            const snapshot = await firebaseDb
+                .ref(`${persistenceScope.collections.bookings}/${rideId}`)
+                .once('value');
             rideData = snapshot.val();
+            if (rideData) {
+                assertStoredRecordMatchesScope(rideData, persistenceScope);
+            }
         }
 
         if (!rideData) {
