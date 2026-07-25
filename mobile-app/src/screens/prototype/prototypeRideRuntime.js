@@ -103,6 +103,7 @@ import {
   isDriverActivationOnlineAttemptAllowed,
   resolveCanonicalDriverActivationGates,
 } from "./driverActivationCanonicalContract";
+import { attemptCanonicalDriverOnlineStatus } from "./driverOnlineCanonicalAttempt";
 import driverActivationService from "../../services/DriverActivationService";
 import rideCostTelemetryService from "../../services/RideCostTelemetryService";
 import {
@@ -18085,18 +18086,15 @@ async function enablePrototypeDriverOnline(profile, options = {}) {
         attempt += 1
       ) {
         try {
-          onlineAck = await socket.setDriverStatus(
-            profile.uid,
-            "available",
-            true,
-            {
-              timeoutMs: 12000,
-              location: statusLocation,
-              destinationMode: buildDriverDestinationModeState(
-                runtimeState.driverDestinationMode,
-              ),
-            },
-          );
+          onlineAck = await attemptCanonicalDriverOnlineStatus({
+            activationState,
+            socket,
+            driverId: profile.uid,
+            statusLocation,
+            destinationMode: buildDriverDestinationModeState(
+              runtimeState.driverDestinationMode,
+            ),
+          });
           break;
         } catch (error) {
           lastOnlineError = error;
