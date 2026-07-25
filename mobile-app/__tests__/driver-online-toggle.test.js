@@ -276,6 +276,9 @@ jest.mock('../src/services/KYCService', () => ({
   default: {
     getPreferredLivenessMode: jest.fn(() => Promise.resolve({ success: true, mode: 'aws' })),
     verifyDriver: jest.fn(() => Promise.resolve({ success: true, data: { isMatch: true } })),
+    verifyDriverServerSideSelfie: jest.fn(() =>
+      Promise.resolve({ success: true, data: { isMatch: true } })
+    ),
     getAwsProviderName: jest.fn(() => 'aws_rekognition_face_liveness'),
   },
 }));
@@ -1119,7 +1122,7 @@ describe('driver online toggle', () => {
     });
   });
 
-  it('opens the driver KYC modal when recent verification is required to go online', async () => {
+  it('starts KYC from the online action and resumes online automatically after approval', async () => {
     const kycServiceMock = require('../src/services/KYCService').default;
     const setDriverOnline = jest
       .fn()
@@ -1157,6 +1160,22 @@ describe('driver online toggle', () => {
         'Modo motorista',
         expect.stringContaining('Nenhuma verificação')
       );
+    });
+
+    fireEvent.press(getByTestId('driver-kyc-aws-native'));
+
+    await waitFor(() => {
+      expect(kycServiceMock.verifyDriverServerSideSelfie).toHaveBeenCalledWith(
+        'driver_1',
+        null,
+        expect.objectContaining({
+          awsSessionId: 'aws-session-1',
+          requirement: 'LIVENESS_REQUIRED',
+        }),
+      );
+      expect(setDriverOnline).toHaveBeenCalledTimes(2);
+      expect(setDriverOnline).toHaveBeenLastCalledWith(true);
+      expect(queryByTestId('driver-kyc-aws-native')).toBeNull();
     });
   });
 

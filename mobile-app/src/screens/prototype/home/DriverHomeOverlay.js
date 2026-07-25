@@ -453,6 +453,14 @@ function DriverHomeOverlay({
   );
   const onlineStartedAtRef = useRef(null);
   const hasDriverWorkInProgress = isDriverWorkLocked(driverWorkInProgress);
+  const driverCanAttemptOnline =
+    driverActivationRemote?.canAttemptOnline === true;
+  const isReadyForIdentityGate =
+    driverActivationResolved &&
+    !driverCanGoOnline &&
+    driverCanAttemptOnline &&
+    !driverOnline &&
+    !hasDriverWorkInProgress;
   const shouldShowWelcomePromo = !hasDriverWorkInProgress &&
     !hasDriverOnlineActivityForCurrentDay({
       driverOnline,
@@ -472,6 +480,7 @@ function DriverHomeOverlay({
   const isActivationBlocked =
     driverActivationResolved &&
     !driverCanGoOnline &&
+    !driverCanAttemptOnline &&
     !driverOnline &&
     !hasDriverWorkInProgress;
   const pendingOfflineActivation =
@@ -491,6 +500,8 @@ function DriverHomeOverlay({
       ? "pending"
       : driverOnline
         ? "online"
+        : isReadyForIdentityGate
+          ? "ready"
         : "offline";
   const sliderLabel = hasDriverWorkInProgress
     ? "Em corrida"
@@ -902,6 +913,8 @@ function DriverHomeOverlay({
               accessibilityHint={
                 driverOnline
                   ? "Toca para sair do modo online"
+                  : isReadyForIdentityGate
+                    ? "Toca para confirmar sua identidade e ficar online"
                   : "Toca para ficar online e receber corridas"
               }
               accessibilityValue={{ text: sliderStatus }}
@@ -919,19 +932,42 @@ function DriverHomeOverlay({
                 sliderStatus === "pending" && styles.driverBottomSliderPending,
               ]}
             >
-              <Text
-                style={[
-                  styles.driverBottomSliderText,
-                  (sliderStatus === "online" || sliderStatus === "ride") &&
-                    styles.driverBottomSliderTextOnline,
-                  sliderStatus === "blocked" &&
-                    styles.driverBottomSliderTextBlocked,
-                  sliderStatus === "pending" &&
-                    styles.driverBottomSliderTextPending,
-                ]}
-              >
-                {sliderLabel}
-              </Text>
+              {isReadyForIdentityGate ? (
+                <View
+                  pointerEvents="none"
+                  style={styles.driverBottomSliderReadyContent}
+                >
+                  <Text
+                    numberOfLines={1}
+                    style={styles.driverBottomSliderReadyStatus}
+                  >
+                    Pronto para ficar online
+                  </Text>
+                  <Text
+                    numberOfLines={1}
+                    style={styles.driverBottomSliderText}
+                  >
+                    Ficar online
+                  </Text>
+                </View>
+              ) : (
+                <Text
+                  numberOfLines={1}
+                  adjustsFontSizeToFit
+                  minimumFontScale={0.82}
+                  style={[
+                    styles.driverBottomSliderText,
+                    (sliderStatus === "online" || sliderStatus === "ride") &&
+                      styles.driverBottomSliderTextOnline,
+                    sliderStatus === "blocked" &&
+                      styles.driverBottomSliderTextBlocked,
+                    sliderStatus === "pending" &&
+                      styles.driverBottomSliderTextPending,
+                  ]}
+                >
+                  {sliderLabel}
+                </Text>
+              )}
               <Animated.View
                 style={[
                   styles.driverBottomSliderThumb,
@@ -1399,6 +1435,17 @@ const styles = StyleSheet.create({
     fontFamily: fonts.SemiBold,
     fontSize: 13.5,
     lineHeight: 19,
+    textAlign: "center",
+  },
+  driverBottomSliderReadyContent: {
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  driverBottomSliderReadyStatus: {
+    color: DRIVER_HOME_COLOR.leaf,
+    fontFamily: fonts.Medium,
+    fontSize: 10.5,
+    lineHeight: 13,
     textAlign: "center",
   },
   driverBottomSliderTextOnline: {

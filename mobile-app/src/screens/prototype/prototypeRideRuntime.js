@@ -99,7 +99,10 @@ import {
   createInitialDriverOnboardingState,
   updateDriverOnboardingChecklist,
 } from "../../services/DriverOnboardingService";
-import { resolveCanonicalDriverActivationGates } from "./driverActivationCanonicalContract";
+import {
+  isDriverActivationOnlineAttemptAllowed,
+  resolveCanonicalDriverActivationGates,
+} from "./driverActivationCanonicalContract";
 import driverActivationService from "../../services/DriverActivationService";
 import rideCostTelemetryService from "../../services/RideCostTelemetryService";
 import {
@@ -16770,9 +16773,22 @@ function applyRemoteActivationSnapshotToLocal(localState, remoteSnapshot) {
   };
 
   const computed = computeDriverOnboardingState(nextState);
+  const canGoOnline = Boolean(
+    remoteSnapshot?.canGoOnline ?? computed?.canGoOnline,
+  );
+  const canAttemptOnline = Boolean(
+    canGoOnline || remoteSnapshot?.canAttemptOnline === true,
+  );
   return {
     ...computed,
-    canGoOnline: Boolean(remoteSnapshot?.canGoOnline ?? computed?.canGoOnline),
+    activationState:
+      remoteSnapshot?.activationState ||
+      remoteSnapshot?.state ||
+      computed?.activationState ||
+      null,
+    canGoOnline,
+    canAttemptOnline,
+    requiresLiveness: remoteSnapshot?.requiresLiveness === true,
   };
 }
 
@@ -17743,12 +17759,14 @@ async function resolveDriverActivationForOnline(profile) {
   await writeRuntimeDebugProbe("driver_online_activation_resolve_start", {
     uid: uid || null,
     currentCanGoOnline: currentActivation?.canGoOnline === true,
+    currentCanAttemptOnline: currentActivation?.canAttemptOnline === true,
     remoteCanGoOnline: persistedRemoteSnapshot?.canGoOnline === true,
+    remoteCanAttemptOnline: persistedRemoteSnapshot?.canAttemptOnline === true,
   });
 
   if (
-    currentActivation?.canGoOnline ||
-    persistedRemoteSnapshot?.canGoOnline === true
+    isDriverActivationOnlineAttemptAllowed(currentActivation) ||
+    isDriverActivationOnlineAttemptAllowed(persistedRemoteSnapshot)
   ) {
     const resolvedActivation = persistedRemoteSnapshot
       ? applyRemoteActivationSnapshotToLocal(
@@ -17756,17 +17774,24 @@ async function resolveDriverActivationForOnline(profile) {
           persistedRemoteSnapshot,
         )
       : currentActivation;
+    const resolvedCanGoOnline =
+      resolvedActivation?.canGoOnline === true ||
+      persistedRemoteSnapshot?.canGoOnline === true;
+    const resolvedCanAttemptOnline =
+      resolvedCanGoOnline ||
+      isDriverActivationOnlineAttemptAllowed(resolvedActivation) ||
+      persistedRemoteSnapshot?.canAttemptOnline === true;
 
     setRuntimeState((previous) => ({
       driverActivation: resolvedActivation,
       driverActivationResolved: true,
-      driverCanGoOnline: true,
+      driverCanGoOnline: resolvedCanGoOnline,
       driverActivationRemote:
         persistedRemoteSnapshot || previous.driverActivationRemote,
     }));
     await persistDriverOnlineActivationBestEffort(
       {
-        canGoOnline: true,
+        canGoOnline: resolvedCanGoOnline,
         driverActivation: resolvedActivation,
       },
       profile,
@@ -17775,7 +17800,8 @@ async function resolveDriverActivationForOnline(profile) {
 
     return {
       ...resolvedActivation,
-      canGoOnline: true,
+      canGoOnline: resolvedCanGoOnline,
+      canAttemptOnline: resolvedCanAttemptOnline,
     };
   }
 
@@ -17812,24 +17838,26 @@ async function resolveDriverActivationForOnline(profile) {
     );
   }
 
-  if (mergedActivation?.canGoOnline) {
+  if (isDriverActivationOnlineAttemptAllowed(mergedActivation)) {
+    const mergedCanGoOnline = mergedActivation?.canGoOnline === true;
     setRuntimeState((previous) => ({
       driverActivation: mergedActivation,
       driverActivationResolved: true,
-      driverCanGoOnline: true,
+      driverCanGoOnline: mergedCanGoOnline,
       driverActivationRemote:
         persistedRemoteSnapshot || previous.driverActivationRemote,
     }));
     await persistPrototypeProfilePatch(
       {
-        canGoOnline: true,
+        canGoOnline: mergedCanGoOnline,
         driverActivation: mergedActivation,
       },
       profile,
     );
     return {
       ...mergedActivation,
-      canGoOnline: true,
+      canGoOnline: mergedCanGoOnline,
+      canAttemptOnline: true,
     };
   }
 
@@ -17955,7 +17983,7 @@ async function enablePrototypeDriverOnline(profile, options = {}) {
     });
 
     const activationState = await resolveDriverActivationForOnline(profile);
-    if (!activationState?.canGoOnline) {
+    if (!isDriverActivationOnlineAttemptAllowed(activationState)) {
       appendRuntimeNotification(
         createRuntimeNotification({
           title: "Ativação pendente",

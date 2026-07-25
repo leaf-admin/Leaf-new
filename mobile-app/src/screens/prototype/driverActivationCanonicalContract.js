@@ -31,3 +31,10 @@ export function resolveCanonicalLivenessGate(remoteSnapshot = null) {
     visible: canStart || completed,
   };
 }
+
+export function isDriverActivationOnlineAttemptAllowed(activationState = null) {
+  return Boolean(
+    activationState?.canGoOnline === true ||
+    activationState?.canAttemptOnline === true,
+  );
+}

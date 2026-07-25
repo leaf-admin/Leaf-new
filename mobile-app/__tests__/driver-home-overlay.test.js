@@ -136,6 +136,36 @@ describe("DriverHomeOverlay", () => {
     expect(onToggleOnline).not.toHaveBeenCalled();
   });
 
+  it('starts the canonical online gate directly when activation is ready for identity validation', () => {
+    const onToggleOnline = jest.fn();
+    const onOpenActivation = jest.fn();
+
+    const { getByLabelText, getByText, queryByText } = render(
+      <DriverHomeOverlay
+        driverId="driver_1"
+        driverOnline={false}
+        driverCanGoOnline={false}
+        driverActivationResolved
+        driverActivationRemote={{
+          activationState: "APPROVED_NEEDS_LIVENESS",
+          canAttemptOnline: true,
+          requiresLiveness: true,
+        }}
+        onToggleOnline={onToggleOnline}
+        onOpenActivation={onOpenActivation}
+      />,
+    );
+
+    expect(getByText("Pronto para ficar online")).toBeTruthy();
+    expect(getByText("Ficar online")).toBeTruthy();
+    expect(queryByText("Em análise")).toBeNull();
+
+    fireEvent.press(getByLabelText("driver-home-toggle-online-ready"));
+
+    expect(onToggleOnline).toHaveBeenCalledTimes(1);
+    expect(onOpenActivation).not.toHaveBeenCalled();
+  });
+
   it('shows an actionable label when the canonical activation is rejected', () => {
     const { getByText, queryByText } = render(
       <DriverHomeOverlay
