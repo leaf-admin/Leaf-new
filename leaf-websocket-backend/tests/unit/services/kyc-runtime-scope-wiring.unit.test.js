@@ -19,6 +19,9 @@ describe('KYC runtime scope wiring', () => {
     expect(source).toContain(
       "const { resolveKycRuntimeForUser } = require('./services/kyc-runtime-scope-service');"
     );
+    expect(source).toContain(
+      "require('./services/driver-online-authorized-identity-retry-gate');"
+    );
     expect(onlineGate).toContain('const kycRuntime = await resolveKycRuntimeForUser({');
     expect(onlineGate).toContain("if (kycRuntime.namespace === 'operational')");
     expect(onlineGate).toContain('kycRuntime.workflow');
@@ -30,9 +33,19 @@ describe('KYC runtime scope wiring', () => {
     expect(onlineGate).toContain(".test(identityReviewGate.holdEvidenceId.trim())");
     expect(onlineGate).toContain("evidenceId\n");
     expect(onlineGate).not.toContain("evidenceId: identityReviewGate.holdEvidenceId || null");
-    expect(onlineGate).toContain('return kycRuntime.trust.evaluateOnlineGate(driverId);');
+    expect(onlineGate).toContain('buildAuthorizedIdentityRetryOnlineGate({');
+    expect(onlineGate).toContain('shouldBlockOnlineForIdentityReviewHold(identityReviewGate)');
+    expect(onlineGate).toContain('bindIdentityReverificationChallengeToOnlineGate({');
+    expect(onlineGate).toContain('`users/${driverId}/identityReverification`');
+    expect(onlineGate).toContain(
+      'const trustGate = await kycRuntime.trust.evaluateOnlineGate(driverId);'
+    );
     expect(onlineGate.indexOf('assertKycOperationAllowed'))
       .toBeLessThan(onlineGate.indexOf('trust.evaluateOnlineGate'));
+    expect(onlineGate.indexOf('buildAuthorizedIdentityRetryOnlineGate'))
+      .toBeLessThan(onlineGate.indexOf('trust.evaluateOnlineGate'));
+    expect(onlineGate.indexOf('shouldBlockOnlineForIdentityReviewHold'))
+      .toBeLessThan(onlineGate.indexOf('buildAuthorizedIdentityRetryOnlineGate'));
     expect(onlineGate.indexOf('resolveKycRuntimeForUser'))
       .toBeLessThan(onlineGate.indexOf('applyDeferredIdentityReverificationIfSafe'));
     expect(onlineGate).not.toContain('driverIdentityTrustService.evaluateOnlineGate');

@@ -878,12 +878,14 @@ class KYCRoutes {
           kycRuntime.namespace === 'operational'
           && (
             identityReviewGate.cleanRetryAuthorized === true
-            || identityReviewGate.retrySessionResumeCandidate === true
+            || (
+              identityReviewGate.retrySessionResumeCandidate === true
+              && !isIdentityReverificationRequest({
+                challengeId: effectiveChallengeId,
+                requirement: effectiveRequirement
+              })
+            )
           )
-          && !isIdentityReverificationRequest({
-            challengeId: effectiveChallengeId,
-            requirement: effectiveRequirement
-          })
         ) {
           const retryAuthorizationId = String(
             identityReviewGate.retryAuthorizationId || ''

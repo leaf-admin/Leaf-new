@@ -129,6 +129,11 @@ const QueueWorker = require('./services/queue-worker');
 const metricsCollector = require('./services/metrics-collector');
 const queueMonitoringRoutes = require('./routes/queue-monitoring');
 const { resolveKycRuntimeForUser } = require('./services/kyc-runtime-scope-service');
+const {
+    bindIdentityReverificationChallengeToOnlineGate,
+    buildAuthorizedIdentityRetryOnlineGate,
+    shouldBlockOnlineForIdentityReviewHold
+} = require('./services/driver-online-authorized-identity-retry-gate');
 const kycPolicyService = require('./services/kyc-policy-service');
 const { recordIngest, getStatus: getOtelIngestStatus } = require('./utils/otel-ingest-monitor');
 // ============================================================================================
@@ -606,7 +611,7 @@ async function enforceDailyKYCForOnline(driverId) {
 
     const identityReviewGate = await kycRuntime.workflow
         .assertKycOperationAllowed(driverId);
-    if (identityReviewGate?.identityReviewHold === true) {
+    if (shouldBlockOnlineForIdentityReviewHold(identityReviewGate)) {
         const reviewCaseId = typeof identityReviewGate.holdCaseId === 'string'
             && identityReviewGate.holdCaseId.trim()
             ? identityReviewGate.holdCaseId.trim()
@@ -635,7 +640,49 @@ async function enforceDailyKYCForOnline(driverId) {
             evidenceId
         };
     }
-    return kycRuntime.trust.evaluateOnlineGate(driverId);
+
+    if (
+        kycRuntime.namespace === 'operational'
+        && (
+            identityReviewGate?.cleanRetryAuthorized === true
+            || identityReviewGate?.retrySessionResumeCandidate === true
+        )
+    ) {
+        const identityState = await Promise.resolve(
+            firebaseConfig?.getFromRealtimeDB?.(
+                `users/${driverId}/identityReverification`
+            )
+        ).catch(() => null);
+        const authorizedRetryGate = buildAuthorizedIdentityRetryOnlineGate({
+            identityReviewGate,
+            identityState
+        });
+        if (authorizedRetryGate) {
+            return authorizedRetryGate;
+        }
+    }
+
+    const trustGate = await kycRuntime.trust.evaluateOnlineGate(driverId);
+    if (
+        trustGate?.allowed === false
+        && trustGate?.requirement === 'IDENTITY_REVERIFICATION'
+        && !trustGate?.challenge?.challengeId
+    ) {
+        const identityState = kycRuntime.namespace === 'operational'
+            ? await Promise.resolve(
+                firebaseConfig?.getFromRealtimeDB?.(
+                    `users/${driverId}/identityReverification`
+                )
+            ).catch(() => null)
+            : await kycRuntime.policy
+                .getStepUpChallenge(null, driverId)
+                .catch(() => null);
+        return bindIdentityReverificationChallengeToOnlineGate({
+            onlineGate: trustGate,
+            identityState
+        });
+    }
+    return trustGate;
 }
 
 async function findAvailableDriversForPickup(pickupLocation, options = {}) {

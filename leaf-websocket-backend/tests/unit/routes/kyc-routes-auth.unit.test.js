@@ -1449,12 +1449,19 @@ describe('kyc routes auth', () => {
       .set('Authorization', 'Bearer firebase-token')
       .send({
         userId: 'driver-1',
-        challengeId: null,
-        requirement: 'LIVENESS_REQUIRED'
+        challengeId: 'idrev_stale_client',
+        requirement: 'IDENTITY_REVERIFICATION'
       });
 
     expect(response.status).toBe(201);
     expect(response.body.success).toBe(true);
+    expect(mockKycPolicyService.recordIdentityReverificationStarted).toHaveBeenCalledWith(
+      'driver-1',
+      {
+        challengeId: 'idrev_orphan_canonical',
+        requirement: 'IDENTITY_REVERIFICATION'
+      }
+    );
     expect(mockCreateSession).toHaveBeenCalledWith(expect.objectContaining({
       challengeId: 'idrev_orphan_canonical',
       requirement: 'IDENTITY_REVERIFICATION',

@@ -516,6 +516,80 @@ describe('driver-identity-trust-service', () => {
       .toBeLessThan(mockReleaseIdentityVerificationWindow.mock.invocationCallOrder[0]);
   });
 
+  test('routes an authorized identity revalidation to liveness before requiring final KYC approval', async () => {
+    const activationService = {
+      resolveDriverActivationState: jest.fn(async () => ({
+        state: 'APPROVED_NEEDS_LIVENESS',
+        canAttemptOnline: true,
+        canGoOnline: false,
+        requiresLiveness: true,
+        blockingReason: 'Revalidacao facial obrigatoria antes de ficar online.',
+        kyc: {
+          status: 'pending_reverify',
+          reverifyRequired: true
+        }
+      }))
+    };
+    const kycPolicyService = {
+      requireApprovedKyc: jest.fn(async () => ({
+        allowed: false,
+        code: 'KYC_NOT_APPROVED'
+      })),
+      getStepUpChallenge: jest.fn(async () => null),
+      getOrCreateStepUpChallenge: jest.fn()
+    };
+    const harness = createHarness({
+      activationService,
+      kycPolicyService
+    });
+
+    const result = await harness.service.evaluateOnlineGate('driver-reverify');
+
+    expect(result).toEqual(expect.objectContaining({
+      allowed: false,
+      code: 'kycRequired',
+      reasonCode: 'KYC_REVERIFY_REQUIRED',
+      requirement: 'IDENTITY_REVERIFICATION',
+      dispatchBlockPersisted: true
+    }));
+    expect(kycPolicyService.requireApprovedKyc).not.toHaveBeenCalled();
+    expect(harness.redis.hset).toHaveBeenCalledWith(
+      'driver:driver-reverify',
+      expect.objectContaining({
+        dispatchEligible: 'false',
+        dispatchEligibilityCode: 'kycRequired'
+      })
+    );
+  });
+
+  test('routes first-access activation liveness without approving dispatch', async () => {
+    const activationService = {
+      resolveDriverActivationState: jest.fn(async () => ({
+        state: 'APPROVED_NEEDS_LIVENESS',
+        canAttemptOnline: true,
+        canGoOnline: false,
+        requiresLiveness: true,
+        blockingReason: 'Primeira validacao facial obrigatoria antes de ficar online.',
+        kyc: {
+          status: 'approved',
+          reverifyRequired: false
+        }
+      }))
+    };
+    const harness = createHarness({ activationService });
+
+    const result = await harness.service.evaluateOnlineGate('driver-first-access');
+
+    expect(result).toEqual(expect.objectContaining({
+      allowed: false,
+      code: 'kycRequired',
+      reasonCode: 'KYC_FIRST_ACCESS_REQUIRED',
+      requirement: 'LIVENESS_REQUIRED',
+      dispatchBlockPersisted: true
+    }));
+    expect(harness.kycPolicy.requireApprovedKyc).not.toHaveBeenCalled();
+  });
+
   test('seals dispatch before releasing the KYC window when durable challenge persistence fails', async () => {
     const kycPolicyService = {
       requireApprovedKyc: jest.fn(async () => ({ allowed: true })),
