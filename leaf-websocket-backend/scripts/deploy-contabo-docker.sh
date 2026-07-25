@@ -14,11 +14,17 @@ set -euo pipefail
 # Optional:
 #   CONTABO_HOST=<host>
 #   CONTABO_KEY=<ssh-key>
+#   CONTABO_KNOWN_HOSTS_FILE=~/.ssh/known_hosts
 #   VPS_USER=root
 #   REMOTE_BACKEND_DIR=/opt/leaf-app
 #   SKIP_LOCAL_TESTS=false
+#   VALIDATE_LOCAL_RUNTIME_CONFIG=true
+#   DEPLOY_TRACKED_PATHS="relative/path.js another/path.js"
+#   GATEWAY_ONLY_DEPLOY=false
+#   UPDATE_COMPOSE_FILES=true
 #   UPDATE_WORKERS=true
 #   RUN_PUBLIC_SMOKE=true
+#   AUTO_ROLLBACK=true
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BACKEND_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -26,12 +32,18 @@ REPO_ROOT="$(cd "$BACKEND_DIR/.." && pwd)"
 
 CONTABO_HOST="${CONTABO_HOST:-${VPS_HOST:-}}"
 CONTABO_KEY="${CONTABO_KEY:-${VPS_KEY:-$HOME/.ssh/leaf_contabo_20260412_ed25519}}"
+CONTABO_KNOWN_HOSTS_FILE="${CONTABO_KNOWN_HOSTS_FILE:-$HOME/.ssh/known_hosts}"
 VPS_USER="${VPS_USER:-root}"
 REMOTE_BACKEND_DIR="${REMOTE_BACKEND_DIR:-/opt/leaf-app}"
 CONFIRM_PRODUCTION_DEPLOY="${CONFIRM_PRODUCTION_DEPLOY:-false}"
 SKIP_LOCAL_TESTS="${SKIP_LOCAL_TESTS:-false}"
+VALIDATE_LOCAL_RUNTIME_CONFIG="${VALIDATE_LOCAL_RUNTIME_CONFIG:-true}"
+DEPLOY_TRACKED_PATHS="${DEPLOY_TRACKED_PATHS:-}"
+GATEWAY_ONLY_DEPLOY="${GATEWAY_ONLY_DEPLOY:-false}"
+UPDATE_COMPOSE_FILES="${UPDATE_COMPOSE_FILES:-true}"
 UPDATE_WORKERS="${UPDATE_WORKERS:-true}"
 RUN_PUBLIC_SMOKE="${RUN_PUBLIC_SMOKE:-true}"
+AUTO_ROLLBACK="${AUTO_ROLLBACK:-true}"
 HEALTH_TIMEOUT_SECONDS="${HEALTH_TIMEOUT_SECONDS:-120}"
 
 BASE_COMPOSE="docker-compose.production.yml"
@@ -45,6 +57,21 @@ if [[ "$CONFIRM_PRODUCTION_DEPLOY" != "true" ]]; then
   echo "[deploy][error] Set CONFIRM_PRODUCTION_DEPLOY=true to authorize the production rollout." >&2
   exit 2
 fi
+
+for boolean_name in \
+  SKIP_LOCAL_TESTS \
+  VALIDATE_LOCAL_RUNTIME_CONFIG \
+  GATEWAY_ONLY_DEPLOY \
+  UPDATE_COMPOSE_FILES \
+  UPDATE_WORKERS \
+  RUN_PUBLIC_SMOKE \
+  AUTO_ROLLBACK; do
+  boolean_value="${!boolean_name}"
+  if [[ "$boolean_value" != "true" && "$boolean_value" != "false" ]]; then
+    echo "[deploy][error] $boolean_name must be true or false." >&2
+    exit 2
+  fi
+done
 
 if [[ -n "$(git -C "$REPO_ROOT" status --porcelain)" ]]; then
   echo "[deploy][error] Production deploy bloqueado: worktree contém alterações não commitadas." >&2
@@ -62,6 +89,16 @@ if [[ ! -f "$CONTABO_KEY" ]]; then
   exit 2
 fi
 
+if [[ ! -f "$CONTABO_KNOWN_HOSTS_FILE" ]]; then
+  echo "[deploy][error] SSH known_hosts not found: $CONTABO_KNOWN_HOSTS_FILE" >&2
+  exit 2
+fi
+
+if ! ssh-keygen -F "$CONTABO_HOST" -f "$CONTABO_KNOWN_HOSTS_FILE" >/dev/null; then
+  echo "[deploy][error] Production host is not pinned in $CONTABO_KNOWN_HOSTS_FILE." >&2
+  exit 2
+fi
+
 for required in "$BASE_COMPOSE" "$SCALE_COMPOSE" "$OPS_COMPOSE" Dockerfile package.json; do
   if [[ ! -f "$BACKEND_DIR/$required" ]]; then
     echo "[deploy][error] Missing local file: $BACKEND_DIR/$required" >&2
@@ -71,15 +108,121 @@ done
 
 SSH_OPTS=(
   -i "$CONTABO_KEY"
-  -o StrictHostKeyChecking=no
-  -o UserKnownHostsFile=/dev/null
+  -o StrictHostKeyChecking=yes
+  -o "UserKnownHostsFile=$CONTABO_KNOWN_HOSTS_FILE"
   -o ConnectTimeout=15
 )
-RSYNC_SSH="ssh -i \"$CONTABO_KEY\" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=15"
+RSYNC_SSH="ssh -i \"$CONTABO_KEY\" -o StrictHostKeyChecking=yes -o UserKnownHostsFile=\"$CONTABO_KNOWN_HOSTS_FILE\" -o ConnectTimeout=15"
+
+TRACKED_MANIFEST="$(mktemp)"
+ROLLBACK_ARMED=false
+STAMP=""
+REMOTE_BACKUP_DIR=""
+
+cleanup_local() {
+  rm -f "$TRACKED_MANIFEST"
+}
+
+trap cleanup_local EXIT
 
 remote() {
   ssh "${SSH_OPTS[@]}" "$VPS_USER@$CONTABO_HOST" "$@"
 }
+
+rollback_on_error() {
+  original_status=$?
+  trap - ERR
+
+  if [[ "$ROLLBACK_ARMED" == "true" && "$AUTO_ROLLBACK" == "true" ]]; then
+    echo "[deploy][rollback] Failure detected; restoring source, compose and container images." >&2
+    set +e
+    remote "
+      set -e
+      cd '$REMOTE_BACKEND_DIR'
+      tar -xzf '$REMOTE_BACKUP_DIR/source-before.tar.gz' -C '$REMOTE_BACKEND_DIR'
+      cp '$REMOTE_BACKUP_DIR/$REMOTE_BASE_COMPOSE' '$REMOTE_BASE_COMPOSE'
+      cp '$REMOTE_BACKUP_DIR/$REMOTE_SCALE_COMPOSE' '$REMOTE_SCALE_COMPOSE'
+      cp '$REMOTE_BACKUP_DIR/$REMOTE_OPS_COMPOSE' '$REMOTE_OPS_COMPOSE'
+
+      while IFS='|' read -r container configured_image previous_image rollback_tag; do
+        test -n \"\$container\"
+        test -n \"\$configured_image\"
+        test -n \"\$previous_image\"
+        docker image inspect \"\$rollback_tag\" >/dev/null
+        docker image tag \"\$previous_image\" \"\$configured_image\"
+      done < '$REMOTE_BACKUP_DIR/container-images-before.txt'
+
+      compose='docker compose -f $REMOTE_BASE_COMPOSE -f $REMOTE_SCALE_COMPOSE -f $REMOTE_OPS_COMPOSE'
+      for service in websocket-gateway-2 websocket-gateway-3 websocket; do
+        \$compose up -d --no-deps --no-build --force-recreate \"\$service\"
+      done
+
+      if [ '$GATEWAY_ONLY_DEPLOY' != true ]; then
+        for service in \
+          trip-location-worker \
+          queue-worker \
+          sideeffects-worker \
+          billing-worker \
+          pricing-baseline-worker \
+          ride-health-monitor-worker; do
+          \$compose up -d --no-deps --no-build --force-recreate \"\$service\"
+        done
+      fi
+
+      elapsed=0
+      until docker exec leaf-websocket \
+        curl -fsS --max-time 10 http://127.0.0.1:3001/health/readiness >/dev/null 2>&1; do
+        if [ \"\$elapsed\" -ge '$HEALTH_TIMEOUT_SECONDS' ]; then
+          echo '[deploy][rollback][error] Readiness did not recover.' >&2
+          exit 1
+        fi
+        sleep 3
+        elapsed=\$((elapsed + 3))
+      done
+      docker exec leaf-nginx nginx -t
+      docker exec leaf-nginx nginx -s reload
+      cmp -s .env '$REMOTE_BACKUP_DIR/.env.before'
+    "
+    rollback_status=$?
+    set -e
+
+    if [[ "$rollback_status" -eq 0 ]]; then
+      echo "[deploy][rollback] Automatic rollback completed." >&2
+    else
+      echo "[deploy][rollback][error] Automatic rollback failed; backup: $REMOTE_BACKUP_DIR" >&2
+    fi
+  fi
+
+  exit "$original_status"
+}
+
+trap rollback_on_error ERR
+
+if [[ -n "$DEPLOY_TRACKED_PATHS" ]]; then
+  for relative_path in $DEPLOY_TRACKED_PATHS; do
+    if [[ "$relative_path" = /* || "$relative_path" == *".."* ]]; then
+      echo "[deploy][error] Invalid targeted path: $relative_path" >&2
+      exit 2
+    fi
+    git -C "$REPO_ROOT" ls-files --error-unmatch \
+      "leaf-websocket-backend/$relative_path" >/dev/null
+    printf '%s\0' "$relative_path" >> "$TRACKED_MANIFEST"
+  done
+else
+  git -C "$REPO_ROOT" ls-files -z -- leaf-websocket-backend |
+    while IFS= read -r -d '' tracked_path; do
+      printf '%s\0' "${tracked_path#leaf-websocket-backend/}"
+    done > "$TRACKED_MANIFEST"
+fi
+
+if [[ ! -s "$TRACKED_MANIFEST" ]]; then
+  echo "[deploy][error] Tracked source manifest is empty." >&2
+  exit 2
+fi
+
+if [[ "$GATEWAY_ONLY_DEPLOY" == "true" ]]; then
+  UPDATE_WORKERS=false
+fi
 
 echo "[deploy] Target: $VPS_USER@$CONTABO_HOST:$REMOTE_BACKEND_DIR"
 echo "[deploy] Compose: $BASE_COMPOSE + $SCALE_COMPOSE"
@@ -94,7 +237,11 @@ if [[ "$SKIP_LOCAL_TESTS" != "true" ]]; then
     else
       echo "[deploy][info] Docker unavailable locally; compose will be validated on the target host."
     fi
-    npm run config:validate
+    if [[ "$VALIDATE_LOCAL_RUNTIME_CONFIG" == "true" ]]; then
+      npm run config:validate
+    else
+      echo "[deploy][info] Local runtime config validation skipped; the active remote .env remains authoritative."
+    fi
     npm run check:no-active-vps-runtime
   )
 else
@@ -119,10 +266,27 @@ remote "
   docker compose -f '$REMOTE_BASE_COMPOSE' -f '$REMOTE_SCALE_COMPOSE' ps \
     > '$REMOTE_BACKUP_DIR/compose-ps-before.txt'
   docker image ls --digests > '$REMOTE_BACKUP_DIR/docker-images-before.txt'
-  previous_backend_image=\$(docker inspect --format '{{.Image}}' leaf-websocket)
-  test -n "\$previous_backend_image"
-  docker image tag "\$previous_backend_image" 'leaf-app-websocket:rollback-$STAMP'
-  printf '%s\n' "\$previous_backend_image" > '$REMOTE_BACKUP_DIR/backend-image-before.txt'
+  : > '$REMOTE_BACKUP_DIR/container-images-before.txt'
+  for container in \
+    leaf-websocket \
+    leaf-websocket-gateway-2 \
+    leaf-websocket-gateway-3 \
+    leaf-trip-location-worker \
+    leaf-queue-worker \
+    leaf-sideeffects-worker \
+    leaf-billing-worker \
+    leaf-pricing-baseline-worker \
+    leaf-ride-health-monitor-worker; do
+    previous_image=\$(docker inspect --format '{{.Image}}' \"\$container\")
+    configured_image=\$(docker inspect --format '{{.Config.Image}}' \"\$container\")
+    test -n \"\$previous_image\"
+    test -n \"\$configured_image\"
+    rollback_tag=\"leaf-app-rollback:$STAMP-\${container#leaf-}\"
+    docker image tag \"\$previous_image\" \"\$rollback_tag\"
+    printf '%s|%s|%s|%s\n' \
+      \"\$container\" \"\$configured_image\" \"\$previous_image\" \"\$rollback_tag\" \
+      >> '$REMOTE_BACKUP_DIR/container-images-before.txt'
+  done
   cp '$REMOTE_BASE_COMPOSE' '$REMOTE_BACKUP_DIR/$REMOTE_BASE_COMPOSE'
   cp '$REMOTE_SCALE_COMPOSE' '$REMOTE_BACKUP_DIR/$REMOTE_SCALE_COMPOSE'
   cp '$REMOTE_OPS_COMPOSE' '$REMOTE_BACKUP_DIR/$REMOTE_OPS_COMPOSE'
@@ -133,8 +297,19 @@ remote "
     --exclude='./certbot' \
     --exclude='./ssl' \
     --exclude='./.git' \
-    --exclude='./.env' \
-    --exclude='./firebase-credentials.json' \
+    --exclude='.env*' \
+    --exclude='*.env' \
+    --exclude='*.env.*' \
+    --exclude='*.pem' \
+    --exclude='*.p12' \
+    --exclude='*.pfx' \
+    --exclude='*.jks' \
+    --exclude='*.keystore' \
+    --exclude='*.key' \
+    --exclude='*.crt' \
+    --exclude='*.cer' \
+    --exclude='firebase-credentials.json' \
+    --exclude='leaf-reactnative-firebase-adminsdk-*.json' \
     -czf '$REMOTE_BACKUP_DIR/source-before.tar.gz' .
 
   authority_mode=\$(awk -F= '\$1==\"KYC_ACTIVE_TRIP_AUTHORITY_MODE\" {print substr(\$0,index(\$0,\"=\")+1)}' .env | tail -n1 | tr -d '\r')
@@ -253,10 +428,13 @@ remote "
     echo '[deploy][preflight] Redis critical authority validated.'
   fi
 "
+ROLLBACK_ARMED=true
 echo "[deploy] Backup: $REMOTE_BACKUP_DIR"
 
-echo "[deploy] 3/7 Synchronizing application source"
-rsync -az --delete-delay \
+echo "[deploy] 3/7 Previewing tracked application source"
+rsync -azc --dry-run --itemize-changes \
+  --from0 \
+  --files-from="$TRACKED_MANIFEST" \
   --exclude ".git" \
   --exclude "node_modules" \
   --exclude "logs" \
@@ -265,8 +443,48 @@ rsync -az --delete-delay \
   --exclude ".nyc_output" \
   --exclude ".env" \
   --exclude ".env.*" \
+  --exclude "*.env" \
+  --exclude "*.env.*" \
   --exclude "firebase-credentials.json" \
   --exclude "leaf-reactnative-firebase-adminsdk-*.json" \
+  --exclude "*.pem" \
+  --exclude "*.p12" \
+  --exclude "*.pfx" \
+  --exclude "*.jks" \
+  --exclude "*.keystore" \
+  --exclude "*.key" \
+  --exclude "*.crt" \
+  --exclude "*.cer" \
+  --exclude "ssl" \
+  --exclude "certbot" \
+  -e "$RSYNC_SSH" \
+  "$BACKEND_DIR/" \
+  "$VPS_USER@$CONTABO_HOST:$REMOTE_BACKEND_DIR/"
+
+echo "[deploy] 3/7 Synchronizing tracked application source"
+rsync -azc --itemize-changes \
+  --from0 \
+  --files-from="$TRACKED_MANIFEST" \
+  --exclude ".git" \
+  --exclude "node_modules" \
+  --exclude "logs" \
+  --exclude "backups" \
+  --exclude "coverage" \
+  --exclude ".nyc_output" \
+  --exclude ".env" \
+  --exclude ".env.*" \
+  --exclude "*.env" \
+  --exclude "*.env.*" \
+  --exclude "firebase-credentials.json" \
+  --exclude "leaf-reactnative-firebase-adminsdk-*.json" \
+  --exclude "*.pem" \
+  --exclude "*.p12" \
+  --exclude "*.pfx" \
+  --exclude "*.jks" \
+  --exclude "*.keystore" \
+  --exclude "*.key" \
+  --exclude "*.crt" \
+  --exclude "*.cer" \
   --exclude "ssl" \
   --exclude "certbot" \
   -e "$RSYNC_SSH" \
@@ -276,15 +494,18 @@ rsync -az --delete-delay \
 remote "
   set -e
   cd '$REMOTE_BACKEND_DIR'
-  if [ '$BASE_COMPOSE' != '$REMOTE_BASE_COMPOSE' ]; then
-    cp '$BASE_COMPOSE' '$REMOTE_BASE_COMPOSE'
+  if [ '$UPDATE_COMPOSE_FILES' = true ]; then
+    if [ '$BASE_COMPOSE' != '$REMOTE_BASE_COMPOSE' ]; then
+      cp '$BASE_COMPOSE' '$REMOTE_BASE_COMPOSE'
+    fi
+    if [ '$SCALE_COMPOSE' != '$REMOTE_SCALE_COMPOSE' ]; then
+      cp '$SCALE_COMPOSE' '$REMOTE_SCALE_COMPOSE'
+    fi
+    if [ '$OPS_COMPOSE' != '$REMOTE_OPS_COMPOSE' ]; then
+      cp '$OPS_COMPOSE' '$REMOTE_OPS_COMPOSE'
+    fi
   fi
-  if [ '$SCALE_COMPOSE' != '$REMOTE_SCALE_COMPOSE' ]; then
-    cp '$SCALE_COMPOSE' '$REMOTE_SCALE_COMPOSE'
-  fi
-  if [ '$OPS_COMPOSE' != '$REMOTE_OPS_COMPOSE' ]; then
-    cp '$OPS_COMPOSE' '$REMOTE_OPS_COMPOSE'
-  fi
+  cmp -s .env '$REMOTE_BACKUP_DIR/.env.before'
   validator_image=\$(docker inspect --format '{{.Image}}' leaf-websocket)
   test -n \"\$validator_image\"
   docker run --rm \
@@ -306,10 +527,14 @@ remote "
   set -e
   cd '$REMOTE_BACKEND_DIR'
   compose='docker compose -f $REMOTE_BASE_COMPOSE -f $REMOTE_SCALE_COMPOSE -f $REMOTE_OPS_COMPOSE'
-  \$compose build \
-    websocket websocket-gateway-2 websocket-gateway-3 \
-    sideeffects-worker billing-worker queue-worker \
-    trip-location-worker pricing-baseline-worker ride-health-monitor-worker
+  if [ '$GATEWAY_ONLY_DEPLOY' = true ]; then
+    \$compose build websocket websocket-gateway-2 websocket-gateway-3
+  else
+    \$compose build \
+      websocket websocket-gateway-2 websocket-gateway-3 \
+      sideeffects-worker billing-worker queue-worker \
+      trip-location-worker pricing-baseline-worker ride-health-monitor-worker
+  fi
   candidate_image=\$(\$compose images -q websocket | head -n1)
   test -n "\$candidate_image"
   docker run --rm \
@@ -369,7 +594,9 @@ remote "
 
   # Readiness dos gateways depende deste consumer. Suba-o primeiro para evitar
   # deadlock no primeiro rollout do runtime canônico.
-  \$compose up -d --no-deps trip-location-worker
+  if [ '$GATEWAY_ONLY_DEPLOY' != true ]; then
+    \$compose up -d --no-deps trip-location-worker
+  fi
   wait_healthy trip-location-worker leaf-trip-location-worker
 
   \$compose up -d --no-deps websocket-gateway-2
@@ -438,6 +665,7 @@ remote "
   curl -fsS --max-time 15 http://127.0.0.1:3001/health/liveness >/dev/null
   curl -fsS --max-time 15 http://127.0.0.1:3001/health/readiness >/dev/null
   docker exec leaf-nginx nginx -t
+  cmp -s .env '$REMOTE_BACKUP_DIR/.env.before'
 "
 
 if [[ "$RUN_PUBLIC_SMOKE" == "true" ]]; then
@@ -446,5 +674,7 @@ if [[ "$RUN_PUBLIC_SMOKE" == "true" ]]; then
   curl -fsS --max-time 20 https://socket.leaf.app.br/health/readiness >/dev/null
 fi
 
+ROLLBACK_ARMED=false
+trap - ERR
 echo "[deploy][done] Modular rollout completed without compose teardown."
-echo "[deploy][rollback] Restore $REMOTE_BACKUP_DIR/source-before.tar.gz and compose files, then roll gateways one at a time."
+echo "[deploy][rollback] Automatic rollback is disarmed after successful public smoke. Backup: $REMOTE_BACKUP_DIR"

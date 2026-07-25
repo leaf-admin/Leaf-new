@@ -248,9 +248,53 @@ describe('production compose launch-control contract', () => {
     const remoteValidator = deploySource.indexOf(
       "validator_image=\\$(docker inspect --format '{{.Image}}' leaf-websocket)",
     );
-    const firstServiceUp = deploySource.indexOf('\\$compose up -d');
+    const firstServiceUp = deploySource.indexOf(
+      '\\$compose up -d',
+      remoteValidator,
+    );
     expect(remoteValidator).toBeGreaterThan(-1);
     expect(firstServiceUp).toBeGreaterThan(remoteValidator);
+  });
+
+  it('pins the production host, syncs only tracked source and keeps an automatic image rollback', () => {
+    expect(deploySource).toContain('StrictHostKeyChecking=yes');
+    expect(deploySource).toContain('ssh-keygen -F "$CONTABO_HOST"');
+    expect(deploySource).not.toContain('StrictHostKeyChecking=no');
+    expect(deploySource).not.toContain('UserKnownHostsFile=/dev/null');
+
+    expect(deploySource).toContain('--from0');
+    expect(deploySource).toContain('--files-from="$TRACKED_MANIFEST"');
+    expect(deploySource).toContain('--dry-run --itemize-changes');
+    expect(deploySource).not.toContain('--delete-delay');
+    expect(deploySource).toContain('DEPLOY_TRACKED_PATHS');
+    expect(deploySource).toContain('GATEWAY_ONLY_DEPLOY');
+
+    for (const credentialPattern of [
+      '*.env',
+      '*.pem',
+      '*.p12',
+      '*.pfx',
+      '*.jks',
+      '*.keystore',
+      '*.key',
+      '*.crt',
+      '*.cer',
+      'leaf-reactnative-firebase-adminsdk-*.json',
+    ]) {
+      expect(deploySource).toContain(credentialPattern);
+      expect(dockerIgnoreSource).toContain(credentialPattern);
+    }
+
+    expect(dockerIgnoreSource).toContain('.env*');
+    expect(dockerIgnoreSource).toContain('backups');
+    expect(dockerIgnoreSource).toContain('reports');
+    expect(dockerIgnoreSource).toContain('.tmp-*');
+    expect(deploySource).toContain('container-images-before.txt');
+    expect(deploySource).toContain('leaf-app-rollback:$STAMP-');
+    expect(deploySource).toContain('rollback_on_error');
+    expect(deploySource).toContain('Automatic rollback completed.');
+    expect(deploySource).toContain('docker image tag \\"\\$previous_image\\" \\"\\$configured_image\\"');
+    expect(deploySource).toContain('cmp -s .env');
   });
 
   it('runs the trip-location consumer as a health-attested canonical Docker worker', () => {
