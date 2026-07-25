@@ -348,6 +348,75 @@ describe('driver-eligibility-service', () => {
     );
   });
 
+  it('allows the online attempt gate for reverification while keeping ride eligibility blocked', async () => {
+    firebaseConfig.getRealtimeDB.mockReturnValue(
+      createRealtimeDB({
+        'driver_activation/driver_reverify': {
+          documents: {
+            cnh: { status: 'approved' },
+            crlv: {
+              status: 'approved',
+              data: {
+                plate: 'REV2026',
+                model: 'Leaf Plus',
+                color: 'Branco'
+              }
+            }
+          },
+          consent: {
+            backgroundCheck: { acceptedAt: '2026-07-25T12:00:00.000Z' }
+          }
+        },
+        'users/driver_reverify': {
+          approved: true,
+          kycStatus: 'pending_reverify',
+          kycReverifyRequired: true,
+          kycFirstAccessVerifiedAt: '2026-07-21T20:00:00.000Z',
+          carType: 'Leaf Plus'
+        },
+        'user_vehicles/driver_reverify': {
+          uv_1: {
+            vehicleId: 'vehicle_reverify',
+            isActive: true,
+            status: 'approved',
+            approved: true
+          }
+        },
+        'vehicles/vehicle_reverify': {
+          approved: true,
+          status: 'approved',
+          carType: 'Leaf Plus',
+          plate: 'REV2026',
+          model: 'Leaf Plus',
+          color: 'Branco'
+        },
+        'vehicle_active_assignment/vehicle_reverify': {
+          driverId: 'driver_reverify',
+          userId: 'driver_reverify',
+          status: 'active'
+        }
+      })
+    );
+
+    const eligibility = await driverEligibilityService.isDriverEligibleForRide(
+      'driver_reverify',
+      'Leaf Plus',
+      { carType: 'Leaf Plus' }
+    );
+
+    expect(eligibility.eligible).toBe(false);
+    expect(eligibility.code).toBe('KYC_LIVENESS_REQUIRED');
+    expect(eligibility.activationState).toEqual(
+      expect.objectContaining({
+        state: 'APPROVED_NEEDS_LIVENESS',
+        canGoOnline: false,
+        canAttemptOnline: true,
+        requiresLiveness: true
+      })
+    );
+    expect(eligibility.profile).toBeNull();
+  });
+
   it('blocks ride eligibility when an activation document is rejected', async () => {
     firebaseConfig.getRealtimeDB.mockReturnValue(
       createRealtimeDB({

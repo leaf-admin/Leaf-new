@@ -467,6 +467,7 @@ async function resolveDriverActivationState({
     effectiveMeiApproved &&
     effectiveBackgroundConsent;
   const kycApproval = resolveKycApproval(resolvedUserData);
+  const kycReverificationRequired = kycApproval.reverifyRequired === true;
   const liveness = resolveLivenessEvidence(resolvedUserData);
   const vehicleActivationComplete =
     crlvApproved &&
@@ -527,12 +528,10 @@ async function resolveDriverActivationState({
     );
   }
 
-  if (!kycApproval.approved) {
+  if (!kycApproval.approved && !kycReverificationRequired) {
     return buildStatePayload(DRIVER_ACTIVATION_STATES.DRIVER_DOCS_IN_REVIEW, {
       ...meta,
-      reason: kycApproval.reverifyRequired || kycApproval.status === 'pending_reverify'
-        ? 'KYC do motorista aguardando revalidacao.'
-        : kycApproval.status === 'missing'
+      reason: kycApproval.status === 'missing'
           ? 'KYC do motorista ainda nao foi iniciado ou aprovado.'
           : 'KYC do motorista aguardando analise.'
     });
@@ -568,10 +567,12 @@ async function resolveDriverActivationState({
     );
   }
 
-  if (!liveness.passed) {
+  if (kycReverificationRequired || !liveness.passed) {
     return buildStatePayload(DRIVER_ACTIVATION_STATES.APPROVED_NEEDS_LIVENESS, {
       ...meta,
-      reason: 'Primeira validacao facial obrigatoria antes de ficar online.'
+      reason: kycReverificationRequired
+        ? 'Revalidacao facial obrigatoria antes de ficar online.'
+        : 'Primeira validacao facial obrigatoria antes de ficar online.'
     });
   }
 
