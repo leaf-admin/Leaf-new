@@ -725,6 +725,7 @@ async function recomputeDriverActivationStatus(driverId) {
     db,
     activationNode
   });
+  const storedStatus = activationNode?.status || {};
   const canGoOnline = Boolean(canonicalState?.canGoOnline);
 
   const updatedAt = nowIso();
@@ -736,6 +737,7 @@ async function recomputeDriverActivationStatus(driverId) {
     canAttemptOnline: Boolean(canonicalState?.canAttemptOnline),
     requiresLiveness: Boolean(canonicalState?.requiresLiveness),
     blockingReason: canonicalState?.blockingReason || null,
+    kyc: canonicalState?.kyc || storedStatus?.kyc || {},
     vehicle: canonicalState?.vehicle || {},
     liveness: canonicalState?.liveness || {},
     summary,
@@ -758,6 +760,7 @@ async function recomputeDriverActivationStatus(driverId) {
     canAttemptOnline: Boolean(canonicalState?.canAttemptOnline),
     requiresLiveness: Boolean(canonicalState?.requiresLiveness),
     blockingReason: canonicalState?.blockingReason || null,
+    kyc: statusPayload?.kyc || {},
     vehicle: canonicalState?.vehicle || {},
     liveness: canonicalState?.liveness || {},
     summary,
@@ -1482,6 +1485,7 @@ class DriverDocumentAnalysisQueue {
           storedStatus?.requiresLiveness
       ),
       blockingReason: canonicalState?.blockingReason || storedStatus?.blockingReason || null,
+      kyc: canonicalState?.kyc || storedStatus?.kyc || {},
       vehicle: canonicalState?.vehicle || storedStatus?.vehicle || {},
       liveness: canonicalState?.liveness || storedStatus?.liveness || {},
       summary,
@@ -1506,6 +1510,7 @@ class DriverDocumentAnalysisQueue {
       canAttemptOnline: Boolean(statusPayload?.canAttemptOnline),
       requiresLiveness: Boolean(statusPayload?.requiresLiveness),
       blockingReason: statusPayload?.blockingReason || null,
+      kyc: statusPayload?.kyc || {},
       vehicle: statusPayload?.vehicle || {},
       liveness: statusPayload?.liveness || {},
       summary,

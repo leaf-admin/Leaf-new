@@ -7,6 +7,7 @@ const mockHasValidVerification = jest.fn();
 const mockResolveActiveTripForDriver = jest.fn();
 const mockClaimIdentityPolicyMutationWindow = jest.fn();
 const mockReleaseIdentityPolicyMutationWindow = jest.fn();
+const mockRecomputeDriverActivationStatus = jest.fn();
 const mockRealtimeValues = {};
 const mockRealtimeSnapshot = (value) => ({
   exists: () => value !== undefined && value !== null,
@@ -88,6 +89,11 @@ jest.mock('../../../firebase-config', () => ({
 
 jest.mock('../../../services/kyc-driver-status-service', () => ({
   blockDriver: jest.fn().mockResolvedValue({ success: true })
+}));
+
+jest.mock('../../../services/driver-document-analysis-queue', () => ({
+  recomputeDriverActivationStatus: (...args) =>
+    mockRecomputeDriverActivationStatus(...args)
 }));
 
 jest.mock('../../../services/KYCNotificationService', () => {
@@ -235,6 +241,10 @@ describe('kyc-policy-service', () => {
       token: 'policy-window-token'
     });
     mockReleaseIdentityPolicyMutationWindow.mockReset().mockResolvedValue(true);
+    mockRecomputeDriverActivationStatus.mockReset().mockResolvedValue({
+      activationState: 'APPROVED_NEEDS_LIVENESS',
+      canGoOnline: false
+    });
   });
 
   test('isPhotoMismatchReport should return true for mismatch keywords', () => {
@@ -1032,6 +1042,7 @@ describe('kyc-policy-service', () => {
         })
       })
     }));
+    expect(mockRecomputeDriverActivationStatus).toHaveBeenCalledWith(driverId);
 
     const firebaseConfig = require('../../../firebase-config');
     expect(firebaseConfig.getFirestore).not.toHaveBeenCalled();
@@ -1205,6 +1216,7 @@ describe('kyc-policy-service', () => {
         })
       })
     );
+    expect(mockRecomputeDriverActivationStatus).toHaveBeenCalledWith('driver-current');
   });
 
   test('replays an approved identity result after a partial Redis persistence failure', async () => {
