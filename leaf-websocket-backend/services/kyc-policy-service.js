@@ -301,6 +301,23 @@ class KYCPolicyService {
     return snapshot?.exists?.() ? snapshot.val() : null;
   }
 
+  async syncDriverActivationProjection(driverId) {
+    try {
+      const {
+        recomputeDriverActivationStatus
+      } = require('./driver-document-analysis-queue');
+      await recomputeDriverActivationStatus(driverId);
+      return true;
+    } catch (error) {
+      logStructured('warn', 'Falha ao sincronizar projeção de ativação após mutação KYC', {
+        service: 'kyc-policy-service',
+        driverId,
+        error: error?.message || String(error)
+      });
+      return false;
+    }
+  }
+
   async transactCurrentIdentityReverification(driverId, challengeId, mutateUser) {
     if (!challengeId) {
       return {
@@ -399,6 +416,7 @@ class KYCPolicyService {
 
       if (cachePinError) throw cachePinError;
       if (transaction?.committed === true && matchedCurrentChallenge) {
+        await this.syncDriverActivationProjection(driverId);
         return {
           committed: true,
           stale: false,
@@ -1479,6 +1497,7 @@ class KYCPolicyService {
       });
     }
     await this.redis.hset(`driver:${driverId}`, redisPayload).catch(() => null);
+    await this.syncDriverActivationProjection(driverId);
 
     return {
       success: true,
@@ -1778,6 +1797,8 @@ class KYCPolicyService {
         });
       });
     }
+
+    await this.syncDriverActivationProjection(driverId);
 
     logStructured('warn', 'Motorista marcado para revalidacao facial sutil por suporte', {
       service: 'kyc-policy-service',

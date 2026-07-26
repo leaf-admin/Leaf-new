@@ -422,10 +422,27 @@ export function isDriverIdentitySupportRequired(remoteActivation) {
   const kycBlocked =
     remoteActivation?.kyc?.blocked === true ||
     ["blocked", "rejected", "failed", "denied"].includes(kycStatus);
+  const blockingReason = String(remoteActivation?.blockingReason || "")
+    .trim()
+    .toUpperCase();
+  const hasFailedDocument = Object.values(
+    remoteActivation?.documents || {},
+  ).some((document) =>
+    ["failed", "rejected", "denied"].includes(
+      String(document?.status || "").trim().toLowerCase(),
+    ),
+  );
+  const canonicalIdentityRejection =
+    activationState === "REJECTED" &&
+    blockingReason.includes("KYC") &&
+    !hasFailedDocument;
 
   return (
-    kycBlocked &&
-    ["REJECTED", "SUSPENDED", "BLOCKED"].includes(activationState)
+    canonicalIdentityRejection ||
+    (
+      kycBlocked &&
+      ["REJECTED", "SUSPENDED", "BLOCKED"].includes(activationState)
+    )
   );
 }
 

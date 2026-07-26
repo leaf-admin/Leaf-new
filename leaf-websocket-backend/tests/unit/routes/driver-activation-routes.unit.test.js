@@ -58,6 +58,7 @@ const mockRealtimeDb = {
 };
 
 const mockQueueEnqueue = jest.fn();
+const mockGetActivationSnapshot = jest.fn();
 const mockSetConsentBackgroundCheck = jest.fn();
 const mockRecomputeDriverActivationStatus = jest.fn();
 const mockCommitDocumentSubmissionState = jest.fn(async ({
@@ -98,7 +99,7 @@ jest.mock('../../../firebase-config', () => ({
 jest.mock('../../../services/driver-document-analysis-queue', () => ({
   driverDocumentAnalysisQueue: {
     enqueue: (...args) => mockQueueEnqueue(...args),
-    getActivationSnapshot: jest.fn(),
+    getActivationSnapshot: (...args) => mockGetActivationSnapshot(...args),
     listActivationDocuments: jest.fn(),
     setConsentBackgroundCheck: (...args) => mockSetConsentBackgroundCheck(...args)
   },
@@ -214,7 +215,43 @@ describe('driver activation routes document upload storage boundary', () => {
     mockMarkCanonicalDocumentPending.mockResolvedValue({ status: 'pending' });
     mockRecomputeDriverActivationStatus.mockResolvedValue({ canGoOnline: false });
     mockSetConsentBackgroundCheck.mockResolvedValue({ canGoOnline: false });
+    mockGetActivationSnapshot.mockResolvedValue({
+      activationState: 'DRIVER_DOCS_PENDING',
+      canGoOnline: false,
+      kyc: {}
+    });
     mockSyncDriverApplication.mockResolvedValue(undefined);
+  });
+
+  it('returns the canonical KYC projection in the activation status contract', async () => {
+    const kyc = {
+      approved: false,
+      blocked: true,
+      pending: false,
+      status: 'blocked',
+      reverifyRequired: true
+    };
+    mockGetActivationSnapshot.mockResolvedValueOnce({
+      activationState: 'REJECTED',
+      canGoOnline: false,
+      blockingReason: 'KYC do motorista bloqueado.',
+      kyc
+    });
+
+    const response = await request(createApp())
+      .get('/api/drivers/me/activation/status')
+      .set('Authorization', 'Bearer firebase-token');
+
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({
+      success: true,
+      data: {
+        activationState: 'REJECTED',
+        canGoOnline: false,
+        kyc
+      }
+    });
+    expect(mockGetActivationSnapshot).toHaveBeenCalledWith('driver-1');
   });
 
   it('authorizes a canonical Firestore driver when the legacy RTDB profile is empty', async () => {

@@ -41,9 +41,12 @@ jest.mock('../../../utils/prometheus-metrics', () => ({
 }));
 
 const firebaseConfig = require('../../../firebase-config');
+const driverActivationStateService = require('../../../services/driver-activation-state-service');
 const driverApplicationService = require('../../../services/driver-application-service');
 const {
+  driverDocumentAnalysisQueue,
   commitDocumentSubmissionState,
+  recomputeDriverActivationStatus,
   runWithCurrentDocumentBinding,
   updateDocumentState
 } = require('../../../services/driver-document-analysis-queue');
@@ -208,6 +211,165 @@ function createDbWithCurrentDocument(documentType, currentMetadata, historyMetad
 describe('driver-document-analysis-queue CRLV persistence', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+  });
+
+  it('projects the canonical KYC block in the driver activation snapshot', async () => {
+    const db = createDb({
+      driver_activation: {
+        driver_1: {
+          documents: {
+            cnh: { status: 'approved' },
+            crlv: { status: 'approved' }
+          },
+          consent: {
+            backgroundCheck: {
+              accepted: true,
+              acceptedAt: '2026-07-25T20:00:00.000Z'
+            }
+          }
+        }
+      },
+      users: {
+        driver_1: {}
+      }
+    });
+    firebaseConfig.getRealtimeDB.mockReturnValue(db);
+    driverActivationStateService.resolveDriverActivationState.mockResolvedValueOnce({
+      state: 'REJECTED',
+      label: 'Rejeitado',
+      canGoOnline: false,
+      canAttemptOnline: false,
+      requiresLiveness: false,
+      blockingReason: 'KYC do motorista bloqueado.',
+      checklist: {
+        cnhEar: true,
+        backgroundCheckConsent: true,
+        vehicleRegistration: true
+      },
+      kyc: {
+        approved: false,
+        blocked: true,
+        pending: false,
+        status: 'blocked',
+        reverifyRequired: true
+      },
+      vehicle: { approved: true, active: true },
+      liveness: { passed: false },
+      updatedAt: '2026-07-25T20:05:00.000Z'
+    });
+
+    const snapshot =
+      await driverDocumentAnalysisQueue.getActivationSnapshot('driver_1');
+
+    expect(snapshot).toMatchObject({
+      activationState: 'REJECTED',
+      canGoOnline: false,
+      canAttemptOnline: false,
+      kyc: {
+        approved: false,
+        blocked: true,
+        pending: false,
+        status: 'blocked',
+        reverifyRequired: true
+      }
+    });
+  });
+
+  it('persists and returns the canonical KYC block when recomputing activation', async () => {
+    const db = createDb({
+      driver_activation: {
+        driver_1: {
+          documents: {
+            cnh: { status: 'approved' },
+            crlv: { status: 'approved' }
+          },
+          consent: {
+            backgroundCheck: {
+              acceptedAt: '2026-07-25T20:00:00.000Z'
+            }
+          }
+        }
+      },
+      users: {
+        driver_1: {}
+      }
+    });
+    firebaseConfig.getRealtimeDB.mockReturnValue(db);
+    driverActivationStateService.resolveDriverActivationState.mockResolvedValueOnce({
+      state: 'REJECTED',
+      label: 'Rejeitado',
+      canGoOnline: false,
+      canAttemptOnline: false,
+      requiresLiveness: false,
+      blockingReason: 'KYC do motorista bloqueado.',
+      checklist: {
+        cnhEar: true,
+        backgroundCheckConsent: true,
+        vehicleRegistration: true
+      },
+      kyc: {
+        approved: false,
+        blocked: true,
+        pending: false,
+        status: 'blocked',
+        reverifyRequired: true
+      },
+      vehicle: { approved: true, active: true },
+      liveness: { passed: false }
+    });
+
+    const result = await recomputeDriverActivationStatus('driver_1');
+    const expectedKyc = {
+      approved: false,
+      blocked: true,
+      pending: false,
+      status: 'blocked',
+      reverifyRequired: true
+    };
+
+    expect(result.kyc).toEqual(expectedKyc);
+    expect(db.read('driver_activation/driver_1/status/kyc')).toEqual(expectedKyc);
+    expect(db.read('users/driver_1/driverActivation/kyc')).toEqual(expectedKyc);
+  });
+
+  it('falls back to the stored KYC projection when live activation resolution fails', async () => {
+    const storedKyc = {
+      approved: false,
+      blocked: true,
+      pending: false,
+      status: 'blocked',
+      reverifyRequired: true
+    };
+    const db = createDb({
+      driver_activation: {
+        driver_1: {
+          status: {
+            activationState: 'REJECTED',
+            blockingReason: 'KYC do motorista bloqueado.',
+            kyc: storedKyc
+          },
+          documents: {
+            cnh: { status: 'approved' },
+            crlv: { status: 'approved' }
+          }
+        }
+      },
+      users: {
+        driver_1: {}
+      }
+    });
+    firebaseConfig.getRealtimeDB.mockReturnValue(db);
+    driverActivationStateService.resolveDriverActivationState.mockRejectedValueOnce(
+      new Error('temporary-resolution-failure')
+    );
+
+    const snapshot =
+      await driverDocumentAnalysisQueue.getActivationSnapshot('driver_1');
+
+    expect(snapshot).toMatchObject({
+      activationState: 'REJECTED',
+      kyc: storedKyc
+    });
   });
 
   it('persists a normalized CRLV identity in both activation and dashboard document projections', async () => {

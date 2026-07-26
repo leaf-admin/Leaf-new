@@ -186,7 +186,27 @@ describe("DriverHomeOverlay", () => {
     expect(queryByText("Em análise")).toBeNull();
   });
 
-  it("routes a canonical identity rejection directly to support", () => {
+  it("does not infer an identity block from a generic rejected state", () => {
+    const { getByText, queryByText } = render(
+      <DriverHomeOverlay
+        driverId="driver_1"
+        driverOnline={false}
+        driverCanGoOnline={false}
+        driverActivationResolved
+        driverActivationRemote={{
+          activationState: "REJECTED",
+          blockingReason: "Cadastro rejeitado.",
+        }}
+        onToggleOnline={() => {}}
+        onOpenActivation={() => {}}
+      />,
+    );
+
+    expect(getByText("Ação necessária")).toBeTruthy();
+    expect(queryByText("Falar com suporte")).toBeNull();
+  });
+
+  it("routes a canonical identity rejection directly to support when the old projection omits kyc", () => {
     const onToggleOnline = jest.fn();
     const onOpenActivation = jest.fn();
     const onOpenIdentitySupport = jest.fn();
@@ -200,7 +220,11 @@ describe("DriverHomeOverlay", () => {
         driverActivationRemote={{
           activationState: "REJECTED",
           canAttemptOnline: false,
-          kyc: { blocked: true, status: "blocked" },
+          blockingReason: "KYC do motorista bloqueado.",
+          documents: {
+            cnh: { status: "approved" },
+            crlv: { status: "approved" },
+          },
         }}
         onToggleOnline={onToggleOnline}
         onOpenActivation={onOpenActivation}
