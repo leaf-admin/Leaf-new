@@ -17,7 +17,9 @@ import PassengerHomeOverlay, {
   PASSENGER_HOME_CARD_METRICS,
   PassengerHomeOverlaySkeleton,
 } from './home/PassengerHomeOverlay';
-import DriverHomeOverlay from './home/DriverHomeOverlay';
+import DriverHomeOverlay, {
+  isDriverIdentitySupportRequired,
+} from './home/DriverHomeOverlay';
 import DriverLiveRideOverlay from './home/DriverLiveRideOverlay';
 import DriverTripStatusBanner from './home/DriverTripStatusBanner';
 import LeafNativeNavigationBanner from './home/LeafNativeNavigationBanner';
@@ -1475,6 +1477,10 @@ export function isDriverIdentityReviewHoldResult(result = {}) {
 
 const DRIVER_IDENTITY_REVERIFICATION_REASON = 'Por segurança, precisamos validar sua identidade.';
 const DRIVER_IDENTITY_REVIEW_SOURCE = 'kyc_identity_mismatch_appeal';
+const DRIVER_IDENTITY_REVIEW_DESCRIPTION =
+  'A validação de identidade não foi concluída. Acredito que houve um engano e solicito uma análise.';
+const DRIVER_IDENTITY_SUPPORT_STORAGE_PREFIX =
+  '@leaf_driver_identity_support_context_v1:';
 const SAFE_KYC_REVIEW_CONTEXT_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/;
 
 function normalizeKycReviewContextId(value) {
@@ -1485,6 +1491,78 @@ function normalizeKycReviewContextId(value) {
 function normalizeKycReviewRequirement(value) {
   const normalized = String(value || '').trim().toUpperCase();
   return /^[A-Z][A-Z0-9_]{0,63}$/.test(normalized) ? normalized : '';
+}
+
+export function buildDriverIdentitySupportStorageKey(driverId) {
+  const normalizedDriverId = String(driverId || '').trim();
+  return normalizedDriverId
+    ? `${DRIVER_IDENTITY_SUPPORT_STORAGE_PREFIX}${normalizedDriverId}`
+    : '';
+}
+
+function normalizePersistedDriverIdentitySupportContext(value = {}) {
+  const kycEvidenceId = normalizeKycReviewContextId(value?.kycEvidenceId);
+  const kycReviewCaseId = normalizeKycReviewContextId(value?.kycReviewCaseId);
+  const kycChallengeId = normalizeKycReviewContextId(value?.kycChallengeId);
+  const requirement = normalizeKycReviewRequirement(value?.requirement);
+
+  if (!kycEvidenceId && !kycReviewCaseId) {
+    return null;
+  }
+
+  return {
+    type: 'account',
+    selectedType: 'account',
+    subject: 'Revisão de identidade',
+    description: DRIVER_IDENTITY_REVIEW_DESCRIPTION,
+    source: DRIVER_IDENTITY_REVIEW_SOURCE,
+    ...(kycEvidenceId ? { kycEvidenceId } : {}),
+    ...(kycReviewCaseId ? { kycReviewCaseId } : {}),
+    ...(kycChallengeId ? { kycChallengeId } : {}),
+    ...(requirement ? { requirement } : {}),
+    ...(typeof value?.reviewAvailable === 'boolean'
+      ? { reviewAvailable: value.reviewAvailable }
+      : {}),
+  };
+}
+
+async function persistDriverIdentitySupportContext(driverId, ticketParams) {
+  const storageKey = buildDriverIdentitySupportStorageKey(driverId);
+  const safeContext = normalizePersistedDriverIdentitySupportContext(ticketParams);
+  if (!storageKey || !safeContext) {
+    return false;
+  }
+
+  await AsyncStorage.setItem(storageKey, JSON.stringify(safeContext));
+  return true;
+}
+
+async function loadDriverIdentitySupportContext(driverId) {
+  const storageKey = buildDriverIdentitySupportStorageKey(driverId);
+  if (!storageKey) {
+    return null;
+  }
+
+  const rawValue = await AsyncStorage.getItem(storageKey);
+  if (!rawValue) {
+    return null;
+  }
+
+  try {
+    return normalizePersistedDriverIdentitySupportContext(
+      JSON.parse(rawValue),
+    );
+  } catch {
+    await AsyncStorage.removeItem(storageKey);
+    return null;
+  }
+}
+
+async function clearDriverIdentitySupportContext(driverId) {
+  const storageKey = buildDriverIdentitySupportStorageKey(driverId);
+  if (storageKey) {
+    await AsyncStorage.removeItem(storageKey);
+  }
 }
 
 export function buildDriverIdentityReviewTicketParams(
@@ -1502,7 +1580,7 @@ export function buildDriverIdentityReviewTicketParams(
     type: 'account',
     selectedType: 'account',
     subject: 'Revisão de identidade',
-    description: 'A validação de identidade não foi concluída. Acredito que houve um engano e solicito uma análise.',
+    description: DRIVER_IDENTITY_REVIEW_DESCRIPTION,
     source: DRIVER_IDENTITY_REVIEW_SOURCE,
     ...(kycEvidenceId ? { kycEvidenceId } : {}),
     ...(kycReviewCaseId ? { kycReviewCaseId } : {}),
@@ -1557,6 +1635,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     resolveDestinationInput,
     selectDestination,
     requestRide,
+    refreshDriverActivationRemote,
     setDriverOnline,
     setDriverDestinationMode,
     tripHistory,
@@ -1696,6 +1775,14 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     challengeId: null,
     requirement: null,
   });
+  const [
+    driverIdentitySupportTicketParams,
+    setDriverIdentitySupportTicketParams,
+  ] = useState(null);
+  const [
+    driverIdentityRemoteBlockObserved,
+    setDriverIdentityRemoteBlockObserved,
+  ] = useState(false);
   const [driverKycLivenessMode, setDriverKycLivenessMode] = useState('unavailable');
   const [driverKycProviderLoading, setDriverKycProviderLoading] = useState(false);
   const [driverKycProcessing, setDriverKycProcessing] = useState(false);
@@ -1709,6 +1796,86 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   const homeMapReadyFallbackTimerRef = useRef(null);
   const connectionIndicatorStableTimerRef = useRef(null);
   const displayedConnectionIndicatorKeyRef = useRef('none');
+  const identitySupportDriverId = String(
+    profile?.uid || profileUid || '',
+  ).trim();
+  const remoteIdentitySupportRequired =
+    isDriverIdentitySupportRequired(driverActivationRemote);
+
+  useEffect(() => {
+    if (!driverIdentitySupportTicketParams) {
+      return;
+    }
+
+    if (remoteIdentitySupportRequired) {
+      if (!driverIdentityRemoteBlockObserved) {
+        setDriverIdentityRemoteBlockObserved(true);
+      }
+      return;
+    }
+
+    if (
+      driverIdentityRemoteBlockObserved &&
+      driverActivationResolved &&
+      driverActivationRemote?.canAttemptOnline === true
+    ) {
+      setDriverIdentitySupportTicketParams(null);
+      setDriverIdentityRemoteBlockObserved(false);
+      clearDriverIdentitySupportContext(identitySupportDriverId).catch(
+        (error) => {
+          Logger.warn(
+            '⚠️ [PrototypeKYC] Falha ao limpar contexto local de suporte:',
+            error?.message || error,
+          );
+        },
+      );
+    }
+  }, [
+    driverActivationRemote?.canAttemptOnline,
+    driverActivationResolved,
+    driverIdentityRemoteBlockObserved,
+    driverIdentitySupportTicketParams,
+    identitySupportDriverId,
+    remoteIdentitySupportRequired,
+  ]);
+
+  useEffect(() => {
+    setDriverIdentitySupportTicketParams(null);
+    setDriverIdentityRemoteBlockObserved(false);
+  }, [identitySupportDriverId]);
+
+  useEffect(() => {
+    let active = true;
+    if (
+      !identitySupportDriverId ||
+      !remoteIdentitySupportRequired ||
+      driverIdentitySupportTicketParams
+    ) {
+      return undefined;
+    }
+
+    loadDriverIdentitySupportContext(identitySupportDriverId)
+      .then((ticketParams) => {
+        if (active && ticketParams) {
+          setDriverIdentitySupportTicketParams(ticketParams);
+          setDriverIdentityRemoteBlockObserved(true);
+        }
+      })
+      .catch((error) => {
+        Logger.warn(
+          '⚠️ [PrototypeKYC] Falha ao restaurar contexto local de suporte:',
+          error?.message || error,
+        );
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [
+    driverIdentitySupportTicketParams,
+    identitySupportDriverId,
+    remoteIdentitySupportRequired,
+  ]);
 
   useEffect(() => {
     const notice = String(route?.params?.passengerHomeAvailabilityNotice || '').trim();
@@ -6889,12 +7056,63 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     navigation.navigate('RobotaxiPrototypeSupportTicket', ticketParams);
   }, [driverHasAcceptedOrActiveWork, navigation]);
 
+  const handleOpenDriverIdentitySupport = useCallback(async () => {
+    let ticketParams = driverIdentitySupportTicketParams;
+    if (!ticketParams) {
+      try {
+        ticketParams = await loadDriverIdentitySupportContext(
+          identitySupportDriverId,
+        );
+      } catch (error) {
+        Logger.warn(
+          '⚠️ [PrototypeKYC] Falha ao carregar contexto local de suporte:',
+          error?.message || error,
+        );
+      }
+    }
+    ticketParams =
+      ticketParams ||
+      buildDriverIdentityReviewTicketParams({}, driverKycChallengeContext);
+    navigateToDriverIdentityReview(ticketParams);
+  }, [
+    driverIdentitySupportTicketParams,
+    driverKycChallengeContext,
+    identitySupportDriverId,
+    navigateToDriverIdentityReview,
+  ]);
+
   const presentDriverKycFailure = useCallback((failure = {}) => {
     const errorPresentation = resolveKycLivenessErrorPresentation(failure);
     const ticketParams = buildDriverIdentityReviewTicketParams(
       failure,
       driverKycChallengeContext,
     );
+
+    if (errorPresentation.canRequestReview) {
+      setDriverIdentityRemoteBlockObserved(false);
+      setDriverIdentitySupportTicketParams(ticketParams);
+      persistDriverIdentitySupportContext(
+        identitySupportDriverId,
+        ticketParams,
+      ).catch((error) => {
+        Logger.warn(
+          '⚠️ [PrototypeKYC] Falha ao guardar contexto local de suporte:',
+          error?.message || error,
+        );
+      });
+    }
+
+    if (
+      errorPresentation.canRequestReview ||
+      isDriverIdentityReviewHoldResult(failure)
+    ) {
+      Promise.resolve(refreshDriverActivationRemote?.()).catch((error) => {
+        Logger.warn(
+          '⚠️ [PrototypeKYC] Falha ao atualizar bloqueio de identidade:',
+          error?.message || error,
+        );
+      });
+    }
 
     handleDriverKycModalCancel();
 
@@ -6916,7 +7134,9 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   }, [
     driverKycChallengeContext,
     handleDriverKycModalCancel,
+    identitySupportDriverId,
     navigateToDriverIdentityReview,
+    refreshDriverActivationRemote,
   ]);
 
   useEffect(() => {
@@ -7041,6 +7261,16 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   const handleDriverKycVerificationSuccess = useCallback(async () => {
     const onlineResult = await setDriverOnline(true);
     if (onlineResult?.success) {
+      setDriverIdentitySupportTicketParams(null);
+      setDriverIdentityRemoteBlockObserved(false);
+      clearDriverIdentitySupportContext(identitySupportDriverId).catch(
+        (error) => {
+          Logger.warn(
+            '⚠️ [PrototypeKYC] Falha ao limpar contexto local de suporte:',
+            error?.message || error,
+          );
+        },
+      );
       handleDriverKycModalCancel();
       return;
     }
@@ -7080,6 +7310,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     );
   }, [
     handleDriverKycModalCancel,
+    identitySupportDriverId,
     presentDriverKycFailure,
     retryDriverOnlineAfterKycReconciliation,
     setDriverOnline,
@@ -8596,6 +8827,9 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
                 driverCanGoOnline={driverCanGoOnline}
                 driverActivationResolved={driverActivationResolved}
                 driverActivationRemote={driverActivationRemote}
+                driverIdentitySupportRequired={Boolean(
+                  driverIdentitySupportTicketParams,
+                )}
                 driverWorkInProgress={driverHasAcceptedOrActiveWork}
                 suppressDaySummary={driverHasAcceptedOrActiveWork}
                 ridesCount={todayTrips}
@@ -8615,6 +8849,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
                   })
                 }
                 onOpenActivation={handleOpenDriverActivation}
+                onOpenIdentitySupport={handleOpenDriverIdentitySupport}
               />
             ) : null}
           </>
