@@ -1178,6 +1178,107 @@ describe('driver online toggle', () => {
     });
   });
 
+  it('turns a canonical CompareFaces mismatch into a friendly identity-review ticket', async () => {
+    const kycServiceMock = require('../src/services/KYCService').default;
+    kycServiceMock.verifyDriverWithAwsReference.mockResolvedValueOnce({
+      success: false,
+      status: 403,
+      code: 'KYC_CHALLENGE_NOT_PASSED',
+      error: 'AWS CompareFaces similarity below threshold 0.95',
+      isMatch: false,
+      reviewAvailable: true,
+      evidenceId: 'evidence_01HZX9',
+      similarityScore: 0.12,
+      referenceImageUrl: 'https://storage.example/private-selfie.jpg',
+    });
+    const setDriverOnline = jest.fn().mockResolvedValueOnce({
+      success: false,
+      code: 'kycRequired',
+      kycRequired: true,
+      reason: 'Nenhuma verificação encontrada',
+      challengeId: 'challenge_01HZX9',
+      requirement: 'IDENTITY_REVERIFICATION',
+    });
+
+    usePrototypeRideRuntime.mockReturnValue(
+      buildDriverRuntime({
+        setDriverOnline,
+      })
+    );
+
+    const navigation = {
+      navigate: jest.fn(),
+      canGoBack: jest.fn(() => false),
+      goBack: jest.fn(),
+    };
+
+    const { getByTestId, queryByTestId } = render(
+      <RobotaxiHomeScreen navigation={navigation} route={{ params: {} }} />
+    );
+
+    fireEvent.press(getByTestId('driver-home-toggle-online'));
+
+    await waitFor(() => {
+      expect(queryByTestId('driver-kyc-aws-native')).toBeTruthy();
+    });
+
+    fireEvent.press(getByTestId('driver-kyc-aws-native'));
+
+    await waitFor(() => {
+      expect(kycServiceMock.verifyDriverWithAwsReference).toHaveBeenCalledWith(
+        'driver_1',
+        {
+          awsSessionId: 'aws-session-1',
+          challengeId: 'challenge_01HZX9',
+          requirement: 'IDENTITY_REVERIFICATION',
+        },
+      );
+      expect(Alert.alert).toHaveBeenCalledWith(
+        'Identidade não confirmada',
+        'Por segurança, não foi possível liberar o modo motorista. Se você acredita que houve um engano, solicite uma análise.',
+        expect.any(Array),
+      );
+      expect(queryByTestId('driver-kyc-aws-native')).toBeNull();
+    });
+
+    expect(setDriverOnline).toHaveBeenCalledTimes(1);
+    const [alertTitle, alertMessage, alertButtons] = Alert.alert.mock.calls.at(-1);
+    expect(`${alertTitle} ${alertMessage}`).not.toMatch(
+      /AWS|CompareFaces|KYC_|similarity|threshold|status\s*403|evidence_/i,
+    );
+    expect(alertButtons).toHaveLength(1);
+    expect(alertButtons[0]?.text).toBe('Solicitar análise');
+
+    act(() => {
+      alertButtons[0]?.onPress?.();
+    });
+
+    await waitFor(() => {
+      expect(navigation.navigate).toHaveBeenCalledWith(
+        'RobotaxiPrototypeSupportTicket',
+        expect.objectContaining({
+          type: 'account',
+          selectedType: 'account',
+          subject: 'Revisão de identidade',
+          description: 'A validação de identidade não foi concluída. Acredito que houve um engano e solicito uma análise.',
+          source: 'kyc_identity_mismatch_appeal',
+          kycEvidenceId: 'evidence_01HZX9',
+          kycChallengeId: 'challenge_01HZX9',
+          requirement: 'IDENTITY_REVERIFICATION',
+          reviewAvailable: true,
+        }),
+      );
+    });
+
+    const [, ticketParams] = navigation.navigate.mock.calls.at(-1);
+    expect(`${ticketParams.subject} ${ticketParams.description}`).not.toMatch(
+      /AWS|CompareFaces|KYC_|similarity|threshold|status\s*403|evidence_/i,
+    );
+    expect(ticketParams).not.toHaveProperty('similarityScore');
+    expect(ticketParams).not.toHaveProperty('referenceImageUrl');
+    expect(ticketParams).not.toHaveProperty('error');
+  });
+
   it('keeps the driver offline without opening a new liveness while identity review is pending', async () => {
     const kycServiceMock = require('../src/services/KYCService').default;
     const setDriverOnline = jest.fn().mockResolvedValue({
