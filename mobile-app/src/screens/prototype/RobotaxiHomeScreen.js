@@ -1816,8 +1816,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
 
     if (
       driverIdentityRemoteBlockObserved &&
-      driverActivationResolved &&
-      driverActivationRemote?.canAttemptOnline === true
+      driverActivationResolved
     ) {
       setDriverIdentitySupportTicketParams(null);
       setDriverIdentityRemoteBlockObserved(false);
@@ -1831,7 +1830,6 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
       );
     }
   }, [
-    driverActivationRemote?.canAttemptOnline,
     driverActivationResolved,
     driverIdentityRemoteBlockObserved,
     driverIdentitySupportTicketParams,
