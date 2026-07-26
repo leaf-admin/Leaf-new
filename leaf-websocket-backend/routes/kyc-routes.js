@@ -4,7 +4,6 @@ const crypto = require('crypto');
 const IntegratedKYCService = require('../services/IntegratedKYCService');
 const AwsFaceLivenessService = require('../services/aws-face-liveness-service');
 const CanonicalAwsFaceCompareService = require('../services/canonical-aws-face-compare-service');
-const kycPolicyService = require('../services/kyc-policy-service');
 const { resolveKycRuntimeForUser } = require('../services/kyc-runtime-scope-service');
 const {
   assertStoredRecordMatchesScope,
@@ -595,41 +594,53 @@ async function requireOperationalLegacyKycRoute(req, res, next) {
   }
 }
 
-async function softBlockLivenessAttemptsExhausted({
-  userId,
-  challengeId = null,
-  attemptState = null,
-  source = 'kyc_route',
-  attemptScope = null,
-  kycRuntime = null
-} = {}) {
-  if (!userId) return null;
+function resolveLivenessRetryWindow(source = {}) {
+  const attemptState = source?.attemptState && typeof source.attemptState === 'object'
+    ? source.attemptState
+    : source;
+  const suppliedRetryAt = source?.retryAt || attemptState?.retryAt || null;
+  const suppliedRetryAtMs = Date.parse(suppliedRetryAt || '');
+  const suppliedRetryAfterSeconds = Number(
+    source?.retryAfterSeconds ?? attemptState?.retryAfterSeconds
+  );
+  const nowMs = Date.now();
+  const retryAfterFromTimestamp = Number.isFinite(suppliedRetryAtMs)
+    ? Math.ceil((suppliedRetryAtMs - nowMs) / 1000)
+    : 0;
+  const retryAfterSeconds = Math.max(
+    1,
+    Number.isFinite(suppliedRetryAfterSeconds)
+      ? Math.ceil(suppliedRetryAfterSeconds)
+      : 0,
+    retryAfterFromTimestamp
+  );
+  const retryAt = Number.isFinite(suppliedRetryAtMs) && suppliedRetryAtMs > nowMs
+    ? new Date(suppliedRetryAtMs).toISOString()
+    : new Date(nowMs + (retryAfterSeconds * 1000)).toISOString();
 
-  try {
-    const policyService = kycRuntime?.policyService || kycPolicyService;
-    if (typeof policyService.markDriverForLivenessAttemptsExhausted !== 'function') {
-      const error = new Error('Politica scoped de limite KYC indisponivel');
-      error.code = 'KYC_LIVENESS_ATTEMPT_POLICY_UNAVAILABLE';
-      throw error;
-    }
-    return await policyService.markDriverForLivenessAttemptsExhausted({
-      driverId: userId,
-      challengeId,
-      attemptState: attemptState || {},
-      metadata: {
-        source,
-        attemptScope: attemptScope || attemptState?.attemptScope || null
-      }
-    });
-  } catch (error) {
-    logError(error, 'Falha ao aplicar soft block por limite de liveness', {
-      service: 'kyc-routes-routes',
-      userId,
-      challengeId,
-      source
-    });
-    return null;
-  }
+  return {
+    retryAt,
+    retryAfterSeconds
+  };
+}
+
+function sendLivenessAttemptRateLimit(res, source = {}) {
+  const retryWindow = resolveLivenessRetryWindow(source);
+  res.set('Retry-After', String(retryWindow.retryAfterSeconds));
+  return res.status(429).json({
+    success: false,
+    error: 'Aguarde um pouco antes de iniciar uma nova validação.',
+    code: 'KYC_AWS_LIVENESS_ATTEMPTS_EXHAUSTED',
+    retryable: true,
+    retryAt: retryWindow.retryAt,
+    retryAfterSeconds: retryWindow.retryAfterSeconds
+  });
+}
+
+function isLivenessAttemptRateLimited(result = {}) {
+  return result?.completed === true
+    && result?.livenessPassed !== true
+    && result?.attemptState?.attemptsExhausted === true;
 }
 
 class KYCRoutes {
@@ -1253,7 +1264,10 @@ class KYCRoutes {
           });
         }
         const isDisabled = error?.code === 'AWS_LIVENESS_DISABLED';
-        const attemptsExhausted = error?.code === 'KYC_AWS_LIVENESS_ATTEMPTS_EXHAUSTED';
+        const attemptsExhausted = [
+          'KYC_AWS_LIVENESS_ATTEMPTS_EXHAUSTED',
+          'KYC_AWS_USER_DAILY_SESSION_LIMIT_EXHAUSTED'
+        ].includes(error?.code);
         const activeTripDeferred = error?.code === 'KYC_VERIFICATION_DEFERRED_ACTIVE_TRIP';
         const verificationBusy = error?.code === 'KYC_VERIFICATION_IN_PROGRESS';
         const retryResumeUnavailable = String(error?.code || '')
@@ -1304,43 +1318,34 @@ class KYCRoutes {
         ].includes(error?.code)
           || String(error?.code || '').startsWith('PERSISTENCE_');
         const identityPermanentlyBlocked = error?.code === 'KYC_IDENTITY_FRAUD_PERMANENT_BLOCK';
+        if (attemptsExhausted) {
+          logError(error, 'Limite temporario de sessoes AWS liveness atingido', {
+            service: 'kyc-routes-routes',
+            userId: req.body?.userId || null
+          });
+          return sendLivenessAttemptRateLimit(res, error);
+        }
         const statusCode = identityPermanentlyBlocked
-          ? 423
-          : attemptsExhausted
           ? 423
           : ((activeTripDeferred || verificationBusy || retryResumeUnavailable)
             ? 409
             : ((isDisabled || stateUnavailable) ? 503 : 500));
-        let softBlock = null;
-        if (attemptsExhausted && error.attemptState?.softBlocked === true) {
-          softBlock = await softBlockLivenessAttemptsExhausted({
-            userId: req.body?.userId,
-            challengeId: req.body?.challengeId || null,
-            attemptState: error.attemptState || null,
-            source: 'create_liveness_session_guard',
-            attemptScope: error.attemptState?.attemptScope || null,
-            kycRuntime
-          });
-        }
         logError(error, 'Erro ao criar sessão AWS liveness', { service: 'kyc-routes-routes' });
         const publicError = identityPermanentlyBlocked
           ? 'Esta conta nao pode usar o modo motorista.'
-          : attemptsExhausted
-            ? 'Nao foi possivel iniciar outra validacao agora. Fale com o suporte.'
-            : retryResumeUnavailable
-              ? 'Sua sessao anterior nao esta mais disponivel. Fale com o suporte para liberar uma nova tentativa.'
-              : stateUnavailable
-                ? 'Nao foi possivel preparar a validacao com seguranca agora. Tente novamente em alguns minutos.'
-                : (activeTripDeferred
-                  ? 'A validacao deve ser feita fora de uma corrida.'
-                  : (verificationBusy
-                    ? 'Outra validacao de identidade ja esta em andamento.'
-                    : 'Nao foi possivel preparar a validacao agora. Tente novamente.'));
+          : retryResumeUnavailable
+            ? 'Sua sessao anterior nao esta mais disponivel. Fale com o suporte para liberar uma nova tentativa.'
+            : stateUnavailable
+              ? 'Nao foi possivel preparar a validacao com seguranca agora. Tente novamente em alguns minutos.'
+              : (activeTripDeferred
+                ? 'A validacao deve ser feita fora de uma corrida.'
+                : (verificationBusy
+                  ? 'Outra validacao de identidade ja esta em andamento.'
+                  : 'Nao foi possivel preparar a validacao agora. Tente novamente.'));
         return res.status(statusCode).json({
           success: false,
           error: publicError,
-          code: error.code || 'KYC_AWS_LIVENESS_SESSION_ERROR',
-          supportTicketId: softBlock?.supportTicketId || null
+          code: error.code || 'KYC_AWS_LIVENESS_SESSION_ERROR'
         });
       } finally {
         if (verificationWindowClaim?.acquired && !retainVerificationWindow) {
@@ -1488,23 +1493,11 @@ class KYCRoutes {
           userId,
           requireBoundMetadata: true
         });
-        if (
-          result?.completed === true
-          && result?.livenessPassed !== true
-          && result?.attemptState?.softBlocked === true
-          && result?.attemptState?.justExhausted === true
-        ) {
-          await softBlockLivenessAttemptsExhausted({
-            userId,
-            challengeId: result?.challengeId || null,
-            attemptState: result.attemptState,
-            source: 'get_liveness_result',
-            attemptScope: result?.attemptScope || result?.attemptState?.attemptScope || null,
-            kycRuntime
-          });
-        }
         if (result?.completed === true && result?.livenessPassed !== true) {
           retainVerificationWindow = false;
+        }
+        if (isLivenessAttemptRateLimited(result)) {
+          return sendLivenessAttemptRateLimit(res, result.attemptState);
         }
 
         return res.json(buildPublicLivenessSessionResponse({
@@ -1817,20 +1810,8 @@ class KYCRoutes {
             }
             retainVerificationWindow = false;
             verificationPayload = this.awsLivenessService.toDevicePayload(awsResult, verificationPayload);
-            if (
-              awsResult?.completed === true
-              && awsResult?.livenessPassed !== true
-              && awsResult?.attemptState?.softBlocked === true
-              && awsResult?.attemptState?.justExhausted === true
-            ) {
-              await softBlockLivenessAttemptsExhausted({
-                userId,
-                challengeId,
-                attemptState: awsResult.attemptState,
-                source: 'device_verify_liveness_result',
-                attemptScope: awsResult?.attemptScope || awsResult?.attemptState?.attemptScope || null,
-                kycRuntime
-              });
+            if (isLivenessAttemptRateLimited(awsResult)) {
+              return sendLivenessAttemptRateLimit(res, awsResult.attemptState);
             }
           } catch (awsError) {
             const awsCode = awsError?.code || awsError?.name || 'KYC_AWS_LIVENESS_FAILED';
@@ -2269,20 +2250,16 @@ class KYCRoutes {
             });
           }
           livenessPayload = this.awsLivenessService.toDevicePayload(awsResult, livenessPayload);
-          if (
-            awsResult?.completed === true
-            && awsResult?.livenessPassed !== true
-            && awsResult?.attemptState?.softBlocked === true
-            && awsResult?.attemptState?.justExhausted === true
-          ) {
-            await softBlockLivenessAttemptsExhausted({
-              userId,
-              challengeId,
-              attemptState: awsResult.attemptState,
-              source: 'server_side_selfie_liveness_result',
-              attemptScope: awsResult?.attemptScope || awsResult?.attemptState?.attemptScope || null,
-              kycRuntime
+          if (isLivenessAttemptRateLimited(awsResult)) {
+            await workflowService.finalizeCleanRetryAuthorization({
+              driverId: userId,
+              attemptScope: sessionMetadataCandidate?.attemptScope || null,
+              sessionId: awsSessionId,
+              outcome: 'ABORTED',
+              reason: 'aws_liveness_attempt_rate_limited'
             });
+            retainVerificationWindow = false;
+            return sendLivenessAttemptRateLimit(res, awsResult.attemptState);
           }
         } catch (awsError) {
           const awsCode = awsError?.code || awsError?.name || 'KYC_AWS_LIVENESS_FAILED';
