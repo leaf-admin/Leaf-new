@@ -62,4 +62,20 @@ describe('KYC runtime scope wiring', () => {
     expect(source.indexOf('const kycRuntime = await resolveKycRuntimeForUser({'))
       .toBeLessThan(source.indexOf('const { ticket, queue } = await supportQueueService.createSupportTicket({'));
   });
+
+  test('liveness claims the durable retry inside the no-trip window before starting the challenge', () => {
+    const source = readBackendSource('routes/kyc-routes.js');
+    const start = source.indexOf("'/liveness/aws/session'");
+    const end = source.indexOf("'/liveness/aws/session/:sessionId/abandon'", start);
+    const sessionRoute = source.slice(start, end);
+
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+    expect(sessionRoute.indexOf('claimVerificationWindow(userId'))
+      .toBeLessThan(sessionRoute.indexOf('claimCleanRetryAuthorization(userId, attemptScope)'));
+    expect(sessionRoute.indexOf('claimCleanRetryAuthorization(userId, attemptScope)'))
+      .toBeLessThan(sessionRoute.indexOf('recordIdentityReverificationStarted(userId'));
+    expect(sessionRoute.indexOf('recordIdentityReverificationStarted(userId'))
+      .toBeLessThan(sessionRoute.indexOf('this.awsLivenessService.createSession({'));
+  });
 });

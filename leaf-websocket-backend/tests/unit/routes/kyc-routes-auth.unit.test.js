@@ -1639,11 +1639,30 @@ describe('kyc routes auth', () => {
   });
 
   it('does not create a paid identity session when a newer challenge wins after precheck', async () => {
+    const recoveryId = `kyc_or_${'f'.repeat(32)}`;
+    const retryScope = `orphan_hold_retry_${recoveryId}`;
+    const claim = {
+      driverId: 'driver-1',
+      recoveryId,
+      authorizationId: recoveryId,
+      attemptScope: retryScope,
+      claimToken: 'opaque-stale-challenge-token'
+    };
+    mockAssertKycOperationAllowed.mockResolvedValueOnce({
+      allowed: true,
+      identityReviewHold: false,
+      cleanRetryAuthorized: true,
+      retrySessionResumeCandidate: false,
+      retryAuthorizationId: recoveryId,
+      retryAuthorizationKind: 'orphan_hold'
+    });
     mockGetFromRealtimeDB.mockResolvedValueOnce({
       challengeId: 'idrev_old',
       requirement: 'IDENTITY_REVERIFICATION',
-      status: 'requested'
+      status: 'requested',
+      attemptScope: retryScope
     });
+    mockClaimCleanRetryAuthorization.mockResolvedValueOnce(claim);
     mockKycPolicyService.recordIdentityReverificationStarted.mockResolvedValueOnce({
       success: true,
       recorded: false,
@@ -1660,9 +1679,72 @@ describe('kyc routes auth', () => {
         requirement: 'IDENTITY_REVERIFICATION'
       });
 
-    expect(response.status).toBe(409);
     expect(response.body.code).toBe('KYC_IDENTITY_REVERIFY_CHALLENGE_STALE');
+    expect(response.status).toBe(409);
+    expect(mockClaimCleanRetryAuthorization).toHaveBeenCalledWith(
+      'driver-1',
+      retryScope
+    );
+    expect(mockReleaseCleanRetryAuthorization).toHaveBeenCalledWith(claim, {
+      reason: 'KYC_IDENTITY_REVERIFY_CHALLENGE_STALE'
+    });
+    expect(mockConsumeCleanRetryAuthorization).not.toHaveBeenCalled();
     expect(mockCreateSession).not.toHaveBeenCalled();
+    expect(mockReleaseVerificationWindow).toHaveBeenCalled();
+  });
+
+  it('releases the claimed retry when identity start persistence is unavailable before AWS', async () => {
+    const recoveryId = `kyc_or_${'a'.repeat(32)}`;
+    const retryScope = `orphan_hold_retry_${recoveryId}`;
+    const claim = {
+      driverId: 'driver-1',
+      recoveryId,
+      authorizationId: recoveryId,
+      attemptScope: retryScope,
+      claimToken: 'opaque-start-failure-token'
+    };
+    mockAssertKycOperationAllowed.mockResolvedValueOnce({
+      allowed: true,
+      identityReviewHold: false,
+      cleanRetryAuthorized: true,
+      retrySessionResumeCandidate: false,
+      retryAuthorizationId: recoveryId,
+      retryAuthorizationKind: 'orphan_hold'
+    });
+    mockGetFromRealtimeDB.mockResolvedValueOnce({
+      challengeId: 'idrev_retry_start_unavailable',
+      requirement: 'IDENTITY_REVERIFICATION',
+      status: 'requested',
+      attemptScope: retryScope
+    });
+    mockClaimCleanRetryAuthorization.mockResolvedValueOnce(claim);
+    mockKycPolicyService.recordIdentityReverificationStarted.mockRejectedValueOnce(
+      Object.assign(new Error('RTDB transaction unavailable'), {
+        code: 'KYC_REVERIFY_STATE_UNAVAILABLE'
+      })
+    );
+
+    const response = await request(createApp())
+      .post('/api/kyc/liveness/aws/session')
+      .set('Authorization', 'Bearer firebase-token')
+      .send({
+        userId: 'driver-1',
+        challengeId: 'idrev_stale_client_value',
+        requirement: 'IDENTITY_REVERIFICATION'
+      });
+
+    expect(response.status).toBe(503);
+    expect(response.body.code).toBe('KYC_REVERIFY_STATE_UNAVAILABLE');
+    expect(mockClaimCleanRetryAuthorization).toHaveBeenCalledWith(
+      'driver-1',
+      retryScope
+    );
+    expect(mockReleaseCleanRetryAuthorization).toHaveBeenCalledWith(claim, {
+      reason: 'KYC_REVERIFY_STATE_UNAVAILABLE'
+    });
+    expect(mockConsumeCleanRetryAuthorization).not.toHaveBeenCalled();
+    expect(mockCreateSession).not.toHaveBeenCalled();
+    expect(mockReleaseVerificationWindow).toHaveBeenCalled();
   });
 
   it('rejects a forged identity reverification challenge before any paid call', async () => {
