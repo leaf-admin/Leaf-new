@@ -1199,6 +1199,14 @@ class KYCRoutes {
           });
         }
 
+        cleanRetryAuthorizationClaim = await workflowService
+          .claimCleanRetryAuthorization(userId, attemptScope);
+        if (requiresDurableRetryAuthorization && !cleanRetryAuthorizationClaim) {
+          const error = new Error('A autorizacao desta nova tentativa nao esta disponivel');
+          error.code = 'KYC_IDENTITY_RETRY_AUTHORIZATION_REQUIRED';
+          throw error;
+        }
+
         if (isIdentityReverification) {
           const startedResult = typeof policyService.recordIdentityReverificationStarted === 'function'
             ? await policyService.recordIdentityReverificationStarted(userId, {
@@ -1207,20 +1215,12 @@ class KYCRoutes {
             })
             : { success: true, recorded: true };
           if (startedResult?.recorded !== true) {
-            return res.status(409).json({
-              success: false,
-              error: 'Esta revalidacao foi substituida por uma solicitacao mais recente',
-              code: startedResult?.code || 'KYC_IDENTITY_REVERIFY_CHALLENGE_STALE'
-            });
+            const error = new Error(
+              'Esta revalidacao foi substituida por uma solicitacao mais recente'
+            );
+            error.code = startedResult?.code || 'KYC_IDENTITY_REVERIFY_CHALLENGE_STALE';
+            throw error;
           }
-        }
-
-        cleanRetryAuthorizationClaim = await workflowService
-          .claimCleanRetryAuthorization(userId, attemptScope);
-        if (requiresDurableRetryAuthorization && !cleanRetryAuthorizationClaim) {
-          const error = new Error('A autorizacao desta nova tentativa nao esta disponivel');
-          error.code = 'KYC_IDENTITY_RETRY_AUTHORIZATION_REQUIRED';
-          throw error;
         }
 
         const session = await this.awsLivenessService.createSession({
@@ -1318,6 +1318,8 @@ class KYCRoutes {
         ].includes(error?.code)
           || String(error?.code || '').startsWith('PERSISTENCE_');
         const identityPermanentlyBlocked = error?.code === 'KYC_IDENTITY_FRAUD_PERMANENT_BLOCK';
+        const challengeStale =
+          error?.code === 'KYC_IDENTITY_REVERIFY_CHALLENGE_STALE';
         if (attemptsExhausted) {
           logError(error, 'Limite temporario de sessoes AWS liveness atingido', {
             service: 'kyc-routes-routes',
@@ -1327,12 +1329,14 @@ class KYCRoutes {
         }
         const statusCode = identityPermanentlyBlocked
           ? 423
-          : ((activeTripDeferred || verificationBusy || retryResumeUnavailable)
+          : ((activeTripDeferred || verificationBusy || retryResumeUnavailable || challengeStale)
             ? 409
             : ((isDisabled || stateUnavailable) ? 503 : 500));
         logError(error, 'Erro ao criar sessão AWS liveness', { service: 'kyc-routes-routes' });
         const publicError = identityPermanentlyBlocked
           ? 'Esta conta nao pode usar o modo motorista.'
+          : challengeStale
+            ? 'Sua solicitacao de validacao foi atualizada. Tente novamente.'
           : retryResumeUnavailable
             ? 'Sua sessao anterior nao esta mais disponivel. Fale com o suporte para liberar uma nova tentativa.'
             : stateUnavailable

@@ -218,6 +218,66 @@ function caseRecord(overrides = {}) {
   };
 }
 
+function falsePositiveCaseRecord(overrides = {}) {
+  return caseRecord({
+    caseId: RETRY_CASE_ID,
+    status: 'FALSE_POSITIVE',
+    evidenceBindingHash: 'binding-hash',
+    resolution: {
+      decision: 'FALSE_POSITIVE',
+      explicitAdminDecision: true,
+      reviewer: {
+        uid: 'admin_1',
+        email: 'admin@leaf.app.br'
+      },
+      reason: 'A divergencia foi revisada e classificada como falso positivo.',
+      ticketId: TICKET_ID,
+      evidenceBindingHash: 'binding-hash',
+      decidedAt: '2026-07-17T12:00:00.000Z'
+    },
+    ...overrides
+  });
+}
+
+function manualRetryEnforcement(overrides = {}) {
+  return {
+    schemaVersion: 1,
+    driverId: DRIVER_ID,
+    active: true,
+    permanent: false,
+    status: 'FALSE_POSITIVE_RETRY_AUTHORIZED',
+    reasonCode: 'FALSE_POSITIVE_REVIEW',
+    caseId: RETRY_CASE_ID,
+    latestCaseId: RETRY_CASE_ID,
+    ticketId: TICKET_ID,
+    evidenceBindingHash: 'binding-hash',
+    retryAllowed: true,
+    retryAttempts: 1,
+    identityApproved: false,
+    ...overrides
+  };
+}
+
+function manualRetryAuthorization(overrides = {}) {
+  return {
+    schemaVersion: 1,
+    authorizationId: RETRY_CASE_ID,
+    caseId: RETRY_CASE_ID,
+    driverId: DRIVER_ID,
+    ticketId: TICKET_ID,
+    status: 'AVAILABLE',
+    purpose: 'FALSE_POSITIVE_ONE_CLEAN_IDENTITY_RETRY',
+    allowedAttempts: 1,
+    remainingAttempts: 1,
+    evidenceBindingHash: 'binding-hash',
+    authorizedAt: '2026-07-17T12:00:00.000Z',
+    expiresAt: '2026-07-17T12:30:00.000Z',
+    consumedAt: null,
+    identityApproved: false,
+    ...overrides
+  };
+}
+
 function createHarness({ firestoreDocuments = {}, evidence = evidenceRecord(), reviewCase = caseRecord() } = {}) {
   const firestore = createFirestore({
     [`kyc_identity_review_cases/${CASE_ID}`]: reviewCase,
@@ -719,6 +779,161 @@ describe('kyc-identity-review-workflow-service', () => {
     expect(consumed).toMatchObject({ status: 'CONSUMED', remainingAttempts: 0 });
     expect(consumed.consumedSessionIdHash).toHaveLength(64);
     expect(JSON.stringify(consumed)).not.toContain('aws-session-123');
+  });
+
+  it('continua automaticamente no gate online um credito manual expirado e nunca consumido', async () => {
+    const harness = createHarness({
+      reviewCase: null,
+      firestoreDocuments: {
+        [`kyc_identity_review_cases/${RETRY_CASE_ID}`]: falsePositiveCaseRecord(),
+        [`driver_identity_enforcement/${DRIVER_ID}`]: manualRetryEnforcement(),
+        [`kyc_identity_retry_authorizations/${RETRY_CASE_ID}`]:
+          manualRetryAuthorization({
+            lastReleasedAt: '2026-07-17T12:05:00.000Z',
+            lastReleaseReason: 'session_creation_failed_before_provider_dispatch'
+          })
+      }
+    });
+
+    await expect(harness.service.assertKycOperationAllowed(DRIVER_ID))
+      .resolves.toMatchObject({
+      identityReviewHold: false,
+      cleanRetryAuthorized: true,
+      retryAuthorizationId: RETRY_CASE_ID,
+      retryAuthorizationKind: 'manual_review'
+    });
+    expect(harness.firestore.documents.get(
+      `kyc_identity_retry_authorizations/${RETRY_CASE_ID}`
+    )).toMatchObject({
+      status: 'AVAILABLE',
+      remainingAttempts: 1,
+      expiresAt: '2026-07-17T12:30:00.000Z'
+    });
+
+    const before = Date.now();
+    const claim = await harness.service.claimCleanRetryAuthorization(
+      DRIVER_ID,
+      RETRY_SCOPE
+    );
+    expect(claim).toMatchObject({ autoContinued: true });
+    const authorization = harness.firestore.documents.get(
+      `kyc_identity_retry_authorizations/${RETRY_CASE_ID}`
+    );
+    expect(authorization).toMatchObject({
+      status: 'CLAIMED',
+      allowedAttempts: 1,
+      remainingAttempts: 0,
+      renewalCount: 1,
+      autoContinuationCount: 1,
+      lastReleaseReason: 'session_creation_failed_before_provider_dispatch',
+      lastAutoContinuationSource: 'aws_liveness_session_claim'
+    });
+    expect(Date.parse(authorization.expiresAt)).toBeGreaterThan(before);
+    expect(harness.canonicalApprovalService.requireApprovedCnh)
+      .toHaveBeenCalledWith(DRIVER_ID);
+    expect(harness.firestore.documents.get(
+      `kyc_identity_review_audit/${RETRY_CASE_ID}_auto_000001_unused_retry_continued`
+    )).toMatchObject({
+      action: 'IDENTITY_RETRY_UNUSED_CREDIT_AUTO_CONTINUED',
+      authorizationId: RETRY_CASE_ID,
+      driverId: DRIVER_ID,
+      allowedAttempts: 1,
+      remainingAttempts: 0,
+      immutable: true
+    });
+    await harness.service.releaseCleanRetryAuthorization(claim, {
+      reason: 'KYC_IDENTITY_REVERIFY_CHALLENGE_STALE'
+    });
+    expect(harness.firestore.documents.get(
+      `kyc_identity_retry_authorizations/${RETRY_CASE_ID}`
+    )).toMatchObject({
+      status: 'AVAILABLE',
+      remainingAttempts: 1,
+      consumedAt: null,
+      lastReleaseReason: 'KYC_IDENTITY_REVERIFY_CHALLENGE_STALE'
+    });
+    expect(harness.firestore.documents.get(
+      `kyc_identity_retry_authorizations/${RETRY_CASE_ID}`
+    ).consumedSessionIdHash).toBeUndefined();
+  });
+
+  it.each([
+    ['CLAIMED', {
+      status: 'CLAIMED',
+      remainingAttempts: 0,
+      claimedAt: '2026-07-17T12:10:00.000Z',
+      claimTokenHash: 'a'.repeat(64)
+    }],
+    ['CONSUMED', {
+      status: 'CONSUMED',
+      remainingAttempts: 0,
+      consumedAt: '2026-07-17T12:10:00.000Z',
+      consumedSessionIdHash: 'b'.repeat(64)
+    }],
+    ['REJECTED', {
+      status: 'REJECTED',
+      remainingAttempts: 0,
+      terminalAt: '2026-07-17T12:11:00.000Z',
+      consumedSessionIdHash: 'b'.repeat(64)
+    }],
+    ['ABORTED', {
+      status: 'ABORTED',
+      remainingAttempts: 0,
+      terminalAt: '2026-07-17T12:11:00.000Z',
+      consumedSessionIdHash: 'b'.repeat(64)
+    }]
+  ])('nao reabre credito manual %s no gate online', async (_status, overrides) => {
+    const authorization = manualRetryAuthorization(overrides);
+    const harness = createHarness({
+      reviewCase: null,
+      firestoreDocuments: {
+        [`kyc_identity_review_cases/${RETRY_CASE_ID}`]: falsePositiveCaseRecord(),
+        [`driver_identity_enforcement/${DRIVER_ID}`]: manualRetryEnforcement(),
+        [`kyc_identity_retry_authorizations/${RETRY_CASE_ID}`]: authorization
+      }
+    });
+
+    await expect(harness.service.assertKycOperationAllowed(DRIVER_ID))
+      .resolves.toMatchObject({
+      identityReviewHold: true,
+      cleanRetryAuthorized: false
+    });
+    expect(harness.firestore.documents.get(
+      `kyc_identity_retry_authorizations/${RETRY_CASE_ID}`
+    )).toEqual(authorization);
+    expect([...harness.firestore.documents.keys()].some(
+      (key) => key.includes('unused_retry_continued')
+    )).toBe(false);
+  });
+
+  it('falha fechado sem consumir o credito quando a CNH manual mudou', async () => {
+    const authorization = manualRetryAuthorization();
+    const harness = createHarness({
+      reviewCase: null,
+      firestoreDocuments: {
+        [`kyc_identity_review_cases/${RETRY_CASE_ID}`]: falsePositiveCaseRecord(),
+        [`driver_identity_enforcement/${DRIVER_ID}`]: manualRetryEnforcement(),
+        [`kyc_identity_retry_authorizations/${RETRY_CASE_ID}`]: authorization
+      }
+    });
+    harness.canonicalApprovalService.requireApprovedCnh.mockResolvedValue(
+      canonicalCnh({ documentSha256: 'd'.repeat(64) })
+    );
+
+    await expect(harness.service.assertKycOperationAllowed(DRIVER_ID))
+      .resolves.toMatchObject({
+        identityReviewHold: false,
+        cleanRetryAuthorized: true
+      });
+    await expect(harness.service.claimCleanRetryAuthorization(
+      DRIVER_ID,
+      RETRY_SCOPE
+    )).rejects.toMatchObject({
+      code: 'KYC_IDENTITY_RETRY_AUTO_CONTINUATION_BINDING_INVALID'
+    });
+    expect(harness.firestore.documents.get(
+      `kyc_identity_retry_authorizations/${RETRY_CASE_ID}`
+    )).toEqual(authorization);
   });
 
   it('retoma a sessao persistida de um claim e repete o consume sem ampliar o TTL', async () => {
@@ -1727,6 +1942,60 @@ describe('kyc-identity-review-workflow-service orphan hold recovery', () => {
     expect(claimedHarness.firestore.documents.get(
       `kyc_identity_retry_authorizations/${claimedAuthorization.recoveryId}`
     )).toMatchObject({ status: 'CLAIMED', remainingAttempts: 0 });
+  });
+
+  test('continues an expired unused orphan credit when the liveness session claims it', async () => {
+    const harness = createOrphanHarness();
+    const first = await authorize(harness);
+    harness.setNow('2026-07-17T13:00:00.000Z');
+
+    await expect(harness.service.assertKycOperationAllowed(DRIVER_ID))
+      .resolves.toMatchObject({
+      identityReviewHold: false,
+      cleanRetryAuthorized: true,
+      retryAuthorizationId: first.recoveryId,
+      retryAuthorizationKind: 'orphan_hold'
+    });
+    const claim = await harness.service.claimCleanRetryAuthorization(
+      DRIVER_ID,
+      first.attemptScope
+    );
+    expect(claim).toMatchObject({ autoContinued: true });
+
+    const authorization = harness.firestore.documents.get(
+      `kyc_identity_retry_authorizations/${first.recoveryId}`
+    );
+    const enforcement = harness.firestore.documents.get(
+      `driver_identity_enforcement/${DRIVER_ID}`
+    );
+    expect(authorization).toMatchObject({
+      status: 'CLAIMED',
+      allowedAttempts: 1,
+      remainingAttempts: 0,
+      expiresAt: '2026-07-17T13:30:00.000Z',
+      renewalCount: 1,
+      autoContinuationCount: 1
+    });
+    expect(enforcement).toMatchObject({
+      status: 'ORPHAN_HOLD_RETRY_AUTHORIZED',
+      retryAllowed: true,
+      retryAttempts: 1,
+      expiresAt: '2026-07-17T13:30:00.000Z'
+    });
+    expect(harness.firestore.documents.get(
+      `kyc_identity_review_audit/${first.recoveryId}_auto_000001_unused_retry_continued`
+    )).toMatchObject({
+      action: 'IDENTITY_RETRY_UNUSED_CREDIT_AUTO_CONTINUED',
+      recoveryId: first.recoveryId,
+      previousExpiresAt: '2026-07-17T12:40:00.000Z',
+      expiresAt: '2026-07-17T13:30:00.000Z',
+      immutable: true
+    });
+    expect(harness.firestore.documents.has(
+      `kyc_identity_review_audit/${first.recoveryId}_000001_orphan_hold_recovery_authorized`
+    )).toBe(true);
+    expect(harness.canonicalApprovalService.requireApprovedCnh)
+      .toHaveBeenCalledTimes(2);
   });
 
   test('explicitly renews an expired untouched authorization with one attempt and distinct audit', async () => {

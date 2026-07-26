@@ -1138,6 +1138,90 @@ class KycIdentityReviewWorkflowService {
       && !optionalString(authorization?.recoveredSessionAt);
   }
 
+  isExpiredUnusedRetryAuthorization(authorization, {
+    driverId,
+    authorizationId,
+    purpose
+  } = {}) {
+    const allowedAttempts = Number(authorization?.allowedAttempts);
+    const remainingAttempts = Number(authorization?.remainingAttempts);
+    const authorizedAtMs = Date.parse(authorization?.authorizedAt || '');
+    const expiresAtMs = Date.parse(authorization?.expiresAt || '');
+    const providerDispatchBindings = [
+      authorization?.consumedSessionIdHash,
+      authorization?.sessionIdHash,
+      authorization?.awsSessionIdHash,
+      authorization?.providerSessionIdHash,
+      authorization?.providerDispatchedAt,
+      authorization?.providerDispatchAt,
+      authorization?.recoveredSessionAt
+    ];
+    return authorization?.status === 'AVAILABLE'
+      && authorization?.purpose === purpose
+      && optionalString(authorization?.driverId) === driverId
+      && optionalString(
+        authorization?.authorizationId
+        || authorization?.caseId
+        || authorization?.recoveryId
+      ) === authorizationId
+      && allowedAttempts === 1
+      && remainingAttempts === allowedAttempts
+      && authorization?.identityApproved !== true
+      && Number.isFinite(authorizedAtMs)
+      && Number.isFinite(expiresAtMs)
+      && expiresAtMs > authorizedAtMs
+      && expiresAtMs <= this.nowDate().getTime()
+      && !optionalString(authorization?.claimedAt)
+      && !optionalString(authorization?.consumedAt)
+      && !optionalString(authorization?.terminalAt)
+      && !optionalString(authorization?.claimTokenHash)
+      && providerDispatchBindings.every((value) => !optionalString(value));
+  }
+
+  manualRetrySourceBindingMatches({
+    authorization,
+    enforcement,
+    reviewCase,
+    canonicalCnh,
+    driverId,
+    caseId
+  } = {}) {
+    const evidenceBindingHash = optionalString(reviewCase?.evidenceBindingHash);
+    const ticketId = optionalString(reviewCase?.resolution?.ticketId);
+    const approvedCnh = reviewCase?.evidenceBinding?.approvedCnh || {};
+    const canonicalCnhSha256 = String(canonicalCnh?.documentSha256 || '')
+      .trim()
+      .toLowerCase();
+    return reviewCase?.status === CASE_STATUSES.FALSE_POSITIVE
+      && optionalString(reviewCase?.caseId) === caseId
+      && optionalString(reviewCase?.driverId) === driverId
+      && reviewCase?.resolution?.decision === CASE_STATUSES.FALSE_POSITIVE
+      && reviewCase?.resolution?.explicitAdminDecision === true
+      && evidenceBindingHash
+      && optionalString(reviewCase?.resolution?.evidenceBindingHash)
+        === evidenceBindingHash
+      && ticketId
+      && optionalString(authorization?.caseId) === caseId
+      && optionalString(authorization?.ticketId) === ticketId
+      && optionalString(authorization?.evidenceBindingHash) === evidenceBindingHash
+      && enforcement?.active === true
+      && enforcement?.permanent !== true
+      && String(enforcement?.status || '').trim().toUpperCase()
+        === 'FALSE_POSITIVE_RETRY_AUTHORIZED'
+      && optionalString(enforcement?.driverId) === driverId
+      && optionalString(enforcement?.caseId) === caseId
+      && optionalString(enforcement?.ticketId) === ticketId
+      && optionalString(enforcement?.evidenceBindingHash) === evidenceBindingHash
+      && enforcement?.retryAllowed === true
+      && Number(enforcement?.retryAttempts) === 1
+      && enforcement?.identityApproved !== true
+      && optionalString(canonicalCnh?.submissionId)
+        === optionalString(approvedCnh?.documentId)
+      && /^[a-f0-9]{64}$/.test(canonicalCnhSha256)
+      && canonicalCnhSha256
+        === String(approvedCnh?.sha256 || '').trim().toLowerCase();
+  }
+
   identityTrustStateRef(driverId) {
     return this.firestore()
       .collection(this.identityTrustCollection)
@@ -1952,14 +2036,20 @@ class KycIdentityReviewWorkflowService {
       enforcementStatus === 'FALSE_POSITIVE_RETRY_AUTHORIZED';
     const orphanRecoveryState = enforcement?.active === true &&
       enforcementStatus === ORPHAN_RECOVERY_ENFORCEMENT_STATUS;
-    const cleanRetryAuthorized = Boolean(retryBinding) &&
+    const cleanRetryAuthorized = Boolean(retryBinding) && (
       this.isRetryAuthorizationAvailable(retryAuthorization, {
         driverId: safeDriverId,
         caseId: retryBinding.caseId,
         recoveryId: retryBinding.recoveryId,
         authorizationId: retryBinding.authorizationId,
         purpose: retryBinding.purpose
-      });
+      })
+      || this.isExpiredUnusedRetryAuthorization(retryAuthorization, {
+        driverId: safeDriverId,
+        authorizationId: retryBinding.authorizationId,
+        purpose: retryBinding.purpose
+      })
+    );
     const retrySessionResumeCandidate = Boolean(
       retryBinding
       && !holdCase
@@ -2031,29 +2121,34 @@ class KycIdentityReviewWorkflowService {
     const safeDriverId = requiredId(driverId, 'driverId');
     const binding = this.retryAuthorizationBindingFromScope(attemptScope);
     if (!binding) return null;
-    const currentCanonicalCnh = binding.kind === 'orphan_hold'
-      ? await this.canonicalApprovalService.requireApprovedCnh(safeDriverId)
-      : null;
+    const currentCanonicalCnh = await this.canonicalApprovalService
+      .requireApprovedCnh(safeDriverId);
     const ref = this.retryAuthorizationRef(binding.authorizationId);
-    const enforcementRef = this.firestore()
+    const firestore = this.firestore();
+    const enforcementRef = firestore
       .collection(this.enforcementCollection)
       .doc(safeDriverId);
     const trustRef = binding.kind === 'orphan_hold'
       ? this.identityTrustStateRef(safeDriverId)
       : null;
+    const caseRef = binding.kind === 'manual_review'
+      ? firestore.collection(this.caseCollection).doc(binding.caseId)
+      : null;
     const claimToken = crypto.randomBytes(24).toString('hex');
     const claimTokenHash = crypto.createHash('sha256').update(claimToken).digest('hex');
     const claimedAt = this.nowDate().toISOString();
 
-    await this.firestore().runTransaction(async (transaction) => {
-      const [snapshot, enforcementSnapshot, trustSnapshot] = await Promise.all([
+    const claimResult = await firestore.runTransaction(async (transaction) => {
+      const [snapshot, enforcementSnapshot, trustSnapshot, caseSnapshot] = await Promise.all([
         transaction.get(ref),
         transaction.get(enforcementRef),
-        trustRef ? transaction.get(trustRef) : Promise.resolve(null)
+        trustRef ? transaction.get(trustRef) : Promise.resolve(null),
+        caseRef ? transaction.get(caseRef) : Promise.resolve(null)
       ]);
       const authorization = this.recordFromSnapshot(snapshot);
       const enforcement = this.recordFromSnapshot(enforcementSnapshot);
       const trust = this.recordFromSnapshot(trustSnapshot);
+      const reviewCase = this.recordFromSnapshot(caseSnapshot);
       this.assertNotPermanentlyBlocked(enforcement);
       if (
         enforcement?.active !== true
@@ -2068,16 +2163,42 @@ class KycIdentityReviewWorkflowService {
           'A autorizacao de nova tentativa nao esta ativa para este caso'
         );
       }
-      if (!this.isRetryAuthorizationAvailable(authorization, {
+      const authorizationBinding = {
         driverId: safeDriverId,
         caseId: binding.caseId,
         recoveryId: binding.recoveryId,
         authorizationId: binding.authorizationId,
         purpose: binding.purpose
-      })) {
+      };
+      const available = this.isRetryAuthorizationAvailable(
+        authorization,
+        authorizationBinding
+      );
+      const expiredUnused = this.isExpiredUnusedRetryAuthorization(
+        authorization,
+        authorizationBinding
+      );
+      if (!available && !expiredUnused) {
         throw domainError(
           'KYC_IDENTITY_REVIEW_RETRY_NOT_AVAILABLE',
           'A nova tentativa autorizada ja foi utilizada ou expirou'
+        );
+      }
+      if (
+        expiredUnused
+        && binding.kind === 'manual_review'
+        && !this.manualRetrySourceBindingMatches({
+          authorization,
+          enforcement,
+          reviewCase,
+          canonicalCnh: currentCanonicalCnh,
+          driverId: safeDriverId,
+          caseId: binding.caseId
+        })
+      ) {
+        throw domainError(
+          'KYC_IDENTITY_RETRY_AUTO_CONTINUATION_BINDING_INVALID',
+          'O credito de identidade nao corresponde mais a revisao aprovada'
         );
       }
       if (binding.kind === 'orphan_hold') {
@@ -2131,14 +2252,102 @@ class KycIdentityReviewWorkflowService {
             'A CNH canonica mudou depois da autorizacao; a recuperacao foi bloqueada'
           );
         }
+        if (
+          expiredUnused
+          && (
+            !this.orphanRecoverySourceBindingMatches({
+              authorization,
+              driverId: safeDriverId,
+              recoveryId: binding.recoveryId,
+              failureEvidenceId: sourceFailureEvidenceId,
+              stateRevision: Number(authorization.sourceTrust?.stateRevision || 0),
+              revokedAt: authorization.sourceTrust?.revokedAt,
+              failureEvidence,
+              cnhSubmissionId: currentCanonicalCnh?.submissionId,
+              cnhDocumentSha256: currentCnhSha256
+            })
+            || !this.orphanRecoveryEnforcementMatches({
+              enforcement,
+              authorization,
+              driverId: safeDriverId,
+              recoveryId: binding.recoveryId,
+              failureEvidenceId: sourceFailureEvidenceId
+            })
+          )
+        ) {
+          throw domainError(
+            'KYC_IDENTITY_RETRY_AUTO_CONTINUATION_BINDING_INVALID',
+            'O credito de identidade nao corresponde mais ao hold canonico'
+          );
+        }
       }
+      const previousContinuationCount = Number(
+        authorization.autoContinuationCount || 0
+      );
+      const safeContinuationCount = Number.isSafeInteger(previousContinuationCount)
+        && previousContinuationCount >= 0
+        ? previousContinuationCount
+        : 0;
+      const previousRenewalCount = Number(authorization.renewalCount || 0);
+      const safeRenewalCount = Number.isSafeInteger(previousRenewalCount)
+        && previousRenewalCount >= 0
+        ? previousRenewalCount
+        : 0;
+      const continuationCount = expiredUnused
+        ? safeContinuationCount + 1
+        : safeContinuationCount;
+      const renewedExpiresAt = expiredUnused
+        ? new Date(
+          this.nowDate().getTime() + this.orphanRecoveryTtlMs
+        ).toISOString()
+        : authorization.expiresAt;
       transaction.set(ref, this.scopedWriteRecord({
         status: 'CLAIMED',
         remainingAttempts: 0,
+        ...(expiredUnused ? {
+          expiresAt: renewedExpiresAt,
+          renewalCount: safeRenewalCount + 1,
+          autoContinuationCount: continuationCount,
+          lastAutoContinuedAt: claimedAt,
+          lastAutoContinuationSource: 'aws_liveness_session_claim'
+        } : {}),
         claimedAt,
         claimTokenHash,
         updatedAt: claimedAt
       }, authorization), { merge: true });
+      if (expiredUnused) {
+        if (binding.kind === 'orphan_hold') {
+          transaction.set(enforcementRef, this.scopedWriteRecord({
+            expiresAt: renewedExpiresAt,
+            lastAutoContinuedAt: claimedAt,
+            updatedAt: claimedAt
+          }, enforcement), { merge: true });
+        }
+        const auditRef = firestore
+          .collection(this.auditCollection)
+          .doc(
+            `${binding.authorizationId}_auto_${String(continuationCount)
+              .padStart(6, '0')}_unused_retry_continued`
+          );
+        transaction.set(auditRef, this.scopedWriteRecord({
+          schemaVersion: 1,
+          authorizationId: binding.authorizationId,
+          recoveryId: binding.recoveryId,
+          caseId: binding.caseId,
+          driverId: safeDriverId,
+          action: 'IDENTITY_RETRY_UNUSED_CREDIT_AUTO_CONTINUED',
+          actor: { uid: 'system:aws-liveness-session', type: 'system' },
+          reason: 'TTL_REFRESH_BEFORE_PROVIDER_DISPATCH',
+          previousExpiresAt: toIso(authorization.expiresAt),
+          expiresAt: renewedExpiresAt,
+          allowedAttempts: 1,
+          remainingAttempts: 0,
+          autoContinuationCount: continuationCount,
+          occurredAt: claimedAt,
+          immutable: true
+        }), { merge: false });
+      }
+      return { autoContinued: expiredUnused, expiresAt: renewedExpiresAt };
     });
 
     return {
@@ -2149,6 +2358,7 @@ class KycIdentityReviewWorkflowService {
       purpose: binding.purpose,
       kind: binding.kind,
       attemptScope: binding.attemptScope,
+      autoContinued: claimResult?.autoContinued === true,
       claimToken
     };
   }

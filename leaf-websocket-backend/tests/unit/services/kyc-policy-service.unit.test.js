@@ -1313,6 +1313,192 @@ describe('kyc-policy-service', () => {
     expect(mockRealtimeValues['users/driver-newer-start']).toEqual(newerState);
   });
 
+  test('primes a cold RTDB parent cache before recording identity validation start', async () => {
+    const driverId = 'driver-cold-rtdb-cache';
+    const challengeId = 'idrev_cold_rtdb_cache';
+    let cachePrimed = false;
+    let currentUser = {
+      identityReverification: {
+        challengeId,
+        requirement: 'IDENTITY_REVERIFICATION',
+        status: 'requested',
+        metrics: {}
+      },
+      kycReverifyRequired: true
+    };
+    const once = jest.fn(async () => {
+      cachePrimed = true;
+      return mockRealtimeSnapshot(currentUser);
+    });
+    const transaction = jest.fn(async (updater) => {
+      const nextUser = updater(cachePrimed ? currentUser : null);
+      if (nextUser === undefined) {
+        return {
+          committed: false,
+          snapshot: mockRealtimeSnapshot(currentUser)
+        };
+      }
+      currentUser = nextUser;
+      return {
+        committed: true,
+        snapshot: mockRealtimeSnapshot(currentUser)
+      };
+    });
+    mockRealtimeRef.mockImplementationOnce(() => ({ once, transaction }));
+
+    const result = await service.recordIdentityReverificationStarted(driverId, {
+      challengeId,
+      requirement: 'IDENTITY_REVERIFICATION'
+    });
+
+    expect(result).toEqual(expect.objectContaining({
+      recorded: true,
+      driverId
+    }));
+    expect(once.mock.invocationCallOrder[0])
+      .toBeLessThan(transaction.mock.invocationCallOrder[0]);
+    expect(currentUser.identityReverification.validationStartedAt).toEqual(expect.any(String));
+    expect(mockRedis.eval).toHaveBeenCalledTimes(1);
+  });
+
+  test('fails as state unavailable when RTDB keeps refusing the current challenge transaction', async () => {
+    const driverId = 'driver-rtdb-transaction-unavailable';
+    const challengeId = 'idrev_rtdb_transaction_unavailable';
+    const currentUser = {
+      identityReverification: {
+        challengeId,
+        requirement: 'IDENTITY_REVERIFICATION',
+        status: 'requested',
+        metrics: {}
+      },
+      kycReverifyRequired: true
+    };
+    const once = jest.fn(async () => mockRealtimeSnapshot(currentUser));
+    const transaction = jest.fn(async () => ({
+      committed: false,
+      snapshot: mockRealtimeSnapshot(currentUser)
+    }));
+    mockRealtimeRef.mockImplementationOnce(() => ({ once, transaction }));
+
+    await expect(service.recordIdentityReverificationStarted(driverId, {
+      challengeId,
+      requirement: 'IDENTITY_REVERIFICATION'
+    })).rejects.toMatchObject({
+      code: 'KYC_REVERIFY_STATE_UNAVAILABLE'
+    });
+
+    expect(transaction).toHaveBeenCalledTimes(2);
+    expect(mockRedis.eval).not.toHaveBeenCalled();
+  });
+
+  test('normalizes an RTDB transaction transport failure before provider dispatch', async () => {
+    const driverId = 'driver-rtdb-transaction-error';
+    const challengeId = 'idrev_rtdb_transaction_error';
+    const currentUser = {
+      identityReverification: {
+        challengeId,
+        requirement: 'IDENTITY_REVERIFICATION',
+        status: 'requested',
+        metrics: {}
+      },
+      kycReverifyRequired: true
+    };
+    const once = jest.fn(async () => mockRealtimeSnapshot(currentUser));
+    const transaction = jest.fn(async () => {
+      throw new Error('RTDB transport failed');
+    });
+    mockRealtimeRef.mockImplementationOnce(() => ({ once, transaction }));
+
+    await expect(service.recordIdentityReverificationStarted(driverId, {
+      challengeId,
+      requirement: 'IDENTITY_REVERIFICATION'
+    })).rejects.toMatchObject({
+      code: 'KYC_REVERIFY_STATE_UNAVAILABLE'
+    });
+
+    expect(mockRedis.eval).not.toHaveBeenCalled();
+  });
+
+  test('retries the Redis projection once while the RTDB challenge remains current', async () => {
+    const driverId = 'driver-redis-projection-retry';
+    const challengeId = 'idrev_redis_projection_retry';
+    const identityState = {
+      challengeId,
+      requirement: 'IDENTITY_REVERIFICATION',
+      status: 'requested',
+      metrics: {}
+    };
+    mockRealtimeValues[`users/${driverId}`] = {
+      identityReverification: identityState,
+      kycReverifyRequired: true
+    };
+    mockRealtimeValues[`users/${driverId}/identityReverification`] = identityState;
+    mockRedis.eval
+      .mockResolvedValueOnce(0)
+      .mockResolvedValueOnce(1);
+
+    const result = await service.recordIdentityReverificationStarted(driverId, {
+      challengeId,
+      requirement: 'IDENTITY_REVERIFICATION'
+    });
+
+    expect(result).toEqual(expect.objectContaining({
+      recorded: true,
+      driverId
+    }));
+    expect(mockRedis.eval).toHaveBeenCalledTimes(2);
+  });
+
+  test('normalizes a Redis transport failure before provider dispatch', async () => {
+    const driverId = 'driver-redis-projection-error';
+    const challengeId = 'idrev_redis_projection_error';
+    mockRealtimeValues[`users/${driverId}`] = {
+      identityReverification: {
+        challengeId,
+        requirement: 'IDENTITY_REVERIFICATION',
+        status: 'requested',
+        metrics: {}
+      },
+      kycReverifyRequired: true
+    };
+    mockRedis.eval.mockRejectedValueOnce(new Error('Redis transport failed'));
+
+    await expect(service.recordIdentityReverificationStarted(driverId, {
+      challengeId,
+      requirement: 'IDENTITY_REVERIFICATION'
+    })).rejects.toMatchObject({
+      code: 'KYC_REVERIFY_STATE_UNAVAILABLE'
+    });
+  });
+
+  test('does not misclassify an unavailable Redis projection as a stale challenge', async () => {
+    const driverId = 'driver-redis-projection-unavailable';
+    const challengeId = 'idrev_redis_projection_unavailable';
+    const identityState = {
+      challengeId,
+      requirement: 'IDENTITY_REVERIFICATION',
+      status: 'requested',
+      metrics: {}
+    };
+    mockRealtimeValues[`users/${driverId}`] = {
+      identityReverification: identityState,
+      kycReverifyRequired: true
+    };
+    mockRealtimeValues[`users/${driverId}/identityReverification`] = identityState;
+    mockRedis.eval
+      .mockResolvedValueOnce(0)
+      .mockResolvedValueOnce(0);
+
+    await expect(service.recordIdentityReverificationStarted(driverId, {
+      challengeId,
+      requirement: 'IDENTITY_REVERIFICATION'
+    })).rejects.toMatchObject({
+      code: 'KYC_REVERIFY_STATE_UNAVAILABLE'
+    });
+
+    expect(mockRedis.eval).toHaveBeenCalledTimes(2);
+  });
+
   test('markDriverForLivenessAttemptsExhausted opens support ticket and soft-blocks dispatch', async () => {
     const supportTicketService = require('../../../services/support-ticket-service');
     const firebaseConfig = require('../../../firebase-config');

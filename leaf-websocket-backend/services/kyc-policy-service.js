@@ -311,28 +311,90 @@ class KYCPolicyService {
     }
 
     const userRef = this.getStrictRealtimeDatabase().ref(`users/${driverId}`);
-    let matchedCurrentChallenge = false;
-    const transaction = await userRef.transaction((currentUser) => {
-      const currentState = currentUser?.identityReverification;
-      if (!currentState || String(currentState.challengeId || '') !== String(challengeId)) {
-        return undefined;
+    const readCurrentUser = async () => {
+      try {
+        const snapshot = await userRef.once('value');
+        return snapshot?.exists?.() ? snapshot.val() : null;
+      } catch (error) {
+        error.code = 'KYC_REVERIFY_STATE_UNAVAILABLE';
+        throw error;
       }
-      matchedCurrentChallenge = true;
-      return mutateUser(currentUser || {}, currentState);
-    });
+    };
+    const hasCurrentChallenge = (currentUser) => (
+      String(currentUser?.identityReverification?.challengeId || '') === String(challengeId)
+    );
 
-    if (transaction?.committed !== true || !matchedCurrentChallenge) {
+    // Firebase Admin invokes a transaction updater immediately with its local
+    // cache. On a cold gateway that value can be null even when RTDB has data;
+    // returning undefined there aborts locally before the server is consulted.
+    // Reading the exact parent ref first primes that cache while the transaction
+    // still protects against a challenge replacement after the read.
+    const preflightUser = await readCurrentUser();
+    if (!hasCurrentChallenge(preflightUser)) {
       return {
         committed: false,
         stale: true,
         code: 'KYC_IDENTITY_REVERIFY_CHALLENGE_STALE'
       };
     }
-    return {
-      committed: true,
-      stale: false,
-      snapshot: transaction.snapshot?.val?.() || null
-    };
+
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      let matchedCurrentChallenge = false;
+      let mutationRejected = false;
+      let transaction = null;
+      try {
+        transaction = await userRef.transaction((currentUser) => {
+          const currentState = currentUser?.identityReverification;
+          if (!currentState || String(currentState.challengeId || '') !== String(challengeId)) {
+            return undefined;
+          }
+          matchedCurrentChallenge = true;
+          const nextUser = mutateUser(currentUser || {}, currentState);
+          if (nextUser === undefined) {
+            mutationRejected = true;
+          }
+          return nextUser;
+        });
+      } catch (error) {
+        error.code = 'KYC_REVERIFY_STATE_UNAVAILABLE';
+        throw error;
+      }
+
+      if (transaction?.committed === true && matchedCurrentChallenge) {
+        return {
+          committed: true,
+          stale: false,
+          snapshot: transaction.snapshot?.val?.() || null
+        };
+      }
+      if (mutationRejected) {
+        return {
+          committed: false,
+          stale: true,
+          code: 'KYC_IDENTITY_REVERIFY_CHALLENGE_STALE'
+        };
+      }
+
+      const latestUser = await readCurrentUser();
+      if (!hasCurrentChallenge(latestUser)) {
+        return {
+          committed: false,
+          stale: true,
+          code: 'KYC_IDENTITY_REVERIFY_CHALLENGE_STALE'
+        };
+      }
+      if (attempt === 0) {
+        logStructured('warn', 'Transacao KYC repetida apos cache RTDB sem estado canonico', {
+          service: 'kyc-policy-service',
+          driverId,
+          challengeId
+        });
+      }
+    }
+
+    const error = new Error('RTDB nao confirmou a transacao do challenge KYC atual');
+    error.code = 'KYC_REVERIFY_STATE_UNAVAILABLE';
+    throw error;
   }
 
   async persistCurrentIdentityFirestore(
@@ -396,13 +458,19 @@ class KYCPolicyService {
     const approvalGuard = requireApprovalSafe
       ? 'local kyc_status = string.lower(tostring(redis.call("hget", KEYS[1], "kyc_status") or "")); local kyc_blocked = string.lower(tostring(redis.call("hget", KEYS[1], "kyc_blocked") or "")); local identity_status = string.lower(tostring(redis.call("hget", KEYS[1], "identity_reverification_status") or "requested")); local account_status = string.lower(tostring(redis.call("hget", KEYS[1], "status") or "")); local kyc_status_owned = kyc_status == "" or kyc_status == "approved" or kyc_status == "pending_reverify"; local identity_status_owned = identity_status == "requested" or identity_status == "validating" or identity_status == "passed"; local account_status_safe = account_status ~= "blocked" and account_status ~= "rejected" and account_status ~= "denied" and account_status ~= "suspended" and account_status ~= "disabled"; if kyc_blocked == "true" or not kyc_status_owned or not identity_status_owned or not account_status_safe then return -1 end; '
       : '';
-    const result = await this.redis.eval(
-      `if tostring(redis.call("hget", KEYS[1], "identity_reverification_challenge_id") or "") ~= tostring(ARGV[1]) then return 0 end; ${approvalGuard}if #ARGV > 1 then redis.call("hset", KEYS[1], unpack(ARGV, 2)) end; return 1`,
-      1,
-      `driver:${driverId}`,
-      String(challengeId || ''),
-      ...flattenedFields
-    );
+    let result = null;
+    try {
+      result = await this.redis.eval(
+        `if tostring(redis.call("hget", KEYS[1], "identity_reverification_challenge_id") or "") ~= tostring(ARGV[1]) then return 0 end; ${approvalGuard}if #ARGV > 1 then redis.call("hset", KEYS[1], unpack(ARGV, 2)) end; return 1`,
+        1,
+        `driver:${driverId}`,
+        String(challengeId || ''),
+        ...flattenedFields
+      );
+    } catch (error) {
+      error.code = 'KYC_REVERIFY_STATE_UNAVAILABLE';
+      throw error;
+    }
     return Number(result) === 1;
   }
 
@@ -2305,13 +2373,31 @@ class KYCPolicyService {
       identity_reverification_validation_started_at: nowIso
     });
     if (!redisCommitted) {
-      return {
-        success: true,
+      const latestIdentityState = await this.readRealtimeStrict(
+        `users/${driverId}/identityReverification`
+      );
+      if (
+        String(latestIdentityState?.challengeId || '') !== String(challengeId)
+      ) {
+        return {
+          success: true,
+          driverId,
+          recorded: false,
+          stale: true,
+          code: 'KYC_IDENTITY_REVERIFY_CHALLENGE_STALE'
+        };
+      }
+      const redisRetryCommitted = await this.persistCurrentIdentityRedis(
         driverId,
-        recorded: false,
-        stale: true,
-        code: 'KYC_IDENTITY_REVERIFY_CHALLENGE_STALE'
-      };
+        challengeId,
+        { identity_reverification_validation_started_at: nowIso }
+      );
+      if (redisRetryCommitted) {
+        return { success: true, driverId, recorded: true };
+      }
+      const error = new Error('Redis nao confirmou o challenge KYC atual');
+      error.code = 'KYC_REVERIFY_STATE_UNAVAILABLE';
+      throw error;
     }
 
     return { success: true, driverId, recorded: true };
