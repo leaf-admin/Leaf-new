@@ -2672,10 +2672,43 @@ class KycIdentityReviewWorkflowService {
           'O enforcement da autorizacao nao foi encontrado'
         );
       }
+      const expectedRejectedEvidenceId = safeOutcome === 'REJECTED'
+        ? sha256(`${safeDriverId}:${safeSessionId}`)
+        : null;
+      const enforcementRecoveryId = optionalString(enforcement.recoveryId);
+      const enforcementCaseId = optionalString(enforcement.caseId);
       const enforcementPointer = binding.kind === 'orphan_hold'
-        ? optionalString(enforcement.recoveryId)
-        : optionalString(enforcement.caseId);
-      if (enforcementPointer !== binding.authorizationId) {
+        ? enforcementRecoveryId
+        : enforcementCaseId;
+      const rejectedEvidenceBoundToConsumedSession = Boolean(
+        expectedRejectedEvidenceId
+        && safeResultEvidenceId === expectedRejectedEvidenceId
+        && resultEvidence
+        && optionalString(resultEvidence.driverId) === safeDriverId
+        && optionalString(resultEvidence.evidenceId) === expectedRejectedEvidenceId
+        && optionalString(resultEvidence.awsSessionHash) === expectedRejectedEvidenceId
+        && String(resultEvidence.terminalOutcome || '').trim().toLowerCase()
+          === 'face_compare_failed'
+        && sameIso(resultEvidence.recordedAt, trust?.lastFailure?.recordedAt)
+        && sameIso(resultEvidence.recordedAt, trust?.revokedAt)
+      );
+      const canonicalMismatchHoldAlreadyPersisted = Boolean(
+        rejectedEvidenceBoundToConsumedSession
+        && enforcementRecoveryId === null
+        && enforcementCaseId === null
+        && optionalString(enforcement.driverId) === safeDriverId
+        && enforcement.active === true
+        && enforcement.permanent !== true
+        && String(enforcement.status || '').trim().toUpperCase() === 'IDENTITY_MISMATCH_HOLD'
+        && String(enforcement.reasonCode || '').trim().toUpperCase()
+          === 'CANONICAL_FACE_COMPARE_MISMATCH'
+        && enforcement.retryAllowed === false
+        && enforcement.identityApproved !== true
+      );
+      if (
+        enforcementPointer !== binding.authorizationId
+        && !canonicalMismatchHoldAlreadyPersisted
+      ) {
         throw domainError(
           'KYC_IDENTITY_REVIEW_RETRY_ENFORCEMENT_INVALID',
           'O enforcement nao corresponde a autorizacao consumida'
@@ -2727,13 +2760,7 @@ class KycIdentityReviewWorkflowService {
       }
 
       if (safeOutcome === 'REJECTED' && resultEvidenceRef) {
-        if (
-          !resultEvidence
-          || optionalString(resultEvidence.driverId) !== safeDriverId
-          || optionalString(resultEvidence.evidenceId) !== safeResultEvidenceId
-          || String(resultEvidence.terminalOutcome || '').trim().toLowerCase()
-            !== 'face_compare_failed'
-        ) {
+        if (!rejectedEvidenceBoundToConsumedSession) {
           throw domainError(
             'KYC_IDENTITY_REVIEW_RETRY_REJECTION_EVIDENCE_INVALID',
             'A rejeicao nao corresponde a uma evidencia canonica de falha'
@@ -2777,6 +2804,16 @@ class KycIdentityReviewWorkflowService {
           resultEvidenceId: safeResultEvidenceId,
           updatedAt: terminalAt
         }, enforcement);
+      terminalEnforcement.retryAuthorizationId = binding.authorizationId;
+      terminalEnforcement.retryAuthorizationKind = binding.kind;
+      terminalEnforcement.retryConsumedAt = authorization.consumedAt || terminalAt;
+      if (binding.kind === 'orphan_hold') {
+        terminalEnforcement.recoveryId = binding.authorizationId;
+        terminalEnforcement.caseId = null;
+      } else {
+        terminalEnforcement.caseId = binding.authorizationId;
+        terminalEnforcement.recoveryId = null;
+      }
       const auditRef = firestore
         .collection(this.auditCollection)
         .doc(`${binding.authorizationId}_terminal_${safeOutcome.toLowerCase()}`);

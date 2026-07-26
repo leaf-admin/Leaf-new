@@ -9,6 +9,7 @@ jest.mock('../../../services/driver-identity-trust-service', () => ({}));
 jest.mock('../../../services/kyc-failed-biometric-evidence-service', () => ({}));
 jest.mock('../../../services/support-ticket-service', () => ({}));
 
+const crypto = require('crypto');
 const {
   KycIdentityReviewWorkflowService,
   createCaseService,
@@ -1201,6 +1202,90 @@ describe('kyc-identity-review-workflow-service', () => {
       .rejects.toMatchObject({ code: 'KYC_IDENTITY_REVIEW_HOLD' });
   });
 
+  it('recusa recoveryId cruzado ao reconciliar um retry manual sem caseId', async () => {
+    const sessionId = 'aws-session-manual-retry-reconciliation';
+    const rejectedEvidenceId = crypto
+      .createHash('sha256')
+      .update(`${DRIVER_ID}:${sessionId}`)
+      .digest('hex');
+    const rejectedAt = '2026-07-17T12:20:00.000Z';
+    const authorization = manualRetryAuthorization({
+      status: 'CONSUMED',
+      remainingAttempts: 0,
+      consumedAt: '2026-07-17T12:19:00.000Z',
+      consumedSessionIdHash: crypto.createHash('sha256').update(sessionId).digest('hex'),
+      expiresAt: '2099-01-01T00:00:00.000Z'
+    });
+    const enforcementPath = `driver_identity_enforcement/${DRIVER_ID}`;
+    const harness = createHarness({
+      reviewCase: null,
+      firestoreDocuments: {
+        [enforcementPath]: {
+          schemaVersion: 1,
+          driverId: DRIVER_ID,
+          active: true,
+          permanent: false,
+          status: 'IDENTITY_MISMATCH_HOLD',
+          reasonCode: 'CANONICAL_FACE_COMPARE_MISMATCH',
+          recoveryId: `kyc_or_${'f'.repeat(32)}`,
+          retryAllowed: false,
+          identityApproved: false
+        },
+        [`kyc_identity_retry_authorizations/${RETRY_CASE_ID}`]: authorization,
+        [`driver_identity_trust/${DRIVER_ID}`]: {
+          schemaVersion: 1,
+          driverId: DRIVER_ID,
+          status: 'revoked',
+          revocationReason: 'identity_reverification_failed',
+          revokedAt: rejectedAt,
+          lastFailure: { recordedAt: rejectedAt }
+        },
+        [`driver_identity_trust/${DRIVER_ID}/evidence/${rejectedEvidenceId}`]: {
+          schemaVersion: 1,
+          evidenceId: rejectedEvidenceId,
+          driverId: DRIVER_ID,
+          awsSessionHash: rejectedEvidenceId,
+          terminalOutcome: 'face_compare_failed',
+          recordedAt: rejectedAt
+        }
+      }
+    });
+
+    await expect(harness.service.finalizeCleanRetryAuthorization({
+      driverId: DRIVER_ID,
+      attemptScope: RETRY_SCOPE,
+      sessionId,
+      outcome: 'REJECTED',
+      resultEvidenceId: rejectedEvidenceId,
+      reason: 'Recovery divergente nunca pode reconciliar um retry manual.'
+    })).rejects.toMatchObject({
+      code: 'KYC_IDENTITY_REVIEW_RETRY_ENFORCEMENT_INVALID'
+    });
+
+    harness.firestore.documents.set(enforcementPath, {
+      ...harness.firestore.documents.get(enforcementPath),
+      recoveryId: null
+    });
+    await expect(harness.service.finalizeCleanRetryAuthorization({
+      driverId: DRIVER_ID,
+      attemptScope: RETRY_SCOPE,
+      sessionId,
+      outcome: 'REJECTED',
+      resultEvidenceId: rejectedEvidenceId,
+      reason: 'Reconciliacao do hard-fail manual sem ponteiros persistidos.'
+    })).resolves.toMatchObject({
+      authorization: { status: 'REJECTED', remainingAttempts: 0 },
+      enforcement: {
+        active: true,
+        status: 'IDENTITY_MISMATCH_HOLD',
+        caseId: RETRY_CASE_ID,
+        recoveryId: null,
+        retryAuthorizationId: RETRY_CASE_ID,
+        retryAuthorizationKind: 'manual_review'
+      }
+    });
+  });
+
   it('lista casos para revisor autorizado sem expor paths de Storage', async () => {
     const harness = createHarness();
     const cases = await harness.service.listCasesForDriver(DRIVER_ID, { reviewerContext });
@@ -1825,20 +1910,25 @@ describe('kyc-identity-review-workflow-service orphan hold recovery', () => {
       rejectedAuthorization.attemptScope
     );
     await rejectedHarness.service.consumeCleanRetryAuthorization(rejectedClaim, AWS_SESSION_ID);
-    const rejectedEvidenceId = 'canonical_failure_evidence_2';
+    const rejectedEvidenceId = crypto
+      .createHash('sha256')
+      .update(`${DRIVER_ID}:${AWS_SESSION_ID}`)
+      .digest('hex');
+    const rejectedAt = '2026-07-17T12:20:00.000Z';
     rejectedHarness.firestore.documents.set(`driver_identity_trust/${DRIVER_ID}`, trustState({
       stateRevision: STATE_REVISION + 1,
       revocationReason: 'identity_reverification_failed',
-      revokedAt: '2026-07-17T12:20:00.000Z',
-      lastFailure: { recordedAt: '2026-07-17T12:20:00.000Z' }
+      revokedAt: rejectedAt,
+      lastFailure: { recordedAt: rejectedAt }
     }));
     rejectedHarness.firestore.documents.set(
       `driver_identity_trust/${DRIVER_ID}/evidence/${rejectedEvidenceId}`,
       {
         evidenceId: rejectedEvidenceId,
         driverId: DRIVER_ID,
+        awsSessionHash: rejectedEvidenceId,
         terminalOutcome: 'face_compare_failed',
-        recordedAt: '2026-07-17T12:20:00.000Z'
+        recordedAt: rejectedAt
       }
     );
 
@@ -1870,6 +1960,182 @@ describe('kyc-identity-review-workflow-service orphan hold recovery', () => {
       outcome: 'ABORTED',
       reason: 'Tentativa de trocar o resultado terminal.'
     })).rejects.toMatchObject({ code: 'KYC_IDENTITY_REVIEW_RETRY_OUTCOME_CONFLICT' });
+
+    const reconciledHarness = createOrphanHarness();
+    const reconciledAuthorization = await authorize(reconciledHarness);
+    const reconciledClaim = await reconciledHarness.service.claimCleanRetryAuthorization(
+      DRIVER_ID,
+      reconciledAuthorization.attemptScope
+    );
+    await reconciledHarness.service.consumeCleanRetryAuthorization(
+      reconciledClaim,
+      AWS_SESSION_ID
+    );
+    reconciledHarness.firestore.documents.set(
+      `driver_identity_trust/${DRIVER_ID}`,
+      trustState({
+        stateRevision: STATE_REVISION + 1,
+        revocationReason: 'identity_reverification_failed',
+        revokedAt: rejectedAt,
+        lastFailure: { recordedAt: rejectedAt }
+      })
+    );
+    reconciledHarness.firestore.documents.set(
+      `driver_identity_trust/${DRIVER_ID}/evidence/${rejectedEvidenceId}`,
+      {
+        evidenceId: rejectedEvidenceId,
+        driverId: DRIVER_ID,
+        awsSessionHash: rejectedEvidenceId,
+        terminalOutcome: 'face_compare_failed',
+        recordedAt: rejectedAt
+      }
+    );
+    reconciledHarness.firestore.documents.set(
+      `driver_identity_enforcement/${DRIVER_ID}`,
+      {
+        schemaVersion: 1,
+        driverId: DRIVER_ID,
+        active: true,
+        permanent: false,
+        status: 'IDENTITY_MISMATCH_HOLD',
+        reasonCode: 'CANONICAL_FACE_COMPARE_MISMATCH',
+        retryAllowed: false,
+        identityApproved: false
+      }
+    );
+
+    await expect(reconciledHarness.service.finalizeCleanRetryAuthorization({
+      driverId: DRIVER_ID,
+      attemptScope: reconciledAuthorization.attemptScope,
+      sessionId: AWS_SESSION_ID,
+      outcome: 'REJECTED',
+      resultEvidenceId: FAILURE_EVIDENCE_ID,
+      reason: 'Evidencia anterior nao pode reconciliar a sessao consumida.'
+    })).rejects.toMatchObject({
+      code: 'KYC_IDENTITY_REVIEW_RETRY_ENFORCEMENT_INVALID'
+    });
+    reconciledHarness.firestore.documents.set(
+      `driver_identity_enforcement/${DRIVER_ID}`,
+      {
+        ...reconciledHarness.firestore.documents.get(
+          `driver_identity_enforcement/${DRIVER_ID}`
+        ),
+        caseId: `kyc_ir_${'e'.repeat(32)}`
+      }
+    );
+    await expect(reconciledHarness.service.finalizeCleanRetryAuthorization({
+      driverId: DRIVER_ID,
+      attemptScope: reconciledAuthorization.attemptScope,
+      sessionId: AWS_SESSION_ID,
+      outcome: 'REJECTED',
+      resultEvidenceId: rejectedEvidenceId,
+      reason: 'Case divergente nunca pode reconciliar um retry orfao.'
+    })).rejects.toMatchObject({
+      code: 'KYC_IDENTITY_REVIEW_RETRY_ENFORCEMENT_INVALID'
+    });
+    reconciledHarness.firestore.documents.set(
+      `driver_identity_enforcement/${DRIVER_ID}`,
+      {
+        ...reconciledHarness.firestore.documents.get(
+          `driver_identity_enforcement/${DRIVER_ID}`
+        ),
+        caseId: null,
+        recoveryId: `kyc_or_${'f'.repeat(32)}`
+      }
+    );
+    await expect(reconciledHarness.service.finalizeCleanRetryAuthorization({
+      driverId: DRIVER_ID,
+      attemptScope: reconciledAuthorization.attemptScope,
+      sessionId: AWS_SESSION_ID,
+      outcome: 'REJECTED',
+      resultEvidenceId: rejectedEvidenceId,
+      reason: 'Ponteiro divergente nunca pode reconciliar a sessao consumida.'
+    })).rejects.toMatchObject({
+      code: 'KYC_IDENTITY_REVIEW_RETRY_ENFORCEMENT_INVALID'
+    });
+    reconciledHarness.firestore.documents.set(
+      `driver_identity_enforcement/${DRIVER_ID}`,
+      {
+        ...reconciledHarness.firestore.documents.get(
+          `driver_identity_enforcement/${DRIVER_ID}`
+        ),
+        recoveryId: null
+      }
+    );
+    reconciledHarness.firestore.documents.set(
+      `driver_identity_enforcement/${DRIVER_ID}`,
+      {
+        ...reconciledHarness.firestore.documents.get(
+          `driver_identity_enforcement/${DRIVER_ID}`
+        ),
+        driverId: 'driver_2'
+      }
+    );
+    await expect(reconciledHarness.service.finalizeCleanRetryAuthorization({
+      driverId: DRIVER_ID,
+      attemptScope: reconciledAuthorization.attemptScope,
+      sessionId: AWS_SESSION_ID,
+      outcome: 'REJECTED',
+      resultEvidenceId: rejectedEvidenceId,
+      reason: 'Enforcement de outro motorista nao pode reconciliar a sessao.'
+    })).rejects.toMatchObject({
+      code: 'KYC_IDENTITY_REVIEW_RETRY_ENFORCEMENT_INVALID'
+    });
+    reconciledHarness.firestore.documents.set(
+      `driver_identity_enforcement/${DRIVER_ID}`,
+      {
+        ...reconciledHarness.firestore.documents.get(
+          `driver_identity_enforcement/${DRIVER_ID}`
+        ),
+        driverId: DRIVER_ID
+      }
+    );
+    reconciledHarness.firestore.documents.set(
+      `driver_identity_trust/${DRIVER_ID}`,
+      {
+        ...reconciledHarness.firestore.documents.get(
+          `driver_identity_trust/${DRIVER_ID}`
+        ),
+        revokedAt: '2026-07-17T12:20:01.000Z'
+      }
+    );
+    await expect(reconciledHarness.service.finalizeCleanRetryAuthorization({
+      driverId: DRIVER_ID,
+      attemptScope: reconciledAuthorization.attemptScope,
+      sessionId: AWS_SESSION_ID,
+      outcome: 'REJECTED',
+      resultEvidenceId: rejectedEvidenceId,
+      reason: 'Timestamp divergente nao pode reconciliar a sessao consumida.'
+    })).rejects.toMatchObject({
+      code: 'KYC_IDENTITY_REVIEW_RETRY_ENFORCEMENT_INVALID'
+    });
+    reconciledHarness.firestore.documents.set(
+      `driver_identity_trust/${DRIVER_ID}`,
+      {
+        ...reconciledHarness.firestore.documents.get(
+          `driver_identity_trust/${DRIVER_ID}`
+        ),
+        revokedAt: rejectedAt
+      }
+    );
+    await expect(reconciledHarness.service.finalizeCleanRetryAuthorization({
+      driverId: DRIVER_ID,
+      attemptScope: reconciledAuthorization.attemptScope,
+      sessionId: AWS_SESSION_ID,
+      outcome: 'REJECTED',
+      resultEvidenceId: rejectedEvidenceId,
+      reason: 'Reconciliacao do hard-fail canonico ja persistido.'
+    })).resolves.toMatchObject({
+      authorization: { status: 'REJECTED', remainingAttempts: 0 },
+      enforcement: {
+        active: true,
+        status: 'IDENTITY_MISMATCH_HOLD',
+        recoveryId: reconciledAuthorization.recoveryId,
+        caseId: null,
+        retryAuthorizationId: reconciledAuthorization.recoveryId,
+        retryAuthorizationKind: 'orphan_hold'
+      }
+    });
 
     const abortedHarness = createOrphanHarness();
     const abortedAuthorization = await authorize(abortedHarness);

@@ -2457,22 +2457,32 @@ class KYCRoutes {
               code: evidenceError?.code || null
             });
           }
+          const retryFinalization = await workflowService.finalizeCleanRetryAuthorization({
+            driverId: userId,
+            attemptScope: sessionMetadataCandidate?.attemptScope || null,
+            sessionId: awsSessionId,
+            outcome: 'REJECTED',
+            resultEvidenceId: failureRecord?.evidenceId || null,
+            reason: 'canonical_face_compare_rejected'
+          });
           let mismatchHoldPersisted = false;
-          try {
-            await persistIdentityMismatchHold(userId, {
-              evidenceId: reviewEvidence?.evidenceId || null,
-              decision: verificationResult.decision || 'reject',
-              persistenceScope
-            });
-            mismatchHoldPersisted = true;
-          } catch (holdError) {
-            // O trust canônico já foi revogado acima; este espelho adicional
-            // existe para impedir troca de CNH e novas chamadas pagas.
-            logError(holdError, 'Falha ao persistir hold de divergencia facial', {
-              service: 'kyc-routes-routes',
-              userId,
-              code: holdError?.code || null
-            });
+          if (!retryFinalization) {
+            try {
+              await persistIdentityMismatchHold(userId, {
+                evidenceId: reviewEvidence?.evidenceId || null,
+                decision: verificationResult.decision || 'reject',
+                persistenceScope
+              });
+              mismatchHoldPersisted = true;
+            } catch (holdError) {
+              // O trust canônico já foi revogado acima; este espelho adicional
+              // existe para impedir troca de CNH e novas chamadas pagas.
+              logError(holdError, 'Falha ao persistir hold de divergencia facial', {
+                service: 'kyc-routes-routes',
+                userId,
+                code: holdError?.code || null
+              });
+            }
           }
           if (reviewEvidence?.evidenceId && !reviewEvidenceLinkedToTrust && !mismatchHoldPersisted) {
             await evidenceService.deleteEvidence(reviewEvidence.evidenceId, {
@@ -2490,14 +2500,6 @@ class KYCRoutes {
             reviewEvidence?.evidenceId
             && (reviewEvidenceLinkedToTrust || mismatchHoldPersisted)
           );
-          await workflowService.finalizeCleanRetryAuthorization({
-            driverId: userId,
-            attemptScope: sessionMetadataCandidate?.attemptScope || null,
-            sessionId: awsSessionId,
-            outcome: 'REJECTED',
-            resultEvidenceId: failureRecord?.evidenceId || null,
-            reason: 'canonical_face_compare_rejected'
-          });
           if (isIdentityReverificationRequest) {
             const identityResult = typeof policyService.recordIdentityReverificationResult === 'function'
               ? await policyService.recordIdentityReverificationResult(userId, {

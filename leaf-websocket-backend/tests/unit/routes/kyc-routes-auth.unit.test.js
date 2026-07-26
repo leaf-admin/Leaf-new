@@ -29,6 +29,7 @@ const mockRestoreRejectedIdentityVerification = jest.fn();
 const mockClaimVerificationWindow = jest.fn();
 const mockReleaseVerificationWindow = jest.fn();
 const mockGetFromRealtimeDB = jest.fn();
+const mockGetFirestore = jest.fn();
 const mockAssertKycOperationAllowed = jest.fn();
 const mockClaimCleanRetryAuthorization = jest.fn();
 const mockConsumeCleanRetryAuthorization = jest.fn();
@@ -70,6 +71,7 @@ jest.mock('firebase-admin', () => ({
 
 jest.mock('../../../firebase-config', () => ({
   initializeFirebase: jest.fn(),
+  getFirestore: (...args) => mockGetFirestore(...args),
   getFromRealtimeDB: (...args) => mockGetFromRealtimeDB(...args)
 }));
 
@@ -284,6 +286,7 @@ describe('kyc routes auth', () => {
     jest.clearAllMocks();
     mockRuntimeNamespace = 'operational';
     mockVerifyIdToken.mockResolvedValue({ uid: 'driver-1', phone_number: '+5521123456789' });
+    mockGetFirestore.mockReset().mockReturnValue(null);
     mockGetFromRealtimeDB.mockResolvedValue(null);
     mockEvaluateProductionReadiness.mockReturnValue({
       ok: true,
@@ -3657,7 +3660,72 @@ describe('kyc routes auth', () => {
       resultEvidenceId: null,
       reason: 'canonical_face_compare_rejected'
     });
+    expect(mockFinalizeCleanRetryAuthorization.mock.invocationCallOrder[0])
+      .toBeLessThan(mockGetFirestore.mock.invocationCallOrder[0]);
     expect(mockKycPolicyService.recordVerificationSuccess).not.toHaveBeenCalled();
+  });
+
+  it('keeps the terminal retry enforcement instead of overwriting its binding with a generic hold', async () => {
+    const challengeId = 'idrev_terminal_retry_binding';
+    const attemptScope = `orphan_hold_retry_kyc_or_${'a'.repeat(32)}`;
+    mockGetSessionMetadata.mockResolvedValueOnce({
+      provider: 'aws_rekognition_face_liveness',
+      userId: 'driver-1',
+      challengeId,
+      requirement: 'IDENTITY_REVERIFICATION',
+      attemptScope,
+      challengeType: 'FaceMovementChallenge',
+      createdAt: '2026-07-13T12:00:00.000Z',
+      expiresAt: '2026-07-13T12:20:00.000Z',
+      verificationWindowToken: 'verification-window-token',
+      persistenceNamespace: 'operational',
+      financialContextId: 'ctx_operational_test'
+    });
+    mockKycServiceInstance.verifyDriverServerSideSelfie.mockResolvedValueOnce({
+      success: true,
+      userId: 'driver-1',
+      isMatch: false,
+      needsReview: false,
+      similarityScore: 0.21,
+      confidence: 0.21,
+      threshold: 0.9,
+      reviewThreshold: 0.78,
+      decision: 'reject',
+      mode: 'server_biometric_selfie_v1'
+    });
+    mockRecordCanonicalFailure.mockResolvedValueOnce({
+      success: true,
+      evidenceId: 'c'.repeat(64),
+      idempotentReplay: false
+    });
+    mockFinalizeCleanRetryAuthorization.mockResolvedValueOnce({
+      authorization: { status: 'REJECTED', remainingAttempts: 0 },
+      enforcement: {
+        active: true,
+        status: 'IDENTITY_MISMATCH_HOLD',
+        recoveryId: attemptScope.replace('orphan_hold_retry_', '')
+      }
+    });
+
+    const response = await request(createApp())
+      .post('/api/kyc/verify-driver/server-side-selfie')
+      .set('Authorization', 'Bearer firebase-token')
+      .field('userId', 'driver-1')
+      .field('awsSessionId', 'session-terminal-retry-binding')
+      .field('challengeId', challengeId)
+      .field('requirement', 'IDENTITY_REVERIFICATION');
+
+    expect(response.status).toBe(403);
+    expect(response.body.code).toBe('KYC_CHALLENGE_NOT_PASSED');
+    expect(mockFinalizeCleanRetryAuthorization).toHaveBeenCalledWith({
+      driverId: 'driver-1',
+      attemptScope,
+      sessionId: 'session-terminal-retry-binding',
+      outcome: 'REJECTED',
+      resultEvidenceId: 'c'.repeat(64),
+      reason: 'canonical_face_compare_rejected'
+    });
+    expect(mockGetFirestore).not.toHaveBeenCalled();
   });
 
   it('does not clear a newer identity challenge with an older successful canonical session', async () => {
