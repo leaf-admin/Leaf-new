@@ -1493,6 +1493,50 @@ function normalizeKycReviewRequirement(value) {
   return /^[A-Z][A-Z0-9_]{0,63}$/.test(normalized) ? normalized : '';
 }
 
+function buildDriverIdentityRemoteFingerprint(remoteActivation) {
+  if (!remoteActivation || typeof remoteActivation !== 'object') {
+    return '';
+  }
+
+  const documentStatuses = Object.entries(
+    remoteActivation.documents || {},
+  )
+    .map(([key, value]) => [
+      String(key || ''),
+      String(value?.status || value || '').trim().toLowerCase(),
+    ])
+    .sort(([left], [right]) => left.localeCompare(right));
+
+  return JSON.stringify({
+    activationState: String(
+      remoteActivation.activationState || remoteActivation.state || '',
+    )
+      .trim()
+      .toUpperCase(),
+    canGoOnline: remoteActivation.canGoOnline === true,
+    canAttemptOnline: remoteActivation.canAttemptOnline === true,
+    requiresLiveness: remoteActivation.requiresLiveness === true,
+    kyc: {
+      status: String(remoteActivation.kyc?.status || '')
+        .trim()
+        .toLowerCase(),
+      blocked: remoteActivation.kyc?.blocked === true,
+      reverifyRequired:
+        remoteActivation.kyc?.reverifyRequired === true,
+    },
+    documents: documentStatuses,
+    vehicle: {
+      status: String(remoteActivation.vehicle?.status || '')
+        .trim()
+        .toLowerCase(),
+      approved: remoteActivation.vehicle?.approved === true,
+      active: remoteActivation.vehicle?.active === true,
+      identityComplete:
+        remoteActivation.vehicle?.identityComplete === true,
+    },
+  });
+}
+
 export function buildDriverIdentitySupportStorageKey(driverId) {
   const normalizedDriverId = String(driverId || '').trim();
   return normalizedDriverId
@@ -1796,11 +1840,17 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   const homeMapReadyFallbackTimerRef = useRef(null);
   const connectionIndicatorStableTimerRef = useRef(null);
   const displayedConnectionIndicatorKeyRef = useRef('none');
+  const driverIdentityRemoteBaselineRef = useRef({
+    driverId: '',
+    fingerprint: '',
+  });
   const identitySupportDriverId = String(
     profile?.uid || profileUid || '',
   ).trim();
   const remoteIdentitySupportRequired =
     isDriverIdentitySupportRequired(driverActivationRemote);
+  const driverIdentityRemoteFingerprint =
+    buildDriverIdentityRemoteFingerprint(driverActivationRemote);
 
   useEffect(() => {
     if (!driverIdentitySupportTicketParams) {
@@ -1814,12 +1864,26 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
       return;
     }
 
+    const remoteBaseline = driverIdentityRemoteBaselineRef.current;
+    const remoteStateChangedAfterFailure =
+      remoteBaseline.driverId === identitySupportDriverId &&
+      Boolean(remoteBaseline.fingerprint) &&
+      Boolean(driverIdentityRemoteFingerprint) &&
+      remoteBaseline.fingerprint !== driverIdentityRemoteFingerprint;
+
     if (
-      driverIdentityRemoteBlockObserved &&
-      driverActivationResolved
+      driverActivationResolved &&
+      (
+        driverIdentityRemoteBlockObserved ||
+        remoteStateChangedAfterFailure
+      )
     ) {
       setDriverIdentitySupportTicketParams(null);
       setDriverIdentityRemoteBlockObserved(false);
+      driverIdentityRemoteBaselineRef.current = {
+        driverId: '',
+        fingerprint: '',
+      };
       clearDriverIdentitySupportContext(identitySupportDriverId).catch(
         (error) => {
           Logger.warn(
@@ -1832,6 +1896,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   }, [
     driverActivationResolved,
     driverIdentityRemoteBlockObserved,
+    driverIdentityRemoteFingerprint,
     driverIdentitySupportTicketParams,
     identitySupportDriverId,
     remoteIdentitySupportRequired,
@@ -1840,6 +1905,10 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   useEffect(() => {
     setDriverIdentitySupportTicketParams(null);
     setDriverIdentityRemoteBlockObserved(false);
+    driverIdentityRemoteBaselineRef.current = {
+      driverId: identitySupportDriverId,
+      fingerprint: '',
+    };
   }, [identitySupportDriverId]);
 
   useEffect(() => {
@@ -7087,6 +7156,10 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     );
 
     if (errorPresentation.canRequestReview) {
+      driverIdentityRemoteBaselineRef.current = {
+        driverId: identitySupportDriverId,
+        fingerprint: driverIdentityRemoteFingerprint,
+      };
       setDriverIdentityRemoteBlockObserved(false);
       setDriverIdentitySupportTicketParams(ticketParams);
       persistDriverIdentitySupportContext(
@@ -7131,6 +7204,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     Alert.alert(errorPresentation.title, errorPresentation.message, undefined);
   }, [
     driverKycChallengeContext,
+    driverIdentityRemoteFingerprint,
     handleDriverKycModalCancel,
     identitySupportDriverId,
     navigateToDriverIdentityReview,
@@ -7261,6 +7335,10 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     if (onlineResult?.success) {
       setDriverIdentitySupportTicketParams(null);
       setDriverIdentityRemoteBlockObserved(false);
+      driverIdentityRemoteBaselineRef.current = {
+        driverId: '',
+        fingerprint: '',
+      };
       clearDriverIdentitySupportContext(identitySupportDriverId).catch(
         (error) => {
           Logger.warn(

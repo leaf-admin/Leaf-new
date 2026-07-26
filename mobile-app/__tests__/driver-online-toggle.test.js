@@ -1358,6 +1358,141 @@ describe('driver online toggle', () => {
     expect(ticketParams).not.toHaveProperty('error');
   });
 
+  it('clears a local identity-support gate only after a semantic canonical release', async () => {
+    const kycServiceMock = require('../src/services/KYCService').default;
+    const AsyncStorage = require('@react-native-async-storage/async-storage');
+    const supportStorageKey =
+      buildDriverIdentitySupportStorageKey('driver_1');
+    const initialActivationRemote = {
+      activationState: 'APPROVED_NEEDS_LIVENESS',
+      canGoOnline: false,
+      canAttemptOnline: true,
+      requiresLiveness: true,
+      updatedAt: '2026-07-25T20:00:00.000Z',
+      kyc: {
+        status: 'pending_reverify',
+        blocked: false,
+        reverifyRequired: true,
+      },
+      documents: {
+        cnh: { status: 'approved' },
+        crlv: { status: 'approved' },
+      },
+      vehicle: {
+        status: 'approved',
+        approved: true,
+        active: true,
+        identityComplete: true,
+      },
+    };
+    kycServiceMock.verifyDriverWithAwsReference.mockResolvedValueOnce({
+      success: false,
+      status: 403,
+      code: 'KYC_CHALLENGE_NOT_PASSED',
+      isMatch: false,
+      reviewAvailable: true,
+      evidenceId: 'evidence_semantic_release_01',
+    });
+    const setDriverOnline = jest.fn().mockResolvedValueOnce({
+      success: false,
+      code: 'kycRequired',
+      kycRequired: true,
+      challengeId: 'challenge_semantic_release_01',
+      requirement: 'IDENTITY_REVERIFICATION',
+    });
+    let runtime = buildDriverRuntime({
+      driverCanGoOnline: false,
+      driverActivationRemote: initialActivationRemote,
+      setDriverOnline,
+    });
+    usePrototypeRideRuntime.mockImplementation(() => runtime);
+
+    const navigation = {
+      navigate: jest.fn(),
+      canGoBack: jest.fn(() => false),
+      goBack: jest.fn(),
+    };
+    const route = { params: {} };
+    const {
+      getByTestId,
+      getByText,
+      queryByText,
+      rerender,
+    } = render(
+      <RobotaxiHomeScreen navigation={navigation} route={route} />,
+    );
+
+    fireEvent.press(getByTestId('driver-home-toggle-online'));
+    await waitFor(() => {
+      expect(getByTestId('driver-kyc-aws-native')).toBeTruthy();
+    });
+    fireEvent.press(getByTestId('driver-kyc-aws-native'));
+
+    await waitFor(() => {
+      expect(getByText('Falar com suporte')).toBeTruthy();
+    });
+    await waitFor(() => {
+      expect(
+        AsyncStorage.setItem.mock.calls.some(
+          ([key]) => key === supportStorageKey,
+        ),
+      ).toBe(true);
+    });
+
+    runtime = buildDriverRuntime({
+      driverCanGoOnline: false,
+      driverActivationRemote: {
+        ...initialActivationRemote,
+        updatedAt: '2026-07-25T20:05:00.000Z',
+      },
+      setDriverOnline,
+    });
+    rerender(
+      <RobotaxiHomeScreen navigation={navigation} route={route} />,
+    );
+
+    await waitFor(() => {
+      expect(getByText('Falar com suporte')).toBeTruthy();
+    });
+    expect(
+      AsyncStorage.removeItem.mock.calls.some(
+        ([key]) => key === supportStorageKey,
+      ),
+    ).toBe(false);
+
+    runtime = buildDriverRuntime({
+      driverCanGoOnline: true,
+      driverActivationRemote: {
+        ...initialActivationRemote,
+        activationState: 'ACTIVE',
+        canGoOnline: true,
+        requiresLiveness: false,
+        updatedAt: '2026-07-25T20:10:00.000Z',
+        kyc: {
+          status: 'approved',
+          blocked: false,
+          reverifyRequired: false,
+        },
+      },
+      setDriverOnline,
+    });
+    rerender(
+      <RobotaxiHomeScreen navigation={navigation} route={route} />,
+    );
+
+    await waitFor(() => {
+      expect(queryByText('Falar com suporte')).toBeNull();
+      expect(getByText('Ficar online')).toBeTruthy();
+    });
+    await waitFor(() => {
+      expect(
+        AsyncStorage.removeItem.mock.calls.some(
+          ([key]) => key === supportStorageKey,
+        ),
+      ).toBe(true);
+    });
+  });
+
   it('restores opaque identity-review references after an app relaunch', async () => {
     const AsyncStorage = require('@react-native-async-storage/async-storage');
     const storageKey = buildDriverIdentitySupportStorageKey('driver_1');
