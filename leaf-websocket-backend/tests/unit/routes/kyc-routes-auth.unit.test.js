@@ -44,6 +44,9 @@ const mockKycPolicyService = {
   isLivenessSatisfied: jest.fn(() => true),
   recordIdentityReverificationStarted: jest.fn(async () => ({ success: true, recorded: true })),
   recordIdentityReverificationResult: jest.fn(async () => ({ success: true, recorded: true })),
+  reconcileRejectedIdentityReverificationMirror: jest.fn(
+    async () => ({ success: true, recorded: true, rtdbOnly: true })
+  ),
   recordVerificationSuccess: jest.fn(async () => ({ success: true })),
   resolveStepUpChallenge: jest.fn(async () => ({ success: true })),
   markDriverForLivenessAttemptsExhausted: jest.fn(async () => ({ success: true, softBlocked: true }))
@@ -324,6 +327,9 @@ describe('kyc routes auth', () => {
     mockKycPolicyService.recordIdentityReverificationResult
       .mockReset()
       .mockResolvedValue({ success: true, recorded: true });
+    mockKycPolicyService.reconcileRejectedIdentityReverificationMirror
+      .mockReset()
+      .mockResolvedValue({ success: true, recorded: true, rtdbOnly: true });
     mockKycPolicyService.recordVerificationSuccess
       .mockReset()
       .mockResolvedValue({ success: true });
@@ -3043,6 +3049,7 @@ describe('kyc routes auth', () => {
     const attemptScope = 'orphan_hold_retry_kyc_or_recovery_1';
     const sessionHash = 'a'.repeat(64);
     const reviewEvidenceId = 'private-review-evidence-reconciled';
+    const canonicalRecordedAt = '2026-07-26T01:46:05.509Z';
     const existingEvidence = {
       schemaVersion: 1,
       evidenceId: sessionHash,
@@ -3051,6 +3058,7 @@ describe('kyc routes auth', () => {
       terminalOutcome: 'face_compare_failed',
       challengeId,
       requirement: 'IDENTITY_REVERIFICATION',
+      recordedAt: canonicalRecordedAt,
       reviewEvidenceId
     };
     mockGetSessionMetadata.mockResolvedValueOnce({
@@ -3128,13 +3136,22 @@ describe('kyc routes auth', () => {
       resultEvidenceId: sessionHash,
       reason: 'canonical_face_compare_rejection_reconciliation'
     });
-    expect(mockKycPolicyService.recordIdentityReverificationResult).toHaveBeenCalledWith(
+    expect(
+      mockKycPolicyService.reconcileRejectedIdentityReverificationMirror
+    ).toHaveBeenCalledWith(
       'driver-1',
       expect.objectContaining({
         isMatch: false,
         challengeId,
-        reconciliationOnly: true
+        attemptScope,
+        canonicalRecordedAt
       })
+    );
+    expect(mockKycPolicyService.recordIdentityReverificationResult).not.toHaveBeenCalled();
+    expect(mockFinalizeCleanRetryAuthorization.mock.invocationCallOrder[0]).toBeLessThan(
+      mockKycPolicyService
+        .reconcileRejectedIdentityReverificationMirror
+        .mock.invocationCallOrder[0]
     );
     expect(mockGetSessionResult).not.toHaveBeenCalled();
     expect(mockRecordCanonicalFailure).not.toHaveBeenCalled();

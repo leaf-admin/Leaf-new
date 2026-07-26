@@ -943,6 +943,173 @@ describe('kyc-policy-service', () => {
     expect(redisPayload).not.toHaveProperty('kyc_blocked');
   });
 
+  test('reconciles a rejected canonical replay only in RTDB with its original timestamp', async () => {
+    const driverId = 'driver-rejected-replay';
+    const challengeId = 'idrev_rejected_replay';
+    const attemptScope = 'orphan_hold_retry_kyc_or_recovery_1';
+    const canonicalRecordedAt = '2026-07-26T01:46:05.509Z';
+    mockRealtimeValues[`users/${driverId}`] = {
+      identityReverification: {
+        challengeId,
+        requirement: 'IDENTITY_REVERIFICATION',
+        metadata: { attemptScope },
+        status: 'requested',
+        notificationSentAt: '2026-07-26T01:45:40.509Z',
+        validationStartedAt: '2026-07-26T01:45:43.509Z',
+        metrics: {
+          notificationToValidationStartedSeconds: 3
+        }
+      },
+      kycReverifyRequired: true,
+      kycStatus: 'pending_reverify',
+      kycBlocked: false,
+      kycUpdatedAt: '2026-07-26T01:45:43.509Z',
+      status: 'OFFLINE',
+      unrelatedField: 'preserved'
+    };
+    const payload = {
+      challengeId,
+      requirement: 'IDENTITY_REVERIFICATION',
+      attemptScope,
+      isMatch: false,
+      needsReview: false,
+      similarityScore: 0.2,
+      decision: 'reject',
+      canonicalRecordedAt
+    };
+
+    const firstResult = await service.reconcileRejectedIdentityReverificationMirror(
+      driverId,
+      payload
+    );
+    const firstProjection = JSON.parse(JSON.stringify(mockRealtimeValues[`users/${driverId}`]));
+    const laterKycUpdatedAt = '2026-07-26T02:00:00.000Z';
+    mockRealtimeValues[`users/${driverId}`].kycUpdatedAt = laterKycUpdatedAt;
+    mockRealtimeValues[`users/${driverId}`].laterOperationalMarker = 'preserved';
+    const expectedIdempotentProjection = JSON.parse(
+      JSON.stringify(mockRealtimeValues[`users/${driverId}`])
+    );
+    const replayResult = await service.reconcileRejectedIdentityReverificationMirror(
+      driverId,
+      payload
+    );
+
+    expect(firstResult).toEqual(expect.objectContaining({
+      recorded: true,
+      rtdbOnly: true,
+      idempotentReplay: false,
+      canonicalCompletedAt: canonicalRecordedAt
+    }));
+    expect(replayResult).toEqual(expect.objectContaining({
+      recorded: true,
+      rtdbOnly: true,
+      idempotentReplay: true,
+      canonicalCompletedAt: canonicalRecordedAt
+    }));
+    expect(mockRealtimeValues[`users/${driverId}`]).toEqual(expectedIdempotentProjection);
+    expect(mockRealtimeValues[`users/${driverId}`].kycUpdatedAt).toBe(laterKycUpdatedAt);
+    expect(firstProjection).toEqual(expect.objectContaining({
+      kycReverifyRequired: true,
+      kycStatus: 'blocked',
+      kycBlocked: true,
+      kycBlockedReason: 'identity_reverification_failed',
+      kycLastVerificationAt: canonicalRecordedAt,
+      kycUpdatedAt: canonicalRecordedAt,
+      status: 'OFFLINE',
+      unrelatedField: 'preserved',
+      identityReverification: expect.objectContaining({
+        challengeId,
+        requirement: 'IDENTITY_REVERIFICATION',
+        metadata: { attemptScope },
+        status: 'failed',
+        validationCompletedAt: canonicalRecordedAt,
+        lastSimilarityScore: 0.2,
+        lastDecision: 'reject',
+        metrics: expect.objectContaining({
+          notificationToValidationStartedSeconds: 3,
+          notificationToValidationCompletedSeconds: 25,
+          validationDurationSeconds: 22
+        })
+      })
+    }));
+
+    const firebaseConfig = require('../../../firebase-config');
+    expect(firebaseConfig.getFirestore).not.toHaveBeenCalled();
+    expect(firebaseConfig.updateRealtimeDB).not.toHaveBeenCalled();
+    expect(mockRedis.eval).not.toHaveBeenCalled();
+    expect(mockRedis.hset).not.toHaveBeenCalled();
+    expect(mockRedis.zrem).not.toHaveBeenCalled();
+    expect(service.notificationService.sendCustomNotification).not.toHaveBeenCalled();
+  });
+
+  test('does not project a rejected replay over a newer RTDB challenge', async () => {
+    const driverId = 'driver-newer-rejected-replay';
+    const currentUser = {
+      identityReverification: {
+        challengeId: 'idrev_newer_replay',
+        requirement: 'IDENTITY_REVERIFICATION',
+        attemptScope: 'orphan_hold_retry_kyc_or_newer_1',
+        status: 'requested',
+        metrics: {}
+      },
+      kycReverifyRequired: true,
+      kycStatus: 'pending_reverify',
+      kycBlocked: false
+    };
+    mockRealtimeValues[`users/${driverId}`] = currentUser;
+
+    const result = await service.reconcileRejectedIdentityReverificationMirror(driverId, {
+      challengeId: 'idrev_older_replay',
+      requirement: 'IDENTITY_REVERIFICATION',
+      attemptScope: 'orphan_hold_retry_kyc_or_older_1',
+      isMatch: false,
+      similarityScore: 0.2,
+      decision: 'reject',
+      canonicalRecordedAt: '2026-07-26T01:46:05.509Z'
+    });
+
+    expect(result).toEqual(expect.objectContaining({
+      recorded: false,
+      stale: true,
+      code: 'KYC_IDENTITY_REVERIFY_CHALLENGE_STALE'
+    }));
+    expect(mockRealtimeValues[`users/${driverId}`]).toEqual(currentUser);
+    expect(mockRedis.hset).not.toHaveBeenCalled();
+    expect(mockRedis.zrem).not.toHaveBeenCalled();
+    expect(service.notificationService.sendCustomNotification).not.toHaveBeenCalled();
+  });
+
+  test('requires the canonical failure timestamp before touching RTDB', async () => {
+    const driverId = 'driver-rejected-replay-without-timestamp';
+    const currentUser = {
+      identityReverification: {
+        challengeId: 'idrev_missing_timestamp',
+        requirement: 'IDENTITY_REVERIFICATION',
+        status: 'requested',
+        metrics: {}
+      },
+      kycReverifyRequired: true,
+      kycStatus: 'pending_reverify'
+    };
+    mockRealtimeValues[`users/${driverId}`] = currentUser;
+
+    const result = await service.reconcileRejectedIdentityReverificationMirror(driverId, {
+      challengeId: 'idrev_missing_timestamp',
+      requirement: 'IDENTITY_REVERIFICATION',
+      isMatch: false,
+      similarityScore: 0,
+      decision: 'reject'
+    });
+
+    expect(result).toEqual(expect.objectContaining({
+      recorded: false,
+      stale: true,
+      code: 'KYC_IDENTITY_REVERIFY_CANONICAL_TIMESTAMP_REQUIRED'
+    }));
+    expect(mockRealtimeRef).not.toHaveBeenCalled();
+    expect(mockRealtimeValues[`users/${driverId}`]).toEqual(currentUser);
+  });
+
   test('a matching identity challenge can clear its own gate atomically', async () => {
     const challengeFixture = installCanonicalPendingChallengeFixture({
       driverId: 'driver-current',

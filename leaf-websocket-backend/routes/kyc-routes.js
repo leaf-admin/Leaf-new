@@ -2119,15 +2119,44 @@ class KYCRoutes {
               resultEvidenceId: reconciledRejection.evidenceId,
               reason: 'canonical_face_compare_rejection_reconciliation'
             });
-            if (
-              isIdentityReverificationRequest
-              && typeof policyService.recordIdentityReverificationResult === 'function'
-            ) {
+            if (isIdentityReverificationRequest) {
               try {
-                await policyService.recordIdentityReverificationResult(userId, {
-                  ...reconciledRejection,
-                  reconciliationOnly: true
-                });
+                let identityMirrorResult = null;
+                if (kycRuntime.namespace === 'operational') {
+                  if (
+                    typeof policyService.reconcileRejectedIdentityReverificationMirror
+                    !== 'function'
+                  ) {
+                    const mirrorUnavailable = new Error(
+                      'Espelho RTDB de rejeicao canonica indisponivel'
+                    );
+                    mirrorUnavailable.code = 'KYC_REVERIFY_STATE_UNAVAILABLE';
+                    throw mirrorUnavailable;
+                  }
+                  identityMirrorResult = await policyService
+                    .reconcileRejectedIdentityReverificationMirror(userId, {
+                      ...reconciledRejection,
+                      attemptScope: sessionMetadataCandidate?.attemptScope || null,
+                      canonicalRecordedAt:
+                        canonicalSessionClaim.existingEvidence?.recordedAt || null
+                    });
+                } else if (
+                  typeof policyService.recordIdentityReverificationResult === 'function'
+                ) {
+                  identityMirrorResult = await policyService
+                    .recordIdentityReverificationResult(userId, {
+                      ...reconciledRejection,
+                      reconciliationOnly: true
+                    });
+                }
+                if (identityMirrorResult?.recorded !== true) {
+                  logStructured('warn', 'Espelho de rejeicao canonica nao foi atualizado', {
+                    service: 'kyc-routes-routes',
+                    userId,
+                    challengeId: challengeId || null,
+                    code: identityMirrorResult?.code || null
+                  });
+                }
               } catch (policyError) {
                 logError(policyError, 'Falha no espelho de uma rejeicao canonica reconciliada', {
                   service: 'kyc-routes-routes',
