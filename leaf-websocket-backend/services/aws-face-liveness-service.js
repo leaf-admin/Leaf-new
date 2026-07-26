@@ -807,8 +807,8 @@ class AwsFaceLivenessService {
     this.maxAttemptsPerWindow = this.parseIntValue(
       process.env.KYC_AWS_LIVENESS_MAX_ATTEMPTS_PER_WINDOW
       || process.env.AWS_LIVENESS_MAX_ATTEMPTS_PER_WINDOW
-      || '2',
-      2,
+      || '5',
+      5,
       1,
       10
     );
@@ -823,8 +823,8 @@ class AwsFaceLivenessService {
     this.attemptWindowSeconds = this.parseIntValue(
       process.env.KYC_AWS_LIVENESS_ATTEMPT_WINDOW_SECONDS
       || process.env.AWS_LIVENESS_ATTEMPT_WINDOW_SECONDS
-      || '86400',
-      86400,
+      || '900',
+      900,
       300,
       604800
     );
@@ -869,7 +869,7 @@ class AwsFaceLivenessService {
     this.softBlockOnAttemptsExhausted = String(
       process.env.KYC_AWS_LIVENESS_SOFT_BLOCK_ON_EXHAUSTED
       || process.env.AWS_LIVENESS_SOFT_BLOCK_ON_EXHAUSTED
-      || 'true'
+      || 'false'
     ).toLowerCase() === 'true';
     this.sdkMaxAttempts = this.parseIntValue(
       process.env.KYC_AWS_LIVENESS_SDK_MAX_ATTEMPTS
@@ -1065,6 +1065,37 @@ class AwsFaceLivenessService {
       return this.withdrawalMaxAttemptsPerWindow;
     }
     return this.maxAttemptsPerWindow;
+  }
+
+  buildAttemptRetryWindow(state = {}) {
+    const windowSeconds = this.parseIntValue(
+      state.windowSeconds,
+      this.attemptWindowSeconds,
+      1,
+      604800
+    );
+    const anchorMs = [
+      state.lastCompletedAt,
+      state.lastStartedAt,
+      state.exhaustedAt
+    ].reduce((latest, candidate) => {
+      const candidateMs = Date.parse(candidate || '');
+      return Number.isFinite(candidateMs) ? Math.max(latest, candidateMs) : latest;
+    }, 0);
+    const nowMs = Date.now();
+    const calculatedRetryAtMs = anchorMs > 0
+      ? anchorMs + (windowSeconds * 1000)
+      : nowMs + (windowSeconds * 1000);
+    const retryAtMs = Math.max(nowMs + 1000, calculatedRetryAtMs);
+    const retryAfterSeconds = Math.max(
+      1,
+      Math.ceil((retryAtMs - nowMs) / 1000)
+    );
+
+    return {
+      retryAt: new Date(retryAtMs).toISOString(),
+      retryAfterSeconds
+    };
   }
 
   normalizeRecoveryAllowance(state = {}, maxAttempts) {
@@ -1382,8 +1413,11 @@ class AwsFaceLivenessService {
       const state = result.state || {};
       const started = Number(state.started || 0);
       const recoveryAllowance = this.normalizeRecoveryAllowance(state, maxAttempts);
+      const retryWindow = this.buildAttemptRetryWindow(state);
       const error = new Error('Limite de tentativas de liveness atingido');
       error.code = 'KYC_AWS_LIVENESS_ATTEMPTS_EXHAUSTED';
+      error.retryAt = retryWindow.retryAt;
+      error.retryAfterSeconds = retryWindow.retryAfterSeconds;
       error.attemptState = {
         ...state,
         attemptsExhausted: true,
@@ -1391,6 +1425,7 @@ class AwsFaceLivenessService {
         softBlockEnabled: this.softBlockOnAttemptsExhausted,
         maxAttempts,
         ...recoveryAllowance,
+        ...retryWindow,
         estimatedCostUsd: Number((started * this.estimatedUnitCostUsd).toFixed(6))
       };
       throw error;
@@ -1671,8 +1706,11 @@ class AwsFaceLivenessService {
       || state.failed >= maxAttempts
       || (needsRecoveryAllowance && !canUseRecoveryAllowance)
     ) {
+      const retryWindow = this.buildAttemptRetryWindow(state);
       const error = new Error('Limite de tentativas de liveness atingido');
       error.code = 'KYC_AWS_LIVENESS_ATTEMPTS_EXHAUSTED';
+      error.retryAt = retryWindow.retryAt;
+      error.retryAfterSeconds = retryWindow.retryAfterSeconds;
       error.attemptState = {
         ...state,
         attemptsExhausted: true,
@@ -1680,6 +1718,7 @@ class AwsFaceLivenessService {
         softBlockEnabled: this.softBlockOnAttemptsExhausted,
         maxAttempts,
         ...recoveryAllowance,
+        ...retryWindow,
         estimatedCostUsd: Number((started * this.estimatedUnitCostUsd).toFixed(6))
       };
       throw error;
@@ -1787,8 +1826,12 @@ class AwsFaceLivenessService {
     );
 
     if (!result?.state) return null;
+    const retryWindow = result.state.attemptsExhausted === true
+      ? this.buildAttemptRetryWindow(result.state)
+      : {};
     return {
       ...result.state,
+      ...retryWindow,
       idempotentReplay: result.status === 'replay'
     };
   }
@@ -3005,6 +3048,8 @@ class AwsFaceLivenessService {
           exhaustedAt: attemptState.exhaustedAt || null,
           justExhausted: attemptState.justExhausted === true,
           idempotentReplay: attemptState.idempotentReplay === true,
+          retryAt: attemptState.retryAt || null,
+          retryAfterSeconds: Number(attemptState.retryAfterSeconds || 0) || null,
           estimatedCostUsd: Number((Number(attemptState.started || 0) * this.estimatedUnitCostUsd).toFixed(6))
         }
         : null;

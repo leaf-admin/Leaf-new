@@ -89,7 +89,7 @@ jest.mock('../../../services/aws-face-liveness-service', () => jest.fn(() => ({
     confidenceThreshold: 80,
     challengeType: 'FaceMovementAndLightChallenge',
     estimatedUnitCostUsd: 0.015,
-    maxAttemptsPerWindow: 2
+    maxAttemptsPerWindow: 5
   })),
   createSession: (...args) => mockCreateSession(...args),
   getAttemptState: (...args) => mockGetAttemptState(...args),
@@ -334,7 +334,7 @@ describe('kyc routes auth', () => {
       status: 'CREATED',
       confidenceThreshold: 80,
       attempt: 1,
-      maxAttempts: 2,
+      maxAttempts: 5,
       estimatedUnitCostUsd: 0.015,
       providerRequestId: 'provider-request-secret',
       sessionMetadata: { costGuardOperationId: 'cost-operation-secret' }
@@ -902,21 +902,26 @@ describe('kyc routes auth', () => {
 
   it('never exposes internal attempt reservations or recovery bindings in session errors', async () => {
     mockKycPolicyService.requiresFirstAccessLiveness.mockResolvedValueOnce({ required: true });
+    const retryAt = new Date(Date.now() + 90_000).toISOString();
     const exhausted = Object.assign(new Error('attempts exhausted'), {
       code: 'KYC_AWS_LIVENESS_ATTEMPTS_EXHAUSTED',
+      retryAt,
+      retryAfterSeconds: 90,
       attemptState: {
         userId: 'driver-1',
         attemptScope: 'first_access',
-        started: 2,
-        failed: 2,
+        started: 5,
+        failed: 5,
         passed: 0,
-        maxAttempts: 2,
-        effectiveMax: 2,
+        maxAttempts: 5,
+        effectiveMax: 5,
         attemptsExhausted: true,
-        softBlocked: true,
+        softBlocked: false,
+        retryAt,
+        retryAfterSeconds: 90,
         recoveryAllowanceTotal: 0,
         recoveryAllowanceRemaining: 0,
-        estimatedCostUsd: 0.03,
+        estimatedCostUsd: 0.075,
         attemptReservations: [{
           token: 'secret-operation-token',
           sessionId: 'secret-session-id',
@@ -934,12 +939,18 @@ describe('kyc routes auth', () => {
       .set('Authorization', 'Bearer firebase-token')
       .send({ userId: 'driver-1', requirement: 'LIVENESS_REQUIRED' });
 
-    expect(response.status).toBe(423);
+    expect(response.status).toBe(429);
+    expect(Number(response.headers['retry-after'])).toBeGreaterThan(0);
     expect(response.body).toEqual(expect.objectContaining({
       success: false,
-      code: 'KYC_AWS_LIVENESS_ATTEMPTS_EXHAUSTED'
+      code: 'KYC_AWS_LIVENESS_ATTEMPTS_EXHAUSTED',
+      retryable: true,
+      retryAt,
+      retryAfterSeconds: 90
     }));
+    expect(response.body).not.toHaveProperty('supportTicketId');
     expect(response.body).not.toHaveProperty('attemptState');
+    expect(mockKycPolicyService.markDriverForLivenessAttemptsExhausted).not.toHaveBeenCalled();
     expectLivenessSessionPublicProjection(response.body);
     const serialized = JSON.stringify(response.body);
     expect(serialized).not.toContain('secret-operation-token');
@@ -948,6 +959,34 @@ describe('kyc routes auth', () => {
     expect(serialized).not.toContain('secret-financial-context');
     expect(serialized).not.toContain('attemptReservations');
     expect(serialized).not.toContain('recoveryMetadata');
+  });
+
+  it('turns the durable per-account daily cap into an automatic retry window', async () => {
+    mockKycPolicyService.requiresFirstAccessLiveness.mockResolvedValueOnce({ required: true });
+    const retryAt = new Date(Date.now() + 300_000).toISOString();
+    mockCreateSession.mockRejectedValueOnce(Object.assign(
+      new Error('daily account cap exhausted'),
+      {
+        code: 'KYC_AWS_USER_DAILY_SESSION_LIMIT_EXHAUSTED',
+        retryAt
+      }
+    ));
+
+    const response = await request(createApp())
+      .post('/api/kyc/liveness/aws/session')
+      .set('Authorization', 'Bearer firebase-token')
+      .send({ userId: 'driver-1', requirement: 'LIVENESS_REQUIRED' });
+
+    expect(response.status).toBe(429);
+    expect(response.body).toEqual(expect.objectContaining({
+      success: false,
+      code: 'KYC_AWS_LIVENESS_ATTEMPTS_EXHAUSTED',
+      retryable: true,
+      retryAt,
+      retryAfterSeconds: expect.any(Number)
+    }));
+    expect(response.body).not.toHaveProperty('supportTicketId');
+    expect(mockKycPolicyService.markDriverForLivenessAttemptsExhausted).not.toHaveBeenCalled();
   });
 
   it('rejects a client-declared liveness requirement when the backend has no pending gate', async () => {
@@ -1449,12 +1488,19 @@ describe('kyc routes auth', () => {
       .set('Authorization', 'Bearer firebase-token')
       .send({
         userId: 'driver-1',
-        challengeId: null,
-        requirement: 'LIVENESS_REQUIRED'
+        challengeId: 'idrev_stale_client',
+        requirement: 'IDENTITY_REVERIFICATION'
       });
 
     expect(response.status).toBe(201);
     expect(response.body.success).toBe(true);
+    expect(mockKycPolicyService.recordIdentityReverificationStarted).toHaveBeenCalledWith(
+      'driver-1',
+      {
+        challengeId: 'idrev_orphan_canonical',
+        requirement: 'IDENTITY_REVERIFICATION'
+      }
+    );
     expect(mockCreateSession).toHaveBeenCalledWith(expect.objectContaining({
       challengeId: 'idrev_orphan_canonical',
       requirement: 'IDENTITY_REVERIFICATION',
@@ -1925,6 +1971,40 @@ describe('kyc routes auth', () => {
       completed: false
     });
     expectLivenessSessionPublicProjection(response.body);
+  });
+
+  it('returns a temporary rate limit without mutating identity when polling exhausts attempts', async () => {
+    const retryAt = new Date(Date.now() + 120_000).toISOString();
+    mockGetSessionResult.mockResolvedValueOnce({
+      provider: 'aws_rekognition_face_liveness',
+      sessionId: 'session-rate-limited',
+      completed: true,
+      status: 'FAILED',
+      livenessPassed: false,
+      attemptState: {
+        attemptsExhausted: true,
+        softBlocked: false,
+        retryAt,
+        retryAfterSeconds: 120
+      }
+    });
+
+    const response = await request(createApp())
+      .get('/api/kyc/liveness/aws/session/session-rate-limited?userId=driver-1')
+      .set('Authorization', 'Bearer firebase-token');
+
+    expect(response.status).toBe(429);
+    expect(Number(response.headers['retry-after'])).toBeGreaterThan(0);
+    expect(response.body).toEqual({
+      success: false,
+      error: 'Aguarde um pouco antes de iniciar uma nova validação.',
+      code: 'KYC_AWS_LIVENESS_ATTEMPTS_EXHAUSTED',
+      retryable: true,
+      retryAt,
+      retryAfterSeconds: 120
+    });
+    expect(mockKycPolicyService.markDriverForLivenessAttemptsExhausted).not.toHaveBeenCalled();
+    expect(mockReleaseVerificationWindow).toHaveBeenCalledTimes(1);
   });
 
   it.each([
@@ -3555,5 +3635,46 @@ describe('kyc routes auth', () => {
     expect(response.status).toBe(412);
     expect(response.body.code).toBe('KYC_LIVENESS_REQUIRED');
     expect(mockKycServiceInstance.verifyDriverServerSideSelfie).not.toHaveBeenCalled();
+  });
+
+  it('rate-limits an exhausted server-side liveness result without creating an identity hold', async () => {
+    const retryAt = new Date(Date.now() + 75_000).toISOString();
+    mockGetSessionResult.mockResolvedValueOnce({
+      provider: 'aws_rekognition_face_liveness',
+      sessionId: 'session-exhausted',
+      completed: true,
+      status: 'FAILED',
+      confidence: 20,
+      confidenceThreshold: 80,
+      livenessPassed: false,
+      attemptScope: 'first_access',
+      attemptState: {
+        attemptsExhausted: true,
+        softBlocked: false,
+        retryAt,
+        retryAfterSeconds: 75
+      }
+    });
+
+    const response = await request(createApp())
+      .post('/api/kyc/verify-driver/server-side-selfie')
+      .set('Authorization', 'Bearer firebase-token')
+      .field('userId', 'driver-1')
+      .field('awsSessionId', 'session-exhausted')
+      .field('requirement', 'LIVENESS_REQUIRED');
+
+    expect(response.status).toBe(429);
+    expect(Number(response.headers['retry-after'])).toBeGreaterThan(0);
+    expect(response.body).toEqual({
+      success: false,
+      error: 'Aguarde um pouco antes de iniciar uma nova validação.',
+      code: 'KYC_AWS_LIVENESS_ATTEMPTS_EXHAUSTED',
+      retryable: true,
+      retryAt,
+      retryAfterSeconds: 75
+    });
+    expect(mockKycPolicyService.markDriverForLivenessAttemptsExhausted).not.toHaveBeenCalled();
+    expect(mockRecordCanonicalSuccess).not.toHaveBeenCalled();
+    expect(mockRecordCanonicalFailure).not.toHaveBeenCalled();
   });
 });

@@ -1050,6 +1050,22 @@ class DriverIdentityTrustService {
         });
       }
 
+      if (activationState?.requiresLiveness === true) {
+        const identityReverification = activationState?.kyc?.reverifyRequired === true;
+        return await denyOnlineGate({
+          allowed: false,
+          reason: activationState.blockingReason || 'Validacao facial necessaria para ficar online.',
+          code: 'kycRequired',
+          reasonCode: identityReverification
+            ? 'KYC_REVERIFY_REQUIRED'
+            : 'KYC_FIRST_ACCESS_REQUIRED',
+          requirement: identityReverification
+            ? 'IDENTITY_REVERIFICATION'
+            : 'LIVENESS_REQUIRED',
+          details: activationState
+        });
+      }
+
       const approvalGate = await this.kycPolicyService.requireApprovedKyc(driverId);
       if (!approvalGate.allowed) {
         return await denyOnlineGate({

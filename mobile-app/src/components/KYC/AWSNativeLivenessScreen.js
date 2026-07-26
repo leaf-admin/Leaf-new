@@ -28,6 +28,10 @@ const TERMINAL_RESULT_ERROR_CODES = new Set([
   'AWS_LIVENESS_SESSION_ABANDONED',
   'KYC_AWS_SESSION_ALREADY_CONSUMED',
 ]);
+const POLL_STOP_ERROR_CODES = new Set([
+  ...TERMINAL_RESULT_ERROR_CODES,
+  'KYC_AWS_LIVENESS_ATTEMPTS_EXHAUSTED',
+]);
 
 const waitFor = (delayMs) => new Promise((resolve) => setTimeout(resolve, delayMs));
 const STATUS_PRESENTATION = {
@@ -98,6 +102,8 @@ export function createFlowError(result = {}, fallbackMessage) {
   error.code = firstValue('code') || '';
   error.status = firstValue('status');
   error.retryAt = firstValue('retryAt');
+  error.retryAfterSeconds = firstValue('retryAfterSeconds');
+  error.retryable = firstValue('retryable') === true;
   error.challengeId = firstValue('challengeId');
   error.requirement = firstValue('requirement');
   error.evidenceId = firstValue('evidenceId');
@@ -144,7 +150,7 @@ export async function pollAwsLivenessResult({
       lastFailure = resultResponse;
     } else {
       const code = String(resultResponse?.code || '').trim().toUpperCase();
-      if (TERMINAL_RESULT_ERROR_CODES.has(code)) {
+      if (POLL_STOP_ERROR_CODES.has(code)) {
         throw createFlowError(resultResponse, 'Não foi possível confirmar a validação.');
       }
       lastFailure = resultResponse;
@@ -297,7 +303,6 @@ export default function AWSNativeLivenessScreen({
         const sessionId = sessionResponse.data.sessionId;
         run.sessionId = sessionId;
         if (!isCurrentRun(run)) {
-          await abandonSessionBestEffort(run, sessionId);
           return;
         }
 
@@ -315,7 +320,6 @@ export default function AWSNativeLivenessScreen({
         }
 
         if (!isCurrentRun(run)) {
-          await abandonSessionBestEffort(run, sessionId);
           return;
         }
         setStatus(STATUS.RUNNING);
@@ -341,12 +345,11 @@ export default function AWSNativeLivenessScreen({
         await finishSuccessfulLiveness(run, sessionId, livenessData);
       } catch (error) {
         if (!isCurrentRun(run)) {
-          await abandonSessionBestEffort(run);
           return;
         }
         if (isTerminalResultError(error)) {
           run.terminal = true;
-        } else {
+        } else if (String(error?.code || '').trim().toUpperCase() === 'AWS_LIVENESS_CANCELLED') {
           const abandonmentResult = await abandonSessionBestEffort(run);
           if (!isCurrentRun(run)) return;
           if (abandonmentResult?.code === 'KYC_AWS_LIVENESS_RESUME_REQUIRED') {
@@ -372,7 +375,8 @@ export default function AWSNativeLivenessScreen({
         activeRunRef.current = null;
       }
       cancelNativeLivenessBestEffort(run);
-      void abandonSessionBestEffort(run);
+      // A desmontagem encerra apenas o trabalho local. O backend mantém a
+      // sessão paga retomável; abandono é reservado ao cancelamento nativo explícito.
     };
   }, [challengeId, driverId, requirement]);
 
@@ -384,7 +388,6 @@ export default function AWSNativeLivenessScreen({
         activeRunRef.current = null;
       }
       cancelNativeLivenessBestEffort(run);
-      void abandonSessionBestEffort(run);
     }
     onCancel?.();
   };

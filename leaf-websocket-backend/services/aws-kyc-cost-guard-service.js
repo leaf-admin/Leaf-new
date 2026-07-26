@@ -84,6 +84,13 @@ class AwsKycCostGuardService {
     this.timeZone = String(this.env.KYC_AWS_COST_TIME_ZONE || 'UTC').trim().toUpperCase();
     this.dailyLimitMicros = usdToMicros(this.env.KYC_AWS_COST_DAILY_LIMIT_USD);
     this.monthlyLimitMicros = usdToMicros(this.env.KYC_AWS_COST_MONTHLY_LIMIT_USD);
+    const perUserDailySessionLimit = Number.parseInt(
+      this.env.KYC_AWS_COST_PER_USER_DAILY_SESSION_LIMIT || '20',
+      10
+    );
+    this.perUserDailySessionLimit = Number.isFinite(perUserDailySessionLimit)
+      ? Math.min(100, Math.max(1, perUserDailySessionLimit))
+      : 20;
     this.livenessCostMicros = usdToMicros(
       this.env.KYC_AWS_LIVENESS_ESTIMATED_UNIT_COST_USD || '0.015'
     );
@@ -123,6 +130,7 @@ class AwsKycCostGuardService {
       monthlyLimitConfigured: Number.isInteger(this.monthlyLimitMicros),
       dailyLimitUsd: this.dailyLimitMicros == null ? null : this.dailyLimitMicros / 1_000_000,
       monthlyLimitUsd: this.monthlyLimitMicros == null ? null : this.monthlyLimitMicros / 1_000_000,
+      perUserDailySessionLimit: this.perUserDailySessionLimit,
       bundleEstimatedCostUsd: this.getBundleCostMicros() == null
         ? null
         : this.getBundleCostMicros() / 1_000_000,
@@ -197,6 +205,12 @@ class AwsKycCostGuardService {
     return firestore.collection(PERIOD_COLLECTION).doc(`${type}_${key}`);
   }
 
+  userDayRef(firestore, day, userIdHash) {
+    return firestore
+      .collection(PERIOD_COLLECTION)
+      .doc(`user_day_${day}_${userIdHash}`);
+  }
+
   async reserveLivenessBundle({ userId, operationId, required = false } = {}) {
     const firestore = this.assertReady({ required });
     if (!firestore) return null;
@@ -217,6 +231,7 @@ class AwsKycCostGuardService {
     const dayRef = this.periodRef(firestore, 'day', day);
     const monthRef = this.periodRef(firestore, 'month', month);
     const userIdHash = sha256(safeUserId);
+    const userDayRef = this.userDayRef(firestore, day, userIdHash);
 
     try {
       const operation = await firestore.runTransaction(async (transaction) => {
@@ -238,14 +253,24 @@ class AwsKycCostGuardService {
           return existing;
         }
 
-        const [daySnapshot, monthSnapshot] = await Promise.all([
+        const [daySnapshot, monthSnapshot, userDaySnapshot] = await Promise.all([
           transaction.get(dayRef),
-          transaction.get(monthRef)
+          transaction.get(monthRef),
+          transaction.get(userDayRef)
         ]);
         const dayState = daySnapshot.exists ? (daySnapshot.data() || {}) : {};
         const monthState = monthSnapshot.exists ? (monthSnapshot.data() || {}) : {};
+        const userDayState = userDaySnapshot.exists ? (userDaySnapshot.data() || {}) : {};
         const nextDaySpent = Number(dayState.spentMicros || 0) + bundleCostMicros;
         const nextMonthSpent = Number(monthState.spentMicros || 0) + bundleCostMicros;
+        const nextUserDayOperationCount = Number(userDayState.operationCount || 0) + 1;
+        if (nextUserDayOperationCount > this.perUserDailySessionLimit) {
+          throw createError(
+            'Limite diario por conta para sessoes AWS KYC atingido',
+            'KYC_AWS_USER_DAILY_SESSION_LIMIT_EXHAUSTED',
+            { retryAt: this.nextUtcDay(now) }
+          );
+        }
         if (nextDaySpent > this.dailyLimitMicros || nextMonthSpent > this.monthlyLimitMicros) {
           const dailyExhausted = nextDaySpent > this.dailyLimitMicros;
           throw createError(
@@ -270,6 +295,15 @@ class AwsKycCostGuardService {
           operationCount: Number(monthState.operationCount || 0) + 1,
           updatedAt: nowIso,
           expiresAt: this.expiresAt(now, 400)
+        }, { merge: false });
+        transaction.set(userDayRef, {
+          periodType: 'user_day',
+          periodKey: day,
+          userIdHash,
+          spentMicros: Number(userDayState.spentMicros || 0) + bundleCostMicros,
+          operationCount: nextUserDayOperationCount,
+          updatedAt: nowIso,
+          expiresAt: this.expiresAt(now, this.operationRetentionDays)
         }, { merge: false });
 
         const created = {
@@ -325,12 +359,22 @@ class AwsKycCostGuardService {
         if (operation.livenessStatus !== 'reserved') return false;
         const dayRef = this.periodRef(firestore, 'day', operation.day);
         const monthRef = this.periodRef(firestore, 'month', operation.month);
-        const [daySnapshot, monthSnapshot] = await Promise.all([
+        const userDayRef = this.userDayRef(
+          firestore,
+          operation.day,
+          operation.userIdHash
+        );
+        const [daySnapshot, monthSnapshot, userDaySnapshot] = await Promise.all([
           transaction.get(dayRef),
-          transaction.get(monthRef)
+          transaction.get(monthRef),
+          transaction.get(userDayRef)
         ]);
         const cost = Number(operation.bundleCostMicros || 0);
-        for (const [ref, snapshot] of [[dayRef, daySnapshot], [monthRef, monthSnapshot]]) {
+        for (const [ref, snapshot] of [
+          [dayRef, daySnapshot],
+          [monthRef, monthSnapshot],
+          [userDayRef, userDaySnapshot]
+        ]) {
           if (!snapshot.exists) continue;
           const state = snapshot.data() || {};
           transaction.set(ref, {

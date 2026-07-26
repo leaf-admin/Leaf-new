@@ -756,6 +756,68 @@ describe('register-socket-driver-control-handlers notificationAction scope', () 
     expect(driverEligibilityService.isDriverEligibleForRide).not.toHaveBeenCalled();
   });
 
+  it('keeps an authorized identity retry offline while projecting its canonical challenge', async () => {
+    resolveDriverActivationState.mockResolvedValue({
+      state: 'APPROVED_NEEDS_LIVENESS',
+      canAttemptOnline: true,
+      canGoOnline: false,
+      requiresLiveness: true,
+    });
+    redis.hgetall.mockResolvedValueOnce({
+      driverId: 'driver_1',
+      status: 'OFFLINE',
+      isOnline: 'false',
+      dispatchEligible: 'false',
+    });
+    enforceDailyKYCForOnline.mockResolvedValueOnce({
+      allowed: false,
+      code: 'kycRequired',
+      reasonCode: 'KYC_IDENTITY_RETRY_AUTHORIZED',
+      reason: 'Validacao facial necessaria para ficar online.',
+      requirement: 'IDENTITY_REVERIFICATION',
+      challenge: {
+        challengeId: 'idrev_orphan_canonical',
+        requirement: 'IDENTITY_REVERIFICATION',
+        source: 'driver_identity_retry',
+        status: 'requested',
+      },
+    });
+
+    await socket.trigger('setDriverStatus', {
+      status: 'online',
+      isOnline: true,
+    });
+
+    const transaction = redis.multi.mock.results.at(-1).value;
+    expect(transaction.hset).toHaveBeenCalledWith(
+      'driver:driver_1',
+      expect.objectContaining({
+        status: 'OFFLINE',
+        isOnline: 'false',
+        dispatchEligible: 'false',
+        dispatchEligibilityCode: 'kycRequired',
+      })
+    );
+    expect(transaction.zrem).toHaveBeenCalledWith(
+      'driver_locations_eligible',
+      'driver_1'
+    );
+    expect(socket.emit).toHaveBeenCalledWith(
+      'driverStatusError',
+      expect.objectContaining({
+        code: 'kycRequired',
+        kycRequired: true,
+        challengeId: 'idrev_orphan_canonical',
+        requirement: 'IDENTITY_REVERIFICATION',
+      })
+    );
+    expect(socket.emit).not.toHaveBeenCalledWith(
+      'driverStatusUpdated',
+      expect.anything()
+    );
+    expect(driverEligibilityService.isDriverEligibleForRide).not.toHaveBeenCalled();
+  });
+
   it('preserves the terminal fraud-block code without exposing review internals', async () => {
     resolveDriverActivationState.mockResolvedValue({
       canAttemptOnline: true,

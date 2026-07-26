@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 
 import {
+  isDriverActivationOnlineAttemptAllowed,
   resolveCanonicalDriverActivationGates,
   resolveCanonicalLivenessGate,
 } from '../src/screens/prototype/driverActivationCanonicalContract';
@@ -32,6 +33,20 @@ function buildApprovedDocumentsSnapshot(overrides = {}) {
 }
 
 describe('prototype driver activation canonical contract', () => {
+  it.each([
+    [{ canGoOnline: true, canAttemptOnline: false }, true],
+    [{ canGoOnline: false, canAttemptOnline: true }, true],
+    [{ canGoOnline: false, canAttemptOnline: false }, false],
+    [null, false],
+  ])(
+    'permite chamar o gate online sem confundir tentativa com liberação %#',
+    (activationState, expected) => {
+      expect(
+        isDriverActivationOnlineAttemptAllowed(activationState),
+      ).toBe(expected);
+    },
+  );
+
   it('keeps document approval separate from the canonical vehicle gate', () => {
     const gates = resolveCanonicalDriverActivationGates(
       buildApprovedDocumentsSnapshot(),
@@ -146,6 +161,12 @@ describe('prototype driver activation canonical contract', () => {
     );
     expect(source).toContain(
       'resolveCanonicalDriverActivationGates(remoteSnapshot)',
+    );
+    expect(source).toContain(
+      'canGoOnline || remoteSnapshot?.canAttemptOnline === true',
+    );
+    expect(source).toContain(
+      'if (!isDriverActivationOnlineAttemptAllowed(activationState))',
     );
   });
 });

@@ -426,7 +426,7 @@ describe('AWSNativeLivenessScreen', () => {
     screen.unmount();
   });
 
-  test('cancels the native capture and pending poll on unmount', async () => {
+  test('cancels local work on unmount without abandoning the resumable paid session', async () => {
     jest.useFakeTimers();
     kycService.createAwsLivenessSession.mockResolvedValue({
       success: true,
@@ -462,19 +462,14 @@ describe('AWSNativeLivenessScreen', () => {
     screen.unmount();
 
     expect(nativeAwsLivenessService.cancel).toHaveBeenCalledTimes(1);
-    await waitFor(() => {
-      expect(kycService.abandonAwsLivenessSession).toHaveBeenCalledWith(
-        'driver-1',
-        'session-cancel'
-      );
-    });
+    expect(kycService.abandonAwsLivenessSession).not.toHaveBeenCalled();
     await act(async () => {
       await jest.advanceTimersByTimeAsync(AWS_LIVENESS_RESULT_POLL_INTERVAL_MS * 2);
     });
     expect(kycService.getAwsLivenessSessionResult).toHaveBeenCalledTimes(1);
   });
 
-  test('abandons a paid session that finishes being created after unmount', async () => {
+  test('preserves a paid session that finishes being created after unmount', async () => {
     let resolveSessionCreation;
     kycService.createAwsLivenessSession.mockImplementation(
       () => new Promise((resolve) => {
@@ -502,12 +497,7 @@ describe('AWSNativeLivenessScreen', () => {
       });
     });
 
-    await waitFor(() => {
-      expect(kycService.abandonAwsLivenessSession).toHaveBeenCalledWith(
-        'driver-1',
-        'session-created-after-unmount'
-      );
-    });
+    expect(kycService.abandonAwsLivenessSession).not.toHaveBeenCalled();
     expect(kycService.getAwsLivenessCredentials).not.toHaveBeenCalled();
   });
 
@@ -563,10 +553,7 @@ describe('AWSNativeLivenessScreen', () => {
     );
     expect(kycService.createAwsLivenessSession).toHaveBeenCalledTimes(1);
     expect(screen.getAllByRole('button')).toHaveLength(1);
-    expect(kycService.abandonAwsLivenessSession).toHaveBeenCalledWith(
-      'driver-1',
-      'session-timeout'
-    );
+    expect(kycService.abandonAwsLivenessSession).not.toHaveBeenCalled();
 
     screen.unmount();
   });
@@ -603,6 +590,10 @@ describe('AWSNativeLivenessScreen', () => {
     expect(nativeAwsLivenessService.start).not.toHaveBeenCalled();
     expect(screen.getAllByRole('button')).toHaveLength(1);
     expect(screen.getByRole('button', { name: 'Fechar' })).toBeTruthy();
+    expect(kycService.abandonAwsLivenessSession).not.toHaveBeenCalled();
+
+    fireEvent.press(screen.getByRole('button', { name: 'Fechar' }));
+    expect(kycService.abandonAwsLivenessSession).not.toHaveBeenCalled();
   });
 
   test('does not offer a local selfie fallback when canonical liveness is unavailable', async () => {

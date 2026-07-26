@@ -94,6 +94,13 @@ describe('aws-kyc-cost-guard-service', () => {
       spentMicros: 17000,
       operationCount: 1
     });
+    const userDay = Array.from(values.entries())
+      .find(([path]) => path.includes('/user_day_2026-07-13_'))?.[1];
+    expect(userDay).toMatchObject({
+      periodType: 'user_day',
+      spentMicros: 17000,
+      operationCount: 1
+    });
     expect(values.get('kyc_aws_cost_guard_periods/day_2026-07-13').expiresAt).toBeTruthy();
     const operation = Array.from(values.entries())
       .find(([path]) => path.startsWith('kyc_aws_cost_guard_operations/'))?.[1];
@@ -120,6 +127,43 @@ describe('aws-kyc-cost-guard-service', () => {
     });
   });
 
+  test('blocks one abusive account at a durable daily cap without consuming the global budget', async () => {
+    const { service, values } = createService({
+      KYC_AWS_COST_DAILY_LIMIT_USD: '1.00',
+      KYC_AWS_COST_MONTHLY_LIMIT_USD: '2.00',
+      KYC_AWS_COST_PER_USER_DAILY_SESSION_LIMIT: '2'
+    });
+    await service.reserveLivenessBundle({
+      userId: 'driver-abusive',
+      operationId: 'operation-user-1',
+      required: true
+    });
+    await service.reserveLivenessBundle({
+      userId: 'driver-abusive',
+      operationId: 'operation-user-2',
+      required: true
+    });
+
+    await expect(service.reserveLivenessBundle({
+      userId: 'driver-abusive',
+      operationId: 'operation-user-3',
+      required: true
+    })).rejects.toMatchObject({
+      code: 'KYC_AWS_USER_DAILY_SESSION_LIMIT_EXHAUSTED',
+      retryAt: '2026-07-14T00:00:00.000Z'
+    });
+
+    await expect(service.reserveLivenessBundle({
+      userId: 'driver-other',
+      operationId: 'operation-other-1',
+      required: true
+    })).resolves.toMatchObject({ status: 'reserved' });
+    expect(values.get('kyc_aws_cost_guard_periods/day_2026-07-13')).toMatchObject({
+      spentMicros: 51000,
+      operationCount: 3
+    });
+  });
+
   test('rolls back only an operation that never reached provider dispatch', async () => {
     const { service, values } = createService();
     await service.reserveLivenessBundle({
@@ -130,6 +174,12 @@ describe('aws-kyc-cost-guard-service', () => {
 
     await expect(service.rollbackBeforeDispatch('operation-rollback')).resolves.toBe(true);
     expect(values.get('kyc_aws_cost_guard_periods/day_2026-07-13')).toMatchObject({
+      spentMicros: 0,
+      operationCount: 0
+    });
+    const userDay = Array.from(values.entries())
+      .find(([path]) => path.includes('/user_day_2026-07-13_'))?.[1];
+    expect(userDay).toMatchObject({
       spentMicros: 0,
       operationCount: 0
     });

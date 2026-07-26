@@ -208,9 +208,8 @@ describe('driver-activation-state-service', () => {
     ['pending_review', { kycStatus: 'pending_review' }, 'pending_review'],
     ['in_review', { kycStatus: 'in_review' }, 'in_review'],
     ['review', { kycStatus: 'review' }, 'review'],
-    ['pending_reverify', { kycStatus: 'pending_reverify' }, 'pending_reverify'],
+    ['pending_reverify sem flag canonica', { kycStatus: 'pending_reverify' }, 'pending_reverify'],
     ['pending contraditorio', { kycStatus: 'pending', kyc: { approved: true } }, 'pending'],
-    ['flag de revalidacao', { kycStatus: 'approved', kycReverifyRequired: true }, 'pending_reverify']
   ])(
     'mantem KYC nao terminal %s em analise e impede veiculo, liveness ou ACTIVE',
     async (_label, kycData, expectedStatus) => {
@@ -247,6 +246,69 @@ describe('driver-activation-state-service', () => {
       );
     }
   );
+
+  it('permite iniciar somente a revalidacao facial com flag canonica e gates anteriores aprovados', async () => {
+    const driverId = 'driver_kyc_reverification_required';
+    const db = createMockDb({
+      [`user_vehicles/${driverId}`]: {
+        vehicleA: createApprovedVehicle()
+      },
+      'vehicles/vehicleA': createCatalogVehicle()
+    });
+
+    const result = await resolveDriverActivationState({
+      driverId,
+      db,
+      activationNode: createApprovedActivation(),
+      userData: {
+        status: 'approved',
+        kycStatus: 'pending_reverify',
+        kycReverifyRequired: true,
+        kycFirstAccessVerifiedAt: '2026-05-14T10:00:00.000Z'
+      }
+    });
+
+    expect(result.state).toBe(DRIVER_ACTIVATION_STATES.APPROVED_NEEDS_LIVENESS);
+    expect(result.canGoOnline).toBe(false);
+    expect(result.canAttemptOnline).toBe(true);
+    expect(result.requiresLiveness).toBe(true);
+    expect(result.blockingReason).toBe(
+      'Revalidacao facial obrigatoria antes de ficar online.'
+    );
+    expect(result.kyc).toEqual(
+      expect.objectContaining({
+        approved: false,
+        blocked: false,
+        pending: true,
+        status: 'pending_reverify',
+        reverifyRequired: true
+      })
+    );
+  });
+
+  it('nao permite iniciar a revalidacao antes da aprovacao canonica do veiculo', async () => {
+    const driverId = 'driver_kyc_reverification_vehicle_pending';
+    const db = createMockDb({
+      [`user_vehicles/${driverId}`]: {}
+    });
+
+    const result = await resolveDriverActivationState({
+      driverId,
+      db,
+      activationNode: createApprovedActivation(),
+      userData: {
+        status: 'approved',
+        kycStatus: 'pending_reverify',
+        kycReverifyRequired: true,
+        kycFirstAccessVerifiedAt: '2026-05-14T10:00:00.000Z'
+      }
+    });
+
+    expect(result.state).toBe(DRIVER_ACTIVATION_STATES.VEHICLE_PENDING);
+    expect(result.canGoOnline).toBe(false);
+    expect(result.canAttemptOnline).toBe(false);
+    expect(result.requiresLiveness).toBe(false);
+  });
 
   it('expõe a identidade normalizada do CRLV sem liberar operação sem veículo aprovado', async () => {
     const driverId = 'driver_crlv_identity';

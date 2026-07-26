@@ -535,6 +535,7 @@ describe('aws-face-liveness-service', () => {
     delete process.env.KYC_AWS_LIVENESS_REFERENCE_RESULT_MAX_READS;
     delete process.env.KYC_AWS_LIVENESS_REFERENCE_RESULT_RETRY_DELAY_MS;
     delete process.env.KYC_AWS_LIVENESS_PROVIDER_RECOVERY_MAX_CREDITS;
+    delete process.env.KYC_AWS_LIVENESS_SOFT_BLOCK_ON_EXHAUSTED;
     delete process.env.KYC_PRODUCTION_BIOMETRICS_ENABLED;
     delete process.env.KYC_AWS_LIVENESS_S3_BUCKET;
     delete process.env.KYC_AWS_LIVENESS_CHALLENGE_TYPE;
@@ -2179,9 +2180,10 @@ describe('aws-face-liveness-service', () => {
     expect(service.getConfigSummary()).toEqual(
       expect.objectContaining({
         estimatedUnitCostUsd: 0.015,
-        maxAttemptsPerWindow: 2,
+        maxAttemptsPerWindow: 5,
         withdrawalMaxAttemptsPerWindow: 2,
-        attemptWindowSeconds: 86400,
+        attemptWindowSeconds: 900,
+        softBlockOnAttemptsExhausted: false,
         sdkMaxAttempts: 2
       })
     );
@@ -2203,7 +2205,7 @@ describe('aws-face-liveness-service', () => {
       attemptScope: 'withdrawal',
       ...OPERATIONAL_BINDING
     })).toBe(buildAttemptKey('driver-1', 'withdrawal'));
-    expect(service.getMaxAttemptsForScope('driver_online')).toBe(2);
+    expect(service.getMaxAttemptsForScope('driver_online')).toBe(5);
     expect(service.getMaxAttemptsForScope('withdrawal')).toBe(3);
     expect(service.getMaxAttemptsForScope(
       'manual_review_retry_kyc_ir_0123456789abcdef0123456789abcdef'
@@ -2294,6 +2296,7 @@ describe('aws-face-liveness-service', () => {
   });
 
   test('should block new liveness session when attempt budget is exhausted', async () => {
+    process.env.KYC_AWS_LIVENESS_MAX_ATTEMPTS_PER_WINDOW = '2';
     writeAttemptState(buildAttemptKey('driver-exhausted', 'liveness_required'), {
       userId: 'driver-exhausted',
       requirement: 'LIVENESS_REQUIRED',
@@ -2309,12 +2312,20 @@ describe('aws-face-liveness-service', () => {
     await expect(
       createBoundSession(service, { userId: 'driver-exhausted', requirement: 'LIVENESS_REQUIRED' })
     ).rejects.toMatchObject({
-      code: 'KYC_AWS_LIVENESS_ATTEMPTS_EXHAUSTED'
+      code: 'KYC_AWS_LIVENESS_ATTEMPTS_EXHAUSTED',
+      retryAt: expect.any(String),
+      retryAfterSeconds: expect.any(Number),
+      attemptState: expect.objectContaining({
+        attemptsExhausted: true,
+        retryAt: expect.any(String),
+        retryAfterSeconds: expect.any(Number)
+      })
     });
     expect(mockSend).not.toHaveBeenCalled();
   });
 
-  test('should mark failed liveness result as soft-blocked on final attempt', async () => {
+  test('should expose a temporary retry window without soft-blocking the final failed attempt', async () => {
+    process.env.KYC_AWS_LIVENESS_MAX_ATTEMPTS_PER_WINDOW = '2';
     writeJsonValue('kyc:aws:liveness:session:session-final', {
       userId: 'driver-final',
       requirement: 'LIVENESS_REQUIRED',
@@ -2345,14 +2356,17 @@ describe('aws-face-liveness-service', () => {
     expect(result.attemptState).toEqual(
       expect.objectContaining({
         failed: 2,
-        softBlocked: true,
+        softBlocked: false,
         justExhausted: true,
-        maxAttempts: 2
+        maxAttempts: 2,
+        retryAt: expect.any(String),
+        retryAfterSeconds: expect.any(Number)
       })
     );
   });
 
   test('should process a terminal session once and keep completedAt stable across polls', async () => {
+    process.env.KYC_AWS_LIVENESS_MAX_ATTEMPTS_PER_WINDOW = '2';
     writeJsonValue('kyc:aws:liveness:session:session-terminal-replay', {
       provider: 'aws_rekognition_face_liveness',
       userId: 'driver-terminal-replay',

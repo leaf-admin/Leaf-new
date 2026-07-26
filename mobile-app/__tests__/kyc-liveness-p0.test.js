@@ -88,9 +88,9 @@ describe('KYC mobile P0 boundary', () => {
 
     expect(start).toBeGreaterThan(-1);
     expect(end).toBeGreaterThan(start);
-    expect(handler).toContain('kycService.verifyDriverServerSideSelfie(');
-    expect(handler).toContain('driverId,');
-    expect(handler).toContain('null,');
+    expect(handler).toContain('kycService.verifyDriverWithAwsReference(driverId,');
+    expect(handler).not.toContain('verifyDriverServerSideSelfie(');
+    expect(handler).not.toContain('null,');
     expect(handler).toContain('await handleDriverKycVerificationSuccess()');
     expect(handler).toContain('presentDriverKycFailure');
     expect(handler).not.toContain('local_after_aws');
@@ -217,6 +217,32 @@ describe('KYC mobile P0 boundary', () => {
     expect(mockCreateAwsLivenessSession).not.toHaveBeenCalled();
   });
 
+  test('stops polling immediately when the backend returns a temporary attempt limit', async () => {
+    const retryAt = new Date(Date.now() + 60_000).toISOString();
+    mockGetAwsLivenessSessionResult.mockResolvedValueOnce({
+      success: false,
+      status: 429,
+      code: 'KYC_AWS_LIVENESS_ATTEMPTS_EXHAUSTED',
+      retryable: true,
+      retryAt,
+      retryAfterSeconds: 60,
+    });
+
+    await expect(pollAwsLivenessResult({
+      driverId: 'driver-1',
+      sessionId: 'session-rate-limited',
+      wait: jest.fn(async () => {}),
+    })).rejects.toMatchObject({
+      code: 'KYC_AWS_LIVENESS_ATTEMPTS_EXHAUSTED',
+      status: 429,
+      retryable: true,
+      retryAt,
+      retryAfterSeconds: 60,
+    });
+
+    expect(mockGetAwsLivenessSessionResult).toHaveBeenCalledTimes(1);
+  });
+
   test('isolates overlapping runs when props change and only starts the current session', async () => {
     const staleCreate = createDeferred();
     const currentCreate = createDeferred();
@@ -268,12 +294,7 @@ describe('KYC mobile P0 boundary', () => {
         data: { sessionId: 'session-stale', region: 'us-east-1' },
       });
     });
-    await waitFor(() => {
-      expect(mockAbandonAwsLivenessSession).toHaveBeenCalledWith(
-        'driver-stale',
-        'session-stale',
-      );
-    });
+    expect(mockAbandonAwsLivenessSession).not.toHaveBeenCalled();
 
     expect(mockGetAwsLivenessCredentials).toHaveBeenCalledTimes(1);
     expect(mockGetAwsLivenessCredentials).toHaveBeenCalledWith(
@@ -323,7 +344,7 @@ describe('KYC mobile P0 boundary', () => {
     expect(mockAbandonAwsLivenessSession).not.toHaveBeenCalled();
   });
 
-  test('abandons a session that arrives after the surface was closed', async () => {
+  test('preserves a session that arrives after the surface was closed', async () => {
     let resolveCreate;
     mockCreateAwsLivenessSession.mockReturnValue(new Promise((resolve) => {
       resolveCreate = resolve;
@@ -345,17 +366,12 @@ describe('KYC mobile P0 boundary', () => {
       });
     });
 
-    await waitFor(() => {
-      expect(mockAbandonAwsLivenessSession).toHaveBeenCalledWith(
-        'driver-1',
-        'session-late',
-      );
-    });
+    expect(mockAbandonAwsLivenessSession).not.toHaveBeenCalled();
     expect(mockGetAwsLivenessCredentials).not.toHaveBeenCalled();
     expect(onCancel).not.toHaveBeenCalled();
   });
 
-  test('abandons the bound session when the surface closes after creation', async () => {
+  test('preserves the bound session when the surface closes after creation', async () => {
     let resolveCredentials;
     mockGetAwsLivenessCredentials.mockReturnValue(new Promise((resolve) => {
       resolveCredentials = resolve;
@@ -372,12 +388,7 @@ describe('KYC mobile P0 boundary', () => {
     });
 
     screen.unmount();
-    await waitFor(() => {
-      expect(mockAbandonAwsLivenessSession).toHaveBeenCalledWith(
-        'driver-1',
-        'session-1',
-      );
-    });
+    expect(mockAbandonAwsLivenessSession).not.toHaveBeenCalled();
 
     await act(async () => {
       resolveCredentials({ success: false, code: 'CANCELLED' });

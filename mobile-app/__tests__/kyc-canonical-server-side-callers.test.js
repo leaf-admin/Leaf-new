@@ -24,9 +24,9 @@ describe('canonical server-side KYC caller contract', () => {
       'const runDriverOnlineMutation = useCallback',
     );
 
-    expect(handler).toContain('kycService.verifyDriverServerSideSelfie(');
-    expect(handler).toContain('driverId,');
-    expect(handler).toContain('null,');
+    expect(handler).toContain('kycService.verifyDriverWithAwsReference(driverId,');
+    expect(handler).not.toContain('verifyDriverServerSideSelfie(');
+    expect(handler).not.toContain('null,');
     expect(handler).toContain('await handleDriverKycVerificationSuccess();');
     expect(handler).toContain('presentDriverKycFailure({');
     expect(handler).not.toContain("setDriverKycLivenessMode('local_after_aws')");
@@ -79,9 +79,9 @@ describe('canonical server-side KYC caller contract', () => {
     );
     expect(source).toContain('<AWSNativeLivenessScreen');
     expect(source).not.toContain('AWSLivenessWebViewScreen');
-    expect(handler).toContain('kycService.verifyDriverServerSideSelfie(');
-    expect(handler).toContain('auth.profile.uid,');
-    expect(handler).toContain('null,');
+    expect(handler).toContain('kycService.verifyDriverWithAwsReference(auth.profile.uid,');
+    expect(handler).not.toContain('verifyDriverServerSideSelfie(');
+    expect(handler).not.toContain('null,');
     expect(handler).toContain('awsSessionId: sessionId,');
     expect(handler).toContain('challengeId: withdrawStepUpChallenge.challengeId,');
     expect(handler).toContain('requirement: withdrawStepUpChallenge.requirement,');
