@@ -189,13 +189,38 @@ jest.mock('../src/screens/prototype/home/PassengerHomeOverlay', () => {
 jest.mock('../src/screens/prototype/home/DriverHomeOverlay', () => {
   const React = require('react');
   const { TouchableOpacity, Text } = require('react-native');
-  const isDriverIdentitySupportRequired = (remoteActivation = {}) => (
-    ['REJECTED', 'SUSPENDED', 'BLOCKED'].includes(
-      String(
-        remoteActivation?.activationState || remoteActivation?.state || '',
-      ).toUpperCase(),
-    ) && remoteActivation?.kyc?.blocked === true
-  );
+  const isDriverIdentitySupportRequired = (remoteActivation = {}) => {
+    const activationState = String(
+      remoteActivation?.activationState || remoteActivation?.state || '',
+    ).toUpperCase();
+    const hasFailedDocument = Object.values(
+      remoteActivation?.documents || {},
+    ).some(document =>
+      ['failed', 'rejected', 'denied'].includes(
+        String(document?.status || '').toLowerCase(),
+      ),
+    );
+    const kycBlocked =
+      remoteActivation?.kyc?.blocked === true ||
+      ['blocked', 'rejected', 'failed', 'denied'].includes(
+        String(remoteActivation?.kyc?.status || '').toLowerCase(),
+      );
+    const blockingReason = String(
+      remoteActivation?.blockingReason || '',
+    ).toUpperCase();
+
+    return (
+      (
+        activationState === 'REJECTED' &&
+        blockingReason.includes('KYC') &&
+        !hasFailedDocument
+      ) ||
+      (
+        ['REJECTED', 'SUSPENDED', 'BLOCKED'].includes(activationState) &&
+        kycBlocked
+      )
+    );
+  };
 
   return {
     __esModule: true,
@@ -1491,6 +1516,56 @@ describe('driver online toggle', () => {
         ),
       ).toBe(true);
     });
+  });
+
+  it('opens support for a canonical identity rejection without local review context', async () => {
+    const setDriverOnline = jest.fn();
+    usePrototypeRideRuntime.mockReturnValue(
+      buildDriverRuntime({
+        driverCanGoOnline: false,
+        driverActivationRemote: {
+          activationState: 'REJECTED',
+          canGoOnline: false,
+          canAttemptOnline: false,
+          requiresLiveness: false,
+          blockingReason: 'KYC do motorista bloqueado.',
+          documents: {
+            cnh: { status: 'approved' },
+            crlv: { status: 'approved' },
+          },
+        },
+        setDriverOnline,
+      }),
+    );
+
+    const navigation = {
+      navigate: jest.fn(),
+      canGoBack: jest.fn(() => false),
+      goBack: jest.fn(),
+    };
+
+    const { getByTestId, getByText } = render(
+      <RobotaxiHomeScreen navigation={navigation} route={{ params: {} }} />,
+    );
+
+    await waitFor(() => {
+      expect(getByText('Falar com suporte')).toBeTruthy();
+    });
+
+    fireEvent.press(getByTestId('driver-home-toggle-online'));
+
+    await waitFor(() => {
+      expect(navigation.navigate).toHaveBeenCalledWith(
+        'RobotaxiPrototypeSupportTicket',
+        expect.objectContaining({
+          type: 'account',
+          selectedType: 'account',
+          subject: 'Revisão de identidade',
+          source: 'kyc_identity_mismatch_appeal',
+        }),
+      );
+    });
+    expect(setDriverOnline).not.toHaveBeenCalled();
   });
 
   it('restores opaque identity-review references after an app relaunch', async () => {
