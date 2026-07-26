@@ -7158,15 +7158,11 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     setDriverKycProcessing(true);
 
     try {
-      const comparisonResult = await kycService.verifyDriverServerSideSelfie(
-        driverId,
-        null,
-        {
-          awsSessionId: sessionId,
-          challengeId: driverKycChallengeContext.challengeId || undefined,
-          requirement: driverKycChallengeContext.requirement || undefined,
-        },
-      );
+      const comparisonResult = await kycService.verifyDriverWithAwsReference(driverId, {
+        awsSessionId: sessionId,
+        challengeId: driverKycChallengeContext.challengeId || undefined,
+        requirement: driverKycChallengeContext.requirement || undefined,
+      });
 
       if (!comparisonResult?.success || comparisonResult?.data?.isMatch !== true) {
         presentDriverKycFailure({

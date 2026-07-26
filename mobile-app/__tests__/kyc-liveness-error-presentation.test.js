@@ -65,6 +65,22 @@ describe('KYC liveness error presentation', () => {
     expect(`${presentation.title} ${presentation.message}`).not.toMatch(TECHNICAL_TERMS);
   });
 
+  test('shows the actual temporary retry delay without provider terminology', () => {
+    const presentation = resolveKycLivenessErrorPresentation({
+      code: 'KYC_AWS_LIVENESS_ATTEMPTS_EXHAUSTED',
+      status: 429,
+      retryable: true,
+      retryAfterSeconds: 121,
+    });
+
+    expect(presentation).toEqual({
+      title: 'Limite de tentativas',
+      message: 'Aguarde 3 minutos para tentar novamente.',
+      allowLocalFallback: false,
+    });
+    expect(`${presentation.title} ${presentation.message}`).not.toMatch(TECHNICAL_TERMS);
+  });
+
   test('explains a real identity mismatch instead of presenting a permission error', () => {
     const presentation = resolveKycLivenessErrorPresentation({
       code: 'KYC_CHALLENGE_NOT_PASSED',

@@ -652,15 +652,11 @@ export default function EarningsReportScreen({ navigation, route }) {
       setShowWithdrawKYCModal(false);
       setIsProcessingKYCWithdraw(true);
 
-      const verifyResult = await kycService.verifyDriverServerSideSelfie(
-        auth.profile.uid,
-        null,
-        {
-          awsSessionId: sessionId,
-          challengeId: withdrawStepUpChallenge.challengeId,
-          requirement: withdrawStepUpChallenge.requirement,
-        },
-      );
+      const verifyResult = await kycService.verifyDriverWithAwsReference(auth.profile.uid, {
+        awsSessionId: sessionId,
+        challengeId: withdrawStepUpChallenge.challengeId,
+        requirement: withdrawStepUpChallenge.requirement,
+      });
 
       const isMatch = !!(verifyResult?.success && verifyResult?.data?.isMatch);
       if (!isMatch) {

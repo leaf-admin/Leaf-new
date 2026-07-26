@@ -112,6 +112,10 @@ function buildKycFailureResult(response, payload = {}, fallbackMessage) {
     code: data.code || '',
     status: Number.isFinite(statusCandidate) ? statusCandidate : null,
     retryAt: data.retryAt || null,
+    retryAfterSeconds: data.retryAfterSeconds != null
+      && Number.isFinite(Number(data.retryAfterSeconds))
+      ? Number(data.retryAfterSeconds)
+      : null,
     retryable: typeof data.retryable === 'boolean' ? data.retryable : undefined,
     challengeId: data.challengeId || null,
     requirement: data.requirement || null,

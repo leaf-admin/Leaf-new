@@ -276,7 +276,7 @@ jest.mock('../src/services/KYCService', () => ({
   default: {
     getPreferredLivenessMode: jest.fn(() => Promise.resolve({ success: true, mode: 'aws' })),
     verifyDriver: jest.fn(() => Promise.resolve({ success: true, data: { isMatch: true } })),
-    verifyDriverServerSideSelfie: jest.fn(() =>
+    verifyDriverWithAwsReference: jest.fn(() =>
       Promise.resolve({ success: true, data: { isMatch: true } })
     ),
     getAwsProviderName: jest.fn(() => 'aws_rekognition_face_liveness'),
@@ -1165,9 +1165,8 @@ describe('driver online toggle', () => {
     fireEvent.press(getByTestId('driver-kyc-aws-native'));
 
     await waitFor(() => {
-      expect(kycServiceMock.verifyDriverServerSideSelfie).toHaveBeenCalledWith(
+      expect(kycServiceMock.verifyDriverWithAwsReference).toHaveBeenCalledWith(
         'driver_1',
-        null,
         expect.objectContaining({
           awsSessionId: 'aws-session-1',
           requirement: 'LIVENESS_REQUIRED',

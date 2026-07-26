@@ -103,6 +103,25 @@ function isInfrastructureCode(code) {
   return /(?:AWS|REDIS|FIRESTORE|REKOGNITION|COMPARE_FACES|COST|STORE|CACHE|CONFIG|PROVIDER|THROTTL|UNAVAILABLE|DISABLED|ACCESS_DENIED|RESOURCENOTFOUND|RESOURCE_NOT_FOUND)/.test(code);
 }
 
+function resolveRetryDelayMinutes(errorOrResult) {
+  const sources = [
+    errorOrResult,
+    errorOrResult?.response?.data,
+    errorOrResult?.payload,
+  ];
+  const seconds = Number(
+    sources.find((source) => source?.retryAfterSeconds != null)?.retryAfterSeconds,
+  );
+  if (Number.isFinite(seconds) && seconds > 0) {
+    return Math.max(1, Math.ceil(seconds / 60));
+  }
+
+  const retryAt = sources.find((source) => source?.retryAt)?.retryAt;
+  const retryAtMs = Date.parse(retryAt || '');
+  if (!Number.isFinite(retryAtMs) || retryAtMs <= Date.now()) return null;
+  return Math.max(1, Math.ceil((retryAtMs - Date.now()) / 60_000));
+}
+
 export function resolveKycLivenessErrorPresentation(errorOrResult) {
   const code = extractCode(errorOrResult);
   const rawMessage = String(
@@ -148,9 +167,17 @@ export function resolveKycLivenessErrorPresentation(errorOrResult) {
   }
 
   if (ATTEMPTS_EXHAUSTED_CODES.has(code)) {
+    const retryDelayMinutes = resolveRetryDelayMinutes(errorOrResult);
+    const retryDelayLabel = retryDelayMinutes
+      ? retryDelayMinutes >= 60
+        ? `${Math.ceil(retryDelayMinutes / 60)} ${Math.ceil(retryDelayMinutes / 60) === 1 ? 'hora' : 'horas'}`
+        : `${retryDelayMinutes} ${retryDelayMinutes === 1 ? 'minuto' : 'minutos'}`
+      : null;
     return {
       title: 'Limite de tentativas',
-      message: 'Você atingiu o limite de tentativas. Tente novamente após o prazo informado.',
+      message: retryDelayMinutes
+        ? `Aguarde ${retryDelayLabel} para tentar novamente.`
+        : 'Você atingiu o limite de tentativas. Tente novamente após o prazo informado.',
       allowLocalFallback: false,
     };
   }

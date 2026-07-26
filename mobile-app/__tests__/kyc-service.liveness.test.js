@@ -225,6 +225,7 @@ describe('KYCService liveness handling', () => {
         error: 'Liveness obrigatório para concluir esta verificação',
         code: 'KYC_LIVENESS_REQUIRED',
         evidenceId: 'evidence-123',
+        retryAfterSeconds: 90,
       })
     });
 
@@ -240,6 +241,7 @@ describe('KYCService liveness handling', () => {
       code: 'KYC_LIVENESS_REQUIRED',
       status: 412,
       evidenceId: 'evidence-123',
+      retryAfterSeconds: 90,
     });
   });
 
