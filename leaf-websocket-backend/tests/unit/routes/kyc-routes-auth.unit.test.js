@@ -3148,15 +3148,169 @@ describe('kyc routes auth', () => {
       })
     );
     expect(mockKycPolicyService.recordIdentityReverificationResult).not.toHaveBeenCalled();
-    expect(mockFinalizeCleanRetryAuthorization.mock.invocationCallOrder[0]).toBeLessThan(
+    expect(
       mockKycPolicyService
         .reconcileRejectedIdentityReverificationMirror
         .mock.invocationCallOrder[0]
+    ).toBeLessThan(
+      mockFinalizeCleanRetryAuthorization.mock.invocationCallOrder[0]
     );
     expect(mockGetSessionResult).not.toHaveBeenCalled();
     expect(mockRecordCanonicalFailure).not.toHaveBeenCalled();
     expect(mockCaptureRejectedComparisonEvidence).not.toHaveBeenCalled();
   });
+
+  it.each([
+    [
+      'RTDB transport failure',
+      () => mockKycPolicyService.reconcileRejectedIdentityReverificationMirror
+        .mockRejectedValueOnce(Object.assign(
+          new Error('RTDB temporarily unavailable'),
+          { code: 'KYC_REVERIFY_STATE_UNAVAILABLE' }
+        ))
+    ],
+    [
+      'unconfirmed RTDB transaction',
+      () => mockKycPolicyService.reconcileRejectedIdentityReverificationMirror
+        .mockResolvedValueOnce({
+          success: true,
+          recorded: false,
+          stale: true,
+          code: 'KYC_IDENTITY_REVERIFY_CHALLENGE_STALE'
+        })
+    ]
+  ])(
+    'keeps a rejected retry replayable without provider calls after %s',
+    async (_label, failFirstMirror) => {
+      const challengeId = 'idrev_rejected_replay_after_rtdb_failure';
+      const attemptScope = 'orphan_hold_retry_kyc_or_recovery_2';
+      const sessionHash = 'b'.repeat(64);
+      const reviewEvidenceId = 'private-review-evidence-replayable';
+      const canonicalRecordedAt = '2026-07-26T01:48:05.509Z';
+      const existingEvidence = {
+        schemaVersion: 1,
+        evidenceId: sessionHash,
+        driverId: 'driver-1',
+        sourcePath: 'server_side_aws_reference_compare',
+        terminalOutcome: 'face_compare_failed',
+        challengeId,
+        requirement: 'IDENTITY_REVERIFICATION',
+        recordedAt: canonicalRecordedAt,
+        reviewEvidenceId
+      };
+      mockGetSessionMetadata.mockResolvedValue({
+        userId: 'driver-1',
+        challengeId,
+        requirement: 'IDENTITY_REVERIFICATION',
+        attemptScope,
+        verificationWindowToken: 'verification-window-token'
+      });
+      mockAssertKycOperationAllowed.mockResolvedValue({
+        allowed: true,
+        identityReviewHold: false,
+        retryAuthorizationId: 'kyc_or_recovery_2',
+        sessionBoundRetryAuthorized: true
+      });
+      mockClaimCanonicalSession.mockResolvedValue({
+        acquired: true,
+        consumed: true,
+        sessionHash,
+        key: 'claim-key',
+        token: 'claim-token',
+        existingEvidence,
+        verificationWindowClaim: {
+          acquired: true,
+          key: 'verification-window-key',
+          token: 'verification-window-token'
+        }
+      });
+      mockRestoreRejectedIdentityVerification.mockReturnValue({
+        success: false,
+        userId: 'driver-1',
+        isMatch: false,
+        needsReview: false,
+        similarityScore: 0.2,
+        confidence: 0.2,
+        decision: 'reject',
+        requirement: 'IDENTITY_REVERIFICATION',
+        challengeId,
+        evidenceId: sessionHash,
+        reviewEvidenceId
+      });
+      failFirstMirror();
+      mockKycPolicyService.reconcileRejectedIdentityReverificationMirror
+        .mockResolvedValue({
+          success: true,
+          recorded: true,
+          rtdbOnly: true,
+          idempotentReplay: true
+        });
+
+      const firstResponse = await request(createApp())
+        .post('/api/kyc/verify-driver/server-side-selfie')
+        .set('Authorization', 'Bearer firebase-token')
+        .field('userId', 'driver-1')
+        .field('awsSessionId', 'session-rejected-rtdb-retry')
+        .field('requirement', 'LIVENESS_REQUIRED');
+
+      expect(firstResponse.status).toBe(503);
+      expect(firstResponse.body).toEqual(expect.objectContaining({
+        success: false,
+        code: 'KYC_REVERIFY_STATE_UNAVAILABLE',
+        error: 'A validação está temporariamente indisponível. Tente novamente em alguns minutos.',
+        retryable: true
+      }));
+      expectCanonicalComparePublicProjection(firstResponse.body);
+      expect(
+        mockKycPolicyService.reconcileRejectedIdentityReverificationMirror
+      ).toHaveBeenCalledTimes(1);
+      expect(mockFinalizeCleanRetryAuthorization).not.toHaveBeenCalled();
+      expect(mockKycPolicyService.recordIdentityReverificationResult).not.toHaveBeenCalled();
+      expect(mockGetSessionResult).not.toHaveBeenCalled();
+      expect(mockKycServiceInstance.verifyDriverServerSideSelfie).not.toHaveBeenCalled();
+      expect(mockRecordCanonicalFailure).not.toHaveBeenCalled();
+      expect(mockCaptureRejectedComparisonEvidence).not.toHaveBeenCalled();
+      expect(mockReleaseCanonicalSessionClaim).toHaveBeenLastCalledWith(
+        expect.objectContaining({ consumed: true }),
+        { releaseVerificationWindow: true }
+      );
+
+      const replayResponse = await request(createApp())
+        .post('/api/kyc/verify-driver/server-side-selfie')
+        .set('Authorization', 'Bearer firebase-token')
+        .field('userId', 'driver-1')
+        .field('awsSessionId', 'session-rejected-rtdb-retry')
+        .field('requirement', 'LIVENESS_REQUIRED');
+
+      expect(replayResponse.status).toBe(403);
+      expect(replayResponse.body).toEqual(expect.objectContaining({
+        code: 'KYC_CHALLENGE_NOT_PASSED',
+        isMatch: false,
+        idempotentReconciliation: true
+      }));
+      expectCanonicalComparePublicProjection(replayResponse.body);
+      expect(
+        mockKycPolicyService.reconcileRejectedIdentityReverificationMirror
+      ).toHaveBeenCalledTimes(2);
+      expect(mockFinalizeCleanRetryAuthorization).toHaveBeenCalledTimes(1);
+      expect(
+        mockKycPolicyService
+          .reconcileRejectedIdentityReverificationMirror
+          .mock.invocationCallOrder[1]
+      ).toBeLessThan(
+        mockFinalizeCleanRetryAuthorization.mock.invocationCallOrder[0]
+      );
+      expect(mockGetSessionResult).not.toHaveBeenCalled();
+      expect(mockKycServiceInstance.verifyDriverServerSideSelfie).not.toHaveBeenCalled();
+      expect(mockRecordCanonicalFailure).not.toHaveBeenCalled();
+      expect(mockCaptureRejectedComparisonEvidence).not.toHaveBeenCalled();
+      expect(mockReleaseCanonicalSessionClaim).toHaveBeenCalledTimes(2);
+      expect(mockReleaseCanonicalSessionClaim).toHaveBeenLastCalledWith(
+        expect.objectContaining({ consumed: true }),
+        { releaseVerificationWindow: true }
+      );
+    }
+  );
 
   it('reconciles approved durable identity evidence after AWS metadata expires', async () => {
     const challengeId = 'idrev_reconcile';

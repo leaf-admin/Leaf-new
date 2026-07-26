@@ -2111,6 +2111,49 @@ class KYCRoutes {
               ? reviewEvidenceCandidate
               : null;
             await trustService.assertVerificationOutsideActiveTrip(userId);
+            if (
+              isIdentityReverificationRequest
+              && kycRuntime.namespace === 'operational'
+            ) {
+              if (
+                typeof policyService.reconcileRejectedIdentityReverificationMirror
+                !== 'function'
+              ) {
+                const mirrorUnavailable = new Error(
+                  'Espelho RTDB de rejeicao canonica indisponivel'
+                );
+                mirrorUnavailable.code = 'KYC_REVERIFY_STATE_UNAVAILABLE';
+                throw mirrorUnavailable;
+              }
+
+              let identityMirrorResult = null;
+              try {
+                identityMirrorResult = await policyService
+                  .reconcileRejectedIdentityReverificationMirror(userId, {
+                    ...reconciledRejection,
+                    attemptScope: sessionMetadataCandidate?.attemptScope || null,
+                    canonicalRecordedAt:
+                      canonicalSessionClaim.existingEvidence?.recordedAt || null
+                  });
+              } catch (policyError) {
+                const mirrorUnavailable = new Error(
+                  'Espelho RTDB de rejeicao canonica nao foi confirmado'
+                );
+                mirrorUnavailable.code = 'KYC_REVERIFY_STATE_UNAVAILABLE';
+                mirrorUnavailable.cause = policyError;
+                throw mirrorUnavailable;
+              }
+              if (identityMirrorResult?.recorded !== true) {
+                const mirrorUnconfirmed = new Error(
+                  'Espelho RTDB de rejeicao canonica nao foi confirmado'
+                );
+                mirrorUnconfirmed.code = 'KYC_REVERIFY_STATE_UNAVAILABLE';
+                mirrorUnconfirmed.mirrorCode = identityMirrorResult?.code || null;
+                throw mirrorUnconfirmed;
+              }
+              await leaseHeartbeat.assertHeld();
+            }
+
             await workflowService.finalizeCleanRetryAuthorization({
               driverId: userId,
               attemptScope: sessionMetadataCandidate?.attemptScope || null,
@@ -2119,36 +2162,18 @@ class KYCRoutes {
               resultEvidenceId: reconciledRejection.evidenceId,
               reason: 'canonical_face_compare_rejection_reconciliation'
             });
-            if (isIdentityReverificationRequest) {
+            if (
+              isIdentityReverificationRequest
+              && kycRuntime.namespace !== 'operational'
+            ) {
               try {
-                let identityMirrorResult = null;
-                if (kycRuntime.namespace === 'operational') {
-                  if (
-                    typeof policyService.reconcileRejectedIdentityReverificationMirror
-                    !== 'function'
-                  ) {
-                    const mirrorUnavailable = new Error(
-                      'Espelho RTDB de rejeicao canonica indisponivel'
-                    );
-                    mirrorUnavailable.code = 'KYC_REVERIFY_STATE_UNAVAILABLE';
-                    throw mirrorUnavailable;
-                  }
-                  identityMirrorResult = await policyService
-                    .reconcileRejectedIdentityReverificationMirror(userId, {
-                      ...reconciledRejection,
-                      attemptScope: sessionMetadataCandidate?.attemptScope || null,
-                      canonicalRecordedAt:
-                        canonicalSessionClaim.existingEvidence?.recordedAt || null
-                    });
-                } else if (
+                const identityMirrorResult =
                   typeof policyService.recordIdentityReverificationResult === 'function'
-                ) {
-                  identityMirrorResult = await policyService
-                    .recordIdentityReverificationResult(userId, {
+                    ? await policyService.recordIdentityReverificationResult(userId, {
                       ...reconciledRejection,
                       reconciliationOnly: true
-                    });
-                }
+                    })
+                    : null;
                 if (identityMirrorResult?.recorded !== true) {
                   logStructured('warn', 'Espelho de rejeicao canonica nao foi atualizado', {
                     service: 'kyc-routes-routes',
