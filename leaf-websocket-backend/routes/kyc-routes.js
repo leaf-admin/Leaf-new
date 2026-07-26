@@ -23,6 +23,19 @@ try {
 const bodyUserId = (req) => req.body?.userId;
 const paramUserId = (req) => req.params?.userId;
 const queryUserId = (req) => req.query?.userId;
+const IDENTITY_REVERIFY_REJECTION_MIRROR_CONFLICT =
+  'KYC_IDENTITY_REVERIFY_RECONCILIATION_CONFLICT';
+const IDENTITY_REVERIFY_REJECTION_MIRROR_CONFLICT_CODES = new Set([
+  'KYC_IDENTITY_REVERIFY_CHALLENGE_STALE',
+  'KYC_IDENTITY_REVERIFY_SUPERSEDED_BY_BLOCK',
+  'KYC_IDENTITY_REVERIFY_REJECTION_INVALID',
+  'KYC_IDENTITY_REVERIFY_CANONICAL_TIMESTAMP_REQUIRED',
+  'KYC_IDENTITY_REVERIFY_RETRY_BINDING_INVALID'
+]);
+const IDENTITY_REVERIFY_REJECTION_MIRROR_SUPERSEDED_CODES = new Set([
+  'KYC_IDENTITY_REVERIFY_CHALLENGE_STALE',
+  'KYC_IDENTITY_REVERIFY_SUPERSEDED_BY_BLOCK'
+]);
 
 function withoutSensitiveBiometricPayload(payload = {}) {
   if (!payload || typeof payload !== 'object') {
@@ -141,7 +154,7 @@ function resolvePublicCanonicalConflictFailure(code, { stateUnavailable = false 
       retryable: true
     };
   }
-  if (code === 'KYC_IDENTITY_REVERIFY_CHALLENGE_STALE') {
+  if (IDENTITY_REVERIFY_REJECTION_MIRROR_SUPERSEDED_CODES.has(code)) {
     return {
       error: 'Esta solicitação foi substituída por uma validação mais recente.',
       retryable: false
@@ -169,7 +182,10 @@ function resolvePublicCanonicalConflictFailure(code, { stateUnavailable = false 
     'KYC_CANONICAL_EVIDENCE_HASH_CONFLICT',
     'KYC_CANONICAL_CHALLENGE_BINDING_INVALID',
     'KYC_CANONICAL_CHALLENGE_NOT_FOUND'
-  ].includes(code)) {
+  ].includes(code)
+    || IDENTITY_REVERIFY_REJECTION_MIRROR_CONFLICT_CODES.has(code)
+    || code === IDENTITY_REVERIFY_REJECTION_MIRROR_CONFLICT
+  ) {
     return {
       error: 'Não foi possível confirmar esta validação com segurança.',
       retryable: false
@@ -2144,11 +2160,26 @@ class KYCRoutes {
                 throw mirrorUnavailable;
               }
               if (identityMirrorResult?.recorded !== true) {
+                const mirrorResultCode = String(
+                  identityMirrorResult?.code || ''
+                ).trim();
+                if (identityMirrorResult?.stale === true) {
+                  const mirrorConflict = new Error(
+                    'Espelho RTDB de rejeicao canonica foi substituido'
+                  );
+                  mirrorConflict.code =
+                    IDENTITY_REVERIFY_REJECTION_MIRROR_CONFLICT_CODES
+                      .has(mirrorResultCode)
+                      ? mirrorResultCode
+                      : IDENTITY_REVERIFY_REJECTION_MIRROR_CONFLICT;
+                  mirrorConflict.mirrorCode = mirrorResultCode || null;
+                  throw mirrorConflict;
+                }
                 const mirrorUnconfirmed = new Error(
                   'Espelho RTDB de rejeicao canonica nao foi confirmado'
                 );
                 mirrorUnconfirmed.code = 'KYC_REVERIFY_STATE_UNAVAILABLE';
-                mirrorUnconfirmed.mirrorCode = identityMirrorResult?.code || null;
+                mirrorUnconfirmed.mirrorCode = mirrorResultCode || null;
                 throw mirrorUnconfirmed;
               }
               await leaseHeartbeat.assertHeld();
@@ -2709,7 +2740,8 @@ class KYCRoutes {
         const conflictCodes = new Set([
           'KYC_VERIFICATION_DEFERRED_ACTIVE_TRIP',
           'KYC_VERIFICATION_LEASE_LOST',
-          'KYC_IDENTITY_REVERIFY_CHALLENGE_STALE',
+          ...IDENTITY_REVERIFY_REJECTION_MIRROR_CONFLICT_CODES,
+          IDENTITY_REVERIFY_REJECTION_MIRROR_CONFLICT,
           'KYC_CANONICAL_EVIDENCE_HASH_CONFLICT',
           'KYC_CANONICAL_CHALLENGE_BINDING_INVALID',
           'KYC_CANONICAL_CHALLENGE_NOT_FOUND',

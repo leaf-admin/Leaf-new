@@ -3167,21 +3167,54 @@ describe('kyc routes auth', () => {
         .mockRejectedValueOnce(Object.assign(
           new Error('RTDB temporarily unavailable'),
           { code: 'KYC_REVERIFY_STATE_UNAVAILABLE' }
-        ))
+        )),
+      503,
+      'KYC_REVERIFY_STATE_UNAVAILABLE',
+      'A validação está temporariamente indisponível. Tente novamente em alguns minutos.',
+      true,
+      true
     ],
     [
-      'unconfirmed RTDB transaction',
+      'stale RTDB challenge',
       () => mockKycPolicyService.reconcileRejectedIdentityReverificationMirror
         .mockResolvedValueOnce({
           success: true,
           recorded: false,
           stale: true,
           code: 'KYC_IDENTITY_REVERIFY_CHALLENGE_STALE'
-        })
+        }),
+      409,
+      'KYC_IDENTITY_REVERIFY_CHALLENGE_STALE',
+      'Esta solicitação foi substituída por uma validação mais recente.',
+      false,
+      false
+    ],
+    [
+      'superseding RTDB block',
+      () => mockKycPolicyService.reconcileRejectedIdentityReverificationMirror
+        .mockResolvedValueOnce({
+          success: true,
+          recorded: false,
+          stale: true,
+          code: 'KYC_IDENTITY_REVERIFY_SUPERSEDED_BY_BLOCK'
+        }),
+      409,
+      'KYC_IDENTITY_REVERIFY_SUPERSEDED_BY_BLOCK',
+      'Esta solicitação foi substituída por uma validação mais recente.',
+      false,
+      false
     ]
   ])(
-    'keeps a rejected retry replayable without provider calls after %s',
-    async (_label, failFirstMirror) => {
+    'handles a rejected retry replay without provider calls after %s',
+    async (
+      _label,
+      failFirstMirror,
+      expectedStatus,
+      expectedCode,
+      expectedError,
+      expectedRetryable,
+      shouldReplay
+    ) => {
       const challengeId = 'idrev_rejected_replay_after_rtdb_failure';
       const attemptScope = 'orphan_hold_retry_kyc_or_recovery_2';
       const sessionHash = 'b'.repeat(64);
@@ -3253,12 +3286,12 @@ describe('kyc routes auth', () => {
         .field('awsSessionId', 'session-rejected-rtdb-retry')
         .field('requirement', 'LIVENESS_REQUIRED');
 
-      expect(firstResponse.status).toBe(503);
+      expect(firstResponse.status).toBe(expectedStatus);
       expect(firstResponse.body).toEqual(expect.objectContaining({
         success: false,
-        code: 'KYC_REVERIFY_STATE_UNAVAILABLE',
-        error: 'A validação está temporariamente indisponível. Tente novamente em alguns minutos.',
-        retryable: true
+        code: expectedCode,
+        error: expectedError,
+        retryable: expectedRetryable
       }));
       expectCanonicalComparePublicProjection(firstResponse.body);
       expect(
@@ -3274,6 +3307,10 @@ describe('kyc routes auth', () => {
         expect.objectContaining({ consumed: true }),
         { releaseVerificationWindow: true }
       );
+
+      if (!shouldReplay) {
+        return;
+      }
 
       const replayResponse = await request(createApp())
         .post('/api/kyc/verify-driver/server-side-selfie')

@@ -1079,6 +1079,50 @@ describe('kyc-policy-service', () => {
     expect(service.notificationService.sendCustomNotification).not.toHaveBeenCalled();
   });
 
+  test('does not project a rejected replay over a superseding RTDB block', async () => {
+    const driverId = 'driver-blocked-after-rejected-replay';
+    const challengeId = 'idrev_rejected_before_block';
+    const attemptScope = 'orphan_hold_retry_kyc_or_recovery_3';
+    const currentUser = {
+      identityReverification: {
+        challengeId,
+        requirement: 'IDENTITY_REVERIFICATION',
+        attemptScope,
+        status: 'requested',
+        metrics: {}
+      },
+      kycReverifyRequired: true,
+      kycStatus: 'blocked',
+      kycBlocked: true,
+      kycBlockedReason: 'admin_review',
+      kycUpdatedAt: '2026-07-26T01:50:05.509Z',
+      status: 'OFFLINE',
+      laterBlockMarker: 'preserved'
+    };
+    mockRealtimeValues[`users/${driverId}`] = currentUser;
+
+    const result = await service.reconcileRejectedIdentityReverificationMirror(driverId, {
+      challengeId,
+      requirement: 'IDENTITY_REVERIFICATION',
+      attemptScope,
+      isMatch: false,
+      similarityScore: 0.2,
+      decision: 'reject',
+      canonicalRecordedAt: '2026-07-26T01:46:05.509Z'
+    });
+
+    expect(result).toEqual(expect.objectContaining({
+      recorded: false,
+      stale: true,
+      code: 'KYC_IDENTITY_REVERIFY_SUPERSEDED_BY_BLOCK'
+    }));
+    expect(mockRealtimeValues[`users/${driverId}`]).toEqual(currentUser);
+    expect(mockRedis.eval).not.toHaveBeenCalled();
+    expect(mockRedis.hset).not.toHaveBeenCalled();
+    expect(mockRedis.zrem).not.toHaveBeenCalled();
+    expect(service.notificationService.sendCustomNotification).not.toHaveBeenCalled();
+  });
+
   test('requires the canonical failure timestamp before touching RTDB', async () => {
     const driverId = 'driver-rejected-replay-without-timestamp';
     const currentUser = {
