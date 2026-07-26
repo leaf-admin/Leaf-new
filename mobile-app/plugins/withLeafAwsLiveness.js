@@ -1,10 +1,13 @@
-const { withDangerousMod, withXcodeProject } = require('@expo/config-plugins');
+const { IOSConfig, withDangerousMod, withXcodeProject } = require('@expo/config-plugins');
 const fs = require('fs');
 const path = require('path');
 
 const TEMPLATES_ROOT = path.join(__dirname, '..', 'native', 'aws-liveness');
 const ANDROID_PACKAGE_PATH = path.join('app', 'src', 'main', 'java', 'br', 'com', 'leaf', 'ride');
 const IOS_APP_GROUP = 'Leaf';
+const IOS_LOCALIZATION_BLOCK_START = '/* LEAF_AWS_LIVENESS_PT_BR_START */';
+const IOS_LOCALIZATION_BLOCK_END = '/* LEAF_AWS_LIVENESS_PT_BR_END */';
+const IOS_LOCALIZATION_REGIONS = ['Base', 'pt-BR'];
 
 const AWS_PACKAGE_ID = 'B9D64E3D8B8C4A40A1F2C901';
 const AWS_PRODUCT_ID = 'B9D64E3D8B8C4A40A1F2C902';
@@ -18,6 +21,51 @@ function ensureDir(dirPath) {
 function copyFile(sourcePath, targetPath) {
   ensureDir(path.dirname(targetPath));
   fs.copyFileSync(sourcePath, targetPath);
+}
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function readIosLocalizationKeys(content) {
+  return Array.from(
+    content.matchAll(/^\s*"([^"]+)"\s*=/gm),
+    (match) => match[1]
+  );
+}
+
+function mergeIosLocalizationFile(sourcePath, targetPath) {
+  const source = fs.readFileSync(sourcePath, 'utf8').trim();
+  const managedKeys = readIosLocalizationKeys(source);
+  const managedBlockPattern = new RegExp(
+    `${escapeRegExp(IOS_LOCALIZATION_BLOCK_START)}[\\s\\S]*?${escapeRegExp(IOS_LOCALIZATION_BLOCK_END)}\\s*`,
+    'g'
+  );
+  const managedEntryPattern = managedKeys.length > 0
+    ? new RegExp(
+      `^\\s*"(?:${managedKeys.map(escapeRegExp).join('|')})"\\s*=\\s*"(?:[^"\\\\]|\\\\.)*"\\s*;\\s*$`,
+      'gm'
+    )
+    : null;
+  const existing = fs.existsSync(targetPath) ? fs.readFileSync(targetPath, 'utf8') : '';
+
+  let preserved = existing.replace(managedBlockPattern, '');
+  if (managedEntryPattern) {
+    preserved = preserved.replace(managedEntryPattern, '');
+  }
+  preserved = preserved.trim();
+
+  const managedBlock = [
+    IOS_LOCALIZATION_BLOCK_START,
+    source,
+    IOS_LOCALIZATION_BLOCK_END,
+  ].join('\n');
+  const next = `${preserved ? `${preserved}\n\n` : ''}${managedBlock}\n`;
+
+  if (next !== existing) {
+    ensureDir(path.dirname(targetPath));
+    fs.writeFileSync(targetPath, next);
+  }
 }
 
 function patchFile(filePath, patcher) {
@@ -147,6 +195,26 @@ function addXcodeSource(project, filePath, groupKey, target) {
   project.addSourceFile(filePath, { target }, groupKey);
 }
 
+function addXcodeLocalizationResource(project, region, targetUuid) {
+  const fileName = 'Localizable.strings';
+  const groupName = `${IOS_APP_GROUP}/Supporting/${region}.lproj`;
+  const group = IOSConfig.XcodeUtils.ensureGroupRecursively(project, groupName);
+
+  project.addKnownRegion(region);
+  if (group?.children.some(({ comment }) => comment === fileName)) {
+    return project;
+  }
+
+  return IOSConfig.XcodeUtils.addResourceFileToGroup({
+    filepath: `${region}.lproj/${fileName}`,
+    groupName,
+    project,
+    isBuildFile: true,
+    verbose: true,
+    targetUuid,
+  });
+}
+
 function addSwiftPackageText(pbxprojPath) {
   patchFile(pbxprojPath, (content) => {
     if (content.includes(AWS_PACKAGE_REPOSITORY)) {
@@ -250,6 +318,14 @@ const withLeafAwsLiveness = (config) => {
         path.join(TEMPLATES_ROOT, 'android', 'LeafAwsLivenessPackage.kt'),
         path.join(androidTargetDir, 'LeafAwsLivenessPackage.kt')
       );
+      copyFile(
+        path.join(TEMPLATES_ROOT, 'android', 'res', 'values-pt-rBR', 'leaf_aws_liveness_strings.xml'),
+        path.join(projectRoot, 'app', 'src', 'main', 'res', 'values', 'leaf_aws_liveness_strings.xml')
+      );
+      copyFile(
+        path.join(TEMPLATES_ROOT, 'android', 'res', 'values-pt-rBR', 'leaf_aws_liveness_strings.xml'),
+        path.join(projectRoot, 'app', 'src', 'main', 'res', 'values-pt-rBR', 'leaf_aws_liveness_strings.xml')
+      );
 
       patchAndroidMainApplication(path.join(androidTargetDir, 'MainApplication.kt'));
       patchAndroidManifest(path.join(projectRoot, 'app', 'src', 'main', 'AndroidManifest.xml'));
@@ -273,6 +349,12 @@ const withLeafAwsLiveness = (config) => {
         path.join(TEMPLATES_ROOT, 'ios', 'LeafAwsLivenessModule.m'),
         path.join(projectRoot, IOS_APP_GROUP, 'LeafAwsLivenessModule.m')
       );
+      for (const region of IOS_LOCALIZATION_REGIONS) {
+        mergeIosLocalizationFile(
+          path.join(TEMPLATES_ROOT, 'ios', 'pt-BR.lproj', 'Localizable.strings'),
+          path.join(projectRoot, IOS_APP_GROUP, 'Supporting', `${region}.lproj`, 'Localizable.strings')
+        );
+      }
 
       return config;
     },
@@ -290,6 +372,9 @@ const withLeafAwsLiveness = (config) => {
 
     addXcodeSource(project, 'Leaf/LeafAwsLivenessModule.swift', leafGroupKey, target);
     addXcodeSource(project, 'Leaf/LeafAwsLivenessModule.m', leafGroupKey, target);
+    for (const region of IOS_LOCALIZATION_REGIONS) {
+      config.modResults = addXcodeLocalizationResource(config.modResults, region, target);
+    }
     return config;
   });
 
@@ -310,3 +395,7 @@ const withLeafAwsLiveness = (config) => {
 };
 
 module.exports = withLeafAwsLiveness;
+module.exports.__private = {
+  mergeIosLocalizationFile,
+  readIosLocalizationKeys,
+};

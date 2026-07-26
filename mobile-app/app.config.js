@@ -395,7 +395,15 @@ module.exports = {
             }
         ],
         "expo-apple-authentication",
-        "expo-localization",
+        [
+            "expo-localization",
+            {
+                supportedLocales: {
+                    ios: ["pt-BR"],
+                    android: ["pt-BR"]
+                }
+            }
+        ],
         "@react-native-firebase/app",
         "@react-native-firebase/auth",
         "./plugins/withGoogleMapsApiKey",

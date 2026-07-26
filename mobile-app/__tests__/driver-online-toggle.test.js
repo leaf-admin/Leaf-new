@@ -4,6 +4,7 @@ import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 
 import RobotaxiHomeScreen, {
   buildDriverIdentityReviewTicketParams,
+  buildDriverIdentitySupportStorageKey,
   buildDestinationFareQuoteRouteKey,
   buildTrafficSegmentsFromDirectionsRoute,
   resolveHomeCategoryFarePresentation,
@@ -188,11 +189,65 @@ jest.mock('../src/screens/prototype/home/PassengerHomeOverlay', () => {
 jest.mock('../src/screens/prototype/home/DriverHomeOverlay', () => {
   const React = require('react');
   const { TouchableOpacity, Text } = require('react-native');
-  return ({ onToggleOnline }) => (
-    <TouchableOpacity testID="driver-home-toggle-online" onPress={onToggleOnline}>
-      <Text>Ficar online</Text>
-    </TouchableOpacity>
+  const isDriverIdentitySupportRequired = (remoteActivation = {}) => (
+    ['REJECTED', 'SUSPENDED', 'BLOCKED'].includes(
+      String(
+        remoteActivation?.activationState || remoteActivation?.state || '',
+      ).toUpperCase(),
+    ) && remoteActivation?.kyc?.blocked === true
   );
+
+  return {
+    __esModule: true,
+    isDriverIdentitySupportRequired,
+    default: ({
+      onToggleOnline,
+      onOpenActivation,
+      onOpenIdentitySupport,
+      driverCanGoOnline,
+      driverActivationResolved,
+      driverIdentitySupportRequired,
+      driverActivationRemote,
+    }) => {
+      const supportRequired =
+        driverIdentitySupportRequired === true ||
+        isDriverIdentitySupportRequired(driverActivationRemote);
+      const activationBlocked =
+        !supportRequired &&
+        driverActivationResolved === true &&
+        driverCanGoOnline !== true &&
+        driverActivationRemote?.canAttemptOnline !== true;
+      const hasFailedDocument = Object.values(
+        driverActivationRemote?.documents || {},
+      ).some(document =>
+        ['failed', 'rejected', 'denied'].includes(
+          String(document?.status || '').toLowerCase(),
+        ),
+      );
+      return (
+        <TouchableOpacity
+          testID="driver-home-toggle-online"
+          onPress={
+            supportRequired
+              ? onOpenIdentitySupport
+              : activationBlocked
+                ? onOpenActivation
+                : onToggleOnline
+          }
+        >
+          <Text>
+            {supportRequired
+              ? 'Falar com suporte'
+              : activationBlocked
+                ? hasFailedDocument
+                  ? 'Ação necessária'
+                  : 'Em análise'
+                : 'Ficar online'}
+          </Text>
+        </TouchableOpacity>
+      );
+    },
+  };
 });
 
 jest.mock('../src/screens/prototype/home/DriverLiveRideOverlay', () => {
@@ -347,6 +402,7 @@ function buildDriverRuntime(overrides = {}) {
     paymentMethod: 'pix',
     driverInfo: { id: 'driver_1', name: 'Driver Test' },
     setDriverOnline: jest.fn().mockResolvedValue({ success: true, isOnline: true }),
+    refreshDriverActivationRemote: jest.fn().mockResolvedValue(undefined),
     tripHistory: [],
     driverOffers: [],
     driverActiveRide: null,
@@ -1199,9 +1255,13 @@ describe('driver online toggle', () => {
       challengeId: 'challenge_01HZX9',
       requirement: 'IDENTITY_REVERIFICATION',
     });
+    const refreshDriverActivationRemote = jest
+      .fn()
+      .mockResolvedValue(undefined);
 
     usePrototypeRideRuntime.mockReturnValue(
       buildDriverRuntime({
+        refreshDriverActivationRemote,
         setDriverOnline,
       })
     );
@@ -1212,7 +1272,7 @@ describe('driver online toggle', () => {
       goBack: jest.fn(),
     };
 
-    const { getByTestId, queryByTestId } = render(
+    const { getByTestId, getByText, queryByTestId } = render(
       <RobotaxiHomeScreen navigation={navigation} route={{ params: {} }} />
     );
 
@@ -1239,9 +1299,30 @@ describe('driver online toggle', () => {
         expect.any(Array),
       );
       expect(queryByTestId('driver-kyc-aws-native')).toBeNull();
+      expect(getByText('Falar com suporte')).toBeTruthy();
     });
 
     expect(setDriverOnline).toHaveBeenCalledTimes(1);
+    expect(refreshDriverActivationRemote).toHaveBeenCalledTimes(1);
+    const AsyncStorage = require('@react-native-async-storage/async-storage');
+    const supportStorageKey =
+      buildDriverIdentitySupportStorageKey('driver_1');
+    await waitFor(() => {
+      const storageCall = AsyncStorage.setItem.mock.calls.find(
+        ([key]) => key === supportStorageKey,
+      );
+      expect(storageCall).toBeTruthy();
+      expect(JSON.parse(storageCall[1])).toEqual(
+        expect.objectContaining({
+          kycEvidenceId: 'evidence_01HZX9',
+          kycChallengeId: 'challenge_01HZX9',
+          requirement: 'IDENTITY_REVERIFICATION',
+        }),
+      );
+      expect(storageCall[1]).not.toMatch(
+        /similarity|referenceImageUrl|private-selfie/i,
+      );
+    });
     const [alertTitle, alertMessage, alertButtons] = Alert.alert.mock.calls.at(-1);
     expect(`${alertTitle} ${alertMessage}`).not.toMatch(
       /AWS|CompareFaces|KYC_|similarity|threshold|status\s*403|evidence_/i,
@@ -1249,9 +1330,7 @@ describe('driver online toggle', () => {
     expect(alertButtons).toHaveLength(1);
     expect(alertButtons[0]?.text).toBe('Solicitar análise');
 
-    act(() => {
-      alertButtons[0]?.onPress?.();
-    });
+    fireEvent.press(getByTestId('driver-home-toggle-online'));
 
     await waitFor(() => {
       expect(navigation.navigate).toHaveBeenCalledWith(
@@ -1278,6 +1357,321 @@ describe('driver online toggle', () => {
     expect(ticketParams).not.toHaveProperty('referenceImageUrl');
     expect(ticketParams).not.toHaveProperty('error');
   });
+
+  it('clears a local identity-support gate only after a semantic canonical release', async () => {
+    const kycServiceMock = require('../src/services/KYCService').default;
+    const AsyncStorage = require('@react-native-async-storage/async-storage');
+    const supportStorageKey =
+      buildDriverIdentitySupportStorageKey('driver_1');
+    const initialActivationRemote = {
+      activationState: 'APPROVED_NEEDS_LIVENESS',
+      canGoOnline: false,
+      canAttemptOnline: true,
+      requiresLiveness: true,
+      updatedAt: '2026-07-25T20:00:00.000Z',
+      kyc: {
+        status: 'pending_reverify',
+        blocked: false,
+        reverifyRequired: true,
+      },
+      documents: {
+        cnh: { status: 'approved' },
+        crlv: { status: 'approved' },
+      },
+      vehicle: {
+        status: 'approved',
+        approved: true,
+        active: true,
+        identityComplete: true,
+      },
+    };
+    kycServiceMock.verifyDriverWithAwsReference.mockResolvedValueOnce({
+      success: false,
+      status: 403,
+      code: 'KYC_CHALLENGE_NOT_PASSED',
+      isMatch: false,
+      reviewAvailable: true,
+      evidenceId: 'evidence_semantic_release_01',
+    });
+    const setDriverOnline = jest.fn().mockResolvedValueOnce({
+      success: false,
+      code: 'kycRequired',
+      kycRequired: true,
+      challengeId: 'challenge_semantic_release_01',
+      requirement: 'IDENTITY_REVERIFICATION',
+    });
+    let runtime = buildDriverRuntime({
+      driverCanGoOnline: false,
+      driverActivationRemote: initialActivationRemote,
+      setDriverOnline,
+    });
+    usePrototypeRideRuntime.mockImplementation(() => runtime);
+
+    const navigation = {
+      navigate: jest.fn(),
+      canGoBack: jest.fn(() => false),
+      goBack: jest.fn(),
+    };
+    const route = { params: {} };
+    const {
+      getByTestId,
+      getByText,
+      queryByText,
+      rerender,
+    } = render(
+      <RobotaxiHomeScreen navigation={navigation} route={route} />,
+    );
+
+    fireEvent.press(getByTestId('driver-home-toggle-online'));
+    await waitFor(() => {
+      expect(getByTestId('driver-kyc-aws-native')).toBeTruthy();
+    });
+    fireEvent.press(getByTestId('driver-kyc-aws-native'));
+
+    await waitFor(() => {
+      expect(getByText('Falar com suporte')).toBeTruthy();
+    });
+    await waitFor(() => {
+      expect(
+        AsyncStorage.setItem.mock.calls.some(
+          ([key]) => key === supportStorageKey,
+        ),
+      ).toBe(true);
+    });
+
+    runtime = buildDriverRuntime({
+      driverCanGoOnline: false,
+      driverActivationRemote: {
+        ...initialActivationRemote,
+        updatedAt: '2026-07-25T20:05:00.000Z',
+      },
+      setDriverOnline,
+    });
+    rerender(
+      <RobotaxiHomeScreen navigation={navigation} route={route} />,
+    );
+
+    await waitFor(() => {
+      expect(getByText('Falar com suporte')).toBeTruthy();
+    });
+    expect(
+      AsyncStorage.removeItem.mock.calls.some(
+        ([key]) => key === supportStorageKey,
+      ),
+    ).toBe(false);
+
+    runtime = buildDriverRuntime({
+      driverCanGoOnline: true,
+      driverActivationRemote: {
+        ...initialActivationRemote,
+        activationState: 'ACTIVE',
+        canGoOnline: true,
+        requiresLiveness: false,
+        updatedAt: '2026-07-25T20:10:00.000Z',
+        kyc: {
+          status: 'approved',
+          blocked: false,
+          reverifyRequired: false,
+        },
+      },
+      setDriverOnline,
+    });
+    rerender(
+      <RobotaxiHomeScreen navigation={navigation} route={route} />,
+    );
+
+    await waitFor(() => {
+      expect(queryByText('Falar com suporte')).toBeNull();
+      expect(getByText('Ficar online')).toBeTruthy();
+    });
+    await waitFor(() => {
+      expect(
+        AsyncStorage.removeItem.mock.calls.some(
+          ([key]) => key === supportStorageKey,
+        ),
+      ).toBe(true);
+    });
+  });
+
+  it('restores opaque identity-review references after an app relaunch', async () => {
+    const AsyncStorage = require('@react-native-async-storage/async-storage');
+    const storageKey = buildDriverIdentitySupportStorageKey('driver_1');
+    await AsyncStorage.setItem(
+      storageKey,
+      JSON.stringify({
+        type: 'account',
+        selectedType: 'account',
+        subject: 'Revisão de identidade',
+        description: 'unsafe value must not be trusted',
+        source: 'unsafe_source',
+        kycEvidenceId: 'evidence_persisted_01',
+        kycReviewCaseId: 'case_persisted_01',
+        kycChallengeId: 'challenge_persisted_01',
+        requirement: 'IDENTITY_REVERIFICATION',
+        reviewAvailable: true,
+        referenceImageUrl: 'https://storage.example/private-selfie.jpg',
+      }),
+    );
+
+    const setDriverOnline = jest.fn();
+    usePrototypeRideRuntime.mockReturnValue(
+      buildDriverRuntime({
+        driverCanGoOnline: false,
+        driverActivationRemote: {
+          activationState: 'REJECTED',
+          canAttemptOnline: false,
+          kyc: { blocked: true, status: 'blocked' },
+        },
+        setDriverOnline,
+      }),
+    );
+
+    const navigation = {
+      navigate: jest.fn(),
+      canGoBack: jest.fn(() => false),
+      goBack: jest.fn(),
+    };
+
+    const { getByTestId, getByText } = render(
+      <RobotaxiHomeScreen navigation={navigation} route={{ params: {} }} />,
+    );
+
+    await waitFor(() => {
+      expect(getByText('Falar com suporte')).toBeTruthy();
+    });
+
+    fireEvent.press(getByTestId('driver-home-toggle-online'));
+
+    await waitFor(() => {
+      expect(navigation.navigate).toHaveBeenCalledWith(
+        'RobotaxiPrototypeSupportTicket',
+        {
+          type: 'account',
+          selectedType: 'account',
+          subject: 'Revisão de identidade',
+          description: 'A validação de identidade não foi concluída. Acredito que houve um engano e solicito uma análise.',
+          source: 'kyc_identity_mismatch_appeal',
+          kycEvidenceId: 'evidence_persisted_01',
+          kycReviewCaseId: 'case_persisted_01',
+          kycChallengeId: 'challenge_persisted_01',
+          requirement: 'IDENTITY_REVERIFICATION',
+          reviewAvailable: true,
+        },
+      );
+    });
+
+    const [, ticketParams] = navigation.navigate.mock.calls.at(-1);
+    expect(ticketParams).not.toHaveProperty('referenceImageUrl');
+    expect(setDriverOnline).not.toHaveBeenCalled();
+    await AsyncStorage.removeItem(storageKey);
+  });
+
+  it.each([
+    [
+      'document rejection',
+      {
+        activationState: 'DRIVER_DOCS_PENDING',
+        canAttemptOnline: false,
+        documents: { cnh: { status: 'failed' } },
+        kyc: { blocked: false, status: 'approved' },
+      },
+      'Ação necessária',
+    ],
+    [
+      'vehicle review',
+      {
+        activationState: 'VEHICLE_IN_REVIEW',
+        canAttemptOnline: false,
+        vehicle: { status: 'in_review' },
+        kyc: { blocked: false, status: 'approved' },
+      },
+      'Em análise',
+    ],
+  ])(
+    'clears stale identity support when the canonical gate changes to %s',
+    async (_scenario, nextActivationRemote, expectedActivationLabel) => {
+      const AsyncStorage = require('@react-native-async-storage/async-storage');
+      const storageKey = buildDriverIdentitySupportStorageKey('driver_1');
+      await AsyncStorage.setItem(
+        storageKey,
+        JSON.stringify({
+          kycEvidenceId: 'evidence_resolved_01',
+          kycReviewCaseId: 'case_resolved_01',
+          reviewAvailable: true,
+        }),
+      );
+
+      const setDriverOnline = jest.fn();
+      let runtime = buildDriverRuntime({
+        driverCanGoOnline: false,
+        driverActivationRemote: {
+          activationState: 'REJECTED',
+          canAttemptOnline: false,
+          kyc: { blocked: true, status: 'blocked' },
+        },
+        setDriverOnline,
+      });
+      usePrototypeRideRuntime.mockImplementation(() => runtime);
+
+      const navigation = {
+        navigate: jest.fn(),
+        canGoBack: jest.fn(() => false),
+        goBack: jest.fn(),
+      };
+      const route = { params: {} };
+      const {
+        getByTestId,
+        getByText,
+        queryByText,
+        rerender,
+      } = render(
+        <RobotaxiHomeScreen navigation={navigation} route={route} />,
+      );
+
+      await waitFor(() => {
+        expect(getByText('Falar com suporte')).toBeTruthy();
+      });
+      fireEvent.press(getByTestId('driver-home-toggle-online'));
+      await waitFor(() => {
+        expect(navigation.navigate).toHaveBeenCalledWith(
+          'RobotaxiPrototypeSupportTicket',
+          expect.objectContaining({
+            kycEvidenceId: 'evidence_resolved_01',
+            kycReviewCaseId: 'case_resolved_01',
+          }),
+        );
+      });
+      navigation.navigate.mockClear();
+
+      runtime = buildDriverRuntime({
+        driverCanGoOnline: false,
+        driverActivationRemote: nextActivationRemote,
+        setDriverOnline,
+      });
+      rerender(
+        <RobotaxiHomeScreen navigation={navigation} route={route} />,
+      );
+
+      await waitFor(() => {
+        expect(queryByText('Falar com suporte')).toBeNull();
+        expect(getByText(expectedActivationLabel)).toBeTruthy();
+      });
+      await waitFor(async () => {
+        await expect(AsyncStorage.getItem(storageKey)).resolves.toBeNull();
+      });
+
+      fireEvent.press(getByTestId('driver-home-toggle-online'));
+
+      expect(navigation.navigate).toHaveBeenCalledWith(
+        'RobotaxiPrototypeDriverActivation',
+      );
+      expect(navigation.navigate).not.toHaveBeenCalledWith(
+        'RobotaxiPrototypeSupportTicket',
+        expect.anything(),
+      );
+      expect(setDriverOnline).not.toHaveBeenCalled();
+    },
+  );
 
   it('keeps the driver offline without opening a new liveness while identity review is pending', async () => {
     const kycServiceMock = require('../src/services/KYCService').default;

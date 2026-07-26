@@ -186,6 +186,74 @@ describe("DriverHomeOverlay", () => {
     expect(queryByText("Em análise")).toBeNull();
   });
 
+  it("routes a canonical identity rejection directly to support", () => {
+    const onToggleOnline = jest.fn();
+    const onOpenActivation = jest.fn();
+    const onOpenIdentitySupport = jest.fn();
+
+    const { getByLabelText, getByText, queryByText } = render(
+      <DriverHomeOverlay
+        driverId="driver_1"
+        driverOnline={false}
+        driverCanGoOnline={false}
+        driverActivationResolved
+        driverActivationRemote={{
+          activationState: "REJECTED",
+          canAttemptOnline: false,
+          kyc: { blocked: true, status: "blocked" },
+        }}
+        onToggleOnline={onToggleOnline}
+        onOpenActivation={onOpenActivation}
+        onOpenIdentitySupport={onOpenIdentitySupport}
+      />,
+    );
+
+    expect(getByText("Identidade não confirmada")).toBeTruthy();
+    expect(getByText("Falar com suporte")).toBeTruthy();
+    expect(queryByText("Pronto para ficar online")).toBeNull();
+
+    fireEvent.press(
+      getByLabelText("driver-home-toggle-online-identity-support"),
+    );
+
+    expect(onOpenIdentitySupport).toHaveBeenCalledTimes(1);
+    expect(onOpenActivation).not.toHaveBeenCalled();
+    expect(onToggleOnline).not.toHaveBeenCalled();
+  });
+
+  it("keeps the support action visible while the remote rejection refreshes", () => {
+    const onToggleOnline = jest.fn();
+    const onOpenIdentitySupport = jest.fn();
+
+    const { getByLabelText, getByText, queryByText } = render(
+      <DriverHomeOverlay
+        driverId="driver_1"
+        driverOnline={false}
+        driverCanGoOnline={false}
+        driverActivationResolved
+        driverActivationRemote={{
+          activationState: "APPROVED_NEEDS_LIVENESS",
+          canAttemptOnline: true,
+          requiresLiveness: true,
+        }}
+        driverIdentitySupportRequired
+        onToggleOnline={onToggleOnline}
+        onOpenActivation={() => {}}
+        onOpenIdentitySupport={onOpenIdentitySupport}
+      />,
+    );
+
+    expect(getByText("Identidade não confirmada")).toBeTruthy();
+    expect(queryByText("Pronto para ficar online")).toBeNull();
+
+    fireEvent.press(
+      getByLabelText("driver-home-toggle-online-identity-support"),
+    );
+
+    expect(onOpenIdentitySupport).toHaveBeenCalledTimes(1);
+    expect(onToggleOnline).not.toHaveBeenCalled();
+  });
+
   it("keeps the online toggle interactive while activation is still resolving", () => {
     const onToggleOnline = jest.fn();
     const onOpenActivation = jest.fn();

@@ -410,6 +410,25 @@ function resolveBlockedActivationLabel(remoteActivation) {
   return "Em análise";
 }
 
+export function isDriverIdentitySupportRequired(remoteActivation) {
+  const activationState = String(
+    remoteActivation?.activationState || remoteActivation?.state || "",
+  )
+    .trim()
+    .toUpperCase();
+  const kycStatus = String(remoteActivation?.kyc?.status || "")
+    .trim()
+    .toLowerCase();
+  const kycBlocked =
+    remoteActivation?.kyc?.blocked === true ||
+    ["blocked", "rejected", "failed", "denied"].includes(kycStatus);
+
+  return (
+    kycBlocked &&
+    ["REJECTED", "SUSPENDED", "BLOCKED"].includes(activationState)
+  );
+}
+
 function DriverHomeOverlay({
   driverId = "",
   insetsBottom = 0,
@@ -421,6 +440,7 @@ function DriverHomeOverlay({
   driverCanGoOnline = false,
   driverActivationResolved = false,
   driverActivationRemote = null,
+  driverIdentitySupportRequired = false,
   driverWorkInProgress = false,
   suppressDaySummary = false,
   ridesCount = 0,
@@ -431,6 +451,7 @@ function DriverHomeOverlay({
   driverDestinationMode = null,
   onToggleOnline,
   onOpenActivation,
+  onOpenIdentitySupport,
   onOpenEarnings,
   onSaveDestinationMode,
   onCtaLayout,
@@ -453,10 +474,14 @@ function DriverHomeOverlay({
   );
   const onlineStartedAtRef = useRef(null);
   const hasDriverWorkInProgress = isDriverWorkLocked(driverWorkInProgress);
+  const identitySupportRequired =
+    driverIdentitySupportRequired === true ||
+    isDriverIdentitySupportRequired(driverActivationRemote);
   const driverCanAttemptOnline =
     driverActivationRemote?.canAttemptOnline === true;
   const isReadyForIdentityGate =
     driverActivationResolved &&
+    !identitySupportRequired &&
     !driverCanGoOnline &&
     driverCanAttemptOnline &&
     !driverOnline &&
@@ -489,11 +514,15 @@ function DriverHomeOverlay({
     driverOnline && !driverRealtimeAuthenticated && !hasDriverWorkInProgress;
   const handleSliderPress = hasDriverWorkInProgress
     ? undefined
-    : isActivationBlocked
+    : identitySupportRequired
+      ? onOpenIdentitySupport
+      : isActivationBlocked
       ? onOpenActivation
       : onToggleOnline;
   const sliderStatus = hasDriverWorkInProgress
     ? "ride"
+    : identitySupportRequired
+    ? "identity-support"
     : isActivationBlocked
     ? "blocked"
     : pendingOfflineActivation || pendingOnlineRealtime
@@ -505,6 +534,8 @@ function DriverHomeOverlay({
         : "offline";
   const sliderLabel = hasDriverWorkInProgress
     ? "Em corrida"
+    : identitySupportRequired
+    ? "Falar com suporte"
     : isActivationBlocked
     ? resolveBlockedActivationLabel(driverActivationRemote)
     : pendingOfflineActivation || pendingOnlineRealtime
@@ -913,6 +944,8 @@ function DriverHomeOverlay({
               accessibilityHint={
                 driverOnline
                   ? "Toca para sair do modo online"
+                  : identitySupportRequired
+                    ? "Toca para falar com o suporte sobre sua identidade"
                   : isReadyForIdentityGate
                     ? "Toca para confirmar sua identidade e ficar online"
                   : "Toca para ficar online e receber corridas"
@@ -928,11 +961,37 @@ function DriverHomeOverlay({
                 styles.driverBottomSlider,
                 (sliderStatus === "online" || sliderStatus === "ride") &&
                   styles.driverBottomSliderOnline,
-                sliderStatus === "blocked" && styles.driverBottomSliderBlocked,
+                (sliderStatus === "blocked" ||
+                  sliderStatus === "identity-support") &&
+                  styles.driverBottomSliderBlocked,
                 sliderStatus === "pending" && styles.driverBottomSliderPending,
               ]}
             >
-              {isReadyForIdentityGate ? (
+              {identitySupportRequired ? (
+                <View
+                  pointerEvents="none"
+                  style={styles.driverBottomSliderReadyContent}
+                >
+                  <Text
+                    numberOfLines={1}
+                    style={[
+                      styles.driverBottomSliderReadyStatus,
+                      styles.driverBottomSliderIdentityStatus,
+                    ]}
+                  >
+                    Identidade não confirmada
+                  </Text>
+                  <Text
+                    numberOfLines={1}
+                    style={[
+                      styles.driverBottomSliderText,
+                      styles.driverBottomSliderTextBlocked,
+                    ]}
+                  >
+                    Falar com suporte
+                  </Text>
+                </View>
+              ) : isReadyForIdentityGate ? (
                 <View
                   pointerEvents="none"
                   style={styles.driverBottomSliderReadyContent}
@@ -959,7 +1018,8 @@ function DriverHomeOverlay({
                     styles.driverBottomSliderText,
                     (sliderStatus === "online" || sliderStatus === "ride") &&
                       styles.driverBottomSliderTextOnline,
-                    sliderStatus === "blocked" &&
+                    (sliderStatus === "blocked" ||
+                      sliderStatus === "identity-support") &&
                       styles.driverBottomSliderTextBlocked,
                     sliderStatus === "pending" &&
                       styles.driverBottomSliderTextPending,
@@ -973,7 +1033,9 @@ function DriverHomeOverlay({
                   styles.driverBottomSliderThumb,
                   (sliderStatus === "online" || sliderStatus === "ride") &&
                     styles.driverBottomSliderThumbOnline,
-                  sliderStatus === "blocked" && styles.driverBottomSliderThumbBlocked,
+                  (sliderStatus === "blocked" ||
+                    sliderStatus === "identity-support") &&
+                    styles.driverBottomSliderThumbBlocked,
                   sliderStatus === "pending" && styles.driverBottomSliderThumbPending,
                   { transform: [{ translateX: sliderThumbTranslateX }] },
                 ]}
@@ -984,6 +1046,8 @@ function DriverHomeOverlay({
                       ? "checkmark"
                       : sliderStatus === "ride"
                         ? "navigate-outline"
+                      : sliderStatus === "identity-support"
+                        ? "chatbubble-ellipses-outline"
                       : sliderStatus === "blocked"
                         ? "time-outline"
                         : sliderStatus === "pending"
@@ -1447,6 +1511,9 @@ const styles = StyleSheet.create({
     fontSize: 10.5,
     lineHeight: 13,
     textAlign: "center",
+  },
+  driverBottomSliderIdentityStatus: {
+    color: DRIVER_HOME_COLOR.warningText,
   },
   driverBottomSliderTextOnline: {
     color: "#FFFFFF",

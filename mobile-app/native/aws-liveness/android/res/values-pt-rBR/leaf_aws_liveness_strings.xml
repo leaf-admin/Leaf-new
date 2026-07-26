@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+  <string name="amplify_ui_liveness_challenge_a11y_cancel_content_description">Cancelar validação</string>
+  <string name="amplify_ui_liveness_challenge_connecting">Conectando</string>
+  <string name="amplify_ui_liveness_challenge_instruction_hold_face_during_freshness">Fique parado</string>
+  <string name="amplify_ui_liveness_challenge_instruction_move_face">Posicione o rosto em frente à câmera</string>
+  <string name="amplify_ui_liveness_challenge_instruction_move_face_closer">Aproxime-se</string>
+  <string name="amplify_ui_liveness_challenge_instruction_move_face_further">Afaste-se</string>
+  <string name="amplify_ui_liveness_challenge_instruction_multiple_faces_detected">Mantenha apenas um rosto na câmera</string>
+  <string name="amplify_ui_liveness_challenge_recording_indicator_label">REC</string>
+  <string name="amplify_ui_liveness_challenge_verifying">Verificando</string>
+  <string name="amplify_ui_liveness_get_ready_a11y_photosensitivity_icon_content_description">Informações sobre sensibilidade à luz</string>
+  <string name="amplify_ui_liveness_get_ready_begin_check">Iniciar validação</string>
+  <string name="amplify_ui_liveness_get_ready_center_face_label">Centralize seu rosto</string>
+  <string name="amplify_ui_liveness_get_ready_photosensitivity_description">Esta validação exibe luzes coloridas. Tenha cuidado se você tiver sensibilidade à luz.</string>
+  <string name="amplify_ui_liveness_get_ready_photosensitivity_dialog_description">Algumas pessoas podem ter convulsões quando expostas a luzes coloridas. Tenha cuidado se você ou alguém da sua família tiver essa condição.</string>
+  <string name="amplify_ui_liveness_get_ready_photosensitivity_dialog_dismiss">Entendi</string>
+  <string name="amplify_ui_liveness_get_ready_photosensitivity_dialog_title">Aviso de sensibilidade à luz</string>
+  <string name="amplify_ui_liveness_get_ready_photosensitivity_title">Aviso de sensibilidade à luz</string>
+</resources>
