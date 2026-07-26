@@ -23,6 +23,19 @@ try {
 const bodyUserId = (req) => req.body?.userId;
 const paramUserId = (req) => req.params?.userId;
 const queryUserId = (req) => req.query?.userId;
+const IDENTITY_REVERIFY_REJECTION_MIRROR_CONFLICT =
+  'KYC_IDENTITY_REVERIFY_RECONCILIATION_CONFLICT';
+const IDENTITY_REVERIFY_REJECTION_MIRROR_CONFLICT_CODES = new Set([
+  'KYC_IDENTITY_REVERIFY_CHALLENGE_STALE',
+  'KYC_IDENTITY_REVERIFY_SUPERSEDED_BY_BLOCK',
+  'KYC_IDENTITY_REVERIFY_REJECTION_INVALID',
+  'KYC_IDENTITY_REVERIFY_CANONICAL_TIMESTAMP_REQUIRED',
+  'KYC_IDENTITY_REVERIFY_RETRY_BINDING_INVALID'
+]);
+const IDENTITY_REVERIFY_REJECTION_MIRROR_SUPERSEDED_CODES = new Set([
+  'KYC_IDENTITY_REVERIFY_CHALLENGE_STALE',
+  'KYC_IDENTITY_REVERIFY_SUPERSEDED_BY_BLOCK'
+]);
 
 function withoutSensitiveBiometricPayload(payload = {}) {
   if (!payload || typeof payload !== 'object') {
@@ -141,7 +154,7 @@ function resolvePublicCanonicalConflictFailure(code, { stateUnavailable = false 
       retryable: true
     };
   }
-  if (code === 'KYC_IDENTITY_REVERIFY_CHALLENGE_STALE') {
+  if (IDENTITY_REVERIFY_REJECTION_MIRROR_SUPERSEDED_CODES.has(code)) {
     return {
       error: 'Esta solicitação foi substituída por uma validação mais recente.',
       retryable: false
@@ -169,7 +182,10 @@ function resolvePublicCanonicalConflictFailure(code, { stateUnavailable = false 
     'KYC_CANONICAL_EVIDENCE_HASH_CONFLICT',
     'KYC_CANONICAL_CHALLENGE_BINDING_INVALID',
     'KYC_CANONICAL_CHALLENGE_NOT_FOUND'
-  ].includes(code)) {
+  ].includes(code)
+    || IDENTITY_REVERIFY_REJECTION_MIRROR_CONFLICT_CODES.has(code)
+    || code === IDENTITY_REVERIFY_REJECTION_MIRROR_CONFLICT
+  ) {
     return {
       error: 'Não foi possível confirmar esta validação com segurança.',
       retryable: false
@@ -2111,6 +2127,64 @@ class KYCRoutes {
               ? reviewEvidenceCandidate
               : null;
             await trustService.assertVerificationOutsideActiveTrip(userId);
+            if (
+              isIdentityReverificationRequest
+              && kycRuntime.namespace === 'operational'
+            ) {
+              if (
+                typeof policyService.reconcileRejectedIdentityReverificationMirror
+                !== 'function'
+              ) {
+                const mirrorUnavailable = new Error(
+                  'Espelho RTDB de rejeicao canonica indisponivel'
+                );
+                mirrorUnavailable.code = 'KYC_REVERIFY_STATE_UNAVAILABLE';
+                throw mirrorUnavailable;
+              }
+
+              let identityMirrorResult = null;
+              try {
+                identityMirrorResult = await policyService
+                  .reconcileRejectedIdentityReverificationMirror(userId, {
+                    ...reconciledRejection,
+                    attemptScope: sessionMetadataCandidate?.attemptScope || null,
+                    canonicalRecordedAt:
+                      canonicalSessionClaim.existingEvidence?.recordedAt || null
+                  });
+              } catch (policyError) {
+                const mirrorUnavailable = new Error(
+                  'Espelho RTDB de rejeicao canonica nao foi confirmado'
+                );
+                mirrorUnavailable.code = 'KYC_REVERIFY_STATE_UNAVAILABLE';
+                mirrorUnavailable.cause = policyError;
+                throw mirrorUnavailable;
+              }
+              if (identityMirrorResult?.recorded !== true) {
+                const mirrorResultCode = String(
+                  identityMirrorResult?.code || ''
+                ).trim();
+                if (identityMirrorResult?.stale === true) {
+                  const mirrorConflict = new Error(
+                    'Espelho RTDB de rejeicao canonica foi substituido'
+                  );
+                  mirrorConflict.code =
+                    IDENTITY_REVERIFY_REJECTION_MIRROR_CONFLICT_CODES
+                      .has(mirrorResultCode)
+                      ? mirrorResultCode
+                      : IDENTITY_REVERIFY_REJECTION_MIRROR_CONFLICT;
+                  mirrorConflict.mirrorCode = mirrorResultCode || null;
+                  throw mirrorConflict;
+                }
+                const mirrorUnconfirmed = new Error(
+                  'Espelho RTDB de rejeicao canonica nao foi confirmado'
+                );
+                mirrorUnconfirmed.code = 'KYC_REVERIFY_STATE_UNAVAILABLE';
+                mirrorUnconfirmed.mirrorCode = mirrorResultCode || null;
+                throw mirrorUnconfirmed;
+              }
+              await leaseHeartbeat.assertHeld();
+            }
+
             await workflowService.finalizeCleanRetryAuthorization({
               driverId: userId,
               attemptScope: sessionMetadataCandidate?.attemptScope || null,
@@ -2121,13 +2195,24 @@ class KYCRoutes {
             });
             if (
               isIdentityReverificationRequest
-              && typeof policyService.recordIdentityReverificationResult === 'function'
+              && kycRuntime.namespace !== 'operational'
             ) {
               try {
-                await policyService.recordIdentityReverificationResult(userId, {
-                  ...reconciledRejection,
-                  reconciliationOnly: true
-                });
+                const identityMirrorResult =
+                  typeof policyService.recordIdentityReverificationResult === 'function'
+                    ? await policyService.recordIdentityReverificationResult(userId, {
+                      ...reconciledRejection,
+                      reconciliationOnly: true
+                    })
+                    : null;
+                if (identityMirrorResult?.recorded !== true) {
+                  logStructured('warn', 'Espelho de rejeicao canonica nao foi atualizado', {
+                    service: 'kyc-routes-routes',
+                    userId,
+                    challengeId: challengeId || null,
+                    code: identityMirrorResult?.code || null
+                  });
+                }
               } catch (policyError) {
                 logError(policyError, 'Falha no espelho de uma rejeicao canonica reconciliada', {
                   service: 'kyc-routes-routes',
@@ -2655,7 +2740,8 @@ class KYCRoutes {
         const conflictCodes = new Set([
           'KYC_VERIFICATION_DEFERRED_ACTIVE_TRIP',
           'KYC_VERIFICATION_LEASE_LOST',
-          'KYC_IDENTITY_REVERIFY_CHALLENGE_STALE',
+          ...IDENTITY_REVERIFY_REJECTION_MIRROR_CONFLICT_CODES,
+          IDENTITY_REVERIFY_REJECTION_MIRROR_CONFLICT,
           'KYC_CANONICAL_EVIDENCE_HASH_CONFLICT',
           'KYC_CANONICAL_CHALLENGE_BINDING_INVALID',
           'KYC_CANONICAL_CHALLENGE_NOT_FOUND',

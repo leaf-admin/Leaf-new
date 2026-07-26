@@ -2117,6 +2117,200 @@ class KYCPolicyService {
     }
   }
 
+  async reconcileRejectedIdentityReverificationMirror(driverId, rejection = {}) {
+    if (!driverId) return { success: false, error: 'driverId e obrigatorio' };
+    const requirement = rejection.requirement || rejection.payload?.requirement;
+    const challengeId = rejection.challengeId || rejection.payload?.challengeId || null;
+    if (requirement !== IDENTITY_REVERIFY_REQUIREMENT || !challengeId) {
+      return {
+        success: true,
+        driverId,
+        recorded: false,
+        stale: true,
+        code: 'KYC_IDENTITY_REVERIFY_CHALLENGE_STALE'
+      };
+    }
+
+    const decision = normalizeKycStatus(rejection.decision);
+    const score = Number(rejection.similarityScore ?? rejection.confidence);
+    if (
+      rejection.isMatch !== false
+      || !['reject', 'review'].includes(decision)
+      || !Number.isFinite(score)
+    ) {
+      return {
+        success: true,
+        driverId,
+        recorded: false,
+        stale: true,
+        code: 'KYC_IDENTITY_REVERIFY_REJECTION_INVALID'
+      };
+    }
+
+    const canonicalRecordedAt = rejection.canonicalRecordedAt
+      || rejection.payload?.canonicalRecordedAt
+      || null;
+    const canonicalRecordedAtMs = toMillis(canonicalRecordedAt);
+    if (!canonicalRecordedAtMs) {
+      return {
+        success: true,
+        driverId,
+        recorded: false,
+        stale: true,
+        code: 'KYC_IDENTITY_REVERIFY_CANONICAL_TIMESTAMP_REQUIRED'
+      };
+    }
+    const canonicalCompletedAt = new Date(canonicalRecordedAtMs).toISOString();
+
+    const rawAttemptScope = String(
+      rejection.attemptScope || rejection.payload?.attemptScope || ''
+    ).trim().toLowerCase();
+    const authorizedAttemptScope = normalizeAuthorizedRetryScope(rawAttemptScope);
+    if (
+      (
+        rawAttemptScope.startsWith(MANUAL_REVIEW_RETRY_SCOPE_PREFIX)
+        || rawAttemptScope.startsWith(ORPHAN_HOLD_RETRY_SCOPE_PREFIX)
+      )
+      && !authorizedAttemptScope
+    ) {
+      return {
+        success: true,
+        driverId,
+        recorded: false,
+        stale: true,
+        code: 'KYC_IDENTITY_REVERIFY_RETRY_BINDING_INVALID'
+      };
+    }
+
+    let superseded = false;
+    let idempotentReplay = false;
+    const realtimeResult = await this.transactCurrentIdentityReverification(
+      driverId,
+      challengeId,
+      (currentUser, currentState) => {
+        superseded = false;
+        idempotentReplay = false;
+        const currentStatus = normalizeKycStatus(currentState.status);
+        const currentRequirement = String(currentState.requirement || '').trim();
+        const currentAttemptScope = normalizeAuthorizedRetryScope(
+          currentState.attemptScope || currentState.metadata?.attemptScope
+        );
+        const currentDecision = normalizeKycStatus(currentState.lastDecision);
+        const currentScoreValue = currentState.lastSimilarityScore;
+        const hasCurrentScore = (
+          currentScoreValue !== undefined
+          && currentScoreValue !== null
+          && currentScoreValue !== ''
+        );
+        const currentScore = Number(currentScoreValue);
+        const currentKycStatus = normalizeKycStatus(
+          currentUser.kycStatus ?? currentUser.kyc_status
+        );
+        const currentBlockReason = normalizeKycStatus(
+          currentUser.kycBlockedReason ?? currentUser.kyc_blocked_reason
+        );
+        const currentAccountStatus = normalizeKycStatus(currentUser.status);
+        const currentUpdatedAtMs = toMillis(currentUser.kycUpdatedAt);
+        const sameFailedResult = currentStatus === 'failed'
+          && (!currentDecision || currentDecision === decision)
+          && (!hasCurrentScore || (Number.isFinite(currentScore) && currentScore === score));
+        const currentBlockIsCanonical = currentKycStatus === 'blocked'
+          && isTrueFlag(currentUser.kycBlocked ?? currentUser.kyc_blocked)
+          && currentBlockReason === 'identity_reverification_failed';
+        const canonicalMirrorAlreadyPresent = Boolean(
+          sameFailedResult
+          && currentBlockIsCanonical
+          && toMillis(currentState.validationCompletedAt) === canonicalRecordedAtMs
+        );
+
+        if (
+          currentRequirement !== IDENTITY_REVERIFY_REQUIREMENT
+          || !['requested', 'validating', 'failed'].includes(currentStatus)
+          || (authorizedAttemptScope && currentAttemptScope !== authorizedAttemptScope)
+          || (!authorizedAttemptScope && currentAttemptScope)
+          || (currentStatus === 'failed' && !sameFailedResult)
+        ) {
+          superseded = true;
+          return undefined;
+        }
+        if (canonicalMirrorAlreadyPresent) {
+          idempotentReplay = true;
+          return currentUser;
+        }
+        if (
+          TERMINAL_KYC_STATUSES.has(currentAccountStatus)
+          || !['', 'approved', 'pending_reverify', 'blocked'].includes(currentKycStatus)
+          || (
+            isTrueFlag(currentUser.kycBlocked ?? currentUser.kyc_blocked)
+            && !currentBlockIsCanonical
+          )
+          || (currentKycStatus === 'blocked' && !currentBlockIsCanonical)
+          || (
+            currentUpdatedAtMs > canonicalRecordedAtMs
+            && !(sameFailedResult && currentBlockIsCanonical)
+          )
+        ) {
+          superseded = true;
+          return undefined;
+        }
+
+        const notificationSentAtMs = toMillis(currentState.notificationSentAt);
+        const validationStartedAtMs = toMillis(currentState.validationStartedAt);
+        return {
+          ...currentUser,
+          identityReverification: {
+            ...currentState,
+            status: 'failed',
+            validationCompletedAt: canonicalCompletedAt,
+            lastSimilarityScore: score,
+            lastDecision: decision,
+            metrics: {
+              ...(currentState.metrics || {}),
+              notificationToValidationCompletedSeconds: notificationSentAtMs
+                ? Math.max(
+                  0,
+                  Math.round((canonicalRecordedAtMs - notificationSentAtMs) / 1000)
+                )
+                : null,
+              validationDurationSeconds: validationStartedAtMs
+                ? Math.max(
+                  0,
+                  Math.round((canonicalRecordedAtMs - validationStartedAtMs) / 1000)
+                )
+                : null
+            }
+          },
+          kycStatus: 'blocked',
+          kycBlocked: true,
+          kycBlockedReason: 'identity_reverification_failed',
+          kycLastVerificationAt: canonicalCompletedAt,
+          kycUpdatedAt: canonicalCompletedAt
+        };
+      }
+    );
+    if (!realtimeResult.committed) {
+      return {
+        success: true,
+        driverId,
+        recorded: false,
+        stale: true,
+        code: superseded
+          ? 'KYC_IDENTITY_REVERIFY_SUPERSEDED_BY_BLOCK'
+          : (realtimeResult.code || 'KYC_IDENTITY_REVERIFY_CHALLENGE_STALE')
+      };
+    }
+
+    return {
+      success: true,
+      driverId,
+      status: 'failed',
+      recorded: true,
+      rtdbOnly: true,
+      idempotentReplay,
+      canonicalCompletedAt
+    };
+  }
+
   async recordIdentityReverificationResult(driverId, verificationResult = {}) {
     if (!driverId) return { success: false, error: 'driverId e obrigatorio' };
     const requirement = verificationResult.requirement || verificationResult.payload?.requirement;
