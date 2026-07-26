@@ -311,39 +311,74 @@ class KYCPolicyService {
     }
 
     const userRef = this.getStrictRealtimeDatabase().ref(`users/${driverId}`);
+    const stateUnavailableError = (error, message) => {
+      const normalized = error instanceof Error ? error : new Error(message);
+      normalized.code = 'KYC_REVERIFY_STATE_UNAVAILABLE';
+      return normalized;
+    };
     const readCurrentUser = async () => {
       try {
         const snapshot = await userRef.once('value');
         return snapshot?.exists?.() ? snapshot.val() : null;
       } catch (error) {
-        error.code = 'KYC_REVERIFY_STATE_UNAVAILABLE';
-        throw error;
+        throw stateUnavailableError(
+          error,
+          'RTDB nao confirmou o estado autoritativo do challenge KYC'
+        );
       }
     };
     const hasCurrentChallenge = (currentUser) => (
       String(currentUser?.identityReverification?.challengeId || '') === String(challengeId)
     );
+    const cachePinListener = () => {};
+    let cachePinAttached = false;
+    let cachePinError = null;
 
     // Firebase Admin invokes a transaction updater immediately with its local
     // cache. On a cold gateway that value can be null even when RTDB has data;
-    // returning undefined there aborts locally before the server is consulted.
-    // Reading the exact parent ref first primes that cache while the transaction
-    // still protects against a challenge replacement after the read.
-    const preflightUser = await readCurrentUser();
-    if (!hasCurrentChallenge(preflightUser)) {
-      return {
-        committed: false,
-        stale: true,
-        code: 'KYC_IDENTITY_REVERIFY_CHALLENGE_STALE'
-      };
-    }
+    // returning undefined there aborts locally before any server round-trip.
+    // Pinning a read listener prevents once() from pruning the authoritative
+    // cache before transaction() starts.
+    // applyLocally=false prevents an uncommitted mutation from being projected.
+    try {
+      if (typeof userRef.on !== 'function' || typeof userRef.off !== 'function') {
+        throw stateUnavailableError(
+          null,
+          'RTDB nao oferece listener autoritativo para o challenge KYC'
+        );
+      }
+      try {
+        userRef.on('value', cachePinListener, (error) => {
+          cachePinError = stateUnavailableError(
+            error,
+            'Listener RTDB do challenge KYC foi cancelado'
+          );
+        });
+        cachePinAttached = true;
+      } catch (error) {
+        throw stateUnavailableError(
+          error,
+          'RTDB nao iniciou o listener autoritativo do challenge KYC'
+        );
+      }
 
-    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const preflightUser = await readCurrentUser();
+      if (cachePinError) throw cachePinError;
+      if (!hasCurrentChallenge(preflightUser)) {
+        return {
+          committed: false,
+          stale: true,
+          code: 'KYC_IDENTITY_REVERIFY_CHALLENGE_STALE'
+        };
+      }
+
       let matchedCurrentChallenge = false;
       let mutationRejected = false;
       let transaction = null;
       try {
         transaction = await userRef.transaction((currentUser) => {
+          matchedCurrentChallenge = false;
+          mutationRejected = false;
           const currentState = currentUser?.identityReverification;
           if (!currentState || String(currentState.challengeId || '') !== String(challengeId)) {
             return undefined;
@@ -354,12 +389,15 @@ class KYCPolicyService {
             mutationRejected = true;
           }
           return nextUser;
-        });
+        }, undefined, false);
       } catch (error) {
-        error.code = 'KYC_REVERIFY_STATE_UNAVAILABLE';
-        throw error;
+        throw stateUnavailableError(
+          error,
+          'RTDB nao confirmou a transacao do challenge KYC atual'
+        );
       }
 
+      if (cachePinError) throw cachePinError;
       if (transaction?.committed === true && matchedCurrentChallenge) {
         return {
           committed: true,
@@ -376,6 +414,7 @@ class KYCPolicyService {
       }
 
       const latestUser = await readCurrentUser();
+      if (cachePinError) throw cachePinError;
       if (!hasCurrentChallenge(latestUser)) {
         return {
           committed: false,
@@ -383,18 +422,24 @@ class KYCPolicyService {
           code: 'KYC_IDENTITY_REVERIFY_CHALLENGE_STALE'
         };
       }
-      if (attempt === 0) {
-        logStructured('warn', 'Transacao KYC repetida apos cache RTDB sem estado canonico', {
-          service: 'kyc-policy-service',
-          driverId,
-          challengeId
-        });
+
+      throw stateUnavailableError(
+        null,
+        'RTDB nao confirmou a transacao do challenge KYC atual'
+      );
+    } finally {
+      if (cachePinAttached) {
+        try {
+          userRef.off('value', cachePinListener);
+        } catch (_error) {
+          logStructured('warn', 'Falha ao remover listener RTDB autoritativo', {
+            service: 'kyc-policy-service',
+            driverId,
+            challengeId
+          });
+        }
       }
     }
-
-    const error = new Error('RTDB nao confirmou a transacao do challenge KYC atual');
-    error.code = 'KYC_REVERIFY_STATE_UNAVAILABLE';
-    throw error;
   }
 
   async persistCurrentIdentityFirestore(
