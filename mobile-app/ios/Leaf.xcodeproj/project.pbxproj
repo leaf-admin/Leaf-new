@@ -34,6 +34,8 @@
 		F11748422D0307B40044C1D9 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = F11748412D0307B40044C1D9 /* AppDelegate.swift */; };
 		F6D5171B18CE4115BF6BFE18 /* repeat.wav in Resources */ = {isa = PBXBuildFile; fileRef = 1046A07F92C54CC482D1B201 /* repeat.wav */; };
 		FF7202B31CAE45B69F394CF1 /* LeafRideActivityWidget.appex in Copy Files */ = {isa = PBXBuildFile; fileRef = 80D5F2DCBBB049F697CCE8B6 /* LeafRideActivityWidget.appex */; };
+		7B3ED97F37814EE0B071E8D1 /* Localizable.strings in Resources */ = {isa = PBXBuildFile; fileRef = F277A3A4036E48219CAD1AE1 /* Localizable.strings */; };
+		2E0B80D0CF174C8A9A984CF9 /* Localizable.strings in Resources */ = {isa = PBXBuildFile; fileRef = 5DB76A7458E64693BFFAC7AE /* Localizable.strings */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -83,6 +85,8 @@
 		ED297162215061F000B7C4FE /* JavaScriptCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = JavaScriptCore.framework; path = System/Library/Frameworks/JavaScriptCore.framework; sourceTree = SDKROOT; };
 		F11748412D0307B40044C1D9 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AppDelegate.swift; path = Leaf/AppDelegate.swift; sourceTree = "<group>"; };
 		F11748442D0722820044C1D9 /* Leaf-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; name = "Leaf-Bridging-Header.h"; path = "Leaf/Leaf-Bridging-Header.h"; sourceTree = "<group>"; };
+		F277A3A4036E48219CAD1AE1 /* Localizable.strings */ = {isa = PBXFileReference; name = "Localizable.strings"; path = "Base.lproj/Localizable.strings"; sourceTree = "<group>"; fileEncoding = 4; lastKnownFileType = text.plist.strings; explicitFileType = undefined; includeInIndex = 0; };
+		5DB76A7458E64693BFFAC7AE /* Localizable.strings */ = {isa = PBXFileReference; name = "Localizable.strings"; path = "pt-BR.lproj/Localizable.strings"; sourceTree = "<group>"; fileEncoding = 4; lastKnownFileType = text.plist.strings; explicitFileType = undefined; includeInIndex = 0; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -209,6 +213,8 @@
 			isa = PBXGroup;
 			children = (
 				BB2F792C24A3F905000567C9 /* Expo.plist */,
+				9C7BFE3AEC2D465AB6A7B14F /* Base.lproj */,
+				21FB98E07A464B1E935E212A /* pt-BR.lproj */,
 			);
 			name = Supporting;
 			path = Leaf/Supporting;
@@ -229,6 +235,24 @@
 			);
 			name = ExpoModulesProviders;
 			sourceTree = "<group>";
+		};
+		9C7BFE3AEC2D465AB6A7B14F /* Base.lproj */ = {
+			isa = "PBXGroup";
+			children = (
+				F277A3A4036E48219CAD1AE1 /* Localizable.strings */,
+			);
+			name = Base.lproj;
+			sourceTree = "<group>";
+			path = "";
+		};
+		21FB98E07A464B1E935E212A /* pt-BR.lproj */ = {
+			isa = "PBXGroup";
+			children = (
+				5DB76A7458E64693BFFAC7AE /* Localizable.strings */,
+			);
+			name = pt-BR.lproj;
+			sourceTree = "<group>";
+			path = "";
 		};
 /* End PBXGroup section */
 
@@ -302,6 +326,7 @@
 			knownRegions = (
 				en,
 				Base,
+				pt-BR,
 			);
 			mainGroup = 83CBB9F61A601CBA00E9B192;
 			packageReferences = (
@@ -334,6 +359,8 @@
 				78DF9BD629FD4332BBF3D095 /* Inter_700Bold.ttf in Resources */,
 				C1BE0C58A2E049B9A3DC28B3 /* Inter_300Light.ttf in Resources */,
 				0B2337091A4587AC3ED6252D /* PrivacyInfo.xcprivacy in Resources */,
+				7B3ED97F37814EE0B071E8D1 /* Localizable.strings in Resources */,
+				2E0B80D0CF174C8A9A984CF9 /* Localizable.strings in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

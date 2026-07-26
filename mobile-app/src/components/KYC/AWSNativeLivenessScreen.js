@@ -326,6 +326,7 @@ export default function AWSNativeLivenessScreen({
 
         const region = sessionResponse.data.region || credentialsResponse.data.region || 'us-east-1';
 
+        Logger.log('[KYC_SURFACE] aws_native_liveness');
         await nativeAwsLivenessService.start({
           sessionId,
           region,
