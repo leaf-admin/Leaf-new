@@ -16,10 +16,11 @@ function listJavaScriptFiles(directory) {
 describe('canonical common runtime boundary', () => {
   it('does not load the legacy common package barrel from mobile runtime code', () => {
     const barrelImportPattern = /(?:from\s+|require\()\s*['"](?:\.\.\/)+common['"]/;
+    const legacyPackageImportPattern = /common\/common-packages\/src\//;
     const violations = listJavaScriptFiles(path.join(MOBILE_ROOT, 'src'))
       .flatMap((filePath) => {
         const source = fs.readFileSync(filePath, 'utf8');
-        return barrelImportPattern.test(source)
+        return barrelImportPattern.test(source) || legacyPackageImportPattern.test(source)
           ? [path.relative(MOBILE_ROOT, filePath)]
           : [];
       });
