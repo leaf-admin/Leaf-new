@@ -89,8 +89,14 @@ describe('canonical product surface manifest', () => {
       expect(getManifestRouteCategory(routeName)).toBe('legacy');
       expect(registeredRoutes).not.toContain(routeName);
     });
+    surfaceManifest.retiredRoutes.forEach(routeName => {
+      expect(getManifestRouteCategory(routeName)).not.toBeNull();
+      expect(getManifestRouteCategory(routeName)).not.toBe('current');
+      expect(registeredRoutes).not.toContain(routeName);
+    });
     expect([...classifiedRoutes].sort()).toEqual([
       ...registeredRoutes,
+      ...surfaceManifest.retiredRoutes,
       ...Object.keys(surfaceManifest.retiredRouteComponents),
     ].sort());
   });

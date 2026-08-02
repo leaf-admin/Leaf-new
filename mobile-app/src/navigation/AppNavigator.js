@@ -34,55 +34,11 @@ import CNHUploadScreen from '../screens/CNHUploadScreen';
 import CRLVUploadScreen from '../screens/CRLVUploadScreen';
 import AuthFlowScreenshotHarness from '../components/auth/AuthFlowScreenshotHarness';
 
-// Telas Principais
-import ProfileScreen from '../screens/ProfileScreen';
-import SettingsScreen from '../screens/SettingsScreen';
-import SearchScreen from '../screens/SearchScreen';
-import RideListScreen from '../screens/RideListScreen';
-import ChatScreen from '../screens/ChatScreen';
-import Notifications from '../screens/Notifications';
-import SupportScreen from '../screens/SupportScreen';
-import SupportTicketScreen from '../screens/SupportTicketScreen';
-import SupportChatScreen from '../screens/SupportChatScreen';
-import HelpScreen from '../screens/HelpScreen';
-import AboutScreen from '../screens/AboutScreen';
 import LegalScreen from '../screens/LegalScreen';
 import PrivacyPolicyScreen from '../screens/PrivacyPolicyScreen';
 import PilotFeatureUnavailableScreen from '../screens/PilotFeatureUnavailableScreen';
 
-// Telas de Motorista
-import DriverDashboardScreen from '../screens/DriverDashboardScreen';
-import DriverRating from '../screens/DriverRating';
-import DriverDocumentsScreen from '../screens/DriverDocumentsScreen';
-import DriverSearchScreen from '../screens/DriverSearchScreen';
-import DriverIncomeScreen from '../screens/DriverIncomeScreen';
 import EarningsReportScreen from '../screens/EarningsReportScreen';
-import SubscriptionManagementScreen from '../screens/SubscriptionManagementScreen';
-
-// Telas de Pagamento
-import PaymentSuccessScreen from '../screens/PaymentSuccessScreen';
-import PaymentFailedScreen from '../screens/PaymentFailedScreen';
-import PaymentDetails from '../screens/PaymentDetails';
-import WithdrawMoney from '../screens/WithdrawMoney';
-
-// Telas de Perfil e Configuração
-import EditProfile from '../screens/EditProfile';
-import EditProfileScreen from '../screens/EditProfileScreen';
-import PersonalDataScreen from '../screens/PersonalDataScreen';
-import UserInfoScreen from '../screens/UserInfoScreen';
-import AddVehicleScreen from '../screens/AddVehicleScreen';
-import MyVehiclesScreen from '../screens/MyVehiclesScreen';
-import CarEditScreen from '../screens/CarEditScreen';
-import CarsScreen from '../screens/CarsScreen';
-
-// Telas de Viagem
-import BookedCabScreen from '../screens/BookedCabScreen';
-import TripTrackingScreen from '../screens/TripTrackingScreen';
-import RideDetails from '../screens/RideDetails';
-import CancellationScreen from '../screens/CancellationScreen';
-import FeedbackScreen from '../screens/FeedbackScreen';
-import Complain from '../screens/Complain';
-import ReceiptScreen from '../screens/ReceiptScreen';
 
 // Telas de Onboarding
 import SplashScreen from '../screens/SplashScreen';
@@ -293,7 +249,6 @@ const pilotLaunchFeatures = getPilotLaunchFeatureSnapshot();
 const prototypeInvitesEntryComponent = pilotLaunchFeatures.referralProgramsEnabled ? RobotaxiInvitesScreen : PilotFeatureUnavailableScreen;
 const referralEntryComponent = prototypeInvitesEntryComponent;
 const driverInviteEntryComponent = RobotaxiDriverWaitlistScreen;
-const withdrawalEntryComponent = pilotLaunchFeatures.driverWithdrawalsEnabled ? WithdrawMoney : PilotFeatureUnavailableScreen;
 const driverPayoutEntryComponent = PilotFeatureUnavailableScreen;
 
 const referralScreenParams = {
@@ -307,18 +262,6 @@ const prototypeReferralScreenParams = {
   targetRoute: 'RobotaxiPrototype'
 };
 
-const withdrawalScreenParams = {
-  title: 'Saque operado manualmente',
-  message: 'Saque e repasse do motorista ficam fora do app nesta fase e serao tratados pela operacao assistida.',
-  targetRoute: 'Map'
-};
-
-const legacyWalletScreenParams = {
-  title: 'Carteira fora do piloto',
-  message: 'Pagamento de corrida segue via Pix. Saldo e saques do motorista ficam na area de ganhos.',
-  targetRoute: 'Map'
-};
-
 const driverPayoutScreenParams = {
   title: 'Repasse pelo saldo Leaf',
   message: 'Conta BaaS nao faz parte do modelo atual. Use a tela de ganhos para consultar saldo e solicitar saque.',
@@ -329,12 +272,6 @@ const legacyPlanScreenParams = {
   title: 'Plano antigo desativado',
   message: 'Assinaturas e repasses seguem o modelo atual de ganhos e saque. Este fluxo antigo ficou em compatibilidade.',
   targetRoute: 'Map'
-};
-
-const legacyDriverTripsScreenParams = {
-  title: 'Aceite antigo desativado',
-  message: 'Aceite de corrida e repasse financeiro acontecem somente pelo fluxo Robotaxi com backend canonico.',
-  targetRoute: 'RobotaxiPrototype'
 };
 
 function normalizeLeafAppLinkPath(path) {
@@ -667,104 +604,6 @@ function renderPublicScreens(allowPrototypeQaScreens = false) {
   );
 }
 
-function renderSharedPrivateScreens() {
-  return (
-    <>
-      <Stack.Screen name="Search" component={SearchScreen} />
-      <Stack.Screen name="Chat" component={ChatScreen} />
-      <Stack.Screen name="Notifications" component={Notifications} />
-      <Stack.Screen name="Settings" component={SettingsScreen} />
-      <Stack.Screen name="Help" component={HelpScreen} />
-      <Stack.Screen name="About" component={AboutScreen} />
-      <Stack.Screen name="Legal" component={LegalScreen} />
-      <Stack.Screen name="PrivacyPolicy" component={PrivacyPolicyScreen} />
-      <Stack.Screen name="Profile" component={ProfileScreen} />
-      <Stack.Screen name="Support" component={SupportScreen} />
-      <Stack.Screen name="SupportTicket" component={SupportTicketScreen} />
-      <Stack.Screen name="SupportChat" component={SupportChatScreen} />
-      <Stack.Screen name="WaitList" component={RobotaxiDriverWaitlistStatusScreen} />
-      <Stack.Screen name="DriverInvite" component={driverInviteEntryComponent} />
-      <Stack.Screen name="EditProfile" component={EditProfile} />
-      <Stack.Screen name="EditProfileScreen" component={EditProfileScreen} />
-      <Stack.Screen name="PersonalData" component={PersonalDataScreen} />
-      <Stack.Screen name="UserInfo" component={UserInfoScreen} />
-      <Stack.Screen name="PaymentDetails" component={PaymentDetails} />
-      <Stack.Screen
-        name="AddMoney"
-        component={PilotFeatureUnavailableScreen}
-        initialParams={legacyWalletScreenParams}
-        options={{ headerShown: false }}
-      />
-      <Stack.Screen
-        name="WithdrawMoney"
-        component={withdrawalEntryComponent}
-        initialParams={withdrawalScreenParams}
-      />
-      <Stack.Screen
-        name="WalletDetails"
-        component={PilotFeatureUnavailableScreen}
-        initialParams={legacyWalletScreenParams}
-        options={{ headerShown: false }}
-      />
-      <Stack.Screen name="OTP" component={OTPScreen} options={{ headerShown: false }} />
-      <Stack.Screen name="PhoneInputScreen" component={LegacyAuthRouteRedirectScreen} options={{ headerShown: false }} />
-      <Stack.Screen name="PhoneScreen" component={LegacyAuthRouteRedirectScreen} options={{ headerShown: false }} />
-      <Stack.Screen name="Login" component={LegacyAuthRouteRedirectScreen} options={{ headerShown: false }} />
-      <Stack.Screen name="AuthScreen" component={LegacyAuthRouteRedirectScreen} options={{ headerShown: false }} />
-      <Stack.Screen name="WelcomeScreen" component={WelcomeScreen} options={{ headerShown: false }} />
-      <Stack.Screen name="ProfileSelectionScreen" component={ProfileSelectionScreen} options={{ headerShown: false }} />
-      <Stack.Screen name="ProfileSelection" component={ProfileSelectionScreen} options={{ headerShown: false }} />
-      <Stack.Screen name="CompleteRegistration" component={CompleteRegistrationScreen} options={{ headerShown: false }} />
-      <Stack.Screen name="DriverTerms" component={DriverTermsScreen} options={{ headerShown: false }} />
-      <Stack.Screen name="CNHUploadScreen" component={CNHUploadScreen} options={{ headerShown: false }} />
-      <Stack.Screen name="CRLVUploadScreen" component={CRLVUploadScreen} options={{ headerShown: false }} />
-      <Stack.Screen name="CNHUpload" component={CNHUploadScreen} options={{ headerShown: false }} />
-      <Stack.Screen name="CRLVUpload" component={CRLVUploadScreen} options={{ headerShown: false }} />
-      <Stack.Screen
-        name="Referral"
-        component={referralEntryComponent}
-        initialParams={referralScreenParams}
-        options={{ headerShown: false }}
-      />
-      <Stack.Screen
-        name="ReferralScreen"
-        component={referralEntryComponent}
-        initialParams={referralScreenParams}
-        options={{ headerShown: false }}
-      />
-      <Stack.Screen
-        name="BaaSAccount"
-        component={driverPayoutEntryComponent}
-        initialParams={driverPayoutScreenParams}
-        options={{ headerShown: false }}
-      />
-      <Stack.Screen
-        name="BaaSAccountScreen"
-        component={driverPayoutEntryComponent}
-        initialParams={driverPayoutScreenParams}
-        options={{ headerShown: false }}
-      />
-      <Stack.Screen name="Messages" component={ChatScreen} />
-      <Stack.Screen name="AccountSettings" component={SettingsScreen} />
-      <Stack.Screen name="SettingsScreen" component={SettingsScreen} />
-      <Stack.Screen name="HelpScreen" component={HelpScreen} />
-      <Stack.Screen
-        name="AccountStatement"
-        component={PilotFeatureUnavailableScreen}
-        initialParams={legacyWalletScreenParams}
-        options={{ headerShown: false }}
-      />
-      <Stack.Screen
-        name="addMoney"
-        component={PilotFeatureUnavailableScreen}
-        initialParams={legacyWalletScreenParams}
-        options={{ headerShown: false }}
-      />
-      <Stack.Screen name="onlineChat" component={SupportChatScreen} />
-    </>
-  );
-}
-
 function renderPrototypeCompanionScreens(activeRole) {
   return (
     <>
@@ -780,99 +619,6 @@ function renderPrototypeCompanionScreens(activeRole) {
           />
         </>
       ) : null}
-    </>
-  );
-}
-
-function renderCustomerPrivateScreens() {
-  return (
-    <>
-      <Stack.Screen name="Rides" component={RideListScreen} />
-      <Stack.Screen name="RideListScreen" component={RideListScreen} />
-      <Stack.Screen name="BookedCab" component={BookedCabScreen} />
-      <Stack.Screen name="TripTracking" component={TripTrackingScreen} />
-      <Stack.Screen name="RideDetails" component={RideDetails} />
-      <Stack.Screen name="TripDetails" component={RideDetails} />
-      <Stack.Screen name="Receipt" component={ReceiptScreen} />
-      <Stack.Screen name="ReceiptDetails" component={ReceiptScreen} />
-      <Stack.Screen name="Cancellation" component={CancellationScreen} />
-      <Stack.Screen name="CancellationSuccess" component={CancellationScreen} />
-      <Stack.Screen name="Feedback" component={FeedbackScreen} />
-      <Stack.Screen name="Complain" component={Complain} />
-      <Stack.Screen name="PaymentSuccess" component={PaymentSuccessScreen} />
-      <Stack.Screen name="PaymentFailed" component={PaymentFailedScreen} />
-      <Stack.Screen name="PaymentSuccessScreen" component={PaymentSuccessScreen} />
-      <Stack.Screen name="BookingConfirmation" component={BookedCabScreen} />
-      <Stack.Screen name="PixPayment" component={PaymentDetails} />
-      <Stack.Screen name="TransactionHistory" component={RideListScreen} />
-    </>
-  );
-}
-
-function renderDriverPrivateScreens() {
-  return (
-    <>
-      <Stack.Screen name="Dashboard" component={DriverDashboardScreen} />
-      <Stack.Screen
-        name="Trips"
-        component={PilotFeatureUnavailableScreen}
-        initialParams={legacyDriverTripsScreenParams}
-        options={{ headerShown: false }}
-      />
-      <Stack.Screen
-        name="DriverBalance"
-        component={driverPayoutEntryComponent}
-        initialParams={driverPayoutScreenParams}
-      />
-      <Stack.Screen name="DriverRating" component={DriverRating} />
-      <Stack.Screen name="DriverDocuments" component={DriverDocumentsScreen} options={{ gestureEnabled: false, headerShown: false }} />
-      <Stack.Screen name="DriverSearch" component={DriverSearchScreen} />
-      <Stack.Screen name="DriverIncome" component={DriverIncomeScreen} />
-      <Stack.Screen
-        name="WeeklyPayment"
-        component={PilotFeatureUnavailableScreen}
-        initialParams={legacyPlanScreenParams}
-        options={{ headerShown: false }}
-      />
-      <Stack.Screen
-        name="WooviDriverBalance"
-        component={driverPayoutEntryComponent}
-        initialParams={driverPayoutScreenParams}
-      />
-      <Stack.Screen name="EarningsReport" component={EarningsReportScreen} />
-      <Stack.Screen name="SubscriptionManagement" component={SubscriptionManagementScreen} />
-      <Stack.Screen name="AddVehicle" component={AddVehicleScreen} />
-      <Stack.Screen name="MyVehicles" component={MyVehiclesScreen} />
-      <Stack.Screen name="CarEdit" component={CarEditScreen} />
-      <Stack.Screen name="Cars" component={CarsScreen} />
-      <Stack.Screen name="DriverDashboard" component={DriverDashboardScreen} />
-      <Stack.Screen
-        name="DriverTrips"
-        component={PilotFeatureUnavailableScreen}
-        initialParams={legacyDriverTripsScreenParams}
-        options={{ headerShown: false }}
-      />
-      <Stack.Screen name="MyEarning" component={EarningsReportScreen} />
-      <Stack.Screen
-        name="UpdateBankInfo"
-        component={driverPayoutEntryComponent}
-        initialParams={driverPayoutScreenParams}
-      />
-      <Stack.Screen name="VehicleRegistration" component={AddVehicleScreen} />
-      <Stack.Screen
-        name="WeeklyPaymentScreen"
-        component={PilotFeatureUnavailableScreen}
-        initialParams={legacyPlanScreenParams}
-        options={{ headerShown: false }}
-      />
-      <Stack.Screen name="EarningsReportScreen" component={EarningsReportScreen} />
-      <Stack.Screen
-        name="TransferMoney"
-        component={withdrawalEntryComponent}
-        initialParams={withdrawalScreenParams}
-      />
-      <Stack.Screen name="CarEditScreen" component={CarEditScreen} />
-      <Stack.Screen name="MyVehiclesScreen" component={MyVehiclesScreen} />
     </>
   );
 }

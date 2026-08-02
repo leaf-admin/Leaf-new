@@ -53,8 +53,8 @@ function extractFunctionBody(source, functionName) {
   return extractBlockAfterMarker(source, `function ${functionName}`);
 }
 
-describe('legacy financial navigation surfaces', () => {
-  it('keeps legacy route aliases but does not mount wallet/BaaS screens directly', () => {
+describe('legacy navigation isolation', () => {
+  it('keeps only the explicit public BaaS unavailable aliases', () => {
     expect(appNavigatorSource).not.toMatch(/import\s+DriverBalanceScreen\s+from/);
     expect(appNavigatorSource).not.toMatch(/import\s+WeeklyPaymentScreen\s+from/);
     expect(appNavigatorSource).not.toMatch(/import\s+AddMoney\s+from/);
@@ -63,25 +63,17 @@ describe('legacy financial navigation surfaces', () => {
     expect(appNavigatorSource).not.toMatch(/import\s+PlanSelectionScreen\s+from/);
 
     expect(appNavigatorSource).toContain('name="BaaSAccountScreen"');
-    expect(appNavigatorSource).toContain('name="DriverBalance"');
-    expect(appNavigatorSource).toContain('name="WalletDetails"');
-    expect(appNavigatorSource).toContain('name="addMoney"');
+    expect(appNavigatorSource).not.toContain('name="DriverBalance"');
+    expect(appNavigatorSource).not.toContain('name="WalletDetails"');
+    expect(appNavigatorSource).not.toContain('name="addMoney"');
     expect(appNavigatorSource).toContain('component={PilotFeatureUnavailableScreen}');
     expect(appNavigatorSource).toContain('component={driverPayoutEntryComponent}');
   });
 
-  it('keeps legacy driver trip aliases without mounting the client-side acceptTask flow', () => {
+  it('does not register legacy driver trip routes or their client-side acceptTask flow', () => {
     expect(appNavigatorSource).not.toMatch(/import\s+DriverTrips\s+from/);
-    expect(appNavigatorSource).toContain('const legacyDriverTripsScreenParams = {');
-    expect(appNavigatorSource).toMatch(
-      /name="Trips"[\s\S]*?component=\{PilotFeatureUnavailableScreen\}[\s\S]*?initialParams=\{legacyDriverTripsScreenParams\}/,
-    );
-    expect(appNavigatorSource).toMatch(
-      /name="DriverTrips"[\s\S]*?component=\{PilotFeatureUnavailableScreen\}[\s\S]*?initialParams=\{legacyDriverTripsScreenParams\}/,
-    );
-    expect(appNavigatorSource).not.toMatch(
-      /name="(?:Trips|DriverTrips)"[\s\S]{0,120}?component=\{DriverTrips\}/,
-    );
+    expect(appNavigatorSource).not.toContain('legacyDriverTripsScreenParams');
+    expect(appNavigatorSource).not.toMatch(/name="(?:Trips|DriverTrips)"/);
   });
 
   it('mounts the canonical Robotaxi lifecycle as the only private map runtime', () => {
@@ -116,7 +108,7 @@ describe('legacy financial navigation surfaces', () => {
     });
   });
 
-  it('keeps legacy ride and payment screens out of the canonical Robotaxi navigator branch', () => {
+  it('removes legacy ride and payment screen registrations from the navigator', () => {
     const prototypeBranchSource = [
       extractFunctionBody(appNavigatorSource, 'renderPrototypeCompanionScreens'),
       extractFunctionBody(appNavigatorSource, 'renderSharedPrototypeScreens'),
@@ -147,6 +139,7 @@ describe('legacy financial navigation surfaces', () => {
       'DriverSearch',
     ].forEach((routeName) => {
       expect(prototypeBranchSource).not.toContain(`name="${routeName}"`);
+      expect(appNavigatorSource).not.toContain(`name="${routeName}"`);
     });
 
     const mainNavigatorSource = extractFunctionBody(appNavigatorSource, 'MainNavigator');
