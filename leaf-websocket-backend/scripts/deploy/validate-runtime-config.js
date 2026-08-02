@@ -419,6 +419,14 @@ function main() {
     'LEAF_SKIP_RUNTIME_CONFIG_VALIDATION',
     false
   );
+  const subscriptionOnlineGateEnabled = booleanDiagnostic(
+    'SUBSCRIPTION_ONLINE_GATE_ENABLED',
+    true
+  );
+  const subscriptionGateCacheTtlSeconds = Number.parseInt(
+    process.env.SUBSCRIPTION_GATE_CACHE_TTL_SECONDS || '60',
+    10
+  );
   const allowLocalFirebaseDefaults = !process.env.ENV_FILE;
   const firebaseDatabaseUrl = resolveFirebaseDatabaseUrl({
     allowDefault: allowLocalFirebaseDefaults
@@ -758,6 +766,16 @@ function main() {
   if (nodeEnv === 'production') {
     if (skipRuntimeConfigValidation.value) {
       blockers.push('LEAF_SKIP_RUNTIME_CONFIG_VALIDATION=true bloqueado em produção');
+    }
+    if (!subscriptionOnlineGateEnabled.value) {
+      blockers.push('SUBSCRIPTION_ONLINE_GATE_ENABLED=false bloqueado em produção');
+    }
+    if (
+      !Number.isFinite(subscriptionGateCacheTtlSeconds)
+      || subscriptionGateCacheTtlSeconds < 5
+      || subscriptionGateCacheTtlSeconds > 3600
+    ) {
+      blockers.push('SUBSCRIPTION_GATE_CACHE_TTL_SECONDS deve estar entre 5 e 3600 em produção');
     }
     const geofenceRadiusKm = Number.parseFloat(process.env.GEOFENCE_RADIUS_KM || '');
     const corsOrigin = String(process.env.CORS_ORIGIN || '').trim();
@@ -1120,6 +1138,13 @@ function main() {
           ...socketRedisAdapterRequiredDiagnostic,
           expected: nodeEnv === 'production' && runtimeRole === 'gateway'
         }
+      },
+      subscriptionAuthority: {
+        source: 'firestore',
+        cache: 'redis',
+        onlineGateEnabled: subscriptionOnlineGateEnabled,
+        cacheTtlSeconds: subscriptionGateCacheTtlSeconds,
+        unavailablePolicy: 'fail_closed'
       },
       launchControl: launchControlDiagnostic,
       financialPolicy: financialPolicyApproval,
