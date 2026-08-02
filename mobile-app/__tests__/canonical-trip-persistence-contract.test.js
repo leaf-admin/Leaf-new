@@ -16,11 +16,15 @@ function listJavaScriptFiles(directory) {
 
 describe('canonical trip persistence boundary', () => {
   it('keeps direct trip_data writes out of the mobile runtime', () => {
-    const legacyWriterPath = path.join(
-      MOBILE_ROOT,
+    const retiredTripDataSurfaces = [
       'src/services/TripDataService.js',
-    );
-    expect(fs.existsSync(legacyWriterPath)).toBe(false);
+      'src/services/runtime/locationActionsBridge.js',
+      'src/hooks/useTripTracking.js',
+      'src/hooks/useTripHistory.js',
+    ];
+    retiredTripDataSurfaces.forEach((relativePath) => {
+      expect(fs.existsSync(path.join(MOBILE_ROOT, relativePath))).toBe(false);
+    });
 
     const directWriterPatterns = [
       /database\(\)\.ref\(\s*[`'"]trip_data\//,
