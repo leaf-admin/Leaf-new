@@ -7,7 +7,6 @@ module.exports = {
         throwOnModuleCollision: false,
     },
     modulePathIgnorePatterns: [
-        "<rootDir>/common/common-packages/",
         "<rootDir>/ios/build/",
         "<rootDir>/test-build-final-success/",
         "<rootDir>/playwright-report/",
