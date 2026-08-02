@@ -320,7 +320,7 @@ export default function SplashScreen({ navigation }) {
         }
 
         if (hasCompleteProfile) {
-          // ✅ SITUAÇÃO 1: Usuário completo - ir para NewMapScreen
+          // ✅ SITUAÇÃO 1: Usuário completo - ir para a Home Robotaxi
           Logger.log('SplashScreen - ✅ Usuário completo, navegando para Map');
           setShouldShowOnboarding(false);
           setIsChecking(false);

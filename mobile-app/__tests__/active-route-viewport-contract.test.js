@@ -25,7 +25,6 @@ const DIRECT_ROUTE_MAP_RENDERER_ALLOWLIST = [
   'src/screens/BookedCabScreen.js',
   'src/screens/DriverTrips.js',
   'src/screens/MapScreen.js',
-  'src/screens/NewMapScreen.js',
   'src/screens/TripTrackingScreen.js',
   'src/screens/prototype/RobotaxiReceiptScreen.js',
 ].sort();
