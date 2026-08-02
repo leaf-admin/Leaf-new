@@ -12,28 +12,17 @@ mkdir -p "$REDIS_BACKUP_DIR" "$FIRESTORE_BACKUP_DIR"
 
 if [[ -f "$ROOT_DIR/.env" ]]; then
   # shellcheck disable=SC1091
+  set -a
   source "$ROOT_DIR/.env"
+  set +a
 fi
 
 echo "[backup] start $TIMESTAMP"
 
-# 1) Backup Redis em formato RDB portavel
-REDIS_TARGET="$REDIS_BACKUP_DIR/redis-$TIMESTAMP.rdb"
-if command -v redis-cli >/dev/null 2>&1; then
-  if [[ -n "${REDIS_HOST:-}" && -n "${REDIS_PORT:-}" && -n "${REDIS_PASSWORD:-}" ]]; then
-    redis-cli -h "$REDIS_HOST" -p "$REDIS_PORT" -a "$REDIS_PASSWORD" --rdb "$REDIS_TARGET" >/dev/null
-    gzip -f "$REDIS_TARGET"
-    echo "[backup] redis ok: ${REDIS_TARGET}.gz"
-  elif [[ -n "${REDIS_URL:-}" ]]; then
-    redis-cli -u "$REDIS_URL" --rdb "$REDIS_TARGET" >/dev/null
-    gzip -f "$REDIS_TARGET"
-    echo "[backup] redis ok: ${REDIS_TARGET}.gz"
-  else
-    echo "[backup] redis skipped: REDIS_URL ausente"
-  fi
-else
-  echo "[backup] redis skipped: redis-cli nao encontrado"
-fi
+# 1) Backup Redis validado, com checksum e manifesto. Falha em vez de pular.
+REDIS_TARGET="$REDIS_BACKUP_DIR/redis-$TIMESTAMP.rdb.gz"
+node "$ROOT_DIR/scripts/ops/backup-redis.cjs" --out "$REDIS_TARGET"
+echo "[backup] redis ok: $REDIS_TARGET"
 
 # 2) Backup Firestore critico em JSON.gz
 FIRESTORE_TARGET="$FIRESTORE_BACKUP_DIR/firestore-critical-$TIMESTAMP.json.gz"
