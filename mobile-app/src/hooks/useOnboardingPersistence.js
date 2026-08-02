@@ -18,7 +18,7 @@ import {
   resetOnboarding as resetOnboardingAction,
   loadOnboardingFromStorage,
   setOnboardingStep
-} from '../../common/common-packages/src/actions/onboardingActions';
+} from '../state/onboarding/onboardingActions';
 
 const ONBOARDING_STORAGE_KEY = '@onboarding_data';
 const ONBOARDING_PROGRESS_KEY = '@onboarding_progress';

@@ -29,7 +29,7 @@ import { complainreducer } from '../reducers/complainreducer';
 import { usedreferralreducer } from "../reducers/usedreferralreducer";
 import { fleetadminearningreducer } from "../reducers/fleetadminearningreducer";
 import vehicleReducer from "../reducers/vehiclereducer.js";
-import onboardingReducer from "../../../common/common-packages/src/reducers/onboardingReducer";
+import onboardingReducer from "../../state/onboarding/onboardingReducer";
 
 const rootReducer = {
   auth: authreducer,
