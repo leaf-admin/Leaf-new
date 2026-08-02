@@ -5,7 +5,6 @@ import Logger from '../utils/Logger';
  * Gerencia verificação de usuários existentes, login com senha e reset de senha
  */
 
-import database from '@react-native-firebase/database';
 import auth from '@react-native-firebase/auth';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { apiClient } from './httpClient';
@@ -203,29 +202,6 @@ class UserAuthService {
     } catch (error) {
       Logger.error('❌ Erro ao verificar usuário:', error);
       return null;
-    }
-  }
-
-  /**
-   * Verifica se o usuário tem senha cadastrada
-   * @param {string} uid - UID do usuário
-   * @returns {Promise<boolean>} - Se tem senha cadastrada
-   */
-  static async hasPassword(uid) {
-    try {
-      const userRef = database().ref(`users/${uid}`);
-      const snapshot = await userRef.once('value');
-
-      if (!snapshot.exists()) {
-        return false;
-      }
-
-      const userData = snapshot.val();
-      // Verificar se tem senha hash ou se está usando Firebase Auth com email/senha
-      return !!(userData.hasPassword || userData.passwordHash);
-    } catch (error) {
-      Logger.error('❌ Erro ao verificar senha:', error);
-      return false;
     }
   }
 

@@ -7,7 +7,7 @@ import store from '../../state/appStore';
 import { saveStepData, completeStep, saveCurrentStep, loadStepData } from '../../utils/secureOnboardingStorage';
 import testUserService from '../../services/TestUserService';
 import UserAuthService from '../../services/UserAuthService';
-import UserDatabaseService from '../../utils/userDatabaseService';
+import OnboardingProfileService from '../../services/OnboardingProfileService';
 import driverActivationService from '../../services/DriverActivationService';
 import { createInitialDriverOnboardingState } from '../../services/DriverOnboardingService';
 import { allowReviewAccess } from '../../config/runtimeAccessPolicy';
@@ -709,7 +709,7 @@ const AuthFlow = ({
 
     let savedProfilePayload = null;
     try {
-      const result = await UserDatabaseService.saveUserProfile(onboardingData);
+      const result = await OnboardingProfileService.saveOnboardingProfile(onboardingData);
       if (result?.success && result?.profile) {
         savedProfilePayload = result.profile;
       }

@@ -7,12 +7,6 @@ jest.mock('../src/utils/Logger', () => ({
   }
 }));
 
-jest.mock('@react-native-firebase/database', () => () => ({
-  ref: jest.fn(() => ({
-    once: jest.fn(async () => ({ exists: () => false, val: () => null }))
-  }))
-}));
-
 jest.mock('@react-native-firebase/auth', () => () => ({}));
 
 jest.mock('@react-native-async-storage/async-storage', () => ({
