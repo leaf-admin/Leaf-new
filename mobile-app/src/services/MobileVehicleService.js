@@ -27,6 +27,14 @@ class MobileVehicleService {
     return payload?.vehicle || null;
   }
 
+  async updateVehicle(vehicleId, vehicle) {
+    const payload = await request(`/account/vehicles/${encodeURIComponent(vehicleId)}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ vehicle }),
+    });
+    return payload?.vehicle || null;
+  }
+
   async selectVehicle(vehicleId) {
     const payload = await request(`/account/vehicles/${encodeURIComponent(vehicleId)}/active`, {
       method: 'PATCH',

@@ -18,12 +18,14 @@ import { createReferralInvite, loadMyReferralInvites } from '../src/services/run
 import { joinDriverWaitlist, loadDriverWaitlistStatus } from '../src/services/runtime/driverWaitlistService';
 
 const mockListVehicles = jest.fn();
+const mockUpdateVehicle = jest.fn();
 
 jest.mock('../src/services/MobileVehicleService', () => ({
   __esModule: true,
   default: {
     listVehicles: (...args) => mockListVehicles(...args),
     addVehicle: jest.fn(),
+    updateVehicle: (...args) => mockUpdateVehicle(...args),
     selectVehicle: jest.fn(),
     removeVehicle: jest.fn(),
   },
@@ -853,6 +855,32 @@ describe('prototype new surfaces', () => {
       expect(vehicles.getAllByText('Nissan Leaf').length).toBeGreaterThan(0);
       expect(vehicles.getAllByText(/LEF-2042/).length).toBeGreaterThan(0);
       expect(vehicles.getByText('Adicionar veículo')).toBeTruthy();
+    });
+  });
+
+  it('edits a vehicle through the account API and warns that approval is reset', async () => {
+    mockUpdateVehicle.mockResolvedValue({ id: 'vehicle_1', status: 'pending' });
+    const screen = render(
+      <RobotaxiVehiclesScreen
+        navigation={buildNavigation()}
+        route={{ key: 'vehicles-edit', params: {} }}
+      />
+    );
+
+    await waitFor(() => expect(screen.getByTestId('robotaxi-vehicle-vehicle_1')).toBeTruthy());
+    fireEvent.press(screen.getByTestId('robotaxi-vehicle-vehicle_1'));
+    fireEvent.press(screen.getByText('Editar dados'));
+
+    expect(screen.getByText('Editar veículo')).toBeTruthy();
+    expect(screen.getByText('Ao salvar, o veículo será desativado e voltará para análise.')).toBeTruthy();
+    fireEvent.changeText(screen.getByTestId('robotaxi-vehicle-input-color'), 'Prata');
+    fireEvent.press(screen.getByText('Salvar e reenviar'));
+
+    await waitFor(() => {
+      expect(mockUpdateVehicle).toHaveBeenCalledWith('vehicle_1', expect.objectContaining({
+        plate: 'LEF-2042',
+        color: 'Prata',
+      }));
     });
   });
 

@@ -572,16 +572,22 @@ class DriverApplicationService {
         status: userVehicle.status || (userVehicle.approved === true ? 'approved' : 'pending'),
         approved: userVehicle.approved === true || userVehicle.status === 'approved',
         category,
-        plate: linkedVehicle.plate || linkedVehicle.vehicleNumber || linkedVehicle.vehiclePlate || null,
-        brand: linkedVehicle.brand || linkedVehicle.vehicleMake || null,
-        model: linkedVehicle.model || linkedVehicle.vehicleModel || null,
-        year: linkedVehicle.year || linkedVehicle.manufactureYear || null,
+        plate:
+          userVehicle.plate ||
+          userVehicle.plateNormalized ||
+          linkedVehicle.plate ||
+          linkedVehicle.vehicleNumber ||
+          linkedVehicle.vehiclePlate ||
+          null,
+        brand: userVehicle.brand || userVehicle.make || linkedVehicle.brand || linkedVehicle.vehicleMake || null,
+        model: userVehicle.model || linkedVehicle.model || linkedVehicle.vehicleModel || null,
+        year: userVehicle.year || linkedVehicle.year || linkedVehicle.manufactureYear || null,
         color:
+          userVehicle.color ||
+          userVehicle.vehicleColor ||
           linkedVehicle.color ||
           linkedVehicle.vehicleColor ||
           linkedVehicle.carColor ||
-          userVehicle.color ||
-          userVehicle.vehicleColor ||
           null,
         identitySource:
           linkedVehicle?.ocrData?.source ||

@@ -945,19 +945,20 @@ router.get('/api/account/vehicles', requireFirebase, requireDriverAccount, async
   try {
     const userVehicles = await readUserVehicles(req.user.uid);
     const vehicles = (await Promise.all(userVehicles.map(async (link) => {
-      const vehicleId = String(link.vehicleId || link.id || '').trim();
-      if (!vehicleId) return null;
-      const catalog = await readVehicleCatalogRecord(vehicleId);
+      const vehicleId = String(link.vehicleId || '').trim();
+      const accountVehicleId = vehicleId || String(link.userVehicleId || link.id || '').trim();
+      if (!accountVehicleId) return null;
+      const catalog = vehicleId ? await readVehicleCatalogRecord(vehicleId) : null;
       return {
-        id: vehicleId,
-        vehicleId,
+        id: accountVehicleId,
+        vehicleId: vehicleId || null,
         userVehicleId: link.userVehicleId,
-        plate: catalog?.plate || catalog?.plateNormalized || link.plate || '',
-        brand: catalog?.brand || catalog?.make || link.brand || '',
-        model: catalog?.model || link.model || '',
-        color: catalog?.color || link.color || '',
-        year: catalog?.year || link.year || null,
-        vehicleType: catalog?.vehicleType || link.vehicleType || 'carro',
+        plate: link.plate || link.plateNormalized || catalog?.plate || catalog?.plateNormalized || '',
+        brand: link.brand || link.make || catalog?.brand || catalog?.make || '',
+        model: link.model || catalog?.model || '',
+        color: link.color || catalog?.color || '',
+        year: link.year || catalog?.year || null,
+        vehicleType: link.vehicleType || catalog?.vehicleType || 'carro',
         status: link.status || (link.approved === true ? 'approved' : 'pending'),
         approved: link.approved === true || ['approved', 'active'].includes(String(link.status || '').toLowerCase()),
         isActive: link.isActive === true,
@@ -1045,6 +1046,99 @@ router.post('/api/account/vehicles', requireFirebase, requireDriverAccount, requ
   }
 });
 
+router.patch('/api/account/vehicles/:vehicleId', requireFirebase, requireDriverAccount, requireDriverOffline, async (req, res) => {
+  try {
+    const userId = req.user.uid;
+    const requestedVehicleId = String(req.params.vehicleId || '').trim();
+    const vehicleInput = normalizeVehicleInput(req.body?.vehicle || req.body || {});
+    const invalidFields = validateVehicleInput(vehicleInput);
+    if (invalidFields.length > 0) {
+      return res.status(400).json({
+        success: false,
+        code: 'VEHICLE_INPUT_INVALID',
+        message: 'Confira placa, marca, modelo, cor e ano.',
+        invalidFields
+      });
+    }
+
+    const userVehicles = await readUserVehicles(userId);
+    const target = userVehicles.find((link) =>
+      [link.userVehicleId, link.id, link.vehicleId]
+        .filter(Boolean)
+        .some((candidate) => String(candidate) === requestedVehicleId)
+    );
+    if (!target) {
+      return res.status(404).json({ success: false, message: 'Veículo não encontrado no perfil' });
+    }
+
+    const currentCatalog = target.vehicleId
+      ? await readVehicleCatalogRecord(String(target.vehicleId))
+      : null;
+    const currentCatalogPlate = normalizeVehiclePlate(
+      currentCatalog?.plateNormalized || currentCatalog?.plate
+    );
+    const matchingCatalog = currentCatalogPlate === vehicleInput.plate
+      ? currentCatalog
+      : await findVehicleCatalogRecordByPlate(vehicleInput.plate);
+    const duplicateLink = userVehicles.find((link) => {
+      if (link.userVehicleId === target.userVehicleId) return false;
+      if (matchingCatalog?.id && String(link.vehicleId || '') === String(matchingCatalog.id)) return true;
+      return normalizeVehiclePlate(link.plateNormalized || link.plate) === vehicleInput.plate;
+    });
+    if (duplicateLink) {
+      return res.status(409).json({
+        success: false,
+        code: 'VEHICLE_ALREADY_LINKED',
+        message: 'Este veículo já está no seu perfil.'
+      });
+    }
+
+    const nowIso = new Date().toISOString();
+    const linkPath = `user_vehicles/${userId}/${target.userVehicleId}`;
+    const updates = {
+      [`${linkPath}/vehicleId`]: matchingCatalog?.id || null,
+      [`${linkPath}/plate`]: vehicleInput.plate,
+      [`${linkPath}/plateNormalized`]: vehicleInput.plate,
+      [`${linkPath}/brand`]: vehicleInput.brand,
+      [`${linkPath}/model`]: vehicleInput.model,
+      [`${linkPath}/color`]: vehicleInput.color,
+      [`${linkPath}/year`]: vehicleInput.year,
+      [`${linkPath}/vehicleType`]: vehicleInput.vehicleType,
+      [`${linkPath}/status`]: 'pending',
+      [`${linkPath}/approved`]: false,
+      [`${linkPath}/isActive`]: false,
+      [`${linkPath}/reviewedAt`]: null,
+      [`${linkPath}/reviewedBy`]: null,
+      [`${linkPath}/submittedAt`]: nowIso,
+      [`${linkPath}/updatedAt`]: nowIso,
+      [`users/${userId}/updatedAt`]: nowIso
+    };
+    if (target.isActive === true) {
+      updates[`users/${userId}/activeVehicleId`] = '';
+    }
+
+    await admin.database().ref().update(updates);
+    await invalidateDriverEligibilityCache(userId);
+
+    return res.json({
+      success: true,
+      vehicle: {
+        id: matchingCatalog?.id || target.userVehicleId,
+        vehicleId: matchingCatalog?.id || null,
+        userVehicleId: target.userVehicleId,
+        ...vehicleInput,
+        status: 'pending',
+        approved: false,
+        isActive: false,
+        updatedAt: nowIso
+      }
+    });
+  } catch (error) {
+    logger.error('Erro ao editar veículo da conta:', error);
+    return res.status(500).json({ success: false, message: 'Erro ao editar veículo da conta' });
+  }
+});
+
 router.patch('/api/account/vehicles/:vehicleId/active', requireFirebase, requireDriverAccount, requireDriverOffline, async (req, res) => {
   try {
     const userId = req.user.uid;
@@ -1054,6 +1148,24 @@ router.patch('/api/account/vehicles/:vehicleId/active', requireFirebase, require
     if (!target) {
       return res.status(404).json({ success: false, message: 'Veículo não encontrado no perfil' });
     }
+    const targetApproved = target.approved === true || ['approved', 'active'].includes(
+      String(target.status || '').trim().toLowerCase()
+    );
+    if (!targetApproved) {
+      return res.status(409).json({
+        success: false,
+        code: 'VEHICLE_APPROVAL_REQUIRED',
+        message: 'Aguarde a aprovação do veículo antes de selecioná-lo.'
+      });
+    }
+    const canonicalVehicleId = String(target.vehicleId || '').trim();
+    if (!canonicalVehicleId) {
+      return res.status(409).json({
+        success: false,
+        code: 'VEHICLE_CANONICAL_IDENTITY_REQUIRED',
+        message: 'Aguarde a validação do CRLV antes de selecionar o veículo.'
+      });
+    }
 
     const nowIso = new Date().toISOString();
     const updates = {};
@@ -1061,12 +1173,12 @@ router.patch('/api/account/vehicles/:vehicleId/active', requireFirebase, require
       updates[`user_vehicles/${userId}/${link.userVehicleId}/isActive`] = link.userVehicleId === target.userVehicleId;
       updates[`user_vehicles/${userId}/${link.userVehicleId}/updatedAt`] = nowIso;
     });
-    updates[`users/${userId}/activeVehicleId`] = vehicleId;
+    updates[`users/${userId}/activeVehicleId`] = canonicalVehicleId;
     updates[`users/${userId}/updatedAt`] = nowIso;
     await admin.database().ref().update(updates);
     await invalidateDriverEligibilityCache(userId);
 
-    return res.json({ success: true, activeVehicleId: vehicleId });
+    return res.json({ success: true, activeVehicleId: canonicalVehicleId });
   } catch (error) {
     logger.error('Erro ao selecionar veículo da conta:', error);
     return res.status(500).json({ success: false, message: 'Erro ao selecionar veículo da conta' });
