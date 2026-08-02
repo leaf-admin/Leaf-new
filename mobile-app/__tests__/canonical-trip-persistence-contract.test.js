@@ -18,6 +18,7 @@ describe('canonical trip persistence boundary', () => {
   it('keeps direct trip_data writes out of the mobile runtime', () => {
     const retiredTripDataSurfaces = [
       'src/services/TripDataService.js',
+      'src/services/SyncService.js',
       'src/services/runtime/locationActionsBridge.js',
       'src/hooks/useTripTracking.js',
       'src/hooks/useTripHistory.js',
