@@ -2,6 +2,12 @@ const fs = require('fs');
 const path = require('path');
 
 describe('KYC legacy boundary', () => {
+  it('does not keep the obsolete dummy-embedding KYC service', () => {
+    expect(
+      fs.existsSync(path.join(__dirname, '../../../services/kyc-service.js'))
+    ).toBe(false);
+  });
+
   it('does not route IntegratedKYCService fallback through legacy kyc-service', () => {
     const source = fs.readFileSync(
       path.join(__dirname, '../../../services/IntegratedKYCService.js'),
