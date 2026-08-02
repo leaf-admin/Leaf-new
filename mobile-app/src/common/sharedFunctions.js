@@ -4,8 +4,8 @@ import { View, Text, TouchableOpacity, Image, Dimensions  } from 'react-native';
 import { colors } from './theme';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import i18n from '../i18n';
-import { api } from '../../common';
 import { getDirectionsApi as getDirectionsApiLocal, getDistanceMatrix as getDistanceMatrixLocal } from '../services/runtime/locationRouteBridge';
+import { GetDistance } from '../services/runtime/mapGeoService';
 import TaxiModal from '../components/TaxiModal';
 var { height, width } = Dimensions.get('window');
 import { fonts } from './font';
@@ -161,12 +161,7 @@ export const CarVertical = (props) =>{
 }
 
 export const validateBookingObj = async (t, addBookingObj, instructionData, settings, bookingType, roundTrip, tripInstructions, tripdata, drivers, otherPerson) => {
-    const {
-        GetDistance,
-    } = api;
-    const getDistanceMatrix = typeof getDistanceMatrixLocal === 'function'
-        ? getDistanceMatrixLocal
-        : api?.getDistanceMatrix;
+    const getDistanceMatrix = getDistanceMatrixLocal;
     const MATRIX_DRIVER_LIMIT = 8;
     const estimateArrivalFromDistance = (distanceKm) => {
         const safeDistance = Number.isFinite(Number(distanceKm)) ? Number(distanceKm) : 2;
@@ -249,9 +244,7 @@ export default function BookingModal(props){
 
 export const prepareEstimateObject =  async (tripdata, instructionData) => {
     const { t } = i18n;
-    const getDirectionsApi = typeof getDirectionsApiLocal === 'function'
-        ? getDirectionsApiLocal
-        : api?.getDirectionsApi;
+    const getDirectionsApi = getDirectionsApiLocal;
     
     // Log de entrada
     Logger.log('🚀 ===== prepareEstimateObject INICIADO =====');
