@@ -302,7 +302,6 @@ function runtimeEnv({ runtime, port, redisPort, redisUrl }) {
     NODE_ENV: 'development',
     APP_ENV: 'runtime-smoke',
     LEAF_ENV: 'runtime-smoke',
-    LEAF_SERVER_RUNTIME: runtime,
     LEAF_SKIP_RUNTIME_CONFIG_VALIDATION: 'true',
     PORT: String(port),
     HOST: '127.0.0.1',
@@ -1036,7 +1035,7 @@ async function shutdown() {
 }
 
 async function mainExistingRuntime() {
-  const runtimeName = process.env.RUNTIME_FULL_FLOW_TARGET_RUNTIME || process.env.LEAF_SERVER_RUNTIME || 'existing';
+  const runtimeName = process.env.RUNTIME_FULL_FLOW_TARGET_RUNTIME || 'existing';
   const safeRuntimeName = runtimeName.replace(/[^a-zA-Z0-9_.-]+/g, '-');
   const report = {
     startedAt: nowIso(),
@@ -1119,7 +1118,7 @@ async function main() {
   try {
     await startRedis(redisPort);
 
-    for (const runtime of ['vps', 'modular']) {
+    for (const runtime of ['modular']) {
       const port = await findFreePort();
       const runtimeInfo = await startRuntime({ runtime, port, redisPort, redisUrl });
       try {

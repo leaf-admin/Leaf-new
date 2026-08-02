@@ -415,7 +415,6 @@ function main() {
   const baseUrl = String(process.env.WOOVI_BASE_URL || '');
   const wooviBaseUrlIsSandbox = /sandbox/i.test(baseUrl);
   const runtimeRole = String(process.env.RUNTIME_ROLE || 'gateway').trim().toLowerCase();
-  const serverRuntime = String(process.env.LEAF_SERVER_RUNTIME || 'modular').trim().toLowerCase();
   const skipRuntimeConfigValidation = booleanDiagnostic(
     'LEAF_SKIP_RUNTIME_CONFIG_VALIDATION',
     false
@@ -757,9 +756,6 @@ function main() {
   }
 
   if (nodeEnv === 'production') {
-    if (serverRuntime !== 'modular') {
-      blockers.push('LEAF_SERVER_RUNTIME deve ser modular em produção');
-    }
     if (skipRuntimeConfigValidation.value) {
       blockers.push('LEAF_SKIP_RUNTIME_CONFIG_VALIDATION=true bloqueado em produção');
     }
@@ -1114,7 +1110,6 @@ function main() {
       },
       runtime: {
         runtimeRole,
-        serverRuntime,
         skipRuntimeConfigValidation,
         paymentProviderConfigRequired,
         socketRedisAdapter: {

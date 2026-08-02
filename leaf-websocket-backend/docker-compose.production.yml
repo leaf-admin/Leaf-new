@@ -49,7 +49,6 @@ services:
       - RUNTIME_ROLE=gateway
       - ENABLE_EMBEDDED_LISTENER_WORKERS=false
       - ENABLE_DIRECT_RIDE_REQUESTED_DISPATCH=true
-      - LEAF_SERVER_RUNTIME=modular
       - LEAF_LAUNCH_PROFILE=${LEAF_LAUNCH_PROFILE:-full}
       - LEAF_PILOT_CONTROLLED=${LEAF_PILOT_CONTROLLED:-false}
       - PILOT_ALLOWED_PASSENGER_IDS=${PILOT_ALLOWED_PASSENGER_IDS:-}
@@ -350,7 +349,6 @@ services:
       - NODE_ENV=production
       - RUNTIME_ROLE=sideeffects
       - ENABLE_EMBEDDED_LISTENER_WORKERS=false
-      - LEAF_SERVER_RUNTIME=modular
 
       # Launch control (must match the gateways so the worker preflight cannot
       # start under a broader policy than the active runtime).

@@ -147,7 +147,6 @@ function runtimeEnv({ runtime, port, redisPort, redisUrl }) {
     NODE_ENV: 'development',
     APP_ENV: 'runtime-smoke',
     LEAF_ENV: 'runtime-smoke',
-    LEAF_SERVER_RUNTIME: runtime,
     LEAF_SKIP_RUNTIME_CONFIG_VALIDATION: 'true',
     PORT: String(port),
     HOST: '127.0.0.1',
@@ -376,7 +375,6 @@ async function shutdown() {
 async function main() {
   ensureDir(ARTIFACT_ROOT);
   const redisPort = await findFreePort();
-  const vpsPort = await findFreePort();
   const modularPort = await findFreePort();
   const redisUrl = `redis://:${encodeURIComponent(REDIS_PASSWORD)}@127.0.0.1:${redisPort}/0`;
   const report = {
@@ -390,7 +388,6 @@ async function main() {
   try {
     await startRedis(redisPort);
     const runtimes = await Promise.all([
-      startRuntime({ runtime: 'vps', port: vpsPort, redisPort, redisUrl }),
       startRuntime({ runtime: 'modular', port: modularPort, redisPort, redisUrl })
     ]);
 

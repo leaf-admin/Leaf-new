@@ -36,16 +36,4 @@ describe('KYC legacy boundary', () => {
       source.indexOf("require('../routes/kyc-proxy-routes')")
     );
   });
-
-  it('keeps legacy KYC proxy behind an explicit runtime flag in the VPS runtime', () => {
-    const source = fs.readFileSync(
-      path.join(__dirname, '../../../server.vps.js'),
-      'utf8'
-    );
-
-    const mountIndex = source.indexOf("app.use('/api/kyc-proxy'");
-    expect(source).toContain('ENABLE_LEGACY_KYC_PROXY');
-    expect(mountIndex).toBeGreaterThan(-1);
-    expect(source.lastIndexOf('ENABLE_LEGACY_KYC_PROXY', mountIndex)).toBeGreaterThan(-1);
-  });
 });

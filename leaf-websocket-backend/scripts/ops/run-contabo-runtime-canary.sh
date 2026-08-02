@@ -14,7 +14,6 @@ CONTABO_KEY="${CONTABO_KEY:-$HOME/.ssh/leaf_contabo_20260412_ed25519}"
 REMOTE_APP_DIR="${REMOTE_APP_DIR:-/opt/leaf-app}"
 REMOTE_CANARY_DIR="${REMOTE_CANARY_DIR:-/opt/leaf-runtime-canary}"
 CANARY_PORT="${CANARY_PORT:-3901}"
-RUNTIME_MODE="${RUNTIME_MODE:-modular}"
 RUN_FULL_FLOW_CANARY="${RUN_FULL_FLOW_CANARY:-false}"
 
 if [[ -z "$CONTABO_HOST" ]]; then
@@ -24,11 +23,6 @@ fi
 
 if [[ ! -f "$CONTABO_KEY" ]]; then
   echo "[canary][error] Chave Contabo nao encontrada: $CONTABO_KEY" >&2
-  exit 2
-fi
-
-if [[ "$RUNTIME_MODE" != "vps" && "$RUNTIME_MODE" != "modular" ]]; then
-  echo "[canary][error] RUNTIME_MODE invalido: $RUNTIME_MODE (use vps|modular)" >&2
   exit 2
 fi
 
@@ -63,7 +57,7 @@ scp "${SSH_OPTS[@]}" "$PACKAGE_PATH" "$CONTABO_USER@$CONTABO_HOST:/tmp/leaf-back
 
 echo "[canary] Preparando canary remoto em $REMOTE_CANARY_DIR..."
 ssh "${SSH_OPTS[@]}" "$CONTABO_USER@$CONTABO_HOST" \
-  "REMOTE_APP_DIR='$REMOTE_APP_DIR' REMOTE_CANARY_DIR='$REMOTE_CANARY_DIR' CANARY_PORT='$CANARY_PORT' RUNTIME_MODE='$RUNTIME_MODE' RUN_FULL_FLOW_CANARY='$RUN_FULL_FLOW_CANARY' bash -s" <<'REMOTE_EOF'
+  "REMOTE_APP_DIR='$REMOTE_APP_DIR' REMOTE_CANARY_DIR='$REMOTE_CANARY_DIR' CANARY_PORT='$CANARY_PORT' RUN_FULL_FLOW_CANARY='$RUN_FULL_FLOW_CANARY' bash -s" <<'REMOTE_EOF'
 set -euo pipefail
 
 rm -rf "$REMOTE_CANARY_DIR"
@@ -89,7 +83,8 @@ services:
     env_file:
       - .env
     environment:
-      NODE_ENV: production
+      # Canary isolado valida a aplicação, não o perfil de configuração de produção.
+      NODE_ENV: development
       APP_ENV: runtime-canary
       LEAF_ENV: runtime-canary
       # The isolated canary full-flow uses socket mock payment on purpose.
@@ -98,8 +93,6 @@ services:
       PORT: 3001
       HOST: 0.0.0.0
       RUNTIME_ROLE: gateway
-      LEAF_SERVER_RUNTIME: ${RUNTIME_MODE}
-      LEAF_SKIP_RUNTIME_CONFIG_VALIDATION: "true"
       LEAF_CLUSTER_ENABLED: "false"
       ENABLE_SOCKETIO_REDIS_ADAPTER: "true"
       REQUIRE_SOCKETIO_REDIS_ADAPTER: "true"
@@ -110,7 +103,7 @@ services:
       SOCKET_ALLOW_POLLING: "false"
       ALLOW_MULTIPLE_SESSIONS: "true"
       AUTO_TEST_MODE: "true"
-      QA_SOCKET_BYPASS_UIDS: "runtime-full-passenger-${RUNTIME_MODE}-contabo-canary,runtime-full-driver-${RUNTIME_MODE}-contabo-canary"
+      QA_SOCKET_BYPASS_UIDS: "runtime-full-passenger-modular-contabo-canary,runtime-full-driver-modular-contabo-canary"
       REQUIRE_PAYMENT_BEFORE_BOOKING: "false"
       VERIFY_PAYMENT_BEFORE_BOOKING: "false"
       REQUIRE_PAYMENT_CHARGE_REF_BEFORE_BOOKING: "false"
@@ -227,17 +220,17 @@ ws.on('error', (error) => {
 NODE
 
 if [[ "${RUN_FULL_FLOW_CANARY}" == "true" ]]; then
-  echo "[canary][full-flow] iniciando corrida completa contra runtime ${RUNTIME_MODE}"
+  echo "[canary][full-flow] iniciando corrida completa contra o backend canônico"
   docker exec -i \
     -e RUNTIME_FULL_FLOW_TARGET_URL="http://127.0.0.1:3001" \
-    -e RUNTIME_FULL_FLOW_TARGET_RUNTIME="${RUNTIME_MODE}-contabo-canary" \
+    -e RUNTIME_FULL_FLOW_TARGET_RUNTIME="modular-contabo-canary" \
     -e RUNTIME_FULL_FLOW_ARTIFACT_ROOT="/app/logs/runtime-full-ride-flow" \
     -e RUNTIME_FULL_FLOW_CLEANUP_REDIS="true" \
     -e RUNTIME_FULL_FLOW_TIMEOUT_MS="70000" \
     -e RUNTIME_FULL_FLOW_VERBOSE="true" \
     -e RUNTIME_FULL_FLOW_FORCE_RAW_WS="true" \
     -e RUNTIME_FULL_FLOW_QA_AUTH_BYPASS="true" \
-    -e RUNTIME_FULL_FLOW_ID_SUFFIX="${RUNTIME_MODE}-contabo-canary" \
+    -e RUNTIME_FULL_FLOW_ID_SUFFIX="modular-contabo-canary" \
     leaf-runtime-canary \
     node scripts/tests/smoke-runtime-full-ride-flow.cjs | tee /tmp/leaf-runtime-canary-full-flow-output.json
 fi

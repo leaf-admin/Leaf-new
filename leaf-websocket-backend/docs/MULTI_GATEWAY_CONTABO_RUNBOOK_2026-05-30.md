@@ -57,7 +57,7 @@ Workers separados:
 Nos gateways extras:
 
 - `RUNTIME_ROLE=gateway`
-- `LEAF_SERVER_RUNTIME=modular`
+- entrada fixa `server.js` via `scripts/runtime/start-server.sh`
 - `ENABLE_SOCKETIO_REDIS_ADAPTER=true`
 - `REQUIRE_SOCKETIO_REDIS_ADAPTER=true`
 - `RUNTIME_ENABLE_QUEUE_WORKER=false`
