@@ -1,0 +1,68 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+    "users": {
+      ".indexOn": [
+        "usertype",
+        "userType",
+        "status",
+        "createdAt",
+        "referralId",
+        "queue",
+        "pushToken"
+      ]
+    },
+    "drivers": {
+      ".indexOn": [
+        "userType",
+        "status",
+        "isOnline"
+      ]
+    },
+    "bookings": {
+      ".indexOn": [
+        "passengerId",
+        "driverId",
+        "customer",
+        "driver",
+        "status",
+        "tripdate"
+      ]
+    },
+    "cars": {
+      ".indexOn": [
+        "driverId",
+        "driver",
+        "fleetadmin"
+      ]
+    },
+    "payments": {
+      ".indexOn": [
+        "driverId"
+      ]
+    },
+    "promos": {
+      ".indexOn": [
+        "promoCode"
+      ]
+    },
+    "support_tickets": {
+      ".indexOn": [
+        "userId"
+      ]
+    },
+    "receipts": {
+      ".indexOn": [
+        "customer/id",
+        "driver/id"
+      ]
+    },
+    "sandbox_receipts": {
+      ".indexOn": [
+        "customer/id",
+        "driver/id"
+      ]
+    }
+  }
+}
