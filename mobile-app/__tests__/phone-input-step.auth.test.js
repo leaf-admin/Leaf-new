@@ -309,13 +309,17 @@ describe('PhoneInputStep', () => {
     );
 
     fireEvent.changeText(getByTestId('auth-phone-input'), '21102938475');
+    await waitFor(() => {
+      expect(getByTestId('auth-password-fallback-btn').props.disabled).toBeFalsy();
+    });
+
     fireEvent.press(getByTestId('auth-password-fallback-btn'));
 
     await waitFor(() => {
       expect(queryByText('Esse passo ajuda a manter sua conta segura.')).toBeNull();
       expect(queryByText('Ja tenho senha')).toBeNull();
       expect(queryByText('Entrar')).not.toBeNull();
-    });
+    }, { timeout: 3000 });
   });
 
   test('normalizes pasted E.164 phone input into local 11-digit format', () => {
