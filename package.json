@@ -18,6 +18,7 @@
     "test:mobile": "npm run test:unit --workspace mobile-app",
     "test:backend": "npm run test --workspace leaf-websocket-backend",
     "test:backend:all": "npm run test:all --workspace leaf-websocket-backend",
+    "test:firebase:rules": "npx --yes firebase-tools@14.22.0 emulators:exec --project demo-leaf-rules --config config/firebase/firebase.json --only auth,firestore \"node scripts/tests/firestore-rules-emulator.cjs\"",
     "test:all": "node scripts/tests/run-with-profile.cjs workspace-all \"npm run test:unit --workspace mobile-app && npm run test:all --workspace leaf-websocket-backend\"",
     "security:scan": "node scripts/maintenance/security/scan-secrets.cjs",
     "prelaunch:copy": "node scripts/prelaunch/assert-onboarding-copy.cjs",
