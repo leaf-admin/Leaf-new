@@ -13,6 +13,14 @@ const CURRENT_SURFACE_FILES = [
   'src/services/BookingHistoryService.js',
 ];
 
+const RETIRED_DIRECT_VEHICLE_FILES = [
+  'src/services/VehicleService.js',
+  'src/common-local/actions/vehicleActions.js',
+  'src/common-local/config/vehicleConfig.js',
+  'src/common-local/reducers/vehiclereducer.js',
+  'src/common-local/store/types.js',
+];
+
 describe('current account surface contract', () => {
   const sources = Object.fromEntries(CURRENT_SURFACE_FILES.map(file => [
     file,
@@ -24,10 +32,12 @@ describe('current account surface contract', () => {
     expect(sources[file]).not.toMatch(/\b(?:database|firestore|storage)\s*\(\s*\)/);
   });
 
-  it('does not restore the direct Firebase vehicle adapter', () => {
-    expect(fs.existsSync(
-      path.join(__dirname, '../src/services/VehicleService.js'),
-    )).toBe(false);
+  it('does not restore a direct Firebase or Redux vehicle mutation path', () => {
+    const restoredFiles = RETIRED_DIRECT_VEHICLE_FILES.filter((file) =>
+      fs.existsSync(path.join(__dirname, '..', file)),
+    );
+
+    expect(restoredFiles).toEqual([]);
   });
 
   it('does not restore the misleading direct-database onboarding profile layer', () => {
