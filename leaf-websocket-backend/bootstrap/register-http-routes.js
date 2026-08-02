@@ -82,13 +82,6 @@ function registerHttpRoutes({ app, logStructured, io = null }) {
     // Rotas KYC
     app.use('/api/kyc', kycRoutes.getRouter());
 
-    // Proxy KYC legado fica desligado no runtime modular; o fluxo atual usa /api/kyc.
-    if (String(process.env.ENABLE_LEGACY_KYC_PROXY || 'false').toLowerCase() === 'true') {
-        const kycProxyRoutes = require('../routes/kyc-proxy-routes');
-        app.use('/api/kyc-proxy', kycProxyRoutes.getRouter());
-        logStructured('warn', 'Proxy KYC legado habilitado por flag explicita', { service: 'server' });
-    }
-
     // Rotas KYC Analytics
     app.use('/api/kyc-analytics', kycAnalyticsRoutes.getRouter());
     logStructured('info', 'Rotas KYC registradas', { service: 'server' });
