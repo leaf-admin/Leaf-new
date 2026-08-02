@@ -9,6 +9,7 @@ const CURRENT_SURFACE_FILES = [
   'src/services/MobileVehicleService.js',
   'src/services/MobilePreferencesService.js',
   'src/services/MobileProfileService.js',
+  'src/services/OnboardingProfileService.js',
   'src/services/BookingHistoryService.js',
 ];
 
@@ -26,6 +27,12 @@ describe('current account surface contract', () => {
   it('does not restore the direct Firebase vehicle adapter', () => {
     expect(fs.existsSync(
       path.join(__dirname, '../src/services/VehicleService.js'),
+    )).toBe(false);
+  });
+
+  it('does not restore the misleading direct-database onboarding profile layer', () => {
+    expect(fs.existsSync(
+      path.join(__dirname, '../src/utils/userDatabaseService.js'),
     )).toBe(false);
   });
 
@@ -54,6 +61,7 @@ describe('current account surface contract', () => {
     expect(sources['src/services/MobileVehicleService.js']).toContain('/account/vehicles');
     expect(sources['src/services/MobilePreferencesService.js']).toContain('/account/preferences');
     expect(sources['src/services/MobileProfileService.js']).toContain('/account/profile');
+    expect(sources['src/services/OnboardingProfileService.js']).toContain('MobileProfileService');
     expect(sources['src/services/BookingHistoryService.js']).toContain('/receipts/user/');
   });
 

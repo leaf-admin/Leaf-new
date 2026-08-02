@@ -30,6 +30,18 @@ if [[ -e "src/services/VehicleService.js" ]]; then
   fail "legacy direct vehicle writer must remain removed"
 fi
 
+if [[ -e "src/utils/userDatabaseService.js" ]]; then
+  fail "misleading direct-database onboarding profile layer must remain removed"
+fi
+
+if command -v rg >/dev/null 2>&1; then
+  if rg -q "@react-native-firebase/database" "src/services/UserAuthService.js"; then
+    fail "password/auth resolution must not read RTDB from the mobile client"
+  fi
+elif grep -q "@react-native-firebase/database" "src/services/UserAuthService.js"; then
+  fail "password/auth resolution must not read RTDB from the mobile client"
+fi
+
 for file in \
   "src/common-local/actions/bookingactions.js" \
   "src/common-local/bookingactions.js"; do
@@ -42,6 +54,8 @@ require_pattern "src/services/HelpService.js" "__DEV__" "dev-only help fallback 
 require_pattern "src/utils/axiosInterceptor.js" "currentUser.getIdToken" "Firebase bearer token interceptor"
 require_pattern "src/services/UserAuthService.js" "/api/auth/password/login" "phone password login endpoint"
 require_pattern "src/services/UserAuthService.js" "/api/auth/password/setup" "phone password setup endpoint"
+require_pattern "src/services/OnboardingProfileService.js" "MobileProfileService" "canonical onboarding profile adapter"
+require_pattern "src/components/auth/AuthFlow.js" "OnboardingProfileService.saveOnboardingProfile" "canonical onboarding profile persistence"
 require_pattern "src/components/auth/AuthFlow.js" "onPasswordLoginSuccess" "password login flow handoff"
 require_pattern "src/components/auth/steps/PhoneInputStep.js" "requiresPassword" "inline password gating"
 require_pattern "src/components/auth/steps/PhoneInputStep.js" "Esqueci minha senha" "inline forgot password action"

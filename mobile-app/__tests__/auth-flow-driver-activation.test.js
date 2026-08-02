@@ -246,7 +246,7 @@ describe('driver onboarding canonical activation bridge', () => {
       'utf8',
     );
     const profileSaveIndex = source.indexOf(
-      'const result = await UserDatabaseService.saveUserProfile(onboardingData);',
+      'const result = await OnboardingProfileService.saveOnboardingProfile(onboardingData);',
     );
     const requiredConsentsGuardIndex = source.indexOf(
       '!hasRequiredDriverConsents(onboardingData.credentials)',

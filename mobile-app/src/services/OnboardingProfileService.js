@@ -1,6 +1,6 @@
-import Logger from './Logger';
+import Logger from '../utils/Logger';
 import auth from '@react-native-firebase/auth';
-import mobileProfileService from '../services/MobileProfileService';
+import mobileProfileService from './MobileProfileService';
 import { resolveCityLabel } from '../config/onboardingConfig';
 
 function normalizeUserType(userType) {
@@ -133,9 +133,11 @@ function resolveCnhIdentity(documentData = {}, userData = {}) {
 }
 
 /**
- * Serviço para gerenciar dados do usuário no backend moderno
+ * Composes the first account profile and persists it through the canonical
+ * authenticated Leaf account API. This service never accesses a client data
+ * store directly.
  */
-export class UserDatabaseService {
+export class OnboardingProfileService {
   static buildProfilePayload(userData = {}, options = {}) {
     const normalizedUserType = normalizeUserType(userData?.profileSelection?.userType || userData?.usertype || userData?.userType);
     const fullName =
@@ -206,11 +208,11 @@ export class UserDatabaseService {
   }
 
   /**
-   * Cria/atualiza o perfil do usuário na fonte moderna de perfil
+   * Creates or updates the authenticated account profile through the Leaf API.
    * @param {Object} userData - Dados completos do usuário
    * @returns {Promise<{success: boolean, profile: Object|null}>}
    */
-  static async saveUserProfile(userData) {
+  static async saveOnboardingProfile(userData) {
     try {
       const currentUser = auth().currentUser;
       const resolvedUid = currentUser?.uid || userData?.user?.uid || userData?.uid;
@@ -220,7 +222,7 @@ export class UserDatabaseService {
         return { success: false, profile: null };
       }
 
-      Logger.log('💾 Salvando perfil do usuário no backend moderno:', resolvedUid);
+      Logger.log('💾 Salvando perfil do usuário pela API de conta:', resolvedUid);
 
       const existingProfile = (await mobileProfileService.getCurrentProfile({ suppressErrors: true })) || {};
 
@@ -232,7 +234,7 @@ export class UserDatabaseService {
       const savedProfile = await mobileProfileService.upsertCurrentProfile(payload);
 
       if (!savedProfile) {
-        Logger.error('❌ Falha ao persistir perfil no backend moderno');
+        Logger.error('❌ Falha ao persistir perfil pela API de conta');
         return { success: false, profile: null };
       }
 
@@ -244,42 +246,6 @@ export class UserDatabaseService {
     }
   }
 
-  /**
-   * Verifica se o usuário já existe na fonte moderna
-   * @param {string} uid - UID do usuário
-   * @returns {Promise<boolean>} - Se o usuário existe
-   */
-  static async userExists(uid) {
-    try {
-      const currentUid = auth().currentUser?.uid;
-      if (currentUid && currentUid !== uid) {
-        return false;
-      }
-      const profile = await mobileProfileService.getCurrentProfile({ suppressErrors: true });
-      return Boolean(profile?.uid && profile.uid === uid);
-    } catch (error) {
-      Logger.error('❌ Erro ao verificar se usuário existe:', error);
-      return false;
-    }
-  }
-
-  /**
-   * Obtém dados do usuário da fonte moderna
-   * @param {string} uid - UID do usuário
-   * @returns {Promise<Object|null>} - Dados do usuário
-   */
-  static async getUserProfile(uid) {
-    try {
-      const currentUid = auth().currentUser?.uid;
-      if (currentUid && currentUid !== uid) {
-        return null;
-      }
-      return await mobileProfileService.getCurrentProfile({ suppressErrors: true });
-    } catch (error) {
-      Logger.error('❌ Erro ao obter perfil do usuário:', error);
-      return null;
-    }
-  }
 }
 
-export default UserDatabaseService;
+export default OnboardingProfileService;

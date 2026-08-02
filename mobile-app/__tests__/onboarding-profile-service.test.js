@@ -19,11 +19,11 @@ jest.mock('../src/services/MobileProfileService', () => ({
   },
 }));
 
-const { UserDatabaseService } = require('../src/utils/userDatabaseService');
+const { OnboardingProfileService } = require('../src/services/OnboardingProfileService');
 
-describe('UserDatabaseService.buildProfilePayload', () => {
+describe('OnboardingProfileService.buildProfilePayload', () => {
   it('builds a consistent passenger payload for a brand new registration', () => {
-    const payload = UserDatabaseService.buildProfilePayload({
+    const payload = OnboardingProfileService.buildProfilePayload({
       phoneNumber: '+5511999999999',
       profileSelection: { userType: 'passenger' },
       profileData: { fullName: 'Maria da Silva' },
@@ -55,7 +55,7 @@ describe('UserDatabaseService.buildProfilePayload', () => {
   });
 
   it('keeps driver approval and document state backend-governed during registration', () => {
-    const payload = UserDatabaseService.buildProfilePayload({
+    const payload = OnboardingProfileService.buildProfilePayload({
       phoneNumber: '+5511888888888',
       profileSelection: { userType: 'driver' },
       profileData: { fullName: 'Joao Motorista' },
@@ -113,7 +113,7 @@ describe('UserDatabaseService.buildProfilePayload', () => {
       userType: 'driver',
     });
 
-    const result = await UserDatabaseService.saveUserProfile({
+    const result = await OnboardingProfileService.saveOnboardingProfile({
       uid: 'driver_1',
       profileSelection: { userType: 'driver' },
       profileData: { fullName: 'Joao Motorista' },
