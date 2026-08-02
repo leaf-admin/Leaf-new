@@ -1,4 +1,4 @@
-import legacyStore, { store } from '../common-local/store';
+import appStore, { store } from '../common-local/store';
 
 export { store };
-export default legacyStore;
+export default appStore;
