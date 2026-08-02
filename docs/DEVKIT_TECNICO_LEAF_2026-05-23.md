@@ -188,8 +188,7 @@ Pontos importantes:
 
 - Store atual: `mobile-app/src/state/appStore.js` reexporta `mobile-app/src/common-local/store`.
 - `mobile-app/src/common-local` e legado vivo. Nao criar novas dependencias nele; migrar por dominio antes de remover.
-- Ainda existem fallbacks legados como `NewMapScreen`, `PassengerUI`, `DriverUI` quando a UI Robotaxi e desligada explicitamente.
-- `FeatureFlagService` forca `PROTOTYPE_ROBOTAXI_UI_ENABLED=true`, salvo opt-out com `EXPO_PUBLIC_FORCE_LEGACY_MAP_UI`.
+- O runtime privado monta exclusivamente a interface Robotaxi; nao existe opt-out para o mapa anterior.
 - `prototypeRideRuntime.js` faz ponte com WebSocket, maps, pagamentos, chat, notificacoes, onboarding de motorista, documentos, recibos e persistencia local.
 - `WebSocketManager.js` tem cerca de `5096` linhas e controla conexao, autenticacao, retry, sync de active ride, booking, driver status, FCM e eventos.
 - Existem `38` imports atuais de `common-local` dentro de `mobile-app/src`.
@@ -213,7 +212,6 @@ URLs mobile:
 Feature flags mobile:
 
 - `KYC_ENABLED`
-- `PROTOTYPE_ROBOTAXI_UI_ENABLED`
 - `PILOT_CONTROLLED_LAUNCH`
 - `PILOT_DRIVER_WITHDRAWALS_ENABLED`
 - `PILOT_REFERRAL_PROGRAMS_ENABLED`

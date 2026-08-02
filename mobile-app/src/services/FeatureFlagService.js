@@ -12,10 +12,6 @@ import { getPilotFeatureFlagDefaults } from '../config/pilotLaunchProfile';
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-const TRUTHY_VALUES = new Set(['1', 'true', 'yes', 'on']);
-const normalizeFlag = (value) => TRUTHY_VALUES.has(String(value ?? '').trim().toLowerCase());
-const forceLegacyMapUi = () => normalizeFlag(process.env.EXPO_PUBLIC_FORCE_LEGACY_MAP_UI);
-
 class FeatureFlagService {
   constructor() {
     this.flags = new Map();
@@ -27,9 +23,6 @@ class FeatureFlagService {
     this.defaultFlags = {
       // KYC (Know Your Customer)
       KYC_ENABLED: true,
-
-      // Protótipo UI/UX Robotaxi (agora é a interface principal do app)
-      PROTOTYPE_ROBOTAXI_UI_ENABLED: true,
 
       // iOS Live Activities para status de corrida na Lock Screen / Dynamic Island
       PILOT_RIDE_LIVE_ACTIVITIES_REQUIRED: true,
@@ -66,12 +59,6 @@ class FeatureFlagService {
           ...this.defaultFlags,
           ...parsedFlags
         };
-
-        // A UI Robotaxi virou a trilha principal do app. Só permitimos cair na UI
-        // legada quando houver opt-out explícito de runtime.
-        if (!forceLegacyMapUi()) {
-          mergedFlags.PROTOTYPE_ROBOTAXI_UI_ENABLED = true;
-        }
 
         this.flags = new Map(Object.entries(mergedFlags));
         await this.saveFlags();
