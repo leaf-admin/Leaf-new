@@ -54,7 +54,10 @@
     "ngrok:auto": "node scripts/utils/start-ngrok-auto.js",
     "ngrok:url": "node scripts/utils/get-ngrok-url.js",
     "test:route-guards": "node scripts/tests/assert-sensitive-route-guards.cjs",
-    "test:redis-sentinel-failover": "node scripts/tests/redis-sentinel-failover.cjs"
+    "test:redis-sentinel-failover": "node scripts/tests/redis-sentinel-failover.cjs",
+    "backup:redis": "node scripts/ops/backup-redis.cjs",
+    "verify:redis-restore": "node scripts/ops/verify-redis-restore.cjs",
+    "test:redis-backup-restore": "node scripts/tests/redis-backup-restore.cjs"
   },
   "keywords": [
     "websocket",
