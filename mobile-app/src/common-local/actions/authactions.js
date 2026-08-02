@@ -77,7 +77,7 @@ export const registerUser = (userData) => async (dispatch) => {
     const profileData = {
       firstName: firstName,
       lastName: lastName,
-      usertype: finalUserType,  // Campo que a NewMapScreen espera
+      usertype: finalUserType,  // Campo canônico consumido pela resolução de perfil
       userType: finalUserType,  // Manter compatibilidade se necessário
       email: email,
       cpf: cpf,

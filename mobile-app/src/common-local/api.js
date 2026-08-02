@@ -125,7 +125,7 @@ export const api = {
         return () => promosRef.off();
     },
 
-    // Funções necessárias para o PassengerUI
+    // Ações históricas de estimativa e reserva.
     getEstimate: () => async (dispatch) => {
         // TODO: Implementar lógica de estimativa
         Logger.log('getEstimate chamado');

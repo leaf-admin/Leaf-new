@@ -38,7 +38,7 @@ export const ptBR = {
   // Corridas
   ride_details_page_title: 'Detalhes da Corrida',
   
-  // Traduções para PassengerUI
+  // Corrida do passageiro
   ride_accepted: 'Corrida Aceita',
   driver_is_on_the_way: 'Motorista a caminho',
   no_drivers_found_alert_title: 'Nenhum Motorista Encontrado',
@@ -109,4 +109,4 @@ export const ptBR = {
   complain: 'Reclamações',
   about: 'Sobre',
   driver_documents: 'Documentos do Motorista',
-}; 
+};

@@ -104,12 +104,12 @@ const OnboardingWrapper = ({ children }) => {
         Logger.log('OnboardingWrapper - 📊 Perfil completo no Realtime Database?', !!hasCompleteProfile);
 
         if (hasCompleteProfile) {
-          // ✅ SITUAÇÃO 1: Usuário completo - ir para NewMapScreen
-          Logger.log('OnboardingWrapper - ✅ Usuário completo, navegando para NewMapScreen');
+          // ✅ SITUAÇÃO 1: Usuário completo - ir para a Home Robotaxi
+          Logger.log('OnboardingWrapper - ✅ Usuário completo, navegando para a Home Robotaxi');
           setShouldShowOnboarding(false);
           setIsCheckingStatus(false);
           
-          // Navegar para Map (NewMapScreen)
+          // Map é o alias de compatibilidade da Home Robotaxi canônica.
           navigation.replace('Map');
           return;
         } else {
@@ -172,7 +172,7 @@ const OnboardingWrapper = ({ children }) => {
     );
   }
 
-  // Se não deve mostrar onboarding, renderizar children (normalmente NewMapScreen)
+  // Se não deve mostrar onboarding, renderizar a superfície privada canônica.
   return children;
 };
 
