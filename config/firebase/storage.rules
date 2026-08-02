@@ -1,0 +1,10 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    // Arquivos de perfil, veículo e KYC são enviados e servidos pela Leaf API.
+    // O Firebase Admin SDK ignora estas regras; clientes móveis e web não.
+    match /{object=**} {
+      allow read, write: if false;
+    }
+  }
+}
