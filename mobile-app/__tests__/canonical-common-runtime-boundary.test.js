@@ -90,10 +90,16 @@ describe('canonical common runtime boundary', () => {
     expect(source).not.toContain("from '../../common';");
   });
 
-  it('keeps the secondary Redux store and removed barrel outside the app graph', () => {
+  it('keeps exactly one Redux store implementation in the common runtime', () => {
     const reachable = collectReachableJavaScriptFiles(path.join(MOBILE_ROOT, 'index.js'));
+    const commonRuntimeFiles = listJavaScriptFiles(path.join(MOBILE_ROOT, 'src/common-local'));
+    const storeImplementations = commonRuntimeFiles.filter((filePath) =>
+      fs.readFileSync(filePath, 'utf8').includes('configureStore('),
+    );
 
-    expect(reachable.has(path.join(MOBILE_ROOT, 'src/common-local/store/store.js'))).toBe(false);
+    expect(fs.existsSync(path.join(MOBILE_ROOT, 'src/common-local/store/store.js'))).toBe(false);
+    expect(storeImplementations).toEqual([path.join(MOBILE_ROOT, 'src/common-local/store.js')]);
+    expect(reachable.has(path.join(MOBILE_ROOT, 'src/common-local/store.js'))).toBe(true);
     expect(fs.existsSync(path.join(MOBILE_ROOT, 'src/common-local/index.js'))).toBe(false);
     expect(fs.existsSync(path.join(MOBILE_ROOT, 'src/services/canonical/legacyApiService.js'))).toBe(false);
   });
