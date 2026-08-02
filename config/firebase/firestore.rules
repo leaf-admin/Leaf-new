@@ -1,30 +1,30 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isSelf(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isSignedIn() &&
+             request.auth.token.admin == true &&
+             request.auth.token.role in ['admin', 'super-admin'];
+    }
+
     // ============================================
     // REGRAS PARA ADMINISTRADORES DO DASHBOARD
     // ============================================
     
     // Coleção adminUsers - Gestão de administradores
     match /adminUsers/{userId} {
-      // Leitura: apenas o próprio usuário ou admins com claim
-      allow read: if request.auth != null && 
-                     (request.auth.uid == userId || 
-                      (request.auth.token.admin == true && 
-                       request.auth.token.role in ['admin', 'super-admin']));
-      
-      // Escrita: apenas o próprio usuário ou super-admins
-      allow create: if request.auth != null && 
-                       (request.auth.uid == userId || 
-                        request.auth.token.role == 'super-admin');
-      
-      allow update: if request.auth != null && 
-                       (request.auth.uid == userId || 
-                        request.auth.token.role == 'super-admin');
-      
-      allow delete: if request.auth != null && 
-                       request.auth.token.role == 'super-admin';
+      // O dashboard pode consultar a própria identidade administrativa. Toda
+      // mutação passa pela Leaf API/Admin SDK para impedir autoelevação.
+      allow read: if isSelf(userId) || isAdmin();
+      allow create, update, delete: if false;
     }
     
     // ============================================
@@ -77,11 +77,9 @@ service cloud.firestore {
     // ============================================
 
     match /vehicles/{vehicleId} {
-      // Leitura: usuários autenticados podem ler veículos
-      allow read: if request.auth != null;
-
-      // Escrita: usuários autenticados podem gerenciar seus próprios veículos
-      allow write: if request.auth != null;
+      // Cadastro, consulta, seleção e exclusão usam /api/account/vehicles.
+      // Aprovação e campos operacionais permanecem backend-governados.
+      allow read, write: if false;
     }
 
     match /drivers/{driverId} {
@@ -165,17 +163,10 @@ service cloud.firestore {
     }
 
     match /driver_withdrawals/{withdrawalId} {
-      allow read: if request.auth != null &&
-                     (request.auth.uid == resource.data.driverId ||
-                      (request.auth.token.admin == true &&
-                       request.auth.token.role in ['admin', 'super-admin']));
-      allow create: if request.auth != null &&
-                       (request.auth.uid == request.resource.data.driverId ||
-                        (request.auth.token.admin == true &&
-                         request.auth.token.role in ['admin', 'super-admin']));
-      allow update, delete: if request.auth != null &&
-                              request.auth.token.admin == true &&
-                              request.auth.token.role in ['admin', 'super-admin'];
+      allow read: if isSignedIn() &&
+                     (request.auth.uid == resource.data.driverId || isAdmin());
+      // Saldo, ledger, tarifas, KYC e idempotência só podem ser validados pela API.
+      allow create, update, delete: if false;
     }
     
     // ============================================
@@ -197,13 +188,10 @@ service cloud.firestore {
     // ============================================
     
     match /support_tickets/{ticketId} {
-      allow read: if request.auth != null && 
-                     (request.auth.token.admin == true || 
-                      request.auth.uid == resource.data.userId);
-      
-      allow write: if request.auth != null && 
-                     (request.auth.token.admin == true || 
-                      request.auth.uid == resource.data.userId);
+      allow read: if isSignedIn() &&
+                     (request.auth.uid == resource.data.userId || isAdmin());
+      // Criação, mensagens e alterações passam pela Leaf Support API.
+      allow create, update, delete: if false;
     }
     
     // ============================================
@@ -249,15 +237,9 @@ service cloud.firestore {
     // ============================================
     // REGRAS PARA DADOS DE VIAGEM (TRIP_DATA)
     // ============================================
-    // Permite que usuários autenticados salvem seus próprios dados de viagem
     match /trip_data/{tripId} {
-      // Leitura: qualquer usuário autenticado pode ler dados de viagem
-      // (para compatibilidade com usuários normais)
-      allow read: if request.auth != null;
-
-      // Escrita: qualquer usuário autenticado pode escrever dados de viagem
-      // (para compatibilidade com usuários normais)
-      allow write: if request.auth != null;
+      // O lifecycle Robotaxi usa Socket/Redis e persistência backend no Firestore.
+      allow read, write: if false;
     }
     
     // ============================================
