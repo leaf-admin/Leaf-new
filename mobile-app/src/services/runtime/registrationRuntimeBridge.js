@@ -1,7 +1,1 @@
-export {
-  mainSignUp,
-  validateReferer,
-  checkUserExists,
-  editreferral,
-  countries
-} from '../canonical/registrationService';
+export { default as countries } from '../../common-local/other/GetCountries';

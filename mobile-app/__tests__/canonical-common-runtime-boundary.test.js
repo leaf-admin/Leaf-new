@@ -13,6 +13,53 @@ function listJavaScriptFiles(directory) {
   });
 }
 
+function resolveLocalModule(importerPath, request) {
+  if (!request.startsWith('.')) return null;
+
+  const basePath = path.resolve(path.dirname(importerPath), request);
+  const candidates = [
+    basePath,
+    `${basePath}.js`,
+    `${basePath}.jsx`,
+    `${basePath}.ts`,
+    `${basePath}.tsx`,
+    path.join(basePath, 'index.js'),
+    path.join(basePath, 'index.jsx'),
+    path.join(basePath, 'index.ts'),
+    path.join(basePath, 'index.tsx'),
+  ];
+
+  return candidates.find((candidate) => {
+    try {
+      return fs.statSync(candidate).isFile();
+    } catch (_error) {
+      return false;
+    }
+  }) || null;
+}
+
+function collectReachableJavaScriptFiles(entryPath) {
+  const pending = [entryPath];
+  const reachable = new Set();
+  const importPattern = /(?:import|export)\s+(?:[^'";]*?\s+from\s+)?['"]([^'"]+)['"]|require\(\s*['"]([^'"]+)['"]\s*\)/g;
+
+  while (pending.length > 0) {
+    const filePath = pending.pop();
+    if (!filePath || reachable.has(filePath)) continue;
+    reachable.add(filePath);
+
+    const source = fs.readFileSync(filePath, 'utf8');
+    for (const match of source.matchAll(importPattern)) {
+      const resolved = resolveLocalModule(filePath, match[1] || match[2]);
+      if (resolved && /\.(?:js|jsx|ts|tsx)$/.test(resolved) && !reachable.has(resolved)) {
+        pending.push(resolved);
+      }
+    }
+  }
+
+  return reachable;
+}
+
 describe('canonical common runtime boundary', () => {
   it('keeps the retired common package out of the mobile workspace', () => {
     expect(fs.existsSync(path.join(MOBILE_ROOT, 'common'))).toBe(false);
@@ -41,5 +88,13 @@ describe('canonical common runtime boundary', () => {
     expect(source).toContain("from '../services/runtime/locationRouteBridge';");
     expect(source).toContain("from '../services/runtime/mapGeoService';");
     expect(source).not.toContain("from '../../common';");
+  });
+
+  it('keeps the secondary Redux store and removed barrel outside the app graph', () => {
+    const reachable = collectReachableJavaScriptFiles(path.join(MOBILE_ROOT, 'index.js'));
+
+    expect(reachable.has(path.join(MOBILE_ROOT, 'src/common-local/store/store.js'))).toBe(false);
+    expect(fs.existsSync(path.join(MOBILE_ROOT, 'src/common-local/index.js'))).toBe(false);
+    expect(fs.existsSync(path.join(MOBILE_ROOT, 'src/services/canonical/legacyApiService.js'))).toBe(false);
   });
 });
