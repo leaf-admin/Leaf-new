@@ -280,7 +280,7 @@ Entradas e bootstrap:
 Rotas HTTP principais registradas:
 
 - Auth: `/auth`, `/api/auth`, `/api/custom-otp`, `/api/auth/password`, `/api/admin/auth`
-- KYC/OCR: `/api/kyc`, `/api/kyc-proxy`, `/api/kyc-analytics`, `/api/ocr`, `/api/kyc-onboarding`
+- KYC/OCR: `/api/kyc`, `/api/kyc-analytics`, `/api/ocr`, `/api/kyc-onboarding`
 - Support/Ops: `/api/support`, `/api/ops`
 - Geofence: `/api/geofence`
 - Referral/programs: `/api/programs/referrals`

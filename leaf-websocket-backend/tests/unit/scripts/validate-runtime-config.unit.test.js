@@ -81,18 +81,6 @@ describe('validate-runtime-config Woovi webhook production gates', () => {
     );
   });
 
-  it('blocks the isolated legacy KYC proxy from being mounted in production', () => {
-    const result = runValidator({
-      ...baseProdEnv,
-      ENABLE_LEGACY_KYC_PROXY: 'true'
-    });
-
-    expect(result.status).toBe(1);
-    expect(result.report.summary.blockers).toContain(
-      'ENABLE_LEGACY_KYC_PROXY=true bloqueado em produção'
-    );
-  });
-
   it.each([
     'ENABLE_LEGACY_GRAPHQL',
     'ENABLE_LEGACY_DRIVER_RESPONSE_ACCEPT'

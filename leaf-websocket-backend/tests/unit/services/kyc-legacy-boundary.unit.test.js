@@ -30,16 +30,31 @@ describe('KYC legacy boundary', () => {
     expect(source).toContain('Reverificacao KYC legada desativada');
   });
 
-  it('keeps legacy KYC proxy behind an explicit runtime flag', () => {
-    const source = fs.readFileSync(
+  it('does not expose the retired KYC proxy or its runtime flag', () => {
+    const runtimeSource = fs.readFileSync(
       path.join(__dirname, '../../../bootstrap/register-http-routes.js'),
       'utf8'
     );
+    const configurationFiles = [
+      '../../../scripts/deploy/validate-runtime-config.js',
+      '../../../docker-compose.gateway-scale.yml',
+      '../../../docker-compose.production.yml',
+      '../../../config/soft-release.env.example',
+      '../../../config/kyc-aws-strict.env.example'
+    ];
 
-    expect(source).toContain('ENABLE_LEGACY_KYC_PROXY');
-    expect(source).toContain("require('../routes/kyc-proxy-routes')");
-    expect(source.indexOf('ENABLE_LEGACY_KYC_PROXY')).toBeLessThan(
-      source.indexOf("require('../routes/kyc-proxy-routes')")
-    );
+    expect(runtimeSource).not.toContain('ENABLE_LEGACY_KYC_PROXY');
+    expect(runtimeSource).not.toContain("require('../routes/kyc-proxy-routes')");
+    expect(
+      fs.existsSync(path.join(__dirname, '../../../routes/kyc-proxy-routes.js'))
+    ).toBe(false);
+    expect(
+      fs.existsSync(path.join(__dirname, '../../../services/KYCClient.js'))
+    ).toBe(false);
+
+    for (const relativePath of configurationFiles) {
+      const source = fs.readFileSync(path.join(__dirname, relativePath), 'utf8');
+      expect(source).not.toContain('ENABLE_LEGACY_KYC_PROXY');
+    }
   });
 });
