@@ -27,4 +27,49 @@ describe('Robotaxi driver documents state consistency', () => {
     expect(source).toContain("? 'danger'");
     expect(source).toContain(": 'warning'");
   });
+
+  it('keeps simulated CNH and CRLV upload screens out of the executable app', () => {
+    const retiredScreens = [
+      'CNHUploadScreen.js',
+      'CRLVUploadScreen.js',
+      'CompleteRegistrationScreen.js',
+      'DriverTermsScreen.js',
+      'OTPScreen.js',
+      'Registration.js',
+      'ProfileSelectionScreen.js',
+      'WelcomeScreen.js',
+    ];
+    const compatibilityRoutes = [
+      'CNHUpload',
+      'CNHUploadScreen',
+      'CRLVUpload',
+      'CRLVUploadScreen',
+      'CompleteRegistration',
+      'DriverTerms',
+      'OTP',
+      'Registration',
+      'ProfileSelection',
+      'ProfileSelectionScreen',
+      'WelcomeScreen',
+    ];
+    const navigatorSource = fs.readFileSync(
+      path.join(__dirname, '..', 'src', 'navigation', 'AppNavigator.js'),
+      'utf8',
+    );
+    const authFlowSource = fs.readFileSync(
+      path.join(__dirname, '..', 'src', 'components', 'auth', 'AuthFlow.js'),
+      'utf8',
+    );
+
+    retiredScreens.forEach(file => {
+      expect(fs.existsSync(path.join(__dirname, '..', 'src', 'screens', file))).toBe(false);
+    });
+    compatibilityRoutes.forEach(routeName => {
+      expect(navigatorSource).toContain(
+        `name="${routeName}" component={LegacyAuthRouteRedirectScreen}`,
+      );
+    });
+    expect(authFlowSource).toContain("import DocumentStep from './steps/DocumentStep'");
+    expect(authFlowSource).toContain('submitDriverOnboardingActivation({');
+  });
 });

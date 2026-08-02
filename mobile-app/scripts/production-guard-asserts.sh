@@ -34,6 +34,20 @@ if [[ -e "src/utils/userDatabaseService.js" ]]; then
   fail "misleading direct-database onboarding profile layer must remain removed"
 fi
 
+for file in \
+  "src/screens/CNHUploadScreen.js" \
+  "src/screens/CRLVUploadScreen.js" \
+  "src/screens/CompleteRegistrationScreen.js" \
+  "src/screens/DriverTermsScreen.js" \
+  "src/screens/OTPScreen.js" \
+  "src/screens/Registration.js" \
+  "src/screens/ProfileSelectionScreen.js" \
+  "src/screens/WelcomeScreen.js"; do
+  if [[ -e "$file" ]]; then
+    fail "simulated document/onboarding screen must remain removed: $file"
+  fi
+done
+
 if command -v rg >/dev/null 2>&1; then
   if rg -q "@react-native-firebase/database" "src/services/UserAuthService.js"; then
     fail "password/auth resolution must not read RTDB from the mobile client"

@@ -24,14 +24,6 @@ import {
   isProfileIdentityConsistent,
 } from '../components/auth/authFlowRecovery';
 
-// Telas de Autenticação
-import OTPScreen from '../screens/OTPScreen';
-import Registration from '../screens/Registration';
-import ProfileSelectionScreen from '../screens/ProfileSelectionScreen';
-import CompleteRegistrationScreen from '../screens/CompleteRegistrationScreen';
-import DriverTermsScreen from '../screens/DriverTermsScreen';
-import CNHUploadScreen from '../screens/CNHUploadScreen';
-import CRLVUploadScreen from '../screens/CRLVUploadScreen';
 import AuthFlowScreenshotHarness from '../components/auth/AuthFlowScreenshotHarness';
 
 import LegalScreen from '../screens/LegalScreen';
@@ -42,7 +34,6 @@ import EarningsReportScreen from '../screens/EarningsReportScreen';
 
 // Telas de Onboarding
 import SplashScreen from '../screens/SplashScreen';
-import WelcomeScreen from '../screens/WelcomeScreen';
 import AuthLoadingScreen from '../screens/AuthLoadingScreen';
 
 import RobotaxiPrototypeScreen from '../screens/RobotaxiPrototypeScreen';
@@ -529,21 +520,21 @@ function renderPublicScreens(allowPrototypeQaScreens = false) {
       <Stack.Screen name="AuthLoading" component={AuthLoadingScreen} options={{ headerShown: false }} />
       <Stack.Screen name="AuthLoadingScreen" component={AuthLoadingScreen} options={{ headerShown: false }} />
       <Stack.Screen name="LoginScreen" component={LegacyAuthRouteRedirectScreen} options={{ headerShown: false }} />
-      <Stack.Screen name="Registration" component={Registration} options={{ headerShown: false }} />
-      <Stack.Screen name="WelcomeScreen" component={WelcomeScreen} options={{ headerShown: false }} />
-      <Stack.Screen name="ProfileSelectionScreen" component={ProfileSelectionScreen} options={{ headerShown: false }} />
-      <Stack.Screen name="CompleteRegistration" component={CompleteRegistrationScreen} options={{ headerShown: false }} />
-      <Stack.Screen name="DriverTerms" component={DriverTermsScreen} options={{ headerShown: false }} />
-      <Stack.Screen name="CNHUploadScreen" component={CNHUploadScreen} options={{ headerShown: false }} />
-      <Stack.Screen name="CRLVUploadScreen" component={CRLVUploadScreen} options={{ headerShown: false }} />
-      <Stack.Screen name="CNHUpload" component={CNHUploadScreen} options={{ headerShown: false }} />
-      <Stack.Screen name="CRLVUpload" component={CRLVUploadScreen} options={{ headerShown: false }} />
-      <Stack.Screen name="OTP" component={OTPScreen} options={{ headerShown: false }} />
+      <Stack.Screen name="Registration" component={LegacyAuthRouteRedirectScreen} options={{ headerShown: false }} />
+      <Stack.Screen name="WelcomeScreen" component={LegacyAuthRouteRedirectScreen} options={{ headerShown: false }} />
+      <Stack.Screen name="ProfileSelectionScreen" component={LegacyAuthRouteRedirectScreen} options={{ headerShown: false }} />
+      <Stack.Screen name="OTP" component={LegacyAuthRouteRedirectScreen} options={{ headerShown: false }} />
+      <Stack.Screen name="CompleteRegistration" component={LegacyAuthRouteRedirectScreen} options={{ headerShown: false }} />
+      <Stack.Screen name="DriverTerms" component={LegacyAuthRouteRedirectScreen} options={{ headerShown: false }} />
+      <Stack.Screen name="CNHUploadScreen" component={LegacyAuthRouteRedirectScreen} options={{ headerShown: false }} />
+      <Stack.Screen name="CRLVUploadScreen" component={LegacyAuthRouteRedirectScreen} options={{ headerShown: false }} />
+      <Stack.Screen name="CNHUpload" component={LegacyAuthRouteRedirectScreen} options={{ headerShown: false }} />
+      <Stack.Screen name="CRLVUpload" component={LegacyAuthRouteRedirectScreen} options={{ headerShown: false }} />
       <Stack.Screen name="PhoneInputScreen" component={LegacyAuthRouteRedirectScreen} options={{ headerShown: false }} />
       <Stack.Screen name="PhoneScreen" component={LegacyAuthRouteRedirectScreen} options={{ headerShown: false }} />
       <Stack.Screen name="Login" component={LegacyAuthRouteRedirectScreen} options={{ headerShown: false }} />
       <Stack.Screen name="AuthScreen" component={LegacyAuthRouteRedirectScreen} options={{ headerShown: false }} />
-      <Stack.Screen name="ProfileSelection" component={ProfileSelectionScreen} options={{ headerShown: false }} />
+      <Stack.Screen name="ProfileSelection" component={LegacyAuthRouteRedirectScreen} options={{ headerShown: false }} />
       <Stack.Screen
         name="FreeTrial"
         component={PilotFeatureUnavailableScreen}
