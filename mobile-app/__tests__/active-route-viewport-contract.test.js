@@ -22,10 +22,6 @@ const DIRECT_ROUTE_MAP_RENDERER_ALLOWLIST = [
   'src/components/TaxiModal.js',
   'src/components/ridelist.js',
   'src/components/prototype/PrototypeMapLayer.js',
-  'src/screens/BookedCabScreen.js',
-  'src/screens/DriverTrips.js',
-  'src/screens/MapScreen.js',
-  'src/screens/TripTrackingScreen.js',
   'src/screens/prototype/RobotaxiReceiptScreen.js',
 ].sort();
 

@@ -121,7 +121,7 @@ RUNTIME_FILES=(
   ".env"
   ".env.production"
   "eas.json"
-  "src/screens/MapScreen.js"
+  "src/screens/prototype/RobotaxiHomeScreen.js"
   "src/common-local/api.js"
   "src/common-local/redisConfig.js"
   "src/common-local/config/redisConfig.js"
