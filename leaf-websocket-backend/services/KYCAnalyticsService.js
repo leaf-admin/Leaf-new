@@ -7,15 +7,11 @@
 
 const Redis = require('ioredis');
 const { logStructured, logError } = require('../utils/logger');
+const DockerDetector = require('../utils/docker-detector');
 
 class KYCAnalyticsService {
   constructor() {
-    this.redis = new Redis({
-      host: process.env.REDIS_HOST || 'localhost',
-      port: process.env.REDIS_PORT || 6379,
-      db: process.env.REDIS_DB || 0,
-      password: process.env.REDIS_PASSWORD || null
-    });
+    this.redis = new Redis(DockerDetector.getRedisConfig());
     
     this.metricsPrefix = 'kyc:analytics:';
     this.realtimePrefix = 'kyc:realtime:';

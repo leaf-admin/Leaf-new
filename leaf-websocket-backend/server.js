@@ -5,8 +5,13 @@ const path = require('path');
 const crypto = require('crypto');
 require('dotenv').config({ path: process.env.ENV_FILE || path.join(__dirname, '.env') });
 
-// Canonicaliza REDIS_URL para evitar divergência entre módulos (ex.: fallback para redis-master).
-if (process.env.REDIS_HOST && process.env.REDIS_PASSWORD && process.env.REDIS_CANONICAL_URL !== 'false') {
+// Canonicaliza REDIS_URL apenas no modo standalone. Sentinel usa descoberta de mestre.
+if (
+    String(process.env.REDIS_MODE || 'standalone').trim().toLowerCase() !== 'sentinel' &&
+    process.env.REDIS_HOST &&
+    process.env.REDIS_PASSWORD &&
+    process.env.REDIS_CANONICAL_URL !== 'false'
+) {
     const redisPort = process.env.REDIS_PORT || '6379';
     const redisDb = process.env.REDIS_DB || '0';
     process.env.REDIS_URL = `redis://:${encodeURIComponent(process.env.REDIS_PASSWORD)}@${process.env.REDIS_HOST}:${redisPort}/${redisDb}`;

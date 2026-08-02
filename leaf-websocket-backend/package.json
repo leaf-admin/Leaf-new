@@ -53,7 +53,8 @@
     "ngrok:start": "node scripts/utils/start-ngrok.js",
     "ngrok:auto": "node scripts/utils/start-ngrok-auto.js",
     "ngrok:url": "node scripts/utils/get-ngrok-url.js",
-    "test:route-guards": "node scripts/tests/assert-sensitive-route-guards.cjs"
+    "test:route-guards": "node scripts/tests/assert-sensitive-route-guards.cjs",
+    "test:redis-sentinel-failover": "node scripts/tests/redis-sentinel-failover.cjs"
   },
   "keywords": [
     "websocket",

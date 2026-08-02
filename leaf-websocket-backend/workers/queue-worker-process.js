@@ -40,6 +40,12 @@ async function main() {
         }
 
         try {
+            await new Promise((resolve) => io.close(() => resolve()));
+        } catch (_socketError) {
+            // noop
+        }
+
+        try {
             if (socketIoRedisAdapter) {
                 await socketIoRedisAdapter.disconnect();
             }

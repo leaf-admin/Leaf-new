@@ -216,6 +216,10 @@ class HealthCheckService {
 
   getRedisHealthConfigKey(config) {
     const passwordMarker = config.password ? 'with-pass' : 'without-pass';
+    if (Array.isArray(config.sentinels)) {
+      const endpoints = config.sentinels.map(item => `${item.host}:${item.port}`).join(',');
+      return `sentinel:${config.name}:${endpoints}:${config.db}:${passwordMarker}`;
+    }
     return `${config.host}:${config.port}:${config.db}:${passwordMarker}`;
   }
 

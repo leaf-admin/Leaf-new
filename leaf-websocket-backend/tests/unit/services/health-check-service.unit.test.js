@@ -186,4 +186,21 @@ describe('health-check-service firebase checks', () => {
       required: true
     });
   });
+
+  test('separa o cache do health check por topologia Sentinel', () => {
+    const config = {
+      sentinels: [
+        { host: 'sentinel-a', port: 26379 },
+        { host: 'sentinel-b', port: 26379 },
+        { host: 'sentinel-c', port: 26379 }
+      ],
+      name: 'leaf-master',
+      db: 0,
+      password: 'redis-secret'
+    };
+
+    expect(healthCheckService.getRedisHealthConfigKey(config)).toBe(
+      'sentinel:leaf-master:sentinel-a:26379,sentinel-b:26379,sentinel-c:26379:0:with-pass'
+    );
+  });
 });
