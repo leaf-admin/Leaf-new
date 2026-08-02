@@ -173,10 +173,6 @@ const API_URLS = {
   firebaseEndpoints: {
     updateUserLocation: '/update_user_location',
     getNearbyDrivers: '/get_nearby_drivers',
-    startTripTracking: '/start_trip_tracking',
-    updateTripLocation: '/update_trip_location',
-    endTripTracking: '/end_trip_tracking',
-    getTripData: '/get_trip_data',
     getRedisStats: '/get_redis_stats',
     firebaseSync: '/firebase_sync',
     health: '/health'

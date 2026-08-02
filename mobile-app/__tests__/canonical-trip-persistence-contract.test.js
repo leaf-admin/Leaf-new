@@ -19,6 +19,8 @@ describe('canonical trip persistence boundary', () => {
     const retiredTripDataSurfaces = [
       'src/services/TripDataService.js',
       'src/services/SyncService.js',
+      'src/common-local/redisTrackingService.js',
+      'src/common-local/services/redisTrackingService.js',
       'src/services/runtime/locationActionsBridge.js',
       'src/hooks/useTripTracking.js',
       'src/hooks/useTripHistory.js',

@@ -125,9 +125,7 @@ RUNTIME_FILES=(
   "src/common-local/api.js"
   "src/common-local/redisConfig.js"
   "src/common-local/config/redisConfig.js"
-  "src/common-local/redisTrackingService.js"
   "src/common-local/redisLocationService.js"
-  "src/common-local/services/redisTrackingService.js"
   "src/common-local/services/redisLocationService.js"
 )
 
