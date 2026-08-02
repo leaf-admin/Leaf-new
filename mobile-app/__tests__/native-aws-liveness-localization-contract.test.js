@@ -86,6 +86,7 @@ describe('AWS native liveness localization contract', () => {
     );
     expect(content).toContain('Centralize seu rosto');
     expect(content).toContain('Posicione o rosto em frente à câmera');
+    expect(content.match(/Aproxime o rosto da câmera/g)).toHaveLength(2);
   });
 
   test('ships the complete Android SDK key set in pt-BR without format placeholders', () => {
@@ -101,6 +102,7 @@ describe('AWS native liveness localization contract', () => {
     expect(content).not.toMatch(/%(?:\d+\$)?[a-zA-Z]/);
     expect(content).toContain('Centralize seu rosto');
     expect(content).toContain('Posicione o rosto em frente à câmera');
+    expect(content).toContain('Aproxime o rosto da câmera');
   });
 
   test('iOS merge preserves unrelated strings and is byte-identical on a second run', () => {

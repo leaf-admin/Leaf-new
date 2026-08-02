@@ -15,6 +15,7 @@ const ROOT = path.resolve(__dirname, '../..');
 const ARTIFACT_ROOT = path.join(ROOT, '..', 'test-results', 'runtime-redis-adapter');
 const REDIS_PASSWORD = `leaf_runtime_smoke_${Date.now()}`;
 const DEFAULT_TIMEOUT_MS = Number.parseInt(process.env.RUNTIME_SMOKE_TIMEOUT_MS || '45000', 10);
+const QA_DRIVER_UID = 'OjML1wSzdNRaynjqMRlSW1Y0LVy2';
 
 const children = [];
 
@@ -230,6 +231,9 @@ function runtimeEnv({ runtime, port, redisPort, redisUrl }) {
     PORT: String(port),
     HOST: '127.0.0.1',
     RUNTIME_ROLE: 'gateway',
+    AUTO_TEST_MODE: 'true',
+    QA_SOCKET_BYPASS_UIDS: QA_DRIVER_UID,
+    ALLOW_MULTIPLE_SESSIONS: 'false',
     ENABLE_SOCKETIO_REDIS_ADAPTER: 'true',
     REQUIRE_SOCKETIO_REDIS_ADAPTER: 'true',
     REDIS_HOST: '127.0.0.1',
@@ -264,8 +268,8 @@ function runtimeEnv({ runtime, port, redisPort, redisUrl }) {
   };
 }
 
-async function startRuntime({ runtime, port, redisPort, redisUrl }) {
-  const proc = spawnLogged(`runtime-${runtime}`, 'bash', ['scripts/runtime/start-server.sh'], {
+async function startRuntime({ runtime, instance = 'primary', port, redisPort, redisUrl }) {
+  const proc = spawnLogged(`runtime-${runtime}-${instance}`, 'bash', ['scripts/runtime/start-server.sh'], {
     cwd: ROOT,
     env: runtimeEnv({ runtime, port, redisPort, redisUrl })
   });
@@ -305,6 +309,7 @@ async function startRuntime({ runtime, port, redisPort, redisUrl }) {
 
   return {
     runtime,
+    instance,
     port,
     pid: proc.child.pid,
     logPath: proc.logPath,
@@ -314,6 +319,103 @@ async function startRuntime({ runtime, port, redisPort, redisUrl }) {
       socketId
     }
   };
+}
+
+async function connectQaDriver(port) {
+  const socket = createClient(`http://127.0.0.1:${port}`, {
+    transports: ['websocket'],
+    reconnection: false,
+    timeout: 5000,
+    auth: {
+      uid: QA_DRIVER_UID,
+      qaAuthBypass: true,
+      qaAutomation: true
+    }
+  });
+
+  await new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error(`Timeout conectando motorista QA na porta ${port}`)), 5000);
+    socket.once('connect', () => {
+      clearTimeout(timeout);
+      resolve();
+    });
+    socket.once('connect_error', (error) => {
+      clearTimeout(timeout);
+      reject(error);
+    });
+  });
+
+  const authenticated = new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error(`Timeout autenticando motorista QA na porta ${port}`)), 5000);
+    socket.once('authenticated', (payload) => {
+      clearTimeout(timeout);
+      resolve(payload);
+    });
+    socket.once('authentication_error', (payload) => {
+      clearTimeout(timeout);
+      reject(new Error(payload?.message || 'Falha de autenticação QA'));
+    });
+  });
+
+  socket.emit('authenticate', {
+    uid: QA_DRIVER_UID,
+    userType: 'driver',
+    qaAuthBypass: true,
+    qaAutomation: true
+  });
+
+  return {
+    socket,
+    authPayload: await authenticated
+  };
+}
+
+async function validateDistributedDriverSessionReplacement(portA, portB) {
+  const first = await connectQaDriver(portA);
+  let second = null;
+
+  try {
+    const termination = new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => reject(new Error('A sessão anterior não recebeu SESSION_REPLACED')), 5000);
+      first.socket.once('sessionTerminated', (payload) => {
+        clearTimeout(timeout);
+        resolve(payload);
+      });
+    });
+    const disconnected = new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => reject(new Error('A sessão anterior não foi desconectada')), 5000);
+      first.socket.once('disconnect', (reason) => {
+        clearTimeout(timeout);
+        resolve(reason);
+      });
+    });
+
+    second = await connectQaDriver(portB);
+    const [terminationPayload, disconnectReason] = await Promise.all([termination, disconnected]);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    if (!second.socket.connected) {
+      throw new Error('A sessão nova foi desconectada durante a substituição distribuída');
+    }
+    if (terminationPayload?.newSocketId !== second.socket.id) {
+      throw new Error('SESSION_REPLACED não aponta para o socket novo');
+    }
+    if (terminationPayload?.previousSocketId !== first.authPayload?.socketId) {
+      throw new Error('SESSION_REPLACED não aponta para o socket anterior');
+    }
+
+    return {
+      status: 'passed',
+      driverId: QA_DRIVER_UID,
+      previousSocketId: first.authPayload.socketId,
+      newSocketId: second.socket.id,
+      disconnectReason,
+      code: terminationPayload.code
+    };
+  } finally {
+    first.socket.close();
+    second?.socket?.close();
+  }
 }
 
 async function shutdown() {
@@ -335,6 +437,7 @@ async function main() {
   const redisPort = await findFreePort();
   const vpsPort = await findFreePort();
   const modularPort = await findFreePort();
+  const modularSecondaryPort = await findFreePort();
   const redisUrl = `redis://:${encodeURIComponent(REDIS_PASSWORD)}@127.0.0.1:${redisPort}/0`;
   const startedAt = nowIso();
 
@@ -343,6 +446,7 @@ async function main() {
     completedAt: null,
     redis: { port: redisPort },
     adapterBroadcast: null,
+    distributedDriverSessionReplacement: null,
     runtimes: [],
     artifactsDir: ARTIFACT_ROOT
   };
@@ -350,11 +454,16 @@ async function main() {
   try {
     await startRedis(redisPort);
     report.adapterBroadcast = await validateAdapterBroadcast(redisUrl);
-    const [vps, modular] = await Promise.all([
-      startRuntime({ runtime: 'vps', port: vpsPort, redisPort, redisUrl }),
-      startRuntime({ runtime: 'modular', port: modularPort, redisPort, redisUrl })
+    const [vps, modular, modularSecondary] = await Promise.all([
+      startRuntime({ runtime: 'vps', instance: 'legacy', port: vpsPort, redisPort, redisUrl }),
+      startRuntime({ runtime: 'modular', instance: 'primary', port: modularPort, redisPort, redisUrl }),
+      startRuntime({ runtime: 'modular', instance: 'secondary', port: modularSecondaryPort, redisPort, redisUrl })
     ]);
-    report.runtimes.push(vps, modular);
+    report.runtimes.push(vps, modular, modularSecondary);
+    report.distributedDriverSessionReplacement = await validateDistributedDriverSessionReplacement(
+      modular.port,
+      modularSecondary.port
+    );
     report.completedAt = nowIso();
 
     const reportPath = path.join(ARTIFACT_ROOT, `runtime-redis-adapter-smoke-${Date.now()}.json`);

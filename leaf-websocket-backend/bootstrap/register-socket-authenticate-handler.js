@@ -13,6 +13,19 @@ const QA_SOCKET_BYPASS_UIDS = new Set(
         .filter(Boolean)
 );
 const DRIVER_DISCONNECT_GRACE_TIMERS_KEY = '__driverDisconnectGraceTimers';
+const SESSION_LOCK_TTL_MS = Math.max(
+    1000,
+    Number.parseInt(process.env.SESSION_LOCK_TTL_MS || '5000', 10) || 5000
+);
+const SESSION_LOCK_MAX_ATTEMPTS = Math.max(
+    1,
+    Number.parseInt(process.env.SESSION_LOCK_MAX_ATTEMPTS || '25', 10) || 25
+);
+const SESSION_LOCK_RETRY_MS = Math.max(
+    5,
+    Number.parseInt(process.env.SESSION_LOCK_RETRY_MS || '25', 10) || 25
+);
+const SESSION_REPLACEMENT_DISCONNECT_DELAY_MS = 250;
 const {
     closeDriverOnlineSessionAt,
     readDriverOnlineDailySnapshot
@@ -23,6 +36,163 @@ const {
 
 const sleepMs = (delayMs) => new Promise((resolve) => setTimeout(resolve, delayMs));
 const isTruthyFlag = (value) => ['1', 'true', 'yes', 'on'].includes(String(value || '').trim().toLowerCase());
+
+async function acquireUserSessionLock(redis, userId, ownerToken) {
+    const key = `session_lock:${userId}`;
+    for (let attempt = 0; attempt < SESSION_LOCK_MAX_ATTEMPTS; attempt += 1) {
+        const acquired = await redis.set(key, ownerToken, 'PX', SESSION_LOCK_TTL_MS, 'NX');
+        if (acquired === 'OK') {
+            return { key, acquired: true };
+        }
+        await sleepMs(SESSION_LOCK_RETRY_MS);
+    }
+    return { key, acquired: false };
+}
+
+async function releaseUserSessionLock(redis, lockRef, ownerToken) {
+    if (!redis || !lockRef?.key || !lockRef.acquired) {
+        return;
+    }
+
+    try {
+        if (typeof redis.eval === 'function') {
+            await redis.eval(
+                'if redis.call("get", KEYS[1]) == ARGV[1] then return redis.call("del", KEYS[1]) else return 0 end',
+                1,
+                lockRef.key,
+                ownerToken
+            );
+            return;
+        }
+
+        const currentOwner = await redis.get(lockRef.key);
+        if (currentOwner === ownerToken) {
+            await redis.del(lockRef.key);
+        }
+    } catch (_releaseError) {
+        // O lock possui TTL e será liberado mesmo se o Redis oscilar neste ponto.
+    }
+}
+
+async function replacePreviousDriverSessions({
+    io,
+    socket,
+    redisPool,
+    userId,
+    userType,
+    existingSocket,
+    logStructured
+}) {
+    const sessionRoom = `session_user_${userId}`;
+    const driverRoom = `driver_${userId}`;
+    const lockOwner = `${socket.id}:${Date.now()}`;
+    let redis = null;
+    let lockRef = null;
+
+    try {
+        try {
+            await redisPool.ensureConnection();
+            redis = redisPool.getConnection();
+            lockRef = await acquireUserSessionLock(redis, userId, lockOwner);
+            if (!lockRef.acquired) {
+                logStructured('warn', 'Lock distribuído de sessão não adquirido no tempo limite', {
+                    service: 'websocket',
+                    userId,
+                    socketId: socket.id
+                });
+            }
+        } catch (lockError) {
+            logStructured('warn', 'Falha ao adquirir lock distribuído de sessão', {
+                service: 'websocket',
+                userId,
+                socketId: socket.id,
+                error: lockError.message
+            });
+        }
+
+        const previousSockets = new Map();
+        try {
+            const distributedSockets = typeof io?.in === 'function'
+                ? await io.in([driverRoom, sessionRoom]).fetchSockets()
+                : [];
+            for (const previousSocket of distributedSockets || []) {
+                if (previousSocket?.id && previousSocket.id !== socket.id) {
+                    previousSockets.set(previousSocket.id, previousSocket);
+                }
+            }
+        } catch (lookupError) {
+            logStructured('warn', 'Falha ao consultar sessões anteriores no cluster', {
+                service: 'websocket',
+                userId,
+                socketId: socket.id,
+                error: lookupError.message
+            });
+        }
+
+        if (existingSocket?.id && existingSocket.id !== socket.id) {
+            previousSockets.set(existingSocket.id, existingSocket);
+        }
+
+        await socket.join(sessionRoom);
+
+        for (const [previousSocketId, previousSocket] of previousSockets) {
+            const payload = {
+                code: 'SESSION_REPLACED',
+                reason: 'Nova sessão iniciada em outro dispositivo',
+                userId,
+                userType,
+                newSocketId: socket.id,
+                previousSocketId,
+                timestamp: new Date().toISOString()
+            };
+
+            if (typeof io?.to === 'function') {
+                io.to(previousSocketId).emit('sessionTerminated', payload);
+            } else if (typeof previousSocket?.emit === 'function') {
+                previousSocket.emit('sessionTerminated', payload);
+            }
+
+            const disconnectTimer = setTimeout(() => {
+                try {
+                    if (typeof io?.in === 'function') {
+                        const target = io.in(previousSocketId);
+                        if (typeof target?.disconnectSockets === 'function') {
+                            target.disconnectSockets(false);
+                            return;
+                        }
+                    }
+                    previousSocket?.disconnect?.();
+                } catch (disconnectError) {
+                    logStructured('warn', 'Falha ao desconectar sessão substituída', {
+                        service: 'websocket',
+                        userId,
+                        previousSocketId,
+                        newSocketId: socket.id,
+                        error: disconnectError.message
+                    });
+                }
+            }, SESSION_REPLACEMENT_DISCONNECT_DELAY_MS);
+            if (typeof disconnectTimer.unref === 'function') {
+                disconnectTimer.unref();
+            }
+        }
+
+        if (previousSockets.size > 0) {
+            logStructured('info', 'Sessões anteriores do motorista substituídas', {
+                service: 'websocket',
+                userId,
+                userType,
+                previousSocketIds: Array.from(previousSockets.keys()),
+                newSocketId: socket.id,
+                distributed: true
+            });
+        }
+
+        return previousSockets.size;
+    } finally {
+        await releaseUserSessionLock(redis, lockRef, lockOwner);
+    }
+}
 
 function canUseQaSocketBypass(data, socket) {
     if (String(process.env.AUTO_TEST_MODE || '').trim().toLowerCase() !== 'true') {
@@ -419,31 +589,16 @@ function registerSocketAuthenticateHandler({
                 SESSION_SIMULTANEA_BLOCKED &&
                 ['driver', 'motorista', 'partner', 'parceiro'].includes(normalizedSessionUserType);
 
-            // Verificar se usuário já está conectado em outro socket
             const existingSocket = io.connectedUsers.get(authUserId);
-            if (existingSocket && existingSocket.id !== socket.id && shouldEnforceSingleSession) {
-                // Avisar a sessão anterior antes de desconectar, para o app mostrar o modal de sessão encerrada.
-                existingSocket.emit('sessionTerminated', {
-                    code: 'SESSION_REPLACED',
-                    reason: 'Nova sessão iniciada em outro dispositivo',
+            if (shouldEnforceSingleSession) {
+                await replacePreviousDriverSessions({
+                    io,
+                    socket,
+                    redisPool,
                     userId: authUserId,
                     userType: socket.userType,
-                    newSocketId: socket.id,
-                    previousSocketId: existingSocket.id,
-                    timestamp: new Date().toISOString()
-                });
-                const disconnectTimer = setTimeout(() => {
-                    existingSocket.disconnect();
-                }, 250);
-                if (typeof disconnectTimer.unref === 'function') {
-                    disconnectTimer.unref();
-                }
-                logStructured('info', 'Desconectando sessão anterior', {
-                    service: 'websocket',
-                    userId: authUserId,
-                    userType: socket.userType,
-                    previousSocketId: existingSocket.id,
-                    newSocketId: socket.id
+                    existingSocket,
+                    logStructured
                 });
             } else if (existingSocket && existingSocket.id !== socket.id) {
                 logStructured('info', 'Múltiplas sessões permitidas para este tipo de usuário', {

@@ -4,7 +4,7 @@
   <string name="amplify_ui_liveness_challenge_connecting">Conectando</string>
   <string name="amplify_ui_liveness_challenge_instruction_hold_face_during_freshness">Fique parado</string>
   <string name="amplify_ui_liveness_challenge_instruction_move_face">Posicione o rosto em frente à câmera</string>
-  <string name="amplify_ui_liveness_challenge_instruction_move_face_closer">Aproxime-se</string>
+  <string name="amplify_ui_liveness_challenge_instruction_move_face_closer">Aproxime o rosto da câmera</string>
   <string name="amplify_ui_liveness_challenge_instruction_move_face_further">Afaste-se</string>
   <string name="amplify_ui_liveness_challenge_instruction_multiple_faces_detected">Mantenha apenas um rosto na câmera</string>
   <string name="amplify_ui_liveness_challenge_recording_indicator_label">REC</string>
