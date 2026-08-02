@@ -9,7 +9,6 @@ import { useDispatch, useSelector } from 'react-redux';
 import { Alert, Linking, Platform, View, Text, ActivityIndicator } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import firebaseAuth from '@react-native-firebase/auth';
-import featureFlagService from '../services/FeatureFlagService';
 import WebSocketManager from '../services/WebSocketManager';
 import realtimeConnectionOrchestrator from '../services/RealtimeConnectionOrchestrator';
 import {
@@ -36,7 +35,6 @@ import CRLVUploadScreen from '../screens/CRLVUploadScreen';
 import AuthFlowScreenshotHarness from '../components/auth/AuthFlowScreenshotHarness';
 
 // Telas Principais
-import NewMapScreen from '../screens/NewMapScreen';
 import ProfileScreen from '../screens/ProfileScreen';
 import SettingsScreen from '../screens/SettingsScreen';
 import SearchScreen from '../screens/SearchScreen';
@@ -1078,12 +1076,12 @@ function renderDriverPrototypeScreens() {
   );
 }
 
-function renderSharedLegacyAliases(mapComponent) {
+function renderSharedLegacyAliases() {
   return (
     <>
-      {/* Legacy compatibility aliases kept only because older screens still navigate to them. */}
-      <Stack.Screen name="MapScreen" component={mapComponent} />
-      <Stack.Screen name="TabRoot" component={mapComponent} />
+      {/* Compatibility aliases resolve to the canonical runtime only. */}
+      <Stack.Screen name="MapScreen" component={RobotaxiPrototypeScreen} />
+      <Stack.Screen name="TabRoot" component={RobotaxiPrototypeScreen} />
     </>
   );
 }
@@ -1233,14 +1231,7 @@ function RealtimeConnectionGuard() {
 function MainNavigator() {
   const auth = useSelector(state => state.auth);
   const [authCompleted, setAuthCompleted] = useState(false);
-  const [prototypeUiEnabled, setPrototypeUiEnabled] = useState(true);
-  const [flagsReady, setFlagsReady] = useState(true);
   const isReviewEnv = Constants?.expoConfig?.extra?.isReview === true;
-  const legacyMapOptOutAllowed =
-    __DEV__ && !isReviewEnv && !isE2ETestBuild() && !isSimulatorBuild();
-  const forceLegacyMapUi =
-    legacyMapOptOutAllowed &&
-    String(process.env.EXPO_PUBLIC_FORCE_LEGACY_MAP_UI || '').trim().toLowerCase() === 'true';
 
   useEffect(() => {
     // Resetar o estado quando a autenticação for completada
@@ -1255,64 +1246,8 @@ function MainNavigator() {
     }
   }, [auth.profile]);
 
-  useEffect(() => {
-    let isMounted = true;
-    let removeListener = null;
-
-    const loadPrototypeFlag = async () => {
-      try {
-        await featureFlagService.initialize();
-        // The Robotaxi flow is the canonical production lifecycle. A missing
-        // cached flag must never silently route a signed-in rider to the
-        // legacy map flow, which does not share its lifecycle safeguards.
-        const enabled = await featureFlagService.getFlag('PROTOTYPE_ROBOTAXI_UI_ENABLED', true);
-
-        if (isMounted) {
-          setPrototypeUiEnabled(Boolean(enabled));
-          setFlagsReady(true);
-        }
-
-        removeListener = featureFlagService.addListener('PROTOTYPE_ROBOTAXI_UI_ENABLED', newValue => {
-          if (isMounted) {
-            setPrototypeUiEnabled(Boolean(newValue));
-          }
-        });
-      } catch (error) {
-        Logger.error('❌ [AppNavigator] Erro ao carregar flag de protótipo:', error);
-        if (isMounted) {
-          setPrototypeUiEnabled(true);
-          setFlagsReady(true);
-        }
-      }
-    };
-
-    loadPrototypeFlag();
-
-    return () => {
-      isMounted = false;
-      if (typeof removeListener === 'function') {
-        removeListener();
-      }
-    };
-  }, []);
-
-  const effectivePrototypeUiEnabled = legacyMapOptOutAllowed
-    ? prototypeUiEnabled
-    : true;
-  const allowPrototypePrivateScreens =
-    !forceLegacyMapUi && (isReviewEnv || isE2ETestBuild() || effectivePrototypeUiEnabled);
   const allowPublicPrototypeQaScreens =
-    !forceLegacyMapUi && (isReviewEnv || isE2ETestBuild() || isSimulatorBuild());
-  const mapComponent = allowPrototypePrivateScreens ? RobotaxiPrototypeScreen : NewMapScreen;
-
-  if (!flagsReady) {
-    return (
-      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#F8FAFC' }}>
-        <ActivityIndicator size="large" color="#1A330E" />
-        <Text style={{ marginTop: 8, color: '#4E5A6B' }}>Carregando configuração de interface...</Text>
-      </View>
-    );
-  }
+    isReviewEnv || isE2ETestBuild() || isSimulatorBuild();
 
   // Se a autenticação foi completada, mostrar navegação principal
   if (authCompleted) {
@@ -1379,7 +1314,7 @@ function MainNavigator() {
     >
       <Stack.Screen
         name="Map"
-        component={mapComponent}
+        component={RobotaxiPrototypeScreen}
         options={{ keyboardHandlingEnabled: false }}
       />
 
@@ -1391,20 +1326,10 @@ function MainNavigator() {
         />
       ) : null}
 
-      {renderSharedLegacyAliases(mapComponent)}
-
-      {allowPrototypePrivateScreens ? (
-        <>
-          {renderPrototypeCompanionScreens(activeRole)}
-          {renderSharedPrototypeScreens()}
-          {activeRole === 'driver' ? renderDriverPrototypeScreens() : renderCustomerPrototypeScreens()}
-        </>
-      ) : (
-        <>
-          {renderSharedPrivateScreens()}
-          {activeRole === 'driver' ? renderDriverPrivateScreens() : renderCustomerPrivateScreens()}
-        </>
-      )}
+      {renderSharedLegacyAliases()}
+      {renderPrototypeCompanionScreens(activeRole)}
+      {renderSharedPrototypeScreens()}
+      {activeRole === 'driver' ? renderDriverPrototypeScreens() : renderCustomerPrototypeScreens()}
     </Stack.Navigator>
   );
 }

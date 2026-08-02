@@ -20,6 +20,10 @@ const fcmNotificationServiceSource = fs.readFileSync(
   path.join(__dirname, '../src/services/FCMNotificationService.js'),
   'utf8'
 );
+const featureFlagServiceSource = fs.readFileSync(
+  path.join(__dirname, '../src/services/FeatureFlagService.js'),
+  'utf8'
+);
 
 function extractBlockAfterMarker(source, marker) {
   const start = source.indexOf(marker);
@@ -80,29 +84,25 @@ describe('legacy financial navigation surfaces', () => {
     );
   });
 
-  it('keeps the canonical Robotaxi lifecycle active when the cached UI flag cannot load', () => {
-    expect(appNavigatorSource).toContain(
-      "featureFlagService.getFlag('PROTOTYPE_ROBOTAXI_UI_ENABLED', true)",
-    );
+  it('mounts the canonical Robotaxi lifecycle as the only private map runtime', () => {
     expect(appNavigatorSource).toMatch(
-      /Erro ao carregar flag de protótipo:[\s\S]*?setPrototypeUiEnabled\(true\);/,
+      /name="Map"[\s\S]{0,120}?component=\{RobotaxiPrototypeScreen\}/,
     );
+    expect(extractFunctionBody(appNavigatorSource, 'renderSharedLegacyAliases')).toMatch(
+      /name="MapScreen"\s+component=\{RobotaxiPrototypeScreen\}/,
+    );
+    expect(extractFunctionBody(appNavigatorSource, 'renderSharedLegacyAliases')).toMatch(
+      /name="TabRoot"\s+component=\{RobotaxiPrototypeScreen\}/,
+    );
+    expect(appNavigatorSource).not.toContain('allowPrototypePrivateScreens');
+    expect(appNavigatorSource).not.toMatch(/import\s+NewMapScreen\s+from/);
   });
 
-  it('blocks the legacy map opt-out from release and review builds', () => {
-    expect(appNavigatorSource).toContain('EXPO_PUBLIC_FORCE_LEGACY_MAP_UI');
-    expect(appNavigatorSource).toContain('const legacyMapOptOutAllowed =');
-    expect(appNavigatorSource).toMatch(
-      /const legacyMapOptOutAllowed\s*=\s*[\s\S]*?__DEV__[\s\S]*?!isReviewEnv[\s\S]*?!isE2ETestBuild\(\)[\s\S]*?!isSimulatorBuild\(\);/,
-    );
-    expect(appNavigatorSource).toMatch(
-      /const forceLegacyMapUi\s*=\s*[\s\S]*?legacyMapOptOutAllowed\s*&&[\s\S]*?EXPO_PUBLIC_FORCE_LEGACY_MAP_UI/,
-    );
-    expect(appNavigatorSource).toMatch(
-      /const effectivePrototypeUiEnabled\s*=\s*legacyMapOptOutAllowed[\s\S]*?\?\s*prototypeUiEnabled[\s\S]*?:\s*true;/,
-    );
-    expect(releaseRuntimePolicySource).toContain('EXPO_PUBLIC_FORCE_LEGACY_MAP_UI');
-    expect(releasePreflightSource).toContain('EXPO_PUBLIC_FORCE_LEGACY_MAP_UI');
+  it('removes the legacy map selector from runtime and build configuration', () => {
+    expect(appNavigatorSource).not.toContain('EXPO_PUBLIC_FORCE_LEGACY_MAP_UI');
+    expect(featureFlagServiceSource).not.toContain('PROTOTYPE_ROBOTAXI_UI_ENABLED');
+    expect(releaseRuntimePolicySource).not.toContain('EXPO_PUBLIC_FORCE_LEGACY_MAP_UI');
+    expect(releasePreflightSource).not.toContain('EXPO_PUBLIC_FORCE_LEGACY_MAP_UI');
 
     [
       'release-test',
@@ -110,10 +110,8 @@ describe('legacy financial navigation surfaces', () => {
       'production-apk',
       'production-review',
     ].forEach((profileName) => {
-      expect(easConfig.build[profileName]?.env).toEqual(
-        expect.objectContaining({
-          EXPO_PUBLIC_FORCE_LEGACY_MAP_UI: 'false',
-        }),
+      expect(easConfig.build[profileName]?.env).not.toHaveProperty(
+        'EXPO_PUBLIC_FORCE_LEGACY_MAP_UI',
       );
     });
   });
@@ -151,12 +149,15 @@ describe('legacy financial navigation surfaces', () => {
       expect(prototypeBranchSource).not.toContain(`name="${routeName}"`);
     });
 
-    expect(appNavigatorSource).toMatch(
-      /allowPrototypePrivateScreens\s*\?\s*\([\s\S]*?renderPrototypeCompanionScreens\(activeRole\)[\s\S]*?renderSharedPrototypeScreens\(\)[\s\S]*?renderDriverPrototypeScreens\(\)\s*:\s*renderCustomerPrototypeScreens\(\)[\s\S]*?\)\s*:\s*\(/,
+    const mainNavigatorSource = extractFunctionBody(appNavigatorSource, 'MainNavigator');
+    expect(mainNavigatorSource).toContain('renderPrototypeCompanionScreens(activeRole)');
+    expect(mainNavigatorSource).toContain('renderSharedPrototypeScreens()');
+    expect(mainNavigatorSource).toMatch(
+      /activeRole === 'driver'\s*\?\s*renderDriverPrototypeScreens\(\)\s*:\s*renderCustomerPrototypeScreens\(\)/,
     );
-    expect(appNavigatorSource).toMatch(
-      /:\s*\([\s\S]*?renderSharedPrivateScreens\(\)[\s\S]*?renderDriverPrivateScreens\(\)\s*:\s*renderCustomerPrivateScreens\(\)[\s\S]*?\)/,
-    );
+    expect(mainNavigatorSource).not.toContain('renderSharedPrivateScreens()');
+    expect(mainNavigatorSource).not.toContain('renderDriverPrivateScreens()');
+    expect(mainNavigatorSource).not.toContain('renderCustomerPrivateScreens()');
   });
 
   it('registers active cancellation as a shared prototype route for passenger and driver flows', () => {
