@@ -2,7 +2,7 @@ import { store } from '../src/state/appStore';
 import {
   loadOnboardingFromStorage,
   resetOnboarding,
-} from '../common/common-packages/src/actions/onboardingActions';
+} from '../src/state/onboarding/onboardingActions';
 
 describe('active app store onboarding reducer', () => {
   afterEach(() => {

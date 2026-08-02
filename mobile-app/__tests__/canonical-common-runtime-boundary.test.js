@@ -14,6 +14,10 @@ function listJavaScriptFiles(directory) {
 }
 
 describe('canonical common runtime boundary', () => {
+  it('keeps the retired common package out of the mobile workspace', () => {
+    expect(fs.existsSync(path.join(MOBILE_ROOT, 'common'))).toBe(false);
+  });
+
   it('does not load the legacy common package barrel from mobile runtime code', () => {
     const barrelImportPattern = /(?:from\s+|require\()\s*['"](?:\.\.\/)+common['"]/;
     const legacyPackageImportPattern = /common\/common-packages\/src\//;
