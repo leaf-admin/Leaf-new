@@ -238,10 +238,6 @@ export const API_URLS = {
     getNearbyDrivers: "/api/drivers/nearby",
     getStats: "/api/app/stats",
     health: "/api/health",
-    startTripTracking: "__WS_ONLY__",
-    updateTripLocation: "__WS_ONLY__",
-    endTripTracking: "__WS_ONLY__",
-    getTripData: "__WS_ONLY__",
     getRedisStats: "/api/queue/cache/stats",
   },
 
@@ -252,10 +248,6 @@ export const API_URLS = {
     getNearbyDrivers: "/get_nearby_drivers",
     getStats: "/get_redis_stats",
     health: "/health",
-    startTripTracking: "/start_trip_tracking",
-    updateTripLocation: "/update_trip_location",
-    endTripTracking: "/end_trip_tracking",
-    getTripData: "/get_trip_data",
   },
 };
 
