@@ -1,174 +1,205 @@
-# 📊 KYC - Análise de Capacidade Real
+# KYC: contrato real de capacidade AWS
 
-## 🎯 MODELO DE USO
+Atualizado em: 2026-08-02
 
-### **Padrão de Verificação:**
-- **1 verificação por motorista por dia** (quando fica online)
-- **Válida até ficar offline**
-- **Nova verificação se houver violação/report**
+## Objetivo
 
-### **Cenários:**
-1. **Motorista fica online**: Verificação automática
-2. **Motorista fica offline**: Verificação expira
-3. **Report de violação**: Nova verificação obrigatória
+Este documento define como comprovar se o fluxo canônico de identidade suporta o
+pico operacional da Leaf. Ele não autoriza mudança de provedor, aumento de quota,
+teste pago ou alteração da cadência de KYC.
 
----
+O fluxo em análise é:
 
-## 📈 CÁLCULO DE CAPACIDADE
+```text
+App -> AWS Face Liveness -> backend Leaf -> comparação facial canônica -> gate online
+```
 
-### **Cenário: 1.000 Motoristas Ativos**
+Não fazem parte da arquitetura atual:
 
-#### **Distribuição ao Longo do Dia:**
-- **Total**: 1.000 verificações/dia
-- **Média horária**: ~42 verificações/hora
-- **Picos esperados**:
-  - **Manhã (6h-9h)**: ~200-300 verificações/hora
-  - **Tarde (17h-20h)**: ~150-200 verificações/hora
-  - **Madrugada (0h-6h)**: ~10-20 verificações/hora
+- aprovação por embedding dummy;
+- proxy KYC legado;
+- fila perceptível ao motorista;
+- aprovação quando o provedor está indisponível;
+- verificação biométrica durante corrida ativa.
 
-#### **Capacidade da VPS (2 vCPUs, 2 workers):**
-- **Processamento simultâneo**: 2 verificações
-- **Tempo por verificação**: 2-5 segundos
-- **Taxa de processamento**: 
-  - **Mínima**: 2 verificações / 5s = 24 verificações/minuto = **1.440/hora**
-  - **Máxima**: 2 verificações / 2s = 60 verificações/minuto = **3.600/hora**
+## Fonte de verdade
 
-#### **Análise de Picos:**
-- **Pico máximo esperado**: 300 verificações/hora
-- **Capacidade mínima**: 1.440 verificações/hora
-- **Margem de segurança**: **4.8x** a capacidade necessária ✅
+O runtime versionado usa `us-east-1` nos perfis canônicos e exige:
 
----
+- AWS Rekognition Face Liveness;
+- comparação facial server-side confiável;
+- política backend fail-closed;
+- sessão nova para cada tentativa;
+- vínculo entre sessão, motorista e resultado.
 
-## ✅ VEREDITO: SUPORTA 1.000 VERIFICAÇÕES/DIA
+As quotas realmente aplicadas pertencem à conta e à região AWS. Elas não podem ser
+deduzidas do código, de médias diárias nem dos valores padrão publicados. Antes de
+qualquer teste de carga, o responsável pela conta deve registrar uma evidência
+read-only da página AWS Service Quotas para `us-east-1`.
 
-### **Análise Detalhada:**
+## Quotas padrão publicadas
 
-#### **Cenário Normal (Média):**
-- **42 verificações/hora** (média)
-- **Capacidade**: 1.440/hora
-- **Utilização**: ~3% ✅ **MUITO CONFORTAVEL**
+Valores padrão consultados na documentação oficial em 2026-08-02:
 
-#### **Cenário de Pico (Manhã):**
-- **300 verificações/hora** (pico)
-- **Capacidade**: 1.440/hora
-- **Utilização**: ~21% ✅ **CONFORTAVEL**
+| Operação em `us-east-1` | Quota padrão |
+| --- | ---: |
+| `CreateFaceLivenessSession` | 25 TPS |
+| `StartFaceLivenessSession` | 25 TPS |
+| `GetFaceLivenessSessionResults` | 25 TPS |
+| Sessões Face Liveness concorrentes | 75 |
+| `CompareFaces` | 100 TPS |
 
-#### **Cenário Extremo (Todos ao mesmo tempo):**
-- **1.000 verificações simultâneas** (teórico, improvável)
-- **Capacidade**: 2 simultâneas
-- **Tempo total**: 1.000 / 2 * 5s = **2.500 segundos = ~42 minutos**
-- ⚠️ **Neste caso, haveria fila, mas processaria tudo**
+Esses valores são defaults ajustáveis, não evidência das quotas atualmente
+aplicadas à conta Leaf.
 
----
+Referências oficiais:
 
-## 🎯 RECOMENDAÇÕES
+- https://docs.aws.amazon.com/general/latest/gr/rekognition.html
+- https://docs.aws.amazon.com/rekognition/latest/dg/limits.html
+- https://docs.aws.amazon.com/rekognition/latest/APIReference/API_CreateFaceLivenessSession.html
+- https://docs.aws.amazon.com/rekognition/latest/APIReference/API_rekognitionstreaming_StartFaceLivenessSession.html
+- https://aws.amazon.com/rekognition/pricing/
 
-### **✅ VPS Dedicada (2 vCPU, 8GB RAM) SUPORTA:**
+## Cenário obrigatório: 1.000 motoristas simultâneos
 
-1. **Até 1.000 motoristas ativos** ✅
-   - 1 verificação/dia por motorista
-   - Picos de até 300 verificações/hora
-   - Margem de segurança: 4.8x
+Com as quotas padrão de `us-east-1`, o cenário não está aprovado:
 
-2. **Até 2.000 motoristas ativos** ⚠️
-   - Ainda suporta, mas com menos margem
-   - Picos podem causar fila (mas processa)
-   - Recomendado monitorar
+- 1.000 sessões excedem a concorrência padrão de 75 em mais de 13 vezes;
+- a 25 criações por segundo, admitir 1.000 sessões exige no mínimo 40 segundos;
+- throttling pode retornar `ProvisionedThroughputExceededException`,
+  `ServiceQuotaExceededException` ou `429`;
+- `CompareFaces` a 100 TPS levaria no mínimo 10 segundos para 1.000 chamadas se
+  todas chegassem juntas.
 
-3. **Mais de 2.000 motoristas** ❌
-   - Pode precisar upgrade
-   - Ou adicionar mais workers (mas limitado por 2 vCPUs)
+Portanto, “suporta 1.000 verificações por dia” não prova capacidade para “1.000
+motoristas ficando online ao mesmo tempo”.
 
----
+## Cálculo de quota
 
-## 📊 CENÁRIOS DE USO
+Definições:
 
-### **Cenário 1: 500 Motoristas Ativos**
-- **Verificações/dia**: 500
-- **Pico/hora**: ~150
-- **Utilização**: ~10% (pico)
-- **Veredito**: ✅ **MUITO CONFORTAVEL**
+- `N`: motoristas no pico;
+- `W`: janela máxima de admissão das sessões, em segundos;
+- `D`: duração observada de uma sessão, em segundos;
+- `H`: headroom operacional; mínimo recomendado para planejamento: 50%.
 
-### **Cenário 2: 1.000 Motoristas Ativos**
-- **Verificações/dia**: 1.000
-- **Pico/hora**: ~300
-- **Utilização**: ~21% (pico)
-- **Veredito**: ✅ **CONFORTAVEL**
+Fórmulas:
 
-### **Cenário 3: 1.500 Motoristas Ativos**
-- **Verificações/dia**: 1.500
-- **Pico/hora**: ~450
-- **Utilização**: ~31% (pico)
-- **Veredito**: ⚠️ **ACEITÁVEL** (mas próximo do limite)
+```text
+TPS de admissão = ceil(N / W)
+Concorrência para pico isolado = N
+Concorrência para carga sustentada = TPS de admissão * D
+Quota solicitada = requisito * (1 + H)
+```
 
-### **Cenário 4: 2.000 Motoristas Ativos**
-- **Verificações/dia**: 2.000
-- **Pico/hora**: ~600
-- **Utilização**: ~42% (pico)
-- **Veredito**: ⚠️ **LIMITE** (pode ter fila em picos)
+Exemplos de planejamento, ainda não aprovados como SLA:
 
----
+| Cenário | TPS mínimo | Concorrência mínima do pico | Com 50% de headroom |
+| --- | ---: | ---: | ---: |
+| 1.000 admitidos em 5 s | 200 | 1.000 | 300 TPS / 1.500 sessões |
+| 1.000 admitidos em 2 s | 500 | 1.000 | 750 TPS / 1.500 sessões |
 
-## 🚀 OTIMIZAÇÕES POSSÍVEIS
+Se a chegada for sustentada, a concorrência deve ser recalculada com a duração
+real `D`. Exemplo: 200 novas sessões/s durante sessões de 10 s exige 2.000
+sessões concorrentes antes do headroom.
 
-### **Se Precisar Mais Capacidade:**
+As quotas de Create, Start, Get e CompareFaces devem ser verificadas
+separadamente. A aprovação de uma operação não aumenta automaticamente as demais.
 
-1. **Aumentar Workers** (mas limitado por 2 vCPUs)
-   - Atual: 2 workers
-   - Máximo recomendado: 3-4 workers (com 2 vCPUs)
-   - Ganho: ~50-100% mais capacidade
+## Política de experiência
 
-2. **Otimizar Processamento**
-   - Reduzir tempo de 5s para 3s
-   - Ganho: ~67% mais capacidade
+“Sem fila” significa:
 
-3. **Cache de Verificações**
-   - Se motorista ficar online/offline várias vezes no mesmo dia
-   - Reutilizar verificação (válida por X horas)
-   - Reduz carga significativamente
+- o app não mostra posição de espera;
+- o backend não guarda solicitações biométricas para processar minutos depois;
+- não existe aprovação temporária enquanto a AWS está indisponível;
+- o motorista recebe início de sessão ou erro controlado dentro do timeout;
+- throttling usa somente retries curtos, limitados, com backoff e jitter;
+- esgotados os retries, o fluxo falha fechado ou usa provedor alternativo já
+  homologado.
 
-4. **Upgrade de VPS**
-   - 4 vCPUs = 4-6 workers
-   - Capacidade: ~3.000-4.000 verificações/dia
+Uma fila interna longa não é alternativa aceitável para insuficiência de quota.
+O tratamento correto é provisionar capacidade antes do lançamento ou trocar de
+provedor.
 
----
+## Gate de aceitação
 
-## 💡 RECOMENDAÇÃO FINAL
+AWS só pode ser declarada capaz para o pico quando todas as evidências abaixo
+existirem:
 
-### **✅ SIM, VPS DEDICADA SUPORTA 1.000 VERIFICAÇÕES/DIA!**
+1. quotas aplicadas da conta e região registradas;
+2. quota de cada operação maior ou igual ao cálculo aprovado com headroom;
+3. teste de criação/resultado sem `429` fora da tolerância;
+4. teste de comparação facial dentro do mesmo pico;
+5. p95 e p99 de criação, início, resultado e comparação registrados;
+6. taxa de conclusão e taxa de throttling registradas;
+7. custo do ensaio aprovado previamente;
+8. teste em dispositivos físicos cobrindo Android e iOS suportados;
+9. comportamento fail-closed comprovado na indisponibilidade do provedor;
+10. nenhuma verificação disparada durante corrida ativa.
 
-**Com margem de segurança de 4.8x**, a VPS dedicada (2 vCPU, 8GB RAM) é **PERFEITA** para:
-- ✅ Até 1.000 motoristas ativos
-- ✅ 1 verificação por motorista por dia
-- ✅ Picos de até 300 verificações/hora
-- ✅ Processamento em tempo real (sem fila significativa)
+Critério provisório de engenharia para o ensaio:
 
-**Próximos passos:**
-1. ✅ Configurar VPS dedicada
-2. ✅ Implementar cache de verificações (otimização)
-3. ✅ Monitorar performance
-4. ✅ Escalar quando necessário (>1.000 motoristas)
+- conclusão bem-sucedida >= 99,5%;
+- throttling final, após retries curtos, < 0,5%;
+- nenhuma aprovação sem Liveness e comparação confiável;
+- nenhuma sessão atribuída ao motorista errado;
+- nenhum bloqueio global do gate online por falha de uma sessão individual.
 
----
+Os limites de latência precisam de aprovação de produto antes de virarem SLA.
 
-## 📋 CHECKLIST DE IMPLEMENTAÇÃO
+## Plano de ensaio
 
-- [ ] **Setup VPS Dedicada**
-  - [ ] Instalar Node.js, Redis, dependências
-  - [ ] Configurar 2 workers KYC
-  - [ ] Configurar comunicação com servidor principal
+### Etapa 1: preflight read-only
 
-- [ ] **Otimizações**
-  - [ ] Cache de verificações (válida por X horas)
-  - [ ] Processamento assíncrono
-  - [ ] Retry automático
+- confirmar região ativa;
+- capturar quotas aplicadas;
+- confirmar política biométrica estrita;
+- confirmar limites diários/mensais de custo;
+- confirmar que o motorista QA não está em corrida ativa.
 
-- [ ] **Monitoramento**
-  - [ ] Métricas de performance
-  - [ ] Alertas de capacidade
-  - [ ] Logs estruturados
+### Etapa 2: carga controlada
 
+- executar degraus pequenos antes do pico total;
+- registrar IDs únicos e impedir reuso de sessão;
+- medir Create, Start, Get e CompareFaces separadamente;
+- interromper o ensaio ao alcançar o limite de custo ou erro;
+- não usar dados biométricos reais fora dos dispositivos autorizados.
 
+### Etapa 3: dispositivos físicos
 
+Face Liveness usa câmera, vídeo e challenge interativo. Um teste HTTP sintético não
+prova o streaming real. A comprovação final exige dispositivos físicos e permanece
+parcial até existir autorização, frota de teste e quota aprovada.
 
+### Etapa 4: decisão de provedor
+
+Homologar outro provedor antes do lançamento se qualquer condição ocorrer:
+
+- a AWS não aprovar as quotas necessárias;
+- o ensaio não atingir o pico com headroom;
+- throttling ou latência violarem o SLA aprovado;
+- custo projetado ultrapassar o limite comercial;
+- indisponibilidade regional não tiver mitigação aceitável.
+
+## Custo
+
+Na faixa inicial publicada, Face Liveness custa aproximadamente US$ 0,015 por
+verificação. Mil verificações representam cerca de US$ 15 somente de Liveness;
+CompareFaces e demais infraestrutura são cobrados separadamente. O valor deve ser
+recalculado na data do ensaio.
+
+## Estado atual
+
+| Evidência | Estado |
+| --- | --- |
+| Arquitetura AWS canônica no código | Implementada |
+| Quotas padrão documentadas | Confirmadas |
+| Quotas aplicadas à conta Leaf | Não verificadas |
+| Aumento de quota aprovado | Não verificado |
+| Teste de 1.000 sessões | Não executado |
+| Teste físico Android/iOS | Não executado |
+| Segundo provedor homologado | Não verificado |
+
+Conclusão atual: a implementação existe, mas a capacidade para 1.000 motoristas
+simultâneos não está comprovada. Com as quotas padrão, ela não atende ao cenário.
