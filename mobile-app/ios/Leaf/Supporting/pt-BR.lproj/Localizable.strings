@@ -11,7 +11,7 @@
 "amplify_ui_liveness_challenge_instruction_hold_face_during_countdown" = "Mantenha o rosto parado durante a contagem.";
 "amplify_ui_liveness_challenge_instruction_hold_face_during_freshness" = "Mantenha o rosto dentro do contorno durante as luzes coloridas.";
 "amplify_ui_liveness_challenge_instruction_move_face_back" = "Afaste-se";
-"amplify_ui_liveness_challenge_instruction_move_face_closer" = "Aproxime-se";
+"amplify_ui_liveness_challenge_instruction_move_face_closer" = "Aproxime o rosto da câmera";
 "amplify_ui_liveness_challenge_instruction_move_face" = "Posicione o rosto em frente à câmera";
 "amplify_ui_liveness_challenge_instruction_move_face_in_front_of_camera" = "Posicione o rosto em frente à câmera";
 "amplify_ui_liveness_challenge_instruction_multiple_faces_detected" = "Mantenha apenas um rosto na câmera";
@@ -35,7 +35,7 @@
 
 "amplify_ui_liveness_face_not_prepared_reason_pendingCheck" = " ";
 "amplify_ui_liveness_face_not_prepared_reason_not_in_oval" = "Posicione o rosto dentro do contorno";
-"amplify_ui_liveness_face_not_prepared_reason_move_face_closer" = "Aproxime-se";
+"amplify_ui_liveness_face_not_prepared_reason_move_face_closer" = "Aproxime o rosto da câmera";
 "amplify_ui_liveness_face_not_prepared_reason_move_face_right" = "Mova o rosto para a direita";
 "amplify_ui_liveness_face_not_prepared_reason_move_face_left" = "Mova o rosto para a esquerda";
 "amplify_ui_liveness_face_not_prepared_reason_move_to_dimmer_area" = "Vá para um local com menos luz";
