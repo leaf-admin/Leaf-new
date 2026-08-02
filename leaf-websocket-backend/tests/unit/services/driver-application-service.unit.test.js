@@ -282,6 +282,49 @@ describe('driver-application-service', () => {
     }));
   });
 
+  it('exposes a pending profile vehicle submission without mutating the shared catalog', async () => {
+    const application = await service.buildApplication('driver_vehicle_edit', {
+      db: {},
+      carsByDriverId: {},
+      userVehiclesRaw: {
+        link_1: {
+          vehicleId: 'vehicle_1',
+          isActive: false,
+          status: 'pending',
+          approved: false,
+          plate: 'DEF4G56',
+          brand: 'Honda',
+          model: 'City',
+          color: 'PRATA',
+          year: 2024,
+        },
+      },
+      vehiclesRaw: {
+        vehicle_1: {
+          plate: 'ABC1D23',
+          brand: 'Nissan',
+          model: 'Leaf',
+          color: 'BRANCO',
+          year: 2025,
+        },
+      },
+      userData: { usertype: 'driver', firstName: 'Maria' },
+    });
+
+    expect(application.vehicleConfig.vehicles).toEqual([
+      expect.objectContaining({
+        userVehicleId: 'link_1',
+        status: 'pending',
+        approved: false,
+        plate: 'DEF4G56',
+        brand: 'Honda',
+        model: 'City',
+        color: 'PRATA',
+        year: 2024,
+      }),
+    ]);
+  });
+
   it('enriches a partial RTDB activation user from the allowlisted canonical Firestore profile', async () => {
     mockCollectionDocGet.mockResolvedValue({
       exists: true,

@@ -26,17 +26,20 @@ describe('current account surface services', () => {
     mockAuthenticatedRequest
       .mockResolvedValueOnce(jsonResponse({ vehicles: [{ id: 'vehicle_1' }] }))
       .mockResolvedValueOnce(jsonResponse({ vehicle: { id: 'vehicle_2' } }, { status: 201 }))
+      .mockResolvedValueOnce(jsonResponse({ vehicle: { id: 'vehicle_2', status: 'pending' } }))
       .mockResolvedValueOnce(jsonResponse({ activeVehicleId: 'vehicle_2' }))
       .mockResolvedValueOnce(jsonResponse({ removedVehicleId: 'vehicle_1' }));
 
     await expect(service.listVehicles()).resolves.toEqual([{ id: 'vehicle_1' }]);
     await expect(service.addVehicle({ plate: 'ABC1D23' })).resolves.toEqual({ id: 'vehicle_2' });
+    await expect(service.updateVehicle('vehicle_2', { plate: 'DEF4G56' })).resolves.toEqual({ id: 'vehicle_2', status: 'pending' });
     await expect(service.selectVehicle('vehicle_2')).resolves.toBe('vehicle_2');
     await expect(service.removeVehicle('vehicle_1')).resolves.toBe(true);
 
     expect(mockAuthenticatedRequest.mock.calls).toEqual([
       ['/account/vehicles', { method: 'GET' }],
       ['/account/vehicles', { method: 'POST', body: JSON.stringify({ vehicle: { plate: 'ABC1D23' } }) }],
+      ['/account/vehicles/vehicle_2', { method: 'PATCH', body: JSON.stringify({ vehicle: { plate: 'DEF4G56' } }) }],
       ['/account/vehicles/vehicle_2/active', { method: 'PATCH', body: JSON.stringify({ active: true }) }],
       ['/account/vehicles/vehicle_1', { method: 'DELETE' }],
     ]);

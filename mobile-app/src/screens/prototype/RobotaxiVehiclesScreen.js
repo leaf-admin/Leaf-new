@@ -46,6 +46,7 @@ export default function RobotaxiVehiclesScreen({ navigation, route }) {
   const [busy, setBusy] = useState(false);
   const [mode, setMode] = useState('list');
   const [expandedId, setExpandedId] = useState('');
+  const [editingVehicleId, setEditingVehicleId] = useState('');
   const [draft, setDraft] = useState({ plate: '', brand: '', model: '', color: '', year: '' });
 
   usePrototypeMapOcclusion({
@@ -108,6 +109,41 @@ export default function RobotaxiVehiclesScreen({ navigation, route }) {
       setBusy(false);
     }
   }, [draft, loadVehicles, showMutationError]);
+
+  const handleEditVehicle = useCallback((vehicle) => {
+    setDraft({
+      plate: vehicle.plate || '',
+      brand: vehicle.brand || '',
+      model: vehicle.model || '',
+      color: vehicle.color || '',
+      year: vehicle.year ? String(vehicle.year) : '',
+    });
+    setEditingVehicleId(vehicle.id);
+    setExpandedId('');
+    setMode('edit');
+  }, []);
+
+  const handleUpdateVehicle = useCallback(async () => {
+    try {
+      setBusy(true);
+      await MobileVehicleService.updateVehicle(editingVehicleId, draft);
+      setDraft({ plate: '', brand: '', model: '', color: '', year: '' });
+      setEditingVehicleId('');
+      setMode('list');
+      await loadVehicles();
+      Alert.alert('Veículos', 'Dados atualizados. O veículo voltou para análise.');
+    } catch (mutationError) {
+      showMutationError(mutationError);
+    } finally {
+      setBusy(false);
+    }
+  }, [draft, editingVehicleId, loadVehicles, showMutationError]);
+
+  const cancelForm = useCallback(() => {
+    setDraft({ plate: '', brand: '', model: '', color: '', year: '' });
+    setEditingVehicleId('');
+    setMode('list');
+  }, []);
 
   const handleSelectVehicle = useCallback(async (vehicleId) => {
     try {
@@ -192,8 +228,8 @@ export default function RobotaxiVehiclesScreen({ navigation, route }) {
                   onAction={loadVehicles}
                   testID="robotaxi-vehicles-error"
                 />
-              ) : mode === 'add' ? (
-                <PrototypeMenuSection title="Novo veículo">
+              ) : mode === 'add' || mode === 'edit' ? (
+                <PrototypeMenuSection title={mode === 'edit' ? 'Editar veículo' : 'Novo veículo'}>
                   {[
                     ['plate', 'Placa', 'ABC1D23'],
                     ['brand', 'Marca', 'Nissan'],
@@ -214,8 +250,17 @@ export default function RobotaxiVehiclesScreen({ navigation, route }) {
                       />
                     </View>
                   ))}
-                  <LeafButton label={busy ? 'Cadastrando...' : 'Cadastrar veículo'} icon="add-outline" tone="primary" disabled={!canSubmit || busy} onPress={handleAddVehicle} />
-                  <TouchableOpacity onPress={() => setMode('list')} style={styles.secondaryAction}><Text style={styles.secondaryActionText}>Cancelar</Text></TouchableOpacity>
+                  {mode === 'edit' ? (
+                    <Text style={styles.reviewNotice}>Ao salvar, o veículo será desativado e voltará para análise.</Text>
+                  ) : null}
+                  <LeafButton
+                    label={busy ? 'Salvando...' : mode === 'edit' ? 'Salvar e reenviar' : 'Cadastrar veículo'}
+                    icon={mode === 'edit' ? 'save-outline' : 'add-outline'}
+                    tone="primary"
+                    disabled={!canSubmit || busy}
+                    onPress={mode === 'edit' ? handleUpdateVehicle : handleAddVehicle}
+                  />
+                  <TouchableOpacity onPress={cancelForm} style={styles.secondaryAction}><Text style={styles.secondaryActionText}>Cancelar</Text></TouchableOpacity>
                 </PrototypeMenuSection>
               ) : (
                 <>
@@ -236,7 +281,8 @@ export default function RobotaxiVehiclesScreen({ navigation, route }) {
                         </TouchableOpacity>
                         {expanded ? (
                           <View style={styles.expandedActions}>
-                            {!vehicle.isActive ? <LeafButton label={busy ? 'Selecionando...' : 'Selecionar veículo'} tone="primary" disabled={busy} onPress={() => handleSelectVehicle(vehicle.id)} /> : null}
+                            {!vehicle.isActive && vehicle.approved ? <LeafButton label={busy ? 'Selecionando...' : 'Selecionar veículo'} tone="primary" disabled={busy} onPress={() => handleSelectVehicle(vehicle.id)} /> : null}
+                            <TouchableOpacity disabled={busy} onPress={() => handleEditVehicle(vehicle)} style={styles.secondaryAction}><Text style={styles.secondaryActionText}>Editar dados</Text></TouchableOpacity>
                             <TouchableOpacity disabled={busy} onPress={() => handleRemoveVehicle(vehicle)} style={styles.secondaryAction}><Text style={styles.removeActionText}>Remover do perfil</Text></TouchableOpacity>
                           </View>
                         ) : null}
@@ -291,6 +337,12 @@ const styles = StyleSheet.create({
     fontFamily: fonts.Regular,
     fontSize: 15,
     paddingHorizontal: 16,
+  },
+  reviewNotice: {
+    color: leafRideColors.secondary,
+    fontFamily: fonts.Regular,
+    fontSize: 13,
+    lineHeight: 19,
   },
   vehicleCard: {
     borderRadius: 26,

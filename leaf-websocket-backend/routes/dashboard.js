@@ -2511,6 +2511,26 @@ router.post('/api/drivers/:driverId/vehicle/config', authenticateJWT, requireRol
       updates[`user_vehicles/${driverId}/${userVehicleId}/reviewedBy`] = req.user.id;
     }
 
+    if (requestsOperationalVehicleConfig && canonicalSelectedVehicleData) {
+      const canonicalVehicleIdentity = normalizeVehicleOcrPayload({
+        ...canonicalSelectedVehicleData,
+        ...(canonicalSelectedVehicleData?.ocrData?.data || {})
+      });
+      const canonicalLinkFields = {
+        plate: canonicalVehicleIdentity.plate,
+        plateNormalized: canonicalVehicleIdentity.plateNormalized,
+        brand: canonicalVehicleIdentity.brand || canonicalVehicleIdentity.make,
+        model: canonicalVehicleIdentity.model,
+        color: canonicalVehicleIdentity.color,
+        year: canonicalVehicleIdentity.year
+      };
+      Object.entries(canonicalLinkFields).forEach(([field, value]) => {
+        if (value) {
+          updates[`user_vehicles/${driverId}/${userVehicleId}/${field}`] = value;
+        }
+      });
+    }
+
     if (normalizedCategory) {
       const categoryLabel = normalizedCategory === 'elite'
         ? 'Leaf Elite'

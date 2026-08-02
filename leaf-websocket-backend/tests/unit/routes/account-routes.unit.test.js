@@ -83,6 +83,24 @@ function createApp() {
   return app;
 }
 
+function valueSnapshot(value) {
+  return {
+    exists: () => value !== null && value !== undefined,
+    val: () => value,
+  };
+}
+
+function collectionSnapshot(records = {}) {
+  return {
+    exists: () => Object.keys(records).length > 0,
+    val: () => records,
+    forEach: (callback) => Object.entries(records).some(([key, value]) => callback({
+      key,
+      val: () => value,
+    }) === true),
+  };
+}
+
 describe('account deletion route', () => {
   beforeEach(() => {
     mockVerifyIdToken.mockResolvedValue({
@@ -507,9 +525,180 @@ describe('account deletion route', () => {
     expect(Object.keys(updates).some(path => path.startsWith('vehicle_active_assignment/'))).toBe(false);
   });
 
+  it('edits only the authenticated profile link and resets vehicle approval', async () => {
+    mockUserDocGet.mockResolvedValue({
+      exists: true,
+      data: () => ({ uid: 'review-user', usertype: 'driver' }),
+    });
+    mockDatabaseOnce
+      .mockResolvedValueOnce(collectionSnapshot({
+        link_1: {
+          id: 'link_1',
+          userId: 'review-user',
+          vehicleId: 'shared-vehicle-1',
+          status: 'approved',
+          approved: true,
+          isActive: true,
+        },
+      }))
+      .mockResolvedValueOnce(valueSnapshot({
+        plate: 'ABC1D23',
+        brand: 'Nissan',
+        model: 'Leaf',
+        color: 'Branco',
+        year: 2025,
+      }));
+
+    const response = await request(createApp())
+      .patch('/api/account/vehicles/shared-vehicle-1')
+      .set('Authorization', 'Bearer firebase-token')
+      .send({ vehicle: { plate: 'ABC1D23', brand: 'Nissan', model: 'Leaf Plus', color: 'Prata', year: 2025 } });
+
+    expect(response.status).toBe(200);
+    expect(response.body.vehicle).toMatchObject({
+      vehicleId: 'shared-vehicle-1',
+      userVehicleId: 'link_1',
+      status: 'pending',
+      approved: false,
+      isActive: false,
+    });
+    const updates = mockDatabaseUpdate.mock.calls[0][0];
+    expect(updates).toEqual(expect.objectContaining({
+      'user_vehicles/review-user/link_1/vehicleId': 'shared-vehicle-1',
+      'user_vehicles/review-user/link_1/model': 'Leaf Plus',
+      'user_vehicles/review-user/link_1/status': 'pending',
+      'user_vehicles/review-user/link_1/approved': false,
+      'user_vehicles/review-user/link_1/isActive': false,
+      'users/review-user/activeVehicleId': '',
+    }));
+    expect(Object.keys(updates).some(path => path.startsWith('vehicles/'))).toBe(false);
+    expect(Object.keys(updates).some(path => path.startsWith('vehicle_plate_index/'))).toBe(false);
+    expect(mockRedisDel).toHaveBeenCalledWith('driver_eligibility_profile:review-user');
+  });
+
+  it('does not attach an edited plate to an unverified global catalog record', async () => {
+    mockUserDocGet.mockResolvedValue({
+      exists: true,
+      data: () => ({ uid: 'review-user', usertype: 'driver' }),
+    });
+    mockDatabaseOnce
+      .mockResolvedValueOnce(collectionSnapshot({
+        link_1: {
+          id: 'link_1',
+          userId: 'review-user',
+          vehicleId: 'shared-vehicle-1',
+          status: 'approved',
+          approved: true,
+          isActive: false,
+        },
+      }))
+      .mockResolvedValueOnce(valueSnapshot({ plate: 'ABC1D23' }))
+      .mockResolvedValueOnce(valueSnapshot(null))
+      .mockResolvedValueOnce(valueSnapshot(null));
+
+    const response = await request(createApp())
+      .patch('/api/account/vehicles/link_1')
+      .set('Authorization', 'Bearer firebase-token')
+      .send({ vehicle: { plate: 'DEF4G56', brand: 'Honda', model: 'City', color: 'Prata', year: 2024 } });
+
+    expect(response.status).toBe(200);
+    const updates = mockDatabaseUpdate.mock.calls[0][0];
+    expect(updates['user_vehicles/review-user/link_1/vehicleId']).toBeNull();
+    expect(updates['user_vehicles/review-user/link_1/plate']).toBe('DEF4G56');
+    expect(Object.keys(updates).some(path => path.startsWith('vehicles/'))).toBe(false);
+    expect(Object.keys(updates).some(path => path.startsWith('vehicle_plate_index/'))).toBe(false);
+  });
+
+  it('lists a pending profile submission even before CRLV creates its canonical catalog record', async () => {
+    mockUserDocGet.mockResolvedValue({
+      exists: true,
+      data: () => ({ uid: 'review-user', usertype: 'driver' }),
+    });
+    mockDatabaseOnce.mockResolvedValueOnce(collectionSnapshot({
+      link_1: {
+        id: 'link_1',
+        userId: 'review-user',
+        status: 'pending',
+        approved: false,
+        isActive: false,
+        plate: 'DEF4G56',
+        brand: 'Honda',
+        model: 'City',
+        color: 'Prata',
+        year: 2024,
+      },
+    }));
+
+    const response = await request(createApp())
+      .get('/api/account/vehicles')
+      .set('Authorization', 'Bearer firebase-token');
+
+    expect(response.status).toBe(200);
+    expect(response.body.vehicles).toEqual([
+      expect.objectContaining({
+        id: 'link_1',
+        vehicleId: null,
+        userVehicleId: 'link_1',
+        plate: 'DEF4G56',
+        model: 'City',
+        status: 'pending',
+      }),
+    ]);
+  });
+
+  it('blocks selecting a vehicle until the administrative approval is complete', async () => {
+    mockUserDocGet.mockResolvedValue({
+      exists: true,
+      data: () => ({ uid: 'review-user', usertype: 'driver' }),
+    });
+    mockDatabaseOnce.mockResolvedValueOnce(collectionSnapshot({
+      link_1: {
+        id: 'link_1',
+        userId: 'review-user',
+        vehicleId: 'vehicle_1',
+        status: 'pending',
+        approved: false,
+        isActive: false,
+      },
+    }));
+
+    const response = await request(createApp())
+      .patch('/api/account/vehicles/vehicle_1/active')
+      .set('Authorization', 'Bearer firebase-token');
+
+    expect(response.status).toBe(409);
+    expect(response.body).toMatchObject({ code: 'VEHICLE_APPROVAL_REQUIRED' });
+    expect(mockDatabaseUpdate).not.toHaveBeenCalled();
+  });
+
+  it('blocks selecting an approved link without a canonical CRLV vehicle identity', async () => {
+    mockUserDocGet.mockResolvedValue({
+      exists: true,
+      data: () => ({ uid: 'review-user', usertype: 'driver' }),
+    });
+    mockDatabaseOnce.mockResolvedValueOnce(collectionSnapshot({
+      link_1: {
+        id: 'link_1',
+        userId: 'review-user',
+        status: 'approved',
+        approved: true,
+        isActive: false,
+      },
+    }));
+
+    const response = await request(createApp())
+      .patch('/api/account/vehicles/link_1/active')
+      .set('Authorization', 'Bearer firebase-token');
+
+    expect(response.status).toBe(409);
+    expect(response.body).toMatchObject({ code: 'VEHICLE_CANONICAL_IDENTITY_REQUIRED' });
+    expect(mockDatabaseUpdate).not.toHaveBeenCalled();
+  });
+
   it.each([
     ['get', '/api/account/vehicles'],
     ['post', '/api/account/vehicles'],
+    ['patch', '/api/account/vehicles/vehicle_1'],
     ['patch', '/api/account/vehicles/vehicle_1/active'],
     ['delete', '/api/account/vehicles/vehicle_1'],
   ])('requires driver role for %s %s', async (method, endpoint) => {

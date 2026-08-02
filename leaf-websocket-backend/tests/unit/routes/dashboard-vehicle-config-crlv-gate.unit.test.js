@@ -66,6 +66,10 @@ const mockRef = jest.fn((path) => ({
       if (mockVehicleReadError) throw mockVehicleReadError;
       return snapshot({
         plate: mockVehiclePlate,
+        brand: 'Nissan',
+        model: 'Leaf',
+        color: 'BRANCO',
+        year: 2025,
         category: 'plus',
       });
     }
@@ -267,6 +271,11 @@ describe('dashboard vehicle configuration canonical CRLV gate', () => {
       'user_vehicles/driver-1/link-1/isActive': true,
       'user_vehicles/driver-1/link-1/status': 'approved',
       'user_vehicles/driver-1/link-1/approved': true,
+      'user_vehicles/driver-1/link-1/plate': 'ABC1D23',
+      'user_vehicles/driver-1/link-1/brand': 'Nissan',
+      'user_vehicles/driver-1/link-1/model': 'Leaf',
+      'user_vehicles/driver-1/link-1/color': 'BRANCO',
+      'user_vehicles/driver-1/link-1/year': '2025',
       'users/driver-1/activeVehicleId': 'vehicle-1',
     }));
     expect(mockRedisHset).toHaveBeenCalledWith(
