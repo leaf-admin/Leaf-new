@@ -181,7 +181,6 @@ function runtimeEnv({ port, redisPort, redisUrl }) {
     NODE_ENV: 'development',
     APP_ENV: 'socket-health-smoke',
     LEAF_ENV: 'socket-health-smoke',
-    LEAF_SERVER_RUNTIME: 'modular',
     LEAF_SKIP_RUNTIME_CONFIG_VALIDATION: 'true',
     PORT: String(port),
     HOST: '127.0.0.1',

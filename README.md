@@ -47,6 +47,6 @@ Docs históricos e relatórios gerados ficam em `docs/archive/`.
 
 - O app mobile atual entra por `mobile-app/index.js` -> `mobile-app/App.js`.
 - A experiência principal do app é a UI Robotaxi, registrada em `mobile-app/src/navigation/AppNavigator.js`.
-- O backend tem dois runtimes vivos: `server.vps.js` para VPS/produção atual e `server.js` como runtime modular.
+- O backend possui uma única entrada executável e canônica: `leaf-websocket-backend/server.js`.
 - Toda feature nova de admin/dashboard deve ser implementada em `leaf-dashboard-js`.
 - `mobile-app/src/common-local` ainda é legado vivo: não criar novas dependências nele; migrar por domínio antes de remover.

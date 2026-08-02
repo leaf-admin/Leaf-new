@@ -8,7 +8,6 @@ services:
     environment:
       - NODE_ENV=production
       - RUNTIME_ROLE=trip-location
-      - LEAF_SERVER_RUNTIME=modular
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - REDIS_PASSWORD=${REDIS_PASSWORD:?REDIS_PASSWORD is required}
@@ -76,7 +75,6 @@ services:
     environment:
       - NODE_ENV=production
       - RUNTIME_ROLE=pricing-baseline
-      - LEAF_SERVER_RUNTIME=modular
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - REDIS_PASSWORD=${REDIS_PASSWORD:?REDIS_PASSWORD is required}
@@ -128,7 +126,6 @@ services:
     environment:
       - NODE_ENV=production
       - RUNTIME_ROLE=ride-health-monitor
-      - LEAF_SERVER_RUNTIME=modular
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - REDIS_PASSWORD=${REDIS_PASSWORD:?REDIS_PASSWORD is required}

@@ -226,7 +226,6 @@ function runtimeEnv({ runtime, port, redisPort, redisUrl }) {
     NODE_ENV: 'development',
     APP_ENV: 'runtime-smoke',
     LEAF_ENV: 'runtime-smoke',
-    LEAF_SERVER_RUNTIME: runtime,
     LEAF_SKIP_RUNTIME_CONFIG_VALIDATION: 'true',
     PORT: String(port),
     HOST: '127.0.0.1',
@@ -435,7 +434,6 @@ async function shutdown() {
 async function main() {
   ensureDir(ARTIFACT_ROOT);
   const redisPort = await findFreePort();
-  const vpsPort = await findFreePort();
   const modularPort = await findFreePort();
   const modularSecondaryPort = await findFreePort();
   const redisUrl = `redis://:${encodeURIComponent(REDIS_PASSWORD)}@127.0.0.1:${redisPort}/0`;
@@ -454,12 +452,11 @@ async function main() {
   try {
     await startRedis(redisPort);
     report.adapterBroadcast = await validateAdapterBroadcast(redisUrl);
-    const [vps, modular, modularSecondary] = await Promise.all([
-      startRuntime({ runtime: 'vps', instance: 'legacy', port: vpsPort, redisPort, redisUrl }),
+    const [modular, modularSecondary] = await Promise.all([
       startRuntime({ runtime: 'modular', instance: 'primary', port: modularPort, redisPort, redisUrl }),
       startRuntime({ runtime: 'modular', instance: 'secondary', port: modularSecondaryPort, redisPort, redisUrl })
     ]);
-    report.runtimes.push(vps, modular, modularSecondary);
+    report.runtimes.push(modular, modularSecondary);
     report.distributedDriverSessionReplacement = await validateDistributedDriverSessionReplacement(
       modular.port,
       modularSecondary.port

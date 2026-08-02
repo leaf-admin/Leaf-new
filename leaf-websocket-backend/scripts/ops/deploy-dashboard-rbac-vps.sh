@@ -114,7 +114,6 @@ node --check "$BACKEND_LOCAL_DIR/services/city-activation-state-service.js"
 node --check "$BACKEND_LOCAL_DIR/utils/prometheus-metrics.js"
 node --check "$BACKEND_LOCAL_DIR/utils/pilot-launch-flags.js"
 node --check "$BACKEND_LOCAL_DIR/server.js"
-node --check "$BACKEND_LOCAL_DIR/server.vps.js"
 node --check "$BACKEND_LOCAL_DIR/workers/pricing-baseline-worker.js"
 node --check "$BACKEND_LOCAL_DIR/workers/ride-health-monitor-worker.js"
 node --check "$BACKEND_LOCAL_DIR/scripts/ops/materialize-pricing-baselines.cjs"
@@ -129,7 +128,7 @@ npm --prefix "$DASH_LOCAL_DIR" run -s build
 if [[ -z "$REMOTE_BACKEND_DIR" ]]; then
   REMOTE_BACKEND_DIR="$(ssh_cmd '
     for d in /opt/leaf/leaf-websocket-backend /opt/leaf-app /opt/leaf; do
-      if [ -f "$d/server.vps.js" ] || [ -f "$d/server.js" ]; then
+      if [ -f "$d/server.js" ]; then
         echo "$d"
         exit 0
       fi
@@ -203,14 +202,12 @@ scp_cmd "$BACKEND_LOCAL_DIR/services/city-activation-state-service.js" "$VPS_USE
 scp_cmd "$BACKEND_LOCAL_DIR/utils/prometheus-metrics.js" "$VPS_USER@$VPS_IP:$REMOTE_BACKEND_DIR/utils/prometheus-metrics.js"
 scp_cmd "$BACKEND_LOCAL_DIR/utils/pilot-launch-flags.js" "$VPS_USER@$VPS_IP:$REMOTE_BACKEND_DIR/utils/pilot-launch-flags.js"
 scp_cmd "$BACKEND_LOCAL_DIR/server.js" "$VPS_USER@$VPS_IP:$REMOTE_BACKEND_DIR/server.js"
-scp_cmd "$BACKEND_LOCAL_DIR/server.vps.js" "$VPS_USER@$VPS_IP:$REMOTE_BACKEND_DIR/server.vps.js"
 scp_cmd "$BACKEND_LOCAL_DIR/workers/pricing-baseline-worker.js" "$VPS_USER@$VPS_IP:$REMOTE_BACKEND_DIR/workers/pricing-baseline-worker.js"
 scp_cmd "$BACKEND_LOCAL_DIR/workers/pm2.pricing-baseline.config.js" "$VPS_USER@$VPS_IP:$REMOTE_BACKEND_DIR/workers/pm2.pricing-baseline.config.js"
 scp_cmd "$BACKEND_LOCAL_DIR/workers/ride-health-monitor-worker.js" "$VPS_USER@$VPS_IP:$REMOTE_BACKEND_DIR/workers/ride-health-monitor-worker.js"
 scp_cmd "$BACKEND_LOCAL_DIR/workers/pm2.ride-health-monitor.config.js" "$VPS_USER@$VPS_IP:$REMOTE_BACKEND_DIR/workers/pm2.ride-health-monitor.config.js"
 scp_cmd "$BACKEND_LOCAL_DIR/scripts/ops/materialize-pricing-baselines.cjs" "$VPS_USER@$VPS_IP:$REMOTE_BACKEND_DIR/scripts/ops/materialize-pricing-baselines.cjs"
 scp_cmd "$BACKEND_LOCAL_DIR/scripts/ops/backfill-ride-health-index.cjs" "$VPS_USER@$VPS_IP:$REMOTE_BACKEND_DIR/scripts/ops/backfill-ride-health-index.cjs"
-scp_cmd "$BACKEND_LOCAL_DIR/scripts/ops/report-legacy-runtime-surface.cjs" "$VPS_USER@$VPS_IP:$REMOTE_BACKEND_DIR/scripts/ops/report-legacy-runtime-surface.cjs"
 scp_cmd "$BACKEND_LOCAL_DIR/scripts/create-admin-profile-user.js" "$VPS_USER@$VPS_IP:$REMOTE_BACKEND_DIR/scripts/create-admin-profile-user.js"
 scp_cmd "$BACKEND_LOCAL_DIR/docker-compose.ops-workers.yml" "$VPS_USER@$VPS_IP:$REMOTE_BACKEND_DIR/docker-compose.ops-workers.yml"
 scp_cmd "$BACKEND_LOCAL_DIR/package.json" "$VPS_USER@$VPS_IP:$REMOTE_BACKEND_DIR/package.json"

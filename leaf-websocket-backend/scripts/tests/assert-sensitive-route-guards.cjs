@@ -260,20 +260,6 @@ function main() {
   });
 
   check(() => {
-    const file = 'server.vps.js';
-    const source = read(file);
-    const userManagementRequireIndex = source.indexOf("require('./routes/user-management')");
-    const userManagementUseIndex = source.indexOf("app.use('/', userManagementRoutes)");
-    const dashboardUseIndex = source.indexOf("app.use('/', dashboardRoutes)");
-    assert(userManagementRequireIndex >= 0, `${file} nao importa routes/user-management`);
-    assert(userManagementUseIndex >= 0, `${file} nao registra userManagementRoutes`);
-    assert(
-      dashboardUseIndex < 0 || userManagementUseIndex < dashboardUseIndex,
-      `${file} deve registrar userManagementRoutes antes de dashboardRoutes`
-    );
-  });
-
-  check(() => {
     const supportAuthFile = 'middleware/support-auth.js';
     const supportRoutesFile = 'routes/support.js';
     const supportAuthSource = read(supportAuthFile);
@@ -301,12 +287,6 @@ function main() {
       assertLineHasToken({ file, ...item, token: 'authenticateSupport' });
       assertLineHasToken({ file, ...item, token: 'requireSupportRoles' });
     }
-  });
-
-  check(() => {
-    const file = 'server.vps.js';
-    const source = read(file);
-    assert(!source.includes("require('./routes/support-routes')"), `${file} ainda registra rota placeholder support-routes`);
   });
 
   if (failures.length > 0) {

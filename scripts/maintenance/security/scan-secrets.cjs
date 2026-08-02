@@ -166,7 +166,6 @@ function shouldScanContent(file) {
     relative.startsWith('leaf-websocket-backend/scripts/deploy/') ||
     relative.startsWith('leaf-websocket-backend/scripts/runtime/') ||
     relative === 'leaf-websocket-backend/server.js' ||
-    relative === 'leaf-websocket-backend/server.vps.js' ||
     relative.startsWith('services/support-agent-orchestrator/src/') ||
     relative.startsWith('services/kyc-service/src/') ||
     relative === 'mobile-app/eas.json' ||

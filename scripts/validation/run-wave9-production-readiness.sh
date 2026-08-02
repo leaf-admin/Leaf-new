@@ -107,7 +107,7 @@ if [[ "${RUN_LOCAL_GATES}" == "true" ]]; then
   run_and_capture hardcoded-secret-guard bash "${ROOT_DIR}/leaf-websocket-backend/scripts/tests/assert-no-hardcoded-secrets.sh" || mark_core_failed
   run_and_capture mobile-production-guards npm --prefix "${ROOT_DIR}/mobile-app" run qa:production-guards || mark_core_failed
   run_and_capture backend-route-guards npm --prefix "${ROOT_DIR}/leaf-websocket-backend" run test:route-guards || mark_core_failed
-  run_and_capture backend-no-active-vps-runtime npm --prefix "${ROOT_DIR}/leaf-websocket-backend" run check:no-active-vps-runtime || mark_core_failed
+  run_and_capture backend-single-runtime npm --prefix "${ROOT_DIR}/leaf-websocket-backend" run check:single-backend-runtime || mark_core_failed
   if [[ "${RUN_EXTENDED_LOCAL_GATES}" == "true" ]]; then
     CORE_NOTES="baseline local gates plus full mobile/backend unit gates"
     run_and_capture mobile-full-unit npm --prefix "${ROOT_DIR}/mobile-app" run test:unit -- --runInBand || mark_core_failed

@@ -40,7 +40,7 @@ npm run branch:task -- nome-curto-da-tarefa
 ## Regras de limpeza
 
 - Nao criar dependencia nova em `mobile-app/src/common-local`.
-- Nao remover `server.vps.js` enquanto a producao ainda depender dele.
+- Nao introduzir entradas alternativas ao `leaf-websocket-backend/server.js`; rollback deve restaurar uma revisao versionada e validada.
 - Relatorio temporario vai para `reports/`, que e ignorado.
 - Decisao duradoura vai para `docs/` ou Linear.
 - Resultado de Maestro vai para `mobile-app/.maestro/results/`, que e ignorado.

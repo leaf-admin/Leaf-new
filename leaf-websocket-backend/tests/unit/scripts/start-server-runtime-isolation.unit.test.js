@@ -1,4 +1,5 @@
 const path = require('path');
+const fs = require('fs');
 const { spawnSync } = require('child_process');
 
 describe('production runtime launcher isolation', () => {
@@ -19,42 +20,23 @@ describe('production runtime launcher isolation', () => {
     });
   }
 
-  it.each(['vps', 'custom'])(
-    'refuses the %s entrypoint before executing application code',
-    (runtime) => {
-      const result = runWith({
-        LEAF_SERVER_RUNTIME: runtime,
-        LEAF_SERVER_ENTRY: 'server.js'
-      });
+  it('fixes server.js as the only entrypoint without runtime selectors', () => {
+    const source = fs.readFileSync(script, 'utf8');
 
-      expect(result.status).toBe(2);
-      expect(`${result.stdout}${result.stderr}`).toContain(
-        'Produção aceita somente LEAF_SERVER_RUNTIME=modular'
-      );
-    }
-  );
+    expect(source).toContain('ENTRY_FILE="server.js"');
+    expect(source).toContain('exec node "$ENTRY_FILE"');
+    expect(source).not.toContain(['LEAF', 'SERVER', 'RUNTIME'].join('_'));
+    expect(source).not.toContain(['LEAF', 'SERVER', 'ENTRY'].join('_'));
+  });
 
   it('refuses the production config-validation bypass', () => {
     const result = runWith({
-      LEAF_SERVER_RUNTIME: 'modular',
       LEAF_SKIP_RUNTIME_CONFIG_VALIDATION: 'true'
     });
 
     expect(result.status).toBe(2);
     expect(`${result.stdout}${result.stderr}`).toContain(
       'Validação de configuração não pode ser ignorada em produção'
-    );
-  });
-
-  it('normalizes production casing and whitespace before applying isolation', () => {
-    const result = runWith({
-      NODE_ENV: ' Production ',
-      LEAF_SERVER_RUNTIME: 'vps'
-    });
-
-    expect(result.status).toBe(2);
-    expect(`${result.stdout}${result.stderr}`).toContain(
-      'Produção aceita somente LEAF_SERVER_RUNTIME=modular'
     );
   });
 });

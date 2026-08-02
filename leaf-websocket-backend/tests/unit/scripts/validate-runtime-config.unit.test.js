@@ -112,22 +112,6 @@ describe('validate-runtime-config Woovi webhook production gates', () => {
     });
   });
 
-  it.each(['vps', 'custom'])(
-    'blocks the %s server entrypoint in production',
-    (runtime) => {
-      const result = runValidator({
-        ...baseProdEnv,
-        LEAF_SERVER_RUNTIME: runtime
-      });
-
-      expect(result.status).toBe(1);
-      expect(result.report.summary.blockers).toContain(
-        'LEAF_SERVER_RUNTIME deve ser modular em produção'
-      );
-      expect(result.report.diagnostics.runtime.serverRuntime).toBe(runtime);
-    }
-  );
-
   it('blocks bypassing runtime config validation in production', () => {
     const result = runValidator({
       ...baseProdEnv,

@@ -242,7 +242,7 @@ if [[ "$SKIP_LOCAL_TESTS" != "true" ]]; then
     else
       echo "[deploy][info] Local runtime config validation skipped; the active remote .env remains authoritative."
     fi
-    npm run check:no-active-vps-runtime
+    npm run check:single-backend-runtime
   )
 else
   echo "[deploy] 1/7 Local validation skipped explicitly"

@@ -10,7 +10,6 @@ x-websocket-gateway-service: &websocket_gateway_service
     - PORT=3001
     - HOST=0.0.0.0
     - RUNTIME_ROLE=gateway
-    - LEAF_SERVER_RUNTIME=modular
     - LEAF_LAUNCH_PROFILE=${LEAF_LAUNCH_PROFILE:-full}
     - LEAF_PILOT_CONTROLLED=${LEAF_PILOT_CONTROLLED:-false}
     - PILOT_ALLOWED_PASSENGER_IDS=${PILOT_ALLOWED_PASSENGER_IDS:-}
@@ -206,7 +205,6 @@ services:
       - PORT=3001
       - HOST=0.0.0.0
       - RUNTIME_ROLE=gateway
-      - LEAF_SERVER_RUNTIME=modular
       - LEAF_LAUNCH_PROFILE=${LEAF_LAUNCH_PROFILE:-full}
       - LEAF_PILOT_CONTROLLED=${LEAF_PILOT_CONTROLLED:-false}
       - PILOT_ALLOWED_PASSENGER_IDS=${PILOT_ALLOWED_PASSENGER_IDS:-}

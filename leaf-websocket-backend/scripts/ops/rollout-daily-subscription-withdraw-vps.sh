@@ -72,7 +72,7 @@ if [[ -z "$REMOTE_BACKEND_DIR" ]]; then
   REMOTE_BACKEND_DIR="$(
     run_ssh '
       for d in /opt/leaf/leaf-websocket-backend /opt/leaf-app /opt/leaf; do
-        if [ -f "$d/server.vps.js" ] || [ -f "$d/server.js" ]; then
+        if [ -f "$d/server.js" ]; then
           echo "$d"
           exit 0
         fi
