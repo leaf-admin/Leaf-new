@@ -9,6 +9,77 @@ const fs = require('fs');
 const { logger } = require('./logger');
 
 class DockerDetector {
+    static getRedisMode() {
+        const explicitMode = String(process.env.REDIS_MODE || '').trim().toLowerCase();
+        if (explicitMode && !['standalone', 'sentinel'].includes(explicitMode)) {
+            throw new Error('REDIS_MODE deve ser standalone ou sentinel');
+        }
+        if (explicitMode) return explicitMode;
+        return String(process.env.REDIS_SENTINELS || '').trim() ? 'sentinel' : 'standalone';
+    }
+
+    static parseRedisSentinels(value = process.env.REDIS_SENTINELS) {
+        const rawEntries = String(value || '')
+            .split(',')
+            .map(entry => entry.trim())
+            .filter(Boolean);
+        const sentinels = rawEntries.map(entry => {
+            const separator = entry.lastIndexOf(':');
+            const host = separator > 0 ? entry.slice(0, separator).trim() : '';
+            const portRaw = separator > 0 ? entry.slice(separator + 1).trim() : '';
+            const port = /^\d+$/.test(portRaw) ? Number.parseInt(portRaw, 10) : Number.NaN;
+            if (!host || !Number.isInteger(port) || port < 1 || port > 65535) {
+                throw new Error(`REDIS_SENTINELS contém endpoint inválido: ${entry}`);
+            }
+            return { host, port };
+        });
+        const uniqueEndpoints = new Set(sentinels.map(({ host, port }) => `${host.toLowerCase()}:${port}`));
+        if (sentinels.length < 3 || uniqueEndpoints.size !== sentinels.length || sentinels.length % 2 === 0) {
+            throw new Error('REDIS_SENTINELS deve conter ao menos 3 endpoints distintos em quantidade ímpar');
+        }
+        return sentinels;
+    }
+
+    static getRedisSentinelConfig() {
+        const name = String(process.env.REDIS_SENTINEL_MASTER_NAME || 'leaf-master').trim();
+        if (!/^[a-zA-Z0-9._-]+$/.test(name)) {
+            throw new Error('REDIS_SENTINEL_MASTER_NAME inválido');
+        }
+        const password = process.env.REDIS_PASSWORD || undefined;
+        const sentinelPassword = process.env.REDIS_SENTINEL_PASSWORD || undefined;
+        if (process.env.NODE_ENV === 'production' && (!password || !sentinelPassword)) {
+            throw new Error('Redis Sentinel em produção exige REDIS_PASSWORD e REDIS_SENTINEL_PASSWORD');
+        }
+        const db = Number.parseInt(process.env.REDIS_DB || '0', 10);
+        if (!Number.isInteger(db) || db < 0) {
+            throw new Error('REDIS_DB inválido');
+        }
+
+        const config = {
+            sentinels: this.parseRedisSentinels(),
+            name,
+            role: 'master',
+            username: process.env.REDIS_USERNAME || undefined,
+            password,
+            sentinelUsername: process.env.REDIS_SENTINEL_USERNAME || undefined,
+            sentinelPassword,
+            db
+        };
+        if (String(process.env.REDIS_USE_TLS || '').toLowerCase() === 'true') {
+            config.tls = {
+                rejectUnauthorized: String(process.env.REDIS_TLS_REJECT_UNAUTHORIZED || 'true').toLowerCase() !== 'false'
+            };
+        }
+        if (String(process.env.REDIS_SENTINEL_USE_TLS || '').toLowerCase() === 'true') {
+            config.sentinelTLS = {
+                rejectUnauthorized: String(
+                    process.env.REDIS_SENTINEL_TLS_REJECT_UNAUTHORIZED || 'true'
+                ).toLowerCase() !== 'false'
+            };
+        }
+        return config;
+    }
+
     static parseRedisUrl() {
         if (!process.env.REDIS_URL) {
             return null;
@@ -114,6 +185,9 @@ class DockerDetector {
      * @returns {Object}
      */
     static getRedisConfig() {
+        if (this.getRedisMode() === 'sentinel') {
+            return this.getRedisSentinelConfig();
+        }
         const parsed = this.parseRedisUrl();
         const host = this.getRedisHost();
         const port = parsed?.port || parseInt(process.env.REDIS_PORT || '6379');
@@ -141,18 +215,24 @@ class DockerDetector {
         return config;
     }
 
+    static describeRedisConfig(config = this.getRedisConfig()) {
+        if (Array.isArray(config.sentinels)) {
+            return `sentinel:${config.name} via ${config.sentinels.map(item => `${item.host}:${item.port}`).join(',')}`;
+        }
+        return `standalone:${config.host}:${config.port}`;
+    }
+
     /**
      * Loga informações sobre o ambiente detectado
      */
     static logEnvironment() {
         const inDocker = this.isRunningInDocker();
-        const redisHost = this.getRedisHost();
-        const redisUrl = this.getRedisUrl();
+        const redisConfig = this.getRedisConfig();
 
         logger.info('🐳 Ambiente detectado:');
         logger.info(`   Docker: ${inDocker ? '✅ Sim' : '❌ Não'}`);
-        logger.info(`   Redis Host: ${redisHost}`);
-        logger.info(`   Redis URL: ${redisUrl.replace(/:[^:@]+@/, ':****@')}`); // Ocultar senha no log
+        logger.info(`   Redis Mode: ${this.getRedisMode()}`);
+        logger.info(`   Redis Target: ${this.describeRedisConfig(redisConfig)}`);
     }
 }
 

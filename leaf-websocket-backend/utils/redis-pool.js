@@ -30,7 +30,7 @@ class RedisPool {
             // Log do ambiente detectado
             DockerDetector.logEnvironment();
 
-            logger.info(`🔧 Configurando Redis: ${redisConfig.host}:${redisConfig.port} ${redisConfig.password ? '(com senha)' : '(sem senha)'}`);
+            logger.info(`🔧 Configurando Redis: ${DockerDetector.describeRedisConfig(redisConfig)} ${redisConfig.password ? '(com senha)' : '(sem senha)'}`);
 
             // Configuração otimizada para connection pooling
             const isTestEnv =
@@ -328,9 +328,14 @@ class RedisPool {
             status: this.pool.status,
             connected: this.pool.status === 'ready',
             options: {
-                host: this.pool.options.host,
-                port: this.pool.options.port,
-                db: this.pool.options.db
+                mode: Array.isArray(this.pool.options.sentinels) ? 'sentinel' : 'standalone',
+                host: this.pool.options.host || null,
+                port: this.pool.options.port || null,
+                db: this.pool.options.db,
+                masterName: this.pool.options.name || null,
+                sentinelCount: Array.isArray(this.pool.options.sentinels)
+                    ? this.pool.options.sentinels.length
+                    : 0
             }
         };
     }

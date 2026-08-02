@@ -9,6 +9,7 @@ const DeviceFaceEmbeddingVerificationService = require('./device-face-embedding-
 const { evaluateDeviceVerificationTrust } = require('./kyc-biometric-production-policy');
 const biometricJobLimiter = require('./biometric-job-limiter');
 const { logStructured, logError } = require('../utils/logger');
+const DockerDetector = require('../utils/docker-detector');
 
 function parseNumber(value, fallback) {
   const numeric = Number(value);
@@ -41,12 +42,7 @@ function normalizeEmbeddingVector(value, expectedDimension = 512) {
 
 class IntegratedKYCService {
   constructor() {
-    this.redisClient = new Redis({
-      host: process.env.REDIS_HOST || 'localhost',
-      port: process.env.REDIS_PORT || 6379,
-      db: process.env.REDIS_DB || 0,
-      password: process.env.REDIS_PASSWORD || null
-    });
+    this.redisClient = new Redis(DockerDetector.getRedisConfig());
 
     this.faceWorker = new KYCFaceWorker();
     this.retryService = new KYCRetryService();

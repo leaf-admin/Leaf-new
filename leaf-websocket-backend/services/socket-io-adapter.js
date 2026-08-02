@@ -8,14 +8,19 @@
  */
 
 const { createAdapter } = require('@socket.io/redis-adapter');
-const { createClient } = require('redis');
+const Redis = require('ioredis');
 const { logger } = require('../utils/logger');
 const DockerDetector = require('../utils/docker-detector');
 
 class SocketIORedisAdapter {
     constructor(redisUrl) {
-        // ✅ Usar DockerDetector para obter URL correta do Redis
-        this.redisUrl = redisUrl || DockerDetector.getRedisUrl();
+        this.redisMode = DockerDetector.getRedisMode();
+        this.redisConfig = this.redisMode === 'sentinel'
+            ? DockerDetector.getRedisConfig()
+            : null;
+        this.redisUrl = this.redisMode === 'sentinel'
+            ? null
+            : (redisUrl || DockerDetector.getRedisUrl());
         this.pubClient = null;
         this.subClient = null;
         this.isInitialized = false;
@@ -39,7 +44,9 @@ class SocketIORedisAdapter {
             logger.info('🚀 [SocketIOAdapter] Inicializando Redis Adapter...');
 
             // Criar clientes Redis
-            this.pubClient = createClient({ url: this.redisUrl });
+            this.pubClient = this.redisConfig
+                ? new Redis({ ...this.redisConfig, lazyConnect: true })
+                : new Redis(this.redisUrl, { lazyConnect: true });
             this.subClient = this.pubClient.duplicate();
 
             // Configurar event handlers
@@ -56,8 +63,10 @@ class SocketIORedisAdapter {
 
             this.isInitialized = true;
             logger.info('✅ [SocketIOAdapter] Redis Adapter configurado com sucesso');
-            logger.info(`   Pub Client: ${this.redisUrl}`);
-            logger.info(`   Sub Client: ${this.redisUrl}`);
+            const target = this.redisConfig
+                ? DockerDetector.describeRedisConfig(this.redisConfig)
+                : DockerDetector.describeRedisConfig(DockerDetector.getRedisConfig());
+            logger.info(`   Pub/Sub target: ${target}`);
 
         } catch (error) {
             logger.error('❌ [SocketIOAdapter] Erro ao inicializar:', error);
@@ -135,11 +144,11 @@ class SocketIORedisAdapter {
             return {
                 status: 'healthy',
                 pubClient: {
-                    connected: this.pubClient.isReady,
+                    connected: this.pubClient.status === 'ready',
                     latency: pubLatency
                 },
                 subClient: {
-                    connected: this.subClient.isReady,
+                    connected: this.subClient.status === 'ready',
                     latency: subLatency
                 },
                 timestamp: new Date().toISOString()
@@ -155,4 +164,3 @@ class SocketIORedisAdapter {
 }
 
 module.exports = SocketIORedisAdapter;
-
