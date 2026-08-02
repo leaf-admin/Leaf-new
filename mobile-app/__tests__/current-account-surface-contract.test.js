@@ -23,6 +23,12 @@ describe('current account surface contract', () => {
     expect(sources[file]).not.toMatch(/\b(?:database|firestore|storage)\s*\(\s*\)/);
   });
 
+  it('does not restore the direct Firebase vehicle adapter', () => {
+    expect(fs.existsSync(
+      path.join(__dirname, '../src/services/VehicleService.js'),
+    )).toBe(false);
+  });
+
   it('routes functional current surfaces through their canonical Leaf API adapters', () => {
     expect(sources['src/screens/prototype/RobotaxiVehiclesScreen.js']).toContain('MobileVehicleService');
     expect(sources['src/screens/prototype/RobotaxiProfileScreen.js']).toContain('MobileProfileService');

@@ -2,24 +2,28 @@ const fs = require('fs');
 const path = require('path');
 
 describe('vehicle sharing policy boundaries', () => {
-  it('keeps registration and selection profile-scoped', () => {
-    const mobileSource = fs.readFileSync(
-      path.join(__dirname, '../../../../mobile-app/src/services/VehicleService.js'),
+  it('keeps account API registration and selection profile-scoped', () => {
+    const accountRoutesSource = fs.readFileSync(
+      path.join(__dirname, '../../../routes/account-routes.js'),
       'utf8'
     );
-    const registerStart = mobileSource.indexOf('async registerVehicleForUser');
-    const registerEnd = mobileSource.indexOf('async createVehicle', registerStart);
-    const selectionStart = mobileSource.indexOf('async setActiveVehicle');
-    const selectionEnd = mobileSource.indexOf('async setElitePlusPreference', selectionStart);
-    const registrationSource = mobileSource.slice(registerStart, registerEnd);
-    const selectionSource = mobileSource.slice(selectionStart, selectionEnd);
+    const registerStart = accountRoutesSource.indexOf("router.post('/api/account/vehicles'");
+    const registerEnd = accountRoutesSource.indexOf("router.patch('/api/account/vehicles/:vehicleId/active'", registerStart);
+    const selectionStart = registerEnd;
+    const selectionEnd = accountRoutesSource.indexOf("router.delete('/api/account/vehicles/:vehicleId'", selectionStart);
+    const registrationSource = accountRoutesSource.slice(registerStart, registerEnd);
+    const selectionSource = accountRoutesSource.slice(selectionStart, selectionEnd);
 
     expect(registerStart).toBeGreaterThan(-1);
     expect(selectionStart).toBeGreaterThan(-1);
-    expect(registrationSource).not.toContain('getActiveUserVehicleByVehicle');
-    expect(registrationSource).not.toContain('Veículo já está ativo com motorista');
-    expect(selectionSource).not.toContain('VEHICLE_ACTIVE_ASSIGNMENT_PATH');
-    expect(selectionSource).not.toContain('activeDriverId');
+    expect(registrationSource).toContain('requireFirebase, requireDriverAccount, requireDriverOffline');
+    expect(registrationSource).toContain('readUserVehicles(userId)');
+    expect(registrationSource).toContain('user_vehicles/${userId}/${userVehicleId}');
+    expect(registrationSource).not.toContain('vehicle_active_assignment');
+    expect(selectionSource).toContain('requireFirebase, requireDriverAccount, requireDriverOffline');
+    expect(selectionSource).toContain('readUserVehicles(userId)');
+    expect(selectionSource).toContain('user_vehicles/${userId}/${link.userVehicleId}/isActive');
+    expect(selectionSource).not.toContain('vehicle_active_assignment');
   });
 
   it('keeps dashboard activation profile-scoped and online exclusivity in Redis', () => {

@@ -26,6 +26,10 @@ if [[ -e "src/services/TripDataService.js" ]]; then
   fail "legacy direct trip_data writer must remain removed"
 fi
 
+if [[ -e "src/services/VehicleService.js" ]]; then
+  fail "legacy direct vehicle writer must remain removed"
+fi
+
 for file in \
   "src/common-local/actions/bookingactions.js" \
   "src/common-local/bookingactions.js"; do
