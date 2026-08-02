@@ -240,7 +240,7 @@ function registerSocketCancelRideHandler({
 
                 for (const driverId of notifiedDrivers) {
                     try {
-                        await driverLockManager.releaseLock(driverId);
+                        await driverLockManager.releaseLock(driverId, bookingId);
                         dispatcher.cancelDriverTimeout(driverId, bookingId);
 
                         // ✅ NOVO: Se este motorista cancelou, adicionar à lista de exclusão permanente

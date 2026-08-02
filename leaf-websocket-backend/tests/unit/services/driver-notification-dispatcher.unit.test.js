@@ -177,8 +177,7 @@ describe('driver-notification-dispatcher timeout cleanup', () => {
     await jest.advanceTimersByTimeAsync(1000);
 
     expect(redis.del).toHaveBeenCalledWith('driver_active_notification:driver_1');
-    expect(driverLockManager.getLockedBooking).toHaveBeenCalledWith('driver_1');
-    expect(driverLockManager.releaseLock).toHaveBeenCalledWith('driver_1');
+    expect(driverLockManager.releaseLock).toHaveBeenCalledWith('driver_1', 'booking_123');
     expect(redis.hset).toHaveBeenCalledWith('booking:booking_123', expect.objectContaining({
       timeoutDriverId: 'driver_1'
     }));
@@ -229,14 +228,14 @@ describe('driver-notification-dispatcher timeout cleanup', () => {
   });
 
   it('does not release the lock when it belongs to another booking', async () => {
-    driverLockManager.getLockedBooking.mockResolvedValue('booking_other');
+    driverLockManager.releaseLock.mockResolvedValue(false);
 
     dispatcher.scheduleDriverTimeout('driver_1', 'booking_123', 1);
 
     await jest.advanceTimersByTimeAsync(1000);
 
     expect(redis.del).toHaveBeenCalledWith('driver_active_notification:driver_1');
-    expect(driverLockManager.releaseLock).not.toHaveBeenCalled();
+    expect(driverLockManager.releaseLock).toHaveBeenCalledWith('driver_1', 'booking_123');
   });
 
   it('does not notify a driver while the booking is in rejection cooldown', async () => {
@@ -472,7 +471,7 @@ describe('driver-notification-dispatcher timeout cleanup', () => {
     });
 
     expect(notified).toBe(true);
-    expect(driverLockManager.renewLock).toHaveBeenCalledWith('driver_1', 20);
+    expect(driverLockManager.renewLock).toHaveBeenCalledWith('driver_1', 20, 'booking_123');
     expect(driverLockManager.releaseLock).not.toHaveBeenCalled();
     expect(emit).toHaveBeenCalledWith('newRideRequest', expect.objectContaining({
       bookingId: 'booking_123',
@@ -524,8 +523,8 @@ describe('driver-notification-dispatcher timeout cleanup', () => {
     });
 
     expect(notified).toBe(false);
-    expect(driverLockManager.renewLock).toHaveBeenCalledWith('driver_1', 20);
-    expect(driverLockManager.releaseLock).toHaveBeenCalledWith('driver_1');
+    expect(driverLockManager.renewLock).toHaveBeenCalledWith('driver_1', 20, 'booking_123');
+    expect(driverLockManager.releaseLock).toHaveBeenCalledWith('driver_1', 'booking_123');
   });
 
   it('cancels a timeout scheduled by another dispatcher instance', async () => {

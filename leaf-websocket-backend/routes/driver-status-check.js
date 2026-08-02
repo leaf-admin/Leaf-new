@@ -161,7 +161,7 @@ router.post('/clear-all-locks', async (req, res) => {
             const lockStatus = await driverLockManager.isDriverLocked(driverId);
             
             if (lockStatus.isLocked) {
-                await driverLockManager.releaseLock(driverId);
+                await driverLockManager.releaseLock(driverId, lockStatus.bookingId);
                 results.push({
                     driverId,
                     wasLocked: true,
@@ -424,7 +424,7 @@ router.post('/:driverId/clear-lock', async (req, res) => {
         
         // Liberar lock se existir
         if (lockStatus.isLocked) {
-            await driverLockManager.releaseLock(driverId);
+            await driverLockManager.releaseLock(driverId, lockStatus.bookingId);
             return res.json({
                 success: true,
                 message: `Lock liberado para driver ${driverId}`,

@@ -414,7 +414,7 @@ function registerSocketActiveRideHandlers({
 
             // Liberar lock do motorista anterior
             if (booking.driverId) {
-                await redis.del(`driver_lock:${booking.driverId}`);
+                await require('../services/driver-lock-manager').releaseLock(booking.driverId, bookingId);
             }
 
             // Processar pagamento parcial ao motorista anterior

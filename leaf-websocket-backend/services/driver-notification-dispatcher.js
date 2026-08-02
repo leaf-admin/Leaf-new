@@ -353,8 +353,7 @@ class DriverNotificationDispatcher {
                 bookingStatePipeline.hmget(`booking:${lockBookingId}`, 'state', 'status');
             }
             const bookingStateResults = await bookingStatePipeline.exec();
-            const cleanupPipeline = this.redis.pipeline();
-            let cleanupCount = 0;
+            const staleLockReleases = [];
             let lockIndex = 0;
 
             for (const driverId of uniqueIds) {
@@ -374,8 +373,9 @@ class DriverNotificationDispatcher {
                     TERMINAL_LOCK_BOOKING_STATES.has(status);
 
                 if (staleLock) {
-                    cleanupPipeline.del(`driver_lock:${driverId}`);
-                    cleanupCount += 1;
+                    staleLockReleases.push(
+                        driverLockManager.releaseLock(driverId, lockBookingId)
+                    );
                     logger.info(
                         `🧹 [Dispatcher] Lock stale removido para driver ${driverId} (booking: ${lockBookingId}, state=${state || 'missing'}, status=${status || 'missing'})`
                     );
@@ -385,8 +385,8 @@ class DriverNotificationDispatcher {
                 lockByDriver.set(driverId, lockBookingId);
             }
 
-            if (cleanupCount > 0) {
-                await cleanupPipeline.exec();
+            if (staleLockReleases.length > 0) {
+                await Promise.all(staleLockReleases);
             }
         }
 
@@ -876,10 +876,7 @@ class DriverNotificationDispatcher {
                 return;
             }
             try {
-                const lockedBooking = await driverLockManager.getLockedBooking(driverId);
-                if (lockedBooking === bookingId) {
-                    await driverLockManager.releaseLock(driverId);
-                }
+                await driverLockManager.releaseLock(driverId, bookingId);
             } finally {
                 lockManagedForOffer = false;
             }
@@ -1036,7 +1033,8 @@ class DriverNotificationDispatcher {
 
                 let renewed = await driverLockManager.renewLock(
                     driverId,
-                    responseTimeoutSeconds
+                    responseTimeoutSeconds,
+                    bookingId
                 );
                 if (!renewed) {
                     // O lock pode ter expirado entre GET e EXPIRE. Tentar readquirir;
@@ -1049,7 +1047,7 @@ class DriverNotificationDispatcher {
                     if (!reacquired) {
                         const lockAfterRace = await driverLockManager.getLockedBooking(driverId);
                         renewed = lockAfterRace === bookingId
-                            ? await driverLockManager.renewLock(driverId, responseTimeoutSeconds)
+                            ? await driverLockManager.renewLock(driverId, responseTimeoutSeconds, bookingId)
                             : false;
                     } else {
                         renewed = true;
@@ -1589,9 +1587,8 @@ class DriverNotificationDispatcher {
                     await clearOfferReservation(this.redis, bookingId, driverId).catch(() => null);
 
                     // ✅ Liberar lock órfão desta corrida para permitir novos dispatches.
-                    const lockedBooking = await driverLockManager.getLockedBooking(driverId);
-                    if (lockedBooking === bookingId) {
-                        await driverLockManager.releaseLock(driverId);
+                    const released = await driverLockManager.releaseLock(driverId, bookingId);
+                    if (released) {
                         logger.debug(`🔓 [Dispatcher] Lock liberado por timeout para driver ${driverId} (booking: ${bookingId})`);
                     }
 

@@ -277,7 +277,7 @@ async function recoverAcceptedBooking({
         }
 
         try {
-            await redis.del(`driver_lock:${previousDriverId}`);
+            await require('./driver-lock-manager').releaseLock(previousDriverId, normalizedBookingId);
         } catch (driverLockError) {
             logStructured('warn', 'Falha ao remover driver_lock durante recovery', {
                 service: 'accepted-ride-recovery',

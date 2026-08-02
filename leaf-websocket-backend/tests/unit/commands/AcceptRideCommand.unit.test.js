@@ -188,7 +188,7 @@ describe('AcceptRideCommand', () => {
     const result = await command.execute();
 
     expect(result.success).toBe(true);
-    expect(driverLockManager.acquireLock).toHaveBeenCalledWith('driver_1', 'booking_1', 3600);
+    expect(driverLockManager.acquireLock).not.toHaveBeenCalled();
     expect(redis.hset).toHaveBeenCalledWith(
       'booking:booking_1',
       expect.objectContaining({
@@ -199,7 +199,7 @@ describe('AcceptRideCommand', () => {
     expect(clearOfferReservationsForBooking).toHaveBeenCalledWith(redis, 'booking_1');
     expect(redis.eval).toHaveBeenCalledWith(
       expect.stringContaining('ERR_KYC_VERIFICATION_IN_PROGRESS'),
-      10,
+      11,
       'booking:booking_1',
       'active_trip_by_driver:driver_1',
       'active_trip_customer_by_driver:driver_1',
@@ -210,6 +210,7 @@ describe('AcceptRideCommand', () => {
       'leaf:runtime:critical-dataset:generation',
       'offer_reservation:booking_1:driver_1',
       'driver_active_notification:driver_1',
+      'driver_lock:driver_1',
       'driver_1',
       'ACCEPTED',
       expect.any(String),
@@ -218,7 +219,8 @@ describe('AcceptRideCommand', () => {
       '21600',
       '',
       '1',
-      '0'
+      '0',
+      '3600'
     );
     expect(redis.eval.mock.calls[0][0]).toContain('identity_reverification_pending_after_trip');
     expect(redis.eval.mock.calls[0][0]).toContain('kyc_recheck_pending_after_trip');
@@ -323,7 +325,7 @@ describe('AcceptRideCommand', () => {
     expect(redisCriticalAuthorityService.assertReady).toHaveBeenCalledWith({ forceRefresh: true });
     expect(result.success).toBe(false);
     expect(result.error).toMatch(/temporariamente indisponível/i);
-    expect(driverLockManager.releaseLock).toHaveBeenCalledWith('driver_1');
+    expect(driverLockManager.releaseLock).not.toHaveBeenCalled();
     expect(writeVisibleBookingSnapshot).not.toHaveBeenCalled();
   });
 
@@ -403,7 +405,7 @@ describe('AcceptRideCommand', () => {
     expect(redis.hset).not.toHaveBeenCalled();
     expect(writeVisibleBookingSnapshot).not.toHaveBeenCalled();
     expect(clearOfferReservationsForBooking).not.toHaveBeenCalled();
-    expect(driverLockManager.releaseLock).toHaveBeenCalledWith('driver_1');
+    expect(driverLockManager.releaseLock).not.toHaveBeenCalled();
   });
 
   it('rejects a persisted identity revalidation gate before mutating acceptance state', async () => {
@@ -463,7 +465,38 @@ describe('AcceptRideCommand', () => {
     expect(result.error).toContain('já está em outra corrida');
     expect(redis.eval.mock.calls[0][0]).toContain('ERR_DRIVER_ACTIVE_TRIP_CONFLICT');
     expect(writeVisibleBookingSnapshot).not.toHaveBeenCalled();
-    expect(driverLockManager.releaseLock).toHaveBeenCalledWith('driver_1');
+    expect(driverLockManager.releaseLock).not.toHaveBeenCalled();
+  });
+
+  it('rejects a concurrent driver-lock owner inside the same acceptance CAS', async () => {
+    redis.eval.mockResolvedValue('ERR_DRIVER_LOCK_CONFLICT');
+
+    const result = await new AcceptRideCommand({
+      driverId: 'driver_1',
+      bookingId: 'booking_1'
+    }).execute();
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('já está em outra corrida');
+    expect(redis.eval.mock.calls[0][0]).toContain("redis.call('SET', driverLockKey, bookingId");
+    expect(writeVisibleBookingSnapshot).not.toHaveBeenCalled();
+  });
+
+  it('fails closed without releasing a lock whose owner could not be resolved', async () => {
+    driverLockManager.isDriverLocked.mockReset().mockResolvedValue({
+      isLocked: true,
+      bookingId: null
+    });
+
+    const result = await new AcceptRideCommand({
+      driverId: 'driver_1',
+      bookingId: 'booking_1'
+    }).execute();
+
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/validar a disponibilidade/i);
+    expect(driverLockManager.releaseLock).not.toHaveBeenCalled();
+    expect(redis.eval).not.toHaveBeenCalled();
   });
 
   it('keeps zero driver-to-pickup distance when driver is at the pickup point', async () => {

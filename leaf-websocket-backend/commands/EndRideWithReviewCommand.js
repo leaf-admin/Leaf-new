@@ -183,7 +183,7 @@ class EndRideWithReviewCommand extends Command {
 
         const lockStatus = await driverLockManager.isDriverLocked(driverId);
         if (lockStatus.isLocked && lockStatus.bookingId === this.bookingId) {
-          await driverLockManager.releaseLock(driverId);
+          await driverLockManager.releaseLock(driverId, this.bookingId);
           logger.info(`🔓 [EndRideWithReviewCommand] Lock de motorista ${driverId} liberado.`);
         }
 

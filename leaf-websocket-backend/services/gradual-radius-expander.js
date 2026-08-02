@@ -800,7 +800,7 @@ class GradualRadiusExpander {
                 if (!isPreservedDriver) {
                     const lockStatus = await driverLockManager.isDriverLocked(driverId);
                     if (lockStatus.isLocked && lockStatus.bookingId === bookingId) {
-                        await driverLockManager.releaseLock(driverId);
+                        await driverLockManager.releaseLock(driverId, bookingId);
                         logger.debug(`🔓 [GradualExpander] Lock liberado para motorista ${driverId} (corrida finalizada para busca)`);
                     }
                 }

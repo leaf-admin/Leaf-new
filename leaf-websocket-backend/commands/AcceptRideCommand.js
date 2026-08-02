@@ -124,19 +124,6 @@ class AcceptRideCommand extends Command {
         const startTime = Date.now();
         // ✅ OBSERVABILIDADE: Executar com traceId
         return await traceContext.runWithTraceId(this.traceId, async () => {
-            let driverRideLockManaged = false;
-            let bookingAcceptanceCommitted = false;
-            const releaseManagedRideLock = async () => {
-                if (!driverRideLockManaged || bookingAcceptanceCommitted) return;
-                try {
-                    const lockedBooking = await driverLockManager.getLockedBooking(this.driverId);
-                    if (lockedBooking === this.bookingId) {
-                        await driverLockManager.releaseLock(this.driverId);
-                    }
-                } finally {
-                    driverRideLockManaged = false;
-                }
-            };
             try {
                 logStructured('info', 'AcceptRideCommand.execute iniciado', {
                     driverId: this.driverId,
@@ -260,10 +247,12 @@ class AcceptRideCommand extends Command {
                         local activeTripKey = KEYS[2]
                         local activeTripCustomerKey = KEYS[3]
                         local driverKey = KEYS[4]
+                        local driverLockKey = KEYS[5]
                         local driverId = ARGV[1]
                         local bookingId = ARGV[2]
                         local activeTripTtl = ARGV[3]
                         local updatedAt = ARGV[4]
+                        local acceptedRideLockTtl = ARGV[5]
                         if redis.call('EXISTS', bookingKey) == 0 then
                             return 'ERR_NOT_FOUND'
                         end
@@ -285,36 +274,46 @@ class AcceptRideCommand extends Command {
                         if not alreadyOwned then
                             return 'NOT_ALREADY_OWNED'
                         end
+                        local currentDriverLock = redis.call('GET', driverLockKey)
+                        if currentDriverLock and tostring(currentDriverLock) ~= tostring(bookingId) then
+                            return 'NOT_ALREADY_OWNED'
+                        end
                         local customerId = redis.call('HGET', bookingKey, 'customerId')
                         local pickupLoc = redis.call('HGET', bookingKey, 'pickupLocation')
+                        local redisTime = redis.call('TIME')
+                        local nowMs = (tonumber(redisTime[1]) * 1000) + math.floor(tonumber(redisTime[2]) / 1000)
+                        local leaseUntilMs = nowMs + (tonumber(activeTripTtl) * 1000)
+                        redis.call('SET', driverLockKey, bookingId, 'EX', acceptedRideLockTtl)
                         redis.call('SET', activeTripKey, bookingId, 'EX', activeTripTtl)
                         if customerId and customerId ~= '' then
                             redis.call('SET', activeTripCustomerKey, customerId, 'EX', activeTripTtl)
                         end
                         redis.call('HSET', driverKey,
                             'activeTripId', bookingId,
-                            'activeTripUpdatedAt', updatedAt
+                            'activeTripUpdatedAt', updatedAt,
+                            '${ACTIVE_TRIP_LEASE_UNTIL_FIELD}', tostring(leaseUntilMs)
                         )
                         return 'OK_ALREADY_ACCEPTED|||' .. (customerId or '') .. '|||' .. (pickupLoc or '')
                     `;
                     const probeResult = await redis.eval(
                         idempotencyProbeScript,
-                        4,
+                        5,
                         bookingKey,
                         activeTripKey(this.driverId),
                         activeTripCustomerKey(this.driverId),
                         `driver:${this.driverId}`,
+                        `driver_lock:${this.driverId}`,
                         this.driverId,
                         this.bookingId,
                         String(ACTIVE_TRIP_TTL_SECONDS),
-                        new Date().toISOString()
+                        new Date().toISOString(),
+                        '3600'
                     );
                     if (
                         typeof probeResult === 'string' &&
                         probeResult.startsWith('OK_ALREADY_ACCEPTED|||')
                     ) {
                         atomicallyConfirmedIdempotentResult = probeResult;
-                        bookingAcceptanceCommitted = true;
                     }
                 }
 
@@ -370,6 +369,10 @@ class AcceptRideCommand extends Command {
 
                 // Garantir lock da corrida aceita (evita re-oferta até completeTrip/cancelRide).
                 const lockStatus = await driverLockManager.isDriverLocked(this.driverId);
+                if (lockStatus.isLocked && !lockStatus.bookingId) {
+                    metrics.recordCommand('AcceptRide', (Date.now() - startTime) / 1000, false);
+                    return CommandResult.failure('Não foi possível validar a disponibilidade do motorista agora.');
+                }
                 if (lockStatus.isLocked && lockStatus.bookingId !== this.bookingId) {
                     // Lock pode ficar residual após falhas/restarts; recuperar automaticamente quando stale.
                     let staleLockDetected = false;
@@ -399,7 +402,7 @@ class AcceptRideCommand extends Command {
                     }
 
                     if (staleLockDetected) {
-                        await driverLockManager.releaseLock(this.driverId);
+                        await driverLockManager.releaseLock(this.driverId, lockStatus.bookingId);
                         logStructured('warn', 'Lock stale recuperado durante AcceptRideCommand', {
                             command: 'AcceptRideCommand',
                             driverId: this.driverId,
@@ -419,45 +422,11 @@ class AcceptRideCommand extends Command {
                 }
 
                 const acceptedRideLockTtlSeconds = 3600;
-                let rideLockReady = false;
-                if (lockStatusAfterRecovery.isLocked && lockStatusAfterRecovery.bookingId === this.bookingId) {
-                    rideLockReady = await driverLockManager.renewLock(
-                        this.driverId,
-                        acceptedRideLockTtlSeconds
-                    );
-                }
-                if (!rideLockReady) {
-                    rideLockReady = await driverLockManager.acquireLock(
-                        this.driverId,
-                        this.bookingId,
-                        acceptedRideLockTtlSeconds
-                    );
-                }
-
-                if (!rideLockReady) {
-                    // Dois aceites concorrentes da mesma corrida podem observar o lock
-                    // em momentos diferentes. Só prosseguir se o lock atual for desta
-                    // corrida e seu TTL puder ser renovado de forma explícita.
-                    const lockAfterRace = await driverLockManager.getLockedBooking(this.driverId);
-                    rideLockReady = lockAfterRace === this.bookingId
-                        ? await driverLockManager.renewLock(
-                            this.driverId,
-                            acceptedRideLockTtlSeconds
-                        )
-                        : false;
-                }
-
-                if (!rideLockReady) {
-                    metrics.recordCommand('AcceptRide', (Date.now() - startTime) / 1000, false);
-                    return CommandResult.failure('Motorista já está em outra corrida');
-                }
-                driverRideLockManaged = true;
-
                 const newState = RideStateManager.STATES.ACCEPTED;
                 const updatedAt = new Date().toISOString();
                 const bookingOwnershipToken = `${this.bookingId}:${this.driverId}:${Date.now()}`;
 
-                // LUA Script Atômico para garantir lock transacional absoluto do Booking
+                // Um único CAS Lua confirma booking, driver_lock e índice de corrida ativa.
                 const luaScript = `
                     local bookingKey = KEYS[1]
                     local activeTripKey = KEYS[2]
@@ -469,6 +438,7 @@ class AcceptRideCommand extends Command {
                     local datasetGenerationKey = KEYS[8]
                     local offerReservationKey = KEYS[9]
                     local activeNotificationKey = KEYS[10]
+                    local driverLockKey = KEYS[11]
                     local driverId = ARGV[1]
                     local newState = ARGV[2]
                     local updatedAt = ARGV[3]
@@ -477,6 +447,7 @@ class AcceptRideCommand extends Command {
                     local requiredDatasetGeneration = ARGV[7]
                     local newOwnershipAuthorityAuthorized = ARGV[8] == '1'
                     local criticalAuthorityRequired = ARGV[9] == '1'
+                    local acceptedRideLockTtl = ARGV[10]
 
                     if redis.call('EXISTS', bookingKey) == 0 then
                         return 'ERR_NOT_FOUND'
@@ -540,6 +511,10 @@ class AcceptRideCommand extends Command {
                     if currentActiveTrip and tostring(currentActiveTrip) ~= tostring(bookingId) then
                         return 'ERR_DRIVER_ACTIVE_TRIP_CONFLICT'
                     end
+                    local currentDriverLock = redis.call('GET', driverLockKey)
+                    if currentDriverLock and tostring(currentDriverLock) ~= tostring(bookingId) then
+                        return 'ERR_DRIVER_LOCK_CONFLICT'
+                    end
                     local identityVerification = redis.call('GET', identityVerificationKey)
                     local identityPolicyMutation = redis.call('GET', identityPolicyMutationKey)
                     if (identityVerification or identityPolicyMutation) and (not currentActiveTrip or tostring(currentActiveTrip) ~= tostring(bookingId)) and not alreadyOwnedBySameDriver then
@@ -585,6 +560,7 @@ class AcceptRideCommand extends Command {
 
                     local function persistActiveTripIndex(customerId)
                         local leaseUntilMs = nowMs + (tonumber(activeTripTtl) * 1000)
+                        redis.call('SET', driverLockKey, bookingId, 'EX', acceptedRideLockTtl)
                         redis.call('SET', activeTripKey, bookingId, 'EX', activeTripTtl)
                         if customerId and customerId ~= '' then
                             redis.call('SET', activeTripCustomerKey, customerId, 'EX', activeTripTtl)
@@ -651,7 +627,7 @@ class AcceptRideCommand extends Command {
                 if (!redisResult) {
                     redisResult = await redis.eval(
                         luaScript,
-                        10,
+                        11,
                         bookingKey,
                         activeTripKey(this.driverId),
                         activeTripCustomerKey(this.driverId),
@@ -662,6 +638,7 @@ class AcceptRideCommand extends Command {
                         datasetGenerationKey,
                         getOfferReservationKey(this.bookingId, this.driverId),
                         activeNotificationKey,
+                        `driver_lock:${this.driverId}`,
                         this.driverId,
                         newState,
                         updatedAt,
@@ -670,7 +647,8 @@ class AcceptRideCommand extends Command {
                         String(ACTIVE_TRIP_TTL_SECONDS),
                         requiredDatasetGeneration,
                         newOwnershipAuthorityAuthorized ? '1' : '0',
-                        criticalAuthorityMode === 'redis_noeviction' ? '1' : '0'
+                        criticalAuthorityMode === 'redis_noeviction' ? '1' : '0',
+                        String(acceptedRideLockTtlSeconds)
                     );
                 }
 
@@ -688,7 +666,6 @@ class AcceptRideCommand extends Command {
                         currentState: currentStateUpper || null,
                         currentStatus: currentStatusUpper || null
                     });
-                    await releaseManagedRideLock().catch(() => null);
                     metrics.recordCommand('AcceptRide', (Date.now() - startTime) / 1000, false);
                     if (redisResult === 'ERR_NOT_FOUND') {
                         return CommandResult.failure('Corrida não encontrada');
@@ -716,16 +693,14 @@ class AcceptRideCommand extends Command {
                     if (redisResult === 'ERR_DRIVER_NOT_DISPATCH_ELIGIBLE') {
                         return CommandResult.failure('Motorista não está elegível para receber esta corrida.');
                     }
-                    if (redisResult === 'ERR_DRIVER_ACTIVE_TRIP_CONFLICT') {
+                    if (
+                        redisResult === 'ERR_DRIVER_ACTIVE_TRIP_CONFLICT'
+                        || redisResult === 'ERR_DRIVER_LOCK_CONFLICT'
+                    ) {
                         return CommandResult.failure('Motorista já está em outra corrida');
                     }
                     return CommandResult.failure(`A corrida já foi aceita por outro motorista ou não está mais disponível.`);
                 }
-
-                // A partir daqui a corrida já estava ou acabou de ser aceita no Redis.
-                // Falhas de enriquecimento/persistência secundária não devem liberar
-                // o lock de uma corrida efetivamente comprometida.
-                bookingAcceptanceCommitted = true;
 
                 const alreadyAcceptedBySameDriver =
                     typeof redisResult === 'string' &&
@@ -904,7 +879,6 @@ class AcceptRideCommand extends Command {
                 });
 
             } catch (error) {
-                await releaseManagedRideLock().catch(() => null);
                 logStructured('error', 'AcceptRideCommand falhou', {
                     driverId: this.driverId,
                     bookingId: this.bookingId,
