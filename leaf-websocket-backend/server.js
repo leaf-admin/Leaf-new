@@ -88,6 +88,7 @@ const {
     driverMatchesRidePreferences
 } = require('./services/ride-dispatch-preference-service');
 const driverEligibilityService = require('./services/driver-eligibility-service');
+const subscriptionOnlineGateService = require('./services/subscription-online-gate-service');
 // =========================================================================================
 
 // ==================== IMPORTAÇÕES REFATORAÇÃO: COMMANDS E LISTENERS ====================
@@ -496,89 +497,7 @@ function parseBookingLocation(rawValue) {
 }
 
 async function enforceSubscriptionForOnline(driverId) {
-    if (!driverId) {
-        return {
-            allowed: false,
-            reason: 'driverId ausente',
-            code: 'driverIdMissing'
-        };
-    }
-
-    if (process.env.SUBSCRIPTION_ONLINE_GATE_ENABLED === 'false') {
-        return {
-            allowed: true,
-            reason: 'Gate de assinatura desabilitado',
-            code: 'subscriptionGateDisabled'
-        };
-    }
-
-    try {
-        const db = firebaseConfig.getRealtimeDB();
-        if (!db) {
-            return {
-                allowed: true,
-                reason: 'Realtime DB indisponível (fail-open)',
-                code: 'subscriptionCheckSkipped'
-            };
-        }
-
-        const [userSnapshot, subscriptionSnapshot] = await Promise.all([
-            db.ref(`users/${driverId}`).once('value'),
-            db.ref(`subscriptions/${driverId}`).once('value')
-        ]);
-
-        const userData = userSnapshot.val() || {};
-        const subscriptionData = subscriptionSnapshot.val() || {};
-
-        const billingStatus = String(userData.billing_status || userData.billingStatus || '').toLowerCase();
-        const subscriptionStatus = String(subscriptionData.status || userData.subscriptionStatus || '').toLowerCase();
-        const pendingFeeCents = Number(subscriptionData.pendingFeeCents || userData.subscription_pending_fee_cents || 0);
-        const gracePeriodEndsAtRaw = subscriptionData.gracePeriodEndsAt || userData.subscription_grace_period_ends_at || null;
-        const gracePeriodEndsAtTs = gracePeriodEndsAtRaw ? Date.parse(gracePeriodEndsAtRaw) : Number.NaN;
-        const gracePeriodExpired = Number.isFinite(gracePeriodEndsAtTs) ? gracePeriodEndsAtTs < Date.now() : false;
-        const blockAfterGraceEnabled =
-            String(process.env.SUBSCRIPTION_BLOCK_ON_GRACE_EXPIRY || 'false').toLowerCase() === 'true';
-
-        const statusBlocked = subscriptionStatus === 'blocked' || subscriptionStatus === 'cancelled' || billingStatus === 'suspended';
-        const blockedAfterGrace = blockAfterGraceEnabled && subscriptionStatus === 'grace_period' && gracePeriodExpired;
-
-        if (statusBlocked || blockedAfterGrace) {
-            return {
-                allowed: false,
-                reason: 'Assinatura bloqueada para ficar online',
-                code: 'subscriptionBlocked',
-                details: {
-                    billingStatus,
-                    subscriptionStatus,
-                    pendingFeeCents,
-                    gracePeriodEndsAt: gracePeriodEndsAtRaw || null
-                }
-            };
-        }
-
-        return {
-            allowed: true,
-            reason: 'Assinatura válida',
-            code: 'subscriptionActive',
-            details: {
-                billingStatus: billingStatus || 'active',
-                subscriptionStatus: subscriptionStatus || 'active',
-                pendingFeeCents
-            }
-        };
-    } catch (error) {
-        logStructured('warn', 'Falha no gate de assinatura (fail-open)', {
-            service: 'server',
-            operation: 'enforceSubscriptionForOnline',
-            driverId,
-            error: error.message
-        });
-        return {
-            allowed: true,
-            reason: 'Falha ao validar assinatura (fail-open)',
-            code: 'subscriptionCheckFailed'
-        };
-    }
+    return subscriptionOnlineGateService.enforce(driverId);
 }
 
 async function enforceDailyKYCForOnline(driverId) {

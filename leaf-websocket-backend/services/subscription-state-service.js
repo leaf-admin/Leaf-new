@@ -4,6 +4,8 @@ const driverSubscriptionService = require('./driver-subscription-service');
 const { logStructured } = require('../utils/logger');
 
 const COLLECTION = 'subscriptions';
+const GATE_CACHE_PREFIX = 'subscription:online-gate:v1:';
+const DEFAULT_GATE_CACHE_TTL_SECONDS = 60;
 
 function cleanObject(value) {
   if (Array.isArray(value)) {
@@ -25,7 +27,30 @@ class SubscriptionStateService {
   }
 
   getRealtimeDB() {
-    return firebaseConfig?.getRealtimeDB?.() || (admin.apps.length > 0 ? admin.database() : null);
+    try {
+      return firebaseConfig?.getRealtimeDB?.() || (admin.apps.length > 0 ? admin.database() : null);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  getRedis() {
+    try {
+      return require('../utils/redis-pool').getConnection();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  gateCacheKey(driverId) {
+    return `${GATE_CACHE_PREFIX}${driverId}`;
+  }
+
+  gateCacheTtlSeconds() {
+    const configured = Number.parseInt(process.env.SUBSCRIPTION_GATE_CACHE_TTL_SECONDS || '', 10);
+    return Number.isFinite(configured) && configured >= 5
+      ? Math.min(configured, 3600)
+      : DEFAULT_GATE_CACHE_TTL_SECONDS;
   }
 
   nowIso() {
@@ -76,6 +101,77 @@ class SubscriptionStateService {
     return 'active';
   }
 
+  buildGateSnapshot(driverId, subscription = {}, userData = {}, authoritySource = 'firestore') {
+    return cleanObject({
+      driverId,
+      subscriptionStatus: this.normalizeStatus(
+        subscription.status || userData.subscriptionStatus,
+        'active'
+      ),
+      billingStatus: this.deriveBillingStatus(subscription, userData),
+      pendingFeeCents: Math.max(
+        0,
+        Number(subscription.pendingFeeCents || userData.subscription_pending_fee_cents || 0) || 0
+      ),
+      gracePeriodEndsAt: subscription.gracePeriodEndsAt || userData.subscription_grace_period_ends_at || null,
+      authoritySource,
+      cachedAt: this.nowIso()
+    });
+  }
+
+  async readGateCache(driverId, { redis } = {}) {
+    const redisClient = redis || this.getRedis();
+    if (!redisClient?.get) return null;
+
+    try {
+      const raw = await redisClient.get(this.gateCacheKey(driverId));
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      if (!parsed || parsed.driverId !== driverId || !parsed.subscriptionStatus || !parsed.billingStatus) {
+        throw new Error('snapshot de assinatura inválido');
+      }
+      const cachedAtMs = Date.parse(parsed.cachedAt || '');
+      const cacheAgeMs = Date.now() - cachedAtMs;
+      if (
+        !Number.isFinite(cachedAtMs)
+        || cacheAgeMs < -5000
+        || cacheAgeMs > (this.gateCacheTtlSeconds() * 1000)
+      ) {
+        throw new Error('snapshot de assinatura expirado');
+      }
+      return { ...parsed, source: 'redis_cache' };
+    } catch (error) {
+      logStructured('warn', 'Cache Redis de assinatura indisponível ou inválido', {
+        service: 'subscription-state-service',
+        driverId,
+        error: error.message
+      });
+      return null;
+    }
+  }
+
+  async writeGateCache(driverId, subscription, userData = {}, { redis, authoritySource = 'firestore' } = {}) {
+    const redisClient = redis || this.getRedis();
+    const snapshot = this.buildGateSnapshot(driverId, subscription, userData, authoritySource);
+    if (!redisClient?.set) return snapshot;
+
+    try {
+      await redisClient.set(
+        this.gateCacheKey(driverId),
+        JSON.stringify(snapshot),
+        'EX',
+        this.gateCacheTtlSeconds()
+      );
+    } catch (error) {
+      logStructured('warn', 'Falha ao atualizar cache Redis de assinatura', {
+        service: 'subscription-state-service',
+        driverId,
+        error: error.message
+      });
+    }
+    return snapshot;
+  }
+
   buildUserShadowPatch(subscription = {}, userData = {}) {
     const subscriptionStatus = this.normalizeStatus(
       subscription.status || userData.subscriptionStatus,
@@ -117,7 +213,7 @@ class SubscriptionStateService {
     return cleanObject(patch);
   }
 
-  async loadLegacyState(driverId, { db } = {}) {
+  async loadRtdbMigrationSource(driverId, { db } = {}) {
     const realtimeDb = db || this.getRealtimeDB();
     if (!realtimeDb || !driverId) {
       return { subscription: {}, userData: {} };
@@ -139,23 +235,10 @@ class SubscriptionStateService {
       return { exists: false, source: 'none', subscription: {}, userData: {} };
     }
 
-    const realtimeDb = db || this.getRealtimeDB();
     const firestoreInstance = firestore || this.getFirestore();
-    let userData = {};
-
-    if (realtimeDb) {
-      const userSnapshot = await realtimeDb.ref(`users/${driverId}`).once('value').catch(() => null);
-      userData = userSnapshot?.val?.() || {};
-    }
 
     if (!firestoreInstance) {
-      const legacy = await this.loadLegacyState(driverId, { db: realtimeDb });
-      return {
-        exists: Object.keys(legacy.subscription || {}).length > 0,
-        source: 'rtdb',
-        subscription: cleanObject({ ...legacy.subscription, driverId }),
-        userData: legacy.userData || userData || {}
-      };
+      throw new Error('Firestore indisponível para autoridade de assinatura');
     }
 
     const docRef = firestoreInstance.collection(COLLECTION).doc(driverId);
@@ -165,17 +248,22 @@ class SubscriptionStateService {
         exists: true,
         source: 'firestore',
         subscription: cleanObject({ ...(docSnapshot.data() || {}), driverId }),
-        userData: userData || {}
+        userData: {}
       };
     }
 
-    const legacy = await this.loadLegacyState(driverId, { db: realtimeDb });
-    const legacySubscription = cleanObject({ ...(legacy.subscription || {}), driverId });
-    const exists = Object.keys(legacySubscription).length > 1 || Boolean(legacySubscription.driverId && legacy.subscription && Object.keys(legacy.subscription).length > 0);
+    const realtimeDb = db || this.getRealtimeDB();
+    const rtdbState = await this.loadRtdbMigrationSource(driverId, { db: realtimeDb });
+    const migratedSubscription = cleanObject({ ...(rtdbState.subscription || {}), driverId });
+    const exists = Object.keys(migratedSubscription).length > 1 || Boolean(
+      migratedSubscription.driverId
+      && rtdbState.subscription
+      && Object.keys(rtdbState.subscription).length > 0
+    );
 
     if (exists && syncIfMissing) {
       await docRef.set({
-        ...legacySubscription,
+        ...migratedSubscription,
         migratedFrom: 'rtdb',
         syncedAt: admin.firestore.FieldValue.serverTimestamp()
       }, { merge: true });
@@ -184,9 +272,39 @@ class SubscriptionStateService {
     return {
       exists,
       source: exists ? 'rtdb' : 'none',
-      subscription: legacySubscription,
-      userData: legacy.userData || userData || {}
+      subscription: migratedSubscription,
+      userData: rtdbState.userData || {}
     };
+  }
+
+  async getGateState(driverId, { db, firestore, redis, bypassCache = false } = {}) {
+    if (!driverId) {
+      throw new Error('driverId ausente para gate de assinatura');
+    }
+
+    if (!bypassCache) {
+      const cached = await this.readGateCache(driverId, { redis });
+      if (cached) return cached;
+    }
+
+    const state = await this.getState(driverId, {
+      db,
+      firestore,
+      syncIfMissing: true
+    });
+    const migrated = state.source === 'rtdb';
+    const authoritativeUserData = migrated ? (state.userData || {}) : {};
+    const snapshot = await this.writeGateCache(
+      driverId,
+      state.subscription || {},
+      authoritativeUserData,
+      {
+        redis,
+        authoritySource: migrated ? 'firestore_migrated' : 'firestore'
+      }
+    );
+
+    return { ...snapshot, source: migrated ? 'firestore_migrated' : 'firestore' };
   }
 
   async syncMirrors(driverId, subscription, { db, userData, syncReadModel = true } = {}) {
@@ -217,75 +335,26 @@ class SubscriptionStateService {
     }
   }
 
-  async legacyTransaction(driverId, updater, { db, syncReadModel = true } = {}) {
-    const realtimeDb = db || this.getRealtimeDB();
-    if (!realtimeDb) {
-      return { success: false, error: 'Realtime DB não disponível' };
-    }
-
-    const { userData } = await this.loadLegacyState(driverId, { db: realtimeDb });
-    const subscriptionRef = realtimeDb.ref(`subscriptions/${driverId}`);
-    let committedSubscription = null;
-
-    const txResult = await subscriptionRef.transaction((current) => {
-      const base = cleanObject(current || {});
-      const next = updater({ ...base }) || base;
-      committedSubscription = cleanObject({
-        ...base,
-        ...next,
-        driverId,
-        updatedAt: next?.updatedAt || this.nowIso(),
-        createdAt: base.createdAt || next?.createdAt || userData?.createdAt || this.nowIso()
-      });
-      return committedSubscription;
-    });
-
-    if (!txResult.committed) {
-      return { success: false, error: 'Falha ao atualizar assinatura' };
-    }
-
-    committedSubscription = cleanObject({ ...(txResult.snapshot.val() || {}), driverId });
-    const shadowPatch = this.buildUserShadowPatch(committedSubscription, userData || {});
-    if (Object.keys(shadowPatch).length > 0) {
-      await realtimeDb.ref(`users/${driverId}`).update(shadowPatch);
-    }
-
-    if (syncReadModel) {
-      try {
-        await driverSubscriptionService.syncDriverSubscription(driverId, { db: realtimeDb });
-      } catch (error) {
-        logStructured('warn', 'Falha ao sincronizar read-model de subscription via fallback legado', {
-          service: 'subscription-state-service',
-          driverId,
-          error: error.message
-        });
-      }
-    }
-
-    return {
-      success: true,
-      subscription: committedSubscription,
-      billingStatus: this.deriveBillingStatus(committedSubscription, userData || {})
-    };
-  }
-
   async runTransaction(driverId, updater, { db, firestore, syncReadModel = true } = {}) {
     const firestoreInstance = firestore || this.getFirestore();
     if (!firestoreInstance) {
-      return this.legacyTransaction(driverId, updater, { db, syncReadModel });
+      return { success: false, error: 'Firestore indisponível para autoridade de assinatura' };
     }
 
     const realtimeDb = db || this.getRealtimeDB();
-    const { subscription: seedSubscription, userData } = await this.getState(driverId, {
-      db: realtimeDb,
-      firestore: firestoreInstance,
-      syncIfMissing: true
-    });
-
     const docRef = firestoreInstance.collection(COLLECTION).doc(driverId);
     let committedSubscription = null;
+    let userData = {};
 
     try {
+      const seedState = await this.getState(driverId, {
+        db: realtimeDb,
+        firestore: firestoreInstance,
+        syncIfMissing: true
+      });
+      const seedSubscription = seedState.subscription || {};
+      userData = seedState.source === 'rtdb' ? (seedState.userData || {}) : {};
+
       await firestoreInstance.runTransaction(async (transaction) => {
         const docSnapshot = await transaction.get(docRef);
         const base = cleanObject(docSnapshot.exists ? (docSnapshot.data() || {}) : (seedSubscription || {}));
@@ -304,19 +373,31 @@ class SubscriptionStateService {
         }, { merge: true });
       });
     } catch (error) {
-      logStructured('warn', 'Falha em transação Firestore de subscription; usando fallback legado', {
+      logStructured('warn', 'Falha em transação Firestore de subscription', {
         service: 'subscription-state-service',
         driverId,
         error: error.message
       });
-      return this.legacyTransaction(driverId, updater, { db: realtimeDb, syncReadModel });
+      return { success: false, error: 'Falha na autoridade Firestore de assinatura' };
     }
 
-    await this.syncMirrors(driverId, committedSubscription, {
-      db: realtimeDb,
-      userData,
-      syncReadModel
+    await this.writeGateCache(driverId, committedSubscription, {}, {
+      authoritySource: 'firestore'
     });
+
+    try {
+      await this.syncMirrors(driverId, committedSubscription, {
+        db: realtimeDb,
+        userData,
+        syncReadModel
+      });
+    } catch (error) {
+      logStructured('warn', 'Autoridade Firestore confirmada; espelho RTDB de assinatura pendente', {
+        service: 'subscription-state-service',
+        driverId,
+        error: error.message
+      });
+    }
 
     return {
       success: true,
@@ -326,49 +407,42 @@ class SubscriptionStateService {
   }
 
   async getBillingData(driverId, { db, firestore } = {}) {
-    const defaultResult = {
-      pendingFeeCents: 0,
-      subscriptionStatus: 'active',
-      billingStatus: 'active',
-      collectionMode: 'withdrawal',
-      dailyFeeCents: 0,
-      waveId: null
-    };
-
     try {
-      const { subscription, userData } = await this.getState(driverId, {
+      const { source, subscription, userData } = await this.getState(driverId, {
         db,
         firestore,
         syncIfMissing: true
       });
+      const authoritativeUserData = source === 'rtdb' ? (userData || {}) : {};
 
       return {
+        authorityAvailable: true,
         pendingFeeCents: Math.max(
           0,
-          Number(subscription.pendingFeeCents || userData.subscription_pending_fee_cents || 0) || 0
+          Number(subscription.pendingFeeCents || authoritativeUserData.subscription_pending_fee_cents || 0) || 0
         ),
         subscriptionStatus: this.normalizeStatus(
-          subscription.status || userData.subscriptionStatus,
+          subscription.status || authoritativeUserData.subscriptionStatus,
           'active'
         ),
-        billingStatus: this.deriveBillingStatus(subscription, userData || {}),
+        billingStatus: this.deriveBillingStatus(subscription, authoritativeUserData),
         collectionMode: this.normalizeCollectionMode(
-          subscription.collectionMode || subscription.billingCollectionMode || userData.subscription_collection_mode,
+          subscription.collectionMode || subscription.billingCollectionMode || authoritativeUserData.subscription_collection_mode,
           'withdrawal'
         ),
         dailyFeeCents: Math.max(
           0,
           Number(subscription.dailyFeeCents || subscription.dailyFeeOverrideCents || 0) || 0
         ),
-        waveId: subscription.waveId || userData.subscription_wave_id || null
+        waveId: subscription.waveId || authoritativeUserData.subscription_wave_id || null
       };
     } catch (error) {
-      logStructured('warn', 'Falha ao obter dados modernos de assinatura', {
+      logStructured('warn', 'Falha ao obter autoridade de assinatura', {
         service: 'subscription-state-service',
         driverId,
         error: error.message
       });
-      return defaultResult;
+      throw error;
     }
   }
 
@@ -422,3 +496,4 @@ class SubscriptionStateService {
 }
 
 module.exports = new SubscriptionStateService();
+module.exports.SubscriptionStateService = SubscriptionStateService;

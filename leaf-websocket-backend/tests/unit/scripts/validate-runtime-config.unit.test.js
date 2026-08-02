@@ -128,6 +128,35 @@ describe('validate-runtime-config Woovi webhook production gates', () => {
     });
   });
 
+  it('blocks disabling the commercial subscription gate in production', () => {
+    const result = runValidator({
+      ...baseProdEnv,
+      SUBSCRIPTION_ONLINE_GATE_ENABLED: 'false'
+    });
+
+    expect(result.status).toBe(1);
+    expect(result.report.summary.blockers).toContain(
+      'SUBSCRIPTION_ONLINE_GATE_ENABLED=false bloqueado em produção'
+    );
+    expect(result.report.diagnostics.subscriptionAuthority).toMatchObject({
+      source: 'firestore',
+      cache: 'redis',
+      unavailablePolicy: 'fail_closed'
+    });
+  });
+
+  it('blocks an unsafe subscription gate cache TTL in production', () => {
+    const result = runValidator({
+      ...baseProdEnv,
+      SUBSCRIPTION_GATE_CACHE_TTL_SECONDS: '7200'
+    });
+
+    expect(result.status).toBe(1);
+    expect(result.report.summary.blockers).toContain(
+      'SUBSCRIPTION_GATE_CACHE_TTL_SECONDS deve estar entre 5 e 3600 em produção'
+    );
+  });
+
   it('blocks a pilot without cohorts, polygon, runtime version and strict KYC', () => {
     const result = runValidator({
       ...baseProdEnv,
