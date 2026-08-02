@@ -281,7 +281,7 @@ describe('CompleteTripCommand', () => {
     const result = await command.execute();
 
     expect(result.success).toBe(true);
-    expect(driverLockManager.releaseLock).toHaveBeenCalledWith('driver_1');
+    expect(driverLockManager.releaseLock).toHaveBeenCalledWith('driver_1', 'booking_1');
     expect(RideStateManager.updateBookingState).toHaveBeenCalledWith(
       redis,
       'booking_1',

@@ -11,9 +11,9 @@ const redisPool = require('../utils/redis-pool');
 const { logger } = require('../utils/logger');
 const RideStateManager = require('./ride-state-manager');
 
-function normalizeBookingState(value) {
-    return String(value || '').trim().toUpperCase();
-}
+const TERMINAL_LOCK_STATE_CHECK_LUA = Array.from(RideStateManager.TERMINAL_STATE_ALIASES)
+    .map((state) => `state == '${state}' or status == '${state}'`)
+    .join(' or ');
 
 class DriverLockManager {
     constructor() {
@@ -61,16 +61,32 @@ class DriverLockManager {
     /**
      * Liberar lock de um motorista
      * @param {string} driverId - ID do motorista
+     * @param {string|null} expectedBookingId - owner esperado; evita apagar lock substituído
      * @returns {Promise<boolean>} true se lock foi liberado com sucesso
      */
-    async releaseLock(driverId) {
+    async releaseLock(driverId, expectedBookingId = null) {
         try {
+            if (!expectedBookingId && process.env.NODE_ENV === 'production') {
+                logger.error(`❌ Liberação não vinculada de driver_lock bloqueada em produção (${driverId})`);
+                return false;
+            }
             const lockKey = `driver_lock:${driverId}`;
-            const result = await this.redis.del(lockKey);
+            const result = await this.redis.eval(
+                `local current = redis.call('GET', KEYS[1])
+                if not current then return 0 end
+                if ARGV[1] ~= '' and tostring(current) ~= tostring(ARGV[1]) then return -1 end
+                return redis.call('DEL', KEYS[1])`,
+                1,
+                lockKey,
+                expectedBookingId ? String(expectedBookingId) : ''
+            );
             
-            if (result > 0) {
+            if (Number(result) > 0) {
                 logger.debug(`🔓 Lock liberado para driver ${driverId}`);
                 return true;
+            } else if (Number(result) === -1) {
+                logger.warn(`⚠️ Lock de ${driverId} não liberado: ownership mudou para outra corrida`);
+                return false;
             } else {
                 logger.debug(`⚠️ Lock não encontrado para driver ${driverId} (já estava liberado?)`);
                 return false;
@@ -89,31 +105,33 @@ class DriverLockManager {
     async isDriverLocked(driverId) {
         try {
             const lockKey = `driver_lock:${driverId}`;
-            const bookingId = await this.redis.get(lockKey);
+            const result = await this.redis.eval(
+                `local current = redis.call('GET', KEYS[1])
+                if not current then return {0, ''} end
+                local bookingKey = 'booking:' .. tostring(current)
+                local state = string.upper(tostring(redis.call('HGET', bookingKey, 'state') or ''))
+                local status = string.upper(tostring(redis.call('HGET', bookingKey, 'status') or ''))
+                local stale = (state == '' and status == '') or ${TERMINAL_LOCK_STATE_CHECK_LUA}
+                if stale then
+                    redis.call('DEL', KEYS[1])
+                    return {2, current}
+                end
+                return {1, current}`,
+                1,
+                lockKey
+            );
+            const statusCode = Number(Array.isArray(result) ? result[0] : 0);
+            const bookingId = Array.isArray(result) ? result[1] : null;
 
-            if (!bookingId) {
+            if (statusCode === 0 || !bookingId) {
                 return {
                     isLocked: false,
                     bookingId: null
                 };
             }
 
-            const [bookingStateRaw, bookingStatusRaw] = await this.redis.hmget(
-                `booking:${bookingId}`,
-                'state',
-                'status'
-            );
-            const bookingState = normalizeBookingState(bookingStateRaw);
-            const bookingStatus = normalizeBookingState(bookingStatusRaw);
-            const staleLockDetected = (
-                (!bookingState && !bookingStatus) ||
-                RideStateManager.isTerminalStateValue(bookingState) ||
-                RideStateManager.isTerminalStateValue(bookingStatus)
-            );
-
-            if (staleLockDetected) {
-                await this.redis.del(lockKey);
-                logger.warn(`⚠️ Lock stale auto-liberado para driver ${driverId} (booking: ${bookingId}, state: ${bookingState || bookingStatus || 'MISSING'})`);
+            if (statusCode === 2) {
+                logger.warn(`⚠️ Lock stale auto-liberado para driver ${driverId} (booking: ${bookingId})`);
                 return {
                     isLocked: false,
                     bookingId: null,
@@ -124,7 +142,7 @@ class DriverLockManager {
 
             return {
                 isLocked: true,
-                bookingId: bookingId
+                bookingId: String(bookingId)
             };
         } catch (error) {
             logger.error(`❌ Erro ao verificar lock do driver ${driverId}:`, error);
@@ -141,17 +159,33 @@ class DriverLockManager {
      * Útil quando motorista está processando resposta
      * @param {string} driverId - ID do motorista
      * @param {number} ttl - Novo TTL em segundos
+     * @param {string|null} expectedBookingId - owner esperado; evita renovar lock substituído
      * @returns {Promise<boolean>} true se TTL foi renovado
      */
-    async renewLock(driverId, ttl = this.defaultTTL) {
+    async renewLock(driverId, ttl = this.defaultTTL, expectedBookingId = null) {
         try {
+            if (!expectedBookingId && process.env.NODE_ENV === 'production') {
+                logger.error(`❌ Renovação não vinculada de driver_lock bloqueada em produção (${driverId})`);
+                return false;
+            }
             const lockKey = `driver_lock:${driverId}`;
-            const exists = await this.redis.exists(lockKey);
+            const result = await this.redis.eval(
+                `local current = redis.call('GET', KEYS[1])
+                if not current then return 0 end
+                if ARGV[1] ~= '' and tostring(current) ~= tostring(ARGV[1]) then return -1 end
+                return redis.call('EXPIRE', KEYS[1], ARGV[2])`,
+                1,
+                lockKey,
+                expectedBookingId ? String(expectedBookingId) : '',
+                String(ttl)
+            );
             
-            if (exists) {
-                await this.redis.expire(lockKey, ttl);
+            if (Number(result) === 1) {
                 logger.debug(`⏰ TTL renovado para driver ${driverId} (${ttl}s)`);
                 return true;
+            } else if (Number(result) === -1) {
+                logger.warn(`⚠️ Lock de ${driverId} não renovado: ownership mudou para outra corrida`);
+                return false;
             } else {
                 logger.debug(`⚠️ Lock não existe para driver ${driverId} (não pode renovar)`);
                 return false;

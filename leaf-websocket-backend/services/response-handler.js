@@ -260,7 +260,7 @@ class ResponseHandler {
                     return { success: false, error: 'Motorista já está ocupado com outra corrida' };
                 }
                 // Lock pertence a esta corrida (recebido na notificação), renova para a duração da corrida (ex: 1 hora)
-                await driverLockManager.renewLock(driverId, 3600);
+                await driverLockManager.renewLock(driverId, 3600, bookingId);
             } else {
                 // Motorista não tinha lock (por timeout ou outro motivo), tentar adquirir novo
                 const lockAcquired = await driverLockManager.acquireLock(driverId, bookingId, 3600);
@@ -281,7 +281,7 @@ class ResponseHandler {
                 currentState === RideStateManager.STATES.MATCHED) {
                 logger.warn(`⚠️ [ResponseHandler] Corrida ${bookingId} já foi aceita por outro motorista (state: ${currentState})`);
                 // Liberar lock deste motorista
-                await driverLockManager.releaseLock(driverId);
+                await driverLockManager.releaseLock(driverId, bookingId);
                 return {
                     success: false,
                     error: 'Corrida já foi aceita por outro motorista'
@@ -772,7 +772,7 @@ class ResponseHandler {
 
             // Tentar liberar lock em caso de erro
             try {
-                await driverLockManager.releaseLock(driverId);
+                await driverLockManager.releaseLock(driverId, bookingId);
             } catch (releaseError) {
                 logger.error(`❌ [ResponseHandler] Erro ao liberar lock após falha:`, releaseError);
             }
@@ -857,7 +857,7 @@ class ResponseHandler {
             }
 
             // ✅ CORREÇÃO: Liberar lock para poder receber próxima corrida
-            await driverLockManager.releaseLock(driverId);
+            await driverLockManager.releaseLock(driverId, bookingId);
             logger.debug(`🔓 [ResponseHandler] Lock liberado para motorista ${driverId} após rejeição`);
 
             const bookingKey = `booking:${bookingId}`;
@@ -968,7 +968,7 @@ class ResponseHandler {
 
             // Tentar liberar lock mesmo em caso de erro
             try {
-                await driverLockManager.releaseLock(driverId);
+                await driverLockManager.releaseLock(driverId, bookingId);
             } catch (releaseError) {
                 logger.error(`❌ [ResponseHandler] Erro ao liberar lock após falha:`, releaseError);
             }
@@ -1378,7 +1378,7 @@ class ResponseHandler {
                     const lockStatus = await driverLockManager.isDriverLocked(driverId);
                     if (lockStatus.isLocked && lockStatus.bookingId === bookingId) {
                         // Liberar lock
-                        await driverLockManager.releaseLock(driverId);
+                        await driverLockManager.releaseLock(driverId, bookingId);
                         // Cancelar timeout
                         this.dispatcher.cancelDriverTimeout(driverId, bookingId);
                         logger.debug(`🔓 [ResponseHandler] Lock liberado para motorista ${driverId} (corrida aceita por outro)`);

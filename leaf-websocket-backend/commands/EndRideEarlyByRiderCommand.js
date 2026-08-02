@@ -154,7 +154,7 @@ class EndRideEarlyByRiderCommand extends Command {
         if (driverId) {
           const lockStatus = await driverLockManager.isDriverLocked(driverId);
           if (lockStatus.isLocked && lockStatus.bookingId === this.bookingId) {
-            await driverLockManager.releaseLock(driverId);
+            await driverLockManager.releaseLock(driverId, this.bookingId);
             logger.info(`🔓 [EndRideEarlyByRiderCommand] Lock de motorista ${driverId} liberado.`);
           }
         }

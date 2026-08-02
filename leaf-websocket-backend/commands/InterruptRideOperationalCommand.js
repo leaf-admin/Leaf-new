@@ -219,7 +219,7 @@ class InterruptRideOperationalCommand extends Command {
 
         const lockStatus = await driverLockManager.isDriverLocked(this.driverId);
         if (lockStatus.isLocked && lockStatus.bookingId === this.bookingId) {
-          await driverLockManager.releaseLock(this.driverId);
+          await driverLockManager.releaseLock(this.driverId, this.bookingId);
           logger.info(`🔓 [InterruptRideOperationalCommand] Lock de motorista ${this.driverId} liberado.`);
         }
 

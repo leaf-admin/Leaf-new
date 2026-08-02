@@ -12,6 +12,10 @@ jest.mock('../../../services/payment-dispatch-service', () => ({
   triggerDispatchAfterPayment: jest.fn(),
 }));
 
+jest.mock('../../../services/driver-lock-manager', () => ({
+  releaseLock: jest.fn(),
+}));
+
 jest.mock('../../../utils/active-trip-index', () => ({
   clearActiveTripForDriver: jest.fn(),
   resolveActiveTripForDriver: jest.fn(),
@@ -23,6 +27,7 @@ jest.mock('../../../utils/logger', () => ({
 
 const RideStateManager = require('../../../services/ride-state-manager');
 const paymentDispatchService = require('../../../services/payment-dispatch-service');
+const driverLockManager = require('../../../services/driver-lock-manager');
 const { clearActiveTripForDriver } = require('../../../utils/active-trip-index');
 const {
   recoverAcceptedBooking,
@@ -56,6 +61,7 @@ describe('accepted ride recovery service', () => {
       success: true,
     });
     clearActiveTripForDriver.mockResolvedValue(undefined);
+    driverLockManager.releaseLock.mockResolvedValue(true);
   });
 
   it('keeps a disconnected accepted ride on an explicit continuation contract for the passenger', async () => {
@@ -91,6 +97,7 @@ describe('accepted ride recovery service', () => {
         status: 'REASSIGNMENT_PENDING',
       }),
     );
+    expect(driverLockManager.releaseLock).toHaveBeenCalledWith('driver_1', 'booking_1');
     expect(redis.hset).toHaveBeenCalledWith(
       'booking:booking_1',
       expect.objectContaining({

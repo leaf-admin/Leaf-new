@@ -185,7 +185,7 @@ describe('EndRideWithReviewCommand', () => {
       'booking_1',
       expect.objectContaining({ status: 'EARLY_ENDED_REVIEW' })
     );
-    expect(driverLockManager.releaseLock).toHaveBeenCalledWith('driver_1');
+    expect(driverLockManager.releaseLock).toHaveBeenCalledWith('driver_1', 'booking_1');
     expect(clearActiveTripForDriver).toHaveBeenCalledWith(expect.anything(), 'driver_1', 'booking_1');
     expect(kycPolicyService.applyDeferredIdentityReverificationIfSafe).not.toHaveBeenCalled();
     expect(settlementService.buildEarlyEndedReviewSettlement).toHaveBeenCalled();
