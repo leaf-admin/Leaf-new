@@ -392,7 +392,11 @@ describe('WooviPaymentModal qaAutoConfirm', () => {
       jest.advanceTimersByTime(2500);
     });
 
-    expect(onClose).toHaveBeenCalled();
+    expect(onClose).toHaveBeenCalledWith({
+      reason: 'confirmed',
+      chargeId: 'charge_123',
+      rideId: 'temp_ride_123',
+    });
   });
 
   it('keeps status polling failures silent while payment remains pending', async () => {

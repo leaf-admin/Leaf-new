@@ -1151,6 +1151,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
   const connectionAutomationExecutionRef = useRef("");
   const connectionAutomationTimersRef = useRef([]);
   const directPixOpenRequestedRef = useRef(false);
+  const directPixPaymentConfirmedRef = useRef(false);
   const latestRidePreferencesRef = useRef(null);
   const pendingPaymentConfirmationRef = useRef(null);
   const paymentRecoveryAttemptedRef = useRef("");
@@ -2813,6 +2814,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
       pendingPaymentConfirmationRef.current = null;
       paymentRecoveryAttemptedRef.current = "";
       directPixOpenRequestedRef.current = false;
+      directPixPaymentConfirmedRef.current = false;
       qaAutoPixOpenedRef.current = false;
       qaAutoPixConfirmedRef.current = false;
       clearPrototypeMapRoute();
@@ -3343,6 +3345,11 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
     setPixModalVisible(false);
     setDirectPixOpening(false);
 
+    const reason = String(event?.reason || "").trim();
+    if (reason === "confirmed") {
+      return;
+    }
+
     if (preferenceModalVisible || pendingPaymentConfirmationRef.current) {
       return;
     }
@@ -3351,7 +3358,6 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
     setDirectPixReturnHomePending(false);
     setStep(QUOTE_STEP);
 
-    const reason = String(event?.reason || "").trim();
     if (reason === "generation_failed") {
       const message =
         normalizeCoverageMessage(event?.error) ||
@@ -3857,6 +3863,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
       if (confirmedChargeId) {
         lastHandledPaymentChargeIdRef.current = confirmedChargeId;
       }
+      directPixPaymentConfirmedRef.current = true;
       pendingPaymentConfirmationRef.current =
         canonicalPaymentConfirmation.paymentConfirmation || {};
       setPixModalVisible(false);
@@ -3984,6 +3991,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
 
   useEffect(() => {
     directPixOpenRequestedRef.current = false;
+    directPixPaymentConfirmedRef.current = false;
     setDirectPixOpening(shouldOpenPixOnReady);
     setDirectPixReturnHomePending(false);
   }, [routeParams.initialPricingQuote, shouldOpenPixOnReady]);
@@ -3992,7 +4000,10 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
     if (
       !shouldOpenPixOnReady ||
       isPixModalVisible ||
-      directPixReturnHomePending
+      directPixReturnHomePending ||
+      directPixPaymentConfirmedRef.current ||
+      preferenceModalVisible ||
+      submittingRide
     ) {
       return undefined;
     }
@@ -4007,14 +4018,18 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
   }, [
     directPixReturnHomePending,
     isPixModalVisible,
+    preferenceModalVisible,
     returnToCleanPassengerHome,
     shouldOpenPixOnReady,
+    submittingRide,
   ]);
 
   useEffect(() => {
     if (
       !shouldOpenPixOnReady ||
       directPixOpenRequestedRef.current ||
+      directPixPaymentConfirmedRef.current ||
+      preferenceModalVisible ||
       (step !== CONFIRM_STEP && step !== QUOTE_STEP) ||
       !canRequestRide ||
       checkingAvailability ||
@@ -4061,6 +4076,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
     navigation,
     returnToCleanPassengerHome,
     paymentQuotePending,
+    preferenceModalVisible,
     shouldOpenPixOnReady,
     step,
     submittingRide,
