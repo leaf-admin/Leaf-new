@@ -12,7 +12,7 @@ function enabledEnv(overrides = {}) {
     KYC_AWS_ADMISSION_RESULT_BURST: '20',
     KYC_AWS_ADMISSION_MAX_CONCURRENT_SESSIONS: '70',
     KYC_AWS_ADMISSION_LEASE_TTL_SECONDS: '180',
-    KYC_AWS_ADMISSION_MAX_WAIT_MS: '15000',
+    KYC_AWS_ADMISSION_MAX_WAIT_MS: '0',
     KYC_AWS_ADMISSION_RETRY_FLOOR_MS: '40',
     ...overrides
   };
@@ -98,7 +98,7 @@ describe('aws-kyc-admission-controller', () => {
         }))
     };
     const controller = new AwsKycAdmissionController({
-      env: enabledEnv(),
+      env: enabledEnv({ KYC_AWS_ADMISSION_MAX_WAIT_MS: '15000' }),
       redisProvider: () => redis,
       sleep,
       nowMs: () => clockMs
@@ -114,7 +114,7 @@ describe('aws-kyc-admission-controller', () => {
     expect(sleep).toHaveBeenCalledWith(50);
   });
 
-  test('returns a retryable capacity error after the bounded wait expires', async () => {
+  test('returns a retryable capacity error immediately without holding the request', async () => {
     let clockMs = 1000;
     const sleep = jest.fn(async (delayMs) => {
       clockMs += delayMs;
@@ -127,7 +127,7 @@ describe('aws-kyc-admission-controller', () => {
       }))
     };
     const controller = new AwsKycAdmissionController({
-      env: enabledEnv({ KYC_AWS_ADMISSION_MAX_WAIT_MS: '100' }),
+      env: enabledEnv(),
       redisProvider: () => redis,
       sleep,
       nowMs: () => clockMs
@@ -140,9 +140,9 @@ describe('aws-kyc-admission-controller', () => {
       code: 'KYC_AWS_ADMISSION_CAPACITY_EXHAUSTED',
       operation: 'create',
       reason: 'concurrency_limited',
-      retryAfterSeconds: 20
+      retryAfterSeconds: 5
     });
-    expect(sleep).toHaveBeenCalledWith(100);
+    expect(sleep).not.toHaveBeenCalled();
   });
 
   test('rate limits provider result reads independently from session concurrency', async () => {

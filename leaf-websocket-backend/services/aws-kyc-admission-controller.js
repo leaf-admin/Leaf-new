@@ -7,6 +7,8 @@ const ADMISSION_KEYS = Object.freeze({
   resultBucket: '{kyc:aws:admission}:result:bucket'
 });
 
+const PUBLIC_RETRY_AFTER_CEILING_MS = 5_000;
+
 const ACQUIRE_CREATE_LEASE_SCRIPT = `
 -- leaf_aws_liveness_admission_create_v1
 local redisTime = redis.call('TIME')
@@ -176,7 +178,7 @@ class AwsKycAdmissionController {
     this.maxWaitMs = boundedNumber(
       this.env,
       'KYC_AWS_ADMISSION_MAX_WAIT_MS',
-      15000,
+      0,
       0,
       30000,
       true
@@ -272,9 +274,12 @@ class AwsKycAdmissionController {
       const elapsedMs = Math.max(0, this.nowMs() - startedAtMs);
       const remainingMs = this.maxWaitMs - elapsedMs;
       if (remainingMs <= 0) {
-        const retryAfterMs = Math.max(
-          this.retryFloorMs,
-          Number(lastResult?.retryAfterMs || this.retryFloorMs)
+        const retryAfterMs = Math.min(
+          PUBLIC_RETRY_AFTER_CEILING_MS,
+          Math.max(
+            this.retryFloorMs,
+            Number(lastResult?.retryAfterMs || this.retryFloorMs)
+          )
         );
         throw createAdmissionError(
           'Capacidade AWS KYC temporariamente ocupada',
