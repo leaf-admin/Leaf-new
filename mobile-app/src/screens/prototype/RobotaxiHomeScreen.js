@@ -2596,23 +2596,23 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
               selectedHomeDriverPickupEtaMin > 0
               ? Math.max(1, Math.round(selectedHomeDriverPickupEtaMin))
             : pickupEta;
-        const farePresentation = resolveHomeCategoryFarePresentation({
-          isSelectedCategory,
-          quotePending: selectedHomeQuotePending,
-          backendQuoteRequired: Boolean(
-            isSelectedCategory &&
-              homeSelectedDestination?.coordinate &&
-              homeBackendQuoteKey
-          ),
-          quoteUnavailable: Boolean(
-            homeBackendQuoteError ||
-              homeRoutePreviewError ||
-              homeQuoteAutoRefreshExhausted,
-          ),
-          backendFare,
-          localFare,
-          allowLocalEstimateWhilePending: false,
-        });
+        const farePresentation = homeQuoteAutoRefreshExhausted
+          ? { fare: null, priceLabel: 'Preço expirado' }
+          : resolveHomeCategoryFarePresentation({
+              isSelectedCategory,
+              quotePending: selectedHomeQuotePending,
+              backendQuoteRequired: Boolean(
+                isSelectedCategory &&
+                  homeSelectedDestination?.coordinate &&
+                  homeBackendQuoteKey
+              ),
+              quoteUnavailable: Boolean(
+                homeBackendQuoteError || homeRoutePreviewError,
+              ),
+              backendFare,
+              localFare,
+              allowLocalEstimateWhilePending: false,
+            });
         return {
           id,
           title: rateCard.title,
