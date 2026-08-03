@@ -501,6 +501,23 @@ describe('driver-online-projection-service', () => {
     expect(methodSource).not.toMatch(/this\.redis\.zrem\([\s\S]*driver_locations_eligible/);
   });
 
+  it('keeps the recurring identity online gate on an atomic eligibility projection', () => {
+    const trustSource = fs.readFileSync(
+      path.resolve(__dirname, '../../../services/driver-identity-trust-service.js'),
+      'utf8'
+    );
+    const methodStart = trustSource.indexOf('async persistOnlineDispatchBlock(');
+    const methodEnd = trustSource.indexOf('async readCanonicalCompatibilityVerification(', methodStart);
+    const methodSource = trustSource.slice(methodStart, methodEnd);
+
+    expect(methodStart).toBeGreaterThan(-1);
+    expect(methodEnd).toBeGreaterThan(methodStart);
+    expect(methodSource).toContain('await commitDriverOnlineProjection(this.redis, {');
+    expect(methodSource).toContain("projectionScope: 'eligibility_only'");
+    expect(methodSource).toContain("dispatchEligible: 'false'");
+    expect(methodSource).not.toMatch(/this\.redis\.(hset|zrem|geoadd|sadd|srem|multi)\(/);
+  });
+
   it('serializes only defined hash fields', () => {
     expect(normalizeHashFields({
       status: 'AVAILABLE',

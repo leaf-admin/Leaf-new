@@ -3,6 +3,7 @@ const crypto = require('crypto');
 const mockClaimIdentityVerificationWindow = jest.fn();
 const mockRenewIdentityVerificationWindow = jest.fn();
 const mockReleaseIdentityVerificationWindow = jest.fn();
+const mockCommitDriverOnlineProjection = jest.fn();
 
 jest.mock('../../../utils/logger', () => ({
   logStructured: jest.fn()
@@ -58,6 +59,10 @@ jest.mock('../../../services/kyc-biometric-production-policy', () => ({
   resolveBiometricPolicy: jest.fn(() => ({ productionBiometricsEnabled: true }))
 }));
 
+jest.mock('../../../services/driver-online-projection-service', () => ({
+  commitDriverOnlineProjection: (...args) => mockCommitDriverOnlineProjection(...args)
+}));
+
 const {
   DriverIdentityTrustService,
   TRUST_TIERS,
@@ -75,6 +80,7 @@ function createRedis() {
       return 'OK';
     }),
     del: jest.fn(async (key) => (values.delete(key) ? 1 : 0)),
+    eval: jest.fn(async () => [1, -1, -1]),
     hset: jest.fn(async () => 1)
   };
 }
@@ -334,6 +340,10 @@ describe('driver-identity-trust-service', () => {
     });
     mockRenewIdentityVerificationWindow.mockReset().mockResolvedValue(true);
     mockReleaseIdentityVerificationWindow.mockReset().mockResolvedValue(true);
+    mockCommitDriverOnlineProjection.mockReset().mockResolvedValue({
+      success: true,
+      projectionScope: 'eligibility_only'
+    });
   });
 
   test('requires a live Redis authority attestation before creating a new KYC window', async () => {
@@ -468,7 +478,7 @@ describe('driver-identity-trust-service', () => {
     expect(harness.activationService.resolveDriverActivationState).not.toHaveBeenCalled();
     expect(harness.kycPolicy.requireApprovedKyc).not.toHaveBeenCalled();
     expect(harness.kycPolicy.getOrCreateStepUpChallenge).not.toHaveBeenCalled();
-    expect(harness.redis.hset).not.toHaveBeenCalled();
+    expect(mockCommitDriverOnlineProjection).not.toHaveBeenCalled();
   });
 
   test('defers the online gate when a trip starts between the first read and the atomic claim', async () => {
@@ -490,7 +500,7 @@ describe('driver-identity-trust-service', () => {
       activeTripId: 'trip-race-online'
     }));
     expect(harness.kycPolicy.getOrCreateStepUpChallenge).not.toHaveBeenCalled();
-    expect(harness.redis.hset).not.toHaveBeenCalled();
+    expect(mockCommitDriverOnlineProjection).not.toHaveBeenCalled();
   });
 
   test('does not let ACTIVE activation state bypass missing canonical evidence', async () => {
@@ -505,14 +515,20 @@ describe('driver-identity-trust-service', () => {
       challengeId: 'challenge-1',
       requirement: 'LIVENESS_REQUIRED'
     }));
-    expect(harness.redis.hset).toHaveBeenCalledWith(
-      'driver:driver-new',
+    expect(mockCommitDriverOnlineProjection).toHaveBeenCalledWith(
+      harness.redis,
       expect.objectContaining({
-        dispatchEligible: 'false',
-        dispatchEligibilityCode: 'kycRequired'
+        driverId: 'driver-new',
+        driverKey: 'driver:driver-new',
+        projectionScope: 'eligibility_only',
+        dispatchEligible: false,
+        fields: expect.objectContaining({
+          dispatchEligible: 'false',
+          dispatchEligibilityCode: 'kycRequired'
+        })
       })
     );
-    expect(harness.redis.hset.mock.invocationCallOrder[0])
+    expect(mockCommitDriverOnlineProjection.mock.invocationCallOrder[0])
       .toBeLessThan(mockReleaseIdentityVerificationWindow.mock.invocationCallOrder[0]);
   });
 
@@ -553,11 +569,15 @@ describe('driver-identity-trust-service', () => {
       dispatchBlockPersisted: true
     }));
     expect(kycPolicyService.requireApprovedKyc).not.toHaveBeenCalled();
-    expect(harness.redis.hset).toHaveBeenCalledWith(
-      'driver:driver-reverify',
+    expect(mockCommitDriverOnlineProjection).toHaveBeenCalledWith(
+      harness.redis,
       expect.objectContaining({
-        dispatchEligible: 'false',
-        dispatchEligibilityCode: 'kycRequired'
+        driverId: 'driver-reverify',
+        projectionScope: 'eligibility_only',
+        fields: expect.objectContaining({
+          dispatchEligible: 'false',
+          dispatchEligibilityCode: 'kycRequired'
+        })
       })
     );
   });
@@ -609,14 +629,18 @@ describe('driver-identity-trust-service', () => {
       code: 'KYC_CHECK_FAILED',
       dispatchBlockPersisted: true
     }));
-    expect(harness.redis.hset).toHaveBeenCalledWith(
-      'driver:driver-durable-failure',
+    expect(mockCommitDriverOnlineProjection).toHaveBeenCalledWith(
+      harness.redis,
       expect.objectContaining({
-        dispatchEligible: 'false',
-        dispatchEligibilityCode: 'KYC_CHECK_FAILED'
+        driverId: 'driver-durable-failure',
+        projectionScope: 'eligibility_only',
+        fields: expect.objectContaining({
+          dispatchEligible: 'false',
+          dispatchEligibilityCode: 'KYC_CHECK_FAILED'
+        })
       })
     );
-    expect(harness.redis.hset.mock.invocationCallOrder[0])
+    expect(mockCommitDriverOnlineProjection.mock.invocationCallOrder[0])
       .toBeLessThan(mockReleaseIdentityVerificationWindow.mock.invocationCallOrder[0]);
   });
 
@@ -651,18 +675,22 @@ describe('driver-identity-trust-service', () => {
       dispatchBlockPersisted: true
     }));
     expect(result).not.toHaveProperty('providerDormant');
-    expect(harness.redis.hset).toHaveBeenCalledWith(
-      'driver:driver-biometric-flag-disabled',
+    expect(mockCommitDriverOnlineProjection).toHaveBeenCalledWith(
+      harness.redis,
       expect.objectContaining({
-        dispatchEligible: 'false',
-        dispatchEligibilityCode: 'KYC_CHECK_FAILED'
+        driverId: 'driver-biometric-flag-disabled',
+        projectionScope: 'eligibility_only',
+        fields: expect.objectContaining({
+          dispatchEligible: 'false',
+          dispatchEligibilityCode: 'KYC_CHECK_FAILED'
+        })
       })
     );
   });
 
   test('retains the KYC window when the fail-closed dispatch seal cannot be persisted', async () => {
     const redis = createRedis();
-    redis.hset.mockRejectedValue(new Error('Redis write failed'));
+    mockCommitDriverOnlineProjection.mockRejectedValueOnce(new Error('Redis write failed'));
     const kycPolicyService = {
       requireApprovedKyc: jest.fn(async () => ({ allowed: true })),
       getStepUpChallenge: jest.fn(async () => null),
@@ -686,7 +714,7 @@ describe('driver-identity-trust-service', () => {
 
   test('never converts an explicit online denial into fail-open when its dispatch seal fails', async () => {
     const redis = createRedis();
-    redis.hset.mockRejectedValue(new Error('Redis write failed'));
+    mockCommitDriverOnlineProjection.mockRejectedValueOnce(new Error('Redis write failed'));
     const activationService = {
       resolveDriverActivationState: jest.fn(async () => ({
         state: 'KYC_PENDING',

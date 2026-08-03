@@ -13,6 +13,9 @@ const driverActivationStateService = require('./driver-activation-state-service'
 const canonicalDriverDocumentApprovalService = require('./canonical-driver-document-approval-service');
 const redisCriticalAuthorityService = require('./redis-critical-authority-service');
 const { resolveBiometricPolicy } = require('./kyc-biometric-production-policy');
+const {
+  commitDriverOnlineProjection
+} = require('./driver-online-projection-service');
 const { logStructured } = require('../utils/logger');
 const {
   resolveKycPersistenceScope,
@@ -912,7 +915,7 @@ class DriverIdentityTrustService {
   }
 
   async persistOnlineDispatchBlock(driverId, gateResult = {}) {
-    if (!this.redis || typeof this.redis.hset !== 'function') {
+    if (!this.redis || typeof this.redis.eval !== 'function') {
       const error = new Error('Redis indisponivel para selar bloqueio de dispatch do KYC');
       error.code = 'KYC_ONLINE_DISPATCH_BLOCK_PERSIST_FAILED';
       throw error;
@@ -920,12 +923,19 @@ class DriverIdentityTrustService {
 
     const checkedAt = this.now().toISOString();
     try {
-      await this.redis.hset(this.buildDriverHashKey(driverId), {
+      await commitDriverOnlineProjection(this.redis, {
         driverId,
-        dispatchEligible: 'false',
-        dispatchEligibilityCode: gateResult.code || 'KYC_REQUIRED',
-        dispatchEligibilityCheckedAt: checkedAt,
-        updatedAt: checkedAt
+        driverKey: this.buildDriverHashKey(driverId),
+        eligibleGeoKey: this.env.ELIGIBLE_DRIVER_GEO_KEY || 'driver_locations_eligible',
+        projectionScope: 'eligibility_only',
+        dispatchEligible: false,
+        fields: {
+          driverId,
+          dispatchEligible: 'false',
+          dispatchEligibilityCode: gateResult.code || 'KYC_REQUIRED',
+          dispatchEligibilityCheckedAt: checkedAt,
+          updatedAt: checkedAt
+        }
       });
       return true;
     } catch (cause) {
