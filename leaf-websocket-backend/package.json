@@ -25,7 +25,7 @@
     "test:e2e:passenger": "node ../scripts/tests/run-with-profile.cjs backend-e2e-passenger \"npx jest --config config/jest.config.js tests/e2e/backend/flows/passenger-flow.test.js\"",
     "test:e2e:driver": "node ../scripts/tests/run-with-profile.cjs backend-e2e-driver \"npx jest --config config/jest.config.js tests/e2e/backend/flows/driver-flow.test.js\"",
     "test:basic": "node test-integration.js",
-    "test:architecture": "node test-architecture.js",
+    "test:architecture": "npm run check:single-backend-runtime && npm run test:route-guards && node ../scripts/tests/run-with-profile.cjs backend-architecture \"npx jest --config config/jest.architecture.config.js --runInBand\"",
     "test:multiple-drivers": "node test-multiple-drivers.js",
     "test:optimizations": "node scripts/tests/test-optimizations.js",
     "smoke:prepare-test-users": "node scripts/tests/ensure-leaf-test-users.cjs",
