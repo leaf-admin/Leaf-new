@@ -10,6 +10,7 @@ set -euo pipefail
 #
 # Required:
 #   CONFIRM_PRODUCTION_DEPLOY=true
+#   PRODUCTION_RELEASE_SHA=<exact origin/main SHA>
 #
 # Optional:
 #   CONTABO_HOST=<host>
@@ -36,6 +37,7 @@ CONTABO_KNOWN_HOSTS_FILE="${CONTABO_KNOWN_HOSTS_FILE:-$HOME/.ssh/known_hosts}"
 VPS_USER="${VPS_USER:-root}"
 REMOTE_BACKEND_DIR="${REMOTE_BACKEND_DIR:-/opt/leaf-app}"
 CONFIRM_PRODUCTION_DEPLOY="${CONFIRM_PRODUCTION_DEPLOY:-false}"
+PRODUCTION_RELEASE_SHA="${PRODUCTION_RELEASE_SHA:-}"
 SKIP_LOCAL_TESTS="${SKIP_LOCAL_TESTS:-false}"
 VALIDATE_LOCAL_RUNTIME_CONFIG="${VALIDATE_LOCAL_RUNTIME_CONFIG:-true}"
 DEPLOY_TRACKED_PATHS="${DEPLOY_TRACKED_PATHS:-}"
@@ -79,6 +81,26 @@ if [[ -n "$(git -C "$REPO_ROOT" status --porcelain)" ]]; then
   exit 2
 fi
 
+CURRENT_BRANCH="$(git -C "$REPO_ROOT" branch --show-current)"
+RELEASE_SHA="$(git -C "$REPO_ROOT" rev-parse HEAD)"
+REMOTE_MAIN_SHA="$(git -C "$REPO_ROOT" rev-parse --verify refs/remotes/origin/main 2>/dev/null)" || {
+  echo "[deploy][error] origin/main is unavailable; refresh the remote reference first." >&2
+  exit 2
+}
+
+if [[ "$CURRENT_BRANCH" != "main" ]]; then
+  echo "[deploy][error] Production deploy must run from main." >&2
+  exit 2
+fi
+if [[ -z "$PRODUCTION_RELEASE_SHA" || "$PRODUCTION_RELEASE_SHA" != "$RELEASE_SHA" ]]; then
+  echo "[deploy][error] PRODUCTION_RELEASE_SHA must exactly match HEAD ($RELEASE_SHA)." >&2
+  exit 2
+fi
+if [[ "$RELEASE_SHA" != "$REMOTE_MAIN_SHA" ]]; then
+  echo "[deploy][error] HEAD must exactly match origin/main before deployment." >&2
+  exit 2
+fi
+
 if [[ -z "$CONTABO_HOST" ]]; then
   echo "[deploy][error] Configure CONTABO_HOST or VPS_HOST." >&2
   exit 2
@@ -115,12 +137,19 @@ SSH_OPTS=(
 RSYNC_SSH="ssh -i \"$CONTABO_KEY\" -o StrictHostKeyChecking=yes -o UserKnownHostsFile=\"$CONTABO_KNOWN_HOSTS_FILE\" -o ConnectTimeout=15"
 
 TRACKED_MANIFEST="$(mktemp)"
+RELEASE_STAGING_DIR=""
+SYNC_SOURCE_DIR="$BACKEND_DIR/"
+RSYNC_SOURCE_ARGS=(--from0 --files-from="$TRACKED_MANIFEST")
+RSYNC_DELETE_ARGS=()
 ROLLBACK_ARMED=false
 STAMP=""
 REMOTE_BACKUP_DIR=""
 
 cleanup_local() {
   rm -f "$TRACKED_MANIFEST"
+  if [[ -n "$RELEASE_STAGING_DIR" && -d "$RELEASE_STAGING_DIR" ]]; then
+    rm -rf -- "$RELEASE_STAGING_DIR"
+  fi
 }
 
 trap cleanup_local EXIT
@@ -209,13 +238,16 @@ if [[ -n "$DEPLOY_TRACKED_PATHS" ]]; then
     printf '%s\0' "$relative_path" >> "$TRACKED_MANIFEST"
   done
 else
-  git -C "$REPO_ROOT" ls-files -z -- leaf-websocket-backend |
-    while IFS= read -r -d '' tracked_path; do
-      printf '%s\0' "${tracked_path#leaf-websocket-backend/}"
-    done > "$TRACKED_MANIFEST"
+  RELEASE_STAGING_DIR="$(mktemp -d)"
+  git -C "$REPO_ROOT" archive --format=tar "$RELEASE_SHA:leaf-websocket-backend" |
+    tar -xf - -C "$RELEASE_STAGING_DIR"
+  test -f "$RELEASE_STAGING_DIR/package.json"
+  SYNC_SOURCE_DIR="$RELEASE_STAGING_DIR/"
+  RSYNC_SOURCE_ARGS=()
+  RSYNC_DELETE_ARGS=(--delete --delete-delay)
 fi
 
-if [[ ! -s "$TRACKED_MANIFEST" ]]; then
+if [[ -n "$DEPLOY_TRACKED_PATHS" && ! -s "$TRACKED_MANIFEST" ]]; then
   echo "[deploy][error] Tracked source manifest is empty." >&2
   exit 2
 fi
@@ -226,6 +258,7 @@ fi
 
 echo "[deploy] Target: $VPS_USER@$CONTABO_HOST:$REMOTE_BACKEND_DIR"
 echo "[deploy] Compose: $BASE_COMPOSE + $SCALE_COMPOSE"
+echo "[deploy] Release SHA: $RELEASE_SHA"
 
 if [[ "$SKIP_LOCAL_TESTS" != "true" ]]; then
   echo "[deploy] 1/7 Local validation"
@@ -257,6 +290,7 @@ remote "
   test -d '$REMOTE_BACKEND_DIR'
   test -f '$REMOTE_BACKEND_DIR/.env'
   command -v docker >/dev/null
+  command -v rsync >/dev/null
   docker compose version >/dev/null
   mkdir -p '$REMOTE_BACKUP_DIR'
   chmod 700 '$REMOTE_BACKUP_DIR'
@@ -433,8 +467,8 @@ echo "[deploy] Backup: $REMOTE_BACKUP_DIR"
 
 echo "[deploy] 3/7 Previewing tracked application source"
 rsync -azc --dry-run --itemize-changes \
-  --from0 \
-  --files-from="$TRACKED_MANIFEST" \
+  "${RSYNC_SOURCE_ARGS[@]}" \
+  "${RSYNC_DELETE_ARGS[@]}" \
   --exclude ".git" \
   --exclude "node_modules" \
   --exclude "logs" \
@@ -457,14 +491,15 @@ rsync -azc --dry-run --itemize-changes \
   --exclude "*.cer" \
   --exclude "ssl" \
   --exclude "certbot" \
+  --exclude "/docker-compose.yml" \
   -e "$RSYNC_SSH" \
-  "$BACKEND_DIR/" \
+  "$SYNC_SOURCE_DIR" \
   "$VPS_USER@$CONTABO_HOST:$REMOTE_BACKEND_DIR/"
 
 echo "[deploy] 3/7 Synchronizing tracked application source"
 rsync -azc --itemize-changes \
-  --from0 \
-  --files-from="$TRACKED_MANIFEST" \
+  "${RSYNC_SOURCE_ARGS[@]}" \
+  "${RSYNC_DELETE_ARGS[@]}" \
   --exclude ".git" \
   --exclude "node_modules" \
   --exclude "logs" \
@@ -487,8 +522,9 @@ rsync -azc --itemize-changes \
   --exclude "*.cer" \
   --exclude "ssl" \
   --exclude "certbot" \
+  --exclude "/docker-compose.yml" \
   -e "$RSYNC_SSH" \
-  "$BACKEND_DIR/" \
+  "$SYNC_SOURCE_DIR" \
   "$VPS_USER@$CONTABO_HOST:$REMOTE_BACKEND_DIR/"
 
 remote "
@@ -528,15 +564,18 @@ remote "
   cd '$REMOTE_BACKEND_DIR'
   compose='docker compose -f $REMOTE_BASE_COMPOSE -f $REMOTE_SCALE_COMPOSE -f $REMOTE_OPS_COMPOSE'
   if [ '$GATEWAY_ONLY_DEPLOY' = true ]; then
-    \$compose build websocket websocket-gateway-2 websocket-gateway-3
+    GIT_SHA='$RELEASE_SHA' \$compose build websocket websocket-gateway-2 websocket-gateway-3
   else
-    \$compose build \
+    GIT_SHA='$RELEASE_SHA' \$compose build \
       websocket websocket-gateway-2 websocket-gateway-3 \
       sideeffects-worker billing-worker queue-worker \
       trip-location-worker pricing-baseline-worker ride-health-monitor-worker
   fi
   candidate_image=\$(\$compose images -q websocket | head -n1)
   test -n "\$candidate_image"
+  test \"\$(docker image inspect --format '{{index .Config.Labels \"org.opencontainers.image.revision\"}}' \"\$candidate_image\")\" = '$RELEASE_SHA'
+  docker image inspect --format '{{range .Config.Env}}{{println .}}{{end}}' \"\$candidate_image\" |
+    grep -Fxq 'GIT_SHA=$RELEASE_SHA'
   docker run --rm \
     --env-file .env \
     -e ENV_FILE=/dev/null \
@@ -592,6 +631,15 @@ remote "
     return 1
   }
 
+  verify_release() {
+    container=\"\$1\"
+    actual_sha=\$(docker inspect --format '{{index .Config.Labels \"org.opencontainers.image.revision\"}}' \"\$container\")
+    test \"\$actual_sha\" = '$RELEASE_SHA'
+    docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' \"\$container\" |
+      grep -Fxq 'GIT_SHA=$RELEASE_SHA'
+    echo \"[deploy][release] \$container sha=\$actual_sha\"
+  }
+
   # Readiness dos gateways depende deste consumer. Suba-o primeiro para evitar
   # deadlock no primeiro rollout do runtime canônico.
   if [ '$GATEWAY_ONLY_DEPLOY' != true ]; then
@@ -602,14 +650,17 @@ remote "
   \$compose up -d --no-deps websocket-gateway-2
   wait_healthy websocket-gateway-2 leaf-websocket-gateway-2
   wait_ready leaf-websocket-gateway-2
+  verify_release leaf-websocket-gateway-2
 
   \$compose up -d --no-deps websocket-gateway-3
   wait_healthy websocket-gateway-3 leaf-websocket-gateway-3
   wait_ready leaf-websocket-gateway-3
+  verify_release leaf-websocket-gateway-3
 
   \$compose up -d --no-deps websocket
   wait_healthy websocket leaf-websocket
   wait_ready leaf-websocket
+  verify_release leaf-websocket
 
   docker exec leaf-nginx nginx -t
   docker exec leaf-nginx nginx -s reload
@@ -651,6 +702,10 @@ if [[ "$UPDATE_WORKERS" == "true" ]]; then
       container=\${pair#*:}
       \$compose up -d --no-deps \"\$service\"
       wait_worker \"\$container\"
+      actual_sha=\$(docker inspect --format '{{index .Config.Labels \"org.opencontainers.image.revision\"}}' \"\$container\")
+      test \"\$actual_sha\" = '$RELEASE_SHA'
+      docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' \"\$container\" |
+        grep -Fxq 'GIT_SHA=$RELEASE_SHA'
     done
   "
 else

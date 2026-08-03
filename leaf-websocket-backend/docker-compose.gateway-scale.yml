@@ -2,6 +2,8 @@ x-websocket-gateway-service: &websocket_gateway_service
   build:
     context: .
     dockerfile: Dockerfile
+    args:
+      GIT_SHA: ${GIT_SHA:-unknown}
   command: ["bash", "./scripts/runtime/start-server.sh"]
   env_file:
     - .env
@@ -373,6 +375,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        GIT_SHA: ${GIT_SHA:-unknown}
     container_name: leaf-queue-worker
     command: ["node", "workers/queue-worker-process.js"]
     env_file:
