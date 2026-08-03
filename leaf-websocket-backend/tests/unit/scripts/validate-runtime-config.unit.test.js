@@ -6,6 +6,7 @@ const validatorPath = path.join(backendRoot, 'scripts/deploy/validate-runtime-co
 const absentEnvFile = path.join(backendRoot, '.env.test-does-not-exist');
 
 function runValidator(extraEnv = {}) {
+  const recentDrillAt = new Date().toISOString();
   const result = spawnSync(process.execPath, [validatorPath], {
     cwd: backendRoot,
     env: {
@@ -13,6 +14,18 @@ function runValidator(extraEnv = {}) {
       HOME: process.env.HOME,
       ENV_FILE: absentEnvFile,
       LEAF_BROAD_LAUNCH_APPROVED: 'true',
+      REDIS_MODE: 'sentinel',
+      REDIS_SENTINELS: 'sentinel-a:26379,sentinel-b:26379,sentinel-c:26379',
+      REDIS_SENTINEL_MASTER_NAME: 'leaf-master',
+      REDIS_PASSWORD: 'redis-password',
+      REDIS_SENTINEL_PASSWORD: 'sentinel-password',
+      REDIS_HA_FAILURE_DOMAINS: 'redis-domain-a,redis-domain-b,redis-domain-c',
+      REDIS_HA_FAILOVER_DRILL_ID: 'ops-20260803-redis-001',
+      REDIS_HA_FAILOVER_DRILL_AT: recentDrillAt,
+      LEAF_EDGE_HA_MODE: 'managed_load_balancer',
+      LEAF_EDGE_HA_FAILURE_DOMAINS: 'edge-domain-a,edge-domain-b',
+      LEAF_EDGE_HA_FAILOVER_DRILL_ID: 'ops-20260803-edge-001',
+      LEAF_EDGE_HA_FAILOVER_DRILL_AT: recentDrillAt,
       ...extraEnv
     },
     encoding: 'utf8'
@@ -79,6 +92,109 @@ describe('validate-runtime-config Woovi webhook production gates', () => {
     expect(result.report.summary.blockers).toContain(
       'Produção exige perfil pilot_controlled ou LEAF_BROAD_LAUNCH_APPROVED=true após o GO formal'
     );
+  });
+
+  it('blocks broad launch while Redis remains standalone or lacks current failover evidence', () => {
+    const result = runValidator({
+      ...baseProdEnv,
+      REDIS_MODE: 'standalone',
+      REDIS_SENTINELS: '',
+      REDIS_HA_FAILURE_DOMAINS: 'redis-domain-a',
+      REDIS_HA_FAILOVER_DRILL_ID: '',
+      REDIS_HA_FAILOVER_DRILL_AT: ''
+    });
+
+    expect(result.status).toBe(1);
+    expect(result.report.summary.blockers).toContain(
+      'Lançamento amplo exige Redis Sentinel válido em 3+ domínios e drill de failover comprovado nos últimos 30 dias'
+    );
+    expect(result.report.diagnostics.productionHa.redis).toMatchObject({
+      mode: 'standalone',
+      ready: false,
+      failureDomainCount: 1,
+      uniqueFailureDomainCount: 1,
+      failoverDrill: { valid: false }
+    });
+  });
+
+  it('blocks broad launch without a redundant edge and current failover evidence', () => {
+    const result = runValidator({
+      ...baseProdEnv,
+      LEAF_EDGE_HA_MODE: 'single_nginx',
+      LEAF_EDGE_HA_FAILURE_DOMAINS: 'edge-domain-a',
+      LEAF_EDGE_HA_FAILOVER_DRILL_ID: 'old-edge-drill',
+      LEAF_EDGE_HA_FAILOVER_DRILL_AT: '2020-01-01T00:00:00.000Z'
+    });
+
+    expect(result.status).toBe(1);
+    expect(result.report.summary.blockers).toContain(
+      'Lançamento amplo exige borda com failover em 2+ domínios e drill comprovado nos últimos 30 dias'
+    );
+    expect(result.report.diagnostics.productionHa.edge).toMatchObject({
+      mode: 'single_nginx',
+      modeValid: false,
+      ready: false,
+      failureDomainCount: 1,
+      uniqueFailureDomainCount: 1,
+      failoverDrill: { timestampValid: false, valid: false }
+    });
+  });
+
+  it('rejects placeholder drill references and repeated failure domains', () => {
+    const result = runValidator({
+      ...baseProdEnv,
+      REDIS_HA_FAILURE_DOMAINS: 'redis-domain-a,redis-domain-a,redis-domain-a',
+      REDIS_HA_FAILOVER_DRILL_ID: 'change-ticket-or-run-id',
+      LEAF_EDGE_HA_FAILURE_DOMAINS: 'edge-domain-a,edge-domain-a',
+      LEAF_EDGE_HA_FAILOVER_DRILL_ID: 'placeholder'
+    });
+
+    expect(result.status).toBe(1);
+    expect(result.report.summary.blockers).toEqual(expect.arrayContaining([
+      'Lançamento amplo exige Redis Sentinel válido em 3+ domínios e drill de failover comprovado nos últimos 30 dias',
+      'Lançamento amplo exige borda com failover em 2+ domínios e drill comprovado nos últimos 30 dias'
+    ]));
+    expect(result.report.diagnostics.productionHa.redis).toMatchObject({
+      ready: false,
+      failureDomainCount: 3,
+      uniqueFailureDomainCount: 1,
+      failoverDrill: { idConfigured: true, idValid: false, valid: false }
+    });
+    expect(result.report.diagnostics.productionHa.edge).toMatchObject({
+      ready: false,
+      failureDomainCount: 2,
+      uniqueFailureDomainCount: 1,
+      failoverDrill: { idConfigured: true, idValid: false, valid: false }
+    });
+  });
+
+  it('accepts broad launch HA only with valid Sentinel, distinct domains and recent drills', () => {
+    const result = runValidator({
+      ...baseProdEnv,
+      ...strictKycProdEnv
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.report.diagnostics.productionHa).toMatchObject({
+      required: true,
+      redis: {
+        mode: 'sentinel',
+        sentinelConfigValid: true,
+        sentinelCount: 3,
+        failureDomainCount: 3,
+        uniqueFailureDomainCount: 3,
+        ready: true,
+        failoverDrill: { valid: true, maxAgeDays: 30 }
+      },
+      edge: {
+        mode: 'managed_load_balancer',
+        modeValid: true,
+        failureDomainCount: 2,
+        uniqueFailureDomainCount: 2,
+        ready: true,
+        failoverDrill: { valid: true, maxAgeDays: 30 }
+      }
+    });
   });
 
   it.each([

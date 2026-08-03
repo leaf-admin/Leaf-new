@@ -26,6 +26,7 @@ const {
 } = require('../../utils/dispatch-config');
 const { resolveLaunchProfile } = require('../../utils/pilot-launch-flags');
 const { parseAllowlist } = require('../../services/pilot-access-control-service');
+const DockerDetector = require('../../utils/docker-detector');
 
 const REQUIRED_BASE = [
   'NODE_ENV'
@@ -146,6 +147,11 @@ const APPROVED_REDIS_CRITICAL_MEMORY_THRESHOLDS = Object.freeze({
   highPercent: 75,
   criticalPercent: 85
 });
+const PRODUCTION_HA_ATTESTATION_MAX_AGE_DAYS = 30;
+const ALLOWED_EDGE_HA_MODES = new Set([
+  'managed_load_balancer',
+  'self_managed_failover'
+]);
 
 function presence(value) {
   const raw = String(value || '').trim();
@@ -187,6 +193,100 @@ function booleanDiagnostic(name, fallback = false) {
   return {
     value: readBooleanLike(raw, fallback),
     source: configured ? 'env' : 'default'
+  };
+}
+
+function resolveUniqueCsvCount(value) {
+  const entries = String(value || '')
+    .split(',')
+    .map((entry) => entry.trim().toLowerCase())
+    .filter(Boolean);
+  return {
+    count: entries.length,
+    uniqueCount: new Set(entries).size
+  };
+}
+
+function resolveHaDrillDiagnostic(idValue, atValue, nowMs = Date.now()) {
+  const rawId = String(idValue || '').trim();
+  const idConfigured = Boolean(rawId);
+  const idValid = idConfigured
+    && rawId.length >= 8
+    && !/(?:example|placeholder|replace|change-ticket-or-run-id|\btest\b|\btodo\b|\btbd\b)/i.test(rawId);
+  const rawAt = String(atValue || '').trim();
+  const atMs = Date.parse(rawAt);
+  const maxAgeMs = PRODUCTION_HA_ATTESTATION_MAX_AGE_DAYS * 24 * 60 * 60 * 1000;
+  const ageMs = nowMs - atMs;
+  const timestampValid = Number.isFinite(atMs) && ageMs >= 0 && ageMs <= maxAgeMs;
+
+  return {
+    idConfigured,
+    idValid,
+    at: Number.isFinite(atMs) ? new Date(atMs).toISOString() : '(invalid)',
+    timestampValid,
+    maxAgeDays: PRODUCTION_HA_ATTESTATION_MAX_AGE_DAYS,
+    valid: idValid && timestampValid
+  };
+}
+
+function resolveProductionHaDiagnostic({ nodeEnv, runtimeRole, launchControlDiagnostic }) {
+  const required = nodeEnv === 'production'
+    && runtimeRole === 'gateway'
+    && !launchControlDiagnostic.pilotControlled
+    && launchControlDiagnostic.broadLaunchApproved;
+  let redisMode = 'invalid';
+  let redisSentinelConfigValid = false;
+  let redisSentinelCount = 0;
+
+  try {
+    redisMode = DockerDetector.getRedisMode();
+    if (redisMode === 'sentinel') {
+      const config = DockerDetector.getRedisSentinelConfig();
+      redisSentinelCount = config.sentinels.length;
+      redisSentinelConfigValid = true;
+    }
+  } catch (_error) {
+    redisSentinelConfigValid = false;
+  }
+
+  const redisFailureDomains = resolveUniqueCsvCount(process.env.REDIS_HA_FAILURE_DOMAINS);
+  const redisFailoverDrill = resolveHaDrillDiagnostic(
+    process.env.REDIS_HA_FAILOVER_DRILL_ID,
+    process.env.REDIS_HA_FAILOVER_DRILL_AT
+  );
+  const edgeMode = String(process.env.LEAF_EDGE_HA_MODE || '').trim().toLowerCase();
+  const edgeFailureDomains = resolveUniqueCsvCount(process.env.LEAF_EDGE_HA_FAILURE_DOMAINS);
+  const edgeFailoverDrill = resolveHaDrillDiagnostic(
+    process.env.LEAF_EDGE_HA_FAILOVER_DRILL_ID,
+    process.env.LEAF_EDGE_HA_FAILOVER_DRILL_AT
+  );
+
+  return {
+    required,
+    redis: {
+      mode: redisMode,
+      sentinelConfigValid: redisSentinelConfigValid,
+      sentinelCount: redisSentinelCount,
+      failureDomainCount: redisFailureDomains.count,
+      uniqueFailureDomainCount: redisFailureDomains.uniqueCount,
+      failoverDrill: redisFailoverDrill,
+      ready: redisMode === 'sentinel'
+        && redisSentinelConfigValid
+        && redisFailureDomains.count >= 3
+        && redisFailureDomains.count === redisFailureDomains.uniqueCount
+        && redisFailoverDrill.valid
+    },
+    edge: {
+      mode: edgeMode || '(empty)',
+      modeValid: ALLOWED_EDGE_HA_MODES.has(edgeMode),
+      failureDomainCount: edgeFailureDomains.count,
+      uniqueFailureDomainCount: edgeFailureDomains.uniqueCount,
+      failoverDrill: edgeFailoverDrill,
+      ready: ALLOWED_EDGE_HA_MODES.has(edgeMode)
+        && edgeFailureDomains.count >= 2
+        && edgeFailureDomains.count === edgeFailureDomains.uniqueCount
+        && edgeFailoverDrill.valid
+    }
   };
 }
 
@@ -446,6 +546,11 @@ function main() {
   const financialPolicyApproval = resolveFinancialPolicyApproval();
   const driverSearchRadiusPolicy = resolveDriverSearchRadiusPolicy();
   const launchControlDiagnostic = resolveLaunchControlDiagnostic();
+  const productionHaDiagnostic = resolveProductionHaDiagnostic({
+    nodeEnv,
+    runtimeRole,
+    launchControlDiagnostic
+  });
 
   const missingCommon = checkRequired([
     ...REQUIRED_BASE,
@@ -784,6 +889,12 @@ function main() {
     }
     if (!launchControlDiagnostic.pilotControlled && !launchControlDiagnostic.broadLaunchApproved) {
       blockers.push('Produção exige perfil pilot_controlled ou LEAF_BROAD_LAUNCH_APPROVED=true após o GO formal');
+    }
+    if (productionHaDiagnostic.required && !productionHaDiagnostic.redis.ready) {
+      blockers.push('Lançamento amplo exige Redis Sentinel válido em 3+ domínios e drill de failover comprovado nos últimos 30 dias');
+    }
+    if (productionHaDiagnostic.required && !productionHaDiagnostic.edge.ready) {
+      blockers.push('Lançamento amplo exige borda com failover em 2+ domínios e drill comprovado nos últimos 30 dias');
     }
     if (launchControlDiagnostic.pilotControlled) {
       if (launchControlDiagnostic.passengerCohortSize < 1) {
@@ -1146,6 +1257,7 @@ function main() {
         unavailablePolicy: 'fail_closed'
       },
       launchControl: launchControlDiagnostic,
+      productionHa: productionHaDiagnostic,
       financialPolicy: financialPolicyApproval,
       authOtp: {
         ...authOtpDiagnostics
