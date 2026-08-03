@@ -3,6 +3,10 @@ const {
   connectionArgs,
   resolveRedisBackupTarget
 } = require('../../../scripts/ops/backup-redis.cjs');
+const {
+  assertRestoredContent,
+  parseKeyspaceInfo
+} = require('../../../scripts/ops/verify-redis-restore.cjs');
 
 describe('Redis backup connection safety', () => {
   test('keeps credentials out of redis-cli arguments', () => {
@@ -54,5 +58,31 @@ describe('Redis backup connection safety', () => {
       expect(call.args.join(' ')).not.toContain('redis-secret');
       expect(call.options.env.REDISCLI_AUTH).toBe('sentinel-secret');
     }
+  });
+
+  test('counts restored keys across databases and rejects an empty required backup', () => {
+    const populated = parseKeyspaceInfo([
+      '# Keyspace',
+      'db0:keys=7,expires=2,avg_ttl=1000',
+      'db3:keys=5,expires=0,avg_ttl=0'
+    ].join('\r\n'));
+    expect(populated).toMatchObject({
+      totalKeys: 12,
+      databases: [
+        { database: 'db0', keys: 7 },
+        { database: 'db3', keys: 5 }
+      ]
+    });
+    expect(assertRestoredContent(populated, { requireNonempty: true })).toBe(populated);
+
+    const empty = parseKeyspaceInfo('# Keyspace\r\n');
+    expect(empty).toEqual({ databases: [], totalKeys: 0 });
+    expect(() => assertRestoredContent(empty, { requireNonempty: true }))
+      .toThrow('Backup Redis restaurou keyspace vazio');
+  });
+
+  test('fails closed on malformed Redis keyspace metadata', () => {
+    expect(() => parseKeyspaceInfo('db0:expires=1,avg_ttl=10'))
+      .toThrow('Linha INFO keyspace inválida');
   });
 });

@@ -31,6 +31,33 @@ function run(command, args) {
   return String(result.stdout || '').trim();
 }
 
+function parseKeyspaceInfo(info) {
+  const databases = String(info || '')
+    .split(/\r?\n/)
+    .map(line => line.trim())
+    .filter(line => /^db\d+:/.test(line))
+    .map(line => {
+      const match = line.match(/^(db\d+):keys=(\d+)(?:,|$)/);
+      if (!match) throw new Error(`Linha INFO keyspace inválida: ${line}`);
+      return {
+        database: match[1],
+        keys: Number.parseInt(match[2], 10),
+        raw: line
+      };
+    });
+  return {
+    databases,
+    totalKeys: databases.reduce((sum, entry) => sum + entry.keys, 0)
+  };
+}
+
+function assertRestoredContent(keyspaceSummary, { requireNonempty = false } = {}) {
+  if (requireNonempty && keyspaceSummary.totalKeys < 1) {
+    throw new Error('Backup Redis restaurou keyspace vazio');
+  }
+  return keyspaceSummary;
+}
+
 async function freePort() {
   return new Promise((resolve, reject) => {
     const server = net.createServer();
@@ -138,6 +165,10 @@ async function main() {
       }
     }
     const keyspace = await client.info('keyspace');
+    const requireNonempty = process.argv.includes('--require-nonempty');
+    const keyspaceSummary = assertRestoredContent(parseKeyspaceInfo(keyspace), {
+      requireNonempty
+    });
     process.stdout.write(`${JSON.stringify({
       status: 'passed',
       backupPath,
@@ -145,7 +176,9 @@ async function main() {
       rdbVerified: true,
       isolatedRestoreStarted: true,
       expectedKeyVerified: Boolean(expectKey),
-      keyspace: keyspace.split(/\r?\n/).filter(line => /^db\d+:/.test(line))
+      nonemptyRequired: requireNonempty,
+      totalKeys: keyspaceSummary.totalKeys,
+      keyspace: keyspaceSummary.databases.map(entry => entry.raw)
     }, null, 2)}\n`);
   } finally {
     try { client?.disconnect(false); } catch (_error) { /* cleanup */ }
@@ -154,7 +187,14 @@ async function main() {
   }
 }
 
-main().catch(error => {
-  process.stderr.write(`${error.message}\n`);
-  process.exitCode = 1;
-});
+if (require.main === module) {
+  main().catch(error => {
+    process.stderr.write(`${error.message}\n`);
+    process.exitCode = 1;
+  });
+}
+
+module.exports = {
+  assertRestoredContent,
+  parseKeyspaceInfo
+};
