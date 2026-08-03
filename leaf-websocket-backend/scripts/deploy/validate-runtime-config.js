@@ -723,8 +723,7 @@ function main() {
     && awsAdmissionLeaseTtlSeconds >= 60
     && awsAdmissionLeaseTtlSeconds <= 180
     && Number.isInteger(awsAdmissionMaxWaitMs)
-    && awsAdmissionMaxWaitMs >= 0
-    && awsAdmissionMaxWaitMs <= 30000;
+    && awsAdmissionMaxWaitMs === 0;
   const legacyRuntimeDiagnostics = LEGACY_RUNTIME_FLAGS.reduce((acc, key) => {
     acc[key] = booleanDiagnostic(key, false);
     return acc;
@@ -771,7 +770,7 @@ function main() {
     blockers.push('KYC_PRODUCTION_BIOMETRICS_ENABLED=true exige KYC_AWS_ADMISSION_CONTROL_ENABLED=true em produção');
   }
   if (nodeEnv === 'production' && biometricReadiness.enabled && !awsAdmissionConfigValid) {
-    blockers.push('Admissão AWS KYC inválida: TPS/burst devem ficar entre 1 e 25, concorrência entre 1 e 75, lease entre 60 e 180s e espera entre 0 e 30000ms');
+    blockers.push('Admissão AWS KYC inválida: TPS/burst devem ficar entre 1 e 25, concorrência entre 1 e 75, lease entre 60 e 180s e KYC_AWS_ADMISSION_MAX_WAIT_MS deve ser exatamente 0');
   }
   if (!activeTripAuthorityModeValid) {
     blockers.push('KYC_ACTIVE_TRIP_AUTHORITY_MODE deve ser vazio ou redis_noeviction');

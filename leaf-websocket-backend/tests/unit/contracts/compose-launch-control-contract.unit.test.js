@@ -167,6 +167,19 @@ describe('production compose launch-control contract', () => {
     expect(deploySource).toContain("''|redis_noeviction)");
   });
 
+  it('hard-pins zero AWS admission wait in every production runtime', () => {
+    expect(
+      composeSource.match(/- KYC_AWS_ADMISSION_MAX_WAIT_MS=0/g),
+    ).toHaveLength(1);
+    expect(
+      gatewayScaleSource.match(/- KYC_AWS_ADMISSION_MAX_WAIT_MS=0/g),
+    ).toHaveLength(2);
+    expect(composeSource).not.toContain('KYC_AWS_ADMISSION_MAX_WAIT_MS=${');
+    expect(gatewayScaleSource).not.toContain('KYC_AWS_ADMISSION_MAX_WAIT_MS=${');
+    expect(strictKycProfileSource).toContain('KYC_AWS_ADMISSION_MAX_WAIT_MS=0');
+    expect(softReleaseProfileSource).toContain('KYC_AWS_ADMISSION_MAX_WAIT_MS=0');
+  });
+
   it('hardens Redis as a live-attested noeviction authority without exposing auth in health args', () => {
     const productionRedisSource = composeSource.slice(
       composeSource.indexOf('  redis:'),

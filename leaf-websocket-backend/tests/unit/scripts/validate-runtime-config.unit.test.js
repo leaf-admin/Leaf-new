@@ -1256,6 +1256,23 @@ describe('validate-runtime-config Woovi webhook production gates', () => {
     });
   });
 
+  it('blocks strict biometric production when AWS admission tries to hold requests', () => {
+    const result = runValidator({
+      ...baseProdEnv,
+      ...strictKycProdEnv,
+      KYC_AWS_ADMISSION_MAX_WAIT_MS: '15000'
+    });
+
+    expect(result.status).toBe(1);
+    expect(result.report.summary.blockers).toContain(
+      'Admissão AWS KYC inválida: TPS/burst devem ficar entre 1 e 25, concorrência entre 1 e 75, lease entre 60 e 180s e KYC_AWS_ADMISSION_MAX_WAIT_MS deve ser exatamente 0'
+    );
+    expect(result.report.diagnostics.awsKycAdmissionControl).toMatchObject({
+      configValid: false,
+      maxWaitMs: 15000
+    });
+  });
+
   it('blocks redis_noeviction activation without attestation, quarantine and generation policy', () => {
     const result = runValidator({
       ...baseProdEnv,

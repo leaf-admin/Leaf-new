@@ -79,7 +79,7 @@ describe('aws-kyc-admission-controller', () => {
     );
   });
 
-  test('waits only for the bounded admission window and then succeeds', async () => {
+  test('ignores a positive wait override and rejects capacity immediately', async () => {
     let clockMs = 1000;
     const sleep = jest.fn(async (delayMs) => {
       clockMs += delayMs;
@@ -90,11 +90,6 @@ describe('aws-kyc-admission-controller', () => {
         .mockResolvedValueOnce(JSON.stringify({
           status: 'rate_limited',
           retryAfterMs: 50
-        }))
-        .mockResolvedValueOnce(JSON.stringify({
-          status: 'acquired',
-          active: 21,
-          leaseExpiresAtMs: 181050
         }))
     };
     const controller = new AwsKycAdmissionController({
@@ -107,11 +102,13 @@ describe('aws-kyc-admission-controller', () => {
     await expect(controller.acquireCreateLease({
       leaseId: 'operation-4',
       required: true
-    })).resolves.toMatchObject({
-      status: 'acquired',
-      waitedMs: 50
+    })).rejects.toMatchObject({
+      code: 'KYC_AWS_ADMISSION_CAPACITY_EXHAUSTED',
+      retryAfterMs: 50
     });
-    expect(sleep).toHaveBeenCalledWith(50);
+    expect(controller.getConfigSummary().maxWaitMs).toBe(0);
+    expect(sleep).not.toHaveBeenCalled();
+    expect(redis.eval).toHaveBeenCalledTimes(1);
   });
 
   test('returns a retryable capacity error immediately without holding the request', async () => {

@@ -176,14 +176,9 @@ class AwsKycAdmissionController {
       180,
       true
     ) * 1000;
-    this.maxWaitMs = boundedNumber(
-      this.env,
-      'KYC_AWS_ADMISSION_MAX_WAIT_MS',
-      0,
-      0,
-      30000,
-      true
-    );
+    // This contract is intentionally not runtime-tunable. Holding HTTP requests
+    // under a burst consumes gateway capacity before any AWS session is created.
+    this.maxWaitMs = 0;
     this.retryFloorMs = boundedNumber(
       this.env,
       'KYC_AWS_ADMISSION_RETRY_FLOOR_MS',
