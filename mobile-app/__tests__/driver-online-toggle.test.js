@@ -980,7 +980,9 @@ describe('driver online toggle', () => {
         estimatedFare: 20.23,
         grossEstimatedFare: 20.23,
         quoteLockId: `quote-lock-refresh-${fetchDynamicPricingQuote.mock.calls.length}`,
-        quoteLockExpiresAt: new Date(Date.now() + 80).toISOString(),
+        quoteLockExpiresAt: new Date(
+          Date.now() + (fetchDynamicPricingQuote.mock.calls.length > 9 ? 60000 : 80),
+        ).toISOString(),
         pricingPayload: {},
       };
     });
@@ -1030,6 +1032,26 @@ describe('driver online toggle', () => {
         await new Promise((resolve) => setTimeout(resolve, 150));
       });
       expect(fetchDynamicPricingQuote).toHaveBeenCalledTimes(9);
+
+      fireEvent.press(screen.getByText('Atualizar preço'));
+      await waitFor(() => {
+        expect(fetchDynamicPricingQuote).toHaveBeenCalledTimes(12);
+        expect(screen.getByText('Confirmar')).toBeTruthy();
+        expect(screen.getByTestId('mock-passenger-category-price').props.children)
+          .toContain('20,23');
+      });
+
+      const refreshedQuoteCalls = fetchDynamicPricingQuote.mock.calls.slice(9);
+      const refreshedQuoteSessionIds = refreshedQuoteCalls.map(
+        ([payload]) => payload.quoteSessionId,
+      );
+      expect(new Set(refreshedQuoteSessionIds)).toHaveProperty('size', 1);
+      expect(refreshedQuoteSessionIds[0]).not.toBe(quoteSessionIds[0]);
+      refreshedQuoteCalls.forEach(([payload, options]) => {
+        expect(payload.previousQuoteSessionId).toBe(quoteSessionIds[0]);
+        expect(options.headers['x-leaf-previous-quote-session-id'])
+          .toBe(quoteSessionIds[0]);
+      });
     } finally {
       global.fetch = originalFetch;
     }
