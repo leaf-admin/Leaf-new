@@ -5,7 +5,6 @@ describe('ReceiptService', () => {
 
   beforeEach(() => {
     jest.resetModules();
-    delete process.env.EXPO_PUBLIC_RECEIPT_RTDATABASE_FALLBACK;
     mockApiGet = jest.fn();
     mockAxiosInstance = { get: mockApiGet };
     mockSetupAxiosInterceptor = jest.fn();
@@ -18,17 +17,9 @@ describe('ReceiptService', () => {
   afterEach(() => {
     jest.dontMock('../src/utils/axiosInterceptor');
     jest.dontMock('../src/config/backendBaseUrl');
-    jest.dontMock('@react-native-firebase/database');
   });
 
-  it('loads receipts through the Leaf API without touching RTDB by default', async () => {
-    const databaseRef = jest.fn();
-    jest.doMock('@react-native-firebase/database', () => ({
-      __esModule: true,
-      default: jest.fn(() => ({
-        ref: databaseRef,
-      })),
-    }));
+  it('loads receipts through the Leaf API', async () => {
     jest.doMock('../src/config/backendBaseUrl', () => 'https://api.leaf.test');
 
     const receipt = { rideId: 'booking_123', financial: { totalPaid: { formatted: 'R$ 79,61' } } };
@@ -41,31 +32,18 @@ describe('ReceiptService', () => {
     expect(createAxiosInstance).toHaveBeenCalledWith({ baseURL: 'https://api.leaf.test/api' });
     expect(mockSetupAxiosInterceptor).toHaveBeenCalledWith(mockAxiosInstance);
     expect(mockApiGet).toHaveBeenCalledWith('/receipts/booking_123');
-    expect(databaseRef).not.toHaveBeenCalled();
   });
 
-  it('uses RTDB only when the legacy fallback flag is explicitly enabled', async () => {
-    process.env.EXPO_PUBLIC_RECEIPT_RTDATABASE_FALLBACK = 'true';
-    const snapshot = {
-      exists: jest.fn(() => true),
-      val: jest.fn(() => ({ rideId: 'booking_legacy' })),
-    };
-    const once = jest.fn().mockResolvedValue(snapshot);
-    const ref = jest.fn(() => ({ once }));
-    jest.doMock('@react-native-firebase/database', () => ({
-      __esModule: true,
-      default: jest.fn(() => ({ ref })),
-    }));
+  it('fails visibly when the Leaf API has no authoritative receipt', async () => {
     jest.doMock('../src/config/backendBaseUrl', () => 'https://api.leaf.test');
 
     mockApiGet.mockResolvedValue({ data: { success: false } });
 
     const service = require('../src/services/ReceiptService').default;
 
-    await expect(service.getReceiptByRideId('booking_legacy')).resolves.toEqual({
-      rideId: 'booking_legacy',
-    });
-    expect(mockApiGet).toHaveBeenCalledWith('/receipts/booking_legacy');
-    expect(ref).toHaveBeenCalledWith('receipts/booking_legacy');
+    await expect(service.getReceiptByRideId('booking_missing')).rejects.toThrow(
+      'Recibo não encontrado',
+    );
+    expect(mockApiGet).toHaveBeenCalledWith('/receipts/booking_missing');
   });
 });
