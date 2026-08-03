@@ -57,7 +57,8 @@
     "verify:redis-restore": "node scripts/ops/verify-redis-restore.cjs",
     "test:redis-backup-restore": "node scripts/tests/redis-backup-restore.cjs",
     "backup:firestore-critical": "node scripts/ops/backup-firestore-critical.js",
-    "verify:firestore-restore": "node scripts/ops/verify-firestore-restore.cjs"
+    "verify:firestore-restore": "node scripts/ops/verify-firestore-restore.cjs",
+    "restore:firestore-emulator": "node scripts/ops/restore-firestore-emulator.cjs"
   },
   "keywords": [
     "websocket",
