@@ -5,6 +5,9 @@ const { logError, logStructured } = require('../utils/logger');
 const passengerTrustService = require('./passenger-trust-service');
 const FCMService = require('./fcm-service');
 const auditService = require('./audit-service');
+const {
+  commitDriverOnlineProjection
+} = require('./driver-online-projection-service');
 
 const OPERATIONAL_STATUSES = new Set(['active', 'blocked', 'suspended']);
 const DRIVER_DOCUMENT_TYPES = new Set(['cnh', 'crlv', 'antecedentes_criminais']);
@@ -173,10 +176,27 @@ async function clearDriverRuntimeState(userId, status, reasonCode) {
   const shouldForceOffline = status !== 'active';
 
   try {
-    const multi = redis.multi();
-    multi.del(`driver_eligibility_profile:${userId}`);
-    if (shouldForceOffline) {
-      multi.hset(driverKey, {
+    try {
+      await redis.del(`driver_eligibility_profile:${userId}`);
+    } catch (error) {
+      logStructured('warn', 'Falha ao invalidar cache de elegibilidade do motorista', {
+        service: 'dashboard-user-management-service',
+        userId,
+        status,
+        error: error.message
+      });
+    }
+    if (!shouldForceOffline) {
+      return;
+    }
+
+    await commitDriverOnlineProjection(redis, {
+      driverId: userId,
+      driverKey,
+      eligibleGeoKey: ELIGIBLE_DRIVER_GEO_KEY,
+      isOnline: false,
+      dispatchEligible: false,
+      fields: {
         driverId: userId,
         status: 'OFFLINE',
         isOnline: 'false',
@@ -184,12 +204,8 @@ async function clearDriverRuntimeState(userId, status, reasonCode) {
         dispatchEligibilityCode: reasonCode,
         dispatchEligibilityCheckedAt: nowIso,
         updatedAt: nowIso
-      });
-      multi.zrem(ELIGIBLE_DRIVER_GEO_KEY, userId);
-      multi.zrem('driver_locations', userId);
-      multi.srem('online_drivers', userId);
-    }
-    await multi.exec();
+      }
+    });
   } catch (error) {
     logError(error, 'Erro ao limpar estado operacional do motorista no Redis', {
       service: 'dashboard-user-management-service',
