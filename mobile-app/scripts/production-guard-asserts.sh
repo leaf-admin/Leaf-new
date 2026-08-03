@@ -68,6 +68,14 @@ elif grep -q "@react-native-firebase/database" "src/services/UserAuthService.js"
   fail "password/auth resolution must not read RTDB from the mobile client"
 fi
 
+if command -v rg >/dev/null 2>&1; then
+  if rg -q "@react-native-firebase/database" src; then
+    fail "retired Realtime Database client must remain removed from mobile source"
+  fi
+elif grep -REq "@react-native-firebase/database" src; then
+  fail "retired Realtime Database client must remain removed from mobile source"
+fi
+
 for file in \
   "src/services/canonical/rideService.js" \
   "src/services/runtime/bookingStateBridge.js" \
@@ -136,7 +144,6 @@ require_pattern "src/config/runtimeAccessPolicy.js" "hasExplicitPaymentBypassFla
 require_pattern "src/config/runtimeAccessPolicy.js" "hasExplicitClientDirectGoogleFallbackFlag" "direct Google fallback explicit flag gate"
 require_pattern "src/config/runtimeAccessPolicy.js" "allowTestUserTools\\(\\) && hasExplicitPaymentBypassFlag" "forced payment bypass requires QA tools gate"
 require_pattern "src/services/PaymentBypassService.js" "allowPaymentBypass" "payment bypass service runtime policy gate"
-require_pattern "src/services/DatabaseBypass.js" "allowTestUserTools" "database bypass service test-user runtime policy gate"
 require_pattern "src/screens/prototype/prototypeRideRuntime.js" "allowCustomOtpFallback" "prototype runtime OTP fallback gate"
 require_pattern "src/screens/prototype/prototypeRideRuntime.js" "allowTestUserTools" "prototype runtime test-user gate"
 require_pattern "src/screens/prototype/prototypeRideRuntime.js" "Restauração de sessão por OTP customizado bloqueada" "prototype runtime OTP production block"

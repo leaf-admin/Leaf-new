@@ -11,10 +11,10 @@
 ### 🧪 Bypass Completo para Usuário Teste
 - **Arquivos**: 
   - `mobile-app/src/services/TestUserService.js` (NOVO)
-  - `mobile-app/src/services/DatabaseBypass.js` (NOVO)
   - `mobile-app/src/components/AuthProvider.js`
-  - `mobile-app/src/common-local/actions/authactions.js`
 - **Funcionalidade**: Usuário teste (11999999999) funciona sem erros de permissão
+
+> Atualização de 2026-08-03: o antigo `DatabaseBypass` e as actions Redux citadas nesta instrução histórica foram retirados; os perfis de teste atuais são governados por `runtimeAccessPolicy` e pelos contratos de autenticação do backend.
 
 ### 🌐 Correções de Rede
 - **Arquivo**: `mobile-app/src/config/NetworkConfig.js` (NOVO)
@@ -85,5 +85,4 @@ curl http://localhost:3001/health
 3. **Usuário teste**: Testar com número 11999999999
 4. **Notificações**: Verificar se FCM está funcionando
 5. **Eventos**: Executar script de teste WebSocket
-
 
