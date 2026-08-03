@@ -1195,6 +1195,92 @@ describe('kyc-policy-service', () => {
     expect(mockRealtimeValues[`users/${driverId}`]).toEqual(currentUser);
   });
 
+  test('atomically blocks a driver when the current identity revalidation fails', async () => {
+    const driverId = 'driver-current-failure';
+    const challengeId = 'idrev_current_failure';
+    mockRealtimeValues[`users/${driverId}`] = {
+      identityReverification: {
+        challengeId,
+        requirement: 'IDENTITY_REVERIFICATION',
+        status: 'requested',
+        metrics: {}
+      },
+      kycReverifyRequired: true,
+      kycStatus: 'pending_reverify',
+      kycBlocked: false
+    };
+
+    const result = await service.recordIdentityReverificationResult(driverId, {
+      challengeId,
+      requirement: 'IDENTITY_REVERIFICATION',
+      isMatch: false,
+      needsReview: false,
+      similarityScore: 10,
+      decision: 'reject'
+    });
+
+    expect(result).toEqual(expect.objectContaining({
+      recorded: true,
+      status: 'failed'
+    }));
+    expect(mockCommitDriverOnlineProjection).toHaveBeenCalledWith(
+      mockRedis,
+      expect.objectContaining({
+        driverId,
+        isOnline: false,
+        dispatchEligible: false,
+        expectedFields: {
+          identity_reverification_challenge_id: challengeId
+        },
+        fields: expect.objectContaining({
+          kyc_status: 'blocked',
+          kyc_blocked: 'true',
+          status: 'OFFLINE',
+          dispatchEligibilityCode: 'KYC_REVERIFY_FAILED',
+          identity_reverification_status: 'failed'
+        })
+      })
+    );
+    expect(mockRedis.zrem).toHaveBeenCalledWith('drivers:available', driverId);
+    expect(mockRedis.zrem).not.toHaveBeenCalledWith('driver_locations_eligible', driverId);
+  });
+
+  test('does not notify success when the failed identity projection loses the challenge race', async () => {
+    const driverId = 'driver-failure-race';
+    const challengeId = 'idrev_failure_race';
+    mockRealtimeValues[`users/${driverId}`] = {
+      identityReverification: {
+        challengeId,
+        requirement: 'IDENTITY_REVERIFICATION',
+        status: 'requested',
+        metrics: {}
+      },
+      kycReverifyRequired: true,
+      kycStatus: 'pending_reverify'
+    };
+    mockCommitDriverOnlineProjection.mockResolvedValueOnce({
+      success: false,
+      skipped: true,
+      code: 'PRECONDITION_MISMATCH'
+    });
+
+    const result = await service.recordIdentityReverificationResult(driverId, {
+      challengeId,
+      requirement: 'IDENTITY_REVERIFICATION',
+      isMatch: false,
+      similarityScore: 10,
+      decision: 'reject'
+    });
+
+    expect(result).toEqual(expect.objectContaining({
+      recorded: false,
+      stale: true,
+      code: 'KYC_IDENTITY_REVERIFY_CHALLENGE_STALE'
+    }));
+    expect(mockRedis.zrem).not.toHaveBeenCalled();
+    expect(service.notificationService.sendCustomNotification).not.toHaveBeenCalled();
+  });
+
   test('a matching identity challenge can clear its own gate atomically', async () => {
     const challengeFixture = installCanonicalPendingChallengeFixture({
       driverId: 'driver-current',
@@ -1546,6 +1632,7 @@ describe('kyc-policy-service', () => {
     }));
     expect(mockRealtimeValues['users/driver-newer']).toEqual(newerState);
     expect(mockRedis.eval).not.toHaveBeenCalled();
+    expect(mockCommitDriverOnlineProjection).not.toHaveBeenCalled();
   });
 
   test('an old identity start cannot change metrics of a newer challenge', async () => {
