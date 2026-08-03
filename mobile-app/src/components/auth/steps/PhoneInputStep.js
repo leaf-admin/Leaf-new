@@ -224,7 +224,7 @@ const PhoneInputStep = ({ onVerificationSent, onPasswordLoginSuccess, progressMe
             if (error?.message?.includes('Muitas tentativas')) {
                 setPasswordError(error.message);
             } else {
-                setPasswordError('Senha incorreta ou conta sem senha configurada.');
+                setPasswordError('Senha incorreta.');
             }
         } finally {
             setLoading(false);
