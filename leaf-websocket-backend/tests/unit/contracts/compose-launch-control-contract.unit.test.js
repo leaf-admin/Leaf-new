@@ -265,7 +265,16 @@ describe('production compose launch-control contract', () => {
     expect(deploySource).toContain('--from0');
     expect(deploySource).toContain('--files-from="$TRACKED_MANIFEST"');
     expect(deploySource).toContain('git -C "$REPO_ROOT" archive --format=tar');
-    expect(deploySource).toContain('RSYNC_DELETE_ARGS=(--delete --delete-delay)');
+    expect(deploySource).toContain(
+      'RSYNC_TRANSFER_ARGS=(--no-owner --no-group --chmod=Du=rwx,Dgo=rx)',
+    );
+    expect(deploySource).toContain(
+      'RSYNC_TRANSFER_ARGS+=(--from0 --files-from="$TRACKED_MANIFEST")',
+    );
+    expect(deploySource).toContain('RSYNC_TRANSFER_ARGS+=(--delete --delete-delay)');
+    expect(deploySource.match(/"\$\{RSYNC_TRANSFER_ARGS\[@\]\}"/g)).toHaveLength(2);
+    expect(deploySource).not.toContain('RSYNC_SOURCE_ARGS=()');
+    expect(deploySource).not.toContain('RSYNC_DELETE_ARGS=()');
     expect(deploySource).toContain('SYNC_SOURCE_DIR="$RELEASE_STAGING_DIR/"');
     expect(deploySource).toContain('--dry-run --itemize-changes');
     expect(deploySource).toContain('--exclude "/docker-compose.yml"');
