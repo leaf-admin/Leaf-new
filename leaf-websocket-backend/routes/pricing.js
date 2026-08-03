@@ -27,6 +27,7 @@ const QUOTE_SESSION_COUNTER_TTL_SECONDS = Math.max(
 );
 const PUBLIC_QUOTE_LOCK_MAX_TTL_SECONDS = 120;
 const MAX_QUOTE_REQUESTS_PER_CATEGORY_SESSION = 3;
+const QUOTE_SESSION_ROUTE_KEY_PREFIX = 'pricing:quote-session-route';
 const INCREMENT_QUOTE_SESSION_COUNTER_SCRIPT = `
 local count = redis.call('INCR', KEYS[1])
 if count == 1 then
@@ -99,6 +100,107 @@ function resolveQuoteSessionId(req, body = {}) {
       body.quote_session_id ||
       ''
   );
+}
+
+function buildQuoteSessionRouteKey(quoteSessionId) {
+  return `${QUOTE_SESSION_ROUTE_KEY_PREFIX}:${quoteSessionId}`;
+}
+
+function buildQuoteSessionRouteSignature(pickupLocation, destinationLocation) {
+  return [
+    Number(pickupLocation?.lat).toFixed(5),
+    Number(pickupLocation?.lng).toFixed(5),
+    Number(destinationLocation?.lat).toFixed(5),
+    Number(destinationLocation?.lng).toFixed(5)
+  ].join('|');
+}
+
+function buildQuoteSessionCanonicalRouteSnapshot(canonicalRoute = {}) {
+  return {
+    distance_in_km: toNumber(canonicalRoute.distance_in_km, 0),
+    time_in_secs: toNumber(canonicalRoute.time_in_secs, 0),
+    duration_in_traffic: toNumber(
+      canonicalRoute.duration_in_traffic ?? canonicalRoute.time_in_secs,
+      0
+    ),
+    polylinePoints: String(canonicalRoute.polylinePoints || '').slice(0, 100000),
+    trafficSegments: Array.isArray(canonicalRoute.trafficSegments)
+      ? canonicalRoute.trafficSegments.slice(0, 80)
+      : [],
+    tollFee: Math.max(0, toNumber(canonicalRoute.tollFee, 0))
+  };
+}
+
+async function persistQuoteSessionRoute({
+  redis,
+  quoteSessionId,
+  pickupLocation,
+  destinationLocation,
+  canonicalRoute
+}) {
+  if (!quoteSessionId || !redis || typeof redis.set !== 'function') {
+    return;
+  }
+
+  const payload = {
+    routeSignature: buildQuoteSessionRouteSignature(
+      pickupLocation,
+      destinationLocation
+    ),
+    canonicalRoute: buildQuoteSessionCanonicalRouteSnapshot(canonicalRoute)
+  };
+
+  try {
+    await redis.set(
+      buildQuoteSessionRouteKey(quoteSessionId),
+      JSON.stringify(payload),
+      'EX',
+      QUOTE_SESSION_COUNTER_TTL_SECONDS,
+      'NX'
+    );
+  } catch (error) {
+    logStructured('warn', 'Falha ao persistir rota canônica da sessão de quote', {
+      service: 'pricing-routes',
+      operation: 'pricing_quote_session_route_write',
+      quoteSessionId,
+      error: error.message
+    });
+  }
+}
+
+async function readQuoteSessionRoute({
+  redis,
+  quoteSessionId,
+  pickupLocation,
+  destinationLocation
+}) {
+  if (!quoteSessionId || !redis || typeof redis.get !== 'function') {
+    return null;
+  }
+
+  try {
+    const raw = await redis.get(buildQuoteSessionRouteKey(quoteSessionId));
+    if (!raw) {
+      return null;
+    }
+    const payload = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    const expectedSignature = buildQuoteSessionRouteSignature(
+      pickupLocation,
+      destinationLocation
+    );
+    if (payload?.routeSignature !== expectedSignature) {
+      return null;
+    }
+    return payload?.canonicalRoute || null;
+  } catch (error) {
+    logStructured('warn', 'Falha ao ler rota canônica da sessão de quote', {
+      service: 'pricing-routes',
+      operation: 'pricing_quote_session_route_read',
+      quoteSessionId,
+      error: error.message
+    });
+    return null;
+  }
 }
 
 async function incrementQuoteSessionCounter(redis, quoteSessionId, carType) {
@@ -306,18 +408,40 @@ router.post('/pricing/quote', async (req, res) => {
       alternativesEnabled: false,
       cacheOnly: true
     });
-    const canonicalRoute = canonicalRouteResult?.data || null;
-    const canonicalRouteDistanceKm = toNumber(canonicalRoute?.distance_in_km, 0);
-    const canonicalRouteDurationSecs = toNumber(
+    let canonicalRoute = canonicalRouteResult?.data || null;
+    let canonicalRouteSource = 'directions_cache';
+    let canonicalRouteDistanceKm = toNumber(canonicalRoute?.distance_in_km, 0);
+    let canonicalRouteDurationSecs = toNumber(
       canonicalRoute?.duration_in_traffic ?? canonicalRoute?.time_in_secs,
       0
     );
-    const hasCanonicalRoute = Boolean(
+    let hasCanonicalRoute = Boolean(
       canonicalRoute &&
       hasCanonicalRouteGeometry(canonicalRoute) &&
       canonicalRouteDistanceKm > 0 &&
       canonicalRouteDurationSecs > 0
     );
+
+    if (!hasCanonicalRoute) {
+      canonicalRoute = await readQuoteSessionRoute({
+        redis,
+        quoteSessionId,
+        pickupLocation: normalizedPickupLocation,
+        destinationLocation: normalizedDestinationLocation
+      });
+      canonicalRouteDistanceKm = toNumber(canonicalRoute?.distance_in_km, 0);
+      canonicalRouteDurationSecs = toNumber(
+        canonicalRoute?.duration_in_traffic ?? canonicalRoute?.time_in_secs,
+        0
+      );
+      hasCanonicalRoute = Boolean(
+        canonicalRoute &&
+        hasCanonicalRouteGeometry(canonicalRoute) &&
+        canonicalRouteDistanceKm > 0 &&
+        canonicalRouteDurationSecs > 0
+      );
+      canonicalRouteSource = hasCanonicalRoute ? 'quote_session' : 'unavailable';
+    }
 
     if (!hasCanonicalRoute) {
       metrics.recordPricingQuoteRequest?.({ success: false, source: quoteSessionId ? 'session' : 'anonymous' });
@@ -326,6 +450,16 @@ router.post('/pricing/quote', async (req, res) => {
         code: 'CANONICAL_ROUTE_REQUIRED',
         retryable: true,
         message: 'Rota canônica indisponível para cotação. Atualize a rota e tente novamente.'
+      });
+    }
+
+    if (canonicalRouteSource === 'directions_cache') {
+      await persistQuoteSessionRoute({
+        redis,
+        quoteSessionId,
+        pickupLocation: normalizedPickupLocation,
+        destinationLocation: normalizedDestinationLocation,
+        canonicalRoute
       });
     }
 
@@ -451,12 +585,14 @@ router.post('/pricing/quote', async (req, res) => {
     if (quoteRequestCount) {
       res.set('X-Leaf-Quote-Session-Count', String(quoteRequestCount));
     }
+    res.set('X-Leaf-Quote-Route-Source', canonicalRouteSource);
 
     logStructured('info', 'Quote dinâmico calculado', {
       service: 'pricing-routes',
       operation: 'pricing_quote',
       quoteSessionId: quoteSessionId || null,
       quoteRequestCount: quoteRequestCount || null,
+      canonicalRouteSource,
       carType: result.normalizedCarType,
       estimatedFare,
       quoteLockTtlSeconds: quoteLockResult.success ? quoteLockResult.ttlSeconds : null,
@@ -473,6 +609,7 @@ router.post('/pricing/quote', async (req, res) => {
       quoteLockExpiresAt: quoteLockResult.success ? quoteLockResult.expiresAtIso : null,
       quoteLockTtlSeconds: quoteLockResult.success ? quoteLockResult.ttlSeconds : null,
       quoteRequestCount: quoteRequestCount || null,
+      canonicalRouteSource,
       estimatedFare,
       grossEstimatedFare: result.estimatedFare,
       passengerPayableFare: estimatedFare,

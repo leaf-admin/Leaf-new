@@ -965,13 +965,25 @@ describe('driver online toggle', () => {
         }),
       };
     });
-    fetchDynamicPricingQuote.mockImplementation(async () => ({
-      estimatedFare: 20.23,
-      grossEstimatedFare: 20.23,
-      quoteLockId: `quote-lock-refresh-${fetchDynamicPricingQuote.mock.calls.length}`,
-      quoteLockExpiresAt: new Date(Date.now() + 80).toISOString(),
-      pricingPayload: {},
-    }));
+    fetchDynamicPricingQuote.mockImplementation(async (_payload, options = {}) => {
+      await new Promise((resolve, reject) => {
+        const timeoutId = setTimeout(resolve, 20);
+        options.signal?.addEventListener?.('abort', () => {
+          clearTimeout(timeoutId);
+          const error = new Error('canceled');
+          error.name = 'AbortError';
+          reject(error);
+        }, { once: true });
+      });
+
+      return {
+        estimatedFare: 20.23,
+        grossEstimatedFare: 20.23,
+        quoteLockId: `quote-lock-refresh-${fetchDynamicPricingQuote.mock.calls.length}`,
+        quoteLockExpiresAt: new Date(Date.now() + 80).toISOString(),
+        pricingPayload: {},
+      };
+    });
 
     usePrototypeRideRuntime.mockReturnValue(
       buildPassengerRuntime({
