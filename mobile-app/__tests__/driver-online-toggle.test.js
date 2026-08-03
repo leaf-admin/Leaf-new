@@ -1018,6 +1018,8 @@ describe('driver online toggle', () => {
         expect(fetchDynamicPricingQuote).toHaveBeenCalledTimes(9);
         expect(screen.getByText('Atualizar preço')).toBeTruthy();
       });
+      expect(screen.getByTestId('mock-passenger-category-price').props.children)
+        .toBe('Preço expirado');
 
       const quoteSessionIds = fetchDynamicPricingQuote.mock.calls.map(
         ([payload]) => payload.quoteSessionId,
