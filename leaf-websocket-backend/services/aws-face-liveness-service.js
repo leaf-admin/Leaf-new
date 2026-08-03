@@ -13,6 +13,7 @@ const {
 } = require('../utils/active-trip-index');
 const { logStructured, logError } = require('../utils/logger');
 const defaultAwsKycCostGuard = require('./aws-kyc-cost-guard-service');
+const defaultAwsKycAdmissionController = require('./aws-kyc-admission-controller');
 
 const PROVIDER_NAME = 'aws_rekognition_face_liveness';
 const DEFAULT_CHALLENGE_TYPE = 'FaceMovementChallenge';
@@ -713,6 +714,7 @@ function normalizeReferenceImageBoundingBox(value) {
 class AwsFaceLivenessService {
   constructor(options = {}) {
     this.costGuard = options.costGuard || defaultAwsKycCostGuard;
+    this.admissionController = options.admissionController || defaultAwsKycAdmissionController;
     this.enabled = String(
       process.env.KYC_AWS_LIVENESS_ENABLED
       || process.env.AWS_LIVENESS_ENABLED
@@ -985,8 +987,23 @@ class AwsFaceLivenessService {
       providerRecoveryMaxCredits: this.providerRecoveryMaxCredits,
       softBlockOnAttemptsExhausted: this.softBlockOnAttemptsExhausted,
       sdkMaxAttempts: this.sdkMaxAttempts,
-      costGuard: this.costGuard?.getConfigSummary?.() || { enabled: false }
+      costGuard: this.costGuard?.getConfigSummary?.() || { enabled: false },
+      admissionController: this.admissionController?.getConfigSummary?.() || { enabled: false }
     };
+  }
+
+  async releaseAdmissionLease(leaseId, context = {}) {
+    if (!leaseId || !this.admissionController?.releaseCreateLease) return false;
+    try {
+      const result = await this.admissionController.releaseCreateLease(leaseId);
+      return result?.released === true;
+    } catch (error) {
+      logError(error, 'Falha ao liberar lease de admissao AWS KYC', {
+        service: 'aws-face-liveness-service',
+        ...context
+      });
+      return false;
+    }
   }
 
   assertEnabled() {
@@ -2708,11 +2725,16 @@ class AwsFaceLivenessService {
     const clientRequestToken = attemptReservation.token;
     const startedAt = Date.now();
     let costGuardReservation = null;
+    let admissionLease = null;
     let metadata = null;
     try {
       costGuardReservation = await this.costGuard.reserveLivenessBundle({
         userId,
         operationId: clientRequestToken,
+        required: strictProductionBiometrics
+      });
+      admissionLease = await this.admissionController.acquireCreateLease({
+        leaseId: clientRequestToken,
         required: strictProductionBiometrics
       });
       metadata = {
@@ -2728,6 +2750,9 @@ class AwsFaceLivenessService {
         persistenceNamespace: normalizedPersistenceNamespace,
         financialContextId: normalizedFinancialContextId,
         costGuardOperationId: costGuardReservation?.operationId || null,
+        admissionLeaseId: admissionLease?.status === 'acquired'
+          ? clientRequestToken
+          : null,
         challengeType: this.challengeType,
         createdAt: new Date(startedAt).toISOString(),
         expiresAt: new Date(startedAt + (this.sessionTtlSeconds * 1000)).toISOString()
@@ -2738,6 +2763,13 @@ class AwsFaceLivenessService {
         this.rollbackAttemptReservation(attemptReservation),
         costGuardReservation?.operationId
           ? this.costGuard.rollbackBeforeDispatch(costGuardReservation.operationId)
+          : Promise.resolve(false),
+        admissionLease?.status === 'acquired'
+          ? this.releaseAdmissionLease(clientRequestToken, {
+            userId,
+            attemptScope: scope,
+            phase: 'metadata_binding'
+          })
           : Promise.resolve(false)
       ]).catch(() => null);
       throw error;
@@ -2782,6 +2814,13 @@ class AwsFaceLivenessService {
           this.rollbackAttemptReservation(attemptReservation),
           costGuardReservation?.operationId
             ? this.costGuard.rollbackBeforeDispatch(costGuardReservation.operationId)
+            : Promise.resolve(false),
+          admissionLease?.status === 'acquired'
+            ? this.releaseAdmissionLease(clientRequestToken, {
+              userId,
+              attemptScope: scope,
+              phase: 'provider_pre_dispatch'
+            })
             : Promise.resolve(false)
         ]).catch((rollbackError) => {
           logError(rollbackError, 'Falha ao reverter reserva pre-dispatch AWS liveness', {
@@ -2902,6 +2941,11 @@ class AwsFaceLivenessService {
     let referenceImageReadAttempts = 0;
     const maxReads = includeReferenceImage ? this.referenceResultMaxReads : 1;
     for (let readAttempt = 1; readAttempt <= maxReads; readAttempt += 1) {
+      await this.admissionController.acquireResultPermit({
+        required: String(
+          process.env.KYC_PRODUCTION_BIOMETRICS_ENABLED || 'false'
+        ).toLowerCase() === 'true'
+      });
       response = await this.rekognitionClient.send(
         new GetFaceLivenessSessionResultsCommand({
           SessionId: sessionId
@@ -3036,6 +3080,12 @@ class AwsFaceLivenessService {
         result.sessionMetadata.completedAt = result.completedAt;
       }
 
+      await this.releaseAdmissionLease(metadata?.admissionLeaseId, {
+        userId: metadata?.userId || userId || null,
+        sessionId,
+        phase: 'terminal_result'
+      });
+
       result.attemptState = attemptState
         ? {
           started: attemptState.started,
@@ -3087,6 +3137,11 @@ class AwsFaceLivenessService {
         && metadata.abandonedAt.trim()
       )
     ) {
+      await this.releaseAdmissionLease(metadata.admissionLeaseId, {
+        userId: safeUserId,
+        sessionId: safeSessionId,
+        phase: 'already_abandoned'
+      });
       return {
         success: true,
         abandoned: true,
@@ -3160,6 +3215,12 @@ class AwsFaceLivenessService {
       error.code = 'KYC_AWS_LIVENESS_ABANDON_PERSIST_FAILED';
       throw error;
     }
+
+    await this.releaseAdmissionLease(metadata.admissionLeaseId, {
+      userId: safeUserId,
+      sessionId: safeSessionId,
+      phase: 'abandoned'
+    });
 
     logStructured('info', 'Sessao AWS Face Liveness encerrada pelo usuario', {
       service: 'aws-face-liveness-service',

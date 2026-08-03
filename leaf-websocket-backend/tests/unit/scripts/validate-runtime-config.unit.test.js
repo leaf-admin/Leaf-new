@@ -49,6 +49,14 @@ describe('validate-runtime-config Woovi webhook production gates', () => {
     KYC_AWS_COST_DAILY_LIMIT_USD: '2.50',
     KYC_AWS_COST_MONTHLY_LIMIT_USD: '50.00',
     KYC_AWS_COST_TIME_ZONE: 'UTC',
+    KYC_AWS_ADMISSION_CONTROL_ENABLED: 'true',
+    KYC_AWS_ADMISSION_CREATE_TPS: '20',
+    KYC_AWS_ADMISSION_CREATE_BURST: '20',
+    KYC_AWS_ADMISSION_RESULT_TPS: '20',
+    KYC_AWS_ADMISSION_RESULT_BURST: '20',
+    KYC_AWS_ADMISSION_MAX_CONCURRENT_SESSIONS: '70',
+    KYC_AWS_ADMISSION_LEASE_TTL_SECONDS: '180',
+    KYC_AWS_ADMISSION_MAX_WAIT_MS: '15000',
     LEAF_APPROVED_FINANCIAL_POLICY_ID: 'runtime_tiered_percent_above_50_v1',
     LEAF_FINANCIAL_POLICY_APPROVAL_REF: 'policy-test-approval'
   };
@@ -67,6 +75,14 @@ describe('validate-runtime-config Woovi webhook production gates', () => {
     KYC_AWS_COMPARE_FACES_ENABLED: 'true',
     KYC_AWS_COMPARE_FACES_SDK_MAX_ATTEMPTS: '1',
     KYC_AWS_COMPARE_RESULT_PERSIST_MAX_ATTEMPTS: '3',
+    KYC_AWS_ADMISSION_CONTROL_ENABLED: 'true',
+    KYC_AWS_ADMISSION_CREATE_TPS: '20',
+    KYC_AWS_ADMISSION_CREATE_BURST: '20',
+    KYC_AWS_ADMISSION_RESULT_TPS: '20',
+    KYC_AWS_ADMISSION_RESULT_BURST: '20',
+    KYC_AWS_ADMISSION_MAX_CONCURRENT_SESSIONS: '70',
+    KYC_AWS_ADMISSION_LEASE_TTL_SECONDS: '180',
+    KYC_AWS_ADMISSION_MAX_WAIT_MS: '15000',
     ENABLE_CNH_FACE_BIOMETRICS: 'false',
     MOBILE_FACE_EMBEDDING_ENABLED: 'false',
     MOBILE_FACE_EMBEDDING_LOCAL_COMPARE_FALLBACK: 'false',
@@ -1220,6 +1236,26 @@ describe('validate-runtime-config Woovi webhook production gates', () => {
       liveAttestation: 'required_at_runtime'
     });
     expect(result.stdout).not.toContain('face-key');
+  });
+
+  it('blocks strict biometric production without distributed AWS admission control', () => {
+    const result = runValidator({
+      ...baseProdEnv,
+      ...strictKycProdEnv,
+      KYC_AWS_ADMISSION_CONTROL_ENABLED: 'false'
+    });
+
+    expect(result.status).toBe(1);
+    expect(result.report.summary.blockers).toContain(
+      'KYC_PRODUCTION_BIOMETRICS_ENABLED=true exige KYC_AWS_ADMISSION_CONTROL_ENABLED=true em produção'
+    );
+    expect(result.report.diagnostics.awsKycAdmissionControl).toMatchObject({
+      enabled: { value: false },
+      configValid: true,
+      createTps: 20,
+      maxConcurrentSessions: 70,
+      maxWaitMs: 15000
+    });
   });
 
   it('blocks redis_noeviction activation without attestation, quarantine and generation policy', () => {

@@ -692,6 +692,42 @@ function main() {
     && awsCostDailyLimitUsd > 0
     && awsCostMonthlyLimitUsd > 0
     && awsCostDailyLimitUsd <= awsCostMonthlyLimitUsd;
+  const awsAdmissionControl = booleanDiagnostic(
+    'KYC_AWS_ADMISSION_CONTROL_ENABLED',
+    false
+  );
+  const awsAdmissionCreateTps = Number(process.env.KYC_AWS_ADMISSION_CREATE_TPS);
+  const awsAdmissionCreateBurst = Number(process.env.KYC_AWS_ADMISSION_CREATE_BURST);
+  const awsAdmissionResultTps = Number(process.env.KYC_AWS_ADMISSION_RESULT_TPS);
+  const awsAdmissionResultBurst = Number(process.env.KYC_AWS_ADMISSION_RESULT_BURST);
+  const awsAdmissionMaxConcurrent = Number(
+    process.env.KYC_AWS_ADMISSION_MAX_CONCURRENT_SESSIONS
+  );
+  const awsAdmissionLeaseTtlSeconds = Number(
+    process.env.KYC_AWS_ADMISSION_LEASE_TTL_SECONDS
+  );
+  const awsAdmissionMaxWaitMs = Number(process.env.KYC_AWS_ADMISSION_MAX_WAIT_MS);
+  const awsAdmissionConfigValid = Number.isFinite(awsAdmissionCreateTps)
+    && awsAdmissionCreateTps >= 1
+    && awsAdmissionCreateTps <= 25
+    && Number.isInteger(awsAdmissionCreateBurst)
+    && awsAdmissionCreateBurst >= 1
+    && awsAdmissionCreateBurst <= 25
+    && Number.isFinite(awsAdmissionResultTps)
+    && awsAdmissionResultTps >= 1
+    && awsAdmissionResultTps <= 25
+    && Number.isInteger(awsAdmissionResultBurst)
+    && awsAdmissionResultBurst >= 1
+    && awsAdmissionResultBurst <= 25
+    && Number.isInteger(awsAdmissionMaxConcurrent)
+    && awsAdmissionMaxConcurrent >= 1
+    && awsAdmissionMaxConcurrent <= 75
+    && Number.isInteger(awsAdmissionLeaseTtlSeconds)
+    && awsAdmissionLeaseTtlSeconds >= 60
+    && awsAdmissionLeaseTtlSeconds <= 180
+    && Number.isInteger(awsAdmissionMaxWaitMs)
+    && awsAdmissionMaxWaitMs >= 0
+    && awsAdmissionMaxWaitMs <= 30000;
   const legacyRuntimeDiagnostics = LEGACY_RUNTIME_FLAGS.reduce((acc, key) => {
     acc[key] = booleanDiagnostic(key, false);
     return acc;
@@ -733,6 +769,12 @@ function main() {
   }
   if (nodeEnv === 'production' && biometricReadiness.enabled && !activeTripIndex.value) {
     blockers.push('KYC_PRODUCTION_BIOMETRICS_ENABLED=true exige ENABLE_ACTIVE_TRIP_INDEX=true em produção');
+  }
+  if (nodeEnv === 'production' && biometricReadiness.enabled && !awsAdmissionControl.value) {
+    blockers.push('KYC_PRODUCTION_BIOMETRICS_ENABLED=true exige KYC_AWS_ADMISSION_CONTROL_ENABLED=true em produção');
+  }
+  if (nodeEnv === 'production' && biometricReadiness.enabled && !awsAdmissionConfigValid) {
+    blockers.push('Admissão AWS KYC inválida: TPS/burst devem ficar entre 1 e 25, concorrência entre 1 e 75, lease entre 60 e 180s e espera entre 0 e 30000ms');
   }
   if (!activeTripAuthorityModeValid) {
     blockers.push('KYC_ACTIVE_TRIP_AUTHORITY_MODE deve ser vazio ou redis_noeviction');
@@ -1179,6 +1221,17 @@ function main() {
         enabled: awsCostGuard,
         limitsValid: awsCostLimitsValid,
         timeZoneUtc: awsCostTimeZone === 'UTC'
+      },
+      awsKycAdmissionControl: {
+        enabled: awsAdmissionControl,
+        configValid: awsAdmissionConfigValid,
+        createTps: awsAdmissionCreateTps,
+        createBurst: awsAdmissionCreateBurst,
+        resultTps: awsAdmissionResultTps,
+        resultBurst: awsAdmissionResultBurst,
+        maxConcurrentSessions: awsAdmissionMaxConcurrent,
+        leaseTtlSeconds: awsAdmissionLeaseTtlSeconds,
+        maxWaitMs: awsAdmissionMaxWaitMs
       },
       webhookSignature: {
         verifierKeysPresent: effectiveWebhookVerifierKeysPresent,
