@@ -514,6 +514,68 @@ function hasValidBackendQuoteLock(value) {
   );
 }
 
+function resolveReusableInitialPricingQuote({
+  initialPricingQuote,
+  expectedRouteKey,
+  expectedQuoteSessionId,
+  expectedPlanId,
+  fallbackRouteSnapshot,
+}) {
+  const quote = initialPricingQuote?.quote;
+  const initialRouteKey = String(initialPricingQuote?.routeKey || "").trim();
+  const initialQuoteSessionId = String(
+    initialPricingQuote?.quoteSessionId || quote?.quoteSessionId || "",
+  ).trim();
+  const initialPlanId = String(initialPricingQuote?.planId || "")
+    .trim()
+    .toLowerCase();
+  const expiresAt = Number(initialPricingQuote?.expiresAt);
+
+  if (
+    !quote ||
+    !initialRouteKey ||
+    initialRouteKey !== String(expectedRouteKey || "").trim() ||
+    !initialQuoteSessionId ||
+    initialQuoteSessionId !== String(expectedQuoteSessionId || "").trim() ||
+    (initialPlanId && initialPlanId !== String(expectedPlanId || "").trim().toLowerCase()) ||
+    (!QA_DISABLE_QUOTE_EXPIRATION &&
+      (!Number.isFinite(expiresAt) || expiresAt <= Date.now()))
+  ) {
+    return null;
+  }
+
+  const reusableQuote = {
+    ...quote,
+    quoteSessionId: initialQuoteSessionId,
+    quoteLockId: initialPricingQuote.quoteLockId || quote.quoteLockId,
+    quoteLockExpiresAt:
+      initialPricingQuote.quoteLockExpiresAt || quote.quoteLockExpiresAt,
+    quoteRouteSnapshot:
+      initialPricingQuote.quoteRouteSnapshot ||
+      quote.quoteRouteSnapshot ||
+      fallbackRouteSnapshot,
+    routeCoordinates:
+      initialPricingQuote.routeCoordinates || quote.routeCoordinates || [],
+    trafficSegments:
+      initialPricingQuote.trafficSegments || quote.trafficSegments || [],
+    routePolyline:
+      initialPricingQuote.routePolyline || quote.routePolyline || null,
+    tollFee: Number(initialPricingQuote.tollFee ?? quote.tollFee ?? 0) || 0,
+    tolls: initialPricingQuote.tolls || quote.tolls || [],
+  };
+
+  const estimatedFare = Number(reusableQuote.estimatedFare);
+  if (
+    !Number.isFinite(estimatedFare) ||
+    estimatedFare <= 0 ||
+    !hasValidBackendQuoteLock(reusableQuote)
+  ) {
+    return null;
+  }
+
+  return reusableQuote;
+}
+
 function normalizeInitialSelectedDestination(value) {
   if (!value || typeof value !== "object") {
     return null;
@@ -1716,6 +1778,12 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
         distanceKm: initialPricingQuote.distanceKm,
         durationMin: initialPricingQuote.durationMin,
         arrivalTime: initialPricingQuote.arrivalTime,
+        quoteRouteSnapshot: initialPricingQuote.quoteRouteSnapshot,
+        routeCoordinates: initialPricingQuote.routeCoordinates,
+        trafficSegments: initialPricingQuote.trafficSegments,
+        routePolyline: initialPricingQuote.routePolyline,
+        tollFee: initialPricingQuote.tollFee,
+        tolls: initialPricingQuote.tolls,
         createdAt: initialPricingQuote.createdAt,
         expiresAt: initialPricingQuote.expiresAt,
       });
@@ -1917,6 +1985,14 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
       Boolean(fareQuoteRouteKey);
 
     if (!canLockQuote) {
+      if (
+        step === SEARCH_STEP &&
+        !isExtensionFlow &&
+        initialSelectedDestination &&
+        initialPricingQuote?.routeKey
+      ) {
+        return;
+      }
       setFareQuoteLock(null);
       return;
     }
@@ -1948,6 +2024,9 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
   }, [
     canRequestRide,
     fareQuoteRouteKey,
+    initialPricingQuote?.routeKey,
+    initialSelectedDestination,
+    isExtensionFlow,
     liveArrivalTime,
     liveDistanceKm,
     liveDurationMin,
@@ -2379,6 +2458,24 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
       destinationLocation: pricingDestinationLocation,
       carType: selectedPlanData.title,
     });
+    const reusableInitialQuote = resolveReusableInitialPricingQuote({
+      initialPricingQuote,
+      expectedRouteKey: fareQuoteRouteKey,
+      expectedQuoteSessionId: fareQuoteLock?.quoteSessionId,
+      expectedPlanId: selectedPlan,
+      fallbackRouteSnapshot: pricingRouteSnapshot,
+    });
+
+    if (reusableInitialQuote) {
+      selectedPricingQuoteCacheRef.current[selectedPricingQuoteRequestKey] = {
+        quote: reusableInitialQuote,
+        expiresAt: Number(initialPricingQuote.expiresAt),
+      };
+      setSelectedPricingQuote(reusableInitialQuote);
+      setPricingQuoteLoading(false);
+      setPricingQuoteError("");
+      return undefined;
+    }
 
     fetchDynamicPricingQuote(
       {
@@ -2495,6 +2592,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
     routeGuardBlocked,
     selectedPlanData?.title,
     selectedPlanData?.value,
+    selectedPlan,
     selectedPricingQuoteRequestKey,
     step,
   ]);
