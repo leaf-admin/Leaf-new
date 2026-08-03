@@ -2449,6 +2449,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     homeCanonicalRouteReady,
     homeQuoteDistanceKm,
     homeQuoteDurationMin,
+    homeQuoteRefreshNonce,
     homeRoutePreview?.key,
     homeRoutePreview?.polylinePoints,
     homeRoutePreview?.tollFee,

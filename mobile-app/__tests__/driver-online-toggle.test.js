@@ -871,6 +871,108 @@ describe('driver online toggle', () => {
     }
   });
 
+  it('executes exactly two automatic backend quote refreshes before requiring passenger action', async () => {
+    const destination = {
+      id: 'place-leblon-refresh',
+      name: 'Leblon',
+      address: 'Rio de Janeiro - RJ, Brasil',
+      coordinate: {
+        latitude: -22.9842698,
+        longitude: -43.223168,
+      },
+    };
+    const routeCoordinates = [
+      { latitude: -22.97045, longitude: -43.18276 },
+      { latitude: -22.9768, longitude: -43.20085 },
+      { latitude: -22.9842698, longitude: -43.223168 },
+    ];
+    const loadRecentDestinations = jest.fn().mockResolvedValue([destination]);
+    const mapRoute = require('../src/screens/prototype/prototypeMapRoute');
+    mapRoute.getPrototypeMapRoute.mockReturnValue({
+      origin: routeCoordinates[0],
+      destination: routeCoordinates[routeCoordinates.length - 1],
+      coordinates: routeCoordinates,
+      trafficSegments: [],
+      destinationLabel: 'Leblon',
+      destinationAddress: 'Rio de Janeiro - RJ, Brasil',
+    });
+
+    const originalFetch = global.fetch;
+    global.fetch = jest.fn(async (url) => {
+      if (!String(url).includes('/api/places/directions')) {
+        throw new Error(`Unexpected fetch in quote refresh test: ${String(url)}`);
+      }
+
+      return {
+        ok: true,
+        status: 200,
+        json: jest.fn().mockResolvedValue({
+          status: 'success',
+          data: {
+            coordinates: routeCoordinates,
+            distance_in_km: 8.3,
+            time_in_secs: 1080,
+            trafficSegments: [],
+          },
+        }),
+      };
+    });
+    fetchDynamicPricingQuote.mockImplementation(async () => ({
+      estimatedFare: 20.23,
+      grossEstimatedFare: 20.23,
+      quoteLockId: `quote-lock-refresh-${fetchDynamicPricingQuote.mock.calls.length}`,
+      quoteLockExpiresAt: new Date(Date.now() + 80).toISOString(),
+      pricingPayload: {},
+    }));
+
+    usePrototypeRideRuntime.mockReturnValue(
+      buildPassengerRuntime({
+        currentCoordinate: routeCoordinates[0],
+        currentAddress: 'Avenida Atlântica, 2213, Rio de Janeiro',
+        loadRecentDestinations,
+        loadDestinationSuggestions: jest.fn().mockResolvedValue([destination]),
+        resolveDestinationInput: jest.fn().mockResolvedValue(destination),
+        selectDestination: jest.fn().mockResolvedValue(destination),
+      }),
+    );
+
+    const navigation = {
+      navigate: jest.fn(),
+      replace: jest.fn(),
+      canGoBack: jest.fn(() => false),
+      goBack: jest.fn(),
+    };
+
+    try {
+      const screen = render(
+        <RobotaxiHomeScreen navigation={navigation} route={{ params: {} }} />,
+      );
+
+      fireEvent.press(screen.getByTestId('mock-passenger-destination-open'));
+      await waitFor(() => {
+        expect(screen.getByTestId('mock-passenger-destination-result-0')).toBeTruthy();
+      });
+      fireEvent.press(screen.getByTestId('mock-passenger-destination-result-0'));
+
+      await waitFor(() => {
+        expect(fetchDynamicPricingQuote).toHaveBeenCalledTimes(9);
+        expect(screen.getByText('Atualizar preço')).toBeTruthy();
+      });
+
+      const quoteSessionIds = fetchDynamicPricingQuote.mock.calls.map(
+        ([payload]) => payload.quoteSessionId,
+      );
+      expect(new Set(quoteSessionIds)).toHaveProperty('size', 1);
+
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 150));
+      });
+      expect(fetchDynamicPricingQuote).toHaveBeenCalledTimes(9);
+    } finally {
+      global.fetch = originalFetch;
+    }
+  });
+
   it('shows the daily online limit message when the backend forces the driver offline', () => {
     usePrototypeRideRuntime.mockReturnValue(
       buildDriverRuntime({
