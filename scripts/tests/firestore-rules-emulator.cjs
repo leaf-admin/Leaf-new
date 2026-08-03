@@ -79,6 +79,12 @@ async function seedFixtures(owner, other) {
     firestore.collection('adminUsers').doc(other.uid).set({ role: 'admin' }),
     firestore.collection('driver_withdrawals').doc('withdraw-owner').set({ driverId: owner.uid }),
     firestore.collection('driver_withdrawals').doc('withdraw-other').set({ driverId: other.uid }),
+    firestore.collection('driver_balances').doc(owner.uid).set({ driverId: owner.uid }),
+    firestore.collection('driver_balances').doc(owner.uid).collection('transactions').doc('tx-owner').set({ driverId: owner.uid }),
+    firestore.collection('ride_payments').doc('payment-1').set({ status: 'confirmed' }),
+    firestore.collection('payment_holdings').doc('ride-1').set({ status: 'held' }),
+    firestore.collection('payment_history').doc('event-1').set({ status: 'posted' }),
+    firestore.collection('payment_distributions').doc('ride-1').set({ status: 'distributed' }),
     firestore.collection('support_tickets').doc('ticket-owner').set({ userId: owner.uid }),
     firestore.collection('support_tickets').doc('ticket-other').set({ userId: other.uid }),
     firestore.collection('vehicles').doc('vehicle-1').set({ ownerId: owner.uid }),
@@ -126,6 +132,40 @@ async function main() {
     'motorista não cria saque fora da API'
   );
 
+  assertAllowed(await firestoreRequest(owner, `driver_balances/${owner.uid}`), 'motorista lê o próprio saldo');
+  assertAllowed(
+    await firestoreRequest(owner, `driver_balances/${owner.uid}/transactions/tx-owner`),
+    'motorista lê a própria transação'
+  );
+  assertDenied(
+    await firestoreRequest(owner, `driver_balances/${owner.uid}`, { method: 'PATCH', data: { status: 'changed' } }),
+    'motorista não altera o próprio saldo fora da API'
+  );
+  assertDenied(
+    await firestoreRequest(superAdmin, `driver_balances/${owner.uid}`, { method: 'PATCH', data: { status: 'changed' } }),
+    'super-admin cliente não altera saldo fora da API'
+  );
+  assertDenied(
+    await firestoreRequest(superAdmin, `driver_balances/${owner.uid}/transactions/tx-owner`, { method: 'PATCH', data: { status: 'changed' } }),
+    'super-admin cliente não altera transação fora da API'
+  );
+  assertDenied(
+    await firestoreRequest(superAdmin, 'ride_payments/payment-1', { method: 'PATCH', data: { status: 'changed' } }),
+    'super-admin cliente não altera pagamento fora da API'
+  );
+  assertDenied(
+    await firestoreRequest(superAdmin, 'payment_holdings/ride-1', { method: 'PATCH', data: { status: 'changed' } }),
+    'super-admin cliente não altera holding fora da API'
+  );
+  assertDenied(
+    await firestoreRequest(superAdmin, 'payment_history/event-1', { method: 'PATCH', data: { status: 'changed' } }),
+    'super-admin cliente não altera histórico financeiro fora da API'
+  );
+  assertDenied(
+    await firestoreRequest(superAdmin, 'payment_distributions/ride-1', { method: 'PATCH', data: { status: 'changed' } }),
+    'super-admin cliente não altera distribuição financeira fora da API'
+  );
+
   assertAllowed(await firestoreRequest(owner, 'support_tickets/ticket-owner'), 'usuário lê o próprio ticket');
   assertDenied(await firestoreRequest(owner, 'support_tickets/ticket-other'), 'usuário não lê ticket alheio');
   assertAllowed(await firestoreRequest(adminUser, 'support_tickets/ticket-other'), 'admin lê ticket para atendimento');
@@ -140,7 +180,7 @@ async function main() {
     'trip_data não é escrito pelo cliente'
   );
 
-  console.log('[firestore-rules] 19 contratos de autorização aprovados');
+  console.log('[firestore-rules] 28 contratos de autorização aprovados');
 }
 
 main().catch((error) => {
