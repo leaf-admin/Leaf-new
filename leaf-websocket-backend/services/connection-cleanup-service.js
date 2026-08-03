@@ -18,6 +18,8 @@ const {
     commitDriverOnlineProjection
 } = require('./driver-online-projection-service');
 
+const ELIGIBLE_GEO_RECONCILIATION_BATCH_SIZE = 50;
+
 class ConnectionCleanupService {
     constructor(io) {
         this.io = io;
@@ -285,20 +287,51 @@ class ConnectionCleanupService {
             }
 
             const now = Date.now();
-            const staleThresholdMs = Math.max(60000, this.config.eligibleGeoStaleMs);
+            const configuredStaleThresholdMs = Number(this.config.eligibleGeoStaleMs);
+            const staleThresholdMs = Math.max(
+                60000,
+                Number.isFinite(configuredStaleThresholdMs) ? configuredStaleThresholdMs : 180000
+            );
+            const configuredHeartbeatTimeoutMs = Number(this.config.heartbeatTimeout);
+            const presenceFreshnessMs = Math.max(
+                30000,
+                Number.isFinite(configuredHeartbeatTimeoutMs) ? configuredHeartbeatTimeoutMs : 120000
+            );
             const readPipeline = this.redis.pipeline();
             driverIds.forEach((driverId) => {
-                readPipeline.hmget(`driver:${driverId}`, 'isOnline', 'dispatchEligible', 'lastUpdate', 'timestamp');
+                readPipeline.hmget(
+                    `driver:${driverId}`,
+                    'isOnline',
+                    'dispatchEligible',
+                    'lastUpdate',
+                    'timestamp',
+                    'status',
+                    'dispatchEligibilityCode'
+                );
             });
 
             const snapshots = await readPipeline.exec();
-            const cleanupPipeline = this.redis.pipeline();
-            let removed = 0;
+            const candidates = [];
 
             for (let i = 0; i < driverIds.length; i += 1) {
                 const driverId = driverIds[i];
-                const result = snapshots?.[i]?.[1] || [];
-                const [isOnlineRaw, dispatchEligibleRaw, lastUpdateRaw, timestampRaw] = result;
+                const [snapshotError, result] = snapshots?.[i] || [];
+                if (snapshotError || !Array.isArray(result)) {
+                    logger.error(
+                        `❌ [ConnectionCleanupService] Falha ao ler estado do motorista ${driverId} durante reconciliação GEO:`,
+                        snapshotError || new Error('Resposta HMGET inválida')
+                    );
+                    continue;
+                }
+
+                const [
+                    isOnlineRaw,
+                    dispatchEligibleRaw,
+                    lastUpdateRaw,
+                    timestampRaw,
+                    statusRaw,
+                    dispatchEligibilityCodeRaw
+                ] = result;
 
                 const isOnline = String(isOnlineRaw || '').toLowerCase() === 'true';
                 const dispatchEligible = String(dispatchEligibleRaw || '').toLowerCase() === 'true';
@@ -313,16 +346,85 @@ class ConnectionCleanupService {
                 );
                 const shouldRemoveForStale = stale && !hasLocalConnectedDriver;
                 if (!isOnline || !dispatchEligible || shouldRemoveForStale) {
-                    cleanupPipeline.zrem(eligibleDriverGeoKey, driverId);
-                    if (!isOnline || shouldRemoveForStale) {
-                        cleanupPipeline.srem('online_drivers', driverId);
-                    }
-                    removed += 1;
+                    const checkedAt = new Date(now).toISOString();
+                    const shouldProjectOffline = !isOnline || shouldRemoveForStale;
+                    candidates.push({
+                        driverId,
+                        projection: {
+                            driverId,
+                            eligibleGeoKey: eligibleDriverGeoKey,
+                            projectionScope: shouldProjectOffline ? 'full' : 'eligibility_only',
+                            isOnline: shouldProjectOffline ? false : undefined,
+                            dispatchEligible: false,
+                            expectedFields: {
+                                isOnline: isOnlineRaw,
+                                dispatchEligible: dispatchEligibleRaw,
+                                lastUpdate: lastUpdateRaw,
+                                timestamp: timestampRaw,
+                                status: statusRaw,
+                                dispatchEligibilityCode: dispatchEligibilityCodeRaw
+                            },
+                            presenceFreshAfterMs: isOnline && shouldRemoveForStale
+                                ? now - presenceFreshnessMs
+                                : 0,
+                            fields: shouldProjectOffline
+                                ? {
+                                    status: 'OFFLINE',
+                                    isOnline: 'false',
+                                    dispatchEligible: 'false',
+                                    dispatchEligibilityCode: shouldRemoveForStale
+                                        ? 'STALE_HEARTBEAT'
+                                        : (dispatchEligibilityCodeRaw || 'OFFLINE'),
+                                    dispatchEligibilityCheckedAt: checkedAt,
+                                    updatedAt: checkedAt
+                                }
+                                : {
+                                    dispatchEligible: 'false',
+                                    dispatchEligibilityCheckedAt: checkedAt
+                                }
+                        }
+                    });
                 }
             }
 
+            let removed = 0;
+            for (
+                let offset = 0;
+                offset < candidates.length;
+                offset += ELIGIBLE_GEO_RECONCILIATION_BATCH_SIZE
+            ) {
+                const batch = candidates.slice(
+                    offset,
+                    offset + ELIGIBLE_GEO_RECONCILIATION_BATCH_SIZE
+                );
+                const outcomes = await Promise.allSettled(batch.map(({ projection }) => (
+                    commitDriverOnlineProjection(this.redis, projection)
+                )));
+
+                outcomes.forEach((outcome, index) => {
+                    const candidate = batch[index];
+                    if (outcome.status === 'fulfilled' && outcome.value?.success === true) {
+                        removed += 1;
+                        return;
+                    }
+
+                    if (outcome.status === 'fulfilled' && outcome.value?.skipped === true) {
+                        logger.debug(
+                            `ℹ️ [ConnectionCleanupService] Reconciliação GEO ignorada para ${candidate.driverId}: ${outcome.value.code}`
+                        );
+                        return;
+                    }
+
+                    logger.error(
+                        `❌ [ConnectionCleanupService] Falha ao reconciliar GEO elegível do motorista ${candidate.driverId}:`,
+                        outcome.status === 'rejected'
+                            ? outcome.reason
+                            : new Error('Projeção atômica não confirmada')
+                    );
+                });
+            }
+
             if (removed > 0) {
-                await cleanupPipeline.exec();
                 logger.warn(`⚠️ [ConnectionCleanupService] Removidos ${removed} motoristas stale/offline do GEO elegível`);
             }
 
