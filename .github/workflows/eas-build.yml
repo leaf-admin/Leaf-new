@@ -124,8 +124,8 @@ jobs:
       - name: Validate versioned pilot geofence matrix
         run: npm run qa:geofence-pilot
 
-      - name: Assert sensitive route guards
-        run: npm run test:route-guards
+      - name: Assert backend architecture contracts
+        run: npm run test:architecture
 
       - name: Run backend unit tests
         run: npm run test:unit
