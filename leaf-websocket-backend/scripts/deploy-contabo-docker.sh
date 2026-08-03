@@ -546,6 +546,7 @@ remote "
   validator_image=\$(docker inspect --format '{{.Image}}' leaf-websocket)
   test -n \"\$validator_image\"
   docker run --rm \
+    --user 0:0 \
     --env-file .env \
     -e ENV_FILE=/dev/null \
     -e NODE_ENV=production \
@@ -578,6 +579,7 @@ remote "
   docker image inspect --format '{{range .Config.Env}}{{println .}}{{end}}' \"\$candidate_image\" |
     grep -Fxq 'GIT_SHA=$RELEASE_SHA'
   docker run --rm \
+    --user 0:0 \
     --env-file .env \
     -e ENV_FILE=/dev/null \
     -e NODE_ENV=production \
