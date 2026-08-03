@@ -19,8 +19,16 @@ const STATUS = {
   ERROR: 'error',
 };
 const SAFE_REVIEW_CONTEXT_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/;
-export const AWS_LIVENESS_RESULT_POLL_INTERVAL_MS = 1000;
-export const AWS_LIVENESS_RESULT_POLL_MAX_ATTEMPTS = 30;
+export const AWS_LIVENESS_ADMISSION_RETRY_WINDOW_MS = 15 * 60 * 1000;
+export const AWS_LIVENESS_ADMISSION_RETRY_BASE_MS = 1000;
+export const AWS_LIVENESS_ADMISSION_RETRY_MAX_DELAY_MS = 30000;
+export const AWS_LIVENESS_ADMISSION_PROVIDER_HINT_MAX_MS = 5000;
+export const AWS_LIVENESS_RESULT_POLL_INTERVAL_MS = 4000;
+export const AWS_LIVENESS_RESULT_POLL_JITTER_MS = 1000;
+export const AWS_LIVENESS_RESULT_POLL_MAX_ATTEMPTS = 45;
+export const AWS_LIVENESS_RESULT_POLL_MAX_INTERVAL_MS =
+  AWS_LIVENESS_RESULT_POLL_INTERVAL_MS + AWS_LIVENESS_RESULT_POLL_JITTER_MS;
+const AWS_ADMISSION_CAPACITY_CODE = 'KYC_AWS_ADMISSION_CAPACITY_EXHAUSTED';
 const TERMINAL_RESULT_ERROR_CODES = new Set([
   'AWS_LIVENESS_SESSION_EXPIRED',
   'AWS_LIVENESS_SESSION_NOT_FOUND',
@@ -37,7 +45,7 @@ const waitFor = (delayMs) => new Promise((resolve) => setTimeout(resolve, delayM
 const STATUS_PRESENTATION = {
   [STATUS.PREPARING]: {
     title: 'Prepare seu rosto',
-    message: 'A câmera abrirá em instantes. A captura começa automaticamente quando seu rosto estiver enquadrado.',
+    message: 'Estamos preparando sua validação com segurança. Em horários de maior movimento, isso pode levar alguns instantes.',
   },
   [STATUS.RUNNING]: {
     title: 'Posicione seu rosto',
@@ -118,11 +126,92 @@ export function createFlowError(result = {}, fallbackMessage) {
   return error;
 }
 
+function responseCode(result = {}) {
+  return String(
+    result?.code || result?.response?.data?.code || result?.payload?.code || '',
+  ).trim().toUpperCase();
+}
+
+export function admissionRetryDelayMs({ attempt, retryAfterSeconds, random = Math.random } = {}) {
+  const safeAttempt = Math.max(1, Number.parseInt(attempt, 10) || 1);
+  const exponentialCeiling = Math.min(
+    AWS_LIVENESS_ADMISSION_RETRY_MAX_DELAY_MS,
+    AWS_LIVENESS_ADMISSION_RETRY_BASE_MS * (2 ** Math.min(safeAttempt - 1, 8)),
+  );
+  const providerHintMs = Number.isFinite(Number(retryAfterSeconds))
+    ? Math.min(
+      AWS_LIVENESS_ADMISSION_PROVIDER_HINT_MAX_MS,
+      Math.max(AWS_LIVENESS_ADMISSION_RETRY_BASE_MS, Number(retryAfterSeconds) * 1000),
+    )
+    : AWS_LIVENESS_ADMISSION_RETRY_BASE_MS;
+  const upperBound = Math.min(
+    AWS_LIVENESS_ADMISSION_RETRY_MAX_DELAY_MS,
+    Math.max(exponentialCeiling, providerHintMs + AWS_LIVENESS_ADMISSION_RETRY_BASE_MS),
+  );
+  const jitterRange = Math.max(0, upperBound - providerHintMs);
+  const randomValue = Math.max(0, Math.min(0.999999, Number(random?.()) || 0));
+  return Math.round(providerHintMs + (jitterRange * randomValue));
+}
+
+export async function createAwsLivenessSessionWithAdmissionRetry({
+  driverId,
+  options = {},
+  service = kycService,
+  isCancelled = () => false,
+  wait = waitFor,
+  now = () => Date.now(),
+  random = Math.random,
+  retryWindowMs = AWS_LIVENESS_ADMISSION_RETRY_WINDOW_MS,
+} = {}) {
+  const startedAt = now();
+  let retryAttempt = 0;
+  let lastCapacityResponse = null;
+
+  while (!isCancelled()) {
+    const response = await service.createAwsLivenessSession(driverId, options);
+    if (response?.success || responseCode(response) !== AWS_ADMISSION_CAPACITY_CODE) {
+      return response;
+    }
+
+    lastCapacityResponse = response;
+    retryAttempt += 1;
+    const elapsedMs = Math.max(0, now() - startedAt);
+    const remainingMs = retryWindowMs - elapsedMs;
+    if (remainingMs <= 0 || isCancelled()) break;
+
+    const delayMs = Math.min(
+      remainingMs,
+      admissionRetryDelayMs({
+        attempt: retryAttempt,
+        retryAfterSeconds: response.retryAfterSeconds,
+        random,
+      }),
+    );
+    await wait(delayMs);
+  }
+
+  if (isCancelled()) {
+    return {
+      success: false,
+      code: 'AWS_LIVENESS_CANCELLED',
+      cancelled: true,
+    };
+  }
+  return {
+    ...(lastCapacityResponse || {}),
+    success: false,
+    code: AWS_ADMISSION_CAPACITY_CODE,
+    retryable: true,
+    admissionRetryExhausted: true,
+  };
+}
+
 export async function pollAwsLivenessResult({
   driverId,
   sessionId,
   isCancelled = () => false,
   wait = waitFor,
+  random = Math.random,
 } = {}) {
   let lastFailure = null;
 
@@ -157,7 +246,11 @@ export async function pollAwsLivenessResult({
     }
 
     if (attempt < AWS_LIVENESS_RESULT_POLL_MAX_ATTEMPTS) {
-      await wait(AWS_LIVENESS_RESULT_POLL_INTERVAL_MS);
+      const randomValue = Math.max(0, Math.min(0.999999, Number(random?.()) || 0));
+      await wait(
+        AWS_LIVENESS_RESULT_POLL_INTERVAL_MS
+        + Math.round(AWS_LIVENESS_RESULT_POLL_JITTER_MS * randomValue),
+      );
     }
   }
 
@@ -291,9 +384,13 @@ export default function AWSNativeLivenessScreen({
         if (!isCurrentRun(run)) return;
 
         setStatus(STATUS.PREPARING);
-        const sessionResponse = await kycService.createAwsLivenessSession(driverId, {
-          challengeId,
-          requirement,
+        const sessionResponse = await createAwsLivenessSessionWithAdmissionRetry({
+          driverId,
+          options: {
+            challengeId,
+            requirement,
+          },
+          isCancelled: () => !isCurrentRun(run),
         });
 
         if (!sessionResponse.success || !sessionResponse.data?.sessionId) {

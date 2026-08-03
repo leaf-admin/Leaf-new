@@ -3,7 +3,8 @@ import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 import { Camera } from 'expo-camera';
 
 import AWSNativeLivenessScreen, {
-  AWS_LIVENESS_RESULT_POLL_INTERVAL_MS,
+  AWS_LIVENESS_ADMISSION_RETRY_MAX_DELAY_MS,
+  AWS_LIVENESS_RESULT_POLL_MAX_INTERVAL_MS,
   AWS_LIVENESS_RESULT_POLL_MAX_ATTEMPTS,
 } from '../src/components/KYC/AWSNativeLivenessScreen';
 import kycService from '../src/services/KYCService';
@@ -69,7 +70,7 @@ describe('AWSNativeLivenessScreen', () => {
     expect(screen.getByText('Prepare seu rosto')).toBeTruthy();
     expect(
       screen.getByText(
-        'A câmera abrirá em instantes. A captura começa automaticamente quando seu rosto estiver enquadrado.'
+        'Estamos preparando sua validação com segurança. Em horários de maior movimento, isso pode levar alguns instantes.'
       )
     ).toBeTruthy();
     expect(screen.queryAllByRole('button')).toHaveLength(0);
@@ -120,6 +121,104 @@ describe('AWSNativeLivenessScreen', () => {
     );
 
     screen.unmount();
+  });
+
+  test('retries admission capacity transparently before creating one paid session', async () => {
+    jest.useFakeTimers();
+    kycService.createAwsLivenessSession
+      .mockResolvedValueOnce({
+        success: false,
+        status: 503,
+        code: 'KYC_AWS_ADMISSION_CAPACITY_EXHAUSTED',
+        retryAfterSeconds: 5,
+        retryable: true,
+      })
+      .mockResolvedValueOnce({
+        success: true,
+        data: { sessionId: 'session-after-capacity', region: 'us-east-1' },
+      });
+    kycService.getAwsLivenessCredentials.mockResolvedValue({
+      success: true,
+      data: {
+        credentials: {
+          accessKeyId: 'access-key',
+          secretAccessKey: 'secret-key',
+          sessionToken: 'session-token',
+        },
+      },
+    });
+    nativeAwsLivenessService.start.mockImplementation(() => new Promise(() => {}));
+
+    const screen = render(
+      <AWSNativeLivenessScreen
+        driverId="driver-burst"
+        challengeId="challenge-burst"
+        requirement="LIVENESS_REQUIRED"
+        onCancel={jest.fn()}
+      />
+    );
+
+    await waitFor(() => {
+      expect(kycService.createAwsLivenessSession).toHaveBeenCalledTimes(1);
+      expect(screen.getByText('Prepare seu rosto')).toBeTruthy();
+    });
+
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(AWS_LIVENESS_ADMISSION_RETRY_MAX_DELAY_MS);
+    });
+
+    await waitFor(() => {
+      expect(kycService.createAwsLivenessSession).toHaveBeenCalledTimes(2);
+      expect(kycService.getAwsLivenessCredentials).toHaveBeenCalledWith(
+        'driver-burst',
+        'session-after-capacity'
+      );
+    });
+    expect(kycService.createAwsLivenessSession.mock.calls).toEqual([
+      ['driver-burst', {
+        challengeId: 'challenge-burst',
+        requirement: 'LIVENESS_REQUIRED',
+      }],
+      ['driver-burst', {
+        challengeId: 'challenge-burst',
+        requirement: 'LIVENESS_REQUIRED',
+      }],
+    ]);
+    expect(nativeAwsLivenessService.start).toHaveBeenCalledTimes(1);
+
+    screen.unmount();
+  });
+
+  test('stops admission retries when the surface is closed before capacity is available', async () => {
+    jest.useFakeTimers();
+    kycService.createAwsLivenessSession.mockResolvedValue({
+      success: false,
+      status: 503,
+      code: 'KYC_AWS_ADMISSION_CAPACITY_EXHAUSTED',
+      retryAfterSeconds: 5,
+      retryable: true,
+    });
+
+    const screen = render(
+      <AWSNativeLivenessScreen
+        driverId="driver-cancelled-burst"
+        requirement="LIVENESS_REQUIRED"
+        onCancel={jest.fn()}
+      />
+    );
+
+    await waitFor(() => {
+      expect(kycService.createAwsLivenessSession).toHaveBeenCalledTimes(1);
+    });
+    screen.unmount();
+
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(AWS_LIVENESS_ADMISSION_RETRY_MAX_DELAY_MS);
+    });
+
+    expect(kycService.createAwsLivenessSession).toHaveBeenCalledTimes(1);
+    expect(kycService.getAwsLivenessCredentials).not.toHaveBeenCalled();
+    expect(nativeAwsLivenessService.start).not.toHaveBeenCalled();
   });
 
   test('confirms the result and calls onSuccess without another user action', async () => {
@@ -214,7 +313,7 @@ describe('AWSNativeLivenessScreen', () => {
     expect(screen.queryAllByRole('button')).toHaveLength(0);
 
     await act(async () => {
-      await jest.advanceTimersByTimeAsync(AWS_LIVENESS_RESULT_POLL_INTERVAL_MS);
+      await jest.advanceTimersByTimeAsync(AWS_LIVENESS_RESULT_POLL_MAX_INTERVAL_MS);
     });
 
     await waitFor(() => {
@@ -286,7 +385,7 @@ describe('AWSNativeLivenessScreen', () => {
     expect(onSuccess).not.toHaveBeenCalled();
 
     await act(async () => {
-      await jest.advanceTimersByTimeAsync(AWS_LIVENESS_RESULT_POLL_INTERVAL_MS);
+      await jest.advanceTimersByTimeAsync(AWS_LIVENESS_RESULT_POLL_MAX_INTERVAL_MS);
     });
 
     await waitFor(() => {
@@ -464,7 +563,7 @@ describe('AWSNativeLivenessScreen', () => {
     expect(nativeAwsLivenessService.cancel).toHaveBeenCalledTimes(1);
     expect(kycService.abandonAwsLivenessSession).not.toHaveBeenCalled();
     await act(async () => {
-      await jest.advanceTimersByTimeAsync(AWS_LIVENESS_RESULT_POLL_INTERVAL_MS * 2);
+      await jest.advanceTimersByTimeAsync(AWS_LIVENESS_RESULT_POLL_MAX_INTERVAL_MS * 2);
     });
     expect(kycService.getAwsLivenessSessionResult).toHaveBeenCalledTimes(1);
   });
@@ -536,7 +635,7 @@ describe('AWSNativeLivenessScreen', () => {
     });
     await act(async () => {
       await jest.advanceTimersByTimeAsync(
-        AWS_LIVENESS_RESULT_POLL_INTERVAL_MS * AWS_LIVENESS_RESULT_POLL_MAX_ATTEMPTS
+        AWS_LIVENESS_RESULT_POLL_MAX_INTERVAL_MS * AWS_LIVENESS_RESULT_POLL_MAX_ATTEMPTS
       );
     });
 
