@@ -6,6 +6,7 @@ const mockRedis = {
 };
 const mockFirestoreDocs = new Map();
 const mockFirestoreSets = [];
+const mockCommitDriverOnlineProjection = jest.fn();
 
 jest.mock('../../../utils/redis-pool', () => ({
   getConnection: jest.fn(() => mockRedis)
@@ -17,6 +18,10 @@ jest.mock('../../../services/KYCNotificationService', () =>
     sendVerificationSuccess: jest.fn()
   }))
 );
+
+jest.mock('../../../services/driver-online-projection-service', () => ({
+  commitDriverOnlineProjection: (...args) => mockCommitDriverOnlineProjection(...args)
+}));
 
 jest.mock('../../../utils/logger', () => ({
   logStructured: jest.fn(),
@@ -55,7 +60,7 @@ jest.mock('firebase-admin', () => ({
 
 const kycDriverStatusService = require('../../../services/kyc-driver-status-service');
 
-describe('KYCDriverStatusService manual override audit', () => {
+describe('KYCDriverStatusService', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockFirestoreDocs.clear();
@@ -64,6 +69,84 @@ describe('KYCDriverStatusService manual override audit', () => {
     mockRedis.hgetall.mockResolvedValue({});
     mockRedis.expire.mockResolvedValue(1);
     mockRedis.zrem.mockResolvedValue(1);
+    mockCommitDriverOnlineProjection.mockResolvedValue({ success: true });
+  });
+
+  it('forces a KYC-blocked driver offline through the canonical atomic projection', async () => {
+    await kycDriverStatusService.forceDriverOffline('driver_blocked');
+
+    expect(mockCommitDriverOnlineProjection).toHaveBeenCalledWith(
+      mockRedis,
+      expect.objectContaining({
+        driverId: 'driver_blocked',
+        eligibleGeoKey: 'driver_locations_eligible',
+        isOnline: false,
+        dispatchEligible: false,
+        ttlSeconds: 30 * 24 * 60 * 60,
+        fields: expect.objectContaining({
+          isOnline: 'false',
+          status: 'OFFLINE',
+          dispatchEligible: 'false',
+          dispatchEligibilityCode: 'KYC_BLOCKED'
+        })
+      })
+    );
+    expect(mockRedis.hset).not.toHaveBeenCalled();
+    expect(mockRedis.zrem).toHaveBeenCalledWith('drivers:available', 'driver_blocked');
+  });
+
+  it('commits KYC block fields and offline discovery state in the same Redis projection', async () => {
+    await kycDriverStatusService.blockDriver('driver_blocked', 'biometric mismatch');
+
+    expect(mockCommitDriverOnlineProjection).toHaveBeenCalledTimes(1);
+    expect(mockCommitDriverOnlineProjection).toHaveBeenCalledWith(
+      mockRedis,
+      expect.objectContaining({
+        driverId: 'driver_blocked',
+        isOnline: false,
+        dispatchEligible: false,
+        fields: expect.objectContaining({
+          kyc_status: 'blocked',
+          kyc_blocked: 'true',
+          kyc_blocked_reason: 'biometric mismatch',
+          status: 'OFFLINE',
+          dispatchEligibilityCode: 'KYC_BLOCKED'
+        })
+      })
+    );
+    expect(mockRedis.hset).not.toHaveBeenCalled();
+    expect(mockFirestoreSets).toHaveLength(2);
+  });
+
+  it('does not persist a successful KYC block when the atomic Redis transition fails', async () => {
+    mockCommitDriverOnlineProjection.mockRejectedValueOnce(new Error('atomic projection failed'));
+
+    await expect(
+      kycDriverStatusService.blockDriver('driver_blocked', 'biometric mismatch')
+    ).rejects.toThrow('atomic projection failed');
+
+    expect(mockFirestoreSets).toHaveLength(0);
+    expect(mockRedis.zrem).not.toHaveBeenCalled();
+  });
+
+  it('fails the KYC offline transition when Redis does not confirm the atomic projection', async () => {
+    mockCommitDriverOnlineProjection.mockRejectedValueOnce(new Error('atomic projection failed'));
+
+    await expect(
+      kycDriverStatusService.forceDriverOffline('driver_blocked')
+    ).rejects.toThrow('atomic projection failed');
+
+    expect(mockRedis.zrem).not.toHaveBeenCalled();
+  });
+
+  it('keeps the canonical KYC block successful when only the unread legacy index cleanup fails', async () => {
+    mockRedis.zrem.mockRejectedValueOnce(new Error('legacy index unavailable'));
+
+    await expect(
+      kycDriverStatusService.forceDriverOffline('driver_blocked')
+    ).resolves.toBeUndefined();
+
+    expect(mockCommitDriverOnlineProjection).toHaveBeenCalledTimes(1);
   });
 
   it('rejects manual KYC unblock without audit before mutating state', async () => {

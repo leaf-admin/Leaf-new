@@ -450,6 +450,23 @@ describe('driver-online-projection-service', () => {
     expect(methodSource).not.toMatch(/this\.redis\.(hset|geoadd|zrem|sadd|srem|multi)\(/);
   });
 
+  it('keeps KYC forced-offline transitions on the canonical atomic projection', () => {
+    const kycStatusSource = fs.readFileSync(
+      path.resolve(__dirname, '../../../services/kyc-driver-status-service.js'),
+      'utf8'
+    );
+    const methodStart = kycStatusSource.indexOf('async forceDriverOffline(driverId, statusFields = {})');
+    const methodEnd = kycStatusSource.indexOf('async processOnboardingResult', methodStart);
+    const methodSource = kycStatusSource.slice(methodStart, methodEnd);
+
+    expect(methodStart).toBeGreaterThan(-1);
+    expect(methodEnd).toBeGreaterThan(methodStart);
+    expect(methodSource).toContain('await commitDriverOnlineProjection(this.redis, {');
+    expect(methodSource).toContain("dispatchEligibilityCode: 'KYC_BLOCKED'");
+    expect(methodSource).not.toMatch(/this\.redis\.(hset|geoadd|sadd|srem|multi)\(/);
+    expect(methodSource).not.toMatch(/this\.redis\.zrem\(['"]driver_locations/);
+  });
+
   it('serializes only defined hash fields', () => {
     expect(normalizeHashFields({
       status: 'AVAILABLE',
