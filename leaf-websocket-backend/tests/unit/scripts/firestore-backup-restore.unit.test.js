@@ -225,7 +225,9 @@ describe('Firestore logical backup and restore drill', () => {
       path.join(__dirname, '../../../scripts/ops/backup-daily.sh'),
       'utf8'
     );
-    expect(dailyBackupSource).toContain('verify-redis-restore.cjs" --backup "$REDIS_TARGET"');
+    expect(dailyBackupSource).toContain(
+      'verify-redis-restore.cjs" --backup "$REDIS_TARGET" --require-nonempty'
+    );
     expect(dailyBackupSource).toContain('verify-firestore-restore.cjs" --backup "$FIRESTORE_TARGET"');
     expect(dailyBackupSource.indexOf('verify-redis-restore.cjs')).toBeLessThan(
       dailyBackupSource.indexOf('echo "[backup] redis ok')

@@ -53,7 +53,7 @@ echo "[backup] start $TIMESTAMP"
 # 1) Backup Redis validado, com checksum e manifesto. Falha em vez de pular.
 REDIS_TARGET="$REDIS_BACKUP_DIR/redis-$TIMESTAMP.rdb.gz"
 node "$ROOT_DIR/scripts/ops/backup-redis.cjs" --out "$REDIS_TARGET"
-node "$ROOT_DIR/scripts/ops/verify-redis-restore.cjs" --backup "$REDIS_TARGET"
+node "$ROOT_DIR/scripts/ops/verify-redis-restore.cjs" --backup "$REDIS_TARGET" --require-nonempty
 echo "[backup] redis ok: $REDIS_TARGET"
 
 # 2) Backup Firestore critico em JSON.gz

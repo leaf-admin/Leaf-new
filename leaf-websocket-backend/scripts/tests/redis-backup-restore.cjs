@@ -50,6 +50,7 @@ async function main() {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'leaf-redis-backup-test-'));
   const port = await freePort();
   const backupPath = path.join(tempDir, 'redis-proof.rdb.gz');
+  const emptyBackupPath = path.join(tempDir, 'redis-empty.rdb.gz');
   const sourceDir = path.join(tempDir, 'source');
   fs.mkdirSync(sourceDir);
   let child = null;
@@ -88,8 +89,22 @@ async function main() {
     const backup = run(process.execPath, ['scripts/ops/backup-redis.cjs', '--out', backupPath], { cwd: path.resolve(__dirname, '../..'), env });
     const restore = run(process.execPath, [
       'scripts/ops/verify-redis-restore.cjs', '--backup', backupPath,
-      '--expect-key', 'leaf:backup:proof', '--expect-value', 'restored-value'
+      '--expect-key', 'leaf:backup:proof', '--expect-value', 'restored-value',
+      '--require-nonempty'
     ], { cwd: path.resolve(__dirname, '../..'), env });
+
+    await client.flushall();
+    run(process.execPath, ['scripts/ops/backup-redis.cjs', '--out', emptyBackupPath], {
+      cwd: path.resolve(__dirname, '../..'),
+      env
+    });
+    const emptyBackupError = runExpectFailure(process.execPath, [
+      'scripts/ops/verify-redis-restore.cjs', '--backup', emptyBackupPath,
+      '--require-nonempty'
+    ], { cwd: path.resolve(__dirname, '../..'), env });
+    if (!emptyBackupError.includes('Backup Redis restaurou keyspace vazio')) {
+      throw new Error(`Falha inesperada ao validar keyspace vazio: ${emptyBackupError}`);
+    }
 
     const originalBackup = fs.readFileSync(backupPath);
     const corruptedBackup = Buffer.from(originalBackup);
@@ -109,6 +124,9 @@ async function main() {
       rdbVerified: restore.rdbVerified,
       isolatedRestoreStarted: restore.isolatedRestoreStarted,
       expectedKeyVerified: restore.expectedKeyVerified,
+      nonemptyRequired: restore.nonemptyRequired,
+      totalKeys: restore.totalKeys,
+      emptyBackupRejected: true,
       corruptedBackupRejected: true
     }, null, 2)}\n`);
   } finally {
