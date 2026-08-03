@@ -271,6 +271,9 @@ describe('production compose launch-control contract', () => {
   });
 
   it('pins an immutable production release, removes stale source and keeps automatic image rollback', () => {
+    // The script embeds remote commands in local double-quoted strings. Legacy
+    // backticks would execute locally before SSH instead of remaining comments.
+    expect(deploySource).not.toContain('`');
     expect(deploySource).toContain('StrictHostKeyChecking=yes');
     expect(deploySource).toContain('ssh-keygen -F "$CONTABO_HOST"');
     expect(deploySource).not.toContain('StrictHostKeyChecking=no');
