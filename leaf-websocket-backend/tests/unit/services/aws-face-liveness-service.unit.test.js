@@ -655,6 +655,33 @@ describe('aws-face-liveness-service', () => {
     );
   });
 
+  test('should reject exhausted admission before reserving any paid cost bundle', async () => {
+    const capacityError = Object.assign(new Error('capacity exhausted'), {
+      code: 'KYC_AWS_ADMISSION_CAPACITY_EXHAUSTED',
+      retryAfterSeconds: 5
+    });
+    const admissionController = createAdmissionControllerMock();
+    admissionController.acquireCreateLease.mockRejectedValue(capacityError);
+    const costGuard = {
+      getConfigSummary: jest.fn(() => ({ enabled: true })),
+      reserveLivenessBundle: jest.fn(),
+      rollbackBeforeDispatch: jest.fn()
+    };
+    const service = new AwsFaceLivenessService({ admissionController, costGuard });
+
+    await expect(createBoundSession(service, {
+      userId: 'driver-admission-exhausted'
+    })).rejects.toMatchObject({
+      code: 'KYC_AWS_ADMISSION_CAPACITY_EXHAUSTED',
+      retryAfterSeconds: 5
+    });
+
+    expect(costGuard.reserveLivenessBundle).not.toHaveBeenCalled();
+    expect(costGuard.rollbackBeforeDispatch).not.toHaveBeenCalled();
+    expect(admissionController.releaseCreateLease).not.toHaveBeenCalled();
+    expect(mockSend).not.toHaveBeenCalled();
+  });
+
   test('should preserve the admission lease when AWS create dispatch has an unknown outcome', async () => {
     const admissionController = {
       getConfigSummary: jest.fn(() => ({ enabled: true })),
@@ -920,7 +947,8 @@ describe('aws-face-liveness-service', () => {
       reserveLivenessBundle: jest.fn(async () => { throw budgetError; }),
       rollbackBeforeDispatch: jest.fn()
     };
-    const service = new AwsFaceLivenessService({ costGuard });
+    const admissionController = createAdmissionControllerMock();
+    const service = new AwsFaceLivenessService({ costGuard, admissionController });
 
     await expect(createBoundSession(service, {
       userId: 'driver-budget-blocked',
@@ -932,6 +960,7 @@ describe('aws-face-liveness-service', () => {
       userId: 'driver-budget-blocked',
       required: true
     }));
+    expect(admissionController.releaseCreateLease).toHaveBeenCalledTimes(1);
     expect(mockSend).not.toHaveBeenCalled();
     expect(mockEval.mock.calls.some(([script]) => (
       script.includes('leaf_aws_liveness_attempt_rollback_v1')
