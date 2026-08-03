@@ -4,6 +4,9 @@ const {
 const {
     clearDriverSocketPresence
 } = require('../services/driver-socket-presence-service');
+const {
+    commitDriverOnlineProjection
+} = require('../services/driver-online-projection-service');
 
 function registerSocketDisconnectHandler({
     socket,
@@ -181,7 +184,16 @@ function registerSocketDisconnectHandler({
                 parseFloat(driverData.heading || 0),
                 parseFloat(driverData.speed || 0),
                 disconnectedAtMs,
-                false
+                false,
+                false,
+                {
+                    eligible: false,
+                    code: 'OFFLINE',
+                    checkedAt: disconnectedAtIso,
+                    fields: {
+                        updatedAt: disconnectedAtIso
+                    }
+                }
             );
             logStructured('info', 'Motorista desconectado - salvo como OFFLINE com última localização', {
                 service: 'websocket',
@@ -189,21 +201,25 @@ function registerSocketDisconnectHandler({
                 userId: socket.userId
             });
         } else {
-            try {
-                await redis.zrem('driver_locations', socket.userId);
-                logStructured('info', 'Motorista desconectado - removido do GEO ativo', {
-                    service: 'websocket',
-                    socketId: socket.id,
-                    userId: socket.userId
-                });
-            } catch (error) {
-                logStructured('warn', 'Erro ao remover do GEO', {
-                    service: 'websocket',
-                    socketId: socket.id,
-                    userId: socket.userId,
-                    error: error.message
-                });
-            }
+            await commitDriverOnlineProjection(redis, {
+                driverId: socket.userId,
+                eligibleGeoKey: ELIGIBLE_DRIVER_GEO_KEY,
+                isOnline: false,
+                dispatchEligible: false,
+                fields: {
+                    status: 'OFFLINE',
+                    isOnline: 'false',
+                    dispatchEligible: 'false',
+                    dispatchEligibilityCode: 'OFFLINE',
+                    dispatchEligibilityCheckedAt: disconnectedAtIso,
+                    updatedAt: disconnectedAtIso
+                }
+            });
+            logStructured('info', 'Motorista desconectado - projeção OFFLINE aplicada sem localização', {
+                service: 'websocket',
+                socketId: socket.id,
+                userId: socket.userId
+            });
         }
 
         try {
@@ -219,17 +235,6 @@ function registerSocketDisconnectHandler({
                 error: error.message
             });
         }
-
-        await redis.zrem(ELIGIBLE_DRIVER_GEO_KEY, socket.userId);
-        await redis.srem('online_drivers', socket.userId);
-        await redis.hset(`driver:${socket.userId}`, {
-            status: 'OFFLINE',
-            isOnline: 'false',
-            dispatchEligible: 'false',
-            dispatchEligibilityCode: 'OFFLINE',
-            dispatchEligibilityCheckedAt: disconnectedAtIso,
-            updatedAt: disconnectedAtIso
-        });
 
         await recoverAcceptedRideOnDriverDisconnect({ redis, driverData });
     };

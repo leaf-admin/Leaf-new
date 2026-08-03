@@ -2,8 +2,14 @@ jest.mock('../../../services/accepted-ride-recovery-service', () => ({
     resolveAcceptedBookingCandidatesForDriver: jest.fn().mockResolvedValue({ bookingIds: [] }),
     recoverAcceptedBooking: jest.fn().mockResolvedValue({ recovered: false, skipped: true })
 }));
+jest.mock('../../../services/driver-online-projection-service', () => ({
+    commitDriverOnlineProjection: jest.fn().mockResolvedValue({ success: true })
+}));
 
 const registerSocketDisconnectHandler = require('../../../bootstrap/register-socket-disconnect-handler');
+const {
+    commitDriverOnlineProjection
+} = require('../../../services/driver-online-projection-service');
 
 describe('registerSocketDisconnectHandler driver online time cleanup', () => {
     afterEach(() => {
@@ -87,7 +93,16 @@ describe('registerSocketDisconnectHandler driver online time cleanup', () => {
             0,
             0,
             Date.parse('2026-06-25T12:30:00.000Z'),
-            false
+            false,
+            false,
+            expect.objectContaining({
+                eligible: false,
+                code: 'OFFLINE',
+                checkedAt: '2026-06-25T12:30:00.000Z',
+                fields: {
+                    updatedAt: '2026-06-25T12:30:00.000Z'
+                }
+            })
         );
         expect(redis.hset).toHaveBeenCalledWith(
             expect.stringMatching(dailyKeyPattern),
@@ -97,19 +112,82 @@ describe('registerSocketDisconnectHandler driver online time cleanup', () => {
                 closedReason: 'stale_heartbeat'
             })
         );
-        expect(redis.hset).toHaveBeenCalledWith(
+        expect(redis.hset).not.toHaveBeenCalledWith(
             'driver:driver_1',
-            expect.objectContaining({
-                status: 'OFFLINE',
-                isOnline: 'false',
-                dispatchEligible: 'false',
-                dispatchEligibilityCode: 'OFFLINE'
-            })
+            expect.anything()
         );
         expect(vehicleLockManager.releaseLock).toHaveBeenCalledWith('ABC1D23', 'driver_1', {
             leaseToken: 'socket_1'
         });
         expect(io.connectedUsers.has('driver_1')).toBe(false);
+    });
+
+    it('atomically projects offline discovery state when no last location exists', async () => {
+        jest.useFakeTimers().setSystemTime(new Date('2026-06-25T12:30:00.000Z'));
+        const redis = {
+            status: 'ready',
+            connect: jest.fn().mockResolvedValue(undefined),
+            hgetall: jest.fn().mockResolvedValue({}),
+            del: jest.fn().mockResolvedValue(1),
+            zrem: jest.fn().mockResolvedValue(1),
+            srem: jest.fn().mockResolvedValue(1),
+            hset: jest.fn().mockResolvedValue(1),
+            expire: jest.fn().mockResolvedValue(1)
+        };
+        const socket = {
+            id: 'socket_1',
+            userId: 'driver_1',
+            userType: 'driver',
+            on: jest.fn((event, handler) => {
+                socket.handlers[event] = handler;
+            }),
+            handlers: {}
+        };
+        const io = {
+            engine: { clientsCount: 1 },
+            connectedUsers: new Map([['driver_1', socket]])
+        };
+        const saveDriverLocation = jest.fn();
+
+        registerSocketDisconnectHandler({
+            socket,
+            io,
+            websocketRateLimiter: {
+                unregisterConnection: jest.fn().mockResolvedValue(undefined)
+            },
+            connectionMonitor: {
+                unregisterConnection: jest.fn().mockResolvedValue(undefined)
+            },
+            vehicleLockManager: {
+                releaseLock: jest.fn().mockResolvedValue(true)
+            },
+            redisPool: { getConnection: jest.fn(() => redis) },
+            saveDriverLocation,
+            logStructured: jest.fn(),
+            releaseAdmissionSlotIfNeeded: jest.fn()
+        });
+
+        await socket.handlers.disconnect('transport close');
+
+        expect(saveDriverLocation).not.toHaveBeenCalled();
+        expect(commitDriverOnlineProjection).toHaveBeenCalledWith(
+            redis,
+            expect.objectContaining({
+                driverId: 'driver_1',
+                eligibleGeoKey: 'driver_locations_eligible',
+                isOnline: false,
+                dispatchEligible: false,
+                fields: expect.objectContaining({
+                    status: 'OFFLINE',
+                    isOnline: 'false',
+                    dispatchEligible: 'false',
+                    dispatchEligibilityCode: 'OFFLINE'
+                })
+            })
+        );
+        expect(redis.zrem).not.toHaveBeenCalled();
+        expect(redis.srem).not.toHaveBeenCalled();
+        expect(redis.hset).not.toHaveBeenCalledWith('driver:driver_1', expect.anything());
     });
 
     it('preserves the new lease and online state when an older socket disconnects', async () => {
