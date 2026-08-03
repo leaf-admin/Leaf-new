@@ -17,8 +17,19 @@ local function validate_key_type(key, expected)
   return true, actual
 end
 
-local key_expectations = { 'hash', 'zset', 'zset', 'set' }
-for index = 1, #KEYS do
+local driver_id = ARGV[1]
+local online = ARGV[2] == '1'
+local has_location = ARGV[3] == '1'
+local longitude = ARGV[4]
+local latitude = ARGV[5]
+local dispatch_eligible = ARGV[6] == '1'
+local projection_scope = ARGV[7]
+local key_expectations = { 'hash', 'zset', 'zset', 'set', 'zset' }
+local key_indices = projection_scope == 'eligibility_only'
+  and { 1, 3 }
+  or (online and { 1, 2, 3, 4, 5 } or { 1, 2, 3, 4 })
+
+for _, index in ipairs(key_indices) do
   local valid, actual = validate_key_type(KEYS[index], key_expectations[index])
   if not valid then
     return redis.error_reply(
@@ -29,17 +40,11 @@ for index = 1, #KEYS do
   end
 end
 
-local driver_id = ARGV[1]
-local online = ARGV[2] == '1'
-local has_location = ARGV[3] == '1'
-local longitude = ARGV[4]
-local latitude = ARGV[5]
-local dispatch_eligible = ARGV[6] == '1'
-local field_count = tonumber(ARGV[7]) or 0
+local field_count = tonumber(ARGV[8]) or 0
 local hash_args = {}
 
 for index = 1, field_count * 2 do
-  hash_args[index] = ARGV[7 + index]
+  hash_args[index] = ARGV[8 + index]
 end
 
 if #hash_args == 0 then
@@ -48,9 +53,13 @@ end
 
 redis.call('HSET', KEYS[1], unpack(hash_args))
 
-if online and has_location then
+if projection_scope == 'eligibility_only' then
+  redis.call('ZREM', KEYS[3], driver_id)
+  return { 1, -1, 0 }
+elseif online and has_location then
   redis.call('GEOADD', KEYS[2], longitude, latitude, driver_id)
   redis.call('SADD', KEYS[4], driver_id)
+  redis.call('ZREM', KEYS[5], driver_id)
   if dispatch_eligible then
     redis.call('GEOADD', KEYS[3], longitude, latitude, driver_id)
   else
@@ -58,6 +67,7 @@ if online and has_location then
   end
 elseif online then
   redis.call('ZREM', KEYS[3], driver_id)
+  redis.call('ZREM', KEYS[5], driver_id)
 else
   redis.call('ZREM', KEYS[2], driver_id)
   redis.call('ZREM', KEYS[3], driver_id)
@@ -120,12 +130,16 @@ async function commitDriverOnlineProjection(redis, {
   fields,
   isOnline,
   dispatchEligible,
+  projectionScope = 'full',
   lat,
   lng
 } = {}) {
   const normalizedDriverId = String(driverId || '').trim();
   const normalizedDriverKey = String(driverKey || '').trim();
   const normalizedEligibleGeoKey = String(eligibleGeoKey || '').trim();
+  const normalizedProjectionScope = projectionScope === 'eligibility_only'
+    ? 'eligibility_only'
+    : 'full';
   const location = normalizeGeoCoordinates(lat, lng, { required: isOnline === true });
   const hasLocation = location.hasLocation;
   const hashArgs = normalizeHashFields(fields);
@@ -145,17 +159,19 @@ async function commitDriverOnlineProjection(redis, {
 
   const result = await redis.eval(
     DRIVER_ONLINE_PROJECTION_SCRIPT,
-    4,
+    5,
     normalizedDriverKey,
     'driver_locations',
     normalizedEligibleGeoKey,
     'online_drivers',
+    'driver_offline_locations',
     normalizedDriverId,
     isOnline === true ? '1' : '0',
     hasLocation ? '1' : '0',
     hasLocation ? String(location.lng) : '',
     hasLocation ? String(location.lat) : '',
     dispatchEligible === true ? '1' : '0',
+    normalizedProjectionScope,
     String(hashArgs.length / 2),
     ...hashArgs
   );
@@ -170,7 +186,8 @@ async function commitDriverOnlineProjection(redis, {
     success: true,
     isOnline: Number(result[1]) === 1,
     dispatchEligible: Number(result[2]) === 1,
-    hasLocation
+    hasLocation,
+    projectionScope: normalizedProjectionScope
   };
 }
 

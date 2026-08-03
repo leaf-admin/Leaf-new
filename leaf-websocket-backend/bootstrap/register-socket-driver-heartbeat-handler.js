@@ -14,6 +14,9 @@ const {
 const {
     buildPublicDriverKycSocketPayload
 } = require('../utils/driver-kyc-socket-projection');
+const {
+    commitDriverOnlineProjection
+} = require('../services/driver-online-projection-service');
 
 const parseTimestampMs = (rawValue) => {
     if (!rawValue) return 0;
@@ -129,35 +132,29 @@ function registerSocketDriverHeartbeatHandler({
             const existingDriverState = await redis.hgetall(`driver:${driverId}`);
             const wasOnline = existingDriverState?.isOnline === 'true';
             let kycContinuityDeferred = !activeTripIndexResolved || Boolean(canonicalActiveTrip?.tripId);
-            const applyKycContinuityState = async (gateResult = {}) => {
-                const activeTripId = gateResult.activeTripId || canonicalActiveTrip?.tripId || null;
+            let continuityActiveTripId = canonicalActiveTrip?.tripId || null;
+            const applyKycContinuityState = (gateResult = {}) => {
+                continuityActiveTripId = gateResult.activeTripId || continuityActiveTripId || null;
                 isInTripState = true;
                 kycContinuityDeferred = true;
-                const checkedAt = new Date().toISOString();
-                await redis.zrem(ELIGIBLE_DRIVER_GEO_KEY, driverId);
-                await redis.hset(`driver:${driverId}`, {
-                    isOnline: 'true',
-                    dispatchEligible: 'false',
-                    dispatchEligibilityCode: 'IN_TRIP_KYC_DEFERRED',
-                    dispatchEligibilityCheckedAt: checkedAt,
-                    kycRecheckPendingAfterTrip: 'true',
-                    ...(activeTripId ? { activeTripId: String(activeTripId) } : {}),
-                    updatedAt: checkedAt
-                });
             };
 
             if (isInTripState) {
-                await applyKycContinuityState({ activeTripId: canonicalActiveTrip?.tripId || null });
+                applyKycContinuityState({ activeTripId: canonicalActiveTrip?.tripId || null });
             }
 
             if (!wasOnline && !isInTripState) {
                 const subscriptionGate = await enforceSubscriptionForOnline(driverId);
                 if (!subscriptionGate.allowed) {
-                    await redis.zrem(ELIGIBLE_DRIVER_GEO_KEY, driverId);
-                    await redis.hset(`driver:${driverId}`, {
-                        dispatchEligible: 'false',
-                        dispatchEligibilityCode: subscriptionGate.code || 'SUBSCRIPTION_REQUIRED',
-                        dispatchEligibilityCheckedAt: new Date().toISOString()
+                    await commitDriverOnlineProjection(redis, {
+                        driverId,
+                        projectionScope: 'eligibility_only',
+                        dispatchEligible: false,
+                        fields: {
+                            dispatchEligible: 'false',
+                            dispatchEligibilityCode: subscriptionGate.code || 'SUBSCRIPTION_REQUIRED',
+                            dispatchEligibilityCheckedAt: new Date().toISOString()
+                        }
                     });
                     socket.emit('driverStatusError', {
                         error: 'Assinatura pendente. Regularize para ficar online.',
@@ -171,11 +168,15 @@ function registerSocketDriverHeartbeatHandler({
                 try {
                     const dailyKYC = await enforceDailyKYCForOnline(driverId);
                     if (!dailyKYC.allowed) {
-                        await redis.zrem(ELIGIBLE_DRIVER_GEO_KEY, driverId);
-                        await redis.hset(`driver:${driverId}`, {
-                            dispatchEligible: 'false',
-                            dispatchEligibilityCode: dailyKYC.code || 'KYC_REQUIRED',
-                            dispatchEligibilityCheckedAt: new Date().toISOString()
+                        await commitDriverOnlineProjection(redis, {
+                            driverId,
+                            projectionScope: 'eligibility_only',
+                            dispatchEligible: false,
+                            fields: {
+                                dispatchEligible: 'false',
+                                dispatchEligibilityCode: dailyKYC.code || 'KYC_REQUIRED',
+                                dispatchEligibilityCheckedAt: new Date().toISOString()
+                            }
                         });
                         socket.emit('driverStatusError', buildPublicDriverKycSocketPayload(
                             dailyKYC,
@@ -184,14 +185,18 @@ function registerSocketDriverHeartbeatHandler({
                         return;
                     }
                     if (dailyKYC.continuityOnly === true || dailyKYC.deferred === true) {
-                        await applyKycContinuityState(dailyKYC);
+                        applyKycContinuityState(dailyKYC);
                     }
                 } catch (kycError) {
-                    await redis.zrem(ELIGIBLE_DRIVER_GEO_KEY, driverId);
-                    await redis.hset(`driver:${driverId}`, {
-                        dispatchEligible: 'false',
-                        dispatchEligibilityCode: 'KYC_CHECK_FAILED',
-                        dispatchEligibilityCheckedAt: new Date().toISOString()
+                    await commitDriverOnlineProjection(redis, {
+                        driverId,
+                        projectionScope: 'eligibility_only',
+                        dispatchEligible: false,
+                        fields: {
+                            dispatchEligible: 'false',
+                            dispatchEligibilityCode: 'KYC_CHECK_FAILED',
+                            dispatchEligibilityCheckedAt: new Date().toISOString()
+                        }
                     });
                     socket.emit('driverStatusError', {
                         error: 'Não foi possível validar KYC agora. Tente novamente.',
@@ -221,19 +226,31 @@ function registerSocketDriverHeartbeatHandler({
                 const postTripKyc = await enforceDailyKYCForOnline(driverId);
                 if (!postTripKyc?.allowed) {
                     const checkedAt = new Date().toISOString();
-                    await redis.zrem(ELIGIBLE_DRIVER_GEO_KEY, driverId);
-                    await redis.zrem('driver_locations', driverId);
-                    await redis.srem('online_drivers', driverId);
-                    await redis.hset(`driver:${driverId}`, {
-                        status: 'OFFLINE',
-                        isOnline: 'false',
-                        dispatchEligible: 'false',
-                        dispatchEligibilityCode: postTripKyc?.code || 'KYC_REQUIRED',
-                        dispatchEligibilityCheckedAt: checkedAt,
-                        kycRecheckPendingAfterTrip: postTripKyc?.retryRequired === true
-                            ? 'true'
-                            : 'false',
-                        updatedAt: checkedAt
+                    await commitDriverOnlineProjection(redis, {
+                        driverId,
+                        isOnline: false,
+                        dispatchEligible: false,
+                        fields: {
+                            status: 'OFFLINE',
+                            isOnline: 'false',
+                            dispatchEligible: 'false',
+                            dispatchEligibilityCode: postTripKyc?.code || 'KYC_REQUIRED',
+                            dispatchEligibilityCheckedAt: checkedAt,
+                            kycRecheckPendingAfterTrip: postTripKyc?.retryRequired === true
+                                ? 'true'
+                                : 'false',
+                            updatedAt: checkedAt
+                        }
+                    });
+                    await resolveDriverOnlineTransition(redis, {
+                        driverId,
+                        isOnline: false
+                    }).catch((transitionError) => {
+                        logStructured('warn', 'Falha ao fechar sessão online após bloqueio KYC pós-corrida', {
+                            service: 'driverHeartbeat',
+                            driverId,
+                            error: transitionError.message
+                        });
                     });
                     socket.emit('driverStatusError', buildPublicDriverKycSocketPayload(
                         postTripKyc,
@@ -242,7 +259,7 @@ function registerSocketDriverHeartbeatHandler({
                     return;
                 }
                 if (postTripKyc.continuityOnly === true || postTripKyc.deferred === true) {
-                    await applyKycContinuityState(postTripKyc);
+                    applyKycContinuityState(postTripKyc);
                 } else {
                     await redis.hset(`driver:${driverId}`, {
                         kycRecheckPendingAfterTrip: 'false',
@@ -265,20 +282,23 @@ function registerSocketDriverHeartbeatHandler({
                     onlineDailySnapshot = rollover.snapshot;
                 }
                 if (onlineDailySnapshot.limitReached) {
+                    const checkedAt = new Date().toISOString();
+                    await commitDriverOnlineProjection(redis, {
+                        driverId,
+                        isOnline: false,
+                        dispatchEligible: false,
+                        fields: {
+                            status: 'OFFLINE',
+                            isOnline: 'false',
+                            dispatchEligible: 'false',
+                            dispatchEligibilityCode: 'DRIVER_ONLINE_DAILY_LIMIT_REACHED',
+                            dispatchEligibilityCheckedAt: checkedAt,
+                            updatedAt: checkedAt
+                        }
+                    });
                     const transition = await resolveDriverOnlineTransition(redis, {
                         driverId,
                         isOnline: false
-                    });
-                    await redis.zrem(ELIGIBLE_DRIVER_GEO_KEY, driverId);
-                    await redis.zrem('driver_locations', driverId);
-                    await redis.srem('online_drivers', driverId);
-                    await redis.hset(`driver:${driverId}`, {
-                        status: 'OFFLINE',
-                        isOnline: 'false',
-                        dispatchEligible: 'false',
-                        dispatchEligibilityCode: 'DRIVER_ONLINE_DAILY_LIMIT_REACHED',
-                        dispatchEligibilityCheckedAt: new Date().toISOString(),
-                        updatedAt: new Date().toISOString()
                     });
                     socket.emit('driverStatusError', {
                         success: false,
@@ -314,28 +334,20 @@ function registerSocketDriverHeartbeatHandler({
                     : getTTL('DRIVER_LOCATION', 'ONLINE');
                 await redis.expire(`driver:${driverId}`, ttl);
 
-                // Garantir que está no GEO ativo (pode ter expirado)
-                const isInGeo = await redis.zscore('driver_locations', driverId);
-                    if (!isInGeo) {
-                        // Re-adicionar ao GEO se não estiver
-                        await redis.geoadd('driver_locations', parseFloat(existingData.lng || lngNum), parseFloat(existingData.lat || latNum), driverId);
-                        await redis.zrem('driver_offline_locations', driverId);
-                    }
-                    await redis.sadd('online_drivers', driverId);
-
                 const effectiveLat = Number.parseFloat(existingData.lat || lat);
                 const effectiveLng = Number.parseFloat(existingData.lng || lng);
                 // Atualizar lastSeen/heartbeat com timestamp numérico recente para evitar stale cleanup
                 const nowIso = new Date().toISOString();
                 const heartbeatTs = Date.now();
-                await redis.hset(`driver:${driverId}`, {
+                const projectionFields = {
+                    isOnline: 'true',
                     lastSeen: nowIso,
                     lastHeartbeatAt: nowIso,
                     lastUpdate: String(heartbeatTs),
                     timestamp: String(heartbeatTs),
                     lat: String(effectiveLat),
                     lng: String(effectiveLng)
-                });
+                };
                 const currentEligibilityCode = String(existingData.dispatchEligibilityCode || '').toUpperCase();
                 const isCurrentlyEligible = existingData.dispatchEligible === 'true';
                 let shouldBeEligible = !isInTripState && isCurrentlyEligible;
@@ -362,20 +374,10 @@ function registerSocketDriverHeartbeatHandler({
                                 existingData || {}
                             );
                             shouldBeEligible = eligibility.eligible === true;
-
-                            if (shouldBeEligible) {
-                                await redis.hset(`driver:${driverId}`, {
-                                    dispatchEligible: 'true',
-                                    dispatchEligibilityCode: eligibility.code || 'ELIGIBLE',
-                                    dispatchEligibilityCheckedAt: new Date().toISOString()
-                                });
-                            } else {
-                                await redis.hset(`driver:${driverId}`, {
-                                    dispatchEligible: 'false',
-                                    dispatchEligibilityCode: eligibility.code || 'NOT_ELIGIBLE',
-                                    dispatchEligibilityCheckedAt: new Date().toISOString()
-                                });
-                            }
+                            projectionFields.dispatchEligibilityCode = shouldBeEligible
+                                ? (eligibility.code || 'ELIGIBLE')
+                                : (eligibility.code || 'NOT_ELIGIBLE');
+                            projectionFields.dispatchEligibilityCheckedAt = new Date().toISOString();
                         } catch (eligibilityError) {
                             logStructured('debug', 'Heartbeat: falha ao revalidar elegibilidade de dispatch', {
                                 service: 'driverHeartbeat',
@@ -386,21 +388,30 @@ function registerSocketDriverHeartbeatHandler({
                     }
                 }
 
-                if (shouldBeEligible && Number.isFinite(effectiveLat) && Number.isFinite(effectiveLng)) {
-                    await redis.geoadd(ELIGIBLE_DRIVER_GEO_KEY, effectiveLng, effectiveLat, driverId);
-                } else {
-                    await redis.zrem(ELIGIBLE_DRIVER_GEO_KEY, driverId);
-                    if (isInTripState) {
-                        await redis.hset(`driver:${driverId}`, {
-                            dispatchEligible: 'false',
-                            dispatchEligibilityCode: kycContinuityDeferred
-                                ? 'IN_TRIP_KYC_DEFERRED'
-                                : 'IN_TRIP',
-                            dispatchEligibilityCheckedAt: new Date().toISOString(),
-                            ...(kycContinuityDeferred ? { kycRecheckPendingAfterTrip: 'true' } : {})
-                        });
+                if (isInTripState) {
+                    shouldBeEligible = false;
+                    projectionFields.dispatchEligibilityCode = kycContinuityDeferred
+                        ? 'IN_TRIP_KYC_DEFERRED'
+                        : 'IN_TRIP';
+                    projectionFields.dispatchEligibilityCheckedAt = new Date().toISOString();
+                    if (kycContinuityDeferred) {
+                        projectionFields.kycRecheckPendingAfterTrip = 'true';
                     }
+                    if (continuityActiveTripId) {
+                        projectionFields.activeTripId = String(continuityActiveTripId);
+                    }
+                    projectionFields.updatedAt = nowIso;
                 }
+                projectionFields.dispatchEligible = String(shouldBeEligible);
+
+                await commitDriverOnlineProjection(redis, {
+                    driverId,
+                    isOnline: true,
+                    dispatchEligible: shouldBeEligible,
+                    lat: effectiveLat,
+                    lng: effectiveLng,
+                    fields: projectionFields
+                });
 
                 // ✅ HEARTBEAT: Renovar lock de veículo (se motorista estiver online)
                 if (socket.vehiclePlate) {
@@ -445,17 +456,23 @@ function registerSocketDriverHeartbeatHandler({
 
                         if (isInTripState) {
                             const checkedAt = new Date().toISOString();
-                            await redis.zrem(ELIGIBLE_DRIVER_GEO_KEY, driverId);
-                            await redis.hset(`driver:${driverId}`, {
-                                status: existingData.status || existingDriverState?.status || 'IN_TRIP',
-                                isOnline: 'true',
-                                dispatchEligible: 'false',
-                                dispatchEligibilityCode: 'IN_TRIP_KYC_DEFERRED',
-                                dispatchEligibilityCheckedAt: checkedAt,
-                                kycRecheckPendingAfterTrip: 'true',
-                                vehicleLeaseRecheckPendingAfterTrip: 'true',
-                                vehicleLeaseLastFailureAt: checkedAt,
-                                updatedAt: checkedAt
+                            await commitDriverOnlineProjection(redis, {
+                                driverId,
+                                isOnline: true,
+                                dispatchEligible: false,
+                                lat: effectiveLat,
+                                lng: effectiveLng,
+                                fields: {
+                                    status: existingData.status || existingDriverState?.status || 'IN_TRIP',
+                                    isOnline: 'true',
+                                    dispatchEligible: 'false',
+                                    dispatchEligibilityCode: 'IN_TRIP_KYC_DEFERRED',
+                                    dispatchEligibilityCheckedAt: checkedAt,
+                                    kycRecheckPendingAfterTrip: 'true',
+                                    vehicleLeaseRecheckPendingAfterTrip: 'true',
+                                    vehicleLeaseLastFailureAt: checkedAt,
+                                    updatedAt: checkedAt
+                                }
                             });
                             logStructured('warn', 'Falha ao renovar lease veicular durante corrida; continuidade preservada', {
                                 service: 'driverHeartbeat',
@@ -467,6 +484,19 @@ function registerSocketDriverHeartbeatHandler({
                         }
 
                         const checkedAt = new Date().toISOString();
+                        await commitDriverOnlineProjection(redis, {
+                            driverId,
+                            isOnline: false,
+                            dispatchEligible: false,
+                            fields: {
+                                status: 'OFFLINE',
+                                isOnline: 'false',
+                                dispatchEligible: 'false',
+                                dispatchEligibilityCode: 'VEHICLE_LEASE_LOST',
+                                dispatchEligibilityCheckedAt: checkedAt,
+                                updatedAt: checkedAt
+                            }
+                        });
                         await resolveDriverOnlineTransition(redis, {
                             driverId,
                             isOnline: false
@@ -476,17 +506,6 @@ function registerSocketDriverHeartbeatHandler({
                                 driverId,
                                 error: transitionError.message
                             });
-                        });
-                        await redis.zrem(ELIGIBLE_DRIVER_GEO_KEY, driverId);
-                        await redis.zrem('driver_locations', driverId);
-                        await redis.srem('online_drivers', driverId);
-                        await redis.hset(`driver:${driverId}`, {
-                            status: 'OFFLINE',
-                            isOnline: 'false',
-                            dispatchEligible: 'false',
-                            dispatchEligibilityCode: 'VEHICLE_LEASE_LOST',
-                            dispatchEligibilityCheckedAt: checkedAt,
-                            updatedAt: checkedAt
                         });
                         socket.vehiclePlate = null;
                         socket.vehicleLockLeaseToken = null;
@@ -520,14 +539,22 @@ function registerSocketDriverHeartbeatHandler({
             } else {
                 // Se não existe, criar com dados do heartbeat
                 await saveDriverLocation(driverId, latNum, lngNum, 0, 0, Date.now(), true, isInTripState);
-                await redis.zrem(ELIGIBLE_DRIVER_GEO_KEY, driverId);
-                await redis.hset(`driver:${driverId}`, {
-                    dispatchEligible: 'false',
-                    dispatchEligibilityCode: isInTripState
-                        ? (kycContinuityDeferred ? 'IN_TRIP_KYC_DEFERRED' : 'IN_TRIP')
-                        : 'AWAITING_LOCATION_SYNC',
-                    dispatchEligibilityCheckedAt: new Date().toISOString(),
-                    ...(kycContinuityDeferred ? { kycRecheckPendingAfterTrip: 'true' } : {})
+                await commitDriverOnlineProjection(redis, {
+                    driverId,
+                    isOnline: true,
+                    dispatchEligible: false,
+                    lat: latNum,
+                    lng: lngNum,
+                    fields: {
+                        isOnline: 'true',
+                        dispatchEligible: 'false',
+                        dispatchEligibilityCode: isInTripState
+                            ? (kycContinuityDeferred ? 'IN_TRIP_KYC_DEFERRED' : 'IN_TRIP')
+                            : 'AWAITING_LOCATION_SYNC',
+                        dispatchEligibilityCheckedAt: new Date().toISOString(),
+                        ...(kycContinuityDeferred ? { kycRecheckPendingAfterTrip: 'true' } : {}),
+                        ...(continuityActiveTripId ? { activeTripId: String(continuityActiveTripId) } : {})
+                    }
                 });
             }
 
