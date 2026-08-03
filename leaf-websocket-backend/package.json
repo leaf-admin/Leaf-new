@@ -59,7 +59,8 @@
     "backup:firestore-critical": "node scripts/ops/backup-firestore-critical.js",
     "verify:firestore-restore": "node scripts/ops/verify-firestore-restore.cjs",
     "restore:firestore-emulator": "node scripts/ops/restore-firestore-emulator.cjs",
-    "restore:rtdb-emulator": "node scripts/ops/restore-rtdb-emulator.cjs"
+    "restore:rtdb-emulator": "node scripts/ops/restore-rtdb-emulator.cjs",
+    "restore:storage-emulator": "node scripts/ops/restore-storage-emulator.cjs"
   },
   "keywords": [
     "websocket",
