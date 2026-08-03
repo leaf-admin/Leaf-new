@@ -316,6 +316,8 @@ function buildKycSection(redisAuthorityAttestation = null) {
     awsCompareApproveThresholdValid,
     awsCompareThresholdsValid,
     awsCostGuardEnabled: envBool('KYC_AWS_COST_GUARD_ENABLED', false),
+    awsCostBudgetAuthority: 'redis_lua_v1',
+    awsCostDurableAudit: 'firestore_operation_documents',
     awsCostLimitsValid,
     awsCostRetentionValid,
     awsCostOperationRetentionDays,

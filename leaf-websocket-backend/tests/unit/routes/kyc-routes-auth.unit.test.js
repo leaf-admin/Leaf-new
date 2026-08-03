@@ -998,6 +998,34 @@ describe('kyc routes auth', () => {
     expect(mockKycPolicyService.markDriverForLivenessAttemptsExhausted).not.toHaveBeenCalled();
   });
 
+  it('returns a governed retry window when the aggregate AWS budget is exhausted', async () => {
+    mockKycPolicyService.requiresFirstAccessLiveness.mockResolvedValueOnce({ required: true });
+    const retryAt = new Date(Date.now() + 300_000).toISOString();
+    mockCreateSession.mockRejectedValueOnce(Object.assign(
+      new Error('aggregate budget exhausted'),
+      {
+        code: 'KYC_AWS_COST_BUDGET_EXHAUSTED',
+        retryAt
+      }
+    ));
+
+    const response = await request(createApp())
+      .post('/api/kyc/liveness/aws/session')
+      .set('Authorization', 'Bearer firebase-token')
+      .send({ userId: 'driver-1', requirement: 'LIVENESS_REQUIRED' });
+
+    expect(response.status).toBe(503);
+    expect(Number(response.headers['retry-after'])).toBeGreaterThan(0);
+    expect(response.body).toEqual({
+      success: false,
+      error: 'A validacao esta temporariamente indisponivel. Tente novamente mais tarde.',
+      code: 'KYC_AWS_COST_BUDGET_EXHAUSTED',
+      retryable: true,
+      retryAt,
+      retryAfterSeconds: expect.any(Number)
+    });
+  });
+
   it('returns a bounded retry hint when AWS admission remains saturated', async () => {
     mockKycPolicyService.requiresFirstAccessLiveness.mockResolvedValueOnce({ required: true });
     mockCreateSession.mockRejectedValueOnce(Object.assign(

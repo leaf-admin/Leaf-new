@@ -1,5 +1,6 @@
 const crypto = require('crypto');
 const { logError } = require('../utils/logger');
+const defaultBudgetAuthority = require('./aws-kyc-cost-budget-authority');
 
 const PERIOD_COLLECTION = 'kyc_aws_cost_guard_periods';
 const OPERATION_COLLECTION = 'kyc_aws_cost_guard_operations';
@@ -79,6 +80,7 @@ class AwsKycCostGuardService {
     this.firestoreProvider = options.firestoreProvider || (() => (
       require('../firebase-config').getFirestore()
     ));
+    this.budgetAuthority = options.budgetAuthority || defaultBudgetAuthority;
     this.now = options.now || (() => new Date());
     this.enabled = options.enabled ?? readBoolean(this.env.KYC_AWS_COST_GUARD_ENABLED, false);
     this.timeZone = String(this.env.KYC_AWS_COST_TIME_ZONE || 'UTC').trim().toUpperCase();
@@ -135,7 +137,10 @@ class AwsKycCostGuardService {
         ? null
         : this.getBundleCostMicros() / 1_000_000,
       compareMaxAttempts: this.compareMaxAttempts,
-      operationRetentionDays: this.operationRetentionDays
+      operationRetentionDays: this.operationRetentionDays,
+      budgetAuthority: this.budgetAuthority?.getConfigSummary?.() || {
+        authority: 'unavailable'
+      }
     };
   }
 
@@ -211,6 +216,73 @@ class AwsKycCostGuardService {
       .doc(`user_day_${day}_${userIdHash}`);
   }
 
+  async readOperation(firestore, operationRef) {
+    return firestore.runTransaction(async (transaction) => {
+      const snapshot = await transaction.get(operationRef);
+      return snapshot.exists ? (snapshot.data() || {}) : null;
+    });
+  }
+
+  async readLegacyBudgetSeed(firestore, { day, month, userIdHash }) {
+    const dayRef = this.periodRef(firestore, 'day', day);
+    const monthRef = this.periodRef(firestore, 'month', month);
+    const userDayRef = this.userDayRef(firestore, day, userIdHash);
+    return firestore.runTransaction(async (transaction) => {
+      const [daySnapshot, monthSnapshot, userDaySnapshot] = await Promise.all([
+        transaction.get(dayRef),
+        transaction.get(monthRef),
+        transaction.get(userDayRef)
+      ]);
+      const dayState = daySnapshot.exists ? (daySnapshot.data() || {}) : {};
+      const monthState = monthSnapshot.exists ? (monthSnapshot.data() || {}) : {};
+      const userDayState = userDaySnapshot.exists ? (userDaySnapshot.data() || {}) : {};
+      return {
+        daySpentMicros: Math.max(0, Number(dayState.spentMicros || 0)),
+        dayOperationCount: Math.max(0, Number(dayState.operationCount || 0)),
+        monthSpentMicros: Math.max(0, Number(monthState.spentMicros || 0)),
+        monthOperationCount: Math.max(0, Number(monthState.operationCount || 0)),
+        userDaySpentMicros: Math.max(0, Number(userDayState.spentMicros || 0)),
+        userDayOperationCount: Math.max(0, Number(userDayState.operationCount || 0))
+      };
+    });
+  }
+
+  assertOperationMatches(existing, {
+    userIdHash,
+    day,
+    month,
+    bundleCostMicros
+  }) {
+    if (
+      existing.kind !== 'liveness_compare_bundle'
+      || existing.userIdHash !== userIdHash
+      || existing.day !== day
+      || existing.month !== month
+      || Number(existing.bundleCostMicros) !== bundleCostMicros
+    ) {
+      throw createError(
+        'Operacao de custo AWS KYC diverge da reserva original',
+        'KYC_AWS_COST_OPERATION_MISMATCH'
+      );
+    }
+    return existing;
+  }
+
+  buildBudgetAuthorityInput(operationId, operation) {
+    return {
+      operationIdHash: sha256(operationId),
+      userIdHash: operation.userIdHash,
+      day: operation.day,
+      month: operation.month,
+      bundleCostMicros: Number(operation.bundleCostMicros),
+      dailyLimitMicros: this.dailyLimitMicros,
+      monthlyLimitMicros: this.monthlyLimitMicros,
+      perUserDailySessionLimit: this.perUserDailySessionLimit,
+      operationRetentionSeconds: this.operationRetentionDays * 24 * 60 * 60,
+      aggregateRetentionSeconds: 400 * 24 * 60 * 60
+    };
+  }
+
   async reserveLivenessBundle({ userId, operationId, required = false } = {}) {
     const firestore = this.assertReady({ required });
     if (!firestore) return null;
@@ -228,83 +300,76 @@ class AwsKycCostGuardService {
     const { day, month } = this.getPeriodKeys(now);
     const bundleCostMicros = this.getBundleCostMicros();
     const operationRef = this.operationRef(firestore, safeOperationId);
-    const dayRef = this.periodRef(firestore, 'day', day);
-    const monthRef = this.periodRef(firestore, 'month', month);
     const userIdHash = sha256(safeUserId);
-    const userDayRef = this.userDayRef(firestore, day, userIdHash);
+    const operationIdentity = { userIdHash, day, month, bundleCostMicros };
+    let budgetReservation = null;
 
     try {
+      const existing = await this.readOperation(firestore, operationRef);
+      if (existing && existing.livenessStatus !== 'rolled_back') {
+        this.assertOperationMatches(existing, operationIdentity);
+        return {
+          operationId: safeOperationId,
+          status: existing.livenessStatus,
+          bundleEstimatedCostUsd: bundleCostMicros / 1_000_000
+        };
+      }
+
+      this.budgetAuthority.assertReady();
+      const budgetInput = this.buildBudgetAuthorityInput(
+        safeOperationId,
+        operationIdentity
+      );
+      budgetReservation = await this.budgetAuthority.reserve(budgetInput);
+      if (budgetReservation?.status === 'initialization_required') {
+        const seed = await this.readLegacyBudgetSeed(firestore, operationIdentity);
+        budgetReservation = await this.budgetAuthority.reserve({
+          ...budgetInput,
+          seed
+        });
+      }
+      if (budgetReservation?.status === 'operation_mismatch') {
+        throw createError(
+          'Operacao Redis de custo AWS KYC diverge da reserva original',
+          'KYC_AWS_COST_OPERATION_MISMATCH'
+        );
+      }
+      if (budgetReservation?.status === 'user_day_exhausted') {
+        throw createError(
+          'Limite diario por conta para sessoes AWS KYC atingido',
+          'KYC_AWS_USER_DAILY_SESSION_LIMIT_EXHAUSTED',
+          { retryAt: this.nextUtcDay(now) }
+        );
+      }
+      if (budgetReservation?.status === 'daily_budget_exhausted') {
+        throw createError(
+          'Orcamento agregado AWS KYC atingido',
+          'KYC_AWS_COST_BUDGET_EXHAUSTED',
+          { retryAt: this.nextUtcDay(now) }
+        );
+      }
+      if (budgetReservation?.status === 'monthly_budget_exhausted') {
+        throw createError(
+          'Orcamento agregado AWS KYC atingido',
+          'KYC_AWS_COST_BUDGET_EXHAUSTED',
+          { retryAt: this.nextUtcMonth(now) }
+        );
+      }
+      if (budgetReservation?.status !== 'reserved') {
+        throw createError(
+          'Resposta invalida da autoridade de custo AWS KYC',
+          'KYC_AWS_COST_GUARD_UNAVAILABLE'
+        );
+      }
+
       const operation = await firestore.runTransaction(async (transaction) => {
         const operationSnapshot = await transaction.get(operationRef);
         if (operationSnapshot.exists) {
           const existing = operationSnapshot.data() || {};
-          if (
-            existing.kind !== 'liveness_compare_bundle'
-            || existing.userIdHash !== userIdHash
-            || existing.day !== day
-            || existing.month !== month
-            || Number(existing.bundleCostMicros) !== bundleCostMicros
-          ) {
-            throw createError(
-              'Operacao de custo AWS KYC diverge da reserva original',
-              'KYC_AWS_COST_OPERATION_MISMATCH'
-            );
+          if (existing.livenessStatus !== 'rolled_back') {
+            return this.assertOperationMatches(existing, operationIdentity);
           }
-          return existing;
         }
-
-        const [daySnapshot, monthSnapshot, userDaySnapshot] = await Promise.all([
-          transaction.get(dayRef),
-          transaction.get(monthRef),
-          transaction.get(userDayRef)
-        ]);
-        const dayState = daySnapshot.exists ? (daySnapshot.data() || {}) : {};
-        const monthState = monthSnapshot.exists ? (monthSnapshot.data() || {}) : {};
-        const userDayState = userDaySnapshot.exists ? (userDaySnapshot.data() || {}) : {};
-        const nextDaySpent = Number(dayState.spentMicros || 0) + bundleCostMicros;
-        const nextMonthSpent = Number(monthState.spentMicros || 0) + bundleCostMicros;
-        const nextUserDayOperationCount = Number(userDayState.operationCount || 0) + 1;
-        if (nextUserDayOperationCount > this.perUserDailySessionLimit) {
-          throw createError(
-            'Limite diario por conta para sessoes AWS KYC atingido',
-            'KYC_AWS_USER_DAILY_SESSION_LIMIT_EXHAUSTED',
-            { retryAt: this.nextUtcDay(now) }
-          );
-        }
-        if (nextDaySpent > this.dailyLimitMicros || nextMonthSpent > this.monthlyLimitMicros) {
-          const dailyExhausted = nextDaySpent > this.dailyLimitMicros;
-          throw createError(
-            'Orcamento agregado AWS KYC atingido',
-            'KYC_AWS_COST_BUDGET_EXHAUSTED',
-            { retryAt: dailyExhausted ? this.nextUtcDay(now) : this.nextUtcMonth(now) }
-          );
-        }
-
-        transaction.set(dayRef, {
-          periodType: 'day',
-          periodKey: day,
-          spentMicros: nextDaySpent,
-          operationCount: Number(dayState.operationCount || 0) + 1,
-          updatedAt: nowIso,
-          expiresAt: this.expiresAt(now, 400)
-        }, { merge: false });
-        transaction.set(monthRef, {
-          periodType: 'month',
-          periodKey: month,
-          spentMicros: nextMonthSpent,
-          operationCount: Number(monthState.operationCount || 0) + 1,
-          updatedAt: nowIso,
-          expiresAt: this.expiresAt(now, 400)
-        }, { merge: false });
-        transaction.set(userDayRef, {
-          periodType: 'user_day',
-          periodKey: day,
-          userIdHash,
-          spentMicros: Number(userDayState.spentMicros || 0) + bundleCostMicros,
-          operationCount: nextUserDayOperationCount,
-          updatedAt: nowIso,
-          expiresAt: this.expiresAt(now, this.operationRetentionDays)
-        }, { merge: false });
 
         const created = {
           kind: 'liveness_compare_bundle',
@@ -314,6 +379,13 @@ class AwsKycCostGuardService {
           bundleCostMicros,
           livenessCostMicros: this.livenessCostMicros,
           compareCostMicros: this.compareCostMicros * this.compareMaxAttempts,
+          budgetAuthority: 'redis_lua_v1',
+          budgetReservation: {
+            daySpentMicros: Number(budgetReservation.daySpentMicros),
+            monthSpentMicros: Number(budgetReservation.monthSpentMicros),
+            userDayOperationCount: Number(budgetReservation.userDayOperationCount),
+            replay: budgetReservation.replay === true
+          },
           livenessStatus: 'reserved',
           compareStatus: 'reserved',
           createdAt: nowIso,
@@ -330,6 +402,17 @@ class AwsKycCostGuardService {
         bundleEstimatedCostUsd: bundleCostMicros / 1_000_000
       };
     } catch (error) {
+      if (budgetReservation?.status === 'reserved' && budgetReservation.replay !== true) {
+        await this.budgetAuthority.rollback(this.buildBudgetAuthorityInput(
+          safeOperationId,
+          operationIdentity
+        )).catch((rollbackError) => {
+          logError(rollbackError, 'Falha ao compensar reserva Redis sem auditoria Firestore', {
+            service: 'aws-kyc-cost-guard-service',
+            userId: safeUserId
+          });
+        });
+      }
       logError(error, 'Falha ao reservar orcamento agregado AWS KYC', {
         service: 'aws-kyc-cost-guard-service',
         userId: safeUserId,
@@ -352,6 +435,35 @@ class AwsKycCostGuardService {
     const operationRef = this.operationRef(firestore, safeOperationId);
 
     try {
+      const durableOperation = await this.readOperation(firestore, operationRef);
+      if (!durableOperation || durableOperation.livenessStatus !== 'reserved') return false;
+      if (durableOperation.budgetAuthority === 'redis_lua_v1') {
+        const rollback = await this.budgetAuthority.rollback(
+          this.buildBudgetAuthorityInput(safeOperationId, durableOperation)
+        );
+        if (rollback?.status !== 'rolled_back') return false;
+        return await this.updateOperation(safeOperationId, (current) => {
+          if (current.livenessStatus === 'rolled_back') {
+            return { result: true };
+          }
+          if (current.livenessStatus !== 'reserved') {
+            return { result: false };
+          }
+          const rolledBackAt = this.now().toISOString();
+          return {
+            next: {
+              ...current,
+              livenessStatus: 'rolled_back',
+              compareStatus: 'rolled_back',
+              budgetRolledBackAt: rolledBackAt,
+              updatedAt: rolledBackAt
+            },
+            result: true
+          };
+        });
+      }
+
+      // Compatibility rollback for reservations created before redis_lua_v1.
       return await firestore.runTransaction(async (transaction) => {
         const operationSnapshot = await transaction.get(operationRef);
         if (!operationSnapshot.exists) return false;
@@ -427,21 +539,78 @@ class AwsKycCostGuardService {
 
   async markLivenessDispatched(operationId) {
     if (!this.isEnabled()) return null;
-    return this.updateOperation(operationId, (current) => {
+    const safeOperationId = String(operationId || '').trim();
+    const firestore = this.assertReady({ required: true });
+    const operationRef = this.operationRef(firestore, safeOperationId);
+    const operation = await this.readOperation(firestore, operationRef);
+    if (!operation) {
+      throw createError(
+        'Reserva de custo AWS KYC nao encontrada',
+        'KYC_AWS_COST_OPERATION_NOT_FOUND'
+      );
+    }
+    if (['dispatched', 'completed'].includes(operation.livenessStatus)) return operation;
+    if (operation.livenessStatus !== 'reserved') {
+      throw createError(
+        'Estado de custo liveness invalido',
+        'KYC_AWS_COST_OPERATION_STATE_INVALID'
+      );
+    }
+
+    if (operation.budgetAuthority === 'redis_lua_v1') {
+      const dispatch = await this.budgetAuthority.markDispatched(
+        this.buildBudgetAuthorityInput(safeOperationId, operation)
+      );
+      if (dispatch?.status === 'missing') {
+        throw createError(
+          'Reserva Redis de custo AWS KYC nao encontrada',
+          'KYC_AWS_COST_GUARD_UNAVAILABLE'
+        );
+      }
+      if (dispatch?.status === 'operation_mismatch') {
+        throw createError(
+          'Operacao Redis de custo AWS KYC diverge da auditoria',
+          'KYC_AWS_COST_OPERATION_MISMATCH'
+        );
+      }
+      if (dispatch?.status !== 'dispatched') {
+        throw createError(
+          'Estado Redis de custo liveness invalido',
+          'KYC_AWS_COST_OPERATION_STATE_INVALID'
+        );
+      }
+    }
+
+    const persisted = await this.updateOperation(safeOperationId, (current) => {
       if (['dispatched', 'completed'].includes(current.livenessStatus)) {
         return { result: current };
       }
       if (current.livenessStatus !== 'reserved') {
-        throw createError('Estado de custo liveness invalido', 'KYC_AWS_COST_OPERATION_STATE_INVALID');
+        throw createError(
+          'Estado de custo liveness invalido',
+          'KYC_AWS_COST_OPERATION_STATE_INVALID'
+        );
       }
+      const dispatchedAt = this.now().toISOString();
       const next = {
         ...current,
         livenessStatus: 'dispatched',
-        livenessDispatchedAt: this.now().toISOString(),
-        updatedAt: this.now().toISOString()
+        livenessDispatchedAt: dispatchedAt,
+        updatedAt: dispatchedAt
       };
       return { next, result: next };
     });
+
+    if (operation.budgetAuthority === 'redis_lua_v1') {
+      await this.budgetAuthority.finalizeDispatch(
+        this.buildBudgetAuthorityInput(safeOperationId, operation)
+      ).catch((error) => {
+        logError(error, 'Falha ao limpar CAS Redis de custo ja despachado', {
+          service: 'aws-kyc-cost-guard-service'
+        });
+      });
+    }
+    return persisted;
   }
 
   async markLivenessCompleted(operationId, sessionId, {
