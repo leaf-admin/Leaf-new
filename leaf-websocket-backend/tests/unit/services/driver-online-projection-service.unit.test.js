@@ -108,6 +108,44 @@ describe('driver-online-projection-service', () => {
     expect(DRIVER_ONLINE_PROJECTION_SCRIPT).toContain("redis.call('SREM', KEYS[4], driver_id)");
   });
 
+  it('stores the last offline location in the full atomic projection', async () => {
+    const redis = {
+      eval: jest.fn().mockResolvedValue([1, 0, 0])
+    };
+
+    const result = await commitDriverOnlineProjection(redis, {
+      driverId: 'driver_1',
+      isOnline: false,
+      dispatchEligible: false,
+      lat: -22.9207,
+      lng: -43.4059,
+      ttlSeconds: 86400,
+      fields: {
+        status: 'OFFLINE',
+        isOnline: false,
+        dispatchEligible: false
+      }
+    });
+
+    expect(result).toMatchObject({
+      isOnline: false,
+      dispatchEligible: false,
+      hasLocation: true,
+      projectionScope: 'full',
+      ttlSeconds: 86400
+    });
+    expect(redis.eval.mock.calls[0]).toEqual(expect.arrayContaining([
+      'driver_offline_locations',
+      '-43.4059',
+      '-22.9207',
+      'full',
+      '86400'
+    ]));
+    expect(DRIVER_ONLINE_PROJECTION_SCRIPT).toContain(
+      "if has_location then\n    redis.call('GEOADD', KEYS[5]"
+    );
+  });
+
   it('fails closed when the atomic Redis primitive is unavailable or rejects', async () => {
     await expect(commitDriverOnlineProjection({}, {
       driverId: 'driver_1',
@@ -253,6 +291,17 @@ describe('driver-online-projection-service', () => {
     expect(writerSource).toContain("projectionScope: hasDispatchProjection ? 'full' : 'location_only'");
     expect(writerSource).toContain("typeof dispatchProjection?.eligible === 'boolean'");
     expect(writerSource).not.toMatch(/redis\.(hset|geoadd|zrem|sadd|srem|expire)\(/);
+  });
+
+  it('keeps disconnect discovery cleanup on the atomic projection contract', () => {
+    const disconnectSource = fs.readFileSync(
+      path.resolve(__dirname, '../../../bootstrap/register-socket-disconnect-handler.js'),
+      'utf8'
+    );
+
+    expect(disconnectSource).toContain('await commitDriverOnlineProjection(redis, {');
+    expect(disconnectSource).toContain("code: 'OFFLINE'");
+    expect(disconnectSource).not.toMatch(/redis\.(geoadd|zrem|sadd|srem)\(/);
   });
 
   it('serializes only defined hash fields', () => {

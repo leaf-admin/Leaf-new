@@ -30,7 +30,9 @@ local key_indices = projection_scope == 'eligibility_only'
   and { 1, 3 }
   or (projection_scope == 'location_only'
     and { 1, 2, 4, 5 }
-    or (online and { 1, 2, 3, 4, 5 } or { 1, 2, 3, 4 }))
+    or (online
+      and { 1, 2, 3, 4, 5 }
+      or (has_location and { 1, 2, 3, 4, 5 } or { 1, 2, 3, 4 })))
 
 for _, index in ipairs(key_indices) do
   local valid, actual = validate_key_type(KEYS[index], key_expectations[index])
@@ -79,6 +81,9 @@ elseif online then
   redis.call('ZREM', KEYS[3], driver_id)
   redis.call('ZREM', KEYS[5], driver_id)
 else
+  if has_location then
+    redis.call('GEOADD', KEYS[5], longitude, latitude, driver_id)
+  end
   redis.call('ZREM', KEYS[2], driver_id)
   redis.call('ZREM', KEYS[3], driver_id)
   redis.call('SREM', KEYS[4], driver_id)
@@ -163,8 +168,13 @@ async function commitDriverOnlineProjection(redis, {
   const normalizedTtlSeconds = Number.isFinite(parsedTtlSeconds) && parsedTtlSeconds > 0
     ? Math.floor(parsedTtlSeconds)
     : 0;
+  const hasAnyLocationValue = [lat, lng].some((value) => (
+    value !== undefined && value !== null && String(value).trim() !== ''
+  ));
   const location = normalizeGeoCoordinates(lat, lng, {
-    required: isOnline === true || normalizedProjectionScope === 'location_only'
+    required: isOnline === true
+      || normalizedProjectionScope === 'location_only'
+      || hasAnyLocationValue
   });
   const hasLocation = location.hasLocation;
   const hashArgs = normalizeHashFields(fields);
