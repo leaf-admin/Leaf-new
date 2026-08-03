@@ -59,6 +59,9 @@ const { resolveJwtSecret } = require('../utils/jwt-secret-resolver');
 const { getAdminUser } = require('../utils/admin-user-cache');
 const { normalizeVehicleOcrPayload } = require('../utils/vehicle-ocr-data');
 const { resolveActiveTripForDriver } = require('../utils/active-trip-index');
+const {
+  commitDriverOnlineProjection
+} = require('../services/driver-online-projection-service');
 
 // Firebase integration
 let firebaseConfig = null;
@@ -2600,15 +2603,21 @@ router.post('/api/drivers/:driverId/vehicle/config', authenticateJWT, requireRol
         // O bloqueio de novos despachos precede a leitura da corrida ativa. Assim,
         // uma revogação nunca cria uma nova oferta, mas também não derruba uma
         // corrida que já esteja em andamento.
-        await redis.hset(driverKey, {
+        await commitDriverOnlineProjection(redis, {
           driverId,
-          dispatchEligible: 'false',
-          dispatchEligibilityCode: 'VEHICLE_CONFIGURATION_REVOKED',
-          dispatchEligibilityCheckedAt: revokedAt,
-          vehicleAccessRevoked: 'true',
-          updatedAt: revokedAt
+          driverKey,
+          eligibleGeoKey: eligibleDriverGeoKey,
+          projectionScope: 'eligibility_only',
+          dispatchEligible: false,
+          fields: {
+            driverId,
+            dispatchEligible: 'false',
+            dispatchEligibilityCode: 'VEHICLE_CONFIGURATION_REVOKED',
+            dispatchEligibilityCheckedAt: revokedAt,
+            vehicleAccessRevoked: 'true',
+            updatedAt: revokedAt
+          }
         });
-        await redis.zrem(eligibleDriverGeoKey, driverId);
 
         let activeTripStateKnown = false;
         let activeTrip = { tripId: null, customerId: null };
@@ -2638,26 +2647,38 @@ router.post('/api/drivers/:driverId/vehicle/config', authenticateJWT, requireRol
             : 'VEHICLE_CONFIGURATION_REVOKED';
 
         if (offlineDeferred) {
-          await redis.hset(driverKey, {
-            dispatchEligible: 'false',
-            dispatchEligibilityCode: revocationReason,
-            vehicleOfflinePendingAfterTrip: 'true',
-            vehicleOfflineDeferredReason: offlineDeferredReason,
-            ...(hasActiveTrip ? { activeTripId: String(activeTrip.tripId) } : {}),
-            updatedAt: revokedAt
+          await commitDriverOnlineProjection(redis, {
+            driverId,
+            driverKey,
+            eligibleGeoKey: eligibleDriverGeoKey,
+            projectionScope: 'eligibility_only',
+            dispatchEligible: false,
+            fields: {
+              dispatchEligible: 'false',
+              dispatchEligibilityCode: revocationReason,
+              vehicleOfflinePendingAfterTrip: 'true',
+              vehicleOfflineDeferredReason: offlineDeferredReason,
+              ...(hasActiveTrip ? { activeTripId: String(activeTrip.tripId) } : {}),
+              updatedAt: revokedAt
+            }
           });
         } else {
-          await redis.hset(driverKey, {
-            status: 'OFFLINE',
-            isOnline: 'false',
-            dispatchEligible: 'false',
-            dispatchEligibilityCode: revocationReason,
-            vehicleOfflinePendingAfterTrip: 'false',
-            vehicleOfflineDeferredReason: '',
-            updatedAt: revokedAt
+          await commitDriverOnlineProjection(redis, {
+            driverId,
+            driverKey,
+            eligibleGeoKey: eligibleDriverGeoKey,
+            isOnline: false,
+            dispatchEligible: false,
+            fields: {
+              status: 'OFFLINE',
+              isOnline: 'false',
+              dispatchEligible: 'false',
+              dispatchEligibilityCode: revocationReason,
+              vehicleOfflinePendingAfterTrip: 'false',
+              vehicleOfflineDeferredReason: '',
+              updatedAt: revokedAt
+            }
           });
-          await redis.zrem('driver_locations', driverId);
-          await redis.srem('online_drivers', driverId);
         }
 
         operationalRevocation = {

@@ -315,6 +315,21 @@ describe('driver-online-projection-service', () => {
     expect(adminStatusSource).not.toContain('const multi = redis.multi();');
   });
 
+  it('keeps administrative vehicle revocation on the atomic projection contract', () => {
+    const dashboardSource = fs.readFileSync(
+      path.resolve(__dirname, '../../../routes/dashboard.js'),
+      'utf8'
+    );
+    const revocationStart = dashboardSource.indexOf('if (requestsOperationalRevocation)');
+    const revocationEnd = dashboardSource.indexOf('// Melhor esforço: atualizar metadados', revocationStart);
+    const revocationSource = dashboardSource.slice(revocationStart, revocationEnd);
+
+    expect(revocationStart).toBeGreaterThan(-1);
+    expect(revocationEnd).toBeGreaterThan(revocationStart);
+    expect(revocationSource).toContain('await commitDriverOnlineProjection(redis, {');
+    expect(revocationSource).not.toMatch(/redis\.(hset|geoadd|zrem|sadd|srem)\(/);
+  });
+
   it('serializes only defined hash fields', () => {
     expect(normalizeHashFields({
       status: 'AVAILABLE',
