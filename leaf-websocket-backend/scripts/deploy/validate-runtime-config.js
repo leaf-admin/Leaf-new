@@ -1220,7 +1220,9 @@ function main() {
       awsKycCostGuard: {
         enabled: awsCostGuard,
         limitsValid: awsCostLimitsValid,
-        timeZoneUtc: awsCostTimeZone === 'UTC'
+        timeZoneUtc: awsCostTimeZone === 'UTC',
+        budgetAuthority: 'redis_lua_v1',
+        durableAudit: 'firestore_operation_documents'
       },
       awsKycAdmissionControl: {
         enabled: awsAdmissionControl,
