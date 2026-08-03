@@ -12,6 +12,9 @@ const {
   releaseIdentityPolicyMutationWindow
 } = require('../utils/active-trip-index');
 const { logStructured, logError } = require('../utils/logger');
+const {
+  commitDriverOnlineProjection
+} = require('./driver-online-projection-service');
 
 const IDENTITY_REVERIFY_PUBLIC_REASON = 'Por segurança, precisamos validar sua identidade.';
 const IDENTITY_REVERIFY_REASON_CODE = 'passenger_photo_mismatch_report';
@@ -1671,20 +1674,31 @@ class KYCPolicyService {
     const attemptScope = normalizeAuthorizedRetryScope(payload.attemptScope);
     const firestore = firebaseConfig.getFirestore();
 
-    if (!this.redis || typeof this.redis.hset !== 'function') {
+    if (!this.redis || typeof this.redis.eval !== 'function') {
       const error = new Error('Redis indisponivel para selar revalidacao de identidade');
       error.code = 'KYC_REVERIFY_STATE_UNAVAILABLE';
       throw error;
     }
-    await this.redis.hset(`driver:${driverId}`, {
-      kyc_reverify_required: String(true),
-      kyc_reverify_source: reasonCode,
-      kyc_status: 'pending_reverify',
-      kyc_blocked: String(false),
-      dispatchEligible: String(false),
-      dispatchEligibilityCode: 'KYC_REVERIFY_REQUIRED',
-      identity_reverification_challenge_id: effectiveChallengeId,
-      identity_reverification_requested_at: nowIso
+    await commitDriverOnlineProjection(this.redis, {
+      driverId,
+      eligibleGeoKey: process.env.ELIGIBLE_DRIVER_GEO_KEY || 'driver_locations_eligible',
+      projectionScope: 'eligibility_only',
+      dispatchEligible: false,
+      fields: {
+        kyc_reverify_required: String(true),
+        kyc_reverify_source: reasonCode,
+        kyc_status: 'pending_reverify',
+        kyc_blocked: String(false),
+        dispatchEligible: String(false),
+        dispatchEligibilityCode: 'KYC_REVERIFY_REQUIRED',
+        identity_reverification_challenge_id: effectiveChallengeId,
+        identity_reverification_attempt_scope: attemptScope || '',
+        identity_reverification_requested_at: nowIso,
+        identity_reverification_pending_after_trip: String(false),
+        kyc_recheck_pending_after_trip: String(false),
+        kycRecheckPendingAfterTrip: String(false),
+        kycReverifyPendingAfterTrip: String(false)
+      }
     });
 
     await this.persistIdentityReverificationEvent({
@@ -1751,27 +1765,6 @@ class KYCPolicyService {
     }
 
     await this.integratedKycService.invalidateVerificationCache(driverId).catch(() => null);
-
-    await this.redis.hset(`driver:${driverId}`, {
-      kyc_reverify_required: String(true),
-      kyc_reverify_source: reasonCode,
-      kyc_status: 'pending_reverify',
-      kyc_blocked: String(false),
-      dispatchEligible: String(false),
-      dispatchEligibilityCode: 'KYC_REVERIFY_REQUIRED',
-      identity_reverification_challenge_id: effectiveChallengeId,
-      identity_reverification_attempt_scope: attemptScope || '',
-      identity_reverification_requested_at: nowIso,
-      identity_reverification_pending_after_trip: String(false),
-      kyc_recheck_pending_after_trip: String(false),
-      kycRecheckPendingAfterTrip: String(false),
-      kycReverifyPendingAfterTrip: String(false)
-    });
-
-    await Promise.resolve().then(() => this.redis.zrem(
-      process.env.ELIGIBLE_DRIVER_GEO_KEY || 'driver_locations_eligible',
-      driverId
-    )).catch(() => null);
 
     if (notify) {
       await this.notificationService.sendCustomNotification(
