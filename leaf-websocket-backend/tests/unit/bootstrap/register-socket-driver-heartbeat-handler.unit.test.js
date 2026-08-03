@@ -11,8 +11,15 @@ jest.mock('../../../services/driver-eligibility-service', () => ({
   isDriverEligibleForRide: jest.fn(),
 }));
 
+jest.mock('../../../services/driver-online-projection-service', () => ({
+  commitDriverOnlineProjection: jest.fn().mockResolvedValue({ success: true }),
+}));
+
 const activeTripIndex = require('../../../utils/active-trip-index');
 const driverEligibilityService = require('../../../services/driver-eligibility-service');
+const {
+  commitDriverOnlineProjection,
+} = require('../../../services/driver-online-projection-service');
 const registerSocketDriverHeartbeatHandler = require('../../../bootstrap/register-socket-driver-heartbeat-handler');
 
 const FORBIDDEN_MOBILE_KYC_FIELDS = new Set([
@@ -64,6 +71,7 @@ describe('register-socket-driver-heartbeat-handler', () => {
       eligible: true,
       code: 'ELIGIBLE',
     });
+    commitDriverOnlineProjection.mockResolvedValue({ success: true });
   });
 
   it('does not trust client in-trip flags to bypass the outside-ride KYC gate', async () => {
@@ -120,16 +128,23 @@ describe('register-socket-driver-heartbeat-handler', () => {
     expect(activeTripIndex.resolveActiveTripForDriver).toHaveBeenCalledWith(redis, 'driver_1');
     expect(enforceSubscriptionForOnline).toHaveBeenCalledWith('driver_1');
     expect(enforceDailyKYCForOnline).toHaveBeenCalledWith('driver_1');
-    expect(redis.hset).toHaveBeenCalledWith(
-      'driver:driver_1',
+    expect(commitDriverOnlineProjection).toHaveBeenCalledWith(
+      redis,
       expect.objectContaining({
-        dispatchEligible: 'false',
-        dispatchEligibilityCode: 'KYC_REQUIRED',
+        projectionScope: 'eligibility_only',
+        dispatchEligible: false,
+        fields: expect.objectContaining({
+          dispatchEligible: 'false',
+          dispatchEligibilityCode: 'KYC_REQUIRED',
+        }),
       })
     );
-    expect(redis.hset).not.toHaveBeenCalledWith(
-      'driver:driver_1',
-      expect.objectContaining({ dispatchEligibilityCode: 'IN_TRIP_KYC_DEFERRED' })
+    expect(commitDriverOnlineProjection).toHaveBeenCalledTimes(1);
+    expect(commitDriverOnlineProjection).not.toHaveBeenCalledWith(
+      redis,
+      expect.objectContaining({
+        fields: expect.objectContaining({ dispatchEligibilityCode: 'IN_TRIP_KYC_DEFERRED' }),
+      })
     );
     expect(socket.emit).toHaveBeenCalledWith(
       'driverStatusError',
@@ -200,15 +215,20 @@ describe('register-socket-driver-heartbeat-handler', () => {
       'driver_1',
       'trip_active_1'
     );
-    expect(redis.hset).toHaveBeenCalledWith(
-      'driver:driver_1',
+    expect(commitDriverOnlineProjection).toHaveBeenCalledWith(
+      redis,
       expect.objectContaining({
-        isOnline: 'true',
-        dispatchEligible: 'false',
-        dispatchEligibilityCode: 'IN_TRIP_KYC_DEFERRED',
-        activeTripId: 'trip_active_1',
+        isOnline: true,
+        dispatchEligible: false,
+        fields: expect.objectContaining({
+          isOnline: 'true',
+          dispatchEligible: 'false',
+          dispatchEligibilityCode: 'IN_TRIP_KYC_DEFERRED',
+          activeTripId: 'trip_active_1',
+        }),
       })
     );
+    expect(commitDriverOnlineProjection).toHaveBeenCalledTimes(1);
   });
 
   it('fails closed when a resolved ride lease cannot be renewed', async () => {
@@ -251,11 +271,15 @@ describe('register-socket-driver-heartbeat-handler', () => {
 
     expect(enforceSubscriptionForOnline).not.toHaveBeenCalled();
     expect(enforceDailyKYCForOnline).not.toHaveBeenCalled();
-    expect(redis.hset).toHaveBeenCalledWith(
-      'driver:driver_1',
+    expect(commitDriverOnlineProjection).toHaveBeenCalledWith(
+      redis,
       expect.objectContaining({
-        dispatchEligible: 'false',
-        dispatchEligibilityCode: 'IN_TRIP_KYC_DEFERRED',
+        isOnline: true,
+        dispatchEligible: false,
+        fields: expect.objectContaining({
+          dispatchEligible: 'false',
+          dispatchEligibilityCode: 'IN_TRIP_KYC_DEFERRED',
+        }),
       })
     );
   });
@@ -350,12 +374,16 @@ describe('register-socket-driver-heartbeat-handler', () => {
       isInTrip: false,
     });
 
-    expect(redis.hset).toHaveBeenCalledWith(
-      'driver:driver_1',
+    expect(commitDriverOnlineProjection).toHaveBeenCalledWith(
+      redis,
       expect.objectContaining({
-        status: 'OFFLINE',
-        isOnline: 'false',
-        dispatchEligibilityCode: 'DRIVER_ONLINE_DAILY_LIMIT_REACHED',
+        isOnline: false,
+        dispatchEligible: false,
+        fields: expect.objectContaining({
+          status: 'OFFLINE',
+          isOnline: 'false',
+          dispatchEligibilityCode: 'DRIVER_ONLINE_DAILY_LIMIT_REACHED',
+        }),
       })
     );
     expect(socket.emit).toHaveBeenCalledWith(
@@ -381,6 +409,64 @@ describe('register-socket-driver-heartbeat-handler', () => {
           limitReached: true,
         }),
       })
+    );
+  });
+
+  it('does not close the daily session when the atomic offline projection fails', async () => {
+    const twelveHoursMs = 12 * 60 * 60 * 1000;
+    const socket = createSocket();
+    const redis = {
+      hgetall: jest
+        .fn()
+        .mockResolvedValueOnce({ isOnline: 'true' })
+        .mockResolvedValueOnce({
+          totalMs: String(twelveHoursMs),
+          sessionStartedAtMs: '',
+        }),
+      hset: jest.fn().mockResolvedValue(1),
+      expire: jest.fn().mockResolvedValue(1),
+      zrem: jest.fn().mockResolvedValue(1),
+      srem: jest.fn().mockResolvedValue(1),
+    };
+    commitDriverOnlineProjection.mockRejectedValueOnce(
+      new Error('atomic projection rejected')
+    );
+
+    registerSocketDriverHeartbeatHandler({
+      socket,
+      redisPool: { getConnection: jest.fn(() => redis) },
+      logStructured: jest.fn(),
+      enforceSubscriptionForOnline: jest.fn(),
+      enforceDailyKYCForOnline: jest.fn(),
+      saveDriverLocation: jest.fn(),
+      vehicleLockManager: { renewLock: jest.fn() },
+    });
+
+    await socket.trigger('driverHeartbeat', {
+      driverId: 'driver_1',
+      lat: -22.9,
+      lng: -43.2,
+      tripStatus: 'idle',
+      isInTrip: false,
+    });
+
+    expect(commitDriverOnlineProjection).toHaveBeenCalledWith(
+      redis,
+      expect.objectContaining({
+        isOnline: false,
+        dispatchEligible: false,
+      })
+    );
+    expect(redis.hset.mock.calls).not.toEqual(
+      expect.arrayContaining([
+        expect.arrayContaining([
+          expect.stringMatching(/^driver_online_daily:/),
+        ]),
+      ])
+    );
+    expect(socket.emit).not.toHaveBeenCalledWith(
+      'driverStatusUpdated',
+      expect.objectContaining({ isOnline: false })
     );
   });
 
@@ -433,13 +519,17 @@ describe('register-socket-driver-heartbeat-handler', () => {
     expect(renewLock).toHaveBeenCalledWith('ABC1D23', 'driver_1', {
       leaseToken: 'socket_1',
     });
-    expect(redis.hset).toHaveBeenCalledWith(
-      'driver:driver_1',
+    expect(commitDriverOnlineProjection).toHaveBeenCalledWith(
+      redis,
       expect.objectContaining({
-        status: 'OFFLINE',
-        isOnline: 'false',
-        dispatchEligible: 'false',
-        dispatchEligibilityCode: 'VEHICLE_LEASE_LOST',
+        isOnline: false,
+        dispatchEligible: false,
+        fields: expect.objectContaining({
+          status: 'OFFLINE',
+          isOnline: 'false',
+          dispatchEligible: 'false',
+          dispatchEligibilityCode: 'VEHICLE_LEASE_LOST',
+        }),
       })
     );
     expect(socket.emit).toHaveBeenCalledWith(
@@ -566,14 +656,18 @@ describe('register-socket-driver-heartbeat-handler', () => {
 
     expect(enforceDailyKYCForOnline).toHaveBeenCalledWith('driver_1');
     expect(driverEligibilityService.isDriverEligibleForRide).not.toHaveBeenCalled();
-    expect(redis.hset).toHaveBeenCalledWith(
-      'driver:driver_1',
+    expect(commitDriverOnlineProjection).toHaveBeenCalledWith(
+      redis,
       expect.objectContaining({
-        isOnline: 'true',
-        dispatchEligible: 'false',
-        dispatchEligibilityCode: 'IN_TRIP_KYC_DEFERRED',
-        kycRecheckPendingAfterTrip: 'true',
-        activeTripId: 'trip_race_1'
+        isOnline: true,
+        dispatchEligible: false,
+        fields: expect.objectContaining({
+          isOnline: 'true',
+          dispatchEligible: 'false',
+          dispatchEligibilityCode: 'IN_TRIP_KYC_DEFERRED',
+          kycRecheckPendingAfterTrip: 'true',
+          activeTripId: 'trip_race_1',
+        }),
       })
     );
     expect(redis.geoadd).not.toHaveBeenCalledWith(
@@ -627,11 +721,15 @@ describe('register-socket-driver-heartbeat-handler', () => {
     });
 
     expect(enforceDailyKYCForOnline).toHaveBeenCalledWith('driver_1');
-    expect(redis.hset).toHaveBeenCalledWith(
-      'driver:driver_1',
+    expect(commitDriverOnlineProjection).toHaveBeenCalledWith(
+      redis,
       expect.objectContaining({
-        isOnline: 'false',
-        dispatchEligibilityCode: 'kycRequired'
+        isOnline: false,
+        dispatchEligible: false,
+        fields: expect.objectContaining({
+          isOnline: 'false',
+          dispatchEligibilityCode: 'kycRequired',
+        }),
       })
     );
     expect(socket.emit).toHaveBeenCalledWith(
@@ -680,11 +778,15 @@ describe('register-socket-driver-heartbeat-handler', () => {
       isInTrip: false
     });
 
-    expect(redis.hset).toHaveBeenCalledWith(
-      'driver:driver_1',
+    expect(commitDriverOnlineProjection).toHaveBeenCalledWith(
+      redis,
       expect.objectContaining({
-        isOnline: 'false',
-        kycRecheckPendingAfterTrip: 'true'
+        isOnline: false,
+        dispatchEligible: false,
+        fields: expect.objectContaining({
+          isOnline: 'false',
+          kycRecheckPendingAfterTrip: 'true',
+        }),
       })
     );
   });
@@ -793,20 +895,26 @@ describe('register-socket-driver-heartbeat-handler', () => {
       isInTrip: true
     });
 
-    expect(redis.hset).toHaveBeenCalledWith(
-      'driver:driver_1',
+    expect(commitDriverOnlineProjection).toHaveBeenCalledWith(
+      redis,
       expect.objectContaining({
-        status: 'IN_TRIP',
-        isOnline: 'true',
-        dispatchEligible: 'false',
-        vehicleLeaseRecheckPendingAfterTrip: 'true'
+        isOnline: true,
+        dispatchEligible: false,
+        fields: expect.objectContaining({
+          status: 'IN_TRIP',
+          isOnline: 'true',
+          dispatchEligible: 'false',
+          vehicleLeaseRecheckPendingAfterTrip: 'true',
+        }),
       })
     );
     expect(redis.zrem).not.toHaveBeenCalledWith('driver_locations', 'driver_1');
     expect(redis.srem).not.toHaveBeenCalledWith('online_drivers', 'driver_1');
-    expect(redis.hset).not.toHaveBeenCalledWith(
-      'driver:driver_1',
-      expect.objectContaining({ dispatchEligibilityCode: 'VEHICLE_LEASE_LOST' })
+    expect(commitDriverOnlineProjection).not.toHaveBeenCalledWith(
+      redis,
+      expect.objectContaining({
+        fields: expect.objectContaining({ dispatchEligibilityCode: 'VEHICLE_LEASE_LOST' }),
+      })
     );
     expect(socket.emit).not.toHaveBeenCalledWith(
       'driverStatusError',
@@ -866,11 +974,18 @@ describe('register-socket-driver-heartbeat-handler', () => {
       null,
       expect.objectContaining({ dispatchEligibilityCode: 'IN_TRIP_KYC_DEFERRED' })
     );
-    expect(redis.geoadd).toHaveBeenCalledWith(
-      'driver_locations_eligible',
-      -43.2,
-      -22.9,
-      'driver_1'
+    expect(commitDriverOnlineProjection).toHaveBeenCalledWith(
+      redis,
+      expect.objectContaining({
+        isOnline: true,
+        dispatchEligible: true,
+        lat: -22.9,
+        lng: -43.2,
+        fields: expect.objectContaining({
+          dispatchEligible: 'true',
+          dispatchEligibilityCode: 'ELIGIBLE',
+        }),
+      })
     );
   });
 });

@@ -33,22 +33,25 @@ describe('driver-online-projection-service', () => {
       success: true,
       isOnline: true,
       dispatchEligible: true,
-      hasLocation: true
+      hasLocation: true,
+      projectionScope: 'full'
     });
     expect(redis.eval).toHaveBeenCalledTimes(1);
     expect(redis.eval).toHaveBeenCalledWith(
       DRIVER_ONLINE_PROJECTION_SCRIPT,
-      4,
+      5,
       'driver:driver_1',
       'driver_locations',
       'driver_locations_eligible',
       'online_drivers',
+      'driver_offline_locations',
       'driver_1',
       '1',
       '1',
       '-43.4059',
       '-22.9207',
       '1',
+      'full',
       '4',
       'driverId',
       'driver_1',
@@ -59,7 +62,7 @@ describe('driver-online-projection-service', () => {
       'dispatchEligible',
       'true'
     );
-    expect(DRIVER_ONLINE_PROJECTION_SCRIPT).toContain("local key_expectations = { 'hash', 'zset', 'zset', 'set' }");
+    expect(DRIVER_ONLINE_PROJECTION_SCRIPT).toContain("local key_expectations = { 'hash', 'zset', 'zset', 'set', 'zset' }");
     expect(DRIVER_ONLINE_PROJECTION_SCRIPT).toContain('if not valid then');
     expect(DRIVER_ONLINE_PROJECTION_SCRIPT).toContain("redis.call('HSET', KEYS[1], unpack(hash_args))");
     expect(DRIVER_ONLINE_PROJECTION_SCRIPT).toContain("redis.call('GEOADD', KEYS[3]");
@@ -89,13 +92,14 @@ describe('driver-online-projection-service', () => {
       hasLocation: false
     });
     const args = redis.eval.mock.calls[0];
-    expect(args.slice(2, 6)).toEqual([
+    expect(args.slice(2, 7)).toEqual([
       'driver:driver_1',
       'driver_locations',
       'driver_locations_eligible',
-      'online_drivers'
+      'online_drivers',
+      'driver_offline_locations'
     ]);
-    expect(args.slice(6, 12)).toEqual(['driver_1', '0', '0', '', '', '0']);
+    expect(args.slice(7, 14)).toEqual(['driver_1', '0', '0', '', '', '0', 'full']);
     expect(DRIVER_ONLINE_PROJECTION_SCRIPT).toContain("redis.call('SREM', KEYS[4], driver_id)");
   });
 
@@ -130,6 +134,24 @@ describe('driver-online-projection-service', () => {
       lat: null,
       lng: null
     });
+  });
+
+  it('supports an atomic eligibility-only patch without changing online discovery indices', async () => {
+    const redis = { eval: jest.fn().mockResolvedValue([1, -1, 0]) };
+
+    const result = await commitDriverOnlineProjection(redis, {
+      driverId: 'driver_1',
+      projectionScope: 'eligibility_only',
+      dispatchEligible: false,
+      fields: {
+        dispatchEligible: 'false',
+        dispatchEligibilityCode: 'KYC_REQUIRED'
+      }
+    });
+
+    expect(result.projectionScope).toBe('eligibility_only');
+    expect(redis.eval.mock.calls[0]).toContain('eligibility_only');
+    expect(DRIVER_ONLINE_PROJECTION_SCRIPT).toContain("projection_scope == 'eligibility_only'");
   });
 
   it('serializes only defined hash fields', () => {
