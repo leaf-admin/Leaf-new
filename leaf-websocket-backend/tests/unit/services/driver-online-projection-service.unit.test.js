@@ -484,6 +484,23 @@ describe('driver-online-projection-service', () => {
     expect(methodSource).not.toMatch(/this\.redis\.(hset|geoadd|zrem|sadd|srem|multi)\(/);
   });
 
+  it('keeps failed identity revalidation on a challenge-guarded full projection', () => {
+    const kycPolicySource = fs.readFileSync(
+      path.resolve(__dirname, '../../../services/kyc-policy-service.js'),
+      'utf8'
+    );
+    const methodStart = kycPolicySource.indexOf('async recordIdentityReverificationResult(');
+    const methodEnd = kycPolicySource.indexOf('async recordIdentityReverificationStarted(', methodStart);
+    const methodSource = kycPolicySource.slice(methodStart, methodEnd);
+
+    expect(methodStart).toBeGreaterThan(-1);
+    expect(methodEnd).toBeGreaterThan(methodStart);
+    expect(methodSource).toContain('const redisProjection = await commitDriverOnlineProjection(this.redis, {');
+    expect(methodSource).toContain('identity_reverification_challenge_id: challengeId');
+    expect(methodSource).toContain("dispatchEligibilityCode: 'KYC_REVERIFY_FAILED'");
+    expect(methodSource).not.toMatch(/this\.redis\.zrem\([\s\S]*driver_locations_eligible/);
+  });
+
   it('serializes only defined hash fields', () => {
     expect(normalizeHashFields({
       status: 'AVAILABLE',

@@ -2540,17 +2540,28 @@ class KYCPolicyService {
     if (!firestoreResult.committed) {
       return { success: true, driverId, recorded: false, ...firestoreResult };
     }
-    const redisCommitted = await this.persistCurrentIdentityRedis(driverId, challengeId, {
-      kyc_status: 'blocked',
-      kyc_blocked: String(true),
-      kyc_reverify_required: String(false),
-      isOnline: String(false),
-      status: 'OFFLINE',
-      dispatchEligible: String(false),
-      dispatchEligibilityCode: 'KYC_REVERIFY_FAILED',
-      identity_reverification_status: 'failed'
+    const redisProjection = await commitDriverOnlineProjection(this.redis, {
+      driverId,
+      eligibleGeoKey: process.env.ELIGIBLE_DRIVER_GEO_KEY || 'driver_locations_eligible',
+      isOnline: false,
+      dispatchEligible: false,
+      expectedFields: {
+        identity_reverification_challenge_id: challengeId
+      },
+      fields: {
+        kyc_status: 'blocked',
+        kyc_blocked: String(true),
+        kyc_reverify_required: String(false),
+        isOnline: String(false),
+        status: 'OFFLINE',
+        dispatchEligible: String(false),
+        dispatchEligibilityCode: 'KYC_REVERIFY_FAILED',
+        dispatchEligibilityCheckedAt: nowIso,
+        identity_reverification_status: 'failed',
+        updatedAt: nowIso
+      }
     });
-    if (!redisCommitted) {
+    if (redisProjection?.success !== true) {
       return {
         success: true,
         driverId,
@@ -2560,10 +2571,6 @@ class KYCPolicyService {
       };
     }
     await Promise.resolve().then(() => this.redis.zrem('drivers:available', driverId)).catch(() => null);
-    await Promise.resolve().then(() => this.redis.zrem(
-      process.env.ELIGIBLE_DRIVER_GEO_KEY || 'driver_locations_eligible',
-      driverId
-    )).catch(() => null);
 
     await this.notificationService.sendCustomNotification(
       driverId,
