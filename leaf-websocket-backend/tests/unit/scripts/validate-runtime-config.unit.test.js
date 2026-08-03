@@ -55,7 +55,7 @@ describe('validate-runtime-config Woovi webhook production gates', () => {
     KYC_AWS_ADMISSION_RESULT_BURST: '20',
     KYC_AWS_ADMISSION_MAX_CONCURRENT_SESSIONS: '70',
     KYC_AWS_ADMISSION_LEASE_TTL_SECONDS: '180',
-    KYC_AWS_ADMISSION_MAX_WAIT_MS: '15000',
+    KYC_AWS_ADMISSION_MAX_WAIT_MS: '0',
     LEAF_APPROVED_FINANCIAL_POLICY_ID: 'runtime_tiered_percent_above_50_v1',
     LEAF_FINANCIAL_POLICY_APPROVAL_REF: 'policy-test-approval'
   };
@@ -81,7 +81,7 @@ describe('validate-runtime-config Woovi webhook production gates', () => {
     KYC_AWS_ADMISSION_RESULT_BURST: '20',
     KYC_AWS_ADMISSION_MAX_CONCURRENT_SESSIONS: '70',
     KYC_AWS_ADMISSION_LEASE_TTL_SECONDS: '180',
-    KYC_AWS_ADMISSION_MAX_WAIT_MS: '15000',
+    KYC_AWS_ADMISSION_MAX_WAIT_MS: '0',
     ENABLE_CNH_FACE_BIOMETRICS: 'false',
     MOBILE_FACE_EMBEDDING_ENABLED: 'false',
     MOBILE_FACE_EMBEDDING_LOCAL_COMPARE_FALLBACK: 'false',
@@ -1252,7 +1252,7 @@ describe('validate-runtime-config Woovi webhook production gates', () => {
       configValid: true,
       createTps: 20,
       maxConcurrentSessions: 70,
-      maxWaitMs: 15000
+      maxWaitMs: 0
     });
   });
 

@@ -2728,13 +2728,13 @@ class AwsFaceLivenessService {
     let admissionLease = null;
     let metadata = null;
     try {
+      admissionLease = await this.admissionController.acquireCreateLease({
+        leaseId: clientRequestToken,
+        required: strictProductionBiometrics
+      });
       costGuardReservation = await this.costGuard.reserveLivenessBundle({
         userId,
         operationId: clientRequestToken,
-        required: strictProductionBiometrics
-      });
-      admissionLease = await this.admissionController.acquireCreateLease({
-        leaseId: clientRequestToken,
         required: strictProductionBiometrics
       });
       metadata = {

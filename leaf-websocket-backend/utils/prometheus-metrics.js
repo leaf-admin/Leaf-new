@@ -453,6 +453,27 @@ const rideCostAlertsTotal = new promClient.Counter({
     registers: [register]
 });
 
+const kycAwsAdmissionTotal = new promClient.Counter({
+    name: 'leaf_kyc_aws_admission_total',
+    help: 'Resultados do controle distribuido de admissao AWS KYC',
+    labelNames: ['operation', 'outcome'],
+    registers: [register]
+});
+
+const kycAwsAdmissionWaitSeconds = new promClient.Histogram({
+    name: 'leaf_kyc_aws_admission_wait_seconds',
+    help: 'Tempo aguardado para obter permissao de admissao AWS KYC',
+    labelNames: ['operation'],
+    buckets: [0.001, 0.01, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 15, 30],
+    registers: [register]
+});
+
+const kycAwsAdmissionActiveSessions = new promClient.Gauge({
+    name: 'leaf_kyc_aws_admission_active_sessions',
+    help: 'Sessoes AWS Face Liveness com lease ativo no controlador local',
+    registers: [register]
+});
+
 // ==================== EXPORT ====================
 
 /**
@@ -809,6 +830,25 @@ const metrics = {
             metric: sanitizeLabelValue(metric, 'unknown'),
             severity: sanitizeLabelValue(severity, 'warning')
         }, Number.isFinite(count) && count > 0 ? count : 1);
+    },
+
+    recordKycAwsAdmission: (operation = 'unknown', outcome = 'unknown', waitSeconds = 0) => {
+        kycAwsAdmissionTotal.inc({
+            operation: sanitizeLabelValue(operation, 'unknown'),
+            outcome: sanitizeLabelValue(outcome, 'unknown')
+        });
+        if (Number.isFinite(waitSeconds) && waitSeconds >= 0) {
+            kycAwsAdmissionWaitSeconds.observe({
+                operation: sanitizeLabelValue(operation, 'unknown')
+            }, waitSeconds);
+        }
+    },
+
+    setKycAwsAdmissionActiveSessions: (count = 0) => {
+        const value = Number(count);
+        if (Number.isFinite(value) && value >= 0) {
+            kycAwsAdmissionActiveSessions.set(value);
+        }
     }
 };
 

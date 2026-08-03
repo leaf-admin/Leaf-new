@@ -2,6 +2,7 @@ import React from 'react';
 import { act, render, waitFor } from '@testing-library/react-native';
 import { Camera } from 'expo-camera';
 import AWSNativeLivenessScreen, {
+  createAwsLivenessSessionWithAdmissionRetry,
   createFlowError,
   pollAwsLivenessResult,
 } from '../src/components/KYC/AWSNativeLivenessScreen';
@@ -197,10 +198,12 @@ describe('KYC mobile P0 boundary', () => {
       .mockResolvedValueOnce({ success: true, data: { completed: false, status: 'IN_PROGRESS' } })
       .mockResolvedValueOnce({ success: true, data: { completed: true, livenessPassed: true } });
 
+    const pollWait = jest.fn(async () => {});
     const result = await pollAwsLivenessResult({
       driverId: 'driver-1',
       sessionId: 'session-1',
-      wait: jest.fn(async () => {}),
+      wait: pollWait,
+      random: () => 0.5,
     });
 
     expect(result).toMatchObject({ completed: true, livenessPassed: true });
@@ -215,6 +218,53 @@ describe('KYC mobile P0 boundary', () => {
       'session-1',
     );
     expect(mockCreateAwsLivenessSession).not.toHaveBeenCalled();
+    expect(pollWait).toHaveBeenCalledWith(4500);
+  });
+
+  test('bounds admission retries without creating a session while capacity is exhausted', async () => {
+    let nowMs = 0;
+    const waits = [];
+    const service = {
+      createAwsLivenessSession: jest.fn(async () => ({
+        success: false,
+        status: 503,
+        code: 'KYC_AWS_ADMISSION_CAPACITY_EXHAUSTED',
+        retryAfterSeconds: 5,
+        retryable: true,
+      })),
+    };
+
+    const result = await createAwsLivenessSessionWithAdmissionRetry({
+      driverId: 'driver-burst-window',
+      options: {
+        challengeId: 'challenge-burst-window',
+        requirement: 'LIVENESS_REQUIRED',
+      },
+      service,
+      now: () => nowMs,
+      wait: async (delayMs) => {
+        waits.push(delayMs);
+        nowMs += delayMs;
+      },
+      random: () => 0,
+      retryWindowMs: 12000,
+    });
+
+    expect(result).toMatchObject({
+      success: false,
+      code: 'KYC_AWS_ADMISSION_CAPACITY_EXHAUSTED',
+      retryable: true,
+      admissionRetryExhausted: true,
+    });
+    expect(waits).toEqual([5000, 5000, 2000]);
+    expect(service.createAwsLivenessSession).toHaveBeenCalledTimes(4);
+    expect(service.createAwsLivenessSession).toHaveBeenCalledWith(
+      'driver-burst-window',
+      {
+        challengeId: 'challenge-burst-window',
+        requirement: 'LIVENESS_REQUIRED',
+      },
+    );
   });
 
   test('stops polling immediately when the backend returns a temporary attempt limit', async () => {
