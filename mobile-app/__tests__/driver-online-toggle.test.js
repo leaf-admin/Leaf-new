@@ -11,6 +11,7 @@ import RobotaxiHomeScreen, {
   normalizeHomeQuoteRefreshBudget,
   resolveHomeCategoryFarePresentation,
   resolveHomeQuoteExpiryAction,
+  shouldProcessHomeQuoteExpiry,
 } from '../src/screens/prototype/RobotaxiHomeScreen';
 import { usePrototypeRideRuntime } from '../src/screens/prototype/prototypeRideRuntime';
 import { fetchDynamicPricingQuote } from '../src/services/runtime/pricingQuoteService';
@@ -650,6 +651,31 @@ describe('driver online toggle', () => {
       key: 'active-route',
       count: 1,
     });
+  });
+
+  it('processes each expired home quote only once across timeout and watchdog checks', () => {
+    expect(
+      shouldProcessHomeQuoteExpiry({
+        expiresAtMs: 2000,
+        nowMs: 1999,
+        expiryKey: 'quote-a:2000',
+      }),
+    ).toBe(false);
+    expect(
+      shouldProcessHomeQuoteExpiry({
+        expiresAtMs: 2000,
+        nowMs: 2000,
+        expiryKey: 'quote-a:2000',
+      }),
+    ).toBe(true);
+    expect(
+      shouldProcessHomeQuoteExpiry({
+        expiresAtMs: 2000,
+        nowMs: 2001,
+        expiryKey: 'quote-a:2000',
+        handledExpiryKey: 'quote-a:2000',
+      }),
+    ).toBe(false);
   });
 
   it('caps a home quote validity at two minutes after it is received', () => {

@@ -136,6 +136,7 @@ const HOME_PICKUP_REVERSE_GEOCODE_PRECISION = 5;
 const HOME_PICKUP_REVERSE_GEOCODE_MAX_DISTANCE_METERS = 180;
 const HOME_QUOTE_VALIDITY_MS = 2 * 60 * 1000;
 const HOME_QUOTE_MAX_AUTOMATIC_REFRESHES = 2;
+const HOME_QUOTE_EXPIRY_WATCHDOG_MS = 2000;
 const DRIVER_EXECUTION_SURFACE_STATUSES = new Set([
   'accepted',
   'arrived',
@@ -1437,6 +1438,20 @@ export function normalizeHomeQuoteRefreshBudget({
   };
 }
 
+export function shouldProcessHomeQuoteExpiry({
+  expiresAtMs,
+  nowMs = Date.now(),
+  expiryKey = '',
+  handledExpiryKey = '',
+} = {}) {
+  return Boolean(
+    String(expiryKey || '').trim() &&
+      String(expiryKey || '').trim() !== String(handledExpiryKey || '').trim() &&
+      Number.isFinite(Number(expiresAtMs)) &&
+      Number(expiresAtMs) <= Number(nowMs),
+  );
+}
+
 function buildHomeBackendQuoteKey({
   routeKey,
   categoryId,
@@ -1835,6 +1850,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   const [homeQuoteAutoRefreshExhaustedKey, setHomeQuoteAutoRefreshExhaustedKey] =
     useState('');
   const homeQuoteAutoRefreshBudgetRef = useRef({ key: '', count: 0 });
+  const homeQuoteHandledExpiryKeyRef = useRef('');
   const homeQuoteRefreshSourceRef = useRef('');
   const [homeAvailabilityNotice, setHomeAvailabilityNotice] = useState('');
   const [homeDriverAvailabilityOverride, setHomeDriverAvailabilityOverride] =
@@ -6778,6 +6794,40 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     setHomeAvailabilityNotice('Atualizando preço...');
   }, [homeQuoteCycleKey]);
 
+  const processHomeQuoteExpiry = useCallback((expiresAtMs) => {
+    const expiryKey = `${homeBackendQuoteKey}:${Number(expiresAtMs) || 0}`;
+    if (!shouldProcessHomeQuoteExpiry({
+      expiresAtMs,
+      expiryKey,
+      handledExpiryKey: homeQuoteHandledExpiryKeyRef.current,
+    })) {
+      return;
+    }
+    homeQuoteHandledExpiryKeyRef.current = expiryKey;
+
+    const refreshBudget = normalizeHomeQuoteRefreshBudget({
+      budget: homeQuoteAutoRefreshBudgetRef.current,
+      cycleKey: homeQuoteCycleKey,
+    });
+    homeQuoteAutoRefreshBudgetRef.current = refreshBudget;
+
+    const expiryAction = resolveHomeQuoteExpiryAction({
+      automaticRefreshCount: refreshBudget.count,
+    });
+
+    if (expiryAction.action === 'refresh') {
+      homeQuoteAutoRefreshBudgetRef.current = {
+        key: homeQuoteCycleKey,
+        count: expiryAction.nextAutomaticRefreshCount,
+      };
+      refreshHomeCategoryQuotes({ automatic: true });
+      return;
+    }
+
+    setHomeQuoteAutoRefreshExhaustedKey(homeQuoteCycleKey);
+    setHomeAvailabilityNotice('Preço expirado');
+  }, [homeBackendQuoteKey, homeQuoteCycleKey, refreshHomeCategoryQuotes]);
+
   useEffect(() => {
     if (
       !isScreenFocused ||
@@ -6794,38 +6844,27 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
       return undefined;
     }
 
-    const timeoutId = setTimeout(() => {
-      const refreshBudget = normalizeHomeQuoteRefreshBudget({
-        budget: homeQuoteAutoRefreshBudgetRef.current,
-        cycleKey: homeQuoteCycleKey,
-      });
-      homeQuoteAutoRefreshBudgetRef.current = refreshBudget;
+    const checkExpiry = () => processHomeQuoteExpiry(expiresAtMs);
+    const timeoutId = setTimeout(
+      checkExpiry,
+      Math.max(0, expiresAtMs - Date.now()) + 25,
+    );
+    const watchdogId = setInterval(
+      checkExpiry,
+      HOME_QUOTE_EXPIRY_WATCHDOG_MS,
+    );
 
-      const expiryAction = resolveHomeQuoteExpiryAction({
-        automaticRefreshCount: refreshBudget.count,
-      });
-
-      if (expiryAction.action === 'refresh') {
-        homeQuoteAutoRefreshBudgetRef.current = {
-          key: homeQuoteCycleKey,
-          count: expiryAction.nextAutomaticRefreshCount,
-        };
-        refreshHomeCategoryQuotes({ automatic: true });
-        return;
-      }
-
-      setHomeQuoteAutoRefreshExhaustedKey(homeQuoteCycleKey);
-      setHomeAvailabilityNotice('Preço expirado');
-    }, Math.max(0, expiresAtMs - Date.now()) + 25);
-
-    return () => clearTimeout(timeoutId);
+    return () => {
+      clearTimeout(timeoutId);
+      clearInterval(watchdogId);
+    };
   }, [
     homeBackendQuote,
     homeBackendQuoteKey,
     homeCategorySurfaceVisible,
     homeQuoteCycleKey,
     isScreenFocused,
-    refreshHomeCategoryQuotes,
+    processHomeQuoteExpiry,
   ]);
 
   const retryHomeRoutePreview = useCallback(() => {
