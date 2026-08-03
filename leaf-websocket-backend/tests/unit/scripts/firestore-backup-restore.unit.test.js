@@ -1,0 +1,233 @@
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+
+const {
+  createBackup,
+  DEFAULT_CRITICAL_COLLECTIONS,
+  dumpCollection,
+  encodeFirestoreValue,
+  parseCollections,
+  writeBackupArtifacts
+} = require('../../../scripts/ops/backup-firestore-critical.js');
+const {
+  verifyFirestoreRestore
+} = require('../../../scripts/ops/verify-firestore-restore.cjs');
+
+function firestoreWithDocuments(collectionName, rows) {
+  const documents = rows.map(({ id, data }, index) => ({
+    id,
+    ref: { path: `${collectionName}/${id}` },
+    data: () => data,
+    index
+  }));
+  const calls = [];
+  return {
+    calls,
+    collection: jest.fn((requestedCollection) => {
+      expect(requestedCollection).toBe(collectionName);
+      let pageSize = 500;
+      let startIndex = 0;
+      return {
+        orderBy(fieldPath) {
+          calls.push({ operation: 'orderBy', fieldPath });
+          return this;
+        },
+        limit(value) {
+          pageSize = value;
+          return this;
+        },
+        startAfter(document) {
+          startIndex = document.index + 1;
+          calls.push({ operation: 'startAfter', id: document.id });
+          return this;
+        },
+        async get() {
+          const docs = documents.slice(startIndex, startIndex + pageSize);
+          calls.push({ operation: 'get', startIndex, count: docs.length });
+          return { docs };
+        }
+      };
+    })
+  };
+}
+
+describe('Firestore logical backup and restore drill', () => {
+  let tempDir;
+
+  beforeEach(() => {
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'leaf-firestore-backup-test-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  test('paginates until every configured document is exported', async () => {
+    const firestore = firestoreWithDocuments('users', [
+      { id: 'a', data: { name: 'A' } },
+      { id: 'b', data: { name: 'B' } },
+      { id: 'c', data: { name: 'C' } },
+      { id: 'd', data: { name: 'D' } },
+      { id: 'e', data: { name: 'E' } }
+    ]);
+
+    const docs = await dumpCollection(firestore, 'users', {
+      pageSize: 2,
+      maxDocs: 0,
+      documentIdFieldPath: '__name__'
+    });
+
+    expect(docs.map(document => document.id)).toEqual(['a', 'b', 'c', 'd', 'e']);
+    expect(firestore.calls.filter(call => call.operation === 'get')).toEqual([
+      { operation: 'get', startIndex: 0, count: 2 },
+      { operation: 'get', startIndex: 2, count: 2 },
+      { operation: 'get', startIndex: 4, count: 1 }
+    ]);
+  });
+
+  test('fails instead of silently truncating when the explicit safety cap is exceeded', async () => {
+    const firestore = firestoreWithDocuments('bookings', [
+      { id: 'a', data: {} },
+      { id: 'b', data: {} },
+      { id: 'c', data: {} },
+      { id: 'd', data: {} }
+    ]);
+
+    await expect(dumpCollection(firestore, 'bookings', {
+      pageSize: 2,
+      maxDocs: 3,
+      documentIdFieldPath: '__name__'
+    })).rejects.toThrow('backup abortado sem truncar');
+  });
+
+  test('fails closed without creating an artifact when any collection read fails', async () => {
+    const backupPath = path.join(tempDir, 'failed-firestore-critical.json.gz');
+    const firestore = {
+      collection: jest.fn(() => ({
+        orderBy() { return this; },
+        limit() { return this; },
+        async get() { throw new Error('permission denied'); }
+      }))
+    };
+
+    await expect(createBackup({
+      firestore,
+      collections: ['users'],
+      pageSize: 100,
+      maxDocs: 0,
+      outputPath: backupPath
+    })).rejects.toThrow('permission denied');
+    expect(fs.existsSync(backupPath)).toBe(false);
+    expect(fs.existsSync(`${backupPath}.manifest.json`)).toBe(false);
+    expect(fs.existsSync(`${backupPath}.sha256`)).toBe(false);
+  });
+
+  test('encodes Firestore-specific values without losing their logical type', () => {
+    class Timestamp {
+      constructor(seconds, nanoseconds) {
+        this.seconds = seconds;
+        this.nanoseconds = nanoseconds;
+      }
+      toDate() {
+        return new Date(this.seconds * 1000);
+      }
+    }
+    class GeoPoint {
+      constructor(latitude, longitude) {
+        this.latitude = latitude;
+        this.longitude = longitude;
+      }
+    }
+    class DocumentReference {
+      constructor(referencePath) {
+        this.path = referencePath;
+      }
+    }
+
+    expect(encodeFirestoreValue({
+      at: new Timestamp(123, 456),
+      location: new GeoPoint(-23.5, -46.6),
+      owner: new DocumentReference('users/driver-1'),
+      bytes: Buffer.from('leaf'),
+      date: new Date('2026-08-02T12:00:00.000Z'),
+      unavailable: Number.NaN
+    })).toEqual({
+      at: { __leafFirestoreType: 'timestamp', seconds: 123, nanoseconds: 456 },
+      location: { __leafFirestoreType: 'geopoint', latitude: -23.5, longitude: -46.6 },
+      owner: { __leafFirestoreType: 'reference', path: 'users/driver-1' },
+      bytes: { __leafFirestoreType: 'bytes', base64: 'bGVhZg==' },
+      date: { __leafFirestoreType: 'date', iso: '2026-08-02T12:00:00.000Z' },
+      unavailable: { __leafFirestoreType: 'number', value: 'NaN' }
+    });
+  });
+
+  test('writes a non-overwriting artifact set and verifies a logical restore offline', () => {
+    const backupPath = path.join(tempDir, 'firestore-critical.json.gz');
+    const payload = {
+      schemaVersion: 2,
+      generatedAt: '2026-08-02T12:00:00.000Z',
+      complete: true,
+      scope: {
+        kind: 'configured_top_level_collections',
+        includesSubcollections: false,
+        includesFirebaseStorage: false,
+        pageSize: 500,
+        maxDocsPerCollection: null
+      },
+      collections: {
+        users: {
+          count: 1,
+          docs: [{ id: 'driver-1', path: 'users/driver-1', data: { active: true } }]
+        },
+        financial_ledger_events: { count: 0, docs: [] }
+      }
+    };
+
+    const written = writeBackupArtifacts(backupPath, payload);
+    expect(written.totalDocuments).toBe(1);
+    expect(verifyFirestoreRestore(backupPath)).toMatchObject({
+      status: 'passed',
+      checksumVerified: true,
+      manifestVerified: true,
+      logicalRestoreDecoded: true,
+      collectionsVerified: 2,
+      documentsVerified: 1
+    });
+    expect(() => writeBackupArtifacts(backupPath, payload)).toThrow('Destino já existe');
+
+    fs.writeFileSync(`${backupPath}.sha256`, `0${'a'.repeat(63)}  firestore-critical.json.gz\n`);
+    expect(() => verifyFirestoreRestore(backupPath)).toThrow('Manifesto ou checksum');
+  });
+
+  test('rejects duplicate or nested collection configuration', () => {
+    expect(() => parseCollections('users,users')).toThrow('Coleções duplicadas');
+    expect(() => parseCollections('users/driver-1/documents')).toThrow('top-level');
+  });
+
+  test('does not expand paid Firestore reads through the default collection inventory', () => {
+    expect(DEFAULT_CRITICAL_COLLECTIONS).toEqual([
+      'bookings',
+      'payment_holdings',
+      'payment_history',
+      'users',
+      'drivers'
+    ]);
+    expect(parseCollections()).toEqual(DEFAULT_CRITICAL_COLLECTIONS);
+  });
+
+  test('keeps both isolated restore drills mandatory in the daily routine', () => {
+    const dailyBackupSource = fs.readFileSync(
+      path.join(__dirname, '../../../scripts/ops/backup-daily.sh'),
+      'utf8'
+    );
+    expect(dailyBackupSource).toContain('verify-redis-restore.cjs" --backup "$REDIS_TARGET"');
+    expect(dailyBackupSource).toContain('verify-firestore-restore.cjs" --backup "$FIRESTORE_TARGET"');
+    expect(dailyBackupSource.indexOf('verify-redis-restore.cjs')).toBeLessThan(
+      dailyBackupSource.indexOf('echo "[backup] redis ok')
+    );
+    expect(dailyBackupSource.indexOf('verify-firestore-restore.cjs')).toBeLessThan(
+      dailyBackupSource.indexOf('echo "[backup] firestore ok')
+    );
+  });
+});

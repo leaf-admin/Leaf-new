@@ -57,7 +57,9 @@
     "test:redis-sentinel-failover": "node scripts/tests/redis-sentinel-failover.cjs",
     "backup:redis": "node scripts/ops/backup-redis.cjs",
     "verify:redis-restore": "node scripts/ops/verify-redis-restore.cjs",
-    "test:redis-backup-restore": "node scripts/tests/redis-backup-restore.cjs"
+    "test:redis-backup-restore": "node scripts/tests/redis-backup-restore.cjs",
+    "backup:firestore-critical": "node scripts/ops/backup-firestore-critical.js",
+    "verify:firestore-restore": "node scripts/ops/verify-firestore-restore.cjs"
   },
   "keywords": [
     "websocket",
