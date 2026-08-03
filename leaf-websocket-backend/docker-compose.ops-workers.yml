@@ -3,6 +3,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        GIT_SHA: ${GIT_SHA:-unknown}
     container_name: leaf-trip-location-worker
     command: ["node", "workers/worker-trip-location.js"]
     environment:
@@ -70,6 +72,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        GIT_SHA: ${GIT_SHA:-unknown}
     container_name: leaf-pricing-baseline-worker
     command: ["node", "workers/pricing-baseline-worker.js"]
     environment:
@@ -121,6 +125,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        GIT_SHA: ${GIT_SHA:-unknown}
     container_name: leaf-ride-health-monitor-worker
     command: ["node", "workers/ride-health-monitor-worker.js"]
     environment:

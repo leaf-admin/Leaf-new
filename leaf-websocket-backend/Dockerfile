@@ -1,6 +1,10 @@
 # Dockerfile otimizado para produção
 FROM node:20-alpine
 
+ARG GIT_SHA=unknown
+LABEL org.opencontainers.image.revision="$GIT_SHA"
+ENV GIT_SHA="$GIT_SHA"
+
 # Instalar dependências do sistema
 RUN apk add --no-cache \
     curl \

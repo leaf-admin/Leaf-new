@@ -256,7 +256,7 @@ describe('production compose launch-control contract', () => {
     expect(firstServiceUp).toBeGreaterThan(remoteValidator);
   });
 
-  it('pins the production host, syncs only tracked source and keeps an automatic image rollback', () => {
+  it('pins an immutable production release, removes stale source and keeps automatic image rollback', () => {
     expect(deploySource).toContain('StrictHostKeyChecking=yes');
     expect(deploySource).toContain('ssh-keygen -F "$CONTABO_HOST"');
     expect(deploySource).not.toContain('StrictHostKeyChecking=no');
@@ -264,10 +264,26 @@ describe('production compose launch-control contract', () => {
 
     expect(deploySource).toContain('--from0');
     expect(deploySource).toContain('--files-from="$TRACKED_MANIFEST"');
+    expect(deploySource).toContain('git -C "$REPO_ROOT" archive --format=tar');
+    expect(deploySource).toContain('RSYNC_DELETE_ARGS=(--delete --delete-delay)');
+    expect(deploySource).toContain('SYNC_SOURCE_DIR="$RELEASE_STAGING_DIR/"');
     expect(deploySource).toContain('--dry-run --itemize-changes');
-    expect(deploySource).not.toContain('--delete-delay');
+    expect(deploySource).toContain('--exclude "/docker-compose.yml"');
     expect(deploySource).toContain('DEPLOY_TRACKED_PATHS');
     expect(deploySource).toContain('GATEWAY_ONLY_DEPLOY');
+    expect(deploySource).toContain('PRODUCTION_RELEASE_SHA');
+    expect(deploySource).toContain('CURRENT_BRANCH" != "main"');
+    expect(deploySource).toContain('refs/remotes/origin/main');
+    expect(deploySource).toContain("GIT_SHA='$RELEASE_SHA' \\$compose build");
+    expect(deploySource).toContain('org.opencontainers.image.revision');
+    expect(deploySource).toContain('grep -Fxq \'GIT_SHA=$RELEASE_SHA\'');
+
+    expect(dockerfileSource).toContain('ARG GIT_SHA=unknown');
+    expect(dockerfileSource).toContain('LABEL org.opencontainers.image.revision="$GIT_SHA"');
+    expect(dockerfileSource).toContain('ENV GIT_SHA="$GIT_SHA"');
+    expect(composeSource.match(/GIT_SHA: \$\{GIT_SHA:-unknown\}/g)).toHaveLength(3);
+    expect(gatewayScaleSource.match(/GIT_SHA: \$\{GIT_SHA:-unknown\}/g)).toHaveLength(2);
+    expect(opsWorkersSource.match(/GIT_SHA: \$\{GIT_SHA:-unknown\}/g)).toHaveLength(3);
 
     for (const credentialPattern of [
       '*.env',

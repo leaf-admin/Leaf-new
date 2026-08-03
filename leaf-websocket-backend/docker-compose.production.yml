@@ -38,6 +38,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        GIT_SHA: ${GIT_SHA:-unknown}
     container_name: leaf-websocket
     ports:
       - "127.0.0.1:3001:3001"
@@ -343,6 +345,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        GIT_SHA: ${GIT_SHA:-unknown}
     container_name: leaf-sideeffects-worker
     command: ["bash", "scripts/runtime/start-sideeffects-worker.sh"]
     environment:
@@ -436,6 +440,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        GIT_SHA: ${GIT_SHA:-unknown}
     container_name: leaf-billing-worker
     command: ["node", "workers/worker-billing.js"]
     env_file:
