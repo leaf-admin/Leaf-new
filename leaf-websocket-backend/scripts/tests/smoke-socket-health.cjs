@@ -423,11 +423,11 @@ async function testAdapterIsolationWithTwoInstances(redisUrl) {
 
   clientA.close();
   clientB.close();
-  await Promise.allSettled([adapterA.disconnect(), adapterB.disconnect()]);
   await Promise.all([
     new Promise((resolve) => ioA.close(() => serverA.close(resolve))),
     new Promise((resolve) => ioB.close(() => serverB.close(resolve)))
   ]);
+  await Promise.allSettled([adapterA.disconnect(), adapterB.disconnect()]);
 
   return {
     status: 'passed',
