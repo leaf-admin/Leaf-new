@@ -103,4 +103,15 @@ describe('canonical common runtime boundary', () => {
     expect(fs.existsSync(path.join(MOBILE_ROOT, 'src/common-local/index.js'))).toBe(false);
     expect(fs.existsSync(path.join(MOBILE_ROOT, 'src/services/canonical/legacyApiService.js'))).toBe(false);
   });
+
+  it('keeps Redux actions under the canonical actions directory', () => {
+    const commonLocalDirectory = path.join(MOBILE_ROOT, 'src/common-local');
+    const duplicatedRootActions = fs.readdirSync(commonLocalDirectory)
+      .filter((fileName) => fileName.endsWith('actions.js'))
+      .sort();
+
+    expect(duplicatedRootActions).toEqual([]);
+    expect(fs.existsSync(path.join(commonLocalDirectory, 'actions/bookingactions.js'))).toBe(true);
+    expect(fs.existsSync(path.join(commonLocalDirectory, 'actions/tripactions.js'))).toBe(true);
+  });
 });
