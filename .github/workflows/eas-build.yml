@@ -12,6 +12,9 @@ on:
       - 'package-lock.json'
       - 'scripts/maintenance/security/**'
       - 'scripts/validation/**'
+      - 'scripts/tests/firestore-rules-emulator.cjs'
+      - 'scripts/tests/firebase-rtdb-storage-rules-emulator.cjs'
+      - 'config/firebase/**'
       - 'services/support-agent-orchestrator/package.json'
       - 'AGENTS.md'
       - 'PROJECT_RULES.md'
@@ -216,6 +219,37 @@ jobs:
       - name: Assert no hardcoded backend secrets
         run: bash leaf-websocket-backend/scripts/tests/assert-no-hardcoded-secrets.sh
 
+  validate-firebase-rules:
+    name: Firebase Rules Release And Emulator Contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: './package-lock.json'
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Validate canonical Firebase rules release
+        run: npm run firebase:rules:check
+
+      - name: Run Firebase rules emulators
+        run: npm run test:firebase:rules
+
   eas-build:
     name: Manual EAS Build
     runs-on: ubuntu-latest
@@ -224,6 +258,7 @@ jobs:
       - validate-mobile
       - validate-dashboard
       - validate-workspace-safety
+      - validate-firebase-rules
     if: github.event_name == 'workflow_dispatch'
     defaults:
       run:

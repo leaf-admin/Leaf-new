@@ -1,38 +1,8 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
-# Script MANUAL para aplicar regras do Firestore
-# Execute APÓS fazer login no Firebase
+set -euo pipefail
 
-echo "🔧 Aplicando regras corrigidas do Firestore..."
-echo ""
+SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 
-# Aplicar regras
-firebase deploy --only firestore:rules
-
-echo ""
-echo "✅ Regras do Firestore atualizadas!"
-echo ""
-echo "🎯 Agora usuários normais podem:"
-echo "   • Salvar dados de viagem no Firestore"
-echo "   • Gerenciar veículos"
-echo "   • Usar o app sem erros de permissão"
-echo ""
-echo "🚀 Reinicie o app para testar!"
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+echo "[firebase-rules-release] apply-rules-manual.sh delega ao release gate canônico."
+exec "$SCRIPT_DIR/deploy-rules.sh" "$@"
