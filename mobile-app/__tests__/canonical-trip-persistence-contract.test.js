@@ -19,6 +19,7 @@ describe('canonical trip persistence boundary', () => {
     const retiredTripDataSurfaces = [
       'src/services/TripDataService.js',
       'src/services/SyncService.js',
+      'src/common-local/locationactions.js',
       'src/common-local/redisTrackingService.js',
       'src/common-local/services/redisTrackingService.js',
       'src/services/runtime/locationActionsBridge.js',
@@ -32,6 +33,7 @@ describe('canonical trip persistence boundary', () => {
     const directWriterPatterns = [
       /database\(\)\.ref\(\s*[`'"]trip_data\//,
       /firestore\(\)\.collection\(\s*['"]trip_data['"]\s*\)/,
+      /\b(?:set|push)\(\s*trackingRef\(/,
     ];
     const violations = listJavaScriptFiles(path.join(MOBILE_ROOT, 'src'))
       .flatMap((filePath) => {
