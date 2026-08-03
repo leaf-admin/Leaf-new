@@ -88,7 +88,8 @@ async function readDriverOnlineDailySnapshot(redis, driverId, nowMs = Date.now()
 async function resolveDriverOnlineTransition(redis, {
   driverId,
   isOnline,
-  nowMs = Date.now()
+  nowMs = Date.now(),
+  persist = true
 }) {
   if (!driverId) {
     throw new Error('driverId ausente para controle diario online');
@@ -111,6 +112,17 @@ async function resolveDriverOnlineTransition(redis, {
 
   if (isOnline) {
     const sessionStartedAtMs = snapshotBefore.sessionStartedAtMs || nowMs;
+    const snapshot = buildSnapshot({
+      dayKey,
+      totalMs: snapshotBefore.totalMs,
+      sessionStartedAtMs
+    }, nowMs, policy);
+    if (persist === false) {
+      return {
+        allowed: true,
+        snapshot
+      };
+    }
     await redis.hset(key, {
       driverId,
       dayKey,
@@ -123,11 +135,7 @@ async function resolveDriverOnlineTransition(redis, {
     await redis.expire(key, policy.ttlSeconds);
     return {
       allowed: true,
-      snapshot: buildSnapshot({
-        dayKey,
-        totalMs: snapshotBefore.totalMs,
-        sessionStartedAtMs
-      }, nowMs, policy)
+      snapshot
     };
   }
 
