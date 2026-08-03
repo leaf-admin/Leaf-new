@@ -137,6 +137,7 @@ jest.mock('../../../services/driver-online-projection-service', () => ({
 }));
 
 jest.mock('../../../services/kyc-driver-status-service', () => ({}));
+jest.mock('../../../services/kyc-policy-service', () => ({}));
 jest.mock('../../../services/dashboard-live-data-service', () => ({ getDashboardLiveData: jest.fn() }));
 jest.mock('../../../services/dashboard-user-service', () => ({
   listUsers: jest.fn(),
