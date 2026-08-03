@@ -292,6 +292,8 @@ describe('production compose launch-control contract', () => {
     expect(deploySource).toContain('SYNC_SOURCE_DIR="$RELEASE_STAGING_DIR/"');
     expect(deploySource).toContain('--dry-run --itemize-changes');
     expect(deploySource).toContain('--exclude "/docker-compose.yml"');
+    expect(deploySource).toContain("candidate_image='leaf-app-websocket:latest'");
+    expect(deploySource).not.toContain('compose images -q websocket');
     expect(deploySource).toContain('DEPLOY_TRACKED_PATHS');
     expect(deploySource).toContain('GATEWAY_ONLY_DEPLOY');
     expect(deploySource).toContain('PRODUCTION_RELEASE_SHA');
