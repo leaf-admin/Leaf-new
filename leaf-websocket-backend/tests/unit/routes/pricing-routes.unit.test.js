@@ -6,7 +6,8 @@ const request = require('supertest');
 const mockRedis = {
   eval: jest.fn(),
   get: jest.fn(),
-  set: jest.fn()
+  set: jest.fn(),
+  ttl: jest.fn()
 };
 const mockGetConnection = jest.fn(() => mockRedis);
 const mockEstimateRideFare = jest.fn();
@@ -79,6 +80,7 @@ describe('pricing routes', () => {
     mockRedis.eval.mockResolvedValue(1);
     mockRedis.get.mockResolvedValue(null);
     mockRedis.set.mockResolvedValue('OK');
+    mockRedis.ttl.mockResolvedValue(600);
     mockGetConnection.mockReturnValue(mockRedis);
     mockHasPaymentEligibleDriver.mockResolvedValue({
       success: true,
@@ -217,6 +219,63 @@ describe('pricing routes', () => {
     expect(mockRedis.get).toHaveBeenCalledWith(
       'pricing:quote-session-route:passenger_quote_refresh_1'
     );
+  });
+
+  it('carries a validated canonical route into a manual refresh session for only the remaining TTL', async () => {
+    const canonicalRoute = {
+      distance_in_km: 9.7,
+      time_in_secs: 920,
+      duration_in_traffic: 980,
+      polylinePoints: 'nuujC~|kgG_|B_|B_|B_|B'
+    };
+    const previousRoutePayload = JSON.stringify({
+      routeSignature: '-22.96600|-43.18200|-22.97400|-43.20700',
+      canonicalRoute
+    });
+    mockFetchDirectionsRoute.mockResolvedValue({
+      cached: false,
+      cacheOnly: true,
+      data: null,
+      status: 'cache_miss'
+    });
+    mockRedis.get
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(previousRoutePayload);
+    mockRedis.ttl.mockResolvedValue(487);
+
+    const response = await request(createApp())
+      .post('/pricing/quote')
+      .set('x-leaf-quote-session-id', 'passenger_quote_manual_2')
+      .set('x-leaf-previous-quote-session-id', 'passenger_quote_refresh_1')
+      .send({
+        pickupLocation: { lat: '-22.9660', lng: '-43.1820' },
+        destinationLocation: { lat: '-22.9740', lng: '-43.2070' },
+        carType: 'Leaf Plus'
+      });
+
+    expect(response.status).toBe(200);
+    expect(response.headers['x-leaf-quote-route-source'])
+      .toBe('previous_quote_session');
+    expect(response.body.canonicalRouteSource).toBe('previous_quote_session');
+    expect(mockRedis.get).toHaveBeenNthCalledWith(
+      1,
+      'pricing:quote-session-route:passenger_quote_manual_2'
+    );
+    expect(mockRedis.get).toHaveBeenNthCalledWith(
+      2,
+      'pricing:quote-session-route:passenger_quote_refresh_1'
+    );
+    expect(mockRedis.set).toHaveBeenCalledWith(
+      'pricing:quote-session-route:passenger_quote_manual_2',
+      previousRoutePayload,
+      'EX',
+      487,
+      'NX'
+    );
+    expect(mockEstimateRideFare).toHaveBeenCalledWith(expect.objectContaining({
+      routeDistanceKm: 9.7,
+      routeDurationSecs: 980
+    }));
   });
 
   it('rejects a stored quote-session route when its server signature does not match the requested route', async () => {

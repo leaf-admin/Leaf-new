@@ -1852,6 +1852,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   const homeQuoteAutoRefreshBudgetRef = useRef({ key: '', count: 0 });
   const homeQuoteHandledExpiryKeyRef = useRef('');
   const homeQuoteRefreshSourceRef = useRef('');
+  const homeQuotePreviousSessionIdRef = useRef('');
   const [homeAvailabilityNotice, setHomeAvailabilityNotice] = useState('');
   const [homeDriverAvailabilityOverride, setHomeDriverAvailabilityOverride] =
     useState(null);
@@ -2277,6 +2278,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
       key: homeQuoteCycleKey,
       count: 0,
     };
+    homeQuotePreviousSessionIdRef.current = '';
     setHomeQuoteAutoRefreshExhaustedKey('');
   }, [homeQuoteCycleKey]);
   const homeBackendQuoteSessionId = useMemo(() => {
@@ -2405,11 +2407,20 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
             tollFee: routeTollFee,
             clientEstimatedFare: fallbackFare,
             quoteSessionId: homeBackendQuoteSessionId,
+            previousQuoteSessionId: homeQuotePreviousSessionIdRef.current,
             passengerId: profile?.uid || profileUid || '',
           },
           {
             signal: controller.signal,
-            headers: { 'x-leaf-quote-session-id': homeBackendQuoteSessionId },
+            headers: {
+              'x-leaf-quote-session-id': homeBackendQuoteSessionId,
+              ...(homeQuotePreviousSessionIdRef.current
+                ? {
+                    'x-leaf-previous-quote-session-id':
+                      homeQuotePreviousSessionIdRef.current,
+                  }
+                : {}),
+            },
           },
         );
         const quoteLockId = String(quote?.quoteLockId || '').trim() || null;
@@ -2449,6 +2460,9 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
           setHomeBackendQuotesByCategory(Object.fromEntries(entries));
           if (refreshSource) {
             setHomeAvailabilityNotice('Preço atualizado');
+          }
+          if (refreshSource === 'manual') {
+            homeQuotePreviousSessionIdRef.current = '';
           }
         }
       })
@@ -6778,21 +6792,26 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     ],
   );
 
-  const refreshHomeCategoryQuotes = useCallback(({ automatic = false } = {}) => {
-    if (!automatic) {
-      homeQuoteAutoRefreshBudgetRef.current = {
-        key: homeQuoteCycleKey,
-        count: 0,
-      };
-      setHomeQuoteAutoRefreshExhaustedKey('');
-      setHomeQuoteSessionNonce((current) => current + 1);
-    }
-    homeQuoteRefreshSourceRef.current = automatic ? 'automatic' : 'manual';
-    setHomeBackendQuotesByCategory({});
-    setHomeQuoteRefreshNonce((current) => current + 1);
-    setHomeBackendQuoteError('');
-    setHomeAvailabilityNotice('Atualizando preço...');
-  }, [homeQuoteCycleKey]);
+  const refreshHomeCategoryQuotes = useCallback(
+    ({ automatic = false } = {}) => {
+      if (!automatic) {
+        homeQuotePreviousSessionIdRef.current =
+          homeBackendQuote?.quoteSessionId || homeBackendQuoteSessionId || '';
+        homeQuoteAutoRefreshBudgetRef.current = {
+          key: homeQuoteCycleKey,
+          count: 0,
+        };
+        setHomeQuoteAutoRefreshExhaustedKey('');
+        setHomeQuoteSessionNonce((current) => current + 1);
+      }
+      homeQuoteRefreshSourceRef.current = automatic ? 'automatic' : 'manual';
+      setHomeBackendQuotesByCategory({});
+      setHomeQuoteRefreshNonce((current) => current + 1);
+      setHomeBackendQuoteError('');
+      setHomeAvailabilityNotice('Atualizando preço...');
+    },
+    [homeBackendQuote?.quoteSessionId, homeBackendQuoteSessionId, homeQuoteCycleKey],
+  );
 
   const processHomeQuoteExpiry = useCallback((expiresAtMs) => {
     const expiryKey = `${homeBackendQuoteKey}:${Number(expiresAtMs) || 0}`;
