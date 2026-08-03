@@ -7,7 +7,9 @@ import RobotaxiHomeScreen, {
   buildDriverIdentitySupportStorageKey,
   buildDestinationFareQuoteRouteKey,
   buildTrafficSegmentsFromDirectionsRoute,
+  getHomeQuoteLockExpiresAtMs,
   resolveHomeCategoryFarePresentation,
+  resolveHomeQuoteExpiryAction,
 } from '../src/screens/prototype/RobotaxiHomeScreen';
 import { usePrototypeRideRuntime } from '../src/screens/prototype/prototypeRideRuntime';
 import { fetchDynamicPricingQuote } from '../src/services/runtime/pricingQuoteService';
@@ -601,6 +603,48 @@ describe('driver online toggle', () => {
       fare: null,
       priceLabel: '--',
     });
+  });
+
+  it('automatically refreshes an expired home quote at most twice', () => {
+    const firstExpiry = resolveHomeQuoteExpiryAction({
+      automaticRefreshCount: 0,
+    });
+    const secondExpiry = resolveHomeQuoteExpiryAction({
+      automaticRefreshCount: firstExpiry.nextAutomaticRefreshCount,
+    });
+    const thirdExpiry = resolveHomeQuoteExpiryAction({
+      automaticRefreshCount: secondExpiry.nextAutomaticRefreshCount,
+    });
+
+    expect(firstExpiry).toEqual({
+      action: 'refresh',
+      nextAutomaticRefreshCount: 1,
+    });
+    expect(secondExpiry).toEqual({
+      action: 'refresh',
+      nextAutomaticRefreshCount: 2,
+    });
+    expect(thirdExpiry).toEqual({
+      action: 'await_user',
+      nextAutomaticRefreshCount: 2,
+    });
+  });
+
+  it('caps a home quote validity at two minutes after it is received', () => {
+    const receivedAtMs = Date.parse('2026-08-03T05:00:00.000Z');
+
+    expect(
+      getHomeQuoteLockExpiresAtMs({
+        receivedAtMs,
+        quoteLockExpiresAt: '2026-08-03T11:00:00.000Z',
+      }),
+    ).toBe(receivedAtMs + 2 * 60 * 1000);
+    expect(
+      getHomeQuoteLockExpiresAtMs({
+        receivedAtMs,
+        quoteLockExpiresAt: '2026-08-03T05:01:00.000Z',
+      }),
+    ).toBe(receivedAtMs + 60 * 1000);
   });
 
   it('uses the passenger quote lock precision for the destination route key', () => {

@@ -3,7 +3,6 @@ const admin = require('firebase-admin');
 const redisPool = require('../utils/redis-pool');
 const fareEstimationService = require('../services/fare-estimation-service');
 const passengerDiscountBenefitService = require('../services/passenger-discount-benefit-service');
-const paymentRuntimeProfileService = require('../services/payment-runtime-profile-service');
 const { getPublicRateCards, RATE_CARD_VERSION } = require('../services/pricing/calculateFare');
 const { metrics } = require('../utils/prometheus-metrics');
 const { logStructured } = require('../utils/logger');
@@ -11,6 +10,7 @@ const geofenceService = require('../services/geofence-service');
 const { hasPaymentEligibleDriver } = require('../services/payment-driver-availability-guard');
 const routeTollService = require('../services/route-toll-service');
 const placesCacheService = require('../services/places-cache-service');
+const { normalizeOperationalCarType } = require('../utils/operational-car-type');
 const {
   createQuoteLock,
   getQuoteLockTtlSeconds
@@ -25,10 +25,15 @@ const QUOTE_SESSION_COUNTER_TTL_SECONDS = Math.max(
   60,
   Number.parseInt(process.env.PRICING_QUOTE_SESSION_COUNTER_TTL_SECONDS || '900', 10) || 900
 );
-
-function isSandboxQuoteLockTtlExtensionEnabled() {
-  return String(process.env.PRICING_SANDBOX_LONG_QUOTE_LOCK_TTL || 'true').toLowerCase() !== 'false';
-}
+const PUBLIC_QUOTE_LOCK_MAX_TTL_SECONDS = 120;
+const MAX_QUOTE_REQUESTS_PER_CATEGORY_SESSION = 3;
+const INCREMENT_QUOTE_SESSION_COUNTER_SCRIPT = `
+local count = redis.call('INCR', KEYS[1])
+if count == 1 then
+  redis.call('EXPIRE', KEYS[1], ARGV[1])
+end
+return count
+`;
 
 function shouldRequireQuoteLockForPayment() {
   const configured = process.env.REQUIRE_PAYMENT_QUOTE_LOCK;
@@ -96,18 +101,28 @@ function resolveQuoteSessionId(req, body = {}) {
   );
 }
 
-async function incrementQuoteSessionCounter(redis, quoteSessionId) {
-  if (!redis || !quoteSessionId || typeof redis.incr !== 'function') {
-    return null;
+async function incrementQuoteSessionCounter(redis, quoteSessionId, carType) {
+  if (!quoteSessionId) {
+    return { success: true, count: null };
   }
 
-  const key = `pricing:quote-session:${quoteSessionId}`;
+  if (!redis || typeof redis.eval !== 'function') {
+    return { success: false, count: null };
+  }
+
+  const categoryKey = normalizeOperationalCarType(carType, 'unknown');
+  const key = `pricing:quote-session:${quoteSessionId}:${categoryKey}`;
   try {
-    const count = Number(await redis.incr(key));
-    if (typeof redis.expire === 'function') {
-      await redis.expire(key, QUOTE_SESSION_COUNTER_TTL_SECONDS);
-    }
-    return Number.isFinite(count) && count > 0 ? count : null;
+    const count = Number(await redis.eval(
+      INCREMENT_QUOTE_SESSION_COUNTER_SCRIPT,
+      1,
+      key,
+      String(QUOTE_SESSION_COUNTER_TTL_SECONDS)
+    ));
+    return {
+      success: Number.isFinite(count) && count > 0,
+      count: Number.isFinite(count) && count > 0 ? count : null
+    };
   } catch (error) {
     logStructured('warn', 'Falha ao incrementar contador temporário de quote', {
       service: 'pricing-routes',
@@ -115,7 +130,7 @@ async function incrementQuoteSessionCounter(redis, quoteSessionId) {
       quoteSessionId,
       error: error.message
     });
-    return null;
+    return { success: false, count: null };
   }
 }
 
@@ -208,45 +223,12 @@ async function resolveOptionalFirebaseUserId(req) {
   }
 }
 
-async function resolveQuoteLockTtlPolicy({ passengerId = '', body = {} } = {}) {
-  const baseTtlSeconds = getQuoteLockTtlSeconds();
-  const safePassengerId = String(passengerId || '').trim();
-  if (!safePassengerId) {
-    return {
-      ttlSeconds: baseTtlSeconds,
-      reason: 'default'
-    };
-  }
-
-  try {
-    const paymentProfile = await paymentRuntimeProfileService.resolveProfile({
-      passengerId: safePassengerId,
-      userId: safePassengerId,
-      phone: body.passengerPhone || body.phone || body.phoneNumber,
-      phoneNumber: body.passengerPhone || body.phone || body.phoneNumber,
-      appReview: String(process.env.APP_REVIEW || '').toLowerCase() === 'true'
-    });
-    if (
-      isSandboxQuoteLockTtlExtensionEnabled() &&
-      String(paymentProfile?.environment || '').toLowerCase() === 'sandbox'
-    ) {
-      return {
-        ttlSeconds: getQuoteLockTtlSeconds({ longLived: true }),
-        reason: 'sandbox_payment_profile',
-        paymentProfileId: paymentProfile.profileId || null
-      };
-    }
-  } catch (error) {
-    logStructured('warn', 'Falha ao resolver perfil de pagamento para TTL da cotação', {
-      service: 'pricing-routes',
-      operation: 'pricing_quote_lock_ttl_policy',
-      passengerId: safePassengerId,
-      error: error.message
-    });
-  }
-
+function resolveQuoteLockTtlPolicy() {
   return {
-    ttlSeconds: baseTtlSeconds,
+    ttlSeconds: Math.min(
+      getQuoteLockTtlSeconds(),
+      PUBLIC_QUOTE_LOCK_MAX_TTL_SECONDS
+    ),
     reason: 'default'
   };
 }
@@ -317,7 +299,6 @@ router.post('/pricing/quote', async (req, res) => {
 
   try {
     const redis = redisPool.getConnection();
-    const quoteRequestCount = await incrementQuoteSessionCounter(redis, quoteSessionId);
     const canonicalRouteResult = await placesCacheService.fetchDirectionsRoute({
       startLoc: `${normalizedPickupLocation.lat},${normalizedPickupLocation.lng}`,
       destLoc: `${normalizedDestinationLocation.lat},${normalizedDestinationLocation.lng}`,
@@ -345,6 +326,37 @@ router.post('/pricing/quote', async (req, res) => {
         code: 'CANONICAL_ROUTE_REQUIRED',
         retryable: true,
         message: 'Rota canônica indisponível para cotação. Atualize a rota e tente novamente.'
+      });
+    }
+
+    const quoteSessionCounter = await incrementQuoteSessionCounter(
+      redis,
+      quoteSessionId,
+      body.carType
+    );
+    if (!quoteSessionCounter.success) {
+      metrics.recordPricingQuoteRequest?.({ success: false, source: 'session' });
+      return res.status(503).json({
+        error: 'quote_refresh_guard_unavailable',
+        code: 'QUOTE_REFRESH_GUARD_UNAVAILABLE',
+        retryable: true,
+        message: 'Não foi possível validar a cotação agora. Tente novamente em instantes.'
+      });
+    }
+
+    const quoteRequestCount = quoteSessionCounter.count;
+    if (
+      Number.isFinite(quoteRequestCount) &&
+      quoteRequestCount > MAX_QUOTE_REQUESTS_PER_CATEGORY_SESSION
+    ) {
+      metrics.recordPricingQuoteRequest?.({ success: false, source: 'session' });
+      return res.status(409).json({
+        error: 'quote_refresh_limit_reached',
+        code: 'QUOTE_REFRESH_LIMIT_REACHED',
+        retryable: false,
+        requiresUserAction: true,
+        maxAutomaticRefreshes: MAX_QUOTE_REQUESTS_PER_CATEGORY_SESSION - 1,
+        message: 'Preço expirado. Atualize a cotação para continuar.'
       });
     }
 
@@ -380,10 +392,7 @@ router.post('/pricing/quote', async (req, res) => {
     const estimatedFare = discountPreview.applied
       ? discountPreview.payableFare
       : result.estimatedFare;
-    const quoteLockTtlPolicy = await resolveQuoteLockTtlPolicy({
-      passengerId,
-      body
-    });
+    const quoteLockTtlPolicy = resolveQuoteLockTtlPolicy();
 
     const quoteLockResult = await createQuoteLock({
       redis,
@@ -452,7 +461,6 @@ router.post('/pricing/quote', async (req, res) => {
       estimatedFare,
       quoteLockTtlSeconds: quoteLockResult.success ? quoteLockResult.ttlSeconds : null,
       quoteLockTtlReason: quoteLockTtlPolicy.reason,
-      paymentProfileId: quoteLockTtlPolicy.paymentProfileId || null,
       tollFee: result.tollFee || 0,
       tollDetectionSource: tollEstimate.source || null,
       driverAvailabilityStatus: driverAvailability.status,

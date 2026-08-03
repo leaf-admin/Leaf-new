@@ -4,13 +4,11 @@ const express = require('express');
 const request = require('supertest');
 
 const mockRedis = {
-  incr: jest.fn(),
-  expire: jest.fn(),
+  eval: jest.fn(),
   set: jest.fn()
 };
 const mockGetConnection = jest.fn(() => mockRedis);
 const mockEstimateRideFare = jest.fn();
-const mockResolvePaymentProfile = jest.fn();
 const mockHasPaymentEligibleDriver = jest.fn();
 const mockIsActive = jest.fn(() => false);
 const mockValidateRideLocations = jest.fn(() => ({ valid: true }));
@@ -25,10 +23,6 @@ jest.mock('../../../utils/redis-pool', () => ({
 
 jest.mock('../../../services/fare-estimation-service', () => ({
   estimateRideFare: (...args) => mockEstimateRideFare(...args)
-}));
-
-jest.mock('../../../services/payment-runtime-profile-service', () => ({
-  resolveProfile: (...args) => mockResolvePaymentProfile(...args)
 }));
 
 jest.mock('../../../services/payment-driver-availability-guard', () => ({
@@ -81,14 +75,9 @@ function createApp() {
 describe('pricing routes', () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    mockRedis.incr.mockResolvedValue(1);
-    mockRedis.expire.mockResolvedValue(1);
+    mockRedis.eval.mockResolvedValue(1);
     mockRedis.set.mockResolvedValue('OK');
     mockGetConnection.mockReturnValue(mockRedis);
-    mockResolvePaymentProfile.mockResolvedValue({
-      environment: 'production',
-      profileId: 'env-production'
-    });
     mockHasPaymentEligibleDriver.mockResolvedValue({
       success: true,
       hasDrivers: true,
@@ -389,7 +378,7 @@ describe('pricing routes', () => {
   });
 
   it('correlates quote requests by temporary session id', async () => {
-    mockRedis.incr.mockResolvedValue(2);
+    mockRedis.eval.mockResolvedValue(2);
     const app = createApp();
     const response = await request(app)
       .post('/pricing/quote')
@@ -407,12 +396,11 @@ describe('pricing routes', () => {
     expect(response.headers['x-leaf-quote-session-count']).toBe('2');
     expect(response.body.quoteSessionId).toBe('passenger_quote_test_1');
     expect(response.body.quoteRequestCount).toBe(2);
-    expect(mockRedis.incr).toHaveBeenCalledWith(
-      'pricing:quote-session:passenger_quote_test_1'
-    );
-    expect(mockRedis.expire).toHaveBeenCalledWith(
-      'pricing:quote-session:passenger_quote_test_1',
-      900
+    expect(mockRedis.eval).toHaveBeenCalledWith(
+      expect.stringContaining("redis.call('INCR', KEYS[1])"),
+      1,
+      'pricing:quote-session:passenger_quote_test_1:leaf_plus',
+      '900'
     );
     expect(mockRecordPricingQuoteRequest).toHaveBeenCalledWith({
       success: true,
@@ -420,11 +408,7 @@ describe('pricing routes', () => {
     });
   });
 
-  it('uses long quote lock ttl for passengers routed to sandbox payment profile', async () => {
-    mockResolvePaymentProfile.mockResolvedValue({
-      environment: 'sandbox',
-      profileId: 'sandbox-test-profile'
-    });
+  it('keeps the standard quote lock ttl for passengers routed to sandbox payment profile', async () => {
     const app = createApp();
     const response = await request(app)
       .post('/pricing/quote')
@@ -438,18 +422,88 @@ describe('pricing routes', () => {
       });
 
     expect(response.status).toBe(200);
-    expect(response.body.quoteLockTtlSeconds).toBe(21600);
-    expect(mockResolvePaymentProfile).toHaveBeenCalledWith(
-      expect.objectContaining({
-        passengerId: 'passenger-sandbox',
-        userId: 'passenger-sandbox'
-      })
-    );
+    expect(response.body.quoteLockTtlSeconds).toBe(120);
     expect(mockRedis.set).toHaveBeenCalledWith(
       expect.stringMatching(/^pricing:quote-lock:ql_/),
       expect.any(String),
       'EX',
-      21600
+      120
     );
+  });
+
+  it('caps the public quote ttl even when legacy smoke flags request a long lock', async () => {
+    const previousLongTtlFlag = process.env.REAL_SMOKE_LONG_TTLS;
+    process.env.REAL_SMOKE_LONG_TTLS = 'true';
+
+    try {
+      const response = await request(createApp())
+        .post('/pricing/quote')
+        .send({
+          passengerId: 'passenger-smoke',
+          pickupLocation: { lat: '-22.9660', lng: '-43.1820' },
+          destinationLocation: { lat: '-22.9740', lng: '-43.2070' },
+          routeDistanceKm: 9.7,
+          routeDurationSecs: 920,
+          carType: 'Leaf Plus'
+        });
+
+      expect(response.status).toBe(200);
+      expect(response.body.quoteLockTtlSeconds).toBe(120);
+      expect(mockRedis.set).toHaveBeenCalledWith(
+        expect.stringMatching(/^pricing:quote-lock:ql_/),
+        expect.any(String),
+        'EX',
+        120
+      );
+    } finally {
+      if (previousLongTtlFlag === undefined) {
+        delete process.env.REAL_SMOKE_LONG_TTLS;
+      } else {
+        process.env.REAL_SMOKE_LONG_TTLS = previousLongTtlFlag;
+      }
+    }
+  });
+
+  it('rejects a fourth automatic quote request for the same session and category', async () => {
+    mockRedis.eval.mockResolvedValue(4);
+
+    const response = await request(createApp())
+      .post('/pricing/quote')
+      .set('x-leaf-quote-session-id', 'passenger_quote_limited_1')
+      .send({
+        pickupLocation: { lat: '-22.9660', lng: '-43.1820' },
+        destinationLocation: { lat: '-22.9740', lng: '-43.2070' },
+        routeDistanceKm: 9.7,
+        routeDurationSecs: 920,
+        carType: 'Leaf Plus'
+      });
+
+    expect(response.status).toBe(409);
+    expect(response.body).toEqual(expect.objectContaining({
+      code: 'QUOTE_REFRESH_LIMIT_REACHED',
+      retryable: false,
+      requiresUserAction: true,
+      maxAutomaticRefreshes: 2
+    }));
+    expect(mockEstimateRideFare).not.toHaveBeenCalled();
+  });
+
+  it('fails closed when the atomic quote refresh guard is unavailable', async () => {
+    mockRedis.eval.mockRejectedValue(new Error('redis unavailable'));
+
+    const response = await request(createApp())
+      .post('/pricing/quote')
+      .set('x-leaf-quote-session-id', 'passenger_quote_guard_failure_1')
+      .send({
+        pickupLocation: { lat: '-22.9660', lng: '-43.1820' },
+        destinationLocation: { lat: '-22.9740', lng: '-43.2070' },
+        routeDistanceKm: 9.7,
+        routeDurationSecs: 920,
+        carType: 'Leaf Plus'
+      });
+
+    expect(response.status).toBe(503);
+    expect(response.body.code).toBe('QUOTE_REFRESH_GUARD_UNAVAILABLE');
+    expect(mockEstimateRideFare).not.toHaveBeenCalled();
   });
 });
