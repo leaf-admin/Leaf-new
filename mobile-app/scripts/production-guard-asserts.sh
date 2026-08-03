@@ -68,13 +68,9 @@ elif grep -q "@react-native-firebase/database" "src/services/UserAuthService.js"
   fail "password/auth resolution must not read RTDB from the mobile client"
 fi
 
-for file in \
-  "src/common-local/actions/bookingactions.js" \
-  "src/common-local/bookingactions.js"; do
-  require_pattern "$file" "assertCanonicalBookingPath" "legacy Firebase booking blocker"
-  require_pattern "$file" "EXPO_PUBLIC_ALLOW_LEGACY_FIREBASE_BOOKING" "explicit legacy-booking override flag"
-  require_pattern "$file" "Fluxo legado de criação de corrida bloqueado" "legacy booking production error"
-done
+require_pattern "src/common-local/actions/bookingactions.js" "assertCanonicalBookingPath" "legacy Firebase booking blocker"
+require_pattern "src/common-local/actions/bookingactions.js" "EXPO_PUBLIC_ALLOW_LEGACY_FIREBASE_BOOKING" "explicit legacy-booking override flag"
+require_pattern "src/common-local/actions/bookingactions.js" "Fluxo legado de criação de corrida bloqueado" "legacy booking production error"
 
 require_pattern "src/services/HelpService.js" "__DEV__" "dev-only help fallback guard"
 require_pattern "src/utils/axiosInterceptor.js" "currentUser.getIdToken" "Firebase bearer token interceptor"
