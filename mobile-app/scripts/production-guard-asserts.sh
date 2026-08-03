@@ -34,6 +34,14 @@ if [[ -e "src/services/VehicleService.js" ]]; then
   fail "legacy direct vehicle writer must remain removed"
 fi
 
+if command -v rg >/dev/null 2>&1; then
+  if rg -q "@react-native-firebase/database|RECEIPT_RTDATABASE_FALLBACK" "src/services/ReceiptService.js"; then
+    fail "receipt recovery must remain Leaf API-only"
+  fi
+elif grep -Eq "@react-native-firebase/database|RECEIPT_RTDATABASE_FALLBACK" "src/services/ReceiptService.js"; then
+  fail "receipt recovery must remain Leaf API-only"
+fi
+
 if [[ -e "src/utils/userDatabaseService.js" ]]; then
   fail "misleading direct-database onboarding profile layer must remain removed"
 fi
