@@ -735,8 +735,19 @@ async function findAvailableDriversForPickup(pickupLocation, options = {}) {
  * @param {number} timestamp - Timestamp (opcional)
  * @param {boolean} isOnline - Se motorista está online (padrão: true)
  * @param {boolean} isInTrip - Se motorista está em viagem (padrão: false)
+ * @param {object|null} dispatchProjection - Decisão final de elegibilidade do fluxo chamador
  */
-const saveDriverLocation = async (driverId, lat, lng, heading = 0, speed = 0, timestamp = Date.now(), isOnline = true, isInTrip = false) => {
+const saveDriverLocation = async (
+    driverId,
+    lat,
+    lng,
+    heading = 0,
+    speed = 0,
+    timestamp = Date.now(),
+    isOnline = true,
+    isInTrip = false,
+    dispatchProjection = null
+) => {
     try {
         const redis = redisPool.getConnection();
 
@@ -776,14 +787,29 @@ const saveDriverLocation = async (driverId, lat, lng, heading = 0, speed = 0, ti
             )
             : getTTL('DRIVER_LOCATION', 'OFFLINE');
 
+        const hasDispatchProjection = typeof dispatchProjection?.eligible === 'boolean';
+        const dispatchCheckedAt = dispatchProjection?.checkedAt || new Date().toISOString();
+        const projectionFields = hasDispatchProjection
+            ? {
+                ...(dispatchProjection?.fields || {}),
+                ...driverStatus,
+                dispatchEligible: String(dispatchProjection.eligible),
+                dispatchEligibilityCode: dispatchProjection.code || (
+                    dispatchProjection.eligible ? 'ELIGIBLE' : 'NOT_ELIGIBLE'
+                ),
+                dispatchEligibilityCheckedAt: dispatchCheckedAt
+            }
+            : driverStatus;
+
         await commitDriverOnlineProjection(redis, {
             driverId,
-            projectionScope: 'location_only',
+            projectionScope: hasDispatchProjection ? 'full' : 'location_only',
             isOnline,
+            dispatchEligible: hasDispatchProjection && dispatchProjection.eligible,
             lat,
             lng,
             ttlSeconds: ttl,
-            fields: driverStatus
+            fields: projectionFields
         });
 
         if (isOnline) {
@@ -810,7 +836,9 @@ const saveDriverLocation = async (driverId, lat, lng, heading = 0, speed = 0, ti
             lat,
             lng,
             isOnline,
-            available: Boolean(isOnline) && !Boolean(isInTrip)
+            available: hasDispatchProjection
+                ? Boolean(isOnline) && dispatchProjection.eligible
+                : Boolean(isOnline) && !Boolean(isInTrip)
         }).catch(() => null);
 
     } catch (error) {
