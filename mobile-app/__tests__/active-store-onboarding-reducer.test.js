@@ -36,9 +36,11 @@ describe('active app store onboarding reducer', () => {
   });
 
   it('keeps only reducers consumed by the active store', () => {
-    const reducerFiles = readdirSync(
-      resolve(__dirname, '../src/common-local/reducers'),
-    ).sort();
+    const commonLocalDirectory = resolve(__dirname, '../src/common-local');
+    const reducerFiles = readdirSync(resolve(commonLocalDirectory, 'reducers')).sort();
+    const duplicatedRootReducers = readdirSync(commonLocalDirectory)
+      .filter((fileName) => fileName.endsWith('reducer.js'))
+      .sort();
 
     expect(reducerFiles).toEqual([
       'authreducer.js',
@@ -46,5 +48,6 @@ describe('active app store onboarding reducer', () => {
       'languagereducer.js',
       'settingsreducer.js',
     ]);
+    expect(duplicatedRootReducers).toEqual([]);
   });
 });
