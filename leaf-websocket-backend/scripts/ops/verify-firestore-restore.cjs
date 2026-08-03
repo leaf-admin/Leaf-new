@@ -70,7 +70,7 @@ function validateEncodedValue(value, location = 'data') {
   }
 }
 
-function verifyFirestoreRestore(backupPath) {
+function loadVerifiedFirestoreBackup(backupPath) {
   const absoluteBackupPath = path.resolve(backupPath);
   if (!fs.existsSync(absoluteBackupPath)) throw new Error(`Backup não encontrado: ${absoluteBackupPath}`);
   const manifestPath = `${absoluteBackupPath}.manifest.json`;
@@ -114,15 +114,23 @@ function verifyFirestoreRestore(backupPath) {
   }
 
   let totalDocuments = 0;
+  const manifestCollectionNames = new Set();
   for (const summary of manifestCollections) {
     const collectionName = String(summary.name || '');
+    if (!/^[A-Za-z0-9_-]+$/.test(collectionName)) {
+      throw new Error(`Nome de coleção top-level inválido no backup: ${collectionName}`);
+    }
+    if (manifestCollectionNames.has(collectionName)) {
+      throw new Error(`Coleção duplicada no manifesto: ${collectionName}`);
+    }
+    manifestCollectionNames.add(collectionName);
     const entry = payload.collections[collectionName];
     if (!entry || !Array.isArray(entry.docs) || entry.count !== entry.docs.length || entry.count !== summary.count) {
       throw new Error(`Contagem inválida para coleção ${collectionName}`);
     }
     const ids = new Set();
     for (const document of entry.docs) {
-      if (!document?.id || ids.has(document.id)) {
+      if (!document?.id || String(document.id).includes('/') || ids.has(document.id)) {
         throw new Error(`ID ausente ou duplicado em ${collectionName}`);
       }
       ids.add(document.id);
@@ -133,19 +141,33 @@ function verifyFirestoreRestore(backupPath) {
     }
     totalDocuments += entry.docs.length;
   }
+  if (payloadCollectionNames.some(name => !manifestCollectionNames.has(name))) {
+    throw new Error('Coleções divergem entre manifesto e payload');
+  }
   if (manifest.totalDocuments !== totalDocuments) {
     throw new Error('Total de documentos diverge do manifesto');
   }
 
   return {
+    manifest,
+    payload,
+    totalDocuments,
+    collectionsVerified: manifestCollections.length,
+    backupPath: absoluteBackupPath
+  };
+}
+
+function verifyFirestoreRestore(backupPath) {
+  const verified = loadVerifiedFirestoreBackup(backupPath);
+  return {
     status: 'passed',
-    backupPath: absoluteBackupPath,
+    backupPath: verified.backupPath,
     checksumVerified: true,
     manifestVerified: true,
     logicalRestoreDecoded: true,
-    collectionsVerified: manifestCollections.length,
-    documentsVerified: totalDocuments,
-    scope: payload.scope
+    collectionsVerified: verified.collectionsVerified,
+    documentsVerified: verified.totalDocuments,
+    scope: verified.payload.scope
   };
 }
 
@@ -165,6 +187,7 @@ if (require.main === module) {
 }
 
 module.exports = {
+  loadVerifiedFirestoreBackup,
   validateEncodedValue,
   verifyFirestoreRestore
 };

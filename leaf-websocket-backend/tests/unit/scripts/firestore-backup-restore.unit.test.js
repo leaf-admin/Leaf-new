@@ -14,6 +14,12 @@ const {
   verifyFirestoreRestore
 } = require('../../../scripts/ops/verify-firestore-restore.cjs');
 const {
+  EMULATOR_CONFIRMATION,
+  assertEmulatorTarget,
+  canonicalizeEncodedValue,
+  decodeFirestoreValue
+} = require('../../../scripts/ops/restore-firestore-emulator.cjs');
+const {
   buildExportScript,
   shellQuote
 } = require('../../../scripts/ops/emit-backup-env.cjs');
@@ -204,9 +210,92 @@ describe('Firestore logical backup and restore drill', () => {
     expect(() => verifyFirestoreRestore(backupPath)).toThrow('Manifesto ou checksum');
   });
 
+  test('permits restore only to an explicitly confirmed loopback demo project', () => {
+    expect(assertEmulatorTarget({
+      emulatorHost: '127.0.0.1:8080',
+      projectId: 'demo-leaf-rules',
+      confirmation: EMULATOR_CONFIRMATION
+    })).toEqual({ emulatorHost: '127.0.0.1:8080', projectId: 'demo-leaf-rules' });
+    expect(assertEmulatorTarget({
+      emulatorHost: '[::1]:8080',
+      projectId: 'demo-leaf-rules',
+      confirmation: EMULATOR_CONFIRMATION
+    })).toEqual({ emulatorHost: '[::1]:8080', projectId: 'demo-leaf-rules' });
+
+    expect(() => assertEmulatorTarget({
+      emulatorHost: 'firestore.googleapis.com:443',
+      projectId: 'demo-leaf-rules',
+      confirmation: EMULATOR_CONFIRMATION
+    })).toThrow('loopback');
+    expect(() => assertEmulatorTarget({
+      emulatorHost: '127.0.0.1:8080',
+      projectId: 'leaf-production',
+      confirmation: EMULATOR_CONFIRMATION
+    })).toThrow('demo-');
+    expect(() => assertEmulatorTarget({
+      emulatorHost: '127.0.0.1:8080',
+      projectId: 'demo-leaf-rules',
+      confirmation: 'yes'
+    })).toThrow('Confirmação obrigatória');
+  });
+
+  test('decodes every Firestore logical type for an emulator write and canonical comparison', () => {
+    const firestore = { doc: jest.fn(referencePath => ({ path: referencePath })) };
+    const decoded = decodeFirestoreValue({
+      unavailable: { __leafFirestoreType: 'number', value: 'NaN' },
+      positive: { __leafFirestoreType: 'number', value: 'Infinity' },
+      negative: { __leafFirestoreType: 'number', value: '-Infinity' },
+      date: { __leafFirestoreType: 'date', iso: '2026-08-02T12:00:00.123Z' },
+      timestamp: { __leafFirestoreType: 'timestamp', seconds: 123, nanoseconds: 456 },
+      location: { __leafFirestoreType: 'geopoint', latitude: -23.5, longitude: -46.6 },
+      owner: { __leafFirestoreType: 'reference', path: 'users/driver-1' },
+      bytes: { __leafFirestoreType: 'bytes', base64: 'bGVhZg==' }
+    }, firestore);
+
+    expect(Number.isNaN(decoded.unavailable)).toBe(true);
+    expect(decoded.positive).toBe(Infinity);
+    expect(decoded.negative).toBe(-Infinity);
+    expect(decoded.date.toISOString()).toBe('2026-08-02T12:00:00.123Z');
+    expect(decoded.timestamp).toMatchObject({ seconds: 123, nanoseconds: 456 });
+    expect(decoded.location).toMatchObject({ latitude: -23.5, longitude: -46.6 });
+    expect(decoded.owner).toEqual({ path: 'users/driver-1' });
+    expect(decoded.bytes.toString()).toBe('leaf');
+    expect(canonicalizeEncodedValue({
+      __leafFirestoreType: 'date',
+      iso: '2026-08-02T12:00:00.123Z'
+    })).toEqual({
+      __leafFirestoreType: 'timestamp',
+      seconds: 1785672000,
+      nanoseconds: 123000000
+    });
+  });
+
   test('rejects duplicate or nested collection configuration', () => {
     expect(() => parseCollections('users,users')).toThrow('Coleções duplicadas');
     expect(() => parseCollections('users/driver-1/documents')).toThrow('top-level');
+  });
+
+  test('rejects a crafted nested collection before it can become a restore target', () => {
+    const backupPath = path.join(tempDir, 'crafted-nested-firestore.json.gz');
+    writeBackupArtifacts(backupPath, {
+      schemaVersion: 2,
+      generatedAt: '2026-08-02T12:00:00.000Z',
+      complete: true,
+      scope: {
+        kind: 'configured_top_level_collections',
+        includesSubcollections: false,
+        includesFirebaseStorage: false,
+        pageSize: 500,
+        maxDocsPerCollection: null
+      },
+      collections: {
+        'users/nested': {
+          count: 1,
+          docs: [{ id: 'driver-1', path: 'users/nested/driver-1', data: { active: true } }]
+        }
+      }
+    });
+    expect(() => verifyFirestoreRestore(backupPath)).toThrow('top-level inválido');
   });
 
   test('does not expand paid Firestore reads through the default collection inventory', () => {
@@ -234,6 +323,16 @@ describe('Firestore logical backup and restore drill', () => {
     );
     expect(dailyBackupSource.indexOf('verify-firestore-restore.cjs')).toBeLessThan(
       dailyBackupSource.indexOf('echo "[backup] firestore ok')
+    );
+  });
+
+  test('keeps the real Firestore emulator restore proof in the Firebase contract job', () => {
+    const rootPackage = JSON.parse(fs.readFileSync(
+      path.join(__dirname, '../../../../package.json'),
+      'utf8'
+    ));
+    expect(rootPackage.scripts['test:firebase:rules']).toContain(
+      'leaf-websocket-backend/scripts/tests/firestore-backup-restore-emulator.cjs'
     );
   });
 
