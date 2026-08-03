@@ -1286,6 +1286,8 @@ class KYCRoutes {
         ].includes(error?.code);
         const activeTripDeferred = error?.code === 'KYC_VERIFICATION_DEFERRED_ACTIVE_TRIP';
         const verificationBusy = error?.code === 'KYC_VERIFICATION_IN_PROGRESS';
+        const admissionCapacityExhausted =
+          error?.code === 'KYC_AWS_ADMISSION_CAPACITY_EXHAUSTED';
         const retryResumeUnavailable = String(error?.code || '')
           .startsWith('KYC_IDENTITY_RETRY_RESUME_')
           || [
@@ -1329,6 +1331,8 @@ class KYCRoutes {
           'KYC_AWS_COST_OPERATION_NOT_FOUND',
           'KYC_AWS_COST_OPERATION_MISMATCH',
           'KYC_AWS_COST_OPERATION_STATE_INVALID',
+          'KYC_AWS_ADMISSION_CONTROL_REQUIRED',
+          'KYC_AWS_ADMISSION_CONTROL_UNAVAILABLE',
           'KYC_IDENTITY_RETRY_BINDING_REQUIRED',
           'KYC_IDENTITY_RETRY_AUTHORIZATION_REQUIRED'
         ].includes(error?.code)
@@ -1347,7 +1351,7 @@ class KYCRoutes {
           ? 423
           : ((activeTripDeferred || verificationBusy || retryResumeUnavailable || challengeStale)
             ? 409
-            : ((isDisabled || stateUnavailable) ? 503 : 500));
+            : ((isDisabled || stateUnavailable || admissionCapacityExhausted) ? 503 : 500));
         logError(error, 'Erro ao criar sessão AWS liveness', { service: 'kyc-routes-routes' });
         const publicError = identityPermanentlyBlocked
           ? 'Esta conta nao pode usar o modo motorista.'
@@ -1355,6 +1359,8 @@ class KYCRoutes {
             ? 'Sua solicitacao de validacao foi atualizada. Tente novamente.'
           : retryResumeUnavailable
             ? 'Sua sessao anterior nao esta mais disponivel. Fale com o suporte para liberar uma nova tentativa.'
+            : admissionCapacityExhausted
+              ? 'A capacidade de validacao esta temporariamente ocupada. Tente novamente em instantes.'
             : stateUnavailable
               ? 'Nao foi possivel preparar a validacao com seguranca agora. Tente novamente em alguns minutos.'
               : (activeTripDeferred
@@ -1365,7 +1371,10 @@ class KYCRoutes {
         return res.status(statusCode).json({
           success: false,
           error: publicError,
-          code: error.code || 'KYC_AWS_LIVENESS_SESSION_ERROR'
+          code: error.code || 'KYC_AWS_LIVENESS_SESSION_ERROR',
+          ...(admissionCapacityExhausted && error?.retryAfterSeconds
+            ? { retryAfterSeconds: error.retryAfterSeconds }
+            : {})
         });
       } finally {
         if (verificationWindowClaim?.acquired && !retainVerificationWindow) {
@@ -1457,6 +1466,11 @@ class KYCRoutes {
         if (conflictCodes.has(code)) statusCode = 409;
         if (code === 'AWS_LIVENESS_DISABLED') statusCode = 503;
         if (transientProviderCodes.has(code)) statusCode = 503;
+        if ([
+          'KYC_AWS_ADMISSION_CAPACITY_EXHAUSTED',
+          'KYC_AWS_ADMISSION_CONTROL_REQUIRED',
+          'KYC_AWS_ADMISSION_CONTROL_UNAVAILABLE'
+        ].includes(code)) statusCode = 503;
 
         logError(error, 'Erro ao encerrar sessao AWS liveness', {
           service: 'kyc-routes-routes',
@@ -1467,6 +1481,9 @@ class KYCRoutes {
           success: false,
           error: error.message,
           code,
+          ...(code === 'KYC_AWS_ADMISSION_CAPACITY_EXHAUSTED' && error?.retryAfterSeconds
+            ? { retryAfterSeconds: error.retryAfterSeconds }
+            : {}),
           ...(code === 'KYC_AWS_LIVENESS_RESUME_REQUIRED'
             ? {
               completed: true,
@@ -1535,6 +1552,11 @@ class KYCRoutes {
         if (code === 'AWS_LIVENESS_SESSION_USER_MISMATCH') statusCode = 403;
         if (code === 'AWS_LIVENESS_SESSION_ABANDONED') statusCode = 409;
         if (code === 'KYC_VERIFICATION_DEFERRED_ACTIVE_TRIP') statusCode = 409;
+        if ([
+          'KYC_AWS_ADMISSION_CAPACITY_EXHAUSTED',
+          'KYC_AWS_ADMISSION_CONTROL_REQUIRED',
+          'KYC_AWS_ADMISSION_CONTROL_UNAVAILABLE'
+        ].includes(code)) statusCode = 503;
         if (code === 'ResourceNotFoundException' || code === 'SessionNotFoundException') statusCode = 404;
         if (code === 'ValidationException') statusCode = 400;
 
@@ -1549,7 +1571,10 @@ class KYCRoutes {
         return res.status(statusCode).json({
           success: false,
           error: publicError,
-          code
+          code,
+          ...(code === 'KYC_AWS_ADMISSION_CAPACITY_EXHAUSTED' && error?.retryAfterSeconds
+            ? { retryAfterSeconds: error.retryAfterSeconds }
+            : {})
         });
       } finally {
         if (verificationWindowClaim?.acquired && !retainVerificationWindow) {

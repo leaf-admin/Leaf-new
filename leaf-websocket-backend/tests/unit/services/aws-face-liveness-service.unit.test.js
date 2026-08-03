@@ -503,6 +503,19 @@ function createBoundSession(service, input = {}) {
   });
 }
 
+function createAdmissionControllerMock() {
+  return {
+    getConfigSummary: jest.fn(() => ({ enabled: true })),
+    acquireCreateLease: jest.fn(async ({ leaseId }) => ({
+      status: 'acquired',
+      leaseId,
+      active: 1
+    })),
+    acquireResultPermit: jest.fn(async () => ({ status: 'acquired' })),
+    releaseCreateLease: jest.fn(async () => ({ released: true, active: 0 }))
+  };
+}
+
 describe('aws-face-liveness-service', () => {
   let AwsFaceLivenessService;
 
@@ -608,6 +621,61 @@ describe('aws-face-liveness-service', () => {
       })
     );
     expect(mockSet).toHaveBeenCalled();
+  });
+
+  test('should acquire admission before AWS dispatch and release it on terminal result', async () => {
+    const admissionController = {
+      getConfigSummary: jest.fn(() => ({ enabled: true })),
+      acquireCreateLease: jest.fn(async () => ({ status: 'acquired', active: 1 })),
+      acquireResultPermit: jest.fn(async () => ({ status: 'acquired' })),
+      releaseCreateLease: jest.fn(async () => ({ released: true, active: 0 }))
+    };
+    mockSend
+      .mockResolvedValueOnce({ SessionId: 'session-admission-terminal' })
+      .mockResolvedValueOnce({ Status: 'FAILED', Confidence: 10 });
+
+    const service = new AwsFaceLivenessService({ admissionController });
+    await createBoundSession(service, { userId: 'driver-admission-terminal' });
+    const metadata = readJsonValue('kyc:aws:liveness:session:session-admission-terminal');
+
+    expect(admissionController.acquireCreateLease).toHaveBeenCalledWith({
+      leaseId: metadata.admissionLeaseId,
+      required: false
+    });
+
+    await service.getSessionResult({
+      sessionId: 'session-admission-terminal',
+      userId: 'driver-admission-terminal',
+      requireBoundMetadata: true
+    });
+
+    expect(admissionController.acquireResultPermit).toHaveBeenCalledWith({ required: false });
+    expect(admissionController.releaseCreateLease).toHaveBeenCalledWith(
+      metadata.admissionLeaseId
+    );
+  });
+
+  test('should preserve the admission lease when AWS create dispatch has an unknown outcome', async () => {
+    const admissionController = {
+      getConfigSummary: jest.fn(() => ({ enabled: true })),
+      acquireCreateLease: jest.fn(async () => ({ status: 'acquired', active: 1 })),
+      acquireResultPermit: jest.fn(async () => ({ status: 'acquired' })),
+      releaseCreateLease: jest.fn(async () => ({ released: true, active: 0 }))
+    };
+    mockSend.mockRejectedValueOnce(Object.assign(new Error('socket reset'), {
+      code: 'ECONNRESET'
+    }));
+
+    const service = new AwsFaceLivenessService({ admissionController });
+    await expect(createBoundSession(service, {
+      userId: 'driver-admission-dispatch-unknown'
+    })).rejects.toMatchObject({
+      code: 'ECONNRESET',
+      providerDispatched: true
+    });
+
+    expect(admissionController.acquireCreateLease).toHaveBeenCalledTimes(1);
+    expect(admissionController.releaseCreateLease).not.toHaveBeenCalled();
   });
 
   test('should retain the canonical session binding for the attempt window after the AWS session expires', async () => {
@@ -881,7 +949,10 @@ describe('aws-face-liveness-service', () => {
       markLivenessCompleted: jest.fn(async () => ({})),
       rollbackBeforeDispatch: jest.fn(async () => false)
     };
-    const service = new AwsFaceLivenessService({ costGuard });
+    const service = new AwsFaceLivenessService({
+      costGuard,
+      admissionController: createAdmissionControllerMock()
+    });
 
     const result = await createBoundSession(service, {
       userId: 'driver-cost-bound',
@@ -932,7 +1003,10 @@ describe('aws-face-liveness-service', () => {
       rollbackBeforeDispatch: jest.fn(async () => false)
     };
 
-    const service = new AwsFaceLivenessService({ costGuard });
+    const service = new AwsFaceLivenessService({
+      costGuard,
+      admissionController: createAdmissionControllerMock()
+    });
 
     await expect(createBoundSession(service, { userId: 'driver-binding-failure' }))
       .rejects.toMatchObject({
@@ -1016,7 +1090,10 @@ describe('aws-face-liveness-service', () => {
       rollbackBeforeDispatch: jest.fn(async () => false)
     };
 
-    const service = new AwsFaceLivenessService({ costGuard });
+    const service = new AwsFaceLivenessService({
+      costGuard,
+      admissionController: createAdmissionControllerMock()
+    });
     await expect(createBoundSession(service, { userId: 'driver-commit-failure' }))
       .rejects.toMatchObject({
         code: 'KYC_AWS_LIVENESS_ATTEMPT_COMMIT_FAILED'

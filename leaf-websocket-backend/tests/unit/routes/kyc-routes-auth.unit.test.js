@@ -998,6 +998,30 @@ describe('kyc routes auth', () => {
     expect(mockKycPolicyService.markDriverForLivenessAttemptsExhausted).not.toHaveBeenCalled();
   });
 
+  it('returns a bounded retry hint when AWS admission remains saturated', async () => {
+    mockKycPolicyService.requiresFirstAccessLiveness.mockResolvedValueOnce({ required: true });
+    mockCreateSession.mockRejectedValueOnce(Object.assign(
+      new Error('capacity occupied'),
+      {
+        code: 'KYC_AWS_ADMISSION_CAPACITY_EXHAUSTED',
+        retryAfterSeconds: 2
+      }
+    ));
+
+    const response = await request(createApp())
+      .post('/api/kyc/liveness/aws/session')
+      .set('Authorization', 'Bearer firebase-token')
+      .send({ userId: 'driver-1', requirement: 'LIVENESS_REQUIRED' });
+
+    expect(response.status).toBe(503);
+    expect(response.body).toEqual({
+      success: false,
+      error: 'A capacidade de validacao esta temporariamente ocupada. Tente novamente em instantes.',
+      code: 'KYC_AWS_ADMISSION_CAPACITY_EXHAUSTED',
+      retryAfterSeconds: 2
+    });
+  });
+
   it('rejects a client-declared liveness requirement when the backend has no pending gate', async () => {
     const response = await request(createApp())
       .post('/api/kyc/liveness/aws/session')
@@ -2062,6 +2086,28 @@ describe('kyc routes auth', () => {
       completed: false
     });
     expectLivenessSessionPublicProjection(response.body);
+  });
+
+  it('returns service unavailable when AWS result admission remains saturated', async () => {
+    mockGetSessionResult.mockRejectedValueOnce(Object.assign(
+      new Error('capacity occupied'),
+      {
+        code: 'KYC_AWS_ADMISSION_CAPACITY_EXHAUSTED',
+        retryAfterSeconds: 1
+      }
+    ));
+
+    const response = await request(createApp())
+      .get('/api/kyc/liveness/aws/session/session-1?userId=driver-1')
+      .set('Authorization', 'Bearer firebase-token');
+
+    expect(response.status).toBe(503);
+    expect(response.body).toEqual({
+      success: false,
+      error: 'Nao foi possivel confirmar a validacao agora. Tente novamente.',
+      code: 'KYC_AWS_ADMISSION_CAPACITY_EXHAUSTED',
+      retryAfterSeconds: 1
+    });
   });
 
   it('returns a temporary rate limit without mutating identity when polling exhausts attempts', async () => {
