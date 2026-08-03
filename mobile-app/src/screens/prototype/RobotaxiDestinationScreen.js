@@ -799,6 +799,74 @@ function normalizePaymentConfirmationForQuoteLock({
   };
 }
 
+export function resolvePaymentQuoteLockForConfirmation({
+  paymentConfirmation = null,
+  paymentQuoteLock = null,
+  paymentRecoveryRouteContextKey = "",
+}) {
+  const confirmedAmountInCents = Math.round(
+    Number(paymentConfirmation?.amountInCents),
+  );
+  const confirmedQuoteLockId = String(
+    paymentConfirmation?.quoteLockId || "",
+  ).trim();
+  const paymentContextKey = String(
+    paymentConfirmation?.paymentContextKey || "",
+  ).trim();
+  const expectedRouteContextKey = String(
+    paymentRecoveryRouteContextKey || "",
+  ).trim();
+  const contextParts = paymentContextKey.split("|");
+  const contextAmountInCents = Math.round(
+    Number(contextParts[contextParts.length - 2]),
+  );
+  const contextGrossAmountInCents = Math.round(
+    Number(contextParts[contextParts.length - 1]),
+  );
+  const contextRouteKey = contextParts.slice(0, -2).join("|");
+
+  if (
+    !Number.isFinite(confirmedAmountInCents) ||
+    confirmedAmountInCents <= 0 ||
+    !confirmedQuoteLockId ||
+    !expectedRouteContextKey ||
+    contextRouteKey !== expectedRouteContextKey ||
+    contextAmountInCents !== confirmedAmountInCents
+  ) {
+    return paymentQuoteLock;
+  }
+
+  const confirmedGrossAmountInCents = Math.round(
+    Number(paymentConfirmation?.grossAmountInCents),
+  );
+  const grossAmountInCents =
+    Number.isFinite(confirmedGrossAmountInCents) &&
+    confirmedGrossAmountInCents > 0
+      ? confirmedGrossAmountInCents
+      : Number.isFinite(contextGrossAmountInCents) &&
+          contextGrossAmountInCents > 0
+        ? contextGrossAmountInCents
+        : confirmedAmountInCents;
+
+  return {
+    ...(paymentQuoteLock && typeof paymentQuoteLock === "object"
+      ? paymentQuoteLock
+      : {}),
+    fare: confirmedAmountInCents / 100,
+    grossEstimatedFare: grossAmountInCents / 100,
+    discountBenefit:
+      paymentConfirmation?.discountBenefit ||
+      paymentQuoteLock?.discountBenefit ||
+      null,
+    quoteSessionId:
+      paymentConfirmation?.quoteSessionId ||
+      paymentQuoteLock?.quoteSessionId ||
+      null,
+    quoteLockId: confirmedQuoteLockId,
+    pricingQuoteRequestKey: null,
+  };
+}
+
 function buildReadyPaymentQuoteLock({
   selectedPricingQuote,
   fareQuoteLock,
@@ -3566,9 +3634,15 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
 
   const submitRideAfterPreferences = useCallback(
     async (paymentConfirmation = null, preferencesOverride = null) => {
+      const confirmationPaymentQuoteLock =
+        resolvePaymentQuoteLockForConfirmation({
+          paymentConfirmation,
+          paymentQuoteLock,
+          paymentRecoveryRouteContextKey,
+        });
       const canonicalPaymentConfirmation = normalizePaymentConfirmationForQuoteLock({
         paymentConfirmation,
-        paymentQuoteLock,
+        paymentQuoteLock: confirmationPaymentQuoteLock,
         selectedPlanFare,
       });
       const effectivePaymentConfirmation =
@@ -3772,6 +3846,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
       paymentQuoteLock?.routeCoordinates,
       paymentQuoteLock?.trafficSegments,
       paymentQuoteLock?.tollFee,
+      paymentRecoveryRouteContextKey,
       profileUid,
       pickupAdjustedOnMap,
       pickupLocationPayload,
@@ -3848,9 +3923,15 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
         return;
       }
 
+      const confirmationPaymentQuoteLock =
+        resolvePaymentQuoteLockForConfirmation({
+          paymentConfirmation,
+          paymentQuoteLock,
+          paymentRecoveryRouteContextKey,
+        });
       const canonicalPaymentConfirmation = normalizePaymentConfirmationForQuoteLock({
         paymentConfirmation,
-        paymentQuoteLock,
+        paymentQuoteLock: confirmationPaymentQuoteLock,
         selectedPlanFare,
       });
       if (!canonicalPaymentConfirmation.ok) {
@@ -3876,6 +3957,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
         lastHandledPaymentChargeIdRef.current = confirmedChargeId;
       }
       directPixPaymentConfirmedRef.current = true;
+      setPaymentQuoteLock(confirmationPaymentQuoteLock);
       pendingPaymentConfirmationRef.current =
         canonicalPaymentConfirmation.paymentConfirmation || {};
       setPixModalVisible(false);
@@ -3890,6 +3972,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
       paymentQuoteLock?.grossEstimatedFare,
       paymentQuoteLock?.quoteLockId,
       paymentQuoteLock?.quoteSessionId,
+      paymentRecoveryRouteContextKey,
       preferenceModalVisible,
       routeGuardBlocked,
       routeGuardMessage,
