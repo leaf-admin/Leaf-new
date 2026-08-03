@@ -47,8 +47,6 @@
     "emulator:setup": "bash scripts/setup-emulator.sh",
     "test:e2e:vps": "bash scripts/run-e2e-vps.sh",
     "test:e2e:stable": "bash scripts/run-e2e-stable-guarded.sh",
-    "test:e2e:appium": "node e2e-appium/run-leaf-e2e.cjs",
-    "test:e2e:adb": "node e2e-adb/run-leaf-e2e-adb.cjs",
     "build:android:export": "bash scripts/export-android-bytecode.sh",
     "env:local:setup:mac": "bash scripts/setup-local-build-macos.sh",
     "env:local:doctor": "bash scripts/local-build-doctor.sh",

@@ -31,6 +31,7 @@
     "smoke:woovi-sandbox": "npm run -w leaf-websocket-backend smoke:woovi-sandbox --",
     "branch:task": "bash scripts/workflow/new-task-branch.sh",
     "governance:check": "node scripts/validation/assert-agent-governance.cjs",
+    "package-scripts:check": "node scripts/validation/assert-package-script-entrypoints.cjs",
     "release:manifest": "node scripts/release/create-rc-manifest.cjs",
     "observability:validate": "node scripts/validation/assert-observability-production-config.cjs"
   },

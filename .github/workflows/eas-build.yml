@@ -12,6 +12,7 @@ on:
       - 'package-lock.json'
       - 'scripts/maintenance/security/**'
       - 'scripts/validation/**'
+      - 'services/support-agent-orchestrator/package.json'
       - 'AGENTS.md'
       - 'PROJECT_RULES.md'
       - '.github/workflows/eas-build.yml'
@@ -202,6 +203,9 @@ jobs:
 
       - name: Validate governance contract
         run: npm run governance:check
+
+      - name: Validate package script entrypoints
+        run: npm run package-scripts:check
 
       - name: Validate production observability invariants
         run: npm run observability:validate
