@@ -18,8 +18,15 @@ jest.mock('../../../utils/active-trip-index', () => ({
   renewActiveTripForDriver: jest.fn().mockResolvedValue(true)
 }));
 
+jest.mock('../../../services/driver-online-projection-service', () => ({
+  commitDriverOnlineProjection: jest.fn().mockResolvedValue({ success: true })
+}));
+
 const driverEligibilityService = require('../../../services/driver-eligibility-service');
 const activeTripIndex = require('../../../utils/active-trip-index');
+const {
+  commitDriverOnlineProjection
+} = require('../../../services/driver-online-projection-service');
 const registerSocketUpdateLocationHandler = require('../../../bootstrap/register-socket-update-location-handler');
 
 const FORBIDDEN_MOBILE_KYC_FIELDS = new Set([
@@ -125,6 +132,7 @@ describe('registerSocketUpdateLocationHandler', () => {
     activeTripIndex.resolveActiveTripForDriver.mockResolvedValue(null);
     activeTripIndex.setActiveTripForDriver.mockResolvedValue(undefined);
     activeTripIndex.renewActiveTripForDriver.mockResolvedValue(true);
+    commitDriverOnlineProjection.mockResolvedValue({ success: true });
   });
 
   it('blocks offline-to-online location sync when canonical driver activation/KYC is not eligible', async () => {
@@ -146,14 +154,17 @@ describe('registerSocketUpdateLocationHandler', () => {
     });
 
     expect(saveDriverLocation).not.toHaveBeenCalled();
-    expect(redis.zrem).toHaveBeenCalledWith('driver_locations_eligible', 'driver_1');
-    expect(redis.hset).toHaveBeenCalledWith(
-      'driver:driver_1',
+    expect(commitDriverOnlineProjection).toHaveBeenCalledWith(
+      redis,
       expect.objectContaining({
-        isOnline: 'false',
-        status: 'OFFLINE',
-        dispatchEligible: 'false',
-        dispatchEligibilityCode: 'DRIVER_ACTIVATION_REJECTED'
+        isOnline: false,
+        dispatchEligible: false,
+        fields: expect.objectContaining({
+          isOnline: 'false',
+          status: 'OFFLINE',
+          dispatchEligible: 'false',
+          dispatchEligibilityCode: 'DRIVER_ACTIVATION_REJECTED'
+        })
       })
     );
     expect(socket.emit).toHaveBeenCalledWith(
@@ -162,6 +173,38 @@ describe('registerSocketUpdateLocationHandler', () => {
         code: 'driverNotEligible',
         reason: 'DRIVER_ACTIVATION_REJECTED',
         eligibilityRequired: true
+      })
+    );
+  });
+
+  it('passes the final eligible dispatch projection into the shared location writer', async () => {
+    driverEligibilityService.isDriverEligibleForRide.mockResolvedValue({
+      eligible: true,
+      code: 'ELIGIBLE'
+    });
+    const { handlers, saveDriverLocation } = createHarness();
+
+    await handlers.updateLocation({
+      lat: -22.91,
+      lng: -43.17,
+      capturedAt: 1710000000000,
+      tripStatus: 'available'
+    });
+
+    expect(saveDriverLocation).toHaveBeenCalledWith(
+      'driver_1',
+      -22.91,
+      -43.17,
+      0,
+      0,
+      1710000000000,
+      true,
+      false,
+      expect.objectContaining({
+        eligible: true,
+        code: 'ELIGIBLE',
+        checkedAt: expect.any(String),
+        fields: {}
       })
     );
   });
@@ -212,16 +255,22 @@ describe('registerSocketUpdateLocationHandler', () => {
     expect(harness.enforceSubscriptionForOnline).toHaveBeenCalledWith('driver_1');
     expect(harness.enforceDailyKYCForOnline).toHaveBeenCalledWith('driver_1');
     expect(harness.saveDriverLocation).not.toHaveBeenCalled();
-    expect(harness.redis.hset).toHaveBeenCalledWith(
-      'driver:driver_1',
+    expect(commitDriverOnlineProjection).toHaveBeenCalledWith(
+      harness.redis,
       expect.objectContaining({
-        dispatchEligible: 'false',
-        dispatchEligibilityCode: 'KYC_REQUIRED'
+        projectionScope: 'eligibility_only',
+        dispatchEligible: false,
+        fields: expect.objectContaining({
+          dispatchEligible: 'false',
+          dispatchEligibilityCode: 'KYC_REQUIRED'
+        })
       })
     );
-    expect(harness.redis.hset).not.toHaveBeenCalledWith(
-      'driver:driver_1',
-      expect.objectContaining({ dispatchEligibilityCode: 'IN_TRIP_KYC_DEFERRED' })
+    expect(commitDriverOnlineProjection).not.toHaveBeenCalledWith(
+      harness.redis,
+      expect.objectContaining({
+        fields: expect.objectContaining({ dispatchEligibilityCode: 'IN_TRIP_KYC_DEFERRED' })
+      })
     );
     expect(harness.socket.emit).toHaveBeenCalledWith(
       'driverStatusError',
@@ -400,6 +449,24 @@ describe('registerSocketUpdateLocationHandler', () => {
     });
 
     expect(saveDriverLocation).toHaveBeenCalledTimes(2);
+    expect(saveDriverLocation).toHaveBeenCalledWith(
+      'driver_1',
+      -22.91,
+      -43.17,
+      0,
+      0,
+      1710000000000,
+      true,
+      true,
+      expect.objectContaining({
+        eligible: false,
+        code: 'IN_TRIP_KYC_DEFERRED',
+        fields: expect.objectContaining({
+          kycRecheckPendingAfterTrip: 'true',
+          activeTripId: 'booking_batch_1'
+        })
+      })
+    );
     expect(activeTripIndex.renewActiveTripForDriver).toHaveBeenCalledTimes(2);
     expect(activeTripIndex.renewActiveTripForDriver).toHaveBeenCalledWith(
       redis,
@@ -457,7 +524,7 @@ describe('registerSocketUpdateLocationHandler', () => {
       customerId: 'customer_1'
     });
     activeTripIndex.renewActiveTripForDriver.mockResolvedValue(false);
-    const { handlers, redis, roomEmit } = createHarness();
+    const { handlers, redis, roomEmit, saveDriverLocation } = createHarness();
     redis.hgetall.mockImplementation(async (key) => {
       if (key === 'driver:driver_1') {
         return {
@@ -488,7 +555,54 @@ describe('registerSocketUpdateLocationHandler', () => {
 
     expect(redis.xadd).not.toHaveBeenCalled();
     expect(roomEmit).not.toHaveBeenCalled();
-    expect(redis.zrem).toHaveBeenCalledWith('driver_locations_eligible', 'driver_1');
+    expect(saveDriverLocation).toHaveBeenCalledWith(
+      'driver_1',
+      -22.91,
+      -43.17,
+      0,
+      0,
+      1710000000000,
+      true,
+      true,
+      expect.objectContaining({
+        eligible: false,
+        code: 'IN_TRIP_KYC_DEFERRED'
+      })
+    );
+  });
+
+  it('does not acknowledge or fan out location when the atomic writer rejects', async () => {
+    activeTripIndex.resolveActiveTripForDriver.mockResolvedValue({
+      tripId: 'booking_projection_rejected',
+      customerId: 'customer_1'
+    });
+    const { handlers, redis, roomEmit, saveDriverLocation, socket } = createHarness();
+    redis.hgetall.mockResolvedValue({
+      isOnline: 'true',
+      dispatchEligible: 'false',
+      dispatchEligibilityCode: 'IN_TRIP'
+    });
+    saveDriverLocation.mockRejectedValueOnce(new Error('atomic projection rejected'));
+
+    await handlers.updateLocation({
+      lat: -22.91,
+      lng: -43.17,
+      tripStatus: 'started',
+      isInTrip: true,
+      seq: 1,
+      capturedAt: 1710000000000
+    });
+
+    expect(redis.xadd).not.toHaveBeenCalled();
+    expect(roomEmit).not.toHaveBeenCalled();
+    expect(socket.emit).toHaveBeenCalledWith(
+      'error',
+      { message: 'Erro ao atualizar localização' }
+    );
+    expect(socket.emit).not.toHaveBeenCalledWith(
+      'locationUpdated',
+      expect.objectContaining({ success: true })
+    );
   });
 
   describe('safe stream retention', () => {

@@ -18,6 +18,9 @@ const {
 const {
     buildPublicDriverKycSocketPayload
 } = require('../utils/driver-kyc-socket-projection');
+const {
+    commitDriverOnlineProjection
+} = require('../services/driver-online-projection-service');
 
 const ENABLE_ACTIVE_TRIP_INDEX = process.env.ENABLE_ACTIVE_TRIP_INDEX !== 'false';
 const ENABLE_TRIP_LOCATION_STREAM = process.env.ENABLE_TRIP_LOCATION_STREAM !== 'false';
@@ -329,7 +332,7 @@ function registerSocketUpdateLocationHandler({
                 code: existingDriverState?.dispatchEligibilityCode || 'CACHED'
             };
             let kycContinuityDeferred = !activeTripIndexResolved || Boolean(canonicalActiveTrip?.tripId);
-            const applyKycContinuityState = async (gateResult = {}) => {
+            const applyKycContinuityState = (gateResult = {}) => {
                 const activeTripId = gateResult.activeTripId || canonicalActiveTrip?.tripId || null;
                 canonicalActiveTrip = {
                     tripId: activeTripId,
@@ -341,31 +344,26 @@ function registerSocketUpdateLocationHandler({
                     eligible: false,
                     code: 'IN_TRIP_KYC_DEFERRED'
                 };
-                const checkedAt = new Date().toISOString();
-                await redis.zrem(ELIGIBLE_DRIVER_GEO_KEY, driverId);
-                await redis.hset(driverHashKey, {
-                    isOnline: 'true',
-                    dispatchEligible: 'false',
-                    dispatchEligibilityCode: 'IN_TRIP_KYC_DEFERRED',
-                    dispatchEligibilityCheckedAt: checkedAt,
-                    kycRecheckPendingAfterTrip: 'true',
-                    ...(activeTripId ? { activeTripId: String(activeTripId) } : {}),
-                    updatedAt: checkedAt
-                });
             };
 
             if (isInTripState) {
-                await applyKycContinuityState({ activeTripId: canonicalActiveTrip?.tripId || null });
+                applyKycContinuityState({ activeTripId: canonicalActiveTrip?.tripId || null });
             }
 
             if (!wasOnline && !isInTripState) {
                 const subscriptionGate = await enforceSubscriptionForOnline(driverId);
                 if (!subscriptionGate.allowed) {
-                    await redis.zrem(ELIGIBLE_DRIVER_GEO_KEY, driverId);
-                    await redis.hset(driverHashKey, {
-                        dispatchEligible: 'false',
-                        dispatchEligibilityCode: subscriptionGate.code || 'SUBSCRIPTION_REQUIRED',
-                        dispatchEligibilityCheckedAt: new Date().toISOString()
+                    await commitDriverOnlineProjection(redis, {
+                        driverId,
+                        driverKey: driverHashKey,
+                        eligibleGeoKey: ELIGIBLE_DRIVER_GEO_KEY,
+                        projectionScope: 'eligibility_only',
+                        dispatchEligible: false,
+                        fields: {
+                            dispatchEligible: 'false',
+                            dispatchEligibilityCode: subscriptionGate.code || 'SUBSCRIPTION_REQUIRED',
+                            dispatchEligibilityCheckedAt: new Date().toISOString()
+                        }
                     });
                     socket.emit('driverStatusError', {
                         error: 'Assinatura pendente. Regularize para ficar online.',
@@ -383,11 +381,17 @@ function registerSocketUpdateLocationHandler({
                 try {
                     const dailyKYC = await enforceDailyKYCForOnline(driverId);
                     if (!dailyKYC.allowed) {
-                        await redis.zrem(ELIGIBLE_DRIVER_GEO_KEY, driverId);
-                        await redis.hset(driverHashKey, {
-                            dispatchEligible: 'false',
-                            dispatchEligibilityCode: dailyKYC.code || 'KYC_REQUIRED',
-                            dispatchEligibilityCheckedAt: new Date().toISOString()
+                        await commitDriverOnlineProjection(redis, {
+                            driverId,
+                            driverKey: driverHashKey,
+                            eligibleGeoKey: ELIGIBLE_DRIVER_GEO_KEY,
+                            projectionScope: 'eligibility_only',
+                            dispatchEligible: false,
+                            fields: {
+                                dispatchEligible: 'false',
+                                dispatchEligibilityCode: dailyKYC.code || 'KYC_REQUIRED',
+                                dispatchEligibilityCheckedAt: new Date().toISOString()
+                            }
                         });
                         socket.emit('driverStatusError', buildPublicDriverKycSocketPayload(
                             dailyKYC,
@@ -400,14 +404,20 @@ function registerSocketUpdateLocationHandler({
                         };
                     }
                     if (dailyKYC.continuityOnly === true || dailyKYC.deferred === true) {
-                        await applyKycContinuityState(dailyKYC);
+                        applyKycContinuityState(dailyKYC);
                     }
                 } catch (kycError) {
-                    await redis.zrem(ELIGIBLE_DRIVER_GEO_KEY, driverId);
-                    await redis.hset(driverHashKey, {
-                        dispatchEligible: 'false',
-                        dispatchEligibilityCode: 'KYC_CHECK_FAILED',
-                        dispatchEligibilityCheckedAt: new Date().toISOString()
+                    await commitDriverOnlineProjection(redis, {
+                        driverId,
+                        driverKey: driverHashKey,
+                        eligibleGeoKey: ELIGIBLE_DRIVER_GEO_KEY,
+                        projectionScope: 'eligibility_only',
+                        dispatchEligible: false,
+                        fields: {
+                            dispatchEligible: 'false',
+                            dispatchEligibilityCode: 'KYC_CHECK_FAILED',
+                            dispatchEligibilityCheckedAt: new Date().toISOString()
+                        }
                     });
                     socket.emit('driverStatusError', {
                         error: 'Não foi possível validar KYC agora. Tente novamente.',
@@ -431,13 +441,21 @@ function registerSocketUpdateLocationHandler({
                         existingDriverState || {}
                     );
                     if (!dispatchEligibility.eligible) {
-                        await redis.zrem(ELIGIBLE_DRIVER_GEO_KEY, driverId);
-                        await redis.hset(driverHashKey, {
-                            isOnline: 'false',
-                            status: 'OFFLINE',
-                            dispatchEligible: 'false',
-                            dispatchEligibilityCode: dispatchEligibility.code || 'NOT_ELIGIBLE',
-                            dispatchEligibilityCheckedAt: new Date().toISOString()
+                        const checkedAt = new Date().toISOString();
+                        await commitDriverOnlineProjection(redis, {
+                            driverId,
+                            driverKey: driverHashKey,
+                            eligibleGeoKey: ELIGIBLE_DRIVER_GEO_KEY,
+                            isOnline: false,
+                            dispatchEligible: false,
+                            fields: {
+                                isOnline: 'false',
+                                status: 'OFFLINE',
+                                dispatchEligible: 'false',
+                                dispatchEligibilityCode: dispatchEligibility.code || 'NOT_ELIGIBLE',
+                                dispatchEligibilityCheckedAt: checkedAt,
+                                updatedAt: checkedAt
+                            }
                         });
                         socket.emit('driverStatusError', {
                             error: 'Cadastro pendente de aprovação para receber corridas.',
@@ -472,19 +490,23 @@ function registerSocketUpdateLocationHandler({
                 const postTripKyc = await enforceDailyKYCForOnline(driverId);
                 if (!postTripKyc?.allowed) {
                     const checkedAt = new Date().toISOString();
-                    await redis.zrem(ELIGIBLE_DRIVER_GEO_KEY, driverId);
-                    await redis.zrem('driver_locations', driverId);
-                    await redis.srem('online_drivers', driverId);
-                    await redis.hset(driverHashKey, {
-                        isOnline: 'false',
-                        status: 'OFFLINE',
-                        dispatchEligible: 'false',
-                        dispatchEligibilityCode: postTripKyc?.code || 'KYC_REQUIRED',
-                        dispatchEligibilityCheckedAt: checkedAt,
-                        kycRecheckPendingAfterTrip: postTripKyc?.retryRequired === true
-                            ? 'true'
-                            : 'false',
-                        updatedAt: checkedAt
+                    await commitDriverOnlineProjection(redis, {
+                        driverId,
+                        driverKey: driverHashKey,
+                        eligibleGeoKey: ELIGIBLE_DRIVER_GEO_KEY,
+                        isOnline: false,
+                        dispatchEligible: false,
+                        fields: {
+                            isOnline: 'false',
+                            status: 'OFFLINE',
+                            dispatchEligible: 'false',
+                            dispatchEligibilityCode: postTripKyc?.code || 'KYC_REQUIRED',
+                            dispatchEligibilityCheckedAt: checkedAt,
+                            kycRecheckPendingAfterTrip: postTripKyc?.retryRequired === true
+                                ? 'true'
+                                : 'false',
+                            updatedAt: checkedAt
+                        }
                     });
                     socket.emit('driverStatusError', buildPublicDriverKycSocketPayload(
                         postTripKyc,
@@ -497,7 +519,7 @@ function registerSocketUpdateLocationHandler({
                     };
                 }
                 if (postTripKyc.continuityOnly === true || postTripKyc.deferred === true) {
-                    await applyKycContinuityState(postTripKyc);
+                    applyKycContinuityState(postTripKyc);
                 } else {
                     await redis.hset(driverHashKey, {
                         kycRecheckPendingAfterTrip: 'false',
@@ -525,13 +547,21 @@ function registerSocketUpdateLocationHandler({
                 );
 
                 if (!dispatchEligibility.eligible) {
-                    await redis.zrem(ELIGIBLE_DRIVER_GEO_KEY, driverId);
-                    await redis.hset(driverHashKey, {
-                        isOnline: 'false',
-                        status: 'OFFLINE',
-                        dispatchEligible: 'false',
-                        dispatchEligibilityCode: dispatchEligibility.code || 'NOT_ELIGIBLE',
-                        dispatchEligibilityCheckedAt: new Date().toISOString()
+                    const checkedAt = new Date().toISOString();
+                    await commitDriverOnlineProjection(redis, {
+                        driverId,
+                        driverKey: driverHashKey,
+                        eligibleGeoKey: ELIGIBLE_DRIVER_GEO_KEY,
+                        isOnline: false,
+                        dispatchEligible: false,
+                        fields: {
+                            isOnline: 'false',
+                            status: 'OFFLINE',
+                            dispatchEligible: 'false',
+                            dispatchEligibilityCode: dispatchEligibility.code || 'NOT_ELIGIBLE',
+                            dispatchEligibilityCheckedAt: checkedAt,
+                            updatedAt: checkedAt
+                        }
                     });
                     socket.emit('driverStatusError', {
                         error: 'Cadastro pendente de aprovação para receber corridas.',
@@ -569,6 +599,14 @@ function registerSocketUpdateLocationHandler({
                         ? Number(data.timestamp)
                         : Date.now()
                 );
+            const projectionCheckedAt = new Date().toISOString();
+            const finalDispatchEligible = !isInTripState && dispatchEligibility.eligible === true;
+            const finalDispatchEligibilityCode = isInTripState
+                ? (kycContinuityDeferred ? 'IN_TRIP_KYC_DEFERRED' : 'IN_TRIP')
+                : (
+                    dispatchEligibility.code
+                    || (finalDispatchEligible ? 'ELIGIBLE' : 'NOT_ELIGIBLE')
+                );
 
             await saveDriverLocation(
                 driverId,
@@ -578,32 +616,22 @@ function registerSocketUpdateLocationHandler({
                 normalizedSpeed,
                 normalizedTimestamp,
                 true,
-                isInTripState
-            );
-
-            if (isInTripState) {
-                await redis.zrem(ELIGIBLE_DRIVER_GEO_KEY, driverId);
-                await redis.hset(driverHashKey, {
-                    dispatchEligible: 'false',
-                    dispatchEligibilityCode: kycContinuityDeferred
-                        ? 'IN_TRIP_KYC_DEFERRED'
-                        : 'IN_TRIP',
-                    dispatchEligibilityCheckedAt: new Date().toISOString(),
-                    ...(kycContinuityDeferred ? { kycRecheckPendingAfterTrip: 'true' } : {})
-                });
-            } else {
-                const shouldJoinEligiblePool = dispatchEligibility.eligible === true;
-                if (shouldJoinEligiblePool) {
-                    await redis.geoadd(ELIGIBLE_DRIVER_GEO_KEY, lngNum, latNum, driverId);
-                    await redis.hset(driverHashKey, {
-                        dispatchEligible: 'true',
-                        dispatchEligibilityCode: dispatchEligibility.code || 'ELIGIBLE',
-                        dispatchEligibilityCheckedAt: new Date().toISOString()
-                    });
-                } else {
-                    await redis.zrem(ELIGIBLE_DRIVER_GEO_KEY, driverId);
+                isInTripState,
+                {
+                    eligible: finalDispatchEligible,
+                    code: finalDispatchEligibilityCode,
+                    checkedAt: projectionCheckedAt,
+                    fields: isInTripState
+                        ? {
+                            ...(kycContinuityDeferred ? { kycRecheckPendingAfterTrip: 'true' } : {}),
+                            ...(canonicalActiveTrip?.tripId
+                                ? { activeTripId: String(canonicalActiveTrip.tripId) }
+                                : {}),
+                            updatedAt: projectionCheckedAt
+                        }
+                        : {}
                 }
-            }
+            );
 
             // Verificar se foi salvo corretamente no GEO
             const isInGeo = await redis.zscore('driver_locations', driverId);

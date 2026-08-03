@@ -250,7 +250,8 @@ describe('driver-online-projection-service', () => {
     expect(writerStart).toBeGreaterThan(-1);
     expect(writerEnd).toBeGreaterThan(writerStart);
     expect(writerSource).toContain('await commitDriverOnlineProjection(redis, {');
-    expect(writerSource).toContain("projectionScope: 'location_only'");
+    expect(writerSource).toContain("projectionScope: hasDispatchProjection ? 'full' : 'location_only'");
+    expect(writerSource).toContain("typeof dispatchProjection?.eligible === 'boolean'");
     expect(writerSource).not.toMatch(/redis\.(hset|geoadd|zrem|sadd|srem|expire)\(/);
   });
 
