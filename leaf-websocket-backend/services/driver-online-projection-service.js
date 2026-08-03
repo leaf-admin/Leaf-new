@@ -56,6 +56,52 @@ if #hash_args == 0 then
   return redis.error_reply('LEAF_DRIVER_PROJECTION_EMPTY_HASH')
 end
 
+local conditional_args_index = 10 + field_count * 2
+local expected_field_count = tonumber(ARGV[conditional_args_index]) or 0
+local expected_missing_value = string.char(0)
+
+for index = 1, expected_field_count do
+  local field_index = conditional_args_index + ((index - 1) * 2) + 1
+  local field = ARGV[field_index]
+  local expected = ARGV[field_index + 1]
+  local actual = redis.call('HGET', KEYS[1], field)
+  local expected_missing = expected == expected_missing_value
+  local actual_missing = actual == false
+
+  if (expected_missing and not actual_missing)
+    or (not expected_missing and (actual_missing or actual ~= expected)) then
+    return { 0, 'PRECONDITION_MISMATCH' }
+  end
+end
+
+local presence_guard_index = conditional_args_index + 1 + expected_field_count * 2
+local presence_fresh_after_ms = tonumber(ARGV[presence_guard_index]) or 0
+
+if presence_fresh_after_ms > 0 then
+  local presence_valid, presence_actual_type = validate_key_type(KEYS[6], 'hash')
+  if not presence_valid then
+    return redis.error_reply(
+      'LEAF_DRIVER_PROJECTION_WRONGTYPE ' .. KEYS[6]
+      .. ' expected=hash actual=' .. presence_actual_type
+    )
+  end
+
+  local presence_driver_id = redis.call('HGET', KEYS[6], 'driverId')
+  local presence_socket_id = redis.call('HGET', KEYS[6], 'socketId')
+  local presence_user_type = redis.call('HGET', KEYS[6], 'userType')
+  local presence_connected = redis.call('HGET', KEYS[6], 'connected')
+  local presence_updated_at_ms = tonumber(redis.call('HGET', KEYS[6], 'updatedAtMs') or '0') or 0
+
+  if presence_driver_id == driver_id
+    and presence_socket_id ~= false
+    and presence_socket_id ~= ''
+    and presence_user_type == 'driver'
+    and presence_connected == 'true'
+    and presence_updated_at_ms >= presence_fresh_after_ms then
+    return { 0, 'ACTIVE_SOCKET_PRESENCE' }
+  end
+end
+
 redis.call('HSET', KEYS[1], unpack(hash_args))
 
 if projection_scope == 'eligibility_only' then
@@ -104,6 +150,15 @@ function normalizeHashFields(fields = {}) {
   return Object.entries(fields)
     .filter(([field, value]) => String(field || '').trim() && value !== undefined && value !== null)
     .flatMap(([field, value]) => [String(field), String(value)]);
+}
+
+function normalizeExpectedHashFields(fields = {}) {
+  return Object.entries(fields)
+    .filter(([field]) => String(field || '').trim())
+    .flatMap(([field, value]) => [
+      String(field),
+      value === undefined || value === null ? '\u0000' : String(value)
+    ]);
 }
 
 function normalizeGeoCoordinates(lat, lng, { required = false } = {}) {
@@ -155,6 +210,8 @@ async function commitDriverOnlineProjection(redis, {
   dispatchEligible,
   projectionScope = 'full',
   ttlSeconds = 0,
+  expectedFields,
+  presenceFreshAfterMs = 0,
   lat,
   lng
 } = {}) {
@@ -178,6 +235,31 @@ async function commitDriverOnlineProjection(redis, {
   });
   const hasLocation = location.hasLocation;
   const hashArgs = normalizeHashFields(fields);
+  const expectedHashArgs = normalizeExpectedHashFields(expectedFields);
+  const parsedPresenceFreshAfterMs = Number(presenceFreshAfterMs);
+  const normalizedPresenceFreshAfterMs = Number.isFinite(parsedPresenceFreshAfterMs)
+    && parsedPresenceFreshAfterMs > 0
+    ? Math.floor(parsedPresenceFreshAfterMs)
+    : 0;
+  const hasConditionalGuards = expectedHashArgs.length > 0 || normalizedPresenceFreshAfterMs > 0;
+  const redisKeys = [
+    normalizedDriverKey,
+    'driver_locations',
+    normalizedEligibleGeoKey,
+    'online_drivers',
+    'driver_offline_locations'
+  ];
+  const conditionalArgs = hasConditionalGuards
+    ? [
+      String(expectedHashArgs.length / 2),
+      ...expectedHashArgs,
+      String(normalizedPresenceFreshAfterMs)
+    ]
+    : [];
+
+  if (normalizedPresenceFreshAfterMs > 0) {
+    redisKeys.push(`driver_socket_presence:${normalizedDriverId}`);
+  }
 
   if (normalizedProjectionScope === 'location_only' && !hasLocation) {
     const error = new Error('Coordenadas obrigatórias para a projeção de localização do motorista');
@@ -206,12 +288,8 @@ async function commitDriverOnlineProjection(redis, {
 
   const result = await redis.eval(
     DRIVER_ONLINE_PROJECTION_SCRIPT,
-    5,
-    normalizedDriverKey,
-    'driver_locations',
-    normalizedEligibleGeoKey,
-    'online_drivers',
-    'driver_offline_locations',
+    redisKeys.length,
+    ...redisKeys,
     normalizedDriverId,
     isOnline === true ? '1' : '0',
     hasLocation ? '1' : '0',
@@ -221,8 +299,21 @@ async function commitDriverOnlineProjection(redis, {
     normalizedProjectionScope,
     String(normalizedTtlSeconds),
     String(hashArgs.length / 2),
-    ...hashArgs
+    ...hashArgs,
+    ...conditionalArgs
   );
+
+  const conditionalResultCode = Array.isArray(result) ? String(result[1] || '') : '';
+  if (Number(result?.[0]) === 0 && hasConditionalGuards && [
+    'PRECONDITION_MISMATCH',
+    'ACTIVE_SOCKET_PRESENCE'
+  ].includes(conditionalResultCode)) {
+    return {
+      success: false,
+      skipped: true,
+      code: conditionalResultCode
+    };
+  }
 
   if (!Array.isArray(result) || Number(result[0]) !== 1) {
     const error = new Error('Redis não confirmou a projeção atômica do motorista');
@@ -244,5 +335,6 @@ module.exports = {
   DRIVER_ONLINE_PROJECTION_SCRIPT,
   commitDriverOnlineProjection,
   normalizeGeoCoordinates,
+  normalizeExpectedHashFields,
   normalizeHashFields
 };

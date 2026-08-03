@@ -7,6 +7,7 @@ const {
   DRIVER_ONLINE_PROJECTION_SCRIPT,
   commitDriverOnlineProjection,
   normalizeGeoCoordinates,
+  normalizeExpectedHashFields,
   normalizeHashFields
 } = require('../../../services/driver-online-projection-service');
 
@@ -158,6 +159,93 @@ describe('driver-online-projection-service', () => {
       driverId: 'driver_1',
       fields: { status: 'ONLINE' }
     })).rejects.toMatchObject({ code: 'DRIVER_ONLINE_PROJECTION_ATOMIC_REJECTED' });
+  });
+
+  it('skips a conditional projection when the observed driver hash changed', async () => {
+    const redis = {
+      eval: jest.fn().mockResolvedValue([0, 'PRECONDITION_MISMATCH'])
+    };
+
+    const result = await commitDriverOnlineProjection(redis, {
+      driverId: 'driver_1',
+      isOnline: false,
+      dispatchEligible: false,
+      expectedFields: {
+        isOnline: 'true',
+        timestamp: null
+      },
+      fields: {
+        status: 'OFFLINE',
+        isOnline: 'false',
+        dispatchEligible: 'false'
+      }
+    });
+
+    expect(result).toEqual({
+      success: false,
+      skipped: true,
+      code: 'PRECONDITION_MISMATCH'
+    });
+    expect(redis.eval.mock.calls[0]).toEqual(expect.arrayContaining([
+      '2',
+      'isOnline',
+      'true',
+      'timestamp',
+      '\u0000',
+      '0'
+    ]));
+    expect(normalizeExpectedHashFields({ present: false, missing: null })).toEqual([
+      'present', 'false', 'missing', '\u0000'
+    ]);
+    expect(DRIVER_ONLINE_PROJECTION_SCRIPT).toContain("return { 0, 'PRECONDITION_MISMATCH' }");
+  });
+
+  it('rejects an unknown conditional script response instead of treating it as a safe skip', async () => {
+    const redis = {
+      eval: jest.fn().mockResolvedValue([0, 'UNKNOWN_CONDITIONAL_RESULT'])
+    };
+
+    await expect(commitDriverOnlineProjection(redis, {
+      driverId: 'driver_1',
+      expectedFields: { isOnline: 'true' },
+      fields: { isOnline: 'false' }
+    })).rejects.toMatchObject({ code: 'DRIVER_ONLINE_PROJECTION_ATOMIC_REJECTED' });
+  });
+
+  it('guards stale cleanup against a fresh distributed driver socket in the same script', async () => {
+    const redis = {
+      eval: jest.fn().mockResolvedValue([0, 'ACTIVE_SOCKET_PRESENCE'])
+    };
+
+    const result = await commitDriverOnlineProjection(redis, {
+      driverId: 'driver_1',
+      isOnline: false,
+      dispatchEligible: false,
+      presenceFreshAfterMs: 1782388800000,
+      fields: {
+        status: 'OFFLINE',
+        isOnline: 'false',
+        dispatchEligible: 'false'
+      }
+    });
+
+    expect(result).toEqual({
+      success: false,
+      skipped: true,
+      code: 'ACTIVE_SOCKET_PRESENCE'
+    });
+    expect(redis.eval.mock.calls[0].slice(0, 9)).toEqual([
+      DRIVER_ONLINE_PROJECTION_SCRIPT,
+      6,
+      'driver:driver_1',
+      'driver_locations',
+      'driver_locations_eligible',
+      'online_drivers',
+      'driver_offline_locations',
+      'driver_socket_presence:driver_1',
+      'driver_1'
+    ]);
+    expect(DRIVER_ONLINE_PROJECTION_SCRIPT).toContain("return { 0, 'ACTIVE_SOCKET_PRESENCE' }");
   });
 
   it('rejects invalid geo coordinates before Redis can perform a partial script write', async () => {
@@ -342,6 +430,23 @@ describe('driver-online-projection-service', () => {
     expect(methodStart).toBeGreaterThan(-1);
     expect(methodEnd).toBeGreaterThan(methodStart);
     expect(methodSource).toContain('await commitDriverOnlineProjection(this.redis, {');
+    expect(methodSource).not.toMatch(/this\.redis\.(hset|geoadd|zrem|sadd|srem|multi)\(/);
+  });
+
+  it('keeps eligible GEO reconciliation on the conditional atomic projection contract', () => {
+    const cleanupSource = fs.readFileSync(
+      path.resolve(__dirname, '../../../services/connection-cleanup-service.js'),
+      'utf8'
+    );
+    const methodStart = cleanupSource.indexOf('async cleanupEligibleGeoStaleDrivers()');
+    const methodEnd = cleanupSource.indexOf('async getStats()', methodStart);
+    const methodSource = cleanupSource.slice(methodStart, methodEnd);
+
+    expect(methodStart).toBeGreaterThan(-1);
+    expect(methodEnd).toBeGreaterThan(methodStart);
+    expect(methodSource).toContain('commitDriverOnlineProjection(this.redis, projection)');
+    expect(methodSource).toContain('expectedFields: {');
+    expect(methodSource).toContain('presenceFreshAfterMs: isOnline && shouldRemoveForStale');
     expect(methodSource).not.toMatch(/this\.redis\.(hset|geoadd|zrem|sadd|srem|multi)\(/);
   });
 
