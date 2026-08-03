@@ -22,9 +22,13 @@ require_pattern() {
 
 node scripts/qa/validate-release-runtime-policy.cjs
 
-if [[ -e "src/services/TripDataService.js" ]]; then
-  fail "legacy direct trip_data writer must remain removed"
-fi
+for file in \
+  "src/services/TripDataService.js" \
+  "src/common-local/locationactions.js"; do
+  if [[ -e "$file" ]]; then
+    fail "legacy direct trip_data writer must remain removed: $file"
+  fi
+done
 
 if [[ -e "src/services/VehicleService.js" ]]; then
   fail "legacy direct vehicle writer must remain removed"
