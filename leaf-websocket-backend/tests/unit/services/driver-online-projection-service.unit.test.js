@@ -1,5 +1,8 @@
 'use strict';
 
+const fs = require('node:fs');
+const path = require('node:path');
+
 const {
   DRIVER_ONLINE_PROJECTION_SCRIPT,
   commitDriverOnlineProjection,
@@ -34,7 +37,8 @@ describe('driver-online-projection-service', () => {
       isOnline: true,
       dispatchEligible: true,
       hasLocation: true,
-      projectionScope: 'full'
+      projectionScope: 'full',
+      ttlSeconds: 0
     });
     expect(redis.eval).toHaveBeenCalledTimes(1);
     expect(redis.eval).toHaveBeenCalledWith(
@@ -52,6 +56,7 @@ describe('driver-online-projection-service', () => {
       '-22.9207',
       '1',
       'full',
+      '0',
       '4',
       'driverId',
       'driver_1',
@@ -99,7 +104,7 @@ describe('driver-online-projection-service', () => {
       'online_drivers',
       'driver_offline_locations'
     ]);
-    expect(args.slice(7, 14)).toEqual(['driver_1', '0', '0', '', '', '0', 'full']);
+    expect(args.slice(7, 15)).toEqual(['driver_1', '0', '0', '', '', '0', 'full', '0']);
     expect(DRIVER_ONLINE_PROJECTION_SCRIPT).toContain("redis.call('SREM', KEYS[4], driver_id)");
   });
 
@@ -152,6 +157,101 @@ describe('driver-online-projection-service', () => {
     expect(result.projectionScope).toBe('eligibility_only');
     expect(redis.eval.mock.calls[0]).toContain('eligibility_only');
     expect(DRIVER_ONLINE_PROJECTION_SCRIPT).toContain("projection_scope == 'eligibility_only'");
+  });
+
+  it('projects an online location snapshot and TTL without changing dispatch eligibility', async () => {
+    const redis = { eval: jest.fn().mockResolvedValue([1, 1, 0]) };
+
+    const result = await commitDriverOnlineProjection(redis, {
+      driverId: 'driver_1',
+      projectionScope: 'location_only',
+      isOnline: true,
+      lat: -22.9207,
+      lng: -43.4059,
+      ttlSeconds: 120,
+      fields: {
+        id: 'driver_1',
+        isOnline: 'true',
+        status: 'AVAILABLE'
+      }
+    });
+
+    expect(result).toMatchObject({
+      success: true,
+      isOnline: true,
+      hasLocation: true,
+      projectionScope: 'location_only',
+      ttlSeconds: 120
+    });
+    expect(redis.eval.mock.calls[0]).toEqual(expect.arrayContaining([
+      'location_only',
+      '120'
+    ]));
+    expect(DRIVER_ONLINE_PROJECTION_SCRIPT).toContain(
+      "projection_scope == 'location_only' and online"
+    );
+    expect(DRIVER_ONLINE_PROJECTION_SCRIPT).toContain("redis.call('EXPIRE', KEYS[1], ttl_seconds)");
+  });
+
+  it('projects an offline location into the offline GEO in the same script', async () => {
+    const redis = { eval: jest.fn().mockResolvedValue([1, 0, 0]) };
+
+    await commitDriverOnlineProjection(redis, {
+      driverId: 'driver_1',
+      projectionScope: 'location_only',
+      isOnline: false,
+      lat: -22.9207,
+      lng: -43.4059,
+      ttlSeconds: 86400,
+      fields: {
+        id: 'driver_1',
+        isOnline: 'false',
+        status: 'OFFLINE'
+      }
+    });
+
+    expect(DRIVER_ONLINE_PROJECTION_SCRIPT).toContain("redis.call('GEOADD', KEYS[5]");
+    expect(DRIVER_ONLINE_PROJECTION_SCRIPT).toContain("redis.call('ZREM', KEYS[2], driver_id)");
+    expect(DRIVER_ONLINE_PROJECTION_SCRIPT).toContain("redis.call('SREM', KEYS[4], driver_id)");
+  });
+
+  it('rejects a location-only projection without coordinates or a positive TTL', async () => {
+    const redis = { eval: jest.fn() };
+
+    await expect(commitDriverOnlineProjection(redis, {
+      driverId: 'driver_1',
+      projectionScope: 'location_only',
+      isOnline: false,
+      ttlSeconds: 86400,
+      fields: { status: 'OFFLINE' }
+    })).rejects.toMatchObject({ code: 'DRIVER_ONLINE_PROJECTION_INVALID_LOCATION' });
+
+    await expect(commitDriverOnlineProjection(redis, {
+      driverId: 'driver_1',
+      projectionScope: 'location_only',
+      isOnline: true,
+      lat: -22.9207,
+      lng: -43.4059,
+      fields: { status: 'AVAILABLE' }
+    })).rejects.toMatchObject({ code: 'DRIVER_ONLINE_PROJECTION_INVALID_TTL' });
+
+    expect(redis.eval).not.toHaveBeenCalled();
+  });
+
+  it('keeps the shared location writer on the atomic projection contract', () => {
+    const serverSource = fs.readFileSync(
+      path.resolve(__dirname, '../../../server.js'),
+      'utf8'
+    );
+    const writerStart = serverSource.indexOf('const saveDriverLocation = async');
+    const writerEnd = serverSource.indexOf('// =========================================================================================', writerStart);
+    const writerSource = serverSource.slice(writerStart, writerEnd);
+
+    expect(writerStart).toBeGreaterThan(-1);
+    expect(writerEnd).toBeGreaterThan(writerStart);
+    expect(writerSource).toContain('await commitDriverOnlineProjection(redis, {');
+    expect(writerSource).toContain("projectionScope: 'location_only'");
+    expect(writerSource).not.toMatch(/redis\.(hset|geoadd|zrem|sadd|srem|expire)\(/);
   });
 
   it('serializes only defined hash fields', () => {

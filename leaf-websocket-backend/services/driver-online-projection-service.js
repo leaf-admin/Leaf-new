@@ -24,10 +24,13 @@ local longitude = ARGV[4]
 local latitude = ARGV[5]
 local dispatch_eligible = ARGV[6] == '1'
 local projection_scope = ARGV[7]
+local ttl_seconds = tonumber(ARGV[8]) or 0
 local key_expectations = { 'hash', 'zset', 'zset', 'set', 'zset' }
 local key_indices = projection_scope == 'eligibility_only'
   and { 1, 3 }
-  or (online and { 1, 2, 3, 4, 5 } or { 1, 2, 3, 4 })
+  or (projection_scope == 'location_only'
+    and { 1, 2, 4, 5 }
+    or (online and { 1, 2, 3, 4, 5 } or { 1, 2, 3, 4 }))
 
 for _, index in ipairs(key_indices) do
   local valid, actual = validate_key_type(KEYS[index], key_expectations[index])
@@ -40,11 +43,11 @@ for _, index in ipairs(key_indices) do
   end
 end
 
-local field_count = tonumber(ARGV[8]) or 0
+local field_count = tonumber(ARGV[9]) or 0
 local hash_args = {}
 
 for index = 1, field_count * 2 do
-  hash_args[index] = ARGV[8 + index]
+  hash_args[index] = ARGV[9 + index]
 end
 
 if #hash_args == 0 then
@@ -55,7 +58,14 @@ redis.call('HSET', KEYS[1], unpack(hash_args))
 
 if projection_scope == 'eligibility_only' then
   redis.call('ZREM', KEYS[3], driver_id)
-  return { 1, -1, 0 }
+elseif projection_scope == 'location_only' and online then
+  redis.call('GEOADD', KEYS[2], longitude, latitude, driver_id)
+  redis.call('SADD', KEYS[4], driver_id)
+  redis.call('ZREM', KEYS[5], driver_id)
+elseif projection_scope == 'location_only' then
+  redis.call('GEOADD', KEYS[5], longitude, latitude, driver_id)
+  redis.call('ZREM', KEYS[2], driver_id)
+  redis.call('SREM', KEYS[4], driver_id)
 elseif online and has_location then
   redis.call('GEOADD', KEYS[2], longitude, latitude, driver_id)
   redis.call('SADD', KEYS[4], driver_id)
@@ -74,7 +84,15 @@ else
   redis.call('SREM', KEYS[4], driver_id)
 end
 
-return { 1, online and 1 or 0, dispatch_eligible and 1 or 0 }
+if ttl_seconds > 0 then
+  redis.call('EXPIRE', KEYS[1], ttl_seconds)
+end
+
+return {
+  1,
+  projection_scope == 'eligibility_only' and -1 or (online and 1 or 0),
+  projection_scope == 'eligibility_only' and -1 or (dispatch_eligible and 1 or 0)
+}
 `;
 
 function normalizeHashFields(fields = {}) {
@@ -131,18 +149,37 @@ async function commitDriverOnlineProjection(redis, {
   isOnline,
   dispatchEligible,
   projectionScope = 'full',
+  ttlSeconds = 0,
   lat,
   lng
 } = {}) {
   const normalizedDriverId = String(driverId || '').trim();
   const normalizedDriverKey = String(driverKey || '').trim();
   const normalizedEligibleGeoKey = String(eligibleGeoKey || '').trim();
-  const normalizedProjectionScope = projectionScope === 'eligibility_only'
-    ? 'eligibility_only'
+  const normalizedProjectionScope = ['eligibility_only', 'location_only'].includes(projectionScope)
+    ? projectionScope
     : 'full';
-  const location = normalizeGeoCoordinates(lat, lng, { required: isOnline === true });
+  const parsedTtlSeconds = Number(ttlSeconds);
+  const normalizedTtlSeconds = Number.isFinite(parsedTtlSeconds) && parsedTtlSeconds > 0
+    ? Math.floor(parsedTtlSeconds)
+    : 0;
+  const location = normalizeGeoCoordinates(lat, lng, {
+    required: isOnline === true || normalizedProjectionScope === 'location_only'
+  });
   const hasLocation = location.hasLocation;
   const hashArgs = normalizeHashFields(fields);
+
+  if (normalizedProjectionScope === 'location_only' && !hasLocation) {
+    const error = new Error('Coordenadas obrigatórias para a projeção de localização do motorista');
+    error.code = 'DRIVER_ONLINE_PROJECTION_INVALID_LOCATION';
+    throw error;
+  }
+
+  if (normalizedProjectionScope === 'location_only' && normalizedTtlSeconds <= 0) {
+    const error = new Error('TTL obrigatório para a projeção de localização do motorista');
+    error.code = 'DRIVER_ONLINE_PROJECTION_INVALID_TTL';
+    throw error;
+  }
 
   if (
     !redis ||
@@ -172,6 +209,7 @@ async function commitDriverOnlineProjection(redis, {
     hasLocation ? String(location.lat) : '',
     dispatchEligible === true ? '1' : '0',
     normalizedProjectionScope,
+    String(normalizedTtlSeconds),
     String(hashArgs.length / 2),
     ...hashArgs
   );
@@ -187,7 +225,8 @@ async function commitDriverOnlineProjection(redis, {
     isOnline: Number(result[1]) === 1,
     dispatchEligible: Number(result[2]) === 1,
     hasLocation,
-    projectionScope: normalizedProjectionScope
+    projectionScope: normalizedProjectionScope,
+    ttlSeconds: normalizedTtlSeconds
   };
 }
 

@@ -85,6 +85,9 @@ const idempotencyService = require('./services/idempotency-service');
 const rideCostTelemetryService = require('./services/ride-cost-telemetry-service');
 const pricingH3ReadModelService = require('./services/pricing-h3-read-model-service');
 const ConnectionCleanupService = require('./services/connection-cleanup-service');
+const {
+    commitDriverOnlineProjection
+} = require('./services/driver-online-projection-service');
 const vehicleLockManager = require('./services/vehicle-lock-manager');
 const driverLockManager = require('./services/driver-lock-manager');
 const FCMService = require('./services/fcm-service');
@@ -764,26 +767,26 @@ const saveDriverLocation = async (driverId, lat, lng, heading = 0, speed = 0, ti
             lastSeen: new Date().toISOString()
         };
 
-        await redis.hset(`driver:${driverId}`, driverStatus);
+        const { getTTL } = require('./config/redis-ttl-config');
+        const ttl = isOnline
+            ? (
+                isInTrip
+                    ? getTTL('DRIVER_LOCATION', 'IN_TRIP')
+                    : getTTL('DRIVER_LOCATION', 'ONLINE')
+            )
+            : getTTL('DRIVER_LOCATION', 'OFFLINE');
+
+        await commitDriverOnlineProjection(redis, {
+            driverId,
+            projectionScope: 'location_only',
+            isOnline,
+            lat,
+            lng,
+            ttlSeconds: ttl,
+            fields: driverStatus
+        });
 
         if (isOnline) {
-            // 2. Motorista ONLINE: adicionar/atualizar no GEO ativo (para match rápido)
-            await redis.geoadd('driver_locations', lng, lat, driverId);
-            await redis.sadd('online_drivers', driverId);
-
-            // 3. Remover do GEO offline (se estava offline antes)
-            await redis.zrem('driver_offline_locations', driverId);
-
-            // 4. ✅ OTIMIZAÇÃO: TTL diferenciado por estado (usando configuração centralizada)
-            // - Em viagem: 60 segundos (dados críticos, mas heartbeat renova a cada 30s)
-            // - Online disponível: 120 segundos (heartbeat renova a cada 30s, então nunca expira se online)
-            // - Heartbeat garante que motorista parado permanece online
-            const { getTTL } = require('./config/redis-ttl-config');
-            const ttl = isInTrip
-                ? getTTL('DRIVER_LOCATION', 'IN_TRIP')
-                : getTTL('DRIVER_LOCATION', 'ONLINE');
-            await redis.expire(`driver:${driverId}`, ttl);
-
             logStructured('info', `Motorista ${isInTrip ? 'EM VIAGEM' : 'ONLINE'} salvo no Redis (GEO ativo)`, {
                 service: 'server',
                 driverId,
@@ -792,17 +795,6 @@ const saveDriverLocation = async (driverId, lat, lng, heading = 0, speed = 0, ti
                 ttl
             });
         } else {
-            // 2. Motorista OFFLINE: adicionar no GEO offline (para notificações de demanda)
-            await redis.geoadd('driver_offline_locations', lng, lat, driverId);
-
-            // 3. Remover do GEO ativo (não deve aparecer em buscas de match)
-            await redis.zrem('driver_locations', driverId);
-            await redis.srem('online_drivers', driverId);
-
-            // 4. TTL longo para offline (24 horas - para notificações futuras)
-            const { getTTL } = require('./config/redis-ttl-config');
-            await redis.expire(`driver:${driverId}`, getTTL('DRIVER_LOCATION', 'OFFLINE'));
-
             if (process.env.NODE_ENV === 'development' || process.env.DEBUG_DRIVER_LOCATION === 'true') {
                 logStructured('debug', 'Motorista OFFLINE salvo no Redis (GEO offline)', {
                     service: 'server',
