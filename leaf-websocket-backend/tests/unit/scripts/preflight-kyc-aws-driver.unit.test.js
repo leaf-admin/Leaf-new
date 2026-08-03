@@ -1,10 +1,45 @@
 const {
   validateProvider,
   validateBiometricReadiness,
-  validateInternalBiometricRuntime
+  validateInternalBiometricRuntime,
+  validateBudget
 } = require('../../../scripts/ops/preflight-kyc-aws-driver.cjs');
 
 describe('KYC AWS preflight public projections', () => {
+  test('accepts available per-driver capacity without requiring a global balance', () => {
+    expect(validateBudget({
+      readOnly: true,
+      enabled: true,
+      timeZone: 'UTC',
+      available: true,
+      limitScope: 'per_driver_daily',
+      bundleEstimatedCostUsd: 0.016,
+      perUserDailySessionLimit: 20,
+      operationCount: 7,
+      remainingSessions: 13,
+      estimatedSpentUsd: 0.112
+    })).toEqual(expect.objectContaining({
+      available: true,
+      limitScope: 'per_driver_daily',
+      remainingSessions: 13
+    }));
+  });
+
+  test('blocks only when the driver has no daily session remaining', () => {
+    expect(() => validateBudget({
+      readOnly: true,
+      enabled: true,
+      timeZone: 'UTC',
+      available: false,
+      limitScope: 'per_driver_daily',
+      bundleEstimatedCostUsd: 0.016,
+      perUserDailySessionLimit: 20,
+      operationCount: 20,
+      remainingSessions: 0,
+      estimatedSpentUsd: 0.32
+    })).toThrow(expect.objectContaining({ code: 'KYC_AWS_BUDGET_UNAVAILABLE' }));
+  });
+
   test('accepts the minimum liveness provider contract', () => {
     expect(validateProvider({
       success: true,
@@ -98,8 +133,10 @@ describe('KYC AWS preflight public projections', () => {
         attemptWindowSeconds: 86400,
         costGuard: {
           enabled: true,
-          dailyLimitConfigured: true,
-          monthlyLimitConfigured: true
+          limitScope: 'per_driver_daily',
+          perUserDailySessionLimit: 20,
+          globalDailyLimitEnabled: false,
+          globalMonthlyLimitEnabled: false
         }
       },
       compare: {
@@ -146,8 +183,10 @@ describe('KYC AWS preflight public projections', () => {
         attemptWindowSeconds: 86400,
         costGuard: {
           enabled: true,
-          dailyLimitConfigured: true,
-          monthlyLimitConfigured: true
+          limitScope: 'per_driver_daily',
+          perUserDailySessionLimit: 20,
+          globalDailyLimitEnabled: false,
+          globalMonthlyLimitEnabled: false
         }
       },
       compare: {
@@ -193,8 +232,10 @@ describe('KYC AWS preflight public projections', () => {
         attemptWindowSeconds: 86400,
         costGuard: {
           enabled: true,
-          dailyLimitConfigured: true,
-          monthlyLimitConfigured: true
+          limitScope: 'per_driver_daily',
+          perUserDailySessionLimit: 20,
+          globalDailyLimitEnabled: false,
+          globalMonthlyLimitEnabled: false
         },
         ...livenessOverrides
       },
@@ -250,8 +291,10 @@ describe('KYC AWS preflight public projections', () => {
         attemptWindowSeconds: 86400,
         costGuard: {
           enabled: true,
-          dailyLimitConfigured: true,
-          monthlyLimitConfigured: true
+          limitScope: 'per_driver_daily',
+          perUserDailySessionLimit: 20,
+          globalDailyLimitEnabled: false,
+          globalMonthlyLimitEnabled: false
         }
       },
       compare: {

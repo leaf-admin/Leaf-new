@@ -222,10 +222,20 @@ describe('daily-earnings-report-service', () => {
       platformNetTotalBrl: '1.66',
       directionsRequestsTotal: '4',
     });
+    redisHashes.set('{kyc:aws:cost}:usage_day:2026-05-13', {
+      reportDay: '2026-05-13',
+      sessionCount: '10',
+      estimatedCostMicros: '160000',
+    });
 
     const result = await service.sendDailyReport('2026-05-13', { force: true });
 
     expect(result.sent).toBe(true);
+    expect(result.summary).toMatchObject({
+      kycAwsSessionsTotal: 10,
+      kycAwsEstimatedCostUsd: 0.16,
+      kycAwsEstimatedCostBrl: 0.83,
+    });
     expect(mockAxiosPost).toHaveBeenCalledWith(
       'https://discord.example/webhook',
       expect.objectContaining({
@@ -233,6 +243,12 @@ describe('daily-earnings-report-service', () => {
         embeds: expect.arrayContaining([
           expect.objectContaining({
             title: 'Leaf earnings daily - 2026-05-13',
+            fields: expect.arrayContaining([
+              expect.objectContaining({
+                name: 'AWS KYC estimado',
+                value: '10 sessoes · US$ 0,16 (≈ R$ 0,83)',
+              }),
+            ]),
           }),
         ]),
       }),
@@ -240,5 +256,25 @@ describe('daily-earnings-report-service', () => {
         headers: { 'Content-Type': 'application/json' },
       }),
     );
+  });
+
+  it('envia o custo KYC mesmo quando nao houve corrida e relatorios vazios estao desativados', async () => {
+    process.env.DAILY_EARNINGS_REPORT_SEND_EMPTY = 'false';
+    redisHashes.set('{kyc:aws:cost}:usage_day:2026-05-13', {
+      sessionCount: '1',
+      estimatedCostMicros: '16000',
+    });
+
+    const result = await service.sendDailyReport('2026-05-13', { force: true });
+
+    expect(result).toMatchObject({
+      sent: true,
+      summary: {
+        completedRides: 0,
+        kycAwsSessionsTotal: 1,
+        kycAwsEstimatedCostUsd: 0.016,
+      },
+    });
+    expect(mockAxiosPost).toHaveBeenCalledTimes(1);
   });
 });

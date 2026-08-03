@@ -67,6 +67,17 @@ function usdToMicros(value) {
   return Math.round(numeric * 1_000_000);
 }
 
+function dateKeyForTimeZone(date, timeZone) {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  }).formatToParts(date);
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${values.year}-${values.month}-${values.day}`;
+}
+
 function createError(message, code, details = {}) {
   const error = new Error(message);
   error.code = code;
@@ -84,8 +95,9 @@ class AwsKycCostGuardService {
     this.now = options.now || (() => new Date());
     this.enabled = options.enabled ?? readBoolean(this.env.KYC_AWS_COST_GUARD_ENABLED, false);
     this.timeZone = String(this.env.KYC_AWS_COST_TIME_ZONE || 'UTC').trim().toUpperCase();
-    this.dailyLimitMicros = usdToMicros(this.env.KYC_AWS_COST_DAILY_LIMIT_USD);
-    this.monthlyLimitMicros = usdToMicros(this.env.KYC_AWS_COST_MONTHLY_LIMIT_USD);
+    this.reportTimeZone = String(
+      this.env.LEAF_REPORT_TIME_ZONE || 'America/Sao_Paulo'
+    ).trim();
     const perUserDailySessionLimit = Number.parseInt(
       this.env.KYC_AWS_COST_PER_USER_DAILY_SESSION_LIMIT || '20',
       10
@@ -128,10 +140,10 @@ class AwsKycCostGuardService {
     return {
       enabled: this.isEnabled(),
       timeZone: this.timeZone,
-      dailyLimitConfigured: Number.isInteger(this.dailyLimitMicros),
-      monthlyLimitConfigured: Number.isInteger(this.monthlyLimitMicros),
-      dailyLimitUsd: this.dailyLimitMicros == null ? null : this.dailyLimitMicros / 1_000_000,
-      monthlyLimitUsd: this.monthlyLimitMicros == null ? null : this.monthlyLimitMicros / 1_000_000,
+      reportTimeZone: this.reportTimeZone,
+      limitScope: 'per_driver_daily',
+      globalDailyLimitEnabled: false,
+      globalMonthlyLimitEnabled: false,
       perUserDailySessionLimit: this.perUserDailySessionLimit,
       bundleEstimatedCostUsd: this.getBundleCostMicros() == null
         ? null
@@ -152,20 +164,27 @@ class AwsKycCostGuardService {
     if (!this.isEnabled()) {
       if (!required) return false;
       throw createError(
-        'Circuit breaker agregado de custo AWS KYC nao esta habilitado',
+        'Limite diario de sessoes AWS KYC por motorista nao esta habilitado',
         'KYC_AWS_COST_GUARD_REQUIRED'
       );
     }
     if (
       this.timeZone !== 'UTC'
-      || !Number.isInteger(this.dailyLimitMicros)
-      || !Number.isInteger(this.monthlyLimitMicros)
-      || this.dailyLimitMicros > this.monthlyLimitMicros
+      || !Number.isInteger(this.perUserDailySessionLimit)
       || !Number.isInteger(this.getBundleCostMicros())
     ) {
       throw createError(
         'Configuracao do circuit breaker de custo AWS KYC e invalida',
         'KYC_AWS_COST_GUARD_CONFIG_INVALID'
+      );
+    }
+    try {
+      dateKeyForTimeZone(this.now(), this.reportTimeZone);
+    } catch (error) {
+      throw createError(
+        'Fuso do relatorio diario AWS KYC e invalido',
+        'KYC_AWS_COST_GUARD_CONFIG_INVALID',
+        { cause: error }
       );
     }
     const firestore = this.firestoreProvider();
@@ -186,19 +205,15 @@ class AwsKycCostGuardService {
     };
   }
 
+  getReportDay(date = this.now()) {
+    return dateKeyForTimeZone(date, this.reportTimeZone);
+  }
+
   nextUtcDay(date = this.now()) {
     return new Date(Date.UTC(
       date.getUTCFullYear(),
       date.getUTCMonth(),
       date.getUTCDate() + 1
-    )).toISOString();
-  }
-
-  nextUtcMonth(date = this.now()) {
-    return new Date(Date.UTC(
-      date.getUTCFullYear(),
-      date.getUTCMonth() + 1,
-      1
     )).toISOString();
   }
 
@@ -247,6 +262,18 @@ class AwsKycCostGuardService {
     });
   }
 
+  async readLegacyUserDayUsage(firestore, { day, userIdHash }) {
+    const userDayRef = this.userDayRef(firestore, day, userIdHash);
+    return firestore.runTransaction(async (transaction) => {
+      const snapshot = await transaction.get(userDayRef);
+      const state = snapshot.exists ? (snapshot.data() || {}) : {};
+      return {
+        operationCount: Math.max(0, Number(state.operationCount || 0)),
+        spentMicros: Math.max(0, Number(state.spentMicros || 0))
+      };
+    });
+  }
+
   assertOperationMatches(existing, {
     userIdHash,
     day,
@@ -275,11 +302,42 @@ class AwsKycCostGuardService {
       day: operation.day,
       month: operation.month,
       bundleCostMicros: Number(operation.bundleCostMicros),
-      dailyLimitMicros: this.dailyLimitMicros,
-      monthlyLimitMicros: this.monthlyLimitMicros,
       perUserDailySessionLimit: this.perUserDailySessionLimit,
       operationRetentionSeconds: this.operationRetentionDays * 24 * 60 * 60,
       aggregateRetentionSeconds: 400 * 24 * 60 * 60
+    };
+  }
+
+  async getPerUserDailyUsage(userId, date = this.now()) {
+    const firestore = this.assertReady({ required: true });
+    this.budgetAuthority.assertReady();
+    const safeUserId = String(userId || '').trim();
+    if (!safeUserId) {
+      throw createError(
+        'Usuario obrigatorio para consultar uso diario AWS KYC',
+        'KYC_AWS_COST_OPERATION_INVALID'
+      );
+    }
+    const { day, month } = this.getPeriodKeys(date);
+    let usage = await this.budgetAuthority.getUserDayUsage({
+      operationIdHash: 'read_only',
+      userIdHash: sha256(safeUserId),
+      day,
+      month
+    });
+    if (usage?.exists !== true) {
+      usage = await this.readLegacyUserDayUsage(firestore, {
+        day,
+        userIdHash: sha256(safeUserId)
+      });
+    }
+    const operationCount = Math.max(0, Number(usage?.operationCount || 0));
+    return {
+      day,
+      operationCount,
+      remainingSessions: Math.max(0, this.perUserDailySessionLimit - operationCount),
+      perUserDailySessionLimit: this.perUserDailySessionLimit,
+      estimatedSpentUsd: Math.max(0, Number(usage?.spentMicros || 0)) / 1_000_000
     };
   }
 
@@ -341,20 +399,6 @@ class AwsKycCostGuardService {
           { retryAt: this.nextUtcDay(now) }
         );
       }
-      if (budgetReservation?.status === 'daily_budget_exhausted') {
-        throw createError(
-          'Orcamento agregado AWS KYC atingido',
-          'KYC_AWS_COST_BUDGET_EXHAUSTED',
-          { retryAt: this.nextUtcDay(now) }
-        );
-      }
-      if (budgetReservation?.status === 'monthly_budget_exhausted') {
-        throw createError(
-          'Orcamento agregado AWS KYC atingido',
-          'KYC_AWS_COST_BUDGET_EXHAUSTED',
-          { retryAt: this.nextUtcMonth(now) }
-        );
-      }
       if (budgetReservation?.status !== 'reserved') {
         throw createError(
           'Resposta invalida da autoridade de custo AWS KYC',
@@ -413,7 +457,7 @@ class AwsKycCostGuardService {
           });
         });
       }
-      logError(error, 'Falha ao reservar orcamento agregado AWS KYC', {
+      logError(error, 'Falha ao reservar limite diario AWS KYC por motorista', {
         service: 'aws-kyc-cost-guard-service',
         userId: safeUserId,
         code: error?.code || null
@@ -557,9 +601,17 @@ class AwsKycCostGuardService {
       );
     }
 
+    let costReportDay = operation.costReportDay || null;
     if (operation.budgetAuthority === 'redis_lua_v1') {
+      const dispatchedAt = this.now();
+      costReportDay = this.getReportDay(dispatchedAt);
+      const budgetInput = {
+        ...this.buildBudgetAuthorityInput(safeOperationId, operation),
+        reportDay: costReportDay,
+        dispatchedAt: dispatchedAt.toISOString()
+      };
       const dispatch = await this.budgetAuthority.markDispatched(
-        this.buildBudgetAuthorityInput(safeOperationId, operation)
+        budgetInput
       );
       if (dispatch?.status === 'missing') {
         throw createError(
@@ -596,6 +648,7 @@ class AwsKycCostGuardService {
         ...current,
         livenessStatus: 'dispatched',
         livenessDispatchedAt: dispatchedAt,
+        ...(costReportDay ? { costReportDay } : {}),
         updatedAt: dispatchedAt
       };
       return { next, result: next };

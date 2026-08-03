@@ -1288,8 +1288,6 @@ class KYCRoutes {
         const verificationBusy = error?.code === 'KYC_VERIFICATION_IN_PROGRESS';
         const admissionCapacityExhausted =
           error?.code === 'KYC_AWS_ADMISSION_CAPACITY_EXHAUSTED';
-        const costBudgetExhausted =
-          error?.code === 'KYC_AWS_COST_BUDGET_EXHAUSTED';
         const retryResumeUnavailable = String(error?.code || '')
           .startsWith('KYC_IDENTITY_RETRY_RESUME_')
           || [
@@ -1348,21 +1346,6 @@ class KYCRoutes {
             userId: req.body?.userId || null
           });
           return sendLivenessAttemptRateLimit(res, error);
-        }
-        if (costBudgetExhausted) {
-          const retryWindow = resolveLivenessRetryWindow(error);
-          res.set('Retry-After', String(retryWindow.retryAfterSeconds));
-          logError(error, 'Limite operacional agregado AWS KYC atingido', {
-            service: 'kyc-routes'
-          });
-          return res.status(503).json({
-            success: false,
-            error: 'A validacao esta temporariamente indisponivel. Tente novamente mais tarde.',
-            code: 'KYC_AWS_COST_BUDGET_EXHAUSTED',
-            retryable: true,
-            retryAt: retryWindow.retryAt,
-            retryAfterSeconds: retryWindow.retryAfterSeconds
-          });
         }
         const statusCode = identityPermanentlyBlocked
           ? 423

@@ -3,6 +3,7 @@ const cron = require('node-cron');
 const redisPool = require('../utils/redis-pool');
 const { logStructured, logError } = require('../utils/logger');
 const { validateAuthoritativeFinancialSnapshot } = require('./ride-financial-contract');
+const { usageDayKey: awsKycUsageDayKey } = require('./aws-kyc-cost-budget-authority');
 
 const ROLLUP_PREFIX = 'daily_earnings_report';
 const DEFAULT_TIME_ZONE = 'America/Sao_Paulo';
@@ -248,7 +249,7 @@ async function incrementRollup(redis, dateKey, delta) {
   await redis.zadd(`${ROLLUP_PREFIX}:index`, Date.now(), dateKey);
 }
 
-function normalizeSummary(dateKey, hash = {}) {
+function normalizeSummary(dateKey, hash = {}, kycUsageHash = {}) {
   const completedRides = Math.max(0, Math.round(safeNumber(hash.completedRides, 0)));
   const grossFareTotalBrl = roundMoney(hash.grossFareTotalBrl);
   const operationalFeeTotalBrl = roundMoney(hash.operationalFeeTotalBrl);
@@ -258,6 +259,23 @@ function normalizeSummary(dateKey, hash = {}) {
   const infrastructureCostTotalBrl = roundMoney(hash.infrastructureCostTotalBrl);
   const platformNetTotalBrl = roundMoney(hash.platformNetTotalBrl);
   const directionsRequestsTotal = safeNumber(hash.directionsRequestsTotal, 0);
+  const kycAwsSessionsTotal = Math.max(
+    0,
+    Math.round(safeNumber(kycUsageHash.sessionCount, 0))
+  );
+  const kycAwsEstimatedCostMicros = Math.max(
+    0,
+    Math.round(safeNumber(kycUsageHash.estimatedCostMicros, 0))
+  );
+  const kycAwsEstimatedCostUsd = kycAwsEstimatedCostMicros / 1_000_000;
+  const usdBrlExchangeRate = firstPositiveNumber(
+    process.env.RIDE_COST_TELEMETRY_USD_BRL_RATE,
+    process.env.USD_BRL_EXCHANGE_RATE,
+    5.2
+  );
+  const kycAwsEstimatedCostBrl = roundMoney(
+    kycAwsEstimatedCostUsd * usdBrlExchangeRate
+  );
 
   return {
     dateKey,
@@ -270,6 +288,11 @@ function normalizeSummary(dateKey, hash = {}) {
     infrastructureCostTotalBrl,
     platformNetTotalBrl,
     directionsRequestsTotal,
+    kycAwsSessionsTotal,
+    kycAwsEstimatedCostMicros,
+    kycAwsEstimatedCostUsd,
+    kycAwsEstimatedCostBrl,
+    kycAwsUsdBrlExchangeRate: usdBrlExchangeRate,
     averageRideCostBrl: completedRides > 0 ? roundMoney(rideCostTotalBrl / completedRides) : 0,
     averageGoogleCostBrl: completedRides > 0 ? roundMoney(googleCostTotalBrl / completedRides) : 0,
     averageOperationalFeeBrl: completedRides > 0 ? roundMoney(operationalFeeTotalBrl / completedRides) : 0,
@@ -282,6 +305,13 @@ function formatBrl(value) {
   return `R$ ${roundMoney(value).toLocaleString('pt-BR', {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
+  })}`;
+}
+
+function formatUsd(value) {
+  return `US$ ${safeNumber(value, 0).toLocaleString('pt-BR', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 4,
   })}`;
 }
 
@@ -305,6 +335,11 @@ function buildDiscordPayload(summary) {
           { name: 'Google', value: formatBrl(summary.googleCostTotalBrl), inline: true },
           { name: 'Firebase/infra variavel', value: formatBrl(summary.firebaseCostTotalBrl + summary.infrastructureCostTotalBrl), inline: true },
           { name: 'Directions/corrida', value: String(summary.directionsPerRide), inline: true },
+          {
+            name: 'AWS KYC estimado',
+            value: `${summary.kycAwsSessionsTotal} sessoes · ${formatUsd(summary.kycAwsEstimatedCostUsd)} (≈ ${formatBrl(summary.kycAwsEstimatedCostBrl)})`,
+            inline: false,
+          },
         ],
         timestamp: new Date().toISOString(),
         footer: {
@@ -371,8 +406,11 @@ class DailyEarningsReportService {
   async getDailySummary(dateKey = dateKeyFor(new Date(), this.getTimeZone())) {
     await redisPool.ensureConnection();
     const redis = redisPool.getConnection();
-    const hash = await redis.hgetall(rollupKey(dateKey));
-    return normalizeSummary(dateKey, hash || {});
+    const [hash, kycUsageHash] = await Promise.all([
+      redis.hgetall(rollupKey(dateKey)),
+      redis.hgetall(awsKycUsageDayKey(dateKey)),
+    ]);
+    return normalizeSummary(dateKey, hash || {}, kycUsageHash || {});
   }
 
   async sendDailyReport(dateKey = previousDateKey(this.getTimeZone()), options = {}) {
@@ -392,7 +430,11 @@ class DailyEarningsReportService {
 
     const summary = await this.getDailySummary(dateKey);
     const sendEmpty = String(process.env.DAILY_EARNINGS_REPORT_SEND_EMPTY || 'true').toLowerCase() !== 'false';
-    if (!sendEmpty && summary.completedRides <= 0) {
+    if (
+      !sendEmpty
+      && summary.completedRides <= 0
+      && summary.kycAwsSessionsTotal <= 0
+    ) {
       return { sent: false, reason: 'empty_day', summary };
     }
 
@@ -413,6 +455,8 @@ class DailyEarningsReportService {
       dateKey,
       completedRides: summary.completedRides,
       platformNetTotalBrl: summary.platformNetTotalBrl,
+      kycAwsSessionsTotal: summary.kycAwsSessionsTotal,
+      kycAwsEstimatedCostUsd: summary.kycAwsEstimatedCostUsd,
     });
 
     return { sent: true, summary };
@@ -456,6 +500,7 @@ module.exports._private = {
   normalizeSummary,
   buildDiscordPayload,
   formatBrl,
+  formatUsd,
   allowedRideCostTotalBrl,
   resolveBackendFinalFinancialSnapshot,
 };

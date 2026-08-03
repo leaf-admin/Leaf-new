@@ -255,13 +255,10 @@ function buildKycSection(redisAuthorityAttestation = null) {
   const activeTripAuthorityMode = acceptRideAuthority.mode;
   const activeTripAuthorityReady = acceptRideAuthority.ready;
   const strictReadiness = buildKycStrictReadinessRequirement();
-  const awsCostDailyLimitUsd = Number(process.env.KYC_AWS_COST_DAILY_LIMIT_USD);
-  const awsCostMonthlyLimitUsd = Number(process.env.KYC_AWS_COST_MONTHLY_LIMIT_USD);
-  const awsCostLimitsValid = Number.isFinite(awsCostDailyLimitUsd)
-    && Number.isFinite(awsCostMonthlyLimitUsd)
-    && awsCostDailyLimitUsd > 0
-    && awsCostMonthlyLimitUsd > 0
-    && awsCostDailyLimitUsd <= awsCostMonthlyLimitUsd;
+  const awsCostPerUserDailySessionLimit = Number(
+    process.env.KYC_AWS_COST_PER_USER_DAILY_SESSION_LIMIT
+  );
+  const awsCostPerUserDailyLimitValid = awsCostPerUserDailySessionLimit === 20;
   const awsCostOperationRetentionDays = Number(
     process.env.KYC_AWS_COST_OPERATION_RETENTION_DAYS ?? 35
   );
@@ -318,7 +315,12 @@ function buildKycSection(redisAuthorityAttestation = null) {
     awsCostGuardEnabled: envBool('KYC_AWS_COST_GUARD_ENABLED', false),
     awsCostBudgetAuthority: 'redis_lua_v1',
     awsCostDurableAudit: 'firestore_operation_documents',
-    awsCostLimitsValid,
+    awsCostLimitScope: 'per_driver_daily',
+    awsCostPerUserDailySessionLimit,
+    awsCostPerUserDailyLimitValid,
+    awsCostGlobalDailyLimitEnabled: false,
+    awsCostGlobalMonthlyLimitEnabled: false,
+    awsCostGlobalSpendMode: 'monitor_only_daily_discord',
     awsCostRetentionValid,
     awsCostOperationRetentionDays,
     awsCompareResultPersistenceValid,
@@ -436,7 +438,7 @@ async function buildRoleReadiness(health) {
       kyc.canonicalFaceCompareConfigured &&
       kyc.awsCompareThresholdsValid &&
       kyc.awsCostGuardEnabled &&
-      kyc.awsCostLimitsValid &&
+      kyc.awsCostPerUserDailyLimitValid &&
       kyc.awsCostRetentionValid &&
       kyc.awsCompareResultPersistenceValid &&
       kyc.awsCostTimeZoneUtc &&
