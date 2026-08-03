@@ -13,6 +13,10 @@ const {
 const {
   verifyFirestoreRestore
 } = require('../../../scripts/ops/verify-firestore-restore.cjs');
+const {
+  buildExportScript,
+  shellQuote
+} = require('../../../scripts/ops/emit-backup-env.cjs');
 
 function firestoreWithDocuments(collectionName, rows) {
   const documents = rows.map(({ id, data }, index) => ({
@@ -229,5 +233,46 @@ describe('Firestore logical backup and restore drill', () => {
     expect(dailyBackupSource.indexOf('verify-firestore-restore.cjs')).toBeLessThan(
       dailyBackupSource.indexOf('echo "[backup] firestore ok')
     );
+  });
+
+  test('limits retention cleanup to validated backup subdirectories', () => {
+    const dailyBackupSource = fs.readFileSync(
+      path.join(__dirname, '../../../scripts/ops/backup-daily.sh'),
+      'utf8'
+    );
+    expect(dailyBackupSource.indexOf('emit-backup-env.cjs')).toBeLessThan(
+      dailyBackupSource.indexOf('BACKUP_ROOT="${BACKUP_ROOT:-/var/backups/leaf}"')
+    );
+    expect(dailyBackupSource).not.toContain('source "$ROOT_DIR/.env"');
+    expect(dailyBackupSource).toContain('BACKUP_ROOT deve ser absoluto');
+    expect(dailyBackupSource).toContain('BACKUP_ROOT amplo demais');
+    expect(dailyBackupSource).toContain('BACKUP_RETENTION_DAYS deve estar entre 1 e 3650');
+    expect(dailyBackupSource).toContain(
+      'find "$REDIS_BACKUP_DIR" "$FIRESTORE_BACKUP_DIR" -type f -mtime "+$RETENTION_DAYS" -delete'
+    );
+    expect(dailyBackupSource).not.toContain('find "$BACKUP_ROOT" -type f');
+  });
+
+  test('loads only backup dependencies from dotenv without shell execution', () => {
+    const exports = buildExportScript([
+      'REDIS_PASSWORD=secret with spaces',
+      'FIRESTORE_BACKUP_PAGE_SIZE=250',
+      'GOOGLE_APPLICATION_CREDENTIALS=/secure/leaf account.json',
+      'DISCORD_ALERT_USERNAME=Leaf Observability',
+      'BACKUP_ROOT=/explicit/backup/root',
+      'NODE_OPTIONS=--require=untrusted.js'
+    ].join('\n'), {
+      BACKUP_ROOT: '/operator/override'
+    });
+
+    expect(exports).toContain("export REDIS_PASSWORD='secret with spaces'");
+    expect(exports).toContain("export FIRESTORE_BACKUP_PAGE_SIZE='250'");
+    expect(exports).toContain(
+      "export GOOGLE_APPLICATION_CREDENTIALS='/secure/leaf account.json'"
+    );
+    expect(exports).not.toContain('DISCORD_ALERT_USERNAME');
+    expect(exports).not.toContain('NODE_OPTIONS');
+    expect(exports).not.toContain('BACKUP_ROOT');
+    expect(shellQuote("Leaf's $(literal) value")).toBe("'Leaf'\"'\"'s $(literal) value'");
   });
 });
