@@ -4290,6 +4290,132 @@ class PaymentService {
     return subscriptionStateService.settlePendingOnWithdrawal(driverId, settlementCents);
   }
 
+  async ensureWithdrawalRequestLedger({
+    firestore,
+    withdrawalId,
+    driverId,
+    amountCents,
+    withdrawFeeCents = 0,
+    subscriptionSettlementCents = 0,
+    requestId
+  }) {
+    const normalizedAmountCents = Math.round(Number(amountCents || 0));
+    const normalizedWithdrawFeeCents = Math.max(0, Math.round(Number(withdrawFeeCents || 0)));
+    const normalizedSubscriptionSettlementCents = Math.max(
+      0,
+      Math.round(Number(subscriptionSettlementCents || 0))
+    );
+    if (
+      !firestore ||
+      !withdrawalId ||
+      !driverId ||
+      !requestId ||
+      normalizedAmountCents <= 0
+    ) {
+      return {
+        success: false,
+        code: 'WITHDRAWAL_LEDGER_REPAIR_DATA_INVALID',
+        error: 'Dados insuficientes para registrar o ledger do saque',
+        status: 'ledger_pending',
+        ledgerStatus: 'pending_retry'
+      };
+    }
+
+    const withdrawalRef = firestore.collection('driver_withdrawals').doc(withdrawalId);
+    const idempotencyKey = this.buildWithdrawalIdempotencyKey(driverId, requestId);
+    const idempotencyRef = firestore.collection('driver_withdrawal_idempotency').doc(idempotencyKey);
+    const ledgerResult = await this.financialLedgerService.recordWithdrawalRequested({
+      withdrawalId,
+      driverId,
+      amountCents: normalizedAmountCents,
+      withdrawFeeCents: normalizedWithdrawFeeCents,
+      subscriptionSettlementCents: normalizedSubscriptionSettlementCents,
+      requestId,
+      metadata: {
+        totalDebitCents:
+          normalizedAmountCents +
+          normalizedWithdrawFeeCents +
+          normalizedSubscriptionSettlementCents,
+        source: 'requestDriverWithdrawal'
+      }
+    });
+    const ledgerPosted = Boolean(ledgerResult.success);
+    const ledgerError = ledgerPosted
+      ? null
+      : ledgerResult.error || ledgerResult.code || 'Falha ao registrar ledger de saque';
+    const statePatch = ledgerPosted
+      ? {
+          status: 'pending',
+          ledgerStatus: 'posted',
+          ledgerEventId: ledgerResult.eventId || null,
+          ledgerError: null,
+          ledgerRetryable: false,
+          ledgerPostedAt: admin.firestore.FieldValue.serverTimestamp(),
+          updatedAt: admin.firestore.FieldValue.serverTimestamp()
+        }
+      : {
+          status: 'ledger_pending',
+          ledgerStatus: 'pending_retry',
+          ledgerError,
+          ledgerRetryable: true,
+          updatedAt: admin.firestore.FieldValue.serverTimestamp()
+        };
+
+    try {
+      await withdrawalRef.set(statePatch, { merge: true });
+      await idempotencyRef.set({
+        status: statePatch.status,
+        ledgerStatus: statePatch.ledgerStatus,
+        ledgerEventId: statePatch.ledgerEventId || null,
+        ledgerError,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp()
+      }, { merge: true });
+    } catch (stateError) {
+      logStructured('error', 'Falha ao persistir estado do ledger do saque', {
+        service: 'payment-service',
+        withdrawalId,
+        driverId,
+        ledgerPosted,
+        error: stateError.message
+      });
+      return {
+        success: false,
+        code: 'WITHDRAWAL_LEDGER_STATE_PERSIST_FAILED',
+        error: stateError.message,
+        eventId: ledgerResult.eventId || null,
+        status: 'ledger_pending',
+        ledgerStatus: 'pending_retry'
+      };
+    }
+
+    if (!ledgerPosted) {
+      logStructured('error', 'Saque solicitado sem ledger financeiro canônico; Pix Out bloqueado até conciliação', {
+        service: 'payment-service',
+        driverId,
+        withdrawalId,
+        ledgerError
+      });
+    }
+
+    this.financialLedgerService.reconcileWithdrawalFinancials({ withdrawalId })
+      .catch((reconciliationError) => {
+        logStructured('warn', 'Falha ao reconciliar saque após atualização do ledger', {
+          service: 'payment-service',
+          withdrawalId,
+          error: reconciliationError.message
+        });
+      });
+
+    return {
+      success: ledgerPosted,
+      code: ledgerResult.code || null,
+      error: ledgerError,
+      eventId: ledgerResult.eventId || null,
+      status: statePatch.status,
+      ledgerStatus: statePatch.ledgerStatus
+    };
+  }
+
   /**
    * Solicita saque do saldo do motorista.
    * Debita imediatamente do saldo e registra pedido para processamento.
@@ -4531,6 +4657,29 @@ class PaymentService {
           };
         }
 
+        const replayLedgerResult = await this.ensureWithdrawalRequestLedger({
+          firestore,
+          withdrawalId: transactionResult.withdrawalId,
+          driverId,
+          amountCents,
+          withdrawFeeCents: transactionResult.withdrawFeeCents || 0,
+          subscriptionSettlementCents: transactionResult.subscriptionSettlementCents || 0,
+          requestId
+        });
+
+        if (!replayLedgerResult.success) {
+          return {
+            success: false,
+            idempotentReplay: true,
+            withdrawalId: transactionResult.withdrawalId,
+            requestId,
+            code: replayLedgerResult.code || 'WITHDRAWAL_LEDGER_NOT_POSTED',
+            error: replayLedgerResult.error || 'Ledger de solicitação de saque ainda não confirmado',
+            status: replayLedgerResult.status || 'ledger_pending',
+            ledgerStatus: replayLedgerResult.ledgerStatus || 'pending_retry'
+          };
+        }
+
         return {
           success: true,
           idempotentReplay: true,
@@ -4547,69 +4696,26 @@ class PaymentService {
           previousBalance: transactionResult.previousBalance,
           newBalance: transactionResult.newBalance,
           subscriptionCollectionMode: subscriptionBilling.collectionMode || 'withdrawal',
-          ledgerStatus: transactionResult.ledgerStatus || 'unknown',
-          ledgerEventId: transactionResult.ledgerEventId || null,
+          status: replayLedgerResult.status,
+          ledgerStatus: replayLedgerResult.ledgerStatus,
+          ledgerEventId: replayLedgerResult.eventId || null,
           settlementSyncStatus: 'unchanged'
         };
       }
 
-      const withdrawalLedgerResult = await this.financialLedgerService.recordWithdrawalRequested({
-        withdrawalId: transactionResult.withdrawalId || withdrawalRef.id,
+      const withdrawalId = transactionResult.withdrawalId || withdrawalRef.id;
+      const withdrawalLedgerResult = await this.ensureWithdrawalRequestLedger({
+        firestore,
+        withdrawalId,
         driverId,
         amountCents,
         withdrawFeeCents,
         subscriptionSettlementCents: transactionResult.subscriptionSettlementCents || 0,
-        requestId,
-        metadata: {
-          totalDebitCents,
-          source: 'requestDriverWithdrawal'
-        }
+        requestId
       });
 
-      const withdrawalDocRef = firestore.collection('driver_withdrawals').doc(transactionResult.withdrawalId || withdrawalRef.id);
+      const withdrawalDocRef = firestore.collection('driver_withdrawals').doc(withdrawalId);
       const ledgerPosted = Boolean(withdrawalLedgerResult.success);
-      const ledgerStatusPatch = ledgerPosted
-        ? {
-            ledgerStatus: 'posted',
-            ledgerEventId: withdrawalLedgerResult.eventId || null,
-            ledgerPostedAt: admin.firestore.FieldValue.serverTimestamp(),
-            updatedAt: admin.firestore.FieldValue.serverTimestamp()
-          }
-        : {
-            status: 'ledger_pending',
-            ledgerStatus: 'pending_retry',
-            ledgerError: withdrawalLedgerResult.error || withdrawalLedgerResult.code || 'Falha ao registrar ledger de saque',
-            ledgerRetryable: true,
-            updatedAt: admin.firestore.FieldValue.serverTimestamp()
-          };
-
-      await withdrawalDocRef.set(ledgerStatusPatch, { merge: true });
-      await idempotencyRef.set({
-        status: ledgerPosted ? 'pending' : 'ledger_pending',
-        ledgerStatus: ledgerStatusPatch.ledgerStatus,
-        ledgerEventId: ledgerStatusPatch.ledgerEventId || null,
-        ledgerError: ledgerStatusPatch.ledgerError || null,
-        updatedAt: admin.firestore.FieldValue.serverTimestamp()
-      }, { merge: true });
-
-      if (!ledgerPosted) {
-        logStructured('error', 'Saque solicitado sem ledger financeiro canônico; Pix Out bloqueado até conciliação', {
-          service: 'payment-service',
-          driverId,
-          withdrawalId: transactionResult.withdrawalId || withdrawalRef.id,
-          ledgerError: withdrawalLedgerResult.error || withdrawalLedgerResult.code
-        });
-      }
-
-      this.financialLedgerService.reconcileWithdrawalFinancials({
-        withdrawalId: transactionResult.withdrawalId || withdrawalRef.id
-      }).catch((reconciliationError) => {
-        logStructured('warn', 'Falha ao reconciliar saque após solicitação', {
-          service: 'payment-service',
-          withdrawalId: transactionResult.withdrawalId || withdrawalRef.id,
-          error: reconciliationError.message
-        });
-      });
 
       let settlementSync = {
         success: true,
@@ -4730,21 +4836,22 @@ class PaymentService {
     }
 
     const safeLimit = Math.max(1, Math.min(Number(limit) || 50, 200));
-    const snapshot = await firestore
-      .collection('driver_withdrawals')
-      .where('status', '==', 'pending')
-      .limit(safeLimit)
-      .get();
+    const snapshots = await Promise.all(
+      ['pending', 'ledger_pending'].map((status) => firestore
+        .collection('driver_withdrawals')
+        .where('status', '==', status)
+        .limit(safeLimit)
+        .get())
+    );
 
     const withdrawals = [];
-    snapshot.forEach((doc) => {
-      const data = doc.data() || {};
-      if (data.ledgerStatus !== 'posted') {
-        return;
-      }
-      withdrawals.push({
-        id: doc.id,
-        ...data
+    snapshots.forEach((snapshot) => {
+      snapshot.docs.forEach((doc) => {
+        const data = doc.data() || {};
+        withdrawals.push({
+          id: doc.id,
+          ...data
+        });
       });
     });
     withdrawals.sort((a, b) => {
@@ -4755,7 +4862,7 @@ class PaymentService {
 
     return {
       success: true,
-      withdrawals
+      withdrawals: withdrawals.slice(0, safeLimit)
     };
   }
 
@@ -4777,6 +4884,33 @@ class PaymentService {
     }
 
     const withdrawalRef = firestore.collection('driver_withdrawals').doc(withdrawalId);
+    const initialWithdrawalDoc = await withdrawalRef.get();
+    if (!initialWithdrawalDoc.exists) {
+      return { success: false, error: 'Saque não encontrado' };
+    }
+
+    const initialWithdrawal = initialWithdrawalDoc.data() || {};
+    if (initialWithdrawal.status === 'ledger_pending') {
+      const ledgerRepair = await this.ensureWithdrawalRequestLedger({
+        firestore,
+        withdrawalId,
+        driverId: initialWithdrawal.driverId,
+        amountCents: Number(initialWithdrawal.amountCents || 0),
+        withdrawFeeCents: Number(initialWithdrawal.feeCents || 0),
+        subscriptionSettlementCents: Number(initialWithdrawal.subscriptionSettlementCents || 0),
+        requestId: initialWithdrawal.requestId
+      });
+      if (!ledgerRepair.success) {
+        return {
+          success: false,
+          error: ledgerRepair.error || 'Ledger de solicitação de saque ainda não confirmado',
+          code: ledgerRepair.code || 'WITHDRAWAL_LEDGER_NOT_POSTED',
+          status: ledgerRepair.status || 'ledger_pending',
+          ledgerStatus: ledgerRepair.ledgerStatus || 'pending_retry'
+        };
+      }
+    }
+
     const claimResult = await firestore.runTransaction(async (transaction) => {
       const withdrawalDoc = await transaction.get(withdrawalRef);
       if (!withdrawalDoc.exists) {
@@ -4784,10 +4918,28 @@ class PaymentService {
       }
 
       const withdrawal = withdrawalDoc.data() || {};
-      if (withdrawal.status !== 'pending') {
+      if (['processed', 'processed_ledger_pending'].includes(withdrawal.status)) {
         return {
           success: true,
           alreadyProcessed: true,
+          status: withdrawal.status
+        };
+      }
+
+      if (withdrawal.status === 'processing') {
+        return {
+          success: false,
+          error: 'Saque já está em processamento',
+          code: 'WITHDRAWAL_ALREADY_PROCESSING',
+          status: withdrawal.status
+        };
+      }
+
+      if (withdrawal.status !== 'pending') {
+        return {
+          success: false,
+          error: 'Estado do saque não permite processamento',
+          code: 'WITHDRAWAL_INVALID_PROCESSING_STATE',
           status: withdrawal.status
         };
       }

@@ -1137,6 +1137,90 @@ describe('PaymentService financial rules', () => {
     });
   });
 
+  it('repairs a ledger_pending withdrawal on idempotent replay without debiting twice', async () => {
+    const firestore = createInMemoryFirestore();
+    firestore.docs.set('driver_balances/driver_ledger_replay', {
+      driverId: 'driver_ledger_replay',
+      balanceCents: 4200
+    });
+    firebaseConfig.getFirestore.mockReturnValue(firestore);
+    const service = new PaymentService();
+    service.financialLedgerService.recordWithdrawalRequested = jest.fn()
+      .mockResolvedValueOnce({
+        success: false,
+        code: 'LEDGER_WRITE_FAILED',
+        error: 'ledger unavailable'
+      })
+      .mockResolvedValueOnce({
+        success: true,
+        eventId: 'withdrawal_requested_repaired'
+      });
+
+    const request = {
+      driverId: 'driver_ledger_replay',
+      amountCents: 2500,
+      pixKey: 'driver@pix.test',
+      requestId: 'withdraw_request_ledger_replay'
+    };
+    const first = await service.requestDriverWithdrawal(request);
+    const transactionPathsAfterFirst = Array.from(firestore.docs.keys())
+      .filter((path) => path.startsWith('driver_balances/driver_ledger_replay/transactions/'));
+    const second = await service.requestDriverWithdrawal(request);
+    const transactionPathsAfterReplay = Array.from(firestore.docs.keys())
+      .filter((path) => path.startsWith('driver_balances/driver_ledger_replay/transactions/'));
+
+    expect(first).toMatchObject({
+      success: true,
+      status: 'ledger_pending',
+      ledgerStatus: 'pending_retry',
+      newBalance: 16
+    });
+    expect(second).toMatchObject({
+      success: true,
+      idempotentReplay: true,
+      status: 'pending',
+      ledgerStatus: 'posted',
+      ledgerEventId: 'withdrawal_requested_repaired',
+      newBalance: 16
+    });
+    expect(firestore.docs.get('driver_balances/driver_ledger_replay')).toMatchObject({
+      balanceCents: 1600,
+      balance: 16
+    });
+    expect(transactionPathsAfterFirst.length).toBeGreaterThan(0);
+    expect(transactionPathsAfterReplay).toEqual(transactionPathsAfterFirst);
+    const withdrawal = Array.from(firestore.docs.entries())
+      .find(([path]) => path.startsWith('driver_withdrawals/'))?.[1];
+    expect(withdrawal).toMatchObject({
+      status: 'pending',
+      ledgerStatus: 'posted',
+      ledgerEventId: 'withdrawal_requested_repaired',
+      ledgerRetryable: false
+    });
+  });
+
+  it('lists ledger_pending withdrawals for operational recovery', async () => {
+    const firestore = createInMemoryFirestore();
+    firestore.docs.set('driver_withdrawals/wd_pending', {
+      status: 'pending',
+      ledgerStatus: 'posted'
+    });
+    firestore.docs.set('driver_withdrawals/wd_ledger_pending', {
+      status: 'ledger_pending',
+      ledgerStatus: 'pending_retry'
+    });
+    firebaseConfig.getFirestore.mockReturnValue(firestore);
+    const service = new PaymentService();
+
+    const result = await service.listPendingWithdrawals(10);
+
+    expect(result.success).toBe(true);
+    expect(result.withdrawals.map((withdrawal) => withdrawal.id).sort()).toEqual([
+      'wd_ledger_pending',
+      'wd_pending'
+    ]);
+  });
+
   it('rejects withdrawal idempotency replay when the same requestId changes parameters', async () => {
     const firestore = createInMemoryFirestore();
     firestore.docs.set('driver_balances/driver_1', {
@@ -1254,6 +1338,68 @@ describe('PaymentService financial rules', () => {
     expect(firestore.docs.get('driver_withdrawals/wd_without_ledger')).toMatchObject({
       status: 'pending'
     });
+  });
+
+  it('repairs ledger_pending before claiming and processing Pix Out', async () => {
+    process.env.LEAF_PIX_KEY = 'leaf@pix.test';
+    const firestore = createInMemoryFirestore();
+    firestore.docs.set('driver_withdrawals/wd_repair_before_pixout', {
+      driverId: 'driver_1',
+      requestId: 'withdraw_request_repair_before_pixout',
+      pixKey: 'driver@pix.test',
+      amountCents: 2500,
+      feeCents: 100,
+      subscriptionSettlementCents: 0,
+      status: 'ledger_pending',
+      ledgerStatus: 'pending_retry'
+    });
+    firebaseConfig.getFirestore.mockReturnValue(firestore);
+    mockTransferDirectToDriver.mockResolvedValue({
+      success: true,
+      transferId: 'transfer_repaired_withdrawal'
+    });
+    const service = new PaymentService();
+    service.financialLedgerService.recordWithdrawalRequested = jest.fn().mockResolvedValue({
+      success: true,
+      eventId: 'withdrawal_requested_repaired_before_pixout'
+    });
+
+    const result = await service.processDriverWithdrawal('wd_repair_before_pixout', 'admin_1');
+
+    expect(result).toMatchObject({
+      success: true,
+      withdrawalId: 'wd_repair_before_pixout',
+      transferId: 'transfer_repaired_withdrawal'
+    });
+    expect(mockTransferDirectToDriver).toHaveBeenCalledTimes(1);
+    expect(firestore.docs.get('driver_withdrawals/wd_repair_before_pixout')).toMatchObject({
+      status: 'processed',
+      ledgerStatus: 'posted',
+      ledgerEventId: 'withdrawal_requested_repaired_before_pixout'
+    });
+  });
+
+  it('does not report a concurrent processing claim as already processed', async () => {
+    process.env.LEAF_PIX_KEY = 'leaf@pix.test';
+    const firestore = createInMemoryFirestore();
+    firestore.docs.set('driver_withdrawals/wd_processing', {
+      driverId: 'driver_1',
+      pixKey: 'driver@pix.test',
+      amountCents: 2500,
+      status: 'processing',
+      ledgerStatus: 'posted'
+    });
+    firebaseConfig.getFirestore.mockReturnValue(firestore);
+    const service = new PaymentService();
+
+    const result = await service.processDriverWithdrawal('wd_processing', 'admin_2');
+
+    expect(result).toMatchObject({
+      success: false,
+      code: 'WITHDRAWAL_ALREADY_PROCESSING',
+      status: 'processing'
+    });
+    expect(mockTransferDirectToDriver).not.toHaveBeenCalled();
   });
 
   it('marks a processed withdrawal as ledger pending when Pix Out succeeds but processed ledger fails', async () => {
