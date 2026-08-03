@@ -134,6 +134,8 @@ const HOME_PICKUP_REVERSE_GEOCODE_DEBOUNCE_MS = 900;
 const HOME_PICKUP_REVERSE_GEOCODE_TIMEOUT_MS = 5500;
 const HOME_PICKUP_REVERSE_GEOCODE_PRECISION = 5;
 const HOME_PICKUP_REVERSE_GEOCODE_MAX_DISTANCE_METERS = 180;
+const HOME_QUOTE_VALIDITY_MS = 2 * 60 * 1000;
+const HOME_QUOTE_MAX_AUTOMATIC_REFRESHES = 2;
 const DRIVER_EXECUTION_SURFACE_STATUSES = new Set([
   'accepted',
   'arrived',
@@ -1393,6 +1395,32 @@ function createHomeQuoteSessionId(createdAt = Date.now()) {
   return `passenger_home_quote_${createdAt}_${randomSuffix}`;
 }
 
+export function resolveHomeQuoteExpiryAction({
+  automaticRefreshCount = 0,
+  maxAutomaticRefreshes = HOME_QUOTE_MAX_AUTOMATIC_REFRESHES,
+} = {}) {
+  const normalizedCount = Math.max(
+    0,
+    Number.parseInt(automaticRefreshCount, 10) || 0,
+  );
+  const normalizedLimit = Math.max(
+    0,
+    Number.parseInt(maxAutomaticRefreshes, 10) || 0,
+  );
+
+  if (normalizedCount < normalizedLimit) {
+    return {
+      action: 'refresh',
+      nextAutomaticRefreshCount: normalizedCount + 1,
+    };
+  }
+
+  return {
+    action: 'await_user',
+    nextAutomaticRefreshCount: normalizedCount,
+  };
+}
+
 function buildHomeBackendQuoteKey({
   routeKey,
   categoryId,
@@ -1404,10 +1432,22 @@ function buildHomeBackendQuoteKey({
   return [routeKey, categoryId, quoteSessionId].join('|');
 }
 
-function getHomeQuoteLockExpiresAtMs(record = null) {
-  return Date.parse(
+export function getHomeQuoteLockExpiresAtMs(record = null) {
+  const serverExpiresAtMs = Date.parse(
     String(record?.quoteLockExpiresAt || record?.quote?.quoteLockExpiresAt || ''),
   );
+  const receivedAtMs = Number(record?.receivedAtMs);
+  const clientExpiresAtMs = Number.isFinite(receivedAtMs)
+    ? receivedAtMs + HOME_QUOTE_VALIDITY_MS
+    : Number.NaN;
+
+  if (Number.isFinite(serverExpiresAtMs) && Number.isFinite(clientExpiresAtMs)) {
+    return Math.min(serverExpiresAtMs, clientExpiresAtMs);
+  }
+
+  return Number.isFinite(serverExpiresAtMs)
+    ? serverExpiresAtMs
+    : clientExpiresAtMs;
 }
 
 function isHomeBackendQuoteRecordFresh(record = null, expectedKey = '', nowMs = Date.now()) {
@@ -1775,6 +1815,11 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   const [, setHomeBackendQuoteLoading] = useState(false);
   const [homeBackendQuoteError, setHomeBackendQuoteError] = useState('');
   const [homeQuoteRefreshNonce, setHomeQuoteRefreshNonce] = useState(0);
+  const [homeQuoteSessionNonce, setHomeQuoteSessionNonce] = useState(0);
+  const [homeQuoteAutoRefreshExhaustedKey, setHomeQuoteAutoRefreshExhaustedKey] =
+    useState('');
+  const homeQuoteAutoRefreshBudgetRef = useRef({ key: '', count: 0 });
+  const homeQuoteRefreshSourceRef = useRef('');
   const [homeAvailabilityNotice, setHomeAvailabilityNotice] = useState('');
   const [homeDriverAvailabilityOverride, setHomeDriverAvailabilityOverride] =
     useState(null);
@@ -2189,14 +2234,25 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   }, [homeSelectedDestination?.eta]);
   const homeArrivalTime = useMemo(
     () => formatHomeArrivalTime(homeQuoteDurationMin),
-    [homeQuoteDurationMin],
+    [homeQuoteDurationMin, homeQuoteRefreshNonce],
   );
+  const homeQuoteCycleKey = useMemo(
+    () => homeRoutePreviewKey || '',
+    [homeRoutePreviewKey],
+  );
+  useEffect(() => {
+    homeQuoteAutoRefreshBudgetRef.current = {
+      key: homeQuoteCycleKey,
+      count: 0,
+    };
+    setHomeQuoteAutoRefreshExhaustedKey('');
+  }, [homeQuoteCycleKey]);
   const homeBackendQuoteSessionId = useMemo(() => {
     if (!homeRoutePreviewKey) {
       return '';
     }
     return createHomeQuoteSessionId();
-  }, [homeQuoteRefreshNonce, homeRoutePreviewKey]);
+  }, [homeQuoteSessionNonce, homeRoutePreviewKey]);
   const homeBackendQuoteKey = useMemo(
     () =>
       buildHomeBackendQuoteKey({
@@ -2250,6 +2306,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
 
     const controller = new AbortController();
     let cancelled = false;
+    const refreshSource = homeQuoteRefreshSourceRef.current;
 
     setHomeBackendQuotesByCategory({});
     setHomeBackendQuoteLoading(true);
@@ -2325,6 +2382,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
         );
         const quoteLockId = String(quote?.quoteLockId || '').trim() || null;
         const quoteLockExpiresAt = String(quote?.quoteLockExpiresAt || '').trim() || null;
+        const receivedAtMs = Date.now();
 
         return [
           categoryId,
@@ -2335,6 +2393,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
             quoteSessionId: homeBackendQuoteSessionId,
             quoteLockId,
             quoteLockExpiresAt,
+            receivedAtMs,
             quote: quote && typeof quote === 'object'
               ? {
                   ...quote,
@@ -2356,6 +2415,9 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
       .then((entries) => {
         if (!cancelled) {
           setHomeBackendQuotesByCategory(Object.fromEntries(entries));
+          if (refreshSource) {
+            setHomeAvailabilityNotice('Preço atualizado');
+          }
         }
       })
       .catch((error) => {
@@ -2368,6 +2430,9 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
       .finally(() => {
         if (!cancelled) {
           setHomeBackendQuoteLoading(false);
+          if (homeQuoteRefreshSourceRef.current === refreshSource) {
+            homeQuoteRefreshSourceRef.current = '';
+          }
         }
       });
 
@@ -2407,6 +2472,13 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   const selectedHomeBackendQuoteExpired = Boolean(
     homeBackendQuote?.quote &&
       getHomeQuoteLockExpiresAtMs(homeBackendQuote) <= Date.now(),
+  );
+  const homeQuoteAutoRefreshExhausted = Boolean(
+    homeQuoteCycleKey &&
+      homeQuoteAutoRefreshExhaustedKey === homeQuoteCycleKey,
+  );
+  const selectedHomeQuoteAutoRefreshExhausted = Boolean(
+    homeQuoteAutoRefreshExhausted && selectedHomeBackendQuoteExpired,
   );
   const homeCategorySurfaceVisible = Boolean(
     homeSelectedDestination?.coordinate
@@ -2453,6 +2525,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     homeSelectedDestination?.coordinate &&
       homeBackendQuoteKey &&
       !selectedHomeBackendQuoteReady &&
+      !selectedHomeQuoteAutoRefreshExhausted &&
       !homeBackendQuoteError &&
       !homeRoutePreviewError,
   );
@@ -2498,7 +2571,11 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
               homeSelectedDestination?.coordinate &&
               homeBackendQuoteKey
           ),
-          quoteUnavailable: Boolean(homeBackendQuoteError || homeRoutePreviewError),
+          quoteUnavailable: Boolean(
+            homeBackendQuoteError ||
+              homeRoutePreviewError ||
+              homeQuoteAutoRefreshExhausted,
+          ),
           backendFare,
           localFare,
           allowLocalEstimateWhilePending: false,
@@ -2510,12 +2587,20 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
           description: homeRoutePreviewError
             ? 'Rota indisponível no momento'
             : rateCard.description,
-          pickupEtaLabel: isSelectedCategory && selectedHomeDriverUnavailable
+          pickupEtaLabel: homeQuoteAutoRefreshExhausted
+            ? '--'
+            : isSelectedCategory && selectedHomeDriverUnavailable
             ? 'Sem motorista'
             : Number.isFinite(displayedPickupEta)
             ? `${displayedPickupEta} min`
             : '--',
-          arrivalLabel: homeCanonicalRouteReady ? homeArrivalTime : '--',
+          arrivalLabel:
+            homeCanonicalRouteReady &&
+            !homeQuoteAutoRefreshExhausted &&
+            (!isSelectedCategory ||
+              (selectedHomeBackendQuoteReady && !selectedHomeDriverUnavailable))
+              ? homeArrivalTime
+              : '--',
           fare: farePresentation.fare,
           priceLabel: farePresentation.priceLabel,
           rateCard,
@@ -2536,6 +2621,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
       homeArrivalTime,
       homeCanonicalRouteReady,
       homePickupEtaBaseMin,
+      homeQuoteAutoRefreshExhausted,
       homeQuoteDistanceKm,
       homeQuoteDurationMin,
       homeBackendQuoteError,
@@ -2549,6 +2635,8 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
       selectedHomeBackendPricingPayload,
       selectedHomeDriverPickupEtaMin,
       selectedHomeDriverUnavailable,
+      selectedHomeBackendQuoteReady,
+      selectedHomeQuoteAutoRefreshExhausted,
       selectedHomeQuotePending,
     ],
   );
@@ -6657,11 +6745,67 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     ],
   );
 
-  const refreshHomeCategoryQuotes = useCallback(() => {
+  const refreshHomeCategoryQuotes = useCallback(({ automatic = false } = {}) => {
+    if (!automatic) {
+      homeQuoteAutoRefreshBudgetRef.current = {
+        key: homeQuoteCycleKey,
+        count: 0,
+      };
+      setHomeQuoteAutoRefreshExhaustedKey('');
+      setHomeQuoteSessionNonce((current) => current + 1);
+    }
+    homeQuoteRefreshSourceRef.current = automatic ? 'automatic' : 'manual';
+    setHomeBackendQuotesByCategory({});
     setHomeQuoteRefreshNonce((current) => current + 1);
     setHomeBackendQuoteError('');
-    setHomeAvailabilityNotice('Preço expirado');
-  }, []);
+    setHomeAvailabilityNotice('Atualizando preço...');
+  }, [homeQuoteCycleKey]);
+
+  useEffect(() => {
+    if (
+      !isScreenFocused ||
+      !homeCategorySurfaceVisible ||
+      !homeQuoteCycleKey ||
+      !homeBackendQuote?.quote
+    ) {
+      return undefined;
+    }
+
+    const expiresAtMs = getHomeQuoteLockExpiresAtMs(homeBackendQuote);
+    if (!Number.isFinite(expiresAtMs)) {
+      return undefined;
+    }
+
+    const timeoutId = setTimeout(() => {
+      if (homeQuoteAutoRefreshBudgetRef.current.key !== homeQuoteCycleKey) {
+        return;
+      }
+
+      const expiryAction = resolveHomeQuoteExpiryAction({
+        automaticRefreshCount: homeQuoteAutoRefreshBudgetRef.current.count,
+      });
+
+      if (expiryAction.action === 'refresh') {
+        homeQuoteAutoRefreshBudgetRef.current = {
+          key: homeQuoteCycleKey,
+          count: expiryAction.nextAutomaticRefreshCount,
+        };
+        refreshHomeCategoryQuotes({ automatic: true });
+        return;
+      }
+
+      setHomeQuoteAutoRefreshExhaustedKey(homeQuoteCycleKey);
+      setHomeAvailabilityNotice('Preço expirado');
+    }, Math.max(0, expiresAtMs - Date.now()) + 25);
+
+    return () => clearTimeout(timeoutId);
+  }, [
+    homeBackendQuote,
+    homeCategorySurfaceVisible,
+    homeQuoteCycleKey,
+    isScreenFocused,
+    refreshHomeCategoryQuotes,
+  ]);
 
   const retryHomeRoutePreview = useCallback(() => {
     setHomeRoutePreview(null);
@@ -8808,7 +8952,8 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
               (!homeRoutePreviewError &&
                 (passengerHomeRoutePending ||
                   selectedHomeDriverUnavailable ||
-                  !selectedHomeBackendQuoteReady))
+                  (!selectedHomeBackendQuoteReady &&
+                    !selectedHomeQuoteAutoRefreshExhausted)))
             }
             categoryConfirmSoftDisabled={
               selectedHomeDriverUnavailable && !homeDriverAvailabilityRefreshing
@@ -8818,6 +8963,8 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
                 ? 'Tentar novamente'
                 : passengerHomeRoutePending
                 ? 'Calculando rota...'
+                : selectedHomeQuoteAutoRefreshExhausted
+                  ? 'Atualizar preço'
                 : selectedHomeDriverUnavailable
                   ? 'Sem motorista disponível'
                 : homeBackendQuoteError && !selectedHomeBackendQuoteReady
