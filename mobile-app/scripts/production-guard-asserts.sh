@@ -89,6 +89,27 @@ elif grep -REq "EXPO_PUBLIC_ALLOW_LEGACY_FIREBASE_BOOKING|Fluxo legado de criaç
   fail "retired direct Firebase booking override must remain removed"
 fi
 
+for file in \
+  "src/services/runtime/firebaseConfigBridge.js" \
+  "src/utils/authUtils.js"; do
+  if [[ -e "$file" ]]; then
+    fail "retired broad Firebase session bridge must remain removed: $file"
+  fi
+done
+
+require_pattern "src/common-local/GoogleAPIFunctions.js" "FirebaseConfig" "direct Firebase config dependency"
+if command -v rg >/dev/null 2>&1; then
+  if rg -q "configureFirebase|firebaseConfigBridge" \
+    "src/common-local/GoogleAPIFunctions.js" \
+    "src/services/canonical/sessionService.js"; then
+    fail "active map/session services must not load the broad Firebase compatibility object"
+  fi
+elif grep -Eq "configureFirebase|firebaseConfigBridge" \
+  "src/common-local/GoogleAPIFunctions.js" \
+  "src/services/canonical/sessionService.js"; then
+  fail "active map/session services must not load the broad Firebase compatibility object"
+fi
+
 require_pattern "src/services/HelpService.js" "__DEV__" "dev-only help fallback guard"
 require_pattern "src/utils/axiosInterceptor.js" "currentUser.getIdToken" "Firebase bearer token interceptor"
 require_pattern "src/services/UserAuthService.js" "/api/auth/password/login" "phone password login endpoint"

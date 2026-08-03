@@ -1,6 +1,6 @@
 # Canonical Runtime Services Slice - 2026-05-30
 
-> Atualização de 2026-08-03: a fachada `rideService`, seus bridges e as actions Redux de booking/estimate/rating/trip foram retirados depois que a análise de alcançabilidade comprovou que apenas um dispatch sem reducer ainda os carregava. A avaliação ativa continua pelo `RatingService`, WebSocket e persistência local; a criação de corrida ativa continua pelo `WebSocketManager` e backend canônico.
+> Atualização de 2026-08-03: a fachada `rideService`, seus bridges e as actions Redux de booking/estimate/rating/trip foram retirados depois que a análise de alcançabilidade comprovou que apenas um dispatch sem reducer ainda os carregava. A avaliação ativa continua pelo `RatingService`, WebSocket e persistência local; a criação de corrida ativa continua pelo `WebSocketManager` e backend canônico. A mesma análise desacoplou configuração de mapas e tipos de sessão do objeto amplo de compatibilidade Firebase, retirando o Realtime Database do grafo de imports do aplicativo ativo.
 
 ## Escopo
 

@@ -104,6 +104,21 @@ describe('canonical common runtime boundary', () => {
     expect(fs.existsSync(path.join(MOBILE_ROOT, 'src/services/canonical/legacyApiService.js'))).toBe(false);
   });
 
+  it('keeps Realtime Database outside the active mobile import graph', () => {
+    const reachable = collectReachableJavaScriptFiles(path.join(MOBILE_ROOT, 'index.js'));
+    const violations = [...reachable]
+      .filter((filePath) => filePath.startsWith(path.join(MOBILE_ROOT, 'src')))
+      .filter((filePath) => (
+        fs.readFileSync(filePath, 'utf8').includes('@react-native-firebase/database')
+      ))
+      .map((filePath) => path.relative(MOBILE_ROOT, filePath))
+      .sort();
+
+    expect(violations).toEqual([]);
+    expect(reachable.has(path.join(MOBILE_ROOT, 'src/firebase-refs.js'))).toBe(false);
+    expect(reachable.has(path.join(MOBILE_ROOT, 'src/common-local/config/configureFirebase.js'))).toBe(false);
+  });
+
   it('keeps the retired ride Redux action graph out of the runtime', () => {
     const commonLocalDirectory = path.join(MOBILE_ROOT, 'src/common-local');
     const actionsDirectory = path.join(commonLocalDirectory, 'actions');

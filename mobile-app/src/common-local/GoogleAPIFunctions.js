@@ -1,7 +1,7 @@
 import Logger from '../utils/Logger';
 import base64 from 'react-native-base64';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { firebase } from './config/configureFirebase';
+import { FirebaseConfig } from '../../config/FirebaseConfig';
 import AccessKey from './AccessKey';
 import { getSelfHostedApiUrl } from '../config/ApiConfig';
 import { allowClientDirectGoogleFallback } from '../config/runtimeAccessPolicy';
@@ -12,8 +12,7 @@ import rideCostTelemetryService, {
 
 // Fallback para config se não estiver disponível
 const getSafeConfig = () => {
-    const { config } = firebase;
-    return config || {
+    return FirebaseConfig || {
         projectId: "leaf-reactnative",
         appId: "1:106504629884:web:ada50a78fcf7bf3ea1a3f9",
         databaseURL: "https://leaf-reactnative-default-rtdb.firebaseio.com",
