@@ -139,8 +139,11 @@ RSYNC_SSH="ssh -i \"$CONTABO_KEY\" -o StrictHostKeyChecking=yes -o UserKnownHost
 TRACKED_MANIFEST="$(mktemp)"
 RELEASE_STAGING_DIR=""
 SYNC_SOURCE_DIR="$BACKEND_DIR/"
-RSYNC_SOURCE_ARGS=(--from0 --files-from="$TRACKED_MANIFEST")
-RSYNC_DELETE_ARGS=()
+# Keep this array non-empty for the Bash 3.2 shipped by macOS. Full releases and
+# targeted releases append their mode-specific arguments below. The metadata
+# guards prevent a local mktemp mode or workstation UID/GID from being applied
+# to the production source tree.
+RSYNC_TRANSFER_ARGS=(--no-owner --no-group --chmod=Du=rwx,Dgo=rx)
 ROLLBACK_ARMED=false
 STAMP=""
 REMOTE_BACKUP_DIR=""
@@ -228,6 +231,7 @@ rollback_on_error() {
 trap rollback_on_error ERR
 
 if [[ -n "$DEPLOY_TRACKED_PATHS" ]]; then
+  RSYNC_TRANSFER_ARGS+=(--from0 --files-from="$TRACKED_MANIFEST")
   for relative_path in $DEPLOY_TRACKED_PATHS; do
     if [[ "$relative_path" = /* || "$relative_path" == *".."* ]]; then
       echo "[deploy][error] Invalid targeted path: $relative_path" >&2
@@ -243,8 +247,7 @@ else
     tar -xf - -C "$RELEASE_STAGING_DIR"
   test -f "$RELEASE_STAGING_DIR/package.json"
   SYNC_SOURCE_DIR="$RELEASE_STAGING_DIR/"
-  RSYNC_SOURCE_ARGS=()
-  RSYNC_DELETE_ARGS=(--delete --delete-delay)
+  RSYNC_TRANSFER_ARGS+=(--delete --delete-delay)
 fi
 
 if [[ -n "$DEPLOY_TRACKED_PATHS" && ! -s "$TRACKED_MANIFEST" ]]; then
@@ -467,8 +470,7 @@ echo "[deploy] Backup: $REMOTE_BACKUP_DIR"
 
 echo "[deploy] 3/7 Previewing tracked application source"
 rsync -azc --dry-run --itemize-changes \
-  "${RSYNC_SOURCE_ARGS[@]}" \
-  "${RSYNC_DELETE_ARGS[@]}" \
+  "${RSYNC_TRANSFER_ARGS[@]}" \
   --exclude ".git" \
   --exclude "node_modules" \
   --exclude "logs" \
@@ -498,8 +500,7 @@ rsync -azc --dry-run --itemize-changes \
 
 echo "[deploy] 3/7 Synchronizing tracked application source"
 rsync -azc --itemize-changes \
-  "${RSYNC_SOURCE_ARGS[@]}" \
-  "${RSYNC_DELETE_ARGS[@]}" \
+  "${RSYNC_TRANSFER_ARGS[@]}" \
   --exclude ".git" \
   --exclude "node_modules" \
   --exclude "logs" \
