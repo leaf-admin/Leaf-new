@@ -8,6 +8,7 @@ const mockResolveActiveTripForDriver = jest.fn();
 const mockClaimIdentityPolicyMutationWindow = jest.fn();
 const mockReleaseIdentityPolicyMutationWindow = jest.fn();
 const mockRecomputeDriverActivationStatus = jest.fn();
+const mockCommitDriverOnlineProjection = jest.fn();
 const mockRealtimeValues = {};
 const mockRealtimeSnapshot = (value) => ({
   exists: () => value !== undefined && value !== null,
@@ -94,6 +95,10 @@ jest.mock('../../../services/kyc-driver-status-service', () => ({
 jest.mock('../../../services/driver-document-analysis-queue', () => ({
   recomputeDriverActivationStatus: (...args) =>
     mockRecomputeDriverActivationStatus(...args)
+}));
+
+jest.mock('../../../services/driver-online-projection-service', () => ({
+  commitDriverOnlineProjection: (...args) => mockCommitDriverOnlineProjection(...args)
 }));
 
 jest.mock('../../../services/KYCNotificationService', () => {
@@ -245,6 +250,7 @@ describe('kyc-policy-service', () => {
       activationState: 'APPROVED_NEEDS_LIVENESS',
       canGoOnline: false
     });
+    mockCommitDriverOnlineProjection.mockReset().mockResolvedValue({ success: true });
   });
 
   test('isPhotoMismatchReport should return true for mismatch keywords', () => {
@@ -714,18 +720,21 @@ describe('kyc-policy-service', () => {
         kycStatus: 'pending_reverify',
       }),
     );
-    expect(mockRedis.hset).toHaveBeenCalledWith(
-      'driver:driver-kyc-blocked',
+    expect(mockCommitDriverOnlineProjection).toHaveBeenCalledWith(
+      mockRedis,
       expect.objectContaining({
-        kyc_blocked: 'false',
-        dispatchEligible: 'false',
-        dispatchEligibilityCode: 'KYC_REVERIFY_REQUIRED',
+        driverId: 'driver-kyc-blocked',
+        projectionScope: 'eligibility_only',
+        dispatchEligible: false,
+        fields: expect.objectContaining({
+          kyc_blocked: 'false',
+          dispatchEligible: 'false',
+          dispatchEligibilityCode: 'KYC_REVERIFY_REQUIRED',
+        }),
       }),
     );
-    expect(mockRedis.zrem).toHaveBeenCalledWith(
-      'driver_locations_eligible',
-      'driver-kyc-blocked',
-    );
+    expect(mockCommitDriverOnlineProjection).toHaveBeenCalledTimes(1);
+    expect(mockRedis.zrem).not.toHaveBeenCalled();
   });
 
   test('defers photo-mismatch revalidation while the driver has an active trip', async () => {
@@ -767,6 +776,7 @@ describe('kyc-policy-service', () => {
       })
     );
     expect(mockRedis.zrem).not.toHaveBeenCalled();
+    expect(mockCommitDriverOnlineProjection).not.toHaveBeenCalled();
   });
 
   test('defers photo-mismatch revalidation when the active-trip index is unavailable', async () => {
@@ -837,6 +847,7 @@ describe('kyc-policy-service', () => {
     }));
     expect(firebaseConfig.updateRealtimeDB).not.toHaveBeenCalled();
     expect(mockRedis.hset).not.toHaveBeenCalled();
+    expect(mockCommitDriverOnlineProjection).not.toHaveBeenCalled();
   });
 
   test('keeps deferred identity revalidation deferred when the active-trip index is unavailable', async () => {
@@ -915,15 +926,34 @@ describe('kyc-policy-service', () => {
     }));
     expect(mockClaimIdentityPolicyMutationWindow).toHaveBeenCalled();
     expect(mockReleaseIdentityPolicyMutationWindow).toHaveBeenCalled();
-    expect(mockRedis.hset).toHaveBeenCalledWith(
-      'driver:driver-deferred',
+    expect(mockCommitDriverOnlineProjection).toHaveBeenCalledWith(
+      mockRedis,
       expect.objectContaining({
-        identity_reverification_pending_after_trip: 'false',
-        kyc_recheck_pending_after_trip: 'false',
-        kycRecheckPendingAfterTrip: 'false',
-        kycReverifyPendingAfterTrip: 'false'
+        driverId: 'driver-deferred',
+        projectionScope: 'eligibility_only',
+        fields: expect.objectContaining({
+          identity_reverification_pending_after_trip: 'false',
+          kyc_recheck_pending_after_trip: 'false',
+          kycRecheckPendingAfterTrip: 'false',
+          kycReverifyPendingAfterTrip: 'false'
+        })
       })
     );
+  });
+
+  test('does not touch durable identity state when the atomic dispatch gate fails', async () => {
+    const firebaseConfig = require('../../../firebase-config');
+    mockCommitDriverOnlineProjection.mockRejectedValueOnce(new Error('atomic gate failed'));
+
+    await expect(service.markDriverForPhotoMismatch({
+      driverId: 'driver-atomic-gate-failure',
+      payload: { selectedOptions: ['Motorista diferente da foto'] }
+    })).rejects.toThrow('atomic gate failed');
+
+    expect(firebaseConfig.updateRealtimeDB).not.toHaveBeenCalled();
+    expect(mockRecomputeDriverActivationStatus).not.toHaveBeenCalled();
+    expect(service.notificationService.sendCustomNotification).not.toHaveBeenCalled();
+    expect(mockReleaseIdentityPolicyMutationWindow).toHaveBeenCalled();
   });
 
   test('does not acknowledge a report when critical RTDB state cannot be persisted', async () => {
