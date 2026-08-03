@@ -2,7 +2,9 @@ import React from "react";
 import { act, fireEvent, render, waitFor } from "@testing-library/react-native";
 import { Alert } from "react-native";
 
-import RobotaxiDestinationScreen from "../src/screens/prototype/RobotaxiDestinationScreen";
+import RobotaxiDestinationScreen, {
+  resolvePaymentQuoteLockForConfirmation,
+} from "../src/screens/prototype/RobotaxiDestinationScreen";
 import { usePrototypeRideRuntime } from "../src/screens/prototype/prototypeRideRuntime";
 import { fetchDynamicPricingQuote } from "../src/services/runtime/pricingQuoteService";
 import { findRecoverableRidePaymentSession } from "../src/services/RidePaymentSessionService";
@@ -209,6 +211,49 @@ describe("RobotaxiDestinationScreen", () => {
       quoteLockExpiresAt: new Date(Date.now() + 120000).toISOString(),
       pricingPayload: {},
     });
+  });
+
+  it("rehydrates a confirmed Pix lock only from the exact persisted route and amount", () => {
+    const routeContextKey =
+      "ride-payment-v1|-22.9825|-43.2167|-22.9673|-43.1790|leaf plus";
+    const currentLock = {
+      fare: 16.69,
+      grossEstimatedFare: 16.69,
+      quoteLockId: "ql_current",
+      quoteSessionId: "quote_current",
+    };
+    const recovered = resolvePaymentQuoteLockForConfirmation({
+      paymentConfirmation: {
+        amountInCents: 1610,
+        grossAmountInCents: 1610,
+        quoteLockId: "ql_paid",
+        quoteSessionId: "quote_paid",
+        paymentContextKey: `${routeContextKey}|1610|1610`,
+      },
+      paymentQuoteLock: currentLock,
+      paymentRecoveryRouteContextKey: routeContextKey,
+    });
+
+    expect(recovered).toEqual(
+      expect.objectContaining({
+        fare: 16.1,
+        grossEstimatedFare: 16.1,
+        quoteLockId: "ql_paid",
+        quoteSessionId: "quote_paid",
+      }),
+    );
+    expect(
+      resolvePaymentQuoteLockForConfirmation({
+        paymentConfirmation: {
+          amountInCents: 1610,
+          quoteLockId: "ql_other_route",
+          paymentContextKey:
+            "ride-payment-v1|-22.9000|-43.2000|-22.9673|-43.1790|leaf plus|1610|1610",
+        },
+        paymentQuoteLock: currentLock,
+        paymentRecoveryRouteContextKey: routeContextKey,
+      }),
+    ).toBe(currentLock);
   });
 
   it("routes terminal completion to receipt with booking and fare context", async () => {
