@@ -83,6 +83,23 @@ describe('driver-online-time-policy-service', () => {
     expect(blocked.snapshot.limitReached).toBe(true);
   });
 
+  it('checks the online limit without opening a session before the status commit', async () => {
+    const nowMs = Date.parse('2026-06-25T12:00:00.000Z');
+    const redis = createRedis();
+
+    const result = await resolveDriverOnlineTransition(redis, {
+      driverId: 'driver_1',
+      isOnline: true,
+      nowMs,
+      persist: false,
+    });
+
+    expect(result.allowed).toBe(true);
+    expect(result.snapshot.sessionStartedAtMs).toBe(nowMs);
+    expect(redis.hset).not.toHaveBeenCalled();
+    expect(redis.expire).not.toHaveBeenCalled();
+  });
+
   it('closes an active session at a canonical stale heartbeat timestamp', async () => {
     const startedAtMs = Date.parse('2026-06-25T12:00:00.000Z');
     const closedAtMs = startedAtMs + 2 * 60 * 1000;
