@@ -252,6 +252,7 @@ describe('production compose launch-control contract', () => {
     }
     expect(deploySource).toContain('This script never tears down the compose project, Redis, or named volumes.');
     expect(deploySource).toContain('It never converts or restarts Redis.');
+    expect(deploySource.match(/--user 0:0/g)).toHaveLength(2);
     expect(deploySource).toContain(
       'Trip-location stream disabled; consumer liveness gate skipped.',
     );
