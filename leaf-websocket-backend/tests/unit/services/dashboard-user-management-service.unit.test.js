@@ -7,16 +7,10 @@ const mockPassengerUnblock = jest.fn();
 const mockFcmInitialize = jest.fn();
 const mockSendNotificationToUser = jest.fn();
 const mockAuditLogEvent = jest.fn();
+const mockCommitDriverOnlineProjection = jest.fn();
 
-const mockRedisMulti = {
-  del: jest.fn(() => mockRedisMulti),
-  hset: jest.fn(() => mockRedisMulti),
-  zrem: jest.fn(() => mockRedisMulti),
-  srem: jest.fn(() => mockRedisMulti),
-  exec: jest.fn().mockResolvedValue([])
-};
 const mockRedis = {
-  multi: jest.fn(() => mockRedisMulti)
+  del: jest.fn().mockResolvedValue(1)
 };
 
 function mockMakeFirestoreUserRef(userId) {
@@ -82,6 +76,10 @@ jest.mock('../../../services/audit-service', () => ({
   requireEvent: (...args) => mockAuditLogEvent(...args)
 }));
 
+jest.mock('../../../services/driver-online-projection-service', () => ({
+  commitDriverOnlineProjection: (...args) => mockCommitDriverOnlineProjection(...args)
+}));
+
 jest.mock('../../../utils/logger', () => ({
   logError: jest.fn(),
   logStructured: jest.fn()
@@ -96,11 +94,8 @@ describe('dashboard-user-management-service', () => {
     mockRealtimeSnapshots.clear();
     mockRealtimeUpdates.length = 0;
     mockTransactions.length = 0;
-    mockRedisMulti.del.mockClear();
-    mockRedisMulti.hset.mockClear();
-    mockRedisMulti.zrem.mockClear();
-    mockRedisMulti.srem.mockClear();
-    mockRedisMulti.exec.mockClear();
+    mockRedis.del.mockResolvedValue(1);
+    mockCommitDriverOnlineProjection.mockResolvedValue({ success: true });
     mockFcmInitialize.mockResolvedValue(undefined);
     mockSendNotificationToUser.mockResolvedValue({ success: true, summary: { success: 1 } });
     mockAuditLogEvent.mockResolvedValue({ success: true, logId: 'audit_1' });
@@ -145,12 +140,22 @@ describe('dashboard-user-management-service', () => {
         payload: expect.objectContaining({ status: 'blocked', operationalBlocked: true })
       })
     ]));
-    expect(mockRedisMulti.del).toHaveBeenCalledWith('driver_eligibility_profile:driver_1');
-    expect(mockRedisMulti.hset).toHaveBeenCalledWith('driver:driver_1', expect.objectContaining({
-      status: 'OFFLINE',
-      dispatchEligible: 'false',
-      dispatchEligibilityCode: 'USER_STATUS_BLOCKED'
-    }));
+    expect(mockRedis.del).toHaveBeenCalledWith('driver_eligibility_profile:driver_1');
+    expect(mockCommitDriverOnlineProjection).toHaveBeenCalledWith(
+      mockRedis,
+      expect.objectContaining({
+        driverId: 'driver_1',
+        driverKey: 'driver:driver_1',
+        eligibleGeoKey: 'driver_locations_eligible',
+        isOnline: false,
+        dispatchEligible: false,
+        fields: expect.objectContaining({
+          status: 'OFFLINE',
+          dispatchEligible: 'false',
+          dispatchEligibilityCode: 'USER_STATUS_BLOCKED'
+        })
+      })
+    );
     expect(mockAuditLogEvent).toHaveBeenCalledWith(expect.objectContaining({
       userId: 'admin_1',
       action: 'dashboard.user.operational_status.update',
@@ -203,11 +208,19 @@ describe('dashboard-user-management-service', () => {
       }),
       { merge: true }
     );
-    expect(mockRedisMulti.hset).toHaveBeenCalledWith('driver:driver_suspended', expect.objectContaining({
-      status: 'OFFLINE',
-      dispatchEligible: 'false',
-      dispatchEligibilityCode: 'USER_STATUS_SUSPENDED'
-    }));
+    expect(mockCommitDriverOnlineProjection).toHaveBeenCalledWith(
+      mockRedis,
+      expect.objectContaining({
+        driverId: 'driver_suspended',
+        isOnline: false,
+        dispatchEligible: false,
+        fields: expect.objectContaining({
+          status: 'OFFLINE',
+          dispatchEligible: 'false',
+          dispatchEligibilityCode: 'USER_STATUS_SUSPENDED'
+        })
+      })
+    );
     expect(mockAuditLogEvent).toHaveBeenCalledWith(expect.objectContaining({
       userId: 'admin_1',
       action: 'dashboard.user.operational_status.update',
@@ -219,6 +232,34 @@ describe('dashboard-user-management-service', () => {
         reasonCode: 'USER_STATUS_SUSPENDED'
       })
     }));
+  });
+
+  it('still applies the atomic offline projection when eligibility cache invalidation fails', async () => {
+    mockMakeFirestoreUserRef('driver_cache_failure').get.mockResolvedValue({
+      exists: true,
+      data: () => ({ usertype: 'driver', approved: true, status: 'approved' })
+    });
+    mockRealtimeSnapshots.set('users/driver_cache_failure', {
+      usertype: 'driver',
+      approved: true,
+      status: 'approved'
+    });
+    mockRedis.del.mockRejectedValueOnce(new Error('cache delete unavailable'));
+
+    await service.updateUserOperationalStatus(
+      'driver_cache_failure',
+      { status: 'blocked', reason: 'Risco operacional' },
+      { operator: { id: 'admin_1' } }
+    );
+
+    expect(mockCommitDriverOnlineProjection).toHaveBeenCalledWith(
+      mockRedis,
+      expect.objectContaining({
+        driverId: 'driver_cache_failure',
+        isOnline: false,
+        dispatchEligible: false
+      })
+    );
   });
 
   it('reactivates customers and clears passenger trust block', async () => {

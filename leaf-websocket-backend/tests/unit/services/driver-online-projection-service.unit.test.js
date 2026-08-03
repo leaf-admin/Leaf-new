@@ -304,6 +304,17 @@ describe('driver-online-projection-service', () => {
     expect(disconnectSource).not.toMatch(/redis\.(geoadd|zrem|sadd|srem)\(/);
   });
 
+  it('keeps administrative driver status revocation on the atomic projection contract', () => {
+    const adminStatusSource = fs.readFileSync(
+      path.resolve(__dirname, '../../../services/dashboard-user-management-service.js'),
+      'utf8'
+    );
+
+    expect(adminStatusSource).toContain('await commitDriverOnlineProjection(redis, {');
+    expect(adminStatusSource).not.toMatch(/redis\.(geoadd|zrem|sadd|srem)\(/);
+    expect(adminStatusSource).not.toContain('const multi = redis.multi();');
+  });
+
   it('serializes only defined hash fields', () => {
     expect(normalizeHashFields({
       status: 'AVAILABLE',
