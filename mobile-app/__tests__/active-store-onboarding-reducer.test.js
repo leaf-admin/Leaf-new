@@ -1,3 +1,6 @@
+import { readdirSync } from 'fs';
+import { resolve } from 'path';
+
 import { store } from '../src/state/appStore';
 import {
   loadOnboardingFromStorage,
@@ -30,5 +33,18 @@ describe('active app store onboarding reducer', () => {
       completedSteps: ['phone_validation', 'profile_selection'],
       isLoaded: true,
     }));
+  });
+
+  it('keeps only reducers consumed by the active store', () => {
+    const reducerFiles = readdirSync(
+      resolve(__dirname, '../src/common-local/reducers'),
+    ).sort();
+
+    expect(reducerFiles).toEqual([
+      'authreducer.js',
+      'cartypesreducer.js',
+      'languagereducer.js',
+      'settingsreducer.js',
+    ]);
   });
 });
