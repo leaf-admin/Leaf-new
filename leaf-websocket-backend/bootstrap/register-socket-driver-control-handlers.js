@@ -600,21 +600,23 @@ function registerSocketDriverControlHandlers({
                 });
                 driverOnlineDaily = onlineTimeGate.snapshot;
                 if (!onlineTimeGate.allowed) {
-                    await redis
-                        .multi()
-                        .hset(driverKey, {
+                    const checkedAt = new Date().toISOString();
+                    await commitDriverOnlineProjection(redis, {
+                        driverId,
+                        driverKey,
+                        eligibleGeoKey: ELIGIBLE_DRIVER_GEO_KEY,
+                        isOnline: false,
+                        dispatchEligible: false,
+                        fields: {
                             driverId,
                             status: 'OFFLINE',
                             isOnline: 'false',
                             dispatchEligible: 'false',
                             dispatchEligibilityCode: onlineTimeGate.code || 'DRIVER_ONLINE_DAILY_LIMIT_REACHED',
-                            dispatchEligibilityCheckedAt: new Date().toISOString(),
-                            updatedAt: new Date().toISOString()
-                        })
-                        .zrem(ELIGIBLE_DRIVER_GEO_KEY, driverId)
-                        .zrem('driver_locations', driverId)
-                        .srem('online_drivers', driverId)
-                        .exec();
+                            dispatchEligibilityCheckedAt: checkedAt,
+                            updatedAt: checkedAt
+                        }
+                    });
 
                     socket.emit('driverStatusError', {
                         success: false,
@@ -643,21 +645,23 @@ function registerSocketDriverControlHandlers({
                 });
 
                 if (!activationState?.canAttemptOnline) {
-                    await redis
-                        .multi()
-                        .hset(driverKey, {
+                    const checkedAt = new Date().toISOString();
+                    await commitDriverOnlineProjection(redis, {
+                        driverId,
+                        driverKey,
+                        eligibleGeoKey: ELIGIBLE_DRIVER_GEO_KEY,
+                        isOnline: false,
+                        dispatchEligible: false,
+                        fields: {
                             driverId,
                             status: 'OFFLINE',
                             isOnline: 'false',
                             dispatchEligible: 'false',
                             dispatchEligibilityCode: activationState?.state || 'DRIVER_ACTIVATION_BLOCKED',
-                            dispatchEligibilityCheckedAt: new Date().toISOString(),
-                            updatedAt: new Date().toISOString()
-                        })
-                        .zrem(ELIGIBLE_DRIVER_GEO_KEY, driverId)
-                        .zrem('driver_locations', driverId)
-                        .srem('online_drivers', driverId)
-                        .exec();
+                            dispatchEligibilityCheckedAt: checkedAt,
+                            updatedAt: checkedAt
+                        }
+                    });
 
                     socket.emit('driverStatusError', {
                         success: false,
@@ -686,9 +690,13 @@ function registerSocketDriverControlHandlers({
                     const kycGate = await enforceDailyKYCForOnline(driverId);
                     if (!kycGate?.allowed) {
                         const checkedAt = new Date().toISOString();
-                        await redis
-                            .multi()
-                            .hset(driverKey, {
+                        await commitDriverOnlineProjection(redis, {
+                            driverId,
+                            driverKey,
+                            eligibleGeoKey: ELIGIBLE_DRIVER_GEO_KEY,
+                            isOnline: false,
+                            dispatchEligible: false,
+                            fields: {
                                 driverId,
                                 status: 'OFFLINE',
                                 isOnline: 'false',
@@ -699,11 +707,8 @@ function registerSocketDriverControlHandlers({
                                     ? 'true'
                                     : 'false',
                                 updatedAt: checkedAt
-                            })
-                            .zrem(ELIGIBLE_DRIVER_GEO_KEY, driverId)
-                            .zrem('driver_locations', driverId)
-                            .srem('online_drivers', driverId)
-                            .exec();
+                            }
+                        });
                         socket.emit('driverStatusError', {
                             success: false,
                             activationState,
@@ -836,25 +841,27 @@ function registerSocketDriverControlHandlers({
                 });
 
                 if (!vehicleLockManager || !vehicleLockIdentifier) {
-                    await resolveDriverOnlineTransition(redis, {
+                    const checkedAt = new Date().toISOString();
+                    await commitDriverOnlineProjection(redis, {
                         driverId,
-                        isOnline: false
-                    });
-                    await redis
-                        .multi()
-                        .hset(driverKey, {
+                        driverKey,
+                        eligibleGeoKey: ELIGIBLE_DRIVER_GEO_KEY,
+                        isOnline: false,
+                        dispatchEligible: false,
+                        fields: {
                             driverId,
                             status: 'OFFLINE',
                             isOnline: 'false',
                             dispatchEligible: 'false',
                             dispatchEligibilityCode: 'VEHICLE_IDENTITY_UNAVAILABLE',
-                            dispatchEligibilityCheckedAt: new Date().toISOString(),
-                            updatedAt: new Date().toISOString()
-                        })
-                        .zrem(ELIGIBLE_DRIVER_GEO_KEY, driverId)
-                        .zrem('driver_locations', driverId)
-                        .srem('online_drivers', driverId)
-                        .exec();
+                            dispatchEligibilityCheckedAt: checkedAt,
+                            updatedAt: checkedAt
+                        }
+                    });
+                    await resolveDriverOnlineTransition(redis, {
+                        driverId,
+                        isOnline: false
+                    });
                     socket.emit('driverStatusError', {
                         success: false,
                         error: 'Não foi possível validar o veículo selecionado para ficar online.',
@@ -868,28 +875,30 @@ function registerSocketDriverControlHandlers({
                     leaseToken: pendingVehicleLeaseToken
                 });
                 if (!lockResult?.success) {
-                    await resolveDriverOnlineTransition(redis, {
-                        driverId,
-                        isOnline: false
-                    });
                     const lockFailureCode = lockResult?.currentDriver
                         ? 'VEHICLE_ALREADY_ONLINE'
                         : 'VEHICLE_LOCK_UNAVAILABLE';
-                    await redis
-                        .multi()
-                        .hset(driverKey, {
+                    const checkedAt = new Date().toISOString();
+                    await commitDriverOnlineProjection(redis, {
+                        driverId,
+                        driverKey,
+                        eligibleGeoKey: ELIGIBLE_DRIVER_GEO_KEY,
+                        isOnline: false,
+                        dispatchEligible: false,
+                        fields: {
                             driverId,
                             status: 'OFFLINE',
                             isOnline: 'false',
                             dispatchEligible: 'false',
                             dispatchEligibilityCode: lockFailureCode,
-                            dispatchEligibilityCheckedAt: new Date().toISOString(),
-                            updatedAt: new Date().toISOString()
-                        })
-                        .zrem(ELIGIBLE_DRIVER_GEO_KEY, driverId)
-                        .zrem('driver_locations', driverId)
-                        .srem('online_drivers', driverId)
-                        .exec();
+                            dispatchEligibilityCheckedAt: checkedAt,
+                            updatedAt: checkedAt
+                        }
+                    });
+                    await resolveDriverOnlineTransition(redis, {
+                        driverId,
+                        isOnline: false
+                    });
                     socket.emit('driverStatusError', {
                         success: false,
                         error: lockResult?.currentDriver
