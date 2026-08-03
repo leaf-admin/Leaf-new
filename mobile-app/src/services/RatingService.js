@@ -2,7 +2,6 @@ import Logger from '../utils/Logger';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import WebSocketManager from './WebSocketManager';
 import { store } from '../state/appStore';
-import { addRating } from './runtime/ratingStateBridge';
 import {
     canUseProfileBypass,
 } from '../config/runtimeAccessPolicy';
@@ -81,11 +80,6 @@ class RatingService {
                     status: 'sent',
                     localOnly: true,
                 });
-                this.updateRatingInStore({
-                    ...ratingData,
-                    status: 'sent',
-                    localOnly: true,
-                });
                 Logger.log('✅ Avaliação confirmada localmente em ambiente de validação');
                 return { success: true, localOnly: true };
             }
@@ -106,9 +100,6 @@ class RatingService {
                     ...ratingData,
                     status: 'sent',
                 });
-                
-                // Atualizar Redux store
-                this.updateRatingInStore(ratingData);
                 
                 return result;
             } else {
@@ -195,19 +186,6 @@ class RatingService {
         }
     }
 
-    // Atualizar Redux store
-    updateRatingInStore(ratingData) {
-        try {
-            const { dispatch } = store;
-
-            // Adicionar avaliação ao store
-            dispatch(addRating(ratingData));
-            
-        } catch (error) {
-            Logger.error('❌ Erro ao atualizar Redux store:', error);
-        }
-    }
-
     // Obter avaliações de uma viagem específica
     async getTripRatings(tripId) {
         try {
@@ -218,16 +196,6 @@ class RatingService {
                 if (result.success) {
                     return result.ratings;
                 }
-            }
-            
-            // Fallback: tentar obter do Redux store
-            const state = store.getState();
-            const ratings = state.ratings?.ratings || [];
-            
-            const tripRatings = ratings.filter(r => r.tripId === tripId);
-            
-            if (tripRatings.length > 0) {
-                return tripRatings;
             }
             
             // Fallback: tentar obter localmente

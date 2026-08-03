@@ -68,9 +68,26 @@ elif grep -q "@react-native-firebase/database" "src/services/UserAuthService.js"
   fail "password/auth resolution must not read RTDB from the mobile client"
 fi
 
-require_pattern "src/common-local/actions/bookingactions.js" "assertCanonicalBookingPath" "legacy Firebase booking blocker"
-require_pattern "src/common-local/actions/bookingactions.js" "EXPO_PUBLIC_ALLOW_LEGACY_FIREBASE_BOOKING" "explicit legacy-booking override flag"
-require_pattern "src/common-local/actions/bookingactions.js" "Fluxo legado de criação de corrida bloqueado" "legacy booking production error"
+for file in \
+  "src/services/canonical/rideService.js" \
+  "src/services/runtime/bookingStateBridge.js" \
+  "src/services/runtime/ratingStateBridge.js"; do
+  if [[ -e "$file" ]]; then
+    fail "retired ride Redux action graph must remain removed: $file"
+  fi
+done
+
+if [[ -d "src/common-local/actions" ]] && find "src/common-local/actions" -maxdepth 1 -type f -name '*.js' -print -quit | grep -q .; then
+  fail "retired common-local Redux action modules must remain removed"
+fi
+
+if command -v rg >/dev/null 2>&1; then
+  if rg -q "EXPO_PUBLIC_ALLOW_LEGACY_FIREBASE_BOOKING|Fluxo legado de criação de corrida bloqueado" src; then
+    fail "retired direct Firebase booking override must remain removed"
+  fi
+elif grep -REq "EXPO_PUBLIC_ALLOW_LEGACY_FIREBASE_BOOKING|Fluxo legado de criação de corrida bloqueado" src; then
+  fail "retired direct Firebase booking override must remain removed"
+fi
 
 require_pattern "src/services/HelpService.js" "__DEV__" "dev-only help fallback guard"
 require_pattern "src/utils/axiosInterceptor.js" "currentUser.getIdToken" "Firebase bearer token interceptor"
