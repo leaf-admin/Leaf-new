@@ -1,3 +1,8 @@
+const mockCommitDriverOnlineProjection = jest.fn(async (redis, projection) => {
+  await redis.hset(projection.driverKey, projection.fields);
+  return { success: true, projectionScope: 'eligibility_only' };
+});
+
 jest.mock('../../../services/kyc-identity-review-workflow-service', () => ({
   openCaseFromTicket: jest.fn(),
   KycIdentityReviewWorkflowService: class MockWorkflow {}
@@ -24,6 +29,10 @@ jest.mock('../../../services/kyc-policy-service', () => ({
   recordIdentityReverificationStarted: jest.fn(),
   recordIdentityReverificationResult: jest.fn(),
   recordVerificationSuccess: jest.fn()
+}));
+
+jest.mock('../../../services/driver-online-projection-service', () => ({
+  commitDriverOnlineProjection: (...args) => mockCommitDriverOnlineProjection(...args)
 }));
 
 const { sealFinancialContext } = require('../../../services/financial-runtime-context');
@@ -486,6 +495,20 @@ describe('kyc-runtime-scope-service', () => {
       identity_reverification_attempt_scope: attemptScope,
       dispatchEligible: 'false'
     });
+    expect(mockCommitDriverOnlineProjection).toHaveBeenCalledWith(
+      persistence.redis,
+      expect.objectContaining({
+        driverId: 'driver-sandbox',
+        driverKey: 'sandbox:driver:driver-sandbox',
+        eligibleGeoKey: 'driver_locations_eligible',
+        projectionScope: 'eligibility_only',
+        dispatchEligible: false,
+        fields: expect.objectContaining({
+          dispatchEligible: 'false',
+          dispatchEligibilityCode: 'KYC_REVERIFY_REQUIRED'
+        })
+      })
+    );
 
     await expect(adapter.applyIdentityReverificationGate({
       driverId: 'driver-sandbox',
@@ -632,5 +655,28 @@ describe('kyc-runtime-scope-service', () => {
       kyc_reverify_required: 'true',
       dispatchEligible: 'false'
     });
+  });
+
+  it('fails closed when sandbox Redis cannot execute the atomic eligibility projection', async () => {
+    const persistence = createPolicyPersistenceHarness();
+    const scope = scopeFor(context('sandbox'));
+    const redisWithoutEval = { ...persistence.redis, eval: undefined };
+    const adapter = createSandboxPolicyGuard({
+      requireApprovedKyc: jest.fn(async () => ({ allowed: true })),
+      getConfig: jest.fn(() => ({ challengeTtlSeconds: 900 }))
+    }, {
+      scope,
+      firestoreProvider: () => persistence.firestore,
+      redis: redisWithoutEval,
+      now: () => new Date('2026-07-21T18:00:00.000Z'),
+      challengeIdGenerator: () => 'idrev_atomic_unavailable_1'
+    });
+    mockCommitDriverOnlineProjection.mockClear();
+
+    await expect(adapter.applyIdentityReverificationGate({
+      driverId: 'driver-atomic-unavailable',
+      payload: { reasonCode: 'identity_photo_mismatch_reported' }
+    })).rejects.toMatchObject({ code: 'KYC_SANDBOX_CHALLENGE_CACHE_UNAVAILABLE' });
+    expect(mockCommitDriverOnlineProjection).not.toHaveBeenCalled();
   });
 });

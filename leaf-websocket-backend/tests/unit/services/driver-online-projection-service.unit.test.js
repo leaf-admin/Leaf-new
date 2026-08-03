@@ -518,6 +518,23 @@ describe('driver-online-projection-service', () => {
     expect(methodSource).not.toMatch(/this\.redis\.(hset|zrem|geoadd|sadd|srem|multi)\(/);
   });
 
+  it('keeps the sandbox identity gate on the same atomic eligibility projection', () => {
+    const runtimeScopeSource = fs.readFileSync(
+      path.resolve(__dirname, '../../../services/kyc-runtime-scope-service.js'),
+      'utf8'
+    );
+    const methodStart = runtimeScopeSource.indexOf('async applyIdentityReverificationGate({');
+    const methodEnd = runtimeScopeSource.indexOf('async markDriverForLivenessAttemptsExhausted(', methodStart);
+    const methodSource = runtimeScopeSource.slice(methodStart, methodEnd);
+
+    expect(methodStart).toBeGreaterThan(-1);
+    expect(methodEnd).toBeGreaterThan(methodStart);
+    expect(methodSource).toContain('await commitDriverOnlineProjection(this.redis, {');
+    expect(methodSource).toContain('driverKey: `${this.driverHashPrefix}${safeDriverId}`');
+    expect(methodSource).toContain("projectionScope: 'eligibility_only'");
+    expect(methodSource).not.toMatch(/this\.redis\.(hset|zrem|geoadd|sadd|srem|multi)\(/);
+  });
+
   it('serializes only defined hash fields', () => {
     expect(normalizeHashFields({
       status: 'AVAILABLE',

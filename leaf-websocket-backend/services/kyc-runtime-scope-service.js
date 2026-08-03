@@ -18,6 +18,9 @@ const {
 const operationalPolicy = require('./kyc-policy-service');
 const operationalSupportTicketService = require('./support-ticket-service');
 const {
+  commitDriverOnlineProjection
+} = require('./driver-online-projection-service');
+const {
   resolveUserPersistenceScope,
   resolveKycPersistenceScope,
   buildScopedPersistenceEnvelope,
@@ -651,8 +654,19 @@ class SandboxKycPolicyAdapter {
       });
     }
 
-    if (typeof this.redis.hset === 'function') {
-      await this.redis.hset(`${this.driverHashPrefix}${safeDriverId}`, {
+    if (!this.redis || typeof this.redis.eval !== 'function') {
+      throw new KycRuntimeScopeError(
+        'KYC_SANDBOX_CHALLENGE_CACHE_UNAVAILABLE',
+        'Redis sandbox indisponivel para selar revalidacao KYC'
+      );
+    }
+    await commitDriverOnlineProjection(this.redis, {
+      driverId: safeDriverId,
+      driverKey: `${this.driverHashPrefix}${safeDriverId}`,
+      eligibleGeoKey: process.env.ELIGIBLE_DRIVER_GEO_KEY || 'driver_locations_eligible',
+      projectionScope: 'eligibility_only',
+      dispatchEligible: false,
+      fields: {
         kyc_reverify_required: String(true),
         kyc_reverify_source: reasonCode,
         kyc_status: 'pending_reverify',
@@ -661,8 +675,8 @@ class SandboxKycPolicyAdapter {
         identity_reverification_challenge_id: challenge.challengeId,
         identity_reverification_attempt_scope: attemptScope || '',
         identity_reverification_requested_at: this.now().toISOString()
-      });
-    }
+      }
+    });
 
     return {
       success: true,
