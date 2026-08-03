@@ -330,6 +330,21 @@ describe('driver-online-projection-service', () => {
     expect(revocationSource).not.toMatch(/redis\.(hset|geoadd|zrem|sadd|srem)\(/);
   });
 
+  it('keeps stale-heartbeat cleanup on the atomic projection contract', () => {
+    const cleanupSource = fs.readFileSync(
+      path.resolve(__dirname, '../../../services/connection-cleanup-service.js'),
+      'utf8'
+    );
+    const methodStart = cleanupSource.indexOf('async cleanupExpiredHeartbeats()');
+    const methodEnd = cleanupSource.indexOf('async cleanupOrphanedConnections()', methodStart);
+    const methodSource = cleanupSource.slice(methodStart, methodEnd);
+
+    expect(methodStart).toBeGreaterThan(-1);
+    expect(methodEnd).toBeGreaterThan(methodStart);
+    expect(methodSource).toContain('await commitDriverOnlineProjection(this.redis, {');
+    expect(methodSource).not.toMatch(/this\.redis\.(hset|geoadd|zrem|sadd|srem|multi)\(/);
+  });
+
   it('serializes only defined hash fields', () => {
     expect(normalizeHashFields({
       status: 'AVAILABLE',
