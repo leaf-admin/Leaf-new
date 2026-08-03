@@ -15,6 +15,9 @@ const admin = require('firebase-admin');
 const redisPool = require('../utils/redis-pool');
 const { logStructured, logError } = require('../utils/logger');
 const KYCNotificationService = require('./KYCNotificationService');
+const {
+  commitDriverOnlineProjection
+} = require('./driver-online-projection-service');
 
 class KYCDriverStatusService {
   constructor() {
@@ -148,8 +151,8 @@ class KYCDriverStatusService {
         verificationAttempts: options.verificationAttempts || 1
       };
 
-      // 1. Atualizar Redis
-      await this.updateRedisStatus(driverId, {
+      // 1. Aplicar bloqueio KYC e revogação operacional no mesmo commit Redis.
+      await this.forceDriverOffline(driverId, {
         [this.statusKeys.kycStatus]: 'blocked',
         [this.statusKeys.kycBlocked]: 'true',
         [this.statusKeys.kycBlockedAt]: timestamp,
@@ -157,10 +160,7 @@ class KYCDriverStatusService {
         [this.statusKeys.kycLastVerification]: timestamp
       });
 
-      // 2. Forçar motorista offline no Redis
-      await this.forceDriverOffline(driverId);
-
-      // 3. Atualizar Firestore
+      // 2. Atualizar Firestore
       await this.updateFirestoreStatus(driverId, {
         kycStatus: 'blocked',
         kycBlocked: true,
@@ -170,7 +170,7 @@ class KYCDriverStatusService {
         ...blockData
       });
 
-      // 4. Enviar notificação
+      // 3. Enviar notificação
       await this.notificationService.sendCustomNotification(
         driverId,
         '🚫 Conta Bloqueada',
@@ -432,28 +432,47 @@ class KYCDriverStatusService {
   /**
    * Forçar motorista offline
    */
-  async forceDriverOffline(driverId) {
+  async forceDriverOffline(driverId, statusFields = {}) {
+    const checkedAt = new Date().toISOString();
     try {
-      const redisKey = `driver:${driverId}`;
-      await this.redis.hset(redisKey, {
-        isOnline: 'false',
-        status: 'OFFLINE'
+      await commitDriverOnlineProjection(this.redis, {
+        driverId,
+        eligibleGeoKey: process.env.ELIGIBLE_DRIVER_GEO_KEY || 'driver_locations_eligible',
+        isOnline: false,
+        dispatchEligible: false,
+        ttlSeconds: 30 * 24 * 60 * 60,
+        fields: {
+          ...statusFields,
+          isOnline: 'false',
+          status: 'OFFLINE',
+          dispatchEligible: 'false',
+          dispatchEligibilityCode: 'KYC_BLOCKED',
+          dispatchEligibilityCheckedAt: checkedAt,
+          updatedAt: checkedAt
+        }
       });
-
-      // Remover da geolocalização
-      await this.redis.zrem('drivers:available', driverId);
-
-      logStructured('info', 'Motorista forçado offline', {
-        service: 'kyc-driver-status-service',
-        driverId
-      });
-
     } catch (error) {
       logError(error, 'Erro ao forçar motorista offline', {
         service: 'kyc-driver-status-service',
         driverId
       });
+      throw error;
     }
+
+    // Índice legado sem leitores no runtime; a autoridade operacional já foi
+    // confirmada atomicamente acima e esta remoção permanece melhor esforço.
+    await this.redis.zrem('drivers:available', driverId).catch((error) => {
+      logStructured('warn', 'Falha ao limpar índice legado de motoristas disponíveis', {
+        service: 'kyc-driver-status-service',
+        driverId,
+        error: error.message
+      });
+    });
+
+    logStructured('info', 'Motorista forçado offline', {
+      service: 'kyc-driver-status-service',
+      driverId
+    });
   }
 
   /**
