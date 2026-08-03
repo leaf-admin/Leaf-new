@@ -439,7 +439,7 @@ describe('driver-online-projection-service', () => {
       'utf8'
     );
     const methodStart = cleanupSource.indexOf('async cleanupEligibleGeoStaleDrivers()');
-    const methodEnd = cleanupSource.indexOf('async getStats()', methodStart);
+    const methodEnd = cleanupSource.indexOf('async cleanupOfflineGeoOrphans()', methodStart);
     const methodSource = cleanupSource.slice(methodStart, methodEnd);
 
     expect(methodStart).toBeGreaterThan(-1);

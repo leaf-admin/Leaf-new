@@ -2,8 +2,10 @@ const mockRedis = {
   hgetall: jest.fn(),
   hset: jest.fn(),
   expire: jest.fn(),
+  exists: jest.fn(),
   pipeline: jest.fn(),
   zrange: jest.fn(),
+  zrem: jest.fn(),
 };
 const mockCommitDriverOnlineProjection = jest.fn();
 
@@ -52,7 +54,9 @@ describe('ConnectionCleanupService', () => {
     });
     mockRedis.hset.mockResolvedValue(1);
     mockRedis.expire.mockResolvedValue(1);
+    mockRedis.exists.mockResolvedValue(1);
     mockRedis.zrange.mockResolvedValue([]);
+    mockRedis.zrem.mockResolvedValue(1);
     mockCommitDriverOnlineProjection.mockResolvedValue({ success: true });
   });
 
@@ -286,5 +290,41 @@ describe('ConnectionCleanupService', () => {
 
     expect(removed).toBe(0);
     expect(mockCommitDriverOnlineProjection).not.toHaveBeenCalled();
+  });
+
+  it('removes only offline GEO entries whose canonical driver state expired', async () => {
+    mockRedis.zrange.mockResolvedValueOnce(['driver_expired', 'driver_active']);
+    mockRedis.exists
+      .mockResolvedValueOnce(0)
+      .mockResolvedValueOnce(1);
+    const service = new ConnectionCleanupService({
+      connectedUsers: new Map(),
+      sockets: { sockets: new Map() },
+    });
+
+    const removed = await service.cleanupOfflineGeoOrphans();
+
+    expect(removed).toBe(1);
+    expect(mockRedis.exists).toHaveBeenNthCalledWith(1, 'driver:driver_expired');
+    expect(mockRedis.exists).toHaveBeenNthCalledWith(2, 'driver:driver_active');
+    expect(mockRedis.zrem).toHaveBeenCalledTimes(1);
+    expect(mockRedis.zrem).toHaveBeenCalledWith(
+      'driver_offline_locations',
+      'driver_expired'
+    );
+  });
+
+  it('fails closed without deleting offline GEO entries when state lookup fails', async () => {
+    mockRedis.zrange.mockResolvedValueOnce(['driver_unknown']);
+    mockRedis.exists.mockRejectedValueOnce(new Error('redis unavailable'));
+    const service = new ConnectionCleanupService({
+      connectedUsers: new Map(),
+      sockets: { sockets: new Map() },
+    });
+
+    const removed = await service.cleanupOfflineGeoOrphans();
+
+    expect(removed).toBe(0);
+    expect(mockRedis.zrem).not.toHaveBeenCalled();
   });
 });

@@ -33,6 +33,10 @@ describe('production compose launch-control contract', () => {
     path.resolve(__dirname, '../../../scripts/deploy-contabo-docker.sh'),
     'utf8',
   );
+  const runtimeServicesSource = fs.readFileSync(
+    path.resolve(__dirname, '../../../bootstrap/init-runtime-services.js'),
+    'utf8',
+  );
   const opsWorkersSource = fs.readFileSync(
     path.resolve(__dirname, '../../../docker-compose.ops-workers.yml'),
     'utf8',
@@ -178,6 +182,24 @@ describe('production compose launch-control contract', () => {
     expect(gatewayScaleSource).not.toContain('KYC_AWS_ADMISSION_MAX_WAIT_MS=${');
     expect(strictKycProfileSource).toContain('KYC_AWS_ADMISSION_MAX_WAIT_MS=0');
     expect(softReleaseProfileSource).toContain('KYC_AWS_ADMISSION_MAX_WAIT_MS=0');
+  });
+
+  it('keeps connection cleanup as the single runtime reconciliation scheduler', () => {
+    for (const source of [
+      composeSource,
+      gatewayScaleSource,
+      realtimeSecondarySource,
+      runtimeServicesSource,
+    ]) {
+      expect(source).not.toContain('ENABLE_RUNTIME_CLEANUP_JOB');
+    }
+    expect(runtimeServicesSource).not.toContain('Job de limpeza periódica iniciado');
+    expect(runtimeServicesSource).not.toContain("status: 'AVAILABLE'");
+    expect(composeSource).not.toContain('ENABLE_CONNECTION_CLEANUP_SERVICE');
+    expect(
+      gatewayScaleSource.match(/- ENABLE_CONNECTION_CLEANUP_SERVICE=(?:true|false)/g),
+    ).toHaveLength(2);
+    expect(gatewayScaleSource).toContain('- ENABLE_CONNECTION_CLEANUP_SERVICE=true');
   });
 
   it('hardens Redis as a live-attested noeviction authority without exposing auth in health args', () => {

@@ -24,6 +24,8 @@ class DemandNotificationService {
      */
     async notifyOfflineDriversNearDemand(pickupLocation, demandLevel = 'high', radius = 2) {
         try {
+            this.cleanupCooldowns();
+
             // Garantir conexão Redis
             if (!this.redis.isOpen) {
                 await this.redis.connect();
@@ -184,5 +186,4 @@ class DemandNotificationService {
 }
 
 module.exports = DemandNotificationService;
-
 

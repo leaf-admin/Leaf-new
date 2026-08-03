@@ -85,6 +85,8 @@ class ConnectionCleanupService {
                 heartbeatExpired: 0,
                 orphanedConnections: 0,
                 redisCleanup: 0,
+                eligibleGeoCleanup: 0,
+                offlineGeoCleanup: 0,
                 total: 0
             };
 
@@ -100,10 +102,17 @@ class ConnectionCleanupService {
             // 4. Limpar pool GEO elegível com drivers stale/offline
             stats.eligibleGeoCleanup = await this.cleanupEligibleGeoStaleDrivers();
 
-            stats.total = stats.heartbeatExpired + stats.orphanedConnections + stats.redisCleanup + stats.eligibleGeoCleanup;
+            // 5. Remover posições offline cujo estado do motorista já expirou
+            stats.offlineGeoCleanup = await this.cleanupOfflineGeoOrphans();
+
+            stats.total = stats.heartbeatExpired
+                + stats.orphanedConnections
+                + stats.redisCleanup
+                + stats.eligibleGeoCleanup
+                + stats.offlineGeoCleanup;
 
             if (stats.total > 0) {
-                logger.info(`✅ [ConnectionCleanupService] Limpeza concluída: ${stats.total} registros removidos (heartbeat: ${stats.heartbeatExpired}, órfãs: ${stats.orphanedConnections}, Redis: ${stats.redisCleanup}, geoElegível: ${stats.eligibleGeoCleanup})`);
+                logger.info(`✅ [ConnectionCleanupService] Limpeza concluída: ${stats.total} registros removidos (heartbeat: ${stats.heartbeatExpired}, órfãs: ${stats.orphanedConnections}, Redis: ${stats.redisCleanup}, geoElegível: ${stats.eligibleGeoCleanup}, geoOffline: ${stats.offlineGeoCleanup})`);
             } else {
                 logger.debug(`✅ [ConnectionCleanupService] Nenhuma conexão para limpar`);
             }
@@ -431,6 +440,46 @@ class ConnectionCleanupService {
             return removed;
         } catch (error) {
             logger.error(`❌ [ConnectionCleanupService] Erro ao limpar GEO elegível:`, error);
+            return 0;
+        }
+    }
+
+    /**
+     * Remover posições offline cujo hash canônico do motorista já expirou.
+     * Preserva o mesmo contrato do job inline aposentado, agora sob uma única
+     * rotina de reconciliação.
+     * @returns {Promise<number>} Número de posições offline removidas.
+     */
+    async cleanupOfflineGeoOrphans() {
+        try {
+            const driverIds = await this.redis.zrange('driver_offline_locations', 0, -1);
+            if (!Array.isArray(driverIds) || driverIds.length === 0) {
+                return 0;
+            }
+
+            let removed = 0;
+            for (const driverId of driverIds) {
+                const driverStateExists = await this.redis.exists(`driver:${driverId}`);
+                if (Number(driverStateExists) !== 0) {
+                    continue;
+                }
+
+                const removedFromGeo = await this.redis.zrem(
+                    'driver_offline_locations',
+                    driverId
+                );
+                if (Number(removedFromGeo) > 0) {
+                    removed += 1;
+                }
+            }
+
+            if (removed > 0) {
+                logger.info(`✅ [ConnectionCleanupService] Removidas ${removed} posições offline órfãs`);
+            }
+
+            return removed;
+        } catch (error) {
+            logger.error('❌ [ConnectionCleanupService] Erro ao limpar GEO offline órfão:', error);
             return 0;
         }
     }
