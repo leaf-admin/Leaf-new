@@ -288,6 +288,45 @@ describe('PhoneInputStep', () => {
     });
   });
 
+  test('shows only the invalid password message when inline login fails', async () => {
+    const UserAuthService = require('../src/services/UserAuthService').default;
+    const reviewAccounts = require('../src/config/reviewAccounts');
+
+    reviewAccounts.getReviewAccountInfo.mockReturnValue({
+      phoneNumber: '21123456789',
+      fullPhoneNumber: '+5521123456789',
+      userType: 'driver',
+      skipOTP: true,
+    });
+    UserAuthService.loginWithPassword.mockRejectedValueOnce(new Error('invalid credentials'));
+
+    const { getByTestId, queryByText } = render(
+      <PhoneInputStep
+        onSwitchToRegister={jest.fn()}
+        onVerificationSent={jest.fn()}
+      />,
+    );
+
+    fireEvent.changeText(getByTestId('auth-phone-input'), '21123456789');
+    fireEvent.press(getByTestId('auth-continue-btn'));
+
+    await waitFor(() => {
+      expect(getByTestId('auth-password-input')).toBeTruthy();
+    });
+
+    fireEvent.changeText(getByTestId('auth-password-input'), 'senha-invalida');
+    fireEvent.press(getByTestId('auth-continue-btn'));
+
+    await waitFor(() => {
+      expect(UserAuthService.loginWithPassword).toHaveBeenCalledWith(
+        '+5521123456789',
+        'senha-invalida',
+      );
+      expect(queryByText('Senha incorreta.')).not.toBeNull();
+      expect(queryByText('Senha incorreta ou conta sem senha configurada.')).toBeNull();
+    });
+  });
+
   test('enables explicit password fallback only when user chooses "Ja tenho senha"', async () => {
     const UserAuthService = require('../src/services/UserAuthService').default;
 
