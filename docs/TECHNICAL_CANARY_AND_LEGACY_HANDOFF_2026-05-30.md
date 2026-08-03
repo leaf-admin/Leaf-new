@@ -1,5 +1,7 @@
 # Technical Canary And Legacy Handoff - 2026-05-30
 
+> Atualização de 2026-08-03: este documento preserva a fotografia histórica de maio. O RTDB continua vivo no backend e em domínios operacionais, mas foi retirado integralmente do código-fonte executável do mobile após auditoria de alcançabilidade, testes completos e exports Android/iOS.
+
 ## Objetivo
 
 Registrar a rodada técnica executada após a sanitização do projeto, com foco em:

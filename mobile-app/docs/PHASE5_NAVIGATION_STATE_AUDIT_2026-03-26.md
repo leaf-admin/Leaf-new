@@ -1,5 +1,7 @@
 # Phase 5 - Navigation and State Audit
 
+> Current-state note (2026-08-03): the unreachable `DatabaseBypass` and `VehicleNotificationService` compatibility modules referenced by this historical audit were removed after the active mobile runtime was detached from RTDB. Vehicle notifications now rely on the active FCM/backend paths.
+
 Date: 2026-03-26
 Scope: mobile app navigation, route reachability, screen state coverage, reachable mock/simulated data, role locks
 Method: static audit of navigator plus core passenger/driver prototype screens and reachable shared modules

@@ -15,14 +15,6 @@ jest.mock('../src/utils/Logger', () => ({
   error: jest.fn(),
 }));
 
-jest.mock('../src/common-local/config/configureFirebase', () => ({
-  firebase: {
-    config: {
-      projectId: 'leaf-reactnative',
-    },
-  },
-}));
-
 jest.mock('../src/common-local/AccessKey', () => 'test-access-key');
 
 jest.mock('../src/config/ApiConfig', () => ({
