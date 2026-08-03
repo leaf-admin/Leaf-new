@@ -20,7 +20,7 @@
     "test:backend:all": "npm run test:all --workspace leaf-websocket-backend",
     "firebase:rules:check": "node scripts/validation/assert-firebase-rules-release.cjs",
     "firebase:rules:release": "bash config/firebase/deploy-rules.sh",
-    "test:firebase:rules": "npx --yes firebase-tools@14.22.0 emulators:exec --project demo-leaf-rules --config config/firebase/firebase.json --only auth,firestore,database,storage \"node scripts/tests/firestore-rules-emulator.cjs && node scripts/tests/firebase-rtdb-storage-rules-emulator.cjs && node leaf-websocket-backend/scripts/tests/firestore-backup-restore-emulator.cjs\"",
+    "test:firebase:rules": "npx --yes firebase-tools@14.22.0 emulators:exec --project demo-leaf-rules --config config/firebase/firebase.json --only auth,firestore,database,storage \"node scripts/tests/firestore-rules-emulator.cjs && node scripts/tests/firebase-rtdb-storage-rules-emulator.cjs && node leaf-websocket-backend/scripts/tests/firestore-backup-restore-emulator.cjs && node leaf-websocket-backend/scripts/tests/rtdb-backup-restore-emulator.cjs\"",
     "test:all": "node scripts/tests/run-with-profile.cjs workspace-all \"npm run test:unit --workspace mobile-app && npm run test:all --workspace leaf-websocket-backend\"",
     "security:scan": "node scripts/maintenance/security/scan-secrets.cjs",
     "prelaunch:copy": "node scripts/prelaunch/assert-onboarding-copy.cjs",
