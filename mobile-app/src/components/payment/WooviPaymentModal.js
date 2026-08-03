@@ -557,7 +557,11 @@ export default function WooviPaymentModal({
         }, notifyDelay);
 
         setTimeout(() => {
-            onClose();
+            onClose({
+                reason: 'confirmed',
+                chargeId: normalizedPayload.chargeId,
+                rideId: normalizedPayload.rideId,
+            });
         }, notifyDelay + 1200);
 
         return true;

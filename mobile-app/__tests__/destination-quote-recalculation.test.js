@@ -142,6 +142,26 @@ jest.mock("../src/components/payment/WooviPaymentModal", () => {
         >
           <Text>Mock Pix confirmado</Text>
         </TouchableOpacity>
+        <TouchableOpacity
+          testID="mock-confirm-pix-and-close"
+          onPress={() => {
+            const confirmation = {
+              chargeId: "charge_test_confirmed_close",
+              rideId: "ride_test_confirmed_close",
+              amountInCents: Math.round(amount * 100),
+              quoteSessionId,
+              quoteLockId,
+            };
+            onPaymentConfirmed?.(confirmation);
+            onClose?.({
+              reason: "confirmed",
+              chargeId: confirmation.chargeId,
+              rideId: confirmation.rideId,
+            });
+          }}
+        >
+          <Text>Mock Pix confirmado e fechado</Text>
+        </TouchableOpacity>
         <TouchableOpacity testID="mock-expire-pix" onPress={() => onPaymentExpired?.()}>
           <Text>Mock Pix expirado</Text>
         </TouchableOpacity>
@@ -935,6 +955,14 @@ describe("RobotaxiDestinationScreen", () => {
   });
 
   it("reuses the valid home quote before direct PIX without consuming another refresh", async () => {
+    const nativeSetTimeout = global.setTimeout;
+    let directPixAvailabilityTimeoutSchedules = 0;
+    global.setTimeout = (callback, delay, ...args) => {
+      if (delay === 15000) {
+        directPixAvailabilityTimeoutSchedules += 1;
+      }
+      return nativeSetTimeout(callback, delay, ...args);
+    };
     const destination = {
       id: "destination_copacabana_palace",
       name: "Copacabana Palace",
@@ -946,6 +974,7 @@ describe("RobotaxiDestinationScreen", () => {
       eta: "4",
     };
     const checkRideAvailability = jest.fn().mockResolvedValue({ available: true });
+    const requestRide = jest.fn().mockResolvedValue({ id: "booking_direct_pix_1" });
     usePrototypeRideRuntime.mockImplementation(() => ({
       bookingStatus: "idle",
       currentAddress: "4, Rua das Pastorinhas",
@@ -970,7 +999,7 @@ describe("RobotaxiDestinationScreen", () => {
       resolveDestinationInput: jest.fn().mockImplementation(async (item) => item),
       selectDestination: jest.fn().mockImplementation(async (item) => item),
       checkRideAvailability,
-      requestRide: jest.fn(),
+      requestRide,
       requestTripExtension: jest.fn(),
       clearFlowPreview: jest.fn(),
     }));
@@ -1039,6 +1068,38 @@ describe("RobotaxiDestinationScreen", () => {
 
     expect(screen.queryByTestId("passenger-destination-confirm-button")).toBeNull();
     expect(fetchDynamicPricingQuote).not.toHaveBeenCalled();
+    const timeoutSchedulesBeforeConfirmation = directPixAvailabilityTimeoutSchedules;
+
+    fireEvent.press(screen.getByTestId("mock-confirm-pix-and-close"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("passenger-preference-countdown-modal")).toBeTruthy();
+    });
+    expect(directPixAvailabilityTimeoutSchedules).toBe(
+      timeoutSchedulesBeforeConfirmation,
+    );
+    fireEvent.press(screen.getByTestId("passenger-preference-confirm-button"));
+
+    await waitFor(() => {
+      expect(requestRide).toHaveBeenCalledWith(
+        expect.objectContaining({
+          fare: 81.59,
+          paymentConfirmation: expect.objectContaining({
+            chargeId: "charge_test_confirmed_close",
+            quoteLockId: "ql_home_quote_lock_1",
+          }),
+        }),
+      );
+      expect(navigation.replace).toHaveBeenCalledWith(
+        "RobotaxiPrototypePaymentSuccess",
+        expect.objectContaining({ autoAdvance: true }),
+      );
+    });
+    expect(navigation.replace).not.toHaveBeenCalledWith(
+      "RobotaxiPrototype",
+      expect.anything(),
+    );
+    global.setTimeout = nativeSetTimeout;
   });
 
   const verifyDirectPixAvailabilityTimeout = async () => {
