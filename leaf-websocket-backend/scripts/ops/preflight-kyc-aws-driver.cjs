@@ -259,8 +259,10 @@ function validateInternalBiometricRuntime(snapshot) {
     && Number(liveness.attemptWindowSeconds) >= EXPECTED_LIVENESS_SESSION_TTL_SECONDS
     && Number(liveness.sessionBindingTtlSeconds) >= Number(liveness.attemptWindowSeconds)
     && liveness.costGuard?.enabled === true
-    && liveness.costGuard?.dailyLimitConfigured === true
-    && liveness.costGuard?.monthlyLimitConfigured === true
+    && liveness.costGuard?.limitScope === 'per_driver_daily'
+    && Number(liveness.costGuard?.perUserDailySessionLimit) === 20
+    && liveness.costGuard?.globalDailyLimitEnabled === false
+    && liveness.costGuard?.globalMonthlyLimitEnabled === false
     && compare.enabled === true
     && compare.provider === EXPECTED_COMPARE_PROVIDER
     && compare.region === 'us-east-1'
@@ -398,24 +400,27 @@ function validateBudget(snapshot) {
     || snapshot.available !== true
     || !Number.isFinite(snapshot.bundleEstimatedCostUsd)
     || snapshot.bundleEstimatedCostUsd <= 0
-    || !Number.isFinite(snapshot.dailyRemainingUsd)
-    || !Number.isFinite(snapshot.monthlyRemainingUsd)
-    || snapshot.dailyRemainingUsd < snapshot.bundleEstimatedCostUsd
-    || snapshot.monthlyRemainingUsd < snapshot.bundleEstimatedCostUsd
+    || snapshot.limitScope !== 'per_driver_daily'
+    || snapshot.perUserDailySessionLimit !== 20
+    || !Number.isFinite(snapshot.operationCount)
+    || snapshot.operationCount < 0
+    || !Number.isFinite(snapshot.remainingSessions)
+    || snapshot.remainingSessions < 1
   ) {
     throw blocker(
       'KYC_AWS_BUDGET_UNAVAILABLE',
-      'Cost guard nao comprova saldo diario e mensal para um bundle Liveness + CompareFaces'
+      'Cost guard nao comprova sessao disponivel no limite diario por motorista'
     );
   }
   return {
     available: true,
     timeZone: 'UTC',
+    limitScope: 'per_driver_daily',
     bundleEstimatedCostUsd: snapshot.bundleEstimatedCostUsd,
-    dailySpentUsd: snapshot.dailySpentUsd,
-    dailyRemainingUsd: snapshot.dailyRemainingUsd,
-    monthlySpentUsd: snapshot.monthlySpentUsd,
-    monthlyRemainingUsd: snapshot.monthlyRemainingUsd
+    perUserDailySessionLimit: snapshot.perUserDailySessionLimit,
+    operationCount: snapshot.operationCount,
+    remainingSessions: snapshot.remainingSessions,
+    estimatedSpentUsd: snapshot.estimatedSpentUsd
   };
 }
 
@@ -525,7 +530,7 @@ async function runKycAwsPreflight(config, dependencies) {
     }),
     runCheck({
       name: 'awsBudget',
-      query: () => dependencies.queryAwsBudget(),
+      query: () => dependencies.queryAwsBudget(config.driverId),
       validate: validateBudget
     })
   ]);
@@ -600,46 +605,21 @@ async function loadRuntimeDependencies() {
           hashLeaseUntilMs: String(driverState?.activeTripLeaseUntilMs || '').trim() || null
         };
       },
-      async queryAwsBudget() {
+      async queryAwsBudget(driverId) {
         const config = costGuard.getConfigSummary();
-        costGuard.assertReady({ required: true });
-        const now = new Date();
-        const { day, month } = costGuard.getPeriodKeys(now);
-        const [daySnapshot, monthSnapshot] = await Promise.all([
-          costGuard.periodRef(firestore, 'day', day).get(),
-          costGuard.periodRef(firestore, 'month', month).get()
-        ]);
-        const dayState = daySnapshot.exists ? (daySnapshot.data() || {}) : {};
-        const monthState = monthSnapshot.exists ? (monthSnapshot.data() || {}) : {};
-        const dailySpentMicros = Number(dayState.spentMicros || 0);
-        const monthlySpentMicros = Number(monthState.spentMicros || 0);
-        const dailyLimitMicros = Number(costGuard.dailyLimitMicros);
-        const monthlyLimitMicros = Number(costGuard.monthlyLimitMicros);
+        const usage = await costGuard.getPerUserDailyUsage(driverId);
         const bundleCostMicros = Number(costGuard.getBundleCostMicros());
-        const numericStateValid = [
-          dailySpentMicros,
-          monthlySpentMicros,
-          dailyLimitMicros,
-          monthlyLimitMicros,
-          bundleCostMicros
-        ].every((value) => Number.isFinite(value) && value >= 0);
-        const available = numericStateValid
-          && dailySpentMicros + bundleCostMicros <= dailyLimitMicros
-          && monthlySpentMicros + bundleCostMicros <= monthlyLimitMicros;
         return {
           readOnly: true,
           enabled: config.enabled === true,
           timeZone: config.timeZone,
-          available,
+          limitScope: config.limitScope,
+          available: usage.remainingSessions > 0,
           bundleEstimatedCostUsd: microsToUsd(bundleCostMicros),
-          dailySpentUsd: microsToUsd(dailySpentMicros),
-          dailyRemainingUsd: numericStateValid
-            ? microsToUsd(Math.max(0, dailyLimitMicros - dailySpentMicros))
-            : null,
-          monthlySpentUsd: microsToUsd(monthlySpentMicros),
-          monthlyRemainingUsd: numericStateValid
-            ? microsToUsd(Math.max(0, monthlyLimitMicros - monthlySpentMicros))
-            : null
+          perUserDailySessionLimit: usage.perUserDailySessionLimit,
+          operationCount: usage.operationCount,
+          remainingSessions: usage.remainingSessions,
+          estimatedSpentUsd: usage.estimatedSpentUsd
         };
       },
       close: () => redisPool.shutdown({ timeoutMs: 2_000 })

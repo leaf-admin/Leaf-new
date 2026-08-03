@@ -174,8 +174,11 @@ export RIDE_COST_DIRECTIONS_CRITICAL_PER_RIDE=3
 
 ## Relatorio diario leaf-earnings
 
-O relatorio diario soma apenas corridas concluidas, usando rollup Redis por `bookingId`.
+O relatorio diario soma corridas concluidas usando rollup Redis por `bookingId`.
 Se a telemetria de uma corrida muda, o rollup remove o snapshot anterior e aplica o novo valor, evitando duplicidade.
+O mesmo payload inclui, em uma linha separada, a quantidade de sessoes AWS KYC
+despachadas e seu custo estimado em USD/BRL. Esse valor e monitoramento operacional
+e nao altera retroativamente a formula financeira das corridas.
 
 **Formula principal**:
 

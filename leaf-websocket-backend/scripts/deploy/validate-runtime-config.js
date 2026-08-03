@@ -684,14 +684,11 @@ function main() {
     process.env.KYC_AWS_LIVENESS_S3_BUCKET || process.env.AWS_LIVENESS_S3_BUCKET || ''
   ).trim();
   const awsCostGuard = booleanDiagnostic('KYC_AWS_COST_GUARD_ENABLED', false);
-  const awsCostDailyLimitUsd = Number(process.env.KYC_AWS_COST_DAILY_LIMIT_USD);
-  const awsCostMonthlyLimitUsd = Number(process.env.KYC_AWS_COST_MONTHLY_LIMIT_USD);
+  const awsCostPerUserDailySessionLimit = Number(
+    process.env.KYC_AWS_COST_PER_USER_DAILY_SESSION_LIMIT
+  );
   const awsCostTimeZone = String(process.env.KYC_AWS_COST_TIME_ZONE || '').trim().toUpperCase();
-  const awsCostLimitsValid = Number.isFinite(awsCostDailyLimitUsd)
-    && Number.isFinite(awsCostMonthlyLimitUsd)
-    && awsCostDailyLimitUsd > 0
-    && awsCostMonthlyLimitUsd > 0
-    && awsCostDailyLimitUsd <= awsCostMonthlyLimitUsd;
+  const awsCostPerUserDailyLimitValid = awsCostPerUserDailySessionLimit === 20;
   const awsAdmissionControl = booleanDiagnostic(
     'KYC_AWS_ADMISSION_CONTROL_ENABLED',
     false
@@ -1219,7 +1216,11 @@ function main() {
       },
       awsKycCostGuard: {
         enabled: awsCostGuard,
-        limitsValid: awsCostLimitsValid,
+        limitScope: 'per_driver_daily',
+        perUserDailySessionLimit: awsCostPerUserDailySessionLimit,
+        perUserDailyLimitValid: awsCostPerUserDailyLimitValid,
+        globalDailyLimitEnabled: false,
+        globalMonthlyLimitEnabled: false,
         timeZoneUtc: awsCostTimeZone === 'UTC',
         budgetAuthority: 'redis_lua_v1',
         durableAudit: 'firestore_operation_documents'

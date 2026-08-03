@@ -55,7 +55,8 @@ function createFakeBudgetAuthority() {
     days: new Map(),
     months: new Map(),
     userDays: new Map(),
-    operations: new Map()
+    operations: new Map(),
+    usageDays: new Map()
   };
   const authority = {
     getConfigSummary: jest.fn(() => ({
@@ -111,12 +112,6 @@ function createFakeBudgetAuthority() {
       if (userDay.operationCount + 1 > input.perUserDailySessionLimit) {
         return { status: 'user_day_exhausted' };
       }
-      if (day.spentMicros + input.bundleCostMicros > input.dailyLimitMicros) {
-        return { status: 'daily_budget_exhausted' };
-      }
-      if (month.spentMicros + input.bundleCostMicros > input.monthlyLimitMicros) {
-        return { status: 'monthly_budget_exhausted' };
-      }
       const nextDay = {
         spentMicros: day.spentMicros + input.bundleCostMicros,
         operationCount: day.operationCount + 1
@@ -147,7 +142,20 @@ function createFakeBudgetAuthority() {
       if (operation.status === 'dispatched') return { status: 'dispatched', replay: true };
       if (operation.status !== 'reserved') return { status: operation.status };
       operation.status = 'dispatched';
-      return { status: 'dispatched', replay: false };
+      const usage = state.usageDays.get(input.reportDay) || {
+        sessionCount: 0,
+        estimatedCostMicros: 0
+      };
+      usage.sessionCount += 1;
+      usage.estimatedCostMicros += input.bundleCostMicros;
+      state.usageDays.set(input.reportDay, usage);
+      return { status: 'dispatched', replay: false, ...usage };
+    }),
+    getUserDayUsage: jest.fn(async (input) => {
+      const usage = state.userDays.get(`${input.day}:${input.userIdHash}`);
+      return usage
+        ? { exists: true, ...usage }
+        : { exists: false, operationCount: 0, spentMicros: 0 };
     }),
     rollback: jest.fn(async (input) => {
       const operation = state.operations.get(input.operationIdHash);
@@ -179,9 +187,8 @@ function createService(overrides = {}) {
   const { authority, state: budgetState } = createFakeBudgetAuthority();
   const env = {
     KYC_AWS_COST_GUARD_ENABLED: 'true',
-    KYC_AWS_COST_DAILY_LIMIT_USD: '0.034',
-    KYC_AWS_COST_MONTHLY_LIMIT_USD: '0.10',
     KYC_AWS_COST_TIME_ZONE: 'UTC',
+    LEAF_REPORT_TIME_ZONE: 'America/Sao_Paulo',
     KYC_AWS_LIVENESS_ESTIMATED_UNIT_COST_USD: '0.015',
     KYC_AWS_COMPARE_FACES_ESTIMATED_UNIT_COST_USD: '0.001',
     KYC_AWS_COMPARE_FACES_SDK_MAX_ATTEMPTS: '2',
@@ -267,8 +274,6 @@ describe('aws-kyc-cost-guard-service', () => {
     const service = new AwsKycCostGuardService({
       env: {
         KYC_AWS_COST_GUARD_ENABLED: 'true',
-        KYC_AWS_COST_DAILY_LIMIT_USD: '2.50',
-        KYC_AWS_COST_MONTHLY_LIMIT_USD: '50.00',
         KYC_AWS_COST_TIME_ZONE: 'UTC',
         KYC_AWS_LIVENESS_ESTIMATED_UNIT_COST_USD: '0.015',
         KYC_AWS_COMPARE_FACES_ESTIMATED_UNIT_COST_USD: '0.001',
@@ -315,10 +320,26 @@ describe('aws-kyc-cost-guard-service', () => {
     ))).toHaveLength(1);
   });
 
-  test('blocks a new paid bundle before AWS when the daily budget is exhausted', async () => {
-    const { service } = createService({
-      KYC_AWS_COST_DAILY_LIMIT_USD: '0.017'
+  test('reads the legacy per-driver usage during migration when Redis is not initialized', async () => {
+    const { service, values } = createService();
+    const userId = 'driver-preflight-migration';
+    const userIdHash = crypto.createHash('sha256').update(userId).digest('hex');
+    values.set(`kyc_aws_cost_guard_periods/user_day_2026-07-13_${userIdHash}`, {
+      spentMicros: 323_000,
+      operationCount: 19
     });
+
+    await expect(service.getPerUserDailyUsage(userId)).resolves.toEqual({
+      day: '2026-07-13',
+      operationCount: 19,
+      remainingSessions: 1,
+      perUserDailySessionLimit: 20,
+      estimatedSpentUsd: 0.323
+    });
+  });
+
+  test('does not block different drivers on the removed aggregate daily budget', async () => {
+    const { service, budgetState } = createService();
     await service.reserveLivenessBundle({
       userId: 'driver-1',
       operationId: 'operation-1',
@@ -329,17 +350,17 @@ describe('aws-kyc-cost-guard-service', () => {
       userId: 'driver-2',
       operationId: 'operation-2',
       required: true
-    })).rejects.toMatchObject({
-      code: 'KYC_AWS_COST_BUDGET_EXHAUSTED',
-      retryAt: '2026-07-14T00:00:00.000Z'
+    })).resolves.toMatchObject({
+      status: 'reserved'
+    });
+    expect(budgetState.days.get('2026-07-13')).toEqual({
+      spentMicros: 34000,
+      operationCount: 2
     });
   });
 
   test('reserves 1000 simultaneous drivers without a shared Firestore period document', async () => {
-    const { service, values, budgetState } = createService({
-      KYC_AWS_COST_DAILY_LIMIT_USD: '17.00',
-      KYC_AWS_COST_MONTHLY_LIMIT_USD: '20.00'
-    });
+    const { service, values, budgetState } = createService();
 
     const results = await Promise.allSettled(Array.from({ length: 1000 }, (_, index) => (
       service.reserveLivenessBundle({
@@ -362,10 +383,8 @@ describe('aws-kyc-cost-guard-service', () => {
     ))).toBe(false);
   });
 
-  test('blocks one abusive account at a durable daily cap without consuming the global budget', async () => {
+  test('blocks one account at its daily cap while another driver remains allowed', async () => {
     const { service, budgetState } = createService({
-      KYC_AWS_COST_DAILY_LIMIT_USD: '1.00',
-      KYC_AWS_COST_MONTHLY_LIMIT_USD: '2.00',
       KYC_AWS_COST_PER_USER_DAILY_SESSION_LIMIT: '2'
     });
     await service.reserveLivenessBundle({
@@ -438,8 +457,6 @@ describe('aws-kyc-cost-guard-service', () => {
     const service = new AwsKycCostGuardService({
       env: {
         KYC_AWS_COST_GUARD_ENABLED: 'true',
-        KYC_AWS_COST_DAILY_LIMIT_USD: '2.50',
-        KYC_AWS_COST_MONTHLY_LIMIT_USD: '50.00',
         KYC_AWS_COST_TIME_ZONE: 'UTC',
         KYC_AWS_LIVENESS_ESTIMATED_UNIT_COST_USD: '0.015',
         KYC_AWS_COMPARE_FACES_ESTIMATED_UNIT_COST_USD: '0.001',
@@ -471,7 +488,11 @@ describe('aws-kyc-cost-guard-service', () => {
       required: true
     });
     const budgetInput = budgetAuthority.reserve.mock.calls[0][0];
-    await budgetAuthority.markDispatched(budgetInput);
+    await budgetAuthority.markDispatched({
+      ...budgetInput,
+      reportDay: '2026-07-13',
+      dispatchedAt: '2026-07-13T20:00:00.000Z'
+    });
 
     await expect(service.rollbackBeforeDispatch('operation-dispatch-race'))
       .resolves.toBe(false);
@@ -484,6 +505,11 @@ describe('aws-kyc-cost-guard-service', () => {
     const operation = Array.from(values.values())
       .find((value) => value.kind === 'liveness_compare_bundle');
     expect(operation.livenessStatus).toBe('dispatched');
+    expect(operation.costReportDay).toBe('2026-07-13');
+    expect(budgetState.usageDays.get('2026-07-13')).toEqual({
+      sessionCount: 1,
+      estimatedCostMicros: 17000
+    });
   });
 
   test('caches one CompareFaces outcome and blocks unknown automatic retries', async () => {
@@ -673,10 +699,9 @@ describe('aws-kyc-cost-guard-service', () => {
     });
   });
 
-  test('fails closed when strict budget configuration is invalid', () => {
+  test('fails closed when the per-driver guard time zone is invalid', () => {
     const { service } = createService({
-      KYC_AWS_COST_DAILY_LIMIT_USD: '60',
-      KYC_AWS_COST_MONTHLY_LIMIT_USD: '50'
+      KYC_AWS_COST_TIME_ZONE: 'America/Sao_Paulo'
     });
 
     expect(() => service.assertReady({ required: true })).toThrow(

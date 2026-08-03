@@ -29,7 +29,7 @@ if operationRaw then
 end
 
 local bundleCostMicros = tonumber(ARGV[5])
-local allowInitialization = ARGV[11] == '1'
+local allowInitialization = ARGV[9] == '1'
 local activatedDay = redis.call('HGET', KEYS[5], 'activatedDay')
 local activatedMonth = redis.call('HGET', KEYS[5], 'activatedMonth')
 if not activatedDay or not activatedMonth then
@@ -42,7 +42,7 @@ if not activatedDay or not activatedMonth then
     'authority', 'redis_lua_v1',
     'activatedDay', activatedDay,
     'activatedMonth', activatedMonth)
-  redis.call('EXPIRE', KEYS[5], tonumber(ARGV[10]))
+  redis.call('EXPIRE', KEYS[5], tonumber(ARGV[8]))
 end
 
 local function initializeCounter(key, periodMatchesActivation, seedSpent, seedCount)
@@ -55,13 +55,13 @@ local function initializeCounter(key, periodMatchesActivation, seedSpent, seedCo
   return true
 end
 
-if not initializeCounter(KEYS[1], ARGV[3] == activatedDay, ARGV[12], ARGV[13]) then
+if not initializeCounter(KEYS[1], ARGV[3] == activatedDay, ARGV[10], ARGV[11]) then
   return cjson.encode({ status = 'initialization_required' })
 end
-if not initializeCounter(KEYS[2], ARGV[4] == activatedMonth, ARGV[14], ARGV[15]) then
+if not initializeCounter(KEYS[2], ARGV[4] == activatedMonth, ARGV[12], ARGV[13]) then
   return cjson.encode({ status = 'initialization_required' })
 end
-if not initializeCounter(KEYS[3], ARGV[3] == activatedDay, ARGV[16], ARGV[17]) then
+if not initializeCounter(KEYS[3], ARGV[3] == activatedDay, ARGV[14], ARGV[15]) then
   return cjson.encode({ status = 'initialization_required' })
 end
 
@@ -72,14 +72,8 @@ local nextDaySpentMicros = daySpentMicros + bundleCostMicros
 local nextMonthSpentMicros = monthSpentMicros + bundleCostMicros
 local nextUserDayOperationCount = userDayOperationCount + 1
 
-if nextUserDayOperationCount > tonumber(ARGV[8]) then
+if nextUserDayOperationCount > tonumber(ARGV[6]) then
   return cjson.encode({ status = 'user_day_exhausted' })
-end
-if nextDaySpentMicros > tonumber(ARGV[6]) then
-  return cjson.encode({ status = 'daily_budget_exhausted' })
-end
-if nextMonthSpentMicros > tonumber(ARGV[7]) then
-  return cjson.encode({ status = 'monthly_budget_exhausted' })
 end
 
 redis.call('HSET', KEYS[1],
@@ -107,10 +101,10 @@ local operation = {
   bundleCostMicros = bundleCostMicros,
   status = 'reserved'
 }
-redis.call('SET', KEYS[4], cjson.encode(operation), 'EX', tonumber(ARGV[9]))
-redis.call('EXPIRE', KEYS[1], tonumber(ARGV[10]))
-redis.call('EXPIRE', KEYS[2], tonumber(ARGV[10]))
-redis.call('EXPIRE', KEYS[3], tonumber(ARGV[9]))
+redis.call('SET', KEYS[4], cjson.encode(operation), 'EX', tonumber(ARGV[7]))
+redis.call('EXPIRE', KEYS[1], tonumber(ARGV[8]))
+redis.call('EXPIRE', KEYS[2], tonumber(ARGV[8]))
+redis.call('EXPIRE', KEYS[3], tonumber(ARGV[7]))
 
 return cjson.encode({
   status = 'reserved',
@@ -140,7 +134,19 @@ if operation.status ~= 'reserved' then
 end
 operation.status = 'dispatched'
 redis.call('SET', KEYS[1], cjson.encode(operation), 'KEEPTTL')
-return cjson.encode({ status = 'dispatched', replay = false })
+local estimatedCostMicros = redis.call(
+  'HINCRBY', KEYS[2], 'estimatedCostMicros', tonumber(operation.bundleCostMicros))
+local sessionCount = redis.call('HINCRBY', KEYS[2], 'sessionCount', 1)
+redis.call('HSET', KEYS[2],
+  'reportDay', ARGV[2],
+  'updatedAt', ARGV[3])
+redis.call('EXPIRE', KEYS[2], tonumber(ARGV[4]))
+return cjson.encode({
+  status = 'dispatched',
+  replay = false,
+  estimatedCostMicros = tonumber(estimatedCostMicros),
+  sessionCount = tonumber(sessionCount)
+})
 `;
 
 const ROLLBACK_BUDGET_SCRIPT = `
@@ -246,6 +252,10 @@ class AwsKycCostBudgetAuthority {
     };
   }
 
+  usageDayKey(reportDay) {
+    return `${KEY_PREFIX}:usage_day:${reportDay}`;
+  }
+
   parse(raw) {
     if (raw && typeof raw === 'object') return raw;
     return raw ? JSON.parse(raw) : {};
@@ -286,8 +296,6 @@ class AwsKycCostBudgetAuthority {
         input.day,
         input.month,
         input.bundleCostMicros,
-        input.dailyLimitMicros,
-        input.monthlyLimitMicros,
         input.perUserDailySessionLimit,
         input.operationRetentionSeconds,
         input.aggregateRetentionSeconds,
@@ -303,12 +311,40 @@ class AwsKycCostBudgetAuthority {
     );
   }
 
+  async getUserDayUsage(input) {
+    try {
+      const redis = this.assertReady();
+      const state = await redis.hgetall(this.keys(input).userDay);
+      return {
+        exists: Boolean(state && Object.keys(state).length > 0),
+        operationCount: Math.max(0, Number(state?.operationCount || 0)),
+        spentMicros: Math.max(0, Number(state?.spentMicros || 0))
+      };
+    } catch (error) {
+      if (error?.code === 'KYC_AWS_COST_GUARD_UNAVAILABLE') throw error;
+      logError(error, 'Falha ao ler uso diario por motorista AWS KYC', {
+        service: 'aws-kyc-cost-budget-authority',
+        operation: 'get_user_day_usage'
+      });
+      throw createAuthorityError(
+        'Falha ao ler uso diario por motorista AWS KYC',
+        'KYC_AWS_COST_GUARD_UNAVAILABLE',
+        { cause: error }
+      );
+    }
+  }
+
   async markDispatched(input) {
     const keys = this.keys(input);
     return this.eval(
       MARK_DISPATCHED_SCRIPT,
-      [keys.operation],
-      [input.operationIdHash],
+      [keys.operation, this.usageDayKey(input.reportDay)],
+      [
+        input.operationIdHash,
+        input.reportDay,
+        input.dispatchedAt,
+        input.aggregateRetentionSeconds
+      ],
       'mark_dispatched'
     );
   }
@@ -345,3 +381,4 @@ const singleton = new AwsKycCostBudgetAuthority();
 module.exports = singleton;
 module.exports.AwsKycCostBudgetAuthority = AwsKycCostBudgetAuthority;
 module.exports.KEY_PREFIX = KEY_PREFIX;
+module.exports.usageDayKey = (reportDay) => `${KEY_PREFIX}:usage_day:${reportDay}`;

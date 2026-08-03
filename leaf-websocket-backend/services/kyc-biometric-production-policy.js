@@ -221,22 +221,17 @@ function evaluateProductionReadiness(env = process.env) {
     blockers.push('Retry idempotente do AWS Liveness exige delay 0-30s e janela 30-150s, com delay menor que a janela.');
   }
   const costGuardEnabled = readBooleanLike(env.KYC_AWS_COST_GUARD_ENABLED, false);
-  const dailyCostLimitUsd = Number(env.KYC_AWS_COST_DAILY_LIMIT_USD);
-  const monthlyCostLimitUsd = Number(env.KYC_AWS_COST_MONTHLY_LIMIT_USD);
+  const perUserDailySessionLimit = Number(
+    env.KYC_AWS_COST_PER_USER_DAILY_SESSION_LIMIT
+  );
   const costOperationRetentionDays = Number(
     env.KYC_AWS_COST_OPERATION_RETENTION_DAYS ?? 35
   );
   if (!costGuardEnabled) {
-    blockers.push('KYC_AWS_COST_GUARD_ENABLED=true obrigatório para limitar chamadas pagas AWS KYC.');
+    blockers.push('KYC_AWS_COST_GUARD_ENABLED=true obrigatório para limitar sessões pagas AWS KYC por motorista.');
   }
-  if (
-    !Number.isFinite(dailyCostLimitUsd)
-    || !Number.isFinite(monthlyCostLimitUsd)
-    || dailyCostLimitUsd <= 0
-    || monthlyCostLimitUsd <= 0
-    || dailyCostLimitUsd > monthlyCostLimitUsd
-  ) {
-    blockers.push('Limites diário/mensal do circuit breaker AWS KYC devem ser positivos e diário <= mensal.');
+  if (perUserDailySessionLimit !== 20) {
+    blockers.push('KYC_AWS_COST_PER_USER_DAILY_SESSION_LIMIT deve ser exatamente 20 na política aprovada.');
   }
   if (String(env.KYC_AWS_COST_TIME_ZONE || '').trim().toUpperCase() !== 'UTC') {
     blockers.push('KYC_AWS_COST_TIME_ZONE=UTC obrigatório para o circuit breaker AWS KYC.');

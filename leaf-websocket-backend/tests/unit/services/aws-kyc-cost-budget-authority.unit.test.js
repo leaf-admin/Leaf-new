@@ -17,8 +17,6 @@ const INPUT = Object.freeze({
   day: '2026-08-03',
   month: '2026-08',
   bundleCostMicros: 16000,
-  dailyLimitMicros: 2_500_000,
-  monthlyLimitMicros: 50_000_000,
   perUserDailySessionLimit: 20,
   operationRetentionSeconds: 3_024_000,
   aggregateRetentionSeconds: 34_560_000
@@ -54,8 +52,6 @@ describe('aws-kyc-cost-budget-authority', () => {
       '2026-08-03',
       '2026-08',
       '16000',
-      '2500000',
-      '50000000',
       '20',
       '3024000',
       '34560000',
@@ -71,8 +67,6 @@ describe('aws-kyc-cost-budget-authority', () => {
 
   test.each([
     ['user_day_exhausted'],
-    ['daily_budget_exhausted'],
-    ['monthly_budget_exhausted'],
     ['initialization_required'],
     ['operation_mismatch']
   ])('preserves the atomic reserve outcome %s for policy mapping', async (status) => {
@@ -111,19 +105,44 @@ describe('aws-kyc-cost-budget-authority', () => {
     ]);
   });
 
-  test('transitions dispatch before Firestore allows the paid provider call', async () => {
+  test('transitions dispatch and records daily monitoring before the paid provider call', async () => {
     const redis = {
       eval: jest.fn(async () => JSON.stringify({ status: 'dispatched', replay: false }))
     };
     const authority = new AwsKycCostBudgetAuthority({ redisProvider: () => redis });
 
-    await authority.markDispatched(INPUT);
+    await authority.markDispatched({
+      ...INPUT,
+      reportDay: '2026-08-03',
+      dispatchedAt: '2026-08-03T18:00:00.000Z'
+    });
 
     expect(redis.eval).toHaveBeenCalledWith(
       expect.stringContaining('leaf_aws_kyc_cost_mark_dispatched_v1'),
-      1,
+      2,
       `${KEY_PREFIX}:operation:operation-hash`,
-      'operation-hash'
+      `${KEY_PREFIX}:usage_day:2026-08-03`,
+      'operation-hash',
+      '2026-08-03',
+      '2026-08-03T18:00:00.000Z',
+      '34560000'
+    );
+  });
+
+  test('reads the daily usage for one driver without a global budget lookup', async () => {
+    const redis = {
+      eval: jest.fn(),
+      hgetall: jest.fn(async () => ({ operationCount: '7', spentMicros: '112000' }))
+    };
+    const authority = new AwsKycCostBudgetAuthority({ redisProvider: () => redis });
+
+    await expect(authority.getUserDayUsage(INPUT)).resolves.toEqual({
+      exists: true,
+      operationCount: 7,
+      spentMicros: 112000
+    });
+    expect(redis.hgetall).toHaveBeenCalledWith(
+      `${KEY_PREFIX}:user_day:2026-08-03:user-hash`
     );
   });
 

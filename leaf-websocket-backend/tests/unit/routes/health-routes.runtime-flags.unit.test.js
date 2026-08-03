@@ -347,8 +347,7 @@ describe('health runtime flags route', () => {
     process.env.KYC_ACTIVE_TRIP_AUTHORITY_MODE = 'redis_noeviction';
     process.env.KYC_TRUSTED_RANDOM_AUDIT_PERCENT = '10';
     process.env.KYC_AWS_COST_GUARD_ENABLED = 'true';
-    process.env.KYC_AWS_COST_DAILY_LIMIT_USD = '2.50';
-    process.env.KYC_AWS_COST_MONTHLY_LIMIT_USD = '50.00';
+    process.env.KYC_AWS_COST_PER_USER_DAILY_SESSION_LIMIT = '20';
     process.env.KYC_AWS_COST_TIME_ZONE = 'UTC';
     delete process.env.KYC_AWS_LIVENESS_S3_BUCKET;
     delete process.env.AWS_LIVENESS_S3_BUCKET;
@@ -373,7 +372,12 @@ describe('health runtime flags route', () => {
     expect(response.body.kyc.legacyCnhEmbeddingDisabled).toBe(false);
     expect(response.body.kyc.requireTrustedBiometricMatch).toBe(true);
     expect(response.body.kyc.awsCostGuardEnabled).toBe(true);
-    expect(response.body.kyc.awsCostLimitsValid).toBe(true);
+    expect(response.body.kyc.awsCostLimitScope).toBe('per_driver_daily');
+    expect(response.body.kyc.awsCostPerUserDailySessionLimit).toBe(20);
+    expect(response.body.kyc.awsCostPerUserDailyLimitValid).toBe(true);
+    expect(response.body.kyc.awsCostGlobalDailyLimitEnabled).toBe(false);
+    expect(response.body.kyc.awsCostGlobalMonthlyLimitEnabled).toBe(false);
+    expect(response.body.kyc.awsCostGlobalSpendMode).toBe('monitor_only_daily_discord');
     expect(response.body.kyc.awsCostRetentionValid).toBe(true);
     expect(response.body.kyc.awsCostOperationRetentionDays).toBe(35);
     expect(response.body.kyc.awsCompareResultPersistenceValid).toBe(true);
@@ -504,8 +508,7 @@ describe('health runtime flags route', () => {
       KYC_AWS_COMPARE_FACES_APPROVE_THRESHOLD: '0.95',
       KYC_AWS_COMPARE_FACES_REVIEW_THRESHOLD: '0.80',
       KYC_AWS_COST_GUARD_ENABLED: 'true',
-      KYC_AWS_COST_DAILY_LIMIT_USD: '2.50',
-      KYC_AWS_COST_MONTHLY_LIMIT_USD: '50.00',
+      KYC_AWS_COST_PER_USER_DAILY_SESSION_LIMIT: '20',
       KYC_AWS_COST_TIME_ZONE: 'UTC',
       ENABLE_CNH_FACE_BIOMETRICS: 'false',
       KYC_REQUIRE_TRUSTED_BIOMETRIC_MATCH: 'true',
@@ -680,8 +683,7 @@ describe('health runtime flags route', () => {
       KYC_AWS_COMPARE_FACES_APPROVE_THRESHOLD: '0.95',
       KYC_AWS_COMPARE_FACES_REVIEW_THRESHOLD: '0.80',
       KYC_AWS_COST_GUARD_ENABLED: 'true',
-      KYC_AWS_COST_DAILY_LIMIT_USD: '2.50',
-      KYC_AWS_COST_MONTHLY_LIMIT_USD: '50.00',
+      KYC_AWS_COST_PER_USER_DAILY_SESSION_LIMIT: '20',
       KYC_AWS_COST_TIME_ZONE: 'UTC',
       ENABLE_CNH_FACE_BIOMETRICS: 'false',
       KYC_REQUIRE_TRUSTED_BIOMETRIC_MATCH: 'true',
@@ -820,8 +822,7 @@ describe('health runtime flags route', () => {
     process.env.KYC_AWS_COMPARE_FACES_ENABLED = 'true';
     process.env.ENABLE_CNH_FACE_BIOMETRICS = 'true';
     process.env.KYC_AWS_COST_GUARD_ENABLED = 'true';
-    process.env.KYC_AWS_COST_DAILY_LIMIT_USD = '2.50';
-    process.env.KYC_AWS_COST_MONTHLY_LIMIT_USD = '50.00';
+    process.env.KYC_AWS_COST_PER_USER_DAILY_SESSION_LIMIT = '20';
     process.env.KYC_AWS_COST_TIME_ZONE = 'UTC';
     process.env.KYC_REQUIRE_TRUSTED_BIOMETRIC_MATCH = 'true';
     process.env.MOBILE_FACE_EMBEDDING_ENABLED = 'false';

@@ -909,10 +909,10 @@ describe('aws-face-liveness-service', () => {
     expect(mockSend).not.toHaveBeenCalled();
   });
 
-  test('should fail before AWS when the aggregate cost guard rejects the bundle', async () => {
+  test('should fail before AWS when the per-driver daily guard rejects the bundle', async () => {
     process.env.KYC_PRODUCTION_BIOMETRICS_ENABLED = 'true';
-    const budgetError = Object.assign(new Error('budget exhausted'), {
-      code: 'KYC_AWS_COST_BUDGET_EXHAUSTED'
+    const budgetError = Object.assign(new Error('driver daily sessions exhausted'), {
+      code: 'KYC_AWS_USER_DAILY_SESSION_LIMIT_EXHAUSTED'
     });
     const costGuard = {
       isEnabled: jest.fn(() => true),
@@ -927,7 +927,7 @@ describe('aws-face-liveness-service', () => {
       persistenceNamespace: 'operational',
       financialContextId: 'ctx_operational_budget'
     }))
-      .rejects.toMatchObject({ code: 'KYC_AWS_COST_BUDGET_EXHAUSTED' });
+      .rejects.toMatchObject({ code: 'KYC_AWS_USER_DAILY_SESSION_LIMIT_EXHAUSTED' });
     expect(costGuard.reserveLivenessBundle).toHaveBeenCalledWith(expect.objectContaining({
       userId: 'driver-budget-blocked',
       required: true
@@ -938,7 +938,7 @@ describe('aws-face-liveness-service', () => {
     ))).toBe(true);
   });
 
-  test('should bind one aggregate budget operation to the AWS client token and session metadata', async () => {
+  test('should bind one per-driver cost operation to the AWS client token and session metadata', async () => {
     process.env.KYC_PRODUCTION_BIOMETRICS_ENABLED = 'true';
     mockSend.mockResolvedValueOnce({ SessionId: 'session-cost-bound' });
     const costGuard = {
