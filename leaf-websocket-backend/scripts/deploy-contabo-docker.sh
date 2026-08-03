@@ -573,7 +573,7 @@ remote "
       sideeffects-worker billing-worker queue-worker \
       trip-location-worker pricing-baseline-worker ride-health-monitor-worker
   fi
-  # `docker compose images` reports the image of the still-running container
+  # docker compose images reports the image of the still-running container
   # during a rolling deploy. Inspect the deterministic build tag instead.
   candidate_image='leaf-app-websocket:latest'
   docker image inspect "\$candidate_image" >/dev/null
