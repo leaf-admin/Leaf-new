@@ -934,7 +934,7 @@ describe("RobotaxiDestinationScreen", () => {
     });
   });
 
-  it("refreshes the home quote before direct PIX even if context changes", async () => {
+  it("reuses the valid home quote before direct PIX without consuming another refresh", async () => {
     const destination = {
       id: "destination_copacabana_palace",
       name: "Copacabana Palace",
@@ -946,14 +946,6 @@ describe("RobotaxiDestinationScreen", () => {
       eta: "4",
     };
     const checkRideAvailability = jest.fn().mockResolvedValue({ available: true });
-    fetchDynamicPricingQuote.mockResolvedValueOnce({
-      estimatedFare: 81.59,
-      grossEstimatedFare: 81.59,
-      quoteLockId: "ql_fresh_home_quote_lock_1",
-      quoteLockExpiresAt: new Date(Date.now() + 120000).toISOString(),
-      pricingPayload: {},
-    });
-
     usePrototypeRideRuntime.mockImplementation(() => ({
       bookingStatus: "idle",
       currentAddress: "4, Rua das Pastorinhas",
@@ -1041,22 +1033,12 @@ describe("RobotaxiDestinationScreen", () => {
       );
       expect(screen.getByTestId("mock-pix-amount").props.children).toBe("81.59");
       expect(screen.getByTestId("mock-pix-quote-lock-id").props.children).toBe(
-        "ql_fresh_home_quote_lock_1",
+        "ql_home_quote_lock_1",
       );
     });
 
     expect(screen.queryByTestId("passenger-destination-confirm-button")).toBeNull();
-    expect(fetchDynamicPricingQuote).toHaveBeenCalledWith(
-      expect.objectContaining({
-        carType: "Leaf Plus",
-        quoteSessionId: expect.stringMatching(/^passenger_quote_/),
-      }),
-      expect.objectContaining({
-        headers: expect.objectContaining({
-          "x-leaf-quote-session-id": expect.stringMatching(/^passenger_quote_/),
-        }),
-      }),
-    );
+    expect(fetchDynamicPricingQuote).not.toHaveBeenCalled();
   });
 
   const verifyDirectPixAvailabilityTimeout = async () => {
@@ -1204,14 +1186,6 @@ describe("RobotaxiDestinationScreen", () => {
       eta: "4",
     };
     const checkRideAvailability = jest.fn().mockResolvedValue({ available: true });
-    fetchDynamicPricingQuote.mockResolvedValueOnce({
-      estimatedFare: 81.59,
-      grossEstimatedFare: 81.59,
-      quoteLockId: "ql_fresh_home_quote_lock_expiring",
-      quoteLockExpiresAt: new Date(Date.now() + 120000).toISOString(),
-      pricingPayload: {},
-    });
-
     usePrototypeRideRuntime.mockImplementation(() => ({
       bookingStatus: "idle",
       currentAddress: "4, Rua das Pastorinhas",
@@ -1291,10 +1265,11 @@ describe("RobotaxiDestinationScreen", () => {
     await waitFor(() => {
       expect(screen.getByTestId("mock-pix-amount").props.children).toBe("81.59");
       expect(screen.getByTestId("mock-pix-quote-lock-id").props.children).toBe(
-        "ql_fresh_home_quote_lock_expiring",
+        "ql_home_quote_lock_expiring",
       );
       expect(screen.queryByTestId("passenger-destination-confirm-button")).toBeNull();
     });
+    expect(fetchDynamicPricingQuote).not.toHaveBeenCalled();
 
     fireEvent.press(screen.getByTestId("mock-expire-pix"));
 
