@@ -8,6 +8,7 @@ import RobotaxiHomeScreen, {
   buildDestinationFareQuoteRouteKey,
   buildTrafficSegmentsFromDirectionsRoute,
   getHomeQuoteLockExpiresAtMs,
+  normalizeHomeQuoteRefreshBudget,
   resolveHomeCategoryFarePresentation,
   resolveHomeQuoteExpiryAction,
 } from '../src/screens/prototype/RobotaxiHomeScreen';
@@ -627,6 +628,27 @@ describe('driver online toggle', () => {
     expect(thirdExpiry).toEqual({
       action: 'await_user',
       nextAutomaticRefreshCount: 2,
+    });
+  });
+
+  it('recovers a stale quote refresh budget for the still-active route cycle', () => {
+    expect(
+      normalizeHomeQuoteRefreshBudget({
+        budget: { key: 'stale-route', count: 2 },
+        cycleKey: 'active-route',
+      }),
+    ).toEqual({
+      key: 'active-route',
+      count: 0,
+    });
+    expect(
+      normalizeHomeQuoteRefreshBudget({
+        budget: { key: 'active-route', count: 1 },
+        cycleKey: 'active-route',
+      }),
+    ).toEqual({
+      key: 'active-route',
+      count: 1,
     });
   });
 

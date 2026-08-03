@@ -1421,6 +1421,22 @@ export function resolveHomeQuoteExpiryAction({
   };
 }
 
+export function normalizeHomeQuoteRefreshBudget({
+  budget = null,
+  cycleKey = '',
+} = {}) {
+  const normalizedCycleKey = String(cycleKey || '').trim();
+  const normalizedBudgetKey = String(budget?.key || '').trim();
+  const count = normalizedBudgetKey === normalizedCycleKey
+    ? Math.max(0, Number.parseInt(budget?.count, 10) || 0)
+    : 0;
+
+  return {
+    key: normalizedCycleKey,
+    count,
+  };
+}
+
 function buildHomeBackendQuoteKey({
   routeKey,
   categoryId,
@@ -6767,6 +6783,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
       !isScreenFocused ||
       !homeCategorySurfaceVisible ||
       !homeQuoteCycleKey ||
+      homeBackendQuote?.key !== homeBackendQuoteKey ||
       !homeBackendQuote?.quote
     ) {
       return undefined;
@@ -6778,12 +6795,14 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     }
 
     const timeoutId = setTimeout(() => {
-      if (homeQuoteAutoRefreshBudgetRef.current.key !== homeQuoteCycleKey) {
-        return;
-      }
+      const refreshBudget = normalizeHomeQuoteRefreshBudget({
+        budget: homeQuoteAutoRefreshBudgetRef.current,
+        cycleKey: homeQuoteCycleKey,
+      });
+      homeQuoteAutoRefreshBudgetRef.current = refreshBudget;
 
       const expiryAction = resolveHomeQuoteExpiryAction({
-        automaticRefreshCount: homeQuoteAutoRefreshBudgetRef.current.count,
+        automaticRefreshCount: refreshBudget.count,
       });
 
       if (expiryAction.action === 'refresh') {
@@ -6802,6 +6821,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     return () => clearTimeout(timeoutId);
   }, [
     homeBackendQuote,
+    homeBackendQuoteKey,
     homeCategorySurfaceVisible,
     homeQuoteCycleKey,
     isScreenFocused,
