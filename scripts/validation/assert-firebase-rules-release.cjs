@@ -42,6 +42,22 @@ assert(
   /match \/driver_withdrawals\/\{withdrawalId\} \{[\s\S]*?allow create, update, delete: if false;/.test(firestoreRules),
   'driver_withdrawals deve impedir mutações diretas.'
 );
+for (const collection of [
+  'ride_payments',
+  'payment_holdings',
+  'payment_history',
+  'payment_distributions',
+  'driver_balances'
+]) {
+  assert(
+    new RegExp(`match \\/${collection}\\/\\{[^}]+\\} \\{[\\s\\S]*?allow write: if false;`).test(firestoreRules),
+    `${collection} deve impedir mutações financeiras diretas.`
+  );
+}
+assert(
+  /match \/transactions\/\{txId\} \{[\s\S]*?allow write: if false;/.test(firestoreRules),
+  'transações de saldo devem impedir mutações diretas.'
+);
 assert(
   /match \/support_tickets\/\{ticketId\} \{[\s\S]*?allow create, update, delete: if false;/.test(firestoreRules),
   'support_tickets deve impedir mutações diretas.'
