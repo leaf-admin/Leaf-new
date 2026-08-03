@@ -2,8 +2,8 @@ const mockRedis = {
   hgetall: jest.fn(),
   hset: jest.fn(),
   expire: jest.fn(),
-  multi: jest.fn(),
 };
+const mockCommitDriverOnlineProjection = jest.fn();
 
 jest.mock('../../../utils/redis-pool', () => ({
   getConnection: jest.fn(() => mockRedis),
@@ -13,6 +13,10 @@ jest.mock('../../../services/connection-monitor', () => ({}));
 
 jest.mock('../../../middleware/websocket-rate-limiter', () => ({
   unregisterConnection: jest.fn(),
+}));
+
+jest.mock('../../../services/driver-online-projection-service', () => ({
+  commitDriverOnlineProjection: (...args) => mockCommitDriverOnlineProjection(...args),
 }));
 
 jest.mock('../../../utils/logger', () => ({
@@ -36,13 +40,7 @@ describe('ConnectionCleanupService', () => {
     });
     mockRedis.hset.mockResolvedValue(1);
     mockRedis.expire.mockResolvedValue(1);
-    const chain = {
-      hset: jest.fn(() => chain),
-      srem: jest.fn(() => chain),
-      zrem: jest.fn(() => chain),
-      exec: jest.fn().mockResolvedValue([]),
-    };
-    mockRedis.multi.mockReturnValue(chain);
+    mockCommitDriverOnlineProjection.mockResolvedValue({ success: true });
   });
 
   afterEach(() => {
@@ -77,12 +75,19 @@ describe('ConnectionCleanupService', () => {
         closedAtIso: '2026-06-25T12:02:00.000Z',
       })
     );
-    expect(mockRedis.multi().hset).toHaveBeenCalledWith(
-      'driver:driver_1',
+    expect(mockCommitDriverOnlineProjection).toHaveBeenCalledWith(
+      mockRedis,
       expect.objectContaining({
-        status: 'OFFLINE',
-        isOnline: 'false',
-        dispatchEligibilityCode: 'STALE_HEARTBEAT',
+        driverId: 'driver_1',
+        eligibleGeoKey: 'driver_locations_eligible',
+        isOnline: false,
+        dispatchEligible: false,
+        fields: expect.objectContaining({
+          status: 'OFFLINE',
+          isOnline: 'false',
+          dispatchEligibilityCode: 'STALE_HEARTBEAT',
+          dispatchEligibilityCheckedAt: '2026-06-25T12:02:00.000Z',
+        }),
       })
     );
     expect(socket.emit).toHaveBeenCalledWith(
@@ -95,6 +100,32 @@ describe('ConnectionCleanupService', () => {
           sessionStartedAtMs: null,
         }),
       })
+    );
+    expect(socket.disconnect).toHaveBeenCalledWith(true);
+  });
+
+  it('does not emit a successful offline projection when the atomic writer rejects', async () => {
+    const socket = {
+      id: 'socket_1',
+      userId: 'driver_1',
+      userType: 'driver',
+      lastHeartbeat: Date.parse('2026-06-25T12:00:00.000Z'),
+      emit: jest.fn(),
+      disconnect: jest.fn(),
+    };
+    const service = new ConnectionCleanupService({
+      connectedUsers: new Map([['driver_1', socket]]),
+      sockets: { fetchSockets: jest.fn(), sockets: new Map() },
+    });
+    service.config.heartbeatTimeout = 120000;
+    mockCommitDriverOnlineProjection.mockRejectedValueOnce(new Error('atomic projection rejected'));
+
+    const removed = await service.cleanupExpiredHeartbeats();
+
+    expect(removed).toBe(1);
+    expect(socket.emit).not.toHaveBeenCalledWith(
+      'driverStatusUpdated',
+      expect.objectContaining({ success: true })
     );
     expect(socket.disconnect).toHaveBeenCalledWith(true);
   });

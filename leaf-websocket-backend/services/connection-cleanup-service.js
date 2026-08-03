@@ -14,6 +14,9 @@ const websocketRateLimiter = require('../middleware/websocket-rate-limiter');
 const {
     closeDriverOnlineSessionAt
 } = require('./driver-online-time-policy-service');
+const {
+    commitDriverOnlineProjection
+} = require('./driver-online-projection-service');
 
 class ConnectionCleanupService {
     constructor(io) {
@@ -151,20 +154,21 @@ class ConnectionCleanupService {
                                 driverId,
                                 closedAtMs
                             });
-                            await this.redis
-                                .multi()
-                                .hset(`driver:${driverId}`, {
+                            const checkedAt = new Date(closedAtMs).toISOString();
+                            await commitDriverOnlineProjection(this.redis, {
+                                driverId,
+                                eligibleGeoKey: process.env.ELIGIBLE_DRIVER_GEO_KEY || 'driver_locations_eligible',
+                                isOnline: false,
+                                dispatchEligible: false,
+                                fields: {
                                     status: 'OFFLINE',
                                     isOnline: 'false',
                                     dispatchEligible: 'false',
                                     dispatchEligibilityCode: 'STALE_HEARTBEAT',
-                                    dispatchEligibilityCheckedAt: new Date(closedAtMs).toISOString(),
-                                    updatedAt: new Date(closedAtMs).toISOString()
-                                })
-                                .srem('online_drivers', driverId)
-                                .zrem('driver_locations', driverId)
-                                .zrem(process.env.ELIGIBLE_DRIVER_GEO_KEY || 'driver_locations_eligible', driverId)
-                                .exec();
+                                    dispatchEligibilityCheckedAt: checkedAt,
+                                    updatedAt: checkedAt
+                                }
+                            });
                             socket.emit?.('driverStatusUpdated', {
                                 success: true,
                                 driverId,
