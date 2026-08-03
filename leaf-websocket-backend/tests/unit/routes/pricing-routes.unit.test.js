@@ -5,6 +5,7 @@ const request = require('supertest');
 
 const mockRedis = {
   eval: jest.fn(),
+  get: jest.fn(),
   set: jest.fn()
 };
 const mockGetConnection = jest.fn(() => mockRedis);
@@ -76,6 +77,7 @@ describe('pricing routes', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockRedis.eval.mockResolvedValue(1);
+    mockRedis.get.mockResolvedValue(null);
     mockRedis.set.mockResolvedValue('OK');
     mockGetConnection.mockReturnValue(mockRedis);
     mockHasPaymentEligibleDriver.mockResolvedValue({
@@ -170,6 +172,82 @@ describe('pricing routes', () => {
       })
     );
     expect(mockResolveTollFeeFromPricingPayload).not.toHaveBeenCalled();
+    expect(mockEstimateRideFare).not.toHaveBeenCalled();
+  });
+
+  it('reuses the backend canonical route stored for the quote session after the traffic cache expires', async () => {
+    const canonicalRoute = {
+      distance_in_km: 9.7,
+      time_in_secs: 920,
+      duration_in_traffic: 980,
+      polylinePoints: 'nuujC~|kgG_|B_|B_|B_|B'
+    };
+    mockFetchDirectionsRoute.mockResolvedValue({
+      cached: false,
+      cacheOnly: true,
+      data: null,
+      status: 'cache_miss'
+    });
+    mockRedis.get.mockResolvedValue(JSON.stringify({
+      routeSignature: '-22.96600|-43.18200|-22.97400|-43.20700',
+      canonicalRoute
+    }));
+    mockRedis.eval.mockResolvedValue(2);
+
+    const response = await request(createApp())
+      .post('/pricing/quote')
+      .set('x-leaf-quote-session-id', 'passenger_quote_refresh_1')
+      .send({
+        pickupLocation: { lat: '-22.9660', lng: '-43.1820' },
+        destinationLocation: { lat: '-22.9740', lng: '-43.2070' },
+        routeDistanceKm: 0.1,
+        routeDurationSecs: 1,
+        routePolyline: 'client_route_must_not_be_used',
+        carType: 'Leaf Plus'
+      });
+
+    expect(response.status).toBe(200);
+    expect(response.headers['x-leaf-quote-route-source']).toBe('quote_session');
+    expect(response.body.canonicalRouteSource).toBe('quote_session');
+    expect(response.body.quoteRequestCount).toBe(2);
+    expect(mockEstimateRideFare).toHaveBeenCalledWith(expect.objectContaining({
+      routeDistanceKm: 9.7,
+      routeDurationSecs: 980
+    }));
+    expect(mockRedis.get).toHaveBeenCalledWith(
+      'pricing:quote-session-route:passenger_quote_refresh_1'
+    );
+  });
+
+  it('rejects a stored quote-session route when its server signature does not match the requested route', async () => {
+    mockFetchDirectionsRoute.mockResolvedValue({
+      cached: false,
+      cacheOnly: true,
+      data: null,
+      status: 'cache_miss'
+    });
+    mockRedis.get.mockResolvedValue(JSON.stringify({
+      routeSignature: '-22.90000|-43.10000|-22.91000|-43.11000',
+      canonicalRoute: {
+        distance_in_km: 9.7,
+        time_in_secs: 920,
+        duration_in_traffic: 980,
+        polylinePoints: 'nuujC~|kgG_|B_|B_|B_|B'
+      }
+    }));
+
+    const response = await request(createApp())
+      .post('/pricing/quote')
+      .set('x-leaf-quote-session-id', 'passenger_quote_wrong_route_1')
+      .send({
+        pickupLocation: { lat: '-22.9660', lng: '-43.1820' },
+        destinationLocation: { lat: '-22.9740', lng: '-43.2070' },
+        carType: 'Leaf Plus'
+      });
+
+    expect(response.status).toBe(503);
+    expect(response.body.code).toBe('CANONICAL_ROUTE_REQUIRED');
+    expect(mockRedis.eval).not.toHaveBeenCalled();
     expect(mockEstimateRideFare).not.toHaveBeenCalled();
   });
 
@@ -396,6 +474,15 @@ describe('pricing routes', () => {
     expect(response.headers['x-leaf-quote-session-count']).toBe('2');
     expect(response.body.quoteSessionId).toBe('passenger_quote_test_1');
     expect(response.body.quoteRequestCount).toBe(2);
+    expect(mockRedis.set).toHaveBeenCalledWith(
+      'pricing:quote-session-route:passenger_quote_test_1',
+      expect.stringContaining(
+        '"routeSignature":"-22.96600|-43.18200|-22.97400|-43.20700"'
+      ),
+      'EX',
+      900,
+      'NX'
+    );
     expect(mockRedis.eval).toHaveBeenCalledWith(
       expect.stringContaining("redis.call('INCR', KEYS[1])"),
       1,
