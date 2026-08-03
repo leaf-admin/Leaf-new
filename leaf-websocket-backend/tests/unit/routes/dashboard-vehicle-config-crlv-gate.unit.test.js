@@ -9,6 +9,7 @@ const mockRedisHset = jest.fn();
 const mockRedisDel = jest.fn();
 const mockRedisZrem = jest.fn();
 const mockRedisSrem = jest.fn();
+const mockCommitDriverOnlineProjection = jest.fn();
 const mockRedisEval = jest.fn(async () => {
   if (mockActiveTripReadError) throw mockActiveTripReadError;
   return [mockActiveTripId || '', ''];
@@ -131,6 +132,9 @@ jest.mock('../../../utils/redis-scan', () => ({
 jest.mock('../../../services/audit-service', () => ({
   logEvent: mockAuditLogEvent,
 }));
+jest.mock('../../../services/driver-online-projection-service', () => ({
+  commitDriverOnlineProjection: (...args) => mockCommitDriverOnlineProjection(...args),
+}));
 
 jest.mock('../../../services/kyc-driver-status-service', () => ({}));
 jest.mock('../../../services/dashboard-live-data-service', () => ({ getDashboardLiveData: jest.fn() }));
@@ -200,6 +204,7 @@ describe('dashboard vehicle configuration canonical CRLV gate', () => {
     mockRedisDel.mockResolvedValue(1);
     mockRedisZrem.mockResolvedValue(1);
     mockRedisSrem.mockResolvedValue(1);
+    mockCommitDriverOnlineProjection.mockResolvedValue({ success: true });
     mockRecomputeDriverActivationStatus.mockResolvedValue({
       canGoOnline: true,
       activationState: 'ACTIVE',
@@ -376,18 +381,24 @@ describe('dashboard vehicle configuration canonical CRLV gate', () => {
       'user_vehicles/driver-1/link-1/status': 'pending',
       'users/driver-1/activeVehicleId': '',
     }));
-    expect(mockRedisHset).toHaveBeenCalledWith(
-      'driver:driver-1',
+    expect(mockCommitDriverOnlineProjection).toHaveBeenCalledWith(
+      expect.anything(),
       expect.objectContaining({
-        status: 'OFFLINE',
-        isOnline: 'false',
-        dispatchEligible: 'false',
-        dispatchEligibilityCode: 'VEHICLE_CONFIGURATION_REVOKED',
+        driverId: 'driver-1',
+        driverKey: 'driver:driver-1',
+        eligibleGeoKey: 'driver_locations_eligible',
+        isOnline: false,
+        dispatchEligible: false,
+        fields: expect.objectContaining({
+          status: 'OFFLINE',
+          isOnline: 'false',
+          dispatchEligible: 'false',
+          dispatchEligibilityCode: 'VEHICLE_CONFIGURATION_REVOKED',
+        }),
       })
     );
-    expect(mockRedisZrem).toHaveBeenCalledWith('driver_locations_eligible', 'driver-1');
-    expect(mockRedisZrem).toHaveBeenCalledWith('driver_locations', 'driver-1');
-    expect(mockRedisSrem).toHaveBeenCalledWith('online_drivers', 'driver-1');
+    expect(mockRedisZrem).not.toHaveBeenCalled();
+    expect(mockRedisSrem).not.toHaveBeenCalled();
     expect(response.body.data).toMatchObject({
       setActive: false,
       operationalSyncPending: false,
@@ -431,22 +442,26 @@ describe('dashboard vehicle configuration canonical CRLV gate', () => {
     });
 
     expect(response.status).toBe(200);
-    expect(mockRedisHset).toHaveBeenCalledWith(
-      'driver:driver-1',
+    expect(mockCommitDriverOnlineProjection).toHaveBeenCalledWith(
+      expect.anything(),
       expect.objectContaining({
-        dispatchEligible: 'false',
-        dispatchEligibilityCode: 'VEHICLE_CONFIGURATION_REVOKED_ACTIVE_TRIP',
-        vehicleOfflinePendingAfterTrip: 'true',
-        vehicleOfflineDeferredReason: 'ACTIVE_TRIP',
-        activeTripId: 'trip-active-1',
+        driverId: 'driver-1',
+        projectionScope: 'eligibility_only',
+        dispatchEligible: false,
+        fields: expect.objectContaining({
+          dispatchEligible: 'false',
+          dispatchEligibilityCode: 'VEHICLE_CONFIGURATION_REVOKED_ACTIVE_TRIP',
+          vehicleOfflinePendingAfterTrip: 'true',
+          vehicleOfflineDeferredReason: 'ACTIVE_TRIP',
+          activeTripId: 'trip-active-1',
+        }),
       })
     );
     expect(
-      mockRedisHset.mock.calls.some(([, payload]) => payload?.status === 'OFFLINE')
+      mockCommitDriverOnlineProjection.mock.calls.some(([, payload]) => payload?.isOnline === false)
     ).toBe(false);
-    expect(mockRedisZrem).toHaveBeenCalledWith('driver_locations_eligible', 'driver-1');
-    expect(mockRedisZrem).not.toHaveBeenCalledWith('driver_locations', 'driver-1');
-    expect(mockRedisSrem).not.toHaveBeenCalledWith('online_drivers', 'driver-1');
+    expect(mockRedisZrem).not.toHaveBeenCalled();
+    expect(mockRedisSrem).not.toHaveBeenCalled();
     expect(response.body.data.operationalRevocation).toMatchObject({
       synced: true,
       dispatchEligible: false,
@@ -484,5 +499,24 @@ describe('dashboard vehicle configuration canonical CRLV gate', () => {
       })
     );
     expect(mockRootUpdate).toHaveBeenCalled();
+  });
+
+  it('reports operational synchronization pending when the atomic revocation rejects', async () => {
+    mockCommitDriverOnlineProjection.mockRejectedValueOnce(new Error('atomic projection rejected'));
+
+    const response = await configureVehicle({ setActive: false, vehicleStatus: 'inactive' });
+
+    expect(response.status).toBe(200);
+    expect(response.body.message).toContain('sincronização operacional pendente');
+    expect(response.body.data).toMatchObject({
+      operationalSyncPending: true,
+      operationalRevocation: {
+        requested: true,
+        synced: false,
+        dispatchEligible: false,
+        offlineDeferred: true,
+        offlineDeferredReason: 'OPERATIONAL_SYNC_PENDING',
+      },
+    });
   });
 });
