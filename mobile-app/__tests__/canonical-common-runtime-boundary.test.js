@@ -104,14 +104,26 @@ describe('canonical common runtime boundary', () => {
     expect(fs.existsSync(path.join(MOBILE_ROOT, 'src/services/canonical/legacyApiService.js'))).toBe(false);
   });
 
-  it('keeps Redux actions under the canonical actions directory', () => {
+  it('keeps the retired ride Redux action graph out of the runtime', () => {
     const commonLocalDirectory = path.join(MOBILE_ROOT, 'src/common-local');
+    const actionsDirectory = path.join(commonLocalDirectory, 'actions');
     const duplicatedRootActions = fs.readdirSync(commonLocalDirectory)
       .filter((fileName) => fileName.endsWith('actions.js'))
       .sort();
+    const remainingActionModules = fs.existsSync(actionsDirectory)
+      ? fs.readdirSync(actionsDirectory).filter((fileName) => fileName.endsWith('.js')).sort()
+      : [];
+    const ratingServiceSource = fs.readFileSync(
+      path.join(MOBILE_ROOT, 'src/services/RatingService.js'),
+      'utf8',
+    );
 
     expect(duplicatedRootActions).toEqual([]);
-    expect(fs.existsSync(path.join(commonLocalDirectory, 'actions/bookingactions.js'))).toBe(true);
-    expect(fs.existsSync(path.join(commonLocalDirectory, 'actions/tripactions.js'))).toBe(true);
+    expect(remainingActionModules).toEqual([]);
+    expect(fs.existsSync(path.join(MOBILE_ROOT, 'src/services/canonical/rideService.js'))).toBe(false);
+    expect(fs.existsSync(path.join(MOBILE_ROOT, 'src/services/runtime/bookingStateBridge.js'))).toBe(false);
+    expect(fs.existsSync(path.join(MOBILE_ROOT, 'src/services/runtime/ratingStateBridge.js'))).toBe(false);
+    expect(ratingServiceSource).not.toContain('ratingStateBridge');
+    expect(ratingServiceSource).not.toContain('store.dispatch');
   });
 });

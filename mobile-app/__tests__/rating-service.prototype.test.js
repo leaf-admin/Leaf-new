@@ -52,7 +52,7 @@ describe('RatingService prototype bypass', () => {
 
     expect(result).toEqual({ success: true });
     expect(AsyncStorage.setItem).toHaveBeenCalled();
-    expect(store.dispatch).toHaveBeenCalled();
+    expect(store.dispatch).not.toHaveBeenCalled();
     expect(mockWebSocketInstance.connect).toHaveBeenCalled();
     expect(mockWebSocketInstance.submitRating).toHaveBeenCalled();
   });
@@ -73,7 +73,7 @@ describe('RatingService prototype bypass', () => {
 
     expect(result).toEqual({ success: true, localOnly: true });
     expect(AsyncStorage.setItem).toHaveBeenCalled();
-    expect(store.dispatch).toHaveBeenCalled();
+    expect(store.dispatch).not.toHaveBeenCalled();
   });
 
   it('marca uma avaliacao confirmada pelo backend como enviada, sem recoloca-la na fila', async () => {
