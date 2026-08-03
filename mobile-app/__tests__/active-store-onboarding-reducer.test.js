@@ -10,7 +10,13 @@ describe('active app store onboarding reducer', () => {
   });
 
   it('hydrates onboarding state instead of forcing Splash to time out', () => {
-    expect(store.getState()).toHaveProperty('onboarding');
+    expect(Object.keys(store.getState()).sort()).toEqual([
+      'auth',
+      'cartypes',
+      'languagedata',
+      'onboarding',
+      'settingsdata',
+    ]);
 
     store.dispatch(loadOnboardingFromStorage({
       currentStep: 5,
