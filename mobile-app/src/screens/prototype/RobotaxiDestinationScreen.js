@@ -1140,6 +1140,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
     PICKUP_FLOATING_CARD_FALLBACK_HEIGHT,
   );
   const [fareQuoteLock, setFareQuoteLock] = useState(null);
+  const [paymentRecoveryPending, setPaymentRecoveryPending] = useState(false);
   const [preferenceModalVisible, setPreferenceModalVisible] = useState(false);
   const [preferenceProgress, setPreferenceProgress] = useState(0);
   const [preferenceDropdownKey, setPreferenceDropdownKey] = useState(null);
@@ -1155,6 +1156,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
   const latestRidePreferencesRef = useRef(null);
   const pendingPaymentConfirmationRef = useRef(null);
   const paymentRecoveryAttemptedRef = useRef("");
+  const paymentRecoveryPendingRef = useRef(false);
   const initialSelectedDestinationHydratedRef = useRef(false);
   const loadRecentDestinationsRef = useRef(loadRecentDestinations);
   const checkRideAvailabilityRef = useRef(checkRideAvailability);
@@ -2196,6 +2198,8 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
     }
 
     paymentRecoveryAttemptedRef.current = paymentRecoveryRouteContextKey;
+    paymentRecoveryPendingRef.current = true;
+    setPaymentRecoveryPending(true);
     let cancelled = false;
     findRecoverableRidePaymentSession({
       passengerId,
@@ -2238,10 +2242,18 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
         });
         setPixModalVisible(true);
       })
-      .catch(() => undefined);
+      .catch(() => undefined)
+      .finally(() => {
+        if (cancelled) {
+          return;
+        }
+        paymentRecoveryPendingRef.current = false;
+        setPaymentRecoveryPending(false);
+      });
 
     return () => {
       cancelled = true;
+      paymentRecoveryPendingRef.current = false;
     };
   }, [
     canRequestRide,
@@ -4002,6 +4014,8 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
       isPixModalVisible ||
       directPixReturnHomePending ||
       directPixPaymentConfirmedRef.current ||
+      paymentRecoveryPendingRef.current ||
+      paymentRecoveryPending ||
       preferenceModalVisible ||
       submittingRide
     ) {
@@ -4018,6 +4032,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
   }, [
     directPixReturnHomePending,
     isPixModalVisible,
+    paymentRecoveryPending,
     preferenceModalVisible,
     returnToCleanPassengerHome,
     shouldOpenPixOnReady,
@@ -4029,6 +4044,8 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
       !shouldOpenPixOnReady ||
       directPixOpenRequestedRef.current ||
       directPixPaymentConfirmedRef.current ||
+      paymentRecoveryPendingRef.current ||
+      paymentRecoveryPending ||
       preferenceModalVisible ||
       (step !== CONFIRM_STEP && step !== QUOTE_STEP) ||
       !canRequestRide ||
@@ -4076,6 +4093,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
     navigation,
     returnToCleanPassengerHome,
     paymentQuotePending,
+    paymentRecoveryPending,
     preferenceModalVisible,
     shouldOpenPixOnReady,
     step,

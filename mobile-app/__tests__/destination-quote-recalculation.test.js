@@ -5,6 +5,7 @@ import { Alert } from "react-native";
 import RobotaxiDestinationScreen from "../src/screens/prototype/RobotaxiDestinationScreen";
 import { usePrototypeRideRuntime } from "../src/screens/prototype/prototypeRideRuntime";
 import { fetchDynamicPricingQuote } from "../src/services/runtime/pricingQuoteService";
+import { findRecoverableRidePaymentSession } from "../src/services/RidePaymentSessionService";
 
 jest.mock("../src/screens/prototype/prototypeRideRuntime", () => ({
   usePrototypeRideRuntime: jest.fn(),
@@ -13,6 +14,15 @@ jest.mock("../src/screens/prototype/prototypeRideRuntime", () => ({
 jest.mock("../src/services/runtime/pricingQuoteService", () => ({
   fetchDynamicPricingQuote: jest.fn(),
 }));
+
+jest.mock("../src/services/RidePaymentSessionService", () => {
+  const actual = jest.requireActual("../src/services/RidePaymentSessionService");
+  return {
+    ...actual,
+    clearRidePaymentSession: jest.fn().mockResolvedValue(false),
+    findRecoverableRidePaymentSession: jest.fn().mockResolvedValue(null),
+  };
+});
 
 jest.mock("../src/screens/prototype/prototypeMapOcclusion", () => ({
   usePrototypeMapOcclusion: jest.fn(),
@@ -189,6 +199,8 @@ describe("RobotaxiDestinationScreen", () => {
   beforeEach(() => {
     jest.clearAllMocks();
     global.__LEAF_TEST_PIX_CONFIRMATION_OVERRIDES__ = null;
+    findRecoverableRidePaymentSession.mockReset();
+    findRecoverableRidePaymentSession.mockResolvedValue(null);
     fetchDynamicPricingQuote.mockReset();
     fetchDynamicPricingQuote.mockResolvedValue({
       estimatedFare: 13.42,
@@ -955,6 +967,13 @@ describe("RobotaxiDestinationScreen", () => {
   });
 
   it("reuses the valid home quote before direct PIX without consuming another refresh", async () => {
+    let resolvePaymentRecovery;
+    findRecoverableRidePaymentSession.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolvePaymentRecovery = resolve;
+        }),
+    );
     const nativeSetTimeout = global.setTimeout;
     let directPixAvailabilityTimeoutSchedules = 0;
     global.setTimeout = (callback, delay, ...args) => {
@@ -1050,6 +1069,15 @@ describe("RobotaxiDestinationScreen", () => {
         }}
       />,
     );
+
+    await waitFor(() => {
+      expect(findRecoverableRidePaymentSession).toHaveBeenCalled();
+    });
+    expect(screen.queryByTestId("mock-pix-amount")).toBeNull();
+
+    await act(async () => {
+      resolvePaymentRecovery(null);
+    });
 
     await waitFor(() => {
       expect(checkRideAvailability).toHaveBeenCalledWith(
