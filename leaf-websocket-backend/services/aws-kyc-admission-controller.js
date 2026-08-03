@@ -1,5 +1,6 @@
 const redisPool = require('../utils/redis-pool');
 const { logStructured, logError } = require('../utils/logger');
+const { metrics } = require('../utils/prometheus-metrics');
 
 const ADMISSION_KEYS = Object.freeze({
   createBucket: '{kyc:aws:admission}:create:bucket',
@@ -260,6 +261,10 @@ class AwsKycAdmissionController {
       lastResult = await attempt();
       if (lastResult?.status === 'acquired') {
         const waitedMs = Math.max(0, this.nowMs() - startedAtMs);
+        metrics.recordKycAwsAdmission(operation, 'acquired', waitedMs / 1000);
+        if (operation === 'create' && Number.isFinite(Number(lastResult.active))) {
+          metrics.setKycAwsAdmissionActiveSessions(Number(lastResult.active));
+        }
         if (hadAdmissionWait) {
           logStructured('info', 'Admissao AWS KYC liberada apos espera curta', {
             service: 'aws-kyc-admission-controller',
@@ -280,6 +285,11 @@ class AwsKycAdmissionController {
             this.retryFloorMs,
             Number(lastResult?.retryAfterMs || this.retryFloorMs)
           )
+        );
+        metrics.recordKycAwsAdmission(
+          operation,
+          lastResult?.status || 'capacity_exhausted',
+          elapsedMs / 1000
         );
         throw createAdmissionError(
           'Capacidade AWS KYC temporariamente ocupada',
@@ -339,12 +349,16 @@ class AwsKycAdmissionController {
     if (!this.isEnabled()) return { released: false, enabled: false };
     const safeLeaseId = String(leaseId || '').trim();
     if (!safeLeaseId) return { released: false, enabled: true };
-    return this.runScript(
+    const result = await this.runScript(
       RELEASE_CREATE_LEASE_SCRIPT,
       1,
       ADMISSION_KEYS.activeLeases,
       safeLeaseId
     );
+    if (Number.isFinite(Number(result?.active))) {
+      metrics.setKycAwsAdmissionActiveSessions(Number(result.active));
+    }
+    return result;
   }
 }
 
