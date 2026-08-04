@@ -150,6 +150,7 @@ run_xcodebuild_with_smithy_retry() {
 
 sync_native_ios_version() {
   local info_plist_path="${PROJECT_DIR}/ios/Leaf/Info.plist"
+  local widget_info_plist_path="${PROJECT_DIR}/ios/LeafRideActivityWidget/Info.plist"
   local expected_version
   local expected_build_number
   local microphone_usage="A Leaf usa o microfone para capturar o destino por voz quando você tocar no ícone de microfone."
@@ -159,6 +160,10 @@ sync_native_ios_version() {
 
   if [[ ! -f "${info_plist_path}" ]]; then
     echo "❌ Info.plist nativo do iOS não encontrado: ${info_plist_path}"
+    exit 1
+  fi
+  if [[ ! -f "${widget_info_plist_path}" ]]; then
+    echo "❌ Info.plist do widget iOS não encontrado: ${widget_info_plist_path}"
     exit 1
   fi
 
@@ -173,6 +178,10 @@ sync_native_ios_version() {
     || /usr/libexec/PlistBuddy -c "Add :CFBundleShortVersionString string ${expected_version}" "${info_plist_path}"
   /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${expected_build_number}" "${info_plist_path}" >/dev/null 2>&1 \
     || /usr/libexec/PlistBuddy -c "Add :CFBundleVersion string ${expected_build_number}" "${info_plist_path}"
+  /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString ${expected_version}" "${widget_info_plist_path}" >/dev/null 2>&1 \
+    || /usr/libexec/PlistBuddy -c "Add :CFBundleShortVersionString string ${expected_version}" "${widget_info_plist_path}"
+  /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${expected_build_number}" "${widget_info_plist_path}" >/dev/null 2>&1 \
+    || /usr/libexec/PlistBuddy -c "Add :CFBundleVersion string ${expected_build_number}" "${widget_info_plist_path}"
   /usr/libexec/PlistBuddy -c "Set :NSMicrophoneUsageDescription ${microphone_usage}" "${info_plist_path}" >/dev/null 2>&1 \
     || /usr/libexec/PlistBuddy -c "Add :NSMicrophoneUsageDescription string ${microphone_usage}" "${info_plist_path}"
   /usr/libexec/PlistBuddy -c "Set :NSSpeechRecognitionUsageDescription ${speech_usage}" "${info_plist_path}" >/dev/null 2>&1 \
@@ -185,7 +194,7 @@ sync_native_ios_version() {
     || /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity:NSAllowsLocalNetworking bool ${ats_bool_value}" "${info_plist_path}"
   /usr/libexec/PlistBuddy -c "Delete :NSAppTransportSecurity:NSExceptionDomains" "${info_plist_path}" >/dev/null 2>&1 || true
 
-  echo "✅ Info.plist iOS sincronizado: ${expected_version} (${expected_build_number})."
+  echo "✅ Info.plist do app e do widget iOS sincronizados: ${expected_version} (${expected_build_number})."
 }
 
 sync_native_ios_updates_config() {
@@ -231,9 +240,14 @@ assert_ios_app_artifact() {
   local context="$2"
   local app_config_path="${app_path}/EXConstants.bundle/app.config"
   local info_plist_path="${app_path}/Info.plist"
+  local widget_info_plist_path="${app_path}/PlugIns/LeafRideActivityWidget.appex/Info.plist"
   local expo_plist_path="${app_path}/Expo.plist"
+  local expected_version
   local expected_build_number
+  local actual_version
   local actual_build_number
+  local widget_actual_version
+  local widget_actual_build_number
   local updates_enabled=""
   local updates_channel=""
   local microphone_usage=""
@@ -248,10 +262,11 @@ assert_ios_app_artifact() {
     exit 1
   fi
 
+  expected_version="$(node -e "console.log(require('./config/AppConfig').AppConfig.ios_app_version)")"
   expected_build_number="$(node -e "console.log(require('./config/AppConfig').AppConfig.ios_build_number)")"
-  expected_runtime_version="${LEAF_RUNTIME_VERSION:-${EXPO_RUNTIME_VERSION:-$(node -e "console.log(require('./config/AppConfig').AppConfig.ios_app_version)")}}"
+  expected_runtime_version="${LEAF_RUNTIME_VERSION:-${EXPO_RUNTIME_VERSION:-${expected_version}}}"
 
-  LEAF_EXPECTED_IOS_VERSION="$(node -e "console.log(require('./config/AppConfig').AppConfig.ios_app_version)")" \
+  LEAF_EXPECTED_IOS_VERSION="${expected_version}" \
   LEAF_EXPECTED_IOS_BUILD_NUMBER="${expected_build_number}" \
   LEAF_EXPECTED_RUNTIME_VERSION="${expected_runtime_version}" node - "${app_config_path}" <<'NODE'
 const fs = require('fs');
@@ -312,6 +327,22 @@ NODE
     exit 1
   fi
   echo "✅ CFBundleVersion confere: ${actual_build_number}."
+
+  if [[ ! -f "${widget_info_plist_path}" ]]; then
+    echo "❌ Info.plist do widget ausente no artefato iOS (${context})."
+    exit 1
+  fi
+  actual_version="$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "${info_plist_path}" 2>/dev/null || true)"
+  widget_actual_version="$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "${widget_info_plist_path}" 2>/dev/null || true)"
+  widget_actual_build_number="$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "${widget_info_plist_path}" 2>/dev/null || true)"
+  if [[ "${actual_version}" != "${expected_version}" || "${widget_actual_version}" != "${expected_version}" || "${widget_actual_build_number}" != "${expected_build_number}" ]]; then
+    echo "❌ Versão do widget divergente do app no artefato iOS (${context})."
+    echo "   Esperado: ${expected_version} (${expected_build_number})"
+    echo "   App: ${actual_version:-<vazio>} (${actual_build_number:-<vazio>})"
+    echo "   Widget: ${widget_actual_version:-<vazio>} (${widget_actual_build_number:-<vazio>})"
+    exit 1
+  fi
+  echo "✅ Versão do widget confere com o app: ${widget_actual_version} (${widget_actual_build_number})."
 
   microphone_usage="$(/usr/libexec/PlistBuddy -c "Print :NSMicrophoneUsageDescription" "${info_plist_path}" 2>/dev/null || true)"
   if [[ -z "${microphone_usage}" ]]; then
