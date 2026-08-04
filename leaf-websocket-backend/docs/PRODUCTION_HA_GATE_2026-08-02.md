@@ -19,6 +19,13 @@ Para um gateway de produção em lançamento amplo, `config:validate` exige:
    menos dois domínios de falha distintos.
 4. Drill de failover da borda identificado e executado nos últimos 30 dias.
 
+Gateways e workers isolados de `trip-location`, `pricing-baseline` e
+`ride-health-monitor` recebem o mesmo conjunto explícito de descoberta,
+autenticação e TLS do Sentinel. Os workers não importam o `.env` inteiro, para
+evitar ampliar o alcance de segredos não relacionados. Em modo `standalone`, os
+valores atuais de `REDIS_HOST`/`REDIS_URL` continuam sendo usados sem mudança de
+comportamento.
+
 As variáveis e exemplos ficam em `config/redis-sentinel.env.example`.
 
 ## Limite da comprovação

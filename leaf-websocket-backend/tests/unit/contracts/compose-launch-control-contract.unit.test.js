@@ -365,6 +365,42 @@ describe('production compose launch-control contract', () => {
     expect(deploySource).toContain('cmp -s .env');
   });
 
+  it('keeps every isolated ops worker on the same Redis Sentinel authority as the gateways', () => {
+    const workerNames = [
+      'trip-location-worker',
+      'pricing-baseline-worker',
+      'ride-health-monitor-worker',
+    ];
+    const sentinelSettings = [
+      'REDIS_MODE=${REDIS_MODE:-standalone}',
+      'REDIS_SENTINELS=${REDIS_SENTINELS:-}',
+      'REDIS_SENTINEL_MASTER_NAME=${REDIS_SENTINEL_MASTER_NAME:-leaf-master}',
+      'REDIS_SENTINEL_USERNAME=${REDIS_SENTINEL_USERNAME:-}',
+      'REDIS_SENTINEL_PASSWORD=${REDIS_SENTINEL_PASSWORD:-}',
+      'REDIS_USERNAME=${REDIS_USERNAME:-}',
+      'REDIS_USE_TLS=${REDIS_USE_TLS:-false}',
+      'REDIS_TLS_REJECT_UNAUTHORIZED=${REDIS_TLS_REJECT_UNAUTHORIZED:-true}',
+      'REDIS_SENTINEL_USE_TLS=${REDIS_SENTINEL_USE_TLS:-false}',
+      'REDIS_SENTINEL_TLS_REJECT_UNAUTHORIZED=${REDIS_SENTINEL_TLS_REJECT_UNAUTHORIZED:-true}',
+    ];
+
+    for (const [index, workerName] of workerNames.entries()) {
+      const workerStartIndex = opsWorkersSource.indexOf(`  ${workerName}:`);
+      const nextWorkerName = workerNames[index + 1];
+      const workerEndIndex = nextWorkerName
+        ? opsWorkersSource.indexOf(`\n  ${nextWorkerName}:`, workerStartIndex)
+        : opsWorkersSource.length;
+      const isolatedWorkerSource = opsWorkersSource.slice(workerStartIndex, workerEndIndex);
+
+      expect(workerStartIndex).toBeGreaterThan(-1);
+      expect(workerEndIndex).toBeGreaterThan(workerStartIndex);
+      expect(isolatedWorkerSource).not.toContain('env_file:');
+      for (const setting of sentinelSettings) {
+        expect(isolatedWorkerSource).toContain(`- ${setting}`);
+      }
+    }
+  });
+
   it('runs the trip-location consumer as a health-attested canonical Docker worker', () => {
     const tripWorkerStart = opsWorkersSource.indexOf('  trip-location-worker:');
     const tripWorkerEnd = opsWorkersSource.indexOf('\n  pricing-baseline-worker:', tripWorkerStart);
