@@ -5,6 +5,17 @@ function read(relativePath) {
   return fs.readFileSync(path.resolve(__dirname, `../../../${relativePath}`), 'utf8');
 }
 
+function serviceBlock(source, serviceName) {
+  const marker = `  ${serviceName}:`;
+  const start = source.indexOf(marker);
+  if (start < 0) throw new Error(`Missing service: ${serviceName}`);
+  const remainder = source.slice(start + marker.length);
+  const nextServiceOffset = remainder.search(/\n  [a-zA-Z0-9][a-zA-Z0-9_-]*:/);
+  return nextServiceOffset < 0
+    ? source.slice(start)
+    : source.slice(start, start + marker.length + nextServiceOffset);
+}
+
 describe('secondary contingency compose contract', () => {
   const compose = read('docker-compose.contingency-secondary.yml');
   const tunnelDockerfile = read('Dockerfile.contingency-tunnel');
@@ -53,12 +64,19 @@ describe('secondary contingency compose contract', () => {
   });
 
   test('enforces the cheap-host resource and hardening budget', () => {
+    const tunnel = serviceBlock(compose, 'redis-primary-tunnel');
+    const replica = serviceBlock(compose, 'redis-replica');
+
     expect(compose.match(/mem_limit:/g)).toHaveLength(3);
     expect(compose.match(/cpus:/g)).toHaveLength(3);
     expect(compose.match(/pids_limit:/g)).toHaveLength(3);
     expect(compose.match(/no-new-privileges:true/g)).toHaveLength(3);
     expect(compose).toContain('mem_limit: 768m');
     expect(compose).toContain('cpus: "0.50"');
+    for (const capability of ['CHOWN', 'SETGID', 'SETUID']) {
+      expect(replica).toContain(`- ${capability}`);
+      expect(tunnel).not.toContain(`- ${capability}`);
+    }
   });
 
   test('validates both the alternate edge path and live replication', () => {
