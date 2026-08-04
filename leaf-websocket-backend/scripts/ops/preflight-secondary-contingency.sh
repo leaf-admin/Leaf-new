@@ -11,6 +11,9 @@ fail() {
 
 docker compose -f "$COMPOSE_FILE" ps --status running >/dev/null
 
+[ "$(cat /proc/sys/vm/overcommit_memory)" = "1" ] \
+    || fail "vm.overcommit_memory must be 1 for Redis persistence safety"
+
 running_services="$(docker compose -f "$COMPOSE_FILE" ps --services --status running)"
 for service in redis-primary-tunnel redis-replica edge-canary; do
     printf '%s\n' "$running_services" | grep -qx "$service" || fail "$service is not running"

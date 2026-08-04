@@ -31,6 +31,7 @@ Install under `/opt/leaf-contingency`:
 docker-compose.contingency-secondary.yml
 Dockerfile.contingency-tunnel
 config/secondary-contingency/nginx.conf
+config/secondary-contingency/90-leaf-redis-contingency.conf
 scripts/ops/start-secondary-redis-replica.sh
 scripts/ops/preflight-secondary-contingency.sh
 secrets/primary_ssh_key
@@ -45,6 +46,14 @@ The dedicated primary key must be source-IP restricted and limited with `permito
 - `127.0.0.1:3001`.
 
 Strict host-key checking is mandatory. Do not copy the primary host's general-purpose SSH key.
+
+Install the versioned Redis kernel prerequisite and apply it before starting the replica:
+
+```bash
+install -m 0644 config/secondary-contingency/90-leaf-redis-contingency.conf \
+  /etc/sysctl.d/90-leaf-redis-contingency.conf
+sysctl --system
+```
 
 ## Start and validate
 

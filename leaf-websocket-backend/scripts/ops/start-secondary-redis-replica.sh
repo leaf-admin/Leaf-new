@@ -33,5 +33,5 @@ maxmemory-policy noeviction
 EOF
 
 unset escaped_password
-chown redis:redis "$CONFIG_FILE" /data
-exec su-exec redis redis-server "$CONFIG_FILE"
+chown redis:redis "$CONFIG_FILE" /run/leaf-runtime /data
+exec /usr/bin/setpriv --reuid redis --regid redis --clear-groups redis-server "$CONFIG_FILE"

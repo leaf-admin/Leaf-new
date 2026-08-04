@@ -22,6 +22,7 @@ describe('secondary contingency compose contract', () => {
   const redisEntrypoint = read('scripts/ops/start-secondary-redis-replica.sh');
   const nginx = read('config/secondary-contingency/nginx.conf');
   const preflight = read('scripts/ops/preflight-secondary-contingency.sh');
+  const sysctl = read('config/secondary-contingency/90-leaf-redis-contingency.conf');
 
   test('keeps every contingency endpoint off public host interfaces', () => {
     expect(compose).toContain('"127.0.0.1:18080:8080"');
@@ -48,6 +49,13 @@ describe('secondary contingency compose contract', () => {
     expect(redisEntrypoint).toContain('requirepass "$escaped_password"');
     expect(redisEntrypoint).toContain('replica-read-only yes');
     expect(redisEntrypoint).toContain('maxmemory-policy noeviction');
+    expect(redisEntrypoint).toContain(
+      '/usr/bin/setpriv --reuid redis --regid redis --clear-groups redis-server',
+    );
+    expect(redisEntrypoint).toContain(
+      'chown redis:redis "$CONFIG_FILE" /run/leaf-runtime /data',
+    );
+    expect(redisEntrypoint).not.toContain('su-exec');
   });
 
   test('does not start an application gateway or operational worker', () => {
@@ -86,5 +94,7 @@ describe('secondary contingency compose contract', () => {
     expect(preflight).toContain("grep -q '^role:slave'");
     expect(preflight).toContain("grep -q '^master_link_status:up'");
     expect(preflight).toContain("grep -q '^master_sync_in_progress:0'");
+    expect(preflight).toContain('/proc/sys/vm/overcommit_memory');
+    expect(sysctl.trim()).toBe('vm.overcommit_memory=1');
   });
 });
