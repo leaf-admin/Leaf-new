@@ -12,9 +12,11 @@ const FORBIDDEN_PROJECT_PERMISSIONS = Object.freeze([
   'datastore.backups.restoreDatabase',
   'datastore.databases.delete',
   'datastore.databases.update',
+  'firebasedatabase.instances.create',
   'firebasedatabase.instances.delete',
   'firebasedatabase.instances.disable',
-  'firebasedatabase.instances.update',
+  'firebasedatabase.instances.reenable',
+  'firebasedatabase.instances.undelete',
   'resourcemanager.projects.delete',
   'resourcemanager.projects.setIamPolicy'
 ]);
@@ -46,6 +48,7 @@ const REQUIRED_PROJECT_PERMISSIONS = Object.freeze([
   'firebaseauth.users.update',
   'firebasedatabase.instances.get',
   'firebasedatabase.instances.list',
+  'firebasedatabase.instances.update',
   'resourcemanager.projects.get'
 ]);
 

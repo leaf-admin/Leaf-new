@@ -19,6 +19,7 @@
     "firebaseauth.users.update",
     "firebasedatabase.instances.get",
     "firebasedatabase.instances.list",
+    "firebasedatabase.instances.update",
     "resourcemanager.projects.get"
   ]
 }

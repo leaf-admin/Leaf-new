@@ -17,7 +17,7 @@ Permissões proibidas:
 - criar ou apagar agendas de backup do Firestore;
 - apagar ou restaurar backups do Firestore;
 - atualizar ou apagar o banco Firestore;
-- desabilitar, apagar ou reconfigurar a instância do Realtime Database;
+- criar, desabilitar, reabilitar, recuperar ou apagar a instância do Realtime Database;
 - apagar o projeto ou alterar sua política IAM;
 - apagar o bucket, alterar sua política IAM ou modificar proteções do bucket;
 - restaurar objetos apagados ou alterar ACL/retenção de objetos.
@@ -26,7 +26,8 @@ Permissões obrigatórias do data plane:
 
 - Firestore: obter o banco, alocar IDs e criar, ler, listar, atualizar e apagar entidades;
 - Auth: criar, obter, atualizar e apagar usuários;
-- RTDB: obter e listar a instância;
+- RTDB: obter/listar a instância e `instances.update`, que é a permissão mínima
+  publicada pelo Firebase para leitura e escrita nos dados existentes;
 - FCM: enviar mensagens;
 - Storage: criar, obter, listar, atualizar e apagar objetos;
 - metadados mínimos de projeto e cliente Firebase usados pelos SDKs.
@@ -43,9 +44,12 @@ configuração, destruição de instância, restauração ou retenção. A ident
 runtime deve usar um papel customizado com o conjunto obrigatório versionado.
 
 O RTDB não expõe permissões IAM granulares para leitura/escrita dos caminhos da
-aplicação. Por isso, `instances.get/list` comprovam somente descoberta da
-instância; o canário funcional deve validar leitura, escrita e limpeza em um
-caminho isolado antes da troca.
+aplicação. A permissão `firebasedatabase.instances.update` também cobre regras e
+configuração da instância, portanto esta é uma limitação explícita do produto e
+o privilégio residual inevitável enquanto o backend ainda escreve no RTDB. As
+permissões separadas de criar, desabilitar, reabilitar, recuperar e apagar a
+instância continuam proibidas. O canário funcional deve validar leitura, escrita
+e limpeza em um caminho isolado antes da troca.
 
 O deploy canônico executa o preflight no artefato candidato, com a credencial
 real montada somente para leitura, antes de substituir qualquer gateway. Fora de

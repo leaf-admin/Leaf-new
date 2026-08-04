@@ -29,9 +29,9 @@ FIREBASE_STORAGE_BUCKET='leaf-reactnative.firebasestorage.app' \
 npm --prefix leaf-websocket-backend run ops:firebase-runtime-iam-plan
 ```
 
-The expected output has `mode=plan_only`, `mutatesCloud=false`, 17 project permissions, five bucket permissions and no basic/admin role.
+The expected output has `mode=plan_only`, `mutatesCloud=false`, 18 project permissions, five bucket permissions and no basic/admin role. The RTDB data-plane canary requires `firebasedatabase.instances.update`, which Firebase documents as the minimum permission for reads and writes to existing RTDB data; instance create/disable/reenable/undelete/delete permissions remain excluded.
 
-The required 22 permissions were queried against the IAM `queryTestablePermissions` API for `leaf-reactnative` on 2026-08-03. All were present, GA and supported in custom roles. Repeat that read-only query immediately before applying if the execution date changes materially.
+The required 23 permissions were queried against the IAM `queryTestablePermissions` API for `leaf-reactnative` on 2026-08-03. All were present, GA and supported in custom roles. Repeat that read-only query immediately before applying if the execution date changes materially.
 
 ## 2. Apply prerequisites — requires separate production authorization
 
