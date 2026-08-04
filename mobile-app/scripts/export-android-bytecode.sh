@@ -3,13 +3,20 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 HERMES_OVERRIDE_DIR="$ROOT_DIR/.hermes-override"
-HERMES_SOURCE_BIN="$ROOT_DIR/node_modules/react-native/sdks/hermesc/osx-bin/hermesc"
+LOCAL_HERMES_BIN="$ROOT_DIR/node_modules/react-native/sdks/hermesc/osx-bin/hermesc"
+WORKSPACE_HERMES_BIN="$ROOT_DIR/../node_modules/react-native/sdks/hermesc/osx-bin/hermesc"
 LOCAL_EXPO_CLI="$ROOT_DIR/node_modules/expo/bin/cli"
 ROOT_EXPO_CLI="$ROOT_DIR/../node_modules/expo/bin/cli"
 
-if [ ! -x "$HERMES_SOURCE_BIN" ]; then
-  echo "Hermes compiler não encontrado em: $HERMES_SOURCE_BIN"
-  echo "Execute: npm install (dentro de mobile-app)"
+if [ -x "$LOCAL_HERMES_BIN" ]; then
+  HERMES_SOURCE_BIN="$LOCAL_HERMES_BIN"
+elif [ -x "$WORKSPACE_HERMES_BIN" ]; then
+  HERMES_SOURCE_BIN="$WORKSPACE_HERMES_BIN"
+else
+  echo "Hermes compiler não encontrado nos caminhos suportados:"
+  echo "- $LOCAL_HERMES_BIN"
+  echo "- $WORKSPACE_HERMES_BIN"
+  echo "Execute: npm install (na raiz do workspace ou dentro de mobile-app)"
   exit 1
 fi
 
