@@ -53,9 +53,14 @@ assert_exported_ipa() {
   local tmp_dir
   local app_config_path
   local info_plist_path
+  local widget_info_plist_path
   local expo_plist_path
+  local expected_version
   local expected_build_number
+  local actual_version
   local actual_build_number
+  local widget_actual_version
+  local widget_actual_build_number
   local microphone_usage
   local updates_enabled
   local updates_channel
@@ -65,6 +70,7 @@ assert_exported_ipa() {
   unzip -q "${ipa_path}" -d "${tmp_dir}"
   app_config_path="$(find "${tmp_dir}/Payload" -path "*/EXConstants.bundle/app.config" -type f | head -n 1)"
   info_plist_path="$(find "${tmp_dir}/Payload" -maxdepth 2 -path "*/Leaf.app/Info.plist" -type f | head -n 1)"
+  widget_info_plist_path="$(find "${tmp_dir}/Payload" -path "*/Leaf.app/PlugIns/LeafRideActivityWidget.appex/Info.plist" -type f | head -n 1)"
   expo_plist_path="$(find "${tmp_dir}/Payload" -maxdepth 2 -path "*/Leaf.app/Expo.plist" -type f | head -n 1)"
 
   if [[ -z "${app_config_path}" ]]; then
@@ -72,10 +78,11 @@ assert_exported_ipa() {
     exit 1
   fi
 
+  expected_version="$(node -e "console.log(require('./config/AppConfig').AppConfig.ios_app_version)")"
   expected_build_number="$(node -e "console.log(require('./config/AppConfig').AppConfig.ios_build_number)")"
-  expected_runtime_version="${LEAF_RUNTIME_VERSION:-${EXPO_RUNTIME_VERSION:-$(node -e "console.log(require('./config/AppConfig').AppConfig.ios_app_version)")}}"
+  expected_runtime_version="${LEAF_RUNTIME_VERSION:-${EXPO_RUNTIME_VERSION:-${expected_version}}}"
 
-  LEAF_EXPECTED_IOS_VERSION="$(node -e "console.log(require('./config/AppConfig').AppConfig.ios_app_version)")" \
+  LEAF_EXPECTED_IOS_VERSION="${expected_version}" \
   LEAF_EXPECTED_IOS_BUILD_NUMBER="${expected_build_number}" \
   LEAF_EXPECTED_RUNTIME_VERSION="${expected_runtime_version}" node - "${app_config_path}" <<'NODE'
 const fs = require('fs');
@@ -136,6 +143,23 @@ NODE
     exit 1
   fi
   echo "✅ CFBundleVersion do IPA confere: ${actual_build_number}."
+
+  if [[ -z "${widget_info_plist_path}" ]]; then
+    echo "❌ Info.plist do widget ausente no IPA exportado."
+    exit 1
+  fi
+  actual_version="$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "${info_plist_path}" 2>/dev/null || true)"
+  widget_actual_version="$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "${widget_info_plist_path}" 2>/dev/null || true)"
+  widget_actual_build_number="$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "${widget_info_plist_path}" 2>/dev/null || true)"
+  if [[ "${actual_version}" != "${expected_version}" || "${widget_actual_version}" != "${expected_version}" || "${widget_actual_build_number}" != "${expected_build_number}" ]]; then
+    echo "❌ Versão do widget divergente do app no IPA exportado."
+    echo "   Esperado: ${expected_version} (${expected_build_number})"
+    echo "   App: ${actual_version:-<vazio>} (${actual_build_number:-<vazio>})"
+    echo "   Widget: ${widget_actual_version:-<vazio>} (${widget_actual_build_number:-<vazio>})"
+    echo "   Não envie ao TestFlight."
+    exit 1
+  fi
+  echo "✅ Versão do widget no IPA confere com o app: ${widget_actual_version} (${widget_actual_build_number})."
 
   microphone_usage="$(/usr/libexec/PlistBuddy -c "Print :NSMicrophoneUsageDescription" "${info_plist_path}" 2>/dev/null || true)"
   if [[ -z "${microphone_usage}" ]]; then
