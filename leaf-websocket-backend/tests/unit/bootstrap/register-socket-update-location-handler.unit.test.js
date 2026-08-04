@@ -486,6 +486,17 @@ describe('registerSocketUpdateLocationHandler', () => {
       'type',
       'trip.location.v1'
     ]);
+    const streamedLocation = JSON.parse(
+      redis.xadd.mock.calls[0][redis.xadd.mock.calls[0].indexOf('data') + 1]
+    );
+    expect(streamedLocation).toEqual(expect.objectContaining({
+      financialContext: '{"version":1,"namespace":"sandbox","contextId":"sandbox-context-id"}',
+      financialNamespace: 'sandbox',
+      financialContextId: 'sandbox-context-id',
+      providerEnvironment: 'sandbox',
+      paymentProfileId: 'qa-sandbox',
+      testUserSandbox: 'true'
+    }));
     expect(redis.xadd.mock.calls[0]).not.toContain('MAXLEN');
     expect(redis.zadd).toHaveBeenCalledWith(
       'ride_health:driver_signal_active',

@@ -702,6 +702,7 @@ function registerSocketUpdateLocationHandler({
                             String(bookingDriverId || '') === String(driverId)
                             && (validStatuses.has(bookingStatus) || validStatuses.has(bookingState))
                         ) {
+                            activeBookingData = bookingData;
                             customerId = bookingData.customerId || bookingData.customer || indexedTrip.customerId || null;
                             const tripChanged = String(indexedTrip.tripId || '') !== String(activeTripId || '');
                             const customerChanged = String(indexedTrip.customerId || '') !== String(customerId || '');
