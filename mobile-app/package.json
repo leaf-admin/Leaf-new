@@ -18,6 +18,7 @@
   },
   "scripts": {
     "postinstall": "node scripts/fix-react-native-maps-ios-modules.js",
+    "eas-build-post-install": "bash scripts/eas-build-post-install.sh",
     "start": "node ../node_modules/expo/bin/cli start",
     "android": "node ../node_modules/expo/bin/cli run:android",
     "android:dev": "node ../node_modules/expo/bin/cli start --dev-client",
