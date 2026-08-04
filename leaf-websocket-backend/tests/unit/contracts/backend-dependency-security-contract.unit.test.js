@@ -22,10 +22,13 @@ describe('backend production dependency security contract', () => {
   const backendRoot = path.resolve(__dirname, '../../..');
   const repositoryRoot = path.resolve(backendRoot, '..');
   const packageJson = JSON.parse(fs.readFileSync(path.join(backendRoot, 'package.json'), 'utf8'));
-  const lockfiles = [
-    JSON.parse(fs.readFileSync(path.join(backendRoot, 'package-lock.json'), 'utf8')),
-    JSON.parse(fs.readFileSync(path.join(repositoryRoot, 'package-lock.json'), 'utf8'))
-  ];
+  const standaloneLockfile = JSON.parse(
+    fs.readFileSync(path.join(backendRoot, 'package-lock.json'), 'utf8')
+  );
+  const workspaceLockfile = JSON.parse(
+    fs.readFileSync(path.join(repositoryRoot, 'package-lock.json'), 'utf8')
+  );
+  const lockfiles = [standaloneLockfile, workspaceLockfile];
   const reportServiceSource = fs.readFileSync(
     path.join(backendRoot, 'services/report-service.js'),
     'utf8'
@@ -40,6 +43,7 @@ describe('backend production dependency security contract', () => {
 
   test('pins supported direct upgrades that remove live critical and high advisories', () => {
     expect(packageJson.dependencies).toMatchObject({
+      '@firebase/app': '0.14.9',
       'express-rate-limit': '^8.6.1',
       'firebase-admin': '^13.10.0',
       sharp: '^0.35.3',
@@ -47,11 +51,15 @@ describe('backend production dependency security contract', () => {
     });
 
     for (const lockfile of lockfiles) {
+      expectAtLeast(resolvedVersion(lockfile, '@firebase/app'), '0.14.9');
       expectAtLeast(resolvedVersion(lockfile, 'express-rate-limit'), '8.6.1');
       expectAtLeast(resolvedVersion(lockfile, 'firebase-admin'), '13.10.0');
       expectAtLeast(resolvedVersion(lockfile, 'sharp'), '0.35.3');
       expectAtLeast(resolvedVersion(lockfile, 'socket.io'), '4.8.3');
     }
+
+    expect(standaloneLockfile.packages[''].dependencies['@firebase/app']).toBe('0.14.9');
+    expect(workspaceLockfile.packages['leaf-websocket-backend'].dependencies['@firebase/app']).toBe('0.14.9');
   });
 
   test('does not regress patched transitive parsers and network dependencies', () => {

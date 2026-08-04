@@ -61,8 +61,10 @@ function readServiceAccountFile(configuredPath) {
 // Inicializar Firebase Admin SDK
 function initializeFirebase() {
     try {
-        // Verificar se já foi inicializado
-        if (firebaseApp) {
+        // Só considerar o Firebase pronto quando todos os clientes exigidos pelo
+        // runtime tiverem sido materializados. Isso evita publicar um estado
+        // parcial quando um peer do RTDB não pode ser carregado.
+        if (firebaseApp && firestore && realtimeDB && storage) {
             logStructured('info', 'Firebase já inicializado', {
                 service: 'firebase',
                 operation: 'initialize'
@@ -70,74 +72,75 @@ function initializeFirebase() {
             return firebaseApp;
         }
 
-        // Reutilizar app default já inicializado por outro módulo (ex.: helper de token em testes)
-        if (Array.isArray(admin.apps) && admin.apps.length > 0) {
-            firebaseApp = admin.app();
-            firestore = admin.firestore();
-            realtimeDB = admin.database();
-            storage = admin.storage();
-            recordRealtimeDbMetric('initialize', 'success', 'firebase_config_reuse');
-
-            logStructured('info', 'Firebase app default reaproveitado', {
-                service: 'firebase',
-                operation: 'initialize',
-                source: 'admin.apps[0]'
-            });
-            return firebaseApp;
-        }
-
         const databaseURL = process.env.FIREBASE_DATABASE_URL || 'https://leaf-reactnative-default-rtdb.firebaseio.com';
+        let appCandidate = firebaseApp;
+        let initializationSource = 'module_cache';
 
-        // 1) Prioriza credencial via env (ideal para App Platform/containers)
-        const serviceAccountJson =
-            process.env.FIREBASE_SERVICE_ACCOUNT_JSON ||
-            process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON;
-        const serviceAccountFile = String(
-            process.env.GOOGLE_APPLICATION_CREDENTIALS || ''
-        ).trim();
-
-        if (serviceAccountJson) {
-            const parsed = parseServiceAccountJson(
-                serviceAccountJson,
-                'FIREBASE_SERVICE_ACCOUNT_JSON/GOOGLE_APPLICATION_CREDENTIALS_JSON'
-            );
-            firebaseApp = admin.initializeApp({
-                credential: admin.credential.cert(parsed),
-                databaseURL
-            });
-        } else if (serviceAccountFile) {
-            // 2) Em containers, lê o arquivo montado explicitamente pelo runtime.
-            const parsed = readServiceAccountFile(serviceAccountFile);
-            firebaseApp = admin.initializeApp({
-                credential: admin.credential.cert(parsed),
-                databaseURL
-            });
-        } else {
-            // 3) Fallback para arquivo local (ambiente dev/VPS tradicional)
-            const serviceAccountPath = path.join(__dirname, 'leaf-reactnative-firebase-adminsdk-fbsvc-456a95e2fc.json');
-            if (!fs.existsSync(serviceAccountPath)) {
-                throw new Error('Firebase credentials ausentes: configure JSON inline ou GOOGLE_APPLICATION_CREDENTIALS');
-            }
-
-            firebaseApp = admin.initializeApp({
-                credential: admin.credential.cert(serviceAccountPath),
-                databaseURL
-            });
+        // Reutilizar app default já inicializado por outro módulo (ex.: helper de token em testes)
+        if (!appCandidate && Array.isArray(admin.apps) && admin.apps.length > 0) {
+            appCandidate = admin.app();
+            initializationSource = 'admin.apps[0]';
         }
 
-        // Inicializar Firestore
-        firestore = admin.firestore();
+        if (!appCandidate) {
+            // 1) Prioriza credencial via env (ideal para App Platform/containers)
+            const serviceAccountJson =
+                process.env.FIREBASE_SERVICE_ACCOUNT_JSON ||
+                process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON;
+            const serviceAccountFile = String(
+                process.env.GOOGLE_APPLICATION_CREDENTIALS || ''
+            ).trim();
 
-        // Inicializar Realtime Database
-        realtimeDB = admin.database();
+            if (serviceAccountJson) {
+                const parsed = parseServiceAccountJson(
+                    serviceAccountJson,
+                    'FIREBASE_SERVICE_ACCOUNT_JSON/GOOGLE_APPLICATION_CREDENTIALS_JSON'
+                );
+                appCandidate = admin.initializeApp({
+                    credential: admin.credential.cert(parsed),
+                    databaseURL
+                });
+                initializationSource = 'inline_credentials';
+            } else if (serviceAccountFile) {
+                // 2) Em containers, lê o arquivo montado explicitamente pelo runtime.
+                const parsed = readServiceAccountFile(serviceAccountFile);
+                appCandidate = admin.initializeApp({
+                    credential: admin.credential.cert(parsed),
+                    databaseURL
+                });
+                initializationSource = 'mounted_credentials';
+            } else {
+                // 3) Fallback para arquivo local (ambiente dev/VPS tradicional)
+                const serviceAccountPath = path.join(__dirname, 'leaf-reactnative-firebase-adminsdk-fbsvc-456a95e2fc.json');
+                if (!fs.existsSync(serviceAccountPath)) {
+                    throw new Error('Firebase credentials ausentes: configure JSON inline ou GOOGLE_APPLICATION_CREDENTIALS');
+                }
+
+                appCandidate = admin.initializeApp({
+                    credential: admin.credential.cert(serviceAccountPath),
+                    databaseURL
+                });
+                initializationSource = 'legacy_local_credentials';
+            }
+        }
+
+        // Resolver todos os clientes antes de publicar qualquer referência no
+        // módulo. Se um deles falhar, a próxima tentativa reutiliza o app
+        // default e refaz a inicialização completa.
+        const firestoreCandidate = admin.firestore();
+        const realtimeDBCandidate = admin.database();
+        const storageCandidate = admin.storage();
+
+        firebaseApp = appCandidate;
+        firestore = firestoreCandidate;
+        realtimeDB = realtimeDBCandidate;
+        storage = storageCandidate;
         recordRealtimeDbMetric('initialize', 'success');
-
-        // Inicializar Storage
-        storage = admin.storage();
 
         logStructured('info', 'Firebase Admin SDK inicializado', {
             service: 'firebase',
-            operation: 'initialize'
+            operation: 'initialize',
+            source: initializationSource
         });
         logStructured('info', 'Firestore conectado', {
             service: 'firebase',
@@ -209,6 +212,13 @@ function isRealtimeDBAvailable() {
 function getStorage() {
     if (!storage) {
         initializeFirebase();
+    }
+    if (!storage) {
+        logStructured('warn', 'Firebase Storage não disponível', {
+            service: 'firebase',
+            operation: 'getStorage'
+        });
+        return null;
     }
     return storage;
 }

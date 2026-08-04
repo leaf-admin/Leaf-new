@@ -23,6 +23,7 @@ describe('firebase-config legacy metrics', () => {
     serviceAccountJson,
     googleCredentialsJson,
     googleCredentialsPath,
+    databaseFailures = 0,
     credentialFileContent = JSON.stringify({
       project_id: 'leaf-app',
       client_email: 'firebase-admin@leaf-app.iam.gserviceaccount.com',
@@ -70,28 +71,43 @@ describe('firebase-config legacy metrics', () => {
       };
     });
 
-    const firestoreFn = jest.fn(() => ({}));
+    const firestoreInstance = {};
+    const storageInstance = {};
+    const firebaseAppInstance = {};
+    const realtimeDatabaseInstance = { ref: refMock };
+    let remainingDatabaseFailures = databaseFailures;
+
+    const firestoreFn = jest.fn(() => firestoreInstance);
     firestoreFn.FieldValue = {
       serverTimestamp: jest.fn(() => 'server-ts')
     };
 
-    const databaseFn = jest.fn(() => ({
-      ref: refMock
-    }));
+    const databaseFn = jest.fn(() => {
+      if (remainingDatabaseFailures > 0) {
+        remainingDatabaseFailures -= 1;
+        const error = new Error("Cannot find module '@firebase/app'");
+        error.code = 'MODULE_NOT_FOUND';
+        throw error;
+      }
+      return realtimeDatabaseInstance;
+    });
     databaseFn.ServerValue = {
       TIMESTAMP: 'server-ts'
     };
 
     firebaseAdminMock = {
       apps: [],
-      app: jest.fn(() => ({})),
-      initializeApp: jest.fn(() => ({})),
+      app: jest.fn(() => firebaseAppInstance),
+      initializeApp: jest.fn(() => {
+        firebaseAdminMock.apps.push(firebaseAppInstance);
+        return firebaseAppInstance;
+      }),
       credential: {
         cert: jest.fn(() => ({ projectId: 'leaf-app' }))
       },
       firestore: firestoreFn,
       database: databaseFn,
-      storage: jest.fn(() => ({}))
+      storage: jest.fn(() => storageInstance)
     };
     jest.doMock('firebase-admin', () => firebaseAdminMock);
 
@@ -192,6 +208,32 @@ describe('firebase-config legacy metrics', () => {
     expect(metricsMock.recordLegacyDependencyAccess).toHaveBeenCalledWith(expect.objectContaining({
       dependency: 'realtime_db',
       operation: 'get_instance',
+      result: 'success'
+    }));
+  });
+
+  test('não publica clientes parciais e reaproveita o app ao repetir inicialização', () => {
+    const firebaseConfig = loadModule({ databaseFailures: 1 });
+
+    expect(firebaseConfig.initializeFirebase()).toBeNull();
+    expect(firebaseConfig.initializeFirebase()).toBeTruthy();
+    expect(firebaseConfig.getFirestore()).toBeTruthy();
+    expect(firebaseConfig.getRealtimeDB()).toBeTruthy();
+    expect(firebaseConfig.getStorage()).toBeTruthy();
+
+    expect(firebaseAdminMock.initializeApp).toHaveBeenCalledTimes(1);
+    expect(firebaseAdminMock.app).toHaveBeenCalledTimes(1);
+    expect(firebaseAdminMock.firestore).toHaveBeenCalledTimes(2);
+    expect(firebaseAdminMock.database).toHaveBeenCalledTimes(2);
+    expect(firebaseAdminMock.storage).toHaveBeenCalledTimes(1);
+    expect(metricsMock.recordLegacyDependencyAccess).toHaveBeenCalledWith(expect.objectContaining({
+      dependency: 'realtime_db',
+      operation: 'initialize',
+      result: 'failure'
+    }));
+    expect(metricsMock.recordLegacyDependencyAccess).toHaveBeenCalledWith(expect.objectContaining({
+      dependency: 'realtime_db',
+      operation: 'initialize',
       result: 'success'
     }));
   });

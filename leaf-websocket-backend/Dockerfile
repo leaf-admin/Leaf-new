@@ -22,8 +22,11 @@ WORKDIR /app
 # Copiar package.json e package-lock.json
 COPY package*.json ./
 
-# Instalar dependências de produção
-RUN npm install --omit=dev && npm cache clean --force
+# Instalar dependências de produção e provar que o cliente RTDB compatível
+# consegue resolver todos os peers no pacote standalone usado pela imagem.
+RUN npm install --omit=dev && \
+    node -e "const admin = require('firebase-admin'); void admin.database.ServerValue.TIMESTAMP" && \
+    npm cache clean --force
 
 # Copiar código da aplicação já com owner correto, sem chown recursivo em node_modules.
 COPY --chown=leaf:nodejs . .
