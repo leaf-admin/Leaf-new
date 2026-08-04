@@ -9,8 +9,9 @@
     "lint": "eslint",
     "test:support-contract": "node scripts/tests/support-realtime-contract.cjs && node scripts/tests/support-sandbox-scope-contract.cjs",
     "test:kyc-contract": "node scripts/tests/kyc-identity-review-panel-contract.cjs",
+    "test:role-matrix": "node scripts/tests/dashboard-role-matrix-contract.cjs",
     "smoke:backoffice": "node scripts/tests/smoke-backoffice.cjs",
-    "qa:backoffice": "npm run test:support-contract && npm run test:kyc-contract && npm run lint && npm run build && npm run smoke:backoffice",
+    "qa:backoffice": "npm run test:support-contract && npm run test:kyc-contract && npm run test:role-matrix && npm run lint && npm run build && npm run smoke:backoffice",
     "session:admin": "node scripts/ops/create-dashboard-admin-session.cjs",
     "session:admin:snippet": "node scripts/ops/print-dashboard-session-snippet.cjs"
   },

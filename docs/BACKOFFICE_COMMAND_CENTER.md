@@ -4,12 +4,15 @@ O Command Center e a tela diaria de operacao do backoffice Leaf.
 
 ## Objetivo
 
-Concentrar os quatro paineis necessarios para operacao diaria em uma chamada barata e cacheada:
+Concentrar o contexto necessário para a operação diária em uma chamada barata e cacheada, com prioridade para a fila de atenção:
 
 - status dos servicos;
 - metricas operacionais do dia;
 - suporte em aberto;
-- campanhas in-app.
+- cadastro de motoristas;
+- custo e receita operacional.
+
+Campanhas continuam disponíveis por drill-down quando `campaignCenterEnabled` está habilitado no perfil de lançamento. Quando o flag está desligado, o dashboard não apresenta links ou ações de campanha.
 
 ## Endpoint canonico
 
@@ -52,12 +55,13 @@ A pagina `/maps` continua separada porque carregar Google Maps JS pode gerar cus
 
 A home do dashboard (`/dashboard`) deve consumir o Command Center como fonte primaria.
 
-As quatro janelas de operacao diaria sao:
+As janelas de operacao diaria sao agrupadas por tarefa:
 
-- `/dashboard`: visao geral diaria, servicos, motoristas ativos, corridas, GMV, receita e controle de custo.
-- `/support`: fila N1/N2/N3, tickets, chat N0, SLA, ownership e copiloto/orquestrador.
-- `/campaign-center`: campanhas in-app, surfaces, slots, assets, metricas comerciais e pacing.
-- `/drivers/review-queue`: cadastro de motorista, fila de documentos e pendencias.
+- `/dashboard`: visão geral, fila **Atenção agora**, canary, custo e saúde agregada.
+- **Operação**: `/support`, `/drivers/review-queue`, `/drivers`, `/users`, `/maps` e `/waitlist`.
+- **Financeiro**: `/subscriptions`, `/financial-reconciliation`, `/reports` e `/payment-runtime`.
+- **Crescimento**: `/notifications`, `/promotions`, `/programs` e `/campaign-center` quando habilitados.
+- **Sistema**: `/observability`, `/metrics`, `/audit` e históricos.
 
 As paginas detalhadas continuam existindo para drill-down:
 
@@ -75,6 +79,7 @@ As paginas detalhadas continuam existindo para drill-down:
 1. Abrir `/dashboard` e confirmar:
    - status geral `saudavel`;
    - cache do Command Center em `HIT` ou com idade baixa;
+   - bloco `Atenção agora` sem item crítico sem responsável;
    - motoristas ativos, corridas em tempo real, GMV, receita e ARPU coerentes;
    - bloco `Controle de custo` sem alerta.
 2. Abrir `/support` quando houver backlog, SLA em risco, chat N0 ou ticket escalado.

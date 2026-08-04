@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import ProtectedRoute from "@/src/components/ProtectedRoute";
 import AppNav from "@/src/components/AppNav";
@@ -585,6 +586,7 @@ function buildWorkspaces(snapshot) {
 
 export default function DashboardPage() {
   const { user, signOut } = useAuth();
+  const router = useRouter();
   const [snapshot, setSnapshot] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -648,7 +650,7 @@ export default function DashboardPage() {
             <button
               onClick={async () => {
                 await signOut();
-                window.location.href = "/login";
+                router.replace("/login");
               }}
             >
               Sair

@@ -1,0 +1,75 @@
+export const dashboardNavigationGroups = [
+  {
+    id: "today",
+    section: "Hoje",
+    label: "Ação imediata",
+    href: "/dashboard",
+    items: [
+      { href: "/dashboard", label: "Visão geral" },
+      { href: "/support", label: "Suporte" },
+      { href: "/drivers/review-queue", label: "Cadastro motorista", allowedRoles: ["admin", "super-admin", "manager"] },
+    ],
+  },
+  {
+    id: "operations",
+    section: "Operação",
+    label: "Pessoas e território",
+    href: "/drivers",
+    items: [
+      { href: "/drivers", label: "Motoristas", allowedRoles: ["admin", "super-admin", "manager"] },
+      { href: "/users", label: "Usuários" },
+      { href: "/maps", label: "Mapa operacional", allowedRoles: ["admin", "super-admin", "manager", "development"] },
+      { href: "/waitlist", label: "Waitlist", allowedRoles: ["admin", "super-admin", "manager"] },
+    ],
+  },
+  {
+    id: "finance",
+    section: "Financeiro",
+    label: "Receita e cobrança",
+    href: "/subscriptions",
+    items: [
+      { href: "/subscriptions", label: "Assinaturas", allowedRoles: ["admin", "super-admin", "manager"] },
+      { href: "/financial-reconciliation", label: "Reconciliação", allowedRoles: ["admin", "super-admin", "manager"] },
+      { href: "/reports", label: "Relatórios", allowedRoles: ["admin", "super-admin", "manager"] },
+      { href: "/payment-runtime", label: "Perfil de pagamento", allowedRoles: ["admin", "super-admin", "manager"] },
+      {
+        href: "/financial-simulator",
+        label: "Simulador",
+        blockedRoles: ["support", "development"],
+        featureFlag: "financialSimulatorEnabled",
+        requireExplicitFeatureFlag: true,
+      },
+    ],
+  },
+  {
+    id: "growth",
+    section: "Crescimento",
+    label: "Comunicação e benefícios",
+    href: "/notifications",
+    items: [
+      { href: "/notifications", label: "Notificações", allowedRoles: ["admin", "super-admin", "manager", "development"] },
+      { href: "/promotions", label: "Promoções", allowedRoles: ["admin", "super-admin", "manager"] },
+      { href: "/programs", label: "Programas", allowedRoles: ["admin", "super-admin", "manager", "development"], featureFlag: "referralProgramsEnabled" },
+      {
+        href: "/campaign-center",
+        label: "Campanhas",
+        allowedRoles: ["admin", "super-admin", "manager", "development"],
+        featureFlag: "campaignCenterEnabled",
+        requireExplicitFeatureFlag: true,
+      },
+    ],
+  },
+  {
+    id: "system",
+    section: "Sistema",
+    label: "Saúde e auditoria",
+    href: "/observability",
+    items: [
+      { href: "/observability", label: "Observabilidade", allowedRoles: ["admin", "super-admin", "manager", "development"] },
+      { href: "/metrics", label: "Métricas", allowedRoles: ["admin", "super-admin", "manager", "development"] },
+      { href: "/metrics/history", label: "Histórico", allowedRoles: ["admin", "super-admin", "manager", "development"] },
+      { href: "/metrics/marketplace", label: "Marketplace", allowedRoles: ["admin", "super-admin", "manager", "development"] },
+      { href: "/audit", label: "Auditoria", allowedRoles: ["admin", "super-admin", "manager", "development"] },
+    ],
+  },
+];
