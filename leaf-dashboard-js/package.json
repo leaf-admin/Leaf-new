@@ -16,15 +16,15 @@
   },
   "dependencies": {
     "@react-google-maps/api": "^2.20.7",
-    "next": "16.1.0",
+    "next": "16.3.0",
     "react": "19.2.3",
     "react-dom": "19.2.3",
-    "socket.io-client": "^4.8.1"
+    "socket.io-client": "^4.8.3"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
     "eslint": "^9",
-    "eslint-config-next": "16.1.0",
+    "eslint-config-next": "16.3.0",
     "playwright": "^1.60.0",
     "tailwindcss": "^4",
     "typescript": "^5.9.3"
