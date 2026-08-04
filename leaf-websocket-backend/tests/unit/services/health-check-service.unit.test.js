@@ -21,7 +21,12 @@ jest.mock('ioredis', () => jest.fn());
 
 describe('health-check-service firebase checks', () => {
   let getFirestoreMock;
-  let getFromRealtimeDBMock;
+  let firestoreReadMock;
+  let getRealtimeDBMock;
+  let getStorageMock;
+  let realtimeRefMock;
+  let realtimeOnMock;
+  let realtimeOffMock;
   let healthCheckService;
   let os;
   const originalEnv = process.env;
@@ -30,19 +35,32 @@ describe('health-check-service firebase checks', () => {
     jest.resetModules();
     process.env = { ...originalEnv };
 
+    firestoreReadMock = jest.fn().mockResolvedValue({ empty: true });
     getFirestoreMock = jest.fn(() => ({
       collection: jest.fn(() => ({
         limit: jest.fn(() => ({
-          get: jest.fn().mockResolvedValue({ empty: true })
+          get: firestoreReadMock
         }))
       }))
     }));
 
-    getFromRealtimeDBMock = jest.fn().mockResolvedValue(true);
+    realtimeOnMock = jest.fn((_event, onValue) => {
+      onValue({ val: jest.fn(() => true) });
+    });
+    realtimeOffMock = jest.fn();
+    realtimeRefMock = jest.fn(() => ({
+      on: realtimeOnMock,
+      off: realtimeOffMock
+    }));
+    getRealtimeDBMock = jest.fn(() => ({
+      ref: realtimeRefMock
+    }));
+    getStorageMock = jest.fn(() => ({}));
 
     jest.doMock('../../../firebase-config', () => ({
       getFirestore: (...args) => getFirestoreMock(...args),
-      getFromRealtimeDB: (...args) => getFromRealtimeDBMock(...args)
+      getRealtimeDB: (...args) => getRealtimeDBMock(...args),
+      getStorage: (...args) => getStorageMock(...args)
     }));
 
     healthCheckService = require('../../../services/health-check-service');
@@ -56,13 +74,46 @@ describe('health-check-service firebase checks', () => {
     jest.restoreAllMocks();
   });
 
-  test('checkFirebase usa helper centralizado do RTDB', async () => {
+  test('checkFirebase prova conexão real sem aceitar helper que engole falhas', async () => {
     const result = await healthCheckService.checkFirebase();
 
-    expect(getFromRealtimeDBMock).toHaveBeenCalledWith('.info/connected');
+    expect(getRealtimeDBMock).toHaveBeenCalledTimes(1);
+    expect(realtimeRefMock).toHaveBeenCalledWith('.info/connected');
+    expect(realtimeOnMock).toHaveBeenCalledWith('value', expect.any(Function), expect.any(Function));
+    expect(realtimeOffMock).toHaveBeenCalledWith('value', expect.any(Function));
     expect(result.status).toBe('healthy');
     expect(result.components.realtimeDB.status).toBe('healthy');
+    expect(result.components.realtimeDB.connected).toBe(true);
     expect(result.cache.status).toBe('MISS');
+  });
+
+  test('checkFirebase marca RTDB ausente como unhealthy', async () => {
+    getRealtimeDBMock.mockReturnValueOnce(null);
+
+    const result = await healthCheckService.checkFirebase();
+
+    expect(result.status).toBe('unhealthy');
+    expect(result.components.realtimeDB).toMatchObject({
+      status: 'unhealthy',
+      message: 'Realtime DB não inicializado'
+    });
+    expect(realtimeRefMock).not.toHaveBeenCalled();
+  });
+
+  test('checkFirebase rejeita erro de conexão do RTDB', async () => {
+    realtimeOnMock.mockImplementationOnce((_event, _onValue, onError) => {
+      onError(new Error('rtdb connection failed'));
+    });
+
+    const result = await healthCheckService.checkFirebase();
+
+    expect(result.status).toBe('unhealthy');
+    expect(result.components.realtimeDB).toMatchObject({
+      status: 'unhealthy',
+      connected: false,
+      error: 'rtdb connection failed',
+      message: 'Realtime DB não está respondendo'
+    });
   });
 
   test('checkFirebase reutiliza cache e nao repete leituras pagas', async () => {
@@ -72,7 +123,8 @@ describe('health-check-service firebase checks', () => {
     expect(first.cache.status).toBe('MISS');
     expect(second.cache.status).toBe('HIT');
     expect(getFirestoreMock).toHaveBeenCalledTimes(1);
-    expect(getFromRealtimeDBMock).toHaveBeenCalledTimes(1);
+    expect(getRealtimeDBMock).toHaveBeenCalledTimes(1);
+    expect(realtimeOnMock).toHaveBeenCalledTimes(1);
   });
 
   test('checkFirebase deduplica verificacoes simultaneas', async () => {
@@ -84,7 +136,8 @@ describe('health-check-service firebase checks', () => {
     expect(first.cache.status).toBe('MISS');
     expect(second.cache.status).toBe('MISS');
     expect(getFirestoreMock).toHaveBeenCalledTimes(1);
-    expect(getFromRealtimeDBMock).toHaveBeenCalledTimes(1);
+    expect(getRealtimeDBMock).toHaveBeenCalledTimes(1);
+    expect(realtimeOnMock).toHaveBeenCalledTimes(1);
   });
 
   test('checkSystem trata pico curto de CPU como warning em producao pequena', () => {
@@ -185,6 +238,41 @@ describe('health-check-service firebase checks', () => {
       state: 'failed',
       required: true
     });
+  });
+
+  test('quickCheck falha readiness quando RTDB não inicializa', async () => {
+    getRealtimeDBMock.mockReturnValueOnce(null);
+
+    const result = await healthCheckService.quickCheck();
+
+    expect(result.status).toBe('unhealthy');
+    expect(result.checks.firebase).toMatchObject({
+      status: 'unhealthy',
+      components: {
+        firestore: true,
+        realtimeDB: false,
+        storage: true
+      }
+    });
+  });
+
+  test('quickCheck valida RTDB sem executar leitura Firestore paga', async () => {
+    healthCheckService.checkRedis = jest.fn().mockResolvedValue({ status: 'healthy' });
+
+    const result = await healthCheckService.quickCheck();
+
+    expect(result.status).toBe('healthy');
+    expect(result.checks.firebase).toMatchObject({
+      status: 'healthy',
+      realtimeConnected: true,
+      components: {
+        firestore: true,
+        realtimeDB: true,
+        storage: true
+      }
+    });
+    expect(getFirestoreMock).toHaveBeenCalledTimes(1);
+    expect(firestoreReadMock).not.toHaveBeenCalled();
   });
 
   test('separa o cache do health check por topologia Sentinel', () => {
