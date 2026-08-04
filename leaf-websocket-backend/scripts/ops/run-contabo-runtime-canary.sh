@@ -15,6 +15,7 @@ REMOTE_APP_DIR="${REMOTE_APP_DIR:-/opt/leaf-app}"
 REMOTE_CANARY_DIR="${REMOTE_CANARY_DIR:-/opt/leaf-runtime-canary}"
 CANARY_PORT="${CANARY_PORT:-3901}"
 RUN_FULL_FLOW_CANARY="${RUN_FULL_FLOW_CANARY:-false}"
+RUN_LOCATION_CONTRACT_CANARY="${RUN_LOCATION_CONTRACT_CANARY:-false}"
 
 if [[ -z "$CONTABO_HOST" ]]; then
   echo "[canary][error] Configure CONTABO_HOST ou VPS_HOST para o host Contabo" >&2
@@ -57,7 +58,7 @@ scp "${SSH_OPTS[@]}" "$PACKAGE_PATH" "$CONTABO_USER@$CONTABO_HOST:/tmp/leaf-back
 
 echo "[canary] Preparando canary remoto em $REMOTE_CANARY_DIR..."
 ssh "${SSH_OPTS[@]}" "$CONTABO_USER@$CONTABO_HOST" \
-  "REMOTE_APP_DIR='$REMOTE_APP_DIR' REMOTE_CANARY_DIR='$REMOTE_CANARY_DIR' CANARY_PORT='$CANARY_PORT' RUN_FULL_FLOW_CANARY='$RUN_FULL_FLOW_CANARY' bash -s" <<'REMOTE_EOF'
+  "REMOTE_APP_DIR='$REMOTE_APP_DIR' REMOTE_CANARY_DIR='$REMOTE_CANARY_DIR' CANARY_PORT='$CANARY_PORT' RUN_FULL_FLOW_CANARY='$RUN_FULL_FLOW_CANARY' RUN_LOCATION_CONTRACT_CANARY='$RUN_LOCATION_CONTRACT_CANARY' bash -s" <<'REMOTE_EOF'
 set -euo pipefail
 
 rm -rf "$REMOTE_CANARY_DIR"
@@ -68,6 +69,8 @@ chmod 0777 "$REMOTE_CANARY_DIR/logs"
 
 cp "$REMOTE_APP_DIR/.env" "$REMOTE_CANARY_DIR/.env"
 cp "$REMOTE_APP_DIR/firebase-credentials.json" "$REMOTE_CANARY_DIR/firebase-credentials.json"
+chown root:1001 "$REMOTE_CANARY_DIR/firebase-credentials.json"
+chmod 0440 "$REMOTE_CANARY_DIR/firebase-credentials.json"
 if [[ -f "$REMOTE_APP_DIR/leaf-reactnative-firebase-adminsdk-fbsvc-456a95e2fc.json" ]]; then
   cp "$REMOTE_APP_DIR/leaf-reactnative-firebase-adminsdk-fbsvc-456a95e2fc.json" "$REMOTE_CANARY_DIR/leaf-reactnative-firebase-adminsdk-fbsvc-456a95e2fc.json"
 fi
@@ -87,6 +90,7 @@ services:
       NODE_ENV: development
       APP_ENV: runtime-canary
       LEAF_ENV: runtime-canary
+      GOOGLE_APPLICATION_CREDENTIALS: /app/firebase-credentials.json
       # The isolated canary full-flow uses socket mock payment on purpose.
       # Public production deploys remain protected by runtime config validation.
       APP_REVIEW: "true"
@@ -172,21 +176,64 @@ for i in $(seq 1 60); do
   fi
 done
 
+set +e
 docker exec -i leaf-runtime-canary node - <<'NODE'
 (async () => {
-  const res = await fetch('http://127.0.0.1:3001/health/quick');
-  const body = await res.json();
-  const adapter = body.checks && body.checks.socketRedisAdapter;
-  if (!res.ok || body.status !== 'healthy' || !adapter || adapter.state !== 'ready' || adapter.enabled !== true || adapter.required !== true) {
-    console.error(JSON.stringify({ statusCode: res.status, status: body.status, adapter }, null, 2));
-    process.exit(1);
+  const maxAttempts = 60;
+  let lastResult = null;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      const res = await fetch('http://127.0.0.1:3001/health/quick', {
+        signal: AbortSignal.timeout(5000)
+      });
+      const body = await res.json();
+      const adapter = body.checks && body.checks.socketRedisAdapter;
+      lastResult = { attempt, statusCode: res.status, body };
+
+      if (
+        res.ok
+        && body.status === 'healthy'
+        && adapter
+        && adapter.state === 'ready'
+        && adapter.enabled === true
+        && adapter.required === true
+      ) {
+        console.log(JSON.stringify({
+          attempt,
+          statusCode: res.status,
+          status: body.status,
+          checks: body.checks
+        }, null, 2));
+        return;
+      }
+    } catch (error) {
+      lastResult = { attempt, error: error.message };
+    }
+
+    if (attempt < maxAttempts) {
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+    }
   }
-  console.log(JSON.stringify({ statusCode: res.status, status: body.status, adapter }, null, 2));
+
+  console.error(JSON.stringify({
+    error: 'timeout_waiting_canary_readiness',
+    maxAttempts,
+    lastResult
+  }, null, 2));
+  process.exit(1);
 })().catch((error) => {
   console.error(error);
   process.exit(1);
 });
 NODE
+readiness_status=$?
+set -e
+if [[ "$readiness_status" -ne 0 ]]; then
+  echo "[canary][error] readiness não ficou saudável" >&2
+  docker logs --tail=180 leaf-runtime-canary >&2 || true
+  exit 1
+fi
 
 docker exec -i leaf-runtime-canary node - <<'NODE'
 const WebSocket = require('ws');
@@ -218,8 +265,13 @@ ws.on('error', (error) => {
 });
 NODE
 
-if [[ "${RUN_FULL_FLOW_CANARY}" == "true" ]]; then
-  echo "[canary][full-flow] iniciando corrida completa contra o backend canônico"
+if [[ "${RUN_FULL_FLOW_CANARY}" == "true" || "${RUN_LOCATION_CONTRACT_CANARY}" == "true" ]]; then
+  if [[ "${RUN_LOCATION_CONTRACT_CANARY}" == "true" ]]; then
+    echo "[canary][location-contract] validando updateLocation contra o backend canônico"
+  else
+    echo "[canary][full-flow] iniciando corrida completa contra o backend canônico"
+  fi
+  set +e
   docker exec -i \
     -e RUNTIME_FULL_FLOW_TARGET_URL="http://127.0.0.1:3001" \
     -e RUNTIME_FULL_FLOW_TARGET_RUNTIME="modular-contabo-canary" \
@@ -229,9 +281,17 @@ if [[ "${RUN_FULL_FLOW_CANARY}" == "true" ]]; then
     -e RUNTIME_FULL_FLOW_VERBOSE="true" \
     -e RUNTIME_FULL_FLOW_FORCE_RAW_WS="true" \
     -e RUNTIME_FULL_FLOW_QA_AUTH_BYPASS="true" \
+    -e RUNTIME_FULL_FLOW_LOCATION_CONTRACT_ONLY="${RUN_LOCATION_CONTRACT_CANARY}" \
     -e RUNTIME_FULL_FLOW_ID_SUFFIX="modular-contabo-canary" \
     leaf-runtime-canary \
     node scripts/tests/smoke-runtime-full-ride-flow.cjs | tee /tmp/leaf-runtime-canary-full-flow-output.json
+  full_flow_status=${PIPESTATUS[0]}
+  set -e
+  if [[ "$full_flow_status" -ne 0 ]]; then
+    echo "[canary][error] corrida completa falhou" >&2
+    docker logs --tail=240 leaf-runtime-canary >&2 || true
+    exit "$full_flow_status"
+  fi
 fi
 
 echo "[canary][prod]"

@@ -29,6 +29,7 @@ const USE_EXISTING_RUNTIME = Boolean(EXISTING_RUNTIME_URL);
 const CLEANUP_REDIS_KEYS = process.env.RUNTIME_FULL_FLOW_CLEANUP_REDIS === 'true' || USE_EXISTING_RUNTIME;
 const VERBOSE = process.env.RUNTIME_FULL_FLOW_VERBOSE === 'true' || USE_EXISTING_RUNTIME;
 const INCLUDE_RIDE_CATEGORY = process.env.RUNTIME_FULL_FLOW_INCLUDE_RIDE_CATEGORY !== 'false';
+const LOCATION_CONTRACT_ONLY = process.env.RUNTIME_FULL_FLOW_LOCATION_CONTRACT_ONLY === 'true';
 
 const PICKUP = {
   lat: Number(process.env.RUNTIME_FULL_FLOW_PICKUP_LAT || -22.971964),
@@ -623,6 +624,222 @@ async function cleanupFlowKeys(redis, { bookingId, passengerId, driverId }) {
   };
 }
 
+function streamFieldsToObject(fields = []) {
+  const result = {};
+  for (let index = 0; index < fields.length; index += 2) {
+    result[String(fields[index])] = fields[index + 1];
+  }
+  return result;
+}
+
+async function cleanupLocationStreamEntries(redis, { bookingId, passengerId, driverId }) {
+  const entries = await redis.xrevrange('trip_location_events', '+', '-', 'COUNT', 2000);
+  const matchingIds = entries
+    .map(([id, fields]) => ({ id, fields: streamFieldsToObject(fields) }))
+    .filter(({ fields }) => (
+      (bookingId && fields.bookingId === bookingId) ||
+      (driverId && fields.driverId === driverId) ||
+      (passengerId && fields.customerId === passengerId)
+    ))
+    .map(({ id }) => id);
+
+  if (matchingIds.length > 0) {
+    await redis.xdel('trip_location_events', ...matchingIds);
+  }
+  return matchingIds.length;
+}
+
+async function cleanupKeysByMarker(redis, marker) {
+  const safeMarker = String(marker || '').trim();
+  if (safeMarker.length < 8 || !/^[a-zA-Z0-9_.-]+$/.test(safeMarker)) {
+    throw new Error('unsafe_runtime_cleanup_marker');
+  }
+
+  const allowedPatterns = [
+    `payment_charge_booking:*${safeMarker}*`,
+    `payment_status_cache:*${safeMarker}*`,
+    `trip_loc_meta:*${safeMarker}*`,
+    `trip_loc_seq_state:*${safeMarker}*`,
+    `trip_loc_dedupe:*${safeMarker}*`
+  ];
+  const keys = Array.from(new Set((await Promise.all(
+    allowedPatterns.map((pattern) => scanKeys(redis, pattern))
+  )).flat()));
+  if (keys.length > 0) {
+    await redis.del(...keys);
+  }
+  return keys.length;
+}
+
+async function runLocationContractForRuntime({ runtimeInfo, redisOptions }) {
+  const redis = createRedisClient(redisOptions);
+  redis.on('error', () => {});
+
+  const eventLog = [];
+  const idSuffix = process.env.RUNTIME_FULL_FLOW_ID_SUFFIX || `${runtimeInfo.runtime}-${Date.now()}`;
+  const passengerId = `runtime-full-passenger-${idSuffix}`;
+  const driverId = `runtime-full-driver-${idSuffix}`;
+  const bookingId = `runtime-location-${idSuffix}-${Date.now()}`;
+  const passenger = createRideClient({ port: runtimeInfo.port, socketUrl: runtimeInfo.socketUrl, label: 'passenger', eventLog });
+  const driver = createRideClient({ port: runtimeInfo.port, socketUrl: runtimeInfo.socketUrl, label: 'driver', eventLog });
+  const streamEntryIds = [];
+
+  try {
+    logProgress(`${runtimeInfo.runtime}: limpando estado antigo do contrato de localização`);
+    await cleanupKeysByMarker(redis, idSuffix);
+    await cleanupFlowKeys(redis, { bookingId, passengerId, driverId });
+    await cleanupLocationStreamEntries(redis, { bookingId, passengerId, driverId });
+
+    logProgress(`${runtimeInfo.runtime}: autenticando passageiro e motorista para localização`);
+    await Promise.all([
+      connectAndAuthenticate(passenger, { uid: passengerId, userType: 'customer' }),
+      connectAndAuthenticate(driver, { uid: driverId, userType: 'driver' })
+    ]);
+
+    const now = Date.now();
+    const leaseUntilMs = now + (5 * 60 * 1000);
+    await redis.hset(`driver:${driverId}`, {
+      id: driverId,
+      driverId,
+      isOnline: 'true',
+      status: 'IN_PROGRESS',
+      dispatchEligible: 'false',
+      dispatchEligibilityCode: 'IN_TRIP',
+      activeTripId: bookingId,
+      activeTripUpdatedAt: new Date(now).toISOString(),
+      activeTripLeaseUntilMs: String(leaseUntilMs),
+      lastUpdate: String(now),
+      lastSeen: new Date(now).toISOString()
+    });
+    await redis.hset(`booking:${bookingId}`, {
+      bookingId,
+      customerId: passengerId,
+      driverId,
+      status: 'IN_PROGRESS',
+      state: 'IN_PROGRESS',
+      paymentStatus: 'confirmed',
+      pickupLocation: JSON.stringify(PICKUP),
+      destinationLocation: JSON.stringify(DESTINATION),
+      updatedAt: new Date(now).toISOString()
+    });
+    await redis.set(`active_trip_by_driver:${driverId}`, bookingId, 'EX', 300);
+    await redis.set(`active_trip_customer_by_driver:${driverId}`, passengerId, 'EX', 300);
+
+    const expectedLat = PICKUP.lat + 0.001;
+    const expectedLng = PICKUP.lng + 0.001;
+    const canonicalSeq = 101;
+    const passengerLocationPromise = waitForSocketEvent(passenger, {
+      eventName: 'driverLocation',
+      timeoutMs: 15000,
+      predicate: (payload = {}) => String(payload.bookingId || payload.tripId || '') === bookingId
+    });
+    const driverAckPromise = waitForSocketEvent(driver, {
+      eventName: 'locationUpdated',
+      errorEvent: 'error',
+      timeoutMs: 15000,
+      predicate: (payload = {}) => String(payload.tripId || '') === bookingId && Number(payload.seq) === canonicalSeq
+    });
+
+    logProgress(`${runtimeInfo.runtime}: emitindo updateLocation canônico`);
+    driver.emit('updateLocation', {
+      driverId,
+      bookingId,
+      lat: expectedLat,
+      lng: expectedLng,
+      heading: 90,
+      speed: 20,
+      tripStatus: 'in_progress',
+      isInTrip: true,
+      seq: canonicalSeq,
+      capturedAt: now
+    });
+
+    const [driverAck, passengerLocation] = await Promise.all([
+      driverAckPromise,
+      passengerLocationPromise
+    ]);
+
+    const streamEntry = await waitFor('trip.location.v1 no stream', async () => {
+      const entries = await redis.xrevrange('trip_location_events', '+', '-', 'COUNT', 200);
+      return entries
+        .map(([id, fields]) => ({ id, fields: streamFieldsToObject(fields) }))
+        .find(({ fields }) => fields.bookingId === bookingId && fields.driverId === driverId) || null;
+    }, { timeoutMs: 10000, intervalMs: 200 });
+    streamEntryIds.push(streamEntry.id);
+
+    if (streamEntry.fields.type !== 'trip.location.v1') {
+      throw new Error(`unexpected_location_stream_type:${streamEntry.fields.type || 'missing'}`);
+    }
+    if (Number(passengerLocation.payload?.location?.lat) !== expectedLat || Number(passengerLocation.payload?.location?.lng) !== expectedLng) {
+      throw new Error('passenger_driverLocation_coordinates_mismatch');
+    }
+
+    const driverLocationCountBeforeLegacyEvent = eventLog.filter((event) =>
+      event.side === 'passenger' && event.eventName === 'driverLocation' && String(event.bookingId || '') === bookingId
+    ).length;
+    driver.emit('updateTripLocation', {
+      driverId,
+      bookingId,
+      lat: expectedLat + 0.01,
+      lng: expectedLng + 0.01,
+      seq: canonicalSeq + 1
+    });
+    await sleep(750);
+
+    const entriesAfterLegacyEvent = await redis.xrevrange('trip_location_events', '+', '-', 'COUNT', 200);
+    const matchingEntries = entriesAfterLegacyEvent
+      .map(([id, fields]) => ({ id, fields: streamFieldsToObject(fields) }))
+      .filter(({ fields }) => fields.bookingId === bookingId && fields.driverId === driverId);
+    for (const entry of matchingEntries) {
+      if (!streamEntryIds.includes(entry.id)) streamEntryIds.push(entry.id);
+    }
+    const driverLocationCountAfterLegacyEvent = eventLog.filter((event) =>
+      event.side === 'passenger' && event.eventName === 'driverLocation' && String(event.bookingId || '') === bookingId
+    ).length;
+    if (matchingEntries.length !== 1 || driverLocationCountAfterLegacyEvent !== driverLocationCountBeforeLegacyEvent) {
+      throw new Error('obsolete_updateTripLocation_was_still_processed');
+    }
+
+    logProgress(`${runtimeInfo.runtime}: contrato updateLocation -> driverLocation validado`);
+    return {
+      runtime: runtimeInfo.runtime,
+      ok: true,
+      mode: 'location-contract-only',
+      bookingId,
+      passengerId,
+      driverId,
+      assertions: {
+        canonicalAck: driverAck.payload?.success === true,
+        passengerDriverLocation: true,
+        streamType: streamEntry.fields.type,
+        obsoleteUpdateTripLocationIgnored: true,
+        streamEntriesForSyntheticBooking: matchingEntries.length
+      },
+      samples: {
+        driverAck: driverAck.payload,
+        passengerLocation: passengerLocation.payload,
+        stream: streamEntry.fields
+      },
+      eventLog: eventLog.slice(-30)
+    };
+  } finally {
+    passenger.close();
+    driver.close();
+    await sleep(500);
+    if (streamEntryIds.length > 0) {
+      await redis.xdel('trip_location_events', ...streamEntryIds).catch(() => null);
+    }
+    await cleanupLocationStreamEntries(redis, { bookingId, passengerId, driverId }).catch(() => null);
+    await cleanupFlowKeys(redis, { bookingId, passengerId, driverId }).catch(() => null);
+    await sleep(300);
+    await cleanupFlowKeys(redis, { bookingId, passengerId, driverId }).catch(() => null);
+    await cleanupKeysByMarker(redis, idSuffix).catch(() => null);
+    await sleep(300);
+    await cleanupKeysByMarker(redis, idSuffix).catch(() => null);
+    await redis.quit().catch(() => null);
+  }
+}
+
 async function runFlowForRuntime({ runtimeInfo, redisOptions, flushBeforeRun = true, cleanupAfterRun = false }) {
   const redis = createRedisClient(redisOptions);
   redis.on('error', () => {});
@@ -1072,12 +1289,15 @@ async function mainExistingRuntime() {
       socketUrl: EXISTING_RUNTIME_URL,
       readiness
     };
-    const flow = await runFlowForRuntime({
-      runtimeInfo,
-      redisOptions: buildRedisOptionsFromEnv(),
-      flushBeforeRun: false,
-      cleanupAfterRun: CLEANUP_REDIS_KEYS
-    });
+    const redisOptions = buildRedisOptionsFromEnv();
+    const flow = LOCATION_CONTRACT_ONLY
+      ? await runLocationContractForRuntime({ runtimeInfo, redisOptions })
+      : await runFlowForRuntime({
+        runtimeInfo,
+        redisOptions,
+        flushBeforeRun: false,
+        cleanupAfterRun: CLEANUP_REDIS_KEYS
+      });
 
     report.runtimes.push({
       ...runtimeInfo,
