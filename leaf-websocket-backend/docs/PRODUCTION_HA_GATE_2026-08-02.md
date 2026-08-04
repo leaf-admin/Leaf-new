@@ -8,6 +8,10 @@ enquanto Redis ou borda ainda forem pontos únicos de falha.
 O gate não altera piloto controlado, `geofence_validation`,
 `ride_flow_validation`, regra comercial, API ou experiência do aplicativo.
 
+O lançamento amplo também depende do gate de recuperação descrito em
+`FIRESTORE_STORAGE_RECOVERY_RUNBOOK_2026-08-02.md`. Ele exige recibos recentes e
+íntegros dos restores isolados de Redis e Firestore antes do rolling deploy.
+
 ## Contrato exigido
 
 Para um gateway de produção em lançamento amplo, `config:validate` exige:

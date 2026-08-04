@@ -274,9 +274,9 @@ describe('production compose launch-control contract', () => {
     }
     expect(deploySource).toContain('This script never tears down the compose project, Redis, or named volumes.');
     expect(deploySource).toContain('It never converts or restarts Redis.');
-    // Config validation before/after build plus the read-only Firebase IAM
-    // boundary need root only to read protected mounts in transient containers.
-    expect(deploySource.match(/--user 0:0/g)).toHaveLength(3);
+    // Config validation before/after build plus the read-only Firebase IAM and
+    // backup boundaries need root only to read protected mounts in transient containers.
+    expect(deploySource.match(/--user 0:0/g)).toHaveLength(4);
     expect(deploySource).toContain(
       'Trip-location stream disabled; consumer liveness gate skipped.',
     );
@@ -363,6 +363,24 @@ describe('production compose launch-control contract', () => {
     expect(deploySource).toContain('Automatic rollback completed.');
     expect(deploySource).toContain('docker image tag \\"\\$previous_image\\" \\"\\$configured_image\\"');
     expect(deploySource).toContain('cmp -s .env');
+  });
+
+  it('blocks broad rollout until fresh backup restore receipts pass read-only admission', () => {
+    const firebaseIamPreflight = deploySource.indexOf(
+      'scripts/ops/preflight-firebase-runtime-iam.cjs',
+    );
+    const backupPreflight = deploySource.indexOf(
+      'scripts/ops/preflight-backup-recovery.cjs',
+    );
+    const firstGatewayRollout = deploySource.indexOf(
+      'echo "[deploy] 5/7 Rolling gateways"',
+    );
+
+    expect(firebaseIamPreflight).toBeGreaterThan(-1);
+    expect(backupPreflight).toBeGreaterThan(firebaseIamPreflight);
+    expect(firstGatewayRollout).toBeGreaterThan(backupPreflight);
+    expect(deploySource).toContain('/var/backups/leaf:/var/backups/leaf:ro');
+    expect(deploySource).not.toContain('mkdir -p /var/backups/leaf');
   });
 
   it('keeps every isolated ops worker on the same Redis Sentinel authority as the gateways', () => {

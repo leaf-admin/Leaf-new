@@ -599,6 +599,22 @@ remote "
     --entrypoint node \
     "\$candidate_image" \
     scripts/ops/preflight-firebase-runtime-iam.cjs
+  run_backup_preflight() {
+    docker run --rm \
+      --user 0:0 \
+      --env-file .env \
+      -e ENV_FILE=/dev/null \
+      -e NODE_ENV=production \
+      "\$@" \
+      --entrypoint node \
+      "\$candidate_image" \
+      scripts/ops/preflight-backup-recovery.cjs
+  }
+  if [ -d /var/backups/leaf ]; then
+    run_backup_preflight -v /var/backups/leaf:/var/backups/leaf:ro
+  else
+    run_backup_preflight
+  fi
   printf '%s\n' "\$candidate_image" > '$REMOTE_BACKUP_DIR/backend-image-candidate.txt'
 "
 

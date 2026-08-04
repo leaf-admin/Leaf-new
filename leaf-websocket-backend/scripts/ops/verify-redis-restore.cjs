@@ -171,6 +171,7 @@ async function main() {
     });
     process.stdout.write(`${JSON.stringify({
       status: 'passed',
+      verifiedAt: new Date().toISOString(),
       backupPath,
       checksumVerified: true,
       rdbVerified: true,
