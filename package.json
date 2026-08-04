@@ -52,6 +52,7 @@
     "form-data@^4.0.0": "4.0.6",
     "@babel/plugin-transform-modules-systemjs": "7.29.7",
     "body-parser@1.20.5": "1.20.6",
+    "body-parser@^2.0.0": "2.3.0",
     "cheerio": {
       "undici": "7.29.0"
     },
@@ -79,6 +80,12 @@
     "react-native-masked-text": {
       "date-and-time": "0.14.2"
     },
+    "react-native-gifted-chat": {
+      "uuid": "11.1.1"
+    },
+    "react-native-google-places-autocomplete": {
+      "qs": "6.15.3"
+    },
     "postcss": "8.5.23",
     "shell-quote": "1.10.0",
     "socket.io-parser": "4.2.7",
@@ -88,7 +95,10 @@
     "webdriver": {
       "undici": "6.28.0"
     },
-    "websocket-driver": "0.7.5"
+    "websocket-driver": "0.7.5",
+    "xcode": {
+      "uuid": "11.1.1"
+    }
   },
   "devDependencies": {
     "expo": "~54.0.36",
