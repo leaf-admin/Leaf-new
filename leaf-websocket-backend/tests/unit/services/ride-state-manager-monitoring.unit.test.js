@@ -54,4 +54,40 @@ describe('RideStateManager monitoring integration', () => {
       })
     );
   });
+
+  it('executa side effects sem regravar uma transição já persistida por Lua', async () => {
+    const redis = createRedisMock('SEARCHING');
+    const hsetSpy = jest.spyOn(redis, 'hset');
+    const updatedAt = '2026-08-04T08:00:00.000Z';
+
+    await RideStateManager.recordPersistedTransitionSideEffects(
+      redis,
+      {
+        bookingId: 'booking-atomic-1',
+        currentState: RideStateManager.STATES.PENDING,
+        newState: RideStateManager.STATES.SEARCHING,
+        updatedAt
+      }
+    );
+
+    expect(hsetSpy).not.toHaveBeenCalled();
+    expect(eventSourcing.recordEvent).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        bookingId: 'booking-atomic-1',
+        fromState: RideStateManager.STATES.PENDING,
+        toState: RideStateManager.STATES.SEARCHING,
+        updatedAt
+      })
+    );
+    expect(syncTrackedRideState).toHaveBeenCalledWith(
+      redis,
+      {
+        bookingId: 'booking-atomic-1',
+        previousState: RideStateManager.STATES.PENDING,
+        newState: RideStateManager.STATES.SEARCHING,
+        updatedAt
+      }
+    );
+  });
 });

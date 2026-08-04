@@ -12,6 +12,58 @@ const eventSourcing = require('./event-sourcing');
 const { logger } = require('../utils/logger');
 const { getVisibleBookingKey, BOOKING_VISIBILITY_TTL_SEC } = require('./booking-visibility-service');
 
+const CLAIM_PENDING_RIDE_SCRIPT = `
+local bookingId = ARGV[1]
+local activatedAt = ARGV[2]
+local pendingState = ARGV[3]
+local searchingState = ARGV[4]
+
+if not redis.call('ZSCORE', KEYS[1], bookingId) then
+    return {'not_pending', ''}
+end
+
+local currentState = redis.call('HGET', KEYS[3], 'state')
+if not currentState then
+    redis.call('ZREM', KEYS[1], bookingId)
+    redis.call('HDEL', KEYS[2], bookingId)
+    return {'missing_state', ''}
+end
+
+if currentState ~= pendingState and currentState ~= searchingState then
+    redis.call('ZREM', KEYS[1], bookingId)
+    redis.call('HDEL', KEYS[2], bookingId)
+    return {'ineligible', currentState}
+end
+
+local bookingFields = redis.call('HGETALL', KEYS[3])
+if #bookingFields == 0 then
+    redis.call('ZREM', KEYS[1], bookingId)
+    redis.call('HDEL', KEYS[2], bookingId)
+    return {'missing_booking', ''}
+end
+
+local activeSnapshot = {}
+for index = 1, #bookingFields, 2 do
+    activeSnapshot[bookingFields[index]] = bookingFields[index + 1]
+end
+
+activeSnapshot['activatedAt'] = activatedAt
+activeSnapshot['state'] = searchingState
+
+if currentState == pendingState then
+    activeSnapshot['updatedAt'] = activatedAt
+end
+
+redis.call('HSET', KEYS[2], bookingId, cjson.encode(activeSnapshot))
+redis.call('ZREM', KEYS[1], bookingId)
+
+if currentState == pendingState then
+    redis.call('HSET', KEYS[3], 'state', searchingState, 'updatedAt', activatedAt)
+end
+
+return {'claimed', currentState}
+`;
+
 function serializeJSONField(value, fallback = {}) {
     if (typeof value === 'string') {
         return value;
@@ -341,41 +393,22 @@ class RideQueueManager {
 
             for (const bookingId of pendingRides) {
                 try {
-                    // Verificar estado da corrida
-                    const currentState = await RideStateManager.getBookingState(
-                        this.redis,
-                        bookingId
-                    );
-
-                    // Aceitar PENDING ou SEARCHING (SEARCHING pode estar na fila se foi criado antes do worker processar)
-                    if (currentState !== RideStateManager.STATES.PENDING && 
-                        currentState !== RideStateManager.STATES.SEARCHING) {
-                        // Corrida já foi processada ou cancelada, remover da fila
-                        await this.dequeueRide(bookingId, regionHash);
+                    const claim = await this.moveToActive(bookingId, regionHash);
+                    if (!claim.claimed) {
+                        if (claim.reason === 'ineligible') {
+                            logger.debug(
+                                `⏭️ Corrida ${bookingId} removida da fila em estado não processável: ${claim.currentState}`
+                            );
+                        }
                         continue;
                     }
-                    
-                    // Se já está em SEARCHING, apenas mover para ativa (não precisa atualizar estado novamente)
-                    if (currentState === RideStateManager.STATES.SEARCHING) {
-                        await this.moveToActive(bookingId, regionHash);
-                        processedRides.push(bookingId);
-                        logger.debug(`🔄 Corrida ${bookingId} já em SEARCHING, movida para busca ativa`);
-                        continue;
-                    }
-
-                    // Mover de pendente para ativa
-                    await this.moveToActive(bookingId, regionHash);
-
-                    // Atualizar estado para SEARCHING
-                    await RideStateManager.updateBookingState(
-                        this.redis,
-                        bookingId,
-                        RideStateManager.STATES.SEARCHING
-                    );
 
                     processedRides.push(bookingId);
-
-                    logger.debug(`🔄 Corrida ${bookingId} movida para busca ativa`);
+                    logger.debug(
+                        claim.previousState === RideStateManager.STATES.SEARCHING
+                            ? `🔄 Corrida ${bookingId} já em SEARCHING, movida para busca ativa`
+                            : `🔄 Corrida ${bookingId} movida atomicamente para busca ativa`
+                    );
                 } catch (error) {
                     logger.error(`❌ Erro ao processar corrida ${bookingId}:`, error);
                     // Continuar com próxima corrida
@@ -395,30 +428,72 @@ class RideQueueManager {
     /**
      * Mover corrida de pendente para ativa
      * @private
+     * @returns {Promise<{claimed: boolean, reason?: string, previousState?: string}>}
      */
     async moveToActive(bookingId, regionHash) {
         const pendingQueueKey = `ride_queue:${regionHash}:pending`;
         const activeQueueKey = `ride_queue:${regionHash}:active`;
-
-        // Obter dados da corrida
         const bookingKey = `booking:${bookingId}`;
-        const bookingData = await this.redis.hgetall(bookingKey);
-
-        // Adicionar à fila ativa (Hash)
-        await this.redis.hset(activeQueueKey, bookingId, JSON.stringify({
-            ...bookingData,
-            activatedAt: new Date().toISOString()
-        }));
-
-        // Remover da fila pendente
-        await this.redis.zrem(pendingQueueKey, bookingId);
-
-        // Registrar evento
-        const { EVENT_TYPES } = require('./event-sourcing');
-        await eventSourcing.recordEvent(EVENT_TYPES.RIDE_DEQUEUED, {
+        const activatedAt = new Date().toISOString();
+        const rawResult = await this.redis.eval(
+            CLAIM_PENDING_RIDE_SCRIPT,
+            3,
+            pendingQueueKey,
+            activeQueueKey,
+            bookingKey,
             bookingId,
-            region: regionHash
+            activatedAt,
+            RideStateManager.STATES.PENDING,
+            RideStateManager.STATES.SEARCHING
+        );
+        const result = Array.isArray(rawResult) ? rawResult : [];
+        const status = String(result[0] || 'invalid_result');
+        const previousState = String(result[1] || '');
+
+        if (status !== 'claimed') {
+            return {
+                claimed: false,
+                reason: status,
+                currentState: previousState || null
+            };
+        }
+
+        const { EVENT_TYPES } = require('./event-sourcing');
+        const sideEffects = [
+            Promise.resolve().then(() => eventSourcing.recordEvent(EVENT_TYPES.RIDE_DEQUEUED, {
+                bookingId,
+                region: regionHash
+            }))
+        ];
+
+        if (previousState === RideStateManager.STATES.PENDING) {
+            sideEffects.push(
+                Promise.resolve().then(() => RideStateManager.recordPersistedTransitionSideEffects(
+                    this.redis,
+                    {
+                        bookingId,
+                        currentState: previousState,
+                        newState: RideStateManager.STATES.SEARCHING,
+                        updatedAt: activatedAt
+                    }
+                ))
+            );
+        }
+
+        const sideEffectResults = await Promise.allSettled(sideEffects);
+        sideEffectResults.forEach((sideEffectResult) => {
+            if (sideEffectResult.status === 'rejected') {
+                logger.warn(
+                    `⚠️ Claim atômico persistido para ${bookingId}, mas um side effect falhou: ${sideEffectResult.reason?.message || sideEffectResult.reason}`
+                );
+            }
         });
+
+        return {
+            claimed: true,
+            previousState,
+            activatedAt
+        };
     }
 
     /**
