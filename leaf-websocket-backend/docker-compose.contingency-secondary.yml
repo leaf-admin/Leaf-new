@@ -1,0 +1,130 @@
+services:
+  redis-primary-tunnel:
+    build:
+      context: .
+      dockerfile: Dockerfile.contingency-tunnel
+    container_name: leaf-contingency-primary-tunnel
+    command:
+      - -NT
+      - -g
+      - -o
+      - BatchMode=yes
+      - -o
+      - ExitOnForwardFailure=yes
+      - -o
+      - ServerAliveInterval=15
+      - -o
+      - ServerAliveCountMax=3
+      - -o
+      - StrictHostKeyChecking=yes
+      - -o
+      - UserKnownHostsFile=/run/leaf/known_hosts
+      - -i
+      - /run/leaf/primary_ssh_key
+      - -p
+      - "${PRIMARY_SSH_PORT:-22}"
+      - -L
+      - 0.0.0.0:6381:127.0.0.1:6379
+      - -L
+      - 0.0.0.0:3001:127.0.0.1:3001
+      - "${PRIMARY_SSH_USER:-root}@${PRIMARY_SSH_HOST:?PRIMARY_SSH_HOST must be set}"
+    volumes:
+      - ./secrets/primary_ssh_key:/run/leaf/primary_ssh_key:ro
+      - ./secrets/primary_known_hosts:/run/leaf/known_hosts:ro
+    networks:
+      - leaf-contingency-internal
+    restart: unless-stopped
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:size=8m,mode=1777
+    mem_limit: 64m
+    cpus: "0.15"
+    pids_limit: 64
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 6381 && nc -z 127.0.0.1 3001"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 10s
+
+  redis-replica:
+    image: redis:7.4.9-alpine
+    container_name: leaf-contingency-redis-replica
+    entrypoint: ["/usr/local/bin/start-secondary-redis-replica.sh"]
+    volumes:
+      - ./scripts/ops/start-secondary-redis-replica.sh:/usr/local/bin/start-secondary-redis-replica.sh:ro
+      - ./secrets/redis_password:/run/leaf/redis_password:ro
+      - leaf-contingency-redis-data:/data
+    networks:
+      - leaf-contingency-internal
+    depends_on:
+      redis-primary-tunnel:
+        condition: service_healthy
+    restart: unless-stopped
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /run/leaf-runtime:size=8m,mode=0700
+    mem_limit: 768m
+    cpus: "0.50"
+    pids_limit: 128
+    healthcheck:
+      test: ["CMD-SHELL", "REDISCLI_AUTH=$$(cat /run/leaf/redis_password) redis-cli ping | grep -qx PONG"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 20s
+
+  edge-canary:
+    image: nginx:1.27-alpine
+    container_name: leaf-contingency-edge-canary
+    ports:
+      - "127.0.0.1:18080:8080"
+    volumes:
+      - ./config/secondary-contingency/nginx.conf:/etc/nginx/nginx.conf:ro
+    networks:
+      - leaf-contingency-internal
+      - lensury-edge
+    depends_on:
+      redis-primary-tunnel:
+        condition: service_healthy
+    restart: unless-stopped
+    read_only: true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETGID
+      - SETUID
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /var/cache/nginx:size=16m,mode=0755
+      - /var/run:size=4m,mode=0755
+      - /tmp:size=8m,mode=1777
+    mem_limit: 128m
+    cpus: "0.25"
+    pids_limit: 64
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/contingency-health | grep -qx ok"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 10s
+
+networks:
+  leaf-contingency-internal:
+    name: leaf-contingency-internal
+  lensury-edge:
+    external: true
+    name: lensury_edge
+
+volumes:
+  leaf-contingency-redis-data:
+    name: leaf-contingency-redis-data

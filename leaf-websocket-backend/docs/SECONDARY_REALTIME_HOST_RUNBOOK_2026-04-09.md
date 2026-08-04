@@ -1,5 +1,9 @@
 # Segundo Host Realtime
 
+> **Legado operacional:** este desenho publica um gateway completo e exige todo o conjunto de
+> credenciais de runtime. Para a contingência de baixo recurso atualmente aprovada, use
+> `SECONDARY_CONTINGENCY_RUNBOOK_2026-08-04.md`. Não execute este runbook na VPS compartilhada.
+
 ## Importante
 Este documento descreve **um segundo host realtime em outra VPS**.
 
