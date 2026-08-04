@@ -7,6 +7,8 @@ import Panel from "@/src/components/ui/Panel";
 import { ErrorText, LoadingState } from "@/src/components/ui/PageFeedback";
 import { leafAPI } from "@/src/services/api";
 import { KeyValueGrid } from "@/src/components/ui/DataViews";
+import { isAdminMutationEnabled, mutationBlockedMessage } from "@/src/utils/dashboard-access";
+import useConfirmAction from "@/src/hooks/useConfirmAction";
 
 const defaultForm = {
   name: "",
@@ -31,19 +33,23 @@ export default function PromotionsPage() {
   const [driverId, setDriverId] = useState("");
   const [selectedPromotion, setSelectedPromotion] = useState("");
   const [busyPromotionId, setBusyPromotionId] = useState("");
+  const [runtimeFlags, setRuntimeFlags] = useState(null);
+  const { requestConfirmation, confirmationDialog, confirmationOpen } = useConfirmAction();
 
   const load = useCallback(async () => {
     setLoading(true);
     setError("");
     try {
       const params = statusFilter !== "all" ? { status: statusFilter } : {};
-      const [listResponse, statsResponse] = await Promise.all([
+      const [listResponse, statsResponse, flagsResponse] = await Promise.all([
         leafAPI.listPromotions(params),
         leafAPI.getPromotionStats(),
+        leafAPI.getRuntimeFlags(),
       ]);
 
       setRows(listResponse?.promotions || []);
       setStats(statsResponse?.stats || null);
+      setRuntimeFlags(flagsResponse || null);
     } catch (err) {
       setError(err?.message || "Falha ao carregar promocoes");
     } finally {
@@ -67,6 +73,10 @@ export default function PromotionsPage() {
   }, [rows, searchFilter]);
 
   const create = async () => {
+    if (readOnly) {
+      setError(readOnlyMessage);
+      return;
+    }
     if (!canCreate) {
       setError("Informe um nome valido para a promocao");
       return;
@@ -103,6 +113,10 @@ export default function PromotionsPage() {
   };
 
   const updatePromotionStatus = async (promotionId, status) => {
+    if (readOnly) {
+      setError(readOnlyMessage);
+      return;
+    }
     if (!promotionId || !status) return;
     setBusyPromotionId(promotionId);
     try {
@@ -117,6 +131,10 @@ export default function PromotionsPage() {
   };
 
   const applyToDriver = async () => {
+    if (readOnly) {
+      setError(readOnlyMessage);
+      return;
+    }
     if (!selectedPromotion || !driverId) {
       setError("Selecione promocao e informe driverId");
       return;
@@ -137,6 +155,38 @@ export default function PromotionsPage() {
       setError(err?.message || "Falha ao aplicar promocao no motorista");
     }
   };
+
+  const requestCreate = () => requestConfirmation({
+    title: "Criar promoção?",
+    description: "A promoção poderá alterar cobrança ou benefício para o público escolhido.",
+    detail: `Nome: ${form.name.trim() || "(vazio)"}; critério: ${form.criteria}.`,
+    confirmLabel: "Criar promoção",
+    tone: "warning",
+    task: create,
+  });
+
+  const requestStatusUpdate = (promotionId, status) => requestConfirmation({
+    title: status === "completed" ? "Encerrar promoção?" : "Alterar status da promoção?",
+    description: status === "completed"
+      ? "A promoção não poderá ser retomada pela operação normal."
+      : `A promoção será marcada como ${status}.`,
+    detail: `Promoção: ${promotionId}`,
+    confirmLabel: status === "completed" ? "Encerrar promoção" : "Confirmar alteração",
+    tone: status === "completed" ? "danger" : "warning",
+    task: () => updatePromotionStatus(promotionId, status),
+  });
+
+  const requestApplyToDriver = () => requestConfirmation({
+    title: "Aplicar promoção e enviar push?",
+    description: "O benefício será aplicado ao motorista e uma notificação será enviada.",
+    detail: `Motorista: ${driverId || "(vazio)"}; promoção: ${selectedPromotion || "(vazia)"}.`,
+    confirmLabel: "Aplicar e notificar",
+    tone: "danger",
+    task: applyToDriver,
+  });
+
+  const readOnly = runtimeFlags === null || !isAdminMutationEnabled(runtimeFlags);
+  const readOnlyMessage = mutationBlockedMessage(runtimeFlags);
 
   return (
     <ProtectedRoute>
@@ -188,7 +238,7 @@ export default function PromotionsPage() {
             />
           </Panel>
 
-          <Panel title="Ações rápidas" subtitle="Criação e aplicação manual ficam recolhidas para não poluir a operação diária.">
+          <Panel title="Ações rápidas" subtitle={readOnlyMessage || "Criação e aplicação manual ficam recolhidas para não poluir a operação diária."}>
             <details className="technical-details">
               <summary>Criar promoção</summary>
               <div className="technical-details-inner">
@@ -199,6 +249,7 @@ export default function PromotionsPage() {
                       placeholder="Nome da promoção"
                       value={form.name}
                       onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))}
+                      disabled={readOnly}
                     />
                   </label>
                   <label className="form-field">
@@ -206,6 +257,7 @@ export default function PromotionsPage() {
                     <select
                       value={form.type}
                       onChange={(e) => setForm((prev) => ({ ...prev, type: e.target.value }))}
+                      disabled={readOnly}
                     >
                       <option value="free_subscription">Assinatura grátis</option>
                       <option value="trial_extension">Extensão de trial</option>
@@ -217,6 +269,7 @@ export default function PromotionsPage() {
                     <select
                       value={form.criteria}
                       onChange={(e) => setForm((prev) => ({ ...prev, criteria: e.target.value }))}
+                      disabled={readOnly}
                     >
                       <option value="all_drivers">Todos os motoristas</option>
                       <option value="first_n_drivers">Primeiros N motoristas</option>
@@ -231,6 +284,7 @@ export default function PromotionsPage() {
                       max="365"
                       value={form.days}
                       onChange={(e) => setForm((prev) => ({ ...prev, days: e.target.value }))}
+                      disabled={readOnly}
                       placeholder="Dias"
                     />
                   </label>
@@ -241,6 +295,7 @@ export default function PromotionsPage() {
                       min="1"
                       value={form.maxRedemptions}
                       onChange={(e) => setForm((prev) => ({ ...prev, maxRedemptions: e.target.value }))}
+                      disabled={readOnly}
                       placeholder="Resgates"
                     />
                   </label>
@@ -250,6 +305,7 @@ export default function PromotionsPage() {
                       type="datetime-local"
                       value={form.startDate}
                       onChange={(e) => setForm((prev) => ({ ...prev, startDate: e.target.value }))}
+                      disabled={readOnly}
                     />
                   </label>
                   <label className="form-field">
@@ -258,9 +314,10 @@ export default function PromotionsPage() {
                       type="datetime-local"
                       value={form.endDate}
                       onChange={(e) => setForm((prev) => ({ ...prev, endDate: e.target.value }))}
+                      disabled={readOnly}
                     />
                   </label>
-                  <button onClick={create} disabled={!canCreate}>
+                  <button onClick={requestCreate} disabled={readOnly || confirmationOpen || !canCreate}>
                     Criar promoção
                   </button>
                 </div>
@@ -273,7 +330,7 @@ export default function PromotionsPage() {
                 <div className="form-grid">
                   <label className="form-field">
                     Promoção
-                    <select value={selectedPromotion} onChange={(e) => setSelectedPromotion(e.target.value)}>
+                    <select value={selectedPromotion} onChange={(e) => setSelectedPromotion(e.target.value)} disabled={readOnly}>
                       <option value="">Selecione promoção</option>
                       {filteredRows.map((promo) => (
                         <option key={promo.id} value={promo.id}>
@@ -288,9 +345,10 @@ export default function PromotionsPage() {
                       placeholder="driverId"
                       value={driverId}
                       onChange={(e) => setDriverId(e.target.value)}
+                      disabled={readOnly}
                     />
                   </label>
-                  <button onClick={applyToDriver}>Aplicar e notificar</button>
+                  <button onClick={requestApplyToDriver} disabled={readOnly || confirmationOpen}>Aplicar e notificar</button>
                 </div>
               </div>
             </details>
@@ -334,20 +392,20 @@ export default function PromotionsPage() {
                           <td>
                             <div className="actions-cell">
                               <button
-                                disabled={isBusy || promo.status === "active"}
-                                onClick={() => updatePromotionStatus(promo.id, "active")}
+                                disabled={readOnly || confirmationOpen || isBusy || promo.status === "active"}
+                                onClick={() => requestStatusUpdate(promo.id, "active")}
                               >
                                 Iniciar/Retomar
                               </button>
                               <button
-                                disabled={isBusy || promo.status === "paused"}
-                                onClick={() => updatePromotionStatus(promo.id, "paused")}
+                                disabled={readOnly || confirmationOpen || isBusy || promo.status === "paused"}
+                                onClick={() => requestStatusUpdate(promo.id, "paused")}
                               >
                                 Pausar
                               </button>
                               <button
-                                disabled={isBusy || promo.status === "completed"}
-                                onClick={() => updatePromotionStatus(promo.id, "completed")}
+                                disabled={readOnly || confirmationOpen || isBusy || promo.status === "completed"}
+                                onClick={() => requestStatusUpdate(promo.id, "completed")}
                               >
                                 Encerrar
                               </button>
@@ -364,6 +422,7 @@ export default function PromotionsPage() {
         </section>
 
         <ErrorText message={error} />
+        {confirmationDialog}
       </main>
     </ProtectedRoute>
   );

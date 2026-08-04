@@ -1,66 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useAuth } from "@/src/contexts/AuthContext";
 import { leafAPI } from "@/src/services/api";
 import { canAccessItem, isLaunchFeatureEnabled } from "@/src/utils/dashboard-access";
-
-const groups = [
-  {
-    id: "daily",
-    section: "Diário",
-    label: "Operação diária",
-    href: "/dashboard",
-    items: [
-      { href: "/dashboard", label: "Visão geral" },
-      { href: "/support", label: "Suporte" },
-      { href: "/campaign-center", label: "Campanhas", allowedRoles: ["admin", "super-admin", "manager", "development"] },
-      { href: "/drivers/review-queue", label: "Cadastro motorista" },
-    ],
-  },
-  {
-    id: "overview",
-    section: "Análise",
-    label: "Dados e saúde",
-    href: "/observability",
-    items: [
-      { href: "/observability", label: "Observabilidade", allowedRoles: ["admin", "super-admin", "manager", "development"] },
-      { href: "/metrics", label: "Métricas", blockedRoles: ["support"] },
-      { href: "/metrics/history", label: "Histórico", blockedRoles: ["support"] },
-      { href: "/metrics/marketplace", label: "Marketplace", blockedRoles: ["support"] },
-      { href: "/maps", label: "Mapa operacional" },
-      { href: "/audit", label: "Auditoria", allowedRoles: ["admin", "super-admin", "manager", "development"] },
-    ],
-  },
-  {
-    id: "organization",
-    section: "Gestão",
-    label: "Pessoas e financeiro",
-    href: "/drivers",
-    items: [
-      { href: "/drivers", label: "Motoristas" },
-      { href: "/users", label: "Usuários" },
-      { href: "/subscriptions", label: "Assinaturas", blockedRoles: ["support", "development"] },
-      { href: "/programs", label: "Programas", allowedRoles: ["admin", "super-admin", "manager", "development"], featureFlag: "referralProgramsEnabled" },
-      { href: "/notifications", label: "Notificações" },
-      { href: "/reports", label: "Relatórios" },
-      { href: "/promotions", label: "Promoções" },
-      { href: "/tolls", label: "Pedágios", allowedRoles: ["admin", "super-admin", "manager"] },
-      { href: "/financial-reconciliation", label: "Reconciliação", allowedRoles: ["admin", "super-admin", "manager"] },
-      { href: "/payment-runtime", label: "Perfil de pagamento", allowedRoles: ["admin", "super-admin", "manager", "development"] },
-      {
-        href: "/financial-simulator",
-        label: "Simulador",
-        blockedRoles: ["support", "development"],
-        featureFlag: "financialSimulatorEnabled",
-        requireExplicitFeatureFlag: true,
-      },
-      { href: "/waitlist", label: "Waitlist", allowedRoles: ["admin", "super-admin", "manager"] },
-    ],
-  },
-];
+import { dashboardNavigationGroups } from "@/src/config/dashboard-navigation";
 
 function resolveActiveItem(pathname, navGroups) {
   const allItems = navGroups.flatMap((group) =>
@@ -84,8 +30,12 @@ export default function AppNav() {
   const { user, signOut } = useAuth();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [runtimeFlags, setRuntimeFlags] = useState(null);
+  const menuButtonRef = useRef(null);
+  const wasMobileOpenRef = useRef(false);
   const apiDocsHref = process.env.NEXT_PUBLIC_API_DOCS_URL || "/reports";
   const isApiDocsExternal = /^https?:\/\//i.test(apiDocsHref);
+  const campaignCenterVisible = runtimeFlags?.launch?.campaignCenterEnabled === true;
+  const adminMutationsEnabled = runtimeFlags?.launch?.adminMutationsEnabled !== false;
 
   useEffect(() => {
     let mounted = true;
@@ -103,7 +53,7 @@ export default function AppNav() {
 
   const visibleGroups = useMemo(
     () =>
-      groups
+      dashboardNavigationGroups
         .map((group) => ({
           ...group,
           items: group.items.filter((item) => {
@@ -131,9 +81,9 @@ export default function AppNav() {
 
   const activeGroup = useMemo(() => {
     if (activeItem) {
-      return visibleGroups.find((group) => group.id === activeItem.groupId) || visibleGroups[0] || groups[0];
+      return visibleGroups.find((group) => group.id === activeItem.groupId) || visibleGroups[0] || dashboardNavigationGroups[0];
     }
-    return visibleGroups[0] || groups[0];
+    return visibleGroups[0] || dashboardNavigationGroups[0];
   }, [activeItem, visibleGroups]);
 
   const userInitials = useMemo(() => {
@@ -150,6 +100,25 @@ export default function AppNav() {
     setMobileOpen(false);
   }, [pathname]);
 
+  useEffect(() => {
+    if (mobileOpen) {
+      const handleKeyDown = (event) => {
+        if (event.key === "Escape") {
+          event.preventDefault();
+          setMobileOpen(false);
+        }
+      };
+      document.addEventListener("keydown", handleKeyDown);
+      return () => document.removeEventListener("keydown", handleKeyDown);
+    }
+    if (wasMobileOpenRef.current) menuButtonRef.current?.focus();
+    return undefined;
+  }, [mobileOpen]);
+
+  useEffect(() => {
+    wasMobileOpenRef.current = mobileOpen;
+  }, [mobileOpen]);
+
   const onSignOut = async () => {
     try {
       await signOut();
@@ -164,16 +133,19 @@ export default function AppNav() {
         <div className="app-topbar-left">
           <button
             type="button"
+            ref={menuButtonRef}
             className="app-menu-toggle"
             onClick={() => setMobileOpen((prev) => !prev)}
-            aria-label="Abrir menu"
+            aria-label={mobileOpen ? "Fechar menu" : "Abrir menu"}
+            aria-expanded={mobileOpen}
+            aria-controls="app-sidebar-nav"
           >
-            Menu
+            {mobileOpen ? "Fechar" : "Menu"}
           </button>
           <span className="app-topbar-avatar app-topbar-avatar-compact">{userInitials.slice(0, 1)}</span>
-          <span className="app-topbar-crumb">Personal</span>
+          <span className="app-topbar-crumb">Leaf</span>
           <span className="app-topbar-separator">•</span>
-          <span className="app-topbar-project">Default project</span>
+          <span className="app-topbar-project">Backoffice operacional</span>
           <span className="app-topbar-separator">/</span>
           <span className="app-topbar-page">{activeItem?.label || activeGroup.label}</span>
         </div>
@@ -184,12 +156,16 @@ export default function AppNav() {
           <Link href="/support" className="app-topbar-link">
             Suporte
           </Link>
-          <Link href="/campaign-center" className="app-topbar-link">
-            Campanhas
-          </Link>
-          <Link href="/drivers/review-queue" className="app-topbar-link">
-            Cadastro
-          </Link>
+          {campaignCenterVisible ? (
+            <Link href="/campaign-center" className="app-topbar-link">
+              Campanhas
+            </Link>
+          ) : null}
+          {canAccessItem({ allowedRoles: ["admin", "super-admin", "manager"] }, user) ? (
+            <Link href="/drivers/review-queue" className="app-topbar-link">
+              Cadastro
+            </Link>
+          ) : null}
           <Link
             href={apiDocsHref}
             className="app-topbar-link app-topbar-link-secondary"
@@ -198,6 +174,11 @@ export default function AppNav() {
           >
             API Docs
           </Link>
+          {runtimeFlags && !adminMutationsEnabled ? (
+            <span className="app-topbar-readonly" role="status">
+              Somente leitura
+            </span>
+          ) : null}
           <div className="app-topbar-avatar" title={user?.name || user?.email || "Admin"}>
             {userInitials}
           </div>
@@ -214,12 +195,12 @@ export default function AppNav() {
         <div className="app-sidebar-head">
           <div className="app-logo">L</div>
           <div>
-            <p className="app-sidebar-title">Personal</p>
-            <p className="app-sidebar-subtitle">Default project</p>
+            <p className="app-sidebar-title">Leaf</p>
+            <p className="app-sidebar-subtitle">Backoffice operacional</p>
           </div>
         </div>
 
-        <nav className="app-sidebar-nav" aria-label="Navegacao principal">
+        <nav id="app-sidebar-nav" className="app-sidebar-nav" aria-label="Navegação principal">
           {visibleGroups.map((group) => {
             const groupActive = group.id === activeGroup.id;
             return (
@@ -236,6 +217,7 @@ export default function AppNav() {
                         key={item.href}
                         href={item.href}
                         className={active ? "app-sidebar-link app-sidebar-link-active" : "app-sidebar-link"}
+                        aria-current={active ? "page" : undefined}
                       >
                         {item.label}
                       </Link>

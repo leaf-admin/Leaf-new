@@ -7,6 +7,8 @@ import Panel from "@/src/components/ui/Panel";
 import KpiCard from "@/src/components/ui/KpiCard";
 import { ErrorText, LoadingState } from "@/src/components/ui/PageFeedback";
 import { leafAPI } from "@/src/services/api";
+import { isAdminMutationEnabled, mutationBlockedMessage } from "@/src/utils/dashboard-access";
+import useConfirmAction from "@/src/hooks/useConfirmAction";
 
 export default function SubscriptionsPage() {
   const [loading, setLoading] = useState(true);
@@ -20,14 +22,20 @@ export default function SubscriptionsPage() {
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [paymentFilter, setPaymentFilter] = useState("all");
+  const [runtimeFlags, setRuntimeFlags] = useState(null);
+  const { requestConfirmation, confirmationDialog, confirmationOpen } = useConfirmAction();
 
   const load = async () => {
     setLoading(true);
     setError("");
     try {
-      const response = await leafAPI.getSubscriptionsDrivers({ page: 1, limit: 200 });
+      const [response, flags] = await Promise.all([
+        leafAPI.getSubscriptionsDrivers({ page: 1, limit: 200 }),
+        leafAPI.getRuntimeFlags(),
+      ]);
       setRows(response?.subscriptions || []);
       setSummary(response?.summary || null);
+      setRuntimeFlags(flags || null);
     } catch (err) {
       setError(err?.message || "Falha ao carregar assinaturas");
     } finally {
@@ -40,6 +48,10 @@ export default function SubscriptionsPage() {
   }, []);
 
   const setBillingStatus = async (driverId, billing_status) => {
+    if (readOnly) {
+      setError(readOnlyMessage);
+      return;
+    }
     try {
       setBusyId(driverId);
       await leafAPI.updateDriverSubscription(driverId, { billing_status });
@@ -52,6 +64,10 @@ export default function SubscriptionsPage() {
   };
 
   const grantFree = async (driverId) => {
+    if (readOnly) {
+      setError(readOnlyMessage);
+      return;
+    }
     try {
       setBusyId(driverId);
       const days = Math.max(1, Number(freeDays) || 7);
@@ -69,6 +85,10 @@ export default function SubscriptionsPage() {
   };
 
   const applyWavePricing = async (driverId) => {
+    if (readOnly) {
+      setError(readOnlyMessage);
+      return;
+    }
     try {
       setBusyId(driverId);
       await leafAPI.updateDriverSubscription(driverId, {
@@ -82,6 +102,15 @@ export default function SubscriptionsPage() {
       setBusyId("");
     }
   };
+
+  const confirmSubscriptionAction = (driverId, action, description, task) => requestConfirmation({
+    title: "Confirmar alteração de assinatura?",
+    description,
+    detail: `Motorista: ${driverId}`,
+    confirmLabel: action,
+    tone: action === "Suspender" ? "danger" : "warning",
+    task,
+  });
 
   const filteredRows = useMemo(() => {
     const term = searchTerm.trim().toLowerCase();
@@ -107,6 +136,9 @@ export default function SubscriptionsPage() {
       return haystack.includes(term);
     });
   }, [rows, searchTerm, statusFilter, paymentFilter]);
+
+  const readOnly = runtimeFlags === null || !isAdminMutationEnabled(runtimeFlags);
+  const readOnlyMessage = mutationBlockedMessage(runtimeFlags);
 
   return (
     <ProtectedRoute>
@@ -139,12 +171,14 @@ export default function SubscriptionsPage() {
               max="90"
               value={freeDays}
               onChange={(e) => setFreeDays(e.target.value)}
+              disabled={readOnly}
               style={{ width: 120 }}
             />
             <input
               placeholder="onda (wave_1)"
               value={waveDraft}
               onChange={(e) => setWaveDraft(e.target.value)}
+              disabled={readOnly}
               style={{ width: 140 }}
             />
             <input
@@ -153,6 +187,7 @@ export default function SubscriptionsPage() {
               step="10"
               value={dailyFeeDraft}
               onChange={(e) => setDailyFeeDraft(e.target.value)}
+              disabled={readOnly}
               style={{ width: 130 }}
               title="Taxa diária em centavos"
             />
@@ -172,7 +207,10 @@ export default function SubscriptionsPage() {
         </section>
 
         <section className="grid">
-          <Panel title="Gestao de Assinaturas" subtitle="Lista filtrável com ações rápidas de cobrança e benefício.">
+          <Panel
+            title="Gestao de Assinaturas"
+            subtitle={readOnlyMessage || "Lista filtrável com ações rápidas de cobrança e benefício."}
+          >
             <div className="table-shell table-shell-tall">
               <table className="table table-compact">
                 <thead>
@@ -211,13 +249,13 @@ export default function SubscriptionsPage() {
                           <td>{item?.currentPeriod?.paymentStatus || "-"}</td>
                           <td>
                             <div className="actions-cell">
-                              <button disabled={!id || isBusy} onClick={() => setBillingStatus(id, "active")}>Ativar</button>
-                              <button disabled={!id || isBusy} onClick={() => setBillingStatus(id, "overdue")}>Overdue</button>
-                              <button disabled={!id || isBusy} onClick={() => setBillingStatus(id, "suspended")}>Suspender</button>
-                              <button disabled={!id || isBusy} onClick={() => applyWavePricing(id)}>
+                              <button disabled={readOnly || confirmationOpen || !id || isBusy} onClick={() => confirmSubscriptionAction(id, "Ativar", "A cobrança da assinatura será marcada como ativa.", () => setBillingStatus(id, "active"))}>Ativar</button>
+                              <button disabled={readOnly || confirmationOpen || !id || isBusy} onClick={() => confirmSubscriptionAction(id, "Marcar overdue", "A assinatura será marcada como inadimplente.", () => setBillingStatus(id, "overdue"))}>Overdue</button>
+                              <button disabled={readOnly || confirmationOpen || !id || isBusy} onClick={() => confirmSubscriptionAction(id, "Suspender", "A assinatura será suspensa e poderá interromper a cobrança operacional.", () => setBillingStatus(id, "suspended"))}>Suspender</button>
+                              <button disabled={readOnly || confirmationOpen || !id || isBusy} onClick={() => confirmSubscriptionAction(id, "Aplicar onda", `A onda ${waveDraft || "(vazia)"} e a taxa configurada serão aplicadas.`, () => applyWavePricing(id))}>
                                 Aplicar onda
                               </button>
-                              <button disabled={!id || isBusy} onClick={() => grantFree(id)}>
+                              <button disabled={readOnly || confirmationOpen || !id || isBusy} onClick={() => confirmSubscriptionAction(id, "Isentar", `A taxa será isenta por ${freeDays} dia(s).`, () => grantFree(id))}>
                                 {`Isentar ${freeDays}d`}
                               </button>
                             </div>
@@ -233,6 +271,7 @@ export default function SubscriptionsPage() {
         </section>
 
         <ErrorText message={error} />
+        {confirmationDialog}
       </main>
     </ProtectedRoute>
   );

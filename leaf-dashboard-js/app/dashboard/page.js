@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import ProtectedRoute from "@/src/components/ProtectedRoute";
 import AppNav from "@/src/components/AppNav";
@@ -198,17 +199,29 @@ function ActionItems({ items = [] }) {
                     : "status-ok"
               }
             >
-              {item.title}
+              {item.title || item.label || "Ação operacional"}
             </span>
-            <small>{item.description}</small>
+            <small>{item.description || item.detail || "Verificar no fluxo indicado."}</small>
           </div>
           <div className="value">
-            <Link href={item.href || "/dashboard"}>{item.priority}</Link>
+            <Link href={item.href || "/dashboard"}>{item.priority || item.status || "ver"}</Link>
           </div>
         </div>
       ))}
     </div>
   );
+}
+
+function buildAttentionItems(snapshot) {
+  const launchFlags = snapshot?.launchFlags || {};
+  const items = Array.isArray(snapshot?.actionItems) ? snapshot.actionItems : [];
+  return items
+    .filter((item) => launchFlags.campaignCenterEnabled === true || !String(item.id || "").startsWith("campaigns-"))
+    .sort((left, right) => {
+      const rank = { alta: 0, media: 1, baixa: 2 };
+      return (rank[left.priority] ?? 3) - (rank[right.priority] ?? 3);
+    })
+    .slice(0, 6);
 }
 
 function CanaryPackPanel({ canaryPack }) {
@@ -496,6 +509,7 @@ function buildWorkspaces(snapshot) {
   const support = snapshot?.support || {};
   const campaigns = snapshot?.campaigns || {};
   const driverOnboarding = snapshot?.driverOnboarding || {};
+  const launchFlags = snapshot?.launchFlags || {};
   const supportBreaches = toNumber(support.overdueAckCount) + toNumber(support.overdueFirstResponseCount);
 
   return [
@@ -533,7 +547,7 @@ function buildWorkspaces(snapshot) {
         { label: "Abertos", value: formatCompact(support.totalOpenTickets) },
       ],
     },
-    {
+    launchFlags.campaignCenterEnabled === true ? {
       id: "campaigns",
       eyebrow: "Campanhas",
       title: `${formatCompact(campaigns.active)} campanhas ativas`,
@@ -549,7 +563,7 @@ function buildWorkspaces(snapshot) {
         { label: "CTR", value: formatPercent(campaigns.ctr) },
         { label: "Valor", value: brlFromCents(campaigns.campaignValueCents) },
       ],
-    },
+    } : null,
     {
       id: "driver-onboarding",
       eyebrow: "Cadastro motorista",
@@ -567,11 +581,12 @@ function buildWorkspaces(snapshot) {
         { label: "Fonte", value: driverOnboarding.reviewQueueSource || "all" },
       ],
     },
-  ];
+  ].filter(Boolean);
 }
 
 export default function DashboardPage() {
   const { user, signOut } = useAuth();
+  const router = useRouter();
   const [snapshot, setSnapshot] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -611,6 +626,7 @@ export default function DashboardPage() {
   }, []);
 
   const workspaces = useMemo(() => buildWorkspaces(snapshot), [snapshot]);
+  const attentionItems = useMemo(() => buildAttentionItems(snapshot), [snapshot]);
   const metrics = snapshot?.dailyMetrics || {};
   const services = snapshot?.services || {};
   const costControls = snapshot?.costControls || {};
@@ -623,7 +639,7 @@ export default function DashboardPage() {
         <header className="header dashboard-header">
           <div>
             <h1>Operação diária</h1>
-            <p>Quatro janelas para acompanhar a Leaf sem consumir APIs pagas sem necessidade.</p>
+            <p>Priorize o que precisa de ação agora; os detalhes ficam agrupados por contexto operacional.</p>
           </div>
           <div className="filters">
             <span className={statusClass(snapshot?.status)}>
@@ -634,7 +650,7 @@ export default function DashboardPage() {
             <button
               onClick={async () => {
                 await signOut();
-                window.location.href = "/login";
+                router.replace("/login");
               }}
             >
               Sair
@@ -685,6 +701,22 @@ export default function DashboardPage() {
           {workspaces.map((workspace) => (
             <WorkspaceCard key={workspace.id} {...workspace} />
           ))}
+        </section>
+
+        <section className="grid ops-detail-grid" aria-label="Atenção operacional">
+          <Panel
+            title="Atenção agora"
+            subtitle="Itens priorizados pelo backend para a equipe decidir o próximo passo sem procurar em várias telas."
+          >
+            <ActionItems items={attentionItems} />
+          </Panel>
+
+          <Panel
+            title="Canary Pack"
+            subtitle="Roteiro operacional para testar com backend como fonte de verdade, sem trocar build."
+          >
+            <CanaryPackPanel canaryPack={snapshot?.canaryPack} />
+          </Panel>
         </section>
 
         <section className="grid ops-detail-grid">
@@ -824,22 +856,6 @@ export default function DashboardPage() {
                 </div>
               </div>
             </details>
-          </Panel>
-        </section>
-
-        <section className="grid ops-detail-grid">
-          <Panel
-            title="Ações sugeridas"
-            subtitle="Próximo passo operacional calculado no snapshot, sem fan-out no navegador."
-          >
-            <ActionItems items={snapshot?.actionItems || []} />
-          </Panel>
-
-          <Panel
-            title="Canary Pack"
-            subtitle="Roteiro operacional para testar com backend como fonte de verdade, sem trocar build."
-          >
-            <CanaryPackPanel canaryPack={snapshot?.canaryPack} />
           </Panel>
         </section>
 

@@ -7,6 +7,7 @@ import AppNav from "@/src/components/AppNav";
 import { leafAPI } from "@/src/services/api";
 import { KeyValueGrid, TechnicalDetails } from "@/src/components/ui/DataViews";
 import { useAuth } from "@/src/contexts/AuthContext";
+import useConfirmAction from "@/src/hooks/useConfirmAction";
 
 const DOCUMENT_OPTIONS = [
   { value: "cnh", label: "CNH" },
@@ -14,6 +15,7 @@ const DOCUMENT_OPTIONS = [
   { value: "antecedentes_criminais", label: "Antecedentes" },
 ];
 const PUSH_ALLOWED_ROLES = new Set(["admin", "super-admin", "manager", "development"]);
+const OPERATIONAL_MUTATION_ROLES = new Set(["admin", "super-admin", "manager", "development"]);
 const OPERATIONAL_DOCUMENT_TYPES = new Set(["cnh", "crlv", "antecedentes_criminais"]);
 
 function summarizeDirectPushResponse(response) {
@@ -52,6 +54,9 @@ export default function UserDetailsPage({ params }) {
   const [documentType, setDocumentType] = useState("cnh");
   const [documentReason, setDocumentReason] = useState("Precisamos que você envie ou atualize este documento no app.");
   const canSendPush = PUSH_ALLOWED_ROLES.has(String(authUser?.role || "").toLowerCase());
+  const canMutateAccount = OPERATIONAL_MUTATION_ROLES.has(String(authUser?.role || "").toLowerCase());
+  const canRequestDocument = OPERATIONAL_MUTATION_ROLES.has(String(authUser?.role || "").toLowerCase());
+  const { requestConfirmation, confirmationDialog, confirmationOpen } = useConfirmAction();
 
   const loadUser = useCallback(async ({ silent = false } = {}) => {
     if (!id) return;
@@ -172,6 +177,37 @@ export default function UserDetailsPage({ params }) {
     formatDocumentRequestMessage
   );
 
+  const requestStatusChange = (status) => requestConfirmation({
+    title: status === "blocked" ? "Bloquear conta?" : status === "suspended" ? "Suspender conta?" : "Reativar conta?",
+    description: status === "blocked"
+      ? "A conta ficará bloqueada para novas ações operacionais."
+      : status === "suspended"
+        ? "A conta ficará suspensa pelo período informado, se houver."
+        : "A conta voltará a ficar liberada para uso normal.",
+    detail: `Usuário: ${primaryName}. Motivo: ${statusReason.trim() || "não informado"}.`,
+    confirmLabel: status === "blocked" ? "Bloquear" : status === "suspended" ? "Suspender" : "Reativar",
+    tone: status === "active" ? "warning" : "danger",
+    task: () => updateStatus(status),
+  });
+
+  const requestPush = () => requestConfirmation({
+    title: "Enviar push individual?",
+    description: "A mensagem será enviada imediatamente ao dispositivo do usuário, se houver token ativo.",
+    detail: `Título: ${pushTitle.trim() || "(vazio)"}`,
+    confirmLabel: "Enviar push",
+    tone: "warning",
+    task: sendPush,
+  });
+
+  const requestDocumentAction = () => requestConfirmation({
+    title: "Solicitar documento?",
+    description: "O motorista receberá uma solicitação de atualização documental e poderá receber um push.",
+    detail: `Documento: ${documentType.toUpperCase()}. Motivo: ${documentReason.trim() || "não informado"}.`,
+    confirmLabel: "Solicitar documento",
+    tone: "warning",
+    task: requestDocument,
+  });
+
   return (
     <ProtectedRoute>
       <main className="page-shell">
@@ -231,28 +267,30 @@ export default function UserDetailsPage({ params }) {
                   />
                 </label>
               </div>
-              <div className="panel-actions">
-                <button
-                  className="button-secondary"
-                  disabled={actionDisabled}
-                  onClick={() => updateStatus("suspended")}
-                >
-                  Suspender
-                </button>
-                <button
-                  className="button-danger"
-                  disabled={actionDisabled}
-                  onClick={() => updateStatus("blocked")}
-                >
-                  Bloquear
-                </button>
-                <button
-                  disabled={actionDisabled || !canReactivate}
-                  onClick={() => updateStatus("active")}
-                >
-                  Reativar
-                </button>
-              </div>
+              {canMutateAccount ? (
+                <div className="panel-actions">
+                  <button
+                    className="button-secondary"
+                    disabled={actionDisabled || confirmationOpen}
+                    onClick={() => requestStatusChange("suspended")}
+                  >
+                    Suspender
+                  </button>
+                  <button
+                    className="button-danger"
+                    disabled={actionDisabled || confirmationOpen}
+                    onClick={() => requestStatusChange("blocked")}
+                  >
+                    Bloquear
+                  </button>
+                  <button
+                    disabled={actionDisabled || confirmationOpen || !canReactivate}
+                    onClick={() => requestStatusChange("active")}
+                  >
+                    Reativar
+                  </button>
+                </div>
+              ) : <p className="table-muted">Seu perfil pode consultar esta conta, mas não pode alterar seu status.</p>}
             </article>
 
             {canSendPush ? (
@@ -269,7 +307,7 @@ export default function UserDetailsPage({ params }) {
                   </label>
                 </div>
                 <div className="panel-actions">
-                  <button disabled={actionDisabled || !pushTitle || !pushBody} onClick={sendPush}>
+                  <button disabled={actionDisabled || confirmationOpen || !pushTitle || !pushBody} onClick={requestPush}>
                     Enviar push
                   </button>
                 </div>
@@ -301,29 +339,33 @@ export default function UserDetailsPage({ params }) {
                   }}
                 />
                 <TechnicalDetails title="Ver payload técnico de documentos" data={documents || {}} />
-                <div className="form-grid form-grid-tight">
-                  <label className="form-field">
-                    Solicitar documento
-                    <select value={documentType} onChange={(event) => setDocumentType(event.target.value)}>
-                      {DOCUMENT_OPTIONS.map((item) => (
-                        <option key={item.value} value={item.value}>{item.label}</option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="form-field">
-                    Mensagem para o motorista
-                    <textarea
-                      value={documentReason}
-                      onChange={(event) => setDocumentReason(event.target.value)}
-                    />
-                  </label>
-                </div>
-                <div className="panel-actions">
-                  <button disabled={actionDisabled || !documentReason} onClick={requestDocument}>
-                    Solicitar documento
-                  </button>
-                  <Link href={`/drivers/${id}/documents`}>Abrir tela de documentos</Link>
-                </div>
+                {canRequestDocument ? (
+                  <>
+                    <div className="form-grid form-grid-tight">
+                      <label className="form-field">
+                        Solicitar documento
+                        <select value={documentType} onChange={(event) => setDocumentType(event.target.value)}>
+                          {DOCUMENT_OPTIONS.map((item) => (
+                            <option key={item.value} value={item.value}>{item.label}</option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="form-field">
+                        Mensagem para o motorista
+                        <textarea
+                          value={documentReason}
+                          onChange={(event) => setDocumentReason(event.target.value)}
+                        />
+                      </label>
+                    </div>
+                    <div className="panel-actions">
+                      <button disabled={actionDisabled || confirmationOpen || !documentReason} onClick={requestDocumentAction}>
+                        Solicitar documento
+                      </button>
+                      <Link href={`/drivers/${id}/documents`}>Abrir tela de documentos</Link>
+                    </div>
+                  </>
+                ) : <p className="table-muted">Seu perfil pode consultar documentos, mas não pode solicitar alterações.</p>}
               </article>
             ) : null}
           </section>
@@ -334,6 +376,7 @@ export default function UserDetailsPage({ params }) {
         {actionMessage ? <p className="success-text">{actionMessage}</p> : null}
         {actionError ? <p className="error">{actionError}</p> : null}
         {error ? <p className="error">{error}</p> : null}
+        {confirmationDialog}
       </main>
     </ProtectedRoute>
   );

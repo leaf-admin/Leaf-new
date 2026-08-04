@@ -29,6 +29,7 @@ const {
   buildLaunchFeatureDisabledPayload
 } = require('../utils/pilot-launch-flags');
 const { evaluatePilotAccess } = require('../services/pilot-access-control-service');
+const { requireAdminMutationsEnabled } = require('../middleware/admin-mutation-guard');
 const { getFinancialCollections } = require('../services/financial-runtime-context');
 const {
   assertStoredRecordMatchesScope,
@@ -447,7 +448,7 @@ router.get('/payment/runtime-profiles', authenticatePaymentActor, requirePayment
  * POST /api/payment/runtime-profiles
  * Cria/atualiza um perfil. Sandbox exige expiração e allowlist por segurança.
  */
-router.post('/payment/runtime-profiles', authenticatePaymentActor, requirePaymentAdmin(), async (req, res) => {
+router.post('/payment/runtime-profiles', authenticatePaymentActor, requirePaymentAdmin(), requireAdminMutationsEnabled, async (req, res) => {
   try {
     const result = await paymentRuntimeProfileService.upsertProfile(req.body || {}, req.paymentActor);
     return res.status(result.success ? 200 : 400).json(result);
@@ -461,7 +462,7 @@ router.post('/payment/runtime-profiles', authenticatePaymentActor, requirePaymen
  * PATCH /api/payment/runtime-profiles/:profileId/status
  * Pausa/ativa/arquiva um perfil sem rebuild do app.
  */
-router.patch('/payment/runtime-profiles/:profileId/status', authenticatePaymentActor, requirePaymentAdmin(), async (req, res) => {
+router.patch('/payment/runtime-profiles/:profileId/status', authenticatePaymentActor, requirePaymentAdmin(), requireAdminMutationsEnabled, async (req, res) => {
   try {
     const result = await paymentRuntimeProfileService.updateProfileStatus(
       req.params.profileId,

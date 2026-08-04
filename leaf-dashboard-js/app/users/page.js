@@ -8,6 +8,7 @@ import { leafAPI } from "@/src/services/api";
 import KpiCard from "@/src/components/ui/KpiCard";
 import Panel from "@/src/components/ui/Panel";
 import { ErrorText, LoadingState } from "@/src/components/ui/PageFeedback";
+import { useAuth } from "@/src/contexts/AuthContext";
 
 const statusTone = {
   active: "status-ok",
@@ -20,12 +21,15 @@ const statusTone = {
 const USERS_REFRESH_MS = 120000;
 
 export default function UsersPage() {
+  const { user: authUser } = useAuth();
   const [users, setUsers] = useState([]);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
   const [searchTerm, setSearchTerm] = useState("");
   const [type, setType] = useState("all");
+  const canReviewDocuments = new Set(["admin", "super-admin", "manager", "development"])
+    .has(String(authUser?.role || "").toLowerCase());
 
   useEffect(() => {
     let mounted = true;
@@ -159,7 +163,7 @@ export default function UsersPage() {
                           <td>
                             <div className="actions-cell">
                               {userId ? <Link href={`/users/${userId}`}>Detalhes</Link> : null}
-                              {userType === "driver" && userId ? (
+                              {userType === "driver" && userId && canReviewDocuments ? (
                                 <Link href={`/drivers/${userId}/documents`}>Documentos</Link>
                               ) : null}
                             </div>

@@ -4,6 +4,7 @@ const geofenceService = require('../services/geofence-service');
 const { logStructured, logError } = require('../utils/logger');
 const { isPilotControlledLaunch } = require('../utils/pilot-launch-flags');
 const { authenticateJWT, requireRole } = require('../middleware/jwt-auth');
+const { requireAdminMutationsEnabled } = require('../middleware/admin-mutation-guard');
 
 let firebaseConfig = null;
 try {
@@ -543,7 +544,7 @@ router.get('/admin/config', authenticateJWT, requireRole(ADMIN_ROLES), async (re
  * Atualiza geofence sem reiniciar backend
  * Body: { enabled?: boolean, region?: Array<[lng,lat]> }
  */
-router.patch('/admin/config', authenticateJWT, requireRole(ADMIN_ROLES), async (req, res) => {
+router.patch('/admin/config', authenticateJWT, requireRole(ADMIN_ROLES), requireAdminMutationsEnabled, async (req, res) => {
     try {
         if (isPilotControlledLaunch()) {
             return res.status(409).json({
@@ -615,7 +616,7 @@ router.patch('/admin/config', authenticateJWT, requireRole(ADMIN_ROLES), async (
  * Ativa/desativa estado para operacao
  * Body: { enabled: boolean }
  */
-router.patch('/admin/states/:stateCode', authenticateJWT, requireRole(ADMIN_ROLES), async (req, res) => {
+router.patch('/admin/states/:stateCode', authenticateJWT, requireRole(ADMIN_ROLES), requireAdminMutationsEnabled, async (req, res) => {
     try {
         const safeStateCode = normalizeStateCode(req.params.stateCode);
         const { enabled } = req.body || {};
@@ -666,7 +667,7 @@ router.patch('/admin/states/:stateCode', authenticateJWT, requireRole(ADMIN_ROLE
  * Ativa/desativa cidade existente.
  * Body: { active: boolean }
  */
-router.patch('/admin/cities/:stateCode/:cityKey', authenticateJWT, requireRole(ADMIN_ROLES), async (req, res) => {
+router.patch('/admin/cities/:stateCode/:cityKey', authenticateJWT, requireRole(ADMIN_ROLES), requireAdminMutationsEnabled, async (req, res) => {
     try {
         const safeStateCode = normalizeStateCode(req.params.stateCode);
         const cityKey = slugify(req.params.cityKey);
@@ -753,7 +754,7 @@ router.patch('/admin/cities/:stateCode/:cityKey', authenticateJWT, requireRole(A
  * Cria uma nova cidade no estado informado.
  * Body: { stateCode, name, value?, active? }
  */
-router.post('/admin/cities', authenticateJWT, requireRole(ADMIN_ROLES), async (req, res) => {
+router.post('/admin/cities', authenticateJWT, requireRole(ADMIN_ROLES), requireAdminMutationsEnabled, async (req, res) => {
     try {
         const safeStateCode = normalizeStateCode(req.body?.stateCode);
         const cityName = String(req.body?.name || '').trim();

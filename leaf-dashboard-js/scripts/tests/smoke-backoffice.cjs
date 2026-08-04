@@ -35,12 +35,28 @@ const routes = [
   { path: "/dashboard", heading: "Operação diária" },
   { path: "/support", heading: "Suporte" },
   { path: "/campaign-center", heading: "Campanhas in-app" },
+  { path: "/drivers", heading: "Motoristas" },
   { path: "/drivers/review-queue", heading: "Fila de Revisão de Documentos" },
+  { path: "/drivers/smoke-driver/documents", heading: "Documentos do Motorista" },
+  { path: "/maps", heading: "Mapas e Geofence" },
   { path: "/metrics", heading: "Métricas" },
+  { path: "/metrics/history", heading: "Historico de metricas" },
+  { path: "/metrics/marketplace", heading: "Marketplace Health" },
   { path: "/observability", heading: "Console operacional" },
   { path: "/financial-reconciliation", heading: "Reconciliação financeira" },
+  { path: "/financial-simulator", heading: "Simulador Financeiro" },
   { path: "/reports", heading: "Relatórios" },
+  { path: "/notifications", heading: "Notificações" },
+  { path: "/payment-runtime", heading: "Perfil de pagamento" },
+  { path: "/programs", heading: "Programas de Convite" },
+  { path: "/promotions", heading: "Promoções" },
   { path: "/runtime-flags", heading: "Perfil de pagamento" },
+  { path: "/subscriptions", heading: "Assinaturas" },
+  { path: "/tolls", heading: "Pedágios" },
+  { path: "/users", heading: "Usuarios" },
+  { path: "/users/smoke-user", heading: "Detalhes do Usuário" },
+  { path: "/waitlist", heading: "Waitlist" },
+  { path: "/audit", heading: "Auditoria e acesso" },
 ];
 
 function log(message) {
@@ -959,8 +975,14 @@ async function main() {
         hasText: "payment_account_document_or_stuck_flow_keyword, payment_category_minimum",
       })
       .waitFor({ timeout: 15000 });
-    await page.getByRole("link", { name: "Campanhas" }).first().click();
-    await page.locator("h1", { hasText: "Campanhas in-app" }).waitFor({ timeout: 15000 });
+    const campaignsLink = page.getByRole("link", { name: "Campanhas" }).first();
+    if (await campaignsLink.count()) {
+      await campaignsLink.click();
+      await page.locator("h1", { hasText: "Campanhas in-app" }).waitFor({ timeout: 15000 });
+      log("top navigation to Campaign Center ok");
+    } else {
+      log("Campaign Center hidden by launch flag");
+    }
     log("top navigation between core areas ok");
 
     await context.close();

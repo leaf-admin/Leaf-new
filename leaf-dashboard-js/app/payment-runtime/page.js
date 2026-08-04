@@ -8,6 +8,8 @@ import Panel from "@/src/components/ui/Panel";
 import { EmptyState, ErrorText, LoadingState } from "@/src/components/ui/PageFeedback";
 import { KeyValueGrid } from "@/src/components/ui/DataViews";
 import { leafAPI } from "@/src/services/api";
+import { isAdminMutationEnabled, mutationBlockedMessage } from "@/src/utils/dashboard-access";
+import useConfirmAction from "@/src/hooks/useConfirmAction";
 
 const nowPlusHours = (hours) => new Date(Date.now() + hours * 60 * 60 * 1000).toISOString();
 const shortId = () => `sandbox-${Date.now().toString(36)}`;
@@ -106,6 +108,8 @@ export default function PaymentRuntimePage() {
   const [resolving, setResolving] = useState(false);
   const [h3Policy, setH3Policy] = useState(defaultH3Policy);
   const [h3Saving, setH3Saving] = useState(false);
+  const [runtimeFlags, setRuntimeFlags] = useState(null);
+  const { requestConfirmation, confirmationDialog, confirmationOpen } = useConfirmAction();
 
   const activeSandboxCount = useMemo(
     () => profiles.filter((profile) =>
@@ -119,9 +123,10 @@ export default function PaymentRuntimePage() {
     try {
       setLoading(true);
       setError("");
-      const [profilesResult, h3Result] = await Promise.allSettled([
+      const [profilesResult, h3Result, flagsResult] = await Promise.allSettled([
         leafAPI.listPaymentRuntimeProfiles({ includeInactive: true }),
         leafAPI.getH3VisualPolicy(),
+        leafAPI.getRuntimeFlags(),
       ]);
       if (profilesResult.status === "fulfilled") {
         setProfiles(Array.isArray(profilesResult.value?.profiles) ? profilesResult.value.profiles : []);
@@ -143,6 +148,9 @@ export default function PaymentRuntimePage() {
           },
         });
       }
+      if (flagsResult.status === "fulfilled") {
+        setRuntimeFlags(flagsResult.value || null);
+      }
     } catch (err) {
       setError(err?.message || "Falha ao carregar perfis de pagamento");
     } finally {
@@ -152,6 +160,10 @@ export default function PaymentRuntimePage() {
 
   const saveH3Policy = async (event) => {
     event.preventDefault();
+    if (readOnly) {
+      setError(readOnlyMessage);
+      return;
+    }
     try {
       setH3Saving(true);
       setError("");
@@ -168,6 +180,10 @@ export default function PaymentRuntimePage() {
 
   const saveProfile = async (event) => {
     event.preventDefault();
+    if (readOnly) {
+      setError(readOnlyMessage);
+      return;
+    }
     try {
       setSaving(true);
       setError("");
@@ -183,7 +199,45 @@ export default function PaymentRuntimePage() {
     }
   };
 
+  const requestSaveH3Policy = (event) => {
+    event.preventDefault();
+    requestConfirmation({
+      title: "Publicar estilo do mapa?",
+      description: "A política visual será atualizada para os consumidores do mapa após o cache curto.",
+      confirmLabel: "Publicar estilo",
+      tone: "warning",
+      task: () => saveH3Policy({ preventDefault: () => {} }),
+    });
+  };
+
+  const requestSaveProfile = (event) => {
+    event.preventDefault();
+    requestConfirmation({
+      title: "Salvar perfil de pagamento?",
+      description: "O perfil pode alterar o ambiente Woovi usado para usuários dentro do escopo.",
+      detail: `Ambiente: ${form.environment}; escopo: ${form.scope}; expiração: ${form.expiresAtIso || "não definida"}.`,
+      confirmLabel: "Salvar perfil",
+      tone: "danger",
+      task: () => saveProfile({ preventDefault: () => {} }),
+    });
+  };
+
+  const requestUpdateStatus = (profileId, status) => requestConfirmation({
+    title: status === "active" ? "Ativar perfil de pagamento?" : "Pausar perfil de pagamento?",
+    description: status === "active"
+      ? "Usuários compatíveis poderão voltar a usar este perfil imediatamente após o cache."
+      : "O perfil deixará de ser elegível para novas resoluções.",
+    detail: `Perfil: ${profileId}`,
+    confirmLabel: status === "active" ? "Ativar perfil" : "Pausar perfil",
+    tone: status === "active" ? "warning" : "danger",
+    task: () => updateStatus(profileId, status),
+  });
+
   const updateStatus = async (profileId, status) => {
+    if (readOnly) {
+      setError(readOnlyMessage);
+      return;
+    }
     try {
       setError("");
       setSuccess("");
@@ -218,6 +272,9 @@ export default function PaymentRuntimePage() {
     loadProfiles();
   }, []);
 
+  const readOnly = runtimeFlags === null || !isAdminMutationEnabled(runtimeFlags);
+  const readOnlyMessage = mutationBlockedMessage(runtimeFlags);
+
   return (
     <ProtectedRoute>
       <main className="page-shell">
@@ -242,17 +299,18 @@ export default function PaymentRuntimePage() {
         </section>
 
         <Panel
-          title="Mapa de pressão de demanda"
-          subtitle="Ajuste a aparência no mapa do motorista sem nova build. A cotação continua sendo a fonte de verdade para o adicional."
+            title="Mapa de pressão de demanda"
+            subtitle={readOnlyMessage || "Ajuste a aparência no mapa do motorista sem nova build. A cotação continua sendo a fonte de verdade para o adicional."}
           className="panel-span-full"
         >
-          <form className="section-stack" onSubmit={saveH3Policy}>
+            <form className="section-stack" onSubmit={requestSaveH3Policy}>
             <div className="form-grid">
               <label className="form-field">
                 Exibição
                 <select
                   value={h3Policy.enabled ? "enabled" : "disabled"}
                   onChange={(event) => setH3Policy({ ...h3Policy, enabled: event.target.value === "enabled" })}
+                  disabled={readOnly}
                 >
                   <option value="enabled">ativa</option>
                   <option value="disabled">oculta</option>
@@ -263,6 +321,7 @@ export default function PaymentRuntimePage() {
                 <select
                   value={h3Policy.resolutionOffset}
                   onChange={(event) => setH3Policy({ ...h3Policy, resolutionOffset: Number(event.target.value) })}
+                  disabled={readOnly}
                 >
                   <option value={-1}>grandes</option>
                   <option value={0}>padrão</option>
@@ -278,6 +337,7 @@ export default function PaymentRuntimePage() {
                   step="0.05"
                   value={h3Policy.opacity}
                   onChange={(event) => setH3Policy({ ...h3Policy, opacity: Number(event.target.value) })}
+                  disabled={readOnly}
                 />
               </label>
             </div>
@@ -297,6 +357,7 @@ export default function PaymentRuntimePage() {
                       ...h3Policy,
                       palette: { ...h3Policy.palette, [key]: event.target.value.toUpperCase() },
                     })}
+                    disabled={readOnly}
                   />
                 </label>
               ))}
@@ -311,6 +372,7 @@ export default function PaymentRuntimePage() {
                     ...h3Policy,
                     label: { ...h3Policy.label, enabled: event.target.value === "enabled" },
                   })}
+                  disabled={readOnly}
                 >
                   <option value="enabled">ativas</option>
                   <option value="disabled">ocultas</option>
@@ -327,6 +389,7 @@ export default function PaymentRuntimePage() {
                     ...h3Policy,
                     label: { ...h3Policy.label, minPercent: Number(event.target.value) },
                   })}
+                  disabled={readOnly}
                 />
               </label>
               <label className="form-field">
@@ -340,6 +403,7 @@ export default function PaymentRuntimePage() {
                     ...h3Policy,
                     label: { ...h3Policy.label, maxVisible: Number(event.target.value) },
                   })}
+                  disabled={readOnly}
                 />
               </label>
               <label className="form-field">
@@ -351,6 +415,7 @@ export default function PaymentRuntimePage() {
                     ...h3Policy,
                     label: { ...h3Policy.label, template: event.target.value },
                   })}
+                  disabled={readOnly}
                 />
               </label>
               <label className="form-field">
@@ -362,6 +427,7 @@ export default function PaymentRuntimePage() {
                     ...h3Policy,
                     label: { ...h3Policy.label, backgroundColor: event.target.value.toUpperCase() },
                   })}
+                  disabled={readOnly}
                 />
               </label>
               <label className="form-field">
@@ -373,15 +439,16 @@ export default function PaymentRuntimePage() {
                     ...h3Policy,
                     label: { ...h3Policy.label, textColor: event.target.value.toUpperCase() },
                   })}
+                  disabled={readOnly}
                 />
               </label>
             </div>
 
             <div className="row-actions">
-              <button type="submit" disabled={h3Saving}>
+              <button type="submit" disabled={readOnly || confirmationOpen || h3Saving}>
                 {h3Saving ? "Salvando..." : "Publicar estilo"}
               </button>
-              <button type="button" className="button-secondary" onClick={() => setH3Policy(defaultH3Policy())}>
+              <button type="button" className="button-secondary" onClick={() => setH3Policy(defaultH3Policy())} disabled={readOnly}>
                 Restaurar padrão no formulário
               </button>
             </div>
@@ -391,35 +458,35 @@ export default function PaymentRuntimePage() {
         <section className="grid">
           <Panel
             title="Novo perfil sandbox"
-            subtitle="Use sempre escopo por usuário ou telefone, com expiração curta."
+            subtitle={readOnlyMessage || "Use sempre escopo por usuário ou telefone, com expiração curta."}
           >
-            <form className="section-stack" onSubmit={saveProfile}>
+            <form className="section-stack" onSubmit={requestSaveProfile}>
               <div className="form-grid">
                 <label className="form-field">
                   Nome
-                  <input value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} />
+                  <input value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} disabled={readOnly} />
                 </label>
                 <label className="form-field">
                   ID técnico
-                  <input value={form.profileId} onChange={(event) => setForm({ ...form, profileId: event.target.value })} />
+                  <input value={form.profileId} onChange={(event) => setForm({ ...form, profileId: event.target.value })} disabled={readOnly} />
                 </label>
                 <label className="form-field">
                   Ambiente
-                  <select value={form.environment} onChange={(event) => setForm({ ...form, environment: event.target.value })}>
+                  <select value={form.environment} onChange={(event) => setForm({ ...form, environment: event.target.value })} disabled={readOnly}>
                     <option value="sandbox">sandbox</option>
                     <option value="production">produção</option>
                   </select>
                 </label>
                 <label className="form-field">
                   Status inicial
-                  <select value={form.status} onChange={(event) => setForm({ ...form, status: event.target.value })}>
+                  <select value={form.status} onChange={(event) => setForm({ ...form, status: event.target.value })} disabled={readOnly}>
                     <option value="paused">pausado</option>
                     <option value="active">ativo</option>
                   </select>
                 </label>
                 <label className="form-field">
                   Escopo
-                  <select value={form.scope} onChange={(event) => setForm({ ...form, scope: event.target.value })}>
+                  <select value={form.scope} onChange={(event) => setForm({ ...form, scope: event.target.value })} disabled={readOnly}>
                     <option value="users">usuários</option>
                     <option value="phones">telefones</option>
                     <option value="canary">canary</option>
@@ -428,7 +495,7 @@ export default function PaymentRuntimePage() {
                 </label>
                 <label className="form-field">
                   Prioridade
-                  <input type="number" value={form.priority} onChange={(event) => setForm({ ...form, priority: event.target.value })} />
+                  <input type="number" value={form.priority} onChange={(event) => setForm({ ...form, priority: event.target.value })} disabled={readOnly} />
                 </label>
               </div>
               <label className="form-field">
@@ -438,6 +505,7 @@ export default function PaymentRuntimePage() {
                   value={form.userIds}
                   placeholder="um por linha"
                   onChange={(event) => setForm({ ...form, userIds: event.target.value })}
+                  disabled={readOnly}
                 />
               </label>
               <label className="form-field">
@@ -447,6 +515,7 @@ export default function PaymentRuntimePage() {
                   value={form.phones}
                   placeholder="+5521992000000"
                   onChange={(event) => setForm({ ...form, phones: event.target.value })}
+                  disabled={readOnly}
                 />
               </label>
               <div className="form-grid">
@@ -455,16 +524,17 @@ export default function PaymentRuntimePage() {
                   <input
                     value={form.expiresAtIso}
                     onChange={(event) => setForm({ ...form, expiresAtIso: event.target.value })}
+                    disabled={readOnly}
                   />
                 </label>
                 <label className="form-field">
                   Motivo
-                  <input value={form.reason} onChange={(event) => setForm({ ...form, reason: event.target.value })} />
+                  <input value={form.reason} onChange={(event) => setForm({ ...form, reason: event.target.value })} disabled={readOnly} />
                 </label>
               </div>
               <div className="row-actions">
-                <button type="submit" disabled={saving}>{saving ? "Salvando..." : "Salvar perfil"}</button>
-                <button type="button" className="button-secondary" onClick={() => setForm(defaultForm())}>Limpar</button>
+                <button type="submit" disabled={readOnly || confirmationOpen || saving}>{saving ? "Salvando..." : "Salvar perfil"}</button>
+                <button type="button" className="button-secondary" onClick={() => setForm(defaultForm())} disabled={readOnly}>Limpar</button>
               </div>
             </form>
           </Panel>
@@ -564,11 +634,11 @@ export default function PaymentRuntimePage() {
                         <td>
                           <div className="row-actions">
                             {status === "active" ? (
-                              <button type="button" className="button-secondary" onClick={() => updateStatus(profileId, "paused")}>
+                                <button type="button" className="button-secondary" onClick={() => requestUpdateStatus(profileId, "paused")} disabled={readOnly || confirmationOpen}>
                                 Pausar
                               </button>
                             ) : (
-                              <button type="button" onClick={() => updateStatus(profileId, "active")}>
+                              <button type="button" onClick={() => requestUpdateStatus(profileId, "active")} disabled={readOnly || confirmationOpen}>
                                 Ativar
                               </button>
                             )}
@@ -585,6 +655,7 @@ export default function PaymentRuntimePage() {
 
         {success ? <p className="success-text">{success}</p> : null}
         <ErrorText message={error} />
+        {confirmationDialog}
       </main>
     </ProtectedRoute>
   );
