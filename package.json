@@ -83,7 +83,7 @@
     "websocket-driver": "0.7.5"
   },
   "devDependencies": {
-    "expo": "^54.0.33",
+    "expo": "~54.0.36",
     "next": "16.3.0"
   }
 }
