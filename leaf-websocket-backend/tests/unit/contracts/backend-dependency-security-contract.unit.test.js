@@ -22,6 +22,9 @@ describe('backend production dependency security contract', () => {
   const backendRoot = path.resolve(__dirname, '../../..');
   const repositoryRoot = path.resolve(backendRoot, '..');
   const packageJson = JSON.parse(fs.readFileSync(path.join(backendRoot, 'package.json'), 'utf8'));
+  const repositoryPackageJson = JSON.parse(
+    fs.readFileSync(path.join(repositoryRoot, 'package.json'), 'utf8')
+  );
   const standaloneLockfile = JSON.parse(
     fs.readFileSync(path.join(backendRoot, 'package-lock.json'), 'utf8')
   );
@@ -41,13 +44,23 @@ describe('backend production dependency security contract', () => {
     );
   }
 
+  function resolvedNestedVersion(lockfile, parentPackageName, packageName) {
+    const suffix = `node_modules/${parentPackageName}/node_modules/${packageName}`;
+    const matches = Object.entries(lockfile.packages)
+      .filter(([packagePath]) => packagePath.endsWith(suffix))
+      .map(([, metadata]) => metadata.version);
+    expect(matches).toHaveLength(1);
+    return matches[0];
+  }
+
   test('pins supported direct upgrades that remove live critical and high advisories', () => {
     expect(packageJson.dependencies).toMatchObject({
       '@firebase/app': '0.14.9',
       'express-rate-limit': '^8.6.1',
       'firebase-admin': '^13.10.0',
       sharp: '^0.35.3',
-      'socket.io': '^4.8.3'
+      'socket.io': '^4.8.3',
+      uuid: '^13.0.2'
     });
 
     for (const lockfile of lockfiles) {
@@ -56,6 +69,7 @@ describe('backend production dependency security contract', () => {
       expectAtLeast(resolvedVersion(lockfile, 'firebase-admin'), '13.10.0');
       expectAtLeast(resolvedVersion(lockfile, 'sharp'), '0.35.3');
       expectAtLeast(resolvedVersion(lockfile, 'socket.io'), '4.8.3');
+      expectAtLeast(resolvedVersion(lockfile, 'uuid'), '13.0.2');
     }
 
     expect(standaloneLockfile.packages[''].dependencies['@firebase/app']).toBe('0.14.9');
@@ -74,6 +88,27 @@ describe('backend production dependency security contract', () => {
         expectAtLeast(resolvedVersion(lockfile, packageName), minimumVersion);
       }
     }
+  });
+
+  test('overrides vulnerable Firebase transport UUID copies without changing Firebase Admin', () => {
+    const expectedOverrides = {
+      gaxios: { uuid: '11.1.1' },
+      'google-gax': { uuid: '11.1.1' },
+      'teeny-request': { uuid: '11.1.1' }
+    };
+
+    expect(packageJson.overrides).toMatchObject(expectedOverrides);
+    expect(repositoryPackageJson.overrides).toMatchObject(expectedOverrides);
+
+    for (const lockfile of lockfiles) {
+      for (const parentPackageName of Object.keys(expectedOverrides)) {
+        expectAtLeast(resolvedNestedVersion(lockfile, parentPackageName, 'uuid'), '11.1.1');
+      }
+    }
+  });
+
+  test('keeps the backend test glob implementation above the patched floor', () => {
+    expectAtLeast(resolvedVersion(standaloneLockfile, 'brace-expansion'), '5.0.9');
   });
 
   test('removes end-of-life Apollo Server 3 from the production dependency graph', () => {
