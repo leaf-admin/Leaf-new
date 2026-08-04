@@ -8,6 +8,7 @@ function setupEventBusAndWorkers({
     logError,
     enableEmbeddedListenerWorkers = false
 }) {
+    const { buildWorkerConsumerName } = require('../workers/worker-consumer-identity');
     // ✅ REFATORAÇÃO: Configurar EventBus e Listeners
     logStructured('info', 'Configurando EventBus e Listeners', { service: 'server', phase: 'refactoring' });
     const eventBus = setupListeners(io);
@@ -35,7 +36,7 @@ function setupEventBusAndWorkers({
             workerManager = new WorkerManager({
                 streamName: 'ride_events',
                 groupName: 'listener-workers',
-                consumerName: `server-worker-${process.pid}`,
+                consumerName: buildWorkerConsumerName('server-worker'),
                 batchSize: 10,
                 blockTime: 1000,
                 maxRetries: 3,

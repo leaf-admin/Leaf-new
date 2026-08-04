@@ -50,6 +50,7 @@ services:
       - HOST=0.0.0.0
       - RUNTIME_ROLE=gateway
       - ENABLE_EMBEDDED_LISTENER_WORKERS=false
+      - LEAF_WORKER_INSTANCE_ID=${LEAF_WORKER_INSTANCE_ID:-}
       - ENABLE_DIRECT_RIDE_REQUESTED_DISPATCH=true
       - LEAF_LAUNCH_PROFILE=${LEAF_LAUNCH_PROFILE:-full}
       - LEAF_PILOT_CONTROLLED=${LEAF_PILOT_CONTROLLED:-false}
@@ -371,6 +372,7 @@ services:
       - NODE_ENV=production
       - RUNTIME_ROLE=sideeffects
       - ENABLE_EMBEDDED_LISTENER_WORKERS=false
+      - LEAF_WORKER_INSTANCE_ID=${LEAF_WORKER_INSTANCE_ID:-}
 
       # Launch control (must match the gateways so the worker preflight cannot
       # start under a broader policy than the active runtime).
@@ -476,6 +478,7 @@ services:
     environment:
       - NODE_ENV=production
       - RUNTIME_ROLE=billing
+      - LEAF_WORKER_INSTANCE_ID=${LEAF_WORKER_INSTANCE_ID:-}
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - REDIS_PASSWORD=${REDIS_PASSWORD:?REDIS_PASSWORD must be set}

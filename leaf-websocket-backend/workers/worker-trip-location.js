@@ -12,6 +12,7 @@
 const WorkerManager = require('./WorkerManager');
 const { logStructured } = require('../utils/logger');
 const tripLocationPersistenceService = require('../services/trip-location-persistence-service');
+const { buildWorkerConsumerName } = require('./worker-consumer-identity');
 
 const WORKER_ENABLED = process.env.ENABLE_TRIP_LOCATION_PERSISTENCE_WORKER !== 'false';
 
@@ -26,7 +27,8 @@ if (!WORKER_ENABLED) {
 const workerManager = new WorkerManager({
     streamName: process.env.TRIP_LOCATION_STREAM_NAME || 'trip_location_events',
     groupName: process.env.TRIP_LOCATION_WORKER_GROUP || 'trip-location-workers',
-    consumerName: process.env.TRIP_LOCATION_WORKER_CONSUMER || 'trip-location-worker-1',
+    consumerName: process.env.TRIP_LOCATION_WORKER_CONSUMER
+        || buildWorkerConsumerName('trip-location-worker', { includePid: false }),
     dlqStreamName: process.env.TRIP_LOCATION_WORKER_DLQ_STREAM_NAME || 'trip_location_events_dlq',
     batchSize: Number.parseInt(process.env.TRIP_LOCATION_WORKER_BATCH_SIZE || '40', 10),
     blockTime: Number.parseInt(process.env.TRIP_LOCATION_WORKER_BLOCK_TIME || '1000', 10),
