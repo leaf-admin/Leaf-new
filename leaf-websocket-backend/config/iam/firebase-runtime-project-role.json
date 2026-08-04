@@ -1,0 +1,24 @@
+{
+  "title": "Leaf Firebase Runtime Project",
+  "description": "Data-plane permissions required by the Leaf backend for FCM, Firestore, Firebase Auth and Realtime Database.",
+  "stage": "GA",
+  "includedPermissions": [
+    "cloudmessaging.messages.create",
+    "datastore.databases.get",
+    "datastore.entities.allocateIds",
+    "datastore.entities.create",
+    "datastore.entities.delete",
+    "datastore.entities.get",
+    "datastore.entities.list",
+    "datastore.entities.update",
+    "firebase.clients.get",
+    "firebase.projects.get",
+    "firebaseauth.users.create",
+    "firebaseauth.users.delete",
+    "firebaseauth.users.get",
+    "firebaseauth.users.update",
+    "firebasedatabase.instances.get",
+    "firebasedatabase.instances.list",
+    "resourcemanager.projects.get"
+  ]
+}

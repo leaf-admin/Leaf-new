@@ -1,0 +1,12 @@
+{
+  "title": "Leaf Firebase Runtime Storage",
+  "description": "Object-only access required by the Leaf backend on its canonical Firebase Storage bucket.",
+  "stage": "GA",
+  "includedPermissions": [
+    "storage.objects.create",
+    "storage.objects.delete",
+    "storage.objects.get",
+    "storage.objects.list",
+    "storage.objects.update"
+  ]
+}
