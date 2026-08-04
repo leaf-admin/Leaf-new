@@ -123,8 +123,7 @@
     "tesseract.js": "^5.0.4",
     "uuid": "^13.0.0",
     "winston": "^3.17.0",
-    "ws": "^8.18.3",
-    "xlsx": "^0.18.5"
+    "ws": "^8.18.3"
   },
   "devDependencies": {
     "@graphql-tools/mock": "^9.0.25",

@@ -15,10 +15,7 @@ class ReportService {
     }
 
     isExcelExportEnabled() {
-        if (String(process.env.NODE_ENV || '').trim().toLowerCase() === 'production') {
-            return false;
-        }
-        return String(process.env.ENABLE_XLSX_REPORT_EXPORT || 'true').trim().toLowerCase() === 'true';
+        return false;
     }
 
     async ensureTemplatesDir() {
@@ -55,79 +52,10 @@ class ReportService {
      * Gerar relatório em Excel
      */
     async generateExcelReport(reportData, template = 'default') {
-        try {
-            if (!this.isExcelExportEnabled()) {
-                const error = new Error('Exportação XLSX desabilitada até substituição da dependência vulnerável.');
-                error.code = 'XLSX_EXPORT_DISABLED_SECURITY';
-                throw error;
-            }
-            const XLSX = require('xlsx');
-            const category = reportData.category || template || 'default';
-            
-            // Criar workbook
-            const workbook = XLSX.utils.book_new();
-            
-            // Adicionar página de informações
-            const infoData = [
-                ['Relatório', reportData.title],
-                ['Categoria', this.getCategoryLabel(category)],
-                ['Período', reportData.period || 'N/A'],
-                ['Gerado em', new Date().toLocaleString('pt-BR')],
-                ['', ''],
-            ];
-            const infoSheet = XLSX.utils.aoa_to_sheet(infoData);
-            XLSX.utils.book_append_sheet(workbook, infoSheet, 'Informações');
-            
-            // Adicionar resumo se disponível
-            if (reportData.summary) {
-                const summaryData = Object.entries(reportData.summary).map(([key, value]) => ({
-                    Métrica: this.formatLabel(key),
-                    Valor: this.formatValue(value, key, category)
-                }));
-                const summarySheet = XLSX.utils.json_to_sheet(summaryData);
-                XLSX.utils.book_append_sheet(workbook, summarySheet, 'Resumo');
-            }
-            
-            // Adicionar dados principais
-            if (reportData.data && Array.isArray(reportData.data)) {
-                const worksheet = XLSX.utils.json_to_sheet(reportData.data);
-                XLSX.utils.book_append_sheet(workbook, worksheet, 'Dados');
-            }
-            
-            // Adicionar insights se disponível
-            if (reportData.insights) {
-                let insightsData;
-                if (Array.isArray(reportData.insights)) {
-                    insightsData = reportData.insights.map((insight, index) => ({
-                        '#': index + 1,
-                        'Insight': insight
-                    }));
-                } else if (typeof reportData.insights === 'object') {
-                    insightsData = Object.entries(reportData.insights).map(([key, value]) => ({
-                        Categoria: this.formatLabel(key),
-                        Descrição: value
-                    }));
-                } else {
-                    insightsData = [{ Insight: reportData.insights }];
-                }
-                const insightsSheet = XLSX.utils.json_to_sheet(insightsData);
-                XLSX.utils.book_append_sheet(workbook, insightsSheet, 'Insights');
-            }
-            
-            // Gerar buffer
-            const excelBuffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
-            
-            logger.info(`✅ Relatório Excel gerado: ${reportData.title} (categoria: ${category})`);
-            return {
-                success: true,
-                content: excelBuffer,
-                format: 'xlsx',
-                filename: `${reportData.title.replace(/\s+/g, '_')}_${Date.now()}.xlsx`
-            };
-        } catch (error) {
-            logger.error(`❌ Erro ao gerar Excel: ${error.message}`);
-            throw error;
-        }
+        const error = new Error('Exportação XLSX desabilitada até substituição da dependência vulnerável.');
+        error.code = 'XLSX_EXPORT_DISABLED_SECURITY';
+        logger.error(`❌ Erro ao gerar Excel: ${error.message}`);
+        throw error;
     }
 
     /**

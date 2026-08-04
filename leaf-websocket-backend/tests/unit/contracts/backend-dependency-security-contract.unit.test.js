@@ -68,14 +68,13 @@ describe('backend production dependency security contract', () => {
     }
   });
 
-  test('keeps vulnerable XLSX generation fail-closed in production', () => {
+  test('removes vulnerable XLSX dependency and keeps export fail-closed', () => {
+    expect(packageJson.dependencies).not.toHaveProperty('xlsx');
     for (const lockfile of lockfiles) {
-      expect(resolvedVersion(lockfile, 'xlsx')).toBe('0.18.5');
+      expect(resolvedVersion(lockfile, 'xlsx')).toBeUndefined();
     }
-    expect(reportServiceSource).toContain(
-      "if (String(process.env.NODE_ENV || '').trim().toLowerCase() === 'production') {"
-    );
-    expect(reportServiceSource).toMatch(/=== 'production'\) \{\s+return false;/);
+    expect(reportServiceSource).not.toMatch(/require\(['"]xlsx['"]\)/);
+    expect(reportServiceSource).toMatch(/isExcelExportEnabled\(\) \{\s+return false;/);
     expect(reportServiceSource).toContain("error.code = 'XLSX_EXPORT_DISABLED_SECURITY'");
   });
 });
