@@ -1,6 +1,20 @@
 const jwt = require('jsonwebtoken');
-const { AuthenticationError, ForbiddenError } = require('apollo-server-express');
+const { GraphQLError } = require('graphql');
 const { resolveJwtSecret } = require('../utils/jwt-secret-resolver');
+
+class AuthenticationError extends GraphQLError {
+  constructor(message) {
+    super(message, { extensions: { code: 'UNAUTHENTICATED' } });
+    this.name = 'AuthenticationError';
+  }
+}
+
+class ForbiddenError extends GraphQLError {
+  constructor(message) {
+    super(message, { extensions: { code: 'FORBIDDEN' } });
+    this.name = 'ForbiddenError';
+  }
+}
 
 class GraphQLAuthMiddleware {
   constructor() {
@@ -277,6 +291,5 @@ class GraphQLAuthMiddleware {
 const graphqlAuth = new GraphQLAuthMiddleware();
 
 module.exports = graphqlAuth;
-
 
 

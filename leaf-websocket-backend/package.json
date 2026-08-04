@@ -89,8 +89,6 @@
     "@socket.io/redis-adapter": "^8.3.0",
     "@turf/boolean-point-in-polygon": "^7.3.4",
     "@turf/helpers": "^7.3.4",
-    "apollo-server-core": "^3.13.0",
-    "apollo-server-express": "^3.13.0",
     "axios": "^1.18.1",
     "bcryptjs": "^3.0.2",
     "cors": "^2.8.5",

@@ -1,41 +1,3 @@
-function isLegacyGraphqlEnabled() {
-    // Produção não possui escape hatch: reativar o legado exige mudança de
-    // código revisada, não apenas drift de variável de ambiente.
-    return String(process.env.NODE_ENV || '').trim().toLowerCase() !== 'production';
-}
-
-async function initializeGraphQL({ app, applyMiddleware, logStructured, logError }) {
-    if (!isLegacyGraphqlEnabled()) {
-        logStructured('info', 'GraphQL legado desabilitado neste runtime', {
-            service: 'graphql',
-            endpoint: 'disabled',
-            reason: 'ENABLE_LEGACY_GRAPHQL=false'
-        });
-        return false;
-    }
-
-    try {
-        logStructured('info', 'Inicializando GraphQL', { service: 'graphql' });
-
-        // Aplicar middleware do GraphQL (já inicia o servidor)
-        await applyMiddleware(app);
-
-        const playgroundEnabled = process.env.NODE_ENV !== 'production' ? '/graphql' : 'disabled';
-        logStructured('info', 'GraphQL integrado com sucesso', {
-            service: 'graphql',
-            endpoint: '/graphql',
-            playground: playgroundEnabled
-        });
-
-        return true;
-
-    } catch (error) {
-        logError(error, 'Erro ao inicializar GraphQL', { service: 'graphql' });
-        // Continuar sem GraphQL se houver erro
-        return false;
-    }
-}
-
 function scheduleDailySubscription({ dailySubscriptionService, logStructured, logError }) {
     const now = new Date();
     const tomorrow = new Date(now);
@@ -100,22 +62,20 @@ function startHttpServer({
     app,
     server,
     io,
-    applyMiddleware,
     cluster,
     VPS_CONFIG,
     ConnectionCleanupService,
     logStructured,
     logError
 }) {
-    // ✅ Inicializar GraphQL e depois iniciar servidor
     // IMPORTANTE: Este bloco DEVE ser executado para o servidor escutar na porta
     logStructured('info', '🔵 Iniciando processo de inicialização do servidor', { service: 'server' });
 
     (async () => {
         try {
             logStructured('info', 'Iniciando processo de inicialização do servidor', { service: 'server' });
-            const graphqlMounted = await initializeGraphQL({ app, applyMiddleware, logStructured, logError });
-            logStructured('info', 'Etapa GraphQL concluída, iniciando servidor HTTP', {
+            const graphqlMounted = false;
+            logStructured('info', 'GraphQL legado removido, iniciando servidor HTTP', {
                 service: 'server',
                 graphqlMounted
             });
@@ -235,5 +195,3 @@ function startHttpServer({
 }
 
 module.exports = startHttpServer;
-module.exports.initializeGraphQL = initializeGraphQL;
-module.exports.isLegacyGraphqlEnabled = isLegacyGraphqlEnabled;
