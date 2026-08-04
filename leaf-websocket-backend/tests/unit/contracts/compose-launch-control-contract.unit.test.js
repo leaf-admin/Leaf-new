@@ -274,7 +274,9 @@ describe('production compose launch-control contract', () => {
     }
     expect(deploySource).toContain('This script never tears down the compose project, Redis, or named volumes.');
     expect(deploySource).toContain('It never converts or restarts Redis.');
-    expect(deploySource.match(/--user 0:0/g)).toHaveLength(2);
+    // Config validation before/after build plus the read-only Firebase IAM
+    // boundary need root only to read protected mounts in transient containers.
+    expect(deploySource.match(/--user 0:0/g)).toHaveLength(3);
     expect(deploySource).toContain(
       'Trip-location stream disabled; consumer liveness gate skipped.',
     );
