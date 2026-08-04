@@ -294,6 +294,82 @@ describe('validate-runtime-config Woovi webhook production gates', () => {
     ]));
   });
 
+  it('allows broad passengers in a controlled pilot only when the driver cohort remains configured', () => {
+    const result = runValidator({
+      ...baseProdEnv,
+      ...strictKycProdEnv,
+      LEAF_BROAD_LAUNCH_APPROVED: 'false',
+      LEAF_LAUNCH_PROFILE: 'pilot_controlled',
+      LEAF_PILOT_CONTROLLED: 'true',
+      PILOT_PASSENGER_ACCESS_MODE: 'broad',
+      PILOT_ALLOWED_PASSENGER_IDS: '',
+      PILOT_ALLOWED_DRIVER_IDS: 'driver-1,driver-2',
+      PILOT_MAX_DRIVER_COHORT_SIZE: '250',
+      LEAF_RUNTIME_POLICY_VERSION: 'assisted-launch-v1',
+      GEOFENCE_FAIL_CLOSED: 'true',
+      GEOFENCE_REQUIRE_DESTINATION_INSIDE_REGION: 'true',
+      GEOFENCE_REGION_FILE: 'config/geofence.json'
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.report.summary.blockers).toEqual([]);
+    expect(result.report.diagnostics.launchControl).toEqual(expect.objectContaining({
+      pilotControlled: true,
+      passengerAccessMode: 'broad',
+      passengerCohortRequired: false,
+      passengerCohortSize: 0,
+      driverCohortSize: 2
+    }));
+  });
+
+  it('blocks a controlled pilot whose driver allowlist exceeds the configured cap', () => {
+    const result = runValidator({
+      ...baseProdEnv,
+      ...strictKycProdEnv,
+      LEAF_BROAD_LAUNCH_APPROVED: 'false',
+      LEAF_LAUNCH_PROFILE: 'pilot_controlled',
+      PILOT_PASSENGER_ACCESS_MODE: 'broad',
+      PILOT_ALLOWED_DRIVER_IDS: 'driver-1,driver-2',
+      PILOT_MAX_DRIVER_COHORT_SIZE: '1',
+      LEAF_RUNTIME_POLICY_VERSION: 'assisted-launch-v1',
+      GEOFENCE_FAIL_CLOSED: 'true',
+      GEOFENCE_REQUIRE_DESTINATION_INSIDE_REGION: 'true',
+      GEOFENCE_REGION_FILE: 'config/geofence.json'
+    });
+
+    expect(result.status).toBe(1);
+    expect(result.report.summary.blockers).toContain(
+      'PILOT_ALLOWED_DRIVER_IDS excede PILOT_MAX_DRIVER_COHORT_SIZE'
+    );
+  });
+
+  it('rejects broad passenger mode in the 1+1 physical ride-flow validation profile', () => {
+    const result = runValidator({
+      ...baseProdEnv,
+      LEAF_BROAD_LAUNCH_APPROVED: 'false',
+      LEAF_LAUNCH_PROFILE: 'ride_flow_validation',
+      LEAF_RIDE_FLOW_VALIDATION_ACK: 'true',
+      PILOT_PASSENGER_ACCESS_MODE: 'broad',
+      PILOT_ALLOWED_PASSENGER_IDS: 'passenger-1',
+      PILOT_ALLOWED_DRIVER_IDS: 'driver-1',
+      LEAF_ACCEPT_NEW_PIX: 'true',
+      LEAF_ACCEPT_NEW_BOOKINGS: 'true',
+      LEAF_RUNTIME_POLICY_VERSION: 'ride-flow-validation-v1',
+      GEOFENCE_FAIL_CLOSED: 'true',
+      GEOFENCE_REQUIRE_DESTINATION_INSIDE_REGION: 'true',
+      GEOFENCE_REGION_FILE: 'config/geofence.json',
+      KYC_PRODUCTION_BIOMETRICS_ENABLED: 'false',
+      KYC_TRUST_CADENCE_ENABLED: 'false',
+      DAILY_KYC_ONLINE_GATE_ENABLED: 'false',
+      KYC_ACTIVE_TRIP_AUTHORITY_MODE: 'redis_noeviction'
+    });
+
+    expect(result.status).toBe(1);
+    expect(result.report.summary.blockers).toContain(
+      'ride_flow_validation exige exatamente 1 passageiro na allowlist'
+    );
+  });
+
   it('recognizes the versioned Rio pilot GeoJSON as a valid multi-polygon', () => {
     const result = runValidator({
       ...baseProdEnv,

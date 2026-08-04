@@ -19,6 +19,7 @@ const {
 } = require('../services/ride-flow-validation-guard');
 const { decodePolyline } = require('../services/route-toll-service');
 const { resolvePersistenceScope } = require('../services/sandbox-persistence-context');
+const { evaluatePilotAccess } = require('../services/pilot-access-control-service');
 
 function normalizeText(value) {
     return String(value || '').trim();
@@ -816,6 +817,22 @@ function registerSocketCreateBookingHandler({
                             payloadCustomerId: sanitizedCustomerId,
                             eventType: 'createBooking'
                         });
+                    }
+
+                    const pilotAccess = evaluatePilotAccess({
+                        userId: customerId,
+                        role: 'passenger',
+                        operation: 'booking'
+                    });
+                    if (!pilotAccess.allowed) {
+                        socket.emit('bookingError', {
+                            error: pilotAccess.message || 'Novas solicitações estão temporariamente indisponíveis.',
+                            message: pilotAccess.message || 'Novas solicitações estão temporariamente indisponíveis.',
+                            code: pilotAccess.code,
+                            retryable: pilotAccess.retryable === true
+                        });
+                        recordFailure('active_guard', pilotAccess.code || 'pilot_booking_access_denied');
+                        return;
                     }
 
                     if (customerId) {

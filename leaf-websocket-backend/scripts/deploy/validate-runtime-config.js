@@ -397,9 +397,16 @@ function resolveLaunchControlDiagnostic() {
   const passengerCohortSize = parseAllowlist(
     process.env.PILOT_ALLOWED_PASSENGER_IDS || process.env.LEAF_PILOT_ALLOWED_PASSENGER_IDS
   ).size;
+  const passengerAccessMode = String(process.env.PILOT_PASSENGER_ACCESS_MODE || 'cohort')
+    .trim()
+    .toLowerCase();
   const driverCohortSize = parseAllowlist(
     process.env.PILOT_ALLOWED_DRIVER_IDS || process.env.LEAF_PILOT_ALLOWED_DRIVER_IDS
   ).size;
+  const driverCohortMaxSize = Number.parseInt(
+    process.env.PILOT_MAX_DRIVER_COHORT_SIZE || '250',
+    10
+  );
 
   return {
     launchProfile,
@@ -407,8 +414,13 @@ function resolveLaunchControlDiagnostic() {
     geofenceValidation,
     rideFlowValidation,
     broadLaunchApproved: boolEnv('LEAF_BROAD_LAUNCH_APPROVED', false),
+    passengerAccessMode,
+    passengerAccessModeValid: ['cohort', 'broad'].includes(passengerAccessMode),
+    passengerCohortRequired: passengerAccessMode !== 'broad',
     passengerCohortSize,
     driverCohortSize,
+    driverCohortMaxSize,
+    driverCohortMaxSizeValid: Number.isFinite(driverCohortMaxSize) && driverCohortMaxSize > 0,
     acceptNewPix: booleanDiagnostic('LEAF_ACCEPT_NEW_PIX', true),
     acceptNewBookings: booleanDiagnostic('LEAF_ACCEPT_NEW_BOOKINGS', true),
     geofenceFailClosed: booleanDiagnostic('GEOFENCE_FAIL_CLOSED', true),
@@ -935,11 +947,22 @@ function main() {
       blockers.push('Lançamento amplo exige borda com failover em 2+ domínios e drill comprovado nos últimos 30 dias');
     }
     if (launchControlDiagnostic.pilotControlled) {
-      if (launchControlDiagnostic.passengerCohortSize < 1) {
+      if (!launchControlDiagnostic.passengerAccessModeValid) {
+        blockers.push('PILOT_PASSENGER_ACCESS_MODE deve ser cohort ou broad');
+      }
+      if (
+        launchControlDiagnostic.passengerCohortRequired
+        && launchControlDiagnostic.passengerCohortSize < 1
+      ) {
         blockers.push('PILOT_ALLOWED_PASSENGER_IDS deve conter o cohort autorizado do piloto');
       }
       if (launchControlDiagnostic.driverCohortSize < 1) {
         blockers.push('PILOT_ALLOWED_DRIVER_IDS deve conter o cohort autorizado do piloto');
+      }
+      if (!launchControlDiagnostic.driverCohortMaxSizeValid) {
+        blockers.push('PILOT_MAX_DRIVER_COHORT_SIZE deve ser um inteiro maior que zero');
+      } else if (launchControlDiagnostic.driverCohortSize > launchControlDiagnostic.driverCohortMaxSize) {
+        blockers.push('PILOT_ALLOWED_DRIVER_IDS excede PILOT_MAX_DRIVER_COHORT_SIZE');
       }
       if (!launchControlDiagnostic.geofenceFailClosed.value) {
         blockers.push('GEOFENCE_FAIL_CLOSED=false bloqueado no perfil piloto');
@@ -963,7 +986,10 @@ function main() {
       if (!boolEnv('LEAF_RIDE_FLOW_VALIDATION_ACK', false)) {
         blockers.push('LEAF_RIDE_FLOW_VALIDATION_ACK=true obrigatório no perfil ride_flow_validation');
       }
-      if (launchControlDiagnostic.passengerCohortSize !== 1) {
+      if (
+        launchControlDiagnostic.passengerAccessMode !== 'cohort'
+        || launchControlDiagnostic.passengerCohortSize !== 1
+      ) {
         blockers.push('ride_flow_validation exige exatamente 1 passageiro na allowlist');
       }
       if (launchControlDiagnostic.driverCohortSize !== 1) {

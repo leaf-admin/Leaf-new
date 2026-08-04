@@ -44,6 +44,27 @@ function resolveRoleAllowlist(role) {
   );
 }
 
+function resolvePassengerAccessMode() {
+  const normalized = String(process.env.PILOT_PASSENGER_ACCESS_MODE || 'cohort')
+    .trim()
+    .toLowerCase();
+
+  if (normalized === 'broad') {
+    return 'broad';
+  }
+
+  return 'cohort';
+}
+
+function isPassengerCohortRequired() {
+  return resolvePassengerAccessMode() !== 'broad';
+}
+
+function resolveDriverCohortMaxSize() {
+  const parsed = Number.parseInt(process.env.PILOT_MAX_DRIVER_COHORT_SIZE || '250', 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 250;
+}
+
 function evaluatePilotAccess({ userId, role = 'passenger', operation = 'booking' } = {}) {
   if (!isPilotControlledLaunch()) {
     return { allowed: true, code: 'PILOT_CONTROL_NOT_ACTIVE' };
@@ -68,7 +89,23 @@ function evaluatePilotAccess({ userId, role = 'passenger', operation = 'booking'
     };
   }
 
+  const normalizedRole = String(role || 'passenger').trim().toLowerCase();
+  if (normalizedRole === 'passenger' && !isPassengerCohortRequired()) {
+    return {
+      allowed: true,
+      code: 'PILOT_PASSENGER_BROAD_ACCESS'
+    };
+  }
+
   const allowlist = resolveRoleAllowlist(role);
+  if (normalizedRole === 'driver' && allowlist.size > resolveDriverCohortMaxSize()) {
+    return {
+      allowed: false,
+      code: 'PILOT_DRIVER_COHORT_LIMIT_EXCEEDED',
+      retryable: false,
+      message: 'A configuração do grupo de motoristas excede o limite da operação assistida.'
+    };
+  }
   if (allowlist.size === 0) {
     return {
       allowed: false,
@@ -94,15 +131,19 @@ function evaluatePilotAccess({ userId, role = 'passenger', operation = 'booking'
 function getPublicPilotAccessSnapshot() {
   const passengerAllowlist = resolveRoleAllowlist('passenger');
   const driverAllowlist = resolveRoleAllowlist('driver');
+  const passengerAccessMode = resolvePassengerAccessMode();
 
   return {
     pilotControlled: isPilotControlledLaunch(),
     acceptNewBookings: readBoolean('LEAF_ACCEPT_NEW_BOOKINGS', true),
     acceptNewPix: readBoolean('LEAF_ACCEPT_NEW_PIX', true),
+    passengerAccessMode,
+    passengerCohortRequired: passengerAccessMode !== 'broad',
     passengerCohortConfigured: passengerAllowlist.size > 0,
     passengerCohortSize: passengerAllowlist.size,
     driverCohortConfigured: driverAllowlist.size > 0,
     driverCohortSize: driverAllowlist.size,
+    driverCohortMaxSize: resolveDriverCohortMaxSize(),
     regionIds: String(process.env.PILOT_REGION_IDS || '')
       .split(/[\n,;]+/)
       .map((item) => item.trim())
@@ -115,5 +156,6 @@ function getPublicPilotAccessSnapshot() {
 module.exports = {
   evaluatePilotAccess,
   getPublicPilotAccessSnapshot,
+  isPassengerCohortRequired,
   parseAllowlist
 };

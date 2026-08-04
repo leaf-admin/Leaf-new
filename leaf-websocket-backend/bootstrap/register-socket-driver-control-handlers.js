@@ -29,6 +29,10 @@ const {
 const {
     commitDriverOnlineProjection
 } = require('../services/driver-online-projection-service');
+const {
+    buildPublicDriverCohortDenial,
+    enforceDriverOnlineCohort
+} = require('../services/driver-online-cohort-guard-service');
 
 const DRIVER_BOARDING_WINDOW_SECONDS = Math.max(
     30,
@@ -488,7 +492,7 @@ function registerSocketDriverControlHandlers({
         let vehicleLockCommitted = false;
         try {
             const redis = redisPool.getConnection();
-            const driverId = data.driverId || socket.userId;
+            const driverId = socket.userId || data.driverId;
             const requestedStatus = String(data.status || '').toUpperCase();
             const requestedOnline = data.isOnline !== false && requestedStatus !== 'OFFLINE';
             const status = requestedOnline ? 'AVAILABLE' : 'OFFLINE';
@@ -593,6 +597,17 @@ function registerSocketDriverControlHandlers({
             }
 
             if (isOnline) {
+                const cohortGate = await enforceDriverOnlineCohort({
+                    redis,
+                    driverId,
+                    driverKey,
+                    eligibleGeoKey: ELIGIBLE_DRIVER_GEO_KEY
+                });
+                if (!cohortGate.allowed) {
+                    socket.emit('driverStatusError', buildPublicDriverCohortDenial(cohortGate));
+                    return;
+                }
+
                 const onlineTimeGate = await resolveDriverOnlineTransition(redis, {
                     driverId,
                     isOnline: true,

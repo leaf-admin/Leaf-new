@@ -27,6 +27,7 @@ function createRealtimeDB(dataByPath) {
 }
 
 describe('driver-eligibility-service', () => {
+  const originalEnv = { ...process.env };
   let redis;
   let driverEligibilityService;
   let redisPool;
@@ -34,6 +35,11 @@ describe('driver-eligibility-service', () => {
 
   beforeEach(() => {
     jest.resetModules();
+    process.env = {
+      ...originalEnv,
+      LEAF_LAUNCH_PROFILE: 'full',
+      LEAF_PILOT_CONTROLLED: 'false'
+    };
 
     redis = {
       hgetall: jest.fn().mockResolvedValue({}),
@@ -49,6 +55,27 @@ describe('driver-eligibility-service', () => {
     firebaseConfig.getRealtimeDB.mockReturnValue(createRealtimeDB({}));
 
     driverEligibilityService = require('../../../services/driver-eligibility-service');
+  });
+
+  afterAll(() => {
+    process.env = originalEnv;
+  });
+
+  it('rejects dispatch eligibility for a driver outside the assisted-launch cohort', async () => {
+    process.env.LEAF_LAUNCH_PROFILE = 'pilot_controlled';
+    process.env.PILOT_ALLOWED_DRIVER_IDS = 'driver-allowed';
+
+    const eligibility = await driverEligibilityService.isDriverEligibleForRide(
+      'driver-outside',
+      'Leaf Plus'
+    );
+
+    expect(eligibility).toEqual(expect.objectContaining({
+      eligible: false,
+      code: 'PILOT_COHORT_ACCESS_DENIED',
+      profile: null
+    }));
+    expect(firebaseConfig.getRealtimeDB).not.toHaveBeenCalled();
   });
 
   it('prefers the approved active vehicle category over stale user carType', async () => {

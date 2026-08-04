@@ -6,6 +6,7 @@ describe('pilot-access-control-service', () => {
     process.env = {
       ...originalEnv,
       LEAF_LAUNCH_PROFILE: 'pilot_controlled',
+      PILOT_PASSENGER_ACCESS_MODE: 'cohort',
       PILOT_ALLOWED_PASSENGER_IDS: 'passenger-1, passenger-2',
       PILOT_ALLOWED_DRIVER_IDS: '["driver-1","driver-2"]',
       LEAF_ACCEPT_NEW_PIX: 'true',
@@ -34,6 +35,38 @@ describe('pilot-access-control-service', () => {
 
     expect(evaluatePilotAccess({ userId: 'driver-1', role: 'driver', operation: 'driver_online' }))
       .toEqual(expect.objectContaining({ allowed: false, code: 'PILOT_COHORT_NOT_CONFIGURED' }));
+  });
+
+  it('allows broad passenger intake while keeping the driver cohort restricted', () => {
+    process.env.PILOT_PASSENGER_ACCESS_MODE = 'broad';
+    delete process.env.PILOT_ALLOWED_PASSENGER_IDS;
+    const { evaluatePilotAccess, getPublicPilotAccessSnapshot } = require('../../../services/pilot-access-control-service');
+
+    expect(evaluatePilotAccess({ userId: 'passenger-any', role: 'passenger', operation: 'payment' }))
+      .toEqual(expect.objectContaining({ allowed: true, code: 'PILOT_PASSENGER_BROAD_ACCESS' }));
+    expect(evaluatePilotAccess({ userId: 'driver-outside', role: 'driver', operation: 'driver_online' }))
+      .toEqual(expect.objectContaining({ allowed: false, code: 'PILOT_COHORT_ACCESS_DENIED' }));
+    expect(getPublicPilotAccessSnapshot()).toEqual(expect.objectContaining({
+      passengerAccessMode: 'broad',
+      passengerCohortRequired: false,
+      passengerCohortConfigured: false,
+      driverCohortConfigured: true
+    }));
+  });
+
+  it('fails closed when the configured driver cohort exceeds the assisted-launch cap', () => {
+    process.env.PILOT_MAX_DRIVER_COHORT_SIZE = '1';
+    const { evaluatePilotAccess, getPublicPilotAccessSnapshot } = require('../../../services/pilot-access-control-service');
+
+    expect(evaluatePilotAccess({ userId: 'driver-1', role: 'driver', operation: 'driver_online' }))
+      .toEqual(expect.objectContaining({
+        allowed: false,
+        code: 'PILOT_DRIVER_COHORT_LIMIT_EXCEEDED'
+      }));
+    expect(getPublicPilotAccessSnapshot()).toEqual(expect.objectContaining({
+      driverCohortSize: 2,
+      driverCohortMaxSize: 1
+    }));
   });
 
   it('pauses new Pix and bookings independently', () => {

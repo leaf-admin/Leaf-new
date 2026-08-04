@@ -316,8 +316,21 @@ async function flushImmediateCallbacks(callbacks) {
 describe('registerSocketCreateBookingHandler payment and availability guards', () => {
   let immediateCallbacks;
   let previousAvailabilityTimeoutMs;
+  let previousPilotEnv;
 
   beforeEach(() => {
+    previousPilotEnv = {
+      LEAF_LAUNCH_PROFILE: process.env.LEAF_LAUNCH_PROFILE,
+      LEAF_PILOT_CONTROLLED: process.env.LEAF_PILOT_CONTROLLED,
+      PILOT_PASSENGER_ACCESS_MODE: process.env.PILOT_PASSENGER_ACCESS_MODE,
+      PILOT_ALLOWED_PASSENGER_IDS: process.env.PILOT_ALLOWED_PASSENGER_IDS,
+      LEAF_ACCEPT_NEW_BOOKINGS: process.env.LEAF_ACCEPT_NEW_BOOKINGS
+    };
+    process.env.LEAF_LAUNCH_PROFILE = 'full';
+    process.env.LEAF_PILOT_CONTROLLED = 'false';
+    delete process.env.PILOT_PASSENGER_ACCESS_MODE;
+    delete process.env.PILOT_ALLOWED_PASSENGER_IDS;
+    delete process.env.LEAF_ACCEPT_NEW_BOOKINGS;
     previousAvailabilityTimeoutMs = process.env.CREATE_BOOKING_AVAILABILITY_TIMEOUT_MS;
     process.env.CREATE_BOOKING_AVAILABILITY_TIMEOUT_MS = '0';
     immediateCallbacks = [];
@@ -360,11 +373,35 @@ describe('registerSocketCreateBookingHandler payment and availability guards', (
   });
 
   afterEach(() => {
+    Object.entries(previousPilotEnv).forEach(([key, value]) => {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    });
     if (previousAvailabilityTimeoutMs === undefined) {
       delete process.env.CREATE_BOOKING_AVAILABILITY_TIMEOUT_MS;
     } else {
       process.env.CREATE_BOOKING_AVAILABILITY_TIMEOUT_MS = previousAvailabilityTimeoutMs;
     }
+  });
+
+  it('blocks a broad passenger when the new-booking kill switch is paused', async () => {
+    process.env.LEAF_LAUNCH_PROFILE = 'pilot_controlled';
+    process.env.PILOT_PASSENGER_ACCESS_MODE = 'broad';
+    process.env.LEAF_ACCEPT_NEW_BOOKINGS = 'false';
+    const harness = createHarness();
+
+    await harness.handlers.createBooking(createRequestPayload());
+
+    expect(harness.socket.emit).toHaveBeenCalledWith(
+      'bookingError',
+      expect.objectContaining({
+        code: 'NEW_BOOKINGS_PAUSED',
+        retryable: true
+      })
+    );
+    expect(passengerTrustService.checkEligibility).not.toHaveBeenCalled();
+    expect(harness.idempotencyService.beginRequest).not.toHaveBeenCalled();
+    expect(harness.RequestRideCommand).not.toHaveBeenCalled();
   });
 
   it('rejects a client-confirmed payment when the proof is only local/cache-backed', async () => {
