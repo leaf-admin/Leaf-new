@@ -59,6 +59,7 @@
     "test:redis-backup-restore": "node scripts/tests/redis-backup-restore.cjs",
     "backup:firestore-critical": "node scripts/ops/backup-firestore-critical.js",
     "verify:firestore-restore": "node scripts/ops/verify-firestore-restore.cjs",
+    "ops:backup-recovery-preflight": "node scripts/ops/preflight-backup-recovery.cjs",
     "restore:firestore-emulator": "node scripts/ops/restore-firestore-emulator.cjs",
     "restore:rtdb-emulator": "node scripts/ops/restore-rtdb-emulator.cjs",
     "restore:storage-emulator": "node scripts/ops/restore-storage-emulator.cjs"

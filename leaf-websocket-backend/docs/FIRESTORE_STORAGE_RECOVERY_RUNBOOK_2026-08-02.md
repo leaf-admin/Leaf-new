@@ -7,6 +7,11 @@
 1. Redis RDB, checksum and manifest, followed by an isolated Redis restore drill.
 2. Firestore logical snapshot, checksum and manifest, followed by an offline logical decode drill.
 
+Cada drill concluído grava de forma atômica um recibo `*.verified.json`, com o
+instante da verificação e o resultado do restore. Um artefato sem recibo, com
+checksum divergente ou com resultado vazio não é elegível para o gate de
+lançamento amplo.
+
 The Firestore command is fail-closed. It paginates every configured top-level collection, aborts on any read error, refuses to overwrite an existing artifact and aborts instead of truncating when `FIRESTORE_BACKUP_MAX_DOCS` is explicitly configured and exceeded.
 
 The default read budget remains the pre-existing five collections (`bookings`, `payment_holdings`, `payment_history`, `users`, `drivers`) and 20,000 documents per collection. Reaching that cap aborts the artifact because completeness cannot be proved without additional reads. Expanding `FIRESTORE_BACKUP_COLLECTIONS` or setting `FIRESTORE_BACKUP_MAX_DOCS=0` requires an approved operational cost change.
@@ -14,9 +19,25 @@ The default read budget remains the pre-existing five collections (`bookings`, `
 ```bash
 npm run backup:firestore-critical -- --out /var/backups/leaf/firestore/firestore-critical-YYYYMMDD_HHMMSS.json.gz
 npm run verify:firestore-restore -- --backup /var/backups/leaf/firestore/firestore-critical-YYYYMMDD_HHMMSS.json.gz
+npm run ops:backup-recovery-preflight
 ```
 
 Credentials must come from `FIREBASE_SERVICE_ACCOUNT_PATH`, `GOOGLE_APPLICATION_CREDENTIALS` or Application Default Credentials. The script has no repository-relative service-account fallback.
+
+## Gate de recuperação para lançamento amplo
+
+Antes do rolling deploy, a imagem candidata executa o preflight contra
+`/var/backups/leaf`, montado somente para leitura. O gate é obrigatório quando
+`NODE_ENV=production` e `LEAF_BROAD_LAUNCH_APPROVED=true`, ou quando
+`BACKUP_RECOVERY_PREFLIGHT_REQUIRED=true` é definido explicitamente.
+
+O backup Redis e o backup lógico Firestore mais recentes precisam ter artefato,
+manifesto, SHA-256 e recibo de restore íntegros e verificados nas últimas 26
+horas. O limite pode ser reduzido ou ampliado entre 1 e 168 horas por
+`BACKUP_RECOVERY_PREFLIGHT_MAX_AGE_HOURS`; alterar esse limite exige justificativa
+operacional. O preflight apenas lê os artefatos. Ele não cria, exclui, restaura
+nem agenda backups. Fora do lançamento amplo, ele registra `skipped` para não
+alterar o piloto controlado.
 
 ## Exact scope and limitations
 

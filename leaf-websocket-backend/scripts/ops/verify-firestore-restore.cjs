@@ -161,6 +161,7 @@ function verifyFirestoreRestore(backupPath) {
   const verified = loadVerifiedFirestoreBackup(backupPath);
   return {
     status: 'passed',
+    verifiedAt: new Date().toISOString(),
     backupPath: verified.backupPath,
     checksumVerified: true,
     manifestVerified: true,
