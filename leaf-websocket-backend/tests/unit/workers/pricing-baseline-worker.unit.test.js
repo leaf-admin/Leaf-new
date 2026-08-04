@@ -1,6 +1,12 @@
+const mockRedis = {
+  kind: 'redis',
+  set: jest.fn(),
+  eval: jest.fn()
+};
+
 jest.mock('../../../utils/redis-pool', () => ({
   ensureConnection: jest.fn().mockResolvedValue(true),
-  getConnection: jest.fn().mockReturnValue({ kind: 'redis' })
+  getConnection: jest.fn().mockReturnValue(mockRedis)
 }));
 
 jest.mock('../../../services/pricing-baseline-materializer', () => ({
@@ -31,6 +37,8 @@ const worker = require('../../../workers/pricing-baseline-worker');
 describe('pricing-baseline-worker', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    mockRedis.set.mockResolvedValue('OK');
+    mockRedis.eval.mockResolvedValue(1);
     worker.stopPricingBaselineWorker();
   });
 
@@ -54,9 +62,36 @@ describe('pricing-baseline-worker', () => {
     expect(redisPool.ensureConnection).toHaveBeenCalledTimes(1);
     expect(materializer.materializePricingBaselines).toHaveBeenCalledWith(
       expect.objectContaining({
-        redis: { kind: 'redis' }
+        redis: mockRedis
       })
     );
+    expect(mockRedis.set).toHaveBeenCalledWith(
+      'leaf:runtime:pricing-baseline-worker:leader',
+      expect.any(String),
+      'PX',
+      60000,
+      'NX'
+    );
+    expect(mockRedis.eval).toHaveBeenCalledWith(
+      expect.stringContaining("redis.call('DEL'"),
+      1,
+      'leaf:runtime:pricing-baseline-worker:leader',
+      expect.any(String)
+    );
+  });
+
+  it('não materializa quando outra réplica possui o lease', async () => {
+    mockRedis.set.mockResolvedValue(null);
+
+    const result = await worker.runPricingBaselineCycle('contended');
+
+    expect(result).toEqual({
+      success: false,
+      skipped: true,
+      reason: 'not_leader'
+    });
+    expect(materializer.materializePricingBaselines).not.toHaveBeenCalled();
+    expect(mockRedis.eval).not.toHaveBeenCalled();
   });
 
   it('inicia worker em modo once e desativa gauge ao final', async () => {

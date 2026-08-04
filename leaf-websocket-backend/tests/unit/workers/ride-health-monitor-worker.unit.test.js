@@ -1,3 +1,9 @@
+const mockRedis = {
+  kind: 'redis',
+  set: jest.fn(),
+  eval: jest.fn()
+};
+
 jest.mock('../../../utils/redis-pool', () => ({
   ensureConnection: jest.fn(),
   getConnection: jest.fn()
@@ -28,7 +34,9 @@ describe('ride-health-monitor-worker', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     redisPool.ensureConnection.mockResolvedValue(true);
-    redisPool.getConnection.mockReturnValue({ kind: 'redis' });
+    redisPool.getConnection.mockReturnValue(mockRedis);
+    mockRedis.set.mockResolvedValue('OK');
+    mockRedis.eval.mockResolvedValue(1);
     rideHealthMonitor.backfillRideHealthIndex.mockResolvedValue({
       scanned: 0,
       tracked: 0
@@ -62,11 +70,38 @@ describe('ride-health-monitor-worker', () => {
     expect(result.success).toBe(true);
     expect(redisPool.ensureConnection).toHaveBeenCalledTimes(1);
     expect(rideHealthMonitor.evaluateRideOperationsAlerts).toHaveBeenCalledWith(
-      { kind: 'redis' },
+      mockRedis,
       expect.objectContaining({
         nowIso: expect.any(String)
       })
     );
+    expect(mockRedis.set).toHaveBeenCalledWith(
+      'leaf:runtime:ride-health-monitor-worker:leader',
+      expect.any(String),
+      'PX',
+      30000,
+      'NX'
+    );
+    expect(mockRedis.eval).toHaveBeenCalledWith(
+      expect.stringContaining("redis.call('DEL'"),
+      1,
+      'leaf:runtime:ride-health-monitor-worker:leader',
+      expect.any(String)
+    );
+  });
+
+  it('não avalia alertas quando outra réplica possui o lease', async () => {
+    mockRedis.set.mockResolvedValue(null);
+
+    const result = await worker.runRideHealthMonitorCycle('contended');
+
+    expect(result).toEqual({
+      success: false,
+      skipped: true,
+      reason: 'not_leader'
+    });
+    expect(rideHealthMonitor.evaluateRideOperationsAlerts).not.toHaveBeenCalled();
+    expect(mockRedis.eval).not.toHaveBeenCalled();
   });
 
   it('inicia worker em modo once e desativa gauge ao final', async () => {

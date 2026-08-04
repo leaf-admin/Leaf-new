@@ -86,6 +86,36 @@ describe('Redis Sentinel production compose contract', () => {
     }
   );
 
+  test.each([
+    [
+      'pricing-baseline-worker',
+      'PRICING_BASELINE_WORKER_LEADER_KEY',
+      'leaf:runtime:pricing-baseline-worker:leader',
+      'PRICING_BASELINE_WORKER_LEADER_TTL_MS',
+      '60000',
+      'PRICING_BASELINE_WORKER_LEADER_RENEW_INTERVAL_MS',
+      '20000'
+    ],
+    [
+      'ride-health-monitor-worker',
+      'RIDE_HEALTH_MONITOR_WORKER_LEADER_KEY',
+      'leaf:runtime:ride-health-monitor-worker:leader',
+      'RIDE_HEALTH_MONITOR_WORKER_LEADER_TTL_MS',
+      '30000',
+      'RIDE_HEALTH_MONITOR_WORKER_LEADER_RENEW_INTERVAL_MS',
+      '10000'
+    ]
+  ])(
+    'gives periodic worker %s an explicit per-cycle leader lease',
+    (serviceName, keyName, keyValue, ttlName, ttlValue, renewName, renewValue) => {
+      const worker = serviceBlock(opsWorkers, serviceName);
+      expect(worker).toContain(`- ${keyName}=\${${keyName}:-${keyValue}}`);
+      expect(worker).toContain(`- ${ttlName}=\${${ttlName}:-${ttlValue}}`);
+      expect(worker).toContain(`- ${renewName}=\${${renewName}:-${renewValue}}`);
+      expect(worker).toContain('- LEAF_WORKER_INSTANCE_ID=${LEAF_WORKER_INSTANCE_ID:-}');
+    }
+  );
+
   test('propagates Sentinel discovery to the separately deployed realtime gateway', () => {
     expectSentinelEnvironment(
       serviceBlock(realtimeSecondary, 'websocket-secondary')
