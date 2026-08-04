@@ -12,6 +12,9 @@ const FORBIDDEN_PROJECT_PERMISSIONS = Object.freeze([
   'datastore.backups.restoreDatabase',
   'datastore.databases.delete',
   'datastore.databases.update',
+  'firebasedatabase.instances.delete',
+  'firebasedatabase.instances.disable',
+  'firebasedatabase.instances.update',
   'resourcemanager.projects.delete',
   'resourcemanager.projects.setIamPolicy'
 ]);
@@ -19,7 +22,11 @@ const FORBIDDEN_PROJECT_PERMISSIONS = Object.freeze([
 const FORBIDDEN_BUCKET_PERMISSIONS = Object.freeze([
   'storage.buckets.delete',
   'storage.buckets.setIamPolicy',
-  'storage.buckets.update'
+  'storage.buckets.update',
+  'storage.objects.overrideUnlockedRetention',
+  'storage.objects.restore',
+  'storage.objects.setIamPolicy',
+  'storage.objects.setRetention'
 ]);
 
 function readBooleanLike(value, fallback = false) {
