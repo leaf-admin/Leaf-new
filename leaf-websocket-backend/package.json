@@ -40,6 +40,8 @@
     "ops:financial-reconcile": "node scripts/ops/reconcile-financial-ledger.cjs",
     "ops:kyc-aws-preflight": "node scripts/ops/preflight-kyc-aws-driver.cjs",
     "ops:firebase-runtime-iam-preflight": "node scripts/ops/preflight-firebase-runtime-iam.cjs",
+    "ops:firebase-runtime-iam-plan": "node scripts/ops/plan-firebase-runtime-iam-rotation.cjs",
+    "ops:firebase-runtime-data-plane-canary": "node scripts/ops/smoke-firebase-runtime-data-plane.cjs",
     "check:single-backend-runtime": "node scripts/analysis/assert-single-backend-runtime.cjs",
     "report:ride-cost": "node scripts/tests/report-ride-cost-telemetry.cjs",
     "benchmark": "node scripts/benchmark/performance-benchmark.js",
