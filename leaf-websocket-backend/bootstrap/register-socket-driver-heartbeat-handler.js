@@ -17,6 +17,10 @@ const {
 const {
     commitDriverOnlineProjection
 } = require('../services/driver-online-projection-service');
+const {
+    buildPublicDriverCohortDenial,
+    enforceDriverOnlineCohort
+} = require('../services/driver-online-cohort-guard-service');
 
 const parseTimestampMs = (rawValue) => {
     if (!rawValue) return 0;
@@ -141,6 +145,18 @@ function registerSocketDriverHeartbeatHandler({
 
             if (isInTripState) {
                 applyKycContinuityState({ activeTripId: canonicalActiveTrip?.tripId || null });
+            }
+
+            if (!isInTripState) {
+                const cohortGate = await enforceDriverOnlineCohort({
+                    redis,
+                    driverId,
+                    eligibleGeoKey: ELIGIBLE_DRIVER_GEO_KEY
+                });
+                if (!cohortGate.allowed) {
+                    socket.emit('driverStatusError', buildPublicDriverCohortDenial(cohortGate));
+                    return;
+                }
             }
 
             if (!wasOnline && !isInTripState) {

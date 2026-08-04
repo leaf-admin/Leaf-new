@@ -13,6 +13,7 @@ const {
     DRIVER_ACTIVATION_STATES,
     resolveDriverActivationState
 } = require('./driver-activation-state-service');
+const { evaluatePilotAccess } = require('./pilot-access-control-service');
 
 const PROFILE_CACHE_TTL_SECONDS = 90;
 const PROFILE_CACHE_FALLBACK_TTL_SECONDS = Number.parseInt(
@@ -454,6 +455,20 @@ class DriverEligibilityService {
     }
 
     async isDriverEligibleForRide(driverId, requestedCategory, fallbackDriverData = {}) {
+        const pilotAccess = evaluatePilotAccess({
+            userId: driverId,
+            role: 'driver',
+            operation: 'driver_dispatch'
+        });
+        if (!pilotAccess.allowed) {
+            return {
+                eligible: false,
+                code: pilotAccess.code || 'PILOT_COHORT_ACCESS_DENIED',
+                pilotAccess,
+                profile: null
+            };
+        }
+
         const activationState = await this._resolveActivationGate(driverId);
         if (!activationState?.canGoOnline) {
             return {

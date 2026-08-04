@@ -2,6 +2,7 @@ process.env.JWT_SECRET = 'test-secret';
 const originalPilotEnv = {
   LEAF_LAUNCH_PROFILE: process.env.LEAF_LAUNCH_PROFILE,
   LEAF_PILOT_CONTROLLED: process.env.LEAF_PILOT_CONTROLLED,
+  PILOT_PASSENGER_ACCESS_MODE: process.env.PILOT_PASSENGER_ACCESS_MODE,
   PILOT_ALLOWED_PASSENGER_IDS: process.env.PILOT_ALLOWED_PASSENGER_IDS,
   LEAF_ACCEPT_NEW_PIX: process.env.LEAF_ACCEPT_NEW_PIX
 };
@@ -134,6 +135,7 @@ describe('payment advance availability guard', () => {
   beforeEach(() => {
     process.env.LEAF_LAUNCH_PROFILE = 'full';
     delete process.env.LEAF_PILOT_CONTROLLED;
+    delete process.env.PILOT_PASSENGER_ACCESS_MODE;
     delete process.env.PILOT_ALLOWED_PASSENGER_IDS;
     delete process.env.LEAF_ACCEPT_NEW_PIX;
     mockVerifyIdToken.mockReset();
@@ -185,6 +187,36 @@ describe('payment advance availability guard', () => {
     });
     expect(mockHasPaymentEligibleDriver).not.toHaveBeenCalled();
     expect(mockProcessAdvancePayment).not.toHaveBeenCalled();
+  });
+
+  it('allows an authenticated broad passenger through the same quote and driver reservation guards', async () => {
+    process.env.LEAF_LAUNCH_PROFILE = 'pilot_controlled';
+    process.env.PILOT_PASSENGER_ACCESS_MODE = 'broad';
+    delete process.env.PILOT_ALLOWED_PASSENGER_IDS;
+    const app = createApp();
+    mockHasPaymentEligibleDriver.mockResolvedValue(buildAvailableDriver());
+    mockProcessAdvancePayment.mockResolvedValue({
+      success: true,
+      chargeId: 'charge-broad-passenger',
+      qrCode: 'qr',
+      paymentLink: 'https://pay.local/charge-broad-passenger'
+    });
+
+    const response = await request(app)
+      .post('/api/payment/advance')
+      .set('Authorization', 'Bearer passenger-token')
+      .send(validPaymentPayload);
+
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({
+      success: true,
+      chargeId: 'charge-broad-passenger'
+    });
+    expect(mockHasPaymentEligibleDriver).toHaveBeenCalledWith(expect.objectContaining({
+      reserveDriver: true,
+      reservationContext: expect.objectContaining({ passengerId: 'passenger-1' })
+    }));
+    expect(mockProcessAdvancePayment).toHaveBeenCalledTimes(1);
   });
 
   it('stops new Pix with the payment kill switch before provider calls', async () => {

@@ -453,7 +453,10 @@ async function buildRoleReadiness(health) {
       kyc.canonicalReferenceImageMode === 'inline_bytes' &&
       !envBool('MOBILE_FACE_EMBEDDING_ENABLED', true)
     ),
-    pilotPassengerCohortConfigured: !pilotAccess.pilotControlled || pilotAccess.passengerCohortConfigured,
+    pilotPassengerCohortConfigured:
+      !pilotAccess.pilotControlled
+      || pilotAccess.passengerCohortRequired === false
+      || pilotAccess.passengerCohortConfigured,
     pilotDriverCohortConfigured: !pilotAccess.pilotControlled || pilotAccess.driverCohortConfigured
   };
 
@@ -551,6 +554,7 @@ async function buildRuntimeFlagsPayload() {
       authReviewOtpBypassEnabled
     },
     launch: getPilotLaunchFlags(),
+    launchAccess: getPublicPilotAccessSnapshot(),
     realSandbox: {
       ready: blockers.length === 0,
       blockers

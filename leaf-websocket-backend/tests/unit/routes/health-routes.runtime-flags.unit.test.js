@@ -141,6 +141,27 @@ describe('health runtime flags route', () => {
     expect(response.body.realSandbox.blockers).toEqual([]);
   });
 
+  it('reports broad passenger admission without exposing cohort identifiers', async () => {
+    process.env.LEAF_LAUNCH_PROFILE = 'pilot_controlled';
+    process.env.PILOT_PASSENGER_ACCESS_MODE = 'broad';
+    process.env.PILOT_ALLOWED_DRIVER_IDS = 'driver-1,driver-2';
+    process.env.PILOT_MAX_DRIVER_COHORT_SIZE = '250';
+    delete process.env.PILOT_ALLOWED_PASSENGER_IDS;
+
+    const response = await request(createApp()).get('/health/runtime-flags');
+
+    expect(response.status).toBe(200);
+    expect(response.body.launchAccess).toEqual(expect.objectContaining({
+      pilotControlled: true,
+      passengerAccessMode: 'broad',
+      passengerCohortRequired: false,
+      passengerCohortSize: 0,
+      driverCohortSize: 2,
+      driverCohortMaxSize: 250
+    }));
+    expect(JSON.stringify(response.body.launchAccess)).not.toContain('driver-1');
+  });
+
   it('fails production readiness when gateway role dependencies are incomplete', async () => {
     process.env.NODE_ENV = 'production';
     process.env.RUNTIME_ROLE = 'gateway';
