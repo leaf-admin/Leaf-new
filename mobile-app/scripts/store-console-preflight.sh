@@ -217,10 +217,11 @@ else
   bad "Disclosure de localização em segundo plano não encontrado no fluxo atual do motorista"
 fi
 
-if rg -n "requestBackgroundPermissionsAsync" src/services/BackgroundLocationService.js >/dev/null 2>&1; then
-  ok "Solicitação de background location centralizada em BackgroundLocationService"
+if rg -n "requestBackgroundLocationPermissionWithDisclosure" src/services/BackgroundLocationService.js >/dev/null 2>&1 \
+  && rg -n "requestBackgroundPermissionsAsync" src/services/AndroidPermissionDisclosure.js >/dev/null 2>&1; then
+  ok "Solicitação de background location centralizada com disclosure obrigatório"
 else
-  bad "Solicitação de background location não encontrada no serviço central"
+  bad "Fluxo central de background location com disclosure obrigatório não encontrado"
 fi
 
 section "Checks automatizados"
