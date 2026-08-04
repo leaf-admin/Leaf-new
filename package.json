@@ -63,6 +63,12 @@
     },
     "fast-xml-parser": "5.10.1",
     "firebase-admin": "$firebase-admin",
+    "gaxios": {
+      "uuid": "11.1.1"
+    },
+    "google-gax": {
+      "uuid": "11.1.1"
+    },
     "ip-address": "10.4.0",
     "lodash": "4.18.1",
     "picomatch": "4.0.5",
@@ -71,6 +77,9 @@
     },
     "shell-quote": "1.9.0",
     "socket.io-parser": "4.2.7",
+    "teeny-request": {
+      "uuid": "11.1.1"
+    },
     "websocket-driver": "0.7.5"
   },
   "devDependencies": {
