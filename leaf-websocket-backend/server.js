@@ -26,9 +26,6 @@ const cors = require('cors');
 const admin = require('firebase-admin');
 const firebaseConfig = require('./firebase-config');
 
-// Importar GraphQL
-const { applyMiddleware } = require('./graphql/server');
-
 // Bootstrap do HTTP (fase de modularização)
 const configureHttpMiddleware = require('./bootstrap/http-middleware');
 const registerHttpRoutes = require('./bootstrap/register-http-routes');
@@ -904,7 +901,6 @@ startHttpServer({
     app,
     server,
     io,
-    applyMiddleware,
     cluster,
     VPS_CONFIG,
     ConnectionCleanupService,

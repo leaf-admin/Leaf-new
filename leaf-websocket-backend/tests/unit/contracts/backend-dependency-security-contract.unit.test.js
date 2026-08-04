@@ -68,6 +68,16 @@ describe('backend production dependency security contract', () => {
     }
   });
 
+  test('removes end-of-life Apollo Server 3 from the production dependency graph', () => {
+    expect(packageJson.dependencies).not.toHaveProperty('apollo-server-core');
+    expect(packageJson.dependencies).not.toHaveProperty('apollo-server-express');
+    for (const lockfile of lockfiles) {
+      expect(resolvedVersion(lockfile, 'apollo-server-core')).toBeUndefined();
+      expect(resolvedVersion(lockfile, 'apollo-server-express')).toBeUndefined();
+    }
+    expect(fs.existsSync(path.join(backendRoot, 'graphql/server.js'))).toBe(false);
+  });
+
   test('removes vulnerable XLSX dependency and keeps export fail-closed', () => {
     expect(packageJson.dependencies).not.toHaveProperty('xlsx');
     for (const lockfile of lockfiles) {
