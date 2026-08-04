@@ -51,6 +51,7 @@
   "overrides": {
     "form-data@^4.0.0": "4.0.6",
     "@babel/plugin-transform-modules-systemjs": "7.29.7",
+    "body-parser@1.20.5": "1.20.6",
     "cheerio": {
       "undici": "7.28.0"
     },
@@ -60,12 +61,17 @@
     "get-uri": {
       "basic-ftp": "6.0.1"
     },
+    "fast-xml-parser": "5.10.1",
+    "firebase-admin": "$firebase-admin",
+    "ip-address": "10.4.0",
     "lodash": "4.18.1",
     "picomatch": "4.0.5",
     "react-native-masked-text": {
       "date-and-time": "0.14.2"
     },
-    "shell-quote": "1.9.0"
+    "shell-quote": "1.9.0",
+    "socket.io-parser": "4.2.7",
+    "websocket-driver": "0.7.5"
   },
   "devDependencies": {
     "expo": "^54.0.33",
