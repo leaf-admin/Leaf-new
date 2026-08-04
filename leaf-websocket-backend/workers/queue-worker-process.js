@@ -34,7 +34,7 @@ async function main() {
             signal
         });
         try {
-            queueWorker.stop();
+            await queueWorker.stop();
         } catch (_stopError) {
             // noop
         }
