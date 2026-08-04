@@ -10,6 +10,7 @@ import { ErrorText, LoadingState } from "@/src/components/ui/PageFeedback";
 import GoogleDriversMap from "@/src/components/map/GoogleDriversMap";
 import { TechnicalDetails } from "@/src/components/ui/DataViews";
 import { isAdminMutationEnabled, mutationBlockedMessage } from "@/src/utils/dashboard-access";
+import useConfirmAction from "@/src/hooks/useConfirmAction";
 
 const H3_VIEWPORT_DEBOUNCE_MS = 400;
 
@@ -101,6 +102,7 @@ export default function MapsPage() {
   const h3ViewportRequestRef = useRef("");
   const [h3RefreshNonce, setH3RefreshNonce] = useState(0);
   const [runtimeFlags, setRuntimeFlags] = useState(null);
+  const { requestConfirmation, confirmationDialog, confirmationOpen } = useConfirmAction();
 
   useEffect(() => {
     let mounted = true;
@@ -224,6 +226,15 @@ export default function MapsPage() {
   const mutationsEnabled = isAdminMutationEnabled(runtimeFlags);
   const readOnly = runtimeFlags === null || !mutationsEnabled;
   const readOnlyMessage = mutationBlockedMessage(runtimeFlags);
+
+  const requestMapMutation = (action) => requestConfirmation({
+    title: action.title || "Confirmar alteração geográfica?",
+    description: action.description || "A alteração pode mudar a área operacional e a elegibilidade de novas corridas.",
+    detail: action.detail,
+    confirmLabel: action.confirmLabel || "Confirmar alteração",
+    tone: action.tone || "danger",
+    task: action.task,
+  });
 
   const toggleGeofenceEnabled = async () => {
     if (readOnly) {
@@ -497,10 +508,26 @@ export default function MapsPage() {
             <div className="filters">
               <button onClick={refreshMapLocations}>Atualizar mapa</button>
               <button onClick={loadGeoConfig}>Atualizar geografia</button>
-              <button onClick={toggleGeofenceEnabled} disabled={readOnly || geoLoading || geofenceBusy}>
+              <button
+                onClick={() => requestMapMutation({
+                  title: geoConfig?.geofence?.enabled !== false ? "Desativar geofence?" : "Ativar geofence?",
+                  description: "A alteração muda a área em que cotações e corridas podem ser criadas.",
+                  confirmLabel: geoConfig?.geofence?.enabled !== false ? "Desativar geofence" : "Ativar geofence",
+                  task: toggleGeofenceEnabled,
+                })}
+                disabled={readOnly || confirmationOpen || geoLoading || geofenceBusy}
+              >
                 {geoConfig?.geofence?.enabled !== false ? "Desativar geofence" : "Ativar geofence"}
               </button>
-              <button onClick={saveGeofenceRegion} disabled={readOnly || geoLoading || geofenceBusy}>
+              <button
+                onClick={() => requestMapMutation({
+                  title: "Salvar geofence?",
+                  description: "O polígono salvo passa a governar a elegibilidade operacional após a validação do backend.",
+                  confirmLabel: "Salvar geofence",
+                  task: saveGeofenceRegion,
+                })}
+                disabled={readOnly || confirmationOpen || geoLoading || geofenceBusy}
+              >
                 Salvar geofence
               </button>
               <button onClick={resetGeofenceDraft} disabled={geoLoading || geofenceBusy}>
@@ -615,12 +642,28 @@ export default function MapsPage() {
 
               <div className="geo-toolbar-actions">
                 <button
-                  onClick={createCity}
-                  disabled={readOnly || !selectedState || newCityName.trim().length < 2 || cityBusyKey === "create-city"}
+                  onClick={() => requestMapMutation({
+                    title: "Adicionar cidade?",
+                    description: "A cidade será criada inativa e ficará disponível para configuração de capacidade e waitlist.",
+                    detail: `${newCityName.trim() || "(vazio)"} · ${selectedState?.stateCode || "UF"}`,
+                    confirmLabel: "Adicionar cidade",
+                    task: createCity,
+                    tone: "warning",
+                  })}
+                  disabled={readOnly || confirmationOpen || !selectedState || newCityName.trim().length < 2 || cityBusyKey === "create-city"}
                 >
                   Adicionar cidade
                 </button>
-                <button onClick={toggleStateActivation} disabled={readOnly || !selectedState || stateBusy}>
+                <button
+                  onClick={() => requestMapMutation({
+                    title: selectedState?.enabled ? "Desativar estado?" : "Ativar estado?",
+                    description: "A alteração muda a disponibilidade operacional de todas as cidades do estado.",
+                    detail: selectedState?.stateCode,
+                    confirmLabel: selectedState?.enabled ? "Desativar estado" : "Ativar estado",
+                    task: toggleStateActivation,
+                  })}
+                  disabled={readOnly || confirmationOpen || !selectedState || stateBusy}
+                >
                   {selectedState?.enabled ? "Desativar estado" : "Ativar estado"}
                 </button>
               </div>
@@ -672,10 +715,29 @@ export default function MapsPage() {
                   </div>
 
                   <div className="city-row-actions">
-                    <button disabled={readOnly || cityBusyKey === `city-config-${city.key}`} onClick={() => saveCityCapacity(city)}>
+                    <button
+                      disabled={readOnly || confirmationOpen || cityBusyKey === `city-config-${city.key}`}
+                      onClick={() => requestMapMutation({
+                        title: "Salvar configuração da cidade?",
+                        description: "Capacidade e waitlist da cidade serão atualizadas para novas admissões.",
+                        detail: `${city.label || city.key} · capacidade ${cityCapDraft[city.key] ?? city.maxActiveDrivers ?? 0}`,
+                        confirmLabel: "Salvar configuração",
+                        task: () => saveCityCapacity(city),
+                        tone: "warning",
+                      })}
+                    >
                       Salvar
                     </button>
-                    <button disabled={readOnly || cityBusyKey === city.key} onClick={() => toggleCityActivation(city)}>
+                    <button
+                      disabled={readOnly || confirmationOpen || cityBusyKey === city.key}
+                      onClick={() => requestMapMutation({
+                        title: city.active ? "Desativar cidade?" : "Ativar cidade?",
+                        description: "A alteração muda a elegibilidade de novas corridas nessa cidade.",
+                        detail: city.label || city.key,
+                        confirmLabel: city.active ? "Desativar cidade" : "Ativar cidade",
+                        task: () => toggleCityActivation(city),
+                      })}
+                    >
                       {city.active ? "Desativar" : "Ativar"}
                     </button>
                   </div>
@@ -697,6 +759,7 @@ export default function MapsPage() {
           </Panel>
         </section>
         <ErrorText message={allErrors} />
+        {confirmationDialog}
       </main>
     </ProtectedRoute>
   );

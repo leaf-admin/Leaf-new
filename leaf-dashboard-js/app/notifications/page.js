@@ -9,6 +9,7 @@ import Panel from "@/src/components/ui/Panel";
 import { ErrorText, LoadingState } from "@/src/components/ui/PageFeedback";
 import { KeyValueGrid, TechnicalDetails } from "@/src/components/ui/DataViews";
 import { isAdminMutationEnabled, mutationBlockedMessage } from "@/src/utils/dashboard-access";
+import useConfirmAction from "@/src/hooks/useConfirmAction";
 
 function summarizeSendResponse(response) {
   const data = response?.data || response || {};
@@ -42,6 +43,7 @@ export default function NotificationsPage() {
   const [registeredMoreThanMonths, setRegisteredMoreThanMonths] = useState("");
   const [endpointFilter, setEndpointFilter] = useState("");
   const [runtimeFlags, setRuntimeFlags] = useState(null);
+  const { requestConfirmation, confirmationDialog, confirmationOpen } = useConfirmAction();
 
   useEffect(() => {
     let mounted = true;
@@ -156,6 +158,15 @@ export default function NotificationsPage() {
     }
   };
 
+  const requestSendNotification = () => requestConfirmation({
+    title: "Enviar notificação agora?",
+    description: "Esta ação dispara uma mensagem para todos os públicos e filtros selecionados.",
+    detail: `Públicos: ${[toDrivers ? "motoristas" : null, toPassengers ? "passageiros" : null].filter(Boolean).join(" e ") || "nenhum"}. Título: ${title.trim() || "(vazio)"}`,
+    confirmLabel: "Enviar agora",
+    tone: "warning",
+    task: sendNotification,
+  });
+
   return (
     <ProtectedRoute>
       <main className="page-shell">
@@ -244,7 +255,7 @@ export default function NotificationsPage() {
                   disabled={readOnly}
                 />
               </label>
-              <button onClick={sendNotification} disabled={readOnly || sending}>
+              <button onClick={requestSendNotification} disabled={readOnly || sending || confirmationOpen}>
                 {sending ? "Enviando..." : "Enviar"}
               </button>
             </div>
@@ -309,6 +320,7 @@ export default function NotificationsPage() {
           </Panel>
         </section>
         <ErrorText message={error} />
+        {confirmationDialog}
       </main>
     </ProtectedRoute>
   );

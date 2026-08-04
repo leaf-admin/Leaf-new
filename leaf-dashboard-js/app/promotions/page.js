@@ -8,6 +8,7 @@ import { ErrorText, LoadingState } from "@/src/components/ui/PageFeedback";
 import { leafAPI } from "@/src/services/api";
 import { KeyValueGrid } from "@/src/components/ui/DataViews";
 import { isAdminMutationEnabled, mutationBlockedMessage } from "@/src/utils/dashboard-access";
+import useConfirmAction from "@/src/hooks/useConfirmAction";
 
 const defaultForm = {
   name: "",
@@ -33,6 +34,7 @@ export default function PromotionsPage() {
   const [selectedPromotion, setSelectedPromotion] = useState("");
   const [busyPromotionId, setBusyPromotionId] = useState("");
   const [runtimeFlags, setRuntimeFlags] = useState(null);
+  const { requestConfirmation, confirmationDialog, confirmationOpen } = useConfirmAction();
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -153,6 +155,35 @@ export default function PromotionsPage() {
       setError(err?.message || "Falha ao aplicar promocao no motorista");
     }
   };
+
+  const requestCreate = () => requestConfirmation({
+    title: "Criar promoção?",
+    description: "A promoção poderá alterar cobrança ou benefício para o público escolhido.",
+    detail: `Nome: ${form.name.trim() || "(vazio)"}; critério: ${form.criteria}.`,
+    confirmLabel: "Criar promoção",
+    tone: "warning",
+    task: create,
+  });
+
+  const requestStatusUpdate = (promotionId, status) => requestConfirmation({
+    title: status === "completed" ? "Encerrar promoção?" : "Alterar status da promoção?",
+    description: status === "completed"
+      ? "A promoção não poderá ser retomada pela operação normal."
+      : `A promoção será marcada como ${status}.`,
+    detail: `Promoção: ${promotionId}`,
+    confirmLabel: status === "completed" ? "Encerrar promoção" : "Confirmar alteração",
+    tone: status === "completed" ? "danger" : "warning",
+    task: () => updatePromotionStatus(promotionId, status),
+  });
+
+  const requestApplyToDriver = () => requestConfirmation({
+    title: "Aplicar promoção e enviar push?",
+    description: "O benefício será aplicado ao motorista e uma notificação será enviada.",
+    detail: `Motorista: ${driverId || "(vazio)"}; promoção: ${selectedPromotion || "(vazia)"}.`,
+    confirmLabel: "Aplicar e notificar",
+    tone: "danger",
+    task: applyToDriver,
+  });
 
   const readOnly = runtimeFlags === null || !isAdminMutationEnabled(runtimeFlags);
   const readOnlyMessage = mutationBlockedMessage(runtimeFlags);
@@ -286,7 +317,7 @@ export default function PromotionsPage() {
                       disabled={readOnly}
                     />
                   </label>
-                  <button onClick={create} disabled={readOnly || !canCreate}>
+                  <button onClick={requestCreate} disabled={readOnly || confirmationOpen || !canCreate}>
                     Criar promoção
                   </button>
                 </div>
@@ -317,7 +348,7 @@ export default function PromotionsPage() {
                       disabled={readOnly}
                     />
                   </label>
-                  <button onClick={applyToDriver} disabled={readOnly}>Aplicar e notificar</button>
+                  <button onClick={requestApplyToDriver} disabled={readOnly || confirmationOpen}>Aplicar e notificar</button>
                 </div>
               </div>
             </details>
@@ -361,20 +392,20 @@ export default function PromotionsPage() {
                           <td>
                             <div className="actions-cell">
                               <button
-                                disabled={readOnly || isBusy || promo.status === "active"}
-                                onClick={() => updatePromotionStatus(promo.id, "active")}
+                                disabled={readOnly || confirmationOpen || isBusy || promo.status === "active"}
+                                onClick={() => requestStatusUpdate(promo.id, "active")}
                               >
                                 Iniciar/Retomar
                               </button>
                               <button
-                                disabled={readOnly || isBusy || promo.status === "paused"}
-                                onClick={() => updatePromotionStatus(promo.id, "paused")}
+                                disabled={readOnly || confirmationOpen || isBusy || promo.status === "paused"}
+                                onClick={() => requestStatusUpdate(promo.id, "paused")}
                               >
                                 Pausar
                               </button>
                               <button
-                                disabled={readOnly || isBusy || promo.status === "completed"}
-                                onClick={() => updatePromotionStatus(promo.id, "completed")}
+                                disabled={readOnly || confirmationOpen || isBusy || promo.status === "completed"}
+                                onClick={() => requestStatusUpdate(promo.id, "completed")}
                               >
                                 Encerrar
                               </button>
@@ -391,6 +422,7 @@ export default function PromotionsPage() {
         </section>
 
         <ErrorText message={error} />
+        {confirmationDialog}
       </main>
     </ProtectedRoute>
   );

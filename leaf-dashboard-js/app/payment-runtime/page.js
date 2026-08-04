@@ -9,6 +9,7 @@ import { EmptyState, ErrorText, LoadingState } from "@/src/components/ui/PageFee
 import { KeyValueGrid } from "@/src/components/ui/DataViews";
 import { leafAPI } from "@/src/services/api";
 import { isAdminMutationEnabled, mutationBlockedMessage } from "@/src/utils/dashboard-access";
+import useConfirmAction from "@/src/hooks/useConfirmAction";
 
 const nowPlusHours = (hours) => new Date(Date.now() + hours * 60 * 60 * 1000).toISOString();
 const shortId = () => `sandbox-${Date.now().toString(36)}`;
@@ -108,6 +109,7 @@ export default function PaymentRuntimePage() {
   const [h3Policy, setH3Policy] = useState(defaultH3Policy);
   const [h3Saving, setH3Saving] = useState(false);
   const [runtimeFlags, setRuntimeFlags] = useState(null);
+  const { requestConfirmation, confirmationDialog, confirmationOpen } = useConfirmAction();
 
   const activeSandboxCount = useMemo(
     () => profiles.filter((profile) =>
@@ -197,6 +199,40 @@ export default function PaymentRuntimePage() {
     }
   };
 
+  const requestSaveH3Policy = (event) => {
+    event.preventDefault();
+    requestConfirmation({
+      title: "Publicar estilo do mapa?",
+      description: "A política visual será atualizada para os consumidores do mapa após o cache curto.",
+      confirmLabel: "Publicar estilo",
+      tone: "warning",
+      task: () => saveH3Policy({ preventDefault: () => {} }),
+    });
+  };
+
+  const requestSaveProfile = (event) => {
+    event.preventDefault();
+    requestConfirmation({
+      title: "Salvar perfil de pagamento?",
+      description: "O perfil pode alterar o ambiente Woovi usado para usuários dentro do escopo.",
+      detail: `Ambiente: ${form.environment}; escopo: ${form.scope}; expiração: ${form.expiresAtIso || "não definida"}.`,
+      confirmLabel: "Salvar perfil",
+      tone: "danger",
+      task: () => saveProfile({ preventDefault: () => {} }),
+    });
+  };
+
+  const requestUpdateStatus = (profileId, status) => requestConfirmation({
+    title: status === "active" ? "Ativar perfil de pagamento?" : "Pausar perfil de pagamento?",
+    description: status === "active"
+      ? "Usuários compatíveis poderão voltar a usar este perfil imediatamente após o cache."
+      : "O perfil deixará de ser elegível para novas resoluções.",
+    detail: `Perfil: ${profileId}`,
+    confirmLabel: status === "active" ? "Ativar perfil" : "Pausar perfil",
+    tone: status === "active" ? "warning" : "danger",
+    task: () => updateStatus(profileId, status),
+  });
+
   const updateStatus = async (profileId, status) => {
     if (readOnly) {
       setError(readOnlyMessage);
@@ -267,7 +303,7 @@ export default function PaymentRuntimePage() {
             subtitle={readOnlyMessage || "Ajuste a aparência no mapa do motorista sem nova build. A cotação continua sendo a fonte de verdade para o adicional."}
           className="panel-span-full"
         >
-          <form className="section-stack" onSubmit={saveH3Policy}>
+            <form className="section-stack" onSubmit={requestSaveH3Policy}>
             <div className="form-grid">
               <label className="form-field">
                 Exibição
@@ -409,7 +445,7 @@ export default function PaymentRuntimePage() {
             </div>
 
             <div className="row-actions">
-              <button type="submit" disabled={readOnly || h3Saving}>
+              <button type="submit" disabled={readOnly || confirmationOpen || h3Saving}>
                 {h3Saving ? "Salvando..." : "Publicar estilo"}
               </button>
               <button type="button" className="button-secondary" onClick={() => setH3Policy(defaultH3Policy())} disabled={readOnly}>
@@ -424,7 +460,7 @@ export default function PaymentRuntimePage() {
             title="Novo perfil sandbox"
             subtitle={readOnlyMessage || "Use sempre escopo por usuário ou telefone, com expiração curta."}
           >
-            <form className="section-stack" onSubmit={saveProfile}>
+            <form className="section-stack" onSubmit={requestSaveProfile}>
               <div className="form-grid">
                 <label className="form-field">
                   Nome
@@ -497,7 +533,7 @@ export default function PaymentRuntimePage() {
                 </label>
               </div>
               <div className="row-actions">
-                <button type="submit" disabled={readOnly || saving}>{saving ? "Salvando..." : "Salvar perfil"}</button>
+                <button type="submit" disabled={readOnly || confirmationOpen || saving}>{saving ? "Salvando..." : "Salvar perfil"}</button>
                 <button type="button" className="button-secondary" onClick={() => setForm(defaultForm())} disabled={readOnly}>Limpar</button>
               </div>
             </form>
@@ -598,11 +634,11 @@ export default function PaymentRuntimePage() {
                         <td>
                           <div className="row-actions">
                             {status === "active" ? (
-                                <button type="button" className="button-secondary" onClick={() => updateStatus(profileId, "paused")} disabled={readOnly}>
+                                <button type="button" className="button-secondary" onClick={() => requestUpdateStatus(profileId, "paused")} disabled={readOnly || confirmationOpen}>
                                 Pausar
                               </button>
                             ) : (
-                              <button type="button" onClick={() => updateStatus(profileId, "active")} disabled={readOnly}>
+                              <button type="button" onClick={() => requestUpdateStatus(profileId, "active")} disabled={readOnly || confirmationOpen}>
                                 Ativar
                               </button>
                             )}
@@ -619,6 +655,7 @@ export default function PaymentRuntimePage() {
 
         {success ? <p className="success-text">{success}</p> : null}
         <ErrorText message={error} />
+        {confirmationDialog}
       </main>
     </ProtectedRoute>
   );

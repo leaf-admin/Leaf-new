@@ -12,6 +12,7 @@ import { useAuth } from "@/src/contexts/AuthContext";
 import { leafAPI } from "@/src/services/api";
 import wsService from "@/src/services/websocket-service";
 import { normalizeRole } from "@/src/utils/dashboard-access";
+import useConfirmAction from "@/src/hooks/useConfirmAction";
 
 const OPEN_STATUSES = new Set(["open", "assigned", "in_progress", "escalated"]);
 const SUPPORT_POLL_MS = 60000;
@@ -450,6 +451,7 @@ function deriveSummary(tickets, queueSummary) {
 function SupportPageContent({ supportScope }) {
   const chatRealtimeRef = useRef(false);
   const { user } = useAuth();
+  const { requestConfirmation, confirmationDialog } = useConfirmAction();
   const isOperationalSupportScope = supportScope === "operational";
   const isSandboxSupportScope = supportScope === "sandbox";
   const supportApiContext = useMemo(() => ({ scope: supportScope }), [supportScope]);
@@ -1431,7 +1433,6 @@ function SupportPageContent({ supportScope }) {
       setError(supportActionBlockReason(supportPolicy, "close_chat", selectedTicketTier));
       return;
     }
-    if (!window.confirm("Encerrar chat deste usuario?")) return;
     try {
       setActionBusy("close-chat");
       setError("");
@@ -1519,7 +1520,6 @@ function SupportPageContent({ supportScope }) {
       setError(supportActionBlockReason(supportPolicy, "close_chat", "N3"));
       return;
     }
-    if (!window.confirm("Encerrar este atendimento simples?")) return;
     try {
       setActionBusy("n0-close");
       setError("");
@@ -1533,6 +1533,22 @@ function SupportPageContent({ supportScope }) {
       setActionBusy("");
     }
   };
+
+  const requestCloseChat = () => requestConfirmation({
+    title: "Encerrar chat deste usuário?",
+    description: "O chat será encerrado e ficará disponível apenas para consulta histórica.",
+    confirmLabel: "Encerrar chat",
+    tone: "warning",
+    task: closeChat,
+  });
+
+  const requestCloseN0Chat = () => requestConfirmation({
+    title: "Encerrar atendimento simples?",
+    description: "O atendimento N0 será encerrado e o histórico será arquivado.",
+    confirmLabel: "Encerrar atendimento",
+    tone: "warning",
+    task: closeN0Chat,
+  });
 
   const refreshOrchestratorAnalysis = async () => {
     if (!selectedTicket?.id || !orchestratorEnabled) return;
@@ -1805,7 +1821,7 @@ function SupportPageContent({ supportScope }) {
                           selectedN0Chat.status === "closed" ||
                           !canRunSupportAction(supportPolicy, "close_chat", "N3")
                         }
-                        onClick={closeN0Chat}
+                        onClick={requestCloseN0Chat}
                       >
                         Encerrar
                       </button>
@@ -2058,7 +2074,7 @@ function SupportPageContent({ supportScope }) {
                         chatStatus?.status === "closed" ||
                         !canRunSupportAction(supportPolicy, "close_chat", selectedTicketTier)
                       }
-                      onClick={closeChat}
+                      onClick={requestCloseChat}
                     >
                       Encerrar chat
                     </button>
@@ -2363,7 +2379,7 @@ function SupportPageContent({ supportScope }) {
                   {mode === "chat" ? (
                     <button
                       type="button"
-                      onClick={closeChat}
+                    onClick={requestCloseChat}
                       disabled={
                         chatStatus?.status === "closed" ||
                         !canRunSupportAction(supportPolicy, "close_chat", selectedTicketTier)
@@ -2684,7 +2700,7 @@ function SupportPageContent({ supportScope }) {
                       selectedN0Chat.status === "closed" ||
                       !canRunSupportAction(supportPolicy, "close_chat", "N3")
                     }
-                    onClick={closeN0Chat}
+                    onClick={requestCloseN0Chat}
                   >
                     Encerrar
                   </button>
@@ -2824,6 +2840,7 @@ function SupportPageContent({ supportScope }) {
         </details>
         {actionMessage ? <p className="success-text">{actionMessage}</p> : null}
         <ErrorText message={error} />
+        {confirmationDialog}
       </main>
     </ProtectedRoute>
   );

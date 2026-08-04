@@ -23,7 +23,7 @@ const groups = [
         featureFlag: "campaignCenterEnabled",
         requireExplicitFeatureFlag: true,
       },
-      { href: "/drivers/review-queue", label: "Cadastro motorista" },
+      { href: "/drivers/review-queue", label: "Cadastro motorista", allowedRoles: ["admin", "super-admin", "manager"] },
     ],
   },
   {
@@ -33,10 +33,10 @@ const groups = [
     href: "/observability",
     items: [
       { href: "/observability", label: "Observabilidade", allowedRoles: ["admin", "super-admin", "manager", "development"] },
-      { href: "/metrics", label: "Métricas", blockedRoles: ["support"] },
-      { href: "/metrics/history", label: "Histórico", blockedRoles: ["support"] },
-      { href: "/metrics/marketplace", label: "Marketplace", blockedRoles: ["support"] },
-      { href: "/maps", label: "Mapa operacional" },
+      { href: "/metrics", label: "Métricas", allowedRoles: ["admin", "super-admin", "manager", "development"] },
+      { href: "/metrics/history", label: "Histórico", allowedRoles: ["admin", "super-admin", "manager", "development"] },
+      { href: "/metrics/marketplace", label: "Marketplace", allowedRoles: ["admin", "super-admin", "manager", "development"] },
+      { href: "/maps", label: "Mapa operacional", allowedRoles: ["admin", "super-admin", "manager", "development"] },
       { href: "/audit", label: "Auditoria", allowedRoles: ["admin", "super-admin", "manager", "development"] },
     ],
   },
@@ -46,15 +46,15 @@ const groups = [
     label: "Pessoas e financeiro",
     href: "/drivers",
     items: [
-      { href: "/drivers", label: "Motoristas" },
+      { href: "/drivers", label: "Motoristas", allowedRoles: ["admin", "super-admin", "manager"] },
       { href: "/users", label: "Usuários" },
-      { href: "/subscriptions", label: "Assinaturas", blockedRoles: ["support", "development"] },
+      { href: "/subscriptions", label: "Assinaturas", allowedRoles: ["admin", "super-admin", "manager"] },
       { href: "/programs", label: "Programas", allowedRoles: ["admin", "super-admin", "manager", "development"], featureFlag: "referralProgramsEnabled" },
-      { href: "/notifications", label: "Notificações" },
-      { href: "/reports", label: "Relatórios" },
-      { href: "/promotions", label: "Promoções" },
+      { href: "/notifications", label: "Notificações", allowedRoles: ["admin", "super-admin", "manager", "development"] },
+      { href: "/reports", label: "Relatórios", allowedRoles: ["admin", "super-admin", "manager"] },
+      { href: "/promotions", label: "Promoções", allowedRoles: ["admin", "super-admin", "manager"] },
       { href: "/financial-reconciliation", label: "Reconciliação", allowedRoles: ["admin", "super-admin", "manager"] },
-      { href: "/payment-runtime", label: "Perfil de pagamento", allowedRoles: ["admin", "super-admin", "manager", "development"] },
+      { href: "/payment-runtime", label: "Perfil de pagamento", allowedRoles: ["admin", "super-admin", "manager"] },
       {
         href: "/financial-simulator",
         label: "Simulador",
@@ -196,9 +196,11 @@ export default function AppNav() {
               Campanhas
             </Link>
           ) : null}
-          <Link href="/drivers/review-queue" className="app-topbar-link">
-            Cadastro
-          </Link>
+          {canAccessItem({ allowedRoles: ["admin", "super-admin", "manager"] }, user) ? (
+            <Link href="/drivers/review-queue" className="app-topbar-link">
+              Cadastro
+            </Link>
+          ) : null}
           <Link
             href={apiDocsHref}
             className="app-topbar-link app-topbar-link-secondary"
