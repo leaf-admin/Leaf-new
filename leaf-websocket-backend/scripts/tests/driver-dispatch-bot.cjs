@@ -316,7 +316,17 @@ async function main() {
       TRIP_STEPS
     );
     for (const [index, point] of steps.entries()) {
-      driver.socket.emit('updateTripLocation', { bookingId, lat: point.lat, lng: point.lng, heading: 45, speed: 12 });
+      driver.socket.emit('updateLocation', {
+        bookingId,
+        tripId: bookingId,
+        lat: point.lat,
+        lng: point.lng,
+        heading: 45,
+        speed: 12,
+        tripStatus: 'started',
+        isInTrip: true,
+        capturedAt: Date.now()
+      });
       console.log('trip_location_update', JSON.stringify({ step: index + 1, total: steps.length, point }));
       await sleep(TRIP_STEP_INTERVAL_MS);
     }

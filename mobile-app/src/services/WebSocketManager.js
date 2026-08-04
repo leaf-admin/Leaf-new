@@ -3804,29 +3804,6 @@ class WebSocketManager {
     });
   }
 
-  // Atualizar localização durante corrida
-  async updateTripLocation(bookingId, lat, lng, heading = 0, speed = 0) {
-    if (!this.socket?.connected) {
-      throw new Error("WebSocket não conectado");
-    }
-
-    this._recordRideTelemetryCommand(
-      "updateTripLocation",
-      {
-        phase: "emit",
-      },
-      {},
-      bookingId,
-    );
-    this.socket.emit("updateTripLocation", {
-      bookingId,
-      lat,
-      lng,
-      heading,
-      speed,
-    });
-  }
-
   async completeTrip(bookingId, endLocation, distance, fare, options = {}) {
     const requestId =
       String(options?.requestId || "").trim() ||

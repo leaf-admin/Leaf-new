@@ -23,7 +23,9 @@ describe('Ride lifecycle source contract audit', () => {
     const startTripHandler = read('leaf-websocket-backend/bootstrap/register-socket-start-trip-handler.js');
     const completeTripHandler = read('leaf-websocket-backend/bootstrap/register-socket-complete-trip-handler.js');
     const confirmPaymentHandler = read('leaf-websocket-backend/bootstrap/register-socket-confirm-payment-handler.js');
-    const updateTripLocationHandler = read('leaf-websocket-backend/bootstrap/register-socket-update-trip-location-handler.js');
+    const updateLocationHandler = read('leaf-websocket-backend/bootstrap/register-socket-update-location-handler.js');
+    const server = read('leaf-websocket-backend/server.js');
+    const websocketManager = read('mobile-app/src/services/WebSocketManager.js');
 
     expect(createBookingHandler).toContain("socket.on('createBooking'");
     expect(createBookingHandler).toContain("socket.emit('bookingError'");
@@ -41,9 +43,13 @@ describe('Ride lifecycle source contract audit', () => {
     expect(completeTripHandler).toContain("const firebaseConfig = require('../firebase-config');");
     expect(confirmPaymentHandler).toContain("socket.on('confirmPayment'");
     expect(confirmPaymentHandler).toContain("socket.emit('paymentConfirmed'");
-    expect(updateTripLocationHandler).toContain("socket.on('updateTripLocation'");
-    expect(updateTripLocationHandler).toContain("io.to(`customer_${customerId}`).emit('tripLocationUpdated'");
-    expect(updateTripLocationHandler).not.toContain("io.emit('tripLocationUpdated'");
+    expect(updateLocationHandler).toContain("socket.on('updateLocation'");
+    expect(updateLocationHandler).toContain("io.to(`customer_${customerId}`).emit('driverLocation'");
+    expect(updateLocationHandler).toContain("'type', 'trip.location.v1'");
+    expect(server).not.toContain('registerSocketUpdateTripLocationHandler');
+    expect(server).not.toContain("socket.on('updateTripLocation'");
+    expect(websocketManager).not.toContain('async updateTripLocation(');
+    expect(websocketManager).not.toContain('this.socket.emit("updateTripLocation"');
   });
 
   it('keeps the prototype runtime subscribed to the canonical ride lifecycle events', () => {

@@ -889,7 +889,7 @@ async function runFlowForRuntime({ runtimeInfo, redisOptions, flushBeforeRun = t
     await sleep(500);
     const passengerLocationEventSeen = eventLog.some((event) =>
       event.side === 'passenger' &&
-      ['driverLocation', 'tripLocationUpdated'].includes(event.eventName) &&
+      event.eventName === 'driverLocation' &&
       String(event.bookingId || '') === String(bookingId)
     );
     timedStep(timings, 'locationUpdatesSentMs', flowStartedAt);

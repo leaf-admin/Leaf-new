@@ -36,7 +36,6 @@ const CRITICAL_HANDLERS = [
     { name: 'acceptRide', event: 'acceptRide', response: 'rideAccepted', required: false },
     { name: 'rejectRide', event: 'rejectRide', response: 'rideRejected', required: false },
     { name: 'startTrip', event: 'startTrip', response: 'tripStarted', required: false },
-    { name: 'updateTripLocation', event: 'updateTripLocation', response: null, required: false },
     { name: 'completeTrip', event: 'completeTrip', response: 'tripCompleted', required: false },
     { name: 'updateDriverLocation', event: 'updateDriverLocation', response: 'locationUpdated', required: false },
     { name: 'driverHeartbeat', event: 'driverHeartbeat', response: null, required: false },
@@ -223,7 +222,6 @@ function getTestData(handlerName, userId) {
                 bookingId: `test_booking_${Date.now()}`,
                 startLocation: { lat: -23.5505, lng: -46.6333 }
             };
-        case 'updateTripLocation':
         case 'updateDriverLocation':
         case 'updateLocation':
             return {
@@ -339,4 +337,3 @@ runTests().catch(error => {
     log(`\n❌ Erro fatal: ${error.message}`, 'red');
     process.exit(1);
 });
-

@@ -107,7 +107,17 @@ async function main() {
     console.log('trip_started', JSON.stringify({ bookingId }));
     const steps = interpolatePoints(pickup, destination, 10);
     for (const [index, point] of steps.entries()) {
-      socket.emit('updateTripLocation', { bookingId, lat: point.lat, lng: point.lng, heading: 45, speed: 12 });
+      socket.emit('updateLocation', {
+        bookingId,
+        tripId: bookingId,
+        lat: point.lat,
+        lng: point.lng,
+        heading: 45,
+        speed: 12,
+        tripStatus: 'started',
+        isInTrip: true,
+        capturedAt: Date.now()
+      });
       console.log('trip_location_update', JSON.stringify({ bookingId, step: index + 1, total: steps.length, point }));
       await sleep(1800);
     }

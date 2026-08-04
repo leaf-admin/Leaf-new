@@ -749,11 +749,14 @@ async function main() {
           lng: point.lng,
           heading: 90,
           speed: i === pickupPoints.length - 1 ? 0 : (USE_SPEED_DERIVED_DURATION ? SIMULATION_SPEED_KMH : 28),
-          bookingId
+          bookingId,
+          tripId: bookingId,
+          tripStatus: 'accepted',
+          isInTrip: true
         }
       });
 
-      driverClient.socket.emit('updateDriverLocation', payload);
+      driverClient.socket.emit('updateLocation', payload);
       await safeRedisEvidenceWrite(report, 'pickup_coordinate_rpush', () =>
         redis.rpush(`trip:coords:${bookingId}:pickup`, JSON.stringify(payload))
       );
@@ -893,12 +896,14 @@ async function main() {
           lat: point.lat,
           lng: point.lng,
           heading: 95,
-          speed: i === tripPoints.length - 1 ? 0 : (USE_SPEED_DERIVED_DURATION ? SIMULATION_SPEED_KMH : 36)
+          speed: i === tripPoints.length - 1 ? 0 : (USE_SPEED_DERIVED_DURATION ? SIMULATION_SPEED_KMH : 36),
+          tripId: bookingId,
+          tripStatus: 'started',
+          isInTrip: true
         }
       });
 
-      driverClient.socket.emit('updateTripLocation', payload);
-      driverClient.socket.emit('updateDriverLocation', payload);
+      driverClient.socket.emit('updateLocation', payload);
       await safeRedisEvidenceWrite(report, 'trip_coordinate_rpush', () =>
         redis.rpush(`trip:coords:${bookingId}:trip`, JSON.stringify(payload))
       );
@@ -1133,10 +1138,9 @@ async function main() {
         websocket: {
           createBooking: 1,
           confirmPayment: 1,
-          updateDriverLocation: report.flow.pickupCoordinates.length + report.flow.tripCoordinates.length,
+          updateLocation: report.flow.pickupCoordinates.length + report.flow.tripCoordinates.length,
           sendMessage: report.flow.chatMessages.length,
           startTrip: 1,
-          updateTripLocation: report.flow.tripCoordinates.length,
           completeTrip: 1,
           submitRating: 1
         },

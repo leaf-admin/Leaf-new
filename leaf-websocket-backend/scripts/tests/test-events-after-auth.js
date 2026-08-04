@@ -89,20 +89,6 @@ const AUTH_DEPENDENT_EVENTS = [
         })
     },
     {
-        name: 'updateTripLocation',
-        event: 'updateTripLocation',
-        userType: 'driver',
-        response: null,
-        errorResponse: null,
-        testData: () => ({
-            bookingId: `test_booking_${Date.now()}`,
-            lat: -23.5505,
-            lng: -46.6333,
-            heading: 0,
-            speed: 0
-        })
-    },
-    {
         name: 'completeTrip',
         event: 'completeTrip',
         userType: 'driver',
@@ -454,4 +440,3 @@ runTests().catch(error => {
     log(`Stack: ${error.stack}`, 'red');
     process.exit(1);
 });
-
