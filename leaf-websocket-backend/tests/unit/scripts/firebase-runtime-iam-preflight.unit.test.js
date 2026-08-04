@@ -97,9 +97,11 @@ describe('Firebase runtime IAM boundary', () => {
       'datastore.backups.restoreDatabase',
       'datastore.databases.delete',
       'datastore.databases.update',
+      'firebasedatabase.instances.create',
       'firebasedatabase.instances.delete',
       'firebasedatabase.instances.disable',
-      'firebasedatabase.instances.update',
+      'firebasedatabase.instances.reenable',
+      'firebasedatabase.instances.undelete',
       'resourcemanager.projects.setIamPolicy'
     ]));
     expect(FORBIDDEN_BUCKET_PERMISSIONS).toEqual(expect.arrayContaining([
@@ -127,7 +129,8 @@ describe('Firebase runtime IAM boundary', () => {
       'firebaseauth.users.get',
       'firebaseauth.users.update',
       'firebasedatabase.instances.get',
-      'firebasedatabase.instances.list'
+      'firebasedatabase.instances.list',
+      'firebasedatabase.instances.update'
     ]));
     expect(REQUIRED_BUCKET_PERMISSIONS).toEqual(expect.arrayContaining([
       'storage.objects.create',
