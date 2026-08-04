@@ -278,6 +278,41 @@ class RideStateManager {
     }
 
     /**
+     * Executa os efeitos de uma transição que já foi persistida atomicamente.
+     * Usado quando a mutação primária ocorre dentro de uma transação Redis/Lua.
+     */
+    static async recordPersistedTransitionSideEffects(
+        redis,
+        { bookingId, currentState, newState, updatedAt, metadata = {} },
+        options = {}
+    ) {
+        if (!bookingId || !currentState || !newState || !updatedAt) {
+            throw new Error('Transição persistida requer bookingId, estados e updatedAt');
+        }
+
+        if (currentState === newState) {
+            return true;
+        }
+
+        if (!RideStateManager.isValidTransition(currentState, newState)) {
+            throw new Error(`Transição persistida inválida: ${currentState} → ${newState}`);
+        }
+
+        const updateData = {
+            state: newState,
+            updatedAt,
+            ...metadata
+        };
+
+        await RideStateManager._runStateSideEffects(
+            redis,
+            { bookingId, currentState, newState, updateData },
+            options
+        );
+        return true;
+    }
+
+    /**
      * Obter estado atual de uma corrida
      * @param {Object} redis - Instância do Redis
      * @param {string} bookingId - ID da corrida
