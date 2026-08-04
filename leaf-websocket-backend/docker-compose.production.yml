@@ -131,7 +131,7 @@ services:
       - REDIS_SENTINEL_TLS_REJECT_UNAUTHORIZED=${REDIS_SENTINEL_TLS_REJECT_UNAUTHORIZED:-true}
 
       # Firebase (configurar via .env ou variáveis)
-      - FIREBASE_PROJECT_ID=${FIREBASE_PROJECT_ID:-leaf-app-91dfdce0}
+      - FIREBASE_PROJECT_ID=${FIREBASE_PROJECT_ID:?FIREBASE_PROJECT_ID must be set}
       - FIREBASE_DATABASE_URL=${FIREBASE_DATABASE_URL:-https://leaf-reactnative-default-rtdb.firebaseio.com}
       - GOOGLE_APPLICATION_CREDENTIALS=/app/firebase-credentials.json
 
@@ -407,7 +407,7 @@ services:
       - REDIS_SENTINEL_TLS_REJECT_UNAUTHORIZED=${REDIS_SENTINEL_TLS_REJECT_UNAUTHORIZED:-true}
 
       # Firebase (push notifications)
-      - FIREBASE_PROJECT_ID=${FIREBASE_PROJECT_ID:-leaf-app-91dfdce0}
+      - FIREBASE_PROJECT_ID=${FIREBASE_PROJECT_ID:?FIREBASE_PROJECT_ID must be set}
       - FIREBASE_DATABASE_URL=${FIREBASE_DATABASE_URL:-https://leaf-reactnative-default-rtdb.firebaseio.com}
       - GOOGLE_APPLICATION_CREDENTIALS=/app/firebase-credentials.json
 
@@ -494,7 +494,7 @@ services:
       - REDIS_TLS_REJECT_UNAUTHORIZED=${REDIS_TLS_REJECT_UNAUTHORIZED:-true}
       - REDIS_SENTINEL_USE_TLS=${REDIS_SENTINEL_USE_TLS:-false}
       - REDIS_SENTINEL_TLS_REJECT_UNAUTHORIZED=${REDIS_SENTINEL_TLS_REJECT_UNAUTHORIZED:-true}
-      - FIREBASE_PROJECT_ID=${FIREBASE_PROJECT_ID:-leaf-app-91dfdce0}
+      - FIREBASE_PROJECT_ID=${FIREBASE_PROJECT_ID:?FIREBASE_PROJECT_ID must be set}
       - FIREBASE_DATABASE_URL=${FIREBASE_DATABASE_URL:-https://leaf-reactnative-default-rtdb.firebaseio.com}
       - GOOGLE_APPLICATION_CREDENTIALS=/app/firebase-credentials.json
       - LOG_LEVEL=${LOG_LEVEL:-info}
