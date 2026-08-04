@@ -6,6 +6,7 @@ const redisPool = require('../utils/redis-pool');
 const { logStructured, logError } = require('../utils/logger');
 const RedisScan = require('../utils/redis-scan');
 const { authenticateJWT, requireRole } = require('../middleware/jwt-auth');
+const { requireAdminMutationsEnabled } = require('../middleware/admin-mutation-guard');
 
 const fcmService = new FCMService();
 const ADMIN_ROLES = ['admin', 'super-admin', 'manager', 'development'];
@@ -313,7 +314,7 @@ router.get('/', requireAuth, async (req, res) => {
 // POST - Enviar notificação imediata
 // Requer autenticação administrativa para envios em lote.
 // Envio direto por fcmToken pode ser público apenas quando ALLOW_PUBLIC_DIRECT_FCM_SEND=true.
-router.post('/send', requireSendAuth, async (req, res) => {
+router.post('/send', requireSendAuth, requireAdminMutationsEnabled, async (req, res) => {
     try {
         bindRedisToFcmService();
         const { userIds, title, body, data, imageUrl, priority, fcmToken, filters } = req.body;
@@ -419,7 +420,7 @@ router.post('/send', requireSendAuth, async (req, res) => {
 });
 
 // POST - Programar notificação
-router.post('/schedule', requireAdminManager, async (req, res) => {
+router.post('/schedule', requireAdminManager, requireAdminMutationsEnabled, async (req, res) => {
     try {
         const { 
             userIds, 
@@ -527,7 +528,7 @@ router.get('/scheduled', requireAdminManager, async (req, res) => {
 });
 
 // DELETE - Cancelar notificação programada
-router.delete('/scheduled/:id', requireSuperAdmin, async (req, res) => {
+router.delete('/scheduled/:id', requireSuperAdmin, requireAdminMutationsEnabled, async (req, res) => {
     try {
         const { id } = req.params;
         const key = `scheduled_notifications:${id}`;

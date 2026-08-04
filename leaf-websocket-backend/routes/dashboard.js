@@ -55,6 +55,7 @@ const os = require('os');
 
 // ✅ Importar middlewares de autenticação
 const { authenticateJWT, requireRole, requirePermission } = require('../middleware/jwt-auth');
+const { requireAdminMutationsEnabled } = require('../middleware/admin-mutation-guard');
 const { resolveJwtSecret } = require('../utils/jwt-secret-resolver');
 const { getAdminUser } = require('../utils/admin-user-cache');
 const { normalizeVehicleOcrPayload } = require('../utils/vehicle-ocr-data');
@@ -4845,6 +4846,7 @@ router.put(
   '/api/map/h3-visual-policy',
   authenticateJWT,
   requireRole(DASHBOARD_MONITORING_ROLES),
+  requireAdminMutationsEnabled,
   async (req, res) => {
     try {
       const previous = await h3VisualPolicyService.getPolicy({ forceRefresh: true });
@@ -5871,7 +5873,7 @@ router.get('/api/subscriptions/drivers', authenticateJWT, requireRole(DASHBOARD_
 });
 
 // 💳 Process Subscription Payment
-router.post('/api/subscriptions/payments', async (req, res) => {
+router.post('/api/subscriptions/payments', authenticateJWT, requireRole(DASHBOARD_FINANCIAL_ROLES), requireAdminMutationsEnabled, async (req, res) => {
   try {
     const { driverId, amount, paymentMethod, weekStart, adminId = 'admin1' } = req.body;
 
@@ -5957,7 +5959,7 @@ router.post('/api/subscriptions/payments', async (req, res) => {
 });
 
 // 💳 Update Subscription Settings
-router.patch('/api/subscriptions/:driverId', async (req, res) => {
+router.patch('/api/subscriptions/:driverId', authenticateJWT, requireRole(DASHBOARD_FINANCIAL_ROLES), requireAdminMutationsEnabled, async (req, res) => {
   try {
     const { driverId } = req.params;
     const { weeklyFee, status, notes, adminId = 'admin1' } = req.body;
@@ -8311,7 +8313,7 @@ const { logger } = require('../utils/logger');
  * Criar nova promoção
  * POST /api/promotions
  */
-router.post('/api/promotions', async (req, res) => {
+router.post('/api/promotions', authenticateJWT, requireRole(DASHBOARD_OPERATION_MUTATION_ROLES), requireAdminMutationsEnabled, async (req, res) => {
   try {
     const {
       name,
@@ -8415,7 +8417,7 @@ router.get('/api/promotions/:promotionId', async (req, res, next) => {
  * Atualizar promoção
  * PATCH /api/promotions/:promotionId
  */
-router.patch('/api/promotions/:promotionId', async (req, res) => {
+router.patch('/api/promotions/:promotionId', authenticateJWT, requireRole(DASHBOARD_OPERATION_MUTATION_ROLES), requireAdminMutationsEnabled, async (req, res) => {
   try {
     const { promotionId } = req.params;
     const updates = req.body;
@@ -8465,7 +8467,7 @@ router.get('/api/promotions/:promotionId/check-eligibility/:driverId', async (re
  * Aplicar promoção a um motorista (manual via dashboard)
  * POST /api/promotions/:promotionId/apply/:driverId
  */
-router.post('/api/promotions/:promotionId/apply/:driverId', async (req, res) => {
+router.post('/api/promotions/:promotionId/apply/:driverId', authenticateJWT, requireRole(DASHBOARD_OPERATION_MUTATION_ROLES), requireAdminMutationsEnabled, async (req, res) => {
   try {
     const { promotionId, driverId } = req.params;
 
@@ -9007,7 +9009,7 @@ router.get('/api/drivers/:driverId/complete', authenticateJWT, requireRole(DASHB
  * PATCH /api/drivers/:driverId/plan
  * Body: { planType: 'plus' | 'elite' | 'none' }
  */
-router.patch('/api/drivers/:driverId/plan', authenticateJWT, requireRole(DASHBOARD_FINANCIAL_ROLES), async (req, res) => {
+router.patch('/api/drivers/:driverId/plan', authenticateJWT, requireRole(DASHBOARD_FINANCIAL_ROLES), requireAdminMutationsEnabled, async (req, res) => {
   try {
     const { driverId } = req.params;
     const { planType } = req.body;
@@ -9048,7 +9050,7 @@ router.patch('/api/drivers/:driverId/plan', authenticateJWT, requireRole(DASHBOA
  * PATCH /api/drivers/:driverId/subscription
  * Body: { status: 'active' | 'suspended' | 'cancelled', billing_status: 'active' | 'overdue' | 'suspended' }
  */
-router.patch('/api/drivers/:driverId/subscription', authenticateJWT, requireRole(DASHBOARD_FINANCIAL_ROLES), async (req, res) => {
+router.patch('/api/drivers/:driverId/subscription', authenticateJWT, requireRole(DASHBOARD_FINANCIAL_ROLES), requireAdminMutationsEnabled, async (req, res) => {
   try {
     const { driverId } = req.params;
     const {
@@ -9184,7 +9186,7 @@ router.patch('/api/drivers/:driverId/subscription', authenticateJWT, requireRole
  * POST /api/drivers/:driverId/extend-free
  * Body: { type: 'trial' | 'months' | 'promotion', days: number, reason: string }
  */
-router.post('/api/drivers/:driverId/extend-free', authenticateJWT, requireRole(DASHBOARD_FINANCIAL_ROLES), async (req, res) => {
+router.post('/api/drivers/:driverId/extend-free', authenticateJWT, requireRole(DASHBOARD_FINANCIAL_ROLES), requireAdminMutationsEnabled, async (req, res) => {
   try {
     const { driverId } = req.params;
     const { type, days, reason } = req.body;

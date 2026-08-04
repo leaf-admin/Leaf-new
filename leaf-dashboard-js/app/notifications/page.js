@@ -8,6 +8,7 @@ import KpiCard from "@/src/components/ui/KpiCard";
 import Panel from "@/src/components/ui/Panel";
 import { ErrorText, LoadingState } from "@/src/components/ui/PageFeedback";
 import { KeyValueGrid, TechnicalDetails } from "@/src/components/ui/DataViews";
+import { isAdminMutationEnabled, mutationBlockedMessage } from "@/src/utils/dashboard-access";
 
 function summarizeSendResponse(response) {
   const data = response?.data || response || {};
@@ -40,6 +41,7 @@ export default function NotificationsPage() {
   const [registeredWithinDays, setRegisteredWithinDays] = useState("");
   const [registeredMoreThanMonths, setRegisteredMoreThanMonths] = useState("");
   const [endpointFilter, setEndpointFilter] = useState("");
+  const [runtimeFlags, setRuntimeFlags] = useState(null);
 
   useEffect(() => {
     let mounted = true;
@@ -49,13 +51,15 @@ export default function NotificationsPage() {
           setLoading(true);
           setError("");
         }
-        const [notifData, statsData] = await Promise.all([
+        const [notifData, statsData, flagsData] = await Promise.all([
           leafAPI.getNotifications(),
           leafAPI.getNotificationStats(),
+          leafAPI.getRuntimeFlags(),
         ]);
         if (!mounted) return;
         setNotifications(notifData);
         setStats(statsData);
+        setRuntimeFlags(flagsData || null);
       } catch (err) {
         if (mounted) setError(err?.message || "Falha ao carregar notificacoes");
       } finally {
@@ -93,7 +97,14 @@ export default function NotificationsPage() {
     );
   }, [endpoints, endpointFilter]);
 
+  const readOnly = runtimeFlags === null || !isAdminMutationEnabled(runtimeFlags);
+  const readOnlyMessage = mutationBlockedMessage(runtimeFlags);
+
   const sendNotification = async () => {
+    if (readOnly) {
+      setError(readOnlyMessage);
+      return;
+    }
     if (!title.trim() || !body.trim()) {
       setSendStatus("");
       setError("Informe título e mensagem");
@@ -169,7 +180,10 @@ export default function NotificationsPage() {
         </section>
 
         <section className="grid">
-          <Panel title="Enviar notificação" subtitle="Mensagem curta com segmentação por perfil e janela de cadastro.">
+          <Panel
+            title="Enviar notificação"
+            subtitle={readOnlyMessage || "Mensagem curta com segmentação por perfil e janela de cadastro."}
+          >
             <div className="form-grid">
               <label className="form-field">
                 Título
@@ -177,6 +191,7 @@ export default function NotificationsPage() {
                   placeholder="Título"
                   value={title}
                   onChange={(e) => setTitle(e.target.value)}
+                  disabled={readOnly}
                 />
               </label>
               <label className="form-field">
@@ -185,15 +200,16 @@ export default function NotificationsPage() {
                   placeholder="Mensagem"
                   value={body}
                   onChange={(e) => setBody(e.target.value)}
+                  disabled={readOnly}
                 />
               </label>
               <label className="form-field form-field-checkbox">
                 Drivers
-                <input type="checkbox" checked={toDrivers} onChange={(e) => setToDrivers(e.target.checked)} />
+                <input type="checkbox" checked={toDrivers} onChange={(e) => setToDrivers(e.target.checked)} disabled={readOnly} />
               </label>
               <label className="form-field form-field-checkbox">
                 Passageiros
-                <input type="checkbox" checked={toPassengers} onChange={(e) => setToPassengers(e.target.checked)} />
+                <input type="checkbox" checked={toPassengers} onChange={(e) => setToPassengers(e.target.checked)} disabled={readOnly} />
               </label>
               <label className="form-field">
                 Últimas horas
@@ -203,6 +219,7 @@ export default function NotificationsPage() {
                   placeholder="Ex.: 24"
                   value={registeredWithinHours}
                   onChange={(e) => setRegisteredWithinHours(e.target.value)}
+                  disabled={readOnly}
                 />
               </label>
               <label className="form-field">
@@ -213,6 +230,7 @@ export default function NotificationsPage() {
                   placeholder="Ex.: 7"
                   value={registeredWithinDays}
                   onChange={(e) => setRegisteredWithinDays(e.target.value)}
+                  disabled={readOnly}
                 />
               </label>
               <label className="form-field">
@@ -223,9 +241,10 @@ export default function NotificationsPage() {
                   placeholder="Ex.: 3"
                   value={registeredMoreThanMonths}
                   onChange={(e) => setRegisteredMoreThanMonths(e.target.value)}
+                  disabled={readOnly}
                 />
               </label>
-              <button onClick={sendNotification} disabled={sending}>
+              <button onClick={sendNotification} disabled={readOnly || sending}>
                 {sending ? "Enviando..." : "Enviar"}
               </button>
             </div>

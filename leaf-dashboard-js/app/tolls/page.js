@@ -5,7 +5,7 @@ import ProtectedRoute from "@/src/components/ProtectedRoute";
 import AppNav from "@/src/components/AppNav";
 import KpiCard from "@/src/components/ui/KpiCard";
 import Panel from "@/src/components/ui/Panel";
-import { ErrorText, LoadingState } from "@/src/components/ui/PageFeedback";
+import { EmptyState, ErrorText, LoadingState } from "@/src/components/ui/PageFeedback";
 import { leafAPI } from "@/src/services/api";
 
 const directionOptions = [
@@ -15,6 +15,10 @@ const directionOptions = [
   ["east", "leste"],
   ["west", "oeste"],
 ];
+
+// The backend contract is not deployed yet. Keep this surface explicitly unavailable
+// until GET/PUT /pricing/toll-catalog exist in the same release.
+const TOLL_CATALOG_AVAILABLE = false;
 
 function clone(value) {
   return JSON.parse(JSON.stringify(value || {}));
@@ -143,8 +147,27 @@ export default function TollsPage() {
   };
 
   useEffect(() => {
+    if (!TOLL_CATALOG_AVAILABLE) return undefined;
     loadCatalog({ refresh: true });
+    return undefined;
   }, []);
+
+  if (!TOLL_CATALOG_AVAILABLE) {
+    return (
+      <ProtectedRoute>
+        <main className="page-shell">
+          <header className="header">
+            <div>
+              <h1>Pedágios</h1>
+              <p>O catálogo será disponibilizado quando o contrato backend estiver publicado.</p>
+            </div>
+          </header>
+          <AppNav />
+          <EmptyState message="Catálogo de pedágios temporariamente indisponível. Nenhuma alteração foi aplicada." />
+        </main>
+      </ProtectedRoute>
+    );
+  }
 
   return (
     <ProtectedRoute>

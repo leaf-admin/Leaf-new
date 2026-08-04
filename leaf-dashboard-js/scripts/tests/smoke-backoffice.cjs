@@ -959,8 +959,14 @@ async function main() {
         hasText: "payment_account_document_or_stuck_flow_keyword, payment_category_minimum",
       })
       .waitFor({ timeout: 15000 });
-    await page.getByRole("link", { name: "Campanhas" }).first().click();
-    await page.locator("h1", { hasText: "Campanhas in-app" }).waitFor({ timeout: 15000 });
+    const campaignsLink = page.getByRole("link", { name: "Campanhas" }).first();
+    if (await campaignsLink.count()) {
+      await campaignsLink.click();
+      await page.locator("h1", { hasText: "Campanhas in-app" }).waitFor({ timeout: 15000 });
+      log("top navigation to Campaign Center ok");
+    } else {
+      log("Campaign Center hidden by launch flag");
+    }
     log("top navigation between core areas ok");
 
     await context.close();

@@ -9,6 +9,7 @@ import Panel from "@/src/components/ui/Panel";
 import { ErrorText, LoadingState } from "@/src/components/ui/PageFeedback";
 import GoogleDriversMap from "@/src/components/map/GoogleDriversMap";
 import { TechnicalDetails } from "@/src/components/ui/DataViews";
+import { isAdminMutationEnabled, mutationBlockedMessage } from "@/src/utils/dashboard-access";
 
 const H3_VIEWPORT_DEBOUNCE_MS = 400;
 
@@ -99,6 +100,7 @@ export default function MapsPage() {
   const [geofenceRegionDraft, setGeofenceRegionDraft] = useState("[]");
   const h3ViewportRequestRef = useRef("");
   const [h3RefreshNonce, setH3RefreshNonce] = useState(0);
+  const [runtimeFlags, setRuntimeFlags] = useState(null);
 
   useEffect(() => {
     let mounted = true;
@@ -205,7 +207,29 @@ export default function MapsPage() {
     }
   }, []);
 
+  useEffect(() => {
+    let mounted = true;
+    leafAPI.getRuntimeFlags()
+      .then((response) => {
+        if (mounted) setRuntimeFlags(response || null);
+      })
+      .catch(() => {
+        if (mounted) setRuntimeFlags(null);
+      });
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  const mutationsEnabled = isAdminMutationEnabled(runtimeFlags);
+  const readOnly = runtimeFlags === null || !mutationsEnabled;
+  const readOnlyMessage = mutationBlockedMessage(runtimeFlags);
+
   const toggleGeofenceEnabled = async () => {
+    if (readOnly) {
+      setGeoError(readOnlyMessage);
+      return;
+    }
     const currentEnabled = geoConfig?.geofence?.enabled !== false;
     const nextEnabled = !currentEnabled;
 
@@ -222,6 +246,10 @@ export default function MapsPage() {
   };
 
   const saveGeofenceRegion = async () => {
+    if (readOnly) {
+      setGeoError(readOnlyMessage);
+      return;
+    }
     let parsedRegion = null;
     try {
       parsedRegion = JSON.parse(geofenceRegionDraft);
@@ -331,6 +359,10 @@ export default function MapsPage() {
   };
 
   const toggleStateActivation = async () => {
+    if (readOnly) {
+      setGeoError(readOnlyMessage);
+      return;
+    }
     if (!selectedState) return;
     try {
       setStateBusy(true);
@@ -345,6 +377,10 @@ export default function MapsPage() {
   };
 
   const toggleCityActivation = async (city) => {
+    if (readOnly) {
+      setGeoError(readOnlyMessage);
+      return;
+    }
     if (!selectedState || !city?.key) return;
     try {
       setCityBusyKey(city.key);
@@ -359,6 +395,10 @@ export default function MapsPage() {
   };
 
   const createCity = async () => {
+    if (readOnly) {
+      setGeoError(readOnlyMessage);
+      return;
+    }
     if (!selectedState || newCityName.trim().length < 2) {
       setGeoError("Informe um nome valido para nova cidade");
       return;
@@ -382,6 +422,10 @@ export default function MapsPage() {
   };
 
   const saveCityCapacity = async (city) => {
+    if (readOnly) {
+      setGeoError(readOnlyMessage);
+      return;
+    }
     if (!selectedState || !city?.key) return;
     const maxActiveDrivers = Number(cityCapDraft[city.key]);
     const waitlistEnabled = cityWaitlistDraft[city.key] !== false;
@@ -409,9 +453,10 @@ export default function MapsPage() {
   const allErrors = [error, geoError].filter(Boolean).join(" | ");
 
   const handleGeofenceMapChange = useCallback((nextRegion) => {
+    if (readOnly) return;
     const nextDraft = formatRegionDraft(nextRegion);
     setGeofenceRegionDraft((previous) => (previous === nextDraft ? previous : nextDraft));
-  }, []);
+  }, [readOnly]);
 
   return (
     <ProtectedRoute>
@@ -444,15 +489,18 @@ export default function MapsPage() {
               <span className={geoConfig?.geofence?.bypassEnabled ? "status-warn" : "status-ok"}>
                 Bypass: {geoConfig?.geofence?.bypassEnabled ? "ligado" : "desligado"}
               </span>
+              {readOnly ? <span className="status-warn">Somente leitura</span> : null}
             </div>
+
+            {readOnlyMessage ? <p className="panel-subtitle">{readOnlyMessage}</p> : null}
 
             <div className="filters">
               <button onClick={refreshMapLocations}>Atualizar mapa</button>
               <button onClick={loadGeoConfig}>Atualizar geografia</button>
-              <button onClick={toggleGeofenceEnabled} disabled={geoLoading || geofenceBusy}>
+              <button onClick={toggleGeofenceEnabled} disabled={readOnly || geoLoading || geofenceBusy}>
                 {geoConfig?.geofence?.enabled !== false ? "Desativar geofence" : "Ativar geofence"}
               </button>
-              <button onClick={saveGeofenceRegion} disabled={geoLoading || geofenceBusy}>
+              <button onClick={saveGeofenceRegion} disabled={readOnly || geoLoading || geofenceBusy}>
                 Salvar geofence
               </button>
               <button onClick={resetGeofenceDraft} disabled={geoLoading || geofenceBusy}>
@@ -469,7 +517,7 @@ export default function MapsPage() {
               onViewportChange={handleMapViewportChange}
               mapHeight="clamp(460px, 58vh, 680px)"
               geofenceRegion={geofenceRegionForMap}
-              geofenceEditable
+              geofenceEditable={!readOnly}
               onGeofenceChange={handleGeofenceMapChange}
               showH3SyncLabel={false}
             />
@@ -481,6 +529,7 @@ export default function MapsPage() {
                   id="geofence-region-draft"
                   value={geofenceRegionDraft}
                   onChange={(event) => setGeofenceRegionDraft(event.target.value)}
+                  disabled={readOnly}
                   rows={8}
                   style={{ width: "100%", resize: "vertical", fontFamily: "monospace" }}
                   placeholder='[[-43.8,-23.1],[-43.1,-23.1],[-43.1,-22.7],[-43.8,-22.7],[-43.8,-23.1]]'
@@ -567,11 +616,11 @@ export default function MapsPage() {
               <div className="geo-toolbar-actions">
                 <button
                   onClick={createCity}
-                  disabled={!selectedState || newCityName.trim().length < 2 || cityBusyKey === "create-city"}
+                  disabled={readOnly || !selectedState || newCityName.trim().length < 2 || cityBusyKey === "create-city"}
                 >
                   Adicionar cidade
                 </button>
-                <button onClick={toggleStateActivation} disabled={!selectedState || stateBusy}>
+                <button onClick={toggleStateActivation} disabled={readOnly || !selectedState || stateBusy}>
                   {selectedState?.enabled ? "Desativar estado" : "Ativar estado"}
                 </button>
               </div>
@@ -597,6 +646,7 @@ export default function MapsPage() {
                         type="number"
                         min="0"
                         value={cityCapDraft[city.key] ?? city.maxActiveDrivers ?? 0}
+                        disabled={readOnly}
                         onChange={(event) =>
                           setCityCapDraft((prev) => ({
                             ...prev,
@@ -607,9 +657,10 @@ export default function MapsPage() {
                     </label>
                     <label className="city-row-field city-row-field-checkbox">
                       <span>Waitlist</span>
-                      <input
-                        type="checkbox"
-                        checked={cityWaitlistDraft[city.key] ?? (city.waitlistEnabled !== false)}
+                        <input
+                          type="checkbox"
+                          checked={cityWaitlistDraft[city.key] ?? (city.waitlistEnabled !== false)}
+                          disabled={readOnly}
                         onChange={(event) =>
                           setCityWaitlistDraft((prev) => ({
                             ...prev,
@@ -621,10 +672,10 @@ export default function MapsPage() {
                   </div>
 
                   <div className="city-row-actions">
-                    <button disabled={cityBusyKey === `city-config-${city.key}`} onClick={() => saveCityCapacity(city)}>
+                    <button disabled={readOnly || cityBusyKey === `city-config-${city.key}`} onClick={() => saveCityCapacity(city)}>
                       Salvar
                     </button>
-                    <button disabled={cityBusyKey === city.key} onClick={() => toggleCityActivation(city)}>
+                    <button disabled={readOnly || cityBusyKey === city.key} onClick={() => toggleCityActivation(city)}>
                       {city.active ? "Desativar" : "Ativar"}
                     </button>
                   </div>

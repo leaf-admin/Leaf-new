@@ -16,7 +16,13 @@ const groups = [
     items: [
       { href: "/dashboard", label: "Visão geral" },
       { href: "/support", label: "Suporte" },
-      { href: "/campaign-center", label: "Campanhas", allowedRoles: ["admin", "super-admin", "manager", "development"] },
+      {
+        href: "/campaign-center",
+        label: "Campanhas",
+        allowedRoles: ["admin", "super-admin", "manager", "development"],
+        featureFlag: "campaignCenterEnabled",
+        requireExplicitFeatureFlag: true,
+      },
       { href: "/drivers/review-queue", label: "Cadastro motorista" },
     ],
   },
@@ -47,7 +53,6 @@ const groups = [
       { href: "/notifications", label: "Notificações" },
       { href: "/reports", label: "Relatórios" },
       { href: "/promotions", label: "Promoções" },
-      { href: "/tolls", label: "Pedágios", allowedRoles: ["admin", "super-admin", "manager"] },
       { href: "/financial-reconciliation", label: "Reconciliação", allowedRoles: ["admin", "super-admin", "manager"] },
       { href: "/payment-runtime", label: "Perfil de pagamento", allowedRoles: ["admin", "super-admin", "manager", "development"] },
       {
@@ -86,6 +91,8 @@ export default function AppNav() {
   const [runtimeFlags, setRuntimeFlags] = useState(null);
   const apiDocsHref = process.env.NEXT_PUBLIC_API_DOCS_URL || "/reports";
   const isApiDocsExternal = /^https?:\/\//i.test(apiDocsHref);
+  const campaignCenterVisible = runtimeFlags?.launch?.campaignCenterEnabled === true;
+  const adminMutationsEnabled = runtimeFlags?.launch?.adminMutationsEnabled !== false;
 
   useEffect(() => {
     let mounted = true;
@@ -184,9 +191,11 @@ export default function AppNav() {
           <Link href="/support" className="app-topbar-link">
             Suporte
           </Link>
-          <Link href="/campaign-center" className="app-topbar-link">
-            Campanhas
-          </Link>
+          {campaignCenterVisible ? (
+            <Link href="/campaign-center" className="app-topbar-link">
+              Campanhas
+            </Link>
+          ) : null}
           <Link href="/drivers/review-queue" className="app-topbar-link">
             Cadastro
           </Link>
@@ -198,6 +207,11 @@ export default function AppNav() {
           >
             API Docs
           </Link>
+          {runtimeFlags && !adminMutationsEnabled ? (
+            <span className="app-topbar-readonly" role="status">
+              Somente leitura
+            </span>
+          ) : null}
           <div className="app-topbar-avatar" title={user?.name || user?.email || "Admin"}>
             {userInitials}
           </div>

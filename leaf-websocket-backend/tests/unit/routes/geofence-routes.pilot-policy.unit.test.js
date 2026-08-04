@@ -25,6 +25,7 @@ const mockSetRealtimeDB = jest.fn();
 
 jest.mock('../../../utils/pilot-launch-flags', () => ({
   isPilotControlledLaunch: jest.fn(() => true),
+  isLaunchFeatureEnabled: jest.fn(() => true),
 }));
 
 jest.mock('../../../services/geofence-service', () => ({
