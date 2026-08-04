@@ -29,6 +29,38 @@ const FORBIDDEN_BUCKET_PERMISSIONS = Object.freeze([
   'storage.objects.setRetention'
 ]);
 
+const REQUIRED_PROJECT_PERMISSIONS = Object.freeze([
+  'cloudmessaging.messages.create',
+  'datastore.databases.get',
+  'datastore.entities.allocateIds',
+  'datastore.entities.create',
+  'datastore.entities.delete',
+  'datastore.entities.get',
+  'datastore.entities.list',
+  'datastore.entities.update',
+  'firebase.clients.get',
+  'firebase.projects.get',
+  'firebaseauth.users.create',
+  'firebaseauth.users.delete',
+  'firebaseauth.users.get',
+  'firebaseauth.users.update',
+  'firebasedatabase.instances.get',
+  'firebasedatabase.instances.list',
+  'resourcemanager.projects.get'
+]);
+
+const REQUIRED_BUCKET_PERMISSIONS = Object.freeze([
+  'storage.objects.create',
+  'storage.objects.delete',
+  'storage.objects.get',
+  'storage.objects.list',
+  'storage.objects.update'
+]);
+
+function uniquePermissions(...permissionGroups) {
+  return [...new Set(permissionGroups.flat())];
+}
+
 function readBooleanLike(value, fallback = false) {
   if (value == null || String(value).trim() === '') return fallback;
   const normalized = String(value).trim().toLowerCase();
@@ -118,6 +150,10 @@ async function requestJson(fetchImpl, url, options = {}) {
 }
 
 async function testProjectPermissions({ fetchImpl, token, projectId }) {
+  const permissions = uniquePermissions(
+    FORBIDDEN_PROJECT_PERMISSIONS,
+    REQUIRED_PROJECT_PERMISSIONS
+  );
   const body = await requestJson(
     fetchImpl,
     `https://cloudresourcemanager.googleapis.com/v1/projects/${encodeURIComponent(projectId)}:testIamPermissions`,
@@ -127,7 +163,7 @@ async function testProjectPermissions({ fetchImpl, token, projectId }) {
         authorization: `Bearer ${token}`,
         'content-type': 'application/json'
       },
-      body: JSON.stringify({ permissions: FORBIDDEN_PROJECT_PERMISSIONS })
+      body: JSON.stringify({ permissions })
     }
   );
   return Array.isArray(body.permissions) ? body.permissions : [];
@@ -137,7 +173,11 @@ async function testBucketPermissions({ fetchImpl, token, bucketName }) {
   const url = new URL(
     `https://storage.googleapis.com/storage/v1/b/${encodeURIComponent(bucketName)}/iam/testPermissions`
   );
-  for (const permission of FORBIDDEN_BUCKET_PERMISSIONS) {
+  const permissions = uniquePermissions(
+    FORBIDDEN_BUCKET_PERMISSIONS,
+    REQUIRED_BUCKET_PERMISSIONS
+  );
+  for (const permission of permissions) {
     url.searchParams.append('permissions', permission);
   }
   const body = await requestJson(fetchImpl, url, {
@@ -151,10 +191,19 @@ function evaluatePermissionBoundary({ projectPermissions = [], bucketPermissions
     ...projectPermissions.filter((permission) => FORBIDDEN_PROJECT_PERMISSIONS.includes(permission)),
     ...bucketPermissions.filter((permission) => FORBIDDEN_BUCKET_PERMISSIONS.includes(permission))
   ])].sort();
+  const missingRequiredPermissions = [
+    ...REQUIRED_PROJECT_PERMISSIONS.filter(
+      (permission) => !projectPermissions.includes(permission)
+    ),
+    ...REQUIRED_BUCKET_PERMISSIONS.filter(
+      (permission) => !bucketPermissions.includes(permission)
+    )
+  ].sort();
 
   return {
-    ok: grantedForbiddenPermissions.length === 0,
-    grantedForbiddenPermissions
+    ok: grantedForbiddenPermissions.length === 0 && missingRequiredPermissions.length === 0,
+    grantedForbiddenPermissions,
+    missingRequiredPermissions
   };
 }
 
@@ -197,7 +246,14 @@ async function runPreflight({
       projectId,
       bucketName,
       checkedPermissionCount:
-        FORBIDDEN_PROJECT_PERMISSIONS.length + FORBIDDEN_BUCKET_PERMISSIONS.length
+        uniquePermissions(
+          FORBIDDEN_PROJECT_PERMISSIONS,
+          REQUIRED_PROJECT_PERMISSIONS
+        ).length
+        + uniquePermissions(
+          FORBIDDEN_BUCKET_PERMISSIONS,
+          REQUIRED_BUCKET_PERMISSIONS
+        ).length
     };
   } finally {
     await app.delete();
@@ -222,6 +278,8 @@ if (require.main === module) {
 module.exports = {
   FORBIDDEN_BUCKET_PERMISSIONS,
   FORBIDDEN_PROJECT_PERMISSIONS,
+  REQUIRED_BUCKET_PERMISSIONS,
+  REQUIRED_PROJECT_PERMISSIONS,
   evaluatePermissionBoundary,
   parseCredentialJson,
   readBooleanLike,
@@ -231,5 +289,6 @@ module.exports = {
   runPreflight,
   shouldEnforce,
   testBucketPermissions,
-  testProjectPermissions
+  testProjectPermissions,
+  uniquePermissions
 };

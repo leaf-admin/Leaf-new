@@ -6,6 +6,8 @@ const deployScriptPath = path.join(backendRoot, 'scripts/deploy-contabo-docker.s
 const {
   FORBIDDEN_BUCKET_PERMISSIONS,
   FORBIDDEN_PROJECT_PERMISSIONS,
+  REQUIRED_BUCKET_PERMISSIONS,
+  REQUIRED_PROJECT_PERMISSIONS,
   evaluatePermissionBoundary,
   resolveAuditTarget,
   runPreflight,
@@ -54,21 +56,37 @@ describe('Firebase runtime IAM boundary', () => {
         'firebasedatabase.instances.disable',
         'storage.buckets.update',
         'storage.objects.setRetention'
-      ]
+      ],
+      missingRequiredPermissions: expect.any(Array)
     });
   });
 
-  it('passes only when none of the forbidden permissions is granted', () => {
+  it('passes only when required data-plane permissions exist and forbidden permissions do not', () => {
     expect(evaluatePermissionBoundary({
-      projectPermissions: ['datastore.entities.get'],
-      bucketPermissions: [
-        'storage.objects.create',
-        'storage.objects.delete',
-        'storage.objects.get'
-      ]
+      projectPermissions: [...REQUIRED_PROJECT_PERMISSIONS],
+      bucketPermissions: [...REQUIRED_BUCKET_PERMISSIONS]
     })).toEqual({
       ok: true,
-      grantedForbiddenPermissions: []
+      grantedForbiddenPermissions: [],
+      missingRequiredPermissions: []
+    });
+  });
+
+  it('fails closed when a required runtime permission is missing', () => {
+    const projectPermissions = REQUIRED_PROJECT_PERMISSIONS.filter(
+      (permission) => permission !== 'cloudmessaging.messages.create'
+    );
+    const bucketPermissions = REQUIRED_BUCKET_PERMISSIONS.filter(
+      (permission) => permission !== 'storage.objects.delete'
+    );
+
+    expect(evaluatePermissionBoundary({ projectPermissions, bucketPermissions })).toEqual({
+      ok: false,
+      grantedForbiddenPermissions: [],
+      missingRequiredPermissions: [
+        'cloudmessaging.messages.create',
+        'storage.objects.delete'
+      ]
     });
   });
 
@@ -92,6 +110,31 @@ describe('Firebase runtime IAM boundary', () => {
       'storage.objects.restore',
       'storage.objects.setIamPolicy',
       'storage.objects.setRetention'
+    ]));
+  });
+
+  it('covers the runtime data plane used by Auth, Firestore, RTDB, FCM and Storage', () => {
+    expect(REQUIRED_PROJECT_PERMISSIONS).toEqual(expect.arrayContaining([
+      'cloudmessaging.messages.create',
+      'datastore.entities.allocateIds',
+      'datastore.entities.create',
+      'datastore.entities.delete',
+      'datastore.entities.get',
+      'datastore.entities.list',
+      'datastore.entities.update',
+      'firebaseauth.users.create',
+      'firebaseauth.users.delete',
+      'firebaseauth.users.get',
+      'firebaseauth.users.update',
+      'firebasedatabase.instances.get',
+      'firebasedatabase.instances.list'
+    ]));
+    expect(REQUIRED_BUCKET_PERMISSIONS).toEqual(expect.arrayContaining([
+      'storage.objects.create',
+      'storage.objects.delete',
+      'storage.objects.get',
+      'storage.objects.list',
+      'storage.objects.update'
     ]));
   });
 
@@ -121,7 +164,9 @@ describe('Firebase runtime IAM boundary', () => {
         ok: true,
         status: 200,
         text: async () => JSON.stringify({
-          permissions: isProjectProbe ? [] : ['storage.objects.get']
+          permissions: isProjectProbe
+            ? [...REQUIRED_PROJECT_PERMISSIONS]
+            : [...REQUIRED_BUCKET_PERMISSIONS]
         })
       };
     });
@@ -143,7 +188,8 @@ describe('Firebase runtime IAM boundary', () => {
       skipped: false,
       projectId: 'leaf-test-project',
       bucketName: 'leaf-test-project.example',
-      grantedForbiddenPermissions: []
+      grantedForbiddenPermissions: [],
+      missingRequiredPermissions: []
     });
     expect(report).not.toHaveProperty('clientEmail');
     expect(JSON.stringify(report)).not.toContain('private-oauth-token');
@@ -155,6 +201,22 @@ describe('Firebase runtime IAM boundary', () => {
     expect(requests.every((request) => (
       request.options.headers.authorization === 'Bearer private-oauth-token'
     ))).toBe(true);
+    const projectRequest = requests.find((request) => (
+      request.url.includes('cloudresourcemanager.googleapis.com')
+    ));
+    const projectProbeBody = JSON.parse(projectRequest.options.body);
+    expect(projectProbeBody.permissions).toEqual(expect.arrayContaining([
+      ...FORBIDDEN_PROJECT_PERMISSIONS,
+      ...REQUIRED_PROJECT_PERMISSIONS
+    ]));
+    const bucketRequest = requests.find((request) => (
+      request.url.includes('storage.googleapis.com')
+    ));
+    const bucketProbeUrl = new URL(bucketRequest.url);
+    expect(bucketProbeUrl.searchParams.getAll('permissions')).toEqual(expect.arrayContaining([
+      ...FORBIDDEN_BUCKET_PERMISSIONS,
+      ...REQUIRED_BUCKET_PERMISSIONS
+    ]));
     expect(deleteApp).toHaveBeenCalledTimes(1);
   });
 
