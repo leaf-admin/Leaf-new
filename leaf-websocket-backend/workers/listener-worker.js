@@ -27,6 +27,7 @@ const { EVENT_TYPES } = require('../events');
 const { Server } = require('socket.io');
 const { createAdapter } = require('@socket.io/redis-adapter');
 const redisPool = require('../utils/redis-pool');
+const { buildWorkerConsumerName } = require('./worker-consumer-identity');
 
 const WORKER_STREAM_NAME = process.env.WORKER_STREAM_NAME || 'ride_events';
 const WORKER_GROUP_NAME = process.env.WORKER_GROUP_NAME || 'listener-workers';
@@ -48,7 +49,7 @@ logStructured('info', 'Socket.IO com Redis Adapter inicializado no worker', {
 const workerManager = new WorkerManager({
     streamName: WORKER_STREAM_NAME,
     groupName: WORKER_GROUP_NAME,
-    consumerName: `${WORKER_CONSUMER_PREFIX}-${process.pid}`,
+    consumerName: buildWorkerConsumerName(WORKER_CONSUMER_PREFIX),
     batchSize: WORKER_BATCH_SIZE,
     blockTime: WORKER_BLOCK_TIME,
     maxRetries: WORKER_MAX_RETRIES,

@@ -19,12 +19,13 @@ const { logStructured, logError } = require('../utils/logger');
 const { metrics } = require('../utils/prometheus-metrics');
 const traceContext = require('../utils/trace-context');
 const { trimRedisStreamSafely } = require('../utils/redis-stream-safe-retention');
+const { buildWorkerConsumerName } = require('./worker-consumer-identity');
 
 class WorkerManager {
     constructor(options = {}) {
         this.streamName = options.streamName || 'ride_events';
         this.groupName = options.groupName || 'listener-workers';
-        this.consumerName = options.consumerName || `worker-${process.pid}`;
+        this.consumerName = options.consumerName || buildWorkerConsumerName('worker');
         this.batchSize = options.batchSize || 10;
         this.blockTime = options.blockTime || 1000; // 1 segundo
         this.maxRetries = options.maxRetries || 3;

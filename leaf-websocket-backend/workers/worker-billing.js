@@ -16,6 +16,7 @@ const { EVENT_TYPES } = require('../events');
 const { isMultiLegBillingEnabled } = require('../utils/ride-lifecycle-feature-flags');
 const { validateAuthoritativeFinancialSnapshot } = require('../services/ride-financial-contract');
 const { resolveFinancialContext } = require('../services/financial-runtime-context');
+const { buildWorkerConsumerName } = require('./worker-consumer-identity');
 
 const driverApprovalService = typeof DriverApprovalService === 'function'
     ? new DriverApprovalService()
@@ -96,7 +97,7 @@ function buildCancellationBillingIdempotencyScope(bookingId, driverId, eventId =
 const workerManager = new WorkerManager({
     streamName: 'ride_events',
     groupName: 'billing-workers',
-    consumerName: `billing-worker-${process.pid}`,
+    consumerName: buildWorkerConsumerName('billing-worker'),
     batchSize: 5, // Processamento menor por lote devido a integrações third-party (Woovi)
     blockTime: 1000,
     maxRetries: 5, // Mais retries para resiliência financeira

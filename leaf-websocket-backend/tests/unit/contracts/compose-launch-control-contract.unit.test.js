@@ -9,6 +9,9 @@ describe('production compose launch-control contract', () => {
   const workerStart = composeSource.indexOf('  sideeffects-worker:');
   const workerEnd = composeSource.indexOf('  # ===== BILLING WORKER =====', workerStart);
   const workerSource = composeSource.slice(workerStart, workerEnd);
+  const billingWorkerStart = composeSource.indexOf('  billing-worker:');
+  const billingWorkerEnd = composeSource.indexOf('\n  nginx:', billingWorkerStart);
+  const billingWorkerSource = composeSource.slice(billingWorkerStart, billingWorkerEnd);
   const gatewayScaleSource = fs.readFileSync(
     path.resolve(__dirname, '../../../docker-compose.gateway-scale.yml'),
     'utf8',
@@ -72,6 +75,12 @@ describe('production compose launch-control contract', () => {
     ]) {
       expect(workerSource).toContain(`- ${key}=\${${key}`);
     }
+  });
+
+  it('propagates an explicit distributed worker instance identity', () => {
+    expect(workerSource).toContain('LEAF_WORKER_INSTANCE_ID=${LEAF_WORKER_INSTANCE_ID:-}');
+    expect(billingWorkerSource).toContain('LEAF_WORKER_INSTANCE_ID=${LEAF_WORKER_INSTANCE_ID:-}');
+    expect(opsWorkersSource).toContain('LEAF_WORKER_INSTANCE_ID=${LEAF_WORKER_INSTANCE_ID:-}');
   });
 
   it('propagates the physical offer timeout only through dispatch gateways', () => {
@@ -439,7 +448,9 @@ describe('production compose launch-control contract', () => {
     expect(dockerIgnoreSource).toContain('leaf-reactnative-firebase-adminsdk-*.json');
     expect(deploySource).toContain('--exclude "leaf-reactnative-firebase-adminsdk-*.json"');
     expect(tripWorkerCompose).toContain('TRIP_LOCATION_STREAM_NAME=${TRIP_LOCATION_STREAM_NAME:-trip_location_events}');
-    expect(tripWorkerCompose).toContain('TRIP_LOCATION_WORKER_CONSUMER=${TRIP_LOCATION_WORKER_CONSUMER:-trip-location-worker-1}');
+    expect(tripWorkerCompose).toContain('LEAF_WORKER_INSTANCE_ID=${LEAF_WORKER_INSTANCE_ID:-}');
+    expect(tripWorkerCompose).toContain('TRIP_LOCATION_WORKER_CONSUMER=${TRIP_LOCATION_WORKER_CONSUMER:-}');
+    expect(tripWorkerCompose).toContain("buildWorkerConsumerName('trip-location-worker',{includePid:false})");
     expect(tripWorkerCompose).toContain('TRIP_LOCATION_WORKER_DLQ_STREAM_NAME=${TRIP_LOCATION_WORKER_DLQ_STREAM_NAME:-trip_location_events_dlq}');
     expect(tripWorkerCompose).toContain('TRIP_LOCATION_WORKER_HEALTH_KEY=${TRIP_LOCATION_WORKER_HEALTH_KEY:-leaf:runtime:trip-location-worker:health}');
     expect(tripWorkerCompose).toContain('TRIP_LOCATION_WORKER_HEALTH_TTL_SECONDS=${TRIP_LOCATION_WORKER_HEALTH_TTL_SECONDS:-90}');
@@ -463,7 +474,7 @@ describe('production compose launch-control contract', () => {
       "streamName: process.env.TRIP_LOCATION_STREAM_NAME || 'trip_location_events'",
     );
     expect(tripLocationWorkerSource).toContain(
-      "consumerName: process.env.TRIP_LOCATION_WORKER_CONSUMER || 'trip-location-worker-1'",
+      "buildWorkerConsumerName('trip-location-worker', { includePid: false })",
     );
     expect(tripLocationWorkerSource).toContain(
       "dlqStreamName: process.env.TRIP_LOCATION_WORKER_DLQ_STREAM_NAME || 'trip_location_events_dlq'",
