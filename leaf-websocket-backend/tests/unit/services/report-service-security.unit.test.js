@@ -14,7 +14,7 @@ describe('report-service XLSX security gate', () => {
     process.env = { ...originalEnv };
   });
 
-  it('blocks XLSX generation in production even when a stale flag enables it', async () => {
+  it('blocks XLSX generation even when a stale flag enables it', async () => {
     process.env.NODE_ENV = 'production';
     process.env.ENABLE_XLSX_REPORT_EXPORT = 'true';
     const ReportService = require('../../../services/report-service');
@@ -25,11 +25,11 @@ describe('report-service XLSX security gate', () => {
       .rejects.toMatchObject({ code: 'XLSX_EXPORT_DISABLED_SECURITY' });
   });
 
-  it('keeps local test generation available for replacement compatibility tests', () => {
+  it('keeps XLSX disabled outside production until a safe replacement is approved', () => {
     process.env.NODE_ENV = 'test';
     process.env.ENABLE_XLSX_REPORT_EXPORT = 'true';
     const ReportService = require('../../../services/report-service');
 
-    expect(new ReportService().isExcelExportEnabled()).toBe(true);
+    expect(new ReportService().isExcelExportEnabled()).toBe(false);
   });
 });
