@@ -65,6 +65,20 @@ describe('Redis Sentinel production compose contract', () => {
     }
   );
 
+  test('gives the dedicated queue worker an explicit renewable leader lease contract', () => {
+    const queueWorker = serviceBlock(gatewayScale, 'queue-worker');
+    expect(queueWorker).toContain(
+      '- QUEUE_WORKER_LEADER_KEY=${QUEUE_WORKER_LEADER_KEY:-leaf:runtime:queue-worker:leader}'
+    );
+    expect(queueWorker).toContain(
+      '- QUEUE_WORKER_LEADER_TTL_MS=${QUEUE_WORKER_LEADER_TTL_MS:-15000}'
+    );
+    expect(queueWorker).toContain(
+      '- QUEUE_WORKER_LEADER_RENEW_INTERVAL_MS=${QUEUE_WORKER_LEADER_RENEW_INTERVAL_MS:-5000}'
+    );
+    expect(queueWorker).toContain('- LEAF_WORKER_INSTANCE_ID=${LEAF_WORKER_INSTANCE_ID:-}');
+  });
+
   test.each(['trip-location-worker', 'pricing-baseline-worker', 'ride-health-monitor-worker'])(
     'preserves Sentinel discovery in operational worker %s',
     serviceName => {

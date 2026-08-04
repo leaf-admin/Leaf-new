@@ -23,13 +23,16 @@ const RideStateManager = require('./ride-state-manager');
 const eventSourcing = require('./event-sourcing');
 const { EVENT_TYPES } = require('./event-sourcing');
 const { logger } = require('../utils/logger');
+const RedisLeaderLease = require('../utils/redis-leader-lease');
+const { buildWorkerConsumerName } = require('../workers/worker-consumer-identity');
 
 class QueueWorker {
-    constructor(io) {
+    constructor(io, options = {}) {
         this.redis = redisPool.getConnection();
         this.io = io;
         this.intervalId = null;
         this.isRunning = false;
+        this.cycleInFlight = null;
         this.gradualExpander = new GradualRadiusExpander(io);
         
         // Configurações
@@ -53,8 +56,27 @@ class QueueWorker {
             ),
             
             // Timeout para operações Redis
-            redisTimeout: 5000 // 5 segundos
+            redisTimeout: 5000, // 5 segundos
+
+            // Lease de liderança: apenas uma réplica processa filas por vez.
+            leaderKey: process.env.QUEUE_WORKER_LEADER_KEY || 'leaf:runtime:queue-worker:leader',
+            leaderTtlMs: Math.max(
+                3000,
+                Number.parseInt(process.env.QUEUE_WORKER_LEADER_TTL_MS || '15000', 10) || 15000
+            ),
+            leaderRenewIntervalMs: Math.max(
+                500,
+                Number.parseInt(process.env.QUEUE_WORKER_LEADER_RENEW_INTERVAL_MS || '5000', 10) || 5000
+            )
         };
+
+        this.leaderLease = options.leaderLease || new RedisLeaderLease(this.redis, {
+            key: this.config.leaderKey,
+            ttlMs: this.config.leaderTtlMs,
+            renewIntervalMs: this.config.leaderRenewIntervalMs,
+            ownerId: buildWorkerConsumerName('queue-worker'),
+            logger
+        });
     }
 
     async isBookingCurrentForCustomer(bookingId, bookingData) {
@@ -88,11 +110,11 @@ class QueueWorker {
         logger.info('🚀 [QueueWorker] Worker iniciado');
 
         // Processar imediatamente na primeira vez
-        this.processAllQueues();
+        this.scheduleProcessingCycle();
 
         // Agendar processamento contínuo
         this.intervalId = setInterval(() => {
-            this.processAllQueues();
+            this.scheduleProcessingCycle();
         }, this.config.processingInterval);
     }
 
@@ -113,14 +135,52 @@ class QueueWorker {
 
         this.isRunning = false;
         logger.info('🛑 [QueueWorker] Worker parado');
+        return this.leaderLease.release();
+    }
+
+    scheduleProcessingCycle() {
+        if (!this.isRunning || this.cycleInFlight) {
+            return this.cycleInFlight;
+        }
+
+        this.cycleInFlight = this.runProcessingCycle()
+            .catch((error) => {
+                logger.error('❌ [QueueWorker] Erro no ciclo protegido de processamento:', error);
+            })
+            .finally(() => {
+                this.cycleInFlight = null;
+            });
+
+        return this.cycleInFlight;
+    }
+
+    async runProcessingCycle() {
+        const isLeader = this.leaderLease.isHeld()
+            ? await this.leaderLease.assertHeld()
+            : await this.leaderLease.acquire();
+
+        if (!isLeader) {
+            logger.debug('⏭️ [QueueWorker] Ciclo ignorado; outra réplica possui a liderança');
+            return;
+        }
+
+        await this.processAllQueues({
+            leadershipGuard: () => this.leaderLease.assertHeld()
+        });
     }
 
     /**
      * Processar todas as filas de todas as regiões
      * @returns {Promise<void>}
      */
-    async processAllQueues() {
+    async processAllQueues(options = {}) {
+        const { leadershipGuard = null } = options;
         try {
+            if (leadershipGuard && !await leadershipGuard()) {
+                logger.warn('⚠️ [QueueWorker] Liderança perdida antes do processamento; ciclo interrompido');
+                return;
+            }
+
             // 1. Buscar todas as regiões com corridas pendentes
             const regions = await this.getActiveRegions();
 
@@ -135,8 +195,13 @@ class QueueWorker {
             const regionsToProcess = regions.slice(0, this.config.maxRegionsPerIteration);
             
             for (const regionHash of regionsToProcess) {
+                if (leadershipGuard && !await leadershipGuard()) {
+                    logger.warn('⚠️ [QueueWorker] Liderança perdida entre regiões; ciclo interrompido');
+                    break;
+                }
+
                 try {
-                    await this.processRegionQueue(regionHash);
+                    await this.processRegionQueue(regionHash, { leadershipGuard });
                 } catch (error) {
                     logger.error(`❌ [QueueWorker] Erro ao processar região ${regionHash}:`, error);
                     // Continuar com próxima região
@@ -153,8 +218,14 @@ class QueueWorker {
      * @param {string} regionHash - Hash da região
      * @returns {Promise<void>}
      */
-    async processRegionQueue(regionHash) {
+    async processRegionQueue(regionHash, options = {}) {
+        const { leadershipGuard = null } = options;
         try {
+            if (leadershipGuard && !await leadershipGuard()) {
+                logger.warn(`⚠️ [QueueWorker] Liderança perdida antes da região ${regionHash}; região ignorada`);
+                return;
+            }
+
             // 1. Processar próximas corridas pendentes (batch)
             const processedBookings = await rideQueueManager.processNextRides(
                 regionHash,
@@ -167,7 +238,9 @@ class QueueWorker {
 
             logger.info(`✅ [QueueWorker] ${processedBookings.length} corrida(s) processada(s) da região ${regionHash}`);
 
-            // 2. Para cada corrida processada, iniciar busca gradual
+            // 2. Para cada corrida já reivindicada neste batch, iniciar busca gradual.
+            // Mesmo que o lease seja perdido após processNextRides(), o batch deve ser
+            // drenado para não deixar corridas já movidas para a fila ativa sem busca.
             for (const bookingId of processedBookings) {
                 try {
                     // Verificar se corrida ainda está em SEARCHING (não foi cancelada ou aceita)
