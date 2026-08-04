@@ -588,6 +588,17 @@ remote "
     --entrypoint node \
     "\$candidate_image" \
     scripts/deploy/validate-runtime-config.js
+  test -f firebase-credentials.json
+  docker run --rm \
+    --user 0:0 \
+    --env-file .env \
+    -e ENV_FILE=/dev/null \
+    -e NODE_ENV=production \
+    -e GOOGLE_APPLICATION_CREDENTIALS=/app/firebase-credentials.json \
+    -v "\$PWD/firebase-credentials.json:/app/firebase-credentials.json:ro" \
+    --entrypoint node \
+    "\$candidate_image" \
+    scripts/ops/preflight-firebase-runtime-iam.cjs
   printf '%s\n' "\$candidate_image" > '$REMOTE_BACKUP_DIR/backend-image-candidate.txt'
 "
 
