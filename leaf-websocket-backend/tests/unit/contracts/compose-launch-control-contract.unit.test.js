@@ -20,6 +20,10 @@ describe('production compose launch-control contract', () => {
     path.resolve(__dirname, '../../../docker-compose.realtime-secondary.yml'),
     'utf8',
   );
+  const localComposeSource = fs.readFileSync(
+    path.resolve(__dirname, '../../../docker-compose.local.yml'),
+    'utf8',
+  );
   const rideFlowProfileSource = fs.readFileSync(
     path.resolve(__dirname, '../../../config/ride-flow-validation.env.example'),
     'utf8',
@@ -81,6 +85,22 @@ describe('production compose launch-control contract', () => {
     expect(workerSource).toContain('LEAF_WORKER_INSTANCE_ID=${LEAF_WORKER_INSTANCE_ID:-}');
     expect(billingWorkerSource).toContain('LEAF_WORKER_INSTANCE_ID=${LEAF_WORKER_INSTANCE_ID:-}');
     expect(opsWorkersSource).toContain('LEAF_WORKER_INSTANCE_ID=${LEAF_WORKER_INSTANCE_ID:-}');
+  });
+
+  it('fails closed instead of falling back to a divergent Firebase project', () => {
+    const requiredProject = 'FIREBASE_PROJECT_ID=${FIREBASE_PROJECT_ID:?FIREBASE_PROJECT_ID must be set}';
+
+    expect(composeSource.match(new RegExp(requiredProject.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g')))
+      .toHaveLength(3);
+    expect(opsWorkersSource).toContain(requiredProject);
+    expect(realtimeSecondarySource).toContain(requiredProject);
+
+    for (const source of [composeSource, opsWorkersSource, realtimeSecondarySource, localComposeSource]) {
+      expect(source).not.toContain('leaf-app-91dfdce0');
+    }
+    expect(localComposeSource).toContain(
+      'FIREBASE_PROJECT_ID=${FIREBASE_PROJECT_ID:-leaf-reactnative}',
+    );
   });
 
   it('propagates the physical offer timeout only through dispatch gateways', () => {
