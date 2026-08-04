@@ -492,12 +492,16 @@ async function runDriverAssistTrip(driverSocket, bookingId, pickup, destination)
 
   const steps = interpolatePoints(pickup, destination, 10);
   for (const [index, point] of steps.entries()) {
-    driverSocket.emit('updateTripLocation', {
+    driverSocket.emit('updateLocation', {
       bookingId,
+      tripId: bookingId,
       lat: point.lat,
       lng: point.lng,
       heading: 45,
-      speed: 14
+      speed: 14,
+      tripStatus: 'started',
+      isInTrip: true,
+      capturedAt: Date.now()
     });
     stage('driver_assist_location_update', true, {
       bookingId,
@@ -764,12 +768,16 @@ async function runPassengerDeviceFlow() {
 
     const steps = interpolatePoints(pickup, destination, 12);
     for (const [index, point] of steps.entries()) {
-      driverSocket.emit('updateTripLocation', {
+      driverSocket.emit('updateLocation', {
         bookingId,
+        tripId: bookingId,
         lat: point.lat,
         lng: point.lng,
         heading: 45,
-        speed: 12
+        speed: 12,
+        tripStatus: 'started',
+        isInTrip: true,
+        capturedAt: Date.now()
       });
       stage('trip_location_update', true, { bookingId, step: index + 1, total: steps.length });
       await sleep(1800);

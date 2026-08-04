@@ -752,12 +752,15 @@ async function main() {
     for (const coordinate of tripNavigationPreview) {
       reportedDriverHeading = calculateHeadingDegrees(reportedDriverCoordinate, coordinate);
       reportedDriverCoordinate = coordinate;
-      driver.socket.emit('updateTripLocation', {
+      driver.socket.emit('updateLocation', {
         bookingId: booking.bookingId,
+        tripId: booking.bookingId,
         lat: coordinate.lat,
         lng: coordinate.lng,
         heading: reportedDriverHeading,
         speed: 10,
+        tripStatus: 'started',
+        isInTrip: true,
       });
       await sleep(Math.max(250, Math.round(VISUAL_TRIP_START_HOLD_MS / Math.max(1, tripNavigationPreview.length))));
     }

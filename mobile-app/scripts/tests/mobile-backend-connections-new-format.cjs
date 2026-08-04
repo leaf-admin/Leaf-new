@@ -508,21 +508,26 @@ async function runScenarioRuntimeTests(collector) {
       const tripLocationResult = await new Promise((resolve) => {
         const timer = setTimeout(() => resolve({ ok: false, timeout: true }), TEST_TIMEOUT_MS);
         const handler = (data) => {
-          passengerSocket.off('tripLocationUpdated', handler);
+          passengerSocket.off('driverLocation', handler);
           clearTimeout(timer);
           resolve({ ok: true, data });
         };
-        passengerSocket.on('tripLocationUpdated', handler);
-        driverSocket.emit('updateTripLocation', {
+        passengerSocket.on('driverLocation', handler);
+        driverSocket.emit('updateLocation', {
           bookingId: context.bookingId,
+          tripId: context.bookingId,
+          driverId: context.driverId,
           lat: TEST_COORDS.midTrip.lat,
           lng: TEST_COORDS.midTrip.lng,
           heading: 110,
-          speed: 30
+          speed: 30,
+          tripStatus: 'started',
+          isInTrip: true,
+          capturedAt: Date.now()
         });
       });
       collector.add(
-        'updateTripLocation broadcast',
+        'updateLocation driverLocation broadcast',
         tripLocationResult.ok ? 'passed' : 'failed',
         tripLocationResult.timeout
           ? 'timeout'

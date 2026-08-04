@@ -50,7 +50,6 @@ const registerSocketDriverHeartbeatHandler = require('./bootstrap/register-socke
 const registerSocketUpdateLocationHandler = require('./bootstrap/register-socket-update-location-handler');
 const registerSocketSearchDriversHandler = require('./bootstrap/register-socket-search-drivers-handler');
 const registerSocketCancelDriverSearchHandler = require('./bootstrap/register-socket-cancel-driver-search-handler');
-const registerSocketUpdateTripLocationHandler = require('./bootstrap/register-socket-update-trip-location-handler');
 const registerSocketTripIntegrityHandlers = require('./bootstrap/register-socket-trip-integrity-handlers');
 const registerSocketCancelRideHandler = require('./bootstrap/register-socket-cancel-ride-handler');
 const registerSocketSafetySupportHandlers = require('./bootstrap/register-socket-safety-support-handlers');
@@ -1097,14 +1096,6 @@ io.on('connection', async (socket) => {
         createEventSpan,
         logEvent,
         fcmService
-    });
-
-    // 7. UpdateTripLocation (crítico - GPS durante viagem)
-    registerSocketUpdateTripLocationHandler({
-        socket,
-        io,
-        redisPool,
-        logStructured
     });
 
     registerSocketTripIntegrityHandlers({
