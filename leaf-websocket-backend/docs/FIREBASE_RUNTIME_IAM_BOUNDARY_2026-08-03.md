@@ -14,12 +14,16 @@ Firebase, dados, aplicativo, piloto controlado ou comportamento de negócio.
 - criar ou apagar agendas de backup do Firestore;
 - apagar ou restaurar backups do Firestore;
 - atualizar ou apagar o banco Firestore;
+- desabilitar, apagar ou reconfigurar a instância do Realtime Database;
 - apagar o projeto ou alterar sua política IAM;
-- apagar o bucket, alterar sua política IAM ou modificar proteções do bucket.
+- apagar o bucket, alterar sua política IAM ou modificar proteções do bucket;
+- restaurar objetos apagados ou alterar ACL/retenção de objetos.
 
 O runtime continua podendo receber permissões de dados estritamente necessárias,
 incluindo leitura/escrita Firestore, Auth, RTDB, FCM e operações de objetos no
-bucket da aplicação. A lista exata deve ser validada por canário antes da troca.
+bucket da aplicação. Exclusão normal de objetos continua permitida para os fluxos
+de documentos e conta; soft delete permanece como recuperação independente. A
+lista exata deve ser validada por canário antes da troca.
 
 O deploy canônico executa o preflight no artefato candidato, com a credencial
 real montada somente para leitura, antes de substituir qualquer gateway. Fora de

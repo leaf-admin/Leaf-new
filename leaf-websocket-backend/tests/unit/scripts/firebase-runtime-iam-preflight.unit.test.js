@@ -36,10 +36,12 @@ describe('Firebase runtime IAM boundary', () => {
     const result = evaluatePermissionBoundary({
       projectPermissions: [
         'datastore.backups.delete',
-        'datastore.databases.update'
+        'datastore.databases.update',
+        'firebasedatabase.instances.disable'
       ],
       bucketPermissions: [
         'storage.buckets.update',
+        'storage.objects.setRetention',
         'storage.objects.get'
       ]
     });
@@ -49,7 +51,9 @@ describe('Firebase runtime IAM boundary', () => {
       grantedForbiddenPermissions: [
         'datastore.backups.delete',
         'datastore.databases.update',
-        'storage.buckets.update'
+        'firebasedatabase.instances.disable',
+        'storage.buckets.update',
+        'storage.objects.setRetention'
       ]
     });
   });
@@ -75,12 +79,19 @@ describe('Firebase runtime IAM boundary', () => {
       'datastore.backups.restoreDatabase',
       'datastore.databases.delete',
       'datastore.databases.update',
+      'firebasedatabase.instances.delete',
+      'firebasedatabase.instances.disable',
+      'firebasedatabase.instances.update',
       'resourcemanager.projects.setIamPolicy'
     ]));
     expect(FORBIDDEN_BUCKET_PERMISSIONS).toEqual(expect.arrayContaining([
       'storage.buckets.delete',
       'storage.buckets.setIamPolicy',
-      'storage.buckets.update'
+      'storage.buckets.update',
+      'storage.objects.overrideUnlockedRetention',
+      'storage.objects.restore',
+      'storage.objects.setIamPolicy',
+      'storage.objects.setRetention'
     ]));
   });
 
