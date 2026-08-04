@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useAuth } from "@/src/contexts/AuthContext";
@@ -9,51 +9,37 @@ import { canAccessItem, isLaunchFeatureEnabled } from "@/src/utils/dashboard-acc
 
 const groups = [
   {
-    id: "daily",
-    section: "Diário",
-    label: "Operação diária",
+    id: "today",
+    section: "Hoje",
+    label: "Ação imediata",
     href: "/dashboard",
     items: [
       { href: "/dashboard", label: "Visão geral" },
       { href: "/support", label: "Suporte" },
-      {
-        href: "/campaign-center",
-        label: "Campanhas",
-        allowedRoles: ["admin", "super-admin", "manager", "development"],
-        featureFlag: "campaignCenterEnabled",
-        requireExplicitFeatureFlag: true,
-      },
       { href: "/drivers/review-queue", label: "Cadastro motorista", allowedRoles: ["admin", "super-admin", "manager"] },
     ],
   },
   {
-    id: "overview",
-    section: "Análise",
-    label: "Dados e saúde",
-    href: "/observability",
-    items: [
-      { href: "/observability", label: "Observabilidade", allowedRoles: ["admin", "super-admin", "manager", "development"] },
-      { href: "/metrics", label: "Métricas", allowedRoles: ["admin", "super-admin", "manager", "development"] },
-      { href: "/metrics/history", label: "Histórico", allowedRoles: ["admin", "super-admin", "manager", "development"] },
-      { href: "/metrics/marketplace", label: "Marketplace", allowedRoles: ["admin", "super-admin", "manager", "development"] },
-      { href: "/maps", label: "Mapa operacional", allowedRoles: ["admin", "super-admin", "manager", "development"] },
-      { href: "/audit", label: "Auditoria", allowedRoles: ["admin", "super-admin", "manager", "development"] },
-    ],
-  },
-  {
-    id: "organization",
-    section: "Gestão",
-    label: "Pessoas e financeiro",
+    id: "operations",
+    section: "Operação",
+    label: "Pessoas e território",
     href: "/drivers",
     items: [
       { href: "/drivers", label: "Motoristas", allowedRoles: ["admin", "super-admin", "manager"] },
       { href: "/users", label: "Usuários" },
+      { href: "/maps", label: "Mapa operacional", allowedRoles: ["admin", "super-admin", "manager", "development"] },
+      { href: "/waitlist", label: "Waitlist", allowedRoles: ["admin", "super-admin", "manager"] },
+    ],
+  },
+  {
+    id: "finance",
+    section: "Financeiro",
+    label: "Receita e cobrança",
+    href: "/subscriptions",
+    items: [
       { href: "/subscriptions", label: "Assinaturas", allowedRoles: ["admin", "super-admin", "manager"] },
-      { href: "/programs", label: "Programas", allowedRoles: ["admin", "super-admin", "manager", "development"], featureFlag: "referralProgramsEnabled" },
-      { href: "/notifications", label: "Notificações", allowedRoles: ["admin", "super-admin", "manager", "development"] },
-      { href: "/reports", label: "Relatórios", allowedRoles: ["admin", "super-admin", "manager"] },
-      { href: "/promotions", label: "Promoções", allowedRoles: ["admin", "super-admin", "manager"] },
       { href: "/financial-reconciliation", label: "Reconciliação", allowedRoles: ["admin", "super-admin", "manager"] },
+      { href: "/reports", label: "Relatórios", allowedRoles: ["admin", "super-admin", "manager"] },
       { href: "/payment-runtime", label: "Perfil de pagamento", allowedRoles: ["admin", "super-admin", "manager"] },
       {
         href: "/financial-simulator",
@@ -62,7 +48,37 @@ const groups = [
         featureFlag: "financialSimulatorEnabled",
         requireExplicitFeatureFlag: true,
       },
-      { href: "/waitlist", label: "Waitlist", allowedRoles: ["admin", "super-admin", "manager"] },
+    ],
+  },
+  {
+    id: "growth",
+    section: "Crescimento",
+    label: "Comunicação e benefícios",
+    href: "/notifications",
+    items: [
+      { href: "/notifications", label: "Notificações", allowedRoles: ["admin", "super-admin", "manager", "development"] },
+      { href: "/promotions", label: "Promoções", allowedRoles: ["admin", "super-admin", "manager"] },
+      { href: "/programs", label: "Programas", allowedRoles: ["admin", "super-admin", "manager", "development"], featureFlag: "referralProgramsEnabled" },
+      {
+        href: "/campaign-center",
+        label: "Campanhas",
+        allowedRoles: ["admin", "super-admin", "manager", "development"],
+        featureFlag: "campaignCenterEnabled",
+        requireExplicitFeatureFlag: true,
+      },
+    ],
+  },
+  {
+    id: "system",
+    section: "Sistema",
+    label: "Saúde e auditoria",
+    href: "/observability",
+    items: [
+      { href: "/observability", label: "Observabilidade", allowedRoles: ["admin", "super-admin", "manager", "development"] },
+      { href: "/metrics", label: "Métricas", allowedRoles: ["admin", "super-admin", "manager", "development"] },
+      { href: "/metrics/history", label: "Histórico", allowedRoles: ["admin", "super-admin", "manager", "development"] },
+      { href: "/metrics/marketplace", label: "Marketplace", allowedRoles: ["admin", "super-admin", "manager", "development"] },
+      { href: "/audit", label: "Auditoria", allowedRoles: ["admin", "super-admin", "manager", "development"] },
     ],
   },
 ];
@@ -89,6 +105,8 @@ export default function AppNav() {
   const { user, signOut } = useAuth();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [runtimeFlags, setRuntimeFlags] = useState(null);
+  const menuButtonRef = useRef(null);
+  const wasMobileOpenRef = useRef(false);
   const apiDocsHref = process.env.NEXT_PUBLIC_API_DOCS_URL || "/reports";
   const isApiDocsExternal = /^https?:\/\//i.test(apiDocsHref);
   const campaignCenterVisible = runtimeFlags?.launch?.campaignCenterEnabled === true;
@@ -157,6 +175,25 @@ export default function AppNav() {
     setMobileOpen(false);
   }, [pathname]);
 
+  useEffect(() => {
+    if (mobileOpen) {
+      const handleKeyDown = (event) => {
+        if (event.key === "Escape") {
+          event.preventDefault();
+          setMobileOpen(false);
+        }
+      };
+      document.addEventListener("keydown", handleKeyDown);
+      return () => document.removeEventListener("keydown", handleKeyDown);
+    }
+    if (wasMobileOpenRef.current) menuButtonRef.current?.focus();
+    return undefined;
+  }, [mobileOpen]);
+
+  useEffect(() => {
+    wasMobileOpenRef.current = mobileOpen;
+  }, [mobileOpen]);
+
   const onSignOut = async () => {
     try {
       await signOut();
@@ -171,16 +208,19 @@ export default function AppNav() {
         <div className="app-topbar-left">
           <button
             type="button"
+            ref={menuButtonRef}
             className="app-menu-toggle"
             onClick={() => setMobileOpen((prev) => !prev)}
-            aria-label="Abrir menu"
+            aria-label={mobileOpen ? "Fechar menu" : "Abrir menu"}
+            aria-expanded={mobileOpen}
+            aria-controls="app-sidebar-nav"
           >
-            Menu
+            {mobileOpen ? "Fechar" : "Menu"}
           </button>
           <span className="app-topbar-avatar app-topbar-avatar-compact">{userInitials.slice(0, 1)}</span>
-          <span className="app-topbar-crumb">Personal</span>
+          <span className="app-topbar-crumb">Leaf</span>
           <span className="app-topbar-separator">•</span>
-          <span className="app-topbar-project">Default project</span>
+          <span className="app-topbar-project">Backoffice operacional</span>
           <span className="app-topbar-separator">/</span>
           <span className="app-topbar-page">{activeItem?.label || activeGroup.label}</span>
         </div>
@@ -230,12 +270,12 @@ export default function AppNav() {
         <div className="app-sidebar-head">
           <div className="app-logo">L</div>
           <div>
-            <p className="app-sidebar-title">Personal</p>
-            <p className="app-sidebar-subtitle">Default project</p>
+            <p className="app-sidebar-title">Leaf</p>
+            <p className="app-sidebar-subtitle">Backoffice operacional</p>
           </div>
         </div>
 
-        <nav className="app-sidebar-nav" aria-label="Navegacao principal">
+        <nav id="app-sidebar-nav" className="app-sidebar-nav" aria-label="Navegação principal">
           {visibleGroups.map((group) => {
             const groupActive = group.id === activeGroup.id;
             return (
@@ -252,6 +292,7 @@ export default function AppNav() {
                         key={item.href}
                         href={item.href}
                         className={active ? "app-sidebar-link app-sidebar-link-active" : "app-sidebar-link"}
+                        aria-current={active ? "page" : undefined}
                       >
                         {item.label}
                       </Link>

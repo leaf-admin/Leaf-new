@@ -9,6 +9,7 @@ const skuCostMonitorService = require('./backoffice-sku-cost-monitor-service');
 const rideCostAlertService = require('./ride-cost-alert-service');
 const WorkerHealthMonitor = require('../workers/health-monitor');
 const { logStructured } = require('../utils/logger');
+const { getPilotLaunchFlags } = require('../utils/pilot-launch-flags');
 
 const DEFAULT_TTL_SECONDS = 90;
 const MIN_TTL_SECONDS = 30;
@@ -762,6 +763,7 @@ class BackofficeCommandCenterService {
       success: true,
       generatedAt,
       status,
+      launchFlags: getPilotLaunchFlags(),
       scope: {
         hours,
         period,
