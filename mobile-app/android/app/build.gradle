@@ -156,7 +156,7 @@ android {
         applicationId 'br.com.leaf.ride'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 127
+        versionCode 128
         versionName "1.0.4"
         manifestPlaceholders = [
                 expoUpdatesEnabled      : leafExpoUpdatesEnabled.toString(),
@@ -246,7 +246,11 @@ dependencies {
     // The version of react-native is set by the React Native Gradle Plugin
     implementation("com.facebook.react:react-android")
     implementation("androidx.core:core-ktx:1.13.1")
-    implementation("com.amplifyframework.ui:liveness:1.5.0")
+    implementation("com.amplifyframework.ui:liveness:1.10.0")
+    // Expo Text Recognition 0.1.0 resolves ML Kit 16.0.0, whose bundled
+    // native OCR library is not 16 KB page-size compatible. Keep the
+    // patch-level update explicit so Play's native-page-size gate passes.
+    implementation("com.google.mlkit:text-recognition:16.0.1")
     implementation("androidx.activity:activity-compose:1.9.3")
     implementation("androidx.compose.material3:material3:1.1.2")
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")

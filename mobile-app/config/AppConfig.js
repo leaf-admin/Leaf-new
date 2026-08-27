@@ -20,7 +20,7 @@ module.exports.AppConfig = {
     app_identifier: 'br.com.leaf.ride',
     ios_app_version: '1.0.4',
     ios_build_number: '35',
-    android_app_version: 127,
+    android_app_version: 128,
     expo_owner: 'leaf-app',
     expo_slug: 'leaf',
     expo_project_id: '91dfdce0-9705-4fde-8417-747273ab7cc2',
