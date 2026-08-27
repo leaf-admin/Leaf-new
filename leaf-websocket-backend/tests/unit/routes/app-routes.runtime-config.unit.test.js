@@ -18,6 +18,9 @@ jest.mock('../../../services/h3-visual-policy-service', () => ({
 
 jest.mock('../../../utils/pilot-launch-flags', () => ({
   isPilotControlledLaunch: jest.fn(() => false),
+  isLaunchFeatureEnabled: jest.fn((featureKey, fallback = true) =>
+    featureKey === 'driverDestinationModeEnabled' ? false : fallback
+  ),
   getPilotLaunchFlags: jest.fn(() => ({
     launchProfile: 'test',
     leafDelasEnabled: true,
@@ -151,7 +154,7 @@ describe('app routes runtime config', () => {
       maxDynamicMarkupPercent: 35
     });
     expect(response.body.driverDestinationPolicy).toMatchObject({
-      enabled: true,
+      enabled: false,
       baseDailyQuota: 2,
       maxDailyQuota: 12,
       bonusRideWindow: 5,

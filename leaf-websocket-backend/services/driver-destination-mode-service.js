@@ -1,5 +1,7 @@
 'use strict';
 
+const { isLaunchFeatureEnabled } = require('../utils/pilot-launch-flags');
+
 const DEFAULT_TIME_ZONE = process.env.LEAF_OPERATION_TIME_ZONE || 'America/Sao_Paulo';
 
 function parseBool(value, fallback = false) {
@@ -49,7 +51,7 @@ function readPolicyFromEnv() {
     5
   );
   return {
-    enabled: parseBool(process.env.ENABLE_DRIVER_DESTINATION_MODE, true),
+    enabled: isLaunchFeatureEnabled('driverDestinationModeEnabled', true),
     baseDailyQuota: parsePositiveInt(process.env.DRIVER_DESTINATION_DAILY_BASE_QUOTA, 2),
     maxDailyQuota: parsePositiveInt(process.env.DRIVER_DESTINATION_DAILY_MAX_QUOTA, 12),
     bonusRideWindow,
