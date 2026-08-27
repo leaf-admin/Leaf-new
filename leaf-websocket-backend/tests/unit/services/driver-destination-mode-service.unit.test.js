@@ -155,6 +155,32 @@ describe('driver-destination-mode-service', () => {
     expect(redis.hincrby).toHaveBeenCalledTimes(1);
   });
 
+  it('rejects destination activation when the controlled launch disables the feature', async () => {
+    process.env.LEAF_LAUNCH_PROFILE = 'pilot_controlled';
+    delete process.env.ENABLE_DRIVER_DESTINATION_MODE;
+    const redis = createRedisMock();
+
+    const result = await resolveDestinationModeIntent({
+      redis,
+      driverId: 'driver_pilot',
+      existingDriverState: {},
+      isOnline: true,
+      now: new Date('2026-06-11T12:00:00.000Z'),
+      requestedMode: {
+        provided: true,
+        active: true,
+        lat: '-22.984',
+        lng: '-43.222'
+      }
+    });
+
+    expect(result).toMatchObject({
+      allowed: false,
+      code: 'DRIVER_DESTINATION_MODE_DISABLED'
+    });
+    expect(redis.hincrby).not.toHaveBeenCalled();
+  });
+
   it('does not consume quota when the same active destination is resent', async () => {
     const redis = createRedisMock();
     const now = new Date('2026-06-11T12:00:00.000Z');
