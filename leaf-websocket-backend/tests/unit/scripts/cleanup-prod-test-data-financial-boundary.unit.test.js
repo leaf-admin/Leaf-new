@@ -28,4 +28,14 @@ describe('cleanup-prod-test-data financial boundary', () => {
     expect(source).toContain("row.collection === 'sandbox_driver_balances'");
     expect(source).toContain("'sandbox_financial_ledger_events'");
   });
+
+  it('resolves the runtime Firebase credential before the legacy local fallback', () => {
+    expect(source).toContain('FIREBASE_SERVICE_ACCOUNT_JSON');
+    expect(source).toContain('GOOGLE_APPLICATION_CREDENTIALS_JSON');
+    expect(source).toContain('GOOGLE_APPLICATION_CREDENTIALS');
+    expect(source.indexOf('FIREBASE_SERVICE_ACCOUNT_JSON')).toBeLessThan(
+      source.indexOf('GOOGLE_APPLICATION_CREDENTIALS')
+    );
+    expect(source).toContain("path.join(ROOT, 'leaf-reactnative-firebase-adminsdk-fbsvc-456a95e2fc.json')");
+  });
 });
