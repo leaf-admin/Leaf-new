@@ -90,6 +90,16 @@ describe('production compose launch-control contract', () => {
     ).toHaveLength(2);
   });
 
+  it('persists primary-gateway launch and financial approvals across recreation', () => {
+    for (const key of [
+      'LEAF_RIDE_FLOW_VALIDATION_ACK',
+      'LEAF_APPROVED_FINANCIAL_POLICY_ID',
+      'LEAF_FINANCIAL_POLICY_APPROVAL_REF',
+    ]) {
+      expect(composeSource).toContain(`- ${key}=\${${key}`);
+    }
+  });
+
   it('propagates an explicit distributed worker instance identity', () => {
     expect(workerSource).toContain('LEAF_WORKER_INSTANCE_ID=${LEAF_WORKER_INSTANCE_ID:-}');
     expect(billingWorkerSource).toContain('LEAF_WORKER_INSTANCE_ID=${LEAF_WORKER_INSTANCE_ID:-}');
