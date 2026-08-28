@@ -32,6 +32,8 @@ const REQUIRED_FALSE_FLAGS = [
   ...BLOCKED_TRUE_FLAGS
 ];
 
+const REQUIRED_ASSISTED_LAUNCH_PROFILE = 'ride_flow_validation';
+
 function readJson(filePath) {
   return JSON.parse(fs.readFileSync(filePath, 'utf8'));
 }
@@ -59,6 +61,12 @@ function validateProductionProfile(name, profile = {}) {
     }
   });
 
+  if (normalize(env.EXPO_PUBLIC_LEAF_LAUNCH_PROFILE) !== REQUIRED_ASSISTED_LAUNCH_PROFILE) {
+    issues.push(
+      `${name}: EXPO_PUBLIC_LEAF_LAUNCH_PROFILE deve ser ${REQUIRED_ASSISTED_LAUNCH_PROFILE} durante o piloto assistido`
+    );
+  }
+
   ['EXPO_PUBLIC_API_URL', 'EXPO_PUBLIC_WS_URL', 'EXPO_PUBLIC_SOCKET_URL'].forEach((flag) => {
     const value = String(env[flag] || '').trim();
     if (!/^https:\/\//i.test(value)) {
@@ -81,6 +89,12 @@ function validateReviewProfile(name, profile = {}) {
 
   if (!isTruthy(env.APP_REVIEW)) {
     issues.push(`${name}: APP_REVIEW deve estar true em profile de review`);
+  }
+
+  if (normalize(env.EXPO_PUBLIC_LEAF_LAUNCH_PROFILE) !== REQUIRED_ASSISTED_LAUNCH_PROFILE) {
+    issues.push(
+      `${name}: EXPO_PUBLIC_LEAF_LAUNCH_PROFILE deve ser ${REQUIRED_ASSISTED_LAUNCH_PROFILE} durante o piloto assistido`
+    );
   }
 
   return issues;
