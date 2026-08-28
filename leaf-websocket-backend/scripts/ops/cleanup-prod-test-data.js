@@ -18,17 +18,54 @@ const identityOnly = process.argv.includes('--identity-only');
 
 const ROOT = path.resolve(__dirname, '..', '..');
 const REPORT_DIR = path.join(ROOT, 'reports');
-const serviceAccountPath = path.join(
-  ROOT,
-  'leaf-reactnative-firebase-adminsdk-fbsvc-456a95e2fc.json'
-);
 
-if (!fs.existsSync(serviceAccountPath)) {
-  console.error(`❌ Service account não encontrado: ${serviceAccountPath}`);
-  process.exit(1);
+function parseServiceAccountJson(rawValue, source) {
+  try {
+    const parsed = JSON.parse(rawValue);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      throw new Error('invalid_shape');
+    }
+    return parsed;
+  } catch (_error) {
+    console.error(`❌ Service account inválido em ${source}`);
+    process.exit(1);
+  }
 }
 
-const serviceAccount = require(serviceAccountPath);
+function loadServiceAccount() {
+  const inline = String(
+    process.env.FIREBASE_SERVICE_ACCOUNT_JSON ||
+    process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON ||
+    ''
+  ).trim();
+  if (inline) {
+    return parseServiceAccountJson(inline, 'FIREBASE_SERVICE_ACCOUNT_JSON');
+  }
+
+  const configuredPath = String(process.env.GOOGLE_APPLICATION_CREDENTIALS || '').trim();
+  const serviceAccountPath = configuredPath
+    ? (path.isAbsolute(configuredPath) ? configuredPath : path.resolve(process.cwd(), configuredPath))
+    : path.join(ROOT, 'leaf-reactnative-firebase-adminsdk-fbsvc-456a95e2fc.json');
+
+  if (!fs.existsSync(serviceAccountPath)) {
+    console.error(`❌ Service account não encontrado: ${serviceAccountPath}`);
+    process.exit(1);
+  }
+
+  try {
+    return parseServiceAccountJson(fs.readFileSync(serviceAccountPath, 'utf8'), configuredPath
+      ? 'GOOGLE_APPLICATION_CREDENTIALS'
+      : 'fallback local');
+  } catch (error) {
+    if (error?.code === 'ENOENT') {
+      console.error(`❌ Service account não encontrado: ${serviceAccountPath}`);
+      process.exit(1);
+    }
+    throw error;
+  }
+}
+
+const serviceAccount = loadServiceAccount();
 
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount),
