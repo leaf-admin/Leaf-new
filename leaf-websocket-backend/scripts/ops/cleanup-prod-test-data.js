@@ -17,7 +17,7 @@ const financialOnly = process.argv.includes('--financial-only');
 const identityOnly = process.argv.includes('--identity-only');
 
 const ROOT = path.resolve(__dirname, '..', '..');
-const REPORT_DIR = path.join(ROOT, 'reports');
+const REPORT_DIR = String(process.env.CLEANUP_REPORT_DIR || path.join(ROOT, 'reports')).trim();
 
 function parseServiceAccountJson(rawValue, source) {
   try {
