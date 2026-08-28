@@ -9,6 +9,7 @@ ENV GIT_SHA="$GIT_SHA"
 RUN apk add --no-cache \
     curl \
     bash \
+    redis \
     poppler-utils \
     postgresql-client
 
