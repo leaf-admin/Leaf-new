@@ -64,6 +64,9 @@ async function main() {
   }
 
   process.stdout.write(`${JSON.stringify(output, null, 2)}\n`);
+  if (summary && summary.success === false) {
+    process.exitCode = 1;
+  }
 }
 
 main().catch((error) => {
