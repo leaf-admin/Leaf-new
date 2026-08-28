@@ -38,4 +38,8 @@ describe('cleanup-prod-test-data financial boundary', () => {
     );
     expect(source).toContain("path.join(ROOT, 'leaf-reactnative-firebase-adminsdk-fbsvc-456a95e2fc.json')");
   });
+
+  it('allows the report directory to be selected by the execution environment', () => {
+    expect(source).toContain("process.env.CLEANUP_REPORT_DIR || path.join(ROOT, 'reports')");
+  });
 });
