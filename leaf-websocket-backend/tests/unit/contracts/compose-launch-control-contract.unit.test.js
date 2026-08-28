@@ -81,6 +81,15 @@ describe('production compose launch-control contract', () => {
     }
   });
 
+  it('keeps admin mutations explicit and fail-closed on every gateway', () => {
+    expect(
+      composeSource.match(/- ENABLE_ADMIN_MUTATIONS=\$\{ENABLE_ADMIN_MUTATIONS:-false\}/g),
+    ).toHaveLength(1);
+    expect(
+      gatewayScaleSource.match(/- ENABLE_ADMIN_MUTATIONS=\$\{ENABLE_ADMIN_MUTATIONS:-false\}/g),
+    ).toHaveLength(2);
+  });
+
   it('propagates an explicit distributed worker instance identity', () => {
     expect(workerSource).toContain('LEAF_WORKER_INSTANCE_ID=${LEAF_WORKER_INSTANCE_ID:-}');
     expect(billingWorkerSource).toContain('LEAF_WORKER_INSTANCE_ID=${LEAF_WORKER_INSTANCE_ID:-}');
