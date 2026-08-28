@@ -259,6 +259,8 @@ export default function RobotaxiVehiclesScreen({ navigation, route }) {
                     tone="primary"
                     disabled={!canSubmit || busy}
                     onPress={mode === 'edit' ? handleUpdateVehicle : handleAddVehicle}
+                    testID="robotaxi-vehicle-submit-button"
+                    accessibilityLabel={mode === 'edit' ? 'Salvar e reenviar veículo' : 'Cadastrar veículo'}
                   />
                   <TouchableOpacity onPress={cancelForm} style={styles.secondaryAction}><Text style={styles.secondaryActionText}>Cancelar</Text></TouchableOpacity>
                 </PrototypeMenuSection>
@@ -281,7 +283,7 @@ export default function RobotaxiVehiclesScreen({ navigation, route }) {
                         </TouchableOpacity>
                         {expanded ? (
                           <View style={styles.expandedActions}>
-                            {!vehicle.isActive && vehicle.approved ? <LeafButton label={busy ? 'Selecionando...' : 'Selecionar veículo'} tone="primary" disabled={busy} onPress={() => handleSelectVehicle(vehicle.id)} /> : null}
+                            {!vehicle.isActive && vehicle.approved ? <LeafButton label={busy ? 'Selecionando...' : 'Selecionar veículo'} tone="primary" disabled={busy} onPress={() => handleSelectVehicle(vehicle.id)} testID="robotaxi-vehicle-select-button" accessibilityLabel="Selecionar veículo" /> : null}
                             <TouchableOpacity disabled={busy} onPress={() => handleEditVehicle(vehicle)} style={styles.secondaryAction}><Text style={styles.secondaryActionText}>Editar dados</Text></TouchableOpacity>
                             <TouchableOpacity disabled={busy} onPress={() => handleRemoveVehicle(vehicle)} style={styles.secondaryAction}><Text style={styles.removeActionText}>Remover do perfil</Text></TouchableOpacity>
                           </View>
@@ -289,7 +291,7 @@ export default function RobotaxiVehiclesScreen({ navigation, route }) {
                       </View>
                     );
                   })}
-                  {!expandedId ? <LeafButton label="Adicionar veículo" icon="add-outline" tone="primary" onPress={() => setMode('add')} style={styles.doneButton} /> : null}
+                  {!expandedId ? <LeafButton label="Adicionar veículo" icon="add-outline" tone="primary" onPress={() => setMode('add')} style={styles.doneButton} testID="robotaxi-vehicle-add-button" accessibilityLabel="Adicionar veículo" /> : null}
                 </>
               )}
             </ScrollView>

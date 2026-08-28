@@ -29,19 +29,19 @@ const requiredSelectors = [
   ['driver-live-primary-action-start-button', /driver-live-primary-action-start-button/],
   ['driver-live-primary-action-complete-button', /driver-live-primary-action-complete-button/],
   ['driver-receipt-screen', /driver-receipt-screen/],
-  ['support-screen', /support-screen/],
-  ['support-chat-message-input', /support-chat-message-input/],
-  ['support-ticket-screen', /support-ticket-screen/],
-  ['support-ticket-open-create-button', /support-ticket-open-create-button/],
-  ['support-ticket-subject-input', /support-ticket-subject-input/],
-  ['support-ticket-description-input', /support-ticket-description-input/],
-  ['driver-vehicles-screen', /driver-vehicles-screen/],
-  ['driver-vehicle-add-button', /driver-vehicle-add-button/],
-  ['driver-vehicle-confirm-active-button', /driver-vehicle-confirm-active-button/],
-  ['driver-add-vehicle-screen', /driver-add-vehicle-screen/],
-  ['driver-add-vehicle-submit-button', /driver-add-vehicle-submit-button/],
-  ['driver-withdraw-screen', /driver-withdraw-screen/],
-  ['driver-withdraw-submit-button', /driver-withdraw-submit-button/]
+  ['support-screen', /robotaxi-support-screen/],
+  ['support-chat-message-input', /robotaxi-support-thread-input/],
+  ['support-ticket-screen', /robotaxi-support-ticket-screen/],
+  ['support-ticket-open-create-button', /robotaxi-support-primary-action/],
+  ['support-ticket-subject-input', /robotaxi-support-ticket-subject/],
+  ['support-ticket-description-input', /robotaxi-support-ticket-description/],
+  ['driver-vehicles-screen', /robotaxi-vehicles-screen/],
+  ['driver-vehicle-add-button', /robotaxi-vehicle-add-button/],
+  ['driver-vehicle-confirm-active-button', /robotaxi-vehicle-select-button/],
+  ['driver-add-vehicle-screen', /robotaxi-vehicles-screen/],
+  ['driver-add-vehicle-submit-button', /robotaxi-vehicle-submit-button/],
+  ['driver-earnings-screen', /driver-earnings-screen/],
+  ['driver-withdraw-submit-button', /driver-earnings-withdraw-confirm-button/]
 ];
 
 function walk(dir, output = []) {
