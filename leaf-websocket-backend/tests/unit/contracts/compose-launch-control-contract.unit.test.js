@@ -518,4 +518,15 @@ describe('production compose launch-control contract', () => {
     expect(deploySource).toContain('trip_worker_health_ttl=\\$(redis_cmd TTL');
     expect(deploySource).toContain('Trip-location consumer and persistence heartbeat validated.');
   });
+
+  it('closes the Redis client in the ride-health worker healthcheck', () => {
+    const workerStart = opsWorkersSource.indexOf('  ride-health-monitor-worker:');
+    const workerEnd = opsWorkersSource.length;
+    const workerCompose = opsWorkersSource.slice(workerStart, workerEnd);
+
+    expect(workerStart).toBeGreaterThan(-1);
+    expect(workerCompose).toContain("redis.healthCheck().then((result)=>finish(result.status==='healthy'))");
+    expect(workerCompose).toContain("redis.shutdown({timeoutMs:1000})");
+    expect(workerCompose).not.toContain("redis.ensureConnection().then(()=>process.exit(0))");
+  });
 });
