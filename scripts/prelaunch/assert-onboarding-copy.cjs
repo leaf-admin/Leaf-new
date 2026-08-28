@@ -9,8 +9,7 @@ const files = [
   'mobile-app/src/components/auth/steps/PhoneInputStep.js',
   'mobile-app/src/components/auth/steps/OTPStep.js',
   'mobile-app/src/components/auth/steps/ForgotPasswordStep.js',
-  'mobile-app/src/screens/UserInfoScreen.js',
-  'mobile-app/src/screens/OTPScreen.js'
+  'mobile-app/src/components/auth/steps/ProfileDataStep.js'
 ];
 
 const bannedUserFacingPatterns = [
