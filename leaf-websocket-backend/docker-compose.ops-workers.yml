@@ -206,7 +206,7 @@ services:
         soft: 131072
         hard: 131072
     healthcheck:
-      test: ["CMD", "node", "-e", "const redis=require('./utils/redis-pool'); const finish=(ok)=>redis.shutdown({timeoutMs:1000}).finally(()=>process.exit(ok?0:1)); redis.healthCheck().then((result)=>finish(result.status==='healthy')).catch(()=>finish(false));"]
+      test: ["CMD-SHELL", "REDISCLI_AUTH=\"$${REDIS_PASSWORD}\" redis-cli -h \"$${REDIS_HOST:-redis}\" -p \"$${REDIS_PORT:-6379}\" -n \"$${REDIS_DB:-0}\" --no-auth-warning --raw ping | grep -qx PONG"]
       interval: 30s
       timeout: 10s
       retries: 3

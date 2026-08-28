@@ -525,8 +525,9 @@ describe('production compose launch-control contract', () => {
     const workerCompose = opsWorkersSource.slice(workerStart, workerEnd);
 
     expect(workerStart).toBeGreaterThan(-1);
-    expect(workerCompose).toContain("redis.healthCheck().then((result)=>finish(result.status==='healthy'))");
-    expect(workerCompose).toContain("redis.shutdown({timeoutMs:1000})");
+    expect(workerCompose).toContain('redis-cli -h \\\"$${REDIS_HOST:-redis}\\\"');
+    expect(workerCompose).toContain('--raw ping | grep -qx PONG');
+    expect(dockerfileSource).toContain('redis \\\n    poppler-utils');
     expect(workerCompose).not.toContain("redis.ensureConnection().then(()=>process.exit(0))");
   });
 });
