@@ -2470,7 +2470,7 @@ export default function RobotaxiDriverTripScreen({ navigation, route }) {
   };
 
   return (
-    <PrototypeScreenTransition>
+    <PrototypeScreenTransition direction="up">
       <View style={styles.container} pointerEvents="box-none">
         <StatusBar
           translucent

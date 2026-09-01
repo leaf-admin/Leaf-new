@@ -111,7 +111,7 @@ export default function RobotaxiPublicTripTrackingScreen({ navigation, route }) 
   }, []);
 
   return (
-    <PrototypeScreenTransition>
+    <PrototypeScreenTransition direction="up">
       <View style={styles.container} pointerEvents="box-none" testID="robotaxi-public-tracking-screen">
         <StatusBar translucent backgroundColor="transparent" barStyle="dark-content" />
         <PrototypeDismissibleSheet

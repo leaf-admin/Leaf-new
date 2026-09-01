@@ -402,7 +402,7 @@ export default function RobotaxiRatingScreen({ navigation, route }) {
   ]);
 
   return (
-    <PrototypeScreenTransition>
+    <PrototypeScreenTransition direction="up">
       <View style={styles.container}>
         <StatusBar
           translucent

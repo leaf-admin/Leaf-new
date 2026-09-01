@@ -1570,7 +1570,7 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
   };
 
   return (
-    <PrototypeScreenTransition>
+    <PrototypeScreenTransition direction="up">
       <View
         style={styles.receiptCleanContainer}
         testID={isDriverView ? "driver-receipt-screen" : "passenger-receipt-screen"}
@@ -1858,7 +1858,7 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
   );
 
   return (
-    <PrototypeScreenTransition>
+    <PrototypeScreenTransition direction="up">
       <View style={styles.container}>
         <StatusBar
           translucent
