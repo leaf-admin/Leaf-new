@@ -1,6 +1,7 @@
 import { robotaxiPrototypeTokens } from '../components/design-system/robotaxiPrototypeTokens';
 
 const tokenColor = robotaxiPrototypeTokens.color;
+const tokenColorDark = robotaxiPrototypeTokens.colorDark;
 
 // Canonical semantic palette — single source: robotaxiPrototypeTokens.
 export const colors = {
@@ -76,18 +77,20 @@ export const lightTheme = {
 };
 
 export const darkTheme = {
-  background: '#1A1A1A',
-  card: '#2A2A2A',
-  text: '#FFFFFF',
-  textSecondary: '#AAAAAA',
-  border: '#333333',
-  icon: '#FFFFFF',
-  divider: '#333333',
-  inputBg: '#2A2A2A',
-  inputBorder: '#333333',
-  placeholder: '#666666',
-  dropdown: '#2A2A2A',
-  leafGreen: '#41D274'
+  // "Leaf Ambient" dark values derived from robotaxiPrototypeTokens.colorDark.
+  // Consumed only when the dark-mode opt-in flag is on (see useThemeScheme).
+  background: tokenColorDark.bg.app,
+  card: tokenColorDark.bg.panelSolid,
+  text: tokenColorDark.text.primary,
+  textSecondary: tokenColorDark.text.secondary,
+  border: tokenColorDark.border.subtle,
+  icon: tokenColorDark.text.primary,
+  divider: tokenColorDark.border.subtle,
+  inputBg: tokenColorDark.surface.tertiary,
+  inputBorder: tokenColorDark.border.strong,
+  placeholder: tokenColorDark.text.muted,
+  dropdown: tokenColorDark.bg.panelSolid,
+  leafGreen: tokenColorDark.brand.lime
 };
 
 // Hook para usar o tema
