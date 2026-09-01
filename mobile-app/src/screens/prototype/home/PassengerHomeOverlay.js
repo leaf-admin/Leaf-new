@@ -48,8 +48,6 @@ const HOME_STACK_HEIGHT = HOME_CARD_HEIGHT + HOME_STACK_GAP + HOME_PROMO_CARD_HE
 const HOME_SEARCH_KEYBOARD_CLEARANCE = 52;
 const EARTH_RADIUS_METERS = 6371000;
 const IS_TEST_ENV = typeof process !== "undefined" && process.env?.NODE_ENV === "test";
-const LEAF_WELCOME_RIO_BANNER_IMAGE_URL =
-  "https://storage.googleapis.com/leaf-reactnative.firebasestorage.app/campaign-center/assets/asset_mpgam7le_f7f03d20_leaf-welcome-rio-1035x564.webp?GoogleAccessId=firebase-adminsdk-fbsvc%40leaf-reactnative.iam.gserviceaccount.com&Expires=2051222400&Signature=pgIHEiHVb5lkRxw9ca%2F9PR8jeIUe2kA03Tou08WveLCBJ%2B5wTYiDFpCW9v%2FXXMCCNUuPpNXVF7ZpHD9tK43x%2B71JC6u4Khq7hSQu9Nvkl3GIuWheGcO4K901olK9OgQJDw6HN4VmsWvvod%2BiE9pu%2B2%2BodJbth3FHwW5nieThVZtdW0QovD9E1SKsjWfpDnIWTw6STwC0fca33awqvQ7eO4tMwc8KQGrQswZIR2GGHChTgFApcKs7oArhjRk6jrlfua0B%2BYVFgr%2FJXXFoMUouY%2BUYuyoSQmqGeKQqItTdYjg2Utcm81bonilMyJ8%2B%2FGSi%2FpNBetSRasPoLPc2T%2F8MxA%3D%3D";
 const PASSENGER_HOME_FALLBACK_CAMPAIGNS = Object.freeze([
   {
     id: "local_leaf_rio_comfort",
@@ -60,10 +58,9 @@ const PASSENGER_HOME_FALLBACK_CAMPAIGNS = Object.freeze([
       title: "Viaje com mais conforto",
       body: "Motoristas verificados, ar ligado e uma experiência mais calma para chegar bem.",
       backgroundColor: "#FBFCF8",
-      imageUrl: LEAF_WELCOME_RIO_BANNER_IMAGE_URL,
       imageAlt: "Banner de boas-vindas da Leaf no Rio de Janeiro",
-      displayMode: "image_only",
-      hideTextOverlay: true,
+      displayMode: "text_overlay",
+      hideTextOverlay: false,
       cta: { label: "Novidades", action: "open_campaign_details" },
     },
     rules: { autoRotateSeconds: 6 },

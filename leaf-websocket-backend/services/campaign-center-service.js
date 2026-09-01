@@ -429,6 +429,65 @@ function buildClientCampaign(campaign, context = {}) {
   };
 }
 
+const CAMPAIGN_ASSET_SIGNED_URL_TTL_MS = 60 * 60 * 1000;
+
+function extractCampaignAssetObjectPath(rawUrl) {
+  const url = normalizeText(rawUrl);
+  if (!url || url.indexOf('storage.googleapis.com/') === -1) {
+    return null;
+  }
+  try {
+    const parsed = new URL(url);
+    const bucketPrefix = `/${process.env.FIREBASE_STORAGE_BUCKET || 'leaf-reactnative.firebasestorage.app'}/`;
+    if (!parsed.pathname.startsWith(bucketPrefix)) {
+      return null;
+    }
+    const objectPath = decodeURIComponent(parsed.pathname.slice(bucketPrefix.length));
+    return objectPath || null;
+  } catch (error) {
+    return null;
+  }
+}
+
+async function resolveCampaignContentUrl(rawUrl) {
+  const objectPath = extractCampaignAssetObjectPath(rawUrl);
+  if (!objectPath) {
+    return rawUrl;
+  }
+  try {
+    const storage = firebaseConfig.getStorage();
+    const bucketName = process.env.FIREBASE_STORAGE_BUCKET || 'leaf-reactnative.firebasestorage.app';
+    const [signedUrl] = await storage.bucket(bucketName).file(objectPath).getSignedUrl({
+      action: 'read',
+      expires: new Date(Date.now() + CAMPAIGN_ASSET_SIGNED_URL_TTL_MS)
+    });
+    return signedUrl || '';
+  } catch (error) {
+    // Graceful degradation: no short-lived signature available, so drop the
+    // long-lived signed URL instead of serving it to clients.
+    return '';
+  }
+}
+
+async function refreshClientCampaignAssetUrls(campaigns = []) {
+  const refreshed = [];
+  for (const campaign of campaigns) {
+    const content = campaign?.content;
+    const rawUrl = content?.imageUrl;
+    if (!rawUrl) {
+      refreshed.push(campaign);
+      continue;
+    }
+    const nextUrl = await resolveCampaignContentUrl(rawUrl);
+    refreshed.push(
+      nextUrl === rawUrl
+        ? campaign
+        : { ...campaign, content: { ...content, imageUrl: nextUrl } }
+    );
+  }
+  return refreshed;
+}
+
 function buildDefaultCampaigns() {
   const createdAt = nowIso();
   const base = {
@@ -882,8 +941,10 @@ class CampaignCenterService {
       if (eligible.length >= limit) break;
     }
 
+    const campaignsForClient = await refreshClientCampaignAssetUrls(eligible);
+
     return {
-      campaigns: eligible,
+      campaigns: campaignsForClient,
       evaluatedAt: nowIso(),
       context: {
         surface: normalizeSlug(context.surface),
