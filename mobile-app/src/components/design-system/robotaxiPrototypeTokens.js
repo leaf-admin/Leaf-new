@@ -49,6 +49,59 @@ export const robotaxiPrototypeTokens = {
       accent: '#1A330E'
     }
   },
+  // "Leaf Ambient" dark surface — green-black base (not pure black), four
+  // elevation levels, warm off-white text. Depth comes from tonal surfaces
+  // and borders, not shadows. Accent green stays; lime pops on dark.
+  colorDark: {
+    bg: {
+      app: '#0E1409',
+      map: '#0C1208',
+      panel: 'rgba(22,29,16,0.96)',
+      panelSoft: 'rgba(22,29,16,0.92)',
+      panelSolid: '#161D10',
+      scrim: 'rgba(5,8,3,0.82)'
+    },
+    surface: {
+      primary: '#161D10',
+      secondary: '#0E1409',
+      tertiary: '#1F2815',
+      activeSoft: '#24301B',
+      activeStrong: '#2C3A20'
+    },
+    text: {
+      primary: '#F2F1EC',
+      secondary: '#B8B2A8',
+      muted: '#8F887C',
+      dark: '#F2F1EC'
+    },
+    accent: {
+      primary: '#D4E84A',
+      strong: '#E9F5B5',
+      soft: '#4A6136',
+      dark: '#1A330E',
+      contrast: '#0E1409'
+    },
+    brand: {
+      lime: '#D4E84A'
+    },
+    feedback: {
+      success: '#D4E84A',
+      warning: '#E3C273',
+      danger: '#F0637E',
+      dangerSoft: '#2E141B',
+      dangerBorder: '#5A2230',
+      indicator: '#409CFF'
+    },
+    border: {
+      subtle: '#252E1B',
+      strong: '#333F23',
+      separator: '#252E1B'
+    },
+    shadow: {
+      base: '#000000',
+      accent: '#0E1409'
+    }
+  },
   radius: {
     sm: 12,
     md: 18,
