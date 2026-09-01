@@ -26,6 +26,7 @@ import {
 import robotaxiPrototypeTokens from "../../components/design-system/robotaxiPrototypeTokens";
 import { usePrototypeMapOcclusion } from "./prototypeMapOcclusion";
 import { usePrototypeRideRuntime } from "./prototypeRideRuntime";
+import { useHapticFeedback } from "../../hooks/useHapticFeedback";
 import RatingService from "../../services/RatingService";
 
 const { color, typography } = robotaxiPrototypeTokens;
@@ -117,6 +118,7 @@ export default function RobotaxiRatingScreen({ navigation, route }) {
   const { height: windowHeight } = useWindowDimensions();
   const [cardHeight, setCardHeight] = useState(FALLBACK_CARD_HEIGHT);
   const [rating, setRating] = useState(5);
+  const triggerHaptic = useHapticFeedback();
   const [comment, setComment] = useState("");
   const reviewerType = normalizeReviewerType(
     route?.params?.reviewerType,
@@ -450,7 +452,10 @@ export default function RobotaxiRatingScreen({ navigation, route }) {
                 return (
                   <TouchableOpacity
                     key={value}
-                    onPress={() => setRating(value)}
+                    onPress={() => {
+                      triggerHaptic("tap");
+                      setRating(value);
+                    }}
                     activeOpacity={0.86}
                   >
                     <Ionicons
