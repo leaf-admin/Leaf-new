@@ -10,6 +10,7 @@ const geofenceService = require('../services/geofence-service');
 const { hasPaymentEligibleDriver } = require('../services/payment-driver-availability-guard');
 const routeTollService = require('../services/route-toll-service');
 const placesCacheService = require('../services/places-cache-service');
+const { resolveOperationalFee } = require('../services/ride-financial-contract');
 const { normalizeOperationalCarType } = require('../utils/operational-car-type');
 const {
   createQuoteLock,
@@ -610,6 +611,7 @@ router.post('/pricing/quote', async (req, res) => {
       String(body.passengerId || body.customerId || '').trim() ||
       (await resolveOptionalFirebaseUserId(req));
     const grossAmountInCents = Math.max(0, Math.round(Number(result.estimatedFare || 0) * 100));
+    const operationalFee = resolveOperationalFee(grossAmountInCents);
     const discountPreview = await passengerDiscountBenefitService.previewDiscount({
       userId: passengerId,
       grossAmountCents: grossAmountInCents,
@@ -630,6 +632,8 @@ router.post('/pricing/quote', async (req, res) => {
       estimatedFare,
       grossEstimatedFare: result.estimatedFare,
       passengerPayableFare: estimatedFare,
+      operationalFeeCents: operationalFee.feeCents,
+      operationalFeeType: operationalFee.feeType,
       discountBenefit: discountPreview.applied ? discountPreview : null,
       routeDistanceKm: result.routeMetrics?.distanceKm || 0,
       routeDurationSecs: result.routeMetrics?.durationSecs || 0,
@@ -705,6 +709,8 @@ router.post('/pricing/quote', async (req, res) => {
       estimatedFare,
       grossEstimatedFare: result.estimatedFare,
       passengerPayableFare: estimatedFare,
+      operationalFeeCents: operationalFee.feeCents,
+      operationalFeeType: operationalFee.feeType,
       discountBenefit: discountPreview.applied ? discountPreview : null,
       carType: result.normalizedCarType,
       rateCardVersion: result.rateCardVersion,

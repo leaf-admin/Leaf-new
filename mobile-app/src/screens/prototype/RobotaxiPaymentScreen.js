@@ -33,15 +33,18 @@ function formatCurrency(value) {
     .replace(".", ",")}`;
 }
 
-function resolveLeafFee(fare) {
-  const numeric = Number(fare);
-  if (!Number.isFinite(numeric) || numeric <= 0) {
+function resolveLockedLeafFeeParam(params = {}) {
+  const initialPricingQuote = params?.initialPricingQuote || params?.pricingQuote || {};
+  const lock = params?.paymentQuoteLock || params?.quoteLock || {};
+  const feeCents = Number(
+    lock?.operationalFeeCents ??
+      initialPricingQuote?.operationalFeeCents ??
+      initialPricingQuote?.quote?.operationalFeeCents,
+  );
+  if (!Number.isFinite(feeCents) || feeCents <= 0) {
     return null;
   }
-  if (numeric > 50) {
-    return numeric * 0.03;
-  }
-  return numeric > 25 ? 1.49 : 0.99;
+  return feeCents / 100;
 }
 
 function normalizeCoordinateParam(value) {
@@ -208,7 +211,7 @@ export default function RobotaxiPaymentScreen({ navigation, route }) {
     Number.isFinite(destinationCoordinate?.latitude) &&
     Number.isFinite(destinationCoordinate?.longitude),
   );
-  const leafFee = resolveLeafFee(fare);
+  const leafFee = resolveLockedLeafFeeParam(route?.params);
   const qaAutoConfirmPix = true;
 
   usePrototypeMapOcclusion({

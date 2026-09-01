@@ -140,6 +140,8 @@ function buildQuoteLockPayload({
   routePolyline = null,
   trafficSegments = [],
   tollFee = 0,
+  operationalFeeCents = null,
+  operationalFeeType = null,
   rateCardVersion = null,
   pricingPayload = null,
   pricingAudit = null,
@@ -171,6 +173,10 @@ function buildQuoteLockPayload({
       ? trafficSegments.slice(0, 80)
       : [],
     tollFee: normalizeMoneyReais(tollFee, 0),
+    operationalFeeCents: Number.isFinite(Number(operationalFeeCents))
+      ? Math.max(0, Math.round(Number(operationalFeeCents)))
+      : null,
+    operationalFeeType: normalizeText(operationalFeeType) || null,
     rateCardVersion: normalizeText(rateCardVersion) || null,
     quoteVersion: normalizeText(rateCardVersion) || 'v1',
     pricingPayload: pricingPayload || null,
