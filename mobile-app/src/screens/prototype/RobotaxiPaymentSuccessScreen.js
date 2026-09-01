@@ -1,5 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { StatusBar, StyleSheet, Text, View } from "react-native";
+import Animated, {
+  useAnimatedStyle,
+  useReducedMotion,
+  useSharedValue,
+  withSpring,
+  withTiming,
+} from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { fonts } from "../../theme/runtimeTokens";
@@ -34,6 +41,29 @@ export default function RobotaxiPaymentSuccessScreen({ navigation, route }) {
     driverInfo,
   } = usePrototypeRideRuntime();
   const insets = useSafeAreaInsets();
+  const reduceMotion = useReducedMotion();
+  const checkScale = useSharedValue(reduceMotion ? 1 : 0.4);
+  const ringOpacity = useSharedValue(reduceMotion ? 0 : 0.35);
+  const ringScale = useSharedValue(reduceMotion ? 1 : 0.9);
+  const { motion } = robotaxiPrototypeTokens;
+
+  useEffect(() => {
+    if (reduceMotion) {
+      return undefined;
+    }
+    checkScale.value = withSpring(1, motion.spring.sheet);
+    ringScale.value = withTiming(1.45, { duration: motion.timing.slow });
+    ringOpacity.value = withTiming(0, { duration: motion.timing.slow });
+    return undefined;
+  }, [checkScale, motion.spring.sheet, motion.timing.slow, reduceMotion, ringOpacity, ringScale]);
+
+  const checkAnimatedStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: checkScale.value }],
+  }));
+  const ringAnimatedStyle = useAnimatedStyle(() => ({
+    opacity: ringOpacity.value,
+    transform: [{ scale: ringScale.value }],
+  }));
   const [cardHeight, setCardHeight] = useState(FALLBACK_CARD_HEIGHT);
   const protectedPaymentSuccessExitRef = useRef(false);
   const sheetBottom =
@@ -290,7 +320,15 @@ export default function RobotaxiPaymentSuccessScreen({ navigation, route }) {
           <RobotaxiLifecycleCard onLayout={handleCardLayout} style={styles.card}>
 
             <View style={styles.iconWrap}>
-              <Ionicons name="checkmark" size={30} color="#FFFFFF" />
+              {!reduceMotion ? (
+                <Animated.View
+                  pointerEvents="none"
+                  style={[styles.iconRing, ringAnimatedStyle]}
+                />
+              ) : null}
+              <Animated.View style={checkAnimatedStyle}>
+                <Ionicons name="checkmark" size={30} color="#FFFFFF" />
+              </Animated.View>
             </View>
 
             <Text style={styles.title}>Pagamento confirmado</Text>
@@ -385,6 +423,13 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.18,
     shadowRadius: 14,
     elevation: 8,
+  },
+  iconRing: {
+    position: "absolute",
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: color.accent.primary,
   },
   title: {
     marginTop: 10,
