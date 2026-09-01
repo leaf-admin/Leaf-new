@@ -5,7 +5,8 @@ export const robotaxiPrototypeTokens = {
       map: '#F2F4EF',
       panel: 'rgba(255,255,255,0.96)',
       panelSoft: 'rgba(255,255,255,0.92)',
-      panelSolid: '#FFFFFF'
+      panelSolid: '#FFFFFF',
+      scrim: 'rgba(23,20,18,0.8)'
     },
     surface: {
       primary: '#FFFFFF',
@@ -24,12 +25,19 @@ export const robotaxiPrototypeTokens = {
       primary: '#1A330E',
       strong: '#2A4D1D',
       soft: '#56764A',
+      dark: '#102307',
       contrast: '#FFFFFF'
+    },
+    brand: {
+      lime: '#D4E84A'
     },
     feedback: {
       success: '#1A330E',
       warning: '#7A6337',
-      danger: '#D7153A'
+      danger: '#D7153A',
+      dangerSoft: '#FFF1F2',
+      dangerBorder: '#F3CDD4',
+      indicator: '#007AFF'
     },
     border: {
       subtle: '#E9E2D8',
