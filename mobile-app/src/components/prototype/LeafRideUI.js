@@ -6,6 +6,8 @@ import { robotaxiPrototypeTokens } from "../design-system/robotaxiPrototypeToken
 
 const tokenColor = robotaxiPrototypeTokens.color;
 
+const TEXT_SCALE_CAP = 1.35;
+
 const AnimatedTouchableOpacity = Animated.createAnimatedComponent(TouchableOpacity);
 
 export const leafRideColors = {
@@ -193,11 +195,11 @@ export function LeafStateHeader({
       style={[styles.stateHeader, { top }, animatedStyle]}
     >
       <View style={styles.stateHeaderCopy}>
-        <Text style={styles.stateHeaderTitle} numberOfLines={2}>
+        <Text maxFontSizeMultiplier={TEXT_SCALE_CAP} style={styles.stateHeaderTitle} numberOfLines={2}>
           {title}
         </Text>
         {subtitle ? (
-          <Text style={styles.stateHeaderSubtitle} numberOfLines={2}>
+          <Text maxFontSizeMultiplier={TEXT_SCALE_CAP} style={styles.stateHeaderSubtitle} numberOfLines={2}>
             {subtitle}
           </Text>
         ) : null}
@@ -319,7 +321,7 @@ export function LeafPill({ label, tone = "leaf", style, testID }) {
       ]}
       testID={testID}
     >
-      <Text style={[styles.pillText, { color: palette.text }]} numberOfLines={1}>
+      <Text maxFontSizeMultiplier={TEXT_SCALE_CAP} style={[styles.pillText, { color: palette.text }]} numberOfLines={1}>
         {label}
       </Text>
     </Animated.View>
@@ -464,7 +466,7 @@ export function LeafRouteProgress({
     <View style={[styles.routeProgress, style]} testID={testID}>
       <View style={styles.routeEndpointRow}>
         <View style={styles.routeEndpoint}>
-          <Text style={styles.routeEndpointLabel}>PARTIDA</Text>
+          <Text maxFontSizeMultiplier={TEXT_SCALE_CAP} style={styles.routeEndpointLabel}>PARTIDA</Text>
           <Text
             style={styles.routeEndpointValue}
             numberOfLines={1}
@@ -474,7 +476,7 @@ export function LeafRouteProgress({
           </Text>
         </View>
         <View style={[styles.routeEndpoint, styles.routeEndpointRight]}>
-          <Text style={styles.routeEndpointLabel}>CHEGADA</Text>
+          <Text maxFontSizeMultiplier={TEXT_SCALE_CAP} style={styles.routeEndpointLabel}>CHEGADA</Text>
           <Text
             style={styles.routeEndpointValue}
             numberOfLines={1}
@@ -503,7 +505,7 @@ export function LeafRouteProgress({
       </View>
 
       {arrivalLabel ? (
-        <Text style={styles.routeArrivalText} numberOfLines={1}>
+        <Text maxFontSizeMultiplier={TEXT_SCALE_CAP} style={styles.routeArrivalText} numberOfLines={1}>
           {arrivalLabel}
         </Text>
       ) : null}
@@ -514,10 +516,10 @@ export function LeafRouteProgress({
 export function LeafMetric({ value, label, style }) {
   return (
     <View style={[styles.metric, style]}>
-      <Text style={styles.metricValue} numberOfLines={1}>
+      <Text maxFontSizeMultiplier={TEXT_SCALE_CAP} style={styles.metricValue} numberOfLines={1}>
         {value}
       </Text>
-      <Text style={styles.metricLabel} numberOfLines={1}>
+      <Text maxFontSizeMultiplier={TEXT_SCALE_CAP} style={styles.metricLabel} numberOfLines={1}>
         {label}
       </Text>
     </View>
@@ -563,28 +565,28 @@ export function LeafInfoRow({
             },
           ]}
         >
-          <Text style={[styles.infoMarkerText, { color: palette.text }]} numberOfLines={1}>
+          <Text maxFontSizeMultiplier={TEXT_SCALE_CAP} style={[styles.infoMarkerText, { color: palette.text }]} numberOfLines={1}>
             {marker}
           </Text>
         </View>
       ) : null}
       <View style={[styles.infoCopy, !showMarker && styles.infoCopyWithoutMarker]}>
         {eyebrow ? (
-          <Text style={styles.infoEyebrow} numberOfLines={1}>
+          <Text maxFontSizeMultiplier={TEXT_SCALE_CAP} style={styles.infoEyebrow} numberOfLines={1}>
             {eyebrow}
           </Text>
         ) : null}
-        <Text style={styles.infoTitle} numberOfLines={titleLines}>
+        <Text maxFontSizeMultiplier={TEXT_SCALE_CAP} style={styles.infoTitle} numberOfLines={titleLines}>
           {title}
         </Text>
         {subtitle ? (
-          <Text style={styles.infoSubtitle} numberOfLines={subtitleLines}>
+          <Text maxFontSizeMultiplier={TEXT_SCALE_CAP} style={styles.infoSubtitle} numberOfLines={subtitleLines}>
             {subtitle}
           </Text>
         ) : null}
       </View>
       {right ? (
-        <Text style={styles.infoRight} numberOfLines={1}>
+        <Text maxFontSizeMultiplier={TEXT_SCALE_CAP} style={styles.infoRight} numberOfLines={1}>
           {right}
         </Text>
       ) : null}
@@ -702,7 +704,7 @@ function LeafAvatar({ initial, photoUri, compact = false, testID }) {
       {source ? (
         <Image source={source} style={styles.identityAvatarImage} />
       ) : (
-        <Text style={[styles.identityAvatarText, compact && styles.identityAvatarTextCompact]}>
+        <Text maxFontSizeMultiplier={TEXT_SCALE_CAP} style={[styles.identityAvatarText, compact && styles.identityAvatarTextCompact]}>
           {initial}
         </Text>
       )}
@@ -750,7 +752,7 @@ export function LeafButton({
           style={styles.buttonIcon}
         />
       ) : null}
-      <Text style={[styles.buttonText, { color: palette.text }, textStyle]} numberOfLines={1}>
+      <Text maxFontSizeMultiplier={TEXT_SCALE_CAP} style={[styles.buttonText, { color: palette.text }, textStyle]} numberOfLines={1}>
         {label}
       </Text>
     </LeafAnimatedPressable>
@@ -807,7 +809,7 @@ export function LeafEmptyState({
     : 1;
 
   return (
-    <View style={styles.emptyState} testID={testID} accessibilityLabel={testID}>
+    <View style={styles.emptyState} testID={testID}>
       <Animated.View style={[styles.emptyIcon, { opacity: iconOpacity }]}>
         {loading ? (
           <ActivityIndicator size="small" color={leafRideColors.leaf} />
@@ -815,11 +817,11 @@ export function LeafEmptyState({
           <Ionicons name={icon} size={20} color={leafRideColors.leaf} />
         )}
       </Animated.View>
-      <Text style={styles.emptyTitle} numberOfLines={2}>
+      <Text maxFontSizeMultiplier={TEXT_SCALE_CAP} style={styles.emptyTitle} numberOfLines={2}>
         {title}
       </Text>
       {message ? (
-        <Text style={styles.emptyMessage} numberOfLines={4}>
+        <Text maxFontSizeMultiplier={TEXT_SCALE_CAP} style={styles.emptyMessage} numberOfLines={4}>
           {message}
         </Text>
       ) : null}
