@@ -2,31 +2,34 @@ import React from "react";
 import { ActivityIndicator, Animated, Easing, Image, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { fonts } from "../../theme/runtimeTokens";
+import { robotaxiPrototypeTokens } from "../design-system/robotaxiPrototypeTokens";
+
+const tokenColor = robotaxiPrototypeTokens.color;
 
 const AnimatedTouchableOpacity = Animated.createAnimatedComponent(TouchableOpacity);
 
 export const leafRideColors = {
-  bg: "#F7F8F4",
-  sheet: "#FFFFFF",
-  sheetTranslucent: "#FFFFFF",
-  text: "#171412",
-  secondary: "#756F68",
-  muted: "#827B73",
-  line: "#E9E2D8",
-  borderStrong: "#E2DAD0",
-  field: "#F7F8F4",
-  leaf: "#1A330E",
-  leafLight: "#EEF3EA",
-  accent: "#1A330E",
-  accentDark: "#102307",
-  accentSoft: "#EEF3EA",
-  accentBorder: "#D9E3D3",
-  blue: "#F3F5F2",
-  blueText: "#514B45",
-  warning: "#F7F8F4",
-  warningText: "#7A6337",
-  danger: "#FFF1F2",
-  dangerText: "#D7153A",
+  bg: tokenColor.bg.app,
+  sheet: tokenColor.bg.panelSolid,
+  sheetTranslucent: tokenColor.bg.panelSolid,
+  text: tokenColor.text.primary,
+  secondary: tokenColor.text.secondary,
+  muted: tokenColor.text.muted,
+  line: tokenColor.border.subtle,
+  borderStrong: tokenColor.border.strong,
+  field: tokenColor.bg.app,
+  leaf: tokenColor.accent.primary,
+  leafLight: tokenColor.surface.activeSoft,
+  accent: tokenColor.accent.primary,
+  accentDark: tokenColor.accent.dark,
+  accentSoft: tokenColor.surface.activeSoft,
+  accentBorder: tokenColor.border.subtle,
+  blue: tokenColor.surface.activeSoft,
+  blueText: tokenColor.text.secondary,
+  warning: tokenColor.bg.app,
+  warningText: tokenColor.feedback.warning,
+  danger: tokenColor.feedback.dangerSoft,
+  dangerText: tokenColor.feedback.danger,
 };
 
 export const leafButtonMetrics = Object.freeze({

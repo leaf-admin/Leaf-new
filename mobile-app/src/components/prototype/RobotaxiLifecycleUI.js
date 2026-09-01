@@ -43,8 +43,8 @@ const buttonTones = Object.freeze({
     foregroundColor: color.feedback.warning,
   },
   danger: {
-    backgroundColor: '#FFF1F2',
-    borderColor: '#F3CDD4',
+    backgroundColor: color.feedback.dangerSoft,
+    borderColor: color.feedback.dangerBorder,
     foregroundColor: color.feedback.danger,
   },
 });
