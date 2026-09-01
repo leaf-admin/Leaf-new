@@ -70,6 +70,33 @@ export const CarSkeletonCard = () => (
     </View>
 );
 
+// Skeleton padronizado de lista de dados: replica a geometria real
+// dos itens (bloco de identidade + duas linhas de texto + valor a direita).
+export const ListSkeleton = ({
+    rows = 4,
+    rowHeight = 56,
+    gap = 12,
+    style,
+    testID,
+}) => {
+    const safeRows = Math.max(1, Math.min(Number(rows) || 4, 12));
+    return (
+        <View testID={testID} style={style} accessibilityRole="progressbar" accessibilityLabel="Carregando...">
+            {Array.from({ length: safeRows }).map((_, index) => (
+                <View key={`list-skeleton-row-${index}`} style={[styles.listSkeletonRow, { height: rowHeight, marginBottom: index === safeRows - 1 ? 0 : gap }]}>
+                    <SkeletonLoader width={40} height={40} style={styles.listSkeletonAvatar} />
+                    <View style={styles.listSkeletonLines}>
+                        <SkeletonLoader width="62%" height={14} style={styles.listSkeletonLine} />
+                        <SkeletonLoader width="38%" height={12} />
+                    </View>
+                    <SkeletonLoader width={56} height={14} />
+                </View>
+            ))}
+        </View>
+    );
+};
+
+
 // Loading Spinner com texto
 export const LoadingSpinner = ({ 
     message = 'Carregando...', 
@@ -243,8 +270,7 @@ const styles = StyleSheet.create({
         shadowColor: '#000',
         shadowOffset: { width: 0, height: 2 },
         shadowOpacity: 0.1,
-        shadowRadius: 4,
-        elevation: 3,
+        shadowRadius: 4,        elevation: 3,
     },
     skeletonCardHeader: {
         flexDirection: 'row',
@@ -393,4 +419,20 @@ const styles = StyleSheet.create({
     loadingScreenSpinner: {
         marginTop: 20,
     },
-}); 
+    listSkeletonRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+    },
+    listSkeletonAvatar: {
+        marginRight: 12,
+        borderRadius: 20,
+    },
+    listSkeletonLines: {
+        flex: 1,
+        marginRight: 12,
+    },
+    listSkeletonLine: {
+        marginBottom: 8,
+        borderRadius: 6,
+    },
+});
