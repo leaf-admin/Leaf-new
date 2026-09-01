@@ -219,7 +219,7 @@ export default function RobotaxiCancellationScreen({ navigation, route }) {
   ]);
 
   return (
-    <PrototypeScreenTransition>
+    <PrototypeScreenTransition direction="up">
       <View style={styles.container} pointerEvents="box-none">
         <StatusBar translucent backgroundColor="transparent" barStyle="dark-content" />
 
