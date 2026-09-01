@@ -63,7 +63,8 @@ export const robotaxiPrototypeTokens = {
     subtitle: { size: 18, lineHeight: 24 },
     body: { size: 15, lineHeight: 22 },
     caption: { size: 13, lineHeight: 18 },
-    micro: { size: 11, lineHeight: 14 }
+    micro: { size: 11, lineHeight: 14 },
+    maxScale: 1.35
   },
   touch: {
     min: 44,

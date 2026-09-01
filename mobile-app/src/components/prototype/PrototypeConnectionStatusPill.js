@@ -51,9 +51,11 @@ export default function PrototypeConnectionStatusPill({
       pointerEvents="none"
       style={[styles.container, { top: topOffset }]}
       testID={testID}
-      accessibilityLabel={testID}
     >
       <View
+        accessibilityLiveRegion="polite"
+        accessibilityRole="alert"
+        accessibilityLabel={`${title}${message ? `. ${message}` : ''}`}
         style={[
           styles.pill,
           {

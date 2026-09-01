@@ -11,6 +11,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { fonts } from '../../theme/runtimeTokens';
 import robotaxiPrototypeTokens from '../design-system/robotaxiPrototypeTokens';
 
+const TEXT_SCALE_CAP = 1.35;
 const { color } = robotaxiPrototypeTokens;
 
 export const robotaxiLifecycleMetrics = Object.freeze({
@@ -163,7 +164,7 @@ export function RobotaxiLifecycleDisclosure({
 export function RobotaxiLifecycleMetric({ label, value, tone = 'default', style, testID }) {
   return (
     <View style={[styles.metric, style]} testID={testID}>
-      <Text style={styles.metricLabel} numberOfLines={1}>
+      <Text maxFontSizeMultiplier={TEXT_SCALE_CAP} style={styles.metricLabel} numberOfLines={1}>
         {label}
       </Text>
       <Text
@@ -194,22 +195,22 @@ export function RobotaxiLifecycleSummary({
   return (
     <View style={[styles.summary, style]}>
       <View style={styles.summaryCopy}>
-        {eyebrow ? <Text style={styles.eyebrow}>{eyebrow}</Text> : null}
-        <Text style={styles.summaryTitle} numberOfLines={1} testID={titleTestID}>
+        {eyebrow ? <Text maxFontSizeMultiplier={TEXT_SCALE_CAP} style={styles.eyebrow}>{eyebrow}</Text> : null}
+        <Text maxFontSizeMultiplier={TEXT_SCALE_CAP} style={styles.summaryTitle} numberOfLines={1} testID={titleTestID}>
           {title}
         </Text>
         {subtitle ? (
-          <Text style={styles.summarySubtitle} numberOfLines={1} testID={subtitleTestID}>
+          <Text maxFontSizeMultiplier={TEXT_SCALE_CAP} style={styles.summarySubtitle} numberOfLines={1} testID={subtitleTestID}>
             {subtitle}
           </Text>
         ) : null}
       </View>
       {value ? (
         <View style={styles.summaryValueWrap}>
-          <Text style={styles.summaryValue} numberOfLines={1} testID={valueTestID}>
+          <Text maxFontSizeMultiplier={TEXT_SCALE_CAP} style={styles.summaryValue} numberOfLines={1} testID={valueTestID}>
             {value}
           </Text>
-          {valueLabel ? <Text style={styles.summaryValueLabel}>{valueLabel}</Text> : null}
+          {valueLabel ? <Text maxFontSizeMultiplier={TEXT_SCALE_CAP} style={styles.summaryValueLabel}>{valueLabel}</Text> : null}
         </View>
       ) : null}
     </View>
@@ -232,21 +233,21 @@ export function RobotaxiLifecycleIdentity({
         {photoUri ? (
           <Image source={{ uri: photoUri }} style={styles.avatarImage} />
         ) : (
-          <Text style={styles.avatarInitial}>{initial}</Text>
+          <Text maxFontSizeMultiplier={TEXT_SCALE_CAP} style={styles.avatarInitial}>{initial}</Text>
         )}
       </View>
       <View style={styles.identityCopy}>
-        <Text style={styles.identityName} numberOfLines={1} testID={fieldTestIDs.name}>
+        <Text maxFontSizeMultiplier={TEXT_SCALE_CAP} style={styles.identityName} numberOfLines={1} testID={fieldTestIDs.name}>
           {name}
         </Text>
         {meta ? (
-          <Text style={styles.identityMeta} numberOfLines={1} testID={fieldTestIDs.meta}>
+          <Text maxFontSizeMultiplier={TEXT_SCALE_CAP} style={styles.identityMeta} numberOfLines={1} testID={fieldTestIDs.meta}>
             {meta}
           </Text>
         ) : null}
       </View>
       {trailing ? (
-        <Text style={styles.identityTrailing} numberOfLines={1} testID={fieldTestIDs.trailing}>
+        <Text maxFontSizeMultiplier={TEXT_SCALE_CAP} style={styles.identityTrailing} numberOfLines={1} testID={fieldTestIDs.trailing}>
           {trailing}
         </Text>
       ) : null}
@@ -257,7 +258,7 @@ export function RobotaxiLifecycleIdentity({
 export function RobotaxiLifecycleSection({ title, children, style }) {
   return (
     <View style={[styles.section, style]}>
-      {title ? <Text style={styles.sectionTitle}>{title}</Text> : null}
+      {title ? <Text maxFontSizeMultiplier={TEXT_SCALE_CAP} style={styles.sectionTitle}>{title}</Text> : null}
       {children}
     </View>
   );
