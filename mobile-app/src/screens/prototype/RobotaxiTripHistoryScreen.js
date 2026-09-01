@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, ScrollView, StatusBar, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
+import { ScrollView, StatusBar, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import PrototypeScreenTransition from '../../components/prototype/PrototypeScreenTransition';
@@ -9,6 +9,7 @@ import {
   PrototypeMenuSection,
   PrototypeMenuSurface,
 } from '../../components/prototype/PrototypeMenuSurface';
+import { ListSkeleton } from '../../components/LoadingStates';
 import { fonts } from '../../theme/runtimeTokens';
 import robotaxiPrototypeTokens from '../../components/design-system/robotaxiPrototypeTokens';
 import { usePrototypeMapOcclusion } from './prototypeMapOcclusion';
@@ -288,7 +289,7 @@ export default function RobotaxiTripHistoryScreen({ navigation, route }) {
               <ScrollView style={styles.scroll} showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
                 {loadingHistory ? (
                   <View style={styles.centerState} testID="robotaxi-history-loading">
-                    <ActivityIndicator color="#1A330E" />
+                    <ListSkeleton rows={4} rowHeight={56} />
                   </View>
                 ) : historyError ? (
                   <LeafEmptyState

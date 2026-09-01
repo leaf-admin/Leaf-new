@@ -1,6 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ActivityIndicator,
   Alert,
   FlatList,
   KeyboardAvoidingView,
@@ -22,6 +21,7 @@ import {
   PrototypeMenuSurface,
 } from '../../components/prototype/PrototypeMenuSurface';
 import { LeafButton, leafRideColors } from '../../components/prototype/LeafRideUI';
+import { ListSkeleton } from '../../components/LoadingStates';
 import SupportTicketService from '../../services/SupportTicketService';
 import { usePrototypeMapOcclusion } from './prototypeMapOcclusion';
 import { normalizeRuntimeRideStatus } from './rideLifecycleContract';
@@ -313,7 +313,7 @@ export default function RobotaxiSupportThreadScreen({ navigation, route }) {
                 ListEmptyComponent={(
                   <View style={styles.emptyState}>
                     {initialLoading ? (
-                      <ActivityIndicator size="small" color={leafRideColors.leaf} />
+                      <ListSkeleton rows={3} rowHeight={44} gap={10} />
                     ) : (
                       <Ionicons
                         name={error ? 'warning-outline' : 'chatbubble-ellipses-outline'}
