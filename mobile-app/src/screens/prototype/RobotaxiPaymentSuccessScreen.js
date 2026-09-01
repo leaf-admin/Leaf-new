@@ -13,6 +13,7 @@ import {
 import robotaxiPrototypeTokens from "../../components/design-system/robotaxiPrototypeTokens";
 import { usePrototypeMapOcclusion } from "./prototypeMapOcclusion";
 import { usePrototypeRideRuntime } from "./prototypeRideRuntime";
+import { useHapticFeedback } from "../../hooks/useHapticFeedback";
 import { resolveMeaningfulAddress } from "./addressLabelUtils";
 import {
   normalizePassengerBookingStatus,
@@ -34,6 +35,15 @@ export default function RobotaxiPaymentSuccessScreen({ navigation, route }) {
     driverInfo,
   } = usePrototypeRideRuntime();
   const insets = useSafeAreaInsets();
+  const triggerHaptic = useHapticFeedback();
+  const successHapticRef = useRef(false);
+  useEffect(() => {
+    if (successHapticRef.current) {
+      return;
+    }
+    successHapticRef.current = true;
+    triggerHaptic("success");
+  }, [triggerHaptic]);
   const [cardHeight, setCardHeight] = useState(FALLBACK_CARD_HEIGHT);
   const protectedPaymentSuccessExitRef = useRef(false);
   const sheetBottom =

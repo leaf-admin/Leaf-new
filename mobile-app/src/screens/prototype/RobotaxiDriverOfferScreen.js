@@ -21,6 +21,7 @@ import {
 } from "../../components/prototype/RobotaxiLifecycleUI";
 import { usePrototypeMapOcclusion } from "./prototypeMapOcclusion";
 import { usePrototypeRideRuntime } from "./prototypeRideRuntime";
+import { useHapticFeedback } from "../../hooks/useHapticFeedback";
 import { PROTOTYPE_ORIGIN_COORDINATE, PROTOTYPE_REGION } from "./robotaxiPrototypeData";
 import {
   buildRouteViewportRegion,
@@ -581,6 +582,30 @@ export default function RobotaxiDriverOfferScreen({ navigation, route }) {
   const passengerInitial = passengerName.charAt(0).toUpperCase() || "P";
   const offerCountdown = useDriverOfferCountdown(request);
   const offerExpired = Boolean(hasRequest && offerCountdown.expired);
+  const triggerHaptic = useHapticFeedback();
+  const countdownWarningRef = useRef(null);
+  const offerKeyForWarning = String(
+    request?.bookingId || request?.rideId || request?.id || "",
+  ).trim();
+  useEffect(() => {
+    const remaining = Number(offerCountdown?.remainingSeconds);
+    const warningKey = `${offerKeyForWarning}:${remaining}`;
+    if (
+      hasRequest &&
+      Number.isFinite(remaining) &&
+      remaining > 0 &&
+      remaining <= 5 &&
+      countdownWarningRef.current !== warningKey
+    ) {
+      countdownWarningRef.current = warningKey;
+      triggerHaptic("warning");
+    }
+  }, [
+    hasRequest,
+    offerCountdown?.remainingSeconds,
+    offerKeyForWarning,
+    triggerHaptic,
+  ]);
   const grossFareLabel = formatCurrency(
     request?.grossFare ||
       request?.totalAmount ||
@@ -909,6 +934,7 @@ export default function RobotaxiDriverOfferScreen({ navigation, route }) {
       return;
     }
 
+    triggerHaptic("medium");
     try {
       setBusyAction("accept");
       await acceptDriverOffer(request);
@@ -937,7 +963,7 @@ export default function RobotaxiDriverOfferScreen({ navigation, route }) {
     } finally {
       setBusyAction("");
     }
-  }, [acceptDriverOffer, hasRequest, navigation, offerExpired, request]);
+  }, [acceptDriverOffer, hasRequest, navigation, offerExpired, request, triggerHaptic]);
 
   const handleReject = useCallback(async () => {
     if (!hasRequest || !request || offerExpired) {
