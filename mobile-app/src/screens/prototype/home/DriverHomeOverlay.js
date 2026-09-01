@@ -34,8 +34,6 @@ const DRIVER_ONLINE_LIMIT_MS = 12 * 60 * 60 * 1000;
 const DRIVER_DAY_SUMMARY_WINDOW_HOUR = 23;
 const DRIVER_DAY_SUMMARY_WINDOW_MINUTE = 50;
 const IS_TEST_ENV = typeof process !== "undefined" && process.env?.NODE_ENV === "test";
-const LEAF_WELCOME_RIO_BANNER_IMAGE_URL =
-  "https://storage.googleapis.com/leaf-reactnative.firebasestorage.app/campaign-center/assets/asset_mpgam7le_f7f03d20_leaf-welcome-rio-1035x564.webp?GoogleAccessId=firebase-adminsdk-fbsvc%40leaf-reactnative.iam.gserviceaccount.com&Expires=2051222400&Signature=pgIHEiHVb5lkRxw9ca%2F9PR8jeIUe2kA03Tou08WveLCBJ%2B5wTYiDFpCW9v%2FXXMCCNUuPpNXVF7ZpHD9tK43x%2B71JC6u4Khq7hSQu9Nvkl3GIuWheGcO4K901olK9OgQJDw6HN4VmsWvvod%2BiE9pu%2B2%2BodJbth3FHwW5nieThVZtdW0QovD9E1SKsjWfpDnIWTw6STwC0fca33awqvQ7eO4tMwc8KQGrQswZIR2GGHChTgFApcKs7oArhjRk6jrlfua0B%2BYVFgr%2FJXXFoMUouY%2BUYuyoSQmqGeKQqItTdYjg2Utcm81bonilMyJ8%2B%2FGSi%2FpNBetSRasPoLPc2T%2F8MxA%3D%3D";
 const DRIVER_HOME_FALLBACK_CAMPAIGNS = Object.freeze([
   {
     id: "local_driver_leaf_day",
@@ -46,10 +44,9 @@ const DRIVER_HOME_FALLBACK_CAMPAIGNS = Object.freeze([
       title: "Fique online quando estiver pronto",
       body: "Acompanhe seus ganhos, aceite corridas com calma e mantenha sua rotina no controle.",
       backgroundColor: "#FBFCF8",
-      imageUrl: LEAF_WELCOME_RIO_BANNER_IMAGE_URL,
       imageAlt: "Banner de boas-vindas da Leaf no Rio de Janeiro",
-      displayMode: "image_only",
-      hideTextOverlay: true,
+      displayMode: "text_overlay",
+      hideTextOverlay: false,
       cta: { label: "Começar", action: "driver_go_online" },
     },
     rules: { autoRotateSeconds: 6 },
