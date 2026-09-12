@@ -6,6 +6,7 @@ import {
   Easing,
   Keyboard,
   Modal,
+  PixelRatio,
   Platform,
   StyleSheet,
   Text,
@@ -27,29 +28,31 @@ const CARD_SURFACE = "#FFFFFF";
 const CARD_BORDER = "#ECE5DC";
 const TEXT_PRIMARY = "#171412";
 const TEXT_MUTED = "#827B73";
-const HOME_CARD_HEIGHT = 142;
-const HOME_CATEGORY_ROUTE_SUMMARY_HEIGHT = 146;
-const HOME_SEARCH_ACTIVE_CARD_HEIGHT = 92;
+// Cards grow with the user's system font size so no label/CTA truncates
+// under accessibility scaling; the positioning math below consumes the
+// same scaled constants, keeping map occlusion consistent.
+const ACCESSIBILITY_FONT_SCALE = Math.max(1, PixelRatio.getFontScale());
+const HOME_CARD_HEIGHT = Math.ceil(142 * ACCESSIBILITY_FONT_SCALE);
+const HOME_CATEGORY_ROUTE_SUMMARY_HEIGHT = Math.ceil(146 * ACCESSIBILITY_FONT_SCALE);
+const HOME_SEARCH_ACTIVE_CARD_HEIGHT = Math.ceil(92 * ACCESSIBILITY_FONT_SCALE);
 const HOME_CARD_HORIZONTAL_INSET = 24;
 const HOME_CARD_RADIUS = 28;
 const HOME_CARD_PADDING_HORIZONTAL = 24;
 const HOME_CARD_PADDING_TOP = 22;
 const HOME_CARD_PADDING_BOTTOM = 18;
 const HOME_STACK_GAP = 18;
-const HOME_PROMO_CARD_HEIGHT = 188;
-const HOME_CATEGORY_CARD_HEIGHT = 244;
-const HOME_CATEGORY_BREAKDOWN_CARD_HEIGHT = 344;
-const HOME_SEARCH_DROPDOWN_MIN_HEIGHT = 72;
-const HOME_SEARCH_DROPDOWN_MAX_HEIGHT = 168;
-const HOME_SEARCH_DROPDOWN_ROW_HEIGHT = 56;
+const HOME_PROMO_CARD_HEIGHT = Math.ceil(188 * ACCESSIBILITY_FONT_SCALE);
+const HOME_CATEGORY_CARD_HEIGHT = Math.ceil(244 * ACCESSIBILITY_FONT_SCALE);
+const HOME_CATEGORY_BREAKDOWN_CARD_HEIGHT = Math.ceil(344 * ACCESSIBILITY_FONT_SCALE);
+const HOME_SEARCH_DROPDOWN_MIN_HEIGHT = Math.ceil(72 * ACCESSIBILITY_FONT_SCALE);
+const HOME_SEARCH_DROPDOWN_MAX_HEIGHT = Math.ceil(168 * ACCESSIBILITY_FONT_SCALE);
+const HOME_SEARCH_DROPDOWN_ROW_HEIGHT = Math.ceil(56 * ACCESSIBILITY_FONT_SCALE);
 const HOME_SEARCH_DROPDOWN_VERTICAL_PADDING = 8;
 const HOME_SEARCH_DROPDOWN_TOP_GAP = 10;
 const HOME_STACK_HEIGHT = HOME_CARD_HEIGHT + HOME_STACK_GAP + HOME_PROMO_CARD_HEIGHT;
 const HOME_SEARCH_KEYBOARD_CLEARANCE = 52;
 const EARTH_RADIUS_METERS = 6371000;
 const IS_TEST_ENV = typeof process !== "undefined" && process.env?.NODE_ENV === "test";
-const LEAF_WELCOME_RIO_BANNER_IMAGE_URL =
-  "https://storage.googleapis.com/leaf-reactnative.firebasestorage.app/campaign-center/assets/asset_mpgam7le_f7f03d20_leaf-welcome-rio-1035x564.webp?GoogleAccessId=firebase-adminsdk-fbsvc%40leaf-reactnative.iam.gserviceaccount.com&Expires=2051222400&Signature=pgIHEiHVb5lkRxw9ca%2F9PR8jeIUe2kA03Tou08WveLCBJ%2B5wTYiDFpCW9v%2FXXMCCNUuPpNXVF7ZpHD9tK43x%2B71JC6u4Khq7hSQu9Nvkl3GIuWheGcO4K901olK9OgQJDw6HN4VmsWvvod%2BiE9pu%2B2%2BodJbth3FHwW5nieThVZtdW0QovD9E1SKsjWfpDnIWTw6STwC0fca33awqvQ7eO4tMwc8KQGrQswZIR2GGHChTgFApcKs7oArhjRk6jrlfua0B%2BYVFgr%2FJXXFoMUouY%2BUYuyoSQmqGeKQqItTdYjg2Utcm81bonilMyJ8%2B%2FGSi%2FpNBetSRasPoLPc2T%2F8MxA%3D%3D";
 const PASSENGER_HOME_FALLBACK_CAMPAIGNS = Object.freeze([
   {
     id: "local_leaf_rio_comfort",
@@ -60,10 +63,9 @@ const PASSENGER_HOME_FALLBACK_CAMPAIGNS = Object.freeze([
       title: "Viaje com mais conforto",
       body: "Motoristas verificados, ar ligado e uma experiência mais calma para chegar bem.",
       backgroundColor: "#FBFCF8",
-      imageUrl: LEAF_WELCOME_RIO_BANNER_IMAGE_URL,
       imageAlt: "Banner de boas-vindas da Leaf no Rio de Janeiro",
-      displayMode: "image_only",
-      hideTextOverlay: true,
+      displayMode: "text_overlay",
+      hideTextOverlay: false,
       cta: { label: "Novidades", action: "open_campaign_details" },
     },
     rules: { autoRotateSeconds: 6 },
@@ -1236,6 +1238,7 @@ function PassengerHomeOverlay({
             { height: categoryCardHeight },
           ]}
           testID="passenger-home-category-card"
+          accessible
           accessibilityLabel="Escolha a categoria da corrida"
         >
           {pickupQaCoordinateLabel ? (

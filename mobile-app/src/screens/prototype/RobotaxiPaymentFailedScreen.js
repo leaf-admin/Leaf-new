@@ -131,8 +131,13 @@ export default function RobotaxiPaymentFailedScreen({ navigation, route }) {
   ]);
 
   return (
-    <PrototypeScreenTransition>
-      <View style={styles.container} pointerEvents="box-none">
+    <PrototypeScreenTransition direction="up">
+      <View
+        style={styles.container}
+        pointerEvents="box-none"
+        testID="passenger-payment-failed-screen"
+        accessibilityLabel="passenger-payment-failed-screen"
+      >
         <StatusBar translucent backgroundColor="transparent" barStyle="dark-content" />
 
         <PrototypeDismissibleSheet

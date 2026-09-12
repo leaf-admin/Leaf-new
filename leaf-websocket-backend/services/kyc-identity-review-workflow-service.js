@@ -31,6 +31,10 @@ const ORPHAN_RECOVERY_TTL_MS = 30 * 60 * 1000;
 const ORPHAN_RECOVERY_MIN_TTL_MS = 5 * 60 * 1000;
 const ORPHAN_RECOVERY_MAX_TTL_MS = 60 * 60 * 1000;
 const RETRY_TERMINAL_OUTCOMES = new Set(['SUCCEEDED', 'REJECTED', 'ABORTED']);
+const DASHBOARD_CANONICAL_FAILURE_REASON_CODES = new Set([
+  'canonical_face_compare_failed',
+  'identity_reverification_failed'
+]);
 
 function domainError(code, message, details = {}) {
   const error = new Error(message);
@@ -233,6 +237,36 @@ function safeCaseMetadata(record = {}) {
     createdAt: record.createdAt || null,
     updatedAt: record.updatedAt || null,
     closedAt: record.closedAt || null
+  };
+}
+
+function safeCanonicalIdentityStatus(state = null) {
+  const source = state && typeof state === 'object' ? state : {};
+  const status = optionalString(source.status);
+  const statusNormalized = String(status || '').toLowerCase();
+  const reasonCode = String(source.revocationReason || '').trim().toLowerCase();
+  const failure = source.lastFailure && typeof source.lastFailure === 'object'
+    ? source.lastFailure
+    : null;
+  const exposesFailure = statusNormalized === 'revoked'
+    && DASHBOARD_CANONICAL_FAILURE_REASON_CODES.has(reasonCode)
+    && failure;
+
+  return {
+    status,
+    stateRevision: Number.isSafeInteger(Number(source.stateRevision))
+      ? Number(source.stateRevision)
+      : null,
+    revokedAt: source.revokedAt || null,
+    updatedAt: source.updatedAt || null,
+    lastFailure: exposesFailure ? {
+      reasonCode,
+      decision: optionalString(failure.decision),
+      similarityScore: Number.isFinite(Number(failure.similarityScore))
+        ? Number(failure.similarityScore)
+        : null,
+      recordedAt: failure.recordedAt || null
+    } : null
   };
 }
 
@@ -869,6 +903,26 @@ class KycIdentityReviewWorkflowService {
     });
     const records = await this.listCaseRecordsForDriver(safeDriverId);
     return records.map(safeCaseMetadata);
+  }
+
+  async getDashboardIdentityStatus(driverId, { reviewerContext } = {}) {
+    const safeDriverId = requiredId(driverId, 'driverId');
+    await this.assertReviewer(reviewerContext, 'VIEW_CANONICAL_IDENTITY_STATUS', {
+      driverId: safeDriverId
+    });
+    if (typeof this.identityTrustService?.readState !== 'function') {
+      throw domainError(
+        'KYC_CANONICAL_IDENTITY_STATUS_UNAVAILABLE',
+        'Estado canonico de identidade indisponivel'
+      );
+    }
+
+    const state = await this.identityTrustService.readState(
+      safeDriverId,
+      { bypassCache: true }
+    );
+    if (state) this.assertRecordScope(state);
+    return safeCanonicalIdentityStatus(state);
   }
 
   async getCaseRecordForDriver(driverId, caseId) {
@@ -3025,6 +3079,7 @@ module.exports.createScopedKycIdentityReviewWorkflowService =
 module.exports.REVIEWER_ROLES = REVIEWER_ROLES;
 module.exports.OPEN_CASE_STATUSES = OPEN_CASE_STATUSES;
 module.exports.safeCaseMetadata = safeCaseMetadata;
+module.exports.safeCanonicalIdentityStatus = safeCanonicalIdentityStatus;
 module.exports.safeEvidenceMetadata = safeEvidenceMetadata;
 module.exports.isSandboxTicket = isSandboxTicket;
 module.exports.domainError = domainError;

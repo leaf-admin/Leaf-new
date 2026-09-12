@@ -1,4 +1,4 @@
-import React, { memo, useCallback, useEffect, useMemo, useState } from "react";
+import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
   Modal,
@@ -38,6 +38,7 @@ import {
 } from "../driverOfferPricingSnapshot";
 import { useDriverOfferCountdown } from "../driverOfferCountdown";
 import { normalizeRuntimeRideStatus } from "../rideLifecycleContract";
+import { useHapticFeedback } from "../../../hooks/useHapticFeedback";
 
 const { color } = robotaxiPrototypeTokens;
 
@@ -376,6 +377,7 @@ function DriverLiveRideOverlay({
   nativeNavigationVisible = false,
 }) {
   const [busyAction, setBusyAction] = useState("");
+  const triggerHaptic = useHapticFeedback();
   const [isTripExpanded, setIsTripExpanded] = useState(false);
   const [isOfferExpanded, setIsOfferExpanded] = useState(false);
   const [dismissedOfferIdentity, setDismissedOfferIdentity] = useState("");
@@ -523,6 +525,20 @@ function DriverLiveRideOverlay({
   );
   const isOperationalInterrupted =
     normalizedActiveStatus === "operational_interrupted";
+  const isSearchingReplacement =
+    normalizedActiveStatus === "searching_replacement";
+  const arrivalHapticBookingRef = useRef("");
+  useEffect(() => {
+    const rideIdentity = activeRide?.bookingId || activeRide?.id || "";
+    if (
+      normalizedActiveStatus === "arrived" &&
+      rideIdentity &&
+      arrivalHapticBookingRef.current !== rideIdentity
+    ) {
+      arrivalHapticBookingRef.current = rideIdentity;
+      triggerHaptic("medium");
+    }
+  }, [normalizedActiveStatus, activeRide?.bookingId, activeRide?.id, triggerHaptic]);
   const activeRideNetAmount = isOperationalInterrupted
     ? resolveOperationalLegNetAmount(operationalContinuation)
     : resolveDisplayNetAmount(activeRide, driverTripMeta);
@@ -935,7 +951,9 @@ function DriverLiveRideOverlay({
               : pickupLocation.title}
           titleTestID={isOperationalInterrupted
             ? "driver-live-operational-hold-title"
-            : undefined}
+            : isSearchingReplacement
+              ? "driver-live-searching-replacement-title"
+              : undefined}
         />
 
         <RobotaxiLifecycleIdentity
@@ -1509,12 +1527,16 @@ function DriverLiveRideOverlay({
                     testID={
                       normalizedActiveStatus === "operational_interrupted"
                         ? "driver-live-operational-hold-title"
-                        : undefined
+                        : normalizedActiveStatus === "searching_replacement"
+                          ? "driver-live-searching-replacement-title"
+                          : undefined
                     }
                     accessibilityLabel={
                       normalizedActiveStatus === "operational_interrupted"
                         ? "driver-live-operational-hold-title"
-                        : undefined
+                        : normalizedActiveStatus === "searching_replacement"
+                          ? "driver-live-searching-replacement-title"
+                          : undefined
                     }
                   >
                     {driverTripSheetTitle}

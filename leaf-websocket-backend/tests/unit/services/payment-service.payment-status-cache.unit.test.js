@@ -502,6 +502,73 @@ describe('PaymentService payment status cache', () => {
     );
   });
 
+  it('propagates the Woovi Pix artifacts without using the payment link as QR text', async () => {
+    const firestore = createInMemoryFirestore();
+    firebaseConfig.getFirestore.mockReturnValue(firestore);
+    mockCreateCharge.mockResolvedValueOnce({
+      success: true,
+      chargeId: 'charge_artifacts_1',
+      qrCodeImage: 'https://api.woovi-sandbox.com/qr/charge_artifacts_1.png',
+      brCode: '000201010212woovi-brcode-1',
+      paymentLinkUrl: 'https://woovi-sandbox.com/pay/charge_artifacts_1',
+      paymentLink: 'https://woovi-sandbox.com/pay/charge_artifacts_1',
+      charge: {
+        identifier: 'charge_artifacts_1'
+      }
+    });
+    const service = new PaymentService();
+
+    const result = await service.processAdvancePayment({
+      passengerId: 'passenger_artifacts',
+      amount: 2243,
+      rideId: 'ride_artifacts_1',
+      rideDetails: { origin: 'Origem', destination: 'Destino' }
+    });
+
+    expect(result).toMatchObject({
+      success: true,
+      chargeId: 'charge_artifacts_1',
+      qrCode: 'https://api.woovi-sandbox.com/qr/charge_artifacts_1.png',
+      qrCodeImage: 'https://api.woovi-sandbox.com/qr/charge_artifacts_1.png',
+      brCode: '000201010212woovi-brcode-1',
+      qrCodeText: '000201010212woovi-brcode-1',
+      paymentLink: 'https://woovi-sandbox.com/pay/charge_artifacts_1',
+      paymentLinkUrl: 'https://woovi-sandbox.com/pay/charge_artifacts_1'
+    });
+    expect(result.qrCodeText).not.toBe(result.paymentLink);
+    expect(firestore.docs.get(`payment_intents/${service.buildAdvancePaymentIntentId('ride_artifacts_1')}`)).toMatchObject({
+      chargeId: 'charge_artifacts_1',
+      qrCodeImage: 'https://api.woovi-sandbox.com/qr/charge_artifacts_1.png',
+      brCode: '000201010212woovi-brcode-1',
+      qrCodeText: '000201010212woovi-brcode-1',
+      paymentLink: 'https://woovi-sandbox.com/pay/charge_artifacts_1',
+      paymentLinkUrl: 'https://woovi-sandbox.com/pay/charge_artifacts_1'
+    });
+  });
+
+  it('fails closed when Woovi creates a charge without any usable Pix artifact', async () => {
+    mockCreateCharge.mockResolvedValueOnce({
+      success: true,
+      chargeId: 'charge_without_pix_artifact',
+      charge: { identifier: 'charge_without_pix_artifact' }
+    });
+    const service = new PaymentService();
+
+    const result = await service.processAdvancePayment({
+      passengerId: 'passenger_missing_artifact',
+      amount: 2243,
+      rideId: 'ride_missing_artifact',
+      rideDetails: { origin: 'Origem', destination: 'Destino' }
+    });
+
+    expect(result).toMatchObject({
+      success: false,
+      code: 'PAYMENT_PROVIDER_PIX_ARTIFACT_MISSING',
+      chargeId: 'charge_without_pix_artifact'
+    });
+    expect(result.error).toContain('QR Code');
+  });
+
   it('blocks a production payment profile before provider calls in ride flow validation', async () => {
     process.env.LEAF_LAUNCH_PROFILE = 'ride_flow_validation';
     const service = new PaymentService();

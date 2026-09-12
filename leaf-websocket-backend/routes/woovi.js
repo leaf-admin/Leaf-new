@@ -2057,6 +2057,10 @@ async function handleSandboxTestPaymentConfirmation(req, res) {
       chargeId: resolved.chargeId,
       paymentIntentId: resolved.paymentIntentId,
       amountInCents: resolved.amountInCents,
+      providerEnvironment: resolved.financialContext.providerEnvironment,
+      financialNamespace: resolved.financialContext.namespace,
+      financialContextId: resolved.financialContext.contextId,
+      financialContext: resolved.financialContext,
       providerConfirmation: {
         status: providerConfirmation.status,
         transactionID: providerConfirmation.transactionID,
@@ -2313,12 +2317,18 @@ router.post('/woovi/webhook', async (req, res) => {
   }
 });
 
+// Compatibilidade com o endpoint configurado no provedor (a aplicação é montada em /api).
+// O encaminhamento preserva o handler canônico, incluindo assinatura e idempotência.
+const forwardToCanonicalWooviWebhook = (req, res) => {
+  req.url = '/woovi/webhook';
+  return router.handle(req, res);
+};
+
+router.post('/webhooks/woovi', forwardToCanonicalWooviWebhook);
+
 // ✅ Rota alternativa com hífen (habilite apenas se precisar suportar webhook legado)
 if (legacyWooviAliasRouteEnabled) {
-  router.post('/woovi-webhook', async (req, res) => {
-    req.url = '/woovi/webhook';
-    return router.handle(req, res);
-  });
+  router.post('/woovi-webhook', forwardToCanonicalWooviWebhook);
 }
 
 /**

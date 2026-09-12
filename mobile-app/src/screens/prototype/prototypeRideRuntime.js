@@ -142,6 +142,11 @@ const DRIVER_ACTIVATION_STORAGE_PREFIX = "@prototype_driver_activation_";
 const RUNTIME_SESSION_STORAGE_PREFIX = "@prototype_runtime_session_";
 const RUNTIME_QA_SEED_STORAGE_PREFIX = "@prototype_runtime_qa_seed_";
 const CONFIRMED_DESTINATIONS_STORAGE_KEY = "confirmedDestinations";
+const QA_PASSENGER_PREBOOKING_SCENARIOS = new Set([
+  "passenger-category",
+  "passenger-booking",
+  "passenger-payment",
+]);
 const DRIVER_LOCATION_HEARTBEAT_MS = 5000;
 const DRIVER_ONLINE_DAILY_LIMIT_CODE = "driver_online_daily_limit_reached";
 const DRIVER_ONLINE_DAILY_LIMIT_MESSAGE =
@@ -472,6 +477,7 @@ const RUNTIME_PERSISTED_FIELDS = Object.freeze([
   "driverOnlineStartedAt",
   "driverOnlineDaily",
   "driverOnlineMutationSource",
+  "driverOnlineVisualOnly",
   "driverDestinationMode",
   "driverTransientCard",
   "driverLastTransientCard",
@@ -682,6 +688,7 @@ const DEFAULT_RUNTIME_STATE = Object.freeze({
   driverOnlineStartedAt: null,
   driverOnlineDaily: null,
   driverOnlineMutationSource: "",
+  driverOnlineVisualOnly: false,
   driverDestinationMode: DEFAULT_DRIVER_DESTINATION_MODE,
   driverActivation: DEFAULT_DRIVER_ACTIVATION,
   driverActivationResolved: false,
@@ -2647,10 +2654,61 @@ export function shouldPreserveQADriverOfferOnBootstrap({
   );
 }
 
+export function shouldPreserveQADriverOnlineWaitingOnBootstrap({
+  qaSeedLock = null,
+  now = Date.now(),
+  testUserToolsAllowed = allowTestUserTools(),
+  e2eBuild = isE2ETestBuild(),
+  simulatorBuild = isSimulatorBuild(),
+} = {}) {
+  const freezeUntil = Number(qaSeedLock?.freezeUntil || 0);
+  const scenario = String(qaSeedLock?.scenario || "").trim();
+  const route = String(qaSeedLock?.route || "").trim();
+
+  return Boolean(
+    testUserToolsAllowed === true &&
+      (e2eBuild === true || simulatorBuild === true) &&
+      scenario === "driver-online-waiting" &&
+      route === "leafapp://robotaxi/home" &&
+      Number.isFinite(freezeUntil) &&
+      freezeUntil > Number(now),
+  );
+}
+
+export function shouldPreserveQAPassengerPreBookingOnBootstrap({
+  qaSeedLock = null,
+  now = Date.now(),
+  testUserToolsAllowed = allowTestUserTools(),
+  e2eBuild = isE2ETestBuild(),
+  simulatorBuild = isSimulatorBuild(),
+} = {}) {
+  const freezeUntil = Number(qaSeedLock?.freezeUntil || 0);
+  const scenario = String(qaSeedLock?.scenario || "").trim();
+  const route = String(qaSeedLock?.route || "").trim();
+  const isCanonicalHomeAutomationRoute =
+    route.startsWith("leafapp://robotaxi/home?") &&
+    route.includes("qaAutomation=1") &&
+    (route.includes("qaPassengerAction=show_category") ||
+      route.includes("qaPassengerAction=open_pix_pending"));
+
+  return Boolean(
+    testUserToolsAllowed === true &&
+      (e2eBuild === true || simulatorBuild === true) &&
+      QA_PASSENGER_PREBOOKING_SCENARIOS.has(scenario) &&
+      isCanonicalHomeAutomationRoute &&
+      Number.isFinite(freezeUntil) &&
+      freezeUntil > Number(now),
+  );
+}
+
 export function sanitizePersistedRuntimeSessionForProfile(
   session,
   profile = null,
-  { preserveQaSeededDriverOffer = false } = {},
+  {
+    preserveQaSeededDriverOffer = false,
+    preserveQaSeededDriverOnlineWaiting = false,
+    preserveQaSeededPassengerPreBooking = false,
+  } = {},
 ) {
   if (!session || typeof session !== "object") {
     return null;
@@ -2744,14 +2802,17 @@ export function sanitizePersistedRuntimeSessionForProfile(
       if (
         hasPersistedDriverRideInProgress ||
         hasPersistedDriverActiveRide ||
-        shouldPreserveQaSeededDriverOffer
+        shouldPreserveQaSeededDriverOffer ||
+        preserveQaSeededDriverOnlineWaiting
       ) {
         restored.driverOnline = true;
         restored.driverOnlinePending = false;
         restored.driverOnlineStartedAt =
           restored.driverOnlineStartedAt || new Date().toISOString();
         restored.driverOnlineMutationSource =
-          shouldPreserveQaSeededDriverOffer
+          preserveQaSeededDriverOnlineWaiting
+            ? "bootstrap_restore_qa_seeded_driver_online_waiting"
+            : shouldPreserveQaSeededDriverOffer
             ? "bootstrap_restore_qa_seeded_driver_offer"
             : "bootstrap_restore_active_driver_session";
       } else {
@@ -2768,6 +2829,9 @@ export function sanitizePersistedRuntimeSessionForProfile(
       restored.driverOnlineMutationSource =
         normalizedOnlineMutationSource || "";
     }
+    restored.driverOnlineVisualOnly = Boolean(
+      preserveQaSeededDriverOnlineWaiting,
+    );
     if (!restored.driverOnlinePending) {
       restored.driverOnlinePending = false;
     }
@@ -2775,7 +2839,8 @@ export function sanitizePersistedRuntimeSessionForProfile(
     if (
       !hasPersistedDriverRideInProgress &&
       !hasPersistedDriverActiveRide &&
-      !shouldPreserveQaSeededDriverOffer
+      !shouldPreserveQaSeededDriverOffer &&
+      !preserveQaSeededDriverOnlineWaiting
     ) {
       restored.currentCoordinate = null;
       restored.driverCoordinate = null;
@@ -2831,6 +2896,12 @@ export function sanitizePersistedRuntimeSessionForProfile(
     const shouldDiscardPassengerPreBookingArtifacts =
       !persistedActiveRideBookingId &&
       (normalizedBookingStatus === "" || normalizedBookingStatus === "idle");
+    const shouldPreserveQaSeededPassengerPreBooking = Boolean(
+      preserveQaSeededPassengerPreBooking === true &&
+        normalizedBookingStatus === "idle" &&
+        !persistedActiveRideBookingId &&
+        restored.selectedDestination?.coordinate,
+    );
     const shouldDiscardPassengerCompletedRideArtifacts =
       normalizedBookingStatus === "completed";
     const shouldPreservePassengerDriverContext = [
@@ -2847,7 +2918,10 @@ export function sanitizePersistedRuntimeSessionForProfile(
     restored.driverOnlineMutationSource = "activation_sync_non_driver";
     restored.driverDestinationMode = DEFAULT_DRIVER_DESTINATION_MODE;
     restored.driverActivationRemote = null;
-    if (shouldDiscardPassengerPreBookingArtifacts) {
+    if (
+      shouldDiscardPassengerPreBookingArtifacts &&
+      !shouldPreserveQaSeededPassengerPreBooking
+    ) {
       restored.bookingStatus = "idle";
       restored.activeBookingId = null;
       restored.activeBooking = null;
@@ -13508,9 +13582,15 @@ async function bootstrapRuntime(profile) {
         if (persistedSession && typeof persistedSession === "object") {
           const preserveQaSeededDriverOffer =
             shouldPreserveQADriverOfferOnBootstrap({ qaSeedLock });
+          const preserveQaSeededDriverOnlineWaiting =
+            shouldPreserveQADriverOnlineWaitingOnBootstrap({ qaSeedLock });
+          const preserveQaSeededPassengerPreBooking =
+            shouldPreserveQAPassengerPreBookingOnBootstrap({ qaSeedLock });
           const sanitizedPersistedSession =
             sanitizePersistedRuntimeSessionForProfile(persistedSession, profile, {
               preserveQaSeededDriverOffer,
+              preserveQaSeededDriverOnlineWaiting,
+              preserveQaSeededPassengerPreBooking,
             });
           const restoredRuntimeSession = {
             ...sanitizedPersistedSession,
@@ -18876,6 +18956,10 @@ async function rejectPrototypeDriverOffer(
 }
 
 function clearDestinationPreview() {
+  if (isRuntimeQALockActive()) {
+    return;
+  }
+
   clearPrototypeMapRoute();
   stopBoardingCountdownTimer();
   setRuntimeState({

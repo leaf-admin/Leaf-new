@@ -209,7 +209,8 @@ function isTransientPaymentCreationError(error) {
         code === 'NO_DRIVERS_AVAILABLE' ||
         code === 'PAYMENT_PASSENGER_SCOPE_MISMATCH' ||
         code === 'PAYMENT_SESSION_CONSUMED' ||
-        code === 'PAYMENT_INTENT_CONFLICT'
+        code === 'PAYMENT_INTENT_CONFLICT' ||
+        code === 'PAYMENT_PROVIDER_PIX_ARTIFACT_MISSING'
     ) {
         return false;
     }
@@ -220,6 +221,80 @@ function isTransientPaymentCreationError(error) {
         status === 408 ||
         status === 429 ||
         (status >= 500 && status <= 599)
+    );
+}
+
+function normalizePaymentArtifactString(value) {
+    const normalized = String(value ?? '').trim();
+    return normalized || null;
+}
+
+function isPaymentImageUri(value) {
+    return /^(?:data:image\/|https?:\/\/)/i.test(String(value ?? '').trim());
+}
+
+function isUrlLikePaymentArtifact(value) {
+    return /^[a-z][a-z\d+.-]*:/i.test(String(value ?? '').trim());
+}
+
+function resolvePaymentArtifacts(source = {}) {
+    const charge = source?.charge && typeof source.charge === 'object' ? source.charge : {};
+    const pix =
+        charge?.paymentMethods?.pix ||
+        charge?.pix ||
+        source?.paymentMethods?.pix ||
+        source?.pix ||
+        {};
+    const paymentLink = normalizePaymentArtifactString(
+        [
+            source.paymentLink,
+            source.paymentLinkUrl,
+            charge.paymentLink,
+            charge.paymentLinkUrl,
+            pix.paymentLink,
+            pix.paymentLinkUrl,
+        ].find(Boolean),
+    );
+    const qrCodeImage = normalizePaymentArtifactString(
+        [
+            source.qrCodeImage,
+            charge.qrCodeImage,
+            pix.qrCodeImage,
+            isPaymentImageUri(source.pixQRCode) ? source.pixQRCode : null,
+            isPaymentImageUri(source.qrCode) ? source.qrCode : null,
+        ].find(
+            (value) =>
+                isPaymentImageUri(value) &&
+                normalizePaymentArtifactString(value) !== paymentLink,
+        ),
+    );
+    const qrCodeText = normalizePaymentArtifactString(
+        [
+            source.qrCodeText,
+            source.brCode,
+            source.pixQRCode,
+            charge.qrCodeText,
+            charge.brCode,
+            pix.brCode,
+            pix.qrCode,
+            !isUrlLikePaymentArtifact(source.qrCode) ? source.qrCode : null,
+        ].find((value) => value && !isUrlLikePaymentArtifact(value)),
+    );
+
+    return {
+        qrCodeImage,
+        brCode: qrCodeText,
+        qrCodeText,
+        paymentLink,
+        paymentLinkUrl: paymentLink,
+    };
+}
+
+function hasPaymentArtifact(paymentData) {
+    return Boolean(
+        paymentData?.qrCodeImage ||
+        paymentData?.qrCodeText ||
+        paymentData?.paymentLink,
     );
 }
 
@@ -243,9 +318,13 @@ export default function WooviPaymentModal({
     quoteLockId = null,
     onPaymentExpired = null,
     onPaymentAborted = null,
+    qaVisualOnlyPayment = false,
     robotaxiLifecycleCard = false
 }) {
     const qaAutoConfirmEnabled = Boolean(qaAutoConfirm);
+    const qaVisualOnlyPaymentEnabled = Boolean(
+        qaVisualOnlyPayment && (__DEV__ || canUseDivergentQaPaymentIdentity()),
+    );
     // Estados
     const [loading, setLoading] = useState(false);
     const [paymentData, setPaymentData] = useState(null);
@@ -659,18 +738,12 @@ export default function WooviPaymentModal({
             if (prefilledPaymentData?.chargeId) {
                 const amountValue = Number(prefilledPaymentData?.amount ?? estimates?.estimateFare ?? tripData?.estimatedFare ?? 0);
                 const amountInCentsValue = Number(prefilledPaymentData?.amountInCents);
+                const prefilledArtifacts = resolvePaymentArtifacts(prefilledPaymentData);
                 const normalizedPaymentInfo = {
                     chargeId: prefilledPaymentData.chargeId,
                     paymentIntentId: prefilledPaymentData.paymentIntentId || null,
                     rideId: prefilledPaymentData.rideId || tripData?.rideId || `prefilled-${Date.now()}`,
-                    qrCodeImage: prefilledPaymentData.qrCodeImage || null,
-                    qrCodeText:
-                        prefilledPaymentData.qrCodeText ||
-                        prefilledPaymentData.brCode ||
-                        prefilledPaymentData.pixQRCode ||
-                        prefilledPaymentData.paymentLink ||
-                        '',
-                    paymentLink: prefilledPaymentData.paymentLink || null,
+                    ...prefilledArtifacts,
                     amount: Number.isFinite(amountValue) ? amountValue : 0,
                     amountInCents:
                         Number.isFinite(amountInCentsValue) && amountInCentsValue > 0
@@ -692,6 +765,20 @@ export default function WooviPaymentModal({
                         prefilledPaymentData.expiresAt ||
                         new Date(Date.now() + PAYMENT_TIMEOUT * 1000)
                 };
+
+                if (!hasPaymentArtifact(normalizedPaymentInfo)) {
+                    const missingArtifactMessage = 'A cobrança da Woovi não retornou QR Code, código Pix ou link de pagamento.';
+                    Logger.error('❌ [WooviPaymentModal] Cobrança pré-gerada sem artefato Pix:', {
+                        chargeId: normalizedPaymentInfo.chargeId,
+                    });
+                    setPaymentGenerationDiagnostics({
+                        code: 'PAYMENT_PROVIDER_PIX_ARTIFACT_MISSING',
+                        chargeId: normalizedPaymentInfo.chargeId,
+                    });
+                    setPaymentGenerationError(missingArtifactMessage);
+                    setLoading(false);
+                    return undefined;
+                }
 
                 Logger.log('💳 [WooviPaymentModal] Usando cobrança PIX pré-gerada:', normalizedPaymentInfo.chargeId);
                 setPaymentData(normalizedPaymentInfo);
@@ -764,8 +851,13 @@ export default function WooviPaymentModal({
             return;
         }
         
-        // ✅ Só iniciar timer se modal está visível, tem paymentData, countdown > 0 e status é pending
-        if (visible && paymentData && countdown > 0 && paymentStatus === 'pending') {
+        // ✅ Só iniciar timer se existe um artefato real da Woovi para o passageiro usar.
+        if (
+            visible &&
+            hasPaymentArtifact(paymentData) &&
+            countdown > 0 &&
+            paymentStatus === 'pending'
+        ) {
             Logger.log('⏱️ [Timer] Iniciando timer de pagamento, countdown:', countdown);
             const lifecycleToken = paymentLifecycleRef.current;
             
@@ -815,7 +907,7 @@ export default function WooviPaymentModal({
 
     // Verificação automática de pagamento a cada 3 segundos
     useEffect(() => {
-        if (visible && paymentData && paymentStatus === 'pending') {
+        if (visible && paymentData && paymentStatus === 'pending' && !qaVisualOnlyPaymentEnabled) {
             checkPaymentStatus(paymentData);
             paymentCheckIntervalRef.current = setInterval(() => {
                 checkPaymentStatus(paymentData);
@@ -832,17 +924,26 @@ export default function WooviPaymentModal({
                 clearInterval(paymentCheckIntervalRef.current);
             }
         };
-    }, [visible, paymentData, paymentStatus]);
+    }, [qaVisualOnlyPaymentEnabled, visible, paymentData, paymentStatus]);
 
     useEffect(() => {
+        const chargeId = String(paymentData?.chargeId || '');
+        const autoConfirmExcludedCharge =
+            chargeId.startsWith('mock_review_') ||
+            chargeId.startsWith('qa_bypass_');
+
         if (
             !qaAutoConfirmEnabled ||
             !visible ||
             !paymentData?.chargeId ||
             !paymentData?.rideId ||
             paymentStatus !== 'pending' ||
-            qaAutoConfirmStartedRef.current
+            qaAutoConfirmStartedRef.current ||
+            autoConfirmExcludedCharge
         ) {
+            if (autoConfirmExcludedCharge) {
+                setQaDebugStatus('disabled');
+            }
             return;
         }
 
@@ -850,13 +951,6 @@ export default function WooviPaymentModal({
         setQaDebugStatus('scheduled');
 
         autoConfirmTimerRef.current = setTimeout(async () => {
-            if (
-                String(paymentData.chargeId || '').startsWith('mock_review_') ||
-                String(paymentData.chargeId || '').startsWith('qa_bypass_')
-            ) {
-                return;
-            }
-
             try {
                 setQaDebugStatus('confirming');
                 await WooviService.simulateTestWebhook({
@@ -882,7 +976,7 @@ export default function WooviPaymentModal({
 
     // WebSocket listener para confirmação server-side
     useEffect(() => {
-        if (!visible || !paymentData) {
+        if (!visible || !paymentData || qaVisualOnlyPaymentEnabled) {
             return;
         }
 
@@ -924,7 +1018,7 @@ export default function WooviPaymentModal({
         return () => {
             webSocketManager.off('paymentConfirmed', handleServerPaymentConfirmed);
         };
-    }, [visible, paymentData, onPaymentConfirmed, onClose]);
+    }, [qaVisualOnlyPaymentEnabled, visible, paymentData, onPaymentConfirmed, onClose]);
 
     // Formatar tempo
     const formatTime = (seconds) => {
@@ -1029,8 +1123,10 @@ export default function WooviPaymentModal({
             });
 
             if (paymentSession?.paymentData?.chargeId) {
+                const restoredArtifacts = resolvePaymentArtifacts(paymentSession.paymentData);
                 const restoredPaymentData = {
                     ...paymentSession.paymentData,
+                    ...restoredArtifacts,
                     paymentSessionId: paymentSession.paymentSessionId,
                     paymentContextKey,
                     passengerId: resolvedPassengerId,
@@ -1059,7 +1155,11 @@ export default function WooviPaymentModal({
                     ? Math.ceil((expiresAtMs - Date.now()) / 1000)
                     : PAYMENT_TIMEOUT;
 
-                if (!TERMINAL_PAYMENT_STATUSES.has(restoredStatus) && remainingSeconds > 0) {
+                if (
+                    !TERMINAL_PAYMENT_STATUSES.has(restoredStatus) &&
+                    remainingSeconds > 0 &&
+                    hasPaymentArtifact(restoredPaymentData)
+                ) {
                     setPaymentData(restoredPaymentData);
                     setCountdown(remainingSeconds);
                     setPaymentStatus('pending');
@@ -1214,15 +1314,29 @@ export default function WooviPaymentModal({
             }
             
             Logger.log('✅ Pagamento gerado com sucesso:', result.chargeId);
+
+            const providerArtifacts = resolvePaymentArtifacts(result);
+            if (!hasPaymentArtifact(providerArtifacts)) {
+                const missingArtifactError = new Error(
+                    'A cobrança da Woovi não retornou QR Code, código Pix ou link de pagamento.',
+                );
+                missingArtifactError.code = 'PAYMENT_PROVIDER_PIX_ARTIFACT_MISSING';
+                missingArtifactError.response = {
+                    status: 502,
+                    data: {
+                        ...result,
+                        code: missingArtifactError.code,
+                    },
+                };
+                throw missingArtifactError;
+            }
             
             // Salvar dados do pagamento
             const paymentInfo = {
                 chargeId: result.chargeId,
                 paymentIntentId: result.paymentIntentId || null,
                 rideId: result.rideId || tempRideId,
-                qrCodeImage: result.qrCode,
-                qrCodeText: result.qrCodeText || result.paymentLink,
-                paymentLink: result.paymentLink,
+                ...providerArtifacts,
                 amount: amount,
                 amountInCents: amountInCents,
                 grossAmount: grossAmountInCents / 100,
@@ -1298,7 +1412,7 @@ export default function WooviPaymentModal({
     // Função para verificar status do pagamento
     const checkPaymentStatus = async (sourcePaymentData = paymentData) => {
         const activePaymentData = sourcePaymentData || paymentData;
-        if ((!activePaymentData?.chargeId && !activePaymentData?.rideId) || isCheckingPaymentRef.current || paymentStatusRef.current !== 'pending') {
+        if (qaVisualOnlyPaymentEnabled || (!activePaymentData?.chargeId && !activePaymentData?.rideId) || isCheckingPaymentRef.current || paymentStatusRef.current !== 'pending') {
             return;
         }
         
@@ -1346,6 +1460,23 @@ export default function WooviPaymentModal({
 
     // Função para lidar com timeout (5 minutos)
     const handleTimeout = async (lifecycleToken = paymentLifecycleRef.current) => {
+        if (qaVisualOnlyPaymentEnabled) {
+            if (!isPaymentLifecycleCurrent(lifecycleToken) || timeoutHandledRef.current) {
+                return;
+            }
+
+            timeoutHandledRef.current = true;
+            terminalClosePendingRef.current = true;
+            const timedOutPaymentData = paymentDataRef.current || paymentData;
+            cleanup();
+            paymentStatusRef.current = 'expired';
+            setPaymentStatus('expired');
+            setCountdown(0);
+            setLoading(false);
+            notifyPaymentExpired(timedOutPaymentData);
+            return;
+        }
+
         if (
             !isPaymentLifecycleCurrent(lifecycleToken) ||
             timeoutHandledRef.current ||
@@ -1437,6 +1568,14 @@ export default function WooviPaymentModal({
     // Função para cancelar manualmente
     const handleCancel = async () => {
         Logger.log('🚫 [WooviPaymentModal] handleCancel chamado, status:', paymentStatus);
+
+        if (qaVisualOnlyPaymentEnabled) {
+            closeWithoutConfirmation({
+                reason: 'qa_visual_only_close',
+                chargeId: paymentData?.chargeId || null,
+            });
+            return;
+        }
         
         if (paymentStatus === 'confirmed') {
             Alert.alert(
@@ -1515,6 +1654,9 @@ export default function WooviPaymentModal({
     // Renderizar conteúdo do modal
     const renderContent = () => {
         const paymentErrorDiagnosticsLabel = serializePaymentErrorDiagnostics(paymentGenerationDiagnostics);
+        const hasQrImage = Boolean(paymentData?.qrCodeImage);
+        const hasQrText = Boolean(paymentData?.qrCodeText);
+        const hasPaymentLink = Boolean(paymentData?.paymentLink);
 
         if (terminalClosePendingRef.current && paymentStatus === 'expired') {
             return (
@@ -1551,7 +1693,7 @@ export default function WooviPaymentModal({
         if (!paymentData) {
             if (paymentGenerationError) {
                 return (
-                    <View style={styles.errorContainer}>
+                    <View style={styles.errorContainer} testID="payment-modal-generation-error">
                         <Icon 
                             name="error-outline" 
                             type="material" 
@@ -1647,7 +1789,11 @@ export default function WooviPaymentModal({
                                         : 'Aguardando PIX'
                             }
                         >
-                            <Text style={styles.statusChipText}>
+                            <Text
+                                style={styles.statusChipText}
+                                testID={paymentStatus === 'pending' ? 'payment-modal-pending-state' : undefined}
+                                accessibilityLabel={paymentStatus === 'pending' ? 'Aguardando PIX' : undefined}
+                            >
                                 {paymentStatus === 'confirmed'
                                     ? 'PIX confirmado'
                                     : paymentStatus === 'expired'
@@ -1709,13 +1855,14 @@ export default function WooviPaymentModal({
                     testID="payment-modal-qr-container"
                     accessibilityLabel="QR Code PIX"
                 >
-                    {paymentData?.qrCodeImage ? (
+                    {hasQrImage ? (
                         <Image
                             source={{ uri: paymentData.qrCodeImage }}
                             style={styles.qrCodeImage}
                             resizeMode="contain"
+                            testID="payment-modal-qr-image"
                         />
-                    ) : paymentData?.qrCodeText ? (
+                    ) : hasQrText ? (
                         <QRCode
                             value={paymentData.qrCodeText}
                             size={145}
@@ -1723,21 +1870,38 @@ export default function WooviPaymentModal({
                             color="#080A09"
                         />
                     ) : (
-                        <View style={styles.qrCode}>
-                            <Text style={styles.qrCodeText}>QR Code</Text>
-                            <Text style={styles.qrCodeSubtext}>145px</Text>
+                        <View
+                            style={styles.qrUnavailable}
+                            testID="payment-modal-qr-unavailable"
+                            accessibilityLabel="QR Code da Woovi indisponível"
+                        >
+                            <Icon name="qr-code-2" type="material" color={PIX_SURFACE.muted} size={42} />
+                            <Text style={styles.qrUnavailableTitle}>QR Code indisponível</Text>
+                            <Text style={styles.qrUnavailableText}>
+                                {hasPaymentLink
+                                    ? 'Use o link seguro da Woovi para concluir o pagamento.'
+                                    : 'A Woovi não enviou um artefato de pagamento utilizável.'}
+                            </Text>
                         </View>
                     )}
                 </View>
 
                 <Text style={styles.qrInstruction}>
-                    Escaneie o QR Code ou copie o código PIX abaixo.
+                    {hasQrImage || hasQrText
+                        ? 'Escaneie o QR Code ou copie o código PIX abaixo.'
+                        : hasPaymentLink
+                            ? 'Abra o link seguro da Woovi para pagar.'
+                            : 'O pagamento não está disponível para uso.'}
                 </Text>
 
                 <View
                     style={styles.pixCopyField}
                     testID="payment-modal-pix-code"
-                    accessibilityLabel="Código PIX pronto para copiar"
+                    accessibilityLabel={
+                        hasQrText
+                            ? 'Código PIX pronto para copiar'
+                            : 'Código PIX indisponível'
+                    }
                 >
                     <Text style={styles.pixCodeText} numberOfLines={1}>
                         {getPixSnippet()}
@@ -1748,21 +1912,23 @@ export default function WooviPaymentModal({
                     styles.actionButtons,
                     robotaxiLifecycleCard && styles.robotaxiActionButtons,
                 ]}>
-                    <TouchableOpacity
-                        style={[
-                            styles.primaryAction,
-                            robotaxiLifecycleCard && styles.robotaxiAction,
-                        ]}
-                        onPress={copyPixCode}
-                        activeOpacity={0.88}
-                        testID="payment-modal-copy-code-button"
-                        accessibilityLabel="Copiar código PIX"
-                    >
-                        <Text style={[
-                            styles.primaryActionText,
-                            robotaxiLifecycleCard && styles.robotaxiActionText,
-                        ]}>Copiar código</Text>
-                    </TouchableOpacity>
+                    {hasQrText ? (
+                        <TouchableOpacity
+                            style={[
+                                styles.primaryAction,
+                                robotaxiLifecycleCard && styles.robotaxiAction,
+                            ]}
+                            onPress={copyPixCode}
+                            activeOpacity={0.88}
+                            testID="payment-modal-copy-code-button"
+                            accessibilityLabel="Copiar código PIX"
+                        >
+                            <Text style={[
+                                styles.primaryActionText,
+                                robotaxiLifecycleCard && styles.robotaxiActionText,
+                            ]}>Copiar código</Text>
+                        </TouchableOpacity>
+                    ) : null}
                     {robotaxiLifecycleCard ? (
                         <>
                             <TouchableOpacity
@@ -2125,6 +2291,28 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
         marginTop: 26,
+    },
+    qrUnavailable: {
+        width: 150,
+        minHeight: 140,
+        paddingHorizontal: 10,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    qrUnavailableTitle: {
+        marginTop: 8,
+        color: PIX_SURFACE.text,
+        fontFamily: fonts.SemiBold,
+        fontSize: 13,
+        textAlign: 'center',
+    },
+    qrUnavailableText: {
+        marginTop: 5,
+        color: PIX_SURFACE.secondary,
+        fontFamily: fonts.Regular,
+        fontSize: 11,
+        lineHeight: 16,
+        textAlign: 'center',
     },
     qrCode: {
         width: 145,

@@ -8,6 +8,13 @@ const driverApprovalService = new DriverApprovalService();
 const DRIVER_APPROVAL_ADMIN_ROLES = ['admin', 'super-admin', 'manager', 'development'];
 const ADMIN_ROUTE_MIDDLEWARE = [authenticateJWT, requireRole(DRIVER_APPROVAL_ADMIN_ROLES)];
 
+function isLegacyFinancialRouteEnabled() {
+  const environment = String(process.env.NODE_ENV || 'development').trim().toLowerCase();
+  const explicitlyEnabled = ['true', '1', 'yes', 'on', 'sim']
+    .includes(String(process.env.ENABLE_LEGACY_FINANCIAL_ROUTES || '').trim().toLowerCase());
+  return environment !== 'production' && explicitlyEnabled;
+}
+
 function getDriverApprovalFailureStatus(errorCode) {
   if (errorCode === 'CANONICAL_DRIVER_EVIDENCE_REQUIRED') {
     return 409;
@@ -97,6 +104,14 @@ router.post('/approve', ...ADMIN_ROUTE_MIDDLEWARE, async (req, res) => {
 // Processar ganhos de corrida
 router.post('/process-earnings', ...ADMIN_ROUTE_MIDDLEWARE, async (req, res) => {
   try {
+    if (!isLegacyFinancialRouteEnabled()) {
+      return res.status(410).json({
+        success: false,
+        error: 'LEGACY_FINANCIAL_ROUTE_DISABLED',
+        message: 'Use o pipeline canônico de settlement para creditar ganhos'
+      });
+    }
+
     const { driverId, wooviClientId, earnings, description, rideId } = req.body;
     
     if (!driverId || !wooviClientId || !earnings || !description || !rideId) {
@@ -208,7 +223,6 @@ router.post('/create-woovi-account', ...ADMIN_ROUTE_MIDDLEWARE, async (req, res)
 });
 
 module.exports = router;
-
 
 
 

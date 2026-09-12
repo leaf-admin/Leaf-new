@@ -1,0 +1,21 @@
+# CURRENT_PRODUCT_ONLY: terminal recovery transition; uses an isolated QA seed.
+appId: br.com.leaf.ride
+name: Passenger no-drivers retry returns to CURRENT Home
+tags:
+  - current
+  - transition
+  - passenger
+  - terminal-recovery
+---
+- launchApp:
+    stopApp: false
+- assertVisible:
+    id: "passenger-no-drivers-screen"
+- tapOn:
+    id: "passenger-no-drivers-retry-button"
+- extendedWaitUntil:
+    visible:
+      id: "passenger-home-destination-input"
+    timeout: 30000
+- assertNotVisible:
+    id: "passenger-no-drivers-screen"

@@ -166,7 +166,7 @@ export default function RobotaxiShareTripScreen({ navigation, route }) {
   }, [destination, driver.name, driver.plate, driver.vehicle, eta, navigation, publicLink, tripId]);
 
   return (
-    <PrototypeScreenTransition>
+    <PrototypeScreenTransition direction="up">
       <View style={styles.container} pointerEvents="box-none" testID="robotaxi-share-trip-screen">
         <StatusBar translucent backgroundColor="transparent" barStyle="dark-content" />
         <PrototypeDismissibleSheet

@@ -11,8 +11,9 @@ RUN_ID="${RUN_ID:-$(date -u +%Y%m%dT%H%M%SZ)}"
 RUN_DIR="${RUN_DIR:-${MOBILE_DIR}/test-results/current-flow-e2e/${RUN_ID}}"
 ANDROID_APK="${ANDROID_APK:-${MOBILE_DIR}/android/app/build/outputs/apk/debug/app-debug.apk}"
 IOS_APP="${IOS_APP:-${MOBILE_DIR}/ios/build/Build/Products/Debug-iphonesimulator/Leaf.app}"
-METRO_URL="${METRO_URL:-http://127.0.0.1:8081}"
-DEV_CLIENT_URL="${DEV_CLIENT_URL:-exp+leafapp-reactnative://expo-development-client/?url=http%3A%2F%2F127.0.0.1%3A8081&disableOnboarding=1}"
+METRO_PORT="${METRO_PORT:-8097}"
+METRO_URL="${METRO_URL:-http://127.0.0.1:${METRO_PORT}}"
+DEV_CLIENT_URL="${DEV_CLIENT_URL:-exp+leafapp-reactnative://expo-development-client/?url=http%3A%2F%2F127.0.0.1%3A${METRO_PORT}&disableOnboarding=1}"
 
 # shellcheck source=/dev/null
 source "${QA_SCRIPT_DIR}/current-flow-e2e-debug-env.sh"
@@ -25,7 +26,7 @@ Usage:
 Options:
   --doctor         Run non-mutating environment doctor only.
   --ios-only       Restrict doctor/build/install/open to iOS simulators.
-  --metro          Restart Metro on port 8081 with current-flow debug env.
+  --metro          Restart Metro on METRO_PORT (default: 8097) with current-flow debug env.
   --build-android  Build Android debug APK.
   --build-ios      Build iOS Debug simulator app.
   --build          Build Android and iOS debug artifacts.
@@ -38,8 +39,8 @@ Options:
 Device overrides:
   PASSENGER_ANDROID_SERIAL=emulator-5554
   DRIVER_ANDROID_SERIAL=emulator-5556
-  PASSENGER_IOS_UDID=195D2C57-87DC-4953-ABF1-4FD351ADBBEF
-  DRIVER_IOS_UDID=2E44BC8E-9AA8-43BE-BD5E-D0B5A73E543C
+  PASSENGER_IOS_UDID=6BC9EC30-C939-4598-A85D-A9E071E90CE5
+  DRIVER_IOS_UDID=C52FE30B-CB7E-4628-B352-27143BF6E9D7
 USAGE
 }
 
@@ -84,9 +85,9 @@ run_doctor() {
 restart_metro() {
   mkdir -p "${RUN_DIR}/metro"
   local pids=""
-  pids="$(lsof -ti tcp:8081 2>/dev/null || true)"
+  pids="$(lsof -ti tcp:${METRO_PORT} 2>/dev/null || true)"
   if [[ -n "${pids}" ]]; then
-    log "stopping existing Metro/listener on 8081: ${pids}"
+    log "stopping existing Metro/listener on ${METRO_PORT}: ${pids}"
     kill ${pids} >/dev/null 2>&1 || true
     sleep 2
   fi
@@ -94,14 +95,14 @@ restart_metro() {
   log "starting Metro with debug E2E flags"
   (
     cd "${MOBILE_DIR}"
-    nohup env -u CI npx expo start --dev-client --localhost --port 8081 --clear \
+    nohup env -u CI npx expo start --dev-client --localhost --port "${METRO_PORT}" --clear \
       </dev/null > "${RUN_DIR}/metro/metro.log" 2>&1 &
     echo "$!" > "${RUN_DIR}/metro/metro.pid"
   )
 
   for _attempt in $(seq 1 45); do
-    if curl -sS --max-time 2 http://127.0.0.1:8081/status >/dev/null 2>&1; then
-      log "Metro is ready on 8081"
+    if curl -sS --max-time 2 "http://127.0.0.1:${METRO_PORT}/status" >/dev/null 2>&1; then
+      log "Metro is ready on ${METRO_PORT}"
       return 0
     fi
     sleep 2
@@ -138,7 +139,7 @@ grant_android_permissions() {
 reverse_android_metro() {
   local serial="$1"
   [[ -n "${serial}" ]] || return 0
-  "${ADB_BIN}" -s "${serial}" reverse tcp:8081 tcp:8081 >/dev/null 2>&1 || true
+  "${ADB_BIN}" -s "${serial}" reverse "tcp:${METRO_PORT}" "tcp:${METRO_PORT}" >/dev/null 2>&1 || true
 }
 
 suppress_android_dev_menu() {
@@ -182,7 +183,17 @@ install_android() {
     return 1
   fi
   log "installing Android debug APK on ${serial}"
-  "${ADB_BIN}" -s "${serial}" install -r "${ANDROID_APK}" >/dev/null
+  local install_output=""
+  if ! install_output="$("${ADB_BIN}" -s "${serial}" install --no-streaming -r "${ANDROID_APK}" 2>&1)"; then
+    if [[ "${install_output}" == *"INSTALL_FAILED_UPDATE_INCOMPATIBLE"* ]]; then
+      log "existing ${APP_ID} signature differs on ${serial}; resetting only that AVD package"
+      "${ADB_BIN}" -s "${serial}" uninstall "${APP_ID}" >/dev/null
+      "${ADB_BIN}" -s "${serial}" install --no-streaming "${ANDROID_APK}" >/dev/null
+    else
+      printf '%s\n' "${install_output}" >&2
+      return 1
+    fi
+  fi
   grant_android_permissions "${serial}"
   reverse_android_metro "${serial}"
   suppress_android_dev_menu "${serial}"
@@ -206,11 +217,12 @@ open_android() {
   [[ -n "${serial}" ]] || return 0
   reverse_android_metro "${serial}"
   log "opening Android ${role} dev-client on ${serial}"
-  "${ADB_BIN}" -s "${serial}" shell am start \
-    --ez EXDevMenuDisableAutoLaunch true \
-    -a android.intent.action.VIEW \
-    -d "'${DEV_CLIENT_URL}'" \
-    "${APP_ID}" >/dev/null
+  local remote_command
+  printf -v remote_command \
+    "am start -W --ez EXDevMenuDisableAutoLaunch true -a android.intent.action.VIEW -d '%s' %s" \
+    "${DEV_CLIENT_URL}" \
+    "${APP_ID}"
+  "${ADB_BIN}" -s "${serial}" shell "${remote_command}" >/dev/null
 }
 
 open_ios() {

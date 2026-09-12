@@ -1,0 +1,42 @@
+# CURRENT_PRODUCT_ONLY: reversible cancellation entry/exit; isolated QA state.
+# This intentionally dismisses the cancellation sheet. It does not call the
+# cancellation endpoint and does not change payment or booking authority.
+appId: br.com.leaf.ride
+name: Passenger accepted cancellation entry returns to trip
+tags:
+  - current
+  - transition
+  - passenger
+  - cancellation
+---
+- launchApp:
+    stopApp: false
+- assertVisible:
+    id: "passenger-trip-screen"
+- assertVisible:
+    id: "passenger-trip-accepted-more-options-button"
+- takeScreenshot: "passenger-accepted-before-cancel"
+- tapOn:
+    id: "passenger-trip-accepted-more-options-button"
+- extendedWaitUntil:
+    visible:
+      id: "passenger-trip-cancel-button"
+    timeout: 30000
+- tapOn:
+    id: "passenger-trip-cancel-button"
+- extendedWaitUntil:
+    visible:
+      id: "passenger-cancellation-screen"
+    timeout: 30000
+- assertVisible:
+    id: "passenger-cancellation-keep-button"
+- takeScreenshot: "passenger-cancellation-before-dismiss"
+- tapOn:
+    id: "passenger-cancellation-keep-button"
+- extendedWaitUntil:
+    visible:
+      id: "passenger-trip-screen"
+    timeout: 30000
+- assertNotVisible:
+    id: "passenger-cancellation-screen"
+- takeScreenshot: "passenger-accepted-after-cancel-dismiss"

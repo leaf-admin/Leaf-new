@@ -10,6 +10,10 @@ describe('Robotaxi reduced motion contract', () => {
     path.join(__dirname, '..', 'src', 'components', 'prototype', 'PrototypeDismissibleSheet.js'),
     'utf8',
   );
+  const mapSource = fs.readFileSync(
+    path.join(__dirname, '..', 'src', 'components', 'prototype', 'PrototypeMapLayer.js'),
+    'utf8',
+  );
 
   it('renders screen transitions without animation when reduced motion is enabled', () => {
     expect(transitionSource).toContain('useReducedMotion');
@@ -22,5 +26,12 @@ describe('Robotaxi reduced motion contract', () => {
     expect(sheetSource).toContain('translateY.value = 0');
     expect(sheetSource).toContain('onClose?.()');
     expect(sheetSource).toContain('translateY.value = reduceMotion ? 0 : withSpring');
+  });
+
+  it('shows the complete route immediately instead of progressively drawing it', () => {
+    expect(mapSource).toContain('useReducedMotion');
+    expect(mapSource).toContain('reduceMotion,');
+    expect(mapSource).toContain('reduceMotion === true');
+    expect(mapSource).toContain("'reduced_motion'");
   });
 });

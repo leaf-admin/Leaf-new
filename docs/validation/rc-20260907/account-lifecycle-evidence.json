@@ -1,0 +1,25 @@
+{
+  "scope": "Local tests with mocks; no production or emulator evidence",
+  "files": {
+    "leaf-websocket-backend/routes/account-routes.js": "54e6f9066532f60c97b5d1431d2ab2fec8452e0212455395ec7765bd13fce324",
+    "leaf-websocket-backend/services/cpf-identity-registry-service.js": "1e783ac206c3f94fd3f8cebe0c5f9bf7e9b48ea7aae5572e616a227b4201006b",
+    "leaf-websocket-backend/services/driver-approval-service.js": "0f991b5840e007f7edc05b315ee3f37cfceb1191f9fa6cea9b63b9500e2899bd",
+    "leaf-websocket-backend/scripts/deploy/validate-runtime-config.js": "f4ebc13937d1b7103c7a8b2ff2e6a827e475384df34f1dabe3e4aca1343bbef2",
+    "leaf-websocket-backend/tests/unit/routes/account-routes.unit.test.js": "34f08963b89ee1f90b10393a10cdc1fe4de2ecdb697bfb1599ea39e062b6c064",
+    "leaf-websocket-backend/tests/unit/services/cpf-identity-registry-service.unit.test.js": "d9c71e6f32d24fc6b039c9e7298002c0d0c3e11b40f4037ab1ddf23b84c57483",
+    "leaf-websocket-backend/tests/unit/scripts/validate-runtime-config.unit.test.js": "8bb6b9a54569a7ba00470bfdcad8b4119c505f9163b9fca36d4881d9d389891b",
+    ".github/workflows/eas-build.yml": "f133e3d78a91feaad1c6061953d296e36a493ac255caf0616b12f9a05aeb075e",
+    "leaf-websocket-backend/services/account-lifecycle-service.js": "dfa413dd03cd90a67e2bd53a9169f2aaf03ca4489506ed911b9c9dc17772db61",
+    "leaf-websocket-backend/services/cpf-review-service.js": "50ba26e162d9aea6dd5a25ba22363ece7863c9de0dae0f71ca9f66757e509402",
+    "leaf-websocket-backend/tests/unit/services/account-lifecycle-service.unit.test.js": "55a3a86b9a01a71d75043cd95a550ebfa604071e356370caa2f781b72807500b",
+    "leaf-websocket-backend/tests/unit/services/cpf-review-service.unit.test.js": "5004aae1929bd1646202d95050d231ee7a1fc95c760138a791c8fbe7b811cb19",
+    "leaf-websocket-backend/tests/unit/helpers/lifecycle-memory.cjs": "3853188f2d46118acd9b5e0253eee61535132e5dc7f01211755f882f279ca211"
+  },
+  "logs": {
+    "/tmp/leaf-lifecycle-accepted.log": "d1beb295dcd6ea121520060e4e386abe51effc2adaf0791782502d15b367019d",
+    "/tmp/leaf-lifecycle-legacy-final.log": "83010cb8392ed1804e06505ad53a1c5e6c7d5ba2ee0c5cfe63da7504ac4250f9",
+    "/tmp/leaf-lifecycle-architecture.log": "f6ce6ee5c8db20d41a51f6ee41cf54c5ae2d09859ff64ddd7a5b199616f8512e",
+    "/tmp/leaf-lifecycle-rules.log": "22f3abcd2da849a5fbb5f5dad391849648a06a20466df82ff861986285bfb4e6",
+    "/tmp/leaf-lifecycle-config-approval.log": "e888c536e87e03d0c8cdd3624952a5a9e4a4e8ccbfd2f1f347202c7634fb03e9"
+  }
+}

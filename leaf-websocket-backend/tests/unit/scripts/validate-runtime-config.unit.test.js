@@ -1,4 +1,6 @@
 const path = require('path');
+const fs = require('fs');
+const os = require('os');
 const { spawnSync } = require('child_process');
 
 const backendRoot = path.resolve(__dirname, '../../..');
@@ -13,6 +15,7 @@ function runValidator(extraEnv = {}) {
       PATH: process.env.PATH,
       HOME: process.env.HOME,
       ENV_FILE: absentEnvFile,
+      CPF_REVIEW_HMAC_KEY: 'ci-test-only-cpf-review-key-not-for-production',
       LEAF_BROAD_LAUNCH_APPROVED: 'true',
       REDIS_MODE: 'sentinel',
       REDIS_SENTINELS: 'sentinel-a:26379,sentinel-b:26379,sentinel-c:26379',
@@ -96,6 +99,38 @@ describe('validate-runtime-config Woovi webhook production gates', () => {
     REDIS_CRITICAL_DATASET_GENERATION: 'prod-test-generation',
     KYC_TRUSTED_RANDOM_AUDIT_PERCENT: '10'
   };
+
+  it('preserves explicit process runtime selectors over an env file', () => {
+    const envFile = path.join(
+      os.tmpdir(),
+      `leaf-runtime-config-${process.pid}-${Date.now()}.env`
+    );
+    fs.writeFileSync(envFile, [
+      'NODE_ENV=production',
+      'WOOVI_ENVIRONMENT=production',
+      'WOOVI_BASE_URL=https://api.woovi.com/api/v1',
+      'WOOVI_API_TOKEN=file-token',
+      'LEAF_PIX_KEY=file-pix-key'
+    ].join('\n') + '\n');
+
+    try {
+      const result = runValidator({
+        ENV_FILE: envFile,
+        NODE_ENV: 'development',
+        WOOVI_ENVIRONMENT: 'sandbox',
+        WOOVI_BASE_URL: 'https://api.woovi-sandbox.com/api/v1',
+        WOOVI_API_TOKEN: 'process-token',
+        LEAF_PIX_KEY: 'process-pix-key'
+      });
+
+      expect(result.status).toBe(0);
+      expect(result.report.nodeEnv).toBe('development');
+      expect(result.report.wooviEnv).toBe('sandbox');
+      expect(result.report.baseUrl).toBe('https://api.woovi-sandbox.com/api/v1');
+    } finally {
+      fs.rmSync(envFile, { force: true });
+    }
+  });
 
   it('blocks a full production profile without formal broad-launch approval', () => {
     const result = runValidator({
@@ -1618,5 +1653,17 @@ describe('validate-runtime-config Woovi webhook production gates', () => {
       'KYC_TRUST_T2_MIN_SUCCESS_COUNT deve ser exatamente 14 na política driver_identity_recurring_v2',
       'KYC_TRUST_T2_MIN_DISTINCT_SUCCESS_DAYS deve ser exatamente 14 na política driver_identity_recurring_v2'
     ]));
+  });
+});
+
+describe('CPF review runtime gates', () => {
+  test('enabled review requires a dedicated key without exposing its value', () => {
+    const result = runValidator({ NODE_ENV: 'test', CPF_REVIEW_ENABLED: 'true', CPF_REVIEW_HMAC_KEY: 'short' });
+    expect(result.report.summary.blockers).toEqual(expect.arrayContaining([expect.stringContaining('CPF_REVIEW_HMAC_KEY')]));
+    expect(result.stdout).not.toContain('"short"');
+  });
+  test('production cannot disable CPF review', () => {
+    const result = runValidator({ NODE_ENV: 'production', CPF_REVIEW_ENABLED: 'false' });
+    expect(result.report.summary.blockers).toEqual(expect.arrayContaining([expect.stringContaining('CPF_REVIEW_ENABLED=false')]));
   });
 });

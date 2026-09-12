@@ -32,6 +32,7 @@ import {
   sanitizeAuthUserForOnboarding,
   PROFILE_SELECTION_STEP_INDEX
 } from '../../utils/onboardingSessionState';
+import { toUserFriendlyMessage } from '../../utils/friendlyErrorMessages';
 
 const { color } = onboardingTheme;
 const AUTH_UID_STORAGE_KEY = '@auth_uid';
@@ -708,8 +709,10 @@ const AuthFlow = ({
     }
 
     let savedProfilePayload = null;
+    let profileSaveResult = null;
     try {
       const result = await OnboardingProfileService.saveOnboardingProfile(onboardingData);
+      profileSaveResult = result;
       if (result?.success && result?.profile) {
         savedProfilePayload = result.profile;
       }
@@ -720,7 +723,10 @@ const AuthFlow = ({
     if (!savedProfilePayload) {
       Alert.alert(
         'Cadastro não confirmado',
-        'Não foi possível salvar seu cadastro agora. Verifique sua conexão e tente novamente.',
+        toUserFriendlyMessage(profileSaveResult?.error, {
+          context: 'auth',
+          fallbackMessage: 'Não foi possível salvar seu cadastro agora. Verifique sua conexão e tente novamente.'
+        }),
       );
       return false;
     }

@@ -1,0 +1,507 @@
+{
+  "kind": "local-review-inputs-not-release-manifest",
+  "head": "c5cf21fd4830108dc17bc8fad872fdadc2877064",
+  "branch": "codex/uiux-integration-validation",
+  "files": [
+    {
+      "path": "docs/validation/CANONICAL_PHYSICAL_QA_PROFILE.md",
+      "sha256": "76dd87a0ea0b84658a54a6400777e617b826844712c079f3a9bdbd2cb53960f3"
+    },
+    {
+      "path": "docs/validation/CURRENT_SURFACE_MENU_AUDIT_20260903.md",
+      "sha256": "c3305bba5321f857e2ce0eca0006b7df35107f1cb54e0d4781e1f0423a834cc4"
+    },
+    {
+      "path": "docs/validation/FIREBASE_TEST_PHONE_AUTH_SMOKE_20260903.md",
+      "sha256": "60530dd9198b9cf1e5645c7981f7c866771464e0abba3b561866d009297564e1"
+    },
+    {
+      "path": "docs/validation/LIFECYCLE_TRANSITION_VALIDATION_20260903.md",
+      "sha256": "9ac64e1f974ad3ffbce7da0ec62f9f78c47ebbd1a3a1ae473ae99a5c1d37bb9b"
+    },
+    {
+      "path": "docs/validation/TERMINAL_TRANSITION_VALIDATION_20260903.md",
+      "sha256": "360435ce54e842a7b6c44e92955ca9602bf9fb8d6191d6b325145c6a7152faad"
+    },
+    {
+      "path": "docs/validation/UX_STATE_REBRAND_TODO.md",
+      "sha256": "fb768aaf8cbeb5d6e0acfa5cb1fd2a1e8ad077ec25485e7492125655fcda3535"
+    },
+    {
+      "path": "leaf-dashboard-js/app/drivers/[id]/documents/page.js",
+      "sha256": "ebbec00cf0c1cf5a6e40f15d288d22c350afffb66ac59705f81712d6e178d977"
+    },
+    {
+      "path": "leaf-dashboard-js/package.json",
+      "sha256": "1b8ac71b96251367725262c817ce1eda6ad4d98ddf8a5d7c83ac7b80b77daf02"
+    },
+    {
+      "path": "leaf-dashboard-js/scripts/tests/kyc-identity-review-panel-contract.cjs",
+      "sha256": "6b9c3c88445313d41255ce172f18eaa8eed2736915cfa786c03fd3dec0d58ef0"
+    },
+    {
+      "path": "leaf-dashboard-js/src/components/kyc/KycIdentityReviewPanel.jsx",
+      "sha256": "8e05dbcbc74989f07c6f79ca4be6e590af49ce429cf77208d4cf3eb89c2e5f79"
+    },
+    {
+      "path": "leaf-websocket-backend/package.json",
+      "sha256": "568bf56ea422e4e2b5df535891be5e2a82ff9a2257544c35477a7dec155ddd44"
+    },
+    {
+      "path": "leaf-websocket-backend/routes/account-routes.js",
+      "sha256": "af08c1d3929f496acc6e9db5fdacea4d6506291eb3ed5101d09bc7e226664804"
+    },
+    {
+      "path": "leaf-websocket-backend/routes/dashboard.js",
+      "sha256": "2205680d26c10cf411644b09e31071a12ecc1db8e7210b52ff185e130c947ae7"
+    },
+    {
+      "path": "leaf-websocket-backend/routes/payment.js",
+      "sha256": "36e2d63516184a11e45f40ff24f993b0736cbdb9438171d6134b79b2901f2a10"
+    },
+    {
+      "path": "leaf-websocket-backend/routes/support.js",
+      "sha256": "8b4bea2b0ed49b866511edb2486b185a7c9a4f006d015fa3e674f80f9e27b446"
+    },
+    {
+      "path": "leaf-websocket-backend/routes/woovi-driver.js",
+      "sha256": "761bcf742dd4897e1aafbdb0e119f237099aa50e4ccdd399204cef3e0bda0e59"
+    },
+    {
+      "path": "leaf-websocket-backend/routes/woovi.js",
+      "sha256": "5c0dbf32d4b5250b9f0d5c4329ac038493e24726b553c339128c98ce8a3fa889"
+    },
+    {
+      "path": "leaf-websocket-backend/scripts/deploy/validate-runtime-config.js",
+      "sha256": "c4548ebd86d41e3671b2d68149cad032adcad784acf1ea7cf61c2a38af52bfd3"
+    },
+    {
+      "path": "leaf-websocket-backend/scripts/tests/driver-dispatch-bot.cjs",
+      "sha256": "5c1cb47f43d47d2835efbd6ed29fc7b04c7806004be4a6ed6c1372966b156234"
+    },
+    {
+      "path": "leaf-websocket-backend/scripts/tests/smoke-woovi-sandbox.cjs",
+      "sha256": "584d77d04280b5661f5145f7d32c3d957e61a9a1286aacdd3061fb2202516630"
+    },
+    {
+      "path": "leaf-websocket-backend/server.js",
+      "sha256": "344b2bf0ad5af3a6131ec2bed4fc7a62fc545c8b4a883256f76d86b596b9a8a0"
+    },
+    {
+      "path": "leaf-websocket-backend/services/cpf-identity-registry-service.js",
+      "sha256": "5fb02d8f7368cb2d0d55fb35b5926016b82a5d915a250075eb77f43c59adc57d"
+    },
+    {
+      "path": "leaf-websocket-backend/services/driver-approval-service.js",
+      "sha256": "e9353d8189daa6577c7592bc0a33e4a8836c8edf3f94f7742a9b4d82111b1984"
+    },
+    {
+      "path": "leaf-websocket-backend/services/driver-identity-trust-service.js",
+      "sha256": "f40c175ebc169642435e43baccec88b5511869880b18bd6b7ba8c1b75ed2f9a9"
+    },
+    {
+      "path": "leaf-websocket-backend/services/financial-reconciliation-dashboard-service.js",
+      "sha256": "e74542efb7315d998f9f4a0914d2dbc6b6b07b179fa52a3b87c59c9bc7de7cfc"
+    },
+    {
+      "path": "leaf-websocket-backend/services/kyc-identity-review-workflow-service.js",
+      "sha256": "be48c410277679d36ae252c194c4322a431825bac0143386d4d15aeedb045cd2"
+    },
+    {
+      "path": "leaf-websocket-backend/services/payment-service.js",
+      "sha256": "79e7f33734f74e5985ae19cf749a08a94c02c50e654900e9bf8f245dea651439"
+    },
+    {
+      "path": "leaf-websocket-backend/services/woovi-driver-service.js",
+      "sha256": "6108e917509f9863752a198990271bccc319a69519da9df06a31147a1ec0faba"
+    },
+    {
+      "path": "leaf-websocket-backend/tests/unit/routes/account-routes.unit.test.js",
+      "sha256": "bdc26d39257090aa45454f375b274c8ef81ede44b927460f732461a2056a2ebe"
+    },
+    {
+      "path": "leaf-websocket-backend/tests/unit/routes/dashboard-financial-route-guards.unit.test.js",
+      "sha256": "0f0e1f265e30a217e530b7ff09da92bbdb3dba1cfa8be98c87c9a0895c7786c2"
+    },
+    {
+      "path": "leaf-websocket-backend/tests/unit/routes/dashboard-kyc-identity-review-boundary.unit.test.js",
+      "sha256": "a802eba1f51ce20f3b4276854fec2dc673488662eb20e070e36765a2ea86b09f"
+    },
+    {
+      "path": "leaf-websocket-backend/tests/unit/routes/support-routes-admin-ops.unit.test.js",
+      "sha256": "0dc4d07825e61ca4a58f4d06f5b44ed3bbd3b86f7f08a5811c2c84c753f1c80b"
+    },
+    {
+      "path": "leaf-websocket-backend/tests/unit/routes/woovi-webhook-guards.unit.test.js",
+      "sha256": "358ca3861b8cf4e499cbee41493990fca202b256f0a1a97053b0c91860a12f5b"
+    },
+    {
+      "path": "leaf-websocket-backend/tests/unit/scripts/smoke-woovi-sandbox.unit.test.js",
+      "sha256": "ccec76597128c8d3a976d5b0534c70f49c8798796f4787a4717de3635b66fe59"
+    },
+    {
+      "path": "leaf-websocket-backend/tests/unit/scripts/validate-runtime-config.unit.test.js",
+      "sha256": "15ea651c694c64280226cf6b6090293b2b7c337a76c2feb8e773f11774318b53"
+    },
+    {
+      "path": "leaf-websocket-backend/tests/unit/services/cpf-identity-registry-service.unit.test.js",
+      "sha256": "d6f304c615b5d004e3dc3fe87e3d8b867e6abc591f896a1902da5e665bd02c1d"
+    },
+    {
+      "path": "leaf-websocket-backend/tests/unit/services/driver-approval-woovi-subaccount.unit.test.js",
+      "sha256": "ea3f09cc1bcef9bc9a96e194ed6d4bbb9f6d0a07b8f6977cb55c743e432d9184"
+    },
+    {
+      "path": "leaf-websocket-backend/tests/unit/services/driver-identity-trust-service.unit.test.js",
+      "sha256": "3188fa70f57f536f71c2877b101bc320decada0ddfcebfdcd64ec370c3af4bb3"
+    },
+    {
+      "path": "leaf-websocket-backend/tests/unit/services/financial-reconciliation-dashboard-service.unit.test.js",
+      "sha256": "4204ab3f9ec7a20b7e55cebaa2d4a2bcea3858791940bc18ec4946010376a991"
+    },
+    {
+      "path": "leaf-websocket-backend/tests/unit/services/kyc-identity-review-workflow-service.unit.test.js",
+      "sha256": "f6dc047e12478de9c71c38c3a0d71eb1adc83488a0206294605f349f39400ff8"
+    },
+    {
+      "path": "leaf-websocket-backend/tests/unit/services/payment-service.payment-status-cache.unit.test.js",
+      "sha256": "d8b6fa08faf4cbce8c46dda10875fd1a7cb5d7ff0869e71d85f2fa4e74b0c2d5"
+    },
+    {
+      "path": "leaf-websocket-backend/tests/unit/services/woovi-driver-service.unit.test.js",
+      "sha256": "1c48088c6cea032bf61961675a2c64f040abfc1ac20f36c29c4ba13f97d7ccea"
+    },
+    {
+      "path": "mobile-app/.maestro/flows/qa/_accept-open-prompt-no-launch.yaml",
+      "sha256": "81c7f9de1226a87029958edc2ca75eb3408d1e306f9bf3df88b0729bf5b1697c"
+    },
+    {
+      "path": "mobile-app/.maestro/flows/qa/boot-app-ready-ios.yaml",
+      "sha256": "4d82a2a6f7ab574f0fcaf48bb9f15e2dc0c569a6d5fb2fc93b6fab12f750758b"
+    },
+    {
+      "path": "mobile-app/.maestro/flows/qa/e2e/01-driver-login-online-8082.yaml",
+      "sha256": "66506586d6e32e78b84fa45c90d3067a9269ccb7181c448ac9fa9e97c1f59a46"
+    },
+    {
+      "path": "mobile-app/.maestro/flows/qa/e2e/02-passenger-login-8081.yaml",
+      "sha256": "6a480ffab0df88a8330dfe90064313e0f6eed353ef1e8dafd2e54c130f296afe"
+    },
+    {
+      "path": "mobile-app/.maestro/flows/qa/qa-session-bootstrap-ios.yaml",
+      "sha256": "b17d1c3753c30380b663e2520288e811cd5a6972967f053c3e4ee3adda223442"
+    },
+    {
+      "path": "mobile-app/.maestro/flows/qa/qa-session-reset-ios.yaml",
+      "sha256": "d2f40d4b62f7f52cff2be6b705b84409f1a9e202fe072d9cf89c669905931146"
+    },
+    {
+      "path": "mobile-app/.maestro/flows/qa/transitions/passenger-accepted-cancel-dismiss-ios.yaml",
+      "sha256": "e614fd460b555c85c9d87784cc5a0491898600f301ba386d517d7552cbf1d3b3"
+    },
+    {
+      "path": "mobile-app/.maestro/flows/qa/transitions/passenger-cancelled-return-to-home-ios.yaml",
+      "sha256": "62a2128782911ce7769d6e860cf3c761fa8ed63da3e38cd3822b7e4f280c5c27"
+    },
+    {
+      "path": "mobile-app/.maestro/flows/qa/transitions/passenger-no-drivers-retry-to-home-ios.yaml",
+      "sha256": "ada4abed02fdea56cca7723234cf3d4f7ba6fd62ea667acb59db597766a8cf4b"
+    },
+    {
+      "path": "mobile-app/.maestro/flows/qa/transitions/passenger-payment-failed-retry-to-home-ios.yaml",
+      "sha256": "a07d259951b7dec64d4cb2c5032f1d9af031ee29d5742303ee02c5cc22430119"
+    },
+    {
+      "path": "mobile-app/.maestro/flows/qa/ui-ux-lifecycle-state-assert-ios.yaml",
+      "sha256": "854271fa8916fa96d10bd72354169ee16fad4d17bd04180b165b6021dfc88c2c"
+    },
+    {
+      "path": "mobile-app/__tests__/android-build-script.test.js",
+      "sha256": "e7b7858b548eaa4537357604be29d020ddbc7d975b252f65f4ba0c5e3d140216"
+    },
+    {
+      "path": "mobile-app/__tests__/android-real-device-smoke-contract.test.js",
+      "sha256": "a846176038d98067696b77de755c52e4b6bc2e22e02e74c1c98ba33f8f3f3198"
+    },
+    {
+      "path": "mobile-app/__tests__/driver-home-overlay.test.js",
+      "sha256": "b3492580f43160f16be213af5d866626404b61c04248d00b0115890bad4c6b8b"
+    },
+    {
+      "path": "mobile-app/__tests__/driver-online-toggle.test.js",
+      "sha256": "d2a95014249429f1b3d7bb9823e3c8fbff2125f2d1fa36df46693946b96afbd1"
+    },
+    {
+      "path": "mobile-app/__tests__/friendly-error-messages.test.js",
+      "sha256": "96e41d8e1cc5b148de3de316263becad1c0aad49cab80fd68c02ede085b0a74d"
+    },
+    {
+      "path": "mobile-app/__tests__/native-aws-liveness-localization-contract.test.js",
+      "sha256": "75e36210287798198ab96347d5da649d16504994cb870093de1454a927c7d55a"
+    },
+    {
+      "path": "mobile-app/__tests__/onboarding-profile-service.test.js",
+      "sha256": "ea40ace38098c179f5afa12d0ff4ab2bec2a489c65df389e51dac27a66e76eb4"
+    },
+    {
+      "path": "mobile-app/__tests__/passenger-home-automation-config.test.js",
+      "sha256": "daa240bbd20b8ba718774b26efeb2753340fab5a4f94712c31a99fbddef41d62"
+    },
+    {
+      "path": "mobile-app/__tests__/passenger-home-overlay.test.js",
+      "sha256": "f2434abce6c5018c3c5e1bf0d043175203075588ffddf7fc54f3f40810cc9ed1"
+    },
+    {
+      "path": "mobile-app/__tests__/phone-input-step.auth.test.js",
+      "sha256": "b9e49c2c0f265a3fa56440898343dde36b48c86786da032fc9364a5e256d0b5f"
+    },
+    {
+      "path": "mobile-app/__tests__/prototype-map-layer-viewport.test.js",
+      "sha256": "6f9f814e22564c950afb32e78e3982b8c13fea9b7db4b07d0367a3e0b61bb961"
+    },
+    {
+      "path": "mobile-app/__tests__/prototype-reduced-motion.test.js",
+      "sha256": "012b9dd4504a79a0402e329229700f23bef0db47007494becef6db6b9a1d37a2"
+    },
+    {
+      "path": "mobile-app/__tests__/prototype-runtime-session-sanitize.test.js",
+      "sha256": "2ea0b7476174facf33b6cbf31b37957d8a09475ebd603125770e430d09339c60"
+    },
+    {
+      "path": "mobile-app/__tests__/prototype-screen-transition.test.js",
+      "sha256": "a49299acbf95309777c58137802f4711f8e561a1ff3c403099ae70bd7dde23f8"
+    },
+    {
+      "path": "mobile-app/__tests__/qa-seed-current-routes.test.js",
+      "sha256": "70283f48c694a4fb71bbe1924648f22f010b9dbd0dea49b3adfcdced9aa93928"
+    },
+    {
+      "path": "mobile-app/__tests__/qa-seed-profile.test.js",
+      "sha256": "eb4c00659949456bce039441aa5b0fe8b37b81c4aad9a191c703a7cdf91c1376"
+    },
+    {
+      "path": "mobile-app/__tests__/same-ride-reconciliation-contract.test.js",
+      "sha256": "8f1892624ed71d84e566440bceed17875a6403c5b51a849067a2044e7078d688"
+    },
+    {
+      "path": "mobile-app/__tests__/ux-lab.test.js",
+      "sha256": "9f49c4503e0fac264485e0f662c298cdef658d653d9238d52a109fa9adb0d618"
+    },
+    {
+      "path": "mobile-app/__tests__/woovi-payment-modal.test.js",
+      "sha256": "ad317a424726158fc1dccd4c67f5d00aa6858329fbeebced4b19ae2856712ccf"
+    },
+    {
+      "path": "mobile-app/ios/Leaf.xcodeproj/project.pbxproj",
+      "sha256": "64b14d8d893a7ffd496ae6be93d6e2f0dc082cc5c58c68eb569dcd9020bc68e6"
+    },
+    {
+      "path": "mobile-app/jest.config.js",
+      "sha256": "88278dc7b62519a94f269dfe5bc45001039ca09999da9b5e28b3cc5efe045c8c"
+    },
+    {
+      "path": "mobile-app/package.json",
+      "sha256": "0765198652212af65b286cf20dfaae062cbf43c3d9c90d917d14919493b2668f"
+    },
+    {
+      "path": "mobile-app/scripts/build-local-android.sh",
+      "sha256": "20856bab2b3c531e0e068179f3380fe1ee5961f33a96932b4f994b080091919b"
+    },
+    {
+      "path": "mobile-app/scripts/build-local-ios.sh",
+      "sha256": "237475f8fb21dde8e27b06f6f63280df05c9b3c01df635cbfd1271a989674a07"
+    },
+    {
+      "path": "mobile-app/scripts/local-build-doctor.sh",
+      "sha256": "44c3d1ec460152d5478cbd42a1d7ce8a138907ca0b9945e18e16bd75ae906ce2"
+    },
+    {
+      "path": "mobile-app/scripts/manual-e2e-helper.cjs",
+      "sha256": "e3d5f1cc850e80cad4dbc36bd9b61a8dedcd261a1622665a3fd6181f71f60838"
+    },
+    {
+      "path": "mobile-app/scripts/qa-simulate-ride-flow.cjs",
+      "sha256": "b5452604e1d52740192558df2da013ed2197e09cf6707e4f1dc2d43119e54958"
+    },
+    {
+      "path": "mobile-app/scripts/qa/android-real-device-smoke.cjs",
+      "sha256": "4890b8c659eadb028a9846812b22329004cf6e30654ed1f190797e51ef12d3a2"
+    },
+    {
+      "path": "mobile-app/scripts/qa/assert-backend-payment-runtime-canary.sh",
+      "sha256": "e722af2bd5625d567d0fbae5e20ce7b164a945b8677861c779bb0487f9cbc42f"
+    },
+    {
+      "path": "mobile-app/scripts/qa/assert-backend-real-sandbox.sh",
+      "sha256": "a168f89002a5a7d5f635db217d2be2a95644765f0e71e3827cea813ccf4f94a1"
+    },
+    {
+      "path": "mobile-app/scripts/qa/build-smoke-evidence-report.cjs",
+      "sha256": "616f098822736d0d2522c99a0f0e82756d37c8ad92067c7ce4cd4e204d5b02b4"
+    },
+    {
+      "path": "mobile-app/scripts/qa/collect-ride-dashboard-evidence.cjs",
+      "sha256": "d32462f1691c88359feac009dbd2a3f60611334faee02fdcd7d846cce74bf893"
+    },
+    {
+      "path": "mobile-app/scripts/qa/current-flow-e2e-debug-run.sh",
+      "sha256": "0d56b0378fe2d71c809200b89dfc6b1d5ac5f663cfe900e0da8e1c800557161a"
+    },
+    {
+      "path": "mobile-app/scripts/qa/current-flow-e2e-lab.cjs",
+      "sha256": "70e97d0c5573cd2543f9ad2cf888a2662a056583438ddcd506d04720e2aa8f40"
+    },
+    {
+      "path": "mobile-app/scripts/qa/driver-bot-passenger-device.cjs",
+      "sha256": "1bd22ee6b2cf77c39e2e4764d94077a409949901824fdda6e4feb94564840410"
+    },
+    {
+      "path": "mobile-app/scripts/qa/open-dual-ios-vps.sh",
+      "sha256": "01fa92c9486f1b53551ba1eb7d3f0b11a781a61ce2e82f2d610642d740632025"
+    },
+    {
+      "path": "mobile-app/scripts/qa/preflight-dual-ios-vps.sh",
+      "sha256": "2ee2e9b59924d91aabe31c882d3b673765323e01d4cdcb63fd3ba7005dc14f9c"
+    },
+    {
+      "path": "mobile-app/scripts/qa/prepare-real-smoke-env.sh",
+      "sha256": "2d440033acfdb4ffe8112d46f0b7727b4403dda44ef286f2664704d7a2f40b18"
+    },
+    {
+      "path": "mobile-app/scripts/qa/run-dual-driver-concurrency-ios.sh",
+      "sha256": "556c2442e04d6398981e5aa65a5bc2143f7dfd688df176c8c23d64e83f347342"
+    },
+    {
+      "path": "mobile-app/scripts/qa/run-prototype-ios-state-matrix.cjs",
+      "sha256": "eccfebd68ced7377c24b169d32d58ef8f3120d4f0c82a00b80cb90e61c7d2f4e"
+    },
+    {
+      "path": "mobile-app/scripts/qa/seed-prototype-android-state.cjs",
+      "sha256": "a078e417a305cd7f2d133381635d33caf10cf98e04f45c696eb7722db6a68376"
+    },
+    {
+      "path": "mobile-app/scripts/qa/seed-prototype-ios-state.cjs",
+      "sha256": "786dbd9a37ebc5f526be678e7e27192cec3bef9174d2e772d2b4af496ec6f229"
+    },
+    {
+      "path": "mobile-app/scripts/qa/simulate-latest-ride-payment.sh",
+      "sha256": "d629865ab6213bf39bf667c4403d9c68442e4849b3fff6495bc4c03e3e4603e3"
+    },
+    {
+      "path": "mobile-app/scripts/qa/validate-same-ride-reconciliation.cjs",
+      "sha256": "e19fe67581e1073d7defe6e946bdaccebfaf3b35d9d6c9891c5997acb937cbb1"
+    },
+    {
+      "path": "mobile-app/scripts/qa/verify-android-role-runtimes.sh",
+      "sha256": "fa5cdc93a2e718afada13fea453d293db4501deecad18aa8894c86db6292f8eb"
+    },
+    {
+      "path": "mobile-app/scripts/qa/verify-host-readiness.sh",
+      "sha256": "799044643a1916d1be73ccb12b32c2a50de61c2ad80cab20539e5848056f0e10"
+    },
+    {
+      "path": "mobile-app/scripts/run-e2e-stable-guarded.sh",
+      "sha256": "82213f1a5ce1d4e4bd1066accb761c23e015d6f191e3be424270b57901195129"
+    },
+    {
+      "path": "mobile-app/scripts/run-e2e-vps.sh",
+      "sha256": "8954fafd40b3094966f3b2ba3be752c56f02db617c7566d5854624a4427db176"
+    },
+    {
+      "path": "mobile-app/scripts/run-prototype-ideal-lifecycle-ios.sh",
+      "sha256": "04fd4d93423a9556ad8b1603628a0bc0adc89b3381d02e91ca577464c42ed676"
+    },
+    {
+      "path": "mobile-app/scripts/source-local-build-env.sh",
+      "sha256": "3940291b7abb65bde21352624a902e8da8e319cc9f2fd8ee98b68d114390415c"
+    },
+    {
+      "path": "mobile-app/src/components/auth/AuthFlow.js",
+      "sha256": "08aa803233ce8e507c6370cab69a9949ab5cd8eee3b4ac07b24e9dfe983535a4"
+    },
+    {
+      "path": "mobile-app/src/components/auth/steps/PhoneInputStep.js",
+      "sha256": "62ff84993a46543eee98214355fdaf0114965140318c15d33b47c12e2432be79"
+    },
+    {
+      "path": "mobile-app/src/components/payment/WooviPaymentModal.js",
+      "sha256": "2990c27dcfaf9080a99f363720de8582de6e1eba575f313ec9ea5de90b4fd28d"
+    },
+    {
+      "path": "mobile-app/src/components/prototype/PrototypeMapLayer.js",
+      "sha256": "18ebc76cda08540bc19ad6f4baba4bd36744d74720fbdacb91a2421123727e10"
+    },
+    {
+      "path": "mobile-app/src/components/prototype/PrototypeScreenTransition.js",
+      "sha256": "fc4274cee8542cf290e9360e34f1538a8b5b5123c97b1d4c066b8923b3083f1c"
+    },
+    {
+      "path": "mobile-app/src/config/reviewAccounts.js",
+      "sha256": "53ba01bd275209bc6b1979dc509f01da074738ccc58793be9f909984145e3079"
+    },
+    {
+      "path": "mobile-app/src/screens/prototype/RobotaxiCancellationScreen.js",
+      "sha256": "1930daeba1f73e5a19a3cdb7cb226ec4714855417c8d0b9c9b6eabd1ce918be6"
+    },
+    {
+      "path": "mobile-app/src/screens/prototype/RobotaxiDestinationScreen.js",
+      "sha256": "83a3470189f92c64b161eb35d0646a0f9d1722ff2be179e57755cee28502e52d"
+    },
+    {
+      "path": "mobile-app/src/screens/prototype/RobotaxiHomeScreen.js",
+      "sha256": "d7a3fdc88613c8c93fdca3a9b1ab24491c232e5a5288035acdaaacce0af35139"
+    },
+    {
+      "path": "mobile-app/src/screens/prototype/RobotaxiPaymentFailedScreen.js",
+      "sha256": "60d634db9faaf872ffeba888816aa1faf0fd4079964f32535b02e9d90f3d105d"
+    },
+    {
+      "path": "mobile-app/src/screens/prototype/RobotaxiTripScreen.js",
+      "sha256": "52276b13ee8d24a3c7425ee00d11152b1ea7812c18632ad7237ddcb7189f2ad3"
+    },
+    {
+      "path": "mobile-app/src/screens/prototype/home/DriverHomeOverlay.js",
+      "sha256": "8c799fd7dad244b332b9e66a7cd25f7ab07baa30f1c16189b6b81866425286de"
+    },
+    {
+      "path": "mobile-app/src/screens/prototype/home/DriverLiveRideOverlay.js",
+      "sha256": "7286f81e804d87df2fb9588ec629cbf2cd68a4bfdcef9f1b16407fc2f11aa509"
+    },
+    {
+      "path": "mobile-app/src/screens/prototype/home/PassengerHomeOverlay.js",
+      "sha256": "56a8543270530ca8f1af8d784abddd9091a9268223f9aff292c1426f6c26394a"
+    },
+    {
+      "path": "mobile-app/src/screens/prototype/passengerHomeAutomationConfig.js",
+      "sha256": "34c20f50a08470a996768d1356474256d2ebc802b367e76753daee0862d56468"
+    },
+    {
+      "path": "mobile-app/src/screens/prototype/prototypeRideRuntime.js",
+      "sha256": "b5041a5296477187956a7afc4dc13c4adf4792af3a902085d2785e849d20fa44"
+    },
+    {
+      "path": "mobile-app/src/screens/prototype/rideLifecycleSurfaceMatrix.js",
+      "sha256": "41d0a0815e7df5e8bd0bfb36a2cd0a5a517ee14821dad23ab06364c297892ef4"
+    },
+    {
+      "path": "mobile-app/src/services/OnboardingProfileService.js",
+      "sha256": "585e29ce1262d1ce7285970876e779ebe7a232b711dd44eb04835e8dd86fe227"
+    },
+    {
+      "path": "mobile-app/src/services/WooviService.js",
+      "sha256": "724c2697dfb55931fbf4187248806bd6c692efe084b8fc8e796606ad89234f2e"
+    },
+    {
+      "path": "mobile-app/src/utils/friendlyErrorMessages.js",
+      "sha256": "3d8a1a688e313e3067c9ad2e78ffd7545b940dded1685613ff76bcdbe15e3b05"
+    },
+    {
+      "path": "mobile-app/src/utils/qaSeedProfile.js",
+      "sha256": "a00ab7041b2cc7e88ce7a9ed741ace81071ae3da9e4bd72efe3e4690034acbb7"
+    },
+    {
+      "path": "mobile-app/ux-lab/config/journeys.json",
+      "sha256": "d1728c2e62dd8efcac5899da4a20eb6e8fcfc5162b3072aa58c69928fca81b36"
+    }
+  ]
+}

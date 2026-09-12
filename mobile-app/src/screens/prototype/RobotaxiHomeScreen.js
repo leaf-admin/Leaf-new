@@ -195,6 +195,123 @@ const QA_SEEDED_DESTINATION = Object.freeze({
     longitude: -43.17874,
   },
 });
+const QA_VISUAL_PIX_FARE = 22.43;
+const QA_VISUAL_PIX_VALIDITY_MS = 120000;
+
+function buildQaVisualOnlyPaymentParams({
+  destination,
+  originCoordinate,
+  originAddress,
+  fare,
+  nonce,
+} = {}) {
+  const normalizedOrigin = pickHomeMapCoordinate(originCoordinate, DEFAULT_USER_COORDINATE);
+  const normalizedDestination = pickHomeMapCoordinate(destination?.coordinate);
+  if (!normalizedOrigin || !normalizedDestination) {
+    throw new Error('Destino ou origem inválidos para a fixture Pix QA.');
+  }
+
+  const createdAt = Date.now();
+  const safeNonce = String(nonce || 'pix-pending')
+    .trim()
+    .replace(/[^a-zA-Z0-9_-]/g, '-')
+    .slice(0, 48) || 'pix-pending';
+  const resolvedFare = Number(fare);
+  const amount = Number.isFinite(resolvedFare) && resolvedFare > 0
+    ? Number(resolvedFare.toFixed(2))
+    : QA_VISUAL_PIX_FARE;
+  const quoteSessionId = `qa-visual-pix-session-${safeNonce}-${createdAt}`;
+  const quoteLockId = `qa-visual-pix-lock-${safeNonce}-${createdAt}`;
+  const quoteLockExpiresAt = new Date(createdAt + QA_VISUAL_PIX_VALIDITY_MS).toISOString();
+  const routeKey = [
+    normalizedOrigin.latitude,
+    normalizedOrigin.longitude,
+    normalizedDestination.latitude,
+    normalizedDestination.longitude,
+  ].map((value) => Number(value).toFixed(PASSENGER_QUOTE_COORDINATE_PRECISION)).join('|');
+  const routeCoordinates = [
+    normalizedOrigin,
+    {
+      latitude: (normalizedOrigin.latitude + normalizedDestination.latitude) / 2,
+      longitude: (normalizedOrigin.longitude + normalizedDestination.longitude) / 2,
+    },
+    normalizedDestination,
+  ].map((coordinate) => ({ lat: coordinate.latitude, lng: coordinate.longitude }));
+  const pickupLocation = {
+    lat: normalizedOrigin.latitude,
+    lng: normalizedOrigin.longitude,
+    latitude: normalizedOrigin.latitude,
+    longitude: normalizedOrigin.longitude,
+    add: originAddress || 'Localização atual',
+    address: originAddress || 'Localização atual',
+  };
+  const destinationLocation = {
+    lat: normalizedDestination.latitude,
+    lng: normalizedDestination.longitude,
+    latitude: normalizedDestination.latitude,
+    longitude: normalizedDestination.longitude,
+    add: destination?.address || destination?.name || 'Destino',
+    address: destination?.address || destination?.name || 'Destino',
+  };
+  const quoteRouteSnapshot = {
+    pickupLocation,
+    destinationLocation,
+    carType: 'Leaf Plus',
+  };
+
+  return {
+    initialSelectedDestination: destination,
+    initialSelectedPlan: 'plus',
+    startAtConfirmation: true,
+    openPixOnReady: true,
+    qaVisualOnlyPayment: true,
+    initialPricingQuote: {
+      quote: {
+        estimatedFare: amount,
+        grossEstimatedFare: amount,
+        quoteSessionId,
+        quoteLockId,
+        quoteLockExpiresAt,
+        routeCoordinates,
+        routePolyline: null,
+        tollFee: 0,
+        tolls: [],
+        quoteRouteSnapshot,
+      },
+      planId: 'plus',
+      carType: 'Leaf Plus',
+      quoteSessionId,
+      quoteLockId,
+      quoteLockExpiresAt,
+      routeKey,
+      quoteRouteSnapshot,
+      distanceKm: 2.8,
+      durationMin: 4,
+      arrivalTime: '4 min',
+      routeCoordinates,
+      routePolyline: null,
+      tollFee: 0,
+      tolls: [],
+      createdAt,
+      expiresAt: createdAt + QA_VISUAL_PIX_VALIDITY_MS,
+      fare: amount,
+      grossEstimatedFare: amount,
+    },
+    prefilledPaymentData: {
+      chargeId: `mock_review_prebooking-${safeNonce}-${createdAt}`,
+      rideId: `mock_review_prebooking_ride-${safeNonce}-${createdAt}`,
+      qrCodeText: '000201010212mockreviewprebooking',
+      paymentLink: 'https://pix.leaf.local/prebooking-review',
+      amount,
+      amountInCents: Math.round(amount * 100),
+      grossAmount: amount,
+      grossAmountInCents: Math.round(amount * 100),
+      quoteSessionId,
+      quoteLockId,
+      expiresAt: new Date(createdAt + 300000).toISOString(),
+    },
+  };
+}
 const ROUTE_SIDE_PADDING = 72;
 const ROUTE_TOP_EXTRA_PADDING = 22;
 const ROUTE_BOTTOM_EXTRA_PADDING = 28;
@@ -1739,6 +1856,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     driverOnlinePending,
     driverOnlineStartedAt,
     driverOnlineDaily,
+    driverOnlineVisualOnly,
     driverCanGoOnline,
     driverActivationResolved,
     driverActivationRemote,
@@ -1795,6 +1913,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   const lastDriverAutomationExecutionRef = useRef('');
   const lastDriverAutomationSnapshotRef = useRef('');
   const lastPassengerAutomationExecutionRef = useRef('');
+  const lastPassengerAutomationSnapshotRef = useRef('');
   const lastConnectionHealthyRef = useRef(false);
   const hasConnectionSnapshotRef = useRef(false);
   const lastDriverAutomationWatchdogCommandRef = useRef('');
@@ -3730,7 +3849,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   }, [currentRouteName, isScreenFocused, persistedPassengerAutomationCommand]);
 
   useEffect(() => {
-    if (!isDriverRole || !isHomeRoute) {
+    if (!isDriverRole || !isHomeRoute || !isScreenFocused) {
       return undefined;
     }
 
@@ -3798,13 +3917,14 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   }, [
     isDriverRole,
     isHomeRoute,
+    isScreenFocused,
     liveDriverAutomationCommand,
     liveQaRouteParams,
     persistedDriverAutomationCommand,
   ]);
 
   useEffect(() => {
-    if (isDriverRole || !isHomeRoute) {
+    if (isDriverRole || !isHomeRoute || !isScreenFocused) {
       return undefined;
     }
 
@@ -3851,7 +3971,12 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
         clearInterval(pollTimer);
       }
     };
-  }, [isDriverRole, isHomeRoute, persistedPassengerAutomationCommand]);
+  }, [
+    isDriverRole,
+    isHomeRoute,
+    isScreenFocused,
+    persistedPassengerAutomationCommand,
+  ]);
 
   useEffect(() => {
     let active = true;
@@ -4088,6 +4213,29 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
           return '';
         }
         break;
+      case 'show_category':
+        if (
+          normalizedStatus !== 'idle' ||
+          Boolean(activeBookingId) ||
+          !selectedDestination?.coordinate
+        ) {
+          return '';
+        }
+        break;
+      case 'open_pix_pending':
+        if (
+          normalizedStatus !== 'idle' ||
+          Boolean(activeBookingId) ||
+          !selectedDestination?.coordinate
+        ) {
+          return '';
+        }
+        break;
+      case 'open_destination_search':
+        if (normalizedStatus !== 'idle' || Boolean(activeBookingId)) {
+          return '';
+        }
+        break;
       case 'cleanup_active':
         if (!hasCleanupTarget) {
           return '';
@@ -4151,7 +4299,54 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     passengerAutomationConfig.action,
     passengerAutomationConfig.automationEnabled,
     passengerAutomationConfig.bookingId,
-    passengerAutomationConfig.nonce
+    passengerAutomationConfig.nonce,
+    selectedDestination?.coordinate?.latitude,
+    selectedDestination?.coordinate?.longitude,
+  ]);
+
+  useEffect(() => {
+    if (
+      isDriverRole ||
+      !isHomeRoute ||
+      !isScreenFocused ||
+      !passengerAutomationConfig.action
+    ) {
+      return;
+    }
+
+    const snapshot = JSON.stringify({
+      currentRouteName,
+      action: passengerAutomationConfig.action,
+      automationEnabled: passengerAutomationConfig.automationEnabled,
+      nonce: passengerAutomationConfig.nonce,
+      normalizedBookingStatus,
+      activeBookingId: Boolean(activeBookingId),
+      hasSelectedDestination: Boolean(selectedDestination?.coordinate),
+      hasHomeSelectedDestination: Boolean(homeSelectedDestination?.coordinate),
+      executionKey: passengerAutomationExecutionKey || '',
+    });
+    if (lastPassengerAutomationSnapshotRef.current === snapshot) {
+      return;
+    }
+
+    lastPassengerAutomationSnapshotRef.current = snapshot;
+    appendPrototypeRuntimeDebugStep(
+      'passenger_home_automation_state',
+      JSON.parse(snapshot),
+    );
+  }, [
+    activeBookingId,
+    currentRouteName,
+    homeSelectedDestination?.coordinate,
+    isHomeRoute,
+    isDriverRole,
+    isScreenFocused,
+    normalizedBookingStatus,
+    passengerAutomationConfig.action,
+    passengerAutomationConfig.automationEnabled,
+    passengerAutomationConfig.nonce,
+    passengerAutomationExecutionKey,
+    selectedDestination?.coordinate,
   ]);
   const driverAutomationExecutionKey = useMemo(() => {
     if (!driverAutomationConfig.automationEnabled || !driverAutomationConfig.action) {
@@ -6155,6 +6350,14 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     setMapFollowingUser(false);
   }, [hasActiveRoute, isSearchingMode]);
 
+  const handleRouteAnimationEvent = useCallback((event) => {
+    if (!event?.phase) {
+      return;
+    }
+
+    void appendPrototypeRuntimeDebugStep('map_route_animation', event);
+  }, []);
+
   useEffect(() => {
     lastNativeNavigationCameraAtRef.current = 0;
     lastNativeNavigationHeadingRef.current = null;
@@ -8058,7 +8261,12 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   ]);
 
   useEffect(() => {
-    if (!passengerAutomationExecutionKey || !passengerAutomationConfig.action) {
+    if (
+      !isScreenFocused ||
+      !isHomeRoute ||
+      !passengerAutomationExecutionKey ||
+      !passengerAutomationConfig.action
+    ) {
       return;
     }
 
@@ -8083,6 +8291,74 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
 
     const runPassengerAutomationAction = async () => {
       try {
+        if (passengerAutomationConfig.action === 'show_category') {
+          if (!selectedDestination?.coordinate) {
+            throw new Error('Nenhum destino confirmado disponível para a categoria QA.');
+          }
+
+          setHomeDestinationSearchActive(false);
+          setHomeDestinationQuery('');
+          setHomeDestinationResults([]);
+          setHomeDestinationSearching(false);
+          setHomeRoutePreview(null);
+          setHomeRoutePreviewError('');
+          setHomeBackendQuotesByCategory({});
+          setHomeBackendQuoteError('');
+          setHomeSelectedDestination(selectedDestination);
+          setHomeSelectedCategoryId('plus');
+          setHomeAvailabilityNotice('');
+          await appendPrototypeRuntimeDebugStep(
+            'passenger_home_automation_show_category',
+            {
+              destinationName: selectedDestination.name || '',
+              destinationAddress: selectedDestination.address || '',
+            },
+          );
+          return;
+        }
+
+        if (passengerAutomationConfig.action === 'open_pix_pending') {
+          if (!selectedDestination?.coordinate) {
+            throw new Error('Nenhum destino confirmado disponível para a fixture Pix QA.');
+          }
+
+          const paymentParams = buildQaVisualOnlyPaymentParams({
+            destination: selectedDestination,
+            originCoordinate:
+              destinationRoutePickupParams.initialPickupCoordinate || currentCoordinate,
+            originAddress:
+              destinationRoutePickupParams.initialPickupAddress || currentAddress,
+            fare: selectedFare,
+            nonce: passengerAutomationConfig.nonce,
+          });
+          navigation.navigate('RobotaxiPrototypeDestination', {
+            ...destinationRoutePickupParams,
+            ...paymentParams,
+            qaAutomation: '1',
+            qaAutoConfirmPix: '0',
+            qaNonce: passengerAutomationConfig.nonce || 'pix-pending',
+          });
+          await appendPrototypeRuntimeDebugStep(
+            'passenger_home_automation_open_pix_pending',
+            {
+              chargeId: paymentParams.prefilledPaymentData?.chargeId || '',
+              quoteLockId: paymentParams.initialPricingQuote?.quoteLockId || '',
+              paymentProviderCalled: false,
+              visualOnly: true,
+            },
+          );
+          return;
+        }
+
+        if (passengerAutomationConfig.action === 'open_destination_search') {
+          handleOpenPassengerDestination();
+          await appendPrototypeRuntimeDebugStep(
+            'passenger_home_automation_open_destination_search',
+            {},
+          );
+          return;
+        }
+
         if (passengerAutomationConfig.action === 'request_seeded_destination') {
           const runtimeSelectedDestination = selectedDestination?.coordinate
             ? selectedDestination
@@ -8280,9 +8556,12 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     bookingStatus,
     buildHomeReceiptParams,
     cancelRideSearch,
+    currentCoordinate,
     dismissCompletedReceipt,
+    destinationRoutePickupParams,
     endTripEarlyFlow,
     currentAddress,
+    handleOpenPassengerDestination,
     lastRideBookingId,
     lastReceipt?.id,
     navigation,
@@ -8297,12 +8576,15 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     requestRide,
     recoverCompletedReceipt,
     selectedFare,
+    selectedDestination,
     selectedVehicle,
     submitCompletedReceiptRating,
+    isHomeRoute,
+    isScreenFocused,
   ]);
 
   useEffect(() => {
-    if (!isDriverRole || !isHomeRoute) {
+    if (!isDriverRole || !isHomeRoute || !isScreenFocused) {
       return;
     }
 
@@ -8500,6 +8782,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     currentRouteName,
     isDriverRole,
     isHomeRoute,
+    isScreenFocused,
     liveDriverAutomationCommand,
     markDriverArrived,
     navigation,
@@ -8516,6 +8799,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
       !SHOULD_AUTO_OPEN_DRIVER_NAVIGATION ||
       !isDriverRole ||
       !isHomeRoute ||
+      !isScreenFocused ||
       !driverTripAssist?.status
     ) {
       lastAutoNavigationPhaseRef.current = '';
@@ -8536,7 +8820,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
 
     lastAutoNavigationPhaseRef.current = phaseKey;
     handleOpenDriverNavigation();
-  }, [driverActiveRide?.bookingId, driverActiveRide?.id, driverTripAssist?.status, handleOpenDriverNavigation, isDriverRole, isHomeRoute]);
+  }, [driverActiveRide?.bookingId, driverActiveRide?.id, driverTripAssist?.status, handleOpenDriverNavigation, isDriverRole, isHomeRoute, isScreenFocused]);
 
   useEffect(() => {
     if (!runtimeVisualStateReady) {
@@ -8687,7 +8971,25 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   ]);
 
   useEffect(() => {
-    if (isDriverRole || !isHomeRoute || normalizedBookingStatus !== 'idle') {
+    const requestedPassengerAction = normalizePassengerAction(
+      effectivePassengerRouteParams?.qaPassengerAction ||
+        effectivePassengerRouteParams?.passengerAction ||
+        effectivePassengerRouteParams?.action,
+    );
+    const persistedPassengerAction = normalizePassengerAction(
+      persistedPassengerAutomationCommand?.action,
+    );
+    const shouldPreserveQaCategoryPreview =
+      passengerAutomationConfig.action === 'show_category' ||
+      requestedPassengerAction === 'show_category' ||
+      persistedPassengerAction === 'show_category';
+
+    if (
+      isDriverRole ||
+      !isHomeRoute ||
+      normalizedBookingStatus !== 'idle' ||
+      shouldPreserveQaCategoryPreview
+    ) {
       return;
     }
 
@@ -8713,24 +9015,44 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     normalizedBookingStatus,
     isDriverRole,
     isHomeRoute,
+    passengerAutomationConfig.action,
     selectedDestination?.address,
     selectedDestination?.coordinate,
-    selectedDestination?.name
+    selectedDestination?.name,
+    effectivePassengerRouteParams,
+    persistedPassengerAutomationCommand,
   ]);
 
-  if (
-    !isDriverRole &&
+  const completedReceiptBookingId = String(
+    lastReceipt?.bookingId ||
+      lastReceipt?.id ||
+      lastRideBookingId ||
+      activeBookingId ||
+      driverActiveRide?.bookingId ||
+      driverActiveRide?.id ||
+      '',
+  ).trim();
+  const shouldPresentCompletedReceipt = Boolean(
     isHomeRoute &&
-    normalizedBookingStatus === 'completed' &&
-    lastReceipt?.id
-  ) {
+      normalizedBookingStatus === 'completed' &&
+      completedReceiptBookingId &&
+      (isDriverRole || lastReceipt?.id),
+  );
+
+  if (shouldPresentCompletedReceipt) {
     return (
       <RobotaxiReceiptScreen
         navigation={navigation}
         route={{
           key: 'robotaxi-home-completed-receipt',
           name: 'RobotaxiPrototypeReceipt',
-          params: { fromTrip: true },
+          params: {
+            fromTrip: true,
+            bookingId: completedReceiptBookingId,
+            rideId: completedReceiptBookingId,
+            tripId: completedReceiptBookingId,
+            ...(isDriverRole ? { activeRole: 'driver' } : {}),
+          },
         }}
       />
     );
@@ -8814,6 +9136,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
             shouldRenderDriverCurrentLocationCar ? 'car' : 'dot'
           }
           animateRoute={routeAnimate}
+          onRouteAnimationEvent={handleRouteAnimationEvent}
           routeMainColor={routeMainColor}
           routeShadowColor={routeShadowColor}
           routeHighlightColor={routeHighlightColor}
@@ -9125,7 +9448,9 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
                 driverOnlinePending={driverOnlinePending}
                 driverOnlineStartedAt={driverOnlineStartedAt}
                 driverOnlineDaily={driverOnlineDaily}
-                driverRealtimeAuthenticated={isSocketAuthenticated}
+                driverRealtimeAuthenticated={
+                  isSocketAuthenticated || driverOnlineVisualOnly === true
+                }
                 driverCanGoOnline={driverCanGoOnline}
                 driverActivationResolved={driverActivationResolved}
                 driverActivationRemote={driverActivationRemote}

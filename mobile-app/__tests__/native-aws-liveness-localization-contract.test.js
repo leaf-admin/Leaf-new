@@ -159,8 +159,8 @@ describe('AWS native liveness localization contract', () => {
     expect(`${iosBase}\n${androidDefault}`).not.toMatch(
       /Start verification|Start video check/i
     );
-    expect(xcodeProject.match(/path = "Base\.lproj\/Localizable\.strings"/g)).toHaveLength(1);
-    expect(xcodeProject.match(/path = "pt-BR\.lproj\/Localizable\.strings"/g)).toHaveLength(1);
-    expect(xcodeProject).toMatch(/knownRegions = \([\s\S]*\bpt-BR,/);
+    expect(xcodeProject.match(/path = "?Base\.lproj\/Localizable\.strings"?;/g)).toHaveLength(1);
+    expect(xcodeProject.match(/path = "?pt-BR\.lproj\/Localizable\.strings"?;/g)).toHaveLength(1);
+    expect(xcodeProject).toMatch(/knownRegions = \([\s\S]*"?pt-BR"?,/);
   });
 });

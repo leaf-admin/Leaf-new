@@ -29,6 +29,7 @@
         { "id": "driver_arrived", "question": "Como identifico e encontro o motorista?", "primaryAction": "Encontrar motorista", "requiredTestIds": ["passenger-trip-screen", "passenger-trip-driver-identity"] },
         { "id": "ride_started", "question": "Quando chego e como acompanho a viagem?", "primaryAction": "Acompanhar viagem", "requiredTestIds": ["passenger-trip-screen", "passenger-trip-started-action-dock"] },
         { "id": "operational_interruption", "question": "O que acontece se o motorista não puder continuar?", "primaryAction": "Escolher como continuar", "requiredTestIds": ["passenger-trip-screen", "passenger-trip-operational-title", "passenger-trip-operational-continue-button"] },
+        { "id": "searching_replacement", "question": "Como sei que a continuidade já foi acionada?", "primaryAction": "Acompanhar busca de substituição", "requiredTestIds": ["passenger-trip-screen", "passenger-trip-searching-replacement-title"] },
         { "id": "completed", "question": "Quanto paguei e o que faço agora?", "primaryAction": "Avaliar viagem", "requiredTestIds": ["passenger-receipt-rate-trip-button"] },
         { "id": "no_drivers", "question": "Estou protegido de cobrança quando não há motorista?", "primaryAction": "Tentar com outro destino", "requiredTestIds": ["passenger-no-drivers-screen"] },
         { "id": "payment_failed", "question": "Como recupero a tentativa sem repetir decisões?", "primaryAction": "Tentar novamente", "requiredTestIds": ["payment-failed-button-Tentar novamente"] }
@@ -46,6 +47,7 @@
         { "id": "arrived", "question": "Posso iniciar a corrida com segurança?", "primaryAction": "Iniciar viagem", "requiredTestIds": ["driver-live-ride-overlay-wrap", "driver-live-trip-card", "driver-live-trip-compact-summary", "driver-live-passenger-identity", "driver-live-primary-action-start-button"] },
         { "id": "started", "question": "Onde fica o destino e como acompanho o progresso?", "primaryAction": "Finalizar corrida", "requiredTestIds": ["driver-live-ride-overlay-wrap", "driver-live-trip-card", "driver-live-trip-compact-summary", "driver-live-passenger-identity", "driver-live-primary-action-complete-button"] },
         { "id": "operational_interruption", "question": "Como resolvo a interrupção sem perder contexto?", "primaryAction": "Aguardar decisão do passageiro", "requiredTestIds": ["driver-live-ride-overlay-wrap", "driver-live-operational-hold-title", "driver-live-passenger-identity"] },
+        { "id": "searching_replacement", "question": "Como sei que fui liberado após a interrupção?", "primaryAction": "Aguardar encerramento da corrida", "requiredTestIds": ["driver-live-ride-overlay-wrap", "driver-live-searching-replacement-title", "driver-live-passenger-identity"] },
         { "id": "completed", "question": "Quanto recebi e como volto a ficar disponível?", "primaryAction": "Voltar a ficar disponível", "requiredTestIds": ["driver-receipt-rate-passenger-button"] }
       ]
     }

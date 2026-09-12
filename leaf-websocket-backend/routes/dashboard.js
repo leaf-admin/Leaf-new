@@ -3141,7 +3141,9 @@ router.get('/api/financial/reconciliation/reports', authenticateJWT, requireRole
     rideId: req.query.rideId,
     limit: req.query.limit,
     cursor: req.query.cursor,
-    includeTestData: req.query.includeTestData
+    includeTestData: req.query.includeTestData,
+    financialContext: req.query.financialContext || null,
+    providerEnvironment: req.query.providerEnvironment || null
   });
 
   if (!result.success) {
@@ -3159,7 +3161,10 @@ router.get('/api/financial/reconciliation/reports', authenticateJWT, requireRole
 });
 
 router.get('/api/financial/reconciliation/rides/:rideId', authenticateJWT, requireRole(DASHBOARD_FINANCIAL_ROLES), async (req, res) => {
-  const result = await financialReconciliationDashboardService.getRideDetail(req.params.rideId);
+  const result = await financialReconciliationDashboardService.getRideDetail(req.params.rideId, {
+    financialContext: req.query.financialContext || null,
+    providerEnvironment: req.query.providerEnvironment || null
+  });
 
   if (!result.success) {
     const statusCode = String(result.error || '').includes('Firestore') ? 503 : 500;
@@ -3176,7 +3181,11 @@ router.get('/api/financial/reconciliation/rides/:rideId', authenticateJWT, requi
 
 router.post('/api/financial/reconciliation/rides/:rideId/run', authenticateJWT, requireRole(DASHBOARD_FINANCIAL_ROLES), async (req, res) => {
   const ledgerService = new FinancialLedgerService();
-  const result = await ledgerService.reconcileRideFinancials({ rideId: req.params.rideId });
+  const result = await ledgerService.reconcileRideFinancials({
+    rideId: req.params.rideId,
+    financialContext: req.body?.financialContext || req.query.financialContext || null,
+    providerEnvironment: req.body?.providerEnvironment || req.query.providerEnvironment || null
+  });
 
   if (!result.success) {
     const statusCode = String(result.error || '').includes('Firestore') ? 503 : 500;
@@ -3197,7 +3206,9 @@ router.post('/api/financial/reconciliation/run', authenticateJWT, requireRole(DA
   const result = await ledgerService.reconcileRecentRideFinancials({
     rideId: req.body?.rideId || req.query.rideId || null,
     limit: req.body?.limit || req.query.limit || 100,
-    includeTestData: req.body?.includeTestData || req.query.includeTestData || false
+    includeTestData: req.body?.includeTestData || req.query.includeTestData || false,
+    financialContext: req.body?.financialContext || req.query.financialContext || null,
+    providerEnvironment: req.body?.providerEnvironment || req.query.providerEnvironment || null
   });
 
   if (!result.success) {
@@ -9411,9 +9422,13 @@ router.get(
       const driverId = req.params.driverId;
       const kycRuntime = await resolveDashboardKycRuntime(req, driverId);
       const reviewerContext = getDashboardKycReviewer(req);
-      const [cases, orphanRecoveryCandidate] = await Promise.all([
+      const [cases, orphanRecoveryCandidate, verificationStatus] = await Promise.all([
         kycRuntime.workflow.listCasesForDriver(driverId, { reviewerContext }),
         kycRuntime.workflow.getOrphanHoldRecoveryCandidate(
+          driverId,
+          { reviewerContext }
+        ),
+        kycRuntime.workflow.getDashboardIdentityStatus(
           driverId,
           { reviewerContext }
         )
@@ -9423,7 +9438,8 @@ router.get(
         success: true,
         persistenceScope: kycRuntime.scope.namespace,
         cases,
-        orphanRecoveryCandidate
+        orphanRecoveryCandidate,
+        verificationStatus
       });
     } catch (error) {
       logError(error, 'Falha ao listar casos KYC de identidade', {

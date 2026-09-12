@@ -1,6 +1,8 @@
 function shouldCaptureSignedWebhookRawBody(req) {
     const requestUrl = String(req.originalUrl || req.url || '');
-    return requestUrl.includes('/api/woovi/webhook') || requestUrl.includes('/api/woovi-webhook');
+    return requestUrl.includes('/api/woovi/webhook')
+        || requestUrl.includes('/api/woovi-webhook')
+        || requestUrl.includes('/api/webhooks/woovi');
 }
 
 function captureSignedWebhookRawBody(req, _res, buffer) {
@@ -20,6 +22,13 @@ function configureHttpMiddleware({
     getOtelIngestStatus,
     logStructured
 }) {
+    const URLENCODED_LIMITS = Object.freeze({
+        extended: true,
+        limit: '50mb',
+        parameterLimit: 1000,
+        depth: 5
+    });
+
     // ✅ NOVO: Middleware para gerar traceId automaticamente em requisições HTTP
     app.use(traceIdExpressMiddleware);
 
@@ -74,7 +83,7 @@ function configureHttpMiddleware({
 
     // ✅ CORREÇÃO: Aumentar limite e timeout para uploads de CNH
     app.use(express.json({ limit: '50mb', verify: captureSignedWebhookRawBody })); // Aumentado de 10mb para 50mb
-    app.use(express.urlencoded({ extended: true, limit: '50mb' })); // Adicionado para multipart/form-data
+    app.use(express.urlencoded(URLENCODED_LIMITS));
 
     // ✅ Timeout mais alto para OCR/extração via IA em PDFs grandes.
     // Mantém compatível com produção via variável de ambiente SERVER_TIMEOUT.
@@ -82,7 +91,8 @@ function configureHttpMiddleware({
     server.timeout = requestTimeoutMs;
     server.keepAliveTimeout = requestTimeoutMs + 5000;
     server.headersTimeout = requestTimeoutMs + 10000;
-    app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+    // Keep a single bounded parser. Multipart uploads use multer; this parser is
+    // only for application/x-www-form-urlencoded requests.
 
     // ✅ INICIALIZAR FIREBASE ANTES DE REGISTRAR ROTAS
     const firebaseConfig = require('../firebase-config');

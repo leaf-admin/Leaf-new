@@ -16,6 +16,7 @@ jest.mock('../src/services/MobileProfileService', () => ({
   default: {
     getCurrentProfile: jest.fn(),
     upsertCurrentProfile: jest.fn(),
+    upsertCurrentProfileOrThrow: jest.fn(),
   },
 }));
 
@@ -108,7 +109,7 @@ describe('OnboardingProfileService.buildProfilePayload', () => {
       documents: { cnh: { status: 'approved' } },
       vehicles: { current: { status: 'approved' } },
     });
-    mobileProfileService.upsertCurrentProfile.mockResolvedValueOnce({
+    mobileProfileService.upsertCurrentProfileOrThrow.mockResolvedValueOnce({
       uid: 'driver_1',
       userType: 'driver',
     });
@@ -125,12 +126,35 @@ describe('OnboardingProfileService.buildProfilePayload', () => {
     });
 
     expect(result).toEqual(expect.objectContaining({ success: true }));
-    expect(mobileProfileService.upsertCurrentProfile).toHaveBeenCalledWith(
+    expect(mobileProfileService.upsertCurrentProfileOrThrow).toHaveBeenCalledWith(
       expect.not.objectContaining({
         approved: expect.anything(),
         documents: expect.anything(),
         vehicles: expect.anything(),
       }),
     );
+  });
+
+  it('preserves backend CPF guard errors for AuthFlow to present', async () => {
+    const mobileProfileService = require('../src/services/MobileProfileService').default;
+    mobileProfileService.getCurrentProfile.mockResolvedValueOnce(null);
+    const error = new Error('Este CPF já está vinculado a outro cadastro.');
+    error.status = 409;
+    error.payload = {
+      code: 'PROFILE_CPF_ALREADY_REGISTERED',
+      message: error.message,
+    };
+    mobileProfileService.upsertCurrentProfileOrThrow.mockRejectedValueOnce(error);
+
+    const result = await OnboardingProfileService.saveOnboardingProfile({
+      uid: 'driver_2',
+      profileSelection: { userType: 'driver' },
+      profileData: { fullName: 'Joao Motorista' },
+      documentData: { cpf: '123.456.789-09' },
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toBe(error);
+    expect(result.error.payload.code).toBe('PROFILE_CPF_ALREADY_REGISTERED');
   });
 });

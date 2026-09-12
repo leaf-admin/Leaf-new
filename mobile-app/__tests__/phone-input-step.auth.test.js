@@ -185,6 +185,60 @@ describe('PhoneInputStep', () => {
     });
   });
 
+  test('gives explicit QA OTP force flow precedence over review password routing', async () => {
+    const onVerificationSent = jest.fn();
+    const apiClient = require('../src/services/httpClient');
+    const runtimeAccessPolicy = require('../src/config/runtimeAccessPolicy');
+    const reviewAccounts = require('../src/config/reviewAccounts');
+    const UserAuthService = require('../src/services/UserAuthService').default;
+
+    runtimeAccessPolicy.allowQaOtpForceFlow.mockReturnValue(true);
+    reviewAccounts.getReviewAccountInfo.mockReturnValue({
+      phoneNumber: '21102938475',
+      fullPhoneNumber: '+5521102938475',
+      userType: 'customer',
+      skipOTP: true,
+    });
+    UserAuthService.resolvePhoneAuthFlow.mockResolvedValueOnce({
+      exists: true,
+      uid: 'qa-passenger',
+      nextAction: 'PASSWORD_LOGIN',
+      passwordFallbackAvailable: true,
+      requiresPassword: true,
+      hasPassword: true,
+      source: 'password_credentials',
+    });
+    apiClient.post.mockResolvedValueOnce({
+      data: {
+        success: true,
+        verificationId: 'vid_review_otp',
+      },
+    });
+
+    const { getByTestId, queryByTestId } = render(
+      <PhoneInputStep
+        onSwitchToRegister={jest.fn()}
+        onVerificationSent={onVerificationSent}
+      />,
+    );
+
+    fireEvent.changeText(getByTestId('auth-phone-input'), '21102938475');
+    fireEvent.press(getByTestId('auth-continue-btn'));
+
+    await waitFor(() => {
+      expect(apiClient.post).toHaveBeenCalledWith('/api/custom-otp/request-otp', {
+        phone: '+5521102938475',
+      });
+      expect(onVerificationSent).toHaveBeenCalledWith(
+        expect.objectContaining({ isCustomOtp: true }),
+        '+5521102938475',
+        true,
+      );
+      expect(queryByTestId('auth-password-input')).toBeNull();
+      expect(mockSignInWithPhoneNumber).not.toHaveBeenCalled();
+    });
+  });
+
   test('keeps OTP flow for existing account when password is not configured', async () => {
     const onVerificationSent = jest.fn();
     const UserAuthService = require('../src/services/UserAuthService').default;
@@ -258,21 +312,33 @@ describe('PhoneInputStep', () => {
     });
   });
 
-  test('routes controlled review account to inline password login without OTP preflight', async () => {
+  test('routes controlled review account through Firebase Phone Auth even when password exists', async () => {
     const UserAuthService = require('../src/services/UserAuthService').default;
     const reviewAccounts = require('../src/config/reviewAccounts');
+    const onVerificationSent = jest.fn();
+    const firebaseConfirmation = { confirm: jest.fn() };
 
     reviewAccounts.getReviewAccountInfo.mockReturnValue({
       phoneNumber: '21123456789',
       fullPhoneNumber: '+5521123456789',
       userType: 'driver',
-      skipOTP: true,
+      skipOTP: false,
     });
+    UserAuthService.resolvePhoneAuthFlow.mockResolvedValueOnce({
+      exists: true,
+      uid: 'qa-driver',
+      nextAction: 'PASSWORD_LOGIN',
+      passwordFallbackAvailable: true,
+      requiresPassword: true,
+      hasPassword: true,
+      source: 'password_credentials',
+    });
+    mockSignInWithPhoneNumber.mockResolvedValueOnce(firebaseConfirmation);
 
-    const { getByTestId, queryByText, getByPlaceholderText } = render(
+    const { getByTestId, queryByTestId } = render(
       <PhoneInputStep
         onSwitchToRegister={jest.fn()}
-        onVerificationSent={jest.fn()}
+        onVerificationSent={onVerificationSent}
       />,
     );
 
@@ -280,11 +346,14 @@ describe('PhoneInputStep', () => {
     fireEvent.press(getByTestId('auth-continue-btn'));
 
     await waitFor(() => {
-      expect(UserAuthService.resolvePhoneAuthFlow).not.toHaveBeenCalled();
-      expect(mockSignInWithPhoneNumber).not.toHaveBeenCalled();
-      expect(queryByText('Ja tenho senha')).toBeNull();
-      expect(queryByText('Entrar')).not.toBeNull();
-      expect(getByPlaceholderText('Senha')).toBeTruthy();
+      expect(UserAuthService.resolvePhoneAuthFlow).toHaveBeenCalledWith('+5521123456789');
+      expect(mockSignInWithPhoneNumber).toHaveBeenCalledWith('+5521123456789');
+      expect(onVerificationSent).toHaveBeenCalledWith(
+        firebaseConfirmation,
+        '+5521123456789',
+        true,
+      );
+      expect(queryByTestId('auth-password-input')).toBeNull();
     });
   });
 
@@ -296,7 +365,16 @@ describe('PhoneInputStep', () => {
       phoneNumber: '21123456789',
       fullPhoneNumber: '+5521123456789',
       userType: 'driver',
-      skipOTP: true,
+      skipOTP: false,
+    });
+    UserAuthService.resolvePhoneAuthFlow.mockResolvedValue({
+      exists: true,
+      uid: 'qa-driver',
+      nextAction: 'OTP_REQUIRED',
+      passwordFallbackAvailable: true,
+      requiresPassword: false,
+      hasPassword: true,
+      source: 'password_credentials',
     });
     UserAuthService.loginWithPassword.mockRejectedValueOnce(new Error('invalid credentials'));
 
@@ -309,6 +387,12 @@ describe('PhoneInputStep', () => {
 
     fireEvent.changeText(getByTestId('auth-phone-input'), '21123456789');
     fireEvent.press(getByTestId('auth-continue-btn'));
+
+    await waitFor(() => {
+      expect(getByTestId('auth-password-fallback-btn').props.disabled).toBeFalsy();
+    });
+
+    fireEvent.press(getByTestId('auth-password-fallback-btn'));
 
     await waitFor(() => {
       expect(getByTestId('auth-password-input')).toBeTruthy();

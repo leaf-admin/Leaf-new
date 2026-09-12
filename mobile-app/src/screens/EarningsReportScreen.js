@@ -23,7 +23,7 @@ import { useSelector } from 'react-redux';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors } from '../theme/runtimeTokens';
 import { fonts } from '../theme/runtimeTokens';
-import { LoadingSpinner } from '../components/LoadingStates';
+import { ListSkeleton } from '../components/LoadingStates';
 import robotaxiPrototypeTokens from '../components/design-system/robotaxiPrototypeTokens';
 import PrototypeDismissibleSheet from '../components/prototype/PrototypeDismissibleSheet';
 import PrototypeScreenTransition from '../components/prototype/PrototypeScreenTransition';
@@ -1135,7 +1135,7 @@ export default function EarningsReportScreen({ navigation, route }) {
 
           {isLoadingEarnings ? (
             <View style={styles.loadingWrap}>
-              <LoadingSpinner message="Carregando seus ganhos..." color={MAIN_COLOR} />
+              <ListSkeleton rows={5} rowHeight={52} testID="earnings-loading-skeleton" />
             </View>
           ) : (
             <>

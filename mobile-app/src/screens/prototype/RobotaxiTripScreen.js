@@ -525,16 +525,17 @@ function buildExtensionPaymentData(rideExtension, bookingId) {
 
   const qrCodeText =
     rideExtension?.brCode ||
-    rideExtension?.pixQRCode ||
-    rideExtension?.paymentLink ||
+    rideExtension?.qrCodeText ||
     '';
 
   return {
     chargeId: rideExtension.chargeId,
     rideId: bookingId,
-    qrCodeImage: null,
+    qrCodeImage: rideExtension?.qrCodeImage || null,
+    pixQRCode: rideExtension?.pixQRCode || null,
     qrCodeText,
-    paymentLink: rideExtension?.paymentLink || null,
+    paymentLink: rideExtension?.paymentLink || rideExtension?.paymentLinkUrl || null,
+    paymentLinkUrl: rideExtension?.paymentLinkUrl || rideExtension?.paymentLink || null,
     amount: Number(rideExtension?.diffFare || 0),
     amountInCents: Math.round(Number(rideExtension?.diffFare || 0) * 100),
     expiresAt: rideExtension?.expiresAt || null
@@ -2153,7 +2154,7 @@ export default function RobotaxiTripScreen({ navigation, route }) {
   );
 
   return (
-    <PrototypeScreenTransition>
+    <PrototypeScreenTransition direction="up">
       <View style={styles.container} pointerEvents="box-none">
         <StatusBar translucent backgroundColor="transparent" barStyle="dark-content" />
         <PrototypeMapLayer
@@ -2480,7 +2481,13 @@ export default function RobotaxiTripScreen({ navigation, route }) {
               <View style={[styles.extensionNotice, styles.operationalNotice]}>
                 <View style={styles.extensionNoticeHeader}>
                   <Ionicons name="search-outline" size={16} color="#365A6D" />
-                  <Text style={styles.extensionTitle}>Procurando outro motorista</Text>
+                  <Text
+                    style={styles.extensionTitle}
+                    testID="passenger-trip-searching-replacement-title"
+                    accessibilityLabel="passenger-trip-searching-replacement-title"
+                  >
+                    Procurando outro motorista
+                  </Text>
                 </View>
                 <Text style={styles.extensionMessage}>
                   {operationalContinuation?.message ||

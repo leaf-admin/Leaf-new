@@ -1,0 +1,33 @@
+{
+  "source": "woovi_sandbox_test_confirm_webhook",
+  "confirmedAt": "2026-09-12T04:54:11.999Z",
+  "status": "COMPLETED",
+  "paymentStatus": "CONFIRMED",
+  "environment": "sandbox",
+  "providerEnvironment": "sandbox",
+  "rideId": "booking_1789188861310_3tEQ8pQ2QzeWbMKhLGsXHHhnOGL2",
+  "canonicalRideId": "booking_1789188861310_3tEQ8pQ2QzeWbMKhLGsXHHhnOGL2",
+  "bookingId": "booking_1789188861310_3tEQ8pQ2QzeWbMKhLGsXHHhnOGL2",
+  "paymentReferenceRideId": "temp_ride_session_4c8c0d5f5482f4f0bf53c13b42b8",
+  "temporaryRideId": "temp_ride_session_4c8c0d5f5482f4f0bf53c13b42b8",
+  "chargeId": "1313eed3bd4f4f3884e55218fc067fb9",
+  "paymentIntentId": "advance_81d5bf7e70a4ffc435bc585577e8ae8f",
+  "amountInCents": 1667,
+  "financialContext": {
+    "version": 1,
+    "namespace": "sandbox",
+    "classification": "sandbox_test_user",
+    "providerEnvironment": "sandbox",
+    "paymentProfileId": "qa-test-users-sandbox-durable",
+    "paymentProfileSource": "firestore",
+    "testUserSandbox": true,
+    "contextId": "d67d0ebade061681aa56c2d4080a10c66fdfdab2b9e840b0f13d0bab21143cbe"
+  },
+  "financialNamespace": "sandbox",
+  "providerConfirmation": {
+    "status": "COMPLETED",
+    "endpointHost": "api.woovi-sandbox.com",
+    "source": "woovi_openpix_testing",
+    "transactionID": "1313eed3bd4f4f3884e55218fc067fb9"
+  }
+}

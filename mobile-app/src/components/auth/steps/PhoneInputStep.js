@@ -355,23 +355,8 @@ const PhoneInputStep = ({ onVerificationSent, onPasswordLoginSuccess, progressMe
                 return;
             }
 
-            const controlledReviewAccount = getReviewAccountInfo(fullPhoneNumber);
-            if (controlledReviewAccount?.phoneNumber) {
-                Logger.log('🔐 Conta controlada detectada: abrindo login por senha sem preflight de OTP.', {
-                    phoneNumber: fullPhoneNumber,
-                    userType: controlledReviewAccount?.userType || null
-                });
-                setRequiresPassword(true);
-                setForgotPasswordMode(false);
-                setPassword('');
-                setPasswordError('');
-                setChecking(false);
-                return;
-            }
-
             const forceCustomOtpFlow =
                 allowForcedQaOtpFlow && FORCE_CUSTOM_OTP_NUMBERS.has(normalizedPhoneInput);
-
             let phoneFlow = null;
             let phoneFlowResolutionSource = 'password_resolver';
             try {
@@ -400,24 +385,11 @@ const PhoneInputStep = ({ onVerificationSent, onPasswordLoginSuccess, progressMe
             setResolvedPhone(phoneFlow);
 
             if (
-                isControlledReviewAccount &&
+                nextAction === 'PASSWORD_LOGIN' &&
                 hasPasswordConfigured &&
-                phoneFlow?.passwordFallbackAvailable === true
+                !forceCustomOtpFlow &&
+                !isControlledReviewAccount
             ) {
-                Logger.log('🔐 Conta controlada com senha detectada: usando login por senha para evitar OTP/SMS no teste.', {
-                    phoneNumber: fullPhoneNumber,
-                    userType: reviewAccount?.userType || phoneFlow?.userType || null,
-                    source: phoneFlow.source || phoneFlowResolutionSource
-                });
-                setRequiresPassword(true);
-                setForgotPasswordMode(false);
-                setPassword('');
-                setPasswordError('');
-                setChecking(false);
-                return;
-            }
-
-            if (nextAction === 'PASSWORD_LOGIN' && hasPasswordConfigured) {
                 Logger.log('🔐 Telefone existente detectado: seguir para senha.', {
                     phoneNumber: fullPhoneNumber,
                     hasPassword: phoneFlow.hasPassword,

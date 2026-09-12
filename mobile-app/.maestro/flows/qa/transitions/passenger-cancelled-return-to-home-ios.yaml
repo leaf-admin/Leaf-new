@@ -1,0 +1,21 @@
+# CURRENT_PRODUCT_ONLY: terminal cancellation return; uses an isolated QA seed.
+appId: br.com.leaf.ride
+name: Passenger cancelled refund returns to CURRENT Home
+tags:
+  - current
+  - transition
+  - passenger
+  - terminal-recovery
+---
+- launchApp:
+    stopApp: false
+- assertVisible:
+    id: "passenger-cancellation-screen"
+- tapOn:
+    id: "passenger-cancellation-keep-button"
+- extendedWaitUntil:
+    visible:
+      id: "passenger-home-destination-input"
+    timeout: 30000
+- assertNotVisible:
+    id: "passenger-cancellation-screen"

@@ -23,22 +23,42 @@ jest.mock('../../../services/driver-document-analysis-queue', () => ({
 const docs = new Map();
 
 function createFirestoreMock() {
+  const createDocumentReference = (collectionName, id) => ({
+    __key: `${collectionName}/${id}`,
+    set: async (payload, options = {}) => {
+      const key = `${collectionName}/${id}`;
+      const previous = docs.get(key) || {};
+      docs.set(key, options.merge ? { ...previous, ...payload } : { ...payload });
+    },
+    get: async () => {
+      const key = `${collectionName}/${id}`;
+      return {
+        exists: docs.has(key),
+        data: () => docs.get(key)
+      };
+    }
+  });
+
   return {
     collection: (collectionName) => ({
-      doc: (id) => ({
-        set: async (payload, options = {}) => {
-          const key = `${collectionName}/${id}`;
-          const previous = docs.get(key) || {};
-          docs.set(key, options.merge ? { ...previous, ...payload } : { ...payload });
-        },
-        get: async () => {
-          const key = `${collectionName}/${id}`;
-          return {
-            exists: docs.has(key),
-            data: () => docs.get(key)
-          };
-        }
+      doc: (id) => createDocumentReference(collectionName, id),
+      where: (field, _operator, value) => ({
+        get: async () => ({
+          docs: [...docs.entries()]
+            .filter(([key, record]) => key.startsWith(`${collectionName}/`) && record?.[field] === value)
+            .map(([key]) => ({ id: key.slice(`${collectionName}/`.length) }))
+        })
       })
+    }),
+    runTransaction: async (callback) => callback({
+      get: async (ref) => ({
+        exists: docs.has(ref.__key),
+        data: () => docs.get(ref.__key)
+      }),
+      set: async (ref, payload, options = {}) => {
+        const previous = docs.get(ref.__key) || {};
+        docs.set(ref.__key, options.merge ? { ...previous, ...payload } : { ...payload });
+      }
     })
   };
 }

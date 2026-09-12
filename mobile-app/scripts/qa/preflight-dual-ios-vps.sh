@@ -13,22 +13,27 @@ DASHBOARD_URL="${DASHBOARD_URL:-https://dashboard.leaf.app.br}"
 PASSENGER_PHONE="${PASSENGER_PHONE:-21102938475}"
 DRIVER_PHONE="${DRIVER_PHONE:-21123456789}"
 PASSENGER_UID="${PASSENGER_UID:-OjML1wSzdNRaynjqMRlSW1Y0LVy2}"
-DRIVER_UID="${DRIVER_UID:-8vg2kxxqi3TYKlpD6eBlWgYseIq2}"
+DRIVER_UID="${DRIVER_UID:-DV4cwZvql3T3pI3lnKYQwQVALKZ2}"
 APP_ID="${APP_ID:-br.com.leaf.ride}"
 
 REMOTE_HOST="${REMOTE_HOST:-${VPS_HOST:-}}"
 REMOTE_KEY="${REMOTE_SSH_KEY:-${VPS_KEY:-${SSH_KEY_PATH:-${REMOTE_KEY:-}}}}"
 REMOTE_ENV_PATH="${REMOTE_ENV_PATH:-/opt/leaf-app/.env}"
 
-PASSENGER_UDID="${PASSENGER_UDID:-195D2C57-87DC-4953-ABF1-4FD351ADBBEF}"
-DRIVER_UDID="${DRIVER_UDID:-2E44BC8E-9AA8-43BE-BD5E-D0B5A73E543C}"
-SHARED_METRO_PORT="${SHARED_METRO_PORT:-8081}"
+PASSENGER_UDID="${PASSENGER_UDID:-6BC9EC30-C939-4598-A85D-A9E071E90CE5}"
+DRIVER_UDID="${DRIVER_UDID:-C52FE30B-CB7E-4628-B352-27143BF6E9D7}"
+SHARED_METRO_PORT="${SHARED_METRO_PORT:-8097}"
 PASSENGER_PORT="${PASSENGER_PORT:-${SHARED_METRO_PORT}}"
 DRIVER_PORT="${DRIVER_PORT:-${SHARED_METRO_PORT}}"
 METRO_STABILITY_WAIT_SEC="${METRO_STABILITY_WAIT_SEC:-25}"
 SIMCTL_BIN="${SIMCTL_BIN:-/Library/Developer/PrivateFrameworks/CoreSimulator.framework/Versions/A/Resources/bin/simctl}"
-QA_SIM_LOCATION_LAT="${QA_SIM_LOCATION_LAT:--22.857}"
-QA_SIM_LOCATION_LNG="${QA_SIM_LOCATION_LNG:--43.309}"
+BOOT_TIMEOUT_SEC="${BOOT_TIMEOUT_SEC:-120}"
+APP_LAUNCH_TIMEOUT_SEC="${APP_LAUNCH_TIMEOUT_SEC:-30}"
+PROCESS_GROUP_PYTHON="${PROCESS_GROUP_PYTHON:-$(command -v python3 2>/dev/null || true)}"
+QA_SIM_LOCATION_LAT="${QA_SIM_LOCATION_LAT:--22.97104}"
+QA_SIM_LOCATION_LNG="${QA_SIM_LOCATION_LNG:--43.18349}"
+QA_TEST_DESTINATION_LAT="${QA_TEST_DESTINATION_LAT:--22.98488}"
+QA_TEST_DESTINATION_LNG="${QA_TEST_DESTINATION_LNG:--43.22215}"
 
 REPORT_DIR="${ROOT_DIR}/test-results/qa-preflight"
 mkdir -p "${REPORT_DIR}"
@@ -54,24 +59,51 @@ run_with_timeout_to_file() {
   local output_file="$2"
   shift 2
 
-  (
-    "$@"
-  ) > "${output_file}" 2>&1 &
+  if [[ -z "${PROCESS_GROUP_PYTHON}" ]]; then
+    printf '%s\n' 'python3 is required to launch bounded commands in an isolated process group' > "${output_file}"
+    return 127
+  fi
+
+  "${PROCESS_GROUP_PYTHON}" -c \
+    'import os, sys; os.setsid(); os.execvp(sys.argv[1], sys.argv[1:])' \
+    "$@" > "${output_file}" 2>&1 &
   local cmd_pid=$!
   local elapsed=0
 
-  while kill -0 "${cmd_pid}" >/dev/null 2>&1; do
+  cleanup_process_group() {
+    if [[ -z "${cmd_pid}" ]]; then
+      return 0
+    fi
+
+    kill -TERM "-${cmd_pid}" >/dev/null 2>&1 || kill -TERM "${cmd_pid}" >/dev/null 2>&1 || true
+    sleep 1
+    kill -KILL "-${cmd_pid}" >/dev/null 2>&1 || kill -KILL "${cmd_pid}" >/dev/null 2>&1 || true
+    wait "${cmd_pid}" >/dev/null 2>&1 || true
+    cmd_pid=""
+  }
+
+  while :; do
+    local state
+    state="$(ps -p "${cmd_pid}" -o stat= 2>/dev/null | tr -d ' ')"
+    case "${state}" in
+      ""|Z*)
+        if wait "${cmd_pid}"; then
+          local status=0
+        else
+          local status=$?
+        fi
+        cmd_pid=""
+        return "${status}"
+        ;;
+    esac
+
     sleep 1
     elapsed=$((elapsed + 1))
     if [[ "${elapsed}" -ge "${timeout_sec}" ]]; then
-      kill "${cmd_pid}" >/dev/null 2>&1 || true
-      sleep 1
-      kill -9 "${cmd_pid}" >/dev/null 2>&1 || true
+      cleanup_process_group
       return 124
     fi
   done
-
-  wait "${cmd_pid}"
 }
 
 fail() {
@@ -121,6 +153,48 @@ wait_http_ready() {
 
   fail "${label} not ready via http"
   return 1
+}
+
+assert_simulator_booted() {
+  local udid="$1"
+  local label="$2"
+  local boot_log="${REPORT_DIR}/simulator-${label}-bootstatus.log"
+
+  if ! run_with_timeout_to_file "${BOOT_TIMEOUT_SEC}" "${boot_log}" \
+    "${SIMCTL_BIN}" bootstatus "${udid}" -b; then
+    fail "simulator did not reach Booted (${label}/${udid}); see ${boot_log}"
+    return 1
+  fi
+
+  if ! "${SIMCTL_BIN}" list devices available 2>/dev/null | \
+    grep -F "${udid}" | grep -F '(Booted)' >/dev/null 2>&1; then
+    fail "simulator bootstatus returned but device is not Booted (${label}/${udid})"
+    return 1
+  fi
+
+  pass "simulator Booted and verified (${label}/${udid})"
+}
+
+assert_app_booted_and_dev_client_open() {
+  local udid="$1"
+  local label="$2"
+  local dev_client_url="$3"
+  local launch_log="${REPORT_DIR}/app-${label}-launch.log"
+  local openurl_log="${REPORT_DIR}/app-${label}-dev-client-openurl.log"
+
+  if ! run_with_timeout_to_file "${APP_LAUNCH_TIMEOUT_SEC}" "${launch_log}" \
+    "${SIMCTL_BIN}" launch "${udid}" "${APP_ID}"; then
+    fail "app launch failed (${label}/${udid}); see ${launch_log}"
+    return 1
+  fi
+
+  if ! run_with_timeout_to_file "${APP_LAUNCH_TIMEOUT_SEC}" "${openurl_log}" \
+    "${SIMCTL_BIN}" openurl "${udid}" "${dev_client_url}"; then
+    fail "Dev Client deep link failed (${label}/${udid}); see ${openurl_log}"
+    return 1
+  fi
+
+  pass "app launched and Dev Client deep link accepted (${label}/${udid})"
 }
 
 reset_simulator_app_state() {
@@ -176,7 +250,7 @@ log "simulator_metro_host=${SIMULATOR_METRO_HOST}"
 log "api=${API_BASE_URL}"
 log "socket=${SOCKET_BASE_URL}"
 
-for c in curl jq node npx xcrun maestro ssh lsof; do
+for c in curl jq node npx xcrun maestro ssh lsof python3; do
   require_cmd "${c}"
 done
 
@@ -528,7 +602,7 @@ if [[ "${RUN_BACKEND_SMOKE:-false}" == "true" ]]; then
   log "running backend smoke (create booking + dispatch)"
   smoke_json="${REPORT_DIR}/smoke-driver-ready-booking.json"
   if run_with_timeout_to_file 120 "${smoke_json}" \
-    bash -lc "cd '${BACKEND_DIR}' && API_BASE_URL='${API_BASE_URL}' WS_URL='${SOCKET_BASE_URL}' TEST_PASSENGER_UID='${PASSENGER_UID}' TEST_DRIVER_UID='${DRIVER_UID}' TEST_PICKUP_LAT=37.7749 TEST_PICKUP_LNG=-122.4194 TEST_DEST_LAT=37.7849 TEST_DEST_LNG=-122.4094 TEST_PICKUP_ADDRESS='SF Pickup' TEST_DEST_ADDRESS='SF Destination' node scripts/tests/smoke-driver-ready-booking.cjs"; then
+    bash -lc "cd '${BACKEND_DIR}' && API_BASE_URL='${API_BASE_URL}' WS_URL='${SOCKET_BASE_URL}' TEST_PASSENGER_UID='${PASSENGER_UID}' TEST_DRIVER_UID='${DRIVER_UID}' TEST_PICKUP_LAT='${QA_SIM_LOCATION_LAT}' TEST_PICKUP_LNG='${QA_SIM_LOCATION_LNG}' TEST_DEST_LAT='${QA_TEST_DESTINATION_LAT}' TEST_DEST_LNG='${QA_TEST_DESTINATION_LNG}' TEST_PICKUP_ADDRESS='Copacabana Palace' TEST_DEST_ADDRESS='Leblon' node scripts/tests/smoke-driver-ready-booking.cjs"; then
     smoke_ok="$(jq -r '.ok // false' "${smoke_json}" 2>/dev/null || echo "false")"
     if [[ "${smoke_ok}" == "true" ]]; then
       pass "backend smoke passed"
@@ -583,7 +657,18 @@ log "booting simulators and opening deep links"
 open -a Simulator || true
 "${SIMCTL_BIN}" boot "${PASSENGER_UDID}" >/dev/null 2>&1 || true
 "${SIMCTL_BIN}" boot "${DRIVER_UDID}" >/dev/null 2>&1 || true
-sleep 1
+
+if ! assert_simulator_booted "${PASSENGER_UDID}" passenger; then
+  log "preflight cannot continue until the passenger simulator is Booted"
+fi
+if ! assert_simulator_booted "${DRIVER_UDID}" driver; then
+  log "preflight cannot continue until the driver simulator is Booted"
+fi
+
+if [[ "${FAIL_COUNT}" -gt 0 ]]; then
+  log "aborting before app state reset or scenario preparation because a selected simulator is not Booted"
+  exit 8
+fi
 
 for udid in "${PASSENGER_UDID}" "${DRIVER_UDID}"; do
   reset_simulator_app_state "${udid}"
@@ -596,13 +681,19 @@ for udid in "${PASSENGER_UDID}" "${DRIVER_UDID}"; do
   fi
 done
 
-"${SIMCTL_BIN}" openurl "${PASSENGER_UDID}" "${MAESTRO_METRO_URL_PASSENGER}" >/dev/null 2>&1 || true
-"${SIMCTL_BIN}" openurl "${DRIVER_UDID}" "${MAESTRO_METRO_URL_DRIVER}" >/dev/null 2>&1 || true
-pass "deep links sent to both simulators"
+assert_app_booted_and_dev_client_open "${PASSENGER_UDID}" passenger "${MAESTRO_METRO_URL_PASSENGER}"
+assert_app_booted_and_dev_client_open "${DRIVER_UDID}" driver "${MAESTRO_METRO_URL_DRIVER}"
+
+if [[ "${FAIL_COUNT}" -gt 0 ]]; then
+  log "aborting before scenario commands because app boot/Dev Client readiness failed on a selected simulator"
+  exit 8
+fi
+pass "both selected simulators booted, launched Leaf and accepted the Dev Client deep link"
 
 env_file="${REPORT_DIR}/maestro-runtime-env.sh"
 cat > "${env_file}" <<EOF
 export MAESTRO_METRO_HOST="${SIMULATOR_METRO_HOST}"
+export MAESTRO_METRO_PORT="${SHARED_METRO_PORT}"
 export MAESTRO_METRO_URL_PASSENGER="${MAESTRO_METRO_URL_PASSENGER}"
 export MAESTRO_METRO_URL_DRIVER="${MAESTRO_METRO_URL_DRIVER}"
 export API_BASE_URL="${API_BASE_URL}"

@@ -2,12 +2,20 @@ const express = require('express');
 const router = express.Router();
 const admin = require('firebase-admin');
 const { logger } = require('../utils/logger');
+const { assertAccountWritable, saveAccountProfile, projectRealtimeProfile, runAccountDeletion } = require('../services/account-lifecycle-service');
 const redisPool = require('../utils/redis-pool');
 const {
   buildVehicleOcrUpdates,
   normalizeVehicleOcrPayload,
   sanitizeVehicleOcrData
 } = require('../utils/vehicle-ocr-data');
+const {
+  claimCpf,
+  releaseCpfsForDeletedAccount,
+  CpfIdentityError,
+  normalizeCpf,
+  normalizeCpfForComparison
+} = require('../services/cpf-identity-registry-service');
 
 const legacyProfileMirrorDefault = process.env.NODE_ENV === 'production' ? 'false' : 'true';
 const legacyProfileRtdbMirrorEnabled =
@@ -29,6 +37,8 @@ const USER_PII_FIELDS_TO_DELETE = [
   'phoneNumber',
   'mobile',
   'cpf',
+  'cpfNormalized',
+  'cpfIndexReleased',
   'pix',
   'pixKey',
   'address',
@@ -159,6 +169,8 @@ const PROFILE_DERIVED_FORBIDDEN_FIELDS = new Set([
   'activeVehicleId',
   'onboardingDocuments',
   'documents',
+  'cpfNormalized',
+  'cpfIndexReleased',
   'vehicles',
   'vehicle',
   'cnhUploaded',
@@ -182,6 +194,7 @@ const PROFILE_IMMUTABLE_AFTER_CREATION_FIELDS = new Set([
   'mobile',
   'phone',
   'phoneNumber',
+  'cpf',
   'phoneValidated',
   'onboardingCompleted',
   'profileComplete'
@@ -348,6 +361,11 @@ function findImmutableProfileFields(input = {}, existingProfile = {}) {
       }
       if (key === 'mobile' || key === 'phone' || key === 'phoneNumber') {
         return normalizePhone(input[key]) !== existingPhone;
+      }
+      if (key === 'cpf') {
+        return normalizeCpfForComparison(input[key]) !== normalizeCpfForComparison(
+          existingProfile.cpf || existingProfile.cpfNormalized
+        );
       }
       return input[key] !== existingProfile[key];
     })
@@ -662,7 +680,7 @@ async function mirrorProfileToRealtimeDB(userId, profile) {
   try {
     const db = admin.database();
     const serialized = serializeForClient(profile);
-    await db.ref(`users/${userId}`).update({
+    await projectRealtimeProfile(userId, {
       ...serialized,
       uid: userId,
       updatedAt: serialized.updatedAt || new Date().toISOString()
@@ -685,20 +703,11 @@ async function projectCanonicalDriverRoleToRealtimeDB(userId, profile) {
     return;
   }
 
-  await admin.database().ref(`users/${userId}`).update({
+  await projectRealtimeProfile(userId, {
     usertype: canonicalRole,
     userType: canonicalRole,
     role: canonicalRole
   });
-}
-
-async function removeRealtimeProfile(userId) {
-  try {
-    const db = admin.database();
-    await db.ref(`users/${userId}`).remove();
-  } catch (error) {
-    logger.warn(`Falha ao remover perfil legado do RTDB para ${userId}: ${error.message}`);
-  }
 }
 
 async function resolveAccountProfile(userId, tokenClaims) {
@@ -727,7 +736,7 @@ async function resolveAccountProfile(userId, tokenClaims) {
     trustIncomingStatus: true
   });
 
-  await userRef.set(migratedProfile, { merge: true });
+  await saveAccountProfile({ userId, profile: migratedProfile });
 
   return {
     profile: composeProfileRecord(userId, {}, legacyProfile, tokenClaims, {
@@ -790,8 +799,33 @@ router.put('/api/account/profile', requireFirebase, async (req, res) => {
     }
 
     const existingResult = await resolveAccountProfile(userId, req.user);
+    assertAccountWritable(existingResult.profile || {});
     const isFirstProfileCompletion =
       !existingResult.profile || isIncompleteOtpBootstrapProfile(existingResult.profile);
+    const hasIncomingCpf = Object.prototype.hasOwnProperty.call(incomingProfile, 'cpf');
+    let normalizedCpf = null;
+
+    try {
+      if (hasIncomingCpf) {
+        normalizedCpf = normalizeCpf(incomingProfile.cpf);
+      } else if (existingResult.profile?.cpf || existingResult.profile?.cpfNormalized) {
+        normalizedCpf = normalizeCpf(
+          existingResult.profile.cpf || existingResult.profile.cpfNormalized,
+          { required: true }
+        );
+      }
+    } catch (error) {
+      if (error instanceof CpfIdentityError || ['ACCOUNT_DELETION_IN_PROGRESS', 'PROFILE_CPF_REVIEW_REQUIRED', 'CPF_REVIEW_CONFIG_UNAVAILABLE'].includes(error.code)) {
+        return res.status(error.status || 400).json({
+          success: false,
+          code: error.code,
+        reviewReference: error.reviewReference,
+          message: error.message
+        });
+      }
+      throw error;
+    }
+
     const immutableFields = findImmutableProfileFields(
       incomingProfile,
       existingResult.profile || {}
@@ -800,7 +834,7 @@ router.put('/api/account/profile', requireFirebase, async (req, res) => {
       return res.status(400).json({
         success: false,
         code: 'PROFILE_IDENTITY_FIELD_IMMUTABLE',
-        message: 'Papel da conta, telefone e conclusão do onboarding não podem ser alterados pelo perfil.',
+        message: 'Papel da conta, telefone, CPF e conclusão do onboarding não podem ser alterados pelo perfil.',
         immutableFields
       });
     }
@@ -847,6 +881,14 @@ router.put('/api/account/profile', requireFirebase, async (req, res) => {
       sanitizedPatch.acceptPrivacy = true;
 
       if (explicitRole.role === 'driver') {
+        if (!normalizedCpf) {
+          return res.status(400).json({
+            success: false,
+            code: 'PROFILE_CPF_REQUIRED',
+            message: 'Informe o CPF da CNH para concluir o cadastro.'
+          });
+        }
+
         sanitizedPatch.consentBackgroundCheck = true;
         baseProfile = {
           ...baseProfile,
@@ -856,6 +898,12 @@ router.put('/api/account/profile', requireFirebase, async (req, res) => {
         };
       }
     }
+
+    if (normalizedCpf) {
+      sanitizedPatch.cpf = normalizedCpf.formatted;
+      sanitizedPatch.cpfNormalized = normalizedCpf.digits;
+    }
+
     const nextProfile = composeProfileRecord(
       userId,
       baseProfile,
@@ -863,7 +911,17 @@ router.put('/api/account/profile', requireFirebase, async (req, res) => {
       req.user
     );
 
-    await admin.firestore().collection('users').doc(userId).set(nextProfile, { merge: true });
+    if (normalizedCpf) {
+      await claimCpf({
+        firestore: admin.firestore(),
+        realtimeDb: admin.database(),
+        userId,
+        cpf: normalizedCpf.digits,
+        profile: nextProfile
+      });
+    } else {
+      await saveAccountProfile({ userId, profile: nextProfile });
+    }
     await projectCanonicalDriverRoleToRealtimeDB(userId, nextProfile);
     await mirrorProfileToRealtimeDB(userId, nextProfile);
     const storedDoc = await admin.firestore().collection('users').doc(userId).get();
@@ -882,6 +940,14 @@ router.put('/api/account/profile', requireFirebase, async (req, res) => {
       mirroredToRealtimeDb: legacyProfileRtdbMirrorEnabled
     });
   } catch (error) {
+    if (error instanceof CpfIdentityError || ['ACCOUNT_DELETION_IN_PROGRESS', 'PROFILE_CPF_REVIEW_REQUIRED', 'CPF_REVIEW_CONFIG_UNAVAILABLE'].includes(error.code)) {
+      return res.status(error.status || 400).json({
+        success: false,
+        code: error.code,
+        reviewReference: error.reviewReference,
+        message: error.message
+      });
+    }
     logger.error('Erro ao atualizar perfil da conta:', error);
     return res.status(500).json({
       success: false,
@@ -1392,122 +1458,22 @@ async function processAccountDeletion(req, res, options = {}) {
       });
     }
 
-    if (userData.status === 'deleted') {
-      return res.json({
-        success: true,
-        message: 'Sua conta já foi excluída.',
-        deletionRequested: true,
-        deleted: true
-      });
-    }
-
-    const deletionLog = {
+    const result = await runAccountDeletion({
       userId,
-      status: 'processing',
-      reason: deletionReason,
-      additionalInfo: additionalInfo || '',
-      phoneMasked: maskPhone(normalizedPhone || registeredPhone || null),
-      passwordProvided: Boolean(password),
-      source: source || 'mobile-app',
-      timestamp: admin.firestore.FieldValue.serverTimestamp(),
-      userEmailMasked: maskEmail(userData.email || null)
-    };
+      metadata: {
+        reason: deletionReason,
+        source: source || 'mobile-app',
+        phoneMasked: maskPhone(normalizedPhone || registeredPhone || null),
+        passwordProvided: Boolean(password)
+      },
+      purge: buildPurgedUserUpdate({ deletionReason, source, additionalInfo }),
+      immediate: immediateAccountPurgeEnabled,
+      removeAuth: removeFirebaseAuthUserEnabled,
+      releaseCpf: releaseCpfsForDeletedAccount
+    });
+    return res.json({ success: true, deletionRequested: true, deleted: result.deleted,
+      message: result.deleted ? 'Sua conta foi excluída com sucesso.' : 'Sua conta foi marcada para exclusão.' });
 
-    const deletionLogRef = await admin.firestore().collection('account_deletions').add(deletionLog);
-    logger.info(`Registro de exclusão de conta criado - UserId: ${userId}, Motivo: ${deletionReason}, purgeImediato: ${immediateAccountPurgeEnabled}`);
-
-    try {
-      await admin.auth().updateUser(userId, {
-        disabled: true
-      });
-
-      if (immediateAccountPurgeEnabled) {
-        await admin.firestore().collection('users').doc(userId).set(
-          buildPurgedUserUpdate({
-            deletionReason,
-            source,
-            additionalInfo
-          }),
-          { merge: true }
-        );
-        await removeRealtimeProfile(userId);
-
-        if (removeFirebaseAuthUserEnabled) {
-          try {
-            await admin.auth().deleteUser(userId);
-          } catch (deleteAuthError) {
-            // Se já não existir, tratamos como sucesso idempotente.
-            if (!String(deleteAuthError?.code || '').includes('user-not-found')) {
-              throw deleteAuthError;
-            }
-          }
-        }
-
-        await deletionLogRef.update({
-          status: 'completed',
-          completedAt: admin.firestore.FieldValue.serverTimestamp(),
-          immediatePurge: true
-        });
-
-        logger.info(`Conta excluída com purge imediato - UserId: ${userId}`);
-
-        return res.json({
-          success: true,
-          message: 'Sua conta foi excluída com sucesso. Dados pessoais foram removidos conforme a política de retenção aplicável.',
-          deletionRequested: true,
-          deleted: true
-        });
-      }
-
-      await admin.firestore().collection('users').doc(userId).set({
-        status: 'deletion_pending',
-        accountDisabled: true,
-        deletionRequestedAt: admin.firestore.FieldValue.serverTimestamp(),
-        deletionReason,
-        deletionSource: source || 'mobile-app',
-        deletionAdditionalInfo: additionalInfo || ''
-      }, { merge: true });
-
-      await deletionLogRef.update({
-        status: 'queued',
-        queuedAt: admin.firestore.FieldValue.serverTimestamp(),
-        immediatePurge: false
-      });
-
-      logger.info(`Conta marcada para exclusão - UserId: ${userId}`);
-
-      return res.json({
-        success: true,
-        message: 'Sua conta foi marcada para exclusão com sucesso. Seus dados serão removidos conforme a política de retenção aplicável.',
-        deletionRequested: true,
-        deleted: false
-      });
-    } catch (deleteError) {
-      logger.error(`Erro ao excluir conta do usuário ${userId}:`, deleteError);
-
-      try {
-        await admin.firestore().collection('users').doc(userId).set({
-          status: userData.status || 'active'
-        }, { merge: true });
-      } catch (revertError) {
-        logger.error(`Erro ao reverter status da conta ${userId}:`, revertError);
-      }
-
-      try {
-        await deletionLogRef.update({
-          status: 'error',
-          errorAt: admin.firestore.FieldValue.serverTimestamp(),
-          errorMessage: String(deleteError?.message || 'Falha ao processar exclusão')
-        });
-      } catch (logUpdateError) {
-        logger.error(`Erro ao atualizar log de exclusão com falha - UserId: ${userId}:`, logUpdateError);
-      }
-
-      return res.status(500).json({
-        success: false,
-        message: 'Erro ao processar exclusão da conta. Tente novamente ou entre em contato com o suporte.'
-      });
-    }
   } catch (error) {
     logger.error('Erro ao excluir conta:', error);
     return res.status(500).json({
@@ -1516,6 +1482,74 @@ async function processAccountDeletion(req, res, options = {}) {
     });
   }
 }
+
+const { authenticateSupport } = require('../middleware/support-auth');
+const { decideCpfReview } = require('../services/cpf-review-service');
+async function requireLifecycleAdmin(req, res, next) {
+  try {
+    const id = req.user?.id || req.user?.uid;
+    if (req.user?.authSource !== 'admin_jwt' || !id) return res.status(403).json({ success: false });
+    const snapshot = await admin.firestore().collection('adminUsers').doc(id).get();
+    const record = snapshot.exists ? snapshot.data() : null;
+    if (!record || record.active !== true || record.role !== 'super-admin') return res.status(403).json({ success: false });
+    next();
+  } catch (_) { return res.status(503).json({ success: false, code: 'ADMIN_AUTH_UNAVAILABLE' }); }
+}
+
+router.get('/api/admin/account-deletions/:userId', authenticateSupport, requireLifecycleAdmin, async (req, res) => {
+  try {
+    const snapshot = await admin.firestore().collection('account_deletions').doc(req.params.userId).get();
+    if (!snapshot.exists) return res.status(404).json({ success: false, code: 'DELETION_NOT_FOUND' });
+    const { status, step, updatedAt, completedAt } = snapshot.data();
+    res.json({ success: true, status, step, updatedAt, completedAt });
+  } catch (_) { res.status(503).json({ success: false, code: 'DELETION_STATUS_UNAVAILABLE' }); }
+});
+
+router.post('/api/admin/account-deletions/:userId/retry', authenticateSupport, requireLifecycleAdmin, async (req, res) => {
+  try {
+    const userId = String(req.params.userId || '');
+    const jobs = admin.firestore().collection('account_deletions');
+    let job = await jobs.doc(userId).get();
+    let recoverySourceRef = null;
+    if (!job.exists) {
+      const legacy = await jobs.where('userId', '==', userId).get();
+      job = legacy.docs.find(doc => ['processing', 'error', 'queued'].includes(doc.data()?.status));
+      if (!job) return res.status(404).json({ success: false, code: 'DELETION_NOT_FOUND' });
+      recoverySourceRef = job.ref;
+    }
+    const { reason, source } = job.data();
+    const metadata = { reason: reason || DEFAULT_DELETION_REASON, source: source || 'admin-recovery' };
+    const result = await runAccountDeletion({ userId, metadata,
+      purge: buildPurgedUserUpdate({ deletionReason: metadata.reason, source: metadata.source }),
+      immediate: true, removeAuth: removeFirebaseAuthUserEnabled,
+      recoveryActor: req.user.id || req.user.uid, recoverySourceRef, releaseCpf: releaseCpfsForDeletedAccount });
+    res.json({ success: true, ...result });
+  } catch (error) { res.status(error.status || 500).json({ success: false, code: 'DELETION_RETRY_FAILED' }); }
+});
+
+router.post('/api/admin/cpf-reviews/decision', authenticateSupport, requireLifecycleAdmin, async (req, res) => {
+  try {
+    const cpf = req.body?.caseId ? null : normalizeCpf(req.body?.cpf, { required: true });
+    const decision = await decideCpfReview({ firestore: admin.firestore(), cpf: cpf?.digits,
+      input: req.body, actor: req.user.id || req.user.uid });
+    res.json({ success: true, ...decision });
+  } catch (error) { res.status(error.status || 500).json({ success: false, code: error.code || 'CPF_REVIEW_FAILED' }); }
+});
+
+router.get('/api/admin/cpf-reviews/pending', authenticateSupport, requireLifecycleAdmin, async (req, res) => {
+  try {
+    const collection = admin.firestore().collection('cpf_review_restrictions');
+    let query = collection.orderBy('reviewAt');
+    if (req.query.afterCaseId) {
+      const cursor = await collection.where('caseId', '==', String(req.query.afterCaseId)).get();
+      if (cursor.docs.length !== 1) return res.status(400).json({ success: false, code: 'INVALID_CURSOR' });
+      query = query.startAfter(cursor.docs[0]);
+    }
+    const snapshot = await query.limit(100).get();
+    res.json({ success: true, cases: snapshot.docs.map(doc => doc.data()),
+      nextCursor: snapshot.docs.length === 100 ? snapshot.docs[99].data().caseId : null });
+  } catch (_) { res.status(503).json({ success: false, code: 'CPF_REVIEW_UNAVAILABLE' }); }
+});
 
 /**
  * POST /api/account/delete

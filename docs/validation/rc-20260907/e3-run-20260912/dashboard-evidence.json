@@ -1,0 +1,440 @@
+{
+  "source": "firestore_direct_sandbox_documents",
+  "retrievedAt": "2026-09-12T05:05:44Z",
+  "success": true,
+  "financialContext": {
+    "version": 1,
+    "namespace": "sandbox",
+    "classification": "sandbox_test_user",
+    "providerEnvironment": "sandbox",
+    "paymentProfileId": "qa-test-users-sandbox-durable",
+    "paymentProfileSource": "firestore",
+    "testUserSandbox": true,
+    "contextId": "d67d0ebade061681aa56c2d4080a10c66fdfdab2b9e840b0f13d0bab21143cbe"
+  },
+  "financialNamespace": "sandbox",
+  "financialContextId": "d67d0ebade061681aa56c2d4080a10c66fdfdab2b9e840b0f13d0bab21143cbe",
+  "report": {
+    "rideId": "booking_1789188861310_3tEQ8pQ2QzeWbMKhLGsXHHhnOGL2",
+    "ok": true,
+    "testData": true,
+    "financialContext": {
+      "version": 1,
+      "namespace": "sandbox",
+      "classification": "sandbox_test_user",
+      "providerEnvironment": "sandbox",
+      "paymentProfileId": "qa-test-users-sandbox-durable",
+      "paymentProfileSource": "firestore",
+      "testUserSandbox": true,
+      "contextId": "d67d0ebade061681aa56c2d4080a10c66fdfdab2b9e840b0f13d0bab21143cbe"
+    },
+    "financialNamespace": "sandbox",
+    "financialContextId": "d67d0ebade061681aa56c2d4080a10c66fdfdab2b9e840b0f13d0bab21143cbe",
+    "issues": [],
+    "totals": {
+      "paymentAmountCents": 1667,
+      "distributionTotalCents": 1667,
+      "ledgerEventCount": 2,
+      "passengerGrossCents": 1667,
+      "driverNetAmountCents": 1518,
+      "operationalFeeCents": 99,
+      "wooviFeeCents": 50,
+      "subscriptionRetainedFeeCents": null
+    },
+    "references": {
+      "ledgerRideIds": [
+        "booking_1789188861310_3tEQ8pQ2QzeWbMKhLGsXHHhnOGL2",
+        "temp_ride_session_4c8c0d5f5482f4f0bf53c13b42b8"
+      ],
+      "paymentLedgerRideId": "temp_ride_session_4c8c0d5f5482f4f0bf53c13b42b8"
+    },
+    "checkedAt": {},
+    "checkedAtIso": "2026-09-12T05:02:50.912Z"
+  },
+  "sourceDocuments": {
+    "ridePayment": {
+      "amount": 1667,
+      "metadata": {
+        "providerConfirmation": {
+          "endpointHost": "api.woovi-sandbox.com",
+          "source": "woovi_openpix_testing",
+          "confirmedAt": "2026-09-12T04:54:10.523Z",
+          "transactionID": "1313eed3bd4f4f3884e55218fc067fb9",
+          "status": 200
+        },
+        "financialContextId": "d67d0ebade061681aa56c2d4080a10c66fdfdab2b9e840b0f13d0bab21143cbe",
+        "providerConfirmationEnforced": false,
+        "testUserSandbox": true,
+        "signatureMethod": null,
+        "source": "sandbox_provider_verification",
+        "financialContext": {
+          "paymentProfileSource": "firestore",
+          "paymentProfileId": "qa-test-users-sandbox-durable",
+          "namespace": "sandbox",
+          "testUserSandbox": true,
+          "contextId": "d67d0ebade061681aa56c2d4080a10c66fdfdab2b9e840b0f13d0bab21143cbe",
+          "classification": "sandbox_test_user",
+          "providerEnvironment": "sandbox",
+          "version": 1
+        },
+        "additionalInfo": [
+          {
+            "key": "passenger_id",
+            "value": "3tEQ8pQ2QzeWbMKhLGsXHHhnOGL2"
+          },
+          {
+            "key": "ride_id",
+            "value": "temp_ride_session_4c8c0d5f5482f4f0bf53c13b42b8"
+          },
+          {
+            "key": "payment_type",
+            "value": "advance_payment"
+          },
+          {
+            "key": "payment_intent_id",
+            "value": "advance_81d5bf7e70a4ffc435bc585577e8ae8f"
+          },
+          {
+            "key": "financial_namespace",
+            "value": "sandbox"
+          },
+          {
+            "key": "financial_context_id",
+            "value": "d67d0ebade061681aa56c2d4080a10c66fdfdab2b9e840b0f13d0bab21143cbe"
+          },
+          {
+            "key": "service",
+            "value": "ride_sharing"
+          }
+        ],
+        "financialNamespace": "sandbox",
+        "paidAt": "2026-09-12T04:54:09.787Z",
+        "correlationID": "leaf_ride_bcdf006ad15fdf9d2dd3aea1",
+        "pixStatus": "COMPLETED",
+        "event": "OPENPIX:CHARGE_COMPLETED",
+        "providerEnvironment": "sandbox",
+        "status": "COMPLETED"
+      },
+      "ledgerRetryable": false,
+      "financialContextId": "d67d0ebade061681aa56c2d4080a10c66fdfdab2b9e840b0f13d0bab21143cbe",
+      "paymentReferenceRideId": "temp_ride_session_4c8c0d5f5482f4f0bf53c13b42b8",
+      "source": "createBooking_paid_immediate",
+      "rideId": "booking_1789188861310_3tEQ8pQ2QzeWbMKhLGsXHHhnOGL2",
+      "bookingId": "booking_1789188861310_3tEQ8pQ2QzeWbMKhLGsXHHhnOGL2",
+      "canonicalRideId": "booking_1789188861310_3tEQ8pQ2QzeWbMKhLGsXHHhnOGL2",
+      "ledgerStatus": "posted",
+      "materializedAt": {
+        "_seconds": 1789188861,
+        "_nanoseconds": 764000000
+      },
+      "temporaryRideId": "temp_ride_session_4c8c0d5f5482f4f0bf53c13b42b8",
+      "chargeId": "1313eed3bd4f4f3884e55218fc067fb9",
+      "ledgerError": null,
+      "financialContext": {
+        "paymentProfileSource": "firestore",
+        "paymentProfileId": "qa-test-users-sandbox-durable",
+        "namespace": "sandbox",
+        "testUserSandbox": true,
+        "contextId": "d67d0ebade061681aa56c2d4080a10c66fdfdab2b9e840b0f13d0bab21143cbe",
+        "classification": "sandbox_test_user",
+        "providerEnvironment": "sandbox",
+        "version": 1
+      },
+      "financialNamespace": "sandbox",
+      "materializedAtIso": "2026-09-12T04:54:21.370Z",
+      "passengerId": "3tEQ8pQ2QzeWbMKhLGsXHHhnOGL2",
+      "materializedFrom": "temp_ride_session_4c8c0d5f5482f4f0bf53c13b42b8",
+      "confirmedAt": {
+        "_seconds": 1789188851,
+        "_nanoseconds": 627000000
+      },
+      "ledgerEventId": "payment_received_186e5572b1447254092ad9b378e177f0",
+      "credited": false,
+      "status": "CONFIRMED",
+      "updatedAt": {
+        "_seconds": 1789188861,
+        "_nanoseconds": 764000000
+      }
+    },
+    "paymentHolding": {
+      "paymentReferenceRideId": "temp_ride_session_4c8c0d5f5482f4f0bf53c13b42b8",
+      "source": "createBooking_paid_immediate",
+      "rideId": "booking_1789188861310_3tEQ8pQ2QzeWbMKhLGsXHHhnOGL2",
+      "materializedAt": {
+        "_seconds": 1789188861,
+        "_nanoseconds": 585000000
+      },
+      "createdAt": {
+        "_seconds": 1789188852,
+        "_nanoseconds": 381000000
+      },
+      "temporaryRideId": "temp_ride_session_4c8c0d5f5482f4f0bf53c13b42b8",
+      "paymentId": "1313eed3bd4f4f3884e55218fc067fb9",
+      "materializedAtIso": "2026-09-12T04:54:21.370Z",
+      "amountInReais": 16.67,
+      "materializedFrom": "temp_ride_session_4c8c0d5f5482f4f0bf53c13b42b8",
+      "amount": 1667,
+      "financialContextId": "d67d0ebade061681aa56c2d4080a10c66fdfdab2b9e840b0f13d0bab21143cbe",
+      "testUserSandbox": true,
+      "bookingId": "booking_1789188861310_3tEQ8pQ2QzeWbMKhLGsXHHhnOGL2",
+      "canonicalRideId": "booking_1789188861310_3tEQ8pQ2QzeWbMKhLGsXHHhnOGL2",
+      "chargeId": "1313eed3bd4f4f3884e55218fc067fb9",
+      "financialContext": {
+        "paymentProfileSource": "firestore",
+        "paymentProfileId": "qa-test-users-sandbox-durable",
+        "namespace": "sandbox",
+        "testUserSandbox": true,
+        "contextId": "d67d0ebade061681aa56c2d4080a10c66fdfdab2b9e840b0f13d0bab21143cbe",
+        "classification": "sandbox_test_user",
+        "providerEnvironment": "sandbox",
+        "version": 1
+      },
+      "financialNamespace": "sandbox",
+      "paidAt": "2026-09-12T04:54:09.787Z",
+      "passengerId": "3tEQ8pQ2QzeWbMKhLGsXHHhnOGL2",
+      "paymentMethod": "pix",
+      "confirmedAt": "2026-09-12T04:54:11.999Z",
+      "providerEnvironment": "sandbox",
+      "distributedAt": "2026-09-12T04:57:37.289Z",
+      "distributionData": {
+        "retainedFees": {
+          "totalRetained": 149,
+          "wooviFee": 50,
+          "operationalFee": 99,
+          "subscriptionRetainedFee": 0
+        },
+        "netAmount": 1518,
+        "balanceCreditId": "ride_credit_30e83d7a1c0ef3f083cc5eddde8e63fb",
+        "transferId": null,
+        "ledgerEventId": "ride_settlement_bd0744a4188ca5b91947cda8f8d0949e"
+      },
+      "status": "distributed",
+      "updatedAt": {
+        "_seconds": 1789189059,
+        "_nanoseconds": 58000000
+      }
+    },
+    "paymentDistribution": {
+      "calculation": {
+        "totalAmount": 1667,
+        "netAmount": 1518,
+        "wooviFee": 50,
+        "breakdown": {
+          "total": "16.67",
+          "wooviFee": "0.50",
+          "operationalFee": "0.99",
+          "tollFee": "0.00",
+          "net": "15.18",
+          "operationalFeeType": "locked_backend_final"
+        },
+        "financialContract": {
+          "passengerPaidCents": 1667,
+          "tollFeeCents": 0,
+          "grossFareCents": 1667,
+          "allocatedTotalCents": 1667,
+          "authoritativeSnapshot": true,
+          "balanced": true,
+          "version": "ride_financial_snapshot_v1",
+          "subscriptionRetainedFeeCents": 0,
+          "driverNetAmountCents": 1518,
+          "paymentIntermediationFeeCents": 50,
+          "retainedTotalCents": 149,
+          "driverTollPassThroughCents": 0,
+          "currency": "BRL",
+          "financialSnapshotSource": "backend_final",
+          "operationalFeeCents": 99
+        },
+        "operationalFee": 99,
+        "tollFee": 0
+      },
+      "retainedFees": {
+        "totalRetained": 149,
+        "wooviFee": 50,
+        "operationalFee": 99,
+        "subscriptionRetainedFee": 0
+      },
+      "netAmount": 1518,
+      "financialContextId": "d67d0ebade061681aa56c2d4080a10c66fdfdab2b9e840b0f13d0bab21143cbe",
+      "distributedAt": "2026-09-12T04:57:36.980Z",
+      "rideId": "booking_1789188861310_3tEQ8pQ2QzeWbMKhLGsXHHhnOGL2",
+      "transferId": null,
+      "createdAt": {
+        "_seconds": 1789189057,
+        "_nanoseconds": 152000000
+      },
+      "driverId": "DV4cwZvql3T3pI3lnKYQwQVALKZ2",
+      "financialContext": {
+        "paymentProfileSource": "firestore",
+        "paymentProfileId": "qa-test-users-sandbox-durable",
+        "namespace": "sandbox",
+        "testUserSandbox": true,
+        "contextId": "d67d0ebade061681aa56c2d4080a10c66fdfdab2b9e840b0f13d0bab21143cbe",
+        "classification": "sandbox_test_user",
+        "providerEnvironment": "sandbox",
+        "version": 1
+      },
+      "financialNamespace": "sandbox",
+      "balanceCreditId": "ride_credit_30e83d7a1c0ef3f083cc5eddde8e63fb",
+      "ledgerEventId": "ride_settlement_bd0744a4188ca5b91947cda8f8d0949e",
+      "subscriptionRetainedFee": 0,
+      "status": "distributed"
+    }
+  },
+  "ledgerEvents": [
+    {
+      "id": "payment_received_186e5572b1447254092ad9b378e177f0",
+      "eventId": "payment_received_186e5572b1447254092ad9b378e177f0",
+      "eventType": "payment_received",
+      "source": "woovi_webhook",
+      "rideId": "temp_ride_session_4c8c0d5f5482f4f0bf53c13b42b8",
+      "driverId": null,
+      "passengerId": "3tEQ8pQ2QzeWbMKhLGsXHHhnOGL2",
+      "chargeId": "1313eed3bd4f4f3884e55218fc067fb9",
+      "withdrawalId": null,
+      "refundId": null,
+      "status": "posted",
+      "currency": "BRL",
+      "totalDebitCents": 1667,
+      "totalCreditCents": 1667,
+      "lineCount": 2,
+      "balanced": true,
+      "balanceHash": "19dc7359c9b8f7cba91fc043ac5b4b76c3831a910a58b92a1167baf26f03cf6f",
+      "lines": [
+        {
+          "lineIndex": 0,
+          "account": "asset:leaf_cash_pix",
+          "direction": "debit",
+          "amountCents": 1667,
+          "entityType": "charge",
+          "entityId": "1313eed3bd4f4f3884e55218fc067fb9",
+          "memo": "Pix recebido do passageiro"
+        },
+        {
+          "lineIndex": 1,
+          "account": "liability:ride_payment_holding",
+          "direction": "credit",
+          "amountCents": 1667,
+          "entityType": "ride",
+          "entityId": "temp_ride_session_4c8c0d5f5482f4f0bf53c13b42b8",
+          "memo": "Valor recebido aguardando conclusão da corrida"
+        }
+      ],
+      "metadata": {
+        "source": "storeConfirmedPayment",
+        "webhookEvent": "OPENPIX:CHARGE_COMPLETED",
+        "correlationID": "leaf_ride_bcdf006ad15fdf9d2dd3aea1"
+      },
+      "financialContext": {
+        "version": 1,
+        "namespace": "sandbox",
+        "classification": "sandbox_test_user",
+        "providerEnvironment": "sandbox",
+        "paymentProfileId": "qa-test-users-sandbox-durable",
+        "paymentProfileSource": "firestore",
+        "testUserSandbox": true,
+        "contextId": "d67d0ebade061681aa56c2d4080a10c66fdfdab2b9e840b0f13d0bab21143cbe"
+      },
+      "financialNamespace": "sandbox",
+      "financialContextId": "d67d0ebade061681aa56c2d4080a10c66fdfdab2b9e840b0f13d0bab21143cbe",
+      "createdAtIso": "2026-09-12T04:54:11.350Z",
+      "updatedAtIso": "2026-09-12T04:54:11.350Z",
+      "createdAt": {
+        "_seconds": 1789188851,
+        "_nanoseconds": 432000000
+      },
+      "updatedAt": {
+        "_seconds": 1789188851,
+        "_nanoseconds": 432000000
+      }
+    },
+    {
+      "id": "ride_settlement_bd0744a4188ca5b91947cda8f8d0949e",
+      "eventId": "ride_settlement_bd0744a4188ca5b91947cda8f8d0949e",
+      "eventType": "ride_settlement",
+      "source": "billing_worker",
+      "rideId": "booking_1789188861310_3tEQ8pQ2QzeWbMKhLGsXHHhnOGL2",
+      "driverId": "DV4cwZvql3T3pI3lnKYQwQVALKZ2",
+      "passengerId": null,
+      "chargeId": null,
+      "withdrawalId": null,
+      "refundId": null,
+      "status": "posted",
+      "currency": "BRL",
+      "totalDebitCents": 1667,
+      "totalCreditCents": 1667,
+      "lineCount": 4,
+      "balanced": true,
+      "balanceHash": "28ef14d5808a857321d74d1ca27539751d30e1570541a104a4259f923f0b8033",
+      "lines": [
+        {
+          "lineIndex": 0,
+          "account": "liability:ride_payment_holding",
+          "direction": "debit",
+          "amountCents": 1667,
+          "entityType": "ride",
+          "entityId": "booking_1789188861310_3tEQ8pQ2QzeWbMKhLGsXHHhnOGL2",
+          "memo": "Baixa do holding após corrida concluída"
+        },
+        {
+          "lineIndex": 1,
+          "account": "liability:driver_balance_payable",
+          "direction": "credit",
+          "amountCents": 1518,
+          "entityType": "driver",
+          "entityId": "DV4cwZvql3T3pI3lnKYQwQVALKZ2",
+          "memo": "Saldo líquido devido ao motorista"
+        },
+        {
+          "lineIndex": 2,
+          "account": "revenue:leaf_operational_fee",
+          "direction": "credit",
+          "amountCents": 99,
+          "entityType": "ride",
+          "entityId": "booking_1789188861310_3tEQ8pQ2QzeWbMKhLGsXHHhnOGL2",
+          "memo": "Taxa operacional Leaf"
+        },
+        {
+          "lineIndex": 3,
+          "account": "contra_revenue:payment_intermediation_fee",
+          "direction": "credit",
+          "amountCents": 50,
+          "entityType": "ride",
+          "entityId": "booking_1789188861310_3tEQ8pQ2QzeWbMKhLGsXHHhnOGL2",
+          "memo": "Custo/intermediação de pagamento retido no settlement"
+        }
+      ],
+      "metadata": {
+        "transferId": null,
+        "balanceCreditId": "ride_credit_30e83d7a1c0ef3f083cc5eddde8e63fb",
+        "refundAmountCents": 0,
+        "refundId": null
+      },
+      "financialContext": {
+        "version": 1,
+        "namespace": "sandbox",
+        "classification": "sandbox_test_user",
+        "providerEnvironment": "sandbox",
+        "paymentProfileId": "qa-test-users-sandbox-durable",
+        "paymentProfileSource": "firestore",
+        "testUserSandbox": true,
+        "contextId": "d67d0ebade061681aa56c2d4080a10c66fdfdab2b9e840b0f13d0bab21143cbe"
+      },
+      "financialNamespace": "sandbox",
+      "financialContextId": "d67d0ebade061681aa56c2d4080a10c66fdfdab2b9e840b0f13d0bab21143cbe",
+      "createdAtIso": "2026-09-12T04:57:35.527Z",
+      "updatedAtIso": "2026-09-12T04:57:35.527Z",
+      "createdAt": {
+        "_seconds": 1789189055,
+        "_nanoseconds": 663000000
+      },
+      "updatedAt": {
+        "_seconds": 1789189055,
+        "_nanoseconds": 663000000
+      }
+    }
+  ],
+  "ledgerRideIds": [
+    "booking_1789188861310_3tEQ8pQ2QzeWbMKhLGsXHHhnOGL2",
+    "temp_ride_session_4c8c0d5f5482f4f0bf53c13b42b8"
+  ]
+}

@@ -467,7 +467,10 @@ function loadRuntimeEnv() {
   };
 
   if (explicitEnvFile) {
-    safeLoad(explicitEnvFile, true);
+    // Keep explicit process variables authoritative, matching server.js. This
+    // matters for local sandbox validation: NODE_ENV=development must not be
+    // replaced by the filename's production-oriented value.
+    safeLoad(explicitEnvFile, false);
     return loadedFiles;
   }
 
@@ -573,6 +576,14 @@ function main() {
     : [];
   const warnings = [];
   const blockers = [];
+  if (nodeEnv === 'production' || process.env.CPF_REVIEW_ENABLED === 'true') {
+    if (Buffer.byteLength(process.env.CPF_REVIEW_HMAC_KEY || '') < 32) {
+      blockers.push('CPF review exige CPF_REVIEW_HMAC_KEY dedicada com pelo menos 32 bytes');
+    }
+    if (nodeEnv === 'production' && process.env.CPF_REVIEW_ENABLED === 'false') {
+      blockers.push('CPF_REVIEW_ENABLED=false não é permitido em produção');
+    }
+  }
   const hasDefaultWooviWebhookPublicKey =
     nodeEnv === 'production' &&
     !paymentProviderSandboxRuntime &&

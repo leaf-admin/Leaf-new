@@ -68,8 +68,9 @@ const imageHeaderStyle = {
 const imageViewportStyle = {
   display: "grid",
   placeItems: "center",
-  minHeight: 280,
-  aspectRatio: "4 / 3",
+  minHeight: 220,
+  height: "clamp(220px, 32vh, 300px)",
+  gridTemplateRows: "minmax(0, 1fr)",
   overflow: "hidden",
   background: "#edf1ed",
 };
@@ -77,6 +78,10 @@ const imageViewportStyle = {
 const imageStyle = {
   width: "100%",
   height: "100%",
+  minWidth: 0,
+  minHeight: 0,
+  maxWidth: "100%",
+  maxHeight: "100%",
   objectFit: "contain",
   userSelect: "none",
 };

@@ -130,25 +130,61 @@ fi
 export ANDROID_SDK_ROOT="${ANDROID_SDK_ROOT:-${HOME}/Android/Sdk}"
 export ANDROID_HOME="${ANDROID_HOME:-${ANDROID_SDK_ROOT}}"
 
-# Prefer local toolchain Java if present.
-LOCAL_JAVA_HOME="${HOME}/.local/mobile-build-tools/jdk-17"
-if [[ -d "${LOCAL_JAVA_HOME}" ]]; then
-  export JAVA_HOME="${JAVA_HOME:-${LOCAL_JAVA_HOME}}"
-fi
-if [[ -z "${JAVA_HOME:-}" ]]; then
+# Prefer a verified local Java 17+ toolchain. The host may expose Java 8 as
+# `java`, while the QA/build tools require Java 17 or newer. Do not preserve a
+# pre-existing JAVA_HOME unless it actually satisfies that contract.
+java_home_is_compatible() {
+  local candidate_java_home="$1"
+  local java_version
+  local java_major
+
+  [[ -x "${candidate_java_home}/bin/java" ]] || return 1
+  java_version="$("${candidate_java_home}/bin/java" -version 2>&1 | sed -n 's/.*version "\([^"]*\)".*/\1/p' | head -n 1)"
+  [[ -n "${java_version}" ]] || return 1
+
+  if [[ "${java_version}" == 1.* ]]; then
+    java_major="${java_version#1.}"
+    java_major="${java_major%%.*}"
+  else
+    java_major="${java_version%%.*}"
+  fi
+
+  [[ "${java_major}" =~ ^[0-9]+$ ]] && (( java_major >= 17 ))
+}
+
+resolve_java_home() {
+  local candidate_java_home
+
   for candidate_java_home in \
+    "${JAVA_HOME:-}" \
+    "${HOME}/.local/jdks/temurin17/jdk-17.0.18+8/Contents/Home" \
+    "${HOME}/.local/mobile-build-tools/jdk-17" \
     "/opt/homebrew/opt/openjdk@17" \
     "/usr/local/opt/openjdk@17" \
     "/opt/homebrew/opt/openjdk@21" \
     "/usr/local/opt/openjdk@21" \
     "/opt/homebrew/opt/java" \
     "/usr/local/opt/java"; do
-    if [[ -x "${candidate_java_home}/bin/java" ]]; then
+    [[ -n "${candidate_java_home}" ]] || continue
+    if java_home_is_compatible "${candidate_java_home}"; then
       export JAVA_HOME="${candidate_java_home}"
-      break
+      return 0
     fi
   done
-fi
+
+  if command -v /usr/libexec/java_home >/dev/null 2>&1; then
+    candidate_java_home="$(/usr/libexec/java_home -v 17 2>/dev/null || true)"
+    if java_home_is_compatible "${candidate_java_home}"; then
+      export JAVA_HOME="${candidate_java_home}"
+      return 0
+    fi
+  fi
+
+  unset JAVA_HOME
+  return 1
+}
+
+resolve_java_home || true
 
 # CocoaPods installed via --user-install lives in Gem.user_dir/bin.
 GEM_USER_BIN="$(ruby -e 'print Gem.user_dir' 2>/dev/null || true)/bin"

@@ -1,0 +1,65 @@
+{
+  "source": "sandbox_trip_ratings",
+  "rideId": "booking_1789188861310_3tEQ8pQ2QzeWbMKhLGsXHHhnOGL2",
+  "financialContext": {
+    "version": 1,
+    "namespace": "sandbox",
+    "classification": "sandbox_test_user",
+    "providerEnvironment": "sandbox",
+    "paymentProfileId": "qa-test-users-sandbox-durable",
+    "paymentProfileSource": "firestore",
+    "testUserSandbox": true,
+    "contextId": "d67d0ebade061681aa56c2d4080a10c66fdfdab2b9e840b0f13d0bab21143cbe"
+  },
+  "ratings": [
+    {
+      "comment": "",
+      "createdAt": "2026-09-12T04:57:42.807Z",
+      "financialContext": {
+        "classification": "sandbox_test_user",
+        "contextId": "d67d0ebade061681aa56c2d4080a10c66fdfdab2b9e840b0f13d0bab21143cbe",
+        "namespace": "sandbox",
+        "paymentProfileId": "qa-test-users-sandbox-durable",
+        "paymentProfileSource": "firestore",
+        "providerEnvironment": "sandbox",
+        "testUserSandbox": true,
+        "version": 1
+      },
+      "financialContextId": "d67d0ebade061681aa56c2d4080a10c66fdfdab2b9e840b0f13d0bab21143cbe",
+      "financialNamespace": "sandbox",
+      "id": "rating_1789189062807_kmeg124q",
+      "rating": 5,
+      "reviewerId": "DV4cwZvql3T3pI3lnKYQwQVALKZ2",
+      "reviewerType": "driver",
+      "targetUserId": "3tEQ8pQ2QzeWbMKhLGsXHHhnOGL2",
+      "tripId": "booking_1789188861310_3tEQ8pQ2QzeWbMKhLGsXHHhnOGL2"
+    },
+    {
+      "comment": "",
+      "createdAt": "2026-09-12T04:58:10.236Z",
+      "financialContext": {
+        "classification": "sandbox_test_user",
+        "contextId": "d67d0ebade061681aa56c2d4080a10c66fdfdab2b9e840b0f13d0bab21143cbe",
+        "namespace": "sandbox",
+        "paymentProfileId": "qa-test-users-sandbox-durable",
+        "paymentProfileSource": "firestore",
+        "providerEnvironment": "sandbox",
+        "testUserSandbox": true,
+        "version": 1
+      },
+      "financialContextId": "d67d0ebade061681aa56c2d4080a10c66fdfdab2b9e840b0f13d0bab21143cbe",
+      "financialNamespace": "sandbox",
+      "id": "rating_1789189090236_p8tb0rjo",
+      "rating": 5,
+      "reviewerId": "3tEQ8pQ2QzeWbMKhLGsXHHhnOGL2",
+      "reviewerType": "passenger",
+      "selectedOptions": [
+        "Condução segura",
+        "Ar-condicionado: Sim"
+      ],
+      "targetUserId": "DV4cwZvql3T3pI3lnKYQwQVALKZ2",
+      "tripId": "booking_1789188861310_3tEQ8pQ2QzeWbMKhLGsXHHhnOGL2"
+    }
+  ],
+  "totalRatings": 2
+}

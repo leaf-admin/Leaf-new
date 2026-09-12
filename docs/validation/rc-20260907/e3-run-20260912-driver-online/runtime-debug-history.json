@@ -1,0 +1,277 @@
+{
+  "history": [
+    {
+      "step": "map_route_animation",
+      "data": {
+        "phase": "reset",
+        "routeSource": null,
+        "routeSynthetic": false,
+        "configuredDurationMs": 0,
+        "routePointCount": 0,
+        "reducedMotion": false,
+        "reason": "no_route",
+        "visiblePointCount": 0
+      },
+      "at": "2026-09-12T04:42:39.777Z"
+    },
+    {
+      "step": "bootstrap_persisted_session_loaded",
+      "data": {
+        "userId": "DV4cwZvql3T3pI3lnKYQwQVALKZ2",
+        "hasSession": true,
+        "bookingStatus": "idle",
+        "activeBookingId": null
+      },
+      "at": "2026-09-12T04:42:39.777Z"
+    },
+    {
+      "step": "map_route_animation",
+      "data": {
+        "phase": "reset",
+        "routeSource": null,
+        "routeSynthetic": false,
+        "configuredDurationMs": 840,
+        "routePointCount": 0,
+        "reducedMotion": false,
+        "reason": "no_route",
+        "visiblePointCount": 0
+      },
+      "at": "2026-09-12T04:42:39.945Z"
+    },
+    {
+      "step": "bootstrap_qa_seed_loaded",
+      "data": {
+        "userId": "DV4cwZvql3T3pI3lnKYQwQVALKZ2",
+        "hasSeed": true,
+        "freezeUntil": 1789188154311,
+        "scenario": "driver-online-waiting"
+      },
+      "at": "2026-09-12T04:42:39.947Z"
+    },
+    {
+      "step": "map_route_animation",
+      "data": {
+        "phase": "reset",
+        "routeSource": null,
+        "routeSynthetic": false,
+        "configuredDurationMs": 840,
+        "routePointCount": 0,
+        "reducedMotion": false,
+        "reason": "no_route",
+        "visiblePointCount": 0
+      },
+      "at": "2026-09-12T04:42:39.955Z"
+    },
+    {
+      "step": "location_current_resolved",
+      "data": {
+        "allowCurrentPosition": true,
+        "forceCurrentPosition": false,
+        "positionSource": "current",
+        "platform": "ios",
+        "latitude": -22.97104,
+        "longitude": -43.18349,
+        "accuracy": 5,
+        "timestamp": 1789188159345.6611
+      },
+      "at": "2026-09-12T04:42:40.036Z"
+    },
+    {
+      "step": "map_route_animation",
+      "data": {
+        "phase": "reset",
+        "routeSource": null,
+        "routeSynthetic": false,
+        "configuredDurationMs": 840,
+        "routePointCount": 0,
+        "reducedMotion": false,
+        "reason": "no_route",
+        "visiblePointCount": 0
+      },
+      "at": "2026-09-12T04:42:40.253Z"
+    },
+    {
+      "step": "map_route_animation",
+      "data": {
+        "phase": "reset",
+        "routeSource": null,
+        "routeSynthetic": false,
+        "configuredDurationMs": 840,
+        "routePointCount": 0,
+        "reducedMotion": false,
+        "reason": "no_route",
+        "visiblePointCount": 0
+      },
+      "at": "2026-09-12T04:42:40.255Z"
+    },
+    {
+      "step": "socket_ready_start",
+      "data": {
+        "userId": "DV4cwZvql3T3pI3lnKYQwQVALKZ2",
+        "targetUserType": "driver"
+      },
+      "at": "2026-09-12T04:42:40.280Z"
+    },
+    {
+      "step": "map_route_animation",
+      "data": {
+        "phase": "reset",
+        "routeSource": null,
+        "routeSynthetic": false,
+        "configuredDurationMs": 840,
+        "routePointCount": 0,
+        "reducedMotion": false,
+        "reason": "no_route",
+        "visiblePointCount": 0
+      },
+      "at": "2026-09-12T04:42:40.286Z"
+    },
+    {
+      "step": "runtime_session_flush",
+      "data": {
+        "userId": "DV4cwZvql3T3pI3lnKYQwQVALKZ2",
+        "reason": "ready_profile_bootstrap",
+        "bookingStatus": "idle",
+        "activeBookingId": null,
+        "hasDriverOffers": false,
+        "hasDriverActiveRide": false,
+        "driverOnline": false,
+        "driverOnlinePending": false
+      },
+      "at": "2026-09-12T04:42:40.286Z"
+    },
+    {
+      "step": "socket_ready_start",
+      "data": {
+        "userId": "DV4cwZvql3T3pI3lnKYQwQVALKZ2",
+        "targetUserType": "driver"
+      },
+      "at": "2026-09-12T04:42:41.246Z"
+    },
+    {
+      "step": "firebase_session_already_present",
+      "data": {
+        "uid": "DV4cwZvql3T3pI3lnKYQwQVALKZ2"
+      },
+      "at": "2026-09-12T04:42:41.252Z"
+    },
+    {
+      "step": "socket_connected",
+      "data": {
+        "userId": "DV4cwZvql3T3pI3lnKYQwQVALKZ2",
+        "targetUserType": "driver",
+        "orchestratorReady": true,
+        "status": {
+          "connected": true,
+          "authenticated": true,
+          "socketId": "ori8TJ8UCdzB8UPDAABm",
+          "userId": "DV4cwZvql3T3pI3lnKYQwQVALKZ2",
+          "userType": "driver",
+          "authPayload": {
+            "uid": "DV4cwZvql3T3pI3lnKYQwQVALKZ2",
+            "userId": "DV4cwZvql3T3pI3lnKYQwQVALKZ2",
+            "success": true,
+            "userType": "driver",
+            "socketId": "ori8TJ8UCdzB8UPDAABm",
+            "isOnline": false,
+            "driverOnline": false,
+            "status": "offline",
+            "initialStatus": "offline",
+            "driverOnlineDaily": {
+              "dayKey": "2026-09-12",
+              "timezone": "America/Sao_Paulo",
+              "totalMs": 0,
+              "sessionStartedAtMs": null,
+              "effectiveMs": 0,
+              "remainingMs": 43200000,
+              "warningMs": 36000000,
+              "limitMs": 43200000,
+              "nearLimit": false,
+              "limitReached": false
+            }
+          },
+          "isConnecting": false
+        }
+      },
+      "at": "2026-09-12T04:42:41.950Z"
+    },
+    {
+      "step": "socket_authenticated",
+      "data": {
+        "userId": "DV4cwZvql3T3pI3lnKYQwQVALKZ2",
+        "targetUserType": "driver",
+        "status": {
+          "connected": true,
+          "authenticated": true,
+          "socketId": "ori8TJ8UCdzB8UPDAABm",
+          "userId": "DV4cwZvql3T3pI3lnKYQwQVALKZ2",
+          "userType": "driver",
+          "authPayload": {
+            "uid": "DV4cwZvql3T3pI3lnKYQwQVALKZ2",
+            "userId": "DV4cwZvql3T3pI3lnKYQwQVALKZ2",
+            "success": true,
+            "userType": "driver",
+            "socketId": "ori8TJ8UCdzB8UPDAABm",
+            "isOnline": false,
+            "driverOnline": false,
+            "status": "offline",
+            "initialStatus": "offline",
+            "driverOnlineDaily": {
+              "dayKey": "2026-09-12",
+              "timezone": "America/Sao_Paulo",
+              "totalMs": 0,
+              "sessionStartedAtMs": null,
+              "effectiveMs": 0,
+              "remainingMs": 43200000,
+              "warningMs": 36000000,
+              "limitMs": 43200000,
+              "nearLimit": false,
+              "limitReached": false
+            }
+          },
+          "isConnecting": false
+        }
+      },
+      "at": "2026-09-12T04:42:41.954Z"
+    },
+    {
+      "step": "socket_active_ride_sync",
+      "data": {
+        "userId": "DV4cwZvql3T3pI3lnKYQwQVALKZ2",
+        "bookingId": null,
+        "hasActiveRide": false,
+        "status": null
+      },
+      "at": "2026-09-12T04:42:42.171Z"
+    },
+    {
+      "step": "map_route_animation",
+      "data": {
+        "phase": "reset",
+        "routeSource": null,
+        "routeSynthetic": false,
+        "configuredDurationMs": 840,
+        "routePointCount": 0,
+        "reducedMotion": false,
+        "reason": "no_route",
+        "visiblePointCount": 0
+      },
+      "at": "2026-09-12T04:42:43.350Z"
+    },
+    {
+      "step": "map_route_animation",
+      "data": {
+        "phase": "reset",
+        "routeSource": null,
+        "routeSynthetic": false,
+        "configuredDurationMs": 840,
+        "routePointCount": 0,
+        "reducedMotion": false,
+        "reason": "no_route",
+        "visiblePointCount": 0
+      },
+      "at": "2026-09-12T04:42:43.355Z"
+    }
+  ],
+  "parseError": null
+}

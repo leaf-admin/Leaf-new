@@ -12,6 +12,7 @@ const {
 const {
   buildFindings: buildDoctorFindings,
   loadMobileEnv,
+  normalizeMetroStatusUrl,
   summarizePaymentRuntimeProbe,
 } = require('../scripts/qa/current-flow-e2e-lab.cjs');
 
@@ -73,7 +74,14 @@ function passEveryObservation(runDir, mutateObservation = () => {}) {
       });
       mutateObservation(observation, name);
       fs.writeFileSync(filePath, `${JSON.stringify(observation, null, 2)}\n`);
-    });
+  });
+}
+
+function getTotalStateCount() {
+  return loadConfig().journeys.journeys.reduce(
+    (sum, journey) => sum + journey.states.length,
+    0,
+  );
 }
 
 describe('Leaf UX Lab', () => {
@@ -96,6 +104,21 @@ describe('Leaf UX Lab', () => {
       if (previousSocketUrl === undefined) delete process.env.EXPO_PUBLIC_SOCKET_URL;
       else process.env.EXPO_PUBLIC_SOCKET_URL = previousSocketUrl;
     }
+  });
+
+  it('probes the configured Metro host instead of assuming port 8081', () => {
+    expect(normalizeMetroStatusUrl()).toBe('http://127.0.0.1:8097/status');
+    expect(normalizeMetroStatusUrl('http://127.0.0.1:8097')).toBe(
+      'http://127.0.0.1:8097/status',
+    );
+    expect(
+      normalizeMetroStatusUrl(
+        'http://127.0.0.1:8097/mobile-app/index.bundle?platform=ios&dev=true',
+      ),
+    ).toBe('http://127.0.0.1:8097/status');
+    expect(normalizeMetroStatusUrl('http://127.0.0.1:8097/status?probe=1')).toBe(
+      'http://127.0.0.1:8097/status',
+    );
   });
 
   it('keeps the canonical debug baseline aligned with the controlled-pilot feature surface', () => {
@@ -284,6 +307,7 @@ describe('Leaf UX Lab', () => {
     const run = JSON.parse(fs.readFileSync(path.join(runDir, 'run.json'), 'utf8'));
     const observation = JSON.parse(fs.readFileSync(observationPath, 'utf8'));
     const config = loadConfig();
+    const totalStates = getTotalStateCount();
 
     expect(run.rules.executionTarget).toBe('ios-simulator');
     setRunStatus(runDir, 'completed');
@@ -310,12 +334,12 @@ describe('Leaf UX Lab', () => {
     expect(result.validationErrors).toEqual([]);
     expect(result.acceptanceBlockers).toEqual(
       expect.arrayContaining([
-        expect.stringContaining('19/20 states remain not_run'),
+        expect.stringContaining(`${totalStates - 1}/${totalStates} states remain not_run`),
         expect.stringContaining('1 states failed UX acceptance'),
       ]),
     );
     expect(report).toContain('P0 [passenger/home] Ação principal ambígua');
-    expect(report).toContain('Coverage: 1/20 states');
+    expect(report).toContain(`Coverage: 1/${totalStates} states`);
     expect(report).toContain('Acceptance: FAIL');
   });
 
@@ -324,13 +348,14 @@ describe('Leaf UX Lab', () => {
     const runDir = initRun({ runId: 'complete-run', runsDir });
     setRunStatus(runDir, 'completed');
     passEveryObservation(runDir);
+    const totalStates = getTotalStateCount();
 
     const result = buildTestReport(runDir);
     const report = fs.readFileSync(result.outputPath, 'utf8');
 
     expect(result.validationErrors).toEqual([]);
     expect(result.acceptanceBlockers).toEqual([]);
-    expect(result.coverage).toEqual([20, 20]);
+    expect(result.coverage).toEqual([totalStates, totalStates]);
     expect(report).toContain('Acceptance: PASS');
   });
 
@@ -366,6 +391,7 @@ describe('Leaf UX Lab', () => {
     run.rules.requireAllStatesForAcceptance = false;
     run.rules.requirePassForAcceptance = false;
     fs.writeFileSync(runPath, `${JSON.stringify(run, null, 2)}\n`);
+    const totalStates = getTotalStateCount();
 
     const result = buildTestReport(runDir);
     const report = fs.readFileSync(result.outputPath, 'utf8');
@@ -383,10 +409,10 @@ describe('Leaf UX Lab', () => {
         expect.stringContaining('run rule screenshotAloneCountsAsUxValidation must be false'),
         expect.stringContaining('run rule requireAllStatesForAcceptance must be true'),
         expect.stringContaining('run rule requirePassForAcceptance must be true'),
-        expect.stringContaining('20/20 states remain not_run'),
+        expect.stringContaining(`${totalStates}/${totalStates} states remain not_run`),
       ]),
     );
-    expect(report).toContain('Coverage: 0/20 states');
+    expect(report).toContain(`Coverage: 0/${totalStates} states`);
     expect(report).toContain('Acceptance: FAIL');
   });
 

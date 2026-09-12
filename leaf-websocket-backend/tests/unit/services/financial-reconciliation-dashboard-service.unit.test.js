@@ -10,6 +10,7 @@ const firebaseConfig = require('../../../firebase-config');
 const {
   FinancialReconciliationDashboardService
 } = require('../../../services/financial-reconciliation-dashboard-service');
+const { sealFinancialContext } = require('../../../services/financial-runtime-context');
 
 function createInMemoryFirestore() {
   const docs = new Map();
@@ -334,6 +335,116 @@ describe('FinancialReconciliationDashboardService', () => {
       'payment_received',
       'ride_settlement'
     ]);
+  });
+
+  it('reads sandbox reconciliation detail from sandbox collections when a sealed context is supplied', async () => {
+    const firestore = createInMemoryFirestore();
+    firebaseConfig.getFirestore.mockReturnValue(firestore);
+    const context = sealFinancialContext({
+      providerEnvironment: 'sandbox',
+      paymentProfileId: 'qa-profile',
+      paymentProfileSource: 'test',
+      testUserSandbox: true
+    });
+    firestore.docs.set('sandbox_financial_reconciliation_reports/ride_sandbox_detail', {
+      rideId: 'ride_sandbox_detail',
+      ok: true,
+      financialContext: context,
+      financialNamespace: 'sandbox',
+      checkedAtIso: '2026-09-03T12:00:00.000Z'
+    });
+    firestore.docs.set('sandbox_ride_payments/ride_sandbox_detail', {
+      rideId: 'ride_sandbox_detail',
+      amount: 3000,
+      financialContext: context
+    });
+    firestore.docs.set('sandbox_payment_holdings/ride_sandbox_detail', {
+      rideId: 'ride_sandbox_detail',
+      amount: 3000,
+      financialContext: context
+    });
+    firestore.docs.set('sandbox_payment_distributions/ride_sandbox_detail', {
+      rideId: 'ride_sandbox_detail',
+      totalAmount: 3000,
+      financialContext: context
+    });
+    firestore.docs.set('sandbox_financial_ledger_events/payment_event', {
+      rideId: 'ride_sandbox_detail',
+      eventType: 'payment_received',
+      financialNamespace: 'sandbox',
+      createdAtIso: '2026-09-03T12:00:01.000Z'
+    });
+
+    const service = new FinancialReconciliationDashboardService();
+    const result = await service.getRideDetail('ride_sandbox_detail', { financialContext: context });
+
+    expect(result).toMatchObject({
+      success: true,
+      financialNamespace: 'sandbox',
+      report: expect.objectContaining({
+        rideId: 'ride_sandbox_detail',
+        financialNamespace: 'sandbox'
+      }),
+      sourceDocuments: {
+        ridePayment: expect.objectContaining({ amount: 3000 }),
+        paymentHolding: expect.objectContaining({ amount: 3000 }),
+        paymentDistribution: expect.objectContaining({ totalAmount: 3000 })
+      }
+    });
+    expect(result.ledgerEvents).toEqual([
+      expect.objectContaining({ eventType: 'payment_received', rideId: 'ride_sandbox_detail' })
+    ]);
+    expect(firestore.docs.has('financial_reconciliation_reports/ride_sandbox_detail')).toBe(false);
+  });
+
+  it('rejects an unsealed sandbox selector instead of silently falling back to operational data', async () => {
+    const service = new FinancialReconciliationDashboardService();
+
+    const result = await service.getRideDetail('ride_sandbox_detail', {
+      providerEnvironment: 'sandbox'
+    });
+
+    expect(result).toMatchObject({
+      success: false,
+      code: 'FINANCIAL_SANDBOX_CONTEXT_LOST'
+    });
+  });
+
+  it('lists sandbox reconciliation reports from the sandbox namespace when a sealed context is supplied', async () => {
+    const firestore = createInMemoryFirestore();
+    firebaseConfig.getFirestore.mockReturnValue(firestore);
+    const context = sealFinancialContext({
+      providerEnvironment: 'sandbox',
+      paymentProfileId: 'qa-profile',
+      paymentProfileSource: 'test',
+      testUserSandbox: true
+    });
+    firestore.docs.set('sandbox_financial_reconciliation_reports/ride_sandbox_list', {
+      rideId: 'ride_sandbox_list',
+      ok: true,
+      financialContext: context,
+      financialNamespace: 'sandbox',
+      checkedAtIso: '2026-09-03T12:00:00.000Z'
+    });
+
+    const service = new FinancialReconciliationDashboardService();
+    const result = await service.listReports({
+      financialContext: context,
+      status: 'ok',
+      includeTestData: 'true'
+    });
+
+    expect(result).toMatchObject({
+      success: true,
+      financialNamespace: 'sandbox',
+      reports: [
+        expect.objectContaining({
+          rideId: 'ride_sandbox_list',
+          financialNamespace: 'sandbox'
+        })
+      ]
+    });
+    expect(firestore.docs.has('financial_reconciliation_reports/ride_sandbox_list')).toBe(false);
   });
 
   it('fails cleanly when Firestore is unavailable', async () => {
