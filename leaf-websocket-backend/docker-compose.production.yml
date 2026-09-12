@@ -373,6 +373,8 @@ services:
         GIT_SHA: ${GIT_SHA:-unknown}
     container_name: leaf-sideeffects-worker
     command: ["bash", "scripts/runtime/start-sideeffects-worker.sh"]
+    env_file:
+      - .env
     environment:
       # Ambiente
       - NODE_ENV=production
