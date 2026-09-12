@@ -58,7 +58,7 @@ describe('backend production dependency security contract', () => {
       '@firebase/app': '0.14.9',
       'express-rate-limit': '^8.6.1',
       'firebase-admin': '^13.10.0',
-      sharp: '^0.35.3',
+      sharp: '^0.35.4',
       'socket.io': '^4.8.3',
       uuid: '^13.0.2'
     });

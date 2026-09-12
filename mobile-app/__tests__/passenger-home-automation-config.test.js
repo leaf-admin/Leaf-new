@@ -20,6 +20,9 @@ describe("passengerHomeAutomationConfig", () => {
     expect(normalizePassengerAction("end-trip-early")).toBe("end_trip_early");
     expect(normalizePassengerAction("end-after-interruption")).toBe("end_after_interruption");
     expect(normalizePassengerAction("dismiss_receipt")).toBe("dismiss_receipt");
+    expect(normalizePassengerAction("show-category")).toBe("show_category");
+    expect(normalizePassengerAction("open-pix-pending")).toBe("open_pix_pending");
+    expect(normalizePassengerAction("destination-search")).toBe("open_destination_search");
   });
 
   test("enables automation for passenger actions only in dev/e2e and on home route", () => {

@@ -253,6 +253,7 @@ describe('dashboard KYC identity review boundary', () => {
     expect(allIdentityReviewRoutes).toContain('kycRuntime.workflow.authorizeOrphanHoldRecovery');
     expect(reviewRoutes).toContain('kycRuntime.workflow.openCaseFromTicket');
     expect(reviewRoutes).toContain('kycRuntime.workflow.listCasesForDriver');
+    expect(reviewRoutes).toContain('kycRuntime.workflow.getDashboardIdentityStatus');
     expect(reviewRoutes).toContain('kycRuntime.workflow.getReviewContext');
     expect(reviewRoutes).toContain('kycRuntime.workflow.runWithVerificationWindow');
     expect(reviewRoutes).toContain('kycRuntime.evidence.getMetadata');

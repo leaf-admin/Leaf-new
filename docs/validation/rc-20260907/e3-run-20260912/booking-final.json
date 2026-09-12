@@ -1,0 +1,38 @@
+{
+  "source": "redis_booking_snapshot",
+  "capturedAt": "2026-09-12T05:08:10Z",
+  "rideId": "booking_1789188861310_3tEQ8pQ2QzeWbMKhLGsXHHhnOGL2",
+  "paymentReferenceRideId": "temp_ride_session_4c8c0d5f5482f4f0bf53c13b42b8",
+  "bookingId": "booking_1789188861310_3tEQ8pQ2QzeWbMKhLGsXHHhnOGL2",
+  "state": "COMPLETED",
+  "driverId": "DV4cwZvql3T3pI3lnKYQwQVALKZ2",
+  "customerId": "3tEQ8pQ2QzeWbMKhLGsXHHhnOGL2",
+  "providerEnvironment": "sandbox",
+  "financialNamespace": "sandbox",
+  "financialContextId": "d67d0ebade061681aa56c2d4080a10c66fdfdab2b9e840b0f13d0bab21143cbe",
+  "startLocation": {
+    "lat": -22.97104,
+    "lng": -43.18349
+  },
+  "destinationLocation": {
+    "lat": -22.9842698,
+    "lng": -43.223168,
+    "add": "Rio de Janeiro - RJ, Brasil"
+  },
+  "routeDistanceKm": "6.23",
+  "routeDurationSecs": "749",
+  "routePointCount": 232,
+  "acceptedAt": "2026-09-12T04:54:32.507Z",
+  "arrivalRegisteredAt": "2026-09-12T04:55:01.788Z",
+  "startedAt": "2026-09-12T04:55:27.573Z",
+  "completedAt": "2026-09-12T04:57:29.707000Z",
+  "finalFare": "16.67",
+  "driverNetAmount": "15.18",
+  "operationalFee": "0.99",
+  "paymentIntermediationFee": "0.5",
+  "subscriptionRetainedFee": "0",
+  "tollFee": "0",
+  "authoritativeSnapshot": "true",
+  "financialSnapshotSource": "backend_final",
+  "settlementReviewRequired": "false"
+}

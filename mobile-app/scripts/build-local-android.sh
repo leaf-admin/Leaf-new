@@ -35,8 +35,8 @@ sync_native_android_version() {
     exit 1
   fi
 
-  expected_version_code="$(node -e "console.log(require('./config/AppConfig').AppConfig.android_app_version)")"
-  expected_version_name="$(node -e "console.log(require('./config/AppConfig').AppConfig.ios_app_version)")"
+  expected_version_code="$(cd "${PROJECT_DIR}" && node -e "console.log(require('./config/AppConfig').AppConfig.android_app_version)")"
+  expected_version_name="$(cd "${PROJECT_DIR}" && node -e "console.log(require('./config/AppConfig').AppConfig.ios_app_version)")"
   if ! [[ "${expected_version_code}" =~ ^[0-9]+$ ]]; then
     echo "❌ android_app_version inválido no AppConfig: ${expected_version_code}"
     exit 1

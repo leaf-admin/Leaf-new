@@ -141,6 +141,7 @@ describe("PassengerHomeOverlay", () => {
       />
     );
 
+    expect(getByTestId("passenger-home-category-card")).toHaveProp("accessible", true);
     expect(getByText("Sua viagem")).toBeTruthy();
     expect(getByText("Local de partida")).toBeTruthy();
     expect(getByText("Local de destino")).toBeTruthy();

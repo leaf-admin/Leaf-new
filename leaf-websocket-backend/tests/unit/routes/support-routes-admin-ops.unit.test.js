@@ -38,6 +38,14 @@ function authUserFromToken(token) {
       permissions: ['support:sandbox']
     };
   }
+  if (token === 'super-admin-token') {
+    return {
+      id: 'smoke_super_admin',
+      uid: 'smoke_super_admin',
+      role: 'super-admin',
+      email: 'super-admin@leaf.test'
+    };
+  }
   return null;
 }
 
@@ -475,6 +483,23 @@ describe('support routes admin operations', () => {
       .set('Authorization', 'Bearer sandbox-admin-token');
 
     expect(authorized.status).toBe(200);
+    expect(mockListTickets).toHaveBeenCalledWith(expect.objectContaining({
+      persistenceContext: expect.objectContaining({
+        namespace: 'sandbox',
+        explicitSandboxAccess: true
+      })
+    }));
+  });
+
+  it('allows a super-admin to read explicit sandbox support without a separate permission claim', async () => {
+    const app = createApp();
+    mockListTickets.mockResolvedValue({ tickets: [], total: 0, hasMore: false });
+
+    const response = await request(app)
+      .get('/support/admin/tickets?scope=sandbox')
+      .set('Authorization', 'Bearer super-admin-token');
+
+    expect(response.status).toBe(200);
     expect(mockListTickets).toHaveBeenCalledWith(expect.objectContaining({
       persistenceContext: expect.objectContaining({
         namespace: 'sandbox',

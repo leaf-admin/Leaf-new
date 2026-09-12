@@ -1,6 +1,7 @@
 const WooviDriverService = require('./woovi-driver-service');
 const firebaseConfig = require('../firebase-config');
 const { logStructured, logError } = require('../utils/logger');
+const { claimCpf, CpfIdentityError } = require('./cpf-identity-registry-service');
 
 class DriverApprovalService {
   constructor() {
@@ -12,6 +13,46 @@ class DriverApprovalService {
 
   normalizePixKey(value) {
     return String(value || '').trim();
+  }
+
+  async claimDriverCpf(driverData = {}) {
+    try {
+      const firestore = firebaseConfig.getFirestore();
+      if (!firestore) {
+        return {
+          success: false,
+          error: 'PROFILE_CPF_UNIQUENESS_UNAVAILABLE',
+          details: 'Firestore indisponível para validar a unicidade do CPF.'
+        };
+      }
+
+      const normalized = await claimCpf({
+        firestore,
+        realtimeDb: firebaseConfig.getRealtimeDB?.() || null,
+        userId: driverData.id,
+        cpf: driverData.cpf
+      });
+
+      return { success: true, normalized };
+    } catch (error) {
+      if (error instanceof CpfIdentityError || ['ACCOUNT_DELETION_IN_PROGRESS', 'PROFILE_CPF_REVIEW_REQUIRED', 'CPF_REVIEW_CONFIG_UNAVAILABLE'].includes(error.code)) {
+        return {
+          success: false,
+          error: error.code,
+          details: error.message
+        };
+      }
+
+      logError(error, 'Falha ao validar unicidade do CPF do motorista', {
+        service: 'driver-approval-service',
+        driverId: driverData.id
+      });
+      return {
+        success: false,
+        error: 'PROFILE_CPF_UNIQUENESS_UNAVAILABLE',
+        details: 'Não foi possível confirmar o CPF agora.'
+      };
+    }
   }
 
   normalizeApprovalEvidence(value) {
@@ -348,6 +389,16 @@ class DriverApprovalService {
           activationStatus: canonicalEvidence.activationStatus
         };
       }
+
+      const cpfClaim = await this.claimDriverCpf(driverData);
+      if (!cpfClaim.success) {
+        return {
+          success: false,
+          error: cpfClaim.error,
+          details: cpfClaim.details
+        };
+      }
+
       const driverDataWithAudit = {
         ...driverData,
         approvalAuditTrail: {
@@ -763,6 +814,15 @@ class DriverApprovalService {
   async createWooviAccountForExistingDriver(driverData) {
     try {
       logStructured('info', 'Criando conta Woovi para motorista existente', { service: 'driver-approval-service', driverId: driverData.id, driverName: driverData.name });
+
+      const cpfClaim = await this.claimDriverCpf(driverData);
+      if (!cpfClaim.success) {
+        return {
+          success: false,
+          error: cpfClaim.error,
+          details: cpfClaim.details
+        };
+      }
       
       // Verificar se já tem conta
       const accountCheck = await this.checkDriverWooviAccount(driverData.id);

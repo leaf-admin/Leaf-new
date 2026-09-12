@@ -1,0 +1,12 @@
+--- a/leaf-websocket-backend/bootstrap/http-middleware.js
++++ b/leaf-websocket-backend/bootstrap/http-middleware.js
+@@ -1,6 +1,8 @@
+ function shouldCaptureSignedWebhookRawBody(req) {
+     const requestUrl = String(req.originalUrl || req.url || '');
+-    return requestUrl.includes('/api/woovi/webhook') || requestUrl.includes('/api/woovi-webhook');
++    return requestUrl.includes('/api/woovi/webhook')
++        || requestUrl.includes('/api/woovi-webhook')
++        || requestUrl.includes('/api/webhooks/woovi');
+ }
+
+ function captureSignedWebhookRawBody(req, _res, buffer) {

@@ -386,7 +386,11 @@ class PaymentService {
       message: 'Cobrança Pix já criada para esta corrida',
       chargeId: existing.chargeId || existing.paymentId || null,
       qrCode: existing.qrCode || null,
+      qrCodeImage: existing.qrCodeImage || existing.qrCode || null,
+      brCode: existing.brCode || existing.qrCodeText || null,
+      qrCodeText: existing.qrCodeText || existing.brCode || null,
       paymentLink: existing.paymentLink || null,
+      paymentLinkUrl: existing.paymentLinkUrl || existing.paymentLink || null,
       rideId: existing.rideId || null,
       amount: existing.amountCents || existing.amount || null,
       grossAmountInCents: existing.grossAmountInCents || existing.amountCents || existing.amount || null,
@@ -862,7 +866,11 @@ class PaymentService {
             status: 'charge_created',
             chargeId: chargeData.chargeId || null,
             qrCode: chargeData.qrCode || null,
+            qrCodeImage: chargeData.qrCodeImage || chargeData.qrCode || null,
+            brCode: chargeData.brCode || chargeData.qrCodeText || null,
+            qrCodeText: chargeData.qrCodeText || chargeData.brCode || null,
             paymentLink: chargeData.paymentLink || null,
+            paymentLinkUrl: chargeData.paymentLinkUrl || chargeData.paymentLink || null,
             provider: intent.provider || 'woovi',
             providerEnvironment: intent.providerEnvironment || null,
             paymentProfileId: intent.paymentProfileId || null,
@@ -1829,19 +1837,34 @@ class PaymentService {
       }
 
       const chargePayload = chargeResult?.charge || {};
+      const pixPayload = chargePayload?.paymentMethods?.pix || chargePayload?.pix || {};
       const chargeId =
+        chargeResult.chargeId ||
         chargePayload.identifier ||
         chargePayload.id ||
         chargePayload.transactionID ||
         chargePayload.correlationID ||
-        chargePayload?.paymentMethods?.pix?.identifier ||
-        chargePayload?.paymentMethods?.pix?.transactionID ||
+        pixPayload.identifier ||
+        pixPayload.transactionID ||
         null;
-      const qrCode =
+      const qrCodeImage =
+        chargeResult.qrCodeImage ||
         chargePayload.qrCodeImage ||
-        chargePayload?.paymentMethods?.pix?.qrCodeImage ||
+        pixPayload.qrCodeImage ||
         null;
-      const paymentLink = chargePayload.paymentLinkUrl || null;
+      const brCode =
+        chargeResult.brCode ||
+        chargeResult.qrCodeText ||
+        chargePayload.brCode ||
+        pixPayload.brCode ||
+        pixPayload.qrCode ||
+        null;
+      const paymentLink =
+        chargeResult.paymentLink ||
+        chargeResult.paymentLinkUrl ||
+        chargePayload.paymentLinkUrl ||
+        pixPayload.paymentLinkUrl ||
+        null;
 
       logStructured('info', 'Cobrança criada com sucesso', {
         service: 'PaymentService',
@@ -1869,12 +1892,65 @@ class PaymentService {
         };
       }
 
+      if (!qrCodeImage && !brCode && !paymentLink) {
+        await this.markAdvancePaymentIntentFailed(paymentIntent, {
+          message: 'A Woovi retornou cobrança sem artefato Pix utilizável',
+          chargeId,
+          correlationID: chargeData.correlationID
+        });
+        if (paymentIntent.paymentDriverReservationId) {
+          try {
+            const {
+              releasePaymentDriverReservation
+            } = require('./payment-driver-reservation-service');
+            await redisPool.ensureConnection();
+            await releasePaymentDriverReservation(
+              redisPool.getConnection(),
+              paymentIntent.paymentDriverReservationId
+            );
+          } catch (reservationReleaseError) {
+            logStructured('warn', 'Falha ao liberar reserva de motorista após resposta Pix sem artefato', {
+              service: 'PaymentService',
+              rideId: paymentData.rideId,
+              paymentIntentId: paymentIntent.paymentIntentId || null,
+              paymentDriverReservationId: paymentIntent.paymentDriverReservationId,
+              error: reservationReleaseError.message
+            });
+          }
+        }
+        logStructured('error', 'Woovi retornou cobrança sem artefato Pix utilizável', {
+          service: 'PaymentService',
+          chargeId,
+          correlationID: chargeData.correlationID,
+          providerEnvironment: paymentProfile.environment,
+          paymentProfileId: paymentProfile.profileId
+        });
+        return {
+          success: false,
+          error: 'A Woovi não retornou QR Code, código Pix ou link de pagamento',
+          code: 'PAYMENT_PROVIDER_PIX_ARTIFACT_MISSING',
+          provider: 'woovi',
+          providerEnvironment: paymentProfile.environment,
+          paymentProfileId: paymentProfile.profileId,
+          paymentIntentId: paymentIntent.paymentIntentId || null,
+          chargeId,
+          details: {
+            message: 'A cobrança foi criada, mas não trouxe artefato Pix utilizável',
+            correlationID: chargeData.correlationID
+          }
+        };
+      }
+
       // Apenas cria a cobrança. O webhook materializa o holding e o crédito do
       // motorista acontece somente após ride.completed no worker de billing.
       await this.completeAdvancePaymentIntent(paymentIntent, {
         chargeId,
-        qrCode,
+        qrCode: qrCodeImage,
+        qrCodeImage,
+        brCode,
+        qrCodeText: brCode,
         paymentLink,
+        paymentLinkUrl: paymentLink,
         chargeExpiresInSeconds: chargeExpiresIn
       });
 
@@ -1882,8 +1958,12 @@ class PaymentService {
         success: true,
         message: 'Pagamento antecipado processado com sucesso',
         chargeId,
-        qrCode,
+        qrCode: qrCodeImage,
+        qrCodeImage,
+        brCode,
+        qrCodeText: brCode,
         paymentLink,
+        paymentLinkUrl: paymentLink,
         rideId: paymentData.rideId,
         amount: paymentIntent.amountCents || paymentData.amount,
         grossAmountInCents: paymentData.grossAmountInCents || paymentIntent.grossAmountInCents || null,

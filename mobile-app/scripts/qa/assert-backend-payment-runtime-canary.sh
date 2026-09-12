@@ -28,6 +28,12 @@ if [[ -z "$USER_ID" && -z "$PHONE" ]]; then
   exit 1
 fi
 
+if [[ "$EXPECTED_ENVIRONMENT" == "sandbox" && -z "$USER_ID" ]]; then
+  echo "[payment-runtime-canary][error] PAYMENT_RUNTIME_USER_ID is required for a user-scoped sandbox canary."
+  echo "[payment-runtime-canary][hint] A phone-only query resolves the global default and cannot prove the QA user's sandbox profile."
+  exit 1
+fi
+
 request_url="${BACKEND_URL%/}/api/app/runtime-config"
 query_args=()
 if [[ -n "$USER_ID" ]]; then
@@ -54,15 +60,22 @@ fi
 
 effective_environment="$(jq -r '.paymentRuntime.effectiveProfile.environment // "unknown"' "$OUTPUT_FILE")"
 profile_id="$(jq -r '.paymentRuntime.effectiveProfile.profileId // "unknown"' "$OUTPUT_FILE")"
+profile_scope="$(jq -r '.paymentRuntime.effectiveProfile.scope // "unknown"' "$OUTPUT_FILE")"
 context_matched="$(jq -r '.paymentRuntime.effectiveProfile.contextMatched // false' "$OUTPUT_FILE")"
 expires_at="$(jq -r '.paymentRuntime.effectiveProfile.expiresAtIso // ""' "$OUTPUT_FILE")"
 
 if [[ "$effective_environment" != "$EXPECTED_ENVIRONMENT" ]]; then
   echo "[payment-runtime-canary][error] Payment runtime is not ${EXPECTED_ENVIRONMENT} for this smoke context."
-  echo "[payment-runtime-canary][error] effectiveEnvironment=$effective_environment profileId=$profile_id contextMatched=$context_matched expiresAt=${expires_at:-none}"
+  echo "[payment-runtime-canary][error] effectiveEnvironment=$effective_environment profileId=$profile_id scope=$profile_scope contextMatched=$context_matched expiresAt=${expires_at:-none}"
   echo "[payment-runtime-canary][hint] Activate a short-lived payment_runtime_profiles sandbox profile or env allowlist for user/phone."
   echo "[payment-runtime-canary][hint] Dry-run helper: DRY_RUN=true bash mobile-app/scripts/qa/activate-payment-runtime-sandbox-profile.sh"
   exit 1
 fi
 
-echo "[payment-runtime-canary][pass] effectiveEnvironment=$effective_environment profileId=$profile_id contextMatched=$context_matched expiresAt=${expires_at:-none}"
+if [[ "$context_matched" != "true" ]]; then
+  echo "[payment-runtime-canary][error] Payment runtime profile did not match the supplied user context."
+  echo "[payment-runtime-canary][error] effectiveEnvironment=$effective_environment profileId=$profile_id scope=$profile_scope contextMatched=$context_matched expiresAt=${expires_at:-none}"
+  exit 1
+fi
+
+echo "[payment-runtime-canary][pass] effectiveEnvironment=$effective_environment profileId=$profile_id scope=$profile_scope contextMatched=$context_matched expiresAt=${expires_at:-none}"

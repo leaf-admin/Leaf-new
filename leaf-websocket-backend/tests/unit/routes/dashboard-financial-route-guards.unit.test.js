@@ -53,4 +53,24 @@ describe('dashboard financial route guards', () => {
       expectBackendFinalRevenueGuard(extractBlockAfterMarker(source, marker));
     });
   });
+
+  it('propagates an explicit financial context through reconciliation actions', () => {
+    const rideRun = extractBlockAfterMarker(
+      source,
+      "router.post('/api/financial/reconciliation/rides/:rideId/run'",
+    );
+    const batchRun = extractBlockAfterMarker(
+      source,
+      "router.post('/api/financial/reconciliation/run'",
+    );
+
+    [rideRun, batchRun].forEach((block) => {
+      expect(block).toContain(
+        'financialContext: req.body?.financialContext || req.query.financialContext || null',
+      );
+      expect(block).toContain(
+        'providerEnvironment: req.body?.providerEnvironment || req.query.providerEnvironment || null',
+      );
+    });
+  });
 });

@@ -1166,6 +1166,54 @@ describe('driver online toggle', () => {
     );
   });
 
+  it('keeps a completed driver on the receipt surface when completion is hydrated by Home', () => {
+    const receipt = {
+      id: 'booking_driver_completed_1',
+      bookingId: 'booking_driver_completed_1',
+      fare: 38.4,
+      grossAmount: 38.4,
+      driverNetAmount: 31.8,
+      totalFees: 6.6,
+      authoritativeSnapshot: true,
+      financialSnapshotSource: 'backend_final',
+      route: 'Rua A, 10 -> Aeroporto Santos Dumont',
+      pickupAddress: 'Rua A, 10, Centro, Rio de Janeiro',
+      destinationAddress: 'Aeroporto Santos Dumont, Rio de Janeiro',
+      paymentMethod: 'pix',
+      driverId: 'driver_1',
+      passengerId: 'customer_1',
+      passengerName: 'Passenger Test',
+    };
+
+    usePrototypeRideRuntime.mockReturnValue(
+      buildDriverRuntime({
+        bookingStatus: 'completed',
+        driverActiveRide: null,
+        driverTripAssist: { status: '' },
+        profileUid: 'driver_1',
+        tripHistory: [receipt],
+        lastReceipt: receipt,
+        dismissCompletedReceipt: jest.fn(),
+        recoverCompletedReceipt: jest.fn(),
+      })
+    );
+
+    const navigation = {
+      navigate: jest.fn(),
+      replace: jest.fn(),
+      canGoBack: jest.fn(() => false),
+      goBack: jest.fn(),
+    };
+
+    const screen = render(
+      <RobotaxiHomeScreen navigation={navigation} route={{ params: {} }} />
+    );
+
+    expect(screen.getByTestId('driver-receipt-screen')).toBeTruthy();
+    expect(screen.getByTestId('driver-receipt-rate-passenger-button')).toBeTruthy();
+    expect(screen.queryByTestId('driver-home-toggle-online')).toBeNull();
+  });
+
   it('routes terminal no-driver passenger home sync to the no-drivers surface', async () => {
     resolvePassengerAutoRoute.mockReturnValue('RobotaxiPrototypeNoDrivers');
     shouldAutoSyncPassengerRoute.mockReturnValue(true);

@@ -68,6 +68,7 @@ const {
   TRUST_TIERS,
   DEFAULTS
 } = require('../../../services/driver-identity-trust-service');
+const { sealFinancialContext } = require('../../../services/financial-runtime-context');
 
 function createRedis() {
   const values = new Map();
@@ -195,6 +196,7 @@ function createHarness(overrides = {}) {
 
   const service = new DriverIdentityTrustService({
     env,
+    persistenceContext: overrides.persistenceContext,
     redis,
     firestoreProvider: () => firestore,
     canonicalDocumentApprovalService,
@@ -530,6 +532,90 @@ describe('driver-identity-trust-service', () => {
     );
     expect(mockCommitDriverOnlineProjection.mock.invocationCallOrder[0])
       .toBeLessThan(mockReleaseIdentityVerificationWindow.mock.invocationCallOrder[0]);
+  });
+
+  test('allows only an explicit expiring sandbox QA trust window after canonical activation checks', async () => {
+    const driverId = 'driver-qa-window';
+    const harness = createHarness({
+      persistenceContext: sealFinancialContext({
+        providerEnvironment: 'sandbox',
+        paymentProfileId: 'qa-test-users-sandbox-durable',
+        paymentProfileSource: 'firestore',
+        testUserSandbox: true
+      }),
+      env: {
+        KYC_QA_ONLINE_TRUST_WINDOW_ENABLED: 'true',
+        KYC_QA_ONLINE_TRUST_WINDOW_UIDS: driverId,
+        KYC_QA_ONLINE_TRUST_WINDOW_PROFILE_ID: 'qa-test-users-sandbox-durable',
+        KYC_QA_ONLINE_TRUST_WINDOW_ACK: 'QA_SANDBOX_ONLY',
+        KYC_QA_ONLINE_TRUST_WINDOW_UNTIL: '2026-07-01T16:00:00.000Z',
+        KYC_QA_ONLINE_TRUST_WINDOW_REASON: 'Sessao QA sandbox autorizada para validar o ciclo de corrida.'
+      }
+    });
+
+    const result = await harness.service.evaluateExplicitQaOnlineTrustWindow(driverId);
+
+    expect(result).toEqual(expect.objectContaining({
+      allowed: true,
+      code: 'KYC_QA_SANDBOX_TRUST_WINDOW',
+      qaTestOnly: true,
+      canonicalEvidenceUnchanged: true,
+      expiresAt: '2026-07-01T16:00:00.000Z'
+    }));
+    expect(harness.activationService.resolveDriverActivationState).toHaveBeenCalledWith({
+      driverId
+    });
+    expect(harness.kycPolicy.requireApprovedKyc).toHaveBeenCalledWith(driverId);
+    expect(harness.firestore.documents).toEqual(new Map());
+    expect(harness.redis.values).toEqual(new Map());
+  });
+
+  test('fails closed when the QA window is not sandbox-scoped or has an invalid expiry', async () => {
+    const driverId = 'driver-qa-window-invalid';
+    const operationalHarness = createHarness({
+      env: {
+        KYC_QA_ONLINE_TRUST_WINDOW_ENABLED: 'true',
+        KYC_QA_ONLINE_TRUST_WINDOW_UIDS: driverId,
+        KYC_QA_ONLINE_TRUST_WINDOW_PROFILE_ID: 'qa-test-users-sandbox-durable',
+        KYC_QA_ONLINE_TRUST_WINDOW_ACK: 'QA_SANDBOX_ONLY',
+        KYC_QA_ONLINE_TRUST_WINDOW_UNTIL: '2026-07-01T16:00:00.000Z',
+        KYC_QA_ONLINE_TRUST_WINDOW_REASON: 'Sessao QA sandbox autorizada para validar o ciclo de corrida.'
+      }
+    });
+
+    await expect(
+      operationalHarness.service.evaluateExplicitQaOnlineTrustWindow(driverId)
+    ).resolves.toEqual(expect.objectContaining({
+      allowed: false,
+      code: 'KYC_QA_TRUST_WINDOW_SCOPE_INVALID'
+    }));
+
+    const invalidExpiryHarness = createHarness({
+      persistenceContext: sealFinancialContext({
+        providerEnvironment: 'sandbox',
+        paymentProfileId: 'qa-test-users-sandbox-durable',
+        paymentProfileSource: 'firestore',
+        testUserSandbox: true
+      }),
+      env: {
+        KYC_QA_ONLINE_TRUST_WINDOW_ENABLED: 'true',
+        KYC_QA_ONLINE_TRUST_WINDOW_UIDS: driverId,
+        KYC_QA_ONLINE_TRUST_WINDOW_PROFILE_ID: 'qa-test-users-sandbox-durable',
+        KYC_QA_ONLINE_TRUST_WINDOW_ACK: 'QA_SANDBOX_ONLY',
+        KYC_QA_ONLINE_TRUST_WINDOW_UNTIL: '2026-07-03T16:00:00.000Z',
+        KYC_QA_ONLINE_TRUST_WINDOW_REASON: 'Sessao QA sandbox autorizada para validar o ciclo de corrida.'
+      }
+    });
+
+    await expect(
+      invalidExpiryHarness.service.evaluateExplicitQaOnlineTrustWindow(driverId)
+    ).resolves.toEqual(expect.objectContaining({
+      allowed: false,
+      code: 'KYC_QA_TRUST_WINDOW_CONFIG_INVALID',
+      details: { errors: ['expiration_exceeds_24h'] }
+    }));
+    expect(invalidExpiryHarness.activationService.resolveDriverActivationState).not.toHaveBeenCalled();
+    expect(invalidExpiryHarness.kycPolicy.requireApprovedKyc).not.toHaveBeenCalled();
   });
 
   test('routes an authorized identity revalidation to liveness before requiring final KYC approval', async () => {

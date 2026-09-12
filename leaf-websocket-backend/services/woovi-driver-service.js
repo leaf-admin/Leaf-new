@@ -4,6 +4,100 @@ const { getWooviConfig, getWooviAuthHeaders } = require('../config/woovi-config'
 
 const DEFAULT_WOOVI_CONFIG = getWooviConfig();
 
+function firstPresentString(...values) {
+  for (const value of values) {
+    const normalized = String(value ?? '').trim();
+    if (normalized) return normalized;
+  }
+  return '';
+}
+
+function isChargeRecord(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  return [
+    'identifier',
+    'id',
+    'transactionID',
+    'correlationID',
+    'status',
+    'state',
+    'value',
+    'amount',
+    'brCode',
+    'qrCodeImage',
+    'paymentLinkUrl'
+  ].some((key) => value[key] !== undefined && value[key] !== null);
+}
+
+function extractChargeRecord(payload) {
+  const candidates = [
+    payload?.charge,
+    payload?.data?.charge,
+    payload?.result?.charge,
+    payload?.data,
+    payload?.result,
+    payload
+  ];
+  return candidates.find(isChargeRecord) || null;
+}
+
+function normalizeChargePixFields(payload, charge) {
+  const pix = charge?.paymentMethods?.pix || charge?.pix || payload?.pix || {};
+  const paymentMethodsPix = payload?.paymentMethods?.pix || {};
+  return {
+    qrCodeImage: firstPresentString(
+      charge?.qrCodeImage,
+      pix?.qrCodeImage,
+      paymentMethodsPix?.qrCodeImage,
+      payload?.qrCodeImage,
+      payload?.data?.qrCodeImage
+    ) || null,
+    brCode: firstPresentString(
+      charge?.brCode,
+      pix?.brCode,
+      pix?.qrCode,
+      paymentMethodsPix?.brCode,
+      paymentMethodsPix?.qrCode,
+      payload?.brCode,
+      payload?.data?.brCode
+    ) || null,
+    paymentLinkUrl: firstPresentString(
+      charge?.paymentLinkUrl,
+      pix?.paymentLinkUrl,
+      paymentMethodsPix?.paymentLinkUrl,
+      payload?.paymentLinkUrl,
+      payload?.paymentLink,
+      payload?.data?.paymentLinkUrl,
+      payload?.data?.paymentLink
+    ) || null
+  };
+}
+
+function normalizeChargeIdentifier(charge, fallback = '') {
+  return firstPresentString(
+    charge?.identifier,
+    charge?.id,
+    charge?.transactionID,
+    charge?.correlationID,
+    fallback
+  ) || null;
+}
+
+function normalizeChargeStatus(charge) {
+  const status = firstPresentString(
+    charge?.status,
+    charge?.state,
+    charge?.paymentStatus
+  );
+  return status ? status.toUpperCase() : null;
+}
+
+function normalizeChargeAmount(charge) {
+  const amount = charge?.value ?? charge?.amount ?? charge?.valueWithDiscount;
+  const numeric = Number(amount);
+  return Number.isFinite(numeric) ? numeric : 0;
+}
+
 class WooviDriverService {
   constructor(options = {}) {
     this.defaultConfig = options.wooviConfig || DEFAULT_WOOVI_CONFIG;
@@ -746,22 +840,31 @@ class WooviDriverService {
         throw new Error('URL da API Woovi incorreta ou redirecionamento detectado');
       }
       
-      if (responseData && responseData.charge) {
-        logStructured('info', 'Cobrança criada com sucesso', { service: 'woovi-driver-service', chargeId: responseData.charge.id, correlationID: chargeData.correlationID, notificationUrl: chargePayload.notificationUrl, chargeNotificationUrl: responseData.charge.notificationUrl || 'NÃO RETORNADO NA RESPOSTA' });
+      const charge = extractChargeRecord(responseData);
+      if (charge) {
+        const chargeId = normalizeChargeIdentifier(charge, chargeData.correlationID);
+        const pixFields = normalizeChargePixFields(responseData, charge);
+        logStructured('info', 'Cobrança criada com sucesso', { service: 'woovi-driver-service', chargeId, correlationID: chargeData.correlationID, notificationUrl: chargePayload.notificationUrl, chargeNotificationUrl: charge.notificationUrl || 'NÃO RETORNADO NA RESPOSTA' });
         
         // ✅ Verificar se a Woovi retornou a notificationUrl na resposta
-        if (responseData.charge.notificationUrl) {
-          logStructured('info', 'Woovi aceitou notificationUrl', { service: 'woovi-driver-service', notificationUrl: responseData.charge.notificationUrl });
+        if (charge.notificationUrl) {
+          logStructured('info', 'Woovi aceitou notificationUrl', { service: 'woovi-driver-service', notificationUrl: charge.notificationUrl });
         } else {
           logStructured('warn', 'Woovi NÃO retornou notificationUrl na resposta - pode estar usando webhook do painel', { service: 'woovi-driver-service' });
         }
         
         return {
           success: true,
-          charge: responseData.charge
+          charge,
+          chargeId,
+          qrCodeImage: pixFields.qrCodeImage,
+          brCode: pixFields.brCode,
+          qrCodeText: pixFields.brCode,
+          paymentLinkUrl: pixFields.paymentLinkUrl,
+          paymentLink: pixFields.paymentLinkUrl
         };
       } else {
-        logStructured('error', 'Resposta inválida da Woovi', { service: 'woovi-driver-service', data: responseData, status: response.status, headers: response.headers });
+        logStructured('error', 'Resposta inválida da Woovi', { service: 'woovi-driver-service', responseKeys: Object.keys(responseData || {}), status: response.status, headers: response.headers });
         throw new Error('Resposta inválida da API Woovi');
       }
     } catch (error) {
@@ -809,23 +912,50 @@ class WooviDriverService {
     try {
       const wooviConfig = options.wooviConfig || this.defaultConfig;
       const api = this.createApi(wooviConfig);
-      const response = await api.get(`/charge/${chargeId}`);
-      
-      if (response.data && response.data.charge) {
+      const encodedChargeId = encodeURIComponent(String(chargeId || '').trim());
+      const response = await api.get(`/charge/${encodedChargeId}`);
+
+      if (response.status < 200 || response.status >= 300) {
+        return {
+          success: false,
+          status: response.status,
+          error: response.data || `Woovi respondeu HTTP ${response.status}`
+        };
+      }
+
+      const charge = extractChargeRecord(response.data);
+      if (charge) {
+        const pixFields = normalizeChargePixFields(response.data, charge);
         return {
           success: true,
-          status: response.data.charge.status,
-          amount: response.data.charge.value,
-          charge: response.data.charge
+          status: normalizeChargeStatus(charge),
+          amount: normalizeChargeAmount(charge),
+          chargeId: normalizeChargeIdentifier(charge, chargeId),
+          paidAt: charge.paidAt || charge.completedAt || null,
+          qrCodeImage: pixFields.qrCodeImage,
+          brCode: pixFields.brCode,
+          qrCodeText: pixFields.brCode,
+          paymentLinkUrl: pixFields.paymentLinkUrl,
+          paymentLink: pixFields.paymentLinkUrl,
+          charge
         };
       } else {
-        throw new Error('Resposta inválida da API Woovi');
+        const responseKeys = Object.keys(response.data || {});
+        const error = new Error('Resposta inválida da API Woovi');
+        error.code = 'WOOVI_CHARGE_RESPONSE_INVALID';
+        error.responseKeys = responseKeys;
+        throw error;
       }
     } catch (error) {
-      logError(error, 'Erro ao verificar status da cobrança', { service: 'woovi-driver-service', errorData: error.response?.data });
+      logError(error, 'Erro ao verificar status da cobrança', {
+        service: 'woovi-driver-service',
+        errorData: error.response?.data,
+        responseKeys: error.responseKeys || null
+      });
       return {
         success: false,
-        error: error.response?.data || error.message
+        error: error.response?.data || error.message,
+        code: error.code || null
       };
     }
   }

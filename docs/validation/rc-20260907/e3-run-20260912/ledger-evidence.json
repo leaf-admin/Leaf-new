@@ -1,0 +1,173 @@
+{
+  "source": "sandbox_financial_ledger_events",
+  "rideId": "booking_1789188861310_3tEQ8pQ2QzeWbMKhLGsXHHhnOGL2",
+  "canonicalRideId": "booking_1789188861310_3tEQ8pQ2QzeWbMKhLGsXHHhnOGL2",
+  "financialContext": {
+    "version": 1,
+    "namespace": "sandbox",
+    "classification": "sandbox_test_user",
+    "providerEnvironment": "sandbox",
+    "paymentProfileId": "qa-test-users-sandbox-durable",
+    "paymentProfileSource": "firestore",
+    "testUserSandbox": true,
+    "contextId": "d67d0ebade061681aa56c2d4080a10c66fdfdab2b9e840b0f13d0bab21143cbe"
+  },
+  "financialNamespace": "sandbox",
+  "ledgerRideIds": [
+    "booking_1789188861310_3tEQ8pQ2QzeWbMKhLGsXHHhnOGL2",
+    "temp_ride_session_4c8c0d5f5482f4f0bf53c13b42b8"
+  ],
+  "events": [
+    {
+      "id": "payment_received_186e5572b1447254092ad9b378e177f0",
+      "eventId": "payment_received_186e5572b1447254092ad9b378e177f0",
+      "eventType": "payment_received",
+      "source": "woovi_webhook",
+      "rideId": "temp_ride_session_4c8c0d5f5482f4f0bf53c13b42b8",
+      "driverId": null,
+      "passengerId": "3tEQ8pQ2QzeWbMKhLGsXHHhnOGL2",
+      "chargeId": "1313eed3bd4f4f3884e55218fc067fb9",
+      "withdrawalId": null,
+      "refundId": null,
+      "status": "posted",
+      "currency": "BRL",
+      "totalDebitCents": 1667,
+      "totalCreditCents": 1667,
+      "lineCount": 2,
+      "balanced": true,
+      "balanceHash": "19dc7359c9b8f7cba91fc043ac5b4b76c3831a910a58b92a1167baf26f03cf6f",
+      "lines": [
+        {
+          "lineIndex": 0,
+          "account": "asset:leaf_cash_pix",
+          "direction": "debit",
+          "amountCents": 1667,
+          "entityType": "charge",
+          "entityId": "1313eed3bd4f4f3884e55218fc067fb9",
+          "memo": "Pix recebido do passageiro"
+        },
+        {
+          "lineIndex": 1,
+          "account": "liability:ride_payment_holding",
+          "direction": "credit",
+          "amountCents": 1667,
+          "entityType": "ride",
+          "entityId": "temp_ride_session_4c8c0d5f5482f4f0bf53c13b42b8",
+          "memo": "Valor recebido aguardando conclusão da corrida"
+        }
+      ],
+      "metadata": {
+        "source": "storeConfirmedPayment",
+        "webhookEvent": "OPENPIX:CHARGE_COMPLETED",
+        "correlationID": "leaf_ride_bcdf006ad15fdf9d2dd3aea1"
+      },
+      "financialContext": {
+        "version": 1,
+        "namespace": "sandbox",
+        "classification": "sandbox_test_user",
+        "providerEnvironment": "sandbox",
+        "paymentProfileId": "qa-test-users-sandbox-durable",
+        "paymentProfileSource": "firestore",
+        "testUserSandbox": true,
+        "contextId": "d67d0ebade061681aa56c2d4080a10c66fdfdab2b9e840b0f13d0bab21143cbe"
+      },
+      "financialNamespace": "sandbox",
+      "financialContextId": "d67d0ebade061681aa56c2d4080a10c66fdfdab2b9e840b0f13d0bab21143cbe",
+      "createdAtIso": "2026-09-12T04:54:11.350Z",
+      "updatedAtIso": "2026-09-12T04:54:11.350Z",
+      "createdAt": {
+        "_seconds": 1789188851,
+        "_nanoseconds": 432000000
+      },
+      "updatedAt": {
+        "_seconds": 1789188851,
+        "_nanoseconds": 432000000
+      }
+    },
+    {
+      "id": "ride_settlement_bd0744a4188ca5b91947cda8f8d0949e",
+      "eventId": "ride_settlement_bd0744a4188ca5b91947cda8f8d0949e",
+      "eventType": "ride_settlement",
+      "source": "billing_worker",
+      "rideId": "booking_1789188861310_3tEQ8pQ2QzeWbMKhLGsXHHhnOGL2",
+      "driverId": "DV4cwZvql3T3pI3lnKYQwQVALKZ2",
+      "passengerId": null,
+      "chargeId": null,
+      "withdrawalId": null,
+      "refundId": null,
+      "status": "posted",
+      "currency": "BRL",
+      "totalDebitCents": 1667,
+      "totalCreditCents": 1667,
+      "lineCount": 4,
+      "balanced": true,
+      "balanceHash": "28ef14d5808a857321d74d1ca27539751d30e1570541a104a4259f923f0b8033",
+      "lines": [
+        {
+          "lineIndex": 0,
+          "account": "liability:ride_payment_holding",
+          "direction": "debit",
+          "amountCents": 1667,
+          "entityType": "ride",
+          "entityId": "booking_1789188861310_3tEQ8pQ2QzeWbMKhLGsXHHhnOGL2",
+          "memo": "Baixa do holding após corrida concluída"
+        },
+        {
+          "lineIndex": 1,
+          "account": "liability:driver_balance_payable",
+          "direction": "credit",
+          "amountCents": 1518,
+          "entityType": "driver",
+          "entityId": "DV4cwZvql3T3pI3lnKYQwQVALKZ2",
+          "memo": "Saldo líquido devido ao motorista"
+        },
+        {
+          "lineIndex": 2,
+          "account": "revenue:leaf_operational_fee",
+          "direction": "credit",
+          "amountCents": 99,
+          "entityType": "ride",
+          "entityId": "booking_1789188861310_3tEQ8pQ2QzeWbMKhLGsXHHhnOGL2",
+          "memo": "Taxa operacional Leaf"
+        },
+        {
+          "lineIndex": 3,
+          "account": "contra_revenue:payment_intermediation_fee",
+          "direction": "credit",
+          "amountCents": 50,
+          "entityType": "ride",
+          "entityId": "booking_1789188861310_3tEQ8pQ2QzeWbMKhLGsXHHhnOGL2",
+          "memo": "Custo/intermediação de pagamento retido no settlement"
+        }
+      ],
+      "metadata": {
+        "transferId": null,
+        "balanceCreditId": "ride_credit_30e83d7a1c0ef3f083cc5eddde8e63fb",
+        "refundAmountCents": 0,
+        "refundId": null
+      },
+      "financialContext": {
+        "version": 1,
+        "namespace": "sandbox",
+        "classification": "sandbox_test_user",
+        "providerEnvironment": "sandbox",
+        "paymentProfileId": "qa-test-users-sandbox-durable",
+        "paymentProfileSource": "firestore",
+        "testUserSandbox": true,
+        "contextId": "d67d0ebade061681aa56c2d4080a10c66fdfdab2b9e840b0f13d0bab21143cbe"
+      },
+      "financialNamespace": "sandbox",
+      "financialContextId": "d67d0ebade061681aa56c2d4080a10c66fdfdab2b9e840b0f13d0bab21143cbe",
+      "createdAtIso": "2026-09-12T04:57:35.527Z",
+      "updatedAtIso": "2026-09-12T04:57:35.527Z",
+      "createdAt": {
+        "_seconds": 1789189055,
+        "_nanoseconds": 663000000
+      },
+      "updatedAt": {
+        "_seconds": 1789189055,
+        "_nanoseconds": 663000000
+      }
+    }
+  ]
+}

@@ -231,7 +231,7 @@ export class OnboardingProfileService {
         fallbackPhone: currentUser?.phoneNumber || existingProfile?.mobile || ''
       });
 
-      const savedProfile = await mobileProfileService.upsertCurrentProfile(payload);
+      const savedProfile = await mobileProfileService.upsertCurrentProfileOrThrow(payload);
 
       if (!savedProfile) {
         Logger.error('❌ Falha ao persistir perfil pela API de conta');

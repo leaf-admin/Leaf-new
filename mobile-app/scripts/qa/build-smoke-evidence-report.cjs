@@ -47,20 +47,28 @@ function main() {
   const smoke = readJson(path.join(ARTIFACTS_DIR, "real-smoke-report.json"));
   const dashboard = readJson(path.join(ARTIFACTS_DIR, "dashboard-evidence.json"));
   const payment = readJson(path.join(ARTIFACTS_DIR, "sandbox-payment-confirmation.json"));
+  const sameRide = readJson(path.join(ARTIFACTS_DIR, "same-ride-reconciliation.json"));
   const logcat = readJson(path.join(ARTIFACTS_DIR, "logcat-analysis.json"));
   const screenshots = listFiles(ARTIFACTS_DIR, (filePath) => filePath.endsWith(".png"));
   const jsonFiles = listFiles(ARTIFACTS_DIR, (filePath) => filePath.endsWith(".json"));
+  const sameRideFailures = sameRide?.ok === false
+    ? (Array.isArray(sameRide.failureCodes) && sameRide.failureCodes.length > 0
+      ? sameRide.failureCodes.map((code) => `same_ride_reconciliation:${code}`)
+      : ["same_ride_reconciliation:not_passed"])
+    : [];
   const failures = [
     ...(Array.isArray(smoke?.failures) ? smoke.failures : []),
     ...(Array.isArray(dashboard?.failures) ? dashboard.failures : []),
+    ...sameRideFailures,
   ];
   const failureClassificationItems = Array.isArray(smoke?.failureClassification?.items)
     ? smoke.failureClassification.items
     : [];
-  const finalStatus =
-    smoke?.failureClassification?.finalStatus ||
-    smoke?.finalStatus ||
-    (failures.length === 0 ? "passed" : "failed");
+  const finalStatus = sameRide?.ok === false
+    ? (sameRide.status === "BLOCKED" ? "blocked" : "failed")
+    : smoke?.failureClassification?.finalStatus ||
+      smoke?.finalStatus ||
+      (failures.length === 0 ? "passed" : "failed");
 
   const lines = [
     "# Leaf Smoke E2E Final Report",
@@ -93,6 +101,7 @@ function main() {
     `- Gross: ${dashboard?.extractedAmounts?.gross?.value ?? "not captured"}`,
     `- Fees: ${dashboard?.extractedAmounts?.fees?.value ?? "not captured"}`,
     `- Driver net: ${dashboard?.extractedAmounts?.driverNet?.value ?? "not captured"}`,
+    `- Same-ride reconciliation: ${status(sameRide?.ok)}${sameRide?.status ? ` (${sameRide.status})` : ""}`,
     "",
     "## Runtime Signals",
     `- Critical logcat lines: ${logcat?.criticalCount ?? smoke?.app?.criticalLogLines ?? "not captured"}`,

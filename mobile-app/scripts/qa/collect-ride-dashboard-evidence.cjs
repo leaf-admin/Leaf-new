@@ -105,6 +105,18 @@ function requestJson(pathname, token) {
   });
 }
 
+function resolveReconciliationFinancialContext(paymentEvidence) {
+  const configured = process.env.RECONCILIATION_FINANCIAL_CONTEXT;
+  if (configured) return configured;
+  const candidates = [
+    paymentEvidence?.financialContext,
+    paymentEvidence?.response?.financialContext,
+    paymentEvidence?.response?.result?.financialContext,
+  ];
+  const context = candidates.find((value) => value && typeof value === "object");
+  return context ? JSON.stringify(context) : "";
+}
+
 function walkNumbers(value, prefix = "", output = []) {
   if (!value || typeof value !== "object") return output;
   for (const [key, child] of Object.entries(value)) {
@@ -167,7 +179,15 @@ async function main() {
   }
 
   fs.mkdirSync(ARTIFACTS_DIR, { recursive: true });
-  const reconciliation = await requestJson(`/api/financial/reconciliation/rides/${encodeURIComponent(RIDE_ID)}`, token);
+  const paymentEvidence = readJsonFile(process.env.PAYMENT_EVIDENCE_PATH || "");
+  const financialContext = resolveReconciliationFinancialContext(paymentEvidence);
+  const reconciliationQuery = new URLSearchParams();
+  if (financialContext) reconciliationQuery.set("financialContext", financialContext);
+  else if (process.env.RECONCILIATION_PROVIDER_ENVIRONMENT) {
+    reconciliationQuery.set("providerEnvironment", process.env.RECONCILIATION_PROVIDER_ENVIRONMENT);
+  }
+  const reconciliationPath = `/api/financial/reconciliation/rides/${encodeURIComponent(RIDE_ID)}${reconciliationQuery.toString() ? `?${reconciliationQuery.toString()}` : ""}`;
+  const reconciliation = await requestJson(reconciliationPath, token);
   const health = await requestJson("/api/monitoring/health", token);
   const numbers = walkNumbers(reconciliation.json || {});
   const gross = findFirstAmount(numbers, [

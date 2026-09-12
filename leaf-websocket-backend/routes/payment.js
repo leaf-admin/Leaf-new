@@ -1141,6 +1141,13 @@ router.post('/payment/advance', authenticatePaymentActor, requirePassengerScope,
         result?.charge?.qrCodeImage ||
         result?.charge?.paymentMethods?.pix?.qrCodeImage ||
         null;
+      const brCode =
+        result.brCode ||
+        result.qrCodeText ||
+        result?.charge?.brCode ||
+        result?.charge?.paymentMethods?.pix?.brCode ||
+        result?.charge?.paymentMethods?.pix?.qrCode ||
+        null;
       const paymentLink =
         result.paymentLink ||
         result.paymentLinkUrl ||
@@ -1152,7 +1159,11 @@ router.post('/payment/advance', authenticatePaymentActor, requirePassengerScope,
         ...result,
         chargeId,
         qrCode,
+        qrCodeImage: qrCode,
+        brCode,
+        qrCodeText: brCode,
         paymentLink,
+        paymentLinkUrl: paymentLink,
         charge: result.charge || (chargeId ? { id: chargeId, correlationID: chargeId } : undefined)
       });
     } else {

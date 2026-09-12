@@ -12,6 +12,7 @@
 		13B07FBF1A68108700A75B9A /* Images.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 13B07FB51A68108700A75B9A /* Images.xcassets */; };
 		22F9049D21CD4AA1840D9375 /* Inter_400Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 5AF1F082D95E49B3BCB57F0F /* Inter_400Regular.ttf */; };
 		26691D78F6994299B7AC732A /* LeafRideActivityModule.m in Sources */ = {isa = PBXBuildFile; fileRef = 83774E6C32A34D2EBE0ED69F /* LeafRideActivityModule.m */; };
+		2E0B80D0CF174C8A9A984CF9 /* Localizable.strings in Resources */ = {isa = PBXBuildFile; fileRef = 5DB76A7458E64693BFFAC7AE /* Localizable.strings */; };
 		39FAB27052894BAAA6552343 /* LeafFaceEmbeddingModule.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9BA426EC014D4E19AA7613F6 /* LeafFaceEmbeddingModule.swift */; };
 		3DCB0EF04A90481A809B621B /* horn.wav in Resources */ = {isa = PBXBuildFile; fileRef = C40C34B7254B4AD0A5A711A6 /* horn.wav */; };
 		3E461D99554A48A4959DE609 /* SplashScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = AA286B85B6C04FC6940260E9 /* SplashScreen.storyboard */; };
@@ -22,6 +23,7 @@
 		6673D942C36943C1935E51D2 /* LeafRideActivityModule.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F059528C88244B6B5C03984 /* LeafRideActivityModule.swift */; };
 		712BA939F32145E2A005547A /* Inter_600SemiBold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = AF2AA683E6EA414985ED9B8C /* Inter_600SemiBold.ttf */; };
 		78DF9BD629FD4332BBF3D095 /* Inter_700Bold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 7278663062B0454BB7102AC3 /* Inter_700Bold.ttf */; };
+		7B3ED97F37814EE0B071E8D1 /* Localizable.strings in Resources */ = {isa = PBXBuildFile; fileRef = F277A3A4036E48219CAD1AE1 /* Localizable.strings */; };
 		B738E7C115448FDB6855404E /* ExpoModulesProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 12312C47B3FB9F909BE2D1F7 /* ExpoModulesProvider.swift */; };
 		B9D64E3D8B8C4A40A1F2C903 /* FaceLiveness in Frameworks */ = {isa = PBXBuildFile; productRef = B9D64E3D8B8C4A40A1F2C902 /* FaceLiveness */; };
 		BB2F792D24A3F905000567C9 /* Expo.plist in Resources */ = {isa = PBXBuildFile; fileRef = BB2F792C24A3F905000567C9 /* Expo.plist */; };
@@ -34,8 +36,6 @@
 		F11748422D0307B40044C1D9 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = F11748412D0307B40044C1D9 /* AppDelegate.swift */; };
 		F6D5171B18CE4115BF6BFE18 /* repeat.wav in Resources */ = {isa = PBXBuildFile; fileRef = 1046A07F92C54CC482D1B201 /* repeat.wav */; };
 		FF7202B31CAE45B69F394CF1 /* LeafRideActivityWidget.appex in Copy Files */ = {isa = PBXBuildFile; fileRef = 80D5F2DCBBB049F697CCE8B6 /* LeafRideActivityWidget.appex */; };
-		7B3ED97F37814EE0B071E8D1 /* Localizable.strings in Resources */ = {isa = PBXBuildFile; fileRef = F277A3A4036E48219CAD1AE1 /* Localizable.strings */; };
-		2E0B80D0CF174C8A9A984CF9 /* Localizable.strings in Resources */ = {isa = PBXBuildFile; fileRef = 5DB76A7458E64693BFFAC7AE /* Localizable.strings */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -63,6 +63,7 @@
 		5007C290CE094343B79AAED0 /* LeafAwsLivenessModule.swift */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = 4; includeInIndex = 0; lastKnownFileType = sourcecode.swift; name = LeafAwsLivenessModule.swift; path = Leaf/LeafAwsLivenessModule.swift; sourceTree = "<group>"; };
 		5145ED1A1CB5476487774F15 /* Inter_300Light.ttf */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = undefined; includeInIndex = 0; lastKnownFileType = unknown; name = Inter_300Light.ttf; path = "../../node_modules/@expo-google-fonts/inter/300Light/Inter_300Light.ttf"; sourceTree = "<group>"; };
 		5AF1F082D95E49B3BCB57F0F /* Inter_400Regular.ttf */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = undefined; includeInIndex = 0; lastKnownFileType = unknown; name = Inter_400Regular.ttf; path = "../../node_modules/@expo-google-fonts/inter/400Regular/Inter_400Regular.ttf"; sourceTree = "<group>"; };
+		5DB76A7458E64693BFFAC7AE /* Localizable.strings */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = 4; includeInIndex = 0; lastKnownFileType = text.plist.strings; name = Localizable.strings; path = "pt-BR.lproj/Localizable.strings"; sourceTree = "<group>"; };
 		63C15E17CB921415517B30E7 /* Pods-Leaf.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Leaf.debug.xcconfig"; path = "Target Support Files/Pods-Leaf/Pods-Leaf.debug.xcconfig"; sourceTree = "<group>"; };
 		7278663062B0454BB7102AC3 /* Inter_700Bold.ttf */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = undefined; includeInIndex = 0; lastKnownFileType = unknown; name = Inter_700Bold.ttf; path = "../../node_modules/@expo-google-fonts/inter/700Bold/Inter_700Bold.ttf"; sourceTree = "<group>"; };
 		79CA3003C57A449FA0952712 /* LeafFaceEmbeddingModule.m */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = 4; includeInIndex = 0; lastKnownFileType = sourcecode.c.objc; name = LeafFaceEmbeddingModule.m; path = Leaf/LeafFaceEmbeddingModule.m; sourceTree = "<group>"; };
@@ -85,8 +86,7 @@
 		ED297162215061F000B7C4FE /* JavaScriptCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = JavaScriptCore.framework; path = System/Library/Frameworks/JavaScriptCore.framework; sourceTree = SDKROOT; };
 		F11748412D0307B40044C1D9 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AppDelegate.swift; path = Leaf/AppDelegate.swift; sourceTree = "<group>"; };
 		F11748442D0722820044C1D9 /* Leaf-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; name = "Leaf-Bridging-Header.h"; path = "Leaf/Leaf-Bridging-Header.h"; sourceTree = "<group>"; };
-		F277A3A4036E48219CAD1AE1 /* Localizable.strings */ = {isa = PBXFileReference; name = "Localizable.strings"; path = "Base.lproj/Localizable.strings"; sourceTree = "<group>"; fileEncoding = 4; lastKnownFileType = text.plist.strings; explicitFileType = undefined; includeInIndex = 0; };
-		5DB76A7458E64693BFFAC7AE /* Localizable.strings */ = {isa = PBXFileReference; name = "Localizable.strings"; path = "pt-BR.lproj/Localizable.strings"; sourceTree = "<group>"; fileEncoding = 4; lastKnownFileType = text.plist.strings; explicitFileType = undefined; includeInIndex = 0; };
+		F277A3A4036E48219CAD1AE1 /* Localizable.strings */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = 4; includeInIndex = 0; lastKnownFileType = text.plist.strings; name = Localizable.strings; path = Base.lproj/Localizable.strings; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -131,6 +131,15 @@
 				84C7E4850D1D7BD7E053F0F7 /* PrivacyInfo.xcprivacy */,
 			);
 			name = Leaf;
+			sourceTree = "<group>";
+		};
+		21FB98E07A464B1E935E212A /* pt-BR.lproj */ = {
+			isa = PBXGroup;
+			children = (
+				5DB76A7458E64693BFFAC7AE /* Localizable.strings */,
+			);
+			name = "pt-BR.lproj";
+			path = "";
 			sourceTree = "<group>";
 		};
 		2D16E6871FA4F8E400B85C8A /* Frameworks */ = {
@@ -209,6 +218,15 @@
 			path = Pods;
 			sourceTree = "<group>";
 		};
+		9C7BFE3AEC2D465AB6A7B14F /* Base.lproj */ = {
+			isa = PBXGroup;
+			children = (
+				F277A3A4036E48219CAD1AE1 /* Localizable.strings */,
+			);
+			name = Base.lproj;
+			path = "";
+			sourceTree = "<group>";
+		};
 		BB2F792B24A3F905000567C9 /* Supporting */ = {
 			isa = PBXGroup;
 			children = (
@@ -235,24 +253,6 @@
 			);
 			name = ExpoModulesProviders;
 			sourceTree = "<group>";
-		};
-		9C7BFE3AEC2D465AB6A7B14F /* Base.lproj */ = {
-			isa = "PBXGroup";
-			children = (
-				F277A3A4036E48219CAD1AE1 /* Localizable.strings */,
-			);
-			name = Base.lproj;
-			sourceTree = "<group>";
-			path = "";
-		};
-		21FB98E07A464B1E935E212A /* pt-BR.lproj */ = {
-			isa = "PBXGroup";
-			children = (
-				5DB76A7458E64693BFFAC7AE /* Localizable.strings */,
-			);
-			name = pt-BR.lproj;
-			sourceTree = "<group>";
-			path = "";
 		};
 /* End PBXGroup section */
 
@@ -326,7 +326,7 @@
 			knownRegions = (
 				en,
 				Base,
-				pt-BR,
+				"pt-BR",
 			);
 			mainGroup = 83CBB9F61A601CBA00E9B192;
 			packageReferences = (

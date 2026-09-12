@@ -29,6 +29,13 @@ function readAndroidRoleRuntimeVerifier() {
   );
 }
 
+function readHostReadinessGate() {
+  return fs.readFileSync(
+    path.resolve(__dirname, '../scripts/qa/verify-host-readiness.sh'),
+    'utf8',
+  );
+}
+
 function readPaymentRuntimeCanary() {
   return fs.readFileSync(
     path.resolve(__dirname, '../scripts/qa/assert-backend-payment-runtime-canary.sh'),
@@ -44,6 +51,47 @@ describe('android real-device smoke runner contract', () => {
     expect(source).not.toContain('blocked_precondition:canonical_app_pickup_no_driver');
   });
 
+  it('blocks unauthenticated or wrong-role launches instead of reporting a false pass', () => {
+    const source = readAndroidSmokeRunner();
+
+    expect(source).toContain('blocked_precondition:auth_session_not_ready');
+    expect(source).toContain('blocked_precondition:passenger_role_not_ready');
+    expect(source).toContain('blocked_precondition:passenger_surface_not_ready:${current.screen}');
+    expect(source).toContain('owner: "qa_authentication"');
+  });
+
+  it('opens the configured Expo dev client before falling back to the native activity', () => {
+    const source = readAndroidSmokeRunner();
+
+    expect(source).toContain('DEV_CLIENT_URL');
+    expect(source).toContain('EXDevMenuDisableAutoLaunch');
+    expect(source).toContain('android.intent.action.VIEW');
+    expect(source).toContain('launchAndroidApp();');
+    expect(source).toContain('`${APP_PACKAGE}/.MainActivity`');
+  });
+
+  it('does not emit downstream quote, payment, or fare failures after an earlier block', () => {
+    const source = readAndroidSmokeRunner();
+
+    expect(source).toContain('const quoteReached = quoteStatus !== "not_reached"');
+    expect(source).toContain('const hasBlockedPrecondition = failures.some');
+    expect(source).toContain('blocked_precondition:quote_not_reached');
+    expect(source).toContain('if (OPEN_PAYMENT && quoteReached && !paymentOpened');
+    expect(source).toContain('AUTO_CONFIRM_SANDBOX_PAYMENT &&');
+    expect(source).toContain('paymentOpened &&');
+    expect(source).toContain('if (quoteReached && !fareConsistency.ok)');
+    expect(source).toContain('return "not reached";');
+  });
+
+  it('does not label websocket-only gateways as a Socket.IO connectivity failure', () => {
+    const source = readAndroidSmokeRunner();
+
+    expect(source).toContain('function formatSocketPollingStatus(poll, realtime)');
+    expect(source).toContain('transport unknown');
+    expect(source).toContain('websocket-only gateway');
+    expect(source).toContain('formatSocketPollingStatus(socketPoll, socketRealtime)');
+  });
+
   it('validates canonical pickup and driver readiness before tapping payment confirmation', () => {
     const source = readAndroidSmokeRunner();
     const firstReadinessIndex = source.indexOf('await prepareCanonicalPickupForPayment(current)');
@@ -52,6 +100,24 @@ describe('android real-device smoke runner contract', () => {
     expect(firstReadinessIndex).toBeGreaterThan(-1);
     expect(firstPaymentTapIndex).toBeGreaterThan(-1);
     expect(firstReadinessIndex).toBeLessThan(firstPaymentTapIndex);
+  });
+
+  it('requires a matched user-scoped sandbox profile before opening the app for payment', () => {
+    const source = readAndroidSmokeRunner();
+    const runtimeValidationIndex = source.indexOf('paymentRuntimeValidation = validatePaymentRuntimeConfig(paymentRuntimeConfig)');
+    const appLaunchIndex = source.indexOf('log("abrindo app em duas passagens para permitir aplicação OTA quando disponível")');
+
+    expect(source).toContain('PAYMENT_RUNTIME_USER_ID = process.env.PAYMENT_RUNTIME_USER_ID || PAYMENT_PASSENGER_UID');
+    expect(source).toContain('userId: PAYMENT_RUNTIME_USER_ID');
+    expect(source).toContain('passengerId: PAYMENT_RUNTIME_USER_ID');
+    expect(source).toContain('scope !== "users"');
+    expect(source).toContain('contextMatched !== true');
+    expect(source).toContain('payment_runtime_profile_expired');
+    expect(source).toContain('blocked_precondition:payment_sandbox_not_confirmed');
+    expect(source).not.toContain('/api/app/runtime-config?phone=');
+    expect(runtimeValidationIndex).toBeGreaterThan(-1);
+    expect(appLaunchIndex).toBeGreaterThan(-1);
+    expect(runtimeValidationIndex).toBeLessThan(appLaunchIndex);
   });
 
   it('blocks payment when the app canonical pickup diverges from the expected device pickup', () => {
@@ -132,6 +198,62 @@ describe('android real-device smoke runner contract', () => {
     expect(source).toContain('confirmed_via_ride_flow');
   });
 
+  it('recognizes the quote card before the reused home destination input id', () => {
+    const source = readAndroidSmokeRunner();
+    const detectScreenSource = source.slice(
+      source.indexOf('function detectScreen'),
+      source.indexOf('function detectPaymentStatus'),
+    );
+    const quoteCardIndex = detectScreenSource.indexOf('passenger-home-category-card');
+    const homeInputIndex = detectScreenSource.indexOf('passenger-home-destination-input');
+
+    expect(quoteCardIndex).toBeGreaterThan(-1);
+    expect(homeInputIndex).toBeGreaterThan(-1);
+    expect(quoteCardIndex).toBeLessThan(homeInputIndex);
+    expect(source).toContain('return "passenger_quote"');
+  });
+
+  it('does not tap a destination result again when Enter already opened the quote', () => {
+    const source = readAndroidSmokeRunner();
+    const quoteGuardIndex = source.indexOf('const quoteAlreadyVisible =');
+    const firstResultIndex = source.indexOf('const firstResult = quoteAlreadyVisible');
+    const conditionalTapIndex = source.indexOf('if (quoteAlreadyVisible || tapNode(firstResult');
+
+    expect(quoteGuardIndex).toBeGreaterThan(-1);
+    expect(firstResultIndex).toBeGreaterThan(quoteGuardIndex);
+    expect(conditionalTapIndex).toBeGreaterThan(firstResultIndex);
+    expect(source).toContain('if (!quoteAlreadyVisible)');
+  });
+
+  it('falls back to the live logcat stream for invisible app pickup evidence', () => {
+    const source = readAndroidSmokeRunner();
+
+    expect(source).toContain('let activeLogcatPath = null');
+    expect(source).toContain('activeLogcatPath = logcatPath');
+    expect(source).toContain('tailTextFile(activeLogcatPath, 400000)');
+    expect(source).toContain('uiautomator_logcat_stream');
+  });
+
+  it('resolves sandbox confirmation against the current ride instead of a stale payment intent', () => {
+    const source = readAndroidSmokeRunner();
+
+    expect(source).toContain("const crypto = require(\"crypto\")");
+    expect(source).toContain('function deriveAdvancePaymentIntentId(rideId)');
+    expect(source).toContain('function resolveCurrentRunPaymentIntentId()');
+    expect(source).toContain('payment_intent_current_run_mismatch');
+    expect(source).toContain("payment-intent-resolution.json");
+    expect(source).toContain('PAYMENT_INTENT_ID: paymentIntentResolution.paymentIntentId');
+  });
+
+  it('waits through a transient payment surface before declaring the Pix modal absent', () => {
+    const source = readAndroidSmokeRunner();
+
+    expect(source).toContain('07-payment-transition-');
+    expect(source).toContain('looksLikePixModalEvidence(current)');
+    expect(source).toContain("currentScreen === 'blank'");
+    expect(source).toContain("currentScreen === 'payment_loading'");
+  });
+
   it('includes managed driver gross fare in smoke fare consistency evidence', () => {
     const source = readAndroidSmokeRunner();
 
@@ -171,6 +293,17 @@ describe('android real-device smoke runner contract', () => {
     expect(paymentCanaryIndex).toBeGreaterThan(-1);
     expect(geofenceLogIndex).toBeLessThan(paymentLogIndex);
     expect(geofenceApiIndex).toBeLessThan(paymentCanaryIndex);
+  });
+
+  it('uses the certified in-region coordinates when device location is unavailable', () => {
+    const source = readRealSmokePreflight();
+
+    expect(source).toContain('PICKUP_LAT="${PICKUP_LAT:--22.97104}"');
+    expect(source).toContain('PICKUP_LNG="${PICKUP_LNG:--43.18349}"');
+    expect(source).toContain('DESTINATION_LAT="${DESTINATION_LAT:--22.98488}"');
+    expect(source).toContain('DESTINATION_LNG="${DESTINATION_LNG:--43.22215}"');
+    expect(source).not.toContain('PICKUP_LAT="${PICKUP_LAT:--22.999357}"');
+    expect(source).not.toContain('PICKUP_LNG="${PICKUP_LNG:--43.357071}"');
   });
 
   it('persists the Android role assignment into generated smoke env evidence', () => {
@@ -228,6 +361,15 @@ describe('android real-device smoke runner contract', () => {
     expect(verifier).toContain('"emulatorStabilitySeconds": "${EMULATOR_STABILITY_SECONDS}"');
     expect(verifier).toContain('ANDROID_EMULATOR_STABILITY_SECONDS=%s');
     expect(verifier).toContain('FORCE_INSTALL_DRIVER_APK="${FORCE_INSTALL_DRIVER_APK:-false}"');
+    expect(preflight).toContain('REQUIRE_RUNNING_ANDROID_APP="${REQUIRE_RUNNING_ANDROID_APP:-true}"');
+    expect(preflight).toContain('REAL_SMOKE_DRIVER_SURFACE_MODE="${REAL_SMOKE_DRIVER_SURFACE_MODE:-app}"');
+    expect(preflight).toContain('REAL_SMOKE_SYNC_DRIVER_TO_APP_PICKUP="\\${REAL_SMOKE_SYNC_DRIVER_TO_APP_PICKUP:-false}"');
+    expect(verifier).toContain('REQUIRE_RUNNING_ANDROID_APP="${REQUIRE_RUNNING_ANDROID_APP:-true}"');
+    expect(verifier).toContain('verify_app_boot_on_serial()');
+    expect(verifier).toContain('blocked_precondition:android_role_app_not_booted');
+    expect(verifier).toContain('blocked_precondition:android_role_session_not_ready');
+    expect(verifier).toContain('passengerAppBooted');
+    expect(verifier).toContain('driverAppBooted');
     expect(verifier).toContain('android-role-runtime-verification.json');
     expect(verifier).toContain('android-role-runtime.env');
     expect(verifier).toContain('passenger and driver serials must both be resolved before L2 smoke');
@@ -238,6 +380,17 @@ describe('android real-device smoke runner contract', () => {
     expect(verifierIndex).toBeGreaterThan(-1);
     expect(smokeRunnerIndex).toBeGreaterThan(-1);
     expect(verifierIndex).toBeLessThan(smokeRunnerIndex);
+  });
+
+  it('keeps app-to-app mode single-session and uses runtime evidence for the Pix modal', () => {
+    const runner = readAndroidSmokeRunner();
+
+    expect(runner).toContain('const DRIVER_SURFACE_MODE = process.env.REAL_SMOKE_DRIVER_SURFACE_MODE || "app"');
+    expect(runner).toContain('driver_surface_mode_conflict');
+    expect(runner).toContain('function looksLikePixModalText(current)');
+    expect(runner).toContain('function looksLikePixModalEvidence(current)');
+    expect(runner).toContain('current?.accessibilityStreamLog');
+    expect(runner).toContain('looksLikePixModalEvidence(current)');
   });
 
   it('keeps sandbox payment runtime activation dry-run and explicit-approval gated', () => {
@@ -268,6 +421,30 @@ describe('android real-device smoke runner contract', () => {
     expect(source).toContain('DRY_RUN=true');
   });
 
+  it('keeps legacy E2E canary runners user-scoped', () => {
+    const vps = fs.readFileSync(
+      path.resolve(__dirname, '../scripts/run-e2e-vps.sh'),
+      'utf8',
+    );
+    const stable = fs.readFileSync(
+      path.resolve(__dirname, '../scripts/run-e2e-stable-guarded.sh'),
+      'utf8',
+    );
+    const canary = readPaymentRuntimeCanary();
+
+    for (const source of [vps, stable]) {
+      expect(source).toContain('PAYMENT_RUNTIME_USER_ID=');
+      expect(source).toContain('PAYMENT_RUNTIME_USER_ID="$PAYMENT_RUNTIME_USER_ID"');
+      expect(source).toContain('FIREBASE_TEST_PHONE="$FIREBASE_TEST_PHONE"');
+    }
+    expect(vps).toContain('source "$MOBILE_DIR/scripts/source-local-build-env.sh"');
+    expect(readRealSmokePreflight()).toContain('export PAYMENT_RUNTIME_USER_ID="${PASSENGER_UID}"');
+    expect(canary).toContain('PAYMENT_RUNTIME_USER_ID is required for a user-scoped sandbox canary');
+    expect(canary).toContain('phone-only query resolves the global default');
+    expect(canary).toContain('Payment runtime profile did not match the supplied user context');
+    expect(canary).toContain('profile_scope="$(jq -r');
+  });
+
   it('writes a machine-readable preflight summary when a precondition blocks smoke', () => {
     const source = readRealSmokePreflight();
 
@@ -282,5 +459,26 @@ describe('android real-device smoke runner contract', () => {
     expect(source).toContain('payment_runtime_canary_failed');
     expect(source).toContain('generatedFiles');
     expect(source).toContain('paymentRuntimeCanary');
+  });
+
+  it('requires a host readiness pass before any Android smoke side effect', () => {
+    const preflight = readRealSmokePreflight();
+    const hostGate = readHostReadinessGate();
+    const hostGateIndex = preflight.indexOf('verify-host-readiness.sh');
+    const deviceValidationIndex = preflight.indexOf('PREFLIGHT_STEP="android_device"');
+
+    expect(preflight).toContain('PREFLIGHT_STEP="host_readiness"');
+    expect(preflight).toContain('QA_PLATFORM=android');
+    expect(preflight).toContain('QA_HOST_READINESS_OUTPUT_DIR="${HOST_READINESS_DIR}"');
+    expect(preflight).toContain('no Android device, app, seed, deep link, quote, payment, or ride was started');
+    expect(preflight).toContain('host-readiness/host-readiness.json');
+    expect(hostGate).toContain('scenarioStarted: false');
+    expect(hostGate).toContain('java_major >= 17');
+    expect(hostGate).toContain('MIN_FREE_GB="${QA_MIN_FREE_GB:-15}"');
+    expect(hostGate).toContain('REQUIRE_METRO_READY');
+    expect(hostGate).toContain('adb:daemon');
+    expect(hostGateIndex).toBeGreaterThan(-1);
+    expect(deviceValidationIndex).toBeGreaterThan(-1);
+    expect(hostGateIndex).toBeLessThan(deviceValidationIndex);
   });
 });

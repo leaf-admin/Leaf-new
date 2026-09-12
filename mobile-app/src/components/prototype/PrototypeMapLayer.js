@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Animated, Easing, Image, Platform, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import MapView, { Circle, Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
+import { useReducedMotion } from 'react-native-reanimated';
 import Svg, { Path, Rect } from 'react-native-svg';
 import mapStyleAppleLike from './mapStyleAppleLike';
 import robotaxiPrototypeTokens from '../design-system/robotaxiPrototypeTokens';
@@ -43,6 +44,14 @@ const DRIVER_MARKER_IMAGE_SOURCES = Object.freeze({
   green: require('../../assets/map/leaf-map-car-marker-green.png'),
   yellow: require('../../assets/map/leaf-map-car-marker-yellow.png'),
 });
+
+export function resolveRouteAnimationEnabled({
+  animateRoute = true,
+  isTestEnv = IS_TEST_ENV,
+  reduceMotion = false,
+} = {}) {
+  return Boolean(animateRoute && !isTestEnv && !reduceMotion);
+}
 const DIRECTIONAL_DRIVER_MARKER_IMAGE_SOURCE = DRIVER_MARKER_IMAGE_SOURCES.black;
 const DRIVER_MARKER_BODY_COLORS = Object.freeze({
   black: '#111111',
@@ -1240,6 +1249,7 @@ function PrototypeMapLayer({
   interactionEnabled = true,
   hideUserMarker = false,
   animateRoute = true,
+  onRouteAnimationEvent,
   routeMainColor = null,
   routeShadowColor = null,
   routeHighlightColor = null,
@@ -1258,6 +1268,7 @@ function PrototypeMapLayer({
   manualCameraHoldMs = 0,
   mapCameraHeading = 0,
 }) {
+  const reduceMotion = useReducedMotion();
   const mapProvider =
     Platform.OS === 'ios' || Platform.OS === 'android'
       ? PROVIDER_GOOGLE
@@ -1464,7 +1475,11 @@ function PrototypeMapLayer({
   const shouldShowUserAvatarMarker = Boolean(searchingMode && shouldShowCurrentLocationMarker);
   const userMarkerTracksViewChanges =
     Platform.OS === 'android' || shouldShowCurrentLocationMarker;
-  const shouldAnimateRoute = Boolean(animateRoute && !IS_TEST_ENV);
+  const shouldAnimateRoute = resolveRouteAnimationEnabled({
+    animateRoute,
+    isTestEnv: IS_TEST_ENV,
+    reduceMotion,
+  });
   const visibleNearbyVehicles = nearbyVehiclesVisible
     ? normalizedNearbyVehicles
     : [];
@@ -2428,18 +2443,60 @@ function PrototypeMapLayer({
   ]);
 
   useEffect(() => {
+    const emitRouteAnimationEvent = (phase, data = {}) => {
+      if (typeof onRouteAnimationEvent !== 'function') {
+        return;
+      }
+
+      try {
+        onRouteAnimationEvent({
+          phase,
+          routeSource: String(routeSource || '').trim() || null,
+          routeSynthetic: routeSynthetic === true,
+          configuredDurationMs: shouldAnimateRoute ? ROUTE_ANIMATION_DURATION : 0,
+          routePointCount: denseRoute.length,
+          reducedMotion: reduceMotion === true,
+          ...data,
+        });
+      } catch (_error) {
+        // Observability must never be able to break the map surface.
+      }
+    };
+
     if (!hasRoute || denseRoute.length < 2) {
       setAnimatedRouteCoordinates([]);
+      emitRouteAnimationEvent('reset', {
+        reason: hasRoute ? 'insufficient_route_geometry' : 'no_route',
+        visiblePointCount: 0,
+      });
       return undefined;
     }
 
     if (!shouldAnimateRoute) {
       setAnimatedRouteCoordinates(denseRoute);
+      emitRouteAnimationEvent('static', {
+        reason: reduceMotion === true
+          ? 'reduced_motion'
+          : IS_TEST_ENV
+            ? 'test_environment'
+            : 'animation_disabled',
+        elapsedMs: 0,
+        visiblePointCount: denseRoute.length,
+      });
       return undefined;
     }
 
     let frameId = null;
+    let completed = false;
+    let firstVisible = false;
+    let lastVisiblePointCount = 0;
+    const minimumVisibleCount = Math.min(MIN_ANIMATED_ROUTE_POINTS, denseRoute.length);
     const startTime = Date.now();
+
+    emitRouteAnimationEvent('start', {
+      elapsedMs: 0,
+      visiblePointCount: 0,
+    });
 
     const animateStep = () => {
       const elapsed = Date.now() - startTime;
@@ -2447,7 +2504,6 @@ function PrototypeMapLayer({
       const eased = progress < 0.5
         ? 4 * progress * progress * progress
         : 1 - Math.pow(-2 * progress + 2, 3) / 2;
-      const minimumVisibleCount = Math.min(MIN_ANIMATED_ROUTE_POINTS, denseRoute.length);
       const visibleCount = Math.floor(denseRoute.length * eased);
 
       setAnimatedRouteCoordinates(
@@ -2456,9 +2512,29 @@ function PrototypeMapLayer({
           : [],
       );
 
+      const nextVisiblePointCount =
+        visibleCount >= minimumVisibleCount
+          ? Math.max(minimumVisibleCount, visibleCount)
+          : 0;
+      lastVisiblePointCount = nextVisiblePointCount;
+      if (!firstVisible && nextVisiblePointCount >= minimumVisibleCount) {
+        firstVisible = true;
+        emitRouteAnimationEvent('first_visible', {
+          elapsedMs: elapsed,
+          visiblePointCount: nextVisiblePointCount,
+        });
+      }
+
       if (progress < 1) {
         frameId = requestAnimationFrame(animateStep);
+        return;
       }
+
+      completed = true;
+      emitRouteAnimationEvent('complete', {
+        elapsedMs: Date.now() - startTime,
+        visiblePointCount: denseRoute.length,
+      });
     };
 
     setAnimatedRouteCoordinates([]);
@@ -2468,8 +2544,22 @@ function PrototypeMapLayer({
       if (frameId) {
         cancelAnimationFrame(frameId);
       }
+      if (!completed) {
+        emitRouteAnimationEvent('cancelled', {
+          elapsedMs: Date.now() - startTime,
+          visiblePointCount: lastVisiblePointCount,
+        });
+      }
     };
-  }, [denseRoute, hasRoute, shouldAnimateRoute]);
+  }, [
+    denseRoute,
+    hasRoute,
+    onRouteAnimationEvent,
+    reduceMotion,
+    routeSource,
+    routeSynthetic,
+    shouldAnimateRoute,
+  ]);
 
   return (
     <View style={styles.mapArea}>

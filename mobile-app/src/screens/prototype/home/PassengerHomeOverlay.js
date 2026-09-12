@@ -1238,6 +1238,7 @@ function PassengerHomeOverlay({
             { height: categoryCardHeight },
           ]}
           testID="passenger-home-category-card"
+          accessible
           accessibilityLabel="Escolha a categoria da corrida"
         >
           {pickupQaCoordinateLabel ? (

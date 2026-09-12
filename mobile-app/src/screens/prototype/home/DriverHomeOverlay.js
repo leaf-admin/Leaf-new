@@ -1028,6 +1028,7 @@ function DriverHomeOverlay({
                   numberOfLines={1}
                   adjustsFontSizeToFit
                   minimumFontScale={0.82}
+                  testID={sliderStatus === "online" ? "driver-home-online-state" : undefined}
                   style={[
                     styles.driverBottomSliderText,
                     (sliderStatus === "online" || sliderStatus === "ride") &&

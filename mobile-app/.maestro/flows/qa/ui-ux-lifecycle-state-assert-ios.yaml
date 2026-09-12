@@ -1,5 +1,8 @@
 appId: br.com.leaf.ride
 ---
+- launchApp:
+    stopApp: false
+
 - runFlow:
     when:
       visible: "Abrir"

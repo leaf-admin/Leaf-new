@@ -1,0 +1,116 @@
+{
+  "date": "2026-09-07",
+  "kind": "local-validation-not-production-acceptance",
+  "checks": [
+    {
+      "name": "mobile-unit",
+      "status": "PASS",
+      "suites": 157,
+      "tests": 1299,
+      "log": "/tmp/leaf-rc-mobile-final-20260907.log",
+      "sha256": "be6f15ad6d84dec41f295b502c6293955da90d128d9b83dfa0fd93a0f7e8ce89"
+    },
+    {
+      "name": "backend-unit",
+      "status": "PASS",
+      "suites": 271,
+      "tests": 2271,
+      "log": "/tmp/leaf-rc-backend-cpf-outage-final.log",
+      "sha256": "8fdc60c63ebfac393a07a085ccdffc9ceac83f0fc77001b94077869cd781a3ab"
+    },
+    {
+      "name": "dashboard-contracts-lint-build",
+      "status": "PASS_THROUGH_BUILD_SMOKE_RETRIED",
+      "log": "/tmp/leaf-rc-dashboard-qa-20260907.log",
+      "sha256": "2bf622857c51df6c8a6c24800a732920d834e8961ea209b5e702f9fd65c2890d"
+    },
+    {
+      "name": "dashboard-local-mocked-smoke",
+      "status": "PASS",
+      "log": "/tmp/leaf-rc-dashboard-smoke-20260907.log",
+      "sha256": "8531bdefeb9863ac12b50b0b4533897f6ec8a5b4d30307d2118eed1544d9b15f"
+    },
+    {
+      "name": "host-readiness",
+      "status": "BLOCKED_METRO",
+      "log": "/tmp/leaf-rc-host-readiness-unrestricted-20260907.log",
+      "sha256": "a2f3b5382f851a02a6f37f61bd766bd6e83e97b0a35ae05f1e85e5f128780934"
+    },
+    {
+      "name": "webhook-regression",
+      "status": "PASS",
+      "tests": 38,
+      "log": "/tmp/leaf-rc-webhook-green.log",
+      "sha256": "7e8981b0711e3f07ebfc258ab1bb0268fb78263c2589753b575c302514769f9e"
+    },
+    {
+      "name": "financial-gate-regression",
+      "status": "PASS",
+      "tests": 15,
+      "log": "/tmp/leaf-rc-financial-gate-green.log",
+      "sha256": "61ddd6ab27a74d50ed8bd76e9712ea16528aa0e131c9ad479bec3301798e8b43"
+    },
+    {
+      "name": "cpf-purge-account-route",
+      "status": "PASS",
+      "tests": 31,
+      "log": "/tmp/leaf-rc-cpf-purge-retry.log",
+      "sha256": "c3c3fe0146d190b1e11519dc63736a144b6f24aea30cbc70039e6dddd3e78812"
+    },
+    {
+      "name": "backend-architecture",
+      "status": "PASS",
+      "log": "/tmp/leaf-rc-architecture-retry.log",
+      "sha256": "825d78aef35e406feb72686c7dc39eccb5a7c556af332343ff9a8aeeffbcfb75",
+      "scope": "local contracts; not deployed runtime evidence"
+    },
+    {
+      "name": "backend-local-integration",
+      "status": "PASS",
+      "log": "/tmp/leaf-rc-integration.log",
+      "sha256": "bf2fee2c032b276e474a1247c347f5f8ec304d2e50cefd21173bada673ba45f7",
+      "scope": "local contracts; not deployed runtime evidence"
+    },
+    {
+      "name": "runtime-ci-fixture",
+      "status": "PASS",
+      "log": "/tmp/leaf-rc-ci-runtime-config.log",
+      "sha256": "bc7d16ee84559dcb82ae76038ab9e92c359a18c501edd3645b24ee7d06274196",
+      "scope": "local contracts; not deployed runtime evidence"
+    }
+  ],
+  "postFixFiles": [
+    {
+      "path": "leaf-websocket-backend/bootstrap/http-middleware.js",
+      "sha256": "75c84fcf7804a0d422bc5c906bf3b3e35a1d00b4ecf8fa67ca94c6fffe889eb4"
+    },
+    {
+      "path": "leaf-websocket-backend/tests/unit/routes/woovi-webhook-guards.unit.test.js",
+      "sha256": "cf9e36125f03d35f46537df858a493ef4eed7e4aadd98093360784cf3d295fe7"
+    },
+    {
+      "path": "mobile-app/scripts/qa/validate-same-ride-reconciliation.cjs",
+      "sha256": "f2eaff68097556f131afe51bee7c30f49c239e926046db8b5f94d66fcc0fcb12"
+    },
+    {
+      "path": "mobile-app/__tests__/same-ride-reconciliation-contract.test.js",
+      "sha256": "e61b5e545b94de0708662764b165f43251a78d06d6f61869be9c2ff2a9c834a6"
+    },
+    {
+      "path": "leaf-websocket-backend/routes/account-routes.js",
+      "sha256": "b0c18f7ec02c4f0001ac503fb5cd975761e75104d222f27a8839bc9ebd3ab1f2"
+    },
+    {
+      "path": "leaf-websocket-backend/tests/unit/routes/account-routes.unit.test.js",
+      "sha256": "439c8e9131854122088947fe1e6d4812c7709d96659bb1511b15e6f7b3cc9eb9"
+    },
+    {
+      "path": "leaf-websocket-backend/services/cpf-identity-registry-service.js",
+      "sha256": "771814381c662c261adc0142845ce1df46137ebafcc6efbdfcc0a89159f8f912"
+    },
+    {
+      "path": "leaf-websocket-backend/tests/unit/services/cpf-identity-registry-service.unit.test.js",
+      "sha256": "f1260a071b86a36b9c5fbb253b12fe59a49791037319fdc6d5db9c63b340d40a"
+    }
+  ]
+}

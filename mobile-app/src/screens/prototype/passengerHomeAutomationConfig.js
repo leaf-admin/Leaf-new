@@ -36,6 +36,34 @@ function normalizePassengerAction(value) {
   }
 
   if (
+    normalized === "show_category" ||
+    normalized === "show-category" ||
+    normalized === "open_category" ||
+    normalized === "open-category" ||
+    normalized === "category"
+  ) {
+    return "show_category";
+  }
+
+  if (
+    normalized === "open_pix_pending" ||
+    normalized === "open-pix-pending" ||
+    normalized === "pix_pending" ||
+    normalized === "pix-pending"
+  ) {
+    return "open_pix_pending";
+  }
+
+  if (
+    normalized === "open_destination_search" ||
+    normalized === "open-destination-search" ||
+    normalized === "destination_search" ||
+    normalized === "destination-search"
+  ) {
+    return "open_destination_search";
+  }
+
+  if (
     normalized === "cancel_search" ||
     normalized === "cancel-search" ||
     normalized === "cancel"

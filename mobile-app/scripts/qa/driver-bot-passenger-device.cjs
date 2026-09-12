@@ -5,8 +5,10 @@ const axios = require('axios');
 const io = require('socket.io-client');
 
 const SERVER_URL = process.env.BACKEND_URL || 'https://api.leaf.app.br';
-const BASE_LAT = Number(process.env.QA_BASE_LAT || '37.779026');
-const BASE_LNG = Number(process.env.QA_BASE_LNG || '-122.419906');
+// Keep standalone QA runs inside the active Rio pilot geofence. Callers may
+// still override these values explicitly for a dedicated local fixture.
+const BASE_LAT = Number(process.env.QA_BASE_LAT || '-22.97104');
+const BASE_LNG = Number(process.env.QA_BASE_LNG || '-43.18349');
 const RADIUS = Number(process.env.QA_COORD_RADIUS || '0.002');
 const ESTIMATED_FARE = Number(process.env.QA_ESTIMATED_FARE || '27.5');
 const DRIVER_EMAIL = process.env.QA_DRIVER_EMAIL || 'ana.teste@leaf.com';

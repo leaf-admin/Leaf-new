@@ -61,7 +61,11 @@ jest.mock('react-native-svg', () => {
 
 const prototypeMapLayerModule = require('../src/components/prototype/PrototypeMapLayer');
 const PrototypeMapLayer = prototypeMapLayerModule.default;
-const { resolveRouteRenderCoordinates, resolveVehicleColorToken } = prototypeMapLayerModule;
+const {
+  resolveRouteAnimationEnabled,
+  resolveRouteRenderCoordinates,
+  resolveVehicleColorToken,
+} = prototypeMapLayerModule;
 
 describe('PrototypeMapLayer route viewport fitting', () => {
   const baseRegion = {
@@ -95,6 +99,20 @@ describe('PrototypeMapLayer route viewport fitting', () => {
       staticRouteCoordinates: routeCoordinates,
       shouldAnimateRoute: false,
     })).toEqual(routeCoordinates);
+  });
+
+  it('disables progressive route drawing when reduced motion is enabled', () => {
+    expect(resolveRouteAnimationEnabled({
+      animateRoute: true,
+      isTestEnv: false,
+      reduceMotion: true,
+    })).toBe(false);
+
+    expect(resolveRouteAnimationEnabled({
+      animateRoute: true,
+      isTestEnv: false,
+      reduceMotion: false,
+    })).toBe(true);
   });
 
   it('resolves vehicle marker color from fallback fields when the primary value is empty', () => {
@@ -358,5 +376,32 @@ describe('PrototypeMapLayer route viewport fitting', () => {
     expect(() => UNSAFE_getAllByProps({ strokeColor: '#123456' })).toThrow();
     expect(UNSAFE_getAllByProps({ strokeColor: '#198754' }).length).toBeGreaterThan(0);
     expect(UNSAFE_getAllByProps({ strokeColor: '#F59E0B' }).length).toBeGreaterThan(0);
+  });
+
+  it('emits route animation telemetry without affecting the map surface', () => {
+    const onRouteAnimationEvent = jest.fn();
+
+    render(
+      <PrototypeMapLayer
+        mapRef={React.createRef()}
+        region={baseRegion}
+        userCoordinate={routeCoordinates[0]}
+        routeCoordinates={routeCoordinates}
+        routeSource="backend"
+        onRouteAnimationEvent={onRouteAnimationEvent}
+        animateRoute={false}
+      />,
+    );
+
+    expect(onRouteAnimationEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        phase: 'static',
+        routeSource: 'backend',
+        routeSynthetic: false,
+        configuredDurationMs: 0,
+        reducedMotion: false,
+        visiblePointCount: expect.any(Number),
+      }),
+    );
   });
 });
