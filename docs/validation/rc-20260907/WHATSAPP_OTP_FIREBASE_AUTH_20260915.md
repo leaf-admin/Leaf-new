@@ -65,3 +65,11 @@ npx jest --config jest.config.js \
 ```
 
 Nenhuma chamada real à Meta, alteração no Firebase Console, rotação de segredo ou deploy foi feita nesta etapa. Antes de produção ainda é necessário criar/aprovar o template, provisionar o system user com as permissões `whatsapp_business_management` e `whatsapp_business_messaging`, inserir os segredos no runtime e executar um smoke com um número autorizado.
+
+## Verificação externa da Meta — 15/09/2026
+
+O portfólio empresarial `Serafy` foi aberto no Meta Business Suite. A conta do WhatsApp Business existente foi identificada pelo WABA ID `1462337719120334` dentro do portfólio `1383444540251234`; o status exibido é `Aprovada`. A empresa aparece como ainda não verificada.
+
+O detalhe de `Phone numbers` informa que nenhum número foi adicionado à WABA. O cadastro foi deixado aberto no passo `Adicionar telefone`, com o nome de exibição `Serafy` e a categoria `Viagem e transporte` já selecionados. A etapa seguinte exige um número comercial que possa receber o código de verificação; esse dado e o código não devem passar pelo repositório nem pelo chat.
+
+Enquanto não houver número verificado, a Meta não fornece `WHATSAPP_META_PHONE_NUMBER_ID`, portanto o gateway não pode sair da simulação. Também continuam pendentes o template `AUTHENTICATION` aprovado, o token de system user e a chave dedicada `AUTH_OTP_HMAC_KEY` no `.env` protegido do gateway (`/opt/leaf-app/.env` no deploy Contabo). Nenhum desses valores foi criado, exibido ou salvo nesta worktree.
