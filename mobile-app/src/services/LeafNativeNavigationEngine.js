@@ -4,8 +4,10 @@ const EARTH_RADIUS_METERS = 6371000;
 const CAMERA_LOOK_AHEAD_METERS = 55;
 export const NAVIGATION_CAMERA_ANCHOR_Y = 0.68;
 export const NAVIGATION_CAMERA_ANIMATION_MS = 800;
-export const NAVIGATION_CAMERA_MOVING_PITCH = 55;
-export const NAVIGATION_CAMERA_IDLE_PITCH = 42;
+// Keep the Leaf map in the standard top-down presentation. Route heading and
+// zoom still follow navigation, but the camera must never tilt into the old
+// isometric view during an active driver trip.
+export const NAVIGATION_CAMERA_TOP_DOWN_PITCH = 0;
 const NAVIGATION_CAMERA_MIN_ROUTE_ZOOM = 15.2;
 const NAVIGATION_CAMERA_MAX_ROUTE_ZOOM = 18.2;
 const NAVIGATION_CAMERA_NEAR_TARGET_METERS = 60;
@@ -168,9 +170,8 @@ export function shouldRevealNavigationRoute({
   );
 }
 
-export function resolveNavigationCameraPitch(speedKmh = 0) {
-  const normalizedSpeed = Math.max(0, Number(speedKmh) || 0);
-  return normalizedSpeed < 2 ? NAVIGATION_CAMERA_IDLE_PITCH : NAVIGATION_CAMERA_MOVING_PITCH;
+export function resolveNavigationCameraPitch() {
+  return NAVIGATION_CAMERA_TOP_DOWN_PITCH;
 }
 
 export function calculateNavigationDistanceMeters(left, right) {
@@ -1007,7 +1008,7 @@ export function buildLeafNativeNavigationState({
       remainingMeters,
       baselineMeters,
     ),
-    cameraPitch: resolveNavigationCameraPitch(normalizedSpeedKmh),
+    cameraPitch: resolveNavigationCameraPitch(),
     cameraAnchorY: NAVIGATION_CAMERA_ANCHOR_Y,
     cameraAnimationDurationMs: NAVIGATION_CAMERA_ANIMATION_MS,
     currentSpeedKmh: normalizedSpeedKmh,

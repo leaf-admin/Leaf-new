@@ -76,7 +76,10 @@ const PASSENGER_STATUS_SURFACES = Object.freeze({
     routeName: 'RobotaxiPrototypeTrip',
     protected: true,
     terminal: false,
-    requiredTestIDs: ['passenger-trip-screen'],
+    requiredTestIDs: [
+      'passenger-trip-screen',
+      'passenger-trip-searching-replacement-title',
+    ],
   },
   [RUNTIME_RIDE_STATUSES.COMPLETED]: {
     surface: RIDE_LIFECYCLE_SURFACES.PASSENGER_RECEIPT,
@@ -191,7 +194,7 @@ const DRIVER_STATUS_SURFACES = Object.freeze({
     terminal: false,
     requiredTestIDs: [
       'driver-live-ride-overlay-wrap',
-      'driver-live-operational-hold-title',
+      'driver-live-searching-replacement-title',
       'driver-live-passenger-identity',
     ],
   },

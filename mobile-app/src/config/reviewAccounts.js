@@ -2,7 +2,8 @@
  * REVIEW ACCOUNTS - Contas de teste para App Review
  * 
  * Estas contas são usadas exclusivamente para revisão da Apple/Google.
- * Elas pulam o fluxo de OTP conforme recomendado pelas lojas.
+ * Elas usam números de teste do Firebase Phone Auth com OTP configurado no
+ * projeto Firebase. O fluxo normal do app continua exigindo a confirmação.
  * 
  * IMPORTANTE: Estas contas devem estar documentadas nos Review Notes.
  */
@@ -13,7 +14,7 @@ export const REVIEW_ACCOUNTS = {
     phoneNumber: '21102938475',
     fullPhoneNumber: '+5521102938475',
     userType: 'customer', // ✅ CORRIGIDO: projeto usa 'customer', não 'passenger'
-    skipOTP: true, // Pula OTP completamente
+    skipOTP: false, // Compatibilidade: o OTP do Firebase continua obrigatório
     description: 'Customer test account for App Review'
   },
   
@@ -22,7 +23,7 @@ export const REVIEW_ACCOUNTS = {
     phoneNumber: '21123456789',
     fullPhoneNumber: '+5521123456789',
     userType: 'driver',
-    skipOTP: true, // Pula OTP completamente
+    skipOTP: false, // Compatibilidade: o OTP do Firebase continua obrigatório
     description: 'Driver test account for App Review'
   }
 };

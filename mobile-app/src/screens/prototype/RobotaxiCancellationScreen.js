@@ -220,7 +220,12 @@ export default function RobotaxiCancellationScreen({ navigation, route }) {
 
   return (
     <PrototypeScreenTransition direction="up">
-      <View style={styles.container} pointerEvents="box-none">
+      <View
+        style={styles.container}
+        pointerEvents="box-none"
+        testID={isDriverCancellation ? 'driver-cancellation-screen' : 'passenger-cancellation-screen'}
+        accessibilityLabel={isDriverCancellation ? 'driver-cancellation-screen' : 'passenger-cancellation-screen'}
+      >
         <StatusBar translucent backgroundColor="transparent" barStyle="dark-content" />
 
         <PrototypeDismissibleSheet onClose={handleDismiss} sheetStyle={[styles.sheetWrap, { bottom: sheetBottom }]}>

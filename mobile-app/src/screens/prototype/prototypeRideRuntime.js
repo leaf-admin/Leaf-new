@@ -142,6 +142,11 @@ const DRIVER_ACTIVATION_STORAGE_PREFIX = "@prototype_driver_activation_";
 const RUNTIME_SESSION_STORAGE_PREFIX = "@prototype_runtime_session_";
 const RUNTIME_QA_SEED_STORAGE_PREFIX = "@prototype_runtime_qa_seed_";
 const CONFIRMED_DESTINATIONS_STORAGE_KEY = "confirmedDestinations";
+const QA_PASSENGER_PREBOOKING_SCENARIOS = new Set([
+  "passenger-category",
+  "passenger-booking",
+  "passenger-payment",
+]);
 const DRIVER_LOCATION_HEARTBEAT_MS = 5000;
 const DRIVER_ONLINE_DAILY_LIMIT_CODE = "driver_online_daily_limit_reached";
 const DRIVER_ONLINE_DAILY_LIMIT_MESSAGE =
@@ -472,6 +477,7 @@ const RUNTIME_PERSISTED_FIELDS = Object.freeze([
   "driverOnlineStartedAt",
   "driverOnlineDaily",
   "driverOnlineMutationSource",
+  "driverOnlineVisualOnly",
   "driverDestinationMode",
   "driverTransientCard",
   "driverLastTransientCard",
@@ -682,6 +688,7 @@ const DEFAULT_RUNTIME_STATE = Object.freeze({
   driverOnlineStartedAt: null,
   driverOnlineDaily: null,
   driverOnlineMutationSource: "",
+  driverOnlineVisualOnly: false,
   driverDestinationMode: DEFAULT_DRIVER_DESTINATION_MODE,
   driverActivation: DEFAULT_DRIVER_ACTIVATION,
   driverActivationResolved: false,
@@ -2647,10 +2654,61 @@ export function shouldPreserveQADriverOfferOnBootstrap({
   );
 }
 
+export function shouldPreserveQADriverOnlineWaitingOnBootstrap({
+  qaSeedLock = null,
+  now = Date.now(),
+  testUserToolsAllowed = allowTestUserTools(),
+  e2eBuild = isE2ETestBuild(),
+  simulatorBuild = isSimulatorBuild(),
+} = {}) {
+  const freezeUntil = Number(qaSeedLock?.freezeUntil || 0);
+  const scenario = String(qaSeedLock?.scenario || "").trim();
+  const route = String(qaSeedLock?.route || "").trim();
+
+  return Boolean(
+    testUserToolsAllowed === true &&
+      (e2eBuild === true || simulatorBuild === true) &&
+      scenario === "driver-online-waiting" &&
+      route === "leafapp://robotaxi/home" &&
+      Number.isFinite(freezeUntil) &&
+      freezeUntil > Number(now),
+  );
+}
+
+export function shouldPreserveQAPassengerPreBookingOnBootstrap({
+  qaSeedLock = null,
+  now = Date.now(),
+  testUserToolsAllowed = allowTestUserTools(),
+  e2eBuild = isE2ETestBuild(),
+  simulatorBuild = isSimulatorBuild(),
+} = {}) {
+  const freezeUntil = Number(qaSeedLock?.freezeUntil || 0);
+  const scenario = String(qaSeedLock?.scenario || "").trim();
+  const route = String(qaSeedLock?.route || "").trim();
+  const isCanonicalHomeAutomationRoute =
+    route.startsWith("leafapp://robotaxi/home?") &&
+    route.includes("qaAutomation=1") &&
+    (route.includes("qaPassengerAction=show_category") ||
+      route.includes("qaPassengerAction=open_pix_pending"));
+
+  return Boolean(
+    testUserToolsAllowed === true &&
+      (e2eBuild === true || simulatorBuild === true) &&
+      QA_PASSENGER_PREBOOKING_SCENARIOS.has(scenario) &&
+      isCanonicalHomeAutomationRoute &&
+      Number.isFinite(freezeUntil) &&
+      freezeUntil > Number(now),
+  );
+}
+
 export function sanitizePersistedRuntimeSessionForProfile(
   session,
   profile = null,
-  { preserveQaSeededDriverOffer = false } = {},
+  {
+    preserveQaSeededDriverOffer = false,
+    preserveQaSeededDriverOnlineWaiting = false,
+    preserveQaSeededPassengerPreBooking = false,
+  } = {},
 ) {
   if (!session || typeof session !== "object") {
     return null;
@@ -2744,14 +2802,17 @@ export function sanitizePersistedRuntimeSessionForProfile(
       if (
         hasPersistedDriverRideInProgress ||
         hasPersistedDriverActiveRide ||
-        shouldPreserveQaSeededDriverOffer
+        shouldPreserveQaSeededDriverOffer ||
+        preserveQaSeededDriverOnlineWaiting
       ) {
         restored.driverOnline = true;
         restored.driverOnlinePending = false;
         restored.driverOnlineStartedAt =
           restored.driverOnlineStartedAt || new Date().toISOString();
         restored.driverOnlineMutationSource =
-          shouldPreserveQaSeededDriverOffer
+          preserveQaSeededDriverOnlineWaiting
+            ? "bootstrap_restore_qa_seeded_driver_online_waiting"
+            : shouldPreserveQaSeededDriverOffer
             ? "bootstrap_restore_qa_seeded_driver_offer"
             : "bootstrap_restore_active_driver_session";
       } else {
@@ -2768,6 +2829,9 @@ export function sanitizePersistedRuntimeSessionForProfile(
       restored.driverOnlineMutationSource =
         normalizedOnlineMutationSource || "";
     }
+    restored.driverOnlineVisualOnly = Boolean(
+      preserveQaSeededDriverOnlineWaiting,
+    );
     if (!restored.driverOnlinePending) {
       restored.driverOnlinePending = false;
     }
@@ -2775,7 +2839,8 @@ export function sanitizePersistedRuntimeSessionForProfile(
     if (
       !hasPersistedDriverRideInProgress &&
       !hasPersistedDriverActiveRide &&
-      !shouldPreserveQaSeededDriverOffer
+      !shouldPreserveQaSeededDriverOffer &&
+      !preserveQaSeededDriverOnlineWaiting
     ) {
       restored.currentCoordinate = null;
       restored.driverCoordinate = null;
@@ -2831,6 +2896,12 @@ export function sanitizePersistedRuntimeSessionForProfile(
     const shouldDiscardPassengerPreBookingArtifacts =
       !persistedActiveRideBookingId &&
       (normalizedBookingStatus === "" || normalizedBookingStatus === "idle");
+    const shouldPreserveQaSeededPassengerPreBooking = Boolean(
+      preserveQaSeededPassengerPreBooking === true &&
+        normalizedBookingStatus === "idle" &&
+        !persistedActiveRideBookingId &&
+        restored.selectedDestination?.coordinate,
+    );
     const shouldDiscardPassengerCompletedRideArtifacts =
       normalizedBookingStatus === "completed";
     const shouldPreservePassengerDriverContext = [
@@ -2847,7 +2918,10 @@ export function sanitizePersistedRuntimeSessionForProfile(
     restored.driverOnlineMutationSource = "activation_sync_non_driver";
     restored.driverDestinationMode = DEFAULT_DRIVER_DESTINATION_MODE;
     restored.driverActivationRemote = null;
-    if (shouldDiscardPassengerPreBookingArtifacts) {
+    if (
+      shouldDiscardPassengerPreBookingArtifacts &&
+      !shouldPreserveQaSeededPassengerPreBooking
+    ) {
       restored.bookingStatus = "idle";
       restored.activeBookingId = null;
       restored.activeBooking = null;
@@ -13508,9 +13582,15 @@ async function bootstrapRuntime(profile) {
         if (persistedSession && typeof persistedSession === "object") {
           const preserveQaSeededDriverOffer =
             shouldPreserveQADriverOfferOnBootstrap({ qaSeedLock });
+          const preserveQaSeededDriverOnlineWaiting =
+            shouldPreserveQADriverOnlineWaitingOnBootstrap({ qaSeedLock });
+          const preserveQaSeededPassengerPreBooking =
+            shouldPreserveQAPassengerPreBookingOnBootstrap({ qaSeedLock });
           const sanitizedPersistedSession =
             sanitizePersistedRuntimeSessionForProfile(persistedSession, profile, {
               preserveQaSeededDriverOffer,
+              preserveQaSeededDriverOnlineWaiting,
+              preserveQaSeededPassengerPreBooking,
             });
           const restoredRuntimeSession = {
             ...sanitizedPersistedSession,
@@ -15553,6 +15633,81 @@ async function arrivePrototypePickup(profile, options = {}) {
   };
 }
 
+function isStartTripTimeoutError(error) {
+  const code = String(error?.code || error?.payload?.code || "")
+    .trim()
+    .toUpperCase();
+  if (code === "START_TRIP_TIMEOUT" || code === "STARTTRIP_TIMEOUT") {
+    return true;
+  }
+
+  const message = String(error?.message || error || "")
+    .trim()
+    .toLowerCase();
+  return message.includes("timeout") || message.includes("demorou mais");
+}
+
+async function recoverStartedTripAfterTimeout(bookingId) {
+  const normalizedBookingId = String(bookingId || "").trim();
+  if (!normalizedBookingId) {
+    return false;
+  }
+
+  const runtimeBookingId = String(runtimeState.activeBookingId || "").trim();
+  const runtimeStatus = resolveSyncedBookingStatus({
+    status:
+      runtimeState.bookingStatus || runtimeState.driverActiveRide?.status || "",
+  });
+  if (runtimeBookingId === normalizedBookingId && runtimeStatus === "started") {
+    await writeRuntimeDebugProbe("start_trip_timeout_recovered_from_runtime", {
+      bookingId: normalizedBookingId,
+    });
+    return true;
+  }
+
+  const socket = WebSocketManager.getInstance();
+  if (!socket?.isConnected?.()) {
+    return false;
+  }
+
+  try {
+    const snapshot = await socket.syncActiveRideWithAck(15000);
+    const snapshotBookingId = String(snapshot?.bookingId || "").trim();
+    const snapshotStatus = resolveSyncedBookingStatus(snapshot);
+    if (
+      snapshotBookingId !== normalizedBookingId ||
+      snapshotStatus !== "started"
+    ) {
+      return false;
+    }
+
+    const applied = applySyncedActiveRideSnapshot(snapshot);
+    const recoveredStatus = resolveSyncedBookingStatus({
+      status:
+        runtimeState.bookingStatus || runtimeState.driverActiveRide?.status || "",
+    });
+    const recovered = applied || recoveredStatus === "started";
+    await writeRuntimeDebugProbe(
+      recovered
+        ? "start_trip_timeout_recovered_from_active_ride_sync"
+        : "start_trip_timeout_sync_not_applied",
+      {
+        bookingId: normalizedBookingId,
+        snapshotStatus,
+        applied,
+      },
+    );
+    return recovered;
+  } catch (error) {
+    await writeRuntimeDebugProbe("start_trip_timeout_recovery_failed", {
+      bookingId: normalizedBookingId,
+      message: error?.message || String(error),
+      code: error?.code || null,
+    });
+    return false;
+  }
+}
+
 async function confirmPrototypeBoardingStatus(profile, boarded = true) {
   const bookingId = runtimeState.activeBookingId;
   if (!bookingId) {
@@ -15628,6 +15783,8 @@ async function startPrototypeTrip(options = {}) {
     bookingId,
   );
   let startLocation = null;
+  let recoveredFromAuthoritativeSync = false;
+  let startResponse = null;
 
   try {
     const socket = WebSocketManager.getInstance();
@@ -15647,7 +15804,7 @@ async function startPrototypeTrip(options = {}) {
         runtimeState.driverCoordinate?.longitude ||
         runtimeState.currentCoordinate?.longitude,
     };
-    const startResponse = await socket.startTrip(bookingId, startLocation, {
+    startResponse = await socket.startTrip(bookingId, startLocation, {
       idempotencyKey,
     });
     markRuntimeLifecycleIntentAcked(
@@ -15657,30 +15814,53 @@ async function startPrototypeTrip(options = {}) {
     );
   } catch (error) {
     if (!allowLocalFallback) {
-      if (shouldQueueRuntimeLifecycleFailure(error)) {
-        await queueRuntimeLifecycleIntent({
-          bookingId,
-          eventType: RIDE_EVENT_TYPES.START_TRIP,
-          payload: { startLocation },
-          error,
-        });
-      } else {
-        markRuntimeLifecycleIntentRejected(
-          RIDE_EVENT_TYPES.START_TRIP,
-          bookingId,
-          error,
+      recoveredFromAuthoritativeSync =
+        isStartTripTimeoutError(error) &&
+        (await recoverStartedTripAfterTimeout(bookingId));
+
+      if (!recoveredFromAuthoritativeSync) {
+        if (shouldQueueRuntimeLifecycleFailure(error)) {
+          await queueRuntimeLifecycleIntent({
+            bookingId,
+            eventType: RIDE_EVENT_TYPES.START_TRIP,
+            payload: { startLocation },
+            error,
+          });
+        } else {
+          markRuntimeLifecycleIntentRejected(
+            RIDE_EVENT_TYPES.START_TRIP,
+            bookingId,
+            error,
+          );
+        }
+        Logger.warn(
+          "⚠️ [PrototypeRuntime] startTrip remoto falhou; mantendo estado atual:",
+          error?.message || error,
         );
+        throw error;
       }
+
+      startResponse = {
+        success: true,
+        bookingId,
+        recoveredFromSync: true,
+      };
+      markRuntimeLifecycleIntentAcked(
+        RIDE_EVENT_TYPES.START_TRIP,
+        bookingId,
+        startResponse,
+      );
       Logger.warn(
-        "⚠️ [PrototypeRuntime] startTrip remoto falhou; mantendo estado atual:",
+        "⚠️ [PrototypeRuntime] startTrip excedeu o ACK, mas a sincronização autoritativa confirmou a viagem:",
         error?.message || error,
       );
-      throw error;
     }
-    Logger.warn(
-      "⚠️ [PrototypeRuntime] startTrip remoto falhou; fallback local permitido por QA:",
-      error?.message || error,
-    );
+    if (!recoveredFromAuthoritativeSync) {
+      Logger.warn(
+        "⚠️ [PrototypeRuntime] startTrip remoto falhou; fallback local permitido por QA:",
+        error?.message || error,
+      );
+    }
   }
 
   stopBoardingCountdownTimer();
@@ -15885,7 +16065,12 @@ async function startPrototypeTrip(options = {}) {
       : runtimeState.driverActiveRide,
     rideLocalSync: cloneDefaultRideLocalSyncState(),
   });
-  return { success: true };
+  return {
+    success: true,
+    ...(startResponse?.recoveredFromSync || recoveredFromAuthoritativeSync
+      ? { recoveredFromSync: true }
+      : {}),
+  };
 }
 
 async function completePrototypeTrip(options = {}) {
@@ -17232,7 +17417,11 @@ async function resolveDriverOnlineLocationSeed() {
   });
 }
 
-async function resolveDriverOnlineLocationSeedWithTimeout(timeoutMs = 1800) {
+// iOS simulators (and cold-start physical devices) can take a few seconds to
+// deliver the first CLLocation even after permission is granted. Keep this
+// bounded by the native request timeout so the online gate does not race a
+// valid coordinate and incorrectly report LOCATION_REQUIRED.
+async function resolveDriverOnlineLocationSeedWithTimeout(timeoutMs = 12000) {
   const fallbackSeed = getDriverLocationPayload();
 
   const resolved = await Promise.race([
@@ -18876,6 +19065,10 @@ async function rejectPrototypeDriverOffer(
 }
 
 function clearDestinationPreview() {
+  if (isRuntimeQALockActive()) {
+    return;
+  }
+
   clearPrototypeMapRoute();
   stopBoardingCountdownTimer();
   setRuntimeState({

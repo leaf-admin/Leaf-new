@@ -43,7 +43,11 @@ import {
 import WooviPaymentModal from "../../components/payment/WooviPaymentModal";
 import SecurePaymentBadge from "../../components/payment/SecurePaymentBadge";
 import robotaxiPrototypeTokens from "../../components/design-system/robotaxiPrototypeTokens";
-import { isE2ETestBuild, isSimulatorBuild } from "../../config/runtimeAccessPolicy";
+import {
+  allowTestUserTools,
+  isE2ETestBuild,
+  isSimulatorBuild,
+} from "../../config/runtimeAccessPolicy";
 import { usePrototypeMapOcclusion } from "./prototypeMapOcclusion";
 import { buildOverlaySheetViewportMetrics } from "./prototypeRouteViewport";
 import { usePrototypeRideRuntime } from "./prototypeRideRuntime";
@@ -100,6 +104,18 @@ function isRuntimeE2ETestBuild() {
 
 function isRuntimeSimulatorBuild() {
   return typeof isSimulatorBuild === "function" && isSimulatorBuild();
+}
+
+function isRuntimeQaVisualOnlyPaymentBuild() {
+  if (__DEV__) {
+    return true;
+  }
+
+  return (
+    isRuntimeE2ETestBuild() &&
+    typeof allowTestUserTools === "function" &&
+    allowTestUserTools()
+  );
 }
 
 const QA_DISABLE_QUOTE_EXPIRATION =
@@ -1235,6 +1251,10 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
     route?.params?.autoStartVoice === "1";
   const isExtensionFlow = route?.params?.mode === "extension";
   const openPixOnReady = !isExtensionFlow && isTruthyRouteParam(routeParams.openPixOnReady);
+  const qaVisualOnlyPayment = Boolean(
+    isRuntimeQaVisualOnlyPaymentBuild() &&
+      isTruthyRouteParam(routeParams.qaVisualOnlyPayment),
+  );
   const shouldOpenPixOnReady = Boolean(
     openPixOnReady &&
       startAtConfirmation &&
@@ -2257,6 +2277,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
     if (
       paymentRecoveryAttemptedRef.current === paymentRecoveryRouteContextKey ||
       isExtensionFlow ||
+      qaVisualOnlyPayment ||
       !canRequestRide ||
       !passengerId ||
       !paymentRecoveryRouteContextKey ||
@@ -2328,6 +2349,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
     isExtensionFlow,
     paymentRecoveryRouteContextKey,
     profileUid,
+    qaVisualOnlyPayment,
     riderProfile?.id,
     riderProfile?.uid,
     routeGuardBlocked,
@@ -3291,6 +3313,20 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
         return { ok: false, message };
       }
 
+      if (qaVisualOnlyPayment) {
+        setPaymentQuoteLock(nextPaymentQuoteLock);
+        setPlanAvailabilityById((current) => ({
+          ...current,
+          [selectedPlanData.id]: {
+            available: true,
+            message: "",
+            code: "QA_VISUAL_ONLY_PAYMENT",
+          },
+        }));
+        setPixModalVisible(true);
+        return { ok: true };
+      }
+
       const lockedPickupLocation =
         nextPaymentQuoteLock.pickupLocation || pickupLocationPayload;
       const lockedDestinationLocation =
@@ -3397,6 +3433,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
     preferenceModalVisible,
     pricingQuoteError,
     pricingQuoteLoading,
+    qaVisualOnlyPayment,
     requestTripExtension,
     resolvedPickupCoordinate,
     returnRouteName,
@@ -5429,7 +5466,11 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
               riderProfile?.profile?.phone ||
               ""
             }
+            prefilledPaymentData={
+              qaVisualOnlyPayment ? routeParams.prefilledPaymentData : null
+            }
             qaAutoConfirm={qaAutoConfirmPix}
+            qaVisualOnlyPayment={qaVisualOnlyPayment}
             robotaxiLifecycleCard
           />
         ) : null}

@@ -21,6 +21,11 @@ const AUTH_ACK_DEFAULT_TIMEOUT_MS = 18000;
 const AUTH_BUSY_MAX_RETRIES = 4;
 const AUTH_BUSY_JITTER_MS = 250;
 const ACTIVE_RIDE_SYNC_TIMEOUT_MS = 8000;
+// startTrip persists the lifecycle transition and publishes the event after
+// the authoritative backend command. Keep the client window above the normal
+// 10s idempotency join period so a successful transition is not shown as a
+// false failure while the socket is still healthy.
+const START_TRIP_COMMAND_TIMEOUT_MS = 20000;
 const TRANSIENT_CONNECT_ERROR_LOG_WINDOW_MS = 15000;
 const AVAILABILITY_CACHE_TTL_MS = 5000;
 const TEST_MODE_STORAGE_KEY = "@test_mode";
@@ -3793,7 +3798,7 @@ class WebSocketManager {
       successEvent: "tripStarted",
       errorEvent: "tripStartError",
       bookingId,
-      timeoutMs: 10000,
+      timeoutMs: START_TRIP_COMMAND_TIMEOUT_MS,
       fallbackErrorMessage: "Não foi possível iniciar a corrida",
       payload: {
         bookingId,

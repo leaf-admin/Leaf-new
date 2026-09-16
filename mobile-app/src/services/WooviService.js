@@ -48,6 +48,7 @@ function resolvePaymentAdvanceMessage(error) {
     if (
         code === 'PAYMENT_PROVIDER_CHARGE_FAILED' ||
         code === 'PAYMENT_PROVIDER_CHARGE_ID_MISSING' ||
+        code === 'PAYMENT_PROVIDER_PIX_ARTIFACT_MISSING' ||
         code === 'PAYMENT_PROFILE_CREDENTIALS_MISSING'
     ) {
         return 'Não foi possível gerar o Pix agora. Tente novamente em instantes.';

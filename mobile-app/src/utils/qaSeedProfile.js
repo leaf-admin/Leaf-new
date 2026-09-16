@@ -131,7 +131,7 @@ export const buildQaSeedProfile = ({ uid, driverActivation = null }) => {
     const baseProfile = buildBaseProfile({
       uid: normalizedUid,
       role: 'driver',
-      phone: isCurrentDriver ? '+5521987654321' : '+5521123456789',
+      phone: '+5521123456789',
       email: isCurrentDriver ? 'motorista.qa.vilakosmos@leafapp.com' : 'motorista.teste@leafapp.com',
       name: isCurrentDriver ? 'Motorista QA' : 'Motorista',
       firstName: 'Leaf',

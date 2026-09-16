@@ -7,24 +7,34 @@ const { motion } = robotaxiPrototypeTokens;
 const enterEasing = Easing.bezier(...motion.bezier.snappy);
 const exitEasing = Easing.bezier(...motion.bezier.smoothIn);
 
+function buildKeyframe(definitions, duration, easing) {
+  return new Keyframe({
+    ...definitions,
+    100: {
+      ...definitions[100],
+      easing
+    }
+  }).duration(duration);
+}
+
 function buildEnterAnimation(direction) {
   if (direction === 'up') {
-    return new Keyframe({
+    return buildKeyframe({
       0: { opacity: 0, transform: [{ translateY: 28 }] },
       100: { opacity: 1, transform: [{ translateY: 0 }] }
-    }).duration(motion.timing.standard).easing(enterEasing);
+    }, motion.timing.standard, enterEasing);
   }
   if (direction === 'left') {
-    return new Keyframe({
+    return buildKeyframe({
       0: { opacity: 0, transform: [{ translateX: 28 }] },
       100: { opacity: 1, transform: [{ translateX: 0 }] }
-    }).duration(motion.timing.standard).easing(enterEasing);
+    }, motion.timing.standard, enterEasing);
   }
   if (direction === 'right') {
-    return new Keyframe({
+    return buildKeyframe({
       0: { opacity: 0, transform: [{ translateX: -28 }] },
       100: { opacity: 1, transform: [{ translateX: 0 }] }
-    }).duration(motion.timing.standard).easing(enterEasing);
+    }, motion.timing.standard, enterEasing);
   }
   return FadeIn.duration(motion.timing.quick)
     .easing(enterEasing)
@@ -33,22 +43,22 @@ function buildEnterAnimation(direction) {
 
 function buildExitAnimation(direction) {
   if (direction === 'up') {
-    return new Keyframe({
+    return buildKeyframe({
       0: { opacity: 1, transform: [{ translateY: 0 }] },
       100: { opacity: 0, transform: [{ translateY: 16 }] }
-    }).duration(motion.timing.quick).easing(exitEasing);
+    }, motion.timing.quick, exitEasing);
   }
   if (direction === 'left') {
-    return new Keyframe({
+    return buildKeyframe({
       0: { opacity: 1, transform: [{ translateX: 0 }] },
       100: { opacity: 0, transform: [{ translateX: -16 }] }
-    }).duration(motion.timing.quick).easing(exitEasing);
+    }, motion.timing.quick, exitEasing);
   }
   if (direction === 'right') {
-    return new Keyframe({
+    return buildKeyframe({
       0: { opacity: 1, transform: [{ translateX: 0 }] },
       100: { opacity: 0, transform: [{ translateX: 16 }] }
-    }).duration(motion.timing.quick).easing(exitEasing);
+    }, motion.timing.quick, exitEasing);
   }
   return FadeOut.duration(motion.timing.quick).easing(exitEasing);
 }

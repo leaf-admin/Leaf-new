@@ -525,6 +525,8 @@ function DriverLiveRideOverlay({
   );
   const isOperationalInterrupted =
     normalizedActiveStatus === "operational_interrupted";
+  const isSearchingReplacement =
+    normalizedActiveStatus === "searching_replacement";
   const arrivalHapticBookingRef = useRef("");
   useEffect(() => {
     const rideIdentity = activeRide?.bookingId || activeRide?.id || "";
@@ -949,7 +951,9 @@ function DriverLiveRideOverlay({
               : pickupLocation.title}
           titleTestID={isOperationalInterrupted
             ? "driver-live-operational-hold-title"
-            : undefined}
+            : isSearchingReplacement
+              ? "driver-live-searching-replacement-title"
+              : undefined}
         />
 
         <RobotaxiLifecycleIdentity
@@ -1523,12 +1527,16 @@ function DriverLiveRideOverlay({
                     testID={
                       normalizedActiveStatus === "operational_interrupted"
                         ? "driver-live-operational-hold-title"
-                        : undefined
+                        : normalizedActiveStatus === "searching_replacement"
+                          ? "driver-live-searching-replacement-title"
+                          : undefined
                     }
                     accessibilityLabel={
                       normalizedActiveStatus === "operational_interrupted"
                         ? "driver-live-operational-hold-title"
-                        : undefined
+                        : normalizedActiveStatus === "searching_replacement"
+                          ? "driver-live-searching-replacement-title"
+                          : undefined
                     }
                   >
                     {driverTripSheetTitle}
