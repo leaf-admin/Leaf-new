@@ -1,6 +1,8 @@
 const express = require('express');
 const router = express.Router();
 const wooviDriverService = require('../services/woovi-driver-service');
+const firebaseConfig = require('../firebase-config');
+const { claimCpf, CpfIdentityError } = require('../services/cpf-identity-registry-service');
 const { authenticateJWT, requireRole } = require('../middleware/jwt-auth');
 const { logStructured, logError } = require('../utils/logger');
 
@@ -18,6 +20,13 @@ router.post('/driver/create-client', ...DRIVER_ROUTE_MIDDLEWARE, async (req, res
         error: 'Dados obrigatórios: name, email, phone, cpf, driverId'
       });
     }
+
+    await claimCpf({
+      firestore: firebaseConfig.getFirestore(),
+      realtimeDb: firebaseConfig.getRealtimeDB?.() || null,
+      userId: driverId,
+      cpf
+    });
 
     const result = await wooviDriverService.createDriverClient({
       name,
@@ -41,6 +50,13 @@ router.post('/driver/create-client', ...DRIVER_ROUTE_MIDDLEWARE, async (req, res
       });
     }
   } catch (error) {
+    if (error instanceof CpfIdentityError) {
+      return res.status(error.status || 400).json({
+        success: false,
+        error: error.code,
+        message: error.message
+      });
+    }
     logError(error, 'Erro ao criar cliente Woovi:', { service: 'woovi-driver-routes' });
     res.status(500).json({
       success: false,
@@ -210,7 +226,6 @@ router.post('/driver/simulate-payment', ...DRIVER_ROUTE_MIDDLEWARE, async (req, 
 });
 
 module.exports = router;
-
 
 
 

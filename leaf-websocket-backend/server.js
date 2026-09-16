@@ -585,6 +585,14 @@ async function enforceDailyKYCForOnline(driverId) {
         }
     }
 
+    if (typeof kycRuntime.trust.evaluateExplicitQaOnlineTrustWindow === 'function') {
+        const qaTrustWindow = await kycRuntime.trust
+            .evaluateExplicitQaOnlineTrustWindow(driverId);
+        if (qaTrustWindow?.allowed === true) {
+            return qaTrustWindow;
+        }
+    }
+
     const trustGate = await kycRuntime.trust.evaluateOnlineGate(driverId);
     if (
         trustGate?.allowed === false

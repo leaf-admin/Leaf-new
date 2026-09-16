@@ -3,11 +3,22 @@ jest.unmock('express');
 const express = require('express');
 const request = require('supertest');
 
+const mockDeletionJobGet = jest.fn();
+const mockAdminDocGet = jest.fn();
+const mockAttemptSet = jest.fn();
 const mockVerifyIdToken = jest.fn();
 const mockUpdateUser = jest.fn();
 const mockDeleteUser = jest.fn();
 const mockUserDocGet = jest.fn();
 const mockUserDocSet = jest.fn();
+const mockCpfQueryGet = jest.fn();
+const mockCpfIndexDocGet = jest.fn();
+const mockCpfIndexDocSet = jest.fn();
+const mockCpfTransactionGet = jest.fn();
+const mockCpfTransactionSet = jest.fn();
+const mockCpfReleaseQueryGet = jest.fn();
+const mockCpfTransactionDelete = jest.fn();
+const mockRunTransaction = jest.fn();
 const mockDeletionAdd = jest.fn();
 const mockDeletionLogUpdate = jest.fn();
 const mockDatabaseOnce = jest.fn();
@@ -21,20 +32,40 @@ const firestoreFn = jest.fn(() => ({
     if (collectionName === 'users') {
       return {
         doc: jest.fn(() => ({
+          kind: 'user',
           get: mockUserDocGet,
           set: mockUserDocSet,
+        })),
+        where: jest.fn(() => ({
+          get: mockCpfQueryGet,
         })),
       };
     }
 
+    if (collectionName === 'cpf_identity_index') {
+      return {
+        where: jest.fn(() => ({ get: mockCpfReleaseQueryGet })),
+        doc: jest.fn(() => ({
+          kind: 'cpf',
+          get: mockCpfIndexDocGet,
+          set: mockCpfIndexDocSet,
+        })),
+      };
+    }
+
+    if (collectionName === 'adminUsers') return { doc: () => ({ get: mockAdminDocGet }) };
     if (collectionName === 'account_deletions') {
       return {
         add: mockDeletionAdd,
+        where: () => ({ get: async () => ({ docs: [] }) }),
+        doc: () => ({ kind: 'job', get: mockDeletionJobGet,
+          collection: () => ({ doc: () => ({ set: mockAttemptSet }) }) }),
       };
     }
 
     return {};
   }),
+  runTransaction: mockRunTransaction,
 }));
 
 firestoreFn.FieldValue = {
@@ -53,9 +84,23 @@ jest.mock('firebase-admin', () => ({
     ref: jest.fn(() => ({
       once: mockDatabaseOnce,
       remove: mockDatabaseRemove,
+      set: mockDatabaseRemove,
+      transaction: async callback => {
+        const value = callback(null);
+        if (value === undefined) return { committed: false };
+        await mockDatabaseUpdate(value);
+        return { committed: true };
+      },
       update: mockDatabaseUpdate,
     })),
   })),
+}));
+
+jest.mock('../../../middleware/support-auth', () => ({
+  authenticateSupport: (req, res, next) => {
+    if (req.headers.authorization !== 'Bearer admin-token') return res.status(401).json({ success: false });
+    req.user = { id: 'admin-1', authSource: 'admin_jwt' }; next();
+  }
 }));
 
 jest.mock('../../../utils/logger', () => ({
@@ -103,6 +148,9 @@ function collectionSnapshot(records = {}) {
 
 describe('account deletion route', () => {
   beforeEach(() => {
+    mockDeletionJobGet.mockResolvedValue({ exists: false, data: () => undefined });
+    mockAdminDocGet.mockResolvedValue({ exists: true, data: () => ({ active: true, role: 'super-admin' }) });
+    mockAttemptSet.mockResolvedValue(undefined);
     mockVerifyIdToken.mockResolvedValue({
       uid: 'review-user',
       phone_number: '+5521102938475',
@@ -112,6 +160,18 @@ describe('account deletion route', () => {
     mockDeleteUser.mockResolvedValue(undefined);
     mockUserDocGet.mockResolvedValue({ exists: false, data: () => null });
     mockUserDocSet.mockResolvedValue(undefined);
+    mockCpfReleaseQueryGet.mockResolvedValue({ docs: [] });
+    mockCpfTransactionDelete.mockImplementation(() => undefined);
+    mockCpfQueryGet.mockResolvedValue({ docs: [] });
+    mockCpfIndexDocGet.mockResolvedValue({ exists: false, data: () => null });
+    mockCpfIndexDocSet.mockResolvedValue(undefined);
+    mockCpfTransactionGet.mockResolvedValue({ exists: false, data: () => null });
+    mockCpfTransactionSet.mockImplementation(() => undefined);
+    mockRunTransaction.mockImplementation(async callback => callback({
+      delete: mockCpfTransactionDelete,
+      get: ref => ref?.kind === 'user' ? mockUserDocGet() : ref?.kind === 'job' ? mockDeletionJobGet() : mockCpfTransactionGet(ref),
+      set: (ref, data, options) => ref?.kind === 'user' ? mockUserDocSet(data, options) : ref?.kind === 'job' ? mockDeletionLogUpdate(data) : mockCpfTransactionSet(ref, data, options),
+    }));
     mockDeletionLogUpdate.mockResolvedValue(undefined);
     mockDeletionAdd.mockResolvedValue({ update: mockDeletionLogUpdate });
     mockDatabaseOnce.mockResolvedValue({
@@ -122,6 +182,43 @@ describe('account deletion route', () => {
     mockDatabaseUpdate.mockResolvedValue(undefined);
     mockRedisHgetall.mockResolvedValue({ status: 'offline', isOnline: 'false' });
     mockRedisDel.mockResolvedValue(1);
+  });
+
+  it.each(['/api/admin/account-deletions/old/retry', '/api/admin/cpf-reviews/decision'])('rejects non-admin access to %s', async endpoint => {
+    const response = await request(createApp()).post(endpoint).set('Authorization', 'Bearer firebase-token').send({});
+    expect(response.status).toBe(401);
+  });
+
+  it.each([null, { active: false, role: 'super-admin' }, { active: true, role: 'support' }])('requires an active authoritative super-admin: %j', async record => {
+    mockAdminDocGet.mockResolvedValue({ exists: Boolean(record), data: () => record });
+    const response = await request(createApp()).post('/api/admin/account-deletions/old/retry')
+      .set('Authorization', 'Bearer admin-token').send({});
+    expect(response.status).toBe(403);
+    expect(mockUpdateUser).not.toHaveBeenCalled();
+  });
+
+  it('fails closed if authoritative admin lookup is unavailable', async () => {
+    mockAdminDocGet.mockRejectedValueOnce(new Error('unavailable'));
+    const response = await request(createApp()).post('/api/admin/cpf-reviews/decision')
+      .set('Authorization', 'Bearer admin-token').send({});
+    expect(response.status).toBe(503);
+  });
+
+  it('requires an existing deletion job for administrative recovery', async () => {
+    const response = await request(createApp()).post('/api/admin/account-deletions/old/retry')
+      .set('Authorization', 'Bearer admin-token').send({});
+    expect(response.status).toBe(404);
+    expect(mockUpdateUser).not.toHaveBeenCalled();
+  });
+
+  it('recovers a pending deletion using admin identity, without target-user authentication', async () => {
+    mockDeletionJobGet.mockResolvedValue({ exists: true, data: () => ({ status: 'error', reason: 'requested' }) });
+    mockUserDocGet.mockResolvedValue({ exists: true, data: () => ({ status: 'deletion_pending' }) });
+    const response = await request(createApp()).post('/api/admin/account-deletions/old/retry')
+      .set('Authorization', 'Bearer admin-token').send({});
+    expect(response.status).toBe(200);
+    expect(mockUpdateUser).toHaveBeenCalledWith('old', { disabled: true });
+    expect(mockAttemptSet).toHaveBeenCalledWith(expect.objectContaining({ actor: 'admin-1', source: 'admin_recovery' }));
   });
 
   it('rejects client profile updates that try to write derived driver approval, document, KYC or vehicle fields', async () => {
@@ -283,6 +380,7 @@ describe('account deletion route', () => {
         name: 'Motorista Novo',
         usertype: 'driver',
         phone: '+5521999999999',
+        cpf: '12345678909',
         phoneValidated: false,
         onboardingCompleted: false,
         acceptTerms: true,
@@ -304,6 +402,8 @@ describe('account deletion route', () => {
         acceptTerms: true,
         acceptPrivacy: true,
         consentBackgroundCheck: true,
+        cpf: '123.456.789-09',
+        cpfNormalized: '12345678909',
         approved: false,
         isApproved: false,
         canGoOnline: false,
@@ -315,6 +415,73 @@ describe('account deletion route', () => {
       userType: 'driver',
       role: 'driver',
     });
+  });
+
+  it('requires a CPF when a new driver profile is completed', async () => {
+    const response = await request(createApp())
+      .put('/api/account/profile')
+      .set('Authorization', 'Bearer firebase-token')
+      .send({
+        name: 'Motorista sem CPF',
+        usertype: 'driver',
+        acceptTerms: true,
+        acceptPrivacy: true,
+        consentBackgroundCheck: true,
+      });
+
+    expect(response.status).toBe(400);
+    expect(response.body).toMatchObject({
+      success: false,
+      code: 'PROFILE_CPF_REQUIRED',
+    });
+    expect(mockUserDocSet).not.toHaveBeenCalled();
+    expect(mockRunTransaction).not.toHaveBeenCalled();
+  });
+
+  it('rejects a CPF already claimed by another profile', async () => {
+    mockCpfQueryGet.mockResolvedValue({ docs: [{ id: 'another-user' }] });
+
+    const response = await request(createApp())
+      .put('/api/account/profile')
+      .set('Authorization', 'Bearer firebase-token')
+      .send({
+        name: 'Motorista duplicado',
+        usertype: 'driver',
+        cpf: '12345678909',
+        acceptTerms: true,
+        acceptPrivacy: true,
+        consentBackgroundCheck: true,
+      });
+
+    expect(response.status).toBe(409);
+    expect(response.body).toMatchObject({
+      success: false,
+      code: 'PROFILE_CPF_ALREADY_REGISTERED',
+    });
+    expect(mockUserDocSet).not.toHaveBeenCalled();
+    expect(mockRunTransaction).not.toHaveBeenCalled();
+  });
+
+  it('rejects an invalid CPF before writing the profile', async () => {
+    const response = await request(createApp())
+      .put('/api/account/profile')
+      .set('Authorization', 'Bearer firebase-token')
+      .send({
+        name: 'Motorista inválido',
+        usertype: 'driver',
+        cpf: '11111111111',
+        acceptTerms: true,
+        acceptPrivacy: true,
+        consentBackgroundCheck: true,
+      });
+
+    expect(response.status).toBe(400);
+    expect(response.body).toMatchObject({
+      success: false,
+      code: 'PROFILE_CPF_INVALID',
+    });
+    expect(mockUserDocSet).not.toHaveBeenCalled();
+    expect(mockRunTransaction).not.toHaveBeenCalled();
   });
 
   it('projects the immutable canonical role into the RTDB user node', async () => {
@@ -423,6 +590,7 @@ describe('account deletion route', () => {
         name: 'Motorista OTP',
         userType: 'driver',
         phone: '+5521999999999',
+        cpf: '12345678909',
         acceptTerms: true,
         acceptPrivacy: true,
         consentBackgroundCheck: true,
@@ -744,6 +912,69 @@ describe('account deletion route', () => {
     );
   });
 
+  it('purges both CPF representations when deleting an authenticated profile', async () => {
+    mockUserDocGet.mockResolvedValue({
+      exists: true,
+      data: () => ({
+        uid: 'review-user',
+        usertype: 'customer',
+        cpf: '123.456.789-09',
+        cpfNormalized: '12345678909',
+      }),
+    });
+    const response = await request(createApp())
+      .post('/api/account/delete')
+      .set('Authorization', 'Bearer firebase-token')
+      .send({ source: 'unit-test' });
+
+    expect(response.status).toBe(200);
+    expect(mockUserDocSet).toHaveBeenCalledWith(
+      expect.objectContaining({ cpf: 'field-delete', cpfNormalized: 'field-delete' }),
+      { merge: true }
+    );
+  });
+
+  it('releases the owned index after removing the legacy profile and Auth user', async () => {
+    const ref = { id: 'cpf-index' };
+    mockCpfReleaseQueryGet.mockResolvedValue({ docs: [{ ref }] });
+    mockCpfTransactionGet.mockResolvedValue({ exists: true, data: () => ({ uid: 'review-user' }) });
+    const response = await request(createApp()).post('/api/account/delete')
+      .set('Authorization', 'Bearer firebase-token').send({});
+    expect(response.status).toBe(200);
+    expect(mockCpfTransactionDelete).toHaveBeenCalledWith(ref);
+    expect(mockDatabaseRemove.mock.invocationCallOrder[0]).toBeLessThan(mockCpfReleaseQueryGet.mock.invocationCallOrder[0]);
+    expect(mockDeleteUser.mock.invocationCallOrder[0]).toBeLessThan(mockCpfReleaseQueryGet.mock.invocationCallOrder[0]);
+  });
+
+  it('does not release CPF or report success when RTDB cleanup fails', async () => {
+    mockDatabaseRemove.mockRejectedValueOnce(new Error('RTDB unavailable'));
+    const response = await request(createApp()).post('/api/account/delete')
+      .set('Authorization', 'Bearer firebase-token').send({});
+    expect(response.status).toBe(500);
+    expect(mockCpfReleaseQueryGet).not.toHaveBeenCalled();
+    expect(mockUserDocSet).toHaveBeenCalledWith(expect.objectContaining({
+      status: 'deletion_pending', accountDisabled: true
+    }), { merge: true });
+  });
+
+  it('retries index cleanup after a partial purge, even without CPF or an Auth user', async () => {
+    mockUserDocGet.mockResolvedValue({ exists: true, data: () => ({ status: 'deleted' }) });
+    mockUpdateUser.mockRejectedValueOnce({ code: 'auth/user-not-found' });
+    mockDeleteUser.mockRejectedValueOnce({ code: 'auth/user-not-found' });
+    const response = await request(createApp()).post('/api/account/delete')
+      .set('Authorization', 'Bearer firebase-token').send({});
+    expect(response.status).toBe(200);
+    expect(mockCpfReleaseQueryGet).toHaveBeenCalled();
+  });
+
+  it('does not report completion when the index lookup fails', async () => {
+    mockCpfReleaseQueryGet.mockRejectedValueOnce(new Error('Firestore unavailable'));
+    const response = await request(createApp()).post('/api/account/delete')
+      .set('Authorization', 'Bearer firebase-token').send({});
+    expect(response.status).toBe(500);
+    expect(mockDeletionLogUpdate).not.toHaveBeenCalledWith(expect.objectContaining({ status: 'completed' }));
+  });
+
   it('migrates and removes the legacy Realtime DB profile during deletion', async () => {
     mockDatabaseOnce.mockResolvedValue({
       exists: () => true,
@@ -773,11 +1004,13 @@ describe('account deletion route', () => {
     expect(mockDatabaseRemove).toHaveBeenCalled();
   });
 
-  it('returns success without reprocessing an account already marked deleted', async () => {
+  it('returns success without reprocessing a completed deletion job', async () => {
+    mockDeletionJobGet.mockResolvedValue({ exists: true, data: () => ({ status: 'completed' }) });
     mockUserDocGet.mockResolvedValue({
       exists: true,
       data: () => ({
         status: 'deleted',
+        cpfIndexReleased: true,
         phone: '+5521102938475',
       }),
     });

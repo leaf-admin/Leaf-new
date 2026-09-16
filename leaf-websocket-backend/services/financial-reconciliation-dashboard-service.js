@@ -1,5 +1,9 @@
 const firebaseConfig = require('../firebase-config');
 const { logError } = require('../utils/logger');
+const {
+  getFinancialCollections,
+  resolveFinancialContext
+} = require('./financial-runtime-context');
 
 class FinancialReconciliationDashboardService {
   normalizeLimit(value, fallback = 50, max = 100) {
@@ -67,10 +71,11 @@ class FinancialReconciliationDashboardService {
     return Array.from(rideIds);
   }
 
-  async listLedgerEventsByRideIds(firestore, rideIds = []) {
+  async listLedgerEventsByRideIds(firestore, rideIds = [], collections = {}) {
+    const ledgerEventsCollection = collections.ledgerEvents || 'financial_ledger_events';
     const snapshots = await Promise.all(
       rideIds.map((currentRideId) => firestore
-        .collection('financial_ledger_events')
+        .collection(ledgerEventsCollection)
         .where('rideId', '==', currentRideId)
         .limit(100)
         .get())
@@ -95,7 +100,11 @@ class FinancialReconciliationDashboardService {
       rideId,
       ok: Boolean(data.ok),
       status: data.ok ? 'ok' : 'divergent',
-      testData: Boolean(data.testData) || this.isTestRideId(rideId),
+      testData: Boolean(data.testData) || data.financialNamespace === 'sandbox' || data.financialContext?.namespace === 'sandbox' || this.isTestRideId(rideId),
+      financialContext: data.financialContext || null,
+      financialNamespace: data.financialNamespace || data.financialContext?.namespace || null,
+      financialContextId: data.financialContextId || data.financialContext?.contextId || null,
+      providerEnvironment: data.providerEnvironment || data.financialContext?.providerEnvironment || null,
       severity: this.resolveHighestSeverity(issues),
       issueCodes: issues.map((issue) => issue.code).filter(Boolean),
       issues,
@@ -166,20 +175,35 @@ class FinancialReconciliationDashboardService {
     }
 
     const limit = this.normalizeLimit(filters.limit, 50, 100);
+    const contextResult = resolveFinancialContext(
+      {
+        financialContext: filters.financialContext || null,
+        providerEnvironment: filters.providerEnvironment || null
+      },
+      { allowLegacyOperational: true }
+    );
+    if (!contextResult.ok) {
+      return {
+        success: false,
+        code: contextResult.code,
+        error: contextResult.error
+      };
+    }
+    const { context, collections } = getFinancialCollections(contextResult.context);
 
     try {
       let reports = [];
 
       if (filters.rideId) {
         const doc = await firestore
-          .collection('financial_reconciliation_reports')
+          .collection(collections.reconciliationReports)
           .doc(String(filters.rideId))
           .get();
         if (doc.exists) {
           reports = [this.normalizeReport(doc.id, doc.data())];
         }
       } else {
-        let query = firestore.collection('financial_reconciliation_reports');
+        let query = firestore.collection(collections.reconciliationReports);
         if (typeof query.orderBy === 'function') {
           query = query.orderBy('checkedAtIso', 'desc');
           if (filters.cursor && typeof query.startAfter === 'function') {
@@ -203,6 +227,9 @@ class FinancialReconciliationDashboardService {
 
       return {
         success: true,
+        financialContext: context,
+        financialNamespace: context.namespace,
+        financialContextId: context.contextId,
         reports: filtered,
         page: {
           limit,
@@ -222,7 +249,7 @@ class FinancialReconciliationDashboardService {
     }
   }
 
-  async getRideDetail(rideId) {
+  async getRideDetail(rideId, { financialContext = null, providerEnvironment = null } = {}) {
     const firestore = firebaseConfig.getFirestore();
     if (!firestore || !rideId) {
       return {
@@ -231,20 +258,37 @@ class FinancialReconciliationDashboardService {
       };
     }
 
+    const contextResult = resolveFinancialContext(
+      { financialContext, providerEnvironment },
+      { allowLegacyOperational: true }
+    );
+    if (!contextResult.ok) {
+      return {
+        success: false,
+        code: contextResult.code,
+        error: contextResult.error,
+        rideId
+      };
+    }
+    const { context, collections } = getFinancialCollections(contextResult.context);
+
     try {
       const [reportDoc, paymentDoc, holdingDoc, distributionDoc] = await Promise.all([
-        firestore.collection('financial_reconciliation_reports').doc(rideId).get(),
-        firestore.collection('ride_payments').doc(rideId).get(),
-        firestore.collection('payment_holdings').doc(rideId).get(),
-        firestore.collection('payment_distributions').doc(rideId).get()
+        firestore.collection(collections.reconciliationReports).doc(rideId).get(),
+        firestore.collection(collections.ridePayments).doc(rideId).get(),
+        firestore.collection(collections.paymentHoldings).doc(rideId).get(),
+        firestore.collection(collections.paymentDistributions).doc(rideId).get()
       ]);
       const payment = paymentDoc.exists ? paymentDoc.data() : null;
       const holding = holdingDoc.exists ? holdingDoc.data() : null;
       const ledgerRideIds = this.resolveLedgerRideIds({ rideId, payment, holding });
-      const ledgerEvents = await this.listLedgerEventsByRideIds(firestore, ledgerRideIds);
+      const ledgerEvents = await this.listLedgerEventsByRideIds(firestore, ledgerRideIds, collections);
 
       return {
         success: true,
+        financialContext: context,
+        financialNamespace: context.namespace,
+        financialContextId: context.contextId,
         report: reportDoc.exists ? this.normalizeReport(reportDoc.id, reportDoc.data()) : null,
         ledgerEvents,
         ledgerRideIds,

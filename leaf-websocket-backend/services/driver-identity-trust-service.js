@@ -53,6 +53,9 @@ const DEFAULTS = Object.freeze({
   verificationWindowTtlSeconds: IDENTITY_VERIFICATION_WINDOW_TTL_SECONDS
 });
 
+const QA_ONLINE_TRUST_WINDOW_ACK = 'QA_SANDBOX_ONLY';
+const QA_ONLINE_TRUST_WINDOW_MAX_MS = 24 * 60 * 60 * 1000;
+
 function boolFromEnv(value, fallback) {
   if (value == null || value === '') return fallback;
   const normalized = String(value).trim().toLowerCase();
@@ -74,6 +77,48 @@ function boundedInteger(value, fallback, min, max) {
 function numberFromEnv(value, fallback) {
   if (value == null || value === '') return fallback;
   return Number(value);
+}
+
+function splitEnvironmentList(value) {
+  return String(value || '')
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function readQaOnlineTrustWindowConfig(env, nowMs) {
+  if (!boolFromEnv(env.KYC_QA_ONLINE_TRUST_WINDOW_ENABLED, false)) {
+    return { enabled: false };
+  }
+
+  const allowedDriverIds = splitEnvironmentList(env.KYC_QA_ONLINE_TRUST_WINDOW_UIDS);
+  const profileId = String(env.KYC_QA_ONLINE_TRUST_WINDOW_PROFILE_ID || '').trim();
+  const acknowledgment = String(env.KYC_QA_ONLINE_TRUST_WINDOW_ACK || '').trim();
+  const reason = String(env.KYC_QA_ONLINE_TRUST_WINDOW_REASON || '').trim();
+  const expiresAtMs = toMillis(env.KYC_QA_ONLINE_TRUST_WINDOW_UNTIL);
+  const errors = [];
+
+  if (allowedDriverIds.length === 0) errors.push('uid_allowlist_missing');
+  if (!profileId) errors.push('profile_id_missing');
+  if (acknowledgment !== QA_ONLINE_TRUST_WINDOW_ACK) errors.push('acknowledgment_invalid');
+  if (reason.length < 20) errors.push('reason_missing');
+  if (!expiresAtMs) {
+    errors.push('expiration_missing');
+  } else if (expiresAtMs <= nowMs) {
+    errors.push('expiration_elapsed');
+  } else if (expiresAtMs - nowMs > QA_ONLINE_TRUST_WINDOW_MAX_MS) {
+    errors.push('expiration_exceeds_24h');
+  }
+
+  return {
+    enabled: true,
+    valid: errors.length === 0,
+    errors,
+    allowedDriverIds,
+    profileId,
+    reason,
+    expiresAtMs
+  };
 }
 
 function toMillis(value) {
@@ -170,6 +215,7 @@ class DriverIdentityTrustService {
       'Prefixo Redis da amostragem KYC'
     );
     this.randomAuditInFlight = new Map();
+    this.qaWindowAuditKeys = new Set();
     this.canonicalSessionClaimPrefix = scopedResource(
       options.canonicalSessionClaimPrefix,
       resources.identityTrustCanonicalSessionClaimPrefix,
@@ -980,6 +1026,138 @@ class DriverIdentityTrustService {
       mode: payload.mode || null,
       timestamp: timestamp || null,
       evidenceId: payload.evidenceId || null
+    };
+  }
+
+  /**
+   * Temporary, explicit QA-only online window.
+   *
+   * This is intentionally separate from canonical identity trust: it never
+   * writes trust state or compatibility evidence. The server must opt in with
+   * an exact UID allowlist, an authoritative sandbox payment profile, an
+   * explicit acknowledgement, and an expiration no longer than 24 hours.
+   */
+  async evaluateExplicitQaOnlineTrustWindow(driverId) {
+    const safeDriverId = String(driverId || '').trim();
+    if (!safeDriverId) return null;
+
+    const config = readQaOnlineTrustWindowConfig(this.env, this.now().getTime());
+    if (!config.enabled) return null;
+
+    const deny = (code, reason, details = {}) => ({
+      allowed: false,
+      verificationRequired: true,
+      retryRequired: false,
+      code,
+      reason,
+      qaTestOnly: true,
+      details
+    });
+
+    if (!config.valid) {
+      return deny(
+        'KYC_QA_TRUST_WINDOW_CONFIG_INVALID',
+        'Janela temporaria de QA indisponivel por configuracao invalida.',
+        { errors: config.errors }
+      );
+    }
+
+    if (!config.allowedDriverIds.includes(safeDriverId)) return null;
+
+    const financialContext = this.persistenceScope?.financialContext;
+    if (
+      this.persistenceScope?.namespace !== 'sandbox'
+      || financialContext?.providerEnvironment !== 'sandbox'
+      || financialContext?.testUserSandbox !== true
+      || financialContext?.paymentProfileId !== config.profileId
+    ) {
+      return deny(
+        'KYC_QA_TRUST_WINDOW_SCOPE_INVALID',
+        'A janela de QA exige o perfil financeiro sandbox autoritativo do motorista.',
+        {
+          namespace: this.persistenceScope?.namespace || null,
+          providerEnvironment: financialContext?.providerEnvironment || null,
+          paymentProfileId: financialContext?.paymentProfileId || null
+        }
+      );
+    }
+
+    const activeTrip = await this.resolveActiveTrip(safeDriverId);
+    if (activeTrip?.tripId) {
+      return {
+        allowed: true,
+        deferred: true,
+        continuityOnly: true,
+        retryRequired: false,
+        code: 'KYC_DEFERRED_ACTIVE_TRIP',
+        reason: 'Validacao adiada ate o fim da corrida ativa.',
+        activeTripId: activeTrip.tripId,
+        qaTestOnly: true,
+        expiresAt: new Date(config.expiresAtMs).toISOString()
+      };
+    }
+
+    const activationState = await this.activationService.resolveDriverActivationState({
+      driverId: safeDriverId
+    });
+    if (
+      activationState?.canGoOnline !== true
+      || activationState?.canAttemptOnline !== true
+      || activationState?.requiresLiveness === true
+    ) {
+      return deny(
+        'KYC_QA_TRUST_WINDOW_ACTIVATION_BLOCKED',
+        activationState?.blockingReason || 'O motorista nao esta apto para ficar online.',
+        {
+          state: activationState?.state || null,
+          canGoOnline: activationState?.canGoOnline === true,
+          canAttemptOnline: activationState?.canAttemptOnline === true,
+          requiresLiveness: activationState?.requiresLiveness === true
+        }
+      );
+    }
+
+    const approvalGate = await this.kycPolicyService.requireApprovedKyc(safeDriverId);
+    if (approvalGate?.allowed !== true) {
+      return deny(
+        approvalGate?.code || 'KYC_QA_TRUST_WINDOW_KYC_BLOCKED',
+        approvalGate?.reason || 'A aprovacao KYC do motorista nao esta valida.',
+        { approvalGate }
+      );
+    }
+
+    const expiresAt = new Date(config.expiresAtMs).toISOString();
+    const auditKey = `${safeDriverId}:${expiresAt}`;
+    if (!this.qaWindowAuditKeys.has(auditKey)) {
+      this.qaWindowAuditKeys.add(auditKey);
+      this.logger('warn', 'Janela temporaria de confianca QA sandbox utilizada', {
+        service: 'driver-identity-trust-service',
+        driverId: safeDriverId,
+        code: 'KYC_QA_SANDBOX_TRUST_WINDOW',
+        expiresAt,
+        persistenceNamespace: this.persistenceScope.namespace,
+        paymentProfileId: financialContext.paymentProfileId,
+        reason: config.reason,
+        canonicalEvidenceUnchanged: true
+      });
+    }
+
+    return {
+      allowed: true,
+      verificationRequired: false,
+      retryRequired: false,
+      code: 'KYC_QA_SANDBOX_TRUST_WINDOW',
+      reason: 'Janela temporaria de QA sandbox autorizada para este motorista.',
+      qaTestOnly: true,
+      canonicalEvidenceUnchanged: true,
+      expiresAt,
+      details: {
+        state: activationState.state || null,
+        canGoOnline: true,
+        canAttemptOnline: true,
+        requiresLiveness: false,
+        paymentProfileId: financialContext.paymentProfileId
+      }
     };
   }
 

@@ -160,6 +160,7 @@ function resolveRequestedSupportScope(req) {
 }
 
 function canAccessSandboxSupport(user = {}) {
+  if (String(user.role || '').trim().toLowerCase() === 'super-admin') return true;
   const permissions = Array.isArray(user.permissions)
     ? user.permissions.map((permission) => String(permission || '').trim().toLowerCase())
     : [];

@@ -740,4 +740,10 @@ describe('driver-notification-dispatcher timeout cleanup', () => {
     expect(driverEligibilityService.isDriverEligibleForRide).not.toHaveBeenCalled();
     expect(redis.hgetall).not.toHaveBeenCalledWith('driver:driver_blocked');
   });
+
+  it('fails closed when the driver profile is missing from the operational cache', async () => {
+    redis.hgetall.mockResolvedValue({});
+
+    await expect(dispatcher.getDriverData('driver_missing')).resolves.toBeNull();
+  });
 });

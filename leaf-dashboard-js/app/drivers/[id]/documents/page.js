@@ -39,6 +39,10 @@ const OPERATIONAL_DOCUMENT_TYPES = new Set(["cnh", "crlv", "antecedentes_crimina
 const MIN_IDENTITY_RECONCILIATION_REASON_LENGTH = 20;
 const MIN_ORPHAN_RECOVERY_REASON_LENGTH = 20;
 const ORPHAN_RECOVERY_CONFIRMATION_PHRASE = "AUTORIZAR NOVA VALIDAÇÃO";
+const CANONICAL_IDENTITY_FAILURE_REASON_LABELS = {
+  canonical_face_compare_failed: "Comparação facial canônica rejeitada",
+  identity_reverification_failed: "Revalidação de identidade rejeitada",
+};
 
 const DOCUMENT_STATUS_LABELS = {
   approved: "Aprovado",
@@ -166,6 +170,7 @@ export default function DriverDocumentsPage({ params }) {
   const [docSearch, setDocSearch] = useState("");
   const [docStatusFilter, setDocStatusFilter] = useState("all");
   const [identityReviews, setIdentityReviews] = useState([]);
+  const [identityVerificationStatus, setIdentityVerificationStatus] = useState(null);
   const [selectedIdentityReviewId, setSelectedIdentityReviewId] = useState("");
   const [identityReviewBusy, setIdentityReviewBusy] = useState("");
   const [identityReviewError, setIdentityReviewError] = useState("");
@@ -202,6 +207,7 @@ export default function DriverDocumentsPage({ params }) {
     const response = await leafAPI.getDriverKycIdentityReviews(id, kycRequestContext);
     const payload = response?.data || response || {};
     setIdentityReviews(Array.isArray(payload?.cases) ? payload.cases : []);
+    setIdentityVerificationStatus(payload?.verificationStatus || null);
     setOrphanRecoveryCandidate(
       payload?.orphanRecoveryCandidate?.available === true
         ? payload.orphanRecoveryCandidate
@@ -270,6 +276,7 @@ export default function DriverDocumentsPage({ params }) {
         if (reviewsResult.status === "fulfilled") {
           const reviewPayload = reviewsResult.value?.data || reviewsResult.value || {};
           setIdentityReviews(Array.isArray(reviewPayload?.cases) ? reviewPayload.cases : []);
+          setIdentityVerificationStatus(reviewPayload?.verificationStatus || null);
           setOrphanRecoveryCandidate(
             reviewPayload?.orphanRecoveryCandidate?.available === true
               ? reviewPayload.orphanRecoveryCandidate
@@ -488,6 +495,22 @@ export default function DriverDocumentsPage({ params }) {
   ) || identityReviews[0] || null;
   const selectedIdentityEvidence = selectedIdentityReview?.evidence ||
     selectedIdentityReview?.evidenceSummary || {};
+  const canonicalIdentityFailure = identityVerificationStatus?.lastFailure || null;
+  const canonicalIdentityStatus = String(identityVerificationStatus?.status || "")
+    .trim()
+    .toLowerCase();
+  const canonicalIdentityStatusLabel = canonicalIdentityFailure
+    ? "Reprovada"
+    : canonicalIdentityStatus === "revoked"
+      ? "Revogada"
+      : canonicalIdentityStatus === "verified"
+        ? "Verificada"
+        : "Sem estado registrado";
+  const canonicalIdentityStatusTone = canonicalIdentityFailure || canonicalIdentityStatus === "revoked"
+    ? "status-bad"
+    : canonicalIdentityStatus === "verified"
+      ? "status-ok"
+      : "status-warn";
   const selectedPendingIdentityTicket = pendingIdentityReviewTickets.find(
     (ticket) => getSupportTicketId(ticket) === selectedPendingIdentityTicketId,
   ) || pendingIdentityReviewTickets[0] || null;
@@ -845,6 +868,10 @@ export default function DriverDocumentsPage({ params }) {
               <strong>Similaridade:</strong>{" "}
               {typeof kyc.similarity === "number" ? `${(kyc.similarity * 100).toFixed(1)}%` : "-"}
             </p>
+            <p>
+              <strong>Identidade canônica:</strong>{" "}
+              <span className={canonicalIdentityStatusTone}>{canonicalIdentityStatusLabel}</span>
+            </p>
             <p style={{ gridColumn: "1 / -1" }}>
               <strong>Última atualização:</strong> {kyc.updatedAt || "-"}
             </p>
@@ -852,6 +879,30 @@ export default function DriverDocumentsPage({ params }) {
               <p style={{ gridColumn: "1 / -1" }}>
                 <strong>Mensagem:</strong> {kyc.message}
               </p>
+            ) : null}
+            {canonicalIdentityFailure ? (
+              <div
+                className="error-banner"
+                style={{ gridColumn: "1 / -1" }}
+                aria-label="Motivo interno da recusa KYC"
+              >
+                <strong>Motivo interno da recusa:</strong>{" "}
+                {CANONICAL_IDENTITY_FAILURE_REASON_LABELS[canonicalIdentityFailure.reasonCode] ||
+                  "Falha canônica de identidade registrada"}
+                <br />
+                <span>
+                  Código: {canonicalIdentityFailure.reasonCode || "-"} · Resultado: {canonicalIdentityFailure.decision || "-"} · Similaridade:{" "}
+                  {typeof canonicalIdentityFailure.similarityScore === "number"
+                    ? `${(canonicalIdentityFailure.similarityScore * 100).toFixed(1)}%`
+                    : "-"}
+                </span>
+                <br />
+                <span>Registrado em: {formatDateTime(canonicalIdentityFailure.recordedAt)}</span>
+                <br />
+                <span className="text-muted">
+                  Informação restrita ao dashboard; a mensagem exibida ao motorista permanece genérica.
+                </span>
+              </div>
             ) : null}
           </div>
         </section>

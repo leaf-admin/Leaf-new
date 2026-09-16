@@ -4,6 +4,7 @@ const express = require('express');
 const request = require('supertest');
 
 const mockApproveDriver = jest.fn();
+const mockProcessRideEarnings = jest.fn();
 const mockAuthenticateJWT = jest.fn((req, res, next) => {
   const token = req.headers.authorization?.replace('Bearer ', '');
   if (!token) {
@@ -27,7 +28,7 @@ jest.mock('../../../middleware/jwt-auth', () => ({
 jest.mock('../../../services/driver-approval-service', () =>
   jest.fn().mockImplementation(() => ({
     approveDriver: (...args) => mockApproveDriver(...args),
-    processRideEarnings: jest.fn(),
+    processRideEarnings: (...args) => mockProcessRideEarnings(...args),
     checkDriverWooviAccount: jest.fn(),
     createWooviAccountForExistingDriver: jest.fn()
   }))
@@ -56,6 +57,38 @@ describe('driver approval routes', () => {
       driverData: { id: 'driver_1' },
       wooviClientId: 'subaccount_1'
     });
+  });
+
+  it('blocks the legacy earnings path in production', async () => {
+    const previousNodeEnv = process.env.NODE_ENV;
+    const previousLegacyFlag = process.env.ENABLE_LEGACY_FINANCIAL_ROUTES;
+    process.env.NODE_ENV = 'production';
+    process.env.ENABLE_LEGACY_FINANCIAL_ROUTES = 'true';
+
+    try {
+      const response = await request(createApp())
+        .post('/driver-approval/process-earnings')
+        .set('Authorization', 'Bearer admin')
+        .send({
+          driverId: 'driver_1',
+          wooviClientId: 'subaccount_1',
+          earnings: 1000,
+          description: 'legacy',
+          rideId: 'ride_1'
+        });
+
+      expect(response.status).toBe(410);
+      expect(response.body).toEqual(expect.objectContaining({
+        success: false,
+        error: 'LEGACY_FINANCIAL_ROUTE_DISABLED'
+      }));
+      expect(mockProcessRideEarnings).not.toHaveBeenCalled();
+    } finally {
+      if (previousNodeEnv === undefined) delete process.env.NODE_ENV;
+      else process.env.NODE_ENV = previousNodeEnv;
+      if (previousLegacyFlag === undefined) delete process.env.ENABLE_LEGACY_FINANCIAL_ROUTES;
+      else process.env.ENABLE_LEGACY_FINANCIAL_ROUTES = previousLegacyFlag;
+    }
   });
 
   it('passes authenticated admin audit trail into manual driver approval', async () => {

@@ -173,6 +173,15 @@ function createReq({ body = {}, rawBody, headers = {} } = {}) {
 describe('woovi webhook guards', () => {
   const originalEnv = { ...process.env };
 
+  it('registers the provider webhook path and keeps it on the canonical handler', () => {
+    const postPaths = wooviRoutes.stack
+      .filter((layer) => layer.route?.methods?.post)
+      .map((layer) => layer.route.path);
+
+    expect(postPaths).toContain('/woovi/webhook');
+    expect(postPaths).toContain('/webhooks/woovi');
+  });
+
   beforeEach(() => {
     jest.clearAllMocks();
     process.env = { ...originalEnv };
@@ -227,6 +236,75 @@ describe('woovi webhook guards', () => {
 
     expect(result.valid).toBe(true);
     expect(result.method).toBe('x-webhook-signature/hmac-sha256');
+  });
+
+  it.each([
+    '/api/woovi/webhook',
+    '/api/woovi-webhook',
+    '/api/webhooks/woovi',
+    '/api/webhooks/woovi?source=provider'
+  ])('preserves signed JSON bytes through the HTTP parser for %s', (originalUrl) => {
+    const configureHttpMiddleware = require('../../../bootstrap/http-middleware');
+    const json = jest.fn(() => jest.fn());
+    const previousNodeEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = 'test';
+    try {
+      configureHttpMiddleware({
+        app: { use: jest.fn(), post: jest.fn(), get: jest.fn() },
+        server: {},
+        express: { json, raw: jest.fn(), urlencoded: jest.fn() },
+        cors: jest.fn(),
+        logStructured: jest.fn()
+      });
+    } finally {
+      process.env.NODE_ENV = previousNodeEnv;
+    }
+    const verify = json.mock.calls[0][0].verify;
+    const originalBytes = Buffer.from('{\n  "event": "CHARGE_COMPLETED",\n  "note": "ação"\n}');
+    process.env.WOOVI_WEBHOOK_SIGNATURE_SECRET = 'woovi-secret';
+    const signature = require('crypto').createHmac('sha256', 'woovi-secret')
+      .update(originalBytes).digest('hex');
+    const req = createReq({
+      body: JSON.parse(originalBytes),
+      headers: { 'x-webhook-signature': signature }
+    });
+    req.originalUrl = originalUrl;
+    verify(req, {}, originalBytes);
+
+    expect(req.rawBody).toEqual(originalBytes);
+    expect(verifyWooviWebhookSignature(req).valid).toBe(true);
+    req.rawBody = Buffer.from('{"event":"CHARGE_COMPLETED","note":"altered"}');
+    expect(verifyWooviWebhookSignature(req).valid).toBe(false);
+
+    const ordinaryRequest = { originalUrl: '/api/account/profile' };
+    verify(ordinaryRequest, {}, originalBytes);
+    expect(ordinaryRequest.rawBody).toBeUndefined();
+  });
+
+  it('bounds URL-encoded parsing to limit nested/query abuse', () => {
+    const configureHttpMiddleware = require('../../../bootstrap/http-middleware');
+    const urlencoded = jest.fn(() => jest.fn());
+    const previousNodeEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = 'test';
+    try {
+      configureHttpMiddleware({
+        app: { use: jest.fn(), post: jest.fn(), get: jest.fn() },
+        server: {},
+        express: { json: jest.fn(() => jest.fn()), raw: jest.fn(), urlencoded },
+        cors: jest.fn(),
+        logStructured: jest.fn()
+      });
+    } finally {
+      process.env.NODE_ENV = previousNodeEnv;
+    }
+
+    expect(urlencoded).toHaveBeenCalledTimes(1);
+    expect(urlencoded).toHaveBeenCalledWith(expect.objectContaining({
+      extended: true,
+      limit: '50mb',
+      parameterLimit: 1000,
+      depth: 5
+    }));
   });
 
   it('rejects invalid signature in production mode', () => {

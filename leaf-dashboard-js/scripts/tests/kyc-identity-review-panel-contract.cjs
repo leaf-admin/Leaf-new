@@ -48,6 +48,18 @@ assert.match(
   /gridTemplateColumns: "repeat\(auto-fit, minmax\(260px, 1fr\)\)"/,
   "the two identity images must use the side-by-side evidence grid",
 );
+assert.match(
+  source,
+  /height: "clamp\(220px, 32vh, 300px\)"/,
+  "identity evidence frames must stay compact in the dashboard",
+);
+assert.match(source, /width: "100%"/, "identity images must fit their full width without cropping");
+assert.match(source, /height: "100%"/, "identity images must fit their full height without cropping");
+assert.match(source, /gridTemplateRows: "minmax\(0, 1fr\)"/, "identity viewport must allow intrinsic images to shrink into the frame");
+assert.match(source, /minHeight: 0/, "identity images must be allowed to shrink inside the frame");
+assert.match(source, /maxWidth: "100%"/, "identity images must not exceed the frame width");
+assert.match(source, /maxHeight: "100%"/, "identity images must not exceed the frame height");
+assert.match(source, /objectFit: "contain"/, "identity images must preserve their intrinsic aspect ratio");
 
 const biometricImageTags = source.match(/<img\s[\s\S]*?\/>/g) || [];
 assert.equal(biometricImageTags.length, 1, "the reusable EvidenceImage renderer should be the only image surface");
@@ -94,6 +106,10 @@ assert.doesNotMatch(source, /\bfetch\s*\(|\baxios\b|from\s+["'][^"']*services\/a
 assert.doesNotMatch(source, /rekognition|compareFaces\s*\(|createFaceLiveness/i, "the dashboard must not call a paid provider directly");
 
 assert.match(pageSource, /import KycIdentityReviewPanel/, "the driver documents page must mount the review panel");
+assert.match(pageSource, /identityVerificationStatus/, "the page must consume the persisted canonical identity status");
+assert.match(pageSource, /Motivo interno da recusa/, "the dashboard must show the internal rejection reason");
+assert.match(pageSource, /canonical_face_compare_failed/, "the dashboard must label the canonical face-compare rejection");
+assert.match(pageSource, /mensagem exibida ao motorista permanece genérica/, "the private reason must remain hidden from the driver");
 assert.match(
   pageSource,
   /getDriverKycIdentityReviews\(id, kycRequestContext\)/,

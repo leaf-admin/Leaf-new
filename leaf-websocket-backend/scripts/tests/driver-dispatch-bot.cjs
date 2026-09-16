@@ -8,10 +8,12 @@ try {
 }
 
 const WS_URL = process.env.WS_URL || 'https://socket.leaf.app.br';
-const DRIVER_UID = process.env.TEST_DRIVER_UID || 'gl3uJkLwBjbeOtbbvVSryhziVBx1';
+const DRIVER_UID = process.env.TEST_DRIVER_UID || 'DV4cwZvql3T3pI3lnKYQwQVALKZ2';
+// Keep standalone QA runs inside the active Rio pilot geofence. Callers may
+// still override these values explicitly for a dedicated local fixture.
 const PICKUP = {
-  lat: Number(process.env.TEST_PICKUP_LAT || 37.779026),
-  lng: Number(process.env.TEST_PICKUP_LNG || -122.419906)
+  lat: Number(process.env.TEST_PICKUP_LAT || -22.97104),
+  lng: Number(process.env.TEST_PICKUP_LNG || -43.18349)
 };
 const ESTIMATED_FARE = Number(process.env.TEST_FARE || 13.42);
 const RIDE_REQUEST_TIMEOUT_MS = Math.max(

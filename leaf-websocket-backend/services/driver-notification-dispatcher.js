@@ -797,25 +797,13 @@ class DriverNotificationDispatcher {
                 };
             }
 
-            // Se não estiver no cache, buscar do Firebase/DB e cachear
-            // Por enquanto, retornar dados padrão
-            // TODO: Integrar com DriverResolver ou Firebase
-            return {
-                id: driverId,
-                isOnline: true,
-                status: 'AVAILABLE',
-                carType: null,
-                vehicleCategory: null,
-                gender: null,
-                destinationModeActive: false,
-                acceptsPlusWithElite: true,
-                driverApproved: true,
-                vehicleApproved: true,
-                rating: 5.0,
-                acceptanceRate: 50.0,
-                avgResponseTime: 5.0,
-                totalTrips: 0
-            };
+            // A ausência do espelho operacional não prova elegibilidade. O
+            // shortlist já exige `dispatchEligible`, mas o perfil completo é
+            // necessário para validar status e preferências antes da oferta.
+            // Falhar fechado permite que o reconciliador reidrate o cache sem
+            // transformar uma falha de leitura em um motorista aprovado.
+            logger.warn(`⚠️ [Dispatcher] Perfil do motorista ${driverId} indisponível no cache; oferta bloqueada`);
+            return null;
         } catch (error) {
             logger.error(`❌ Erro ao buscar dados do motorista ${driverId}:`, error);
             return null;

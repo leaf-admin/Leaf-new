@@ -109,12 +109,24 @@ function summarizeCharge(charge = {}) {
 
 function resolveChargeReference(charge = {}, fallback) {
   return (
-    charge.correlationID ||
     charge.identifier ||
-    charge.transactionID ||
     charge.id ||
+    charge.transactionID ||
+    charge.correlationID ||
     fallback
   );
+}
+
+function isChargeNotFoundResponse(response) {
+  const errorText = String(
+    response?.data?.error ||
+    response?.data?.message ||
+    response?.data ||
+    '',
+  ).toLowerCase();
+
+  return response?.status === 404 ||
+    (response?.status === 400 && /not found|não encontrada|nao encontrada/.test(errorText));
 }
 
 function writeReport(outPath, report) {
@@ -200,10 +212,17 @@ async function main() {
 
   if (!options.keepCharge) {
     const deleteResponse = await api.delete(`/charge/${encodeURIComponent(chargeReference)}`);
+    const verifyDeleteResponse = deleteResponse.status >= 200 && deleteResponse.status < 300
+      ? await api.get(`/charge/${encodeURIComponent(chargeReference)}`)
+      : null;
     report.charge.cleanup = {
       attempted: true,
       httpStatus: deleteResponse.status,
-      ok: deleteResponse.status >= 200 && deleteResponse.status < 300,
+      ok: deleteResponse.status >= 200 &&
+        deleteResponse.status < 300 &&
+        isChargeNotFoundResponse(verifyDeleteResponse),
+      verificationHttpStatus: verifyDeleteResponse?.status || null,
+      verificationNotFound: isChargeNotFoundResponse(verifyDeleteResponse),
     };
   } else {
     report.charge.cleanup = {
@@ -237,12 +256,21 @@ async function main() {
   }
 }
 
-main().catch((error) => {
-  const payload = {
-    success: false,
-    error: error.message,
-    blockers: error.blockers || [],
-  };
-  console.error(JSON.stringify(payload, null, 2));
-  process.exit(1);
-});
+if (require.main === module) {
+  main().catch((error) => {
+    const payload = {
+      success: false,
+      error: error.message,
+      blockers: error.blockers || [],
+    };
+    console.error(JSON.stringify(payload, null, 2));
+    process.exit(1);
+  });
+}
+
+module.exports = {
+  assertSafeSandboxRuntime,
+  isChargeNotFoundResponse,
+  resolveChargeReference,
+  summarizeCharge,
+};

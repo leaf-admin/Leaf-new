@@ -1298,6 +1298,58 @@ describe('kyc-identity-review-workflow-service', () => {
     expect(JSON.stringify(cases)).not.toContain('restricted/private');
   });
 
+  it('projeta o estado canonico rejeitado para o dashboard sem expor ponteiros privados', async () => {
+    const harness = createHarness();
+    harness.identityTrustService.readState = jest.fn().mockResolvedValue({
+      driverId: DRIVER_ID,
+      stateRevision: 3,
+      status: 'revoked',
+      revocationReason: 'canonical_face_compare_failed',
+      revokedAt: '2026-07-17T12:00:00.000Z',
+      updatedAt: '2026-07-17T12:00:00.000Z',
+      lastFailure: {
+        decision: 'reject',
+        similarityScore: 0.22,
+        recordedAt: '2026-07-17T12:00:00.000Z',
+        reviewEvidenceId: EVIDENCE_ID
+      }
+    });
+
+    await expect(harness.service.getDashboardIdentityStatus(DRIVER_ID, { reviewerContext }))
+      .resolves.toEqual({
+        status: 'revoked',
+        stateRevision: 3,
+        revokedAt: '2026-07-17T12:00:00.000Z',
+        updatedAt: '2026-07-17T12:00:00.000Z',
+        lastFailure: {
+          reasonCode: 'canonical_face_compare_failed',
+          decision: 'reject',
+          similarityScore: 0.22,
+          recordedAt: '2026-07-17T12:00:00.000Z'
+        }
+      });
+    expect(harness.caseService.assertAuthorizedReviewer).toHaveBeenCalledWith(expect.objectContaining({
+      action: 'VIEW_CANONICAL_IDENTITY_STATUS'
+    }));
+  });
+
+  it('nao projeta motivos canonicos fora da allowlist do dashboard', async () => {
+    const harness = createHarness();
+    harness.identityTrustService.readState = jest.fn().mockResolvedValue({
+      driverId: DRIVER_ID,
+      status: 'revoked',
+      revocationReason: 'internal_unclassified_reason',
+      lastFailure: {
+        decision: 'reject',
+        similarityScore: 0.01,
+        recordedAt: '2026-07-17T12:00:00.000Z'
+      }
+    });
+
+    await expect(harness.service.getDashboardIdentityStatus(DRIVER_ID, { reviewerContext }))
+      .resolves.toMatchObject({ status: 'revoked', lastFailure: null });
+  });
+
   it('audita contexto antes de conceder URL curta pela evidence service', async () => {
     const harness = createHarness();
 
