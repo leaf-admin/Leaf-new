@@ -68,8 +68,8 @@ Nenhuma chamada real à Meta, alteração no Firebase Console, rotação de segr
 
 ## Verificação externa da Meta — 15/09/2026
 
-O portfólio empresarial `Serafy` foi aberto no Meta Business Suite. A conta do WhatsApp Business existente foi identificada pelo WABA ID `1462337719120334` dentro do portfólio `1383444540251234`; o status exibido é `Aprovada`. A empresa aparece como ainda não verificada.
+A sessão do navegador estava autenticada no portfólio empresarial `Serafy`. Esse portfólio não é a identidade canônica da Leaf: os artefatos legais e o recibo E3 identificam a operação como `LEAF - Freedom Tecnologia e Serviços LTDA`. Portanto, a WABA exibida dentro de `Serafy` é apenas uma descoberta incidental e não pode ser usada para ativar o OTP da Leaf.
 
-O detalhe de `Phone numbers` informa que nenhum número foi adicionado à WABA. O cadastro foi deixado aberto no passo `Adicionar telefone`, com o nome de exibição `Serafy` e a categoria `Viagem e transporte` já selecionados. A etapa seguinte exige um número comercial que possa receber o código de verificação; esse dado e o código não devem passar pelo repositório nem pelo chat.
+Não foi localizado no navegador um portfólio Meta próprio da Leaf. Nenhum número, template, token, permissão ou segredo foi criado ou alterado; o cadastro iniciado em `Serafy` deve ser descartado. A ativação correta precisa começar no Business Portfolio pertencente à Leaf, com nome comercial e dados legais correspondentes.
 
-Enquanto não houver número verificado, a Meta não fornece `WHATSAPP_META_PHONE_NUMBER_ID`, portanto o gateway não pode sair da simulação. Também continuam pendentes o template `AUTHENTICATION` aprovado, o token de system user e a chave dedicada `AUTH_OTP_HMAC_KEY` no `.env` protegido do gateway (`/opt/leaf-app/.env` no deploy Contabo). Nenhum desses valores foi criado, exibido ou salvo nesta worktree.
+O gateway continua sem `WHATSAPP_META_PHONE_NUMBER_ID`, template `AUTHENTICATION`, token de system user e chave dedicada `AUTH_OTP_HMAC_KEY` no `.env` protegido (`/opt/leaf-app/.env` no deploy Contabo). Nenhum desses valores foi criado, exibido ou salvo nesta worktree.
