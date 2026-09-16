@@ -26,11 +26,11 @@ appId: br.com.leaf.ride
 
 - extendedWaitUntil:
     visible:
-      id: "passenger-destination-search-input"
+      id: "passenger-home-destination-search-input"
     timeout: 30000
 
 - tapOn:
-    id: "passenger-destination-search-input"
+    id: "passenger-home-destination-search-input"
 - eraseText
 - inputText: "Copacabana Palace"
 
@@ -41,17 +41,17 @@ appId: br.com.leaf.ride
 - takeScreenshot: "ideal-passenger-03-destination-results"
 
 - tapOn:
-    id: "passenger-destination-result-0"
+    id: "passenger-home-destination-result-0"
 
 - extendedWaitUntil:
     visible:
-      id: "passenger-destination-confirm-button"
+      id: "passenger-home-category-confirm"
     timeout: 30000
 
 - takeScreenshot: "ideal-passenger-04-quote"
 
 - tapOn:
-    id: "passenger-destination-confirm-button"
+    id: "passenger-home-category-confirm"
 
 - extendedWaitUntil:
     visible: ".*(Realize seu pagamento|Gerando cobrança PIX...).*"

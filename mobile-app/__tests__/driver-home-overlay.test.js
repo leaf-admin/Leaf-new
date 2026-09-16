@@ -79,6 +79,7 @@ describe("DriverHomeOverlay", () => {
     );
 
     expect(offline.getByLabelText("driver-home-toggle-online-offline")).toBeTruthy();
+    expect(offline.queryByTestId("driver-home-online-state")).toBeNull();
 
     const online = render(
       <DriverHomeOverlay
@@ -92,6 +93,7 @@ describe("DriverHomeOverlay", () => {
     );
 
     expect(online.getByLabelText("driver-home-toggle-online-online")).toBeTruthy();
+    expect(online.getByTestId("driver-home-online-state")).toBeTruthy();
   });
 
   it('shows reconnecting instead of a zeroed timer when online is not authenticated by realtime', () => {

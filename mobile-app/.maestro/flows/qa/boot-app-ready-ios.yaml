@@ -1,0 +1,52 @@
+appId: br.com.leaf.ride
+---
+# This is a readiness gate, not a lifecycle scenario. It must reject the
+# Expo Dev Client shell/red error and only pass after the Leaf bundle renders
+# a role-specific operational surface. The runner launches the installed app
+# and opens the development-client URL before entering this flow. Do not add
+# launchApp here: relaunching without the URL can erase the script URL.
+
+- runFlow:
+    when:
+      visible: 'Abrir com ".*Leaf.*"\?'
+    commands:
+      - tapOn: "Abrir"
+
+- runFlow:
+    when:
+      visible: "Abrir"
+    commands:
+      - tapOn: "Abrir"
+
+- runFlow:
+    when:
+      visible: "Open"
+    commands:
+      - tapOn: "Open"
+
+- runFlow:
+    when:
+      visible: "Connected to:"
+    commands:
+      - tapOn:
+          point: "88%,44%"
+
+- runFlow:
+    when:
+      visible: "This is the developer menu"
+    commands:
+      - tapOn: "Continue"
+
+- runFlow:
+    when:
+      visible: "Continue"
+    commands:
+      - tapOn: "Continue"
+
+- extendedWaitUntil:
+    visible:
+      id: ${READY_SCREEN_ID}
+    timeout: 90000
+
+- assertVisible:
+    id: ${READY_SCREEN_ID}

@@ -1,0 +1,27 @@
+# CURRENT_PRODUCT_ONLY: payment failure recovery; isolated QA visual state.
+# The retry path here is the safe no-charge path: it returns to the current
+# Home surface and must not materialize a new Pix without a confirmed payment.
+appId: br.com.leaf.ride
+name: Passenger payment failed retry returns to CURRENT Home
+tags:
+  - current
+  - transition
+  - passenger
+  - payment-recovery
+---
+- launchApp:
+    stopApp: false
+- assertVisible:
+    id: "passenger-payment-failed-screen"
+- assertVisible:
+    id: "payment-failed-button-Tentar novamente"
+- takeScreenshot: "passenger-payment-failed-before-retry"
+- tapOn:
+    id: "payment-failed-button-Tentar novamente"
+- extendedWaitUntil:
+    visible:
+      id: "passenger-home-destination-input"
+    timeout: 30000
+- assertNotVisible:
+    id: "passenger-payment-failed-screen"
+- takeScreenshot: "passenger-payment-failed-after-retry"

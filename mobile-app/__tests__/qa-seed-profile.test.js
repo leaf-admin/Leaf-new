@@ -128,6 +128,8 @@ describe('qaSeedProfile', () => {
         usertype: 'driver',
         userType: 'driver',
         canGoOnline: true,
+        phone: '+5521123456789',
+        phoneNumber: '+5521123456789',
         carPlate: 'TES6789',
         carModel: 'Toyota Prius',
         carType: 'Leaf Plus',

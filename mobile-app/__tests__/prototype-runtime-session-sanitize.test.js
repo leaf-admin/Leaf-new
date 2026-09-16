@@ -35,6 +35,8 @@ import {
   shouldAttemptCompletedReceiptRecovery,
   shouldDispatchRuntimeProfileRestore,
   shouldPreserveQADriverOfferOnBootstrap,
+  shouldPreserveQADriverOnlineWaitingOnBootstrap,
+  shouldPreserveQAPassengerPreBookingOnBootstrap,
 } from "../src/screens/prototype/prototypeRideRuntime";
 
 describe("prototype Firebase identity guard", () => {
@@ -504,6 +506,191 @@ describe("sanitizePersistedRuntimeSessionForProfile", () => {
       latitude: -22.9708,
       longitude: -43.1819,
     });
+  });
+
+  it("preserves a seeded online-waiting home only with explicit simulator QA context", () => {
+    const now = 1_757_786_400_000;
+    const qaSeedLock = {
+      scenario: "driver-online-waiting",
+      route: "leafapp://robotaxi/home",
+      seededAt: now - 1_000,
+      freezeUntil: now + 60_000,
+    };
+
+    expect(
+      shouldPreserveQADriverOnlineWaitingOnBootstrap({
+        qaSeedLock,
+        now,
+        testUserToolsAllowed: true,
+        e2eBuild: false,
+        simulatorBuild: true,
+      }),
+    ).toBe(true);
+    expect(
+      shouldPreserveQADriverOnlineWaitingOnBootstrap({
+        qaSeedLock: { ...qaSeedLock, route: "leafapp://robotaxi/driver" },
+        now,
+        testUserToolsAllowed: true,
+        e2eBuild: false,
+        simulatorBuild: true,
+      }),
+    ).toBe(false);
+    expect(
+      shouldPreserveQADriverOnlineWaitingOnBootstrap({
+        qaSeedLock,
+        now,
+        testUserToolsAllowed: false,
+        e2eBuild: false,
+        simulatorBuild: true,
+      }),
+    ).toBe(false);
+
+    const seededOnlineWaitingSession = {
+      activeRole: "driver",
+      bookingStatus: "idle",
+      activeBookingId: null,
+      activeBooking: null,
+      driverActiveRide: null,
+      driverOnline: true,
+      driverOnlinePending: false,
+      driverOnlineStartedAt: "2026-09-02T05:45:00.000Z",
+      driverOnlineMutationSource: "qa_seed",
+      currentCoordinate: { latitude: -22.984843, longitude: -43.221972 },
+      driverCoordinate: { latitude: -22.984843, longitude: -43.221972 },
+      currentAddress: "Copacabana Palace, Rio de Janeiro, RJ",
+    };
+    const normalRestore = sanitizePersistedRuntimeSessionForProfile(
+      seededOnlineWaitingSession,
+      driverProfile,
+    );
+    const qaRestore = sanitizePersistedRuntimeSessionForProfile(
+      seededOnlineWaitingSession,
+      driverProfile,
+      { preserveQaSeededDriverOnlineWaiting: true },
+    );
+
+    expect(normalRestore.driverOnline).toBe(false);
+    expect(normalRestore.driverOnlineMutationSource).toBe(
+      "bootstrap_clear_stale_online_intent",
+    );
+    expect(qaRestore.driverOnline).toBe(true);
+    expect(qaRestore.driverOnlinePending).toBe(false);
+    expect(qaRestore.driverOnlineMutationSource).toBe(
+      "bootstrap_restore_qa_seeded_driver_online_waiting",
+    );
+    expect(qaRestore.isSocketConnected).toBe(false);
+    expect(qaRestore.isSocketAuthenticated).toBe(false);
+    expect(qaRestore.driverOnlineVisualOnly).toBe(true);
+    expect(normalRestore.driverOnlineVisualOnly).toBe(false);
+    expect(qaRestore.currentCoordinate).toEqual(
+      seededOnlineWaitingSession.currentCoordinate,
+    );
+  });
+
+  it("preserves a seeded passenger destination only when the sanitizer receives explicit QA context", () => {
+    const selectedDestination = {
+      name: "Leblon",
+      address: "Leblon, Rio de Janeiro, RJ",
+      coordinate: { latitude: -22.984843, longitude: -43.221972 },
+    };
+    const seededQuoteSession = {
+      activeRole: "customer",
+      bookingStatus: "idle",
+      activeBookingId: null,
+      activeBooking: null,
+      selectedDestination,
+      selectedFare: 22.43,
+      selectedVehicle: "Leaf Plus",
+      tripDistanceKm: 2.8,
+      tripDurationMin: 4,
+      tripArrivalText: "Chegada estimada em 4 min",
+      currentCoordinate: { latitude: -22.971964, longitude: -43.182543 },
+      currentAddress: "Copacabana Palace, Rio de Janeiro, RJ",
+    };
+
+    const normalRestore = sanitizePersistedRuntimeSessionForProfile(
+      seededQuoteSession,
+      passengerProfile,
+    );
+    const qaRestore = sanitizePersistedRuntimeSessionForProfile(
+      seededQuoteSession,
+      passengerProfile,
+      { preserveQaSeededPassengerPreBooking: true },
+    );
+
+    expect(normalRestore.selectedDestination).toBeNull();
+    expect(qaRestore.selectedDestination).toEqual(selectedDestination);
+    expect(qaRestore.selectedFare).toBe(22.43);
+    expect(qaRestore.selectedVehicle).toBe("Leaf Plus");
+    expect(qaRestore.tripDistanceKm).toBe(2.8);
+    expect(qaRestore.tripDurationMin).toBe(4);
+  });
+
+  it("authorizes QA passenger pre-booking restoration only for a live current-home category seed", () => {
+    const now = 1_752_336_000_000;
+    const qaSeedLock = {
+      scenario: "passenger-category",
+      route:
+        "leafapp://robotaxi/home?qaAutomation=1&qaPassengerAction=show_category&qaNonce=seed-category",
+      seededAt: now - 1_000,
+      freezeUntil: now + 60_000,
+    };
+    const controlledContext = {
+      qaSeedLock,
+      now,
+      testUserToolsAllowed: true,
+      e2eBuild: false,
+      simulatorBuild: true,
+    };
+
+    expect(
+      shouldPreserveQAPassengerPreBookingOnBootstrap(controlledContext),
+    ).toBe(true);
+    expect(
+      shouldPreserveQAPassengerPreBookingOnBootstrap({
+        ...controlledContext,
+        qaSeedLock: {
+          ...qaSeedLock,
+          scenario: "passenger-payment",
+          route:
+            "leafapp://robotaxi/home?qaAutomation=1&qaPassengerAction=open_pix_pending&qaNonce=seed-pix-pending",
+        },
+      }),
+    ).toBe(true);
+    expect(
+      shouldPreserveQAPassengerPreBookingOnBootstrap({
+        ...controlledContext,
+        testUserToolsAllowed: false,
+      }),
+    ).toBe(false);
+    expect(
+      shouldPreserveQAPassengerPreBookingOnBootstrap({
+        ...controlledContext,
+        e2eBuild: false,
+        simulatorBuild: false,
+      }),
+    ).toBe(false);
+    expect(
+      shouldPreserveQAPassengerPreBookingOnBootstrap({
+        ...controlledContext,
+        qaSeedLock: { ...qaSeedLock, scenario: "passenger-searching" },
+      }),
+    ).toBe(false);
+    expect(
+      shouldPreserveQAPassengerPreBookingOnBootstrap({
+        ...controlledContext,
+        qaSeedLock: {
+          ...qaSeedLock,
+          route: "leafapp://robotaxi/destination",
+        },
+      }),
+    ).toBe(false);
+    expect(
+      shouldPreserveQAPassengerPreBookingOnBootstrap({
+        ...controlledContext,
+        qaSeedLock: { ...qaSeedLock, freezeUntil: now },
+      }),
+    ).toBe(false);
   });
 
   it("authorizes QA driver-offer restoration only for a live current-home seed in a controlled runtime", () => {

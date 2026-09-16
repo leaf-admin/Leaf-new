@@ -5,7 +5,23 @@ appId: br.com.leaf.ride
 
 - openLink: ${MAESTRO_METRO_URL_PASSENGER}
 
-- runFlow: ../../_accept-open-prompt.yaml
+- runFlow:
+    when:
+      visible: "Abrir com \".*Leaf.*\"\\?"
+    commands:
+      - tapOn: "Abrir"
+
+- runFlow:
+    when:
+      visible: "Abrir"
+    commands:
+      - tapOn: "Abrir"
+
+- runFlow:
+    when:
+      visible: "Open"
+    commands:
+      - tapOn: "Open"
 
 - runFlow:
     when:
@@ -22,7 +38,9 @@ appId: br.com.leaf.ride
       - waitForAnimationToEnd
 
 - extendedWaitUntil:
-    visible: ".*(DEVELOPMENT SERVERS|Sign in to view updates|No development servers found|Connected to:|auth-phone-input|Bem-vindo\\(a\\) à Leaf|Número|Verificação|Como você quer usar a Leaf\\?|Para onde vamos\\?|Quero viajar).*"
+    # The iOS accessibility tree exposes the stable app root as Leaf; the
+    # rendered home labels are not consistently exposed as text nodes.
+    visible: "Leaf"
     timeout: 120000
 
 - runFlow:
@@ -114,11 +132,9 @@ appId: br.com.leaf.ride
     commands:
       - tapOn: "Permitir Enquanto Usa o App"
 
-- extendedWaitUntil:
-    visible:
-      id: "auth-phone-input"
-    timeout: 120000
-
+# Firebase may restore the QA passenger session from the native keychain even
+# after the simulator app data reset. Keep the login branch conditional so a
+# persisted Home session is accepted and a fresh phone/OTP flow still runs.
 - runFlow:
     when:
       visible:
@@ -128,6 +144,9 @@ appId: br.com.leaf.ride
           id: "auth-phone-input"
       - eraseText
       - inputText: "21102938475"
+      # The iOS keyboard covers the native Continue button; dismiss it before
+      # tapping the stable automation id so the submit is deterministic.
+      - pressKey: Enter
       - tapOn:
           id: "auth-continue-btn"
 
@@ -154,13 +173,8 @@ appId: br.com.leaf.ride
       - tapOn:
           id: "auth-otp-digit-5"
       - inputText: "1"
-      - runFlow:
-          when:
-            visible:
-              id: "auth-otp-verify-btn"
-          commands:
-            - tapOn:
-                id: "auth-otp-verify-btn"
+      # OTPStep auto-verifies immediately after the sixth digit; no second
+      # tap is needed and the button may already be unmounted by then.
 
 - runFlow:
     when:

@@ -1,0 +1,8 @@
+appId: br.com.leaf.ride
+---
+# Clear persisted authentication and ride state on the dedicated QA simulator.
+# The runner opens the explicit Expo Dev Client URL after this flow completes.
+
+- launchApp:
+    clearState: true
+    clearKeychain: true

@@ -60,9 +60,9 @@ appId: br.com.leaf.ride
 
 - runFlow:
     when:
-      visible: "http://.*:8081"
+      visible: "http://.*:${MAESTRO_METRO_PORT}"
     commands:
-      - tapOn: "http://.*:8081"
+      - tapOn: "http://.*:${MAESTRO_METRO_PORT}"
 
 - runFlow:
     when:
@@ -73,7 +73,7 @@ appId: br.com.leaf.ride
           point: "50%,32%"
       - tapOn: "http://.*"
       - eraseText
-      - inputText: "http://${MAESTRO_METRO_HOST}:8081"
+      - inputText: "http://${MAESTRO_METRO_HOST}:${MAESTRO_METRO_PORT}"
       - pressKey: Enter
       - runFlow:
           when:
@@ -95,7 +95,7 @@ appId: br.com.leaf.ride
           point: "50%,32%"
       - tapOn: "http://.*"
       - eraseText
-      - inputText: "http://${MAESTRO_METRO_HOST}:8081"
+      - inputText: "http://${MAESTRO_METRO_HOST}:${MAESTRO_METRO_PORT}"
       - pressKey: Enter
       - runFlow:
           when:

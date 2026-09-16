@@ -1,0 +1,291 @@
+appId: br.com.leaf.ride
+---
+# QA-session bootstrap for the protected iOS matrix. The runner already
+# booted the simulator, launched the installed app, and opened the explicit
+# Expo Dev Client URL. This flow must never launch the app or open a ride
+# route.
+
+- runFlow:
+    when:
+      visible: 'Abrir com ".*Leaf.*"\?'
+    commands:
+      - tapOn: "Abrir"
+
+- runFlow:
+    when:
+      visible: "Abrir"
+    commands:
+      - tapOn: "Abrir"
+
+- runFlow:
+    when:
+      visible: "Open"
+    commands:
+      - tapOn: "Open"
+
+- runFlow:
+    when:
+      visible: "Connected to:"
+    commands:
+      - tapOn:
+          point: "88%,44%"
+
+- runFlow:
+    when:
+      visible: "This is the developer menu"
+    commands:
+      - tapOn: "Continue"
+
+- runFlow:
+    when:
+      visible: "Continue"
+    commands:
+      - tapOn: "Continue"
+
+- runFlow:
+    when:
+      visible: "Agora Não"
+    commands:
+      - tapOn: "Agora Não"
+
+- runFlow:
+    when:
+      visible: "Not Now"
+    commands:
+      - tapOn: "Not Now"
+
+- runFlow:
+    when:
+      visible: "Allow While Using App"
+    commands:
+      - tapOn: "Allow While Using App"
+
+- runFlow:
+    when:
+      visible: "Permitir Enquanto Usa o App"
+    commands:
+      - tapOn: "Permitir Enquanto Usa o App"
+
+- extendedWaitUntil:
+    visible:
+      id: "(auth-phone-input|auth-password-input|auth-otp-digit-0|auth-profile-selection-continue-btn|driver-email-skip-btn|${READY_SCREEN_ID})"
+    timeout: 90000
+
+- runFlow:
+    when:
+      visible:
+        id: "auth-phone-input"
+    commands:
+      - tapOn:
+          id: "auth-phone-input"
+      - eraseText
+      - inputText: ${QA_PHONE}
+      - runFlow:
+          when:
+            visible: "Done"
+          commands:
+            - tapOn: "Done"
+      - tapOn:
+          id: "auth-continue-btn"
+
+- extendedWaitUntil:
+    visible:
+      id: "(auth-password-input|auth-otp-digit-0|auth-profile-selection-continue-btn|driver-email-skip-btn|${READY_SCREEN_ID})"
+    timeout: 90000
+
+- runFlow:
+    when:
+      visible:
+        id: "auth-password-input"
+    commands:
+      - tapOn:
+          id: "auth-password-input"
+      - eraseText
+      - inputText: ${QA_PASSWORD}
+      - runFlow:
+          when:
+            visible: "Done"
+          commands:
+            - tapOn: "Done"
+      - runFlow:
+          when:
+            visible: "retorno"
+          commands:
+            - pressKey: Enter
+      - runFlow:
+          when:
+            visible: "Return"
+          commands:
+            - pressKey: Enter
+      - runFlow:
+          when:
+            visible: "Agora Não"
+          commands:
+            - tapOn: "Agora Não"
+      - runFlow:
+          when:
+            visible: "Not Now"
+          commands:
+            - tapOn: "Not Now"
+      - tapOn:
+          id: "auth-continue-btn"
+      - runFlow:
+          when:
+            notVisible:
+              id: "auth-continue-btn"
+          commands:
+            - pressKey: Enter
+
+- runFlow:
+    when:
+      visible:
+        id: "auth-otp-digit-0"
+    commands:
+      - tapOn:
+          id: "auth-otp-digit-0"
+      - inputText: ${QA_OTP_0}
+      - tapOn:
+          id: "auth-otp-digit-1"
+      - inputText: ${QA_OTP_1}
+      - tapOn:
+          id: "auth-otp-digit-2"
+      - inputText: ${QA_OTP_2}
+      - tapOn:
+          id: "auth-otp-digit-3"
+      - inputText: ${QA_OTP_3}
+      - tapOn:
+          id: "auth-otp-digit-4"
+      - inputText: ${QA_OTP_4}
+      - tapOn:
+          id: "auth-otp-digit-5"
+      - inputText: ${QA_OTP_5}
+      - runFlow:
+          when:
+            visible:
+              id: "auth-otp-verify-btn"
+          commands:
+            - tapOn:
+                id: "auth-otp-verify-btn"
+                optional: true
+
+- extendedWaitUntil:
+    visible:
+      id: "(auth-profile-selection-continue-btn|driver-email-skip-btn|${READY_SCREEN_ID})"
+    timeout: 90000
+
+- runFlow:
+    when:
+      visible:
+        id: "auth-profile-option-${QA_PROFILE_OPTION}"
+    commands:
+      - tapOn:
+          id: "auth-profile-option-${QA_PROFILE_OPTION}"
+      - tapOn:
+          id: "auth-profile-selection-continue-btn"
+
+- runFlow:
+    when:
+      visible: "Como você quer usar a Leaf?"
+    commands:
+      - runFlow:
+          when:
+            visible: "Quero viajar"
+          commands:
+            - tapOn: "Quero viajar"
+      - runFlow:
+          when:
+            visible: "Quero ser parceiro"
+          commands:
+            - tapOn: "Quero ser parceiro"
+      - runFlow:
+          when:
+            visible:
+              id: "auth-profile-selection-continue-btn"
+          commands:
+            - tapOn:
+                id: "auth-profile-selection-continue-btn"
+      - runFlow:
+          when:
+            visible: "Continuar"
+          commands:
+            - tapOn: "Continuar"
+
+- runFlow:
+    when:
+      visible: "Quero viajar"
+    commands:
+      - tapOn: "Quero viajar"
+      - runFlow:
+          when:
+            visible: "Continuar"
+          commands:
+            - tapOn: "Continuar"
+
+- runFlow:
+    when:
+      visible: "Quero ser parceiro"
+    commands:
+      - tapOn: "Quero ser parceiro"
+      - runFlow:
+          when:
+            visible: "Continuar"
+          commands:
+            - tapOn: "Continuar"
+
+- runFlow:
+    when:
+      visible:
+        id: "driver-email-skip-btn"
+    commands:
+      - tapOn:
+          id: "driver-email-skip-btn"
+
+- runFlow:
+    when:
+      visible: "Complete seu e-mail"
+    commands:
+      - tapOn: "Depois"
+
+- runFlow:
+    when:
+      visible: "Allow While Using App"
+    commands:
+      - tapOn: "Allow While Using App"
+
+- runFlow:
+    when:
+      visible: "Permitir Enquanto Usa o App"
+    commands:
+      - tapOn: "Permitir Enquanto Usa o App"
+
+- runFlow:
+    when:
+      visible: "This is the developer menu"
+    commands:
+      - tapOn: "Continue"
+
+- runFlow:
+    when:
+      visible: "Continue"
+    commands:
+      - tapOn: "Continue"
+
+- runFlow:
+    when:
+      visible: "Agora Não"
+    commands:
+      - tapOn: "Agora Não"
+
+- runFlow:
+    when:
+      visible: "Not Now"
+    commands:
+      - tapOn: "Not Now"
+
+- extendedWaitUntil:
+    visible:
+      id: ${READY_SCREEN_ID}
+    timeout: 90000
+
+- assertVisible:
+    id: ${READY_SCREEN_ID}

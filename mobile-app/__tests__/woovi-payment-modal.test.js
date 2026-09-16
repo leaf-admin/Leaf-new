@@ -148,6 +148,200 @@ describe('WooviPaymentModal qaAutoConfirm', () => {
     expect(getQaPaymentProgressLabel('awaiting_backend')).not.toContain('awaiting_backend');
   });
 
+  it('renders a visual-only pending Pix fixture without polling or payment side effects', async () => {
+    const onClose = jest.fn();
+    const screen = render(
+      <WooviPaymentModal
+        visible
+        onClose={onClose}
+        onPaymentConfirmed={jest.fn()}
+        tripData={{
+          pickup: { add: 'Origem', lat: -22.92, lng: -43.18 },
+          drop: { add: 'Destino', lat: -22.91, lng: -43.17 },
+          carType: 'Leaf Plus',
+          estimatedFare: 22.43,
+        }}
+        estimates={{ estimateFare: 22.43 }}
+        passengerId="passenger_1"
+        prefilledPaymentData={{
+          chargeId: 'mock_review_prebooking-test',
+          rideId: 'mock_review_prebooking_ride-test',
+          qrCodeText: '000201010212mockreviewprebooking',
+          paymentLink: 'https://pix.leaf.local/prebooking-review',
+          amount: 22.43,
+          amountInCents: 2243,
+        }}
+        qaVisualOnlyPayment
+      />,
+    );
+
+    await act(async () => {
+      jest.advanceTimersByTime(200);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(screen.getByTestId('payment-modal-content')).toBeTruthy();
+    expect(screen.getByTestId('payment-modal-pending-state')).toBeTruthy();
+    expect(WooviService.processAdvancePayment).not.toHaveBeenCalled();
+    expect(WooviService.getPaymentStatus).not.toHaveBeenCalled();
+    screen.unmount();
+
+    await act(async () => {
+      jest.advanceTimersByTime(5000);
+      await Promise.resolve();
+    });
+    expect(WooviService.getPaymentStatus).not.toHaveBeenCalled();
+
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('fails closed instead of rendering a fake QR when Woovi returns no payment artifact', async () => {
+    WooviService.processAdvancePayment.mockResolvedValue({
+      success: true,
+      chargeId: 'charge_without_pix_artifact',
+      paymentIntentId: 'intent_without_pix_artifact',
+      rideId: 'temp_ride_without_pix_artifact',
+    });
+
+    const screen = render(
+      <WooviPaymentModal
+        visible
+        onClose={jest.fn()}
+        onPaymentConfirmed={jest.fn()}
+        tripData={{
+          pickup: { add: 'Origem' },
+          drop: { add: 'Destino' },
+          carType: 'Leaf Plus',
+          estimatedFare: 22.43,
+        }}
+        estimates={{ estimateFare: 22.43 }}
+        passengerId="passenger_1"
+      />,
+    );
+
+    await act(async () => {
+      jest.advanceTimersByTime(200);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('payment-modal-generation-error')).toBeTruthy();
+    });
+    expect(screen.queryByText('145px')).toBeNull();
+    expect(screen.queryByTestId('payment-modal-qr-container')).toBeNull();
+    expect(WooviService.getPaymentStatus).not.toHaveBeenCalled();
+  });
+
+  it('shows the provider artifact failure as a retryable payment error', async () => {
+    WooviService.processAdvancePayment.mockRejectedValue({
+      code: 'PAYMENT_PROVIDER_PIX_ARTIFACT_MISSING',
+      response: {
+        status: 502,
+        data: {
+          code: 'PAYMENT_PROVIDER_PIX_ARTIFACT_MISSING',
+          error: 'A Woovi não retornou QR Code, código Pix ou link de pagamento',
+        },
+      },
+      message: 'Não foi possível gerar o Pix agora. Tente novamente em instantes.',
+    });
+
+    const screen = render(
+      <WooviPaymentModal
+        visible
+        onClose={jest.fn()}
+        onPaymentConfirmed={jest.fn()}
+        tripData={{
+          pickup: { add: 'Origem' },
+          drop: { add: 'Destino' },
+          carType: 'Leaf Plus',
+          estimatedFare: 22.43,
+        }}
+        estimates={{ estimateFare: 22.43 }}
+        passengerId="passenger_1"
+      />,
+    );
+
+    await act(async () => {
+      jest.advanceTimersByTime(200);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('payment-modal-generation-error')).toBeTruthy();
+    });
+    expect(screen.queryByText('145px')).toBeNull();
+    expect(screen.queryByTestId('payment-modal-copy-code-button')).toBeNull();
+    screen.unmount();
+  });
+
+  it('does not use the Woovi payment link as QR text', async () => {
+    const screen = render(
+      <WooviPaymentModal
+        visible
+        onClose={jest.fn()}
+        onPaymentConfirmed={jest.fn()}
+        tripData={{
+          pickup: { add: 'Origem' },
+          drop: { add: 'Destino' },
+          carType: 'Leaf Plus',
+          estimatedFare: 22.43,
+        }}
+        estimates={{ estimateFare: 22.43 }}
+        passengerId="passenger_1"
+        prefilledPaymentData={{
+          chargeId: 'woovi_charge_link_only',
+          rideId: 'temp_ride_link_only',
+          amount: 22.43,
+          amountInCents: 2243,
+          qrCodeText: 'leaf://woovi-sandbox/pay/woovi_charge_link_only',
+          paymentLink: 'https://woovi-sandbox.com/pay/woovi_charge_link_only',
+        }}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('payment-modal-qr-unavailable')).toBeTruthy();
+    });
+    expect(screen.queryByTestId('payment-modal-copy-code-button')).toBeNull();
+    expect(screen.getByTestId('payment-modal-open-bank-button')).toBeTruthy();
+    expect(screen.queryByText('145px')).toBeNull();
+    screen.unmount();
+  });
+
+  it('keeps a provider QR image separate from the payment link', async () => {
+    const screen = render(
+      <WooviPaymentModal
+        visible
+        onClose={jest.fn()}
+        onPaymentConfirmed={jest.fn()}
+        tripData={{
+          pickup: { add: 'Origem' },
+          drop: { add: 'Destino' },
+          carType: 'Leaf Plus',
+          estimatedFare: 22.43,
+        }}
+        estimates={{ estimateFare: 22.43 }}
+        passengerId="passenger_1"
+        prefilledPaymentData={{
+          chargeId: 'woovi_charge_with_image',
+          rideId: 'temp_ride_with_image',
+          pixQRCode: 'https://api.woovi-sandbox.com/openpix/charge/woovi_charge_with_image/brcode/image',
+          paymentLink: 'https://woovi-sandbox.com/pay/woovi_charge_with_image',
+        }}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('payment-modal-qr-image')).toBeTruthy();
+    });
+    expect(screen.queryByTestId('payment-modal-qr-unavailable')).toBeNull();
+    expect(screen.queryByTestId('payment-modal-copy-code-button')).toBeNull();
+    screen.unmount();
+  });
+
   it('reopens the persisted charge without creating a second Pix charge', async () => {
     WooviService.processAdvancePayment.mockResolvedValue({
       success: true,
@@ -204,8 +398,8 @@ describe('WooviPaymentModal qaAutoConfirm', () => {
 	          quoteLockId: 'ql_persisted_1',
 	        }),
 	        quoteLockId: 'ql_persisted_1',
-	      })
-	    );
+      })
+    );
     firstRender.unmount();
 
     render(<WooviPaymentModal {...props} />);
@@ -397,6 +591,52 @@ describe('WooviPaymentModal qaAutoConfirm', () => {
       chargeId: 'charge_123',
       rideId: 'temp_ride_123',
     });
+  });
+
+  it('keeps visual-only QA charges pending without attempting a webhook', async () => {
+    WooviService.getPaymentStatus.mockResolvedValue({
+      success: true,
+      status: 'ACTIVE',
+    });
+
+    const screen = render(
+      <WooviPaymentModal
+        visible
+        onClose={jest.fn()}
+        onPaymentConfirmed={jest.fn()}
+        tripData={{
+          pickup: { add: 'Origem' },
+          drop: { add: 'Destino' },
+          carType: 'Leaf Plus',
+          estimatedFare: 7.25,
+        }}
+        estimates={{ estimateFare: 7.25 }}
+        passengerId="passenger_1"
+        passengerName="Passageira Leaf"
+        passengerEmail="passageira@leaf.app.br"
+        prefilledPaymentData={{
+          chargeId: 'mock_review_extension-proof-1',
+          paymentIntentId: 'intent_extension_proof_1',
+          rideId: 'booking-proof-passenger-1',
+          amount: 7.25,
+          amountInCents: 725,
+          qrCodeText: 'visual-only-pix-code',
+        }}
+        qaAutoConfirm
+      />,
+    );
+
+    await waitFor(() => {
+      expect(
+        screen.UNSAFE_getByProps({ testID: 'payment-modal-qa-debug' }).props.children,
+      ).toBe('Aguardando pagamento');
+    });
+
+    await act(async () => {
+      jest.advanceTimersByTime(1200);
+    });
+
+    expect(WooviService.simulateTestWebhook).not.toHaveBeenCalled();
   });
 
   it('keeps status polling failures silent while payment remains pending', async () => {
