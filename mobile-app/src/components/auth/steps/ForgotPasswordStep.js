@@ -25,6 +25,7 @@ const ForgotPasswordStep = ({ phoneNumber, onPasswordReset, onBack }) => {
     const [timer, setTimer] = useState(60);
     const [canResend, setCanResend] = useState(false);
     const [confirmation, setConfirmation] = useState(null);
+    const [verifiedOtp, setVerifiedOtp] = useState('');
     const [showPassword, setShowPassword] = useState(false);
     const [showConfirmPassword, setShowConfirmPassword] = useState(false);
     const inputRefs = useRef([]);
@@ -52,10 +53,15 @@ const ForgotPasswordStep = ({ phoneNumber, onPasswordReset, onBack }) => {
         setLoading(true);
         try {
             const result = await UserAuthService.requestPasswordReset(phoneNumber);
-            setConfirmation(result.confirmation);
+            setConfirmation(result.confirmation || {
+                verificationId: result.verificationId,
+                isCustomOtp: true,
+                channel: result.channel || 'whatsapp'
+            });
+            setVerifiedOtp('');
             setTimer(60);
             setCanResend(false);
-            Alert.alert('Sucesso', 'Código enviado para seu telefone!');
+            Alert.alert('Sucesso', 'Código enviado pelo WhatsApp!');
         } catch (error) {
             Logger.error('❌ Erro ao solicitar OTP:', error);
             if (error.message && error.message.includes('Muitas tentativas')) {
@@ -106,6 +112,16 @@ const ForgotPasswordStep = ({ phoneNumber, onPasswordReset, onBack }) => {
 
         setLoading(true);
         try {
+            if (confirmation?.isCustomOtp && confirmation?.verificationId) {
+                // O backend consome o desafio junto com a nova senha. Guardamos
+                // o código nesta etapa para não criar uma segunda confirmação
+                // Firebase nem deixar um token temporário no dispositivo.
+                setVerifiedOtp(code);
+                setStep(2);
+                setOtp(['', '', '', '', '', '']);
+                return;
+            }
+
             // Verificar OTP usando o método confirm do Firebase
             let credential;
             
@@ -150,9 +166,27 @@ const ForgotPasswordStep = ({ phoneNumber, onPasswordReset, onBack }) => {
             return;
         }
 
-	        setLoading(true);
-	        try {
-	            const currentUser = auth().currentUser;
+        setLoading(true);
+        try {
+            if (confirmation?.isCustomOtp) {
+                if (!verifiedOtp) {
+                    throw new Error('Código de recuperação não confirmado');
+                }
+
+                await UserAuthService.resetPassword(
+                    phoneNumber,
+                    confirmation.verificationId,
+                    verifiedOtp,
+                    newPassword
+                );
+                const userData = await UserAuthService.loginWithPassword(phoneNumber, newPassword);
+
+                Alert.alert('Sucesso', 'Senha alterada com sucesso!');
+                onPasswordReset?.(userData);
+                return;
+            }
+
+            const currentUser = auth().currentUser;
 	            if (currentUser) {
 	                await UserAuthService.setupPassword(phoneNumber, newPassword);
 	                

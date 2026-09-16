@@ -140,7 +140,7 @@ export function buildSerializableConfirmationMeta(confirmation) {
     return null;
   }
 
-  return {
+  const metadata = {
     verificationId: String(confirmation.verificationId || '').trim() || null,
     isCustomOtp: confirmation.isCustomOtp === true,
     isReviewAccount: confirmation.isReviewAccount === true,
@@ -148,6 +148,15 @@ export function buildSerializableConfirmationMeta(confirmation) {
     isTestNumber: confirmation.isTestNumber === true,
     source: confirmation.isCustomOtp ? 'custom_otp' : 'firebase_phone_auth',
   };
+
+  if (confirmation.channel) {
+    metadata.channel = confirmation.channel === 'sms' ? 'sms' : 'whatsapp';
+  }
+  if (Number.isFinite(Number(confirmation.expiresIn))) {
+    metadata.expiresIn = Number(confirmation.expiresIn);
+  }
+
+  return metadata;
 }
 
 export function resolveAuthFlowInitialStep(

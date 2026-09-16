@@ -205,10 +205,18 @@ else
   bad "Credenciais/OTP de review divergentes ou com 000000 inseguro"
 fi
 
-if rg -n "signInWithPhoneNumber" src/components/auth/steps/PhoneInputStep.js >/dev/null 2>&1; then
-  ok "Fluxo OTP real via Firebase Phone Auth encontrado"
+if rg -n "requestOtpWithFallback|/api/custom-otp/request-otp" src/components/auth/steps/PhoneInputStep.js >/dev/null 2>&1 \
+  && rg -n "signInWithCustomToken" src/components/auth/steps/OTPStep.js src/hooks/useAuth.js >/dev/null 2>&1; then
+  ok "Fluxo OTP real via WhatsApp/Leaf encontrado; sessão final usa Firebase custom token"
 else
-  bad "Fluxo OTP real via Firebase Phone Auth não encontrado"
+  bad "Fluxo OTP WhatsApp/Leaf com sessão Firebase custom token não encontrado"
+fi
+
+if rg -n "allowCustomOtpFallback" src/config/runtimeAccessPolicy.js src/components/auth/steps/PhoneInputStep.js >/dev/null 2>&1 \
+  && rg -n "signInWithPhoneNumber" src/components/auth/steps/PhoneInputStep.js >/dev/null 2>&1; then
+  ok "Fallback legado Firebase SMS presente somente atrás da política de ambiente controlado"
+else
+  bad "Fallback legado Firebase SMS não está explicitamente protegido"
 fi
 
 if rg -n "BACKGROUND_LOCATION_DISCLOSURE_ACCEPTED_KEY|driverBackgroundDisclosureVisible|locationType=\"background\"" src/screens/prototype/RobotaxiHomeScreen.js src/services/BackgroundLocationService.js src/components/PermissionExplanationModal.js >/dev/null 2>&1; then

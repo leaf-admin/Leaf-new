@@ -73,6 +73,7 @@ const OTPStep = ({ phoneNumber, confirmation, onVerified, onBack, progressMeta }
     const [currentConfirmation, setCurrentConfirmation] = useState(confirmation);
     const inputRefs = useRef([]);
     const verifyInFlightRef = useRef(false);
+    const otpChannelLabel = currentConfirmation?.channel === 'sms' ? 'SMS' : 'WhatsApp';
 
     useEffect(() => {
         setCurrentConfirmation(confirmation);
@@ -269,7 +270,7 @@ const OTPStep = ({ phoneNumber, confirmation, onVerified, onBack, progressMeta }
 
             if (error.message) {
                 if (error.message.includes('invalid') || error.message.includes('inválido')) {
-                    errorMessage = 'Código inválido. Verifique o código recebido por SMS e tente novamente.';
+                    errorMessage = `Código inválido. Verifique o código recebido pelo ${otpChannelLabel} e tente novamente.`;
                 } else if (error.message.includes('expired') || error.message.includes('expirado')) {
                     errorMessage = 'Código expirado. Solicite um novo código.';
                 } else if (
@@ -293,7 +294,7 @@ const OTPStep = ({ phoneNumber, confirmation, onVerified, onBack, progressMeta }
             verifyInFlightRef.current = false;
             setLoading(false);
         }
-    }, [otp, currentConfirmation, onVerified, loading, verifyOtpWithFallback, phoneNumber]);
+    }, [otp, currentConfirmation, onVerified, loading, verifyOtpWithFallback, phoneNumber, otpChannelLabel]);
 
     // Função para lidar com mudança de input
     const handleOtpChange = useCallback((value, index) => {
@@ -337,7 +338,9 @@ const OTPStep = ({ phoneNumber, confirmation, onVerified, onBack, progressMeta }
                 if (response.data && response.data.success) {
                     newConfirmation = {
                         verificationId: response.data.verificationId,
-                        isCustomOtp: true
+                        isCustomOtp: true,
+                        channel: response.data.channel || 'whatsapp',
+                        expiresIn: response.data.expiresIn || 300
                     };
                 } else {
                     throw new Error('Falha ao reenviar código.');
@@ -350,7 +353,7 @@ const OTPStep = ({ phoneNumber, confirmation, onVerified, onBack, progressMeta }
             setTimer(30);
             setCanResend(false);
             setOtp(['', '', '', '', '', '']);
-            Alert.alert('Código enviado', 'Enviamos um novo código por SMS.');
+            Alert.alert('Código enviado', `Enviamos um novo código pelo ${otpChannelLabel}.`);
         } catch (error) {
             Logger.error('Erro ao reenviar código:', error);
             Alert.alert('Erro', 'Não foi possível reenviar o código. Tente novamente.');
@@ -363,7 +366,7 @@ const OTPStep = ({ phoneNumber, confirmation, onVerified, onBack, progressMeta }
         <EditorialOnboardingScreen
             keyboard
             title={'Confirme\nseu celular'}
-            description="Digite o código de 6 dígitos que enviamos por SMS."
+            description={`Digite o código de 6 dígitos que enviamos pelo ${otpChannelLabel}.`}
             onBack={onBack}
             backTestID="auth-otp-back-btn"
             backAccessibilityLabel="auth-otp-back-btn"

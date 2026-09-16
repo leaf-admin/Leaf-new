@@ -253,7 +253,7 @@ Prazo prometido ao usuario:
 
 | Cenario | Sinais | N1 | N2 | Ferramentas |
 |---|---|---|---|---|
-| Nao recebe OTP/SMS | usuario nao consegue entrar, muitas tentativas | orientar rede, numero correto, aguardar cooldown, nao pedir codigo | checar rate limit/auth, logs de auth, provedor SMS | Usuarios, logs auth, `/api/admin/auth`, Firebase Auth |
+| Nao recebe OTP/WhatsApp | usuario nao consegue entrar, muitas tentativas | orientar rede, numero correto, aguardar cooldown, nao pedir codigo | checar rate limit/auth, logs de auth, entrega Meta WhatsApp | Usuarios, logs auth, `/api/admin/auth`, Firebase Auth |
 | OTP invalido | erro `INVALID_OTP` ou `AUTH/INVALID-VERIFICATION-CODE` | pedir novo codigo, orientar copiar sem espacos | investigar clock, numero, provider | App, Auth, friendly errors |
 | Sessao expirada | 401, `TOKEN_EXPIRED`, app pede login | orientar login novamente | se recorrente, validar refresh token/API | Usuarios, auth-service |
 | Conta com dados errados | nome/e-mail/telefone | orientar edicao no app se existir | alterar perfil apenas com politica e auditoria | Usuarios |
@@ -263,7 +263,7 @@ Prazo prometido ao usuario:
 Macros:
 
 ```text
-Entendi. Para proteger sua conta, eu nunca vou pedir sua senha ou codigo SMS. Vou confirmar seu cadastro pelo canal autenticado e verificar o status da sua sessao. Se precisar de analise tecnica, deixo o ticket atualizado com o prazo da proxima resposta.
+Entendi. Para proteger sua conta, eu nunca vou pedir sua senha ou codigo recebido pelo WhatsApp. Vou confirmar seu cadastro pelo canal autenticado e verificar o status da sua sessao. Se precisar de analise tecnica, deixo o ticket atualizado com o prazo da proxima resposta.
 ```
 
 ### 8.2 App, conexao e WebSocket

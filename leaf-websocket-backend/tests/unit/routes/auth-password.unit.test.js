@@ -450,7 +450,14 @@ describe('auth-password routes', () => {
     expect(response.status).toBe(200);
     expect(response.body.success).toBe(true);
     expect(response.body.otpBypassEnabled).toBe(false);
+    expect(response.body.channel).toBe('simulation');
     expect(redisPool.ensureConnection).toHaveBeenCalledTimes(1);
+    expect(mockRedisSet).toHaveBeenCalledWith(
+      expect.stringMatching(/^password_reset_otp:/),
+      expect.stringMatching(/^[a-f0-9]{64}$/),
+      'EX',
+      300
+    );
   });
 
   it('accepts static reset OTP for configured test phones even when APP_REVIEW is false', async () => {

@@ -5,8 +5,8 @@
 ### 🔐 Autenticação
 
 1. **`auth/01-login-customer-real.yaml`**
-   - Login com OTP real via Firebase Test Phone Numbers
-   - Valida fluxo de verificação de código (sem bypass)
+   - Login com OTP entregue pelo backend Leaf via WhatsApp Cloud API
+   - Confirma a sessão pelo Firebase custom token (sem credencial Meta no app)
    - Captura screenshots em cada etapa
 
 ### 🚗 Corridas
@@ -57,6 +57,11 @@ Os testes foram criados com seletores genéricos. **Você precisa ajustar:**
 3. **Timeouts** - Ajuste conforme velocidade do app
 4. **Fluxos** - Adapte conforme sua lógica de negócio
 
+Para executar o login sem bypass, configure no gateway `AUTH_OTP_PROVIDER=whatsapp`,
+as credenciais da Meta e um template `AUTHENTICATION` aprovado. Os valores de OTP
+documentados nos fluxos QA pertencem apenas aos perfis controlados e não substituem
+o smoke com um número autorizado no WhatsApp.
+
 ## 🔧 Adicionar testID nos Componentes
 
 Para tornar os testes mais robustos, adicione `testID`:
@@ -81,7 +86,6 @@ Depois use no teste:
 
 - `COMO_TESTAR_E_ANALISAR.md` - Guia completo
 - `GUIA_TESTES_E2E.md` - Documentação técnica
-
 
 
 

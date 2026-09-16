@@ -184,6 +184,7 @@ const applyRateLimit = (req, res, next) => {
     url.includes('/auth/register') ||
     url.includes('/auth/forgot') ||
     url.includes('/auth/reset-password') ||
+    url.includes('/custom-otp') ||
     url.includes('/login') ||
     url.includes('/register');
 

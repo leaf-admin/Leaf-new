@@ -246,7 +246,7 @@ class UserAuthService {
   /**
    * Inicia processo de reset de senha via OTP
    * @param {string} phoneNumber - Número de telefone
-   * @returns {Promise<Object>} - Confirmação do Firebase Phone Auth
+   * @returns {Promise<Object>} - Metadados do desafio OTP entregue pelo WhatsApp
    */
   static async requestPasswordReset(phoneNumber) {
     try {
@@ -260,14 +260,28 @@ class UserAuthService {
         throw new Error('Usuário não encontrado');
       }
 
-      // Fluxo principal via Firebase Phone Auth.
-      const confirmation = await auth().signInWithPhoneNumber(phoneNumber);
+      const response = await apiClient.post('/api/auth/password/reset/request', {
+        phone: this.normalizePhone(phoneNumber)
+      });
+      const data = response?.data || {};
+      if (!data.success || !data.verificationId) {
+        const error = new Error(data.error || 'Não foi possível enviar o código de recuperação.');
+        error.code = data.code || 'OTP_PROVIDER_NOT_CONFIGURED';
+        throw error;
+      }
 
       // Registrar tentativa
       await this.recordAttempt(phoneNumber, false); // false porque ainda não resetou
 
       return {
-        confirmation,
+        confirmation: {
+          verificationId: data.verificationId,
+          isCustomOtp: true,
+          channel: data.channel || 'whatsapp',
+          expiresIn: data.expiresIn || 300
+        },
+        verificationId: data.verificationId,
+        channel: data.channel || 'whatsapp',
         userId: user.uid
       };
     } catch (error) {
@@ -279,29 +293,29 @@ class UserAuthService {
   /**
    * Reseta senha após verificação do OTP
    * @param {string} phoneNumber - Número de telefone
-   * @param {string} verificationId - ID de verificação do Firebase
+   * @param {string} verificationId - ID do desafio OTP do backend
    * @param {string} otp - Código OTP
    * @param {string} newPassword - Nova senha
    * @returns {Promise<boolean>} - Sucesso da operação
    */
   static async resetPassword(phoneNumber, verificationId, otp, newPassword) {
     try {
-      // Verificar OTP via Firebase e autenticar temporariamente.
-      const credential = auth.PhoneAuthProvider.credential(verificationId, otp);
-      await auth().signInWithCredential(credential);
-
-      // Atualizar senha
-      const currentUser = auth().currentUser;
-      if (currentUser) {
-        await this.setupPassword(phoneNumber, newPassword);
-
-        // Registrar sucesso
-        await this.recordAttempt(phoneNumber, true);
-
-        return true;
+      const response = await apiClient.post('/api/auth/password/reset/confirm', {
+        phone: this.normalizePhone(phoneNumber),
+        verificationId,
+        otp,
+        password: newPassword,
+        confirmPassword: newPassword
+      });
+      const data = response?.data || {};
+      if (!data.success) {
+        const error = new Error(data.error || 'Não foi possível redefinir a senha.');
+        error.code = data.code || 'OTP_INVALID';
+        throw error;
       }
 
-      throw new Error('Erro ao resetar senha');
+      await this.recordAttempt(phoneNumber, true);
+      return true;
     } catch (error) {
       Logger.error('❌ Erro ao resetar senha:', error);
       await this.recordAttempt(phoneNumber, false);

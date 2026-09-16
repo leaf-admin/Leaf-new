@@ -40,6 +40,18 @@ describe('friendlyErrorMessages', () => {
     expect(msg).toBe('Servico temporariamente indisponivel. Tente novamente em alguns minutos.');
   });
 
+  test('maps CPF registration guards to safe onboarding messages', () => {
+    expect(toUserFriendlyMessage({ code: 'PROFILE_CPF_REQUIRED' }, { context: 'auth' })).toBe(
+      'Informe o CPF da CNH para concluir o cadastro.'
+    );
+    expect(toUserFriendlyMessage({ code: 'PROFILE_CPF_ALREADY_REGISTERED' }, { context: 'auth' })).toBe(
+      'Este CPF já está vinculado a outro cadastro.'
+    );
+    expect(toUserFriendlyMessage({ code: 'PROFILE_CPF_UNIQUENESS_UNAVAILABLE' }, { context: 'auth' })).toBe(
+      'Não foi possível confirmar o CPF agora. Tente novamente.'
+    );
+  });
+
   test('maps firebase auth too-many-requests code to a friendly rate limit message', () => {
     const msg = toUserFriendlyMessage(
       { code: 'auth/too-many-requests', message: 'Too many requests' },
