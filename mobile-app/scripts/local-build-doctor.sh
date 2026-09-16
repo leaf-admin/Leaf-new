@@ -37,6 +37,51 @@ check_cmd() {
   fi
 }
 
+check_java_17() {
+  local java_version
+  local java_major
+
+  if [[ -z "${JAVA_HOME:-}" || ! -x "${JAVA_HOME}/bin/java" ]]; then
+    fail "Java 17+: JAVA_HOME não resolve um executável Java válido"
+    return
+  fi
+
+  java_version="$("${JAVA_HOME}/bin/java" -version 2>&1 | sed -n 's/.*version "\([^"]*\)".*/\1/p' | head -n 1)"
+  if [[ -z "${java_version}" ]]; then
+    fail "Java 17+: não foi possível ler a versão de ${JAVA_HOME}"
+    return
+  fi
+
+  if [[ "${java_version}" == 1.* ]]; then
+    java_major="${java_version#1.}"
+    java_major="${java_major%%.*}"
+  else
+    java_major="${java_version%%.*}"
+  fi
+
+  if [[ "${java_major}" =~ ^[0-9]+$ ]] && (( java_major >= 17 )); then
+    ok "Java 17+: ${java_version} (${JAVA_HOME})"
+  else
+    fail "Java 17+: versão incompatível ${java_version} (${JAVA_HOME})"
+  fi
+}
+
+check_maestro() {
+  local maestro_bin="${MAESTRO_BIN:-${HOME}/.maestro/bin/maestro}"
+  local maestro_output
+
+  if [[ ! -x "${maestro_bin}" ]]; then
+    fail "Maestro: executável não encontrado ou sem permissão: ${maestro_bin}"
+    return
+  fi
+
+  if maestro_output="$("${maestro_bin}" --version 2>&1)"; then
+    ok "Maestro: ${maestro_output//$'\n'/ }"
+  else
+    fail "Maestro: não inicializou com Java 17 (${maestro_output//$'\n'/ })"
+  fi
+}
+
 check_pod_version() {
   local required_version="1.15.2"
   local current_version
@@ -192,7 +237,8 @@ check_cmd pod "CocoaPods"
 check_pod_version
 check_ios_signing_assets
 check_ios_development_team
-check_cmd java "Java 17+"
+check_java_17
+check_maestro
 check_cmd adb "Android platform-tools (adb)"
 check_cmd sdkmanager "Android cmdline-tools (sdkmanager)"
 

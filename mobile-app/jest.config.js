@@ -7,7 +7,11 @@ module.exports = {
         throwOnModuleCollision: false,
     },
     modulePathIgnorePatterns: [
+        "<rootDir>/android/",
         "<rootDir>/ios/build/",
+        "<rootDir>/QA/",
+        "<rootDir>/dist/",
+        "<rootDir>/test-results/",
         "<rootDir>/test-build-final-success/",
         "<rootDir>/playwright-report/",
     ],

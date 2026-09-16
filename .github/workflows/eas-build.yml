@@ -66,6 +66,7 @@ jobs:
       - name: Validate production runtime guard
         env:
           NODE_ENV: production
+          CPF_REVIEW_HMAC_KEY: ci-test-only-cpf-review-key-not-for-production
           WOOVI_ENVIRONMENT: production
           WOOVI_BASE_URL: https://api.woovi.com
           WOOVI_API_TOKEN: ci-token-placeholder

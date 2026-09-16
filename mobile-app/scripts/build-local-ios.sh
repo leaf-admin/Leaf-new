@@ -16,7 +16,7 @@ IOS_CODE_SIGN_STYLE="${IOS_CODE_SIGN_STYLE:-Automatic}"
 FORCE_SIGNED_ARCHIVE="${FORCE_SIGNED_ARCHIVE:-0}"
 IOS_ALLOW_PROVISIONING_DEVICE_REGISTRATION="${IOS_ALLOW_PROVISIONING_DEVICE_REGISTRATION:-1}"
 IOS_SIMULATOR_CONFIGURATION="${IOS_SIMULATOR_CONFIGURATION:-Release}"
-IOS_SIMULATOR_UDID="${IOS_SIMULATOR_UDID:-195D2C57-87DC-4953-ABF1-4FD351ADBBEF}"
+IOS_SIMULATOR_UDID="${IOS_SIMULATOR_UDID:-6BC9EC30-C939-4598-A85D-A9E071E90CE5}"
 
 ensure_ios_native() {
   if [[ -d "${PROJECT_DIR}/ios" ]]; then
@@ -136,9 +136,10 @@ run_xcodebuild_with_smithy_retry() {
   ensure_smithy_codegen_cli_alias "${configuration}" || true
   if "${command[@]}"; then
     return 0
+  else
+    local exit_code=$?
   fi
 
-  local exit_code=$?
   if ensure_smithy_codegen_cli_alias "${configuration}"; then
     echo "↻ Reexecutando xcodebuild após corrigir caminho do SmithyCodegenCLI..."
     "${command[@]}"
@@ -461,6 +462,14 @@ main() {
         /usr/libexec/PlistBuddy -c "Set :EXUpdatesEnabled false" "${expo_plist_path}" >/dev/null 2>&1 || true
         /usr/libexec/PlistBuddy -c "Set :EXUpdatesCheckOnLaunch NEVER" "${expo_plist_path}" >/dev/null 2>&1 || true
         /usr/libexec/PlistBuddy -c "Delete :EXUpdatesURL" "${expo_plist_path}" >/dev/null 2>&1 || true
+      fi
+      if ! codesign --force --sign - --timestamp=none --generate-entitlement-der "${built_app_path}" >/dev/null 2>&1; then
+        echo "❌ Não foi possível reassinar o app iOS do simulador após ajustar o Expo.plist."
+        exit 1
+      fi
+      if ! codesign --verify --deep --strict "${built_app_path}" >/dev/null 2>&1; then
+        echo "❌ Assinatura inválida no app iOS do simulador após o build."
+        exit 1
       fi
       assert_ios_app_artifact "${built_app_path}" "simulator"
       echo "✅ Build iOS simulator concluída em ${PROJECT_DIR}/ios/build"
