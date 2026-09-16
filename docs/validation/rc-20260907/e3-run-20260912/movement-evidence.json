@@ -1,0 +1,41 @@
+{
+  "source": "xcrun simctl location",
+  "deviceUdid": "0DA1FB5E-2308-4F40-87DD-A8C04F7E7878",
+  "rideId": "booking_1789188861310_3tEQ8pQ2QzeWbMKhLGsXHHhnOGL2",
+  "routeSource": "backend routeCoordinates",
+  "points": [
+    [
+      -22.97081,
+      -43.18362
+    ],
+    [
+      -22.97513,
+      -43.18744
+    ],
+    [
+      -22.98119,
+      -43.18982
+    ],
+    [
+      -22.98492,
+      -43.19078
+    ],
+    [
+      -22.98661,
+      -43.203
+    ],
+    [
+      -22.98661,
+      -43.21958
+    ],
+    [
+      -22.9842698,
+      -43.223168
+    ]
+  ],
+  "finalDestinationFromBooking": {
+    "lat": -22.9842698,
+    "lng": -43.223168,
+    "add": "Rio de Janeiro - RJ, Brasil"
+  }
+}

@@ -1,0 +1,89 @@
+{
+  "history": [
+    {
+      "step": "map_route_animation",
+      "data": {
+        "phase": "reset",
+        "routeSource": null,
+        "routeSynthetic": false,
+        "configuredDurationMs": 0,
+        "routePointCount": 0,
+        "reducedMotion": false,
+        "reason": "no_route",
+        "visiblePointCount": 0
+      },
+      "at": "2026-09-12T04:38:04.314Z"
+    },
+    {
+      "step": "map_route_animation",
+      "data": {
+        "phase": "reset",
+        "routeSource": null,
+        "routeSynthetic": false,
+        "configuredDurationMs": 0,
+        "routePointCount": 0,
+        "reducedMotion": false,
+        "reason": "no_route",
+        "visiblePointCount": 0
+      },
+      "at": "2026-09-12T04:38:04.316Z"
+    },
+    {
+      "step": "map_route_animation",
+      "data": {
+        "phase": "reset",
+        "routeSource": null,
+        "routeSynthetic": false,
+        "configuredDurationMs": 0,
+        "routePointCount": 0,
+        "reducedMotion": false,
+        "reason": "no_route",
+        "visiblePointCount": 0
+      },
+      "at": "2026-09-12T04:38:04.317Z"
+    },
+    {
+      "step": "map_route_animation",
+      "data": {
+        "phase": "reset",
+        "routeSource": null,
+        "routeSynthetic": false,
+        "configuredDurationMs": 0,
+        "routePointCount": 0,
+        "reducedMotion": false,
+        "reason": "no_route",
+        "visiblePointCount": 0
+      },
+      "at": "2026-09-12T04:38:04.318Z"
+    },
+    {
+      "step": "map_route_animation",
+      "data": {
+        "phase": "reset",
+        "routeSource": null,
+        "routeSynthetic": false,
+        "configuredDurationMs": 0,
+        "routePointCount": 0,
+        "reducedMotion": false,
+        "reason": "no_route",
+        "visiblePointCount": 0
+      },
+      "at": "2026-09-12T04:38:05.102Z"
+    },
+    {
+      "step": "map_route_animation",
+      "data": {
+        "phase": "reset",
+        "routeSource": null,
+        "routeSynthetic": false,
+        "configuredDurationMs": 0,
+        "routePointCount": 0,
+        "reducedMotion": false,
+        "reason": "no_route",
+        "visiblePointCount": 0
+      },
+      "at": "2026-09-12T04:38:05.326Z"
+    }
+  ],
+  "parseError": null
+}

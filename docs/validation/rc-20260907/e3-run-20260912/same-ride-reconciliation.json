@@ -1,0 +1,317 @@
+{
+  "contract": "same_ride_reconciliation_v1",
+  "evidenceLevel": "E3",
+  "integrated": true,
+  "ok": true,
+  "status": "PASS",
+  "rideId": "booking_1789188861310_3tEQ8pQ2QzeWbMKhLGsXHHhnOGL2",
+  "allowedRideIds": [
+    "booking_1789188861310_3tEQ8pQ2QzeWbMKhLGsXHHhnOGL2",
+    "temp_ride_session_4c8c0d5f5482f4f0bf53c13b42b8"
+  ],
+  "sources": {
+    "quote": {
+      "present": true,
+      "rideIds": [
+        "booking_1789188861310_3tEQ8pQ2QzeWbMKhLGsXHHhnOGL2"
+      ],
+      "amount": {
+        "cents": 1667,
+        "path": "passengerPaidCents",
+        "unit": "cents",
+        "sourcePath": "quote.root.passengerPaidCents"
+      }
+    },
+    "payment": {
+      "present": true,
+      "rideIds": [
+        "booking_1789188861310_3tEQ8pQ2QzeWbMKhLGsXHHhnOGL2",
+        "temp_ride_session_4c8c0d5f5482f4f0bf53c13b42b8"
+      ],
+      "amount": {
+        "cents": 1667,
+        "path": "amountInCents",
+        "unit": "cents",
+        "sourcePath": "payment.root.amountInCents"
+      },
+      "environment": {
+        "value": "sandbox",
+        "path": "providerEnvironment",
+        "sourcePath": "payment.root.providerEnvironment"
+      },
+      "status": {
+        "value": "COMPLETED",
+        "path": "status",
+        "sourcePath": "payment.root.status"
+      }
+    },
+    "receipt": {
+      "present": true,
+      "rideIds": [
+        "booking_1789188861310_3tEQ8pQ2QzeWbMKhLGsXHHhnOGL2"
+      ],
+      "amount": {
+        "cents": 1667,
+        "path": "financial.totalPaid.amount",
+        "unit": "brl",
+        "sourcePath": "receipt.root.financial.totalPaid.amount"
+      }
+    },
+    "dashboard": {
+      "present": true,
+      "rideIds": [
+        "booking_1789188861310_3tEQ8pQ2QzeWbMKhLGsXHHhnOGL2"
+      ],
+      "amount": {
+        "cents": 1667,
+        "path": "dashboard.sourceDocuments.paymentDistribution.calculation.financialContract.passengerPaidCents"
+      },
+      "snapshotPath": "dashboard.sourceDocuments.paymentDistribution.calculation.financialContract"
+    },
+    "ledger": {
+      "present": true,
+      "rideIds": [
+        "temp_ride_session_4c8c0d5f5482f4f0bf53c13b42b8",
+        "booking_1789188861310_3tEQ8pQ2QzeWbMKhLGsXHHhnOGL2"
+      ],
+      "eventTypes": [
+        "payment_received",
+        "ride_settlement"
+      ]
+    }
+  },
+  "checks": [
+    {
+      "name": "required_sources_present",
+      "status": "PASS",
+      "details": {
+        "sourcePresence": {
+          "quote": true,
+          "payment": true,
+          "receipt": true,
+          "dashboard": true,
+          "ledger": true
+        },
+        "missingSources": []
+      }
+    },
+    {
+      "name": "ride_id_defined",
+      "status": "PASS",
+      "details": {
+        "rideId": "booking_1789188861310_3tEQ8pQ2QzeWbMKhLGsXHHhnOGL2"
+      }
+    },
+    {
+      "name": "same_ride_identity",
+      "status": "PASS",
+      "details": {
+        "canonicalRideId": "booking_1789188861310_3tEQ8pQ2QzeWbMKhLGsXHHhnOGL2",
+        "allowedRideIds": [
+          "booking_1789188861310_3tEQ8pQ2QzeWbMKhLGsXHHhnOGL2",
+          "temp_ride_session_4c8c0d5f5482f4f0bf53c13b42b8"
+        ],
+        "sourceIdentity": {
+          "quote": [
+            "booking_1789188861310_3tEQ8pQ2QzeWbMKhLGsXHHhnOGL2"
+          ],
+          "payment": [
+            "booking_1789188861310_3tEQ8pQ2QzeWbMKhLGsXHHhnOGL2",
+            "temp_ride_session_4c8c0d5f5482f4f0bf53c13b42b8"
+          ],
+          "receipt": [
+            "booking_1789188861310_3tEQ8pQ2QzeWbMKhLGsXHHhnOGL2"
+          ],
+          "dashboard": [
+            "booking_1789188861310_3tEQ8pQ2QzeWbMKhLGsXHHhnOGL2"
+          ],
+          "ledger": [
+            "temp_ride_session_4c8c0d5f5482f4f0bf53c13b42b8",
+            "booking_1789188861310_3tEQ8pQ2QzeWbMKhLGsXHHhnOGL2"
+          ]
+        },
+        "identityFailures": []
+      }
+    },
+    {
+      "name": "gross_amounts_present_and_equal",
+      "status": "PASS",
+      "details": {
+        "values": [
+          {
+            "source": "quote",
+            "cents": 1667
+          },
+          {
+            "source": "pix",
+            "cents": 1667
+          },
+          {
+            "source": "receipt",
+            "cents": 1667
+          },
+          {
+            "source": "dashboard",
+            "cents": 1667
+          }
+        ],
+        "missing": []
+      }
+    },
+    {
+      "name": "pix_provider_sandbox",
+      "status": "PASS",
+      "details": {
+        "environment": "sandbox"
+      }
+    },
+    {
+      "name": "pix_confirmed",
+      "status": "PASS",
+      "details": {
+        "confirmed": true,
+        "status": "COMPLETED",
+        "statuses": [
+          "COMPLETED",
+          "CONFIRMED"
+        ]
+      }
+    },
+    {
+      "name": "dashboard_backend_final_snapshot",
+      "status": "PASS",
+      "details": {
+        "snapshotPath": "dashboard.sourceDocuments.paymentDistribution.calculation.financialContract",
+        "snapshot": {
+          "passengerPaidCents": 1667,
+          "tollFeeCents": 0,
+          "operationalFeeCents": 99,
+          "paymentIntermediationFeeCents": 50,
+          "subscriptionRetainedFeeCents": 0,
+          "driverNetAmountCents": 1518,
+          "retainedTotalCents": 149,
+          "allocatedTotalCents": 1667,
+          "authoritativeSnapshot": true,
+          "financialSnapshotSource": "backend_final",
+          "balanced": true
+        }
+      }
+    },
+    {
+      "name": "receipt_backend_final_provenance",
+      "status": "PASS",
+      "details": {
+        "authoritativeSnapshot": true,
+        "financialSnapshotSource": "backend_final"
+      }
+    },
+    {
+      "name": "dashboard_source_documents_complete",
+      "status": "PASS",
+      "details": {
+        "apiSuccess": true,
+        "reportOk": true,
+        "sourceDocuments": {
+          "ridePayment": true,
+          "paymentHolding": true,
+          "paymentDistribution": true
+        }
+      }
+    },
+    {
+      "name": "financial_context_sandbox",
+      "status": "PASS",
+      "details": {
+        "contextValues": [
+          "sandbox"
+        ],
+        "hasSandboxContext": true,
+        "hasProductionContext": false
+      }
+    },
+    {
+      "name": "ledger_payment_and_settlement_posted",
+      "status": "PASS",
+      "details": {
+        "eventCount": 2,
+        "eventTypes": [
+          "payment_received",
+          "ride_settlement"
+        ],
+        "paymentStatus": "posted",
+        "settlementStatus": "posted"
+      }
+    },
+    {
+      "name": "ledger_and_documents_amounts_equal",
+      "status": "PASS",
+      "details": {
+        "values": [
+          {
+            "source": "pix",
+            "cents": 1667
+          },
+          {
+            "source": "ledger.payment_received",
+            "cents": 1667
+          },
+          {
+            "source": "ledger.ride_settlement",
+            "cents": 1667
+          },
+          {
+            "source": "dashboard.payment_document",
+            "cents": 1667
+          },
+          {
+            "source": "dashboard.distribution_document",
+            "cents": 1667
+          }
+        ],
+        "missing": []
+      }
+    },
+    {
+      "name": "receipt_components_match_backend_final",
+      "status": "PASS",
+      "details": {
+        "backendFinal": {
+          "tollFeeCents": 0,
+          "operationalFeeCents": 99,
+          "paymentIntermediationFeeCents": 50,
+          "subscriptionRetainedFeeCents": 0,
+          "driverNetAmountCents": 1518
+        },
+        "receipt": {
+          "tollFeeCents": 0,
+          "operationalFeeCents": 99,
+          "paymentIntermediationFeeCents": 50,
+          "driverNetAmountCents": 1518
+        },
+        "componentMismatches": []
+      }
+    },
+    {
+      "name": "ledger_settlement_components_match_backend_final",
+      "status": "PASS",
+      "details": {
+        "backendFinal": {
+          "driverNetAmountCents": 1518,
+          "operationalFeeCents": 99,
+          "paymentIntermediationFeeCents": 50,
+          "subscriptionRetainedFeeCents": 0
+        },
+        "ledger": {
+          "driverNetAmountCents": 1518,
+          "operationalFeeCents": 99,
+          "paymentIntermediationFeeCents": 50,
+          "subscriptionRetainedFeeCents": 0
+        },
+        "componentMismatches": []
+      }
+    }
+  ],
+  "failures": [],
+  "failureCodes": [],
+  "generatedAt": "2026-09-12T05:15:36.979Z"
+}

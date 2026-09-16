@@ -1,0 +1,140 @@
+{
+  "customer": {
+    "email": "",
+    "id": "3tEQ8pQ2QzeWbMKhLGsXHHhnOGL2",
+    "name": "QA Passageiro SmokeLeafReview2026",
+    "phone": ""
+  },
+  "driver": {
+    "fullName": "Motorista Leaf",
+    "id": "DV4cwZvql3T3pI3lnKYQwQVALKZ2",
+    "name": "Motorista Leaf",
+    "vehicle": {
+      "brand": "VW",
+      "brandModel": "VW NOVA SAVEIRO RB MBVS",
+      "model": "NOVA SAVEIRO RB MBVS",
+      "plate": "QQO0G16",
+      "type": "Leaf Plus"
+    }
+  },
+  "financial": {
+    "breakdown": {
+      "driverAmount": {
+        "amount": 15.18,
+        "formatted": "R$ 15,18"
+      },
+      "driverTollPassThrough": {
+        "amount": 0,
+        "formatted": "R$ 0,00",
+        "passThrough": true
+      },
+      "operationalCost": {
+        "amount": 0.99,
+        "formatted": "R$ 0,99"
+      },
+      "tollPassThrough": {
+        "amount": 0,
+        "formatted": "R$ 0,00",
+        "passThrough": true
+      },
+      "tripFare": {
+        "amount": 16.67,
+        "formatted": "R$ 16,67"
+      },
+      "wooviFee": {
+        "amount": 0.5,
+        "formatted": "R$ 0,50"
+      }
+    },
+    "totalPaid": {
+      "amount": 16.67,
+      "formatted": "R$ 16,67"
+    },
+    "totals": {
+      "customerPaid": 16.67,
+      "driverReceived": 15.18,
+      "driverTollPassThrough": 0,
+      "leafOperational": 0.99,
+      "retainedFees": 1.49,
+      "tollPassThrough": 0,
+      "wooviFee": 0.5
+    }
+  },
+  "financialContext": {
+    "version": 1,
+    "namespace": "sandbox",
+    "classification": "sandbox_test_user",
+    "providerEnvironment": "sandbox",
+    "paymentProfileId": "qa-test-users-sandbox-durable",
+    "paymentProfileSource": "firestore",
+    "testUserSandbox": true,
+    "contextId": "d67d0ebade061681aa56c2d4080a10c66fdfdab2b9e840b0f13d0bab21143cbe"
+  },
+  "financialContextId": "d67d0ebade061681aa56c2d4080a10c66fdfdab2b9e840b0f13d0bab21143cbe",
+  "financialNamespace": "sandbox",
+  "hash": "77B58368A57F9E6893721434AE6FF2FE",
+  "issueDate": "2026-09-12T04:57:30.072Z",
+  "issueTimestamp": 1789189050072,
+  "legal": {
+    "cnpj": "54.027.374/0001-20",
+    "companyName": "LEAF - Freedom Tecnologia e Serviços LTDA",
+    "note": "Este documento não é uma nota fiscal. Para solicitar nota fiscal, entre em contato conosco.",
+    "privacyPolicy": "https://www.leaf.app.br/privacidade"
+  },
+  "metadata": {
+    "authoritativeSnapshot": true,
+    "financialSnapshotSource": "backend_final",
+    "generatedBy": "Leaf Receipt Service",
+    "status": "COMPLETED",
+    "version": "2.0"
+  },
+  "payment": {
+    "method": "PIX",
+    "processedAt": "2026-09-12T04:57:30.060Z",
+    "status": "in_holding",
+    "transactionId": ""
+  },
+  "receiptId": "LEAF-booking_1789188861310_3tEQ8pQ2QzeWbMKhLGsXHHhnOGL2",
+  "reference": "BOOKIN",
+  "rideId": "booking_1789188861310_3tEQ8pQ2QzeWbMKhLGsXHHhnOGL2",
+  "savedAt": "2026-09-12T04:57:30.073Z",
+  "savedTimestamp": 1789189050073,
+  "title": "Sua corrida para Rio de Janeiro - RJ, Brasil, em 12/09/2026 04:57",
+  "trip": {
+    "date": "12/09/2026",
+    "dateTime": "2026-09-12T04:57:30.060Z",
+    "distance": {
+      "actual": 6.23,
+      "estimated": 6.23,
+      "formatted": "6.23 km",
+      "unit": "km"
+    },
+    "dropoff": {
+      "address": "Rio de Janeiro - RJ, Brasil",
+      "coordinates": {
+        "lat": -22.9842698,
+        "lng": -43.223168
+      },
+      "timestamp": "2026-09-12T04:57:30.060Z"
+    },
+    "duration": 12,
+    "durationFormatted": "12min",
+    "mapImage": {
+      "redacted": true,
+      "reason": "provider URL omitted from evidence"
+    },
+    "pickup": {
+      "address": "Av. Atlântica, 101 - Copacabana, Rio de Janeiro - RJ, 22031-072, Brasil",
+      "coordinates": {
+        "lat": -22.97104,
+        "lng": -43.18349
+      },
+      "timestamp": "2026-09-12T04:55:27.573Z"
+    },
+    "time": "04:57"
+  },
+  "source": "passenger_app_receipt_backend",
+  "canonicalRideId": "booking_1789188861310_3tEQ8pQ2QzeWbMKhLGsXHHhnOGL2",
+  "bookingId": "booking_1789188861310_3tEQ8pQ2QzeWbMKhLGsXHHhnOGL2",
+  "providerEnvironment": "sandbox"
+}

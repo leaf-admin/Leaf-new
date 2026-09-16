@@ -1,0 +1,86 @@
+{
+  "capturedAt": "2026-09-15T13:22:39-03:00",
+  "validationCapturedAt": "2026-09-15T16:30:45Z",
+  "branch": "codex/uiux-integration-validation",
+  "head": "c5cf21fd4830108dc17bc8fad872fdadc2877064",
+  "worktree": "dirty — build includes the local deltas listed below; no clean release SHA was declared",
+  "environment": {
+    "host": "macOS local",
+    "xcode": "Xcode 26.6 (17F113)",
+    "sdk": "iPhoneSimulator26.5",
+    "configuration": "Release",
+    "mode": "simulator"
+  },
+  "command": "cd mobile-app && bash scripts/build-local-ios.sh simulator",
+  "result": "PASS",
+  "app": {
+    "bundleId": "br.com.leaf.ride",
+    "version": "1.0.4",
+    "buildNumber": "35",
+    "path": "mobile-app/ios/build/Build/Products/Release-iphonesimulator/Leaf.app",
+    "bundleSizeBytes": 173551616,
+    "binarySizeBytes": 126652416,
+    "bundleFileSizeBytes": 9410188,
+    "binarySha256": "e6cb6934dfc083f04581bc2509fe2e9688b7043cd9ab400cf0d0695c86714c19",
+    "bundleSha256": "27a22715398ed44f1c33a74336cce6072d6ad7f0544c6fb7f14ffb8540e4cc79",
+    "expoUpdatesEnabled": false,
+    "expoUpdatesChannel": "production",
+    "embeddedConfigValidated": true,
+    "widgetVersionValidated": true,
+    "microphoneUsageDescriptionValidated": true,
+    "codesignVerified": true
+  },
+  "devices": [
+    {
+      "role": "passenger",
+      "name": "Leaf iPhone 17 Dedicated",
+      "udid": "6BC9EC30-C939-4598-A85D-A9E071E90CE5",
+      "state": "Booted",
+      "installed": true,
+      "launched": true,
+      "screenshot": {
+        "path": "mobile-app/test-results/e3-full-20260915/local-build-passenger-home.png",
+        "sha256": "39db52c5eee1a8da3579964fbed54aec230e089dc5dfd7e69d23eaa28afc47d6"
+      }
+    },
+    {
+      "role": "driver",
+      "name": "Leaf iPhone 16 Driver E3",
+      "udid": "D148E5B1-7E4B-4FA7-8ECD-D5E1CB924438",
+      "state": "Booted",
+      "installed": true,
+      "launched": true,
+      "screenshot": {
+        "path": "mobile-app/test-results/e3-full-20260915/local-build-driver-home.png",
+        "sha256": "ed905875cc9abdb699cc2b6fedb152523df9ec7903faeff94ea5cdf6a90edf97"
+      }
+    }
+  ],
+  "validation": {
+    "mobileFocused": "4 suites / 60 tests PASS",
+    "mobileFull": "157 suites / 1301 tests PASS",
+    "mobileProductionGuards": "PASS",
+    "backendWoovi": "3 suites / 50 tests PASS",
+    "backendKyc": "14 suites / 364 tests PASS",
+    "dashboardQa": "PASS — contracts, lint, build de 28 páginas e smoke protegido",
+    "governance": "PASS",
+    "secretScan": "PASS",
+    "hardcodedSecretGuard": "PASS",
+    "gitDiffCheck": "PASS",
+    "stagingHealth": "API and socket healthy; Firestore 199 ms; Redis 0-1 ms; RTDB 2 ms"
+  },
+  "validationCommands": {
+    "mobileFocused": "npm --prefix mobile-app run test:unit -- --runTestsByPath __tests__/websocket-manager-create-booking.test.js __tests__/driver-home-overlay.test.js __tests__/passenger-home-overlay.test.js __tests__/prototype-runtime-session-sanitize.test.js",
+    "backendWoovi": "npm --prefix leaf-websocket-backend run test:unit -- --runInBand tests/unit/routes/woovi-webhook-guards.unit.test.js tests/unit/scripts/smoke-woovi-sandbox.unit.test.js tests/unit/config/woovi-config.unit.test.js",
+    "backendKyc": "npm --prefix leaf-websocket-backend run test:unit -- --runInBand tests/unit/services/aws-kyc-admission-controller.unit.test.js tests/unit/services/aws-kyc-cost-budget-authority.unit.test.js tests/unit/services/aws-kyc-cost-guard-service.unit.test.js tests/unit/services/kyc-identity-review-workflow-service.unit.test.js tests/unit/services/kyc-identity-review-case-service.unit.test.js tests/unit/services/kyc-policy-service.unit.test.js tests/unit/services/kyc-runtime-scope-service.unit.test.js tests/unit/services/kyc-runtime-scope-wiring.unit.test.js tests/unit/services/kyc-biometric-production-policy.unit.test.js tests/unit/services/kyc-driver-status-service.unit.test.js tests/unit/services/kyc-failed-biometric-evidence-service.unit.test.js tests/unit/scripts/preflight-kyc-aws-driver.unit.test.js tests/unit/routes/kyc-routes-auth.unit.test.js tests/unit/routes/dashboard-kyc-identity-review-boundary.unit.test.js",
+    "dashboard": "npm --prefix leaf-dashboard-js run qa:backoffice",
+    "governance": "npm run governance:check",
+    "security": "node scripts/maintenance/security/scan-secrets.cjs --tracked-only && bash leaf-websocket-backend/scripts/tests/assert-no-hardcoded-secrets.sh",
+    "integrity": "git diff --check"
+  },
+  "limitations": [
+    "This artifact is an iOS simulator build; it does not replace a physical-device run if the release runbook requires one.",
+    "The E3 payment and settlement evidence remains Woovi sandbox evidence.",
+    "Real AWS liveness/face compare and a production-signed Woovi webhook remain external-provider gates."
+  ]
+}

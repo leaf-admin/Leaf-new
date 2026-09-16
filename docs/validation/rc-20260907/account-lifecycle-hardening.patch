@@ -1,0 +1,980 @@
+--- a/leaf-websocket-backend/routes/account-routes.js
++++ b/leaf-websocket-backend/routes/account-routes.js
+@@ -2,6 +2,7 @@
+ const router = express.Router();
+ const admin = require('firebase-admin');
+ const { logger } = require('../utils/logger');
++const { assertAccountWritable, saveAccountProfile, projectRealtimeProfile, runAccountDeletion } = require('../services/account-lifecycle-service');
+ const redisPool = require('../utils/redis-pool');
+ const {
+   buildVehicleOcrUpdates,
+@@ -679,7 +680,7 @@
+   try {
+     const db = admin.database();
+     const serialized = serializeForClient(profile);
+-    await db.ref(`users/${userId}`).update({
++    await projectRealtimeProfile(userId, {
+       ...serialized,
+       uid: userId,
+       updatedAt: serialized.updatedAt || new Date().toISOString()
+@@ -702,21 +703,11 @@
+     return;
+   }
+
+-  await admin.database().ref(`users/${userId}`).update({
++  await projectRealtimeProfile(userId, {
+     usertype: canonicalRole,
+     userType: canonicalRole,
+     role: canonicalRole
+   });
+-}
+-
+-async function removeRealtimeProfile(userId) {
+-  try {
+-    const db = admin.database();
+-    await db.ref(`users/${userId}`).remove();
+-  } catch (error) {
+-    logger.warn(`Falha ao remover perfil legado do RTDB para ${userId}: ${error.message}`);
+-    throw error;
+-  }
+ }
+
+ async function resolveAccountProfile(userId, tokenClaims) {
+@@ -745,7 +736,7 @@
+     trustIncomingStatus: true
+   });
+
+-  await userRef.set(migratedProfile, { merge: true });
++  await saveAccountProfile({ userId, profile: migratedProfile });
+
+   return {
+     profile: composeProfileRecord(userId, {}, legacyProfile, tokenClaims, {
+@@ -808,6 +799,7 @@
+     }
+
+     const existingResult = await resolveAccountProfile(userId, req.user);
++    assertAccountWritable(existingResult.profile || {});
+     const isFirstProfileCompletion =
+       !existingResult.profile || isIncompleteOtpBootstrapProfile(existingResult.profile);
+     const hasIncomingCpf = Object.prototype.hasOwnProperty.call(incomingProfile, 'cpf');
+@@ -823,10 +815,11 @@
+         );
+       }
+     } catch (error) {
+-      if (error instanceof CpfIdentityError) {
++      if (error instanceof CpfIdentityError || ['ACCOUNT_DELETION_IN_PROGRESS', 'PROFILE_CPF_REVIEW_REQUIRED', 'CPF_REVIEW_CONFIG_UNAVAILABLE'].includes(error.code)) {
+         return res.status(error.status || 400).json({
+           success: false,
+           code: error.code,
++        reviewReference: error.reviewReference,
+           message: error.message
+         });
+       }
+@@ -923,11 +916,12 @@
+         firestore: admin.firestore(),
+         realtimeDb: admin.database(),
+         userId,
+-        cpf: normalizedCpf.digits
+-      });
+-    }
+-
+-    await admin.firestore().collection('users').doc(userId).set(nextProfile, { merge: true });
++        cpf: normalizedCpf.digits,
++        profile: nextProfile
++      });
++    } else {
++      await saveAccountProfile({ userId, profile: nextProfile });
++    }
+     await projectCanonicalDriverRoleToRealtimeDB(userId, nextProfile);
+     await mirrorProfileToRealtimeDB(userId, nextProfile);
+     const storedDoc = await admin.firestore().collection('users').doc(userId).get();
+@@ -946,10 +940,11 @@
+       mirroredToRealtimeDb: legacyProfileRtdbMirrorEnabled
+     });
+   } catch (error) {
+-    if (error instanceof CpfIdentityError) {
++    if (error instanceof CpfIdentityError || ['ACCOUNT_DELETION_IN_PROGRESS', 'PROFILE_CPF_REVIEW_REQUIRED', 'CPF_REVIEW_CONFIG_UNAVAILABLE'].includes(error.code)) {
+       return res.status(error.status || 400).json({
+         success: false,
+         code: error.code,
++        reviewReference: error.reviewReference,
+         message: error.message
+       });
+     }
+@@ -1463,130 +1458,22 @@
+       });
+     }
+
+-    if (userData.status === 'deleted' && userData.cpfIndexReleased === true) {
+-      return res.json({
+-        success: true,
+-        message: 'Sua conta já foi excluída.',
+-        deletionRequested: true,
+-        deleted: true
+-      });
+-    }
+-
+-    const deletionLog = {
++    const result = await runAccountDeletion({
+       userId,
+-      status: 'processing',
+-      reason: deletionReason,
+-      additionalInfo: additionalInfo || '',
+-      phoneMasked: maskPhone(normalizedPhone || registeredPhone || null),
+-      passwordProvided: Boolean(password),
+-      source: source || 'mobile-app',
+-      timestamp: admin.firestore.FieldValue.serverTimestamp(),
+-      userEmailMasked: maskEmail(userData.email || null)
+-    };
+-
+-    const deletionLogRef = await admin.firestore().collection('account_deletions').add(deletionLog);
+-    logger.info(`Registro de exclusão de conta criado - UserId: ${userId}, Motivo: ${deletionReason}, purgeImediato: ${immediateAccountPurgeEnabled}`);
+-
+-    try {
+-      try {
+-        await admin.auth().updateUser(userId, { disabled: true });
+-      } catch (authError) {
+-        if (authError?.code !== 'auth/user-not-found') throw authError;
+-      }
+-
+-      if (immediateAccountPurgeEnabled) {
+-        await admin.firestore().collection('users').doc(userId).set(
+-          buildPurgedUserUpdate({
+-            deletionReason,
+-            source,
+-            additionalInfo
+-          }),
+-          { merge: true }
+-        );
+-        await removeRealtimeProfile(userId);
+-
+-        if (removeFirebaseAuthUserEnabled) {
+-          try {
+-            await admin.auth().deleteUser(userId);
+-          } catch (deleteAuthError) {
+-            // Se já não existir, tratamos como sucesso idempotente.
+-            if (!String(deleteAuthError?.code || '').includes('user-not-found')) {
+-              throw deleteAuthError;
+-            }
+-          }
+-        }
+-
+-        await releaseCpfsForDeletedAccount({ userId });
+-        await admin.firestore().collection('users').doc(userId).set({
+-          cpfIndexReleased: true
+-        }, { merge: true });
+-
+-        await deletionLogRef.update({
+-          status: 'completed',
+-          completedAt: admin.firestore.FieldValue.serverTimestamp(),
+-          immediatePurge: true
+-        });
+-
+-        logger.info(`Conta excluída com purge imediato - UserId: ${userId}`);
+-
+-        return res.json({
+-          success: true,
+-          message: 'Sua conta foi excluída com sucesso. Dados pessoais foram removidos conforme a política de retenção aplicável.',
+-          deletionRequested: true,
+-          deleted: true
+-        });
+-      }
+-
+-      await admin.firestore().collection('users').doc(userId).set({
+-        status: 'deletion_pending',
+-        accountDisabled: true,
+-        deletionRequestedAt: admin.firestore.FieldValue.serverTimestamp(),
+-        deletionReason,
+-        deletionSource: source || 'mobile-app',
+-        deletionAdditionalInfo: additionalInfo || ''
+-      }, { merge: true });
+-
+-      await deletionLogRef.update({
+-        status: 'queued',
+-        queuedAt: admin.firestore.FieldValue.serverTimestamp(),
+-        immediatePurge: false
+-      });
+-
+-      logger.info(`Conta marcada para exclusão - UserId: ${userId}`);
+-
+-      return res.json({
+-        success: true,
+-        message: 'Sua conta foi marcada para exclusão com sucesso. Seus dados serão removidos conforme a política de retenção aplicável.',
+-        deletionRequested: true,
+-        deleted: false
+-      });
+-    } catch (deleteError) {
+-      logger.error(`Erro ao excluir conta do usuário ${userId}:`, deleteError);
+-
+-      try {
+-        await admin.firestore().collection('users').doc(userId).set({
+-          status: 'deletion_pending',
+-          accountDisabled: true
+-        }, { merge: true });
+-      } catch (revertError) {
+-        logger.error(`Erro ao reverter status da conta ${userId}:`, revertError);
+-      }
+-
+-      try {
+-        await deletionLogRef.update({
+-          status: 'error',
+-          errorAt: admin.firestore.FieldValue.serverTimestamp(),
+-          errorMessage: String(deleteError?.message || 'Falha ao processar exclusão')
+-        });
+-      } catch (logUpdateError) {
+-        logger.error(`Erro ao atualizar log de exclusão com falha - UserId: ${userId}:`, logUpdateError);
+-      }
+-
+-      return res.status(500).json({
+-        success: false,
+-        message: 'Erro ao processar exclusão da conta. Tente novamente ou entre em contato com o suporte.'
+-      });
+-    }
++      metadata: {
++        reason: deletionReason,
++        source: source || 'mobile-app',
++        phoneMasked: maskPhone(normalizedPhone || registeredPhone || null),
++        passwordProvided: Boolean(password)
++      },
++      purge: buildPurgedUserUpdate({ deletionReason, source, additionalInfo }),
++      immediate: immediateAccountPurgeEnabled,
++      removeAuth: removeFirebaseAuthUserEnabled,
++      releaseCpf: releaseCpfsForDeletedAccount
++    });
++    return res.json({ success: true, deletionRequested: true, deleted: result.deleted,
++      message: result.deleted ? 'Sua conta foi excluída com sucesso.' : 'Sua conta foi marcada para exclusão.' });
++
+   } catch (error) {
+     logger.error('Erro ao excluir conta:', error);
+     return res.status(500).json({
+@@ -1595,6 +1482,74 @@
+     });
+   }
+ }
++
++const { authenticateSupport } = require('../middleware/support-auth');
++const { decideCpfReview } = require('../services/cpf-review-service');
++async function requireLifecycleAdmin(req, res, next) {
++  try {
++    const id = req.user?.id || req.user?.uid;
++    if (req.user?.authSource !== 'admin_jwt' || !id) return res.status(403).json({ success: false });
++    const snapshot = await admin.firestore().collection('adminUsers').doc(id).get();
++    const record = snapshot.exists ? snapshot.data() : null;
++    if (!record || record.active !== true || record.role !== 'super-admin') return res.status(403).json({ success: false });
++    next();
++  } catch (_) { return res.status(503).json({ success: false, code: 'ADMIN_AUTH_UNAVAILABLE' }); }
++}
++
++router.get('/api/admin/account-deletions/:userId', authenticateSupport, requireLifecycleAdmin, async (req, res) => {
++  try {
++    const snapshot = await admin.firestore().collection('account_deletions').doc(req.params.userId).get();
++    if (!snapshot.exists) return res.status(404).json({ success: false, code: 'DELETION_NOT_FOUND' });
++    const { status, step, updatedAt, completedAt } = snapshot.data();
++    res.json({ success: true, status, step, updatedAt, completedAt });
++  } catch (_) { res.status(503).json({ success: false, code: 'DELETION_STATUS_UNAVAILABLE' }); }
++});
++
++router.post('/api/admin/account-deletions/:userId/retry', authenticateSupport, requireLifecycleAdmin, async (req, res) => {
++  try {
++    const userId = String(req.params.userId || '');
++    const jobs = admin.firestore().collection('account_deletions');
++    let job = await jobs.doc(userId).get();
++    let recoverySourceRef = null;
++    if (!job.exists) {
++      const legacy = await jobs.where('userId', '==', userId).get();
++      job = legacy.docs.find(doc => ['processing', 'error', 'queued'].includes(doc.data()?.status));
++      if (!job) return res.status(404).json({ success: false, code: 'DELETION_NOT_FOUND' });
++      recoverySourceRef = job.ref;
++    }
++    const { reason, source } = job.data();
++    const metadata = { reason: reason || DEFAULT_DELETION_REASON, source: source || 'admin-recovery' };
++    const result = await runAccountDeletion({ userId, metadata,
++      purge: buildPurgedUserUpdate({ deletionReason: metadata.reason, source: metadata.source }),
++      immediate: true, removeAuth: removeFirebaseAuthUserEnabled,
++      recoveryActor: req.user.id || req.user.uid, recoverySourceRef, releaseCpf: releaseCpfsForDeletedAccount });
++    res.json({ success: true, ...result });
++  } catch (error) { res.status(error.status || 500).json({ success: false, code: 'DELETION_RETRY_FAILED' }); }
++});
++
++router.post('/api/admin/cpf-reviews/decision', authenticateSupport, requireLifecycleAdmin, async (req, res) => {
++  try {
++    const cpf = req.body?.caseId ? null : normalizeCpf(req.body?.cpf, { required: true });
++    const decision = await decideCpfReview({ firestore: admin.firestore(), cpf: cpf?.digits,
++      input: req.body, actor: req.user.id || req.user.uid });
++    res.json({ success: true, ...decision });
++  } catch (error) { res.status(error.status || 500).json({ success: false, code: error.code || 'CPF_REVIEW_FAILED' }); }
++});
++
++router.get('/api/admin/cpf-reviews/pending', authenticateSupport, requireLifecycleAdmin, async (req, res) => {
++  try {
++    const collection = admin.firestore().collection('cpf_review_restrictions');
++    let query = collection.orderBy('reviewAt');
++    if (req.query.afterCaseId) {
++      const cursor = await collection.where('caseId', '==', String(req.query.afterCaseId)).get();
++      if (cursor.docs.length !== 1) return res.status(400).json({ success: false, code: 'INVALID_CURSOR' });
++      query = query.startAfter(cursor.docs[0]);
++    }
++    const snapshot = await query.limit(100).get();
++    res.json({ success: true, cases: snapshot.docs.map(doc => doc.data()),
++      nextCursor: snapshot.docs.length === 100 ? snapshot.docs[99].data().caseId : null });
++  } catch (_) { res.status(503).json({ success: false, code: 'CPF_REVIEW_UNAVAILABLE' }); }
++});
+
+ /**
+  * POST /api/account/delete
+--- a/leaf-websocket-backend/services/cpf-identity-registry-service.js
++++ b/leaf-websocket-backend/services/cpf-identity-registry-service.js
+@@ -1,4 +1,6 @@
+ const admin = require('firebase-admin');
++const { readCpfReview } = require('./cpf-review-service');
++const { assertAccountWritable } = require('./account-lifecycle-service');
+
+ const CPF_INDEX_COLLECTION = 'cpf_identity_index';
+
+@@ -142,7 +144,7 @@
+   }
+ }
+
+-async function claimCpf({ firestore = admin.firestore(), realtimeDb = null, userId, cpf }) {
++async function claimCpf({ firestore = admin.firestore(), realtimeDb = null, userId, cpf, profile }) {
+   const normalized = normalizeCpf(cpf, { required: true });
+   const ownerId = String(userId || '').trim();
+
+@@ -176,6 +178,10 @@
+
+   try {
+     await firestore.runTransaction(async (transaction) => {
++      const userRef = firestore.collection('users').doc(ownerId);
++      const userSnapshot = await transaction.get(userRef);
++      assertAccountWritable(userSnapshot.exists ? userSnapshot.data() : {});
++      await readCpfReview({ firestore, transaction, cpf: normalized.digits });
+       const indexSnapshot = await transaction.get(indexRef);
+       const indexData = indexSnapshot.exists ? indexSnapshot.data() || {} : null;
+       const indexedOwnerId = String(indexData?.uid || '').trim();
+@@ -184,6 +190,7 @@
+         throw new CpfIdentityError('PROFILE_CPF_ALREADY_REGISTERED');
+       }
+
++      if (profile) transaction.set(userRef, profile, { merge: true });
+       transaction.set(indexRef, {
+         uid: ownerId,
+         cpfNormalized: normalized.digits,
+@@ -192,7 +199,7 @@
+       }, { merge: true });
+     });
+   } catch (error) {
+-    if (error instanceof CpfIdentityError) throw error;
++    if (error instanceof CpfIdentityError || ['ACCOUNT_DELETION_IN_PROGRESS', 'PROFILE_CPF_REVIEW_REQUIRED', 'CPF_REVIEW_CONFIG_UNAVAILABLE'].includes(error.code)) throw error;
+     throw new CpfIdentityError(
+       'PROFILE_CPF_UNIQUENESS_UNAVAILABLE',
+       CPF_ERROR_MESSAGES.PROFILE_CPF_UNIQUENESS_UNAVAILABLE,
+--- a/leaf-websocket-backend/services/driver-approval-service.js
++++ b/leaf-websocket-backend/services/driver-approval-service.js
+@@ -35,7 +35,7 @@
+
+       return { success: true, normalized };
+     } catch (error) {
+-      if (error instanceof CpfIdentityError) {
++      if (error instanceof CpfIdentityError || ['ACCOUNT_DELETION_IN_PROGRESS', 'PROFILE_CPF_REVIEW_REQUIRED', 'CPF_REVIEW_CONFIG_UNAVAILABLE'].includes(error.code)) {
+         return {
+           success: false,
+           error: error.code,
+--- a/leaf-websocket-backend/scripts/deploy/validate-runtime-config.js
++++ b/leaf-websocket-backend/scripts/deploy/validate-runtime-config.js
+@@ -576,6 +576,14 @@
+     : [];
+   const warnings = [];
+   const blockers = [];
++  if (nodeEnv === 'production' || process.env.CPF_REVIEW_ENABLED === 'true') {
++    if (Buffer.byteLength(process.env.CPF_REVIEW_HMAC_KEY || '') < 32) {
++      blockers.push('CPF review exige CPF_REVIEW_HMAC_KEY dedicada com pelo menos 32 bytes');
++    }
++    if (nodeEnv === 'production' && process.env.CPF_REVIEW_ENABLED === 'false') {
++      blockers.push('CPF_REVIEW_ENABLED=false não é permitido em produção');
++    }
++  }
+   const hasDefaultWooviWebhookPublicKey =
+     nodeEnv === 'production' &&
+     !paymentProviderSandboxRuntime &&
+--- a/leaf-websocket-backend/tests/unit/routes/account-routes.unit.test.js
++++ b/leaf-websocket-backend/tests/unit/routes/account-routes.unit.test.js
+@@ -3,6 +3,9 @@
+ const express = require('express');
+ const request = require('supertest');
+
++const mockDeletionJobGet = jest.fn();
++const mockAdminDocGet = jest.fn();
++const mockAttemptSet = jest.fn();
+ const mockVerifyIdToken = jest.fn();
+ const mockUpdateUser = jest.fn();
+ const mockDeleteUser = jest.fn();
+@@ -29,6 +32,7 @@
+     if (collectionName === 'users') {
+       return {
+         doc: jest.fn(() => ({
++          kind: 'user',
+           get: mockUserDocGet,
+           set: mockUserDocSet,
+         })),
+@@ -42,15 +46,20 @@
+       return {
+         where: jest.fn(() => ({ get: mockCpfReleaseQueryGet })),
+         doc: jest.fn(() => ({
++          kind: 'cpf',
+           get: mockCpfIndexDocGet,
+           set: mockCpfIndexDocSet,
+         })),
+       };
+     }
+
++    if (collectionName === 'adminUsers') return { doc: () => ({ get: mockAdminDocGet }) };
+     if (collectionName === 'account_deletions') {
+       return {
+         add: mockDeletionAdd,
++        where: () => ({ get: async () => ({ docs: [] }) }),
++        doc: () => ({ kind: 'job', get: mockDeletionJobGet,
++          collection: () => ({ doc: () => ({ set: mockAttemptSet }) }) }),
+       };
+     }
+
+@@ -75,9 +84,23 @@
+     ref: jest.fn(() => ({
+       once: mockDatabaseOnce,
+       remove: mockDatabaseRemove,
++      set: mockDatabaseRemove,
++      transaction: async callback => {
++        const value = callback(null);
++        if (value === undefined) return { committed: false };
++        await mockDatabaseUpdate(value);
++        return { committed: true };
++      },
+       update: mockDatabaseUpdate,
+     })),
+   })),
++}));
++
++jest.mock('../../../middleware/support-auth', () => ({
++  authenticateSupport: (req, res, next) => {
++    if (req.headers.authorization !== 'Bearer admin-token') return res.status(401).json({ success: false });
++    req.user = { id: 'admin-1', authSource: 'admin_jwt' }; next();
++  }
+ }));
+
+ jest.mock('../../../utils/logger', () => ({
+@@ -125,6 +148,9 @@
+
+ describe('account deletion route', () => {
+   beforeEach(() => {
++    mockDeletionJobGet.mockResolvedValue({ exists: false, data: () => undefined });
++    mockAdminDocGet.mockResolvedValue({ exists: true, data: () => ({ active: true, role: 'super-admin' }) });
++    mockAttemptSet.mockResolvedValue(undefined);
+     mockVerifyIdToken.mockResolvedValue({
+       uid: 'review-user',
+       phone_number: '+5521102938475',
+@@ -143,8 +169,8 @@
+     mockCpfTransactionSet.mockImplementation(() => undefined);
+     mockRunTransaction.mockImplementation(async callback => callback({
+       delete: mockCpfTransactionDelete,
+-      get: mockCpfTransactionGet,
+-      set: mockCpfTransactionSet,
++      get: ref => ref?.kind === 'user' ? mockUserDocGet() : ref?.kind === 'job' ? mockDeletionJobGet() : mockCpfTransactionGet(ref),
++      set: (ref, data, options) => ref?.kind === 'user' ? mockUserDocSet(data, options) : ref?.kind === 'job' ? mockDeletionLogUpdate(data) : mockCpfTransactionSet(ref, data, options),
+     }));
+     mockDeletionLogUpdate.mockResolvedValue(undefined);
+     mockDeletionAdd.mockResolvedValue({ update: mockDeletionLogUpdate });
+@@ -156,6 +182,43 @@
+     mockDatabaseUpdate.mockResolvedValue(undefined);
+     mockRedisHgetall.mockResolvedValue({ status: 'offline', isOnline: 'false' });
+     mockRedisDel.mockResolvedValue(1);
++  });
++
++  it.each(['/api/admin/account-deletions/old/retry', '/api/admin/cpf-reviews/decision'])('rejects non-admin access to %s', async endpoint => {
++    const response = await request(createApp()).post(endpoint).set('Authorization', 'Bearer firebase-token').send({});
++    expect(response.status).toBe(401);
++  });
++
++  it.each([null, { active: false, role: 'super-admin' }, { active: true, role: 'support' }])('requires an active authoritative super-admin: %j', async record => {
++    mockAdminDocGet.mockResolvedValue({ exists: Boolean(record), data: () => record });
++    const response = await request(createApp()).post('/api/admin/account-deletions/old/retry')
++      .set('Authorization', 'Bearer admin-token').send({});
++    expect(response.status).toBe(403);
++    expect(mockUpdateUser).not.toHaveBeenCalled();
++  });
++
++  it('fails closed if authoritative admin lookup is unavailable', async () => {
++    mockAdminDocGet.mockRejectedValueOnce(new Error('unavailable'));
++    const response = await request(createApp()).post('/api/admin/cpf-reviews/decision')
++      .set('Authorization', 'Bearer admin-token').send({});
++    expect(response.status).toBe(503);
++  });
++
++  it('requires an existing deletion job for administrative recovery', async () => {
++    const response = await request(createApp()).post('/api/admin/account-deletions/old/retry')
++      .set('Authorization', 'Bearer admin-token').send({});
++    expect(response.status).toBe(404);
++    expect(mockUpdateUser).not.toHaveBeenCalled();
++  });
++
++  it('recovers a pending deletion using admin identity, without target-user authentication', async () => {
++    mockDeletionJobGet.mockResolvedValue({ exists: true, data: () => ({ status: 'error', reason: 'requested' }) });
++    mockUserDocGet.mockResolvedValue({ exists: true, data: () => ({ status: 'deletion_pending' }) });
++    const response = await request(createApp()).post('/api/admin/account-deletions/old/retry')
++      .set('Authorization', 'Bearer admin-token').send({});
++    expect(response.status).toBe(200);
++    expect(mockUpdateUser).toHaveBeenCalledWith('old', { disabled: true });
++    expect(mockAttemptSet).toHaveBeenCalledWith(expect.objectContaining({ actor: 'admin-1', source: 'admin_recovery' }));
+   });
+
+   it('rejects client profile updates that try to write derived driver approval, document, KYC or vehicle fields', async () => {
+@@ -941,7 +1004,8 @@
+     expect(mockDatabaseRemove).toHaveBeenCalled();
+   });
+
+-  it('returns success without reprocessing an account already marked deleted', async () => {
++  it('returns success without reprocessing a completed deletion job', async () => {
++    mockDeletionJobGet.mockResolvedValue({ exists: true, data: () => ({ status: 'completed' }) });
+     mockUserDocGet.mockResolvedValue({
+       exists: true,
+       data: () => ({
+--- a/leaf-websocket-backend/tests/unit/services/cpf-identity-registry-service.unit.test.js
++++ b/leaf-websocket-backend/tests/unit/services/cpf-identity-registry-service.unit.test.js
+@@ -23,6 +23,7 @@
+     collection: jest.fn((name) => {
+       if (name === 'users') {
+         return {
++          doc: () => ({ kind: 'user' }),
+           where: jest.fn(() => userQuery)
+         };
+       }
+@@ -32,7 +33,7 @@
+       };
+     }),
+     runTransaction: jest.fn(async (callback) => callback({
+-      get: jest.fn(async () => indexSnapshot),
++      get: jest.fn(async ref => ref.kind === 'user' ? ({ exists: false }) : indexSnapshot),
+       set: jest.fn((ref, value, options) => writes.push({ ref, value, options }))
+     }))
+   };
+@@ -165,13 +166,13 @@
+   const ref = { id: '12345678909' };
+   const firestore = {
+     collection: (name) => ({
+-      doc: () => ref,
++      doc: () => name === 'users' ? ({ kind: 'user' }) : ref,
+       where: () => ({ get: async () => ({
+         docs: name === 'users' || !index ? [] : [{ ref }]
+       }) })
+     }),
+     runTransaction: async (callback) => callback({
+-      get: async () => ({ exists: Boolean(index), data: () => index }),
++      get: async ref => ref.kind === 'user' ? ({ exists: false }) : ({ exists: Boolean(index), data: () => index }),
+       delete: () => { index = null; },
+       set: (_, value) => { index = value; }
+     })
+--- a/leaf-websocket-backend/tests/unit/scripts/validate-runtime-config.unit.test.js
++++ b/leaf-websocket-backend/tests/unit/scripts/validate-runtime-config.unit.test.js
+@@ -15,6 +15,7 @@
+       PATH: process.env.PATH,
+       HOME: process.env.HOME,
+       ENV_FILE: absentEnvFile,
++      CPF_REVIEW_HMAC_KEY: 'ci-test-only-cpf-review-key-not-for-production',
+       LEAF_BROAD_LAUNCH_APPROVED: 'true',
+       REDIS_MODE: 'sentinel',
+       REDIS_SENTINELS: 'sentinel-a:26379,sentinel-b:26379,sentinel-c:26379',
+@@ -1654,3 +1655,15 @@
+     ]));
+   });
+ });
++
++describe('CPF review runtime gates', () => {
++  test('enabled review requires a dedicated key without exposing its value', () => {
++    const result = runValidator({ NODE_ENV: 'test', CPF_REVIEW_ENABLED: 'true', CPF_REVIEW_HMAC_KEY: 'short' });
++    expect(result.report.summary.blockers).toEqual(expect.arrayContaining([expect.stringContaining('CPF_REVIEW_HMAC_KEY')]));
++    expect(result.stdout).not.toContain('"short"');
++  });
++  test('production cannot disable CPF review', () => {
++    const result = runValidator({ NODE_ENV: 'production', CPF_REVIEW_ENABLED: 'false' });
++    expect(result.report.summary.blockers).toEqual(expect.arrayContaining([expect.stringContaining('CPF_REVIEW_ENABLED=false')]));
++  });
++});
+--- a/.github/workflows/eas-build.yml
++++ b/.github/workflows/eas-build.yml
+@@ -66,6 +66,7 @@
+       - name: Validate production runtime guard
+         env:
+           NODE_ENV: production
++          CPF_REVIEW_HMAC_KEY: ci-test-only-cpf-review-key-not-for-production
+           WOOVI_ENVIRONMENT: production
+           WOOVI_BASE_URL: https://api.woovi.com
+           WOOVI_API_TOKEN: ci-token-placeholder
+--- /dev/null
++++ b/leaf-websocket-backend/services/account-lifecycle-service.js
+@@ -0,0 +1,96 @@
++const admin = require('firebase-admin');
++
++function assertAccountWritable(data = {}) {
++  if (data.accountDisabled === true || ['deletion_pending', 'deleted'].includes(data.status)) {
++    const error = new Error('Esta conta está em processo de exclusão ou já foi excluída.');
++    error.code = 'ACCOUNT_DELETION_IN_PROGRESS';
++    error.status = 409;
++    throw error;
++  }
++}
++
++async function saveAccountProfile({ firestore = admin.firestore(), userId, profile }) {
++  const ref = firestore.collection('users').doc(userId);
++  await firestore.runTransaction(async tx => {
++    const current = await tx.get(ref);
++    assertAccountWritable(current.exists ? current.data() : {});
++    tx.set(ref, profile, { merge: true });
++  });
++}
++
++// A tombstone makes delayed projections abort atomically, including after Auth removal.
++async function projectRealtimeProfile(userId, profile, db = admin.database()) {
++  const result = await db.ref(`users/${userId}`).transaction(current => {
++    if (current?.accountDisabled || ['deleted', 'deletion_pending'].includes(current?.status)) return;
++    return { ...current, ...profile };
++  });
++  if (!result.committed) assertAccountWritable({ status: 'deleted' });
++}
++
++async function runAccountDeletion({ userId, metadata, purge, immediate = true, removeAuth = true,
++  recoveryActor = null, recoverySourceRef = null, firestore = admin.firestore(), db = admin.database(), auth = admin.auth(),
++  releaseCpf }) {
++  const userRef = firestore.collection('users').doc(userId);
++  const jobRef = firestore.collection('account_deletions').doc(userId);
++  const now = () => admin.firestore.FieldValue.serverTimestamp();
++  const completed = await firestore.runTransaction(async tx => {
++    const user = await tx.get(userRef);
++    const job = await tx.get(jobRef);
++    const legacyJob = recoverySourceRef ? await tx.get(recoverySourceRef) : null;
++    const legacyData = legacyJob?.exists ? legacyJob.data() : null;
++    const recoverableLegacy = legacyData?.userId === userId && ['processing', 'error', 'queued'].includes(legacyData.status);
++    const data = user.exists ? user.data() : {};
++    if (recoveryActor && ((!job.exists && !recoverableLegacy) || !['deletion_pending', 'deleted'].includes(data.status))) {
++      const error = new Error('Nenhuma exclusão recuperável para esta conta.');
++      error.status = 409;
++      throw error;
++    }
++    if (job.data()?.status === 'completed') return true;
++    tx.set(userRef, { status: 'deletion_pending', accountDisabled: true }, { merge: true });
++    if (!job.exists) tx.set(jobRef, { ...metadata, userId, status: 'processing', createdAt: now(),
++      ...(recoverableLegacy ? { legacyDeletionId: recoverySourceRef.id } : {}) });
++    return false;
++  });
++  if (completed) return { deleted: true };
++  const attemptRef = jobRef.collection('attempts').doc();
++  await attemptRef.set({ actor: recoveryActor || userId, source: recoveryActor ? 'admin_recovery' : 'self_service', startedAt: now() });
++  const checkpoint = async (step, extra = {}) => {
++    await attemptRef.set({ step, ...extra, updatedAt: now() }, { merge: true });
++    await firestore.runTransaction(async tx => {
++      const job = await tx.get(jobRef);
++      if (job.data()?.status !== 'completed') tx.set(jobRef, { step, ...extra, updatedAt: now() }, { merge: true });
++    });
++  };
++  try {
++    try { await auth.updateUser(userId, { disabled: true }); }
++    catch (error) { if (error.code !== 'auth/user-not-found') throw error; }
++    await checkpoint('auth_disabled');
++    if (!immediate) {
++      await checkpoint('queued', { status: 'queued' });
++      return { deleted: false };
++    }
++    await db.ref(`users/${userId}`).set({ status: 'deleted', accountDisabled: true });
++    await checkpoint('realtime_purged');
++    await userRef.set(purge, { merge: true });
++    await checkpoint('profile_purged');
++    if (removeAuth) {
++      try { await auth.deleteUser(userId); }
++      catch (error) { if (error.code !== 'auth/user-not-found') throw error; }
++    }
++    await checkpoint(removeAuth ? 'auth_removed' : 'auth_retained_disabled');
++    await releaseCpf({ firestore, userId });
++    await checkpoint('cpf_released');
++    await firestore.runTransaction(async tx => {
++      // Both completion markers commit together; a failed attempt never reactivates an account.
++      tx.set(userRef, { status: 'deleted', accountDisabled: true, cpfIndexReleased: true }, { merge: true });
++      tx.set(jobRef, { status: 'completed', step: 'completed', completedAt: now() }, { merge: true });
++    });
++    await attemptRef.set({ status: 'completed', completedAt: now() }, { merge: true });
++    return { deleted: true };
++  } catch (error) {
++    await checkpoint('retry_required', { status: 'error', errorCode: 'ACCOUNT_DELETION_STEP_FAILED' });
++    throw error;
++  }
++}
++
++module.exports = { assertAccountWritable, saveAccountProfile, projectRealtimeProfile, runAccountDeletion };
+--- /dev/null
++++ b/leaf-websocket-backend/services/cpf-review-service.js
+@@ -0,0 +1,83 @@
++const crypto = require('crypto');
++
++function reviewEnabled() {
++  return process.env.NODE_ENV === 'production' || process.env.CPF_REVIEW_ENABLED === 'true';
++}
++function reviewError(code, status = 400) {
++  const error = new Error(code);
++  error.code = code;
++  error.status = status;
++  return error;
++}
++function reviewKey(cpf) {
++  if (!reviewEnabled()) throw reviewError('CPF_REVIEW_DISABLED', 503);
++  const key = process.env.CPF_REVIEW_HMAC_KEY;
++  if (!key || Buffer.byteLength(key) < 32) throw reviewError('CPF_REVIEW_CONFIG_UNAVAILABLE', 503);
++  return crypto.createHmac('sha256', key).update(`leaf:cpf-review:v1:${cpf}`).digest('hex');
++}
++
++async function readCpfReview({ firestore, transaction, cpf, now = Date.now() }) {
++  if (!reviewEnabled()) return null;
++  const snapshot = await transaction.get(firestore.collection('cpf_review_restrictions').doc(reviewKey(cpf)));
++  if (!snapshot.exists) return null;
++  const record = snapshot.data();
++  // No silent renewal: expired restrictions stop blocking, but still require audited cleanup.
++  if (Number.isFinite(Date.parse(record.expiresAt)) && Date.parse(record.expiresAt) <= now) return null;
++  const error = reviewError('PROFILE_CPF_REVIEW_REQUIRED', 423);
++  error.message = 'Seu cadastro precisa de revisão. Entre em contato com o suporte para solicitar análise ou contestar a restrição.';
++  error.reviewReference = record.caseId;
++  throw error;
++}
++
++function requiredText(value, field) {
++  if (typeof value !== 'string' || !value.trim() || value.length > 500) throw reviewError(`INVALID_${field}`);
++  return value.trim();
++}
++
++async function decideCpfReview({ firestore, cpf, input, actor, now = Date.now() }) {
++  if (!reviewEnabled()) throw reviewError('CPF_REVIEW_DISABLED', 503);
++  let ref;
++  if (input.caseId) {
++    const matches = await firestore.collection('cpf_review_restrictions').where('caseId', '==', input.caseId).get();
++    if (matches.docs.length !== 1) throw reviewError('CPF_REVIEW_NOT_FOUND', 404);
++    ref = matches.docs[0].ref;
++  } else {
++    ref = firestore.collection('cpf_review_restrictions').doc(reviewKey(cpf));
++  }
++  const auditRef = firestore.collection('cpf_review_audit').doc();
++  const action = input.action;
++  if (!['restrict', 'release', 'expire'].includes(action)) throw reviewError('INVALID_REVIEW_ACTION');
++  const decisionReason = requiredText(input.decisionReason, 'DECISION_REASON');
++  if (!Number.isInteger(input.expectedRevision) || input.expectedRevision < 0) throw reviewError('INVALID_REVISION');
++  let details;
++  if (action === 'restrict') {
++    if (!['fraud_confirmed', 'safety_restriction'].includes(input.reason)) throw reviewError('INVALID_RESTRICTION_REASON');
++    const reviewAt = Date.parse(input.reviewAt);
++    const expiresAt = Date.parse(input.expiresAt);
++    if (!(reviewAt > now && expiresAt >= reviewAt)) throw reviewError('INVALID_RETENTION_DATES');
++    details = {
++      reason: input.reason,
++      evidenceRef: requiredText(input.evidenceRef, 'EVIDENCE_REFERENCE'),
++      legalBasis: requiredText(input.legalBasis, 'LEGAL_BASIS'),
++      reviewAt: new Date(reviewAt).toISOString(), expiresAt: new Date(expiresAt).toISOString()
++    };
++  }
++  return firestore.runTransaction(async tx => {
++    const snapshot = await tx.get(ref);
++    const previous = snapshot.exists ? snapshot.data() : null;
++    if (previous && input.caseId !== previous.caseId) throw reviewError('CPF_REVIEW_CASE_CONFLICT', 409);
++    if ((previous?.revision || 0) !== input.expectedRevision) throw reviewError('CPF_REVIEW_REVISION_CONFLICT', 409);
++    if (action !== 'restrict' && !previous) throw reviewError('CPF_REVIEW_NOT_FOUND', 404);
++    if (action === 'expire' && !(Date.parse(previous.expiresAt) <= now)) throw reviewError('CPF_REVIEW_NOT_EXPIRED', 409);
++    const caseId = previous?.caseId || auditRef.id;
++    const revision = (previous?.revision || 0) + 1;
++    if (action === 'restrict') tx.set(ref, { ...details, caseId, revision, updatedAt: new Date(now).toISOString() });
++    else tx.delete(ref);
++    // Audit has no raw CPF or HMAC. Evidence stays in its separately controlled system.
++    tx.set(auditRef, { caseId, revision, action, actor, decisionReason,
++      ...(details || {}), createdAt: new Date(now).toISOString() });
++    return { caseId, revision, action };
++  });
++}
++
++module.exports = { readCpfReview, decideCpfReview, reviewKey, reviewEnabled };
+--- /dev/null
++++ b/leaf-websocket-backend/tests/unit/services/account-lifecycle-service.unit.test.js
+@@ -0,0 +1,74 @@
++jest.mock('firebase-admin', () => ({ firestore: Object.assign(jest.fn(), { FieldValue: { serverTimestamp: () => 'server-time' } }) }));
++const { memoryFirestore } = require('../helpers/lifecycle-memory.cjs');
++const { runAccountDeletion, saveAccountProfile, projectRealtimeProfile } = require('../../../services/account-lifecycle-service');
++const { claimCpf, releaseCpfsForDeletedAccount } = require('../../../services/cpf-identity-registry-service');
++
++function fixture() {
++  const firestore = memoryFirestore({ 'users/old': { status: 'active' },
++    'cpf_identity_index/12345678909': { uid: 'old' } });
++  let realtime = { cpf: '12345678909' };
++  const ref = { set: jest.fn(async value => { realtime = value; }),
++    transaction: async callback => { const value = callback(realtime);
++      if (value === undefined) return { committed: false };
++      realtime = value; return { committed: true }; } };
++  const db = { ref: () => ref };
++  const auth = { updateUser: jest.fn().mockResolvedValue(), deleteUser: jest.fn().mockResolvedValue() };
++  const options = { firestore, db, auth, userId: 'old', metadata: { reason: 'user_request' },
++    purge: { status: 'deleted', accountDisabled: true }, releaseCpf: releaseCpfsForDeletedAccount };
++  return { firestore, ref, db, auth, options, getRealtime: () => realtime };
++}
++
++test.each(['profile-first', 'delete-first'])('concurrent profile/CPF writes cannot resurrect deletion: %s', async order => {
++  const f = fixture();
++  const profile = () => claimCpf({ firestore: f.firestore, userId: 'old', cpf: '12345678909', profile: { name: 'late', status: 'active' } });
++  const deletion = () => runAccountDeletion(f.options);
++  const tasks = order === 'profile-first' ? [profile(), deletion()] : [deletion(), profile()];
++  await Promise.allSettled(tasks);
++  expect(f.firestore.records.get('users/old')).toMatchObject({ status: 'deleted', accountDisabled: true });
++  expect(f.firestore.records.has('cpf_identity_index/12345678909')).toBe(false);
++  await expect(saveAccountProfile({ firestore: f.firestore, userId: 'old', profile: { status: 'active' } }))
++    .rejects.toMatchObject({ code: 'ACCOUNT_DELETION_IN_PROGRESS' });
++  await expect(profile()).rejects.toMatchObject({ code: 'ACCOUNT_DELETION_IN_PROGRESS' });
++  await expect(projectRealtimeProfile('old', { cpf: '12345678909' }, f.db)).rejects.toThrow();
++  expect(f.getRealtime()).toEqual({ status: 'deleted', accountDisabled: true });
++});
++
++test.each(['auth', 'rtdb', 'index'])('manual recovery completes after %s failure without user login', async step => {
++  const f = fixture();
++  if (step === 'auth') f.auth.deleteUser.mockRejectedValueOnce(new Error('outage'));
++  if (step === 'rtdb') f.ref.set.mockRejectedValueOnce(new Error('outage'));
++  if (step === 'index') f.options.releaseCpf = jest.fn().mockRejectedValueOnce(new Error('outage')).mockImplementation(releaseCpfsForDeletedAccount);
++  await expect(runAccountDeletion(f.options)).rejects.toThrow();
++  expect(f.firestore.records.get('account_deletions/old').status).toBe('error');
++  f.auth.updateUser.mockRejectedValue({ code: 'auth/user-not-found' });
++  f.auth.deleteUser.mockRejectedValue({ code: 'auth/user-not-found' });
++  await expect(runAccountDeletion({ ...f.options, recoveryActor: 'admin-1' })).resolves.toEqual({ deleted: true });
++  expect(f.firestore.records.get('account_deletions/old').status).toBe('completed');
++  expect([...f.firestore.records.values()]).toEqual(expect.arrayContaining([
++    expect.objectContaining({ actor: 'admin-1', source: 'admin_recovery', status: 'completed' })
++  ]));
++});
++
++test('queued deletion retains CPF until explicit recovery completes it', async () => {
++  const f = fixture();
++  await expect(runAccountDeletion({ ...f.options, immediate: false })).resolves.toEqual({ deleted: false });
++  expect(f.firestore.records.get('cpf_identity_index/12345678909').uid).toBe('old');
++  await runAccountDeletion({ ...f.options, recoveryActor: 'admin-1' });
++  expect(f.firestore.records.has('cpf_identity_index/12345678909')).toBe(false);
++});
++
++test('administrative recovery cannot initiate deletion on an active account', async () => {
++  const f = fixture();
++  await expect(runAccountDeletion({ ...f.options, recoveryActor: 'admin-1' })).rejects.toMatchObject({ status: 409 });
++  expect(f.auth.updateUser).not.toHaveBeenCalled();
++});
++
++test('recovers a legacy random-ID deletion only after validating its owner and pending state', async () => {
++  const f = fixture();
++  f.firestore.records.set('users/old', { status: 'deletion_pending', accountDisabled: true });
++  f.firestore.records.set('account_deletions/legacy-id', { userId: 'old', status: 'error' });
++  const recoverySourceRef = f.firestore.collection('account_deletions').doc('legacy-id');
++  await runAccountDeletion({ ...f.options, recoveryActor: 'admin-1', recoverySourceRef });
++  expect(f.firestore.records.get('account_deletions/old')).toMatchObject({ status: 'completed', legacyDeletionId: 'legacy-id' });
++  expect(f.firestore.records.get('account_deletions/legacy-id')).toEqual({ userId: 'old', status: 'error' });
++});
+--- /dev/null
++++ b/leaf-websocket-backend/tests/unit/services/cpf-review-service.unit.test.js
+@@ -0,0 +1,65 @@
++const { memoryFirestore } = require('../helpers/lifecycle-memory.cjs');
++const { decideCpfReview, reviewKey } = require('../../../services/cpf-review-service');
++const { claimCpf } = require('../../../services/cpf-identity-registry-service');
++const cpf = '12345678909';
++const now = Date.parse('2026-09-07T00:00:00Z');
++const input = { action: 'restrict', expectedRevision: 0, decisionReason: 'Documented review',
++  reason: 'fraud_confirmed', evidenceRef: 'ticket-1', legalBasis: 'approved-policy-reference',
++  reviewAt: '2026-09-08T00:00:00Z', expiresAt: '2026-09-09T00:00:00Z' };
++let previousEnabled;
++let previousKey;
++beforeEach(() => {
++  previousEnabled = process.env.CPF_REVIEW_ENABLED; previousKey = process.env.CPF_REVIEW_HMAC_KEY;
++  process.env.CPF_REVIEW_ENABLED = 'true'; process.env.CPF_REVIEW_HMAC_KEY = 'unit-test-only-key'.repeat(3);
++  jest.useFakeTimers().setSystemTime(now);
++});
++afterEach(() => {
++  jest.useRealTimers();
++  if (previousEnabled === undefined) delete process.env.CPF_REVIEW_ENABLED; else process.env.CPF_REVIEW_ENABLED = previousEnabled;
++  if (previousKey === undefined) delete process.env.CPF_REVIEW_HMAC_KEY; else process.env.CPF_REVIEW_HMAC_KEY = previousKey;
++});
++
++test('protected restriction blocks profile/CPF commit and release allows a fresh registration', async () => {
++  const firestore = memoryFirestore();
++  const decision = await decideCpfReview({ firestore, cpf, input, actor: 'admin-1', now });
++  await expect(claimCpf({ firestore, userId: 'new', cpf, profile: { name: 'new' } }))
++    .rejects.toMatchObject({ code: 'PROFILE_CPF_REVIEW_REQUIRED', reviewReference: decision.caseId });
++  expect(firestore.records.has('users/new')).toBe(false);
++  expect(JSON.stringify([...firestore.records])).not.toContain(cpf);
++  await decideCpfReview({ firestore, input: { action: 'release', caseId: decision.caseId,
++    expectedRevision: 1, decisionReason: 'Appeal upheld: ticket-2' }, actor: 'admin-2', now });
++  await expect(claimCpf({ firestore, userId: 'new', cpf })).resolves.toMatchObject({ digits: cpf });
++});
++
++test('expiry stops blocking without extending retention; explicit cleanup is audited', async () => {
++  const firestore = memoryFirestore();
++  const decision = await decideCpfReview({ firestore, cpf, input, actor: 'admin-1', now });
++  jest.setSystemTime(Date.parse(input.expiresAt));
++  await expect(claimCpf({ firestore, userId: 'new', cpf })).resolves.toMatchObject({ digits: cpf });
++  await decideCpfReview({ firestore, input: { action: 'expire', caseId: decision.caseId,
++    expectedRevision: 1, decisionReason: 'Retention ended' }, actor: 'admin-2', now: Date.now() });
++  expect(firestore.records.has(`cpf_review_restrictions/${reviewKey(cpf)}`)).toBe(false);
++  expect([...firestore.records.values()]).toEqual(expect.arrayContaining([expect.objectContaining({ action: 'expire', actor: 'admin-2' })]));
++});
++
++test.each([
++  { reason: 'suspicion' }, { legalBasis: '' }, { evidenceRef: '' },
++  { expiresAt: '2026-09-06T00:00:00Z' }, { reviewAt: '2026-09-10T00:00:00Z' }
++])('rejects an unjustified or unbounded restriction: %j', async patch => {
++  const firestore = memoryFirestore();
++  await expect(decideCpfReview({ firestore, cpf, input: { ...input, ...patch }, actor: 'admin', now })).rejects.toThrow();
++  expect(firestore.records.size).toBe(0);
++});
++
++test('stale revision cannot release or overwrite a case', async () => {
++  const firestore = memoryFirestore();
++  const decision = await decideCpfReview({ firestore, cpf, input, actor: 'admin', now });
++  await expect(decideCpfReview({ firestore, input: { action: 'release', caseId: decision.caseId,
++    expectedRevision: 0, decisionReason: 'stale' }, actor: 'admin', now })).rejects.toMatchObject({ status: 409 });
++});
++
++test('enabled enforcement fails closed without a dedicated HMAC key', async () => {
++  delete process.env.CPF_REVIEW_HMAC_KEY;
++  await expect(claimCpf({ firestore: memoryFirestore(), userId: 'new', cpf }))
++    .rejects.toMatchObject({ code: 'CPF_REVIEW_CONFIG_UNAVAILABLE', status: 503 });
++});
+--- /dev/null
++++ b/leaf-websocket-backend/tests/unit/helpers/lifecycle-memory.cjs
+@@ -0,0 +1,38 @@
++// Transaction model with optimistic conflict retries; no provider/network access.
++function memoryFirestore(seed = {}) {
++  const records = new Map(Object.entries(seed));
++  let sequence = 0;
++  let version = 0;
++  const snapshot = ref => ({ ref, id: ref.id, exists: records.has(ref.path), data: () => records.get(ref.path) });
++  const write = (ref, value, options) => {
++    records.set(ref.path, options?.merge ? { ...records.get(ref.path), ...value } : value);
++    version += 1;
++  };
++  const collection = path => ({
++    doc: (id = `auto-${++sequence}`) => {
++      const ref = { path: `${path}/${id}`, id, collection: name => collection(`${path}/${id}/${name}`) };
++      ref.get = async () => snapshot(ref);
++      ref.set = async (value, options) => write(ref, value, options);
++      return ref;
++    },
++    where: (field, _op, value) => ({ get: async () => ({ docs: [...records.entries()]
++      .filter(([key, data]) => key.startsWith(`${path}/`) && key.split('/').length === path.split('/').length + 1 && data[field] === value)
++      .map(([key]) => snapshot(collection(path).doc(key.split('/').pop()))) }) })
++  });
++  return { records, collection, runTransaction: async callback => {
++    for (let retry = 0; retry < 30; retry += 1) {
++      const start = version;
++      const pending = [];
++      const result = await callback({
++        get: async ref => snapshot(ref),
++        set: (ref, value, options) => pending.push(() => write(ref, value, options)),
++        delete: ref => pending.push(() => { records.delete(ref.path); version += 1; })
++      });
++      if (version !== start) continue;
++      pending.forEach(commit => commit());
++      return result;
++    }
++    throw new Error('transaction contention');
++  } };
++}
++module.exports = { memoryFirestore };

@@ -1,0 +1,250 @@
+{
+  "capturedAt": "2026-09-12T05:08:10Z",
+  "devices": {
+    "passenger": {
+      "name": "Leaf iPhone 17 Dedicated",
+      "udid": "6BC9EC30-C939-4598-A85D-A9E071E90CE5",
+      "runtime": "iOS 26.5",
+      "booted": true
+    },
+    "driver": {
+      "name": "Leaf iPhone 17 Driver E3",
+      "udid": "0DA1FB5E-2308-4F40-87DD-A8C04F7E7878",
+      "runtime": "iOS 26.5",
+      "booted": true
+    }
+  },
+  "coordinates": {
+    "pickup": [
+      -22.97104,
+      -43.18349
+    ],
+    "destination": [
+      -22.9842698,
+      -43.223168
+    ]
+  },
+  "geofence": {
+    "pickupAllowed": true,
+    "destinationAllowed": true
+  },
+  "paymentRuntime": {
+    "schemaVersion": 1,
+    "environment": "production",
+    "generatedAt": "2026-09-12T05:08:08.610Z",
+    "cacheTtlSeconds": 30,
+    "staleTtlSeconds": 120,
+    "paymentRuntime": {
+      "provider": "woovi",
+      "defaultEnvironment": "production",
+      "defaultProfile": {
+        "profileId": "env-default",
+        "name": "Backend default",
+        "provider": "woovi",
+        "environment": "production",
+        "status": "active",
+        "scope": "global",
+        "source": "env",
+        "priority": 0,
+        "startsAtIso": null,
+        "expiresAtIso": null,
+        "testUserSandbox": false,
+        "reason": "default_backend_environment"
+      },
+      "canarySandboxEnabled": true,
+      "globalSandboxEnabled": false,
+      "activeProfileCount": 1,
+      "effectiveProfile": {
+        "profileId": "qa-test-users-sandbox-durable",
+        "name": "Durable QA test users Woovi sandbox",
+        "environment": "sandbox",
+        "scope": "users",
+        "source": "firestore",
+        "reason": "durable_test_users_payment_sandbox_policy",
+        "expiresAtIso": null,
+        "contextMatched": true
+      }
+    },
+    "biometricRuntime": {
+      "strictModeEnabled": true,
+      "awsLivenessEnabled": true,
+      "faceCompareEnabled": true,
+      "cnhFaceBiometricsEnabled": false,
+      "requireTrustedBiometricMatch": true,
+      "mobileDeviceEmbeddingEnabled": false
+    },
+    "featureGates": {
+      "launchProfile": "pilot_controlled",
+      "pilotControlled": true,
+      "driverWithdrawalsEnabled": false,
+      "referralProgramsEnabled": false,
+      "campaignCenterEnabled": false,
+      "leafDelasEnabled": false,
+      "driverDestinationModeEnabled": false,
+      "dynamicPricingEnabled": false,
+      "demandPredictionEnabled": false,
+      "smartPushEnabled": false,
+      "softBanEnforcementEnabled": false,
+      "adminMutationsEnabled": true,
+      "financialSimulatorEnabled": false
+    },
+    "launchControl": {
+      "pilotControlled": true,
+      "acceptNewBookings": true,
+      "acceptNewPix": true,
+      "passengerAccessMode": "broad",
+      "passengerCohortRequired": false,
+      "passengerCohortConfigured": true,
+      "passengerCohortSize": 1,
+      "driverCohortConfigured": true,
+      "driverCohortSize": 1,
+      "driverCohortMaxSize": 250,
+      "regionIds": [
+        "rio-zona-sul-centro-lapa-v1"
+      ],
+      "financialPolicyVersion": "runtime_tiered_percent_above_50_v1",
+      "runtimePolicyVersion": "assisted-pilot-broad-passenger-v1",
+      "geofence": {
+        "active": true,
+        "available": true,
+        "configured": true,
+        "enabled": true,
+        "bypassEnabled": false,
+        "failClosed": true,
+        "code": "GEOFENCE_ACTIVE",
+        "regionSource": "default",
+        "regionVersion": "rio-zona-sul-centro-lapa-v1",
+        "regionUpdatedAt": "2026-07-09",
+        "regionName": "Piloto Rio - Zona Sul + Centro + Lapa",
+        "regionPolygons": 22,
+        "regionPoints": 4337,
+        "destinationInsideRegionRequired": true
+      }
+    },
+    "mapsRoutingPolicy": {
+      "backendOnly": true,
+      "clientDirectGoogleFallback": false,
+      "placesCacheEnabled": true,
+      "placesCacheTtlSeconds": 2592000,
+      "routesCacheEnabled": true,
+      "routesCacheTtlSeconds": 90,
+      "trafficAwareRoutes": true,
+      "alternativeRoutesEnabled": false,
+      "driverTrafficLayerEnabled": true,
+      "demandHeatmap": {
+        "source": "leaf_internal_supply_demand",
+        "paidProviderCalls": false,
+        "refreshIntervalSeconds": 60,
+        "backendCacheTtlSeconds": 10,
+        "trafficAffectsHeatmap": false
+      },
+      "h3VisualPolicy": {
+        "enabled": true,
+        "opacity": 0.6,
+        "resolutionOffset": 0,
+        "palette": {
+          "yellow": "#FACC15",
+          "red": "#EF4444",
+          "purple": "#7E22CE",
+          "yellowStroke": "#CA8A04",
+          "redStroke": "#B91C1C",
+          "purpleStroke": "#581C87"
+        },
+        "label": {
+          "enabled": true,
+          "minPercent": 3,
+          "maxVisible": 5,
+          "template": "+{percent}%",
+          "backgroundColor": "#171412",
+          "backgroundOpacity": 0.9,
+          "textColor": "#FFFFFF",
+          "borderColor": "#FFFFFF",
+          "borderOpacity": 0.82,
+          "fontSize": 12
+        },
+        "version": 4
+      }
+    },
+    "pricingPolicy": {
+      "mode": "active",
+      "trafficPricing": "traffic_aware_time_component",
+      "dynamicMarkup": "leaf_supply_demand_pressure",
+      "maxDynamicMarkupPercent": 35
+    },
+    "notificationPolicy": {
+      "configured": true,
+      "provider": "firebase-admin",
+      "fcmConfigured": true,
+      "allowPublicDirectFcmSend": false,
+      "smartPushMode": "disabled",
+      "persistentRideNotificationsEnabled": true,
+      "defaultTtlSeconds": 3600
+    },
+    "driverOnlinePolicy": {
+      "backendGoverned": true,
+      "geofenceEnforced": false,
+      "geofenceBypass": false,
+      "requireApprovedDocuments": true,
+      "requireFreshLiveness": false,
+      "dailyTimeLimit": {
+        "backendGoverned": true,
+        "timezone": "America/Sao_Paulo",
+        "warningMs": 36000000,
+        "limitMs": 43200000
+      },
+      "minAppVersion": null
+    },
+    "driverDestinationPolicy": {
+      "enabled": false,
+      "baseDailyQuota": 2,
+      "maxDailyQuota": 12,
+      "bonusRideWindow": 5,
+      "extraEveryCompletedTrips": 5,
+      "maxCarriedBonusTickets": 1,
+      "durationMinutes": 90,
+      "minProgressKm": 1,
+      "arrivalRadiusKm": 3
+    },
+    "campaignSurfaces": {
+      "passengerHome": true,
+      "driverHome": true
+    },
+    "legalUrls": {
+      "privacy": "https://leaf.app.br/privacy",
+      "terms": "https://leaf.app.br/terms"
+    },
+    "supportPolicy": {
+      "inAppChatEnabled": true,
+      "ticketEscalationEnabled": true,
+      "copilotMode": "guarded_copilot"
+    }
+  },
+  "driverSocketPresence": [
+    "inDriverRoom",
+    "true",
+    "workerId",
+    "worker-main",
+    "updatedAt",
+    "2026-09-12T05:08:10.181Z",
+    "userType",
+    "driver",
+    "updatedAtMs",
+    "1789189690181",
+    "rooms",
+    "[\"oj6leb9T5KHYn5x9AAAB\",\"session_user_DV4cwZvql3T3pI3lnKYQwQVALKZ2\",\"drivers_room\",\"driver_DV4cwZvql3T3pI3lnKYQwQVALKZ2\"]",
+    "socketId",
+    "oj6leb9T5KHYn5x9AAAB",
+    "driverId",
+    "DV4cwZvql3T3pI3lnKYQwQVALKZ2",
+    "source",
+    "updateLocation",
+    "connected",
+    "true"
+  ],
+  "qaTrustWindowRenewedUntil": "2026-09-12T08:48:38Z",
+  "qaTrustWindowScope": {
+    "driverUid": "DV4cwZvql3T3pI3lnKYQwQVALKZ2",
+    "profileId": "qa-test-users-sandbox-durable",
+    "ack": "QA_SANDBOX_ONLY"
+  }
+}

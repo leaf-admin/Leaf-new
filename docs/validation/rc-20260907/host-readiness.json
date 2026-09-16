@@ -1,0 +1,122 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-09-07T20:04:29.344Z",
+  "status": "blocked",
+  "platform": "all",
+  "javaHome": "/Users/izaakdias/.local/jdks/temurin17/jdk-17.0.18+8/Contents/Home",
+  "androidSdkRoot": "/Users/izaakdias/Android/Sdk",
+  "maestroBin": "/Users/izaakdias/.maestro/bin/maestro",
+  "metroPort": 8097,
+  "minimumFreeGb": 15,
+  "checks": [
+    {
+      "name": "java17",
+      "status": "pass",
+      "message": "17.0.18 em /Users/izaakdias/.local/jdks/temurin17/jdk-17.0.18+8/Contents/Home"
+    },
+    {
+      "name": "node",
+      "status": "pass",
+      "message": "v20.20.2"
+    },
+    {
+      "name": "curl",
+      "status": "pass",
+      "message": "/usr/bin/curl"
+    },
+    {
+      "name": "jq",
+      "status": "pass",
+      "message": "/opt/homebrew/bin/jq"
+    },
+    {
+      "name": "cocoapods",
+      "status": "pass",
+      "message": "1.16.2"
+    },
+    {
+      "name": "disk",
+      "status": "pass",
+      "message": "16.9 GB livres; m\u00ednimo 15 GB"
+    },
+    {
+      "name": "maestro:runtime",
+      "status": "pass",
+      "message": "2.5.1"
+    },
+    {
+      "name": "metro",
+      "status": "blocked",
+      "message": "Metro n\u00e3o respondeu na porta 8097; iniciar e aquecer antes do app"
+    },
+    {
+      "name": "adb",
+      "status": "pass",
+      "message": "/opt/homebrew/bin/adb"
+    },
+    {
+      "name": "android:adb",
+      "status": "pass",
+      "message": "/Users/izaakdias/Android/Sdk/platform-tools/adb"
+    },
+    {
+      "name": "android:emulator",
+      "status": "pass",
+      "message": "/Users/izaakdias/Android/Sdk/emulator/emulator"
+    },
+    {
+      "name": "android:sdkmanager",
+      "status": "pass",
+      "message": "/Users/izaakdias/Android/Sdk/cmdline-tools/latest/bin/sdkmanager"
+    },
+    {
+      "name": "android:aapt",
+      "status": "pass",
+      "message": "/Users/izaakdias/Android/Sdk/build-tools/35.0.0/aapt"
+    },
+    {
+      "name": "android:android.jar",
+      "status": "pass",
+      "message": "/Users/izaakdias/Android/Sdk/platforms/android-35/android.jar"
+    },
+    {
+      "name": "adb:daemon",
+      "status": "pass",
+      "message": "daemon inicializado"
+    },
+    {
+      "name": "android:driver-avd",
+      "status": "pass",
+      "message": "Leaf_API_35_Driver"
+    },
+    {
+      "name": "ios:xcode",
+      "status": "pass",
+      "message": "/Applications/Xcode.app/Contents/Developer (Xcode 26.6)"
+    },
+    {
+      "name": "ios:simctl",
+      "status": "pass",
+      "message": "/Applications/Xcode.app/Contents/Developer/usr/bin/simctl"
+    },
+    {
+      "name": "ios:team-id",
+      "status": "pass",
+      "message": "DTA8W5KA5D encontrado no projeto"
+    },
+    {
+      "name": "ios:signing",
+      "status": "pass",
+      "message": "6 identidade(s) v\u00e1lida(s)"
+    }
+  ],
+  "blockers": [
+    {
+      "name": "metro",
+      "status": "blocked",
+      "message": "Metro n\u00e3o respondeu na porta 8097; iniciar e aquecer antes do app"
+    }
+  ],
+  "warnings": [],
+  "scenarioStarted": false
+}
