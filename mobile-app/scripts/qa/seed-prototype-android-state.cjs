@@ -29,7 +29,7 @@ const PASSENGER_UID = String(
   QA_PREFLIGHT_USERS?.passenger?.uid || 'OjML1wSzdNRaynjqMRlSW1Y0LVy2',
 ).trim();
 const DRIVER_UID = String(
-  QA_PREFLIGHT_USERS?.driver?.uid || '8vg2kxxqi3TYKlpD6eBlWgYseIq2',
+  QA_PREFLIGHT_USERS?.driver?.uid || 'DV4cwZvql3T3pI3lnKYQwQVALKZ2',
 ).trim();
 
 const REAL_PICKUP_ROUTE_POLYLINE =
@@ -97,6 +97,7 @@ function lastRouteCoordinate(coordinates, fallback) {
 
 const BASE_COORDS = {
   pickup: lastRouteCoordinate(REAL_PICKUP_ROUTE_COORDINATES, { latitude: -22.971964, longitude: -43.182543 }),
+  interruption: { latitude: -22.976794, longitude: -43.197329 },
   destination: lastRouteCoordinate(REAL_DESTINATION_ROUTE_COORDINATES, { latitude: -22.984843, longitude: -43.221972 }),
   driverHome: routeCoordinateAt(REAL_PICKUP_ROUTE_COORDINATES, 0, { latitude: -22.9708, longitude: -43.1819 }),
   pickupManeuver: routeCoordinateAt(REAL_PICKUP_ROUTE_COORDINATES, 10, { latitude: -22.971382, longitude: -43.182156 }),
@@ -106,7 +107,9 @@ const BASE_COORDS = {
 
 const LABELS = {
   pickupAddress: 'Copacabana Palace, Rio de Janeiro, RJ',
+  interruptionAddress: 'Av. Vieira Souto, Ipanema, Rio de Janeiro, RJ',
   destinationAddress: 'Leblon, Rio de Janeiro, RJ',
+  newDestinationAddress: 'Barra da Tijuca, Rio de Janeiro, RJ',
 };
 
 const PREFIX = '@prototype_runtime_session_';
@@ -119,6 +122,44 @@ const QA_SOCKET_ID_TOKEN_STORAGE_KEY = '@qa_socket_id_token';
 const CONFIRMED_DESTINATIONS_STORAGE_KEY = 'confirmedDestinations';
 const DEFAULT_QA_FREEZE_MS = 600000;
 const REALTIME_DRIVER_SCENARIOS = new Set(['driver-home']);
+const SUPPORTED_SCENARIOS = Object.freeze([
+  'passenger-home',
+  'passenger-destination-search',
+  'passenger-booking',
+  'passenger-category',
+  'passenger-payment',
+  'passenger-searching',
+  'passenger-requesting',
+  'passenger-no-drivers',
+  'passenger-payment-failed',
+  'passenger-extension',
+  'passenger-operational',
+  'passenger-searching-replacement',
+  'passenger-receipt',
+  'passenger-cancelled-refund',
+  'passenger-accepted',
+  'passenger-arrived',
+  'passenger-started',
+  'driver-home',
+  'driver-online-waiting',
+  'driver-offer',
+  'driver-accepted',
+  'driver-arrived',
+  'driver-started',
+  'driver-operational',
+  'driver-searching-replacement',
+  'driver-completed-home',
+  'driver-receipt',
+]);
+
+function assertSupportedScenario(scenario) {
+  const normalizedScenario = String(scenario || '').trim();
+  if (!SUPPORTED_SCENARIOS.includes(normalizedScenario)) {
+    throw new Error(
+      `unknown_scenario:${normalizedScenario || '<empty>'}; supported=${SUPPORTED_SCENARIOS.join(',')}`,
+    );
+  }
+}
 const ADB_BIN = resolveAdbBin();
 const AUTH_FLOW_STALE_STORAGE_KEYS = [
   '@onboarding_data',
@@ -164,6 +205,17 @@ function arg(name, fallback = '') {
 
 function hasFlag(name) {
   return process.argv.includes(name);
+}
+
+function printUsage() {
+  process.stdout.write([
+    'Uso: seed-prototype-android-state.cjs [opcoes]',
+    '  --list-scenarios                         lista os estados suportados',
+    '  --scenario <nome> --device <serial>      semeia um estado no device',
+    '  --skip-socket-token                      mantem a fixture isolada (sem E2E)',
+    '  --screenshot <arquivo> --artifact-dir <dir>',
+    '  --help                                   mostra esta ajuda',
+  ].join('\\n') + '\\n');
 }
 
 function defaultFreezeMsForScenario(scenario) {
@@ -1132,8 +1184,154 @@ function buildScenarioPatch(scenario) {
     };
   }
 
-  if (scenario === 'passenger-booking' || scenario === 'passenger-payment') {
+  if (scenario === 'passenger-destination-search') {
+    return buildScenarioPatch('passenger-home');
+  }
+
+  if (
+    scenario === 'passenger-booking' ||
+    scenario === 'passenger-category' ||
+    scenario === 'passenger-payment'
+  ) {
     return buildPassengerQuoteBase();
+  }
+
+  if (scenario === 'passenger-no-drivers') {
+    return {
+      ...buildPassengerQuoteBase(),
+      // The runtime reconciles the terminal no-driver event to idle and
+      // presents this surface through the explicit deep link below. Keeping
+      // the persisted session idle lets terminal actions return to Home.
+      bookingStatus: 'idle',
+      activeBookingId: null,
+      activeBooking: null,
+      driverInfo: null,
+      driverCoordinate: null,
+      driverActiveRide: null,
+      lastError: '',
+    };
+  }
+
+  if (scenario === 'passenger-payment-failed') {
+    return {
+      ...buildPassengerQuoteBase(),
+      bookingStatus: 'idle',
+      activeBookingId: null,
+      activeBooking: null,
+      paymentState: {
+        status: 'failed',
+        paymentId: null,
+        chargeId: null,
+        error: 'Falha controlada de pagamento para validação visual.',
+      },
+    };
+  }
+
+  if (scenario === 'passenger-extension') {
+    return {
+      ...buildPassengerTripBase('started'),
+      rideExtension: {
+        status: 'pending_payment',
+        bookingId: 'booking-proof-passenger-1',
+        requestId: 'ext-proof-1',
+        currentFare: 27.5,
+        newFare: 34.75,
+        diffFare: 7.25,
+        destination: {
+          name: 'Barra da Tijuca',
+          address: LABELS.newDestinationAddress,
+          coordinate: { latitude: -23.00037, longitude: -43.365895 },
+        },
+        // Visual-only fixture: the modal must not auto-call the webhook without a QA token.
+        chargeId: 'mock_review_extension-proof-1',
+        paymentLink: 'https://pix.leaf.local/extension-proof-1',
+        brCode: '000201010212extensionproof',
+        requestedAt: '2026-03-28T23:10:00.000Z',
+        decidedAt: '2026-03-28T23:10:30.000Z',
+        expiresAt: '2026-03-28T23:12:00.000Z',
+        message: 'O motorista aceitou. Pague o complemento Pix para seguir ao novo destino.',
+      },
+      operationalContinuation: { status: 'idle' },
+    };
+  }
+
+  if (scenario === 'passenger-operational') {
+    return {
+      ...buildPassengerTripBase('started'),
+      bookingStatus: 'operational_interrupted',
+      operationalContinuation: {
+        status: 'passenger_decision_pending',
+        bookingId: 'booking-proof-passenger-1',
+        reason: 'VEHICLE_BREAKDOWN',
+        note: 'Falha mecânica em teste controlado',
+        previousDriverId: DRIVER_UID,
+        pickupLocation: {
+          lat: BASE_COORDS.interruption.latitude,
+          lng: BASE_COORDS.interruption.longitude,
+          address: LABELS.interruptionAddress,
+        },
+        estimatedRefund: 20.62,
+        remainingReservedAmount: 27.5,
+        rideLegs: [],
+        message: 'Seu motorista não consegue continuar. Deseja seguir com outro motorista parceiro?',
+      },
+      rideExtension: { status: 'idle' },
+    };
+  }
+
+  if (scenario === 'passenger-searching-replacement') {
+    return {
+      ...buildPassengerTripBase('started'),
+      bookingStatus: 'searching_replacement',
+      driverInfo: null,
+      driverCoordinate: null,
+      driverActiveRide: null,
+      operationalContinuation: {
+        status: 'searching_replacement_driver',
+        bookingId: 'booking-proof-passenger-replacement-1',
+        reason: 'VEHICLE_BREAKDOWN',
+        previousDriverId: DRIVER_UID,
+        pickupLocation: {
+          lat: BASE_COORDS.interruption.latitude,
+          lng: BASE_COORDS.interruption.longitude,
+          address: LABELS.interruptionAddress,
+        },
+        estimatedRefund: 20.62,
+        remainingReservedAmount: 27.5,
+        rideLegs: [],
+        message: 'Estamos procurando outro motorista para continuar a corrida.',
+      },
+      rideExtension: { status: 'idle' },
+    };
+  }
+
+  if (scenario === 'passenger-cancelled-refund') {
+    return {
+      activeRole: 'customer',
+      bookingStatus: 'idle',
+      activeBookingId: null,
+      activeBooking: null,
+      driverOffers: [],
+      driverActiveRide: null,
+      driverInfo: null,
+      searchingElapsedSeconds: 0,
+      paymentState: {
+        status: 'refunded',
+        paymentId: 'charge-cancellation-proof-1',
+        chargeId: 'charge-cancellation-proof-1',
+        amount: 13.42,
+        originalPaidAmount: 13.42,
+        method: 'pix',
+        error: '',
+        refundStatus: 'ALREADY_REFUNDED',
+        refundAmount: 13.42,
+        cancellationFee: 0,
+        refundId: 'refund-cancellation-proof-1',
+      },
+      currentCoordinate: BASE_COORDS.pickup,
+      currentAddress: LABELS.pickupAddress,
+      lastError: 'Corrida cancelada e reembolso processado',
+    };
   }
 
   if (scenario === 'passenger-searching' || scenario === 'passenger-requesting') {
@@ -1172,6 +1370,70 @@ function buildScenarioPatch(scenario) {
     };
   }
 
+  if (scenario === 'driver-operational') {
+    return {
+      ...buildDriverRideContext('started'),
+      bookingStatus: 'operational_interrupted',
+      activeBookingId: 'booking-proof-driver-operational-1',
+      driverActiveRide: {
+        ...buildDriverActiveRide('operational_interrupted'),
+        bookingId: 'booking-proof-driver-operational-1',
+        id: 'booking-proof-driver-operational-1',
+      },
+      operationalContinuation: {
+        status: 'driver_decision_pending',
+        bookingId: 'booking-proof-driver-operational-1',
+        reason: 'VEHICLE_BREAKDOWN',
+        interruptedByDriverId: DRIVER_UID,
+        remainingReservedAmount: 27.5,
+        message: 'Aguardando a decisão do passageiro para concluir a corrida com segurança.',
+        rideLegs: [
+          {
+            source: 'operational_interrupt',
+            driverNetAmount: 10.8,
+            metadata: { settlementType: 'INTERRUPTED_OPERATIONAL' },
+          },
+        ],
+      },
+    };
+  }
+
+  if (scenario === 'driver-searching-replacement') {
+    return {
+      ...buildDriverRideContext('started'),
+      bookingStatus: 'searching_replacement',
+      activeBookingId: 'booking-proof-driver-replacement-1',
+      activeBooking: {
+        ...buildDriverActiveRide('searching_replacement'),
+        bookingId: 'booking-proof-driver-replacement-1',
+        id: 'booking-proof-driver-replacement-1',
+      },
+      driverActiveRide: {
+        ...buildDriverActiveRide('searching_replacement'),
+        bookingId: 'booking-proof-driver-replacement-1',
+        id: 'booking-proof-driver-replacement-1',
+        routePlan: buildDriverRoutePlan(),
+        routeCoordinates: buildDriverRoutePlan().destinationCoordinates,
+      },
+      driverTripMeta: buildDriverTripMeta('started'),
+      operationalContinuation: {
+        status: 'searching_replacement_driver',
+        bookingId: 'booking-proof-driver-replacement-1',
+        reason: 'VEHICLE_BREAKDOWN',
+        interruptedByDriverId: DRIVER_UID,
+        remainingReservedAmount: 27.5,
+        message: 'O passageiro optou por continuar com outro parceiro. Você já foi liberado desta corrida.',
+        rideLegs: [
+          {
+            source: 'operational_interrupt',
+            driverNetAmount: 10.8,
+            metadata: { settlementType: 'INTERRUPTED_OPERATIONAL' },
+          },
+        ],
+      },
+    };
+  }
+
   if (scenario === 'passenger-receipt') {
     return {
       activeRole: 'customer',
@@ -1192,7 +1454,7 @@ function buildScenarioPatch(scenario) {
     };
   }
 
-  if (scenario === 'driver-receipt') {
+  if (scenario === 'driver-completed-home' || scenario === 'driver-receipt') {
     return {
       activeRole: 'driver',
       bookingStatus: 'completed',
@@ -1225,12 +1487,18 @@ function buildScenarioPatch(scenario) {
       bookingStatus: 'idle',
       activeBookingId: null,
       activeBooking: null,
+      lastRideBookingId: null,
+      selectedDestination: null,
+      selectedFare: null,
+      selectedVehicle: '',
+      tripHistory: [],
+      lastReceipt: null,
       tripDistanceKm: null,
       tripDurationMin: null,
       tripArrivalText: '',
       boardingDeadlineAt: null,
       boardingRemainingSec: 0,
-      driverOnline: true,
+      driverOnline: false,
       driverOnlinePending: false,
       driverOnlineMutationSource: '',
       driverActivation: buildApprovedDriverActivation(),
@@ -1248,6 +1516,55 @@ function buildScenarioPatch(scenario) {
         destinationAddress: '',
         pickupCoordinate: null,
         destinationCoordinate: null,
+        routePlan: null,
+        routeCoordinates: [],
+        fare: 0,
+        fareLabel: '',
+      },
+      rideExtension: { status: 'idle' },
+      operationalContinuation: { status: 'idle' },
+    };
+  }
+
+  if (scenario === 'driver-online-waiting') {
+    return {
+      activeRole: 'driver',
+      bookingStatus: 'idle',
+      activeBookingId: null,
+      activeBooking: null,
+      lastRideBookingId: null,
+      selectedDestination: null,
+      selectedFare: null,
+      selectedVehicle: '',
+      tripHistory: [],
+      lastReceipt: null,
+      tripDistanceKm: null,
+      tripDurationMin: null,
+      tripArrivalText: '',
+      boardingDeadlineAt: null,
+      boardingRemainingSec: 0,
+      driverOnline: true,
+      driverOnlinePending: false,
+      driverOnlineStartedAt: '2026-09-02T05:45:00.000Z',
+      driverOnlineMutationSource: 'qa_seed',
+      driverActivation: buildApprovedDriverActivation(),
+      driverActivationResolved: true,
+      driverCanGoOnline: true,
+      driverOffers: [],
+      driverActiveRide: null,
+      driverCoordinate: BASE_COORDS.destination,
+      currentCoordinate: BASE_COORDS.destination,
+      currentAddress: LABELS.pickupAddress,
+      driverTripMeta: {
+        leg: null,
+        initialMeters: null,
+        initialEtaMinutes: null,
+        pickupAddress: '',
+        destinationAddress: '',
+        pickupCoordinate: null,
+        destinationCoordinate: null,
+        routePlan: null,
+        routeCoordinates: [],
         fare: 0,
         fareLabel: '',
       },
@@ -1367,6 +1684,36 @@ function scenarioRoute(scenario) {
     return params.toString();
   };
 
+  if (scenario === 'driver-home' || scenario === 'driver-online-waiting') {
+    return 'leafapp://robotaxi/home';
+  }
+  if (scenario === 'passenger-destination-search') {
+    return 'leafapp://robotaxi/home?qaAutomation=1&qaPassengerAction=open_destination_search&qaNonce=seed-destination-search';
+  }
+  if (scenario === 'passenger-booking' || scenario === 'passenger-category') {
+    return 'leafapp://robotaxi/home?qaAutomation=1&qaPassengerAction=show_category&qaNonce=seed-category';
+  }
+  if (scenario === 'passenger-payment') {
+    return 'leafapp://robotaxi/home?qaAutomation=1&qaPassengerAction=open_pix_pending&qaNonce=seed-pix-pending';
+  }
+  if (scenario === 'passenger-no-drivers') {
+    const params = new URLSearchParams({
+      reason: 'Nenhum motorista disponível no momento.',
+      refundStatus: 'REFUND_PENDING',
+      refundAmount: '27.5',
+      fare: '27.5',
+      destination: 'Leblon',
+    });
+    return `leafapp://robotaxi/no-drivers?${params.toString()}`;
+  }
+  if (scenario === 'passenger-payment-failed') {
+    const params = new URLSearchParams({
+      title: 'Pagamento não confirmado',
+      errorMessage: 'Não foi possível confirmar o Pix. Nenhuma nova cobrança foi iniciada.',
+      retryRouteName: 'RobotaxiPrototype',
+    });
+    return `leafapp://robotaxi/payment/failed?${params.toString()}`;
+  }
   if (scenario === 'driver-offer') {
     return 'leafapp://robotaxi/home';
   }
@@ -1375,10 +1722,11 @@ function scenarioRoute(scenario) {
     // Opening robotaxi/trip would bypass it for the standalone legacy screen.
     return 'leafapp://robotaxi/home';
   }
-  if (scenario === 'passenger-booking' || scenario === 'passenger-payment') {
-    // Booking/payment deep links still resolve to standalone legacy surfaces.
-    // QA must start from the current home runtime and reach the next surface
-    // through the canonical interaction, never through those stale routes.
+  if (
+    scenario === 'passenger-extension' ||
+    scenario === 'passenger-operational' ||
+    scenario === 'passenger-searching-replacement'
+  ) {
     return 'leafapp://robotaxi/home';
   }
   if (scenario === 'passenger-receipt') {
@@ -1387,7 +1735,29 @@ function scenarioRoute(scenario) {
   if (scenario === 'driver-receipt') {
     return `leafapp://robotaxi/receipt?${passengerReceiptParams('driver')}`;
   }
-  if (scenario === 'driver-accepted' || scenario === 'driver-arrived' || scenario === 'driver-started') {
+  if (scenario === 'driver-completed-home') {
+    return 'leafapp://robotaxi/home';
+  }
+  if (scenario === 'passenger-cancelled-refund') {
+    const params = new URLSearchParams({
+      bookingId: 'booking-cancellation-proof-1',
+      bookingStatus: 'canceled',
+      completed: 'true',
+      source: 'search',
+      originalPaidAmount: '13.42',
+      refundAmount: '13.42',
+      cancellationFee: '0',
+      refundStatus: 'ALREADY_REFUNDED',
+    });
+    return `leafapp://robotaxi/cancellation?${params.toString()}`;
+  }
+  if (
+    scenario === 'driver-accepted' ||
+    scenario === 'driver-arrived' ||
+    scenario === 'driver-started' ||
+    scenario === 'driver-operational' ||
+    scenario === 'driver-searching-replacement'
+  ) {
     return 'leafapp://robotaxi/home';
   }
   return 'leafapp://robotaxi/home';
@@ -1639,12 +2009,21 @@ function setAndroidEmulatorLocation(deviceId, coordinate) {
 }
 
 async function main() {
+  if (hasFlag('--help') || hasFlag('-h')) {
+    printUsage();
+    return;
+  }
+  if (hasFlag('--list-scenarios')) {
+    process.stdout.write(`${JSON.stringify(SUPPORTED_SCENARIOS, null, 2)}\n`);
+    return;
+  }
   const deviceId = String(arg('--device', firstAndroidDevice())).trim();
   if (!deviceId) {
     throw new Error('Nenhum device Android conectado.');
   }
 
   const scenario = String(arg('--scenario', 'driver-accepted')).trim();
+  assertSupportedScenario(scenario);
   const isDriverScenario = scenario.startsWith('driver-');
   const defaultUid = isDriverScenario ? DRIVER_UID : PASSENGER_UID;
   const screenshotPath = arg('--screenshot', '');
@@ -1911,7 +2290,16 @@ async function main() {
   );
 }
 
-main().catch((error) => {
-  console.error(error?.stack || error?.message || String(error));
-  process.exit(1);
-});
+if (require.main === module) {
+  main().catch((error) => {
+    console.error(error?.stack || error?.message || String(error));
+    process.exit(1);
+  });
+}
+
+module.exports = {
+  assertSupportedScenario,
+  getSupportedScenarios: () => SUPPORTED_SCENARIOS.slice(),
+  scenarioPatch: buildScenarioPatch,
+  scenarioRoute,
+};

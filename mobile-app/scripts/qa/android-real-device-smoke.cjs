@@ -6,6 +6,7 @@ const http = require("http");
 const https = require("https");
 const os = require("os");
 const path = require("path");
+const crypto = require("crypto");
 const { spawn, spawnSync } = require("child_process");
 const { PNG } = require("pngjs");
 const { extractCriticalAppLines } = require("./real-smoke-logcat.cjs");
@@ -33,6 +34,7 @@ const ALLOW_EXISTING_ACTIVE_RIDE =
   process.env.REAL_SMOKE_ALLOW_EXISTING_ACTIVE_RIDE === "true";
 const SYNC_DRIVER_TO_APP_PICKUP =
   process.env.REAL_SMOKE_SYNC_DRIVER_TO_APP_PICKUP === "true";
+const DRIVER_SURFACE_MODE = process.env.REAL_SMOKE_DRIVER_SURFACE_MODE || "app";
 const REQUIRE_DRIVER_CRLV_IDENTITY =
   process.env.REAL_SMOKE_REQUIRE_DRIVER_CRLV_IDENTITY !== "false";
 const REQUIRE_CANONICAL_PICKUP =
@@ -51,6 +53,7 @@ const PAYMENT_PASSENGER_UID =
   process.env.FIREBASE_TEST_UID ||
   process.env.PAYMENT_RUNTIME_UID ||
   "";
+const PAYMENT_RUNTIME_USER_ID = process.env.PAYMENT_RUNTIME_USER_ID || PAYMENT_PASSENGER_UID;
 const PAYMENT_INTENT_ID =
   process.env.REAL_SMOKE_PAYMENT_INTENT_ID ||
   process.env.PAYMENT_INTENT_ID ||
@@ -65,6 +68,13 @@ const QUOTE_STABILITY_WAIT_MS = Number(process.env.QUOTE_STABILITY_WAIT_MS || 18
 const PAYMENT_WAIT_MS = Number(process.env.REAL_SMOKE_PAYMENT_WAIT_MS || 30000);
 const CAPTURE_XML_SETTLE_MS = Number(process.env.REAL_SMOKE_CAPTURE_XML_SETTLE_MS || 700);
 const CAPTURE_XML_RETRY_MS = Number(process.env.REAL_SMOKE_CAPTURE_XML_RETRY_MS || 1200);
+const METRO_PORT = Number(process.env.METRO_PORT || 8097);
+const METRO_URL = process.env.METRO_URL || `http://127.0.0.1:${METRO_PORT}`;
+const DEV_CLIENT_URL =
+  process.env.DEV_CLIENT_URL ||
+  `exp+leafapp-reactnative://expo-development-client/?url=${encodeURIComponent(
+    METRO_URL,
+  )}&disableOnboarding=1`;
 const EXPECTED_PICKUP_LAT = Number(process.env.TEST_PICKUP_LAT);
 const EXPECTED_PICKUP_LNG = Number(process.env.TEST_PICKUP_LNG);
 const EXPECTED_PICKUP_SOURCE_CERTIFIED =
@@ -84,6 +94,7 @@ const commands = [];
 const warnings = [];
 const failures = [];
 let lastCanonicalPickup = null;
+let activeLogcatPath = null;
 
 function log(message) {
   console.log(`[real-smoke] ${message}`);
@@ -141,6 +152,32 @@ function adbRun(args, options = {}) {
 function adbText(args, options = {}) {
   const result = adbRun(args, { ...options, encoding: "utf8" });
   return String(result.stdout || "").replace(/\r/g, "");
+}
+
+function launchAndroidApp() {
+  adbRun(["shell", "am", "force-stop", APP_PACKAGE], { allowFailure: true });
+  const deepLinkLaunch = adbRun(
+    [
+      "shell",
+      "am",
+      "start",
+      "-W",
+      "--ez",
+      "EXDevMenuDisableAutoLaunch",
+      "true",
+      "-a",
+      "android.intent.action.VIEW",
+      "-d",
+      DEV_CLIENT_URL,
+      APP_PACKAGE,
+    ],
+    { allowFailure: true },
+  );
+  if (deepLinkLaunch.status === 0) return deepLinkLaunch;
+  return adbRun(
+    ["shell", "am", "start", "-W", "-n", `${APP_PACKAGE}/.MainActivity`],
+    { allowFailure: true },
+  );
 }
 
 function sleep(ms) {
@@ -252,10 +289,36 @@ function classifySmokeFailure(message) {
         owner: "qa_environment",
       };
     }
+    if (lower.includes("auth_session_not_ready")) {
+      return {
+        ...base,
+        domain: "execution_environment",
+        severity: "P1",
+        owner: "qa_authentication",
+      };
+    }
+    if (lower.includes("passenger_role_not_ready")) {
+      return {
+        ...base,
+        domain: "execution_environment",
+        severity: "P1",
+        owner: "qa_session_state",
+      };
+    }
+    if (lower.includes("passenger_surface_not_ready")) {
+      return {
+        ...base,
+        domain: "test_harness",
+        severity: "P1",
+        owner: "qa_automation",
+      };
+    }
     if (
       lower.includes("destination_query_input_failed") ||
       lower.includes("app_canonical_pickup_unavailable") ||
-      lower.includes("expected_pickup_source_uncertified")
+      lower.includes("expected_pickup_source_uncertified") ||
+      lower.includes("quote_not_reached") ||
+      lower.includes("driver_surface_mode_conflict")
     ) {
       return {
         ...base,
@@ -399,6 +462,31 @@ function writeArtifact(name, content) {
   return filePath;
 }
 
+function formatOptionalStatus(value) {
+  if (!value?.requested) return "not requested";
+  if (value.ok === true) return "OK";
+  if (value.ok === false) return "FAIL";
+  return "not reached";
+}
+
+function formatSocketPollingStatus(poll, realtime) {
+  if (poll?.ok) {
+    return `OK${poll.status ? ` (${poll.status})` : ""}`;
+  }
+
+  const pollingBody = String(poll?.body || "").toLowerCase();
+  const websocketOnlyGateway =
+    poll?.status === 400 &&
+    pollingBody.includes("transport unknown") &&
+    realtime?.ok === true &&
+    realtime?.transport === "websocket";
+  if (websocketOnlyGateway) {
+    return "not supported (websocket-only gateway) (400)";
+  }
+
+  return `FAIL${poll?.status ? ` (${poll.status})` : ""}`;
+}
+
 function requestText(url, timeoutMs = 12000) {
   return new Promise((resolve) => {
     let parsed;
@@ -432,6 +520,68 @@ function requestText(url, timeoutMs = 12000) {
     });
     req.end();
   });
+}
+
+function validatePaymentRuntimeConfig(response) {
+  if (!response?.ok) {
+    return {
+      ok: false,
+      reason: response?.error || `payment_runtime_config_http_${response?.status || "unknown"}`,
+      profile: null,
+    };
+  }
+
+  let payload;
+  try {
+    payload = JSON.parse(response.body || "{}");
+  } catch (error) {
+    return {
+      ok: false,
+      reason: `payment_runtime_config_invalid_json:${error.message}`,
+      profile: null,
+    };
+  }
+
+  const profile = payload?.paymentRuntime?.effectiveProfile;
+  const safeProfile = profile
+    ? {
+        profileId: profile.profileId || null,
+        environment: profile.environment || null,
+        scope: profile.scope || null,
+        source: profile.source || null,
+        contextMatched: profile.contextMatched === true,
+        expiresAtIso: profile.expiresAtIso || null,
+      }
+    : null;
+
+  if (!safeProfile) {
+    return { ok: false, reason: "payment_runtime_profile_missing", profile: null };
+  }
+  if (safeProfile.environment !== "sandbox") {
+    return {
+      ok: false,
+      reason: `payment_runtime_environment_${safeProfile.environment || "missing"}`,
+      profile: safeProfile,
+    };
+  }
+  if (safeProfile.scope !== "users") {
+    return {
+      ok: false,
+      reason: `payment_runtime_scope_${safeProfile.scope || "missing"}`,
+      profile: safeProfile,
+    };
+  }
+  if (safeProfile.contextMatched !== true) {
+    return { ok: false, reason: "payment_runtime_context_not_matched", profile: safeProfile };
+  }
+  if (safeProfile.expiresAtIso) {
+    const expiresAt = Date.parse(safeProfile.expiresAtIso);
+    if (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) {
+      return { ok: false, reason: "payment_runtime_profile_expired", profile: safeProfile };
+    }
+  }
+
+  return { ok: true, reason: null, profile: safeProfile };
 }
 
 function decodeXml(value = "") {
@@ -942,6 +1092,13 @@ function detectScreen(nodes) {
   ) {
     return "passenger_active_trip";
   }
+  if (
+    allText.includes("passenger-home-category-card") ||
+    allText.includes("passenger-home-category-confirm") ||
+    (allText.includes("Sua viagem") && allText.includes("valor da corrida"))
+  ) {
+    return "passenger_quote";
+  }
   if (allText.includes("passenger-destination-confirm-button")) return "passenger_quote";
   if (
     allText.includes("passenger-destination-search-input") ||
@@ -1006,11 +1163,15 @@ function runSandboxPaymentConfirmation() {
     };
   }
 
-  if (!PAYMENT_INTENT_ID) {
+  const paymentIntentResolution = resolveCurrentRunPaymentIntentId();
+  if (!paymentIntentResolution.ok) {
     return {
       requested: true,
       ok: false,
-      error: "REAL_SMOKE_PAYMENT_INTENT_ID is required for exact sandbox confirmation",
+      error:
+        paymentIntentResolution.error ||
+        "REAL_SMOKE_PAYMENT_INTENT_ID could not be resolved for the current ride",
+      paymentIntentResolution,
     };
   }
 
@@ -1024,7 +1185,7 @@ function runSandboxPaymentConfirmation() {
       ...process.env,
       API_BASE_URL: BACKEND_URL,
       PASSENGER_UID_FILTER: PAYMENT_PASSENGER_UID,
-      PAYMENT_INTENT_ID,
+      PAYMENT_INTENT_ID: paymentIntentResolution.paymentIntentId,
       PAYMENT_EVIDENCE_PATH: evidencePath,
       WATCH_TIMEOUT_SEC: process.env.REAL_SMOKE_PAYMENT_CONFIRM_TIMEOUT_SEC || "180",
     },
@@ -1041,6 +1202,7 @@ function runSandboxPaymentConfirmation() {
     status: result.status,
     stdout: result.stdout,
     stderr: result.stderr,
+    paymentIntentResolution,
     evidencePath: fs.existsSync(evidencePath) ? evidencePath : null,
   };
   writeArtifact("sandbox-payment-confirmation-process.json", JSON.stringify(payload, null, 2));
@@ -1093,6 +1255,9 @@ function runDashboardEvidenceCollection(paymentConfirmation) {
       ...process.env,
       API_BASE_URL: BACKEND_URL,
       RIDE_ID: rideId,
+      PAYMENT_EVIDENCE_PATH: paymentConfirmation?.evidencePath || "",
+      RECONCILIATION_FINANCIAL_CONTEXT: process.env.RECONCILIATION_FINANCIAL_CONTEXT || "",
+      RECONCILIATION_PROVIDER_ENVIRONMENT: process.env.RECONCILIATION_PROVIDER_ENVIRONMENT || "",
       ARTIFACTS_DIR: artifactsDir,
       EXPECTED_GROSS:
         process.env.EXPECTED_GROSS ||
@@ -1200,6 +1365,15 @@ async function waitForManagedDriverReadiness(logPath, timeoutMs = 45000) {
 async function startManagedDriverBotAtPickup(pickup) {
   if (!SYNC_DRIVER_TO_APP_PICKUP) {
     return { requested: false, ok: null, skippedReason: "disabled" };
+  }
+
+  if (DRIVER_SURFACE_MODE !== "bot") {
+    return {
+      requested: true,
+      ok: false,
+      error: "driver_surface_mode_conflict",
+      skippedReason: "app_surface_selected",
+    };
   }
 
   if (!TEST_DRIVER_UID) {
@@ -1477,6 +1651,81 @@ function looksLikePixModalScreenshot(filePath) {
   }
 }
 
+function looksLikePixModalText(current) {
+  const text = [
+    current?.accessibilityDumpLog,
+    current?.accessibilityStreamLog,
+    current?.screen,
+    current?.paymentErrorMessage,
+  ]
+    .filter(Boolean)
+    .join("\n");
+  return /payment-modal-loading|confirmando pagamento|processando pagamento|recuperando ou criando pagamento pix|woovipaymentmodal.*modal aberto/i.test(
+    text,
+  );
+}
+
+function looksLikePixModalEvidence(current) {
+  return looksLikePixModalScreenshot(current?.screenshot) || looksLikePixModalText(current);
+}
+
+function deriveAdvancePaymentIntentId(rideId) {
+  const normalizedRideId = String(rideId || '').trim() || 'unknown-ride';
+  const hash = crypto
+    .createHash('sha256')
+    .update(`advance_payment:${normalizedRideId}`)
+    .digest('hex')
+    .slice(0, 32);
+  return `advance_${hash}`;
+}
+
+function resolveCurrentRunPaymentIntentId() {
+  const configuredPaymentIntentId = String(PAYMENT_INTENT_ID || '').trim();
+  const logcat = activeLogcatPath ? tailTextFile(activeLogcatPath, 800000) : '';
+  const rideMatches = [
+    ...logcat.matchAll(/["']rideId["']\s*:\s*["']([^"']+)["']/g),
+  ]
+    .map((match) => String(match[1] || '').trim())
+    .filter((rideId) => rideId && rideId !== 'null' && rideId !== 'undefined');
+  const rideId = rideMatches[rideMatches.length - 1] || null;
+  const derivedPaymentIntentId = rideId ? deriveAdvancePaymentIntentId(rideId) : '';
+
+  if (
+    configuredPaymentIntentId &&
+    derivedPaymentIntentId &&
+    configuredPaymentIntentId !== derivedPaymentIntentId
+  ) {
+    const mismatch = {
+      ok: false,
+      error: 'payment_intent_current_run_mismatch',
+      configuredPaymentIntentId,
+      rideId,
+      derivedPaymentIntentId,
+      source: 'configured_vs_current_run',
+    };
+    writeArtifact('payment-intent-resolution.json', JSON.stringify(mismatch, null, 2));
+    return mismatch;
+  }
+
+  const paymentIntentId = derivedPaymentIntentId || configuredPaymentIntentId;
+  const resolution = {
+    ok: Boolean(paymentIntentId),
+    paymentIntentId: paymentIntentId || null,
+    rideId,
+    derivedPaymentIntentId: derivedPaymentIntentId || null,
+    configuredPaymentIntentId: configuredPaymentIntentId || null,
+    source: derivedPaymentIntentId
+      ? configuredPaymentIntentId
+        ? 'current_run_and_configured'
+        : 'current_run_logcat'
+      : configuredPaymentIntentId
+        ? 'configured'
+        : 'unresolved',
+  };
+  writeArtifact('payment-intent-resolution.json', JSON.stringify(resolution, null, 2));
+  return resolution;
+}
+
 function tapNode(node, label) {
   if (!node?.center) {
     warnings.push(`Não encontrei coordenadas para tocar em ${label}.`);
@@ -1549,6 +1798,43 @@ async function tapConfirmUntilPayment(current, steps) {
       ["Confirmar"],
     ]);
     if (!tapNode(confirmButton, `botão confirmar tentativa ${attempt}`)) {
+      const currentStatus = detectPaymentStatus(current.nodes);
+      const currentScreen = String(current.screen || '');
+      const transitionSurface =
+        currentScreen === 'blank' ||
+        currentScreen === 'unknown' ||
+        currentScreen === 'payment_loading' ||
+        currentScreen.startsWith('payment_') ||
+        currentStatus !== 'not_visible' ||
+        looksLikePixModalScreenshot(current.screenshot);
+      if (transitionSurface) {
+        for (let transitionAttempt = 1; transitionAttempt <= 4; transitionAttempt += 1) {
+          await sleep(transitionAttempt === 1 ? 2500 : 3500);
+          current = await captureStep(
+            `07-payment-transition-${attempt}-${transitionAttempt}`,
+          );
+          steps.push(current);
+          const transitionStatus = detectPaymentStatus(current.nodes);
+          const transitionScreen = String(current.screen || '');
+          if (
+            transitionStatus !== 'not_visible' ||
+            transitionScreen.startsWith('payment_') ||
+            looksLikePixModalEvidence(current)
+          ) {
+            return {
+              current,
+              opened: true,
+              status:
+                transitionStatus === 'not_visible'
+                  ? 'pix_visual_detected'
+                  : transitionStatus,
+            };
+          }
+          if (transitionScreen !== 'blank' && transitionScreen !== 'unknown') {
+            break;
+          }
+        }
+      }
       return { current, opened: false, status: detectPaymentStatus(current.nodes) };
     }
 
@@ -1576,7 +1862,7 @@ async function tapConfirmUntilPayment(current, steps) {
         }
       }
     }
-    if (status === "not_visible" && looksLikePixModalScreenshot(current.screenshot)) {
+    if (status === "not_visible" && looksLikePixModalEvidence(current)) {
       return { current, opened: true, status: "pix_visual_detected" };
     }
     if (status === "blocked_no_driver") {
@@ -1597,7 +1883,7 @@ async function tapConfirmUntilPayment(current, steps) {
       current = await captureStep("07b-payment-after-confirm-settle");
       steps.push(current);
       status = detectPaymentStatus(current.nodes);
-      if (status === "not_visible" && looksLikePixModalScreenshot(current.screenshot)) {
+      if (status === "not_visible" && looksLikePixModalEvidence(current)) {
         return { current, opened: true, status: "pix_visual_detected" };
       }
       if (status === "blocked_no_driver") {
@@ -1629,7 +1915,7 @@ async function waitForPaymentReady(current, steps) {
     current = await captureStep(`08-payment-wait-${steps.filter((step) => step.name.startsWith("08-payment-wait")).length + 1}`);
     steps.push(current);
     status = detectPaymentStatus(current.nodes);
-    if (status === "not_visible" && looksLikePixModalScreenshot(current.screenshot)) {
+    if (status === "not_visible" && looksLikePixModalEvidence(current)) {
       status = "pix_visual_detected";
       break;
     }
@@ -1940,15 +2226,28 @@ async function captureStep(name) {
   );
   const accessibilityDumpLog =
     accessibilityLogResult.status === 0 ? String(accessibilityLogResult.stdout || "") : "";
+  const accessibilityStreamLog = activeLogcatPath
+    ? tailTextFile(activeLogcatPath, 400000)
+    : "";
   const canonicalPickup = extractCanonicalPickup(nodes, [
     { source: "uiautomator_logcat", text: accessibilityDumpLog },
+    { source: "uiautomator_logcat_stream", text: accessibilityStreamLog },
   ]);
   if (canonicalPickup) {
     lastCanonicalPickup = canonicalPickup;
   }
-  if (canonicalPickup && canonicalPickup.source === "uiautomator_logcat") {
-    const fallbackPath = path.join(artifactsDir, `${name}-canonical-pickup-uiautomator-logcat.txt`);
-    fs.writeFileSync(fallbackPath, accessibilityDumpLog);
+  if (canonicalPickup && canonicalPickup.source !== "uiautomator_xml") {
+    const sourceSuffix =
+      canonicalPickup.source === "uiautomator_logcat_stream"
+        ? "uiautomator-logcat-stream"
+        : "uiautomator-logcat";
+    const fallbackPath = path.join(artifactsDir, `${name}-canonical-pickup-${sourceSuffix}.txt`);
+    fs.writeFileSync(
+      fallbackPath,
+      canonicalPickup.source === "uiautomator_logcat_stream"
+        ? canonicalPickup.raw
+        : accessibilityDumpLog,
+    );
     evidence.push(fallbackPath);
   }
   const prices = extractPrices(nodes);
@@ -1964,6 +2263,7 @@ async function captureStep(name) {
     nodes,
     canonicalPickup,
     accessibilityDumpLog,
+    accessibilityStreamLog,
     prices,
     screen,
     vehicleIdentity,
@@ -1977,6 +2277,7 @@ function startLogcat() {
   adbRun(["logcat", "-c"], { allowFailure: true });
   const logcatPath = path.join(artifactsDir, "android-logcat.txt");
   const output = fs.openSync(logcatPath, "w");
+  activeLogcatPath = logcatPath;
   const child = spawn(adb, adbArgs(["logcat", "-v", "time"]), {
     stdio: ["ignore", output, output],
   });
@@ -2058,6 +2359,13 @@ function socketIoClientHandshake(url, timeoutMs = 12000) {
 }
 
 let androidSerial = process.env.ANDROID_SERIAL || "";
+let paymentRuntimeConfig = null;
+let paymentRuntimeValidation = {
+  requested: OPEN_PAYMENT,
+  ok: !OPEN_PAYMENT,
+  reason: OPEN_PAYMENT ? "not_checked" : "disabled",
+  profile: null,
+};
 
 async function main() {
   if (!adb) {
@@ -2096,6 +2404,17 @@ async function main() {
   writeArtifact("package-list.txt", packageList);
   writeArtifact("package-dumpsys.txt", adbText(["shell", "dumpsys", "package", APP_PACKAGE], { allowFailure: true }));
 
+  if (!["app", "bot"].includes(DRIVER_SURFACE_MODE)) {
+    throw new Error(
+      `blocked_precondition:driver_surface_mode_conflict unsupported REAL_SMOKE_DRIVER_SURFACE_MODE=${DRIVER_SURFACE_MODE}; use app or bot`,
+    );
+  }
+  if (DRIVER_SURFACE_MODE === "app" && SYNC_DRIVER_TO_APP_PICKUP) {
+    throw new Error(
+      "blocked_precondition:driver_surface_mode_conflict app mode cannot start a second driver bot socket for the same UID",
+    );
+  }
+
   log("checando backend e socket polling");
   const backendHealth = await requestText(`${BACKEND_URL.replace(/\/$/, "")}/health`);
   writeArtifact("backend-health.json", JSON.stringify(backendHealth, null, 2));
@@ -2103,11 +2422,31 @@ async function main() {
   writeArtifact("backend-socketio-polling.json", JSON.stringify(socketPoll, null, 2));
   const socketRealtime = await socketIoClientHandshake(SOCKET_URL);
   writeArtifact("backend-socketio-client.json", JSON.stringify(socketRealtime, null, 2));
-  let paymentRuntimeConfig = null;
-  if (OPEN_PAYMENT && PAYMENT_RUNTIME_PHONE) {
-    const runtimeUrl = `${BACKEND_URL.replace(/\/$/, "")}/api/app/runtime-config?phone=${encodeURIComponent(PAYMENT_RUNTIME_PHONE)}`;
-    paymentRuntimeConfig = await requestText(runtimeUrl);
+  if (OPEN_PAYMENT) {
+    if (!PAYMENT_RUNTIME_USER_ID || !PAYMENT_RUNTIME_PHONE) {
+      paymentRuntimeConfig = {
+        ok: false,
+        status: null,
+        error: "payment_runtime_context_missing:userId_and_phone_are_required",
+        url: null,
+      };
+    } else {
+      const runtimeParams = new URLSearchParams({
+        userId: PAYMENT_RUNTIME_USER_ID,
+        passengerId: PAYMENT_RUNTIME_USER_ID,
+        phone: PAYMENT_RUNTIME_PHONE,
+      });
+      const runtimeUrl = `${BACKEND_URL.replace(/\/$/, "")}/api/app/runtime-config?${runtimeParams.toString()}`;
+      paymentRuntimeConfig = await requestText(runtimeUrl);
+    }
+    paymentRuntimeValidation = validatePaymentRuntimeConfig(paymentRuntimeConfig);
     writeArtifact("backend-payment-runtime-config.json", JSON.stringify(paymentRuntimeConfig, null, 2));
+    writeArtifact("payment-runtime-validation.json", JSON.stringify(paymentRuntimeValidation, null, 2));
+    if (!paymentRuntimeValidation.ok) {
+      throw new Error(
+        `blocked_precondition:payment_sandbox_not_confirmed:${paymentRuntimeValidation.reason}`,
+      );
+    }
   }
 
   const logcat = startLogcat();
@@ -2134,13 +2473,11 @@ async function main() {
 
   try {
     log("abrindo app em duas passagens para permitir aplicação OTA quando disponível");
-    adbRun(["shell", "am", "force-stop", APP_PACKAGE], { allowFailure: true });
-    adbRun(["shell", "am", "start", "-W", "-n", `${APP_PACKAGE}/.MainActivity`], { allowFailure: true });
+    launchAndroidApp();
     await sleep(FIRST_LAUNCH_WAIT_MS);
     steps.push(await captureStep("01-first-launch"));
 
-    adbRun(["shell", "am", "force-stop", APP_PACKAGE], { allowFailure: true });
-    adbRun(["shell", "am", "start", "-W", "-n", `${APP_PACKAGE}/.MainActivity`], { allowFailure: true });
+    launchAndroidApp();
     await sleep(SECOND_LAUNCH_WAIT_MS);
     let current = await captureStep("02-second-launch");
     steps.push(current);
@@ -2225,12 +2562,18 @@ async function main() {
       current = await captureStep("04b-destination-results-keyboard-hidden");
       steps.push(current);
 
-      const firstResult = findNodeByPriority(current.nodes, [
-        ["passenger-destination-result-0", "passenger-home-destination-result-0"],
-        ["Escolher Copacabana Palace", "Belmond Hotel"],
-      ]);
-      if (tapNode(firstResult, "primeiro resultado de destino")) {
-        await sleep(10000);
+      const quoteAlreadyVisible =
+        current.screen === "passenger_quote" || current.prices.length > 0;
+      const firstResult = quoteAlreadyVisible
+        ? null
+        : findNodeByPriority(current.nodes, [
+            ["passenger-destination-result-0", "passenger-home-destination-result-0"],
+            ["Escolher Copacabana Palace", "Belmond Hotel"],
+          ]);
+      if (quoteAlreadyVisible || tapNode(firstResult, "primeiro resultado de destino")) {
+        if (!quoteAlreadyVisible) {
+          await sleep(10000);
+        }
         current = await captureStep("05-quote-initial");
         steps.push(current);
         initialQuote = current.prices;
@@ -2397,10 +2740,13 @@ async function main() {
         );
       }
     } else if (current.screen === "auth") {
+      failures.push("blocked_precondition:auth_session_not_ready");
       warnings.push("App abriu na autenticação; smoke preservou a sessão e não tentou login/OTP automaticamente.");
     } else if (current.screen === "driver_home") {
+      failures.push("blocked_precondition:passenger_role_not_ready");
       warnings.push("Sessão atual está em perfil de motorista; smoke não trocou perfil automaticamente.");
     } else {
+      failures.push(`blocked_precondition:passenger_surface_not_ready:${current.screen}`);
       warnings.push(`Tela inicial não reconhecida pelo smoke: ${current.screen}.`);
     }
   } finally {
@@ -2432,17 +2778,28 @@ async function main() {
   if (quoteStatus === "unstable_or_unreadable") {
     warnings.push("Cotação foi alcançada, mas o smoke não conseguiu provar estabilidade visual por texto acessível.");
   }
-  if (STRICT_QUOTE && quoteStable !== true) {
+  const quoteReached = quoteStatus !== "not_reached";
+  const hasBlockedPrecondition = failures.some((message) =>
+    String(message).startsWith("blocked_precondition:"),
+  );
+  if (STRICT_QUOTE && !quoteReached && !hasBlockedPrecondition) {
+    failures.push("blocked_precondition:quote_not_reached");
+  } else if (STRICT_QUOTE && quoteReached && quoteStable !== true) {
     failures.push(`STRICT_QUOTE=true exige cotação estável; status atual: ${quoteStatus}.`);
   }
   const paymentBlockedByPrecondition = String(paymentStatus || "").startsWith("blocked_precondition");
-  if (OPEN_PAYMENT && !paymentOpened && !paymentBlockedByPrecondition) {
+  if (OPEN_PAYMENT && quoteReached && !paymentOpened && !paymentBlockedByPrecondition) {
     failures.push(`REAL_SMOKE_OPEN_PAYMENT=true exige abertura do modal Pix; status atual: ${paymentStatus}.`);
   }
   if (OPEN_PAYMENT && paymentOpened && !paymentBlockedByPrecondition && !["pix_copy_available", "pix_modal_content", "pix_visual_detected", "confirmed", "confirmed_via_ride_flow"].includes(paymentStatus)) {
     failures.push(`Modal Pix abriu, mas não chegou a um estado pronto; status atual: ${paymentStatus}${paymentErrorDiagnosticSuffix(paymentErrorDiagnostics)}.`);
   }
-  if (AUTO_CONFIRM_SANDBOX_PAYMENT && !paymentBlockedByPrecondition && !sandboxPaymentConfirmation.ok) {
+  if (
+    AUTO_CONFIRM_SANDBOX_PAYMENT &&
+    paymentOpened &&
+    !paymentBlockedByPrecondition &&
+    !sandboxPaymentConfirmation.ok
+  ) {
     failures.push(`Baixa automática sandbox falhou: ${sandboxPaymentConfirmation.error || sandboxPaymentConfirmation.stderr || "unknown"}`);
   }
   if (
@@ -2454,7 +2811,7 @@ async function main() {
       `Validação pós-corrida falhou: ${postTripValidation.receipt?.error || postTripValidation.rating?.error || postTripValidation.activeTripMapTap?.error || postTripValidation.finalScreen || "unknown"}`,
     );
   }
-  if (!fareConsistency.ok) {
+  if (quoteReached && !fareConsistency.ok) {
     failures.push(
       `Consistência de tarifa falhou: ${fareConsistency.mismatches
         .map((entry) => `${entry.stage}=R$ ${entry.amount.toFixed(2)}`)
@@ -2493,10 +2850,17 @@ async function main() {
     socketPolling: { ok: socketPoll.ok, status: socketPoll.status, error: socketPoll.error },
     socketRealtime,
     paymentRuntimeConfig: paymentRuntimeConfig
-      ? { ok: paymentRuntimeConfig.ok, status: paymentRuntimeConfig.status, error: paymentRuntimeConfig.error }
+      ? {
+          ok: paymentRuntimeConfig.ok,
+          status: paymentRuntimeConfig.status,
+          error: paymentRuntimeConfig.error,
+          profile: paymentRuntimeValidation.profile,
+        }
       : null,
+    paymentRuntimeValidation,
     app: {
       package: APP_PACKAGE,
+      driverSurfaceMode: DRIVER_SURFACE_MODE,
       detectedScreens: steps.map((step) => ({
         name: step.name,
         screen: step.screen,
@@ -2552,10 +2916,12 @@ async function main() {
     `- Run ID: ${RUN_ID}`,
     `- Device: ${deviceInfo.model} / Android ${deviceInfo.android} / ${deviceInfo.serial}`,
     `- Package: ${APP_PACKAGE}`,
+    `- Driver surface mode: ${DRIVER_SURFACE_MODE}`,
     `- Backend health: ${backendHealth.ok ? "OK" : "FAIL"}${backendHealth.status ? ` (${backendHealth.status})` : ""}`,
     `- Socket.IO client: ${socketRealtime.ok ? "OK" : "FAIL"}${socketRealtime.transport ? ` (${socketRealtime.transport})` : ""}`,
-    `- Socket.IO polling probe: ${socketPoll.ok ? "OK" : "FAIL"}${socketPoll.status ? ` (${socketPoll.status})` : ""}`,
+    `- Socket.IO polling probe: ${formatSocketPollingStatus(socketPoll, socketRealtime)}`,
     `- Payment runtime config probe: ${paymentRuntimeConfig ? (paymentRuntimeConfig.ok ? "OK" : "FAIL") : "not requested"}${paymentRuntimeConfig?.status ? ` (${paymentRuntimeConfig.status})` : ""}`,
+    `- Payment runtime effective profile: ${paymentRuntimeValidation.profile ? `${paymentRuntimeValidation.profile.profileId || "unknown"} / ${paymentRuntimeValidation.profile.environment || "unknown"} / scope=${paymentRuntimeValidation.profile.scope || "unknown"} / contextMatched=${paymentRuntimeValidation.profile.contextMatched}` : "not captured"}`,
     `- Final status: ${failureClassification.finalStatus}`,
     `- App screens: ${steps.map((step) => `${step.name}:${step.screen}`).join(", ")}`,
     `- Quote status: ${quoteStatus}`,
@@ -2569,12 +2935,12 @@ async function main() {
     `- Payment error diagnostics: ${formatPaymentErrorDiagnostics(paymentErrorDiagnostics)}`,
     `- App canonical pickup: ${appCanonicalPickup ? `${appCanonicalPickup.lat}, ${appCanonicalPickup.lng}` : "not captured"}`,
     `- App pickup availability: ${appPickupAvailability ? (appPickupAvailability.ok ? "OK" : "FAIL") : "not captured"}`,
-    `- Managed driver bot: ${managedDriverBot?.requested ? (managedDriverBot.ok ? "OK" : "FAIL") : "not requested"}`,
+    `- Managed driver bot: ${formatOptionalStatus(managedDriverBot)}`,
     `- Managed driver vehicle identity: ${managedDriverBot?.vehicleIdentity ? (managedDriverBot.vehicleIdentity.ok ? "OK" : `FAIL (${managedDriverBot.vehicleIdentity.code})`) : "not captured"}`,
     `- Driver vehicle consistency: ${driverVehicleConsistency.entries.length > 0 ? (driverVehicleConsistency.ok ? "OK" : "FAIL") : "not captured"}`,
-    `- Sandbox payment auto-confirm: ${AUTO_CONFIRM_SANDBOX_PAYMENT ? (sandboxPaymentConfirmation.ok ? "OK" : "FAIL") : "not requested"}`,
+    `- Sandbox payment auto-confirm: ${AUTO_CONFIRM_SANDBOX_PAYMENT ? formatOptionalStatus(sandboxPaymentConfirmation) : "not requested"}`,
     `- Post-trip validation: ${postTripValidation?.requested ? (postTripValidation.ok ? "OK" : postTripValidation.ok === false ? "FAIL" : "not reached") : "not requested"}`,
-    `- Fare consistency: ${fareConsistency.ok ? "OK" : "FAIL"}${fareConsistency.quote ? ` (quote R$ ${fareConsistency.quote.amount.toFixed(2)})` : ""}`,
+    `- Fare consistency: ${quoteReached ? (fareConsistency.ok ? "OK" : "FAIL") : "not reached"}${fareConsistency.quote ? ` (quote R$ ${fareConsistency.quote.amount.toFixed(2)})` : ""}`,
     `- Fare gross evidence: ${fareConsistency.entries.map((entry) => `${entry.stage}=R$ ${entry.amount.toFixed(2)}`).join(", ") || "not captured"}`,
     `- Driver net evidence: ${fareConsistency.driverNetEntries.map((entry) => `${entry.stage}=R$ ${entry.amount.toFixed(2)}`).join(", ") || "not captured"}`,
     `- Driver fee evidence: ${fareConsistency.driverFeeEntries.map((entry) => `${entry.stage}=R$ ${entry.amount.toFixed(2)}`).join(", ") || "not captured"}`,
@@ -2621,6 +2987,14 @@ main().catch((error) => {
       {
         error: error.message,
         stack: error.stack,
+        paymentRuntimeConfig: paymentRuntimeConfig
+          ? {
+              ok: paymentRuntimeConfig.ok,
+              status: paymentRuntimeConfig.status,
+              error: paymentRuntimeConfig.error,
+            }
+          : null,
+        paymentRuntimeValidation,
         finalStatus: failureClassification.finalStatus,
         failures,
         failureClassification,

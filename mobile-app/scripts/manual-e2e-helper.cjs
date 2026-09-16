@@ -44,10 +44,12 @@ const PASSENGER_ACCEPT_UNCONFIRMED =
   String(arg('--passenger-accept-unconfirmed', process.env.PASSENGER_ACCEPT_UNCONFIRMED || 'true')).toLowerCase() !==
   'false';
 
-const BASE_LAT = Number.parseFloat(arg('--base-lat', process.env.QA_BASE_LAT || '-23.55052'));
-const BASE_LNG = Number.parseFloat(arg('--base-lng', process.env.QA_BASE_LNG || '-46.633308'));
-const DEST_LAT = Number.parseFloat(arg('--dest-lat', process.env.QA_DEST_LAT || '-23.561414'));
-const DEST_LNG = Number.parseFloat(arg('--dest-lng', process.env.QA_DEST_LNG || '-46.655881'));
+// Keep standalone QA runs inside the active Rio pilot geofence. Callers may
+// still override these values explicitly for a dedicated local fixture.
+const BASE_LAT = Number.parseFloat(arg('--base-lat', process.env.QA_BASE_LAT || '-22.97104'));
+const BASE_LNG = Number.parseFloat(arg('--base-lng', process.env.QA_BASE_LNG || '-43.18349'));
+const DEST_LAT = Number.parseFloat(arg('--dest-lat', process.env.QA_DEST_LAT || '-22.98488'));
+const DEST_LNG = Number.parseFloat(arg('--dest-lng', process.env.QA_DEST_LNG || '-43.22215'));
 const RADIUS = Number.parseFloat(arg('--radius', process.env.QA_COORD_RADIUS || '0.002'));
 const ESTIMATED_FARE = Number.parseFloat(arg('--fare', process.env.QA_ESTIMATED_FARE || '27.5'));
 

@@ -12,11 +12,11 @@ SOCKET_URL="${SOCKET_URL:-https://socket.leaf.app.br}"
 APP_PACKAGE="${APP_PACKAGE:-br.com.leaf.ride}"
 PASSENGER_UID="${PASSENGER_UID:-3tEQ8pQ2QzeWbMKhLGsXHHhnOGL2}"
 PASSENGER_PHONE="${PASSENGER_PHONE:-21102938475}"
-DRIVER_UID="${DRIVER_UID:-8vg2kxxqi3TYKlpD6eBlWgYseIq2}"
-PICKUP_LAT="${PICKUP_LAT:--22.999357}"
-PICKUP_LNG="${PICKUP_LNG:--43.357071}"
-DESTINATION_LAT="${DESTINATION_LAT:--22.9673111}"
-DESTINATION_LNG="${DESTINATION_LNG:--43.1789541}"
+DRIVER_UID="${DRIVER_UID:-DV4cwZvql3T3pI3lnKYQwQVALKZ2}"
+PICKUP_LAT="${PICKUP_LAT:--22.97104}"
+PICKUP_LNG="${PICKUP_LNG:--43.18349}"
+DESTINATION_LAT="${DESTINATION_LAT:--22.98488}"
+DESTINATION_LNG="${DESTINATION_LNG:--43.22215}"
 PREPARE_DRIVER="${PREPARE_DRIVER:-false}"
 ALLOW_DEVICE_MISSING="${ALLOW_DEVICE_MISSING:-false}"
 USE_DEVICE_LOCATION_FOR_PICKUP="${USE_DEVICE_LOCATION_FOR_PICKUP:-true}"
@@ -27,13 +27,16 @@ PASSENGER_RUNTIME="${PASSENGER_RUNTIME:-android_device}"
 DRIVER_RUNTIME="${DRIVER_RUNTIME:-android_emulator}"
 PASSENGER_AVD="${PASSENGER_AVD:-Leaf_API_35}"
 DRIVER_AVD="${DRIVER_AVD:-Leaf_API_35_Driver}"
-REQUIRE_RUNNING_ANDROID_EMULATOR="${REQUIRE_RUNNING_ANDROID_EMULATOR:-false}"
+REQUIRE_RUNNING_ANDROID_EMULATOR="${REQUIRE_RUNNING_ANDROID_EMULATOR:-true}"
+REQUIRE_RUNNING_ANDROID_APP="${REQUIRE_RUNNING_ANDROID_APP:-true}"
 ANDROID_EMULATOR_STABILITY_SECONDS="${ANDROID_EMULATOR_STABILITY_SECONDS:-60}"
 ANDROID_PASSENGER_SERIAL="${ANDROID_PASSENGER_SERIAL:-}"
 ANDROID_DRIVER_SERIAL="${ANDROID_DRIVER_SERIAL:-}"
 DRIVER_EMULATOR_SERIAL="${DRIVER_EMULATOR_SERIAL:-}"
 ANDROID_DRIVER_APK="${ANDROID_DRIVER_APK:-}"
 FORCE_INSTALL_DRIVER_APK="${FORCE_INSTALL_DRIVER_APK:-}"
+REAL_SMOKE_DRIVER_SURFACE_MODE="${REAL_SMOKE_DRIVER_SURFACE_MODE:-app}"
+HOST_READINESS_DIR="${ARTIFACTS_DIR}/host-readiness"
 DRIVER_APK_VERSION_CODE=""
 DRIVER_APK_VERSION_NAME=""
 DEVICE_APP_VERSION_CODE=""
@@ -94,6 +97,8 @@ write_preflight_summary() {
   PASSENGER_AVD="${PASSENGER_AVD}" \
   DRIVER_AVD="${DRIVER_AVD}" \
   REQUIRE_RUNNING_ANDROID_EMULATOR="${REQUIRE_RUNNING_ANDROID_EMULATOR}" \
+  REQUIRE_RUNNING_ANDROID_APP="${REQUIRE_RUNNING_ANDROID_APP}" \
+  REAL_SMOKE_DRIVER_SURFACE_MODE="${REAL_SMOKE_DRIVER_SURFACE_MODE}" \
   ANDROID_EMULATOR_STABILITY_SECONDS="${ANDROID_EMULATOR_STABILITY_SECONDS}" \
   DEVICE_SERIAL="${DEVICE_SERIAL:-}" \
   DEVICE_APP_VERSION_NAME="${DEVICE_APP_VERSION_NAME}" \
@@ -105,6 +110,7 @@ write_preflight_summary() {
   PICKUP_LNG="${PICKUP_LNG}" \
   DESTINATION_LAT="${DESTINATION_LAT}" \
   DESTINATION_LNG="${DESTINATION_LNG}" \
+  HOST_READINESS_DIR="${HOST_READINESS_DIR}" \
   node - <<'NODE'
 const fs = require('fs');
 const path = require('path');
@@ -127,6 +133,7 @@ const resolvedPickupLocation = pickupLocation || androidLocationProviders?.selec
 const rolePair = readJson('android-role-pair.json');
 const pickupGeofence = readJson('geofence-pickup.json');
 const destinationGeofence = readJson('geofence-destination.json');
+const hostReadiness = readJson('host-readiness/host-readiness.json');
 
 const summary = {
   schemaVersion: 1,
@@ -160,6 +167,8 @@ const summary = {
     passengerAvd: env.PASSENGER_AVD,
     driverAvd: env.DRIVER_AVD,
     requireRunningEmulator: env.REQUIRE_RUNNING_ANDROID_EMULATOR,
+    requireRunningApp: env.REQUIRE_RUNNING_ANDROID_APP,
+    driverSurfaceMode: env.REAL_SMOKE_DRIVER_SURFACE_MODE,
     emulatorStabilitySeconds: rolePair?.androidEmulatorStabilitySeconds || env.ANDROID_EMULATOR_STABILITY_SECONDS,
     appVersionName: rolePair?.deviceAppVersionName || env.DEVICE_APP_VERSION_NAME || null,
     appVersionCode: rolePair?.deviceAppVersionCode || env.DEVICE_APP_VERSION_CODE || null
@@ -187,7 +196,9 @@ const summary = {
     contextMatched: Boolean(paymentRuntime.contextMatched),
     expiresAtIso: paymentRuntime.expiresAtIso || null
   } : null,
+  hostReadiness,
   generatedFiles: {
+    hostReadiness: exists('host-readiness/host-readiness.json'),
     smokeEnv: exists('smoke-env.sh'),
     runAndroidSmoke: exists('run-android-smoke.sh'),
     androidRolePair: exists('android-role-pair.json'),
@@ -226,6 +237,18 @@ require_cmd() {
 require_file() {
   [[ -x "$1" || -f "$1" ]] || fail "Missing file: $1"
 }
+
+PREFLIGHT_STEP="host_readiness"
+log "Validating host readiness before touching Android devices"
+if ! QA_PLATFORM=android \
+  REQUIRE_METRO_READY="${REQUIRE_METRO_READY:-true}" \
+  QA_HOST_READINESS_OUTPUT_DIR="${HOST_READINESS_DIR}" \
+  bash "${QA_SCRIPT_DIR}/verify-host-readiness.sh"; then
+  PREFLIGHT_STATUS="blocked"
+  PREFLIGHT_BLOCKER="blocked_precondition:host_readiness"
+  PREFLIGHT_MESSAGE="Host readiness gate failed; no Android device, app, seed, deep link, quote, payment, or ride was started"
+  fail "${PREFLIGHT_MESSAGE}"
+fi
 
 normalize_runtime() {
   printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9_' '_'
@@ -622,14 +645,7 @@ const RedisDriverSimulator = require(process.cwd() + '/leaf-websocket-backend/te
 NODE
 fi
 
-FORCE_INSTALL_DRIVER_APK_DEFAULT="${FORCE_INSTALL_DRIVER_APK}"
-if [[ -z "${FORCE_INSTALL_DRIVER_APK_DEFAULT}" ]]; then
-  if [[ -n "${ANDROID_DRIVER_APK}" ]]; then
-    FORCE_INSTALL_DRIVER_APK_DEFAULT="true"
-  else
-    FORCE_INSTALL_DRIVER_APK_DEFAULT="false"
-  fi
-fi
+FORCE_INSTALL_DRIVER_APK_DEFAULT="${FORCE_INSTALL_DRIVER_APK:-false}"
 
 cat > "${ARTIFACTS_DIR}/smoke-env.sh" <<EOF
 #!/usr/bin/env bash
@@ -639,6 +655,7 @@ source mobile-app/scripts/source-local-build-env.sh
 export ADB_BIN="${ADB_BIN}"
 export ANDROID_SERIAL="\${ANDROID_SERIAL:-${DEVICE_SERIAL:-}}"
 export PAYMENT_RUNTIME_PHONE="${PASSENGER_PHONE}"
+export PAYMENT_RUNTIME_USER_ID="${PASSENGER_UID}"
 export FIREBASE_TEST_PHONE="${PASSENGER_PHONE}"
 export PASSENGER_UID="${PASSENGER_UID}"
 export REAL_SMOKE_PASSENGER_UID="${PASSENGER_UID}"
@@ -650,12 +667,14 @@ export DRIVER_RUNTIME="${DRIVER_RUNTIME}"
 export PASSENGER_AVD="${PASSENGER_AVD}"
 export DRIVER_AVD="${DRIVER_AVD}"
 export REQUIRE_RUNNING_ANDROID_EMULATOR="${REQUIRE_RUNNING_ANDROID_EMULATOR}"
+export REQUIRE_RUNNING_ANDROID_APP="${REQUIRE_RUNNING_ANDROID_APP}"
 export ANDROID_EMULATOR_STABILITY_SECONDS="${ANDROID_EMULATOR_STABILITY_SECONDS}"
 export ANDROID_PASSENGER_SERIAL="${ANDROID_PASSENGER_SERIAL}"
 export ANDROID_DRIVER_SERIAL="${ANDROID_DRIVER_SERIAL}"
 export DRIVER_EMULATOR_SERIAL="${DRIVER_EMULATOR_SERIAL}"
 export ANDROID_DRIVER_APK="${ANDROID_DRIVER_APK}"
 export FORCE_INSTALL_DRIVER_APK="\${FORCE_INSTALL_DRIVER_APK:-${FORCE_INSTALL_DRIVER_APK_DEFAULT}}"
+export REAL_SMOKE_DRIVER_SURFACE_MODE="\${REAL_SMOKE_DRIVER_SURFACE_MODE:-${REAL_SMOKE_DRIVER_SURFACE_MODE}}"
 export TEST_PICKUP_LAT="${PICKUP_LAT}"
 export TEST_PICKUP_LNG="${PICKUP_LNG}"
 export REAL_SMOKE_EXPECTED_PICKUP_SOURCE_CERTIFIED="true"
@@ -701,7 +720,7 @@ source "$(printf '%q' "${ARTIFACTS_DIR}/android-role-runtime.env")"
 export ANDROID_SERIAL="\${ANDROID_PASSENGER_SERIAL}"
 
 # Real-device smoke runner with sandbox payment auto-confirmation for the canary passenger.
-STRICT_QUOTE=true REAL_SMOKE_OPEN_PAYMENT=true REAL_SMOKE_AUTO_CONFIRM_SANDBOX_PAYMENT=true REAL_SMOKE_SYNC_DRIVER_TO_APP_PICKUP=true REAL_SMOKE_REQUIRE_CANONICAL_PICKUP=true REAL_SMOKE_COMPLETE_EXISTING_RECEIPT=true REAL_SMOKE_VERIFY_ACTIVE_TRIP_MAP_TAP=true REAL_SMOKE_REQUIRE_POST_TRIP=true FIRST_LAUNCH_WAIT_MS=12000 SECOND_LAUNCH_WAIT_MS=10000 QUOTE_STABILITY_WAIT_MS=16000 REAL_SMOKE_PAYMENT_WAIT_MS=60000 \\
+STRICT_QUOTE=true REAL_SMOKE_OPEN_PAYMENT=true REAL_SMOKE_AUTO_CONFIRM_SANDBOX_PAYMENT=true REAL_SMOKE_SYNC_DRIVER_TO_APP_PICKUP="\${REAL_SMOKE_SYNC_DRIVER_TO_APP_PICKUP:-false}" REAL_SMOKE_REQUIRE_CANONICAL_PICKUP=true REAL_SMOKE_COMPLETE_EXISTING_RECEIPT=true REAL_SMOKE_VERIFY_ACTIVE_TRIP_MAP_TAP=true REAL_SMOKE_REQUIRE_POST_TRIP=true FIRST_LAUNCH_WAIT_MS=12000 SECOND_LAUNCH_WAIT_MS=10000 QUOTE_STABILITY_WAIT_MS=16000 REAL_SMOKE_PAYMENT_WAIT_MS=60000 \\
   npm --prefix mobile-app run qa:android:real-smoke
 EOF
 chmod +x "${ARTIFACTS_DIR}/smoke-env.sh" "${ARTIFACTS_DIR}/start-driver-emulator.sh" "${ARTIFACTS_DIR}/verify-android-role-runtimes.sh" "${ARTIFACTS_DIR}/start-driver-bot.sh" "${ARTIFACTS_DIR}/run-android-smoke.sh"

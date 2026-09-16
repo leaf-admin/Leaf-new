@@ -24,8 +24,12 @@ if ! curl -sS --max-time 12 "$BACKEND_URL/health/runtime-flags" > "$OUTPUT_FILE"
   exit 1
 fi
 
-if ! jq -e '.realSandbox.ready' "$OUTPUT_FILE" >/dev/null 2>&1; then
-  echo "[backend-real-sandbox][error] Invalid runtime flags response (backend may be outdated)."
+if ! jq -e '
+  (.realSandbox | type == "object")
+  and (.realSandbox | has("ready"))
+  and (.realSandbox.ready | type == "boolean")
+' "$OUTPUT_FILE" >/dev/null 2>&1; then
+  echo "[backend-real-sandbox][error] Invalid runtime flags response (backend may be outdated or malformed)."
   head -n 20 "$OUTPUT_FILE"
   exit 1
 fi

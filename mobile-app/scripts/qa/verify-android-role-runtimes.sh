@@ -16,6 +16,7 @@ PASSENGER_AVD="${PASSENGER_AVD:-Leaf_API_35}"
 DRIVER_AVD="${DRIVER_AVD:-Leaf_API_35_Driver}"
 START_DRIVER_EMULATOR="${START_DRIVER_EMULATOR:-false}"
 REQUIRE_RUNNING_ANDROID_EMULATOR="${REQUIRE_RUNNING_ANDROID_EMULATOR:-true}"
+REQUIRE_RUNNING_ANDROID_APP="${REQUIRE_RUNNING_ANDROID_APP:-true}"
 REQUIRE_MATCHING_ANDROID_APP_VERSION="${REQUIRE_MATCHING_ANDROID_APP_VERSION:-true}"
 FORCE_INSTALL_DRIVER_APK="${FORCE_INSTALL_DRIVER_APK:-false}"
 ANDROID_PASSENGER_SERIAL="${ANDROID_PASSENGER_SERIAL:-}"
@@ -154,15 +155,8 @@ verify_package_on_serial() {
   package_list="$("${ADB_BIN}" -s "${serial}" shell pm list packages "${APP_PACKAGE}" 2>/dev/null || true)"
   printf '%s\n' "${package_list}" > "${OUTPUT_DIR}/android-${role}-runtime-package-list.txt"
 
-  if [[ "${package_list}" != *"${APP_PACKAGE}"* && "${role}" == "driver" && -n "${ANDROID_DRIVER_APK}" ]]; then
-    [[ -f "${ANDROID_DRIVER_APK}" ]] || fail "ANDROID_DRIVER_APK does not exist: ${ANDROID_DRIVER_APK}"
-    "${ADB_BIN}" -s "${serial}" install -r "${ANDROID_DRIVER_APK}"
-    package_list="$("${ADB_BIN}" -s "${serial}" shell pm list packages "${APP_PACKAGE}" 2>/dev/null || true)"
-    printf '%s\n' "${package_list}" > "${OUTPUT_DIR}/android-${role}-runtime-package-list.txt"
-  fi
-
   if [[ "${package_list}" != *"${APP_PACKAGE}"* ]]; then
-    fail "blocked_precondition:android_role_pair_not_ready ${APP_PACKAGE} is not installed on ${role} runtime ${serial}"
+    fail "blocked_precondition:android_role_pair_not_ready ${APP_PACKAGE} is not installed on ${role} runtime ${serial}; install explicitly or set FORCE_INSTALL_DRIVER_APK=true for the driver"
   fi
 
   local version_file="${OUTPUT_DIR}/android-${role}-runtime-app-version.txt"
@@ -178,6 +172,31 @@ verify_package_on_serial() {
     printf 'VERSION_CODE=%s\n' "${version_code}"
     printf 'VERSION_NAME=%s\n' "${version_name}"
   } > "${OUTPUT_DIR}/android-${role}-runtime-version.env"
+}
+
+verify_app_boot_on_serial() {
+  local serial="$1"
+  local role="$2"
+  local activity_dump
+  local resumed_line
+  local ui_dump
+  local remote_ui_path="/sdcard/leaf-qa-${role}-ui.xml"
+
+  activity_dump="$("${ADB_BIN}" -s "${serial}" shell dumpsys activity activities 2>/dev/null | tr -d '\r' || true)"
+  printf '%s\n' "${activity_dump}" > "${OUTPUT_DIR}/android-${role}-runtime-activity.txt"
+  resumed_line="$(printf '%s\n' "${activity_dump}" | rg '(mResumedActivity|ResumedActivity)' | head -n 1 || true)"
+  if [[ "${resumed_line}" != *"${APP_PACKAGE}/"*"MainActivity"* ]]; then
+    fail "blocked_precondition:android_role_app_not_booted ${role} app must have ${APP_PACKAGE}/.MainActivity resumed before the scenario"
+  fi
+
+  "${ADB_BIN}" -s "${serial}" shell rm -f "${remote_ui_path}" >/dev/null 2>&1 || true
+  "${ADB_BIN}" -s "${serial}" shell uiautomator dump "${remote_ui_path}" >/dev/null 2>&1 || true
+  ui_dump="$("${ADB_BIN}" -s "${serial}" shell cat "${remote_ui_path}" 2>/dev/null | tr -d '\r' || true)"
+  "${ADB_BIN}" -s "${serial}" shell rm -f "${remote_ui_path}" >/dev/null 2>&1 || true
+  printf '%s\n' "${ui_dump}" > "${OUTPUT_DIR}/android-${role}-runtime-ui.txt"
+  if printf '%s\n' "${ui_dump}" | rg -qi 'Sessão encerrada|Session ended|opened in another device|aberta em outro aparelho'; then
+    fail "blocked_precondition:android_role_session_not_ready ${role} app has an ended-session dialog; re-establish the single real app session before the scenario"
+  fi
 }
 
 require_file "${ADB_BIN}"
@@ -240,6 +259,15 @@ fi
 verify_package_on_serial "${passenger_serial}" "passenger"
 verify_package_on_serial "${driver_serial}" "driver"
 
+passenger_app_booted=null
+driver_app_booted=null
+if [[ "${REQUIRE_RUNNING_ANDROID_APP}" == "true" ]]; then
+  verify_app_boot_on_serial "${passenger_serial}" "passenger"
+  passenger_app_booted=true
+  verify_app_boot_on_serial "${driver_serial}" "driver"
+  driver_app_booted=true
+fi
+
 # shellcheck source=/dev/null
 source "${OUTPUT_DIR}/android-passenger-runtime-version.env"
 passenger_version_code="${VERSION_CODE}"
@@ -273,6 +301,9 @@ cat > "${OUTPUT_DIR}/android-role-runtime-verification.json" <<JSON
   "passengerAvd": "${PASSENGER_AVD}",
   "driverAvd": "${DRIVER_AVD}",
   "emulatorStabilitySeconds": "${EMULATOR_STABILITY_SECONDS}",
+  "requireRunningAndroidApp": "${REQUIRE_RUNNING_ANDROID_APP}",
+  "passengerAppBooted": ${passenger_app_booted},
+  "driverAppBooted": ${driver_app_booted},
   "appPackage": "${APP_PACKAGE}"
 }
 JSON

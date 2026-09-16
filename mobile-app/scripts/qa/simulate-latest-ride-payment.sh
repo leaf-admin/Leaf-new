@@ -111,6 +111,7 @@ while [[ $(date +%s) -lt ${deadline} ]]; do
             value: $value,
             environment: "sandbox"
           },
+          financialContext: ($response.financialContext // $response.result.financialContext // null),
           response: $response
         }' > "${PAYMENT_EVIDENCE_PATH}"
     fi

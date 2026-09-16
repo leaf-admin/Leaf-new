@@ -46,10 +46,12 @@ function resolveFirebaseApiKey() {
 const SERVER_URL = arg('--url', process.env.BACKEND_URL || 'https://api.leaf.app.br');
 const OUT_FILE = arg('--out', '');
 const FIREBASE_API_KEY = resolveFirebaseApiKey();
-const QA_BASE_LAT = Number.parseFloat(arg('--base-lat', process.env.QA_BASE_LAT || '-23.55052'));
-const QA_BASE_LNG = Number.parseFloat(arg('--base-lng', process.env.QA_BASE_LNG || '-46.633308'));
-const QA_DEST_LAT = Number.parseFloat(arg('--dest-lat', process.env.QA_DEST_LAT || '-23.561414'));
-const QA_DEST_LNG = Number.parseFloat(arg('--dest-lng', process.env.QA_DEST_LNG || '-46.655881'));
+// Keep standalone QA runs inside the active Rio pilot geofence. Callers may
+// still override these values explicitly for a dedicated local fixture.
+const QA_BASE_LAT = Number.parseFloat(arg('--base-lat', process.env.QA_BASE_LAT || '-22.97104'));
+const QA_BASE_LNG = Number.parseFloat(arg('--base-lng', process.env.QA_BASE_LNG || '-43.18349'));
+const QA_DEST_LAT = Number.parseFloat(arg('--dest-lat', process.env.QA_DEST_LAT || '-22.98488'));
+const QA_DEST_LNG = Number.parseFloat(arg('--dest-lng', process.env.QA_DEST_LNG || '-43.22215'));
 const QA_COORD_RADIUS = Number.parseFloat(arg('--radius', process.env.QA_COORD_RADIUS || '0.006'));
 const QA_SKIP_REMOTE_DRIVER_CLEANUP = String(process.env.QA_SKIP_REMOTE_DRIVER_CLEANUP || 'false').toLowerCase() === 'true';
 const QA_REMOTE_SSH_HOST = process.env.E2E_REMOTE_SSH_HOST || process.env.QA_REMOTE_SSH_HOST || process.env.REMOTE_HOST || process.env.VPS_HOST || '';
@@ -424,13 +426,13 @@ async function run() {
     });
 
     const pickup = randomPoint(
-      Number.isFinite(QA_BASE_LAT) ? QA_BASE_LAT : -23.55052,
-      Number.isFinite(QA_BASE_LNG) ? QA_BASE_LNG : -46.633308,
+      Number.isFinite(QA_BASE_LAT) ? QA_BASE_LAT : -22.97104,
+      Number.isFinite(QA_BASE_LNG) ? QA_BASE_LNG : -43.18349,
       Number.isFinite(QA_COORD_RADIUS) ? QA_COORD_RADIUS : 0.006
     );
     const destination = randomPoint(
-      Number.isFinite(QA_DEST_LAT) ? QA_DEST_LAT : -23.561414,
-      Number.isFinite(QA_DEST_LNG) ? QA_DEST_LNG : -46.655881,
+      Number.isFinite(QA_DEST_LAT) ? QA_DEST_LAT : -22.98488,
+      Number.isFinite(QA_DEST_LNG) ? QA_DEST_LNG : -43.22215,
       Number.isFinite(QA_COORD_RADIUS) ? QA_COORD_RADIUS : 0.006
     );
     stage('geofence_coordinates_selected', true, {

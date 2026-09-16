@@ -10,6 +10,7 @@ const { spawnSync } = require('child_process');
 const ROOT_DIR = path.resolve(__dirname, '../../..');
 const MOBILE_DIR = path.join(ROOT_DIR, 'mobile-app');
 const APP_ID = 'br.com.leaf.ride';
+const DEFAULT_METRO_URL = 'http://127.0.0.1:8097';
 const DEFAULT_SIMCTL_BIN =
   '/Library/Developer/PrivateFrameworks/CoreSimulator.framework/Versions/A/Resources/bin/simctl';
 const TRUTHY = new Set(['1', 'true', 'yes', 'on']);
@@ -51,6 +52,25 @@ function readArg(flag, fallback = '') {
 
 function hasFlag(flag) {
   return process.argv.includes(flag);
+}
+
+function normalizeMetroStatusUrl(rawUrl) {
+  const candidate = String(rawUrl || '').trim() || DEFAULT_METRO_URL;
+  try {
+    const parsed = new URL(candidate);
+    parsed.pathname = '/status';
+    parsed.search = '';
+    parsed.hash = '';
+    return parsed.toString();
+  } catch (_error) {
+    return `${candidate.replace(/\/+$/, '')}/status`;
+  }
+}
+
+function resolveMetroStatusUrl() {
+  return normalizeMetroStatusUrl(
+    readArg('--metro-url', process.env.METRO_URL || DEFAULT_METRO_URL),
+  );
 }
 
 function normalizeFlag(value) {
@@ -476,7 +496,11 @@ function buildFindings({ envSummary, backend, devices, artifacts, metro, iosOnly
   }
 
   if (!metro.ok) {
-    findings.push({ severity: 'warn', code: 'metro_not_confirmed', message: 'Metro nao respondeu em http://127.0.0.1:8081/status.' });
+    findings.push({
+      severity: 'warn',
+      code: 'metro_not_confirmed',
+      message: `Metro nao respondeu em ${metro?.url || `${DEFAULT_METRO_URL}/status`}.`,
+    });
   }
 
   return findings;
@@ -527,6 +551,7 @@ function writeReport(report, outDir) {
   lines.push(`- Execution target: ${report.executionTarget || 'cross-platform'}`);
   lines.push(`- Android: ${report.executionTarget === 'ios-simulator' ? 'fora do escopo' : report.devices.android.map((d) => `${d.id} (${d.state})`).join(', ') || 'nenhum'}`);
   lines.push(`- iOS booted: ${report.devices.ios.map((d) => `${d.name || 'iPhone'} ${d.udid}`).join(', ') || 'nenhum'}`);
+  lines.push(`- Metro probe: ${report.metro?.url || `${DEFAULT_METRO_URL}/status`}`);
   lines.push('');
   lines.push('## Next Manual E2E Sequence');
   lines.push('');
@@ -553,12 +578,16 @@ async function main() {
   const env = loadMobileEnv();
   const adbBin = resolveAdbBin();
   const simctlBin = resolveSimctlBin();
+  const metroUrl = resolveMetroStatusUrl();
   const apiBaseUrl = String(env.values.EXPO_PUBLIC_API_URL || env.values.EXPO_PUBLIC_BACKEND_URL || '').replace(/\/+$/, '');
   const socketBaseUrl = String(env.values.EXPO_PUBLIC_WS_URL || env.values.EXPO_PUBLIC_SOCKET_URL || '').replace(/\/+$/, '');
 
   const androidDevices = iosOnly ? [] : parseAndroidDevices(run(adbBin, ['devices']).stdout);
   const iosDevices = parseBootedIosDevices(run(simctlBin, ['list', 'devices', 'booted']).stdout);
-  const metro = await requestUrl('http://127.0.0.1:8081/status', 3000);
+  const metro = {
+    ...(await requestUrl(metroUrl, 3000)),
+    url: metroUrl,
+  };
   const health = apiBaseUrl ? await requestUrl(`${apiBaseUrl}/health`) : { ok: false, error: 'missing api url' };
   const runtimeFlags = apiBaseUrl
     ? await requestUrl(`${apiBaseUrl}/health/runtime-flags`)
@@ -646,5 +675,7 @@ if (require.main === module) {
 module.exports = {
   buildFindings,
   loadMobileEnv,
+  normalizeMetroStatusUrl,
+  resolveMetroStatusUrl,
   summarizePaymentRuntimeProbe,
 };

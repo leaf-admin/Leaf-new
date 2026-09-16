@@ -76,9 +76,11 @@ run_flow() {
 }
 
 cd "${MOBILE_DIR}"
+# Bootstrap the passenger first so both roles have an authenticated session
+# before the driver is made dispatch-ready and the ride lifecycle begins.
+run_flow "${PASSENGER_UDID}" ".maestro/flows/qa/e2e/ideal/12-passenger-login-ideal.yaml" "12-passenger-login-ideal"
 run_flow "${DRIVER_UDID}" ".maestro/flows/qa/e2e/ideal/11-driver-login-online-ideal.yaml" "11-driver-login-online-ideal"
 wait_driver_ready
-run_flow "${PASSENGER_UDID}" ".maestro/flows/qa/e2e/ideal/12-passenger-login-ideal.yaml" "12-passenger-login-ideal"
 run_flow "${PASSENGER_UDID}" ".maestro/flows/qa/e2e/ideal/13-passenger-request-ideal.yaml" "13-passenger-request-ideal"
 run_flow "${DRIVER_UDID}" ".maestro/flows/qa/e2e/ideal/14-driver-complete-ideal.yaml" "14-driver-complete-ideal"
 run_flow "${PASSENGER_UDID}" ".maestro/flows/qa/e2e/ideal/15-passenger-receipt-rating-ideal.yaml" "15-passenger-receipt-rating-ideal"

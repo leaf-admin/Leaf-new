@@ -14,6 +14,7 @@ APP_PACKAGE="${APP_PACKAGE:-br.com.leaf.ride}"
 SEED_TEST_USERS="${SEED_TEST_USERS:-true}"
 PAYMENT_RUNTIME_GUARD="${PAYMENT_RUNTIME_GUARD:-canary}"
 FIREBASE_TEST_PHONE="${FIREBASE_TEST_PHONE:-21102938475}"
+PAYMENT_RUNTIME_USER_ID="${PAYMENT_RUNTIME_USER_ID:-${FIREBASE_TEST_USER_ID:-3tEQ8pQ2QzeWbMKhLGsXHHhnOGL2}}"
 ADB_BIN="${ADB_BIN:-$(command -v adb || true)}"
 ANDROID_SERIAL_ENV="${ANDROID_SERIAL:-}"
 MAESTRO_MIN_VERSION="${MAESTRO_MIN_VERSION:-2.5.0}"
@@ -340,7 +341,7 @@ fi
 
 case "$PAYMENT_RUNTIME_GUARD" in
   canary)
-    if ! FIREBASE_TEST_PHONE="$FIREBASE_TEST_PHONE" bash "${SCRIPT_DIR}/qa/assert-backend-payment-runtime-canary.sh" "$BACKEND_URL" "$ARTIFACTS_DIR/backend-payment-runtime-canary.json"; then
+    if ! PAYMENT_RUNTIME_USER_ID="$PAYMENT_RUNTIME_USER_ID" FIREBASE_TEST_PHONE="$FIREBASE_TEST_PHONE" bash "${SCRIPT_DIR}/qa/assert-backend-payment-runtime-canary.sh" "$BACKEND_URL" "$ARTIFACTS_DIR/backend-payment-runtime-canary.json"; then
       exit 1
     fi
     ;;

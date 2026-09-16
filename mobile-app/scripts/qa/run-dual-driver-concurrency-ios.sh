@@ -129,7 +129,7 @@ encode_dev_client_url() {
 }
 
 METRO_HOST="${METRO_HOST:-127.0.0.1}"
-METRO_PORT="${METRO_PORT:-8081}"
+METRO_PORT="${METRO_PORT:-8097}"
 DEV_CLIENT_BUNDLE_URL="http://${METRO_HOST}:${METRO_PORT}"
 DEV_CLIENT_DEEPLINK="exp+leafapp-reactnative://expo-development-client/?url=$(encode_dev_client_url "${DEV_CLIENT_BUNDLE_URL}")"
 
