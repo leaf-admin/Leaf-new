@@ -270,11 +270,11 @@ sem bloquear a execução do E3 enquanto o risco estiver aceito pelo responsáve
   ativo, liveness, face compare, revisão manual, aprovação e bloqueio de online
   quando qualquer evidência estiver ausente. Nenhuma verificação durante corrida
   ativa fora do fluxo de incidente aprovado.
-- [x] Preparar o OTP de staging/release para entrega pelo WhatsApp Cloud API da Meta,
-  mantendo o Firebase Auth como autoridade de sessão via custom token. Manter OTP QA,
-  review account, `APP_REVIEW` e bypasses desligados nos artefatos de produção; a
-  ativação real ainda depende do template Meta aprovado, segredos no gateway e smoke
-  com número autorizado.
+- [ ] Ativar o OTP por WhatsApp em uma rodada futura, depois do piloto assistido:
+  o template Meta, os segredos do gateway e o smoke com número autorizado ainda
+  não foram concluídos. O artefato do piloto mantém `enableWhatsAppOtp=false` e
+  usa Firebase Phone Auth/SMS como transporte real, com Firebase Auth como
+  autoridade da sessão.
 
 ## TODO 3 — mobile e E3 bilateral
 
@@ -286,8 +286,8 @@ sem bloquear a execução do E3 enquanto o risco estiver aceito pelo responsáve
   versão, build number, bundle id e hash.
 - [x] Preparar dois papéis autenticados e isolados: um passageiro e um motorista.
   O motorista deve estar aprovado, online, dispatch-eligible e dentro da
-  geofence. O passageiro deve receber OTP pelo WhatsApp e concluir a sessão
-  com custom token do Firebase Auth.
+  geofence. O passageiro conclui a sessão pelo transporte OTP ativo no artefato
+  (Firebase Phone Auth/SMS no piloto; WhatsApp permanece em backlog).
 - [x] Fazer preflight de localização: `gps`, `network` e `fused` coerentes;
   pickup e destino dentro da região aprovada; nenhum override artificial não
   documentado. Se o preflight falhar, parar antes de Pix.

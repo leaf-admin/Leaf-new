@@ -36,6 +36,7 @@ jest.mock('../src/config/runtimeAccessPolicy', () => ({
   allowReviewAccess: jest.fn(() => false),
   isE2ETestBuild: jest.fn(() => false),
   isSimulatorBuild: jest.fn(() => false),
+  isWhatsAppOtpEnabled: jest.fn(() => false),
 }));
 
 jest.mock('../src/services/httpClient', () => ({
@@ -104,11 +105,13 @@ describe('PhoneInputStep', () => {
     runtimeAccessPolicy.allowReviewAccess.mockReset();
     runtimeAccessPolicy.isE2ETestBuild.mockReset();
     runtimeAccessPolicy.isSimulatorBuild.mockReset();
+    runtimeAccessPolicy.isWhatsAppOtpEnabled.mockReset();
     runtimeAccessPolicy.allowQaOtpForceFlow.mockReturnValue(false);
     runtimeAccessPolicy.allowCustomOtpFallback.mockReturnValue(false);
     runtimeAccessPolicy.allowReviewAccess.mockReturnValue(false);
     runtimeAccessPolicy.isE2ETestBuild.mockReturnValue(false);
     runtimeAccessPolicy.isSimulatorBuild.mockReturnValue(false);
+    runtimeAccessPolicy.isWhatsAppOtpEnabled.mockReturnValue(false);
     reviewAccounts.isReviewAccount.mockReset();
     reviewAccounts.getReviewAccountInfo.mockReset();
     reviewAccounts.isReviewAccount.mockReturnValue(false);
@@ -134,6 +137,8 @@ describe('PhoneInputStep', () => {
 
   test('shows a clear rate limit message when the OTP provider throttles delivery', async () => {
     const apiClient = require('../src/services/httpClient');
+    const runtimeAccessPolicy = require('../src/config/runtimeAccessPolicy');
+    runtimeAccessPolicy.isWhatsAppOtpEnabled.mockReturnValue(true);
     apiClient.post.mockRejectedValueOnce({
       code: 'auth/too-many-requests',
       nativeErrorCode: 17010,
@@ -248,7 +253,7 @@ describe('PhoneInputStep', () => {
     });
   });
 
-  test('sends WhatsApp OTP for an existing account when password is not configured', async () => {
+  test('sends Firebase SMS OTP for an existing account when WhatsApp is deferred', async () => {
     const onVerificationSent = jest.fn();
     const UserAuthService = require('../src/services/UserAuthService').default;
 
@@ -273,19 +278,19 @@ describe('PhoneInputStep', () => {
     fireEvent.press(getByTestId('auth-continue-btn'));
 
     await waitFor(() => {
-      expect(apiClient.post).toHaveBeenCalledWith('/api/custom-otp/request-otp', {
+      expect(apiClient.post).not.toHaveBeenCalledWith('/api/custom-otp/request-otp', {
         phone: '+5521102938475',
       });
       expect(onVerificationSent).toHaveBeenCalledWith(
-        expect.objectContaining({ isCustomOtp: true, channel: 'whatsapp' }),
+        expect.objectContaining({ isCustomOtp: false, channel: 'sms' }),
         '+5521102938475',
         true,
       );
-      expect(mockSignInWithPhoneNumber).not.toHaveBeenCalled();
+      expect(mockSignInWithPhoneNumber).toHaveBeenCalledWith('+5521102938475');
     });
   });
 
-  test('keeps WhatsApp OTP as default even when account has password configured', async () => {
+  test('keeps Firebase SMS as default even when account has password configured', async () => {
     const UserAuthService = require('../src/services/UserAuthService').default;
     const onVerificationSent = jest.fn();
     const apiClient = require('../src/services/httpClient');
@@ -310,24 +315,26 @@ describe('PhoneInputStep', () => {
     fireEvent.press(getByTestId('auth-continue-btn'));
 
     await waitFor(() => {
-      expect(apiClient.post).toHaveBeenCalledWith('/api/custom-otp/request-otp', {
+      expect(apiClient.post).not.toHaveBeenCalledWith('/api/custom-otp/request-otp', {
         phone: '+5521102938475',
       });
       expect(onVerificationSent).toHaveBeenCalledWith(
-        expect.objectContaining({ isCustomOtp: true, channel: 'whatsapp' }),
+        expect.objectContaining({ isCustomOtp: false, channel: 'sms' }),
         '+5521102938475',
         true,
       );
-      expect(mockSignInWithPhoneNumber).not.toHaveBeenCalled();
+      expect(mockSignInWithPhoneNumber).toHaveBeenCalledWith('+5521102938475');
       expect(queryByText('Esse passo ajuda a manter sua conta segura.')).not.toBeNull();
     });
   });
 
-  test('routes controlled review account through WhatsApp OTP even when password exists', async () => {
+  test('routes controlled review account through the explicit WhatsApp path when enabled', async () => {
     const UserAuthService = require('../src/services/UserAuthService').default;
     const reviewAccounts = require('../src/config/reviewAccounts');
     const onVerificationSent = jest.fn();
     const apiClient = require('../src/services/httpClient');
+    const runtimeAccessPolicy = require('../src/config/runtimeAccessPolicy');
+    runtimeAccessPolicy.isWhatsAppOtpEnabled.mockReturnValue(true);
 
     reviewAccounts.getReviewAccountInfo.mockReturnValue({
       phoneNumber: '21123456789',

@@ -73,7 +73,9 @@ const OTPStep = ({ phoneNumber, confirmation, onVerified, onBack, progressMeta }
     const [currentConfirmation, setCurrentConfirmation] = useState(confirmation);
     const inputRefs = useRef([]);
     const verifyInFlightRef = useRef(false);
-    const otpChannelLabel = currentConfirmation?.channel === 'sms' ? 'SMS' : 'WhatsApp';
+    const otpChannelLabel = currentConfirmation?.isCustomOtp
+        ? (currentConfirmation?.channel === 'sms' ? 'SMS' : 'WhatsApp')
+        : 'SMS';
 
     useEffect(() => {
         setCurrentConfirmation(confirmation);

@@ -16,7 +16,8 @@ import {
     allowCustomOtpFallback,
     allowQaOtpForceFlow,
     isE2ETestBuild,
-    isSimulatorBuild
+    isSimulatorBuild,
+    isWhatsAppOtpEnabled
 } from '../../../config/runtimeAccessPolicy';
 import apiClient from '../../../services/httpClient';
 import UserAuthService from '../../../services/UserAuthService';
@@ -128,6 +129,8 @@ const PhoneInputStep = ({ onVerificationSent, onPasswordLoginSuccess, progressMe
     const continueInFlightRef = useRef(false);
 
     const enableCustomOtpFallback = allowCustomOtpFallback();
+    const useWhatsAppOtp = isWhatsAppOtpEnabled();
+    const otpChannelLabel = useWhatsAppOtp ? 'WhatsApp' : 'SMS';
     const allowForcedQaOtpFlow = allowQaOtpForceFlow();
     const shouldDisableFirebaseAppVerificationForE2E =
         allowForcedQaOtpFlow ||
@@ -416,19 +419,54 @@ const PhoneInputStep = ({ onVerificationSent, onPasswordLoginSuccess, progressMe
             }
 
             // 📱 Primeiro acesso: OTP + criação de conta
-            if (forceCustomOtpFlow) {
-                Logger.log('📲 Forçando fluxo OTP customizado para conta QA controlada.');
+            const requestCustomOtp = async () => {
                 const response = await requestOtpWithFallback(fullPhoneNumber);
-                if (!response.data || !response.data.success) {
-                    throw new Error(response.data?.error || 'Erro ao enviar OTP');
+                if (!response?.data?.success || !response?.data?.verificationId) {
+                    throw new Error(response?.data?.error || 'Erro ao enviar OTP');
                 }
-
-                const confirmation = {
+                return {
                     verificationId: response.data.verificationId,
                     isCustomOtp: true,
                     channel: response.data.channel || 'whatsapp',
                     expiresIn: response.data.expiresIn || 300
                 };
+            };
+
+            const requestFirebaseOtp = async () => {
+                if (shouldDisableFirebaseAppVerificationForE2E) {
+                    try {
+                        auth().settings.appVerificationDisabledForTesting = true;
+                        Logger.log('🧪 Firebase app verification desativado para fallback legado de QA/E2E.');
+                    } catch (appVerificationError) {
+                        Logger.warn('⚠️ Não foi possível desativar app verification para fallback:', appVerificationError?.message || appVerificationError);
+                    }
+
+                    if (Platform.OS === 'android') {
+                        const preconfiguredSmsCode = QA_SMS_CODE_BY_PHONE.get(fullPhoneNumber);
+                        if (preconfiguredSmsCode) {
+                            try {
+                                await auth().settings.setAutoRetrievedSmsCodeForPhoneNumber(
+                                    fullPhoneNumber,
+                                    preconfiguredSmsCode
+                                );
+                            } catch (autoSmsError) {
+                                Logger.warn('⚠️ Falha ao configurar auto SMS para fallback:', autoSmsError?.message || autoSmsError);
+                            }
+                        }
+                    }
+                }
+
+                const firebaseConfirmation = await auth().signInWithPhoneNumber(fullPhoneNumber);
+                return {
+                    ...firebaseConfirmation,
+                    channel: 'sms',
+                    isCustomOtp: false
+                };
+            };
+
+            if (forceCustomOtpFlow) {
+                Logger.log('📲 Forçando fluxo OTP customizado para conta QA controlada.');
+                const confirmation = await requestCustomOtp();
 
                 if (onVerificationSent) {
                     onVerificationSent(confirmation, fullPhoneNumber, isExistingUser);
@@ -436,63 +474,35 @@ const PhoneInputStep = ({ onVerificationSent, onPasswordLoginSuccess, progressMe
                 return;
             }
 
-            Logger.log('📲 Enviando OTP via WhatsApp pelo backend Leaf...', {
-                phoneNumber: fullPhoneNumber
-            });
-            try {
-                const response = await requestOtpWithFallback(fullPhoneNumber);
-                if (!response?.data?.success || !response?.data?.verificationId) {
-                    throw new Error(response?.data?.error || 'Erro ao enviar OTP via WhatsApp');
-                }
-                if (onVerificationSent) {
-                    onVerificationSent({
-                        verificationId: response.data.verificationId,
-                        isCustomOtp: true,
-                        channel: response.data.channel || 'whatsapp',
-                        expiresIn: response.data.expiresIn || 300
-                    }, fullPhoneNumber, isExistingUser);
-                }
-                return;
-            } catch (whatsappError) {
-                Logger.error('❌ Falha no envio OTP via WhatsApp:', whatsappError);
-                if (!enableCustomOtpFallback) {
-                    throw whatsappError;
-                }
-                Logger.warn('⚠️ Aplicando fallback legado de SMS somente no ambiente controlado.');
-            }
-
-            // Fallback legado controlado (dev/review/suporte), nunca em produção.
-            if (shouldDisableFirebaseAppVerificationForE2E) {
+            if (useWhatsAppOtp) {
+                Logger.log('📲 Enviando OTP via WhatsApp pelo backend Leaf...', {
+                    phoneNumber: fullPhoneNumber
+                });
                 try {
-                    auth().settings.appVerificationDisabledForTesting = true;
-                    Logger.log('🧪 Firebase app verification desativado para fallback legado de QA/E2E.');
-                } catch (appVerificationError) {
-                    Logger.warn('⚠️ Não foi possível desativar app verification para fallback:', appVerificationError?.message || appVerificationError);
-                }
-
-                if (Platform.OS === 'android') {
-                    const preconfiguredSmsCode = QA_SMS_CODE_BY_PHONE.get(fullPhoneNumber);
-                    if (preconfiguredSmsCode) {
-                        try {
-                            await auth().settings.setAutoRetrievedSmsCodeForPhoneNumber(
-                                fullPhoneNumber,
-                                preconfiguredSmsCode
-                            );
-                        } catch (autoSmsError) {
-                            Logger.warn('⚠️ Falha ao configurar auto SMS para fallback:', autoSmsError?.message || autoSmsError);
-                        }
+                    const confirmation = await requestCustomOtp();
+                    onVerificationSent?.(confirmation, fullPhoneNumber, isExistingUser);
+                    return;
+                } catch (whatsappError) {
+                    Logger.error('❌ Falha no envio OTP via WhatsApp:', whatsappError);
+                    if (!enableCustomOtpFallback) {
+                        throw whatsappError;
                     }
+                    Logger.warn('⚠️ Aplicando fallback legado de SMS somente no ambiente controlado.');
                 }
             }
 
-            const firebaseConfirmation = await auth().signInWithPhoneNumber(fullPhoneNumber);
-
-            if (onVerificationSent) {
-                onVerificationSent({
-                    ...firebaseConfirmation,
-                    channel: 'sms',
-                    isCustomOtp: false
-                }, fullPhoneNumber, isExistingUser);
+            try {
+                const confirmation = await requestFirebaseOtp();
+                onVerificationSent?.(confirmation, fullPhoneNumber, isExistingUser);
+                return;
+            } catch (firebaseError) {
+                if (!useWhatsAppOtp && enableCustomOtpFallback) {
+                    Logger.warn('⚠️ Firebase SMS indisponível; tentando OTP customizado somente no ambiente controlado.');
+                    const confirmation = await requestCustomOtp();
+                    onVerificationSent?.(confirmation, fullPhoneNumber, isExistingUser);
+                    return;
+                }
+                throw firebaseError;
             }
         } catch (error) {
             Logger.error("Erro no handleContinue:", error);
@@ -520,7 +530,7 @@ const PhoneInputStep = ({ onVerificationSent, onPasswordLoginSuccess, progressMe
             showBack={false}
             progressMeta={progressMeta}
             title="Bem-vindo à Leaf"
-            description="Digite seu celular para entrar ou criar sua conta. Vamos enviar um código pelo WhatsApp."
+            description={`Digite seu celular para entrar ou criar sua conta. Vamos enviar um código pelo ${otpChannelLabel}.`}
             scrollEnabled={requiresPassword || forgotPasswordMode}
             childrenStyle={styles.childrenWrap}
             footer={(
@@ -630,7 +640,7 @@ const PhoneInputStep = ({ onVerificationSent, onPasswordLoginSuccess, progressMe
                             {forgotPasswordMode ? (
                                 <>
                                     <TextInput
-                                        placeholder="Código recebido pelo WhatsApp"
+                                        placeholder="Código de recuperação"
                                         placeholderTextColor={color.textMuted}
                                         value={resetOtp}
                                         onChangeText={(value) => {

@@ -145,6 +145,13 @@ const expoUpdatesConfig = disableUpdatesForLocalSimulator || !otaUpdatesEnabled
 const pilotControlled =
     ['pilot_controlled', 'geofence_validation', 'ride_flow_validation'].includes(launchProfile) ||
     normalizeFlag(firstDefined(process.env.EXPO_PUBLIC_PILOT_CONTROLLED, process.env.LEAF_PILOT_CONTROLLED), false);
+// WhatsApp OTP remains an opt-in rollout until the Meta WABA, template and
+// gateway secrets are provisioned and a real delivery smoke is accepted.
+// The assisted pilot therefore uses Firebase Phone Auth/SMS by default.
+const enableWhatsAppOtp = normalizeFlag(
+    firstDefined(process.env.EXPO_PUBLIC_ENABLE_WHATSAPP_OTP, process.env.LEAF_ENABLE_WHATSAPP_OTP),
+    false
+);
 const resolvePilotFeature = (publicKey, privateKey, enabledOutsidePilot = true) => {
     const fallback = pilotControlled ? false : enabledOutsidePilot;
     return normalizeFlag(firstDefined(process.env[publicKey], process.env[privateKey]), fallback);
@@ -266,6 +273,7 @@ module.exports = {
             process.env.EXPO_PUBLIC_ALLOW_CLIENT_DIRECT_GOOGLE_FALLBACK === '1',
         launchProfile,
         pilotControlled,
+        enableWhatsAppOtp,
         pilotFeatureFlags,
         prototypePlayback
     },

@@ -108,7 +108,7 @@ describe('OTPStep', () => {
       expect(saveStepData).not.toHaveBeenCalled();
       expect(Alert.alert).toHaveBeenCalledWith(
         'Código não confirmado',
-        'Código inválido. Verifique o código recebido pelo WhatsApp e tente novamente.',
+        'Código inválido. Verifique o código recebido pelo SMS e tente novamente.',
         undefined,
         undefined,
       );

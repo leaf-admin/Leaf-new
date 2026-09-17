@@ -85,6 +85,7 @@ SUPPORT_EMAIL="$(jq -r '.extra.supportEmail // ""' "$TMP_PUBLIC_JSON")"
 IS_REVIEW="$(jq -r '.extra.isReview // false' "$TMP_PUBLIC_JSON")"
 LAUNCH_PROFILE="$(jq -r '.extra.launchProfile // ""' "$TMP_PUBLIC_JSON")"
 PILOT_CONTROLLED="$(jq -r '.extra.pilotControlled // false' "$TMP_PUBLIC_JSON")"
+WHATSAPP_OTP_ENABLED="$(jq -r '.extra.enableWhatsAppOtp // false' "$TMP_PUBLIC_JSON")"
 WITHDRAWALS_ENABLED="$(jq -r '.extra.pilotFeatureFlags.driverWithdrawalsEnabled // false' "$TMP_PUBLIC_JSON")"
 
 if [[ -n "$PRIVACY_URL" ]]; then ok "privacyPolicyUrl definido: $PRIVACY_URL"; else bad "privacyPolicyUrl ausente"; fi
@@ -205,11 +206,15 @@ else
   bad "Credenciais/OTP de review divergentes ou com 000000 inseguro"
 fi
 
-if rg -n "requestOtpWithFallback|/api/custom-otp/request-otp" src/components/auth/steps/PhoneInputStep.js >/dev/null 2>&1 \
+if [[ "$WHATSAPP_OTP_ENABLED" == "true" ]] \
+  && rg -n "requestOtpWithFallback|/api/custom-otp/request-otp" src/components/auth/steps/PhoneInputStep.js >/dev/null 2>&1 \
   && rg -n "signInWithCustomToken" src/components/auth/steps/OTPStep.js src/hooks/useAuth.js >/dev/null 2>&1; then
-  ok "Fluxo OTP real via WhatsApp/Leaf encontrado; sessão final usa Firebase custom token"
+  ok "OTP WhatsApp explicitamente habilitado; sessão final usa Firebase custom token"
+elif [[ "$WHATSAPP_OTP_ENABLED" != "true" ]] \
+  && rg -n "signInWithPhoneNumber" src/components/auth/steps/PhoneInputStep.js >/dev/null 2>&1; then
+  ok "OTP Firebase Phone Auth/SMS ativo; WhatsApp permanece desabilitado no piloto"
 else
-  bad "Fluxo OTP WhatsApp/Leaf com sessão Firebase custom token não encontrado"
+  bad "Nenhum fluxo OTP de release compatível com a flag de transporte foi encontrado"
 fi
 
 if rg -n "allowCustomOtpFallback" src/config/runtimeAccessPolicy.js src/components/auth/steps/PhoneInputStep.js >/dev/null 2>&1 \

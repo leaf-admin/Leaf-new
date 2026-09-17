@@ -37,11 +37,12 @@ se exigida pelo runbook e gates pós-piloto de métricas/HA.
 O quadro executável está em
 [`PRODUCTION_GATES_STATUS_20260912.md`](PRODUCTION_GATES_STATUS_20260912.md).
 
-### Atualização de autenticação — 15/09/2026
+### Atualização de autenticação — 17/09/2026
 
-O OTP de login e recuperação foi preparado para entrega pela WhatsApp Cloud API
-da Meta, mantendo o Firebase Auth como autoridade de sessão via custom token.
-O desenho, variáveis, testes e gates externos estão em
+O OTP por WhatsApp foi movido para o backlog de melhoria futura. No piloto
+assistido, o app usa Firebase Phone Auth/SMS por padrão; o caminho WhatsApp
+continua disponível somente com flag explícita após o provisionamento da Meta.
+O desenho futuro, variáveis, testes e gates externos estão em
 [`WHATSAPP_OTP_FIREBASE_AUTH_20260915.md`](WHATSAPP_OTP_FIREBASE_AUTH_20260915.md).
 
 ## Atualização operacional — 14/09/2026

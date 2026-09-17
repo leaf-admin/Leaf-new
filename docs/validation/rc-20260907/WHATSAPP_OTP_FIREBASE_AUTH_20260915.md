@@ -1,12 +1,23 @@
-# OTP por WhatsApp com Firebase Auth — 15/09/2026
+# OTP por WhatsApp com Firebase Auth — backlog — 15/09/2026
+
+## Status atual
+
+Esta implementação está registrada como melhoria futura. O piloto assistido
+usa Firebase Phone Auth/SMS por padrão (`enableWhatsAppOtp=false`) para não
+depender de WABA, template ou segredos Meta ainda não provisionados. O código
+e os contratos do caminho WhatsApp ficam preservados atrás da flag explícita
+`EXPO_PUBLIC_ENABLE_WHATSAPP_OTP`.
 
 ## Decisão
 
-O canal de entrega do código passa a ser a WhatsApp Cloud API da Meta. O Firebase Auth continua sendo a autoridade da sessão: depois da confirmação do código no backend, o Leaf Admin SDK emite um custom token e o app conclui com `signInWithCustomToken`.
+Quando o item for reaberto, o canal de entrega será a WhatsApp Cloud API da
+Meta. O Firebase Auth continua sendo a autoridade da sessão: depois da
+confirmação do código no backend, o Leaf Admin SDK emite um custom token e o
+app conclui com `signInWithCustomToken`.
 
 O app nunca chama a Meta diretamente e não contém access token, WABA ID ou phone number ID. A API da Meta é chamada somente pelo backend, no endpoint versionado `/{PHONE_NUMBER_ID}/messages`, usando um template aprovado da categoria `AUTHENTICATION`.
 
-## Fluxo de login
+## Fluxo futuro de login WhatsApp
 
 1. O app envia o telefone para `POST /api/custom-otp/request-otp`.
 2. O backend normaliza o E.164, gera um código criptograficamente seguro de seis dígitos e grava somente o HMAC contextualizado no Redis, com TTL de 300 segundos.
@@ -72,4 +83,8 @@ A sessão do navegador estava autenticada no portfólio empresarial `Serafy`. Es
 
 Não foi localizado no navegador um portfólio Meta próprio da Leaf. Nenhum número, template, token, permissão ou segredo foi criado ou alterado; o cadastro iniciado em `Serafy` deve ser descartado. A ativação correta precisa começar no Business Portfolio pertencente à Leaf, com nome comercial e dados legais correspondentes.
 
-O gateway continua sem `WHATSAPP_META_PHONE_NUMBER_ID`, template `AUTHENTICATION`, token de system user e chave dedicada `AUTH_OTP_HMAC_KEY` no `.env` protegido (`/opt/leaf-app/.env` no deploy Contabo). Nenhum desses valores foi criado, exibido ou salvo nesta worktree.
+O gateway continua sem `WHATSAPP_META_PHONE_NUMBER_ID`, template
+`AUTHENTICATION`, token de system user e chave dedicada `AUTH_OTP_HMAC_KEY` no
+`.env` protegido (`/opt/leaf-app/.env` no deploy Contabo). Nenhum desses
+valores foi criado, exibido ou salvo nesta worktree. A ativação permanece fora
+do piloto até que os quatro passos do backlog estratégico sejam concluídos.

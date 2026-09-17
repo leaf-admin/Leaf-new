@@ -119,7 +119,7 @@ class HelpService {
     getMockFAQ(category) {
         const allFAQs = {
             'getting-started': [
-                { question: 'Como criar uma conta?', answer: 'Para criar uma conta, baixe o app Leaf, abra e toque em "Criar conta". Informe seu número de telefone, nome completo e e-mail. Você receberá um código de verificação pelo WhatsApp.' },
+                { question: 'Como criar uma conta?', answer: 'Para criar uma conta, baixe o app Leaf, abra e toque em "Criar conta". Informe seu número de telefone, nome completo e e-mail. Você receberá um código de verificação por SMS.' },
                 { question: 'Como solicitar uma viagem?', answer: 'Abra o app, informe seu destino no mapa ou digite o endereço. Escolha o tipo de veículo e confirme. Um motorista próximo será notificado.' },
                 { question: 'Como funciona o pagamento?', answer: 'O pagamento é feito via PIX antes da viagem começar. Você receberá um QR Code para pagar. Após a confirmação do pagamento, o motorista iniciará a viagem.' },
             ],
