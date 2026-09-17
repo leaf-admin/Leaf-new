@@ -10,28 +10,31 @@ para o backlog; esta versão usa Firebase Phone Auth/SMS.
 ## Escopo concluído
 
 - Build iOS local para App Store Connect: `1.0.5 (36)`.
-- Build Android local para Play Console: `1.0.5 (versionCode 130)`.
+- Build Android local para Play Console: `1.0.5 (versionCode 131)`.
 - App configurado para `pilot_controlled`, sem bypass de pagamento e com
   `enableWhatsAppOtp=false`.
 - Upload iOS realizado pelo Xcode Organizer para o app correto
   `br.com.leaf.ride` (App Store Connect app id `6757092661`).
-- Upload Android preparado na conta ativa da organização Equipe de
+- Upload Android publicado na conta ativa da organização Equipe de
   desenvolvimento LEAF (developer id `6672543536613609799`, app id
   `4974985862127979760`), na trilha de teste interno. O primeiro AAB, code 129,
-  foi rejeitado por duplicidade; o artefato correto é o code 130.
+  foi rejeitado por duplicidade; o code 130 já estava consumido no Play Console,
+  então o artefato publicado é o code 131.
+- Fila de revisão de documentos do dashboard reorganizada para separar contexto,
+  filtros, próxima ação e decisões por documento.
 
 ## Artefatos locais
 
 | Plataforma | Artefato | Identidade | SHA-256 |
 | --- | --- | --- | --- |
 | iOS | `mobile-app/ios/build/export-appstore/Leaf.ipa` | `br.com.leaf.ride`, `1.0.5 (36)`, Team `DTA8W5KA5D` | `24034c0818f0dc9f3b4bcdf763de439d88c0df08aaf460938d2afa3b32e1e9be` |
-| Android | `mobile-app/android/app/build/outputs/bundle/release/app-release.aab` | `br.com.leaf.ride`, `1.0.5 (130)` | `78dc310e8e736dfb9bafbd9821df79e407b2793377ff6ccc4fe215a57c233070` |
-| Android | `mobile-app/android/app/build/outputs/apk/release/app-release.apk` | `br.com.leaf.ride`, `1.0.5 (130)` | `6ef42b886d533aae9c7adf422bad20e9bf7ed4decabd71c661a6139275cbd9a5` |
+| Android | `mobile-app/android/app/build/outputs/bundle/release/app-release.aab` | `br.com.leaf.ride`, `1.0.5 (131)` | `9c89e8cd8b82f178de06fa5f3388a5a36162d1259ef9f325aff89f4d26894e17` |
+| Android | `mobile-app/android/app/build/outputs/apk/release/app-release.apk` | `br.com.leaf.ride`, `1.0.5 (131)` | `187b03bf9a524b2ba310020247591488f267c38eb29d39d3f7e8a94068d597c3` |
 
 O IPA foi exportado com `app-store-connect`, assinado pelo Team `DTA8W5KA5D`
 e confirmado com `codesign`. O APK passou na verificação v2; o AAB contém
 `launchProfile=pilot_controlled`, `pilotControlled=true`,
-`enableWhatsAppOtp=false` e `versionCode=130` no `base/assets/app.config`.
+`enableWhatsAppOtp=false` e `versionCode=131` no `base/assets/app.config`.
 
 ## Contratos e validações
 
@@ -44,8 +47,8 @@ e confirmado com `codesign`. O APK passou na verificação v2; o AAB contém
 | Governance e segredos | **PASS** | `governance:check`, secret scan e hardcoded-secret guard. |
 | Preflight de loja | **PASS** — 25 pass / 0 fail | Rede habilitada; URLs legais HTTP 200 e guards de release. |
 | Socket público | **PASS** | Health/readiness, Firebase, Redis, WebSocket, reconnect e multi-gateway. |
-| iOS App Store Connect | **UPLOADED / PROCESSING** | Build 36 visível no TestFlight como `A processar`; há apenas avisos de dSYM de frameworks React. |
-| Google Play interno | **PENDING REPLACEMENT** | Rascunho contém o upload inválido code 129; substituir pelo AAB code 130 antes de salvar. |
+| iOS App Store Connect | **UPLOADED / READY TO SUBMIT** | Build 36 (`1.0.5`) concluído no TestFlight e disponível para os grupos internos. Ainda não foi enviado à análise da Apple; a distribuição mostra a versão anterior 1.0.4 como pendente pelo programador. Há apenas avisos de dSYM de frameworks React. |
+| Google Play interno | **PUBLISHED** | Trilha de teste interno ativa com `131 (1.0.5)`, disponível para testadores internos. O anexo inválido foi removido antes do novo upload. |
 
 ## Gates manuais antes de instalar no piloto
 
@@ -57,8 +60,11 @@ e confirmado com `codesign`. O APK passou na verificação v2; o AAB contém
   location e testadores no Play Console.
 - Confirmar privacy labels, review notes e credenciais de review no App Store
   Connect.
-- Esperar o processamento do build iOS e concluir a criação da versão de teste
-  interno Android; não iniciar lançamento para produção nesta etapa.
+- Se a análise da Apple for necessária, criar a versão 1.0.5 na distribuição,
+  preencher metadados/review notes e enviar manualmente; o build 36 já está
+  pronto para essa etapa.
+- Instalar o Android 131 pela trilha interna e o iOS 36 pelo TestFlight; não
+  iniciar lançamento para produção nesta etapa.
 
 ## Riscos e bloqueios externos
 
@@ -76,9 +82,9 @@ e confirmado com `codesign`. O APK passou na verificação v2; o AAB contém
 
 ## Rollback
 
-Manter a versão atual publicada `1.0.4` como fallback. No Android, descartar o
-rascunho de teste interno se a validação do code 130 falhar; no iOS, não
-promover o build 36 até o processamento e os gates manuais concluírem. O
+Manter a versão atual publicada `1.0.4` como fallback. No Android, pausar ou
+promover a trilha interna conforme o resultado do piloto; no iOS, não promover
+o build 36 até os gates manuais concluírem. O
 WhatsApp continua desligado pela flag e pode ser reativado apenas após o
 provisionamento Meta/WABA, templates, segredo e smoke de entrega.
 

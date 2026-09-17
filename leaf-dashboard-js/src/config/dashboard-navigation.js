@@ -7,7 +7,7 @@ export const dashboardNavigationGroups = [
     items: [
       { href: "/dashboard", label: "Visão geral" },
       { href: "/support", label: "Suporte" },
-      { href: "/drivers/review-queue", label: "Cadastro motorista", allowedRoles: ["admin", "super-admin", "manager"] },
+      { href: "/drivers/review-queue", label: "Revisão de documentos", allowedRoles: ["admin", "super-admin", "manager"] },
     ],
   },
   {

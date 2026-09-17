@@ -163,7 +163,7 @@ export default function AppNav() {
           ) : null}
           {canAccessItem({ allowedRoles: ["admin", "super-admin", "manager"] }, user) ? (
             <Link href="/drivers/review-queue" className="app-topbar-link">
-              Cadastro
+              Revisão KYC
             </Link>
           ) : null}
           <Link

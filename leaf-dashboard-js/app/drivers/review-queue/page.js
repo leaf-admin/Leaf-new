@@ -5,7 +5,6 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import ProtectedRoute from "@/src/components/ProtectedRoute";
 import AppNav from "@/src/components/AppNav";
-import Panel from "@/src/components/ui/Panel";
 import KpiCard from "@/src/components/ui/KpiCard";
 import { ErrorText, LoadingState } from "@/src/components/ui/PageFeedback";
 import { leafAPI } from "@/src/services/api";
@@ -34,6 +33,12 @@ const statusTone = {
   pending: "status-warn",
   approved: "status-ok",
   rejected: "status-bad",
+};
+
+const statusPresentation = {
+  pending: { label: "Pendente", detail: "Aguardando decisão", tone: "status-warn" },
+  approved: { label: "Aprovado", detail: "Documento válido", tone: "status-ok" },
+  rejected: { label: "Rejeitado", detail: "Aguardando correção", tone: "status-bad" },
 };
 
 const REJECTION_REASON_OPTIONS = {
@@ -68,6 +73,15 @@ function resolveDocumentLabel(type) {
   if (normalized === "cnh") return "CNH";
   if (normalized === "crlv") return "CRLV";
   return normalized || "-";
+}
+
+function resolveStatusPresentation(value) {
+  const normalized = String(value || "pending").trim().toLowerCase();
+  return statusPresentation[normalized] || {
+    label: normalized || "Pendente",
+    detail: "Revisar cadastro",
+    tone: statusTone[normalized] || "status-warn",
+  };
 }
 
 function resolveRejectionReason(documentType) {
@@ -185,13 +199,26 @@ function DriversReviewQueuePageContent() {
       pending: Number(byStatus.pending || 0),
       approved: Number(byStatus.approved || 0),
       rejected: Number(byStatus.rejected || 0),
+      ready: items.filter(
+        (item) =>
+          String(item?.status || "pending").toLowerCase() === "pending" &&
+          item?.contentAvailable === true &&
+          item?.requiredUpdate !== true &&
+          item?.requestStatus !== "requested",
+      ).length,
       requested: items.filter((item) => item?.requiredUpdate === true || item?.requestStatus === "requested").length,
     };
   }, [items, summary]);
   const reviewChecklist = useMemo(() => {
     const missingFiles = items.filter((item) => item?.contentAvailable !== true).length;
     const waitingResubmit = items.filter((item) => item?.requiredUpdate === true || item?.requestStatus === "requested").length;
-    const readyToReview = items.filter((item) => String(item?.status || "pending").toLowerCase() === "pending" && item?.contentAvailable === true).length;
+    const readyToReview = items.filter(
+      (item) =>
+        String(item?.status || "pending").toLowerCase() === "pending" &&
+        item?.contentAvailable === true &&
+        item?.requiredUpdate !== true &&
+        item?.requestStatus !== "requested",
+    ).length;
     return [
       {
         label: "Prontos para decisão",
@@ -297,19 +324,34 @@ function DriversReviewQueuePageContent() {
   return (
     <ProtectedRoute>
       <main className="page-shell">
-        <header className="header">
-          <h1>Fila de Revisão de Documentos</h1>
-          <div className="filters">
-            <Link href="/drivers">Voltar para Motoristas</Link>
+        <header className="header review-queue-header">
+          <div className="review-queue-title">
+            <span className="review-queue-eyebrow">Cadastro / KYC</span>
+            <h1>Fila de revisão de documentos</h1>
+            <p>Priorize o que precisa de decisão e acompanhe cada reenvio em um único lugar.</p>
+          </div>
+          <div className="review-queue-header-actions">
+            <span className="review-queue-refresh-note">Atualização automática a cada 60s</span>
+            <button type="button" className="button-secondary" onClick={() => load()} disabled={loading}>
+              {loading ? "Atualizando..." : "Atualizar agora"}
+            </button>
+            <Link href="/drivers">Voltar para motoristas</Link>
           </div>
         </header>
 
         <AppNav />
-        <section className="card">
-          <span className={kycPersistenceScope === "sandbox" ? "status-warn" : "status-ok"}>
-            {kycPersistenceScope === "sandbox" ? "Sandbox KYC" : "Operacional"}
-          </span>
-          <div className="filters" style={{ marginTop: 8 }}>
+        <section className="card review-queue-context" aria-label="Contexto da fila">
+          <div className="review-queue-context-main">
+            <span className="review-queue-eyebrow">Ambiente de trabalho</span>
+            <div className="review-queue-context-title">
+              <h2>{kycPersistenceScope === "sandbox" ? "Revisão em sandbox" : "Revisão operacional"}</h2>
+              <span className={kycPersistenceScope === "sandbox" ? "status-warn" : "status-ok"}>
+                {kycPersistenceScope === "sandbox" ? "Sandbox KYC" : "Operacional"}
+              </span>
+            </div>
+            <p>As decisões desta fila são auditadas e aplicadas ao cadastro do motorista.</p>
+          </div>
+          <div className="review-queue-context-actions">
             <Link
               href={kycPersistenceScope === "sandbox"
                 ? "/drivers/review-queue"
@@ -321,17 +363,25 @@ function DriversReviewQueuePageContent() {
         </section>
         {loading ? <LoadingState message="Carregando fila de revisão..." /> : null}
 
-        <section className="grid grid-kpi">
-          <KpiCard title="Total na fila" value={counters.total} />
-          <KpiCard title="Pendentes" value={counters.pending} tone="warning" />
-          <KpiCard title="Aprovados" value={counters.approved} tone="positive" />
-          <KpiCard title="Rejeitados" value={counters.rejected} tone="danger" />
-          <KpiCard title="Ajuste solicitado" value={counters.requested} tone={counters.requested > 0 ? "warning" : "default"} />
+        <section className="grid grid-kpi review-queue-kpis" aria-label="Resumo da fila">
+          <KpiCard title="Aguardando decisão" value={counters.pending} subtitle={`${counters.total} documentos na fila`} tone="warning" />
+          <KpiCard title="Prontos para revisar" value={counters.ready} subtitle="arquivo disponível" tone="positive" />
+          <KpiCard title="Aguardando reenvio" value={counters.requested} subtitle="ajuste solicitado" tone={counters.requested > 0 ? "warning" : "default"} />
+          <KpiCard title="Rejeitados" value={counters.rejected} subtitle="aguardando correção" tone="danger" />
         </section>
 
-        <section className="grid">
-          <Panel title="Filtros" subtitle="Refine por tipo, status, ordenação e busca textual.">
-            <div className="filters">
+        <section className="card review-queue-filter-panel">
+          <div className="review-section-heading">
+            <div>
+              <span className="review-queue-eyebrow">Encontrar</span>
+              <h2>Filtre a fila</h2>
+              <p>Comece por pendentes para trabalhar o que exige decisão agora.</p>
+            </div>
+            <span className="review-queue-result-count">
+              {items.length} de {pagination.total || counters.total} documentos
+            </span>
+          </div>
+          <div className="review-queue-filter-grid">
               <label>
                 Documento
                 <select
@@ -400,7 +450,7 @@ function DriversReviewQueuePageContent() {
               <label>
                 Buscar
                 <input
-                  placeholder="nome, email, cpf, id..."
+                  placeholder="nome, e-mail, CPF ou ID"
                   value={filters.search}
                   onChange={(e) => {
                     setPagination((prev) => ({ ...prev, page: 1 }));
@@ -408,51 +458,67 @@ function DriversReviewQueuePageContent() {
                   }}
                 />
               </label>
-            </div>
-          </Panel>
+          </div>
+        </section>
 
-          <Panel title="Checklist da fila" subtitle="Próxima ação por bloco, sem abrir cada ficha manualmente.">
-            <div className="metric-list">
-              {reviewChecklist.map((item) => (
-                <div className="row" key={item.label}>
-                  <div className="label">
-                    <span>{item.label}</span>
-                    <small>{item.detail}</small>
-                  </div>
-                  <div className="value">{item.value}</div>
+        <section className="card review-queue-workflow" aria-label="Como trabalhar a fila">
+          <div className="review-section-heading">
+            <div>
+              <span className="review-queue-eyebrow">Fluxo recomendado</span>
+              <h2>Trabalhe nesta ordem</h2>
+              <p>O próximo passo de cada documento aparece na tabela abaixo.</p>
+            </div>
+          </div>
+          <ol className="review-queue-steps">
+            {reviewChecklist.map((item, index) => (
+              <li className="review-queue-step" key={item.label}>
+                <span className="review-queue-step-number">{index + 1}</span>
+                <div>
+                  <strong>{item.label}</strong>
+                  <span>{item.detail}</span>
                 </div>
-              ))}
-            </div>
-          </Panel>
+                <b>{item.value}</b>
+              </li>
+            ))}
+          </ol>
+        </section>
 
-          <Panel
-            className="panel-span-full"
-            title="Documentos"
-            subtitle="Central de decisão para aprovação e rejeição de documentos enviados."
-          >
-            <div className="table-shell">
-              <table className="table table-compact">
+        <section className="card review-queue-documents">
+          <div className="review-section-heading">
+            <div>
+              <span className="review-queue-eyebrow">Decisão</span>
+              <h2>Documentos recebidos</h2>
+              <p>Abra a ficha para contexto completo ou decida diretamente quando o arquivo estiver disponível.</p>
+            </div>
+            <span className="review-queue-result-count">Página {pagination.page} de {Math.max(1, pagination.pages || 1)}</span>
+          </div>
+          <div className="table-shell">
+            <table className="table table-compact review-queue-table">
                 <thead>
                   <tr>
                     <th>Motorista</th>
                     <th>Documento</th>
-                    <th>Status</th>
+                    <th>Situação</th>
                     <th>Próxima ação</th>
                     <th>Atualização</th>
-                    <th>Contato</th>
                     <th>Ações</th>
                   </tr>
                 </thead>
                 <tbody>
                   {items.length === 0 ? (
                     <tr>
-                      <td colSpan={7}>Nenhum item encontrado para os filtros selecionados.</td>
+                      <td colSpan={6}>
+                        <div className="review-queue-empty">
+                          <strong>Nenhum documento nesta visão</strong>
+                          <span>Altere o status ou limpe a busca para consultar toda a fila.</span>
+                        </div>
+                      </td>
                     </tr>
                   ) : (
                     items.map((item, index) => {
                       const rowKey = `${item?.driverId || "driver"}:${item?.documentType || "doc"}:${index}`;
                       const statusKey = String(item?.status || "pending").toLowerCase();
-                      const badgeClass = statusTone[statusKey] || "status-warn";
+                      const statusInfo = resolveStatusPresentation(statusKey);
                       const actionKey = `${item?.driverId || ""}:${item?.documentType || ""}`;
                       const requestKey = `${item?.driverId || ""}:${item?.documentType || ""}:request`;
                       const openKey = `${item?.driverId || ""}:${item?.documentType || ""}:open`;
@@ -462,13 +528,15 @@ function DriversReviewQueuePageContent() {
                           <td>
                             <strong>{item?.driver?.name || "-"}</strong>
                             <span className="table-muted">{item?.driverId || "-"}</span>
+                            <span className="table-muted">{item?.driver?.email || item?.driver?.phone || "Sem contato"}</span>
                           </td>
                           <td>
                             <strong>{resolveDocumentLabel(item?.documentType)}</strong>
                             <span className="table-muted">{item?.fileName || "-"}</span>
                           </td>
                           <td>
-                            <span className={badgeClass}>{statusKey}</span>
+                            <span className={statusInfo.tone}>{statusInfo.label}</span>
+                            <span className="table-muted">{statusInfo.detail}</span>
                             {item?.requiredUpdate || item?.requestStatus === "requested" ? (
                               <span className="status-warn">ajuste solicitado</span>
                             ) : null}
@@ -490,12 +558,8 @@ function DriversReviewQueuePageContent() {
                             <span className="table-muted">Rev.: {formatDateTime(item?.reviewedAt)}</span>
                           </td>
                           <td>
-                            <div>{item?.driver?.email || "-"}</div>
-                            <span className="table-muted">{item?.driver?.phone || "-"}</span>
-                          </td>
-                          <td>
-                            <div className="actions-cell">
-                              <Link href={`/drivers/${item?.driverId}/documents${kycPersistenceScope === "sandbox" ? "?kycScope=sandbox" : ""}`}>Abrir ficha</Link>
+                            <div className="actions-cell review-queue-actions">
+                              <Link className="review-action-primary" href={`/drivers/${item?.driverId}/documents${kycPersistenceScope === "sandbox" ? "?kycScope=sandbox" : ""}`}>Abrir ficha</Link>
                               <button
                                 type="button"
                                 disabled={item?.contentAvailable !== true || openingKey === openKey}
@@ -504,6 +568,7 @@ function DriversReviewQueuePageContent() {
                                 {openingKey === openKey ? "Abrindo..." : "Visualizar"}
                               </button>
                               <button
+                                className="button-positive"
                                 type="button"
                                 disabled={isBusy}
                                 onClick={() => reviewDocument(item, "approve")}
@@ -511,6 +576,7 @@ function DriversReviewQueuePageContent() {
                                 Aprovar
                               </button>
                               <button
+                                className="button-danger"
                                 type="button"
                                 disabled={isBusy}
                                 onClick={() => reviewDocument(item, "reject")}
@@ -531,10 +597,10 @@ function DriversReviewQueuePageContent() {
                     })
                   )}
                 </tbody>
-              </table>
-            </div>
+            </table>
+          </div>
 
-            <div className="pager">
+          <div className="pager review-queue-pager">
               <button
                 type="button"
                 onClick={() => setPagination((prev) => ({ ...prev, page: Math.max(1, prev.page - 1) }))}
@@ -557,8 +623,7 @@ function DriversReviewQueuePageContent() {
               >
                 Próxima
               </button>
-            </div>
-          </Panel>
+          </div>
         </section>
 
         <ErrorText message={error} />

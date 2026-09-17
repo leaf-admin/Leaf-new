@@ -566,13 +566,13 @@ function buildWorkspaces(snapshot) {
     } : null,
     {
       id: "driver-onboarding",
-      eyebrow: "Cadastro motorista",
-      title: `${formatCompact(driverOnboarding.pendingDocuments)} documentos pendentes`,
-      description: "Fila de cadastro, KYC e documentos de motorista para aprovar sem perder contexto.",
+      eyebrow: "Revisão de documentos",
+      title: `${formatCompact(driverOnboarding.pendingDocuments)} para revisar`,
+      description: "Documentos recebidos de motoristas, com próxima ação e decisão no mesmo fluxo.",
       href: "/drivers/review-queue",
-      actionLabel: "Abrir cadastro",
+      actionLabel: "Revisar documentos",
       tone: driverOnboarding.pendingDocuments > 0 ? "warning" : "positive",
-      status: driverOnboarding.pendingDocuments > 0 ? "revisar" : "limpo",
+      status: driverOnboarding.pendingDocuments > 0 ? "ação necessária" : "em dia",
       footnote: `Fila total: ${formatCompact(driverOnboarding.totalDocuments)} documentos`,
       metrics: [
         { label: "Pendentes", value: formatCompact(driverOnboarding.pendingDocuments) },
