@@ -52,6 +52,14 @@ const DOCUMENT_STATUS_LABELS = {
   missing: "Ausente",
 };
 
+const DRIVER_DETAIL_SECTIONS = [
+  { id: "summary", label: "Resumo" },
+  { id: "documents", label: "Documentos" },
+  { id: "identity", label: "Identidade" },
+  { id: "vehicle", label: "Veículo" },
+  { id: "audit", label: "Auditoria" },
+];
+
 function getReasonOptions(documentType) {
   const normalized = String(documentType || "").trim().toLowerCase();
   return DOCUMENT_REJECTION_REASON_OPTIONS[normalized] || [];
@@ -153,6 +161,19 @@ export default function DriverDocumentsPage({ params }) {
     .toLowerCase() === "sandbox"
     ? "sandbox"
     : "operational";
+  const requestedSection = String(searchParams.get("section") || "summary")
+    .trim()
+    .toLowerCase();
+  const activeSection = DRIVER_DETAIL_SECTIONS.some((section) => section.id === requestedSection)
+    ? requestedSection
+    : "summary";
+  const buildSectionHref = (sectionId) => {
+    const query = new URLSearchParams();
+    if (sectionId !== "summary") query.set("section", sectionId);
+    if (kycPersistenceScope === "sandbox") query.set("kycScope", "sandbox");
+    const queryString = query.toString();
+    return `/drivers/${encodeURIComponent(id)}/documents${queryString ? `?${queryString}` : ""}`;
+  };
   const kycRequestContext = useMemo(
     () => ({ scope: kycPersistenceScope }),
     [kycPersistenceScope],
@@ -695,15 +716,37 @@ export default function DriverDocumentsPage({ params }) {
   return (
     <ProtectedRoute>
       <main className="page-shell">
-        <header className="header">
-          <h1>Documentos do Motorista</h1>
-          <div className="filters">
+        <header className="header driver-detail-header">
+          <div className="driver-detail-title">
+            <span className="driver-detail-eyebrow">Ficha individual do motorista</span>
+            <h1>Documentos do Motorista</h1>
+            <p>
+              {documents?.driver?.name || "Carregando motorista"} · decisão atual em {DRIVER_DETAIL_SECTIONS.find((section) => section.id === activeSection)?.label}
+            </p>
+          </div>
+          <div className="filters driver-detail-header-actions">
+            <span className={kycPersistenceScope === "sandbox" ? "status-warn" : "status-ok"}>
+              {kycPersistenceScope === "sandbox" ? "Sandbox KYC" : "Operacional"}
+            </span>
             <Link href="/drivers">Voltar</Link>
           </div>
         </header>
         <AppNav />
 
-        <section className="card">
+        <nav className="driver-detail-tabs" aria-label="Seções da ficha do motorista">
+          {DRIVER_DETAIL_SECTIONS.map((section) => (
+            <Link
+              key={section.id}
+              className={`driver-detail-tab${activeSection === section.id ? " driver-detail-tab-active" : ""}`}
+              href={buildSectionHref(section.id)}
+              aria-current={activeSection === section.id ? "page" : undefined}
+            >
+              {section.label}
+            </Link>
+          ))}
+        </nav>
+
+        {activeSection === "summary" ? <section className="card driver-detail-tab-panel">
           <h2>Resumo do motorista</h2>
           <KeyValueGrid
             data={{
@@ -782,10 +825,10 @@ export default function DriverDocumentsPage({ params }) {
               )}
             </div>
           ) : null}
-          <TechnicalDetails title="Ver payload técnico do motorista" data={documents?.driver || {}} />
-        </section>
+        </section> : null}
 
-        <section className="card">
+        {activeSection === "documents" ? <>
+        <section className="card driver-detail-tab-panel">
           <h2>Certidão de antecedentes</h2>
           <div className="filters" style={{ display: "grid", gap: 6 }}>
             <p>
@@ -833,8 +876,10 @@ export default function DriverDocumentsPage({ params }) {
             Documento anexado aqui fica disponível para revisão junto com CNH/CRLV.
           </p>
         </section>
+        </> : null}
 
-        <section className="card">
+        {activeSection === "identity" ? <>
+        <section className="card driver-detail-tab-panel">
           <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
             <h2 style={{ margin: 0 }}>KYC (Onboarding + Diário)</h2>
             <span className={kycPersistenceScope === "sandbox" ? "status-warn" : "status-ok"}>
@@ -1106,8 +1151,9 @@ export default function DriverDocumentsPage({ params }) {
         ) : identityReviewError ? (
           <p className="error-banner" role="alert">{identityReviewError}</p>
         ) : null}
+        </> : null}
 
-        <section className="card">
+        {activeSection === "vehicle" ? <section className="card driver-detail-tab-panel">
           <h2>Configuração de Veículo e Categoria</h2>
           {vehicleList.length === 0 ? (
             <p>Nenhum veículo encontrado para este motorista.</p>
@@ -1186,8 +1232,9 @@ export default function DriverDocumentsPage({ params }) {
               </div>
             </div>
           )}
-        </section>
+        </section> : null}
 
+        {activeSection === "documents" ? <>
         <section className="grid">
           <article className="card">
             <h2>Filtros de documentos</h2>
@@ -1291,6 +1338,28 @@ export default function DriverDocumentsPage({ params }) {
             })
           )}
         </section>
+        </> : null}
+
+        {activeSection === "audit" ? (
+          <section className="card driver-detail-tab-panel">
+            <h2>Auditoria e dados técnicos</h2>
+            <p className="text-muted">
+              Dados operacionais ficam disponíveis para consulta sem misturar a tela de decisão com payloads técnicos.
+            </p>
+            <TechnicalDetails
+              title="Ver payload técnico do motorista"
+              data={documents?.driver || {}}
+            />
+            <TechnicalDetails
+              title="Ver estado técnico da revisão"
+              data={{
+                kyc: documents?.kyc || {},
+                documents: documents?.documents || {},
+                vehicleConfig: documents?.vehicleConfig || {},
+              }}
+            />
+          </section>
+        ) : null}
 
         <ConfirmActionDialog
           open={orphanRecoveryDialogOpen}

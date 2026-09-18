@@ -869,6 +869,36 @@ async function assertReportsDownloadContract(page, observed) {
   log("reports export uses authenticated dashboard API client ok");
 }
 
+async function assertDriverDetailSections(page) {
+  const sections = [
+    { id: "summary", label: "Resumo", heading: "Resumo do motorista" },
+    { id: "documents", label: "Documentos", heading: "Certidão de antecedentes" },
+    { id: "identity", label: "Identidade", heading: "KYC (Onboarding + Diário)" },
+    { id: "vehicle", label: "Veículo", heading: "Configuração de Veículo e Categoria" },
+    { id: "audit", label: "Auditoria", heading: "Auditoria e dados técnicos" },
+  ];
+
+  for (const section of sections) {
+    const query = section.id === "summary" ? "" : `?section=${section.id}`;
+    await page.goto(`/drivers/smoke-driver/documents${query}`, { waitUntil: "domcontentloaded" });
+    await page
+      .locator(".driver-detail-tab-active", { hasText: section.label })
+      .waitFor({ timeout: 15000 });
+    await page.locator("h2", { hasText: section.heading }).waitFor({ timeout: 15000 });
+  }
+
+  const tabHrefs = await page.locator(".driver-detail-tab").evaluateAll((links) => (
+    links.map((link) => link.getAttribute("href"))
+  ));
+  for (const section of sections.slice(1)) {
+    if (!tabHrefs.some((href) => href?.includes(`section=${section.id}`))) {
+      throw new Error(`Driver detail tab did not expose a deep link for ${section.id}`);
+    }
+  }
+
+  log("driver detail sections preserve deep links and isolated decision surfaces ok");
+}
+
 async function main() {
   const port = await getFreePort();
   const baseURL = `http://localhost:${port}`;
@@ -946,6 +976,7 @@ async function main() {
       await assertVisibleHeading(page, routeConfig);
     }
 
+    await assertDriverDetailSections(page);
     await assertFinancialReconciliationContract(page);
     await assertMetricsFinancialContract(page);
     await assertFinancialSimulatorRequiresExplicitFlag(page);

@@ -782,6 +782,76 @@ label {
   gap: 7px;
 }
 
+.driver-detail-header {
+  align-items: center;
+}
+
+.driver-detail-title {
+  display: grid;
+  gap: 4px;
+  min-width: min(420px, 100%);
+}
+
+.driver-detail-title p {
+  margin: 0;
+  color: var(--text-soft);
+  font-size: 0.8rem;
+}
+
+.driver-detail-eyebrow {
+  color: var(--text-muted);
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.driver-detail-header-actions {
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.driver-detail-tabs {
+  display: flex;
+  align-items: flex-end;
+  gap: 4px;
+  overflow-x: auto;
+  margin: 0 0 10px;
+  padding: 0 4px;
+  border-bottom: 1px solid var(--line);
+  scrollbar-width: thin;
+}
+
+.driver-detail-tab {
+  flex: 0 0 auto;
+  margin-bottom: -1px;
+  padding: 9px 12px 8px;
+  border: 1px solid transparent;
+  border-bottom-color: var(--line);
+  border-radius: 8px 8px 0 0;
+  color: var(--text-soft);
+  font-size: 0.78rem;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.driver-detail-tab:hover {
+  background: #f8fafc;
+  color: var(--text);
+}
+
+.driver-detail-tab-active {
+  border-color: var(--line);
+  border-bottom-color: #ffffff;
+  background: #ffffff;
+  box-shadow: inset 0 -2px 0 var(--accent);
+  color: var(--accent);
+}
+
+.driver-detail-tab-panel {
+  min-height: 0;
+}
+
 .review-queue-header {
   align-items: center;
   padding: 14px 16px;
