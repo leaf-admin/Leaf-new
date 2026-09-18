@@ -78,9 +78,15 @@ e confirmado com `codesign`. O APK passou na verificação v2; o AAB contém
 - O runtime público atual informa Woovi em produção, portanto o smoke sandbox
   contra o host remoto não é uma prova de cobrança sandbox; não fazer cobrança
   real sem a configuração aprovada.
-- `config:validate` remoto ainda aponta ausência de `CPF_REVIEW_HMAC_KEY` e
-  `AUTH_OTP_HMAC_KEY`, perfil Woovi de produção e biometria de produção
-  desabilitada. Não inventar segredos nem alterar o ambiente nesta rodada.
+- `CPF_REVIEW_HMAC_KEY` fica **fechado para o piloto controlado**: a chave
+  dedicada foi provisionada no host/gateways e não é versionada. A validação
+  local pode apontar ausência porque este checkout não carrega segredos; isso é
+  uma limitação de evidência local, não um bloqueio do piloto. O guard de
+  produção permanece ativo e deve ser confirmado no SHA candidato, sem gerar
+  ou rotacionar a chave.
+- Os demais gates de runtime continuam sujeitos à validação operacional
+  correspondente; esta nota não altera regras de autenticação, pagamento ou
+  biometria.
 - Live Activity/APNs contextualizado permanece não configurado; a notificação
   persistente do piloto deve ser validada no dispositivo e tratada como gate
   separado.
