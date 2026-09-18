@@ -792,7 +792,8 @@ class BackofficeCommandCenterService {
         paymentPendingCount,
         totalDrivers: toNumber(usersStatus?.drivers?.total, 0),
         totalPassengers: totalCustomers,
-        cancellationRate: toNumber(ridesToday.cancellationRate, 0)
+        cancellationRate: toNumber(ridesToday.cancellationRate, 0),
+        trend: Array.isArray(ridesToday.trend) ? ridesToday.trend : []
       },
       support: {
         totalOpenTickets: openSupportTickets,

@@ -23,10 +23,6 @@ function formatCompact(value) {
   });
 }
 
-function formatPercent(value) {
-  return `${(toNumber(value) * 100).toFixed(1)}%`;
-}
-
 function formatPercentValue(value) {
   return `${toNumber(value).toFixed(1)}%`;
 }
@@ -52,9 +48,12 @@ function formatUsd(value) {
   })}`;
 }
 
-function formatMinutes(value) {
-  if (value === null || value === undefined || Number.isNaN(Number(value))) return "-";
-  return `${Number(value).toFixed(1)} min`;
+function hasSnapshotData(snapshot) {
+  return Boolean(snapshot && typeof snapshot.status === "string" && snapshot.status.length > 0);
+}
+
+function snapshotText(snapshot, value) {
+  return hasSnapshotData(snapshot) ? value : "—";
 }
 
 function formatTime(value) {
@@ -66,13 +65,6 @@ function formatTime(value) {
     minute: "2-digit",
     second: "2-digit",
   });
-}
-
-function statusTone(status) {
-  if (!status) return "default";
-  if (status === "healthy") return "positive";
-  if (status === "warning") return "warning";
-  return "danger";
 }
 
 function statusClass(status) {
@@ -406,6 +398,121 @@ function CommandStat({ label, value, detail, tone = "default" }) {
   );
 }
 
+function OperationsTrendPanel({ points = [] }) {
+  const chartPoints = Array.isArray(points) ? points.slice(-24) : [];
+  const hasActivity = chartPoints.some(
+    (point) => toNumber(point?.rides) > 0 || toNumber(point?.gmvCents) > 0,
+  );
+
+  if (!chartPoints.length || !hasActivity) {
+    return (
+      <section className="ops-trend-panel" aria-label="Ritmo operacional">
+        <Panel
+          title="Ritmo do dia"
+          subtitle="Corridas e GMV por hora, consolidados pelo backend."
+        >
+          <div className="ops-trend-empty">
+            <strong>Sem movimentação registrada hoje</strong>
+            <span>O gráfico aparece quando houver uma série horária disponível.</span>
+          </div>
+        </Panel>
+      </section>
+    );
+  }
+
+  const width = 760;
+  const height = 210;
+  const padding = { top: 18, right: 18, bottom: 34, left: 18 };
+  const chartWidth = width - padding.left - padding.right;
+  const chartHeight = height - padding.top - padding.bottom;
+  const maxRides = Math.max(1, ...chartPoints.map((point) => toNumber(point.rides)));
+  const maxGmv = Math.max(1, ...chartPoints.map((point) => toNumber(point.gmvCents)));
+  const columnWidth = chartWidth / chartPoints.length;
+  const barWidth = Math.max(7, columnWidth * 0.42);
+  const gmvLine = chartPoints
+    .map((point, index) => {
+      const x = padding.left + columnWidth * index + columnWidth / 2;
+      const y = padding.top + chartHeight - (toNumber(point.gmvCents) / maxGmv) * chartHeight;
+      return `${x},${y}`;
+    })
+    .join(" ");
+
+  return (
+    <section className="ops-trend-panel" aria-label="Ritmo operacional">
+      <Panel
+        title="Ritmo do dia"
+        subtitle="Corridas e GMV por hora, consolidados pelo backend."
+        actions={<span className="meta-badge">últimas 24h</span>}
+      >
+        <div className="ops-trend-legend" aria-hidden="true">
+          <span><i className="ops-trend-dot ops-trend-dot-rides" /> Corridas</span>
+          <span><i className="ops-trend-dot ops-trend-dot-gmv" /> GMV</span>
+        </div>
+        <div className="ops-trend-chart-wrap">
+          <svg
+            className="ops-trend-chart"
+            data-testid="ops-trend-chart"
+            viewBox={`0 0 ${width} ${height}`}
+            role="img"
+            aria-label="Gráfico horário de corridas e GMV"
+          >
+            {[0.25, 0.5, 0.75, 1].map((ratio) => {
+              const y = padding.top + chartHeight - ratio * chartHeight;
+              return (
+                <line
+                  key={ratio}
+                  x1={padding.left}
+                  x2={width - padding.right}
+                  y1={y}
+                  y2={y}
+                  className="ops-trend-gridline"
+                />
+              );
+            })}
+            {chartPoints.map((point, index) => {
+              const rides = toNumber(point.rides);
+              const barHeight = (rides / maxRides) * chartHeight;
+              const x = padding.left + columnWidth * index + (columnWidth - barWidth) / 2;
+              const y = padding.top + chartHeight - barHeight;
+              const showLabel = index === 0 || index === chartPoints.length - 1 || index % 4 === 0;
+              return (
+                <g key={`${point.label || point.hour}-${index}`}>
+                  <rect
+                    x={x}
+                    y={y}
+                    width={barWidth}
+                    height={Math.max(2, barHeight)}
+                    rx="4"
+                    className="ops-trend-bar"
+                  >
+                    <title>{`${point.label || `${point.hour}:00`}: ${rides} corrida(s), ${brlFromCents(point.gmvCents)} GMV`}</title>
+                  </rect>
+                  {showLabel ? (
+                    <text
+                      x={padding.left + columnWidth * index + columnWidth / 2}
+                      y={height - 10}
+                      textAnchor="middle"
+                      className="ops-trend-axis-label"
+                    >
+                      {point.label || `${point.hour}:00`}
+                    </text>
+                  ) : null}
+                </g>
+              );
+            })}
+            <polyline points={gmvLine} className="ops-trend-line" />
+          </svg>
+        </div>
+        <div className="ops-trend-summary">
+          <span>{formatCompact(chartPoints.reduce((sum, point) => sum + toNumber(point.rides), 0))} corridas solicitadas</span>
+          <span>{formatCompact(chartPoints.reduce((sum, point) => sum + toNumber(point.completed), 0))} concluídas</span>
+          <span>{brlFromCents(chartPoints.reduce((sum, point) => sum + toNumber(point.gmvCents), 0))} GMV</span>
+        </div>
+      </Panel>
+    </section>
+  );
+}
+
 function WorkspaceCard({
   eyebrow,
   title,
@@ -456,6 +563,7 @@ function CommandCenterHealth({ snapshot }) {
   const canaryReadiness = Array.isArray(snapshot?.canaryPack?.readiness)
     ? snapshot.canaryPack.readiness
     : [];
+  const canaryNeedsAttention = canaryReadiness.some((item) => item.status !== "ready");
 
   const healthItems = [
     {
@@ -497,7 +605,7 @@ function CommandCenterHealth({ snapshot }) {
           </Link>
         ))}
       </div>
-      {canaryReadiness.length ? (
+      {canaryNeedsAttention ? (
         <div className="ops-health-canary">
           <div>
             <span className="ops-workspace-eyebrow">Canary Pack</span>
@@ -519,97 +627,67 @@ function CommandCenterHealth({ snapshot }) {
 function buildWorkspaces(snapshot) {
   const metrics = snapshot?.dailyMetrics || {};
   const support = snapshot?.support || {};
-  const campaigns = snapshot?.campaigns || {};
   const driverOnboarding = snapshot?.driverOnboarding || {};
-  const launchFlags = snapshot?.launchFlags || {};
   const supportBreaches = toNumber(support.overdueAckCount) + toNumber(support.overdueFirstResponseCount);
+  const hasData = hasSnapshotData(snapshot);
 
   return [
     {
       id: "operations",
       eyebrow: "Operação",
-      title: `${formatCompact(metrics.activeRides)} corridas em curso`,
-      description: "Motoristas, corridas e território ficam em uma única entrada operacional.",
+      title: hasData ? `${formatCompact(metrics.activeRides)} em curso` : "Sem leitura",
+      description: "Corridas, território e motoristas.",
       href: "/maps",
       actionLabel: "Abrir operação",
-      tone: metrics.activeRides > 0 ? "positive" : "default",
-      status: metrics.activeDrivers > 0 ? "online" : "sem motoristas",
-      footnote: `Total cadastrado: ${formatCompact(metrics.totalDrivers)} motoristas`,
+      tone: hasData && metrics.totalDrivers > 0 && metrics.activeDrivers === 0 ? "warning" : "default",
+      status: hasData && metrics.totalDrivers > 0 && metrics.activeDrivers === 0 ? "sem online" : null,
       metrics: [
-        { label: "Motoristas ativos", value: formatCompact(metrics.activeDrivers) },
-        { label: "Corridas agora", value: formatCompact(metrics.activeRides) },
-        { label: "Finalizadas hoje", value: formatCompact(metrics.completedRidesToday) },
-        { label: "Motoristas", value: formatCompact(metrics.totalDrivers) },
+        { label: "Motoristas online", value: snapshotText(snapshot, formatCompact(metrics.activeDrivers)) },
+        { label: "Finalizadas hoje", value: snapshotText(snapshot, formatCompact(metrics.completedRidesToday)) },
       ],
     },
     {
       id: "driver-onboarding",
       eyebrow: "Cadastro",
-      title: `${formatCompact(driverOnboarding.pendingDocuments)} para revisar`,
-      description: "Uma fila única para documentos, reenvios e decisões de KYC.",
+      title: hasData ? `${formatCompact(driverOnboarding.pendingDocuments)} pendentes` : "Sem leitura",
+      description: "Fila de KYC e documentos.",
       href: "/drivers/review-queue",
       actionLabel: "Abrir documentos",
-      tone: driverOnboarding.pendingDocuments > 0 ? "warning" : "positive",
-      status: driverOnboarding.pendingDocuments > 0 ? "ação necessária" : "em dia",
-      footnote: `Fila total: ${formatCompact(driverOnboarding.totalDocuments)} documentos`,
+      tone: hasData && driverOnboarding.pendingDocuments > 0 ? "warning" : "default",
+      status: hasData && driverOnboarding.pendingDocuments > 0 ? "ação necessária" : null,
       metrics: [
-        { label: "Pendentes", value: formatCompact(driverOnboarding.pendingDocuments) },
-        { label: "Aprovados", value: formatCompact(driverOnboarding.approvedDocuments) },
-        { label: "Rejeitados", value: formatCompact(driverOnboarding.rejectedDocuments) },
-        { label: "Fonte", value: driverOnboarding.reviewQueueSource || "agregada" },
+        { label: "Rejeitados", value: snapshotText(snapshot, formatCompact(driverOnboarding.rejectedDocuments)) },
+        { label: "Fila total", value: snapshotText(snapshot, formatCompact(driverOnboarding.totalDocuments)) },
       ],
     },
     {
       id: "finance",
       eyebrow: "Financeiro",
-      title: brlFromCents(metrics.grossRevenueCents),
-      description: "GMV, receita, pagamentos pendentes e reconciliação em um só ponto.",
+      title: hasData ? `GMV ${brlFromCents(metrics.gmvCents)}` : "Sem leitura",
+      description: "Receita e reconciliação.",
       href: "/financial-reconciliation",
       actionLabel: "Abrir financeiro",
-      tone: metrics.paymentPendingCount > 0 ? "warning" : "positive",
-      status: metrics.paymentPendingCount > 0 ? "acompanhar" : "normal",
-      footnote: `Ticket médio ${brlFromCents(metrics.averageRideTicketCents)} · ARPU ${brlFromCents(metrics.arpuBaseCents)}`,
+      tone: hasData && metrics.paymentPendingCount > 0 ? "warning" : "default",
+      status: hasData && metrics.paymentPendingCount > 0 ? "pendência" : null,
       metrics: [
-        { label: "GMV hoje", value: brlFromCents(metrics.gmvCents) },
-        { label: "Receita Leaf", value: brlFromCents(metrics.grossRevenueCents) },
-        { label: "Pendências", value: formatCompact(metrics.paymentPendingCount) },
-        { label: "Ambiente Woovi", value: runtimeEnvironmentLabel(snapshot?.paymentRuntime?.defaultEnvironment) },
+        { label: "Receita Leaf", value: snapshotText(snapshot, brlFromCents(metrics.grossRevenueCents)) },
+        { label: "Pagamentos pendentes", value: snapshotText(snapshot, formatCompact(metrics.paymentPendingCount)) },
       ],
     },
     {
       id: "support",
       eyebrow: "Suporte",
-      title: `${formatCompact(support.totalOpenTickets)} tickets abertos`,
-      description: "Fila de atendimento, dono, SLA e classificação N1/N2/N3 para ação rápida.",
+      title: hasData ? `${formatCompact(support.totalOpenTickets)} abertos` : "Sem leitura",
+      description: "Fila, SLA e responsáveis.",
       href: "/support",
       actionLabel: "Abrir suporte",
-      tone: supportBreaches > 0 ? "danger" : "positive",
-      status: supportBreaches > 0 ? "SLA" : "ok",
-      footnote: `1ª resposta mediana: ${formatMinutes(support.medianFirstResponseMinutes)}`,
+      tone: hasData && supportBreaches > 0 ? "danger" : "default",
+      status: hasData && supportBreaches > 0 ? "SLA" : null,
       metrics: [
-        { label: "N1 / N2 / N3", value: `${formatCompact(support.backlogByPriority?.N1)} / ${formatCompact(support.backlogByPriority?.N2)} / ${formatCompact(support.backlogByPriority?.N3)}` },
-        { label: "Fora do SLA", value: formatCompact(supportBreaches) },
-        { label: "Sem responsável", value: formatCompact(support.ticketsWithoutOwner) },
-        { label: "Abertos", value: formatCompact(support.totalOpenTickets) },
+        { label: "Fora do SLA", value: snapshotText(snapshot, formatCompact(supportBreaches)) },
+        { label: "Sem responsável", value: snapshotText(snapshot, formatCompact(support.ticketsWithoutOwner)) },
       ],
     },
-    launchFlags.campaignCenterEnabled === true ? {
-      id: "campaigns",
-      eyebrow: "Campanhas",
-      title: `${formatCompact(campaigns.active)} campanhas ativas`,
-      description: "Monitor de banners, campanhas in-app, prazo, valor contratado e performance.",
-      href: "/campaign-center",
-      actionLabel: "Abrir campanhas",
-      tone: campaigns.active > 0 ? "positive" : "default",
-      status: campaigns.active > 0 ? "ativo" : "neutro",
-      footnote: `eCPM ${brlFromCents(campaigns.effectiveCpmCents)} · eCPC ${brlFromCents(campaigns.effectiveCpcCents)}`,
-      metrics: [
-        { label: "Impressões", value: formatCompact(campaigns.impressions) },
-        { label: "Cliques", value: formatCompact(campaigns.clicks) },
-        { label: "CTR", value: formatPercent(campaigns.ctr) },
-        { label: "Valor", value: brlFromCents(campaigns.campaignValueCents) },
-      ],
-    } : null,
   ].filter(Boolean);
 }
 
@@ -658,7 +736,13 @@ export default function DashboardPage() {
   const services = snapshot?.services || {};
   const costControls = snapshot?.costControls || {};
   const firestoreReadGuard = costControls.firestoreReadGuard || {};
-  const paymentRuntime = snapshot?.paymentRuntime || {};
+  const driverOnboarding = snapshot?.driverOnboarding || {};
+  const support = snapshot?.support || {};
+  const supportBreaches = toNumber(support.overdueAckCount) + toNumber(support.overdueFirstResponseCount);
+  const pendingCount =
+    toNumber(driverOnboarding.pendingDocuments) +
+    toNumber(metrics.paymentPendingCount) +
+    supportBreaches;
 
   return (
     <ProtectedRoute>
@@ -673,7 +757,6 @@ export default function DashboardPage() {
               {statusLabel(snapshot?.status)}
             </span>
             <span className="meta-badge">Atualizado {formatTime(snapshot?.generatedAt)}</span>
-            <span className="meta-badge">Cache {snapshot?.cache?.status || "-"}</span>
           </div>
         </header>
 
@@ -682,37 +765,28 @@ export default function DashboardPage() {
 
         <section className="ops-command-strip" aria-label="Resumo operacional">
           <CommandStat
-            label="Serviços"
-            value={statusLabel(snapshot?.status)}
-            detail={`TTL ${snapshot?.scope?.ttlSeconds || 0}s`}
-            tone={statusTone(snapshot?.status)}
+            label="Corridas"
+            value={snapshotText(snapshot, `${formatCompact(metrics.activeRides)} em curso`)}
+            detail={snapshotText(snapshot, `${formatCompact(metrics.completedRidesToday)} finalizadas hoje`)}
           />
           <CommandStat
             label="Motoristas"
-            value={formatCompact(metrics.activeDrivers)}
-            detail={`${formatCompact(metrics.totalDrivers)} cadastrados`}
-            tone={metrics.activeDrivers > 0 ? "positive" : "warning"}
+            value={snapshotText(snapshot, `${formatCompact(metrics.activeDrivers)} online`)}
+            detail={snapshotText(snapshot, `${formatCompact(metrics.totalDrivers)} cadastrados`)}
           />
           <CommandStat
-            label="Corridas"
-            value={formatCompact(metrics.activeRides)}
-            detail={`${formatCompact(metrics.completedRidesToday)} finalizadas hoje`}
+            label="GMV + receita"
+            value={snapshotText(snapshot, brlFromCents(metrics.gmvCents))}
+            detail={snapshotText(snapshot, `Leaf ${brlFromCents(metrics.grossRevenueCents)}`)}
           />
           <CommandStat
-            label="GMV"
-            value={brlFromCents(metrics.gmvCents)}
-            detail={`ticket ${brlFromCents(metrics.averageRideTicketCents)}`}
-          />
-          <CommandStat
-            label="Receita Leaf"
-            value={brlFromCents(metrics.grossRevenueCents)}
-            detail={`ARPU ${brlFromCents(metrics.arpuBaseCents)}`}
-          />
-          <CommandStat
-            label="Woovi"
-            value={runtimeEnvironmentLabel(paymentRuntime.defaultEnvironment)}
-            detail={`${formatCompact(paymentRuntime.sandboxProfileCount)} sandbox · ${formatCompact(metrics.paymentPendingCount)} pendências`}
-            tone={paymentRuntime.globalSandboxEnabled ? "danger" : paymentRuntime.canarySandboxEnabled ? "positive" : "warning"}
+            label="Pendências"
+            value={snapshotText(snapshot, formatCompact(pendingCount))}
+            detail={snapshotText(
+              snapshot,
+              `KYC ${formatCompact(driverOnboarding.pendingDocuments)} · pagamento ${formatCompact(metrics.paymentPendingCount)} · SLA ${formatCompact(supportBreaches)}`,
+            )}
+            tone={hasSnapshotData(snapshot) && pendingCount > 0 ? "warning" : "default"}
           />
         </section>
 
@@ -722,24 +796,30 @@ export default function DashboardPage() {
           ))}
         </section>
 
-        <section className="grid ops-detail-grid" aria-label="Atenção operacional">
-          <Panel
-            title="Atenção agora"
-            subtitle="Itens priorizados pelo backend para a equipe decidir o próximo passo sem procurar em várias telas."
-          >
-            <ActionItems items={attentionItems} />
-          </Panel>
+        <OperationsTrendPanel points={metrics.trend} />
 
+        {attentionItems.length ? (
+          <section className="ops-attention-panel" aria-label="Atenção operacional">
+            <Panel
+              title="Atenção agora"
+              subtitle="Itens priorizados pelo backend para a equipe decidir o próximo passo."
+            >
+              <ActionItems items={attentionItems} />
+            </Panel>
+          </section>
+        ) : null}
+
+        <section className="ops-health-panel" aria-label="Saúde da plataforma">
           <Panel
-            title="Saúde e atalhos"
-            subtitle="Resumo operacional; os detalhes técnicos ficam nas telas próprias."
+            title="Saúde da plataforma"
+            subtitle="Serviços, pagamentos e custo do dashboard em uma única leitura."
           >
             <CommandCenterHealth snapshot={snapshot} />
           </Panel>
         </section>
 
         <details className="ops-advanced-panel">
-          <summary>Dados técnicos, custos e fontes</summary>
+          <summary>Telemetria, custos e fontes</summary>
           <div className="ops-advanced-panel-body">
         <section className="grid ops-detail-grid">
           <Panel

@@ -74,6 +74,61 @@ describe('modern-metrics-service rounding', () => {
     expect(result.averageValue).toBe(83.22);
   });
 
+  test('getRidesStats returns an hourly operational trend for a one-day window', async () => {
+    const firestoreMock = {
+      collection: jest.fn(() => ({
+        where: jest.fn(() => ({
+          where: jest.fn(() => ({
+            get: jest.fn().mockResolvedValue({
+              docs: [
+                {
+                  id: 'ride-trend-completed',
+                  data: () => ({
+                    status: 'COMPLETED',
+                    createdAt: new Date('2026-04-06T10:10:00'),
+                    finalPrice: 10.13,
+                    authoritativeSnapshot: true,
+                    financialSnapshotSource: 'backend_final'
+                  })
+                },
+                {
+                  id: 'ride-trend-active',
+                  data: () => ({
+                    status: 'ACCEPTED',
+                    createdAt: new Date('2026-04-06T10:30:00'),
+                    estimatedFare: 12.57
+                  })
+                },
+                {
+                  id: 'ride-trend-cancelled',
+                  data: () => ({
+                    status: 'CANCELLED',
+                    createdAt: new Date('2026-04-06T11:05:00')
+                  })
+                }
+              ]
+            })
+          }))
+        }))
+      }))
+    };
+
+    jest.doMock('../../../firebase-config', () => ({
+      getFirestore: () => firestoreMock
+    }));
+
+    const service = require('../../../services/modern-metrics-service');
+    const result = await service.getRidesStats({
+      period: 'custom',
+      startDate: '2026-04-06T00:00:00',
+      endDate: '2026-04-06T23:59:59'
+    });
+
+    expect(result.trend).toHaveLength(24);
+    expect(result.trend[10]).toMatchObject({ rides: 2, completed: 1, gmvCents: 1013 });
+    expect(result.trend[11]).toMatchObject({ rides: 1, cancelled: 1, gmvCents: 0 });
+  });
+
   test('getFinancialRidesStats rounds totalValue to two decimals', async () => {
     const firestoreMock = {
       collection: jest.fn(() => ({

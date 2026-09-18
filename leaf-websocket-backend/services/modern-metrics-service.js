@@ -140,6 +140,65 @@ function roundMoney(value) {
   return Number(toNumber(value, 0).toFixed(2));
 }
 
+const HOUR_MS = 60 * 60 * 1000;
+
+function buildHourlyTrend(rides, start, end) {
+  const startMs = start?.getTime?.();
+  const endMs = end?.getTime?.();
+  if (!Array.isArray(rides) || !Number.isFinite(startMs) || !Number.isFinite(endMs)) {
+    return [];
+  }
+
+  const windowMs = endMs - startMs;
+  if (windowMs < 0 || windowMs > 24 * HOUR_MS + 60 * 1000) return [];
+
+  const points = Array.from({ length: 24 }, (_, index) => {
+    const timestamp = new Date(startMs + index * HOUR_MS);
+    return {
+      hour: timestamp.getHours(),
+      label: timestamp.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+      rides: 0,
+      completed: 0,
+      cancelled: 0,
+      gmvCents: 0
+    };
+  });
+
+  rides.forEach((ride) => {
+    const requestTs = pickFirstTimestamp(
+      ride.createdAt,
+      ride.tripdate,
+      ride.timestamp,
+      ride.activatedAt
+    );
+    if (!Number.isFinite(requestTs) || requestTs < startMs || requestTs > endMs) return;
+
+    const index = Math.floor((requestTs - startMs) / HOUR_MS);
+    const point = points[index];
+    if (!point) return;
+
+    point.rides += 1;
+    if (COMPLETED_STATUSES.has(ride.status)) {
+      const completionTs = pickFirstTimestamp(
+        ride.completedAt,
+        ride.finishedAt,
+        ride.endedAt,
+        ride.updatedAt,
+        requestTs
+      );
+      const completionIndex = Number.isFinite(completionTs)
+        ? Math.floor((completionTs - startMs) / HOUR_MS)
+        : index;
+      const completionPoint = points[completionIndex] || point;
+      completionPoint.completed += 1;
+      completionPoint.gmvCents += Math.round(getRideRevenue(ride) * 100);
+    }
+    if (CANCELLED_STATUSES.has(ride.status)) point.cancelled += 1;
+  });
+
+  return points;
+}
+
 async function getActiveRidesCount() {
   const redis = redisPool.getConnection();
 
@@ -454,6 +513,7 @@ class ModernMetricsService {
 
   async getRidesStats({ period = 'today', startDate, endDate } = {}) {
     const rides = await this.getRidesForWindow({ period, startDate, endDate });
+    const { start, end } = getWindow(period, startDate, endDate);
     const completedRides = rides.filter((ride) => COMPLETED_STATUSES.has(ride.status));
     const reconciledCompletedRides = completedRides.filter(
       (ride) => !isRideRevenuePendingFinalSnapshot(ride)
@@ -473,7 +533,8 @@ class ModernMetricsService {
       reconciledRides: reconciledCompletedRides.length,
       pendingReconciliationRides: completedRides.length - reconciledCompletedRides.length,
       reserveFundLosses: await getReserveFundLosses(),
-      growthRate: 0
+      growthRate: 0,
+      trend: buildHourlyTrend(rides, start, end)
     };
   }
 }

@@ -196,6 +196,14 @@ function commandCenterFixture() {
       grossRevenueCents: 9900,
       arpuBaseCents: 235,
       paymentPendingCount: 0,
+      trend: Array.from({ length: 24 }, (_, hour) => ({
+        hour,
+        label: `${String(hour).padStart(2, "0")}:00`,
+        rides: hour === 10 ? 3 : hour === 11 ? 2 : 0,
+        completed: hour === 10 ? 2 : hour === 11 ? 1 : 0,
+        cancelled: hour === 11 ? 1 : 0,
+        gmvCents: hour === 10 ? 42000 : hour === 11 ? 18000 : 0,
+      })),
     },
     paymentRuntime: {
       defaultEnvironment: "sandbox",
@@ -315,6 +323,12 @@ function commandCenterFixture() {
       checklist: ["login", "categoria", "pix sandbox", "dashboard"],
     },
     support: {
+      totalOpenTickets: 1,
+      backlogByPriority: { N1: 1, N2: 0, N3: 0 },
+      overdueAckCount: 0,
+      overdueFirstResponseCount: 0,
+      ticketsWithoutOwner: 0,
+      medianFirstResponseMinutes: 12,
       openTickets: 1,
       unreadChats: 1,
     },
@@ -801,6 +815,14 @@ async function assertVisibleHeading(page, routeConfig) {
   log(`${routeConfig.path} ok`);
 }
 
+async function assertDashboardTrend(page) {
+  await page.goto("/dashboard", { waitUntil: "domcontentloaded" });
+  await page.locator("h1", { hasText: "Operação diária" }).waitFor({ timeout: 15000 });
+  await page.locator("h2", { hasText: "Ritmo do dia" }).waitFor({ timeout: 15000 });
+  await page.locator("[data-testid='ops-trend-chart']").waitFor({ timeout: 15000 });
+  log("dashboard renders consolidated operational trend");
+}
+
 async function assertFinancialReconciliationContract(page) {
   await page.goto("/financial-reconciliation", { waitUntil: "domcontentloaded" });
   await page.locator("h1", { hasText: "Reconciliação financeira" }).waitFor({ timeout: 15000 });
@@ -976,6 +998,7 @@ async function main() {
       await assertVisibleHeading(page, routeConfig);
     }
 
+    await assertDashboardTrend(page);
     await assertDriverDetailSections(page);
     await assertFinancialReconciliationContract(page);
     await assertMetricsFinancialContract(page);
