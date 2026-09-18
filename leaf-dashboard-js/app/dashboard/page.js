@@ -69,18 +69,21 @@ function formatTime(value) {
 }
 
 function statusTone(status) {
+  if (!status) return "default";
   if (status === "healthy") return "positive";
   if (status === "warning") return "warning";
   return "danger";
 }
 
 function statusClass(status) {
+  if (!status) return "meta-badge";
   if (status === "healthy") return "status-ok";
   if (status === "warning") return "status-warn";
   return "status-bad";
 }
 
 function statusLabel(status) {
+  if (!status) return "Sem leitura";
   if (status === "healthy") return "Operação saudável";
   if (status === "warning") return "Atenção operacional";
   return "Ação necessária";

@@ -1690,27 +1690,55 @@ function SupportPageContent({ supportScope }) {
         <AppNav />
         {loading ? <LoadingState message="Carregando suporte..." /> : null}
 
-        <section className="grid grid-kpi support-kpi-strip">
+        <section className="grid support-kpi-strip" aria-label="Resumo do suporte">
           <KpiCard title="Abertos" value={summary.totalOpenTickets} />
-          <KpiCard title="N1" value={summary.n1} tone={summary.n1 > 0 ? "danger" : "default"} />
-          <KpiCard title="N2" value={summary.n2} tone={summary.n2 > 0 ? "warning" : "default"} />
-          <KpiCard title="N3" value={summary.n3} />
-          <KpiCard title="Ack vencido" value={summary.overdueAckCount} tone={summary.overdueAckCount > 0 ? "danger" : "positive"} />
           <KpiCard
-            title="1a resposta vencida"
-            value={summary.overdueFirstResponseCount}
-            tone={summary.overdueFirstResponseCount > 0 ? "danger" : "positive"}
+            title="Prioridades"
+            value={`${summary.n1} / ${summary.n2} / ${summary.n3}`}
+            subtitle="N1 / N2 / N3"
+            tone={summary.n1 > 0 ? "danger" : summary.n2 > 0 ? "warning" : "default"}
           />
-          <KpiCard title="Sem dono" value={summary.ticketsWithoutOwner} tone={summary.ticketsWithoutOwner > 0 ? "warning" : "positive"} />
+          <KpiCard
+            title="SLA vencido"
+            value={summary.overdueAckCount + summary.overdueFirstResponseCount}
+            subtitle={`Ack ${summary.overdueAckCount} · 1ª resposta ${summary.overdueFirstResponseCount}`}
+            tone={summary.overdueAckCount + summary.overdueFirstResponseCount > 0 ? "danger" : "positive"}
+          />
+          <KpiCard
+            title="Sem dono"
+            value={summary.ticketsWithoutOwner}
+            tone={summary.ticketsWithoutOwner > 0 ? "warning" : "positive"}
+          />
           <KpiCard
             title="FRT mediana"
             value={formatMinutes(summary.medianFirstResponseMinutes)}
             subtitle="tickets respondidos"
           />
-          <KpiCard title="Chats N0" value={chatInbox.length} subtitle="atendimentos simples" />
-          <KpiCard title="Nao lidas N0" value={n0UnreadCount} tone={n0UnreadCount > 0 ? "warning" : "positive"} />
-          <KpiCard title="Chat" value={chatRealtime} subtitle="notificacoes" />
+          <KpiCard
+            title="Inbox N0"
+            value={chatInbox.length}
+            subtitle={`${n0UnreadCount} não lida(s) · ${chatRealtime}`}
+            tone={n0UnreadCount > 0 ? "warning" : "positive"}
+          />
         </section>
+
+        <details className="support-secondary-kpis">
+          <summary>Indicadores detalhados</summary>
+          <div className="support-secondary-kpi-grid">
+            <KpiCard title="N1" value={summary.n1} tone={summary.n1 > 0 ? "danger" : "default"} />
+            <KpiCard title="N2" value={summary.n2} tone={summary.n2 > 0 ? "warning" : "default"} />
+            <KpiCard title="N3" value={summary.n3} />
+            <KpiCard title="Ack vencido" value={summary.overdueAckCount} tone={summary.overdueAckCount > 0 ? "danger" : "positive"} />
+            <KpiCard
+              title="1a resposta vencida"
+              value={summary.overdueFirstResponseCount}
+              tone={summary.overdueFirstResponseCount > 0 ? "danger" : "positive"}
+            />
+            <KpiCard title="Chats N0" value={chatInbox.length} subtitle="atendimentos simples" />
+            <KpiCard title="Nao lidas N0" value={n0UnreadCount} tone={n0UnreadCount > 0 ? "warning" : "positive"} />
+            <KpiCard title="Chat" value={chatRealtime} subtitle="notificacoes" />
+          </div>
+        </details>
 
         <section className="support-inbox-layout">
           <aside className="support-inbox-panel card">
