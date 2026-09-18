@@ -36,7 +36,7 @@ const routes = [
   { path: "/support", heading: "Suporte" },
   { path: "/campaign-center", heading: "Campanhas in-app" },
   { path: "/drivers", heading: "Motoristas" },
-  { path: "/drivers/review-queue", heading: "Fila de Revisão de Documentos" },
+  { path: "/drivers/review-queue", heading: "Documentos para revisar" },
   { path: "/drivers/smoke-driver/documents", heading: "Documentos do Motorista" },
   { path: "/maps", heading: "Mapas e Geofence" },
   { path: "/metrics", heading: "Métricas" },

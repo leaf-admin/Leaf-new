@@ -1,11 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import ProtectedRoute from "@/src/components/ProtectedRoute";
 import AppNav from "@/src/components/AppNav";
-import { useAuth } from "@/src/contexts/AuthContext";
 import { leafAPI } from "@/src/services/api";
 import Panel from "@/src/components/ui/Panel";
 import { ErrorText, LoadingState } from "@/src/components/ui/PageFeedback";
@@ -188,7 +186,7 @@ function ActionItems({ items = [] }) {
   return (
     <div className="metric-list">
       {items.map((item) => (
-        <div className="row" key={item.id}>
+        <div className="row" key={item.id || item.title || item.label || item.description}>
           <div className="label">
             <span
               className={
@@ -222,65 +220,6 @@ function buildAttentionItems(snapshot) {
       return (rank[left.priority] ?? 3) - (rank[right.priority] ?? 3);
     })
     .slice(0, 6);
-}
-
-function CanaryPackPanel({ canaryPack }) {
-  if (!canaryPack) return <p className="text-muted">Canary Pack ainda não carregado.</p>;
-  return (
-    <div className="canary-pack">
-      <div className="canary-pack-summary">
-        <div>
-          <span>Pagamento</span>
-          <strong>{runtimeEnvironmentLabel(canaryPack.paymentRuntime?.defaultEnvironment)}</strong>
-          <small>
-            {canaryPack.paymentRuntime?.sandboxProfileCount || 0} perfil(is) sandbox ·{" "}
-            {canaryPack.paymentRuntime?.canarySandboxEnabled ? "canary habilitado" : "canary por produção"}
-          </small>
-        </div>
-        <Link href={canaryPack.paymentRuntime?.href || "/payment-runtime"}>Ajustar runtime</Link>
-      </div>
-
-      <div className="canary-readiness-grid">
-        {(canaryPack.readiness || []).map((item) => (
-          <article key={item.id} className="canary-readiness-item">
-            <span className={readinessClass(item.status)}>{readinessLabel(item.status)}</span>
-            <strong>{item.label}</strong>
-            <small>{item.detail}</small>
-          </article>
-        ))}
-      </div>
-
-      <div className="canary-link-row">
-        {(canaryPack.links || []).map((link) => (
-          <Link href={link.href} key={link.href}>{link.label}</Link>
-        ))}
-      </div>
-
-      <details className="support-advanced-drawer">
-        <summary>Checklist do canary</summary>
-        <div className="canary-checklist-grid">
-          <div>
-            <h3>Passos</h3>
-            <ul>
-              {(canaryPack.flowSteps || []).map((step) => <li key={step}>{step}</li>)}
-            </ul>
-          </div>
-          <div>
-            <h3>Sucesso</h3>
-            <ul>
-              {(canaryPack.successCriteria || []).map((criterion) => <li key={criterion}>{criterion}</li>)}
-            </ul>
-          </div>
-          <div>
-            <h3>Falha</h3>
-            <ul>
-              {(canaryPack.failureCriteria || []).map((criterion) => <li key={criterion}>{criterion}</li>)}
-            </ul>
-          </div>
-        </div>
-      </details>
-    </div>
-  );
 }
 
 function RideCostAnomalyBanner({ anomaly }) {
@@ -504,6 +443,76 @@ function WorkspaceCard({
   );
 }
 
+function CommandCenterHealth({ snapshot }) {
+  const services = snapshot?.services || {};
+  const costControls = snapshot?.costControls || {};
+  const firestoreReadGuard = costControls.firestoreReadGuard || {};
+  const paymentRuntime = snapshot?.paymentRuntime || {};
+  const domains = Array.isArray(services.domainHealth) ? services.domainHealth : [];
+  const healthyDomains = domains.filter((domain) => domain.status === "healthy").length;
+  const canaryReadiness = Array.isArray(snapshot?.canaryPack?.readiness)
+    ? snapshot.canaryPack.readiness
+    : [];
+
+  const healthItems = [
+    {
+      label: "Serviços",
+      value: statusLabel(snapshot?.status),
+      detail: domains.length ? `${healthyDomains}/${domains.length} domínios saudáveis` : "Leitura consolidada do backend",
+      tone: statusClass(snapshot?.status),
+      href: "/observability",
+    },
+    {
+      label: "Pagamento",
+      value: runtimeEnvironmentLabel(paymentRuntime.defaultEnvironment),
+      detail: `${formatCompact(paymentRuntime.sandboxProfileCount)} sandbox · ${formatCompact(snapshot?.dailyMetrics?.paymentPendingCount)} pendências`,
+      tone: paymentRuntime.globalSandboxEnabled ? "status-bad" : paymentRuntime.canarySandboxEnabled ? "status-ok" : "status-warn",
+      href: "/payment-runtime",
+    },
+    {
+      label: "Custo do dashboard",
+      value: costGuardLabel(firestoreReadGuard.budgetStatus),
+      detail: `${formatPercentValue(firestoreReadGuard.budgetUsagePercent)} do orçamento de reads`,
+      tone: costGuardClass(firestoreReadGuard.budgetStatus),
+      href: "/metrics",
+    },
+  ];
+
+  return (
+    <div className="ops-health-summary">
+      <div className="ops-health-list">
+        {healthItems.map((item) => (
+          <Link href={item.href} className="ops-health-row" key={item.label}>
+            <span>
+              <small>{item.label}</small>
+              <strong className={item.tone}>{item.value}</strong>
+            </span>
+            <span>
+              <small>{item.detail}</small>
+              <b aria-hidden="true">→</b>
+            </span>
+          </Link>
+        ))}
+      </div>
+      {canaryReadiness.length ? (
+        <div className="ops-health-canary">
+          <div>
+            <span className="ops-workspace-eyebrow">Canary Pack</span>
+            <strong>{canaryReadiness.filter((item) => item.status === "ready").length}/{canaryReadiness.length} pronto</strong>
+          </div>
+          <div className="ops-health-canary-items">
+            {canaryReadiness.slice(0, 3).map((item) => (
+              <span key={item.id} className={readinessClass(item.status)}>
+                {item.label}: {readinessLabel(item.status)}
+              </span>
+            ))}
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function buildWorkspaces(snapshot) {
   const metrics = snapshot?.dailyMetrics || {};
   const support = snapshot?.support || {};
@@ -514,20 +523,54 @@ function buildWorkspaces(snapshot) {
 
   return [
     {
-      id: "overview",
-      eyebrow: "Visão geral",
-      title: statusLabel(snapshot?.status),
-      description: "Serviços, motoristas ativos, corridas, GMV e receita em um snapshot cacheado.",
-      href: "/dashboard",
-      actionLabel: "Abrir visão geral",
-      tone: statusTone(snapshot?.status),
-      status: snapshot?.cache?.status || "-",
-      footnote: `ARPU base ${brlFromCents(metrics.arpuBaseCents)} · ticket médio ${brlFromCents(metrics.averageRideTicketCents)}`,
+      id: "operations",
+      eyebrow: "Operação",
+      title: `${formatCompact(metrics.activeRides)} corridas em curso`,
+      description: "Motoristas, corridas e território ficam em uma única entrada operacional.",
+      href: "/maps",
+      actionLabel: "Abrir operação",
+      tone: metrics.activeRides > 0 ? "positive" : "default",
+      status: metrics.activeDrivers > 0 ? "online" : "sem motoristas",
+      footnote: `Total cadastrado: ${formatCompact(metrics.totalDrivers)} motoristas`,
       metrics: [
         { label: "Motoristas ativos", value: formatCompact(metrics.activeDrivers) },
         { label: "Corridas agora", value: formatCompact(metrics.activeRides) },
+        { label: "Finalizadas hoje", value: formatCompact(metrics.completedRidesToday) },
+        { label: "Motoristas", value: formatCompact(metrics.totalDrivers) },
+      ],
+    },
+    {
+      id: "driver-onboarding",
+      eyebrow: "Cadastro",
+      title: `${formatCompact(driverOnboarding.pendingDocuments)} para revisar`,
+      description: "Uma fila única para documentos, reenvios e decisões de KYC.",
+      href: "/drivers/review-queue",
+      actionLabel: "Abrir documentos",
+      tone: driverOnboarding.pendingDocuments > 0 ? "warning" : "positive",
+      status: driverOnboarding.pendingDocuments > 0 ? "ação necessária" : "em dia",
+      footnote: `Fila total: ${formatCompact(driverOnboarding.totalDocuments)} documentos`,
+      metrics: [
+        { label: "Pendentes", value: formatCompact(driverOnboarding.pendingDocuments) },
+        { label: "Aprovados", value: formatCompact(driverOnboarding.approvedDocuments) },
+        { label: "Rejeitados", value: formatCompact(driverOnboarding.rejectedDocuments) },
+        { label: "Fonte", value: driverOnboarding.reviewQueueSource || "agregada" },
+      ],
+    },
+    {
+      id: "finance",
+      eyebrow: "Financeiro",
+      title: brlFromCents(metrics.grossRevenueCents),
+      description: "GMV, receita, pagamentos pendentes e reconciliação em um só ponto.",
+      href: "/financial-reconciliation",
+      actionLabel: "Abrir financeiro",
+      tone: metrics.paymentPendingCount > 0 ? "warning" : "positive",
+      status: metrics.paymentPendingCount > 0 ? "acompanhar" : "normal",
+      footnote: `Ticket médio ${brlFromCents(metrics.averageRideTicketCents)} · ARPU ${brlFromCents(metrics.arpuBaseCents)}`,
+      metrics: [
         { label: "GMV hoje", value: brlFromCents(metrics.gmvCents) },
         { label: "Receita Leaf", value: brlFromCents(metrics.grossRevenueCents) },
+        { label: "Pendências", value: formatCompact(metrics.paymentPendingCount) },
+        { label: "Ambiente Woovi", value: runtimeEnvironmentLabel(snapshot?.paymentRuntime?.defaultEnvironment) },
       ],
     },
     {
@@ -564,29 +607,10 @@ function buildWorkspaces(snapshot) {
         { label: "Valor", value: brlFromCents(campaigns.campaignValueCents) },
       ],
     } : null,
-    {
-      id: "driver-onboarding",
-      eyebrow: "Revisão de documentos",
-      title: `${formatCompact(driverOnboarding.pendingDocuments)} para revisar`,
-      description: "Documentos recebidos de motoristas, com próxima ação e decisão no mesmo fluxo.",
-      href: "/drivers/review-queue",
-      actionLabel: "Revisar documentos",
-      tone: driverOnboarding.pendingDocuments > 0 ? "warning" : "positive",
-      status: driverOnboarding.pendingDocuments > 0 ? "ação necessária" : "em dia",
-      footnote: `Fila total: ${formatCompact(driverOnboarding.totalDocuments)} documentos`,
-      metrics: [
-        { label: "Pendentes", value: formatCompact(driverOnboarding.pendingDocuments) },
-        { label: "Aprovados", value: formatCompact(driverOnboarding.approvedDocuments) },
-        { label: "Reprovados", value: formatCompact(driverOnboarding.rejectedDocuments) },
-        { label: "Fonte", value: driverOnboarding.reviewQueueSource || "all" },
-      ],
-    },
   ].filter(Boolean);
 }
 
 export default function DashboardPage() {
-  const { user, signOut } = useAuth();
-  const router = useRouter();
   const [snapshot, setSnapshot] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -647,14 +671,6 @@ export default function DashboardPage() {
             </span>
             <span className="meta-badge">Atualizado {formatTime(snapshot?.generatedAt)}</span>
             <span className="meta-badge">Cache {snapshot?.cache?.status || "-"}</span>
-            <button
-              onClick={async () => {
-                await signOut();
-                router.replace("/login");
-              }}
-            >
-              Sair
-            </button>
           </div>
         </header>
 
@@ -712,13 +728,16 @@ export default function DashboardPage() {
           </Panel>
 
           <Panel
-            title="Canary Pack"
-            subtitle="Roteiro operacional para testar com backend como fonte de verdade, sem trocar build."
+            title="Saúde e atalhos"
+            subtitle="Resumo operacional; os detalhes técnicos ficam nas telas próprias."
           >
-            <CanaryPackPanel canaryPack={snapshot?.canaryPack} />
+            <CommandCenterHealth snapshot={snapshot} />
           </Panel>
         </section>
 
+        <details className="ops-advanced-panel">
+          <summary>Dados técnicos, custos e fontes</summary>
+          <div className="ops-advanced-panel-body">
         <section className="grid ops-detail-grid">
           <Panel
             title="Monitor SKU e margem"
@@ -875,6 +894,8 @@ export default function DashboardPage() {
             <SourceRows sources={services.sources || []} />
           </Panel>
         </section>
+          </div>
+        </details>
 
         <ErrorText message={error} />
       </main>

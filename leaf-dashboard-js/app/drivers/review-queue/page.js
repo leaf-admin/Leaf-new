@@ -41,25 +41,6 @@ const statusPresentation = {
   rejected: { label: "Rejeitado", detail: "Aguardando correção", tone: "status-bad" },
 };
 
-const REJECTION_REASON_OPTIONS = {
-  cnh: [
-    "CNH sem EAR - Exerce atividade remunerada",
-    "CNH vencida a mais de 30 dias",
-    "CNH inválida - enviar CNH-e digital em PDF",
-  ],
-  crlv: [
-    "CRLV inválido - enviar CRLV digital em PDF",
-    "CRLV - ano do veículo não permitido (apenas são aceitos veículos com no máximo 10 anos de fabricação)",
-    "CRLV - marca/modelo do veículo não permitido",
-    "CRLV - licenciamento pendente (verificar no campo Exercício se corresponde ao ano atual)",
-  ],
-  antecedentes_criminais: [
-    "Certidão inválida - enviar certidão oficial em PDF",
-    "Certidão fora do prazo de validade",
-    "Certidão não corresponde ao CPF do motorista",
-  ],
-};
-
 function formatDateTime(value) {
   if (!value) return "-";
   const parsed = new Date(value);
@@ -82,33 +63,6 @@ function resolveStatusPresentation(value) {
     detail: "Revisar cadastro",
     tone: statusTone[normalized] || "status-warn",
   };
-}
-
-function resolveRejectionReason(documentType) {
-  const options = REJECTION_REASON_OPTIONS[String(documentType || "").toLowerCase()] || [];
-  if (options.length === 0) {
-    return String(window.prompt("Motivo da rejeição:") || "").trim();
-  }
-
-  const typed = String(
-    window.prompt(
-      `Motivo da rejeição:\n${options.map((item, index) => `${index + 1}. ${item}`).join("\n")}\n\nDigite o número ou escreva o motivo:`,
-    ) || "",
-  ).trim();
-  if (!typed) return "";
-
-  const parsedIndex = Number.parseInt(typed, 10);
-  if (Number.isFinite(parsedIndex) && parsedIndex >= 1 && parsedIndex <= options.length) {
-    return options[parsedIndex - 1];
-  }
-
-  return typed;
-}
-
-function formatDocumentRequestMessage(result) {
-  if (result?.push?.success) return "Ajuste solicitado e push enviado ao motorista.";
-  if (result?.push?.skipped) return "Ajuste solicitado sem envio de push.";
-  return "Ajuste solicitado. O backend não confirmou a entrega do push.";
 }
 
 function resolveNextAction(item) {
@@ -137,8 +91,6 @@ function DriversReviewQueuePageContent() {
   const [pagination, setPagination] = useState({ page: 1, limit: 25, total: 0, pages: 0 });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [actionMessage, setActionMessage] = useState("");
-  const [busyKey, setBusyKey] = useState("");
   const [openingKey, setOpeningKey] = useState("");
   const [filters, setFilters] = useState({
     documentType: "all",
@@ -209,35 +161,6 @@ function DriversReviewQueuePageContent() {
       requested: items.filter((item) => item?.requiredUpdate === true || item?.requestStatus === "requested").length,
     };
   }, [items, summary]);
-  const reviewChecklist = useMemo(() => {
-    const missingFiles = items.filter((item) => item?.contentAvailable !== true).length;
-    const waitingResubmit = items.filter((item) => item?.requiredUpdate === true || item?.requestStatus === "requested").length;
-    const readyToReview = items.filter(
-      (item) =>
-        String(item?.status || "pending").toLowerCase() === "pending" &&
-        item?.contentAvailable === true &&
-        item?.requiredUpdate !== true &&
-        item?.requestStatus !== "requested",
-    ).length;
-    return [
-      {
-        label: "Prontos para decisão",
-        value: readyToReview,
-        detail: "visualizar documento, aprovar ou rejeitar",
-      },
-      {
-        label: "Sem arquivo visível",
-        value: missingFiles,
-        detail: "pedir envio pelo app antes da análise",
-      },
-      {
-        label: "Aguardando reenvio",
-        value: waitingResubmit,
-        detail: "push já solicitado, esperar nova versão",
-      },
-    ];
-  }, [items]);
-
   const openDocument = async (item) => {
     const driverId = String(item?.driverId || "").trim();
     const documentType = String(item?.documentType || "").trim().toLowerCase();
@@ -265,72 +188,26 @@ function DriversReviewQueuePageContent() {
     }
   };
 
-  const reviewDocument = async (item, action) => {
-    const driverId = String(item?.driverId || "").trim();
-    const documentType = String(item?.documentType || "").trim().toLowerCase();
-    if (!driverId || !documentType) return;
-
-    const rejectionReason = action === "reject" ? resolveRejectionReason(documentType) : "";
-    if (action === "reject" && !rejectionReason) return;
-
-    try {
-      setBusyKey(`${driverId}:${documentType}`);
-      setError("");
-      setActionMessage("");
-      await leafAPI.reviewDriverDocument(
-        driverId,
-        documentType,
-        action,
-        rejectionReason || "",
-        kycRequestContext,
-      );
-      setActionMessage(
-        `${resolveDocumentLabel(documentType)} ${action === "approve" ? "aprovado" : "rejeitado"} com sucesso.`,
-      );
-      await load({ silent: true });
-    } catch (err) {
-      setError(err?.message || "Falha ao revisar documento");
-    } finally {
-      setBusyKey("");
-    }
-  };
-
-  const requestDocumentUpdate = async (item) => {
-    const driverId = String(item?.driverId || "").trim();
-    const documentType = String(item?.documentType || "").trim().toLowerCase();
-    if (!driverId || !documentType) return;
-
-    const defaultReason = item?.rejectionReason || "Precisamos que você envie uma versão atualizada deste documento no app.";
-    const reason = String(window.prompt("Mensagem para o motorista:", defaultReason) || "").trim();
-    if (!reason) return;
-
-    try {
-      setBusyKey(`${driverId}:${documentType}:request`);
-      setError("");
-      setActionMessage("");
-      const result = await leafAPI.requestDriverDocument(driverId, documentType, {
-        reason,
-        sendPush: true,
-      }, kycRequestContext);
-      setActionMessage(formatDocumentRequestMessage(result));
-      await load({ silent: true });
-    } catch (err) {
-      setError(err?.message || "Falha ao solicitar ajuste do documento");
-    } finally {
-      setBusyKey("");
-    }
-  };
-
   return (
     <ProtectedRoute>
       <main className="page-shell">
         <header className="header review-queue-header">
           <div className="review-queue-title">
             <span className="review-queue-eyebrow">Cadastro / KYC</span>
-            <h1>Fila de revisão de documentos</h1>
-            <p>Priorize o que precisa de decisão e acompanhe cada reenvio em um único lugar.</p>
+            <h1>Documentos para revisar</h1>
+            <p>Encontre a pendência, abra a ficha do motorista e tome a decisão com todo o contexto.</p>
           </div>
           <div className="review-queue-header-actions">
+            <span className={kycPersistenceScope === "sandbox" ? "status-warn" : "status-ok"}>
+              {kycPersistenceScope === "sandbox" ? "Sandbox KYC" : "Operacional"}
+            </span>
+            <Link
+              href={kycPersistenceScope === "sandbox"
+                ? "/drivers/review-queue"
+                : "/drivers/review-queue?kycScope=sandbox"}
+            >
+              {kycPersistenceScope === "sandbox" ? "Fila operacional" : "Abrir fila sandbox"}
+            </Link>
             <span className="review-queue-refresh-note">Atualização automática a cada 60s</span>
             <button type="button" className="button-secondary" onClick={() => load()} disabled={loading}>
               {loading ? "Atualizando..." : "Atualizar agora"}
@@ -340,27 +217,6 @@ function DriversReviewQueuePageContent() {
         </header>
 
         <AppNav />
-        <section className="card review-queue-context" aria-label="Contexto da fila">
-          <div className="review-queue-context-main">
-            <span className="review-queue-eyebrow">Ambiente de trabalho</span>
-            <div className="review-queue-context-title">
-              <h2>{kycPersistenceScope === "sandbox" ? "Revisão em sandbox" : "Revisão operacional"}</h2>
-              <span className={kycPersistenceScope === "sandbox" ? "status-warn" : "status-ok"}>
-                {kycPersistenceScope === "sandbox" ? "Sandbox KYC" : "Operacional"}
-              </span>
-            </div>
-            <p>As decisões desta fila são auditadas e aplicadas ao cadastro do motorista.</p>
-          </div>
-          <div className="review-queue-context-actions">
-            <Link
-              href={kycPersistenceScope === "sandbox"
-                ? "/drivers/review-queue"
-                : "/drivers/review-queue?kycScope=sandbox"}
-            >
-              {kycPersistenceScope === "sandbox" ? "Voltar à fila operacional" : "Abrir fila sandbox"}
-            </Link>
-          </div>
-        </section>
         {loading ? <LoadingState message="Carregando fila de revisão..." /> : null}
 
         <section className="grid grid-kpi review-queue-kpis" aria-label="Resumo da fila">
@@ -374,8 +230,8 @@ function DriversReviewQueuePageContent() {
           <div className="review-section-heading">
             <div>
               <span className="review-queue-eyebrow">Encontrar</span>
-              <h2>Filtre a fila</h2>
-              <p>Comece por pendentes para trabalhar o que exige decisão agora.</p>
+              <h2>Encontre uma pendência</h2>
+              <p>Comece por pendentes. As decisões ficam na ficha individual para evitar ações sem contexto.</p>
             </div>
             <span className="review-queue-result-count">
               {items.length} de {pagination.total || counters.total} documentos
@@ -417,6 +273,21 @@ function DriversReviewQueuePageContent() {
               </label>
 
               <label>
+                Buscar
+                <input
+                  placeholder="nome, e-mail, CPF ou ID"
+                  value={filters.search}
+                  onChange={(e) => {
+                    setPagination((prev) => ({ ...prev, page: 1 }));
+                    setFilters((prev) => ({ ...prev, search: e.target.value }));
+                  }}
+                />
+              </label>
+          </div>
+          <details className="review-queue-advanced-filters">
+            <summary>Ordenação avançada</summary>
+            <div className="review-queue-advanced-grid">
+              <label>
                 Ordenar por
                 <select
                   value={filters.sortBy}
@@ -432,7 +303,6 @@ function DriversReviewQueuePageContent() {
                   ))}
                 </select>
               </label>
-
               <label>
                 Direção
                 <select
@@ -446,41 +316,8 @@ function DriversReviewQueuePageContent() {
                   <option value="asc">Mais antigos primeiro</option>
                 </select>
               </label>
-
-              <label>
-                Buscar
-                <input
-                  placeholder="nome, e-mail, CPF ou ID"
-                  value={filters.search}
-                  onChange={(e) => {
-                    setPagination((prev) => ({ ...prev, page: 1 }));
-                    setFilters((prev) => ({ ...prev, search: e.target.value }));
-                  }}
-                />
-              </label>
-          </div>
-        </section>
-
-        <section className="card review-queue-workflow" aria-label="Como trabalhar a fila">
-          <div className="review-section-heading">
-            <div>
-              <span className="review-queue-eyebrow">Fluxo recomendado</span>
-              <h2>Trabalhe nesta ordem</h2>
-              <p>O próximo passo de cada documento aparece na tabela abaixo.</p>
             </div>
-          </div>
-          <ol className="review-queue-steps">
-            {reviewChecklist.map((item, index) => (
-              <li className="review-queue-step" key={item.label}>
-                <span className="review-queue-step-number">{index + 1}</span>
-                <div>
-                  <strong>{item.label}</strong>
-                  <span>{item.detail}</span>
-                </div>
-                <b>{item.value}</b>
-              </li>
-            ))}
-          </ol>
+          </details>
         </section>
 
         <section className="card review-queue-documents">
@@ -488,7 +325,7 @@ function DriversReviewQueuePageContent() {
             <div>
               <span className="review-queue-eyebrow">Decisão</span>
               <h2>Documentos recebidos</h2>
-              <p>Abra a ficha para contexto completo ou decida diretamente quando o arquivo estiver disponível.</p>
+              <p>Uma ação principal por linha. Aprovação, rejeição e solicitação de ajuste acontecem na ficha do motorista.</p>
             </div>
             <span className="review-queue-result-count">Página {pagination.page} de {Math.max(1, pagination.pages || 1)}</span>
           </div>
@@ -519,10 +356,7 @@ function DriversReviewQueuePageContent() {
                       const rowKey = `${item?.driverId || "driver"}:${item?.documentType || "doc"}:${index}`;
                       const statusKey = String(item?.status || "pending").toLowerCase();
                       const statusInfo = resolveStatusPresentation(statusKey);
-                      const actionKey = `${item?.driverId || ""}:${item?.documentType || ""}`;
-                      const requestKey = `${item?.driverId || ""}:${item?.documentType || ""}:request`;
                       const openKey = `${item?.driverId || ""}:${item?.documentType || ""}:open`;
-                      const isBusy = busyKey === actionKey || busyKey === requestKey;
                       return (
                         <tr key={rowKey}>
                           <td>
@@ -559,36 +393,13 @@ function DriversReviewQueuePageContent() {
                           </td>
                           <td>
                             <div className="actions-cell review-queue-actions">
-                              <Link className="review-action-primary" href={`/drivers/${item?.driverId}/documents${kycPersistenceScope === "sandbox" ? "?kycScope=sandbox" : ""}`}>Abrir ficha</Link>
+                              <Link className="review-action-primary" href={`/drivers/${item?.driverId}/documents${kycPersistenceScope === "sandbox" ? "?kycScope=sandbox" : ""}`}>Abrir revisão</Link>
                               <button
                                 type="button"
                                 disabled={item?.contentAvailable !== true || openingKey === openKey}
                                 onClick={() => openDocument(item)}
                               >
                                 {openingKey === openKey ? "Abrindo..." : "Visualizar"}
-                              </button>
-                              <button
-                                className="button-positive"
-                                type="button"
-                                disabled={isBusy}
-                                onClick={() => reviewDocument(item, "approve")}
-                              >
-                                Aprovar
-                              </button>
-                              <button
-                                className="button-danger"
-                                type="button"
-                                disabled={isBusy}
-                                onClick={() => reviewDocument(item, "reject")}
-                              >
-                                Rejeitar
-                              </button>
-                              <button
-                                type="button"
-                                disabled={isBusy}
-                                onClick={() => requestDocumentUpdate(item)}
-                              >
-                                Solicitar ajuste
                               </button>
                             </div>
                           </td>
@@ -627,7 +438,6 @@ function DriversReviewQueuePageContent() {
         </section>
 
         <ErrorText message={error} />
-        {actionMessage ? <p className="success-text">{actionMessage}</p> : null}
       </main>
     </ProtectedRoute>
   );

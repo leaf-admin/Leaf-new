@@ -34,7 +34,6 @@ export default function AppNav() {
   const wasMobileOpenRef = useRef(false);
   const apiDocsHref = process.env.NEXT_PUBLIC_API_DOCS_URL || "/reports";
   const isApiDocsExternal = /^https?:\/\//i.test(apiDocsHref);
-  const campaignCenterVisible = runtimeFlags?.launch?.campaignCenterEnabled === true;
   const adminMutationsEnabled = runtimeFlags?.launch?.adminMutationsEnabled !== false;
 
   useEffect(() => {
@@ -150,22 +149,7 @@ export default function AppNav() {
           <span className="app-topbar-page">{activeItem?.label || activeGroup.label}</span>
         </div>
         <div className="app-topbar-right">
-          <Link href="/dashboard" className="app-topbar-link">
-            Visão geral
-          </Link>
-          <Link href="/support" className="app-topbar-link">
-            Suporte
-          </Link>
-          {campaignCenterVisible ? (
-            <Link href="/campaign-center" className="app-topbar-link">
-              Campanhas
-            </Link>
-          ) : null}
-          {canAccessItem({ allowedRoles: ["admin", "super-admin", "manager"] }, user) ? (
-            <Link href="/drivers/review-queue" className="app-topbar-link">
-              Revisão KYC
-            </Link>
-          ) : null}
+          <span className="app-topbar-context">{activeGroup?.section || "Operação"}</span>
           <Link
             href={apiDocsHref}
             className="app-topbar-link app-topbar-link-secondary"
@@ -204,11 +188,10 @@ export default function AppNav() {
           {visibleGroups.map((group) => {
             const groupActive = group.id === activeGroup.id;
             return (
-              <section key={group.id} className="app-sidebar-group">
-                <p className="app-sidebar-section">{group.section}</p>
-                <h3 className={groupActive ? "app-sidebar-group-title app-sidebar-group-title-active" : "app-sidebar-group-title"}>
-                  {group.label}
-                </h3>
+              <section key={group.id} className="app-sidebar-group" aria-label={`${group.section}: ${group.label}`}>
+                <div className={groupActive ? "app-sidebar-group-heading app-sidebar-group-heading-active" : "app-sidebar-group-heading"}>
+                  <h3 className="app-sidebar-group-title">{group.section}</h3>
+                </div>
                 <div className="app-sidebar-links">
                   {group.items.map((item) => {
                     const active = activeItem?.href === item.href;
@@ -230,10 +213,6 @@ export default function AppNav() {
         </nav>
 
         <div className="app-sidebar-foot">
-          <div className="app-sidebar-card">
-            <p className="app-sidebar-card-title">Live observability</p>
-            <p className="app-sidebar-card-text">Console limpo para operação assistida.</p>
-          </div>
           <div className="app-sidebar-user">
             <div className="app-sidebar-avatar">{userInitials}</div>
             <div>
