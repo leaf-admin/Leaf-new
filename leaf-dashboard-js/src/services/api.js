@@ -1051,6 +1051,18 @@ class LeafApiService {
     });
   }
 
+  async listPendingWithdrawals(limit = 50) {
+    const safeLimit = Math.min(200, Math.max(1, Number(limit) || 50));
+    return this.request(`/payment/withdrawals/pending?limit=${encodeURIComponent(safeLimit)}`);
+  }
+
+  async processDriverWithdrawal(withdrawalId) {
+    return this.request(`/payment/withdrawals/${encodeURIComponent(withdrawalId)}/process`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+  }
+
   async listAuditLogs(params = {}) {
     const query = new URLSearchParams();
     Object.entries(params).forEach(([key, value]) => {

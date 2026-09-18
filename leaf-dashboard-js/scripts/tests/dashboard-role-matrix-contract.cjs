@@ -9,7 +9,7 @@ const accessPath = path.join(__dirname, "..", "..", "src", "utils", "dashboard-a
 const navigationSource = fs.readFileSync(navigationPath, "utf8");
 const accessSource = fs.readFileSync(accessPath, "utf8");
 
-for (const section of ["Hoje", "Operação", "Financeiro", "Crescimento", "Sistema"]) {
+for (const section of ["Hoje", "Operação", "Financeiro", "Crescimento", "Mais ferramentas"]) {
   assert.match(navigationSource, new RegExp(`section: [\\\"']${section}[\\\"']`), `missing navigation section: ${section}`);
 }
 
@@ -17,6 +17,8 @@ const roleMatrix = [
   ["/drivers", ["admin", "super-admin", "manager"]],
   ["/maps", ["admin", "super-admin", "manager", "development"]],
   ["/subscriptions", ["admin", "super-admin", "manager"]],
+  ["/withdrawals", ["admin", "super-admin", "manager"]],
+  ["/tolls", ["admin", "super-admin", "manager"]],
   ["/notifications", ["admin", "super-admin", "manager", "development"]],
   ["/observability", ["admin", "super-admin", "manager", "development"]],
   ["/audit", ["admin", "super-admin", "manager", "development"]],

@@ -12,12 +12,16 @@ const routeTollService = require('../services/route-toll-service');
 const placesCacheService = require('../services/places-cache-service');
 const { resolveOperationalFee } = require('../services/ride-financial-contract');
 const { normalizeOperationalCarType } = require('../utils/operational-car-type');
+const { authenticateJWT, requireRole } = require('../middleware/jwt-auth');
+const { requireAdminMutationsEnabled } = require('../middleware/admin-mutation-guard');
 const {
   createQuoteLock,
   getQuoteLockTtlSeconds
 } = require('../services/quote-lock-service');
 
 const router = express.Router();
+const TOLL_CATALOG_READ_ROLES = ['admin', 'super-admin', 'manager'];
+const TOLL_CATALOG_WRITE_ROLES = ['admin', 'super-admin', 'manager'];
 const MAX_OPERATIONAL_ROUTE_DISTANCE_KM = Math.max(
   80,
   Number.parseFloat(process.env.PRICING_MAX_OPERATIONAL_ROUTE_DISTANCE_KM || '120') || 120
@@ -411,6 +415,68 @@ router.get('/pricing/categories', (_req, res) => {
   });
 });
 
+/**
+ * GET /api/pricing/toll-catalog
+ * Catálogo operacional de pedágios usado pelo cálculo server-side.
+ */
+router.get(
+  '/pricing/toll-catalog',
+  authenticateJWT,
+  requireRole(TOLL_CATALOG_READ_ROLES),
+  async (req, res) => {
+    try {
+      const catalog = await routeTollService.loadTollCatalog({
+        forceRefresh: String(req.query?.refresh || '').toLowerCase() === 'true'
+      });
+      return res.json({ success: true, catalog });
+    } catch (error) {
+      logStructured('error', 'Falha ao carregar catálogo de pedágios', {
+        service: 'pricing-routes',
+        operation: 'get_toll_catalog',
+        error: error.message
+      });
+      return res.status(500).json({
+        success: false,
+        error: 'Não foi possível carregar o catálogo de pedágios',
+        code: 'TOLL_CATALOG_READ_FAILED'
+      });
+    }
+  }
+);
+
+/**
+ * PUT /api/pricing/toll-catalog
+ * Publica uma nova versão do catálogo; quotes já emitidos permanecem travados.
+ */
+router.put(
+  '/pricing/toll-catalog',
+  authenticateJWT,
+  requireRole(TOLL_CATALOG_WRITE_ROLES),
+  requireAdminMutationsEnabled,
+  async (req, res) => {
+    try {
+      const catalog = await routeTollService.updateTollCatalog(
+        req.body?.catalog || req.body || {},
+        req.user || {}
+      );
+      return res.json({ success: true, catalog });
+    } catch (error) {
+      const status = String(error?.code || '').startsWith('TOLL_CATALOG_') ? 400 : 500;
+      logStructured(status >= 500 ? 'error' : 'warn', 'Falha ao publicar catálogo de pedágios', {
+        service: 'pricing-routes',
+        operation: 'update_toll_catalog',
+        code: error.code || null,
+        error: error.message
+      });
+      return res.status(status).json({
+        success: false,
+        error: error.message || 'Não foi possível publicar o catálogo de pedágios',
+        code: error.code || 'TOLL_CATALOG_WRITE_FAILED'
+      });
+    }
+  }
+);
+
 router.post('/pricing/quote', async (req, res) => {
   const body = req.body || {};
   const pickupLocation = body.pickupLocation || body.pickup || {};
@@ -592,6 +658,9 @@ router.post('/pricing/quote', async (req, res) => {
       polylinePoints: canonicalRoute.polylinePoints,
       routeDetails: canonicalRoute
     };
+    // Revalida o snapshot curto antes de emitir a cotação para que uma publicação
+    // administrativa de pedágio seja aplicada também após um restart concorrente.
+    await routeTollService.loadTollCatalog();
     const tollEstimate = routeTollService.resolveTollFeeFromPricingPayload(
       canonicalPricingPayload
     );

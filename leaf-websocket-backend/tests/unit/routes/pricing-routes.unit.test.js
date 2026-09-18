@@ -18,6 +18,8 @@ const mockRecordPricingQuoteRequest = jest.fn();
 const mockResolveTollFeeFromPricingPayload = jest.fn();
 const mockFetchDirectionsRoute = jest.fn();
 const mockDecodePolyline = jest.fn();
+const mockLoadTollCatalog = jest.fn();
+const mockUpdateTollCatalog = jest.fn();
 
 jest.mock('../../../utils/redis-pool', () => ({
   getConnection: () => mockGetConnection()
@@ -58,7 +60,21 @@ jest.mock('../../../services/geofence-service', () => ({
 
 jest.mock('../../../services/route-toll-service', () => ({
   resolveTollFeeFromPricingPayload: (...args) => mockResolveTollFeeFromPricingPayload(...args),
-  decodePolyline: (...args) => mockDecodePolyline(...args)
+  decodePolyline: (...args) => mockDecodePolyline(...args),
+  loadTollCatalog: (...args) => mockLoadTollCatalog(...args),
+  updateTollCatalog: (...args) => mockUpdateTollCatalog(...args)
+}));
+
+jest.mock('../../../middleware/jwt-auth', () => ({
+  authenticateJWT: (req, _res, next) => {
+    req.user = { id: 'admin_1', email: 'admin@leaf.app.br', role: 'admin' };
+    next();
+  },
+  requireRole: () => (_req, _res, next) => next()
+}));
+
+jest.mock('../../../middleware/admin-mutation-guard', () => ({
+  requireAdminMutationsEnabled: (_req, _res, next) => next()
 }));
 
 jest.mock('../../../services/places-cache-service', () => ({
@@ -130,6 +146,8 @@ describe('pricing routes', () => {
       scoreExcecao: 0,
       exceptionalMode: null
     });
+    mockLoadTollCatalog.mockResolvedValue({ version: 1, plazas: [] });
+    mockUpdateTollCatalog.mockResolvedValue({ version: 2, plazas: [] });
   });
 
   it('returns 400 when pickup/destination coordinates are missing', async () => {
@@ -144,6 +162,34 @@ describe('pricing routes', () => {
     expect(response.status).toBe(400);
     expect(response.body.error).toBe('pickup_and_destination_required');
     expect(mockEstimateRideFare).not.toHaveBeenCalled();
+  });
+
+  it('exposes the authenticated dashboard toll catalog contract', async () => {
+    mockLoadTollCatalog.mockResolvedValueOnce({ version: 7, enabled: true, plazas: [{ id: 'p09' }] });
+
+    const response = await request(createApp()).get('/pricing/toll-catalog?refresh=true');
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({
+      success: true,
+      catalog: { version: 7, enabled: true, plazas: [{ id: 'p09' }] }
+    });
+    expect(mockLoadTollCatalog).toHaveBeenCalledWith({ forceRefresh: true });
+  });
+
+  it('publishes a new toll catalog version with the authenticated operator', async () => {
+    mockUpdateTollCatalog.mockResolvedValueOnce({ version: 8, enabled: true, plazas: [{ id: 'p09' }] });
+
+    const response = await request(createApp())
+      .put('/pricing/toll-catalog')
+      .send({ enabled: true, plazas: [{ id: 'p09' }] });
+
+    expect(response.status).toBe(200);
+    expect(response.body.success).toBe(true);
+    expect(mockUpdateTollCatalog).toHaveBeenCalledWith(
+      { enabled: true, plazas: [{ id: 'p09' }] },
+      { id: 'admin_1', email: 'admin@leaf.app.br', role: 'admin' }
+    );
   });
 
   it('returns 503 without pricing when the server canonical route is not cached', async () => {

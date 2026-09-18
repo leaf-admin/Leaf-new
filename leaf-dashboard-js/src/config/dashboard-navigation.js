@@ -29,6 +29,8 @@ export const dashboardNavigationGroups = [
     href: "/subscriptions",
     items: [
       { href: "/subscriptions", label: "Assinaturas", allowedRoles: ["admin", "super-admin", "manager"] },
+      { href: "/withdrawals", label: "Saques", allowedRoles: ["admin", "super-admin", "manager"] },
+      { href: "/tolls", label: "Pedágios", allowedRoles: ["admin", "super-admin", "manager"] },
       { href: "/financial-reconciliation", label: "Conferir pagamentos", allowedRoles: ["admin", "super-admin", "manager"] },
       { href: "/reports", label: "Relatórios", allowedRoles: ["admin", "super-admin", "manager"] },
       { href: "/payment-runtime", label: "Ambiente de cobrança", allowedRoles: ["admin", "super-admin", "manager"] },

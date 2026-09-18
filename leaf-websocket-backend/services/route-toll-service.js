@@ -1,4 +1,15 @@
 const EARTH_RADIUS_KM = 6371;
+const admin = require('firebase-admin');
+const firebaseConfig = require('../firebase-config');
+const { logStructured } = require('../utils/logger');
+
+const TOLL_CATALOG_COLLECTION = 'systemConfig';
+const TOLL_CATALOG_DOCUMENT_ID = 'tollCatalog';
+const DEFAULT_CATALOG_CACHE_TTL_MS = Math.max(
+  1000,
+  Number.parseInt(process.env.TOLL_CATALOG_CACHE_TTL_MS || '30000', 10) || 30000
+);
+const ALLOWED_DIRECTIONS = new Set(['bidirectional', 'north', 'south', 'east', 'west']);
 const DEFAULT_TOLERANCE_KM = Math.max(
   0.1,
   Number.parseFloat(process.env.ROUTE_TOLL_DETECTION_TOLERANCE_KM || '2') || 2
@@ -27,6 +38,231 @@ const TOLL_PLAZAS = Object.freeze([
   { id: 'p10a_transolimpica', name: 'P10a - Transolimpica', road: 'RJ-066', direction: 'north', lat: -22.9194989223804, lng: -43.3962833, fees: { car: { weekday: 8.95, weekend: 8.95 }, truck: { weekday: 17.9, weekend: 17.9 } } },
   { id: 'p10b_transolimpica', name: 'P10b - Transolimpica', road: 'RJ-066', direction: 'south', lat: -22.9193061842793, lng: -43.3967711, fees: { car: { weekday: 8.95, weekend: 8.95 }, truck: { weekday: 17.9, weekend: 17.9 } } }
 ]);
+
+const DEFAULT_CATALOG = Object.freeze({
+  enabled: true,
+  version: 1,
+  currency: 'BRL',
+  toleranceKm: DEFAULT_TOLERANCE_KM,
+  source: 'leaf_toll_catalog_default',
+  plazas: TOLL_PLAZAS
+});
+
+let activeCatalog = cloneCatalog(DEFAULT_CATALOG);
+let catalogLoadedAt = 0;
+
+function toFiniteNumber(value, fallback = 0) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function cloneCatalog(catalog = {}) {
+  return JSON.parse(JSON.stringify(catalog));
+}
+
+function normalizeFee(value, fallback = 0) {
+  return Number(Math.max(0, Math.min(1000, toFiniteNumber(value, fallback))).toFixed(2));
+}
+
+function normalizePlaza(raw = {}, index = 0, { strict = false } = {}) {
+  const id = String(raw.id || '').trim().toLowerCase();
+  const name = String(raw.name || '').trim();
+  const road = String(raw.road || '').trim();
+  const direction = String(raw.direction || 'bidirectional').trim().toLowerCase();
+  const lat = toFiniteNumber(raw.lat, NaN);
+  const lng = toFiniteNumber(raw.lng, NaN);
+
+  const invalid = [];
+  if (!/^[a-z0-9][a-z0-9_-]{1,95}$/.test(id)) invalid.push('id');
+  if (!name || name.length > 160) invalid.push('name');
+  if (!road || road.length > 80) invalid.push('road');
+  if (!ALLOWED_DIRECTIONS.has(direction)) invalid.push('direction');
+  if (!Number.isFinite(lat) || lat < -90 || lat > 90) invalid.push('lat');
+  if (!Number.isFinite(lng) || lng < -180 || lng > 180) invalid.push('lng');
+  if (strict && invalid.length > 0) {
+    const error = new Error(`Praça ${index + 1} inválida: ${invalid.join(', ')}`);
+    error.code = 'TOLL_CATALOG_INVALID_PLAZA';
+    throw error;
+  }
+  if (invalid.length > 0) return null;
+
+  const sourceFees = raw.fees && typeof raw.fees === 'object' ? raw.fees : {};
+  const normalizeVehicleFees = (vehicle, fallbackVehicle = 'car') => {
+    const values = sourceFees[vehicle] || sourceFees[fallbackVehicle] || {};
+    return {
+      weekday: normalizeFee(values.weekday),
+      weekend: normalizeFee(values.weekend, values.weekday)
+    };
+  };
+
+  return {
+    id,
+    name,
+    road,
+    direction,
+    lat: Number(lat.toFixed(7)),
+    lng: Number(lng.toFixed(7)),
+    active: raw.active !== false,
+    fees: {
+      car: normalizeVehicleFees('car'),
+      truck: normalizeVehicleFees('truck', 'car')
+    }
+  };
+}
+
+function normalizeCatalog(raw = {}, { strict = false, currentVersion = 1 } = {}) {
+  const source = raw && typeof raw === 'object' ? raw : {};
+  if (strict && !Array.isArray(source.plazas)) {
+    const error = new Error('plazas deve ser uma lista');
+    error.code = 'TOLL_CATALOG_PLAZAS_REQUIRED';
+    throw error;
+  }
+
+  const rawPlazas = Array.isArray(source.plazas) ? source.plazas : TOLL_PLAZAS;
+  if (strict && (rawPlazas.length === 0 || rawPlazas.length > 200)) {
+    const error = new Error('O catálogo deve conter entre 1 e 200 praças');
+    error.code = 'TOLL_CATALOG_INVALID_SIZE';
+    throw error;
+  }
+
+  const plazas = rawPlazas
+    .map((plaza, index) => normalizePlaza(plaza, index, { strict }))
+    .filter(Boolean);
+  const ids = new Set();
+  for (const plaza of plazas) {
+    if (ids.has(plaza.id)) {
+      const error = new Error(`ID de praça duplicado: ${plaza.id}`);
+      error.code = 'TOLL_CATALOG_DUPLICATE_PLAZA';
+      throw error;
+    }
+    ids.add(plaza.id);
+  }
+
+  const normalized = {
+    enabled: source.enabled !== false,
+    version: Math.max(
+      1,
+      Number.parseInt(source.version || currentVersion, 10) || currentVersion
+    ),
+    currency: 'BRL',
+    toleranceKm: Number(Math.max(
+      0.1,
+      Math.min(10, toFiniteNumber(source.toleranceKm, DEFAULT_TOLERANCE_KM))
+    ).toFixed(2)),
+    source: String(source.source || 'leaf_toll_catalog').trim().slice(0, 80) || 'leaf_toll_catalog',
+    plazas
+  };
+
+  const updatedAt = source.updatedAt?.toDate?.() || source.updatedAt;
+  if (updatedAt) {
+    normalized.updatedAt = updatedAt instanceof Date
+      ? updatedAt.toISOString()
+      : String(updatedAt);
+  }
+  if (source.updatedBy) normalized.updatedBy = String(source.updatedBy);
+  if (source.updatedByEmail) normalized.updatedByEmail = String(source.updatedByEmail);
+  if (source.updatedByRole) normalized.updatedByRole = String(source.updatedByRole);
+  return normalized;
+}
+
+function getCatalogSnapshot() {
+  return cloneCatalog(activeCatalog);
+}
+
+function applyCatalogSnapshot(catalog) {
+  activeCatalog = normalizeCatalog(catalog, {
+    currentVersion: Number(activeCatalog.version || 1)
+  });
+  catalogLoadedAt = Date.now();
+  return getCatalogSnapshot();
+}
+
+async function loadTollCatalog({ forceRefresh = false } = {}) {
+  const now = Date.now();
+  if (!forceRefresh && catalogLoadedAt && now - catalogLoadedAt < DEFAULT_CATALOG_CACHE_TTL_MS) {
+    return getCatalogSnapshot();
+  }
+
+  const firestore = firebaseConfig.getFirestore();
+  if (!firestore) {
+    catalogLoadedAt = now;
+    return getCatalogSnapshot();
+  }
+
+  try {
+    const snapshot = await firestore
+      .collection(TOLL_CATALOG_COLLECTION)
+      .doc(TOLL_CATALOG_DOCUMENT_ID)
+      .get();
+    if (snapshot.exists) {
+      const persisted = normalizeCatalog(snapshot.data(), {
+        currentVersion: Number(activeCatalog.version || 1)
+      });
+      if (persisted.plazas.length > 0) {
+        activeCatalog = persisted;
+      } else {
+        logStructured('warn', 'Catálogo persistido sem praças válidas; mantendo snapshot atual', {
+          service: 'route-toll-service',
+          operation: 'load_toll_catalog_invalid_snapshot'
+        });
+      }
+    }
+    catalogLoadedAt = now;
+    return getCatalogSnapshot();
+  } catch (error) {
+    logStructured('warn', 'Falha ao carregar catálogo de pedágios; mantendo snapshot atual', {
+      service: 'route-toll-service',
+      operation: 'load_toll_catalog',
+      error: error.message
+    });
+    catalogLoadedAt = now;
+    return getCatalogSnapshot();
+  }
+}
+
+async function updateTollCatalog(input = {}, actor = {}) {
+  const current = await loadTollCatalog({ forceRefresh: true });
+  const next = normalizeCatalog({
+    ...input,
+    version: Number(current.version || 1) + 1,
+    source: 'leaf_toll_catalog'
+  }, {
+    strict: true,
+    currentVersion: Number(current.version || 1) + 1
+  });
+
+  const firestore = firebaseConfig.getFirestore();
+  if (!firestore) {
+    const error = new Error('Firestore indisponível para salvar catálogo de pedágios');
+    error.code = 'TOLL_CATALOG_STORE_UNAVAILABLE';
+    throw error;
+  }
+
+  const updatedAt = admin.firestore?.FieldValue?.serverTimestamp
+    ? admin.firestore.FieldValue.serverTimestamp()
+    : new Date();
+  const metadata = {
+    updatedAt,
+    updatedBy: actor.id || actor.userId || 'dashboard',
+    updatedByEmail: actor.email || null,
+    updatedByRole: actor.role || null
+  };
+
+  await firestore
+    .collection(TOLL_CATALOG_COLLECTION)
+    .doc(TOLL_CATALOG_DOCUMENT_ID)
+    .set({ ...next, ...metadata }, { merge: true });
+
+  activeCatalog = {
+    ...next,
+    updatedAt: new Date().toISOString(),
+    updatedBy: metadata.updatedBy,
+    updatedByEmail: metadata.updatedByEmail,
+    updatedByRole: metadata.updatedByRole
+  };
+  catalogLoadedAt = Date.now();
+  return getCatalogSnapshot();
+}
 
 function toRad(value) {
   return (Number(value) * Math.PI) / 180;
@@ -165,18 +401,25 @@ function getTollFeeForDate(toll, vehicleClass, now = new Date()) {
 }
 
 function findRouteTolls(routeCoordinates = [], options = {}) {
+  if (activeCatalog.enabled === false) {
+    return [];
+  }
+
   const coordinates = routeCoordinates.map(normalizeCoordinate).filter(Boolean);
   if (coordinates.length < 2) {
     return [];
   }
 
-  const toleranceKm = Math.max(0.1, Number(options.toleranceKm) || DEFAULT_TOLERANCE_KM);
+  const toleranceKm = Math.max(
+    0.1,
+    Number(options.toleranceKm) || Number(activeCatalog.toleranceKm) || DEFAULT_TOLERANCE_KM
+  );
   const vehicleClass = normalizeVehicleTollClass(options.vehicleType);
   const now = options.now || new Date();
   const found = [];
   const foundIds = new Set();
 
-  TOLL_PLAZAS.forEach((toll) => {
+  activeCatalog.plazas.filter((toll) => toll.active !== false).forEach((toll) => {
     const tollCoordinate = normalizeCoordinate({ latitude: toll.lat, longitude: toll.lng });
     if (!tollCoordinate || foundIds.has(toll.id)) {
       return;
@@ -219,7 +462,11 @@ function estimateRouteTollsFromCoordinates(routeCoordinates = [], options = {}) 
     tolls,
     tollCount: tolls.length,
     source: 'leaf_toll_catalog',
-    toleranceKm: Math.max(0.1, Number(options.toleranceKm) || DEFAULT_TOLERANCE_KM)
+    toleranceKm: Math.max(
+      0.1,
+      Number(options.toleranceKm) || Number(activeCatalog.toleranceKm) || DEFAULT_TOLERANCE_KM
+    ),
+    catalogVersion: Number(activeCatalog.version || 1)
   };
 }
 
@@ -288,6 +535,12 @@ function resolveTollFeeFromPricingPayload(payload = {}) {
 
 module.exports = {
   TOLL_PLAZAS,
+  DEFAULT_CATALOG,
+  normalizeCatalog,
+  getCatalogSnapshot,
+  loadTollCatalog,
+  updateTollCatalog,
+  applyCatalogSnapshot,
   decodePolyline,
   findRouteTolls,
   estimateRouteTolls,

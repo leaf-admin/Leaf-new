@@ -52,6 +52,7 @@ const routes = [
   { path: "/promotions", heading: "Promoções" },
   { path: "/runtime-flags", heading: "Perfil de pagamento" },
   { path: "/subscriptions", heading: "Assinaturas" },
+  { path: "/withdrawals", heading: "Saques" },
   { path: "/tolls", heading: "Pedágios" },
   { path: "/users", heading: "Usuarios" },
   { path: "/users/smoke-user", heading: "Detalhes do Usuário" },
@@ -549,6 +550,34 @@ function financialReconciliationDetailFixture() {
   };
 }
 
+function tollCatalogFixture() {
+  return {
+    success: true,
+    catalog: {
+      enabled: true,
+      version: 1,
+      currency: "BRL",
+      toleranceKm: 2,
+      source: "smoke",
+      plazas: [
+        {
+          id: "p09_linha_amarela",
+          name: "P09 - Linha Amarela",
+          road: "RJ-065",
+          direction: "bidirectional",
+          lat: -22.87,
+          lng: -43.3,
+          active: true,
+          fees: {
+            car: { weekday: 4, weekend: 4 },
+            truck: { weekday: 8, weekend: 8 },
+          },
+        },
+      ],
+    },
+  };
+}
+
 function fixtureForApiPath(apiPath, method) {
   if (apiPath === "/admin/auth/verify") return json({ success: true, user: adminUser });
   if (apiPath === "/admin/auth/login") {
@@ -565,6 +594,8 @@ function fixtureForApiPath(apiPath, method) {
   }
   if (apiPath === "/admin/auth/logout") return json({ success: true });
   if (apiPath === "/health/runtime-flags") return json(runtimeFlagsFixture());
+  if (apiPath.startsWith("/pricing/toll-catalog")) return json(tollCatalogFixture());
+  if (apiPath.startsWith("/payment/withdrawals/pending")) return json({ success: true, withdrawals: [] });
   if (apiPath.startsWith("/ops/overview")) return json(opsOverviewFixture());
   if (apiPath.startsWith("/ops/alerts")) return json(opsAlertsFixture());
   if (apiPath.startsWith("/ops/command-center")) return json(commandCenterFixture());

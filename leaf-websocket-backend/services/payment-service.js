@@ -15,7 +15,8 @@ const {
 } = require('./financial-runtime-context');
 const {
   buildRideFinancialContract,
-  validateAuthoritativeFinancialSnapshot
+  validateAuthoritativeFinancialSnapshot,
+  DEFAULT_POLICY
 } = require('./ride-financial-contract');
 const paymentRuntimeProfileService = require('./payment-runtime-profile-service');
 const { logStructured, logError } = require('../utils/logger');
@@ -69,15 +70,17 @@ class PaymentService {
     this.paymentRuntimeProfileService = paymentRuntimeProfileService;
     this.financialLedgerService = new FinancialLedgerService();
     // Taxas operacionais por faixa de valor (regra vigente)
-    this.OPERATIONAL_FEE_UP_TO_10 = 79; // R$ 0,79 para corridas até R$ 10,00 (em centavos)
-    this.OPERATIONAL_FEE_10_TO_25 = 99; // R$ 0,99 para corridas acima de R$ 10,00 até R$ 25,00 (em centavos)
-    this.OPERATIONAL_FEE_25_TO_50 = 149; // R$ 1,49 para corridas acima de R$ 25,00 até R$ 50,00 (em centavos)
-    this.OPERATIONAL_FEE_ABOVE_50_PERCENTAGE = 0.03; // 3% para corridas acima de R$ 50,00
-    this.THRESHOLD_10 = 1000; // R$ 10,00 em centavos
-    this.THRESHOLD_25 = 2500; // R$ 25,00 em centavos
-    this.THRESHOLD_50 = 5000; // R$ 50,00 em centavos
-    this.WOOVI_FEE_PERCENTAGE = 0.008; // 0,8% da transação
-    this.WOOVI_FEE_MINIMUM = 50; // R$ 0,50 mínimo (em centavos)
+    // A política financeira canônica vive em ride-financial-contract.js.
+    // Estes aliases preservam a API interna histórica sem duplicar valores.
+    this.OPERATIONAL_FEE_UP_TO_10 = DEFAULT_POLICY.operationalFeeUpTo10Cents;
+    this.OPERATIONAL_FEE_10_TO_25 = DEFAULT_POLICY.operationalFee10To25Cents;
+    this.OPERATIONAL_FEE_25_TO_50 = DEFAULT_POLICY.operationalFee25To50Cents;
+    this.OPERATIONAL_FEE_ABOVE_50_PERCENTAGE = DEFAULT_POLICY.operationalFeeAbove50Percentage;
+    this.THRESHOLD_10 = DEFAULT_POLICY.threshold10Cents;
+    this.THRESHOLD_25 = DEFAULT_POLICY.threshold25Cents;
+    this.THRESHOLD_50 = DEFAULT_POLICY.threshold50Cents;
+    this.WOOVI_FEE_PERCENTAGE = DEFAULT_POLICY.paymentIntermediationPercentage;
+    this.WOOVI_FEE_MINIMUM = DEFAULT_POLICY.paymentIntermediationMinimumCents;
     this.WITHDRAW_FEE_THRESHOLD_CENTS = 50000; // R$ 500,00
     this.WITHDRAW_FEE_BELOW_THRESHOLD_CENTS = 100; // R$ 1,00
     this.SUBSCRIPTION_DAILY_BILLING_ENABLED =
