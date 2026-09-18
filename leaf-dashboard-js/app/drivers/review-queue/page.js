@@ -41,6 +41,12 @@ const statusPresentation = {
   rejected: { label: "Rejeitado", detail: "Aguardando correção", tone: "status-bad" },
 };
 
+const REVIEW_FLOW_STEPS = [
+  { number: "1", title: "Encontre", detail: "Filtre a fila" },
+  { number: "2", title: "Abra a ficha", detail: "Veja o contexto" },
+  { number: "3", title: "Decida", detail: "Aprove ou peça ajuste" },
+];
+
 function formatDateTime(value) {
   if (!value) return "-";
   const parsed = new Date(value);
@@ -217,6 +223,17 @@ function DriversReviewQueuePageContent() {
         </header>
 
         <AppNav />
+        <nav className="review-flow" aria-label="Como aprovar um cadastro">
+          {REVIEW_FLOW_STEPS.map((step) => (
+            <div className="review-flow-step" key={step.number}>
+              <span className="review-flow-number">{step.number}</span>
+              <span>
+                <strong>{step.title}</strong>
+                <small>{step.detail}</small>
+              </span>
+            </div>
+          ))}
+        </nav>
         {loading ? <LoadingState message="Carregando fila de revisão..." /> : null}
 
         <section className="grid grid-kpi review-queue-kpis" aria-label="Resumo da fila">
@@ -230,8 +247,8 @@ function DriversReviewQueuePageContent() {
           <div className="review-section-heading">
             <div>
               <span className="review-queue-eyebrow">Encontrar</span>
-              <h2>Encontre uma pendência</h2>
-              <p>Comece por pendentes. As decisões ficam na ficha individual para evitar ações sem contexto.</p>
+              <h2>Encontre um cadastro</h2>
+              <p>Comece pelos pendentes. A decisão acontece na ficha individual, com todo o contexto.</p>
             </div>
             <span className="review-queue-result-count">
               {items.length} de {pagination.total || counters.total} documentos
@@ -320,12 +337,12 @@ function DriversReviewQueuePageContent() {
           </details>
         </section>
 
-        <section className="card review-queue-documents">
+        <section className="card review-queue-documents" id="review-queue-list">
           <div className="review-section-heading">
             <div>
               <span className="review-queue-eyebrow">Decisão</span>
-              <h2>Documentos recebidos</h2>
-              <p>Uma ação principal por linha. Aprovação, rejeição e solicitação de ajuste acontecem na ficha do motorista.</p>
+              <h2>Documentos na fila</h2>
+              <p>Abra a ficha do motorista para aprovar, rejeitar ou pedir correção.</p>
             </div>
             <span className="review-queue-result-count">Página {pagination.page} de {Math.max(1, pagination.pages || 1)}</span>
           </div>
@@ -393,7 +410,7 @@ function DriversReviewQueuePageContent() {
                           </td>
                           <td>
                             <div className="actions-cell review-queue-actions">
-                              <Link className="review-action-primary" href={`/drivers/${item?.driverId}/documents${kycPersistenceScope === "sandbox" ? "?kycScope=sandbox" : ""}`}>Abrir revisão</Link>
+                              <Link className="review-action-primary" href={`/drivers/${item?.driverId}/documents${kycPersistenceScope === "sandbox" ? "?kycScope=sandbox" : ""}`}>Abrir ficha</Link>
                               <button
                                 type="button"
                                 disabled={item?.contentAvailable !== true || openingKey === openKey}

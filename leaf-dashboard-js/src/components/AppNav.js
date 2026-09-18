@@ -187,26 +187,50 @@ export default function AppNav() {
         <nav id="app-sidebar-nav" className="app-sidebar-nav" aria-label="Navegação principal">
           {visibleGroups.map((group) => {
             const groupActive = group.id === activeGroup.id;
+            const headingClass = groupActive
+              ? "app-sidebar-group-heading app-sidebar-group-heading-active"
+              : "app-sidebar-group-heading";
+            const groupLinks = (
+              <div className="app-sidebar-links">
+                {group.items.map((item) => {
+                  const active = activeItem?.href === item.href;
+                  return (
+                    <Link
+                      key={item.href}
+                      href={item.href}
+                      className={active ? "app-sidebar-link app-sidebar-link-active" : "app-sidebar-link"}
+                      aria-current={active ? "page" : undefined}
+                    >
+                      {item.label}
+                    </Link>
+                  );
+                })}
+              </div>
+            );
+
+            if (group.collapsible) {
+              return (
+                <details
+                  key={group.id}
+                  className="app-sidebar-group app-sidebar-group-collapsible"
+                  open={groupActive}
+                  aria-label={`${group.section}: ${group.label}`}
+                >
+                  <summary className={headingClass}>
+                    <h3 className="app-sidebar-group-title">{group.section}</h3>
+                    <span className="app-sidebar-group-toggle" aria-hidden="true" />
+                  </summary>
+                  {groupLinks}
+                </details>
+              );
+            }
+
             return (
               <section key={group.id} className="app-sidebar-group" aria-label={`${group.section}: ${group.label}`}>
-                <div className={groupActive ? "app-sidebar-group-heading app-sidebar-group-heading-active" : "app-sidebar-group-heading"}>
+                <div className={headingClass}>
                   <h3 className="app-sidebar-group-title">{group.section}</h3>
                 </div>
-                <div className="app-sidebar-links">
-                  {group.items.map((item) => {
-                    const active = activeItem?.href === item.href;
-                    return (
-                      <Link
-                        key={item.href}
-                        href={item.href}
-                        className={active ? "app-sidebar-link app-sidebar-link-active" : "app-sidebar-link"}
-                        aria-current={active ? "page" : undefined}
-                      >
-                        {item.label}
-                      </Link>
-                    );
-                  })}
-                </div>
+                {groupLinks}
               </section>
             );
           })}

@@ -176,32 +176,113 @@ function DomainHealthRows({ domains = [] }) {
   );
 }
 
+const TASK_COPY = {
+  "support-sla": {
+    title: "Responder tickets atrasados",
+    description: "Há atendimentos que já passaram do prazo combinado.",
+  },
+  "support-owner": {
+    title: "Distribuir tickets sem responsável",
+    description: "Atribua cada atendimento para alguém da equipe.",
+  },
+  "driver-docs": {
+    title: "Aprovar documentos de motoristas",
+    description: "Confira os documentos pendentes e decida na ficha do motorista.",
+  },
+  "payment-global-sandbox": {
+    title: "Revisar ambiente de cobrança",
+    description: "O ambiente de testes está ativo para toda a operação.",
+  },
+  "payment-canary-profile": {
+    title: "Preparar cobrança de teste",
+    description: "Configure um perfil sandbox antes de testar um pagamento.",
+  },
+  "workers-attention": {
+    title: "Verificar processamento",
+    description: "Há eventos aguardando processamento no sistema.",
+  },
+  "sku-cost-monitor": {
+    title: "Revisar custo por corrida",
+    description: "O custo operacional está acima do esperado.",
+  },
+  "ride-cost-anomaly": {
+    title: "Revisar custo de uma corrida",
+    description: "Uma corrida ficou acima do limite de custo configurado.",
+  },
+  "directions-anomaly": {
+    title: "Revisar uso de rotas",
+    description: "O uso de rotas por corrida está acima do limite de acompanhamento.",
+  },
+};
+
+function taskPriorityLabel(priority) {
+  if (priority === "alta") return "Urgente";
+  if (priority === "media") return "Hoje";
+  return "Acompanhar";
+}
+
+function presentTask(item) {
+  const id = String(item?.id || "");
+  const copy = TASK_COPY[id];
+  if (copy) return { ...item, ...copy };
+  if (id.startsWith("source-")) {
+    return {
+      ...item,
+      title: "Verificar serviço da plataforma",
+      description: [item?.title, item?.description].filter(Boolean).join(" · "),
+    };
+  }
+  return {
+    ...item,
+    title: item?.title || item?.label || "Tarefa operacional",
+    description: item?.description || item?.detail || "Verifique o fluxo indicado.",
+  };
+}
+
 function ActionItems({ items = [] }) {
   if (!items.length) return <p className="text-muted">Sem ações sugeridas agora.</p>;
   return (
-    <div className="metric-list">
-      {items.map((item) => (
-        <div className="row" key={item.id || item.title || item.label || item.description}>
-          <div className="label">
-            <span
-              className={
-                item.priority === "alta"
-                  ? "status-bad"
-                  : item.priority === "media"
-                    ? "status-warn"
-                    : "status-ok"
-              }
-            >
-              {item.title || item.label || "Ação operacional"}
-            </span>
-            <small>{item.description || item.detail || "Verificar no fluxo indicado."}</small>
+    <div className="metric-list task-queue-list">
+      {items.map((rawItem) => {
+        const item = presentTask(rawItem);
+        const tone = item.priority === "alta" ? "status-bad" : item.priority === "media" ? "status-warn" : "status-ok";
+        return (
+          <div className="row task-queue-row" key={item.id || item.title || item.description}>
+            <div className="label task-queue-main">
+              <span className={tone}>{taskPriorityLabel(item.priority)}</span>
+              <strong>{item.title}</strong>
+              <small>{item.description}</small>
+            </div>
+            <div className="value">
+              <Link className="task-queue-action" href={item.href || "/dashboard"}>Resolver</Link>
+            </div>
           </div>
-          <div className="value">
-            <Link href={item.href || "/dashboard"}>{item.priority || item.status || "ver"}</Link>
-          </div>
-        </div>
-      ))}
+        );
+      })}
     </div>
+  );
+}
+
+function DailyTaskQueue({ snapshot, items }) {
+  if (!hasSnapshotData(snapshot)) return null;
+  const hasTasks = items.length > 0;
+  return (
+    <section className="ops-attention-panel" aria-label="Tarefas de hoje">
+      <Panel
+        title="Tarefas de hoje"
+        subtitle="Resolva primeiro o que depende de uma decisão da equipe."
+      >
+        {hasTasks ? (
+          <ActionItems items={items} />
+        ) : (
+          <div className="task-queue-empty">
+            <span className="status-ok">Tudo em dia</span>
+            <strong>Nenhuma tarefa crítica agora</strong>
+            <p>A operação continua sendo acompanhada automaticamente.</p>
+          </div>
+        )}
+      </Panel>
+    </section>
   );
 }
 
@@ -636,9 +717,9 @@ function buildWorkspaces(snapshot) {
       id: "operations",
       eyebrow: "Operação",
       title: hasData ? `${formatCompact(metrics.activeRides)} em curso` : "Sem leitura",
-      description: "Corridas, território e motoristas.",
+      description: "Corridas ao vivo e motoristas.",
       href: "/maps",
-      actionLabel: "Abrir operação",
+      actionLabel: "Ver corridas ao vivo",
       tone: hasData && metrics.totalDrivers > 0 && metrics.activeDrivers === 0 ? "warning" : "default",
       status: hasData && metrics.totalDrivers > 0 && metrics.activeDrivers === 0 ? "sem online" : null,
       metrics: [
@@ -648,11 +729,11 @@ function buildWorkspaces(snapshot) {
     },
     {
       id: "driver-onboarding",
-      eyebrow: "Cadastro",
+      eyebrow: "Cadastros",
       title: hasData ? `${formatCompact(driverOnboarding.pendingDocuments)} pendentes` : "Sem leitura",
-      description: "Fila de KYC e documentos.",
+      description: "Aprove ou peça correção nos documentos.",
       href: "/drivers/review-queue",
-      actionLabel: "Abrir documentos",
+      actionLabel: "Aprovar cadastros",
       tone: hasData && driverOnboarding.pendingDocuments > 0 ? "warning" : "default",
       status: hasData && driverOnboarding.pendingDocuments > 0 ? "ação necessária" : null,
       metrics: [
@@ -664,9 +745,9 @@ function buildWorkspaces(snapshot) {
       id: "finance",
       eyebrow: "Financeiro",
       title: hasData ? `GMV ${brlFromCents(metrics.gmvCents)}` : "Sem leitura",
-      description: "Receita e reconciliação.",
+      description: "Confira pagamentos e repasses.",
       href: "/financial-reconciliation",
-      actionLabel: "Abrir financeiro",
+      actionLabel: "Conferir pagamentos",
       tone: hasData && metrics.paymentPendingCount > 0 ? "warning" : "default",
       status: hasData && metrics.paymentPendingCount > 0 ? "pendência" : null,
       metrics: [
@@ -678,9 +759,9 @@ function buildWorkspaces(snapshot) {
       id: "support",
       eyebrow: "Suporte",
       title: hasData ? `${formatCompact(support.totalOpenTickets)} abertos` : "Sem leitura",
-      description: "Fila, SLA e responsáveis.",
+      description: "Atenda tickets e acompanhe prazos.",
       href: "/support",
-      actionLabel: "Abrir suporte",
+      actionLabel: "Atender suporte",
       tone: hasData && supportBreaches > 0 ? "danger" : "default",
       status: hasData && supportBreaches > 0 ? "SLA" : null,
       metrics: [
@@ -775,7 +856,7 @@ export default function DashboardPage() {
             detail={snapshotText(snapshot, `${formatCompact(metrics.totalDrivers)} cadastrados`)}
           />
           <CommandStat
-            label="GMV + receita"
+            label="Vendas e receita"
             value={snapshotText(snapshot, brlFromCents(metrics.gmvCents))}
             detail={snapshotText(snapshot, `Leaf ${brlFromCents(metrics.grossRevenueCents)}`)}
           />
@@ -784,7 +865,7 @@ export default function DashboardPage() {
             value={snapshotText(snapshot, formatCompact(pendingCount))}
             detail={snapshotText(
               snapshot,
-              `KYC ${formatCompact(driverOnboarding.pendingDocuments)} · pagamento ${formatCompact(metrics.paymentPendingCount)} · SLA ${formatCompact(supportBreaches)}`,
+              `cadastros ${formatCompact(driverOnboarding.pendingDocuments)} · pagamentos ${formatCompact(metrics.paymentPendingCount)} · suporte ${formatCompact(supportBreaches)}`,
             )}
             tone={hasSnapshotData(snapshot) && pendingCount > 0 ? "warning" : "default"}
           />
@@ -798,28 +879,19 @@ export default function DashboardPage() {
 
         <OperationsTrendPanel points={metrics.trend} />
 
-        {attentionItems.length ? (
-          <section className="ops-attention-panel" aria-label="Atenção operacional">
-            <Panel
-              title="Atenção agora"
-              subtitle="Itens priorizados pelo backend para a equipe decidir o próximo passo."
-            >
-              <ActionItems items={attentionItems} />
-            </Panel>
-          </section>
-        ) : null}
+        <DailyTaskQueue snapshot={snapshot} items={attentionItems} />
 
         <section className="ops-health-panel" aria-label="Saúde da plataforma">
           <Panel
             title="Saúde da plataforma"
-            subtitle="Serviços, pagamentos e custo do dashboard em uma única leitura."
+            subtitle="Serviços, pagamentos e custos em uma única leitura."
           >
             <CommandCenterHealth snapshot={snapshot} />
           </Panel>
         </section>
 
         <details className="ops-advanced-panel">
-          <summary>Telemetria, custos e fontes</summary>
+          <summary>Detalhes técnicos e custos</summary>
           <div className="ops-advanced-panel-body">
         <section className="grid ops-detail-grid">
           <Panel

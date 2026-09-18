@@ -60,6 +60,13 @@ const DRIVER_DETAIL_SECTIONS = [
   { id: "audit", label: "Auditoria" },
 ];
 
+const DRIVER_DECISION_STEPS = [
+  { id: "summary", label: "Conferir cadastro", detail: "Dados básicos" },
+  { id: "documents", label: "Revisar documentos", detail: "CNH, CRLV e certidão" },
+  { id: "identity", label: "Validar identidade", detail: "KYC e evidências" },
+  { id: "vehicle", label: "Confirmar veículo", detail: "Categoria e status" },
+];
+
 function getReasonOptions(documentType) {
   const normalized = String(documentType || "").trim().toLowerCase();
   return DOCUMENT_REJECTION_REASON_OPTIONS[normalized] || [];
@@ -744,6 +751,26 @@ export default function DriverDocumentsPage({ params }) {
               {section.label}
             </Link>
           ))}
+        </nav>
+
+        <nav className="driver-decision-flow" aria-label="Fluxo de decisão do motorista">
+          {DRIVER_DECISION_STEPS.map((step, index) => (
+            <Link
+              key={step.id}
+              className={`driver-decision-step${activeSection === step.id ? " driver-decision-step-active" : ""}`}
+              href={buildSectionHref(step.id)}
+              aria-current={activeSection === step.id ? "step" : undefined}
+            >
+              <span className="driver-decision-step-number">{index + 1}</span>
+              <span>
+                <strong>{step.label}</strong>
+                <small>{step.detail}</small>
+              </span>
+            </Link>
+          ))}
+          <Link className="driver-decision-audit" href={buildSectionHref("audit")}>
+            Ver auditoria
+          </Link>
         </nav>
 
         {activeSection === "summary" ? <section className="card driver-detail-tab-panel">
