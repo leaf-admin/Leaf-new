@@ -42,11 +42,11 @@ jest.mock('../../../services/geofence-service', () => ({
     failClosed: true,
     code: 'GEOFENCE_ACTIVE',
     regionSource: 'file',
-    regionVersion: 'rio-zona-sul-centro-lapa-v1',
-    regionUpdatedAt: '2026-07-09',
-    regionName: 'Piloto Rio - Zona Sul + Centro + Lapa',
-    regionPolygons: 22,
-    regionPoints: 4337,
+    regionVersion: 'rio-zona-sul-barra-jacarepagua-v2',
+    regionUpdatedAt: '2026-09-18',
+    regionName: 'Piloto Rio - Zona Sul + Centro + Lapa + Barra da Tijuca + Jacarepaguá',
+    regionPolygons: 33,
+    regionPoints: 7122,
     destinationInsideRegionRequired: true,
   })),
 }));
@@ -95,8 +95,8 @@ describe('geofence routes controlled-pilot policy', () => {
       enabled: true,
       available: true,
       regionSource: 'file',
-      regionVersion: 'rio-zona-sul-centro-lapa-v1',
-      regionPolygons: 22,
+      regionVersion: 'rio-zona-sul-barra-jacarepagua-v2',
+      regionPolygons: 33,
       policyLocked: true,
       policyLockCode: 'GEOFENCE_POLICY_LOCKED',
     });
@@ -115,7 +115,7 @@ describe('geofence routes controlled-pilot policy', () => {
       code: 'GEOFENCE_POLICY_LOCKED',
       geofence: {
         enabled: true,
-        regionVersion: 'rio-zona-sul-centro-lapa-v1',
+        regionVersion: 'rio-zona-sul-barra-jacarepagua-v2',
         policyLocked: true,
       },
     });

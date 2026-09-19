@@ -417,9 +417,9 @@ describe('validate-runtime-config Woovi webhook production gates', () => {
         configured: true,
         valid: true,
         source: 'file',
-        version: 'rio-zona-sul-centro-lapa-v1',
-        polygons: 22,
-        points: 4337
+        version: 'rio-zona-sul-barra-jacarepagua-v2',
+        polygons: 33,
+        points: 7122
       })
     );
   });
