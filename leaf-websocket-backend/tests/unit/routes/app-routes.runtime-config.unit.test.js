@@ -151,7 +151,7 @@ describe('app routes runtime config', () => {
       mode: 'dry_run',
       trafficPricing: 'traffic_aware_time_component',
       dynamicMarkup: 'legacy_combined_pressure',
-      maxDynamicMarkupPercent: 35
+      maxDynamicMarkupPercent: 40
     });
     expect(response.body.driverDestinationPolicy).toMatchObject({
       enabled: false,

@@ -413,6 +413,7 @@ router.get('/pricing/categories', (_req, res) => {
 
 router.post('/pricing/quote', async (req, res) => {
   const body = req.body || {};
+  const quoteRequestedAt = new Date().toISOString();
   const pickupLocation = body.pickupLocation || body.pickup || {};
   const destinationLocation = body.destinationLocation || body.destination || body.drop || {};
   const quoteSessionId = resolveQuoteSessionId(req, body);
@@ -604,7 +605,15 @@ router.post('/pricing/quote', async (req, res) => {
       routeDurationSecs: canonicalRouteDurationSecs,
       tollFee: tollEstimate.tollFee,
       clientEstimatedFare: body.clientEstimatedFare,
-      pricingContext: null
+      pricingContext: null,
+      quoteRequestedAt,
+      city: body.city || body.cityName || normalizedPickupLocation.city || normalizedPickupLocation.cityName || null,
+      timeZone:
+        body.timeZone
+        || body.timezone
+        || normalizedPickupLocation.timeZone
+        || normalizedPickupLocation.timezone
+        || null
     });
 
     const passengerId =
@@ -687,6 +696,7 @@ router.post('/pricing/quote', async (req, res) => {
       service: 'pricing-routes',
       operation: 'pricing_quote',
       quoteSessionId: quoteSessionId || null,
+      quoteRequestedAt,
       quoteRequestCount: quoteRequestCount || null,
       canonicalRouteSource,
       carType: result.normalizedCarType,
@@ -701,6 +711,7 @@ router.post('/pricing/quote', async (req, res) => {
 
     return res.json({
       quoteSessionId: quoteSessionId || null,
+      quoteRequestedAt,
       quoteLockId: quoteLockResult.success ? quoteLockResult.quoteLockId : null,
       quoteLockExpiresAt: quoteLockResult.success ? quoteLockResult.expiresAtIso : null,
       quoteLockTtlSeconds: quoteLockResult.success ? quoteLockResult.ttlSeconds : null,
