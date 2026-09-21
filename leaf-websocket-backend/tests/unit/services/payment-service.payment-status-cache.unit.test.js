@@ -1025,6 +1025,20 @@ describe('PaymentService financial rules', () => {
     });
   });
 
+  it('calculates Woovi on the full transaction when a high-value ride includes toll', () => {
+    const service = new PaymentService();
+    const calculation = service.calculateNetAmount(10000, 2000);
+
+    expect(calculation).toMatchObject({
+      totalAmount: 10000,
+      tollFee: 2000,
+      operationalFee: 240,
+      wooviFee: 80,
+      netAmount: 9680
+    });
+    expect(calculation.financialContract.balanced).toBe(true);
+  });
+
   it('prefers quote lock toll values when resolving Pix split tolls', () => {
     const service = new PaymentService();
 

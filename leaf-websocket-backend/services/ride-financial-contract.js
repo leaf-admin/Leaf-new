@@ -50,10 +50,10 @@ function resolveOperationalFee(grossFareCents, policy = DEFAULT_POLICY) {
   };
 }
 
-function resolvePaymentIntermediationFee(grossFareCents, policy = DEFAULT_POLICY) {
-  const grossFare = toCents(grossFareCents);
+function resolvePaymentIntermediationFee(transactionAmountCents, policy = DEFAULT_POLICY) {
+  const transactionAmount = toCents(transactionAmountCents);
   return Math.max(
-    Math.round(grossFare * policy.paymentIntermediationPercentage),
+    Math.round(transactionAmount * policy.paymentIntermediationPercentage),
     policy.paymentIntermediationMinimumCents
   );
 }
@@ -146,7 +146,8 @@ function buildRideFinancialContract({
   const requestedOperationalFeeCents = toCents(operationalFee.feeCents);
   const leafOperationalFeeCents = clampCents(requestedOperationalFeeCents, grossFareCents);
   const remainingAfterOperationalFeeCents = Math.max(0, grossFareCents - leafOperationalFeeCents);
-  const requestedPaymentIntermediationFeeCents = toCents(resolvePaymentIntermediationFee(grossFareCents, policy));
+  // Woovi charges intermediation on the full passenger transaction, including toll.
+  const requestedPaymentIntermediationFeeCents = toCents(resolvePaymentIntermediationFee(totalAmountCents, policy));
   const paymentIntermediationFeeCents = clampCents(
     requestedPaymentIntermediationFeeCents,
     remainingAfterOperationalFeeCents

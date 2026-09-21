@@ -1,6 +1,6 @@
 const { clamp, normalizeRange } = require('./utils');
 
-const MAX_DEMAND_MARKUP_PERCENT = 35;
+const MAX_DEMAND_MARKUP_PERCENT = 40;
 
 const DEMAND_SUPPLY_BREAKPOINTS = [
   { x: 0.8, y: 0 },

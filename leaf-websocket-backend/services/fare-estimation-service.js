@@ -3,6 +3,11 @@ const { metrics } = require('../utils/prometheus-metrics');
 const { CANONICAL_RATE_CARDS, RATE_CARD_VERSION } = require('./pricing/calculateFare');
 const { runDynamicPricingEngine } = require('./pricing');
 const pricingContextProvider = require('./pricing-context-provider');
+const {
+  normalizeRequestedAt,
+  resolveNightSurcharge,
+  resolveTimeZone
+} = require('./pricing/nightSurcharge');
 
 const RATE_CARDS = Object.fromEntries(
   Object.entries(CANONICAL_RATE_CARDS).map(([key, rateCard]) => [
@@ -97,7 +102,8 @@ function buildFareEstimationCacheKey({
   routeDistanceKm,
   routeDurationSecs,
   tollFee,
-  pricingContext
+  pricingContext,
+  pricingTiming
 }) {
   const pickupLat = toNumber(pickupLocation?.lat, NaN);
   const pickupLng = toNumber(pickupLocation?.lng, NaN);
@@ -121,6 +127,12 @@ function buildFareEstimationCacheKey({
     roundForCache(Number(routeDistanceKm || 0), 1),
     roundForCache(Math.round(Number(routeDurationSecs || 0) / 30) * 30, 0),
     roundForCache(Number(tollFee || 0), 1),
+    pricingTiming && typeof pricingTiming === 'object'
+      ? JSON.stringify({
+          nightSurchargeApplied: pricingTiming.nightSurchargeApplied === true,
+          timeZone: pricingTiming.timeZone || null
+        })
+      : '',
     contextStamp
   ].join('|');
 }
@@ -282,7 +294,10 @@ async function estimateRideFare({
   routeDurationSecs,
   tollFee,
   clientEstimatedFare,
-  pricingContext
+  pricingContext,
+  quoteRequestedAt,
+  city,
+  timeZone
 }) {
   const normalizedCarType = normalizeCarType(carType);
   const providedDistanceKm = toNumber(routeDistanceKm, 0);
@@ -298,6 +313,19 @@ async function estimateRideFare({
   const effectiveDurationSecs = hasProvidedRouteMetrics ? providedDurationSecs : fallbackMetrics.durationSecs;
   const effectiveTollFee = toNumber(tollFee, 0);
   const clientFare = toNumber(clientEstimatedFare, 0);
+  const effectiveQuoteRequestedAt = normalizeRequestedAt(quoteRequestedAt) || new Date().toISOString();
+  const effectiveCity = city || pickupLocation?.city || pickupLocation?.cityName || null;
+  const effectiveTimeZone = resolveTimeZone({
+    city: effectiveCity,
+    timeZone,
+    pickupLocation
+  });
+  const nightSurcharge = resolveNightSurcharge({
+    requestedAt: effectiveQuoteRequestedAt,
+    city: effectiveCity,
+    timeZone: effectiveTimeZone,
+    pickupLocation
+  });
   const nowMs = Date.now();
   const estimationStartedAt = Date.now();
   const perfBreakdownMs = {};
@@ -308,7 +336,11 @@ async function estimateRideFare({
     routeDistanceKm: effectiveDistanceKm,
     routeDurationSecs: effectiveDurationSecs,
     tollFee: effectiveTollFee,
-    pricingContext
+    pricingContext,
+    pricingTiming: {
+      nightSurchargeApplied: nightSurcharge.applied,
+      timeZone: nightSurcharge.timeZone
+    }
   });
 
   if (FARE_ESTIMATION_CACHE_ENABLED) {
@@ -368,10 +400,18 @@ async function estimateRideFare({
       current: normalizedPricingContext.operational.current,
       baseline: sanitizeBaseline(normalizedPricingContext.operational.baseline),
       state_context: normalizedPricingContext.operational.state_context
+    },
+    quote: {
+      requested_at: effectiveQuoteRequestedAt,
+      city: effectiveCity,
+      time_zone: nightSurcharge.timeZone,
+      pickup_location: pickupLocation
     }
   });
   engineResult.pricingPayload = {
     ...engineResult.pricingPayload,
+    quote_requested_at: effectiveQuoteRequestedAt,
+    pricing_time_zone: nightSurcharge.timeZone,
     eta_pickup_min: normalizedPricingContext.trip.eta_pickup_min,
     eta_pickup_pricing_min: pricingPickupEtaMin,
     pickup_eta_source: normalizedPricingContext.trip.eta_pickup_source,
@@ -403,6 +443,8 @@ async function estimateRideFare({
     baselineSource: derivedPricingContext.metadata?.baselineSource || 'derived_heuristic',
     dynamicApplied: Number(engineResult.pricingPayload.dynamic_percentage || 0) > 0,
     minimumFareApplied: Boolean(engineResult.pricingPayload.minimum_fare_applied),
+    volumeDropAlert: Boolean(engineResult.pricingPayload.request_volume_monitoring?.alert),
+    volumeDropPercent: Number(engineResult.pricingPayload.request_volume_monitoring?.drop_percent || 0),
     scorePressao: Number(engineResult.pricingPayload.score_pressao || 0),
     scoreExcecao: Number(engineResult.pricingPayload.score_excecao || 0)
   });
@@ -462,7 +504,10 @@ async function estimateRideFare({
       rateCard: RATE_CARDS[normalizedCarType] || RATE_CARDS.leaf_plus,
       currentSnapshot: normalizedPricingContext.operational.current,
       baselineSnapshot: sanitizeBaseline(normalizedPricingContext.operational.baseline),
-      stateSnapshot: normalizedPricingContext.operational.state_context
+      stateSnapshot: normalizedPricingContext.operational.state_context,
+      quoteRequestedAt: effectiveQuoteRequestedAt,
+      timeZone: nightSurcharge.timeZone,
+      nightSurcharge: nightSurcharge
     },
     pricingDebug: {
       context: normalizedPricingContext,

@@ -10,6 +10,7 @@ const { getPublicPilotAccessSnapshot } = require('../services/pilot-access-contr
 const geofenceService = require('../services/geofence-service');
 const h3VisualPolicyService = require('../services/h3-visual-policy-service');
 const { resolvePricingModelMode } = require('../services/pricing');
+const { MAX_DYNAMIC_MARKUP_PERCENT } = require('../services/pricing/calculateFare');
 const router = express.Router();
 
 const TRUTHY_VALUES = new Set(['1', 'true', 'yes', 'on', 'sim']);
@@ -281,7 +282,7 @@ router.get('/runtime-config', async (req, res) => {
                     pricingModelMode === 'active'
                         ? 'leaf_supply_demand_pressure'
                         : 'legacy_combined_pressure',
-                maxDynamicMarkupPercent: 35
+                maxDynamicMarkupPercent: MAX_DYNAMIC_MARKUP_PERCENT
             },
             notificationPolicy: buildNotificationPolicy(),
             driverOnlinePolicy: buildDriverOnlinePolicy(),

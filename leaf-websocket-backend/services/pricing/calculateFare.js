@@ -1,12 +1,14 @@
 const { clamp, roundCurrency } = require('./utils');
 
 const RATE_CARD_VERSION = process.env.PRICING_RATE_CARD_VERSION || 'leaf-go-live-2026-04-10-v1';
+const MAX_DYNAMIC_MARKUP_RATE = 0.40;
+const MAX_DYNAMIC_MARKUP_PERCENT = MAX_DYNAMIC_MARKUP_RATE * 100;
 
 const DYNAMIC_PRICING_DEFAULTS = {
   pickup_grace_min: 4,
   pickup_increment: 0.4,
   pickup_cap: 2.5,
-  max_dynamic_markup: 0.35,
+  max_dynamic_markup: MAX_DYNAMIC_MARKUP_RATE,
   score_pressao_weight: 0.15,
   score_excecao_weight: 0.20
 };
@@ -87,7 +89,7 @@ function getPublicRateCards() {
 }
 
 /**
- * @param {{distance_km?:number, duration_min_traffic?:number, eta_pickup_min?:number, score_pressao?:number, score_excecao?:number, dynamic_markup_rate?:number, carType?:string}} input
+ * @param {{distance_km?:number, duration_min_traffic?:number, eta_pickup_min?:number, score_pressao?:number, score_excecao?:number, dynamic_markup_rate?:number, night_surcharge_rate?:number, carType?:string}} input
  */
 function calculateDynamicFare(input = {}) {
   const rateCard = getRateCard(input.carType || input.car_type || input.serviceCategory || input.category);
@@ -108,14 +110,16 @@ function calculateDynamicFare(input = {}) {
         rateCard.max_dynamic_markup,
         (rateCard.score_pressao_weight * scorePressao) + (rateCard.score_excecao_weight * scoreExcecao)
       );
+  const nightSurchargeRate = clamp(input.night_surcharge_rate, 0, 1);
   const fatorDinamico = 1 + dynamicMarkupRate;
   const additionalPickup = Math.min(
     rateCard.pickup_cap,
     Math.max(0, etaPickupMin - rateCard.pickup_grace_min) * rateCard.pickup_increment
   );
-  const subtotalWithDynamic = (tarifaBase * fatorDinamico) + additionalPickup;
-  const minimumFareApplied = subtotalWithDynamic < rateCard.valor_minimo;
-  const finalPrice = Math.max(rateCard.valor_minimo, subtotalWithDynamic);
+  const nightSurchargeValue = tarifaBase * nightSurchargeRate;
+  const subtotalWithSurcharges = (tarifaBase * (1 + dynamicMarkupRate + nightSurchargeRate)) + additionalPickup;
+  const minimumFareApplied = subtotalWithSurcharges < rateCard.valor_minimo;
+  const finalPrice = Math.max(rateCard.valor_minimo, subtotalWithSurcharges);
 
   return {
     car_type: rateCard.car_type,
@@ -123,6 +127,8 @@ function calculateDynamicFare(input = {}) {
     tarifa_base: roundCurrency(tarifaBase),
     fator_dinamico: Number(fatorDinamico.toFixed(4)),
     percentual_dinamico_aplicado: roundCurrency(dynamicMarkupRate * 100),
+    adicional_noturno_aplicado: nightSurchargeRate > 0,
+    percentual_adicional_noturno: roundCurrency(nightSurchargeRate * 100),
     adicional_pickup: roundCurrency(additionalPickup),
     preco_final: roundCurrency(finalPrice),
     valor_minimo_aplicado: minimumFareApplied,
@@ -138,6 +144,7 @@ function calculateDynamicFare(input = {}) {
       dynamic_markup_source: Number.isFinite(explicitDynamicMarkupRate)
         ? 'demand_pressure'
         : 'legacy_combined_pressure',
+      night_surcharge_value: roundCurrency(nightSurchargeValue),
       pickup_adjustment: roundCurrency(additionalPickup)
     }
   };
@@ -145,6 +152,8 @@ function calculateDynamicFare(input = {}) {
 
 module.exports = {
   RATE_CARD_VERSION,
+  MAX_DYNAMIC_MARKUP_RATE,
+  MAX_DYNAMIC_MARKUP_PERCENT,
   CANONICAL_RATE_CARDS,
   PRICING_CONSTANTS,
   normalizeCarType,
