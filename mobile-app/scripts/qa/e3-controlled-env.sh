@@ -20,6 +20,11 @@ if [[ -f "${MOBILE_DIR}/scripts/source-local-build-env.sh" ]]; then
   source "${MOBILE_DIR}/scripts/source-local-build-env.sh"
 fi
 
+export EAS_BUILD_PROFILE="${EAS_BUILD_PROFILE:-production}"
+export LEAF_BUILD_PROFILE="${LEAF_BUILD_PROFILE:-${EAS_BUILD_PROFILE}}"
+export EXPO_UPDATE_CHANNEL="${EXPO_UPDATE_CHANNEL:-production}"
+load_eas_build_profile_env
+
 # E3 must exercise the production-shaped app with backend/provider policy as
 # the authority. These values are intentionally forced off rather than using
 # caller defaults from the debug E2E helper.

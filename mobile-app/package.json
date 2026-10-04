@@ -77,7 +77,8 @@
     "qa:phase6:manual": "bash scripts/phase6-manual-evidence.sh",
     "qa:phase6:cross": "bash scripts/phase6-cross-platform-evidence.sh",
     "qa:asserts": "bash scripts/qa-asserts.sh",
-    "qa:production-guards": "bash scripts/production-guard-asserts.sh"
+    "qa:production-guards": "bash scripts/production-guard-asserts.sh",
+    "qa:backend:pilot-canary": "bash -c 'source scripts/qa/e3-controlled-env.sh && PAYMENT_RUNTIME_USER_ID=\"$PASSENGER_UID\" PAYMENT_RUNTIME_PHONE=\"$PASSENGER_PHONE\" bash scripts/qa/assert-backend-payment-runtime-canary.sh'"
   },
   "dependencies": {
     "@expo-google-fonts/inter": "^0.4.2",

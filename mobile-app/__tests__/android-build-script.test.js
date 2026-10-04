@@ -7,6 +7,11 @@ const script = fs.readFileSync(
 );
 
 describe('local Android build script', () => {
+  it('uses the selected EAS release configuration and canonical Android entry', () => {
+    expect(script).toContain('export ENTRY_FILE=index.js');
+    expect(script).toContain('export EAS_BUILD_PROFILE="${EAS_BUILD_PROFILE:-production}"');
+    expect(script).toContain('load_eas_build_profile_env');
+  });
   it('resolves AppConfig from the mobile project regardless of caller cwd', () => {
     expect(script).toContain(
       'expected_version_code="$(cd "${PROJECT_DIR}" && node -e "console.log(require(\'./config/AppConfig\').AppConfig.android_app_version)")"',

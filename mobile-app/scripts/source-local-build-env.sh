@@ -8,6 +8,7 @@ PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 load_env_file() {
   local file_path="$1"
+  local override="${2:-false}"
   [[ -f "${file_path}" ]] || return 0
 
   while IFS= read -r raw_line || [[ -n "${raw_line}" ]]; do
@@ -31,20 +32,57 @@ load_env_file() {
       value="${value%\'}"
     fi
 
-    if [[ -n "${key}" ]]; then
+    if [[ "${key}" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
       local current_value=""
       eval "current_value=\${${key}:-}"
-      if [[ -z "${current_value}" ]]; then
+      if [[ "${override}" == "true" || -z "${current_value}" ]]; then
         export "${key}=${value}"
       fi
     fi
   done < "${file_path}"
 }
 
-load_env_file "${PROJECT_DIR}/.env"
-load_env_file "${PROJECT_DIR}/.env.local"
-load_env_file "${PROJECT_DIR}/.env.production"
-load_env_file "${PROJECT_DIR}/.env.production.local"
+if [[ -n "${LEAF_ENV_FILE:-}" ]]; then
+  leaf_selected_env_file="${LEAF_ENV_FILE}"
+  [[ "${leaf_selected_env_file}" == /* ]] || leaf_selected_env_file="${PROJECT_DIR}/${leaf_selected_env_file}"
+  if [[ ! -f "${leaf_selected_env_file}" ]]; then
+    echo "❌ LEAF_ENV_FILE aponta para um arquivo inexistente." >&2
+    return 1 2>/dev/null || exit 1
+  fi
+  load_env_file "${leaf_selected_env_file}" true
+else
+  load_env_file "${PROJECT_DIR}/.env"
+  load_env_file "${PROJECT_DIR}/.env.local"
+  load_env_file "${PROJECT_DIR}/.env.production"
+  load_env_file "${PROJECT_DIR}/.env.production.local"
+fi
+
+# Local native builds use the same public values as the selected EAS profile.
+# An explicitly selected QA env remains authoritative instead of merging release.
+load_eas_build_profile_env() {
+  [[ -z "${LEAF_ENV_FILE:-}" ]] || return 0
+  local profile="${EAS_BUILD_PROFILE:-${LEAF_BUILD_PROFILE:-}}"
+  [[ -n "${profile}" ]] || return 0
+  local profile_values
+  profile_values="$(node - "${PROJECT_DIR}/eas.json" "${profile}" <<'NODE'
+const fs = require('fs');
+const eas = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+const profile = eas.build?.[process.argv[3]];
+if (!profile) {
+  console.error('Selected EAS build profile does not exist.');
+  process.exit(1);
+}
+for (const [key, value] of Object.entries(profile.env || {})) {
+  console.log(`${key}\t${String(value)}`);
+}
+NODE
+)" || return 1
+  local key value
+  while IFS=$'\t' read -r key value; do
+    [[ -n "${key}" ]] && export "${key}=${value}"
+  done <<< "${profile_values}"
+  return 0
+}
 
 ensure_xcode_developer_dir() {
   local preferred_developer_dir="/Applications/Xcode.app/Contents/Developer"

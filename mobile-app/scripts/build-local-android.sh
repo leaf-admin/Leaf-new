@@ -268,6 +268,15 @@ main() {
   echo "   Build Android Local (${MODE})"
   echo "══════════════════════════════════════════════════════"
 
+  export PROJECT_ROOT="${PROJECT_DIR}"
+  export ENTRY_FILE=index.js
+  if [[ "${MODE}" == "release" || "${MODE}" == "aab" ]]; then
+    export EAS_BUILD_PROFILE="${EAS_BUILD_PROFILE:-production}"
+    export LEAF_BUILD_PROFILE="${LEAF_BUILD_PROFILE:-${EAS_BUILD_PROFILE}}"
+    export EXPO_UPDATE_CHANNEL="${EXPO_UPDATE_CHANNEL:-production}"
+  fi
+  load_eas_build_profile_env
+
   ensure_android_native
   ensure_local_properties
   sync_native_android_version

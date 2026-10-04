@@ -381,6 +381,7 @@ main() {
   export EAS_BUILD_PROFILE="${EAS_BUILD_PROFILE:-production}"
   export LEAF_BUILD_PROFILE="${LEAF_BUILD_PROFILE:-${EAS_BUILD_PROFILE}}"
   export EXPO_UPDATE_CHANNEL="${EXPO_UPDATE_CHANNEL:-production}"
+  load_eas_build_profile_env
   if [[ -f "${PROJECT_DIR}/index.js" ]]; then
     # Expo/Metro resolves the bundle entry relative to the workspace server root
     # in this monorepo, while expo-constants must still use mobile-app as root.

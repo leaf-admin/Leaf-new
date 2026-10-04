@@ -4,7 +4,10 @@ const path = require('path');
 
 const ENV_KEYS = [
   'LEAF_ENV_FILE',
+  'EAS_BUILD_PROFILE',
+  'LEAF_BUILD_PROFILE',
   'EXPO_PUBLIC_API_URL',
+  'EXPO_PUBLIC_LEAF_LAUNCH_PROFILE',
   'LEAF_QA_MARKER',
   'LEAF_PRODUCTION_MARKER',
   'GOOGLE_MAPS_API_KEY',
@@ -69,5 +72,44 @@ describe('mobile app config environment loader', () => {
 
     expect(process.env.LEAF_QA_MARKER).toBe('base');
     expect(process.env.LEAF_PRODUCTION_MARKER).toBe('production');
+  });
+
+  it('loads the selected EAS profile before stale local defaults', () => {
+    fs.writeFileSync(path.join(projectRoot, '.env'), 'EXPO_PUBLIC_API_URL=http://localhost:3001\n');
+    fs.writeFileSync(path.join(projectRoot, 'eas.json'), JSON.stringify({ build: {
+      production: { env: { EXPO_PUBLIC_API_URL: 'https://api.leaf.app.br', EXPO_PUBLIC_LEAF_LAUNCH_PROFILE: 'pilot_controlled' } },
+    } }));
+    process.env.EAS_BUILD_PROFILE = 'production';
+    require('../config/loadConfigEnv').loadConfigEnv(projectRoot);
+    expect(process.env.EXPO_PUBLIC_API_URL).toBe('https://api.leaf.app.br');
+    expect(process.env.EXPO_PUBLIC_LEAF_LAUNCH_PROFILE).toBe('pilot_controlled');
+  });
+
+  it('preserves explicit process values when resolving the EAS profile', () => {
+    fs.writeFileSync(path.join(projectRoot, 'eas.json'), JSON.stringify({ build: {
+      production: { env: { EXPO_PUBLIC_API_URL: 'https://api.leaf.app.br' } },
+    } }));
+    process.env.EAS_BUILD_PROFILE = 'production';
+    process.env.EXPO_PUBLIC_API_URL = 'https://api.qa.example.test';
+    require('../config/loadConfigEnv').loadConfigEnv(projectRoot);
+    expect(process.env.EXPO_PUBLIC_API_URL).toBe('https://api.qa.example.test');
+  });
+
+  it('keeps an explicit QA env isolated from a selected release profile', () => {
+    fs.writeFileSync(path.join(projectRoot, '.env.qa'), 'EXPO_PUBLIC_API_URL=https://api.qa.example.test\n');
+    fs.writeFileSync(path.join(projectRoot, 'eas.json'), JSON.stringify({ build: {
+      production: { env: { EXPO_PUBLIC_API_URL: 'https://api.leaf.app.br', EXPO_PUBLIC_LEAF_LAUNCH_PROFILE: 'pilot_controlled' } },
+    } }));
+    process.env.EAS_BUILD_PROFILE = 'production';
+    process.env.LEAF_ENV_FILE = '.env.qa';
+    require('../config/loadConfigEnv').loadConfigEnv(projectRoot);
+    expect(process.env.EXPO_PUBLIC_API_URL).toBe('https://api.qa.example.test');
+    expect(process.env.EXPO_PUBLIC_LEAF_LAUNCH_PROFILE).toBeUndefined();
+  });
+
+  it('fails closed for an unknown selected build profile', () => {
+    fs.writeFileSync(path.join(projectRoot, 'eas.json'), JSON.stringify({ build: {} }));
+    process.env.EAS_BUILD_PROFILE = 'production';
+    expect(() => require('../config/loadConfigEnv').loadConfigEnv(projectRoot)).toThrow('Selected EAS build profile does not exist.');
   });
 });
