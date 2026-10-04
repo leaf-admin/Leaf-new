@@ -1,0 +1,48 @@
+{
+  "paymentRuntime": {
+    "profileId": "qa-test-users-sandbox-durable",
+    "name": "Durable QA test users Woovi sandbox",
+    "environment": "sandbox",
+    "scope": "users",
+    "source": "firestore",
+    "reason": "durable_test_users_payment_sandbox_policy",
+    "expiresAtIso": null,
+    "contextMatched": true
+  },
+  "notificationPolicy": {
+    "configured": true,
+    "fcmConfigured": true
+  },
+  "mapsRoutingPolicy": {
+    "backendOnly": true,
+    "clientDirectGoogleFallback": false,
+    "trafficAwareRoutes": true,
+    "driverTrafficLayerEnabled": true
+  },
+  "launchControl": {
+    "pilotControlled": true,
+    "passengerCohortConfigured": true,
+    "driverCohortConfigured": true,
+    "passengerCohortSize": 1,
+    "driverCohortSize": 1
+  },
+  "probe": "read-only existing QA user runtime config",
+  "qaCanaries": {
+    "passenger": {
+      "result": "PASS",
+      "effectiveEnvironment": "sandbox",
+      "profileId": "qa-test-users-sandbox-durable",
+      "scope": "users",
+      "contextMatched": true,
+      "expiresAt": null
+    },
+    "driver": {
+      "result": "PASS",
+      "effectiveEnvironment": "sandbox",
+      "profileId": "qa-test-users-sandbox-durable",
+      "scope": "users",
+      "contextMatched": true,
+      "expiresAt": null
+    }
+  }
+}

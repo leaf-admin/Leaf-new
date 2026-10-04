@@ -1,0 +1,58 @@
+[
+  {
+    "path": "mobile-app/__tests__/android-build-script.test.js",
+    "sha256": "ecdbc8115dd438520e16a92f600413c48ec6d29b98c107eb8fc27c0ce79fd96e"
+  },
+  {
+    "path": "mobile-app/__tests__/ios-local-widget-version-contract.test.js",
+    "sha256": "8eb6490b0cb3fd3ba3356646a311ad2aab9caf7cdf16bd8f364a764733dd2bcc"
+  },
+  {
+    "path": "mobile-app/__tests__/local-build-env-profile.test.js",
+    "sha256": "7ac03f787c03adcdc7da96fc123fe7ee3948fdef3b961ff68b2baccc8d63ebed"
+  },
+  {
+    "path": "mobile-app/__tests__/mobile-env-config-loader.test.js",
+    "sha256": "1f9b8e3b0768c68695b48398e545be4760ed43fefbb69557bb116ce0f3c0c6d3"
+  },
+  {
+    "path": "mobile-app/__tests__/release-runtime-policy.test.js",
+    "sha256": "b7b504b104409a858c9598bd8a0cab74cba183c47f198f6c0428b381804f110b"
+  },
+  {
+    "path": "mobile-app/config/loadConfigEnv.js",
+    "sha256": "782bc279156641489987bb3cabdd20d41afc8b4cca820e67bc8c1ff91b1ce9b0"
+  },
+  {
+    "path": "mobile-app/eas.json",
+    "sha256": "79aacdef878279ef64d7ded93e012edd0db50203fa660b68873e7c4395b5b414"
+  },
+  {
+    "path": "mobile-app/package.json",
+    "sha256": "f9e6767888097c38f4d5638dcfd8b0d22f7ecca5f09a86b6e5477420dc9f2aae"
+  },
+  {
+    "path": "mobile-app/scripts/build-local-android.sh",
+    "sha256": "161d4420941cd33f53f298ce56621e301b1ebff7b8c5a4c4c344eff7690f3b12"
+  },
+  {
+    "path": "mobile-app/scripts/build-local-ios.sh",
+    "sha256": "852a7b683cc28de34bc7eebaf07a32387401cd847c14bc4b485d0948dd206a65"
+  },
+  {
+    "path": "mobile-app/scripts/export-local-ios-ipa.sh",
+    "sha256": "2f6cca32cd5ab2473dc4388d80a2c4f81f3907cd597936ecc70e4da10448c9ac"
+  },
+  {
+    "path": "mobile-app/scripts/qa/e3-controlled-env.sh",
+    "sha256": "8d4b595c57c54c4ced2efc96102e742bda512cc63e133b813f4d389dea7301c0"
+  },
+  {
+    "path": "mobile-app/scripts/qa/validate-release-runtime-policy.cjs",
+    "sha256": "a1c80cbd19356e49c1fdb67cdafb7ff2c3cf2dbe08eeb562920eaa174369b8c4"
+  },
+  {
+    "path": "mobile-app/scripts/source-local-build-env.sh",
+    "sha256": "47ce226940293367b7db40eb36de9069eeebe868aae4ef1f3cea4bcffb6a29eb"
+  }
+]

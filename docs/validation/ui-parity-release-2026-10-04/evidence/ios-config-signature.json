@@ -1,0 +1,37 @@
+{
+  "targets": [
+    {
+      "target": "Leaf.app",
+      "bundleIdentifier": "br.com.leaf.ride",
+      "version": "1.0.6",
+      "build": "38",
+      "codesignDeepStrict": "PASS",
+      "profileEntitlementsMatch": true,
+      "debuggable": false
+    },
+    {
+      "target": "LeafRideActivityWidget.appex",
+      "bundleIdentifier": "br.com.leaf.ride.LeafRideActivityWidget",
+      "version": "1.0.6",
+      "build": "38",
+      "codesignDeepStrict": "PASS",
+      "profileEntitlementsMatch": true,
+      "debuggable": false
+    }
+  ],
+  "embeddedRuntime": "1.0.6",
+  "otaChannel": "production",
+  "embeddedExtra": {
+    "launchProfile": "pilot_controlled",
+    "pilotControlled": true,
+    "apiUrl": "https://api.leaf.app.br",
+    "backendUrl": "https://api.leaf.app.br",
+    "wsUrl": "https://socket.leaf.app.br",
+    "socketUrl": "https://socket.leaf.app.br",
+    "isReview": false,
+    "e2eTest": false,
+    "forcePaymentBypass": false,
+    "enableTestUserTools": false,
+    "allowClientDirectGoogleFallback": false
+  }
+}

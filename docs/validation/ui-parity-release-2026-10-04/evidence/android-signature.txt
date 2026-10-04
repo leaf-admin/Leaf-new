@@ -1,5 +1,4 @@
-Temurin 17 jarsigner -verify: PASS (jar verified)
+jar verified.
 Certificate SHA-256: B8:A2:ED:46:34:36:06:A6:2C:C1:26:92:BE:62:32:3E:29:69:CD:F4:C8:3F:B5:41:80:D9:24:73:8A:7C:9B:F4
-Matches the existing project App Links fingerprint.
-Android uses a self-signed upload certificate; trust in a public Java CA is not asserted.
-No Play Console upload performed.
+Matches project Asset Links: true
+Java jarsigner reports self-signed upload certificate, no timestamp and ZIP streaming/manifest-order warnings; JarFile verification passed. This is not Google Play acceptance. Full local log: /tmp/leaf-config-aab-signature.log

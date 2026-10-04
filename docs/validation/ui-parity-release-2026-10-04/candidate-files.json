@@ -53,7 +53,7 @@
   },
   {
     "path": "mobile-app/__tests__/android-build-script.test.js",
-    "sha256": "cb35b081f869b0e0fbe20ba3310c13ffcd4af79ebd2a931bb873499333e010d7"
+    "sha256": "ecdbc8115dd438520e16a92f600413c48ec6d29b98c107eb8fc27c0ce79fd96e"
   },
   {
     "path": "mobile-app/__tests__/auth-flow-submission.test.js",
@@ -109,7 +109,7 @@
   },
   {
     "path": "mobile-app/__tests__/ios-local-widget-version-contract.test.js",
-    "sha256": "ff09a5f59951c9123334109ac805a903f36d9eb7424328c6124a5e3e486d5040"
+    "sha256": "8eb6490b0cb3fd3ba3356646a311ad2aab9caf7cdf16bd8f364a764733dd2bcc"
   },
   {
     "path": "mobile-app/__tests__/kyc-service.liveness.test.js",
@@ -132,8 +132,12 @@
     "sha256": "7dbab7be68fc1237db9964046ef2357d19fc4cc11398263c1ce96a45e600cc93"
   },
   {
+    "path": "mobile-app/__tests__/local-build-env-profile.test.js",
+    "sha256": "7ac03f787c03adcdc7da96fc123fe7ee3948fdef3b961ff68b2baccc8d63ebed"
+  },
+  {
     "path": "mobile-app/__tests__/mobile-env-config-loader.test.js",
-    "sha256": "627eefb6856ecc5eeb0aed484d8314554356d7bb26372e95d9207cddfc5975f1"
+    "sha256": "1f9b8e3b0768c68695b48398e545be4760ed43fefbb69557bb116ce0f3c0c6d3"
   },
   {
     "path": "mobile-app/__tests__/otp-step.auth.test.js",
@@ -194,6 +198,10 @@
   {
     "path": "mobile-app/__tests__/qa-mobile-target-preflight.test.js",
     "sha256": "2182303b77dd1dfd2ec867ca618c3949dcb7f1ff17b84333078a90e99179bb96"
+  },
+  {
+    "path": "mobile-app/__tests__/release-runtime-policy.test.js",
+    "sha256": "b7b504b104409a858c9598bd8a0cab74cba183c47f198f6c0428b381804f110b"
   },
   {
     "path": "mobile-app/__tests__/ride-lifecycle-outbox-replay-service.test.js",
@@ -341,7 +349,7 @@
   },
   {
     "path": "mobile-app/config/loadConfigEnv.js",
-    "sha256": "f1ca32605215097419bbd7d804552421d81327f88cfbb1630d5a7f245650912b"
+    "sha256": "782bc279156641489987bb3cabdd20d41afc8b4cca820e67bc8c1ff91b1ce9b0"
   },
   {
     "path": "mobile-app/docs/QA_FLOW_INVENTORY.md",
@@ -350,6 +358,10 @@
   {
     "path": "mobile-app/docs/qa-flow-inventory.json",
     "sha256": "cd418d686ab904d8c727d05c83255f4975dc4dae988e6e41d3d4a9cc4b4d65c2"
+  },
+  {
+    "path": "mobile-app/eas.json",
+    "sha256": "79aacdef878279ef64d7ded93e012edd0db50203fa660b68873e7c4395b5b414"
   },
   {
     "path": "mobile-app/ios/Leaf.xcodeproj/project.pbxproj",
@@ -369,7 +381,7 @@
   },
   {
     "path": "mobile-app/package.json",
-    "sha256": "f1d2fb8577ce011134b5cdb18519917f65cb151eb9514887a49c1aa0b33c6ade"
+    "sha256": "f9e6767888097c38f4d5638dcfd8b0d22f7ecca5f09a86b6e5477420dc9f2aae"
   },
   {
     "path": "mobile-app/plugins/withLeafMaterial.js",
@@ -377,19 +389,35 @@
   },
   {
     "path": "mobile-app/scripts/build-local-android.sh",
-    "sha256": "d46f2a89ba0906fdc9a1a9107fd40b5edda04edfeabd5b1595a4f457da61b771"
+    "sha256": "161d4420941cd33f53f298ce56621e301b1ebff7b8c5a4c4c344eff7690f3b12"
   },
   {
     "path": "mobile-app/scripts/build-local-ios.sh",
-    "sha256": "64b7d0be2c4c3fc5bec615790172e8f0a3f433946b976074e8e084e4e8464c2e"
+    "sha256": "852a7b683cc28de34bc7eebaf07a32387401cd847c14bc4b485d0948dd206a65"
+  },
+  {
+    "path": "mobile-app/scripts/export-local-ios-ipa.sh",
+    "sha256": "2f6cca32cd5ab2473dc4388d80a2c4f81f3907cd597936ecc70e4da10448c9ac"
+  },
+  {
+    "path": "mobile-app/scripts/qa/e3-controlled-env.sh",
+    "sha256": "8d4b595c57c54c4ced2efc96102e742bda512cc63e133b813f4d389dea7301c0"
   },
   {
     "path": "mobile-app/scripts/qa/generate-flow-inventory.js",
     "sha256": "737eaa9c0c2951d986e01dfbe6b134df912d2e541f7a6f8e3ef82a9bd846cbce"
   },
   {
+    "path": "mobile-app/scripts/qa/validate-release-runtime-policy.cjs",
+    "sha256": "a1c80cbd19356e49c1fdb67cdafb7ff2c3cf2dbe08eeb562920eaa174369b8c4"
+  },
+  {
     "path": "mobile-app/scripts/qa/verify-real-qa-target.cjs",
     "sha256": "9a427b10f713316c4010e49b9d3b09d2c9b05c39375ef6e1f2480e2384da9cea"
+  },
+  {
+    "path": "mobile-app/scripts/source-local-build-env.sh",
+    "sha256": "47ce226940293367b7db40eb36de9069eeebe868aae4ef1f3cea4bcffb6a29eb"
   },
   {
     "path": "mobile-app/src/components/KYC/AWSNativeLivenessScreen.js",

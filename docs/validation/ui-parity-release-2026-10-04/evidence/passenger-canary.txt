@@ -1,0 +1,4 @@
+> mobile-app@1.0.0 qa:backend:pilot-canary
+> bash -c 'source scripts/qa/e3-controlled-env.sh && PAYMENT_RUNTIME_USER_ID="$PASSENGER_UID" PAYMENT_RUNTIME_PHONE="$PASSENGER_PHONE" bash scripts/qa/assert-backend-payment-runtime-canary.sh'
+
+[payment-runtime-canary][pass] effectiveEnvironment=sandbox profileId=qa-test-users-sandbox-durable scope=users contextMatched=true expiresAt=none

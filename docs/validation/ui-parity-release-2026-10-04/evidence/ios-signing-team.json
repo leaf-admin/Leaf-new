@@ -1,0 +1,24 @@
+[
+  {
+    "target": "Leaf.app",
+    "profileName": "iOS Team Store Provisioning Profile: br.com.leaf.ride",
+    "teamName": "FREEDOM TECNOLOGIA E SERVICOS LTDA",
+    "teamIdentifiers": [
+      "DTA8W5KA5D"
+    ],
+    "applicationIdentifier": "DTA8W5KA5D.br.com.leaf.ride",
+    "certificate": "Authority=Apple Distribution: FREEDOM TECNOLOGIA E SERVICOS LTDA (DTA8W5KA5D)",
+    "codeTeam": "TeamIdentifier=DTA8W5KA5D"
+  },
+  {
+    "target": "LeafRideActivityWidget.appex",
+    "profileName": "iOS Team Store Provisioning Profile: br.com.leaf.ride.LeafRideActivityWidget",
+    "teamName": "FREEDOM TECNOLOGIA E SERVICOS LTDA",
+    "teamIdentifiers": [
+      "DTA8W5KA5D"
+    ],
+    "applicationIdentifier": "DTA8W5KA5D.br.com.leaf.ride.LeafRideActivityWidget",
+    "certificate": "Authority=Apple Distribution: FREEDOM TECNOLOGIA E SERVICOS LTDA (DTA8W5KA5D)",
+    "codeTeam": "TeamIdentifier=DTA8W5KA5D"
+  }
+]

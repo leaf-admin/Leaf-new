@@ -1,6 +1,1 @@
-xcodebuild archive: PASS
-xcodebuild automatic export: PASS
-App + widget codesign --verify --deep --strict: PASS
-Versions: 1.0.6 / 38; app + widget.
-Runtime: 1.0.6; OTA channel production.
-No store upload performed.
+

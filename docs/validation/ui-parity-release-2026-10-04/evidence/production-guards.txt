@@ -1,0 +1,12 @@
+    "production": [
+      "release-test",
+      "production",
+      "production-apk"
+    ],
+    "review": [
+      "production-review"
+    ]
+  },
+  "issues": []
+}
+[production-guards] PASS
