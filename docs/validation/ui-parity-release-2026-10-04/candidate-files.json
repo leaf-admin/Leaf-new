@@ -40,6 +40,10 @@
     "sha256": "515d24a73c2450fcce610c39c4d8bad0cbc76ce151b69dae492a5d9f0229dad9"
   },
   {
+    "path": "mobile-app/App.js",
+    "sha256": "8887bb47b2124e6f2a58039a8f146f33356eb2d070388cde252452813420cd42"
+  },
+  {
     "path": "mobile-app/__tests__/BookingHistoryService.test.js",
     "sha256": "a3a8522e2443acc64eb953c9b81b6c61fa7dfb43bf135f870011e63b7c4fc864"
   },
@@ -65,7 +69,11 @@
   },
   {
     "path": "mobile-app/__tests__/current-account-surface-contract.test.js",
-    "sha256": "6c1b9047086dc675c51fc51c317953402e4168d504088779f6fc7685c2bd75dd"
+    "sha256": "08565384e9831c7146a43fb1a713825779332fe3ac1a9921bd82e565ea7a2842"
+  },
+  {
+    "path": "mobile-app/__tests__/current-account-surface-services.test.js",
+    "sha256": "945083f66e26aaa159492d646cbe56bd0dff1b160738108ebbe35585e192a95e"
   },
   {
     "path": "mobile-app/__tests__/current-ride-chat-contract.test.js",
@@ -128,6 +136,14 @@
     "sha256": "0ba436a2ed4c590082eeb6b82bbd082eafad0ff7215dd8cd24ae2f54bc8ef63e"
   },
   {
+    "path": "mobile-app/__tests__/leaf-voice-guidance.test.js",
+    "sha256": "fc5393f004d1680d2828f069dea537047339fc38ee9156c8e1727f589e41e61f"
+  },
+  {
+    "path": "mobile-app/__tests__/leaf-voice-native-contract.test.js",
+    "sha256": "04b369674c85b0ca6c370aa73c366b529fba8cef06a545eb95ccdfea31326f30"
+  },
+  {
     "path": "mobile-app/__tests__/legal-screen-robotaxi-shell.test.js",
     "sha256": "7dbab7be68fc1237db9964046ef2357d19fc4cc11398263c1ce96a45e600cc93"
   },
@@ -138,6 +154,14 @@
   {
     "path": "mobile-app/__tests__/mobile-env-config-loader.test.js",
     "sha256": "1f9b8e3b0768c68695b48398e545be4760ed43fefbb69557bb116ce0f3c0c6d3"
+  },
+  {
+    "path": "mobile-app/__tests__/mobile-preferences-provider.test.js",
+    "sha256": "e26dd9589247e27c0eec9c0b3a7759153bd2d39f98c0a0f3df2f8e7185509778"
+  },
+  {
+    "path": "mobile-app/__tests__/mobile-preferences-service.test.js",
+    "sha256": "f5632d789fd07b4d9117f988ba1dc6d542f2994ec09598fa5095883ce2ed076c"
   },
   {
     "path": "mobile-app/__tests__/otp-step.auth.test.js",
@@ -165,7 +189,7 @@
   },
   {
     "path": "mobile-app/__tests__/prototype-map-layer-viewport.test.js",
-    "sha256": "be7b4872681483b598546e6dbf5332a85146e86fdd8a27d90f9bb62bda726f8b"
+    "sha256": "46e418429b840b986e3711ed63765bf6fb0e8f6c7452f5b28b3b564d07a4c2a2"
   },
   {
     "path": "mobile-app/__tests__/prototype-new-surfaces.test.js",
@@ -217,7 +241,7 @@
   },
   {
     "path": "mobile-app/__tests__/robotaxi-settings-persistence.test.js",
-    "sha256": "9581289e163e8490b9d172b599e01ceeb27b900768946c8b23f09b5027ed3eb4"
+    "sha256": "f2bc8f03b540a92868665c1c60646b721b6299dacc0149ae26a094cc1f1f63fe"
   },
   {
     "path": "mobile-app/__tests__/root-tab-surface-navigation.test.js",
@@ -241,7 +265,7 @@
   },
   {
     "path": "mobile-app/android/app/build.gradle",
-    "sha256": "0604e1bda456a45afbf5e490b305389086e90e14a8308e0971f52b64f9bfe052"
+    "sha256": "7b9a027ce321cfe057c9f2c78a76a08fe2606d038046ecd9f2c70351572594e4"
   },
   {
     "path": "mobile-app/app.config.js",
@@ -365,11 +389,19 @@
   },
   {
     "path": "mobile-app/ios/Leaf.xcodeproj/project.pbxproj",
-    "sha256": "27362940dcf313a651e0283e6b6f71d408f59ba68a8e39cb1e977c437de5272e"
+    "sha256": "3d0c7da34b127ef0e602c21a0ba84216c73f8a1bf5d446d6486a2ccd1d6abb78"
   },
   {
     "path": "mobile-app/ios/Leaf/Info.plist",
     "sha256": "1f8409b7f181fa3a5afad2a1a5ed524ca7130d6e957f08fbb9d0f8b86c81d78d"
+  },
+  {
+    "path": "mobile-app/native/ui/android/LeafVoiceGuidanceModule.java",
+    "sha256": "2301dfbe8560524a723fbe722629de11743105cb6a5fae90287e54b4607298b1"
+  },
+  {
+    "path": "mobile-app/native/ui/android/LeafVoiceGuidancePackage.java",
+    "sha256": "c8229d5ee6bd61a78893326bde9d36016c191b8eaef9b39b6cc8aef05ea89838"
   },
   {
     "path": "mobile-app/native/ui/ios/LeafMaterialView.m",
@@ -380,20 +412,28 @@
     "sha256": "bfe0e7a9558abd819860159e69c566bd699089a3b00f686795ab34d71e2f9d14"
   },
   {
+    "path": "mobile-app/native/ui/ios/LeafVoiceGuidance.m",
+    "sha256": "fee8786200dd441de88d9cc305937bebafcdd21bb22e67eb0365e37b21cecfa3"
+  },
+  {
+    "path": "mobile-app/native/ui/ios/LeafVoiceGuidance.swift",
+    "sha256": "f7df80f8f2578bf7130ed03e445cffc1a3f0d6c6b7d5496bf307492afb2e7ef0"
+  },
+  {
     "path": "mobile-app/package.json",
     "sha256": "f9e6767888097c38f4d5638dcfd8b0d22f7ecca5f09a86b6e5477420dc9f2aae"
   },
   {
     "path": "mobile-app/plugins/withLeafMaterial.js",
-    "sha256": "5f183b24ceb9aab2239d5287e25ef6b28370f89929c5485b670a8f2fa5fc9815"
+    "sha256": "60d717f09280d10a7c9f537daa836e3a6db9da77b9ad4d311747e06f95a44576"
   },
   {
     "path": "mobile-app/scripts/build-local-android.sh",
-    "sha256": "161d4420941cd33f53f298ce56621e301b1ebff7b8c5a4c4c344eff7690f3b12"
+    "sha256": "2af5e619053037dee072f3d28fe113095303901018ae86443b30b7cffd911cd4"
   },
   {
     "path": "mobile-app/scripts/build-local-ios.sh",
-    "sha256": "852a7b683cc28de34bc7eebaf07a32387401cd847c14bc4b485d0948dd206a65"
+    "sha256": "e73bb923fec07cdc240ee46f10641e4bd965635b070a6b38a83b31dba046dfa1"
   },
   {
     "path": "mobile-app/scripts/export-local-ios-ipa.sh",
@@ -420,6 +460,10 @@
     "sha256": "47ce226940293367b7db40eb36de9069eeebe868aae4ef1f3cea4bcffb6a29eb"
   },
   {
+    "path": "mobile-app/scripts/sync-leaf-ui-native.cjs",
+    "sha256": "96409906cc38cbf2518c53f5c87a85a29bff7c6a1fdfe211106d94e0430366de"
+  },
+  {
     "path": "mobile-app/src/components/KYC/AWSNativeLivenessScreen.js",
     "sha256": "c5f20aade415c46a2492c246a90a57cc19272c9a843987302407fe118b0b0215"
   },
@@ -430,6 +474,10 @@
   {
     "path": "mobile-app/src/components/LoadingStates.js",
     "sha256": "b0688f429baa4a5675603d6055d66179293d238431fab8e3f8c9cf6729fb09cd"
+  },
+  {
+    "path": "mobile-app/src/components/MobilePreferencesProvider.js",
+    "sha256": "58c038d51ff00050d6e31977116690809ddc42d395046a744dbe81d8c514e434"
   },
   {
     "path": "mobile-app/src/components/PermissionExplanationModal.js",
@@ -512,6 +560,10 @@
     "sha256": "f306af33a6193b35a6eaa43dd223ec315d72ae0e1f03beb7ddd0824af8b7ca4b"
   },
   {
+    "path": "mobile-app/src/components/i18n/LanguageProvider.js",
+    "sha256": "a0d23bc7b783ccea547d02ec6603e9d3c61e04902033b35528319948550724d9"
+  },
+  {
     "path": "mobile-app/src/components/payment/SecurePaymentBadge.js",
     "sha256": "95978bf7876f802eafd74ac85b6b960522b80656447ba9be8c85eee4aef31d7a"
   },
@@ -553,7 +605,7 @@
   },
   {
     "path": "mobile-app/src/components/prototype/PrototypeMapLayer.js",
-    "sha256": "94321d60a8230b840506ac7f7cb0b50eef5afc1eac8b153c5bed5bc724ae5185"
+    "sha256": "68d53e159e27fcc311bf890a6b06084846fd263bb19a5405b460a1d90e0ae126"
   },
   {
     "path": "mobile-app/src/components/prototype/PrototypeMenuSurface.js",
@@ -574,6 +626,18 @@
   {
     "path": "mobile-app/src/hooks/useAccountSummary.js",
     "sha256": "221db9b18f25addc787ff032049798324a9476bd857d1759c13ca448fb59ac6d"
+  },
+  {
+    "path": "mobile-app/src/hooks/useLeafVoiceGuidance.js",
+    "sha256": "842dc3c30215d04d65899a8782d5d95d08252ebfae0a95bf24eafe61ec3663b8"
+  },
+  {
+    "path": "mobile-app/src/i18n/index.js",
+    "sha256": "f4c28ff5d0cb14717e002d15ab0509b601e02cf70dde196bd8b1f298a80ba8e1"
+  },
+  {
+    "path": "mobile-app/src/locales/index.js",
+    "sha256": "fb92a508c09503104b40b78b476cf59c6557d3101c3068ba73bddf8bea7ff4a4"
   },
   {
     "path": "mobile-app/src/navigation/AppNavigator.js",
@@ -665,7 +729,7 @@
   },
   {
     "path": "mobile-app/src/screens/prototype/RobotaxiHomeScreen.js",
-    "sha256": "2ab720f9dae9ec3ccd94217d2d51c1a7c8a0997e1af00f9e59ac93e6b87d8126"
+    "sha256": "72857cc6fb8502a89951fc888acffbe70ec3af6671aef9700f713d9f962b709a"
   },
   {
     "path": "mobile-app/src/screens/prototype/RobotaxiInvitesScreen.js",
@@ -713,7 +777,7 @@
   },
   {
     "path": "mobile-app/src/screens/prototype/RobotaxiSettingsScreen.js",
-    "sha256": "167c57ffa1a34be6afbb639413d2dd6d79424d15647296b5c652a0b6f6378c77"
+    "sha256": "69e04047816fa4a212e00c9e847d2d0206a961742ac6fdb55ed78a7825de99ed"
   },
   {
     "path": "mobile-app/src/screens/prototype/RobotaxiShareTripScreen.js",
@@ -784,6 +848,10 @@
     "sha256": "19f2e5b8653adf7ff4e9fe6056864912106b3350f10dadbc8dc02d21f00f23b9"
   },
   {
+    "path": "mobile-app/src/screens/prototype/robotaxiSettingsConfig.js",
+    "sha256": "1a14fbe95c10808ea88fbca82827ef2d457c45faf62a11266b3927aced9013d5"
+  },
+  {
     "path": "mobile-app/src/screens/prototype/tripAddressPresentation.js",
     "sha256": "e2fbde874c71ed4010cf2c384f2fce32067eda0b76d492f801f59dfa8dd2539c"
   },
@@ -802,6 +870,14 @@
   {
     "path": "mobile-app/src/services/KYCService.js",
     "sha256": "1cdf0124dd93c64c6dde23ea01de9dacb5e14716e57a85d68acdeb3657a6bad3"
+  },
+  {
+    "path": "mobile-app/src/services/LeafVoiceGuidanceService.js",
+    "sha256": "4c35327c2144fa75ea900b544fa6858043e9253148d606300f0374a585884f33"
+  },
+  {
+    "path": "mobile-app/src/services/MobilePreferencesService.js",
+    "sha256": "142fedbecab7381eb4de2e460fddf58585c24f336bb2544c615f29c88487cc6b"
   },
   {
     "path": "mobile-app/src/services/RideLifecycleOutboxReplayService.js",

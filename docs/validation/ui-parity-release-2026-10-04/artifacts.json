@@ -1,17 +1,18 @@
 {
-  "candidateCommit": "678173e41",
+  "candidateCommit": "1097a27fc8b8e9a481c095c004f4d5529586b2ac",
   "android": {
     "path": "/Users/izaakdias/Documents/Leaf-release-candidates/1.0.6/Leaf-1.0.6-132-candidate.aab",
     "package": "br.com.leaf.ride",
     "version": "1.0.6",
     "build": "132",
-    "sha256": "b12ea19a241267f51c870c928c6d2bb4721c2b5131800b010346ef539c151e56",
-    "bytes": 155137828,
+    "sha256": "e6035abbe9eb872a76fdf3684d1796d886feb3277640848c21883164ffe71c5e",
+    "bytes": 154694568,
     "signatureVerified": true,
     "certificateSha256": "B8:A2:ED:46:34:36:06:A6:2C:C1:26:92:BE:62:32:3E:29:69:CD:F4:C8:3F:B5:41:80:D9:24:73:8A:7C:9B:F4",
     "matchesProjectAssetLinks": true,
     "launchProfile": "pilot_controlled",
-    "pilotControlled": true
+    "pilotControlled": true,
+    "includesNativeVoiceGuidance": true
   },
   "ios": {
     "status": "signed_export_verified",
@@ -25,14 +26,15 @@
     "otaChannel": "production",
     "includesRideActivityWidget": true,
     "signatureVerified": true,
-    "sha256": "b8f462d05967f20f0496434df0b1c90109cdb6099d1e1d0361dd1ab6ad5a9033",
-    "bytes": 79550622,
+    "sha256": "4a9e5ccf1e4cd9b258891ed2f0e01021efde6667ff2fa0dbe2734e82d21ccd01",
+    "bytes": 79572112,
     "distributionMethod": "app-store-connect; local export only",
     "launchProfile": "pilot_controlled",
     "pilotControlled": true,
     "teamId": "DTA8W5KA5D",
     "teamName": "FREEDOM TECNOLOGIA E SERVICOS LTDA",
-    "appAndWidgetTeamVerified": true
+    "appAndWidgetTeamVerified": true,
+    "includesNativeVoiceGuidance": true
   },
   "storeSubmission": "not_submitted",
   "qaPaymentRuntime": {
@@ -42,5 +44,19 @@
     "driverCanary": "PASS",
     "globalPaymentEnvironmentUnchanged": true
   },
-  "previousCandidateDirectory": "/Users/izaakdias/Documents/Leaf-release-candidates/1.0.6/pre-config"
+  "previousCandidateDirectory": "/Users/izaakdias/Documents/Leaf-release-candidates/1.0.6/pre-settings",
+  "iosDevelopment": {
+    "path": "/Users/izaakdias/Documents/Leaf-release-candidates/1.0.6/Leaf-1.0.6-38-device.ipa",
+    "sha256": "aa651c22e3f21c2fb4bb679569c0576ac772490790fc6ed21edf7580168a5036",
+    "bytes": 49503092,
+    "teamId": "DTA8W5KA5D",
+    "includesRideActivityWidget": true,
+    "appAndWidgetTeamVerified": true,
+    "distributionMethod": "debugging",
+    "nativeVoiceGuidanceIncluded": true,
+    "installationStatus": "failed_device_tunnel_unavailable",
+    "deviceCountInProfiles": 2
+  },
+  "settingsPreferencesApi": "validated_real_QA_roundtrip",
+  "savedPlacesApi": "HTTP_404_not_deployed"
 }

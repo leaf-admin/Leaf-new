@@ -1,0 +1,27 @@
+{
+  "probe": "Authenticated QA read-only GET; no account or ride mutation",
+  "results": [
+    {
+      "path": "/api/account/preferences",
+      "status": 200,
+      "success": true,
+      "responseKeys": [
+        "success",
+        "preferences"
+      ],
+      "preferences": {
+        "notificationsEnabled": true,
+        "trafficLayerEnabled": true,
+        "voiceGuidanceEnabled": false,
+        "schemaVersion": 1,
+        "updatedAt": null
+      }
+    },
+    {
+      "path": "/api/account/places",
+      "status": 404,
+      "success": false,
+      "responseKeys": []
+    }
+  ]
+}
