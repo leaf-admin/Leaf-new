@@ -1,0 +1,1519 @@
+
+> mobile-app@1.0.0 test:unit
+> node ../scripts/tests/run-with-profile.cjs mobile-unit "npx jest --config jest.config.js --runInBand" --runInBand
+
+========================================================================================
+TEST EXECUTION PROFILE :: mobile-unit
+========================================================================================
+repo: /Users/izaakdias/.codex/worktrees/leaf-ui-rc106/Leaf-new
+timestamp: 2026-10-04T15:49:15.672Z
+git: codex/leaf-ui-rc-1.0.6 @ d3f8e5f88 (dirty)
+node: v20.20.2
+mode: remote-shared (contabo)
+WS_URL: https://socket.leaf.app.br
+API_BASE_URL: https://api.leaf.app.br
+E2E_REMOTE_SSH_HOST: (set E2E_REMOTE_SSH_HOST)
+E2E_REMOTE_SSH_USER: root
+E2E_REMOTE_SSH_KEY_PATH(resolved): /Users/izaakdias/.ssh/leaf_contabo_20260412_ed25519
+E2E_REMOTE_REDIS_PASSWORD: (unset)
+E2E_RUN_ID: (auto: Date.now())
+E2E_DRIVER_SIM_MODE: (auto)
+E2E_GENERATE_FIREBASE_TOKEN: true
+FIREBASE_TEST_CREDENTIAL: unset
+E2E_MOCK_PAYMENT: true
+APP_REVIEW: false
+========================================================================================
+CANONICAL DOC: /Users/izaakdias/.codex/worktrees/leaf-ui-rc106/Leaf-new/docs/TEST_EXECUTION_CANONICAL_PROFILE.md
+========================================================================================
+# Perfil Canônico de Execução de Testes (LEAF)
+
+Este documento define o baseline oficial para reduzir flakiness e evitar falso-positivo/falso-negativo entre execuções em dias diferentes.
+
+## 1) Comandos oficiais
+
+Sempre rode testes pelos scripts npm (não use `npx jest` direto):
+
+1. Backend completo: `cd leaf-websocket-backend && npm run test:all`
+2. Backend unit+integration: `cd leaf-websocket-backend && npm test`
+3. Backend E2E: `cd leaf-websocket-backend && npm run test:e2e`
+4. Mobile unit: `cd mobile-app && npm run test:unit`
+
+Todos esses comandos exibem automaticamente este perfil antes da execução.
+
+## 2) Ambiente alvo (hoje)
+
+1. Infra remota principal de E2E/carga: Contabo (shared runtime)
+2. Endpoint socket padrão: `https://socket.leaf.app.br`
+3. Endpoint API padrão: `https://api.leaf.app.br`
+4. Backend local é opcional para unit/integration; E2E padrão usa ambiente remoto compartilhado
+
+## 3) Variáveis críticas
+
+1. `APP_REVIEW=false` para teste funcional normal (evita bypass mascarar erro real)
+2. `E2E_RUN_ID` opcional (se ausente, testes geram tag única via `Date.now()`)
+3. `E2E_REMOTE_SSH_HOST` apontando para o host Contabo atual, vindo de env/segredo operacional
+4. `E2E_REMOTE_SSH_USER=root`
+5. `E2E_REMOTE_SSH_KEY_PATH` apontando para chave válida da Contabo
+6. `E2E_REMOTE_REDIS_PASSWORD` definido explicitamente no shell/CI
+7. `E2E_GENERATE_FIREBASE_TOKEN=true` (padrão recomendado)
+8. `E2E_MOCK_PAYMENT=true` somente para cenários de teste que exigem mock controlado
+
+## 4) Por que passa hoje e falha em 1-2 dias?
+
+As causas mais comuns no projeto atual são:
+
+1. Ambiente E2E é remoto e compartilhado: estado concorrente muda entre execuções.
+2. Redis remoto pode variar (locks, filas, TTL, limpeza parcial), mudando timing de eventos.
+3. Mudança de credencial/chave SSH/segredo Redis gera falhas como `NOAUTH`.
+4. `APP_REVIEW`/flags de bypass alteram comportamento de auth e pagamento.
+5. Deploy/config no backend remoto muda entre uma rodada e outra sem fixar snapshot.
+6. Testes com janelas de tempo curtas sofrem com variação de latência no ambiente remoto.
+
+## 5) Regras de estabilidade
+
+1. Sempre rodar pelos scripts npm com preflight.
+2. Não alternar `APP_REVIEW` no meio da bateria.
+3. Não misturar execução local e remota no mesmo relatório sem separar contexto.
+4. Registrar commit SHA e branch no relatório da rodada.
+5. Em falha, repetir com mesmo perfil e `E2E_RUN_ID` novo para evitar colisão de estado.
+6. Antes de classificar regressão de código, validar preflight (env + credenciais + endpoints).
+
+## 6) Checklist rápido antes de executar
+
+1. Estou no branch/commit certo?
+2. `APP_REVIEW` está `false`?
+3. Endpoints apontam para Contabo?
+4. Chave SSH e senha Redis remota estão válidas?
+5. Vou rodar via `npm run ...` (com preflight) e não via comando avulso?
+
+========================================================================================
+PASS __tests__/prototype-ride-screens.test.js (9.817 s)
+PASS __tests__/local-build-env-profile.test.js (7.481 s)
+PASS __tests__/destination-quote-recalculation.test.js
+PASS __tests__/driver-online-toggle.test.js (5.078 s)
+  ● Console
+
+    console.log
+      🔧 [ApiConfig] Platform.OS: android | Usando chave: mobile
+
+      at Function.apply [as log] (src/utils/Logger.js:45:18)
+
+    console.log
+      🔧 [ApiConfig] Configuração carregada: {
+        platform: 'android',
+        platformKey: 'mobile',
+        selfHostedApi: 'https://api.leaf.app.br',
+        selfHostedWebSocket: 'https://socket.leaf.app.br',
+        environment: 'development'
+      }
+
+      at Function.apply [as log] (src/utils/Logger.js:45:18)
+
+    console.warn
+      [PassengerHome] Rota real indisponível; aguardando rota válida para exibir polyline. Rota canônica indisponível para navegação.
+
+      52 |   static warn(...args) {
+      53 |     if (__DEV__) {
+    > 54 |       console.warn(...sanitizeLogArgs(args));
+         |                   ^
+      55 |     }
+      56 |   }
+      57 |
+
+      at Function.apply [as warn] (src/utils/Logger.js:54:19)
+      at warn (src/screens/prototype/RobotaxiHomeScreen.js:7361:18)
+
+    console.error
+      An update to RobotaxiHomeScreen inside a test was not wrapped in act(...).
+
+      When testing, code that causes React state updates should be wrapped into act(...):
+
+      act(() => {
+        /* fire events that update state */
+      });
+      /* assert on the output */
+
+      This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+      665 |     }
+      666 |
+    > 667 |     originalConsoleError(...args);
+          |                         ^
+      668 |   };
+      669 |   global.__leafPrototypeMaxDepthPatchInstalled = true;
+      670 | }
+
+      at console.apply (src/screens/prototype/RobotaxiHomeScreen.js:667:25)
+      at ../../../../../Documents/Leaf-new/node_modules/react-test-renderer/cjs/react-test-renderer.development.js:11801:19
+      at runWithFiberInDEV (../../../../../Documents/Leaf-new/node_modules/react-test-renderer/cjs/react-test-renderer.development.js:1574:13)
+      at warnIfUpdatesNotWrappedWithActDEV (../../../../../Documents/Leaf-new/node_modules/react-test-renderer/cjs/react-test-renderer.development.js:11800:9)
+      at scheduleUpdateOnFiber (../../../../../Documents/Leaf-new/node_modules/react-test-renderer/cjs/react-test-renderer.development.js:10326:9)
+      at dispatchSetStateInternal (../../../../../Documents/Leaf-new/node_modules/react-test-renderer/cjs/react-test-renderer.development.js:4148:13)
+      at dispatchSetState (../../../../../Documents/Leaf-new/node_modules/react-test-renderer/cjs/react-test-renderer.development.js:4107:7)
+      at Timeout.setHomeDestinationSearching (src/screens/prototype/RobotaxiHomeScreen.js:4614:9)
+      at asyncGeneratorStep (../../../../../Documents/Leaf-new/node_modules/@babel/runtime/helpers/asyncToGenerator.js:3:17)
+      at _next (../../../../../Documents/Leaf-new/node_modules/@babel/runtime/helpers/asyncToGenerator.js:17:9)
+      at ../../../../../Documents/Leaf-new/node_modules/@babel/runtime/helpers/asyncToGenerator.js:22:7
+      at Timeout.<anonymous> (../../../../../Documents/Leaf-new/node_modules/@babel/runtime/helpers/asyncToGenerator.js:14:12)
+      at Timeout.apply [as _onTimeout] (src/screens/prototype/RobotaxiHomeScreen.js:4612:22)
+
+    console.error
+      An update to RobotaxiHomeScreen inside a test was not wrapped in act(...).
+
+      When testing, code that causes React state updates should be wrapped into act(...):
+
+      act(() => {
+        /* fire events that update state */
+      });
+      /* assert on the output */
+
+      This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+      665 |     }
+      666 |
+    > 667 |     originalConsoleError(...args);
+          |                         ^
+      668 |   };
+      669 |   global.__leafPrototypeMaxDepthPatchInstalled = true;
+      670 | }
+
+      at console.apply (src/screens/prototype/RobotaxiHomeScreen.js:667:25)
+      at ../../../../../Documents/Leaf-new/node_modules/react-test-renderer/cjs/react-test-renderer.development.js:11801:19
+      at runWithFiberInDEV (../../../../../Documents/Leaf-new/node_modules/react-test-renderer/cjs/react-test-renderer.development.js:1574:13)
+      at warnIfUpdatesNotWrappedWithActDEV (../../../../../Documents/Leaf-new/node_modules/react-test-renderer/cjs/react-test-renderer.development.js:11800:9)
+      at scheduleUpdateOnFiber (../../../../../Documents/Leaf-new/node_modules/react-test-renderer/cjs/react-test-renderer.development.js:10326:9)
+      at dispatchSetStateInternal (../../../../../Documents/Leaf-new/node_modules/react-test-renderer/cjs/react-test-renderer.development.js:4148:13)
+      at dispatchSetState (../../../../../Documents/Leaf-new/node_modules/react-test-renderer/cjs/react-test-renderer.development.js:4107:7)
+      at Timeout.setHomeDestinationResults (src/screens/prototype/RobotaxiHomeScreen.js:4616:11)
+      at asyncGeneratorStep (../../../../../Documents/Leaf-new/node_modules/@babel/runtime/helpers/asyncToGenerator.js:3:17)
+      at _next (../../../../../Documents/Leaf-new/node_modules/@babel/runtime/helpers/asyncToGenerator.js:17:9)
+      at ../../../../../Documents/Leaf-new/node_modules/@babel/runtime/helpers/asyncToGenerator.js:22:7
+      at Timeout.<anonymous> (../../../../../Documents/Leaf-new/node_modules/@babel/runtime/helpers/asyncToGenerator.js:14:12)
+      at Timeout.apply [as _onTimeout] (src/screens/prototype/RobotaxiHomeScreen.js:4612:22)
+
+    console.error
+      An update to RobotaxiHomeScreen inside a test was not wrapped in act(...).
+
+      When testing, code that causes React state updates should be wrapped into act(...):
+
+      act(() => {
+        /* fire events that update state */
+      });
+      /* assert on the output */
+
+      This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+      665 |     }
+      666 |
+    > 667 |     originalConsoleError(...args);
+          |                         ^
+      668 |   };
+      669 |   global.__leafPrototypeMaxDepthPatchInstalled = true;
+      670 | }
+
+      at console.apply (src/screens/prototype/RobotaxiHomeScreen.js:667:25)
+      at ../../../../../Documents/Leaf-new/node_modules/react-test-renderer/cjs/react-test-renderer.development.js:11801:19
+      at runWithFiberInDEV (../../../../../Documents/Leaf-new/node_modules/react-test-renderer/cjs/react-test-renderer.development.js:1574:13)
+      at warnIfUpdatesNotWrappedWithActDEV (../../../../../Documents/Leaf-new/node_modules/react-test-renderer/cjs/react-test-renderer.development.js:11800:9)
+      at scheduleUpdateOnFiber (../../../../../Documents/Leaf-new/node_modules/react-test-renderer/cjs/react-test-renderer.development.js:10326:9)
+      at dispatchSetStateInternal (../../../../../Documents/Leaf-new/node_modules/react-test-renderer/cjs/react-test-renderer.development.js:4148:13)
+      at dispatchSetState (../../../../../Documents/Leaf-new/node_modules/react-test-renderer/cjs/react-test-renderer.development.js:4107:7)
+      at Timeout.setHomeDestinationSearching (src/screens/prototype/RobotaxiHomeScreen.js:4614:9)
+      at asyncGeneratorStep (../../../../../Documents/Leaf-new/node_modules/@babel/runtime/helpers/asyncToGenerator.js:3:17)
+      at _next (../../../../../Documents/Leaf-new/node_modules/@babel/runtime/helpers/asyncToGenerator.js:17:9)
+      at ../../../../../Documents/Leaf-new/node_modules/@babel/runtime/helpers/asyncToGenerator.js:22:7
+      at Timeout.<anonymous> (../../../../../Documents/Leaf-new/node_modules/@babel/runtime/helpers/asyncToGenerator.js:14:12)
+      at Timeout.apply [as _onTimeout] (src/screens/prototype/RobotaxiHomeScreen.js:4612:22)
+
+    console.error
+      An update to RobotaxiHomeScreen inside a test was not wrapped in act(...).
+
+      When testing, code that causes React state updates should be wrapped into act(...):
+
+      act(() => {
+        /* fire events that update state */
+      });
+      /* assert on the output */
+
+      This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+      665 |     }
+      666 |
+    > 667 |     originalConsoleError(...args);
+          |                         ^
+      668 |   };
+      669 |   global.__leafPrototypeMaxDepthPatchInstalled = true;
+      670 | }
+
+      at console.apply (src/screens/prototype/RobotaxiHomeScreen.js:667:25)
+      at ../../../../../Documents/Leaf-new/node_modules/react-test-renderer/cjs/react-test-renderer.development.js:11801:19
+      at runWithFiberInDEV (../../../../../Documents/Leaf-new/node_modules/react-test-renderer/cjs/react-test-renderer.development.js:1574:13)
+      at warnIfUpdatesNotWrappedWithActDEV (../../../../../Documents/Leaf-new/node_modules/react-test-renderer/cjs/react-test-renderer.development.js:11800:9)
+      at scheduleUpdateOnFiber (../../../../../Documents/Leaf-new/node_modules/react-test-renderer/cjs/react-test-renderer.development.js:10326:9)
+      at dispatchSetStateInternal (../../../../../Documents/Leaf-new/node_modules/react-test-renderer/cjs/react-test-renderer.development.js:4148:13)
+      at dispatchSetState (../../../../../Documents/Leaf-new/node_modules/react-test-renderer/cjs/react-test-renderer.development.js:4107:7)
+      at Timeout.setHomeDestinationResults (src/screens/prototype/RobotaxiHomeScreen.js:4616:11)
+      at asyncGeneratorStep (../../../../../Documents/Leaf-new/node_modules/@babel/runtime/helpers/asyncToGenerator.js:3:17)
+      at _next (../../../../../Documents/Leaf-new/node_modules/@babel/runtime/helpers/asyncToGenerator.js:17:9)
+      at ../../../../../Documents/Leaf-new/node_modules/@babel/runtime/helpers/asyncToGenerator.js:22:7
+      at Timeout.<anonymous> (../../../../../Documents/Leaf-new/node_modules/@babel/runtime/helpers/asyncToGenerator.js:14:12)
+      at Timeout.apply [as _onTimeout] (src/screens/prototype/RobotaxiHomeScreen.js:4612:22)
+
+    console.error
+      An update to RobotaxiHomeScreen inside a test was not wrapped in act(...).
+
+      When testing, code that causes React state updates should be wrapped into act(...):
+
+      act(() => {
+        /* fire events that update state */
+      });
+      /* assert on the output */
+
+      This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+      665 |     }
+      666 |
+    > 667 |     originalConsoleError(...args);
+          |                         ^
+      668 |   };
+      669 |   global.__leafPrototypeMaxDepthPatchInstalled = true;
+      670 | }
+
+      at console.apply (src/screens/prototype/RobotaxiHomeScreen.js:667:25)
+      at ../../../../../Documents/Leaf-new/node_modules/react-test-renderer/cjs/react-test-renderer.development.js:11801:19
+      at runWithFiberInDEV (../../../../../Documents/Leaf-new/node_modules/react-test-renderer/cjs/react-test-renderer.development.js:1574:13)
+      at warnIfUpdatesNotWrappedWithActDEV (../../../../../Documents/Leaf-new/node_modules/react-test-renderer/cjs/react-test-renderer.development.js:11800:9)
+      at scheduleUpdateOnFiber (../../../../../Documents/Leaf-new/node_modules/react-test-renderer/cjs/react-test-renderer.development.js:10326:9)
+      at dispatchSetStateInternal (../../../../../Documents/Leaf-new/node_modules/react-test-renderer/cjs/react-test-renderer.development.js:4148:13)
+      at dispatchSetState (../../../../../Documents/Leaf-new/node_modules/react-test-renderer/cjs/react-test-renderer.development.js:4107:7)
+      at Timeout.setHomeDestinationSearching (src/screens/prototype/RobotaxiHomeScreen.js:4614:9)
+      at asyncGeneratorStep (../../../../../Documents/Leaf-new/node_modules/@babel/runtime/helpers/asyncToGenerator.js:3:17)
+      at _next (../../../../../Documents/Leaf-new/node_modules/@babel/runtime/helpers/asyncToGenerator.js:17:9)
+      at ../../../../../Documents/Leaf-new/node_modules/@babel/runtime/helpers/asyncToGenerator.js:22:7
+      at Timeout.<anonymous> (../../../../../Documents/Leaf-new/node_modules/@babel/runtime/helpers/asyncToGenerator.js:14:12)
+      at Timeout.apply [as _onTimeout] (src/screens/prototype/RobotaxiHomeScreen.js:4612:22)
+
+    console.error
+      An update to RobotaxiHomeScreen inside a test was not wrapped in act(...).
+
+      When testing, code that causes React state updates should be wrapped into act(...):
+
+      act(() => {
+        /* fire events that update state */
+      });
+      /* assert on the output */
+
+      This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+      665 |     }
+      666 |
+    > 667 |     originalConsoleError(...args);
+          |                         ^
+      668 |   };
+      669 |   global.__leafPrototypeMaxDepthPatchInstalled = true;
+      670 | }
+
+      at console.apply (src/screens/prototype/RobotaxiHomeScreen.js:667:25)
+      at ../../../../../Documents/Leaf-new/node_modules/react-test-renderer/cjs/react-test-renderer.development.js:11801:19
+      at runWithFiberInDEV (../../../../../Documents/Leaf-new/node_modules/react-test-renderer/cjs/react-test-renderer.development.js:1574:13)
+      at warnIfUpdatesNotWrappedWithActDEV (../../../../../Documents/Leaf-new/node_modules/react-test-renderer/cjs/react-test-renderer.development.js:11800:9)
+      at scheduleUpdateOnFiber (../../../../../Documents/Leaf-new/node_modules/react-test-renderer/cjs/react-test-renderer.development.js:10326:9)
+      at dispatchSetStateInternal (../../../../../Documents/Leaf-new/node_modules/react-test-renderer/cjs/react-test-renderer.development.js:4148:13)
+      at dispatchSetState (../../../../../Documents/Leaf-new/node_modules/react-test-renderer/cjs/react-test-renderer.development.js:4107:7)
+      at Timeout.setHomeDestinationResults (src/screens/prototype/RobotaxiHomeScreen.js:4616:11)
+      at asyncGeneratorStep (../../../../../Documents/Leaf-new/node_modules/@babel/runtime/helpers/asyncToGenerator.js:3:17)
+      at _next (../../../../../Documents/Leaf-new/node_modules/@babel/runtime/helpers/asyncToGenerator.js:17:9)
+      at ../../../../../Documents/Leaf-new/node_modules/@babel/runtime/helpers/asyncToGenerator.js:22:7
+      at Timeout.<anonymous> (../../../../../Documents/Leaf-new/node_modules/@babel/runtime/helpers/asyncToGenerator.js:14:12)
+      at Timeout.apply [as _onTimeout] (src/screens/prototype/RobotaxiHomeScreen.js:4612:22)
+
+PASS __tests__/robotaxi-profile-account-deletion.test.js
+PASS __tests__/prototype-new-surfaces.test.js
+  ● Console
+
+    console.log
+      🔧 [ApiConfig] Platform.OS: android | Usando chave: mobile
+
+      at Function.apply [as log] (src/utils/Logger.js:45:18)
+
+    console.log
+      🔧 [ApiConfig] Configuração carregada: {
+        platform: 'android',
+        platformKey: 'mobile',
+        selfHostedApi: 'https://api.leaf.app.br',
+        selfHostedWebSocket: 'https://socket.leaf.app.br',
+        environment: 'development'
+      }
+
+      at Function.apply [as log] (src/utils/Logger.js:45:18)
+
+PASS __tests__/driver-home-overlay.test.js
+PASS __tests__/driver-live-ride-overlay.test.js
+PASS __tests__/phone-input-step.auth.test.js
+PASS __tests__/driver-active-status-alerts.test.js
+PASS __tests__/otp-step.auth.test.js
+PASS __tests__/document-step.kyc.test.js
+  ● Console
+
+    console.error
+      ❌ [DocumentStep PDF extraction] {
+        friendly: 'Sem conexao com a internet. Verifique sua rede e tente novamente.',
+        raw: 'Network request failed',
+        code: '',
+        status: null
+      }
+
+      63 |   static error(...args) {
+      64 |     if (__DEV__) {
+    > 65 |       console.error(...sanitizeLogArgs(args));
+         |                    ^
+      66 |     } else {
+      67 |       // Em produção: apenas logar erros críticos tratados
+      68 |       // Não expor dados do usuário
+
+      at Function.apply (src/utils/Logger.js:65:20)
+      at error (src/utils/friendlyErrorMessages.js:219:10)
+      at src/components/auth/steps/DocumentStep.js:253:23
+      at asyncGeneratorStep (../../../../../Documents/Leaf-new/node_modules/@babel/runtime/helpers/asyncToGenerator.js:3:17)
+      at _next (../../../../../Documents/Leaf-new/node_modules/@babel/runtime/helpers/asyncToGenerator.js:17:9)
+
+PASS __tests__/robotaxi-settings-persistence.test.js
+PASS __tests__/woovi-payment-modal.test.js
+PASS __tests__/prototype-map-layer-viewport.test.js
+PASS __tests__/prototype-payment-failed-screen.test.js
+PASS __tests__/driver-receipt-screen.test.js
+PASS __tests__/prototype-support-thread.test.js
+PASS __tests__/leaf-campaign-slot.test.js
+PASS __tests__/prototype-payment-availability.test.js
+PASS __tests__/leaf-voice-native-contract.test.js
+PASS __tests__/passenger-home-overlay.test.js
+PASS __tests__/driver-email-step-submission.test.js
+PASS __tests__/leaf-native-navigation-banner.test.js
+PASS __tests__/prototype-runtime-session-sanitize.test.js
+  ● Console
+
+    console.log
+      ✅ Axios interceptors configurados
+
+      at Function.apply [as log] (src/utils/Logger.js:45:18)
+
+    console.log
+      🔧 [ApiConfig] Platform.OS: android | Usando chave: mobile
+
+      at Function.apply [as log] (src/utils/Logger.js:45:18)
+
+    console.log
+      🔧 [ApiConfig] Configuração carregada: {
+        platform: 'android',
+        platformKey: 'mobile',
+        selfHostedApi: 'https://api.leaf.app.br',
+        selfHostedWebSocket: 'https://socket.leaf.app.br',
+        environment: 'development'
+      }
+
+      at Function.apply [as log] (src/utils/Logger.js:45:18)
+
+    console.error
+      🚫 [PrototypeRuntime] Restauração Firebase bloqueada por divergência de identidade. { currentUid: 'firebase-user-a', targetUid: 'qa-driver-b' }
+
+      63 |   static error(...args) {
+      64 |     if (__DEV__) {
+    > 65 |       console.error(...sanitizeLogArgs(args));
+         |                    ^
+      66 |     } else {
+      67 |       // Em produção: apenas logar erros críticos tratados
+      68 |       // Não expor dados do usuário
+
+      at Function.apply (src/utils/Logger.js:65:20)
+      at error (src/screens/prototype/prototypeRideRuntime.js:2050:12)
+      at asyncGeneratorStep (../../../../../Documents/Leaf-new/node_modules/@babel/runtime/helpers/asyncToGenerator.js:3:17)
+      at _next (../../../../../Documents/Leaf-new/node_modules/@babel/runtime/helpers/asyncToGenerator.js:17:9)
+
+PASS __tests__/websocket-manager-active-ride-sync.test.js
+PASS __tests__/credentials-step-consent-guards.test.js
+PASS __tests__/aws-native-liveness-screen.test.js
+PASS __tests__/auth-provider-startup.test.js
+  ● Console
+
+    console.log
+      🔄 Sincronizando dados do usuário na fonte moderna...
+
+      at Function.apply [as log] (src/utils/Logger.js:45:18)
+
+    console.log
+      ✅ Usuário sincronizado no Redux via perfil: { source: 'local-cache', uid: 'firebase-uid-1', usertype: 'customer' }
+
+      at Function.apply [as log] (src/utils/Logger.js:45:18)
+
+    console.log
+      ✅ Serviços de notificação inicializados
+
+      at Function.apply [as log] (src/utils/Logger.js:45:18)
+
+    console.log
+      ✅ Usuário sincronizado no Redux via perfil: {
+        source: 'remote-refresh',
+        uid: 'firebase-uid-1',
+        usertype: 'customer'
+      }
+
+      at Function.apply [as log] (src/utils/Logger.js:45:18)
+
+    console.log
+      ✅ Perfil remoto atualizado em background após cache local
+
+      at Function.apply [as log] (src/utils/Logger.js:45:18)
+
+    console.log
+      🔄 Sincronizando dados do usuário na fonte moderna...
+
+      at Function.apply [as log] (src/utils/Logger.js:45:18)
+
+    console.log
+      🧪 AuthProvider - sessão Firebase divergente do perfil QA semeado; priorizando cache local do simulador {
+        firebaseUid: 'firebase-session-1',
+        seededUid: 'driver-seeded-1',
+        seededRole: 'driver'
+      }
+
+      at Function.apply [as log] (src/utils/Logger.js:45:18)
+
+    console.log
+      ✅ Usuário sincronizado no Redux via perfil: {
+        source: 'qa-simulator-e2e-cache',
+        uid: 'driver-seeded-1',
+        usertype: 'driver'
+      }
+
+      at Function.apply [as log] (src/utils/Logger.js:45:18)
+
+    console.log
+      🔄 Sincronizando dados do usuário na fonte moderna...
+
+      at Function.apply [as log] (src/utils/Logger.js:45:18)
+
+    console.log
+      ⚠️ Usuário não encontrado na fonte moderna - NÃO criando perfil básico
+
+      at Function.apply [as log] (src/utils/Logger.js:45:18)
+
+    console.log
+      ⚠️ Deixando Splash/AuthFlow controlar o fluxo de onboarding
+
+      at Function.apply [as log] (src/utils/Logger.js:45:18)
+
+    console.log
+      🔄 Sincronizando dados do usuário na fonte moderna...
+
+      at Function.apply [as log] (src/utils/Logger.js:45:18)
+
+    console.log
+      ⚠️ Usuário não encontrado na fonte moderna - NÃO criando perfil básico
+
+      at Function.apply [as log] (src/utils/Logger.js:45:18)
+
+    console.log
+      ⚠️ Deixando Splash/AuthFlow controlar o fluxo de onboarding
+
+      at Function.apply [as log] (src/utils/Logger.js:45:18)
+
+    console.log
+      🔄 Sincronizando dados do usuário na fonte moderna...
+
+      at Function.apply [as log] (src/utils/Logger.js:45:18)
+
+    console.log
+      ⚠️ Usuário não encontrado na fonte moderna - NÃO criando perfil básico
+
+      at Function.apply [as log] (src/utils/Logger.js:45:18)
+
+    console.log
+      ⚠️ Deixando Splash/AuthFlow controlar o fluxo de onboarding
+
+      at Function.apply [as log] (src/utils/Logger.js:45:18)
+
+    console.log
+      🔄 Sincronizando dados do usuário na fonte moderna...
+
+      at Function.apply [as log] (src/utils/Logger.js:45:18)
+
+    console.log
+      ⚠️ Usuário não encontrado na fonte moderna - NÃO criando perfil básico
+
+      at Function.apply [as log] (src/utils/Logger.js:45:18)
+
+    console.log
+      ⚠️ Deixando Splash/AuthFlow controlar o fluxo de onboarding
+
+      at Function.apply [as log] (src/utils/Logger.js:45:18)
+
+    console.log
+      🔄 Sincronizando dados do usuário na fonte moderna...
+
+      at Function.apply [as log] (src/utils/Logger.js:45:18)
+
+    console.log
+      ⚠️ Usuário não encontrado na fonte moderna - NÃO criando perfil básico
+
+      at Function.apply [as log] (src/utils/Logger.js:45:18)
+
+    console.log
+      ⚠️ Deixando Splash/AuthFlow controlar o fluxo de onboarding
+
+      at Function.apply [as log] (src/utils/Logger.js:45:18)
+
+    console.log
+      🔄 Sincronizando dados do usuário na fonte moderna...
+
+      at Function.apply [as log] (src/utils/Logger.js:45:18)
+
+    console.log
+      ✅ Dados encontrados na fonte moderna: { uid: 'driver-live-session', usertype: 'driver' }
+
+      at Function.apply [as log] (src/utils/Logger.js:45:18)
+
+    console.log
+      ✅ Usuário sincronizado com sucesso no Redux
+
+      at Function.apply [as log] (src/utils/Logger.js:45:18)
+
+    console.log
+      ✅ Serviços de notificação inicializados
+
+      at Function.apply [as log] (src/utils/Logger.js:45:18)
+
+PASS __tests__/prototype-map-vehicle-heading.test.js
+PASS __tests__/profile-data-step-submission.test.js
+PASS __tests__/leaf-passenger-landing.test.js
+PASS __tests__/saved-place-picker-screen.test.js
+PASS __tests__/prototype-top-controls.test.js
+PASS __tests__/mobile-preferences-provider.test.js
+PASS __tests__/profile-selection-step.guard.test.js
+PASS __tests__/prototype-menu-accessibility.test.js
+PASS __tests__/editorial-onboarding-layout.test.js
+PASS __tests__/kyc-liveness-p0.test.js
+PASS __tests__/mobile-runtime-transitive-security-contract.test.js
+PASS __tests__/robotaxi-menu-availability.test.js
+  ● Console
+
+    console.log
+      🔧 [ApiConfig] Platform.OS: android | Usando chave: mobile
+
+      at Function.apply [as log] (src/utils/Logger.js:45:18)
+
+    console.log
+      🔧 [ApiConfig] Configuração carregada: {
+        platform: 'android',
+        platformKey: 'mobile',
+        selfHostedApi: 'https://api.leaf.app.br',
+        selfHostedWebSocket: 'https://socket.leaf.app.br',
+        environment: 'development'
+      }
+
+      at Function.apply [as log] (src/utils/Logger.js:45:18)
+
+    console.log
+      ✅ Axios interceptors configurados
+
+      at Function.apply [as log] (src/utils/Logger.js:45:18)
+
+PASS __tests__/qa-seed-current-routes.test.js
+PASS __tests__/auth.test.js
+PASS __tests__/websocket-manager-create-booking.test.js
+  ● Console
+
+    console.log
+      📤 [WebSocketManager] Criando booking... {
+        connected: true,
+        socketId: undefined,
+        idempotencyKey: 'mobile_customer_123_1791129009926_n5e7mgzl_r9rh53',
+        bookingData: {
+          customerId: 'customer_123',
+          carType: 'Leaf Plus',
+          estimatedFare: 27.5
+        }
+      }
+
+      at Function.apply [as log] (src/utils/Logger.js:45:18)
+
+    console.log
+      📤 [WebSocketManager] Emitindo evento createBooking...
+
+      at Function.apply [as log] (src/utils/Logger.js:45:18)
+
+    console.log
+      ✅ [WebSocketManager] Resposta bookingCreated recebida: {
+        success: true,
+        bookingId: 'booking_telemetry_1',
+        data: { bookingId: 'booking_telemetry_1' }
+      }
+
+      at Function.apply [as log] (src/utils/Logger.js:45:18)
+          at Array.forEach (<anonymous>)
+
+PASS __tests__/same-ride-reconciliation-contract.test.js
+PASS __tests__/prototype-ride-runtime-financial-snapshot.test.js
+PASS __tests__/ux-lab.test.js
+PASS __tests__/websocket-manager-accept-ride.test.js
+PASS __tests__/websocket-manager-driver-status.test.js
+PASS __tests__/websocket-manager-support-scope.test.js
+PASS __tests__/websocket-manager-auth.test.js
+  ● Console
+
+    console.warn
+      ⚠️ [WebSocketManager] Token QA do socket expirado ou próximo de expirar; usando autenticação alternativa.
+
+      52 |   static warn(...args) {
+      53 |     if (__DEV__) {
+    > 54 |       console.warn(...sanitizeLogArgs(args));
+         |                   ^
+      55 |     }
+      56 |   }
+      57 |
+
+      at Function.apply [as warn] (src/utils/Logger.js:54:19)
+      at WebSocketManager.warn (src/services/WebSocketManager.js:959:18)
+      at asyncGeneratorStep (../../../../../Documents/Leaf-new/node_modules/@babel/runtime/helpers/asyncToGenerator.js:3:17)
+      at _next (../../../../../Documents/Leaf-new/node_modules/@babel/runtime/helpers/asyncToGenerator.js:17:9)
+
+    console.log
+      🔐 [WebSocketManager] Autenticando usuário: OjML1wSzdNRaynjqMRlSW1Y0LVy2 como customer
+
+      at Function.apply [as log] (src/utils/Logger.js:45:18)
+
+    console.warn
+      ⚠️ [WebSocketManager] Substituindo identidade de socket pela identidade QA assinada. {
+        requestedUserId: 'driver_stale_1',
+        requestedUserType: 'driver',
+        qaUserId: 'passenger_qa_1',
+        qaUserType: 'customer'
+      }
+
+      52 |   static warn(...args) {
+      53 |     if (__DEV__) {
+    > 54 |       console.warn(...sanitizeLogArgs(args));
+         |                   ^
+      55 |     }
+      56 |   }
+      57 |
+
+      at Function.apply [as warn] (src/utils/Logger.js:54:19)
+      at WebSocketManager.warn (src/services/WebSocketManager.js:1068:14)
+      at asyncGeneratorStep (../../../../../Documents/Leaf-new/node_modules/@babel/runtime/helpers/asyncToGenerator.js:3:17)
+      at _next (../../../../../Documents/Leaf-new/node_modules/@babel/runtime/helpers/asyncToGenerator.js:17:9)
+
+    console.log
+      🔐 [WebSocketManager] Autenticando usuário: passenger_qa_1 como customer
+
+      at Function.apply [as log] (src/utils/Logger.js:45:18)
+
+    console.log
+      🔌 [WebSocketManager] Conectando ao WebSocket: wss://socket.leaf.app.br/socket.io?ignored=1
+
+      at Function.apply [as log] (src/utils/Logger.js:45:18)
+
+    console.log
+      🔌 [WebSocketManager] Configuração de transporte: {
+        transports: [ 'websocket' ],
+        url: 'wss://socket.leaf.app.br/socket.io?ignored=1',
+        isDev: true,
+        origin: 'file://'
+      }
+
+      at Function.apply [as log] (src/utils/Logger.js:45:18)
+
+    console.log
+      🔐 [WebSocketManager] Meta do handshake do socket: {
+        hasToken: '[REDACTED]',
+        uid: 'qa-user',
+        qaAuthBypass: true,
+        qaAutomation: true,
+        queryKeys: [ 'uid', 'qaAuthBypass', 'qaAutomation' ],
+        candidateUrls: [ 'https://socket.test' ]
+      }
+
+      at Function.apply [as log] (src/utils/Logger.js:45:18)
+
+    console.log
+      🔌 [WebSocketManager] Tentando endpoint de socket { candidateUrl: 'https://socket.test', attempt: 1, totalCandidates: 1 }
+
+      at Function.apply [as log] (src/utils/Logger.js:45:18)
+
+    console.warn
+      ⚠️ [WebSocketManager] Falha ao conectar no endpoint de socket {
+        candidateUrl: 'https://socket.test',
+        attempt: 1,
+        totalCandidates: 1,
+        error: 'Timeout ao conectar WebSocket'
+      }
+
+      52 |   static warn(...args) {
+      53 |     if (__DEV__) {
+    > 54 |       console.warn(...sanitizeLogArgs(args));
+         |                   ^
+      55 |     }
+      56 |   }
+      57 |
+
+      at Function.apply [as warn] (src/utils/Logger.js:54:19)
+      at WebSocketManager.warn (src/services/WebSocketManager.js:1356:16)
+          at Generator.throw (<anonymous>)
+      at asyncGeneratorStep (../../../../../Documents/Leaf-new/node_modules/@babel/runtime/helpers/asyncToGenerator.js:3:17)
+      at _throw (../../../../../Documents/Leaf-new/node_modules/@babel/runtime/helpers/asyncToGenerator.js:20:9)
+
+    console.warn
+      ⚠️ [WebSocketManager] Erro ao inicializar WebSocket: Timeout ao conectar WebSocket
+
+      52 |   static warn(...args) {
+      53 |     if (__DEV__) {
+    > 54 |       console.warn(...sanitizeLogArgs(args));
+         |                   ^
+      55 |     }
+      56 |   }
+      57 |
+
+      at Function.apply [as warn] (src/utils/Logger.js:54:19)
+      at WebSocketManager.warn (src/services/WebSocketManager.js:1414:14)
+          at Generator.throw (<anonymous>)
+      at asyncGeneratorStep (../../../../../Documents/Leaf-new/node_modules/@babel/runtime/helpers/asyncToGenerator.js:3:17)
+      at _throw (../../../../../Documents/Leaf-new/node_modules/@babel/runtime/helpers/asyncToGenerator.js:20:9)
+
+    console.warn
+      ⚠️ [WebSocketManager] Stack: Error: Timeout ao conectar WebSocket
+          at /Users/izaakdias/.codex/worktrees/leaf-ui-rc106/Leaf-new/mobile-app/__tests__/websocket-manager-auth.test.js:27:19
+          at /Users/izaakdias/Documents/Leaf-new/node_modules/jest-mock/build/index.js:397:39
+          at /Users/izaakdias/Documents/Leaf-new/node_modules/jest-mock/build/index.js:404:13
+          at mockConstructor (/Users/izaakdias/Documents/Leaf-new/node_modules/jest-mock/build/index.js:103:19)
+          at buildSocketError (/Users/izaakdias/.codex/worktrees/leaf-ui-rc106/Leaf-new/mobile-app/src/services/WebSocketManager.js:73:36)
+          at buildSocketError (/Users/izaakdias/.codex/worktrees/leaf-ui-rc106/Leaf-new/mobile-app/src/services/WebSocketManager.js:1566:13)
+          at handler (/Users/izaakdias/.codex/worktrees/leaf-ui-rc106/Leaf-new/mobile-app/src/services/WebSocketManager.js:1552:9)
+          at /Users/izaakdias/.codex/worktrees/leaf-ui-rc106/Leaf-new/mobile-app/src/services/WebSocketManager.js:1575:10
+          at callTimer (/Users/izaakdias/Documents/Leaf-new/node_modules/@sinonjs/fake-timers/src/fake-timers-src.js:744:24)
+          at doTickInner (/Users/izaakdias/Documents/Leaf-new/node_modules/@sinonjs/fake-timers/src/fake-timers-src.js:1312:29)
+          at doTick (/Users/izaakdias/Documents/Leaf-new/node_modules/@sinonjs/fake-timers/src/fake-timers-src.js:1393:20)
+          at Immediate.<anonymous> (/Users/izaakdias/Documents/Leaf-new/node_modules/@sinonjs/fake-timers/src/fake-timers-src.js:1413:29)
+          at processImmediate (node:internal/timers:483:21)
+
+      52 |   static warn(...args) {
+      53 |     if (__DEV__) {
+    > 54 |       console.warn(...sanitizeLogArgs(args));
+         |                   ^
+      55 |     }
+      56 |   }
+      57 |
+
+      at Function.apply [as warn] (src/utils/Logger.js:54:19)
+      at WebSocketManager.warn (src/services/WebSocketManager.js:1418:14)
+          at Generator.throw (<anonymous>)
+      at asyncGeneratorStep (../../../../../Documents/Leaf-new/node_modules/@babel/runtime/helpers/asyncToGenerator.js:3:17)
+      at _throw (../../../../../Documents/Leaf-new/node_modules/@babel/runtime/helpers/asyncToGenerator.js:20:9)
+
+    console.log
+      ⏳ [WebSocketManager] Conexão já em andamento, aguardando...
+
+      at Function.apply [as log] (src/utils/Logger.js:45:18)
+
+    console.warn
+      ⚠️ [WebSocketManager] Ignorando sessionTerminated de socket obsoleto {
+        activeSocketId: 'socket-reconnected',
+        sourceSocketId: 'socket-reconnected',
+        previousSocketId: '',
+        newSocketId: 'socket-reconnected'
+      }
+
+      52 |   static warn(...args) {
+      53 |     if (__DEV__) {
+    > 54 |       console.warn(...sanitizeLogArgs(args));
+         |                   ^
+      55 |     }
+      56 |   }
+      57 |
+
+      at Function.apply [as warn] (src/utils/Logger.js:54:19)
+      at Array.warn (src/services/WebSocketManager.js:1745:24)
+      at Object.<anonymous> (__tests__/websocket-manager-auth.test.js:906:20)
+
+    console.log
+      ✅ [WebSocketManager] Autenticação confirmada pelo servidor: {
+        success: true,
+        uid: 'driver-123',
+        userType: 'driver',
+        driverOnline: true,
+        isOnline: true,
+        driverOnlineDaily: { sessionStartedAtMs: 1782523241715, effectiveMs: 420000 }
+      }
+
+      at Function.apply [as log] (src/utils/Logger.js:45:18)
+
+    console.log
+      🔌 [WebSocketManager] Desconectado do servidor WebSocket: transport close
+
+      at Function.apply [as log] (src/utils/Logger.js:45:18)
+
+    console.log
+      🔌 [WebSocketManager] Motivo da desconexão: transport close
+
+      at Function.apply [as log] (src/utils/Logger.js:45:18)
+
+    console.warn
+      ⚠️ [WebSocketManager] QA bypass sem token rejeitado pelo backend local. Ative AUTO_TEST_MODE=true ou use um idToken QA para testar socket.
+
+      52 |   static warn(...args) {
+      53 |     if (__DEV__) {
+    > 54 |       console.warn(...sanitizeLogArgs(args));
+         |                   ^
+      55 |     }
+      56 |   }
+      57 |
+
+      at Function.apply [as warn] (src/utils/Logger.js:54:19)
+      at Array.warn (src/services/WebSocketManager.js:1763:24)
+      at Object.<anonymous> (__tests__/websocket-manager-auth.test.js:1123:20)
+
+PASS __tests__/canonical-common-runtime-boundary.test.js
+PASS __tests__/secure-onboarding-storage.test.js
+PASS __tests__/runtime-endpoint-config.test.js
+PASS __tests__/websocket-manager-fcm-actions.test.js
+PASS __tests__/kyc-liveness-error-presentation.test.js
+PASS __tests__/campaign-center-service.test.js
+PASS __tests__/kyc-service.liveness.test.js
+PASS __tests__/root-tab-surface-navigation.test.js
+PASS __tests__/native-aws-liveness-localization-contract.test.js
+PASS __tests__/account-summary-hook.test.js
+PASS __tests__/rating-service.prototype.test.js
+  ● Console
+
+    console.log
+      ⭐ Enviando avaliação: {
+        tripId: 'trip-passenger-proof-1',
+        userId: 'prototype-user',
+        reviewerId: 'prototype-user',
+        reviewerType: 'passenger',
+        driverId: 'driver-test',
+        targetUserId: 'driver-test',
+        rating: 5,
+        comment: 'Tudo certo'
+      }
+
+      at Function.apply [as log] (src/utils/Logger.js:45:18)
+
+    console.log
+      ✅ Avaliação enviada com sucesso
+
+      at Function.apply [as log] (src/utils/Logger.js:45:18)
+
+    console.log
+      💾 Avaliação salva localmente
+
+      at Function.apply [as log] (src/utils/Logger.js:45:18)
+
+    console.log
+      ⭐ Enviando avaliação: {
+        tripId: 'trip-driver-proof-1',
+        userId: 'prototype-user',
+        reviewerId: 'prototype-user',
+        reviewerType: 'driver',
+        passengerId: 'passenger-test',
+        targetUserId: 'passenger-test',
+        rating: 5,
+        comment: 'Passageiro ok'
+      }
+
+      at Function.apply [as log] (src/utils/Logger.js:45:18)
+
+    console.log
+      💾 Avaliação salva localmente
+
+      at Function.apply [as log] (src/utils/Logger.js:45:18)
+
+    console.log
+      ✅ Avaliação confirmada localmente em ambiente de validação
+
+      at Function.apply [as log] (src/utils/Logger.js:45:18)
+
+    console.log
+      ⭐ Enviando avaliação: {
+        tripId: 'ride_1',
+        userId: 'passenger_1',
+        reviewerType: 'passenger',
+        rating: 5
+      }
+
+      at Function.apply [as log] (src/utils/Logger.js:45:18)
+
+    console.log
+      ✅ Avaliação enviada com sucesso
+
+      at Function.apply [as log] (src/utils/Logger.js:45:18)
+
+    console.log
+      💾 Avaliação salva localmente
+
+      at Function.apply [as log] (src/utils/Logger.js:45:18)
+
+    console.log
+      ⭐ Enviando avaliação: {
+        tripId: 'ride_1',
+        userId: 'passenger_1',
+        reviewerType: 'passenger',
+        rating: 5
+      }
+
+      at Function.apply [as log] (src/utils/Logger.js:45:18)
+
+    console.error
+      ❌ Erro ao enviar avaliação: { code: 'RATING_TRIP_NOT_COMPLETED' }
+
+      63 |   static error(...args) {
+      64 |     if (__DEV__) {
+    > 65 |       console.error(...sanitizeLogArgs(args));
+         |                    ^
+      66 |     } else {
+      67 |       // Em produção: apenas logar erros críticos tratados
+      68 |       // Não expor dados do usuário
+
+      at Function.apply (src/utils/Logger.js:65:20)
+      at RatingService.error (src/services/RatingService.js:110:20)
+          at Generator.throw (<anonymous>)
+      at asyncGeneratorStep (../../../../../Documents/Leaf-new/node_modules/@babel/runtime/helpers/asyncToGenerator.js:3:17)
+      at _throw (../../../../../Documents/Leaf-new/node_modules/@babel/runtime/helpers/asyncToGenerator.js:20:9)
+
+    console.log
+      ⭐ Enviando avaliação: {
+        tripId: 'ride_1',
+        userId: 'passenger_1',
+        reviewerType: 'passenger',
+        rating: 5
+      }
+
+      at Function.apply [as log] (src/utils/Logger.js:45:18)
+
+    console.error
+      ❌ Erro ao enviar avaliação: { code: 'WS_DISCONNECTED' }
+
+      63 |   static error(...args) {
+      64 |     if (__DEV__) {
+    > 65 |       console.error(...sanitizeLogArgs(args));
+         |                    ^
+      66 |     } else {
+      67 |       // Em produção: apenas logar erros críticos tratados
+      68 |       // Não expor dados do usuário
+
+      at Function.apply (src/utils/Logger.js:65:20)
+      at RatingService.error (src/services/RatingService.js:110:20)
+          at Generator.throw (<anonymous>)
+      at asyncGeneratorStep (../../../../../Documents/Leaf-new/node_modules/@babel/runtime/helpers/asyncToGenerator.js:3:17)
+      at _throw (../../../../../Documents/Leaf-new/node_modules/@babel/runtime/helpers/asyncToGenerator.js:20:9)
+
+    console.log
+      💾 Avaliação salva localmente
+
+      at Function.apply [as log] (src/utils/Logger.js:45:18)
+
+PASS __tests__/canonical-trip-persistence-contract.test.js
+PASS __tests__/payment-no-direct-woovi-guard.test.js
+PASS __tests__/saved-places-service.test.js
+PASS __tests__/ride-card-contract.test.js
+PASS __tests__/google-api-functions.test.js
+PASS __tests__/surface-manifest-contract.test.js
+PASS __tests__/ride-cost-telemetry-service.test.js
+PASS __tests__/auth-flow-submission.test.js
+PASS __tests__/ride-lifecycle-surface-matrix.test.js
+PASS __tests__/ride-event-outbox-service.test.js
+PASS __tests__/driver-balance-service-pilot.test.js
+  ● Console
+
+    console.log
+      🔧 [ApiConfig] Platform.OS: android | Usando chave: mobile
+
+      at Function.apply [as log] (src/utils/Logger.js:45:18)
+
+    console.log
+      🔧 [ApiConfig] Configuração carregada: {
+        platform: 'android',
+        platformKey: 'mobile',
+        selfHostedApi: 'https://api.leaf.app.br',
+        selfHostedWebSocket: 'https://socket.leaf.app.br',
+        environment: 'development'
+      }
+
+      at Function.apply [as log] (src/utils/Logger.js:45:18)
+
+    console.log
+      🔗 DriverBalanceService baseUrl: https://api.leaf.app.br/api/payment
+
+      at Function.apply [as log] (src/utils/Logger.js:45:18)
+
+    console.log
+      🔧 [ApiConfig] Platform.OS: android | Usando chave: mobile
+
+      at Function.apply [as log] (src/utils/Logger.js:45:18)
+
+    console.log
+      🔧 [ApiConfig] Configuração carregada: {
+        platform: 'android',
+        platformKey: 'mobile',
+        selfHostedApi: 'https://api.leaf.app.br',
+        selfHostedWebSocket: 'https://socket.leaf.app.br',
+        environment: 'development'
+      }
+
+      at Function.apply [as log] (src/utils/Logger.js:45:18)
+
+    console.log
+      🔗 DriverBalanceService baseUrl: https://api.leaf.app.br/api/payment
+
+      at Function.apply [as log] (src/utils/Logger.js:45:18)
+
+    console.log
+      🔧 [ApiConfig] Platform.OS: android | Usando chave: mobile
+
+      at Function.apply [as log] (src/utils/Logger.js:45:18)
+
+    console.log
+      🔧 [ApiConfig] Configuração carregada: {
+        platform: 'android',
+        platformKey: 'mobile',
+        selfHostedApi: 'https://api.leaf.app.br',
+        selfHostedWebSocket: 'https://socket.leaf.app.br',
+        environment: 'development'
+      }
+
+      at Function.apply [as log] (src/utils/Logger.js:45:18)
+
+    console.log
+      🔗 DriverBalanceService baseUrl: https://api.leaf.app.br/api/payment
+
+      at Function.apply [as log] (src/utils/Logger.js:45:18)
+
+    console.log
+      🔧 [ApiConfig] Platform.OS: android | Usando chave: mobile
+
+      at Function.apply [as log] (src/utils/Logger.js:45:18)
+
+    console.log
+      🔧 [ApiConfig] Configuração carregada: {
+        platform: 'android',
+        platformKey: 'mobile',
+        selfHostedApi: 'https://api.leaf.app.br',
+        selfHostedWebSocket: 'https://socket.leaf.app.br',
+        environment: 'development'
+      }
+
+      at Function.apply [as log] (src/utils/Logger.js:45:18)
+
+    console.log
+      🔗 DriverBalanceService baseUrl: https://api.leaf.app.br/api/payment
+
+      at Function.apply [as log] (src/utils/Logger.js:45:18)
+
+    console.log
+      🔧 [ApiConfig] Platform.OS: android | Usando chave: mobile
+
+      at Function.apply [as log] (src/utils/Logger.js:45:18)
+
+    console.log
+      🔧 [ApiConfig] Configuração carregada: {
+        platform: 'android',
+        platformKey: 'mobile',
+        selfHostedApi: 'https://api.leaf.app.br',
+        selfHostedWebSocket: 'https://socket.leaf.app.br',
+        environment: 'development'
+      }
+
+      at Function.apply [as log] (src/utils/Logger.js:45:18)
+
+    console.log
+      🔗 DriverBalanceService baseUrl: https://api.leaf.app.br/api/payment
+
+      at Function.apply [as log] (src/utils/Logger.js:45:18)
+
+PASS __tests__/android-hermes-export-script.test.js
+PASS __tests__/auth-service-qa-request.test.js
+PASS __tests__/pilot-launch-profile.test.js
+PASS __tests__/h3-map-service.test.js
+PASS __tests__/prototype-screen-transition.test.js
+PASS __tests__/ride-lifecycle-state-guard.test.js
+PASS __tests__/leaf-native-tab-bar.test.js
+PASS __tests__/android-build-script.test.js
+PASS __tests__/prototype-connection-status.test.js
+PASS __tests__/app-orientation-guard.test.js
+PASS __tests__/prototype-traffic-route.test.js
+PASS __tests__/fcm-notification-service.test.js
+PASS __tests__/active-route-viewport-contract.test.js
+PASS __tests__/mobile-env-config-loader.test.js
+PASS __tests__/android-real-device-smoke-contract.test.js
+PASS __tests__/driver-offer-countdown.test.js
+PASS __tests__/robotaxi-menu-config.test.js
+PASS __tests__/BookingHistoryService.test.js
+  ● Console
+
+    console.error
+      ❌ Erro ao buscar histórico de corridas: {}
+
+      63 |   static error(...args) {
+      64 |     if (__DEV__) {
+    > 65 |       console.error(...sanitizeLogArgs(args));
+         |                    ^
+      66 |     } else {
+      67 |       // Em produção: apenas logar erros críticos tratados
+      68 |       // Não expor dados do usuário
+
+      at Function.apply (src/utils/Logger.js:65:20)
+      at BookingHistoryService.error (src/services/BookingHistoryService.js:230:20)
+          at Generator.throw (<anonymous>)
+      at asyncGeneratorStep (../../../../../Documents/Leaf-new/node_modules/@babel/runtime/helpers/asyncToGenerator.js:3:17)
+      at _throw (../../../../../Documents/Leaf-new/node_modules/@babel/runtime/helpers/asyncToGenerator.js:20:9)
+
+PASS __tests__/location-buffer-service.test.js
+  ● Console
+
+    console.log
+      📍 [LocationBuffer] Localização adicionada ao buffer (1 total)
+
+      at Function.apply [as log] (src/utils/Logger.js:45:18)
+
+    console.log
+      📍 [LocationBuffer] Localização adicionada ao buffer (2 total)
+
+      at Function.apply [as log] (src/utils/Logger.js:45:18)
+
+    console.log
+      🔄 [LocationBuffer] Sincronizando 2 localizações...
+
+      at Function.apply [as log] (src/utils/Logger.js:45:18)
+
+    console.log
+      ✅ [LocationBuffer] 2 localizações sincronizadas, 0 mantidas no buffer
+
+      at Function.apply [as log] (src/utils/Logger.js:45:18)
+
+    console.log
+      📍 [LocationBuffer] Localização adicionada ao buffer (1 total)
+
+      at Function.apply [as log] (src/utils/Logger.js:45:18)
+
+    console.log
+      🔄 [LocationBuffer] Sincronizando 1 localizações...
+
+      at Function.apply [as log] (src/utils/Logger.js:45:18)
+
+    console.error
+      ❌ Erro ao enviar lote de localizações: {}
+
+      63 |   static error(...args) {
+      64 |     if (__DEV__) {
+    > 65 |       console.error(...sanitizeLogArgs(args));
+         |                    ^
+      66 |     } else {
+      67 |       // Em produção: apenas logar erros críticos tratados
+      68 |       // Não expor dados do usuário
+
+      at Function.apply (src/utils/Logger.js:65:20)
+      at LocationBufferService.error (src/services/LocationBufferService.js:365:20)
+          at Generator.throw (<anonymous>)
+      at asyncGeneratorStep (../../../../../Documents/Leaf-new/node_modules/@babel/runtime/helpers/asyncToGenerator.js:3:17)
+      at _throw (../../../../../Documents/Leaf-new/node_modules/@babel/runtime/helpers/asyncToGenerator.js:20:9)
+
+    console.log
+      ✅ [LocationBuffer] 0 localizações sincronizadas, 1 mantidas no buffer
+
+      at Function.apply [as log] (src/utils/Logger.js:45:18)
+
+PASS __tests__/DriverExternalNavigationService.test.js
+PASS __tests__/home-quote-failure-presentation.test.js
+PASS __tests__/android-real-device-smoke-driver-identity.test.js
+PASS __tests__/native-aws-liveness-service.test.js
+PASS __tests__/live-route-timing.test.js
+PASS __tests__/android-permission-disclosure.test.js
+PASS __tests__/e2e-current-suite-contract.test.js
+PASS __tests__/onboarding-session-state.test.js
+PASS __tests__/driver-offer-pricing-snapshot.test.js
+PASS __tests__/user-auth-service.resolve-next-action.test.js
+PASS __tests__/leaf-native-navigation-engine.test.js
+PASS __tests__/ride-lifecycle-outbox-replay-service.test.js
+PASS __tests__/prototype-map-presentation.test.js
+PASS __tests__/prototype-driver-online-attempt.test.js
+PASS __tests__/design-system-dark-tokens.test.js
+PASS __tests__/auth-flow-driver-activation.test.js
+PASS __tests__/leaf-native-tab-bar-fallback.test.js
+PASS __tests__/prototype-trip-history-route-label.test.js
+PASS __tests__/driver-document-extraction-runtime-endpoint.test.js
+PASS __tests__/axios-interceptor-auth.test.js
+  ● Console
+
+    console.log
+      🌐 [Axios] GET /api/map/h3-cells
+
+      at Function.apply [as log] (src/utils/Logger.js:45:18)
+
+    console.log
+      🌐 [Axios] GET /api/map/h3-cells
+
+      at Function.apply [as log] (src/utils/Logger.js:45:18)
+
+    console.log
+      🌐 [Axios] POST /api/payment/advance
+
+      at Function.apply [as log] (src/utils/Logger.js:45:18)
+
+    console.log
+      🌐 [Axios] GET /api/account/profile
+
+      at Function.apply [as log] (src/utils/Logger.js:45:18)
+
+    console.warn
+      ⚠️ [Axios] Token QA persistido expirado; usando autenticação alternativa.
+
+      52 |   static warn(...args) {
+      53 |     if (__DEV__) {
+    > 54 |       console.warn(...sanitizeLogArgs(args));
+         |                   ^
+      55 |     }
+      56 |   }
+      57 |
+
+      at Function.apply [as warn] (src/utils/Logger.js:54:19)
+      at warn (src/utils/axiosInterceptor.js:188:28)
+      at asyncGeneratorStep (../../../../../Documents/Leaf-new/node_modules/@babel/runtime/helpers/asyncToGenerator.js:3:17)
+      at _next (../../../../../Documents/Leaf-new/node_modules/@babel/runtime/helpers/asyncToGenerator.js:17:9)
+
+    console.log
+      🌐 [Axios] POST /api/payment/advance
+
+      at Function.apply [as log] (src/utils/Logger.js:45:18)
+
+    console.warn
+      ⚠️ [Axios] Token QA persistido expirado; usando autenticação alternativa.
+
+      52 |   static warn(...args) {
+      53 |     if (__DEV__) {
+    > 54 |       console.warn(...sanitizeLogArgs(args));
+         |                   ^
+      55 |     }
+      56 |   }
+      57 |
+
+      at Function.apply [as warn] (src/utils/Logger.js:54:19)
+      at warn (src/utils/axiosInterceptor.js:188:28)
+      at asyncGeneratorStep (../../../../../Documents/Leaf-new/node_modules/@babel/runtime/helpers/asyncToGenerator.js:3:17)
+      at _next (../../../../../Documents/Leaf-new/node_modules/@babel/runtime/helpers/asyncToGenerator.js:17:9)
+
+    console.log
+      🌐 [Axios] POST /api/payment/advance
+
+      at Function.apply [as log] (src/utils/Logger.js:45:18)
+
+    console.warn
+      ⚠️ [Axios] Token QA persistido expirado; usando autenticação alternativa.
+
+      52 |   static warn(...args) {
+      53 |     if (__DEV__) {
+    > 54 |       console.warn(...sanitizeLogArgs(args));
+         |                   ^
+      55 |     }
+      56 |   }
+      57 |
+
+      at Function.apply [as warn] (src/utils/Logger.js:54:19)
+      at warn (src/utils/axiosInterceptor.js:188:28)
+      at asyncGeneratorStep (../../../../../Documents/Leaf-new/node_modules/@babel/runtime/helpers/asyncToGenerator.js:3:17)
+      at _next (../../../../../Documents/Leaf-new/node_modules/@babel/runtime/helpers/asyncToGenerator.js:17:9)
+
+    console.warn
+      ⚠️ [Axios] Token HTTP não corresponde ao passageiro do pagamento; tentando renovar.
+
+      52 |   static warn(...args) {
+      53 |     if (__DEV__) {
+    > 54 |       console.warn(...sanitizeLogArgs(args));
+         |                   ^
+      55 |     }
+      56 |   }
+      57 |
+
+      at Function.apply [as warn] (src/utils/Logger.js:54:19)
+      at warn (src/utils/axiosInterceptor.js:280:28)
+      at asyncGeneratorStep (../../../../../Documents/Leaf-new/node_modules/@babel/runtime/helpers/asyncToGenerator.js:3:17)
+      at _next (../../../../../Documents/Leaf-new/node_modules/@babel/runtime/helpers/asyncToGenerator.js:17:9)
+
+    console.warn
+      ⚠️ [Axios] Bloqueando pagamento com identidade divergente. { tokenSource: 'firebase' }
+
+      52 |   static warn(...args) {
+      53 |     if (__DEV__) {
+    > 54 |       console.warn(...sanitizeLogArgs(args));
+         |                   ^
+      55 |     }
+      56 |   }
+      57 |
+
+      at Function.apply [as warn] (src/utils/Logger.js:54:19)
+      at warn (src/utils/axiosInterceptor.js:290:28)
+      at asyncGeneratorStep (../../../../../Documents/Leaf-new/node_modules/@babel/runtime/helpers/asyncToGenerator.js:3:17)
+      at _next (../../../../../Documents/Leaf-new/node_modules/@babel/runtime/helpers/asyncToGenerator.js:17:9)
+
+    console.warn
+      ⚠️ [Axios] Token HTTP não corresponde ao passageiro do pagamento; tentando renovar.
+
+      52 |   static warn(...args) {
+      53 |     if (__DEV__) {
+    > 54 |       console.warn(...sanitizeLogArgs(args));
+         |                   ^
+      55 |     }
+      56 |   }
+      57 |
+
+      at Function.apply [as warn] (src/utils/Logger.js:54:19)
+      at warn (src/utils/axiosInterceptor.js:280:28)
+      at asyncGeneratorStep (../../../../../Documents/Leaf-new/node_modules/@babel/runtime/helpers/asyncToGenerator.js:3:17)
+      at _next (../../../../../Documents/Leaf-new/node_modules/@babel/runtime/helpers/asyncToGenerator.js:17:9)
+
+    console.log
+      🌐 [Axios] POST /api/payment/advance
+
+      at Function.apply [as log] (src/utils/Logger.js:45:18)
+
+    console.warn
+      🔒 [Axios] Não autorizado (401), tentando renovar credencial HTTP...
+
+      52 |   static warn(...args) {
+      53 |     if (__DEV__) {
+    > 54 |       console.warn(...sanitizeLogArgs(args));
+         |                   ^
+      55 |     }
+      56 |   }
+      57 |
+
+      at Function.apply [as warn] (src/utils/Logger.js:54:19)
+      at warn (src/utils/axiosInterceptor.js:348:28)
+      at asyncGeneratorStep (../../../../../Documents/Leaf-new/node_modules/@babel/runtime/helpers/asyncToGenerator.js:3:17)
+      at _next (../../../../../Documents/Leaf-new/node_modules/@babel/runtime/helpers/asyncToGenerator.js:17:9)
+      at ../../../../../Documents/Leaf-new/node_modules/@babel/runtime/helpers/asyncToGenerator.js:22:7
+      at ../../../../../Documents/Leaf-new/node_modules/@babel/runtime/helpers/asyncToGenerator.js:14:12
+      at apply (src/utils/axiosInterceptor.js:382:10)
+      at Object.responseRejected (__tests__/axios-interceptor-auth.test.js:365:18)
+      at asyncGeneratorStep (../../../../../Documents/Leaf-new/node_modules/@babel/runtime/helpers/asyncToGenerator.js:3:17)
+      at _next (../../../../../Documents/Leaf-new/node_modules/@babel/runtime/helpers/asyncToGenerator.js:17:9)
+      at ../../../../../Documents/Leaf-new/node_modules/@babel/runtime/helpers/asyncToGenerator.js:22:7
+      at Object.<anonymous> (../../../../../Documents/Leaf-new/node_modules/@babel/runtime/helpers/asyncToGenerator.js:14:12)
+
+    console.error
+      🔥 [Axios] Erro do servidor
+
+      63 |   static error(...args) {
+      64 |     if (__DEV__) {
+    > 65 |       console.error(...sanitizeLogArgs(args));
+         |                    ^
+      66 |     } else {
+      67 |       // Em produção: apenas logar erros críticos tratados
+      68 |       // Não expor dados do usuário
+
+      at Function.apply (src/utils/Logger.js:65:20)
+      at error (src/utils/axiosInterceptor.js:375:28)
+      at asyncGeneratorStep (../../../../../Documents/Leaf-new/node_modules/@babel/runtime/helpers/asyncToGenerator.js:3:17)
+      at _next (../../../../../Documents/Leaf-new/node_modules/@babel/runtime/helpers/asyncToGenerator.js:17:9)
+      at ../../../../../Documents/Leaf-new/node_modules/@babel/runtime/helpers/asyncToGenerator.js:22:7
+      at ../../../../../Documents/Leaf-new/node_modules/@babel/runtime/helpers/asyncToGenerator.js:14:12
+      at apply (src/utils/axiosInterceptor.js:382:10)
+      at Object.responseRejected (__tests__/axios-interceptor-auth.test.js:385:18)
+      at asyncGeneratorStep (../../../../../Documents/Leaf-new/node_modules/@babel/runtime/helpers/asyncToGenerator.js:3:17)
+      at _next (../../../../../Documents/Leaf-new/node_modules/@babel/runtime/helpers/asyncToGenerator.js:17:9)
+      at ../../../../../Documents/Leaf-new/node_modules/@babel/runtime/helpers/asyncToGenerator.js:22:7
+      at Object.<anonymous> (../../../../../Documents/Leaf-new/node_modules/@babel/runtime/helpers/asyncToGenerator.js:14:12)
+
+PASS __tests__/realtime-connection-orchestrator.test.js
+PASS __tests__/runtime-access-policy.test.js
+PASS __tests__/receipt-service.test.js
+  ● Console
+
+    console.error
+      Erro ao buscar recibo: {}
+
+      63 |   static error(...args) {
+      64 |     if (__DEV__) {
+    > 65 |       console.error(...sanitizeLogArgs(args));
+         |                    ^
+      66 |     } else {
+      67 |       // Em produção: apenas logar erros críticos tratados
+      68 |       // Não expor dados do usuário
+
+      at Function.apply (src/utils/Logger.js:65:20)
+      at ReceiptService.error (src/services/ReceiptService.js:37:20)
+      at asyncGeneratorStep (../../../../../Documents/Leaf-new/node_modules/@babel/runtime/helpers/asyncToGenerator.js:3:17)
+      at _next (../../../../../Documents/Leaf-new/node_modules/@babel/runtime/helpers/asyncToGenerator.js:17:9)
+
+PASS __tests__/mock-route-playback.test.js
+PASS __tests__/auth-flow.recovery.test.js
+PASS __tests__/android-real-device-smoke-status.test.js
+PASS __tests__/support-ticket-service-contract.test.js
+PASS __tests__/ride-payment-session-service.test.js
+PASS __tests__/prototype-route-viewport.test.js
+PASS __tests__/current-account-surface-services.test.js
+PASS __tests__/passenger-home-automation-config.test.js
+PASS __tests__/legacy-financial-routes.test.js
+PASS __tests__/prototype-profile-identity.test.js
+PASS __tests__/prototype-reduced-motion.test.js
+PASS __tests__/mobile-preferences-service.test.js
+PASS __tests__/driver-online-location-seed.test.js
+PASS __tests__/prototype-earnings-navigation.test.js
+PASS __tests__/qa-visual-evidence-overlay-policy.test.js
+PASS __tests__/leaf-voice-guidance.test.js
+PASS __tests__/socket-service-transports.test.js
+  ● Console
+
+    console.log
+      🔌 Conectando ao WebSocket: https://socket.leaf.test
+
+      at Function.apply [as log] (src/utils/Logger.js:45:18)
+
+PASS __tests__/destination-automation-config.test.js
+PASS __tests__/mobile-tooling-dependency-security-contract.test.js
+PASS __tests__/qa-flow-inventory-release-signup.test.js
+PASS __tests__/home-automation-command-store.test.js
+PASS __tests__/qa-seed-profile.test.js
+PASS __tests__/runtime-crash-recovery.test.js
+PASS __tests__/splash-qa-seed-guard.test.js
+PASS __tests__/support-chat-service-fail-visible.test.js
+PASS __tests__/passenger-search-lifecycle.test.js
+PASS __tests__/account-summary-service.test.js
+PASS __tests__/active-store-onboarding-reducer.test.js
+PASS __tests__/ios-local-widget-version-contract.test.js
+PASS __tests__/driver-offer-state.test.js
+PASS __tests__/prototype-home-automation-bus.test.js
+PASS __tests__/onboarding-profile-service.test.js
+PASS __tests__/legal-screen-robotaxi-shell.test.js
+PASS __tests__/kyc-canonical-server-side-callers.test.js
+PASS __tests__/native-aws-liveness-lifecycle-contract.test.js
+PASS __tests__/app-navigator-onboarding-guard.test.js
+PASS __tests__/release-runtime-policy.test.js
+PASS __tests__/current-ride-chat-contract.test.js
+PASS __tests__/prototype-map-route.test.js
+PASS __tests__/ios-eas-smithy-build-hook.test.js
+PASS __tests__/ProfileToggleService.test.js
+PASS __tests__/trip-financial-summary.test.js
+PASS __tests__/support-service-fail-visible.test.js
+PASS src/screens/prototype/tripFinancialSummary.test.js
+PASS __tests__/prototype-driver-activation-contract.test.js
+PASS __tests__/prototype-search-map-composition.test.js
+PASS __tests__/payment-service-quote-lock.test.js
+PASS __tests__/qa-mobile-target-preflight.test.js
+PASS __tests__/friendly-error-messages.test.js
+PASS __tests__/multipart-json-request.test.js
+PASS __tests__/passenger-flow-routing.test.js
+PASS __tests__/ride-live-activity-service.test.js
+PASS __tests__/prototype-driver-documents-consistency.test.js
+PASS __tests__/booking-error-policy.test.js
+PASS __tests__/search-presentation.test.js
+PASS __tests__/driver-activation-service.test.js
+PASS __tests__/current-account-surface-contract.test.js
+PASS __tests__/ride-local-snapshot-service.test.js
+PASS __tests__/real-smoke-logcat.test.js
+PASS __tests__/driver-home-automation-config.test.js
+PASS __tests__/prototype-menu-dynamic-type.test.js
+PASS __tests__/driver-trip-assist-contract.test.js
+
+Test Suites: 177 passed, 177 total
+Tests:       1467 passed, 1467 total
+Snapshots:   0 total
+Time:        65.476 s, estimated 86 s
+Ran all test suites.

@@ -1,0 +1,32 @@
+- Creating native directories (./ios and ./android)
+✔ Created native directories | reusing /android, /ios
+- Updating package.json
+✔ Updated package.json | no changes
+- Running prebuild
+✅ network_security_config.xml synchronized (main + debug + debugOptimized)
+- Running prebuild
+[withExpoModulesCoreFix] Marker not found in /Users/izaakdias/Documents/Leaf-new/node_modules/expo-modules-core/android/ExpoModulesCorePlugin.gradle, maybe already patched
+- Running prebuild
+[withGradleNodeFix] expo-dev-launcher build.gradle not found
+- Running prebuild
+✅ Network Security Config added to AndroidManifest.xml (secure defaults)
+- Running prebuild
+✅ Google Maps API Key já existe no AndroidManifest.xml
+- Running prebuild
+[withDevLauncherPortScanFix] DevLauncherViewModel.swift não encontrado
+- Running prebuild
+» ios: ios-xcode-project: Skipped adding duplicate file "../../node_modules/@expo-google-fonts/inter/400Regular/Inter_400Regular.ttf" to PBXGroup named "Resources"
+- Running prebuild
+» ios: ios-xcode-project: Skipped adding duplicate file "../../node_modules/@expo-google-fonts/inter/500Medium/Inter_500Medium.ttf" to PBXGroup named "Resources"
+- Running prebuild
+» ios: ios-xcode-project: Skipped adding duplicate file "../../node_modules/@expo-google-fonts/inter/600SemiBold/Inter_600SemiBold.ttf" to PBXGroup named "Resources"
+- Running prebuild
+» ios: ios-xcode-project: Skipped adding duplicate file "../../node_modules/@expo-google-fonts/inter/700Bold/Inter_700Bold.ttf" to PBXGroup named "Resources"
+- Running prebuild
+» ios: ios-xcode-project: Skipped adding duplicate file "../../node_modules/@expo-google-fonts/inter/300Light/Inter_300Light.ttf" to PBXGroup named "Resources"
+- Running prebuild
+» ios: orientation: "ios.infoPlist.UISupportedInterfaceOrientations" is set in the config. Ignoring abstract property "orientation": portrait
+- Running prebuild
+✅ Google Maps API Key adicionada ao Info.plist (iOS)
+- Running prebuild
+✔ Finished prebuild

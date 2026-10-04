@@ -1,0 +1,19 @@
+
+> mobile-app@1.0.0 qa:production-guards
+> bash scripts/production-guard-asserts.sh
+
+{
+  "ok": true,
+  "checkedProfiles": {
+    "production": [
+      "release-test",
+      "production",
+      "production-apk"
+    ],
+    "review": [
+      "production-review"
+    ]
+  },
+  "issues": []
+}
+[production-guards] PASS
