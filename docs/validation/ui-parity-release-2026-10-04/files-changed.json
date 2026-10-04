@@ -1,0 +1,162 @@
+[
+  {
+    "path": "leaf-websocket-backend/routes/account-routes.js",
+    "new": false,
+    "sha256": "a4d871026d99f8f68400c53d6ec3196d87087c3494a874eb411a58032f5df892"
+  },
+  {
+    "path": "leaf-websocket-backend/services/account-saved-places.js",
+    "new": true,
+    "sha256": "e6fef2ddc852bf8ab7461d9d8de7facccc7cb26cbad150ac345258c2d7d9c87a"
+  },
+  {
+    "path": "leaf-websocket-backend/tests/unit/routes/account-routes.unit.test.js",
+    "new": false,
+    "sha256": "4adfd9fe361233366741736e96709b73c7f16dccb8cfdf0e0958d788730977fa"
+  },
+  {
+    "path": "leaf-websocket-backend/tests/unit/services/account-saved-places.unit.test.js",
+    "new": true,
+    "sha256": "36c4a961678988cb948886deda2946cd8fbba97e7d59d246efc9800a3ed29505"
+  },
+  {
+    "path": "mobile-app/__tests__/account-summary-hook.test.js",
+    "new": true,
+    "sha256": "3658405ca994e11d8fbd166f8f8a701340589646bd5ef3a68370c205b4047c56"
+  },
+  {
+    "path": "mobile-app/__tests__/account-summary-service.test.js",
+    "new": true,
+    "sha256": "98b8352ff317e41bd3af4faa6aa1047b92c01481662575a5e72e24e7758336ee"
+  },
+  {
+    "path": "mobile-app/__tests__/current-account-surface-contract.test.js",
+    "new": false,
+    "sha256": "6c1b9047086dc675c51fc51c317953402e4168d504088779f6fc7685c2bd75dd"
+  },
+  {
+    "path": "mobile-app/__tests__/design-system-dark-tokens.test.js",
+    "new": false,
+    "sha256": "2c1c57aab72d68f3dfc2559b844d8be8d74bd7f5a4e47534ca8a6f62bdbf476c"
+  },
+  {
+    "path": "mobile-app/__tests__/driver-online-toggle.test.js",
+    "new": false,
+    "sha256": "4d7d72abb68a5cd176c48842e8e5715f1b32a85db7e6734b7f40b866ba9ecc24"
+  },
+  {
+    "path": "mobile-app/__tests__/robotaxi-profile-account-deletion.test.js",
+    "new": false,
+    "sha256": "256c7aa14fb356a922ffc7706305406eae0d0c8d213f4377e31cb55deaa0a923"
+  },
+  {
+    "path": "mobile-app/__tests__/robotaxi-settings-persistence.test.js",
+    "new": false,
+    "sha256": "9581289e163e8490b9d172b599e01ceeb27b900768946c8b23f09b5027ed3eb4"
+  },
+  {
+    "path": "mobile-app/__tests__/saved-place-picker-screen.test.js",
+    "new": true,
+    "sha256": "e36684045fc9d2f12f06ba2fec1f78e0f19ea9ed3bbf6332fc066a6c3bdf9122"
+  },
+  {
+    "path": "mobile-app/__tests__/saved-places-service.test.js",
+    "new": true,
+    "sha256": "a436eeaab6d881d8b218e93f0404c62eb835036ff3793bb54333c8aec149554b"
+  },
+  {
+    "path": "mobile-app/android/app/build.gradle",
+    "new": false,
+    "sha256": "0604e1bda456a45afbf5e490b305389086e90e14a8308e0971f52b64f9bfe052"
+  },
+  {
+    "path": "mobile-app/config/AppConfig.js",
+    "new": false,
+    "sha256": "4390894b208c7135580804eb022e4805d2bd00aacabfdb5c05c7f4472d078f80"
+  },
+  {
+    "path": "mobile-app/docs/QA_FLOW_INVENTORY.md",
+    "new": false,
+    "sha256": "c8a2de6ce2c081e58fe9fbded3895b34aaf44ca14882cfa347b436d5a17d1035"
+  },
+  {
+    "path": "mobile-app/docs/qa-flow-inventory.json",
+    "new": false,
+    "sha256": "cd418d686ab904d8c727d05c83255f4975dc4dae988e6e41d3d4a9cc4b4d65c2"
+  },
+  {
+    "path": "mobile-app/ios/Leaf.xcodeproj/project.pbxproj",
+    "new": false,
+    "sha256": "27362940dcf313a651e0283e6b6f71d408f59ba68a8e39cb1e977c437de5272e"
+  },
+  {
+    "path": "mobile-app/ios/Leaf/Info.plist",
+    "new": false,
+    "sha256": "1f8409b7f181fa3a5afad2a1a5ed524ca7130d6e957f08fbb9d0f8b86c81d78d"
+  },
+  {
+    "path": "mobile-app/ios/Leaf/Supporting/Expo.plist",
+    "new": false,
+    "sha256": "705693b58db333b6092f6762ead6f1138bbb20f0b59715795c93ea9f1375b8b3"
+  },
+  {
+    "path": "mobile-app/ios/LeafRideActivityWidget/Info.plist",
+    "new": false,
+    "sha256": "224f931c8523128da1e79e90d19d69a0ad84c79ad70be4dee1cd3a4dba93ccfd"
+  },
+  {
+    "path": "mobile-app/src/components/prototype/LeafVisualElements.js",
+    "new": false,
+    "sha256": "2d17d1c300973859b8022159395d6ad770fb37f99b0f6b0b1bcb6731c161d140"
+  },
+  {
+    "path": "mobile-app/src/hooks/useAccountSummary.js",
+    "new": true,
+    "sha256": "221db9b18f25addc787ff032049798324a9476bd857d1759c13ca448fb59ac6d"
+  },
+  {
+    "path": "mobile-app/src/navigation/AppNavigator.js",
+    "new": false,
+    "sha256": "ec2223e2447255def7ab64ec8e51410870e07a19f53ea5c5d9e200b78e841792"
+  },
+  {
+    "path": "mobile-app/src/navigation/surfaceManifest.json",
+    "new": false,
+    "sha256": "f98b560eed693cc562e38b299640997417c8761135bf02c270e8b5fec82d4b1d"
+  },
+  {
+    "path": "mobile-app/src/screens/prototype/LeafSavedPlacePickerScreen.js",
+    "new": true,
+    "sha256": "c96553fcba3af7ea4aa5024643be1631233c2f68585bf10312c7471ee4888761"
+  },
+  {
+    "path": "mobile-app/src/screens/prototype/LeafSavedPlacesScreen.js",
+    "new": false,
+    "sha256": "b10b0a39cbfdebe1582e77f09b5ffb92712b11b4c58837efb76de51e26187257"
+  },
+  {
+    "path": "mobile-app/src/screens/prototype/RobotaxiHomeScreen.js",
+    "new": false,
+    "sha256": "2ab720f9dae9ec3ccd94217d2d51c1a7c8a0997e1af00f9e59ac93e6b87d8126"
+  },
+  {
+    "path": "mobile-app/src/screens/prototype/RobotaxiMenuScreen.js",
+    "new": false,
+    "sha256": "9fe2b798bfe21294e99b3b9884b9dfb4c1ff5e8ce84e9e0e93718df32de5b59a"
+  },
+  {
+    "path": "mobile-app/src/services/AccountSummaryService.js",
+    "new": true,
+    "sha256": "33bf45fa4fc577397f6a0d399fc36df5cfa14d67023948117b0f181c1b9885e5"
+  },
+  {
+    "path": "mobile-app/src/services/BookingHistoryService.js",
+    "new": false,
+    "sha256": "6f4a6b83aade58366622353f2479770f38c5aaa3a4cc32aaabeb6923449482b3"
+  },
+  {
+    "path": "mobile-app/src/services/SavedPlacesService.js",
+    "new": false,
+    "sha256": "78c23c92fe0dfa458c856b8d5efef1fb9f0e23a010010da1d6bb789719296ada"
+  }
+]

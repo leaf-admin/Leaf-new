@@ -1,0 +1,31 @@
+{
+  "candidateCommit": "b4594e3f2",
+  "android": {
+    "path": "/Users/izaakdias/Documents/Leaf-release-candidates/1.0.6/Leaf-1.0.6-132-candidate.aab",
+    "package": "br.com.leaf.ride",
+    "version": "1.0.6",
+    "build": "132",
+    "sha256": "fb74db0c3e6f908eaaab323f265bce8d08e4fe5da474afa3c938de13710ce7e8",
+    "bytes": 155137855,
+    "signatureVerified": true,
+    "certificateSha256": "B8:A2:ED:46:34:36:06:A6:2C:C1:26:92:BE:62:32:3E:29:69:CD:F4:C8:3F:B5:41:80:D9:24:73:8A:7C:9B:F4",
+    "matchesProjectAssetLinks": true
+  },
+  "ios": {
+    "status": "signed_export_verified",
+    "path": "/Users/izaakdias/Documents/Leaf-release-candidates/1.0.6/Leaf-1.0.6-38-candidate.ipa",
+    "archivePath": "/Users/izaakdias/Documents/Leaf-release-candidates/1.0.6/Leaf-1.0.6-38.xcarchive",
+    "bundleIdentifier": "br.com.leaf.ride",
+    "version": "1.0.6",
+    "build": "38",
+    "minimumOSVersion": "17.0",
+    "runtime": "1.0.6",
+    "otaChannel": "production",
+    "includesRideActivityWidget": true,
+    "signatureVerified": true,
+    "sha256": "0fc8ffeecb1ef9c624d27b504ec2c8ec32a67651c32cc2d54591c4c3ece2be39",
+    "bytes": 49487772,
+    "distributionMethod": "app-store-connect; local export only"
+  },
+  "storeSubmission": "not_submitted"
+}

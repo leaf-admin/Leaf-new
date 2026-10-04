@@ -1,0 +1,24 @@
+BUILD_MODE bundle-ios
+env: load .env.production.local .env.local .env.production .env
+env: export API_BASE_URL WEBSOCKET_URL FIREBASE_FALLBACK_URL GOOGLE_MAPS_API_KEY MAPBOX_API_KEY LOCATIONIQ_API_KEY FIREBASE_API_KEY FIREBASE_AUTH_DOMAIN FIREBASE_PROJECT_ID FIREBASE_STORAGE_BUCKET FIREBASE_MESSAGING_SENDER_ID FIREBASE_APP_ID WOOVI_API_KEY MERCADOPAGO_PUBLIC_KEY MERCADOPAGO_ACCESS_TOKEN EXPO_PUBLIC_ENV LEAF_UPLOAD_STORE_FILE LEAF_UPLOAD_STORE_PASSWORD LEAF_UPLOAD_KEY_ALIAS LEAF_UPLOAD_KEY_PASSWORD
+EXPO_USE_METRO_WORKSPACE_ROOT is enabled by default, use EXPO_NO_METRO_WORKSPACE_ROOT instead to disable.
+EXPO_USE_METRO_WORKSPACE_ROOT is enabled by default, use EXPO_NO_METRO_WORKSPACE_ROOT instead to disable.
+EXPO_USE_METRO_WORKSPACE_ROOT is enabled by default, use EXPO_NO_METRO_WORKSPACE_ROOT instead to disable.
+EXPO_USE_METRO_WORKSPACE_ROOT is enabled by default, use EXPO_NO_METRO_WORKSPACE_ROOT instead to disable.
+EXPO_USE_METRO_WORKSPACE_ROOT is enabled by default, use EXPO_NO_METRO_WORKSPACE_ROOT instead to disable.
+EXPO_USE_METRO_WORKSPACE_ROOT is enabled by default, use EXPO_NO_METRO_WORKSPACE_ROOT instead to disable.
+EXPO_USE_METRO_WORKSPACE_ROOT is enabled by default, use EXPO_NO_METRO_WORKSPACE_ROOT instead to disable.
+Starting Metro Bundler
+warning: Bundler cache is empty, rebuilding (this may take a minute)
+iOS mobile-app/index.js ░░░░░░░░░░░░░░░░  0.0% (0/1)
+iOS mobile-app/index.js ▓▓░░░░░░░░░░░░░░ 12.9% ( 96/269)
+iOS mobile-app/index.js ▓▓▓▓░░░░░░░░░░░░ 30.6% (300/582)
+iOS mobile-app/index.js ▓▓▓▓▓░░░░░░░░░░░ 33.1% (574/997)
+iOS mobile-app/index.js ▓▓▓▓▓▓▓░░░░░░░░░ 46.9% ( 825/1224)
+iOS mobile-app/index.js ▓▓▓▓▓▓▓▓▓▓░░░░░░ 63.4% (1231/1546)
+iOS mobile-app/index.js ▓▓▓▓▓▓▓▓▓▓▓▓░░░░ 79.4% (1555/1745)
+iOS mobile-app/index.js ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓░ 96.9% (2212/2296)
+iOS Bundled 25658ms mobile-app/index.js (2317 modules)
+Writing bundle output to: /tmp/leaf-ui-rc-bundle-ios/main.jsbundle
+Copying 74 asset files
+Done writing bundle output

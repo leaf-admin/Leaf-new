@@ -1,0 +1,28 @@
+{
+  "app": {
+    "signatureVerified": true,
+    "bundleIdentifier": "br.com.leaf.ride",
+    "version": "1.0.6",
+    "build": "38",
+    "applicationIdentifier": "DTA8W5KA5D.br.com.leaf.ride",
+    "teamIdentifier": "DTA8W5KA5D",
+    "debuggable": false,
+    "profileExpires": "2027-03-16T22:35:00",
+    "profileMatchesAppId": true
+  },
+  "widget": {
+    "signatureVerified": true,
+    "bundleIdentifier": "br.com.leaf.ride.LeafRideActivityWidget",
+    "version": "1.0.6",
+    "build": "38",
+    "applicationIdentifier": "DTA8W5KA5D.br.com.leaf.ride.LeafRideActivityWidget",
+    "teamIdentifier": "DTA8W5KA5D",
+    "debuggable": false,
+    "profileExpires": "2027-03-16T22:35:00",
+    "profileMatchesAppId": true
+  },
+  "ota": {
+    "runtime": "1.0.6",
+    "channel": "production"
+  }
+}
