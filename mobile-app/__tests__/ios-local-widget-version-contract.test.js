@@ -56,4 +56,14 @@ describe('iOS local widget version contract', () => {
       'widget_actual_build_number}" != "${expected_build_number}',
     );
   });
+
+  it('enforces the Leaf team before building and after signing app and widget', () => {
+    const buildScript = readScript('build-local-ios.sh');
+    const exportScript = readScript('export-local-ios-ipa.sh');
+    expect(buildScript).toContain('assert_leaf_ios_team "${IOS_DEVELOPMENT_TEAM}"');
+    expect(exportScript).toContain('assert_leaf_ios_team "${team_id}"');
+    expect(exportScript).toContain('assert_leaf_ios_team "${signed_team}"');
+    expect(exportScript).toContain('assert_leaf_ios_team "${profile_team}"');
+    expect(exportScript).toContain('codesign --verify --deep --strict "${signed_target}"');
+  });
 });

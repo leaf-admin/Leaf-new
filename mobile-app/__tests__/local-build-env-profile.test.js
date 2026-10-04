@@ -47,4 +47,12 @@ describe('local native build environment', () => {
   it('allows development profiles without public env overrides', () => {
     expect(run({ EAS_BUILD_PROFILE: 'development' }).status).toBe(0);
   });
+
+  it('accepts only the existing Leaf Apple Developer team', () => {
+    const check = (team) => spawnSync('bash', ['-c', 'source scripts/source-local-build-env.sh && assert_leaf_ios_team "$1"', 'leaf-team-test', team], { cwd: root, env: { ...process.env, LEAF_ENV_FILE: '' }, encoding: 'utf8', timeout: 15000 });
+    expect(check('DTA8W5KA5D').status).toBe(0);
+    const otherTeam = check('OTHERTEAM1');
+    expect(otherTeam.status).not.toBe(0);
+    expect(otherTeam.stderr).toContain('Assinatura bloqueada');
+  });
 });

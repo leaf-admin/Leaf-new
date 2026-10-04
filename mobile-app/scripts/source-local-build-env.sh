@@ -6,6 +6,18 @@ SCRIPT_SOURCE="${BASH_SOURCE[0]:-$0}"
 SCRIPT_DIR="$(cd "$(dirname "${SCRIPT_SOURCE}")" && pwd)"
 PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
+# Leaf's existing Apple Developer organization. This is not a credential.
+LEAF_IOS_TEAM_ID="DTA8W5KA5D"
+
+assert_leaf_ios_team() {
+  local selected_team="$1"
+  local expected_team="DTA8W5KA5D"
+  if [[ "${selected_team}" != "${expected_team}" ]]; then
+    echo "❌ Assinatura bloqueada: o Team ID deve ser ${expected_team} (Leaf)." >&2
+    return 1
+  fi
+}
+
 load_env_file() {
   local file_path="$1"
   local override="${2:-false}"

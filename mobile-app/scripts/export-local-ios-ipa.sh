@@ -64,6 +64,9 @@ assert_exported_ipa() {
   local microphone_usage
   local updates_enabled
   local updates_channel
+  local signed_target
+  local signed_team
+  local profile_team
 
   tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/leaf-ios-ipa.XXXXXX")"
 
@@ -72,6 +75,16 @@ assert_exported_ipa() {
   info_plist_path="$(find "${tmp_dir}/Payload" -maxdepth 2 -path "*/Leaf.app/Info.plist" -type f | head -n 1)"
   widget_info_plist_path="$(find "${tmp_dir}/Payload" -path "*/Leaf.app/PlugIns/LeafRideActivityWidget.appex/Info.plist" -type f | head -n 1)"
   expo_plist_path="$(find "${tmp_dir}/Payload" -maxdepth 2 -path "*/Leaf.app/Expo.plist" -type f | head -n 1)"
+
+  for signed_target in "${tmp_dir}/Payload/Leaf.app" "${tmp_dir}/Payload/Leaf.app/PlugIns/LeafRideActivityWidget.appex"; do
+    codesign --verify --deep --strict "${signed_target}"
+    signed_team="$(codesign -dv --verbose=4 "${signed_target}" 2>&1 | sed -n 's/^TeamIdentifier=//p')"
+    assert_leaf_ios_team "${signed_team}"
+    security cms -D -i "${signed_target}/embedded.mobileprovision" > "${tmp_dir}/signing-profile.plist"
+    profile_team="$(/usr/libexec/PlistBuddy -c 'Print :TeamIdentifier:0' "${tmp_dir}/signing-profile.plist")"
+    assert_leaf_ios_team "${profile_team}"
+  done
+  echo "✅ App e widget assinados com o Team ID da Leaf: DTA8W5KA5D."
 
   if [[ -z "${app_config_path}" ]]; then
     echo "❌ EXConstants app.config ausente no IPA exportado."
@@ -238,6 +251,7 @@ main() {
     echo "❌ Team ID não resolvido. Defina IOS_DEVELOPMENT_TEAM=XXXXXXXXXX"
     exit 1
   fi
+  assert_leaf_ios_team "${team_id}"
 
   mkdir -p "${PROJECT_DIR}/ios/build"
   rm -rf "${export_path}"
