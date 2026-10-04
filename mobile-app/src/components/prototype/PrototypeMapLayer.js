@@ -5,6 +5,7 @@ import { useReducedMotion } from 'react-native-reanimated';
 import Svg, { Path, Rect } from 'react-native-svg';
 import mapStyleAppleLike from './mapStyleAppleLike';
 import robotaxiPrototypeTokens from '../design-system/robotaxiPrototypeTokens';
+import LeafLocationMarker from './LeafLocationMarker';
 
 const { color, motion } = robotaxiPrototypeTokens;
 const ROUTE_ANIMATION_DURATION = Math.min(Number(motion.timing.map) || 840, 840);
@@ -834,18 +835,6 @@ const UserRadarPulse = React.memo(function UserRadarPulse() {
   );
 });
 
-const CurrentLocationMarkerContent = React.memo(function CurrentLocationMarkerContent() {
-  return (
-    <View style={styles.currentLocationWrap} collapsable={false}>
-      <View style={styles.currentLocationBadge}>
-        <View style={styles.currentLocationBadgeInner}>
-          <View style={styles.currentLocationDot} />
-        </View>
-      </View>
-    </View>
-  );
-});
-
 const IOSUserMarkerContent = React.memo(function IOSUserMarkerContent({
   avatarSource,
   avatarLetter,
@@ -1215,6 +1204,7 @@ const AndroidRouteEndpointOverlay = React.memo(function AndroidRouteEndpointOver
 });
 
 function PrototypeMapLayer({
+  containerStyle,
   mapRef,
   region,
   userCoordinate,
@@ -1303,6 +1293,7 @@ function PrototypeMapLayer({
   const normalizedManualCameraHoldMs = Math.max(0, Number(manualCameraHoldMs) || 0);
   const manualCameraHoldUntilRef = useRef(0);
   const manualCameraResumeTimeoutRef = useRef(null);
+  const lastIosControlledRegionRef = useRef(undefined);
   const [manualCameraControlHeld, setManualCameraControlHeld] = useState(false);
   const normalizedDriverCoordinate = useMemo(
     () => normalizeMapCoordinate(driverCoordinate),
@@ -2052,6 +2043,11 @@ function PrototypeMapLayer({
     isValidMapRegion(forcedTargetViewportRegion)
       ? forcedTargetViewportRegion
       : undefined;
+  // Clearing region sends a zero region to AIRGoogleMap.setRegion on iOS.
+  // Keep the last prop unchanged when releasing camera control; RN then makes
+  // no native region write, and manual/imperative camera movement stays free.
+  if (iosControlledRegion) lastIosControlledRegionRef.current = iosControlledRegion;
+  const iosNativeRegion = iosControlledRegion || lastIosControlledRegionRef.current;
   const androidProjectionLayout = useMemo(() => {
     const width =
       Number.isFinite(androidMapLayout.width) && androidMapLayout.width > 0
@@ -2562,7 +2558,7 @@ function PrototypeMapLayer({
   ]);
 
   return (
-    <View style={styles.mapArea}>
+    <View style={[styles.mapArea, containerStyle]} testID="prototype-map-container">
       <View
         pointerEvents={interactionEnabled ? 'auto' : 'none'}
         style={StyleSheet.absoluteFillObject}
@@ -2575,9 +2571,12 @@ function PrototypeMapLayer({
           key={nativeMapTopologyKey}
           ref={mapRef}
           testID="prototype-map-view"
-          accessibilityLabel="prototype-map-view"
+          accessibilityLabel="Mapa"
           style={StyleSheet.absoluteFillObject}
           mapPadding={iosControlledRegion ? ZERO_VIEWPORT_PADDING : resolvedMapPadding}
+          // Keep Google's attribution inside the device safe area. Pickup camera
+          // anchoring explicitly accounts for this additional native offset.
+          paddingAdjustmentBehavior="automatic"
           onRegionChange={scheduleAndroidVisibleRegionUpdate}
           onRegionChangeComplete={nextRegion => {
             scheduleAndroidVisibleRegionUpdate(nextRegion);
@@ -2588,7 +2587,7 @@ function PrototypeMapLayer({
           onPanDrag={interactionEnabled ? handleMapPanDrag : undefined}
           provider={mapProvider}
           initialRegion={region}
-          region={iosControlledRegion}
+          region={iosNativeRegion}
           mapType="standard"
           customMapStyle={mapStyleAppleLike}
           onMapLoaded={handleNativeMapLoaded}
@@ -2811,9 +2810,11 @@ function PrototypeMapLayer({
               })
             : null}
 
-          {shouldShowCurrentLocationMarker && Platform.OS !== 'android' ? (
+          {shouldShowCurrentLocationMarker &&
+          (Platform.OS !== 'android' || (!shouldShowUserAvatarMarker && currentLocationMarkerMode !== 'car')) ? (
             <Marker
               key="user-marker"
+              testID="map-user-location-marker"
               coordinate={{ latitude: markerCoordinate.latitude, longitude: markerCoordinate.longitude }}
               zIndex={20}
               anchor={{ x: 0.5, y: 0.5 }}
@@ -2829,7 +2830,7 @@ function PrototypeMapLayer({
                     showRadar={searchingMode}
                   />
                 ) : (
-                  <CurrentLocationMarkerContent />
+                  <LeafLocationMarker />
                 )}
 
                 {showMarkerCallouts ? (
@@ -2950,6 +2951,7 @@ function PrototypeMapLayer({
 
       {shouldShowCurrentLocationMarker &&
       shouldRenderProjectedUserOverlay &&
+      (shouldRenderCurrentLocationVehicleOverlay || shouldShowUserAvatarMarker) &&
       projectedUserOverlayPoint ? (
         shouldRenderCurrentLocationVehicleOverlay ? (
           <ProjectedVehicleOverlay
@@ -2959,7 +2961,7 @@ function PrototypeMapLayer({
             source={driverVehicleMarkerImageSource}
             colorToken={driverVehicleMarkerColorToken}
           />
-        ) : shouldShowUserAvatarMarker ? (
+        ) : (
           <FloatingUserOverlay
             pointX={projectedUserOverlayPoint.x}
             pointY={projectedUserOverlayPoint.y}
@@ -2968,20 +2970,6 @@ function PrototypeMapLayer({
             onAvatarError={handleAvatarError}
             showRadar={searchingMode}
           />
-        ) : (
-          <View pointerEvents="none" style={styles.androidUserOverlayLayer}>
-            <View
-              style={[
-                styles.androidCurrentLocationOverlay,
-                {
-                  left: projectedUserOverlayPoint.x - 21,
-                  top: projectedUserOverlayPoint.y - 21
-                }
-              ]}
-            >
-              <CurrentLocationMarkerContent />
-            </View>
-          </View>
         )
       ) : null}
 
@@ -3126,37 +3114,6 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(26,51,14,0.42)',
     backgroundColor: 'rgba(26,51,14,0.08)'
   },
-  currentLocationWrap: {
-    width: 32,
-    height: 32,
-    alignItems: 'center',
-    justifyContent: 'center',
-    overflow: 'visible'
-  },
-  currentLocationBadge: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(255, 214, 10, 0.34)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.92)'
-  },
-  currentLocationBadgeInner: {
-    width: 16,
-    height: 16,
-    borderRadius: 8,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#FFFFFF'
-  },
-  currentLocationDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: '#1FA64A'
-  },
   destinationMarkerWrap: {
     alignItems: 'center'
   },
@@ -3192,7 +3149,7 @@ const styles = StyleSheet.create({
     height: 7,
     borderRadius: 3.5,
     marginRight: 7,
-    backgroundColor: '#171412'
+    backgroundColor: '#222222'
   },
   routeEndpointBubbleDotDestination: {
     backgroundColor: '#1A330E'
@@ -3202,7 +3159,7 @@ const styles = StyleSheet.create({
     height: 11,
     borderRadius: 5.5,
     marginTop: 4,
-    backgroundColor: '#171412',
+    backgroundColor: '#222222',
     borderWidth: 2,
     borderColor: 'rgba(255,255,255,0.98)',
     shadowColor: color.shadow.base,
@@ -3215,7 +3172,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#1A330E'
   },
   routeEndpointText: {
-    color: '#171412',
+    color: '#222222',
     fontSize: 11.5,
     lineHeight: 15,
     fontWeight: '700'
@@ -3245,7 +3202,7 @@ const styles = StyleSheet.create({
     width: 10,
     height: 10,
     borderRadius: 5,
-    backgroundColor: '#171412'
+    backgroundColor: '#222222'
   },
   routeEndpointDotMarkerCoreDestination: {
     backgroundColor: '#1A330E'
@@ -3280,13 +3237,13 @@ const styles = StyleSheet.create({
     height: 7,
     borderRadius: 3.5,
     marginRight: 7,
-    backgroundColor: '#171412'
+    backgroundColor: '#222222'
   },
   androidRouteEndpointOverlayDotDestination: {
     backgroundColor: '#1A330E'
   },
   androidRouteEndpointOverlayText: {
-    color: '#171412',
+    color: '#222222',
     fontSize: 11.5,
     lineHeight: 15,
     fontWeight: '700',
@@ -3476,14 +3433,6 @@ const styles = StyleSheet.create({
     position: 'absolute',
     width: 56,
     height: 56,
-    alignItems: 'center',
-    justifyContent: 'center',
-    overflow: 'visible'
-  },
-  androidCurrentLocationOverlay: {
-    position: 'absolute',
-    width: 42,
-    height: 42,
     alignItems: 'center',
     justifyContent: 'center',
     overflow: 'visible'

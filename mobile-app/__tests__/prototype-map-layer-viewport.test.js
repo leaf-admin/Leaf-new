@@ -85,6 +85,39 @@ describe('PrototypeMapLayer route viewport fitting', () => {
     longitudeDelta: 0.014,
   };
 
+  it.each(['ios', 'android'])('anchors the blue location dot to the Google SDK coordinate on %s', os => {
+    const { Platform } = require('react-native');
+    const originalPlatform = Platform.OS;
+    Platform.OS = os;
+    try {
+      const screen = render(<PrototypeMapLayer region={baseRegion} userCoordinate={routeCoordinates[0]} />);
+      expect(screen.getByTestId('prototype-map-view').props.provider).toBe('google');
+      expect(screen.getByTestId('prototype-map-view').props.paddingAdjustmentBehavior).toBe('automatic');
+      const marker = screen.getByTestId('map-user-location-marker');
+      expect(marker.props.coordinate).toEqual(routeCoordinates[0]);
+      expect(marker.props.anchor).toEqual({ x: 0.5, y: 0.5 });
+      expect(screen.getAllByTestId('leaf-location-marker')).toHaveLength(1);
+      expect(screen.getByTestId('leaf-location-marker')).toHaveStyle({ width: 32, height: 32 });
+      expect(screen.getByTestId('leaf-location-marker-dot')).toHaveStyle({ backgroundColor: '#007AFF' });
+      screen.rerender(<PrototypeMapLayer region={baseRegion} userCoordinate={routeCoordinates[0]} hideUserMarker />);
+      expect(screen.queryByTestId('map-user-location-marker')).toBeNull();
+    } finally {
+      Platform.OS = originalPlatform;
+    }
+  });
+
+  it('keeps the same native map while its home frame expands to the full viewport', () => {
+    const mapRef = React.createRef();
+    const framed = { left: 24, top: 226, width: 345, height: 472, right: undefined, bottom: undefined };
+    const expanded = { left: 0, top: 0, width: 393, height: 852, right: undefined, bottom: undefined };
+    const screen = render(<PrototypeMapLayer mapRef={mapRef} region={baseRegion} containerStyle={framed} />);
+    const nativeMap = screen.getByTestId('prototype-map-view');
+    expect(screen.getByTestId('prototype-map-container')).toHaveStyle({ left: 24, top: 226, width: 345, height: 472 });
+    screen.rerender(<PrototypeMapLayer mapRef={mapRef} region={baseRegion} containerStyle={expanded} />);
+    expect(screen.getByTestId('prototype-map-view')).toBe(nativeMap);
+    expect(screen.getByTestId('prototype-map-container')).toHaveStyle({ left: 0, top: 0, width: 393, height: 852 });
+  });
+
   it('does not render a two-point partial route while route animation is waiting for its first frame', () => {
     expect(resolveRouteRenderCoordinates({
       hasRoute: true,
@@ -162,7 +195,7 @@ describe('PrototypeMapLayer route viewport fitting', () => {
     });
   });
 
-  it('controls the native iOS region while active forceRegionUpdate is enabled', () => {
+  it('retains the last native iOS region prop when relinquishing camera control', () => {
     const { Platform } = require('react-native');
     const originalPlatform = Platform.OS;
     Platform.OS = 'ios';
@@ -192,13 +225,13 @@ describe('PrototypeMapLayer route viewport fitting', () => {
           forceRegionUpdate={false}
         />,
       );
-      expect(getByTestId('prototype-map-view').props.region).toBeUndefined();
+      expect(getByTestId('prototype-map-view').props.region).toBe(visibleRouteRegion);
     } finally {
       Platform.OS = originalPlatform;
     }
   });
 
-  it('temporarily releases the controlled iOS region during the manual camera hold', () => {
+  it('keeps the native region prop stable and suspends camera writes during manual hold', () => {
     const { Platform } = require('react-native');
     const originalPlatform = Platform.OS;
     Platform.OS = 'ios';
@@ -216,15 +249,21 @@ describe('PrototypeMapLayer route viewport fitting', () => {
         />,
       );
 
+      mockAnimateToRegion.mockClear();
       act(() => {
         getByTestId('prototype-map-view').props.onPanDrag({ nativeEvent: {} });
       });
-      expect(getByTestId('prototype-map-view').props.region).toBeUndefined();
+      expect(getByTestId('prototype-map-view').props.region).toBe(visibleRouteRegion);
+      act(() => {
+        jest.advanceTimersByTime(100);
+      });
+      expect(mockAnimateToRegion).not.toHaveBeenCalled();
 
       act(() => {
         jest.advanceTimersByTime(1020);
       });
       expect(getByTestId('prototype-map-view').props.region).toEqual(visibleRouteRegion);
+      expect(mockAnimateToRegion).toHaveBeenCalledWith(visibleRouteRegion, 180);
     } finally {
       Platform.OS = originalPlatform;
     }

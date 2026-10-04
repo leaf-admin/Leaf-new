@@ -1,0 +1,153 @@
+appId: br.com.leaf.ride
+---
+- launchApp:
+    clearState: true
+
+- extendedWaitUntil:
+    visible:
+      id: "auth-phone-input"
+    timeout: 120000
+
+- tapOn:
+    id: "auth-phone-input"
+- inputText: ${DRIVER_PHONE}
+- runFlow:
+    when:
+      visible: "Done"
+    commands:
+      - tapOn: "Done"
+- tapOn:
+    id: "auth-continue-btn"
+
+- extendedWaitUntil:
+    visible:
+      id: "(auth-otp-digit-0|auth-password-input)"
+    timeout: 90000
+
+- runFlow:
+    when:
+      visible:
+        id: "auth-password-input"
+    commands:
+      - takeScreenshot: "signup-driver-ios-blocked-existing-password-account"
+      - assertNotVisible:
+          id: "auth-password-input"
+
+- tapOn:
+    id: "auth-otp-digit-0"
+- inputText: ${DRIVER_OTP_DIGIT_0}
+- tapOn:
+    id: "auth-otp-digit-1"
+- inputText: ${DRIVER_OTP_DIGIT_1}
+- tapOn:
+    id: "auth-otp-digit-2"
+- inputText: ${DRIVER_OTP_DIGIT_2}
+- tapOn:
+    id: "auth-otp-digit-3"
+- inputText: ${DRIVER_OTP_DIGIT_3}
+- tapOn:
+    id: "auth-otp-digit-4"
+- inputText: ${DRIVER_OTP_DIGIT_4}
+- tapOn:
+    id: "auth-otp-digit-5"
+- inputText: ${DRIVER_OTP_DIGIT_5}
+- runFlow:
+    when:
+      visible:
+        id: "auth-otp-verify-btn"
+    commands:
+      - tapOn:
+          id: "auth-otp-verify-btn"
+
+- runFlow:
+    when:
+      visible:
+        id: "auth-profile-selection-trigger"
+    commands:
+      - tapOn:
+          id: "auth-profile-selection-trigger"
+      - tapOn:
+          id: "auth-profile-option-driver"
+      - tapOn:
+          id: "auth-profile-selection-continue-btn"
+
+- extendedWaitUntil:
+    visible: ".*(Validação da CNH|Toque para enviar o PDF da CNH).*"
+    timeout: 120000
+- takeScreenshot: "signup-driver-ios-before-cnh-upload"
+- tapOn: "Toque para enviar o PDF da CNH"
+
+- extendedWaitUntil:
+    visible: ".*(CNH\\.pdf|Browse|Recents|Recent|Arquivos|Files).*"
+    timeout: 60000
+- runFlow:
+    when:
+      visible: "Browse"
+    commands:
+      - tapOn: "Browse"
+- runFlow:
+    when:
+      visible: "On My iPhone"
+    commands:
+      - tapOn: "On My iPhone"
+- runFlow:
+    when:
+      visible: "Leaf Pilot QA"
+    commands:
+      - tapOn: "Leaf Pilot QA"
+- tapOn: ".*CNH\\.pdf.*"
+
+- extendedWaitUntil:
+    visible: ".*(Finalizar cadastro|Aceito os Termos de Uso|Autorizo checagem de antecedentes).*"
+    timeout: 120000
+- takeScreenshot: "signup-driver-ios-after-cnh-extraction"
+- runFlow:
+    when:
+      visible: ".*Termos de Uso.*"
+    commands:
+      - tapOn: ".*Termos de Uso.*"
+- runFlow:
+    when:
+      visible: ".*Privacidade.*"
+    commands:
+      - tapOn: ".*Privacidade.*"
+- runFlow:
+    when:
+      visible: ".*checagem de antecedentes.*"
+    commands:
+      - tapOn: ".*checagem de antecedentes.*"
+- tapOn: "Concluir"
+
+- runFlow:
+    when:
+      visible:
+        id: "driver-email-input"
+    commands:
+      - tapOn:
+          id: "driver-email-input"
+      - inputText: "qa.driver.signup@leaf.local"
+      - tapOn:
+          id: "driver-email-continue-btn"
+
+- runFlow:
+    when:
+      visible: "Allow While Using App"
+    commands:
+      - tapOn: "Allow While Using App"
+- runFlow:
+    when:
+      visible: "Permitir ao usar o app"
+    commands:
+      - tapOn: "Permitir ao usar o app"
+- runFlow:
+    when:
+      visible: "Permitir Durante o Uso do App"
+    commands:
+      - tapOn: "Permitir Durante o Uso do App"
+
+- extendedWaitUntil:
+    visible: ".*(Concluir ativação|Concluir ativacao|Ficar Online|Ficar online|driver-home-toggle-online).*"
+    timeout: 120000
+- assertNotVisible:
+    id: "auth-phone-input"
+- takeScreenshot: "signup-driver-ios-home-before-activation"

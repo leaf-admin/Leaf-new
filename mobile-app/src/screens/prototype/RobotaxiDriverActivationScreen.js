@@ -1,9 +1,10 @@
+import leafTypography from '../../components/prototype/LeafTypography';
+import { LeafObjectIcon } from '../../components/prototype/LeafVisualElements';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, ScrollView, StatusBar, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import * as DocumentPicker from 'expo-document-picker';
-import { fonts } from '../../theme/runtimeTokens';
 import robotaxiPrototypeTokens from '../../components/design-system/robotaxiPrototypeTokens';
 import PrototypeScreenTransition from '../../components/prototype/PrototypeScreenTransition';
 import PrototypeDismissibleSheet from '../../components/prototype/PrototypeDismissibleSheet';
@@ -15,21 +16,21 @@ import Logger from '../../utils/Logger';
 import { resolveCanonicalLivenessGate } from './driverActivationCanonicalContract';
 
 const { color, typography } = robotaxiPrototypeTokens;
-const SURFACE_TOP_PADDING = 28;
+const SURFACE_TOP_PADDING = 20;
 const SURFACE_BOTTOM_PADDING = 18;
 const FALLBACK_CARD_HEIGHT = 330;
 const DOC_ANALYSIS_SLA_TEXT = 'Até 48 horas';
 const ACTIVATION_COLOR = {
-  bg: '#F8F6F1',
-  text: '#171412',
-  title: '#171412',
-  secondary: '#756F68',
-  muted: '#827B73',
-  line: '#E9E2D8',
+  bg: '#FFFFFF',
+  text: '#222222',
+  title: '#222222',
+  secondary: '#6A6A6A',
+  muted: '#767676',
+  line: '#E5E5E5',
   leaf: '#1A330E',
   dot: '#1A330E',
   icon: '#514B45',
-  chevron: '#827B73',
+  chevron: '#767676',
 };
 
 const FIELD_STATUS = {
@@ -772,12 +773,6 @@ export default function RobotaxiDriverActivationScreen({ navigation, route }) {
             ]}
           >
             <View style={styles.activationHeaderRow}>
-              <View style={styles.activationHeaderCopy}>
-                <Text style={styles.activationTitle}>Ativação do motorista</Text>
-                <Text style={styles.activationSubtitle}>
-                  Envie o essencial para ficar online.
-                </Text>
-              </View>
               <TouchableOpacity
                 style={styles.activationCloseButton}
                 onPress={handleDismiss}
@@ -785,8 +780,14 @@ export default function RobotaxiDriverActivationScreen({ navigation, route }) {
                 accessibilityRole="button"
                 accessibilityLabel="Fechar ativação"
               >
-                <Ionicons name="close" size={18} color={ACTIVATION_COLOR.text} />
+                <Ionicons name="arrow-back" size={20} color={ACTIVATION_COLOR.text} />
               </TouchableOpacity>
+              <View style={styles.activationHeaderCopy}>
+                <Text style={styles.activationTitle}>Ativação do motorista</Text>
+                <Text style={styles.activationSubtitle}>
+                  Envie o essencial para ficar online.
+                </Text>
+              </View>
             </View>
 
             <ScrollView
@@ -809,19 +810,15 @@ export default function RobotaxiDriverActivationScreen({ navigation, route }) {
                     ]}
                   >
                     <View style={styles.activationIconSlot}>
-                      <Ionicons
-                        name={resolveActivationRowIcon(row.field)}
-                        size={17}
-                        color={ACTIVATION_COLOR.icon}
-                      />
+                      <LeafObjectIcon symbol={resolveActivationRowIcon(row.field)} size={40} />
                     </View>
                     <View style={styles.activationRowCopy}>
                       <Text style={styles.activationRowTitle}>{row.title}</Text>
-                      <Text style={styles.activationRowSubtitle} numberOfLines={1}>
+                      <Text style={styles.activationRowSubtitle}>
                         {row.subtitle}
                       </Text>
                       {row.fieldState?.status === FIELD_STATUS.FAILED && row.fieldState?.reason ? (
-                        <Text style={styles.activationRowError} numberOfLines={1}>
+                        <Text style={styles.activationRowError}>
                           {row.fieldState.reason}
                         </Text>
                       ) : null}
@@ -883,34 +880,33 @@ const styles = StyleSheet.create({
     paddingRight: 4,
   },
   activationCloseButton: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: ACTIVATION_COLOR.line,
+    backgroundColor: '#F5F5F5',
   },
   activationTitle: {
     color: ACTIVATION_COLOR.title,
-    fontFamily: fonts.SemiBold,
-    fontSize: 20,
-    lineHeight: 26,
+    ...leafTypography.semiBold,
+    fontSize: 22,
+    lineHeight: 28,
   },
   activationSubtitle: {
     marginTop: 8,
     color: ACTIVATION_COLOR.secondary,
-    fontFamily: fonts.Regular,
-    fontSize: 13,
-    lineHeight: 18,
+    ...leafTypography.regular,
+    fontSize: 14,
+    lineHeight: 20,
   },
   activationScrollContent: {
     paddingTop: 18,
-    paddingBottom: 118,
+    paddingBottom: 24,
   },
   activationRow: {
-    minHeight: 62,
+    minHeight: 78,
+    paddingVertical: 12,
     flexDirection: 'row',
     alignItems: 'center',
     borderBottomWidth: StyleSheet.hairlineWidth,
@@ -920,7 +916,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: 0,
   },
   activationIconSlot: {
-    width: 28,
+    width: 52,
     alignItems: 'flex-start',
     justifyContent: 'center',
   },
@@ -931,55 +927,52 @@ const styles = StyleSheet.create({
   },
   activationRowTitle: {
     color: ACTIVATION_COLOR.text,
-    fontFamily: fonts.Medium,
-    fontSize: 13,
-    lineHeight: 17,
+    ...leafTypography.medium,
+    fontSize: 16,
+    lineHeight: 22,
   },
   activationRowSubtitle: {
     marginTop: 3,
     color: ACTIVATION_COLOR.secondary,
-    fontFamily: fonts.Regular,
-    fontSize: 10,
-    lineHeight: 13,
+    ...leafTypography.regular,
+    fontSize: 13,
+    lineHeight: 18,
   },
   activationRowError: {
     marginTop: 3,
     color: '#9F2424',
-    fontFamily: fonts.Regular,
-    fontSize: 10,
-    lineHeight: 13,
+    ...leafTypography.regular,
+    fontSize: 13,
+    lineHeight: 18,
   },
   activationRowAction: {
-    width: 84,
+    width: 78,
     color: ACTIVATION_COLOR.text,
-    fontFamily: fonts.Medium,
-    fontSize: 11,
-    lineHeight: 15,
+    ...leafTypography.medium,
+    fontSize: 13,
+    lineHeight: 18,
     textAlign: 'right',
   },
   activationHint: {
     marginTop: 16,
     color: ACTIVATION_COLOR.secondary,
-    fontFamily: fonts.Regular,
-    fontSize: 11,
-    lineHeight: 15,
+    ...leafTypography.regular,
+    fontSize: 14,
+    lineHeight: 20,
   },
   activationButton: {
-    position: 'absolute',
-    left: 31,
-    right: 31,
-    bottom: 72,
-    height: 46,
-    borderRadius: 23,
+    marginTop: 16,
+    minHeight: 54,
+    borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: ACTIVATION_COLOR.leaf,
+    backgroundColor: '#222222',
   },
   activationButtonText: {
     color: '#FFFFFF',
-    fontFamily: fonts.Medium,
-    fontSize: 12,
-    lineHeight: 16,
+    ...leafTypography.medium,
+    fontSize: 16,
+    lineHeight: 22,
     textAlign: 'center',
   },
   body: {
@@ -999,7 +992,7 @@ const styles = StyleSheet.create({
   },
   progressHintText: {
     color: color.text.secondary,
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     fontSize: typography.micro.size,
     lineHeight: typography.micro.lineHeight,
   },
@@ -1011,7 +1004,7 @@ const styles = StyleSheet.create({
   },
   nextStepsHintText: {
     color: color.text.muted,
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     fontSize: 12,
   },
   stageSummaryRow: {
@@ -1040,14 +1033,14 @@ const styles = StyleSheet.create({
   },
   statusBadgeText: {
     color: color.text.primary,
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     fontSize: typography.micro.size,
     lineHeight: typography.micro.lineHeight,
   },
   stageDescription: {
     flex: 1,
     color: color.text.secondary,
-    fontFamily: fonts.Regular,
+    ...leafTypography.regular,
     fontSize: typography.micro.size,
     lineHeight: typography.micro.lineHeight,
   },
@@ -1076,7 +1069,7 @@ const styles = StyleSheet.create({
   },
   fieldLabel: {
     color: color.text.primary,
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     fontSize: typography.caption.size,
     lineHeight: typography.caption.lineHeight,
   },
@@ -1091,21 +1084,21 @@ const styles = StyleSheet.create({
   },
   inlineStatusBadgeText: {
     color: color.text.secondary,
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     fontSize: typography.micro.size,
     lineHeight: typography.micro.lineHeight,
   },
   fieldHelper: {
     marginTop: 4,
     color: color.text.secondary,
-    fontFamily: fonts.Regular,
+    ...leafTypography.regular,
     fontSize: typography.micro.size,
     lineHeight: typography.micro.lineHeight,
   },
   fieldMeta: {
     marginTop: 6,
     color: color.text.muted,
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     fontSize: typography.micro.size,
     lineHeight: typography.micro.lineHeight,
   },
@@ -1132,7 +1125,7 @@ const styles = StyleSheet.create({
   },
   fieldActionButtonText: {
     color: '#FFFFFF',
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: typography.micro.size,
     lineHeight: typography.micro.lineHeight,
   },
@@ -1142,7 +1135,7 @@ const styles = StyleSheet.create({
   },
   moreInfoText: {
     color: color.accent.strong,
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     fontSize: typography.micro.size,
     lineHeight: typography.micro.lineHeight,
     textDecorationLine: 'underline',

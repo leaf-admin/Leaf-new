@@ -1,8 +1,8 @@
+import leafTypography from '../components/prototype/LeafTypography';
 import React, { useMemo } from 'react';
 import { StatusBar, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { fonts } from '../theme/runtimeTokens';
 
 const DEFAULT_MESSAGE = 'Este recurso fica fora do escopo do piloto controlado e sera operado manualmente nesta fase.';
 
@@ -89,14 +89,14 @@ const styles = StyleSheet.create({
   },
   title: {
     color: '#111A27',
-    fontFamily: fonts.Bold,
-    fontSize: 24,
+    ...leafTypography.bold,
+    fontSize: 22,
     lineHeight: 28,
   },
   message: {
     marginTop: 10,
     color: '#4E5A6B',
-    fontFamily: fonts.Regular,
+    ...leafTypography.regular,
     fontSize: 15,
     lineHeight: 22,
   },
@@ -110,7 +110,7 @@ const styles = StyleSheet.create({
   },
   buttonText: {
     color: '#FFFFFF',
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 15,
     lineHeight: 18,
   },

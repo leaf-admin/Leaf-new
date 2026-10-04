@@ -50,4 +50,51 @@ describe('CredentialsStep driver consent guards', () => {
       marketingOptIn: false,
     });
   });
+
+  it('disables finalization while the profile is being saved', () => {
+    const onCreated = jest.fn();
+    const { getByLabelText } = render(
+      <CredentialsStep
+        initialData={{
+          ...initialData,
+          acceptTerms: true,
+          acceptPrivacy: true,
+          consentBackgroundCheck: true,
+        }}
+        onCreated={onCreated}
+        onBack={jest.fn()}
+        isSubmitting
+      />,
+    );
+
+    const submitButton = getByLabelText('Finalizando...');
+    expect(submitButton.props.accessibilityState).toEqual(
+      expect.objectContaining({ disabled: true }),
+    );
+    fireEvent.press(submitButton);
+    expect(onCreated).not.toHaveBeenCalled();
+  });
+
+  it('announces required driver consents as labeled checkboxes with their checked state', () => {
+    const { getByTestId } = render(
+      <CredentialsStep
+        initialData={{
+          ...initialData,
+          acceptTerms: true,
+          acceptPrivacy: false,
+          consentBackgroundCheck: false,
+        }}
+        onCreated={jest.fn()}
+        onBack={jest.fn()}
+      />,
+    );
+
+    expect(getByTestId('auth-credentials-terms-consent').props.accessibilityRole).toBe('checkbox');
+    expect(getByTestId('auth-credentials-terms-consent').props.accessibilityState).toEqual({ checked: true });
+    expect(getByTestId('auth-credentials-privacy-consent').props.accessibilityState).toEqual({ checked: false });
+    expect(getByTestId('auth-driver-background-check-consent').props.accessibilityLabel)
+      .toContain('checagem de antecedentes');
+    expect(getByTestId('auth-driver-marketing-consent').props.accessibilityLabel)
+      .toContain('comunicações promocionais');
+  });
 });

@@ -6,8 +6,13 @@ import RobotaxiDestinationScreen, {
   resolvePaymentQuoteLockForConfirmation,
 } from "../src/screens/prototype/RobotaxiDestinationScreen";
 import { usePrototypeRideRuntime } from "../src/screens/prototype/prototypeRideRuntime";
+import { getPilotLaunchFeatureSnapshot } from "../src/config/pilotLaunchProfile";
 import { fetchDynamicPricingQuote } from "../src/services/runtime/pricingQuoteService";
 import { findRecoverableRidePaymentSession } from "../src/services/RidePaymentSessionService";
+
+jest.mock("../src/config/pilotLaunchProfile", () => ({
+  getPilotLaunchFeatureSnapshot: jest.fn(() => ({ leafDelasEnabled: true })),
+}));
 
 jest.mock("../src/screens/prototype/prototypeRideRuntime", () => ({
   usePrototypeRideRuntime: jest.fn(),
@@ -72,6 +77,7 @@ jest.mock("react-native-reanimated", () => {
       bezier: jest.fn(() => "bezier"),
     },
     FadeIn,
+    useReducedMotion: () => false,
   };
 });
 
@@ -200,6 +206,7 @@ jest.mock("../src/components/payment/WooviPaymentModal", () => {
 describe("RobotaxiDestinationScreen", () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    getPilotLaunchFeatureSnapshot.mockReturnValue({ leafDelasEnabled: true });
     global.__LEAF_TEST_PIX_CONFIRMATION_OVERRIDES__ = null;
     findRecoverableRidePaymentSession.mockReset();
     findRecoverableRidePaymentSession.mockResolvedValue(null);
@@ -2607,6 +2614,63 @@ describe("RobotaxiDestinationScreen", () => {
           }),
         }),
       );
+    });
+  });
+
+  it("ignores Leaf Delas route preferences when the controlled pilot disables it", async () => {
+    getPilotLaunchFeatureSnapshot.mockReturnValue({ leafDelasEnabled: false });
+    const destination = {
+      id: "destination_shopping_leblon_pilot",
+      name: "Shopping Leblon",
+      address: "Av. Afrânio de Melo Franco, Leblon, Rio de Janeiro",
+      coordinate: { latitude: -22.9834, longitude: -43.217 },
+      eta: "7",
+    };
+    const checkRideAvailability = jest.fn().mockResolvedValue({ available: true });
+
+    usePrototypeRideRuntime.mockReturnValue({
+      bookingStatus: "idle",
+      currentAddress: "Rua das Pastorinhas, Taquara, Rio de Janeiro",
+      currentCoordinate: { latitude: -22.9711, longitude: -43.1822 },
+      driverInfo: null,
+      profileUid: "customer_1",
+      riderProfile: { name: "Passageira Leaf", email: "passageira@leaf.app.br" },
+      selectedVehicle: "Leaf Plus",
+      selectedFare: 21.5,
+      selectedDestination: destination,
+      tripDistanceKm: 6.3,
+      tripDurationMin: 14,
+      tripArrivalText: "01:42",
+      loadDestinationSuggestions: jest.fn().mockResolvedValue([destination]),
+      loadRecentDestinations: jest.fn().mockResolvedValue([destination]),
+      resolveDestinationInput: jest.fn().mockImplementation(async (item) => item),
+      selectDestination: jest.fn().mockImplementation(async (item) => item),
+      checkRideAvailability,
+      requestRide: jest.fn(),
+      requestTripExtension: jest.fn(),
+      clearFlowPreview: jest.fn(),
+    });
+
+    const screen = render(
+      <RobotaxiDestinationScreen
+        navigation={{ navigate: jest.fn(), replace: jest.fn() }}
+        route={{
+          params: {
+            leafDelas: true,
+            preferences: { leafDelas: true, femaleDriverOnly: true },
+          },
+        }}
+      />,
+    );
+
+    expect(screen.queryByTestId("passenger-destination-leaf-delas-toggle")).toBeNull();
+    await waitFor(() => expect(screen.getByText("Shopping Leblon")).toBeTruthy());
+    fireEvent.press(screen.getByText("Shopping Leblon"));
+
+    await waitFor(() => expect(checkRideAvailability).toHaveBeenCalled());
+    checkRideAvailability.mock.calls.forEach(([request]) => {
+      expect(request.preferences).not.toHaveProperty("leafDelas");
+      expect(request.preferences).not.toHaveProperty("femaleDriverOnly");
     });
   });
 

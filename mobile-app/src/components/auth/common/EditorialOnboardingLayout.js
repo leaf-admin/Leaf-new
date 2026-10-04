@@ -1,3 +1,4 @@
+import leafTypography from '../../prototype/LeafTypography';
 import React from 'react';
 import {
   KeyboardAvoidingView,
@@ -6,14 +7,16 @@ import {
   ScrollView,
   StyleSheet,
   Text,
-  View
+  View,
+  useWindowDimensions
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaInsetsContext } from 'react-native-safe-area-context';
-import { fonts } from '../../../theme/runtimeTokens';
 import onboardingTheme from './onboardingTheme';
+import { LeafObjectIcon } from '../../prototype/LeafVisualElements';
 
 const { color, spacing } = onboardingTheme;
+const STICKY_FOOTER_MAX_FONT_SCALE = 1.4;
 const defaultInsets = { top: 0, right: 0, bottom: 0, left: 0 };
 const FallbackSafeAreaInsetsContext = React.createContext(defaultInsets);
 
@@ -83,6 +86,8 @@ export default function EditorialOnboardingScreen({
   footer = null,
   title,
   description,
+  headerTitle = 'Cadastro',
+  leadObject = 'account',
   onBack,
   showBack = true,
   backTestID,
@@ -97,17 +102,27 @@ export default function EditorialOnboardingScreen({
   testID
 }) {
   const insets = React.useContext(SafeAreaInsetsContext || FallbackSafeAreaInsetsContext) || defaultInsets;
+  const { fontScale = 1 } = useWindowDimensions();
+  const [stickyFooterHeight, setStickyFooterHeight] = React.useState(0);
   const meta = progressMeta || resolveEditorialProgressMeta(0, null);
   const Root = keyboard ? KeyboardAvoidingView : View;
   const stepNumber = String(meta.stepNumber || meta.activeStep || 1).padStart(2, '0');
+  const useStickyFooter = stickyFooter && fontScale < STICKY_FOOTER_MAX_FONT_SCALE;
+  const handleStickyFooterLayout = React.useCallback(({ nativeEvent }) => {
+    const measuredHeight = Math.ceil(nativeEvent?.layout?.height || 0);
+    setStickyFooterHeight((currentHeight) => (
+      currentHeight === measuredHeight ? currentHeight : measuredHeight
+    ));
+  }, []);
 
   return (
     <Root
       style={styles.root}
-      behavior={keyboard && Platform.OS === 'ios' ? 'padding' : undefined}
+      behavior={keyboard ? (Platform.OS === 'ios' ? 'padding' : 'height') : undefined}
       keyboardVerticalOffset={keyboard && Platform.OS === 'ios' ? 10 : 0}
       testID={testID}
     >
+      <View style={styles.keyboardContent}>
       <ScrollView
         style={styles.scroll}
         scrollEnabled={scrollEnabled}
@@ -116,10 +131,14 @@ export default function EditorialOnboardingScreen({
         showsVerticalScrollIndicator={false}
         contentContainerStyle={[
           styles.scrollContent,
-          { paddingTop: Math.max(insets.top + 18, 54) },
-          footer && stickyFooter ? styles.scrollContentWithFooter : null,
-          contentStyle
+          { paddingTop: Math.max(insets.top + 10, 44) },
+          footer && useStickyFooter ? styles.scrollContentWithFooter : null,
+          contentStyle,
+          footer && useStickyFooter
+            ? { paddingBottom: spacing.lg }
+            : null
         ]}
+        testID="editorial-onboarding-scroll"
       >
         <View style={styles.topRow}>
           {showBack ? (
@@ -131,43 +150,51 @@ export default function EditorialOnboardingScreen({
               accessibilityLabel={backAccessibilityLabel}
               testID={backTestID}
             >
-              <Ionicons name="chevron-back" size={21} color={color.textPrimary} />
+              <Ionicons name="arrow-back" size={20} color={color.textPrimary} />
             </Pressable>
           ) : (
             <View style={styles.backButtonPlaceholder} />
           )}
+          <Text style={styles.headerTitle}>{headerTitle}</Text>
+          <Text style={styles.stepNumber}>{meta.activeStep} de {meta.totalSteps}</Text>
         </View>
 
-        <EditorialProgress totalSteps={meta.totalSteps} activeStep={meta.activeStep} />
-        <View style={styles.editorialRule} />
-        <Text style={styles.stepNumber}>{stepNumber}</Text>
-        <Text style={styles.title}>{title}</Text>
-        {description ? <Text style={styles.description}>{description}</Text> : null}
+        <View style={styles.lead}>
+          <View style={styles.leadCopy}>
+            <Text style={styles.title} accessibilityRole="header">{String(title || '').replace(/\n/g, ' ')}</Text>
+            {description ? <Text style={styles.description}>{description}</Text> : null}
+          </View>
+          {leadObject ? <LeafObjectIcon name={leadObject} size={48} /> : null}
+        </View>
         <View style={[styles.childrenWrap, childrenStyle]}>{children}</View>
-        {footer && !stickyFooter ? (
-          <View
-            style={[
-              styles.inlineFooter,
-              { paddingBottom: Math.max(insets.bottom + 18, Platform.OS === 'android' ? 26 : 22) },
-              footerStyle
-            ]}
-          >
+      {footer && !useStickyFooter ? (
+        <View
+          style={[
+            styles.inlineFooter,
+            { paddingBottom: Math.max(insets.bottom + 18, Platform.OS === 'android' ? 26 : 22) },
+            footerStyle
+          ]}
+          testID="editorial-onboarding-inline-footer"
+        >
             {footer}
           </View>
         ) : null}
       </ScrollView>
 
-      {footer && stickyFooter ? (
+      {footer && useStickyFooter ? (
         <View
+          onLayout={handleStickyFooterLayout}
           style={[
             styles.footer,
             { paddingBottom: Math.max(insets.bottom + 18, Platform.OS === 'android' ? 26 : 22) },
             footerStyle
           ]}
+          testID="editorial-onboarding-sticky-footer"
         >
           {footer}
         </View>
       ) : null}
+      </View>
     </Root>
   );
 }
@@ -177,36 +204,43 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: color.background
   },
+  keyboardContent: {
+    flex: 1,
+    minHeight: 0
+  },
   scroll: {
     flex: 1,
     backgroundColor: color.background
   },
   scrollContent: {
     flexGrow: 1,
-    paddingHorizontal: 28,
+    paddingHorizontal: 24,
     paddingBottom: spacing.xl
   },
   scrollContentWithFooter: {
     paddingBottom: 128
   },
   topRow: {
-    minHeight: 38,
-    justifyContent: 'center'
+    minHeight: 44,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginBottom: 24,
   },
   backButton: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    borderWidth: 1,
-    borderColor: color.border,
-    backgroundColor: color.surface,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: color.surfaceMuted,
     alignItems: 'center',
     justifyContent: 'center'
   },
   backButtonPlaceholder: {
-    width: 38,
-    height: 38
+    display: 'none',
   },
+  headerTitle: { ...leafTypography.semiBold, fontSize: 14, lineHeight: 20, color: color.textSecondary, flex: 1 },
+  lead: { flexDirection: 'row', alignItems: 'flex-start', gap: 18 },
+  leadCopy: { flex: 1, minWidth: 0 },
   progressRow: {
     height: 4,
     flexDirection: 'row',
@@ -231,38 +265,32 @@ const styles = StyleSheet.create({
     marginTop: 26
   },
   stepNumber: {
-    marginTop: 24,
-    color: color.accent,
-    fontSize: 15,
-    lineHeight: 19,
-    fontFamily: fonts.Bold,
+    color: color.textSecondary,
+    fontSize: 12,
+    lineHeight: 16,
+    ...leafTypography.medium,
     letterSpacing: 0
   },
   title: {
-    marginTop: 22,
     color: color.textPrimary,
-    fontSize: 39,
-    lineHeight: 45,
-    fontFamily: fonts.Bold,
-    letterSpacing: 0
+    fontSize: 24,
+    lineHeight: 30,
+    ...leafTypography.semiBold,
+    letterSpacing: -0.5
   },
   description: {
-    marginTop: 14,
+    marginTop: 8,
     color: color.textSecondary,
-    fontSize: 16,
-    lineHeight: 24,
-    fontFamily: fonts.Regular,
+    fontSize: 14,
+    lineHeight: 21,
+    ...leafTypography.regular,
     letterSpacing: 0
   },
   childrenWrap: {
-    marginTop: 34
+    marginTop: 24
   },
   footer: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
-    paddingHorizontal: 28,
+    paddingHorizontal: 24,
     paddingTop: 12,
     backgroundColor: color.background
   },

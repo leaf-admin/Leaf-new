@@ -1,36 +1,87 @@
-# Teste: Chat Durante Corrida
+# Chat durante corrida ativa.
 appId: br.com.leaf.ride
+env:
+  # Substituir por um valor único a cada repetição do fluxo.
+  CHAT_RUN_TOKEN: "qa-20260929-01"
+# @qa-roles: passenger, driver
+# Requer uma corrida QA iniciada; este fluxo não cria corrida nem pagamento.
 ---
-# Assumindo que há uma corrida ativa
-# (Este teste deve ser executado após uma corrida ser aceita)
+- launchApp:
+    clearState: false
+    stopApp: false
 
-- launchApp
-- assertVisible: 
-    id: "active-ride-container"
-    timeout: 5000
+- runFlow:
+    when:
+      visible:
+        id: "passenger-trip-screen"
+    commands:
+      - assertVisible:
+          id: "passenger-trip-started-action-dock"
+      - runFlow:
+          when:
+            notVisible:
+              id: "passenger-trip-message-button"
+          commands:
+            - tapOn:
+                id: "passenger-trip-more-actions-button"
+      - assertVisible:
+          id: "passenger-trip-message-button"
+      - tapOn:
+          id: "passenger-trip-message-button"
 
-# Abrir chat
-- tapOn: 
-    id: "chat-button"
-    timeout: 2000
-- assertVisible: 
-    id: "chat-screen"
-    timeout: 3000
+- runFlow:
+    when:
+      visible:
+        id: "driver-live-ride-overlay-wrap"
+    commands:
+      - runFlow:
+          when:
+            notVisible:
+              id: "driver-live-trip-chat-button"
+          commands:
+            - tapOn:
+                id: "driver-live-trip-details-button"
+      - assertVisible:
+          id: "driver-live-trip-chat-button"
+      - tapOn:
+          id: "driver-live-trip-chat-button"
 
-# Enviar mensagem
-- tapOn: 
-    id: "message-input"
-- inputText: "Olá, estou chegando!"
-- tapOn: 
-    id: "send-button"
-    timeout: 2000
+- extendedWaitUntil:
+    visible:
+      id: "robotaxi-chat-screen"
+    timeout: 30000
+- assertVisible: "Chat com .*"
+- assertVisible:
+    id: "prototype-chat-message-input"
+- assertNotVisible: "Leaf QA chat ${CHAT_RUN_TOKEN}"
+- takeScreenshot: "ride-chat-before-send"
 
-# Verificar mensagem enviada
-- assertVisible: 
-    text: "Olá, estou chegando!"
-    timeout: 3000
+- tapOn:
+    id: "prototype-chat-message-input"
+- inputText: "Leaf QA chat ${CHAT_RUN_TOKEN}"
+- tapOn:
+    id: "prototype-chat-send-button"
+- extendedWaitUntil:
+    visible: "Leaf QA chat ${CHAT_RUN_TOKEN}"
+    timeout: 30000
+- takeScreenshot: "ride-chat-message-sent"
 
-
+- tapOn:
+    id: "robotaxi-chat-close-button"
+- runFlow:
+    when:
+      visible:
+        id: "passenger-trip-screen"
+    commands:
+      - assertVisible:
+          id: "passenger-trip-screen"
+- runFlow:
+    when:
+      visible:
+        id: "driver-live-ride-overlay-wrap"
+    commands:
+      - assertVisible:
+          id: "driver-live-ride-overlay-wrap"
 
 
 

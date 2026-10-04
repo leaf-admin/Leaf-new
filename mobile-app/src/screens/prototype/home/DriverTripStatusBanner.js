@@ -1,10 +1,10 @@
+import leafTypography from '../../../components/prototype/LeafTypography';
 import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { PrototypePrimaryButton } from '../../../components/prototype/PrototypeUI';
 import { leafButtonMetrics } from '../../../components/prototype/LeafRideUI';
 import robotaxiPrototypeTokens from '../../../components/design-system/robotaxiPrototypeTokens';
-import { fonts } from '../../../theme/runtimeTokens';
 import { usePrototypeMapOcclusion } from '../prototypeMapOcclusion';
 
 const { color } = robotaxiPrototypeTokens;
@@ -115,7 +115,7 @@ const styles = StyleSheet.create({
     flex: 1
   },
   eyebrow: {
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 12,
     textTransform: 'uppercase',
     letterSpacing: 0.8,
@@ -123,9 +123,9 @@ const styles = StyleSheet.create({
   },
   subtitle: {
     marginTop: 4,
-    fontFamily: fonts.Medium,
-    fontSize: 13,
-    lineHeight: 18,
+    ...leafTypography.medium,
+    fontSize: 14,
+    lineHeight: 20,
     color: color.text.secondary
   },
   metaPill: {
@@ -138,7 +138,7 @@ const styles = StyleSheet.create({
   },
   metaPillText: {
     marginLeft: 6,
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 12,
     color: '#365A6D'
   },
@@ -163,12 +163,12 @@ const styles = StyleSheet.create({
   },
   infoText: {
     flex: 1,
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     fontSize: 12,
     color: color.text.secondary
   },
   infoValue: {
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 13,
     color: color.text.primary
   },

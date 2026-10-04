@@ -3,6 +3,7 @@ const router = express.Router();
 const admin = require('firebase-admin');
 const { logger } = require('../utils/logger');
 const { assertAccountWritable, saveAccountProfile, projectRealtimeProfile, runAccountDeletion } = require('../services/account-lifecycle-service');
+const { readPlaces, mutatePlaces, normalizePlace, validatePlaceId } = require('../services/account-saved-places');
 const redisPool = require('../utils/redis-pool');
 const {
   buildVehicleOcrUpdates,
@@ -58,7 +59,8 @@ const USER_PII_FIELDS_TO_DELETE = [
   'crlvImage',
   'cnhExtraction',
   'vehicleExtraction',
-  'documents'
+  'documents',
+  'savedPlaces'
 ];
 
 // Middleware de autenticação Firebase
@@ -1006,6 +1008,42 @@ router.patch('/api/account/preferences', requireFirebase, async (req, res) => {
     return res.status(500).json({ success: false, message: 'Erro ao atualizar preferências da conta' });
   }
 });
+
+// Preferences belong to the Firebase actor, never to a uid supplied in the body.
+router.get('/api/account/places', requireFirebase, async (req, res) => {
+  try {
+    const doc = await admin.firestore().collection('users').doc(req.user.uid).get();
+    const profile = doc.exists ? doc.data() : {};
+    assertAccountWritable(profile);
+    return res.json({ success: true, uid: req.user.uid, places: readPlaces(profile) });
+  } catch (error) {
+    return res.status(error.status || 500).json({ success: false, code: error.code || 'SAVED_PLACES_READ_FAILED', message: error.status ? error.message : 'Não foi possível carregar seus endereços.' });
+  }
+});
+
+async function writeSavedPlace(req, res, operation) {
+  try {
+    const id = req.params.placeId || null;
+    if (id) validatePlaceId(id);
+    if (operation !== 'delete') normalizePlace(req.body?.place, id);
+    const db = admin.firestore();
+    const ref = db.collection('users').doc(req.user.uid);
+    const places = await db.runTransaction(async transaction => {
+      const doc = await transaction.get(ref);
+      const profile = doc.exists ? doc.data() : {};
+      assertAccountWritable(profile);
+      const next = mutatePlaces(profile, operation, req.body?.place, id);
+      transaction.set(ref, { savedPlaces: next }, { merge: true });
+      return next;
+    });
+    return res.json({ success: true, uid: req.user.uid, places });
+  } catch (error) {
+    return res.status(error.status || 500).json({ success: false, code: error.code || 'SAVED_PLACES_WRITE_FAILED', message: error.status ? error.message : 'Não foi possível salvar seus endereços.' });
+  }
+}
+router.post('/api/account/places', requireFirebase, (req, res) => writeSavedPlace(req, res, 'add'));
+router.patch('/api/account/places/:placeId', requireFirebase, (req, res) => writeSavedPlace(req, res, 'update'));
+router.delete('/api/account/places/:placeId', requireFirebase, (req, res) => writeSavedPlace(req, res, 'delete'));
 
 router.get('/api/account/vehicles', requireFirebase, requireDriverAccount, async (req, res) => {
   try {

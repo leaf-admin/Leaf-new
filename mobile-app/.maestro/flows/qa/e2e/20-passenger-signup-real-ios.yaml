@@ -1,0 +1,113 @@
+appId: br.com.leaf.ride
+---
+- launchApp:
+    clearState: true
+
+- extendedWaitUntil:
+    visible:
+      id: "auth-phone-input"
+    timeout: 120000
+
+- tapOn:
+    id: "auth-phone-input"
+- inputText: ${PASSENGER_PHONE}
+- runFlow:
+    when:
+      visible: "Done"
+    commands:
+      - tapOn: "Done"
+- tapOn:
+    id: "auth-continue-btn"
+
+- extendedWaitUntil:
+    visible:
+      id: "(auth-otp-digit-0|auth-password-input)"
+    timeout: 90000
+
+- runFlow:
+    when:
+      visible:
+        id: "auth-password-input"
+    commands:
+      - takeScreenshot: "signup-passenger-ios-blocked-existing-password-account"
+      - assertNotVisible:
+          id: "auth-password-input"
+
+- tapOn:
+    id: "auth-otp-digit-0"
+- inputText: ${PASSENGER_OTP_DIGIT_0}
+- tapOn:
+    id: "auth-otp-digit-1"
+- inputText: ${PASSENGER_OTP_DIGIT_1}
+- tapOn:
+    id: "auth-otp-digit-2"
+- inputText: ${PASSENGER_OTP_DIGIT_2}
+- tapOn:
+    id: "auth-otp-digit-3"
+- inputText: ${PASSENGER_OTP_DIGIT_3}
+- tapOn:
+    id: "auth-otp-digit-4"
+- inputText: ${PASSENGER_OTP_DIGIT_4}
+- tapOn:
+    id: "auth-otp-digit-5"
+- inputText: ${PASSENGER_OTP_DIGIT_5}
+- runFlow:
+    when:
+      visible:
+        id: "auth-otp-verify-btn"
+    commands:
+      - tapOn:
+          id: "auth-otp-verify-btn"
+
+- runFlow:
+    when:
+      visible:
+        id: "auth-profile-selection-trigger"
+    commands:
+      - tapOn:
+          id: "auth-profile-selection-trigger"
+      - tapOn:
+          id: "auth-profile-option-customer"
+      - tapOn:
+          id: "auth-profile-selection-continue-btn"
+
+- extendedWaitUntil:
+    visible: "Digite seu nome completo"
+    timeout: 90000
+- tapOn: "Digite seu nome completo"
+- inputText: "QA Passageiro Cadastro"
+- tapOn: ".*Termos de Uso.*"
+- tapOn: ".*Privacidade.*"
+- swipe:
+    start: "50%,82%"
+    end: "50%,36%"
+- tapOn: "Continuar"
+
+- runFlow:
+    when:
+      visible: "Allow Leaf to access this device's location\\?"
+    commands:
+      - tapOn: "While Using the App"
+- runFlow:
+    when:
+      visible: "Allow While Using App"
+    commands:
+      - tapOn: "Allow While Using App"
+- runFlow:
+    when:
+      visible: "Permitir ao usar o app"
+    commands:
+      - tapOn: "Permitir ao usar o app"
+- runFlow:
+    when:
+      visible: "Permitir Durante o Uso do App"
+    commands:
+      - tapOn: "Permitir Durante o Uso do App"
+
+- extendedWaitUntil:
+    visible:
+      id: "(passenger-home-destination-input|passenger-rating-screen|robotaxi-support-screen)"
+    timeout: 120000
+- assertNotVisible:
+    id: "auth-phone-input"
+- takeScreenshot: "signup-passenger-ios-success-home"

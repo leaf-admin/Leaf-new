@@ -561,7 +561,7 @@ const styles = StyleSheet.create({
   },
   errorIcon: {
     width: 56,
-    height: 56,
+    minHeight: 48,
     borderRadius: 28,
     borderWidth: 3,
     borderColor: '#D92D20',
@@ -577,7 +577,7 @@ const styles = StyleSheet.create({
     fontSize: 22,
     lineHeight: 28,
     color: '#111111',
-    fontFamily: 'Inter_700Bold',
+    fontFamily: 'Inter_600SemiBold',
     textAlign: 'center',
   },
   subtitle: {
@@ -591,9 +591,9 @@ const styles = StyleSheet.create({
   primaryButton: {
     marginTop: 24,
     width: '100%',
-    height: 56,
+    minHeight: 48,
     borderRadius: 28,
-    backgroundColor: '#1A330E',
+    backgroundColor: '#252525',
     alignItems: 'center',
     justifyContent: 'center',
   },

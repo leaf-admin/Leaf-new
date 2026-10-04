@@ -1,8 +1,9 @@
+import leafTypography from '../../components/prototype/LeafTypography';
+import { RobotaxiLifecycleSummary } from '../../components/prototype/RobotaxiLifecycleUI';
 import React, { useCallback, useRef, useState } from 'react';
 import { StatusBar, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { fonts } from '../../theme/runtimeTokens';
 import PrototypeScreenTransition from '../../components/prototype/PrototypeScreenTransition';
 import PrototypeDismissibleSheet from '../../components/prototype/PrototypeDismissibleSheet';
 import {
@@ -30,7 +31,7 @@ export default function RobotaxiPaymentFailedScreen({ navigation, route }) {
   const [retryError, setRetryError] = useState('');
   const retryGuardRef = useRef(false);
   const sheetBottom =
-    insets.bottom + SHEET_BOTTOM_OFFSET + robotaxiLifecycleMetrics.cardBottomGap;
+    SHEET_BOTTOM_OFFSET + robotaxiLifecycleMetrics.cardBottomGap;
 
   const title = route?.params?.title || 'Pagamento não confirmado';
   const errorMessage = route?.params?.errorMessage || 'Não conseguimos confirmar o pagamento desta vez.';
@@ -136,7 +137,7 @@ export default function RobotaxiPaymentFailedScreen({ navigation, route }) {
         style={styles.container}
         pointerEvents="box-none"
         testID="passenger-payment-failed-screen"
-        accessibilityLabel="passenger-payment-failed-screen"
+        accessibilityLabel={title}
       >
         <StatusBar translucent backgroundColor="transparent" barStyle="dark-content" />
 
@@ -146,14 +147,9 @@ export default function RobotaxiPaymentFailedScreen({ navigation, route }) {
           dragEnabled={!confirmedRetryRequested}
           backdropDismissEnabled={!confirmedRetryRequested}
         >
-          <RobotaxiLifecycleCard onLayout={handleCardLayout} style={styles.card}>
+          <RobotaxiLifecycleCard onLayout={handleCardLayout} style={[styles.card, { paddingBottom: robotaxiLifecycleMetrics.cardPaddingBottom + insets.bottom }]}>
 
-            <View style={styles.iconWrap}>
-              <Ionicons name="warning-outline" size={30} color="#FFFFFF" />
-            </View>
-
-            <Text style={styles.title}>{title}</Text>
-            <Text style={styles.subtitle}>{visibleMessage}</Text>
+            <RobotaxiLifecycleSummary title={title} subtitle={visibleMessage} object="payment" />
 
             <RobotaxiLifecycleButton
               label={retrying ? 'Reenviando corrida' : 'Tentar novamente'}
@@ -202,18 +198,18 @@ const styles = StyleSheet.create({
   title: {
     marginTop: 10,
     color: color.text.primary,
-    fontFamily: fonts.SemiBold,
-    fontSize: 15.5,
-    lineHeight: 20,
-    textAlign: 'center'
+    ...leafTypography.semiBold,
+    fontSize: 22,
+    lineHeight: 28,
+    textAlign: 'left'
   },
   subtitle: {
     marginTop: 4,
     color: color.text.secondary,
-    fontFamily: fonts.Regular,
-    fontSize: typography.caption.size,
-    lineHeight: typography.caption.lineHeight,
-    textAlign: 'center'
+    ...leafTypography.regular,
+    fontSize: 14,
+    lineHeight: 20,
+    textAlign: 'left'
   },
   primaryButton: {
     marginTop: 12

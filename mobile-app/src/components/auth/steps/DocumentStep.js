@@ -1,3 +1,4 @@
+import leafTypography from '../../prototype/LeafTypography';
 import React, { useMemo, useState } from 'react';
 import {
   ActivityIndicator,
@@ -9,7 +10,6 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as DocumentPicker from 'expo-document-picker';
-import { fonts } from '../../../theme/runtimeTokens';
 import ContinueButton from '../common/ContinueButton';
 import onboardingTheme from '../common/onboardingTheme';
 import EditorialOnboardingScreen from '../common/EditorialOnboardingLayout';
@@ -514,17 +514,17 @@ const styles = StyleSheet.create({
     justifyContent: 'center'
   },
   title: {
-    fontSize: 32,
-    lineHeight: 36,
+    fontSize: 22,
+    lineHeight: 28,
     color: color.textPrimary,
-    fontFamily: fonts.Bold,
+    ...leafTypography.bold,
     letterSpacing: 0
   },
   subtitle: {
-    fontSize: 15,
-    lineHeight: 21,
+    fontSize: 14,
+    lineHeight: 20,
     color: color.textSecondary,
-    fontFamily: fonts.Regular,
+    ...leafTypography.regular,
     marginTop: spacing.sm,
     marginBottom: spacing.lg
   },
@@ -541,12 +541,12 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 16,
     color: color.textSecondary,
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     marginBottom: 8
   },
   optionalTag: {
     color: color.textMuted,
-    fontFamily: fonts.Medium
+    ...leafTypography.medium
   },
   input: {
     borderWidth: 1,
@@ -556,7 +556,7 @@ const styles = StyleSheet.create({
     paddingVertical: 9,
     fontSize: 13,
     lineHeight: 17,
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     color: color.textPrimary,
     backgroundColor: color.surfaceMuted
   },
@@ -578,7 +578,7 @@ const styles = StyleSheet.create({
     marginRight: 8,
     fontSize: 13,
     lineHeight: 17,
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     color: color.textPrimary
   },
   selectPlaceholder: {
@@ -586,7 +586,7 @@ const styles = StyleSheet.create({
     marginRight: 8,
     fontSize: 13,
     lineHeight: 17,
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     color: color.textMuted
   },
   uploadContainer: {
@@ -618,21 +618,21 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 18,
     color: color.textPrimary,
-    fontFamily: fonts.SemiBold
+    ...leafTypography.semiBold
   },
   uploadFile: {
     marginTop: 2,
     fontSize: 10,
     lineHeight: 13,
     color: color.textSecondary,
-    fontFamily: fonts.Regular
+    ...leafTypography.regular
   },
   uploadMeta: {
     marginTop: 2,
     fontSize: 10,
     lineHeight: 13,
     color: color.textMuted,
-    fontFamily: fonts.Medium
+    ...leafTypography.medium
   },
   uploadProgress: {
     height: 6,
@@ -655,7 +655,7 @@ const styles = StyleSheet.create({
     color: color.error,
     fontSize: 12,
     lineHeight: 16,
-    fontFamily: fonts.Medium
+    ...leafTypography.medium
   },
   identityGrid: {
     flexDirection: 'row',
@@ -691,11 +691,11 @@ const styles = StyleSheet.create({
     marginRight: 12,
     fontSize: 14,
     lineHeight: 18,
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     color: color.textPrimary
   },
   genderOptionTextSelected: {
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     color: color.accent
   }
 });

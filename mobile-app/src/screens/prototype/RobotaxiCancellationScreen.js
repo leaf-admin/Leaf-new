@@ -1,8 +1,9 @@
+import leafTypography from '../../components/prototype/LeafTypography';
+import { RobotaxiLifecycleSummary } from '../../components/prototype/RobotaxiLifecycleUI';
 import React, { useCallback, useMemo, useState } from 'react';
 import { Alert, StatusBar, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { fonts } from '../../theme/runtimeTokens';
 import PrototypeScreenTransition from '../../components/prototype/PrototypeScreenTransition';
 import PrototypeDismissibleSheet from '../../components/prototype/PrototypeDismissibleSheet';
 import {
@@ -37,7 +38,7 @@ export default function RobotaxiCancellationScreen({ navigation, route }) {
   const [isCancelling, setIsCancelling] = useState(false);
   const [cancellationActionsVisible, setCancellationActionsVisible] = useState(false);
   const sheetBottom =
-    insets.bottom + SHEET_BOTTOM_OFFSET + robotaxiLifecycleMetrics.cardBottomGap;
+    SHEET_BOTTOM_OFFSET + robotaxiLifecycleMetrics.cardBottomGap;
   const source = route?.params?.source || 'passenger-trip';
   const isDriverCancellation = source === 'driver-trip' || source === 'driver';
   const isPassengerCancellation = source === 'trip' || source === 'passenger-trip' || source === 'search';
@@ -224,27 +225,21 @@ export default function RobotaxiCancellationScreen({ navigation, route }) {
         style={styles.container}
         pointerEvents="box-none"
         testID={isDriverCancellation ? 'driver-cancellation-screen' : 'passenger-cancellation-screen'}
-        accessibilityLabel={isDriverCancellation ? 'driver-cancellation-screen' : 'passenger-cancellation-screen'}
       >
         <StatusBar translucent backgroundColor="transparent" barStyle="dark-content" />
 
         <PrototypeDismissibleSheet onClose={handleDismiss} sheetStyle={[styles.sheetWrap, { bottom: sheetBottom }]}>
-          <RobotaxiLifecycleCard onLayout={handleCardLayout} style={styles.card}>
+          <RobotaxiLifecycleCard onLayout={handleCardLayout} style={[styles.card, { paddingBottom: robotaxiLifecycleMetrics.cardPaddingBottom + insets.bottom }]}>
 
-            <View style={styles.iconWrap}>
-              <Ionicons name="close-circle-outline" size={30} color="#FFFFFF" />
-            </View>
-
-            <Text style={styles.title}>
-              {isTerminalCancellation ? terminalCancellationTitle : 'Cancelar corrida'}
-            </Text>
-            <Text style={styles.subtitle}>
-              {isTerminalCancellation
+            <RobotaxiLifecycleSummary
+              title={isTerminalCancellation ? terminalCancellationTitle : 'Cancelar corrida'}
+              subtitle={isTerminalCancellation
                 ? terminalSubtitle
                 : isPassengerCancellation
                   ? 'Ao cancelar agora, encerramos esta solicitação e você volta para o mapa.'
                   : 'Confirme o cancelamento para voltar ao estado inicial.'}
-            </Text>
+              object="activity"
+            />
 
             {isTerminalCancellation && hasFinancialOutcome ? (
               <View style={styles.financialSummary} testID="cancellation-financial-summary">
@@ -348,45 +343,43 @@ const styles = StyleSheet.create({
   title: {
     marginTop: 10,
     color: color.text.primary,
-    fontFamily: fonts.SemiBold,
-    fontSize: 15.5,
-    lineHeight: 20,
-    textAlign: 'center'
+    ...leafTypography.semiBold,
+    fontSize: 22,
+    lineHeight: 28,
+    textAlign: 'left'
   },
   subtitle: {
     marginTop: 4,
     color: color.text.secondary,
-    fontFamily: fonts.Regular,
-    fontSize: typography.caption.size,
-    lineHeight: typography.caption.lineHeight,
-    textAlign: 'center'
+    ...leafTypography.regular,
+    fontSize: 14,
+    lineHeight: 20,
+    textAlign: 'left'
   },
   warningBox: {
     marginTop: 10,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: color.border.subtle,
-    backgroundColor: color.surface.secondary,
-    paddingHorizontal: 10,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: '#E5E5E5',
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 0,
     paddingVertical: 8
   },
   warningText: {
     color: color.text.secondary,
-    fontFamily: fonts.Regular,
+    ...leafTypography.regular,
     fontSize: typography.micro.size,
     lineHeight: typography.micro.lineHeight,
-    textAlign: 'center'
+    textAlign: 'left'
   },
   financialSummary: {
     marginTop: 10,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: color.border.subtle,
-    backgroundColor: color.surface.secondary,
-    paddingHorizontal: 12,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: '#E5E5E5',
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 0,
   },
   financialRow: {
-    minHeight: 38,
+    minHeight: 54,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
@@ -399,14 +392,14 @@ const styles = StyleSheet.create({
   financialLabel: {
     flex: 1,
     color: color.text.secondary,
-    fontFamily: fonts.Regular,
-    fontSize: typography.micro.size,
-    lineHeight: typography.micro.lineHeight,
+    ...leafTypography.regular,
+    fontSize: 14,
+    lineHeight: 20,
   },
   financialValue: {
     marginLeft: 12,
     color: color.text.primary,
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     fontSize: typography.caption.size,
     lineHeight: typography.caption.lineHeight,
   },

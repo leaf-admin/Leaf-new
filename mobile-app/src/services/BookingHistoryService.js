@@ -2,6 +2,19 @@ import Logger from '../utils/Logger';
 import { createAxiosInstance, setupAxiosInterceptor } from '../utils/axiosInterceptor';
 import { getSelfHostedApiUrl } from '../config/ApiConfig';
 
+export const BOOKING_HISTORY_CACHE_TTL_MS = 30000;
+const BOOKING_HISTORY_CACHE_MAX_AGE_MS = 5 * 60000;
+const BOOKING_HISTORY_CACHE_MAX_ENTRIES = 20;
+
+function historyRequestKey(userId, userType, options = {}) {
+    return JSON.stringify([
+        userId,
+        String(userType || 'CUSTOMER').toUpperCase() === 'DRIVER' ? 'driver' : 'customer',
+        options.first ?? 50, options.after ?? null,
+        options.status ?? null, options.dateRange ?? null, options.revision ?? null,
+    ]);
+}
+
 function normalizeStatus(status) {
     const raw = String(status || '').trim().toUpperCase();
     if (!raw) return 'UNKNOWN';
@@ -10,14 +23,40 @@ function normalizeStatus(status) {
     return raw;
 }
 
+function firstPresentValue(...values) {
+    return values.find((value) =>
+        value !== null && value !== undefined && String(value).trim() !== ''
+    );
+}
+
+function parseOptionalMoney(value) {
+    if (value === null || value === undefined || String(value).trim() === '') {
+        return null;
+    }
+
+    if (typeof value === 'number') {
+        return Number.isFinite(value) ? value : null;
+    }
+
+    const sanitized = String(value).trim().replace(/[^\d,.-]/g, '');
+    if (!sanitized) {
+        return null;
+    }
+    const normalized = sanitized.includes(',') && sanitized.includes('.')
+        ? sanitized.replace(/\./g, '').replace(',', '.')
+        : sanitized.replace(',', '.');
+    const parsed = Number(normalized);
+    return Number.isFinite(parsed) ? parsed : null;
+}
+
 function mapReceiptToBooking(receipt) {
     const status = normalizeStatus(receipt?.status || receipt?.bookingStatus || 'COMPLETE');
-    const totalAmount = Number.parseFloat(
-        receipt?.grossAmount ??
-        receipt?.totalAmountValue ??
-        receipt?.totalAmountRaw ??
+    const totalAmount = parseOptionalMoney(firstPresentValue(
+        receipt?.grossAmount,
+        receipt?.totalAmountValue,
+        receipt?.totalAmountRaw,
         receipt?.totalAmount
-    );
+    ));
     const distanceKm = Number.parseFloat(receipt?.distanceKm ?? receipt?.distance);
     const durationMinutes = Number.parseFloat(receipt?.durationMinutes ?? receipt?.duration);
 
@@ -39,12 +78,19 @@ function mapReceiptToBooking(receipt) {
         date: receipt?.completedAt || receipt?.date || receipt?.createdAt || null,
         trip_cost: Number.isFinite(totalAmount) ? totalAmount : receipt?.totalAmount,
         estimate: Number.isFinite(totalAmount) ? totalAmount : receipt?.totalAmount,
-        grossAmount: Number.isFinite(totalAmount) ? totalAmount : 0,
-        driverNetAmount: Number.parseFloat(receipt?.driverNetAmount) || 0,
-        operationalFee: Number.parseFloat(receipt?.operationalFee) || 0,
-        paymentIntermediationFee: Number.parseFloat(receipt?.paymentIntermediationFee) || 0,
-        totalFees: Number.parseFloat(receipt?.totalFees) || 0,
-        tollAmount: Number.parseFloat(receipt?.tollAmount) || 0,
+        grossAmount: Number.isFinite(totalAmount) ? totalAmount : null,
+        driverNetAmount: parseOptionalMoney(firstPresentValue(
+            receipt?.driverNetAmount,
+            receipt?.netAmount
+        )),
+        operationalFee: parseOptionalMoney(receipt?.operationalFee),
+        paymentIntermediationFee: parseOptionalMoney(receipt?.paymentIntermediationFee),
+        totalFees: parseOptionalMoney(firstPresentValue(receipt?.totalFees, receipt?.feeAmount)),
+        tollAmount: parseOptionalMoney(firstPresentValue(
+            receipt?.tollAmount,
+            receipt?.tollFee,
+            receipt?.tollFeeReais
+        )),
         distance: Number.isFinite(distanceKm) ? distanceKm : receipt?.distance,
         distanceKm: Number.isFinite(distanceKm) ? distanceKm : 0,
         duration: Number.isFinite(durationMinutes) ? durationMinutes : receipt?.duration,
@@ -67,6 +113,20 @@ class BookingHistoryService {
         this.baseUrl = getSelfHostedApiUrl('/api');
         this.axiosInstance = createAxiosInstance({ baseURL: this.baseUrl });
         setupAxiosInterceptor(this.axiosInstance);
+        this.historyCache = new Map();
+        this.historyRequests = new Map();
+    }
+
+    getCachedBookingHistory(userId, userType, options = {}) {
+        const key = historyRequestKey(userId, userType, options);
+        const snapshot = this.historyCache.get(key);
+        if (!snapshot) return null;
+        const age = Date.now() - snapshot.updatedAt;
+        if (age >= BOOKING_HISTORY_CACHE_MAX_AGE_MS) {
+            this.historyCache.delete(key);
+            return null;
+        }
+        return { ...snapshot, fresh: age < BOOKING_HISTORY_CACHE_TTL_MS };
     }
 
     applyClientFilters(bookings, { status = null, dateRange = null } = {}) {
@@ -101,6 +161,29 @@ class BookingHistoryService {
      * @returns {Promise<{success: boolean, bookings?: Array, error?: string}>}
      */
     async getBookingHistory(userId, userType, options = {}) {
+        const key = historyRequestKey(userId, userType, options);
+        const cached = this.getCachedBookingHistory(userId, userType, options);
+        if (!options.forceRefresh && cached?.fresh) return cached.result;
+        if (this.historyRequests.has(key)) return this.historyRequests.get(key);
+
+        const request = this.fetchBookingHistory(userId, userType, options);
+        this.historyRequests.set(key, request);
+        try {
+            const result = await request;
+            if (result?.success) {
+                this.historyCache.delete(key);
+                this.historyCache.set(key, { result, updatedAt: Date.now() });
+                if (this.historyCache.size > BOOKING_HISTORY_CACHE_MAX_ENTRIES) {
+                    this.historyCache.delete(this.historyCache.keys().next().value);
+                }
+            }
+            return result;
+        } finally {
+            if (this.historyRequests.get(key) === request) this.historyRequests.delete(key);
+        }
+    }
+
+    async fetchBookingHistory(userId, userType, options = {}) {
         try {
             const {
                 first = 50,
@@ -121,6 +204,10 @@ class BookingHistoryService {
                 }
             });
 
+            if (response?.data?.success === false) {
+                return { success: false, error: response.data.error || 'Não foi possível carregar o histórico.' };
+            }
+
             const receipts = Array.isArray(response?.data?.receipts) ? response.data.receipts : [];
             const mappedBookings = receipts.map(mapReceiptToBooking);
             const filteredBookings = this.applyClientFilters(mappedBookings, { status, dateRange });
@@ -136,7 +223,8 @@ class BookingHistoryService {
                         ? String(response?.data?.nextOffset ?? offset + receipts.length)
                         : null
                 },
-                totalCount: Number(response?.data?.total || filteredBookings.length)
+                totalCount: Number(response?.data?.total ?? filteredBookings.length),
+                totalCountKnown: response?.data?.total !== null && response?.data?.total !== undefined && response?.data?.total !== '' && Number.isInteger(Number(response.data.total)) && Number(response.data.total) >= receipts.length
             };
         } catch (error) {
             Logger.error('❌ Erro ao buscar histórico de corridas:', error);

@@ -65,6 +65,7 @@
     "qa:runtime:endpoints": "bash scripts/check-runtime-endpoints.sh",
     "qa:host:readiness": "bash scripts/qa/verify-host-readiness.sh",
     "qa:backend:real-sandbox": "bash scripts/qa/assert-backend-real-sandbox.sh",
+    "qa:preflight:real-e2e": "node scripts/qa/verify-real-qa-target.cjs",
     "qa:android:real-smoke": "node scripts/qa/android-real-device-smoke.cjs",
     "qa:reconcile:same-ride": "node scripts/qa/validate-same-ride-reconciliation.cjs",
     "ux:lab:validate": "node scripts/qa/ux-lab.cjs validate",

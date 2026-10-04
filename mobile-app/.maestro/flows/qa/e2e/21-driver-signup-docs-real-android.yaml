@@ -1,6 +1,4 @@
 appId: br.com.leaf.ride
-env:
-  DRIVER_PHONE: "21123456789"
 ---
 - launchApp:
     clearState: true
@@ -60,22 +58,22 @@ env:
     commands:
       - tapOn:
           id: "auth-otp-digit-0"
-      - inputText: "9"
+      - inputText: ${DRIVER_OTP_DIGIT_0}
       - tapOn:
           id: "auth-otp-digit-1"
-      - inputText: "9"
+      - inputText: ${DRIVER_OTP_DIGIT_1}
       - tapOn:
           id: "auth-otp-digit-2"
-      - inputText: "2"
+      - inputText: ${DRIVER_OTP_DIGIT_2}
       - tapOn:
           id: "auth-otp-digit-3"
-      - inputText: "0"
+      - inputText: ${DRIVER_OTP_DIGIT_3}
       - tapOn:
           id: "auth-otp-digit-4"
-      - inputText: "0"
+      - inputText: ${DRIVER_OTP_DIGIT_4}
       - tapOn:
           id: "auth-otp-digit-5"
-      - inputText: "0"
+      - inputText: ${DRIVER_OTP_DIGIT_5}
       - runFlow:
           when:
             visible:

@@ -1,8 +1,8 @@
+import leafTypography from '../../components/prototype/LeafTypography';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, StatusBar, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { fonts } from '../../theme/runtimeTokens';
 import PrototypeScreenTransition from '../../components/prototype/PrototypeScreenTransition';
 import PrototypeDismissibleSheet from '../../components/prototype/PrototypeDismissibleSheet';
 import PrototypeMapLayer from '../../components/prototype/PrototypeMapLayer';
@@ -13,6 +13,7 @@ import robotaxiPrototypeTokens from '../../components/design-system/robotaxiProt
 import {
   LeafAnimatedPressable,
   LeafDivider,
+  LeafJourneyRoute,
   LeafProgressBar,
   LeafRouteProgress,
   leafButtonMetrics,
@@ -621,7 +622,7 @@ export default function RobotaxiTripScreen({ navigation, route }) {
   const [publishedMapRoute, setPublishedMapRoute] = useState(() => getPrototypeMapRoute());
   const qaAutoConfirmPix = true;
   const safeBottom = Math.max(0, Number(insets.bottom) || 0);
-  const sheetBottom = Math.max(SHEET_BOTTOM_OFFSET, safeBottom + 12);
+  const sheetBottom = SHEET_BOTTOM_OFFSET;
   const tripSheetMaxHeight = useMemo(
     () => buildTripSheetMaxHeight({
       mapHeight: mapHeight || windowHeight,
@@ -1649,7 +1650,7 @@ export default function RobotaxiTripScreen({ navigation, route }) {
     <View
       style={[styles.startedActionDock, style]}
       testID="passenger-trip-started-action-dock"
-      accessibilityLabel="passenger-trip-started-action-dock"
+      accessibilityLabel="Ações da viagem ativa"
     >
       {compact ? (
         renderCompactMoreOptionsButton(
@@ -1723,7 +1724,7 @@ export default function RobotaxiTripScreen({ navigation, route }) {
   const renderPassengerMissingIdentityState = () => (
     <View
       testID="passenger-trip-missing-identity-card"
-      accessibilityLabel="passenger-trip-missing-identity-card"
+      accessibilityLabel="Sincronizando dados da viagem"
     >
       <View style={styles.sheetHandle} />
       <View style={styles.cardStateHeader}>
@@ -1752,7 +1753,7 @@ export default function RobotaxiTripScreen({ navigation, route }) {
         disabled
         style={styles.acceptedPrimary}
         testID="passenger-trip-missing-identity-button"
-        accessibilityLabel="passenger-trip-missing-identity-button"
+        accessibilityLabel="Aguardando confirmação da viagem pelo servidor"
       />
     </View>
   );
@@ -1814,7 +1815,7 @@ export default function RobotaxiTripScreen({ navigation, route }) {
         onPress={() => setIsTripExpanded(false)}
         expandedLabel="Voltar ao resumo"
         testID="passenger-trip-collapse-button"
-        accessibilityLabel="passenger-trip-collapse-button"
+        accessibilityLabel="Voltar ao resumo da viagem"
       />
       <RobotaxiLifecycleSummary
         eyebrow="VIAGEM INTERROMPIDA"
@@ -1872,7 +1873,7 @@ export default function RobotaxiTripScreen({ navigation, route }) {
   const renderCompactTripCard = () => (
     <View
       testID="passenger-trip-compact-summary"
-      accessibilityLabel="passenger-trip-compact-summary"
+      accessibilityLabel="Resumo da viagem do passageiro"
     >
       {isProtectedStatusWithoutRideIdentity ? (
         renderPassengerMissingIdentityState()
@@ -1884,11 +1885,25 @@ export default function RobotaxiTripScreen({ navigation, route }) {
         <>
           <RobotaxiLifecycleSummary
             eyebrow="EM VIAGEM"
-            title={destination}
-            value={compactArrivalTime}
-            valueLabel="chegada"
-            titleTestID={passengerCardFieldTestIDs.destination_address}
-            valueTestID={passengerCardFieldTestIDs.eta_final}
+            title={compactArrivalTime && compactArrivalTime !== '--'
+              ? `Chegada ${arrivalClockLabel ? 'às' : 'em'} ${compactArrivalTime}`
+              : 'Em viagem'}
+            object="activity"
+            titleTestID={passengerCardFieldTestIDs.eta_final}
+          />
+          <View style={styles.journeyFacts}>
+            <Text style={styles.journeyFactSupport}>{compactEtaValue} · {distanceLabel}</Text>
+            <View style={styles.journeyFare}>
+              <Text style={styles.journeyFareValue} testID={passengerCardFieldTestIDs.fare}>{fareLabel}</Text>
+              <Text style={styles.journeyFactSupport} testID={passengerCardFieldTestIDs.vehicle_type}>{vehicle} · valor da viagem</Text>
+            </View>
+          </View>
+          <LeafJourneyRoute
+            origin={pickupPointLabel}
+            destination={destinationAddress || destination}
+            destinationTestID={passengerCardFieldTestIDs.destination_address}
+            testID="passenger-trip-route-details"
+            style={styles.journeyRoute}
           />
           <View style={styles.startedProgressTrack} testID="passenger-trip-route-progress">
             <LeafProgressBar
@@ -1906,18 +1921,39 @@ export default function RobotaxiTripScreen({ navigation, route }) {
               </Text>
             </View>
           </View>
+          <RobotaxiLifecycleIdentity
+            initial={driverInitial}
+            photoUri={driverPhotoUri}
+            name={driverName}
+            meta={driverRatingLabel}
+            trailing={plateLabel}
+            style={styles.compactIdentity}
+            testID="passenger-trip-driver-identity"
+            fieldTestIDs={{
+              avatar: passengerCardFieldTestIDs.driver_photo,
+              name: passengerCardFieldTestIDs.driver_name,
+              trailing: passengerCardFieldTestIDs.vehicle_plate,
+            }}
+          />
+          <Text style={styles.journeyVehicle}>
+            <Text testID={passengerCardFieldTestIDs.vehicle_model}>{vehicleModel}</Text>
+            <Text> · </Text>
+            <Text testID={passengerCardFieldTestIDs.vehicle_color}>{vehicleColorLabel}</Text>
+          </Text>
           {renderStartedActionDock(styles.startedActionDockCompact, { compact: true })}
         </>
       ) : isArrived ? (
         <>
           <RobotaxiLifecycleSummary
             eyebrow="MOTORISTA CHEGOU"
-            title={pickupCompactLabel}
-            value={boardingCountdownLabel || '0:00'}
-            valueLabel="para embarcar"
-            titleTestID={passengerCardFieldTestIDs.pickup_address}
-            valueTestID={passengerCardFieldTestIDs.boarding_timer}
+            title="Confira antes de embarcar"
+            subtitle="Placa e veículo devem ser os mesmos desta tela."
+            object="privacy"
           />
+          <View style={styles.journeyFacts}>
+            <Text style={styles.journeyFactSupport}>Tempo para embarcar</Text>
+            <Text style={styles.journeyFareValue} testID={passengerCardFieldTestIDs.boarding_timer}>{boardingCountdownLabel || '0:00'}</Text>
+          </View>
           <Text
             style={[
               styles.compactStatusMessage,
@@ -1949,6 +1985,21 @@ export default function RobotaxiTripScreen({ navigation, route }) {
               trailing: passengerCardFieldTestIDs.vehicle_plate,
             }}
           />
+          <View style={styles.journeyBoarding}>
+            <View style={styles.journeyBoardingCopy}>
+              <Text style={styles.journeyBoardingTitle}>Seu código</Text>
+              <Text style={styles.journeyFactSupport}>Informe depois de conferir a placa</Text>
+            </View>
+            <Text style={styles.journeyBoardingCode} testID="passenger-trip-boarding-code">
+              {boardingPinLabel === '----' ? '—' : boardingPinLabel}
+            </Text>
+          </View>
+          <LeafJourneyRoute
+            origin={pickupPointLabel}
+            destination={destinationAddress || destination}
+            originTestID={passengerCardFieldTestIDs.pickup_address}
+            style={styles.journeyRoute}
+          />
           <View
             style={styles.compactLifecycleActions}
             testID={passengerCardFieldTestIDs.contact_actions}
@@ -1963,11 +2014,9 @@ export default function RobotaxiTripScreen({ navigation, route }) {
         <>
           <RobotaxiLifecycleSummary
             eyebrow="MOTORISTA A CAMINHO"
-            title={pickupCompactLabel}
-            value={compactEtaValue}
-            valueLabel="até chegar"
-            titleTestID={passengerCardFieldTestIDs.pickup_address}
-            valueTestID={passengerCardFieldTestIDs.pickup_eta}
+            title={compactEtaValue && compactEtaValue !== '--' ? `Chega em ${compactEtaValue}` : 'Motorista a caminho'}
+            object="places"
+            titleTestID={passengerCardFieldTestIDs.pickup_eta}
           />
           <Text
             style={styles.compactStatusMessage}
@@ -1998,6 +2047,17 @@ export default function RobotaxiTripScreen({ navigation, route }) {
               trailing: passengerCardFieldTestIDs.vehicle_plate,
             }}
           />
+          <LeafJourneyRoute
+            origin={pickupPointLabel}
+            destination={destinationAddress || destination}
+            originTestID={passengerCardFieldTestIDs.pickup_address}
+            destinationTestID={passengerCardFieldTestIDs.destination_address}
+            style={styles.journeyRoute}
+          />
+          <View style={styles.journeyFacts}>
+            <Text style={styles.journeyFactSupport} testID={passengerCardFieldTestIDs.vehicle_type}>{vehicle} · valor da viagem</Text>
+            <Text style={styles.journeyFareValue} testID={passengerCardFieldTestIDs.fare}>{fareLabel}</Text>
+          </View>
           <View
             style={styles.compactLifecycleActions}
             testID={passengerCardFieldTestIDs.contact_actions}
@@ -2022,7 +2082,7 @@ export default function RobotaxiTripScreen({ navigation, route }) {
         label="Mais opções"
         expandedLabel="Voltar ao resumo"
         testID="passenger-trip-collapse-button"
-        accessibilityLabel="passenger-trip-collapse-button"
+        accessibilityLabel="Voltar ao resumo da viagem"
       />
 
       <RobotaxiLifecycleSection>
@@ -2063,14 +2123,6 @@ export default function RobotaxiTripScreen({ navigation, route }) {
             >
               {isArrived ? boardingTimerMessage : `${distanceLabel} até o embarque`}
             </Text>
-            {isAccepted ? (
-              <Text
-                style={styles.compactDestinationLine}
-                testID={passengerCardFieldTestIDs.destination_address}
-              >
-                Destino: {destination}
-              </Text>
-            ) : null}
           </>
         )}
 
@@ -2096,6 +2148,27 @@ export default function RobotaxiTripScreen({ navigation, route }) {
             trailing: passengerCardFieldTestIDs.vehicle_plate,
           }}
         />
+        {isArrived ? (
+          <View style={styles.journeyBoarding}>
+            <View style={styles.journeyBoardingCopy}>
+              <Text style={styles.journeyBoardingTitle}>Seu código</Text>
+              <Text style={styles.journeyFactSupport}>Informe depois de conferir a placa</Text>
+            </View>
+            <Text style={styles.journeyBoardingCode} testID="passenger-trip-boarding-code">
+              {boardingPinLabel === '----' ? '—' : boardingPinLabel}
+            </Text>
+          </View>
+        ) : null}
+        <LeafJourneyRoute
+          origin={pickupPointLabel}
+          destination={destinationAddress || destination}
+          destinationTestID={isStarted ? undefined : passengerCardFieldTestIDs.destination_address}
+          style={styles.journeyRoute}
+        />
+        <View style={styles.journeyFacts}>
+          <Text style={styles.journeyFactSupport} testID={passengerCardFieldTestIDs.vehicle_type}>{vehicle} · valor da viagem</Text>
+          <Text style={styles.journeyFareValue} testID={passengerCardFieldTestIDs.fare}>{fareLabel}</Text>
+        </View>
       </RobotaxiLifecycleSection>
 
       <RobotaxiLifecycleSection title="AÇÕES">
@@ -2223,6 +2296,7 @@ export default function RobotaxiTripScreen({ navigation, route }) {
                 styles.compactCard,
               {
                 maxHeight: tripSheetMaxHeight,
+                paddingBottom: robotaxiLifecycleMetrics.cardPaddingBottom + safeBottom,
               },
             ]}
             scrollEnabled
@@ -2234,7 +2308,9 @@ export default function RobotaxiTripScreen({ navigation, route }) {
               passengerTripSheetExpansionLocked || isTripExpanded
             }
             testID="passenger-trip-screen"
-            accessibilityLabel="passenger-trip-screen"
+            accessibilityLabel={isOperationalDecisionPending || isOperationalSearching
+              ? "Estado atual da viagem do passageiro"
+              : "Viagem ativa do passageiro"}
           >
             {shouldUseCompactTripCard &&
             !passengerTripSheetExpansionLocked &&
@@ -2256,7 +2332,7 @@ export default function RobotaxiTripScreen({ navigation, route }) {
                 onPress={() => setIsTripExpanded(false)}
                 style={styles.collapseControl}
                 testID="passenger-trip-collapse-button"
-                accessibilityLabel="passenger-trip-collapse-button"
+                accessibilityLabel="Voltar ao resumo da viagem"
               >
                 <Ionicons name="chevron-down-outline" size={16} color={color.text.secondary} />
                 <Text style={styles.collapseControlText}>Voltar ao resumo</Text>
@@ -2269,7 +2345,7 @@ export default function RobotaxiTripScreen({ navigation, route }) {
               <View
                 style={styles.statusChip}
                 testID="passenger-trip-status-chip"
-                accessibilityLabel="passenger-trip-status-chip"
+                accessibilityLabel={formatStatusLabel(normalizedStatus)}
               >
                 <Text style={styles.statusChipText}>{formatStatusLabel(normalizedStatus)}</Text>
               </View>
@@ -2280,11 +2356,7 @@ export default function RobotaxiTripScreen({ navigation, route }) {
                     ? passengerCardFieldTestIDs.eta_final
                     : "passenger-trip-arrival-label"
                 }
-                accessibilityLabel={
-                  isStarted
-                    ? passengerCardFieldTestIDs.eta_final
-                    : "passenger-trip-arrival-label"
-                }
+                accessibilityLabel={arrivalLabel}
               >
                 {arrivalLabel}
               </Text>
@@ -2293,7 +2365,7 @@ export default function RobotaxiTripScreen({ navigation, route }) {
             <Text
               style={styles.destinationText}
               testID={passengerCardFieldTestIDs.destination_address}
-              accessibilityLabel={passengerCardFieldTestIDs.destination_address}
+              accessibilityLabel={destination}
             >
               {destination}
             </Text>
@@ -2444,7 +2516,7 @@ export default function RobotaxiTripScreen({ navigation, route }) {
                     onPress={handleContinueWithOtherDriver}
                     disabled={isBusy}
                     testID="passenger-trip-operational-continue-button"
-                    accessibilityLabel="passenger-trip-operational-continue-button"
+                    accessibilityLabel="Continuar com outro motorista"
                   >
                     <Ionicons
                       name="car-outline"
@@ -2462,7 +2534,7 @@ export default function RobotaxiTripScreen({ navigation, route }) {
                     onPress={handleEndAfterInterruption}
                     disabled={isBusy}
                     testID="passenger-trip-operational-end-button"
-                    accessibilityLabel="passenger-trip-operational-end-button"
+                    accessibilityLabel="Encerrar neste ponto"
                   >
                     <Ionicons
                       name="stop-circle-outline"
@@ -2484,7 +2556,7 @@ export default function RobotaxiTripScreen({ navigation, route }) {
                   <Text
                     style={styles.extensionTitle}
                     testID="passenger-trip-searching-replacement-title"
-                    accessibilityLabel="passenger-trip-searching-replacement-title"
+                    accessibilityLabel="Procurando outro motorista"
                   >
                     Procurando outro motorista
                   </Text>
@@ -2525,7 +2597,7 @@ export default function RobotaxiTripScreen({ navigation, route }) {
                     onPress={handleShareTrip}
                     style={styles.expandedShareAction}
                     testID="passenger-trip-share-button"
-                    accessibilityLabel="passenger-trip-share-button"
+                    accessibilityLabel="Compartilhar viagem"
                   />
                 ) : null}
               </>
@@ -2541,7 +2613,7 @@ export default function RobotaxiTripScreen({ navigation, route }) {
                 style={styles.cancelAction}
                 onPress={handleOpenPassengerCancellation}
                 testID="passenger-trip-cancel-button"
-                accessibilityLabel="passenger-trip-cancel-button"
+                accessibilityLabel="Cancelar corrida"
               />
             )}
 
@@ -2580,18 +2652,31 @@ export default function RobotaxiTripScreen({ navigation, route }) {
 }
 
 const styles = StyleSheet.create({
+  journeyFacts: { marginTop: 14, flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 14 },
+  journeyFactSupport: { ...leafTypography.regular, fontSize: 14, lineHeight: 20, color: '#6A6A6A' },
+  journeyFare: { alignItems: 'flex-end' },
+  journeyFareValue: { ...leafTypography.semiBold, fontSize: 17, lineHeight: 22, color: '#222222', fontVariant: ['tabular-nums'] },
+  journeyRoute: { marginTop: 16 },
+  journeyVehicle: { ...leafTypography.regular, fontSize: 13, lineHeight: 19, color: '#6A6A6A', marginLeft: 56, marginTop: 4 },
+  journeyBoarding: { marginTop: 16, paddingVertical: 14, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: '#E5E5E5', flexDirection: 'row', alignItems: 'center', gap: 14 },
+  journeyBoardingCopy: { flex: 1 },
+  journeyBoardingTitle: { ...leafTypography.medium, fontSize: 16, lineHeight: 22, color: '#222222', marginBottom: 4 },
+  journeyBoardingCode: { ...leafTypography.semiBold, fontSize: 28, lineHeight: 34, letterSpacing: 3, fontVariant: ['tabular-nums'], color: '#222222' },
   container: {
     flex: 1,
     backgroundColor: 'transparent'
   },
   sheetWrap: {
     position: 'absolute',
-    left: 24,
-    right: 24,
+    left: 0,
+    right: 0,
   },
   tripCard: {
     minHeight: 0,
-    borderRadius: robotaxiLifecycleMetrics.cardRadius,
+    borderTopLeftRadius: robotaxiLifecycleMetrics.cardRadius,
+    borderTopRightRadius: robotaxiLifecycleMetrics.cardRadius,
+    borderBottomLeftRadius: 0,
+    borderBottomRightRadius: 0,
   },
   tripSheetScroll: {
     flexGrow: 0
@@ -2607,7 +2692,7 @@ const styles = StyleSheet.create({
     width: 50,
     height: 4,
     borderRadius: 3,
-    backgroundColor: '#D8D0C7',
+    backgroundColor: '#D5D8D4',
     alignSelf: 'center',
     marginBottom: 24
   },
@@ -2622,7 +2707,7 @@ const styles = StyleSheet.create({
     flex: 1,
     minWidth: 0,
     color: leafRideColors.text,
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 19,
     lineHeight: 24
   },
@@ -2678,9 +2763,9 @@ const styles = StyleSheet.create({
     flex: 1,
     minWidth: 0,
     color: leafRideColors.text,
-    fontFamily: fonts.SemiBold,
-    fontSize: 18,
-    lineHeight: 24
+    ...leafTypography.semiBold,
+    fontSize: 22,
+    lineHeight: 28
   },
   rideHeader: {
     flexDirection: 'row',
@@ -2696,13 +2781,13 @@ const styles = StyleSheet.create({
   rideKicker: {
     marginTop: 2,
     color: leafRideColors.secondary,
-    fontFamily: fonts.Regular,
+    ...leafTypography.regular,
     fontSize: 11,
     lineHeight: 15
   },
   rideTitle: {
     color: leafRideColors.text,
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 20,
     lineHeight: 25
   },
@@ -2720,7 +2805,7 @@ const styles = StyleSheet.create({
   },
   rideRightValue: {
     color: leafRideColors.text,
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     fontSize: 11,
     lineHeight: 16,
     textAlign: 'center'
@@ -2764,14 +2849,14 @@ const styles = StyleSheet.create({
   },
   rideRouteMeta: {
     color: leafRideColors.secondary,
-    fontFamily: fonts.Regular,
+    ...leafTypography.regular,
     fontSize: 10.5,
     lineHeight: 14
   },
   rideRouteAddress: {
     marginTop: 2,
     color: leafRideColors.text,
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 14,
     lineHeight: 18
   },
@@ -2793,14 +2878,14 @@ const styles = StyleSheet.create({
   },
   compactTitle: {
     color: leafRideColors.text,
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 19,
     lineHeight: 24
   },
   compactSubtitleStrong: {
     marginTop: 1,
     color: leafRideColors.text,
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 15,
     lineHeight: 20
   },
@@ -2808,7 +2893,7 @@ const styles = StyleSheet.create({
     minWidth: 62,
     marginTop: 8,
     color: leafRideColors.text,
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 18,
     lineHeight: 23,
     textAlign: 'right'
@@ -2838,7 +2923,7 @@ const styles = StyleSheet.create({
   vehicleColorText: {
     marginTop: 4,
     color: leafRideColors.secondary,
-    fontFamily: fonts.Regular,
+    ...leafTypography.regular,
     fontSize: 11,
     lineHeight: 15
   },
@@ -2861,14 +2946,14 @@ const styles = StyleSheet.create({
   },
   routeSummaryTitle: {
     color: leafRideColors.text,
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 14,
     lineHeight: 18
   },
   routeSummaryMeta: {
     marginTop: 4,
     color: leafRideColors.secondary,
-    fontFamily: fonts.Regular,
+    ...leafTypography.regular,
     fontSize: 10,
     lineHeight: 14
   },
@@ -2914,14 +2999,14 @@ const styles = StyleSheet.create({
   compactStatusMessage: {
     marginTop: 5,
     color: leafRideColors.secondary,
-    fontFamily: fonts.Regular,
+    ...leafTypography.regular,
     fontSize: 12,
     lineHeight: 17,
   },
   compactDestinationLine: {
     marginTop: 3,
     color: leafRideColors.secondary,
-    fontFamily: fonts.Regular,
+    ...leafTypography.regular,
     fontSize: 12,
     lineHeight: 17,
   },
@@ -2929,7 +3014,7 @@ const styles = StyleSheet.create({
     marginTop: 7,
     marginLeft: 56,
     color: leafRideColors.secondary,
-    fontFamily: fonts.Regular,
+    ...leafTypography.regular,
     fontSize: 12,
     lineHeight: 16,
   },
@@ -3009,7 +3094,7 @@ const styles = StyleSheet.create({
     marginTop: 7,
     marginLeft: 56,
     color: leafRideColors.secondary,
-    fontFamily: fonts.Regular,
+    ...leafTypography.regular,
     fontSize: 12,
     lineHeight: 16,
   },
@@ -3058,14 +3143,14 @@ const styles = StyleSheet.create({
   },
   boardingTimerValue: {
     color: leafRideColors.text,
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 40,
     lineHeight: 46
   },
   boardingTimerMessage: {
     marginTop: 2,
     color: leafRideColors.secondary,
-    fontFamily: fonts.Regular,
+    ...leafTypography.regular,
     fontSize: 13,
     lineHeight: 18
   },
@@ -3094,28 +3179,28 @@ const styles = StyleSheet.create({
   },
   statusChipText: {
     color: color.text.primary,
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: typography.micro.size,
     lineHeight: typography.micro.lineHeight,
     letterSpacing: 0.5
   },
   arrivalText: {
     color: color.text.secondary,
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     fontSize: typography.caption.size,
     lineHeight: typography.caption.lineHeight
   },
   destinationText: {
     marginTop: 8,
     color: color.text.primary,
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: typography.subtitle.size,
     lineHeight: typography.subtitle.lineHeight
   },
   driverText: {
     marginTop: 2,
     color: color.text.secondary,
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     fontSize: typography.caption.size,
     lineHeight: typography.caption.lineHeight
   },
@@ -3136,7 +3221,7 @@ const styles = StyleSheet.create({
   },
   metaLabel: {
     color: color.text.primary,
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     fontSize: typography.caption.size,
     lineHeight: typography.caption.lineHeight
   },
@@ -3156,21 +3241,21 @@ const styles = StyleSheet.create({
   },
   extensionTitle: {
     color: color.text.primary,
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: typography.caption.size,
     lineHeight: typography.caption.lineHeight
   },
   extensionMessage: {
     marginTop: 6,
     color: color.text.secondary,
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     fontSize: typography.caption.size,
     lineHeight: typography.caption.lineHeight + 2
   },
   extensionCostDetail: {
     marginTop: 6,
     color: color.text.muted,
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     fontSize: typography.micro.size,
     lineHeight: typography.micro.lineHeight + 2
   },
@@ -3187,7 +3272,7 @@ const styles = StyleSheet.create({
   },
   extensionPayActionText: {
     color: '#1A7A3E',
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: typography.caption.size,
     lineHeight: typography.caption.lineHeight
   },
@@ -3202,7 +3287,7 @@ const styles = StyleSheet.create({
   operationalContextText: {
     marginTop: 8,
     color: color.text.primary,
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: typography.caption.size,
     lineHeight: typography.caption.lineHeight + 2
   },
@@ -3212,7 +3297,7 @@ const styles = StyleSheet.create({
   },
   operationalMetaLabel: {
     color: color.text.secondary,
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     fontSize: typography.micro.size,
     lineHeight: typography.micro.lineHeight + 2
   },
@@ -3236,7 +3321,7 @@ const styles = StyleSheet.create({
   },
   secondaryActionText: {
     color: color.text.primary,
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     fontSize: typography.caption.size,
     lineHeight: typography.caption.lineHeight
   },
@@ -3258,7 +3343,7 @@ const styles = StyleSheet.create({
   },
   cancelActionText: {
     color: color.text.primary,
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     fontSize: typography.caption.size,
     lineHeight: typography.caption.lineHeight
   },
@@ -3271,7 +3356,7 @@ const styles = StyleSheet.create({
   compactTitle: {
     marginTop: 0,
     color: leafRideColors.text,
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 20,
     lineHeight: 25
   },
@@ -3303,7 +3388,7 @@ const styles = StyleSheet.create({
   },
   startedProgressEyebrow: {
     color: leafRideColors.muted,
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 10,
     lineHeight: 13,
     letterSpacing: 0.7,
@@ -3311,7 +3396,7 @@ const styles = StyleSheet.create({
   startedProgressDestination: {
     marginTop: 3,
     color: leafRideColors.text,
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 22,
     lineHeight: 27,
   },
@@ -3320,14 +3405,14 @@ const styles = StyleSheet.create({
   },
   startedProgressEtaValue: {
     color: leafRideColors.text,
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 18,
     lineHeight: 22,
   },
   startedProgressEtaLabel: {
     marginTop: 2,
     color: leafRideColors.muted,
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 9,
     lineHeight: 12,
     letterSpacing: 0.6,
@@ -3345,20 +3430,20 @@ const styles = StyleSheet.create({
   startedProgressMetaLabel: {
     flex: 1,
     color: leafRideColors.secondary,
-    fontFamily: fonts.Regular,
+    ...leafTypography.regular,
     fontSize: 12,
     lineHeight: 16,
   },
   startedProgressMetaValue: {
     color: leafRideColors.text,
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 12,
     lineHeight: 16,
   },
   tripRouteMeta: {
     marginTop: 8,
     color: leafRideColors.secondary,
-    fontFamily: fonts.Regular,
+    ...leafTypography.regular,
     fontSize: 12,
     lineHeight: 16
   },
@@ -3376,7 +3461,7 @@ const styles = StyleSheet.create({
   tripCompactEyebrow: {
     marginBottom: 2,
     color: leafRideColors.muted,
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 10,
     lineHeight: 13,
     textTransform: 'uppercase',
@@ -3409,7 +3494,7 @@ const styles = StyleSheet.create({
   },
   acceptedRouteLabel: {
     color: leafRideColors.muted,
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 10,
     lineHeight: 13,
     textTransform: 'uppercase',
@@ -3418,7 +3503,7 @@ const styles = StyleSheet.create({
   acceptedRouteValue: {
     marginTop: 2,
     color: leafRideColors.text,
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 13,
     lineHeight: 17
   },
@@ -3434,13 +3519,13 @@ const styles = StyleSheet.create({
   },
   quietCancelText: {
     color: leafRideColors.muted,
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     fontSize: 12,
     lineHeight: 16
   },
   compactSubtitle: {
     color: color.text.secondary,
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     fontSize: typography.caption.size,
     lineHeight: typography.caption.lineHeight + 2
   },
@@ -3468,7 +3553,7 @@ const styles = StyleSheet.create({
     flex: 1,
     minWidth: 0,
     color: color.text.primary,
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     fontSize: typography.micro.size,
     lineHeight: typography.micro.lineHeight + 1
   },
@@ -3504,7 +3589,7 @@ const styles = StyleSheet.create({
   },
   compactMetricLabel: {
     color: color.text.secondary,
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: typography.micro.size,
     lineHeight: typography.micro.lineHeight,
     textTransform: 'uppercase',
@@ -3513,7 +3598,7 @@ const styles = StyleSheet.create({
   compactMetricValue: {
     marginTop: 2,
     color: color.text.primary,
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: typography.caption.size,
     lineHeight: typography.caption.lineHeight
   },
@@ -3536,7 +3621,7 @@ const styles = StyleSheet.create({
   },
   compactSecondaryActionText: {
     color: color.text.primary,
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     fontSize: typography.caption.size,
     lineHeight: typography.caption.lineHeight
   },
@@ -3558,7 +3643,7 @@ const styles = StyleSheet.create({
   },
   collapseControlText: {
     color: color.text.secondary,
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: typography.micro.size,
     lineHeight: typography.micro.lineHeight
   }

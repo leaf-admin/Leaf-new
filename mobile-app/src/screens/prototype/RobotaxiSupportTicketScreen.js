@@ -1,3 +1,4 @@
+import leafTypography from '../../components/prototype/LeafTypography';
 import React, { useCallback, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
@@ -14,8 +15,8 @@ import {
   useWindowDimensions,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { LeafObjectIcon } from '../../components/prototype/LeafVisualElements';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { fonts } from '../../theme/runtimeTokens';
 import PrototypeDismissibleSheet from '../../components/prototype/PrototypeDismissibleSheet';
 import PrototypeScreenTransition from '../../components/prototype/PrototypeScreenTransition';
 import {
@@ -29,7 +30,7 @@ import { usePrototypeRideRuntime } from './prototypeRideRuntime';
 import { normalizeRuntimeRideStatus } from './rideLifecycleContract';
 import { toUserFriendlyMessage } from '../../utils/friendlyErrorMessages';
 
-const SURFACE_TOP_PADDING = 16;
+const SURFACE_TOP_PADDING = 20;
 const SURFACE_BOTTOM_PADDING = 18;
 const BACKDROP_COLOR = 'transparent';
 const KYC_IDENTITY_REVIEW_SOURCE = 'kyc_identity_mismatch_appeal';
@@ -91,23 +92,26 @@ function resolveTicketReturnRoute(context = {}) {
   return 'RobotaxiPrototypeSupport';
 }
 
-function TicketTypeRow({ item, active, onPress }) {
+function TicketTypeRow({ item, active, onPress, expanded = null }) {
   return (
     <TouchableOpacity
       activeOpacity={0.78}
       onPress={onPress}
       style={[styles.typeRow, active && styles.typeRowActive]}
       testID={`robotaxi-support-ticket-type-${item.id}`}
-      accessibilityLabel={`robotaxi-support-ticket-type-${item.id}`}
+      accessibilityRole={expanded === null ? 'radio' : 'button'}
+      accessibilityLabel={item.title}
+      accessibilityHint={item.subtitle}
+      accessibilityState={expanded === null ? { checked: active } : { expanded }}
     >
       <View style={styles.typeIcon}>
-        <Ionicons name={item.icon} size={17} color={active ? leafRideColors.leaf : leafRideColors.text} />
+        <LeafObjectIcon symbol={item.icon} size={40} />
       </View>
       <View style={styles.typeCopy}>
         <Text style={styles.typeTitle}>{item.title}</Text>
         <Text style={styles.typeSubtitle}>{item.subtitle}</Text>
       </View>
-      <Ionicons name={active ? 'checkmark-circle' : 'ellipse-outline'} size={18} color={active ? leafRideColors.leaf : leafRideColors.muted} />
+      <Ionicons name={expanded !== null ? (expanded ? 'chevron-up' : 'chevron-down') : active ? 'checkmark-circle' : 'ellipse-outline'} size={18} color={expanded !== null ? leafRideColors.muted : active ? leafRideColors.leaf : leafRideColors.muted} />
     </TouchableOpacity>
   );
 }
@@ -129,6 +133,7 @@ export default function RobotaxiSupportTicketScreen({ navigation, route }) {
     ? requestedType
     : 'trip';
   const [selectedTypeId, setSelectedTypeId] = useState(initialType);
+  const [showTicketTypes, setShowTicketTypes] = useState(false);
   const [subject, setSubject] = useState(route?.params?.subject || '');
   const [description, setDescription] = useState(route?.params?.description || '');
   const [createdTicket, setCreatedTicket] = useState(null);
@@ -311,20 +316,26 @@ export default function RobotaxiSupportTicketScreen({ navigation, route }) {
                 <PrototypeMenuCloseButton
                   onPress={handleDismiss}
                   testID="robotaxi-support-ticket-close-button"
-                  accessibilityLabel="robotaxi-support-ticket-close-button"
+                  accessibilityLabel="Fechar formulário de suporte"
                 />
               )}
             >
               <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
                 <PrototypeMenuSection title="Tipo de atendimento">
-                  {TICKET_TYPES.filter(item => !isIdentityReviewFlow || item.id === 'account').map(item => (
+                  <TicketTypeRow
+                    item={selectedType}
+                    active
+                    expanded={isIdentityReviewFlow ? null : showTicketTypes}
+                    onPress={isIdentityReviewFlow ? undefined : () => setShowTicketTypes(value => !value)}
+                  />
+                  {showTicketTypes && !isIdentityReviewFlow ? TICKET_TYPES.filter(item => item.id !== selectedTypeId).map(item => (
                     <TicketTypeRow
                       key={item.id}
                       item={item}
-                      active={item.id === selectedTypeId}
-                      onPress={() => setSelectedTypeId(item.id)}
+                      active={false}
+                      onPress={() => { setSelectedTypeId(item.id); setShowTicketTypes(false); }}
                     />
-                  ))}
+                  )) : null}
                 </PrototypeMenuSection>
 
                 <View style={styles.formBlock}>
@@ -336,7 +347,8 @@ export default function RobotaxiSupportTicketScreen({ navigation, route }) {
                     placeholderTextColor={leafRideColors.muted}
                     style={styles.input}
                     testID="robotaxi-support-ticket-subject"
-                    accessibilityLabel="robotaxi-support-ticket-subject"
+                    accessibilityLabel={isIdentityReviewFlow ? 'Assunto do pedido de revisão' : 'Assunto do ticket de suporte'}
+                    accessibilityHint={selectedType.title}
                   />
                   <Text style={styles.inputLabel}>Detalhes</Text>
                   <TextInput
@@ -348,7 +360,10 @@ export default function RobotaxiSupportTicketScreen({ navigation, route }) {
                     multiline
                     textAlignVertical="top"
                     testID="robotaxi-support-ticket-description"
-                    accessibilityLabel="robotaxi-support-ticket-description"
+                    accessibilityLabel={isIdentityReviewFlow ? 'Detalhes do pedido de revisão' : 'Detalhes do ticket de suporte'}
+                    accessibilityHint={isIdentityReviewFlow
+                      ? 'Descreva o motivo da solicitação de revisão.'
+                      : 'Explique o que aconteceu e quando percebeu o problema.'}
                   />
                 </View>
 
@@ -364,7 +379,11 @@ export default function RobotaxiSupportTicketScreen({ navigation, route }) {
                   onPress={handleSubmit}
                   style={styles.doneButton}
                   testID="robotaxi-support-ticket-submit"
-                  accessibilityLabel="robotaxi-support-ticket-submit"
+                  accessibilityLabel={supportLoading
+                    ? 'Enviando solicitação de suporte'
+                    : isIdentityReviewFlow
+                      ? 'Solicitar análise de identidade'
+                      : 'Enviar ticket de suporte'}
                 />
 
                 {supportLoading ? (
@@ -410,7 +429,7 @@ const styles = StyleSheet.create({
     gap: 18,
   },
   typeRow: {
-    minHeight: 58,
+    minHeight: 68,
     flexDirection: 'row',
     alignItems: 'center',
     borderBottomWidth: StyleSheet.hairlineWidth,
@@ -418,10 +437,10 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
   },
   typeRowActive: {
-    backgroundColor: 'rgba(15,59,22,0.04)',
+    backgroundColor: '#F5F5F5',
   },
   typeIcon: {
-    width: 30,
+    width: 52,
     alignItems: 'flex-start',
   },
   typeCopy: {
@@ -431,47 +450,42 @@ const styles = StyleSheet.create({
   },
   typeTitle: {
     color: leafRideColors.text,
-    fontFamily: fonts.SemiBold,
-    fontSize: 14,
-    lineHeight: 19,
+    ...leafTypography.semiBold,
+    fontSize: 16,
+    lineHeight: 22,
   },
   typeSubtitle: {
     marginTop: 2,
     color: leafRideColors.secondary,
-    fontFamily: fonts.Regular,
-    fontSize: 11,
-    lineHeight: 15,
+    ...leafTypography.regular,
+    fontSize: 14,
+    lineHeight: 20,
   },
   formBlock: {
-    borderRadius: 24,
-    borderWidth: 1,
-    borderColor: leafRideColors.line,
-    backgroundColor: 'rgba(255,255,255,0.96)',
-    paddingHorizontal: 16,
-    paddingVertical: 16,
+    paddingVertical: 4,
   },
   inputLabel: {
     color: leafRideColors.secondary,
-    fontFamily: fonts.Medium,
-    fontSize: 11,
-    lineHeight: 15,
+    ...leafTypography.medium,
+    fontSize: 13,
+    lineHeight: 18,
     marginBottom: 8,
   },
   input: {
-    minHeight: 44,
-    borderRadius: 16,
+    minHeight: 54,
+    borderRadius: 12,
     borderWidth: 1,
     borderColor: leafRideColors.line,
-    backgroundColor: leafRideColors.bg,
+    backgroundColor: '#F5F5F5',
     paddingHorizontal: 14,
     color: leafRideColors.text,
-    fontFamily: fonts.Regular,
-    fontSize: 13,
-    lineHeight: 18,
+    ...leafTypography.regular,
+    fontSize: 16,
+    lineHeight: 22,
     marginBottom: 14,
   },
   textarea: {
-    minHeight: 116,
+    minHeight: 145,
     paddingTop: 12,
     marginBottom: 0,
   },
@@ -486,14 +500,14 @@ const styles = StyleSheet.create({
   },
   feedbackText: {
     color: leafRideColors.secondary,
-    fontFamily: fonts.Regular,
-    fontSize: 12,
-    lineHeight: 17,
+    ...leafTypography.regular,
+    fontSize: 14,
+    lineHeight: 20,
   },
   errorText: {
     color: leafRideColors.dangerText,
-    fontFamily: fonts.Medium,
-    fontSize: 12,
-    lineHeight: 17,
+    ...leafTypography.medium,
+    fontSize: 14,
+    lineHeight: 20,
   },
 });

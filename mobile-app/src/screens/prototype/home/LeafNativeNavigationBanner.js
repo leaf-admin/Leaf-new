@@ -1,9 +1,9 @@
+import leafTypography from '../../../components/prototype/LeafTypography';
 import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
 import { Ionicons } from '@expo/vector-icons';
 import robotaxiPrototypeTokens from '../../../components/design-system/robotaxiPrototypeTokens';
-import { fonts } from '../../../theme/runtimeTokens';
 import { usePrototypeMapOcclusion } from '../prototypeMapOcclusion';
 
 const { color } = robotaxiPrototypeTokens;
@@ -208,15 +208,15 @@ const styles = StyleSheet.create({
     minWidth: 0,
   },
   title: {
-    fontFamily: fonts.SemiBold,
-    fontSize: 18,
-    lineHeight: 22,
+    ...leafTypography.semiBold,
+    fontSize: 22,
+    lineHeight: 28,
     color: color.text.primary,
   },
   subtitle: {
-    fontFamily: fonts.Regular,
-    fontSize: 12,
-    lineHeight: 16,
+    ...leafTypography.regular,
+    fontSize: 14,
+    lineHeight: 20,
     color: '#667180',
     marginTop: 4,
   },
@@ -226,12 +226,12 @@ const styles = StyleSheet.create({
     gap: 2,
   },
   metaDistance: {
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 15,
     color: color.text.primary,
   },
   metaEta: {
-    fontFamily: fonts.Regular,
+    ...leafTypography.regular,
     fontSize: 12,
     color: '#667180',
   },
@@ -243,7 +243,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#111A27',
   },
   navigationButtonText: {
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 11,
     color: '#FFFFFF',
   },
@@ -255,7 +255,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(17,26,39,0.06)',
   },
   hideButtonText: {
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 11,
     color: '#365A6D',
   },

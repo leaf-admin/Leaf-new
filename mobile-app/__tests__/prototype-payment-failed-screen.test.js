@@ -107,6 +107,9 @@ describe('RobotaxiPaymentFailedScreen', () => {
       />,
     );
 
+    expect(screen.getByTestId('passenger-payment-failed-screen').props.accessibilityLabel).toBe(
+      'Falha ao gerar pagamento',
+    );
     expect(screen.getByText('Falha ao gerar pagamento')).toBeTruthy();
     expect(screen.getByText('Sua sessão expirou. Entre novamente para continuar.')).toBeTruthy();
 

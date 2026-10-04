@@ -112,7 +112,7 @@ describe('RobotaxiSettingsScreen current renderer', () => {
       <RobotaxiSettingsScreen navigation={navigation} route={{ key: 'settings' }} />,
     );
 
-    expect(screen.getByLabelText('Fechar configurações')).toBeTruthy();
+    expect(screen.getByLabelText('Voltar')).toBeTruthy();
     expect(screen.getByLabelText('Privacidade')).toBeTruthy();
     expect(screen.getByLabelText('Sair da conta')).toBeTruthy();
     expect(screen.getByLabelText('Excluir conta')).toBeTruthy();

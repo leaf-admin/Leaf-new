@@ -1,9 +1,9 @@
+import leafTypography from '../../components/prototype/LeafTypography';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Alert, ScrollView, StatusBar, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useSelector } from 'react-redux';
 import { Ionicons } from '@expo/vector-icons';
-import { fonts } from '../../theme/runtimeTokens';
 import robotaxiPrototypeTokens from '../../components/design-system/robotaxiPrototypeTokens';
 import PrototypeScreenTransition from '../../components/prototype/PrototypeScreenTransition';
 import PrototypeDismissibleSheet from '../../components/prototype/PrototypeDismissibleSheet';
@@ -549,22 +549,22 @@ const styles = StyleSheet.create({
   },
   summaryPillText: {
     color: color.accent.strong,
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     fontSize: typography.micro.size,
     lineHeight: typography.micro.lineHeight
   },
   title: {
     color: color.text.dark,
-    fontFamily: fonts.SemiBold,
-    fontSize: typography.subtitle.size,
-    lineHeight: typography.subtitle.lineHeight
+    ...leafTypography.semiBold,
+    fontSize: 22,
+    lineHeight: 28
   },
   subtitle: {
     marginTop: 1,
     color: color.text.secondary,
-    fontFamily: fonts.Regular,
-    fontSize: typography.caption.size,
-    lineHeight: typography.caption.lineHeight
+    ...leafTypography.regular,
+    fontSize: 14,
+    lineHeight: 20
   },
   scroll: {
     marginTop: 10,
@@ -590,7 +590,7 @@ const styles = StyleSheet.create({
   },
   formLabel: {
     color: color.text.secondary,
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     fontSize: typography.micro.size,
     lineHeight: typography.micro.lineHeight
   },
@@ -603,7 +603,7 @@ const styles = StyleSheet.create({
     backgroundColor: color.surface.secondary,
     paddingHorizontal: 10,
     color: color.text.primary,
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     fontSize: typography.caption.size,
     lineHeight: typography.caption.lineHeight
   },
@@ -628,7 +628,7 @@ const styles = StyleSheet.create({
   },
   inlineGhostButtonText: {
     color: color.text.primary,
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     fontSize: typography.caption.size,
     lineHeight: typography.caption.lineHeight
   },
@@ -684,14 +684,14 @@ const styles = StyleSheet.create({
   },
   preferenceTitle: {
     color: color.text.primary,
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     fontSize: typography.caption.size,
     lineHeight: typography.caption.lineHeight
   },
   preferenceSubtitle: {
     marginTop: 1,
     color: color.text.secondary,
-    fontFamily: fonts.Regular,
+    ...leafTypography.regular,
     fontSize: typography.micro.size,
     lineHeight: typography.micro.lineHeight
   },
@@ -734,14 +734,14 @@ const styles = StyleSheet.create({
   },
   rowLabel: {
     color: color.text.secondary,
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     fontSize: typography.micro.size,
     lineHeight: typography.micro.lineHeight
   },
   rowValue: {
     marginTop: 1,
     color: color.text.dark,
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     fontSize: typography.caption.size,
     lineHeight: typography.caption.lineHeight
   },
@@ -771,20 +771,20 @@ const styles = StyleSheet.create({
   },
   detailRowLabel: {
     color: color.text.secondary,
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     fontSize: typography.micro.size,
     lineHeight: typography.micro.lineHeight
   },
   detailRowValue: {
     marginTop: 1,
     color: color.text.dark,
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     fontSize: typography.caption.size,
     lineHeight: typography.caption.lineHeight
   },
   detailBadge: {
     color: color.text.primary,
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: typography.caption.size,
     lineHeight: typography.caption.lineHeight
   },
@@ -801,21 +801,21 @@ const styles = StyleSheet.create({
   metaText: {
     marginTop: 6,
     color: color.text.secondary,
-    fontFamily: fonts.Regular,
+    ...leafTypography.regular,
     fontSize: typography.micro.size,
     lineHeight: typography.micro.lineHeight
   },
   feedbackText: {
     marginTop: 10,
     color: color.text.secondary,
-    fontFamily: fonts.Regular,
+    ...leafTypography.regular,
     fontSize: typography.micro.size,
     lineHeight: typography.micro.lineHeight
   },
   errorText: {
     marginTop: 6,
     color: '#8A1F2B',
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     fontSize: typography.caption.size,
     lineHeight: typography.caption.lineHeight
   }

@@ -59,12 +59,20 @@ function loadConfigEnv(projectRoot = path.resolve(__dirname, '..')) {
     return;
   }
 
-  for (const fileName of DEFAULT_ENV_FILES) {
-    const filePath = path.join(projectRoot, fileName);
+  const explicitEnvFile = String(process.env.LEAF_ENV_FILE || '').trim();
+  const fileNames = explicitEnvFile ? [explicitEnvFile] : DEFAULT_ENV_FILES;
+
+  for (const fileName of fileNames) {
+    const filePath = path.isAbsolute(fileName)
+      ? fileName
+      : path.resolve(projectRoot, fileName);
+    if (explicitEnvFile && !fs.existsSync(filePath)) {
+      throw new Error('LEAF_ENV_FILE points to a missing file.');
+    }
     const envValues = parseEnvFile(filePath);
 
     for (const [key, value] of Object.entries(envValues)) {
-      if (!process.env[key]) {
+      if (explicitEnvFile || !process.env[key]) {
         process.env[key] = value;
       }
     }

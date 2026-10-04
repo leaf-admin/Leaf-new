@@ -1,3 +1,5 @@
+import leafTypography from '../../components/prototype/LeafTypography';
+import { LeafObjectIcon } from '../../components/prototype/LeafVisualElements';
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
@@ -12,7 +14,6 @@ import {
   useWindowDimensions,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { fonts } from '../../theme/runtimeTokens';
 import PrototypeDismissibleSheet from '../../components/prototype/PrototypeDismissibleSheet';
 import PrototypeScreenTransition from '../../components/prototype/PrototypeScreenTransition';
 import {
@@ -24,7 +25,7 @@ import { LeafButton, LeafEmptyState, LeafPill, leafRideColors } from '../../comp
 import { usePrototypeMapOcclusion } from './prototypeMapOcclusion';
 import MobileVehicleService from '../../services/MobileVehicleService';
 
-const SURFACE_TOP_PADDING = 16;
+const SURFACE_TOP_PADDING = 20;
 const SURFACE_BOTTOM_PADDING = 18;
 const BACKDROP_COLOR = 'transparent';
 
@@ -216,7 +217,7 @@ export default function RobotaxiVehiclesScreen({ navigation, route }) {
               />
             )}
           >
-            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.content}>
+            <ScrollView automaticallyAdjustKeyboardInsets keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" showsVerticalScrollIndicator={false} contentContainerStyle={styles.content}>
               {loading ? (
                 <View style={styles.centerState} testID="robotaxi-vehicles-loading"><ActivityIndicator color={leafRideColors.leaf} /></View>
               ) : error ? (
@@ -274,10 +275,10 @@ export default function RobotaxiVehiclesScreen({ navigation, route }) {
                     return (
                       <View key={vehicle.id} style={styles.vehicleCard}>
                         <TouchableOpacity style={styles.vehicleHeader} onPress={() => setExpandedId(expanded ? '' : vehicle.id)} testID={`robotaxi-vehicle-${vehicle.id}`}>
-                          <View style={styles.carGlyph}><Text style={styles.carGlyphText}>L</Text></View>
+                          <LeafObjectIcon name="vehicle" size={48} />
                           <View style={styles.vehicleCopy}>
-                            <Text style={styles.vehicleModel} numberOfLines={1}>{[vehicle.brand, vehicle.model].filter(Boolean).join(' ') || 'Veículo'}</Text>
-                            <Text style={styles.vehiclePlate}>{vehicle.plate || 'Placa pendente'} · {vehicle.year || 'Ano pendente'}</Text>
+                            <Text style={styles.vehicleModel}>{[vehicle.brand, vehicle.model].filter(Boolean).join(' ') || 'Veículo'}</Text>
+                            <Text style={styles.vehiclePlate}>{vehicle.plate || 'Placa pendente'} · {[vehicle.color, vehicle.year].filter(Boolean).join(' · ') || 'Ano pendente'}</Text>
                           </View>
                           <LeafPill label={vehicle.isActive ? 'Selecionado' : status} tone={vehicle.isActive || status === 'Aprovado' ? 'leaf' : 'warning'} />
                         </TouchableOpacity>
@@ -325,33 +326,32 @@ const styles = StyleSheet.create({
   },
   fieldLabel: {
     color: leafRideColors.secondary,
-    fontFamily: fonts.Medium,
-    fontSize: 12,
-    lineHeight: 16,
+    ...leafTypography.medium,
+    fontSize: 13,
+    lineHeight: 18,
   },
   fieldInput: {
-    minHeight: 52,
-    borderRadius: 18,
+    minHeight: 54,
+    borderRadius: 12,
     borderWidth: 1,
-    borderColor: 'rgba(221,232,225,0.95)',
-    backgroundColor: '#FFFFFF',
+    borderColor: '#E5E5E5',
+    backgroundColor: '#F5F5F5',
     color: leafRideColors.text,
-    fontFamily: fonts.Regular,
-    fontSize: 15,
+    ...leafTypography.regular,
+    fontSize: 16,
     paddingHorizontal: 16,
   },
   reviewNotice: {
     color: leafRideColors.secondary,
-    fontFamily: fonts.Regular,
+    ...leafTypography.regular,
     fontSize: 13,
     lineHeight: 19,
   },
   vehicleCard: {
-    borderRadius: 26,
-    borderWidth: 1,
-    borderColor: 'rgba(221,232,225,0.85)',
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#E5E5E5',
     backgroundColor: '#FFFFFF',
-    paddingHorizontal: 18,
+    paddingHorizontal: 0,
     paddingVertical: 18,
   },
   vehicleHeader: {
@@ -370,7 +370,7 @@ const styles = StyleSheet.create({
   },
   carGlyphText: {
     color: leafRideColors.leaf,
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 20,
     lineHeight: 27,
   },
@@ -380,16 +380,16 @@ const styles = StyleSheet.create({
   },
   vehicleModel: {
     color: leafRideColors.text,
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 16,
     lineHeight: 22,
   },
   vehiclePlate: {
     marginTop: 2,
     color: leafRideColors.secondary,
-    fontFamily: fonts.Medium,
-    fontSize: 12,
-    lineHeight: 16,
+    ...leafTypography.medium,
+    fontSize: 13,
+    lineHeight: 18,
   },
   doneButton: {
     alignSelf: 'stretch',
@@ -398,7 +398,7 @@ const styles = StyleSheet.create({
     marginTop: 16,
     paddingTop: 16,
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: 'rgba(221,232,225,0.95)',
+    borderTopColor: '#E5E5E5',
     gap: 8,
   },
   secondaryAction: {
@@ -408,14 +408,14 @@ const styles = StyleSheet.create({
   },
   secondaryActionText: {
     color: leafRideColors.secondary,
-    fontFamily: fonts.Medium,
-    fontSize: 13,
-    lineHeight: 18,
+    ...leafTypography.medium,
+    fontSize: 14,
+    lineHeight: 20,
   },
   removeActionText: {
     color: '#9F2424',
-    fontFamily: fonts.Medium,
-    fontSize: 13,
-    lineHeight: 18,
+    ...leafTypography.medium,
+    fontSize: 14,
+    lineHeight: 20,
   },
 });

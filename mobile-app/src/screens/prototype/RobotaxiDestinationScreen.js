@@ -1,3 +1,4 @@
+import leafTypography from '../../components/prototype/LeafTypography';
 import React, {
   useCallback,
   useEffect,
@@ -28,8 +29,8 @@ import Animated, { Easing, FadeIn } from "react-native-reanimated";
 import { useSelector } from "react-redux";
 import { ExpoSpeechRecognitionModule } from "expo-speech-recognition";
 import { Ionicons } from "@expo/vector-icons";
-import { fonts } from "../../theme/runtimeTokens";
 import PrototypeScreenTransition from "../../components/prototype/PrototypeScreenTransition";
+import LeafLocationMarker, { LEAF_LOCATION_MARKER_SIZE } from "../../components/prototype/LeafLocationMarker";
 import PrototypeDismissibleSheet from "../../components/prototype/PrototypeDismissibleSheet";
 import PrototypeConnectionStatusPill from "../../components/prototype/PrototypeConnectionStatusPill";
 import {
@@ -48,8 +49,9 @@ import {
   isE2ETestBuild,
   isSimulatorBuild,
 } from "../../config/runtimeAccessPolicy";
+import { getPilotLaunchFeatureSnapshot } from "../../config/pilotLaunchProfile";
 import { usePrototypeMapOcclusion } from "./prototypeMapOcclusion";
-import { buildOverlaySheetViewportMetrics } from "./prototypeRouteViewport";
+import { buildOverlaySheetViewportMetrics, resolveMapViewportCenterY } from "./prototypeRouteViewport";
 import { usePrototypeRideRuntime } from "./prototypeRideRuntime";
 import { resolvePassengerAutoRoute } from "./passengerFlowRouting";
 import {
@@ -1206,8 +1208,9 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
   const [showRecoveredConnectionHint, setShowRecoveredConnectionHint] =
     useState(false);
   const [qaConnectionVisualState, setQaConnectionVisualState] = useState(null);
+  const leafDelasFeatureEnabled = getPilotLaunchFeatureSnapshot().leafDelasEnabled;
   const [leafDelasEnabled, setLeafDelasEnabled] = useState(() =>
-    resolveLeafDelasRequested(route?.params || {}),
+    leafDelasFeatureEnabled && resolveLeafDelasRequested(route?.params || {}),
   );
   const [pickupCoordinate, setPickupCoordinate] = useState(
     () => initialPickupCoordinate,
@@ -1266,10 +1269,15 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
   const [directPixReturnHomePending, setDirectPixReturnHomePending] = useState(false);
 
   useEffect(() => {
+    if (!leafDelasFeatureEnabled) {
+      setLeafDelasEnabled(false);
+      return;
+    }
+
     if (resolveLeafDelasRequested(route?.params || {})) {
       setLeafDelasEnabled(true);
     }
-  }, [route?.params]);
+  }, [leafDelasFeatureEnabled, route?.params]);
 
   useEffect(() => {
     loadRecentDestinationsRef.current = loadRecentDestinations;
@@ -1318,7 +1326,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
         ? { ...route.params.preferences }
         : {};
 
-    if (!leafDelasEnabled) {
+    if (!leafDelasFeatureEnabled || !leafDelasEnabled) {
       delete routePreferences.leafDelas;
       delete routePreferences.femaleDriverOnly;
       return {
@@ -1334,6 +1342,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
       femaleDriverOnly: true,
     };
   }, [
+    leafDelasFeatureEnabled,
     leafDelasEnabled,
     rideComfortPreferences,
     route?.params?.preferences,
@@ -2730,12 +2739,9 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
       ? pickupFloatingTop + pickupFloatingCardHeight + 16
       : 0;
   const pickupMarkerTop = useMemo(() => {
-    const visibleMapHeight = Math.max(
-      220,
-      windowHeight - pickupMapTopOcclusion - insets.bottom - 24,
-    );
-    return pickupMapTopOcclusion + visibleMapHeight / 2 - 34;
-  }, [insets.bottom, pickupMapTopOcclusion, windowHeight]);
+    return resolveMapViewportCenterY({ height: windowHeight, top: pickupMapTopOcclusion })
+      - LEAF_LOCATION_MARKER_SIZE / 2;
+  }, [pickupMapTopOcclusion, windowHeight]);
   const searchSurfaceMaxHeight = Math.max(
     SEARCH_FALLBACK_HEIGHT,
     windowHeight - insets.top - effectiveSheetBottomOffset - 24,
@@ -4464,11 +4470,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
             testID="passenger-pickup-map-marker"
             accessibilityLabel="Marcador do ponto de embarque"
           >
-            <View style={styles.pickupMapMarkerPin}>
-              <View style={styles.pickupMapMarkerCore}>
-                <View style={styles.pickupMapMarkerDot} />
-              </View>
-            </View>
+            <LeafLocationMarker testID="leaf-pickup-location-marker" />
           </View>
         ) : null}
         {step === PICKUP_STEP ? (
@@ -4885,35 +4887,37 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
                   </View>
                 </View>
 
-                <TouchableOpacity
-                  activeOpacity={0.86}
-                  style={styles.leafDelasRow}
-                  onPress={() => setLeafDelasEnabled((current) => !current)}
-                  testID="passenger-destination-leaf-delas-toggle"
-                  accessibilityRole="switch"
-                  accessibilityLabel="Leaf Delas"
-                  accessibilityState={{ checked: leafDelasEnabled }}
-                >
-                  <View style={styles.leafDelasCopy}>
-                    <Text style={styles.leafDelasTitle}>Leaf Delas</Text>
-                    <Text style={styles.leafDelasSubtitle}>
-                      Motorista mulher, quando disponível.
-                    </Text>
-                  </View>
-                  <View
-                    style={[
-                      styles.leafDelasSwitch,
-                      leafDelasEnabled && styles.leafDelasSwitchActive,
-                    ]}
+                {leafDelasFeatureEnabled ? (
+                  <TouchableOpacity
+                    activeOpacity={0.86}
+                    style={styles.leafDelasRow}
+                    onPress={() => setLeafDelasEnabled((current) => !current)}
+                    testID="passenger-destination-leaf-delas-toggle"
+                    accessibilityRole="switch"
+                    accessibilityLabel="Leaf Delas"
+                    accessibilityState={{ checked: leafDelasEnabled }}
                   >
+                    <View style={styles.leafDelasCopy}>
+                      <Text style={styles.leafDelasTitle}>Leaf Delas</Text>
+                      <Text style={styles.leafDelasSubtitle}>
+                        Motorista mulher, quando disponível.
+                      </Text>
+                    </View>
                     <View
                       style={[
-                        styles.leafDelasSwitchKnob,
-                        leafDelasEnabled && styles.leafDelasSwitchKnobActive,
+                        styles.leafDelasSwitch,
+                        leafDelasEnabled && styles.leafDelasSwitchActive,
                       ]}
-                    />
-                  </View>
-                </TouchableOpacity>
+                    >
+                      <View
+                        style={[
+                          styles.leafDelasSwitchKnob,
+                          leafDelasEnabled && styles.leafDelasSwitchKnobActive,
+                        ]}
+                      />
+                    </View>
+                  </TouchableOpacity>
+                ) : null}
 
                 {selectedDynamicNotice ? (
                   <View
@@ -4943,14 +4947,12 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
                     <Text
                       style={styles.unavailableTitle}
                       testID={`passenger-destination-plan-unavailable-label-${selectedPlanData?.id}`}
-                      accessibilityLabel={`passenger-destination-plan-unavailable-label-${selectedPlanData?.id}`}
                     >
                       {routeGuardBlocked ? "Indisponível" : "Categoria indisponível"}
                     </Text>
                     <Text
                       style={styles.unavailableText}
                       testID={`passenger-destination-plan-unavailable-message-${selectedPlanData?.id}`}
-                      accessibilityLabel={`passenger-destination-plan-unavailable-message-${selectedPlanData?.id}`}
                     >
                       {routeGuardBlocked || hasCoverageBlockedPlan
                         ? OUT_OF_COVERAGE_MESSAGE
@@ -5065,49 +5067,22 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
                         accessibilityLabel={`Categoria ${plan.categoryLabel}, embarque em ${plan.pickupEtaLabel}, ${plan.priceLabel}`}
                         accessibilityState={{ selected, disabled: plan.unavailable }}
                       >
-                        <Text
-                          style={[
-                            styles.categoryTabText,
-                            selected && styles.categoryTabTextActive,
-                          ]}
-                          numberOfLines={1}
-                        >
-                          {plan.categoryLabel}
-                        </Text>
+                        <View style={{ flex: 1, gap: 4 }}>
+                          <Text style={[styles.categoryTabText, selected && styles.categoryTabTextActive]}>{plan.categoryLabel.toUpperCase()}</Text>
+                          <Text style={styles.categorySelectedSubtitle}>{plan.categoryDescription}</Text>
+                        </View>
+                        <View style={styles.categorySelectedPriceWrap}>
+                          <Text style={styles.categorySelectedPrice}
+                            testID={selected ? `passenger-destination-quote-price-${plan.id}` : undefined}
+                            accessibilityLabel={`Valor da corrida ${plan.priceLabel}`}>{plan.priceLabel}</Text>
+                          <Text style={styles.categorySelectedSubtitle}>{plan.pickupEtaLabel}</Text>
+                        </View>
                       </TouchableOpacity>
                     );
                   })}
                 </View>
 
                 <LeafDivider style={styles.categoryDivider} />
-
-                <View style={styles.categorySelectedRow}>
-                  <View style={styles.categorySelectedLeft}>
-                    <View style={styles.categorySelectedCopy}>
-                      <Text style={styles.categorySelectedTitle} numberOfLines={1}>
-                        {selectedCategoryOption?.categoryLabel || "Plus"}
-                      </Text>
-                      <Text style={styles.categorySelectedSubtitle} numberOfLines={1}>
-                        {selectedCategoryOption?.categoryDescription || "Confortável e acessível"}
-                      </Text>
-                    </View>
-                  </View>
-                  <View style={styles.categorySelectedPriceWrap}>
-                    <Text
-                      style={styles.categorySelectedPrice}
-                      numberOfLines={1}
-                      testID={`passenger-destination-quote-price-${selectedCategoryOption?.id || selectedPlan || "selected"}`}
-                      accessibilityLabel={`Valor da corrida ${selectedCategoryOption?.priceLabel || "--"}`}
-                    >
-                      {selectedCategoryOption?.priceLabel || "--"}
-                    </Text>
-                    <Text style={styles.categorySelectedPriceCaption}>
-                      valor da corrida
-                    </Text>
-                  </View>
-                </View>
-
-                <LeafDivider style={styles.categoryDividerCompact} />
 
                 <View style={styles.categoryMetaRow}>
                   <View style={styles.categoryMetaItem}>
@@ -5148,27 +5123,29 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
                       {tariffStatusLabel}
                     </Text>
                   </View>
-                  <TouchableOpacity
-                    activeOpacity={0.84}
-                    onPress={() => setLeafDelasEnabled((current) => !current)}
-                    style={[
-                      styles.categoryStatusPill,
-                      leafDelasEnabled && styles.categoryLeafDelasPillActive,
-                    ]}
-                    testID="passenger-destination-leaf-delas-toggle"
-                    accessibilityRole="switch"
-                    accessibilityLabel="Leaf Delas"
-                    accessibilityState={{ checked: leafDelasEnabled }}
-                  >
-                    <Text
+                  {leafDelasFeatureEnabled ? (
+                    <TouchableOpacity
+                      activeOpacity={0.84}
+                      onPress={() => setLeafDelasEnabled((current) => !current)}
                       style={[
-                        styles.categoryStatusText,
-                        leafDelasEnabled && styles.categoryLeafDelasTextActive,
+                        styles.categoryStatusPill,
+                        leafDelasEnabled && styles.categoryLeafDelasPillActive,
                       ]}
+                      testID="passenger-destination-leaf-delas-toggle"
+                      accessibilityRole="switch"
+                      accessibilityLabel="Leaf Delas"
+                      accessibilityState={{ checked: leafDelasEnabled }}
                     >
-                      {leafDelasEnabled ? "Leaf Delas ativa" : "Leaf Delas"}
-                    </Text>
-                  </TouchableOpacity>
+                      <Text
+                        style={[
+                          styles.categoryStatusText,
+                          leafDelasEnabled && styles.categoryLeafDelasTextActive,
+                        ]}
+                      >
+                        {leafDelasEnabled ? "Leaf Delas ativa" : "Leaf Delas"}
+                      </Text>
+                    </TouchableOpacity>
+                  ) : null}
                 </View>
 
                 {selectedPlanUnavailable || routeGuardBlocked || destinationSurfaceNotice ? (
@@ -5307,7 +5284,9 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
                   <Text
                     style={styles.hiddenText}
                     testID="passenger-destination-pickup-coordinate"
-                    accessibilityLabel={`passenger-destination-pickup-coordinate ${pickupQaCoordinateLabel}`}
+                    accessible={false}
+                    accessibilityElementsHidden
+                    importantForAccessibility="no-hide-descendants"
                   >
                     {pickupQaCoordinateLabel}
                   </Text>
@@ -5318,14 +5297,12 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
                     <Text
                       style={styles.unavailableTitle}
                       testID={`passenger-destination-plan-unavailable-label-${selectedPlanData?.id}`}
-                      accessibilityLabel={`passenger-destination-plan-unavailable-label-${selectedPlanData?.id}`}
                     >
                       {routeGuardBlocked ? "Indisponível" : "Categoria indisponível"}
                     </Text>
                     <Text
                       style={styles.unavailableText}
                       testID={`passenger-destination-plan-unavailable-message-${selectedPlanData?.id}`}
-                      accessibilityLabel={`passenger-destination-plan-unavailable-message-${selectedPlanData?.id}`}
                     >
                       {routeGuardBlocked || hasCoverageBlockedPlan
                         ? OUT_OF_COVERAGE_MESSAGE
@@ -5577,17 +5554,17 @@ const styles = StyleSheet.create({
     width: 50,
     height: 4,
     borderRadius: 3,
-    backgroundColor: "#D8D0C7",
+    backgroundColor: "#D5D8D4",
     alignSelf: "center",
   },
   searchSurface: {
     minHeight: SEARCH_FALLBACK_HEIGHT,
-    borderTopLeftRadius: 26,
-    borderTopRightRadius: 26,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
     borderBottomLeftRadius: 0,
     borderBottomRightRadius: 0,
     backgroundColor: leafRideColors.sheet,
-    paddingHorizontal: 22,
+    paddingHorizontal: 24,
     paddingTop: 10,
     paddingBottom: 14,
     shadowColor: "#000000",
@@ -5612,14 +5589,14 @@ const styles = StyleSheet.create({
   directPixPreparingTitle: {
     marginTop: 18,
     color: leafRideColors.text,
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 20,
     lineHeight: 25,
   },
   directPixPreparingSubtitle: {
     marginTop: 6,
     color: leafRideColors.secondary,
-    fontFamily: fonts.Regular,
+    ...leafTypography.regular,
     fontSize: 13,
     lineHeight: 18,
   },
@@ -5640,29 +5617,29 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#F8F6F1",
+    backgroundColor: "#FFFFFF",
     borderWidth: 1,
     borderColor: "rgba(39,74,54,0.08)",
   },
   searchTitle: {
     color: leafRideColors.text,
-    fontFamily: fonts.SemiBold,
-    fontSize: 20,
-    lineHeight: 25,
+    ...leafTypography.semiBold,
+    fontSize: 24,
+    lineHeight: 30,
   },
   searchSubtitle: {
     marginTop: 3,
     color: leafRideColors.secondary,
-    fontFamily: fonts.Regular,
-    fontSize: 11.5,
-    lineHeight: 15,
+    ...leafTypography.regular,
+    fontSize: 14,
+    lineHeight: 20,
   },
   searchInputShell: {
     marginTop: 14,
-    height: 46,
-    borderRadius: 23,
+    height: 54,
+    borderRadius: 16,
     borderWidth: 1,
-    borderColor: "#E9E2D8",
+    borderColor: "#E5E5E5",
     backgroundColor: leafRideColors.field,
     justifyContent: "center",
     paddingLeft: 42,
@@ -5674,9 +5651,9 @@ const styles = StyleSheet.create({
   },
   searchInput: {
     color: leafRideColors.text,
-    fontFamily: fonts.Medium,
-    fontSize: 13.5,
-    lineHeight: 18,
+    ...leafTypography.medium,
+    fontSize: 16,
+    lineHeight: 22,
     paddingVertical: 0,
   },
   searchMicButton: {
@@ -5692,14 +5669,14 @@ const styles = StyleSheet.create({
   voiceHint: {
     marginTop: 8,
     color: leafRideColors.secondary,
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     fontSize: 11,
     lineHeight: 15,
   },
   voiceErrorText: {
     marginTop: 8,
     color: leafRideColors.dangerText,
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     fontSize: 11,
     lineHeight: 15,
   },
@@ -5715,7 +5692,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: "#E9E2D8",
+    borderBottomColor: "#E5E5E5",
   },
   destinationDot: {
     width: 24,
@@ -5732,14 +5709,14 @@ const styles = StyleSheet.create({
   },
   destinationName: {
     color: leafRideColors.text,
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 14,
     lineHeight: 18,
   },
   destinationAddress: {
     marginTop: 3,
     color: leafRideColors.secondary,
-    fontFamily: fonts.Regular,
+    ...leafTypography.regular,
     fontSize: 10,
     lineHeight: 13,
   },
@@ -5747,14 +5724,14 @@ const styles = StyleSheet.create({
     marginLeft: 10,
     width: 56,
     color: leafRideColors.muted,
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     fontSize: 12,
     lineHeight: 16,
     textAlign: "right",
   },
   emptyText: {
     color: leafRideColors.secondary,
-    fontFamily: fonts.Regular,
+    ...leafTypography.regular,
     fontSize: 12,
     lineHeight: 16,
     textAlign: "center",
@@ -5784,7 +5761,7 @@ const styles = StyleSheet.create({
   },
   searchingText: {
     color: leafRideColors.secondary,
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     fontSize: 13,
     lineHeight: 17,
   },
@@ -5800,30 +5777,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     zIndex: 20,
     elevation: 20,
-  },
-  pickupMapMarkerPin: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "rgba(255, 214, 10, 0.34)",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.92)",
-  },
-  pickupMapMarkerCore: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "#FFFFFF",
-  },
-  pickupMapMarkerDot: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    backgroundColor: "#1FA64A",
   },
   pickupFloatingLayer: {
     ...StyleSheet.absoluteFillObject,
@@ -5869,7 +5822,7 @@ const styles = StyleSheet.create({
   },
   pickupFloatingEyebrow: {
     color: leafRideColors.secondary,
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 10,
     lineHeight: 13,
     textTransform: "uppercase",
@@ -5878,21 +5831,21 @@ const styles = StyleSheet.create({
   pickupFloatingAddress: {
     marginTop: 3,
     color: leafRideColors.text,
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 14,
     lineHeight: 18,
   },
   pickupFloatingHint: {
     marginTop: 3,
     color: leafRideColors.secondary,
-    fontFamily: fonts.Regular,
+    ...leafTypography.regular,
     fontSize: 11,
     lineHeight: 15,
   },
   pickupFloatingMeta: {
     marginTop: 5,
     color: leafRideColors.leaf,
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 12,
     lineHeight: 16,
   },
@@ -5902,14 +5855,14 @@ const styles = StyleSheet.create({
   pickupFloatingNotice: {
     marginTop: 10,
     color: leafRideColors.dangerText,
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     fontSize: 11,
     lineHeight: 15,
   },
   pickupFloatingDynamicText: {
     marginTop: 6,
     color: leafRideColors.leaf,
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     fontSize: 10.5,
     lineHeight: 14,
   },
@@ -5930,7 +5883,7 @@ const styles = StyleSheet.create({
   },
   pickupFloatingSecondaryButtonText: {
     color: leafRideColors.leaf,
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 12,
     lineHeight: 16,
   },
@@ -5947,7 +5900,7 @@ const styles = StyleSheet.create({
   },
   pickupFloatingPrimaryButtonText: {
     color: "#FFFFFF",
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 12,
     lineHeight: 16,
   },
@@ -5976,7 +5929,7 @@ const styles = StyleSheet.create({
   },
   pickupEyebrow: {
     color: leafRideColors.secondary,
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 10,
     lineHeight: 14,
     textTransform: "uppercase",
@@ -5985,20 +5938,20 @@ const styles = StyleSheet.create({
   pickupTitle: {
     marginTop: 4,
     color: leafRideColors.text,
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 20,
     lineHeight: 26,
   },
   pickupSubtitle: {
     marginTop: 6,
     color: leafRideColors.secondary,
-    fontFamily: fonts.Regular,
+    ...leafTypography.regular,
     fontSize: 12,
     lineHeight: 16,
   },
   pickupFare: {
     color: leafRideColors.text,
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 20,
     lineHeight: 26,
     textAlign: "right",
@@ -6008,8 +5961,8 @@ const styles = StyleSheet.create({
     minHeight: 92,
     borderRadius: 22,
     borderWidth: 1,
-    borderColor: "#E9E2D8",
-    backgroundColor: "#F8F6F1",
+    borderColor: "#E5E5E5",
+    backgroundColor: "#FFFFFF",
     paddingHorizontal: 14,
     paddingVertical: 13,
     flexDirection: "row",
@@ -6030,7 +5983,7 @@ const styles = StyleSheet.create({
   },
   pickupPointLabel: {
     color: leafRideColors.secondary,
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 10,
     lineHeight: 14,
     textTransform: "uppercase",
@@ -6039,14 +5992,14 @@ const styles = StyleSheet.create({
   pickupPointAddress: {
     marginTop: 3,
     color: leafRideColors.text,
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 14,
     lineHeight: 18,
   },
   pickupPointHint: {
     marginTop: 4,
     color: leafRideColors.secondary,
-    fontFamily: fonts.Regular,
+    ...leafTypography.regular,
     fontSize: 11,
     lineHeight: 15,
   },
@@ -6062,7 +6015,7 @@ const styles = StyleSheet.create({
   },
   pickupResetButtonText: {
     color: leafRideColors.leaf,
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 11,
     lineHeight: 15,
   },
@@ -6070,8 +6023,8 @@ const styles = StyleSheet.create({
     marginTop: 14,
     borderRadius: 999,
     borderWidth: 1,
-    borderColor: "#E9E2D8",
-    backgroundColor: "#F8F6F1",
+    borderColor: "#E5E5E5",
+    backgroundColor: "#FFFFFF",
     paddingHorizontal: 13,
     paddingVertical: 10,
     flexDirection: "row",
@@ -6092,14 +6045,14 @@ const styles = StyleSheet.create({
   },
   comfortIndicatorTitle: {
     color: leafRideColors.text,
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 13,
     lineHeight: 17,
   },
   comfortIndicatorText: {
     marginTop: 1,
     color: leafRideColors.secondary,
-    fontFamily: fonts.Regular,
+    ...leafTypography.regular,
     fontSize: 11,
     lineHeight: 15,
   },
@@ -6108,7 +6061,7 @@ const styles = StyleSheet.create({
   },
   preferenceLabel: {
     color: leafRideColors.secondary,
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 11,
     lineHeight: 15,
     marginBottom: 8,
@@ -6125,7 +6078,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     borderWidth: 1,
-    borderColor: "#E9E2D8",
+    borderColor: "#E5E5E5",
     backgroundColor: "rgba(255,255,255,0.82)",
   },
   preferenceChipSelected: {
@@ -6134,7 +6087,7 @@ const styles = StyleSheet.create({
   },
   preferenceChipText: {
     color: leafRideColors.text,
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 11,
     lineHeight: 15,
   },
@@ -6147,18 +6100,18 @@ const styles = StyleSheet.create({
   categoryCard: {
     minHeight: QUOTE_FALLBACK_HEIGHT,
     marginHorizontal: 24,
-    borderRadius: 28,
-    paddingHorizontal: 18,
+    borderRadius: 24,
+    paddingHorizontal: 24,
     paddingTop: 10,
     paddingBottom: 18,
   },
   categoryHandle: {
     alignSelf: "center",
-    width: 36,
-    height: 4,
+    width: 32,
+    height: 3,
     borderRadius: 2,
-    backgroundColor: "rgba(23,20,18,0.18)",
-    marginBottom: 12,
+    backgroundColor: '#DDDDDD',
+    marginBottom: 16,
   },
   categoryTopRow: {
     flexDirection: "row",
@@ -6168,53 +6121,61 @@ const styles = StyleSheet.create({
   },
   categoryEyebrow: {
     color: leafRideColors.text,
-    fontFamily: fonts.SemiBold,
-    fontSize: 11,
-    lineHeight: 15,
+    ...leafTypography.semiBold,
+    fontSize: 22,
+    lineHeight: 28,
     letterSpacing: 0,
-    textTransform: "uppercase",
+    textTransform: "none",
   },
   categoryCloseButton: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#F8F6F1",
-    borderWidth: 1,
-    borderColor: "#E9E2D8",
+    backgroundColor: '#F5F5F5',
+    borderColor: "#E5E5E5",
   },
   categoryTabs: {
     marginTop: 14,
     minHeight: 55,
-    flexDirection: "row",
-    alignItems: "flex-end",
+    flexDirection: "column",
+    alignItems: "stretch",
+
+    gap: 8,
   },
   categoryTab: {
-    flex: 1,
-    minHeight: 52,
+    minHeight: 78,
     alignItems: "center",
-    justifyContent: "center",
-    gap: 4,
-    borderBottomWidth: 1,
-    borderBottomColor: "#E9E2D8",
+    justifyContent: "space-between",
+    gap: 12,
+    flexDirection: "row",
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#E5E5E5',
+    backgroundColor: '#FFFFFF',
   },
   categoryTabActive: {
-    borderBottomWidth: 2,
-    borderBottomColor: leafRideColors.text,
+
+    borderColor: '#222222',
+    backgroundColor: '#F7F8F7',
   },
   categoryTabDisabled: {
     opacity: 0.42,
   },
   categoryTabText: {
     color: leafRideColors.secondary,
-    fontFamily: fonts.SemiBold,
-    fontSize: 12.5,
-    lineHeight: 16,
+    ...leafTypography.semiBold,
+    fontSize: 22,
+    lineHeight: 28,
+
+    letterSpacing: -0.3,
   },
   categoryTabTextActive: {
     color: leafRideColors.text,
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
   },
   categoryDivider: {
     marginTop: 0,
@@ -6243,16 +6204,16 @@ const styles = StyleSheet.create({
   },
   categorySelectedTitle: {
     color: leafRideColors.text,
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 15.5,
     lineHeight: 20,
   },
   categorySelectedSubtitle: {
     marginTop: 1,
     color: leafRideColors.secondary,
-    fontFamily: fonts.Regular,
-    fontSize: 11,
-    lineHeight: 15,
+    ...leafTypography.regular,
+    fontSize: 14,
+    lineHeight: 20,
   },
   categorySelectedPriceWrap: {
     alignItems: "flex-end",
@@ -6260,7 +6221,7 @@ const styles = StyleSheet.create({
   },
   categorySelectedPrice: {
     color: leafRideColors.text,
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 17,
     lineHeight: 22,
     textAlign: "right",
@@ -6268,7 +6229,7 @@ const styles = StyleSheet.create({
   categorySelectedPriceCaption: {
     marginTop: 1,
     color: leafRideColors.secondary,
-    fontFamily: fonts.Regular,
+    ...leafTypography.regular,
     fontSize: 10,
     lineHeight: 13,
   },
@@ -6287,9 +6248,9 @@ const styles = StyleSheet.create({
   },
   categoryMetaLabel: {
     color: leafRideColors.secondary,
-    fontFamily: fonts.Regular,
-    fontSize: 10.5,
-    lineHeight: 14,
+    ...leafTypography.regular,
+    fontSize: 12,
+    lineHeight: 17,
   },
   categoryMetaValueRow: {
     marginTop: 3,
@@ -6299,9 +6260,9 @@ const styles = StyleSheet.create({
   },
   categoryMetaValue: {
     color: leafRideColors.text,
-    fontFamily: fonts.SemiBold,
-    fontSize: 12,
-    lineHeight: 16,
+    ...leafTypography.semiBold,
+    fontSize: 20,
+    lineHeight: 26,
   },
   categoryStatusRow: {
     marginTop: 12,
@@ -6315,9 +6276,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#F8F6F1",
+    backgroundColor: "#FFFFFF",
     borderWidth: 1,
-    borderColor: "#E9E2D8",
+    borderColor: "#E5E5E5",
   },
   categoryStatusPillHigh: {
     backgroundColor: "#FFF7ED",
@@ -6329,7 +6290,7 @@ const styles = StyleSheet.create({
   },
   categoryStatusText: {
     color: leafRideColors.secondary,
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 10,
     lineHeight: 13,
   },
@@ -6341,8 +6302,8 @@ const styles = StyleSheet.create({
   },
   categoryConfirmButton: {
     marginTop: 14,
-    minHeight: 48,
-    borderRadius: 24,
+    minHeight: 54,
+    borderRadius: 12,
   },
   confirmStack: {
     minHeight: CONFIRM_FALLBACK_HEIGHT,
@@ -6368,7 +6329,7 @@ const styles = StyleSheet.create({
   },
   confirmEyebrow: {
     color: leafRideColors.secondary,
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 10,
     lineHeight: 14,
     textTransform: "uppercase",
@@ -6377,25 +6338,26 @@ const styles = StyleSheet.create({
   confirmTitle: {
     marginTop: 2,
     color: leafRideColors.text,
-    fontFamily: fonts.SemiBold,
-    fontSize: 20,
-    lineHeight: 25,
+    ...leafTypography.semiBold,
+    fontSize: 24,
+    lineHeight: 30,
   },
   confirmPrice: {
     color: leafRideColors.text,
-    fontFamily: fonts.SemiBold,
-    fontSize: 19,
-    lineHeight: 24,
+    ...leafTypography.semiBold,
+    fontSize: 32,
+    lineHeight: 40,
     textAlign: "right",
   },
   confirmMetricRow: {
     marginTop: 16,
     flexDirection: "row",
-    borderRadius: 20,
-    backgroundColor: "#F8F6F1",
-    borderWidth: 1,
-    borderColor: "#E9E2D8",
+    borderRadius: 0,
+    backgroundColor: "#FFFFFF",
+    borderColor: "#E5E5E5",
     paddingVertical: 12,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderBottomWidth: StyleSheet.hairlineWidth,
   },
   confirmMetric: {
     flex: 1,
@@ -6404,18 +6366,18 @@ const styles = StyleSheet.create({
   },
   confirmMetricValue: {
     color: leafRideColors.text,
-    fontFamily: fonts.SemiBold,
-    fontSize: 13,
-    lineHeight: 17,
-    textAlign: "center",
+    ...leafTypography.semiBold,
+    fontSize: 20,
+    lineHeight: 26,
+    textAlign: "left",
   },
   confirmMetricLabel: {
     marginTop: 2,
     color: leafRideColors.secondary,
-    fontFamily: fonts.Regular,
-    fontSize: 10,
-    lineHeight: 13,
-    textAlign: "center",
+    ...leafTypography.regular,
+    fontSize: 12,
+    lineHeight: 17,
+    textAlign: "left",
   },
   confirmDivider: {
     marginTop: 16,
@@ -6441,15 +6403,15 @@ const styles = StyleSheet.create({
   },
   quoteTitle: {
     color: leafRideColors.text,
-    fontFamily: fonts.SemiBold,
-    fontSize: 20,
-    lineHeight: 25,
+    ...leafTypography.semiBold,
+    fontSize: 24,
+    lineHeight: 30,
   },
   quotePrice: {
     color: leafRideColors.text,
-    fontFamily: fonts.SemiBold,
-    fontSize: 18,
-    lineHeight: 24,
+    ...leafTypography.semiBold,
+    fontSize: 32,
+    lineHeight: 40,
     textAlign: "right",
   },
   quoteDivider: {
@@ -6465,30 +6427,30 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 11,
     borderRadius: 18,
-    backgroundColor: "#F8F6F1",
+    backgroundColor: "#FFFFFF",
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: "#E9E2D8",
+    borderColor: "#E5E5E5",
   },
   dynamicPricingBadgeTitle: {
     color: leafRideColors.text,
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     fontSize: 12.5,
     lineHeight: 17,
   },
   dynamicPricingBadgeText: {
     marginTop: 2,
     color: leafRideColors.secondary,
-    fontFamily: fonts.Regular,
+    ...leafTypography.regular,
     fontSize: 11,
     lineHeight: 15,
   },
   pricingQuoteStatus: {
     marginTop: 12,
     color: leafRideColors.secondary,
-    fontFamily: fonts.Regular,
-    fontSize: 11,
-    lineHeight: 15,
-    textAlign: "center",
+    ...leafTypography.regular,
+    fontSize: 14,
+    lineHeight: 20,
+    textAlign: "left",
   },
   leafDelasRow: {
     marginTop: 14,
@@ -6507,14 +6469,14 @@ const styles = StyleSheet.create({
   },
   leafDelasTitle: {
     color: leafRideColors.text,
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     fontSize: 13,
     lineHeight: 18,
   },
   leafDelasSubtitle: {
     marginTop: 2,
     color: leafRideColors.secondary,
-    fontFamily: fonts.Regular,
+    ...leafTypography.regular,
     fontSize: 10.5,
     lineHeight: 14,
   },
@@ -6524,7 +6486,7 @@ const styles = StyleSheet.create({
     height: 24,
     borderRadius: 12,
     padding: 3,
-    backgroundColor: "#E9E2D8",
+    backgroundColor: "#E5E5E5",
   },
   leafDelasSwitchActive: {
     backgroundColor: leafRideColors.leaf,
@@ -6555,24 +6517,24 @@ const styles = StyleSheet.create({
   },
   unavailableTitle: {
     color: leafRideColors.dangerText,
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 12,
     lineHeight: 16,
   },
   unavailableText: {
     marginTop: 2,
     color: leafRideColors.secondary,
-    fontFamily: fonts.Regular,
+    ...leafTypography.regular,
     fontSize: 10.5,
     lineHeight: 14,
   },
   availabilityNotice: {
     marginTop: 10,
     color: leafRideColors.dangerText,
-    fontFamily: fonts.Medium,
-    fontSize: 11,
-    lineHeight: 15,
-    textAlign: "center",
+    ...leafTypography.medium,
+    fontSize: 14,
+    lineHeight: 20,
+    textAlign: "left",
   },
   quoteActionsRow: {
     marginTop: 16,
@@ -6624,7 +6586,7 @@ const styles = StyleSheet.create({
   },
   preferenceModalEyebrow: {
     color: leafRideColors.secondary,
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 10,
     lineHeight: 13,
     textTransform: "uppercase",
@@ -6633,14 +6595,14 @@ const styles = StyleSheet.create({
   preferenceModalTitle: {
     marginTop: 4,
     color: leafRideColors.text,
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 18,
     lineHeight: 23,
   },
   preferenceModalSubtitle: {
     marginTop: 4,
     color: leafRideColors.secondary,
-    fontFamily: fonts.Regular,
+    ...leafTypography.regular,
     fontSize: 11.5,
     lineHeight: 16,
   },
@@ -6656,7 +6618,7 @@ const styles = StyleSheet.create({
   },
   preferenceModalCountdownText: {
     color: leafRideColors.leaf,
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 14,
     lineHeight: 18,
   },
@@ -6669,10 +6631,10 @@ const styles = StyleSheet.create({
   },
   preferenceSelectorButton: {
     minHeight: 62,
-    borderRadius: 16,
+    borderRadius: 12,
     borderWidth: 1,
-    borderColor: "#E7E0D8",
-    backgroundColor: "#FBFAF7",
+    borderColor: '#E5E5E5',
+    backgroundColor: '#F5F5F5',
     paddingHorizontal: 14,
     paddingVertical: 11,
     flexDirection: "row",
@@ -6681,8 +6643,8 @@ const styles = StyleSheet.create({
     gap: 14,
   },
   preferenceSelectorButtonOpen: {
-    borderColor: "rgba(23,74,43,0.34)",
-    backgroundColor: "#F6FAF7",
+    borderColor: '#222222',
+    backgroundColor: '#F7F8F7',
   },
   preferenceSelectorCopy: {
     flex: 1,
@@ -6690,21 +6652,21 @@ const styles = StyleSheet.create({
   },
   preferenceSelectorLabel: {
     color: leafRideColors.secondary,
-    fontFamily: fonts.Medium,
-    fontSize: 11,
-    lineHeight: 15,
+    ...leafTypography.medium,
+    fontSize: 13,
+    lineHeight: 18,
   },
   preferenceSelectorValue: {
     marginTop: 3,
     color: leafRideColors.text,
-    fontFamily: fonts.SemiBold,
-    fontSize: 15,
-    lineHeight: 19,
+    ...leafTypography.semiBold,
+    fontSize: 16,
+    lineHeight: 22,
   },
   preferenceDropdownList: {
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: "#E7E0D8",
+    borderColor: '#E5E5E5',
     backgroundColor: "#FFFFFF",
     overflow: "hidden",
   },
@@ -6725,18 +6687,18 @@ const styles = StyleSheet.create({
   },
   preferenceDropdownTitle: {
     color: leafRideColors.text,
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     fontSize: 13,
     lineHeight: 17,
   },
   preferenceDropdownTitleSelected: {
     color: leafRideColors.leaf,
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
   },
   preferenceDropdownHint: {
     marginTop: 3,
     color: leafRideColors.secondary,
-    fontFamily: fonts.Regular,
+    ...leafTypography.regular,
     fontSize: 11,
     lineHeight: 15,
   },
@@ -6745,7 +6707,7 @@ const styles = StyleSheet.create({
   },
   preferenceModalSectionLabel: {
     color: leafRideColors.secondary,
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 11,
     lineHeight: 15,
     marginBottom: 9,
@@ -6777,7 +6739,7 @@ const styles = StyleSheet.create({
   },
   preferenceModalOptionText: {
     color: leafRideColors.text,
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 13,
     lineHeight: 17,
     flex: 1,
@@ -6802,7 +6764,7 @@ const styles = StyleSheet.create({
   preferenceModalOptionHint: {
     marginTop: 4,
     color: leafRideColors.secondary,
-    fontFamily: fonts.Regular,
+    ...leafTypography.regular,
     fontSize: 11,
     lineHeight: 15,
   },
@@ -6818,13 +6780,13 @@ const styles = StyleSheet.create({
   },
   preferenceModalProgressLabel: {
     color: leafRideColors.secondary,
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     fontSize: 11,
     lineHeight: 15,
   },
   preferenceModalProgressTime: {
     color: leafRideColors.leaf,
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 11,
     lineHeight: 15,
   },
@@ -6846,11 +6808,11 @@ const styles = StyleSheet.create({
     borderRadius: leafButtonMetrics.radius,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: leafRideColors.leaf,
+    backgroundColor: '#222222',
   },
   preferenceModalConfirmButtonText: {
     color: "#FFFFFF",
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 13,
     lineHeight: 17,
   },

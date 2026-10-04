@@ -86,6 +86,29 @@ describe('KYCService liveness handling', () => {
     expect(result.mode).toBe('aws');
   });
 
+  test('getPreferredLivenessMode should resolve face compare bypass mode', async () => {
+    global.fetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        success: true,
+        provider: 'biometric-face-service',
+        mode: 'face_compare',
+        config: {
+          enabled: false,
+          credentialsEnabled: false,
+          hasAssumeRoleArn: false,
+          bypassEnabled: true,
+          awsCallsDisabled: true
+        }
+      })
+    });
+
+    const result = await kycService.getPreferredLivenessMode();
+    expect(result.success).toBe(true);
+    expect(result.mode).toBe('face_compare');
+    expect(result.config.awsCallsDisabled).toBe(true);
+  });
+
   test('getPreferredLivenessMode should fallback local on connection failure', async () => {
     global.fetch.mockRejectedValueOnce(new Error('Network request failed'));
 
@@ -361,6 +384,51 @@ describe('KYCService liveness handling', () => {
       ['userId', 'driver-1'],
       ['awsSessionId', 'sess-123'],
       ['challengeId', 'challenge-1'],
+      ['requirement', 'LIVENESS_REQUIRED'],
+      ['currentImage', expect.objectContaining({
+        uri: 'file://selfie.jpg',
+        name: 'driver-selfie.jpg',
+        type: 'image/jpeg'
+      })]
+    ]));
+  });
+
+  test('verifyDriverWithFaceCompare should send the current selfie without an AWS session', async () => {
+    global.fetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        success: true,
+        isMatch: true,
+        livenessBypassed: true,
+        comparisonProvider: 'biometric-face-service'
+      })
+    });
+
+    const result = await kycService.verifyDriverWithFaceCompare(
+      'driver-1',
+      'file://selfie.jpg',
+      {
+        challengeId: 'kyc_ch_online',
+        requirement: 'LIVENESS_REQUIRED'
+      }
+    );
+
+    expect(result.success).toBe(true);
+    expect(global.fetch).toHaveBeenCalledWith(
+      'https://api.test/api/kyc/verify-driver/face-compare',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({
+          Accept: 'application/json',
+          Authorization: 'Bearer firebase-id-token'
+        })
+      })
+    );
+    const [, options] = global.fetch.mock.calls[0];
+    expect(options.body.parts).toEqual(expect.arrayContaining([
+      ['userId', 'driver-1'],
+      ['livenessBypass', 'true'],
+      ['challengeId', 'kyc_ch_online'],
       ['requirement', 'LIVENESS_REQUIRED'],
       ['currentImage', expect.objectContaining({
         uri: 'file://selfie.jpg',

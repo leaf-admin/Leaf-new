@@ -1,3 +1,4 @@
+import leafTypography from '../components/prototype/LeafTypography';
 import Logger from '../utils/Logger';
 import React, { useEffect, useRef, useState } from 'react';
 import { View, Image, StyleSheet, StatusBar, Animated, Text, ActivityIndicator, Dimensions } from 'react-native';
@@ -9,7 +10,6 @@ import { useOnboardingPersistence } from '../hooks/useOnboardingPersistence';
 import AuthFlow from '../components/auth/AuthFlow';
 import { restoreQaSeedProfile } from '../utils/qaSeedProfile';
 import { PROFILE_SELECTION_STEP_INDEX } from '../utils/onboardingSessionState';
-import { fonts } from '../theme/runtimeTokens';
 import {
   allowTestUserTools,
   isE2ETestBuild,
@@ -491,6 +491,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '500',
     marginTop: 12,
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
   },
 }); 

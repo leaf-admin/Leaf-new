@@ -423,6 +423,7 @@ module.exports = {
         "./plugins/withLeafAwsLiveness",
         "./plugins/withLeafFaceEmbedding",
         "./plugins/withLeafRideLiveActivity",
+        "./plugins/withLeafMaterial",
         [
             "expo-notifications",
             {
@@ -437,7 +438,10 @@ module.exports = {
             {
               "android": {
                 "compileSdkVersion": 36,
-                "targetSdkVersion": 36
+                "targetSdkVersion": 36,
+                "packagingOptions": {
+                  "pickFirst": ["**/libworklets.so"]
+                }
               },
               "ios": {
                 "useFrameworks": "static",

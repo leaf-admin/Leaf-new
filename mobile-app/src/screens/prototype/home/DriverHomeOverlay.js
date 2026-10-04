@@ -1,3 +1,4 @@
+import leafTypography from '../../../components/prototype/LeafTypography';
 import React, { memo, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
@@ -16,7 +17,6 @@ import { Ionicons } from "@expo/vector-icons";
 import LeafCampaignCarousel from "../../../components/campaigns/LeafCampaignCarousel";
 import robotaxiPrototypeTokens from "../../../components/design-system/robotaxiPrototypeTokens";
 import { leafButtonMetrics } from "../../../components/prototype/LeafRideUI";
-import { fonts } from "../../../theme/runtimeTokens";
 
 const { color } = robotaxiPrototypeTokens;
 const DRIVER_BOTTOM_CTA_OFFSET = 16;
@@ -43,7 +43,7 @@ const DRIVER_HOME_FALLBACK_CAMPAIGNS = Object.freeze([
       eyebrow: "Hoje na Leaf",
       title: "Fique online quando estiver pronto",
       body: "Acompanhe seus ganhos, aceite corridas com calma e mantenha sua rotina no controle.",
-      backgroundColor: "#FBFCF8",
+      backgroundColor: "#F7F8F7",
       imageAlt: "Banner de boas-vindas da Leaf no Rio de Janeiro",
       displayMode: "text_overlay",
       hideTextOverlay: false,
@@ -55,15 +55,15 @@ const DRIVER_HOME_FALLBACK_CAMPAIGNS = Object.freeze([
 const DRIVER_HOME_COLOR = {
   sheet: "#FFFFFF",
   sheetSoft: "#FFFFFF",
-  text: "#171412",
-  secondary: "#756F68",
-  muted: "#827B73",
-  line: "#E9E2D8",
+  text: "#222222",
+  secondary: "#6A6A6A",
+  muted: "#767676",
+  line: "#E5E5E5",
   leaf: "#1A330E",
   leafLight: "#F1F5EE",
   blue: "#F2F4EF",
   blueText: "#514B45",
-  warning: "#F8F6F1",
+  warning: "#FFFFFF",
   warningText: "#7A6337",
 };
 
@@ -446,6 +446,7 @@ export function isDriverIdentitySupportRequired(remoteActivation) {
 function DriverHomeOverlay({
   driverId = "",
   insetsBottom = 0,
+  rootNavigationInset = 0,
   driverOnline = false,
   driverOnlinePending = false,
   driverOnlineStartedAt = null,
@@ -559,6 +560,26 @@ function DriverHomeOverlay({
     : driverOnline
       ? "Online"
       : "Ficar online";
+  const sliderAccessibilityValue = {
+    ride: "Em corrida",
+    "identity-support": "Identidade requer suporte",
+    blocked: sliderLabel,
+    pending: pendingOnlineRealtime ? "Reconectando" : "Ativando",
+    online: "Online",
+    ready: "Pronto para confirmar identidade",
+    offline: "Offline",
+  }[sliderStatus];
+  const sliderAccessibilityHint = {
+    ride: "A disponibilidade não pode ser alterada durante uma corrida em andamento.",
+    "identity-support": "Toque para falar com o suporte sobre sua identidade.",
+    blocked: "Toque para revisar sua ativação.",
+    pending: pendingOnlineRealtime
+      ? "Aguarde a confirmação da conexão em tempo real."
+      : "Aguarde a confirmação para ficar online.",
+    online: "Toque para sair do modo online.",
+    ready: "Toque para confirmar sua identidade e ficar online.",
+    offline: "Toque para ficar online e receber corridas.",
+  }[sliderStatus];
   const goalStorageKey = useMemo(
     () =>
       `${DRIVER_GOAL_STORAGE_PREFIX}${String(driverId || "anonymous").trim() || "anonymous"}`,
@@ -860,7 +881,7 @@ function DriverHomeOverlay({
         onLayout={onCtaLayout}
         style={[
           styles.driverHomeStack,
-          { bottom: safeBottom + DRIVER_BOTTOM_CTA_OFFSET },
+          { bottom: safeBottom + DRIVER_BOTTOM_CTA_OFFSET + rootNavigationInset },
         ]}
       >
         <View style={styles.driverBottomCard}>
@@ -882,11 +903,8 @@ function DriverHomeOverlay({
                 >
                   {currentGoalProgressLabel}
                 </Text>
-                <Text style={styles.driverBottomStatValueSecondary}>
-                  {" "}
-                  / R$ {goalTargetLabel}
-                </Text>
               </View>
+              <Text style={styles.driverBottomStatValueSecondary}>Meta de hoje · R$ {goalTargetLabel}</Text>
               <View style={styles.driverGoalProgressTrack}>
                 <View
                   style={[
@@ -954,17 +972,9 @@ function DriverHomeOverlay({
               disabled={hasDriverWorkInProgress}
               testID="driver-home-toggle-online"
               accessibilityRole="button"
-              accessibilityLabel={`driver-home-toggle-online-${sliderStatus}`}
-              accessibilityHint={
-                driverOnline
-                  ? "Toca para sair do modo online"
-                  : identitySupportRequired
-                    ? "Toca para falar com o suporte sobre sua identidade"
-                  : isReadyForIdentityGate
-                    ? "Toca para confirmar sua identidade e ficar online"
-                  : "Toca para ficar online e receber corridas"
-              }
-              accessibilityValue={{ text: sliderStatus }}
+              accessibilityLabel="Disponibilidade do motorista"
+              accessibilityHint={sliderAccessibilityHint}
+              accessibilityValue={{ text: sliderAccessibilityValue }}
               onLayout={(event) => {
                 const nextWidth = event?.nativeEvent?.layout?.width;
                 if (Number.isFinite(nextWidth) && nextWidth > 0) {
@@ -1082,7 +1092,7 @@ function DriverHomeOverlay({
               activeOpacity={0.88}
               onPress={handleOpenGoalModal}
               testID="driver-home-preferences-button"
-              accessibilityLabel="driver-home-preferences-button"
+              accessibilityLabel="Preferências do motorista"
               style={styles.driverPreferencesAction}
             >
               <Ionicons
@@ -1312,12 +1322,12 @@ const styles = StyleSheet.create({
   driverBottomCard: {
     minHeight: DRIVER_HOME_CARD_HEIGHT,
     borderRadius: DRIVER_HOME_CARD_RADIUS,
-    paddingHorizontal: 28,
-    paddingTop: 21,
+    paddingHorizontal: 20,
+    paddingTop: 20,
     paddingBottom: 18,
     backgroundColor: DRIVER_HOME_COLOR.sheetSoft,
     borderWidth: 1,
-    borderColor: "#ECE5DC",
+    borderColor: "#E5E5E5",
     shadowColor: "#000000",
     shadowOffset: { width: 0, height: 20 },
     shadowOpacity: 0.12,
@@ -1342,7 +1352,7 @@ const styles = StyleSheet.create({
   driverStatsVerticalDivider: {
     width: StyleSheet.hairlineWidth,
     alignSelf: "stretch",
-    backgroundColor: "#E9E2D8",
+    backgroundColor: "#E5E5E5",
     marginLeft: 3,
     marginRight: 13,
   },
@@ -1361,9 +1371,9 @@ const styles = StyleSheet.create({
   },
   driverBottomStatLabel: {
     color: DRIVER_HOME_COLOR.muted,
-    fontFamily: fonts.Medium,
-    fontSize: 10.5,
-    lineHeight: 14,
+    ...leafTypography.regular,
+    fontSize: 12,
+    lineHeight: 17,
   },
   driverGoalHeaderRow: {
     width: "100%",
@@ -1374,18 +1384,19 @@ const styles = StyleSheet.create({
   },
   driverBottomStatValuePrimary: {
     color: DRIVER_HOME_COLOR.text,
-    fontFamily: fonts.SemiBold,
-    fontSize: 26,
-    lineHeight: 32,
+    ...leafTypography.semiBold,
+    fontSize: 32,
+    lineHeight: 38,
+    fontVariant: ['tabular-nums'],
     marginTop: 0,
-    maxWidth: 128,
+    maxWidth: '100%',
   },
   driverBottomStatValueSecondary: {
     color: DRIVER_HOME_COLOR.secondary,
-    fontFamily: fonts.Medium,
-    fontSize: 13,
-    lineHeight: 20,
-    flexShrink: 0,
+    ...leafTypography.regular,
+    fontSize: 12,
+    lineHeight: 17,
+    marginTop: 4,
   },
   driverGoalValueRow: {
     marginTop: 2,
@@ -1417,15 +1428,15 @@ const styles = StyleSheet.create({
   },
   driverGoalProgressCaption: {
     color: DRIVER_HOME_COLOR.secondary,
-    fontFamily: fonts.Medium,
-    fontSize: 10.5,
-    lineHeight: 14,
+    ...leafTypography.regular,
+    fontSize: 12,
+    lineHeight: 17,
   },
   driverGoalProgressPercentText: {
     color: DRIVER_HOME_COLOR.leaf,
-    fontFamily: fonts.SemiBold,
-    fontSize: 10.5,
-    lineHeight: 14,
+    ...leafTypography.semiBold,
+    fontSize: 12,
+    lineHeight: 17,
   },
   driverStreakInline: {
     marginTop: 8,
@@ -1436,23 +1447,24 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 5,
-    backgroundColor: "rgba(248,245,239,0.88)",
+    backgroundColor: "rgba(245,246,245,0.88)",
     borderWidth: 1,
-    borderColor: "rgba(233,226,216,0.86)",
+    borderColor: '#E5E5E5',
   },
   driverStreakInlineText: {
     flexShrink: 1,
     color: DRIVER_HOME_COLOR.warningText,
-    fontFamily: fonts.SemiBold,
-    fontSize: 10.5,
-    lineHeight: 13,
+    ...leafTypography.semiBold,
+    fontSize: 12,
+    lineHeight: 17,
   },
   driverSideStatValue: {
     marginTop: 0,
     color: DRIVER_HOME_COLOR.text,
-    fontFamily: fonts.SemiBold,
-    fontSize: 18,
-    lineHeight: 23,
+    ...leafTypography.semiBold,
+    fontSize: 20,
+    lineHeight: 25,
+    fontVariant: ['tabular-nums'],
     minWidth: 30,
     textAlign: "left",
   },
@@ -1461,15 +1473,15 @@ const styles = StyleSheet.create({
   },
   driverSideStatLabel: {
     color: DRIVER_HOME_COLOR.muted,
-    fontFamily: fonts.Medium,
-    fontSize: 10.5,
-    lineHeight: 14,
+    ...leafTypography.regular,
+    fontSize: 12,
+    lineHeight: 17,
     textAlign: "left",
   },
   driverOnlineLimitHint: {
     marginTop: 1,
     color: DRIVER_HOME_COLOR.warningText,
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     fontSize: 9.5,
     lineHeight: 12,
     textAlign: "left",
@@ -1490,8 +1502,8 @@ const styles = StyleSheet.create({
     height: 56,
     borderRadius: 28,
     borderWidth: 1,
-    borderColor: "#E2DAD0",
-    backgroundColor: "#F8F6F1",
+    borderColor: "#D6D9D6",
+    backgroundColor: "#FFFFFF",
     alignItems: "center",
     justifyContent: "center",
     overflow: "hidden",
@@ -1511,7 +1523,7 @@ const styles = StyleSheet.create({
   },
   driverBottomSliderText: {
     color: DRIVER_HOME_COLOR.text,
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 13.5,
     lineHeight: 19,
     textAlign: "center",
@@ -1522,7 +1534,7 @@ const styles = StyleSheet.create({
   },
   driverBottomSliderReadyStatus: {
     color: DRIVER_HOME_COLOR.leaf,
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     fontSize: 10.5,
     lineHeight: 13,
     textAlign: "center",
@@ -1569,7 +1581,7 @@ const styles = StyleSheet.create({
     height: 56,
     borderRadius: 28,
     borderWidth: 1,
-    borderColor: "#E2DAD0",
+    borderColor: "#D6D9D6",
     backgroundColor: DRIVER_HOME_COLOR.sheet,
     alignItems: "center",
     justifyContent: "center",
@@ -1612,7 +1624,7 @@ const styles = StyleSheet.create({
   },
   summaryEyebrow: {
     color: DRIVER_HOME_COLOR.muted,
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 11,
     lineHeight: 15,
     textTransform: "uppercase",
@@ -1621,14 +1633,14 @@ const styles = StyleSheet.create({
   summaryTitle: {
     marginTop: 4,
     color: DRIVER_HOME_COLOR.text,
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 24,
     lineHeight: 30,
   },
   summarySubtitle: {
     marginTop: 4,
     color: DRIVER_HOME_COLOR.secondary,
-    fontFamily: fonts.Regular,
+    ...leafTypography.regular,
     fontSize: 13,
     lineHeight: 18,
   },
@@ -1650,13 +1662,13 @@ const styles = StyleSheet.create({
   },
   summaryMetricLabel: {
     color: DRIVER_HOME_COLOR.muted,
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     fontSize: 11,
     lineHeight: 15,
   },
   summaryMetricValue: {
     color: DRIVER_HOME_COLOR.text,
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 20,
     lineHeight: 25,
   },
@@ -1685,21 +1697,21 @@ const styles = StyleSheet.create({
   },
   summaryComparisonTitle: {
     color: DRIVER_HOME_COLOR.text,
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 13,
     lineHeight: 18,
   },
   summaryComparisonText: {
     marginTop: 3,
     color: DRIVER_HOME_COLOR.secondary,
-    fontFamily: fonts.Regular,
+    ...leafTypography.regular,
     fontSize: 12,
     lineHeight: 17,
   },
   summaryComparisonDelta: {
     marginTop: 5,
     color: DRIVER_HOME_COLOR.leaf,
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 12,
     lineHeight: 16,
   },
@@ -1712,7 +1724,7 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     borderWidth: 1,
     borderColor: "rgba(236,220,199,0.96)",
-    backgroundColor: "rgba(248,245,239,0.82)",
+    backgroundColor: "rgba(245,246,245,0.82)",
     paddingHorizontal: 12,
     paddingVertical: 11,
     flexDirection: "row",
@@ -1729,7 +1741,7 @@ const styles = StyleSheet.create({
   },
   summaryStreakNumber: {
     color: "#FFFFFF",
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 18,
     lineHeight: 23,
   },
@@ -1739,27 +1751,27 @@ const styles = StyleSheet.create({
   },
   summaryStreakTitle: {
     color: DRIVER_HOME_COLOR.text,
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 13,
     lineHeight: 18,
   },
   summaryStreakText: {
     marginTop: 2,
     color: DRIVER_HOME_COLOR.secondary,
-    fontFamily: fonts.Regular,
+    ...leafTypography.regular,
     fontSize: 12,
     lineHeight: 17,
   },
   modalTitle: {
     color: color.text.primary,
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 18,
     lineHeight: 22,
   },
   modalLabel: {
     marginTop: 14,
     color: color.text.secondary,
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     fontSize: 11,
     lineHeight: 15,
   },
@@ -1772,7 +1784,7 @@ const styles = StyleSheet.create({
     backgroundColor: color.surface.secondary,
     paddingHorizontal: 12,
     color: color.text.primary,
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     fontSize: 15,
   },
   modalInputDisabled: {
@@ -1795,21 +1807,21 @@ const styles = StyleSheet.create({
   },
   destinationModeTitle: {
     color: color.text.primary,
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 13,
     lineHeight: 18,
   },
   destinationModeSubtitle: {
     marginTop: 2,
     color: color.text.secondary,
-    fontFamily: fonts.Regular,
+    ...leafTypography.regular,
     fontSize: 11,
     lineHeight: 15,
   },
   destinationModeActiveHint: {
     marginTop: 8,
     color: DRIVER_HOME_COLOR.secondary,
-    fontFamily: fonts.Regular,
+    ...leafTypography.regular,
     fontSize: 11,
     lineHeight: 15,
   },
@@ -1818,7 +1830,7 @@ const styles = StyleSheet.create({
     height: 24,
     borderRadius: 12,
     padding: 3,
-    backgroundColor: "#E9E2D8",
+    backgroundColor: "#E5E5E5",
   },
   destinationModeSwitchActive: {
     backgroundColor: DRIVER_HOME_COLOR.leaf,
@@ -1849,7 +1861,7 @@ const styles = StyleSheet.create({
   },
   modalGhostButtonText: {
     color: color.text.primary,
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 14,
   },
   modalPrimaryButton: {
@@ -1860,11 +1872,11 @@ const styles = StyleSheet.create({
     borderColor: color.border.strong,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: color.accent.primary,
+    backgroundColor: '#252525',
   },
   modalPrimaryButtonText: {
     color: color.accent.contrast,
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 14,
   },
 });

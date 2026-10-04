@@ -88,6 +88,22 @@ describe('OTPStep', () => {
     }
   }
 
+  test('announces OTP positions and actions with user-facing accessibility labels', () => {
+    const { getByTestId } = render(
+      <OTPStep
+        phoneNumber="+5521102938475"
+        confirmation={{ confirm: jest.fn() }}
+        onVerified={jest.fn()}
+        onBack={jest.fn()}
+      />,
+    );
+
+    expect(getByTestId('auth-otp-digit-0').props.accessibilityLabel).toBe('Dígito 1 de 6');
+    expect(getByTestId('auth-otp-digit-0').props.accessibilityHint).toContain('Campo 1 de 6');
+    expect(getByTestId('auth-otp-digit-5').props.accessibilityLabel).toBe('Dígito 6 de 6');
+    expect(getByTestId('auth-otp-verify-btn').props.accessibilityLabel).toBe('Confirmar código');
+  });
+
   test('shows a friendly message for invalid OTP', async () => {
     const confirmation = {
       confirm: jest.fn().mockRejectedValue(new Error('invalid-verification-code')),
@@ -112,6 +128,34 @@ describe('OTPStep', () => {
         undefined,
         undefined,
       );
+    });
+  });
+
+  test('distributes an autofilled OTP received in the first input', async () => {
+    const verifiedUser = {
+      uid: 'uid-otp-autofill',
+      phoneNumber: '+5521102938475',
+    };
+    mockCurrentUser = verifiedUser;
+    const confirmation = {
+      confirm: jest.fn().mockResolvedValue({ user: verifiedUser }),
+    };
+    const onVerified = jest.fn();
+
+    const { getByTestId } = render(
+      <OTPStep
+        phoneNumber="+5521102938475"
+        confirmation={confirmation}
+        onVerified={onVerified}
+        onBack={jest.fn()}
+      />,
+    );
+
+    fireEvent.changeText(getByTestId('auth-otp-digit-0'), '123456');
+
+    await waitFor(() => {
+      expect(confirmation.confirm).toHaveBeenCalledWith('123456');
+      expect(onVerified).toHaveBeenCalledWith(verifiedUser);
     });
   });
 

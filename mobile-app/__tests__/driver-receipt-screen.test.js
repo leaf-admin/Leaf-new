@@ -148,13 +148,18 @@ describe("driver receipt screen", () => {
       />,
     );
 
+    expect(screen.getByTestId("driver-receipt-screen").props.accessibilityLabel)
+      .toBe("Recibo do motorista");
     expect(screen.getByText("Valor recebido")).toBeTruthy();
     expect(screen.getAllByText("R$ 21,34").length).toBeGreaterThan(0);
     expect(screen.getByText("Passageiro Rota")).toBeTruthy();
     expect(screen.getByText("Rua Origem")).toBeTruthy();
     expect(screen.getByText("Rua Destino")).toBeTruthy();
 
-    fireEvent.press(screen.getByTestId("driver-receipt-back-to-map-button"));
+    const backToMapButton = screen.getByTestId("driver-receipt-back-to-map-button");
+    expect(backToMapButton.props.accessibilityRole).toBe("button");
+    expect(backToMapButton.props.accessibilityLabel).toBe("Voltar ao mapa");
+    fireEvent.press(backToMapButton);
 
     expect(dismissCompletedReceipt).toHaveBeenCalled();
     expect(navigation.navigate).toHaveBeenCalledWith("RobotaxiPrototype");
@@ -193,7 +198,10 @@ describe("driver receipt screen", () => {
       />,
     );
 
-    fireEvent.press(screen.getByTestId("driver-receipt-rate-passenger-button"));
+    const ratePassengerButton = screen.getByTestId("driver-receipt-rate-passenger-button");
+    expect(ratePassengerButton.props.accessibilityRole).toBe("button");
+    expect(ratePassengerButton.props.accessibilityLabel).toMatch(/Avaliar/);
+    fireEvent.press(ratePassengerButton);
 
     expect(navigation.replace).toHaveBeenCalledWith(
       "RobotaxiPrototypeRating",
@@ -238,7 +246,138 @@ describe("driver receipt screen", () => {
     expect(screen.getByText("Repasse pendente")).toBeTruthy();
     expect(screen.getByText("Aguardando dados de repasse")).toBeTruthy();
     expect(screen.getAllByText("R$ 25,00").length).toBeGreaterThan(0);
+    expect(screen.getByTestId("driver-receipt-fees-amount")).toHaveTextContent("--");
+    expect(screen.getByTestId("driver-receipt-toll-amount")).toHaveTextContent("--");
     expect(screen.queryByText("Valor recebido")).toBeNull();
+  });
+
+  it("keeps missing passenger fee and toll detail unknown instead of showing zero", () => {
+    usePrototypeRideRuntime.mockReturnValue(
+      buildRuntime({ activeRole: "passenger" }),
+    );
+    const navigation = {
+      navigate: jest.fn(),
+      canGoBack: jest.fn(() => false),
+      goBack: jest.fn(),
+    };
+    const receipt = {
+      id: "trip_passenger_gross_only",
+      authoritativeSnapshot: true,
+      financialSnapshotSource: "backend_final",
+      fare: 25,
+      finalFare: 25,
+      grossAmount: 25,
+      paymentMethod: "pix",
+      passengerId: "passenger_1",
+      driverId: "driver_1",
+      driverName: "Motorista Leaf",
+      pickupAddress: "Rua Origem, Centro",
+      destinationAddress: "Rua Destino, Botafogo",
+      distanceKm: 4.2,
+      durationMin: 16,
+    };
+
+    const screen = render(
+      <RobotaxiReceiptScreen
+        navigation={navigation}
+        route={{ params: { fromTrip: true, receipt } }}
+      />,
+    );
+
+    expect(screen.getAllByText("R$ 25,00").length).toBeGreaterThan(0);
+    expect(screen.getByTestId("passenger-receipt-subtotal-amount")).toHaveTextContent("--");
+    expect(screen.getByTestId("passenger-receipt-fees-amount")).toHaveTextContent("--");
+    expect(screen.getByTestId("passenger-receipt-toll-amount")).toHaveTextContent("--");
+  });
+
+  it("preserves explicit zero fee and toll values in the passenger receipt", () => {
+    usePrototypeRideRuntime.mockReturnValue(
+      buildRuntime({ activeRole: "passenger" }),
+    );
+    const navigation = {
+      navigate: jest.fn(),
+      canGoBack: jest.fn(() => false),
+      goBack: jest.fn(),
+    };
+    const receipt = {
+      id: "trip_passenger_explicit_zero_values",
+      authoritativeSnapshot: true,
+      financialSnapshotSource: "backend_final",
+      fare: 25,
+      finalFare: 25,
+      grossAmount: 25,
+      totalFees: 0,
+      tollFee: 0,
+      paymentMethod: "pix",
+      passengerId: "passenger_1",
+      driverId: "driver_1",
+      driverName: "Motorista Leaf",
+      pickupAddress: "Rua Origem, Centro",
+      destinationAddress: "Rua Destino, Botafogo",
+      distanceKm: 4.2,
+      durationMin: 16,
+    };
+
+    const screen = render(
+      <RobotaxiReceiptScreen
+        navigation={navigation}
+        route={{ params: { fromTrip: true, receipt } }}
+      />,
+    );
+
+    expect(screen.getByTestId("passenger-receipt-subtotal-amount")).toHaveTextContent("R$ 25,00");
+    expect(screen.getByTestId("passenger-receipt-fees-amount")).toHaveTextContent("R$ 0,00");
+    expect(screen.getByTestId("passenger-receipt-toll-amount")).toHaveTextContent("R$ 0,00");
+  });
+
+  it("uses readable labels and expanded state for passenger receipt actions", () => {
+    usePrototypeRideRuntime.mockReturnValue(buildRuntime({ activeRole: "passenger" }));
+    const navigation = {
+      navigate: jest.fn(),
+      canGoBack: jest.fn(() => false),
+      goBack: jest.fn(),
+    };
+    const receipt = {
+      id: "trip_passenger_accessible_actions",
+      authoritativeSnapshot: true,
+      financialSnapshotSource: "backend_final",
+      fare: 25,
+      finalFare: 25,
+      grossAmount: 25,
+      totalFees: 3.66,
+      paymentMethod: "pix",
+      passengerId: "passenger_1",
+      driverId: "driver_1",
+      driverName: "Motorista Leaf",
+      pickupAddress: "Rua Origem, Centro",
+      destinationAddress: "Rua Destino, Botafogo",
+      distanceKm: 4.2,
+      durationMin: 16,
+    };
+    const screen = render(
+      <RobotaxiReceiptScreen
+        navigation={navigation}
+        route={{ params: { fromTrip: true, receipt } }}
+      />,
+    );
+
+    expect(screen.getByTestId("passenger-receipt-screen").props.accessibilityLabel)
+      .toBe("Recibo do passageiro");
+    expect(screen.getByTestId("passenger-receipt-back-to-map-button").props.accessibilityLabel)
+      .toBe("Voltar ao mapa");
+
+    const moreOptionsButton = screen.getByTestId("passenger-receipt-more-options-button");
+    expect(moreOptionsButton.props.accessibilityRole).toBe("button");
+    expect(moreOptionsButton.props.accessibilityLabel).toBe("Mais opções");
+    expect(moreOptionsButton.props.accessibilityState).toEqual({ expanded: false });
+    fireEvent.press(moreOptionsButton);
+
+    expect(screen.getByTestId("passenger-receipt-more-options-button").props.accessibilityLabel)
+      .toBe("Ocultar opções");
+    expect(screen.getByTestId("passenger-receipt-more-options-button").props.accessibilityState)
+      .toEqual({ expanded: true });
+    expect(screen.getByTestId("passenger-receipt-report-issue-button").props.accessibilityLabel)
+      .toBe("Reportar problema com a viagem");
   });
 
   it("decodes only persisted slash entities on the current driver receipt", () => {

@@ -83,7 +83,7 @@ describe('current account surface contract', () => {
       'accessibilityLabel="robotaxi-vehicles-close-button"',
     );
     expect(sources['src/screens/prototype/RobotaxiSettingsScreen.js']).toContain(
-      'accessibilityLabel="Fechar configurações"',
+      'accessibilityLabel="Voltar"',
     );
     expect(sources['src/screens/prototype/RobotaxiSettingsScreen.js']).toContain(
       'accessible={false}',

@@ -9,6 +9,11 @@ import { useDispatch, useSelector } from 'react-redux';
 const mockGetCurrentProfile = jest.fn();
 const mockUpsertCurrentProfile = jest.fn();
 
+jest.mock('@react-navigation/native', () => ({
+  ...jest.requireActual('@react-navigation/native'),
+  useIsFocused: () => true,
+}));
+
 jest.mock('../src/services/MobileProfileService', () => ({
   __esModule: true,
   default: {

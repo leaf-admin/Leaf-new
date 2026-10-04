@@ -1,7 +1,7 @@
 import Logger from '../utils/Logger';
 import React, { useEffect, useRef, useState } from 'react';
 import { CommonActions, NavigationContainer, createNavigationContainerRef, getStateFromPath } from '@react-navigation/native';
-import { TransitionPresets, createStackNavigator } from '@react-navigation/stack';
+import { CardStyleInterpolators, TransitionPresets, createStackNavigator } from '@react-navigation/stack';
 import Constants from 'expo-constants';
 
 import { useDispatch, useSelector } from 'react-redux';
@@ -25,6 +25,7 @@ import {
 } from '../components/auth/authFlowRecovery';
 
 import AuthFlowScreenshotHarness from '../components/auth/AuthFlowScreenshotHarness';
+import { LeafNativeTabBarProvider } from '../components/prototype/LeafNativeTabBar';
 
 import LegalScreen from '../screens/LegalScreen';
 import PrivacyPolicyScreen from '../screens/PrivacyPolicyScreen';
@@ -43,6 +44,9 @@ import RobotaxiTripScreen from '../screens/prototype/RobotaxiTripScreen';
 import RobotaxiProfileScreen from '../screens/prototype/RobotaxiProfileScreen';
 import RobotaxiSettingsScreen from '../screens/prototype/RobotaxiSettingsScreen';
 import RobotaxiMenuScreen from '../screens/prototype/RobotaxiMenuScreen';
+import LeafSavedPlacesScreen from '../screens/prototype/LeafSavedPlacesScreen';
+import LeafSavedPlacePickerScreen from '../screens/prototype/LeafSavedPlacePickerScreen';
+import LeafAccountInfoScreen from '../screens/prototype/LeafAccountInfoScreen';
 import RobotaxiTripHistoryScreen from '../screens/prototype/RobotaxiTripHistoryScreen';
 import RobotaxiPaymentSuccessScreen from '../screens/prototype/RobotaxiPaymentSuccessScreen';
 import RobotaxiPaymentFailedScreen from '../screens/prototype/RobotaxiPaymentFailedScreen';
@@ -220,6 +224,7 @@ const prototypeOverlayScreenOptions = {
   headerShown: false,
   presentation: 'card',
   animationEnabled: false,
+  cardStyleInterpolator: CardStyleInterpolators.forNoAnimation,
   gestureEnabled: false,
   cardOverlayEnabled: false,
   cardStyle: { backgroundColor: 'transparent' },
@@ -229,6 +234,13 @@ const prototypeOverlayScreenOptions = {
 const prototypeTransparentOverlayScreenOptions = {
   ...prototypeOverlayScreenOptions,
   presentation: 'transparentModal'
+};
+
+// Root tabs share one transition config. A default iOS home transition would
+// also translate the retained account/activity card by 30% of the screen.
+const prototypeRootScreenOptions = {
+  ...prototypeOverlayScreenOptions,
+  cardStyle: { backgroundColor: '#FFFFFF' },
 };
 
 const prototypeInteractiveOverlayScreenOptions = {
@@ -339,6 +351,8 @@ const appLinking = {
       RobotaxiPrototypeProfile: 'robotaxi/profile',
       RobotaxiPrototypeSettings: 'robotaxi/settings',
       RobotaxiPrototypeMenu: 'robotaxi/menu',
+      LeafSavedPlaces: 'robotaxi/places',
+      LeafAccountInfo: 'robotaxi/account-info',
       RobotaxiMenuEditProfile: 'robotaxi/menu/profile',
       RobotaxiMenuTripHistory: 'robotaxi/menu/history',
       RobotaxiMenuMessages: 'robotaxi/menu/messages',
@@ -508,7 +522,7 @@ function renderPublicScreens(allowPrototypeQaScreens = false) {
           <Stack.Screen
             name="RobotaxiPrototype"
             component={RobotaxiPrototypeScreen}
-            options={{ keyboardHandlingEnabled: false }}
+            options={{ ...prototypeRootScreenOptions, keyboardHandlingEnabled: false }}
           />
           <Stack.Screen
             name="AuthFlowScreenshotHarness"
@@ -620,7 +634,7 @@ function renderSharedPrototypeScreens() {
       <Stack.Screen
         name="RobotaxiPrototype"
         component={RobotaxiPrototypeScreen}
-        options={{ headerShown: false }}
+        options={prototypeRootScreenOptions}
       />
       <Stack.Screen
         name="RobotaxiPrototypeChat"
@@ -667,10 +681,13 @@ function renderSharedPrototypeScreens() {
         component={RobotaxiSettingsScreen}
         options={prototypeOverlayScreenOptions}
       />
+      <Stack.Screen name="LeafSavedPlaces" component={LeafSavedPlacesScreen} options={prototypeOverlayScreenOptions} />
+      <Stack.Screen name="LeafSavedPlacePicker" component={LeafSavedPlacePickerScreen} options={prototypeOverlayScreenOptions} />
+      <Stack.Screen name="LeafAccountInfo" component={LeafAccountInfoScreen} options={prototypeOverlayScreenOptions} />
       <Stack.Screen
         name="RobotaxiPrototypeMenu"
         component={RobotaxiMenuScreen}
-        options={prototypeOverlayScreenOptions}
+        options={prototypeRootScreenOptions}
       />
       <Stack.Screen
         name="RobotaxiPrototypeShareTrip"
@@ -708,7 +725,7 @@ function renderSharedPrototypeScreens() {
       <Stack.Screen
         name="RobotaxiMenuTripHistory"
         component={RobotaxiTripHistoryScreen}
-        options={prototypeOverlayScreenOptions}
+        options={prototypeRootScreenOptions}
       />
       <Stack.Screen
         name="RobotaxiMenuMessages"
@@ -1156,7 +1173,7 @@ function PrototypeQaDeepLinkGuard({ navigationRef }) {
 
 export default function AppNavigator() {
   return (
-    <>
+    <LeafNativeTabBarProvider>
       <NavigationContainer ref={rootNavigationRef} linking={appLinking}>
         <MainNavigator />
       </NavigationContainer>
@@ -1164,6 +1181,6 @@ export default function AppNavigator() {
       <PrototypeReceiptDeepLinkGuard navigationRef={rootNavigationRef} />
       <RealtimeConnectionGuard />
       <SessionTerminatedGuard navigationRef={rootNavigationRef} />
-    </>
+    </LeafNativeTabBarProvider>
   );
 }

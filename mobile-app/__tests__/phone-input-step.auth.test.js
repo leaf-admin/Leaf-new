@@ -1,5 +1,5 @@
 import React from 'react';
-import { Alert } from 'react-native';
+import { Alert, StyleSheet } from 'react-native';
 import { fireEvent, render, waitFor } from '@testing-library/react-native';
 
 import PhoneInputStep, { normalizePhoneInputValue } from '../src/components/auth/steps/PhoneInputStep';
@@ -70,7 +70,9 @@ jest.mock('../src/components/auth/common/ContinueButton', () => {
         onPress={onPress}
         disabled={disabled}
         testID={testID}
-        accessibilityLabel={accessibilityLabel}
+        accessibilityRole="button"
+        accessibilityState={{ disabled }}
+        accessibilityLabel={accessibilityLabel || text}
       >
         <Text>{text}</Text>
       </TouchableOpacity>
@@ -163,6 +165,61 @@ describe('PhoneInputStep', () => {
         undefined,
       );
     });
+  });
+
+  test('rejects a short phone submitted from the keyboard before requesting an OTP', () => {
+    const apiClient = require('../src/services/httpClient');
+    const { getByTestId } = render(
+      <PhoneInputStep
+        onSwitchToRegister={jest.fn()}
+        onVerificationSent={jest.fn()}
+      />,
+    );
+
+    const phoneInput = getByTestId('auth-phone-input');
+    fireEvent.changeText(phoneInput, '123');
+    fireEvent(phoneInput, 'submitEditing');
+
+    expect(Alert.alert).toHaveBeenCalledWith(
+      'Erro',
+      'Por favor, insira um número de telefone válido.',
+      undefined,
+      undefined,
+    );
+    expect(apiClient.post).not.toHaveBeenCalled();
+    expect(mockSignInWithPhoneNumber).not.toHaveBeenCalled();
+  });
+
+  test('exposes user-facing accessibility names for phone entry and login actions', () => {
+    const { getByTestId } = render(
+      <PhoneInputStep
+        onSwitchToRegister={jest.fn()}
+        onVerificationSent={jest.fn()}
+      />,
+    );
+
+    expect(getByTestId('auth-phone-input').props.accessibilityLabel).toBe(
+      'Número de celular com DDD',
+    );
+    expect(getByTestId('auth-continue-btn').props.accessibilityLabel).toBe('Continuar');
+    expect(getByTestId('auth-password-fallback-btn').props.accessibilityLabel).toBe(
+      'Já tenho senha',
+    );
+    expect(getByTestId('auth-password-fallback-btn').props.accessibilityRole).toBe('button');
+  });
+
+  test('allows the phone input to grow with accessibility text scaling', () => {
+    const { getByTestId } = render(
+      <PhoneInputStep
+        onSwitchToRegister={jest.fn()}
+        onVerificationSent={jest.fn()}
+      />,
+    );
+    const inputStyle = StyleSheet.flatten(getByTestId('auth-phone-input').props.style);
+
+    expect(inputStyle.minHeight).toBe(58);
+    expect(inputStyle.height).toBeUndefined();
+    expect(inputStyle.lineHeight).toBeUndefined();
   });
 
   test('routes controlled QA phones through custom OTP without firebase custom token login', async () => {
@@ -324,7 +381,7 @@ describe('PhoneInputStep', () => {
         true,
       );
       expect(mockSignInWithPhoneNumber).toHaveBeenCalledWith('+5521102938475');
-      expect(queryByText('Esse passo ajuda a manter sua conta segura.')).not.toBeNull();
+      expect(queryByText('Informe seu celular para confirmar sua conta com segurança.')).not.toBeNull();
     });
   });
 

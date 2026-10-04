@@ -96,14 +96,17 @@ describe("DriverLiveRideOverlay", () => {
       screen.getByTestId("driver-live-offer-accept-button").props
         .accessibilityState.disabled,
     ).toBe(true);
-    expect(screen.queryByTestId("driver-live-offer-reject-button")).toBeNull();
+    expect(screen.getByTestId("driver-live-offer-reject-button").props.accessibilityState.disabled).toBe(true);
     fireEvent.press(screen.getByTestId("driver-live-offer-details-button"));
     expect(
-      screen.getByLabelText("driver-live-offer-reject-button").props
+      screen.getByTestId("driver-live-offer-reject-button").props
         .accessibilityState.disabled,
     ).toBe(true);
     fireEvent.press(screen.getByTestId("driver-live-offer-accept-button"));
-    fireEvent.press(screen.getByLabelText("driver-live-offer-reject-button"));
+    expect(screen.getByTestId("driver-live-offer-reject-button").props.accessibilityLabel).toBe(
+      "Recusar corrida",
+    );
+    fireEvent.press(screen.getByTestId("driver-live-offer-reject-button"));
     expect(acceptDriverOffer).not.toHaveBeenCalled();
     expect(rejectDriverOffer).not.toHaveBeenCalled();
   });
@@ -177,9 +180,9 @@ describe("DriverLiveRideOverlay", () => {
     );
 
     expect(screen.getByText("Ponto de embarque")).toBeTruthy();
-    expect(
-      screen.getByLabelText("driver-live-trip-compact-summary"),
-    ).toBeTruthy();
+    expect(screen.getByTestId("driver-live-trip-compact-summary").props.accessibilityLabel).toBe(
+      "Resumo da corrida do motorista",
+    );
     expect(screen.getByTestId("driver-live-trip-card")).toBeTruthy();
     expect(screen.getByTestId("driver-live-passenger-identity")).toBeTruthy();
     expect(
@@ -221,17 +224,18 @@ describe("DriverLiveRideOverlay", () => {
       />,
     );
 
-    expect(screen.getByText("A caminho de 1 Ferry Building")).toBeTruthy();
+    expect(screen.getByText("Em viagem")).toBeTruthy();
+    expect(screen.getByText("1 Ferry Building")).toBeTruthy();
     const cardStyle = StyleSheet.flatten(
       screen.getByTestId("driver-live-trip-card").props.style,
     );
     const wrapStyle = StyleSheet.flatten(
       screen.getByTestId("driver-live-ride-overlay-wrap").props.style,
     );
-    expect(cardStyle.marginHorizontal).toBe(24);
-    expect(cardStyle.borderBottomLeftRadius).toBe(28);
-    expect(cardStyle.borderBottomRightRadius).toBe(28);
-    expect(wrapStyle.bottom).toBe(16);
+    expect(cardStyle.marginHorizontal).toBe(0);
+    expect(cardStyle.borderBottomLeftRadius).toBe(0);
+    expect(cardStyle.borderBottomRightRadius).toBe(0);
+    expect(wrapStyle.bottom).toBe(0);
     expect(screen.queryByTestId("driver-live-trip-navigation-button")).toBeNull();
     expect(screen.queryByTestId("driver-live-trip-report-problem-button")).toBeNull();
     expect(screen.queryByTestId("driver-live-trip-chat-button")).toBeNull();
@@ -330,12 +334,13 @@ describe("DriverLiveRideOverlay", () => {
     expect(screen.getByText("8 min")).toBeTruthy();
     expect(screen.getByText("3 km")).toBeTruthy();
     expect(screen.getByText("Finalizar corrida")).toBeTruthy();
-    expect(screen.getByText("A caminho de 1 Ferry Building")).toBeTruthy();
+    expect(screen.getByText("Em viagem")).toBeTruthy();
+    expect(screen.getByText("1 Ferry Building")).toBeTruthy();
     expect(screen.queryByText("Progresso da viagem")).toBeNull();
     expect(screen.queryByText("Navegar")).toBeNull();
   });
 
-  it("opens the active trip card without using a scroll view", () => {
+  it("keeps the active trip details reachable inside a bounded scroll view", () => {
     const screen = render(
       <DriverLiveRideOverlay
         driverActiveRide={{
@@ -367,9 +372,9 @@ describe("DriverLiveRideOverlay", () => {
 
     expect(screen.getByTestId("driver-live-trip-collapse-button")).toBeTruthy();
     expect(screen.getAllByText("Líquido").length).toBeGreaterThan(0);
-    expect(screen.getByText("EMBARQUE")).toBeTruthy();
-    expect(screen.getByText("DESTINO")).toBeTruthy();
-    expect(screen.UNSAFE_queryAllByType(ScrollView)).toHaveLength(0);
+    expect(screen.getByText("Embarque")).toBeTruthy();
+    expect(screen.getByText("Destino")).toBeTruthy();
+    expect(screen.UNSAFE_queryAllByType(ScrollView)).toHaveLength(1);
   });
 
   it("asks for confirmation before canceling an accepted ride", () => {
@@ -472,7 +477,9 @@ describe("DriverLiveRideOverlay", () => {
       />,
     );
 
-    expect(screen.getByLabelText("driver-live-trip-compact-summary")).toBeTruthy();
+    expect(screen.getByTestId("driver-live-trip-compact-summary").props.accessibilityLabel).toBe(
+      "Resumo da corrida do motorista",
+    );
     expect(screen.getByLabelText(actionLabel)).toBeTruthy();
   });
 });

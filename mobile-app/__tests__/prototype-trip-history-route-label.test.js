@@ -23,4 +23,10 @@ describe('Robotaxi trip history route labels', () => {
     expect(source).toContain("'Origem indisponível'");
     expect(source).toContain("'Destino indisponível'");
   });
+
+  it('shows a total only when each trip has a known role-appropriate amount', () => {
+    expect(source).toContain('const knownAmountCount = isDriverRole ? totals.netKnownCount : totals.grossKnownCount;');
+    expect(source).toContain('totalTrips > 0 && knownAmountCount === totalTrips');
+    expect(source).toContain("resolveTripDisplayLabel(item, {");
+  });
 });

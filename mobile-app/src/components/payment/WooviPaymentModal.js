@@ -1,3 +1,5 @@
+import leafTypography from '../prototype/LeafTypography';
+import { LeafObjectIcon } from '../prototype/LeafVisualElements';
 import Logger from '../../utils/Logger';
 import React, { useState, useEffect, useRef } from 'react';
 import {
@@ -10,16 +12,17 @@ import {
     ActivityIndicator,
     Dimensions,
     Image,
-    Linking
+    Linking,
+    ScrollView
 } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import { Icon } from 'react-native-elements';
 import auth from '@react-native-firebase/auth';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { WooviService, PaymentBypassService } from '../../services/canonical/paymentService';
 import WebSocketManager from '../../services/WebSocketManager';
 import QRCode from 'react-native-qrcode-svg';
-import { fonts } from '../../theme/runtimeTokens';
 import {
     allowForcedPaymentBypass,
     allowTestUserTools,
@@ -64,15 +67,15 @@ const QA_PAYMENT_PROGRESS_LABELS = Object.freeze({
 const canUseDivergentQaPaymentIdentity = () =>
     allowTestUserTools() && isSimulatorBuild() && isE2ETestBuild();
 const PIX_SURFACE = {
-    bg: '#F8FBF9',
-    sheet: 'rgba(255,255,255,0.97)',
-    text: '#101C14',
-    secondary: '#66756B',
-    muted: '#5F6B62',
-    line: '#DFE8E1',
-    leaf: '#0F3B16',
-    leafLight: '#EAF6EE',
-    soft: '#F3F8F4',
+    bg: '#FFFFFF',
+    sheet: '#FFFFFF',
+    text: '#222222',
+    secondary: '#6A6A6A',
+    muted: '#6A6A6A',
+    line: '#E5E5E5',
+    leaf: '#1A330E',
+    leafLight: '#F1F5EE',
+    soft: '#F5F5F5',
     danger: '#B5533E',
     progress: '#1FA76F'
 };
@@ -321,6 +324,7 @@ export default function WooviPaymentModal({
     qaVisualOnlyPayment = false,
     robotaxiLifecycleCard = false
 }) {
+    const insets = useSafeAreaInsets();
     const qaAutoConfirmEnabled = Boolean(qaAutoConfirm);
     const qaVisualOnlyPaymentEnabled = Boolean(
         qaVisualOnlyPayment && (__DEV__ || canUseDivergentQaPaymentIdentity()),
@@ -1680,7 +1684,9 @@ export default function WooviPaymentModal({
                 <View
                     style={styles.loadingContainer}
                     testID="payment-modal-loading"
-                    accessibilityLabel="payment-modal-loading"
+                    accessible
+                    accessibilityRole="progressbar"
+                    accessibilityLabel="Carregando pagamento"
                 >
                     <ActivityIndicator size="large" color={color.accent.primary} />
                     <Text style={[styles.loadingText, { color: color.text.primary }]}>
@@ -1718,7 +1724,7 @@ export default function WooviPaymentModal({
 
                         <View style={styles.errorActions}>
                             <TouchableOpacity
-                                style={[styles.retryButton, { backgroundColor: color.accent.primary }]}
+                                style={[styles.retryButton, { backgroundColor: '#252525' }]}
                                 onPress={generatePayment}
                                 activeOpacity={0.8}
                             >
@@ -1766,7 +1772,7 @@ export default function WooviPaymentModal({
                 accessibilityViewIsModal
             >
                 <View style={styles.paymentHeader}>
-                    <View>
+                    <View style={{ flex: 1 }}>
                         <Text
                             style={[
                                 styles.paymentTitle,
@@ -1775,7 +1781,7 @@ export default function WooviPaymentModal({
                             testID="payment-modal-title"
                             accessibilityLabel="Pague com PIX"
                         >
-                            Pague com PIX
+                            Pagar com Pix
                         </Text>
                         <SecurePaymentBadge style={styles.securePaymentBadge} color={PIX_SURFACE.muted} />
                         <View
@@ -1802,7 +1808,9 @@ export default function WooviPaymentModal({
                             </Text>
                         </View>
                     </View>
+                    <LeafObjectIcon name="payment" size={48} />
                     <View style={styles.paymentRightColumn}>
+                        <Text style={styles.paymentAmountLabel}>Total da viagem</Text>
                         <Text
                             style={[
                                 styles.paymentAmount,
@@ -1975,7 +1983,9 @@ export default function WooviPaymentModal({
                         <View
                             style={styles.confirmedContainer}
                             testID="payment-modal-confirmed"
-                            accessibilityLabel="payment-modal-confirmed"
+                            accessible
+                            accessibilityRole="summary"
+                            accessibilityLabel="Pagamento confirmado"
                         >
                             <Icon name="check-circle" type="material" color={color.feedback.success} size={32} />
                             <Text style={[styles.confirmedText, { color: color.feedback.success }]}>
@@ -2004,6 +2014,7 @@ export default function WooviPaymentModal({
                 <View style={[
                     styles.modalContent,
                     robotaxiLifecycleCard && styles.robotaxiModalContent,
+                    robotaxiLifecycleCard && { paddingBottom: 18 + insets.bottom },
                 ]}>
                     {robotaxiLifecycleCard ? null : <View style={styles.handle} />}
                     <View style={styles.modalHeader}>
@@ -2021,13 +2032,16 @@ export default function WooviPaymentModal({
                             onPress={handleCancel}
                             activeOpacity={0.7}
                             testID="payment-modal-close-button"
-                            accessibilityLabel="payment-modal-close-button"
+                            accessibilityRole="button"
+                            accessibilityLabel="Fechar pagamento"
                         >
                             <Icon name="close" type="material" color={color.text.secondary} size={22} />
                         </TouchableOpacity>
                     </View>
 
-                    {renderContent()}
+                    <ScrollView style={{ flexShrink: 1 }} contentContainerStyle={{ paddingBottom: 8 }} bounces={false} showsVerticalScrollIndicator={false}>
+                        {renderContent()}
+                    </ScrollView>
                 </View>
             </View>
         </Modal>
@@ -2060,12 +2074,17 @@ const styles = StyleSheet.create({
         elevation: 8,
     },
     robotaxiModalContent: {
-        width: width - 48,
-        maxWidth: width - 48,
+        width: '100%',
+        maxWidth: width,
         maxHeight: height - 64,
-        marginBottom: 16,
-        paddingHorizontal: 18,
-        paddingTop: 10,
+        marginBottom: 0,
+        borderTopLeftRadius: 24,
+        borderTopRightRadius: 24,
+        borderBottomLeftRadius: 0,
+        borderBottomRightRadius: 0,
+        borderWidth: 0,
+        paddingHorizontal: 24,
+        paddingTop: 24,
         paddingBottom: 18,
     },
     handle: {
@@ -2084,13 +2103,13 @@ const styles = StyleSheet.create({
         zIndex: 3,
     },
     modalHeaderTitle: {
-        fontFamily: fonts.SemiBold,
-        fontSize: typography.subtitle.size,
-        lineHeight: typography.subtitle.lineHeight
+        ...leafTypography.semiBold,
+        fontSize: 22,
+        lineHeight: 28
     },
     qaDebugBadge: {
         marginLeft: spacing.sm,
-        fontFamily: fonts.Medium,
+        ...leafTypography.medium,
         fontSize: typography.micro.size,
         lineHeight: typography.micro.lineHeight,
     },
@@ -2151,7 +2170,7 @@ const styles = StyleSheet.create({
         paddingVertical: 24,
     },
     errorTitle: {
-        fontFamily: fonts.SemiBold,
+        ...leafTypography.semiBold,
         fontSize: typography.subtitle.size,
         lineHeight: typography.subtitle.lineHeight,
         marginTop: 12,
@@ -2159,7 +2178,7 @@ const styles = StyleSheet.create({
         textAlign: 'center',
     },
     errorSubtitle: {
-        fontFamily: fonts.Regular,
+        ...leafTypography.regular,
         fontSize: typography.body.size,
         lineHeight: typography.body.lineHeight,
         textAlign: 'center',
@@ -2182,7 +2201,7 @@ const styles = StyleSheet.create({
     },
     retryButtonText: {
         color: '#FFFFFF',
-        fontFamily: fonts.SemiBold,
+        ...leafTypography.semiBold,
         fontSize: typography.body.size,
         lineHeight: typography.body.lineHeight
     },
@@ -2192,7 +2211,7 @@ const styles = StyleSheet.create({
         paddingHorizontal: 12,
     },
     dismissButtonText: {
-        fontFamily: fonts.Medium,
+        ...leafTypography.medium,
         fontSize: typography.body.size,
         lineHeight: typography.body.lineHeight
     },
@@ -2202,23 +2221,24 @@ const styles = StyleSheet.create({
         alignItems: 'stretch',
     },
     paymentHeader: {
-        marginTop: 22,
+        marginTop: 16,
         minHeight: 66,
         flexDirection: 'row',
+        flexWrap: 'wrap',
         justifyContent: 'space-between',
         alignItems: 'flex-start',
         gap: 12,
     },
     paymentTitle: {
         color: PIX_SURFACE.text,
-        fontFamily: fonts.Medium,
-        fontSize: 20,
-        lineHeight: 31,
+        ...leafTypography.medium,
+        fontSize: 24,
+        lineHeight: 30,
     },
     robotaxiPaymentTitle: {
-        fontFamily: fonts.SemiBold,
-        fontSize: 15.5,
-        lineHeight: 20,
+        ...leafTypography.semiBold,
+        fontSize: 24,
+        lineHeight: 30,
     },
     securePaymentBadge: {
         marginTop: 1,
@@ -2234,34 +2254,36 @@ const styles = StyleSheet.create({
     },
     statusChipText: {
         color: PIX_SURFACE.leaf,
-        fontFamily: fonts.Medium,
-        fontSize: 10,
-        lineHeight: 15,
+        ...leafTypography.medium,
+        fontSize: 12,
+        lineHeight: 17,
         textAlign: 'center',
     },
     paymentRightColumn: {
-        alignItems: 'flex-end',
+        width: '100%',
+        alignItems: 'flex-start',
         paddingRight: 2,
     },
+    paymentAmountLabel: { ...leafTypography.regular, color: PIX_SURFACE.secondary, fontSize: 14, lineHeight: 20, marginBottom: 6 },
     paymentAmount: {
         color: PIX_SURFACE.text,
-        fontFamily: fonts.Medium,
-        fontSize: 20,
-        lineHeight: 31,
-        textAlign: 'right',
+        ...leafTypography.medium,
+        fontSize: 32,
+        lineHeight: 40,
+        textAlign: 'left',
     },
     robotaxiPaymentAmount: {
-        fontFamily: fonts.SemiBold,
-        fontSize: 17,
-        lineHeight: 22,
+        ...leafTypography.semiBold,
+        fontSize: 32,
+        lineHeight: 40,
     },
     expiryText: {
         marginTop: 8,
         color: PIX_SURFACE.danger,
-        fontFamily: fonts.Medium,
-        fontSize: 11,
-        lineHeight: 18,
-        textAlign: 'right',
+        ...leafTypography.medium,
+        fontSize: 14,
+        lineHeight: 20,
+        textAlign: 'left',
     },
     expiryTextDanger: {
         color: color.feedback.danger,
@@ -2302,14 +2324,14 @@ const styles = StyleSheet.create({
     qrUnavailableTitle: {
         marginTop: 8,
         color: PIX_SURFACE.text,
-        fontFamily: fonts.SemiBold,
+        ...leafTypography.semiBold,
         fontSize: 13,
         textAlign: 'center',
     },
     qrUnavailableText: {
         marginTop: 5,
         color: PIX_SURFACE.secondary,
-        fontFamily: fonts.Regular,
+        ...leafTypography.regular,
         fontSize: 11,
         lineHeight: 16,
         textAlign: 'center',
@@ -2325,7 +2347,7 @@ const styles = StyleSheet.create({
         borderStyle: 'dashed',
     },
     qrCodeText: {
-        fontFamily: fonts.SemiBold,
+        ...leafTypography.semiBold,
         fontSize: 15,
         color: '#666',
     },
@@ -2340,14 +2362,14 @@ const styles = StyleSheet.create({
         marginTop: 14,
         width: 294,
         color: PIX_SURFACE.secondary,
-        fontFamily: fonts.Regular,
-        fontSize: 12,
-        lineHeight: 18,
+        ...leafTypography.regular,
+        fontSize: 14,
+        lineHeight: 20,
         textAlign: 'center',
     },
     pixCopyField: {
-        height: 44,
-        borderRadius: 22,
+        minHeight: 54,
+        borderRadius: 12,
         borderWidth: 1,
         borderColor: PIX_SURFACE.line,
         backgroundColor: PIX_SURFACE.soft,
@@ -2359,7 +2381,7 @@ const styles = StyleSheet.create({
     },
     pixCodeText: {
         color: PIX_SURFACE.text,
-        fontFamily: fonts.Medium,
+        ...leafTypography.medium,
         fontSize: 12,
         lineHeight: 19,
         flex: 1,
@@ -2374,13 +2396,13 @@ const styles = StyleSheet.create({
         paddingVertical: 0,
     },
     countdownLabel: {
-        fontFamily: fonts.Medium,
+        ...leafTypography.medium,
         fontSize: typography.caption.size,
         lineHeight: typography.caption.lineHeight,
         marginBottom: 5,
     },
     countdownText: {
-        fontFamily: fonts.Bold,
+        ...leafTypography.bold,
         fontSize: 28,
         lineHeight: 32
     },
@@ -2399,35 +2421,35 @@ const styles = StyleSheet.create({
     robotaxiAction: {
         flex: 0,
         width: '100%',
-        height: 48,
-        borderRadius: 24,
+        height: 54,
+        borderRadius: 12,
         borderWidth: 1,
         borderColor: PIX_SURFACE.line,
     },
     robotaxiActionText: {
-        fontFamily: fonts.SemiBold,
-        fontSize: 13,
-        lineHeight: 17,
+        ...leafTypography.semiBold,
+        fontSize: 16,
+        lineHeight: 22,
     },
     primaryAction: {
         flex: 1,
-        height: 46,
-        borderRadius: 23,
-        backgroundColor: PIX_SURFACE.leaf,
+        height: 54,
+        borderRadius: 12,
+        backgroundColor: '#252525',
         alignItems: 'center',
         justifyContent: 'center',
     },
     primaryActionText: {
         color: '#FFFFFF',
-        fontFamily: fonts.Medium,
-        fontSize: 12,
-        lineHeight: 19,
+        ...leafTypography.medium,
+        fontSize: 16,
+        lineHeight: 22,
         textAlign: 'center',
     },
     secondaryAction: {
         flex: 1,
-        height: 46,
-        borderRadius: 23,
+        height: 54,
+        borderRadius: 12,
         borderWidth: 1,
         borderColor: PIX_SURFACE.line,
         backgroundColor: PIX_SURFACE.soft,
@@ -2435,10 +2457,10 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
     },
     secondaryActionText: {
-        color: PIX_SURFACE.leaf,
-        fontFamily: fonts.Medium,
-        fontSize: 12,
-        lineHeight: 19,
+        color: PIX_SURFACE.text,
+        ...leafTypography.medium,
+        fontSize: 16,
+        lineHeight: 22,
         textAlign: 'center',
     },
 
@@ -2448,14 +2470,14 @@ const styles = StyleSheet.create({
         paddingVertical: 40,
     },
     loadingText: {
-        fontFamily: fonts.Medium,
+        ...leafTypography.medium,
         fontSize: typography.body.size,
         lineHeight: typography.body.lineHeight,
         marginTop: 15,
         textAlign: 'center',
     },
     loadingSubtext: {
-        fontFamily: fonts.Regular,
+        ...leafTypography.regular,
         fontSize: typography.caption.size,
         lineHeight: typography.caption.lineHeight,
         marginTop: 8,
@@ -2475,14 +2497,14 @@ const styles = StyleSheet.create({
         marginTop: 0,
     },
     confirmedText: {
-        fontFamily: fonts.SemiBold,
+        ...leafTypography.semiBold,
         fontSize: typography.body.size,
         lineHeight: typography.body.lineHeight,
         marginTop: 8,
     },
     automaticText: {
         color: PIX_SURFACE.muted,
-        fontFamily: fonts.Regular,
+        ...leafTypography.regular,
         fontSize: 11,
         lineHeight: 18,
         textAlign: 'center',

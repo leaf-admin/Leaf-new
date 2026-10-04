@@ -1,3 +1,4 @@
+import leafTypography from '../components/prototype/LeafTypography';
 import Logger from '../utils/Logger';
 import React, { useState, useEffect } from 'react';
 import {
@@ -17,7 +18,6 @@ import { Ionicons } from '@expo/vector-icons';
 import { useSelector } from 'react-redux';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { apiClient } from '../services/httpClient';
-import { fonts } from '../theme/runtimeTokens';
 import robotaxiPrototypeTokens from '../components/design-system/robotaxiPrototypeTokens';
 
 const { color, radius, spacing, touch } = robotaxiPrototypeTokens;
@@ -437,7 +437,7 @@ const LegalScreen = ({ navigation, route }) => {
   }
 
   return (
-    <View style={[styles.container, { paddingTop: insets.top }]} testID="legal-screen" accessibilityLabel="legal-screen">
+    <View style={[styles.container, { paddingTop: insets.top }]} testID="legal-screen">
       <StatusBar translucent barStyle="dark-content" backgroundColor="transparent" />
       
       <View style={styles.header}>
@@ -482,7 +482,7 @@ const styles = StyleSheet.create({
   },
   loadingText: {
     marginTop: 16,
-    fontFamily: fonts.Regular,
+    ...leafTypography.regular,
     fontSize: 15,
     color: color.text.secondary,
   },
@@ -502,16 +502,16 @@ const styles = StyleSheet.create({
     paddingRight: spacing.md,
   },
   headerTitle: {
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 22,
     lineHeight: 28,
     color: color.text.primary,
   },
   headerSubtitle: {
     marginTop: spacing.xs,
-    fontFamily: fonts.Regular,
-    fontSize: 13,
-    lineHeight: 18,
+    ...leafTypography.regular,
+    fontSize: 14,
+    lineHeight: 20,
     color: color.text.secondary,
   },
   closeButton: {
@@ -549,7 +549,7 @@ const styles = StyleSheet.create({
     borderColor: color.accent.soft,
   },
   sectionText: {
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     fontSize: 12,
     lineHeight: 16,
     color: color.text.secondary,
@@ -557,7 +557,7 @@ const styles = StyleSheet.create({
   },
   activeSectionText: {
     color: color.accent.primary,
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
   },
   content: {
     flex: 1,
@@ -566,7 +566,7 @@ const styles = StyleSheet.create({
     padding: spacing.xl,
   },
   sectionTitle: {
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 20,
     lineHeight: 26,
     color: color.text.primary,
@@ -574,7 +574,7 @@ const styles = StyleSheet.create({
   },
   lastUpdated: {
     fontSize: 12,
-    fontFamily: fonts.Regular,
+    ...leafTypography.regular,
     color: color.text.secondary,
     marginBottom: 20,
   },
@@ -587,12 +587,12 @@ const styles = StyleSheet.create({
   },
   legalText: {
     fontSize: 14,
-    fontFamily: fonts.Regular,
+    ...leafTypography.regular,
     color: color.text.primary,
     lineHeight: 22,
   },
   boldText: {
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
   },
   licensesList: {
     backgroundColor: '#fff',

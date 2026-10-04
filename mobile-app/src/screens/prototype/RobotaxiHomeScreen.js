@@ -1,3 +1,4 @@
+import leafTypography from '../../components/prototype/LeafTypography';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Keyboard, Linking, Modal, Platform, StatusBar, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -6,10 +7,10 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Marker, Polygon } from 'react-native-maps';
 import { Ionicons } from '@expo/vector-icons';
 import polyline from '@mapbox/polyline';
-import { fonts } from '../../theme/runtimeTokens';
 import robotaxiPrototypeTokens from '../../components/design-system/robotaxiPrototypeTokens';
 import PrototypeScreenTransition from '../../components/prototype/PrototypeScreenTransition';
 import PrototypeMapLayer from '../../components/prototype/PrototypeMapLayer';
+import LeafLocationMarker, { LEAF_LOCATION_MARKER_SIZE } from '../../components/prototype/LeafLocationMarker';
 import PrototypeConnectionStatusPill from '../../components/prototype/PrototypeConnectionStatusPill';
 import { PrototypeBottomIsland, PrototypeTopControls } from '../../components/prototype/PrototypeScaffold';
 import PermissionExplanationModal from '../../components/PermissionExplanationModal';
@@ -17,6 +18,7 @@ import PassengerHomeOverlay, {
   PASSENGER_HOME_CARD_METRICS,
   PassengerHomeOverlaySkeleton,
 } from './home/PassengerHomeOverlay';
+import LeafPassengerLanding from './home/LeafPassengerLanding';
 import DriverHomeOverlay, {
   isDriverIdentitySupportRequired,
 } from './home/DriverHomeOverlay';
@@ -36,8 +38,10 @@ import {
 } from './prototypeMapRoute';
 import {
   buildRouteViewportRegion,
+  buildPickupMapCamera,
   buildVisibleRouteEdgePadding,
   distanceBetweenCoordinatesKm,
+  resolveMapViewportCenterY,
 } from './prototypeRouteViewport';
 import {
   PROTOTYPE_TRAFFIC_SEGMENT_COLORS,
@@ -161,7 +165,7 @@ const DEFAULT_DRIVER_H3_VISUAL_POLICY = {
   label: {
     enabled: true,
     maxVisible: 5,
-    backgroundColor: '#171412',
+    backgroundColor: '#222222',
     backgroundOpacity: 0.9,
     textColor: '#FFFFFF',
     borderColor: '#FFFFFF',
@@ -1945,6 +1949,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   const connectionAutomationExecutionRef = useRef('');
   const connectionAutomationTimersRef = useRef([]);
   const [homeCardHeight, setHomeCardHeight] = useState(HOME_CARD_FALLBACK_HEIGHT);
+  const [homeCardTop, setHomeCardTop] = useState(null);
   const [homePickupPickerVisible, setHomePickupPickerVisible] = useState(false);
   const [homePickupSearchActive, setHomePickupSearchActive] = useState(false);
   const [homePickupSearchQuery, setHomePickupSearchQuery] = useState('');
@@ -3322,7 +3327,9 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     ? PASSENGER_HOME_CARD_METRICS.categoryBottomOffset
     : HOME_CARD_BOTTOM_OFFSET;
   const passengerOccludedBottom =
-    insets.bottom + passengerCardBottomOffset + homeCardHeight;
+    (passengerHomePreviewRouteActive || homePickupSearchActive || homeDestinationSearchActive) && Number.isFinite(homeCardTop)
+      ? Math.max(0, (mapHeight || windowHeight) - homeCardTop)
+      : insets.bottom + passengerCardBottomOffset + homeCardHeight;
   const driverOccludedBottom = insets.bottom + DRIVER_BOTTOM_CTA_OFFSET + driverBottomCtaHeight;
   const driverLiveOffer = useMemo(
     () => selectDisplayableDriverOffer(driverOffers),
@@ -4593,12 +4600,12 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   ]);
 
   useEffect(() => {
-    if (!homeDestinationSearchActive) {
+    if (!homeDestinationSearchActive && (!canShowPassengerHomeOverlay || homePickupSearchActive || homeCategorySurfaceVisible)) {
       return undefined;
     }
 
     let cancelled = false;
-    const trimmedQuery = homeDestinationQuery.trim();
+    const trimmedQuery = homeDestinationSearchActive ? homeDestinationQuery.trim() : '';
 
     const loadResults = async () => {
       if (!trimmedQuery) {
@@ -4665,6 +4672,9 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   }, [
     homeDestinationQuery,
     homeDestinationSearchActive,
+    canShowPassengerHomeOverlay,
+    homePickupSearchActive,
+    homeCategorySurfaceVisible,
     effectiveHomePickupCoordinate,
     loadDestinationSuggestions,
     loadRecentDestinations,
@@ -5183,6 +5193,16 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     resolvedRole,
   ]);
 
+  const showRootNavigation = Boolean(
+    runtimeHomeSurfaceReady && showHomeChrome && isHomeRoute &&
+    !homePickupPickerVisible &&
+    !homeDestinationSearchActive && !homePickupSearchActive &&
+    !homeCategorySurfaceVisible && !isPassengerRideLifecycleLocked &&
+    !hasDriverLiveRideOverlay && !driverHasAcceptedOrActiveWork &&
+    normalizedBookingStatus === 'idle'
+  );
+  const rootNavigationInset = showRootNavigation ? 84 : 0;
+
   const connectionIndicatorTopOffset = useMemo(
     () => insets.top + (showHomeChrome ? 66 : 14),
     [insets.top, showHomeChrome]
@@ -5206,16 +5226,16 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   ]);
   const homeOccludedBottom = isHomeRoute
     ? (isDriverRole
-        ? Math.max(showDriverHomeOverlay ? driverOccludedBottom : 0, hasDriverLiveRideOverlay ? driverLiveRideOccludedBottom : 0)
+        ? Math.max(showDriverHomeOverlay ? driverOccludedBottom + rootNavigationInset : 0, hasDriverLiveRideOverlay ? driverLiveRideOccludedBottom : 0)
         : homePickupPickerVisible
           ? insets.bottom + HOME_PICKUP_PICKER_BOTTOM_OFFSET + homePickupPickerCardHeight
-          : passengerOccludedBottom)
+          : passengerOccludedBottom + rootNavigationInset)
     : 0;
   const baselineOccludedBottom = isDriverRole
-    ? driverOccludedBottom
+    ? driverOccludedBottom + rootNavigationInset
     : homePickupPickerVisible
       ? insets.bottom + HOME_PICKUP_PICKER_BOTTOM_OFFSET + homePickupPickerCardHeight
-      : passengerOccludedBottom;
+      : passengerOccludedBottom + rootNavigationInset;
   const homeOccludedTop = homePickupPickerVisible ? insets.top + 122 : 0;
   const effectiveRouteOcclusion = useMemo(
     () => ({
@@ -5255,11 +5275,9 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     const bottomInset = homePickupPickerVisible
       ? insets.bottom + HOME_PICKUP_PICKER_BOTTOM_OFFSET + homePickupPickerCardHeight
       : 0;
-    const visibleHeight = Math.max(
-      220,
-      windowHeight - homeOccludedTop - bottomInset
-    );
-    return homeOccludedTop + visibleHeight / 2 - 48;
+    return resolveMapViewportCenterY({
+      height: windowHeight, top: homeOccludedTop, bottom: bottomInset,
+    }) - LEAF_LOCATION_MARKER_SIZE / 2;
   }, [
     homeOccludedTop,
     homePickupPickerCardHeight,
@@ -5488,12 +5506,9 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     }
 
     const effectiveHeight = Math.max(1, mapHeight || windowHeight);
-    const maxTop = Math.max(0, effectiveHeight - MAP_MIN_VISIBLE_HEIGHT);
-    const topInset = Math.min(Math.max(0, activeOcclusion.top || 0), maxTop);
-    const maxBottom = Math.max(0, effectiveHeight - MAP_MIN_VISIBLE_HEIGHT - topInset);
-    const bottomInset = Math.min(Math.max(0, activeOcclusion.bottom || 0), maxBottom);
-    const availableHeight = Math.max(MAP_MIN_VISIBLE_HEIGHT, effectiveHeight - topInset - bottomInset);
-    const desiredMarkerY = topInset + availableHeight / 2;
+    const desiredMarkerY = resolveMapViewportCenterY({
+      height: effectiveHeight, top: activeOcclusion.top, bottom: activeOcclusion.bottom,
+    });
     const baseCenterY = effectiveHeight / 2;
     const pixelOffsetY = desiredMarkerY - baseCenterY;
     const latitudeOffset = (latitudeDelta * pixelOffsetY) / effectiveHeight;
@@ -5917,7 +5932,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
                   styles.driverSurgeFlag,
                   {
                     backgroundColor: hexToRgba(
-                      driverH3VisualPolicy?.label?.backgroundColor || '#171412',
+                      driverH3VisualPolicy?.label?.backgroundColor || '#222222',
                       Number(driverH3VisualPolicy?.label?.backgroundOpacity ?? 0.9)
                     ),
                     borderColor: hexToRgba(
@@ -6693,33 +6708,44 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
 
   const handleSearchCardLayout = useCallback(event => {
     const nextHeight = event?.nativeEvent?.layout?.height;
+    const nextTop = event?.nativeEvent?.layout?.y;
     if (Number.isFinite(nextHeight) && nextHeight > 0) {
       setHomeCardHeight(previous => (previous === nextHeight ? previous : nextHeight));
     }
-  }, []);
-
-  const handleHomePickupPickerCardLayout = useCallback(event => {
-    const nextHeight = event?.nativeEvent?.layout?.height;
-    if (Number.isFinite(nextHeight) && nextHeight > 0) {
-      setHomePickupPickerCardHeight(previous => (previous === nextHeight ? previous : nextHeight));
+    if (Number.isFinite(nextTop)) {
+      setHomeCardTop(previous => (previous === nextTop ? previous : nextTop));
     }
   }, []);
 
-  const focusHomePickupCoordinate = useCallback((coordinate = effectiveHomePickupCoordinate) => {
+  const focusHomePickupCoordinate = useCallback((
+    coordinate = effectiveHomePickupCoordinate,
+    pickerHeight = homePickupPickerCardHeight,
+  ) => {
     if (!mapRef.current || !homeMapInteractiveReady || !isFiniteCoordinate(coordinate)) {
       return;
     }
+    const camera = buildPickupMapCamera({
+      coordinate,
+      zoom: Platform.OS === 'ios' ? 16 : 17,
+      height: windowHeight,
+      nativeSafeArea: Platform.OS === 'ios' ? { top: insets.top, bottom: insets.bottom } : {},
+      markerCenterY: resolveMapViewportCenterY({
+        height: windowHeight,
+        top: insets.top + 122,
+        bottom: insets.bottom + HOME_PICKUP_PICKER_BOTTOM_OFFSET + pickerHeight,
+      }),
+    });
+    if (camera) mapRef.current.animateCamera(camera, { duration: 520 });
+  }, [effectiveHomePickupCoordinate, homeMapInteractiveReady, homePickupPickerCardHeight,
+    insets.bottom, insets.top, windowHeight]);
 
-    mapRef.current.animateCamera(
-      {
-        center: coordinate,
-        zoom: Platform.OS === 'ios' ? 16 : 17,
-        pitch: 0,
-        heading: 0,
-      },
-      { duration: 520 }
-    );
-  }, [effectiveHomePickupCoordinate, homeMapInteractiveReady]);
+  const handleHomePickupPickerCardLayout = useCallback(event => {
+    const nextHeight = event?.nativeEvent?.layout?.height;
+    if (Number.isFinite(nextHeight) && nextHeight > 0 && nextHeight !== homePickupPickerCardHeight) {
+      setHomePickupPickerCardHeight(nextHeight);
+      if (homePickupPickerVisible) focusHomePickupCoordinate(homePickupCoordinate, nextHeight);
+    }
+  }, [focusHomePickupCoordinate, homePickupCoordinate, homePickupPickerCardHeight, homePickupPickerVisible]);
 
   const handleOpenHomePickupSearch = useCallback(() => {
     setHomeDestinationSearchActive(false);
@@ -7446,6 +7472,12 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
         return;
       }
 
+      if (providerResult.mode === 'face_compare') {
+        setDriverKycLivenessMode('face_compare');
+        setDriverKycProviderLoading(false);
+        return;
+      }
+
       if (providerResult.mode === 'aws') {
         Logger.warn(
           '⚠️ [PrototypeKYC] Provider AWS ativo, mas módulo nativo ausente nesta build.'
@@ -7833,6 +7865,27 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
         requirement: driverKycChallengeContext.requirement || undefined,
         livenessPassed: true,
       };
+      if (driverKycLivenessMode === 'face_compare') {
+        const faceCompareResult = await kycService.verifyDriverWithFaceCompare(
+          driverId,
+          selfieImageUri,
+          kycOptions
+        );
+        if (!faceCompareResult?.success || faceCompareResult?.data?.isMatch !== true) {
+          const presentation = resolveKycLivenessErrorPresentation({
+            ...faceCompareResult,
+            ...(faceCompareResult?.data || {}),
+            code: faceCompareResult?.data?.code || faceCompareResult?.code || 'KYC_FACE_COMPARE_NOT_APPROVED',
+          });
+          presentDriverKycFailure({ ...faceCompareResult?.data, ...faceCompareResult });
+          if (presentation.action !== 'request_identity_review') {
+            handleDriverKycModalCancel();
+          }
+          return;
+        }
+        await handleDriverKycVerificationSuccess();
+        return;
+      }
       const result = await kycService.verifyDriver(driverId, selfieImageUri, {
         ...kycOptions,
         mode: 'device_signature_v1',
@@ -7872,6 +7925,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   }, [
     driverKycChallengeContext.challengeId,
     driverKycChallengeContext.requirement,
+    driverKycLivenessMode,
     handleDriverKycModalCancel,
     handleDriverKycVerificationSuccess,
     presentDriverKycFailure,
@@ -8128,6 +8182,21 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   ]);
 
   const handleTopLeftPress = () => {
+    if (isHomeRoute && homeDestinationSearchActive) {
+      handleCloseHomeDestinationSearch();
+      return;
+    }
+    if (isHomeRoute && homePickupSearchActive) {
+      handleCloseHomePickupSearch();
+      return;
+    }
+    if (isHomeRoute && homeCategorySurfaceVisible && !isPassengerRideLifecycleLocked) {
+      setHomeSelectedDestination(null);
+      setHomeDestinationQuery('');
+      clearPrototypeMapRoute();
+      clearFlowPreview();
+      return;
+    }
     if (isHomeRoute) {
       handleCenterMap();
       return;
@@ -9022,6 +9091,9 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     persistedPassengerAutomationCommand,
   ]);
 
+  const [homeLandingMapFrame, setHomeLandingMapFrame] = useState(null);
+  const passengerLandingVisible = Boolean(showRootNavigation && !isDriverRole && canShowPassengerHomeOverlay && !homeSurfaceInteractionBlocked);
+
   const completedReceiptBookingId = String(
     lastReceipt?.bookingId ||
       lastReceipt?.id ||
@@ -9060,7 +9132,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   const DriverKycCameraScreen = driverKycModalVisible &&
     !driverKycProviderLoading &&
     !driverKycProcessing &&
-    driverKycLivenessMode === 'local_legacy'
+    ['local_legacy', 'face_compare'].includes(driverKycLivenessMode)
     ? resolveKYCCameraScreen()
     : null;
   const DriverKycAWSNativeLivenessScreen = driverKycModalVisible &&
@@ -9075,8 +9147,8 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
       : targetRegion;
   const presentedUserCoordinate =
     !isDriverRole && showHomeChrome && isHomeRoute
-      ? effectiveHomePickupCoordinate || currentCoordinate || DEFAULT_USER_COORDINATE
-      : currentCoordinate || DEFAULT_USER_COORDINATE;
+      ? effectiveHomePickupCoordinate || currentCoordinate || null
+      : currentCoordinate || null;
   const shouldForceHomePickupRegionUpdate = Boolean(
     !isDriverRole &&
       showHomeChrome &&
@@ -9101,8 +9173,19 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     <PrototypeScreenTransition>
       <View style={styles.container}>
         <StatusBar translucent backgroundColor="transparent" barStyle="dark-content" />
+        {passengerLandingVisible ? <View style={[StyleSheet.absoluteFillObject, { backgroundColor: '#FFFFFF' }]} /> : null}
 
         <PrototypeMapLayer
+          containerStyle={passengerLandingVisible ? {
+            left: homeLandingMapFrame?.left ?? 24, right: undefined, bottom: undefined,
+            top: homeLandingMapFrame?.top ?? insets.top + 164,
+            width: homeLandingMapFrame?.width ?? windowWidth - 48,
+            height: homeLandingMapFrame?.height ?? Math.max(0, windowHeight - insets.top - insets.bottom - 306),
+            borderTopLeftRadius: 24, borderTopRightRadius: 24, overflow: 'hidden',
+          } : {
+            left: 0, top: 0, right: undefined, bottom: undefined,
+            width: windowWidth, height: windowHeight,
+          }}
           mapRef={mapRef}
           region={presentedMapRegion}
           userCoordinate={presentedUserCoordinate}
@@ -9164,14 +9247,15 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
           manualCameraHoldMs={homeMapPresentation.manualCameraHoldMs}
         />
 
-        {showHomeChrome &&
+        {showHomeChrome && !passengerLandingVisible &&
+        !homeDestinationSearchActive && !homePickupSearchActive &&
         !homeSurfaceInteractionBlocked &&
         !isPassengerRideLifecycleLocked &&
         !homePickupPickerVisible &&
         !hasDriverLiveRideOverlay ? (
           <PrototypeTopControls
             insets={insets}
-            leftIcon={isHomeRoute ? 'locate' : 'arrow-back'}
+            leftIcon={isHomeRoute && !homeCategorySurfaceVisible && !homeDestinationSearchActive && !homePickupSearchActive ? 'locate' : 'arrow-back'}
             rightIcon={hasMenuTopAction ? 'menu' : 'locate'}
             showRightBadge={false}
             onPressLeft={handleTopLeftPress}
@@ -9187,11 +9271,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
               testID="passenger-home-pickup-map-marker"
               accessibilityLabel="Marcador do local de partida"
             >
-              <View style={styles.homePickupMarkerPin}>
-                <View style={styles.homePickupMarkerCore}>
-                  <View style={styles.homePickupMarkerDot} />
-                </View>
-              </View>
+              <LeafLocationMarker testID="leaf-pickup-location-marker" />
             </View>
 
             <View pointerEvents="box-none" style={styles.homePickupPickerLayer}>
@@ -9203,7 +9283,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
                   testID="passenger-home-pickup-cancel-button"
                   accessibilityLabel="Cancelar alteração de partida"
                 >
-                  <Ionicons name="chevron-back" size={20} color="#171412" />
+                  <Ionicons name="chevron-back" size={20} color="#222222" />
                 </TouchableOpacity>
                 <View style={styles.homePickupFloatingCopy}>
                   <Text style={styles.homePickupEyebrow}>Partida</Text>
@@ -9305,9 +9385,21 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
           />
         ) : null}
 
-        {canShowPassengerHomeOverlay ? (
+        {passengerLandingVisible ? <LeafPassengerLanding
+          insets={insets}
+          pickupLabel={homePickupDisplayLabel}
+          onDestinationPress={() => handleOpenPassengerDestination()}
+          onVoicePress={() => handleOpenPassengerDestination({ autoStartVoice: true })}
+          onPickupPress={handleOpenHomePickupSearch}
+          onSettingsPress={() => navigation.navigate('RobotaxiPrototypeSettings')}
+          onRecenterPress={handleTopLeftPress}
+          onMapFrame={setHomeLandingMapFrame}
+        /> : null}
+
+        {canShowPassengerHomeOverlay && !passengerLandingVisible ? (
           <PassengerHomeOverlay
             insetsBottom={insets.bottom}
+            rootNavigationInset={rootNavigationInset}
             userId={profile?.uid}
             pickupLabel={homePickupDisplayLabel}
             pickupAddress={homePickupDisplayAddress}
@@ -9440,6 +9532,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
 
             {showDriverHomeOverlay ? (
               <DriverHomeOverlay
+                rootNavigationInset={rootNavigationInset}
                 driverId={profile?.uid}
                 insetsTop={insets.top}
                 insetsBottom={insets.bottom}
@@ -9481,13 +9574,13 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
           </>
         ) : null}
 
-        {showPassengerBottomIsland ? (
+        {showRootNavigation && !homeSurfaceInteractionBlocked ? (
           <PrototypeBottomIsland
             insets={insets}
             active={activeTab}
             onPressHome={handleBottomHomePress}
-            onPressProfile={() => navigation.navigate('RobotaxiPrototypeProfile')}
-            onPressSettings={() => navigation.navigate('RobotaxiPrototypeSettings')}
+            onPressProfile={() => navigation.navigate('RobotaxiPrototypeMenu')}
+            onPressActivity={() => navigation.navigate('RobotaxiMenuTripHistory', { rootTab: true })}
           />
         ) : null}
 
@@ -9575,34 +9668,10 @@ const styles = StyleSheet.create({
   homePickupMarker: {
     position: 'absolute',
     left: '50%',
-    marginLeft: -16,
+    marginLeft: -LEAF_LOCATION_MARKER_SIZE / 2,
     zIndex: 34,
     elevation: 34,
     alignItems: 'center',
-  },
-  homePickupMarkerPin: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: 'rgba(255, 214, 10, 0.34)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.92)',
-  },
-  homePickupMarkerCore: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#FFFFFF',
-  },
-  homePickupMarkerDot: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    backgroundColor: '#1FA64A',
   },
   homePickupPickerLayer: {
     ...StyleSheet.absoluteFillObject,
@@ -9616,7 +9685,7 @@ const styles = StyleSheet.create({
     minHeight: 86,
     borderRadius: 28,
     borderWidth: 1,
-    borderColor: '#ECE5DC',
+    borderColor: '#E5E5E5',
     backgroundColor: '#FFFFFF',
     paddingHorizontal: 16,
     paddingVertical: 14,
@@ -9642,22 +9711,22 @@ const styles = StyleSheet.create({
     minWidth: 0,
   },
   homePickupEyebrow: {
-    color: '#827B73',
-    fontFamily: fonts.Medium,
+    color: '#767676',
+    ...leafTypography.medium,
     fontSize: 11,
     lineHeight: 15,
   },
   homePickupFloatingTitle: {
     marginTop: 2,
     color: '#111611',
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 17,
     lineHeight: 23,
   },
   homePickupFloatingAddress: {
     marginTop: 3,
-    color: '#756F68',
-    fontFamily: fonts.Regular,
+    color: '#6A6A6A',
+    ...leafTypography.regular,
     fontSize: 12,
     lineHeight: 17,
   },
@@ -9670,7 +9739,7 @@ const styles = StyleSheet.create({
     borderBottomLeftRadius: 0,
     borderBottomRightRadius: 0,
     borderWidth: 1,
-    borderColor: '#ECE5DC',
+    borderColor: '#E5E5E5',
     backgroundColor: '#FFFFFF',
     paddingHorizontal: 24,
     paddingTop: 14,
@@ -9685,20 +9754,20 @@ const styles = StyleSheet.create({
     width: 50,
     height: 4,
     borderRadius: 3,
-    backgroundColor: '#D8D0C7',
+    backgroundColor: '#D5D8D4',
     alignSelf: 'center',
     marginBottom: 18,
   },
   homePickupPickerTitle: {
     color: '#111611',
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 17,
     lineHeight: 23,
   },
   homePickupPickerText: {
     marginTop: 4,
-    color: '#756F68',
-    fontFamily: fonts.Regular,
+    color: '#6A6A6A',
+    ...leafTypography.regular,
     fontSize: 12,
     lineHeight: 17,
   },
@@ -9713,15 +9782,15 @@ const styles = StyleSheet.create({
     height: 48,
     borderRadius: 24,
     borderWidth: 1,
-    borderColor: '#E9E2D8',
-    backgroundColor: '#F8F6F1',
+    borderColor: '#E5E5E5',
+    backgroundColor: '#FFFFFF',
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 16,
   },
   homePickupSecondaryButtonText: {
     color: '#111611',
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 13,
     lineHeight: 18,
   },
@@ -9729,14 +9798,14 @@ const styles = StyleSheet.create({
     flex: 1,
     height: 48,
     borderRadius: 24,
-    backgroundColor: '#1A330E',
+    backgroundColor: '#252525',
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 18,
   },
   homePickupPrimaryButtonText: {
     color: '#FFFFFF',
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 14,
     lineHeight: 19,
   },
@@ -9744,7 +9813,7 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
     zIndex: 120,
     elevation: 120,
-    backgroundColor: '#F8F6F1',
+    backgroundColor: '#FFFFFF',
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 28,
@@ -9754,8 +9823,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   homeLoadingTitle: {
-    color: '#171412',
-    fontFamily: fonts.SemiBold,
+    color: '#222222',
+    ...leafTypography.semiBold,
     fontSize: 20,
     lineHeight: 26,
     textAlign: 'center',
@@ -9765,15 +9834,15 @@ const styles = StyleSheet.create({
   },
   driverKycLoadingContainer: {
     flex: 1,
-    backgroundColor: '#F8F6F1',
+    backgroundColor: '#FFFFFF',
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 28,
   },
   driverKycLoadingText: {
     marginTop: 16,
-    color: '#171412',
-    fontFamily: fonts.SemiBold,
+    color: '#222222',
+    ...leafTypography.semiBold,
     fontSize: 18,
     lineHeight: 24,
     textAlign: 'center',
@@ -9791,7 +9860,7 @@ const styles = StyleSheet.create({
   driverKycReasonText: {
     marginTop: 10,
     color: '#5E5955',
-    fontFamily: fonts.Regular,
+    ...leafTypography.regular,
     fontSize: 13,
     lineHeight: 18,
     textAlign: 'center',
@@ -9808,7 +9877,7 @@ const styles = StyleSheet.create({
   },
   driverKycUnavailableButtonText: {
     color: '#FFFFFF',
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 14,
     lineHeight: 19,
   },
@@ -9827,7 +9896,7 @@ const styles = StyleSheet.create({
     paddingBottom: 18,
     backgroundColor: '#FFFFFF',
     borderWidth: 1,
-    borderColor: '#ECE5DC',
+    borderColor: '#E5E5E5',
     shadowColor: '#000000',
     shadowOffset: { width: 0, height: 20 },
     shadowOpacity: 0.12,
@@ -9846,7 +9915,7 @@ const styles = StyleSheet.create({
   driverHomeSkeletonDivider: {
     width: StyleSheet.hairlineWidth,
     alignSelf: 'stretch',
-    backgroundColor: '#E9E2D8',
+    backgroundColor: '#E5E5E5',
     marginLeft: 3,
     marginRight: 13,
   },
@@ -9916,7 +9985,7 @@ const styles = StyleSheet.create({
   },
   driverHomeSkeletonHorizontalDivider: {
     height: StyleSheet.hairlineWidth,
-    backgroundColor: '#E9E2D8',
+    backgroundColor: '#E5E5E5',
     marginTop: 6,
     marginBottom: 15,
   },
@@ -9929,7 +9998,7 @@ const styles = StyleSheet.create({
     height: 56,
     borderRadius: 28,
     borderWidth: 1,
-    borderColor: '#ECE5DC',
+    borderColor: '#E5E5E5',
     backgroundColor: 'rgba(248,246,241,0.72)',
     justifyContent: 'center',
   },
@@ -9951,7 +10020,7 @@ const styles = StyleSheet.create({
     height: 56,
     borderRadius: 28,
     borderWidth: 1,
-    borderColor: '#ECE5DC',
+    borderColor: '#E5E5E5',
     backgroundColor: 'rgba(248,246,241,0.72)',
   },
   driverHomeSkeletonPromoCard: {
@@ -9959,7 +10028,7 @@ const styles = StyleSheet.create({
     marginTop: 12,
     borderRadius: 32,
     borderWidth: 1,
-    borderColor: '#ECE5DC',
+    borderColor: '#E5E5E5',
     backgroundColor: 'rgba(255,255,255,0.96)',
     paddingHorizontal: 28,
     paddingTop: 28,
@@ -9999,7 +10068,7 @@ const styles = StyleSheet.create({
   },
   driverSurgeFlagText: {
     color: '#FFFFFF',
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 12,
     lineHeight: 14,
     textAlign: 'center',

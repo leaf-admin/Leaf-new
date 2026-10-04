@@ -1,3 +1,4 @@
+import leafTypography from '../../prototype/LeafTypography';
 import Logger from '../../../utils/Logger';
 /**
  * 🔑 TELA DE ESQUECI A SENHA
@@ -7,7 +8,6 @@ import Logger from '../../../utils/Logger';
 
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, KeyboardAvoidingView, Platform } from 'react-native';
-import { fonts } from '../../../theme/runtimeTokens';
 import auth from '@react-native-firebase/auth';
 import { Ionicons } from '@expo/vector-icons';
 import ContinueButton from '../common/ContinueButton';
@@ -386,15 +386,15 @@ const styles = StyleSheet.create({
         fontSize: 22,
         lineHeight: 28,
         color: color.textPrimary,
-        fontFamily: fonts.Bold,
+        ...leafTypography.bold,
         textAlign: 'left',
         marginBottom: 6
     },
     subtitle: {
-        fontSize: 13,
-        lineHeight: 19,
+        fontSize: 14,
+        lineHeight: 20,
         color: color.textSecondary,
-        fontFamily: fonts.Regular,
+        ...leafTypography.regular,
         marginBottom: spacing.sm
     },
     card: {
@@ -425,7 +425,7 @@ const styles = StyleSheet.create({
         borderRadius: radius.sm,
         textAlign: 'center',
         fontSize: 16,
-        fontFamily: fonts.Bold,
+        ...leafTypography.bold,
         color: color.textPrimary,
         backgroundColor: color.surfaceMuted
     },
@@ -439,18 +439,18 @@ const styles = StyleSheet.create({
         fontSize: 13,
         lineHeight: 18,
         color: color.textSecondary,
-        fontFamily: fonts.Medium
+        ...leafTypography.medium
     },
     resendLink: {
         color: color.accent,
         textDecorationLine: 'underline',
-        fontFamily: fonts.Medium,
+        ...leafTypography.medium,
         fontSize: 13,
         lineHeight: 18
     },
     timerText: {
         color: color.textMuted,
-        fontFamily: fonts.Medium,
+        ...leafTypography.medium,
         fontSize: 13,
         lineHeight: 18
     },
@@ -470,7 +470,7 @@ const styles = StyleSheet.create({
         paddingVertical: 10,
         fontSize: 14,
         lineHeight: 18,
-        fontFamily: fonts.Medium,
+        ...leafTypography.medium,
         color: color.textPrimary
     },
     eyeButton: {
@@ -490,7 +490,7 @@ const styles = StyleSheet.create({
         fontSize: 12,
         lineHeight: 16,
         color: color.textSecondary,
-        fontFamily: fonts.Regular,
+        ...leafTypography.regular,
         marginBottom: 4
     },
     backButton: {
@@ -502,7 +502,7 @@ const styles = StyleSheet.create({
         color: color.textSecondary,
         fontSize: 13,
         lineHeight: 18,
-        fontFamily: fonts.Medium,
+        ...leafTypography.medium,
         textDecorationLine: 'underline'
     }
 });

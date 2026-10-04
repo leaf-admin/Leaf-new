@@ -6,6 +6,40 @@ const DEFAULT_ROUTE_MIN_LAT_DELTA = 0.028;
 const DEFAULT_OVERLAY_SHEET_MAX_RATIO = 0.66;
 const DEFAULT_OVERLAY_SHEET_MIN_HEIGHT = 236;
 
+export function resolveMapViewportCenterY({ height, top = 0, bottom = 0 } = {}) {
+  const mapHeight = Math.max(1, Number(height) || 1);
+  const visibleMinimum = Math.min(DEFAULT_MIN_VISIBLE_HEIGHT, mapHeight);
+  const topInset = Math.min(Math.max(0, Number(top) || 0), mapHeight - visibleMinimum);
+  const bottomInset = Math.min(
+    Math.max(0, Number(bottom) || 0),
+    mapHeight - visibleMinimum - topInset,
+  );
+  return topInset + (mapHeight - topInset - bottomInset) / 2;
+}
+
+// Google Maps camera at heading/pitch zero: anchor in logical screen points.
+// Shift the Mercator center rather than changing the selected pickup coordinate.
+export function buildPickupMapCamera({ coordinate, zoom, height, markerCenterY, nativeSafeArea = {} } = {}) {
+  if (!isFiniteRouteCoordinate(coordinate) || !Number.isFinite(zoom) ||
+      !Number.isFinite(height) || height <= 0 || !Number.isFinite(markerCenterY)) {
+    return null;
+  }
+  const worldSize = 256 * 2 ** zoom;
+  const latitude = Math.max(-85.05112878, Math.min(85.05112878, coordinate.latitude));
+  const sine = Math.sin(latitude * Math.PI / 180);
+  const worldY = (0.5 - Math.log((1 + sine) / (1 - sine)) / (4 * Math.PI)) * worldSize;
+  const nativeCenterY = height / 2 +
+    (Math.max(0, Number(nativeSafeArea.top) || 0) - Math.max(0, Number(nativeSafeArea.bottom) || 0)) / 2;
+  const centerWorldY = worldY - (markerCenterY - nativeCenterY);
+  const centerLatitude = Math.atan(Math.sinh(Math.PI * (1 - 2 * centerWorldY / worldSize))) * 180 / Math.PI;
+  return {
+    center: { latitude: centerLatitude, longitude: coordinate.longitude },
+    zoom,
+    pitch: 0,
+    heading: 0,
+  };
+}
+
 export function buildOverlaySheetViewportMetrics({
   windowHeight,
   topOcclusion = 0,

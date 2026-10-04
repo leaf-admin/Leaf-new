@@ -1044,7 +1044,7 @@ export default function RobotaxiDriverOfferScreen({ navigation, route }) {
             scrollEnabled
             showsVerticalScrollIndicator={detailsExpanded}
             testID="driver-offer-screen"
-            accessibilityLabel="driver-offer-screen"
+            accessibilityLabel="Oferta de corrida para o motorista"
           >
             {hasRequest ? (
               <>
@@ -1172,7 +1172,7 @@ export default function RobotaxiDriverOfferScreen({ navigation, route }) {
                       onPress={handleReject}
                       style={styles.rejectButton}
                       testID={DRIVER_OFFER_FIELD_TEST_IDS.reject_action}
-                      accessibilityLabel="driver-offer-screen-reject-button"
+                      accessibilityLabel="Recusar corrida"
                     />
                   </RobotaxiLifecycleSection>
                 ) : null}
@@ -1189,7 +1189,7 @@ export default function RobotaxiDriverOfferScreen({ navigation, route }) {
                   onPress={handleAccept}
                   style={styles.acceptButton}
                   testID={DRIVER_OFFER_FIELD_TEST_IDS.accept_action}
-                  accessibilityLabel="driver-offer-screen-accept-button"
+                  accessibilityLabel="Aceitar corrida"
                 />
               </>
             ) : (

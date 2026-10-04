@@ -1,9 +1,10 @@
+import leafTypography from '../../components/prototype/LeafTypography';
 import React, { useCallback, useEffect, useState } from 'react';
 import { Alert, ScrollView, StatusBar, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useSelector } from 'react-redux';
 import { Ionicons } from '@expo/vector-icons';
-import { fonts } from '../../theme/runtimeTokens';
+import { LeafObjectIcon } from '../../components/prototype/LeafVisualElements';
 import PrototypeScreenTransition from '../../components/prototype/PrototypeScreenTransition';
 import PrototypeDismissibleSheet from '../../components/prototype/PrototypeDismissibleSheet';
 import { usePrototypeMapOcclusion } from './prototypeMapOcclusion';
@@ -14,18 +15,18 @@ import Logger from '../../utils/Logger';
 import { isCurrentSurfaceUnavailable } from './currentSurfaceStatus';
 import { ROBOTAXI_SETTINGS_ITEMS } from './robotaxiSettingsConfig';
 
-const SURFACE_TOP_PADDING = 28;
+const SURFACE_TOP_PADDING = 20;
 const SURFACE_BOTTOM_PADDING = 18;
 const BACKDROP_COLOR = 'transparent';
 const SETTINGS_COLOR = {
-  bg: '#F8F6F1',
-  text: '#171412',
-  title: '#171412',
-  secondary: '#756F68',
-  line: '#E9E2D8',
+  bg: '#FFFFFF',
+  text: '#222222',
+  title: '#222222',
+  secondary: '#6A6A6A',
+  line: '#E5E5E5',
   danger: '#9F2424',
   icon: '#514B45',
-  chevron: '#827B73',
+  chevron: '#767676',
 };
 
 function SettingRow({
@@ -51,11 +52,7 @@ function SettingRow({
       accessibilityState={{ disabled: false }}
     >
       <View style={styles.rowIconSlot}>
-        <Ionicons
-          name={icon || 'ellipse-outline'}
-          size={17}
-          color={tone === 'danger' ? SETTINGS_COLOR.danger : SETTINGS_COLOR.icon}
-        />
+        <LeafObjectIcon symbol={icon} size={40} />
       </View>
       <View style={styles.settingTextWrap}>
         <Text style={[styles.settingTitle, tone === 'danger' && styles.settingTitleDanger]}>
@@ -94,11 +91,10 @@ export default function RobotaxiSettingsScreen({ navigation, route }) {
   });
 
   useEffect(() => {
-    const hideStatusBar = () => StatusBar.setHidden(true, 'fade');
     const showStatusBar = () => StatusBar.setHidden(false, 'fade');
 
-    hideStatusBar();
-    const removeFocusListener = navigation?.addListener?.('focus', hideStatusBar);
+    showStatusBar();
+    const removeFocusListener = navigation?.addListener?.('focus', showStatusBar);
     const removeBlurListener = navigation?.addListener?.('blur', showStatusBar);
 
     return () => {
@@ -115,8 +111,12 @@ export default function RobotaxiSettingsScreen({ navigation, route }) {
   });
 
   const handleDismiss = useCallback(() => {
+    if (route?.params?.returnToAccount && navigation.canGoBack()) {
+      navigation.goBack();
+      return;
+    }
     navigation.navigate('RobotaxiPrototype');
-  }, [navigation]);
+  }, [navigation, route?.params?.returnToAccount]);
 
   const handlePanelLayout = useCallback(event => {
     const nextHeight = event?.nativeEvent?.layout?.height;
@@ -223,7 +223,6 @@ export default function RobotaxiSettingsScreen({ navigation, route }) {
         style={styles.container}
         pointerEvents="box-none"
         testID="robotaxi-settings-screen"
-        accessibilityLabel="robotaxi-settings-screen"
       >
         <StatusBar translucent backgroundColor="transparent" barStyle="dark-content" />
         <PrototypeDismissibleSheet
@@ -243,21 +242,18 @@ export default function RobotaxiSettingsScreen({ navigation, route }) {
             ]}
           >
             <View style={styles.headerRow}>
-              <View style={styles.headerCopy}>
-                <Text style={styles.screenTitle}>Configurações</Text>
-                <Text style={styles.screenSubtitle}>
-                  Conta, privacidade e suporte.
-                </Text>
-              </View>
               <TouchableOpacity
                 style={styles.closeButton}
                 onPress={handleDismiss}
                 activeOpacity={0.78}
                 testID="robotaxi-settings-close-button"
-                accessibilityLabel="Fechar configurações"
+                accessibilityLabel="Voltar"
               >
-                <Ionicons name="close" size={18} color={SETTINGS_COLOR.text} />
+                <Ionicons name="arrow-back" size={20} color={SETTINGS_COLOR.text} />
               </TouchableOpacity>
+              <View style={styles.headerCopy}>
+                <Text style={styles.screenTitle}>Configurações</Text>
+              </View>
             </View>
 
             <ScrollView
@@ -290,43 +286,45 @@ const styles = StyleSheet.create({
   },
   headerRow: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
+    alignItems: 'center',
     justifyContent: 'space-between',
-    gap: 14,
+    gap: 12,
+    minHeight: 44,
+    marginBottom: 20,
   },
   headerCopy: {
     flex: 1,
     paddingRight: 4,
   },
   closeButton: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: SETTINGS_COLOR.line,
+    backgroundColor: '#F5F5F5',
   },
   screenTitle: {
     color: SETTINGS_COLOR.title,
-    fontFamily: fonts.SemiBold,
-    fontSize: 20,
-    lineHeight: 26,
+    ...leafTypography.semiBold,
+    fontSize: 22,
+    lineHeight: 28,
+    letterSpacing: -0.4,
   },
   screenSubtitle: {
     marginTop: 8,
     color: SETTINGS_COLOR.secondary,
-    fontFamily: fonts.Regular,
-    fontSize: 13,
-    lineHeight: 18,
+    ...leafTypography.regular,
+    fontSize: 14,
+    lineHeight: 20,
   },
   rowsContent: {
-    paddingTop: 18,
+    paddingTop: 4,
     paddingBottom: 28,
   },
   settingRow: {
-    minHeight: 60,
+    minHeight: 68,
+    paddingVertical: 10,
     flexDirection: 'row',
     alignItems: 'center',
     borderBottomWidth: StyleSheet.hairlineWidth,
@@ -342,9 +340,9 @@ const styles = StyleSheet.create({
   },
   settingTitle: {
     color: SETTINGS_COLOR.text,
-    fontFamily: fonts.Medium,
-    fontSize: 13,
-    lineHeight: 17,
+    ...leafTypography.medium,
+    fontSize: 16,
+    lineHeight: 22,
   },
   settingTitleDanger: {
     color: SETTINGS_COLOR.danger,
@@ -352,12 +350,12 @@ const styles = StyleSheet.create({
   settingSubtitle: {
     marginTop: 3,
     color: SETTINGS_COLOR.secondary,
-    fontFamily: fonts.Regular,
-    fontSize: 10,
-    lineHeight: 13,
+    ...leafTypography.regular,
+    fontSize: 13,
+    lineHeight: 18,
   },
   rowIconSlot: {
-    width: 28,
+    width: 52,
     alignItems: 'flex-start',
     justifyContent: 'center',
   },

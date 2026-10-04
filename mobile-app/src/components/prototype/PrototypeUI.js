@@ -1,3 +1,4 @@
+import leafTypography from './LeafTypography';
 import React from "react";
 import {
   ActivityIndicator,
@@ -9,8 +10,7 @@ import {
   View,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import Animated, { Easing, FadeInUp } from "react-native-reanimated";
-import { fonts } from "../../theme/runtimeTokens";
+import Animated, { Easing, FadeInUp, useReducedMotion } from "react-native-reanimated";
 import robotaxiPrototypeTokens from "../design-system/robotaxiPrototypeTokens";
 import { leafButtonMetrics } from "./LeafRideUI";
 
@@ -18,9 +18,10 @@ const { color, typography, motion } = robotaxiPrototypeTokens;
 const cardEnterEasing = Easing.bezier(...motion.bezier.snappy);
 
 export function PrototypeCard({ style, children, ...viewProps }) {
+  const reduceMotion = useReducedMotion();
   return (
     <Animated.View
-      entering={FadeInUp.duration(motion.timing.standard)
+      entering={reduceMotion ? undefined : FadeInUp.duration(motion.timing.standard)
         .easing(cardEnterEasing)
         .withInitialValues({ transform: [{ translateY: 16 }], opacity: 0.96 })}
       style={[styles.card, style]}
@@ -181,7 +182,7 @@ export function PrototypePrimaryButton({
 }
 
 export function CardHandle() {
-  return <View style={styles.handle} />;
+  return <View style={styles.handleSlot}><View style={styles.handle} /></View>;
 }
 
 const styles = StyleSheet.create({
@@ -192,17 +193,17 @@ const styles = StyleSheet.create({
     borderColor: color.border.subtle,
     shadowColor: color.shadow.base,
     shadowOffset: { width: 0, height: 18 },
-    shadowOpacity: 0.1,
+    shadowOpacity: 0.06,
     shadowRadius: 20,
     elevation: Platform.OS === "android" ? 0 : 10,
   },
+  handleSlot: { height: 30, alignItems: 'center', justifyContent: 'center' },
   handle: {
-    width: 46,
-    height: 4,
+    width: 32,
+    height: 3,
     borderRadius: 999,
-    backgroundColor: "#D8D0C7",
+    backgroundColor: "#DDDDDD",
     alignSelf: "center",
-    marginBottom: 10,
   },
   destinationInput: {
     minHeight: 52,
@@ -226,7 +227,7 @@ const styles = StyleSheet.create({
     marginRight: 10,
     height: 24,
     color: color.text.primary,
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     fontSize: typography.body.size,
     lineHeight: typography.body.lineHeight,
     textAlignVertical: "center",
@@ -244,7 +245,7 @@ const styles = StyleSheet.create({
   },
   destinationFieldText: {
     color: color.text.primary,
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     fontSize: typography.body.size,
     lineHeight: typography.body.lineHeight,
   },
@@ -257,7 +258,7 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: color.accent.primary,
+    backgroundColor: robotaxiPrototypeTokens.action.primary,
     shadowColor: color.shadow.accent,
     shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.24,
@@ -273,14 +274,14 @@ const styles = StyleSheet.create({
   primaryButton: {
     minHeight: leafButtonMetrics.height,
     borderRadius: leafButtonMetrics.radius,
-    backgroundColor: color.accent.primary,
+    backgroundColor: robotaxiPrototypeTokens.action.primary,
     alignItems: "center",
     justifyContent: "center",
     flexDirection: "row",
     gap: leafButtonMetrics.iconGap,
     paddingHorizontal: 18,
     borderWidth: 1,
-    borderColor: color.border.strong,
+    borderColor: robotaxiPrototypeTokens.action.primary,
     minWidth: 0,
   },
   primaryButtonDisabled: {
@@ -288,9 +289,9 @@ const styles = StyleSheet.create({
   },
   primaryButtonText: {
     color: color.accent.contrast,
-    fontFamily: fonts.SemiBold,
-    fontSize: 13,
-    lineHeight: 17,
+    ...leafTypography.semiBold,
+    fontSize: 16,
+    lineHeight: 22,
     flexShrink: 1,
   },
 });

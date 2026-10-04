@@ -27,6 +27,7 @@ import {
   resolveDriverActivationBlockingAlert,
   submitDriverOnboardingActivation,
 } from './authFlowDriverActivation';
+import { createSingleFlightGate } from './authFlowSubmission';
 import {
   persistPhoneValidatedOnboardingSession,
   sanitizeAuthUserForOnboarding,
@@ -62,6 +63,8 @@ const AuthFlow = ({
   const driverActivationSubmissionTracker = React.useRef(
     createDriverActivationSubmissionTracker(),
   );
+  const finalizationGate = React.useRef(createSingleFlightGate()).current;
+  const [isFinalizing, setIsFinalizing] = useState(false);
   const isReviewEnv = allowReviewAccess();
   const editorialProgressMeta = React.useMemo(
     () => resolveEditorialProgressMeta(currentStep, authData?.profileSelection?.userType),
@@ -669,7 +672,18 @@ const AuthFlow = ({
     goToNextStep();
   }, [saveStepDataLocal, completeStep, goToNextStep, authData?.profileSelection?.userType, authData?.profileData]);
 
-  async function finalizeOnboarding({ credentialsOverride, documentDataOverride = {}, profileDataOverride = null } = {}) {
+  function finalizeOnboarding(options = {}) {
+    if (finalizationGate.isRunning()) {
+      return finalizationGate.run();
+    }
+
+    setIsFinalizing(true);
+    return finalizationGate
+      .run(() => finalizeOnboardingOnce(options))
+      .finally(() => setIsFinalizing(false));
+  }
+
+  async function finalizeOnboardingOnce({ credentialsOverride, documentDataOverride = {}, profileDataOverride = null } = {}) {
     const normalizedUserType = normalizeAuthFlowUserType(authData?.profileSelection?.userType);
     const normalizedProfile = normalizeAuthFlowProfileData(profileDataOverride || authData?.profileData || {});
     const normalizedSelection = {
@@ -912,6 +926,7 @@ const AuthFlow = ({
           <ProfileDataStep
             onSubmitted={handleProfileDataSubmitted}
             onBack={goToPreviousStep}
+            isSubmitting={isFinalizing}
             initialData={{
               ...(authData.profileData || {}),
               profileSelection: authData.profileSelection || {},
@@ -940,6 +955,7 @@ const AuthFlow = ({
           <CredentialsStep
             onCreated={handleCredentialsCreated}
             onBack={goToPreviousStep}
+            isSubmitting={isFinalizing}
             initialData={{
               profileData: authData.profileData || {},
               documentData: authData.documentData || {},
@@ -954,6 +970,7 @@ const AuthFlow = ({
           <DriverEmailStep
             onSubmitted={handleDriverEmailSubmitted}
             onBack={goToPreviousStep}
+            isSubmitting={isFinalizing}
             initialData={{
               email: authData?.documentData?.email || authData?.driverContactData?.email || ''
             }}

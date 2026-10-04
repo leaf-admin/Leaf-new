@@ -9,6 +9,26 @@ PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 source "${SCRIPT_DIR}/source-local-build-env.sh"
 
 MODE="${1:-debug}"
+ANDROID_BUILD_OUTPUT_PATH="${ANDROID_BUILD_OUTPUT_PATH:-}"
+ANDROID_BUILD_INIT_SCRIPT=""
+ANDROID_WORKLETS_BUILD_DIR=""
+ANDROID_WORKLETS_BUILD_BACKUP=""
+ANDROID_WORKLETS_BUILD_LINK_TARGET=""
+ANDROID_WORKLETS_BUILD_LINKED=0
+
+cleanup_external_build_script() {
+  if [[ "${ANDROID_WORKLETS_BUILD_LINKED}" == "1" && -n "${ANDROID_WORKLETS_BUILD_DIR}" && -L "${ANDROID_WORKLETS_BUILD_DIR}" && "$(readlink "${ANDROID_WORKLETS_BUILD_DIR}")" == "${ANDROID_WORKLETS_BUILD_LINK_TARGET}" ]]; then
+    rm "${ANDROID_WORKLETS_BUILD_DIR}"
+  fi
+  if [[ -n "${ANDROID_WORKLETS_BUILD_BACKUP}" && -e "${ANDROID_WORKLETS_BUILD_BACKUP}" && ! -e "${ANDROID_WORKLETS_BUILD_DIR}" ]]; then
+    ln -s "${ANDROID_WORKLETS_BUILD_BACKUP}" "${ANDROID_WORKLETS_BUILD_DIR}"
+  fi
+  if [[ -n "${ANDROID_BUILD_INIT_SCRIPT}" && -f "${ANDROID_BUILD_INIT_SCRIPT}" ]]; then
+    rm -f "${ANDROID_BUILD_INIT_SCRIPT}"
+  fi
+}
+
+trap cleanup_external_build_script EXIT
 
 ensure_android_native() {
   if [[ -d "${PROJECT_DIR}/android" ]]; then
@@ -78,22 +98,167 @@ sync_android_inter_fonts() {
 run_gradle() {
   local task="$1"
   local -a tasks=("generateCodegenArtifactsFromSchema" "${task}")
+  local -a gradle_options=(--no-daemon)
+  local -a local_qa_signing_options=()
+
   if [[ "${ANDROID_BUILD_CLEAN:-0}" == "1" ]]; then
     tasks=("clean" "${tasks[@]}")
   fi
-  (cd "${PROJECT_DIR}/android" && ./gradlew "${tasks[@]}" --no-daemon)
+
+  if [[ -n "${ANDROID_BUILD_OUTPUT_PATH}" ]]; then
+    gradle_options+=(
+      --init-script "${ANDROID_BUILD_INIT_SCRIPT}"
+      --project-cache-dir "${ANDROID_BUILD_OUTPUT_PATH}/project-cache"
+    )
+  fi
+  if [[ "${ANDROID_DISABLE_PROBLEMS_REPORT:-0}" == "1" ]]; then
+    gradle_options+=(--no-problems-report)
+  fi
+  if [[ "${ANDROID_BUILD_STACKTRACE:-0}" == "1" ]]; then
+    gradle_options+=(--stacktrace)
+  fi
+
+  if [[ "${ANDROID_LOCAL_QA_SIGNING:-}" == "debug" ]]; then
+    local debug_keystore="${PROJECT_DIR}/android/app/debug.keystore"
+    [[ "${MODE}" == "release" ]] || {
+      echo "❌ ANDROID_LOCAL_QA_SIGNING=debug só pode assinar assembleRelease local."
+      exit 1
+    }
+    [[ -f "${debug_keystore}" ]] || {
+      echo "❌ Keystore debug local ausente: ${debug_keystore}"
+      exit 1
+    }
+    local_qa_signing_options+=(
+      "-Pandroid.injected.signing.store.file=${debug_keystore}"
+      "-Pandroid.injected.signing.store.password=android"
+      "-Pandroid.injected.signing.key.alias=androiddebugkey"
+      "-Pandroid.injected.signing.key.password=android"
+      "-Pandroid.packagingOptions.pickFirsts=**/libworklets.so"
+    )
+    echo "ℹ️  Release local assinado com debug.keystore; artefato de QA não publicável."
+  fi
+
+  (cd "${PROJECT_DIR}/android" && ./gradlew "${tasks[@]}" "${gradle_options[@]}" "${local_qa_signing_options[@]}")
+}
+
+prepare_external_build_output() {
+  [[ -n "${ANDROID_BUILD_OUTPUT_PATH}" ]] || return 0
+
+  mkdir -p "${ANDROID_BUILD_OUTPUT_PATH}"
+  export ANDROID_BUILD_OUTPUT_PATH
+  export ANDROID_GRADLE_PROJECT_DIR="${PROJECT_DIR}/android"
+  export GRADLE_USER_HOME="${GRADLE_USER_HOME:-${ANDROID_BUILD_OUTPUT_PATH}/gradle-user-home}"
+  mkdir -p "${GRADLE_USER_HOME}"
+  ANDROID_BUILD_INIT_SCRIPT="$(mktemp "${ANDROID_BUILD_OUTPUT_PATH}/.leaf-android-build-dir.XXXXXX")"
+  cat > "${ANDROID_BUILD_INIT_SCRIPT}" <<'GRADLE'
+def externalBuildRoot = new File(System.getenv('ANDROID_BUILD_OUTPUT_PATH'))
+def mainAndroidProjectDir = new File(System.getenv('ANDROID_GRADLE_PROJECT_DIR')).canonicalFile
+
+def mainAndroidAppDir = new File(mainAndroidProjectDir, 'app').canonicalFile
+def configureExternalNativeStaging = { project, nativeOutputRoot ->
+  def androidExtension = project.extensions.findByName('android')
+  def externalNativeBuild = androidExtension?.externalNativeBuild
+  def projectKey = project.path.substring(1).replace(':', '/')
+  def cmake = externalNativeBuild?.cmake
+  def ndkBuild = externalNativeBuild?.ndkBuild
+
+  if (cmake != null) {
+    cmake.buildStagingDirectory = new File(nativeOutputRoot, "cxx/${projectKey}")
+    println "[leaf-android-build] ${project.path} CMake -> ${cmake.buildStagingDirectory}"
+  }
+  if (ndkBuild != null) {
+    ndkBuild.buildStagingDirectory = new File(nativeOutputRoot, "ndk/${projectKey}")
+    println "[leaf-android-build] ${project.path} NDK -> ${ndkBuild.buildStagingDirectory}"
+  }
+}
+
+gradle.projectsLoaded {
+  def isMainAndroidBuild = gradle.rootProject.projectDir.canonicalFile == mainAndroidProjectDir
+  def includedBuildKey = "${Integer.toHexString(gradle.rootProject.projectDir.canonicalPath.hashCode())}-${Integer.toHexString(System.identityHashCode(gradle))}"
+  def nativeOutputRoot = isMainAndroidBuild
+    ? externalBuildRoot
+    : new File(externalBuildRoot, "included/${includedBuildKey}")
+
+  gradle.rootProject.allprojects { project ->
+    if (isMainAndroidBuild && project.path == ':' && project.projectDir.canonicalFile == mainAndroidProjectDir) {
+      println "[leaf-android-build] ${project.path} keeps Android root build directory for Expo autolinking"
+    } else {
+      def projectPath = project.path == ':' ? 'root' : project.path.substring(1).replace(':', '/')
+      def projectBuildPath = isMainAndroidBuild
+        ? (project.projectDir.canonicalFile == mainAndroidAppDir ? 'app' : "modules/${projectPath}")
+        : "included/${includedBuildKey}/${projectPath}"
+      project.layout.buildDirectory.set(new File(externalBuildRoot, projectBuildPath))
+      println "[leaf-android-build] ${project.path} -> ${project.layout.buildDirectory.get().asFile}"
+    }
+
+    project.plugins.withId('com.android.application') { configureExternalNativeStaging(project, nativeOutputRoot) }
+    project.plugins.withId('com.android.library') { configureExternalNativeStaging(project, nativeOutputRoot) }
+  }
+}
+GRADLE
+
+  echo "ℹ️  As saídas dos módulos Android, staging CMake/NDK e caches Gradle serão gravados em ${ANDROID_BUILD_OUTPUT_PATH}."
+}
+
+prepare_external_worklets_build_link() {
+  [[ -n "${ANDROID_BUILD_OUTPUT_PATH}" ]] || return 0
+
+  local worklets_android_dir="${PROJECT_DIR}/../node_modules/react-native-worklets/android"
+  [[ -d "${worklets_android_dir}" ]] || return 0
+
+  local worklets_build_dir="${worklets_android_dir}/build"
+  local external_worklets_build_dir="${ANDROID_BUILD_OUTPUT_PATH}/modules/react-native-worklets"
+  mkdir -p "${external_worklets_build_dir}"
+  ANDROID_WORKLETS_BUILD_DIR="${worklets_build_dir}"
+  ANDROID_WORKLETS_BUILD_LINK_TARGET="${external_worklets_build_dir}"
+
+  if [[ -L "${worklets_build_dir}" ]]; then
+    local existing_link_target
+    existing_link_target="$(readlink "${worklets_build_dir}")"
+    if [[ "${existing_link_target}" == "${external_worklets_build_dir}" ]]; then
+      return 0
+    fi
+    local preserved_worklets_root="${ANDROID_BUILD_OUTPUT_PATH}/preserved/react-native-worklets/"
+    if [[ "${existing_link_target}" == "${preserved_worklets_root}"android-build-* && -d "${existing_link_target}" ]]; then
+      ANDROID_WORKLETS_BUILD_BACKUP="${existing_link_target}"
+      rm "${worklets_build_dir}"
+    else
+      echo "❌ O diretório Android de react-native-worklets já é um link para outro destino: ${worklets_build_dir}"
+      exit 1
+    fi
+  fi
+
+  if [[ -e "${worklets_build_dir}" ]]; then
+    local backup_root="${ANDROID_BUILD_OUTPUT_PATH}/preserved/react-native-worklets"
+    mkdir -p "${backup_root}"
+    ANDROID_WORKLETS_BUILD_BACKUP="${backup_root}/android-build-$(date +%Y%m%d%H%M%S)-$$"
+    if [[ -e "${ANDROID_WORKLETS_BUILD_BACKUP}" ]]; then
+      echo "❌ Destino para preservar o build Android de Worklets já existe: ${ANDROID_WORKLETS_BUILD_BACKUP}"
+      exit 1
+    fi
+    mv "${worklets_build_dir}" "${ANDROID_WORKLETS_BUILD_BACKUP}"
+  fi
+
+  ln -s "${external_worklets_build_dir}" "${worklets_build_dir}"
+  ANDROID_WORKLETS_BUILD_LINKED=1
+  echo "ℹ️  O caminho CMake de react-native-worklets aponta temporariamente para a saída externa."
 }
 
 show_artifact_path() {
+  local app_build_root="${PROJECT_DIR}/android/app/build"
+  if [[ -n "${ANDROID_BUILD_OUTPUT_PATH}" ]]; then
+    app_build_root="${ANDROID_BUILD_OUTPUT_PATH}/app"
+  fi
+
   case "${MODE}" in
     debug)
-      echo "✅ APK debug: ${PROJECT_DIR}/android/app/build/outputs/apk/debug/app-debug.apk"
+      echo "✅ APK debug: ${app_build_root}/outputs/apk/debug/app-debug.apk"
       ;;
     release)
-      echo "✅ APK release: ${PROJECT_DIR}/android/app/build/outputs/apk/release/app-release.apk"
+      echo "✅ APK release: ${app_build_root}/outputs/apk/release/app-release.apk"
       ;;
     aab)
-      echo "✅ AAB release: ${PROJECT_DIR}/android/app/build/outputs/bundle/release/app-release.aab"
+      echo "✅ AAB release: ${app_build_root}/outputs/bundle/release/app-release.aab"
       ;;
   esac
 }
@@ -107,6 +272,8 @@ main() {
   ensure_local_properties
   sync_native_android_version
   sync_android_inter_fonts
+  prepare_external_build_output
+  prepare_external_worklets_build_link
 
   case "${MODE}" in
     debug) run_gradle "assembleDebug" ;;

@@ -1,3 +1,4 @@
+import leafTypography from '../../components/prototype/LeafTypography';
 import React, { useCallback, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
@@ -9,7 +10,6 @@ import {
   useWindowDimensions,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { fonts } from '../../theme/runtimeTokens';
 import PrototypeDismissibleSheet from '../../components/prototype/PrototypeDismissibleSheet';
 import PrototypeScreenTransition from '../../components/prototype/PrototypeScreenTransition';
 import {
@@ -23,7 +23,7 @@ import { LeafButton, LeafEmptyState, leafRideColors } from '../../components/pro
 import { usePrototypeMapOcclusion } from './prototypeMapOcclusion';
 import { usePrototypeRideRuntime } from './prototypeRideRuntime';
 
-const SURFACE_TOP_PADDING = 16;
+const SURFACE_TOP_PADDING = 20;
 const SURFACE_BOTTOM_PADDING = 18;
 const BACKDROP_COLOR = 'transparent';
 
@@ -125,7 +125,7 @@ export default function RobotaxiDriverDocumentsScreen({ navigation, route }) {
               <PrototypeMenuCloseButton
                 onPress={handleDismiss}
                 testID="robotaxi-driver-documents-close-button"
-                accessibilityLabel="robotaxi-driver-documents-close-button"
+                accessibilityLabel="Fechar documentos do motorista"
               />
             )}
           >
@@ -239,7 +239,7 @@ const styles = StyleSheet.create({
   },
   feedbackText: {
     color: leafRideColors.secondary,
-    fontFamily: fonts.Regular,
+    ...leafTypography.regular,
     fontSize: 12,
     lineHeight: 17,
   },

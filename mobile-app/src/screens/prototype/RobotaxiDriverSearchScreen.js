@@ -1,7 +1,7 @@
+import leafTypography from '../../components/prototype/LeafTypography';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { StatusBar, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { fonts } from "../../theme/runtimeTokens";
 import PrototypeScreenTransition from "../../components/prototype/PrototypeScreenTransition";
 import PrototypeDismissibleSheet from "../../components/prototype/PrototypeDismissibleSheet";
 import {
@@ -235,7 +235,7 @@ export default function RobotaxiDriverSearchScreen({ navigation, route }) {
   const terminalRouteHandledRef = useRef(false);
   const protectedSearchExitRef = useRef(false);
   const sheetBottom =
-    insets.bottom + SHEET_BOTTOM_OFFSET + robotaxiLifecycleMetrics.cardBottomGap;
+    SHEET_BOTTOM_OFFSET + robotaxiLifecycleMetrics.cardBottomGap;
   const normalizedBookingStatus = normalizePassengerBookingStatus(bookingStatus);
   const passengerAutoRoute = resolvePassengerAutoRoute(bookingStatus);
   const noDriversRefundParams = useMemo(() => {
@@ -703,9 +703,11 @@ export default function RobotaxiDriverSearchScreen({ navigation, route }) {
         >
           <RobotaxiLifecycleCard
             onLayout={handleCardLayout}
-            style={styles.searchingCard}
+            style={[styles.searchingCard, { paddingBottom: robotaxiLifecycleMetrics.cardPaddingBottom + insets.bottom }]}
             testID={sheetTestID}
-            accessibilityLabel={sheetTestID}
+            accessibilityLabel={showSearchTimeoutDecision
+              ? "Escolha como continuar a busca por motorista"
+              : "Buscando motorista para sua viagem"}
           >
             <RobotaxiLifecycleSummary
               eyebrow={showSearchTimeoutDecision ? "BUSCA MAIS LONGA" : "BUSCANDO MOTORISTA"}
@@ -766,8 +768,8 @@ export default function RobotaxiDriverSearchScreen({ navigation, route }) {
                     ? "passenger-driver-search-timeout-cancel-button"
                     : "passenger-driver-search-cancel-button"}
                   accessibilityLabel={showSearchTimeoutDecision
-                    ? "passenger-driver-search-timeout-cancel-button"
-                    : "passenger-driver-search-cancel-button"}
+                    ? "Cancelar busca de motorista"
+                    : "Cancelar busca"}
                 />
                 {isSearchReconciling || cancelError ||
                 (!cancelPending && searchPresentation.remainingSeconds === 0) ? (
@@ -777,7 +779,7 @@ export default function RobotaxiDriverSearchScreen({ navigation, route }) {
                     icon="chatbubble-ellipses-outline"
                     style={styles.supportButton}
                     testID="passenger-driver-search-support-button"
-                    accessibilityLabel="passenger-driver-search-support-button"
+                    accessibilityLabel="Falar com suporte"
                   />
                 ) : null}
               </RobotaxiLifecycleSection>
@@ -786,7 +788,7 @@ export default function RobotaxiDriverSearchScreen({ navigation, route }) {
             {showSearchTimeoutDecision ? (
               <View
                 testID="passenger-driver-search-timeout-decision"
-                accessibilityLabel="passenger-driver-search-timeout-decision"
+                accessibilityLabel="Decisão sobre a busca de motorista"
               >
                   <RobotaxiLifecycleButton
                     label="Continuar buscando"
@@ -794,7 +796,7 @@ export default function RobotaxiDriverSearchScreen({ navigation, route }) {
                     tone="primary"
                     style={styles.continueButton}
                     testID="passenger-driver-search-timeout-continue-button"
-                    accessibilityLabel="passenger-driver-search-timeout-continue-button"
+                    accessibilityLabel="Continuar buscando motorista"
                   />
               </View>
             ) : null}
@@ -829,7 +831,7 @@ const styles = StyleSheet.create({
   },
   routeSummaryLabel: {
     color: leafRideColors.secondary,
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     fontSize: 10,
     lineHeight: 13,
     letterSpacing: 0.5,
@@ -837,14 +839,14 @@ const styles = StyleSheet.create({
   routeSummaryValue: {
     marginTop: 2,
     color: leafRideColors.text,
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     fontSize: 12,
     lineHeight: 16,
   },
   routeSummaryMeta: {
     marginTop: 2,
     color: leafRideColors.secondary,
-    fontFamily: fonts.Regular,
+    ...leafTypography.regular,
     fontSize: 12,
     lineHeight: 16,
   },
@@ -854,7 +856,7 @@ const styles = StyleSheet.create({
   errorText: {
     marginTop: 12,
     color: leafRideColors.dangerText,
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     fontSize: 13,
     lineHeight: 17,
     textAlign: "center",

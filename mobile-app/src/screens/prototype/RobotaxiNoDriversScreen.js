@@ -1,3 +1,5 @@
+import leafTypography from '../../components/prototype/LeafTypography';
+import { RobotaxiLifecycleSummary } from '../../components/prototype/RobotaxiLifecycleUI';
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   StatusBar,
@@ -7,7 +9,6 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
-import { fonts } from "../../theme/runtimeTokens";
 import PrototypeScreenTransition from "../../components/prototype/PrototypeScreenTransition";
 import PrototypeDismissibleSheet from "../../components/prototype/PrototypeDismissibleSheet";
 import {
@@ -73,7 +74,7 @@ export default function RobotaxiNoDriversScreen({ navigation, route }) {
   const [cardHeight, setCardHeight] = useState(FALLBACK_CARD_HEIGHT);
   const [secondaryActionsVisible, setSecondaryActionsVisible] = useState(false);
   const sheetBottom =
-    insets.bottom + SHEET_BOTTOM_OFFSET + robotaxiLifecycleMetrics.cardBottomGap;
+    SHEET_BOTTOM_OFFSET + robotaxiLifecycleMetrics.cardBottomGap;
   const reason = formatNoDriversReason(route?.params?.reason);
   const refundStatus = String(route?.params?.refundStatus || "")
     .trim()
@@ -244,7 +245,7 @@ export default function RobotaxiNoDriversScreen({ navigation, route }) {
         style={styles.container}
         pointerEvents="box-none"
         testID="passenger-no-drivers-screen"
-        accessibilityLabel="passenger-no-drivers-screen"
+        accessibilityLabel="Nenhum motorista encontrado"
       >
         <StatusBar
           translucent
@@ -256,18 +257,9 @@ export default function RobotaxiNoDriversScreen({ navigation, route }) {
           onClose={handleDismiss}
           sheetStyle={[styles.sheetWrap, { bottom: sheetBottom }]}
         >
-          <RobotaxiLifecycleCard onLayout={handleCardLayout} style={styles.card}>
+          <RobotaxiLifecycleCard onLayout={handleCardLayout} style={[styles.card, { paddingBottom: robotaxiLifecycleMetrics.cardPaddingBottom + insets.bottom }]}>
 
-            <View style={styles.iconWrap}>
-              <Ionicons
-                name="car-outline"
-                size={30}
-                color={color.text.primary}
-              />
-            </View>
-
-            <Text style={styles.title}>Nenhum motorista encontrado</Text>
-            <Text style={styles.subtitle}>{reason}</Text>
+            <RobotaxiLifecycleSummary title="Nenhum motorista encontrado" subtitle={reason} object="vehicle" />
 
             {hasRefundInfo ? (
               <View style={styles.refundBox}>
@@ -287,7 +279,7 @@ export default function RobotaxiNoDriversScreen({ navigation, route }) {
               onPress={handleRetryDestination}
               style={styles.primaryButton}
               testID="passenger-no-drivers-retry-button"
-              accessibilityLabel="passenger-no-drivers-retry-button"
+              accessibilityLabel="Tentar com outro destino"
             />
 
             <RobotaxiLifecycleDisclosure
@@ -297,7 +289,7 @@ export default function RobotaxiNoDriversScreen({ navigation, route }) {
               expandedLabel="Ocultar opções"
               style={styles.moreOptionsButton}
               testID="passenger-no-drivers-more-options-button"
-              accessibilityLabel="passenger-no-drivers-more-options-button"
+              accessibilityLabel={secondaryActionsVisible ? "Ocultar opções" : "Mais opções"}
             />
 
             {secondaryActionsVisible ? (
@@ -308,7 +300,7 @@ export default function RobotaxiNoDriversScreen({ navigation, route }) {
                 style={styles.secondaryButton}
                 onPress={() => navigation.navigate("RobotaxiPrototypeSupport")}
                 testID="passenger-no-drivers-support-button"
-                accessibilityLabel="passenger-no-drivers-support-button"
+                accessibilityLabel="Falar com suporte"
               />
 
               <RobotaxiLifecycleButton
@@ -317,7 +309,7 @@ export default function RobotaxiNoDriversScreen({ navigation, route }) {
                 style={styles.secondaryButton}
                 onPress={handleDismiss}
                 testID="passenger-no-drivers-back-to-map-button"
-                accessibilityLabel="passenger-no-drivers-back-to-map-button"
+                accessibilityLabel="Voltar ao mapa"
               />
               </View>
             ) : null}
@@ -355,27 +347,26 @@ const styles = StyleSheet.create({
   title: {
     marginTop: 10,
     color: color.text.primary,
-    fontFamily: fonts.SemiBold,
-    fontSize: 15.5,
-    lineHeight: 20,
-    textAlign: "center",
+    ...leafTypography.semiBold,
+    fontSize: 22,
+    lineHeight: 28,
+    textAlign: 'left',
   },
   subtitle: {
     marginTop: 4,
     color: color.text.secondary,
-    fontFamily: fonts.Regular,
-    fontSize: typography.caption.size,
-    lineHeight: typography.caption.lineHeight,
-    textAlign: "center",
+    ...leafTypography.regular,
+    fontSize: 14,
+    lineHeight: 20,
+    textAlign: 'left',
   },
   refundBox: {
     marginTop: 10,
-    paddingHorizontal: 10,
+    paddingHorizontal: 0,
     minHeight: 42,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: color.border.strong,
-    backgroundColor: color.surface.secondary,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: color.border.strong,
+    backgroundColor: '#FFFFFF',
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
@@ -384,10 +375,10 @@ const styles = StyleSheet.create({
   refundText: {
     flex: 1,
     color: color.text.primary,
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     fontSize: typography.caption.size,
     lineHeight: typography.caption.lineHeight,
-    textAlign: "center",
+    textAlign: "left",
   },
   primaryButton: {
     marginTop: 12,

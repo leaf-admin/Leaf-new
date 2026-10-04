@@ -16,7 +16,7 @@ describe("DriverHomeOverlay", () => {
   });
 
   it('shows "Ativando..." while the driver is pending and still offline', () => {
-    const { getByLabelText, getByText } = render(
+    const { getByTestId, getByText } = render(
       <DriverHomeOverlay
         driverId="driver_1"
         driverOnline={false}
@@ -28,11 +28,11 @@ describe("DriverHomeOverlay", () => {
     );
 
     expect(getByText("Ativando...")).toBeTruthy();
-    expect(getByLabelText("driver-home-toggle-online-pending")).toBeTruthy();
+    expect(getByTestId("driver-home-toggle-online")).toBeTruthy();
   });
 
   it('keeps "Online" while the driver is already online even if pending flag is stale', () => {
-    const { getAllByText, getByLabelText } = render(
+    const { getAllByText, getByTestId } = render(
       <DriverHomeOverlay
         driverId="driver_1"
         driverOnline
@@ -45,11 +45,11 @@ describe("DriverHomeOverlay", () => {
     );
 
     expect(getAllByText("Online").length).toBeGreaterThan(0);
-    expect(getByLabelText("driver-home-toggle-online-online")).toBeTruthy();
+    expect(getByTestId("driver-home-toggle-online")).toBeTruthy();
   });
 
   it('does not flash "Ativação pendente" while activation is still resolving', () => {
-    const { getAllByText, getByLabelText, queryByText } = render(
+    const { getAllByText, getByTestId, queryByText } = render(
       <DriverHomeOverlay
         driverId="driver_1"
         driverOnline
@@ -63,7 +63,7 @@ describe("DriverHomeOverlay", () => {
 
     expect(getAllByText("Online").length).toBeGreaterThan(0);
     expect(queryByText("Ativação pendente")).toBeNull();
-    expect(getByLabelText("driver-home-toggle-online-online")).toBeTruthy();
+    expect(getByTestId("driver-home-toggle-online")).toBeTruthy();
   });
 
   it("exposes stable offline and online toggle states for automation", () => {
@@ -78,7 +78,7 @@ describe("DriverHomeOverlay", () => {
       />,
     );
 
-    expect(offline.getByLabelText("driver-home-toggle-online-offline")).toBeTruthy();
+    expect(offline.getByTestId("driver-home-toggle-online")).toBeTruthy();
     expect(offline.queryByTestId("driver-home-online-state")).toBeNull();
 
     const online = render(
@@ -92,12 +92,99 @@ describe("DriverHomeOverlay", () => {
       />,
     );
 
-    expect(online.getByLabelText("driver-home-toggle-online-online")).toBeTruthy();
+    expect(online.getByTestId("driver-home-toggle-online")).toBeTruthy();
     expect(online.getByTestId("driver-home-online-state")).toBeTruthy();
   });
 
+  it("announces the availability action and current status in user-facing language", () => {
+    const scenarios = [
+      {
+        name: "offline",
+        props: { driverOnline: false, driverCanGoOnline: true, driverActivationResolved: true },
+        value: "Offline",
+      },
+      {
+        name: "activation pending",
+        props: { driverOnline: false, driverOnlinePending: true, driverCanGoOnline: true },
+        value: "Ativando",
+      },
+      {
+        name: "online",
+        props: { driverOnline: true, driverCanGoOnline: true, driverActivationResolved: true },
+        value: "Online",
+      },
+      {
+        name: "identity blocked",
+        props: {
+          driverOnline: false,
+          driverCanGoOnline: false,
+          driverActivationResolved: true,
+          driverActivationRemote: {
+            activationState: "REJECTED",
+            documents: { cnh: { status: "failed" } },
+          },
+        },
+        value: "Ação necessária",
+      },
+      {
+        name: "identity support",
+        props: {
+          driverOnline: false,
+          driverCanGoOnline: false,
+          driverActivationResolved: true,
+          driverIdentitySupportRequired: true,
+        },
+        value: "Identidade requer suporte",
+      },
+      {
+        name: "identity ready",
+        props: {
+          driverOnline: false,
+          driverCanGoOnline: false,
+          driverActivationResolved: true,
+          driverActivationRemote: {
+            activationState: "APPROVED_NEEDS_LIVENESS",
+            canAttemptOnline: true,
+            requiresLiveness: true,
+          },
+        },
+        value: "Pronto para confirmar identidade",
+      },
+      {
+        name: "active ride",
+        props: {
+          driverOnline: true,
+          driverCanGoOnline: false,
+          driverActivationResolved: true,
+          driverWorkInProgress: true,
+        },
+        value: "Em corrida",
+      },
+    ];
+
+    for (const scenario of scenarios) {
+      const { getByTestId, unmount } = render(
+        <DriverHomeOverlay
+          driverId="driver_1"
+          onToggleOnline={() => {}}
+          onOpenActivation={() => {}}
+          {...scenario.props}
+        />,
+      );
+      const availabilityControl = getByTestId("driver-home-toggle-online");
+
+      expect(availabilityControl.props.accessibilityLabel).toBe(
+        "Disponibilidade do motorista",
+      );
+      expect(availabilityControl.props.accessibilityValue).toEqual({
+        text: scenario.value,
+      });
+      unmount();
+    }
+  });
+
   it('shows reconnecting instead of a zeroed timer when online is not authenticated by realtime', () => {
-    const { getByLabelText, getByText, queryByText } = render(
+    const { getByTestId, getByText, queryByText } = render(
       <DriverHomeOverlay
         driverId="driver_1"
         driverOnline
@@ -112,14 +199,14 @@ describe("DriverHomeOverlay", () => {
     expect(getByText("Reconectando")).toBeTruthy();
     expect(getByText("--")).toBeTruthy();
     expect(queryByText("0min")).toBeNull();
-    expect(getByLabelText("driver-home-toggle-online-pending")).toBeTruthy();
+    expect(getByTestId("driver-home-toggle-online")).toBeTruthy();
   });
 
   it('routes blocked drivers to activation instead of trying to go online', () => {
     const onToggleOnline = jest.fn();
     const onOpenActivation = jest.fn();
 
-    const { getByLabelText, getByText } = render(
+    const { getByTestId, getByText } = render(
       <DriverHomeOverlay
         driverId="driver_1"
         driverOnline={false}
@@ -132,7 +219,7 @@ describe("DriverHomeOverlay", () => {
 
     expect(getByText('Em análise')).toBeTruthy();
 
-    fireEvent.press(getByLabelText('driver-home-toggle-online-blocked'));
+    fireEvent.press(getByTestId('driver-home-toggle-online'));
 
     expect(onOpenActivation).toHaveBeenCalledTimes(1);
     expect(onToggleOnline).not.toHaveBeenCalled();
@@ -142,7 +229,7 @@ describe("DriverHomeOverlay", () => {
     const onToggleOnline = jest.fn();
     const onOpenActivation = jest.fn();
 
-    const { getByLabelText, getByText, queryByText } = render(
+    const { getByTestId, getByText, queryByText } = render(
       <DriverHomeOverlay
         driverId="driver_1"
         driverOnline={false}
@@ -162,7 +249,7 @@ describe("DriverHomeOverlay", () => {
     expect(getByText("Ficar online")).toBeTruthy();
     expect(queryByText("Em análise")).toBeNull();
 
-    fireEvent.press(getByLabelText("driver-home-toggle-online-ready"));
+    fireEvent.press(getByTestId("driver-home-toggle-online"));
 
     expect(onToggleOnline).toHaveBeenCalledTimes(1);
     expect(onOpenActivation).not.toHaveBeenCalled();
@@ -213,7 +300,7 @@ describe("DriverHomeOverlay", () => {
     const onOpenActivation = jest.fn();
     const onOpenIdentitySupport = jest.fn();
 
-    const { getByLabelText, getByText, queryByText } = render(
+    const { getByTestId, getByText, queryByText } = render(
       <DriverHomeOverlay
         driverId="driver_1"
         driverOnline={false}
@@ -239,7 +326,7 @@ describe("DriverHomeOverlay", () => {
     expect(queryByText("Pronto para ficar online")).toBeNull();
 
     fireEvent.press(
-      getByLabelText("driver-home-toggle-online-identity-support"),
+      getByTestId("driver-home-toggle-online"),
     );
 
     expect(onOpenIdentitySupport).toHaveBeenCalledTimes(1);
@@ -251,7 +338,7 @@ describe("DriverHomeOverlay", () => {
     const onToggleOnline = jest.fn();
     const onOpenIdentitySupport = jest.fn();
 
-    const { getByLabelText, getByText, queryByText } = render(
+    const { getByTestId, getByText, queryByText } = render(
       <DriverHomeOverlay
         driverId="driver_1"
         driverOnline={false}
@@ -273,7 +360,7 @@ describe("DriverHomeOverlay", () => {
     expect(queryByText("Pronto para ficar online")).toBeNull();
 
     fireEvent.press(
-      getByLabelText("driver-home-toggle-online-identity-support"),
+      getByTestId("driver-home-toggle-online"),
     );
 
     expect(onOpenIdentitySupport).toHaveBeenCalledTimes(1);
@@ -284,7 +371,7 @@ describe("DriverHomeOverlay", () => {
     const onToggleOnline = jest.fn();
     const onOpenActivation = jest.fn();
 
-    const { getByLabelText, getByText, queryByText } = render(
+    const { getByTestId, getByText, queryByText } = render(
       <DriverHomeOverlay
         driverId="driver_1"
         driverOnline={false}
@@ -298,7 +385,7 @@ describe("DriverHomeOverlay", () => {
     expect(getByText("Ficar online")).toBeTruthy();
     expect(queryByText("Ativação pendente")).toBeNull();
 
-    fireEvent.press(getByLabelText("driver-home-toggle-online-offline"));
+    fireEvent.press(getByTestId("driver-home-toggle-online"));
 
     expect(onToggleOnline).toHaveBeenCalledTimes(1);
     expect(onOpenActivation).not.toHaveBeenCalled();
@@ -326,7 +413,8 @@ describe("DriverHomeOverlay", () => {
     expect(getByText("7")).toBeTruthy();
     expect(getByText("corridas")).toBeTruthy();
     expect(getByText("online")).toBeTruthy();
-    expect(getByTestId("driver-home-preferences-button")).toBeTruthy();
+    expect(getByTestId("driver-home-preferences-button").props.accessibilityLabel)
+      .toBe("Preferências do motorista");
     expect(queryByText("Área aquecida")).toBeNull();
     expect(queryByText("Preferências ativas")).toBeNull();
     expect(queryByText("Central de segurança")).toBeNull();
@@ -522,7 +610,7 @@ describe("DriverHomeOverlay", () => {
 
   it("suppresses offline summary and activation CTA while a driver ride is active", async () => {
     const onToggleOnline = jest.fn();
-    const { getByLabelText, getByText, queryByText, rerender } = render(
+    const { getByTestId, getByText, queryByText, rerender } = render(
       <DriverHomeOverlay
         driverId="driver_1"
         driverOnline
@@ -536,7 +624,7 @@ describe("DriverHomeOverlay", () => {
     );
 
     expect(getByText("Em corrida")).toBeTruthy();
-    fireEvent.press(getByLabelText("driver-home-toggle-online-ride"));
+    fireEvent.press(getByTestId("driver-home-toggle-online"));
     expect(onToggleOnline).not.toHaveBeenCalled();
 
     rerender(

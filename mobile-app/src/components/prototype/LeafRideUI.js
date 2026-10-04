@@ -1,7 +1,9 @@
+import leafTypography from './LeafTypography';
 import React from "react";
 import { ActivityIndicator, Animated, Easing, Image, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { useReducedMotion } from "react-native-reanimated";
 import { Ionicons } from "@expo/vector-icons";
-import { fonts } from "../../theme/runtimeTokens";
+import { LeafObjectIcon } from "./LeafVisualElements";
 import { robotaxiPrototypeTokens } from "../design-system/robotaxiPrototypeTokens";
 
 const tokenColor = robotaxiPrototypeTokens.color;
@@ -35,8 +37,8 @@ export const leafRideColors = {
 };
 
 export const leafButtonMetrics = Object.freeze({
-  height: 48,
-  radius: 24,
+  height: 54,
+  radius: 12,
   iconSize: 16,
   iconGap: 6,
 });
@@ -48,9 +50,9 @@ const toneConfig = {
     border: leafRideColors.line,
   },
   dark: {
-    fill: leafRideColors.leaf,
-    text: "#FFFFFF",
-    border: leafRideColors.leaf,
+    fill: robotaxiPrototypeTokens.action.primary,
+    text: robotaxiPrototypeTokens.action.contrast,
+    border: robotaxiPrototypeTokens.action.primary,
   },
   blue: {
     fill: leafRideColors.blue,
@@ -84,11 +86,13 @@ function resolveAvatarSource(photoUri) {
 }
 
 function useLeafPressScale(disabled = false, pressedScale = 0.982) {
+  const reduceMotion = useReducedMotion();
   const scale = React.useRef(new Animated.Value(1)).current;
 
   const settle = React.useCallback(
     (toValue) => {
       scale.stopAnimation();
+      if (reduceMotion) { scale.setValue(1); return; }
       Animated.spring(scale, {
         toValue,
         stiffness: 420,
@@ -98,7 +102,7 @@ function useLeafPressScale(disabled = false, pressedScale = 0.982) {
         useNativeDriver: true,
       }).start();
     },
-    [scale],
+    [scale, reduceMotion],
   );
 
   const onPressIn = React.useCallback(() => {
@@ -129,12 +133,14 @@ export function LeafStateHeader({
   onLayout,
 }) {
   const top = insetsTop + 50;
+  const reduceMotion = useReducedMotion();
   const entrance = React.useRef(new Animated.Value(0)).current;
   const settle = React.useRef(new Animated.Value(1)).current;
   const stateKey = `${title || ""}|${subtitle || ""}|${rightLabel || ""}|${rightTone || ""}`;
   const previousStateKeyRef = React.useRef(stateKey);
 
   React.useEffect(() => {
+    if (reduceMotion) { entrance.setValue(1); return undefined; }
     const animation = Animated.spring(entrance, {
       toValue: 1,
       stiffness: 260,
@@ -145,7 +151,7 @@ export function LeafStateHeader({
     });
     animation.start();
     return () => animation.stop();
-  }, [entrance]);
+  }, [entrance, reduceMotion]);
 
   React.useEffect(() => {
     if (previousStateKeyRef.current === stateKey) {
@@ -153,6 +159,7 @@ export function LeafStateHeader({
     }
     previousStateKeyRef.current = stateKey;
     settle.stopAnimation();
+    if (reduceMotion) { settle.setValue(1); return undefined; }
     settle.setValue(0.986);
     const animation = Animated.spring(settle, {
       toValue: 1,
@@ -164,7 +171,7 @@ export function LeafStateHeader({
     });
     animation.start();
     return () => animation.stop();
-  }, [settle, stateKey]);
+  }, [settle, stateKey, reduceMotion]);
 
   const animatedStyle = {
     opacity: entrance.interpolate({
@@ -222,9 +229,11 @@ export function LeafRideSheet({
   scrollContentContainerStyle,
   showsVerticalScrollIndicator = false,
 }) {
+  const reduceMotion = useReducedMotion();
   const entrance = React.useRef(new Animated.Value(0)).current;
 
   React.useEffect(() => {
+    if (reduceMotion) { entrance.setValue(1); return undefined; }
     const animation = Animated.spring(entrance, {
       toValue: 1,
       stiffness: 250,
@@ -235,7 +244,7 @@ export function LeafRideSheet({
     });
     animation.start();
     return () => animation.stop();
-  }, [entrance]);
+  }, [entrance, reduceMotion]);
 
   const animatedStyle = {
     opacity: entrance.interpolate({
@@ -284,6 +293,7 @@ export function LeafRideSheet({
 }
 
 export function LeafPill({ label, tone = "leaf", style, testID }) {
+  const reduceMotion = useReducedMotion();
   const palette = resolveTone(tone);
   const settle = React.useRef(new Animated.Value(1)).current;
   const pillKey = `${label || ""}|${tone || ""}`;
@@ -295,6 +305,7 @@ export function LeafPill({ label, tone = "leaf", style, testID }) {
     }
     previousPillKeyRef.current = pillKey;
     settle.stopAnimation();
+    if (reduceMotion) { settle.setValue(1); return undefined; }
     settle.setValue(0.97);
     const animation = Animated.spring(settle, {
       toValue: 1,
@@ -306,7 +317,7 @@ export function LeafPill({ label, tone = "leaf", style, testID }) {
     });
     animation.start();
     return () => animation.stop();
-  }, [pillKey, settle]);
+  }, [pillKey, settle, reduceMotion]);
 
   return (
     <Animated.View
@@ -398,6 +409,7 @@ export function LeafRouteProgress({
   testID,
   fieldTestIDs = {},
 }) {
+  const reduceMotion = useReducedMotion();
   const pulse = React.useRef(new Animated.Value(0)).current;
   const numericProgress = Number(progress);
   const normalizedProgress = Number.isFinite(numericProgress)
@@ -409,6 +421,7 @@ export function LeafRouteProgress({
   const maxProgressRef = React.useRef(normalizedProgress);
 
   React.useEffect(() => {
+    if (reduceMotion) { pulse.setValue(0); return undefined; }
     const loop = Animated.loop(
       Animated.sequence([
         Animated.timing(pulse, {
@@ -425,7 +438,7 @@ export function LeafRouteProgress({
     );
     loop.start();
     return () => loop.stop();
-  }, [pulse]);
+  }, [pulse, reduceMotion]);
 
   React.useEffect(() => {
     if (previousRouteIdentityRef.current !== routeIdentity) {
@@ -438,6 +451,7 @@ export function LeafRouteProgress({
     const nextProgress = Math.max(maxProgressRef.current, normalizedProgress);
     maxProgressRef.current = nextProgress;
 
+    if (reduceMotion) { progressAnim.setValue(nextProgress); return undefined; }
     const animation = Animated.timing(progressAnim, {
       toValue: nextProgress,
       duration: 1200,
@@ -447,7 +461,7 @@ export function LeafRouteProgress({
 
     animation.start();
     return () => animation.stop();
-  }, [normalizedProgress, progressAnim, routeIdentity]);
+  }, [normalizedProgress, progressAnim, routeIdentity, reduceMotion]);
 
   const pulseScale = pulse.interpolate({
     inputRange: [0, 1],
@@ -536,6 +550,28 @@ export function LeafMetricRow({ metrics = [], style }) {
           label={metric.label}
         />
       ))}
+    </View>
+  );
+}
+
+export function LeafJourneyRoute({ origin, destination, originTestID, destinationTestID, style, testID }) {
+  return (
+    <View style={[styles.journeyRoute, style]} testID={testID}>
+      <View style={styles.journeyRouteStop}>
+        <View style={styles.journeyRouteMarker} accessible={false} />
+        <View style={styles.journeyRouteCopy}>
+          <Text style={styles.journeyRouteLabel}>Embarque</Text>
+          <Text style={styles.journeyRouteValue} testID={originTestID}>{origin || 'Embarque não informado'}</Text>
+        </View>
+      </View>
+      <View style={styles.journeyRouteHairline} />
+      <View style={styles.journeyRouteStop}>
+        <View style={[styles.journeyRouteMarker, styles.journeyRouteDestination]} accessible={false} />
+        <View style={styles.journeyRouteCopy}>
+          <Text style={styles.journeyRouteLabel}>Destino</Text>
+          <Text style={styles.journeyRouteValue} testID={destinationTestID}>{destination || 'Destino não informado'}</Text>
+        </View>
+      </View>
     </View>
   );
 }
@@ -723,7 +759,7 @@ export function LeafButton({
   testID,
   accessibilityLabel,
 }) {
-  const palette = resolveTone(tone === "primary" ? "dark" : tone);
+  const palette = resolveTone(tone === "primary" ? "dark" : tone === "secondary" ? "ghost" : tone);
 
   return (
     <LeafAnimatedPressable
@@ -734,7 +770,7 @@ export function LeafButton({
         styles.button,
         {
           backgroundColor: palette.fill,
-          borderColor: tone === "primary" ? leafRideColors.leaf : palette.border,
+          borderColor: tone === "primary" ? robotaxiPrototypeTokens.action.primary : palette.border,
         },
         disabled && styles.buttonDisabled,
         style,
@@ -772,10 +808,11 @@ export function LeafEmptyState({
   onAction,
   testID,
 }) {
+  const reduceMotion = useReducedMotion();
   const pulse = React.useRef(new Animated.Value(0)).current;
 
   React.useEffect(() => {
-    if (!loading) {
+    if (!loading || reduceMotion) {
       pulse.stopAnimation();
       pulse.setValue(0);
       return undefined;
@@ -799,7 +836,7 @@ export function LeafEmptyState({
     );
     loop.start();
     return () => loop.stop();
-  }, [loading, pulse]);
+  }, [loading, pulse, reduceMotion]);
 
   const iconOpacity = loading
     ? pulse.interpolate({
@@ -814,7 +851,7 @@ export function LeafEmptyState({
         {loading ? (
           <ActivityIndicator size="small" color={leafRideColors.leaf} />
         ) : (
-          <Ionicons name={icon} size={20} color={leafRideColors.leaf} />
+          <LeafObjectIcon symbol={icon} size={64} />
         )}
       </Animated.View>
       <Text maxFontSizeMultiplier={TEXT_SCALE_CAP} style={styles.emptyTitle} numberOfLines={2}>
@@ -838,6 +875,19 @@ export function LeafEmptyState({
 }
 
 const styles = StyleSheet.create({
+  journeyRoute: {
+    paddingVertical: 14,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderColor: '#E5E5E5',
+  },
+  journeyRouteStop: { flexDirection: 'row', alignItems: 'flex-start', gap: 14 },
+  journeyRouteMarker: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#222222', marginTop: 7 },
+  journeyRouteDestination: { borderRadius: 2 },
+  journeyRouteCopy: { flex: 1, minWidth: 0 },
+  journeyRouteLabel: { ...leafTypography.regular, fontSize: 12, lineHeight: 17, color: '#6A6A6A' },
+  journeyRouteValue: { ...leafTypography.medium, fontSize: 16, lineHeight: 22, color: '#222222', marginTop: 3 },
+  journeyRouteHairline: { marginLeft: 22, marginVertical: 12, height: StyleSheet.hairlineWidth, backgroundColor: '#E5E5E5' },
   stateHeader: {
     position: "absolute",
     left: 28,
@@ -866,16 +916,16 @@ const styles = StyleSheet.create({
   },
   stateHeaderTitle: {
     color: leafRideColors.text,
-    fontFamily: fonts.SemiBold,
-    fontSize: 15,
-    lineHeight: 19,
+    ...leafTypography.semiBold,
+    fontSize: 17,
+    lineHeight: 22,
   },
   stateHeaderSubtitle: {
     marginTop: 2,
     color: leafRideColors.secondary,
-    fontFamily: fonts.Regular,
-    fontSize: 11,
-    lineHeight: 14,
+    ...leafTypography.regular,
+    fontSize: 14,
+    lineHeight: 20,
   },
   headerPill: {
     minWidth: 58,
@@ -912,7 +962,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   pillText: {
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 10.5,
     lineHeight: 14,
   },
@@ -943,16 +993,16 @@ const styles = StyleSheet.create({
   },
   routeEndpointLabel: {
     color: leafRideColors.muted,
-    fontFamily: fonts.SemiBold,
-    fontSize: 10,
-    lineHeight: 13,
+    ...leafTypography.semiBold,
+    fontSize: 12,
+    lineHeight: 17,
   },
   routeEndpointValue: {
     marginTop: 2,
     color: leafRideColors.text,
-    fontFamily: fonts.SemiBold,
-    fontSize: 12.5,
-    lineHeight: 17,
+    ...leafTypography.semiBold,
+    fontSize: 14,
+    lineHeight: 20,
   },
   routeLineWrap: {
     height: 18,
@@ -997,7 +1047,7 @@ const styles = StyleSheet.create({
   },
   routeArrivalText: {
     color: leafRideColors.secondary,
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 12,
     lineHeight: 16,
     textAlign: "center",
@@ -1013,16 +1063,16 @@ const styles = StyleSheet.create({
   },
   metricValue: {
     color: leafRideColors.text,
-    fontFamily: fonts.SemiBold,
-    fontSize: 18,
-    lineHeight: 23,
+    ...leafTypography.semiBold,
+    fontSize: 20,
+    lineHeight: 25,
   },
   metricLabel: {
     marginTop: 1,
     color: leafRideColors.muted,
-    fontFamily: fonts.Regular,
-    fontSize: 10,
-    lineHeight: 14,
+    ...leafTypography.regular,
+    fontSize: 12,
+    lineHeight: 17,
   },
   infoRow: {
     minHeight: 42,
@@ -1041,7 +1091,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   infoMarkerText: {
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 13,
     lineHeight: 17,
   },
@@ -1056,31 +1106,31 @@ const styles = StyleSheet.create({
   infoEyebrow: {
     marginBottom: 2,
     color: leafRideColors.muted,
-    fontFamily: fonts.SemiBold,
-    fontSize: 10,
-    lineHeight: 13,
+    ...leafTypography.semiBold,
+    fontSize: 12,
+    lineHeight: 17,
     textTransform: "uppercase",
   },
   infoTitle: {
     color: leafRideColors.text,
-    fontFamily: fonts.SemiBold,
-    fontSize: 13,
-    lineHeight: 17,
+    ...leafTypography.semiBold,
+    fontSize: 16,
+    lineHeight: 22,
   },
   infoSubtitle: {
     marginTop: 1,
     color: leafRideColors.secondary,
-    fontFamily: fonts.Regular,
-    fontSize: 11,
-    lineHeight: 15,
+    ...leafTypography.regular,
+    fontSize: 14,
+    lineHeight: 20,
   },
   infoRight: {
     marginLeft: 8,
     width: 76,
     color: leafRideColors.text,
-    fontFamily: fonts.SemiBold,
-    fontSize: 12.5,
-    lineHeight: 17,
+    ...leafTypography.semiBold,
+    fontSize: 14,
+    lineHeight: 20,
     textAlign: "right",
   },
   identityRow: {
@@ -1091,9 +1141,9 @@ const styles = StyleSheet.create({
     width: 56,
     height: 56,
     borderRadius: 28,
-    backgroundColor: "#EFEAE2",
+    backgroundColor: "#F5F5F5",
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: "#E5DCD2",
+    borderColor: "#E5E5E5",
     alignItems: "center",
     justifyContent: "center",
     overflow: "hidden",
@@ -1109,7 +1159,7 @@ const styles = StyleSheet.create({
   },
   identityAvatarText: {
     color: leafRideColors.text,
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 20,
     lineHeight: 27,
   },
@@ -1124,23 +1174,23 @@ const styles = StyleSheet.create({
   },
   identityName: {
     color: leafRideColors.text,
-    fontFamily: fonts.SemiBold,
-    fontSize: 15,
-    lineHeight: 20,
+    ...leafTypography.semiBold,
+    fontSize: 16,
+    lineHeight: 22,
   },
   identityMeta: {
     color: leafRideColors.secondary,
-    fontFamily: fonts.Regular,
-    fontSize: 11,
-    lineHeight: 15,
+    ...leafTypography.regular,
+    fontSize: 14,
+    lineHeight: 20,
   },
   identityNameCompact: {
-    fontSize: 13.5,
-    lineHeight: 18,
+    fontSize: 16,
+    lineHeight: 22,
   },
   identityMetaCompact: {
-    fontSize: 10.5,
-    lineHeight: 14,
+    fontSize: 13,
+    lineHeight: 18,
   },
   vehicleCopy: {
     width: 116,
@@ -1148,20 +1198,20 @@ const styles = StyleSheet.create({
   },
   plateText: {
     color: leafRideColors.text,
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 15,
     lineHeight: 20,
   },
   vehicleText: {
     color: leafRideColors.secondary,
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     fontSize: 11,
     lineHeight: 15,
   },
   identityRight: {
     maxWidth: 104,
     color: leafRideColors.text,
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 13,
     lineHeight: 18,
     textAlign: "right",
@@ -1184,9 +1234,9 @@ const styles = StyleSheet.create({
     flexShrink: 0,
   },
   buttonText: {
-    fontFamily: fonts.SemiBold,
-    fontSize: 13,
-    lineHeight: 17,
+    ...leafTypography.semiBold,
+    fontSize: 16,
+    lineHeight: 22,
     flexShrink: 1,
   },
   divider: {
@@ -1195,38 +1245,29 @@ const styles = StyleSheet.create({
   },
   emptyState: {
     minHeight: 148,
-    borderRadius: 22,
-    borderWidth: 1,
-    borderColor: leafRideColors.line,
-    backgroundColor: leafRideColors.sheet,
-    paddingHorizontal: 18,
-    paddingVertical: 20,
-    alignItems: "center",
+    paddingVertical: 24,
+    alignItems: "flex-start",
     justifyContent: "center",
   },
   emptyIcon: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    backgroundColor: leafRideColors.leafLight,
+    width: 64,
+    height: 64,
     alignItems: "center",
     justifyContent: "center",
-    marginBottom: 12,
+    marginBottom: 18,
   },
   emptyTitle: {
     color: leafRideColors.text,
-    fontFamily: fonts.SemiBold,
-    fontSize: 15,
-    lineHeight: 20,
-    textAlign: "center",
+    ...leafTypography.semiBold,
+    fontSize: 18,
+    lineHeight: 24,
   },
   emptyMessage: {
     marginTop: 6,
     color: leafRideColors.secondary,
-    fontFamily: fonts.Regular,
-    fontSize: 12,
-    lineHeight: 17,
-    textAlign: "center",
+    ...leafTypography.regular,
+    fontSize: 14,
+    lineHeight: 21,
   },
   emptyAction: {
     marginTop: 14,

@@ -1,3 +1,4 @@
+import leafTypography from '../../components/prototype/LeafTypography';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Alert,
@@ -10,7 +11,6 @@ import {
   useWindowDimensions,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { fonts } from '../../theme/runtimeTokens';
 import PrototypeDismissibleSheet from '../../components/prototype/PrototypeDismissibleSheet';
 import PrototypeScreenTransition from '../../components/prototype/PrototypeScreenTransition';
 import {
@@ -28,7 +28,7 @@ import {
   loadDriverWaitlistStatus,
 } from '../../services/runtime/driverWaitlistService';
 
-const SURFACE_TOP_PADDING = 16;
+const SURFACE_TOP_PADDING = 20;
 const SURFACE_BOTTOM_PADDING = 18;
 const DEFAULT_CITY = 'Rio de Janeiro';
 
@@ -273,11 +273,11 @@ export default function RobotaxiDriverWaitlistStatusScreen({ navigation, route }
               <PrototypeMenuCloseButton
                 onPress={handleDismiss}
                 testID="robotaxi-driver-waitlist-status-close-button"
-                accessibilityLabel="robotaxi-driver-waitlist-status-close-button"
+                accessibilityLabel="Fechar lista de espera"
               />
             )}
           >
-            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.content}>
+            <ScrollView automaticallyAdjustKeyboardInsets keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" showsVerticalScrollIndicator={false} contentContainerStyle={styles.content}>
               <PrototypeMenuStatRow
                 items={[
                   { key: 'status', label: 'status', value: statusCopy.label, loading },
@@ -313,7 +313,7 @@ export default function RobotaxiDriverWaitlistStatusScreen({ navigation, route }
                   placeholderTextColor="rgba(93,106,99,0.55)"
                   style={[styles.input, !canJoin && styles.inputDisabled]}
                   testID="robotaxi-driver-waitlist-status-city-input"
-                  accessibilityLabel="robotaxi-driver-waitlist-status-city-input"
+                  accessibilityLabel="Cidade de operação"
                 />
                 {canJoin ? (
                   <LeafButton
@@ -324,7 +324,7 @@ export default function RobotaxiDriverWaitlistStatusScreen({ navigation, route }
                     disabled={busy}
                     style={styles.fullButton}
                     testID="robotaxi-driver-waitlist-status-join-button"
-                    accessibilityLabel="robotaxi-driver-waitlist-status-join-button"
+                    accessibilityLabel={busy ? 'Entrando na lista de espera' : 'Entrar na lista'}
                   />
                 ) : canLeave ? (
                   <LeafButton
@@ -335,7 +335,7 @@ export default function RobotaxiDriverWaitlistStatusScreen({ navigation, route }
                     disabled={busy}
                     style={styles.fullButton}
                     testID="robotaxi-driver-waitlist-status-leave-button"
-                    accessibilityLabel="robotaxi-driver-waitlist-status-leave-button"
+                    accessibilityLabel={busy ? 'Atualizando lista de espera' : 'Sair da lista'}
                   />
                 ) : null}
               </View>
@@ -392,7 +392,7 @@ export default function RobotaxiDriverWaitlistStatusScreen({ navigation, route }
                   onPress={() => navigation.navigate('RobotaxiPrototype')}
                   style={styles.fullButton}
                   testID="robotaxi-driver-waitlist-status-online-button"
-                  accessibilityLabel="robotaxi-driver-waitlist-status-online-button"
+                  accessibilityLabel="Voltar para ficar online"
                 />
               ) : null}
 
@@ -426,11 +426,10 @@ const styles = StyleSheet.create({
     gap: 18,
   },
   statusCard: {
-    borderRadius: 24,
-    borderWidth: 1,
-    borderColor: 'rgba(221,232,225,0.85)',
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#E5E5E5',
     backgroundColor: '#FFFFFF',
-    paddingHorizontal: 18,
+    paddingHorizontal: 0,
     paddingVertical: 18,
   },
   statusPill: {
@@ -442,58 +441,58 @@ const styles = StyleSheet.create({
   },
   statusPillText: {
     color: leafRideColors.leaf,
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 11,
     lineHeight: 14,
   },
   statusTitle: {
     marginTop: 14,
     color: leafRideColors.text,
-    fontFamily: fonts.SemiBold,
-    fontSize: 20,
-    lineHeight: 26,
+    ...leafTypography.semiBold,
+    fontSize: 22,
+    lineHeight: 28,
   },
   statusText: {
     marginTop: 8,
     color: leafRideColors.secondary,
-    fontFamily: fonts.Regular,
+    ...leafTypography.regular,
     fontSize: 14,
     lineHeight: 20,
   },
   pushContextText: {
     marginTop: 10,
     color: leafRideColors.leaf,
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     fontSize: 12,
     lineHeight: 17,
   },
   inputBlock: {
-    borderRadius: 24,
-    borderWidth: 1,
-    borderColor: 'rgba(221,232,225,0.85)',
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: '#E5E5E5',
     backgroundColor: '#FFFFFF',
-    paddingHorizontal: 18,
+    paddingHorizontal: 0,
     paddingVertical: 16,
   },
   inputLabel: {
     color: leafRideColors.secondary,
-    fontFamily: fonts.Medium,
-    fontSize: 11,
-    lineHeight: 15,
+    ...leafTypography.medium,
+    fontSize: 13,
+    lineHeight: 18,
   },
   input: {
     marginTop: 8,
-    minHeight: 46,
-    borderRadius: 14,
+    minHeight: 54,
+    borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#E9E2D8',
+    borderColor: '#E5E5E5',
+    backgroundColor: '#F5F5F5',
     paddingHorizontal: 13,
     color: leafRideColors.text,
-    fontFamily: fonts.Medium,
-    fontSize: 14,
+    ...leafTypography.medium,
+    fontSize: 16,
   },
   inputDisabled: {
-    backgroundColor: '#F7F8F4',
+    backgroundColor: '#F5F5F5',
     color: leafRideColors.secondary,
   },
   fullButton: {

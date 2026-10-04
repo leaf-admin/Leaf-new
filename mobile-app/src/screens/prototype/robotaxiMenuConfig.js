@@ -2,6 +2,16 @@ import { CURRENT_SURFACE_STATUS } from './currentSurfaceStatus';
 
 const COMMON_ITEMS = [
   {
+    key: 'achievements',
+    status: CURRENT_SURFACE_STATUS.CURRENT,
+    title: 'Conquistas',
+    icon: 'person-circle-outline',
+    route: 'LeafAccountInfo',
+    openDirect: true,
+    section: 'account',
+    subtitle: 'Sua história e emblemas',
+  },
+  {
     key: 'privacy-account-deletion',
     status: CURRENT_SURFACE_STATUS.CURRENT,
     title: 'Privacidade',
@@ -21,7 +31,7 @@ const COMMON_ITEMS = [
     detailRoute: 'RobotaxiMenuSettings',
     openDirect: true,
     section: 'support',
-    subtitle: 'Notificações, mapa e acessibilidade'
+    subtitle: 'Conta, privacidade e suporte'
   },
   {
     key: 'help',
@@ -45,9 +55,31 @@ function withRole(items, role) {
 
 const PASSENGER_ITEMS = [
   {
+    key: 'payment-info',
+    status: CURRENT_SURFACE_STATUS.CURRENT,
+    title: 'Pagamento',
+    icon: 'wallet-outline',
+    route: 'LeafAccountInfo',
+    openDirect: true,
+    roles: ['customer'],
+    section: 'rides',
+    subtitle: 'Pix antes do embarque',
+  },
+  {
+    key: 'saved-places',
+    status: CURRENT_SURFACE_STATUS.CURRENT,
+    title: 'Endereços salvos',
+    icon: 'location-outline',
+    route: 'LeafSavedPlaces',
+    openDirect: true,
+    roles: ['customer'],
+    section: 'account',
+    subtitle: 'Casa, trabalho e favoritos'
+  },
+  {
     key: 'edit-profile',
     status: CURRENT_SURFACE_STATUS.CURRENT,
-    title: 'Editar perfil',
+    title: 'Dados pessoais',
     icon: 'person-outline',
     route: 'RobotaxiPrototypeProfile',
     detailRoute: 'RobotaxiMenuEditProfile',

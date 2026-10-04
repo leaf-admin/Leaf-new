@@ -1,3 +1,5 @@
+import leafTypography from '../../components/prototype/LeafTypography';
+import { LeafObjectIcon } from '../../components/prototype/LeafVisualElements';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { StatusBar, StyleSheet, Text, View } from "react-native";
 import Animated, {
@@ -9,7 +11,6 @@ import Animated, {
 } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
-import { fonts } from "../../theme/runtimeTokens";
 import PrototypeScreenTransition from "../../components/prototype/PrototypeScreenTransition";
 import PrototypeDismissibleSheet from "../../components/prototype/PrototypeDismissibleSheet";
 import {
@@ -78,7 +79,7 @@ export default function RobotaxiPaymentSuccessScreen({ navigation, route }) {
   const [cardHeight, setCardHeight] = useState(FALLBACK_CARD_HEIGHT);
   const protectedPaymentSuccessExitRef = useRef(false);
   const sheetBottom =
-    insets.bottom + SHEET_BOTTOM_OFFSET + robotaxiLifecycleMetrics.cardBottomGap;
+    SHEET_BOTTOM_OFFSET + robotaxiLifecycleMetrics.cardBottomGap;
 
   const destination =
     route?.params?.destination || selectedDestination?.name || "Destino";
@@ -328,9 +329,14 @@ export default function RobotaxiPaymentSuccessScreen({ navigation, route }) {
           dragEnabled={!isRideLifecycleLocked}
           sheetStyle={[styles.sheetWrap, { bottom: sheetBottom }]}
         >
-          <RobotaxiLifecycleCard onLayout={handleCardLayout} style={styles.card}>
+          <RobotaxiLifecycleCard onLayout={handleCardLayout} style={[styles.card, { paddingBottom: robotaxiLifecycleMetrics.cardPaddingBottom + insets.bottom }]}>
 
-            <View style={styles.iconWrap}>
+            <View style={styles.leadRow}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.title}>Pagamento confirmado</Text>
+                <Text style={styles.subtitle}>Corrida criada com sucesso. Agora vamos buscar seu motorista.</Text>
+              </View>
+              <View style={styles.iconWrap}>
               {!reduceMotion ? (
                 <Animated.View
                   pointerEvents="none"
@@ -338,14 +344,10 @@ export default function RobotaxiPaymentSuccessScreen({ navigation, route }) {
                 />
               ) : null}
               <Animated.View style={checkAnimatedStyle}>
-                <Ionicons name="checkmark" size={30} color="#FFFFFF" />
+                <LeafObjectIcon name="payment" size={48} />
               </Animated.View>
+              </View>
             </View>
-
-            <Text style={styles.title}>Pagamento confirmado</Text>
-            <Text style={styles.subtitle}>
-              Corrida criada com sucesso. Agora vamos buscar seu motorista.
-            </Text>
 
             <RobotaxiLifecycleButton
               label="Continuar para busca"
@@ -390,7 +392,7 @@ export default function RobotaxiPaymentSuccessScreen({ navigation, route }) {
               }}
               style={styles.primaryButton}
               testID="passenger-payment-success-continue-button"
-              accessibilityLabel="passenger-payment-success-continue-button"
+              accessibilityLabel="Continuar para busca"
             />
 
             {isRideLifecycleLocked ? null : (
@@ -421,42 +423,35 @@ const styles = StyleSheet.create({
   card: {
     marginHorizontal: robotaxiLifecycleMetrics.cardHorizontalMargin,
   },
+  leadRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 14 },
   iconWrap: {
-    alignSelf: "center",
-    width: 64,
-    height: 64,
-    borderRadius: 32,
+    width: 48,
+    height: 48,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: color.accent.primary,
-    shadowColor: color.shadow.accent,
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.18,
-    shadowRadius: 14,
-    elevation: 8,
   },
   iconRing: {
     position: "absolute",
     width: 64,
     height: 64,
     borderRadius: 32,
-    backgroundColor: color.accent.primary,
+    backgroundColor: color.surface.activeSoft,
   },
   title: {
-    marginTop: 10,
+    marginTop: 0,
     color: color.text.primary,
-    fontFamily: fonts.SemiBold,
-    fontSize: 15.5,
-    lineHeight: 20,
-    textAlign: "center",
+    ...leafTypography.semiBold,
+    fontSize: 24,
+    lineHeight: 30,
+    textAlign: 'left',
   },
   subtitle: {
     marginTop: 4,
     color: color.text.secondary,
-    fontFamily: fonts.Regular,
-    fontSize: typography.caption.size,
-    lineHeight: typography.caption.lineHeight,
-    textAlign: "center",
+    ...leafTypography.regular,
+    fontSize: 14,
+    lineHeight: 20,
+    textAlign: 'left',
   },
   primaryButton: {
     marginTop: 12,

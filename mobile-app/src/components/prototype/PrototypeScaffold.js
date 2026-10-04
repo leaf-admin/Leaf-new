@@ -1,11 +1,14 @@
+import leafTypography from './LeafTypography';
 import React from 'react';
-import { StyleSheet, TouchableOpacity, View } from 'react-native';
+import { useIsFocused } from '@react-navigation/native';
+import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import Animated, { Easing, FadeInUp } from 'react-native-reanimated';
+import { LeafObjectIcon } from './LeafVisualElements';
+import LeafMaterialSurface from './LeafMaterialSurface';
+import { useLeafNativeTabBar } from './LeafNativeTabBar';
 import robotaxiPrototypeTokens from '../design-system/robotaxiPrototypeTokens';
 
 const { color, touch, motion } = robotaxiPrototypeTokens;
-const islandEasing = Easing.bezier(...motion.bezier.snappy);
 
 function PrototypeTopControlGlyph({ name, tintColor }) {
   if (name === 'menu') {
@@ -30,12 +33,7 @@ function PrototypeTopControlGlyph({ name, tintColor }) {
   }
 
   if (name === 'arrow-back') {
-    return (
-      <View style={styles.chevronGlyphWrap}>
-        <View style={[styles.chevronGlyphStroke, styles.chevronGlyphStrokeTop, { backgroundColor: tintColor }]} />
-        <View style={[styles.chevronGlyphStroke, styles.chevronGlyphStrokeBottom, { backgroundColor: tintColor }]} />
-      </View>
-    );
+    return <Ionicons name="arrow-back" size={20} color={tintColor} />;
   }
 
   return <View style={[styles.glyphFallbackDot, { backgroundColor: tintColor }]} />;
@@ -84,45 +82,38 @@ export function PrototypeTopControls({
   );
 }
 
-export function PrototypeBottomIsland({ insets, active = 'home', onPressProfile, onPressHome, onPressSettings }) {
+export function PrototypeBottomIsland({ insets = {}, active = 'home', onPressProfile, onPressHome, onPressSettings, onPressActivity }) {
+  const focused = useIsFocused();
+  const native = useLeafNativeTabBar({ active, focused, onPressProfile, onPressHome, onPressSettings, onPressActivity });
+  if (native || !focused) return null;
+  const items = [
+    { key: 'home', title: 'Início', object: 'home', onPress: onPressHome },
+    { key: 'activity', title: 'Atividade', object: 'tabActivity', onPress: onPressActivity || onPressSettings },
+    { key: 'account', title: 'Conta', object: 'tabAccount', onPress: onPressProfile },
+  ];
   return (
-    <View style={[styles.islandWrap, { bottom: insets.bottom + 10 }]} pointerEvents="box-none">
-      <Animated.View
-        entering={FadeInUp.duration(motion.timing.standard)
-          .easing(islandEasing)
-          .withInitialValues({ transform: [{ translateY: 14 }], opacity: 0.95 })}
-        style={styles.island}
-      >
-        <TouchableOpacity
-          style={[styles.islandAction, active === 'profile' && styles.islandActionActive]}
-          onPress={onPressProfile}
-          activeOpacity={0.85}
-        >
-          <Ionicons name="person-outline" size={22} color={active === 'profile' ? color.accent.contrast : color.text.primary} />
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={[styles.islandAction, active === 'home' && styles.islandActionActive]}
-          onPress={onPressHome}
-          activeOpacity={0.85}
-        >
-          <Ionicons name="location" size={22} color={active === 'home' ? color.accent.contrast : color.text.primary} />
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={[styles.islandAction, active === 'settings' && styles.islandActionActive]}
-          onPress={onPressSettings}
-          activeOpacity={0.85}
-        >
-          <Ionicons
-            name="settings-outline"
-            size={22}
-            color={active === 'settings' ? color.accent.contrast : color.text.primary}
-          />
-        </TouchableOpacity>
-      </Animated.View>
+    <View style={[styles.islandWrap, { bottom: (insets.bottom || 0) + 8 }]} pointerEvents="box-none">
+      <LeafMaterialSurface style={styles.island}>
+        {items.map(item => (
+          <TouchableOpacity key={item.key} style={[styles.islandAction, active === item.key && styles.islandActionActive]}
+            onPress={item.onPress} activeOpacity={0.85} accessibilityRole="tab"
+            accessibilityLabel={item.title} accessibilityState={{ selected: active === item.key }} testID={`leaf-root-tab-${item.key}`}>
+            <LeafObjectIcon name={item.object} size={32} />
+            <Text style={[styles.tabLabel, active === item.key && styles.tabLabelActive]}>{item.title}</Text>
+          </TouchableOpacity>
+        ))}
+      </LeafMaterialSurface>
     </View>
   );
+}
+
+export function LeafRootTabs({ navigation, active, insets }) {
+  const focused = useIsFocused();
+  if (!focused) return null;
+  return <PrototypeBottomIsland insets={insets} active={active}
+    onPressHome={() => navigation.navigate('RobotaxiPrototype')}
+    onPressActivity={() => navigation.navigate('RobotaxiMenuTripHistory', { rootTab: true })}
+    onPressProfile={() => navigation.navigate('RobotaxiPrototypeMenu')} />;
 }
 
 const styles = StyleSheet.create({
@@ -243,36 +234,33 @@ const styles = StyleSheet.create({
     zIndex: 20
   },
   island: {
-    width: 236,
-    minHeight: touch.large + 12,
-    borderRadius: 37,
-    backgroundColor: color.surface.primary,
+    width: 274,
+    minHeight: 64,
+    borderRadius: 34,
+    backgroundColor: 'transparent',
     borderWidth: 1,
-    borderColor: color.border.strong,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
+    borderColor: 'rgba(255,255,255,0.8)',
+    paddingHorizontal: 4,
+    paddingVertical: 4,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     shadowColor: color.shadow.base,
     shadowOffset: { width: 0, height: 16 },
-    shadowOpacity: 0.24,
+    shadowOpacity: 0.09,
     shadowRadius: 26,
-    elevation: 13
+    elevation: 4
   },
   islandAction: {
-    width: touch.comfortable,
-    height: touch.comfortable,
-    borderRadius: touch.comfortable / 2,
+    flex: 1,
+    minHeight: 54,
+    borderRadius: 26,
     alignItems: 'center',
     justifyContent: 'center'
   },
   islandActionActive: {
-    backgroundColor: color.accent.primary,
-    shadowColor: color.shadow.accent,
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.26,
-    shadowRadius: 12,
-    elevation: 7
-  }
+    backgroundColor: 'rgba(222,222,222,0.58)',
+  },
+  tabLabel: { ...leafTypography.medium, fontSize: 10, lineHeight: 14, color: '#222222', marginTop: 1 },
+  tabLabelActive: { color: '#1A330E', ...leafTypography.semiBold },
 });

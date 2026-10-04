@@ -26,9 +26,9 @@ describe('dark ambient token foundation', () => {
     expect(surfaces.size).toBeGreaterThanOrEqual(4);
   });
 
-  it('dark background is green-black ambient, not pure black or light', () => {
+  it('uses the approved neutral charcoal dark background', () => {
     const { colorDark } = robotaxiPrototypeTokens;
-    expect(colorDark.bg.app.toLowerCase()).toBe('#0e1409');
+    expect(colorDark.bg.app.toLowerCase()).toBe('#141414');
   });
 
   it('dark accent and lime pop against the dark base', () => {

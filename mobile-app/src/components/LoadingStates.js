@@ -1,3 +1,4 @@
+import leafTypography from './prototype/LeafTypography';
 import React, { useEffect, useRef } from 'react';
 import {
     View,
@@ -8,7 +9,6 @@ import {
     ActivityIndicator
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { fonts } from '../theme/runtimeTokens';
 
 const { width, height } = Dimensions.get('window');
 
@@ -302,7 +302,7 @@ const styles = StyleSheet.create({
     loadingText: {
         marginTop: 12,
         fontSize: 14,
-        fontFamily: fonts.Medium,
+        ...leafTypography.medium,
         color: '#6B7280',
         textAlign: 'center',
     },
@@ -329,7 +329,7 @@ const styles = StyleSheet.create({
         right: 0,
         top: -20,
         fontSize: 12,
-        fontFamily: fonts.Medium,
+        ...leafTypography.medium,
         color: '#6B7280',
     },
     pullToRefreshContainer: {
@@ -345,7 +345,7 @@ const styles = StyleSheet.create({
     pullToRefreshText: {
         marginLeft: 8,
         fontSize: 14,
-        fontFamily: fonts.Medium,
+        ...leafTypography.medium,
         color: '#6B7280',
     },
     overlay: {
@@ -372,7 +372,7 @@ const styles = StyleSheet.create({
     overlayText: {
         marginTop: 12,
         fontSize: 16,
-        fontFamily: fonts.Medium,
+        ...leafTypography.medium,
         textAlign: 'center',
     },
     buttonLoadingContainer: {
@@ -387,7 +387,7 @@ const styles = StyleSheet.create({
     buttonLoadingText: {
         marginLeft: 8,
         fontSize: 16,
-        fontFamily: fonts.Medium,
+        ...leafTypography.medium,
         color: '#FFFFFF',
     },
     loadingScreenContainer: {
@@ -408,13 +408,13 @@ const styles = StyleSheet.create({
         fontWeight: '700',
         color: '#41D274',
         marginBottom: 8,
-        fontFamily: fonts.Bold,
+        ...leafTypography.bold,
     },
     loadingScreenSubtitle: {
         fontSize: 16,
         color: '#666',
         marginBottom: 30,
-        fontFamily: fonts.Medium,
+        ...leafTypography.medium,
     },
     loadingScreenSpinner: {
         marginTop: 20,

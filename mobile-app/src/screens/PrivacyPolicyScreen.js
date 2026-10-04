@@ -1,3 +1,4 @@
+import leafTypography from '../components/prototype/LeafTypography';
 import Logger from '../utils/Logger';
 import React, { useCallback, useState, useEffect } from 'react';
 import {
@@ -11,11 +12,11 @@ import {
   Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { LeafObjectIcon } from '../components/prototype/LeafVisualElements';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useSelector } from 'react-redux';
 import { apiClient } from '../services/httpClient';
 import { useAccountDeletionFlow } from '../hooks/useAccountDeletionFlow';
-import { fonts } from '../theme/runtimeTokens';
 import {
   PrototypeMenuCloseButton,
   PrototypeMenuInfoRow,
@@ -32,6 +33,7 @@ const SURFACE_BOTTOM_PADDING = 18;
 const PrivacyPolicyScreen = ({ navigation, route }) => {
   const insets = useSafeAreaInsets();
   const [selectedSection, setSelectedSection] = useState(() => route?.params?.initialSection || 'overview');
+  const [sectionsExpanded, setSectionsExpanded] = useState(false);
   const [privacySettings, setPrivacySettings] = useState({
     locationSharing: true,
     dataAnalytics: true,
@@ -161,7 +163,7 @@ const PrivacyPolicyScreen = ({ navigation, route }) => {
   const renderDetailRow = ({ icon, title, description, last = false }) => (
     <View style={[styles.detailRow, last && styles.detailRowLast]}>
       <View style={styles.detailIconSlot}>
-        <Ionicons name={icon} size={18} color={color.text.primary} />
+        <LeafObjectIcon symbol={icon} size={40} />
       </View>
       <View style={styles.detailCopy}>
         <Text style={styles.detailTitle}>{title}</Text>
@@ -174,7 +176,7 @@ const PrivacyPolicyScreen = ({ navigation, route }) => {
     <View style={[styles.settingRow, last && styles.detailRowLast]}>
       <View style={styles.settingCopyWrap}>
         <View style={styles.detailIconSlot}>
-          <Ionicons name={icon} size={18} color={color.text.primary} />
+          <LeafObjectIcon symbol={icon} size={40} />
         </View>
         <View style={styles.detailCopy}>
           <Text style={styles.detailTitle}>{title}</Text>
@@ -325,16 +327,30 @@ const PrivacyPolicyScreen = ({ navigation, route }) => {
 
   const renderSections = () => (
     <PrototypeMenuSection title="Tópicos">
-      {sections.map((item, index) => (
+      <PrototypeMenuRow
+        icon="document-text-outline"
+        title={sections.find(item => item.id === selectedSection)?.label || 'Tópicos'}
+        subtitle={sectionsExpanded ? 'Escolha o conteúdo abaixo' : 'Ver todos os tópicos'}
+        last={!sectionsExpanded}
+        trailing={<Ionicons name={sectionsExpanded ? 'chevron-up' : 'chevron-down'} size={18} color={color.text.secondary} />}
+        onPress={() => setSectionsExpanded(current => !current)}
+        expanded={sectionsExpanded}
+        testID="privacy-topic-selector"
+        accessibilityLabel="Tópicos de privacidade"
+        accessibilityHint={sectionsExpanded ? 'Recolher a lista de tópicos.' : 'Abrir a lista de tópicos.'}
+      />
+      {sectionsExpanded ? sections.map((item, index) => (
         <PrototypeMenuRow
           key={item.id}
           icon={item.icon}
           title={item.label}
           active={selectedSection === item.id}
           last={index === sections.length - 1}
-          onPress={() => setSelectedSection(item.id)}
+          onPress={() => { setSelectedSection(item.id); setSectionsExpanded(false); }}
+          testID={`privacy-topic-${item.id}`}
+          accessibilityLabel={item.label}
         />
-      ))}
+      )) : null}
     </PrototypeMenuSection>
   );
 
@@ -351,7 +367,6 @@ const PrivacyPolicyScreen = ({ navigation, route }) => {
     <View
       style={styles.container}
       testID="privacy-policy-screen"
-      accessibilityLabel="privacy-policy-screen"
     >
       <StatusBar translucent backgroundColor="transparent" barStyle="dark-content" />
 
@@ -393,12 +408,12 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: 'rgba(247,250,247,0.985)',
+    backgroundColor: '#FFFFFF',
   },
   loadingText: {
     marginTop: 12,
     color: color.text.secondary,
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     fontSize: typography.caption.size,
     lineHeight: typography.caption.lineHeight,
   },
@@ -417,7 +432,7 @@ const styles = StyleSheet.create({
     padding: 8,
   },
   headerTitle: {
-    fontSize: 20,
+    fontSize: 22,
     fontWeight: 'bold',
     color: '#2c3e50',
   },
@@ -761,26 +776,26 @@ const styles = StyleSheet.create({
   },
   bodyCopy: {
     color: color.text.secondary,
-    fontFamily: fonts.Regular,
+    ...leafTypography.regular,
     fontSize: typography.body.size,
     lineHeight: typography.body.lineHeight,
     paddingTop: 10,
     paddingBottom: 4,
   },
   detailRow: {
-    minHeight: 54,
+    minHeight: 68,
     flexDirection: 'row',
     alignItems: 'center',
     paddingVertical: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(17,26,39,0.08)',
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#E5E5E5',
   },
   detailRowLast: {
     borderBottomWidth: 0,
     paddingBottom: 4,
   },
   detailIconSlot: {
-    width: 28,
+    width: 52,
     alignItems: 'flex-start',
     justifyContent: 'center',
   },
@@ -790,26 +805,26 @@ const styles = StyleSheet.create({
   },
   detailTitle: {
     color: color.text.primary,
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 16,
     lineHeight: 22,
   },
   detailDescription: {
     marginTop: 1,
     color: color.text.secondary,
-    fontFamily: fonts.Regular,
-    fontSize: typography.micro.size,
-    lineHeight: typography.micro.lineHeight,
+    ...leafTypography.regular,
+    fontSize: 14,
+    lineHeight: 20,
   },
   settingRow: {
-    minHeight: 62,
+    minHeight: 68,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: 12,
     paddingVertical: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(17,26,39,0.08)',
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#E5E5E5',
   },
   settingCopyWrap: {
     flex: 1,

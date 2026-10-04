@@ -1,3 +1,4 @@
+import leafTypography from '../../prototype/LeafTypography';
 import React, { useRef, useState } from 'react';
 import {
     View,
@@ -10,8 +11,8 @@ import {
     Platform
 } from 'react-native';
 import auth from '@react-native-firebase/auth';
-import { fonts } from '../../../theme/runtimeTokens';
 import { Ionicons } from '@expo/vector-icons';
+import { LeafObjectIcon } from '../../prototype/LeafVisualElements';
 import {
     allowCustomOtpFallback,
     allowQaOtpForceFlow,
@@ -529,15 +530,15 @@ const PhoneInputStep = ({ onVerificationSent, onPasswordLoginSuccess, progressMe
             keyboard
             showBack={false}
             progressMeta={progressMeta}
-            title="Bem-vindo à Leaf"
-            description={`Digite seu celular para entrar ou criar sua conta. Vamos enviar um código pelo ${otpChannelLabel}.`}
-            scrollEnabled={requiresPassword || forgotPasswordMode}
+            headerTitle="Seu acesso"
+            leadObject="account"
+            title="Qual é seu número?"
+            description={`Vamos confirmar seu acesso por ${otpChannelLabel}.`}
             childrenStyle={styles.childrenWrap}
             footer={(
                 <View>
                     <ContinueButton
                         testID="auth-continue-btn"
-                        accessibilityLabel="auth-continue-btn"
                         onPress={handleContinue}
                         text={loading || checking
                             ? 'Continuando...'
@@ -549,9 +550,6 @@ const PhoneInputStep = ({ onVerificationSent, onPasswordLoginSuccess, progressMe
 
                     {!requiresPassword ? (
                         <>
-                            <Text style={styles.firstAccessHint}>
-                                Esse passo ajuda a manter sua conta segura.
-                            </Text>
                             <Text style={styles.hiddenText}>
                                 Informe seu celular para confirmar sua conta com segurança.
                             </Text>
@@ -561,7 +559,9 @@ const PhoneInputStep = ({ onVerificationSent, onPasswordLoginSuccess, progressMe
                                 disabled={loading || checking || phoneNumber.length < 10}
                                 style={styles.passwordFallbackButton}
                                 testID="auth-password-fallback-btn"
-                                accessibilityLabel="auth-password-fallback-btn"
+                                accessibilityRole="button"
+                                accessibilityLabel="Já tenho senha"
+                                accessibilityHint="Entrar com a senha deste celular."
                             >
                                 <Text style={styles.passwordFallbackText}>Já tenho senha</Text>
                             </TouchableOpacity>
@@ -571,15 +571,24 @@ const PhoneInputStep = ({ onVerificationSent, onPasswordLoginSuccess, progressMe
             )}
         >
                 <View style={styles.contentCard}>
+                    <Text style={styles.fieldLabel}>Telefone com DDD</Text>
                     <View style={styles.inputContainer}>
-                        <TouchableOpacity style={styles.countrySelector}>
-                            <Text style={styles.countryCode}>+55</Text>
-                        </TouchableOpacity>
+                        <View
+                            style={styles.countrySelector}
+                            accessible
+                            accessibilityRole="text"
+                            accessibilityLabel="Código do país +55"
+                        >
+                            <Text style={styles.countryCode} accessible={false}>+55</Text>
+                        </View>
 
                         <TextInput
                             testID="auth-phone-input"
-                            placeholder="Seu celular"
+                            placeholder="DDD + número"
+                            accessibilityLabel="Número de celular com DDD"
+                            accessibilityHint="Digite o número com DDD, sem o código do país."
                             placeholderTextColor={color.textMuted}
+                            selectionColor="#222222"
                             keyboardType="phone-pad"
                             value={phoneNumber}
                             onChangeText={handlePhoneChanged}
@@ -594,6 +603,15 @@ const PhoneInputStep = ({ onVerificationSent, onPasswordLoginSuccess, progressMe
                             style={styles.input}
                         />
                     </View>
+
+                    {!requiresPassword ? (
+                        <View style={styles.accessHint}>
+                            <LeafObjectIcon name="privacy" size={32} />
+                            <Text style={styles.accessHintText}>
+                                Um código de 6 números confirma que este telefone é seu.
+                            </Text>
+                        </View>
+                    ) : null}
 
                     {requiresPassword ? (
                         <View style={styles.passwordInlineContainer}>
@@ -615,7 +633,7 @@ const PhoneInputStep = ({ onVerificationSent, onPasswordLoginSuccess, progressMe
                                     secureTextEntry={forgotPasswordMode ? !showNewPassword : !showPassword}
                                     editable={!loading}
                                     testID={forgotPasswordMode ? 'auth-reset-new-password-input' : 'auth-password-input'}
-                                    accessibilityLabel={forgotPasswordMode ? 'auth-reset-new-password-input' : 'auth-password-input'}
+                                    accessibilityLabel={forgotPasswordMode ? 'Nova senha' : 'Senha'}
                                     style={styles.passwordInput}
                                 />
                                 <TouchableOpacity
@@ -628,6 +646,12 @@ const PhoneInputStep = ({ onVerificationSent, onPasswordLoginSuccess, progressMe
                                         }
                                     }}
                                     disabled={loading}
+                                    accessibilityRole="button"
+                                    accessibilityLabel={
+                                        (forgotPasswordMode ? showNewPassword : showPassword)
+                                            ? 'Ocultar senha'
+                                            : 'Mostrar senha'
+                                    }
                                 >
                                     <Ionicons
                                         name={(forgotPasswordMode ? showNewPassword : showPassword) ? 'eye-off' : 'eye'}
@@ -650,7 +674,7 @@ const PhoneInputStep = ({ onVerificationSent, onPasswordLoginSuccess, progressMe
                                         keyboardType="number-pad"
                                         editable={!loading}
                                         testID="auth-reset-otp-input"
-                                        accessibilityLabel="auth-reset-otp-input"
+                                        accessibilityLabel="Código de recuperação"
                                         style={styles.inlineTextInput}
                                     />
                                     <View style={styles.passwordInputContainer}>
@@ -667,13 +691,19 @@ const PhoneInputStep = ({ onVerificationSent, onPasswordLoginSuccess, progressMe
                                             secureTextEntry={!showConfirmNewPassword}
                                             editable={!loading}
                                             testID="auth-reset-confirm-password-input"
-                                            accessibilityLabel="auth-reset-confirm-password-input"
+                                            accessibilityLabel="Confirmar nova senha"
                                             style={styles.passwordInput}
                                         />
                                         <TouchableOpacity
                                             style={styles.passwordEyeButton}
                                             onPress={() => setShowConfirmNewPassword((prev) => !prev)}
                                             disabled={loading}
+                                            accessibilityRole="button"
+                                            accessibilityLabel={
+                                                showConfirmNewPassword
+                                                    ? 'Ocultar confirmação de senha'
+                                                    : 'Mostrar confirmação de senha'
+                                            }
                                         >
                                             <Ionicons
                                                 name={showConfirmNewPassword ? 'eye-off' : 'eye'}
@@ -687,6 +717,8 @@ const PhoneInputStep = ({ onVerificationSent, onPasswordLoginSuccess, progressMe
                                         onPress={() => handleForgotPasswordPressed(`+55${normalizePhoneInputValue(phoneNumber)}`)}
                                         disabled={loading}
                                         style={styles.inlineLinkButton}
+                                        accessibilityRole="button"
+                                        accessibilityLabel="Reenviar código"
                                     >
                                         <Text style={styles.inlineLinkText}>Reenviar código</Text>
                                     </TouchableOpacity>
@@ -718,7 +750,7 @@ const PhoneInputStep = ({ onVerificationSent, onPasswordLoginSuccess, progressMe
 
 const styles = StyleSheet.create({
     childrenWrap: {
-        marginTop: 54
+        marginTop: 24
     },
     keyboardContainer: {
         flex: 1,
@@ -742,18 +774,18 @@ const styles = StyleSheet.create({
     },
     title: {
         color: '#102018',
-        fontSize: 19,
-        lineHeight: 25,
-        fontFamily: fonts.Medium,
+        fontSize: 22,
+        lineHeight: 28,
+        ...leafTypography.medium,
         textAlign: 'left',
         letterSpacing: 0
     },
     subtitle: {
         marginTop: 8,
         color: '#66756B',
-        fontSize: 13,
-        lineHeight: 18,
-        fontFamily: fonts.Regular,
+        fontSize: 14,
+        lineHeight: 20,
+        ...leafTypography.regular,
         textAlign: 'left'
     },
     contentCard: {
@@ -783,7 +815,7 @@ const styles = StyleSheet.create({
         fontSize: 15,
         lineHeight: 20,
         color: color.textPrimary,
-        fontFamily: fonts.Medium
+        ...leafTypography.medium
     },
     passwordEyeButton: {
         paddingHorizontal: spacing.sm,
@@ -800,7 +832,7 @@ const styles = StyleSheet.create({
         fontSize: 15,
         lineHeight: 20,
         color: color.textPrimary,
-        fontFamily: fonts.Medium
+        ...leafTypography.medium
     },
     inlineLinkButton: {
         alignSelf: 'flex-start',
@@ -811,7 +843,7 @@ const styles = StyleSheet.create({
         color: color.textSecondary,
         fontSize: 13,
         lineHeight: 18,
-        fontFamily: fonts.SemiBold,
+        ...leafTypography.semiBold,
         textDecorationLine: 'underline'
     },
     inlineHintText: {
@@ -819,50 +851,70 @@ const styles = StyleSheet.create({
         color: color.textSecondary,
         fontSize: 12,
         lineHeight: 16,
-        fontFamily: fonts.Medium
+        ...leafTypography.medium
     },
     passwordErrorText: {
         marginTop: 6,
         color: color.error,
         fontSize: 12,
         lineHeight: 16,
-        fontFamily: fonts.Medium
+        ...leafTypography.medium
     },
     inputContainer: {
         flexDirection: 'row',
         alignItems: 'center',
-        backgroundColor: '#FFFFFF',
-        borderWidth: 1,
+        backgroundColor: color.surfaceMuted,
+        borderWidth: StyleSheet.hairlineWidth,
         borderColor: color.border,
-        borderRadius: 24,
+        borderRadius: 16,
         paddingRight: 18,
-        minHeight: 58
+        minHeight: 64
     },
     countrySelector: {
         width: 64,
         paddingHorizontal: 0,
+        paddingVertical: 0,
         justifyContent: 'center',
         borderRightWidth: 1,
         borderRightColor: color.border,
-        height: 58
+        minHeight: 24
+    },
+    fieldLabel: {
+        marginBottom: 10,
+        color: color.textSecondary,
+        fontSize: 13,
+        lineHeight: 18,
+        ...leafTypography.regular
+    },
+    accessHint: {
+        marginTop: 24,
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+        gap: 12
+    },
+    accessHintText: {
+        flex: 1,
+        color: color.textSecondary,
+        fontSize: 13,
+        lineHeight: 19,
+        ...leafTypography.regular
     },
     countryCode: {
         marginTop: 1,
         color: color.textPrimary,
         fontSize: 16,
-        lineHeight: 21,
-        fontFamily: fonts.Medium,
+        ...leafTypography.medium,
         textAlign: 'center'
     },
     input: {
         flex: 1,
-        height: 58,
+        minHeight: 58,
         paddingHorizontal: 18,
+        paddingVertical: 12,
         fontSize: 16,
-        lineHeight: 21,
         letterSpacing: 0,
         color: color.textPrimary,
-        fontFamily: fonts.Regular
+        ...leafTypography.regular
     },
     footer: {
         marginTop: 'auto',
@@ -884,7 +936,7 @@ const styles = StyleSheet.create({
     continueButtonText: {
         fontSize: 12,
         lineHeight: 16,
-        fontFamily: fonts.Medium
+        ...leafTypography.medium
     },
     firstAccessHint: {
         marginTop: 0,
@@ -892,7 +944,7 @@ const styles = StyleSheet.create({
         color: color.textMuted,
         fontSize: 11,
         lineHeight: 15,
-        fontFamily: fonts.Regular,
+        ...leafTypography.regular,
         paddingHorizontal: 14
     },
     hiddenText: {
@@ -911,7 +963,7 @@ const styles = StyleSheet.create({
         color: color.textSecondary,
         fontSize: 13,
         lineHeight: 18,
-        fontFamily: fonts.SemiBold,
+        ...leafTypography.semiBold,
         textDecorationLine: 'underline'
     }
 });

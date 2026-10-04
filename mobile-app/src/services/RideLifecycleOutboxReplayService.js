@@ -12,6 +12,22 @@ const normalizeStatus = (value) => {
   if (normalized === 'cancelled') return 'canceled';
   if (normalized === 'driver_arrived') return 'arrived';
   if (normalized === 'in_progress' || normalized === 'on_trip') return 'started';
+  if (
+    [
+      'finished',
+      'trip_completed',
+      'early_ended_by_rider',
+      'interrupted_operational_ended',
+      'early_ended_review',
+    ].includes(normalized)
+  ) {
+    return 'completed';
+  }
+  if (
+    ['no_driver', 'no_drivers_found', 'no_drivers_available'].includes(normalized)
+  ) {
+    return 'no_drivers';
+  }
   return normalized;
 };
 
@@ -28,7 +44,7 @@ const STATUS_ORDER = Object.freeze({
   canceled: 5,
 });
 
-const TERMINAL_STATUSES = new Set(['completed', 'canceled']);
+const TERMINAL_STATUSES = new Set(['completed', 'canceled', 'no_drivers', 'rejected']);
 
 const getStatusOrder = (status) => STATUS_ORDER[normalizeStatus(status)] ?? -1;
 
@@ -84,6 +100,24 @@ export const resolveRideLifecycleReplayDecision = (intent = {}, state = {}) => {
 
   if (!activeBookingId && !TERMINAL_STATUSES.has(status)) {
     return { action: 'hold', reason: 'no_active_booking', status };
+  }
+
+  if (TERMINAL_STATUSES.has(status)) {
+    if (status === 'completed') {
+      if (eventType === RIDE_EVENT_TYPES.ARRIVED_AT_PICKUP) {
+        return { action: 'ack', reason: 'state_already_arrived', status };
+      }
+      if (eventType === RIDE_EVENT_TYPES.START_TRIP) {
+        return { action: 'ack', reason: 'state_already_started', status };
+      }
+      if (eventType === RIDE_EVENT_TYPES.COMPLETE_TRIP) {
+        return { action: 'ack', reason: 'state_already_completed', status };
+      }
+    }
+    if (status === 'canceled' && eventType === RIDE_EVENT_TYPES.CANCEL_RIDE) {
+      return { action: 'ack', reason: 'state_already_canceled', status };
+    }
+    return { action: 'reject', reason: 'ride_already_terminal', status };
   }
 
   if (eventType === RIDE_EVENT_TYPES.ARRIVED_AT_PICKUP) {
@@ -286,6 +320,16 @@ export const replayPendingRideLifecycleIntents = async ({
       await markAcked({ idempotencyKey: intent.idempotencyKey });
       onSyncState(buildSyncState());
       report.acked += 1;
+      continue;
+    }
+
+    if (decision.action === 'reject') {
+      await markRejected({
+        idempotencyKey: intent.idempotencyKey,
+        error: `Ride was already terminal (${decision.status || 'unknown'}); pending event was superseded.`,
+      });
+      onSyncState(buildSyncState());
+      report.rejected += 1;
       continue;
     }
 

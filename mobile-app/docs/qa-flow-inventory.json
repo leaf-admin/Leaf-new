@@ -1,5 +1,6 @@
 {
-  "generatedAt": "2026-06-22T20:09:07.275Z",
+  "generatedAt": "2026-10-04T06:48:25.121Z",
+  "coverageModel": "static-flow-definition-only",
   "releasePreconditions": [
     "Executar somente build release instalado (`br.com.leaf.ride`), sem Expo Go/dev-client como alvo.",
     "Backend deve responder `/health/runtime-flags` com `realSandbox.ready=true`.",
@@ -7,40 +8,43 @@
     "Motorista deve estar online e elegível antes de qualquer flow de solicitação do passageiro.",
     "Evidências por rodada devem incluir JUnit XML, logs Maestro, screenshots e snapshot de runtime flags."
   ],
+  "routeSurfaceCounts": {
+    "current": 43,
+    "compatibility_redirect": 26
+  },
   "releaseCoverageMatrix": [
     {
       "id": "passenger_signup",
       "label": "Cadastro passageiro",
-      "status": "GAP",
-      "missing": [
-        "platform:ios"
-      ],
+      "status": "DEFINED",
+      "missing": [],
       "flows": [
-        ".maestro/flows/qa/e2e/20-passenger-signup-real-android.yaml"
+        ".maestro/flows/qa/e2e/20-passenger-signup-real-android.yaml",
+        ".maestro/flows/qa/e2e/20-passenger-signup-real-ios.yaml"
       ]
     },
     {
       "id": "driver_signup",
       "label": "Cadastro motorista",
-      "status": "GAP",
-      "missing": [
-        "platform:ios"
-      ],
+      "status": "DEFINED",
+      "missing": [],
       "flows": [
-        ".maestro/flows/qa/e2e/21-driver-signup-docs-real-android.yaml"
+        ".maestro/flows/qa/e2e/21-driver-signup-docs-real-android.yaml",
+        ".maestro/flows/qa/e2e/21-driver-signup-real-ios.yaml"
       ]
     },
     {
       "id": "login",
       "label": "Login passageiro/motorista",
-      "status": "GO",
+      "status": "DEFINED",
       "missing": [],
       "flows": [
         ".maestro/flows/auth/01-login-customer.yaml",
-        ".maestro/flows/auth/02-login-driver.yaml",
         ".maestro/flows/qa/10-passenger-voice-after-login.yaml",
         ".maestro/flows/qa/e2e/20-passenger-signup-real-android.yaml",
+        ".maestro/flows/qa/e2e/20-passenger-signup-real-ios.yaml",
         ".maestro/flows/qa/e2e/21-driver-signup-docs-real-android.yaml",
+        ".maestro/flows/qa/e2e/21-driver-signup-real-ios.yaml",
         ".maestro/flows/rides/01-request-ride-real.yaml",
         ".maestro/flows/rides/01-request-ride.yaml",
         ".maestro/flows/screenshots-for-stores.yaml"
@@ -49,40 +53,56 @@
     {
       "id": "driver_online",
       "label": "Motorista online antes da solicitação",
-      "status": "GO",
+      "status": "DEFINED",
       "missing": [],
       "flows": [
-        ".maestro/flows/auth/02-login-driver.yaml",
+        ".maestro/flows/current-menus/02-driver-dedicated-device.yaml",
+        ".maestro/flows/current/01-robotaxi-current-home.yaml",
         ".maestro/flows/driver/01-driver-go-online.yaml",
-        ".maestro/flows/qa/91-play-video-driver-location-android.yaml",
         ".maestro/flows/qa/e2e/04-driver-offer-trip-complete.yaml",
         ".maestro/flows/qa/e2e/07-driver-navigation-audit.yaml",
         ".maestro/flows/qa/e2e/21-driver-signup-docs-real-android.yaml",
+        ".maestro/flows/qa/e2e/21-driver-signup-real-ios.yaml",
         ".maestro/flows/qa/e2e/lifecycle/00-driver-offline-home.yaml",
         ".maestro/flows/qa/e2e/lifecycle/01-driver-online-home.yaml",
         ".maestro/flows/qa/e2e/lifecycle/01-driver-toggle-online.yaml",
-        ".maestro/flows/qa/e2e/lifecycle/09-driver-receipt-back-to-map.yaml"
+        ".maestro/flows/qa/e2e/lifecycle/09-driver-receipt-back-to-map.yaml",
+        ".maestro/flows/qa/ux-lab-driver-home-baseline-ios.yaml"
       ]
     },
     {
       "id": "request_ride",
       "label": "Passageiro solicita corrida",
-      "status": "GO",
+      "status": "DEFINED",
       "missing": [],
       "flows": [
         ".maestro/flows/auth/01-login-customer.yaml",
+        ".maestro/flows/current-menus/01-passenger-dedicated-device.yaml",
+        ".maestro/flows/current/01-robotaxi-current-home.yaml",
         ".maestro/flows/qa/e2e/03-passenger-request-ride.yaml",
         ".maestro/flows/qa/e2e/05-passenger-post-trip-verify.yaml",
         ".maestro/flows/qa/e2e/20-passenger-signup-real-android.yaml",
+        ".maestro/flows/qa/e2e/20-passenger-signup-real-ios.yaml",
         ".maestro/flows/qa/e2e/ideal/13-passenger-request-ideal.yaml",
         ".maestro/flows/qa/e2e/lifecycle/02-passenger-request-copacabana-release-direct.yaml",
         ".maestro/flows/qa/e2e/lifecycle/02-passenger-request-copacabana.yaml",
+        ".maestro/flows/qa/e2e/lifecycle/02-passenger-request-current-home.yaml",
         ".maestro/flows/qa/e2e/lifecycle/02-passenger-request-home.yaml",
         ".maestro/flows/qa/e2e/lifecycle/02-passenger-request-recent-destination.yaml",
         ".maestro/flows/qa/e2e/lifecycle/10-passenger-receipt-back-to-map.yaml",
         ".maestro/flows/qa/e2e/wave4/00-passenger-quote-ready.yaml",
         ".maestro/flows/qa/e2e/wave4/01-passenger-request-from-quote.yaml",
         ".maestro/flows/qa/e2e/wave4/06-passenger-request-extension.yaml",
+        ".maestro/flows/qa/transitions/passenger-cancelled-return-to-home-ios.yaml",
+        ".maestro/flows/qa/transitions/passenger-no-drivers-retry-to-home-ios.yaml",
+        ".maestro/flows/qa/transitions/passenger-payment-failed-retry-to-home-ios.yaml",
+        ".maestro/flows/qa/ui-ux-passenger-category-current-ios.yaml",
+        ".maestro/flows/qa/ui-ux-passenger-confirm-availability-release-ios.yaml",
+        ".maestro/flows/qa/ui-ux-passenger-destination-quote-ios.yaml",
+        ".maestro/flows/qa/ui-ux-passenger-destination-quote-release-compact-ios.yaml",
+        ".maestro/flows/qa/ui-ux-passenger-destination-quote-release-ios.yaml",
+        ".maestro/flows/qa/ui-ux-passenger-pix-release-compact-ios.yaml",
+        ".maestro/flows/qa/ui-ux-passenger-pix-release-ios.yaml",
         ".maestro/flows/rides/01-request-ride-real.yaml",
         ".maestro/flows/rides/01-request-ride.yaml",
         ".maestro/flows/screenshots-for-stores.yaml"
@@ -91,7 +111,7 @@
     {
       "id": "driver_accept",
       "label": "Motorista aceita corrida",
-      "status": "GO",
+      "status": "DEFINED",
       "missing": [],
       "flows": [
         ".maestro/flows/qa/e2e/ideal/14-driver-complete-ideal.yaml",
@@ -103,11 +123,12 @@
     {
       "id": "navigation",
       "label": "Navegação passageiro/motorista",
-      "status": "GO",
+      "status": "DEFINED",
       "missing": [],
       "flows": [
         ".maestro/flows/account-deletion-direct-smoke.yaml",
-        ".maestro/flows/auth/02-login-driver.yaml",
+        ".maestro/flows/current-menus/01-passenger-dedicated-device.yaml",
+        ".maestro/flows/current-menus/02-driver-dedicated-device.yaml",
         ".maestro/flows/qa/03-passenger-final-view.yaml",
         ".maestro/flows/qa/04-driver-final-view.yaml",
         ".maestro/flows/qa/11-passenger-menu-support-settings-audit.yaml",
@@ -121,16 +142,15 @@
         ".maestro/flows/qa/e2e/ideal/14-driver-complete-ideal.yaml",
         ".maestro/flows/qa/e2e/ideal/15-passenger-receipt-rating-ideal.yaml",
         ".maestro/flows/qa/e2e/lifecycle/11-driver-open-earnings.yaml",
+        ".maestro/flows/qa/ui-ux-privacy-route-ios.yaml",
         ".maestro/flows/screenshots-for-stores.yaml"
       ]
     },
     {
       "id": "chat",
       "label": "Chat em corrida ativa",
-      "status": "GAP",
-      "missing": [
-        "role:driver"
-      ],
+      "status": "DEFINED",
+      "missing": [],
       "flows": [
         ".maestro/flows/qa/11-passenger-menu-support-settings-audit.yaml",
         ".maestro/flows/qa/e2e/06-passenger-navigation-audit.yaml",
@@ -140,21 +160,25 @@
     {
       "id": "support",
       "label": "Suporte/ticket",
-      "status": "GO",
+      "status": "DEFINED",
       "missing": [],
       "flows": [
+        ".maestro/flows/current-menus/01-passenger-dedicated-device.yaml",
+        ".maestro/flows/current-menus/02-driver-dedicated-device.yaml",
         ".maestro/flows/qa/11-passenger-menu-support-settings-audit.yaml",
-        ".maestro/flows/qa/e2e/20-passenger-signup-real-android.yaml"
+        ".maestro/flows/qa/e2e/20-passenger-signup-real-android.yaml",
+        ".maestro/flows/qa/e2e/20-passenger-signup-real-ios.yaml"
       ]
     },
     {
       "id": "rating",
       "label": "Avaliação pós-corrida",
-      "status": "GO",
+      "status": "DEFINED",
       "missing": [],
       "flows": [
         ".maestro/flows/qa/12-passenger-rating-screen-audit.yaml",
         ".maestro/flows/qa/e2e/20-passenger-signup-real-android.yaml",
+        ".maestro/flows/qa/e2e/20-passenger-signup-real-ios.yaml",
         ".maestro/flows/qa/e2e/ideal/15-passenger-receipt-rating-ideal.yaml",
         ".maestro/flows/qa/e2e/lifecycle/07-passenger-rate-trip.yaml",
         ".maestro/flows/qa/e2e/lifecycle/08-driver-rate-passenger.yaml",
@@ -164,544 +188,349 @@
   ],
   "routes": [
     {
-      "name": "About",
-      "category": "account-support"
-    },
-    {
-      "name": "AccountSettings",
-      "category": "account-support"
-    },
-    {
-      "name": "AccountStatement",
-      "category": "other"
-    },
-    {
-      "name": "addMoney",
-      "category": "wallet-finance"
-    },
-    {
-      "name": "AddMoney",
-      "category": "wallet-finance"
-    },
-    {
-      "name": "AddVehicle",
-      "category": "driver-ops"
+      "name": "AuthFlowScreenshotHarness",
+      "category": "auth-onboarding",
+      "surfaceStatus": "current"
     },
     {
       "name": "AuthLoading",
-      "category": "auth-onboarding"
+      "category": "auth-onboarding",
+      "surfaceStatus": "current"
     },
     {
       "name": "AuthLoadingScreen",
-      "category": "auth-onboarding"
+      "category": "auth-onboarding",
+      "surfaceStatus": "current"
     },
     {
       "name": "AuthScreen",
-      "category": "auth-onboarding"
+      "category": "auth-onboarding",
+      "surfaceStatus": "compatibility_redirect"
     },
     {
       "name": "BaaSAccount",
-      "category": "auth-onboarding"
+      "category": "auth-onboarding",
+      "surfaceStatus": "compatibility_redirect"
     },
     {
       "name": "BaaSAccountScreen",
-      "category": "auth-onboarding"
-    },
-    {
-      "name": "BookedCab",
-      "category": "ride-lifecycle"
-    },
-    {
-      "name": "BookingConfirmation",
-      "category": "other"
-    },
-    {
-      "name": "Cancellation",
-      "category": "ride-lifecycle"
-    },
-    {
-      "name": "CancellationSuccess",
-      "category": "ride-lifecycle"
-    },
-    {
-      "name": "CarEdit",
-      "category": "other"
-    },
-    {
-      "name": "CarEditScreen",
-      "category": "other"
-    },
-    {
-      "name": "Cars",
-      "category": "other"
-    },
-    {
-      "name": "Chat",
-      "category": "account-support"
+      "category": "auth-onboarding",
+      "surfaceStatus": "compatibility_redirect"
     },
     {
       "name": "CNHUpload",
-      "category": "auth-onboarding"
+      "category": "auth-onboarding",
+      "surfaceStatus": "compatibility_redirect"
     },
     {
       "name": "CNHUploadScreen",
-      "category": "auth-onboarding"
-    },
-    {
-      "name": "Complain",
-      "category": "ride-lifecycle"
+      "category": "auth-onboarding",
+      "surfaceStatus": "compatibility_redirect"
     },
     {
       "name": "CompleteRegistration",
-      "category": "auth-onboarding"
+      "category": "auth-onboarding",
+      "surfaceStatus": "compatibility_redirect"
     },
     {
       "name": "CRLVUpload",
-      "category": "auth-onboarding"
+      "category": "auth-onboarding",
+      "surfaceStatus": "compatibility_redirect"
     },
     {
       "name": "CRLVUploadScreen",
-      "category": "auth-onboarding"
-    },
-    {
-      "name": "Dashboard",
-      "category": "other"
-    },
-    {
-      "name": "DriverBalance",
-      "category": "driver-ops"
-    },
-    {
-      "name": "DriverDashboard",
-      "category": "driver-ops"
-    },
-    {
-      "name": "DriverDocuments",
-      "category": "driver-ops"
-    },
-    {
-      "name": "DriverIncome",
-      "category": "driver-ops"
+      "category": "auth-onboarding",
+      "surfaceStatus": "compatibility_redirect"
     },
     {
       "name": "DriverInvite",
-      "category": "driver-ops"
-    },
-    {
-      "name": "DriverRating",
-      "category": "driver-ops"
-    },
-    {
-      "name": "DriverSearch",
-      "category": "driver-ops"
+      "category": "driver-ops",
+      "surfaceStatus": "current"
     },
     {
       "name": "DriverTerms",
-      "category": "auth-onboarding"
-    },
-    {
-      "name": "DriverTrips",
-      "category": "ride-lifecycle"
+      "category": "auth-onboarding",
+      "surfaceStatus": "compatibility_redirect"
     },
     {
       "name": "EarningsReport",
-      "category": "driver-ops"
-    },
-    {
-      "name": "EarningsReportScreen",
-      "category": "driver-ops"
-    },
-    {
-      "name": "EditProfile",
-      "category": "account-support"
-    },
-    {
-      "name": "EditProfileScreen",
-      "category": "account-support"
-    },
-    {
-      "name": "Feedback",
-      "category": "ride-lifecycle"
+      "category": "driver-ops",
+      "surfaceStatus": "current"
     },
     {
       "name": "FreeTrial",
-      "category": "auth-onboarding"
+      "category": "auth-onboarding",
+      "surfaceStatus": "compatibility_redirect"
     },
     {
-      "name": "Help",
-      "category": "account-support"
+      "name": "LeafAccountInfo",
+      "category": "other",
+      "surfaceStatus": "current"
     },
     {
-      "name": "HelpScreen",
-      "category": "account-support"
+      "name": "LeafSavedPlacePicker",
+      "category": "other",
+      "surfaceStatus": "current"
+    },
+    {
+      "name": "LeafSavedPlaces",
+      "category": "other",
+      "surfaceStatus": "current"
     },
     {
       "name": "Legal",
-      "category": "account-support"
+      "category": "account-support",
+      "surfaceStatus": "current"
     },
     {
       "name": "Login",
-      "category": "auth-onboarding"
+      "category": "auth-onboarding",
+      "surfaceStatus": "compatibility_redirect"
     },
     {
       "name": "LoginScreen",
-      "category": "auth-onboarding"
+      "category": "auth-onboarding",
+      "surfaceStatus": "compatibility_redirect"
     },
     {
       "name": "Map",
-      "category": "ride-lifecycle"
+      "category": "ride-lifecycle",
+      "surfaceStatus": "compatibility_redirect"
     },
     {
       "name": "MapScreen",
-      "category": "ride-lifecycle"
-    },
-    {
-      "name": "Messages",
-      "category": "account-support"
-    },
-    {
-      "name": "MyEarning",
-      "category": "other"
-    },
-    {
-      "name": "MyVehicles",
-      "category": "driver-ops"
-    },
-    {
-      "name": "MyVehiclesScreen",
-      "category": "driver-ops"
-    },
-    {
-      "name": "Notifications",
-      "category": "account-support"
-    },
-    {
-      "name": "onlineChat",
-      "category": "account-support"
+      "category": "ride-lifecycle",
+      "surfaceStatus": "compatibility_redirect"
     },
     {
       "name": "OTP",
-      "category": "auth-onboarding"
-    },
-    {
-      "name": "PaymentDetails",
-      "category": "ride-lifecycle"
-    },
-    {
-      "name": "PaymentFailed",
-      "category": "ride-lifecycle"
-    },
-    {
-      "name": "PaymentSuccess",
-      "category": "ride-lifecycle"
-    },
-    {
-      "name": "PaymentSuccessScreen",
-      "category": "ride-lifecycle"
-    },
-    {
-      "name": "PersonalData",
-      "category": "other"
+      "category": "auth-onboarding",
+      "surfaceStatus": "compatibility_redirect"
     },
     {
       "name": "PhoneInputScreen",
-      "category": "other"
+      "category": "other",
+      "surfaceStatus": "compatibility_redirect"
     },
     {
       "name": "PhoneScreen",
-      "category": "other"
-    },
-    {
-      "name": "PixPayment",
-      "category": "ride-lifecycle"
+      "category": "other",
+      "surfaceStatus": "compatibility_redirect"
     },
     {
       "name": "PlanSelection",
-      "category": "auth-onboarding"
+      "category": "auth-onboarding",
+      "surfaceStatus": "compatibility_redirect"
     },
     {
       "name": "PrivacyPolicy",
-      "category": "account-support"
-    },
-    {
-      "name": "Profile",
-      "category": "account-support"
+      "category": "account-support",
+      "surfaceStatus": "current"
     },
     {
       "name": "ProfileSelection",
-      "category": "auth-onboarding"
+      "category": "auth-onboarding",
+      "surfaceStatus": "compatibility_redirect"
     },
     {
       "name": "ProfileSelectionScreen",
-      "category": "auth-onboarding"
-    },
-    {
-      "name": "Receipt",
-      "category": "ride-lifecycle"
-    },
-    {
-      "name": "ReceiptDetails",
-      "category": "ride-lifecycle"
+      "category": "auth-onboarding",
+      "surfaceStatus": "compatibility_redirect"
     },
     {
       "name": "Referral",
-      "category": "auth-onboarding"
+      "category": "auth-onboarding",
+      "surfaceStatus": "compatibility_redirect"
     },
     {
       "name": "ReferralScreen",
-      "category": "auth-onboarding"
+      "category": "auth-onboarding",
+      "surfaceStatus": "compatibility_redirect"
     },
     {
       "name": "Registration",
-      "category": "auth-onboarding"
-    },
-    {
-      "name": "RideDetails",
-      "category": "ride-lifecycle"
-    },
-    {
-      "name": "RideListScreen",
-      "category": "ride-lifecycle"
-    },
-    {
-      "name": "Rides",
-      "category": "ride-lifecycle"
+      "category": "auth-onboarding",
+      "surfaceStatus": "compatibility_redirect"
     },
     {
       "name": "RobotaxiMenuEditProfile",
-      "category": "account-support"
+      "category": "account-support",
+      "surfaceStatus": "current"
     },
     {
       "name": "RobotaxiMenuHelp",
-      "category": "account-support"
+      "category": "account-support",
+      "surfaceStatus": "current"
     },
     {
       "name": "RobotaxiMenuMessages",
-      "category": "account-support"
+      "category": "account-support",
+      "surfaceStatus": "current"
     },
     {
       "name": "RobotaxiMenuSettings",
-      "category": "account-support"
+      "category": "account-support",
+      "surfaceStatus": "current"
     },
     {
       "name": "RobotaxiMenuTripHistory",
-      "category": "ride-lifecycle"
+      "category": "ride-lifecycle",
+      "surfaceStatus": "current"
     },
     {
       "name": "RobotaxiPrototype",
-      "category": "prototype"
-    },
-    {
-      "name": "RobotaxiPrototypeBooking",
-      "category": "prototype"
+      "category": "prototype",
+      "surfaceStatus": "current"
     },
     {
       "name": "RobotaxiPrototypeCancellation",
-      "category": "ride-lifecycle"
+      "category": "ride-lifecycle",
+      "surfaceStatus": "current"
     },
     {
       "name": "RobotaxiPrototypeChat",
-      "category": "account-support"
+      "category": "account-support",
+      "surfaceStatus": "current"
     },
     {
       "name": "RobotaxiPrototypeComplain",
-      "category": "ride-lifecycle"
+      "category": "ride-lifecycle",
+      "surfaceStatus": "current"
     },
     {
       "name": "RobotaxiPrototypeDestination",
-      "category": "prototype"
+      "category": "prototype",
+      "surfaceStatus": "current"
     },
     {
       "name": "RobotaxiPrototypeDriverActivation",
-      "category": "driver-ops"
+      "category": "driver-ops",
+      "surfaceStatus": "current"
     },
     {
       "name": "RobotaxiPrototypeDriverDocuments",
-      "category": "driver-ops"
-    },
-    {
-      "name": "RobotaxiPrototypeDriverOffer",
-      "category": "driver-ops"
+      "category": "driver-ops",
+      "surfaceStatus": "current"
     },
     {
       "name": "RobotaxiPrototypeDriverPanel",
-      "category": "driver-ops"
+      "category": "driver-ops",
+      "surfaceStatus": "current"
     },
     {
       "name": "RobotaxiPrototypeDriverSearch",
-      "category": "driver-ops"
-    },
-    {
-      "name": "RobotaxiPrototypeDriverTrip",
-      "category": "ride-lifecycle"
+      "category": "driver-ops",
+      "surfaceStatus": "current"
     },
     {
       "name": "RobotaxiPrototypeDriverWaitlist",
-      "category": "driver-ops"
+      "category": "driver-ops",
+      "surfaceStatus": "current"
     },
     {
       "name": "RobotaxiPrototypeDriverWaitlistStatus",
-      "category": "driver-ops"
+      "category": "driver-ops",
+      "surfaceStatus": "current"
     },
     {
       "name": "RobotaxiPrototypeInvites",
-      "category": "prototype"
+      "category": "prototype",
+      "surfaceStatus": "current"
     },
     {
       "name": "RobotaxiPrototypeMenu",
-      "category": "prototype"
+      "category": "prototype",
+      "surfaceStatus": "current"
     },
     {
       "name": "RobotaxiPrototypeNoDrivers",
-      "category": "driver-ops"
-    },
-    {
-      "name": "RobotaxiPrototypePayment",
-      "category": "ride-lifecycle"
+      "category": "driver-ops",
+      "surfaceStatus": "current"
     },
     {
       "name": "RobotaxiPrototypePaymentFailed",
-      "category": "ride-lifecycle"
+      "category": "ride-lifecycle",
+      "surfaceStatus": "current"
     },
     {
       "name": "RobotaxiPrototypePaymentSuccess",
-      "category": "ride-lifecycle"
+      "category": "ride-lifecycle",
+      "surfaceStatus": "current"
     },
     {
       "name": "RobotaxiPrototypeProfile",
-      "category": "account-support"
+      "category": "account-support",
+      "surfaceStatus": "current"
     },
     {
       "name": "RobotaxiPrototypePublicTracking",
-      "category": "prototype"
+      "category": "prototype",
+      "surfaceStatus": "current"
     },
     {
       "name": "RobotaxiPrototypeRating",
-      "category": "prototype"
+      "category": "prototype",
+      "surfaceStatus": "current"
     },
     {
       "name": "RobotaxiPrototypeReceipt",
-      "category": "ride-lifecycle"
+      "category": "ride-lifecycle",
+      "surfaceStatus": "current"
     },
     {
       "name": "RobotaxiPrototypeSettings",
-      "category": "account-support"
+      "category": "account-support",
+      "surfaceStatus": "current"
     },
     {
       "name": "RobotaxiPrototypeShareTrip",
-      "category": "ride-lifecycle"
+      "category": "ride-lifecycle",
+      "surfaceStatus": "current"
     },
     {
       "name": "RobotaxiPrototypeSupport",
-      "category": "account-support"
+      "category": "account-support",
+      "surfaceStatus": "current"
+    },
+    {
+      "name": "RobotaxiPrototypeSupportThread",
+      "category": "account-support",
+      "surfaceStatus": "current"
     },
     {
       "name": "RobotaxiPrototypeSupportTicket",
-      "category": "account-support"
+      "category": "account-support",
+      "surfaceStatus": "current"
     },
     {
       "name": "RobotaxiPrototypeTrip",
-      "category": "ride-lifecycle"
+      "category": "ride-lifecycle",
+      "surfaceStatus": "current"
     },
     {
       "name": "RobotaxiPrototypeVehicles",
-      "category": "driver-ops"
-    },
-    {
-      "name": "Search",
-      "category": "account-support"
-    },
-    {
-      "name": "Settings",
-      "category": "account-support"
-    },
-    {
-      "name": "SettingsScreen",
-      "category": "account-support"
+      "category": "driver-ops",
+      "surfaceStatus": "current"
     },
     {
       "name": "Splash",
-      "category": "other"
-    },
-    {
-      "name": "SubscriptionManagement",
-      "category": "other"
-    },
-    {
-      "name": "Support",
-      "category": "account-support"
-    },
-    {
-      "name": "SupportChat",
-      "category": "account-support"
-    },
-    {
-      "name": "SupportTicket",
-      "category": "account-support"
+      "category": "other",
+      "surfaceStatus": "current"
     },
     {
       "name": "TabRoot",
-      "category": "other"
-    },
-    {
-      "name": "TransactionHistory",
-      "category": "other"
-    },
-    {
-      "name": "TransferMoney",
-      "category": "other"
-    },
-    {
-      "name": "TripDetails",
-      "category": "ride-lifecycle"
-    },
-    {
-      "name": "Trips",
-      "category": "ride-lifecycle"
-    },
-    {
-      "name": "TripTracking",
-      "category": "ride-lifecycle"
-    },
-    {
-      "name": "UpdateBankInfo",
-      "category": "other"
-    },
-    {
-      "name": "UserInfo",
-      "category": "other"
-    },
-    {
-      "name": "VehicleRegistration",
-      "category": "auth-onboarding"
-    },
-    {
-      "name": "WaitList",
-      "category": "other"
-    },
-    {
-      "name": "WalletDetails",
-      "category": "wallet-finance"
-    },
-    {
-      "name": "WeeklyPayment",
-      "category": "ride-lifecycle"
-    },
-    {
-      "name": "WeeklyPaymentScreen",
-      "category": "ride-lifecycle"
+      "category": "other",
+      "surfaceStatus": "compatibility_redirect"
     },
     {
       "name": "WelcomeScreen",
-      "category": "auth-onboarding"
-    },
-    {
-      "name": "WithdrawMoney",
-      "category": "wallet-finance"
+      "category": "auth-onboarding",
+      "surfaceStatus": "compatibility_redirect"
     },
     {
       "name": "WooviDriverBalance",
-      "category": "driver-ops"
+      "category": "driver-ops",
+      "surfaceStatus": "compatibility_redirect"
     }
   ],
   "flows": [
@@ -772,7 +601,8 @@
         "support"
       ],
       "releaseBlockers": [
-        "dev-server-marker"
+        "dev-server-marker",
+        "fixed-otp-marker"
       ],
       "releaseOnly": false,
       "hasScreenshots": true,
@@ -821,8 +651,10 @@
         "login",
         "navigation"
       ],
-      "releaseBlockers": [],
-      "releaseOnly": true,
+      "releaseBlockers": [
+        "fixed-otp-marker"
+      ],
+      "releaseOnly": false,
       "hasScreenshots": true,
       "expectedEvidence": [
         "junit:02-login-driver.xml",
@@ -846,7 +678,8 @@
         "request-ride"
       ],
       "releaseBlockers": [
-        "dev-server-marker"
+        "dev-server-marker",
+        "fixed-otp-marker"
       ],
       "releaseOnly": false,
       "hasScreenshots": true,
@@ -872,7 +705,8 @@
         "navigation"
       ],
       "releaseBlockers": [
-        "dev-server-marker"
+        "dev-server-marker",
+        "fixed-otp-marker"
       ],
       "releaseOnly": false,
       "hasScreenshots": true,
@@ -897,7 +731,8 @@
         "navigation"
       ],
       "releaseBlockers": [
-        "dev-server-marker"
+        "dev-server-marker",
+        "fixed-otp-marker"
       ],
       "releaseOnly": false,
       "hasScreenshots": true,
@@ -905,6 +740,80 @@
         "junit:04-phone-driver-home-online-ios.xml",
         "log:04-phone-driver-home-online-ios.log",
         "screenshots:takeScreenshot outputs",
+        "driver-online screenshot/runtime state"
+      ]
+    },
+    {
+      "path": ".maestro/flows/current-menus/01-passenger-dedicated-device.yaml",
+      "category": "other",
+      "platforms": [
+        "android",
+        "ios"
+      ],
+      "roles": [
+        "passenger"
+      ],
+      "capabilities": [
+        "navigation",
+        "request-ride",
+        "support"
+      ],
+      "releaseBlockers": [],
+      "releaseOnly": true,
+      "hasScreenshots": false,
+      "expectedEvidence": [
+        "junit:01-passenger-dedicated-device.xml",
+        "log:01-passenger-dedicated-device.log",
+        "backend-runtime-flags.json"
+      ]
+    },
+    {
+      "path": ".maestro/flows/current-menus/02-driver-dedicated-device.yaml",
+      "category": "other",
+      "platforms": [
+        "android",
+        "ios"
+      ],
+      "roles": [
+        "driver"
+      ],
+      "capabilities": [
+        "complete-ride",
+        "driver-online",
+        "navigation",
+        "support"
+      ],
+      "releaseBlockers": [],
+      "releaseOnly": true,
+      "hasScreenshots": false,
+      "expectedEvidence": [
+        "junit:02-driver-dedicated-device.xml",
+        "log:02-driver-dedicated-device.log",
+        "driver-online screenshot/runtime state"
+      ]
+    },
+    {
+      "path": ".maestro/flows/current/01-robotaxi-current-home.yaml",
+      "category": "other",
+      "platforms": [
+        "android",
+        "ios"
+      ],
+      "roles": [
+        "driver",
+        "passenger"
+      ],
+      "capabilities": [
+        "driver-online",
+        "request-ride"
+      ],
+      "releaseBlockers": [],
+      "releaseOnly": true,
+      "hasScreenshots": false,
+      "expectedEvidence": [
+        "junit:01-robotaxi-current-home.xml",
+        "log:01-robotaxi-current-home.log",
+        "backend-runtime-flags.json",
         "driver-online screenshot/runtime state"
       ]
     },
@@ -971,7 +880,8 @@
         "request-ride"
       ],
       "releaseBlockers": [
-        "dev-server-marker"
+        "dev-server-marker",
+        "fixed-otp-marker"
       ],
       "releaseOnly": false,
       "hasScreenshots": true,
@@ -999,7 +909,8 @@
         "navigation"
       ],
       "releaseBlockers": [
-        "dev-server-marker"
+        "dev-server-marker",
+        "fixed-otp-marker"
       ],
       "releaseOnly": false,
       "hasScreenshots": true,
@@ -1093,7 +1004,8 @@
         "navigation"
       ],
       "releaseBlockers": [
-        "dev-server-marker"
+        "dev-server-marker",
+        "fixed-otp-marker"
       ],
       "releaseOnly": false,
       "hasScreenshots": true,
@@ -1118,7 +1030,8 @@
         "navigation"
       ],
       "releaseBlockers": [
-        "dev-server-marker"
+        "dev-server-marker",
+        "fixed-otp-marker"
       ],
       "releaseOnly": false,
       "hasScreenshots": true,
@@ -1143,7 +1056,8 @@
         "navigation"
       ],
       "releaseBlockers": [
-        "dev-server-marker"
+        "dev-server-marker",
+        "fixed-otp-marker"
       ],
       "releaseOnly": false,
       "hasScreenshots": true,
@@ -1256,8 +1170,10 @@
       "capabilities": [
         "smoke"
       ],
-      "releaseBlockers": [],
-      "releaseOnly": true,
+      "releaseBlockers": [
+        "fixed-otp-marker"
+      ],
+      "releaseOnly": false,
       "hasScreenshots": true,
       "expectedEvidence": [
         "junit:90-play-video-passenger-voice-android.xml",
@@ -1277,14 +1193,38 @@
       "capabilities": [
         "driver-online"
       ],
-      "releaseBlockers": [],
-      "releaseOnly": true,
+      "releaseBlockers": [
+        "fixed-otp-marker"
+      ],
+      "releaseOnly": false,
       "hasScreenshots": true,
       "expectedEvidence": [
         "junit:91-play-video-driver-location-android.xml",
         "log:91-play-video-driver-location-android.log",
         "screenshots:takeScreenshot outputs",
         "driver-online screenshot/runtime state"
+      ]
+    },
+    {
+      "path": ".maestro/flows/qa/boot-app-ready-ios.yaml",
+      "category": "qa-auxiliary",
+      "platforms": [
+        "ios"
+      ],
+      "roles": [
+        "unknown"
+      ],
+      "capabilities": [
+        "navigation"
+      ],
+      "releaseBlockers": [
+        "dev-server-marker"
+      ],
+      "releaseOnly": false,
+      "hasScreenshots": false,
+      "expectedEvidence": [
+        "junit:boot-app-ready-ios.xml",
+        "log:boot-app-ready-ios.log"
       ]
     },
     {
@@ -1493,6 +1433,32 @@
       ]
     },
     {
+      "path": ".maestro/flows/qa/e2e/20-passenger-signup-real-ios.yaml",
+      "category": "e2e-core",
+      "platforms": [
+        "ios"
+      ],
+      "roles": [
+        "passenger"
+      ],
+      "capabilities": [
+        "login",
+        "rating",
+        "request-ride",
+        "signup",
+        "support"
+      ],
+      "releaseBlockers": [],
+      "releaseOnly": true,
+      "hasScreenshots": true,
+      "expectedEvidence": [
+        "junit:20-passenger-signup-real-ios.xml",
+        "log:20-passenger-signup-real-ios.log",
+        "screenshots:takeScreenshot outputs",
+        "backend-runtime-flags.json"
+      ]
+    },
+    {
       "path": ".maestro/flows/qa/e2e/20-passenger-signup-screenshots-android.yaml",
       "category": "e2e-core",
       "platforms": [
@@ -1510,7 +1476,8 @@
         "support"
       ],
       "releaseBlockers": [
-        "dev-server-marker"
+        "dev-server-marker",
+        "fixed-otp-marker"
       ],
       "releaseOnly": false,
       "hasScreenshots": true,
@@ -1546,6 +1513,30 @@
       ]
     },
     {
+      "path": ".maestro/flows/qa/e2e/21-driver-signup-real-ios.yaml",
+      "category": "e2e-core",
+      "platforms": [
+        "ios"
+      ],
+      "roles": [
+        "driver"
+      ],
+      "capabilities": [
+        "driver-online",
+        "login",
+        "signup"
+      ],
+      "releaseBlockers": [],
+      "releaseOnly": true,
+      "hasScreenshots": true,
+      "expectedEvidence": [
+        "junit:21-driver-signup-real-ios.xml",
+        "log:21-driver-signup-real-ios.log",
+        "screenshots:takeScreenshot outputs",
+        "driver-online screenshot/runtime state"
+      ]
+    },
+    {
       "path": ".maestro/flows/qa/e2e/21-driver-signup-screenshots-android.yaml",
       "category": "e2e-core",
       "platforms": [
@@ -1561,7 +1552,8 @@
         "signup"
       ],
       "releaseBlockers": [
-        "dev-server-marker"
+        "dev-server-marker",
+        "fixed-otp-marker"
       ],
       "releaseOnly": false,
       "hasScreenshots": true,
@@ -1588,7 +1580,8 @@
         "navigation"
       ],
       "releaseBlockers": [
-        "dev-server-marker"
+        "dev-server-marker",
+        "fixed-otp-marker"
       ],
       "releaseOnly": false,
       "hasScreenshots": true,
@@ -1615,7 +1608,8 @@
         "request-ride"
       ],
       "releaseBlockers": [
-        "dev-server-marker"
+        "dev-server-marker",
+        "fixed-otp-marker"
       ],
       "releaseOnly": false,
       "hasScreenshots": true,
@@ -1812,6 +1806,30 @@
       "expectedEvidence": [
         "junit:02-passenger-request-copacabana.xml",
         "log:02-passenger-request-copacabana.log",
+        "backend-runtime-flags.json"
+      ]
+    },
+    {
+      "path": ".maestro/flows/qa/e2e/lifecycle/02-passenger-request-current-home.yaml",
+      "category": "ride-lifecycle",
+      "platforms": [
+        "android",
+        "ios"
+      ],
+      "roles": [
+        "driver",
+        "passenger"
+      ],
+      "capabilities": [
+        "payment",
+        "request-ride"
+      ],
+      "releaseBlockers": [],
+      "releaseOnly": true,
+      "hasScreenshots": false,
+      "expectedEvidence": [
+        "junit:02-passenger-request-current-home.xml",
+        "log:02-passenger-request-current-home.log",
         "backend-runtime-flags.json"
       ]
     },
@@ -2347,6 +2365,442 @@
       ]
     },
     {
+      "path": ".maestro/flows/qa/qa-session-bootstrap-ios.yaml",
+      "category": "qa-auxiliary",
+      "platforms": [
+        "ios"
+      ],
+      "roles": [
+        "driver",
+        "passenger"
+      ],
+      "capabilities": [
+        "login",
+        "navigation"
+      ],
+      "releaseBlockers": [
+        "dev-server-marker"
+      ],
+      "releaseOnly": false,
+      "hasScreenshots": false,
+      "expectedEvidence": [
+        "junit:qa-session-bootstrap-ios.xml",
+        "log:qa-session-bootstrap-ios.log"
+      ]
+    },
+    {
+      "path": ".maestro/flows/qa/qa-session-reset-ios.yaml",
+      "category": "qa-auxiliary",
+      "platforms": [
+        "ios"
+      ],
+      "roles": [
+        "unknown"
+      ],
+      "capabilities": [
+        "smoke"
+      ],
+      "releaseBlockers": [],
+      "releaseOnly": true,
+      "hasScreenshots": false,
+      "expectedEvidence": [
+        "junit:qa-session-reset-ios.xml",
+        "log:qa-session-reset-ios.log"
+      ]
+    },
+    {
+      "path": ".maestro/flows/qa/transitions/passenger-accepted-cancel-dismiss-ios.yaml",
+      "category": "qa-auxiliary",
+      "platforms": [
+        "ios"
+      ],
+      "roles": [
+        "passenger"
+      ],
+      "capabilities": [
+        "payment"
+      ],
+      "releaseBlockers": [],
+      "releaseOnly": true,
+      "hasScreenshots": true,
+      "expectedEvidence": [
+        "junit:passenger-accepted-cancel-dismiss-ios.xml",
+        "log:passenger-accepted-cancel-dismiss-ios.log",
+        "screenshots:takeScreenshot outputs",
+        "backend-runtime-flags.json"
+      ]
+    },
+    {
+      "path": ".maestro/flows/qa/transitions/passenger-cancelled-return-to-home-ios.yaml",
+      "category": "qa-auxiliary",
+      "platforms": [
+        "ios"
+      ],
+      "roles": [
+        "passenger"
+      ],
+      "capabilities": [
+        "request-ride"
+      ],
+      "releaseBlockers": [],
+      "releaseOnly": true,
+      "hasScreenshots": false,
+      "expectedEvidence": [
+        "junit:passenger-cancelled-return-to-home-ios.xml",
+        "log:passenger-cancelled-return-to-home-ios.log",
+        "backend-runtime-flags.json"
+      ]
+    },
+    {
+      "path": ".maestro/flows/qa/transitions/passenger-no-drivers-retry-to-home-ios.yaml",
+      "category": "qa-auxiliary",
+      "platforms": [
+        "ios"
+      ],
+      "roles": [
+        "driver",
+        "passenger"
+      ],
+      "capabilities": [
+        "request-ride"
+      ],
+      "releaseBlockers": [],
+      "releaseOnly": true,
+      "hasScreenshots": false,
+      "expectedEvidence": [
+        "junit:passenger-no-drivers-retry-to-home-ios.xml",
+        "log:passenger-no-drivers-retry-to-home-ios.log",
+        "backend-runtime-flags.json"
+      ]
+    },
+    {
+      "path": ".maestro/flows/qa/transitions/passenger-payment-failed-retry-to-home-ios.yaml",
+      "category": "qa-auxiliary",
+      "platforms": [
+        "ios"
+      ],
+      "roles": [
+        "passenger"
+      ],
+      "capabilities": [
+        "payment",
+        "request-ride"
+      ],
+      "releaseBlockers": [],
+      "releaseOnly": true,
+      "hasScreenshots": true,
+      "expectedEvidence": [
+        "junit:passenger-payment-failed-retry-to-home-ios.xml",
+        "log:passenger-payment-failed-retry-to-home-ios.log",
+        "screenshots:takeScreenshot outputs",
+        "backend-runtime-flags.json"
+      ]
+    },
+    {
+      "path": ".maestro/flows/qa/ui-ux-lifecycle-state-assert-ios.yaml",
+      "category": "qa-auxiliary",
+      "platforms": [
+        "ios"
+      ],
+      "roles": [
+        "unknown"
+      ],
+      "capabilities": [
+        "smoke"
+      ],
+      "releaseBlockers": [],
+      "releaseOnly": true,
+      "hasScreenshots": true,
+      "expectedEvidence": [
+        "junit:ui-ux-lifecycle-state-assert-ios.xml",
+        "log:ui-ux-lifecycle-state-assert-ios.log",
+        "screenshots:takeScreenshot outputs"
+      ]
+    },
+    {
+      "path": ".maestro/flows/qa/ui-ux-passenger-category-current-ios.yaml",
+      "category": "qa-auxiliary",
+      "platforms": [
+        "ios"
+      ],
+      "roles": [
+        "passenger"
+      ],
+      "capabilities": [
+        "request-ride"
+      ],
+      "releaseBlockers": [],
+      "releaseOnly": true,
+      "hasScreenshots": true,
+      "expectedEvidence": [
+        "junit:ui-ux-passenger-category-current-ios.xml",
+        "log:ui-ux-passenger-category-current-ios.log",
+        "screenshots:takeScreenshot outputs",
+        "backend-runtime-flags.json"
+      ]
+    },
+    {
+      "path": ".maestro/flows/qa/ui-ux-passenger-confirm-availability-release-ios.yaml",
+      "category": "qa-auxiliary",
+      "platforms": [
+        "ios"
+      ],
+      "roles": [
+        "passenger"
+      ],
+      "capabilities": [
+        "request-ride"
+      ],
+      "releaseBlockers": [],
+      "releaseOnly": true,
+      "hasScreenshots": true,
+      "expectedEvidence": [
+        "junit:ui-ux-passenger-confirm-availability-release-ios.xml",
+        "log:ui-ux-passenger-confirm-availability-release-ios.log",
+        "screenshots:takeScreenshot outputs",
+        "backend-runtime-flags.json"
+      ]
+    },
+    {
+      "path": ".maestro/flows/qa/ui-ux-passenger-destination-quote-ios.yaml",
+      "category": "qa-auxiliary",
+      "platforms": [
+        "ios"
+      ],
+      "roles": [
+        "passenger"
+      ],
+      "capabilities": [
+        "payment",
+        "request-ride"
+      ],
+      "releaseBlockers": [],
+      "releaseOnly": true,
+      "hasScreenshots": true,
+      "expectedEvidence": [
+        "junit:ui-ux-passenger-destination-quote-ios.xml",
+        "log:ui-ux-passenger-destination-quote-ios.log",
+        "screenshots:takeScreenshot outputs",
+        "backend-runtime-flags.json"
+      ]
+    },
+    {
+      "path": ".maestro/flows/qa/ui-ux-passenger-destination-quote-release-compact-ios.yaml",
+      "category": "qa-auxiliary",
+      "platforms": [
+        "ios"
+      ],
+      "roles": [
+        "passenger"
+      ],
+      "capabilities": [
+        "request-ride"
+      ],
+      "releaseBlockers": [],
+      "releaseOnly": true,
+      "hasScreenshots": true,
+      "expectedEvidence": [
+        "junit:ui-ux-passenger-destination-quote-release-compact-ios.xml",
+        "log:ui-ux-passenger-destination-quote-release-compact-ios.log",
+        "screenshots:takeScreenshot outputs",
+        "backend-runtime-flags.json"
+      ]
+    },
+    {
+      "path": ".maestro/flows/qa/ui-ux-passenger-destination-quote-release-ios.yaml",
+      "category": "qa-auxiliary",
+      "platforms": [
+        "ios"
+      ],
+      "roles": [
+        "passenger"
+      ],
+      "capabilities": [
+        "request-ride"
+      ],
+      "releaseBlockers": [],
+      "releaseOnly": true,
+      "hasScreenshots": true,
+      "expectedEvidence": [
+        "junit:ui-ux-passenger-destination-quote-release-ios.xml",
+        "log:ui-ux-passenger-destination-quote-release-ios.log",
+        "screenshots:takeScreenshot outputs",
+        "backend-runtime-flags.json"
+      ]
+    },
+    {
+      "path": ".maestro/flows/qa/ui-ux-passenger-pix-release-compact-ios.yaml",
+      "category": "qa-auxiliary",
+      "platforms": [
+        "ios"
+      ],
+      "roles": [
+        "passenger"
+      ],
+      "capabilities": [
+        "payment",
+        "request-ride"
+      ],
+      "releaseBlockers": [],
+      "releaseOnly": true,
+      "hasScreenshots": true,
+      "expectedEvidence": [
+        "junit:ui-ux-passenger-pix-release-compact-ios.xml",
+        "log:ui-ux-passenger-pix-release-compact-ios.log",
+        "screenshots:takeScreenshot outputs",
+        "backend-runtime-flags.json"
+      ]
+    },
+    {
+      "path": ".maestro/flows/qa/ui-ux-passenger-pix-release-ios.yaml",
+      "category": "qa-auxiliary",
+      "platforms": [
+        "ios"
+      ],
+      "roles": [
+        "passenger"
+      ],
+      "capabilities": [
+        "payment",
+        "request-ride"
+      ],
+      "releaseBlockers": [],
+      "releaseOnly": true,
+      "hasScreenshots": true,
+      "expectedEvidence": [
+        "junit:ui-ux-passenger-pix-release-ios.xml",
+        "log:ui-ux-passenger-pix-release-ios.log",
+        "screenshots:takeScreenshot outputs",
+        "backend-runtime-flags.json"
+      ]
+    },
+    {
+      "path": ".maestro/flows/qa/ui-ux-passenger-quote-pix-ios.yaml",
+      "category": "qa-auxiliary",
+      "platforms": [
+        "ios"
+      ],
+      "roles": [
+        "passenger"
+      ],
+      "capabilities": [
+        "payment"
+      ],
+      "releaseBlockers": [],
+      "releaseOnly": true,
+      "hasScreenshots": true,
+      "expectedEvidence": [
+        "junit:ui-ux-passenger-quote-pix-ios.xml",
+        "log:ui-ux-passenger-quote-pix-ios.log",
+        "screenshots:takeScreenshot outputs",
+        "backend-runtime-flags.json"
+      ]
+    },
+    {
+      "path": ".maestro/flows/qa/ui-ux-privacy-route-ios.yaml",
+      "category": "qa-auxiliary",
+      "platforms": [
+        "ios"
+      ],
+      "roles": [
+        "passenger"
+      ],
+      "capabilities": [
+        "navigation"
+      ],
+      "releaseBlockers": [],
+      "releaseOnly": true,
+      "hasScreenshots": true,
+      "expectedEvidence": [
+        "junit:ui-ux-privacy-route-ios.xml",
+        "log:ui-ux-privacy-route-ios.log",
+        "screenshots:takeScreenshot outputs"
+      ]
+    },
+    {
+      "path": ".maestro/flows/qa/ux-lab-connect-debug-ios.yaml",
+      "category": "qa-auxiliary",
+      "platforms": [
+        "ios"
+      ],
+      "roles": [
+        "unknown"
+      ],
+      "capabilities": [
+        "smoke"
+      ],
+      "releaseBlockers": [],
+      "releaseOnly": true,
+      "hasScreenshots": false,
+      "expectedEvidence": [
+        "junit:ux-lab-connect-debug-ios.xml",
+        "log:ux-lab-connect-debug-ios.log"
+      ]
+    },
+    {
+      "path": ".maestro/flows/qa/ux-lab-driver-home-baseline-ios.yaml",
+      "category": "qa-auxiliary",
+      "platforms": [
+        "ios"
+      ],
+      "roles": [
+        "driver"
+      ],
+      "capabilities": [
+        "driver-online"
+      ],
+      "releaseBlockers": [],
+      "releaseOnly": true,
+      "hasScreenshots": true,
+      "expectedEvidence": [
+        "junit:ux-lab-driver-home-baseline-ios.xml",
+        "log:ux-lab-driver-home-baseline-ios.log",
+        "screenshots:takeScreenshot outputs",
+        "driver-online screenshot/runtime state"
+      ]
+    },
+    {
+      "path": ".maestro/flows/qa/ux-lab-driver-location-consent-ios.yaml",
+      "category": "qa-auxiliary",
+      "platforms": [
+        "ios"
+      ],
+      "roles": [
+        "driver"
+      ],
+      "capabilities": [
+        "smoke"
+      ],
+      "releaseBlockers": [],
+      "releaseOnly": true,
+      "hasScreenshots": true,
+      "expectedEvidence": [
+        "junit:ux-lab-driver-location-consent-ios.xml",
+        "log:ux-lab-driver-location-consent-ios.log",
+        "screenshots:takeScreenshot outputs"
+      ]
+    },
+    {
+      "path": ".maestro/flows/qa/ux-lab-driver-permission-upgrade-ios.yaml",
+      "category": "qa-auxiliary",
+      "platforms": [
+        "ios"
+      ],
+      "roles": [
+        "driver"
+      ],
+      "capabilities": [
+        "smoke"
+      ],
+      "releaseBlockers": [],
+      "releaseOnly": true,
+      "hasScreenshots": false,
+      "expectedEvidence": [
+        "junit:ux-lab-driver-permission-upgrade-ios.xml",
+        "log:ux-lab-driver-permission-upgrade-ios.log"
+      ]
+    },
+    {
       "path": ".maestro/flows/ride_request.yaml",
       "category": "other",
       "platforms": [
@@ -2431,17 +2885,21 @@
         "ios"
       ],
       "roles": [
-        "unknown"
+        "driver",
+        "passenger"
       ],
       "capabilities": [
-        "chat"
+        "chat",
+        "payment"
       ],
       "releaseBlockers": [],
       "releaseOnly": true,
-      "hasScreenshots": false,
+      "hasScreenshots": true,
       "expectedEvidence": [
         "junit:02-chat-during-ride.xml",
-        "log:02-chat-during-ride.log"
+        "log:02-chat-during-ride.log",
+        "screenshots:takeScreenshot outputs",
+        "backend-runtime-flags.json"
       ]
     },
     {

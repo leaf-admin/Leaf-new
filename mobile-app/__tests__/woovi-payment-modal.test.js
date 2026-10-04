@@ -16,6 +16,7 @@ import {
 } from '../src/services/RidePaymentSessionService';
 
 jest.useFakeTimers();
+jest.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }) }));
 
 let mockFirebaseCurrentUserUid = 'passenger_1';
 
@@ -182,6 +183,12 @@ describe('WooviPaymentModal qaAutoConfirm', () => {
     });
 
     expect(screen.getByTestId('payment-modal-content')).toBeTruthy();
+    expect(screen.getByTestId('payment-modal-content').props.accessibilityLabel).toBe(
+      'Modal de pagamento PIX',
+    );
+    expect(screen.UNSAFE_getByProps({ testID: 'payment-modal-close-button' }).props.accessibilityLabel).toBe(
+      'Fechar pagamento',
+    );
     expect(screen.getByTestId('payment-modal-pending-state')).toBeTruthy();
     expect(WooviService.processAdvancePayment).not.toHaveBeenCalled();
     expect(WooviService.getPaymentStatus).not.toHaveBeenCalled();
@@ -737,7 +744,7 @@ describe('WooviPaymentModal qaAutoConfirm', () => {
 
     await waitFor(() => {
       expect(WooviService.processAdvancePayment).toHaveBeenCalledTimes(2);
-      expect(screen.getByText('Pague com PIX')).toBeTruthy();
+      expect(screen.getByTestId('payment-modal-title')).toHaveTextContent('Pagar com Pix');
     });
 
     const [firstPayload] = WooviService.processAdvancePayment.mock.calls[0];

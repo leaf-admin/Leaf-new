@@ -1,3 +1,4 @@
+import leafTypography from '../../components/prototype/LeafTypography';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ScrollView,
@@ -12,14 +13,15 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from "react-native-maps";
 import { StackActions, useIsFocused } from "@react-navigation/native";
-import { fonts } from "../../theme/runtimeTokens";
 import PrototypeScreenTransition from "../../components/prototype/PrototypeScreenTransition";
 import {
   PrototypeCard,
   PrototypePrimaryButton,
 } from "../../components/prototype/PrototypeUI";
 import mapStyleAppleLike from "../../components/prototype/mapStyleAppleLike";
-import { leafButtonMetrics } from "../../components/prototype/LeafRideUI";
+import { LeafButton, leafButtonMetrics } from "../../components/prototype/LeafRideUI";
+import { LeafObjectIcon } from "../../components/prototype/LeafVisualElements";
+import { formatTripDateLabel, resolveTripAddressLabel } from "./tripAddressPresentation";
 import { PrototypeMenuCloseButton } from "../../components/prototype/PrototypeMenuSurface";
 import robotaxiPrototypeTokens from "../../components/design-system/robotaxiPrototypeTokens";
 import { usePrototypeMapOcclusion } from "./prototypeMapOcclusion";
@@ -29,7 +31,7 @@ import {
   resolveTripFeeAmount,
   resolveTripGrossAmount,
   resolveTripNetAmountOrNull,
-  resolveTripTollAmount,
+  resolveTripTollAmountOrNull,
 } from "./tripFinancialSummary";
 
 const { color } = robotaxiPrototypeTokens;
@@ -51,6 +53,15 @@ const receiptMapStyle = [
 function toNumber(value, fallback = 0) {
   const numeric = Number(value);
   return Number.isFinite(numeric) ? numeric : fallback;
+}
+
+function toOptionalNumber(value) {
+  if (value === null || value === undefined || String(value).trim() === "") {
+    return NaN;
+  }
+
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : NaN;
 }
 
 function formatCurrency(value) {
@@ -131,12 +142,8 @@ function splitLocationLabel(label = "") {
 }
 
 function buildReceiptHistoryRouteParts(item = {}) {
-  const directPickup = String(
-    item?.pickupAddress || item?.pickup || "",
-  ).trim();
-  const directDrop = String(
-    item?.destinationAddress || item?.dropoffAddress || item?.drop || "",
-  ).trim();
+  const directPickup = resolveTripAddressLabel(item?.pickupAddress, item?.pickup);
+  const directDrop = resolveTripAddressLabel(item?.destinationAddress, item?.dropoffAddress, item?.drop);
   if (directPickup || directDrop) {
     return {
       pickup: directPickup || "Origem indisponível",
@@ -284,10 +291,8 @@ function buildRouteReceiptFromParams(params = {}) {
   const fare = toNumber(params.fare || params.grossAmount || params.value, NaN);
   const driverName = String(params.driverName || "").trim();
   const passengerName = String(params.passengerName || "").trim();
-  const pickupAddress = String(params.pickupAddress || params.pickup || "").trim();
-  const destinationAddress = String(
-    params.destinationAddress || params.dropoffAddress || params.drop || "",
-  ).trim();
+  const pickupAddress = resolveTripAddressLabel(params.pickupAddress, params.pickup);
+  const destinationAddress = resolveTripAddressLabel(params.destinationAddress, params.dropoffAddress, params.drop);
 
   if (
     !id &&
@@ -862,39 +867,48 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
   const rawBaseFare = toNumber(selected?.baseFare, NaN);
   const rawVariableFare = toNumber(selected?.variableFare, NaN);
   const totalAmount = hasReceiptFinancialContract ? resolvedGrossAmount : 0;
-  const tollAmount = resolveTripTollAmount(selected);
+  const tollAmount = resolveTripTollAmountOrNull(selected);
   const hasExplicitBreakdown =
     Number.isFinite(rawBaseFare) &&
     Number.isFinite(rawVariableFare) &&
     rawBaseFare + rawVariableFare > 0;
   const fareAmount = hasExplicitBreakdown
     ? rawBaseFare
-    : Number((totalAmount * 0.55).toFixed(2));
+    : NaN;
   const variableAmount = hasExplicitBreakdown
     ? rawVariableFare
-    : Number(Math.max(0, totalAmount - fareAmount).toFixed(2));
+    : NaN;
   const totalAmountLabel = hasReceiptFinancialContract
     ? formatCurrency(totalAmount)
     : "--";
-  const finalOperationalFee = toNumber(selected?.operationalFee, NaN);
-  const finalIntermediationFee = toNumber(
+  const finalOperationalFee = toOptionalNumber(selected?.operationalFee);
+  const finalIntermediationFee = toOptionalNumber(
     selected?.paymentIntermediationFee,
-    NaN,
   );
   const resolvedFeeAmount = resolveTripFeeAmount(selected);
-  const finalTotalFees = toNumber(resolvedFeeAmount, NaN);
+  const finalTotalFees = toOptionalNumber(resolvedFeeAmount);
   const resolvedDriverNetAmount = resolveTripNetAmountOrNull(selected);
-  const finalDriverNetAmount = toNumber(resolvedDriverNetAmount, NaN);
+  const finalDriverNetAmount = toOptionalNumber(resolvedDriverNetAmount);
   const hasDriverNetAmount =
     hasReceiptFinancialContract && resolvedDriverNetAmount !== null;
   const safeFeeAmount = Number.isFinite(finalTotalFees) ? finalTotalFees : 0;
-  const safeTollAmount = Number.isFinite(tollAmount) ? tollAmount : 0;
-  const passengerRideSubtotal = Math.max(
-    0,
-    Number((totalAmount - safeFeeAmount - safeTollAmount).toFixed(2)),
-  );
+  const safeTollAmount = tollAmount === null ? 0 : tollAmount;
+  const passengerRideSubtotal =
+    Number.isFinite(finalTotalFees) && tollAmount !== null
+      ? Math.max(
+          0,
+          Number((totalAmount - safeFeeAmount - safeTollAmount).toFixed(2)),
+        )
+      : NaN;
   const formatReceiptMoney = useCallback(
-    (value) => (hasReceiptFinancialContract ? formatCurrency(value) : "--"),
+    (value) =>
+      hasReceiptFinancialContract &&
+      value !== null &&
+      value !== undefined &&
+      value !== "" &&
+      Number.isFinite(Number(value))
+        ? formatCurrency(value)
+        : "--",
     [hasReceiptFinancialContract],
   );
   const hasFinalFeeBreakdown =
@@ -915,17 +929,9 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
     1,
     Math.round(toNumber(selected?.passengerCount, 1)),
   );
-  const rawPickupLabel =
-    selected?.pickupAddress ||
-    selected?.pickup ||
-    selected?.route?.split("->")?.[0]?.trim() ||
-    "";
-  const rawDropoffLabel =
-    selected?.destinationAddress ||
-    selected?.dropoffAddress ||
-    selected?.drop ||
-    selected?.route?.split("->")?.[1]?.trim() ||
-    "";
+  const routeLabelText = typeof selected?.route === 'string' ? selected.route : '';
+  const rawPickupLabel = resolveTripAddressLabel(selected?.pickupAddress, selected?.pickup, routeLabelText.split('->')[0]);
+  const rawDropoffLabel = resolveTripAddressLabel(selected?.destinationAddress, selected?.dropoffAddress, selected?.drop, routeLabelText.split('->')[1]);
   const pickupLabel =
     rawPickupLabel ||
     (hasSelectedReceipt ? "Origem em verificação" : "Origem");
@@ -1228,7 +1234,8 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
             accessible
             accessibilityRole="button"
             testID="driver-receipt-rate-passenger-button"
-            accessibilityLabel="driver-receipt-rate-passenger-button"
+            accessibilityLabel={driverRateButtonLabel}
+            accessibilityHint="Abre a avaliação do passageiro desta corrida."
             onPress={openDriverReceiptRating}
             onAccessibilityTap={openDriverReceiptRating}
             style={[
@@ -1295,7 +1302,8 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
           accessibilityState={{ disabled: false }}
           focusable
           hitSlop={{ top: 6, right: 6, bottom: 6, left: 6 }}
-          accessibilityLabel="passenger-receipt-report-issue-button"
+          accessibilityLabel="Reportar problema com a viagem"
+          accessibilityHint="Abre o suporte para relatar um problema nesta corrida."
           testID="passenger-receipt-report-issue-button"
           onPress={() =>
             navigation.navigate("RobotaxiPrototypeSupport", {
@@ -1397,6 +1405,16 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
     : receiptRecoveryState === "failed"
       ? "Verificar"
       : "Recibo pendente";
+  const receiptRecoveryTitle = !hasSelectedReceipt
+    ? receiptRecoveryState === "failed"
+      ? "Recibo em verificação"
+      : "Recibo final pendente"
+    : "Recibo final indisponível";
+  const receiptRecoverySubtitle = !hasSelectedReceipt
+    ? receiptRecoveryState === "failed"
+      ? "A corrida foi encerrada, mas o recibo final autorizado ainda não foi carregado. Você pode voltar ao mapa sem reabrir a corrida."
+      : "A corrida foi encerrada. O app aguarda o recibo final autorizado pelo servidor antes de liberar detalhes e avaliação."
+    : "Este recibo não tem confirmação financeira final do servidor. Por segurança, não exibimos outro valor nem liberamos avaliação.";
   const ratingButtonLabel = isDriverView
     ? driverRateButtonLabel
     : passengerRatingSubmitted
@@ -1443,16 +1461,9 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
     }
 
     return (
-      <View style={styles.receiptMockMap}>
-        <View style={styles.receiptWaterStrip} />
-        <View style={[styles.receiptRoad, styles.receiptRoadA]} />
-        <View style={[styles.receiptRoad, styles.receiptRoadB]} />
-        <View style={[styles.receiptRoad, styles.receiptRoadC]} />
-        <View style={[styles.receiptRoadVertical, styles.receiptRoadD]} />
-        <View style={[styles.receiptRoadVertical, styles.receiptRoadE]} />
-        <View style={[styles.receiptRouteLine, styles.receiptRouteLineA]} />
-        <View style={[styles.receiptRouteDot, styles.receiptRouteDotPickup]} />
-        <View style={[styles.receiptRouteDot, styles.receiptRouteDotDropoff]} />
+      <View style={[styles.receiptMockMap, { alignItems: 'center', justifyContent: 'center', backgroundColor: '#F5F5F5' }]} accessibilityLabel="Rota desta viagem não disponível">
+        <Ionicons name="map-outline" size={30} color="#6A6A6A" />
+        <Text style={{ ...leafTypography.medium, fontSize: 14, color: '#6A6A6A', marginTop: 10 }}>Rota não disponível</Text>
       </View>
     );
   };
@@ -1476,11 +1487,11 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
           </Text>
         </View>
         <View style={styles.receiptCleanAvatarCopy}>
-          <Text style={styles.receiptCleanRowTitle} numberOfLines={1}>{title}</Text>
+          <Text style={styles.receiptCleanRowTitle} numberOfLines={2}>{title}</Text>
           {subtitle ? (
             <Text
               style={styles.receiptCleanRowSubtitle}
-              numberOfLines={1}
+              numberOfLines={2}
               testID={subtitleTestID}
             >
               {subtitle}
@@ -1508,8 +1519,8 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
           <Text style={styles.receiptCleanRouteLabel}>{label}</Text>
         </View>
         <View style={styles.receiptCleanRouteCopy}>
-          <Text style={styles.receiptCleanRowTitle} numberOfLines={1}>{title}</Text>
-          {subtitle ? <Text style={styles.receiptCleanRowSubtitle} numberOfLines={1}>{subtitle}</Text> : null}
+          <Text style={styles.receiptCleanRowTitle} numberOfLines={2}>{title}</Text>
+          {subtitle ? <Text style={styles.receiptCleanRowSubtitle} numberOfLines={3}>{subtitle}</Text> : null}
         </View>
       </View>
     </>
@@ -1574,13 +1585,18 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
       <View
         style={styles.receiptCleanContainer}
         testID={isDriverView ? "driver-receipt-screen" : "passenger-receipt-screen"}
-        accessibilityLabel={isDriverView ? "driver-receipt-screen" : "passenger-receipt-screen"}
+        accessibilityLabel={isDriverView ? "Recibo do motorista" : "Recibo do passageiro"}
         accessibilityElementsHidden={!isScreenFocused}
         importantForAccessibility={isScreenFocused ? "auto" : "no-hide-descendants"}
         pointerEvents={isScreenFocused ? "auto" : "none"}
       >
         <StatusBar translucent backgroundColor="transparent" barStyle="dark-content" />
-        <View style={styles.receiptCleanMapLayer}>{renderCleanMap()}</View>
+        <View style={[styles.receiptPageHeader, { paddingTop: insets.top + 20 }]}>
+          <TouchableOpacity style={styles.receiptPageBack} activeOpacity={0.76} onPress={handleDismiss}
+            testID={closeButtonTestId} accessibilityRole="button" accessibilityLabel="Voltar ao mapa" accessibilityHint="Fecha o recibo e retorna ao mapa.">
+            <Ionicons name="arrow-back" size={20} color="#222222" />
+          </TouchableOpacity><Text style={styles.receiptPageContext}>Sua viagem</Text>
+        </View>
 
         <ScrollView
           style={styles.receiptCleanSheetViewport}
@@ -1590,47 +1606,19 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
           onLayout={handleCardLayout}
         >
           <View style={styles.receiptCleanSheet}>
-            <View style={styles.receiptCleanTotalRow}>
-              <View>
-                <Text style={styles.receiptCleanTotalLabel}>
-                  {isDriverView
-                    ? driverReceiptAmountLabel
-                    : showPassengerOperationalSettlement
-                      ? "Pix pago original"
-                      : "Total pago"}
-                </Text>
-                <Text
-                  style={styles.receiptCleanTotalValue}
-                  testID={showPassengerOperationalSettlement
-                    ? "passenger-receipt-original-paid-amount"
-                    : undefined}
-                >
-                  {showPassengerOperationalSettlement
-                    ? formatCurrency(operationalInterruptionSettlement.originalPaidAmount)
-                    : receiptTotalLabel}
-                </Text>
-              </View>
-              <View style={styles.receiptCleanPillColumn}>
-                <TouchableOpacity
-                  style={styles.receiptCleanClose}
-                  activeOpacity={0.76}
-                  onPress={handleDismiss}
-                  testID={closeButtonTestId}
-                  accessibilityLabel={closeButtonTestId}
-                >
-                  <Text style={styles.receiptCleanCloseText}>×</Text>
-                </TouchableOpacity>
-                <View style={styles.receiptCleanPill}>
-                  <Text style={styles.receiptCleanPillText}>{receiptPaymentPill}</Text>
-                </View>
-              </View>
+            <View style={styles.receiptLead}>
+              <View style={{ flex: 1, gap: 9 }}><Text style={styles.receiptLeadTitle}>Recibo da viagem</Text>
+                <Text style={styles.receiptCleanRowSubtitle}>{formatTripDateLabel(selected?.date || selected?.completedAt || selected?.createdAt)}</Text></View>
+              <LeafObjectIcon name="activity" size={48} />
             </View>
-
+            <View style={styles.receiptSnapshot} testID="receipt-route-snapshot">{renderCleanMap()}</View>
             {receiptNeedsRecovery ? (
               <View
                 style={styles.receiptRecoveryCard}
                 testID="receipt-recovery-state-card"
-                accessibilityLabel="receipt-recovery-state-card"
+                accessible
+                accessibilityRole="summary"
+                accessibilityLabel={`${receiptRecoveryTitle}. ${receiptRecoverySubtitle}`}
               >
                 <View style={styles.receiptRecoveryIcon}>
                   <Ionicons
@@ -1644,36 +1632,11 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
                   />
                 </View>
                 <View style={styles.receiptRecoveryCopy}>
-                  <Text style={styles.receiptRecoveryTitle}>
-                    {!hasSelectedReceipt
-                      ? receiptRecoveryState === "failed"
-                        ? "Recibo em verificação"
-                        : "Recibo final pendente"
-                      : "Recibo final indisponível"}
-                  </Text>
-                  <Text style={styles.receiptRecoverySubtitle}>
-                    {!hasSelectedReceipt
-                      ? receiptRecoveryState === "failed"
-                        ? "A corrida foi encerrada, mas o recibo final autorizado ainda não foi carregado. Você pode voltar ao mapa sem reabrir a corrida."
-                        : "A corrida foi encerrada. O app aguarda o recibo final autorizado pelo servidor antes de liberar detalhes e avaliação."
-                      : "Este recibo não tem confirmação financeira final do servidor. Por segurança, não exibimos outro valor nem liberamos avaliação."}
-                  </Text>
+                  <Text style={styles.receiptRecoveryTitle}>{receiptRecoveryTitle}</Text>
+                  <Text style={styles.receiptRecoverySubtitle}>{receiptRecoverySubtitle}</Text>
                 </View>
               </View>
             ) : null}
-
-            {renderCleanAvatarRow({
-              marker: receiptPersonName.slice(0, 1).toUpperCase(),
-              title: receiptPersonName,
-              subtitle: receiptVehicleLabel,
-              subtitleTestID: !isDriverView
-                ? "passenger-receipt-vehicle-model-color"
-                : undefined,
-              right: receiptPlateLabel,
-              rightTestID: !isDriverView
-                ? "passenger-receipt-vehicle-plate"
-                : undefined,
-            })}
 
             {renderCleanRouteRow({
               label: "Origem",
@@ -1702,11 +1665,41 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
               </View>
               <View style={styles.receiptCleanMetricCell}>
                 <Text style={styles.receiptCleanMetricValue}>
-                  {formatReceiptMoney(safeTollAmount)}
+                  {formatReceiptMoney(tollAmount)}
                 </Text>
                 <Text style={styles.receiptCleanMetricLabel}>pedágio</Text>
               </View>
             </View>
+
+            <View style={styles.receiptCleanTotalRow}>
+              <View>
+                <Text style={styles.receiptCleanTotalLabel}>
+                  {isDriverView
+                    ? driverReceiptAmountLabel
+                    : showPassengerOperationalSettlement
+                      ? "Pix pago original"
+                      : "Total pago"}
+                </Text>
+                <Text
+                  style={styles.receiptCleanTotalValue}
+                  testID={showPassengerOperationalSettlement
+                    ? "passenger-receipt-original-paid-amount"
+                    : undefined}
+                >
+                  {showPassengerOperationalSettlement
+                    ? formatCurrency(operationalInterruptionSettlement.originalPaidAmount)
+                    : receiptTotalLabel}
+                </Text>
+              </View>
+              <View style={styles.receiptCleanPillColumn}>
+                <View style={styles.receiptCleanPill}>
+                  <Text style={styles.receiptCleanPillText}>{receiptPaymentPill}</Text>
+                </View>
+              </View>
+            </View>
+
+            <View style={styles.receiptCleanDivider} />
+            <Text style={styles.receiptCleanSectionTitle}>Pagamento</Text>
 
             <View style={styles.receiptCleanValueBlock}>
               {isDriverView ? (
@@ -1719,13 +1712,17 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
                   {renderCleanValueRow({
                     title: "Pedágio",
                     subtitle: "Repassado integralmente",
-                    value: formatReceiptMoney(safeTollAmount),
+                    value: formatReceiptMoney(tollAmount),
+                    testID: "driver-receipt-toll-row",
+                    valueTestID: "driver-receipt-toll-amount",
                   })}
                   {renderCleanValueRow({
                     title: "Taxas Leaf",
                     subtitle: "Operacional e processamento antes do repasse",
-                    value: formatReceiptMoney(safeFeeAmount),
+                    value: formatReceiptMoney(finalTotalFees),
                     muted: true,
+                    testID: "driver-receipt-fees-row",
+                    valueTestID: "driver-receipt-fees-amount",
                   })}
                   {renderCleanValueRow({
                     title: "Repasse Leaf",
@@ -1759,21 +1756,43 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
                       title: "Corrida",
                       subtitle: "Trajeto e serviço",
                       value: formatReceiptMoney(passengerRideSubtotal),
+                      testID: "passenger-receipt-subtotal-row",
+                      valueTestID: "passenger-receipt-subtotal-amount",
                     })}
                     {renderCleanValueRow({
                       title: "Pedágio",
                       subtitle: "Incluso no total pago",
-                      value: formatReceiptMoney(safeTollAmount),
+                      value: formatReceiptMoney(tollAmount),
+                      testID: "passenger-receipt-toll-row",
+                      valueTestID: "passenger-receipt-toll-amount",
                     })}
                     {renderCleanValueRow({
                       title: "Taxa Leaf",
                       subtitle: "Inclusa no total pago",
-                      value: formatReceiptMoney(safeFeeAmount),
+                      value: formatReceiptMoney(finalTotalFees),
+                      testID: "passenger-receipt-fees-row",
+                      valueTestID: "passenger-receipt-fees-amount",
                     })}
                   </>
                 )
               )}
             </View>
+
+            <View style={styles.receiptCleanDivider} />
+            <Text style={styles.receiptCleanSectionTitle}>{isDriverView ? "Passageiro" : "Motorista"}</Text>
+            {renderCleanAvatarRow({
+              topDivider: false,
+              marker: receiptPersonName.slice(0, 1).toUpperCase(),
+              title: receiptPersonName,
+              subtitle: receiptVehicleLabel,
+              subtitleTestID: !isDriverView
+                ? "passenger-receipt-vehicle-model-color"
+                : undefined,
+              right: receiptPlateLabel,
+              rightTestID: !isDriverView
+                ? "passenger-receipt-vehicle-plate"
+                : undefined,
+            })}
 
             {isDriverView ? (
               <>
@@ -1798,7 +1817,7 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
                   activeOpacity={0.86}
                   accessible
                   accessibilityRole="button"
-                  accessibilityLabel="passenger-receipt-more-options-button"
+                  accessibilityLabel={receiptOptionsVisible ? "Ocultar opções" : "Mais opções"}
                   accessibilityState={{ expanded: receiptOptionsVisible }}
                   testID="passenger-receipt-more-options-button"
                   onPress={() => setReceiptOptionsVisible((visible) => !visible)}
@@ -1835,7 +1854,8 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
                 activeOpacity={0.86}
                 accessible
                 accessibilityRole="button"
-                accessibilityLabel="passenger-receipt-report-issue-button"
+                accessibilityLabel="Reportar problema com a viagem"
+                accessibilityHint="Abre o suporte para informar um problema de cobrança."
                 testID="passenger-receipt-report-issue-button"
                 onPress={() =>
                   navigation.navigate("RobotaxiPrototypeSupport", {
@@ -1851,6 +1871,10 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
                 <Text style={styles.receiptCleanSecondaryButtonText}>Reportar problema</Text>
               </TouchableOpacity>
             ) : null}
+            {selected?.id ? <View style={styles.receiptReference}>
+              <Text style={styles.receiptCleanRowSubtitle}>Referência</Text><Text selectable style={styles.receiptReferenceValue}>{selected.id}</Text>
+            </View> : null}
+            <LeafButton label="Concluir" tone="primary" onPress={handleDismiss} testID="receipt-done-button" style={{ marginTop: 20 }} />
           </View>
         </ScrollView>
       </View>
@@ -1876,7 +1900,7 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
               { paddingBottom: receiptCardBottomPadding },
             ]}
             testID={isDriverView ? "driver-receipt-screen" : "passenger-receipt-screen"}
-            accessibilityLabel={isDriverView ? "driver-receipt-screen" : "passenger-receipt-screen"}
+            accessibilityLabel={isDriverView ? "Recibo do motorista" : "Recibo do passageiro"}
           >
             <ScrollView
               style={styles.scrollViewport}
@@ -1899,7 +1923,8 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
                 <PrototypeMenuCloseButton
                   onPress={handleDismiss}
                   testID={closeButtonTestId}
-                  accessibilityLabel={closeButtonTestId}
+                  accessibilityLabel="Voltar ao mapa"
+                  accessibilityHint="Fecha o recibo e retorna ao mapa."
                 />
               </View>
 
@@ -2873,13 +2898,21 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
 }
 
 const styles = StyleSheet.create({
+  receiptPageHeader: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 24, paddingBottom: 22 },
+  receiptPageBack: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#F5F5F5', alignItems: 'center', justifyContent: 'center' },
+  receiptPageContext: { ...leafTypography.medium, fontSize: 14, lineHeight: 20, color: '#6A6A6A' },
+  receiptLead: { flexDirection: 'row', alignItems: 'flex-start', gap: 18, marginBottom: 24 },
+  receiptLeadTitle: { ...leafTypography.semiBold, fontSize: 24, lineHeight: 30, letterSpacing: -0.5, color: '#222222' },
+  receiptSnapshot: { height: 210, borderRadius: 18, overflow: 'hidden', marginBottom: 24, backgroundColor: '#F5F5F5' },
+  receiptReference: { paddingTop: 20, marginTop: 20, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: '#E5E5E5', gap: 6 },
+  receiptReferenceValue: { ...leafTypography.regular, fontSize: 13, lineHeight: 20, color: '#6A6A6A' },
   container: {
     flex: 1,
-    backgroundColor: "#F8F6F1",
+    backgroundColor: "#FFFFFF",
   },
   receiptCleanContainer: {
     flex: 1,
-    backgroundColor: "#F8F6F1",
+    backgroundColor: "#FFFFFF",
   },
   receiptCleanMapLayer: {
     position: "absolute",
@@ -2963,7 +2996,7 @@ const styles = StyleSheet.create({
     height: 16,
     borderRadius: 8,
     borderWidth: 4,
-    borderColor: "#F8F6F1",
+    borderColor: "#FFFFFF",
     backgroundColor: "#1A330E",
   },
   receiptRouteDotPickup: {
@@ -2994,15 +3027,15 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   receiptCleanTitle: {
-    color: "#171412",
-    fontFamily: fonts.SemiBold,
+    color: "#222222",
+    ...leafTypography.semiBold,
     fontSize: 22,
     lineHeight: 29,
   },
   receiptCleanSubtitle: {
     marginTop: 6,
     color: "#5D6A63",
-    fontFamily: fonts.Regular,
+    ...leafTypography.regular,
     fontSize: 13,
     lineHeight: 17,
   },
@@ -3019,33 +3052,18 @@ const styles = StyleSheet.create({
   },
   receiptCleanCloseText: {
     color: "#0A1410",
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 24,
     lineHeight: 28,
   },
   receiptCleanSheetViewport: {
-    position: "absolute",
-    top: 132,
-    left: 0,
-    right: 0,
-    bottom: 0,
+    flex: 1,
   },
   receiptCleanSheetContent: {
-    paddingHorizontal: 14,
+    paddingHorizontal: 24,
   },
   receiptCleanSheet: {
-    minHeight: 620,
-    borderRadius: 28,
-    borderWidth: 1,
-    borderColor: "#ECE5DC",
     backgroundColor: "#FFFFFF",
-    paddingHorizontal: 22,
-    paddingTop: 22,
-    shadowColor: "#000",
-    shadowOpacity: 0.08,
-    shadowOffset: { width: 0, height: -8 },
-    shadowRadius: 10,
-    elevation: 6,
   },
   receiptCleanTotalRow: {
     minHeight: 62,
@@ -3053,26 +3071,27 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
     gap: 14,
+    marginTop: 20,
   },
   receiptCleanTotalLabel: {
-    color: "#8C9A92",
-    fontFamily: fonts.Medium,
-    fontSize: 12,
-    lineHeight: 16,
+    color: "#6A6A6A",
+    ...leafTypography.medium,
+    fontSize: 14,
+    lineHeight: 20,
   },
   receiptCleanTotalValue: {
     marginTop: 6,
-    color: "#171412",
-    fontFamily: fonts.SemiBold,
-    fontSize: 30,
-    lineHeight: 38,
+    color: "#222222",
+    ...leafTypography.semiBold,
+    fontSize: 32,
+    lineHeight: 40,
   },
   receiptCleanPill: {
     minWidth: 120,
     height: 26,
     borderRadius: 13,
     borderWidth: 1,
-    borderColor: "#E9E2D8",
+    borderColor: "#E5E5E5",
     backgroundColor: "#F1F5EE",
     alignItems: "center",
     justifyContent: "center",
@@ -3080,7 +3099,7 @@ const styles = StyleSheet.create({
   },
   receiptCleanPillText: {
     color: "#1A330E",
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 10.5,
     lineHeight: 14,
   },
@@ -3114,20 +3133,20 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   receiptRecoveryTitle: {
-    color: "#171412",
-    fontFamily: fonts.SemiBold,
+    color: "#222222",
+    ...leafTypography.semiBold,
     fontSize: 14,
     lineHeight: 18,
   },
   receiptRecoverySubtitle: {
     color: "#5D6A63",
-    fontFamily: fonts.Regular,
+    ...leafTypography.regular,
     fontSize: 12,
     lineHeight: 17,
   },
   receiptCleanDivider: {
-    height: 1,
-    backgroundColor: "#E9E2D8",
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: "#E5E5E5",
     marginTop: 18,
   },
   receiptCleanAvatarRow: {
@@ -3135,6 +3154,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 12,
+    paddingVertical: 12,
   },
   receiptCleanAvatar: {
     width: 38,
@@ -3142,14 +3162,14 @@ const styles = StyleSheet.create({
     borderRadius: 19,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#F1F5EE",
+    backgroundColor: "#F5F5F5",
   },
   receiptCleanAvatarBlue: {
-    backgroundColor: "#DCEAF6",
+    backgroundColor: "#F5F5F5",
   },
   receiptCleanAvatarText: {
     color: "#1A330E",
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 13,
     lineHeight: 17,
   },
@@ -3161,40 +3181,41 @@ const styles = StyleSheet.create({
     minWidth: 0,
   },
   receiptCleanRowTitle: {
-    color: "#171412",
-    fontFamily: fonts.SemiBold,
-    fontSize: 13.5,
-    lineHeight: 18,
+    color: "#222222",
+    ...leafTypography.semiBold,
+    fontSize: 16,
+    lineHeight: 22,
   },
   receiptCleanRowSubtitle: {
     marginTop: 2,
-    color: "#756F68",
-    fontFamily: fonts.Regular,
-    fontSize: 11,
-    lineHeight: 15,
+    color: "#6A6A6A",
+    ...leafTypography.regular,
+    fontSize: 14,
+    lineHeight: 20,
   },
   receiptCleanRowRight: {
     maxWidth: 84,
-    color: "#171412",
-    fontFamily: fonts.SemiBold,
-    fontSize: 13,
-    lineHeight: 17,
+    color: "#222222",
+    ...leafTypography.semiBold,
+    fontSize: 14,
+    lineHeight: 20,
     textAlign: "right",
   },
   receiptCleanRouteRow: {
-    minHeight: 52,
+    minHeight: 68,
     flexDirection: "row",
     alignItems: "center",
     gap: 13,
+    paddingVertical: 12,
   },
   receiptCleanRouteLabelColumn: {
     width: 58,
   },
   receiptCleanRouteLabel: {
-    color: "#8C9A92",
-    fontFamily: fonts.SemiBold,
-    fontSize: 10,
-    lineHeight: 13,
+    color: "#6A6A6A",
+    ...leafTypography.semiBold,
+    fontSize: 12,
+    lineHeight: 17,
     textTransform: "uppercase",
   },
   receiptCleanRouteCopy: {
@@ -3211,17 +3232,17 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   receiptCleanMetricValue: {
-    color: "#171412",
-    fontFamily: fonts.SemiBold,
-    fontSize: 17,
-    lineHeight: 23,
+    color: "#222222",
+    ...leafTypography.semiBold,
+    fontSize: 20,
+    lineHeight: 25,
   },
   receiptCleanMetricLabel: {
     marginTop: 2,
-    color: "#827B73",
-    fontFamily: fonts.Medium,
-    fontSize: 10.5,
-    lineHeight: 14,
+    color: "#767676",
+    ...leafTypography.medium,
+    fontSize: 12,
+    lineHeight: 17,
   },
   receiptCleanValueBlock: {
     gap: 11,
@@ -3238,30 +3259,30 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   receiptCleanValueTitle: {
-    color: "#171412",
-    fontFamily: fonts.SemiBold,
-    fontSize: 13.5,
-    lineHeight: 18,
+    color: "#222222",
+    ...leafTypography.semiBold,
+    fontSize: 14,
+    lineHeight: 20,
   },
   receiptCleanValueTitleMuted: {
-    color: "#756F68",
+    color: "#6A6A6A",
   },
   receiptCleanValueSubtitle: {
     marginTop: 2,
-    color: "#756F68",
-    fontFamily: fonts.Regular,
-    fontSize: 11,
-    lineHeight: 15,
+    color: "#6A6A6A",
+    ...leafTypography.regular,
+    fontSize: 13,
+    lineHeight: 18,
   },
   receiptCleanValueAmount: {
-    color: "#171412",
-    fontFamily: fonts.SemiBold,
-    fontSize: 13,
-    lineHeight: 17,
+    color: "#222222",
+    ...leafTypography.semiBold,
+    fontSize: 16,
+    lineHeight: 22,
     textAlign: "right",
   },
   receiptCleanValueAmountMuted: {
-    color: "#756F68",
+    color: "#6A6A6A",
   },
   receiptCleanRecentBlock: {
     marginTop: 28,
@@ -3269,14 +3290,15 @@ const styles = StyleSheet.create({
   },
   receiptCleanSectionTitle: {
     color: "#0A1410",
-    fontFamily: fonts.SemiBold,
-    fontSize: 13.5,
-    lineHeight: 18,
+    ...leafTypography.semiBold,
+    fontSize: 18,
+    lineHeight: 24,
+    marginTop: 20,
   },
   receiptCleanRecentRow: {
     minHeight: 48,
     borderTopWidth: 1,
-    borderTopColor: "#E9E2D8",
+    borderTopColor: "#E5E5E5",
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
@@ -3299,38 +3321,39 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     borderRadius: leafButtonMetrics.radius,
     borderWidth: 1,
-    borderColor: "#E9E2D8",
+    borderColor: "#E5E5E5",
     backgroundColor: "#FFFFFF",
     alignItems: "center",
     justifyContent: "center",
   },
   receiptCleanMoreOptionsText: {
     color: "#1A330E",
-    fontFamily: fonts.SemiBold,
-    fontSize: 12.5,
-    lineHeight: 17,
+    ...leafTypography.semiBold,
+    fontSize: 16,
+    lineHeight: 22,
   },
   receiptCleanSecondaryButton: {
-    width: 100,
+    width: '100%',
     minHeight: leafButtonMetrics.height,
     borderRadius: leafButtonMetrics.radius,
     borderWidth: 1,
-    borderColor: "#E9E2D8",
+    borderColor: "#E5E5E5",
     backgroundColor: "#FFFFFF",
     alignItems: "center",
     justifyContent: "center",
+    marginTop: 12,
   },
   receiptCleanSecondaryButtonText: {
     color: "#1A330E",
-    fontFamily: fonts.SemiBold,
-    fontSize: 12.5,
-    lineHeight: 17,
+    ...leafTypography.semiBold,
+    fontSize: 16,
+    lineHeight: 22,
   },
   receiptCleanPrimaryButton: {
     flex: 1,
     minHeight: leafButtonMetrics.height,
     borderRadius: leafButtonMetrics.radius,
-    backgroundColor: "#1A330E",
+    backgroundColor: '#252525',
     alignItems: "center",
     justifyContent: "center",
   },
@@ -3342,9 +3365,9 @@ const styles = StyleSheet.create({
   },
   receiptCleanPrimaryButtonText: {
     color: "#FFFFFF",
-    fontFamily: fonts.SemiBold,
-    fontSize: 12.5,
-    lineHeight: 17,
+    ...leafTypography.semiBold,
+    fontSize: 16,
+    lineHeight: 22,
     textAlign: "center",
   },
   receiptHiddenTestGroup: {
@@ -3432,7 +3455,7 @@ const styles = StyleSheet.create({
   },
   driverHeroBadgeText: {
     color: "#1A330E",
-    fontFamily: fonts.Bold,
+    ...leafTypography.bold,
     fontSize: 12,
     lineHeight: 15,
   },
@@ -3447,7 +3470,7 @@ const styles = StyleSheet.create({
   },
   driverHeroMetaPillText: {
     color: "#6C651B",
-    fontFamily: fonts.Bold,
+    ...leafTypography.bold,
     fontSize: 12,
     lineHeight: 15,
   },
@@ -3494,7 +3517,7 @@ const styles = StyleSheet.create({
   driverTitle: {
     marginTop: 0,
     color: color.text.primary,
-    fontFamily: fonts.Bold,
+    ...leafTypography.bold,
     fontSize: 21,
     lineHeight: 25,
     letterSpacing: -0.6,
@@ -3511,7 +3534,7 @@ const styles = StyleSheet.create({
   driverSubtitle: {
     marginTop: 0,
     color: color.text.secondary,
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     fontSize: 13.5,
     lineHeight: 18,
     textAlign: "left",
@@ -3564,7 +3587,7 @@ const styles = StyleSheet.create({
   },
   driverSummaryAmountLabel: {
     color: color.text.secondary,
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 12,
     lineHeight: 14,
     textTransform: "uppercase",
@@ -3581,7 +3604,7 @@ const styles = StyleSheet.create({
   driverSummaryAmountValue: {
     marginTop: 8,
     color: "#1A7F37",
-    fontFamily: fonts.Bold,
+    ...leafTypography.bold,
     fontSize: 34,
     lineHeight: 38,
     letterSpacing: -1,
@@ -3599,7 +3622,7 @@ const styles = StyleSheet.create({
   driverSummaryAmountCaption: {
     marginTop: 6,
     color: "#6B7178",
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     fontSize: 12,
     lineHeight: 16,
   },
@@ -3721,7 +3744,7 @@ const styles = StyleSheet.create({
   },
   driverSummaryAsideLabel: {
     color: "#6B7178",
-    fontFamily: fonts.Bold,
+    ...leafTypography.bold,
     fontSize: 10,
     lineHeight: 12,
     textTransform: "uppercase",
@@ -3738,7 +3761,7 @@ const styles = StyleSheet.create({
   driverSummaryAsideValue: {
     marginTop: 2,
     color: color.text.primary,
-    fontFamily: fonts.Bold,
+    ...leafTypography.bold,
     fontSize: 15,
     lineHeight: 18,
   },
@@ -3775,7 +3798,7 @@ const styles = StyleSheet.create({
   driverSummaryPillText: {
     marginLeft: 6,
     color: "#6C651B",
-    fontFamily: fonts.Bold,
+    ...leafTypography.bold,
     fontSize: 13,
     lineHeight: 16,
   },
@@ -3855,7 +3878,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   driverMetricLabel: {
-    fontFamily: fonts.Bold,
+    ...leafTypography.bold,
     fontSize: 11,
     textTransform: "uppercase",
     color: "#6B7178",
@@ -3870,7 +3893,7 @@ const styles = StyleSheet.create({
     marginBottom: 1,
   },
   driverMetricValue: {
-    fontFamily: fonts.Bold,
+    ...leafTypography.bold,
     fontSize: 18,
     color: color.text.primary,
   },
@@ -3907,7 +3930,7 @@ const styles = StyleSheet.create({
   },
   driverFeeDisclosureEyebrow: {
     color: "#6B7178",
-    fontFamily: fonts.Bold,
+    ...leafTypography.bold,
     fontSize: 10,
     lineHeight: 12,
     letterSpacing: 1,
@@ -3915,7 +3938,7 @@ const styles = StyleSheet.create({
   },
   driverFeeDisclosureHint: {
     color: "#7C868D",
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     fontSize: 11,
     lineHeight: 14,
   },
@@ -3934,7 +3957,7 @@ const styles = StyleSheet.create({
   },
   driverFeeDisclosureMetricLabel: {
     color: "#6B7178",
-    fontFamily: fonts.Bold,
+    ...leafTypography.bold,
     fontSize: 10,
     lineHeight: 12,
     textTransform: "uppercase",
@@ -3943,7 +3966,7 @@ const styles = StyleSheet.create({
   driverFeeDisclosureMetricValue: {
     marginTop: 4,
     color: color.text.primary,
-    fontFamily: fonts.Bold,
+    ...leafTypography.bold,
     fontSize: 13,
     lineHeight: 16,
   },
@@ -3958,13 +3981,13 @@ const styles = StyleSheet.create({
   },
   driverFeeDisclosureTotalLabel: {
     color: "#4F5A63",
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 12,
     lineHeight: 16,
   },
   driverFeeDisclosureTotalValue: {
     color: "#1A7F37",
-    fontFamily: fonts.Bold,
+    ...leafTypography.bold,
     fontSize: 14,
     lineHeight: 16,
   },
@@ -4026,7 +4049,7 @@ const styles = StyleSheet.create({
   },
   driverRouteSnapshotBadgeText: {
     color: "#FFFFFF",
-    fontFamily: fonts.Bold,
+    ...leafTypography.bold,
     fontSize: 11,
     lineHeight: 13,
     letterSpacing: 0.5,
@@ -4038,7 +4061,7 @@ const styles = StyleSheet.create({
   },
   driverSectionEyebrow: {
     color: "#6B7178",
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 10,
     lineHeight: 12,
     textTransform: "uppercase",
@@ -4046,7 +4069,7 @@ const styles = StyleSheet.create({
   },
   driverSectionTitleInline: {
     color: color.text.primary,
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 17,
     lineHeight: 22,
   },
@@ -4162,7 +4185,7 @@ const styles = StyleSheet.create({
     minHeight: 44,
   },
   driverRouteStopLabel: {
-    fontFamily: fonts.Bold,
+    ...leafTypography.bold,
     fontSize: 12,
     textTransform: "uppercase",
     letterSpacing: 1.6,
@@ -4183,7 +4206,7 @@ const styles = StyleSheet.create({
     color: "#4D6575",
   },
   driverRouteStopTitle: {
-    fontFamily: fonts.Bold,
+    ...leafTypography.bold,
     fontSize: 17,
     lineHeight: 23,
     color: color.text.primary,
@@ -4198,7 +4221,7 @@ const styles = StyleSheet.create({
   },
   driverRouteStopSubtitle: {
     marginTop: 4,
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     fontSize: 14,
     lineHeight: 19,
     color: color.text.secondary,
@@ -4260,7 +4283,7 @@ const styles = StyleSheet.create({
   },
   driverFeeMetricLabel: {
     color: "#6B7178",
-    fontFamily: fonts.Bold,
+    ...leafTypography.bold,
     fontSize: 10,
     lineHeight: 12,
     textTransform: "uppercase",
@@ -4277,7 +4300,7 @@ const styles = StyleSheet.create({
   driverFeeMetricValue: {
     marginTop: 3,
     color: color.text.primary,
-    fontFamily: fonts.Bold,
+    ...leafTypography.bold,
     fontSize: 14,
     lineHeight: 17,
   },
@@ -4293,7 +4316,7 @@ const styles = StyleSheet.create({
   driverFeeTextMuted: {
     marginTop: 8,
     color: "#506372",
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     fontSize: 13,
     lineHeight: 18,
   },
@@ -4363,7 +4386,7 @@ const styles = StyleSheet.create({
   },
   driverBackSecondaryText: {
     color: "#4F5A63",
-    fontFamily: fonts.Bold,
+    ...leafTypography.bold,
     fontSize: 15,
     lineHeight: 18,
   },
@@ -4405,7 +4428,7 @@ const styles = StyleSheet.create({
   },
   receiptHeaderEyebrow: {
     color: color.text.secondary,
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 11,
     lineHeight: 14,
     textTransform: "uppercase",
@@ -4414,16 +4437,16 @@ const styles = StyleSheet.create({
   receiptHeaderTitle: {
     marginTop: 4,
     color: color.text.primary,
-    fontFamily: fonts.Bold,
-    fontSize: 24,
+    ...leafTypography.bold,
+    fontSize: 22,
     lineHeight: 28,
   },
   receiptHeaderSubtitle: {
     marginTop: 4,
     color: color.text.secondary,
-    fontFamily: fonts.Regular,
-    fontSize: 13,
-    lineHeight: 18,
+    ...leafTypography.regular,
+    fontSize: 14,
+    lineHeight: 20,
   },
   passengerHeroCard: {
     borderRadius: 22,
@@ -4467,13 +4490,13 @@ const styles = StyleSheet.create({
   },
   passengerHeroMetaPillText: {
     color: "#445062",
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 11,
     lineHeight: 14,
   },
   passengerHeroBadgeText: {
     color: "#1A7F37",
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 11,
     lineHeight: 14,
     textTransform: "uppercase",
@@ -4482,7 +4505,7 @@ const styles = StyleSheet.create({
   passengerHeroAmountLabel: {
     marginTop: 16,
     color: color.text.secondary,
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 11,
     lineHeight: 14,
     textTransform: "uppercase",
@@ -4491,21 +4514,21 @@ const styles = StyleSheet.create({
   passengerHeroAmount: {
     marginTop: 6,
     color: color.text.primary,
-    fontFamily: fonts.Bold,
+    ...leafTypography.bold,
     fontSize: 32,
     lineHeight: 36,
   },
   passengerHeroTitle: {
     marginTop: 10,
     color: color.text.primary,
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 18,
     lineHeight: 24,
   },
   passengerHeroSubtitle: {
     marginTop: 4,
     color: color.text.secondary,
-    fontFamily: fonts.Regular,
+    ...leafTypography.regular,
     fontSize: 13,
     lineHeight: 18,
   },
@@ -4535,7 +4558,7 @@ const styles = StyleSheet.create({
   },
   passengerHeroDriverLabel: {
     color: color.text.secondary,
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 10,
     lineHeight: 12,
     textTransform: "uppercase",
@@ -4544,7 +4567,7 @@ const styles = StyleSheet.create({
   passengerHeroDriverName: {
     marginTop: 2,
     color: color.text.primary,
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 14,
     lineHeight: 18,
   },
@@ -4564,7 +4587,7 @@ const styles = StyleSheet.create({
   },
   passengerHeroStatLabel: {
     color: color.text.secondary,
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 10,
     lineHeight: 12,
     textTransform: "uppercase",
@@ -4573,7 +4596,7 @@ const styles = StyleSheet.create({
   passengerHeroStatValue: {
     marginTop: 4,
     color: color.text.primary,
-    fontFamily: fonts.Bold,
+    ...leafTypography.bold,
     fontSize: 15,
     lineHeight: 18,
   },
@@ -4634,7 +4657,7 @@ const styles = StyleSheet.create({
   },
   passengerRouteStopLabel: {
     color: color.text.secondary,
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 10,
     lineHeight: 12,
     textTransform: "uppercase",
@@ -4645,13 +4668,13 @@ const styles = StyleSheet.create({
   },
   passengerRouteStopTitle: {
     color: color.text.primary,
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 15,
     lineHeight: 20,
   },
   passengerRouteStopSubtitle: {
     color: color.text.secondary,
-    fontFamily: fonts.Regular,
+    ...leafTypography.regular,
     fontSize: 12,
     lineHeight: 17,
   },
@@ -4661,7 +4684,7 @@ const styles = StyleSheet.create({
   },
   passengerSectionEyebrow: {
     color: color.text.secondary,
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 10,
     lineHeight: 12,
     textTransform: "uppercase",
@@ -4669,7 +4692,7 @@ const styles = StyleSheet.create({
   },
   passengerSectionTitleInline: {
     color: color.text.primary,
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 17,
     lineHeight: 22,
   },
@@ -4692,7 +4715,7 @@ const styles = StyleSheet.create({
   },
   passengerStatPillText: {
     color: color.text.primary,
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     fontSize: 12,
     lineHeight: 16,
   },
@@ -4705,7 +4728,7 @@ const styles = StyleSheet.create({
   },
   receiptSectionTitle: {
     color: color.text.primary,
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 16,
     lineHeight: 22,
   },
@@ -4722,7 +4745,7 @@ const styles = StyleSheet.create({
   },
   receiptSectionBadgeText: {
     color: color.text.secondary,
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 12,
     lineHeight: 14,
   },
@@ -4737,7 +4760,7 @@ const styles = StyleSheet.create({
   },
   earningsCardLabel: {
     color: color.text.secondary,
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 12,
     lineHeight: 14,
     textTransform: "uppercase",
@@ -4746,7 +4769,7 @@ const styles = StyleSheet.create({
   earningsCardValue: {
     marginTop: 5,
     color: "#1A7F37",
-    fontFamily: fonts.Bold,
+    ...leafTypography.bold,
     fontSize: 36,
     lineHeight: 40,
     letterSpacing: -0.9,
@@ -4759,7 +4782,7 @@ const styles = StyleSheet.create({
   },
   feeText: {
     color: "#365A6D",
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 13,
     lineHeight: 18,
   },
@@ -4784,7 +4807,7 @@ const styles = StyleSheet.create({
   },
   splitLabel: {
     color: color.text.secondary,
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 11.5,
     lineHeight: 14,
     textTransform: "uppercase",
@@ -4793,7 +4816,7 @@ const styles = StyleSheet.create({
   splitValue: {
     marginTop: 4,
     color: color.text.primary,
-    fontFamily: fonts.Bold,
+    ...leafTypography.bold,
     fontSize: 24,
     lineHeight: 28,
   },
@@ -4811,14 +4834,14 @@ const styles = StyleSheet.create({
   },
   feeDetailText: {
     color: "#365A6D",
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     fontSize: 13,
     lineHeight: 17,
   },
   feeDetailTextStrong: {
     marginTop: 3,
     color: "#1F3440",
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 13,
     lineHeight: 17,
   },
@@ -4856,14 +4879,14 @@ const styles = StyleSheet.create({
   },
   routeSummaryTextMuted: {
     color: "#556271",
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     fontSize: 16,
     lineHeight: 20,
   },
   routeSummaryTextStrong: {
     marginTop: 1,
     color: color.text.primary,
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 16,
     lineHeight: 20,
   },
@@ -4877,7 +4900,7 @@ const styles = StyleSheet.create({
   },
   routeMetaItem: {
     color: color.text.secondary,
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     fontSize: 12.5,
     lineHeight: 16,
   },
@@ -4888,16 +4911,16 @@ const styles = StyleSheet.create({
   },
   title: {
     color: color.text.primary,
-    fontFamily: fonts.SemiBold,
-    fontSize: 18,
-    lineHeight: 24,
+    ...leafTypography.semiBold,
+    fontSize: 22,
+    lineHeight: 28,
   },
   subtitle: {
     marginTop: 1,
     color: color.text.secondary,
-    fontFamily: fonts.Regular,
-    fontSize: 13,
-    lineHeight: 18,
+    ...leafTypography.regular,
+    fontSize: 14,
+    lineHeight: 20,
   },
   historyWrap: {
     marginTop: 10,
@@ -4930,7 +4953,7 @@ const styles = StyleSheet.create({
   },
   historyDate: {
     color: color.text.primary,
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     fontSize: 13,
     lineHeight: 18,
   },
@@ -4946,7 +4969,7 @@ const styles = StyleSheet.create({
   },
   historyStatusPillText: {
     color: "#1A7F37",
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 10,
     lineHeight: 12,
     textTransform: "uppercase",
@@ -4965,7 +4988,7 @@ const styles = StyleSheet.create({
   },
   historyValuePillText: {
     color: color.text.primary,
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 13,
     lineHeight: 16,
   },
@@ -4994,7 +5017,7 @@ const styles = StyleSheet.create({
   historyStopLabel: {
     width: 54,
     color: color.text.secondary,
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 10,
     lineHeight: 14,
     textTransform: "uppercase",
@@ -5004,13 +5027,13 @@ const styles = StyleSheet.create({
     flex: 1,
     minWidth: 0,
     color: color.text.secondary,
-    fontFamily: fonts.Regular,
+    ...leafTypography.regular,
     fontSize: 11.5,
     lineHeight: 15,
   },
   historyValue: {
     color: color.text.primary,
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 14,
     lineHeight: 18,
   },
@@ -5036,13 +5059,13 @@ const styles = StyleSheet.create({
   },
   detailLabel: {
     color: color.text.secondary,
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     fontSize: 13,
     lineHeight: 18,
   },
   detailValue: {
     color: color.text.primary,
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     fontSize: 13,
     lineHeight: 18,
   },
@@ -5056,19 +5079,19 @@ const styles = StyleSheet.create({
   },
   detailValuePillText: {
     color: "#445062",
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 11,
     lineHeight: 14,
   },
   detailLabelStrong: {
     color: color.text.primary,
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 15,
     lineHeight: 20,
   },
   detailValueStrong: {
     color: color.accent.primary,
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 15,
     lineHeight: 20,
   },
@@ -5103,7 +5126,7 @@ const styles = StyleSheet.create({
   },
   passengerPrimaryActionText: {
     color: "#1A330E",
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 14,
     lineHeight: 18,
   },
@@ -5135,14 +5158,14 @@ const styles = StyleSheet.create({
   },
   secondaryActionText: {
     color: color.text.primary,
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     fontSize: 13,
     lineHeight: 18,
   },
   touchProbeText: {
     marginTop: 6,
     color: color.text.muted,
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     fontSize: 11,
     lineHeight: 14,
   },
@@ -5158,7 +5181,7 @@ const styles = StyleSheet.create({
   },
   emptyText: {
     color: color.text.secondary,
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     fontSize: 13,
     lineHeight: 18,
     textAlign: "center",

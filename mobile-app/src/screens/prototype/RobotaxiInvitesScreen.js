@@ -1,3 +1,4 @@
+import leafTypography from '../../components/prototype/LeafTypography';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Alert,
@@ -12,7 +13,6 @@ import {
 } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { fonts } from '../../theme/runtimeTokens';
 import PrototypeDismissibleSheet from '../../components/prototype/PrototypeDismissibleSheet';
 import PrototypeScreenTransition from '../../components/prototype/PrototypeScreenTransition';
 import {
@@ -30,7 +30,7 @@ import {
   loadMyReferralInvites,
 } from '../../services/runtime/referralProgramService';
 
-const SURFACE_TOP_PADDING = 16;
+const SURFACE_TOP_PADDING = 20;
 const SURFACE_BOTTOM_PADDING = 18;
 const INVITE_BASE_URL = 'https://leaf.app.br/convite';
 const HISTORY_LIMIT = 5;
@@ -274,7 +274,7 @@ export default function RobotaxiInvitesScreen({ navigation, route }) {
               <PrototypeMenuCloseButton
                 onPress={handleDismiss}
                 testID="robotaxi-invites-close-button"
-                accessibilityLabel="robotaxi-invites-close-button"
+                accessibilityLabel="Fechar convites"
               />
             )}
           >
@@ -297,7 +297,7 @@ export default function RobotaxiInvitesScreen({ navigation, route }) {
                   style={styles.input}
                   autoCapitalize="none"
                   testID="robotaxi-invites-target-input"
-                  accessibilityLabel="robotaxi-invites-target-input"
+                  accessibilityLabel="Telefone ou email do passageiro convidado"
                 />
                 <LeafButton
                   label={busy ? 'Criando...' : 'Criar convite'}
@@ -306,6 +306,8 @@ export default function RobotaxiInvitesScreen({ navigation, route }) {
                   onPress={handleCreateInvite}
                   disabled={busy}
                   style={styles.fullButton}
+                  testID="robotaxi-invites-create-button"
+                  accessibilityLabel={busy ? 'Criando convite para passageiro' : 'Criar convite para passageiro'}
                 />
               </View>
 
@@ -331,7 +333,7 @@ export default function RobotaxiInvitesScreen({ navigation, route }) {
                       onPress={handleCopy}
                       style={styles.actionButton}
                       testID="robotaxi-invites-copy-button"
-                      accessibilityLabel="robotaxi-invites-copy-button"
+                      accessibilityLabel={copied ? 'Convite copiado' : 'Copiar convite'}
                     />
                     <LeafButton
                       label="Compartilhar"
@@ -340,7 +342,7 @@ export default function RobotaxiInvitesScreen({ navigation, route }) {
                       onPress={handleShare}
                       style={styles.actionButton}
                       testID="robotaxi-invites-share-button"
-                      accessibilityLabel="robotaxi-invites-share-button"
+                      accessibilityLabel="Compartilhar convite"
                     />
                   </View>
                 </PrototypeMenuSection>
@@ -368,7 +370,7 @@ export default function RobotaxiInvitesScreen({ navigation, route }) {
                   style={styles.input}
                   autoCapitalize="characters"
                   testID="robotaxi-invites-accept-input"
-                  accessibilityLabel="robotaxi-invites-accept-input"
+                  accessibilityLabel="Código do convite para passageiro"
                 />
                 <LeafButton
                   label="Aceitar convite"
@@ -377,6 +379,8 @@ export default function RobotaxiInvitesScreen({ navigation, route }) {
                   onPress={handleAcceptInvite}
                   disabled={busy}
                   style={styles.fullButton}
+                  testID="robotaxi-invites-accept-button"
+                  accessibilityLabel="Aceitar convite de passageiro"
                 />
               </View>
 
@@ -430,7 +434,7 @@ const styles = StyleSheet.create({
   },
   inputLabel: {
     color: leafRideColors.secondary,
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     fontSize: 11,
     lineHeight: 15,
   },
@@ -439,10 +443,10 @@ const styles = StyleSheet.create({
     minHeight: 46,
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: '#E9E2D8',
+    borderColor: '#E5E5E5',
     paddingHorizontal: 13,
     color: leafRideColors.text,
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     fontSize: 14,
   },
   fullButton: {
@@ -474,14 +478,14 @@ const styles = StyleSheet.create({
   },
   historyTitle: {
     color: leafRideColors.text,
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 14,
     lineHeight: 19,
   },
   historyMeta: {
     marginTop: 2,
     color: leafRideColors.secondary,
-    fontFamily: fonts.Regular,
+    ...leafTypography.regular,
     fontSize: 12,
     lineHeight: 16,
   },
@@ -490,21 +494,21 @@ const styles = StyleSheet.create({
   },
   historyStatus: {
     color: leafRideColors.leaf,
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 12,
     lineHeight: 16,
   },
   historyDate: {
     marginTop: 2,
     color: leafRideColors.secondary,
-    fontFamily: fonts.Regular,
+    ...leafTypography.regular,
     fontSize: 11,
     lineHeight: 14,
   },
   emptyHistoryText: {
     paddingVertical: 12,
     color: leafRideColors.secondary,
-    fontFamily: fonts.Regular,
+    ...leafTypography.regular,
     fontSize: 13,
     lineHeight: 18,
   },

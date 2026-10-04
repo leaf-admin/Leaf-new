@@ -123,25 +123,29 @@ export function resolveTripTollAmount(item = {}) {
   return resolveTripTollAmountOrNull(item) ?? 0;
 }
 
-export function resolveTripPassengerPaidAmount(item = {}) {
-  return roundMoney(
-    pickMoney(
-      item?.grossAmount,
-      item?.grossFare,
-      item?.totalPaid,
-      item?.totalAmount,
-      item?.totalFare,
-      item?.paymentAmount,
-      item?.chargedAmount,
-      item?.amountPaid,
-      item?.customerPaid,
-      item?.customer_paid,
-      item?.fare,
-      item?.finalFare,
-      item?.amount,
-      parseCurrencyText(item?.value),
-    ) ?? 0,
+export function resolveTripPassengerPaidAmountOrNull(item = {}) {
+  return pickMoney(
+    item?.grossAmount,
+    item?.grossFare,
+    item?.totalPaid,
+    item?.totalAmount,
+    item?.totalFare,
+    item?.paymentAmount,
+    item?.chargedAmount,
+    item?.amountPaid,
+    item?.customerPaid,
+    item?.customer_paid,
+    item?.fare,
+    item?.finalFare,
+    item?.amount,
+    item?.trip_cost,
+    item?.estimate,
+    parseCurrencyText(item?.value),
   );
+}
+
+export function resolveTripPassengerPaidAmount(item = {}) {
+  return resolveTripPassengerPaidAmountOrNull(item) ?? 0;
 }
 
 export function resolveTripGrossAmount(item = {}) {
@@ -158,11 +162,11 @@ export function resolveTripFeeAmount(item = {}) {
     return roundMoney(Math.max(0, explicitFee));
   }
 
-  const gross = resolveTripGrossAmount(item);
+  const gross = resolveTripPassengerPaidAmountOrNull(item);
   const explicitNet =
     toFiniteMoney(item?.driverNetAmount, null) ??
     toFiniteMoney(item?.netAmount, null);
-  if (explicitNet !== null) {
+  if (gross !== null && explicitNet !== null) {
     return roundMoney(Math.max(0, gross - explicitNet));
   }
 
@@ -177,9 +181,9 @@ export function resolveTripNetAmountOrNull(item = {}) {
     return roundMoney(Math.max(0, explicitNet));
   }
 
-  const gross = resolveTripGrossAmount(item);
+  const gross = resolveTripPassengerPaidAmountOrNull(item);
   const fees = resolveTripFeeAmount(item);
-  if (fees !== null) {
+  if (gross !== null && fees !== null) {
     return roundMoney(Math.max(0, gross - fees));
   }
 
@@ -206,13 +210,14 @@ export function resolveTripNetAmount(item = {}, { fallbackToGross = false } = {}
 
 export function resolveTripDisplayAmount(item = {}, { role = 'driver' } = {}) {
   if (role === 'driver') {
-    return resolveTripNetAmount(item);
+    return resolveTripNetAmountOrNull(item);
   }
-  return resolveTripGrossAmount(item);
+  return resolveTripPassengerPaidAmountOrNull(item);
 }
 
 export function resolveTripDisplayLabel(item = {}, { role = 'driver' } = {}) {
-  return formatCurrencyBRL(resolveTripDisplayAmount(item, { role }));
+  const amount = resolveTripDisplayAmount(item, { role });
+  return amount === null ? '--' : formatCurrencyBRL(amount);
 }
 
 export function buildTripFinancialTotals(history = [], { role = 'driver' } = {}) {
@@ -230,6 +235,11 @@ export function buildTripFinancialTotals(history = [], { role = 'driver' } = {})
         totalNet: roundMoney(summary.totalNet + net),
         totalFees:
           fees === null ? summary.totalFees : roundMoney(summary.totalFees + fees),
+        grossKnownCount:
+          summary.grossKnownCount + (resolveTripPassengerPaidAmountOrNull(item) === null ? 0 : 1),
+        netKnownCount:
+          summary.netKnownCount + (resolveTripNetAmountOrNull(item) === null ? 0 : 1),
+        feeKnownCount: summary.feeKnownCount + (fees === null ? 0 : 1),
       };
     },
     {
@@ -238,6 +248,9 @@ export function buildTripFinancialTotals(history = [], { role = 'driver' } = {})
       totalGross: 0,
       totalNet: 0,
       totalFees: 0,
+      grossKnownCount: 0,
+      netKnownCount: 0,
+      feeKnownCount: 0,
     },
   );
 }
@@ -320,19 +333,42 @@ export function buildRuntimeHistorySeries(history = []) {
       netAmount: 0,
       grossAmount: 0,
       feeAmount: 0,
+      netAmountComplete: true,
+      grossAmountComplete: true,
+      feeAmountComplete: true,
       completedCount: 0,
       cancelledCount: 0,
     };
 
-    previous.netAmount = roundMoney(previous.netAmount + resolveTripNetAmount(item));
-    previous.grossAmount = roundMoney(previous.grossAmount + resolveTripGrossAmount(item));
-    previous.feeAmount = roundMoney(previous.feeAmount + (resolveTripFeeAmount(item) || 0));
+    const netAmount = resolveTripNetAmountOrNull(item);
+    const grossAmount = resolveTripPassengerPaidAmountOrNull(item);
+    const feeAmount = resolveTripFeeAmount(item);
+    if (netAmount === null) {
+      previous.netAmountComplete = false;
+    } else {
+      previous.netAmount = roundMoney(previous.netAmount + netAmount);
+    }
+    if (grossAmount === null) {
+      previous.grossAmountComplete = false;
+    } else {
+      previous.grossAmount = roundMoney(previous.grossAmount + grossAmount);
+    }
+    if (feeAmount === null) {
+      previous.feeAmountComplete = false;
+    } else {
+      previous.feeAmount = roundMoney(previous.feeAmount + feeAmount);
+    }
     previous.completedCount += 1;
 
     buckets.set(dayKey, previous);
   });
 
-  return Array.from(buckets.values()).sort((left, right) =>
-    String(left.date || '').localeCompare(String(right.date || '')),
-  );
+  return Array.from(buckets.values())
+    .sort((left, right) => String(left.date || '').localeCompare(String(right.date || '')))
+    .map((bucket) => ({
+      ...bucket,
+      netAmount: bucket.netAmountComplete ? bucket.netAmount : null,
+      grossAmount: bucket.grossAmountComplete ? bucket.grossAmount : null,
+      feeAmount: bucket.feeAmountComplete ? bucket.feeAmount : null,
+    }));
 }

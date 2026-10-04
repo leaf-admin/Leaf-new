@@ -11,6 +11,7 @@ source "${SCRIPT_DIR}/source-local-build-env.sh"
 assert_full_xcode_toolchain "build iOS local" "1"
 
 MODE="${1:-simulator}"
+IOS_DERIVED_DATA_PATH="${IOS_DERIVED_DATA_PATH:-${PROJECT_DIR}/ios/build}"
 IOS_DEVELOPMENT_TEAM="${IOS_DEVELOPMENT_TEAM:-}"
 IOS_CODE_SIGN_STYLE="${IOS_CODE_SIGN_STYLE:-Automatic}"
 FORCE_SIGNED_ARCHIVE="${FORCE_SIGNED_ARCHIVE:-0}"
@@ -105,8 +106,8 @@ ensure_pods() {
 
 ensure_smithy_codegen_cli_alias() {
   local configuration="$1"
-  local products_dir="${PROJECT_DIR}/ios/build/Build/Products"
-  local smithy_package_dir="${PROJECT_DIR}/ios/build/SourcePackages/checkouts/smithy-swift"
+  local products_dir="${IOS_DERIVED_DATA_PATH}/Build/Products"
+  local smithy_package_dir="${IOS_DERIVED_DATA_PATH}/SourcePackages/checkouts/smithy-swift"
   local host_cli="${smithy_package_dir}/.build/release/SmithyCodegenCLI"
   local expected_dir="${products_dir}/${configuration}"
   local expected_cli="${expected_dir}/SmithyCodegenCLI"
@@ -407,7 +408,7 @@ main() {
   workspace="$(find "${PROJECT_DIR}/ios" -maxdepth 1 -name "*.xcworkspace" | head -n 1)"
   project="$(find "${PROJECT_DIR}/ios" -maxdepth 1 -name "*.xcodeproj" | head -n 1)"
   scheme="$(resolve_scheme "${workspace}" "${project}")"
-  archive_path="${PROJECT_DIR}/ios/build/${scheme}.xcarchive"
+  archive_path="${IOS_DERIVED_DATA_PATH}/${scheme}.xcarchive"
   identity_count="$(count_signing_identities)"
   force_unsigned="${FORCE_UNSIGNED_ARCHIVE:-0}"
   force_signed="${FORCE_SIGNED_ARCHIVE}"
@@ -420,7 +421,7 @@ main() {
 
   [[ -n "${scheme}" ]] || { echo "❌ Não foi possível resolver scheme do iOS."; exit 1; }
 
-  mkdir -p "${PROJECT_DIR}/ios/build"
+  mkdir -p "${IOS_DERIVED_DATA_PATH}"
   sim_destination="$(resolve_simulator_destination)"
   xcode_common_args=("-skipPackagePluginValidation")
   sim_extra_args=("ONLY_ACTIVE_ARCH=YES")
@@ -430,9 +431,9 @@ main() {
   case "${MODE}" in
     simulator)
       export LEAF_DISABLE_UPDATES_FOR_SIMULATOR=1
-      local built_app_path="${PROJECT_DIR}/ios/build/Build/Products/${IOS_SIMULATOR_CONFIGURATION}-iphonesimulator/${scheme}.app"
+      local built_app_path="${IOS_DERIVED_DATA_PATH}/Build/Products/${IOS_SIMULATOR_CONFIGURATION}-iphonesimulator/${scheme}.app"
       local expo_plist_path="${built_app_path}/Expo.plist"
-      mkdir -p "${PROJECT_DIR}/ios/build/Build/Products/${IOS_SIMULATOR_CONFIGURATION}-iphonesimulator/EXUpdates.bundle"
+      mkdir -p "${IOS_DERIVED_DATA_PATH}/Build/Products/${IOS_SIMULATOR_CONFIGURATION}-iphonesimulator/EXUpdates.bundle"
       if [[ -n "${workspace}" ]]; then
         run_xcodebuild_with_smithy_retry "${IOS_SIMULATOR_CONFIGURATION}" \
           xcodebuild \
@@ -441,7 +442,7 @@ main() {
           -configuration "${IOS_SIMULATOR_CONFIGURATION}" \
           -sdk iphonesimulator \
           -destination "${sim_destination}" \
-          -derivedDataPath "${PROJECT_DIR}/ios/build" \
+          -derivedDataPath "${IOS_DERIVED_DATA_PATH}" \
           "${xcode_common_args[@]}" \
           "${sim_extra_args[@]}" \
           build
@@ -453,7 +454,7 @@ main() {
           -configuration "${IOS_SIMULATOR_CONFIGURATION}" \
           -sdk iphonesimulator \
           -destination "${sim_destination}" \
-          -derivedDataPath "${PROJECT_DIR}/ios/build" \
+          -derivedDataPath "${IOS_DERIVED_DATA_PATH}" \
           "${xcode_common_args[@]}" \
           "${sim_extra_args[@]}" \
           build
@@ -472,7 +473,7 @@ main() {
         exit 1
       fi
       assert_ios_app_artifact "${built_app_path}" "simulator"
-      echo "✅ Build iOS simulator concluída em ${PROJECT_DIR}/ios/build"
+      echo "✅ Build iOS simulator concluída em ${IOS_DERIVED_DATA_PATH}"
       ;;
     archive)
       if [[ "${force_signed}" == "1" && "${identity_count:-0}" == "0" ]]; then

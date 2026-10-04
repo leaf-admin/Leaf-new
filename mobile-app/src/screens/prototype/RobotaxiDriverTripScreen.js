@@ -1609,6 +1609,15 @@ export default function RobotaxiDriverTripScreen({ navigation, route }) {
         : normalizedBookingStatus === "started"
           ? "Finalizar"
           : "Voltar";
+  const primaryAccessibilityLabel = busyAction
+    ? "Atualizando etapa da corrida"
+    : normalizedBookingStatus === "accepted"
+      ? "Confirmar chegada ao embarque"
+      : normalizedBookingStatus === "arrived"
+        ? "Iniciar corrida"
+        : normalizedBookingStatus === "started"
+          ? "Finalizar corrida"
+          : "Voltar ao mapa";
   const headerCopy = useMemo(() => {
     if (!hasActiveRide) {
       return {
@@ -2117,7 +2126,7 @@ export default function RobotaxiDriverTripScreen({ navigation, route }) {
             disabled={busyAction}
             onPress={handlePrimaryAction}
             testID={primaryActionTestID}
-            accessibilityLabel={primaryActionTestID}
+            accessibilityLabel={primaryAccessibilityLabel}
           />
         </View>
       </>
@@ -2146,7 +2155,7 @@ export default function RobotaxiDriverTripScreen({ navigation, route }) {
                 disabled
                 style={styles.primaryAction}
                 testID="driver-trip-missing-identity-button"
-                accessibilityLabel="driver-trip-missing-identity-button"
+                accessibilityLabel="Aguardando confirmação da corrida pelo servidor"
               />
             </View>
           </>
@@ -2162,7 +2171,7 @@ export default function RobotaxiDriverTripScreen({ navigation, route }) {
             onPress={handlePrimaryAction}
             style={styles.emptyBackButton}
             testID={primaryActionTestID}
-            accessibilityLabel={primaryActionTestID}
+            accessibilityLabel="Voltar ao mapa"
           />
           <Text style={styles.emptyTitle}>Nenhuma corrida ativa</Text>
           <Text style={styles.emptyText}>
@@ -2211,7 +2220,7 @@ export default function RobotaxiDriverTripScreen({ navigation, route }) {
               disabled
               style={styles.primaryAction}
               testID="driver-trip-operational-hold-button"
-              accessibilityLabel="driver-trip-operational-hold-button"
+              accessibilityLabel="Aguardando confirmação da corrida"
             />
           </View>
         </>
@@ -2311,7 +2320,7 @@ export default function RobotaxiDriverTripScreen({ navigation, route }) {
               onPress={handlePrimaryAction}
               style={styles.primaryAction}
               testID={primaryActionTestID}
-              accessibilityLabel={primaryActionTestID}
+              accessibilityLabel={primaryAccessibilityLabel}
             />
           </View>
         </>
@@ -2378,7 +2387,7 @@ export default function RobotaxiDriverTripScreen({ navigation, route }) {
               onPress={handlePrimaryAction}
               style={styles.primaryAction}
               testID={primaryActionTestID}
-              accessibilityLabel={primaryActionTestID}
+              accessibilityLabel={primaryAccessibilityLabel}
             />
           </View>
         </>
@@ -2462,7 +2471,7 @@ export default function RobotaxiDriverTripScreen({ navigation, route }) {
             onPress={handlePrimaryAction}
             style={styles.primaryAction}
             testID={primaryActionTestID}
-            accessibilityLabel={primaryActionTestID}
+            accessibilityLabel={primaryAccessibilityLabel}
           />
         </View>
       </>
@@ -2552,7 +2561,7 @@ export default function RobotaxiDriverTripScreen({ navigation, route }) {
               ]}
               showsVerticalScrollIndicator={detailsExpanded}
               testID="driver-live-trip-screen"
-              accessibilityLabel="driver-live-trip-screen"
+              accessibilityLabel="Corrida ativa do motorista"
             >
               {renderDriverCard()}
 
@@ -2579,7 +2588,9 @@ export default function RobotaxiDriverTripScreen({ navigation, route }) {
                 isOperationalHoldSurface || isProtectedStatusWithoutRideIdentity
               }
               testID="driver-live-trip-screen"
-              accessibilityLabel="driver-live-trip-screen"
+              accessibilityLabel={hasActiveRide
+                ? "Estado protegido da corrida do motorista"
+                : "Situação das corridas do motorista"}
             >
               {renderDriverCard()}
 

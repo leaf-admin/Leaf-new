@@ -1,3 +1,4 @@
+import leafTypography from '../../components/prototype/LeafTypography';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Alert,
@@ -12,7 +13,6 @@ import {
 } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { fonts } from '../../theme/runtimeTokens';
 import PrototypeDismissibleSheet from '../../components/prototype/PrototypeDismissibleSheet';
 import PrototypeScreenTransition from '../../components/prototype/PrototypeScreenTransition';
 import {
@@ -32,7 +32,7 @@ import {
 } from '../../services/runtime/referralProgramService';
 import { joinDriverWaitlist, loadDriverWaitlistStatus } from '../../services/runtime/driverWaitlistService';
 
-const SURFACE_TOP_PADDING = 16;
+const SURFACE_TOP_PADDING = 20;
 const SURFACE_BOTTOM_PADDING = 18;
 const DRIVER_INVITE_BASE_URL = 'https://leaf.app.br/motorista/convite';
 const HISTORY_LIMIT = 5;
@@ -339,7 +339,7 @@ export default function RobotaxiDriverWaitlistScreen({ navigation, route }) {
               />
             )}
           >
-            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.content}>
+            <ScrollView automaticallyAdjustKeyboardInsets keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" showsVerticalScrollIndicator={false} contentContainerStyle={styles.content}>
               <PrototypeMenuStatRow
                 items={[
                   { key: 'status', label: 'status', value: statusLabel, loading },
@@ -432,7 +432,7 @@ export default function RobotaxiDriverWaitlistScreen({ navigation, route }) {
                     style={styles.input}
                     autoCapitalize="none"
                     testID="robotaxi-driver-invite-target-input"
-                    accessibilityLabel="robotaxi-driver-invite-target-input"
+                    accessibilityLabel="Telefone ou email para convidar motorista"
                   />
                   <LeafButton
                     label={busy ? 'Criando...' : 'Criar convite'}
@@ -442,7 +442,7 @@ export default function RobotaxiDriverWaitlistScreen({ navigation, route }) {
                     disabled={busy}
                     style={styles.fullButton}
                     testID="robotaxi-driver-invite-create-button"
-                    accessibilityLabel="robotaxi-driver-invite-create-button"
+                    accessibilityLabel={busy ? 'Criando convite para motorista' : 'Criar convite para motorista'}
                   />
                 </View>
               ) : null}
@@ -458,7 +458,7 @@ export default function RobotaxiDriverWaitlistScreen({ navigation, route }) {
                     style={styles.input}
                     autoCapitalize="characters"
                     testID="robotaxi-driver-invite-accept-input"
-                    accessibilityLabel="robotaxi-driver-invite-accept-input"
+                    accessibilityLabel="Código do convite para motorista"
                   />
                   <LeafButton
                     label="Aceitar convite"
@@ -468,7 +468,7 @@ export default function RobotaxiDriverWaitlistScreen({ navigation, route }) {
                     disabled={busy}
                     style={styles.fullButton}
                     testID="robotaxi-driver-invite-accept-button"
-                    accessibilityLabel="robotaxi-driver-invite-accept-button"
+                    accessibilityLabel="Aceitar convite de motorista"
                   />
                 </View>
               ) : null}
@@ -487,7 +487,7 @@ export default function RobotaxiDriverWaitlistScreen({ navigation, route }) {
                       onPress={handleCopy}
                       style={styles.actionButton}
                       testID="robotaxi-driver-invite-copy-button"
-                      accessibilityLabel="robotaxi-driver-invite-copy-button"
+                      accessibilityLabel={copied ? 'Convite de motorista copiado' : 'Copiar convite de motorista'}
                     />
                     <LeafButton
                       label="Compartilhar"
@@ -496,7 +496,7 @@ export default function RobotaxiDriverWaitlistScreen({ navigation, route }) {
                       onPress={handleShare}
                       style={styles.actionButton}
                       testID="robotaxi-driver-invite-share-button"
-                      accessibilityLabel="robotaxi-driver-invite-share-button"
+                      accessibilityLabel="Compartilhar convite de motorista"
                     />
                   </View>
                 </PrototypeMenuSection>
@@ -532,29 +532,29 @@ const styles = StyleSheet.create({
     gap: 18,
   },
   inputBlock: {
-    borderRadius: 24,
-    borderWidth: 1,
-    borderColor: 'rgba(221,232,225,0.85)',
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: '#E5E5E5',
     backgroundColor: '#FFFFFF',
-    paddingHorizontal: 18,
+    paddingHorizontal: 0,
     paddingVertical: 16,
   },
   inputLabel: {
     color: leafRideColors.secondary,
-    fontFamily: fonts.Medium,
-    fontSize: 11,
-    lineHeight: 15,
+    ...leafTypography.medium,
+    fontSize: 13,
+    lineHeight: 18,
   },
   input: {
     marginTop: 8,
-    minHeight: 46,
-    borderRadius: 14,
+    minHeight: 54,
+    borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#E9E2D8',
+    borderColor: '#E5E5E5',
+    backgroundColor: '#F5F5F5',
     paddingHorizontal: 13,
     color: leafRideColors.text,
-    fontFamily: fonts.Medium,
-    fontSize: 14,
+    ...leafTypography.medium,
+    fontSize: 16,
   },
   fullButton: {
     marginTop: 12,
@@ -572,8 +572,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(233,226,216,0.78)',
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#E5E5E5',
     gap: 12,
   },
   historyRowLast: {
@@ -585,14 +585,14 @@ const styles = StyleSheet.create({
   },
   historyTitle: {
     color: leafRideColors.text,
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 14,
     lineHeight: 19,
   },
   historyMeta: {
     marginTop: 2,
     color: leafRideColors.secondary,
-    fontFamily: fonts.Regular,
+    ...leafTypography.regular,
     fontSize: 12,
     lineHeight: 16,
   },
@@ -601,21 +601,21 @@ const styles = StyleSheet.create({
   },
   historyStatus: {
     color: leafRideColors.leaf,
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 12,
     lineHeight: 16,
   },
   historyDate: {
     marginTop: 2,
     color: leafRideColors.secondary,
-    fontFamily: fonts.Regular,
+    ...leafTypography.regular,
     fontSize: 11,
     lineHeight: 14,
   },
   emptyHistoryText: {
     paddingVertical: 12,
     color: leafRideColors.secondary,
-    fontFamily: fonts.Regular,
+    ...leafTypography.regular,
     fontSize: 13,
     lineHeight: 18,
   },

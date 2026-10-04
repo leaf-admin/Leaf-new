@@ -100,6 +100,15 @@ jest.mock('../src/components/prototype/PrototypeScaffold', () => {
   };
 });
 
+jest.mock('../src/screens/prototype/home/LeafPassengerLanding', () => {
+  const React = require('react');
+  const { Text, TouchableOpacity, View } = require('react-native');
+  return ({ pickupLabel, onDestinationPress }) => <View>
+    <Text>{pickupLabel}</Text>
+    <TouchableOpacity testID="mock-passenger-destination-open" onPress={onDestinationPress}><Text>Abrir destino</Text></TouchableOpacity>
+  </View>;
+});
+
 jest.mock('../src/screens/prototype/home/PassengerHomeOverlay', () => {
   const React = require('react');
   const { Text, TouchableOpacity, View } = require('react-native');
@@ -1415,7 +1424,7 @@ describe('driver online toggle', () => {
 
     expect(getAllByText('Local atual').length).toBeGreaterThan(0);
     expect(queryByText('Rua das Pastorinhas')).toBeNull();
-    expect(getByTestId('passenger-home-overlay-pickup-coordinate')).toHaveTextContent('none');
+    expect(mockPrototypeMapLayer.mock.calls.at(-1)[0].userCoordinate).toBeNull();
   });
 
   it('uses the live passenger location as the home pickup coordinate without reusing stale text', () => {
@@ -1437,9 +1446,6 @@ describe('driver online toggle', () => {
     );
 
     expect(queryByText('Carioca Shopping')).toBeNull();
-    expect(getByTestId('passenger-home-overlay-pickup-coordinate')).toHaveTextContent(
-      '-22.853586,-43.318168',
-    );
     const latestMapProps = mockPrototypeMapLayer.mock.calls.at(-1)?.[0] || {};
     expect(latestMapProps.forceRegionUpdate).toBe(true);
     expect(latestMapProps.userCoordinate).toEqual({

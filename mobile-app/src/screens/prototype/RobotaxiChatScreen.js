@@ -1,8 +1,8 @@
+import leafTypography from '../../components/prototype/LeafTypography';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, FlatList, KeyboardAvoidingView, Platform, StatusBar, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { fonts } from '../../theme/runtimeTokens';
 import PrototypeScreenTransition from '../../components/prototype/PrototypeScreenTransition';
 import PrototypeDismissibleSheet from '../../components/prototype/PrototypeDismissibleSheet';
 import {
@@ -10,13 +10,14 @@ import {
   PrototypeMenuSurface,
 } from '../../components/prototype/PrototypeMenuSurface';
 import { leafRideColors } from '../../components/prototype/LeafRideUI';
+import { LeafObjectIcon } from '../../components/prototype/LeafVisualElements';
 import robotaxiPrototypeTokens from '../../components/design-system/robotaxiPrototypeTokens';
 import { usePrototypeMapOcclusion } from './prototypeMapOcclusion';
 import { usePrototypeRideRuntime } from './prototypeRideRuntime';
 import { normalizeRuntimeRideStatus } from './rideLifecycleContract';
 
 const { color, typography } = robotaxiPrototypeTokens;
-const SURFACE_TOP_PADDING = 16;
+const SURFACE_TOP_PADDING = 20;
 const SURFACE_BOTTOM_PADDING = 18;
 const BACKDROP_COLOR = 'transparent';
 
@@ -163,7 +164,8 @@ export default function RobotaxiChatScreen({ navigation, route }) {
                 <PrototypeMenuCloseButton
                   onPress={handleDismiss}
                   testID="robotaxi-chat-close-button"
-                  accessibilityLabel="robotaxi-chat-close-button"
+                  accessibilityLabel="Fechar chat da corrida"
+                  accessibilityHint="Fecha o chat e retorna à corrida."
                 />
               )}
             >
@@ -198,6 +200,7 @@ export default function RobotaxiChatScreen({ navigation, route }) {
                     accessibilityLabel={hasListError ? 'Erro ao carregar chat da corrida' : 'Estado vazio do chat da corrida'}
                   >
                     {chatLoading ? <ActivityIndicator size="small" color={leafRideColors.leaf} /> : null}
+                    {!chatLoading ? <LeafObjectIcon name="help" size={64} /> : null}
                     {hasListError ? <Ionicons name="warning-outline" size={18} color={leafRideColors.dangerText} /> : null}
                     <Text style={[styles.emptyText, hasListError && styles.emptyErrorText]}>
                       {chatLoading
@@ -311,14 +314,14 @@ const styles = StyleSheet.create({
   },
   bubbleText: {
     color: leafRideColors.text,
-    fontFamily: fonts.Medium,
-    fontSize: typography.caption.size,
-    lineHeight: typography.caption.lineHeight,
+    ...leafTypography.regular,
+    fontSize: 16,
+    lineHeight: 22,
   },
   bubbleMeta: {
     marginTop: 3,
     color: leafRideColors.secondary,
-    fontFamily: fonts.Regular,
+    ...leafTypography.regular,
     fontSize: typography.micro.size,
     lineHeight: typography.micro.lineHeight,
   },
@@ -329,14 +332,14 @@ const styles = StyleSheet.create({
   },
   emptyText: {
     color: leafRideColors.secondary,
-    fontFamily: fonts.Regular,
-    fontSize: typography.caption.size,
-    lineHeight: typography.caption.lineHeight,
+    ...leafTypography.regular,
+    fontSize: 14,
+    lineHeight: 20,
     textAlign: 'center',
   },
   emptyErrorText: {
     color: leafRideColors.dangerText,
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
   },
   retryButton: {
     minHeight: 38,
@@ -350,7 +353,7 @@ const styles = StyleSheet.create({
   },
   retryButtonText: {
     color: leafRideColors.text,
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     fontSize: typography.caption.size,
     lineHeight: typography.caption.lineHeight,
   },
@@ -362,20 +365,20 @@ const styles = StyleSheet.create({
   },
   inputWrap: {
     flex: 1,
-    minHeight: 50,
-    borderBottomWidth: 1,
-    borderBottomColor: leafRideColors.line,
+    minHeight: 54,
+    backgroundColor: '#F5F5F5',
+    borderRadius: 16,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    paddingHorizontal: 2,
+    paddingHorizontal: 14,
   },
   inputText: {
     flex: 1,
     color: leafRideColors.text,
-    fontFamily: fonts.Regular,
-    fontSize: typography.caption.size,
-    lineHeight: typography.caption.lineHeight,
+    ...leafTypography.regular,
+    fontSize: 16,
+    lineHeight: 22,
     paddingVertical: 0,
   },
   sendButton: {
@@ -384,7 +387,7 @@ const styles = StyleSheet.create({
     borderRadius: 22,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: leafRideColors.leaf,
+    backgroundColor: '#252525',
   },
   sendButtonDisabled: {
     opacity: 0.72,
@@ -392,7 +395,7 @@ const styles = StyleSheet.create({
   errorText: {
     marginTop: 8,
     color: leafRideColors.dangerText,
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     fontSize: typography.caption.size,
     lineHeight: typography.caption.lineHeight,
   },

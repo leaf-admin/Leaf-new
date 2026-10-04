@@ -1,7 +1,7 @@
+import leafTypography from '../prototype/LeafTypography';
 import React from 'react';
 import { Text, StyleSheet } from 'react-native';
 import { colors } from '../../theme/runtimeTokens';
-import { fonts } from '../../theme/runtimeTokens';
 
 export const Typography = ({
     variant = 'body',
@@ -28,52 +28,52 @@ export const Typography = ({
 
 const styles = StyleSheet.create({
     base: {
-        fontFamily: fonts.Regular,
+        ...leafTypography.regular,
     },
     h1: {
-        fontFamily: fonts.Bold,
+        ...leafTypography.bold,
         fontSize: 28,
         lineHeight: 34,
         letterSpacing: 0.36,
     },
     h2: {
-        fontFamily: fonts.Bold,
+        ...leafTypography.bold,
         fontSize: 22,
         lineHeight: 28,
         letterSpacing: 0.35,
     },
     h3: {
-        fontFamily: fonts.Bold,
+        ...leafTypography.bold,
         fontSize: 20,
         lineHeight: 25,
         letterSpacing: 0.38,
     },
     body: {
-        fontFamily: fonts.Regular,
+        ...leafTypography.regular,
         fontSize: 16,
         lineHeight: 24,
         letterSpacing: -0.32,
     },
     bodyMedium: {
-        fontFamily: fonts.Medium,
+        ...leafTypography.medium,
         fontSize: 16,
         lineHeight: 24,
         letterSpacing: -0.32,
     },
     caption: {
-        fontFamily: fonts.Regular,
+        ...leafTypography.regular,
         fontSize: 14,
         lineHeight: 20,
         letterSpacing: -0.15,
     },
     button: {
-        fontFamily: fonts.Bold,
+        ...leafTypography.bold,
         fontSize: 16,
         lineHeight: 21,
         letterSpacing: -0.32,
     },
     label: {
-        fontFamily: fonts.Medium,
+        ...leafTypography.medium,
         fontSize: 13,
         lineHeight: 18,
         letterSpacing: -0.08,

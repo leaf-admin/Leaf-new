@@ -5,6 +5,7 @@ const path = require('path');
 
 const ROOT = path.resolve(__dirname, '../..');
 const NAVIGATOR_FILE = path.join(ROOT, 'src/navigation/AppNavigator.js');
+const SURFACE_MANIFEST_FILE = path.join(ROOT, 'src/navigation/surfaceManifest.json');
 const MAESTRO_DIR = path.join(ROOT, '.maestro/flows');
 const DOCS_DIR = path.join(ROOT, 'docs');
 const OUTPUT_MD = path.join(DOCS_DIR, 'QA_FLOW_INVENTORY.md');
@@ -224,6 +225,13 @@ function detectCapabilities(relPath, text) {
 function detectReleaseBlockers(text) {
   const blockers = [];
   if (!/appId:\s*br\.com\.leaf\.ride/.test(text)) blockers.push('missing-release-app-id');
+  const literalOtpDigits = (text.match(/^\s*(?:-\s*)?inputText:\s*["']\d["']\s*$/gim) || []).length;
+  if (
+    /^\s*[A-Z0-9_]*OTP[A-Z0-9_]*:\s*["']?\d{4,8}["']?\s*$/im.test(text) ||
+    (/auth-otp-digit-\d/i.test(text) && literalOtpDigits >= 6)
+  ) {
+    blockers.push('fixed-otp-marker');
+  }
   if (/payment[-_\s]?bypass|PaymentBypassService|(?:EXPO_PUBLIC_)?E2E_TEST\s*[:=]\s*"?true/i.test(text)) {
     blockers.push('payment-bypass-marker');
   }
@@ -272,7 +280,7 @@ function buildCoverageMatrix(flows) {
     return {
       id: area.id,
       label: area.label,
-      status: missing.length === 0 ? 'GO' : 'GAP',
+      status: missing.length === 0 ? 'DEFINED' : 'GAP',
       missing,
       flows: candidates.map((flow) => flow.path),
     };
@@ -288,21 +296,27 @@ function shouldIncludeFlow(flowPath) {
 }
 
 function extractRoutes() {
-  const text = readText(NAVIGATOR_FILE);
-  const regex = /<Stack\.Screen\s+name="([^"]+)"/g;
-  const seen = new Set();
-  const routes = [];
-  let match;
-  while ((match = regex.exec(text))) {
-    const route = match[1];
-    if (seen.has(route)) continue;
-    seen.add(route);
-    routes.push({
-      name: route,
-      category: routeCategory(route),
-    });
-  }
-  return routes.sort((a, b) => a.name.localeCompare(b.name));
+  const navigatorSource = readText(NAVIGATOR_FILE);
+  const manifest = JSON.parse(readText(SURFACE_MANIFEST_FILE));
+  const registeredRoutes = [...navigatorSource.matchAll(/<Stack\.Screen\b[\s\S]*?\/>/g)]
+    .map(([screen]) => screen.match(/\bname=["']([^"']+)["']/)?.[1])
+    .filter(Boolean);
+  const routeNames = [...new Set(registeredRoutes)];
+
+  return routeNames
+    .map(name => {
+      const surfaceStatus = Object.entries(manifest.routeCategories)
+        .find(([, names]) => names.includes(name))?.[0];
+      if (!surfaceStatus) {
+        throw new Error(`Registered route is missing from surface manifest: ${name}`);
+      }
+      return {
+        name,
+        category: routeCategory(name),
+        surfaceStatus,
+      };
+    })
+    .sort((a, b) => a.name.localeCompare(b.name));
 }
 
 function extractFlows() {
@@ -364,6 +378,14 @@ function buildMarkdown(routes, flows, coverageMatrix) {
   lines.push(`Generated at: ${new Date().toISOString()}`);
   lines.push('');
   lines.push(`Total navigation routes: ${routes.length}`);
+  const routeSurfaceCounts = routes.reduce((counts, route) => {
+    counts[route.surfaceStatus] = (counts[route.surfaceStatus] || 0) + 1;
+    return counts;
+  }, {});
+  const routeStatusSummary = Object.entries(routeSurfaceCounts)
+    .map(([status, count]) => `${status} ${count}`)
+    .join('; ');
+  lines.push(`Surface status: ${routeStatusSummary}`);
   lines.push(`Total maestro flows (non-debug): ${flows.length}`);
   lines.push(`Release-only eligible flows: ${flows.filter((flow) => flow.releaseOnly).length}`);
   lines.push('');
@@ -373,6 +395,8 @@ function buildMarkdown(routes, flows, coverageMatrix) {
   lines.push('');
   lines.push('## Release Coverage Matrix');
   lines.push('');
+  lines.push('This is a static inventory of flow definitions, not an execution report. `DEFINED` means an eligible flow file names every required platform and role; `GAP` means one or more definitions are missing. Check execution logs and screenshots before treating a flow as PASS.');
+  lines.push('');
   lines.push('| Area | Status | Release-only flows | Gaps |');
   lines.push('|---|---|---:|---|');
   for (const row of coverageMatrix) {
@@ -381,7 +405,7 @@ function buildMarkdown(routes, flows, coverageMatrix) {
   lines.push('');
   lines.push('## Product Routes (One By One)');
   lines.push('');
-  lines.push(toNumberedList(routes, (route) => `\`${route.name}\` (${route.category})`));
+  lines.push(toNumberedList(routes, (route) => `\`${route.name}\` (${route.surfaceStatus}; ${route.category})`));
   lines.push('');
   lines.push('## Maestro Flows (One By One)');
   lines.push('');
@@ -402,10 +426,10 @@ function buildMarkdown(routes, flows, coverageMatrix) {
   lines.push('');
   lines.push('## Execution Notes');
   lines.push('');
-  lines.push('1. Route inventory is extracted from `src/navigation/AppNavigator.js`.');
+  lines.push('1. Reachable routes are extracted from `Stack.Screen` registrations in `src/navigation/AppNavigator.js`; `src/navigation/surfaceManifest.json` supplies current/redirect/legacy classification. Retired manifest entries are not counted as reachable.');
   lines.push('2. Flow inventory is extracted from `.maestro/flows/**/*.yaml` excluding debug/helper flows that start with `_`.');
   lines.push('3. Use `node scripts/qa/generate-flow-inventory.js` from `mobile-app/` to regenerate after navigation or flow changes.');
-  lines.push('4. `releaseOnly=false` means the flow still exists, but has a static blocker for release evidence such as dev-server markers or payment mock/bypass markers.');
+  lines.push('4. `releaseOnly=false` means the flow still exists, but has a static blocker for release evidence such as dev-server markers, fixed OTP values, or payment mock/bypass markers.');
   lines.push('');
 
   return lines.join('\n');
@@ -419,7 +443,12 @@ function main() {
   const markdown = buildMarkdown(routes, flows, coverageMatrix);
   const json = {
     generatedAt: new Date().toISOString(),
+    coverageModel: 'static-flow-definition-only',
     releasePreconditions: RELEASE_PRECONDITIONS,
+    routeSurfaceCounts: routes.reduce((counts, route) => {
+      counts[route.surfaceStatus] = (counts[route.surfaceStatus] || 0) + 1;
+      return counts;
+    }, {}),
     releaseCoverageMatrix: coverageMatrix,
     routes,
     flows,
@@ -433,4 +462,10 @@ function main() {
   );
 }
 
-main();
+if (require.main === module) {
+  main();
+}
+
+module.exports = {
+  detectReleaseBlockers,
+};
