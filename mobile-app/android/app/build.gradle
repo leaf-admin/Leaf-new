@@ -165,6 +165,7 @@ android {
         ]
 
         buildConfigField "String", "REACT_NATIVE_RELEASE_LEVEL", "\"${findProperty('reactNativeReleaseLevel') ?: 'stable'}\""
+        resourceConfigurations += ["pt-BR"]
     }
     compileOptions {
         coreLibraryDesugaringEnabled true
