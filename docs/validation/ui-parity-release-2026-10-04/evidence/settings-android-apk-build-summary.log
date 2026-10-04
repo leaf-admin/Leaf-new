@@ -1,0 +1,23 @@
+> Task :react-native-webview:mapReleaseSourceSetPaths UP-TO-DATE
+> Task :react-native-view-shot:verifyReleaseResources UP-TO-DATE
+> Task :react-native-view-shot:assembleRelease UP-TO-DATE
+> Task :react-native-webview:mergeReleaseResources UP-TO-DATE
+> Task :react-native-webview:verifyReleaseResources UP-TO-DATE
+> Task :react-native-webview:assembleRelease UP-TO-DATE
+> Task :react-native-worklets:bundleReleaseAar
+> Task :react-native-worklets:mapReleaseSourceSetPaths
+> Task :react-native-worklets:mergeReleaseResources
+> Task :react-native-worklets:verifyReleaseResources
+> Task :react-native-worklets:assembleRelease
+
+[Incubating] Problems report is available at: file:///Users/izaakdias/Documents/Leaf-new/mobile-app/android/build/reports/problems/problems-report.html
+
+Deprecated Gradle features were used in this build, making it incompatible with Gradle 9.0.
+
+You can use '--warning-mode all' to show the individual deprecation warnings and determine if they come from your own scripts or plugins.
+
+For more on this, please refer to https://docs.gradle.org/8.14.3/userguide/command_line_interface.html#sec:command_line_warnings in the Gradle documentation.
+
+BUILD SUCCESSFUL in 41s
+1833 actionable tasks: 64 executed, 1769 up-to-date
+✅ APK release: /Users/izaakdias/Documents/Leaf-new/mobile-app/android/app/build/outputs/apk/release/app-release.apk

@@ -79,6 +79,7 @@ Metadados, caminhos absolutos e hashes estão em [artifacts.json](/Users/izaakdi
 - AAB: `/Users/izaakdias/Documents/Leaf-release-candidates/1.0.6/Leaf-1.0.6-132-candidate.aab`.
 - IPA: `/Users/izaakdias/Documents/Leaf-release-candidates/1.0.6/Leaf-1.0.6-38-candidate.ipa`.
 - Archive: `/Users/izaakdias/Documents/Leaf-release-candidates/1.0.6/Leaf-1.0.6-38.xcarchive`. App e widget têm versão/build correspondentes, runtime 1.0.6 e perfil de distribuição não depurável. A exportação manual foi rejeitada pelo Xcode por usar perfis gerenciados; a exportação automática com esses mesmos perfis passou. A assinatura do app e widget corresponde a **FREEDOM TECNOLOGIA E SERVICOS LTDA — Team ID DTA8W5KA5D**, já configurado no projeto Leaf. Os scripts agora rejeitam outro Team ID antes de build/export e verificam também a equipe da assinatura e dos perfis dentro do IPA. A assinatura local não substitui a validação da App Store. Os binários anteriores estão preservados em `pre-config/`.
+- APK físico de teste: `/Users/izaakdias/Documents/Leaf-release-candidates/1.0.6/Leaf-1.0.6-132-device.apk`, assinatura e configuração embarcada verificadas.
 - Pacote físico de teste: `/Users/izaakdias/Documents/Leaf-release-candidates/1.0.6/Leaf-1.0.6-38-device.ipa`, com app e widget completos e Team Leaf. Os candidatos anteriores às configurações/voz estão em `pre-settings/`; hashes e commit atuais foram atualizados em `artifacts.json`.
 - Nenhum artefato foi enviado às lojas. Nenhuma OTA foi publicada.
 

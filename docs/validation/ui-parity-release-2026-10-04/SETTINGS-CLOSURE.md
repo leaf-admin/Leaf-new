@@ -31,7 +31,7 @@ Código isolado nos commits `609fca2d3`, `d3f8e5f88` e `1097a27fc`, branch `code
 - Production guards, governança, scan de segredos, guard hardcoded, `git diff --check` e preflight de release: PASS.
 - Canary de pagamento QA por usuário: PASS; ambiente global e regras de pagamento preservados.
 - Archive iOS, exportação de distribuição e de desenvolvimento: PASS, **Team Leaf DTA8W5KA5D em app e widget**.
-- AAB Android: PASS; certificado coincide com o candidato Leaf anterior e App Links. O log de jarsigner preserva avisos sobre certificado próprio e leitura do layout JAR; `jar verified` retornou sucesso. Isso não substitui a validação da Play Store.
+- AAB e APK Android: PASS; certificado coincide com o candidato Leaf anterior e App Links. O log de jarsigner preserva avisos sobre certificado próprio e leitura do layout JAR; `jar verified` retornou sucesso. Isso não substitui a validação da Play Store.
 - Bundle iOS: PASS, 2.321 módulos.
 - API real QA: GET/PATCH/GET/restauração/GET de trânsito, todos HTTP 200; valor original restaurado. Nenhuma corrida, pagamento ou perfil foi alterado.
 
@@ -41,7 +41,7 @@ A primeira compilação Android detectou o qualifier incorreto `pt-BR` produzido
 
 Logs, round trip da API e verificações de binários estão em `evidence/settings-*`. Prints do simulador em `screenshots/leaf-settings-*`. O simulador usa a sessão QA existente e uma casca nativa anterior com o bundle final: valida a interface e a API observadas, **não comprova reprodução da nova voz no aparelho**.
 
-Metadados e hashes atuais dos binários: [artifacts.json](/Users/izaakdias/Documents/Leaf-new/docs/validation/ui-parity-release-2026-10-04/artifacts.json). O pacote `Leaf-1.0.6-38-device.ipa` inclui o widget e perfis de desenvolvimento para dois dispositivos, ambos no Team Leaf. Nenhuma OTA ou submissão de loja foi feita.
+Metadados e hashes atuais dos binários: [artifacts.json](/Users/izaakdias/Documents/Leaf-new/docs/validation/ui-parity-release-2026-10-04/artifacts.json). O pacote `Leaf-1.0.6-38-device.ipa` inclui o widget e perfis de desenvolvimento para dois dispositivos, ambos no Team Leaf. APK para aparelho: `Leaf-1.0.6-132-device.apk`, assinatura verificada e versão 1.0.6/132. Nenhuma OTA ou submissão de loja foi feita.
 
 ## Riscos e pendências reais
 

@@ -1,0 +1,7 @@
+{
+  "signatureVerified": true,
+  "certificateSha256": "B8A2ED46343606A62CC12692BE62323E2969CDF4C83FB54180D924738A7C9BF4",
+  "manifest": "package: name='br.com.leaf.ride' versionCode='132' versionName='1.0.6' platformBuildVersionName='16' platformBuildVersionCode='36' compileSdkVersion='36' compileSdkVersionCodename='16'",
+  "launchProfile": "pilot_controlled",
+  "pilotControlled": true
+}

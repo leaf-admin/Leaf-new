@@ -58,5 +58,16 @@
     "deviceCountInProfiles": 2
   },
   "settingsPreferencesApi": "validated_real_QA_roundtrip",
-  "savedPlacesApi": "HTTP_404_not_deployed"
+  "savedPlacesApi": "HTTP_404_not_deployed",
+  "androidDevice": {
+    "path": "/Users/izaakdias/Documents/Leaf-release-candidates/1.0.6/Leaf-1.0.6-132-device.apk",
+    "bytes": 235619707,
+    "sha256": "ce9775b47ade85afbf3a26abd419a4f83944ac2758c4f4b4f6ac834ef188cce1",
+    "signatureVerified": true,
+    "certificateSha256": "B8A2ED46343606A62CC12692BE62323E2969CDF4C83FB54180D924738A7C9BF4",
+    "manifest": "package: name='br.com.leaf.ride' versionCode='132' versionName='1.0.6' platformBuildVersionName='16' platformBuildVersionCode='36' compileSdkVersion='36' compileSdkVersionCodename='16'",
+    "launchProfile": "pilot_controlled",
+    "pilotControlled": true,
+    "installationStatus": "not_installed_android_absent_from_adb"
+  }
 }
