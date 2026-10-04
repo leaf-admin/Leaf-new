@@ -8,6 +8,7 @@ import * as Font from 'expo-font';
 import { store } from './src/state/appStore';
 import AppNavigator from './src/navigation/AppNavigator';
 import AuthProvider from './src/components/AuthProvider';
+import { MobilePreferencesProvider } from './src/components/MobilePreferencesProvider';
 import { LanguageProvider } from './src/components/i18n/LanguageProvider';
 import FCMNotificationService from './src/services/FCMNotificationService';
 import InteractiveNotificationService from './src/services/InteractiveNotificationService';
@@ -337,6 +338,7 @@ export default function App() {
       <Provider store={store}>
         <LanguageProvider>
           <AuthProvider>
+            <MobilePreferencesProvider>
             {/* ✅ Banner de status de conexão (não bloqueante) */}
             <NetworkStatusBanner />
             <AndroidPermissionDisclosureHost />
@@ -348,6 +350,7 @@ export default function App() {
               // A splash nativa continua visível via preventAutoHideAsync
               <View style={{ flex: 1, backgroundColor: '#1A330E' }} />
             )}
+            </MobilePreferencesProvider>
           </AuthProvider>
         </LanguageProvider>
       </Provider>

@@ -86,7 +86,9 @@ describe('current account surface contract', () => {
       'accessibilityLabel="Voltar"',
     );
     expect(sources['src/screens/prototype/RobotaxiSettingsScreen.js']).toContain(
-      'accessible={false}',
+      'accessibilityLabel={title}',
     );
+    expect(sources['src/screens/prototype/RobotaxiSettingsScreen.js']).toContain('checked: Boolean(switchValue)');
+    expect(sources['src/screens/prototype/RobotaxiSettingsScreen.js']).not.toMatch(/accessibilityLabel=\{(?:rowTestID|switchTestID)\}/);
   });
 });

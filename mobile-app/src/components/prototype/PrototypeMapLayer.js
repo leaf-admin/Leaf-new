@@ -6,6 +6,7 @@ import Svg, { Path, Rect } from 'react-native-svg';
 import mapStyleAppleLike from './mapStyleAppleLike';
 import robotaxiPrototypeTokens from '../design-system/robotaxiPrototypeTokens';
 import LeafLocationMarker from './LeafLocationMarker';
+import { useMobilePreferences } from '../MobilePreferencesProvider';
 
 const { color, motion } = robotaxiPrototypeTokens;
 const ROUTE_ANIMATION_DURATION = Math.min(Number(motion.timing.map) || 840, 840);
@@ -1213,7 +1214,7 @@ function PrototypeMapLayer({
   userAvatarLetter = 'L',
   driverCoordinate,
   driverHeading = null,
-  showTraffic = false,
+  showTraffic: requestedTraffic = false,
   searchingMode = false,
   searchCenterCoordinate,
   searchRadiusKm = null,
@@ -1258,6 +1259,8 @@ function PrototypeMapLayer({
   manualCameraHoldMs = 0,
   mapCameraHeading = 0,
 }) {
+  const { preferences } = useMobilePreferences();
+  const showTraffic = Boolean(requestedTraffic && preferences.trafficLayerEnabled);
   const reduceMotion = useReducedMotion();
   const mapProvider =
     Platform.OS === 'ios' || Platform.OS === 'android'

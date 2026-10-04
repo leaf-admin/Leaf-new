@@ -38,6 +38,8 @@
 		FF7202B31CAE45B69F394CF1 /* LeafRideActivityWidget.appex in Copy Files */ = {isa = PBXBuildFile; fileRef = 80D5F2DCBBB049F697CCE8B6 /* LeafRideActivityWidget.appex */; };
 		A42BD31DEC2C450A97FBC477 /* LeafMaterialView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D06AB1EAF8E3406CB8DBDADE /* LeafMaterialView.swift */; };
 		184BA88472364ABEB0C4DEAB /* LeafMaterialView.m in Sources */ = {isa = PBXBuildFile; fileRef = 079CD5E50F674F46B5718A0A /* LeafMaterialView.m */; };
+		3B155D9914C44CB3A3821CA9 /* LeafVoiceGuidance.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0882C4C938DE42E5A5B89A4E /* LeafVoiceGuidance.swift */; };
+		06E7EABA633340589FB9B02A /* LeafVoiceGuidance.m in Sources */ = {isa = PBXBuildFile; fileRef = E243C58BC61942AA8DA91ADB /* LeafVoiceGuidance.m */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -91,6 +93,8 @@
 		F277A3A4036E48219CAD1AE1 /* Localizable.strings */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = 4; includeInIndex = 0; lastKnownFileType = text.plist.strings; name = Localizable.strings; path = Base.lproj/Localizable.strings; sourceTree = "<group>"; };
 		D06AB1EAF8E3406CB8DBDADE /* LeafMaterialView.swift */ = {isa = PBXFileReference; name = "LeafMaterialView.swift"; path = "Leaf/LeafMaterialView.swift"; sourceTree = "<group>"; fileEncoding = 4; lastKnownFileType = sourcecode.swift; explicitFileType = undefined; includeInIndex = 0; };
 		079CD5E50F674F46B5718A0A /* LeafMaterialView.m */ = {isa = PBXFileReference; name = "LeafMaterialView.m"; path = "Leaf/LeafMaterialView.m"; sourceTree = "<group>"; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; explicitFileType = undefined; includeInIndex = 0; };
+		0882C4C938DE42E5A5B89A4E /* LeafVoiceGuidance.swift */ = {isa = PBXFileReference; name = "LeafVoiceGuidance.swift"; path = "Leaf/LeafVoiceGuidance.swift"; sourceTree = "<group>"; fileEncoding = 4; lastKnownFileType = sourcecode.swift; explicitFileType = undefined; includeInIndex = 0; };
+		E243C58BC61942AA8DA91ADB /* LeafVoiceGuidance.m */ = {isa = PBXFileReference; name = "LeafVoiceGuidance.m"; path = "Leaf/LeafVoiceGuidance.m"; sourceTree = "<group>"; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; explicitFileType = undefined; includeInIndex = 0; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -135,6 +139,8 @@
 				84C7E4850D1D7BD7E053F0F7 /* PrivacyInfo.xcprivacy */,
 				D06AB1EAF8E3406CB8DBDADE /* LeafMaterialView.swift */,
 				079CD5E50F674F46B5718A0A /* LeafMaterialView.m */,
+				0882C4C938DE42E5A5B89A4E /* LeafVoiceGuidance.swift */,
+				E243C58BC61942AA8DA91ADB /* LeafVoiceGuidance.m */,
 			);
 			name = Leaf;
 			sourceTree = "<group>";
@@ -623,6 +629,8 @@
 				B738E7C115448FDB6855404E /* ExpoModulesProvider.swift in Sources */,
 				A42BD31DEC2C450A97FBC477 /* LeafMaterialView.swift in Sources */,
 				184BA88472364ABEB0C4DEAB /* LeafMaterialView.m in Sources */,
+				3B155D9914C44CB3A3821CA9 /* LeafVoiceGuidance.swift in Sources */,
+				06E7EABA633340589FB9B02A /* LeafVoiceGuidance.m in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

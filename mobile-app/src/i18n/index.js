@@ -10,10 +10,10 @@ import languageManager from '../locales';
 // Configurações do sistema i18n
 export const i18nConfig = {
   // Idiomas suportados
-  supportedLanguages: ['en', 'pt', 'es', 'fr', 'de'],
+  supportedLanguages: ['pt'],
   
   // Idioma padrão
-  defaultLanguage: 'en',
+  defaultLanguage: 'pt',
   
   // Configurações de cache
   cache: {

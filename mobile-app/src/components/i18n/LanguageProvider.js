@@ -14,7 +14,7 @@ import languageManager from '../../locales';
 const LanguageContext = createContext();
 
 export const LanguageProvider = ({ children }) => {
-  const [currentLang, setCurrentLang] = useState('en');
+  const [currentLang, setCurrentLang] = useState('pt');
   const [isLoading, setIsLoading] = useState(true);
   const [supportedLanguages, setSupportedLanguages] = useState([]);
 
@@ -76,7 +76,7 @@ export const LanguageProvider = ({ children }) => {
   /**
    * Formatar moeda (memoizado)
    */
-  const formatCurrency = useCallback((amount, currency = 'USD') => {
+  const formatCurrency = useCallback((amount, currency = 'BRL') => {
     try {
       return languageManager.formatCurrency(amount, currency);
     } catch (error) {
@@ -124,7 +124,7 @@ export const LanguageProvider = ({ children }) => {
       <View style={styles.loadingContainer}>
         <ActivityIndicator size="large" color="#1A330E" />
         <Text style={styles.loadingText}>
-          🌍 Loading translations...
+          Carregando
         </Text>
       </View>
     );

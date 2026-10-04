@@ -391,6 +391,7 @@ main() {
   fi
 
   ensure_ios_native
+  node "${SCRIPT_DIR}/sync-leaf-ui-native.cjs" ios
   sync_native_ios_version
   sync_native_ios_updates_config
   ensure_pods

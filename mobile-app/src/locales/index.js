@@ -19,7 +19,7 @@ const deTranslations = enTranslations;
 
 class LanguageManager {
   constructor() {
-    this.currentLanguage = 'en';
+    this.currentLanguage = 'pt';
     this.translations = {
       en: enTranslations,
       pt: ptTranslations,
@@ -27,8 +27,10 @@ class LanguageManager {
       fr: frTranslations,
       de: deTranslations
     };
-    this.fallbackLanguage = 'en';
-    this.supportedLanguages = ['en', 'pt', 'es', 'fr', 'de'];
+    this.fallbackLanguage = 'pt';
+    // The controlled Brazilian pilot exposes only the fully supported locale.
+    // Translation files remain available for later, reviewed language releases.
+    this.supportedLanguages = ['pt'];
     this.listeners = [];
   }
 

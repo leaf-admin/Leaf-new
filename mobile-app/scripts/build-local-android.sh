@@ -278,6 +278,7 @@ main() {
   load_eas_build_profile_env
 
   ensure_android_native
+  node "${SCRIPT_DIR}/sync-leaf-ui-native.cjs" android
   ensure_local_properties
   sync_native_android_version
   sync_android_inter_fonts

@@ -10,6 +10,8 @@ import polyline from '@mapbox/polyline';
 import robotaxiPrototypeTokens from '../../components/design-system/robotaxiPrototypeTokens';
 import PrototypeScreenTransition from '../../components/prototype/PrototypeScreenTransition';
 import PrototypeMapLayer from '../../components/prototype/PrototypeMapLayer';
+import { useMobilePreferences } from '../../components/MobilePreferencesProvider';
+import useLeafVoiceGuidance from '../../hooks/useLeafVoiceGuidance';
 import LeafLocationMarker, { LEAF_LOCATION_MARKER_SIZE } from '../../components/prototype/LeafLocationMarker';
 import PrototypeConnectionStatusPill from '../../components/prototype/PrototypeConnectionStatusPill';
 import { PrototypeBottomIsland, PrototypeTopControls } from '../../components/prototype/PrototypeScaffold';
@@ -4755,6 +4757,13 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     && driverH3RefreshPolicy?.trafficLayerEnabled !== false
   );
   const driverTripAssistNativeNavigation = driverTripAssist?.nativeNavigation || null;
+  const { uid: preferencesUid, preferences: mobilePreferences } = useMobilePreferences();
+  useLeafVoiceGuidance({
+    uid: preferencesUid,
+    enabled: isDriverRole && mobilePreferences.voiceGuidanceEnabled,
+    focused: isScreenFocused && currentRouteName === 'RobotaxiPrototype',
+    navigationModel: driverTripAssistNativeNavigation,
+  });
   const isPickupPhase =
     normalizedBookingStatus === 'accepted' ||
     normalizedBookingStatus === 'arrived';

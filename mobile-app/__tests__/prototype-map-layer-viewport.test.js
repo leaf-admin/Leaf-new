@@ -4,6 +4,12 @@ import { act, render } from '@testing-library/react-native';
 const mockAnimateToRegion = jest.fn();
 const mockFitToCoordinates = jest.fn();
 const mockAnimateCamera = jest.fn();
+jest.mock('../src/components/MobilePreferencesProvider', () => {
+  const React = require('react');
+  const Context = React.createContext({ preferences: { trafficLayerEnabled: true } });
+  return { useMobilePreferences: () => React.useContext(Context), TestPreferencesProvider: Context.Provider };
+});
+const { TestPreferencesProvider } = require('../src/components/MobilePreferencesProvider');
 
 jest.mock('react-native-maps', () => {
   const React = require('react');
@@ -159,6 +165,16 @@ describe('PrototypeMapLayer route viewport fitting', () => {
     mockAnimateCamera.mockClear();
     mockAnimateToRegion.mockClear();
     mockFitToCoordinates.mockClear();
+  });
+
+  it('gates Google traffic with both backend policy and the confirmed account preference', () => {
+    const surface = (trafficLayerEnabled, policy = true) => <TestPreferencesProvider value={{ preferences: { trafficLayerEnabled } }}><PrototypeMapLayer region={baseRegion} showTraffic={policy} /></TestPreferencesProvider>;
+    const screen = render(surface(true));
+    expect(screen.getByTestId('prototype-map-view').props.showsTraffic).toBe(true);
+    screen.rerender(surface(false));
+    expect(screen.getByTestId('prototype-map-view').props.showsTraffic).toBe(false);
+    screen.rerender(surface(true, false));
+    expect(screen.getByTestId('prototype-map-view').props.showsTraffic).toBe(false);
   });
 
   afterEach(() => {
