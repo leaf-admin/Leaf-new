@@ -43,6 +43,13 @@ describe('saved places synchronization', () => {
     await expect(service.savePlace('u1', place, 'Casa')).rejects.toThrow('sessão mudou');
     expect(await service.getLocalSavedPlaces('u1')).toEqual([]);
   });
+  it('never exposes another account local cache as an offline fallback', async () => {
+    await AsyncStorage.setItem('@leaf_saved_places_u1', JSON.stringify([place]));
+    mockCurrentUser.mockResolvedValue({ uid: 'u2' });
+    await expect(service.getSavedPlacesSnapshot('u1')).rejects.toThrow('sessão mudou');
+    await expect(service.getLocalSavedPlaces('u1')).rejects.toThrow('sessão mudou');
+    expect(mockRequest).not.toHaveBeenCalled();
+  });
   it('retires a legacy copy only after the remote copy is confirmed, so it cannot resurrect after deletion elsewhere', async () => {
     await AsyncStorage.setItem('@leaf_saved_places_u1', JSON.stringify([place]));
     expect((await service.getSavedPlacesSnapshot('u1')).localOnly).toEqual([]);

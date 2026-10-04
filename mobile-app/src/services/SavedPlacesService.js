@@ -9,9 +9,12 @@ function validatePlaces(places) {
   if (!Array.isArray(places) || places.some(place => !place || typeof place.id !== 'string' || typeof place.name !== 'string' || !Number.isFinite(place.coordinate?.latitude) || !Number.isFinite(place.coordinate?.longitude) || Math.abs(place.coordinate.latitude) > 90 || Math.abs(place.coordinate.longitude) > 180)) throw new Error('Não foi possível ler seus endereços salvos.');
   return places;
 }
-async function request(uid, suffix = '', options = {}) {
+async function assertOwner(uid) {
   key(uid);
   if ((await authService.getCurrentUser())?.uid !== uid) throw new Error('A sessão mudou. Abra novamente seus endereços.');
+}
+async function request(uid, suffix = '', options = {}) {
+  await assertOwner(uid);
   const response = await authService.authenticatedRequest(`/account/places${suffix}`, options);
   const payload = await response.json().catch(() => ({}));
   if (!response.ok || payload.success === false) throw Object.assign(new Error(payload.message || 'Não foi possível sincronizar seus endereços.'), { status: response.status });
@@ -25,9 +28,11 @@ async function getLegacyPlaces(uid) {
   return stored ? validatePlaces(JSON.parse(stored)) : [];
 }
 export async function getLocalSavedPlaces(uid) {
+  await assertOwner(uid);
   const legacy = await getLegacyPlaces(uid);
   const stored = await AsyncStorage.getItem(`${key(uid)}_cloud`);
   const cloud = stored ? validatePlaces(JSON.parse(stored)) : [];
+  await assertOwner(uid);
   return [...cloud, ...legacy.filter(place => !cloud.some(item => item.id === place.id))];
 }
 async function acknowledgeLegacy(uid, id) {
@@ -45,7 +50,10 @@ export async function getSavedPlacesSnapshot(uid) {
     // local copy from reappearing after deletion on another device.
     await AsyncStorage.setItem(key(uid), JSON.stringify(localOnly));
     return { places: [...remote, ...localOnly], localOnly, synced: true, error: '' };
-  } catch (error) { return { places: local, localOnly: local, synced: false, error: error.status === 404 ? 'Sincronização ainda indisponível. Seus endereços deste aparelho foram preservados.' : 'Sem sincronização. Mostrando os endereços deste aparelho.' }; }
+  } catch (error) {
+    await assertOwner(uid);
+    return { places: local, localOnly: local, synced: false, error: error.status === 404 ? 'Sincronização ainda indisponível. Seus endereços deste aparelho foram preservados.' : 'Sem sincronização. Mostrando os endereços deste aparelho.' };
+  }
 }
 export async function getSavedPlaces(uid) { return (await getSavedPlacesSnapshot(uid)).places; }
 export async function savePlace(uid, place, label, { id = null } = {}) {
