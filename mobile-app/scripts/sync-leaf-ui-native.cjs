@@ -1,6 +1,6 @@
 const fs = require('fs');
 const path = require('path');
-const { registerVoicePackage } = require('../plugins/withLeafMaterial');
+const { registerVoicePackage, normalizeAndroidResourceLocales } = require('../plugins/withLeafMaterial');
 const root = path.resolve(__dirname, '..');
 
 function writeIfChanged(destination, contents) {
@@ -19,6 +19,8 @@ function syncNativeUi(platform, projectRoot = root) {
       writeIfChanged(path.join(projectRoot, 'ios/Leaf', file), fs.readFileSync(path.join(source, file)));
     }
   } else {
+    const gradle = path.join(projectRoot, 'android/app/build.gradle');
+    writeIfChanged(gradle, normalizeAndroidResourceLocales(fs.readFileSync(gradle, 'utf8')));
     const destination = path.join(projectRoot, 'android/app/src/main/java/br/com/leaf/ride');
     for (const file of ['LeafVoiceGuidanceModule.java', 'LeafVoiceGuidancePackage.java']) {
       writeIfChanged(path.join(destination, file), fs.readFileSync(path.join(source, file)));

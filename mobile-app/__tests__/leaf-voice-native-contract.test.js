@@ -5,8 +5,9 @@ jest.mock('@expo/config-plugins', () => ({
   withXcodeProject: jest.fn(config => config),
   withMainApplication: jest.fn(config => config),
   withAndroidManifest: jest.fn(config => config),
+  withAppBuildGradle: jest.fn(config => config),
 }));
-const { registerVoicePackage } = require('../plugins/withLeafMaterial');
+const { registerVoicePackage, normalizeAndroidResourceLocales } = require('../plugins/withLeafMaterial');
 const root = path.resolve(__dirname, '..');
 const os = require('os');
 const { syncNativeUi } = require('../scripts/sync-leaf-ui-native.cjs');
@@ -35,6 +36,7 @@ describe('voice native build contract', () => {
       ['LeafVoiceGuidanceModule.java', 'LeafVoiceGuidancePackage.java'].forEach(file => copy(`native/ui/android/${file}`, fs.readFileSync(path.join(root, 'native/ui/android', file))));
       copy('android/app/src/main/java/br/com/leaf/ride/MainApplication.kt', 'PackageList(this).packages.apply {\n}');
       copy('android/app/src/main/AndroidManifest.xml', '<manifest><queries></queries><application /></manifest>');
+      copy('android/app/build.gradle', 'resourceConfigurations += ["pt-BR"]');
       syncNativeUi('android', directory);
       const manifest = fs.readFileSync(path.join(directory, 'android/app/src/main/AndroidManifest.xml'), 'utf8');
       const main = fs.readFileSync(path.join(directory, 'android/app/src/main/java/br/com/leaf/ride/MainApplication.kt'), 'utf8');
@@ -43,6 +45,8 @@ describe('voice native build contract', () => {
       expect(fs.readFileSync(path.join(directory, 'android/app/src/main/java/br/com/leaf/ride/MainApplication.kt'), 'utf8')).toBe(main);
       expect(manifest).toContain('android.intent.action.TTS_SERVICE');
       expect(main.match(/add\(LeafVoiceGuidancePackage\(\)\)/g)).toHaveLength(1);
+      expect(fs.readFileSync(path.join(directory, 'android/app/build.gradle'), 'utf8')).toBe('resourceConfigurations += ["pt-rBR"]');
+      expect(normalizeAndroidResourceLocales('resourceConfigurations += ["en"]')).toBe('resourceConfigurations += ["en"]');
       expect(fs.existsSync(path.join(directory, 'android/app/src/main/java/br/com/leaf/ride/LeafVoiceGuidanceModule.java'))).toBe(true);
       expect(() => syncNativeUi('unknown', directory)).toThrow('ios ou android');
     } finally { fs.rmSync(directory, { recursive: true, force: true }); }

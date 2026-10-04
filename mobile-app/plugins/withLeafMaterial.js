@@ -1,4 +1,4 @@
-const { withDangerousMod, withXcodeProject, withMainApplication, withAndroidManifest } = require('@expo/config-plugins');
+const { withDangerousMod, withXcodeProject, withMainApplication, withAndroidManifest, withAppBuildGradle } = require('@expo/config-plugins');
 const fs = require('fs');
 const path = require('path');
 const files = ['LeafMaterialView.swift', 'LeafMaterialView.m', 'LeafVoiceGuidance.swift', 'LeafVoiceGuidance.m'];
@@ -8,6 +8,10 @@ function registerVoicePackage(contents) {
   const anchor = 'PackageList(this).packages.apply {';
   if (!contents.includes(anchor)) throw new Error('withLeafMaterial: registro de pacotes Android ausente');
   return contents.replace(anchor, `${anchor}\n              add(LeafVoiceGuidancePackage())`);
+}
+
+function normalizeAndroidResourceLocales(contents) {
+  return contents.replace(/(resourceConfigurations\s*\+=\s*\[\s*)["']pt-BR["'](\s*\])/g, '$1"pt-rBR"$2');
 }
 
 // Use the exact source images from the approved Swift reference. The native
@@ -25,6 +29,10 @@ function copyTabImages(platformRoot) {
 }
 
 module.exports = function withLeafMaterial(config) {
+  config = withAppBuildGradle(config, config => {
+    config.modResults.contents = normalizeAndroidResourceLocales(config.modResults.contents);
+    return config;
+  });
   config = withMainApplication(config, config => {
     config.modResults.contents = registerVoicePackage(config.modResults.contents);
     return config;
@@ -68,3 +76,4 @@ module.exports = function withLeafMaterial(config) {
 };
 
 module.exports.registerVoicePackage = registerVoicePackage;
+module.exports.normalizeAndroidResourceLocales = normalizeAndroidResourceLocales;
