@@ -11,6 +11,7 @@ const mockUpdateUser = jest.fn();
 const mockDeleteUser = jest.fn();
 const mockUserDocGet = jest.fn();
 const mockUserDocSet = jest.fn();
+const mockUserDocId = jest.fn();
 const mockCpfQueryGet = jest.fn();
 const mockCpfIndexDocGet = jest.fn();
 const mockCpfIndexDocSet = jest.fn();
@@ -31,11 +32,11 @@ const firestoreFn = jest.fn(() => ({
   collection: jest.fn((collectionName) => {
     if (collectionName === 'users') {
       return {
-        doc: jest.fn(() => ({
+        doc: jest.fn(uid => { mockUserDocId(uid); return ({
           kind: 'user',
           get: mockUserDocGet,
           set: mockUserDocSet,
-        })),
+        }); }),
         where: jest.fn(() => ({
           get: mockCpfQueryGet,
         })),
@@ -182,6 +183,53 @@ describe('account deletion route', () => {
     mockDatabaseUpdate.mockResolvedValue(undefined);
     mockRedisHgetall.mockResolvedValue({ status: 'offline', isOnline: 'false' });
     mockRedisDel.mockResolvedValue(1);
+  });
+
+  describe('saved places owned by the authenticated account', () => {
+    const place = { name: 'Casa', address: 'Rua A, 10', coordinate: { latitude: -22, longitude: -43 } };
+    const authorize = call => call.set('Authorization', 'Bearer firebase-token');
+    it.each(['get', 'post', 'patch', 'delete'])('requires authentication for %s', async method => {
+      const suffix = ['patch', 'delete'].includes(method) ? '/place-1' : '';
+      expect((await request(createApp())[method](`/api/account/places${suffix}`).send({ place })).status).toBe(401);
+    });
+    it('returns only the token owner data and ignores a body uid', async () => {
+      const response = await authorize(request(createApp()).post('/api/account/places')).send({ uid: 'foreign', place: { ...place, uid: 'foreign', balance: 999 } });
+      expect(response.status).toBe(200);
+      expect(response.body.uid).toBe('review-user');
+      expect(mockUserDocId).toHaveBeenLastCalledWith('review-user');
+      expect(mockUserDocSet).toHaveBeenCalledWith({ savedPlaces: [{ ...place, id: '-22,-43', sourceType: 'saved_place' }] }, { merge: true });
+      expect(mockRunTransaction).toHaveBeenCalledTimes(1);
+    });
+    it('reads and edits the existing saved-place list without overwriting other profile fields', async () => {
+      const saved = { ...place, id: 'place-1' };
+      mockUserDocGet.mockResolvedValue({ exists: true, data: () => ({ savedPlaces: [saved], balance: 50 }) });
+      const read = await authorize(request(createApp()).get('/api/account/places'));
+      expect(read.body.places[0]).toEqual(expect.objectContaining(saved));
+      const response = await authorize(request(createApp()).patch('/api/account/places/place-1')).send({ place: { ...place, name: 'Trabalho' } });
+      expect(response.status).toBe(200);
+      const fields = mockUserDocSet.mock.calls.at(-1)[0];
+      expect(Object.keys(fields)).toEqual(['savedPlaces']);
+      expect(fields.savedPlaces[0]).toEqual(expect.objectContaining({ id: 'place-1', name: 'Trabalho' }));
+    });
+    it('rejects missing edits, invalid coordinates and invalid payloads before writing', async () => {
+      expect((await authorize(request(createApp()).patch('/api/account/places/missing')).send({ place })).status).toBe(404);
+      expect((await authorize(request(createApp()).post('/api/account/places')).send({ place: { ...place, coordinate: { latitude: 91, longitude: 0 } } })).status).toBe(400);
+      expect((await authorize(request(createApp()).post('/api/account/places')).send({ place: null })).status).toBe(400);
+      expect(mockUserDocSet).not.toHaveBeenCalled();
+    });
+    it('deletes idempotently and blocks account tombstones', async () => {
+      expect((await authorize(request(createApp()).delete('/api/account/places/missing'))).status).toBe(200);
+      mockUserDocGet.mockResolvedValue({ exists: true, data: () => ({ status: 'deleted', accountDisabled: true }) });
+      const response = await authorize(request(createApp()).post('/api/account/places')).send({ place });
+      expect(response.status).toBe(409);
+      expect(mockUserDocSet).toHaveBeenCalledTimes(1);
+    });
+    it('fails without exposing provider internals when storage is unavailable', async () => {
+      mockUserDocGet.mockRejectedValueOnce(new Error('private provider detail'));
+      const response = await authorize(request(createApp()).get('/api/account/places'));
+      expect(response.status).toBe(500);
+      expect(JSON.stringify(response.body)).not.toContain('private provider');
+    });
   });
 
   it.each(['/api/admin/account-deletions/old/retry', '/api/admin/cpf-reviews/decision'])('rejects non-admin access to %s', async endpoint => {
