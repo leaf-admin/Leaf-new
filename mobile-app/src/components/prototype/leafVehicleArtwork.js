@@ -9,7 +9,42 @@ const PAINTS = Object.freeze({
   blue: ['#8098AE', '#627F99', '#4A657E', '#364A5D'],
   green: ['#869C8D', '#6A8273', '#4F6859', '#3B4F42'],
   yellow: ['#D4BE84', '#BAA062', '#9B824C', '#79663D'],
+  brown: ['#AC8B77', '#896955', '#684B3C', '#49342A'],
+  beige: ['#E3D8C1', '#CBBCA0', '#AA997B', '#837257'],
+  orange: ['#E3A073', '#CC8150', '#A66037', '#7D4629'],
+  purple: ['#A59ABA', '#85759D', '#655580', '#493C61'],
+  pink: ['#DFB2C5', '#C88FA9', '#A66D88', '#80516B'],
 });
+
+// Register additional bundled campaign artwork here. Unknown keys always fall
+// back to the registered-color car; remote creatives use the existing upload.
+export const VEHICLE_MARKER_SHAPES = Object.freeze({
+  leaf_vehicle: createLeafVehicleSvg,
+  halloween_pumpkin: createHalloweenPumpkinSvg,
+});
+
+export function resolveVehicleMarkerShapeKey(value) {
+  const key = String(value || '').trim().toLowerCase();
+  return Object.prototype.hasOwnProperty.call(VEHICLE_MARKER_SHAPES, key) ? key : '';
+}
+
+export function createLeafMapMarkerSvg({ shapeKey = '', ...options } = {}) {
+  const key = resolveVehicleMarkerShapeKey(shapeKey) || 'leaf_vehicle';
+  return VEHICLE_MARKER_SHAPES[key](options);
+}
+
+function createHalloweenPumpkinSvg({ screenHeading = 0, idPrefix = 'leaf-pumpkin' } = {}) {
+  const pose = resolveVehicleArtworkPose(screenHeading);
+  const id = String(idPrefix).replace(/[^a-zA-Z0-9_-]/g, '') || 'leaf-pumpkin';
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="42" height="42" viewBox="0 0 64 64">
+  <defs><linearGradient id="${id}-pumpkin" gradientUnits="userSpaceOnUse" x1="${pose.lightX}" y1="${pose.lightY}" x2="${64 - pose.lightX}" y2="${64 - pose.lightY}"><stop offset="0" stop-color="#F8BD71"/><stop offset=".48" stop-color="#E7933E"/><stop offset="1" stop-color="#BD6027"/></linearGradient></defs>
+  <ellipse cx="32.5" cy="35" rx="19.5" ry="19" fill="#15171B" opacity=".10"/>
+  <path d="M29.5 18L30.5 10Q32 8 34.5 10L33 19Z" fill="#596B46"/>
+  <path d="M32 18C19 12 12 23 14 37C15.5 49 23 53 32 50C41 53 48.5 49 50 37C52 23 45 12 32 18Z" fill="url(#${id}-pumpkin)" stroke="#AE602A" stroke-width=".65"/>
+  <path d="M27 19C21 29 22 42 28 49M37 19C43 29 42 42 36 49M32 19L32 49" fill="none" stroke="#A45627" stroke-opacity=".24" stroke-width="1.3"/>
+  <path d="M21.5 32L27.5 28.5L28 34.5ZM42.5 32L36.5 28.5L36 34.5ZM24 40Q32 46 40 40L36 44L32 43L28 44Z" fill="#704425"/>
+  </svg>`;
+}
 
 // Orthographic, symmetrical silhouette. Heading only changes light, never the
 // geometry: rotating a small map marker must not stretch or shear the vehicle.

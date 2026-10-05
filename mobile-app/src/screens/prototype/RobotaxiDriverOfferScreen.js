@@ -6,6 +6,7 @@ import { fonts } from "../../theme/runtimeTokens";
 import PrototypeScreenTransition from "../../components/prototype/PrototypeScreenTransition";
 import PrototypeDismissibleSheet from "../../components/prototype/PrototypeDismissibleSheet";
 import PrototypeMapLayer from "../../components/prototype/PrototypeMapLayer";
+import { resolveRegisteredVehicleColor } from '../../components/prototype/vehicleMarkerIdentity';
 import {
   LeafButton,
   leafRideColors,
@@ -403,6 +404,7 @@ export default function RobotaxiDriverOfferScreen({ navigation, route }) {
     driverOffers,
     driverTripMeta,
     profile,
+    driverActivationRemote,
     acceptDriverOffer,
     rejectDriverOffer,
     lastError,
@@ -722,15 +724,9 @@ export default function RobotaxiDriverOfferScreen({ navigation, route }) {
   const offerMapDestinationAddress = isTripRoutePreview
     ? dropoffLabel
     : pickupLabel;
-  const offerVehicleColor = String(
-    profile?.vehicleColor ||
-      profile?.vehicle?.color ||
-      profile?.carColor ||
-      profile?.car?.color ||
-      driverTripMeta?.vehicleColor ||
-      driverTripMeta?.vehicle?.color ||
-      '',
-  ).trim();
+  const offerVehicleColor = resolveRegisteredVehicleColor({
+    role: 'driver', profile, driverActivationRemote, driverTripMeta,
+  });
   const vehicleMarkerCampaignAsset = useCampaignAssetOverride({
     surface: 'ride_map',
     placement: 'vehicle_marker',
@@ -1026,6 +1022,7 @@ export default function RobotaxiDriverOfferScreen({ navigation, route }) {
           driverMarkerMode="car"
           driverVehicleColor={offerVehicleColor}
           driverMarkerAssetUrl={vehicleMarkerCampaignAsset.imageUrl}
+          driverMarkerShapeKey={vehicleMarkerCampaignAsset.shapeKey}
           driverMarkerLetter="M"
           destinationMarkerMode="avatar"
           destinationMarkerLetter={passengerInitial}

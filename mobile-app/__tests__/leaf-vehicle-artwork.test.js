@@ -1,15 +1,28 @@
-import { createLeafVehicleSvg, resolveVehicleArtworkPose } from '../src/components/prototype/leafVehicleArtwork';
+import { createLeafVehicleSvg, createLeafMapMarkerSvg, resolveVehicleMarkerShapeKey, resolveVehicleArtworkPose } from '../src/components/prototype/leafVehicleArtwork';
 import { parse } from 'react-native-svg';
 
 describe('Leaf vehicle vector artwork', () => {
   it('parses all paint and direction variants with the installed native SVG parser', () => {
-    for (const colorToken of ['black', 'white', 'silver', 'gray', 'red', 'blue', 'green', 'yellow']) {
+    for (const colorToken of ['black', 'white', 'silver', 'gray', 'red', 'blue', 'green', 'yellow', 'brown', 'beige', 'orange', 'purple', 'pink']) {
       for (const screenHeading of [0, 90, 180, 270]) {
         const ast = parse(createLeafVehicleSvg({ colorToken, screenHeading }));
         expect(ast).not.toBeNull();
         expect(ast.props.viewBox).toBe('0 0 64 64');
       }
     }
+  });
+  it('renders the bundled Halloween shape in every direction and safely falls back for unknown keys', () => {
+    expect(resolveVehicleMarkerShapeKey(' HALLOWEEN_PUMPKIN ')).toBe('halloween_pumpkin');
+    expect(resolveVehicleMarkerShapeKey('__proto__')).toBe('');
+    expect(createLeafMapMarkerSvg({ shapeKey: 'unreleased', colorToken: 'silver' }))
+      .toEqual(createLeafVehicleSvg({ colorToken: 'silver' }));
+    for (let screenHeading = 0; screenHeading < 360; screenHeading += 45) {
+      const xml = createLeafMapMarkerSvg({ shapeKey: 'halloween_pumpkin', screenHeading });
+      expect(parse(xml)).not.toBeNull();
+      expect(xml).toContain('#E7933E');
+      expect(xml).not.toMatch(/<image|<filter|skew|scale|matrix/);
+    }
+    expect(createLeafMapMarkerSvg({ shapeKey: 'leaf_vehicle', colorToken: 'white' })).toContain('#F0F0F1');
   });
   it('uses a compact vector silhouette with subtle paint and a ground shadow', () => {
     const xml = createLeafVehicleSvg();

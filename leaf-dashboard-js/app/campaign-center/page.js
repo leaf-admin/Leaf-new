@@ -29,6 +29,7 @@ const defaultForm = {
   eyebrow: "",
   body: "",
   imageUrl: "",
+  assetKey: "",
   imageAlt: "",
   displayMode: "text_overlay",
   backgroundColor: "#FBFCF8",
@@ -76,6 +77,10 @@ const templateOptions = [
   "map_vehicle_marker",
 ];
 const costModelOptions = ["internal", "fixed_fee", "cpm", "cpc", "cpa", "barter"];
+const markerShapeOptions = [
+  { assetKey: "leaf_vehicle", label: "Carro · cor do veículo cadastrado" },
+  { assetKey: "halloween_pumpkin", label: "Halloween · abóbora" },
+];
 
 const fallbackCampaignSlots = [
   {
@@ -235,7 +240,7 @@ function buildCampaignAlerts(rows, commercialReport) {
   }
 
   activeRows.forEach((campaign) => {
-    if (!campaign.content?.imageUrl) {
+    if (!campaign.content?.imageUrl && !campaign.content?.assetKey) {
       alerts.push({
         id: `image-${campaign.id}`,
         tone: "status-warn",
@@ -353,18 +358,20 @@ export default function CampaignCenterPage() {
     load();
   }, [load]);
 
+  const isMarkerCampaign = form.template === "map_vehicle_marker";
   const canCreate = useMemo(
     () =>
       canMutateCampaignCenter &&
       form.name.trim().length > 2 &&
-      form.title.trim().length > 2 &&
-      form.body.trim().length > 2,
-    [canMutateCampaignCenter, form.body, form.name, form.title],
+      (isMarkerCampaign
+        ? Boolean(form.assetKey || form.imageUrl.trim())
+        : form.title.trim().length > 2 && form.body.trim().length > 2),
+    [canMutateCampaignCenter, form.body, form.name, form.title, form.assetKey, form.imageUrl, isMarkerCampaign],
   );
 
   const create = async () => {
     if (!canCreate) {
-      setError(actionBlockedMessage || "Informe nome, titulo e texto da campanha.");
+      setError(actionBlockedMessage || (isMarkerCampaign ? "Informe nome e formato ou imagem do marcador." : "Informe nome, titulo e texto da campanha."));
       return;
     }
 
@@ -392,7 +399,8 @@ export default function CampaignCenterPage() {
             url: form.ctaUrl.trim(),
             route: form.ctaRoute.trim(),
           },
-          imageUrl: form.imageUrl.trim(),
+          assetKey: isMarkerCampaign ? form.assetKey : "",
+          imageUrl: isMarkerCampaign && form.assetKey ? "" : form.imageUrl.trim(),
           imageAlt: form.imageAlt.trim(),
           displayMode: form.displayMode,
           hideTextOverlay: form.displayMode === "image_only",
@@ -400,10 +408,10 @@ export default function CampaignCenterPage() {
           textColor: form.textColor.trim(),
         },
         rules: {
-          autoRotateSeconds: Number(form.autoRotateSeconds) || 6,
+          autoRotateSeconds: isMarkerCampaign ? 0 : Number(form.autoRotateSeconds) || 6,
           rotationWeight: Number(form.rotationWeight) || 1,
-          maxImpressionsPerUser: Number(form.maxImpressionsPerUser) || 6,
-          maxImpressionsPerDay: Number(form.maxImpressionsPerDay) || 2,
+          maxImpressionsPerUser: isMarkerCampaign ? 0 : Number(form.maxImpressionsPerUser) || 6,
+          maxImpressionsPerDay: isMarkerCampaign ? 0 : Number(form.maxImpressionsPerDay) || 2,
           dismissCooldownHours: Number(form.dismissCooldownHours) || 72,
           metadata: {
             slot: selectedSlot.id,
@@ -467,6 +475,7 @@ export default function CampaignCenterPage() {
       setForm((prev) => ({
         ...prev,
         imageUrl,
+        assetKey: prev.template === "map_vehicle_marker" ? "" : prev.assetKey,
         imageAlt: prev.imageAlt || assetFile.name,
       }));
       setAssetFile(null);
@@ -494,6 +503,27 @@ export default function CampaignCenterPage() {
       setNotice(`Campanha ${status === "active" ? "ativada" : "atualizada"} com sucesso.`);
     } catch (err) {
       setError(err?.message || "Falha ao atualizar campanha");
+    } finally {
+      setBusyCampaignId("");
+    }
+  };
+
+  const updateMarkerShape = async (campaign, assetKey) => {
+    if (!canMutateCampaignCenter) return;
+    if (!assetKey && !campaign.content?.imageUrl) {
+      setError("Para um formato personalizado, crie uma campanha com PNG ou WebP transparente.");
+      return;
+    }
+    setBusyCampaignId(campaign.id);
+    setError("");
+    try {
+      await leafAPI.updateInAppCampaign(campaign.id, {
+        content: { assetKey, ...(assetKey ? { imageUrl: "" } : {}) },
+      });
+      await load();
+      setNotice("Formato atualizado. O app recebe a alteração na próxima consulta de campanhas.");
+    } catch (err) {
+      setError(err?.message || "Falha ao atualizar formato do marcador.");
     } finally {
       setBusyCampaignId("");
     }
@@ -558,6 +588,7 @@ export default function CampaignCenterPage() {
       roles: slot.role || prev.roles,
       surfaces: slot.surface || prev.surfaces,
       placements: slot.placement || prev.placements,
+      assetKey: slot.template === "map_vehicle_marker" ? "leaf_vehicle" : "",
       autoRotateSeconds: slot.autoRotateSeconds || prev.autoRotateSeconds,
     }));
   };
@@ -819,10 +850,29 @@ export default function CampaignCenterPage() {
                 URL da arte
                 <input
                   value={form.imageUrl}
-                  onChange={(event) => setForm((prev) => ({ ...prev, imageUrl: event.target.value }))}
+                  onChange={(event) => setForm((prev) => ({ ...prev, imageUrl: event.target.value, assetKey: prev.template === "map_vehicle_marker" ? "" : prev.assetKey }))}
                   placeholder="https://.../banner-rio-01.webp"
                 />
               </label>
+              {isMarkerCampaign ? (
+                <label className="form-field">
+                  Formato no mapa
+                  <select
+                    value={form.assetKey}
+                    onChange={(event) => setForm((prev) => ({ ...prev, assetKey: event.target.value }))}
+                  >
+                    {(selectedSlot.markerShapes || markerShapeOptions).map((shape) => (
+                      <option key={shape.assetKey} value={shape.assetKey}>{shape.label}</option>
+                    ))}
+                    <option value="">Imagem personalizada</option>
+                  </select>
+                  <span className="text-muted">
+                    O carro usa a cor cadastrada. A abóbora usa a arte da campanha.
+                    Para outros formatos, envie PNG/WebP transparente, vista de cima e frente apontando para cima.
+                    A janela abaixo controla início e fim; ao encerrar, volta o carro padrão.
+                  </span>
+                </label>
+              ) : null}
               <label className="form-field">
                 Upload da arte
                 <input
@@ -1216,6 +1266,22 @@ export default function CampaignCenterPage() {
                             <span className="text-muted">{campaign.metrics?.clicks || 0} clicks</span>
                           </td>
                           <td>
+                            {campaign.template === "map_vehicle_marker" ? (
+                              <label className="form-field">
+                                Formato no mapa
+                                <select
+                                  aria-label={`Formato de ${campaign.name}`}
+                                  value={campaign.content?.assetKey || ""}
+                                  disabled={!canMutateCampaignCenter || isBusy}
+                                  onChange={(event) => updateMarkerShape(campaign, event.target.value)}
+                                >
+                                  {markerShapeOptions.map((shape) => (
+                                    <option key={shape.assetKey} value={shape.assetKey}>{shape.label}</option>
+                                  ))}
+                                  <option value="">Imagem personalizada</option>
+                                </select>
+                              </label>
+                            ) : null}
                             <div className="actions-cell">
                               <button
                                 disabled={!canMutateCampaignCenter || isBusy || campaign.status === "active"}

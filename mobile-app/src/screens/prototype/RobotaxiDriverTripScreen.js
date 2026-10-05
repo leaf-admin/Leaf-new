@@ -14,6 +14,8 @@ import PrototypeScreenTransition from "../../components/prototype/PrototypeScree
 import PrototypeDismissibleSheet from "../../components/prototype/PrototypeDismissibleSheet";
 import PrototypeConnectionStatusPill from "../../components/prototype/PrototypeConnectionStatusPill";
 import PrototypeMapLayer from "../../components/prototype/PrototypeMapLayer";
+import useCampaignAssetOverride from "../../hooks/useCampaignAssetOverride";
+import { resolveRegisteredVehicleColor } from '../../components/prototype/vehicleMarkerIdentity';
 import {
   RobotaxiLifecycleButton,
   RobotaxiLifecycleCard,
@@ -805,6 +807,8 @@ export default function RobotaxiDriverTripScreen({ navigation, route }) {
     activeBooking,
     driverActiveRide,
     driverTripMeta,
+    profile,
+    driverActivationRemote,
     selectedDestination,
     selectedFare,
     currentCoordinate,
@@ -822,6 +826,13 @@ export default function RobotaxiDriverTripScreen({ navigation, route }) {
     rideLocalSync,
     lastError,
   } = usePrototypeRideRuntime();
+  const vehicleColor = resolveRegisteredVehicleColor({
+    role: 'driver', activeBooking, driverActiveRide, driverTripMeta, driverActivationRemote, profile,
+  });
+  const vehicleMarkerCampaignAsset = useCampaignAssetOverride({
+    surface: 'ride_map', placement: 'vehicle_marker', role: 'driver', userId: profile?.uid || '',
+    context: { city: 'rio_de_janeiro' }, eventMetadata: { screen: 'robotaxi_driver_trip' },
+  });
   const insets = useSafeAreaInsets();
   const { height: windowHeight, width: windowWidth } = useWindowDimensions();
   const mapRef = useRef(null);
@@ -2515,6 +2526,9 @@ export default function RobotaxiDriverTripScreen({ navigation, route }) {
           animateRoute={driverTripMapPresentation.animateRoute}
           manualCameraHoldMs={driverTripMapPresentation.manualCameraHoldMs}
           driverMarkerMode="car"
+          driverVehicleColor={vehicleColor}
+          driverMarkerAssetUrl={vehicleMarkerCampaignAsset.imageUrl}
+          driverMarkerShapeKey={vehicleMarkerCampaignAsset.shapeKey}
           driverMarkerLetter="M"
           destinationMarkerMode={normalizedBookingStatus === "started" ? "place" : "avatar"}
           destinationMarkerLetter={passengerInitial}

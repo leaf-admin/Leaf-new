@@ -168,6 +168,9 @@ function resolveSingleVehicleColorToken(value) {
     if (hue < 24 || hue >= 340) {
       return 'red';
     }
+    if (hue < 38) {
+      return lightness < 0.4 ? 'brown' : 'orange';
+    }
     if (hue >= 38 && hue < 70) {
       return 'yellow';
     }
@@ -177,10 +180,10 @@ function resolveSingleVehicleColorToken(value) {
     if (hue >= 170 && hue < 260) {
       return 'blue';
     }
-    return lightness > 0.42 ? 'gray' : 'black';
+    return hue < 300 ? 'purple' : 'pink';
   }
 
-  if (normalized.includes('branco') || normalized.includes('white')) {
+  if (/\bbranc[oa]\b/.test(normalized) || normalized.includes('white')) {
     return 'white';
   }
   if (normalized.includes('prata') || normalized.includes('silver')) {
@@ -194,7 +197,7 @@ function resolveSingleVehicleColorToken(value) {
   ) {
     return 'gray';
   }
-  if (normalized.includes('vermelho') || normalized.includes('vinho') || normalized.includes('red')) {
+  if (/\bvermelh[oa]\b/.test(normalized) || normalized.includes('vinho') || normalized.includes('red')) {
     return 'red';
   }
   if (normalized.includes('azul') || normalized.includes('blue')) {
@@ -204,16 +207,21 @@ function resolveSingleVehicleColorToken(value) {
     return 'green';
   }
   if (
-    normalized.includes('amarelo') ||
-    normalized.includes('dourado') ||
+    /\bamarel[oa]\b/.test(normalized) ||
+    /\bdourad[oa]\b/.test(normalized) ||
     normalized.includes('yellow') ||
     normalized.includes('gold')
   ) {
     return 'yellow';
   }
-  if (normalized.includes('preto') || normalized.includes('black')) {
+  if (/\bpret[oa]\b/.test(normalized) || normalized.includes('black')) {
     return 'black';
   }
+  if (normalized.includes('marrom') || normalized.includes('brown') || normalized.includes('bronze')) return 'brown';
+  if (normalized.includes('bege') || normalized.includes('beige')) return 'beige';
+  if (normalized.includes('laranja') || normalized.includes('orange')) return 'orange';
+  if (/\brox[oa]\b/.test(normalized) || normalized.includes('purple') || normalized.includes('violeta')) return 'purple';
+  if (normalized.includes('rosa') || normalized.includes('pink')) return 'pink';
 
   return null;
 }
@@ -939,13 +947,16 @@ const MapAvatarMarker = React.memo(function MapAvatarMarker({
 const VehicleMarkerContent = React.memo(function VehicleMarkerContent({
   source,
   colorToken = 'black',
+  shapeKey = '',
   screenHeading = 0,
 }) {
+  const [failedImageUrl, setFailedImageUrl] = useState('');
+  useEffect(() => setFailedImageUrl(''), [source?.uri]);
   const shouldRenderRemoteImage = Boolean(
     source &&
       typeof source === 'object' &&
       typeof source.uri === 'string' &&
-      source.uri.trim()
+      source.uri.trim() && source.uri !== failedImageUrl
   );
 
   return (
@@ -956,9 +967,11 @@ const VehicleMarkerContent = React.memo(function VehicleMarkerContent({
           style={styles.vehicleMarkerImage}
           resizeMode="contain"
           fadeDuration={0}
+          onError={() => setFailedImageUrl(source.uri)}
+          testID="leaf-vehicle-campaign-image"
         />
       ) : (
-        <LeafVehicleMarker colorToken={colorToken} screenHeading={screenHeading} />
+        <LeafVehicleMarker colorToken={colorToken} shapeKey={shapeKey} screenHeading={screenHeading} />
       )}
     </View>
   );
@@ -970,6 +983,7 @@ const ProjectedVehicleOverlay = React.memo(function ProjectedVehicleOverlay({
   heading = 0,
   source,
   colorToken = 'black',
+  shapeKey = '',
 }) {
   if (!Number.isFinite(pointX) || !Number.isFinite(pointY)) {
     return null;
@@ -990,7 +1004,7 @@ const ProjectedVehicleOverlay = React.memo(function ProjectedVehicleOverlay({
           },
         ]}
       >
-        <VehicleMarkerContent source={effectiveSource} colorToken={colorToken} screenHeading={heading} />
+        <VehicleMarkerContent source={effectiveSource} colorToken={colorToken} shapeKey={shapeKey} screenHeading={heading} />
       </View>
     </View>
   );
@@ -1224,6 +1238,7 @@ function PrototypeMapLayer({
   currentLocationMarkerMode = 'dot',
   driverVehicleColor = '',
   driverMarkerAssetUrl = '',
+  driverMarkerShapeKey = '',
   driverMarkerLetter = 'D',
   destinationMarkerMode = 'place',
   destinationMarkerLetter = 'P',
@@ -2744,7 +2759,7 @@ function PrototypeMapLayer({
           !shouldRenderProjectedDriverVehicleOverlay &&
           !shouldSuppressNativeAndroidDriverVehicleMarker ? (
             <Marker
-              key="driver-marker"
+              key={`driver-marker-${driverVehicleMarkerColorToken}-${driverMarkerShapeKey}-${driverMarkerAssetUrl}`}
               coordinate={{
                 latitude: displayedDriverCoordinate.latitude,
                 longitude: displayedDriverCoordinate.longitude,
@@ -2762,6 +2777,7 @@ function PrototypeMapLayer({
                 <VehicleMarkerContent
                   source={driverVehicleMarkerImageSource}
                   colorToken={driverVehicleMarkerColorToken}
+                  shapeKey={driverMarkerShapeKey}
                   screenHeading={displayedDriverScreenHeading}
                 />
               ) : null}
@@ -2802,6 +2818,7 @@ function PrototypeMapLayer({
                       <VehicleMarkerContent
                         source={vehicleMarkerImageSource}
                         colorToken={vehicleMarkerColorToken}
+                        shapeKey={driverMarkerShapeKey}
                         screenHeading={resolveScreenRelativeVehicleHeading(vehicle.heading, normalizedMapCameraHeading)}
                       />
                     </Marker>
@@ -2869,6 +2886,7 @@ function PrototypeMapLayer({
           heading={displayedDriverScreenHeading}
           source={driverVehicleMarkerImageSource}
           colorToken={driverVehicleMarkerColorToken}
+          shapeKey={driverMarkerShapeKey}
         />
       ) : null}
 
@@ -2924,6 +2942,7 @@ function PrototypeMapLayer({
                 <VehicleMarkerContent
                   source={item.source}
                   colorToken={item.colorToken}
+                  shapeKey={driverMarkerShapeKey}
                   screenHeading={resolveScreenRelativeVehicleHeading(item.heading, normalizedMapCameraHeading)}
                 />
               </View>
@@ -2979,6 +2998,7 @@ function PrototypeMapLayer({
             heading={displayedDriverScreenHeading}
             source={driverVehicleMarkerImageSource}
             colorToken={driverVehicleMarkerColorToken}
+            shapeKey={driverMarkerShapeKey}
           />
         ) : (
           <FloatingUserOverlay

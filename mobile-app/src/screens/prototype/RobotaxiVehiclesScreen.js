@@ -23,6 +23,7 @@ import {
 } from '../../components/prototype/PrototypeMenuSurface';
 import { LeafButton, LeafEmptyState, LeafPill, leafRideColors } from '../../components/prototype/LeafRideUI';
 import { usePrototypeMapOcclusion } from './prototypeMapOcclusion';
+import { usePrototypeRideRuntime } from './prototypeRideRuntime';
 import MobileVehicleService from '../../services/MobileVehicleService';
 
 const SURFACE_TOP_PADDING = 20;
@@ -38,6 +39,7 @@ function formatVehicleStatus(status) {
 }
 
 export default function RobotaxiVehiclesScreen({ navigation, route }) {
+  const { refreshDriverActivationRemote } = usePrototypeRideRuntime();
   const insets = useSafeAreaInsets();
   const { height: windowHeight } = useWindowDimensions();
   const [panelHeight, setPanelHeight] = useState(windowHeight);
@@ -128,6 +130,7 @@ export default function RobotaxiVehiclesScreen({ navigation, route }) {
     try {
       setBusy(true);
       await MobileVehicleService.updateVehicle(editingVehicleId, draft);
+      await Promise.resolve(refreshDriverActivationRemote?.()).catch(() => null);
       setDraft({ plate: '', brand: '', model: '', color: '', year: '' });
       setEditingVehicleId('');
       setMode('list');
@@ -138,7 +141,7 @@ export default function RobotaxiVehiclesScreen({ navigation, route }) {
     } finally {
       setBusy(false);
     }
-  }, [draft, editingVehicleId, loadVehicles, showMutationError]);
+  }, [draft, editingVehicleId, loadVehicles, showMutationError, refreshDriverActivationRemote]);
 
   const cancelForm = useCallback(() => {
     setDraft({ plate: '', brand: '', model: '', color: '', year: '' });
@@ -150,6 +153,7 @@ export default function RobotaxiVehiclesScreen({ navigation, route }) {
     try {
       setBusy(true);
       await MobileVehicleService.selectVehicle(vehicleId);
+      await Promise.resolve(refreshDriverActivationRemote?.()).catch(() => null);
       setVehicles(previous => previous.map(vehicle => ({ ...vehicle, isActive: vehicle.id === vehicleId })));
       setExpandedId('');
     } catch (mutationError) {
@@ -157,7 +161,7 @@ export default function RobotaxiVehiclesScreen({ navigation, route }) {
     } finally {
       setBusy(false);
     }
-  }, [showMutationError]);
+  }, [showMutationError, refreshDriverActivationRemote]);
 
   const handleRemoveVehicle = useCallback((vehicle) => {
     Alert.alert('Remover veículo', `Remover ${vehicle.model || 'este veículo'} do seu perfil?`, [

@@ -6,6 +6,7 @@ import { Ionicons } from '@expo/vector-icons';
 import PrototypeScreenTransition from '../../components/prototype/PrototypeScreenTransition';
 import PrototypeDismissibleSheet from '../../components/prototype/PrototypeDismissibleSheet';
 import PrototypeMapLayer from '../../components/prototype/PrototypeMapLayer';
+import { resolveRegisteredVehicleColor } from '../../components/prototype/vehicleMarkerIdentity';
 import PrototypeConnectionStatusPill from '../../components/prototype/PrototypeConnectionStatusPill';
 import WooviPaymentModal from '../../components/payment/WooviPaymentModal';
 import SecurePaymentBadge from '../../components/payment/SecurePaymentBadge';
@@ -839,26 +840,9 @@ export default function RobotaxiTripScreen({ navigation, route }) {
     driverInfo?.driver?.vehicle?.plate,
     fallbackVehiclePlate,
   );
-  const vehicleColorLabel = resolveVehicleColorLabel(
-    route?.params?.vehicleColor,
-    route?.params?.carColor,
-    route?.params?.color,
-    driverInfo?.color,
-    driverInfo?.vehicleColor,
-    driverInfo?.carColor,
-    driverInfo?.vehicle?.color,
-    driverInfo?.driver?.vehicle?.color,
-    activeBooking?.vehicleColor,
-    activeBooking?.carColor,
-    activeBooking?.color,
-    activeBooking?.vehicle?.color,
-    activeBooking?.driver?.vehicle?.color,
-    driverActiveRide?.vehicleColor,
-    driverActiveRide?.carColor,
-    driverActiveRide?.color,
-    driverActiveRide?.vehicle?.color,
-    driverActiveRide?.driver?.vehicle?.color,
-  );
+  const vehicleColorLabel = resolveVehicleColorLabel(resolveRegisteredVehicleColor({
+    operationalDriverInfo, driverInfo, activeBooking, driverActiveRide, routeParams: route?.params,
+  }));
   const vehicleMarkerCampaignAsset = useCampaignAssetOverride({
     surface: 'ride_map',
     placement: 'vehicle_marker',
@@ -2258,6 +2242,7 @@ export default function RobotaxiTripScreen({ navigation, route }) {
           driverMarkerMode="car"
           driverVehicleColor={vehicleColorLabel}
           driverMarkerAssetUrl={vehicleMarkerCampaignAsset.imageUrl}
+          driverMarkerShapeKey={vehicleMarkerCampaignAsset.shapeKey}
           driverMarkerLetter={getFirstName(driverName, 'M')}
           destinationMarkerMode="place"
         />

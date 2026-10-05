@@ -19,6 +19,7 @@ import { joinDriverWaitlist, loadDriverWaitlistStatus } from '../src/services/ru
 
 const mockListVehicles = jest.fn();
 const mockUpdateVehicle = jest.fn();
+const mockSelectVehicle = jest.fn();
 
 jest.mock('../src/services/MobileVehicleService', () => ({
   __esModule: true,
@@ -26,7 +27,7 @@ jest.mock('../src/services/MobileVehicleService', () => ({
     listVehicles: (...args) => mockListVehicles(...args),
     addVehicle: jest.fn(),
     updateVehicle: (...args) => mockUpdateVehicle(...args),
-    selectVehicle: jest.fn(),
+    selectVehicle: (...args) => mockSelectVehicle(...args),
     removeVehicle: jest.fn(),
   },
 }));
@@ -921,6 +922,22 @@ describe('prototype new surfaces', () => {
       expect(vehicles.getAllByText('Nissan Leaf').length).toBeGreaterThan(0);
       expect(vehicles.getAllByText(/LEF-2042/).length).toBeGreaterThan(0);
       expect(vehicles.getByText('Adicionar veículo')).toBeTruthy();
+    });
+  });
+
+  it('refreshes the canonical vehicle identity after selecting a registered car', async () => {
+    const refreshDriverActivationRemote = jest.fn().mockResolvedValue(undefined);
+    usePrototypeRideRuntime.mockReturnValue(buildRuntime({ refreshDriverActivationRemote }));
+    mockListVehicles.mockResolvedValue([{ id: 'vehicle_silver', model: 'Honda City', color: 'Prata', approved: true, isActive: false }]);
+    mockSelectVehicle.mockResolvedValue('vehicle_silver');
+    const screen = render(<RobotaxiVehiclesScreen navigation={buildNavigation()} route={{ key: 'vehicle-selection', params: {} }} />);
+    await waitFor(() => expect(screen.getByTestId('robotaxi-vehicle-vehicle_silver')).toBeTruthy());
+    fireEvent.press(screen.getByTestId('robotaxi-vehicle-vehicle_silver'));
+    fireEvent.press(screen.getByTestId('robotaxi-vehicle-select-button'));
+    await waitFor(() => {
+      expect(mockSelectVehicle).toHaveBeenCalledWith('vehicle_silver');
+      expect(refreshDriverActivationRemote).toHaveBeenCalledTimes(1);
+      expect(screen.getByText('Selecionado')).toBeTruthy();
     });
   });
 

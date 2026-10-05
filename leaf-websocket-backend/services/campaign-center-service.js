@@ -222,6 +222,10 @@ const CAMPAIGN_SLOT_DEFINITIONS = Object.freeze({
     placement: 'vehicle_marker',
     role: 'all',
     template: 'map_vehicle_marker',
+    markerShapes: [
+      { assetKey: 'leaf_vehicle', label: 'Carro · cor do veículo cadastrado' },
+      { assetKey: 'halloween_pumpkin', label: 'Halloween · abóbora' }
+    ],
     maxItems: 1,
     autoRotateSeconds: 0,
     dimensions: {
@@ -416,6 +420,8 @@ function buildClientCampaign(campaign, context = {}) {
     surface,
     placement,
     priority: campaign.priority,
+    startAt: campaign.startAt || null,
+    endAt: campaign.endAt || null,
     content: campaign.content,
     rules: {
       autoRotateSeconds: Number(campaign.rules?.autoRotateSeconds || 6),

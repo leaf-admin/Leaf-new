@@ -1,5 +1,7 @@
 # Marcador vetorial do veículo — 05/10/2026
 
+Atualização posterior: [cor cadastrada e formatos de campanha](CAMPAIGNS.md), incluindo a abóbora de Halloween, painel e validação do bloco atual. As seções abaixo conservam as evidências das revisões V1/V2.
+
 ## Revisão 2 — proporções e detalhe
 
 O usuário rejeitou o primeiro desenho por excesso de informação e aparência distorcida. A versão vigente refaz a carroceria em vista superior simétrica, com 42 unidades de comprimento e 24 de largura no `viewBox` de 64. Elimina o `skewX`, os deslocamentos laterais variáveis, os quatro pneus aparentes, as lanternas vermelhas, as linhas do capô e os múltiplos reflexos. Restam vidro frontal/traseiro, cabine, retrovisores discretos, pintura de baixo contraste e uma sombra única. A iluminação acompanha a orientação; os caminhos e proporções são idênticos em todos os ângulos.

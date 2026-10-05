@@ -1,5 +1,5 @@
 import React from 'react';
-import { act, render } from '@testing-library/react-native';
+import { act, fireEvent, render } from '@testing-library/react-native';
 
 const mockAnimateToRegion = jest.fn();
 const mockFitToCoordinates = jest.fn();
@@ -112,6 +112,30 @@ describe('PrototypeMapLayer route viewport fitting', () => {
       Platform.OS = originalPlatform;
     }
   });
+
+  it('updates the registered paint, replaces the shape and recovers from a failed custom image', () => {
+    const { Platform } = require('react-native');
+    const originalPlatform = Platform.OS;
+    Platform.OS = 'ios';
+    try {
+      const props = { region: baseRegion, driverCoordinate: routeCoordinates[0], driverHeading: 90 };
+      const screen = render(<PrototypeMapLayer {...props} driverVehicleColor="Branco" />);
+      expect(screen.getByTestId('leaf-vehicle-vector').props.xml).toContain('#F0F0F1');
+      screen.rerender(<PrototypeMapLayer {...props} driverVehicleColor="Marrom" />);
+      expect(screen.getByTestId('leaf-vehicle-vector').props.xml).toContain('#896955');
+      screen.rerender(<PrototypeMapLayer {...props} driverVehicleColor="Marrom" driverMarkerShapeKey="halloween_pumpkin" />);
+      expect(screen.getByTestId('leaf-vehicle-vector').props.xml).toContain('#E7933E');
+      screen.rerender(<PrototypeMapLayer {...props} driverVehicleColor="Prata" driverMarkerAssetUrl="https://cdn.leaf.test/custom.webp" />);
+      fireEvent(screen.getByTestId('leaf-vehicle-campaign-image'), 'error', {});
+      expect(screen.getByTestId('leaf-vehicle-vector').props.xml).toContain('#B6B8BC');
+      screen.unmount();
+    } finally {
+      Platform.OS = originalPlatform;
+    }
+  });
+
+  it.each([['Marrom', 'brown'], ['Bege', 'beige'], ['Laranja', 'orange'], ['Roxo', 'purple'], ['Rosa', 'pink'], ['BRANCA', 'white'], ['PRETA', 'black'], ['VERMELHA', 'red'], ['AMARELA', 'yellow'], ['ROXA', 'purple']])
+    ('recognizes the registered color %s', (label, token) => expect(resolveVehicleColorToken(label)).toBe(token));
 
   it.each(['ios', 'android'])('anchors the blue location dot to the Google SDK coordinate on %s', os => {
     const { Platform } = require('react-native');

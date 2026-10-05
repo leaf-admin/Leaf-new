@@ -90,6 +90,35 @@ describe('campaign-center-service', () => {
     );
   });
 
+  it('serves built-in map shapes with their validity window and preserves existing audience/status rules', async () => {
+    const startAt = new Date(Date.now() - 60000).toISOString();
+    const endAt = new Date(Date.now() + 60000).toISOString();
+    const slot = campaignCenterService.getSlotDefinitions().find(item => item.id === 'ride_map_vehicle_marker');
+    expect(slot.markerShapes.map(shape => shape.assetKey)).toEqual(['leaf_vehicle', 'halloween_pumpkin']);
+    await campaignCenterService.createCampaign({
+      id: 'cmp_halloween_marker', name: 'Halloween marker', status: 'active', priority: 100,
+      template: 'map_vehicle_marker', surfaces: ['ride_map'], placements: ['vehicle_marker'],
+      audience: { roles: ['driver'] }, startAt, endAt,
+      content: { assetKey: 'halloween_pumpkin' },
+      rules: { maxImpressionsPerUser: 0, maxImpressionsPerDay: 0 },
+    });
+    const context = { userId: 'driver-one', role: 'driver', surface: 'ride_map', placement: 'vehicle_marker', limit: 1 };
+    const result = await campaignCenterService.resolveEligibleCampaigns(context);
+    expect(result.campaigns).toHaveLength(1);
+    expect(result.campaigns[0]).toEqual(expect.objectContaining({
+      startAt, endAt, content: expect.objectContaining({ assetKey: 'halloween_pumpkin', imageUrl: '' }),
+    }));
+    expect((await campaignCenterService.resolveEligibleCampaigns({ ...context, role: 'customer' })).campaigns).toHaveLength(0);
+    await campaignCenterService.updateCampaign('cmp_halloween_marker', { content: { assetKey: 'leaf_vehicle' } });
+    expect((await campaignCenterService.resolveEligibleCampaigns(context)).campaigns[0].content.assetKey).toBe('leaf_vehicle');
+    await campaignCenterService.updateCampaign('cmp_halloween_marker', { endAt: new Date(Date.now() - 1000).toISOString() });
+    expect((await campaignCenterService.resolveEligibleCampaigns(context)).campaigns).toHaveLength(0);
+    await campaignCenterService.updateCampaign('cmp_halloween_marker', { startAt: new Date(Date.now() + 5000).toISOString(), endAt });
+    expect((await campaignCenterService.resolveEligibleCampaigns(context)).campaigns).toHaveLength(0);
+    await campaignCenterService.updateCampaign('cmp_halloween_marker', { startAt, status: 'paused' });
+    expect((await campaignCenterService.resolveEligibleCampaigns(context)).campaigns).toHaveLength(0);
+  });
+
   it('returns only active campaigns that match surface, placement and role', async () => {
     await campaignCenterService.createCampaign({
       id: 'cmp_passenger_home',

@@ -10,6 +10,7 @@ import polyline from '@mapbox/polyline';
 import robotaxiPrototypeTokens from '../../components/design-system/robotaxiPrototypeTokens';
 import PrototypeScreenTransition from '../../components/prototype/PrototypeScreenTransition';
 import PrototypeMapLayer from '../../components/prototype/PrototypeMapLayer';
+import { resolveRegisteredVehicleColor } from '../../components/prototype/vehicleMarkerIdentity';
 import { useMobilePreferences } from '../../components/MobilePreferencesProvider';
 import useLeafVoiceGuidance from '../../hooks/useLeafVoiceGuidance';
 import LeafLocationMarker, { LEAF_LOCATION_MARKER_SIZE } from '../../components/prototype/LeafLocationMarker';
@@ -4812,39 +4813,10 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
         driverInfo?.bearing ??
         null
       : null;
-  const presentedDriverVehicleColor = useMemo(() => {
-    const candidates = [
-      driverInfo?.color,
-      driverInfo?.vehicleColor,
-      driverInfo?.vehicle?.color,
-      activeBooking?.vehicleColor,
-      activeBooking?.vehicle?.color,
-      driverActiveRide?.vehicleColor,
-      driverActiveRide?.vehicle?.color,
-      profile?.vehicleColor,
-      profile?.vehicle?.color,
-      profile?.carColor,
-      profile?.car?.color,
-    ];
-
-    return (
-      candidates
-        .map((candidate) => String(candidate || '').trim())
-        .find(Boolean) || ''
-    );
-  }, [
-    activeBooking?.vehicle?.color,
-    activeBooking?.vehicleColor,
-    driverActiveRide?.vehicle?.color,
-    driverActiveRide?.vehicleColor,
-    driverInfo?.color,
-    driverInfo?.vehicle?.color,
-    driverInfo?.vehicleColor,
-    profile?.car?.color,
-    profile?.carColor,
-    profile?.vehicle?.color,
-    profile?.vehicleColor,
-  ]);
+  const presentedDriverVehicleColor = useMemo(() => resolveRegisteredVehicleColor({
+    role: isDriverRole ? 'driver' : 'customer', driverInfo, activeBooking,
+    driverActiveRide, driverTripMeta, driverActivationRemote, profile,
+  }), [isDriverRole, driverInfo, activeBooking, driverActiveRide, driverTripMeta, driverActivationRemote, profile]);
   const driverMarkerMode = 'car';
   const driverMarkerLetter = useMemo(() => {
     if (isDriverRole) {
@@ -9236,6 +9208,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
           driverMarkerOccludedBottom={isDriverRole ? baselineOccludedBottom : 0}
           driverVehicleColor={presentedDriverVehicleColor}
           driverMarkerAssetUrl={vehicleMarkerCampaignAsset.imageUrl}
+          driverMarkerShapeKey={vehicleMarkerCampaignAsset.shapeKey}
           driverMarkerLetter={driverMarkerLetter}
           destinationMarkerMode={destinationMarkerMode}
           destinationMarkerLetter={passengerMarkerLetter}

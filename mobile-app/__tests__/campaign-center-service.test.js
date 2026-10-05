@@ -60,6 +60,13 @@ describe("campaignCenterService", () => {
     delete global.__LEAF_CAMPAIGN_FIXTURES__;
   });
 
+  it("preserves the server validity window and bundled map shape in normalized cache data", () => {
+    const startAt = '2026-10-30T03:00:00.000Z';
+    const endAt = '2026-11-02T03:00:00.000Z';
+    expect(normalizeCampaign({ id: 'halloween', startAt, endAt, content: { assetKey: 'halloween_pumpkin' } }))
+      .toEqual(expect.objectContaining({ startAt, endAt, content: expect.objectContaining({ assetKey: 'halloween_pumpkin' }) }));
+  });
+
   it("returns eligible campaigns from the test-safe runtime bridge", async () => {
     const result = await refreshEligibleCampaigns({
       userId: "user_1",
