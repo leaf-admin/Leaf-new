@@ -1,0 +1,17 @@
+{
+  "timestamp": "2026-10-05T03:32:50.069404+00:00",
+  "objective": "Deploy saved places API and accept the frozen mobile candidates on physical devices",
+  "pr": "https://github.com/leaf-admin/Leaf-new/pull/222",
+  "prState": "MERGED",
+  "prHead": "f87ee33504091a90bbc5fdc96dd7f51ab61115ad",
+  "mergeCommit": "db94e58bdec60871a92d2b20d8ea77d866899d3c",
+  "prCiGates": "six_passed_manual_EAS_skipped",
+  "sourceFilesInPr": 4,
+  "targetedBackendTests": 67,
+  "vpsAuthenticated": false,
+  "vpsDeployed": false,
+  "accountOrRideMutationsThisRun": false,
+  "deviceInstallExecutedThisRun": false,
+  "storeSubmittedThisRun": false,
+  "primaryStagedDiffUnchanged": true
+}

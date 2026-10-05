@@ -1,0 +1,33 @@
+{
+  "artifacts": [
+    {
+      "artifact": "ios",
+      "path": "/Users/izaakdias/Documents/Leaf-release-candidates/1.0.6/Leaf-1.0.6-38-candidate.ipa",
+      "bytes": 79572112,
+      "sha256": "4a9e5ccf1e4cd9b258891ed2f0e01021efde6667ff2fa0dbe2734e82d21ccd01",
+      "matches": true
+    },
+    {
+      "artifact": "iosDevelopment",
+      "path": "/Users/izaakdias/Documents/Leaf-release-candidates/1.0.6/Leaf-1.0.6-38-device.ipa",
+      "bytes": 49503092,
+      "sha256": "aa651c22e3f21c2fb4bb679569c0576ac772490790fc6ed21edf7580168a5036",
+      "matches": true
+    },
+    {
+      "artifact": "android",
+      "path": "/Users/izaakdias/Documents/Leaf-release-candidates/1.0.6/Leaf-1.0.6-132-candidate.aab",
+      "bytes": 154694568,
+      "sha256": "e6035abbe9eb872a76fdf3684d1796d886feb3277640848c21883164ffe71c5e",
+      "matches": true
+    },
+    {
+      "artifact": "androidDevice",
+      "path": "/Users/izaakdias/Documents/Leaf-release-candidates/1.0.6/Leaf-1.0.6-132-device.apk",
+      "bytes": 235619707,
+      "sha256": "ce9775b47ade85afbf3a26abd419a4f83944ac2758c4f4b4f6ac834ef188cce1",
+      "matches": true
+    }
+  ],
+  "allMatch": true
+}

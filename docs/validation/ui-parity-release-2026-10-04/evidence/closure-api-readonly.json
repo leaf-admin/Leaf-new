@@ -1,0 +1,122 @@
+{
+  "timestamp": "2026-10-05T03:14:36.495Z",
+  "scope": "Read-only real Leaf API; existing passenger and driver QA users; no account, ride or payment mutations",
+  "records": [
+    {
+      "role": "passenger",
+      "path": "/api/account/preferences",
+      "status": 200,
+      "success": true,
+      "preferences": {
+        "notificationsEnabled": true,
+        "trafficLayerEnabled": true,
+        "voiceGuidanceEnabled": false,
+        "schemaVersion": 1,
+        "updatedAt": "2026-10-04T15:13:46.092Z"
+      }
+    },
+    {
+      "role": "passenger",
+      "path": "/api/account/places",
+      "status": 404,
+      "success": false
+    },
+    {
+      "role": "passenger",
+      "path": "/api/app/runtime-config",
+      "status": 200,
+      "profile": {
+        "profileId": "qa-test-users-sandbox-durable",
+        "scope": "users",
+        "environment": "sandbox",
+        "contextMatched": true,
+        "expiresAtIso": null
+      }
+    },
+    {
+      "role": "driver",
+      "path": "/api/account/preferences",
+      "status": 200,
+      "success": true,
+      "preferences": {
+        "notificationsEnabled": true,
+        "trafficLayerEnabled": true,
+        "voiceGuidanceEnabled": false,
+        "schemaVersion": 1,
+        "updatedAt": null
+      }
+    },
+    {
+      "role": "driver",
+      "path": "/api/account/places",
+      "status": 404,
+      "success": false
+    },
+    {
+      "role": "driver",
+      "path": "/api/app/runtime-config",
+      "status": 200,
+      "profile": {
+        "profileId": "qa-test-users-sandbox-durable",
+        "scope": "users",
+        "environment": "sandbox",
+        "contextMatched": true,
+        "expiresAtIso": null
+      }
+    }
+  ],
+  "publicHealth": [
+    {
+      "origin": "https://api.leaf.app.br",
+      "path": "/health/liveness",
+      "status": 200,
+      "responseStatus": "alive"
+    },
+    {
+      "origin": "https://api.leaf.app.br",
+      "path": "/health/quick",
+      "status": 200,
+      "responseStatus": "healthy",
+      "checks": {
+        "redis": {
+          "status": "healthy"
+        },
+        "firebase": {
+          "status": "healthy"
+        },
+        "socketRedisAdapter": {
+          "state": "ready",
+          "status": "healthy",
+          "enabled": true,
+          "required": true
+        }
+      }
+    },
+    {
+      "origin": "https://socket.leaf.app.br",
+      "path": "/health/liveness",
+      "status": 200,
+      "responseStatus": "alive"
+    },
+    {
+      "origin": "https://socket.leaf.app.br",
+      "path": "/health/quick",
+      "status": 200,
+      "responseStatus": "healthy",
+      "checks": {
+        "redis": {
+          "status": "healthy"
+        },
+        "firebase": {
+          "status": "healthy"
+        },
+        "socketRedisAdapter": {
+          "state": "ready",
+          "status": "healthy",
+          "enabled": true,
+          "required": true
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,168 @@
+
+> leaf-websocket-backend@1.0.0 test:unit
+> node ../scripts/tests/run-with-profile.cjs backend-unit "npx jest --config config/jest.unit.config.js" --runInBand --runTestsByPath tests/unit/routes/account-routes.unit.test.js tests/unit/services/account-saved-places.unit.test.js --coverage=false
+
+========================================================================================
+TEST EXECUTION PROFILE :: backend-unit
+========================================================================================
+repo: /Users/izaakdias/.codex/worktrees/saved-places-pilot/Leaf-new
+timestamp: 2026-10-05T03:19:34.475Z
+git: codex/saved-places-pilot-rc106 @ 3ddaefc7d (dirty)
+node: v20.20.2
+mode: remote-shared (contabo)
+WS_URL: https://socket.leaf.app.br
+API_BASE_URL: https://api.leaf.app.br
+E2E_REMOTE_SSH_HOST: (set E2E_REMOTE_SSH_HOST)
+E2E_REMOTE_SSH_USER: root
+E2E_REMOTE_SSH_KEY_PATH(resolved): /Users/izaakdias/.ssh/leaf_contabo_20260412_ed25519
+E2E_REMOTE_REDIS_PASSWORD: (unset)
+E2E_RUN_ID: (auto: Date.now())
+E2E_DRIVER_SIM_MODE: (auto)
+E2E_GENERATE_FIREBASE_TOKEN: true
+FIREBASE_TEST_CREDENTIAL: unset
+E2E_MOCK_PAYMENT: true
+APP_REVIEW: false
+========================================================================================
+CANONICAL DOC: /Users/izaakdias/.codex/worktrees/saved-places-pilot/Leaf-new/docs/TEST_EXECUTION_CANONICAL_PROFILE.md
+========================================================================================
+# Perfil Canônico de Execução de Testes (LEAF)
+
+Este documento define o baseline oficial para reduzir flakiness e evitar falso-positivo/falso-negativo entre execuções em dias diferentes.
+
+## 1) Comandos oficiais
+
+Sempre rode testes pelos scripts npm (não use `npx jest` direto):
+
+1. Backend completo: `cd leaf-websocket-backend && npm run test:all`
+2. Backend unit+integration: `cd leaf-websocket-backend && npm test`
+3. Backend E2E: `cd leaf-websocket-backend && npm run test:e2e`
+4. Mobile unit: `cd mobile-app && npm run test:unit`
+
+Todos esses comandos exibem automaticamente este perfil antes da execução.
+
+## 2) Ambiente alvo (hoje)
+
+1. Infra remota principal de E2E/carga: Contabo (shared runtime)
+2. Endpoint socket padrão: `https://socket.leaf.app.br`
+3. Endpoint API padrão: `https://api.leaf.app.br`
+4. Backend local é opcional para unit/integration; E2E padrão usa ambiente remoto compartilhado
+
+## 3) Variáveis críticas
+
+1. `APP_REVIEW=false` para teste funcional normal (evita bypass mascarar erro real)
+2. `E2E_RUN_ID` opcional (se ausente, testes geram tag única via `Date.now()`)
+3. `E2E_REMOTE_SSH_HOST` apontando para o host Contabo atual, vindo de env/segredo operacional
+4. `E2E_REMOTE_SSH_USER=root`
+5. `E2E_REMOTE_SSH_KEY_PATH` apontando para chave válida da Contabo
+6. `E2E_REMOTE_REDIS_PASSWORD` definido explicitamente no shell/CI
+7. `E2E_GENERATE_FIREBASE_TOKEN=true` (padrão recomendado)
+8. `E2E_MOCK_PAYMENT=true` somente para cenários de teste que exigem mock controlado
+
+## 4) Por que passa hoje e falha em 1-2 dias?
+
+As causas mais comuns no projeto atual são:
+
+1. Ambiente E2E é remoto e compartilhado: estado concorrente muda entre execuções.
+2. Redis remoto pode variar (locks, filas, TTL, limpeza parcial), mudando timing de eventos.
+3. Mudança de credencial/chave SSH/segredo Redis gera falhas como `NOAUTH`.
+4. `APP_REVIEW`/flags de bypass alteram comportamento de auth e pagamento.
+5. Deploy/config no backend remoto muda entre uma rodada e outra sem fixar snapshot.
+6. Testes com janelas de tempo curtas sofrem com variação de latência no ambiente remoto.
+
+## 5) Regras de estabilidade
+
+1. Sempre rodar pelos scripts npm com preflight.
+2. Não alternar `APP_REVIEW` no meio da bateria.
+3. Não misturar execução local e remota no mesmo relatório sem separar contexto.
+4. Registrar commit SHA e branch no relatório da rodada.
+5. Em falha, repetir com mesmo perfil e `E2E_RUN_ID` novo para evitar colisão de estado.
+6. Antes de classificar regressão de código, validar preflight (env + credenciais + endpoints).
+
+## 6) Checklist rápido antes de executar
+
+1. Estou no branch/commit certo?
+2. `APP_REVIEW` está `false`?
+3. Endpoints apontam para Contabo?
+4. Chave SSH e senha Redis remota estão válidas?
+5. Vou rodar via `npm run ...` (com preflight) e não via comando avulso?
+
+========================================================================================
+PASS tests/unit/routes/account-routes.unit.test.js
+  account deletion route
+    ✓ rejects non-admin access to /api/admin/account-deletions/old/retry (2 ms)
+    ✓ rejects non-admin access to /api/admin/cpf-reviews/decision (1 ms)
+    ✓ requires an active authoritative super-admin: null (1 ms)
+    ✓ requires an active authoritative super-admin: {"active":false,"role":"super-admin"} (2 ms)
+    ✓ requires an active authoritative super-admin: {"active":true,"role":"support"} (2 ms)
+    ✓ fails closed if authoritative admin lookup is unavailable (1 ms)
+    ✓ requires an existing deletion job for administrative recovery (2 ms)
+    ✓ recovers a pending deletion using admin identity, without target-user authentication (1 ms)
+    ✓ rejects client profile updates that try to write derived driver approval, document, KYC or vehicle fields (2 ms)
+    ✓ allows normal account profile updates without derived driver lifecycle fields (2 ms)
+    ✓ rejects role, phone and onboarding identity changes after profile creation (2 ms)
+    ✓ allows idempotent retries that repeat the completed role, phone and onboarding values (2 ms)
+    ✓ derives phone verification and onboarding completion on first profile creation (2 ms)
+    ✓ requires a CPF when a new driver profile is completed (2 ms)
+    ✓ rejects a CPF already claimed by another profile (2 ms)
+    ✓ rejects an invalid CPF before writing the profile (1 ms)
+    ✓ projects the immutable canonical role into the RTDB user node (2 ms)
+    ✓ blocks first profile completion without required terms consent (2 ms)
+    ✓ blocks first profile completion without required privacy consent (1 ms)
+    ✓ blocks first profile completion without required background check for drivers consent (2 ms)
+    ✓ requires an explicit valid role on first profile completion (1 ms)
+    ✓ completes an OTP RTDB bootstrap once and resets customer approval when selecting driver (2 ms)
+    ✓ persists only supported app preferences behind the authenticated account API (1 ms)
+    ✓ blocks vehicle mutations while the authenticated driver is online (2 ms)
+    ✓ links a shared catalog vehicle to the profile without claiming global exclusivity (2 ms)
+    ✓ edits only the authenticated profile link and resets vehicle approval (2 ms)
+    ✓ does not attach an edited plate to an unverified global catalog record (1 ms)
+    ✓ lists a pending profile submission even before CRLV creates its canonical catalog record (1 ms)
+    ✓ blocks selecting a vehicle until the administrative approval is complete (2 ms)
+    ✓ blocks selecting an approved link without a canonical CRLV vehicle identity (1 ms)
+    ✓ requires driver role for get /api/account/vehicles (1 ms)
+    ✓ requires driver role for post /api/account/vehicles (2 ms)
+    ✓ requires driver role for patch /api/account/vehicles/vehicle_1 (1 ms)
+    ✓ requires driver role for patch /api/account/vehicles/vehicle_1/active (1 ms)
+    ✓ requires driver role for delete /api/account/vehicles/vehicle_1 (1 ms)
+    ✓ deletes an authenticated account even when no Firestore profile exists (2 ms)
+    ✓ purges both CPF representations when deleting an authenticated profile (1 ms)
+    ✓ releases the owned index after removing the legacy profile and Auth user (1 ms)
+    ✓ does not release CPF or report success when RTDB cleanup fails (2 ms)
+    ✓ retries index cleanup after a partial purge, even without CPF or an Auth user (2 ms)
+    ✓ does not report completion when the index lookup fails (2 ms)
+    ✓ migrates and removes the legacy Realtime DB profile during deletion (2 ms)
+    ✓ returns success without reprocessing a completed deletion job (1 ms)
+    saved places owned by the authenticated account
+      ✓ requires authentication for get (22 ms)
+      ✓ requires authentication for post (3 ms)
+      ✓ requires authentication for patch (2 ms)
+      ✓ requires authentication for delete (2 ms)
+      ✓ returns only the token owner data and ignores a body uid (3 ms)
+      ✓ reads and edits the existing saved-place list without overwriting other profile fields (4 ms)
+      ✓ rejects missing edits, invalid coordinates and invalid payloads before writing (6 ms)
+      ✓ deletes idempotently and blocks account tombstones (3 ms)
+      ✓ fails without exposing provider internals when storage is unavailable (2 ms)
+
+PASS tests/unit/services/account-saved-places.unit.test.js
+  saved place validation and mutation
+    ✓ whitelists persisted fields and derives an id
+    ✓ rejects invalid input null (2 ms)
+    ✓ rejects invalid input []
+    ✓ rejects invalid input {"name":" ","address":"Rua A, 10","coordinate":{"latitude":-22,"longitude":-43}} (1 ms)
+    ✓ rejects invalid input {"name":"Casa","address":"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx","coordinate":{"latitude":-22,"longitude":-43}}
+    ✓ rejects invalid input {"name":"Casa","address":"Rua A, 10","coordinate":{"latitude":"22","longitude":43}}
+    ✓ rejects invalid input {"name":"Casa","address":"Rua A, 10","coordinate":{"latitude":91,"longitude":0}} (1 ms)
+    ✓ rejects invalid input {"name":"Casa","address":"Rua A, 10","coordinate":{"latitude":0,"longitude":null}}
+    ✓ rejects invalid ids ../../u2
+    ✓ rejects invalid ids  (1 ms)
+    ✓ rejects invalid ids a/b
+    ✓ rejects invalid ids xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+    ✓ upserts duplicates and preserves the id on relocation
+    ✓ does not create a missing entry when editing, and deletion is idempotent (1 ms)
+    ✓ limits thirty places while allowing update or deletion at capacity
+
+Test Suites: 2 passed, 2 total
+Tests:       67 passed, 67 total
+Snapshots:   0 total
+Time:        0.447 s
+Ran all test suites within paths "tests/unit/routes/account-routes.unit.test.js", "tests/unit/services/account-saved-places.unit.test.js".

@@ -2,6 +2,8 @@
 
 Data: 04/10/2026. Estado: **aceitação de release pendente**.
 
+Atualização de 05/10/2026: a API de endereços salvos foi integrada em `main` pela [PR #222](https://github.com/leaf-admin/Leaf-new/pull/222), com 67 testes focados e os seis gates da CI passando. O endpoint remoto ainda respondeu 404; implantação e validação física seguem pendentes de confirmação da identidade SSH e disponibilidade dos aparelhos. Ver [registro desta rodada](CLOSURE-RUN-2026-10-05.md).
+
 ## Objetivo
 
 Concluir as lacunas funcionais da nova superfície React Native, preservar a interface aprovada e preparar um candidato verificável para iOS e Android. A conclusão dos testes locais não autoriza declarar a versão validada integralmente em produção ou publicada nas lojas.

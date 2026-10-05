@@ -1,0 +1,5 @@
+
+> leaf-websocket-backend@1.0.0 test:route-guards
+> node scripts/tests/assert-sensitive-route-guards.cjs
+
+Sensitive route guard assertion passed.

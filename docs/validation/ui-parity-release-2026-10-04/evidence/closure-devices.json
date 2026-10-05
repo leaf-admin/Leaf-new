@@ -1,0 +1,20 @@
+{
+  "timestamp": "2026-10-05T03:26:58.522084+00:00",
+  "ios": [
+    {
+      "model": "iPad Air (5th generation)",
+      "connectionState": "unavailable",
+      "pairingState": "paired"
+    },
+    {
+      "model": "iPhone 15 Pro Max",
+      "connectionState": "unavailable",
+      "pairingState": "paired"
+    }
+  ],
+  "iosAvailable": false,
+  "androidAdbDeviceCount": 0,
+  "usbPhonesObservedEarlierThisRun": 0,
+  "physicalAcceptance": "not_executed_no_available_devices",
+  "candidateInstalledThisRun": false
+}

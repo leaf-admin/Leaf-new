@@ -69,5 +69,16 @@
     "launchProfile": "pilot_controlled",
     "pilotControlled": true,
     "installationStatus": "not_installed_android_absent_from_adb"
+  },
+  "closureValidation20261005": {
+    "report": "CLOSURE-RUN-2026-10-05.md",
+    "savedPlacesSourcePr": "https://github.com/leaf-admin/Leaf-new/pull/222",
+    "savedPlacesSourceMerge": "db94e58bdec60871a92d2b20d8ea77d866899d3c",
+    "prCiGates": "six_passed_manual_EAS_skipped",
+    "nativeArtifactHashesMatch": true,
+    "sourceManifestFileCount": 222,
+    "physicalAcceptance": "not_executed_no_available_devices",
+    "vpsDeploy": "blocked_pending_server_identity_confirmation",
+    "savedPlacesApi": "HTTP_404_not_deployed"
   }
 }
