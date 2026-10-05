@@ -1,0 +1,270 @@
+<!doctype html><html lang="pt-BR"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Leaf · Veículo no mapa</title><style>
+*{box-sizing:border-box}body{margin:0;background:#f5f7f8;color:#243039;font:15px -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif}main{max-width:1080px;margin:auto;padding:36px 32px 24px}header{display:flex;align-items:center;justify-content:space-between;margin-bottom:24px}h1{font-size:26px;letter-spacing:-.8px;margin:6px 0}p{color:#75818a;font-size:13px;line-height:1.6;margin:4px 0}.eyebrow{font-size:10px;letter-spacing:2px;color:#76858d;font-weight:600}.layout{display:grid;grid-template-columns:384px 1fr;gap:24px}.map{height:542px;position:relative;overflow:hidden;border-radius:24px;background:#e6edf0;box-shadow:0 12px 28px #193a4812}.map img{position:absolute;inset:0;width:100%;height:100%;object-fit:fill}.route{width:100%;height:100%;position:absolute;inset:0}.car{position:absolute;width:42px;height:42px;left:0;top:0;pointer-events:none;transform-origin:center}.map-label{position:absolute;top:16px;left:16px;padding:8px 11px;background:#fffffff0;border:1px solid #e8ecee;border-radius:12px;box-shadow:0 2px 6px #193a4810;font-size:11px;color:#46545e}.panel{border:1px solid #e8ecef;background:white;border-radius:24px;padding:24px;margin-bottom:16px}.panel h2{font-size:16px;letter-spacing:-.2px;margin:0 0 14px}.enlarged{display:flex;align-items:center;gap:22px;height:180px}.large-car{height:154px;width:154px;background:#f4f6f7;border-radius:24px;display:grid;place-items:center;overflow:hidden}.large-car svg{height:150px;width:150px}.actual{display:grid;place-items:center;gap:12px}.actual svg{width:42px;height:42px}.caption{font-size:11px;color:#819099}.directions{display:grid;grid-template-columns:repeat(8,1fr);gap:4px;padding:8px 0}.direction{display:grid;justify-items:center;gap:8px}.direction .glyph{height:46px;display:grid;place-items:center;transform-origin:center}.direction svg{width:42px;height:42px}.controls{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding-top:20px;border-top:1px solid #edf0f2}button,select{font:inherit;font-size:12px;border:1px solid #dfe5e8;border-radius:12px;padding:10px 13px;background:white;color:#32434d;cursor:pointer}button.primary{background:#253740;color:white;border-color:#253740}button:focus-visible,select:focus-visible{outline:2px solid #718f80;outline-offset:3px}.status{margin-left:auto;font-variant-numeric:tabular-nums;color:#7d8a92;font-size:11px}.details{display:flex;gap:16px;flex-wrap:wrap;font-size:12px;color:#6c7d87}.details span:before{content:'·';margin-right:7px;color:#426c52}footer{font-size:11px;color:#829098;margin-top:18px}footer a{color:#5e737f} @media(max-width:760px){main{padding:24px 18px}.layout{grid-template-columns:1fr}.map{width:384px;max-width:100%;margin:auto}.panel{padding:20px}.directions{grid-template-columns:repeat(4,1fr);row-gap:14px}.status{margin-left:0}}
+.layout>div{min-width:0}@media(max-width:980px){.layout{grid-template-columns:1fr}.map{width:384px;max-width:100%;margin:auto}}@media(min-width:761px) and (max-width:980px){.directions{grid-template-columns:repeat(8,1fr)}}
+</style><main><header><div><div class="eyebrow">LEAF · MARCADOR VETORIAL</div><h1>Presença, sem pesar no mapa.</h1><p>Sombra suave, volume discreto e orientação pelo traçado.</p></div></header>
+<div class="layout"><div class="map" id="map"><img src="map-reference.jpg" alt="Mapa de Copacabana, Google Maps — referência estática já usada no protótipo">
+<svg class="route" viewBox="0 0 780 1100" preserveAspectRatio="none"><polyline id="route-rim" fill="none" stroke="white" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/><polyline id="route-line" fill="none" stroke="#344751" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/><circle cx="230" cy="950" r="9" fill="#007AFF" stroke="white" stroke-width="4"/><circle cx="361" cy="275" r="7" fill="#253740" stroke="white" stroke-width="4"/></svg>
+<div class="map-label">Estudo de movimento · rota ilustrativa</div><div id="moving-car" class="car"></div></div>
+<div><section class="panel"><h2>O mesmo SVG do React Native</h2><div class="enlarged"><div class="large-car" id="large-car"></div><div><div class="actual" id="actual-car"></div><p class="caption">42 pt · tamanho de uso</p><p class="caption">À esquerda, detalhe ampliado</p></div></div><div class="controls"><button class="primary" id="play">Pausar</button><button id="restart">Reiniciar</button><select id="paint" aria-label="Cor do veículo"><option value="black">Grafite</option><option value="silver">Prata</option><option value="white">Branco</option><option value="blue">Azul</option><option value="red">Vermelho</option></select><span class="status" id="status"></span></div></section>
+<section class="panel"><h2>Direção e perspectiva</h2><div class="directions" id="directions"></div></section><div class="details"><span>Gradientes, sem bitmap</span><span>Curvas sem atalhos</span><span>Frente e traseira distintas</span></div></div></div>
+<footer>Prévia visual com o SVG e a geometria extraídos do código. Mapa estático; posições ilustrativas. Não é evidência de uma corrida integrada nem de desempenho em aparelho.</footer></main>
+<script>// Shared vector source for the native marker and its design review. No raster,
+// filters or external images: the small map glyph stays crisp at every density.
+const PAINTS = Object.freeze({
+  black: ['#778389', '#354047', '#172126', '#0D151A'],
+  white: ['#FFFFFF', '#E8EDF0', '#AFBCC4', '#637680'],
+  silver: ['#EFF3F5', '#AAB8C0', '#657781', '#35464F'],
+  gray: ['#A5AFB5', '#65737C', '#33424C', '#1D2B34'],
+  red: ['#D99391', '#984944', '#632C2C', '#381C22'],
+  blue: ['#A2BCCD', '#557B96', '#29465C', '#1C2C3B'],
+  green: ['#A1B4A4', '#54745F', '#2B4836', '#1E3025'],
+  yellow: ['#F4DB9D', '#C8A859', '#8C713B', '#4F422A'],
+});
+
+const BODY = 'M22 15C22 10 25.5 8 32 8S42 10 42 15L44 43C44.5 51 41.5 55 32 55S19.5 51 20 43Z';
+
+function resolveVehicleArtworkPose(screenHeading = 0) {
+  const numeric = Number(screenHeading);
+  // Only the shading changes in 5° steps; the map rotates the vehicle smoothly.
+  // This avoids rebuilding the SVG on every animation frame.
+  const heading = Math.round(((Number.isFinite(numeric) ? numeric : 0) % 360 + 360) % 360 / 5) * 5;
+  const radians = heading * Math.PI / 180;
+  return {
+    heading: heading % 360,
+    side: Number((Math.cos(radians) * 1.15).toFixed(2)),
+    rise: Number((1.1 + Math.sin(radians) * 0.35).toFixed(2)),
+    skew: Number((Math.cos(radians) * 2.2).toFixed(2)),
+    lightX: Number((32 - Math.cos(radians) * 24 - Math.sin(radians) * 15).toFixed(2)),
+    lightY: Number((32 + Math.sin(radians) * 24 - Math.cos(radians) * 15).toFixed(2)),
+  };
+}
+
+function createLeafVehicleSvg({ colorToken = 'black', screenHeading = 0, idPrefix = 'leaf-vehicle' } = {}) {
+  const [highlight, paint, shade, edge] = PAINTS[colorToken] || PAINTS.black;
+  const pose = resolveVehicleArtworkPose(screenHeading);
+  const id = String(idPrefix).replace(/[^a-zA-Z0-9_-]/g, '') || 'leaf-vehicle';
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="42" height="42" viewBox="0 0 64 64">
+  <defs>
+    <linearGradient id="${id}-paint" gradientUnits="userSpaceOnUse" x1="${pose.lightX}" y1="${pose.lightY}" x2="${64 - pose.lightX}" y2="${64 - pose.lightY}">
+      <stop offset="0" stop-color="${highlight}"/><stop offset=".44" stop-color="${paint}"/><stop offset="1" stop-color="${shade}"/>
+    </linearGradient>
+    <linearGradient id="${id}-glass" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#A5BBC7"/><stop offset=".32" stop-color="#506976"/><stop offset="1" stop-color="#1A2B35"/>
+    </linearGradient>
+    <linearGradient id="${id}-roof" x1="0" y1="0" x2="1" y2=".8">
+      <stop offset="0" stop-color="${highlight}"/><stop offset=".5" stop-color="${paint}"/><stop offset="1" stop-color="${shade}"/>
+    </linearGradient>
+  </defs>
+  <g fill="#15232D">
+    <ellipse cx="33" cy="34.5" rx="17" ry="26" opacity=".035"/>
+    <ellipse cx="33" cy="34.5" rx="15" ry="24" opacity=".055"/>
+    <ellipse cx="33" cy="34.5" rx="12.8" ry="22" opacity=".10"/>
+  </g>
+  <g transform="translate(32 32) skewX(${pose.skew}) translate(-32 -32)">
+    <g fill="#162127">
+      <rect x="18" y="17" width="4" height="9" rx="1.6"/><rect x="42" y="17" width="4" height="9" rx="1.6"/>
+      <rect x="17.5" y="42" width="4" height="9" rx="1.6"/><rect x="42.5" y="42" width="4" height="9" rx="1.6"/>
+    </g>
+    <path d="${BODY}" fill="${edge}" transform="translate(${pose.side} ${pose.rise})"/>
+    <path d="${BODY}" fill="url(#${id}-paint)" stroke="${edge}" stroke-width=".55"/>
+    <path d="M22.5 17L21.8 42Q21 50 25 52" fill="none" stroke="#FFFFFF" stroke-opacity=".24" stroke-width=".65"/>
+    <path d="M41.5 17L42.2 43Q42.5 50 39 52" fill="none" stroke="${edge}" stroke-opacity=".6" stroke-width=".7"/>
+    <path d="M23.8 21Q32 19.5 40.2 21L38.5 29Q32 27.7 25.5 29Z" fill="url(#${id}-glass)" stroke="${highlight}" stroke-width=".55"/>
+    <path d="M25.8 22.2L31.5 21.7L27.9 27.5L26.4 27.7Z" fill="#FFFFFF" opacity=".26"/>
+    <path d="M22.5 27.5L24.5 31L24 41.7L21.8 44Z M41.5 27.5L39.5 31L40 41.7L42.2 44Z" fill="#253842"/>
+    <path d="M25.5 44Q32 45 38.5 44L40.4 48.6Q32 50.5 23.6 48.6Z" fill="url(#${id}-glass)" stroke="${highlight}" stroke-width=".45"/>
+    <path d="M25.5 31Q32 29.8 38.5 31L38.8 41.5Q32 43 25.2 41.5Z" fill="url(#${id}-roof)" stroke="${highlight}" stroke-opacity=".28" stroke-width=".6"/>
+    <path d="M26.5 32.2Q32 31.2 37 32" stroke="#FFFFFF" stroke-opacity=".30" stroke-width=".55" fill="none"/>
+    <path d="M25.5 12L25 18.6M38.5 12L39 18.6" stroke="${highlight}" stroke-opacity=".32" stroke-width=".55"/>
+    <path d="M24.2 10.8Q32 9 39.8 10.8" stroke="#FFFFFF" stroke-opacity=".32" stroke-width=".6" fill="none"/>
+    <path d="M23 14L26.2 13.6M37.8 13.6L41 14" stroke="#FAF7E9" stroke-width="1.4" stroke-linecap="round"/>
+    <path d="M27 11.5L37 11.5" stroke="${edge}" stroke-opacity=".65" stroke-width=".7" stroke-linecap="round"/>
+    <path d="M20.9 24L17.3 25.1L17 26.6L21 26Z M43.1 24L46.7 25.1L47 26.6L43 26Z" fill="${shade}" stroke="${highlight}" stroke-width=".4"/>
+    <path d="M22.6 50.7L26.1 51.8M37.9 51.8L41.4 50.7" stroke="#BC5654" stroke-width="1.2" stroke-linecap="round"/>
+    <path d="M27 53L37 53" stroke="${edge}" stroke-opacity=".75" stroke-width=".7" stroke-linecap="round"/>
+  </g>
+</svg>`;
+}
+
+const EARTH_RADIUS_METERS = 6371000;
+const DRIVER_MARKER_MIN_HEADING_DISTANCE_METERS = 0.85;
+function normalizeMapCoordinate(value) {
+  const latitude = Number(value?.latitude ?? value?.lat);
+  const longitude = Number(value?.longitude ?? value?.lng);
+
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+    return null;
+  }
+
+  return { latitude, longitude };
+}
+function toRadians(value) {
+  return (Number(value) * Math.PI) / 180;
+}
+function toDegrees(value) {
+  return (Number(value) * 180) / Math.PI;
+}
+function calculateCoordinateDistanceMeters(left, right) {
+  const start = normalizeMapCoordinate(left);
+  const end = normalizeMapCoordinate(right);
+
+  if (!start || !end) {
+    return Number.POSITIVE_INFINITY;
+  }
+
+  const latitudeDelta = toRadians(end.latitude - start.latitude);
+  const longitudeDelta = toRadians(end.longitude - start.longitude);
+  const startLatitude = toRadians(start.latitude);
+  const endLatitude = toRadians(end.latitude);
+  const haversine =
+    Math.sin(latitudeDelta / 2) ** 2 +
+    Math.cos(startLatitude) * Math.cos(endLatitude) * Math.sin(longitudeDelta / 2) ** 2;
+  return EARTH_RADIUS_METERS * 2 * Math.atan2(Math.sqrt(haversine), Math.sqrt(1 - haversine));
+}
+function normalizeRoutePath(path = []) {
+  return Array.isArray(path)
+    ? path.map(normalizeMapCoordinate).filter(Boolean)
+    : [];
+}
+function buildRouteMotionMetrics(path = []) {
+  const coordinates = normalizeRoutePath(path);
+
+  if (coordinates.length < 2) {
+    return null;
+  }
+
+  const segments = [];
+  let totalMeters = 0;
+
+  for (let index = 0; index < coordinates.length - 1; index += 1) {
+    const start = coordinates[index];
+    const end = coordinates[index + 1];
+    const meters = calculateCoordinateDistanceMeters(start, end);
+
+    if (!Number.isFinite(meters) || meters <= 0) {
+      continue;
+    }
+
+    segments.push({
+      start,
+      end,
+      startMeters: totalMeters,
+      endMeters: totalMeters + meters,
+      meters,
+      heading: calculateHeadingDegrees(start, end),
+    });
+    totalMeters += meters;
+  }
+
+  if (segments.length === 0 || totalMeters <= 0) {
+    return null;
+  }
+
+  return {
+    coordinates,
+    origin: coordinates[0],
+    segments,
+    totalMeters,
+  };
+}
+function resolveCoordinateAtRouteMeters(routeMetrics, routeMeters) {
+  if (!routeMetrics?.segments?.length || !Number.isFinite(routeMeters)) {
+    return null;
+  }
+
+  const safeRouteMeters = Math.max(0, Math.min(routeMetrics.totalMeters, routeMeters));
+  const segment =
+    routeMetrics.segments.find(item => (
+      safeRouteMeters >= item.startMeters && safeRouteMeters <= item.endMeters
+    )) ||
+    routeMetrics.segments[routeMetrics.segments.length - 1];
+
+  if (!segment) {
+    return null;
+  }
+
+  const ratio =
+    segment.meters > 0
+      ? (safeRouteMeters - segment.startMeters) / segment.meters
+      : 0;
+
+  return {
+    coordinate: interpolateCoordinate(segment.start, segment.end, ratio),
+    heading: segment.heading,
+    routeMeters: safeRouteMeters,
+  };
+}
+function normalizeHeadingDegrees(value) {
+  if (value === null || value === undefined || value === '') {
+    return null;
+  }
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return null;
+  }
+
+  const normalized = numeric % 360;
+  return normalized < 0 ? normalized + 360 : normalized;
+}
+function calculateHeadingDegrees(startCoordinate, endCoordinate) {
+  const start = normalizeMapCoordinate(startCoordinate);
+  const end = normalizeMapCoordinate(endCoordinate);
+
+  if (!start || !end) {
+    return null;
+  }
+
+  const distanceMeters = calculateCoordinateDistanceMeters(start, end);
+  if (!Number.isFinite(distanceMeters) || distanceMeters < DRIVER_MARKER_MIN_HEADING_DISTANCE_METERS) {
+    return null;
+  }
+
+  const startLatitude = toRadians(start.latitude);
+  const endLatitude = toRadians(end.latitude);
+  const longitudeDelta = toRadians(end.longitude - start.longitude);
+  const y = Math.sin(longitudeDelta) * Math.cos(endLatitude);
+  const x =
+    Math.cos(startLatitude) * Math.sin(endLatitude) -
+    Math.sin(startLatitude) * Math.cos(endLatitude) * Math.cos(longitudeDelta);
+
+  return normalizeHeadingDegrees(toDegrees(Math.atan2(y, x)));
+}
+function interpolateCoordinate(start, end, ratio) {
+  const safeRatio = Math.max(0, Math.min(1, Number(ratio) || 0));
+  return {
+    latitude: start.latitude + (end.latitude - start.latitude) * safeRatio,
+    longitude: start.longitude + (end.longitude - start.longitude) * safeRatio,
+  };
+}
+function resolveVehicleRouteFrame({ routeMetrics, startMeters, endMeters, progress = 0 } = {}) {
+  if (!Number.isFinite(startMeters) || !Number.isFinite(endMeters)) {
+    return null;
+  }
+  const ratio = Math.max(0, Math.min(1, Number(progress) || 0));
+  const meters = startMeters + (endMeters - startMeters) * ratio;
+  const position = resolveCoordinateAtRouteMeters(routeMetrics, meters);
+  if (!position) {
+    return null;
+  }
+  // A short tangent straddling the current point turns the nose progressively
+  // around corners, while the coordinate itself stays on the received polyline.
+  const before = resolveCoordinateAtRouteMeters(routeMetrics, meters - 3.2);
+  const after = resolveCoordinateAtRouteMeters(routeMetrics, meters + 3.2);
+  return {
+    ...position,
+    heading: calculateHeadingDegrees(before?.coordinate, after?.coordinate) ?? position.heading,
+  };
+}
+const points = [[230,950],[253,864],[279,775],[310,685],[353,619],[420,542],[498,465],[457,406],[414,349],[361,275]];
+const coords = points.map(([x,y]) => ({latitude:-y*0.00001,longitude:x*0.00001}));
+const metrics = buildRouteMotionMetrics(coords);
+const line = points.map(p=>p.join(',')).join(' ');
+document.getElementById('route-line').setAttribute('points',line);document.getElementById('route-rim').setAttribute('points',line);
+let colorToken='black',elapsed=1800,playing=!matchMedia('(prefers-reduced-motion: reduce)').matches,last=performance.now(),previousHeading=0;
+function paintCar(heading){document.getElementById('large-car').innerHTML=createLeafVehicleSvg({colorToken,screenHeading:heading,idPrefix:'large'});document.getElementById('actual-car').innerHTML=createLeafVehicleSvg({colorToken,screenHeading:heading,idPrefix:'actual'});}
+function paintDirections(){document.getElementById('directions').innerHTML=[0,45,90,135,180,225,270,315].map(h=>'<div class="direction"><div class="glyph" style="transform:rotate('+h+'deg)">'+createLeafVehicleSvg({colorToken,screenHeading:h,idPrefix:'direction-'+h})+'</div><span class="caption">'+h+'°</span></div>').join('');}
+function draw(){const progress=Math.min(1,elapsed/18000);const frame=resolveVehicleRouteFrame({routeMetrics:metrics,startMeters:0,endMeters:metrics.totalMeters,progress});const heading=frame.heading;const x=frame.coordinate.longitude/0.00001,y=-frame.coordinate.latitude/0.00001;const map=document.getElementById('map');const car=document.getElementById('moving-car');car.innerHTML=createLeafVehicleSvg({colorToken,screenHeading:heading,idPrefix:'moving'});car.style.left=(x/780*map.clientWidth-21)+'px';car.style.top=(y/1100*map.clientHeight-21)+'px';car.style.transform='rotate('+heading+'deg)';paintCar(heading);document.getElementById('status').textContent=Math.round(heading)+'° · '+Math.round(progress*100)+'%';previousHeading=heading;}
+function tick(now){if(playing){elapsed+=Math.min(50,now-last);if(elapsed>=18000){elapsed=18000;playing=false;document.getElementById('play').textContent='Repetir';}draw();}last=now;requestAnimationFrame(tick);}
+document.getElementById('paint').onchange=e=>{colorToken=e.target.value;paintDirections();draw();};document.getElementById('play').onclick=()=>{if(elapsed>=18000)elapsed=0;playing=!playing;document.getElementById('play').textContent=playing?'Pausar':'Continuar';draw();};document.getElementById('restart').onclick=()=>{elapsed=0;playing=true;document.getElementById('play').textContent='Pausar';draw();};paintDirections();draw();document.getElementById('play').textContent=playing?'Pausar':'Continuar';window.addEventListener('resize',draw);requestAnimationFrame(tick);
+</script></html>

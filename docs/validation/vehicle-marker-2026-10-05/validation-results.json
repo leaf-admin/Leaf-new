@@ -1,0 +1,51 @@
+{
+  "date": "2026-10-05T13:43:18.177613+00:00",
+  "branch": "codex/vehicle-marker-refinement",
+  "baseCommit": "3c837691fd359ae227e836d0543d160607af5c72",
+  "environment": "local React Native unit tests; visual design review in Codex browser",
+  "fullUnit": {
+    "status": "PASS",
+    "suites": 178,
+    "tests": 1478,
+    "seconds": 48.297
+  },
+  "focusedUnit": {
+    "status": "PASS",
+    "suites": 3,
+    "tests": 30,
+    "seconds": 2.24
+  },
+  "nativeSvgParserVariants": 32,
+  "guards": {
+    "production": "PASS",
+    "governance": "PASS",
+    "trackedSecrets": "PASS",
+    "hardcodedSecrets": "PASS",
+    "diffCheck": "PASS"
+  },
+  "nativeBuildPerformed": false,
+  "otaPublished": false,
+  "realRideRecorded": false,
+  "physicalDevicePerformanceVerified": false,
+  "review": "Same vector and route helpers; static map and illustrative positions",
+  "codeSha256": {
+    "mobile-app/src/components/prototype/LeafVehicleMarker.js": "a2b67266553e07e7834d87ae68f3a5596792136caa7363c21e01ca81808fa078",
+    "mobile-app/src/components/prototype/leafVehicleArtwork.js": "f2c8875c74dd2997b7866dbd113569e8251859c27cd4c8c073e295e3111b10b5",
+    "mobile-app/src/components/prototype/PrototypeMapLayer.js": "67b961d799b9e86e219e884634e2f8664a4a3b79f1c5238864a0302f6aa42c7e",
+    "mobile-app/__tests__/leaf-vehicle-artwork.test.js": "32eeed899f1f14f33d460b79eee694566e2ebca2f9633ced302715ace277d6db",
+    "mobile-app/__tests__/prototype-map-vehicle-heading.test.js": "5749a9049d02439b705401fea3d28caa160c61f11e8c490f78b94f2cf3de8361",
+    "mobile-app/__tests__/prototype-map-layer-viewport.test.js": "ca9496061a047ffe93de8c9e1bf379a274e6d0ff1992657bdf1a717f17e99da1"
+  },
+  "primarySync": {
+    "stagedUnchanged": true,
+    "sourceFiles": [
+      "mobile-app/src/components/prototype/PrototypeMapLayer.js",
+      "mobile-app/__tests__/prototype-map-vehicle-heading.test.js",
+      "mobile-app/__tests__/prototype-map-layer-viewport.test.js",
+      "docs/validation/ui-parity-release-2026-10-04/RELEASE-STATUS.md",
+      "mobile-app/src/components/prototype/LeafVehicleMarker.js",
+      "mobile-app/src/components/prototype/leafVehicleArtwork.js",
+      "mobile-app/__tests__/leaf-vehicle-artwork.test.js"
+    ]
+  }
+}

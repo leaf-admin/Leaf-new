@@ -4,6 +4,8 @@ Data: 04/10/2026. Estado: **aceitação de release pendente**.
 
 Atualização de 05/10/2026: a API de endereços salvos foi integrada em `main` pela [PR #222](https://github.com/leaf-admin/Leaf-new/pull/222), com 67 testes focados e os seis gates da CI passando. O endpoint remoto ainda respondeu 404; implantação e validação física seguem pendentes de confirmação da identidade SSH e disponibilidade dos aparelhos. Ver [registro desta rodada](CLOSURE-RUN-2026-10-05.md).
 
+Refinamento visual de 05/10/2026: o branch `codex/vehicle-marker-refinement` acrescenta o novo carro SVG e interpolação pelas curvas da rota. Esses arquivos JS ainda **não estão nos binários congelados abaixo**. O manifesto de 222 arquivos descreve o candidato anterior; a árvore principal evolui a partir dele nesta rodada. O checkout isolado está temporariamente nesse novo branch, enquanto `codex/leaf-ui-rc-1.0.6` preserva o estado anterior. Ver [escopo, prévia e validação do marcador](../vehicle-marker-2026-10-05/REPORT.md).
+
 ## Objetivo
 
 Concluir as lacunas funcionais da nova superfície React Native, preservar a interface aprovada e preparar um candidato verificável para iOS e Android. A conclusão dos testes locais não autoriza declarar a versão validada integralmente em produção ou publicada nas lojas.
@@ -18,7 +20,7 @@ Concluir as lacunas funcionais da nova superfície React Native, preservar a int
 - Versão sincronizada: **1.0.6; iOS 38; Android 132; runtime OTA 1.0.6; canal production**. Os perfis mobile de release agora usam `pilot_controlled`, alinhados ao backend. A configuração pública do perfil EAS selecionado prevalece sobre valores locais antigos nos builds nativos; um `LEAF_ENV_FILE` explícito continua isolado.
 - A ponte de apresentação nativa para a tab bar SwiftUI/Liquid Glass continua no projeto. Navegação, conteúdo e regras continuam em React Native. O efeito nativo depende de iOS 26; os demais sistemas usam a apresentação compatível existente.
 - Notificações consulta a permissão do sistema e registra push quando a permissão é ativada pelos ajustes. Trânsito e voz são configurações do motorista persistidas pela API autenticada. O piloto expõe português do Brasil. A voz nativa utiliza os passos de navegação existentes e funciona com o app em primeiro plano; não introduz chamadas pagas de rota. Detalhes e limites em [SETTINGS-CLOSURE.md](/Users/izaakdias/Documents/Leaf-new/docs/validation/ui-parity-release-2026-10-04/SETTINGS-CLOSURE.md).
-- O candidato está isolado em `codex/leaf-ui-rc-1.0.6`, no checkout `/Users/izaakdias/.codex/worktrees/leaf-ui-rc106/Leaf-new`. Commits de código: `92e5e742d`, `b4594e3f2`, `823ea4fc8` e `678173e41`. A rodada de configurações/voz está nos commits `609fca2d3`, `d3f8e5f88` e `1097a27fc`. Os 222 arquivos congelados correspondem aos hashes de origem em `candidate-files.json` e coincidem entre a árvore principal e o RC.
+- O candidato está preservado em `codex/leaf-ui-rc-1.0.6`. O checkout `/Users/izaakdias/.codex/worktrees/leaf-ui-rc106/Leaf-new` também abriga o branch de refinamento citado acima. Commits de código do candidato: `92e5e742d`, `b4594e3f2`, `823ea4fc8` e `678173e41`. A rodada de configurações/voz está nos commits `609fca2d3`, `d3f8e5f88` e `1097a27fc`. Os 222 arquivos de `candidate-files.json` coincidiram entre a árvore principal e o RC na verificação registrada em `CLOSURE-RUN-2026-10-05.md`, antes do novo refinamento do marcador.
 
 ## Arquivos alterados
 

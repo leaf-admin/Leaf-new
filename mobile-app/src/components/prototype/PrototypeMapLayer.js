@@ -2,10 +2,10 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Animated, Easing, Image, Platform, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import MapView, { Circle, Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
 import { useReducedMotion } from 'react-native-reanimated';
-import Svg, { Path, Rect } from 'react-native-svg';
 import mapStyleAppleLike from './mapStyleAppleLike';
 import robotaxiPrototypeTokens from '../design-system/robotaxiPrototypeTokens';
 import LeafLocationMarker from './LeafLocationMarker';
+import LeafVehicleMarker from './LeafVehicleMarker';
 import { useMobilePreferences } from '../MobilePreferencesProvider';
 
 const { color, motion } = robotaxiPrototypeTokens;
@@ -24,7 +24,6 @@ const DRIVER_MARKER_SMOOTH_SNAP_METERS = 3000;
 const DRIVER_MARKER_MIN_HEADING_DISTANCE_METERS = 0.85;
 const DRIVER_ROUTE_SNAP_MAX_METERS = 42;
 const DRIVER_DEAD_RECKONING_MAX_MS = 4200;
-const DRIVER_DEAD_RECKONING_DEFAULT_SPEED_MPS = 8;
 const DRIVER_DEAD_RECKONING_MAX_SPEED_MPS = 18;
 const DRIVER_DEAD_RECKONING_FRAME_MS = 42;
 const EARTH_RADIUS_METERS = 6371000;
@@ -55,16 +54,6 @@ export function resolveRouteAnimationEnabled({
   return Boolean(animateRoute && !isTestEnv && !reduceMotion);
 }
 const DIRECTIONAL_DRIVER_MARKER_IMAGE_SOURCE = DRIVER_MARKER_IMAGE_SOURCES.black;
-const DRIVER_MARKER_BODY_COLORS = Object.freeze({
-  black: '#111111',
-  white: '#F4F1EA',
-  silver: '#B9C0C3',
-  gray: '#50575A',
-  red: '#7E2020',
-  blue: '#1E4D6F',
-  green: '#1A330E',
-  yellow: '#D7A623',
-});
 
 function resolveAvatarInitial(value) {
   return String(value || 'L').trim().charAt(0).toUpperCase() || 'L';
@@ -260,10 +249,6 @@ export function resolveScreenRelativeVehicleHeading(vehicleHeading, mapCameraHea
   ) ?? 0;
 }
 
-function resolveVehicleMarkerBodyColor(token) {
-  return DRIVER_MARKER_BODY_COLORS[token] || DRIVER_MARKER_BODY_COLORS.black;
-}
-
 function resolveRemoteMarkerImageSource(value) {
   const uri = String(value || '').trim();
   return uri ? { uri } : null;
@@ -385,7 +370,7 @@ export function resolveRouteRenderCoordinates({
   return Array.isArray(staticRouteCoordinates) ? staticRouteCoordinates : [];
 }
 
-function buildRouteMotionMetrics(path = []) {
+export function buildRouteMotionMetrics(path = []) {
   const coordinates = normalizeRoutePath(path);
 
   if (coordinates.length < 2) {
@@ -522,19 +507,22 @@ function resolveCoordinateAtRouteMeters(routeMetrics, routeMeters) {
   };
 }
 
-function clampDriverSpeedMetersPerSecond(value) {
+export function clampDriverSpeedMetersPerSecond(value) {
   const numeric = Number(value);
   if (!Number.isFinite(numeric) || numeric <= 0) {
-    return DRIVER_DEAD_RECKONING_DEFAULT_SPEED_MPS;
+    return 0;
   }
 
   return Math.min(
     DRIVER_DEAD_RECKONING_MAX_SPEED_MPS,
-    Math.max(1.4, numeric),
+    numeric,
   );
 }
 
 function normalizeHeadingDegrees(value) {
+  if (value === null || value === undefined || value === '') {
+    return null;
+  }
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) {
     return null;
@@ -579,7 +567,7 @@ function resolveShortestHeadingDeltaDegrees(fromHeading, toHeading) {
   return ((to - from + 540) % 360) - 180;
 }
 
-function interpolateHeadingDegrees(startHeading, endHeading, ratio) {
+export function interpolateHeadingDegrees(startHeading, endHeading, ratio) {
   const start = normalizeHeadingDegrees(startHeading) ?? 0;
   const end = normalizeHeadingDegrees(endHeading) ?? start;
   const safeRatio = Math.max(0, Math.min(1, Number(ratio) || 0));
@@ -593,6 +581,26 @@ function interpolateCoordinate(start, end, ratio) {
   return {
     latitude: start.latitude + (end.latitude - start.latitude) * safeRatio,
     longitude: start.longitude + (end.longitude - start.longitude) * safeRatio,
+  };
+}
+
+export function resolveVehicleRouteFrame({ routeMetrics, startMeters, endMeters, progress = 0 } = {}) {
+  if (!Number.isFinite(startMeters) || !Number.isFinite(endMeters)) {
+    return null;
+  }
+  const ratio = Math.max(0, Math.min(1, Number(progress) || 0));
+  const meters = startMeters + (endMeters - startMeters) * ratio;
+  const position = resolveCoordinateAtRouteMeters(routeMetrics, meters);
+  if (!position) {
+    return null;
+  }
+  // A short tangent straddling the current point turns the nose progressively
+  // around corners, while the coordinate itself stays on the received polyline.
+  const before = resolveCoordinateAtRouteMeters(routeMetrics, meters - 3.2);
+  const after = resolveCoordinateAtRouteMeters(routeMetrics, meters + 3.2);
+  return {
+    ...position,
+    heading: calculateHeadingDegrees(before?.coordinate, after?.coordinate) ?? position.heading,
   };
 }
 
@@ -928,44 +936,10 @@ const MapAvatarMarker = React.memo(function MapAvatarMarker({
   );
 });
 
-const InlineVehicleMarker = React.memo(function InlineVehicleMarker({
-  colorToken = 'black',
-}) {
-  const bodyColor = resolveVehicleMarkerBodyColor(colorToken);
-  const windowColor = colorToken === 'white' ? '#60727A' : '#37474F';
-  const sideWindowColor = colorToken === 'white' ? '#4B5E66' : '#263238';
-
-  return (
-    <Svg width={38} height={38} viewBox="0 0 512 512">
-      <Rect x="130" y="40" width="252" height="432" rx="60" fill="#000000" opacity="0.15" />
-      <Rect x="115" y="90" width="30" height="70" rx="8" fill="#1C2022" />
-      <Rect x="367" y="90" width="30" height="70" rx="8" fill="#1C2022" />
-      <Rect x="115" y="350" width="30" height="70" rx="8" fill="#1C2022" />
-      <Rect x="367" y="350" width="30" height="70" rx="8" fill="#1C2022" />
-      <Path
-        d="M140 100 C140 50 160 30 256 30 C352 30 372 50 372 100 L372 410 C372 460 340 480 256 480 C172 480 140 460 140 410 Z"
-        fill={bodyColor}
-      />
-      <Rect x="105" y="140" width="36" height="16" rx="6" fill={bodyColor} />
-      <Rect x="371" y="140" width="36" height="16" rx="6" fill={bodyColor} />
-      <Path d="M160 130 L352 130 L332 185 L180 185 Z" fill={windowColor} />
-      <Path d="M155 195 L175 195 L175 330 L155 310 Z" fill={sideWindowColor} />
-      <Path d="M357 195 L337 195 L337 330 L357 310 Z" fill={sideWindowColor} />
-      <Path d="M180 340 L332 340 L352 385 L160 385 Z" fill={windowColor} />
-      <Rect x="180" y="195" width="152" height="135" rx="10" fill={bodyColor} />
-      <Path d="M180 45 L190 115" stroke="rgba(255,255,255,0.16)" strokeWidth="3" strokeLinecap="round" />
-      <Path d="M332 45 L322 115" stroke="rgba(255,255,255,0.16)" strokeWidth="3" strokeLinecap="round" />
-      <Path d="M150 35 Q170 32 190 36" stroke="#FFFFFF" strokeWidth="6" strokeLinecap="round" fill="none" opacity="0.9" />
-      <Path d="M362 35 Q342 32 322 36" stroke="#FFFFFF" strokeWidth="6" strokeLinecap="round" fill="none" opacity="0.9" />
-      <Rect x="145" y="470" width="35" height="6" rx="2" fill="#D32F2F" />
-      <Rect x="332" y="470" width="35" height="6" rx="2" fill="#D32F2F" />
-    </Svg>
-  );
-});
-
 const VehicleMarkerContent = React.memo(function VehicleMarkerContent({
   source,
   colorToken = 'black',
+  screenHeading = 0,
 }) {
   const shouldRenderRemoteImage = Boolean(
     source &&
@@ -984,7 +958,7 @@ const VehicleMarkerContent = React.memo(function VehicleMarkerContent({
           fadeDuration={0}
         />
       ) : (
-        <InlineVehicleMarker colorToken={colorToken} />
+        <LeafVehicleMarker colorToken={colorToken} screenHeading={screenHeading} />
       )}
     </View>
   );
@@ -1016,7 +990,7 @@ const ProjectedVehicleOverlay = React.memo(function ProjectedVehicleOverlay({
           },
         ]}
       >
-        <VehicleMarkerContent source={effectiveSource} colorToken={colorToken} />
+        <VehicleMarkerContent source={effectiveSource} colorToken={colorToken} screenHeading={heading} />
       </View>
     </View>
   );
@@ -1414,13 +1388,19 @@ function PrototypeMapLayer({
     projectedDriverRoutePosition &&
       projectedDriverRoutePosition.snappedDistanceMeters <= DRIVER_ROUTE_SNAP_MAX_METERS,
   );
+  const projectedDriverRouteHeading = useMemo(() => resolveVehicleRouteFrame({
+    routeMetrics: routeMotionMetrics,
+    startMeters: projectedDriverRoutePosition?.routeMeters,
+    endMeters: projectedDriverRoutePosition?.routeMeters,
+    progress: 1,
+  })?.heading, [projectedDriverRoutePosition?.routeMeters, routeMotionMetrics]);
   const targetDriverCoordinate =
     shouldSnapDriverToRoute
       ? projectedDriverRoutePosition.coordinate
       : normalizedDriverCoordinate;
   const targetDriverHeading =
-    normalizedDriverHeading ??
-    (shouldSnapDriverToRoute ? projectedDriverRoutePosition.heading : null);
+    (shouldSnapDriverToRoute ? projectedDriverRouteHeading : null) ??
+    normalizedDriverHeading;
   const targetDriverRouteMeters =
     shouldSnapDriverToRoute &&
     Number.isFinite(projectedDriverRoutePosition?.routeMeters)
@@ -1444,7 +1424,7 @@ function PrototypeMapLayer({
   const [userAvatarFailed, setUserAvatarFailed] = useState(false);
   const [smoothedDriverCoordinate, setSmoothedDriverCoordinate] = useState(targetDriverCoordinate);
   const [smoothedDriverHeading, setSmoothedDriverHeading] = useState(
-    normalizedDriverHeading ?? normalizedUserHeading,
+    targetDriverHeading ?? normalizedUserHeading,
   );
   const androidPendingRegionRef = useRef(region);
   const androidRegionFrameRef = useRef(null);
@@ -1455,7 +1435,7 @@ function PrototypeMapLayer({
   const driverLastRouteSampleRef = useRef(null);
   const driverLastPredictionFrameAtRef = useRef(0);
   const smoothedDriverCoordinateRef = useRef(targetDriverCoordinate);
-  const smoothedDriverHeadingRef = useRef(normalizedDriverHeading ?? normalizedUserHeading);
+  const smoothedDriverHeadingRef = useRef(targetDriverHeading ?? normalizedUserHeading);
   const showMarkerCallouts = false;
   const normalizedAvatarUri = String(userAvatarUri || '').trim();
   const shouldRenderAvatarImage = Boolean(normalizedAvatarUri) && !userAvatarFailed;
@@ -1710,11 +1690,19 @@ function PrototypeMapLayer({
     );
     const now = Date.now();
     const previousRouteSample = driverLastRouteSampleRef.current;
+    const startProjection = findNearestRouteProjection(startCoordinate, routeMotionMetrics);
+    const followsReceivedRoute = Boolean(
+      startProjection &&
+      startProjection.snappedDistanceMeters <= DRIVER_ROUTE_SNAP_MAX_METERS &&
+      Number.isFinite(targetDriverRouteMeters) &&
+      Math.abs(targetDriverRouteMeters - startProjection.routeMeters) <= distanceMeters * 3 + 20
+    );
 
     if (Number.isFinite(targetDriverRouteMeters)) {
-      let estimatedSpeed = driverPredictionBaseRef.current?.speedMetersPerSecond;
+      let estimatedSpeed = 0;
       if (
         previousRouteSample &&
+        previousRouteSample.routeMetrics === routeMotionMetrics &&
         Number.isFinite(previousRouteSample.routeMeters) &&
         Number.isFinite(previousRouteSample.at) &&
         now > previousRouteSample.at
@@ -1730,6 +1718,7 @@ function PrototypeMapLayer({
       driverLastRouteSampleRef.current = {
         routeMeters: targetDriverRouteMeters,
         at: now,
+        routeMetrics: routeMotionMetrics,
       };
       driverPredictionBaseRef.current = {
         routeMeters: targetDriverRouteMeters,
@@ -1742,7 +1731,7 @@ function PrototypeMapLayer({
       driverLastRouteSampleRef.current = null;
     }
 
-    if (!Number.isFinite(distanceMeters) || distanceMeters > DRIVER_MARKER_SMOOTH_SNAP_METERS) {
+    if (reduceMotion || !Number.isFinite(distanceMeters) || distanceMeters > DRIVER_MARKER_SMOOTH_SNAP_METERS) {
       commitSmoothedDriverCoordinate(targetDriverCoordinate);
       commitSmoothedDriverHeading(targetHeading);
       return undefined;
@@ -1764,17 +1753,27 @@ function PrototypeMapLayer({
     const animateDriverMarker = () => {
       const progress = Math.min(1, (Date.now() - startedAt) / animationDuration);
       const eased = 1 - Math.pow(1 - progress, 3);
+      const routeFrame = followsReceivedRoute && shouldAnimateCoordinate
+        ? resolveVehicleRouteFrame({
+            routeMetrics: routeMotionMetrics,
+            startMeters: startProjection.routeMeters,
+            endMeters: targetDriverRouteMeters,
+            progress: eased,
+          })
+        : null;
       commitSmoothedDriverCoordinate(
-        shouldAnimateCoordinate
+        routeFrame?.coordinate || (shouldAnimateCoordinate
           ? interpolateCoordinate(
               startCoordinate,
               targetDriverCoordinate,
               eased,
             )
-          : targetDriverCoordinate,
+          : targetDriverCoordinate),
       );
       commitSmoothedDriverHeading(
-        shouldAnimateHeading
+        routeFrame?.heading !== null && routeFrame?.heading !== undefined
+          ? interpolateHeadingDegrees(startHeading, routeFrame.heading, Math.min(1, eased / 0.22))
+          : shouldAnimateHeading
           ? interpolateHeadingDegrees(startHeading, targetHeading, eased)
           : targetHeading,
       );
@@ -1784,7 +1783,7 @@ function PrototypeMapLayer({
       } else {
         driverSmoothFrameRef.current = null;
         commitSmoothedDriverCoordinate(targetDriverCoordinate);
-        commitSmoothedDriverHeading(targetHeading);
+        commitSmoothedDriverHeading(routeFrame?.heading ?? targetHeading);
       }
     };
 
@@ -1799,6 +1798,8 @@ function PrototypeMapLayer({
   }, [
     commitSmoothedDriverCoordinate,
     commitSmoothedDriverHeading,
+    reduceMotion,
+    routeMotionMetrics,
     targetDriverCoordinate,
     targetDriverHeading,
     targetDriverRouteMeters,
@@ -1812,6 +1813,7 @@ function PrototypeMapLayer({
 
     if (
       IS_TEST_ENV ||
+      reduceMotion ||
       driverMarkerMode !== 'car' ||
       !routeMotionMetrics ||
       !Number.isFinite(targetDriverRouteMeters)
@@ -1824,7 +1826,8 @@ function PrototypeMapLayer({
       if (
         !base ||
         !Number.isFinite(base.routeMeters) ||
-        !Number.isFinite(base.at)
+        !Number.isFinite(base.at) ||
+        !(base.speedMetersPerSecond > 0)
       ) {
         driverPredictionFrameRef.current = null;
         return;
@@ -1844,16 +1847,22 @@ function PrototypeMapLayer({
             base.routeMeters +
             clampDriverSpeedMetersPerSecond(base.speedMetersPerSecond) *
               (predictionMs / 1000);
-          const predictedPosition = resolveCoordinateAtRouteMeters(
-            routeMotionMetrics,
-            predictedRouteMeters,
-          );
+          const predictedPosition = resolveVehicleRouteFrame({
+            routeMetrics: routeMotionMetrics,
+            startMeters: base.routeMeters,
+            endMeters: predictedRouteMeters,
+            progress: 1,
+          });
 
           if (predictedPosition?.coordinate) {
             driverLastPredictionFrameAtRef.current = now;
             commitSmoothedDriverCoordinate(predictedPosition.coordinate);
             commitSmoothedDriverHeading(
-              predictedPosition.heading ?? base.heading,
+              interpolateHeadingDegrees(
+                smoothedDriverHeadingRef.current,
+                predictedPosition.heading ?? base.heading,
+                0.25,
+              ),
             );
           }
         } else {
@@ -1877,6 +1886,7 @@ function PrototypeMapLayer({
     commitSmoothedDriverCoordinate,
     commitSmoothedDriverHeading,
     driverMarkerMode,
+    reduceMotion,
     routeMotionMetrics,
     targetDriverRouteMeters,
   ]);
@@ -2752,6 +2762,7 @@ function PrototypeMapLayer({
                 <VehicleMarkerContent
                   source={driverVehicleMarkerImageSource}
                   colorToken={driverVehicleMarkerColorToken}
+                  screenHeading={displayedDriverScreenHeading}
                 />
               ) : null}
             </Marker>
@@ -2791,6 +2802,7 @@ function PrototypeMapLayer({
                       <VehicleMarkerContent
                         source={vehicleMarkerImageSource}
                         colorToken={vehicleMarkerColorToken}
+                        screenHeading={resolveScreenRelativeVehicleHeading(vehicle.heading, normalizedMapCameraHeading)}
                       />
                     </Marker>
                     {isRequestingVehicle ? (
@@ -2905,11 +2917,15 @@ function PrototypeMapLayer({
                     left: item.point.x - 21,
                     top: item.point.y - 21,
                     opacity: item.opacity,
-                    transform: [{ rotate: `${normalizeHeadingDegrees(item.heading) ?? 0}deg` }],
+                    transform: [{ rotate: `${resolveScreenRelativeVehicleHeading(item.heading, normalizedMapCameraHeading)}deg` }],
                   },
                 ]}
               >
-                <VehicleMarkerContent source={item.source} colorToken={item.colorToken} />
+                <VehicleMarkerContent
+                  source={item.source}
+                  colorToken={item.colorToken}
+                  screenHeading={resolveScreenRelativeVehicleHeading(item.heading, normalizedMapCameraHeading)}
+                />
               </View>
               {item.isRequesting ? (
                 <View

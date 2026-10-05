@@ -55,13 +55,14 @@ jest.mock('react-native-maps', () => {
 jest.mock('react-native-svg', () => {
   const React = require('react');
   const { View } = require('react-native');
-  const MockView = ({ children }) => <View>{children}</View>;
+  const MockView = ({ children, ...props }) => <View {...props}>{children}</View>;
 
   return {
     __esModule: true,
     default: MockView,
     Path: MockView,
     Rect: MockView,
+    SvgXml: MockView,
   };
 });
 
@@ -90,6 +91,27 @@ describe('PrototypeMapLayer route viewport fitting', () => {
     latitudeDelta: 0.014,
     longitudeDelta: 0.014,
   };
+
+  it('renders the shared SVG vehicle in the native map marker', () => {
+    const { Platform } = require('react-native');
+    const originalPlatform = Platform.OS;
+    Platform.OS = 'ios';
+    try {
+      const screen = render(<PrototypeMapLayer
+        region={baseRegion}
+        driverCoordinate={routeCoordinates[0]}
+        driverHeading={90}
+        driverVehicleColor="prata"
+      />);
+      const vehicle = screen.getByTestId('leaf-vehicle-vector');
+      expect(vehicle.props.xml).toContain('linearGradient');
+      expect(vehicle.props.xml).toContain('#AAB8C0');
+      expect(vehicle.props.xml).not.toContain('<image');
+      screen.unmount();
+    } finally {
+      Platform.OS = originalPlatform;
+    }
+  });
 
   it.each(['ios', 'android'])('anchors the blue location dot to the Google SDK coordinate on %s', os => {
     const { Platform } = require('react-native');
