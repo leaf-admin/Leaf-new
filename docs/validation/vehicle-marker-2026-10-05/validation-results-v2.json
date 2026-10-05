@@ -1,0 +1,44 @@
+{
+  "revision": 2,
+  "date": "2026-10-05T13:54:48.345058+00:00",
+  "branch": "codex/vehicle-marker-refinement",
+  "baseCommit": "26e113bca4dda9cb4fcb48ff1c46bdebe97514ac",
+  "scope": "vehicle artwork, drawing tests and visual review",
+  "focusedUnit": {
+    "status": "PASS",
+    "suites": 3,
+    "tests": 30,
+    "seconds": 1.684
+  },
+  "fullUnit": {
+    "status": "PASS",
+    "suites": 178,
+    "tests": 1478,
+    "seconds": 47.984
+  },
+  "nativeSvgParserVariants": 32,
+  "silhouetteInvariantBearings": 72,
+  "deformationTransforms": false,
+  "runtimeGeometryChanged": false,
+  "guards": {
+    "production": "PASS",
+    "governance": "PASS",
+    "trackedSecrets": "PASS",
+    "hardcodedSecrets": "PASS",
+    "diffCheck": "PASS"
+  },
+  "sourceSha256": {
+    "mobile-app/src/components/prototype/leafVehicleArtwork.js": "7670ea753c0348d728dfd5c7697c50212f88df8da2215753154867244c1dbe5c",
+    "mobile-app/__tests__/leaf-vehicle-artwork.test.js": "5050317d2e6c53943280c7205c52b4024a83cca07cdb28d096539571356bb12e",
+    "mobile-app/__tests__/prototype-map-layer-viewport.test.js": "bbea381cab27a55e7b8cb53077d7234ad7b99e4b9e8f10207c95938be82bdbad"
+  },
+  "referenceSources": [
+    "https://medium.com/uber-design/upgrading-ubers-3d-fleet-4662c3e1081",
+    "https://www.uber.com/au/en/blog/car-colours-arriving-now/"
+  ],
+  "previewOnly": true,
+  "physicalDevicePerformanceVerified": false,
+  "realRideRecorded": false,
+  "newNativeBinaryBuilt": false,
+  "otaPublished": false
+}

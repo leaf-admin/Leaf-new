@@ -1,17 +1,19 @@
 // Shared vector source for the native marker and its design review. No raster,
 // filters or external images: the small map glyph stays crisp at every density.
 const PAINTS = Object.freeze({
-  black: ['#778389', '#354047', '#172126', '#0D151A'],
-  white: ['#FFFFFF', '#E8EDF0', '#AFBCC4', '#637680'],
-  silver: ['#EFF3F5', '#AAB8C0', '#657781', '#35464F'],
-  gray: ['#A5AFB5', '#65737C', '#33424C', '#1D2B34'],
-  red: ['#D99391', '#984944', '#632C2C', '#381C22'],
-  blue: ['#A2BCCD', '#557B96', '#29465C', '#1C2C3B'],
-  green: ['#A1B4A4', '#54745F', '#2B4836', '#1E3025'],
-  yellow: ['#F4DB9D', '#C8A859', '#8C713B', '#4F422A'],
+  black: ['#64666A', '#414347', '#25272A', '#1B1D20'],
+  white: ['#FFFFFF', '#F0F0F1', '#CDD0D3', '#9A9DA2'],
+  silver: ['#E0E1E3', '#B6B8BC', '#96999E', '#6D7075'],
+  gray: ['#999CA1', '#74777D', '#55585E', '#393C42'],
+  red: ['#BF7A75', '#A75A55', '#88423F', '#683330'],
+  blue: ['#8098AE', '#627F99', '#4A657E', '#364A5D'],
+  green: ['#869C8D', '#6A8273', '#4F6859', '#3B4F42'],
+  yellow: ['#D4BE84', '#BAA062', '#9B824C', '#79663D'],
 });
 
-const BODY = 'M22 15C22 10 25.5 8 32 8S42 10 42 15L44 43C44.5 51 41.5 55 32 55S19.5 51 20 43Z';
+// Orthographic, symmetrical silhouette. Heading only changes light, never the
+// geometry: rotating a small map marker must not stretch or shear the vehicle.
+const BODY = 'M22 16C22 12.5 25.5 11 32 11S42 12.5 42 16L44 24L44 44C44 50 41 53 32 53S20 50 20 44L20 24Z';
 
 export function resolveVehicleArtworkPose(screenHeading = 0) {
   const numeric = Number(screenHeading);
@@ -21,11 +23,8 @@ export function resolveVehicleArtworkPose(screenHeading = 0) {
   const radians = heading * Math.PI / 180;
   return {
     heading: heading % 360,
-    side: Number((Math.cos(radians) * 1.15).toFixed(2)),
-    rise: Number((1.1 + Math.sin(radians) * 0.35).toFixed(2)),
-    skew: Number((Math.cos(radians) * 2.2).toFixed(2)),
-    lightX: Number((32 - Math.cos(radians) * 24 - Math.sin(radians) * 15).toFixed(2)),
-    lightY: Number((32 + Math.sin(radians) * 24 - Math.cos(radians) * 15).toFixed(2)),
+    lightX: Number((32 - Math.cos(radians) * 22 - Math.sin(radians) * 8).toFixed(2)),
+    lightY: Number((32 + Math.sin(radians) * 22 - Math.cos(radians) * 8).toFixed(2)),
   };
 }
 
@@ -38,40 +37,18 @@ export function createLeafVehicleSvg({ colorToken = 'black', screenHeading = 0, 
     <linearGradient id="${id}-paint" gradientUnits="userSpaceOnUse" x1="${pose.lightX}" y1="${pose.lightY}" x2="${64 - pose.lightX}" y2="${64 - pose.lightY}">
       <stop offset="0" stop-color="${highlight}"/><stop offset=".44" stop-color="${paint}"/><stop offset="1" stop-color="${shade}"/>
     </linearGradient>
-    <linearGradient id="${id}-glass" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#A5BBC7"/><stop offset=".32" stop-color="#506976"/><stop offset="1" stop-color="#1A2B35"/>
-    </linearGradient>
-    <linearGradient id="${id}-roof" x1="0" y1="0" x2="1" y2=".8">
-      <stop offset="0" stop-color="${highlight}"/><stop offset=".5" stop-color="${paint}"/><stop offset="1" stop-color="${shade}"/>
+    <linearGradient id="${id}-glass" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#707780"/><stop offset="1" stop-color="#30353D"/>
     </linearGradient>
   </defs>
-  <g fill="#15232D">
-    <ellipse cx="33" cy="34.5" rx="17" ry="26" opacity=".035"/>
-    <ellipse cx="33" cy="34.5" rx="15" ry="24" opacity=".055"/>
-    <ellipse cx="33" cy="34.5" rx="12.8" ry="22" opacity=".10"/>
-  </g>
-  <g transform="translate(32 32) skewX(${pose.skew}) translate(-32 -32)">
-    <g fill="#162127">
-      <rect x="18" y="17" width="4" height="9" rx="1.6"/><rect x="42" y="17" width="4" height="9" rx="1.6"/>
-      <rect x="17.5" y="42" width="4" height="9" rx="1.6"/><rect x="42.5" y="42" width="4" height="9" rx="1.6"/>
-    </g>
-    <path d="${BODY}" fill="${edge}" transform="translate(${pose.side} ${pose.rise})"/>
-    <path d="${BODY}" fill="url(#${id}-paint)" stroke="${edge}" stroke-width=".55"/>
-    <path d="M22.5 17L21.8 42Q21 50 25 52" fill="none" stroke="#FFFFFF" stroke-opacity=".24" stroke-width=".65"/>
-    <path d="M41.5 17L42.2 43Q42.5 50 39 52" fill="none" stroke="${edge}" stroke-opacity=".6" stroke-width=".7"/>
-    <path d="M23.8 21Q32 19.5 40.2 21L38.5 29Q32 27.7 25.5 29Z" fill="url(#${id}-glass)" stroke="${highlight}" stroke-width=".55"/>
-    <path d="M25.8 22.2L31.5 21.7L27.9 27.5L26.4 27.7Z" fill="#FFFFFF" opacity=".26"/>
-    <path d="M22.5 27.5L24.5 31L24 41.7L21.8 44Z M41.5 27.5L39.5 31L40 41.7L42.2 44Z" fill="#253842"/>
-    <path d="M25.5 44Q32 45 38.5 44L40.4 48.6Q32 50.5 23.6 48.6Z" fill="url(#${id}-glass)" stroke="${highlight}" stroke-width=".45"/>
-    <path d="M25.5 31Q32 29.8 38.5 31L38.8 41.5Q32 43 25.2 41.5Z" fill="url(#${id}-roof)" stroke="${highlight}" stroke-opacity=".28" stroke-width=".6"/>
-    <path d="M26.5 32.2Q32 31.2 37 32" stroke="#FFFFFF" stroke-opacity=".30" stroke-width=".55" fill="none"/>
-    <path d="M25.5 12L25 18.6M38.5 12L39 18.6" stroke="${highlight}" stroke-opacity=".32" stroke-width=".55"/>
-    <path d="M24.2 10.8Q32 9 39.8 10.8" stroke="#FFFFFF" stroke-opacity=".32" stroke-width=".6" fill="none"/>
-    <path d="M23 14L26.2 13.6M37.8 13.6L41 14" stroke="#FAF7E9" stroke-width="1.4" stroke-linecap="round"/>
-    <path d="M27 11.5L37 11.5" stroke="${edge}" stroke-opacity=".65" stroke-width=".7" stroke-linecap="round"/>
-    <path d="M20.9 24L17.3 25.1L17 26.6L21 26Z M43.1 24L46.7 25.1L47 26.6L43 26Z" fill="${shade}" stroke="${highlight}" stroke-width=".4"/>
-    <path d="M22.6 50.7L26.1 51.8M37.9 51.8L41.4 50.7" stroke="#BC5654" stroke-width="1.2" stroke-linecap="round"/>
-    <path d="M27 53L37 53" stroke="${edge}" stroke-opacity=".75" stroke-width=".7" stroke-linecap="round"/>
-  </g>
+  <ellipse cx="32.4" cy="33.5" rx="14.5" ry="21.5" fill="#15171B" opacity=".09"/>
+  <path d="M19.8 25.5L17.9 26.1L17.9 28L20 27.7M44.2 25.5L46.1 26.1L46.1 28L44 27.7" fill="${edge}"/>
+  <path d="${BODY}" fill="${edge}" transform="translate(0 .65)"/>
+  <path d="${BODY}" fill="url(#${id}-paint)" stroke="${edge}" stroke-width=".45"/>
+  <path d="M23.5 24Q32 22.5 40.5 24L38.8 30Q32 29 25.2 30Z" fill="url(#${id}-glass)"/>
+  <path d="M22.7 30L24.3 32L24.3 40.5L22.4 42.2Z M41.3 30L39.7 32L39.7 40.5L41.6 42.2Z" fill="#282D33"/>
+  <path d="M25.5 43L38.5 43L40.3 47Q32 48.2 23.7 47Z" fill="url(#${id}-glass)"/>
+  <path d="M25.5 31.4Q32 30.4 38.5 31.4" fill="none" stroke="#FFFFFF" stroke-opacity=".14" stroke-width=".55"/>
+  <path d="M23.4 16.2L26.1 15.7M37.9 15.7L40.6 16.2" stroke="#E4E5E7" stroke-opacity=".65" stroke-width=".85" stroke-linecap="round"/>
 </svg>`;
 }

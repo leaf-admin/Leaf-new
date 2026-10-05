@@ -105,7 +105,7 @@ describe('PrototypeMapLayer route viewport fitting', () => {
       />);
       const vehicle = screen.getByTestId('leaf-vehicle-vector');
       expect(vehicle.props.xml).toContain('linearGradient');
-      expect(vehicle.props.xml).toContain('#AAB8C0');
+      expect(vehicle.props.xml).toContain('#B6B8BC');
       expect(vehicle.props.xml).not.toContain('<image');
       screen.unmount();
     } finally {

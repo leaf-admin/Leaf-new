@@ -11,26 +11,25 @@ describe('Leaf vehicle vector artwork', () => {
       }
     }
   });
-  it('uses only vector surfaces with paint, glass, extrusion and a soft ground shadow', () => {
+  it('uses a compact vector silhouette with subtle paint and a ground shadow', () => {
     const xml = createLeafVehicleSvg();
     expect(xml).toContain('viewBox="0 0 64 64"');
     expect(xml).toContain('linearGradient');
     expect(xml).toContain('<ellipse');
-    expect(xml).toContain('skewX(');
+    expect(xml).not.toMatch(/skew|scale|matrix/);
+    expect((xml.match(/<path /g) || []).length).toBeLessThanOrEqual(9);
     expect(xml).not.toMatch(/<image|<filter|data:image|https?:\/\/[^w]/);
   });
 
-  it('keeps shading and perspective subtle while adapting to screen direction', () => {
-    const north = resolveVehicleArtworkPose(0);
-    const south = resolveVehicleArtworkPose(180);
-    expect(north.side).toBe(-south.side);
-    expect(north.skew).toBe(-south.skew);
+  it('changes light direction without distorting the silhouette at any bearing', () => {
+    const north = createLeafVehicleSvg({ screenHeading: 0 });
+    const paths = xml => [...xml.matchAll(/<path d="([^"]+)"/g)].map(match => match[1]);
     for (let heading = 0; heading < 360; heading += 5) {
-      const pose = resolveVehicleArtworkPose(heading);
-      expect(Math.abs(pose.skew)).toBeLessThanOrEqual(2.2);
-      expect(Math.abs(pose.side)).toBeLessThanOrEqual(1.15);
-      expect(pose.rise).toBeLessThanOrEqual(1.45);
+      const xml = createLeafVehicleSvg({ screenHeading: heading });
+      expect(paths(xml)).toEqual(paths(north));
+      expect(xml).not.toMatch(/skew|scale|matrix/);
     }
+    expect(resolveVehicleArtworkPose(0).lightX).not.toBe(resolveVehicleArtworkPose(180).lightX);
   });
 
   it('normalizes shading directions and avoids rebuilding for tiny angular noise', () => {
@@ -41,8 +40,8 @@ describe('Leaf vehicle vector artwork', () => {
   });
 
   it('preserves vehicle colors and isolates gradient ids between cars', () => {
-    expect(createLeafVehicleSvg({ colorToken: 'white' })).toContain('#E8EDF0');
-    expect(createLeafVehicleSvg({ colorToken: 'silver' })).toContain('#AAB8C0');
+    expect(createLeafVehicleSvg({ colorToken: 'white' })).toContain('#F0F0F1');
+    expect(createLeafVehicleSvg({ colorToken: 'silver' })).toContain('#B6B8BC');
     expect(createLeafVehicleSvg({ colorToken: 'unknown' })).toEqual(createLeafVehicleSvg());
     const xml = createLeafVehicleSvg({ idPrefix: 'car:two' });
     expect(xml).toContain('id="cartwo-paint"');
