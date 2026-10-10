@@ -130,6 +130,7 @@ function registerSocketCompleteTripHandler({
 }) {
     const { buildTripCompletedPayload } = require('../utils/trip-completion-payload');
     const { scheduleMapH3Refresh } = require('../utils/map-h3-refresh-broadcaster');
+    const { resolveRideEarlyEnd } = require('../services/ride-early-end-service');
     const {
         hasRideOfflineIntentPayload,
         markRideOfflineIntentProcessed,
@@ -500,6 +501,32 @@ function registerSocketCompleteTripHandler({
                         : null,
                     persistence: 'accepted_background'
                 });
+
+                // Encerramento longe do destino: registra o fato no booking e avisa
+                // o passageiro, que responde se foi a pedido dele. Não muda valores.
+                const earlyEnd = resolveRideEarlyEnd({
+                    endLocation: resultEndLocation || endLocation,
+                    destinationLocation: bookingSnapshot?.destinationLocation,
+                    driverStatement: data?.earlyEnd
+                });
+                if (earlyEnd) {
+                    tripCompletedData.earlyEnd = earlyEnd;
+                    await redis.hset(`booking:${bookingId}`, {
+                        earlyEnd: JSON.stringify({
+                            ...earlyEnd,
+                            detectedAt: new Date().toISOString()
+                        }),
+                        earlyEndReviewStatus: 'PENDING_PASSENGER_FEEDBACK'
+                    }).catch(() => null);
+                    logStructured('warn', 'Corrida encerrada antes do destino', {
+                        bookingId,
+                        driverId,
+                        remainingMeters: earlyEnd.remainingMeters,
+                        driverReason: earlyEnd.driverReason,
+                        eventType: 'completeTrip'
+                    });
+                }
+
                 await rideIdempotencyService.cacheResult(idempotencyKey, tripCompletedData);
                 if (offlineIntentValidation && !offlineIntentValidation.skipped) {
                     await markRideOfflineIntentProcessed({
