@@ -1,9 +1,9 @@
 # QA Flow Inventory
 
-Generated at: 2026-10-04T06:48:25.120Z
+Generated at: 2026-10-07T23:50:08.646Z
 
-Total navigation routes: 69
-Surface status: current 43; compatibility_redirect 26
+Total navigation routes: 70
+Surface status: current 44; compatibility_redirect 26
 Total maestro flows (non-debug): 103
 Release-only eligible flows: 79
 
@@ -72,37 +72,38 @@ This is a static inventory of flow definitions, not an execution report. `DEFINE
 36. `RobotaxiMenuMessages` (current; account-support)
 37. `RobotaxiMenuSettings` (current; account-support)
 38. `RobotaxiMenuTripHistory` (current; ride-lifecycle)
-39. `RobotaxiPrototype` (current; prototype)
-40. `RobotaxiPrototypeCancellation` (current; ride-lifecycle)
-41. `RobotaxiPrototypeChat` (current; account-support)
-42. `RobotaxiPrototypeComplain` (current; ride-lifecycle)
-43. `RobotaxiPrototypeDestination` (current; prototype)
-44. `RobotaxiPrototypeDriverActivation` (current; driver-ops)
-45. `RobotaxiPrototypeDriverDocuments` (current; driver-ops)
-46. `RobotaxiPrototypeDriverPanel` (current; driver-ops)
-47. `RobotaxiPrototypeDriverSearch` (current; driver-ops)
-48. `RobotaxiPrototypeDriverWaitlist` (current; driver-ops)
-49. `RobotaxiPrototypeDriverWaitlistStatus` (current; driver-ops)
-50. `RobotaxiPrototypeInvites` (current; prototype)
-51. `RobotaxiPrototypeMenu` (current; prototype)
-52. `RobotaxiPrototypeNoDrivers` (current; driver-ops)
-53. `RobotaxiPrototypePaymentFailed` (current; ride-lifecycle)
-54. `RobotaxiPrototypePaymentSuccess` (current; ride-lifecycle)
-55. `RobotaxiPrototypeProfile` (current; account-support)
-56. `RobotaxiPrototypePublicTracking` (current; prototype)
-57. `RobotaxiPrototypeRating` (current; prototype)
-58. `RobotaxiPrototypeReceipt` (current; ride-lifecycle)
-59. `RobotaxiPrototypeSettings` (current; account-support)
-60. `RobotaxiPrototypeShareTrip` (current; ride-lifecycle)
-61. `RobotaxiPrototypeSupport` (current; account-support)
-62. `RobotaxiPrototypeSupportThread` (current; account-support)
-63. `RobotaxiPrototypeSupportTicket` (current; account-support)
-64. `RobotaxiPrototypeTrip` (current; ride-lifecycle)
-65. `RobotaxiPrototypeVehicles` (current; driver-ops)
-66. `Splash` (current; other)
-67. `TabRoot` (compatibility_redirect; other)
-68. `WelcomeScreen` (compatibility_redirect; auth-onboarding)
-69. `WooviDriverBalance` (compatibility_redirect; driver-ops)
+39. `RobotaxiNotifications` (current; account-support)
+40. `RobotaxiPrototype` (current; prototype)
+41. `RobotaxiPrototypeCancellation` (current; ride-lifecycle)
+42. `RobotaxiPrototypeChat` (current; account-support)
+43. `RobotaxiPrototypeComplain` (current; ride-lifecycle)
+44. `RobotaxiPrototypeDestination` (current; prototype)
+45. `RobotaxiPrototypeDriverActivation` (current; driver-ops)
+46. `RobotaxiPrototypeDriverDocuments` (current; driver-ops)
+47. `RobotaxiPrototypeDriverPanel` (current; driver-ops)
+48. `RobotaxiPrototypeDriverSearch` (current; driver-ops)
+49. `RobotaxiPrototypeDriverWaitlist` (current; driver-ops)
+50. `RobotaxiPrototypeDriverWaitlistStatus` (current; driver-ops)
+51. `RobotaxiPrototypeInvites` (current; prototype)
+52. `RobotaxiPrototypeMenu` (current; prototype)
+53. `RobotaxiPrototypeNoDrivers` (current; driver-ops)
+54. `RobotaxiPrototypePaymentFailed` (current; ride-lifecycle)
+55. `RobotaxiPrototypePaymentSuccess` (current; ride-lifecycle)
+56. `RobotaxiPrototypeProfile` (current; account-support)
+57. `RobotaxiPrototypePublicTracking` (current; prototype)
+58. `RobotaxiPrototypeRating` (current; prototype)
+59. `RobotaxiPrototypeReceipt` (current; ride-lifecycle)
+60. `RobotaxiPrototypeSettings` (current; account-support)
+61. `RobotaxiPrototypeShareTrip` (current; ride-lifecycle)
+62. `RobotaxiPrototypeSupport` (current; account-support)
+63. `RobotaxiPrototypeSupportThread` (current; account-support)
+64. `RobotaxiPrototypeSupportTicket` (current; account-support)
+65. `RobotaxiPrototypeTrip` (current; ride-lifecycle)
+66. `RobotaxiPrototypeVehicles` (current; driver-ops)
+67. `Splash` (current; other)
+68. `TabRoot` (compatibility_redirect; other)
+69. `WelcomeScreen` (compatibility_redirect; auth-onboarding)
+70. `WooviDriverBalance` (compatibility_redirect; driver-ops)
 
 ## Maestro Flows (One By One)
 
@@ -218,7 +219,7 @@ This is a static inventory of flow definitions, not an execution report. `DEFINE
 | ride-lifecycle | 10 | 39 |
 | driver-ops | 11 | 1 |
 | wallet-finance | 0 | 1 |
-| account-support | 12 | 0 |
+| account-support | 13 | 0 |
 | prototype | 6 | 0 |
 | e2e-core | 0 | 13 |
 | qa-auxiliary | 0 | 35 |

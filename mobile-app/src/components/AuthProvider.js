@@ -1,4 +1,5 @@
 import Logger from '../utils/Logger';
+import LeafBootSplash from './design-system/LeafBootSplash';
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { useDispatch } from 'react-redux';
 import { useAuth } from '../hooks/useAuth';
@@ -140,20 +141,9 @@ const resolveBootstrapFirstName = (user) => {
 
 const AuthBootstrapShell = ({ user }) => {
   const firstName = resolveBootstrapFirstName(user);
-  const title = firstName ? `Bem vindo(a), ${firstName}` : 'Bem vindo(a)';
+  const title = firstName ? `Bem-vindo(a), ${firstName}` : null;
 
-  return (
-    <View style={styles.bootstrapContainer}>
-      <View style={styles.bootstrapContent}>
-        <Text style={styles.bootstrapTitle}>{title}</Text>
-        <ActivityIndicator
-          size="small"
-          color="#0F3B16"
-          style={styles.bootstrapSpinner}
-        />
-      </View>
-    </View>
-  );
+  return <LeafBootSplash title={title} testID="auth-bootstrap-splash" />;
 };
 
 const runPostLoginServicesInBackground = ({ updateFcmToken = false } = {}) => {
@@ -723,7 +713,7 @@ const styles = StyleSheet.create({
     color: '#0A1410',
     fontSize: 22,
     lineHeight: 29,
-    fontWeight: '700',
+    fontFamily: 'Figtree-Bold',
     textAlign: 'center',
   },
   bootstrapSpinner: {

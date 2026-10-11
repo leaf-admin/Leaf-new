@@ -310,3 +310,31 @@ export function buildRestoredAuthFlowData({
 
   return savedData;
 }
+
+// After phone verification: a remote profile that already finished onboarding
+// (role defined, consents complete) logs straight in instead of asking the role
+// again. Returns null when the account is new, incomplete, or belongs to
+// another uid, so the regular onboarding continues.
+export function resolveExistingAccountLogin({ verifiedUser, remoteProfile } = {}) {
+  const verifiedUid = String(verifiedUser?.uid || '').trim();
+  if (!verifiedUid || !remoteProfile || typeof remoteProfile !== 'object') {
+    return null;
+  }
+  const remoteUid = String(remoteProfile.uid || remoteProfile.id || '').trim();
+  if (remoteUid && remoteUid !== verifiedUid) {
+    return null;
+  }
+  if (!isPersistedProfileOnboardingComplete(remoteProfile)) {
+    return null;
+  }
+  const userType = normalizeAuthFlowUserType(
+    remoteProfile.usertype || remoteProfile.userType || remoteProfile?.profile?.usertype || remoteProfile?.profile?.userType,
+  );
+  return {
+    ...remoteProfile,
+    uid: verifiedUid,
+    phoneNumber: remoteProfile.phoneNumber || verifiedUser?.phoneNumber || null,
+    usertype: userType,
+    userType,
+  };
+}

@@ -426,7 +426,7 @@ const styles = StyleSheet.create({
     },
     title: {
         fontSize: 24,
-        fontWeight: 'bold',
+        fontFamily: 'Figtree-Bold',
         color: '#1A330E',
     },
     closeButton: {
@@ -440,7 +440,7 @@ const styles = StyleSheet.create({
     },
     instructionsTitle: {
         fontSize: 16,
-        fontWeight: 'bold',
+        fontFamily: 'Figtree-Bold',
         color: '#333',
         marginBottom: 8,
     },
@@ -463,7 +463,7 @@ const styles = StyleSheet.create({
     },
     fileName: {
         fontSize: 14,
-        fontWeight: '600',
+        fontFamily: 'Figtree-SemiBold',
         color: '#333',
         marginBottom: 4,
     },
@@ -479,7 +479,7 @@ const styles = StyleSheet.create({
     processingText: {
         marginTop: 10,
         fontSize: 16,
-        fontWeight: '600',
+        fontFamily: 'Figtree-SemiBold',
         color: '#1A330E',
     },
     actionsContainer: {
@@ -508,7 +508,7 @@ const styles = StyleSheet.create({
     },
     buttonText: {
         fontSize: 16,
-        fontWeight: '600',
+        fontFamily: 'Figtree-SemiBold',
         color: '#fff',
     },
     retryButtonText: {
@@ -531,7 +531,7 @@ const styles = StyleSheet.create({
     warningText: {
         fontSize: 13,
         color: '#FF6B00',
-        fontWeight: '600',
+        fontFamily: 'Figtree-SemiBold',
         flex: 1,
     },
 });

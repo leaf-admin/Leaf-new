@@ -334,7 +334,7 @@ const styles = StyleSheet.create({
     },
     headerTitle: {
         fontSize: 18,
-        fontWeight: 'bold',
+        fontFamily: 'Figtree-Bold',
         color: '#333',
     },
     closeButton: {
@@ -350,7 +350,7 @@ const styles = StyleSheet.create({
     },
     starsTitle: {
         fontSize: 16,
-        fontWeight: '600',
+        fontFamily: 'Figtree-SemiBold',
         color: '#333',
         marginBottom: 20,
         textAlign: 'center',
@@ -366,7 +366,7 @@ const styles = StyleSheet.create({
     },
     ratingText: {
         fontSize: 16,
-        fontWeight: '600',
+        fontFamily: 'Figtree-SemiBold',
         color: '#FFD700',
         marginTop: 10,
     },
@@ -375,7 +375,7 @@ const styles = StyleSheet.create({
     },
     optionsTitle: {
         fontSize: 16,
-        fontWeight: '600',
+        fontFamily: 'Figtree-SemiBold',
         color: '#333',
         marginBottom: 15,
         textAlign: 'center',
@@ -404,11 +404,11 @@ const styles = StyleSheet.create({
         fontSize: 12,
         color: '#666',
         textAlign: 'center',
-        fontWeight: '500',
+        fontFamily: 'Figtree-Medium',
     },
     optionTextSelected: {
         color: '#FFFFFF',
-        fontWeight: '600',
+        fontFamily: 'Figtree-SemiBold',
     },
     textFieldsContainer: {
         marginBottom: 20,
@@ -418,7 +418,7 @@ const styles = StyleSheet.create({
     },
     textFieldLabel: {
         fontSize: 14,
-        fontWeight: '600',
+        fontFamily: 'Figtree-SemiBold',
         color: '#333',
         marginBottom: 8,
     },
@@ -453,7 +453,7 @@ const styles = StyleSheet.create({
     submitButtonText: {
         color: '#FFFFFF',
         fontSize: 16,
-        fontWeight: 'bold',
+        fontFamily: 'Figtree-Bold',
     },
 });
 

@@ -738,7 +738,7 @@ export default function EarningsReportScreen({ navigation, route }) {
       if (!withdrawalsEnabled) {
         Alert.alert(
           'Saque fora do piloto',
-          'Durante o piloto controlado, os repasses do motorista serao tratados pela operacao assistida.'
+          'Durante o piloto controlado, os repasses do motorista serão tratados pela operação assistida.'
         );
         setWithdrawModalVisible(false);
         return;
@@ -909,6 +909,7 @@ export default function EarningsReportScreen({ navigation, route }) {
     ? summaryTotalRides
     : Math.max(totalRides, todayFallbackRides);
   const safeTotalCancellations = Math.max(totalCancellations, Math.round(toNumber(earningsData?.totalCancellations, 0)));
+  const periodHasActivity = safeTotalRides > 0 || safeTotalCancellations > 0 || toNumber(summaryTotalNet, 0) > 0;
 
   const chartHeight = 152;
   const chartTop = 12;
@@ -1244,7 +1245,7 @@ export default function EarningsReportScreen({ navigation, route }) {
                 <View style={styles.pilotInfoBanner}>
                   <Ionicons name="information-circle-outline" size={18} color="#1A330E" />
                   <Text style={styles.pilotInfoBannerText}>
-                    Saque e repasse ficam fora do app neste piloto e serao conduzidos pela operacao assistida.
+                    Saque e repasse ficam fora do app neste piloto e serão conduzidos pela operação assistida.
                   </Text>
                 </View>
               ) : null}
@@ -1277,19 +1278,20 @@ export default function EarningsReportScreen({ navigation, route }) {
                   <Text style={styles.chartTitle}>
                     {activeSegment === 'daily' ? 'Resumo de hoje' : activeSegment === 'weekly' ? 'Resumo da semana' : 'Resumo do mês'}
                   </Text>
-                  <View style={styles.chartTrendBadge}>
+                  {/* A zero variation over an empty period is noise, not information. */}
+                  {periodHasActivity ? <View style={styles.chartTrendBadge}>
                     <Text style={styles.chartTrendBadgeText}>
                       {deltaFromYesterday === null
                         ? 'Variação indisponível'
                         : `${deltaPrefix}R$ ${deltaAmountLabel} vs ontem`}
                     </Text>
-                  </View>
+                  </View> : null}
                 </View>
 
                 <View style={styles.chartWrap} onLayout={event => setChartWidth(event.nativeEvent.layout.width)}>
-                  {bars.length === 0 ? (
+                  {bars.length === 0 || !periodHasActivity ? (
                     <View style={styles.emptyChartWrap}>
-                      <Text style={styles.emptyChartText}>Sem dados para o período</Text>
+                      <Text style={styles.emptyChartText}>{activeSegment === 'daily' ? 'Nenhuma corrida hoje' : 'Nenhuma corrida no período'}</Text>
                     </View>
                   ) : (
                     <Svg width={chartInnerWidth} height={chartHeight}>
@@ -2506,6 +2508,6 @@ const styles = StyleSheet.create({
     color: '#2a2a2a',
     fontSize: 14,
     textAlign: 'center',
-    fontWeight: '600'
+    fontFamily: 'Figtree-SemiBold',
   }
 });

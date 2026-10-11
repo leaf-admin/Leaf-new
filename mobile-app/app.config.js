@@ -125,7 +125,12 @@ const canonicalInterFonts = [
     '../node_modules/@expo-google-fonts/inter/500Medium/Inter_500Medium.ttf',
     '../node_modules/@expo-google-fonts/inter/600SemiBold/Inter_600SemiBold.ttf',
     '../node_modules/@expo-google-fonts/inter/700Bold/Inter_700Bold.ttf',
-    '../node_modules/@expo-google-fonts/inter/300Light/Inter_300Light.ttf'
+    '../node_modules/@expo-google-fonts/inter/300Light/Inter_300Light.ttf',
+    '../node_modules/@expo-google-fonts/figtree/400Regular/Figtree_400Regular.ttf',
+    '../node_modules/@expo-google-fonts/figtree/500Medium/Figtree_500Medium.ttf',
+    '../node_modules/@expo-google-fonts/figtree/600SemiBold/Figtree_600SemiBold.ttf',
+    '../node_modules/@expo-google-fonts/figtree/700Bold/Figtree_700Bold.ttf',
+    '../node_modules/@expo-google-fonts/figtree/300Light/Figtree_300Light.ttf'
 ];
 const expoUpdatesConfig = disableUpdatesForLocalSimulator || !otaUpdatesEnabled
     ? {

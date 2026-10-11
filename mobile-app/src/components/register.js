@@ -720,7 +720,7 @@ const styles = StyleSheet.create({
         color: '#fff',
         marginTop: 16,
         fontSize: 16,
-        fontWeight: '500',
+        fontFamily: 'Figtree-Medium',
     },
     snackbar: {
         position: 'absolute',
@@ -747,7 +747,7 @@ const styles = StyleSheet.create({
     snackbarText: {
         color: '#fff',
         fontSize: 16,
-        fontWeight: '500',
+        fontFamily: 'Figtree-Medium',
         textAlign: 'center',
     },
     formFieldsContainer: {
@@ -812,7 +812,7 @@ const styles = StyleSheet.create({
     buttonTitle: {
         color: '#FFFFFF',
         fontSize: 18,
-        fontWeight: '600',
+        fontFamily: 'Figtree-SemiBold',
     },
 });
 

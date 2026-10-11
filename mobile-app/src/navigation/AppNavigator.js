@@ -1,6 +1,6 @@
 import Logger from '../utils/Logger';
 import React, { useEffect, useRef, useState } from 'react';
-import { CommonActions, NavigationContainer, createNavigationContainerRef, getStateFromPath } from '@react-navigation/native';
+import { CommonActions, DefaultTheme, NavigationContainer, createNavigationContainerRef, getStateFromPath } from '@react-navigation/native';
 import { CardStyleInterpolators, TransitionPresets, createStackNavigator } from '@react-navigation/stack';
 import Constants from 'expo-constants';
 
@@ -52,6 +52,7 @@ import RobotaxiPaymentSuccessScreen from '../screens/prototype/RobotaxiPaymentSu
 import RobotaxiPaymentFailedScreen from '../screens/prototype/RobotaxiPaymentFailedScreen';
 import RobotaxiNoDriversScreen from '../screens/prototype/RobotaxiNoDriversScreen';
 import RobotaxiChatScreen from '../screens/prototype/RobotaxiChatScreen';
+import RobotaxiNotificationsScreen from '../screens/prototype/RobotaxiNotificationsScreen';
 import RobotaxiSupportScreen from '../screens/prototype/RobotaxiSupportScreen';
 import RobotaxiReceiptScreen from '../screens/prototype/RobotaxiReceiptScreen';
 import RobotaxiSupportThreadScreen from '../screens/prototype/RobotaxiSupportThreadScreen';
@@ -73,6 +74,11 @@ import RobotaxiDriverWaitlistStatusScreen from '../screens/prototype/RobotaxiDri
 
 const Stack = createStackNavigator();
 const rootNavigationRef = createNavigationContainerRef();
+// Behind the first screen while it mounts: splash green instead of a white flash.
+const LEAF_NAVIGATION_THEME = {
+  ...DefaultTheme,
+  colors: { ...DefaultTheme.colors, background: '#003002' },
+};
 
 function RobotaxiDriverSearchMapScreen(props) {
   return (
@@ -356,6 +362,7 @@ const appLinking = {
       RobotaxiMenuEditProfile: 'robotaxi/menu/profile',
       RobotaxiMenuTripHistory: 'robotaxi/menu/history',
       RobotaxiMenuMessages: 'robotaxi/menu/messages',
+      RobotaxiNotifications: 'robotaxi/notifications',
       RobotaxiMenuHelp: 'robotaxi/menu/help',
       RobotaxiMenuSettings: 'robotaxi/menu/settings',
       EarningsReport: 'driver/earnings',
@@ -728,6 +735,11 @@ function renderSharedPrototypeScreens() {
         options={prototypeRootScreenOptions}
       />
       <Stack.Screen
+        name="RobotaxiNotifications"
+        component={RobotaxiNotificationsScreen}
+        options={prototypeRootScreenOptions}
+      />
+      <Stack.Screen
         name="RobotaxiMenuMessages"
         component={RobotaxiChatScreen}
         options={prototypeOverlayScreenOptions}
@@ -1063,7 +1075,12 @@ function MainNavigator() {
   return (
     <Stack.Navigator
       key={activeRole === 'driver' ? 'private-driver' : 'private-customer'}
-      initialRouteName="Map"
+      // The home must start under the name every "go home" call uses. It used
+      // to start as "Map" while ~40 call sites navigate to "RobotaxiPrototype",
+      // which stacked a second home (a second live map) on top of the first.
+      // With two homes the driver could be left looking at the unfocused one:
+      // a ride offer arrived and no card was shown.
+      initialRouteName="RobotaxiPrototype"
       screenOptions={verticalScreenOptions}
     >
       <Stack.Screen
@@ -1174,7 +1191,7 @@ function PrototypeQaDeepLinkGuard({ navigationRef }) {
 export default function AppNavigator() {
   return (
     <LeafNativeTabBarProvider>
-      <NavigationContainer ref={rootNavigationRef} linking={appLinking}>
+      <NavigationContainer ref={rootNavigationRef} linking={appLinking} theme={LEAF_NAVIGATION_THEME}>
         <MainNavigator />
       </NavigationContainer>
       <PrototypeQaDeepLinkGuard navigationRef={rootNavigationRef} />

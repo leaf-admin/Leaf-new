@@ -612,14 +612,14 @@ const styles = StyleSheet.create({
   },
   licenseTitle: {
     fontSize: 16,
-    fontWeight: 'bold',
+    fontFamily: 'Figtree-Bold',
     color: '#2c3e50',
     marginBottom: 4,
   },
   licenseType: {
     fontSize: 12,
     color: '#2E8B57',
-    fontWeight: 'bold',
+    fontFamily: 'Figtree-Bold',
     marginBottom: 8,
   },
   licenseDescription: {
@@ -657,7 +657,7 @@ const styles = StyleSheet.create({
   },
   complianceTitle: {
     fontSize: 16,
-    fontWeight: 'bold',
+    fontFamily: 'Figtree-Bold',
     color: '#2c3e50',
     marginBottom: 4,
   },
@@ -678,7 +678,7 @@ const styles = StyleSheet.create({
   },
   certificationsTitle: {
     fontSize: 16,
-    fontWeight: 'bold',
+    fontFamily: 'Figtree-Bold',
     color: '#2c3e50',
     marginBottom: 16,
   },

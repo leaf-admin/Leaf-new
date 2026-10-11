@@ -8,6 +8,7 @@ import { saveStepData, completeStep, saveCurrentStep, loadStepData } from '../..
 import testUserService from '../../services/TestUserService';
 import UserAuthService from '../../services/UserAuthService';
 import OnboardingProfileService from '../../services/OnboardingProfileService';
+import mobileProfileService from '../../services/MobileProfileService';
 import driverActivationService from '../../services/DriverActivationService';
 import { createInitialDriverOnboardingState } from '../../services/DriverOnboardingService';
 import { allowReviewAccess } from '../../config/runtimeAccessPolicy';
@@ -20,6 +21,7 @@ import {
   normalizeAuthFlowProfileData,
   normalizeAuthFlowUserType,
   resolveAuthFlowInitialStep,
+  resolveExistingAccountLogin,
   unwrapAuthFlowStepData,
 } from './authFlowRecovery';
 import {
@@ -481,6 +483,28 @@ const AuthFlow = ({
       ...user,
       phoneNumber,
     });
+    // Existing account with a defined role: log in directly instead of asking
+    // the role again. Any lookup failure keeps the regular onboarding path.
+    let existingAccount = null;
+    try {
+      const remoteProfile = await mobileProfileService.getCurrentProfile({ suppressErrors: true, timeoutMs: 6000 });
+      existingAccount = resolveExistingAccountLogin({ verifiedUser: sanitizedUser, remoteProfile });
+    } catch (lookupError) {
+      Logger.warn('⚠️ Perfil remoto indisponível após OTP; seguindo onboarding:', lookupError?.message || lookupError);
+    }
+    if (existingAccount) {
+      const persistedExisting =
+        await persistAuthenticatedProfile(existingAccount, existingAccount.userType) || existingAccount;
+      store.dispatch({ type: FETCH_USER_SUCCESS, payload: persistedExisting });
+      store.dispatch({ type: 'SET_AUTH_STATUS', payload: { authenticated: true, user: persistedExisting } });
+      await completeStep('phone_validation');
+      Logger.log('✅ Conta existente reconhecida após OTP; login direto.', { userType: persistedExisting.userType });
+      if (onComplete) {
+        onComplete({ ...persistedExisting, phoneValidated: true, authMethod: 'phone_otp' });
+      }
+      return;
+    }
+
     await persistPhoneValidatedOnboardingSession(sanitizedUser);
     await saveStepDataLocal({
       phoneNumber: sanitizedUser.phoneNumber,
@@ -491,7 +515,7 @@ const AuthFlow = ({
     await completeStep('phone_validation');
     setCurrentStep(PROFILE_SELECTION_STEP_INDEX);
     await saveCurrentStep(PROFILE_SELECTION_STEP_INDEX);
-  }, [authData, saveStepDataLocal, completeStep, onComplete]);
+  }, [authData, saveStepDataLocal, completeStep, onComplete, persistAuthenticatedProfile]);
 
   // Função para lidar com o envio do telefone
   const handlePhoneVerificationSent = useCallback(async (confirmation, phoneNumber, isExistingUser = false, skipOTP = false) => {

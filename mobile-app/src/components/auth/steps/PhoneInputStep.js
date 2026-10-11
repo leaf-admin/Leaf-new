@@ -458,11 +458,11 @@ const PhoneInputStep = ({ onVerificationSent, onPasswordLoginSuccess, progressMe
                 }
 
                 const firebaseConfirmation = await auth().signInWithPhoneNumber(fullPhoneNumber);
-                return {
-                    ...firebaseConfirmation,
+                // confirm() lives on the ConfirmationResult prototype; spreading drops it.
+                return Object.assign(firebaseConfirmation, {
                     channel: 'sms',
                     isCustomOtp: false
-                };
+                });
             };
 
             if (forceCustomOtpFlow) {

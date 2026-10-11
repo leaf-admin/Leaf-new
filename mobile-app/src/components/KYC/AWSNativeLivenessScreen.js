@@ -569,7 +569,7 @@ const styles = StyleSheet.create({
     fontSize: 34,
     lineHeight: 52,
     textAlign: 'center',
-    fontFamily: 'Inter_700Bold',
+    fontFamily: 'Figtree-Bold',
     marginBottom: 4,
   },
   title: {
@@ -577,7 +577,7 @@ const styles = StyleSheet.create({
     fontSize: 22,
     lineHeight: 28,
     color: '#111111',
-    fontFamily: 'Inter_600SemiBold',
+    fontFamily: 'Figtree-SemiBold',
     textAlign: 'center',
   },
   subtitle: {
@@ -585,7 +585,7 @@ const styles = StyleSheet.create({
     fontSize: 15,
     lineHeight: 22,
     color: '#6B7169',
-    fontFamily: 'Inter_400Regular',
+    fontFamily: 'Figtree-Regular',
     textAlign: 'center',
   },
   primaryButton: {
@@ -600,7 +600,7 @@ const styles = StyleSheet.create({
   primaryButtonText: {
     color: '#FFFFFF',
     fontSize: 16,
-    fontFamily: 'Inter_700Bold',
+    fontFamily: 'Figtree-Bold',
   },
   secondaryButton: {
     marginTop: 16,
@@ -612,6 +612,6 @@ const styles = StyleSheet.create({
   secondaryButtonText: {
     color: '#6B7169',
     fontSize: 16,
-    fontFamily: 'Inter_600SemiBold',
+    fontFamily: 'Figtree-SemiBold',
   },
 });

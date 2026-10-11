@@ -104,7 +104,7 @@ const styles = StyleSheet.create({
     },
     title: {
         fontSize: 24,
-        fontWeight: 'bold',
+        fontFamily: 'Figtree-Bold',
         color: colors.BLACK,
         marginBottom: 16,
         textAlign: 'center',
@@ -127,7 +127,7 @@ const styles = StyleSheet.create({
     startButtonText: {
         color: colors.WHITE,
         fontSize: 16,
-        fontWeight: '600',
+        fontFamily: 'Figtree-SemiBold',
         textAlign: 'center',
     },
     dontShowButton: {

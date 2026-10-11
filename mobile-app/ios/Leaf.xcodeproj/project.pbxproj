@@ -7,13 +7,16 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		06E7EABA633340589FB9B02A /* LeafVoiceGuidance.m in Sources */ = {isa = PBXBuildFile; fileRef = E243C58BC61942AA8DA91ADB /* LeafVoiceGuidance.m */; };
 		0B2337091A4587AC3ED6252D /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 84C7E4850D1D7BD7E053F0F7 /* PrivacyInfo.xcprivacy */; };
 		0E8B0FA32C504421955FAFD2 /* LeafAwsLivenessModule.m in Sources */ = {isa = PBXBuildFile; fileRef = 9296643619E746EB8B5E5DA2 /* LeafAwsLivenessModule.m */; };
 		13B07FBF1A68108700A75B9A /* Images.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 13B07FB51A68108700A75B9A /* Images.xcassets */; };
+		184BA88472364ABEB0C4DEAB /* LeafMaterialView.m in Sources */ = {isa = PBXBuildFile; fileRef = 079CD5E50F674F46B5718A0A /* LeafMaterialView.m */; };
 		22F9049D21CD4AA1840D9375 /* Inter_400Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 5AF1F082D95E49B3BCB57F0F /* Inter_400Regular.ttf */; };
 		26691D78F6994299B7AC732A /* LeafRideActivityModule.m in Sources */ = {isa = PBXBuildFile; fileRef = 83774E6C32A34D2EBE0ED69F /* LeafRideActivityModule.m */; };
 		2E0B80D0CF174C8A9A984CF9 /* Localizable.strings in Resources */ = {isa = PBXBuildFile; fileRef = 5DB76A7458E64693BFFAC7AE /* Localizable.strings */; };
 		39FAB27052894BAAA6552343 /* LeafFaceEmbeddingModule.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9BA426EC014D4E19AA7613F6 /* LeafFaceEmbeddingModule.swift */; };
+		3B155D9914C44CB3A3821CA9 /* LeafVoiceGuidance.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0882C4C938DE42E5A5B89A4E /* LeafVoiceGuidance.swift */; };
 		3DCB0EF04A90481A809B621B /* horn.wav in Resources */ = {isa = PBXBuildFile; fileRef = C40C34B7254B4AD0A5A711A6 /* horn.wav */; };
 		3E461D99554A48A4959DE609 /* SplashScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = AA286B85B6C04FC6940260E9 /* SplashScreen.storyboard */; };
 		3EE614912FFA4AA0A9CA0C64 /* LeafFaceEmbeddingModule.m in Sources */ = {isa = PBXBuildFile; fileRef = 79CA3003C57A449FA0952712 /* LeafFaceEmbeddingModule.m */; };
@@ -24,6 +27,7 @@
 		712BA939F32145E2A005547A /* Inter_600SemiBold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = AF2AA683E6EA414985ED9B8C /* Inter_600SemiBold.ttf */; };
 		78DF9BD629FD4332BBF3D095 /* Inter_700Bold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 7278663062B0454BB7102AC3 /* Inter_700Bold.ttf */; };
 		7B3ED97F37814EE0B071E8D1 /* Localizable.strings in Resources */ = {isa = PBXBuildFile; fileRef = F277A3A4036E48219CAD1AE1 /* Localizable.strings */; };
+		A42BD31DEC2C450A97FBC477 /* LeafMaterialView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D06AB1EAF8E3406CB8DBDADE /* LeafMaterialView.swift */; };
 		B738E7C115448FDB6855404E /* ExpoModulesProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 12312C47B3FB9F909BE2D1F7 /* ExpoModulesProvider.swift */; };
 		B9D64E3D8B8C4A40A1F2C903 /* FaceLiveness in Frameworks */ = {isa = PBXBuildFile; productRef = B9D64E3D8B8C4A40A1F2C902 /* FaceLiveness */; };
 		BB2F792D24A3F905000567C9 /* Expo.plist in Resources */ = {isa = PBXBuildFile; fileRef = BB2F792C24A3F905000567C9 /* Expo.plist */; };
@@ -36,10 +40,6 @@
 		F11748422D0307B40044C1D9 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = F11748412D0307B40044C1D9 /* AppDelegate.swift */; };
 		F6D5171B18CE4115BF6BFE18 /* repeat.wav in Resources */ = {isa = PBXBuildFile; fileRef = 1046A07F92C54CC482D1B201 /* repeat.wav */; };
 		FF7202B31CAE45B69F394CF1 /* LeafRideActivityWidget.appex in Copy Files */ = {isa = PBXBuildFile; fileRef = 80D5F2DCBBB049F697CCE8B6 /* LeafRideActivityWidget.appex */; };
-		A42BD31DEC2C450A97FBC477 /* LeafMaterialView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D06AB1EAF8E3406CB8DBDADE /* LeafMaterialView.swift */; };
-		184BA88472364ABEB0C4DEAB /* LeafMaterialView.m in Sources */ = {isa = PBXBuildFile; fileRef = 079CD5E50F674F46B5718A0A /* LeafMaterialView.m */; };
-		3B155D9914C44CB3A3821CA9 /* LeafVoiceGuidance.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0882C4C938DE42E5A5B89A4E /* LeafVoiceGuidance.swift */; };
-		06E7EABA633340589FB9B02A /* LeafVoiceGuidance.m in Sources */ = {isa = PBXBuildFile; fileRef = E243C58BC61942AA8DA91ADB /* LeafVoiceGuidance.m */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -57,6 +57,8 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		079CD5E50F674F46B5718A0A /* LeafMaterialView.m */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = 4; includeInIndex = 0; lastKnownFileType = sourcecode.c.objc; name = LeafMaterialView.m; path = Leaf/LeafMaterialView.m; sourceTree = "<group>"; };
+		0882C4C938DE42E5A5B89A4E /* LeafVoiceGuidance.swift */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = 4; includeInIndex = 0; lastKnownFileType = sourcecode.swift; name = LeafVoiceGuidance.swift; path = Leaf/LeafVoiceGuidance.swift; sourceTree = "<group>"; };
 		0F059528C88244B6B5C03984 /* LeafRideActivityModule.swift */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = 4; includeInIndex = 0; lastKnownFileType = sourcecode.swift; name = LeafRideActivityModule.swift; path = Leaf/LeafRideActivityModule.swift; sourceTree = "<group>"; };
 		1046A07F92C54CC482D1B201 /* repeat.wav */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = undefined; includeInIndex = 0; lastKnownFileType = unknown; name = repeat.wav; path = Leaf/repeat.wav; sourceTree = "<group>"; };
 		12312C47B3FB9F909BE2D1F7 /* ExpoModulesProvider.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ExpoModulesProvider.swift; path = "Pods/Target Support Files/Pods-Leaf/ExpoModulesProvider.swift"; sourceTree = "<group>"; };
@@ -85,16 +87,14 @@
 		BB2F792C24A3F905000567C9 /* Expo.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; path = Expo.plist; sourceTree = "<group>"; };
 		C40C34B7254B4AD0A5A711A6 /* horn.wav */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = undefined; includeInIndex = 0; lastKnownFileType = unknown; name = horn.wav; path = Leaf/horn.wav; sourceTree = "<group>"; };
 		CAA91E44121947F3910D9A2F /* LeafRideActivityWidgetBundle.swift */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = 4; includeInIndex = 0; lastKnownFileType = sourcecode.swift; name = LeafRideActivityWidgetBundle.swift; path = LeafRideActivityWidgetBundle.swift; sourceTree = "<group>"; };
+		D06AB1EAF8E3406CB8DBDADE /* LeafMaterialView.swift */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = 4; includeInIndex = 0; lastKnownFileType = sourcecode.swift; name = LeafMaterialView.swift; path = Leaf/LeafMaterialView.swift; sourceTree = "<group>"; };
 		D19C57DEAE98491A992BF0F6 /* LeafRideActivityAttributes.swift */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = 4; includeInIndex = 0; lastKnownFileType = sourcecode.swift; name = LeafRideActivityAttributes.swift; path = Leaf/LeafRideActivityAttributes.swift; sourceTree = "<group>"; };
 		D330AE9FB630895D3394782B /* Pods-Leaf.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Leaf.release.xcconfig"; path = "Target Support Files/Pods-Leaf/Pods-Leaf.release.xcconfig"; sourceTree = "<group>"; };
+		E243C58BC61942AA8DA91ADB /* LeafVoiceGuidance.m */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = 4; includeInIndex = 0; lastKnownFileType = sourcecode.c.objc; name = LeafVoiceGuidance.m; path = Leaf/LeafVoiceGuidance.m; sourceTree = "<group>"; };
 		ED297162215061F000B7C4FE /* JavaScriptCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = JavaScriptCore.framework; path = System/Library/Frameworks/JavaScriptCore.framework; sourceTree = SDKROOT; };
 		F11748412D0307B40044C1D9 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AppDelegate.swift; path = Leaf/AppDelegate.swift; sourceTree = "<group>"; };
 		F11748442D0722820044C1D9 /* Leaf-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; name = "Leaf-Bridging-Header.h"; path = "Leaf/Leaf-Bridging-Header.h"; sourceTree = "<group>"; };
 		F277A3A4036E48219CAD1AE1 /* Localizable.strings */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = 4; includeInIndex = 0; lastKnownFileType = text.plist.strings; name = Localizable.strings; path = Base.lproj/Localizable.strings; sourceTree = "<group>"; };
-		D06AB1EAF8E3406CB8DBDADE /* LeafMaterialView.swift */ = {isa = PBXFileReference; name = "LeafMaterialView.swift"; path = "Leaf/LeafMaterialView.swift"; sourceTree = "<group>"; fileEncoding = 4; lastKnownFileType = sourcecode.swift; explicitFileType = undefined; includeInIndex = 0; };
-		079CD5E50F674F46B5718A0A /* LeafMaterialView.m */ = {isa = PBXFileReference; name = "LeafMaterialView.m"; path = "Leaf/LeafMaterialView.m"; sourceTree = "<group>"; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; explicitFileType = undefined; includeInIndex = 0; };
-		0882C4C938DE42E5A5B89A4E /* LeafVoiceGuidance.swift */ = {isa = PBXFileReference; name = "LeafVoiceGuidance.swift"; path = "Leaf/LeafVoiceGuidance.swift"; sourceTree = "<group>"; fileEncoding = 4; lastKnownFileType = sourcecode.swift; explicitFileType = undefined; includeInIndex = 0; };
-		E243C58BC61942AA8DA91ADB /* LeafVoiceGuidance.m */ = {isa = PBXFileReference; name = "LeafVoiceGuidance.m"; path = "Leaf/LeafVoiceGuidance.m"; sourceTree = "<group>"; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; explicitFileType = undefined; includeInIndex = 0; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -828,7 +828,7 @@
 				LIBRARY_SEARCH_PATHS = "$(SDKROOT)/usr/lib/swift\"$(inherited)\"";
 				MTL_ENABLE_DEBUG_INFO = YES;
 				ONLY_ACTIVE_ARCH = YES;
-				REACT_NATIVE_PATH = "${PODS_ROOT}/../../../node_modules/react-native";
+				REACT_NATIVE_PATH = "${PODS_ROOT}/../../../../../../../Documents/Leaf-new/node_modules/react-native";
 				SDKROOT = iphoneos;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) DEBUG";
 				SWIFT_ENABLE_EXPLICIT_MODULES = NO;
@@ -906,7 +906,7 @@
 				);
 				LIBRARY_SEARCH_PATHS = "$(SDKROOT)/usr/lib/swift\"$(inherited)\"";
 				MTL_ENABLE_DEBUG_INFO = NO;
-				REACT_NATIVE_PATH = "${PODS_ROOT}/../../../node_modules/react-native";
+				REACT_NATIVE_PATH = "${PODS_ROOT}/../../../../../../../Documents/Leaf-new/node_modules/react-native";
 				SDKROOT = iphoneos;
 				SWIFT_ENABLE_EXPLICIT_MODULES = NO;
 				USE_HERMES = true;

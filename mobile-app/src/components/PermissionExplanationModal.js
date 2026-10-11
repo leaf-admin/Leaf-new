@@ -187,14 +187,14 @@ const styles = StyleSheet.create({
   },
   title: {
     fontSize: 22,
-    fontWeight: '600',
+    fontFamily: 'Figtree-SemiBold',
     color: '#000',
     marginBottom: 16,
     lineHeight: 28,
   },
   text: {
     fontSize: 14,
-    fontWeight: 'normal',
+    fontFamily: 'Figtree-Regular',
     color: '#333',
     lineHeight: 21,
     marginBottom: 24,
@@ -214,7 +214,7 @@ const styles = StyleSheet.create({
   },
   cancelButtonText: {
     fontSize: 14,
-    fontWeight: '600',
+    fontFamily: 'Figtree-SemiBold',
     color: '#666',
   },
   acceptButton: {
@@ -227,7 +227,7 @@ const styles = StyleSheet.create({
   },
   acceptButtonText: {
     fontSize: 14,
-    fontWeight: '600',
+    fontFamily: 'Figtree-SemiBold',
     color: '#fff',
   },
 });

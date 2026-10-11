@@ -291,7 +291,7 @@ PLIST
     -archivePath "${archive_path}" \
     -exportPath "${export_path}" \
     -exportOptionsPlist "${export_options}" \
-    "${provisioning_flags[@]}"
+    ${provisioning_flags[@]+"${provisioning_flags[@]}"}
 
   if [[ -f "${export_path}/Leaf.ipa" ]]; then
     assert_exported_ipa "${export_path}/Leaf.ipa"

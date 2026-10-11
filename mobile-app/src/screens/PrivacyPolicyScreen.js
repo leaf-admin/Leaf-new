@@ -1,21 +1,16 @@
 import leafTypography from '../components/prototype/LeafTypography';
-import Logger from '../utils/Logger';
-import React, { useCallback, useState, useEffect } from 'react';
+import React, { useCallback, useState } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   ScrollView,
   StatusBar,
-  ActivityIndicator,
-  Switch,
-  Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LeafObjectIcon } from '../components/prototype/LeafVisualElements';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useSelector } from 'react-redux';
-import { apiClient } from '../services/httpClient';
 import { useAccountDeletionFlow } from '../hooks/useAccountDeletionFlow';
 import {
   PrototypeMenuCloseButton,
@@ -34,18 +29,9 @@ const PrivacyPolicyScreen = ({ navigation, route }) => {
   const insets = useSafeAreaInsets();
   const [selectedSection, setSelectedSection] = useState(() => route?.params?.initialSection || 'overview');
   const [sectionsExpanded, setSectionsExpanded] = useState(false);
-  const [privacySettings, setPrivacySettings] = useState({
-    locationSharing: true,
-    dataAnalytics: true,
-    marketingEmails: false,
-    pushNotifications: true,
-    thirdPartySharing: false
-  });
-  const [isLoading, setIsLoading] = useState(true);
   
   const authState = useSelector(state => state.auth);
   const currentUser = authState.profile;
-  const userIdentifier = String(currentUser?.id || currentUser?.uid || '').trim();
   const { promptAccountDeletion } = useAccountDeletionFlow({
     navigation,
     profile: currentUser,
@@ -59,96 +45,19 @@ const PrivacyPolicyScreen = ({ navigation, route }) => {
     { id: 'data-usage', label: 'Uso dos dados', icon: 'options-outline' },
     { id: 'data-sharing', label: 'Compartilhamento', icon: 'share-social-outline' },
     { id: 'data-security', label: 'Segurança', icon: 'shield-checkmark-outline' },
-    { id: 'user-rights', label: 'Excluir conta', icon: 'trash-outline' },
-    { id: 'settings', label: 'Configurações', icon: 'settings-outline' }
+    { id: 'user-rights', label: 'Seus direitos', icon: 'trash-outline' },
   ];
   const isAccountDeletionEntry = selectedSection === 'user-rights';
 
-  useEffect(() => {
-    loadPrivacySettings();
-  }, [currentUser?.id, currentUser?.uid]);
-
-  const loadPrivacySettings = async () => {
-    if (!userIdentifier) {
-      setIsLoading(false);
-      Logger.warn('⚠️ Identificador do usuário indisponível para carregar privacidade.');
-      return;
-    }
-
-    try {
-      setIsLoading(true);
-      
-      const response = await apiClient.get(`/api/privacy/settings/${userIdentifier}`);
-      setPrivacySettings(response.data.settings || privacySettings);
-      
-    } catch (error) {
-      Logger.error('Erro ao carregar configurações de privacidade:', error);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const updatePrivacySetting = async (setting, value) => {
-    if (!userIdentifier) {
-      Alert.alert('Sessão indisponível', 'Faça login novamente para ajustar as configurações de privacidade.');
-      return;
-    }
-
-    try {
-      await apiClient.put(`/api/privacy/settings/${userIdentifier}`, {
-        setting,
-        value
-      });
-      
-      setPrivacySettings(prev => ({
-        ...prev,
-        [setting]: value
-      }));
-      
-    } catch (error) {
-      Logger.error('Erro ao atualizar configuração:', error);
-      Alert.alert('Erro', 'Não foi possível atualizar a configuração');
-    }
-  };
-
-  const handleSettingToggle = (setting) => {
-    const newValue = !privacySettings[setting];
-    
-    if (setting === 'locationSharing') {
-      Alert.alert(
-        'Compartilhamento de Localização',
-        newValue 
-          ? 'Permitir que a Leaf acesse sua localização para encontrar motoristas próximos?'
-          : 'Desativar o compartilhamento de localização pode afetar a funcionalidade do app.',
-        [
-          { text: 'Cancelar', style: 'cancel' },
-          { text: 'Confirmar', onPress: () => updatePrivacySetting(setting, newValue) }
-        ]
-      );
-    } else {
-      updatePrivacySetting(setting, newValue);
-    }
-  };
-
-  const downloadUserData = async () => {
-    if (!userIdentifier) {
-      Alert.alert('Sessão indisponível', 'Faça login novamente para solicitar o download dos seus dados.');
-      return;
-    }
-
-    try {
-      Alert.alert(
-        'Download de Dados',
-        'Sua solicitação foi enviada. Você receberá um email com o link para download em até 48 horas.',
-        [{ text: 'OK' }]
-      );
-      
-      await apiClient.post(`/api/privacy/download-data/${userIdentifier}`);
-      
-    } catch (error) {
-      Logger.error('Erro ao solicitar download:', error);
-      Alert.alert('Erro', 'Não foi possível solicitar o download dos dados');
-    }
+  // Data export has no backend endpoint yet; route the LGPD request to support
+  // (a real ticket) instead of promising an email that is never sent.
+  const downloadUserData = () => {
+    navigation.navigate('RobotaxiPrototypeSupportTicket', {
+      type: 'account',
+      subject: 'Solicitação de cópia dos meus dados',
+      description: 'Quero receber uma cópia dos meus dados pessoais (LGPD).',
+      source: 'privacy-data-export',
+    });
   };
 
   const handleBack = useCallback(() => {
@@ -172,32 +81,12 @@ const PrivacyPolicyScreen = ({ navigation, route }) => {
     </View>
   );
 
-  const renderSettingRow = ({ keyName, icon, title, description, last = false }) => (
-    <View style={[styles.settingRow, last && styles.detailRowLast]}>
-      <View style={styles.settingCopyWrap}>
-        <View style={styles.detailIconSlot}>
-          <LeafObjectIcon symbol={icon} size={40} />
-        </View>
-        <View style={styles.detailCopy}>
-          <Text style={styles.detailTitle}>{title}</Text>
-          <Text style={styles.detailDescription}>{description}</Text>
-        </View>
-      </View>
-      <Switch
-        value={privacySettings[keyName]}
-        onValueChange={() => handleSettingToggle(keyName)}
-        trackColor={{ false: 'rgba(17,26,39,0.16)', true: 'rgba(42,77,29,0.36)' }}
-        thumbColor={privacySettings[keyName] ? color.accent.strong : '#F5F8FB'}
-      />
-    </View>
-  );
-
   const renderOverview = () => (
     <View style={styles.sectionContent}>
       <PrototypeMenuSection title="Resumo">
         <PrototypeMenuInfoRow label="Atualização" value="28 de julho de 2025" />
         <Text style={styles.bodyCopy}>
-          A Leaf respeita sua privacidade e está comprometido em proteger seus dados pessoais.
+          A Leaf respeita sua privacidade e está comprometida em proteger seus dados pessoais.
           Esta política descreve como coletamos, usamos e protegemos suas informações.
         </Text>
       </PrototypeMenuSection>
@@ -292,18 +181,6 @@ const PrivacyPolicyScreen = ({ navigation, route }) => {
     </View>
   );
 
-  const renderSettings = () => (
-    <View style={styles.sectionContent}>
-      <PrototypeMenuSection title="Configurações de privacidade">
-        {renderSettingRow({ keyName: 'locationSharing', icon: 'location-outline', title: 'Compartilhamento de localização', description: 'Permite encontrar motoristas próximos.' })}
-        {renderSettingRow({ keyName: 'dataAnalytics', icon: 'analytics-outline', title: 'Análise de dados', description: 'Ajuda a melhorar o serviço.' })}
-        {renderSettingRow({ keyName: 'marketingEmails', icon: 'mail-outline', title: 'Emails de marketing', description: 'Receber ofertas e novidades.' })}
-        {renderSettingRow({ keyName: 'pushNotifications', icon: 'notifications-outline', title: 'Notificações push', description: 'Atualizações sobre viagens e conta.' })}
-        {renderSettingRow({ keyName: 'thirdPartySharing', icon: 'share-social-outline', title: 'Compartilhamento com terceiros', description: 'Permitir uso por parceiros autorizados.', last: true })}
-      </PrototypeMenuSection>
-    </View>
-  );
-
   const renderSectionContent = () => {
     switch (selectedSection) {
       case 'overview':
@@ -318,8 +195,6 @@ const PrivacyPolicyScreen = ({ navigation, route }) => {
         return renderDataSecurity();
       case 'user-rights':
         return renderUserRights();
-      case 'settings':
-        return renderSettings();
       default:
         return null;
     }
@@ -354,14 +229,6 @@ const PrivacyPolicyScreen = ({ navigation, route }) => {
     </PrototypeMenuSection>
   );
 
-  if (isLoading) {
-    return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="small" color={color.accent.strong} />
-        <Text style={styles.loadingText}>Carregando privacidade...</Text>
-      </View>
-    );
-  }
 
   return (
     <View
@@ -404,19 +271,6 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: 'transparent',
   },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#FFFFFF',
-  },
-  loadingText: {
-    marginTop: 12,
-    color: color.text.secondary,
-    ...leafTypography.medium,
-    fontSize: typography.caption.size,
-    lineHeight: typography.caption.lineHeight,
-  },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -433,7 +287,7 @@ const styles = StyleSheet.create({
   },
   headerTitle: {
     fontSize: 22,
-    fontWeight: 'bold',
+    fontFamily: 'Figtree-Bold',
     color: '#2c3e50',
   },
   helpButton: {
@@ -465,7 +319,7 @@ const styles = StyleSheet.create({
   },
   activeSectionText: {
     color: '#2E8B57',
-    fontWeight: 'bold',
+    fontFamily: 'Figtree-Bold',
   },
   content: {
     flex: 1,
@@ -475,7 +329,7 @@ const styles = StyleSheet.create({
   },
   sectionTitle: {
     fontSize: 20,
-    fontWeight: 'bold',
+    fontFamily: 'Figtree-Bold',
     color: '#2c3e50',
     marginBottom: 8,
   },
@@ -510,7 +364,7 @@ const styles = StyleSheet.create({
   },
   accountDeletionTitle: {
     fontSize: 16,
-    fontWeight: 'bold',
+    fontFamily: 'Figtree-Bold',
     color: '#7a1f16',
     marginBottom: 8,
   },
@@ -531,7 +385,7 @@ const styles = StyleSheet.create({
   accountDeletionButtonText: {
     color: '#fff',
     fontSize: 14,
-    fontWeight: 'bold',
+    fontFamily: 'Figtree-Bold',
     marginLeft: 8,
   },
   highlightsContainer: {
@@ -546,7 +400,7 @@ const styles = StyleSheet.create({
   },
   highlightsTitle: {
     fontSize: 16,
-    fontWeight: 'bold',
+    fontFamily: 'Figtree-Bold',
     color: '#2c3e50',
     marginBottom: 12,
   },
@@ -572,7 +426,7 @@ const styles = StyleSheet.create({
   },
   dataTitle: {
     fontSize: 16,
-    fontWeight: 'bold',
+    fontFamily: 'Figtree-Bold',
     color: '#2c3e50',
     marginBottom: 16,
   },
@@ -587,7 +441,7 @@ const styles = StyleSheet.create({
   },
   dataLabel: {
     fontSize: 14,
-    fontWeight: 'bold',
+    fontFamily: 'Figtree-Bold',
     color: '#2c3e50',
     marginBottom: 2,
   },
@@ -607,7 +461,7 @@ const styles = StyleSheet.create({
   },
   usageTitle: {
     fontSize: 16,
-    fontWeight: 'bold',
+    fontFamily: 'Figtree-Bold',
     color: '#2c3e50',
     marginBottom: 16,
   },
@@ -633,7 +487,7 @@ const styles = StyleSheet.create({
   },
   sharingTitle: {
     fontSize: 16,
-    fontWeight: 'bold',
+    fontFamily: 'Figtree-Bold',
     color: '#2c3e50',
     marginBottom: 16,
   },
@@ -666,7 +520,7 @@ const styles = StyleSheet.create({
   },
   securityTitle: {
     fontSize: 16,
-    fontWeight: 'bold',
+    fontFamily: 'Figtree-Bold',
     color: '#2c3e50',
     marginBottom: 16,
   },
@@ -693,7 +547,7 @@ const styles = StyleSheet.create({
   },
   rightsTitle: {
     fontSize: 16,
-    fontWeight: 'bold',
+    fontFamily: 'Figtree-Bold',
     color: '#2c3e50',
     marginBottom: 16,
   },
@@ -727,7 +581,7 @@ const styles = StyleSheet.create({
   actionButtonText: {
     color: '#fff',
     fontSize: 14,
-    fontWeight: 'bold',
+    fontFamily: 'Figtree-Bold',
     marginLeft: 8,
   },
   settingsCard: {
@@ -759,7 +613,7 @@ const styles = StyleSheet.create({
   },
   settingTitle: {
     fontSize: 16,
-    fontWeight: 'bold',
+    fontFamily: 'Figtree-Bold',
     color: '#2c3e50',
     marginBottom: 2,
   },
@@ -815,21 +669,6 @@ const styles = StyleSheet.create({
     ...leafTypography.regular,
     fontSize: 14,
     lineHeight: 20,
-  },
-  settingRow: {
-    minHeight: 68,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 12,
-    paddingVertical: 10,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#E5E5E5',
-  },
-  settingCopyWrap: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
   },
 });
 

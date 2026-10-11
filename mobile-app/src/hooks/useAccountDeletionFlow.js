@@ -37,15 +37,15 @@ export function useAccountDeletionFlow({
 
   const promptAccountDeletion = useCallback(() => {
     Alert.alert(
-      'Excluir Conta',
-      'Essa ação é irreversível e removerá sua conta e seus dados do Leaf. Deseja continuar?',
+      'Excluir conta',
+      'Essa ação é irreversível e removerá sua conta e seus dados da Leaf. Deseja continuar?',
       [
         {
           text: 'Cancelar',
           style: 'cancel',
         },
         {
-          text: 'Excluir Conta',
+          text: 'Excluir conta',
           style: 'destructive',
           onPress: () => {
             confirmDeleteData().catch((error) => {

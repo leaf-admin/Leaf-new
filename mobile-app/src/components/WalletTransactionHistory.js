@@ -96,7 +96,7 @@ export default function  WTransactionHistory(props) {
                                         <Text style={[styles.historyamounttextStyle, { textAlign: isRTL ? "right" : "left" }]}>{t('withdrawn') + ' ' + parseFloat(item.amount).toFixed(settings.decimal) + settings.symbol}</Text>
                                     : null}
                                     <View style={{width: width-100}}>
-                                    <Text style={[styles.textStyle2, { textAlign: isRTL ? "right" : "left",  fontWeight: '500', }]}>{t('transaction_id')} {item.txRef.startsWith('wallet') ? item.transaction_id : item.txRef}</Text>
+                                    <Text style={[styles.textStyle2, { textAlign: isRTL ? "right" : "left",  fontFamily: 'Figtree-Medium', }]}>{t('transaction_id')} {item.txRef.startsWith('wallet') ? item.transaction_id : item.txRef}</Text>
                                     </View>
                                 <Text style={[styles.textStyle2, { textAlign: isRTL ? "right" : "left" }]}>{moment(item.date).format('lll')}</Text>
                             </View>

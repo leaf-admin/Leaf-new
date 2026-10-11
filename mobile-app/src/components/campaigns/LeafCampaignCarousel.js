@@ -261,7 +261,7 @@ function LeafCampaignCarousel({
           {content.title}
         </Text>
         {content.body ? (
-          <Text style={[styles.body, { color: textOnImage ? "rgba(255,255,255,0.9)" : TEXT_MUTED }]} numberOfLines={3}>
+          <Text style={[styles.body, { color: textOnImage ? "rgba(255,255,255,0.9)" : TEXT_MUTED }]} numberOfLines={2}>
             {content.body}
           </Text>
         ) : null}
@@ -399,8 +399,12 @@ const styles = StyleSheet.create({
     paddingTop: 22,
     paddingBottom: 18,
   },
+  // Fixed-height card: clip the copy so long campaign text never runs under
+  // the CTA/footer (the footer keeps its own row below).
   copy: {
     flex: 1,
+    minHeight: 0,
+    overflow: "hidden",
   },
   eyebrow: {
     ...leafTypography.medium,

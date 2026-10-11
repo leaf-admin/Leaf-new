@@ -1,4 +1,5 @@
 import leafTypography from '../components/prototype/LeafTypography';
+import LeafBootSplash from '../components/design-system/LeafBootSplash';
 import Logger from '../utils/Logger';
 import React, { useEffect, useRef, useState } from 'react';
 import { View, Image, StyleSheet, StatusBar, Animated, Text, ActivityIndicator, Dimensions } from 'react-native';
@@ -325,20 +326,11 @@ export default function SplashScreen({ navigation }) {
           setShouldShowOnboarding(false);
           setIsChecking(false);
           
-          // Navegar para Map após transição curta
-          // ✅ Verificar se o navigator está pronto antes de navegar
-          setTimeout(() => {
-            if (navigation.isReady && navigation.isReady()) {
-              navigation.replace('Map');
-            } else {
-              // Se não estiver pronto, tentar novamente após um delay
-              setTimeout(() => {
-                if (navigation.replace) {
-                  navigation.replace('Map');
-                }
-              }, 1000);
-            }
-          }, 220);
+          // A screen's navigation prop is usable as soon as the screen is
+          // mounted. The old check used navigation.isReady, which exists only
+          // on the container ref, so it always failed and every signed-in
+          // launch waited an extra 1.2s here.
+          navigation.replace('Map');
           return;
         } else {
           // 🔄 SITUAÇÃO 2: Usuário autenticado mas incompleto - continuar onboarding
@@ -430,15 +422,7 @@ export default function SplashScreen({ navigation }) {
 
           // Navegar para a tela principal após onboarding completo
           // ✅ Verificar se o navigator está pronto antes de navegar
-          if (navigation.isReady && navigation.isReady()) {
-            navigation.replace('Map');
-          } else {
-            setTimeout(() => {
-              if (navigation.replace) {
-                navigation.replace('Map');
-              }
-            }, 500);
-          }
+          navigation.replace('Map');
         }}
         onClose={() => {
           Logger.log('SplashScreen - ❌ Onboarding fechado');
@@ -448,19 +432,13 @@ export default function SplashScreen({ navigation }) {
     );
   }
 
+  // Same look as the native splash (no spinner, no "Carregando"): launch reads
+  // as one continuous splash until the app is ready.
   return (
-    <Animated.View style={[styles.container, { opacity: fadeAnim }]}> 
+    <View style={styles.container}>
       <StatusBar backgroundColor="#003002" barStyle="light-content" />
-      <Image
-        source={require('../../assets/images/splash.png')}
-        style={styles.splashImage}
-        resizeMode="cover"
-      />
-      <Animated.View style={[styles.loadingContainer, { opacity: loadingOpacity }]}>
-        <ActivityIndicator size="large" color="#4CAF50" />
-        <Text style={styles.loadingText}>Carregando...</Text>
-      </Animated.View>
-    </Animated.View>
+      <LeafBootSplash testID="splash-screen" />
+    </View>
   );
 }
 

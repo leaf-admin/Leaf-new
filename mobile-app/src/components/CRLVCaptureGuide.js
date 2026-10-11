@@ -331,7 +331,7 @@ const styles = StyleSheet.create({
     },
     title: {
         fontSize: 24,
-        fontWeight: 'bold',
+        fontFamily: 'Figtree-Bold',
         color: '#1A330E',
     },
     closeButton: {
@@ -345,7 +345,7 @@ const styles = StyleSheet.create({
     },
     instructionsTitle: {
         fontSize: 16,
-        fontWeight: 'bold',
+        fontFamily: 'Figtree-Bold',
         color: '#333',
         marginBottom: 8,
     },
@@ -382,7 +382,7 @@ const styles = StyleSheet.create({
         color: '#fff',
         marginTop: 10,
         fontSize: 16,
-        fontWeight: '600',
+        fontFamily: 'Figtree-SemiBold',
     },
     actionsContainer: {
         gap: 12,
@@ -415,7 +415,7 @@ const styles = StyleSheet.create({
     },
     buttonText: {
         fontSize: 16,
-        fontWeight: '600',
+        fontFamily: 'Figtree-SemiBold',
         color: '#fff',
     },
     galleryButtonText: {

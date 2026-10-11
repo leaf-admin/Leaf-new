@@ -359,7 +359,7 @@ const styles = StyleSheet.create({
   errorTitle: {
     color: '#111111',
     fontSize: 18,
-    fontWeight: '700',
+    fontFamily: 'Figtree-Bold',
     textAlign: 'center',
     marginBottom: 10,
   },
@@ -381,7 +381,7 @@ const styles = StyleSheet.create({
   primaryButtonText: {
     color: '#FFFFFF',
     fontSize: 15,
-    fontWeight: '700',
+    fontFamily: 'Figtree-Bold',
   },
   secondaryButton: {
     width: '100%',
@@ -396,7 +396,7 @@ const styles = StyleSheet.create({
   secondaryButtonText: {
     color: '#111111',
     fontSize: 14,
-    fontWeight: '600',
+    fontFamily: 'Figtree-SemiBold',
   },
   ghostButton: {
     paddingVertical: 8,
@@ -405,6 +405,6 @@ const styles = StyleSheet.create({
   ghostButtonText: {
     color: '#666666',
     fontSize: 13,
-    fontWeight: '600',
+    fontFamily: 'Figtree-SemiBold',
   },
 });

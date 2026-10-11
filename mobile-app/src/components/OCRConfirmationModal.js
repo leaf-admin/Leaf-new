@@ -114,7 +114,7 @@ const styles = StyleSheet.create({
     },
     title: {
         fontSize: 20,
-        fontWeight: 'bold',
+        fontFamily: 'Figtree-Bold',
         color: '#003002',
         marginTop: 12,
         textAlign: 'center',
@@ -160,7 +160,7 @@ const styles = StyleSheet.create({
         fontSize: 14,
         color: '#666',
         marginLeft: 8,
-        fontWeight: '500',
+        fontFamily: 'Figtree-Medium',
     },
     fieldValueContainer: {
         flex: 1,
@@ -169,7 +169,7 @@ const styles = StyleSheet.create({
     fieldValue: {
         fontSize: 14,
         color: '#003002',
-        fontWeight: '600',
+        fontFamily: 'Figtree-SemiBold',
     },
     fieldValueMissing: {
         fontSize: 14,
@@ -198,7 +198,7 @@ const styles = StyleSheet.create({
     buttonCancelText: {
         fontSize: 16,
         color: '#666',
-        fontWeight: '600',
+        fontFamily: 'Figtree-SemiBold',
     },
     buttonConfirm: {
         backgroundColor: '#003002',
@@ -206,7 +206,7 @@ const styles = StyleSheet.create({
     buttonConfirmText: {
         fontSize: 16,
         color: '#FFF',
-        fontWeight: '600',
+        fontFamily: 'Figtree-SemiBold',
     },
 });
 

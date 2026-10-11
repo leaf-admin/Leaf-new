@@ -186,7 +186,7 @@ const styles = StyleSheet.create({
   loadingText: {
     color: color.textPrimary,
     fontSize: 18,
-    fontWeight: '600',
+    fontFamily: 'Figtree-SemiBold',
     marginTop: 20,
   },
 });
