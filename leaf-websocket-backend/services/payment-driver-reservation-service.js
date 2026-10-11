@@ -148,7 +148,29 @@ async function getDriverPaymentReservation(redis, driverId) {
     await clearDriverPaymentReservationPointer(redis, safeDriverId, reservationId);
     return null;
   }
+  if (await isReservationBookingFinished(redis, reservation)) {
+    // The paid booking already ended (no drivers, cancelled, completed): the
+    // reservation must stop holding the driver for other requests.
+    await clearDriverPaymentReservationPointer(redis, safeDriverId, reservationId);
+    return null;
+  }
   return reservation;
+}
+
+async function isReservationBookingFinished(redis, reservation = {}) {
+  const bookingId = normalizeText(reservation.bookingId);
+  if (reservation.status !== 'consumed_for_booking' || !bookingId || typeof redis.hgetall !== 'function') {
+    return false;
+  }
+
+  const booking = await redis.hgetall(`booking:${bookingId}`);
+  if (!booking || Object.keys(booking).length === 0) {
+    // May not be written yet right after consumption; the TTL covers the rest.
+    return false;
+  }
+
+  const RideStateManager = require('./ride-state-manager');
+  return [booking.state, booking.status].some((value) => RideStateManager.isTerminalStateValue(value));
 }
 
 function reservationMatchesContext(reservation = {}, context = {}) {
