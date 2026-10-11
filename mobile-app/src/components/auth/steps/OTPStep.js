@@ -55,7 +55,7 @@ const Alert = {
     ...NativeAlert,
     alert: (title, message, buttons, options) =>
         NativeAlert.alert(
-            title || 'Atencao',
+            title || 'Atenção',
             toUserFriendlyMessage(message, {
                 context: 'auth',
                 fallbackMessage: 'Não foi possível validar o código agora. Tente novamente.'

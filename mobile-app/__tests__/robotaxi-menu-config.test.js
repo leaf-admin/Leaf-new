@@ -56,7 +56,7 @@ describe('robotaxiMenuConfig', () => {
 
     expect(item).toEqual(expect.objectContaining({
       status: CURRENT_SURFACE_STATUS.CURRENT,
-      title: 'Waitlist',
+      title: 'Lista de espera',
       subtitle: 'Fila de ativação da cidade',
     }));
   });
@@ -73,7 +73,7 @@ describe('robotaxiMenuConfig', () => {
     expect(driverItems.find(item => item.key === 'driver-waitlist-invites')).toEqual(
       expect.objectContaining({
         status: CURRENT_SURFACE_STATUS.CURRENT,
-        title: 'Waitlist e convites',
+        title: 'Lista de espera e convites',
       })
     );
   });

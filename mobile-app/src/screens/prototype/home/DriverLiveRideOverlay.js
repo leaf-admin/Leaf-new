@@ -977,6 +977,11 @@ function DriverLiveRideOverlay({
     setShowCancelPrompt(true);
   }, [busyAction, canCancelActiveRide]);
 
+  // The driver waited the whole boarding time at the pickup. Cancelling now is
+  // a no-show, which the server needs to tell apart from a driver giving up.
+  const passengerNoShow =
+    normalizedActiveStatus === "arrived" && liveEtaLabel === "0:00";
+
   const handleConfirmCancelRide = useCallback(async () => {
     if (!canCancelActiveRide || busyAction) {
       return;
@@ -986,7 +991,9 @@ function DriverLiveRideOverlay({
       setShowCancelPrompt(false);
       setBusyAction("cancel");
       await cancelActiveRideFlow({
-        reason: "Cancelado pelo motorista.",
+        reason: passengerNoShow
+          ? "Passageiro não compareceu ao embarque."
+          : "Cancelado pelo motorista.",
       });
     } catch (error) {
       Alert.alert(
@@ -996,7 +1003,7 @@ function DriverLiveRideOverlay({
     } finally {
       setBusyAction("");
     }
-  }, [busyAction, canCancelActiveRide, cancelActiveRideFlow]);
+  }, [busyAction, canCancelActiveRide, cancelActiveRideFlow, passengerNoShow]);
 
   if (!hasActiveRide && !hasOffer) {
     return null;
@@ -2010,9 +2017,13 @@ function DriverLiveRideOverlay({
       >
         <View style={styles.cancelPromptScrim}>
           <View style={styles.cancelPromptCard}>
-            <Text style={styles.cancelPromptTitle}>Cancelar corrida?</Text>
+            <Text style={styles.cancelPromptTitle}>
+              {passengerNoShow ? "Passageiro não apareceu?" : "Cancelar corrida?"}
+            </Text>
             <Text style={styles.cancelPromptMessage}>
-              O passageiro será avisado. Cancelar depois de aceitar pode gerar cobrança.
+              {passengerNoShow
+                ? "O tempo de espera terminou. Ao cancelar, registramos que o passageiro não compareceu ao embarque."
+                : "O passageiro será avisado. Cancelar depois de aceitar pode gerar cobrança."}
             </Text>
             <View style={styles.cancelPromptActions}>
               <TouchableOpacity

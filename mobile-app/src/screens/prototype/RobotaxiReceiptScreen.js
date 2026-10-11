@@ -641,6 +641,10 @@ function resolveReceiptViewerRole({
 
 // Receipts already asked about an early end in this app session.
 const earlyEndPromptedReceiptIds = new Set();
+// Receipts whose answer already failed to send once. The question comes back a
+// single time; asking on every visit trapped the passenger on the sheet while
+// the server kept refusing the answer.
+const earlyEndRetriedReceiptIds = new Set();
 
 export default function RobotaxiReceiptScreen({ navigation, route }) {
   const {
@@ -810,8 +814,11 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
         })
         .catch((error) => {
           // The answer must not vanish silently: say it was not recorded and
-          // ask again the next time this receipt is opened.
-          earlyEndPromptedReceiptIds.delete(receiptId);
+          // ask again, once, the next time this receipt is opened.
+          if (!earlyEndRetriedReceiptIds.has(receiptId)) {
+            earlyEndRetriedReceiptIds.add(receiptId);
+            earlyEndPromptedReceiptIds.delete(receiptId);
+          }
           Alert.alert(
             "Não conseguimos registrar",
             __DEV__ && error?.message

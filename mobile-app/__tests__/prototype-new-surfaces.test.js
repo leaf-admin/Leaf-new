@@ -307,7 +307,7 @@ describe('prototype new surfaces', () => {
       />
     );
 
-    expect(screen.getByText('Waitlist e convites')).toBeTruthy();
+    expect(screen.getByText('Lista de espera e convites')).toBeTruthy();
 
     await waitFor(() => {
       expect(screen.getByText('Rio de Janeiro')).toBeTruthy();

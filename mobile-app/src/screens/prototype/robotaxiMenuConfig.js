@@ -174,7 +174,7 @@ const DRIVER_ITEMS = [
   {
     key: 'driver-waitlist-invites',
     status: CURRENT_SURFACE_STATUS.CURRENT,
-    title: 'Waitlist e convites',
+    title: 'Lista de espera e convites',
     icon: 'people-outline',
     route: 'RobotaxiPrototypeDriverWaitlist',
     openDirect: true,
@@ -248,14 +248,14 @@ export function getMenuItemsByRole(role, options = {}) {
       return {
         ...item,
         status: CURRENT_SURFACE_STATUS.OUT_OF_PILOT,
-        subtitle: 'Fora do piloto controlado',
+        subtitle: 'Indisponível no momento',
       };
     }
 
     if (!referralProgramsEnabled && item.key === 'driver-waitlist-invites') {
       return {
         ...item,
-        title: 'Waitlist',
+        title: 'Lista de espera',
         subtitle: 'Fila de ativação da cidade',
         status: CURRENT_SURFACE_STATUS.CURRENT,
       };

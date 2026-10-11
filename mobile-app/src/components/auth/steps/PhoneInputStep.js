@@ -35,7 +35,7 @@ const Alert = {
     ...NativeAlert,
     alert: (title, message, buttons, options) =>
         NativeAlert.alert(
-            title || 'Atencao',
+            title || 'Atenção',
             toUserFriendlyMessage(message, {
                 context: 'auth',
                 fallbackMessage: 'Não foi possível concluir a autenticação agora. Tente novamente.'
@@ -90,7 +90,7 @@ function resolveAuthAlertTitle(error, friendlyMessage = '') {
         normalizedCode === 'AUTH/INVALID-PHONE-NUMBER' ||
         /invalid phone|numero de telefone invalido|telefone invalido/.test(normalizedText)
     ) {
-        return 'Telefone Invalido';
+        return 'Telefone inválido';
     }
 
     if (
@@ -108,7 +108,7 @@ function resolveAuthAlertTitle(error, friendlyMessage = '') {
         return 'Erro de Conexão';
     }
 
-    return 'Erro de Autenticacao';
+    return 'Erro de autenticação';
 }
 
 const PhoneInputStep = ({ onVerificationSent, onPasswordLoginSuccess, progressMeta }) => {
@@ -204,7 +204,7 @@ const PhoneInputStep = ({ onVerificationSent, onPasswordLoginSuccess, progressMe
         } catch (error) {
             const friendlyError = toUserFriendlyError(error, {
                 context: 'auth',
-                fallbackMessage: 'Não foi possível enviar o código de recuperacao agora.'
+                fallbackMessage: 'Não foi possível enviar o código de recuperação agora.'
             });
             Alert.alert(resolveAuthAlertTitle(error, friendlyError.message), friendlyError.message);
         } finally {

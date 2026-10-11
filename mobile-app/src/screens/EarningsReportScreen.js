@@ -147,7 +147,7 @@ function formatWeekdayLabel(dateISO) {
   if (!date) {
     return '--';
   }
-  return date.toLocaleDateString('en-US', { weekday: 'short' }).toUpperCase();
+  return date.toLocaleDateString('pt-BR', { weekday: 'short' }).toUpperCase();
 }
 
 function normalizeDailySeries(report) {
@@ -365,6 +365,8 @@ export default function EarningsReportScreen({ navigation, route }) {
   const { height: windowHeight } = useWindowDimensions();
 
   const [earningsData, setEarningsData] = useState(null);
+  // A failed load used to look like an empty account (R$ 0,00) with no notice.
+  const [earningsLoadFailed, setEarningsLoadFailed] = useState(false);
   const [isLoadingEarnings, setIsLoadingEarnings] = useState(true);
   const [panelHeight, setPanelHeight] = useState(windowHeight);
 
@@ -473,8 +475,9 @@ export default function EarningsReportScreen({ navigation, route }) {
           }
 
           setEarningsData(mergedReport);
+          setEarningsLoadFailed(false);
         } else {
-          setEarningsData({
+          setEarningsData((previous) => previous || {
             balance: 0,
             rating: 0,
             dailySeries: [],
@@ -482,10 +485,11 @@ export default function EarningsReportScreen({ navigation, route }) {
             tripsToday: 0,
             totalCancellations: 0
           });
+          setEarningsLoadFailed(true);
         }
       } catch (error) {
         Logger.error('Erro ao carregar dados de ganhos:', error);
-        setEarningsData({
+        setEarningsData((previous) => previous || {
           balance: 0,
           rating: 0,
           dailySeries: [],
@@ -493,6 +497,7 @@ export default function EarningsReportScreen({ navigation, route }) {
           tripsToday: 0,
           totalCancellations: 0
         });
+        setEarningsLoadFailed(true);
       } finally {
         setIsLoadingEarnings(false);
       }
@@ -575,7 +580,7 @@ export default function EarningsReportScreen({ navigation, route }) {
       if (!awsAvailable) {
         setWithdrawKycReason(
           providerResult.mode === 'face_compare'
-            ? 'Saques sem liveness ficam sujeitos à revisão manual da operação.'
+            ? 'Saques sem validação facial ficam sujeitos à revisão manual.'
             : 'Não foi possível preparar a validação agora. Tente novamente em alguns minutos.'
         );
       }
@@ -710,7 +715,7 @@ export default function EarningsReportScreen({ navigation, route }) {
 
       if (!retryResult.success) {
         setWithdrawModalVisible(true);
-        setWithdrawError(retryResult.error || 'Falha ao solicitar saque após validação KYC');
+        setWithdrawError(retryResult.error || 'Não foi possível solicitar o saque após a validação de identidade.');
         return;
       }
 
@@ -963,7 +968,7 @@ export default function EarningsReportScreen({ navigation, route }) {
   const positiveDeltaColor = '#1A7F37';
   const negativeDeltaColor = '#B42318';
 
-  const tierLabel = String(earningsData?.tierName || earningsData?.driverTier || 'Gold Tier');
+  const tierLabel = String(earningsData?.tierName || earningsData?.driverTier || '');
 
   const activeSegment = useMemo(() => {
     if (activeFilterKey === 'd7') {
@@ -1213,6 +1218,11 @@ export default function EarningsReportScreen({ navigation, route }) {
                     {withdrawalsEnabled ? 'Disponível para saque' : 'Saldo do motorista'}
                   </Text>
                   <Text style={styles.balanceValue}>R$ {formatCurrency(saldoDisponivel)}</Text>
+                  {earningsLoadFailed ? (
+                    <Text style={styles.balanceLoadError} accessibilityRole="alert">
+                      Não conseguimos atualizar seus ganhos agora. Os valores podem estar desatualizados.
+                    </Text>
+                  ) : null}
                 </View>
 
                 {withdrawalsEnabled ? (
@@ -1283,7 +1293,7 @@ export default function EarningsReportScreen({ navigation, route }) {
                     <Text style={styles.chartTrendBadgeText}>
                       {deltaFromYesterday === null
                         ? 'Variação indisponível'
-                        : `${deltaPrefix}R$ ${deltaAmountLabel} vs ontem`}
+                        : `${deltaPrefix}R$ ${deltaAmountLabel} em relação a ontem`}
                     </Text>
                   </View> : null}
                 </View>
@@ -1396,7 +1406,7 @@ export default function EarningsReportScreen({ navigation, route }) {
               </View>
 
               <Text style={styles.driverContextText}>
-                {`${profileName} · Nota ${ratingLabel} · ${tierLabel} · Desde ${partnerSinceLabel}`}
+                {[profileName, `Nota ${ratingLabel}`, tierLabel, `Desde ${partnerSinceLabel}`].filter(Boolean).join(' · ')}
               </Text>
             </>
           )}
@@ -1407,6 +1417,7 @@ export default function EarningsReportScreen({ navigation, route }) {
         animationType="slide"
         transparent={false}
         onRequestClose={() => {
+          if (isProcessingWithdraw) return;
           setWithdrawModalVisible(false);
           setWithdrawPassword('');
           setWithdrawError('');
@@ -1427,6 +1438,9 @@ export default function EarningsReportScreen({ navigation, route }) {
               <TouchableOpacity
                 style={styles.cleanBackHit}
                 activeOpacity={0.76}
+                accessibilityRole="button"
+                accessibilityLabel="Voltar"
+                disabled={isProcessingWithdraw}
                 onPress={() => {
                   setWithdrawModalVisible(false);
                   setWithdrawPassword('');
@@ -1722,6 +1736,12 @@ const styles = StyleSheet.create({
     ...leafTypography.medium,
     fontSize: 14,
     lineHeight: 20,
+  },
+  balanceLoadError: {
+    marginTop: 6,
+    fontSize: 13,
+    lineHeight: 18,
+    color: '#B42318',
   },
   balanceValue: {
     marginTop: 8,

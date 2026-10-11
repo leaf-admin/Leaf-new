@@ -320,7 +320,7 @@ export default function RobotaxiDriverWaitlistScreen({ navigation, route }) {
           <PrototypeMenuSurface
             onLayout={handlePanelLayout}
             eyebrow="Motoristas"
-            title={referralProgramsEnabled ? 'Waitlist e convites' : 'Waitlist'}
+            title={referralProgramsEnabled ? 'Lista de espera e convites' : 'Waitlist'}
             subtitle={
               referralProgramsEnabled
                 ? 'Acompanhe sua posição e convide motoristas para a próxima leva da Leaf.'

@@ -2049,6 +2049,8 @@ function PrototypeMapLayer({
     });
   }, []);
 
+  // True while the next framing belongs to a map that just mounted or loaded.
+  const snapNextFramingRef = useRef(true);
   const markNativeMapReady = useCallback(() => {
     setNativeMapReadyVersion(previous => previous + 1);
   }, []);
@@ -2126,6 +2128,7 @@ function PrototypeMapLayer({
   }, [glassBackdropEnabled]);
 
   const handleNativeMapLoaded = useCallback((event) => {
+    snapNextFramingRef.current = true;
     markNativeMapReady();
     applyForcedRegionUpdate(0);
     requestGlassBackdrop();
@@ -2149,6 +2152,11 @@ function PrototypeMapLayer({
     if (Number.isFinite(width) && Number.isFinite(height) && width > 0 && height > 0) {
       const layoutKey = `${Math.round(width)}x${Math.round(height)}`;
       if (nativeMapLayoutKeyRef.current !== layoutKey) {
+        // Only the first layout is a fresh map. A later size change (a ride
+        // card replacing another) re-frames with the glide, not a snap.
+        if (!nativeMapLayoutKeyRef.current) {
+          snapNextFramingRef.current = true;
+        }
         nativeMapLayoutKeyRef.current = layoutKey;
         markNativeMapReady();
       }
@@ -2208,10 +2216,14 @@ function PrototypeMapLayer({
     if (!isFirstFraming && isValidMapRegion(target) && previous && isCameraTargetClose(previous, target)) {
       return undefined;
     }
-    const duration = isFirstFraming || reduceMotion ? 0 : CAMERA_TRANSITION_MS;
+    // Snapping on every size change showed as the map jumping to a blank
+    // area for a few frames when the driver accepted a ride (seen on video).
+    const duration =
+      (isFirstFraming && snapNextFramingRef.current) || reduceMotion ? 0 : CAMERA_TRANSITION_MS;
     if (!applyForcedRegionUpdate(duration)) {
       return undefined;
     }
+    snapNextFramingRef.current = false;
     framedMapVersionRef.current = nativeMapReadyVersion;
     lastFramedTargetRef.current = isValidMapRegion(target) ? target : null;
 

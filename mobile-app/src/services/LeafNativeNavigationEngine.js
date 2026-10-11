@@ -939,8 +939,16 @@ export function buildLeafNativeNavigationState({
   const fallbackRemainingMeters = Number.isFinite(Number(remainingDistanceMeters))
     ? Math.max(0, Number(remainingDistanceMeters))
     : calculateNavigationDistanceMeters(current, target);
+  // The caller's value is the one the ride card shows (near the pickup it is
+  // the straight-line distance). Never show a longer one in the banner: it
+  // said "30 m" while the card under it said "10 m".
   const remainingMeters = Number.isFinite(Number(routeRemainingMeters))
-    ? Math.max(0, Number(routeRemainingMeters))
+    ? Math.max(
+        0,
+        Number(remainingDistanceMeters) > 0
+          ? Math.min(Number(routeRemainingMeters), Number(remainingDistanceMeters))
+          : Number(routeRemainingMeters),
+      )
     : fallbackRemainingMeters;
   const upcomingTarget = resolveUpcomingNavigationTarget({
     current,
