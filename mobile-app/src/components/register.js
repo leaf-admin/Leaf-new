@@ -199,7 +199,7 @@ export default function Registration(props) {
         <View style={{ flex: 1, }}>
             <SafeAreaView style={{ flex: 1, position: 'absolute', backgroundColor: colors.WHITE, height: '100%', width: '100%' }}>
                 <View style={[{ backgroundColor: colors.WHITE }]}>
-                <TouchableOpacity style={isRTL ? { marginRight: 10, alignSelf: 'flex-end', width: 70, padding: 8, marginTop: 12 } : { marginLeft: 10, width: 70, padding: 8, marginTop: Platform.OS == 'android' ? (__DEV__ ? 15 :40) : (hasNotch ? 35 : 30) }} onPress={props.onPressBack} >
+                <TouchableOpacity style={isRTL ? { marginRight: 10, alignSelf: 'flex-end', width: 70, padding: 8, marginTop: 12 } : { marginLeft: 10, width: 70, padding: 8, marginTop: Platform.OS == 'android' ? (__DEV__ ? 15 :40) : (hasNotch ? 35 : 30) }} onPress={props.onPressBack} accessibilityRole="button" accessibilityLabel="Voltar" >
                         <AntDesign name={isRTL ? 'right' : "left"} size={30} color="black" />
                     </TouchableOpacity>
                 </View>
@@ -345,7 +345,7 @@ export default function Registration(props) {
                                         keyboardType="default"
                                         secureTextEntry={eyePass}
                                     />
-                                    <TouchableOpacity onPress={() => setEyePass(!eyePass)} style={styles.passwordIcon}>
+                                    <TouchableOpacity onPress={() => setEyePass(!eyePass)} style={styles.passwordIcon} accessibilityRole="button" accessibilityLabel={eyePass === true ? 'Mostrar senha' : 'Ocultar senha'}>
                                         <Feather name={eyePass === true ? "eye-off" : "eye"} size={24} color={(passwordFocus === true || state.password.length > 0) ? MAIN_COLOR : colors.PLACEHOLDER_COLOR} />
                                     </TouchableOpacity>
                                 </View>
@@ -362,7 +362,7 @@ export default function Registration(props) {
                                         onChangeText={(text) => setConfirmPassword(text)}
                                         keyboardType="default"
                                     />
-                                    <TouchableOpacity onPress={() => setEyeConfirmPass(!eyeConfirmPass)} style={styles.passwordIcon}>
+                                    <TouchableOpacity onPress={() => setEyeConfirmPass(!eyeConfirmPass)} style={styles.passwordIcon} accessibilityRole="button" accessibilityLabel={eyeConfirmPass === true ? 'Mostrar senha' : 'Ocultar senha'}>
                                         <Feather name={eyeConfirmPass === true ? "eye-off" : "eye"} size={24} color={(confirmPasswordFocus === true || confirmpassword.length > 0) ? MAIN_COLOR : colors.PLACEHOLDER_COLOR} />
                                     </TouchableOpacity>
                                 </View>

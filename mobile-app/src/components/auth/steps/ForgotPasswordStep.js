@@ -307,6 +307,8 @@ const ForgotPasswordStep = ({ phoneNumber, onPasswordReset, onBack }) => {
                         <TouchableOpacity
                             style={styles.eyeButton}
                             onPress={() => setShowPassword(!showPassword)}
+                            accessibilityRole="button"
+                            accessibilityLabel={showPassword ? 'Ocultar senha' : 'Mostrar senha'}
                         >
                             <Ionicons
                                 name={showPassword ? 'eye-off' : 'eye'}
@@ -330,6 +332,8 @@ const ForgotPasswordStep = ({ phoneNumber, onPasswordReset, onBack }) => {
                         <TouchableOpacity
                             style={styles.eyeButton}
                             onPress={() => setShowConfirmPassword(!showConfirmPassword)}
+                            accessibilityRole="button"
+                            accessibilityLabel={showConfirmPassword ? 'Ocultar senha' : 'Mostrar senha'}
                         >
                             <Ionicons
                                 name={showConfirmPassword ? 'eye-off' : 'eye'}

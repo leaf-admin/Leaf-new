@@ -199,7 +199,12 @@ export default function KYCCameraScreen({ onCapture, onCancel }) {
 
       <View style={styles.overlay} pointerEvents="box-none">
         <View style={styles.topBar}>
-          <TouchableOpacity style={styles.iconButton} onPress={onCancel}>
+          <TouchableOpacity
+            style={styles.iconButton}
+            onPress={onCancel}
+            accessibilityRole="button"
+            accessibilityLabel="Fechar"
+          >
             <MaterialCommunityIcons name="close" size={24} color="#fff" />
           </TouchableOpacity>
         </View>

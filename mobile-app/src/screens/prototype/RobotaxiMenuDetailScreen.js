@@ -311,6 +311,7 @@ export default function RobotaxiMenuDetailScreen({ navigation, route }) {
             <View style={styles.toggleSlot}>
               <Switch
                 value={notificationsEnabled}
+                accessibilityLabel="Alertas de corrida"
                 onValueChange={value => updateSettings({ notificationsEnabled: value })}
                 trackColor={SWITCH_TRACK_COLORS}
                 thumbColor={SWITCH_THUMB_COLOR}
@@ -333,6 +334,7 @@ export default function RobotaxiMenuDetailScreen({ navigation, route }) {
             <View style={styles.toggleSlot}>
               <Switch
                 value={trafficLayerEnabled}
+                accessibilityLabel="Camada de trânsito"
                 onValueChange={value => updateSettings({ trafficLayerEnabled: value })}
                 trackColor={SWITCH_TRACK_COLORS}
                 thumbColor={SWITCH_THUMB_COLOR}
@@ -355,6 +357,7 @@ export default function RobotaxiMenuDetailScreen({ navigation, route }) {
             <View style={styles.toggleSlot}>
               <Switch
                 value={voiceGuidanceEnabled}
+                accessibilityLabel="Instruções por voz"
                 onValueChange={value => updateSettings({ voiceGuidanceEnabled: value })}
                 trackColor={SWITCH_TRACK_COLORS}
                 thumbColor={SWITCH_THUMB_COLOR}
@@ -464,7 +467,13 @@ export default function RobotaxiMenuDetailScreen({ navigation, route }) {
                     </Text>
                   </View>
                 </View>
-                <TouchableOpacity style={styles.headerBackButton} activeOpacity={0.86} onPress={handleDismiss}>
+                <TouchableOpacity
+                  style={styles.headerBackButton}
+                  activeOpacity={0.86}
+                  onPress={handleDismiss}
+                  accessibilityRole="button"
+                  accessibilityLabel="Voltar"
+                >
                   <Ionicons name="arrow-back" size={18} color={color.text.primary} />
                 </TouchableOpacity>
               </View>

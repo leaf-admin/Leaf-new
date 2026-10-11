@@ -88,6 +88,8 @@ const PasswordLoginStep = ({ phoneNumber, onLoginSuccess, onForgotPassword, onBa
                     <TouchableOpacity
                         style={styles.eyeButton}
                         onPress={() => setShowPassword(!showPassword)}
+                        accessibilityRole="button"
+                        accessibilityLabel={showPassword ? 'Ocultar senha' : 'Mostrar senha'}
                     >
                         <Ionicons 
                             name={showPassword ? 'eye-off' : 'eye'} 
