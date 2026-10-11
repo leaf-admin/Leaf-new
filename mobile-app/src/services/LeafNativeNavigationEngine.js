@@ -9,7 +9,9 @@ export const NAVIGATION_CAMERA_ANIMATION_MS = 800;
 // isometric view during an active driver trip.
 export const NAVIGATION_CAMERA_TOP_DOWN_PITCH = 0;
 const NAVIGATION_CAMERA_MIN_ROUTE_ZOOM = 15.2;
-const NAVIGATION_CAMERA_MAX_ROUTE_ZOOM = 18.2;
+// 18.2 framed about 150 m of road: arriving at the pickup the map showed a
+// blank patch with no cross streets. 17.3 keeps the surrounding block visible.
+const NAVIGATION_CAMERA_MAX_ROUTE_ZOOM = 17.3;
 const NAVIGATION_CAMERA_NEAR_TARGET_METERS = 60;
 const NAVIGATION_CAMERA_MIN_ROUTE_REFERENCE_METERS = 1200;
 
@@ -585,7 +587,9 @@ function projectCoordinateToRouteMeasure(coordinate, routeCoordinates = []) {
 function buildSyntheticNavigationStepsFromRoute(
   routeCoordinates = [],
   totalDurationMinutes = null,
+  phase = 'destination',
 ) {
+  const targetLabel = phase === 'pickup' ? 'o embarque' : 'o destino';
   const coordinates = Array.isArray(routeCoordinates)
     ? routeCoordinates.map(normalizeNavigationCoordinate).filter(Boolean)
     : [];
@@ -674,7 +678,7 @@ function buildSyntheticNavigationStepsFromRoute(
   );
   if (finalDistanceMeters > 10 || steps.length === 0) {
     steps.push({
-      instruction: steps.length === 0 ? 'Siga até o destino' : 'Siga em frente até o destino',
+      instruction: steps.length === 0 ? `Siga até ${targetLabel}` : `Siga em frente até ${targetLabel}`,
       startLocation: coordinates[stepStartIndex],
       endLocation: coordinates[coordinates.length - 1],
       distanceMeters: Math.round(finalDistanceMeters),
@@ -915,6 +919,7 @@ export function buildLeafNativeNavigationState({
     normalizedSteps = buildSyntheticNavigationStepsFromRoute(
       routeGeometryCoordinates,
       totalDurationMinutes,
+      normalizedPhase,
     );
   }
   const currentStepIndex = resolveCurrentNavigationStepIndex({
@@ -925,7 +930,7 @@ export function buildLeafNativeNavigationState({
   const fallbackInstruction =
     normalizedPhase === 'destination'
       ? 'Siga até o destino'
-      : 'Siga até o local de embarque';
+      : 'Siga até o embarque';
   const routeRemainingMeters = calculateRemainingRouteMeters(
     current,
     routeGeometryCoordinates,
@@ -996,7 +1001,10 @@ export function buildLeafNativeNavigationState({
     maneuverDistanceMeters,
     maneuverDistanceLabel: formatDistanceLabel(maneuverDistanceMeters),
     maneuverDistanceTargetKind: upcomingTarget.distanceTargetKind,
-    maneuverDistanceTargetLabel: upcomingTarget.distanceTargetLabel,
+    maneuverDistanceTargetLabel:
+      upcomingTarget.distanceTargetKind === 'destination' && normalizedPhase === 'pickup'
+        ? 'o embarque'
+        : upcomingTarget.distanceTargetLabel,
     remainingDistanceMeters: remainingMeters,
     totalDistanceMeters: baselineMeters,
     remainingDistanceLabel: formatDistanceLabel(remainingMeters),

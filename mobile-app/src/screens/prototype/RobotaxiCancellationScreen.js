@@ -38,7 +38,7 @@ export default function RobotaxiCancellationScreen({ navigation, route }) {
   const [isCancelling, setIsCancelling] = useState(false);
   const [cancellationActionsVisible, setCancellationActionsVisible] = useState(false);
   const sheetBottom =
-    SHEET_BOTTOM_OFFSET + robotaxiLifecycleMetrics.cardBottomGap;
+    SHEET_BOTTOM_OFFSET + robotaxiLifecycleMetrics.cardBottomGap + insets.bottom;
   const source = route?.params?.source || 'passenger-trip';
   const isDriverCancellation = source === 'driver-trip' || source === 'driver';
   const isPassengerCancellation = source === 'trip' || source === 'passenger-trip' || source === 'search';
@@ -229,7 +229,7 @@ export default function RobotaxiCancellationScreen({ navigation, route }) {
         <StatusBar translucent backgroundColor="transparent" barStyle="dark-content" />
 
         <PrototypeDismissibleSheet onClose={handleDismiss} sheetStyle={[styles.sheetWrap, { bottom: sheetBottom }]}>
-          <RobotaxiLifecycleCard onLayout={handleCardLayout} style={[styles.card, { paddingBottom: robotaxiLifecycleMetrics.cardPaddingBottom + insets.bottom }]}>
+          <RobotaxiLifecycleCard onLayout={handleCardLayout} style={[styles.card, { paddingBottom: robotaxiLifecycleMetrics.cardPaddingBottom }]}>
 
             <RobotaxiLifecycleSummary
               title={isTerminalCancellation ? terminalCancellationTitle : 'Cancelar corrida'}

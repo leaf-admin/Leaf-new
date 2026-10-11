@@ -139,6 +139,13 @@ export default function RobotaxiRatingScreen({ navigation, route }) {
     (reviewerType === "driver"
       ? receipt?.passengerName || "Passageiro Leaf"
       : receipt?.driverName || driverInfo?.name || "Motorista Leaf");
+  // "Motorista Leaf" / "Passageiro Leaf" are placeholders, not names.
+  const hasRealTargetName = !["motorista leaf", "passageiro leaf"].includes(
+    String(targetName || "").trim().toLowerCase(),
+  );
+  const targetFirstName = hasRealTargetName
+    ? String(targetName || "").trim().split(/\s+/)[0] || targetName
+    : "";
   const tripId = route?.params?.tripId || receipt?.id || null;
   const quickTags =
     reviewerType === "driver" ? DRIVER_REVIEW_TAGS : PASSENGER_REVIEW_TAGS;
@@ -146,11 +153,13 @@ export default function RobotaxiRatingScreen({ navigation, route }) {
     reviewerType === "driver" ? ["Pontualidade"] : ["Condução segura"],
   );
   const [airConditioningOk, setAirConditioningOk] = useState(null);
+  // Required answer: keep the button disabled and say why instead of an alert after tapping.
+  const awaitingAirConditioningAnswer = reviewerType === "passenger" && airConditioningOk === null;
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [secondaryActionsVisible, setSecondaryActionsVisible] = useState(false);
   const qaAutoSubmitStartedRef = useRef(false);
   const sheetBottom =
-    SHEET_BOTTOM_OFFSET + robotaxiLifecycleMetrics.cardBottomGap;
+    SHEET_BOTTOM_OFFSET + robotaxiLifecycleMetrics.cardBottomGap + insets.bottom;
   const cardMaxHeight = Math.max(
     340,
     windowHeight - insets.top - insets.bottom - 86,
@@ -340,11 +349,8 @@ export default function RobotaxiRatingScreen({ navigation, route }) {
       );
 
       dismissCompletedReceipt();
+      // Back home without an extra confirmation tap.
       replaceWithPrototypeHome();
-      Alert.alert(
-        "Avaliação enviada",
-        `Sua nota para ${targetName} foi registrada com sucesso.`,
-      );
     } catch (error) {
       Alert.alert(
         "Não foi possível enviar",
@@ -411,6 +417,27 @@ export default function RobotaxiRatingScreen({ navigation, route }) {
           barStyle="dark-content"
         />
 
+        {/* Fills the space above the sheet instead of leaving it blank; hidden when it would not fit. */}
+        {windowHeight - sheetBottom - cardHeight - insets.top >= COMPLETION_HERO_MIN_SPACE ? (
+        <View
+          pointerEvents="none"
+          style={[styles.completionHero, { top: insets.top + 56 }]}
+          testID="rating-completion-hero"
+        >
+          <View style={styles.completionAvatar}>
+            <Text style={styles.completionAvatarInitial}>
+              {String(targetFirstName || targetName || "L").charAt(0).toUpperCase()}
+            </Text>
+          </View>
+          <Text style={styles.completionTitle}>Corrida concluída</Text>
+          {targetFirstName ? (
+            <Text style={styles.completionSubtitle} numberOfLines={1}>
+              {targetFirstName}
+            </Text>
+          ) : null}
+        </View>
+        ) : null}
+
         <KeyboardAvoidingView
           pointerEvents="box-none"
           behavior={Platform.OS === "ios" ? "padding" : undefined}
@@ -419,7 +446,7 @@ export default function RobotaxiRatingScreen({ navigation, route }) {
         >
           <RobotaxiLifecycleCard
             onLayout={handleCardLayout}
-            style={[styles.card, { maxHeight: cardMaxHeight, paddingBottom: robotaxiLifecycleMetrics.cardPaddingBottom + insets.bottom }]}
+            style={[styles.card, { maxHeight: cardMaxHeight, paddingBottom: robotaxiLifecycleMetrics.cardPaddingBottom }]}
             testID={
               reviewerType === "driver"
                 ? "driver-rating-screen"
@@ -441,9 +468,8 @@ export default function RobotaxiRatingScreen({ navigation, route }) {
                 ? "Avalie o passageiro"
                 : "Avalie a viagem"}
                 subtitle={reviewerType === "driver"
-                ? `Seu feedback sobre ${targetName} ajuda a melhorar a comunidade Leaf.`
-                : "Sua opinião ajuda a melhorar a próxima viagem."}
-                object="account"
+                ? targetFirstName ? `Como foi a corrida com ${targetFirstName}?` : "Como foi a corrida?"
+                : targetFirstName ? `Como foi sua viagem com ${targetFirstName}?` : "Como foi sua viagem?"}
               />
 
             <View
@@ -580,18 +606,22 @@ export default function RobotaxiRatingScreen({ navigation, route }) {
               </View>
             ) : null}
 
-            <Text numberOfLines={1} style={styles.summaryText}>
-              {summary
-                ? `Resumo: ${summary}`
-                : "Selecione uma opção ou escreva um comentário."}
-            </Text>
+            {!summary ? (
+              <Text numberOfLines={1} style={styles.summaryText}>
+                Selecione uma opção ou escreva um comentário.
+              </Text>
+            ) : null}
 
             <RobotaxiLifecycleButton
-              label={isSubmitting ? "Enviando avaliação" : "Enviar avaliação"}
+              label={isSubmitting
+                ? "Enviando avaliação"
+                : awaitingAirConditioningAnswer
+                  ? "Responda sobre o ar-condicionado"
+                  : "Enviar avaliação"}
               icon="checkmark-outline"
               tone="primary"
               onPress={handleSubmit}
-              disabled={isSubmitting}
+              disabled={isSubmitting || awaitingAirConditioningAnswer}
               style={styles.submitButton}
               testID="passenger-rating-submit-button"
               accessibilityLabel={isSubmitting ? "Enviando avaliação" : "Enviar avaliação"}
@@ -623,10 +653,45 @@ export default function RobotaxiRatingScreen({ navigation, route }) {
   );
 }
 
+// Room needed above the sheet for the 'Corrida concluída' header.
+const COMPLETION_HERO_MIN_SPACE = 260;
+
 const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: "#FFFFFF",
+  },
+  completionHero: {
+    position: "absolute",
+    left: 24,
+    right: 24,
+    alignItems: "center",
+  },
+  completionAvatar: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: "#EEF0EC",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  completionAvatarInitial: {
+    ...leafTypography.semiBold,
+    fontSize: 28,
+    color: color.text.primary,
+  },
+  completionTitle: {
+    ...leafTypography.semiBold,
+    marginTop: 14,
+    fontSize: 22,
+    lineHeight: 28,
+    color: color.text.primary,
+  },
+  completionSubtitle: {
+    ...leafTypography.regular,
+    marginTop: 2,
+    fontSize: 15,
+    color: color.text.secondary,
   },
   sheetWrap: {
     position: "absolute",
@@ -650,7 +715,7 @@ const styles = StyleSheet.create({
     marginTop: 2,
     color: color.text.secondary,
     ...leafTypography.regular,
-    fontSize: 14,
+    fontSize: 15,
     lineHeight: 20,
     textAlign: 'left',
   },
@@ -701,7 +766,7 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     color: color.text.primary,
     ...leafTypography.regular,
-    fontSize: 16,
+    fontSize: 17,
     lineHeight: 22,
     textAlignVertical: "top",
   },

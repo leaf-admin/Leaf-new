@@ -79,7 +79,7 @@ export default function RobotaxiPaymentSuccessScreen({ navigation, route }) {
   const [cardHeight, setCardHeight] = useState(FALLBACK_CARD_HEIGHT);
   const protectedPaymentSuccessExitRef = useRef(false);
   const sheetBottom =
-    SHEET_BOTTOM_OFFSET + robotaxiLifecycleMetrics.cardBottomGap;
+    SHEET_BOTTOM_OFFSET + robotaxiLifecycleMetrics.cardBottomGap + insets.bottom;
 
   const destination =
     route?.params?.destination || selectedDestination?.name || "Destino";
@@ -329,7 +329,7 @@ export default function RobotaxiPaymentSuccessScreen({ navigation, route }) {
           dragEnabled={!isRideLifecycleLocked}
           sheetStyle={[styles.sheetWrap, { bottom: sheetBottom }]}
         >
-          <RobotaxiLifecycleCard onLayout={handleCardLayout} style={[styles.card, { paddingBottom: robotaxiLifecycleMetrics.cardPaddingBottom + insets.bottom }]}>
+          <RobotaxiLifecycleCard onLayout={handleCardLayout} style={[styles.card, { paddingBottom: robotaxiLifecycleMetrics.cardPaddingBottom }]}>
 
             <View style={styles.leadRow}>
               <View style={{ flex: 1 }}>

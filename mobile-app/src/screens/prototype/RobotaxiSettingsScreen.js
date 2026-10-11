@@ -1,6 +1,7 @@
 import leafTypography from '../../components/prototype/LeafTypography';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, AppState, Linking, ScrollView, StatusBar, StyleSheet, Switch, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
+import { ActivityIndicator, Alert, AppState, Linking, Platform, ScrollView, StatusBar, StyleSheet, Switch, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
+import * as Application from 'expo-application';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useSelector } from 'react-redux';
 import { Ionicons } from '@expo/vector-icons';
@@ -46,7 +47,8 @@ function SettingRow({
   tone = 'default',
   last = false,
 }) {
-  const Container = onValueChange ? View : TouchableOpacity;
+  const informational = !onValueChange && !onPress;
+  const Container = onValueChange || informational ? View : TouchableOpacity;
   return (
     <Container
       style={[styles.settingRow, last && styles.settingRowLast]}
@@ -54,9 +56,10 @@ function SettingRow({
       disabled={disabled}
       activeOpacity={0.78}
       testID={rowTestID}
+      accessible={informational ? true : undefined}
       accessibilityLabel={onValueChange ? undefined : title}
       accessibilityHint={onValueChange ? undefined : subtitle}
-      accessibilityRole={onValueChange ? undefined : 'button'}
+      accessibilityRole={onValueChange ? undefined : informational ? 'text' : 'button'}
       accessibilityState={{ disabled }}
     >
       <View style={styles.rowIconSlot}>
@@ -123,23 +126,37 @@ export default function RobotaxiSettingsScreen({ navigation, route }) {
     return () => { live = false; focus?.(); subscription?.remove(); };
   }, [navigation, isDriver, refresh, receivePermission]);
 
+  // Android: go straight to this app's notification screen instead of the
+  // generic "App info" page; fall back to it if the intent is unavailable.
+  const openNotificationSettings = useCallback(async () => {
+    if (Platform.OS === 'android' && Application.applicationId) {
+      try {
+        await Linking.sendIntent('android.settings.APP_NOTIFICATION_SETTINGS', [
+          { key: 'android.provider.extra.APP_PACKAGE', value: Application.applicationId },
+        ]);
+        return;
+      } catch { /* fall back to app settings */ }
+    }
+    await Linking.openSettings();
+  }, []);
+
   const configureNotifications = useCallback(async () => {
     if (permissionBusy) return;
     setPermissionBusy(true);
     try {
       const granted = await FCMNotificationService.hasNotificationPermission();
-      if (granted) await Linking.openSettings();
+      if (granted) await openNotificationSettings();
       else {
         const enabled = await FCMNotificationService.requestUserPermission();
         receivePermission(enabled);
         if (!enabled) Alert.alert('Notificações desativadas', 'Ative as notificações da Leaf nos ajustes do dispositivo.', [
           { text: 'Agora não', style: 'cancel' },
-          { text: 'Abrir ajustes', onPress: () => Linking.openSettings().catch(() => Alert.alert('Ajustes indisponíveis', 'Abra os ajustes do dispositivo e selecione Leaf.')) },
+          { text: 'Abrir ajustes', onPress: () => openNotificationSettings().catch(() => Alert.alert('Ajustes indisponíveis', 'Abra os ajustes do dispositivo e selecione Leaf.')) },
         ]);
       }
     } catch { Alert.alert('Não foi possível abrir os ajustes', 'Tente novamente.'); }
     finally { setPermissionBusy(false); }
-  }, [permissionBusy, receivePermission]);
+  }, [openNotificationSettings, permissionBusy, receivePermission]);
 
   const savePreference = useCallback(async (key, value) => {
     try {
@@ -204,7 +221,7 @@ export default function RobotaxiSettingsScreen({ navigation, route }) {
   const promptLogout = useCallback(() => {
     Alert.alert(
       'Sair da conta',
-      'Tem certeza que deseja voltar para a entrada por telefone?',
+      'Tem certeza que deseja sair da sua conta Leaf?',
       [
         { text: 'Cancelar', style: 'cancel' },
         {
@@ -238,8 +255,8 @@ export default function RobotaxiSettingsScreen({ navigation, route }) {
       icon: 'language-outline',
       title: 'Idioma',
       subtitle: 'Português do Brasil',
-      onPress: () => Alert.alert('Idioma do aplicativo', 'Português do Brasil está disponível nesta versão da Leaf.'),
-      showChevron: true,
+      // Single language: informational row (no chevron/alert dead end) until
+      // a real language picker exists.
       rowTestID: 'robotaxi-settings-row-language',
     },
     {
@@ -299,7 +316,8 @@ export default function RobotaxiSettingsScreen({ navigation, route }) {
       icon: 'help-circle-outline',
       title: 'Falar com suporte',
       subtitle: 'Ajuda sem sair do fluxo atual',
-      onPress: () => navigation.replace('RobotaxiPrototypeSupport'),
+      // Push (not replace): replacing removed Settings mid-transition and flashed the home map.
+      onPress: () => navigation.navigate('RobotaxiPrototypeSupport'),
       rowTestID: 'robotaxi-settings-open-support',
       showChevron: true,
       last: true,
@@ -343,15 +361,19 @@ export default function RobotaxiSettingsScreen({ navigation, route }) {
               <View style={styles.headerCopy}>
                 <Text style={styles.screenTitle}>Configurações</Text>
               </View>
+              {/* Rows render from cache immediately; refresh/save status lives in
+                  the header so the list never shifts when it appears or clears. */}
+              {loading || saving ? <View testID={loading ? 'robotaxi-settings-loading' : 'robotaxi-settings-saving'}
+                accessibilityLabel={loading ? 'Carregando configurações' : 'Salvando configuração'} accessibilityLiveRegion="polite">
+                <ActivityIndicator size="small" color="#1A330E" />
+              </View> : null}
             </View>
 
             <ScrollView
               showsVerticalScrollIndicator={false}
               contentContainerStyle={styles.rowsContent}
             >
-              {loading ? <View testID="robotaxi-settings-loading" style={styles.feedback}><ActivityIndicator size="small" color="#1A330E" /><Text style={styles.settingSubtitle}>Carregando configurações</Text></View> : null}
               {error ? <TouchableOpacity testID="robotaxi-settings-retry" style={styles.feedback} onPress={() => refresh({ forceRefresh: true })}><Text style={styles.settingSubtitle}>Configurações não atualizadas · Tentar novamente</Text></TouchableOpacity> : null}
-              {saving ? <Text testID="robotaxi-settings-saving" style={styles.settingSubtitle}>Salvando configuração</Text> : null}
               {visibleSettingRows.map(({ item, driverOnly, ...row }) => (
                 <SettingRow key={item.key} {...row} />
               ))}

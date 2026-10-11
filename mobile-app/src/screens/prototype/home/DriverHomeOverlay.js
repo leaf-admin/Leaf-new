@@ -1,4 +1,5 @@
 import leafTypography from '../../../components/prototype/LeafTypography';
+import LeafGlassSurface from "../../../components/design-system/LeafGlassSurface";
 import React, { memo, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
@@ -14,7 +15,7 @@ import {
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Ionicons } from "@expo/vector-icons";
-import LeafCampaignCarousel from "../../../components/campaigns/LeafCampaignCarousel";
+import Reanimated, { FadeInDown, FadeOutUp } from "react-native-reanimated";
 import robotaxiPrototypeTokens from "../../../components/design-system/robotaxiPrototypeTokens";
 import { leafButtonMetrics } from "../../../components/prototype/LeafRideUI";
 
@@ -23,7 +24,6 @@ const DRIVER_BOTTOM_CTA_OFFSET = 16;
 const DRIVER_HOME_CARD_HEIGHT = 236;
 const DRIVER_HOME_CARD_HORIZONTAL_INSET = 24;
 const DRIVER_HOME_CARD_RADIUS = 32;
-const DRIVER_HOME_PROMO_CARD_HEIGHT = 188;
 const DRIVER_HOME_STACK_GAP = 12;
 const DRIVER_GOAL_STORAGE_PREFIX = "@prototype_driver_daily_goal_";
 const DRIVER_DAY_SUMMARY_STORAGE_PREFIX = "@prototype_driver_day_summary_seen_";
@@ -34,24 +34,6 @@ const DRIVER_ONLINE_LIMIT_MS = 12 * 60 * 60 * 1000;
 const DRIVER_DAY_SUMMARY_WINDOW_HOUR = 23;
 const DRIVER_DAY_SUMMARY_WINDOW_MINUTE = 50;
 const IS_TEST_ENV = typeof process !== "undefined" && process.env?.NODE_ENV === "test";
-const DRIVER_HOME_FALLBACK_CAMPAIGNS = Object.freeze([
-  {
-    id: "local_driver_leaf_day",
-    name: "Leaf motorista",
-    template: "home_banner_card",
-    content: {
-      eyebrow: "Hoje na Leaf",
-      title: "Fique online quando estiver pronto",
-      body: "Acompanhe seus ganhos, aceite corridas com calma e mantenha sua rotina no controle.",
-      backgroundColor: "#F7F8F7",
-      imageAlt: "Banner de boas-vindas da Leaf no Rio de Janeiro",
-      displayMode: "text_overlay",
-      hideTextOverlay: false,
-      cta: { label: "Começar", action: "driver_go_online" },
-    },
-    rules: { autoRotateSeconds: 6 },
-  },
-]);
 const DRIVER_HOME_COLOR = {
   sheet: "#FFFFFF",
   sheetSoft: "#FFFFFF",
@@ -445,6 +427,7 @@ export function isDriverIdentitySupportRequired(remoteActivation) {
 
 function DriverHomeOverlay({
   driverId = "",
+  insetsTop = 0,
   insetsBottom = 0,
   rootNavigationInset = 0,
   driverOnline = false,
@@ -472,6 +455,9 @@ function DriverHomeOverlay({
   onCtaLayout,
 }) {
   const safeBottom = Math.max(0, Number(insetsBottom) || 0);
+  const safeTop = Math.max(0, Number(insetsTop) || 0);
+  // Map-first home: earnings live in a top pill; the full summary expands from it.
+  const [earningsExpanded, setEarningsExpanded] = useState(false);
   const [goalModalVisible, setGoalModalVisible] = useState(false);
   const [goalInput, setGoalInput] = useState("");
   const [dailyGoal, setDailyGoal] = useState(DEFAULT_DAILY_GOAL);
@@ -501,14 +487,6 @@ function DriverHomeOverlay({
     driverCanAttemptOnline &&
     !driverOnline &&
     !hasDriverWorkInProgress;
-  const shouldShowWelcomePromo = !hasDriverWorkInProgress &&
-    !hasDriverOnlineActivityForCurrentDay({
-      driverOnline,
-      driverOnlineStartedAt,
-      driverOnlineDaily,
-      nowMs: onlineClockTick,
-    }) &&
-    Number(ridesCount || 0) <= 0;
   const earningsAnimation = useRef(
     new Animated.Value(parseMoneyLabel(formattedDriverEarnings)),
   ).current;
@@ -523,8 +501,21 @@ function DriverHomeOverlay({
     !driverCanAttemptOnline &&
     !driverOnline &&
     !hasDriverWorkInProgress;
+  // Immediate feedback: the go-online request (gates, socket, location) can take
+  // several seconds before the parent reports pending; show it from the tap.
+  const [localToggleTarget, setLocalToggleTarget] = useState(null);
+  useEffect(() => {
+    if (localToggleTarget === null) return undefined;
+    if (driverOnline === localToggleTarget) {
+      setLocalToggleTarget(null);
+      return undefined;
+    }
+    const timer = setTimeout(() => setLocalToggleTarget(null), 20000);
+    return () => clearTimeout(timer);
+  }, [driverOnline, localToggleTarget]);
+  const localTogglePending = localToggleTarget !== null && driverOnline !== localToggleTarget && !hasDriverWorkInProgress;
   const pendingOfflineActivation =
-    driverOnlinePending && !driverOnline && !hasDriverWorkInProgress;
+    (driverOnlinePending && !driverOnline && !hasDriverWorkInProgress) || localTogglePending;
   const pendingOnlineRealtime =
     driverOnline && !driverRealtimeAuthenticated && !hasDriverWorkInProgress;
   const handleSliderPress = hasDriverWorkInProgress
@@ -533,7 +524,14 @@ function DriverHomeOverlay({
       ? onOpenIdentitySupport
       : isActivationBlocked
       ? onOpenActivation
-      : onToggleOnline;
+      : localTogglePending
+        ? undefined
+        : (...args) => {
+            // Going offline asks for confirmation first (parent dialog); only the
+            // go-online path, which starts immediately, gets the local pending state.
+            if (!driverOnline) setLocalToggleTarget(true);
+            return onToggleOnline?.(...args);
+          };
   const sliderStatus = hasDriverWorkInProgress
     ? "ride"
     : identitySupportRequired
@@ -877,20 +875,35 @@ function DriverHomeOverlay({
 
   return (
     <>
-      <View
-        onLayout={onCtaLayout}
-        style={[
-          styles.driverHomeStack,
-          { bottom: safeBottom + DRIVER_BOTTOM_CTA_OFFSET + rootNavigationInset },
-        ]}
-      >
-        <View style={styles.driverBottomCard}>
+      {/* Earnings pill: the map stays the main view; tap to expand the summary. */}
+      <View pointerEvents="box-none" style={[styles.driverEarningsPillLayer, { top: safeTop + 18 }]}>
+        <TouchableOpacity
+          activeOpacity={0.88}
+          onPress={() => setEarningsExpanded(current => !current)}
+          style={styles.driverEarningsPill}
+          testID="driver-home-earnings-pill"
+          accessibilityRole="button"
+          accessibilityLabel={`Ganhos de hoje ${currentGoalProgressLabel}`}
+          accessibilityState={{ expanded: earningsExpanded }}
+        >
+          <LeafGlassSurface interactive pointerEvents="none" style={styles.driverEarningsPillGlass} />
+          <View style={[styles.driverEarningsPillDot, (sliderStatus === "online" || sliderStatus === "ride") && styles.driverEarningsPillDotOnline]} />
+          <Text style={styles.driverEarningsPillValue} numberOfLines={1}>{currentGoalProgressLabel}</Text>
+          {/* Safety signal stays visible without expanding the panel. */}
+          {onlineLimitHintVisible ? <Ionicons name="time-outline" size={16} color={DRIVER_HOME_COLOR.warningText} accessibilityLabel="Próximo ao limite de horas online" /> : null}
+          <Ionicons name={earningsExpanded ? "chevron-up" : "chevron-down"} size={16} color="#6A6A6A" />
+        </TouchableOpacity>
+      </View>
+
+      {earningsExpanded ? (
+        <Reanimated.View
+          entering={FadeInDown.duration(200)}
+          exiting={FadeOutUp.duration(140)}
+          style={[styles.driverEarningsPanel, { top: safeTop + 74 }]}
+          testID="driver-home-earnings-panel"
+        >
           <View style={styles.driverBottomStatsRow}>
-            <TouchableOpacity
-              activeOpacity={0.86}
-              style={styles.earningsBlock}
-              onPress={onOpenEarnings || handleOpenGoalModal}
-            >
+            <View style={styles.earningsBlock}>
               <View style={styles.driverGoalHeaderRow}>
                 <Text style={styles.driverBottomStatLabel}>Meus ganhos</Text>
               </View>
@@ -933,7 +946,7 @@ function DriverHomeOverlay({
                     : "Meta pronta para hoje"}
                 </Text>
               </View>
-            </TouchableOpacity>
+            </View>
 
             <View style={styles.driverStatsVerticalDivider} />
 
@@ -963,8 +976,27 @@ function DriverHomeOverlay({
             </View>
           </View>
 
-          <View style={styles.driverBottomDivider} />
+          <TouchableOpacity
+            activeOpacity={0.86}
+            onPress={() => { setEarningsExpanded(false); (onOpenEarnings || handleOpenGoalModal)(); }}
+            style={styles.driverEarningsPanelLink}
+            accessibilityRole="button"
+            testID="driver-home-earnings-report"
+          >
+            <Text style={styles.driverEarningsPanelLinkText}>Ver relatório de ganhos</Text>
+            <Ionicons name="chevron-forward" size={14} color={DRIVER_HOME_COLOR.leaf} />
+          </TouchableOpacity>
+        </Reanimated.View>
+      ) : null}
 
+      <View
+        onLayout={onCtaLayout}
+        style={[
+          styles.driverHomeStack,
+          { bottom: safeBottom + DRIVER_BOTTOM_CTA_OFFSET + rootNavigationInset },
+        ]}
+      >
+        <LeafGlassSurface style={styles.driverControlCard}>
           <View style={styles.driverBottomActions}>
             <TouchableOpacity
               activeOpacity={0.88}
@@ -1015,7 +1047,7 @@ function DriverHomeOverlay({
                     Falar com suporte
                   </Text>
                 </View>
-              ) : isReadyForIdentityGate ? (
+              ) : isReadyForIdentityGate && !localTogglePending ? (
                 <View
                   pointerEvents="none"
                   style={styles.driverBottomSliderReadyContent}
@@ -1102,22 +1134,7 @@ function DriverHomeOverlay({
               />
             </TouchableOpacity>
           </View>
-        </View>
-
-        {shouldShowWelcomePromo ? (
-          <LeafCampaignCarousel
-            userId={driverId}
-            role="driver"
-            surface="driver_home"
-            placement="below_home_card"
-            limit={3}
-            height={DRIVER_HOME_PROMO_CARD_HEIGHT}
-            borderRadius={DRIVER_HOME_CARD_RADIUS}
-            fallbackCampaigns={DRIVER_HOME_FALLBACK_CAMPAIGNS}
-            style={styles.driverPromoCard}
-            testID="driver-home-promo-carousel"
-          />
-        ) : null}
+        </LeafGlassSurface>
       </View>
 
       <Modal
@@ -1312,6 +1329,69 @@ function DriverHomeOverlay({
 export default memo(DriverHomeOverlay);
 
 const styles = StyleSheet.create({
+  driverEarningsPillLayer: {
+    position: "absolute",
+    left: 84,
+    right: 84,
+    alignItems: "center",
+    zIndex: 18,
+  },
+  driverEarningsPill: {
+    minHeight: 48,
+    paddingHorizontal: 18,
+    borderRadius: 24,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  driverEarningsPillGlass: {
+    ...StyleSheet.absoluteFillObject,
+    borderRadius: 24,
+  },
+  driverEarningsPillDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: "#B5B5B5" },
+  driverEarningsPillDotOnline: { backgroundColor: "#2E9E4F" },
+  driverEarningsPillValue: {
+    ...leafTypography.semiBold,
+    fontSize: 20,
+    lineHeight: 26,
+    color: "#222222",
+    fontVariant: ["tabular-nums"],
+  },
+  driverEarningsPanel: {
+    position: "absolute",
+    left: DRIVER_HOME_CARD_HORIZONTAL_INSET,
+    right: DRIVER_HOME_CARD_HORIZONTAL_INSET,
+    zIndex: 17,
+    borderRadius: DRIVER_HOME_CARD_RADIUS,
+    paddingHorizontal: 20,
+    paddingTop: 18,
+    paddingBottom: 6,
+    backgroundColor: "#FFFFFF",
+    shadowColor: "#000000",
+    shadowOffset: { width: 0, height: 16 },
+    shadowOpacity: 0.12,
+    shadowRadius: 20,
+    elevation: 8,
+  },
+  driverEarningsPanelLink: {
+    minHeight: 48,
+    marginTop: 12,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: "#E5E5E5",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  driverEarningsPanelLinkText: {
+    ...leafTypography.medium,
+    fontSize: 15,
+    lineHeight: 20,
+    color: DRIVER_HOME_COLOR.leaf,
+  },
+  driverControlCard: {
+    borderRadius: DRIVER_HOME_CARD_RADIUS,
+    padding: 10,
+  },
   driverHomeStack: {
     position: "absolute",
     left: DRIVER_HOME_CARD_HORIZONTAL_INSET,
@@ -1372,7 +1452,7 @@ const styles = StyleSheet.create({
   driverBottomStatLabel: {
     color: DRIVER_HOME_COLOR.muted,
     ...leafTypography.regular,
-    fontSize: 12,
+    fontSize: 13,
     lineHeight: 17,
   },
   driverGoalHeaderRow: {
@@ -1385,8 +1465,8 @@ const styles = StyleSheet.create({
   driverBottomStatValuePrimary: {
     color: DRIVER_HOME_COLOR.text,
     ...leafTypography.semiBold,
-    fontSize: 32,
-    lineHeight: 38,
+    fontSize: 34,
+    lineHeight: 44,
     fontVariant: ['tabular-nums'],
     marginTop: 0,
     maxWidth: '100%',
@@ -1394,7 +1474,7 @@ const styles = StyleSheet.create({
   driverBottomStatValueSecondary: {
     color: DRIVER_HOME_COLOR.secondary,
     ...leafTypography.regular,
-    fontSize: 12,
+    fontSize: 13,
     lineHeight: 17,
     marginTop: 4,
   },
@@ -1429,13 +1509,13 @@ const styles = StyleSheet.create({
   driverGoalProgressCaption: {
     color: DRIVER_HOME_COLOR.secondary,
     ...leafTypography.regular,
-    fontSize: 12,
+    fontSize: 13,
     lineHeight: 17,
   },
   driverGoalProgressPercentText: {
     color: DRIVER_HOME_COLOR.leaf,
     ...leafTypography.semiBold,
-    fontSize: 12,
+    fontSize: 13,
     lineHeight: 17,
   },
   driverStreakInline: {
@@ -1455,7 +1535,7 @@ const styles = StyleSheet.create({
     flexShrink: 1,
     color: DRIVER_HOME_COLOR.warningText,
     ...leafTypography.semiBold,
-    fontSize: 12,
+    fontSize: 13,
     lineHeight: 17,
   },
   driverSideStatValue: {
@@ -1474,7 +1554,7 @@ const styles = StyleSheet.create({
   driverSideStatLabel: {
     color: DRIVER_HOME_COLOR.muted,
     ...leafTypography.regular,
-    fontSize: 12,
+    fontSize: 13,
     lineHeight: 17,
     textAlign: "left",
   },
@@ -1482,8 +1562,8 @@ const styles = StyleSheet.create({
     marginTop: 1,
     color: DRIVER_HOME_COLOR.warningText,
     ...leafTypography.medium,
-    fontSize: 9.5,
-    lineHeight: 12,
+    fontSize: 11,
+    lineHeight: 14,
     textAlign: "left",
   },
   driverBottomDivider: {
@@ -1524,7 +1604,7 @@ const styles = StyleSheet.create({
   driverBottomSliderText: {
     color: DRIVER_HOME_COLOR.text,
     ...leafTypography.semiBold,
-    fontSize: 13.5,
+    fontSize: 13,
     lineHeight: 19,
     textAlign: "center",
   },
@@ -1535,7 +1615,7 @@ const styles = StyleSheet.create({
   driverBottomSliderReadyStatus: {
     color: DRIVER_HOME_COLOR.leaf,
     ...leafTypography.medium,
-    fontSize: 10.5,
+    fontSize: 11,
     lineHeight: 13,
     textAlign: "center",
   },
@@ -1634,7 +1714,7 @@ const styles = StyleSheet.create({
     marginTop: 4,
     color: DRIVER_HOME_COLOR.text,
     ...leafTypography.semiBold,
-    fontSize: 24,
+    fontSize: 22,
     lineHeight: 30,
   },
   summarySubtitle: {
@@ -1705,14 +1785,14 @@ const styles = StyleSheet.create({
     marginTop: 3,
     color: DRIVER_HOME_COLOR.secondary,
     ...leafTypography.regular,
-    fontSize: 12,
+    fontSize: 13,
     lineHeight: 17,
   },
   summaryComparisonDelta: {
     marginTop: 5,
     color: DRIVER_HOME_COLOR.leaf,
     ...leafTypography.semiBold,
-    fontSize: 12,
+    fontSize: 13,
     lineHeight: 16,
   },
   summaryComparisonDeltaMuted: {
@@ -1742,8 +1822,8 @@ const styles = StyleSheet.create({
   summaryStreakNumber: {
     color: "#FFFFFF",
     ...leafTypography.semiBold,
-    fontSize: 18,
-    lineHeight: 23,
+    fontSize: 20,
+    lineHeight: 26,
   },
   summaryStreakCopy: {
     flex: 1,
@@ -1759,14 +1839,14 @@ const styles = StyleSheet.create({
     marginTop: 2,
     color: DRIVER_HOME_COLOR.secondary,
     ...leafTypography.regular,
-    fontSize: 12,
-    lineHeight: 17,
+    fontSize: 13,
+    lineHeight: 26,
   },
   modalTitle: {
     color: color.text.primary,
     ...leafTypography.semiBold,
-    fontSize: 18,
-    lineHeight: 22,
+    fontSize: 20,
+    lineHeight: 26,
   },
   modalLabel: {
     marginTop: 14,
@@ -1862,7 +1942,7 @@ const styles = StyleSheet.create({
   modalGhostButtonText: {
     color: color.text.primary,
     ...leafTypography.semiBold,
-    fontSize: 14,
+    fontSize: 15,
   },
   modalPrimaryButton: {
     flex: 1,
@@ -1877,6 +1957,6 @@ const styles = StyleSheet.create({
   modalPrimaryButtonText: {
     color: color.accent.contrast,
     ...leafTypography.semiBold,
-    fontSize: 14,
+    fontSize: 15,
   },
 });

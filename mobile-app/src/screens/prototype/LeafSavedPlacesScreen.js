@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { LeafObjectIcon } from '../../components/prototype/LeafVisualElements';
@@ -22,6 +22,9 @@ export default function LeafSavedPlacesScreen({ navigation, route }) {
   const loadSequence = useRef(0);
   const visible = state.uid === profileUid ? state : { places: [], localOnly: [], recent: [], busy: true, error: '', synced: false };
   const { places, localOnly, recent, busy, error, synced } = visible;
+  // Full loading state only before the first answer; later refreshes (after
+  // save/remove) keep the current list and show the header spinner.
+  const initialLoading = busy && !places.length && !synced;
   const load = useCallback(async () => {
     const owner = profileUid;
     const sequence = ++loadSequence.current;
@@ -70,36 +73,43 @@ export default function LeafSavedPlacesScreen({ navigation, route }) {
     </TouchableOpacity>
     {saved ? <View style={styles.actions}>
       <TouchableOpacity onPress={() => edit(place)} disabled={busy} style={styles.smallAction} accessibilityRole="button" accessibilityLabel={`Editar endereço ${place.name}`} testID={`leaf-place-edit-${index}`}><Ionicons name="pencil-outline" size={18} color="#6A6A6A" /></TouchableOpacity>
-      <TouchableOpacity onPress={() => mutate(() => removeSavedPlace(profileUid, place.id))} disabled={busy} style={styles.smallAction} accessibilityRole="button" accessibilityLabel={`Remover endereço ${place.name}`} testID={`leaf-place-remove-${index}`}><Ionicons name="close" size={18} color="#6A6A6A" /></TouchableOpacity>
+      <TouchableOpacity onPress={() => Alert.alert('Remover endereço', `Remover "${place.name || place.address}" dos seus endereços salvos?`, [{ text: 'Cancelar', style: 'cancel' }, { text: 'Remover', style: 'destructive', onPress: () => mutate(() => removeSavedPlace(profileUid, place.id)) }])} disabled={busy} style={styles.smallAction} accessibilityRole="button" accessibilityLabel={`Remover endereço ${place.name}`} testID={`leaf-place-remove-${index}`}><Ionicons name="close" size={18} color="#6A6A6A" /></TouchableOpacity>
     </View> : <Ionicons name="chevron-forward" size={13} color="#6A6A6A" />}
   </View>;
   return <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={[styles.page, { paddingTop: insets.top + 20, paddingBottom: insets.bottom + 20 }]} testID="leaf-saved-places-screen">
-    <View style={styles.header}><TouchableOpacity onPress={() => { if (selected || adding) { setSelected(null); setAdding(false); setEditingId(null); } else navigation.goBack(); }} style={styles.back} accessibilityRole="button" accessibilityLabel="Voltar"><Ionicons name="arrow-back" size={22} color="#222222" /></TouchableOpacity><Text style={styles.title}>Endereços salvos</Text></View>
+    <View style={styles.header}><TouchableOpacity onPress={() => { if (selected || adding) { setSelected(null); setAdding(false); setEditingId(null); } else navigation.goBack(); }} style={styles.back} accessibilityRole="button" accessibilityLabel="Voltar"><Ionicons name="arrow-back" size={22} color="#222222" /></TouchableOpacity><Text style={styles.title}>Endereços salvos</Text>{/* Refresh status in the header: an inline spinner shifted the list. */}{busy && !initialLoading ? <ActivityIndicator color="#6A6A6A" accessibilityLabel="Atualizando endereços" style={styles.headerSpinner} /> : null}</View>
     <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-      <Text style={styles.detail}>{synced ? 'Sincronizados com sua conta' : 'Salvos neste aparelho'}</Text>
+      {/* Sync source is unknown until the first load settles; don't claim "neste aparelho" meanwhile. */}
+      <Text style={styles.detail}>{initialLoading ? 'Sincronizando com sua conta…' : synced ? 'Sincronizados com sua conta' : 'Salvos neste aparelho'}</Text>
       {error ? <View accessibilityRole="alert"><Text style={styles.error}>{error}</Text><LeafButton label="Tentar novamente" onPress={load} disabled={busy} /></View> : null}
-      {busy && places.length ? <ActivityIndicator color="#6A6A6A" accessibilityLabel="Atualizando endereços" /> : null}
       {selected ? <>
         <Text style={styles.name}>{editingId ? 'Editar endereço' : 'Salvar endereço'}</Text>
         <View style={styles.row}><LeafObjectIcon name="places" size={48} /><Text style={[styles.detail, { flex: 1 }]}>{selected.address || selected.name}</Text></View>
+        <Text style={styles.fieldLabel}>Nome</Text>
         <TextInput value={label} onChangeText={setLabel} maxLength={80} placeholder="Casa, trabalho ou outro nome" style={styles.input} accessibilityLabel="Nome do endereço" testID="leaf-place-name-input" />
+        {/* Save is the primary action; changing the address is secondary. */}
+        <LeafButton label={busy ? 'Salvando…' : 'Salvar endereço'} tone="primary" onPress={() => mutate(() => savePlace(profileUid, selected, label, { id: editingId }))} disabled={busy || !label.trim()} />
         <LeafButton label="Alterar endereço" tone="secondary" onPress={chooseAddress} disabled={busy} />
-        <LeafButton label={busy ? 'Salvando…' : 'Salvar endereço'} onPress={() => mutate(() => savePlace(profileUid, selected, label, { id: editingId }))} disabled={busy || !label.trim()} />
       </> : adding ? <>
         <LeafButton label="Buscar endereço" onPress={chooseAddress} disabled={busy} />
         <Text style={styles.name}>Destinos recentes</Text>
         {recent.length ? recent.map((item, index) => row(item, index, false)) : <LeafEmptyState icon="location-outline" title="Nenhum destino recente" message="Busque um endereço para começar." />}
       </> : <>
         {places.map((item, index) => row(item, index, true))}
-        {!places.length ? <LeafEmptyState icon="location-outline" loading={busy} title={busy ? 'Carregando endereços…' : 'Seus lugares, por perto'} message="Guarde os endereços que você usa com frequência." /> : null}
+        {/* One state at a time: loading shows only the spinner; the empty copy and
+            the add action appear once the list is known. */}
+        {initialLoading ? <LeafEmptyState icon="location-outline" loading title="Carregando endereços…" /> : null}
+        {!places.length && !initialLoading ? <LeafEmptyState icon="location-outline" title="Seus lugares, por perto" message="Guarde os endereços que você usa com frequência." /> : null}
         {synced && localOnly.length ? <LeafButton label="Sincronizar endereços deste aparelho" tone="secondary" onPress={() => mutate(() => syncLocalSavedPlaces(profileUid))} disabled={busy} /> : null}
-        <LeafButton label="Adicionar endereço" onPress={() => setAdding(true)} disabled={busy} />
+        {initialLoading ? null : <LeafButton label="Adicionar endereço" tone="primary" onPress={() => setAdding(true)} disabled={busy} />}
       </>}
     </ScrollView>
   </KeyboardAvoidingView>;
 }
 
 const styles = StyleSheet.create({
+  headerSpinner: { marginLeft: 'auto' },
+  fieldLabel: { ...leafTypography.medium, fontSize: 13, lineHeight: 18, color: '#6A6A6A', marginBottom: -8 },
   page: { flex: 1, backgroundColor: '#FFFFFF', paddingHorizontal: 24 },
   header: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 20 },
   back: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#F5F5F5', alignItems: 'center', justifyContent: 'center' },

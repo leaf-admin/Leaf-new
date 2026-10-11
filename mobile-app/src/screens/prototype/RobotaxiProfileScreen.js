@@ -1,6 +1,7 @@
 import leafTypography from '../../components/prototype/LeafTypography';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useIsFocused } from '@react-navigation/native';
+import useAccountSummary from '../../hooks/useAccountSummary';
 import { ActivityIndicator, Alert, ScrollView, StatusBar, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useSelector } from 'react-redux';
@@ -102,11 +103,25 @@ function ProfileRow({
   );
 }
 
+// "+5521102938475" -> "+55 21 10293-8475"; other shapes are returned as-is.
+export function formatBrazilPhoneLabel(value) {
+  const raw = String(value || '').trim();
+  const digits = raw.replace(/\D/g, '');
+  const local = digits.startsWith('55') && (digits.length === 12 || digits.length === 13) ? digits.slice(2) : '';
+  if (!local) return raw;
+  const area = local.slice(0, 2);
+  const number = local.slice(2);
+  const split = number.length - 4;
+  return `+55 ${area} ${number.slice(0, split)}-${number.slice(split)}`;
+}
+
 export default function RobotaxiProfileScreen({ navigation, route }) {
   const authProfile = useSelector(state => state?.auth?.profile);
-  const { riderProfile, activeRole, driverCanGoOnline, updateRiderProfile } = usePrototypeRideRuntime();
+  const { riderProfile, activeRole, driverCanGoOnline, updateRiderProfile, profileUid, lastReceipt } = usePrototypeRideRuntime();
   const insets = useSafeAreaInsets();
   const focused = useIsFocused();
+  // Same summary source as the Conta card, so rating/trips are not "—" here.
+  const accountSummary = useAccountSummary({ uid: profileUid || riderProfile?.uid, role: activeRole, revision: lastReceipt?.receiptId || lastReceipt?.id || null, focused });
   const { height: windowHeight } = useWindowDimensions();
   const [panelHeight, setPanelHeight] = useState(windowHeight);
   const [remoteProfile, setRemoteProfile] = useState(null);
@@ -124,11 +139,11 @@ export default function RobotaxiProfileScreen({ navigation, route }) {
     'Sua conta';
   const profileInitial = String(profileName).trim().charAt(0).toUpperCase() || 'L';
   const actions = isDriverRole ? DRIVER_ACTIONS : PASSENGER_ACTIONS;
-  const phoneLabel =
+  const phoneLabel = formatBrazilPhoneLabel(
     resolvePrototypeProfilePhone(remoteProfile) ||
     resolvePrototypeProfilePhone(authProfile) ||
-    resolvePrototypeProfilePhone(riderProfile) ||
-    'Telefone não informado';
+    resolvePrototypeProfilePhone(riderProfile),
+  ) || 'Telefone não informado';
   const emailLabel =
     resolvePrototypeProfileEmail(remoteProfile) ||
     resolvePrototypeProfileEmail(authProfile) ||
@@ -182,6 +197,10 @@ export default function RobotaxiProfileScreen({ navigation, route }) {
     setEditingProfile(true);
   }, [emailLabel, profileName]);
 
+  // Opened to edit: keep the editor's title/layout while the profile loads, so
+  // the screen does not show a "Perfil" card with empty metrics and then swap.
+  const showEditorLayout = editingProfile || Boolean(route?.params?.editProfile && loadingProfile && !initialEditorOpened.current);
+
   useEffect(() => {
     if (route?.params?.editProfile && !loadingProfile && !profileError && !initialEditorOpened.current) {
       initialEditorOpened.current = true;
@@ -189,19 +208,29 @@ export default function RobotaxiProfileScreen({ navigation, route }) {
     }
   }, [loadingProfile, profileError, route?.params?.editProfile, startProfileEdit]);
 
+  // Opened from Conta to edit: leaving the editor returns there instead of
+  // revealing the legacy profile hub underneath.
+  const exitEditor = useCallback(() => {
+    if (route?.params?.editProfile && navigation.canGoBack?.()) {
+      navigation.goBack();
+      return;
+    }
+    setEditingProfile(false);
+  }, [navigation, route?.params?.editProfile]);
+
   const saveProfile = useCallback(async () => {
     try {
       setSavingProfile(true);
       const saved = await MobileProfileService.upsertCurrentProfileOrThrow(profileDraft);
       setRemoteProfile(saved || profileDraft);
       updateRiderProfile(profileDraft);
-      setEditingProfile(false);
+      exitEditor();
     } catch (error) {
       Alert.alert('Dados pessoais', error?.message || 'Não foi possível salvar seus dados.');
     } finally {
       setSavingProfile(false);
     }
-  }, [profileDraft, updateRiderProfile]);
+  }, [exitEditor, profileDraft, updateRiderProfile]);
 
   useEffect(() => {
     const showStatusBar = () => StatusBar.setHidden(false, 'fade');
@@ -373,16 +402,17 @@ export default function RobotaxiProfileScreen({ navigation, route }) {
               </TouchableOpacity>
               <View style={styles.headerCopy}>
                 <Text style={styles.screenTitle}>
-                  {editingProfile ? 'Dados pessoais' : isDriverRole ? 'Perfil do motorista' : 'Perfil'}
+                  {showEditorLayout ? 'Dados pessoais' : isDriverRole ? 'Perfil do motorista' : 'Perfil'}
                 </Text>
               </View>
             </View>
 
-            {!editingProfile ? <LeafAccountCard name={profileName} role={activeRole}
-              profile={{ ...(riderProfile || {}), ...(authProfile || {}), ...(remoteProfile || {}) }}
+            {!showEditorLayout ? <LeafAccountCard name={profileName} role={activeRole}
+              profile={{ ...(riderProfile || {}), ...(authProfile || {}), ...(remoteProfile || {}), ...(accountSummary.summary?.profile || {}) }}
+              loadingMetrics={accountSummary.loading && !accountSummary.summary}
               detail={isDriverRole ? accountStatus : String(riderProfile?.preference || '').trim() || undefined} motionEnabled={focused} /> : null}
 
-            {!editingProfile ? <View style={styles.divider} /> : null}
+            {!showEditorLayout ? <View style={styles.divider} /> : null}
 
             <ScrollView
               showsVerticalScrollIndicator={false}
@@ -437,7 +467,7 @@ export default function RobotaxiProfileScreen({ navigation, route }) {
                   />
                   <TouchableOpacity
                     disabled={savingProfile}
-                    onPress={() => setEditingProfile(false)}
+                    onPress={exitEditor}
                     style={styles.secondaryAction}
                   >
                     <Text style={styles.secondaryActionText}>Cancelar</Text>

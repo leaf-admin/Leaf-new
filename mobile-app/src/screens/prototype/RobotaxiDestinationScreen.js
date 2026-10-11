@@ -5624,14 +5624,14 @@ const styles = StyleSheet.create({
   searchTitle: {
     color: leafRideColors.text,
     ...leafTypography.semiBold,
-    fontSize: 24,
+    fontSize: 22,
     lineHeight: 30,
   },
   searchSubtitle: {
     marginTop: 3,
     color: leafRideColors.secondary,
     ...leafTypography.regular,
-    fontSize: 14,
+    fontSize: 15,
     lineHeight: 20,
   },
   searchInputShell: {
@@ -5652,7 +5652,7 @@ const styles = StyleSheet.create({
   searchInput: {
     color: leafRideColors.text,
     ...leafTypography.medium,
-    fontSize: 16,
+    fontSize: 17,
     lineHeight: 22,
     paddingVertical: 0,
   },
@@ -5710,14 +5710,14 @@ const styles = StyleSheet.create({
   destinationName: {
     color: leafRideColors.text,
     ...leafTypography.semiBold,
-    fontSize: 14,
+    fontSize: 15,
     lineHeight: 18,
   },
   destinationAddress: {
     marginTop: 3,
     color: leafRideColors.secondary,
     ...leafTypography.regular,
-    fontSize: 10,
+    fontSize: 11,
     lineHeight: 13,
   },
   destinationEta: {
@@ -5725,14 +5725,14 @@ const styles = StyleSheet.create({
     width: 56,
     color: leafRideColors.muted,
     ...leafTypography.medium,
-    fontSize: 12,
+    fontSize: 13,
     lineHeight: 16,
     textAlign: "right",
   },
   emptyText: {
     color: leafRideColors.secondary,
     ...leafTypography.regular,
-    fontSize: 12,
+    fontSize: 13,
     lineHeight: 16,
     textAlign: "center",
   },
@@ -5823,7 +5823,7 @@ const styles = StyleSheet.create({
   pickupFloatingEyebrow: {
     color: leafRideColors.secondary,
     ...leafTypography.semiBold,
-    fontSize: 10,
+    fontSize: 11,
     lineHeight: 13,
     textTransform: "uppercase",
     letterSpacing: 0.9,
@@ -5832,7 +5832,7 @@ const styles = StyleSheet.create({
     marginTop: 3,
     color: leafRideColors.text,
     ...leafTypography.semiBold,
-    fontSize: 14,
+    fontSize: 15,
     lineHeight: 18,
   },
   pickupFloatingHint: {
@@ -5840,13 +5840,13 @@ const styles = StyleSheet.create({
     color: leafRideColors.secondary,
     ...leafTypography.regular,
     fontSize: 11,
-    lineHeight: 15,
+    lineHeight: 17,
   },
   pickupFloatingMeta: {
     marginTop: 5,
     color: leafRideColors.leaf,
     ...leafTypography.semiBold,
-    fontSize: 12,
+    fontSize: 13,
     lineHeight: 16,
   },
   pickupSecurePaymentBadge: {
@@ -5863,7 +5863,7 @@ const styles = StyleSheet.create({
     marginTop: 6,
     color: leafRideColors.leaf,
     ...leafTypography.medium,
-    fontSize: 10.5,
+    fontSize: 11,
     lineHeight: 14,
   },
   pickupFloatingActions: {
@@ -5884,7 +5884,7 @@ const styles = StyleSheet.create({
   pickupFloatingSecondaryButtonText: {
     color: leafRideColors.leaf,
     ...leafTypography.semiBold,
-    fontSize: 12,
+    fontSize: 13,
     lineHeight: 16,
   },
   pickupFloatingPrimaryButton: {
@@ -5901,7 +5901,7 @@ const styles = StyleSheet.create({
   pickupFloatingPrimaryButtonText: {
     color: "#FFFFFF",
     ...leafTypography.semiBold,
-    fontSize: 12,
+    fontSize: 13,
     lineHeight: 16,
   },
   pickupStack: {
@@ -5930,7 +5930,7 @@ const styles = StyleSheet.create({
   pickupEyebrow: {
     color: leafRideColors.secondary,
     ...leafTypography.semiBold,
-    fontSize: 10,
+    fontSize: 11,
     lineHeight: 14,
     textTransform: "uppercase",
     letterSpacing: 0.8,
@@ -5946,7 +5946,7 @@ const styles = StyleSheet.create({
     marginTop: 6,
     color: leafRideColors.secondary,
     ...leafTypography.regular,
-    fontSize: 12,
+    fontSize: 13,
     lineHeight: 16,
   },
   pickupFare: {
@@ -5984,7 +5984,7 @@ const styles = StyleSheet.create({
   pickupPointLabel: {
     color: leafRideColors.secondary,
     ...leafTypography.semiBold,
-    fontSize: 10,
+    fontSize: 11,
     lineHeight: 14,
     textTransform: "uppercase",
     letterSpacing: 0.8,
@@ -5993,7 +5993,7 @@ const styles = StyleSheet.create({
     marginTop: 3,
     color: leafRideColors.text,
     ...leafTypography.semiBold,
-    fontSize: 14,
+    fontSize: 15,
     lineHeight: 18,
   },
   pickupPointHint: {
@@ -6205,14 +6205,14 @@ const styles = StyleSheet.create({
   categorySelectedTitle: {
     color: leafRideColors.text,
     ...leafTypography.semiBold,
-    fontSize: 15.5,
+    fontSize: 15,
     lineHeight: 20,
   },
   categorySelectedSubtitle: {
     marginTop: 1,
     color: leafRideColors.secondary,
     ...leafTypography.regular,
-    fontSize: 14,
+    fontSize: 15,
     lineHeight: 20,
   },
   categorySelectedPriceWrap: {
@@ -6230,7 +6230,7 @@ const styles = StyleSheet.create({
     marginTop: 1,
     color: leafRideColors.secondary,
     ...leafTypography.regular,
-    fontSize: 10,
+    fontSize: 11,
     lineHeight: 13,
   },
   categoryMetaRow: {
@@ -6249,7 +6249,7 @@ const styles = StyleSheet.create({
   categoryMetaLabel: {
     color: leafRideColors.secondary,
     ...leafTypography.regular,
-    fontSize: 12,
+    fontSize: 13,
     lineHeight: 17,
   },
   categoryMetaValueRow: {
@@ -6291,7 +6291,7 @@ const styles = StyleSheet.create({
   categoryStatusText: {
     color: leafRideColors.secondary,
     ...leafTypography.semiBold,
-    fontSize: 10,
+    fontSize: 11,
     lineHeight: 13,
   },
   categoryStatusTextHigh: {
@@ -6310,10 +6310,8 @@ const styles = StyleSheet.create({
   },
   confirmCard: {
     minHeight: CONFIRM_FALLBACK_HEIGHT,
-    borderTopLeftRadius: 28,
-    borderTopRightRadius: 28,
-    borderBottomLeftRadius: 0,
-    borderBottomRightRadius: 0,
+    marginHorizontal: 12,
+    borderRadius: 28,
     paddingTop: 14,
   },
   confirmHeader: {
@@ -6330,7 +6328,7 @@ const styles = StyleSheet.create({
   confirmEyebrow: {
     color: leafRideColors.secondary,
     ...leafTypography.semiBold,
-    fontSize: 10,
+    fontSize: 11,
     lineHeight: 14,
     textTransform: "uppercase",
     letterSpacing: 1,
@@ -6339,14 +6337,14 @@ const styles = StyleSheet.create({
     marginTop: 2,
     color: leafRideColors.text,
     ...leafTypography.semiBold,
-    fontSize: 24,
-    lineHeight: 30,
+    fontSize: 22,
+    lineHeight: 44,
   },
   confirmPrice: {
     color: leafRideColors.text,
     ...leafTypography.semiBold,
-    fontSize: 32,
-    lineHeight: 40,
+    fontSize: 34,
+    lineHeight: 44,
     textAlign: "right",
   },
   confirmMetricRow: {
@@ -6375,7 +6373,7 @@ const styles = StyleSheet.create({
     marginTop: 2,
     color: leafRideColors.secondary,
     ...leafTypography.regular,
-    fontSize: 12,
+    fontSize: 13,
     lineHeight: 17,
     textAlign: "left",
   },
@@ -6388,10 +6386,8 @@ const styles = StyleSheet.create({
   },
   quoteCard: {
     minHeight: QUOTE_FALLBACK_HEIGHT,
-    borderTopLeftRadius: 28,
-    borderTopRightRadius: 28,
-    borderBottomLeftRadius: 0,
-    borderBottomRightRadius: 0,
+    marginHorizontal: 12,
+    borderRadius: 28,
     paddingTop: 16,
   },
   quoteHeader: {
@@ -6404,14 +6400,14 @@ const styles = StyleSheet.create({
   quoteTitle: {
     color: leafRideColors.text,
     ...leafTypography.semiBold,
-    fontSize: 24,
-    lineHeight: 30,
+    fontSize: 22,
+    lineHeight: 44,
   },
   quotePrice: {
     color: leafRideColors.text,
     ...leafTypography.semiBold,
-    fontSize: 32,
-    lineHeight: 40,
+    fontSize: 34,
+    lineHeight: 44,
     textAlign: "right",
   },
   quoteDivider: {
@@ -6434,7 +6430,7 @@ const styles = StyleSheet.create({
   dynamicPricingBadgeTitle: {
     color: leafRideColors.text,
     ...leafTypography.medium,
-    fontSize: 12.5,
+    fontSize: 13,
     lineHeight: 17,
   },
   dynamicPricingBadgeText: {
@@ -6442,13 +6438,13 @@ const styles = StyleSheet.create({
     color: leafRideColors.secondary,
     ...leafTypography.regular,
     fontSize: 11,
-    lineHeight: 15,
+    lineHeight: 20,
   },
   pricingQuoteStatus: {
     marginTop: 12,
     color: leafRideColors.secondary,
     ...leafTypography.regular,
-    fontSize: 14,
+    fontSize: 15,
     lineHeight: 20,
     textAlign: "left",
   },
@@ -6477,7 +6473,7 @@ const styles = StyleSheet.create({
     marginTop: 2,
     color: leafRideColors.secondary,
     ...leafTypography.regular,
-    fontSize: 10.5,
+    fontSize: 11,
     lineHeight: 14,
   },
   leafDelasSwitch: {
@@ -6518,21 +6514,21 @@ const styles = StyleSheet.create({
   unavailableTitle: {
     color: leafRideColors.dangerText,
     ...leafTypography.semiBold,
-    fontSize: 12,
+    fontSize: 13,
     lineHeight: 16,
   },
   unavailableText: {
     marginTop: 2,
     color: leafRideColors.secondary,
     ...leafTypography.regular,
-    fontSize: 10.5,
-    lineHeight: 14,
+    fontSize: 11,
+    lineHeight: 20,
   },
   availabilityNotice: {
     marginTop: 10,
     color: leafRideColors.dangerText,
     ...leafTypography.medium,
-    fontSize: 14,
+    fontSize: 15,
     lineHeight: 20,
     textAlign: "left",
   },
@@ -6587,7 +6583,7 @@ const styles = StyleSheet.create({
   preferenceModalEyebrow: {
     color: leafRideColors.secondary,
     ...leafTypography.semiBold,
-    fontSize: 10,
+    fontSize: 11,
     lineHeight: 13,
     textTransform: "uppercase",
     letterSpacing: 0.9,
@@ -6596,14 +6592,14 @@ const styles = StyleSheet.create({
     marginTop: 4,
     color: leafRideColors.text,
     ...leafTypography.semiBold,
-    fontSize: 18,
-    lineHeight: 23,
+    fontSize: 20,
+    lineHeight: 26,
   },
   preferenceModalSubtitle: {
     marginTop: 4,
     color: leafRideColors.secondary,
     ...leafTypography.regular,
-    fontSize: 11.5,
+    fontSize: 11,
     lineHeight: 16,
   },
   preferenceModalCountdown: {
@@ -6619,7 +6615,7 @@ const styles = StyleSheet.create({
   preferenceModalCountdownText: {
     color: leafRideColors.leaf,
     ...leafTypography.semiBold,
-    fontSize: 14,
+    fontSize: 15,
     lineHeight: 18,
   },
   preferenceSelectors: {
@@ -6654,13 +6650,13 @@ const styles = StyleSheet.create({
     color: leafRideColors.secondary,
     ...leafTypography.medium,
     fontSize: 13,
-    lineHeight: 18,
+    lineHeight: 22,
   },
   preferenceSelectorValue: {
     marginTop: 3,
     color: leafRideColors.text,
     ...leafTypography.semiBold,
-    fontSize: 16,
+    fontSize: 17,
     lineHeight: 22,
   },
   preferenceDropdownList: {

@@ -1552,7 +1552,7 @@ export default function WooviPaymentModal({
         notifyPaymentExpired(timedOutPaymentData);
         
         Alert.alert(
-            '⏰ Tempo Esgotado',
+            'Tempo esgotado',
             'O tempo para realizar o pagamento expirou. Faça uma nova cotação para continuar.',
             [{ 
                 text: 'OK', 
@@ -1565,7 +1565,10 @@ export default function WooviPaymentModal({
                     setPaymentData(null);
                     setLoading(false);
                 }
-            }]
+            }],
+            // Product copy, not an error: the global alert patch would rewrite
+            // any message mentioning "pagamento" into a generic failure.
+            { __skipFriendlyAlertPatch: true }
         );
     };
 
@@ -2138,7 +2141,7 @@ const styles = StyleSheet.create({
     },
     generateTitle: {
         fontSize: 24,
-        fontWeight: 'bold',
+        fontFamily: 'Figtree-Bold',
         marginTop: 20,
         marginBottom: 10,
         textAlign: 'center',
@@ -2163,7 +2166,7 @@ const styles = StyleSheet.create({
     generateButtonText: {
         color: '#FFFFFF',
         fontSize: 18,
-        fontWeight: 'bold',
+        fontFamily: 'Figtree-Bold',
     },
     errorContainer: {
         alignItems: 'center',
@@ -2543,6 +2546,6 @@ const styles = StyleSheet.create({
     },
     cancelButtonText: {
         fontSize: 16,
-        fontWeight: 'bold',
+        fontFamily: 'Figtree-Bold',
     },
 }); 

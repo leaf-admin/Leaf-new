@@ -146,7 +146,8 @@ function SupportOptionRow({ item, active, onPress, rowTestID, last = false }) {
         <Text style={[styles.optionTitle, active && styles.optionTitleActive]}>{item.title}</Text>
         <Text style={styles.optionSubtitle}>{item.subtitle}</Text>
       </View>
-      <Ionicons name="chevron-forward" size={15} color={color.text.muted} />
+      {/* Radio, not a chevron: tapping selects the subject for "Abrir ticket"; it does not navigate. */}
+      <Ionicons name={active ? 'radio-button-on' : 'radio-button-off'} size={20} color={active ? '#1A330E' : color.text.muted} />
     </TouchableOpacity>
   );
 }

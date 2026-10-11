@@ -19,6 +19,8 @@ import fcmService from './FCMNotificationService';
 import { requestExpoNotificationsPermissionWithDisclosure } from './AndroidPermissionDisclosure';
 import RideLiveActivityService from './RideLiveActivityService';
 
+const RIDE_STATUS_NOTIFICATION_IDENTIFIER = 'leaf-ride-status';
+
 
 class PersistentRideNotificationService {
     constructor() {
@@ -196,6 +198,8 @@ class PersistentRideNotificationService {
 
             // Criar nova notificação persistente
             const notificationId = await Notifications.scheduleNotificationAsync({
+                // Stable id: each post replaces the shown one instead of stacking copies.
+                identifier: RIDE_STATUS_NOTIFICATION_IDENTIFIER,
                 content: {
                     title: customTitle || title,
                     body: customBody || body,
@@ -279,6 +283,8 @@ class PersistentRideNotificationService {
             await Notifications.cancelScheduledNotificationAsync(this.currentNotificationId);
 
             const notificationId = await Notifications.scheduleNotificationAsync({
+                // Stable id: each post replaces the shown one instead of stacking copies.
+                identifier: RIDE_STATUS_NOTIFICATION_IDENTIFIER,
                 content: {
                     title: customTitle || title,
                     body: customBody || body,
@@ -427,6 +433,8 @@ class PersistentRideNotificationService {
                 status: rideData.status || 'completed',
             });
 
+            // Dismiss by the stable id too: after a JS reload currentNotificationId is lost.
+            await Notifications.dismissNotificationAsync(RIDE_STATUS_NOTIFICATION_IDENTIFIER).catch(() => {});
             if (this.currentNotificationId) {
                 await Notifications.cancelScheduledNotificationAsync(this.currentNotificationId);
                 await Notifications.dismissNotificationAsync(this.currentNotificationId);

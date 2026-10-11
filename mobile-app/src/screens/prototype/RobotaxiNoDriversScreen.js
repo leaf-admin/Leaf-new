@@ -74,7 +74,7 @@ export default function RobotaxiNoDriversScreen({ navigation, route }) {
   const [cardHeight, setCardHeight] = useState(FALLBACK_CARD_HEIGHT);
   const [secondaryActionsVisible, setSecondaryActionsVisible] = useState(false);
   const sheetBottom =
-    SHEET_BOTTOM_OFFSET + robotaxiLifecycleMetrics.cardBottomGap;
+    SHEET_BOTTOM_OFFSET + robotaxiLifecycleMetrics.cardBottomGap + insets.bottom;
   const reason = formatNoDriversReason(route?.params?.reason);
   const refundStatus = String(route?.params?.refundStatus || "")
     .trim()
@@ -257,7 +257,7 @@ export default function RobotaxiNoDriversScreen({ navigation, route }) {
           onClose={handleDismiss}
           sheetStyle={[styles.sheetWrap, { bottom: sheetBottom }]}
         >
-          <RobotaxiLifecycleCard onLayout={handleCardLayout} style={[styles.card, { paddingBottom: robotaxiLifecycleMetrics.cardPaddingBottom + insets.bottom }]}>
+          <RobotaxiLifecycleCard onLayout={handleCardLayout} style={[styles.card, { paddingBottom: robotaxiLifecycleMetrics.cardPaddingBottom }]}>
 
             <RobotaxiLifecycleSummary title="Nenhum motorista encontrado" subtitle={reason} object="vehicle" />
 

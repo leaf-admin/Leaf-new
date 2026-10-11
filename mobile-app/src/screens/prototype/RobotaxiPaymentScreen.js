@@ -24,7 +24,7 @@ import { usePrototypeRideRuntime } from "./prototypeRideRuntime";
 import { resolveMeaningfulAddress } from "./addressLabelUtils";
 import { buildOverlaySheetViewportMetrics } from "./prototypeRouteViewport";
 
-const SHEET_BOTTOM_OFFSET = 0;
+const SHEET_BOTTOM_OFFSET = 12;
 const FALLBACK_CARD_HEIGHT = 356;
 const STATE_HEADER_TOP_OFFSET = 50;
 const STATE_HEADER_FALLBACK_HEIGHT = 76;
@@ -628,10 +628,8 @@ const styles = StyleSheet.create({
   },
   paymentCard: {
     minHeight: 356,
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    borderBottomLeftRadius: 0,
-    borderBottomRightRadius: 0,
+    marginHorizontal: 12,
+    borderRadius: 28,
     paddingHorizontal: 24,
     paddingTop: 14,
   },
@@ -650,15 +648,15 @@ const styles = StyleSheet.create({
   title: {
     color: leafRideColors.text,
     ...leafTypography.semiBold,
-    fontSize: 24,
-    lineHeight: 30,
+    fontSize: 22,
+    lineHeight: 44,
   },
-  detail: { ...leafTypography.regular, fontSize: 14, lineHeight: 20, color: '#6A6A6A' },
+  detail: { ...leafTypography.regular, fontSize: 15, lineHeight: 44, color: '#6A6A6A' },
   price: {
     color: leafRideColors.text,
     ...leafTypography.semiBold,
-    fontSize: 32,
-    lineHeight: 40,
+    fontSize: 34,
+    lineHeight: 44,
   },
   divider: {
     marginTop: 16,
@@ -693,7 +691,7 @@ const styles = StyleSheet.create({
     marginTop: 10,
     color: leafRideColors.dangerText,
     ...leafTypography.regular,
-    fontSize: 14,
+    fontSize: 15,
     lineHeight: 20,
     textAlign: "left",
   },

@@ -11,8 +11,9 @@ export default function LeafPassengerLanding({ insets, pickupLabel, onDestinatio
   return <View pointerEvents="box-none" style={[styles.container, { paddingTop: insets.top + 16, paddingBottom: insets.bottom + 84 }]} testID="leaf-passenger-landing">
     <View style={styles.header}>
       <Text style={styles.title} accessibilityRole="header">Viajar</Text>
-      <TouchableOpacity style={styles.iconButton} onPress={onSettingsPress} accessibilityRole="button" accessibilityLabel="Preferências da viagem" testID="leaf-home-preferences">
-        <Ionicons name="options-outline" size={22} color="#222222" />
+      <TouchableOpacity style={styles.iconButton} onPress={onSettingsPress} accessibilityRole="button" accessibilityLabel="Configurações" testID="leaf-home-preferences">
+        {/* Opens app settings (notifications, idioma, privacidade): a gear, not trip-filter sliders. */}
+        <Ionicons name="settings-outline" size={22} color="#222222" />
       </TouchableOpacity>
     </View>
     <TouchableOpacity onPress={onDestinationPress} onLongPress={onVoicePress} activeOpacity={0.88}

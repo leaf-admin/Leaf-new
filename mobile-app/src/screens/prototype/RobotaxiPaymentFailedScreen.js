@@ -31,7 +31,7 @@ export default function RobotaxiPaymentFailedScreen({ navigation, route }) {
   const [retryError, setRetryError] = useState('');
   const retryGuardRef = useRef(false);
   const sheetBottom =
-    SHEET_BOTTOM_OFFSET + robotaxiLifecycleMetrics.cardBottomGap;
+    SHEET_BOTTOM_OFFSET + robotaxiLifecycleMetrics.cardBottomGap + insets.bottom;
 
   const title = route?.params?.title || 'Pagamento não confirmado';
   const errorMessage = route?.params?.errorMessage || 'Não conseguimos confirmar o pagamento desta vez.';
@@ -147,7 +147,7 @@ export default function RobotaxiPaymentFailedScreen({ navigation, route }) {
           dragEnabled={!confirmedRetryRequested}
           backdropDismissEnabled={!confirmedRetryRequested}
         >
-          <RobotaxiLifecycleCard onLayout={handleCardLayout} style={[styles.card, { paddingBottom: robotaxiLifecycleMetrics.cardPaddingBottom + insets.bottom }]}>
+          <RobotaxiLifecycleCard onLayout={handleCardLayout} style={[styles.card, { paddingBottom: robotaxiLifecycleMetrics.cardPaddingBottom }]}>
 
             <RobotaxiLifecycleSummary title={title} subtitle={visibleMessage} object="payment" />
 

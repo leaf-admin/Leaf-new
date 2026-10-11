@@ -1,4 +1,5 @@
 import leafTypography from '../../components/prototype/LeafTypography';
+import LeafBootSplash from '../../components/design-system/LeafBootSplash';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Keyboard, Linking, Modal, Platform, StatusBar, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -13,7 +14,7 @@ import PrototypeMapLayer from '../../components/prototype/PrototypeMapLayer';
 import { resolveRegisteredVehicleColor } from '../../components/prototype/vehicleMarkerIdentity';
 import { useMobilePreferences } from '../../components/MobilePreferencesProvider';
 import useLeafVoiceGuidance from '../../hooks/useLeafVoiceGuidance';
-import LeafLocationMarker, { LEAF_LOCATION_MARKER_SIZE } from '../../components/prototype/LeafLocationMarker';
+import { LEAF_LOCATION_MARKER_SIZE } from '../../components/prototype/LeafLocationMarker';
 import PrototypeConnectionStatusPill from '../../components/prototype/PrototypeConnectionStatusPill';
 import { PrototypeBottomIsland, PrototypeTopControls } from '../../components/prototype/PrototypeScaffold';
 import PermissionExplanationModal from '../../components/PermissionExplanationModal';
@@ -53,6 +54,7 @@ import {
   resolveWorstTrafficSegmentLevel,
 } from './prototypeTrafficRoute';
 import { usePrototypeRideRuntime } from './prototypeRideRuntime';
+import { navigateLeafRootTab } from '../../navigation/leafRootTabNavigation';
 import { resolvePassengerAutoRoute, shouldAutoSyncPassengerRoute } from './passengerFlowRouting';
 import { normalizeRuntimeRideStatus } from './rideLifecycleContract';
 import { resolvePrototypeMapPresentation } from './prototypeMapPresentation';
@@ -116,13 +118,13 @@ import {
   fetchPlacesAutocomplete,
 } from '../../services/runtime/locationRouteBridge';
 import { fetchDynamicPricingQuote } from '../../services/runtime/pricingQuoteService';
+import { confirmDriverEarlyEnd } from './home/driverEarlyEndConfirm';
 import Logger from '../../utils/Logger';
 import { resolveHomeQuoteFailurePresentation } from './home/homeQuoteFailurePresentation';
 
 const { color } = robotaxiPrototypeTokens;
 const HOME_CARD_BOTTOM_OFFSET = 16;
 const HOME_CARD_FALLBACK_HEIGHT = PASSENGER_HOME_CARD_METRICS.stackHeight;
-const HOME_PICKUP_PICKER_BOTTOM_OFFSET = 26;
 const HOME_PICKUP_PICKER_FALLBACK_HEIGHT = 122;
 const DRIVER_BOTTOM_CTA_OFFSET = 16;
 const DRIVER_BOTTOM_CTA_FALLBACK_HEIGHT = 236;
@@ -330,6 +332,10 @@ const PREBOOKING_ROUTE_MIN_LATITUDE_DELTA = 0.0015;
 const PREBOOKING_ROUTE_SHORT_DELTA_MULTIPLIER = 1.12;
 const PREBOOKING_ROUTE_LONG_DELTA_MULTIPLIER = 1.12;
 const SEARCH_ZOOM_ANIMATION_MS = 1150;
+// The dispatch radius grows to several kilometres while searching. Framing the
+// map to it showed the whole city with a still circle; the passenger only
+// needs the surroundings of the pickup, so the drawn area is capped.
+const SEARCH_VISUAL_MAX_RADIUS_KM = 1.2;
 const SEARCH_RADIUS_MARGIN = 1.34;
 const SEARCH_INITIAL_VIEWPORT_RADIUS_KM = 0.48;
 const MAP_OCCLUSION_REPOSITION_MS = 760;
@@ -344,9 +350,65 @@ const HOME_AUTOMATION_WATCHDOG_MS = 250;
 const LEAF_NATIVE_NAV_CAMERA_THROTTLE_MS = 800;
 const LEAF_NATIVE_NAV_MANUAL_PAN_PAUSE_MS = 8000;
 const LEAF_NATIVE_NAV_ROUTE_REVEAL_MS = 1600;
-const LEAF_NATIVE_NAV_CAMERA_MIN_LOOKAHEAD_KM = 0.045;
-const LEAF_NATIVE_NAV_CAMERA_MAX_LOOKAHEAD_KM = 0.28;
 const MERCATOR_METERS_PER_PIXEL_AT_ZOOM_0 = 156543.03392;
+// Navigation camera: room kept for the top banner, and where the car sits in
+// the visible window (0 = top, 1 = bottom) so most of it shows the road ahead.
+// Camera dead zones: GPS wobbles a few metres even when parked; following every
+// wobble made the map drift and twitch.
+const FOLLOW_CAMERA_RECENTER_RATIO = 0.18;
+const NAV_CAMERA_MIN_MOVE_METERS = 8;
+const NAV_CAMERA_MIN_HEADING_DEG = 12;
+
+function isFollowRegionClose(previous, next) {
+  if (!previous || !next) return false;
+  const latSpan = Math.max(Number(previous.latitudeDelta) || 0, 0.0001);
+  const lngSpan = Math.max(Number(previous.longitudeDelta) || 0, 0.0001);
+  const zoomRatio = (Number(next.latitudeDelta) || latSpan) / latSpan;
+  return (
+    Math.abs(previous.latitude - next.latitude) <= latSpan * FOLLOW_CAMERA_RECENTER_RATIO &&
+    Math.abs(previous.longitude - next.longitude) <= lngSpan * FOLLOW_CAMERA_RECENTER_RATIO &&
+    zoomRatio > 0.85 &&
+    zoomRatio < 1.15
+  );
+}
+
+// Approach legs shorter than this are drawn as the trip ahead instead.
+const DRIVER_AT_PICKUP_ROUTE_METERS = 80;
+
+const NAV_ROUTE_REVEAL_MAX_SPAN_METERS = 4000;
+// Diagonal of the bounding box of a route, in metres.
+function measureRouteSpanMeters(coordinates = []) {
+  const points = (Array.isArray(coordinates) ? coordinates : []).filter(
+    point => Number.isFinite(Number(point?.latitude)) && Number.isFinite(Number(point?.longitude)),
+  );
+  if (points.length < 2) return 0;
+  const latitudes = points.map(point => Number(point.latitude));
+  const longitudes = points.map(point => Number(point.longitude));
+  return measureRouteLengthMeters([
+    { latitude: Math.min(...latitudes), longitude: Math.min(...longitudes) },
+    { latitude: Math.max(...latitudes), longitude: Math.max(...longitudes) },
+  ]);
+}
+
+function measureRouteLengthMeters(coordinates = []) {
+  if (!Array.isArray(coordinates) || coordinates.length < 2) return 0;
+  let meters = 0;
+  for (let index = 1; index < coordinates.length; index += 1) {
+    const a = coordinates[index - 1];
+    const b = coordinates[index];
+    const lat1 = (Number(a?.latitude) * Math.PI) / 180;
+    const lat2 = (Number(b?.latitude) * Math.PI) / 180;
+    const dLat = lat2 - lat1;
+    const dLng = ((Number(b?.longitude) - Number(a?.longitude)) * Math.PI) / 180;
+    const h = Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
+    const step = 2 * 6371000 * Math.asin(Math.min(1, Math.sqrt(h)));
+    if (Number.isFinite(step)) meters += step;
+  }
+  return meters;
+}
+
+const NAVIGATION_BANNER_CLEARANCE = 128;
+const NAVIGATION_CAR_VISIBLE_ANCHOR = 0.74;
 const DRIVER_DISCLOSURE_STORAGE_TIMEOUT_MS = Math.max(
   600,
   Number.parseInt(
@@ -692,38 +754,6 @@ function offsetCoordinateByDistance(center, distanceKm, bearingDegrees) {
     latitude: (nextLatRad * 180) / Math.PI,
     longitude: (nextLonRad * 180) / Math.PI
   };
-}
-
-function resolveNavigationCameraLookAheadKm({
-  coordinate,
-  zoom,
-  mapHeight,
-  anchorY = NAVIGATION_CAMERA_ANCHOR_Y,
-}) {
-  if (!isFiniteCoordinate(coordinate)) {
-    return LEAF_NATIVE_NAV_CAMERA_MIN_LOOKAHEAD_KM;
-  }
-
-  const safeZoom = Number.isFinite(Number(zoom))
-    ? Math.max(1, Math.min(22, Number(zoom)))
-    : resolveNavigationCameraZoom(0);
-  const safeHeight = Number.isFinite(Number(mapHeight)) && Number(mapHeight) > 0
-    ? Number(mapHeight)
-    : 760;
-  const safeAnchorY = Math.max(0.5, Math.min(0.82, Number(anchorY) || NAVIGATION_CAMERA_ANCHOR_Y));
-  const latitudeCosine = Math.max(
-    0.18,
-    Math.cos((Number(coordinate.latitude) * Math.PI) / 180),
-  );
-  const metersPerPixel =
-    (MERCATOR_METERS_PER_PIXEL_AT_ZOOM_0 * latitudeCosine) / (2 ** safeZoom);
-  const anchorOffsetPixels = Math.max(0, safeHeight * (safeAnchorY - 0.5));
-  const lookAheadKm = (anchorOffsetPixels * metersPerPixel) / 1000;
-
-  return Math.min(
-    LEAF_NATIVE_NAV_CAMERA_MAX_LOOKAHEAD_KM,
-    Math.max(LEAF_NATIVE_NAV_CAMERA_MIN_LOOKAHEAD_KM, lookAheadKm),
-  );
 }
 
 function getSearchViewportRadiusKm(radiusKm) {
@@ -1083,6 +1113,15 @@ function isGenericPickupAddress(value = '') {
 
 function hasStreetNumber(value = '') {
   return /\b\d{1,6}[a-zA-Z]?\b/.test(String(value || ''));
+}
+
+// Vertical span (degrees) actually shown: the larger of the requested
+// latitudeDelta and the width-fitted span (Web Mercator: cos(lat) per degree).
+export function resolveVisibleLatitudeSpan({ latitude = 0, latitudeDelta, longitudeDelta, width, height }) {
+  const lat = Number(latitudeDelta) || 0;
+  if (!(width > 0) || !(height > 0) || !(Number(longitudeDelta) > 0)) return lat;
+  const widthFitted = Number(longitudeDelta) * (height / width) * Math.cos((Number(latitude) * Math.PI) / 180);
+  return Math.max(lat, widthFitted);
 }
 
 function formatPickupStreetNumberLabel(value = '', fallback = 'Local atual') {
@@ -1484,12 +1523,13 @@ export function resolveHomeCategoryFarePresentation({
     };
   }
 
+  // Once a route needs a backend quote, every category shows only the backend
+  // fare; a local estimate that later changes reads as a price jump.
   if (
-    isSelectedCategory &&
     backendQuoteRequired &&
     !(Number.isFinite(normalizedBackendFare) && normalizedBackendFare > 0)
   ) {
-    if (!quoteUnavailable && allowLocalEstimateWhilePending && hasLocalEstimate) {
+    if (isSelectedCategory && !quoteUnavailable && allowLocalEstimateWhilePending && hasLocalEstimate) {
       return {
         fare: normalizedLocalFare,
         priceLabel: formatCurrencyBRL(normalizedLocalFare),
@@ -1889,6 +1929,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     operationalContinuation,
     acceptDriverOffer,
     rejectDriverOffer,
+    expireDriverOffer,
     respondToDriverExtension,
     respondOperationalContinuationFlow,
     interruptRideOperationalFlow,
@@ -1911,6 +1952,8 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   const lastRouteLayoutKeyRef = useRef('');
   const lastNativeNavigationCameraAtRef = useRef(0);
   const lastNativeNavigationHeadingRef = useRef(null);
+  const lastNativeNavigationCameraPoseRef = useRef(null);
+  const lastFollowRegionRef = useRef(null);
   const lastNativeNavigationRouteRevealKeyRef = useRef('');
   const nativeNavigationRouteRevealTimerRef = useRef(null);
   const lastManualMapPanAtRef = useRef(0);
@@ -1994,6 +2037,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   const [homePickupPickerCardHeight, setHomePickupPickerCardHeight] = useState(HOME_PICKUP_PICKER_FALLBACK_HEIGHT);
   const [driverBottomCtaHeight, setDriverBottomCtaHeight] = useState(DRIVER_BOTTOM_CTA_FALLBACK_HEIGHT);
   const [driverLiveRideHeight, setDriverLiveRideHeight] = useState(DRIVER_LIVE_RIDE_FALLBACK_HEIGHT);
+  const [driverLiveRideHeightMeasured, setDriverLiveRideHeightMeasured] = useState(false);
   const lastPassengerHomeAvailabilityNoticeRef = useRef('');
   const [mapWidth, setMapWidth] = useState(windowWidth);
   const [mapHeight, setMapHeight] = useState(windowHeight);
@@ -2743,8 +2787,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
               isSelectedCategory,
               quotePending: selectedHomeQuotePending,
               backendQuoteRequired: Boolean(
-                isSelectedCategory &&
-                  homeSelectedDestination?.coordinate &&
+                homeSelectedDestination?.coordinate &&
                   homeBackendQuoteKey
               ),
               quoteUnavailable: Boolean(
@@ -2771,6 +2814,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
           arrivalLabel:
             homeCanonicalRouteReady &&
             !homeQuoteAutoRefreshExhausted &&
+            !homeBackendQuoteError &&
             (!isSelectedCategory ||
               (selectedHomeBackendQuoteReady && !selectedHomeDriverUnavailable))
               ? homeArrivalTime
@@ -2976,8 +3020,9 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
       return undefined;
     }
 
+    // Keep the last resolved label while the new position resolves; clearing it
+    // here made the pickup flash "Local atual" on every GPS update/refocus.
     homeCurrentPickupReverseRequestKeyRef.current = cacheKey;
-    setCachedHomePickupAddress(previous => (previous ? '' : previous));
 
     const resolveCurrentPickupAddress = async () => {
       try {
@@ -3098,6 +3143,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     },
   });
   const hasMenuTopAction = isDriverRole || isHomeRoute || isDriverRoute;
+  const [centerMapTapCount, setCenterMapTapCount] = useState(0);
   const isSearchingMode =
     normalizedBookingStatus === 'searching' ||
     normalizedBookingStatus === 'requesting';
@@ -3225,16 +3271,16 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
       return null;
     }
 
-    return searchPresentation.radiusKm;
+    return Math.min(searchPresentation.radiusKm, SEARCH_VISUAL_MAX_RADIUS_KM);
   }, [isSearchingMode, searchPresentation.radiusKm]);
   const searchPreviewRadiusKm = useMemo(() => {
     if (!isSearchingMode) {
       return null;
     }
 
-    return Math.max(
-      searchPresentation.radiusKm,
-      searchPresentation.previewRadiusKm,
+    return Math.min(
+      Math.max(searchPresentation.radiusKm, searchPresentation.previewRadiusKm),
+      SEARCH_VISUAL_MAX_RADIUS_KM * 1.25,
     );
   }, [
     isSearchingMode,
@@ -3296,13 +3342,23 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     const signatureCoordinates = passengerHomePreviewRouteActive
       ? homeRoutePreviewCoordinates
       : activeRouteCoordinates;
-
-    return signatureCoordinates
-      .map(point => `${point.latitude.toFixed(6)},${point.longitude.toFixed(6)}`)
-      .join('|');
+    const lastPoint = signatureCoordinates[signatureCoordinates.length - 1];
+    const lastKey = lastPoint
+      ? `${lastPoint.latitude.toFixed(5)},${lastPoint.longitude.toFixed(5)}`
+      : '';
+    // During a ride the runtime republishes the remaining route as the car
+    // moves; keying the camera on every point refitted it every few metres
+    // (the constant zoom in/out). Refit only when the leg itself changes.
+    if (!passengerHomePreviewRouteActive && ['accepted', 'arrived', 'started'].includes(normalizedBookingStatus)) {
+      return `${normalizedBookingStatus}|${activeBookingId || ''}|${lastKey}`;
+    }
+    const firstPoint = signatureCoordinates[0];
+    return `${signatureCoordinates.length}|${firstPoint ? `${firstPoint.latitude.toFixed(5)},${firstPoint.longitude.toFixed(5)}` : ''}|${lastKey}`;
   }, [
+    activeBookingId,
     activeRouteCoordinates,
     hasActiveRoute,
+    normalizedBookingStatus,
     homeRoutePreviewCoordinates,
     passengerHomePreviewRouteActive,
   ]);
@@ -3312,7 +3368,8 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     }
 
     const effectiveMapHeight = Math.max(1, Number(mapHeight || windowHeight) || 1);
-    return `${routeSignature}|${Math.round(activeOcclusion.top)}|${Math.round(activeOcclusion.bottom)}|${Math.round(effectiveMapHeight)}`;
+    // Card heights in 24 px steps: a reflowed line of text must not refit.
+    return `${routeSignature}|${Math.round(activeOcclusion.top / 24)}|${Math.round(activeOcclusion.bottom / 24)}|${Math.round(effectiveMapHeight)}`;
   }, [
     activeBooking?.bookingId,
     activeBooking?.id,
@@ -4690,25 +4747,103 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   const presentedNearbyVehicles = presentedSearchingMode
     ? nearbyDriverCoordinates
     : [];
+  const isLiveRideRouteStatus = ['accepted', 'arrived', 'started'].includes(
+    normalizedBookingStatus,
+  );
   const shouldPresentMapRoute = Boolean(
     shouldRenderRuntimeMapState || passengerHomePreviewRouteActive,
   );
-  const presentedRouteCoordinates = shouldPresentMapRoute
+  // While an offer is on screen the driver previews the trip (pickup →
+  // destination) the dispatcher already sent; no extra routing request.
+  // Memoized: a fresh array each render restarted the draw animation forever.
+  const driverOfferRouteSource =
+    isDriverRole && driverLiveOffer && !driverActiveRide?.bookingId
+      ? driverLiveOffer?.routeCoordinates
+      : null;
+  const driverOfferPreviewCoordinates = useMemo(
+    () => (Array.isArray(driverOfferRouteSource)
+      ? driverOfferRouteSource.filter(
+          (point) => Number.isFinite(point?.latitude) && Number.isFinite(point?.longitude),
+        )
+      : []),
+    [driverOfferRouteSource],
+  );
+  const driverOfferPreviewActive = driverOfferPreviewCoordinates.length >= 2;
+  // At pickup (or a few metres away) the approach leg has no drawable line;
+  // show the trip ahead instead, so the driver always sees where the ride goes.
+  const driverPlannedTripCoordinates = driverTripMeta?.routePlan?.destinationCoordinates;
+  const driverTripAheadCoordinates = useMemo(
+    () => (Array.isArray(driverPlannedTripCoordinates)
+      ? driverPlannedTripCoordinates.filter(
+          (point) => Number.isFinite(point?.latitude) && Number.isFinite(point?.longitude),
+        )
+      : []),
+    [driverPlannedTripCoordinates],
+  );
+  // A few metres of approach leg is invisible at any sensible zoom; treat
+  // anything under 80 m as "at pickup" and show the trip ahead instead.
+  const driverApproachLegMeters = useMemo(
+    () => measureRouteLengthMeters(activeRouteCoordinates),
+    [activeRouteCoordinates],
+  );
+  const driverShowsTripAhead = Boolean(
+    isDriverRole &&
+      ['accepted', 'arrived'].includes(normalizedBookingStatus) &&
+      (activeRouteCoordinates.length < 2 || driverApproachLegMeters < DRIVER_AT_PICKUP_ROUTE_METERS) &&
+      driverTripAheadCoordinates.length >= 2,
+  );
+  const basePresentedRouteCoordinates = driverOfferPreviewActive
+    ? driverOfferPreviewCoordinates
+    : shouldPresentMapRoute
     ? passengerHomePreviewRouteActive
       ? homeRoutePreviewCoordinates
-      : activeRouteCoordinates
+      : driverShowsTripAhead
+        ? driverTripAheadCoordinates
+        : activeRouteCoordinates
     : [];
-  const presentedRouteTrafficSegments = shouldPresentMapRoute
+  // Background re-syncs (foregrounding, socket refresh) briefly mark the
+  // runtime as syncing. Hiding the line there made it blink and redraw; keep
+  // the last route drawn for this same ride, never one from another ride.
+  const liveRideRouteKey = isLiveRideRouteStatus
+    ? String(activeBookingId || driverActiveRide?.bookingId || '')
+    : '';
+  const lastLiveRouteRef = useRef({ key: '', coordinates: [] });
+  if (liveRideRouteKey && !presentationSyncing && basePresentedRouteCoordinates.length >= 2) {
+    lastLiveRouteRef.current = { key: liveRideRouteKey, coordinates: basePresentedRouteCoordinates };
+  } else if (!liveRideRouteKey) {
+    lastLiveRouteRef.current = { key: '', coordinates: [] };
+  }
+  const presentedRouteCoordinates =
+    basePresentedRouteCoordinates.length < 2 &&
+    presentationSyncing &&
+    liveRideRouteKey &&
+    lastLiveRouteRef.current.key === liveRideRouteKey
+      ? lastLiveRouteRef.current.coordinates
+      : basePresentedRouteCoordinates;
+  // Any route on screen (live trip, offer preview, trip ahead) gets a colour
+  // and a camera fit; `hasActiveRoute` only covers the runtime's live route.
+  const hasPresentedRoute = presentedRouteCoordinates.length >= 2;
+  const presentedRouteTrafficSegments = driverOfferPreviewActive
+    ? []
+    : shouldPresentMapRoute
     ? passengerHomePreviewRouteActive
       ? homeRoutePreview?.trafficSegments || []
       : activeRoute.trafficSegments
     : [];
-  const presentedRouteOrigin = shouldPresentMapRoute
+  const presentedRouteOrigin = driverOfferPreviewActive
+    ? driverOfferPreviewCoordinates[0]
+    : driverShowsTripAhead && shouldPresentMapRoute
+    ? driverTripAheadCoordinates[0]
+    : shouldPresentMapRoute
     ? passengerHomePreviewRouteActive
       ? homeRoutePreview?.origin || null
       : activeRoute.origin
     : null;
-  const presentedRouteDestination = shouldPresentMapRoute
+  const presentedRouteDestination = driverOfferPreviewActive
+    ? driverOfferPreviewCoordinates[driverOfferPreviewCoordinates.length - 1]
+    : driverShowsTripAhead && shouldPresentMapRoute
+    ? driverTripAheadCoordinates[driverTripAheadCoordinates.length - 1]
+    : shouldPresentMapRoute
     ? passengerHomePreviewRouteActive
       ? homeRoutePreview?.destination || null
       : activeRoute.destination || null
@@ -4861,13 +4996,15 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     [driverActiveRide?.status, isDriverRole, normalizedBookingStatus],
   );
   const routeMainColor =
-    shouldRenderRuntimeMapState && hasActiveRoute && !isPassengerPreBookingRoutePreview
+    (shouldRenderRuntimeMapState || isLiveRideRouteStatus || driverOfferPreviewActive) &&
+    hasPresentedRoute &&
+    !isPassengerPreBookingRoutePreview
       ? '#2B5B21'
       : hasActiveRoute
         ? PROTOTYPE_TRAFFIC_SEGMENT_COLORS[passengerHomeEffectiveTrafficLevel] || null
         : null;
   const routeShadowColor =
-    shouldRenderRuntimeMapState && hasActiveRoute
+    (shouldRenderRuntimeMapState || isLiveRideRouteStatus || driverOfferPreviewActive) && hasPresentedRoute
       ? '#FFFFFF'
       : null;
   const routeHighlightColor =
@@ -4908,8 +5045,9 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   const leafNativeNavigationModel = driverTripAssistNativeNavigation;
   const leafNativeNavigationKey = String(leafNativeNavigationModel?.navigationKey || '');
   const leafNativeNavigationCameraHeading = leafNativeNavigationModel?.cameraHeadingDegrees;
+  // Stays up through background re-syncs (it used to drop and return).
   const showLeafNativeNavigation = Boolean(
-    runtimeVisualStateReady &&
+    runtimeHomeSurfaceReady &&
       showHomeChrome &&
       isDriverRole &&
       isHomeRoute &&
@@ -4918,8 +5056,11 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
       leafNativeNavigationKey &&
       hiddenNativeNavigationKey !== leafNativeNavigationKey
   );
+  // Not tied to presentationSyncing: background re-syncs toggled ownership,
+  // so the camera kept switching between route fit (zoom out) and car follow
+  // (zoom in) every few seconds.
   const driverNavigationCameraOwnsMap = Boolean(
-    runtimeVisualStateReady &&
+    runtimeHomeSurfaceReady &&
       isDriverRole &&
       isHomeRoute &&
       isLiveTripMapActive &&
@@ -4928,6 +5069,15 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
         showLeafNativeNavigation ||
         String(driverTripAssist.status || '').trim().toLowerCase() === 'arrived'
       )
+  );
+  // Reopening the app mid-ride used to fit the whole route before the map and
+  // the trip card were measured: with the card at its fallback height the
+  // visible window was tiny, so the fit zoomed out to state level and then
+  // straight back in. No route fit for a driver ride until both are measured.
+  const driverAwaitingNavigationCamera = Boolean(
+    isDriverRole &&
+      hasDriverLiveRideOverlay &&
+      (!(Number(mapHeight) > 0) || !driverLiveRideHeightMeasured)
   );
   const shouldFreezeBackgroundMapCamera = freezeBackgroundMapCamera;
   const showDriverHomeOverlay = Boolean(
@@ -4979,8 +5129,8 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
       )
   );
   const homeLoadingTitle = profileFirstName
-    ? `Bem vindo(a), ${profileFirstName}`
-    : 'Bem vindo(a)';
+    ? `Bem-vindo(a), ${profileFirstName}`
+    : 'Bem-vindo(a)';
 
   const clearHomeMapReadyTimers = useCallback(() => {
     if (homeMapReadyWarmupTimerRef.current) {
@@ -5078,7 +5228,9 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     isDriverRole && isHomeRoute && showDriverHomeOverlay
   );
   const driverLiveRideBottomOffset = hasDriverLiveRideOverlay ? 0 : DRIVER_BOTTOM_CTA_OFFSET + driverBottomCtaHeight + 12;
-  const driverLiveRideOccludedBottom = driverLiveRideBottomOffset + driverLiveRideHeight;
+  // Floating driver card: lifted insets.bottom + 12 above the edge.
+  const driverLiveRideOccludedBottom =
+    driverLiveRideBottomOffset + insets.bottom + 12 + driverLiveRideHeight;
   const qaConnectionAutomationConfig = useMemo(
     () =>
       resolvePrototypeConnectionAutomationConfig(effectiveRouteParams, {
@@ -5183,6 +5335,14 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     normalizedBookingStatus === 'idle'
   );
   const rootNavigationInset = showRootNavigation ? 84 : 0;
+  // The passenger landing renders the map inside its own card, already sized
+  // above the pickup row; full-screen sheet occlusion would push the dot up.
+  // Search surfaces cover the landing opaquely; keeping the map in its card
+  // avoids a full-screen resize and camera jump behind them on open/close.
+  const passengerLandingMapLayout = Boolean(
+    !isDriverRole && canShowPassengerHomeOverlay &&
+    (showRootNavigation || homeDestinationSearchActive || homePickupSearchActive)
+  );
 
   const connectionIndicatorTopOffset = useMemo(
     () => insets.top + (showHomeChrome ? 66 : 14),
@@ -5209,14 +5369,18 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     ? (isDriverRole
         ? Math.max(showDriverHomeOverlay ? driverOccludedBottom + rootNavigationInset : 0, hasDriverLiveRideOverlay ? driverLiveRideOccludedBottom : 0)
         : homePickupPickerVisible
-          ? insets.bottom + HOME_PICKUP_PICKER_BOTTOM_OFFSET + homePickupPickerCardHeight
-          : passengerOccludedBottom + rootNavigationInset)
+          ? homePickupPickerCardHeight
+          : passengerLandingMapLayout
+            ? 0
+            : passengerOccludedBottom + rootNavigationInset)
     : 0;
   const baselineOccludedBottom = isDriverRole
     ? driverOccludedBottom + rootNavigationInset
     : homePickupPickerVisible
-      ? insets.bottom + HOME_PICKUP_PICKER_BOTTOM_OFFSET + homePickupPickerCardHeight
-      : passengerOccludedBottom + rootNavigationInset;
+      ? homePickupPickerCardHeight
+      : passengerLandingMapLayout
+        ? 0
+        : passengerOccludedBottom + rootNavigationInset;
   const homeOccludedTop = homePickupPickerVisible ? insets.top + 122 : 0;
   const effectiveRouteOcclusion = useMemo(
     () => ({
@@ -5240,8 +5404,8 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
       routeLayoutKey,
       Math.round(Number(mapWidth || windowWidth) || 0),
       Math.round(Number(mapHeight || windowHeight) || 0),
-      Math.round(routeViewportOcclusion.top),
-      Math.round(routeViewportOcclusion.bottom),
+      Math.round(routeViewportOcclusion.top / 24),
+      Math.round(routeViewportOcclusion.bottom / 24),
     ].join('|');
   }, [
     mapHeight,
@@ -5254,7 +5418,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   ]);
   const homePickupMarkerTop = useMemo(() => {
     const bottomInset = homePickupPickerVisible
-      ? insets.bottom + HOME_PICKUP_PICKER_BOTTOM_OFFSET + homePickupPickerCardHeight
+      ? homePickupPickerCardHeight
       : 0;
     return resolveMapViewportCenterY({
       height: windowHeight, top: homeOccludedTop, bottom: bottomInset,
@@ -5328,34 +5492,6 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
       selectedDestination?.name
     ]
   );
-  const liveRouteTrackingCoordinate = useMemo(() => {
-    if (
-      !hasActiveRoute ||
-      !hasDriverLiveRideOverlay ||
-      !['accepted', 'started'].includes(normalizedBookingStatus)
-    ) {
-      return null;
-    }
-
-    return driverCoordinate || currentCoordinate || activeRoute.origin || null;
-  }, [
-    activeRoute.origin,
-    currentCoordinate,
-    driverCoordinate,
-    hasActiveRoute,
-    hasDriverLiveRideOverlay,
-    normalizedBookingStatus
-  ]);
-  const liveRouteTrackingKey = useMemo(() => {
-    if (!liveRouteTrackingCoordinate) {
-      return '';
-    }
-
-    return [
-      Math.round(Number(liveRouteTrackingCoordinate.latitude || 0) * 10000),
-      Math.round(Number(liveRouteTrackingCoordinate.longitude || 0) * 10000)
-    ].join(':');
-  }, [liveRouteTrackingCoordinate]);
   const showPassengerBottomIsland = Boolean(
     runtimeHomeSurfaceReady &&
       showHomeChrome &&
@@ -5401,8 +5537,23 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     showHomeChrome &&
       !hasPrimaryHomeBottomSurface
   );
+  // Launch: keep the boot splash until the real home surface has painted once.
+  // The skeleton (default map + grey cards) only covers rare in-session gaps.
+  const homeSurfaceFirstPaintDoneRef = useRef(false);
+  if (
+    !homeSurfaceFirstPaintDoneRef.current &&
+    (canShowPassengerHomeOverlay ||
+      showDriverHomeOverlay ||
+      hasDriverLiveRideOverlay ||
+      hasPassengerLockedRideSurface ||
+      homePickupPickerVisible)
+  ) {
+    homeSurfaceFirstPaintDoneRef.current = true;
+  }
+  const isBootBeforeFirstPaint = !homeSurfaceFirstPaintDoneRef.current;
   const effectiveHomeSurfaceLoadingVisible = Boolean(
     homeRuntimeHydrationPending ||
+      (isBootBeforeFirstPaint && (showPassengerHomeSkeleton || showDriverHomeSkeleton)) ||
       (
         (homeSurfaceLoadingVisible || shouldCoverBareHomeMap) &&
         !showPassengerHomeSkeleton &&
@@ -5454,7 +5605,11 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     const zoomOutFactor = 1 + extraOcclusionRatio * OVERLAY_ZOOM_OUT_GAIN;
     const latitudeDelta = PROTOTYPE_REGION.latitudeDelta * zoomOutFactor;
     const longitudeDelta = PROTOTYPE_REGION.longitudeDelta * zoomOutFactor;
-    const latitudeOffset = (latitudeDelta * pixelOffsetY) / effectiveHeight;
+    // Google Maps fits the region by width on a tall map, so the real vertical
+    // span is wider than latitudeDelta; convert the pixel shift with it.
+    const latitudeOffset = (resolveVisibleLatitudeSpan({
+      latitude: baseCoordinate.latitude, latitudeDelta, longitudeDelta, width: mapWidth || windowWidth, height: effectiveHeight,
+    }) * pixelOffsetY) / effectiveHeight;
 
     return {
       ...PROTOTYPE_REGION,
@@ -5471,7 +5626,9 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     effectiveHomePickupCoordinate,
     homePickupPickerVisible,
     mapHeight,
-    windowHeight
+    mapWidth,
+    windowHeight,
+    windowWidth
   ]);
 
   const resolveVisibleMapCenterCoordinate = useCallback((nextRegion) => {
@@ -5532,11 +5689,12 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
       return '';
     }
 
+    // ~1 km position buckets: small nudges reuse the cells already loaded.
     return [
-      latitude.toFixed(3),
-      longitude.toFixed(3),
-      latitudeDelta.toFixed(3),
-      longitudeDelta.toFixed(3),
+      latitude.toFixed(2),
+      longitude.toFixed(2),
+      latitudeDelta.toFixed(2),
+      longitudeDelta.toFixed(2),
     ].join(':');
   }, []);
 
@@ -5570,7 +5728,10 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
         return;
       }
 
+      // Throttle repeat fetches of the same area only; a new viewport (pan/zoom)
+      // must load its cells right away or the overlay looks like it vanished.
       const fetchedRecently =
+        requestKey === driverH3LastFetchKeyRef.current &&
         now - driverH3LastFetchAtRef.current < Math.max(
           DRIVER_H3_MIN_FETCH_INTERVAL_MS,
           Number(driverH3RefreshPolicy?.pollIntervalMs || DRIVER_H3_DEFAULT_FETCH_INTERVAL_MS)
@@ -5609,9 +5770,10 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
           const status = Number(error?.status || error?.response?.status || 0);
           if (status === 401 || status === 403) {
             driverH3DisabledUntilRef.current = Date.now() + DRIVER_H3_AUTH_COOLDOWN_MS;
+            setDriverH3Cells([]);
+            setDriverH3VisualPolicy(DEFAULT_DRIVER_H3_VISUAL_POLICY);
           }
-          setDriverH3Cells([]);
-          setDriverH3VisualPolicy(DEFAULT_DRIVER_H3_VISUAL_POLICY);
+          // Transient failures keep the last cells instead of blinking them away.
         }
       }
     }, DRIVER_H3_VIEWPORT_DEBOUNCE_MS);
@@ -5907,6 +6069,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
               anchor={anchor}
               tracksViewChanges={Platform.OS === 'android'}
             >
+              <View collapsable={false} style={styles.driverSurgeFlagWrap}>
               <View
                 collapsable={false}
                 style={[
@@ -5935,6 +6098,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
                 >
                   {label}
                 </Text>
+              </View>
               </View>
             </Marker>
           );
@@ -5974,12 +6138,12 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     windowHeight,
   ]);
   const homeRouteViewportPadding = useMemo(() => {
-    if (!hasActiveRoute) {
+    if (!hasActiveRoute && !hasPresentedRoute) {
       return null;
     }
 
     return getRouteEdgePadding();
-  }, [getRouteEdgePadding, hasActiveRoute]);
+  }, [getRouteEdgePadding, hasActiveRoute, hasPresentedRoute]);
   const homeViewportCoordinates = useMemo(() => {
     const finiteRouteCoordinates = presentedRouteCoordinates.filter(
       coordinate =>
@@ -6006,7 +6170,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     presentedRouteOrigin,
   ]);
   const homeRouteViewportRegion = useMemo(() => {
-    if (!hasActiveRoute) {
+    if (!hasActiveRoute && !hasPresentedRoute) {
       return null;
     }
 
@@ -6036,6 +6200,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     return routeViewportRegion;
   }, [
     hasActiveRoute,
+    hasPresentedRoute,
     homeRouteViewportPadding,
     homeViewportCoordinates,
     insets,
@@ -6137,14 +6302,18 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
       !hasActiveRoute ||
       !routeViewportLayoutKey ||
       isSearchingMode ||
-      driverNavigationCameraOwnsMap
+      driverNavigationCameraOwnsMap ||
+      driverAwaitingNavigationCamera ||
+      !isScreenFocused
     ) {
       return;
     }
 
+    // Ride phase, not the car's position: following position refitted the
+    // route every ~11 m.
     const routeFocusTrackingKey = showLeafNativeNavigation
       ? leafNativeNavigationKey || 'leaf-native-navigation'
-      : liveRouteTrackingKey;
+      : normalizedBookingStatus || 'idle';
     const nextRouteFocusKey = `${routeViewportLayoutKey}|${routeFocusTrackingKey}`;
     if (lastRouteLayoutKeyRef.current === nextRouteFocusKey) {
       return;
@@ -6154,19 +6323,21 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     focusRoute(activeRoute, true);
   }, [
     activeRoute,
+    driverAwaitingNavigationCamera,
     driverNavigationCameraOwnsMap,
+    isScreenFocused,
     focusRoute,
     hasActiveRoute,
     homeMapInteractiveReady,
     isSearchingMode,
     leafNativeNavigationKey,
-    liveRouteTrackingKey,
+    normalizedBookingStatus,
     routeViewportLayoutKey,
     showLeafNativeNavigation,
   ]);
 
   useEffect(() => {
-    if (!mapRef.current || !homeMapInteractiveReady || hasActiveRoute || isSearchingMode || shouldFreezeBackgroundMapCamera) {
+    if (!mapRef.current || !homeMapInteractiveReady || hasActiveRoute || isSearchingMode || shouldFreezeBackgroundMapCamera || !isScreenFocused) {
       return;
     }
 
@@ -6174,9 +6345,31 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
       return;
     }
 
+    if (isFollowRegionClose(lastFollowRegionRef.current, targetRegion)) {
+      return;
+    }
+
     lastRouteLayoutKeyRef.current = '';
+    lastFollowRegionRef.current = targetRegion;
     mapRef.current.animateToRegion(targetRegion, MAP_OCCLUSION_REPOSITION_MS);
-  }, [hasActiveRoute, homeMapInteractiveReady, isSearchingMode, mapFollowingUser, shouldFreezeBackgroundMapCamera, targetRegion]);
+  }, [hasActiveRoute, homeMapInteractiveReady, isScreenFocused, isSearchingMode, mapFollowingUser, shouldFreezeBackgroundMapCamera, targetRegion]);
+
+  // Back on the home after another screen (e.g. the ride receipt) with no
+  // route left: follow the user again at street level. Screens on top register
+  // their own map occlusion, and the hidden home used to fit to that (state
+  // level zoom) and stay there after the receipt closed.
+  const wasScreenFocusedRef = useRef(isScreenFocused);
+  useEffect(() => {
+    const regainedFocus = isScreenFocused && !wasScreenFocusedRef.current;
+    wasScreenFocusedRef.current = isScreenFocused;
+    if (!regainedFocus || hasActiveRoute || isSearchingMode || !mapRef.current || !homeMapInteractiveReady) {
+      return;
+    }
+    lastRouteLayoutKeyRef.current = '';
+    lastFollowRegionRef.current = targetRegion;
+    setMapFollowingUser(true);
+    mapRef.current.animateToRegion(targetRegion, MAP_OCCLUSION_REPOSITION_MS);
+  }, [hasActiveRoute, homeMapInteractiveReady, isScreenFocused, isSearchingMode, targetRegion]);
 
   useEffect(() => {
     if (!isSearchingMode) {
@@ -6285,7 +6478,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
       }
       const routeFocusTrackingKey = showLeafNativeNavigation
         ? leafNativeNavigationKey || 'leaf-native-navigation'
-        : liveRouteTrackingKey;
+        : normalizedBookingStatus || 'idle';
       lastRouteLayoutKeyRef.current = `${routeViewportLayoutKey}|${routeFocusTrackingKey}`;
       focusRoute(activeRoute, true);
       return;
@@ -6302,7 +6495,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     homeMapInteractiveReady,
     isSearchingMode,
     leafNativeNavigationKey,
-    liveRouteTrackingKey,
+    normalizedBookingStatus,
     routeViewportLayoutKey,
     shouldFreezeBackgroundMapCamera,
     showLeafNativeNavigation,
@@ -6391,6 +6584,14 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
       return;
     }
 
+    // The reveal fits the whole leg in the small window between the banner
+    // and the trip card. For a long leg that meant zooming out to the entire
+    // city for a moment; skip it and go straight to following the car.
+    if (measureRouteSpanMeters(navigationRouteCoordinates) > NAV_ROUTE_REVEAL_MAX_SPAN_METERS) {
+      lastNativeNavigationRouteRevealKeyRef.current = leafNativeNavigationKey;
+      return;
+    }
+
     lastNativeNavigationRouteRevealKeyRef.current = leafNativeNavigationKey;
     lastNativeNavigationCameraAtRef.current = Date.now();
     setNativeNavigationRouteRevealKey(leafNativeNavigationKey);
@@ -6460,11 +6661,27 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
       return;
     }
 
-    lastNativeNavigationCameraAtRef.current = now;
     const resolvedCameraHeading = resolveSmoothedNavigationHeading(
       lastNativeNavigationHeadingRef.current,
       leafNativeNavigationCameraHeading,
     );
+    // Dead zone: parked or crawling, GPS jitter alone must not move the camera.
+    const lastPose = lastNativeNavigationCameraPoseRef.current;
+    if (lastPose && lastPose.key === leafNativeNavigationKey) {
+      const movedMeters = measureRouteLengthMeters([lastPose.coordinate, activeDriverNavigationCoordinate]);
+      const headingDelta = Number.isFinite(Number(resolvedCameraHeading)) && Number.isFinite(Number(lastPose.heading))
+        ? Math.abs(((Number(resolvedCameraHeading) - Number(lastPose.heading) + 540) % 360) - 180)
+        : 0;
+      if (movedMeters < NAV_CAMERA_MIN_MOVE_METERS && headingDelta < NAV_CAMERA_MIN_HEADING_DEG) {
+        return;
+      }
+    }
+    lastNativeNavigationCameraPoseRef.current = {
+      key: leafNativeNavigationKey,
+      coordinate: activeDriverNavigationCoordinate,
+      heading: resolvedCameraHeading,
+    };
+    lastNativeNavigationCameraAtRef.current = now;
     lastNativeNavigationHeadingRef.current = resolvedCameraHeading;
     const navigationSpeedKmh = Number(driverTripAssistNativeNavigation?.currentSpeedKmh);
     const resolvedCameraZoom = Number.isFinite(Number(driverTripAssistNativeNavigation?.cameraZoom))
@@ -6480,19 +6697,32 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     const resolvedCameraAnchorY = Number.isFinite(Number(driverTripAssistNativeNavigation?.cameraAnchorY))
       ? Number(driverTripAssistNativeNavigation.cameraAnchorY)
       : NAVIGATION_CAMERA_ANCHOR_Y;
+    // Place the car in the lower part of the map that is actually visible
+    // (between the navigation banner and the floating card), so the road
+    // ahead fills that window. Anchoring on the full map height put the car,
+    // and the route ahead of it, behind the card.
+    const safeMapHeight = Number(mapHeight) > 0 ? Number(mapHeight) : windowHeight;
+    const visibleTop = Math.max(Number(routeViewportOcclusion.top) || 0, insets.top + NAVIGATION_BANNER_CLEARANCE);
+    const visibleBottom = Math.max(
+      visibleTop + 120,
+      safeMapHeight - (Number(routeViewportOcclusion.bottom) || 0),
+    );
+    const carScreenY = visibleTop + (visibleBottom - visibleTop) * NAVIGATION_CAR_VISIBLE_ANCHOR;
+    const latitudeCosine = Math.max(
+      0.18,
+      Math.cos((Number(activeDriverNavigationCoordinate.latitude) * Math.PI) / 180),
+    );
+    const metersPerPixel =
+      (MERCATOR_METERS_PER_PIXEL_AT_ZOOM_0 * latitudeCosine) / (2 ** resolvedCameraZoom);
+    // Positive: camera centre ahead of the car; negative: behind it.
     const lookAheadKm = Number.isFinite(Number(resolvedCameraHeading))
-      ? resolveNavigationCameraLookAheadKm({
-          coordinate: activeDriverNavigationCoordinate,
-          zoom: resolvedCameraZoom,
-          mapHeight,
-          anchorY: resolvedCameraAnchorY,
-        })
+      ? ((carScreenY - safeMapHeight / 2) * metersPerPixel) / 1000
       : 0;
-    const cameraCenterCoordinate = Number.isFinite(Number(resolvedCameraHeading))
+    const cameraCenterCoordinate = Number.isFinite(Number(resolvedCameraHeading)) && lookAheadKm !== 0
       ? offsetCoordinateByDistance(
           activeDriverNavigationCoordinate,
-          lookAheadKm,
-          resolvedCameraHeading,
+          Math.abs(lookAheadKm),
+          lookAheadKm > 0 ? resolvedCameraHeading : (resolvedCameraHeading + 180) % 360,
         )
       : activeDriverNavigationCoordinate;
     const animationDurationMs = Number.isFinite(Number(driverTripAssistNativeNavigation?.cameraAnimationDurationMs))
@@ -6546,8 +6776,12 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     leafNativeNavigationKey,
     mapHeight,
     nativeNavigationRouteRevealKey,
+    routeViewportOcclusion.bottom,
+    routeViewportOcclusion.top,
     shouldFreezeBackgroundMapCamera,
     showLeafNativeNavigation,
+    insets.top,
+    windowHeight,
   ]);
 
   const handleMapRegionChangeComplete = useCallback((nextRegion) => {
@@ -6713,31 +6947,86 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
       markerCenterY: resolveMapViewportCenterY({
         height: windowHeight,
         top: insets.top + 122,
-        bottom: insets.bottom + HOME_PICKUP_PICKER_BOTTOM_OFFSET + pickerHeight,
+        bottom: pickerHeight,
       }),
     });
     if (camera) mapRef.current.animateCamera(camera, { duration: 520 });
   }, [effectiveHomePickupCoordinate, homeMapInteractiveReady, homePickupPickerCardHeight,
     insets.bottom, insets.top, windowHeight]);
 
+  // Waiting at the pickup there is no navigation banner, so neither the
+  // follow camera nor the route fit runs. Reopening the app in this state left
+  // the map at city scale; frame the car once, above the trip card.
+  const driverWaitingAtPickup = Boolean(
+    driverNavigationCameraOwnsMap &&
+      !showLeafNativeNavigation &&
+      String(driverTripAssist?.status || '').trim().toLowerCase() === 'arrived',
+  );
+  const driverWaitingCameraKeyRef = useRef('');
+  useEffect(() => {
+    if (!driverWaitingAtPickup) {
+      driverWaitingCameraKeyRef.current = '';
+      return;
+    }
+    const coordinate = activeDriverNavigationCoordinate;
+    const bookingKey = String(activeBookingId || 'ride');
+    if (
+      !mapRef.current ||
+      !homeMapInteractiveReady ||
+      !driverLiveRideHeightMeasured ||
+      !isFiniteCoordinate(coordinate) ||
+      driverWaitingCameraKeyRef.current === bookingKey
+    ) {
+      return;
+    }
+    const camera = buildPickupMapCamera({
+      coordinate,
+      zoom: 16.5,
+      height: mapHeight || windowHeight,
+      nativeSafeArea: Platform.OS === 'ios' ? { top: insets.top, bottom: insets.bottom } : {},
+      markerCenterY: resolveMapViewportCenterY({
+        height: mapHeight || windowHeight,
+        top: insets.top + 24,
+        bottom: Number(routeViewportOcclusion.bottom) || 0,
+      }),
+    });
+    if (camera) {
+      driverWaitingCameraKeyRef.current = bookingKey;
+      mapRef.current.animateCamera({ ...camera, heading: 0, pitch: 0 }, { duration: 450 });
+    }
+  }, [
+    activeBookingId,
+    activeDriverNavigationCoordinate,
+    driverLiveRideHeightMeasured,
+    driverWaitingAtPickup,
+    homeMapInteractiveReady,
+    insets.bottom,
+    insets.top,
+    mapHeight,
+    routeViewportOcclusion.bottom,
+    windowHeight,
+  ]);
+
   const handleHomePickupPickerCardLayout = useCallback(event => {
-    const nextHeight = event?.nativeEvent?.layout?.height;
+    const cardHeight = event?.nativeEvent?.layout?.height;
+    // The floating card sits insets.bottom + 12 above the edge; what it hides
+    // of the map is its height plus that lift.
+    const nextHeight = Number.isFinite(cardHeight) ? cardHeight + insets.bottom + 12 : cardHeight;
     if (Number.isFinite(nextHeight) && nextHeight > 0 && nextHeight !== homePickupPickerCardHeight) {
       setHomePickupPickerCardHeight(nextHeight);
       if (homePickupPickerVisible) focusHomePickupCoordinate(homePickupCoordinate, nextHeight);
     }
-  }, [focusHomePickupCoordinate, homePickupCoordinate, homePickupPickerCardHeight, homePickupPickerVisible]);
+  }, [focusHomePickupCoordinate, homePickupCoordinate, homePickupPickerCardHeight, homePickupPickerVisible, insets.bottom]);
 
   const handleOpenHomePickupSearch = useCallback(() => {
     setHomeDestinationSearchActive(false);
     setHomeDestinationQuery('');
     setHomeDestinationResults([]);
     setHomeDestinationSearching(false);
-    setHomePickupSearchQuery(
-      homePickupAdjustedOnMap
-        ? homePickupAddress || ''
-        : effectiveHomePickupAddress || homePickupDisplayLabel || '',
-    );
+    // Start empty: prefilling the current address showed only its tail in the
+    // field and spent an autocomplete call returning the pickup itself. The
+    // current pickup is shown as the surface subtitle instead.
+    setHomePickupSearchQuery('');
     setHomePickupSearchResults([]);
     setHomePickupSearching(false);
     homePickupSearchSessionTokenRef.current = createHomePickupSearchSessionToken();
@@ -7112,6 +7401,10 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     }
   }, [homeBackendQuotesByCategory, refreshHomeCategoryQuotes]);
 
+  // A tap on an expired price used to only refresh quotes and stop, with the
+  // button still reading "Confirmar": it looked dead. Now the tap is kept and
+  // the flow continues by itself once the fresh price arrives.
+  const [homeConfirmAwaitingQuote, setHomeConfirmAwaitingQuote] = useState(false);
   const handleConfirmHomeCategory = useCallback(async () => {
     if (!homeSelectedDestination?.coordinate) {
       handleOpenPassengerDestination();
@@ -7124,9 +7417,11 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     }
 
     if (selectedHomeBackendQuoteExpired) {
+      setHomeConfirmAwaitingQuote(true);
       refreshHomeCategoryQuotes();
       return;
     }
+    setHomeConfirmAwaitingQuote(false);
 
     if (homeDriverAvailabilityRefreshing) {
       return;
@@ -7224,6 +7519,25 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     selectedHomeDriverUnavailable,
     selectedHomeRateCard.title,
     homeRoutePreviewError,
+  ]);
+
+  useEffect(() => {
+    if (!homeConfirmAwaitingQuote) return;
+    if (!homeSelectedDestination?.coordinate || homeRoutePreviewError || homeBackendQuoteError) {
+      setHomeConfirmAwaitingQuote(false);
+      return;
+    }
+    if (selectedHomeBackendQuoteReady && !selectedHomeBackendQuoteExpired) {
+      handleConfirmHomeCategory();
+    }
+  }, [
+    handleConfirmHomeCategory,
+    homeBackendQuoteError,
+    homeConfirmAwaitingQuote,
+    homeRoutePreviewError,
+    homeSelectedDestination?.coordinate,
+    selectedHomeBackendQuoteExpired,
+    selectedHomeBackendQuoteReady,
   ]);
 
   useEffect(() => {
@@ -8179,6 +8493,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
       return;
     }
     if (isHomeRoute) {
+      setCenterMapTapCount((count) => count + 1);
       handleCenterMap();
       return;
     }
@@ -8193,12 +8508,14 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     }
   };
 
+  // Account lives in the bottom tabs; the header's right slot is the inbox.
   const handleTopRightPress = () => {
     if (hasMenuTopAction) {
-      navigation.navigate('RobotaxiPrototypeMenu');
+      navigation.navigate('RobotaxiNotifications');
       return;
     }
 
+    setCenterMapTapCount((count) => count + 1);
     handleCenterMap();
   };
 
@@ -8274,7 +8591,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     try {
       if (driverTripAssist.status === 'accepted') {
         if (!driverTripAssist.primaryActionEnabled) {
-          Alert.alert('Aproxime-se do embarque', 'O botão será liberado quando você estiver a até 20 metros do local de embarque.');
+          Alert.alert('Aproxime-se do embarque', 'O botão será liberado quando você estiver perto do local de embarque.');
           return;
         }
         await markDriverArrived();
@@ -8287,7 +8604,13 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
       }
 
       if (driverTripAssist.status === 'started') {
-        const result = await completeTripFlow();
+        // Ending far from the destination is allowed, but it is a deliberate
+        // act: the driver states why, and the passenger is asked about it.
+        const earlyEnd = await confirmDriverEarlyEnd(driverTripAssist.remainingMeters);
+        if (earlyEnd?.cancelled) {
+          return;
+        }
+        const result = await completeTripFlow(earlyEnd ? { earlyEnd } : {});
         if (result?.success !== false) {
           navigation.navigate(
             'RobotaxiPrototypeReceipt',
@@ -9074,6 +9397,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
 
   const [homeLandingMapFrame, setHomeLandingMapFrame] = useState(null);
   const passengerLandingVisible = Boolean(showRootNavigation && !isDriverRole && canShowPassengerHomeOverlay && !homeSurfaceInteractionBlocked);
+  const passengerMapInCard = Boolean(passengerLandingVisible || (passengerLandingMapLayout && !homeSurfaceInteractionBlocked));
 
   const completedReceiptBookingId = String(
     lastReceipt?.bookingId ||
@@ -9126,8 +9450,10 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     presentedSearchingMode && searchTargetRegion
       ? searchTargetRegion
       : targetRegion;
+  // While adjusting the pickup, the blue dot must stay on the real GPS position;
+  // the centre pin is the pickup. Otherwise the dot followed the pin around.
   const presentedUserCoordinate =
-    !isDriverRole && showHomeChrome && isHomeRoute
+    !isDriverRole && showHomeChrome && isHomeRoute && !homePickupPickerVisible
       ? effectiveHomePickupCoordinate || currentCoordinate || null
       : currentCoordinate || null;
   const shouldForceHomePickupRegionUpdate = Boolean(
@@ -9154,10 +9480,10 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     <PrototypeScreenTransition>
       <View style={styles.container}>
         <StatusBar translucent backgroundColor="transparent" barStyle="dark-content" />
-        {passengerLandingVisible ? <View style={[StyleSheet.absoluteFillObject, { backgroundColor: '#FFFFFF' }]} /> : null}
+        {passengerMapInCard ? <View style={[StyleSheet.absoluteFillObject, { backgroundColor: '#FFFFFF' }]} /> : null}
 
         <PrototypeMapLayer
-          containerStyle={passengerLandingVisible ? {
+          containerStyle={passengerMapInCard ? {
             left: homeLandingMapFrame?.left ?? 24, right: undefined, bottom: undefined,
             top: homeLandingMapFrame?.top ?? insets.top + 164,
             width: homeLandingMapFrame?.width ?? windowWidth - 48,
@@ -9203,7 +9529,12 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
           routeMainColor={routeMainColor}
           routeShadowColor={routeShadowColor}
           routeHighlightColor={routeHighlightColor}
-          hideRouteEndpointMarkers={isLiveTripMapActive || passengerHomePreviewRouteActive}
+          hideRouteEndpointMarkers={isLiveTripMapActive && !isDriverRole}
+          // Driver: the route starts at the car, so only the target pin matters.
+          hideRouteOriginMarker={isLiveTripMapActive && isDriverRole}
+          // Driver live map: native dot/square pins move with the follow camera;
+          // the projected label overlay lagged behind and floated near the car.
+          compactRouteEndpoints={passengerHomePreviewRouteActive || (isLiveTripMapActive && isDriverRole)}
           driverMarkerMode={driverMarkerMode}
           driverMarkerOccludedBottom={isDriverRole ? baselineOccludedBottom : 0}
           driverVehicleColor={presentedDriverVehicleColor}
@@ -9215,7 +9546,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
           viewportPadding={homeRouteViewportPadding}
           routeViewportRegion={homeRouteViewportRegion}
           forceRegionUpdate={Boolean(
-            (hasActiveRoute && !driverNavigationCameraOwnsMap) ||
+            ((hasActiveRoute || hasPresentedRoute) && !driverNavigationCameraOwnsMap) && !driverAwaitingNavigationCamera && isScreenFocused ||
               shouldForceHomePickupRegionUpdate
           )}
           onMapLayout={handleMapLayout}
@@ -9223,7 +9554,8 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
           onMapPanDrag={handleMapPanDrag}
           onMapReady={handleHomeMapReady}
           onRegionChangeComplete={handleMapRegionChangeComplete}
-          mapChildren={shouldRenderRuntimeMapState ? driverH3MapChildren : null}
+          // H3 cells stay through background re-syncs (they blinked before).
+          mapChildren={shouldRenderRuntimeMapState || (isDriverRole && runtimeHomeSurfaceReady) ? driverH3MapChildren : null}
           mapSafetyProfile={isDriverRole ? 'driver' : 'default'}
           interactionEnabled={homeMapInteractionEnabled}
           manualCameraHoldMs={homeMapPresentation.manualCameraHoldMs}
@@ -9238,8 +9570,10 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
           <PrototypeTopControls
             insets={insets}
             leftIcon={isHomeRoute && !homeCategorySurfaceVisible && !homeDestinationSearchActive && !homePickupSearchActive ? 'locate' : 'arrow-back'}
-            rightIcon={hasMenuTopAction ? 'menu' : 'locate'}
-            showRightBadge={false}
+            rightIcon={hasMenuTopAction ? 'bell' : 'locate'}
+            showRightBadge={hasMenuTopAction && unreadNotificationCount > 0}
+            rightBadgeCount={hasMenuTopAction ? unreadNotificationCount : 0}
+            leftSignal={centerMapTapCount}
             onPressLeft={handleTopLeftPress}
             onPressRight={handleTopRightPress}
           />
@@ -9253,7 +9587,13 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
               testID="passenger-home-pickup-map-marker"
               accessibilityLabel="Marcador do local de partida"
             >
-              <LeafLocationMarker testID="leaf-pickup-location-marker" />
+              {/* Pickup pin (tip at the box centre), distinct from the blue
+                  user-location dot that the map keeps showing underneath. */}
+              <View style={styles.homePickupPin} testID="leaf-pickup-location-marker">
+                <View style={styles.homePickupPinHead}><View style={styles.homePickupPinCore} /></View>
+                <View style={styles.homePickupPinStem} />
+              </View>
+              <View style={styles.homePickupPinGround} />
             </View>
 
             <View pointerEvents="box-none" style={styles.homePickupPickerLayer}>
@@ -9269,10 +9609,10 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
                 </TouchableOpacity>
                 <View style={styles.homePickupFloatingCopy}>
                   <Text style={styles.homePickupEyebrow}>Partida</Text>
-                  <Text style={styles.homePickupFloatingTitle}>
+                  <Text style={styles.homePickupFloatingTitle} numberOfLines={1}>
                     {homePickupDisplayLabel}
                   </Text>
-                  <Text style={styles.homePickupFloatingAddress} numberOfLines={2}>
+                  <Text style={styles.homePickupFloatingAddress} numberOfLines={1}>
                     {effectiveHomePickupAddress}
                   </Text>
                 </View>
@@ -9282,7 +9622,8 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
                 onLayout={handleHomePickupPickerCardLayout}
                 style={[
                   styles.homePickupBottomCard,
-                  { bottom: insets.bottom + HOME_PICKUP_PICKER_BOTTOM_OFFSET }
+                  // Floating card above the home indicator, like the ride cards.
+                  { bottom: insets.bottom + 12, paddingBottom: 18 }
                 ]}
                 testID="passenger-home-pickup-picker"
                 accessibilityLabel="Selecionar local de partida no mapa"
@@ -9307,9 +9648,13 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
                   <TouchableOpacity
                     activeOpacity={0.88}
                     onPress={handleConfirmHomePickup}
-                    style={styles.homePickupPrimaryButton}
+                    // Wait for the reverse geocode; confirming mid-lookup stored
+                    // "Localizando endereço..." as the pickup label.
+                    disabled={homePickupAddress === 'Localizando endereço...'}
+                    style={[styles.homePickupPrimaryButton, homePickupAddress === 'Localizando endereço...' && { opacity: 0.45 }]}
                     testID="passenger-home-pickup-confirm-button"
                     accessibilityLabel="Confirmar local de partida"
+                    accessibilityState={{ disabled: homePickupAddress === 'Localizando endereço...' }}
                   >
                     <Text style={styles.homePickupPrimaryButtonText}>Confirmar</Text>
                   </TouchableOpacity>
@@ -9424,6 +9769,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
             categoryNotice={homeRoutePreviewError || homeAvailabilityNotice}
             categoryConfirmDisabled={
               !homeSelectedDestination?.coordinate ||
+              homeConfirmAwaitingQuote ||
               (!homeRoutePreviewError &&
                 (passengerHomeRoutePending ||
                   selectedHomeDriverUnavailable ||
@@ -9444,6 +9790,8 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
                   ? 'Sem motorista disponível'
                 : homeBackendQuoteError && !selectedHomeBackendQuoteReady
                   ? homeBackendQuoteFailurePresentation.actionLabel
+                : homeConfirmAwaitingQuote || !selectedHomeBackendQuoteReady || selectedHomeBackendQuoteExpired
+                  ? 'Atualizando preço…'
                   : 'Confirmar'
             }
             tariffStatusLabel={passengerHomeTrafficStatusLabel}
@@ -9451,14 +9799,14 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
           />
         ) : null}
 
-        {showPassengerHomeSkeleton ? (
+        {showPassengerHomeSkeleton && !isBootBeforeFirstPaint ? (
           <PassengerHomeOverlaySkeleton
             insetsBottom={insets.bottom}
             onCardLayout={handleSearchCardLayout}
           />
         ) : null}
 
-        {showDriverHomeSkeleton ? (
+        {showDriverHomeSkeleton && !isBootBeforeFirstPaint ? (
           <DriverHomeHydrationSkeleton
             insetsBottom={insets.bottom}
             onCtaLayout={handleDriverCtaLayout}
@@ -9477,6 +9825,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
               onCardLayout={event => {
                 const nextHeight = event?.nativeEvent?.layout?.height;
                 if (Number.isFinite(nextHeight) && nextHeight > 0) {
+                  setDriverLiveRideHeightMeasured(true);
                   setDriverLiveRideHeight(previous => (
                     previous === nextHeight ? previous : nextHeight
                   ));
@@ -9492,6 +9841,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
               operationalContinuation={operationalContinuation}
               acceptDriverOffer={acceptDriverOffer}
               rejectDriverOffer={rejectDriverOffer}
+              expireDriverOffer={expireDriverOffer}
               respondToDriverExtension={respondToDriverExtension}
               interruptRideOperationalFlow={interruptRideOperationalFlow}
               cancelActiveRideFlow={cancelActiveRideFlow}
@@ -9561,8 +9911,8 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
             insets={insets}
             active={activeTab}
             onPressHome={handleBottomHomePress}
-            onPressProfile={() => navigation.navigate('RobotaxiPrototypeMenu')}
-            onPressActivity={() => navigation.navigate('RobotaxiMenuTripHistory', { rootTab: true })}
+            onPressProfile={() => navigateLeafRootTab(navigation, 'account')}
+            onPressActivity={() => navigateLeafRootTab(navigation, 'activity', { rootTab: true })}
           />
         ) : null}
 
@@ -9621,21 +9971,12 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
         </Modal>
 
         {effectiveHomeSurfaceLoadingVisible ? (
-          <View
-            style={styles.homeLoadingOverlay}
+          <LeafBootSplash
+            title={profileFirstName ? homeLoadingTitle : null}
             testID="prototype-home-loading"
-            accessibilityRole="progressbar"
             accessibilityLabel={homeLoadingTitle}
-          >
-            <View style={styles.homeLoadingContent}>
-              <Text style={styles.homeLoadingTitle}>{homeLoadingTitle}</Text>
-              <ActivityIndicator
-                size="small"
-                color="#1A330E"
-                style={styles.homeLoadingSpinner}
-              />
-            </View>
-          </View>
+            style={styles.homeLoadingOverlay}
+          />
         ) : null}
       </View>
     </PrototypeScreenTransition>
@@ -9650,10 +9991,40 @@ const styles = StyleSheet.create({
   homePickupMarker: {
     position: 'absolute',
     left: '50%',
+    width: LEAF_LOCATION_MARKER_SIZE,
+    height: LEAF_LOCATION_MARKER_SIZE,
     marginLeft: -LEAF_LOCATION_MARKER_SIZE / 2,
     zIndex: 34,
     elevation: 34,
     alignItems: 'center',
+  },
+  homePickupPin: {
+    position: 'absolute',
+    bottom: LEAF_LOCATION_MARKER_SIZE / 2,
+    alignItems: 'center',
+  },
+  homePickupPinHead: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#222222',
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.22,
+    shadowRadius: 5,
+    elevation: 4,
+  },
+  homePickupPinCore: { width: 9, height: 9, borderRadius: 4.5, backgroundColor: '#FFFFFF' },
+  homePickupPinStem: { width: 3, height: 14, borderBottomLeftRadius: 2, borderBottomRightRadius: 2, backgroundColor: '#222222' },
+  homePickupPinGround: {
+    position: 'absolute',
+    top: LEAF_LOCATION_MARKER_SIZE / 2 - 2,
+    width: 8,
+    height: 4,
+    borderRadius: 4,
+    backgroundColor: 'rgba(0,0,0,0.28)',
   },
   homePickupPickerLayer: {
     ...StyleSheet.absoluteFillObject,
@@ -9714,23 +10085,20 @@ const styles = StyleSheet.create({
   },
   homePickupBottomCard: {
     position: 'absolute',
-    left: 0,
-    right: 0,
-    borderTopLeftRadius: 28,
-    borderTopRightRadius: 28,
-    borderBottomLeftRadius: 0,
-    borderBottomRightRadius: 0,
+    left: 12,
+    right: 12,
+    borderRadius: 28,
     borderWidth: 1,
     borderColor: '#E5E5E5',
     backgroundColor: '#FFFFFF',
     paddingHorizontal: 24,
     paddingTop: 14,
     paddingBottom: 18,
-    shadowColor: '#000000',
-    shadowOffset: { width: 0, height: -14 },
-    shadowOpacity: 0.08,
-    shadowRadius: 30,
-    elevation: Platform.OS === 'android' ? 0 : 12,
+    shadowColor: '#0B120A',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.14,
+    shadowRadius: 24,
+    elevation: 12,
   },
   homePickupHandle: {
     width: 50,
@@ -9792,13 +10160,8 @@ const styles = StyleSheet.create({
     lineHeight: 19,
   },
   homeLoadingOverlay: {
-    ...StyleSheet.absoluteFillObject,
     zIndex: 120,
     elevation: 120,
-    backgroundColor: '#FFFFFF',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 28,
   },
   homeLoadingContent: {
     alignItems: 'center',
@@ -10029,6 +10392,13 @@ const styles = StyleSheet.create({
     height: 13,
     marginTop: 9,
   },
+  // Android rasterises a marker to the exact bounds of its root view, which
+  // cut the pill's border and shadow. The transparent margin keeps them inside.
+  driverSurgeFlagWrap: {
+    padding: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   driverSurgeFlag: {
     minWidth: 52,
     minHeight: 28,
@@ -10044,7 +10414,7 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 6 },
     shadowOpacity: 0.18,
     shadowRadius: 8,
-    elevation: 6,
+    elevation: Platform.OS === 'android' ? 0 : 6,
     overflow: 'visible',
     flexShrink: 0,
   },

@@ -2,6 +2,8 @@ import { Alert, PermissionsAndroid, Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export const BACKGROUND_LOCATION_DISCLOSURE_ACCEPTED_KEY = 'has_shown_background_location_modal';
+export const BACKGROUND_LOCATION_DISCLOSURE_DECLINED_AT_KEY = 'background_location_disclosure_declined_at';
+const BACKGROUND_LOCATION_DECLINE_COOLDOWN_MS = 24 * 60 * 60 * 1000;
 
 const ANDROID_PERMISSION_RESULTS = PermissionsAndroid?.RESULTS || {
   GRANTED: 'granted',
@@ -136,11 +138,18 @@ export async function requestBackgroundLocationPermissionWithDisclosure() {
     return currentPermission;
   }
 
-  const accepted = await showAndroidDisclosure(ANDROID_BACKGROUND_LOCATION_DISCLOSURE);
-  if (!accepted) {
+  const declinedAt = Number(await AsyncStorage.getItem(BACKGROUND_LOCATION_DISCLOSURE_DECLINED_AT_KEY));
+  if (declinedAt > 0 && Date.now() - declinedAt < BACKGROUND_LOCATION_DECLINE_COOLDOWN_MS) {
     return deniedPermissionResponse(currentPermission);
   }
 
+  const accepted = await showAndroidDisclosure(ANDROID_BACKGROUND_LOCATION_DISCLOSURE);
+  if (!accepted) {
+    await AsyncStorage.setItem(BACKGROUND_LOCATION_DISCLOSURE_DECLINED_AT_KEY, String(Date.now()));
+    return deniedPermissionResponse(currentPermission);
+  }
+
+  await AsyncStorage.removeItem(BACKGROUND_LOCATION_DISCLOSURE_DECLINED_AT_KEY);
   await AsyncStorage.setItem(BACKGROUND_LOCATION_DISCLOSURE_ACCEPTED_KEY, 'true');
   return Location.requestBackgroundPermissionsAsync();
 }

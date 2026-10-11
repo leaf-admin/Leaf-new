@@ -6,7 +6,10 @@ import PersistentRideNotificationService from './PersistentRideNotificationServi
 
 const STORAGE_KEY = 'prototype_driver_trip_assistant_v1';
 const ACTIVE_STATUSES = new Set(['accepted', 'arrived', 'started']);
-const PICKUP_TOLERANCE_METERS = 20;
+// Pickup radius in which the driver may mark arrival. Phone GPS is commonly
+// off by 20-40 m in cities and indoors, so a tighter radius blocks drivers who
+// are already standing at the pickup point.
+const PICKUP_TOLERANCE_METERS = 80;
 const FALLBACK_SPEED_KM_PER_MIN = 0.45;
 const SHOULD_DISABLE_PERSISTENT_NOTIFICATIONS =
   Platform.OS === 'ios' && !Device.isDevice;
@@ -220,7 +223,8 @@ class PrototypeDriverTripAssistantService {
   async ensureTrackingActive() {
     try {
       const BackgroundLocationService = require('./BackgroundLocationService').default;
-      const permissions = await BackgroundLocationService.requestPermissions();
+      // Mid-ride: never prompt. Permissions are requested when going online.
+      const permissions = await BackgroundLocationService.checkPermissions();
       if (permissions?.foreground) {
         await BackgroundLocationService.startBackgroundTracking();
       }

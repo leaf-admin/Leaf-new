@@ -157,18 +157,19 @@ export default function RobotaxiDriverDocumentsScreen({ navigation, route }) {
 
               <PrototypeMenuSection title="Resumo">
                 <PrototypeMenuInfoRow
-                  label="Liberação operacional"
-                  value={driverCanGoOnline ? 'Liberada pelo backend' : 'Pendente'}
+                  label="Liberação para ficar online"
+                  value={driverCanGoOnline ? 'Liberada' : 'Pendente'}
                 />
-                <PrototypeMenuInfoRow label="Prazo de análise" value="Até 48 horas" />
-                <PrototypeMenuInfoRow label="Última sync" value={lastSyncedAt ? 'Atualizada' : 'Sem sync'} last />
+                {/* The SLA only matters while something is still under review. */}
+                {approvedCount < DRIVER_DOCS.length ? <PrototypeMenuInfoRow label="Prazo de análise" value="Até 48 horas" /> : null}
+                <PrototypeMenuInfoRow label="Última atualização" value={lastSyncedAt ? 'Atualizada agora' : 'Ainda não consultada'} last />
               </PrototypeMenuSection>
 
               {operationallyReleasedBeforeDocumentSync ? (
                 <LeafEmptyState
                   icon="sync-outline"
                   title="Documentos aguardando sincronização"
-                  message="A liberação operacional veio do backend. Atualize para consultar o status de CNH e CRLV."
+                  message="Sua conta já está liberada. Atualize para consultar o status de CNH e CRLV."
                   testID="robotaxi-driver-documents-sync-state"
                 />
               ) : approvedCount === 0 ? (
@@ -182,7 +183,7 @@ export default function RobotaxiDriverDocumentsScreen({ navigation, route }) {
 
               <View style={styles.actionsRow}>
                 <LeafButton
-                  label={refreshing ? 'Atualizando...' : 'Atualizar status'}
+                  label={refreshing ? 'Atualizando...' : 'Atualizar'}
                   icon="refresh-outline"
                   tone="ghost"
                   disabled={refreshing}
@@ -190,7 +191,7 @@ export default function RobotaxiDriverDocumentsScreen({ navigation, route }) {
                   style={styles.actionButton}
                 />
                 <LeafButton
-                  label="Abrir ativação"
+                  label="Ativação"
                   icon="arrow-forward-outline"
                   tone="primary"
                   onPress={() => navigation.navigate('RobotaxiPrototypeDriverActivation')}

@@ -737,6 +737,10 @@ export default function RobotaxiDriverActivationScreen({ navigation, route }) {
     return !row.stageBlocked && !row.isReadonly && status !== FIELD_STATUS.APPROVED && status !== FIELD_STATUS.IN_REVIEW;
   });
 
+  // The CTA names what it does: send what is missing, or, when everything is
+  // approved, return to the home to go online (no "continuar envio" with nothing to send).
+  const activationComplete = !firstActionableRow && driverCanGoOnline;
+  const activationCtaLabel = firstActionableRow ? 'Continuar envio' : activationComplete ? 'Ir para o início' : 'Ver andamento';
   const handleContinueUpload = useCallback(() => {
     if (firstActionableRow) {
       handleFieldAction(firstActionableRow.stageKey, firstActionableRow.field);
@@ -744,12 +748,12 @@ export default function RobotaxiDriverActivationScreen({ navigation, route }) {
     }
 
     if (driverCanGoOnline) {
-      Alert.alert('Ativação concluída', 'Você já pode ficar online para receber corridas.');
+      navigation.navigate('RobotaxiPrototype');
       return;
     }
 
     Alert.alert('Em análise', `Suas informações estão em análise. Prazo: ${DOC_ANALYSIS_SLA_TEXT}.`);
-  }, [driverCanGoOnline, firstActionableRow, handleFieldAction]);
+  }, [driverCanGoOnline, firstActionableRow, handleFieldAction, navigation]);
 
   return (
     <PrototypeScreenTransition>
@@ -845,9 +849,9 @@ export default function RobotaxiDriverActivationScreen({ navigation, route }) {
               style={styles.activationButton}
               onPress={handleContinueUpload}
               accessibilityRole="button"
-              accessibilityLabel="Continuar envio"
+              accessibilityLabel={activationCtaLabel}
             >
-              <Text style={styles.activationButtonText}>Continuar envio</Text>
+              <Text style={styles.activationButtonText}>{activationCtaLabel}</Text>
             </TouchableOpacity>
           </View>
         </PrototypeDismissibleSheet>

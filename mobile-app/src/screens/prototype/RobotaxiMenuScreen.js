@@ -8,6 +8,7 @@ import { LeafAccountCard, LeafObjectIcon } from '../../components/prototype/Leaf
 import useAccountSummary from '../../hooks/useAccountSummary';
 import { useAccountSessionReset } from '../../hooks/useAccountSessionReset';
 import { LeafRootTabs } from '../../components/prototype/PrototypeScaffold';
+import { navigateLeafRootTab } from '../../navigation/leafRootTabNavigation';
 import { resolvePrototypeProfileName } from './prototypeProfileIdentity';
 import { Ionicons } from '@expo/vector-icons';
 import PrototypeScreenTransition from '../../components/prototype/PrototypeScreenTransition';
@@ -75,7 +76,8 @@ export default function RobotaxiMenuScreen({ navigation, route }) {
     ] : [
       ['trips', 'Viagens e pagamento', 'Histórico, recibos e Pix', 'time-outline', ['trip-history', 'payment-info']],
       ['places', 'Endereços salvos', 'Casa, trabalho e favoritos', 'location-outline', ['saved-places']],
-      ['profile', 'Perfil e conquistas', 'Dados, emblemas e convites', 'person-outline', ['edit-profile', 'achievements', 'passenger-invites']],
+      // Subtitle follows availability: invites are behind referralProgramsEnabled.
+      ['profile', 'Perfil e conquistas', referralProgramsEnabled ? 'Dados, emblemas e convites' : 'Dados e emblemas', 'person-outline', ['edit-profile', 'achievements', 'passenger-invites']],
       ['settings', 'Ajuda e preferências', 'Suporte, configurações e privacidade', 'help-circle-outline', ['help', 'settings', 'privacy-account-deletion']],
     ];
     const covered = new Set(definitions.flatMap(group => group[4]));
@@ -83,7 +85,7 @@ export default function RobotaxiMenuScreen({ navigation, route }) {
     const remaining = all.filter(item => !covered.has(item.key));
     if (remaining.length) entries.push({ key: 'other', title: 'Mais opções', icon: 'settings-outline', items: remaining });
     return entries;
-  }, [roleMenuSections, isDriverRole]);
+  }, [roleMenuSections, isDriverRole, referralProgramsEnabled]);
   const currentGroup = groups.find(group => group.key === selectedGroup);
   const promptLogout = () => Alert.alert('Sair da conta', 'Tem certeza que deseja sair da sua conta Leaf?', [
     { text: 'Cancelar', style: 'cancel' },
@@ -92,7 +94,7 @@ export default function RobotaxiMenuScreen({ navigation, route }) {
 
   const handleDismiss = useCallback(() => {
     if (selectedGroup) { setSelectedGroup(null); return; }
-    navigation.navigate('RobotaxiPrototype');
+    navigateLeafRootTab(navigation, 'home');
   }, [navigation, selectedGroup]);
 
   useEffect(() => {
@@ -164,9 +166,10 @@ export default function RobotaxiMenuScreen({ navigation, route }) {
             headerAccessory={(
               <PrototypeMenuCloseButton
                 onPress={currentGroup ? handleDismiss : () => navigation.navigate('RobotaxiPrototypeSettings', { returnToAccount: true })}
-                icon={currentGroup ? "chevron-back" : "options-outline"}
+                // Same gear + label as the home button: both open Configurações.
+                icon={currentGroup ? "arrow-back" : "settings-outline"}
                 testID="robotaxi-menu-close-button"
-                accessibilityLabel={currentGroup ? "Voltar à conta" : "Preferências da conta"}
+                accessibilityLabel={currentGroup ? "Voltar à conta" : "Configurações"}
               />
             )}
           >

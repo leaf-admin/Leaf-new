@@ -16,6 +16,7 @@ import { ListSkeleton, SkeletonLoader } from '../../components/LoadingStates';
 import robotaxiPrototypeTokens from '../../components/design-system/robotaxiPrototypeTokens';
 import { usePrototypeMapOcclusion } from './prototypeMapOcclusion';
 import { usePrototypeRideRuntime } from './prototypeRideRuntime';
+import { navigateLeafRootTab } from '../../navigation/leafRootTabNavigation';
 import {
   buildTripFinancialTotals,
   formatCurrencyBRL,
@@ -23,7 +24,7 @@ import {
 } from './tripFinancialSummary';
 import { LeafButton, LeafEmptyState } from '../../components/prototype/LeafRideUI';
 import BookingHistoryService, { BOOKING_HISTORY_CACHE_TTL_MS } from '../../services/BookingHistoryService';
-import { formatTripDateLabel, resolveTripAddressLabel } from './tripAddressPresentation';
+import { formatTripDateLabel, resolveTripAddressLabel, shortTripAddressLabel } from './tripAddressPresentation';
 
 const { color, typography } = robotaxiPrototypeTokens;
 const SURFACE_TOP_PADDING = 20;
@@ -104,16 +105,18 @@ function buildHistoryStats(history, isDriverRole) {
 function HistoryRow({ item, isDriverRole = false, last = false, onPress }) {
   const routeLabels = splitRouteLabel(item);
   const valueLabel = formatHistoryValue(item, isDriverRole);
-  const counterpartyLabel = isDriverRole
-    ? String(item?.passengerName || 'Passageiro Leaf').trim()
-    : String(item?.driverName || 'Motorista Leaf').trim();
+  // Placeholder names are not information; show the counterparty only when known.
+  const counterpartyName = String(isDriverRole ? item?.passengerName || '' : item?.driverName || '').trim();
+  const counterpartyLabel = /^(passageiro|motorista) leaf$/i.test(counterpartyName) ? '' : counterpartyName;
   const counterpartyTitle = isDriverRole ? 'Passageiro' : 'Motorista';
   const distance = Number(item?.distanceKm ?? item?.distance);
   const duration = Number(item?.durationMinutes ?? item?.duration);
-  const metrics = [Number.isFinite(distance) && distance > 0 ? `${distance.toLocaleString('pt-BR', { maximumFractionDigits: 1 })} km` : null,
+  const metrics = [formatTripDateLabel(item?.date || item?.completedAt || item?.createdAt, { compact: true }),
+    Number.isFinite(distance) && distance > 0 ? `${distance.toLocaleString('pt-BR', { maximumFractionDigits: 1 })} km` : null,
     Number.isFinite(duration) && duration > 0 ? `${Math.round(duration)} min` : null].filter(Boolean).join(' · ');
   const status = String(item?.status || '').toUpperCase();
-  const statusLabel = ['COMPLETE', 'COMPLETED'].includes(status) ? 'Concluída' : ['CANCELLED', 'CANCELED'].includes(status) ? 'Cancelada' : 'Registro da viagem';
+  const completed = ['COMPLETE', 'COMPLETED'].includes(status);
+  const statusLabel = completed ? 'Concluída' : ['CANCELLED', 'CANCELED'].includes(status) ? 'Cancelada' : 'Registro da viagem';
 
   return (
     <TouchableOpacity
@@ -121,16 +124,19 @@ function HistoryRow({ item, isDriverRole = false, last = false, onPress }) {
       onPress={onPress}
       style={[styles.tripRow, last && styles.tripRowLast]}
       testID={`robotaxi-history-row-${item?.id || item?.rideId || 'receipt'}`}
+      accessibilityRole="button"
+      accessibilityLabel={`${routeLabels.dropoff}, ${valueLabel}, ${statusLabel}`}
     >
-      <LeafObjectIcon name="activity" size={64} />
+      <LeafObjectIcon name="activity" size={44} />
       <View style={styles.tripCopy}>
-        <Text style={styles.tripDestination} numberOfLines={2}>{routeLabels.dropoff}</Text>
-        <Text style={styles.tripDetail}>{formatTripDateLabel(item?.date || item?.completedAt || item?.createdAt)}</Text>
-        {metrics ? <Text style={styles.tripDetail}>{metrics}</Text> : null}
-        <Text style={styles.tripAmount}>{valueLabel} · {isDriverRole ? 'líquido' : 'total pago'}</Text>
-        <Text style={styles.tripDetail} numberOfLines={2}>Partida: {routeLabels.pickup}</Text>
-        <Text style={styles.tripDetail}>{counterpartyTitle}: {counterpartyLabel}</Text>
-        <Text style={styles.tripStatus}>{statusLabel}</Text>
+        <Text style={styles.tripDestination} numberOfLines={1}>{shortTripAddressLabel(routeLabels.dropoff)}</Text>
+        <Text style={styles.tripDetail} numberOfLines={1}>{metrics}</Text>
+        <View style={styles.tripAmountRow}>
+          <Text style={styles.tripAmount}>{valueLabel} · {isDriverRole ? 'líquido' : 'total pago'}</Text>
+          {completed ? null : <Text style={styles.tripStatus}>{statusLabel}</Text>}
+        </View>
+        <Text style={styles.tripDetail} numberOfLines={1}>Partida: {shortTripAddressLabel(routeLabels.pickup)}</Text>
+        {counterpartyLabel ? <Text style={styles.tripDetail} numberOfLines={1}>{counterpartyTitle}: {counterpartyLabel}</Text> : null}
       </View>
       <Ionicons name="chevron-forward" size={13} color="#6A6A6A" />
     </TouchableOpacity>
@@ -189,7 +195,7 @@ export default function RobotaxiTripHistoryScreen({ navigation, route }) {
       navigation.goBack();
       return;
     }
-    navigation.navigate('RobotaxiPrototype');
+    navigateLeafRootTab(navigation, 'home');
   }, [navigation, route?.params?.returnToAccount]);
 
   const handlePanelLayout = useCallback(event => {
@@ -300,7 +306,13 @@ export default function RobotaxiTripHistoryScreen({ navigation, route }) {
               paddingBottom: (isRootTab ? 92 : 0) + Math.max(insets.bottom, SURFACE_BOTTOM_PADDING),
             }}
             bodyStyle={styles.body}
-            headerAccessory={isRootTab ? null : <PrototypeMenuCloseButton onPress={handleDismiss} />}
+            // Background refresh lives in the header: an inline row above the list
+            // pushed every trip down and back up on each visit.
+            headerAccessory={<View style={styles.headerAccessory}>
+              {refreshing ? <ActivityIndicator size="small" color="#6A6A6A" testID="robotaxi-history-refreshing"
+                accessibilityRole="progressbar" accessibilityLabel="Atualizando viagens" /> : null}
+              {isRootTab ? null : <PrototypeMenuCloseButton onPress={handleDismiss} />}
+            </View>}
           >
             {loadingHistory || history.length > 0 ? <View style={styles.summaryCardGrid}>
               {primaryStat ? (
@@ -344,12 +356,6 @@ export default function RobotaxiTripHistoryScreen({ navigation, route }) {
                   />
                 ) : history.length > 0 ? (
                   <>
-                  {refreshing ? (
-                    <View style={styles.refreshStatus} accessibilityRole="progressbar" testID="robotaxi-history-refreshing">
-                      <ActivityIndicator size="small" color="#6A6A6A" />
-                      <Text style={styles.tripDetail}>Atualizando viagens…</Text>
-                    </View>
-                  ) : null}
                   {historyError ? (
                     <TouchableOpacity style={styles.refreshStatus} accessibilityRole="button" onPress={() => loadHistory({ forceRefresh: true })} testID="robotaxi-history-refresh-error">
                       <Ionicons name="refresh" size={16} color="#6A6A6A" />
@@ -397,14 +403,16 @@ export default function RobotaxiTripHistoryScreen({ navigation, route }) {
 }
 
 const styles = StyleSheet.create({
+  headerAccessory: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   refreshStatus: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 10 },
-  tripRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 14, paddingVertical: 18, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#E5E5E5' },
+  tripRow: { flexDirection: 'row', alignItems: 'center', gap: 14, paddingVertical: 14, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#E5E5E5' },
   tripRowLast: { borderBottomWidth: 0 },
-  tripCopy: { flex: 1, minWidth: 0, gap: 6 },
+  tripCopy: { flex: 1, minWidth: 0, gap: 3 },
+  tripAmountRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   tripDestination: { ...leafTypography.semiBold, fontSize: 16, lineHeight: 22, color: '#222222' },
   tripDetail: { ...leafTypography.regular, fontSize: 13, lineHeight: 18, color: '#6A6A6A' },
   tripAmount: { ...leafTypography.medium, fontSize: 14, lineHeight: 20, color: '#222222' },
-  tripStatus: { ...leafTypography.regular, fontSize: 12, lineHeight: 17, color: '#6A6A6A' },
+  tripStatus: { ...leafTypography.medium, fontSize: 12, lineHeight: 17, color: '#6A6A6A', paddingHorizontal: 8, paddingVertical: 1, borderRadius: 8, backgroundColor: '#F2F2F2', overflow: 'hidden' },
   container: {
     flex: 1,
     backgroundColor: '#FFFFFF',

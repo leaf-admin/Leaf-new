@@ -3828,6 +3828,7 @@ class WebSocketManager {
         distance,
         fare,
         requestId,
+        ...(options?.earlyEnd ? { earlyEnd: options.earlyEnd } : {}),
         ...lifecycleMetadata,
       },
     });
@@ -4942,6 +4943,26 @@ class WebSocketManager {
       const cleanup = () => {
         clearTimeout(timeout);
         this.socket.off?.("rideCancelled", onCancelled);
+        this.socket.off?.("rideCancellationError", onCancellationError);
+      };
+
+      // The server answers a refused cancel on its own event; without this
+      // listener every refusal surfaced as a 10 s timeout.
+      const onCancellationError = (data) => {
+        cleanup();
+        this._recordRideTelemetryCommand(
+          "cancelRide",
+          {
+            phase: "error",
+            latencyMs: Date.now() - startedAt,
+            errorCode: data?.code || null,
+          },
+          telemetryContext,
+          bookingId,
+        );
+        const error = new Error(data?.error || "Cancel ride failed");
+        error.code = data?.code || null;
+        reject(error);
       };
 
       const onCancelled = (data) => {
@@ -4986,6 +5007,7 @@ class WebSocketManager {
         bookingId,
       );
       this.socket.once("rideCancelled", onCancelled);
+      this.socket.once("rideCancellationError", onCancellationError);
       this.socket.emit("cancelRide", {
         bookingId,
         reason,

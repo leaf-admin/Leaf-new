@@ -20,7 +20,7 @@ const COMMON_ITEMS = [
     detailRoute: 'PrivacyPolicy',
     openDirect: true,
     section: 'support',
-    subtitle: 'Dados e preferências da conta'
+    subtitle: 'Seus dados e direitos'
   },
   {
     key: 'settings',
