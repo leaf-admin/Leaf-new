@@ -1,5 +1,5 @@
 import leafTypography from '../../prototype/LeafTypography';
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   StyleSheet,
@@ -120,6 +120,8 @@ const DocumentStep = ({ onSubmitted, onBack, initialData = {}, progressMeta }) =
   });
   const [genderOptionsVisible, setGenderOptionsVisible] = useState(false);
   const [errors, setErrors] = useState({});
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const submitInFlightRef = useRef(false);
 
   const isFormValid = useMemo(() => {
     if (!isDriver) {
@@ -264,19 +266,34 @@ const DocumentStep = ({ onSubmitted, onBack, initialData = {}, progressMeta }) =
     }
   };
 
+  const submitOnce = async (payload) => {
+    submitInFlightRef.current = true;
+    setIsSubmitting(true);
+    try {
+      await onSubmitted(payload);
+    } finally {
+      submitInFlightRef.current = false;
+      setIsSubmitting(false);
+    }
+  };
+
   const handleSubmit = () => {
+    if (submitInFlightRef.current) {
+      return;
+    }
+
     if (!validateFields()) {
       return;
     }
 
     if (!isDriver) {
-      onSubmitted({
+      submitOnce({
         email: documentData.email.trim().toLowerCase()
       });
       return;
     }
 
-    onSubmitted({
+    submitOnce({
       cpf: documentData.cpf,
       birthDate: documentData.birthDate,
       motherName: documentData.motherName,
@@ -331,7 +348,7 @@ const DocumentStep = ({ onSubmitted, onBack, initialData = {}, progressMeta }) =
       footer={(
         <ContinueButton
           onPress={handleSubmit}
-          disabled={!isFormValid || isExtracting.cnh || isExtracting.vehicle}
+          disabled={!isFormValid || isExtracting.cnh || isExtracting.vehicle || isSubmitting}
           text="Continuar"
         />
       )}

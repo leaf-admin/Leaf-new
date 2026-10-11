@@ -1,5 +1,5 @@
 import leafTypography from '../../components/prototype/LeafTypography';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, ScrollView, StatusBar, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useSelector } from 'react-redux';
@@ -57,6 +57,7 @@ export default function RobotaxiMenuDetailScreen({ navigation, route }) {
   const [quickMessage, setQuickMessage] = useState('');
   const [helpDescription, setHelpDescription] = useState('');
   const [formBusy, setFormBusy] = useState('');
+  const supportSubmitInFlightRef = useRef(false);
   const [feedback, setFeedback] = useState('');
 
   const targetRoute = route?.name;
@@ -165,7 +166,12 @@ export default function RobotaxiMenuDetailScreen({ navigation, route }) {
       return;
     }
 
+    if (supportSubmitInFlightRef.current) {
+      return;
+    }
+
     try {
+      supportSubmitInFlightRef.current = true;
       setFormBusy('ticket');
       await openSupportTicket({
         type: 'menu-help',
@@ -176,6 +182,7 @@ export default function RobotaxiMenuDetailScreen({ navigation, route }) {
     } catch (error) {
       Alert.alert('Não foi possível abrir ticket', error?.message || 'Falha de comunicação.');
     } finally {
+      supportSubmitInFlightRef.current = false;
       setFormBusy('');
     }
   }, [helpDescription, openSupportTicket]);
@@ -187,7 +194,12 @@ export default function RobotaxiMenuDetailScreen({ navigation, route }) {
       return;
     }
 
+    if (supportSubmitInFlightRef.current) {
+      return;
+    }
+
     try {
+      supportSubmitInFlightRef.current = true;
       setFormBusy('incident');
       await reportIncident({
         type: 'menu-help',
@@ -197,6 +209,7 @@ export default function RobotaxiMenuDetailScreen({ navigation, route }) {
     } catch (error) {
       Alert.alert('Não foi possível registrar', error?.message || 'Falha de comunicação.');
     } finally {
+      supportSubmitInFlightRef.current = false;
       setFormBusy('');
     }
   }, [helpDescription, reportIncident]);
@@ -389,12 +402,12 @@ export default function RobotaxiMenuDetailScreen({ navigation, route }) {
           </View>
 
           <View style={styles.dualActionRow}>
-            <TouchableOpacity style={styles.halfGhostButton} activeOpacity={0.86} onPress={supportLoading ? undefined : handleOpenTicket}>
+            <TouchableOpacity style={styles.halfGhostButton} activeOpacity={0.86} disabled={Boolean(formBusy)} onPress={supportLoading ? undefined : handleOpenTicket}>
               <Ionicons name="document-text-outline" size={15} color={color.text.primary} />
               <Text style={styles.inlineGhostButtonText}>{formBusy === 'ticket' ? 'Enviando...' : 'Ticket'}</Text>
             </TouchableOpacity>
 
-            <TouchableOpacity style={styles.halfGhostButton} activeOpacity={0.86} onPress={supportLoading ? undefined : handleReportIncident}>
+            <TouchableOpacity style={styles.halfGhostButton} activeOpacity={0.86} disabled={Boolean(formBusy)} onPress={supportLoading ? undefined : handleReportIncident}>
               <Ionicons name="alert-circle-outline" size={15} color={color.text.primary} />
               <Text style={styles.inlineGhostButtonText}>{formBusy === 'incident' ? 'Enviando...' : 'Incidente'}</Text>
             </TouchableOpacity>

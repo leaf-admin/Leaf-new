@@ -275,6 +275,7 @@ export default function AWSNativeLivenessScreen({
   const activeRunRef = useRef(null);
   const abandoningSessionsRef = useRef(new Set());
   const onSuccessRef = useRef(onSuccess);
+  const reviewRequestedRef = useRef(false);
 
   useEffect(() => {
     onSuccessRef.current = onSuccess;
@@ -348,6 +349,7 @@ export default function AWSNativeLivenessScreen({
   const showFlowError = (run, error) => {
     if (!isCurrentRun(run) || run.successful === true) return;
     Logger.error('❌ [AWS NATIVE LIVENESS] Falha no fluxo nativo:', error);
+    reviewRequestedRef.current = false;
     setStatus(STATUS.ERROR);
     setErrorContext(error);
     setErrorPresentation(resolveKycLivenessErrorPresentation(error));
@@ -522,7 +524,11 @@ export default function AWSNativeLivenessScreen({
               && onRequestReview ? (
               <TouchableOpacity
                 style={styles.primaryButton}
-                onPress={() => onRequestReview(errorContext)}
+                onPress={() => {
+                  if (reviewRequestedRef.current) return;
+                  reviewRequestedRef.current = true;
+                  onRequestReview(errorContext);
+                }}
               >
                 <Text style={styles.primaryButtonText}>
                   {errorPresentation.primaryActionLabel || 'Solicitar análise'}

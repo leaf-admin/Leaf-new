@@ -545,7 +545,7 @@ const PhoneInputStep = ({ onVerificationSent, onPasswordLoginSuccess, progressMe
                             : requiresPassword
                                 ? (forgotPasswordMode ? 'Redefinir senha' : 'Entrar')
                                 : 'Continuar'}
-                        disabled={phoneNumber.length < 10}
+                        disabled={loading || phoneNumber.length < 10}
                     />
 
                     {!requiresPassword ? (
