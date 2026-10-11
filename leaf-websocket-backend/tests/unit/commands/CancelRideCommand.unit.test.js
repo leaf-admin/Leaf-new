@@ -285,4 +285,50 @@ describe('CancelRideCommand authorization and terminal guards', () => {
       })
     );
   });
+  it('charges the no-show wait fee in cents of a fare stored in reais', async () => {
+    const processRideRefund = jest.fn().mockResolvedValue({ success: true, refundId: 'refund_no_show_1' });
+    PaymentService.mockImplementation(() => ({
+      WOOVI_FEE_PERCENTAGE: 0.0099,
+      WOOVI_FEE_MINIMUM: 50,
+      getStoredPayment: jest.fn().mockResolvedValue({
+        status: 'PAID',
+        chargeId: 'charge_no_show_1',
+        amount: 4507,
+        passengerId: 'customer_1',
+      }),
+      processRideRefund,
+    }));
+    redisPool.getConnection.mockReturnValue({
+      hgetall: jest.fn().mockImplementation(async (key) => {
+        if (key === 'booking:booking_no_show') {
+          return {
+            customerId: 'customer_1',
+            driverId: 'driver_1',
+            status: 'ARRIVED',
+            driverArrivedAt: String(Date.now() - 5 * 60000 - 2000),
+            estimatedFare: '45.07',
+          };
+        }
+        return {};
+      }),
+      hset: jest.fn().mockResolvedValue(1),
+      hdel: jest.fn().mockResolvedValue(1),
+      get: jest.fn().mockResolvedValue('booking_no_show'),
+      del: jest.fn().mockResolvedValue(1),
+      geopos: jest.fn().mockResolvedValue([]),
+    });
+    RideStateManager.getBookingState.mockResolvedValue('ARRIVED');
+    RideStateManager.updateBookingState.mockResolvedValue({ success: true });
+
+    const result = await new CancelRideCommand({
+      bookingId: 'booking_no_show',
+      canceledBy: 'driver_1',
+      userType: 'driver',
+      reason: 'Passageiro não compareceu ao embarque.',
+    }).execute();
+
+    expect(result.success).toBe(true);
+    // 5 min x R$ 0,50 + R$ 0,50; the 40% cap is R$ 18,02, not R$ 0,18.
+    expect(result.data.cancellationFee).toBe(300);
+  });
 });
