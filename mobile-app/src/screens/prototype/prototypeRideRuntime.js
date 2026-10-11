@@ -7393,9 +7393,17 @@ export function isRiderEarlyEndCompletion(payload = {}) {
   );
 }
 
+// Same settlement shape when the server settles a ride the driver ended far
+// from the destination (completionType EARLY_ENDED_BY_DRIVER).
+function isDriverEarlyEndCompletion(payload = {}) {
+  return (
+    String(payload?.completionType || "").trim().toUpperCase() === "EARLY_ENDED_BY_DRIVER"
+  );
+}
+
 function hasRiderEarlyEndSettlement(payload = {}) {
   return (
-    isRiderEarlyEndCompletion(payload) &&
+    (isRiderEarlyEndCompletion(payload) || isDriverEarlyEndCompletion(payload)) &&
     Number.isFinite(Number(payload?.settlement?.executedFare)) &&
     Number(payload.settlement.executedFare) >= 0
   );
@@ -7705,7 +7713,11 @@ export function resolveCompletedTripFinancialSnapshot(
     ...(totalFees !== null ? { totalFees } : {}),
     ...(driverNetAmount !== null ? { driverNetAmount } : {}),
     ...(hasRiderEarlyEndSettlement(payload)
-      ? { settlementType: "EARLY_ENDED_BY_RIDER" }
+      ? {
+          settlementType: isDriverEarlyEndCompletion(payload)
+            ? "EARLY_ENDED_BY_DRIVER"
+            : "EARLY_ENDED_BY_RIDER",
+        }
       : {}),
     ...(isAuthoritativeOperationalInterruptionEnded && originalPaidAmount !== null
       ? { originalPaidAmount }

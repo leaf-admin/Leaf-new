@@ -450,7 +450,9 @@ function resolveCanonicalOperationalInterruptionSettlement(receipt = {}) {
   // the runtime only stores a paid amount plus a refund for settlements that
   // came from the server.
   const hasServerRefundSettlement =
-    String(receipt?.settlementType || "").trim().toUpperCase() === "EARLY_ENDED_BY_RIDER" &&
+    ["EARLY_ENDED_BY_RIDER", "EARLY_ENDED_BY_DRIVER"].includes(
+      String(receipt?.settlementType || "").trim().toUpperCase(),
+    ) &&
     Number(receipt?.estimatedRefund) > 0 &&
     Number(receipt?.originalPaidAmount) > 0;
   if (

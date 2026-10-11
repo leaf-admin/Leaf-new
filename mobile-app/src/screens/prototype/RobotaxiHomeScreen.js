@@ -5434,8 +5434,20 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     const mergedHistory = [lastReceipt, ...(Array.isArray(tripHistory) ? tripHistory : [])]
       .filter(Boolean);
     const seenIds = new Set();
+    // "Ganhos de hoje" used to add every stored receipt, whatever its day, so
+    // the total moved by the difference between the newest ride and the
+    // oldest one dropping out of the list. Count only today's receipts.
+    const todayKey = new Date().toDateString();
 
     return mergedHistory.filter((item, index) => {
+      const completedAt = item?.completedAt ? new Date(item.completedAt) : null;
+      if (
+        completedAt &&
+        !Number.isNaN(completedAt.getTime()) &&
+        completedAt.toDateString() !== todayKey
+      ) {
+        return false;
+      }
       const id = String(
         item?.id ||
           item?.bookingId ||
