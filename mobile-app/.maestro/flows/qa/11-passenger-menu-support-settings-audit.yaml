@@ -95,9 +95,9 @@ appId: br.com.leaf.ride
       - assertVisible: ".*(Registrar incidente|Abrir canal recomendado).*"
 - runFlow:
     when:
-      visible: "Abrir ticket"
+      visible: "Abrir chamado"
     commands:
-      - assertVisible: "Abrir ticket"
+      - assertVisible: "Abrir chamado"
 - takeScreenshot: "qa-support-screen"
 
 - runFlow:
@@ -109,18 +109,18 @@ appId: br.com.leaf.ride
           id: "robotaxi-support-open-ticket"
 - runFlow:
     when:
-      visible: "Abrir ticket"
+      visible: "Abrir chamado"
     commands:
-      - tapOn: "Abrir ticket"
+      - tapOn: "Abrir chamado"
 - tapOn:
     point: "50%,90%"
     optional: true
     retryTapIfNoChange: true
 - runFlow:
     when:
-      visible: ".*(Ticket criado|Nao foi possivel abrir ticket|Não foi possível abrir ticket|Triagem incompleta).*"
+      visible: ".*(Chamado #.* criado|Nao foi possivel abrir chamado|Não foi possível abrir chamado|Triagem incompleta).*"
     commands:
-      - assertVisible: ".*(Ticket criado|Nao foi possivel abrir ticket|Não foi possível abrir ticket|Triagem incompleta).*"
+      - assertVisible: ".*(Chamado #.* criado|Nao foi possivel abrir chamado|Não foi possível abrir chamado|Triagem incompleta).*"
       - runFlow:
           when:
             visible: "OK"

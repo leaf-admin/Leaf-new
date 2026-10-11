@@ -252,7 +252,7 @@ export default function RobotaxiSupportTicketScreen({ navigation, route }) {
             fallbackMessage: 'Não foi possível solicitar a análise agora. Tente novamente em instantes.',
           })
         : error?.message || 'Tente novamente em instantes.';
-      Alert.alert('Não foi possível abrir ticket', message);
+      Alert.alert('Não foi possível abrir chamado', message);
     }
   }, [
     bookingId,
@@ -303,7 +303,7 @@ export default function RobotaxiSupportTicketScreen({ navigation, route }) {
             <PrototypeMenuSurface
               onLayout={handlePanelLayout}
               eyebrow="Suporte"
-              title={isIdentityReviewFlow ? 'Solicitar análise' : 'Abrir ticket'}
+              title={isIdentityReviewFlow ? 'Solicitar análise' : 'Abrir chamado'}
               subtitle={isIdentityReviewFlow
                 ? 'Conte o que aconteceu. Nossa equipe verificará a validação de identidade e o documento aprovado.'
                 : 'Registre o problema com contexto suficiente para a operação agir rápido.'}
@@ -347,7 +347,7 @@ export default function RobotaxiSupportTicketScreen({ navigation, route }) {
                     placeholderTextColor={leafRideColors.muted}
                     style={styles.input}
                     testID="robotaxi-support-ticket-subject"
-                    accessibilityLabel={isIdentityReviewFlow ? 'Assunto do pedido de revisão' : 'Assunto do ticket de suporte'}
+                    accessibilityLabel={isIdentityReviewFlow ? 'Assunto do pedido de revisão' : 'Assunto do chamado de suporte'}
                     accessibilityHint={selectedType.title}
                   />
                   <Text style={styles.inputLabel}>Detalhes</Text>
@@ -360,7 +360,7 @@ export default function RobotaxiSupportTicketScreen({ navigation, route }) {
                     multiline
                     textAlignVertical="top"
                     testID="robotaxi-support-ticket-description"
-                    accessibilityLabel={isIdentityReviewFlow ? 'Detalhes do pedido de revisão' : 'Detalhes do ticket de suporte'}
+                    accessibilityLabel={isIdentityReviewFlow ? 'Detalhes do pedido de revisão' : 'Detalhes do chamado de suporte'}
                     accessibilityHint={isIdentityReviewFlow
                       ? 'Descreva o motivo da solicitação de revisão.'
                       : 'Explique o que aconteceu e quando percebeu o problema.'}
@@ -372,7 +372,7 @@ export default function RobotaxiSupportTicketScreen({ navigation, route }) {
                     ? 'Enviando...'
                     : isIdentityReviewFlow
                       ? 'Solicitar análise'
-                      : 'Enviar ticket'}
+                      : 'Enviar chamado'}
                   icon="send-outline"
                   tone="primary"
                   disabled={supportLoading || !canSubmit}
@@ -383,7 +383,7 @@ export default function RobotaxiSupportTicketScreen({ navigation, route }) {
                     ? 'Enviando solicitação de suporte'
                     : isIdentityReviewFlow
                       ? 'Solicitar análise de identidade'
-                      : 'Enviar ticket de suporte'}
+                      : 'Enviar chamado de suporte'}
                 />
 
                 {supportLoading ? (
@@ -396,9 +396,9 @@ export default function RobotaxiSupportTicketScreen({ navigation, route }) {
                 {createdTicket?.id ? (
                   <LeafEmptyState
                     icon="checkmark-circle-outline"
-                    title={`Ticket #${createdTicket.id} criado`}
-                    message="A operação recebeu sua solicitação. A resposta aparecerá na thread deste ticket."
-                    actionLabel="Acompanhar ticket"
+                    title={`Chamado #${createdTicket.id} criado`}
+                    message="A operação recebeu sua solicitação. A resposta aparecerá na thread deste chamado."
+                    actionLabel="Acompanhar chamado"
                     onAction={handleOpenCreatedTicketThread}
                     testID="robotaxi-support-ticket-created"
                   />

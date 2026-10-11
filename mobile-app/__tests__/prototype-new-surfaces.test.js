@@ -408,17 +408,17 @@ describe('prototype new surfaces', () => {
       />
     );
 
-    expect(screen.getByText('Abrir ticket')).toBeTruthy();
+    expect(screen.getByText('Abrir chamado')).toBeTruthy();
     const tripType = screen.getByTestId('robotaxi-support-ticket-type-trip');
     expect(tripType.props.accessibilityRole).toBe('button');
     expect(tripType.props.accessibilityLabel).toBe('Viagem');
     expect(tripType.props.accessibilityState).toEqual({ expanded: false });
     expect(screen.getByTestId('robotaxi-support-ticket-subject').props.accessibilityLabel)
-      .toBe('Assunto do ticket de suporte');
+      .toBe('Assunto do chamado de suporte');
     const description = screen.getByTestId('robotaxi-support-ticket-description');
-    expect(description.props.accessibilityLabel).toBe('Detalhes do ticket de suporte');
+    expect(description.props.accessibilityLabel).toBe('Detalhes do chamado de suporte');
     expect(screen.getByTestId('robotaxi-support-ticket-submit').props.accessibilityLabel)
-      .toBe('Enviar ticket de suporte');
+      .toBe('Enviar chamado de suporte');
 
     fireEvent.changeText(
       description,
@@ -436,10 +436,10 @@ describe('prototype new surfaces', () => {
           bookingStatus: 'started',
         })
       );
-      expect(screen.getByText('Ticket #SUP-123 criado')).toBeTruthy();
+      expect(screen.getByText('Chamado #SUP-123 criado')).toBeTruthy();
     });
 
-    fireEvent.press(screen.getByText('Acompanhar ticket'));
+    fireEvent.press(screen.getByText('Acompanhar chamado'));
 
     expect(navigation.replace).toHaveBeenCalledWith(
       'RobotaxiPrototypeSupportThread',
@@ -637,7 +637,7 @@ describe('prototype new surfaces', () => {
     expect(paymentOption.props.accessibilityLabel).toBe('Problema com Pix');
     expect(paymentOption.props.accessibilityState).toEqual({ checked: true });
     const primaryAction = screen.getByTestId('robotaxi-support-primary-action');
-    expect(primaryAction.props.accessibilityLabel).toBe('Abrir ticket: Problema com Pix');
+    expect(primaryAction.props.accessibilityLabel).toBe('Abrir chamado: Problema com Pix');
     fireEvent.press(primaryAction);
 
     expect(navigation.navigate).toHaveBeenCalledWith(
@@ -768,10 +768,10 @@ describe('prototype new surfaces', () => {
     fireEvent.press(screen.getByTestId('robotaxi-support-ticket-submit'));
 
     await waitFor(() => {
-      expect(screen.getByText('Ticket #SUP-123 criado')).toBeTruthy();
+      expect(screen.getByText('Chamado #SUP-123 criado')).toBeTruthy();
     });
 
-    fireEvent.press(screen.getByText('Acompanhar ticket'));
+    fireEvent.press(screen.getByText('Acompanhar chamado'));
 
     expect(navigation.replace).toHaveBeenCalledWith(
       'RobotaxiPrototypeSupportThread',

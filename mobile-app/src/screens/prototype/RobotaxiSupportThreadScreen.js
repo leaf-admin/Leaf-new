@@ -139,7 +139,7 @@ export default function RobotaxiSupportThreadScreen({ navigation, route }) {
       if (mountedRef.current) {
         setInitialLoading(false);
         setRefreshing(false);
-        setError('Não encontramos o ticket para acompanhar.');
+        setError('Não encontramos o chamado para acompanhar.');
       }
       return false;
     }
@@ -167,7 +167,7 @@ export default function RobotaxiSupportThreadScreen({ navigation, route }) {
     }
 
     if (messagesResult.status === 'rejected') {
-      setError(messagesResult.reason?.message || 'Não foi possível atualizar as mensagens do ticket.');
+      setError(messagesResult.reason?.message || 'Não foi possível atualizar as mensagens do chamado.');
       setInitialLoading(false);
       setRefreshing(false);
       return false;
@@ -266,7 +266,7 @@ export default function RobotaxiSupportThreadScreen({ navigation, route }) {
             <PrototypeMenuSurface
               onLayout={handlePanelLayout}
               eyebrow="Suporte"
-              title={ticketId ? `Ticket #${ticketId}` : 'Ticket de suporte'}
+              title={ticketId ? `Chamado #${ticketId}` : 'Chamado de suporte'}
               subtitle="Acompanhe a resposta da operação e mantenha a conversa neste chamado."
               fullScreen
               style={{
@@ -278,7 +278,7 @@ export default function RobotaxiSupportThreadScreen({ navigation, route }) {
                 <PrototypeMenuCloseButton
                   onPress={handleDismiss}
                   testID="robotaxi-support-thread-close-button"
-                  accessibilityLabel="Fechar ticket de suporte"
+                  accessibilityLabel="Fechar chamado de suporte"
                 />
               )}
             >
@@ -292,7 +292,7 @@ export default function RobotaxiSupportThreadScreen({ navigation, route }) {
               <FlatList
                 ref={listRef}
                 testID="robotaxi-support-thread-list"
-                accessibilityLabel="Mensagens do ticket de suporte"
+                accessibilityLabel="Mensagens do chamado de suporte"
                 data={messages}
                 keyExtractor={item => item.id}
                 style={styles.list}
@@ -329,7 +329,7 @@ export default function RobotaxiSupportThreadScreen({ navigation, route }) {
                         icon="refresh-outline"
                         onPress={() => loadThread({ mode: 'refresh' })}
                         testID="robotaxi-support-thread-retry-button"
-                        accessibilityLabel="Tentar novamente carregar ticket"
+                        accessibilityLabel="Tentar novamente carregar chamado"
                         style={styles.retryButton}
                       />
                     ) : null}
@@ -350,7 +350,7 @@ export default function RobotaxiSupportThreadScreen({ navigation, route }) {
                   maxLength={1000}
                   editable={!sending && Boolean(ticketId)}
                   testID="robotaxi-support-thread-input"
-                  accessibilityLabel="Resposta do ticket"
+                  accessibilityLabel="Resposta do chamado"
                 />
                 <LeafButton
                   label={sending ? 'Enviando...' : 'Enviar resposta'}
@@ -359,7 +359,7 @@ export default function RobotaxiSupportThreadScreen({ navigation, route }) {
                   onPress={handleSend}
                   disabled={sending || !ticketId || !String(draft || '').trim()}
                   testID="robotaxi-support-thread-send-button"
-                  accessibilityLabel="Enviar resposta no ticket"
+                  accessibilityLabel="Enviar resposta no chamado"
                   style={styles.sendButton}
                 />
               </View>

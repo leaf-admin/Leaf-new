@@ -92,7 +92,7 @@ function buildPdfMeta(asset = {}) {
 function formatExtractionLabel(result) {
   if (!result?.success) return 'Falha na extração';
   if (result?.usedFallback) return 'Extraído com OCR de fallback';
-  return `Extraído com ${result?.model || 'IA'}`;
+  return 'Dados lidos do documento';
 }
 
 const DocumentStep = ({ onSubmitted, onBack, initialData = {}, progressMeta }) => {

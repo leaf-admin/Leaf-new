@@ -61,7 +61,15 @@ const ForgotPasswordStep = ({ phoneNumber, onPasswordReset, onBack }) => {
             setVerifiedOtp('');
             setTimer(60);
             setCanResend(false);
-            Alert.alert('Sucesso', 'Código enviado pelo WhatsApp!');
+            const sentChannel = String(result.confirmation?.channel || result.channel || '').toLowerCase();
+            Alert.alert(
+                'Sucesso',
+                sentChannel === 'whatsapp'
+                    ? 'Código enviado pelo WhatsApp.'
+                    : sentChannel === 'sms'
+                        ? 'Código enviado por SMS.'
+                        : 'Código enviado.'
+            );
         } catch (error) {
             Logger.error('❌ Erro ao solicitar OTP:', error);
             // Envio falhou: libera o reenvio imediato em vez de esperar o timer.

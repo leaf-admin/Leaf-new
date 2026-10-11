@@ -162,12 +162,12 @@ export default function RobotaxiSupportScreen({ navigation, route }) {
   const [showSecondaryActions, setShowSecondaryActions] = useState(false);
   const selectedOption = useMemo(() => SUPPORT_OPTIONS.find(item => item.id === selectedOptionId) || SUPPORT_OPTIONS[0], [selectedOptionId]);
   const incidentIsPrimary = selectedOption.id === 'safety';
-  const primaryActionLabel = incidentIsPrimary ? 'Registrar incidente' : 'Abrir ticket';
+  const primaryActionLabel = incidentIsPrimary ? 'Registrar incidente' : 'Abrir chamado';
   const primaryActionAccessibilityLabel = supportLoading
     ? 'Enviando solicitação de suporte'
     : incidentIsPrimary
       ? 'Registrar incidente de segurança'
-      : `Abrir ticket: ${selectedOption.title}`;
+      : `Abrir chamado: ${selectedOption.title}`;
   const supportRideContext = useMemo(
     () => resolveSupportRideContext(route?.params, runtime),
     [
@@ -185,7 +185,7 @@ export default function RobotaxiSupportScreen({ navigation, route }) {
   const openChatTitle = hasRideChatContext
     ? 'Falar com motorista'
     : supportLastTicket?.id
-      ? 'Acompanhar ticket'
+      ? 'Acompanhar chamado'
       : 'Abrir conversa com suporte';
   const openChatSubtitle = hasRideChatContext
     ? 'Enviar mensagem no chat desta corrida.'
@@ -402,7 +402,7 @@ export default function RobotaxiSupportScreen({ navigation, route }) {
                   <Text style={styles.feedbackText}>Sincronizando com suporte...</Text>
                 </View>
               ) : null}
-              {supportLastTicket?.id ? <Text style={styles.feedbackText}>Ticket recente: #{supportLastTicket.id}</Text> : null}
+              {supportLastTicket?.id ? <Text style={styles.feedbackText}>Chamado recente: #{supportLastTicket.id}</Text> : null}
               {supportLastIncident?.id ? <Text style={styles.feedbackText}>Incidente recente: #{supportLastIncident.id}</Text> : null}
               {supportError ? <Text style={styles.errorText}>{supportError}</Text> : null}
             </ScrollView>

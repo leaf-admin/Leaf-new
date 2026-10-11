@@ -162,7 +162,7 @@ export default function RobotaxiMenuDetailScreen({ navigation, route }) {
   const handleOpenTicket = useCallback(async () => {
     const description = String(helpDescription || '').trim();
     if (!description) {
-      setFeedback('Descreva o que aconteceu antes de abrir ticket.');
+      setFeedback('Descreva o que aconteceu antes de abrir chamado.');
       return;
     }
 
@@ -178,9 +178,9 @@ export default function RobotaxiMenuDetailScreen({ navigation, route }) {
         priority: 'N3',
         description
       });
-      setFeedback('Ticket enviado para o suporte.');
+      setFeedback('Chamado enviado para o suporte.');
     } catch (error) {
-      Alert.alert('Não foi possível abrir ticket', error?.message || 'Falha de comunicação.');
+      Alert.alert('Não foi possível abrir chamado', error?.message || 'Falha de comunicação.');
     } finally {
       supportSubmitInFlightRef.current = false;
       setFormBusy('');
@@ -404,7 +404,7 @@ export default function RobotaxiMenuDetailScreen({ navigation, route }) {
           <View style={styles.dualActionRow}>
             <TouchableOpacity style={styles.halfGhostButton} activeOpacity={0.86} disabled={Boolean(formBusy)} onPress={supportLoading ? undefined : handleOpenTicket}>
               <Ionicons name="document-text-outline" size={15} color={color.text.primary} />
-              <Text style={styles.inlineGhostButtonText}>{formBusy === 'ticket' ? 'Enviando...' : 'Ticket'}</Text>
+              <Text style={styles.inlineGhostButtonText}>{formBusy === 'ticket' ? 'Enviando...' : 'Chamado'}</Text>
             </TouchableOpacity>
 
             <TouchableOpacity style={styles.halfGhostButton} activeOpacity={0.86} disabled={Boolean(formBusy)} onPress={supportLoading ? undefined : handleReportIncident}>
@@ -415,7 +415,7 @@ export default function RobotaxiMenuDetailScreen({ navigation, route }) {
 
           <PrototypePrimaryButton label="Abrir central de suporte" icon="help-circle-outline" onPress={handleOpenFullModule} style={styles.inlinePrimaryButton} />
 
-          {supportLastTicket?.id ? <Text style={styles.metaText}>Ticket recente: #{supportLastTicket.id}</Text> : null}
+          {supportLastTicket?.id ? <Text style={styles.metaText}>Chamado recente: #{supportLastTicket.id}</Text> : null}
           {supportLastIncident?.id ? <Text style={styles.metaText}>Incidente recente: #{supportLastIncident.id}</Text> : null}
           {supportError ? <Text style={styles.errorText}>{supportError}</Text> : null}
         </View>

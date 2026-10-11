@@ -1570,6 +1570,10 @@ export default function EarningsReportScreen({ navigation, route }) {
                 <Text style={styles.cleanSummaryAccent}>Débito total</Text>
                 <Text style={styles.cleanSummaryAccent}>R$ {formatCurrency(currentWithdrawBreakdown.totalDebit)}</Text>
               </View>
+              <View style={styles.cleanSummaryRow}>
+                <Text style={styles.cleanSummaryLabel}>Você recebe</Text>
+                <Text style={styles.cleanSummaryValue}>R$ {formatCurrency(currentWithdrawAmount)}</Text>
+              </View>
             </View>
 
             <TouchableOpacity
