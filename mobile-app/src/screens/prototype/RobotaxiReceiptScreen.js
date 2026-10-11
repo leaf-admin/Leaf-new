@@ -446,9 +446,17 @@ function resolveCanonicalOperationalInterruptionSettlement(receipt = {}) {
     );
   });
 
+  // Same breakdown for a ride the passenger ended before the destination:
+  // the runtime only stores a paid amount plus a refund for settlements that
+  // came from the server.
+  const hasServerRefundSettlement =
+    String(receipt?.settlementType || "").trim().toUpperCase() === "EARLY_ENDED_BY_RIDER" &&
+    Number(receipt?.estimatedRefund) > 0 &&
+    Number(receipt?.originalPaidAmount) > 0;
   if (
-    continuationStatus !== "PASSENGER_ENDED_RIDE" ||
-    !hasCanonicalInterruptedRideLeg
+    !hasServerRefundSettlement &&
+    (continuationStatus !== "PASSENGER_ENDED_RIDE" ||
+      !hasCanonicalInterruptedRideLeg)
   ) {
     return null;
   }

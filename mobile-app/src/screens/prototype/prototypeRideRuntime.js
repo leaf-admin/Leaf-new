@@ -5132,6 +5132,10 @@ const RECEIPT_EARLY_END_METERS = 500;
 // A trip that ended well short of its destination. The server value wins when
 // present; otherwise it is measured from where the car was when it ended.
 export function resolveReceiptEarlyEnd(payload = {}, state = {}, destinationCoordinate = null) {
+  // The passenger ended the ride themselves: nothing to ask them about.
+  if (isRiderEarlyEndCompletion(payload)) {
+    return null;
+  }
   if (payload?.earlyEnd && typeof payload.earlyEnd === "object") {
     return { ...payload.earlyEnd };
   }
@@ -7381,6 +7385,22 @@ function resolveConfirmedPaymentGrossAmount(previousState = runtimeState) {
   return null;
 }
 
+// The passenger ended the ride before the destination. The server settles it
+// by the part actually travelled and sends that settlement with the completion.
+export function isRiderEarlyEndCompletion(payload = {}) {
+  return (
+    String(payload?.completionType || "").trim().toUpperCase() === "EARLY_ENDED_BY_RIDER"
+  );
+}
+
+function hasRiderEarlyEndSettlement(payload = {}) {
+  return (
+    isRiderEarlyEndCompletion(payload) &&
+    Number.isFinite(Number(payload?.settlement?.executedFare)) &&
+    Number(payload.settlement.executedFare) >= 0
+  );
+}
+
 function isAuthoritativeOperationalInterruptionEndedCompletion(payload = {}) {
   if (!hasBackendFinalFinancialSnapshot(payload)) {
     return false;
@@ -7431,8 +7451,12 @@ export function resolveCompletedTripFinancialSnapshot(
 ) {
   const payloadHasBackendFinalFinancialSnapshot =
     hasBackendFinalFinancialSnapshot(payload);
+  // Both cases replace the fare locked at payment with the server's settled
+  // one. Without the early-end case the receipts kept showing the full fare
+  // (seen on devices: driver "+ R$ 44,23" for a ride the server paid R$ 1,59).
   const isAuthoritativeOperationalInterruptionEnded =
-    isAuthoritativeOperationalInterruptionEndedCompletion(payload);
+    isAuthoritativeOperationalInterruptionEndedCompletion(payload) ||
+    hasRiderEarlyEndSettlement(payload);
   const persistedLockedRideSnapshot = mergeLockedDriverRideSnapshot(
     previousState?.lastReceipt,
     previousState?.driverActiveRide,
@@ -7680,6 +7704,9 @@ export function resolveCompletedTripFinancialSnapshot(
     ...(hasPayloadSnapshot || tollFee > 0 ? { tollFee } : {}),
     ...(totalFees !== null ? { totalFees } : {}),
     ...(driverNetAmount !== null ? { driverNetAmount } : {}),
+    ...(hasRiderEarlyEndSettlement(payload)
+      ? { settlementType: "EARLY_ENDED_BY_RIDER" }
+      : {}),
     ...(isAuthoritativeOperationalInterruptionEnded && originalPaidAmount !== null
       ? { originalPaidAmount }
       : {}),

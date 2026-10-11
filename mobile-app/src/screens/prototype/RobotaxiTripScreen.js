@@ -1615,7 +1615,7 @@ export default function RobotaxiTripScreen({ navigation, route }) {
 
     Alert.alert(
       'Encerrar corrida agora',
-      'Vamos encerrar a corrida no ponto atual. O reembolso será calculado pelo backend com base no trecho executado e nos custos da corrida.',
+      'Vamos encerrar a corrida aqui. Você paga só o trecho percorrido e a diferença volta para o mesmo Pix.',
       [
         { text: 'Voltar', style: 'cancel' },
         {
