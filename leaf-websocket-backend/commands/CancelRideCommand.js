@@ -397,7 +397,9 @@ class CancelRideCommand extends Command {
                         if (elapsedMinutes >= 5) {
                             const waitTimeFee = elapsedMinutes * 50; // R$ 0,50 por minuto esperado
                             const wooviFee = 50;
-                            const estimatedFare = parseInt(bookingData.estimatedFare || 0);
+                            // estimatedFare é gravado em reais ("45.07"). Lido como centavos, o
+                            // teto de 40% virava R$ 0,18 e a taxa de no-show nunca passava disso.
+                            const estimatedFare = normalizeMoneyToCents(bookingData.estimatedFare || bookingData.totalAmount || 0);
                             const maxFee = estimatedFare > 0 ? Math.floor(estimatedFare * 0.4) : 500; // Teto de 40%
 
                             let calculatedFee = wooviFee + waitTimeFee;

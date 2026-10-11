@@ -595,6 +595,9 @@ function normalizeGoogleSteps(steps = []) {
   return steps.map(normalizeGoogleStep).filter(Boolean);
 }
 
+const INITIALIZE_RETRY_BASE_DELAY_MS = 2000;
+const INITIALIZE_RETRY_MAX_DELAY_MS = 60000;
+
 class PlacesCacheService {
   constructor() {
     // Usar Redis Pool (padrão do projeto)
@@ -631,10 +634,16 @@ class PlacesCacheService {
    * Inicializa o serviço
    */
   async initialize() {
+    if (this.initializeRetryTimer) {
+      clearTimeout(this.initializeRetryTimer);
+      this.initializeRetryTimer = null;
+    }
+
     try {
       // Verificar conexão Redis
       await this.redis.ping();
       this.isInitialized = true;
+      this.initializeAttempts = 0;
       
       // Carregar métricas do Redis
       await this.loadMetrics();
@@ -644,6 +653,27 @@ class PlacesCacheService {
       logger.error('❌ Erro ao inicializar Places Cache Service:', error);
       // Não falhar - serviço pode funcionar sem Redis (com fallback)
       this.isInitialized = false;
+      this.scheduleInitializeRetry();
+    }
+  }
+
+  /**
+   * Um timeout transitório do Redis no boot deixava este processo sem cache
+   * para sempre: as rotas não eram gravadas e a cotação (que só lê do cache)
+   * respondia CANONICAL_ROUTE_REQUIRED para tudo que passasse por ele.
+   */
+  scheduleInitializeRetry() {
+    this.initializeAttempts = (this.initializeAttempts || 0) + 1;
+    const delayMs = Math.min(
+      INITIALIZE_RETRY_MAX_DELAY_MS,
+      INITIALIZE_RETRY_BASE_DELAY_MS * 2 ** (this.initializeAttempts - 1),
+    );
+    this.initializeRetryTimer = setTimeout(() => {
+      this.initializeRetryTimer = null;
+      this.initialize();
+    }, delayMs);
+    if (typeof this.initializeRetryTimer.unref === 'function') {
+      this.initializeRetryTimer.unref();
     }
   }
   

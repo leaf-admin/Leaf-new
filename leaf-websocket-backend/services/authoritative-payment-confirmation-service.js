@@ -255,15 +255,17 @@ async function resolveAuthoritativePaymentConfirmation({
     };
   }
 
-  const localRecords = [];
+  // As mesmas leituras, na mesma ordem de precedência, disparadas em paralelo.
+  // Em fila eram ~25 idas ao Firestore e seguravam o início da corrida por ~5s.
+  const localLookups = [];
   const localDocIds = collectPaymentReferences(bookingId, safeReferences);
   for (const docId of localDocIds) {
-    localRecords.push(await getFirestoreDocData(
+    localLookups.push(getFirestoreDocData(
       firestore,
       confirmationScope.collections.paymentHoldings,
       docId
     ));
-    localRecords.push(await getFirestoreDocData(
+    localLookups.push(getFirestoreDocData(
       firestore,
       confirmationScope.collections.ridePayments,
       docId
@@ -271,25 +273,26 @@ async function resolveAuthoritativePaymentConfirmation({
   }
 
   for (const reference of safeReferences) {
-    localRecords.push(await queryFirstDocData(
+    localLookups.push(queryFirstDocData(
       firestore,
       confirmationScope.collections.paymentHoldings,
       'paymentId',
       reference
     ));
-    localRecords.push(await queryFirstDocData(
+    localLookups.push(queryFirstDocData(
       firestore,
       confirmationScope.collections.paymentHoldings,
       'chargeId',
       reference
     ));
-    localRecords.push(await queryFirstDocData(
+    localLookups.push(queryFirstDocData(
       firestore,
       confirmationScope.collections.ridePayments,
       'chargeId',
       reference
     ));
   }
+  const localRecords = await Promise.all(localLookups);
 
   const authoritativeLocalRecord = localRecords.find((record) =>
     recordMatchesPaymentScope(record, confirmationScope) && isAuthoritativePaymentRecord(record, {

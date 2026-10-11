@@ -210,6 +210,64 @@ describe('socket-scope-guard', () => {
     });
   });
 
+  it('reads redis when the in-memory copy was created on another gateway without the driver', async () => {
+    const redis = {
+      hgetall: jest.fn().mockResolvedValue({
+        bookingId: 'ride_other_gateway',
+        customerId: 'passenger_1',
+        driverId: 'driver_1',
+        status: 'ACCEPTED'
+      })
+    };
+    const io = {
+      activeBookings: new Map([
+        ['ride_other_gateway', {
+          bookingId: 'ride_other_gateway',
+          customerId: 'passenger_1',
+          status: 'SEARCHING'
+        }]
+      ])
+    };
+
+    const driver = await assertRideParticipant({
+      socket: { userId: 'driver_1', userType: 'driver' },
+      io,
+      redisPool: { getConnection: () => redis },
+      bookingId: 'ride_other_gateway'
+    });
+
+    expect(driver).toMatchObject({
+      allowed: true,
+      participantRole: 'driver',
+      scope: expect.objectContaining({ source: 'redis', driverId: 'driver_1' })
+    });
+  });
+
+  it('keeps the in-memory copy when redis has no record', async () => {
+    const redis = { hgetall: jest.fn().mockResolvedValue({}) };
+    const io = {
+      activeBookings: new Map([
+        ['ride_memory_only', {
+          bookingId: 'ride_memory_only',
+          customerId: 'passenger_1',
+          status: 'SEARCHING'
+        }]
+      ])
+    };
+
+    const passenger = await assertRideParticipant({
+      socket: { userId: 'passenger_1', userType: 'customer' },
+      io,
+      redisPool: { getConnection: () => redis },
+      bookingId: 'ride_memory_only'
+    });
+
+    expect(passenger).toMatchObject({
+      allowed: true,
+      scope: expect.objectContaining({ source: 'memory' })
+    });
+  });
+
   it('does not let a normal support chat user target another user id', () => {
     const result = resolveSupportChatAuthorization(
       { userId: 'user_1', userType: 'passenger' },
