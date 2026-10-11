@@ -928,6 +928,29 @@ function shouldIgnoreStaleDriverOfflinePatch(patch, currentState) {
     return false;
   }
 
+  // The "offline" in the authentication answer describes the moment the
+  // connection opened, and that cached answer is re-applied many times. It is
+  // outdated while a ride is running (app reopened mid-ride) and once the
+  // server confirmed "online" on this same connection. A device test showed
+  // the driver silently offline after finishing a ride restored this way.
+  if (patchSource === "socket_authenticated_offline") {
+    const hasRideInProgress =
+      Boolean(currentState?.driverActiveRide?.bookingId) &&
+      ["accepted", "arrived", "started"].includes(
+        normalizeRuntimeLifecycleStatus(currentState?.bookingStatus),
+      );
+    if (hasRideInProgress) {
+      runtimeDriverOnlineReassertAfterRide = true;
+      return true;
+    }
+    if (
+      runtimeLastDriverOnlineConfirmedAt &&
+      runtimeLastDriverOnlineConfirmedAt > runtimeLastSocketConnectAt
+    ) {
+      return true;
+    }
+  }
+
   if (
     !runtimeLastDriverOnlineConfirmedAt ||
     Date.now() - runtimeLastDriverOnlineConfirmedAt >
@@ -1055,6 +1078,10 @@ let runtimeDeferredSocketBootstrapTimer = null;
 let runtimeQALockUntil = 0;
 let runtimeDriverOnlineEnablePromise = null;
 let runtimeLastSocketConnectAt = 0;
+// Set when the server reported the driver as offline in the middle of a ride
+// (app reopened: the new connection is not "online" for the server yet). The
+// ride goes on; the online request is repeated once the ride is over.
+let runtimeDriverOnlineReassertAfterRide = false;
 let runtimeLifecycleOutboxFlushPromise = null;
 let runtimeLastDriverCoordinateUpdateAt = 0;
 let runtimeLastDriverOnlineConfirmedAt = 0;
@@ -3673,12 +3700,24 @@ function setRuntimeState(next) {
       guardAgeMs: Date.now() - runtimeLastDriverOnlineConfirmedAt,
       hasDriverOnlineDaily: Boolean(patch.driverOnlineDaily),
     });
+    const ignoredSource = normalizeDriverOnlineMutationSource(
+      patch.driverOnlineMutationSource,
+    );
     patch = { ...patch };
     delete patch.driverOnline;
     delete patch.driverOnlinePending;
     delete patch.driverOnlineStartedAt;
     delete patch.driverOnlineMutationSource;
     delete patch.driverOnlineDaily;
+    if (ignoredSource === "socket_authenticated_offline") {
+      // The same outdated answer also carries "no offers / no booking". Left
+      // in, each re-application wiped the offer on screen and the card kept
+      // closing and reopening during one offer.
+      delete patch.driverOffers;
+      delete patch.bookingStatus;
+      delete patch.activeBookingId;
+      delete patch.activeBooking;
+    }
   }
 
   if (patch.driverOnline === true) {
@@ -9462,6 +9501,27 @@ function attachSocketListeners() {
       : null;
     const restoringOnline =
       shouldRestoreOnlineIntent && driverOnlineAuthPatch?.driverOnline === false;
+    // Mid-ride the driver is working whatever the fresh connection says, and
+    // asking to go online now would run eligibility checks during the ride.
+    // Keep the local state and repeat the request after the ride (a device
+    // test showed the driver silently offline after finishing such a ride).
+    const hasDriverRideInProgress =
+      isDriverRuntime &&
+      Boolean(runtimeState.driverActiveRide?.bookingId) &&
+      ["accepted", "arrived", "started"].includes(
+        normalizeRuntimeLifecycleStatus(runtimeState.bookingStatus),
+      );
+    if (
+      hasDriverRideInProgress &&
+      runtimeState.driverOnline === true &&
+      driverOnlineAuthPatch?.driverOnline === false
+    ) {
+      runtimeDriverOnlineReassertAfterRide = true;
+      delete driverOnlineAuthPatch.driverOnline;
+      delete driverOnlineAuthPatch.driverOnlinePending;
+      delete driverOnlineAuthPatch.driverOnlineMutationSource;
+      delete driverOnlineAuthPatch.driverOnlineStartedAt;
+    }
     setRuntimeState({
       connecting: false,
       isSocketAuthenticated: true,
@@ -11738,6 +11798,19 @@ function attachSocketListeners() {
       rideLocalSync: cloneDefaultRideLocalSyncState(),
       lastError: "",
     });
+    if (runtimeDriverOnlineReassertAfterRide) {
+      runtimeDriverOnlineReassertAfterRide = false;
+      if (shouldPreserveDriverOnlineAfterCompletion && runtimeState.profile?.uid) {
+        enablePrototypeDriverOnline(runtimeState.profile, {
+          preserveOnlineOnFailure: false,
+        }).catch((error) => {
+          Logger.warn(
+            "⚠️ [PrototypeRuntime] Falha ao voltar a ficar online após a corrida:",
+            error?.message || error,
+          );
+        });
+      }
+    }
     appendRuntimeNotification(
       createRuntimeNotification({
         title: "Viagem concluída",
