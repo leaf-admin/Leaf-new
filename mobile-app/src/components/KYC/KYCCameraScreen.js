@@ -7,6 +7,7 @@
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  AppState,
   Linking,
   View,
   Text,
@@ -71,8 +72,24 @@ export default function KYCCameraScreen({ onCapture, onCancel }) {
 
     requestCameraPermission();
 
+    // Voltando de "Abrir ajustes": consulta sem abrir novo diálogo de permissão.
+    const appStateSubscription = AppState.addEventListener('change', async (nextState) => {
+      if (nextState !== 'active') {
+        return;
+      }
+      try {
+        const { status } = await Camera.getCameraPermissionsAsync();
+        if (mounted) {
+          setHasPermission(status === 'granted');
+        }
+      } catch (error) {
+        Logger.error('Erro ao consultar permissão da câmera:', error);
+      }
+    });
+
     return () => {
       mounted = false;
+      appStateSubscription?.remove();
       if (stepTimerRef.current) {
         clearInterval(stepTimerRef.current);
       }
