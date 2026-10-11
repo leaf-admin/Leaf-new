@@ -135,6 +135,57 @@ describe('worker-billing money normalization', () => {
     expect(mockReleaseInflight).not.toHaveBeenCalled();
   });
 
+  it('settles a driver early end on the executed fare and skips a redelivered event', async () => {
+    const settledEvent = {
+      eventId: 'event_early_end',
+      data: {
+        bookingId: 'booking_1',
+        driverId: 'driver_1',
+        finalFare: 20,
+        tollFee: 0,
+        completionType: 'EARLY_ENDED_BY_DRIVER',
+        settlement: {
+          settlementType: 'EARLY_ENDED_BY_DRIVER',
+          prepaidAmount: 40,
+          executedFare: 20,
+          estimatedRefund: 20
+        },
+        paymentDistribution: { status: 'PENDING' },
+        financialSnapshot: {
+          authoritativeSnapshot: true,
+          financialSnapshotSource: 'backend_final',
+          passengerPaidCents: 2000,
+          tollFeeCents: 0,
+          operationalFeeCents: 99,
+          paymentIntermediationFeeCents: 50,
+          subscriptionRetainedFeeCents: 0,
+          driverNetAmountCents: 1851
+        }
+      }
+    };
+
+    await mockListeners[EVENT_TYPES.RIDE_COMPLETED](settledEvent);
+
+    // totalAmount abaixo do valor pago é o que faz o PaymentService estornar a diferença.
+    expect(mockProcessNetDistribution).toHaveBeenCalledTimes(1);
+    expect(mockProcessNetDistribution).toHaveBeenCalledWith(expect.objectContaining({
+      rideId: 'booking_1',
+      driverId: 'driver_1',
+      totalAmount: 2000,
+      tollFee: 0,
+      financialSnapshot: expect.objectContaining({
+        passengerPaidCents: 2000,
+        driverNetAmountCents: 1851
+      })
+    }));
+
+    mockCheckAndSet.mockResolvedValue({ isNew: false, cachedResult: { success: true } });
+    const replay = await mockListeners[EVENT_TYPES.RIDE_COMPLETED](settledEvent);
+
+    expect(replay).toMatchObject({ success: true, reason: 'Duplicate Processing Avoided' });
+    expect(mockProcessNetDistribution).toHaveBeenCalledTimes(1);
+  });
+
   it('rejects standard ride settlement without the backend-final financial snapshot', async () => {
     await expect(
       mockListeners[EVENT_TYPES.RIDE_COMPLETED]({
