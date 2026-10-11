@@ -9222,6 +9222,15 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
       return;
     }
 
+    // The passenger opened the cancellation confirmation from the trip card.
+    // Pulling them back to Trip here made "Cancelar corrida" do nothing.
+    if (
+      currentRouteName === 'RobotaxiPrototypeCancellation' &&
+      passengerAutoRoute === 'RobotaxiPrototypeTrip'
+    ) {
+      return;
+    }
+
     const isReceiptSubflowRoute =
       passengerAutoRoute === 'RobotaxiPrototypeReceipt' &&
       [

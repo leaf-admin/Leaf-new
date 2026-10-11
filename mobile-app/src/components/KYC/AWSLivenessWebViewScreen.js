@@ -182,7 +182,7 @@ export default function AWSLivenessWebViewScreen({
 
     if (!createResult.success) {
       setStatus(STATUS.ERROR);
-      setErrorMessage(createResult.error || 'Nao foi possivel criar sessao de liveness');
+      setErrorMessage(createResult.error || 'Não foi possível criar sessão de liveness');
       return;
     }
 
@@ -192,7 +192,7 @@ export default function AWSLivenessWebViewScreen({
     );
     if (!credentialsResult.success || !credentialsResult.data?.credentials) {
       setStatus(STATUS.ERROR);
-      setErrorMessage(credentialsResult.error || 'Nao foi possivel preparar credenciais seguras de liveness');
+      setErrorMessage(credentialsResult.error || 'Não foi possível preparar credenciais seguras de liveness');
       return;
     }
 
@@ -233,14 +233,14 @@ export default function AWSLivenessWebViewScreen({
         const resultResponse = await kycService.getAwsLivenessSessionResult(driverId, sessionData?.sessionId);
         if (!resultResponse.success) {
           setStatus(STATUS.ERROR);
-          setErrorMessage(resultResponse.error || 'Nao foi possivel validar o resultado de liveness');
+          setErrorMessage(resultResponse.error || 'Não foi possível validar o resultado de liveness');
           return;
         }
 
         const livenessData = resultResponse.data || {};
         if (livenessData?.livenessPassed !== true) {
           setStatus(STATUS.ERROR);
-          setErrorMessage('Liveness nao aprovado. Tente novamente com boa iluminacao e rosto centralizado.');
+          setErrorMessage('Liveness não aprovado. Tente novamente com boa iluminacao e rosto centralizado.');
           return;
         }
 

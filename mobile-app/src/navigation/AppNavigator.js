@@ -273,7 +273,7 @@ const prototypeReferralScreenParams = {
 
 const driverPayoutScreenParams = {
   title: 'Repasse pelo saldo Leaf',
-  message: 'Conta BaaS nao faz parte do modelo atual. Use a tela de ganhos para consultar saldo e solicitar saque.',
+  message: 'Conta BaaS não faz parte do modelo atual. Use a tela de ganhos para consultar saldo e solicitar saque.',
   targetRoute: 'Map'
 };
 

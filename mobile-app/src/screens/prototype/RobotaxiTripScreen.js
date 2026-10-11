@@ -638,7 +638,8 @@ export default function RobotaxiTripScreen({ navigation, route }) {
     profileUid,
     riderProfile,
     endTripEarlyFlow,
-    respondOperationalContinuationFlow
+    respondOperationalContinuationFlow,
+    terminalRideGuards
   } = usePrototypeRideRuntime();
   const insets = useSafeAreaInsets();
   const { height: windowHeight, width: windowWidth } = useWindowDimensions();
@@ -1392,6 +1393,45 @@ export default function RobotaxiTripScreen({ navigation, route }) {
   const handleOpenPassengerChat = useCallback(() => {
     navigation.navigate('RobotaxiPrototypeChat', passengerSupportContext);
   }, [navigation, passengerSupportContext]);
+  // The ride was cancelled by the other side (driver or system) while the
+  // passenger watched this screen. The runtime goes back to idle; without this
+  // the card stayed up with empty driver data ("Placa não informada").
+  // A plain idle is not enough (state also passes through idle while the app
+  // reloads): the runtime must have recorded this ride as cancelled.
+  const watchedBookingIdRef = useRef('');
+  useEffect(() => {
+    const status = String(bookingStatus || '').trim().toLowerCase();
+    if (activeBookingId && status && status !== 'idle') {
+      watchedBookingIdRef.current = String(activeBookingId);
+      return;
+    }
+    const watchedBookingId = watchedBookingIdRef.current;
+    if (!watchedBookingId || activeBookingId || (status && status !== 'idle')) {
+      return;
+    }
+    // The cancel event may name the ride by its server booking id while this
+    // screen knew the request id, so a cancel recorded just now also counts.
+    const wasCancelled = (Array.isArray(terminalRideGuards) ? terminalRideGuards : []).some(
+      (guard) =>
+        /^cancel/i.test(String(guard?.status || '')) &&
+        (String(guard?.bookingId || '') === watchedBookingId ||
+          Date.now() - new Date(guard?.guardedAt || 0).getTime() < 20000),
+    );
+    if (!wasCancelled) {
+      return;
+    }
+    watchedBookingIdRef.current = '';
+    // Not when the passenger cancelled from the screen on top of this one:
+    // that flow shows its own summary.
+    if (typeof navigation.isFocused === 'function' && !navigation.isFocused()) {
+      return;
+    }
+    navigation.replace('RobotaxiPrototypeCancellation', {
+      source: 'remote_cancel',
+      completed: true,
+    });
+  }, [activeBookingId, bookingStatus, navigation, terminalRideGuards]);
+
   const handleOpenPassengerCancellation = useCallback(() => {
     navigation.navigate('RobotaxiPrototypeCancellation', {
       ...passengerSupportContext,

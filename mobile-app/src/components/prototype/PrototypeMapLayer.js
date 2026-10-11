@@ -2814,6 +2814,38 @@ function PrototypeMapLayer({
     shouldAnimateRoute,
   ]);
 
+
+  // iOS Google Maps aborts (NSArray insertObject:atIndex: out of bounds) when
+  // React inserts a native child in the middle of the map's subviews. Seen on a
+  // device when the driver cancelled an accepted ride. This lists every native
+  // child exactly as rendered below, so any change of that list remounts the
+  // map instead of mutating it. Keep it in sync with the children of <MapView>.
+  const iosNativeChildSignature = Platform.OS !== 'ios'
+    ? 'prototype-map-native'
+    : [
+        nativeMapTopologyKey,
+        !useSimplifiedIosMap && searchingMode && hasSearchCenter && hasSearchPreviewRadius ? 'c1' : '',
+        !useSimplifiedIosMap && searchingMode && hasSearchCenter && hasSearchRadius ? 'c2' : '',
+        !useSimplifiedIosMap && hasRenderableRoute ? `shadow:${effectiveRouteShadowColor}` : '',
+        hasRenderableRoute && !trafficSegmentsCoverRoute ? 'base' : '',
+        hasRenderableRoute
+          ? `traffic:${normalizedTrafficRouteSegments.map(segment => segment.key).join(',')}`
+          : '',
+        !useSimplifiedIosMap && hasRenderableRoute && effectiveRouteHighlightColor ? 'highlight' : '',
+        hasOriginMarker ? 'origin' : '',
+        hasDestination && hasDestinationMarker ? 'destination' : '',
+        hasDisplayedDriverCoordinate &&
+        !shouldRenderProjectedDriverVehicleOverlay &&
+        !shouldSuppressNativeAndroidDriverVehicleMarker
+          ? `driver:${driverVehicleMarkerColorToken}-${driverMarkerShapeKey}-${driverMarkerAssetUrl}`
+          : '',
+        !useSimplifiedIosMap && searchingMode && !shouldRenderProjectedNearbyVehicleOverlays
+          ? `nearby:${collisionSafeNearbyVehicles.length}:${activeNearbyRequestIndex}`
+          : '',
+        shouldShowCurrentLocationMarker ? 'user' : '',
+        shouldRenderExternalMapChildren ? `children:${mapChildrenCount}` : '',
+      ].join('|');
+
   return (
     <View ref={mapContainerRef} style={[styles.mapArea, containerStyle]} testID="prototype-map-container">
       <View
@@ -2825,7 +2857,7 @@ function PrototypeMapLayer({
           // iOS Google Maps can abort in AIRGoogleMap when React inserts/removes
           // native children during route lifecycle transitions. Remount the map
           // only when that native child topology changes.
-          key={nativeMapTopologyKey}
+          key={iosNativeChildSignature}
           ref={mapRef}
           testID="prototype-map-view"
           accessibilityLabel="Mapa"

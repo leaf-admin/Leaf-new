@@ -1374,7 +1374,7 @@ class WebSocketManager {
           code: "WS_CONNECT_TIMEOUT",
           message: "Timeout ao conectar WebSocket",
         },
-        "A conexao com o servidor demorou mais que o esperado. Tente novamente.",
+        "A conexão com o servidor demorou mais que o esperado. Tente novamente.",
         "websocket",
       )
     );
@@ -1516,8 +1516,8 @@ class WebSocketManager {
       this.connectionPromise = null;
       return Promise.reject(
         buildSocketError(
-          { code: "WS_NOT_INITIALIZED", message: "Socket nao inicializado" },
-          "Nao foi possivel iniciar a conexao com o servidor agora.",
+          { code: "WS_NOT_INITIALIZED", message: "Socket não inicializado" },
+          "Não foi possível iniciar a conexão com o servidor agora.",
           "websocket",
         ),
       );
@@ -1568,7 +1568,7 @@ class WebSocketManager {
                 code: "WS_CONNECT_TIMEOUT",
                 message: "Timeout ao conectar WebSocket",
               },
-              "A conexao com o servidor demorou mais que o esperado. Tente novamente.",
+              "A conexão com o servidor demorou mais que o esperado. Tente novamente.",
               "websocket",
             ),
           ),
@@ -2374,7 +2374,7 @@ class WebSocketManager {
             code: "AUTH_RETRY_EXHAUSTED",
             message: "Falha ao autenticar após retries",
           },
-          "Nao foi possivel validar sua sessao agora. Tente novamente.",
+          "Não foi possível validar sua sessão agora. Tente novamente.",
           "auth",
         )
       );
@@ -2395,8 +2395,8 @@ class WebSocketManager {
       if (!this.socket?.connected) {
         reject(
           buildSocketError(
-            { code: "WS_DISCONNECTED", message: "WebSocket nao conectado" },
-            "Sem conexao com o servidor agora. Verifique sua internet e tente novamente.",
+            { code: "WS_DISCONNECTED", message: "WebSocket não conectado" },
+            "Sem conexão com o servidor agora. Verifique sua internet e tente novamente.",
             "auth",
           ),
         );
@@ -2412,7 +2412,7 @@ class WebSocketManager {
 
       const completeWithError = (
         payload,
-        fallbackMessage = "Nao foi possivel validar sua sessao agora. Tente novamente.",
+        fallbackMessage = "Não foi possível validar sua sessão agora. Tente novamente.",
       ) => {
         cleanup();
         const error = buildSocketError(payload, fallbackMessage, "auth");
@@ -2450,7 +2450,7 @@ class WebSocketManager {
             code: "AUTH_TIMEOUT",
             message: `Timeout de autenticacao (${Math.floor(timeoutMs / 1000)}s)`,
           },
-          "A validacao da sessao demorou mais que o esperado. Tente novamente.",
+          "A validação da sessão demorou mais que o esperado. Tente novamente.",
         );
       }, timeoutMs);
 
@@ -2466,9 +2466,9 @@ class WebSocketManager {
         completeWithError(
           {
             code: "AUTH_EMIT_ERROR",
-            message: error?.message || "Falha ao iniciar autenticacao",
+            message: error?.message || "Falha ao iniciar autenticação",
           },
-          "Nao foi possivel iniciar a validacao da sua sessao.",
+          "Não foi possível iniciar a validação da sua sessão.",
         );
       });
     });
@@ -2637,7 +2637,7 @@ class WebSocketManager {
 
         const error = buildSocketError(
           data,
-          "Nao foi possivel solicitar a viagem agora.",
+          "Não foi possível solicitar a viagem agora.",
           "booking",
         );
         Logger.error(
@@ -2653,7 +2653,7 @@ class WebSocketManager {
         cleanup();
         const error = buildSocketError(
           errorPayload,
-          "Nao foi possivel solicitar a viagem agora.",
+          "Não foi possível solicitar a viagem agora.",
           "booking",
         );
         if (errorPayload?.retryAfterSec) {
@@ -2888,7 +2888,7 @@ class WebSocketManager {
           code: "BOOKING_RETRY_EXHAUSTED",
           message: "Falha ao criar booking apos retries",
         },
-        "Nao foi possivel solicitar a viagem agora. Tente novamente em instantes.",
+        "Não foi possível solicitar a viagem agora. Tente novamente em instantes.",
         "booking",
       )
     );
@@ -2996,7 +2996,7 @@ class WebSocketManager {
         reject(
           buildSocketError(
             data,
-            "Nao foi possivel validar a disponibilidade agora.",
+            "Não foi possível validar a disponibilidade agora.",
             "availability",
           ),
         );
@@ -3022,7 +3022,7 @@ class WebSocketManager {
         reject(
           buildSocketError(
             errorPayload,
-            "Nao foi possivel validar a disponibilidade agora.",
+            "Não foi possível validar a disponibilidade agora.",
             "availability",
           ),
         );
@@ -3048,7 +3048,7 @@ class WebSocketManager {
               code: "AVAILABILITY_TIMEOUT",
               message: "Ride availability timeout",
             },
-            "Nao foi possivel validar a disponibilidade agora.",
+            "Não foi possível validar a disponibilidade agora.",
             "availability",
           ),
         );
@@ -4416,7 +4416,7 @@ class WebSocketManager {
   async setDriverStatus(driverId, status, isOnline = true, options = {}) {
     if (!this.socket?.connected) {
       throw buildSocketError(
-        { code: "WS_DISCONNECTED", message: "WebSocket nao conectado" },
+        { code: "WS_DISCONNECTED", message: "WebSocket não conectado" },
         "Sem conexão com o servidor agora. Verifique sua internet e tente novamente.",
         "driver_status",
       );
@@ -4938,7 +4938,9 @@ class WebSocketManager {
           bookingId,
         );
         reject(new Error("Cancel ride timeout"));
-      }, 10000);
+      // A cancel with a Pix refund took longer than 10 s on a real device and
+      // was reported as failed although the server completed it.
+      }, 20000);
 
       const cleanup = () => {
         clearTimeout(timeout);
@@ -5763,16 +5765,16 @@ class WebSocketManager {
   async syncActiveRideWithAck(timeoutMs = ACTIVE_RIDE_SYNC_TIMEOUT_MS) {
     if (!this.socket?.connected) {
       throw buildSocketError(
-        { code: "WS_DISCONNECTED", message: "WebSocket nao conectado" },
-        "Sem conexao com o servidor agora. Verifique sua internet e tente novamente.",
+        { code: "WS_DISCONNECTED", message: "WebSocket não conectado" },
+        "Sem conexão com o servidor agora. Verifique sua internet e tente novamente.",
         "ride_sync",
       );
     }
 
     if (!this.authenticatedUserId || !this.authenticatedUserType) {
       throw buildSocketError(
-        { code: "AUTH_REQUIRED", message: "Usuario nao autenticado" },
-        "A sessao ainda nao foi validada. Tente novamente.",
+        { code: "AUTH_REQUIRED", message: "Usuario não autenticado" },
+        "A sessão ainda não foi validada. Tente novamente.",
         "ride_sync",
       );
     }
@@ -5789,7 +5791,7 @@ class WebSocketManager {
           reject(
             buildSocketError(
               payload,
-              "Nao foi possivel sincronizar sua corrida ativa agora.",
+              "Não foi possível sincronizar sua corrida ativa agora.",
               "ride_sync",
             ),
           );
@@ -5806,7 +5808,7 @@ class WebSocketManager {
               code: "RIDE_SYNC_TIMEOUT",
               message: `Timeout ao sincronizar corrida ativa (${Math.floor(timeoutMs / 1000)}s)`,
             },
-            "A sincronizacao da corrida ativa demorou mais que o esperado.",
+            "A sincronização da corrida ativa demorou mais que o esperado.",
             "ride_sync",
           ),
         );

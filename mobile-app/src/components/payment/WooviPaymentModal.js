@@ -1034,7 +1034,7 @@ export default function WooviPaymentModal({
     const getPixSnippet = () => {
         const pixCode = String(paymentData?.qrCodeText || '').trim();
         if (!pixCode) {
-            return 'Codigo PIX indisponivel';
+            return 'Código PIX indisponível';
         }
 
         if (pixCode.length <= 18) {

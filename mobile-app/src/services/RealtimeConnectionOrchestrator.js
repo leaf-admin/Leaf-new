@@ -311,7 +311,7 @@ class RealtimeConnectionOrchestrator {
         (finalStatus.userType === session.userType || !finalStatus.userType);
 
       if (!isReady) {
-        throw new Error('Sessao em tempo real ainda nao autenticada.');
+        throw new Error('Sessão em tempo real ainda não autenticada.');
       }
 
       this.activeSession = session;

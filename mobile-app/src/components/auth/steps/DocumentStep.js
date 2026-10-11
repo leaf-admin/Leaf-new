@@ -256,8 +256,8 @@ const DocumentStep = ({ onSubmitted, onBack, initialData = {}, progressMeta }) =
         [fieldErrorKey]:
           toUserFriendlyMessage(error, {
             context: 'document_upload',
-            fallbackMessage: 'Nao foi possivel processar o PDF enviado. Tente novamente.'
-          }) || 'Nao foi possivel processar o PDF enviado. Tente novamente.'
+            fallbackMessage: 'Não foi possível processar o PDF enviado. Tente novamente.'
+          }) || 'Não foi possível processar o PDF enviado. Tente novamente.'
       }));
     } finally {
       setIsExtracting(previous => ({ ...previous, [type]: false }));

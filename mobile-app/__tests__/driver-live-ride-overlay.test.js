@@ -524,10 +524,10 @@ describe("DriverLiveRideOverlay", () => {
     fireEvent.press(screen.getByLabelText("Cancelar corrida"));
     expect(
       screen.getByText(
-        "Ao cancelar a corrida cobranças podem ser aplicadas, deseja cancelar?",
+        "O passageiro será avisado. Cancelar depois de aceitar pode gerar cobrança.",
       ),
     ).toBeTruthy();
-    fireEvent.press(screen.getByLabelText("Não"));
+    fireEvent.press(screen.getByLabelText("Continuar corrida"));
     expect(cancelActiveRideFlow).not.toHaveBeenCalled();
   });
 

@@ -1656,7 +1656,7 @@ describe("RobotaxiDestinationScreen", () => {
     const checkRideAvailability = jest.fn().mockResolvedValue({
       available: false,
       code: "DRIVER_SERVICE_UNAVAILABLE",
-      message: "Servico de corridas indisponivel.",
+      message: "Serviço de corridas indisponível.",
       candidates: 1,
       eligible: 0,
       rejections: {

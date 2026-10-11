@@ -53,7 +53,7 @@ describe('DocumentStep (driver KYC docs)', () => {
     fireEvent.press(getByText('Toque para enviar o PDF da CNH'));
 
     expect(
-      await findByText('Sem conexao com a internet. Verifique sua rede e tente novamente.')
+      await findByText('Sem conexão com a internet. Verifique sua rede e tente novamente.')
     ).toBeTruthy();
     expect(baseProps.onSubmitted).not.toHaveBeenCalled();
   });

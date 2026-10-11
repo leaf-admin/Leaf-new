@@ -2012,7 +2012,7 @@ function DriverLiveRideOverlay({
           <View style={styles.cancelPromptCard}>
             <Text style={styles.cancelPromptTitle}>Cancelar corrida?</Text>
             <Text style={styles.cancelPromptMessage}>
-              Ao cancelar a corrida cobranças podem ser aplicadas, deseja cancelar?
+              O passageiro será avisado. Cancelar depois de aceitar pode gerar cobrança.
             </Text>
             <View style={styles.cancelPromptActions}>
               <TouchableOpacity
@@ -2020,18 +2020,18 @@ function DriverLiveRideOverlay({
                 style={styles.cancelPromptYesButton}
                 onPress={handleConfirmCancelRide}
                 testID="driver-live-trip-cancel-confirm-button"
-                accessibilityLabel="Sim"
+                accessibilityLabel="Confirmar cancelamento"
               >
-                <Text style={styles.cancelPromptYesText}>Sim</Text>
+                <Text style={styles.cancelPromptYesText}>Cancelar</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 activeOpacity={0.86}
                 style={styles.cancelPromptNoButton}
                 onPress={() => setShowCancelPrompt(false)}
                 testID="driver-live-trip-cancel-dismiss-button"
-                accessibilityLabel="Não"
+                accessibilityLabel="Continuar corrida"
               >
-                <Text style={styles.cancelPromptNoText}>Não</Text>
+                <Text style={styles.cancelPromptNoText}>Continuar</Text>
               </TouchableOpacity>
             </View>
           </View>

@@ -85,6 +85,11 @@ export default function RobotaxiCancellationScreen({ navigation, route }) {
     source,
   ]);
   const isTerminalCancellation = route?.params?.completed === true || source === 'search' || isTerminalRideStatus(cancellationContext.bookingStatus);
+  // After the driver accepted, the server may keep a cancellation fee; say so
+  // before the passenger confirms, not only on the closing summary.
+  const hasDriverOnTheWay = ['accepted', 'arrived'].includes(
+    String(cancellationContext.bookingStatus || '').trim().toLowerCase(),
+  );
   const terminalCancellationTitle = cancellationContext.bookingStatus === 'completed' ? 'Corrida encerrada' : 'Corrida cancelada';
   const cancellationOutcome = route?.params?.cancellationOutcome || {};
   const firstFiniteMoney = (...values) => {
@@ -132,7 +137,9 @@ export default function RobotaxiCancellationScreen({ navigation, route }) {
       : 'O reembolso integral foi registrado no mesmo Pix usado no pagamento.'
     : hasFinancialOutcome
       ? 'Os valores abaixo refletem a política aplicada ao momento do cancelamento.'
-      : 'A solicitação foi encerrada. Você pode pedir uma nova corrida quando quiser.';
+      : source === 'remote_cancel'
+        ? 'Esta corrida foi cancelada antes do embarque. Você pode pedir outra agora.'
+        : 'A solicitação foi encerrada. Você pode pedir uma nova corrida quando quiser.';
 
   const replaceOrNavigate = useCallback((routeName, params) => {
     if (typeof navigation.replace === 'function') {
@@ -198,10 +205,20 @@ export default function RobotaxiCancellationScreen({ navigation, route }) {
           reason: 'Cancelado pelo motorista.',
         });
       } else {
-        await cancelRideSearch({
+        const cancellationResponse = await cancelRideSearch({
           ...cancellationContext,
           reason: 'Cancelado pelo passageiro.',
         });
+        if (!cancellationResponse?.alreadyEnded) {
+          // Same closing summary as a cancel during the search: what was paid,
+          // what comes back and any fee, instead of dropping to the map.
+          replaceOrNavigate('RobotaxiPrototypeCancellation', {
+            ...cancellationContext,
+            completed: true,
+            cancellationOutcome: cancellationResponse?.data || null,
+          });
+          return;
+        }
       }
       replaceOrNavigate('RobotaxiPrototype');
     } catch (error) {
@@ -264,7 +281,11 @@ export default function RobotaxiCancellationScreen({ navigation, route }) {
               </View>
             ) : (
               <View style={styles.warningBox}>
-                <Text style={styles.warningText}>Você pode pedir uma nova corrida logo depois, se precisar.</Text>
+                <Text style={styles.warningText}>
+                  {isPassengerCancellation && hasDriverOnTheWay
+                    ? 'O motorista já está a caminho, então pode haver taxa de cancelamento. O restante volta para o mesmo Pix e você vê os valores na próxima tela.'
+                    : 'Você pode pedir uma nova corrida logo depois, se precisar.'}
+                </Text>
               </View>
             )}
 

@@ -58,7 +58,7 @@ const Alert = {
             title || 'Atencao',
             toUserFriendlyMessage(message, {
                 context: 'auth',
-                fallbackMessage: 'Nao foi possivel validar o codigo agora. Tente novamente.'
+                fallbackMessage: 'Não foi possível validar o código agora. Tente novamente.'
             }),
             buttons,
             options

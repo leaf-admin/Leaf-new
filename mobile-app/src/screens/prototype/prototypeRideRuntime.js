@@ -13113,7 +13113,13 @@ function applySyncedActiveRideSnapshot(snapshot) {
         ...syncedOffer,
         ...(syncedPricingSnapshotMetadata || {}),
       };
-  const boardingDeadlineRaw = snapshot?.boardingDeadlineAt || null;
+  // The sync answer does not always carry the boarding deadline. After the
+  // app is reopened the one saved on the device is still valid for this ride;
+  // dropping it showed "0:00 para embarcar" with most of the wait left.
+  const boardingDeadlineRaw =
+    snapshot?.boardingDeadlineAt ||
+    (bookingStatus === "arrived" ? runtimeState.boardingDeadlineAt : null) ||
+    null;
   const parsedBoardingDeadline = boardingDeadlineRaw
     ? new Date(boardingDeadlineRaw)
     : null;
@@ -13657,7 +13663,7 @@ async function ensureSocketReady(profile) {
     });
 
     if (!orchestratorReady) {
-      throw new Error("Sessao realtime ainda nao foi preparada.");
+      throw new Error("Sessão realtime ainda não foi preparada.");
     }
 
     const postAuthStatus = socket.getConnectionStatus?.() || {};
@@ -13667,7 +13673,7 @@ async function ensureSocketReady(profile) {
       postAuthStatus?.userId === userId &&
       (postAuthStatus?.userType === targetUserType || !postAuthStatus?.userType);
     if (!finallyAuthenticatedAsCurrentUser) {
-      throw new Error("Sessao do socket ainda nao foi autenticada.");
+      throw new Error("Sessão do socket ainda não foi autenticada.");
     }
 
     await writeRuntimeDebugProbe("socket_authenticated", {

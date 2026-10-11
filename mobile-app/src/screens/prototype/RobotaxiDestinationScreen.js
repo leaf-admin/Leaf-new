@@ -189,7 +189,7 @@ const OUT_OF_COVERAGE_MESSAGE = "Destino fora da area de cobertura da Leaf";
 const PIX_CANCELLED_RETRY_MESSAGE =
   "Pagamento cancelado. Gere um novo PIX para continuar.";
 const PIX_NOT_COMPLETED_RETRY_MESSAGE =
-  "Pagamento nao concluido. Gere um novo PIX para continuar.";
+  "Pagamento não concluido. Gere um novo PIX para continuar.";
 const DIRECT_PIX_AVAILABILITY_TIMEOUT_MS = 15000;
 const DIRECT_PIX_AVAILABILITY_TIMEOUT_MESSAGE =
   "A validação de motoristas demorou mais que o esperado. Tente solicitar novamente.";

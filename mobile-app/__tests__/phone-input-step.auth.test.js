@@ -160,7 +160,7 @@ describe('PhoneInputStep', () => {
     await waitFor(() => {
       expect(Alert.alert).toHaveBeenCalledWith(
         'Limite de Tentativas',
-        'Voce fez muitas tentativas em pouco tempo. Aguarde um pouco e tente novamente.',
+        'Você fez muitas tentativas em pouco tempo. Aguarde um pouco e tente novamente.',
         undefined,
         undefined,
       );

@@ -38,7 +38,7 @@ const Alert = {
             title || 'Atencao',
             toUserFriendlyMessage(message, {
                 context: 'auth',
-                fallbackMessage: 'Nao foi possivel concluir a autenticacao agora. Tente novamente.'
+                fallbackMessage: 'Não foi possível concluir a autenticação agora. Tente novamente.'
             }),
             buttons,
             options
@@ -105,7 +105,7 @@ function resolveAuthAlertTitle(error, friendlyMessage = '') {
         normalizedCode === 'AUTH/NETWORK-REQUEST-FAILED' ||
         /network|internet|conexao|connection/.test(normalizedText)
     ) {
-        return 'Erro de Conexao';
+        return 'Erro de Conexão';
     }
 
     return 'Erro de Autenticacao';
@@ -204,7 +204,7 @@ const PhoneInputStep = ({ onVerificationSent, onPasswordLoginSuccess, progressMe
         } catch (error) {
             const friendlyError = toUserFriendlyError(error, {
                 context: 'auth',
-                fallbackMessage: 'Nao foi possivel enviar o codigo de recuperacao agora.'
+                fallbackMessage: 'Não foi possível enviar o código de recuperacao agora.'
             });
             Alert.alert(resolveAuthAlertTitle(error, friendlyError.message), friendlyError.message);
         } finally {
@@ -279,7 +279,7 @@ const PhoneInputStep = ({ onVerificationSent, onPasswordLoginSuccess, progressMe
             Logger.error('❌ Erro no reset inline de senha:', error);
             const friendlyError = toUserFriendlyError(error, {
                 context: 'auth',
-                fallbackMessage: 'Nao foi possivel redefinir a senha agora.'
+                fallbackMessage: 'Não foi possível redefinir a senha agora.'
             });
             setPasswordError(friendlyError.message);
         } finally {
@@ -320,7 +320,7 @@ const PhoneInputStep = ({ onVerificationSent, onPasswordLoginSuccess, progressMe
         } catch (error) {
             const friendlyError = toUserFriendlyError(error, {
                 context: 'auth',
-                fallbackMessage: 'Nao foi possivel validar esse telefone para login com senha.'
+                fallbackMessage: 'Não foi possível validar esse telefone para login com senha.'
             });
             Alert.alert(resolveAuthAlertTitle(error, friendlyError.message), friendlyError.message);
         } finally {
@@ -509,7 +509,7 @@ const PhoneInputStep = ({ onVerificationSent, onPasswordLoginSuccess, progressMe
             Logger.error("Erro no handleContinue:", error);
             const friendlyError = toUserFriendlyError(error, {
                 context: 'auth',
-                fallbackMessage: 'Nao foi possivel concluir a autenticacao agora. Tente novamente.'
+                fallbackMessage: 'Não foi possível concluir a autenticação agora. Tente novamente.'
             });
 
             Alert.alert(

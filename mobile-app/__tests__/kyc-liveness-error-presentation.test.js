@@ -106,7 +106,7 @@ describe('KYC liveness error presentation', () => {
       code: 'KYC_IDENTITY_REVIEW_HOLD',
       status: 423,
       reviewCaseId: 'case_01HZX9',
-      message: 'Sua solicitacao de analise de identidade esta em andamento.',
+      message: 'Sua solicitação de analise de identidade esta em andamento.',
     });
 
     expect(presentation).toEqual({
@@ -127,7 +127,7 @@ describe('KYC liveness error presentation', () => {
       code: 'KYC_IDENTITY_REVIEW_HOLD',
       status: 423,
       reviewCaseId,
-      message: 'Sua solicitacao de analise de identidade esta em andamento.',
+      message: 'Sua solicitação de analise de identidade esta em andamento.',
     });
 
     expect(presentation).toEqual({
@@ -169,7 +169,7 @@ describe('KYC liveness error presentation', () => {
   test('does not offer a local bypass when the native module is unavailable', () => {
     const presentation = resolveKycLivenessErrorPresentation({
       code: 'AWS_LIVENESS_NATIVE_UNAVAILABLE',
-      message: 'Modulo nativo de liveness AWS indisponivel',
+      message: 'Modulo nativo de liveness AWS indisponível',
     });
 
     expect(presentation.allowLocalFallback).toBe(false);
