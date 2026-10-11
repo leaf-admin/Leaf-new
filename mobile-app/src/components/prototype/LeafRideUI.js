@@ -554,22 +554,40 @@ export function LeafMetricRow({ metrics = [], style }) {
   );
 }
 
-export function LeafJourneyRoute({ origin, destination, originTestID, destinationTestID, style, testID }) {
+// `dense`: one line per stop, no captions. For the default (compact) ride card,
+// where the map needs the room; the expanded card keeps the captioned layout.
+export function LeafJourneyRoute({ origin, destination, originTestID, destinationTestID, style, testID, dense = false }) {
+  const valueStyle = dense ? styles.journeyRouteValueDense : styles.journeyRouteValue;
+  const stopStyle = dense ? styles.journeyRouteStopDense : styles.journeyRouteStop;
   return (
-    <View style={[styles.journeyRoute, style]} testID={testID}>
-      <View style={styles.journeyRouteStop}>
-        <View style={styles.journeyRouteMarker} accessible={false} />
+    <View style={[styles.journeyRoute, dense && styles.journeyRouteDense, style]} testID={testID}>
+      <View style={stopStyle}>
+        <View style={[styles.journeyRouteMarker, dense && styles.journeyRouteMarkerDense]} accessible={false} />
         <View style={styles.journeyRouteCopy}>
-          <Text style={styles.journeyRouteLabel}>Embarque</Text>
-          <Text style={styles.journeyRouteValue} testID={originTestID}>{origin || 'Embarque não informado'}</Text>
+          {dense ? null : <Text style={styles.journeyRouteLabel}>Embarque</Text>}
+          <Text
+            style={valueStyle}
+            numberOfLines={dense ? 1 : undefined}
+            accessibilityLabel={dense ? `Embarque: ${origin || 'não informado'}` : undefined}
+            testID={originTestID}
+          >
+            {origin || 'Embarque não informado'}
+          </Text>
         </View>
       </View>
-      <View style={styles.journeyRouteHairline} />
-      <View style={styles.journeyRouteStop}>
-        <View style={[styles.journeyRouteMarker, styles.journeyRouteDestination]} accessible={false} />
+      {dense ? null : <View style={styles.journeyRouteHairline} />}
+      <View style={stopStyle}>
+        <View style={[styles.journeyRouteMarker, styles.journeyRouteDestination, dense && styles.journeyRouteMarkerDense]} accessible={false} />
         <View style={styles.journeyRouteCopy}>
-          <Text style={styles.journeyRouteLabel}>Destino</Text>
-          <Text style={styles.journeyRouteValue} testID={destinationTestID}>{destination || 'Destino não informado'}</Text>
+          {dense ? null : <Text style={styles.journeyRouteLabel}>Destino</Text>}
+          <Text
+            style={valueStyle}
+            numberOfLines={dense ? 1 : undefined}
+            accessibilityLabel={dense ? `Destino: ${destination || 'não informado'}` : undefined}
+            testID={destinationTestID}
+          >
+            {destination || 'Destino não informado'}
+          </Text>
         </View>
       </View>
     </View>
@@ -882,6 +900,10 @@ const styles = StyleSheet.create({
     borderColor: '#E5E5E5',
   },
   journeyRouteStop: { flexDirection: 'row', alignItems: 'flex-start', gap: 14 },
+  journeyRouteDense: { paddingVertical: 10, gap: 6 },
+  journeyRouteStopDense: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  journeyRouteMarkerDense: { marginTop: 0 },
+  journeyRouteValueDense: { ...leafTypography.medium, fontSize: 15, lineHeight: 20, color: '#222222' },
   journeyRouteMarker: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#222222', marginTop: 7 },
   journeyRouteDestination: { borderRadius: 2 },
   journeyRouteCopy: { flex: 1, minWidth: 0 },

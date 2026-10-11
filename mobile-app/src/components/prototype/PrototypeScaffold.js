@@ -3,14 +3,21 @@ import React from 'react';
 import { useIsFocused } from '@react-navigation/native';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { LeafObjectIcon } from './LeafVisualElements';
 import LeafMaterialSurface from './LeafMaterialSurface';
+import LeafGlassSurface from '../design-system/LeafGlassSurface';
+import LeafLineIcon from '../design-system/LeafLineIcon';
+import LeafSoftIcon from '../design-system/LeafSoftIcon';
 import { useLeafNativeTabBar } from './LeafNativeTabBar';
+import { navigateLeafRootTab } from '../../navigation/leafRootTabNavigation';
 import robotaxiPrototypeTokens from '../design-system/robotaxiPrototypeTokens';
 
 const { color, touch, motion } = robotaxiPrototypeTokens;
+// Line icons in the same weight as the header; the selected tab takes the brand
+// green so state reads from colour, not from a grey pill alone.
+const TAB_ACTIVE_COLOR = '#1A330E';
+const TAB_IDLE_COLOR = '#3A4037';
 
-function PrototypeTopControlGlyph({ name, tintColor }) {
+function PrototypeTopControlGlyph({ name, tintColor, signal }) {
   if (name === 'menu') {
     return (
       <View style={styles.menuGlyphWrap}>
@@ -20,24 +27,21 @@ function PrototypeTopControlGlyph({ name, tintColor }) {
       </View>
     );
   }
-
-  if (name === 'locate') {
-    return (
-      <View style={styles.locateGlyphWrap}>
-        <View style={[styles.locateGlyphCrosshairVertical, { backgroundColor: tintColor }]} />
-        <View style={[styles.locateGlyphCrosshairHorizontal, { backgroundColor: tintColor }]} />
-        <View style={[styles.locateGlyphOuter, { borderColor: tintColor }]} />
-        <View style={[styles.locateGlyphInner, { backgroundColor: tintColor }]} />
-      </View>
-    );
+  if (name === 'locate' || name === 'bell') {
+    return <LeafSoftIcon name={name} size={30} signal={signal} />;
   }
-
   if (name === 'arrow-back') {
-    return <Ionicons name="arrow-back" size={20} color={tintColor} />;
+    return <LeafLineIcon name="back" size={22} color={tintColor} />;
   }
-
   return <View style={[styles.glyphFallbackDot, { backgroundColor: tintColor }]} />;
 }
+
+const TOP_CONTROL_LABELS = {
+  'arrow-back': 'Voltar',
+  bell: 'Notificações',
+  locate: 'Centralizar mapa',
+  menu: 'Abrir menu',
+};
 
 export function PrototypeTopControls({
   insets,
@@ -46,16 +50,22 @@ export function PrototypeTopControls({
   leftIcon = 'locate',
   rightIcon = 'menu',
   showRightBadge = false,
+  rightBadgeCount = 0,
+  leftSignal = 0,
   leftAccessibilityLabel,
   rightAccessibilityLabel,
   leftTestID = 'prototype-top-left-control',
   rightTestID = 'prototype-top-right-control',
 }) {
-  const resolvedLeftLabel = leftAccessibilityLabel || (leftIcon === 'arrow-back' ? 'Voltar' : 'Centralizar mapa');
-  const resolvedRightLabel = rightAccessibilityLabel || (rightIcon === 'menu' ? 'Abrir menu' : 'Centralizar mapa');
+  const resolvedLeftLabel = leftAccessibilityLabel || TOP_CONTROL_LABELS[leftIcon] || 'Centralizar mapa';
+  const baseRightLabel = rightAccessibilityLabel || TOP_CONTROL_LABELS[rightIcon] || 'Centralizar mapa';
+  const resolvedRightLabel =
+    rightIcon === 'bell' && rightBadgeCount > 0
+      ? `${baseRightLabel}, ${rightBadgeCount} ${rightBadgeCount === 1 ? 'nova' : 'novas'}`
+      : baseRightLabel;
 
   return (
-    <View style={[styles.topRow, { top: insets.top + 18 }]}>
+    <View pointerEvents="box-none" style={[styles.topRow, { top: insets.top + 18 }]}>
       <TouchableOpacity
         style={styles.topButton}
         activeOpacity={0.85}
@@ -64,7 +74,8 @@ export function PrototypeTopControls({
         accessibilityLabel={resolvedLeftLabel}
         testID={leftTestID}
       >
-        <PrototypeTopControlGlyph name={leftIcon} tintColor={color.text.primary} />
+        <LeafGlassSurface interactive pointerEvents="none" style={styles.topButtonGlass} />
+        <PrototypeTopControlGlyph name={leftIcon} tintColor={color.text.primary} signal={leftSignal} />
       </TouchableOpacity>
 
       <TouchableOpacity
@@ -75,8 +86,9 @@ export function PrototypeTopControls({
         accessibilityLabel={resolvedRightLabel}
         testID={rightTestID}
       >
-        <PrototypeTopControlGlyph name={rightIcon} tintColor={color.text.primary} />
-        {showRightBadge ? <View style={styles.notificationDot} /> : null}
+        <LeafGlassSurface interactive pointerEvents="none" style={styles.topButtonGlass} />
+        <PrototypeTopControlGlyph name={rightIcon} tintColor={color.text.primary} signal={rightBadgeCount} />
+        {showRightBadge ? <View style={styles.notificationDot} testID={`${rightTestID}-badge`} /> : null}
       </TouchableOpacity>
     </View>
   );
@@ -87,9 +99,9 @@ export function PrototypeBottomIsland({ insets = {}, active = 'home', onPressPro
   const native = useLeafNativeTabBar({ active, focused, onPressProfile, onPressHome, onPressSettings, onPressActivity });
   if (native || !focused) return null;
   const items = [
-    { key: 'home', title: 'Início', object: 'home', onPress: onPressHome },
-    { key: 'activity', title: 'Atividade', object: 'tabActivity', onPress: onPressActivity || onPressSettings },
-    { key: 'account', title: 'Conta', object: 'tabAccount', onPress: onPressProfile },
+    { key: 'home', title: 'Início', icon: 'home', onPress: onPressHome },
+    { key: 'activity', title: 'Atividade', icon: 'activity', onPress: onPressActivity || onPressSettings },
+    { key: 'account', title: 'Conta', icon: 'account', onPress: onPressProfile },
   ];
   return (
     <View style={[styles.islandWrap, { bottom: (insets.bottom || 0) + 8 }]} pointerEvents="box-none">
@@ -98,7 +110,12 @@ export function PrototypeBottomIsland({ insets = {}, active = 'home', onPressPro
           <TouchableOpacity key={item.key} style={[styles.islandAction, active === item.key && styles.islandActionActive]}
             onPress={item.onPress} activeOpacity={0.85} accessibilityRole="tab"
             accessibilityLabel={item.title} accessibilityState={{ selected: active === item.key }} testID={`leaf-root-tab-${item.key}`}>
-            <LeafObjectIcon name={item.object} size={32} />
+            <LeafSoftIcon
+              name={item.icon}
+              size={30}
+              active={active === item.key}
+              signal={active === item.key ? 1 : 0}
+            />
             <Text style={[styles.tabLabel, active === item.key && styles.tabLabelActive]}>{item.title}</Text>
           </TouchableOpacity>
         ))}
@@ -111,9 +128,9 @@ export function LeafRootTabs({ navigation, active, insets }) {
   const focused = useIsFocused();
   if (!focused) return null;
   return <PrototypeBottomIsland insets={insets} active={active}
-    onPressHome={() => navigation.navigate('RobotaxiPrototype')}
-    onPressActivity={() => navigation.navigate('RobotaxiMenuTripHistory', { rootTab: true })}
-    onPressProfile={() => navigation.navigate('RobotaxiPrototypeMenu')} />;
+    onPressHome={() => navigateLeafRootTab(navigation, 'home')}
+    onPressActivity={() => navigateLeafRootTab(navigation, 'activity', { rootTab: true })}
+    onPressProfile={() => navigateLeafRootTab(navigation, 'account')} />;
 }
 
 const styles = StyleSheet.create({
@@ -131,22 +148,19 @@ const styles = StyleSheet.create({
     width: 48,
     height: 48,
     borderRadius: 24,
-    backgroundColor: color.surface.primary,
-    borderWidth: 1,
-    borderColor: color.border.strong,
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: color.shadow.base,
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.12,
-    shadowRadius: 16,
-    elevation: 6,
     position: 'relative'
+  },
+  // Glass (iOS 26) or solid fallback behind the glyph; same 48 pt circle.
+  topButtonGlass: {
+    ...StyleSheet.absoluteFillObject,
+    borderRadius: 24,
   },
   notificationDot: {
     position: 'absolute',
-    top: -1,
-    right: -1,
+    top: 12,
+    right: 13,
     width: 9,
     height: 9,
     borderRadius: 4.5,
@@ -259,8 +273,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center'
   },
   islandActionActive: {
-    backgroundColor: 'rgba(222,222,222,0.58)',
+    backgroundColor: 'rgba(26,51,14,0.08)',
   },
-  tabLabel: { ...leafTypography.medium, fontSize: 10, lineHeight: 14, color: '#222222', marginTop: 1 },
-  tabLabelActive: { color: '#1A330E', ...leafTypography.semiBold },
+  tabLabel: { ...leafTypography.medium, fontSize: 11, lineHeight: 14, color: TAB_IDLE_COLOR, marginTop: 3 },
+  tabLabelActive: { color: TAB_ACTIVE_COLOR, ...leafTypography.semiBold },
 });

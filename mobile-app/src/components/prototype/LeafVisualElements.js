@@ -68,6 +68,14 @@ function LeafBrandMark() {
   </Svg>;
 }
 
+// Time since account creation ("4 meses", "1 ano", "Novo"); "—" when unknown.
+export function formatLeafMembership(joined) {
+  const rawDate = joined?.toDate ? joined.toDate() : typeof joined === 'number' ? new Date(joined < 100000000000 ? joined * 1000 : joined) : typeof joined === 'string' ? new Date(joined) : joined?.seconds ? new Date(joined.seconds * 1000) : null;
+  const validDate = rawDate && !Number.isNaN(rawDate.getTime()) && rawDate <= new Date();
+  const months = validDate ? Math.max(0, (new Date().getFullYear() - rawDate.getFullYear()) * 12 + new Date().getMonth() - rawDate.getMonth()) : null;
+  return months === null ? '—' : months < 1 ? 'Novo' : months < 12 ? `${months} ${months === 1 ? 'mês' : 'meses'}` : `${Math.floor(months / 12)} ${months < 24 ? 'ano' : 'anos'}`;
+}
+
 // Values remain absent when the authenticated profile does not supply them.
 // A paginated trip history is never presented as a lifetime total.
 export function LeafAccountCard({ name, role, profile = {}, detail, onLayout, motionEnabled = false, loadingMetrics = false }) {
@@ -77,11 +85,7 @@ export function LeafAccountCard({ name, role, profile = {}, detail, onLayout, mo
     ? Number(ratingValue).toFixed(2).replace('.', ',') : null;
   const rawTrips = profile.totalTrips ?? profile.totalRides;
   const trips = rawTrips !== null && rawTrips !== undefined && Number.isFinite(Number(rawTrips)) && Number(rawTrips) >= 0 ? Math.floor(Number(rawTrips)) : null;
-  const joined = profile.createdAt;
-  const rawDate = joined?.toDate ? joined.toDate() : typeof joined === 'number' ? new Date(joined < 100000000000 ? joined * 1000 : joined) : typeof joined === 'string' ? new Date(joined) : joined?.seconds ? new Date(joined.seconds * 1000) : null;
-  const validDate = rawDate && !Number.isNaN(rawDate.getTime()) && rawDate <= new Date();
-  const months = validDate ? Math.max(0, (new Date().getFullYear() - rawDate.getFullYear()) * 12 + new Date().getMonth() - rawDate.getMonth()) : null;
-  const membership = months === null ? '—' : months < 1 ? 'Novo' : months < 12 ? `${months} ${months === 1 ? 'mês' : 'meses'}` : `${Math.floor(months / 12)} ${months < 24 ? 'ano' : 'anos'}`;
+  const membership = formatLeafMembership(profile.createdAt);
   const initials = String(name || 'L').trim().split(/\s+/).filter(Boolean).slice(0, 2).map(part => part.charAt(0)).join('').toUpperCase();
   return (
     <View style={styles.cardShadow}>

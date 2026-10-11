@@ -347,6 +347,36 @@ describe('PhoneInputStep', () => {
     });
   });
 
+  test('keeps the Firebase confirmation prototype so confirm() still works', async () => {
+    class FakeConfirmationResult {
+      constructor() {
+        this._verificationId = 'verification-123';
+      }
+
+      confirm(code) {
+        return Promise.resolve({ user: { uid: 'firebase-user-123' }, code });
+      }
+    }
+    mockSignInWithPhoneNumber.mockResolvedValueOnce(new FakeConfirmationResult());
+    const onVerificationSent = jest.fn();
+    const { getByTestId } = render(
+      <PhoneInputStep
+        onSwitchToRegister={jest.fn()}
+        onVerificationSent={onVerificationSent}
+      />,
+    );
+
+    fireEvent.changeText(getByTestId('auth-phone-input'), '21102938475');
+    fireEvent.press(getByTestId('auth-continue-btn'));
+
+    await waitFor(() => expect(onVerificationSent).toHaveBeenCalled());
+    const [confirmation] = onVerificationSent.mock.calls[0];
+    expect(confirmation).toEqual(expect.objectContaining({ isCustomOtp: false, channel: 'sms' }));
+    await expect(confirmation.confirm('992111')).resolves.toEqual(
+      expect.objectContaining({ code: '992111' }),
+    );
+  });
+
   test('keeps Firebase SMS as default even when account has password configured', async () => {
     const UserAuthService = require('../src/services/UserAuthService').default;
     const onVerificationSent = jest.fn();
