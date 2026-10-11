@@ -2,7 +2,7 @@ import React from "react";
 import { ScrollView, StyleSheet } from "react-native";
 import { act, fireEvent, render } from "@testing-library/react-native";
 
-import DriverLiveRideOverlay from "../src/screens/prototype/home/DriverLiveRideOverlay";
+import DriverLiveRideOverlay, { resolveOfferInstanceKey } from "../src/screens/prototype/home/DriverLiveRideOverlay";
 
 jest.mock("@expo/vector-icons", () => {
   const React = require("react");
@@ -56,15 +56,15 @@ describe("DriverLiveRideOverlay", () => {
       />,
     );
 
-    expect(screen.getByText("Passageira Leaf")).toBeTruthy();
+    expect(screen.getByText("Passageira")).toBeTruthy();
     expect(screen.getByTestId("driver-live-ride-overlay-wrap")).toBeTruthy();
     expect(screen.getByTestId("driver-live-offer-card")).toBeTruthy();
     expect(screen.getByTestId("driver-live-offer-accept-button")).toBeTruthy();
     expect(screen.queryByTestId("driver-offer-screen")).toBeNull();
     expect(screen.getAllByText("R$ 50,91")).toHaveLength(1);
-    expect(screen.getAllByText(/Rio de Janeiro/).length).toBeGreaterThan(0);
-    expect(screen.getByText("16 km")).toBeTruthy();
-    expect(screen.getByText("31 min")).toBeTruthy();
+    expect(screen.getAllByText(/Av. Meriti, 9 - Vila Kosmos/).length).toBeGreaterThan(0);
+    expect(screen.getByText(/16 km/)).toBeTruthy();
+    expect(screen.getByText(/16 km · 31 min/)).toBeTruthy();
     expect(screen.queryByText("Local combinado")).toBeNull();
   });
 
@@ -91,7 +91,7 @@ describe("DriverLiveRideOverlay", () => {
     );
 
     expect(screen.getByTestId("driver-live-offer-response-timer")).toBeTruthy();
-    expect(screen.getByText("00:00 para responder")).toBeTruthy();
+    expect(screen.getByText("Tempo de resposta esgotado")).toBeTruthy();
     expect(
       screen.getByTestId("driver-live-offer-accept-button").props
         .accessibilityState.disabled,
@@ -109,6 +109,51 @@ describe("DriverLiveRideOverlay", () => {
     fireEvent.press(screen.getByTestId("driver-live-offer-reject-button"));
     expect(acceptDriverOffer).not.toHaveBeenCalled();
     expect(rejectDriverOffer).not.toHaveBeenCalled();
+  });
+
+  it("keeps offer actions outside the scroll area and drops an expired offer locally", () => {
+    jest.useFakeTimers();
+    const expireDriverOffer = jest.fn();
+    try {
+      const screen = render(
+        <DriverLiveRideOverlay
+          driverOffers={[
+            {
+              bookingId: "booking_lost_clear",
+              passenger: "Passageira Leaf",
+              pickup: "Av. Meriti, 9",
+              dropoff: "Av. das Américas, 4666",
+              estimatedDriverNetAmount: 47.52,
+              expiresAt: new Date(Date.now() - 1000).toISOString(),
+            },
+          ]}
+          acceptDriverOffer={jest.fn()}
+          rejectDriverOffer={jest.fn()}
+          expireDriverOffer={expireDriverOffer}
+        />,
+      );
+
+      const actions = screen.getByTestId("driver-live-offer-actions");
+      const scrollAncestors = [];
+      for (let node = actions.parent; node; node = node.parent) {
+        if (node.type === ScrollView || node.type === "RCTScrollView") {
+          scrollAncestors.push(node);
+        }
+      }
+      expect(scrollAncestors).toHaveLength(0);
+      expect(screen.UNSAFE_queryAllByType(ScrollView).length).toBeGreaterThan(0);
+
+      act(() => {
+        jest.advanceTimersByTime(1600);
+      });
+      expect(screen.queryByTestId("driver-live-offer-card")).toBeNull();
+      expect(expireDriverOffer).toHaveBeenCalledTimes(1);
+      expect(expireDriverOffer.mock.calls[0][0]).toEqual(
+        expect.objectContaining({ bookingId: "booking_lost_clear" }),
+      );
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   it("removes a rejected current offer immediately and keeps stale snapshots hidden", async () => {
@@ -179,7 +224,7 @@ describe("DriverLiveRideOverlay", () => {
       />,
     );
 
-    expect(screen.getByText("Ponto de embarque")).toBeTruthy();
+    expect(screen.getAllByText("1540 Mission St").length).toBeGreaterThan(0);
     expect(screen.getByTestId("driver-live-trip-compact-summary").props.accessibilityLabel).toBe(
       "Resumo da corrida do motorista",
     );
@@ -192,6 +237,70 @@ describe("DriverLiveRideOverlay", () => {
     expect(screen.getByText("2 km")).toBeTruthy();
     expect(screen.getByText("Cheguei ao embarque")).toBeTruthy();
     expect(screen.getByLabelText("Cheguei ao embarque")).toBeTruthy();
+  });
+
+  it("steps the trip card through peek, compact and expanded heights", () => {
+    const screen = render(
+      <DriverLiveRideOverlay
+        driverActiveRide={{
+          bookingId: "booking_heights",
+          status: "accepted",
+          pickupAddress: "1540 Mission St",
+          dropoffAddress: "1 Ferry Building",
+          estimatedDriverNetAmount: 24.9,
+          passengerName: "Ana Souza",
+        }}
+        bookingStatus="accepted"
+        driverTripAssist={{ status: "accepted", primaryActionLabel: "Cheguei ao embarque", primaryActionEnabled: true }}
+        markDriverArrived={jest.fn()}
+        startTripFlow={jest.fn()}
+        completeTripFlow={jest.fn()}
+      />,
+    );
+
+    expect(screen.getByTestId("driver-live-passenger-identity")).toBeTruthy();
+    fireEvent.press(screen.getByTestId("driver-live-trip-sheet-handle"));
+    expect(screen.queryByTestId("driver-live-trip-compact-summary")).toBeNull();
+    fireEvent.press(screen.getByTestId("driver-live-trip-sheet-handle"));
+    expect(screen.queryByTestId("driver-live-passenger-identity")).toBeNull();
+    expect(screen.queryByTestId("driver-live-trip-details-button")).toBeNull();
+    expect(screen.getByLabelText("Cheguei ao embarque")).toBeTruthy();
+    fireEvent.press(screen.getByTestId("driver-live-trip-sheet-handle"));
+    expect(screen.getByTestId("driver-live-passenger-identity")).toBeTruthy();
+  });
+
+  it("ends the trip only through the slide control (or its accessibility action)", async () => {
+    const completeTripFlow = jest.fn(() => Promise.resolve({ success: true }));
+    const screen = render(
+      <DriverLiveRideOverlay
+        driverActiveRide={{
+          bookingId: "booking_slide_end",
+          status: "started",
+          pickupAddress: "1540 Mission St",
+          dropoffAddress: "1 Ferry Building",
+          estimatedDriverNetAmount: 24.9,
+        }}
+        bookingStatus="started"
+        driverTripAssist={{
+          status: "started",
+          primaryActionLabel: "Finalizar corrida",
+          primaryActionEnabled: true,
+        }}
+        markDriverArrived={jest.fn()}
+        startTripFlow={jest.fn()}
+        completeTripFlow={completeTripFlow}
+      />,
+    );
+
+    const control = screen.getByTestId("driver-live-primary-action-complete-button");
+    expect(screen.getByText("Deslize para encerrar")).toBeTruthy();
+    fireEvent.press(control);
+    expect(completeTripFlow).not.toHaveBeenCalled();
+
+    await act(async () => {
+      fireEvent(control, "accessibilityAction", { nativeEvent: { actionName: "activate" } });
+    });
+    expect(completeTripFlow).toHaveBeenCalledTimes(1);
   });
 
   it("renders the started state as a floating card with progressive actions", () => {
@@ -232,10 +341,12 @@ describe("DriverLiveRideOverlay", () => {
     const wrapStyle = StyleSheet.flatten(
       screen.getByTestId("driver-live-ride-overlay-wrap").props.style,
     );
-    expect(cardStyle.marginHorizontal).toBe(0);
-    expect(cardStyle.borderBottomLeftRadius).toBe(0);
-    expect(cardStyle.borderBottomRightRadius).toBe(0);
-    expect(wrapStyle.bottom).toBe(0);
+    // Floating card: inset from the sides, rounded on all corners, lifted
+    // above the bottom edge (safe area + gap).
+    expect(cardStyle.marginHorizontal).toBe(12);
+    expect(cardStyle.borderRadius).toBe(28);
+    expect(cardStyle.borderBottomLeftRadius).toBeUndefined();
+    expect(wrapStyle.bottom).toBe(12);
     expect(screen.queryByTestId("driver-live-trip-navigation-button")).toBeNull();
     expect(screen.queryByTestId("driver-live-trip-report-problem-button")).toBeNull();
     expect(screen.queryByTestId("driver-live-trip-chat-button")).toBeNull();
@@ -295,7 +406,7 @@ describe("DriverLiveRideOverlay", () => {
 
     fireEvent.press(screen.getByTestId("driver-live-trip-details-button"));
 
-    expect(screen.getByText("TRECHO ENCERRADO")).toBeTruthy();
+    expect(screen.getByText("Trecho encerrado")).toBeTruthy();
     expect(screen.getAllByText("Aguardando decisão do passageiro")).toHaveLength(1);
     expect(screen.getByText("R$ 0,00")).toBeTruthy();
   });
@@ -330,10 +441,10 @@ describe("DriverLiveRideOverlay", () => {
     );
 
     expect(screen.getAllByText("Passageiro Leaf").length).toBeGreaterThan(0);
-    expect(screen.getByText("EM VIAGEM")).toBeTruthy();
+    expect(screen.getByText("Em viagem")).toBeTruthy();
     expect(screen.getByText("8 min")).toBeTruthy();
     expect(screen.getByText("3 km")).toBeTruthy();
-    expect(screen.getByText("Finalizar corrida")).toBeTruthy();
+    expect(screen.getByLabelText("Finalizar corrida")).toBeTruthy();
     expect(screen.getByText("Em viagem")).toBeTruthy();
     expect(screen.getByText("1 Ferry Building")).toBeTruthy();
     expect(screen.queryByText("Progresso da viagem")).toBeNull();
@@ -481,5 +592,16 @@ describe("DriverLiveRideOverlay", () => {
       "Resumo da corrida do motorista",
     );
     expect(screen.getByLabelText(actionLabel)).toBeTruthy();
+  });
+});
+
+describe("driver offer instance key", () => {
+  it("tells a re-offer of the same booking apart from the dismissed one", () => {
+    const first = { bookingId: "booking_1", expiresAt: "2026-10-11T04:08:50.000Z" };
+    const reoffer = { bookingId: "booking_1", expiresAt: "2026-10-11T04:09:40.000Z" };
+
+    expect(resolveOfferInstanceKey(first)).not.toBe(resolveOfferInstanceKey(reoffer));
+    expect(resolveOfferInstanceKey(first)).toBe(resolveOfferInstanceKey({ ...first }));
+    expect(resolveOfferInstanceKey(null)).toBe("");
   });
 });

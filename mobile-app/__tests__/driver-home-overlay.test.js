@@ -196,6 +196,7 @@ describe("DriverHomeOverlay", () => {
       />,
     );
 
+    fireEvent.press(getByTestId("driver-home-earnings-pill"));
     expect(getByText("Reconectando")).toBeTruthy();
     expect(getByText("--")).toBeTruthy();
     expect(queryByText("0min")).toBeNull();
@@ -405,8 +406,10 @@ describe("DriverHomeOverlay", () => {
       />,
     );
 
+    // Pill and expanded panel both show the day's earnings.
+    expect(getByTestId("driver-home-earnings-pill").props.accessibilityLabel).toContain("R$ 184,20");
+    fireEvent.press(getByTestId("driver-home-earnings-pill"));
     expect(getByText("Meus ganhos")).toBeTruthy();
-    expect(getByText("R$ 184,20")).toBeTruthy();
     expect(getByText("92%")).toBeTruthy();
     expect(getByText("Progresso da meta")).toBeTruthy();
     expect(queryByText("92% da meta")).toBeNull();
@@ -420,40 +423,64 @@ describe("DriverHomeOverlay", () => {
     expect(queryByText("Central de segurança")).toBeNull();
   });
 
-  it("shows the welcome campaign only before the driver's first activity of the day", () => {
-    const firstSession = render(
+  it("shows pending feedback immediately on tap and ignores repeated taps", () => {
+    const onToggleOnline = jest.fn();
+    const screen = render(
+      <DriverHomeOverlay
+        driverId="driver_1"
+        driverOnline={false}
+        driverCanGoOnline
+        driverActivationResolved
+        onToggleOnline={onToggleOnline}
+        onOpenActivation={() => {}}
+      />,
+    );
+    fireEvent.press(screen.getByTestId("driver-home-toggle-online"));
+    expect(screen.getByText("Ativando...")).toBeTruthy();
+    fireEvent.press(screen.getByTestId("driver-home-toggle-online"));
+    expect(onToggleOnline).toHaveBeenCalledTimes(1);
+    screen.rerender(
+      <DriverHomeOverlay
+        driverId="driver_1"
+        driverOnline
+        driverCanGoOnline
+        driverActivationResolved
+        onToggleOnline={onToggleOnline}
+        onOpenActivation={() => {}}
+      />,
+    );
+    expect(screen.queryByText("Ativando...")).toBeNull();
+    expect(screen.getByText("Online")).toBeTruthy();
+  });
+
+  it("keeps the map clear: earnings live in a top pill that expands into the day summary", () => {
+    const screen = render(
       <DriverHomeOverlay
         driverId="driver_1"
         driverOnline={false}
         driverCanGoOnline
         driverActivationResolved
         ridesCount={0}
+        formattedDriverEarnings="R$ 42,00"
         onToggleOnline={() => {}}
         onOpenActivation={() => {}}
       />,
     );
 
-    expect(firstSession.getByTestId("driver-home-promo-carousel")).toBeTruthy();
-
-    const activeDay = render(
-      <DriverHomeOverlay
-        driverId="driver_1"
-        driverOnline={false}
-        driverCanGoOnline
-        driverActivationResolved
-        ridesCount={1}
-        onToggleOnline={() => {}}
-        onOpenActivation={() => {}}
-      />,
-    );
-
-    expect(activeDay.queryByTestId("driver-home-promo-carousel")).toBeNull();
+    expect(screen.queryByTestId("driver-home-promo-carousel")).toBeNull();
+    expect(screen.queryByText("Meus ganhos")).toBeNull();
+    expect(screen.getByTestId("driver-home-toggle-online")).toBeTruthy();
+    fireEvent.press(screen.getByTestId("driver-home-earnings-pill"));
+    expect(screen.getByTestId("driver-home-earnings-panel")).toBeTruthy();
+    expect(screen.getByText("Meus ganhos")).toBeTruthy();
+    fireEvent.press(screen.getByTestId("driver-home-earnings-pill"));
+    expect(screen.queryByTestId("driver-home-earnings-panel")).toBeNull();
   });
 
   it("shows cumulative daily online time without warning before 10h", () => {
     jest.spyOn(Date, "now").mockReturnValue(100_000_000);
 
-    const { getByText, queryByText } = render(
+    const { getByText, queryByText, getByTestId } = render(
       <DriverHomeOverlay
         driverId="driver_1"
         driverOnline
@@ -470,6 +497,7 @@ describe("DriverHomeOverlay", () => {
       />,
     );
 
+    fireEvent.press(getByTestId("driver-home-earnings-pill"));
     expect(getByText("9h50")).toBeTruthy();
     expect(queryByText("Próximo ao limite")).toBeNull();
   });
@@ -477,7 +505,7 @@ describe("DriverHomeOverlay", () => {
   it("shows a low-noise warning when daily online time reaches 10h", () => {
     jest.spyOn(Date, "now").mockReturnValue(100_000_000);
 
-    const { getByText } = render(
+    const { getByText, getByTestId } = render(
       <DriverHomeOverlay
         driverId="driver_1"
         driverOnline
@@ -494,6 +522,7 @@ describe("DriverHomeOverlay", () => {
       />,
     );
 
+    fireEvent.press(getByTestId("driver-home-earnings-pill"));
     expect(getByText("10h00")).toBeTruthy();
     expect(getByText("Próximo ao limite")).toBeTruthy();
   });

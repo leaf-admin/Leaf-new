@@ -325,7 +325,7 @@ describe('PrototypeMapLayer route viewport fitting', () => {
         jest.advanceTimersByTime(1020);
       });
       expect(getByTestId('prototype-map-view').props.region).toEqual(visibleRouteRegion);
-      expect(mockAnimateToRegion).toHaveBeenCalledWith(visibleRouteRegion, 180);
+      expect(mockAnimateToRegion).toHaveBeenCalledWith(visibleRouteRegion, 450);
     } finally {
       Platform.OS = originalPlatform;
     }
@@ -440,6 +440,34 @@ describe('PrototypeMapLayer route viewport fitting', () => {
     );
 
     expect(UNSAFE_getAllByProps({ strokeWidth: 7 }).length).toBeGreaterThan(0);
+  });
+
+  it('keeps the full route visible when traffic covers only a small part of it', () => {
+    const { UNSAFE_getAllByProps } = render(
+      <PrototypeMapLayer
+        mapRef={React.createRef()}
+        region={baseRegion}
+        userCoordinate={routeCoordinates[0]}
+        routeCoordinates={routeCoordinates}
+        routeTrafficSegments={[
+          {
+            level: 'normal',
+            color: '#198754',
+            coordinates: [
+              routeCoordinates[0],
+              {
+                latitude: routeCoordinates[0].latitude + 0.0001,
+                longitude: routeCoordinates[0].longitude + 0.0001,
+              },
+            ],
+          },
+        ]}
+        routeMainColor="#123456"
+        animateRoute={false}
+      />,
+    );
+
+    expect(UNSAFE_getAllByProps({ strokeColor: '#123456' }).length).toBeGreaterThan(0);
   });
 
   it('does not paint an explicit traffic route with one uniform route color', () => {

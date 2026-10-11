@@ -125,7 +125,15 @@ const {
   buildConfirmedBookingMaterializationRetryContext,
   normalizeDestinationItem,
   resolveDestinationCoordinate,
+  resolveReceiptEarlyEnd,
+  resolveReceiptRouteGeometry,
+  resolveSyncedBookingStatusForRole,
+  buildBookingDestinationLabel,
 } = require('../src/screens/prototype/prototypeRideRuntime');
+const { getPrototypeMapRoute } = require('../src/screens/prototype/prototypeMapRoute');
+const {
+  calculateDistanceMeters,
+} = require('../src/services/PrototypeDriverTripAssistantService');
 const {
   fetchCoordsfromPlace,
 } = require('../src/services/runtime/locationRouteBridge');
@@ -293,6 +301,34 @@ describe('prototype ride runtime financial snapshot', () => {
       payload: { status: 'idle' },
       syncedBookingId: 'booking_other',
     })).toBe(false);
+  });
+
+  it('lets the server drop a driver pickup it no longer assigns, after the accept grace', () => {
+    const source = {
+      activeRole: 'driver',
+      bookingStatus: 'accepted',
+      activeBookingId: 'booking_reassigned',
+      driverActiveRide: { bookingId: 'booking_reassigned' },
+    };
+    const payload = { success: true, source: 'explicit_sync', hasActiveRide: false, bookingId: null };
+    const acceptedAt = 1_000_000;
+
+    expect(shouldPreserveActiveRideOnIdleSync({
+      source, payload, nowMs: acceptedAt + 10_000, driverRideAssignedAtMs: acceptedAt,
+    })).toBe(true);
+    expect(shouldPreserveActiveRideOnIdleSync({
+      source, payload, nowMs: acceptedAt + 60_000, driverRideAssignedAtMs: acceptedAt,
+    })).toBe(false);
+    expect(shouldPreserveActiveRideOnIdleSync({
+      source: { ...source, bookingStatus: 'started' }, payload, nowMs: acceptedAt + 60_000, driverRideAssignedAtMs: acceptedAt,
+    })).toBe(true);
+  });
+
+  it('lets the server end a passenger pickup it no longer has, after the accept grace', () => {
+    const source = { activeRole: 'customer', bookingStatus: 'accepted', activeBookingId: 'booking_gone' };
+    const payload = { success: true, source: 'explicit_sync', hasActiveRide: false, bookingId: null };
+    expect(shouldPreserveActiveRideOnIdleSync({ source, payload, nowMs: 60_000, driverRideAssignedAtMs: 50_000 })).toBe(true);
+    expect(shouldPreserveActiveRideOnIdleSync({ source, payload, nowMs: 200_000, driverRideAssignedAtMs: 50_000 })).toBe(false);
   });
 
   it('accepts explicit receipt recovery booking ids from route-only receipt screens', () => {
@@ -958,5 +994,108 @@ describe('prototype ride runtime financial snapshot', () => {
     expect(bookingRoute.routeCoordinates[170].latitude).toBeLessThan(-22.98);
     expect(bookingRoute.routeDistanceKm).toBeCloseTo(27.1, 1);
     expect(bookingRoute.routeDurationMinutes).toBe(43);
+  });
+});
+
+describe('prototype ride runtime receipt and recovery helpers', () => {
+  const pickup = { latitude: -22.9208, longitude: -43.4061 };
+  const midway = { latitude: -22.95, longitude: -43.39 };
+  const destination = { latitude: -22.9827, longitude: -43.3642 };
+
+  beforeEach(() => {
+    getPrototypeMapRoute.mockReturnValue({ coordinates: [] });
+    // The distance helper is mocked in this file; each test states the distance.
+    calculateDistanceMeters.mockReturnValue(0);
+  });
+
+  it('flags a trip that ended far from its destination', () => {
+    calculateDistanceMeters.mockReturnValue(8200);
+    const earlyEnd = resolveReceiptEarlyEnd(
+      { endLocation: { lat: pickup.latitude, lng: pickup.longitude } },
+      {},
+      destination,
+    );
+
+    expect(earlyEnd).toEqual({ remainingMeters: 8200 });
+  });
+
+  it('does not flag a trip that ended at the destination', () => {
+    calculateDistanceMeters.mockReturnValue(120);
+    expect(
+      resolveReceiptEarlyEnd(
+        { endLocation: { lat: destination.latitude + 0.0005, lng: destination.longitude } },
+        {},
+        destination,
+      ),
+    ).toBeNull();
+  });
+
+  it('measures from the last known car position when the server sends no end location', () => {
+    calculateDistanceMeters.mockReturnValue(8200);
+    const earlyEnd = resolveReceiptEarlyEnd({}, { driverCoordinate: pickup }, destination);
+
+    expect(earlyEnd).toEqual({ remainingMeters: 8200 });
+    expect(calculateDistanceMeters).toHaveBeenCalledWith(pickup, destination);
+  });
+
+  it('keeps the server early-end details when present', () => {
+    expect(
+      resolveReceiptEarlyEnd(
+        { earlyEnd: { reason: 'passenger_request', remainingMeters: 1200 } },
+        { driverCoordinate: destination },
+        destination,
+      ),
+    ).toEqual({ reason: 'passenger_request', remainingMeters: 1200 });
+  });
+
+  it('cannot tell without a destination', () => {
+    expect(resolveReceiptEarlyEnd({}, { driverCoordinate: pickup }, null)).toBeNull();
+  });
+
+  it('prefers a route with real geometry over a two-point straight line', () => {
+    const route = resolveReceiptRouteGeometry(
+      { quoteLock: { coordinates: [pickup, midway, destination] } },
+      [[pickup, destination]],
+    );
+
+    expect(route).toHaveLength(3);
+  });
+
+  it('uses the route on the map when the server sends none', () => {
+    getPrototypeMapRoute.mockReturnValue({ coordinates: [pickup, midway, destination] });
+
+    expect(resolveReceiptRouteGeometry({}, [undefined])).toHaveLength(3);
+  });
+
+  it('falls back to the endpoints only when no source has geometry', () => {
+    expect(resolveReceiptRouteGeometry({}, [[pickup, destination]])).toHaveLength(2);
+    expect(resolveReceiptRouteGeometry({}, [])).toEqual([]);
+  });
+
+  it('sends a driver home when their accepted ride was reassigned after a disconnect', () => {
+    const snapshot = { status: 'SEARCHING', recoveryMode: 'accepted_driver_reassignment' };
+
+    expect(resolveSyncedBookingStatusForRole(snapshot, 'driver')).toBe('idle');
+    expect(resolveSyncedBookingStatusForRole(snapshot, 'customer')).toBe('searching_replacement');
+  });
+
+  it('keeps the operational replacement state for a driver when it is not a disconnect recovery', () => {
+    expect(
+      resolveSyncedBookingStatusForRole({ status: 'SEARCHING_REPLACEMENT_DRIVER' }, 'driver'),
+    ).toBe('searching_replacement');
+  });
+
+  it('sends the place name with the booking destination', () => {
+    expect(
+      buildBookingDestinationLabel({
+        name: 'Via Parque Shopping',
+        address: 'Av. Ayrton Senna, 3000 - Barra da Tijuca',
+      }),
+    ).toBe('Via Parque Shopping - Av. Ayrton Senna, 3000 - Barra da Tijuca');
+    expect(
+      buildBookingDestinationLabel({ name: 'Rua A', address: 'Rua A, 10 - Centro' }),
+    ).toBe('Rua A, 10 - Centro');
+    expect(buildBookingDestinationLabel({ name: 'Casa' })).toBe('Casa');
+    expect(buildBookingDestinationLabel({})).toBe('Destino');
   });
 });

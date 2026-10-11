@@ -908,7 +908,7 @@ describe('prototype new surfaces', () => {
 
     expect(docs.getByText('Documentos')).toBeTruthy();
     expect(docs.getByText('CNH com EAR')).toBeTruthy();
-    expect(docs.getByText('Abrir ativação')).toBeTruthy();
+    expect(docs.getByText('Ativação')).toBeTruthy();
 
     const vehicles = render(
       <RobotaxiVehiclesScreen

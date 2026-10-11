@@ -879,9 +879,10 @@ describe('WooviPaymentModal qaAutoConfirm', () => {
     await waitFor(() => {
       expect(alertSpy).toHaveBeenCalledTimes(1);
       expect(alertSpy).toHaveBeenCalledWith(
-        '⏰ Tempo Esgotado',
+        'Tempo esgotado',
         'O tempo para realizar o pagamento expirou. Faça uma nova cotação para continuar.',
         expect.any(Array),
+        { __skipFriendlyAlertPatch: true },
       );
     });
     expect(onPaymentExpired).toHaveBeenCalledTimes(1);

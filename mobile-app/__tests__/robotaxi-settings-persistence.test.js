@@ -88,8 +88,13 @@ describe('live Leaf settings surface', () => {
   it('opens OS settings for granted notifications instead of faking a server mute', async () => {
     const ui = screen();
     await waitFor(() => expect(ui.getByText('Ativadas no dispositivo')).toBeTruthy());
+    const sendIntent = jest.spyOn(Linking, 'sendIntent').mockResolvedValue();
     fireEvent.press(ui.getByLabelText('Notificações'));
-    await waitFor(() => expect(Linking.openSettings).toHaveBeenCalled());
+    // Android opens the app's notification screen directly; other platforms open app settings.
+    await waitFor(() => expect(
+      sendIntent.mock.calls.some(([action]) => action === 'android.settings.APP_NOTIFICATION_SETTINGS') ||
+        Linking.openSettings.mock.calls.length > 0,
+    ).toBe(true));
     expect(preferences.update).not.toHaveBeenCalled();
   });
 
@@ -152,8 +157,9 @@ describe('live Leaf settings surface', () => {
   it('assigns current status to every implemented setting', async () => {
     Object.values(ROBOTAXI_SETTINGS_ITEMS).forEach(item => expect(item.status).toBe('current'));
     const ui = screen();
-    fireEvent.press(ui.getByLabelText('Idioma'));
-    expect(Alert.alert).toHaveBeenCalledWith('Idioma do aplicativo', expect.stringContaining('Português do Brasil'));
+    // Only pt-BR exists: the language row is informational, not a dead-end button.
+    expect(ui.getByLabelText('Idioma')).toHaveProp('accessibilityRole', 'text');
+    expect(ui.getByText('Português do Brasil')).toBeTruthy();
     await act(async () => {});
   });
 });

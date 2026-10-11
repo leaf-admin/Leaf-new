@@ -45,7 +45,8 @@ describe('LeafNativeNavigationBanner', () => {
     expect(getByText('Navegar')).toBeTruthy();
     expect(usePrototypeMapOcclusion).toHaveBeenCalledWith(
       expect.objectContaining({
-        occludedTop: 156,
+        // insetsTop (24) + banner offset (70) + fallback height (96) + gap (12)
+        occludedTop: 202,
       }),
     );
 

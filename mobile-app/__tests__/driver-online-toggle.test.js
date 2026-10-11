@@ -616,6 +616,13 @@ describe('driver online toggle', () => {
     });
   });
 
+  it('does not show a local estimate for unselected categories once a backend quote is required', () => {
+    const base = { isSelectedCategory: false, quotePending: false, backendQuoteRequired: true, backendFare: null, localFare: 83.42 };
+    expect(resolveHomeCategoryFarePresentation(base)).toEqual({ fare: null, priceLabel: 'Calculando' });
+    expect(resolveHomeCategoryFarePresentation({ ...base, quoteUnavailable: true })).toEqual({ fare: null, priceLabel: '--' });
+    expect(resolveHomeCategoryFarePresentation({ ...base, backendFare: 54.73 })).toEqual({ fare: 54.73, priceLabel: 'R$ 54,73' });
+  });
+
   it('automatically refreshes an expired home quote at most twice', () => {
     const firstExpiry = resolveHomeQuoteExpiryAction({
       automaticRefreshCount: 0,
@@ -1123,13 +1130,13 @@ describe('driver online toggle', () => {
       goBack: jest.fn(),
     };
 
-    const { getByTestId, getByText, queryByTestId } = render(
+    const { getByTestId, getByLabelText, queryByTestId } = render(
       <RobotaxiHomeScreen navigation={navigation} route={{ params: {} }} />
     );
 
     expect(getByTestId('prototype-home-loading')).toBeTruthy();
-    expect(getByText('Bem vindo(a), Izaak')).toBeTruthy();
-    expect(getByTestId('passenger-home-overlay-skeleton')).toBeTruthy();
+    expect(getByLabelText('Bem-vindo(a), Izaak')).toBeTruthy();
+    expect(queryByTestId('passenger-home-overlay-skeleton')).toBeNull();
     expect(queryByTestId('prototype-top-controls')).toBeNull();
     expect(mockPrototypeMapLayer).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -1373,7 +1380,7 @@ describe('driver online toggle', () => {
 
     const loadingOverlay = queryByTestId('prototype-home-loading');
     expect(loadingOverlay).toBeTruthy();
-    expect(loadingOverlay.props.accessibilityLabel).toBe('Bem vindo(a), Izaak');
+    expect(loadingOverlay.props.accessibilityLabel).toBe('Bem-vindo(a), Izaak');
     expect(mockPrototypeMapLayer).toHaveBeenLastCalledWith(
       expect.objectContaining({
         interactionEnabled: false,

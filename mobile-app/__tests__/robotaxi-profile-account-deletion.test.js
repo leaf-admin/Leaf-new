@@ -133,11 +133,11 @@ describe('RobotaxiProfileScreen account deletion entry point', () => {
 
     expect(navigation.replace).not.toHaveBeenCalled();
     expect(alertSpy).toHaveBeenCalledWith(
-      'Excluir Conta',
+      'Excluir conta',
       expect.stringContaining('irreversível'),
       expect.arrayContaining([
         expect.objectContaining({ text: 'Cancelar', style: 'cancel' }),
-        expect.objectContaining({ text: 'Excluir Conta', style: 'destructive' }),
+        expect.objectContaining({ text: 'Excluir conta', style: 'destructive' }),
       ]),
     );
   });

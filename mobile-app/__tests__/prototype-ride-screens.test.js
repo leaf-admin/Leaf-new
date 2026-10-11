@@ -853,7 +853,7 @@ describe('prototype ride screens', () => {
     const screen = render(<RobotaxiTripScreen navigation={navigation} route={{ params: {} }} />);
 
     expect(screen.getByTestId('passenger-trip-screen')).toBeTruthy();
-    expect(screen.getByText('MOTORISTA A CAMINHO')).toBeTruthy();
+    expect(screen.getByText('Motorista a caminho')).toBeTruthy();
     expect(screen.getByText('Motorista Leaf')).toBeTruthy();
   });
 
@@ -2401,7 +2401,7 @@ describe('prototype ride screens', () => {
       'Resumo da viagem do passageiro',
     );
     expect(screen.getByText('Chega em 14 min')).toBeTruthy();
-    expect(screen.getByText('MOTORISTA A CAMINHO')).toBeTruthy();
+    expect(screen.getByText('Motorista a caminho')).toBeTruthy();
     expect(screen.getByText('Motorista Leaf')).toBeTruthy();
     expect(screen.getByText('LEF-2042')).toBeTruthy();
     expect(screen.getByTestId('ride-card-field-passenger-passenger_driver_accepted-vehicle_type')).toHaveTextContent(/Leaf Plus/);
@@ -2412,8 +2412,8 @@ describe('prototype ride screens', () => {
       screen.getByTestId(
         'ride-card-field-passenger-passenger_driver_accepted-destination_address',
       ),
-    ).toHaveTextContent('Centro, Rio de Janeiro');
-    expect(screen.queryByLabelText('Mensagem')).toBeNull();
+    ).toHaveTextContent('Aeroporto Santos Dumont');
+    expect(screen.getByLabelText('Mensagem')).toBeTruthy();
     expect(screen.getByLabelText('Mais opções')).toBeTruthy();
     expect(screen.queryByLabelText('Segurança')).toBeNull();
     expect(screen.queryByLabelText('Ligar')).toBeNull();
@@ -2726,7 +2726,8 @@ describe('prototype ride screens', () => {
 
     expect(mapView.props.routeCoordinates).toEqual(routeCoordinates);
     expect(mapView.props.routeTrafficSegments).toEqual(routeTrafficSegments);
-    expect(mapView.props.showTraffic).toBe(true);
+    // Traffic shows on the route line only; the city-wide layer stays off.
+    expect(mapView.props.showTraffic).toBe(false);
     expect(mapView.props.routeViewportRegion).toEqual(expect.objectContaining({
       latitude: expect.any(Number),
       longitude: expect.any(Number),
@@ -3300,7 +3301,7 @@ describe('prototype ride screens', () => {
 
     usePrototypeRideRuntime.mockReturnValue(buildPassengerRuntime({ bookingStatus: 'arrived', boardingRemainingSec: 90 }));
     const activeTimer = render(<RobotaxiTripScreen navigation={navigation} route={{ params: {} }} />);
-    expect(activeTimer.getByText('MOTORISTA CHEGOU')).toBeTruthy();
+    expect(activeTimer.getByText('Motorista chegou')).toBeTruthy();
     expect(activeTimer.getAllByText('1:30').length).toBeGreaterThan(0);
     expect(activeTimer.getByText('Prossiga para o embarque')).toBeTruthy();
     activeTimer.unmount();
@@ -3896,8 +3897,8 @@ describe('prototype ride screens', () => {
     );
 
     expect(getByText('R$ 58,19')).toBeTruthy();
-    expect(getByText('Av. Meriti')).toBeTruthy();
-    expect(getByText('Av. das Americas')).toBeTruthy();
+    expect(getByText('Av. Meriti, 9')).toBeTruthy();
+    expect(getByText('Av. das Americas, 4666')).toBeTruthy();
     expect(queryByTestId('receipt-recovery-state-card')).toBeNull();
     expect(queryByText('Recibo pendente')).toBeNull();
     expect(getByTestId('passenger-receipt-rate-trip-button').props.accessibilityState?.disabled).toBe(false);
@@ -3948,8 +3949,8 @@ describe('prototype ride screens', () => {
     );
 
     expect(getByText('R$ 58,19')).toBeTruthy();
-    expect(getByText('Av. Meriti')).toBeTruthy();
-    expect(getByText('Av. das Americas')).toBeTruthy();
+    expect(getByText('Av. Meriti, 9')).toBeTruthy();
+    expect(getByText('Av. das Americas, 4666')).toBeTruthy();
     expect(queryByTestId('receipt-recovery-state-card')).toBeNull();
     expect(queryByText('Recibo final indisponível')).toBeNull();
     expect(getByTestId('passenger-receipt-rate-trip-button').props.accessibilityState?.disabled).toBe(false);
@@ -4376,7 +4377,7 @@ describe('prototype ride screens', () => {
     );
 
     await waitFor(() => {
-      expect(getByText('Praça Senador Salgado Filho, Centro, Rio de Janeiro')).toBeTruthy();
+      expect(getByText('Praça Senador Salgado Filho, Centro')).toBeTruthy();
       expect(queryByText('Destino indisponivel')).toBeNull();
     });
   });
@@ -4410,7 +4411,7 @@ describe('prototype ride screens', () => {
     expect(getByTestId('passenger-driver-search-sheet')).toBeTruthy();
     expect(queryByText('Detalhes da corrida')).toBeNull();
     expect(getByTestId('passenger-driver-search-elapsed').props.children).toBe('00:12');
-    expect(getByText('BUSCANDO MOTORISTA')).toBeTruthy();
+    expect(getByText('Procurando motorista')).toBeTruthy();
     expect(getByText('tempo de busca')).toBeTruthy();
     expect(getByText('valor protegido')).toBeTruthy();
     expect(getByTestId('passenger-driver-search-progress-fill').props.style).toEqual(
@@ -4469,7 +4470,7 @@ describe('prototype ride screens', () => {
 
     expect(queryByTestId('passenger-booking-finalizing-sheet')).toBeNull();
     expect(getByTestId('passenger-driver-search-sheet')).toBeTruthy();
-    expect(getByText('BUSCANDO MOTORISTA')).toBeTruthy();
+    expect(getByText('Procurando motorista')).toBeTruthy();
     expect(queryByText('Criando corrida')).toBeNull();
     expect(queryByText('Pagamento confirmado. Estamos criando sua corrida com segurança.')).toBeNull();
     expect(getByTestId('passenger-driver-search-elapsed').props.children).toBe('00:44');
@@ -4665,7 +4666,7 @@ describe('prototype ride screens', () => {
     await waitFor(() => {
       expect(getByText('Servidor não confirmou o cancelamento.')).toBeTruthy();
     });
-    expect(getByText('BUSCANDO MOTORISTA')).toBeTruthy();
+    expect(getByText('Procurando motorista')).toBeTruthy();
     expect(navigation.goBack).not.toHaveBeenCalled();
     expect(navigation.replace).not.toHaveBeenCalled();
 
@@ -5310,7 +5311,7 @@ describe('prototype ride screens', () => {
       <RobotaxiDriverSearchScreen navigation={navigation} route={{ params: {} }} />
     );
 
-    expect(getByText('BUSCANDO MOTORISTA')).toBeTruthy();
+    expect(getByText('Procurando motorista')).toBeTruthy();
     expect(getByText('sincronizando estado')).toBeTruthy();
     expect(() => getByText('Sincronizando...')).toThrow();
     fireEvent.press(getByTestId('passenger-driver-search-details-toggle'));

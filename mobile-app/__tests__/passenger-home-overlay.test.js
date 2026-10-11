@@ -9,13 +9,14 @@ jest.mock('react-native-safe-area-context', () => ({
 }));
 
 describe("PassengerHomeOverlay", () => {
-  it("keeps empty search compact with the keyboard and expands for recent rows", () => {
+  it("anchors the search field where the landing pill sits and lists rows below it", () => {
     const screen = render(<LeafPassengerSearch kind="destination" query="" results={[]} keyboardHeight={300} />);
-    expect(screen.getByTestId('passenger-home-destination-search-sheet')).toHaveStyle({ height: 300 });
+    // Full-screen surface mirroring the landing: no bottom sheet that moves with the keyboard.
+    expect(screen.getByTestId('passenger-home-destination-search-sheet')).toHaveStyle({ top: 0, bottom: 0, paddingTop: 16 });
     expect(screen.getByTestId('passenger-home-destination-search-close')).toBeTruthy();
     screen.rerender(<LeafPassengerSearch kind="destination" query="" keyboardHeight={300}
       results={[1, 2, 3].map(id => ({ item: { id }, display: { title: `Destino ${id}`, address: `Rua ${id}` } }))} />);
-    expect(screen.getByTestId('passenger-home-destination-search-sheet')).toHaveStyle({ height: 480 });
+    expect(screen.getByTestId('passenger-home-destination-search-sheet')).toHaveStyle({ top: 0, bottom: 0 });
     expect(screen.getByTestId('passenger-home-destination-result-2')).toBeTruthy();
   });
 
@@ -40,11 +41,15 @@ describe("PassengerHomeOverlay", () => {
     expect(screen.queryByText('Destinos recentes')).toBeNull();
     expect(screen.queryByText('Seu próximo destino')).toBeNull();
     expect(screen.getByText('Busque um endereço ou lugar.')).toBeTruthy();
-    expect(screen.getByTestId('passenger-home-destination-search-sheet')).toHaveStyle({ height: 300 });
     screen.rerender(<PassengerHomeOverlay destinationSearchActive destinationSearchQuery="Ca" destinationSearchResults={[]} />);
     expect(screen.queryByText('Nenhum lugar encontrado')).toBeNull();
     expect(screen.getByText('Continue digitando para buscar.')).toBeTruthy();
+    // Debounce pending: the honest state is "searching", not "no results".
     screen.rerender(<PassengerHomeOverlay destinationSearchActive destinationSearchQuery="Casa" destinationSearchResults={[]} />);
+    expect(screen.queryByText('Nenhum lugar encontrado')).toBeNull();
+    expect(screen.getByText('Buscando…')).toBeTruthy();
+    screen.rerender(<PassengerHomeOverlay destinationSearchActive destinationSearchQuery="Casa" destinationSearchSearching destinationSearchResults={[]} />);
+    screen.rerender(<PassengerHomeOverlay destinationSearchActive destinationSearchQuery="Casa" destinationSearchSearching={false} destinationSearchResults={[]} />);
     expect(screen.getByText('Nenhum lugar encontrado')).toBeTruthy();
   });
 
@@ -195,9 +200,10 @@ describe("PassengerHomeOverlay", () => {
     );
 
     expect(getByTestId("passenger-home-category-card")).toHaveProp("accessible", true);
-    expect(getByText("Sua viagem")).toBeTruthy();
-    expect(getByText("Local de partida")).toBeTruthy();
-    expect(getByText("Local de destino")).toBeTruthy();
+    // Compact summary: addresses only, with origin/destination marks (no titles).
+    expect(queryByText("Sua viagem")).toBeNull();
+    expect(getByTestId("passenger-home-pickup-input")).toHaveProp("accessibilityLabel", expect.stringContaining("Origem:"));
+    expect(getByText("Mercadão de Madureira")).toBeTruthy();
     expect(getByText("R$ 18,55")).toBeTruthy();
     expect(getByText("Chegada ~15:30")).toBeTruthy();
     fireEvent.press(getByTestId("passenger-home-pickup-input"));

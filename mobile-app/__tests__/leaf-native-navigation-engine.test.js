@@ -69,7 +69,7 @@ describe('LeafNativeNavigationEngine', () => {
 
     expect(distanceToRouteMeters).toBeGreaterThan(100);
     expect(state.isOffRoute).toBe(true);
-    expect(state.currentInstruction).toBe('Siga até o local de embarque');
+    expect(state.currentInstruction).toBe('Siga até o embarque');
   });
 
   it('uses a safe generic instruction when route steps are unavailable', () => {
@@ -155,8 +155,8 @@ describe('LeafNativeNavigationEngine', () => {
       totalDurationMinutes: 3,
     });
 
-    expect(state.maneuverDistanceTargetLabel).toBe('o destino');
-    expect(state.currentInstruction).toBe('Siga até o local de embarque');
+    expect(state.maneuverDistanceTargetLabel).toBe('o embarque');
+    expect(state.currentInstruction).toBe('Siga até o embarque');
     expect(state.maneuverDistanceMeters).toBeGreaterThan(80);
   });
 
