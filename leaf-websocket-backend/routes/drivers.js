@@ -4,11 +4,13 @@ const redisPool = require('../utils/redis-pool');
 const driverLockManager = require('../services/driver-lock-manager');
 const { getPolicyForDriver } = require('../services/driver-destination-mode-service');
 const { validateAuthoritativeFinancialSnapshot } = require('../services/ride-financial-contract');
-const { requireFirebaseUser } = require('../middleware/firebase-user-auth');
+const { requireFirebaseUser, requireFirebaseSelf } = require('../middleware/firebase-user-auth');
 const { authenticateJWT, requireRole } = require('../middleware/jwt-auth');
 const { logger, logStructured, logError } = require('../utils/logger');
 const DRIVER_APPLICATION_ADMIN_ROLES = ['admin', 'super-admin', 'manager', 'support', 'development'];
 const requireDriverApplicationAdmin = [authenticateJWT, requireRole(DRIVER_APPLICATION_ADMIN_ROLES)];
+// Dado pessoal do motorista: exige ID token do Firebase e só o próprio motorista (uid do token == :id) acessa.
+const requireDriverSelf = [requireFirebaseUser, requireFirebaseSelf((req) => req.params?.id)];
 const LEGACY_DRIVER_APPLICATION_MUTATIONS_ENABLED = false;
 
 // Firebase integration
@@ -863,7 +865,7 @@ router.get('/api/drivers/nearby', async (req, res) => {
 });
 
 // ✅ NOVO: GET /api/drivers/:id/earnings - Relatório de Ganhos para o Mobile
-router.get('/api/drivers/:id/earnings', requireFirebase, async (req, res) => {
+router.get('/api/drivers/:id/earnings', requireDriverSelf, requireFirebase, async (req, res) => {
   try {
     const { id } = req.params;
     const db = firebaseConfig.getRealtimeDB();

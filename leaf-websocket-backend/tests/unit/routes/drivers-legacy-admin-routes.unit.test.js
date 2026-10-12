@@ -15,8 +15,17 @@ jest.mock('../../../services/payment-service', () => jest.fn().mockImplementatio
 jest.mock('../../../services/driver-destination-mode-service', () => ({
   getPolicyForDriver: jest.fn()
 }));
+// Token de teste: "Bearer firebase:<uid>". A checagem de dono (requireFirebaseSelf) é a real.
 jest.mock('../../../middleware/firebase-user-auth', () => ({
-  requireFirebaseUser: jest.fn((_req, _res, next) => next())
+  ...jest.requireActual('../../../middleware/firebase-user-auth'),
+  requireFirebaseUser: jest.fn((req, res, next) => {
+    const match = /^Bearer firebase:(.+)$/.exec(String(req.headers.authorization || ''));
+    if (!match) {
+      return res.status(401).json({ success: false, error: 'Token de autenticação ausente.' });
+    }
+    req.authenticatedUser = { uid: match[1], authSource: 'firebase' };
+    return next();
+  })
 }));
 jest.mock('../../../utils/logger', () => ({
   logger: { info: jest.fn(), warn: jest.fn(), error: jest.fn() },
@@ -58,6 +67,11 @@ function createApp() {
   app.use(express.json());
   app.use(driversRoutes);
   return app;
+}
+
+function getEarnings(app, driverId = 'driver_1', tokenUid = driverId) {
+  const pending = request(app).get(`/api/drivers/${driverId}/earnings`);
+  return tokenUid ? pending.set('Authorization', `Bearer firebase:${tokenUid}`) : pending;
 }
 
 function buildSnapshot(value) {
@@ -154,6 +168,64 @@ describe('drivers legacy admin application routes', () => {
   });
 });
 
+describe('drivers earnings route authentication', () => {
+  const earningsDb = () => ({
+    users: {
+      driver_1: { walletBalance: 50, rating: 4.9, hoursOnline: 3.5 },
+      driver_2: { walletBalance: 10, rating: 4.7, hoursOnline: 1 }
+    }
+  });
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  it('responde 401 sem token e não lê dados do motorista', async () => {
+    const app = createApp();
+    mockRealtimeDb(earningsDb());
+
+    const response = await getEarnings(app, 'driver_1', null);
+
+    expect(response.status).toBe(401);
+    expect(response.body.report).toBeUndefined();
+    expect(firebaseConfig.getRealtimeDB).not.toHaveBeenCalled();
+  });
+
+  it('responde 403 para o token de outro motorista e não lê dados', async () => {
+    const app = createApp();
+    mockRealtimeDb(earningsDb());
+
+    const response = await getEarnings(app, 'driver_1', 'driver_2');
+
+    expect(response.status).toBe(403);
+    expect(response.body.report).toBeUndefined();
+    expect(firebaseConfig.getRealtimeDB).not.toHaveBeenCalled();
+  });
+
+  it('não aceita o JWT de admin do dashboard no lugar do ID token do motorista', async () => {
+    const app = createApp();
+    mockRealtimeDb(earningsDb());
+
+    const response = await request(app)
+      .get('/api/drivers/driver_1/earnings')
+      .set('Authorization', 'Bearer admin-token');
+
+    expect(response.status).toBe(401);
+    expect(firebaseConfig.getRealtimeDB).not.toHaveBeenCalled();
+  });
+
+  it('responde 200 para o próprio motorista', async () => {
+    const app = createApp();
+    mockRealtimeDb(earningsDb());
+
+    const response = await getEarnings(app, 'driver_1', 'driver_1');
+
+    expect(response.status).toBe(200);
+    expect(response.body.success).toBe(true);
+    expect(response.body.report.balance).toBe(50);
+  });
+});
+
 describe('drivers earnings route financial source', () => {
   beforeEach(() => {
     jest.clearAllMocks();
@@ -190,7 +262,7 @@ describe('drivers earnings route financial source', () => {
       }
     });
 
-    const response = await request(app).get('/api/drivers/driver_1/earnings');
+    const response = await getEarnings(app);
 
     expect(response.status).toBe(200);
     expect(response.body.success).toBe(true);
@@ -224,7 +296,7 @@ describe('drivers earnings route financial source', () => {
       }
     });
 
-    const response = await request(app).get('/api/drivers/driver_1/earnings');
+    const response = await getEarnings(app);
 
     expect(response.status).toBe(200);
     expect(response.body.success).toBe(true);
@@ -281,7 +353,7 @@ describe('drivers earnings route financial source', () => {
         }
       });
 
-      const response = await request(app).get('/api/drivers/driver_1/earnings');
+      const response = await getEarnings(app);
 
       expect(response.status).toBe(200);
       const { report } = response.body;
@@ -314,7 +386,7 @@ describe('drivers earnings route financial source', () => {
         }
       });
 
-      const response = await request(app).get('/api/drivers/driver_1/earnings');
+      const response = await getEarnings(app);
 
       expect(response.body.report.totalCompletedRides).toBe(1);
       expect(response.body.report.totalNetAmount).toBeCloseTo(10.86, 2);
@@ -335,7 +407,7 @@ describe('drivers earnings route financial source', () => {
         }
       });
 
-      const response = await request(app).get('/api/drivers/driver_1/earnings');
+      const response = await getEarnings(app);
 
       const { report } = response.body;
       expect(report.totalCompletedRides).toBe(0);
@@ -359,7 +431,7 @@ describe('drivers earnings route financial source', () => {
         }
       });
 
-      const response = await request(app).get('/api/drivers/driver_1/earnings');
+      const response = await getEarnings(app);
 
       expect(response.body.report.totalCompletedRides).toBe(0);
       expect(response.body.report.totalNetAmount).toBe(0);
@@ -384,7 +456,7 @@ describe('drivers earnings route financial source', () => {
         }
       });
 
-      const response = await request(app).get('/api/drivers/driver_1/earnings');
+      const response = await getEarnings(app);
 
       const { report } = response.body;
       expect(report.totalCompletedRides).toBe(0);
@@ -407,7 +479,7 @@ describe('drivers earnings route financial source', () => {
         }
       });
 
-      const response = await request(app).get('/api/drivers/driver_1/earnings');
+      const response = await getEarnings(app);
 
       expect(response.body.report.totalCompletedRides).toBe(0);
       expect(response.body.report.totalCancellations).toBe(1);
