@@ -60,10 +60,21 @@ if (!TaskManager.isTaskDefined(LOCATION_TASK_NAME)) {
     });
 }
 
+// O Logger serializa objetos por chaves enumeráveis, o que reduz um Error nativo
+// a {"code": "..."} e descarta a mensagem real ("→ Caused by: ..."). Extrair aqui.
+function describeTrackingError(error) {
+    const code = typeof error?.code === 'string' && error.code ? error.code : null;
+    const rawMessage = typeof error?.message === 'string' ? error.message : String(error ?? '');
+    const message = rawMessage.replace(/\s+/g, ' ').trim().slice(0, 600) || 'erro desconhecido';
+    return { code, message };
+}
+
 class BackgroundLocationService {
     static instance = null;
     locationSubscription = null;
     isTracking = false;
+    startInFlight = null;
+    lastStartFailure = null;
 
     static getInstance() {
         if (!BackgroundLocationService.instance) {
@@ -128,15 +139,38 @@ class BackgroundLocationService {
     }
 
     /**
-     * Iniciar tracking de localização em background
+     * Estado observável do tracking de background. Uma falha ao iniciar não é
+     * engolida: fica disponível aqui (código + mensagem nativa real) para a UI
+     * ou para diagnóstico, mesmo em release, onde o Logger não imprime.
+     * @returns {{isTracking: boolean, lastStartFailure: (null|{code: (string|null), message: string, nativeTaskRegistered: (boolean|null), count: number, firstAt: number, lastAt: number})}}
+     */
+    getTrackingStatus() {
+        return {
+            isTracking: this.isTracking,
+            lastStartFailure: this.lastStartFailure ? { ...this.lastStartFailure } : null
+        };
+    }
+
+    /**
+     * Iniciar tracking de localização em background.
+     * Idempotente: já ativo é no-op e chamadas concorrentes compartilham a mesma tentativa.
      */
     async startBackgroundTracking() {
-        try {
-            if (this.isTracking) {
-                Logger.log('📍 Tracking já está ativo');
-                return;
-            }
+        if (this.isTracking) {
+            Logger.log('📍 Tracking já está ativo');
+            return;
+        }
+        if (this.startInFlight) {
+            return this.startInFlight;
+        }
+        this.startInFlight = this.startBackgroundTrackingOnce().finally(() => {
+            this.startInFlight = null;
+        });
+        return this.startInFlight;
+    }
 
+    async startBackgroundTrackingOnce() {
+        try {
             // ✅ Verificar se app está em foreground antes de iniciar
             const appState = AppState.currentState;
             if (appState !== 'active') {
@@ -176,27 +210,68 @@ class BackgroundLocationService {
             });
 
             this.isTracking = true;
+            if (this.lastStartFailure) {
+                Logger.log(`✅ Tracking de background recuperado após ${this.lastStartFailure.count} falha(s)`);
+            }
+            this.lastStartFailure = null;
             Logger.log('✅ Tracking de background iniciado');
         } catch (error) {
-            // ✅ Não lançar erro, apenas logar (evitar quebrar o fluxo)
-            Logger.error('❌ Erro ao iniciar tracking de background:', error);
-            // Se o erro for sobre foreground service, apenas logar e continuar
-            if (error.message && error.message.includes('foreground service')) {
-                Logger.warn('⚠️ Não foi possível iniciar foreground service (app pode estar em background). Tentando novamente quando app voltar ao foreground.');
-                this.isTracking = false; // Resetar flag para tentar novamente depois
-            }
+            // ✅ Não lançar erro (evitar quebrar o fluxo), mas registrar a condição
+            this.isTracking = false;
+            await this.recordStartFailure(error);
         }
     }
 
     /**
-     * Parar tracking de localização em background
+     * Uma falha persistente é UMA condição: console.error apenas quando ela aparece
+     * ou muda; repetições idênticas viram log simples com contador.
+     */
+    async recordStartFailure(error) {
+        const { code, message } = describeTrackingError(error);
+        let nativeTaskRegistered = null;
+        try {
+            nativeTaskRegistered = await Location.hasStartedLocationUpdatesAsync(LOCATION_TASK_NAME);
+        } catch (statusError) {
+            nativeTaskRegistered = null;
+        }
+
+        const signature = `${code || ''}|${message}`;
+        const now = Date.now();
+        const previous = this.lastStartFailure;
+        if (previous && previous.signature === signature) {
+            this.lastStartFailure = {
+                ...previous,
+                nativeTaskRegistered,
+                count: previous.count + 1,
+                lastAt: now
+            };
+            Logger.log(`📍 Tracking de background segue indisponível (mesma falha, tentativa ${previous.count + 1}): [${code || 'sem código'}]`);
+            return;
+        }
+
+        this.lastStartFailure = {
+            signature,
+            code,
+            message,
+            nativeTaskRegistered,
+            count: 1,
+            firstAt: now,
+            lastAt: now
+        };
+        Logger.error(
+            `❌ Erro ao iniciar tracking de background: [${code || 'sem código'}] ${message}`
+            + ` (task nativa registrada: ${nativeTaskRegistered === null ? 'desconhecido' : nativeTaskRegistered})`
+        );
+    }
+
+    /**
+     * Parar tracking de localização em background.
+     * Consulta o estado nativo: uma task registrada sobrevive ao reinício do app,
+     * enquanto `isTracking` (memória JS) volta a false.
      */
     async stopBackgroundTracking() {
+        const wasTracking = this.isTracking;
         try {
-            if (!this.isTracking) {
-                return;
-            }
-
             if (Device.isDevice === false) {
                 this.isTracking = false;
                 return;
@@ -208,13 +283,23 @@ class BackgroundLocationService {
             }
 
             this.isTracking = false;
-            Logger.log('✅ Tracking de background parado');
+            this.lastStartFailure = null;
+            if (wasTracking || isRunning) {
+                Logger.log('✅ Tracking de background parado');
+            }
         } catch (error) {
             this.isTracking = false;
             if (Device.isDevice === false) {
                 return;
             }
-            Logger.error('❌ Erro ao parar tracking de background:', error);
+            const { code, message } = describeTrackingError(error);
+            const report = `Erro ao parar tracking de background: [${code || 'sem código'}] ${message}`;
+            if (wasTracking) {
+                Logger.error(`❌ ${report}`);
+            } else {
+                // Nada foi iniciado por este contexto JS: a sondagem nativa falhou, não o tracking.
+                Logger.log(`📍 ${report}`);
+            }
         }
     }
 
