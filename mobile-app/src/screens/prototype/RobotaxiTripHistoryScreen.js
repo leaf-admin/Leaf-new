@@ -200,6 +200,7 @@ export default function RobotaxiTripHistoryScreen({ navigation, route }) {
             serverPeriod: driverServerPeriod,
             historyComplete: !pageInfo?.hasNextPage,
             loadedListStats: buildHistoryStats(history, true),
+            loadedRideCount: Array.isArray(history) ? history.length : 0,
           })
         : buildHistoryStats(history, false),
     [driverServerPeriod, history, isDriverRole, pageInfo?.hasNextPage],

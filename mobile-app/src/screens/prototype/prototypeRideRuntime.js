@@ -7075,7 +7075,9 @@ function buildDriverTripAssistModel(snapshot) {
       status === "accepted"
         ? "Confirme quando chegar ao ponto de embarque."
         : status === "arrived"
-          ? "O passageiro foi avisado e tem 2 minutos para embarcar."
+          ? Number(snapshot?.boardingRemainingSec || 0) > 0
+            ? "O passageiro foi avisado e tem 2 minutos para embarcar."
+            : "O passageiro foi avisado. Você está aguardando no embarque."
           : "Encerre a corrida ao desembarque do passageiro.",
     navigationPhase,
     nativeNavigation,
@@ -11747,7 +11749,7 @@ function attachSocketListeners() {
       receiptPickupCoordinate,
       receiptDestinationCoordinate,
     );
-    const distance = resolveCompletedTripDistanceKm({
+    const plannedDistance = resolveCompletedTripDistanceKm({
       payloadDistance: payload?.distance ?? payload?.distanceKm,
       runtimeDistance: runtimeState.tripDistanceKm,
       routeCoordinates: receiptRouteCoordinates,
@@ -11755,7 +11757,7 @@ function attachSocketListeners() {
       destinationCoordinate: receiptDestinationCoordinate,
       initialMeters: runtimeState.driverTripMeta?.initialMeters,
     });
-    const durationMinutes = resolveCompletedTripDurationMin({
+    const plannedDurationMinutes = resolveCompletedTripDurationMin({
       payloadDurationSeconds:
         payload?.duration ??
         payload?.durationSecs ??
@@ -11764,8 +11766,22 @@ function attachSocketListeners() {
       routeDurationMinutes:
         runtimeState.driverTripMeta?.routePlan?.destinationDurationMinutes ??
         runtimeState.driverTripMeta?.initialEtaMinutes,
-      distanceKm: distance,
+      distanceKm: plannedDistance,
     });
+    // A ride settled before its destination was shown with the planned trip
+    // ("15 km rodados, 20 min" after one minute without moving). When the
+    // server settled it, the receipt uses what the server measured.
+    const settledDistanceKm = Number(payload?.settlement?.executedDistanceKm);
+    const settledDurationSecs = Number(payload?.settlement?.executedDurationSecs);
+    const hasSettledTrip =
+      hasRiderEarlyEndSettlement(payload) &&
+      Number.isFinite(settledDistanceKm) &&
+      settledDistanceKm >= 0;
+    const distance = hasSettledTrip ? settledDistanceKm : plannedDistance;
+    const durationMinutes =
+      hasSettledTrip && Number.isFinite(settledDurationSecs) && settledDurationSecs >= 0
+        ? Math.max(1, Math.round(settledDurationSecs / 60))
+        : plannedDurationMinutes;
 
     const receipt = {
       pickupAddress: resolveCompletedReceiptPickupLabel(payload, runtimeState),

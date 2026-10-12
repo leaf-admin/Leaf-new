@@ -1595,7 +1595,7 @@ describe('prototype ride screens', () => {
       expect(screen.getByText('R$ 3,00')).toBeTruthy();
       expect(
         screen.getByText(
-          'O motorista esperou no local de embarque e cancelou a corrida porque você não compareceu. Por isso foi cobrada a taxa de cancelamento.',
+          'O motorista esperou no embarque e você não compareceu. Há taxa de cancelamento.',
         ),
       ).toBeTruthy();
       expect(

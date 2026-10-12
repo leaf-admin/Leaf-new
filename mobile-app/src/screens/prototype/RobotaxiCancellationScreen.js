@@ -144,7 +144,7 @@ export default function RobotaxiCancellationScreen({ navigation, route }) {
       ? 'O reembolso integral já foi registrado no mesmo Pix usado no pagamento.'
       : 'O reembolso integral foi registrado no mesmo Pix usado no pagamento.'
     : isDriverNoShowFee
-      ? 'O motorista esperou no local de embarque e cancelou a corrida porque você não compareceu. Por isso foi cobrada a taxa de cancelamento.'
+      ? 'O motorista esperou no embarque e você não compareceu. Há taxa de cancelamento.'
     : hasFinancialOutcome
       ? 'Os valores abaixo refletem a política aplicada ao momento do cancelamento.'
       : source === 'remote_cancel'

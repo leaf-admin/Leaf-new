@@ -140,8 +140,11 @@ export function buildDriverHistoryStats({
   serverPeriod = null,
   historyComplete = false,
   loadedListStats = [],
+  loadedRideCount = 0,
 } = {}) {
-  if (serverPeriod) {
+  // A server total that counts fewer rides than the list on screen is not a
+  // total; do not put it above that list.
+  if (serverPeriod && Number(serverPeriod.count) >= Number(loadedRideCount || 0)) {
     const periodLabel = `${serverPeriod.windowDays} dias`;
     return [
       { key: 'rides', label: `Concluídas · ${periodLabel}`, value: String(serverPeriod.count) },
@@ -172,10 +175,6 @@ export function selectDriverTodayEarnings({
   now = new Date(),
 } = {}) {
   const serverToday = resolveServerTodayEarnings(report, now);
-  if (serverToday) {
-    return { source: 'server', ...serverToday };
-  }
-
   const dateKey = toLocalDateKey(now);
   const local = {
     source: 'local',
@@ -190,7 +189,15 @@ export function selectDriverTodayEarnings({
     previousFallback.dateKey === dateKey &&
     Number(previousFallback.net) > local.net
   ) {
-    return previousFallback;
+    return serverToday && Number(serverToday.net) >= Number(previousFallback.net)
+      ? { source: 'server', ...serverToday }
+      : previousFallback;
+  }
+  // The server report can lag behind or miss rides (seen on a device: it
+  // answered zero right after a ride whose receipt said + R$ 41,93). It only
+  // wins when it accounts for at least what this phone already knows about.
+  if (serverToday && Number(serverToday.net) >= local.net && serverToday.count >= local.count) {
+    return { source: 'server', ...serverToday };
   }
   return local;
 }

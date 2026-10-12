@@ -1661,7 +1661,10 @@ export default function RobotaxiTripScreen({ navigation, route }) {
             }
           }
         }
-      ]
+      ],
+      // The text mentions Pix; the friendly-alert patch rewrote it as a
+      // payment failure message.
+      { __skipFriendlyAlertPatch: true }
     );
   }, [endTripEarlyFlow, isBusy]);
 
