@@ -244,6 +244,48 @@ function resolveCompletedDriverEarlyEndFields(bookingData = {}) {
     };
 }
 
+// Confere se a liquidação do encerramento antecipado fecha em centavos com o
+// que o billing worker vai executar: valor liquidado + estorno = valor pago,
+// pedágio inteiro, taxas + líquido = valor liquidado, e líquido da corrida
+// (sem o repasse do pedágio) positivo. Devolve o motivo quando não fecha.
+function resolveDriverEarlyEndInconsistency({
+    settlement = {},
+    breakdown = {},
+    tollFee = 0,
+    fullFare = 0,
+    fareTolerance = 0.01
+}) {
+    const cents = (value) => Math.round((Number(value) || 0) * 100);
+    const executedFareCents = cents(settlement.executedFare);
+    const prepaidCents = cents(settlement.prepaidAmount);
+    const tollFeeCents = cents(tollFee);
+
+    if (cents(settlement.tollFee) !== tollFeeCents || tollFeeCents >= executedFareCents) {
+        return 'TOLL_AMOUNT_MISMATCH';
+    }
+    // O estorno real é o valor pago menos o liquidado; a liquidação só é
+    // verdadeira se o pré-pago dela for o valor travado da corrida.
+    if (Math.abs(prepaidCents - cents(fullFare)) > Math.round(fareTolerance * 100)) {
+        return 'PREPAID_AMOUNT_MISMATCH';
+    }
+    if (executedFareCents + cents(settlement.estimatedRefund) !== prepaidCents) {
+        return 'SETTLEMENT_UNBALANCED';
+    }
+    const driverNetCents = cents(breakdown.driverNetAmount);
+    const allocatedCents =
+        cents(breakdown.operationalFee) +
+        cents(breakdown.paymentIntermediationFee) +
+        cents(breakdown.subscriptionRetainedFee) +
+        driverNetCents;
+    if (allocatedCents !== executedFareCents) {
+        return 'SETTLEMENT_UNBALANCED';
+    }
+    if (!(driverNetCents - tollFeeCents > 0)) {
+        return 'SETTLED_NET_NOT_POSITIVE';
+    }
+    return null;
+}
+
 async function applyDeferredIdentityReverification(driverId, context = {}) {
     try {
         const kycPolicyService = require('../services/kyc-policy-service');
@@ -468,9 +510,10 @@ class CompleteTripCommand extends Command {
                 );
 
                 // Encerramento antecipado pelo motorista: mesma regra do encerramento
-                // pelo passageiro (trecho percorrido, com o mesmo mínimo). Quem decide
-                // é o servidor, com a telemetria da corrida. Qualquer dúvida ou erro
-                // mantém o valor integral: a finalização nunca falha por causa disto.
+                // pelo passageiro (trecho percorrido, com o mesmo mínimo), aplicada à
+                // tarifa sem o pedágio; o pedágio é repasse e fica cobrado inteiro. Quem
+                // decide é o servidor, com a telemetria da corrida. Qualquer dúvida ou
+                // erro mantém o valor integral: a finalização nunca falha por causa disto.
                 let driverEarlyEnd = null;
                 let driverEarlyEndSkip = null;
                 if (offlineSettlementReview) {
@@ -496,14 +539,23 @@ class CompleteTripCommand extends Command {
                                         { subscriptionRetainedFeeCents: extensionRetainedOperationalFeeCents }
                                     )
                                     : null;
+                            const inconsistency = settledBreakdown
+                                ? resolveDriverEarlyEndInconsistency({
+                                    settlement: decision.settlement,
+                                    breakdown: settledBreakdown,
+                                    tollFee: this.tollFee,
+                                    fullFare: this.finalFare,
+                                    fareTolerance
+                                })
+                                : null;
                             if (!settledBreakdown) {
                                 driverEarlyEndSkip = { ...decision, applied: false, reason: 'NO_REFUND_DUE' };
-                            } else if (!(Number(settledBreakdown.driverNetAmount) > 0)) {
+                            } else if (inconsistency) {
                                 driverEarlyEndSkip = {
                                     ...decision,
                                     applied: false,
                                     detected: true,
-                                    reason: 'SETTLED_NET_NOT_POSITIVE'
+                                    reason: inconsistency
                                 };
                             } else {
                                 driverEarlyEnd = decision;

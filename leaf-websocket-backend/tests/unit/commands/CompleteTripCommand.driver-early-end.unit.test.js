@@ -390,22 +390,153 @@ describe('CompleteTripCommand driver early end settlement', () => {
     expect(redis.store['booking:booking_1'].status).toBe('COMPLETED');
   });
 
-  it('does not settle a ride with toll and records the reason for review', async () => {
-    redis = createRedis({ tollFee: '6.5' });
+  function useTollBooking({ fare, toll, ...overrides }) {
+    redis = createRedis({
+      estimatedFare: String(fare),
+      paymentAmountInCents: String(Math.round(fare * 100)),
+      tollFee: String(toll),
+      ...overrides
+    });
+    redisPool.getConnection.mockReturnValue(redis);
+  }
+
+  function expectConsistentSettlement(result, { fare, toll, executedFare, driverNet }) {
+    const { settlement, financialSnapshot } = result.data;
+    const cents = (value) => Math.round(value * 100);
+
+    expect(result.data.completionType).toBe('EARLY_ENDED_BY_DRIVER');
+    expect(result.data.finalFare).toBe(executedFare);
+    expect(result.data.tollFee).toBe(toll);
+    expect(settlement.prepaidAmount).toBe(fare);
+    expect(settlement.executedFare).toBe(executedFare);
+    expect(settlement.tollFee).toBe(toll);
+    expect(cents(settlement.executedFare) + cents(settlement.estimatedRefund)).toBe(cents(fare));
+    expect(cents(settlement.tollFee) + cents(settlement.executedFareWithoutToll)).toBe(cents(executedFare));
+
+    const snapshotCheck = validateAuthoritativeFinancialSnapshot(financialSnapshot, {
+      passengerPaidCents: cents(executedFare),
+      tollFeeCents: cents(toll)
+    });
+    expect(snapshotCheck.valid).toBe(true);
+    expect(
+      financialSnapshot.operationalFeeCents +
+        financialSnapshot.paymentIntermediationFeeCents +
+        financialSnapshot.subscriptionRetainedFeeCents +
+        financialSnapshot.driverNetAmountCents
+    ).toBe(cents(executedFare));
+    expect(financialSnapshot.driverNetAmountCents).toBe(cents(driverNet));
+    expect(financialSnapshot.driverNetAmountCents - financialSnapshot.tollFeeCents).toBeGreaterThan(0);
+    expect(result.data.driverNetAmount).toBe(driverNet);
+    expect(result.data.event.finalFare).toBe(executedFare);
+    expect(result.data.event.tollFee).toBe(toll);
+  }
+
+  it('settles a toll ride ended halfway: toll whole, travelled share on the rest', async () => {
+    useTollBooking({ fare: 46.5, toll: 6.5 });
+    serverSaw(HALFWAY, { distanceKm: 5, durationSecs: 600 });
+
+    const result = await buildCommand({ finalFare: 46.5, tollFee: 6.5 }).execute();
+
+    // 6,50 + 50% × 40,00 = 26,50; estorno 20,00.
+    // Líquido: 20,00 − 0,99 − 0,50 + 6,50 de pedágio = 25,01.
+    expect(result.success).toBe(true);
+    expectConsistentSettlement(result, { fare: 46.5, toll: 6.5, executedFare: 26.5, driverNet: 25.01 });
+    expect(result.data.settlement).toMatchObject({
+      appliedRatio: 0.5,
+      fareWithoutToll: 40,
+      executedFareWithoutToll: 20,
+      estimatedRefund: 20,
+      tollKeptWhole: true,
+      tollChargedAmount: 6.5,
+      tollCrossingVerified: false,
+      tollManualRefundOnDispute: true
+    });
+    expect(result.data.financialSnapshot).toMatchObject({
+      operationalFeeCents: 99,
+      paymentIntermediationFeeCents: 50
+    });
+    expect(result.data.earlyEndSettlementSkipped).toBeUndefined();
+
+    const stored = redis.store['booking:booking_1'];
+    expect(stored.finalFare).toBe('26.5');
+    expect(stored.tollFee).toBe('6.5');
+    expect(JSON.parse(stored.settlement)).toMatchObject({
+      executedFare: 26.5,
+      tollFee: 6.5,
+      tollKeptWhole: true
+    });
+  });
+
+  it('settles a toll ride ended almost immediately on the whole toll plus the 25% minimum', async () => {
+    useTollBooking({ fare: 46.5, toll: 6.5 });
+    serverSaw(JUST_AFTER_PICKUP, { distanceKm: 0.2, durationSecs: 60 });
+
+    const result = await buildCommand({ finalFare: 46.5, tollFee: 6.5 }).execute();
+
+    // 6,50 + 25% × 40,00 = 16,50; estorno 30,00. Líquido: 10,00 − 0,79 − 0,50 + 6,50 = 15,21.
+    expectConsistentSettlement(result, { fare: 46.5, toll: 6.5, executedFare: 16.5, driverNet: 15.21 });
+    expect(result.data.settlement).toMatchObject({
+      appliedRatio: 0.25,
+      executedFareWithoutToll: 10,
+      estimatedRefund: 30,
+      tollKeptWhole: true
+    });
+  });
+
+  it('stays consistent when the toll is larger than the minimum charge', async () => {
+    useTollBooking({ fare: 20, toll: 12 });
+    serverSaw(JUST_AFTER_PICKUP, { distanceKm: 0.2, durationSecs: 60 });
+
+    const result = await buildCommand({ finalFare: 20, tollFee: 12 }).execute();
+
+    // 12,00 + 25% × 8,00 = 14,00; estorno 6,00. Líquido: 2,00 − 0,79 − 0,50 + 12,00 = 12,71.
+    expectConsistentSettlement(result, { fare: 20, toll: 12, executedFare: 14, driverNet: 12.71 });
+    expect(result.data.settlement).toMatchObject({
+      executedFareWithoutToll: 2,
+      estimatedRefund: 6,
+      tollKeptWhole: true
+    });
+  });
+
+  it('keeps the full fare when the settled share would leave the driver only the toll', async () => {
+    useTollBooking({ fare: 16, toll: 12 });
+    serverSaw(JUST_AFTER_PICKUP, { distanceKm: 0.2, durationSecs: 60 });
+
+    const result = await buildCommand({ finalFare: 16, tollFee: 12 }).execute();
+
+    // 25% × 4,00 = 1,00 não cobre as taxas: o líquido da corrida seria zero.
+    expect(result.success).toBe(true);
+    expect(result.data.finalFare).toBe(16);
+    expect(result.data.completionType).toBeUndefined();
+    expect(result.data.financialSnapshot).toMatchObject({ passengerPaidCents: 1600, tollFeeCents: 1200 });
+    expect(result.data.earlyEndSettlementSkipped).toMatchObject({ reason: 'SETTLED_NET_NOT_POSITIVE' });
+    expect(JSON.parse(redis.store['booking:booking_1'].earlyEndSettlementSkipped)).toMatchObject({
+      reason: 'SETTLED_NET_NOT_POSITIVE'
+    });
+    expect(redis.store['booking:booking_1'].settlement).toBeUndefined();
+  });
+
+  it('keeps the full fare when the completion toll differs from the booked toll', async () => {
+    useTollBooking({ fare: 46.5, toll: 6.5 });
+    serverSaw(HALFWAY, { distanceKm: 5, durationSecs: 600 });
+
+    const result = await buildCommand({ finalFare: 46.5, tollFee: 9 }).execute();
+
+    expect(result.data.finalFare).toBe(46.5);
+    expect(result.data.completionType).toBeUndefined();
+    expect(result.data.earlyEndSettlementSkipped).toMatchObject({ reason: 'TOLL_AMOUNT_MISMATCH' });
+    expect(redis.store['booking:booking_1'].settlement).toBeUndefined();
+  });
+
+  it('keeps the full fare when the prepaid amount of the settlement is not the amount paid', async () => {
+    redis = createRedis({ estimatedFare: '45', paymentAmountInCents: '4000' });
     redisPool.getConnection.mockReturnValue(redis);
     serverSaw(HALFWAY, { distanceKm: 5, durationSecs: 600 });
 
-    const result = await buildCommand({ tollFee: 6.5 }).execute();
+    const result = await buildCommand().execute();
 
-    expect(result.success).toBe(true);
-    expect(result.data.finalFare).toBe(40);
-    expect(result.data.tollFee).toBe(6.5);
-    expect(result.data.completionType).toBeUndefined();
-    expect(result.data.earlyEndSettlementSkipped).toMatchObject({ reason: 'TOLL_PASS_THROUGH' });
-    expect(JSON.parse(redis.store['booking:booking_1'].earlyEndSettlementSkipped)).toMatchObject({
-      reason: 'TOLL_PASS_THROUGH'
-    });
-    expect(redis.store['booking:booking_1'].settlement).toBeUndefined();
+    expectFullFare(result, redis);
+    expect(result.data.earlyEndSettlementSkipped).toMatchObject({ reason: 'PREPAID_AMOUNT_MISMATCH' });
   });
 
   it('does not settle without the contracted route distance', async () => {

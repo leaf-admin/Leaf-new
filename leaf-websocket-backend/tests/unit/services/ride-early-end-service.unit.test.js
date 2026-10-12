@@ -192,8 +192,9 @@ describe('ride-early-end-service driver settlement decision', () => {
   });
 
   it.each([
-    ['toll on the booking', { bookingData: booking({ tollFee: '6.5' }) }, 'TOLL_PASS_THROUGH'],
-    ['toll resolved by the handler', { tollFee: 4 }, 'TOLL_PASS_THROUGH'],
+    ['a toll the booking does not have', { tollFee: 4 }, 'TOLL_AMOUNT_MISMATCH'],
+    ['a toll different from the booked one', { bookingData: booking({ estimatedFare: '46.5', paymentAmountInCents: '4650', tollFee: '6.5' }), tollFee: 9 }, 'TOLL_AMOUNT_MISMATCH'],
+    ['a toll that is the whole fare', { bookingData: booking({ tollFee: '40' }), tollFee: 40 }, 'TOLL_NOT_BELOW_FARE'],
     ['ride legs', { bookingData: booking({ rideLegs: JSON.stringify([{ legNumber: 1 }]) }) }, 'MULTI_LEG_RIDE'],
     ['operational continuation', { bookingData: booking({ operationalContinuation: JSON.stringify({ status: 'X' }) }) }, 'MULTI_LEG_RIDE'],
     ['confirmed extension', { bookingData: booking({ extensionHistory: JSON.stringify([{ status: 'CONFIRMED' }]) }) }, 'RIDE_EXTENSION'],
@@ -205,6 +206,71 @@ describe('ride-early-end-service driver settlement decision', () => {
     expect(result.applied).toBe(false);
     expect(result.reason).toBe(reason);
     expect(result.settlement).toBeUndefined();
+  });
+
+  it('keeps the toll whole and applies the travelled share to the fare without it', async () => {
+    const result = await decide({
+      bookingData: booking({ estimatedFare: '46.5', paymentAmountInCents: '4650', tollFee: '6.5' }),
+      tollFee: 6.5
+    });
+
+    // 6,50 + 50% × (46,50 − 6,50) = 26,50
+    expect(result.applied).toBe(true);
+    expect(result.settlement).toMatchObject({
+      settlementType: 'EARLY_ENDED_BY_DRIVER',
+      originalFare: 46.5,
+      prepaidAmount: 46.5,
+      appliedRatio: 0.5,
+      tollFee: 6.5,
+      fareWithoutToll: 40,
+      executedFareWithoutToll: 20,
+      executedFare: 26.5,
+      estimatedRefund: 20,
+      remainingReservedAmount: 20,
+      tollKeptWhole: true,
+      tollChargedAmount: 6.5,
+      tollCrossingVerified: false,
+      tollManualRefundOnDispute: true
+    });
+  });
+
+  it('charges the whole toll plus the 25% minimum of the fare without it', async () => {
+    mockResolveCanonicalTripMetrics.mockResolvedValue({
+      success: true,
+      distanceKm: 0.2,
+      durationSecs: 60,
+      endLocation: { lat: -22.9226, lng: -43.4049 },
+      lastReceivedAtMs: nowMs - 1000
+    });
+
+    // 8,95 + 25% × (48,61 − 8,95) = 8,95 + 9,92 = 18,87
+    const result = await decide({
+      bookingData: booking({ estimatedFare: '48.61', paymentAmountInCents: '4861', tollFee: '8.95' }),
+      tollFee: 8.95
+    });
+
+    expect(result.applied).toBe(true);
+    expect(result.settlement).toMatchObject({
+      appliedRatio: 0.25,
+      tollFee: 8.95,
+      fareWithoutToll: 39.66,
+      executedFareWithoutToll: 9.92,
+      executedFare: 18.87,
+      estimatedRefund: 29.74,
+      tollKeptWhole: true
+    });
+  });
+
+  it('leaves a ride without toll exactly on the rider early-end numbers', async () => {
+    const { calculateRiderEarlyEndSettlement } = require('../../../services/ride-lifecycle-service');
+    const riderSettlement = calculateRiderEarlyEndSettlement(booking(), { distanceKm: 5, durationSecs: 600 });
+
+    const result = await decide({ tollFee: 0 });
+
+    expect(result.applied).toBe(true);
+    expect(result.settlement).toMatchObject({ ...riderSettlement, settlementType: 'EARLY_ENDED_BY_DRIVER' });
+    expect(result.settlement.tollKeptWhole).toBeUndefined();
+    expect(result.settlement.fareWithoutToll).toBeUndefined();
   });
 
   it('does not settle when the travelled share already covers the full fare', async () => {
