@@ -98,7 +98,25 @@ function firstObjectCandidate(...values) {
   return null;
 }
 
-function resolveBackendFinalFinancialSnapshot(booking = {}) {
+// Estados terminais em que a corrida é liquidada e creditada ao motorista
+// (ver RideStateManager.STATES). Ficam de fora os cancelamentos, EARLY_ENDED_REVIEW
+// (liquidação manual, sem crédito automático) e INTERRUPTED_OPERATIONAL_ENDED
+// (encerramento sem snapshot financeiro final do backend).
+const DRIVER_PAID_RIDE_STATUSES = new Set(['COMPLETED', 'EARLY_ENDED_BY_RIDER']);
+const EARLY_ENDED_BY_RIDER_STATUS = 'EARLY_ENDED_BY_RIDER';
+
+// Valor executado (em centavos) de uma corrida encerrada antecipadamente, quando o
+// settlement foi persistido junto da corrida. Retorna undefined se não houver.
+function resolveExecutedFareCents(booking = {}) {
+  const settlement = parseObjectCandidate(booking.settlement);
+  const executedFare = Number(settlement?.executedFare);
+  if (!Number.isFinite(executedFare) || executedFare <= 0) {
+    return undefined;
+  }
+  return Math.round(executedFare * 100);
+}
+
+function resolveBackendFinalFinancialSnapshot(booking = {}, expected = {}) {
   const financialBreakdown = parseObjectCandidate(booking.financialBreakdown) || {};
   const paymentDistribution = parseObjectCandidate(booking.paymentDistribution) || {};
   const paymentCalculation = parseObjectCandidate(paymentDistribution.calculation) || {};
@@ -111,7 +129,7 @@ function resolveBackendFinalFinancialSnapshot(booking = {}) {
     paymentCalculation.financialContract,
     paymentCalculation.financialSnapshot
   );
-  const validation = validateAuthoritativeFinancialSnapshot(candidate || {});
+  const validation = validateAuthoritativeFinancialSnapshot(candidate || {}, expected);
   return validation.valid ? validation.snapshot : null;
 }
 
@@ -905,7 +923,7 @@ router.get('/api/drivers/:id/earnings', requireFirebase, async (req, res) => {
 
     allDriverBookings.forEach(booking => {
       const status = String(booking?.status || '').toUpperCase();
-      const isCompleted = status === 'COMPLETED';
+      const isCompleted = DRIVER_PAID_RIDE_STATUSES.has(status);
       const isCancelled = status.includes('CANCEL');
       if (!isCompleted && !isCancelled) {
         return;
@@ -935,7 +953,16 @@ router.get('/api/drivers/:id/earnings', requireFirebase, async (req, res) => {
         return;
       }
 
-      const finalFinancialSnapshot = resolveBackendFinalFinancialSnapshot(booking);
+      // No encerramento antecipado vale o líquido liquidado sobre o valor executado, nunca o
+      // contratado: um snapshot que não bate com o settlement fica pendente em vez de somar.
+      const expectedSnapshot = {};
+      if (status === EARLY_ENDED_BY_RIDER_STATUS) {
+        const executedFareCents = resolveExecutedFareCents(booking);
+        if (executedFareCents !== undefined) {
+          expectedSnapshot.passengerPaidCents = executedFareCents;
+        }
+      }
+      const finalFinancialSnapshot = resolveBackendFinalFinancialSnapshot(booking, expectedSnapshot);
       if (!finalFinancialSnapshot) {
         financialSnapshotPendingCount += 1;
         seriesSlot.financialSnapshotPendingCount = (seriesSlot.financialSnapshotPendingCount || 0) + 1;
