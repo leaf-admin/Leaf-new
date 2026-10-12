@@ -130,45 +130,6 @@ function moneyToCents(value) {
 }
 
 /**
- * Regra do pedágio no encerramento antecipado pelo motorista.
- *
- * valor liquidado = pedágio + proporção × (tarifa − pedágio)
- * estorno         = valor pré-pago − valor liquidado
- *
- * O servidor não sabe se a praça de pedágio foi de fato cruzada, então o
- * pedágio contratado fica cobrado inteiro e a liquidação registra isso: se o
- * passageiro contestar, o suporte estorna o pedágio manualmente.
- *
- * Devolve `null` quando a conta não fecha (pedágio maior ou igual à tarifa).
- */
-function applyTollPassThrough(baseSettlement, tollFeeCents) {
-  const originalFareCents = moneyToCents(baseSettlement.originalFare);
-  const prepaidCents = moneyToCents(baseSettlement.prepaidAmount);
-  const fareWithoutTollCents = originalFareCents - tollFeeCents;
-  if (!(fareWithoutTollCents > 0)) {
-    return null;
-  }
-
-  const executedFareWithoutTollCents = Math.round(fareWithoutTollCents * baseSettlement.appliedRatio);
-  const executedFareCents = tollFeeCents + executedFareWithoutTollCents;
-  const estimatedRefundCents = Math.max(0, prepaidCents - executedFareCents);
-
-  return {
-    ...baseSettlement,
-    executedFare: executedFareCents / 100,
-    tollFee: tollFeeCents / 100,
-    estimatedRefund: estimatedRefundCents / 100,
-    remainingReservedAmount: estimatedRefundCents / 100,
-    fareWithoutToll: fareWithoutTollCents / 100,
-    executedFareWithoutToll: executedFareWithoutTollCents / 100,
-    tollKeptWhole: true,
-    tollChargedAmount: tollFeeCents / 100,
-    tollCrossingVerified: false,
-    tollManualRefundOnDispute: true
-  };
-}
-
-/**
  * Decide se a finalização feita pelo motorista é um encerramento antecipado
  * a liquidar pelo trecho percorrido.
  *
@@ -255,6 +216,7 @@ async function resolveDriverEarlyEndSettlement({
   const executedDistanceKm = Math.max(Number(metrics.distanceKm) || 0, straightLineKm);
   const executedDurationSecs = Math.max(0, Number(metrics.durationSecs) || 0);
 
+  // Mesma conta do encerramento pelo passageiro, pedágio incluído.
   const { calculateRiderEarlyEndSettlement } = require('./ride-lifecycle-service');
   const proportionalSettlement = calculateRiderEarlyEndSettlement(bookingData, {
     distanceKm: executedDistanceKm,
@@ -274,11 +236,11 @@ async function resolveDriverEarlyEndSettlement({
     return notApplied('TOLL_AMOUNT_MISMATCH', detected);
   }
 
-  // Sem pedágio a liquidação é exatamente a do encerramento pelo passageiro.
-  const baseSettlement = bookedTollFeeCents > 0
-    ? applyTollPassThrough(proportionalSettlement, bookedTollFeeCents)
-    : proportionalSettlement;
-  if (!baseSettlement) {
+  // A regra do pedágio (pedágio inteiro + proporção da tarifa sem ele) já vem
+  // aplicada pela conta compartilhada com o encerramento pelo passageiro.
+  // Quando o pedágio não é menor que a tarifa a conta não fecha: não liquida.
+  const baseSettlement = proportionalSettlement;
+  if (baseSettlement.tollRuleSkippedReason === 'TOLL_NOT_BELOW_FARE') {
     return notApplied('TOLL_NOT_BELOW_FARE', detected);
   }
   if (!(baseSettlement.executedFare > 0) || !(baseSettlement.estimatedRefund > 0)) {

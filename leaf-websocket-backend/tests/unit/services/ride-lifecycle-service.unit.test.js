@@ -1,4 +1,5 @@
 const {
+  calculateExecutedFareSettlement,
   calculateRiderEarlyEndSettlement,
   calculateOperationalInterruptionSettlement,
   buildRideLegSettlement,
@@ -42,6 +43,148 @@ describe('ride-lifecycle-service', () => {
     expect(settlement.settlementType).toBe('INTERRUPTED_OPERATIONAL');
     expect(settlement.executedFare).toBe(10);
     expect(settlement.estimatedRefund).toBe(30);
+  });
+
+  describe('early-end toll rule (toll whole + travelled share of the fare without it)', () => {
+    const tollBooking = (overrides = {}) => ({
+      estimatedFare: '48.61',
+      paymentAmountInCents: '4861',
+      tollFee: '8.95',
+      routeDistanceKm: '10',
+      routeDurationSecs: '600',
+      ...overrides
+    });
+    const cents = (value) => Math.round(value * 100);
+
+    it('settles the approved example at toll + 25% of the fare without toll', () => {
+      const settlement = calculateRiderEarlyEndSettlement(tollBooking(), { distanceKm: 0.1, durationSecs: 5 });
+
+      // 8,95 + 25% × (48,61 − 8,95) = 8,95 + 9,92 = 18,87 (antes: 25% × 48,61 = 12,15)
+      expect(settlement).toMatchObject({
+        settlementType: 'EARLY_ENDED_BY_RIDER',
+        originalFare: 48.61,
+        prepaidAmount: 48.61,
+        appliedRatio: 0.25,
+        tollFee: 8.95,
+        fareWithoutToll: 39.66,
+        executedFareWithoutToll: 9.92,
+        executedFare: 18.87,
+        estimatedRefund: 29.74,
+        remainingReservedAmount: 29.74,
+        tollKeptWhole: true,
+        tollChargedAmount: 8.95,
+        tollCrossingVerified: false,
+        tollManualRefundOnDispute: true
+      });
+    });
+
+    it('never scales the toll, whatever the travelled share', () => {
+      [[0, 0], [2, 120], [5, 300], [7.5, 450], [10, 600], [14, 900]].forEach(([distanceKm, durationSecs]) => {
+        const settlement = calculateRiderEarlyEndSettlement(tollBooking(), { distanceKm, durationSecs });
+
+        expect(cents(settlement.executedFare)).toBe(895 + Math.round(3966 * settlement.appliedRatio));
+        expect(cents(settlement.executedFare) + cents(settlement.estimatedRefund)).toBe(4861);
+        expect(settlement.executedFare).toBeLessThanOrEqual(settlement.prepaidAmount);
+        expect(settlement.estimatedRefund).toBeGreaterThanOrEqual(0);
+        expect(settlement.tollChargedAmount).toBe(8.95);
+      });
+    });
+
+    it('produces exactly today\'s numbers for rides without toll', () => {
+      const fares = ['7.9', '12.34', '19.99', '33.33', '40', '45.48', '48.61', '77.77', '101.01', '250.05'];
+      const progress = [[0, 0], [0.4, 60], [3.3, 200], [5, 300], [9.99, 599], [10, 600]];
+      const noTollVariants = [{}, { tollFee: '0' }, { tollFee: '' }, { tollFee: 'abc' }, { tollFee: null }, { tollFee: '-3' }];
+
+      fares.forEach((fare) => {
+        progress.forEach(([distanceKm, durationSecs]) => {
+          noTollVariants.forEach((variant) => {
+            const booking = {
+              estimatedFare: fare,
+              paymentAmountInCents: String(Math.round(Number(fare) * 100)),
+              routeDistanceKm: '10',
+              routeDurationSecs: '600',
+              ...variant
+            };
+            // Conta de hoje: proporção × tarifa inteira, sem a regra do pedágio.
+            const today = calculateExecutedFareSettlement(booking, {
+              distanceKm,
+              durationSecs,
+              settlementType: 'EARLY_ENDED_BY_RIDER',
+              minChargeRatio: 0.25
+            });
+            const settlement = calculateRiderEarlyEndSettlement(booking, { distanceKm, durationSecs });
+
+            expect(settlement).toEqual(today);
+            expect(settlement.executedFare).toBe(
+              Math.round(Number(fare) * settlement.appliedRatio * 100) / 100
+            );
+            expect(settlement.tollKeptWhole).toBeUndefined();
+            expect(settlement.fareWithoutToll).toBeUndefined();
+          });
+        });
+      });
+    });
+
+    it('treats a missing or non-numeric toll as no toll', () => {
+      ['abc', '', null, undefined, 'NaN', '-3'].forEach((tollFee) => {
+        const settlement = calculateRiderEarlyEndSettlement(tollBooking({ tollFee }), { distanceKm: 0.1, durationSecs: 5 });
+
+        expect(settlement.executedFare).toBe(12.15);
+        expect(settlement.estimatedRefund).toBe(36.46);
+        expect(settlement.tollKeptWhole).toBeUndefined();
+      });
+    });
+
+    it('keeps the old numbers and flags the settlement when the toll is not below the fare', () => {
+      ['20', '25'].forEach((tollFee) => {
+        const settlement = calculateRiderEarlyEndSettlement(
+          tollBooking({ estimatedFare: '20', paymentAmountInCents: '2000', tollFee }),
+          { distanceKm: 0.1, durationSecs: 5 }
+        );
+
+        expect(settlement).toMatchObject({
+          executedFare: 5,
+          estimatedRefund: 15,
+          tollKeptWhole: false,
+          tollRuleSkippedReason: 'TOLL_NOT_BELOW_FARE'
+        });
+        expect(settlement.tollChargedAmount).toBeUndefined();
+      });
+    });
+
+    it('never charges more than was prepaid and never returns a negative refund', () => {
+      // Pedágio quase do tamanho da tarifa: pedágio + mínimo continua dentro do pré-pago.
+      const nearFare = calculateRiderEarlyEndSettlement(
+        tollBooking({ estimatedFare: '20', paymentAmountInCents: '2000', tollFee: '19.99' }),
+        { distanceKm: 0.1, durationSecs: 5 }
+      );
+      expect(nearFare.executedFare).toBe(19.99);
+      expect(nearFare.estimatedRefund).toBe(0.01);
+
+      // Corrida inteira percorrida: cobra o pré-pago, estorno zero.
+      const full = calculateRiderEarlyEndSettlement(tollBooking(), { distanceKm: 30, durationSecs: 3000 });
+      expect(full.executedFare).toBe(48.61);
+      expect(full.estimatedRefund).toBe(0);
+
+      // Pré-pago acima da tarifa estimada: a tarifa contratual acompanha o pré-pago.
+      const overPrepaid = calculateRiderEarlyEndSettlement(
+        tollBooking({ estimatedFare: '40', paymentAmountInCents: '4861' }),
+        { distanceKm: 0.1, durationSecs: 5 }
+      );
+      expect(overPrepaid.executedFare).toBeLessThanOrEqual(overPrepaid.prepaidAmount);
+      expect(cents(overPrepaid.executedFare) + cents(overPrepaid.estimatedRefund)).toBe(4861);
+    });
+
+    it('does not apply the toll rule to operational interruption or to the generic calculation', () => {
+      const interruption = calculateOperationalInterruptionSettlement(tollBooking(), { distanceKm: 2.5, durationSecs: 150 });
+      expect(interruption.executedFare).toBe(12.15);
+      expect(interruption.estimatedRefund).toBe(36.46);
+      expect(interruption.tollKeptWhole).toBeUndefined();
+
+      const generic = calculateExecutedFareSettlement(tollBooking(), { distanceKm: 2.5, durationSecs: 150, minChargeRatio: 0 });
+      expect(generic.executedFare).toBe(12.15);
+      expect(generic.tollKeptWhole).toBeUndefined();
+    });
   });
 
   it('builds a primary leg retaining fees on the driver leg', () => {
