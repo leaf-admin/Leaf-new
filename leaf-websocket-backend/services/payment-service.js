@@ -1041,13 +1041,14 @@ class PaymentService {
         };
       }
 
+      // Consultas independentes por namespace: em paralelo, preservando a ordem dos resultados.
+      const snapshots = await Promise.all(['operational', 'sandbox'].map((namespace) => firestore
+        .collection(FINANCIAL_COLLECTIONS[namespace].paymentIntents)
+        .where('chargeId', '==', safeChargeId)
+        .limit(1)
+        .get()));
       const matches = [];
-      for (const namespace of ['operational', 'sandbox']) {
-        const snapshot = await firestore
-          .collection(FINANCIAL_COLLECTIONS[namespace].paymentIntents)
-          .where('chargeId', '==', safeChargeId)
-          .limit(1)
-          .get();
+      for (const snapshot of snapshots) {
         if (!snapshot.empty && snapshot.docs?.length) matches.push(snapshot.docs[0]);
       }
       if (matches.length === 0) return { found: false };
@@ -1300,12 +1301,13 @@ class PaymentService {
         return null;
       }
 
+      // Leituras independentes por namespace: em paralelo, preservando a ordem dos resultados.
+      const holdingDocs = await Promise.all(['operational', 'sandbox'].map((namespace) => firestore
+        .collection(FINANCIAL_COLLECTIONS[namespace].paymentHoldings)
+        .doc(rideId)
+        .get()));
       const matches = [];
-      for (const namespace of ['operational', 'sandbox']) {
-        const holdingDoc = await firestore
-          .collection(FINANCIAL_COLLECTIONS[namespace].paymentHoldings)
-          .doc(rideId)
-          .get();
+      for (const holdingDoc of holdingDocs) {
         if (holdingDoc.exists) matches.push(holdingDoc.data() || {});
       }
       if (matches.length !== 1) return null;
