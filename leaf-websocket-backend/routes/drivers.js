@@ -4,11 +4,14 @@ const redisPool = require('../utils/redis-pool');
 const driverLockManager = require('../services/driver-lock-manager');
 const { getPolicyForDriver } = require('../services/driver-destination-mode-service');
 const { validateAuthoritativeFinancialSnapshot } = require('../services/ride-financial-contract');
-const { requireFirebaseUser } = require('../middleware/firebase-user-auth');
+const { requireFirebaseUser, requireFirebaseSelf } = require('../middleware/firebase-user-auth');
+const { getOperationalDayKey } = require('../services/driver-online-time-policy-service');
 const { authenticateJWT, requireRole } = require('../middleware/jwt-auth');
 const { logger, logStructured, logError } = require('../utils/logger');
 const DRIVER_APPLICATION_ADMIN_ROLES = ['admin', 'super-admin', 'manager', 'support', 'development'];
 const requireDriverApplicationAdmin = [authenticateJWT, requireRole(DRIVER_APPLICATION_ADMIN_ROLES)];
+// Dado pessoal do motorista: exige ID token do Firebase e só o próprio motorista (uid do token == :id) acessa.
+const requireDriverSelf = [requireFirebaseUser, requireFirebaseSelf((req) => req.params?.id)];
 const LEGACY_DRIVER_APPLICATION_MUTATIONS_ENABLED = false;
 
 // Firebase integration
@@ -131,6 +134,45 @@ function resolveBackendFinalFinancialSnapshot(booking = {}, expected = {}) {
   );
   const validation = validateAuthoritativeFinancialSnapshot(candidate || {}, expected);
   return validation.valid ? validation.snapshot : null;
+}
+
+// Fuso do relatório de ganhos: o dia vira à meia-noite de Brasília, não no fuso do processo.
+const DEFAULT_REPORT_TIME_ZONE = 'America/Sao_Paulo';
+
+function getReportTimeZone() {
+  return String(process.env.LEAF_REPORT_TIME_ZONE || '').trim() || DEFAULT_REPORT_TIME_ZONE;
+}
+
+// Chave YYYY-MM-DD do dia de calendário `daysBack` dias antes de `dayKey`.
+function shiftDayKey(dayKey, daysBack) {
+  const [year, month, day] = dayKey.split('-').map(Number);
+  return new Date(Date.UTC(year, month - 1, day - daysBack)).toISOString().slice(0, 10);
+}
+
+function toValidDate(value) {
+  if (value === null || value === undefined || value === '') {
+    return null;
+  }
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+// Momento que define o dia da corrida no relatório: a conclusão (completedAt, ou o tripend
+// legado) quando a corrida gravada tem esse carimbo; senão, os mesmos campos de antes.
+function resolveBookingReportDate(booking = {}) {
+  const completionDate = toValidDate(booking.completedAt) || toValidDate(booking.tripend);
+  if (completionDate) {
+    return completionDate;
+  }
+
+  return toValidDate(
+    booking.tripdate ||
+    booking.updatedAt ||
+    booking.createdAt ||
+    booking.created_on ||
+    booking.timestamp ||
+    null
+  );
 }
 
 function centsToBrl(cents) {
@@ -863,7 +905,7 @@ router.get('/api/drivers/nearby', async (req, res) => {
 });
 
 // ✅ NOVO: GET /api/drivers/:id/earnings - Relatório de Ganhos para o Mobile
-router.get('/api/drivers/:id/earnings', requireFirebase, async (req, res) => {
+router.get('/api/drivers/:id/earnings', requireDriverSelf, requireFirebase, async (req, res) => {
   try {
     const { id } = req.params;
     const db = firebaseConfig.getRealtimeDB();
@@ -885,25 +927,17 @@ router.get('/api/drivers/:id/earnings', requireFirebase, async (req, res) => {
     const bookings = bookingsSnapshot.val() || {};
     const allDriverBookings = Object.values(bookings);
 
-    const now = new Date();
-    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const reportTimeZone = getReportTimeZone();
+    const toDateKey = date => getOperationalDayKey(date.getTime(), reportTimeZone);
+    const todayKey = toDateKey(new Date());
     const dailyWindowDays = 30;
-
-    const toDateKey = date => {
-      const year = date.getFullYear();
-      const month = String(date.getMonth() + 1).padStart(2, '0');
-      const day = String(date.getDate()).padStart(2, '0');
-      return `${year}-${month}-${day}`;
-    };
 
     const dailySeriesMap = {};
     for (let i = dailyWindowDays - 1; i >= 0; i--) {
-      const targetDate = new Date(startOfToday);
-      targetDate.setDate(targetDate.getDate() - i);
-      const dateKey = toDateKey(targetDate);
+      const dateKey = shiftDayKey(todayKey, i);
       dailySeriesMap[dateKey] = {
         date: dateKey,
-        day: String(targetDate.getDate()).padStart(2, '0'),
+        day: dateKey.slice(8, 10),
         amount: 0,
         grossAmount: 0,
         feeAmount: 0,
@@ -929,15 +963,8 @@ router.get('/api/drivers/:id/earnings', requireFirebase, async (req, res) => {
         return;
       }
 
-      const rawDate =
-        booking?.tripdate ||
-        booking?.updatedAt ||
-        booking?.createdAt ||
-        booking?.created_on ||
-        booking?.timestamp ||
-        null;
-      const tripDate = rawDate ? new Date(rawDate) : null;
-      if (!tripDate || Number.isNaN(tripDate.getTime())) {
+      const tripDate = resolveBookingReportDate(booking || {});
+      if (!tripDate) {
         return;
       }
 
@@ -983,7 +1010,7 @@ router.get('/api/drivers/:id/earnings', requireFirebase, async (req, res) => {
       totalNetAmount += netAmount;
       totalFeeAmount += feeAmount;
 
-      if (tripDate >= startOfToday) {
+      if (dateKey === todayKey) {
         tripsTodayCount += 1;
       }
     });

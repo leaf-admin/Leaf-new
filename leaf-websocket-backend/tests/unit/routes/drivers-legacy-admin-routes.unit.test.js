@@ -15,8 +15,17 @@ jest.mock('../../../services/payment-service', () => jest.fn().mockImplementatio
 jest.mock('../../../services/driver-destination-mode-service', () => ({
   getPolicyForDriver: jest.fn()
 }));
+// Token de teste: "Bearer firebase:<uid>". A checagem de dono (requireFirebaseSelf) é a real.
 jest.mock('../../../middleware/firebase-user-auth', () => ({
-  requireFirebaseUser: jest.fn((_req, _res, next) => next())
+  ...jest.requireActual('../../../middleware/firebase-user-auth'),
+  requireFirebaseUser: jest.fn((req, res, next) => {
+    const match = /^Bearer firebase:(.+)$/.exec(String(req.headers.authorization || ''));
+    if (!match) {
+      return res.status(401).json({ success: false, error: 'Token de autenticação ausente.' });
+    }
+    req.authenticatedUser = { uid: match[1], authSource: 'firebase' };
+    return next();
+  })
 }));
 jest.mock('../../../utils/logger', () => ({
   logger: { info: jest.fn(), warn: jest.fn(), error: jest.fn() },
@@ -58,6 +67,11 @@ function createApp() {
   app.use(express.json());
   app.use(driversRoutes);
   return app;
+}
+
+function getEarnings(app, driverId = 'driver_1', tokenUid = driverId) {
+  const pending = request(app).get(`/api/drivers/${driverId}/earnings`);
+  return tokenUid ? pending.set('Authorization', `Bearer firebase:${tokenUid}`) : pending;
 }
 
 function buildSnapshot(value) {
@@ -154,6 +168,64 @@ describe('drivers legacy admin application routes', () => {
   });
 });
 
+describe('drivers earnings route authentication', () => {
+  const earningsDb = () => ({
+    users: {
+      driver_1: { walletBalance: 50, rating: 4.9, hoursOnline: 3.5 },
+      driver_2: { walletBalance: 10, rating: 4.7, hoursOnline: 1 }
+    }
+  });
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  it('responde 401 sem token e não lê dados do motorista', async () => {
+    const app = createApp();
+    mockRealtimeDb(earningsDb());
+
+    const response = await getEarnings(app, 'driver_1', null);
+
+    expect(response.status).toBe(401);
+    expect(response.body.report).toBeUndefined();
+    expect(firebaseConfig.getRealtimeDB).not.toHaveBeenCalled();
+  });
+
+  it('responde 403 para o token de outro motorista e não lê dados', async () => {
+    const app = createApp();
+    mockRealtimeDb(earningsDb());
+
+    const response = await getEarnings(app, 'driver_1', 'driver_2');
+
+    expect(response.status).toBe(403);
+    expect(response.body.report).toBeUndefined();
+    expect(firebaseConfig.getRealtimeDB).not.toHaveBeenCalled();
+  });
+
+  it('não aceita o JWT de admin do dashboard no lugar do ID token do motorista', async () => {
+    const app = createApp();
+    mockRealtimeDb(earningsDb());
+
+    const response = await request(app)
+      .get('/api/drivers/driver_1/earnings')
+      .set('Authorization', 'Bearer admin-token');
+
+    expect(response.status).toBe(401);
+    expect(firebaseConfig.getRealtimeDB).not.toHaveBeenCalled();
+  });
+
+  it('responde 200 para o próprio motorista', async () => {
+    const app = createApp();
+    mockRealtimeDb(earningsDb());
+
+    const response = await getEarnings(app, 'driver_1', 'driver_1');
+
+    expect(response.status).toBe(200);
+    expect(response.body.success).toBe(true);
+    expect(response.body.report.balance).toBe(50);
+  });
+});
+
 describe('drivers earnings route financial source', () => {
   beforeEach(() => {
     jest.clearAllMocks();
@@ -190,7 +262,7 @@ describe('drivers earnings route financial source', () => {
       }
     });
 
-    const response = await request(app).get('/api/drivers/driver_1/earnings');
+    const response = await getEarnings(app);
 
     expect(response.status).toBe(200);
     expect(response.body.success).toBe(true);
@@ -224,7 +296,7 @@ describe('drivers earnings route financial source', () => {
       }
     });
 
-    const response = await request(app).get('/api/drivers/driver_1/earnings');
+    const response = await getEarnings(app);
 
     expect(response.status).toBe(200);
     expect(response.body.success).toBe(true);
@@ -251,12 +323,13 @@ describe('drivers earnings route financial source', () => {
       paymentIntermediationFeeCents: 50,
       driverNetAmountCents: 4662
     });
-    const todayKey = () => {
-      const now = new Date();
-      const month = String(now.getMonth() + 1).padStart(2, '0');
-      const day = String(now.getDate()).padStart(2, '0');
-      return `${now.getFullYear()}-${month}-${day}`;
-    };
+    // O relatório corta o dia no fuso de Brasília.
+    const todayKey = () => new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'America/Sao_Paulo',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit'
+    }).format(new Date());
 
     it('conta a corrida EARLY_ENDED_BY_RIDER com o líquido liquidado, não o valor contratado', async () => {
       const app = createApp();
@@ -281,7 +354,7 @@ describe('drivers earnings route financial source', () => {
         }
       });
 
-      const response = await request(app).get('/api/drivers/driver_1/earnings');
+      const response = await getEarnings(app);
 
       expect(response.status).toBe(200);
       const { report } = response.body;
@@ -314,7 +387,7 @@ describe('drivers earnings route financial source', () => {
         }
       });
 
-      const response = await request(app).get('/api/drivers/driver_1/earnings');
+      const response = await getEarnings(app);
 
       expect(response.body.report.totalCompletedRides).toBe(1);
       expect(response.body.report.totalNetAmount).toBeCloseTo(10.86, 2);
@@ -335,7 +408,7 @@ describe('drivers earnings route financial source', () => {
         }
       });
 
-      const response = await request(app).get('/api/drivers/driver_1/earnings');
+      const response = await getEarnings(app);
 
       const { report } = response.body;
       expect(report.totalCompletedRides).toBe(0);
@@ -359,7 +432,7 @@ describe('drivers earnings route financial source', () => {
         }
       });
 
-      const response = await request(app).get('/api/drivers/driver_1/earnings');
+      const response = await getEarnings(app);
 
       expect(response.body.report.totalCompletedRides).toBe(0);
       expect(response.body.report.totalNetAmount).toBe(0);
@@ -384,7 +457,7 @@ describe('drivers earnings route financial source', () => {
         }
       });
 
-      const response = await request(app).get('/api/drivers/driver_1/earnings');
+      const response = await getEarnings(app);
 
       const { report } = response.body;
       expect(report.totalCompletedRides).toBe(0);
@@ -407,11 +480,147 @@ describe('drivers earnings route financial source', () => {
         }
       });
 
-      const response = await request(app).get('/api/drivers/driver_1/earnings');
+      const response = await getEarnings(app);
 
       expect(response.body.report.totalCompletedRides).toBe(0);
       expect(response.body.report.totalCancellations).toBe(1);
       expect(response.body.report.totalNetAmount).toBe(0);
     });
+  });
+});
+
+describe('drivers earnings route day boundaries (America/Sao_Paulo)', () => {
+  const driverProfile = { walletBalance: 50, rating: 4.9, hoursOnline: 3.5 };
+  const completedBooking = (overrides = {}) => ({
+    driver: 'driver_1',
+    status: 'COMPLETED',
+    financialSnapshot: buildBackendFinalSnapshot(),
+    ...overrides
+  });
+  // Só o relógio (Date) é simulado; os timers reais continuam servindo o supertest.
+  const freezeClockAt = (isoInstant) => {
+    jest.useFakeTimers({
+      now: new Date(isoInstant),
+      doNotFake: [
+        'nextTick', 'queueMicrotask', 'setImmediate', 'clearImmediate',
+        'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval',
+        'hrtime', 'performance'
+      ]
+    });
+  };
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    delete process.env.LEAF_REPORT_TIME_ZONE;
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  it('corrida concluída às 22:30 de Brasília fica nesse dia, não no seguinte', async () => {
+    freezeClockAt('2026-10-11T15:00:00.000Z'); // 12:00 de 11/10 em Brasília
+    const app = createApp();
+    mockRealtimeDb({
+      users: { driver_1: driverProfile },
+      bookings: {
+        // 22:30 de 10/10 em Brasília = 01:30 de 11/10 em UTC
+        booking_1: completedBooking({ completedAt: '2026-10-11T01:30:00.000Z' })
+      }
+    });
+
+    const response = await getEarnings(app);
+
+    expect(response.status).toBe(200);
+    const { report } = response.body;
+    const slot = (date) => report.dailySeries.find((item) => item.date === date);
+    expect(slot('2026-10-10')).toMatchObject({ day: '10', completedCount: 1, amount: 20.51 });
+    expect(slot('2026-10-11')).toMatchObject({ day: '11', completedCount: 0, amount: 0 });
+    expect(report.tripsToday).toBe(0);
+    expect(report.totalCompletedRides).toBe(1);
+  });
+
+  it('às 23:30 de Brasília a última entrada de dailySeries ainda é o dia corrente de Brasília', async () => {
+    freezeClockAt('2026-10-11T02:30:00.000Z'); // 23:30 de 10/10 em Brasília
+    const app = createApp();
+    mockRealtimeDb({
+      users: { driver_1: driverProfile },
+      bookings: {
+        booking_1: completedBooking({ completedAt: '2026-10-11T01:30:00.000Z' })
+      }
+    });
+
+    const response = await getEarnings(app);
+
+    const { report } = response.body;
+    expect(report.dailySeries).toHaveLength(30);
+    expect(report.dailySeries[0].date).toBe('2026-09-11');
+    expect(report.dailySeries[29]).toMatchObject({ date: '2026-10-10', day: '10', completedCount: 1 });
+    expect(report.dailySeries.map((item) => item.date)).not.toContain('2026-10-11');
+    expect(report.tripsToday).toBe(1);
+    expect(report.dailyEarnings[report.dailyEarnings.length - 1]).toMatchObject({ day: '10', amount: 20.51 });
+  });
+
+  it('usa o horário de conclusão da corrida quando existe, e não o de criação', async () => {
+    freezeClockAt('2026-10-10T15:00:00.000Z');
+    const app = createApp();
+    mockRealtimeDb({
+      users: { driver_1: driverProfile },
+      bookings: {
+        // Pedida 23:50 de 09/10, concluída 00:20 de 10/10 (Brasília)
+        booking_completed_at: completedBooking({
+          tripdate: '2026-10-10T02:50:00.000Z',
+          completedAt: '2026-10-10T03:20:00.000Z'
+        }),
+        // Corrida legada com tripend em milissegundos
+        booking_tripend: completedBooking({
+          tripdate: '2026-10-10T02:50:00.000Z',
+          tripend: Date.parse('2026-10-10T03:25:00.000Z')
+        })
+      }
+    });
+
+    const response = await getEarnings(app);
+
+    const { report } = response.body;
+    const slot = (date) => report.dailySeries.find((item) => item.date === date);
+    expect(slot('2026-10-09').completedCount).toBe(0);
+    expect(slot('2026-10-10').completedCount).toBe(2);
+    expect(report.tripsToday).toBe(2);
+  });
+
+  it('sem horário de conclusão válido, mantém os campos de antes (tripdate)', async () => {
+    freezeClockAt('2026-10-10T15:00:00.000Z');
+    const app = createApp();
+    mockRealtimeDb({
+      users: { driver_1: driverProfile },
+      bookings: {
+        booking_no_completion: completedBooking({ tripdate: '2026-10-10T02:50:00.000Z' }),
+        booking_bad_completion: completedBooking({
+          tripdate: '2026-10-10T02:50:00.000Z',
+          completedAt: 'not-a-date'
+        }),
+        booking_cancelled: { driver: 'driver_1', status: 'CANCELED', tripdate: '2026-10-10T02:50:00.000Z' }
+      }
+    });
+
+    const response = await getEarnings(app);
+
+    const { report } = response.body;
+    const slot = (date) => report.dailySeries.find((item) => item.date === date);
+    expect(slot('2026-10-09')).toMatchObject({ completedCount: 2, cancelledCount: 1 });
+    expect(slot('2026-10-10')).toMatchObject({ completedCount: 0, cancelledCount: 0 });
+    expect(report.tripsToday).toBe(0);
+  });
+
+  it('respeita LEAF_REPORT_TIME_ZONE quando configurado', async () => {
+    process.env.LEAF_REPORT_TIME_ZONE = 'UTC';
+    freezeClockAt('2026-10-11T02:30:00.000Z');
+    const app = createApp();
+    mockRealtimeDb({ users: { driver_1: driverProfile } });
+
+    const response = await getEarnings(app);
+
+    expect(response.body.report.dailySeries[29].date).toBe('2026-10-11');
   });
 });
