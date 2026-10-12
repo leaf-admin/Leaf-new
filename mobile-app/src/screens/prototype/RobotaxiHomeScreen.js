@@ -1930,6 +1930,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     driverTransientCard,
     driverExtensionRequest,
     driverTripAssist,
+    boardingDeadlineAt,
     operationalContinuation,
     acceptDriverOffer,
     rejectDriverOffer,
@@ -9878,6 +9879,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
               driverOffers={driverOffers}
               driverActiveRide={driverActiveRide}
               driverTripMeta={driverTripMeta}
+              boardingDeadlineAt={boardingDeadlineAt}
               bookingStatus={normalizedBookingStatus || bookingStatus}
               tripDistanceKm={tripDistanceKm}
               paymentMethod={paymentMethod}

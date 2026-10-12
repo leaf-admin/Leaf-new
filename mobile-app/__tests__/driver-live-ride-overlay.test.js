@@ -595,6 +595,132 @@ describe("DriverLiveRideOverlay", () => {
   });
 });
 
+describe("DriverLiveRideOverlay boarding wait", () => {
+  const ARRIVAL_MS = new Date("2026-10-12T15:00:00.000Z").getTime();
+  const DEADLINE = new Date(ARRIVAL_MS + 120000).toISOString();
+
+  const renderArrived = ({ etaLabel, cancelActiveRideFlow = jest.fn(), boardingDeadlineAt = DEADLINE }) =>
+    render(
+      <DriverLiveRideOverlay
+        driverActiveRide={{
+          bookingId: "booking_wait",
+          status: "arrived",
+          pickupAddress: "1540 Mission St",
+          dropoffAddress: "1 Ferry Building",
+          estimatedDriverNetAmount: 18.75,
+          passengerName: "Passageiro Leaf",
+        }}
+        bookingStatus="arrived"
+        paymentMethod="pix"
+        boardingDeadlineAt={boardingDeadlineAt}
+        driverTripAssist={{
+          status: "arrived",
+          remainingDistanceLabel: "0 m",
+          etaLabel,
+          primaryActionLabel: "Iniciar corrida",
+          primaryActionEnabled: true,
+        }}
+        cancelActiveRideFlow={cancelActiveRideFlow}
+        markDriverArrived={jest.fn()}
+        startTripFlow={jest.fn()}
+        completeTripFlow={jest.fn()}
+        onOpenNavigation={jest.fn()}
+      />,
+    );
+
+  const openCancelPrompt = (screen) => {
+    fireEvent.press(screen.getByTestId("driver-live-trip-details-button"));
+    fireEvent.press(screen.getByLabelText("Cancelar corrida"));
+  };
+
+  beforeEach(() => {
+    jest.useFakeTimers();
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  it("keeps the countdown and the plain cancel prompt before the 2 minutes are over", async () => {
+    jest.setSystemTime(ARRIVAL_MS + 30000);
+    const cancelActiveRideFlow = jest.fn().mockResolvedValue({ success: true });
+    const screen = renderArrived({ etaLabel: "1:30", cancelActiveRideFlow });
+
+    expect(screen.getAllByText("1:30").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Espera").length).toBeGreaterThan(0);
+    expect(screen.queryByTestId("driver-live-boarding-wait-hint")).toBeNull();
+    openCancelPrompt(screen);
+    expect(screen.getByText("Cancelar corrida?")).toBeTruthy();
+    await act(async () => {
+      fireEvent.press(screen.getByTestId("driver-live-trip-cancel-confirm-button"));
+    });
+    expect(cancelActiveRideFlow).toHaveBeenCalledWith({ reason: "Cancelado pelo motorista." });
+  });
+
+  it("counts the wait up after 0:00 and does not promise a no-show before 5 minutes", async () => {
+    jest.setSystemTime(ARRIVAL_MS + 192000);
+    const cancelActiveRideFlow = jest.fn().mockResolvedValue({ success: true });
+    const screen = renderArrived({ etaLabel: "0:00", cancelActiveRideFlow });
+
+    expect(screen.queryByText("0:00")).toBeNull();
+    expect(screen.getAllByText("3:12").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Esperando").length).toBeGreaterThan(0);
+    act(() => {
+      jest.advanceTimersByTime(3000);
+    });
+    expect(screen.getAllByText("3:15").length).toBeGreaterThan(0);
+    expect(screen.queryByTestId("driver-live-boarding-wait-hint")).toBeNull();
+
+    openCancelPrompt(screen);
+    expect(screen.queryByText("Passageiro não apareceu?")).toBeNull();
+    expect(screen.getByText("Cancelar corrida?")).toBeTruthy();
+    expect(
+      screen.getByText(
+        "O passageiro será avisado. Antes de 5 minutos de espera no embarque, o cancelamento não conta como não comparecimento do passageiro.",
+      ),
+    ).toBeTruthy();
+    await act(async () => {
+      fireEvent.press(screen.getByTestId("driver-live-trip-cancel-confirm-button"));
+    });
+    expect(cancelActiveRideFlow).toHaveBeenCalledWith({ reason: "Cancelado pelo motorista." });
+  });
+
+  it("says a cancel counts as no-show from 5 minutes on and sends the no-show reason", async () => {
+    jest.setSystemTime(ARRIVAL_MS + 301000);
+    const cancelActiveRideFlow = jest.fn().mockResolvedValue({ success: true });
+    const screen = renderArrived({ etaLabel: "0:00", cancelActiveRideFlow });
+
+    expect(screen.getAllByText("5:01").length).toBeGreaterThan(0);
+    expect(screen.getByTestId("driver-live-boarding-wait-hint").props.children).toBe(
+      "Cancelar agora conta como não comparecimento do passageiro.",
+    );
+
+    openCancelPrompt(screen);
+    expect(screen.getByText("Passageiro não apareceu?")).toBeTruthy();
+    expect(
+      screen.getByText(
+        "Você esperou 5 minutos no embarque. Ao cancelar, registramos que o passageiro não compareceu ao embarque.",
+      ),
+    ).toBeTruthy();
+    await act(async () => {
+      fireEvent.press(screen.getByTestId("driver-live-trip-cancel-confirm-button"));
+    });
+    expect(cancelActiveRideFlow).toHaveBeenCalledWith({
+      reason: "Passageiro não compareceu ao embarque.",
+    });
+  });
+
+  it("does not promise a no-show when the arrival time is unknown", () => {
+    jest.setSystemTime(ARRIVAL_MS + 900000);
+    const screen = renderArrived({ etaLabel: "0:00", boardingDeadlineAt: null });
+
+    expect(screen.getAllByText("0:00").length).toBeGreaterThan(0);
+    expect(screen.queryByTestId("driver-live-boarding-wait-hint")).toBeNull();
+    openCancelPrompt(screen);
+    expect(screen.queryByText("Passageiro não apareceu?")).toBeNull();
+  });
+});
+
 describe("driver offer instance key", () => {
   it("tells a re-offer of the same booking apart from the dismissed one", () => {
     const first = { bookingId: "booking_1", expiresAt: "2026-10-11T04:08:50.000Z" };

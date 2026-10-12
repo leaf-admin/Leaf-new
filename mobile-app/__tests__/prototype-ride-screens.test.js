@@ -3396,7 +3396,40 @@ describe('prototype ride screens', () => {
     usePrototypeRideRuntime.mockReturnValue(buildPassengerRuntime({ bookingStatus: 'arrived', boardingRemainingSec: 0 }));
     const expiredTimer = render(<RobotaxiTripScreen navigation={navigation} route={{ params: {} }} />);
     expect(expiredTimer.getAllByText('0:00').length).toBeGreaterThan(0);
-    expect(expiredTimer.getByText('Uma taxa poderá ser aplicada')).toBeTruthy();
+    expect(expiredTimer.queryByText('Uma taxa poderá ser aplicada')).toBeNull();
+    expect(
+      expiredTimer.getByText('Depois de 5 minutos de espera, o motorista pode cancelar e uma taxa é cobrada.'),
+    ).toBeTruthy();
+  });
+
+  it('counts the driver wait up after the boarding countdown and states the 5 minute rule', () => {
+    const navigation = { navigate: jest.fn(), canGoBack: jest.fn(() => false), goBack: jest.fn() };
+    // boardingDeadlineAt is arrival + 2:00, so these are 3:12 and 5:30 of waiting.
+    const deadlineForWait = (waitedSeconds) =>
+      new Date(Date.now() - (waitedSeconds - 120) * 1000).toISOString();
+
+    usePrototypeRideRuntime.mockReturnValue(
+      buildPassengerRuntime({ bookingStatus: 'arrived', boardingRemainingSec: 0, boardingDeadlineAt: deadlineForWait(192) }),
+    );
+    const waiting = render(<RobotaxiTripScreen navigation={navigation} route={{ params: {} }} />);
+    expect(waiting.queryByText('0:00')).toBeNull();
+    expect(waiting.getAllByText(/^3:1[2-9]$/).length).toBeGreaterThan(0);
+    expect(waiting.getAllByText('de espera').length).toBeGreaterThan(0);
+    expect(waiting.queryByText('para embarcar')).toBeNull();
+    expect(
+      waiting.getByText('Depois de 5 minutos de espera, o motorista pode cancelar e uma taxa é cobrada.'),
+    ).toBeTruthy();
+    waiting.unmount();
+
+    usePrototypeRideRuntime.mockReturnValue(
+      buildPassengerRuntime({ bookingStatus: 'arrived', boardingRemainingSec: 0, boardingDeadlineAt: deadlineForWait(330) }),
+    );
+    const noShow = render(<RobotaxiTripScreen navigation={navigation} route={{ params: {} }} />);
+    expect(noShow.getAllByText(/^5:3\d$/).length).toBeGreaterThan(0);
+    expect(
+      noShow.getByText('O motorista já esperou 5 minutos. Ele pode cancelar e uma taxa é cobrada.'),
+    ).toBeTruthy();
+    noShow.unmount();
   });
 
   it('opens rating from the passenger receipt with the real trip payload', async () => {

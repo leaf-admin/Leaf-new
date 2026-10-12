@@ -48,7 +48,11 @@ import {
 import { useDriverOfferCountdown } from "../driverOfferCountdown";
 import { shortTripAddressLabel } from "../tripAddressPresentation";
 import { normalizeRuntimeRideStatus } from "../rideLifecycleContract";
-import { PASSENGER_NO_SHOW_CANCEL_REASON } from "../boardingWaitPolicy";
+import {
+  PASSENGER_NO_SHOW_CANCEL_REASON,
+  resolveBoardingWait,
+  resolveDriverBoardingWaitCopy,
+} from "../boardingWaitPolicy";
 import { useHapticFeedback } from "../../../hooks/useHapticFeedback";
 
 const { color } = robotaxiPrototypeTokens;
@@ -406,6 +410,7 @@ function DriverLiveRideOverlay({
   paymentMethod = "pix",
   driverExtensionRequest = null,
   driverTripAssist = null,
+  boardingDeadlineAt = null,
   operationalContinuation = null,
   acceptDriverOffer,
   rejectDriverOffer,
@@ -740,6 +745,31 @@ function DriverLiveRideOverlay({
           formatDurationMinutes(activeRide?.durationMinutes, ""),
           etaLabel,
         ) || "--";
+  // The 2:00 boarding countdown is over: count the wait up from the arrival
+  // time instead of leaving a frozen "0:00".
+  const boardingCountdownOver =
+    normalizedActiveStatus === "arrived" && liveEtaLabel === "0:00";
+  const [boardingClockMs, setBoardingClockMs] = useState(() => Date.now());
+  useEffect(() => {
+    if (!boardingCountdownOver) {
+      return undefined;
+    }
+    setBoardingClockMs(Date.now());
+    const timer = setInterval(() => setBoardingClockMs(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [boardingCountdownOver]);
+  const boardingWaitCopy = resolveDriverBoardingWaitCopy(
+    resolveBoardingWait({
+      boardingDeadlineAt,
+      remainingSec: boardingCountdownOver ? 0 : null,
+      nowMs: boardingClockMs,
+    }),
+  );
+  const boardingWaitValueLabel =
+    boardingCountdownOver && boardingWaitCopy.value
+      ? boardingWaitCopy.value
+      : liveEtaLabel;
+  const boardingWaitHint = boardingCountdownOver ? boardingWaitCopy.hint : null;
   const primaryActionLabel =
     driverTripAssist?.primaryActionLabel || tripPhase.primaryLabel;
   const primaryActionTestID = resolveTripPrimaryActionTestID(
@@ -813,7 +843,7 @@ function DriverLiveRideOverlay({
     ? fareLabel
     : normalizedActiveStatus === "started"
       ? "Em rota"
-      : liveEtaLabel;
+      : boardingWaitValueLabel;
   const driverTripSheetTitle =
     normalizedActiveStatus === "started"
       ? "Progresso da viagem"
@@ -827,8 +857,11 @@ function DriverLiveRideOverlay({
       {
         key: "time",
         // At pickup this value is the boarding countdown, not a travel time.
-        label: normalizedActiveStatus === "arrived" ? "Espera" : "Tempo",
-        value: liveEtaLabel,
+        label:
+          normalizedActiveStatus === "arrived"
+            ? (boardingCountdownOver && boardingWaitCopy.metricLabel) || "Espera"
+            : "Tempo",
+        value: boardingWaitValueLabel,
         icon: "time-outline",
         toneStyle: styles.metricIconEta,
         iconColor: "#365A6D",
@@ -850,7 +883,14 @@ function DriverLiveRideOverlay({
         iconColor: "#7A5D16",
       },
     ].filter((metric) => !(normalizedActiveStatus === "arrived" && metric.key === "distance")),
-    [fareLabel, liveDistanceLabel, liveEtaLabel, normalizedActiveStatus],
+    [
+      boardingCountdownOver,
+      boardingWaitCopy.metricLabel,
+      boardingWaitValueLabel,
+      fareLabel,
+      liveDistanceLabel,
+      normalizedActiveStatus,
+    ],
   );
   const compactTripMetrics = useMemo(
     () =>
@@ -978,10 +1018,15 @@ function DriverLiveRideOverlay({
     setShowCancelPrompt(true);
   }, [busyAction, canCancelActiveRide]);
 
-  // The driver waited the whole boarding time at the pickup. Cancelling now is
-  // a no-show, which the server needs to tell apart from a driver giving up.
-  const passengerNoShow =
-    normalizedActiveStatus === "arrived" && liveEtaLabel === "0:00";
+  // Cancelling is a passenger no-show only once the driver has really waited
+  // the no-show time at the pickup (5 minutes from arrival). Between the end
+  // of the countdown and that mark it is a plain driver cancellation.
+  const passengerNoShow = boardingCountdownOver && boardingWaitCopy.passengerNoShow;
+  const cancelPromptTitle =
+    (boardingCountdownOver && boardingWaitCopy.cancelPromptTitle) || "Cancelar corrida?";
+  const cancelPromptMessage =
+    (boardingCountdownOver && boardingWaitCopy.cancelPromptMessage) ||
+    "O passageiro será avisado. Cancelar depois de aceitar pode gerar cobrança.";
 
   const handleConfirmCancelRide = useCallback(async () => {
     if (!canCancelActiveRide || busyAction) {
@@ -1110,6 +1155,11 @@ function DriverLiveRideOverlay({
             />
           ))}
         </View>
+        {boardingWaitHint ? (
+          <Text style={styles.boardingWaitHint} testID="driver-live-boarding-wait-hint">
+            {boardingWaitHint}
+          </Text>
+        ) : null}
           </>
         ) : null}
       </View>
@@ -1371,6 +1421,11 @@ function DriverLiveRideOverlay({
           />
         ))}
       </View>
+      {boardingWaitHint ? (
+        <Text style={styles.boardingWaitHint} testID="driver-live-boarding-wait-hint">
+          {boardingWaitHint}
+        </Text>
+      ) : null}
 
       <RobotaxiLifecycleSection
         title={isOperationalInterrupted ? "TRECHO ENCERRADO" : "ROTA E AÇÕES"}
@@ -2019,12 +2074,10 @@ function DriverLiveRideOverlay({
         <View style={styles.cancelPromptScrim}>
           <View style={styles.cancelPromptCard}>
             <Text style={styles.cancelPromptTitle}>
-              {passengerNoShow ? "Passageiro não apareceu?" : "Cancelar corrida?"}
+              {cancelPromptTitle}
             </Text>
             <Text style={styles.cancelPromptMessage}>
-              {passengerNoShow
-                ? "O tempo de espera terminou. Ao cancelar, registramos que o passageiro não compareceu ao embarque."
-                : "O passageiro será avisado. Cancelar depois de aceitar pode gerar cobrança."}
+              {cancelPromptMessage}
             </Text>
             <View style={styles.cancelPromptActions}>
               <TouchableOpacity
@@ -2133,6 +2186,13 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "flex-start",
     gap: 20,
+  },
+  boardingWaitHint: {
+    marginTop: 8,
+    color: color.text.secondary,
+    ...leafTypography.regular,
+    fontSize: 13,
+    lineHeight: 17,
   },
   lifecycleTripRouteRow: {
     flexDirection: "row",

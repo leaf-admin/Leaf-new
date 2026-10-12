@@ -8811,7 +8811,11 @@ function startBoardingCountdown(deadlineInput) {
   if (!Number.isFinite(deadlineMs) || deadlineMs <= Date.now()) {
     stopBoardingCountdownTimer();
     setRuntimeState({
-      boardingDeadlineAt: null,
+      // A deadline already in the past is kept: it is the only record of when
+      // the driver arrived, and the cards count the wait up from it.
+      boardingDeadlineAt: Number.isFinite(deadlineMs)
+        ? new Date(deadlineMs).toISOString()
+        : null,
       boardingRemainingSec: 0,
     });
     return;

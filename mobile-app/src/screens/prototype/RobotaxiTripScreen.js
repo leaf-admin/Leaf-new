@@ -37,6 +37,7 @@ import { usePrototypeMapOcclusion } from './prototypeMapOcclusion';
 import { usePrototypeRideRuntime } from './prototypeRideRuntime';
 import { useLiveRouteTiming } from './liveRouteTiming';
 import { formatCurrencyBRL } from './tripFinancialSummary';
+import { resolveBoardingWait, resolvePassengerBoardingWaitCopy } from './boardingWaitPolicy';
 import { PROTOTYPE_ORIGIN_COORDINATE, PROTOTYPE_REGION } from './robotaxiPrototypeData';
 import { normalizePassengerBookingStatus } from './passengerFlowRouting';
 import { resolvePrototypeMapPresentation } from './prototypeMapPresentation';
@@ -621,6 +622,7 @@ export default function RobotaxiTripScreen({ navigation, route }) {
     tripDurationMin,
     tripArrivalText,
     boardingRemainingSec,
+    boardingDeadlineAt,
     driverInfo,
     driverActiveRide,
     rideExtension,
@@ -985,6 +987,31 @@ export default function RobotaxiTripScreen({ navigation, route }) {
   const isBoardingTimerUrgent =
     boardingTimerSeconds !== null && boardingTimerSeconds > 0 && boardingTimerSeconds <= 30;
   const isBoardingTimerExpired = boardingTimerSeconds === 0;
+  // Once the 2:00 are over the card shows how long the driver has been
+  // waiting, counted up from the arrival time, and what the wait leads to.
+  const isBoardingWaitRunning = isArrived && isBoardingTimerExpired;
+  const [boardingClockMs, setBoardingClockMs] = useState(() => Date.now());
+  useEffect(() => {
+    if (!isBoardingWaitRunning) {
+      return undefined;
+    }
+    setBoardingClockMs(Date.now());
+    const timer = setInterval(() => setBoardingClockMs(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [isBoardingWaitRunning]);
+  const boardingWaitCopy = resolvePassengerBoardingWaitCopy(
+    resolveBoardingWait({
+      boardingDeadlineAt,
+      remainingSec: isBoardingWaitRunning ? 0 : null,
+      nowMs: boardingClockMs,
+    }),
+  );
+  const boardingDisplayValue =
+    (isBoardingWaitRunning && boardingWaitCopy.value) || boardingCountdownLabel || '0:00';
+  const boardingDisplayValueLabel =
+    (isBoardingWaitRunning && boardingWaitCopy.valueLabel) || 'para embarcar';
+  const boardingDisplayMessage =
+    (isBoardingWaitRunning && boardingWaitCopy.message) || boardingTimerMessage;
   const tripPickupCoordinate =
     normalizeMapCoordinate(route?.params?.pickupCoordinate) ||
     normalizeMapCoordinate(activeBooking?.pickupLocation) ||
@@ -1270,7 +1297,9 @@ export default function RobotaxiTripScreen({ navigation, route }) {
       : isOperationalSearching
         ? 'Procurando outro motorista'
       : isArrived
-      ? `Encontre seu motorista em ${boardingCountdownLabel || '2:00'}`
+      ? isBoardingWaitRunning
+        ? 'Seu motorista está esperando no embarque'
+        : `Encontre seu motorista em ${boardingCountdownLabel || '2:00'}`
       : Number.isFinite(resolvedTripDurationMin) && resolvedTripDurationMin > 0
         ? `Chegada em ${resolvedTripDurationMin} min`
         : isAccepted
@@ -2105,8 +2134,8 @@ export default function RobotaxiTripScreen({ navigation, route }) {
           <RobotaxiLifecycleSummary
             eyebrow="MOTORISTA CHEGOU"
             title="Confira a placa e embarque"
-            value={boardingCountdownLabel || '0:00'}
-            valueLabel="para embarcar"
+            value={boardingDisplayValue}
+            valueLabel={boardingDisplayValueLabel}
             valueTestID={passengerCardFieldTestIDs.boarding_timer}
           />
           <Text
@@ -2115,10 +2144,10 @@ export default function RobotaxiTripScreen({ navigation, route }) {
               isBoardingTimerUrgent && styles.boardingTimerMessageUrgent,
               isBoardingTimerExpired && styles.boardingTimerMessageExpired,
             ]}
-            numberOfLines={1}
+            numberOfLines={isBoardingWaitRunning ? 3 : 1}
             testID={passengerCardFieldTestIDs.boarding_timer_message}
           >
-            {boardingTimerMessage}
+            {boardingDisplayMessage}
           </Text>
           <RobotaxiLifecycleIdentity
             initial={driverInitial}
@@ -2227,8 +2256,8 @@ export default function RobotaxiTripScreen({ navigation, route }) {
         <RobotaxiLifecycleSummary
           eyebrow={isStarted ? 'EM VIAGEM' : isArrived ? 'MOTORISTA CHEGOU' : 'MOTORISTA A CAMINHO'}
           title={isStarted ? destination : pickupCompactLabel}
-          value={isStarted ? compactArrivalTime : isArrived ? boardingCountdownLabel || '0:00' : compactEtaValue}
-          valueLabel={isStarted ? 'chegada' : isArrived ? 'para embarcar' : 'até chegar'}
+          value={isStarted ? compactArrivalTime : isArrived ? boardingDisplayValue : compactEtaValue}
+          valueLabel={isStarted ? 'chegada' : isArrived ? boardingDisplayValueLabel : 'até chegar'}
           titleTestID={isStarted
             ? passengerCardFieldTestIDs.destination_address
             : passengerCardFieldTestIDs.pickup_address}
@@ -2259,7 +2288,7 @@ export default function RobotaxiTripScreen({ navigation, route }) {
                 ? passengerCardFieldTestIDs.boarding_timer_message
                 : passengerCardFieldTestIDs.pickup_distance}
             >
-              {isArrived ? boardingTimerMessage : `${distanceLabel} até o embarque`}
+              {isArrived ? boardingDisplayMessage : `${distanceLabel} até o embarque`}
             </Text>
           </>
         )}
