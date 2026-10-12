@@ -363,6 +363,20 @@ workerManager.registerListener(EVENT_TYPES.RIDE_COMPLETED, async (event) => {
         throw new Error(`Falha na distribuição de pagamento Woovi: ${distributionResult.error}`);
     }
 
+    if (distributionResult.passengerRefund?.manualReviewRequired === true) {
+        // Motorista creditado, mas o estorno parcial do passageiro não foi feito e não pode
+        // ser repetido automaticamente: fica registrado no pagamento da corrida
+        // (passengerRefundPending) e na reconciliação financeira para o suporte resolver.
+        logStructured('error', 'Estorno parcial do passageiro pendente de revisão manual após liquidação', {
+            bookingId,
+            driverId,
+            refundAmountCents: distributionResult.passengerRefund.refundAmountCents || 0,
+            code: distributionResult.passengerRefund.code || null,
+            error: distributionResult.passengerRefund.error || null,
+            providerDelivery: distributionResult.passengerRefund.providerDelivery || null
+        });
+    }
+
     logStructured('info', 'Processamento contábil concluído com sucesso', {
         bookingId,
         driverId,
