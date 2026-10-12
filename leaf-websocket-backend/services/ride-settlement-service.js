@@ -51,6 +51,8 @@ function buildEarlyEndedReviewSettlement(bookingHash = {}, options = {}) {
   const settlement = calculateExecutedFareSettlement(bookingHash, {
     ...options,
     settlementType: 'EARLY_ENDED_REVIEW',
+    // Encerramento com revisão manual não entrou na regra do pedágio: conta inalterada.
+    tollPassThrough: false,
     minChargeRatio: options.minChargeRatio ?? 0
   });
 

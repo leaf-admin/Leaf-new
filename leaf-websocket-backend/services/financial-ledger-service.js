@@ -818,6 +818,28 @@ class FinancialLedgerService {
         });
       }
 
+      // Estorno parcial do encerramento antecipado que falhou na liquidação: fica
+      // visível aqui até ser resolvido (ver PaymentService.recordPassengerRefundPending).
+      const passengerRefundPending = payment?.passengerRefundPending || null;
+      if (['RETRY_PENDING', 'MANUAL_REVIEW_REQUIRED'].includes(passengerRefundPending?.status)) {
+        issues.push({
+          code: passengerRefundPending.status === 'MANUAL_REVIEW_REQUIRED'
+            ? 'PASSENGER_REFUND_MANUAL_REVIEW_REQUIRED'
+            : 'PASSENGER_REFUND_RETRY_PENDING',
+          severity: 'high',
+          message: passengerRefundPending.status === 'MANUAL_REVIEW_REQUIRED'
+            ? 'Estorno parcial do passageiro falhou e precisa de revisão manual'
+            : 'Estorno parcial do passageiro falhou e aguarda nova tentativa',
+          chargeId: passengerRefundPending.chargeId || null,
+          refundAmountCents: this.toCents(passengerRefundPending.amountCents),
+          refundErrorCode: passengerRefundPending.code || null,
+          refundError: passengerRefundPending.error || null,
+          providerDelivery: passengerRefundPending.providerDelivery || null,
+          attempts: Number(passengerRefundPending.attempts) || 0,
+          lastFailedAtIso: passengerRefundPending.lastFailedAtIso || null
+        });
+      }
+
       const isManualOrMultiLegDistribution = ['manual_settlement_required', 'multi_leg']
         .includes(String(distribution?.mode || '').toLowerCase());
       const shouldRequireFinancialSnapshot = Boolean(distribution && distributionTotal > 0 && !isManualOrMultiLegDistribution);

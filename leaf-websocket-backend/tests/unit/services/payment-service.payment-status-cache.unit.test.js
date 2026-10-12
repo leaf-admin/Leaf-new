@@ -1869,6 +1869,72 @@ describe('PaymentService financial rules', () => {
     });
   });
 
+  it('refunds the unused part once and credits the settled net when a ride is settled below the prepaid amount', async () => {
+    const firestore = createInMemoryFirestore();
+    firebaseConfig.getFirestore.mockReturnValue(firestore);
+    await firestore.collection('ride_payments').doc('booking_driver_early_end').set({
+      rideId: 'booking_driver_early_end',
+      chargeId: 'charge_driver_early_end',
+      amount: 4000,
+      passengerId: 'customer_early_end',
+      status: 'PAID'
+    });
+    await firestore.collection('payment_holdings').doc('booking_driver_early_end').set({
+      rideId: 'booking_driver_early_end',
+      chargeId: 'charge_driver_early_end',
+      amount: 4000,
+      status: 'in_holding'
+    });
+    mockProcessRefund.mockReset();
+    mockProcessRefund.mockResolvedValue({ success: true, refundId: 'refund_driver_early_end' });
+    const service = new PaymentService();
+    // Mesmo evento que o CompleteTripCommand emite numa corrida liquidada pela
+    // metade: R$ 40,00 pagos, R$ 20,00 executados.
+    const settledRide = {
+      rideId: 'booking_driver_early_end',
+      driverId: 'driver_early_end',
+      totalAmount: 2000,
+      tollFee: 0,
+      financialSnapshot: {
+        authoritativeSnapshot: true,
+        financialSnapshotSource: 'backend_final',
+        passengerPaidCents: 2000,
+        tollFeeCents: 0,
+        operationalFeeCents: 99,
+        paymentIntermediationFeeCents: 50,
+        subscriptionRetainedFeeCents: 0,
+        driverNetAmountCents: 1851
+      }
+    };
+
+    const first = await service.processNetDistribution(settledRide);
+
+    expect(first).toMatchObject({ success: true, netAmount: 1851 });
+    expect(mockProcessRefund).toHaveBeenCalledTimes(1);
+    expect(mockProcessRefund.mock.calls[0][0]).toBe('charge_driver_early_end');
+    expect(mockProcessRefund.mock.calls[0][1]).toBe(2000);
+    expect(firestore.docs.get('ride_payments/booking_driver_early_end')).toMatchObject({
+      status: 'REFUNDED_PARTIAL',
+      refunded: true,
+      refundAmount: 2000,
+      refundId: 'refund_driver_early_end'
+    });
+    expect(firestore.docs.get('driver_balances/driver_early_end')).toMatchObject({
+      balance: 18.51,
+      totalEarnings: 18.51
+    });
+
+    // Reentrega do mesmo evento: nem novo estorno na Woovi, nem novo crédito.
+    const second = await service.processNetDistribution(settledRide);
+
+    expect(second.success).toBe(true);
+    expect(mockProcessRefund).toHaveBeenCalledTimes(1);
+    expect(firestore.docs.get('driver_balances/driver_early_end')).toMatchObject({
+      balance: 18.51,
+      totalEarnings: 18.51
+    });
+  });
+
   it('settles subscription retention from the backend-final snapshot without recalculating', async () => {
     const firestore = createInMemoryFirestore();
     firebaseConfig.getFirestore.mockReturnValue(firestore);

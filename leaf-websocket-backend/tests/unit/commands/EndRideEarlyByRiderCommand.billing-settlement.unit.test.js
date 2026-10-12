@@ -226,10 +226,22 @@ describe('EndRideEarlyByRiderCommand -> billing worker', () => {
     });
   });
 
-  it('keeps the toll explicit in the executed-fare snapshot', async () => {
+  it('keeps the toll whole and outside the travelled share in the executed-fare snapshot', async () => {
     setBooking({ tollFee: '4.5' });
 
+    // 4,50 + 25% × (45,48 − 4,50) = 4,50 + 10,25 = 14,75
     const result = await endEarly();
+    expect(result.data.settlement).toMatchObject({
+      prepaidAmount: 45.48,
+      executedFare: 14.75,
+      estimatedRefund: 30.73,
+      tollFee: 4.5,
+      tollKeptWhole: true,
+      tollChargedAmount: 4.5,
+      tollCrossingVerified: false,
+      tollManualRefundOnDispute: true
+    });
+
     await mockListeners[EVENT_TYPES.RIDE_COMPLETED]({
       eventId: 'event_early_end_toll',
       eventType: EVENT_TYPES.RIDE_COMPLETED,
@@ -238,15 +250,66 @@ describe('EndRideEarlyByRiderCommand -> billing worker', () => {
 
     expect(mockProcessNetDistribution).toHaveBeenCalledWith(
       expect.objectContaining({
-        totalAmount: 1137,
+        totalAmount: 1475,
         tollFee: 450,
         financialSnapshot: expect.objectContaining({
-          passengerPaidCents: 1137,
+          passengerPaidCents: 1475,
           tollFeeCents: 450,
-          allocatedTotalCents: 1137
+          driverTollPassThroughCents: 450,
+          allocatedTotalCents: 1475,
+          balanced: true
         })
       })
     );
+  });
+
+  it('settles the approved worked example to the cent (R$ 48,61 with a R$ 8,95 toll)', async () => {
+    setBooking({ estimatedFare: '48.61', paymentAmountInCents: '4861', tollFee: '8.95' });
+
+    const result = await endEarly();
+
+    expect(result.data.settlement).toMatchObject({
+      appliedRatio: 0.25,
+      prepaidAmount: 48.61,
+      executedFare: 18.87,
+      estimatedRefund: 29.74,
+      tollFee: 8.95,
+      fareWithoutToll: 39.66,
+      executedFareWithoutToll: 9.92,
+      tollKeptWhole: true
+    });
+
+    const snapshot = result.data.financialSnapshot;
+    expect(validateAuthoritativeFinancialSnapshot(snapshot, {
+      passengerPaidCents: 1887,
+      tollFeeCents: 895
+    })).toMatchObject({ valid: true });
+    expect(snapshot.driverNetAmountCents).toBe(1758);
+    // taxa operacional + taxa de pagamento + líquido do motorista (com o pedágio) = valor executado
+    expect(
+      snapshot.operationalFeeCents +
+        snapshot.paymentIntermediationFeeCents +
+        snapshot.subscriptionRetainedFeeCents +
+        snapshot.driverNetAmountCents
+    ).toBe(1887);
+    // valor executado + estorno = pré-pago
+    expect(snapshot.passengerPaidCents + Math.round(result.data.settlement.estimatedRefund * 100)).toBe(4861);
+  });
+
+  it('keeps today\'s unsettled outcome when the booked toll is not below the fare', async () => {
+    setBooking({ estimatedFare: '20', paymentAmountInCents: '2000', tollFee: '20' });
+
+    const result = await endEarly();
+
+    // Dado inconsistente: a conta antiga é mantida, o snapshot não fecha e o
+    // worker de billing rejeita o evento em vez de movimentar dinheiro.
+    expect(result.data.settlement).toMatchObject({
+      executedFare: 5,
+      estimatedRefund: 15,
+      tollKeptWhole: false,
+      tollRuleSkippedReason: 'TOLL_NOT_BELOW_FARE'
+    });
+    expect(result.data.financialSnapshot || null).toBeNull();
   });
 
   it('propagates the sealed financial context of the booking to the billing event', async () => {

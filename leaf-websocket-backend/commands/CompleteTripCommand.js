@@ -37,6 +37,10 @@ const {
 } = require('../services/ride-lifecycle-service');
 const { buildAuthoritativeFinancialSnapshot } = require('../services/ride-financial-contract');
 const { resolveFinancialContext } = require('../services/financial-runtime-context');
+const {
+    DRIVER_EARLY_END_COMPLETION_TYPE,
+    resolveDriverEarlyEndSettlement
+} = require('../services/ride-early-end-service');
 
 function toMoney(value) {
     const parsed = Number(value);
@@ -222,6 +226,66 @@ function resolveCompletedFinancialResultFields(bookingData = {}) {
     return fields;
 }
 
+// Replay de uma corrida já liquidada como encerramento antecipado pelo
+// motorista: devolve a mesma liquidação gravada, sem recalcular nada.
+function resolveCompletedDriverEarlyEndFields(bookingData = {}) {
+    if (String(bookingData.completionType || '').toUpperCase() !== DRIVER_EARLY_END_COMPLETION_TYPE) {
+        return {};
+    }
+    const settlement = safeJsonParse(bookingData.settlement, null);
+    if (!settlement || typeof settlement !== 'object') {
+        return {};
+    }
+    const earlyEnd = safeJsonParse(bookingData.earlyEnd, null);
+    return {
+        completionType: DRIVER_EARLY_END_COMPLETION_TYPE,
+        settlement,
+        ...(earlyEnd && typeof earlyEnd === 'object' ? { earlyEnd } : {})
+    };
+}
+
+// Confere se a liquidação do encerramento antecipado fecha em centavos com o
+// que o billing worker vai executar: valor liquidado + estorno = valor pago,
+// pedágio inteiro, taxas + líquido = valor liquidado, e líquido da corrida
+// (sem o repasse do pedágio) positivo. Devolve o motivo quando não fecha.
+function resolveDriverEarlyEndInconsistency({
+    settlement = {},
+    breakdown = {},
+    tollFee = 0,
+    fullFare = 0,
+    fareTolerance = 0.01
+}) {
+    const cents = (value) => Math.round((Number(value) || 0) * 100);
+    const executedFareCents = cents(settlement.executedFare);
+    const prepaidCents = cents(settlement.prepaidAmount);
+    const tollFeeCents = cents(tollFee);
+
+    if (cents(settlement.tollFee) !== tollFeeCents || tollFeeCents >= executedFareCents) {
+        return 'TOLL_AMOUNT_MISMATCH';
+    }
+    // O estorno real é o valor pago menos o liquidado; a liquidação só é
+    // verdadeira se o pré-pago dela for o valor travado da corrida.
+    if (Math.abs(prepaidCents - cents(fullFare)) > Math.round(fareTolerance * 100)) {
+        return 'PREPAID_AMOUNT_MISMATCH';
+    }
+    if (executedFareCents + cents(settlement.estimatedRefund) !== prepaidCents) {
+        return 'SETTLEMENT_UNBALANCED';
+    }
+    const driverNetCents = cents(breakdown.driverNetAmount);
+    const allocatedCents =
+        cents(breakdown.operationalFee) +
+        cents(breakdown.paymentIntermediationFee) +
+        cents(breakdown.subscriptionRetainedFee) +
+        driverNetCents;
+    if (allocatedCents !== executedFareCents) {
+        return 'SETTLEMENT_UNBALANCED';
+    }
+    if (!(driverNetCents - tollFeeCents > 0)) {
+        return 'SETTLED_NET_NOT_POSITIVE';
+    }
+    return null;
+}
+
 async function applyDeferredIdentityReverification(driverId, context = {}) {
     try {
         const kycPolicyService = require('../services/kyc-policy-service');
@@ -249,6 +313,9 @@ class CompleteTripCommand extends Command {
         this.tollFee = data.tollFee || 0; // ✅ Adicionado pedágio
         this.distance = data.distance || 0;
         this.duration = data.duration || 0;
+        // Declaração do app do motorista ({ reason, remainingMeters }). É só um
+        // registro do motivo: nunca decide valor, repasse ou estorno.
+        this.earlyEnd = data.earlyEnd && typeof data.earlyEnd === 'object' ? data.earlyEnd : null;
         // ✅ VALIDAÇÃO: Garantir traceId válido
         this.traceId = validateAndEnsureTraceIdInCommand(data, 'CompleteTrip');
         this.correlationId = data.correlationId || this.bookingId; // ✅ Adicionar correlationId
@@ -358,6 +425,7 @@ class CompleteTripCommand extends Command {
                             ? safeJsonParse(bookingData.paymentDistribution, { status: 'PENDING', message: 'Processamento assíncrono em andamento' })
                             : { status: 'PENDING', message: 'Processamento assíncrono em andamento' },
                         ...resolveCompletedFinancialResultFields(bookingData),
+                        ...resolveCompletedDriverEarlyEndFields(bookingData),
                         financialContext,
                         idempotentReplay: true
                     });
@@ -440,6 +508,114 @@ class CompleteTripCommand extends Command {
                     Number(this.tollFee || 0),
                     { subscriptionRetainedFeeCents: extensionRetainedOperationalFeeCents }
                 );
+
+                // Encerramento antecipado pelo motorista: mesma regra do encerramento
+                // pelo passageiro (trecho percorrido, com o mesmo mínimo), aplicada à
+                // tarifa sem o pedágio; o pedágio é repasse e fica cobrado inteiro. Quem
+                // decide é o servidor, com a telemetria da corrida. Qualquer dúvida ou
+                // erro mantém o valor integral: a finalização nunca falha por causa disto.
+                let driverEarlyEnd = null;
+                let driverEarlyEndSkip = null;
+                if (offlineSettlementReview) {
+                    // Corrida já vai para liquidação manual; não empilhar outro ajuste.
+                    driverEarlyEndSkip = { reason: 'OFFLINE_SETTLEMENT_REVIEW' };
+                } else {
+                    try {
+                        const decision = await resolveDriverEarlyEndSettlement({
+                            redis,
+                            bookingId: this.bookingId,
+                            driverId: this.driverId,
+                            bookingData,
+                            tollFee: this.tollFee,
+                            driverStatement: this.earlyEnd
+                        });
+                        if (decision?.applied) {
+                            const settledFare = toMoney(decision.settlement?.executedFare);
+                            const settledBreakdown =
+                                settledFare !== null && settledFare > 0 && settledFare < this.finalFare
+                                    ? paymentService.calculateFareBreakdownFromReais(
+                                        settledFare,
+                                        Number(this.tollFee || 0),
+                                        { subscriptionRetainedFeeCents: extensionRetainedOperationalFeeCents }
+                                    )
+                                    : null;
+                            const inconsistency = settledBreakdown
+                                ? resolveDriverEarlyEndInconsistency({
+                                    settlement: decision.settlement,
+                                    breakdown: settledBreakdown,
+                                    tollFee: this.tollFee,
+                                    fullFare: this.finalFare,
+                                    fareTolerance
+                                })
+                                : null;
+                            if (!settledBreakdown) {
+                                driverEarlyEndSkip = { ...decision, applied: false, reason: 'NO_REFUND_DUE' };
+                            } else if (inconsistency) {
+                                driverEarlyEndSkip = {
+                                    ...decision,
+                                    applied: false,
+                                    detected: true,
+                                    reason: inconsistency
+                                };
+                            } else {
+                                driverEarlyEnd = decision;
+                                completedFareBreakdown = settledBreakdown;
+                                this.finalFare = settledFare;
+                                this.distance = decision.settlement.executedDistanceKm;
+                                this.duration = decision.settlement.executedDurationSecs;
+                                this.endLocation = {
+                                    ...this.endLocation,
+                                    lat: decision.endLocation.lat,
+                                    lng: decision.endLocation.lng
+                                };
+                            }
+                        } else {
+                            driverEarlyEndSkip = decision || null;
+                        }
+                    } catch (earlyEndError) {
+                        driverEarlyEnd = null;
+                        driverEarlyEndSkip = { reason: 'SETTLEMENT_ERROR' };
+                        logStructured('error', 'Falha ao avaliar encerramento antecipado pelo motorista; valor integral mantido', {
+                            service: 'complete-trip-command',
+                            bookingId: this.bookingId,
+                            driverId: this.driverId,
+                            error: earlyEndError.message
+                        });
+                    }
+                }
+                const driverEarlyEndFields = driverEarlyEnd
+                    ? {
+                        completionType: DRIVER_EARLY_END_COMPLETION_TYPE,
+                        completionReason: driverEarlyEnd.settlement.driverReason || 'EARLY_END_BY_DRIVER',
+                        settlement: driverEarlyEnd.settlement,
+                        earlyEndSettlement: driverEarlyEnd.settlement
+                    }
+                    : {};
+                // Só registra quando o servidor viu o encerramento longe do destino
+                // e mesmo assim não liquidou; serve para a operação revisar.
+                const driverEarlyEndSkipped =
+                    !driverEarlyEnd && driverEarlyEndSkip?.detected
+                        ? {
+                            reason: driverEarlyEndSkip.reason,
+                            remainingMeters: driverEarlyEndSkip.earlyEnd?.remainingMeters ?? null,
+                            driverReason: driverEarlyEndSkip.earlyEnd?.driverReason ?? null,
+                            at: new Date().toISOString()
+                        }
+                        : null;
+                if (driverEarlyEnd || (driverEarlyEndSkip && !['DISABLED', 'NEAR_DESTINATION'].includes(driverEarlyEndSkip.reason))) {
+                    logStructured(driverEarlyEnd ? 'info' : 'warn', driverEarlyEnd
+                        ? 'Encerramento antecipado pelo motorista liquidado pelo trecho percorrido'
+                        : 'Encerramento antecipado pelo motorista não liquidado; valor integral mantido', {
+                        service: 'complete-trip-command',
+                        bookingId: this.bookingId,
+                        driverId: this.driverId,
+                        reason: driverEarlyEnd ? null : driverEarlyEndSkip.reason,
+                        executedFare: driverEarlyEnd?.settlement.executedFare ?? null,
+                        estimatedRefund: driverEarlyEnd?.settlement.estimatedRefund ?? null,
+                        remainingMeters:
+                            (driverEarlyEnd || driverEarlyEndSkip)?.earlyEnd?.remainingMeters ?? null
+                    });
+                }
                 const finalFinancialSnapshot = buildAuthoritativeFinancialSnapshot({
                     passengerPaidCents: Math.round(Number(this.finalFare || 0) * 100),
                     tollFeeCents: Math.round(Number(this.tollFee || 0) * 100),
@@ -536,7 +712,9 @@ class CompleteTripCommand extends Command {
                         paymentDistribution,
                         financialContext,
                         financialNamespace: financialContext.namespace,
-                        financialContextId: financialContext.contextId
+                        financialContextId: financialContext.contextId,
+                        ...driverEarlyEndFields,
+                        ...(driverEarlyEndSkipped ? { earlyEndSettlementSkipped: driverEarlyEndSkipped } : {})
                     }
                 );
 
@@ -565,6 +743,17 @@ class CompleteTripCommand extends Command {
                     financialContextId: financialContext.contextId,
                     ...(offlineSettlementReview ? { offlineSettlementReview: JSON.stringify(offlineSettlementReview) } : {}),
                     ...(offlineSettlementReview ? { settlementReviewRequired: 'true' } : {}),
+                    ...(driverEarlyEnd
+                        ? {
+                            completionType: driverEarlyEndFields.completionType,
+                            completionReason: driverEarlyEndFields.completionReason,
+                            settlement: JSON.stringify(driverEarlyEnd.settlement),
+                            earlyEndSettlement: JSON.stringify(driverEarlyEnd.settlement)
+                        }
+                        : {}),
+                    ...(driverEarlyEndSkipped
+                        ? { earlyEndSettlementSkipped: JSON.stringify(driverEarlyEndSkipped) }
+                        : {}),
                     ...(rideLegSettlements.length > 0 ? { rideLegs: JSON.stringify(rideLegSettlements) } : {}),
                     ...(completedContinuation ? { operationalContinuation: JSON.stringify(completedContinuation) } : {})
                 });
@@ -692,6 +881,13 @@ class CompleteTripCommand extends Command {
                     financialContext,
                     financialNamespace: financialContext.namespace,
                     financialContextId: financialContext.contextId,
+                    ...(driverEarlyEnd
+                        ? {
+                            completionType: driverEarlyEndFields.completionType,
+                            completionReason: driverEarlyEndFields.completionReason,
+                            settlement: driverEarlyEnd.settlement
+                        }
+                        : {}),
                     traceId: this.traceId, // ✅ Incluir traceId no evento
                     correlationId: this.correlationId || this.bookingId // ✅ Incluir correlationId no evento
                 });
@@ -730,7 +926,16 @@ class CompleteTripCommand extends Command {
                     authoritativeSnapshot: true,
                     financialSnapshotSource: 'backend_final',
                     financialSnapshot: finalFinancialSnapshot,
-                    financialContext
+                    financialContext,
+                    ...(driverEarlyEnd
+                        ? {
+                            completionType: driverEarlyEndFields.completionType,
+                            completionReason: driverEarlyEndFields.completionReason,
+                            settlement: driverEarlyEnd.settlement,
+                            earlyEnd: driverEarlyEnd.earlyEnd
+                        }
+                        : {}),
+                    ...(driverEarlyEndSkipped ? { earlyEndSettlementSkipped: driverEarlyEndSkipped } : {})
                 });
 
             } catch (error) {
