@@ -7393,6 +7393,48 @@ export function isRiderEarlyEndCompletion(payload = {}) {
   );
 }
 
+// A cancel that came from the other side resets the payment state. The
+// summary still needs the amount the passenger paid: taken from the cancel
+// event if the server sends it, else from the payment known before the reset.
+// Only when neither exists it is rebuilt from the event's own refund and fee
+// (paid = refund + fee); with one of them missing, or nothing refunded, it
+// stays unknown (null).
+export function resolveRemoteCancelSummaryContext(payload = {}, previous = {}) {
+  const data = payload?.data || {};
+  const toMoney = (value) => {
+    if (value === null || value === undefined || String(value).trim() === "") {
+      return null;
+    }
+    const numeric = Number(value);
+    return Number.isFinite(numeric) && numeric >= 0 ? numeric : null;
+  };
+  const previousPayment = previous?.paymentState || {};
+  const knownPaidAmount =
+    [
+      data.originalPaidAmount,
+      payload?.originalPaidAmount,
+      previousPayment.originalPaidAmount,
+      previousPayment.amount,
+      Number(previous?.activeBooking?.paymentData?.grossAmountInCents) / 100,
+    ]
+      .map(toMoney)
+      .find((value) => value !== null && value > 0) ?? null;
+  const refundAmount = toMoney(data.refundAmount ?? payload?.refundAmount);
+  const cancellationFee = toMoney(data.cancellationFee ?? payload?.cancellationFee);
+  const derivedPaidAmount =
+    refundAmount !== null && refundAmount > 0 && cancellationFee !== null
+      ? Number((refundAmount + cancellationFee).toFixed(2))
+      : null;
+  const cancelledBy = String(payload?.initiatedBy || "").trim().toLowerCase();
+  const cancellationReason = String(data.reason || payload?.reason || "").trim();
+
+  return {
+    originalPaidAmount: knownPaidAmount ?? derivedPaidAmount,
+    cancelledBy: cancelledBy || null,
+    cancellationReason: cancellationReason || null,
+  };
+}
+
 // Same settlement shape when the server settles a ride the driver ended far
 // from the destination (completionType EARLY_ENDED_BY_DRIVER).
 function isDriverEarlyEndCompletion(payload = {}) {
@@ -12071,6 +12113,9 @@ function attachSocketListeners() {
           cancellationFee: Number(
             payload?.data?.cancellationFee || payload?.cancellationFee || 0,
           ),
+          // Kept for the cancellation summary: what was paid, who cancelled
+          // and why. `amount` stays 0 so nothing treats the ride as paid.
+          ...resolveRemoteCancelSummaryContext(payload, previous),
           refundId: payload?.data?.refundId || payload?.refundId || null,
           chargeId: payload?.data?.chargeId || payload?.chargeId || null,
         },

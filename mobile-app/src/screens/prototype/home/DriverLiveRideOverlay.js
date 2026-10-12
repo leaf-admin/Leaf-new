@@ -48,6 +48,7 @@ import {
 import { useDriverOfferCountdown } from "../driverOfferCountdown";
 import { shortTripAddressLabel } from "../tripAddressPresentation";
 import { normalizeRuntimeRideStatus } from "../rideLifecycleContract";
+import { PASSENGER_NO_SHOW_CANCEL_REASON } from "../boardingWaitPolicy";
 import { useHapticFeedback } from "../../../hooks/useHapticFeedback";
 
 const { color } = robotaxiPrototypeTokens;
@@ -992,7 +993,7 @@ function DriverLiveRideOverlay({
       setBusyAction("cancel");
       await cancelActiveRideFlow({
         reason: passengerNoShow
-          ? "Passageiro não compareceu ao embarque."
+          ? PASSENGER_NO_SHOW_CANCEL_REASON
           : "Cancelado pelo motorista.",
       });
     } catch (error) {

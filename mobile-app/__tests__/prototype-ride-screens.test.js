@@ -1560,6 +1560,83 @@ describe('prototype ride screens', () => {
     expect(screen.getByLabelText('Voltar ao mapa')).toBeTruthy();
   });
 
+  describe('cancellation summary after the driver cancels', () => {
+    const renderRemoteCancel = (paymentState) => {
+      usePrototypeRideRuntime.mockReturnValue({
+        activeBookingId: null,
+        bookingStatus: 'idle',
+        cancelRideSearch: jest.fn(),
+        cancelActiveRideFlow: jest.fn(),
+        paymentState,
+      });
+      return render(
+        <RobotaxiCancellationScreen
+          navigation={{ navigate: jest.fn(), replace: jest.fn(), canGoBack: jest.fn(() => false), goBack: jest.fn() }}
+          route={{ key: 'remote-cancel', params: { source: 'remote_cancel', completed: true } }}
+        />
+      );
+    };
+
+    it('shows the Pix paid next to the refund and the fee, and says the fee is for no-show', () => {
+      const screen = renderRemoteCancel({
+        status: 'idle',
+        amount: 0,
+        originalPaidAmount: 40.49,
+        refundAmount: 37.49,
+        cancellationFee: 3,
+        refundStatus: 'REFUNDED_PARTIAL',
+        cancelledBy: 'driver',
+        cancellationReason: 'Passageiro não compareceu ao embarque.',
+      });
+
+      expect(screen.getByText('Pix pago')).toBeTruthy();
+      expect(screen.getByText('R$ 40,49')).toBeTruthy();
+      expect(screen.getByText('R$ 37,49')).toBeTruthy();
+      expect(screen.getByText('R$ 3,00')).toBeTruthy();
+      expect(
+        screen.getByText(
+          'O motorista esperou no local de embarque e cancelou a corrida porque você não compareceu. Por isso foi cobrada a taxa de cancelamento.',
+        ),
+      ).toBeTruthy();
+      expect(
+        screen.queryByText('Os valores abaixo refletem a política aplicada ao momento do cancelamento.'),
+      ).toBeNull();
+    });
+
+    it('keeps the generic subtitle when the cancel event did not give the no-show reason', () => {
+      const screen = renderRemoteCancel({
+        status: 'idle',
+        amount: 0,
+        originalPaidAmount: 40.49,
+        refundAmount: 37.49,
+        cancellationFee: 3,
+        refundStatus: 'REFUNDED_PARTIAL',
+        cancelledBy: 'driver',
+        cancellationReason: 'Cancelado pelo motorista.',
+      });
+
+      expect(screen.getByText('Pix pago')).toBeTruthy();
+      expect(
+        screen.getByText('Os valores abaixo refletem a política aplicada ao momento do cancelamento.'),
+      ).toBeTruthy();
+    });
+
+    it('does not invent a Pix paid row when the amount is unknown', () => {
+      const screen = renderRemoteCancel({
+        status: 'idle',
+        amount: 0,
+        originalPaidAmount: null,
+        refundAmount: 0,
+        cancellationFee: 3,
+        cancelledBy: 'driver',
+        cancellationReason: null,
+      });
+
+      expect(screen.queryByText('Pix pago')).toBeNull();
+      expect(screen.getByText('R$ 3,00')).toBeTruthy();
+    });
+  });
+
   it('treats completed cancellation aliases as terminal without sending another cancel command', () => {
     const cancelRideSearch = jest.fn();
     const cancelActiveRideFlow = jest.fn();

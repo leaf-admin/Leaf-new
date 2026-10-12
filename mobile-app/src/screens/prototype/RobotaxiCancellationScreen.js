@@ -17,6 +17,7 @@ import { usePrototypeMapOcclusion } from './prototypeMapOcclusion';
 import { usePrototypeRideRuntime } from './prototypeRideRuntime';
 import { isTerminalRideStatus, normalizeRuntimeRideStatus } from './rideLifecycleContract';
 import { formatCurrencyBRL } from './tripFinancialSummary';
+import { isPassengerNoShowCancelReason } from './boardingWaitPolicy';
 
 const { color, typography } = robotaxiPrototypeTokens;
 const SHEET_BOTTOM_OFFSET = 0;
@@ -131,10 +132,19 @@ export default function RobotaxiCancellationScreen({ navigation, route }) {
     ['REFUNDED', 'REFUNDED_FULL', 'ALREADY_REFUNDED'].includes(refundStatus) &&
     Number(cancellationFee || 0) === 0 &&
     Number(refundAmount || 0) > 0;
+  // The driver waited at the pickup and cancelled for no-show: say why a fee
+  // was kept. Only when the cancel event itself said so (driver + reason).
+  const isDriverNoShowFee =
+    source === 'remote_cancel' &&
+    Number(cancellationFee || 0) > 0 &&
+    paymentState?.cancelledBy === 'driver' &&
+    isPassengerNoShowCancelReason(paymentState?.cancellationReason);
   const terminalSubtitle = isIntegralRefund
     ? refundStatus === 'ALREADY_REFUNDED'
       ? 'O reembolso integral já foi registrado no mesmo Pix usado no pagamento.'
       : 'O reembolso integral foi registrado no mesmo Pix usado no pagamento.'
+    : isDriverNoShowFee
+      ? 'O motorista esperou no local de embarque e cancelou a corrida porque você não compareceu. Por isso foi cobrada a taxa de cancelamento.'
     : hasFinancialOutcome
       ? 'Os valores abaixo refletem a política aplicada ao momento do cancelamento.'
       : source === 'remote_cancel'

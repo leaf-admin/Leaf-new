@@ -109,6 +109,7 @@ const {
   mergeCompletedReceiptForHistory,
   normalizeCompletedTripDriverNetAmount,
   resolveCompletedTripFinancialSnapshot,
+  resolveRemoteCancelSummaryContext,
   resolveDriverPayoutAmount,
   isRemoteLivenessPassed,
   resolveSyncedBookingStatus,
@@ -1097,5 +1098,72 @@ describe('prototype ride runtime receipt and recovery helpers', () => {
     ).toBe('Rua A, 10 - Centro');
     expect(buildBookingDestinationLabel({ name: 'Casa' })).toBe('Casa');
     expect(buildBookingDestinationLabel({})).toBe('Destino');
+  });
+
+  describe('remote cancel summary context', () => {
+    const noShowCancel = {
+      success: true,
+      bookingId: 'booking_1',
+      initiatedBy: 'driver',
+      data: {
+        reason: 'Passageiro não compareceu ao embarque.',
+        cancellationFee: 3,
+        refundAmount: 37.49,
+        refundStatus: 'REFUNDED_PARTIAL',
+      },
+    };
+
+    it('carries the amount paid before the cancel event resets the payment state', () => {
+      expect(
+        resolveRemoteCancelSummaryContext(noShowCancel, {
+          paymentState: { status: 'paid', amount: 40.49 },
+        }),
+      ).toEqual({
+        originalPaidAmount: 40.49,
+        cancelledBy: 'driver',
+        cancellationReason: 'Passageiro não compareceu ao embarque.',
+      });
+    });
+
+    it('prefers a paid amount sent by the server over the local one', () => {
+      const context = resolveRemoteCancelSummaryContext(
+        { ...noShowCancel, data: { ...noShowCancel.data, originalPaidAmount: 41 } },
+        { paymentState: { amount: 40.49 } },
+      );
+      expect(context.originalPaidAmount).toBe(41);
+    });
+
+    it('derives the paid amount from refund plus fee only when both came in the event', () => {
+      expect(
+        resolveRemoteCancelSummaryContext(noShowCancel, { paymentState: { amount: 0 } })
+          .originalPaidAmount,
+      ).toBe(40.49);
+      expect(
+        resolveRemoteCancelSummaryContext(
+          { initiatedBy: 'driver', data: { refundAmount: 37.49 } },
+          { paymentState: { amount: 0 } },
+        ).originalPaidAmount,
+      ).toBeNull();
+      expect(
+        resolveRemoteCancelSummaryContext(
+          { initiatedBy: 'driver', data: { cancellationFee: 3 } },
+          {},
+        ).originalPaidAmount,
+      ).toBeNull();
+      expect(
+        resolveRemoteCancelSummaryContext(
+          { initiatedBy: 'driver', data: { cancellationFee: 3, refundAmount: 0 } },
+          {},
+        ).originalPaidAmount,
+      ).toBeNull();
+    });
+
+    it('leaves who cancelled and why empty when the event does not say', () => {
+      expect(resolveRemoteCancelSummaryContext({ message: 'Corrida cancelada' }, {})).toEqual({
+        originalPaidAmount: null,
+        cancelledBy: null,
+        cancellationReason: null,
+      });
+    });
   });
 });
