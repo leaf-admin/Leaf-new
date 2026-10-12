@@ -144,6 +144,47 @@ describe('registerSocketEndTripEarlyHandler', () => {
     expect(pricingH3ReadModelService.clearBookingSnapshot).toHaveBeenCalledWith(redis, 'booking-1');
   });
 
+  it('persists the backend-final financial snapshot returned by the command', async () => {
+    const financialSnapshot = {
+      authoritativeSnapshot: true,
+      financialSnapshotSource: 'backend_final',
+      passengerPaidCents: 1137,
+      driverNetAmountCents: 988
+    };
+    const { listeners } = buildHarness({
+      commandResult: {
+        success: true,
+        data: {
+          driverId: 'driver-1',
+          customerId: 'customer-1',
+          event: { bookingId: 'booking-1' },
+          finalFare: 11.37,
+          tollFee: 0,
+          distance: 0.4,
+          duration: 60,
+          settlement: { executedFare: 11.37, estimatedRefund: 34.11 },
+          financialSnapshot
+        }
+      }
+    });
+
+    await listeners.endTripEarlyByRider({
+      bookingId: 'booking-1',
+      endLocation: { lat: -22.98, lng: -43.21 }
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(ridePersistenceService.persistFinalRideDataWithOutbox).toHaveBeenCalledWith(
+      'booking-1',
+      expect.objectContaining({
+        fare: 11.37,
+        authoritativeSnapshot: true,
+        financialSnapshotSource: 'backend_final',
+        financialSnapshot
+      })
+    );
+  });
+
   it('rejects early ending when the feature flag is off', async () => {
     isRiderEarlyEndEnabled.mockReturnValue(false);
     const { listeners, socket } = buildHarness();

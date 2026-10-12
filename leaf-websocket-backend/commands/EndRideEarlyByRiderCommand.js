@@ -22,6 +22,38 @@ const {
 const {
   buildAuthoritativeCompletionArtifacts
 } = require('../services/ride-settlement-service');
+const { buildAuthoritativeFinancialSnapshot } = require('../services/ride-financial-contract');
+const PaymentService = require('../services/payment-service');
+
+function parseJsonObject(value) {
+  if (value && typeof value === 'object') return value;
+  if (typeof value !== 'string' || !value.trim()) return null;
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === 'object' ? parsed : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+// Snapshot financeiro final do valor executado. Sem ele o worker de billing rejeita o
+// ride.completed e a corrida encerrada pelo passageiro fica sem estorno, ledger e crédito.
+// Usa o mesmo cálculo de taxas já exibido ao motorista no tripCompleted.
+function buildExecutedFareFinancialSnapshot(settlement = {}) {
+  const paymentService = new PaymentService();
+  const breakdown = paymentService.calculateFareBreakdownFromReais(
+    Number(settlement.executedFare || 0),
+    Number(settlement.tollFee || 0)
+  );
+  return buildAuthoritativeFinancialSnapshot({
+    passengerPaidCents: Math.round(Number(settlement.executedFare || 0) * 100),
+    tollFeeCents: Math.round(Number(settlement.tollFee || 0) * 100),
+    operationalFeeCents: Math.round(Number(breakdown.operationalFee || 0) * 100),
+    paymentIntermediationFeeCents: Math.round(Number(breakdown.paymentIntermediationFee || 0) * 100),
+    subscriptionRetainedFeeCents: Math.round(Number(breakdown.subscriptionRetainedFee || 0) * 100),
+    driverNetAmountCents: Math.round(Number(breakdown.driverNetAmount || 0) * 100)
+  });
+}
 
 async function applyDeferredIdentityReverification(driverId, context = {}) {
   try {
@@ -133,6 +165,32 @@ class EndRideEarlyByRiderCommand extends Command {
         });
         const completedAt = new Date().toISOString();
         const normalizedEndLocation = normalizeLocation(this.endLocation) || this.endLocation;
+
+        let financialSnapshot = null;
+        try {
+          financialSnapshot = buildExecutedFareFinancialSnapshot(settlement);
+        } catch (snapshotError) {
+          logStructured('error', 'Falha ao gerar snapshot financeiro final do encerramento antecipado', {
+            service: 'end-ride-early-command',
+            bookingId: this.bookingId,
+            driverId,
+            executedFare: settlement.executedFare,
+            tollFee: settlement.tollFee,
+            error: snapshotError.message
+          });
+        }
+
+        const financialContextResult = resolveFinancialContext({
+          financialContext: parseJsonObject(context.bookingHash.financialContext),
+          financialNamespace: context.bookingHash.financialNamespace,
+          providerEnvironment:
+            context.bookingHash.paymentProviderEnvironment || context.bookingHash.providerEnvironment
+        }, { allowLegacyOperational: true });
+        const financialContext =
+          financialContextResult.ok && financialContextResult.legacy !== true
+            ? financialContextResult.context
+            : null;
+
         const completion = buildAuthoritativeCompletionArtifacts({
           bookingHash: context.bookingHash,
           bookingId: this.bookingId,
@@ -145,6 +203,8 @@ class EndRideEarlyByRiderCommand extends Command {
           distance: settlement.executedDistanceKm,
           duration: settlement.executedDurationSecs,
           settlement,
+          financialSnapshot,
+          financialContext,
           driverId,
           customerId: bookingCustomerId,
           traceId: this.traceId,

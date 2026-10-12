@@ -128,6 +128,13 @@ function registerSocketEndTripEarlyHandler({
               financialBreakdown: paymentDistribution || null,
               completionType: 'EARLY_ENDED_BY_RIDER',
               settlement,
+              ...(result.data?.financialSnapshot
+                ? {
+                    authoritativeSnapshot: true,
+                    financialSnapshotSource: 'backend_final',
+                    financialSnapshot: result.data.financialSnapshot
+                  }
+                : {}),
               financialContext: bookingSnapshot?.financialContext || null,
               financialNamespace: bookingSnapshot?.financialNamespace || null,
               financialContextId: bookingSnapshot?.financialContextId || null,
