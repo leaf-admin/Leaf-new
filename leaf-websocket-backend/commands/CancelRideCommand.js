@@ -416,6 +416,7 @@ class CancelRideCommand extends Command {
 
                 // Processar reembolso se houver pagamento
                 let refundResult = null;
+                const refundStartedAt = Date.now();
                 const paymentRecord = await paymentService.getStoredPayment(
                     this.bookingId,
                     financialContext
@@ -503,6 +504,8 @@ class CancelRideCommand extends Command {
                     }
                 }
 
+                const refundLatencyMs = Date.now() - refundStartedAt;
+
                 // Atualizar estado da corrida
                 await RideStateManager.updateBookingState(
                     redis,
@@ -581,26 +584,33 @@ class CancelRideCommand extends Command {
                     }
                 }
 
-                // Flush final da trilha de localização (se existirem pontos) para manter integridade histórica
-                try {
-                    await tripLocationPersistenceService.forceFinalizeTrip(this.bookingId, {
-                        status: 'canceled',
-                        reason: 'ride_canceled',
-                        financialContext: bookingData.financialContext,
-                        financialNamespace: bookingData.financialNamespace,
-                        financialContextId: bookingData.financialContextId,
-                        providerEnvironment:
-                            bookingData.paymentProviderEnvironment || bookingData.providerEnvironment,
-                        paymentProfileId: bookingData.paymentProfileId,
-                        testUserSandbox: bookingData.testUserSandbox
-                    });
-                } catch (locationFinalizeError) {
-                    logStructured('warn', 'Falha ao finalizar trilha de localização da corrida cancelada', {
-                        service: 'cancel-ride-command',
-                        bookingId: this.bookingId,
-                        error: locationFinalizeError.message
-                    });
-                }
+                // Flush final da trilha de localização (se existirem pontos) para manter integridade histórica.
+                // A resposta do cancelamento não depende dele: o estado canônico já foi confirmado acima.
+                // Roda fora do caminho da resposta (mesmo padrão do EndRideEarlyByRiderCommand); a falha
+                // continua apenas registrada em log, como antes.
+                const bookingIdToFinalize = this.bookingId;
+                const finalizeTripLocation = async () => {
+                    try {
+                        await tripLocationPersistenceService.forceFinalizeTrip(bookingIdToFinalize, {
+                            status: 'canceled',
+                            reason: 'ride_canceled',
+                            financialContext: bookingData.financialContext,
+                            financialNamespace: bookingData.financialNamespace,
+                            financialContextId: bookingData.financialContextId,
+                            providerEnvironment:
+                                bookingData.paymentProviderEnvironment || bookingData.providerEnvironment,
+                            paymentProfileId: bookingData.paymentProfileId,
+                            testUserSandbox: bookingData.testUserSandbox
+                        });
+                    } catch (locationFinalizeError) {
+                        logStructured('warn', 'Falha ao finalizar trilha de localização da corrida cancelada', {
+                            service: 'cancel-ride-command',
+                            bookingId: bookingIdToFinalize,
+                            error: locationFinalizeError.message
+                        });
+                    }
+                };
+                finalizeTripLocation();
 
                 // Criar evento canônico
                 const event = new RideCanceledEvent({
@@ -625,6 +635,14 @@ class CancelRideCommand extends Command {
                     canceledBy: this.canceledBy,
                     reason: this.reason,
                     command: 'CancelRideCommand'
+                });
+                // Tempos no texto da mensagem: o formato de console só imprime a mensagem.
+                logStructured('info', `CancelRideCommand tempos: reembolso=${refundLatencyMs}ms total=${Date.now() - startTime}ms`, {
+                    bookingId: this.bookingId,
+                    command: 'CancelRideCommand',
+                    refundLatencyMs,
+                    refundAttempted: Boolean(refundResult),
+                    latency_ms: Date.now() - startTime
                 });
 
                 // ✅ OBSERVABILIDADE: Registrar métrica de sucesso

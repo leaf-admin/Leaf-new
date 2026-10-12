@@ -1041,13 +1041,14 @@ class PaymentService {
         };
       }
 
+      // Consultas independentes por namespace: em paralelo, preservando a ordem dos resultados.
+      const snapshots = await Promise.all(['operational', 'sandbox'].map((namespace) => firestore
+        .collection(FINANCIAL_COLLECTIONS[namespace].paymentIntents)
+        .where('chargeId', '==', safeChargeId)
+        .limit(1)
+        .get()));
       const matches = [];
-      for (const namespace of ['operational', 'sandbox']) {
-        const snapshot = await firestore
-          .collection(FINANCIAL_COLLECTIONS[namespace].paymentIntents)
-          .where('chargeId', '==', safeChargeId)
-          .limit(1)
-          .get();
+      for (const snapshot of snapshots) {
         if (!snapshot.empty && snapshot.docs?.length) matches.push(snapshot.docs[0]);
       }
       if (matches.length === 0) return { found: false };
@@ -1300,12 +1301,13 @@ class PaymentService {
         return null;
       }
 
+      // Leituras independentes por namespace: em paralelo, preservando a ordem dos resultados.
+      const holdingDocs = await Promise.all(['operational', 'sandbox'].map((namespace) => firestore
+        .collection(FINANCIAL_COLLECTIONS[namespace].paymentHoldings)
+        .doc(rideId)
+        .get()));
       const matches = [];
-      for (const namespace of ['operational', 'sandbox']) {
-        const holdingDoc = await firestore
-          .collection(FINANCIAL_COLLECTIONS[namespace].paymentHoldings)
-          .doc(rideId)
-          .get();
+      for (const holdingDoc of holdingDocs) {
         if (holdingDoc.exists) matches.push(holdingDoc.data() || {});
       }
       if (matches.length !== 1) return null;
@@ -3406,11 +3408,28 @@ class PaymentService {
       // 0. ✅ CAOS SCENARIO: Checar se o valor cobrado final é menor que o estimado pago (Encerramento Antecipado)
       let passengerRefundAmount = 0;
       let passengerRefundResult = null;
+      // Rastro do estorno parcial: acompanha o resultado da liquidação (cache de idempotência
+      // e payment_distributions) para que uma corrida possa ser auditada sem depender de logs.
+      const passengerRefundTrace = {
+        attempted: false,
+        success: false,
+        skippedReason: null,
+        storedAmountCents: null,
+        finalAmountCents: Number.isFinite(Number(rideData.totalAmount)) ? Number(rideData.totalAmount) : null,
+        refundAmountCents: 0,
+        refundId: null,
+        code: null,
+        error: null
+      };
       try {
         const paymentRecord = storedPayment;
         const chargeIdToRefund = paymentRecord?.chargeId || paymentRecord?.paymentId;
+        const storedAmountCents = Number(paymentRecord?.amount);
+        passengerRefundTrace.storedAmountCents = Number.isFinite(storedAmountCents) ? storedAmountCents : null;
         if (paymentRecord && isCapturedPaymentStatus(paymentRecord.status) && chargeIdToRefund && paymentRecord.amount > rideData.totalAmount) {
           passengerRefundAmount = paymentRecord.amount - rideData.totalAmount;
+          passengerRefundTrace.attempted = true;
+          passengerRefundTrace.refundAmountCents = passengerRefundAmount;
           logStructured('info', 'Encerramento Antecipado detectado: processando estorno parcial para o passageiro', {
             service: 'PaymentService',
             rideId: rideData.rideId,
@@ -3433,14 +3452,61 @@ class PaymentService {
               finalAmountCents: rideData.totalAmount
             }
           });
+          passengerRefundTrace.success = passengerRefundResult.success === true;
+          passengerRefundTrace.refundId = passengerRefundResult.refundId || null;
+          passengerRefundTrace.code = passengerRefundResult.code || null;
           if (passengerRefundResult.success) {
-            logStructured('info', 'Estorno parcial do passageiro realizado com sucesso', { service: 'PaymentService', refundId: passengerRefundResult.refundId });
+            logStructured('info', 'Estorno parcial do passageiro realizado com sucesso', {
+              service: 'PaymentService',
+              rideId: rideData.rideId,
+              refundId: passengerRefundResult.refundId
+            });
           } else {
-            logStructured('error', 'Falha ao processar estorno parcial do passageiro', { service: 'PaymentService', error: passengerRefundResult.error });
+            const refundError = passengerRefundResult.error || passengerRefundResult.details || null;
+            passengerRefundTrace.error = typeof refundError === 'string'
+              ? refundError
+              : (refundError ? JSON.stringify(refundError) : null);
+            logStructured('error', 'Falha ao processar estorno parcial do passageiro', {
+              service: 'PaymentService',
+              rideId: rideData.rideId,
+              chargeId: chargeIdToRefund,
+              refundAmount: passengerRefundAmount,
+              code: passengerRefundResult.code || null,
+              error: passengerRefundResult.error
+            });
           }
+        } else if (paymentRecord && storedAmountCents > rideData.totalAmount) {
+          // Valor pago maior que o final, mas o estorno não foi tentado: registrar o motivo
+          // em vez de seguir em silêncio.
+          const alreadyRefunded = paymentRecord.refunded === true || isRefundedPaymentStatus(paymentRecord.status);
+          passengerRefundTrace.skippedReason = alreadyRefunded
+            ? 'PAYMENT_ALREADY_REFUNDED'
+            : (!chargeIdToRefund ? 'PAYMENT_CHARGE_ID_MISSING' : 'PAYMENT_STATUS_NOT_CAPTURED');
+          if (alreadyRefunded) {
+            passengerRefundTrace.refundId = paymentRecord.refundId || null;
+            passengerRefundTrace.refundAmountCents = Number(paymentRecord.refundAmount || 0) || 0;
+          }
+          logStructured(alreadyRefunded ? 'info' : 'warn', 'Estorno parcial do passageiro não tentado na liquidação', {
+            service: 'PaymentService',
+            rideId: rideData.rideId,
+            reason: passengerRefundTrace.skippedReason,
+            paymentStatus: paymentRecord.status || null,
+            originalAmount: storedAmountCents,
+            finalAmount: rideData.totalAmount
+          });
+        } else {
+          passengerRefundTrace.skippedReason = paymentRecord
+            ? 'NO_REFUND_DUE'
+            : 'PAYMENT_RECORD_NOT_FOUND';
         }
       } catch (refundCheckErr) {
-        logStructured('error', 'Erro ao checar necessidade de estorno parcial', { service: 'PaymentService', error: refundCheckErr.message });
+        passengerRefundTrace.code = 'REFUND_CHECK_EXCEPTION';
+        passengerRefundTrace.error = refundCheckErr.message;
+        logStructured('error', 'Erro ao checar necessidade de estorno parcial', {
+          service: 'PaymentService',
+          rideId: rideData.rideId,
+          error: refundCheckErr.message
+        });
       }
 
       // 1. Liquidar o snapshot final quando o evento canônico o fornece.
@@ -3707,6 +3773,7 @@ class PaymentService {
         balanceCreditId: creditResult.transactionId || plannedBalanceCreditId,
         ledgerEventId: ledgerResult.eventId || null,
         calculation: netCalculation,
+        passengerRefund: passengerRefundTrace,
         financialContext,
         financialNamespace: financialContext.namespace,
         financialContextId: financialContext.contextId,
@@ -3769,6 +3836,7 @@ class PaymentService {
         balance: creditResult.newBalance || null, // Novo saldo do motorista
         calculation: netCalculation,
         retainedFees: distributionData.retainedFees,
+        passengerRefund: passengerRefundTrace,
         financialContext
       };
 

@@ -234,4 +234,184 @@ describe('drivers earnings route financial source', () => {
     expect(response.body.report.totalFeeAmount).toBe(0);
     expect(response.body.report.financialSnapshotPendingCount).toBe(1);
   });
+  describe('corridas encerradas antecipadamente pelo passageiro', () => {
+    const driverProfile = { walletBalance: 50, rating: 4.9, hoursOnline: 3.5 };
+    // Pix de R$ 48,61; valor executado R$ 12,15; líquido liquidado R$ 10,86.
+    const settledEarlyEndSnapshot = () => buildBackendFinalSnapshot({
+      passengerPaidCents: 1215,
+      tollFeeCents: 895,
+      operationalFeeCents: 79,
+      paymentIntermediationFeeCents: 50,
+      driverNetAmountCents: 1086
+    });
+    const contractedSnapshot = () => buildBackendFinalSnapshot({
+      passengerPaidCents: 4861,
+      tollFeeCents: 895,
+      operationalFeeCents: 149,
+      paymentIntermediationFeeCents: 50,
+      driverNetAmountCents: 4662
+    });
+    const todayKey = () => {
+      const now = new Date();
+      const month = String(now.getMonth() + 1).padStart(2, '0');
+      const day = String(now.getDate()).padStart(2, '0');
+      return `${now.getFullYear()}-${month}-${day}`;
+    };
+
+    it('conta a corrida EARLY_ENDED_BY_RIDER com o líquido liquidado, não o valor contratado', async () => {
+      const app = createApp();
+      mockRealtimeDb({
+        users: { driver_1: driverProfile },
+        bookings: {
+          booking_completed: {
+            driver: 'driver_1',
+            status: 'COMPLETED',
+            tripdate: new Date().toISOString(),
+            financialSnapshot: JSON.stringify(buildBackendFinalSnapshot())
+          },
+          booking_early_end: {
+            driver: 'driver_1',
+            status: 'EARLY_ENDED_BY_RIDER',
+            tripdate: new Date().toISOString(),
+            estimate: 48.61,
+            finalFare: 48.61,
+            settlement: { settlementType: 'EARLY_ENDED_BY_RIDER', executedFare: 12.15 },
+            financialSnapshot: settledEarlyEndSnapshot()
+          }
+        }
+      });
+
+      const response = await request(app).get('/api/drivers/driver_1/earnings');
+
+      expect(response.status).toBe(200);
+      const { report } = response.body;
+      expect(report.totalCompletedRides).toBe(2);
+      expect(report.tripsToday).toBe(2);
+      expect(report.totalGrossAmount).toBeCloseTo(22 + 12.15, 2);
+      expect(report.totalNetAmount).toBeCloseTo(20.51 + 10.86, 2);
+      expect(report.totalFeeAmount).toBeCloseTo(1.49 + 1.29, 2);
+      expect(report.totalCancellations).toBe(0);
+      expect(report.financialSnapshotPendingCount).toBe(0);
+      const today = report.dailySeries.find((slot) => slot.date === todayKey());
+      expect(today).toMatchObject({ completedCount: 2, cancelledCount: 0 });
+      expect(today.amount).toBeCloseTo(31.37, 2);
+      expect(today.grossAmount).toBeCloseTo(34.15, 2);
+      expect(report.dailyEarnings[report.dailyEarnings.length - 1].amount).toBeCloseTo(31.37, 2);
+    });
+
+    it('aceita o status em minúsculas e o settlement serializado', async () => {
+      const app = createApp();
+      mockRealtimeDb({
+        users: { driver_1: driverProfile },
+        bookings: {
+          booking_early_end: {
+            driver: 'driver_1',
+            status: 'early_ended_by_rider',
+            tripdate: new Date().toISOString(),
+            settlement: JSON.stringify({ executedFare: 12.15 }),
+            financialSnapshot: JSON.stringify(settledEarlyEndSnapshot())
+          }
+        }
+      });
+
+      const response = await request(app).get('/api/drivers/driver_1/earnings');
+
+      expect(response.body.report.totalCompletedRides).toBe(1);
+      expect(response.body.report.totalNetAmount).toBeCloseTo(10.86, 2);
+    });
+
+    it('deixa pendente o encerramento antecipado cujo snapshot ainda é o do valor contratado', async () => {
+      const app = createApp();
+      mockRealtimeDb({
+        users: { driver_1: driverProfile },
+        bookings: {
+          booking_early_end: {
+            driver: 'driver_1',
+            status: 'EARLY_ENDED_BY_RIDER',
+            tripdate: new Date().toISOString(),
+            settlement: { executedFare: 12.15 },
+            financialSnapshot: contractedSnapshot()
+          }
+        }
+      });
+
+      const response = await request(app).get('/api/drivers/driver_1/earnings');
+
+      const { report } = response.body;
+      expect(report.totalCompletedRides).toBe(0);
+      expect(report.tripsToday).toBe(0);
+      expect(report.totalNetAmount).toBe(0);
+      expect(report.financialSnapshotPendingCount).toBe(1);
+    });
+
+    it('deixa pendente o encerramento antecipado sem snapshot final do backend', async () => {
+      const app = createApp();
+      mockRealtimeDb({
+        users: { driver_1: driverProfile },
+        bookings: {
+          booking_early_end: {
+            driver: 'driver_1',
+            status: 'EARLY_ENDED_BY_RIDER',
+            tripdate: new Date().toISOString(),
+            estimate: 48.61,
+            driverNetAmount: 46.62
+          }
+        }
+      });
+
+      const response = await request(app).get('/api/drivers/driver_1/earnings');
+
+      expect(response.body.report.totalCompletedRides).toBe(0);
+      expect(response.body.report.totalNetAmount).toBe(0);
+      expect(response.body.report.financialSnapshotPendingCount).toBe(1);
+    });
+
+    it.each([
+      ['EARLY_ENDED_REVIEW'],
+      ['INTERRUPTED_OPERATIONAL_ENDED'],
+      ['IN_PROGRESS']
+    ])('não conta corridas %s como ganho nem como cancelamento', async (status) => {
+      const app = createApp();
+      mockRealtimeDb({
+        users: { driver_1: driverProfile },
+        bookings: {
+          booking_other: {
+            driver: 'driver_1',
+            status,
+            tripdate: new Date().toISOString(),
+            financialSnapshot: settledEarlyEndSnapshot()
+          }
+        }
+      });
+
+      const response = await request(app).get('/api/drivers/driver_1/earnings');
+
+      const { report } = response.body;
+      expect(report.totalCompletedRides).toBe(0);
+      expect(report.totalCancellations).toBe(0);
+      expect(report.totalNetAmount).toBe(0);
+      expect(report.financialSnapshotPendingCount).toBe(0);
+    });
+
+    it('continua contando cancelamentos apenas como cancelamento', async () => {
+      const app = createApp();
+      mockRealtimeDb({
+        users: { driver_1: driverProfile },
+        bookings: {
+          booking_cancelled: {
+            driver: 'driver_1',
+            status: 'CANCELED',
+            tripdate: new Date().toISOString(),
+            financialSnapshot: settledEarlyEndSnapshot()
+          }
+        }
+      });
+
+      const response = await request(app).get('/api/drivers/driver_1/earnings');
+
+      expect(response.body.report.totalCompletedRides).toBe(0);
+      expect(response.body.report.totalCancellations).toBe(1);
+      expect(response.body.report.totalNetAmount).toBe(0);
+    });
+  });
 });
