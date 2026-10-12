@@ -1,6 +1,7 @@
 import leafTypography from '../../components/prototype/LeafTypography';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, ScrollView, StatusBar, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
+import { useIsFocused } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LeafRootTabs } from '../../components/prototype/PrototypeScaffold';
 import { LeafObjectIcon } from '../../components/prototype/LeafVisualElements';
@@ -24,6 +25,7 @@ import {
 } from './tripFinancialSummary';
 import { LeafButton, LeafEmptyState } from '../../components/prototype/LeafRideUI';
 import BookingHistoryService, { BOOKING_HISTORY_CACHE_TTL_MS } from '../../services/BookingHistoryService';
+import { buildDriverHistoryStats, resolveServerPeriodEarnings, useDriverEarningsReport } from './driverEarningsReport';
 import { formatTripDateLabel, resolveTripAddressLabel, shortTripAddressLabel } from './tripAddressPresentation';
 
 const { color, typography } = robotaxiPrototypeTokens;
@@ -149,6 +151,7 @@ export default function RobotaxiTripHistoryScreen({ navigation, route }) {
   const { height: windowHeight } = useWindowDimensions();
   const { activeRole, profileUid, lastReceipt } = usePrototypeRideRuntime();
   const [panelHeight, setPanelHeight] = useState(windowHeight);
+  const isScreenFocused = useIsFocused();
   const isDriverRole = activeRole === 'driver';
   const historyRole = isDriverRole ? 'DRIVER' : 'CUSTOMER';
   const historyRevision = lastReceipt?.receiptId || lastReceipt?.id || lastReceipt?.rideId || null;
@@ -180,7 +183,27 @@ export default function RobotaxiTripHistoryScreen({ navigation, route }) {
   const mountedRef = useRef(false);
   const pendingHistoryRef = useRef(null);
   const { bookings: history, loading: loadingHistory, loadingMore, refreshing, error: historyError, pageInfo } = visibleHistory;
-  const stats = useMemo(() => buildHistoryStats(history, isDriverRole), [history, isDriverRole]);
+  const driverEarningsReport = useDriverEarningsReport({
+    driverId: isDriverRole ? profileUid : '',
+    enabled: isDriverRole && isScreenFocused,
+    refreshKey: String(historyRevision || ''),
+  });
+  const driverServerPeriod = useMemo(
+    () => (isDriverRole ? resolveServerPeriodEarnings(driverEarningsReport.report) : null),
+    [driverEarningsReport.report, isDriverRole],
+  );
+  const loadingSummary = loadingHistory || (isDriverRole && driverEarningsReport.pending);
+  const stats = useMemo(
+    () =>
+      isDriverRole
+        ? buildDriverHistoryStats({
+            serverPeriod: driverServerPeriod,
+            historyComplete: !pageInfo?.hasNextPage,
+            loadedListStats: buildHistoryStats(history, true),
+          })
+        : buildHistoryStats(history, false),
+    [driverServerPeriod, history, isDriverRole, pageInfo?.hasNextPage],
+  );
   const primaryStat = stats[0] || null;
   const secondaryStat = stats[1] || null;
 
@@ -318,7 +341,7 @@ export default function RobotaxiTripHistoryScreen({ navigation, route }) {
               {primaryStat ? (
                 <View style={styles.summaryCard}>
                   <Text style={styles.summaryCardLabel}>{primaryStat.label}</Text>
-                  {loadingHistory ? (
+                  {loadingSummary ? (
                     <View testID="robotaxi-history-summary-loading-rides" accessibilityRole="progressbar" accessibilityLabel="Carregando número de viagens">
                       <SkeletonLoader width={48} height={28} style={{ marginTop: 6 }} />
                     </View>
@@ -328,7 +351,7 @@ export default function RobotaxiTripHistoryScreen({ navigation, route }) {
               {secondaryStat ? (
                 <View style={[styles.summaryCard, styles.summaryCardAccent]}>
                   <Text style={styles.summaryCardLabel}>{secondaryStat.label}</Text>
-                  {loadingHistory ? (
+                  {loadingSummary ? (
                     <View testID="robotaxi-history-summary-loading-amount" accessibilityRole="progressbar" accessibilityLabel="Carregando total das viagens">
                       <SkeletonLoader width={112} height={28} style={{ marginTop: 6 }} />
                     </View>

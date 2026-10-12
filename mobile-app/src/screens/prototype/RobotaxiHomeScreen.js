@@ -97,6 +97,10 @@ import {
   resolveTripTollAmount,
 } from './tripFinancialSummary';
 import {
+  selectDriverTodayEarnings,
+  useDriverEarningsReport,
+} from './driverEarningsReport';
+import {
   NAVIGATION_CAMERA_ANCHOR_Y,
   NAVIGATION_CAMERA_ANIMATION_MS,
   resolveNavigationCameraPitch,
@@ -5468,8 +5472,27 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     () => buildTripFinancialTotals(driverFinancialHistory, { role: 'driver' }),
     [driverFinancialHistory]
   );
-  const todayEarnings = driverTripTotals.totalNet;
-  const todayTrips = driverTripTotals.count;
+  // "Ganhos de hoje" comes from the server report; the receipts stored on the
+  // phone are only the fallback while there is no server value for today.
+  const driverEarningsReport = useDriverEarningsReport({
+    driverId: isDriverRole ? profile?.uid || profileUid || '' : '',
+    enabled: Boolean(isDriverRole && isScreenFocused && !driverActiveRide),
+    refreshKey: String(lastReceipt?.id || lastReceipt?.completedAt || ''),
+  });
+  const driverTodayFallbackRef = useRef(null);
+  const driverTodaySummary = useMemo(() => {
+    const summary = selectDriverTodayEarnings({
+      report: driverEarningsReport.report,
+      localTotals: driverTripTotals,
+      previousFallback: driverTodayFallbackRef.current,
+    });
+    if (summary.source === 'local') {
+      driverTodayFallbackRef.current = summary;
+    }
+    return summary;
+  }, [driverEarningsReport.report, driverTripTotals]);
+  const todayEarnings = driverTodaySummary.net;
+  const todayTrips = driverTodaySummary.count;
   const formattedDriverEarnings = useMemo(
     () => formatCurrencyBRL(todayEarnings || 0),
     [todayEarnings]
@@ -9906,8 +9929,8 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
                 suppressDaySummary={driverHasAcceptedOrActiveWork}
                 ridesCount={todayTrips}
                 formattedDriverEarnings={formattedDriverEarnings}
-                driverGrossAmount={driverTripTotals.totalGross}
-                driverFeeAmount={driverTripTotals.totalFees}
+                driverGrossAmount={driverTodaySummary.gross}
+                driverFeeAmount={driverTodaySummary.fees}
                 driverFinancialHistory={driverFinancialHistory}
                 driverDestinationMode={driverDestinationMode}
                 onCtaLayout={handleDriverCtaLayout}

@@ -16,6 +16,7 @@ import RobotaxiTripScreen, {
 import RobotaxiReceiptScreen from '../src/screens/prototype/RobotaxiReceiptScreen';
 import RobotaxiRatingScreen from '../src/screens/prototype/RobotaxiRatingScreen';
 import RobotaxiTripHistoryScreen from '../src/screens/prototype/RobotaxiTripHistoryScreen';
+import { resetDriverEarningsReportCache } from '../src/screens/prototype/driverEarningsReport';
 import RobotaxiChatScreen from '../src/screens/prototype/RobotaxiChatScreen';
 import RobotaxiCancellationScreen from '../src/screens/prototype/RobotaxiCancellationScreen';
 import RatingService from '../src/services/RatingService';
@@ -654,6 +655,9 @@ describe('prototype ride screens', () => {
     allowForcedPaymentBypass.mockReturnValue(false);
     allowTestUserTools.mockReturnValue(false);
     require('@react-navigation/native').useIsFocused.mockReturnValue(true);
+    // The driver Atividade summary reads the server earnings report.
+    resetDriverEarningsReportCache();
+    global.fetch = jest.fn().mockRejectedValue(new Error('offline'));
     mockGetCachedBookingHistory.mockReturnValue(null);
     mockGetBookingHistory.mockResolvedValue({
       success: true,
@@ -4329,6 +4333,34 @@ describe('prototype ride screens', () => {
       await waitFor(() => expect(mockGetBookingHistory).toHaveBeenLastCalledWith('activity_user', 'CUSTOMER', { first: 10, after: null, revision: 'receipt_new' }));
       await waitFor(() => expect(screen.queryByTestId('robotaxi-history-loading')).toBeNull());
       expect(mockGetBookingHistory).toHaveBeenCalledTimes(2);
+    });
+
+    it('shows the driver totals from the server report with their period instead of summing the loaded page', async () => {
+      mockGetBookingHistory.mockResolvedValueOnce({ ...result, pageInfo: { hasNextPage: true, endCursor: '10' } });
+      global.fetch = jest.fn().mockResolvedValue({
+        json: async () => ({
+          success: true,
+          report: { dailySeries: [], totalCompletedRides: 37, totalNetAmount: 1480.9, dailySeriesWindowDays: 30 },
+        }),
+      });
+      usePrototypeRideRuntime.mockReturnValue(runtime({ activeRole: 'driver' }));
+      const screen = render(<RobotaxiTripHistoryScreen navigation={navigation()} route={{ key: 'activity' }} />);
+      await waitFor(() => expect(screen.getByText('Concluídas · 30 dias')).toBeTruthy());
+      expect(screen.getByText('37')).toBeTruthy();
+      expect(screen.getByText('Total líquido · 30 dias')).toBeTruthy();
+      expect(screen.getByText('R$ 1.480,90')).toBeTruthy();
+      expect(global.fetch).toHaveBeenCalledTimes(1);
+      expect(global.fetch.mock.calls[0][0]).toMatch(/\/api\/drivers\/activity_user\/earnings$/);
+    });
+
+    it('does not present a truncated page as the driver total when the server report is unavailable', async () => {
+      mockGetBookingHistory.mockResolvedValueOnce({ ...result, pageInfo: { hasNextPage: true, endCursor: '10' } });
+      usePrototypeRideRuntime.mockReturnValue(runtime({ activeRole: 'driver' }));
+      const screen = render(<RobotaxiTripHistoryScreen navigation={navigation()} route={{ key: 'activity' }} />);
+      await waitFor(() => expect(screen.getByTestId('robotaxi-history-row-cached_trip')).toBeTruthy());
+      await waitFor(() => expect(screen.getAllByText('Indisponível')).toHaveLength(2));
+      expect(screen.queryByText('1')).toBeNull();
+      expect(screen.queryByText('R$ 18,90')).toBeNull();
     });
 
     it('appends pages without hiding the existing rows or duplicating a pending page request', async () => {
