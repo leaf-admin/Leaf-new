@@ -442,7 +442,17 @@ export default function EarningsReportScreen({ navigation, route }) {
         const baseUrl = getSelfHostedApiUrl('/api');
         Logger.log(`Trazendo Relatório de Faturamento: ${baseUrl}/drivers/${auth.profile.uid}/earnings`);
 
-        const response = await fetch(`${baseUrl}/drivers/${auth.profile.uid}/earnings`);
+        // O relatório é do próprio motorista: a rota exige o token dele.
+        let earningsHeaders = {};
+        try {
+          earningsHeaders = await DriverBalanceService.getAuthHeaders();
+        } catch (headerError) {
+          earningsHeaders = {};
+        }
+        const response = await fetch(`${baseUrl}/drivers/${auth.profile.uid}/earnings`, {
+          method: 'GET',
+          headers: earningsHeaders,
+        });
         const payload = await response.json();
 
         if (payload?.success && payload?.report) {
