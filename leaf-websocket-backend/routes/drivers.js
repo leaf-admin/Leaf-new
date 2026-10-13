@@ -792,11 +792,21 @@ router.get('/api/drivers/applications/:id', requireDriverApplicationAdmin, requi
 });
 
 // ✅ NOVO: GET /api/drivers/nearby - Buscar motoristas próximos usando Redis GEO + status + lock
-router.get('/api/drivers/nearby', async (req, res) => {
+// A rota devolve posição de motoristas. O app passa a enviar o ID token; a exigência é ligada por
+// NEARBY_REQUIRE_AUTH=true só depois que a versão do app com o token estiver distribuída, para não
+// apagar os carros do mapa de quem ainda usa a versão anterior.
+const requireNearbyDriversAuth = (req, res, next) => {
+  if (process.env.NEARBY_REQUIRE_AUTH !== 'true') {
+    return next();
+  }
+  return requireFirebaseUser(req, res, next);
+};
+
+router.get('/api/drivers/nearby', requireNearbyDriversAuth, async (req, res) => {
   try {
+    // Sem os headers: eles carregam o token do usuário.
     logger.info(`🔍 [DriversRoute] Requisição recebida: ${req.method} ${req.path}`, {
-      query: req.query,
-      headers: req.headers
+      query: req.query
     });
 
     const { lat, lng, radius = 5, limit = 10 } = req.query;

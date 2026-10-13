@@ -1635,3 +1635,53 @@ describe('drivers earnings route cancellation credits (multa de cancelamento/no-
     expect(report.tripsToday).toBe(1);
   });
 });
+
+describe('GET /api/drivers/nearby auth gate', () => {
+  const originalFlag = process.env.NEARBY_REQUIRE_AUTH;
+  const { logger } = require('../../../utils/logger');
+
+  afterEach(() => {
+    if (originalFlag === undefined) {
+      delete process.env.NEARBY_REQUIRE_AUTH;
+    } else {
+      process.env.NEARBY_REQUIRE_AUTH = originalFlag;
+    }
+  });
+
+  it('rejects requests without a token when the flag is on', async () => {
+    process.env.NEARBY_REQUIRE_AUTH = 'true';
+
+    const response = await request(createApp()).get('/api/drivers/nearby?lat=-22.9&lng=-43.3');
+
+    expect(response.status).toBe(401);
+  });
+
+  it('lets an authenticated request through when the flag is on', async () => {
+    process.env.NEARBY_REQUIRE_AUTH = 'true';
+
+    const response = await request(createApp())
+      .get('/api/drivers/nearby')
+      .set('Authorization', 'Bearer firebase:passenger_1');
+
+    // Passou da autenticação e parou na validação dos parâmetros.
+    expect(response.status).toBe(400);
+  });
+
+  it('keeps the previous app version working while the flag is off', async () => {
+    delete process.env.NEARBY_REQUIRE_AUTH;
+
+    const response = await request(createApp()).get('/api/drivers/nearby');
+
+    expect(response.status).toBe(400);
+  });
+
+  it('does not log request headers', async () => {
+    logger.info.mockClear();
+
+    await request(createApp())
+      .get('/api/drivers/nearby')
+      .set('Authorization', 'Bearer firebase:passenger_1');
+
+    expect(JSON.stringify(logger.info.mock.calls)).not.toContain('firebase:passenger_1');
+  });
+});
