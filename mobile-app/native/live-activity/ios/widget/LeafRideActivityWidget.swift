@@ -62,7 +62,7 @@ struct LeafRideActivityWidget: Widget {
           Circle()
             .stroke(Color.white.opacity(0.22), lineWidth: 2.5)
           Circle()
-            .trim(from: 0, to: max(0.04, context.state.progress))
+            .trim(from: 0, to: max(0.04, leafRideTrackProgress(context.state)))
             .stroke(LeafTone.lime, style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
             .rotationEffect(.degrees(-90))
         }
@@ -156,8 +156,9 @@ struct LeafRideEtaLabel: View {
 
   var body: some View {
     let parts = leafRideEtaParts(state.etaText)
+    // No estimate (driver at the door, ride cancelled): say nothing instead of "--".
     HStack(alignment: .firstTextBaseline, spacing: 3) {
-      Text(parts.value)
+      Text(parts.value == "--" ? "" : parts.value)
         .font(.system(.title2, design: .rounded).weight(.bold))
         .monospacedDigit()
         .contentTransition(.numericText())
@@ -182,7 +183,7 @@ struct LeafRideTrack: View {
   var body: some View {
     GeometryReader { proxy in
       let usable = max(0, proxy.size.width - carSize)
-      let progress = CGFloat(min(1, max(0, state.progress)))
+      let progress = CGFloat(leafRideTrackProgress(state))
       let carX = usable * progress
 
       ZStack(alignment: .leading) {
@@ -215,10 +216,10 @@ struct LeafRideTrack: View {
 
         ZStack {
           Circle()
-            .fill(onDark ? LeafTone.lime : LeafTone.leaf)
+            .fill(leafRideIsProblem(state.phase) ? LeafTone.danger : (onDark ? LeafTone.lime : LeafTone.leaf))
           Image(systemName: leafRideIsProblem(state.phase) ? "xmark" : "car.fill")
             .font(.system(size: 10, weight: .bold))
-            .foregroundStyle(onDark ? LeafTone.ink : Color.white)
+            .foregroundStyle(leafRideIsProblem(state.phase) || !onDark ? Color.white : LeafTone.ink)
         }
         .frame(width: carSize, height: carSize)
         .shadow(color: Color.black.opacity(onDark ? 0 : 0.16), radius: 3, y: 1)
@@ -237,6 +238,17 @@ struct LeafRideTrack: View {
     return onDark
       ? [LeafTone.lime.opacity(0.55), LeafTone.lime]
       : [LeafTone.leaf.opacity(0.55), LeafTone.leaf]
+  }
+}
+
+// The track is the current leg: to the pickup, then to the destination. Once the driver
+// is at the pickup (or the ride is over) the car is at the end, whatever number arrived.
+private func leafRideTrackProgress(_ state: LeafRideActivityAttributes.ContentState) -> Double {
+  switch state.phase.lowercased() {
+  case "arrived", "completed", "complete":
+    return 1
+  default:
+    return min(1, max(0, state.progress))
   }
 }
 
