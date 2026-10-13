@@ -9,6 +9,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import Logger from '../utils/Logger';
 import { fetchNetInfo } from '../utils/NetInfoSafe';
 
+const DRIVER_PRESENCE_MIN_INTERVAL_MS = 5000;
+
 class LocationBufferService {
     constructor() {
         this.bufferKey = '@location_buffer';
@@ -17,6 +19,8 @@ class LocationBufferService {
         this.syncInterval = null;
         this.isOnline = true;
         this.activeTripContextCache = null;
+        this.driverPresenceContext = null;
+        this.lastPresenceSentAt = 0;
     }
 
     buildEventId() {
@@ -232,10 +236,66 @@ class LocationBufferService {
         }
     }
 
+    // Motorista online sem corrida: o servidor o tira da fila quando a posição para de
+    // chegar. Com o app em segundo plano só a task nativa continua recebendo posições,
+    // então é ela que mantém a presença. Nada é guardado em buffer: presença antiga não
+    // serve para nada.
+    setDriverPresenceContext(context = null) {
+        this.driverPresenceContext = context?.driverId
+            ? { driverId: String(context.driverId) }
+            : null;
+        this.lastPresenceSentAt = 0;
+    }
+
+    getDriverPresenceContext() {
+        return this.driverPresenceContext;
+    }
+
+    async sendDriverPresenceFromBackground(location = {}) {
+        const presence = this.driverPresenceContext;
+        if (!presence?.driverId) {
+            return { buffered: false, reason: 'no_active_trip' };
+        }
+
+        // Com o app na frente o heartbeat do runtime já envia a posição.
+        const { AppState } = require('react-native');
+        if (AppState?.currentState === 'active') {
+            return { buffered: false, reason: 'foreground_heartbeat_active' };
+        }
+
+        const now = Date.now();
+        if (now - this.lastPresenceSentAt < DRIVER_PRESENCE_MIN_INTERVAL_MS) {
+            return { buffered: false, reason: 'presence_throttled' };
+        }
+
+        const WebSocketManager = require('./WebSocketManager').default;
+        const webSocketManager = WebSocketManager.getInstance();
+        const status = webSocketManager.getConnectionStatus();
+        if (!webSocketManager.isConnected() || !status?.authenticated) {
+            return { buffered: false, reason: 'socket_unavailable' };
+        }
+
+        this.lastPresenceSentAt = now;
+        webSocketManager.emitToServer('updateLocation', {
+            uid: presence.driverId,
+            driverId: presence.driverId,
+            lat: location.lat,
+            lng: location.lng,
+            heading: location.heading || 0,
+            speed: location.speed || 0,
+            accuracy: location.accuracy || null,
+            timestamp: location.timestamp || now,
+            isInTrip: false,
+            source: 'background_presence'
+        });
+
+        return { buffered: false, sent: true, reason: 'presence_sent' };
+    }
+
     async addDriverLocationFromBackground(location = {}) {
         const context = await this.getActiveTripContext();
         if (!context?.bookingId) {
-            return { buffered: false, reason: 'no_active_trip' };
+            return this.sendDriverPresenceFromBackground(location);
         }
 
         const seq = await this.reserveNextSeq(context.bookingId);
