@@ -453,6 +453,7 @@ function DriverHomeOverlay({
   onOpenActivation,
   onOpenIdentitySupport,
   onOpenEarnings,
+  onOpenAvoidedAreas,
   onSaveDestinationMode,
   onCtaLayout,
 }) {
@@ -1208,6 +1209,31 @@ function DriverHomeOverlay({
               <Text style={styles.destinationModeActiveHint} numberOfLines={2}>
                 Ativo para {destinationModeLabel}. A preferência expira automaticamente.
               </Text>
+            ) : null}
+            {typeof onOpenAvoidedAreas === "function" ? (
+              <TouchableOpacity
+                activeOpacity={0.84}
+                style={styles.destinationModeRow}
+                onPress={() => {
+                  setGoalModalVisible(false);
+                  onOpenAvoidedAreas();
+                }}
+                testID="driver-avoided-areas-open"
+                accessibilityRole="button"
+                accessibilityLabel="Áreas a evitar"
+              >
+                <View style={styles.destinationModeCopy}>
+                  <Text style={styles.destinationModeTitle}>Áreas a evitar</Text>
+                  <Text style={styles.destinationModeSubtitle}>
+                    Marque no mapa os lugares onde você não quer embarcar nem desembarcar.
+                  </Text>
+                </View>
+                <Ionicons
+                  name="chevron-forward"
+                  size={18}
+                  color={DRIVER_HOME_COLOR.secondary}
+                />
+              </TouchableOpacity>
             ) : null}
             <View style={styles.modalActions}>
               <TouchableOpacity

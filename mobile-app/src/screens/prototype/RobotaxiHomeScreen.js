@@ -9569,6 +9569,9 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
       maxRangeDays: 7
     });
   }, [navigation]);
+  const handleOpenDriverAvoidedAreas = useCallback(() => {
+    navigation.navigate('RobotaxiDriverAvoidedAreas');
+  }, [navigation]);
   const presentedMapRegion =
     presentedSearchingMode && searchTargetRegion
       ? searchTargetRegion
@@ -9993,6 +9996,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
                 onToggleOnline={handleDriverOnlineToggle}
                 onSaveDestinationMode={handleSaveDriverDestinationMode}
                 onOpenEarnings={handleOpenDriverEarnings}
+                onOpenAvoidedAreas={handleOpenDriverAvoidedAreas}
                 onOpenActivation={handleOpenDriverActivation}
                 onOpenIdentitySupport={handleOpenDriverIdentitySupport}
               />
