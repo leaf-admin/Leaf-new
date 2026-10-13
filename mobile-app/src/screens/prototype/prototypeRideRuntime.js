@@ -20773,6 +20773,30 @@ export function usePrototypeRideRuntime() {
       });
   }, [isRuntimeEffectOwner, driverOnlinePresenceUid]);
 
+  // Sem oferta aberta não há motivo para o aviso de "Nova corrida" continuar na barra
+  // (aceita, recusada ou expirada com o app em segundo plano).
+  const driverOpenOfferCount =
+    resolveRuntimeRole(profile) === "driver" && Array.isArray(snapshot.driverOffers)
+      ? snapshot.driverOffers.length
+      : 0;
+  const previousDriverOpenOfferCountRef = useRef(0);
+  useEffect(() => {
+    if (!isRuntimeEffectOwner) {
+      return;
+    }
+    const previous = previousDriverOpenOfferCountRef.current;
+    previousDriverOpenOfferCountRef.current = driverOpenOfferCount;
+    if (previous > 0 && driverOpenOfferCount === 0) {
+      try {
+        require("../../services/FCMNotificationService")
+          .default.dismissRideOfferNotifications?.()
+          ?.catch?.(() => {});
+      } catch (_error) {
+        // serviço de notificações indisponível neste ambiente
+      }
+    }
+  }, [isRuntimeEffectOwner, driverOpenOfferCount]);
+
   useEffect(() => {
     if (!isRuntimeEffectOwner) {
       return;
