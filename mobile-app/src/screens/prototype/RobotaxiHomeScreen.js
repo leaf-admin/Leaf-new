@@ -5202,13 +5202,6 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     return clearHomeMapReadyTimers;
   }, [clearHomeMapReadyTimers, homeSurfaceHydrated, isDriverRole, showHomeChrome]);
 
-  // The boot splash comes back only for a different account. The runtime also
-  // re-syncs briefly after every ride; a recording showed the green splash for
-  // about two seconds when the driver closed the receipt.
-  const homeSurfaceUid = String(profile?.uid || profileUid || '');
-  const homeSurfaceHydratedUidRef = useRef(
-    hasPrototypeHomeSurfaceHydratedInSession ? homeSurfaceUid : null,
-  );
   useEffect(() => {
     const shouldResetHydratedSurface = Boolean(
       !runtimeVisualStateReady &&
@@ -5219,9 +5212,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
       !showHomeChrome ||
       runtimeVisualStateReady ||
       !homeSurfaceHydrated ||
-      !shouldResetHydratedSurface ||
-      (homeSurfaceHydratedUidRef.current !== null &&
-        homeSurfaceHydratedUidRef.current === homeSurfaceUid)
+      !shouldResetHydratedSurface
     ) {
       return;
     }
@@ -5229,7 +5220,6 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     setHomeSurfaceHydrated(false);
   }, [
     homeSurfaceHydrated,
-    homeSurfaceUid,
     initializing,
     ready,
     runtimeVisualStateReady,
@@ -5239,10 +5229,9 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   useEffect(() => {
     if (showHomeChrome && !homeSurfaceHydrated && homeSurfaceReadyForFirstPaint) {
       hasPrototypeHomeSurfaceHydratedInSession = true;
-      homeSurfaceHydratedUidRef.current = homeSurfaceUid;
       setHomeSurfaceHydrated(true);
     }
-  }, [homeSurfaceHydrated, homeSurfaceReadyForFirstPaint, homeSurfaceUid, showHomeChrome]);
+  }, [homeSurfaceHydrated, homeSurfaceReadyForFirstPaint, showHomeChrome]);
 
   const showDriverH3Overlay = Boolean(
     isDriverRole && isHomeRoute && showDriverHomeOverlay
@@ -5609,10 +5598,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   );
   // Launch: keep the boot splash until the real home surface has painted once.
   // The skeleton (default map + grey cards) only covers rare in-session gaps.
-  // Once the home has painted in this app session it is no longer "launch":
-  // the screen is recreated when the driver closes a receipt, and a recording
-  // showed the green splash for about two seconds there.
-  const homeSurfaceFirstPaintDoneRef = useRef(hasPrototypeHomeSurfaceHydratedInSession);
+  const homeSurfaceFirstPaintDoneRef = useRef(false);
   if (
     !homeSurfaceFirstPaintDoneRef.current &&
     (canShowPassengerHomeOverlay ||
