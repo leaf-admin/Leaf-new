@@ -102,7 +102,7 @@ describe('driver avoided areas routes', () => {
     expect(response.body).toMatchObject({
       success: true,
       cells: [COPACABANA_CELL],
-      maxCells: 60,
+      maxCells: 80,
       resolution: 8
     });
     expect(response.body.areas[0]).toMatchObject({
@@ -129,7 +129,7 @@ describe('driver avoided areas routes', () => {
       success: true,
       cells: [],
       areas: [],
-      maxCells: 60,
+      maxCells: 80,
       resolution: 8,
       updatedAt: null
     });
@@ -143,17 +143,17 @@ describe('driver avoided areas routes', () => {
     expect(saved.body.updatedAt).toEqual(expect.any(String));
   });
 
-  it('PUT over the cell limit returns 400 with AVOIDED_AREAS_LIMIT_EXCEEDED', async () => {
+  it('PUT with more than four regions returns 400 with AVOIDED_AREAS_LIMIT_EXCEEDED', async () => {
     const app = createApp();
-    // Cada área com ring 2 tem 19 células; três áreas distantes somam 57 (ok), quatro passam de 60.
-    const far = [
+    const centers = [
       { lat: -22.9711, lng: -43.1822 },
       { lat: -23.0045, lng: -43.3659 },
       { lat: -22.8, lng: -43.2 },
-      { lat: -22.7, lng: -43.4 }
+      { lat: -22.7, lng: -43.4 },
+      { lat: -22.9, lng: -43.5 }
     ];
     const response = await putAreas(app, {
-      areas: far.map((center, index) => ({ id: `a${index}`, label: `Área ${index}`, center, ringSize: 2 }))
+      areas: centers.map((center, index) => ({ id: `a${index}`, label: `Área ${index}`, center, ringSize: 0 }))
     });
 
     expect(response.status).toBe(400);
@@ -162,6 +162,47 @@ describe('driver avoided areas routes', () => {
       code: 'AVOIDED_AREAS_LIMIT_EXCEEDED'
     });
     expect(mockRedisState.hashes.get(`driver:${DRIVER_UID}`)).toBeUndefined();
+  });
+
+  it('PUT accepts a whole neighbourhood by its official code, with its outline', async () => {
+    mockRedisState.hashes.set(`driver:${DRIVER_UID}`, { id: DRIVER_UID, isOnline: 'true' });
+    const app = createApp();
+    const lookup = await request(app)
+      .get('/api/drivers/me/avoided-areas/bairro?lat=-22.9711&lng=-43.1822')
+      .set('Authorization', `Bearer firebase:${DRIVER_UID}`);
+    expect(lookup.status).toBe(200);
+    expect(lookup.body.bairro.name).toBe('Copacabana');
+
+    const response = await putAreas(app, {
+      areas: [
+        { bairroId: lookup.body.bairro.id },
+        { bairroId: lookup.body.bairro.id },
+        { id: 'a1', label: 'Centro', center: { lat: -22.8, lng: -43.2 }, ringSize: 0 }
+      ]
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.body.areas).toHaveLength(2);
+    expect(response.body.areas[0]).toMatchObject({ type: 'bairro', label: 'Copacabana', bairroId: lookup.body.bairro.id });
+    expect(response.body.areas[0].outline[0].length).toBeGreaterThan(3);
+    expect(response.body.areas[1].type).toBe('free');
+
+    const stored = JSON.parse(mockRedisState.strings.get(`driver_avoided_areas:${DRIVER_UID}`));
+    expect(stored.bairros).toEqual([lookup.body.bairro.id]);
+    const hash = mockRedisState.hashes.get(`driver:${DRIVER_UID}`);
+    expect(JSON.parse(hash.avoidedBairros)).toEqual([lookup.body.bairro.id]);
+  });
+
+  it('PUT refuses an unknown neighbourhood and the lookup answers null outside Rio', async () => {
+    const app = createApp();
+    const response = await putAreas(app, { areas: [{ bairroId: '99999' }] });
+    expect(response.status).toBe(400);
+    expect(response.body.code).toBe('AVOIDED_AREA_INVALID');
+
+    const outside = await request(app)
+      .get('/api/drivers/me/avoided-areas/bairro?lat=-23.55&lng=-46.63')
+      .set('Authorization', `Bearer firebase:${DRIVER_UID}`);
+    expect(outside.body).toEqual({ success: true, bairro: null });
   });
 
   it('PUT does not create the driver hash when the driver has none (offline)', async () => {

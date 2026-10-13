@@ -32,7 +32,7 @@ const {
     hasRideDispatchPreferences
 } = require('./ride-dispatch-preference-service');
 const driverEligibilityService = require('./driver-eligibility-service');
-const { isRideInAvoidedArea, parseStoredAvoidedCells } = require('./driver-avoided-areas-service');
+const { isRideInAvoidedArea, parseStoredAvoided } = require('./driver-avoided-areas-service');
 const {
     getDriverPaymentReservation,
     reservationMatchesContext
@@ -820,6 +820,7 @@ class DriverNotificationDispatcher {
                         cached.driverDestinationArrivalRadiusKm ||
                         null,
                     avoidedH3Cells: cached.avoidedH3Cells || null,
+                    avoidedBairros: cached.avoidedBairros || null,
                     acceptsPlusWithElite: cached.acceptsPlusWithElite === 'true' || cached.acceptsPlusWithElite === true,
                     driverApproved: cached.driverApproved === 'true' || cached.driverApproved === true,
                     vehicleApproved: cached.vehicleApproved === 'true' || cached.vehicleApproved === true,
@@ -1044,15 +1045,16 @@ class DriverNotificationDispatcher {
             }
 
             // Áreas evitadas pelo motorista são bloqueio duro: embarque ou destino dentro delas não é ofertado.
-            const avoidedCells = parseStoredAvoidedCells(this.readPreflightPipelineResult(preflightResults, 7, null));
-            if (avoidedCells.length > 0) {
+            const avoided = parseStoredAvoided(this.readPreflightPipelineResult(preflightResults, 7, null));
+            if (avoided.cells.length > 0 || avoided.bairros.length > 0) {
                 // Repõe a cópia usada pelo shortlist quando o hash foi recriado sem ela.
                 if (typeof this.redis.hsetnx === 'function') {
-                    Promise.resolve(this.redis.hsetnx(`driver:${driverId}`, 'avoidedH3Cells', JSON.stringify(avoidedCells))).catch(() => null);
+                    Promise.resolve(this.redis.hsetnx(`driver:${driverId}`, 'avoidedH3Cells', JSON.stringify(avoided.cells))).catch(() => null);
+                    Promise.resolve(this.redis.hsetnx(`driver:${driverId}`, 'avoidedBairros', JSON.stringify(avoided.bairros))).catch(() => null);
                 }
                 const avoidedAreaBookingData = dispatchabilitySnapshot?.bookingData || bookingData || {};
                 const inAvoidedArea = isRideInAvoidedArea(
-                    { avoidedH3Cells: avoidedCells },
+                    { avoidedH3Cells: avoided.cells, avoidedBairros: avoided.bairros },
                     {
                         pickupLocation: this.safeJSONParse(avoidedAreaBookingData.pickupLocation, null),
                         destinationLocation: this.safeJSONParse(avoidedAreaBookingData.destinationLocation, null)

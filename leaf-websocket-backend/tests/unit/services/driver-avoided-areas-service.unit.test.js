@@ -7,6 +7,7 @@ const {
   cellsAroundPoint,
   isDestinationAvoided,
   isRideInAvoidedArea,
+  parseStoredAvoided,
   normalizeAvoidedCells,
   parseAvoidedCells,
   parseStoredAvoidedCells
@@ -20,7 +21,7 @@ const BARRA_CELL = h3.latLngToCell(BARRA.lat, BARRA.lng, 8);
 describe('driver-avoided-areas-service', () => {
   it('exposes the agreed resolution and cell limit', () => {
     expect(AVOIDED_AREAS_H3_RESOLUTION).toBe(8);
-    expect(MAX_AVOIDED_CELLS).toBe(60);
+    expect(MAX_AVOIDED_CELLS).toBe(80);
   });
 
   describe('normalizeAvoidedCells', () => {
@@ -128,6 +129,7 @@ describe('driver-avoided-areas-service', () => {
 
       expect(patch).toEqual({
         avoidedH3Cells: JSON.stringify([COPACABANA_CELL]),
+        avoidedBairros: '[]',
         avoidedAreasUpdatedAt: '2026-10-13T12:00:00.000Z'
       });
     });
@@ -185,6 +187,36 @@ describe('driver-avoided-areas-service', () => {
     it('returns nothing without valid cells', () => {
       expect(buildAreaOutline([])).toEqual([]);
       expect(buildAreaOutline(['x'])).toEqual([]);
+    });
+  });
+  describe('whole neighbourhoods', () => {
+    const { findBairroAt } = require('../../../services/rio-bairros-service');
+    const copacabana = findBairroAt(COPACABANA.lat, COPACABANA.lng);
+
+    it('finds the official neighbourhood of a point', () => {
+      expect(copacabana.name).toBe('Copacabana');
+      expect(findBairroAt(BARRA.lat, BARRA.lng).name).not.toBe('Copacabana');
+      expect(findBairroAt(-23.55, -46.63)).toBeNull();
+      expect(findBairroAt('x', null)).toBeNull();
+    });
+
+    it('blocks pickup or destination anywhere inside an avoided neighbourhood', () => {
+      const driver = { avoidedBairros: JSON.stringify([copacabana.id]) };
+      expect(isRideInAvoidedArea(driver, { pickupLocation: BARRA, destinationLocation: COPACABANA })).toBe(true);
+      expect(isRideInAvoidedArea(driver, { pickupLocation: { lat: '-22.9668', lng: '-43.1790' }, destinationLocation: BARRA })).toBe(true);
+      expect(isRideInAvoidedArea(driver, { pickupLocation: BARRA, destinationLocation: BARRA })).toBe(false);
+      expect(isRideInAvoidedArea({ avoidedBairros: ['99999'] }, { destinationLocation: COPACABANA })).toBe(false);
+    });
+
+    it('reads cells and neighbourhoods from the stored record and writes both to the hash copy', () => {
+      expect(parseStoredAvoided(JSON.stringify({ cells: [COPACABANA_CELL], bairros: [copacabana.id, 'nope'] }))).toEqual({
+        cells: [COPACABANA_CELL],
+        bairros: [copacabana.id]
+      });
+      expect(parseStoredAvoided('{broken')).toEqual({ cells: [], bairros: [] });
+      expect(buildAvoidedAreasPatch([], '2026-10-13T12:00:00.000Z', [copacabana.id]).avoidedBairros).toBe(
+        JSON.stringify([copacabana.id])
+      );
     });
   });
 });
