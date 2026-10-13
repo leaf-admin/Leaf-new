@@ -20747,6 +20747,32 @@ export function usePrototypeRideRuntime() {
     };
   }, [isRuntimeEffectOwner, profile]);
 
+  // Online sem corrida: mantém o serviço de localização para o motorista continuar
+  // recebendo ofertas com o app em segundo plano.
+  const driverOnlinePresenceUid =
+    isRuntimeEffectOwner &&
+    resolveRuntimeRole(profile) === "driver" &&
+    snapshot.driverOnline === true &&
+    profile?.uid
+      ? String(profile.uid)
+      : "";
+  useEffect(() => {
+    if (!isRuntimeEffectOwner) {
+      return;
+    }
+    prototypeDriverTripAssistantService
+      .setOnlinePresence({
+        online: Boolean(driverOnlinePresenceUid),
+        driverId: driverOnlinePresenceUid || null,
+      })
+      .catch((error) => {
+        Logger.warn(
+          "⚠️ [PrototypeRuntime] Falha ao sincronizar presença online do motorista:",
+          error?.message || error,
+        );
+      });
+  }, [isRuntimeEffectOwner, driverOnlinePresenceUid]);
+
   useEffect(() => {
     if (!isRuntimeEffectOwner) {
       return;

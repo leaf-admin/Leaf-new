@@ -190,6 +190,17 @@ class BackgroundLocationService {
         if (this.startInFlight) {
             return this.startInFlight;
         }
+        // Uma parada em andamento terminaria depois deste início e derrubaria o serviço
+        // recém-criado (fim de corrida com o motorista ainda online).
+        if (this.stopInFlight) {
+            await this.stopInFlight.catch(() => {});
+            if (this.isTracking) {
+                return;
+            }
+            if (this.startInFlight) {
+                return this.startInFlight;
+            }
+        }
         this.startInFlight = this.startBackgroundTrackingOnce().finally(() => {
             this.startInFlight = null;
         });
@@ -228,8 +239,8 @@ class BackgroundLocationService {
                 timeInterval: BACKGROUND_LOCATION_TIME_INTERVAL_MS,
                 distanceInterval: BACKGROUND_LOCATION_DISTANCE_INTERVAL_M,
                 foregroundService: {
-                    notificationTitle: 'Leaf App',
-                    notificationBody: 'Rastreando sua localização',
+                    notificationTitle: 'Leaf · Você está online',
+                    notificationBody: 'Recebendo corridas perto de você. Toque para voltar ao app.',
                     notificationColor: '#003002'
                 },
                 pausesUpdatesAutomatically: false,
@@ -304,6 +315,12 @@ class BackgroundLocationService {
     async stopBackgroundTracking() {
         if (this.stopInFlight) {
             return this.stopInFlight;
+        }
+        if (this.startInFlight) {
+            await this.startInFlight.catch(() => {});
+            if (this.stopInFlight) {
+                return this.stopInFlight;
+            }
         }
         this.stopInFlight = this.stopBackgroundTrackingOnce().finally(() => {
             this.stopInFlight = null;
