@@ -1,5 +1,21 @@
 const winston = require('winston');
 const path = require('path');
+const fs = require('fs');
+
+// Mesmo cuidado de utils/logger.js: sem permissão de escrita na pasta, o transporte de
+// arquivo trava e o winston para de entregar também para o console.
+const LEGACY_LOG_DIRECTORY = path.join(__dirname, '../logs');
+let legacyLogFilesEnabled = String(process.env.LOG_TO_FILES || '').toLowerCase() !== 'false';
+if (legacyLogFilesEnabled) {
+  try {
+    fs.accessSync(LEGACY_LOG_DIRECTORY, fs.constants.W_OK);
+  } catch (error) {
+    legacyLogFilesEnabled = false;
+  }
+}
+function createFileTransport(options) {
+  return legacyLogFilesEnabled ? new winston.transports.File(options) : null;
+}
 
 // Configuração de cores para diferentes níveis
 const colors = {
@@ -42,7 +58,7 @@ const transports = [
   }),
   
   // Arquivo para logs de erro
-  new winston.transports.File({
+  createFileTransport({
     filename: path.join(__dirname, '../logs/error.log'),
     level: 'error',
     format: logFormat,
@@ -51,7 +67,7 @@ const transports = [
   }),
   
   // Arquivo para todos os logs
-  new winston.transports.File({
+  createFileTransport({
     filename: path.join(__dirname, '../logs/combined.log'),
     format: logFormat,
     maxsize: 5242880, // 5MB
@@ -59,7 +75,7 @@ const transports = [
   }),
   
   // Arquivo específico para WebSocket
-  new winston.transports.File({
+  createFileTransport({
     filename: path.join(__dirname, '../logs/websocket.log'),
     level: 'info',
     format: logFormat,
@@ -68,7 +84,7 @@ const transports = [
   }),
   
   // Arquivo específico para Redis
-  new winston.transports.File({
+  createFileTransport({
     filename: path.join(__dirname, '../logs/redis.log'),
     level: 'info',
     format: logFormat,
@@ -81,7 +97,7 @@ const transports = [
 const logger = winston.createLogger({
   level: process.env.LOG_LEVEL || 'info',
   format: logFormat,
-  transports,
+  transports: transports.filter(Boolean),
   exitOnError: false
 });
 
@@ -90,7 +106,7 @@ const websocketLogger = winston.createLogger({
   level: 'info',
   format: logFormat,
   transports: [
-    new winston.transports.File({
+    createFileTransport({
       filename: path.join(__dirname, '../logs/websocket.log'),
       maxsize: 5242880,
       maxFiles: 5
@@ -103,14 +119,14 @@ const websocketLogger = winston.createLogger({
         })
       )
     })
-  ]
+  ].filter(Boolean)
 });
 
 const redisLogger = winston.createLogger({
   level: 'info',
   format: logFormat,
   transports: [
-    new winston.transports.File({
+    createFileTransport({
       filename: path.join(__dirname, '../logs/redis.log'),
       maxsize: 5242880,
       maxFiles: 5
@@ -123,14 +139,14 @@ const redisLogger = winston.createLogger({
         })
       )
     })
-  ]
+  ].filter(Boolean)
 });
 
 const securityLogger = winston.createLogger({
   level: 'warn',
   format: logFormat,
   transports: [
-    new winston.transports.File({
+    createFileTransport({
       filename: path.join(__dirname, '../logs/security.log'),
       maxsize: 5242880,
       maxFiles: 10
@@ -143,7 +159,7 @@ const securityLogger = winston.createLogger({
         })
       )
     })
-  ]
+  ].filter(Boolean)
 });
 
 // Funções de logging específicas
