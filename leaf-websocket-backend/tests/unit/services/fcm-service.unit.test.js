@@ -148,4 +148,61 @@ describe('fcm-service', () => {
     fcmService.destroy();
     expect(mockRedis.disconnect).toHaveBeenCalled();
   });
+  test('stale device tokens do not count as service failures and are removed; the valid token still receives', async () => {
+    const circuitBreaker = require('../../../services/circuit-breaker-service');
+    // Breaker real o bastante para o caso: abre após 5 falhas e passa a usar o fallback.
+    let failures = 0;
+    circuitBreaker.execute.mockImplementation(async (name, fn, fallback) => {
+      if (failures >= 5) return fallback();
+      try {
+        return await fn();
+      } catch (error) {
+        failures += 1;
+        return fallback(error);
+      }
+    });
+
+    const staleTokens = ['stale-1', 'stale-2', 'stale-3', 'stale-4', 'stale-5', 'stale-6'];
+    const send = jest.fn(async (message) => {
+      if (staleTokens.includes(message.token)) {
+        const error = new Error('NotRegistered');
+        error.code = 'messaging/registration-token-not-registered';
+        throw error;
+      }
+      return 'msg-valid';
+    });
+    admin.messaging.mockReturnValue({ send });
+    fcmService.resolveUserTokens = jest.fn().mockResolvedValue(
+      [...staleTokens, 'valid-token'].map((fcmToken) => ({ fcmToken }))
+    );
+    fcmService.removeInvalidToken = jest.fn().mockResolvedValue(undefined);
+
+    const result = await fcmService.sendNotificationToUser('u1', { title: 'Nova corrida', body: 'x', data: {} });
+
+    expect(result.success).toBe(true);
+    expect(result.summary).toEqual({ total: 7, success: 1, failed: 6 });
+    expect(failures).toBe(0);
+    expect(fcmService.removeInvalidToken.mock.calls.map(([token]) => token)).toEqual(staleTokens);
+  });
+
+  test('a real FCM outage still counts as a failure for the breaker', async () => {
+    const circuitBreaker = require('../../../services/circuit-breaker-service');
+    const fallback = jest.fn();
+    circuitBreaker.execute.mockImplementation(async (name, fn) => {
+      try {
+        return await fn();
+      } catch (error) {
+        fallback(error.message);
+        throw error;
+      }
+    });
+    admin.messaging.mockReturnValue({ send: jest.fn().mockRejectedValue(new Error('UNAVAILABLE')) });
+    fcmService.removeInvalidToken = jest.fn();
+
+    const result = await fcmService.sendToToken('valid-token', { title: 't', body: 'b', data: {} });
+
+    expect(result).toEqual({ success: false, error: 'UNAVAILABLE' });
+    expect(fallback).toHaveBeenCalledWith('UNAVAILABLE');
+    expect(fcmService.removeInvalidToken).not.toHaveBeenCalled();
+  });
 });
