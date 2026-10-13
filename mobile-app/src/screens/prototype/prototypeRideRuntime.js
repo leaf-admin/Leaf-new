@@ -20512,15 +20512,22 @@ export function usePrototypeRideRuntime() {
     const updateDriverSignalAge = () => {
       setRuntimeState((previous) => {
         const heartbeat = previous.driverLocationHeartbeat || {};
+        if (String(heartbeat.bookingId || "") !== bookingId) {
+          // Corrida nova: a idade do sinal conta a partir de agora. Sem isto o horário da
+          // última localização da corrida anterior fazia o aviso "sinal instável há N min"
+          // aparecer logo depois do aceite.
+          return {
+            driverLocationHeartbeat: {
+              ...heartbeat,
+              bookingId,
+              lastReceivedAt: Date.now(),
+              stale: false,
+              ageSeconds: 0,
+            },
+          };
+        }
         const lastReceivedAt = Number(heartbeat.lastReceivedAt);
-        if (
-          !Number.isFinite(lastReceivedAt) ||
-          lastReceivedAt <= 0 ||
-          (
-            heartbeat.bookingId &&
-            String(heartbeat.bookingId) !== bookingId
-          )
-        ) {
+        if (!Number.isFinite(lastReceivedAt) || lastReceivedAt <= 0) {
           return null;
         }
 

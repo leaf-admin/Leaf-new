@@ -115,6 +115,13 @@ function parseDateFlexible(rawValue) {
     return null;
   }
 
+  // "AAAA-MM-DD" é um dia do calendário, não um instante: new Date() o leria em UTC
+  // e, no fuso do Brasil, ele cairia no dia anterior.
+  const dayOnly = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text);
+  if (dayOnly) {
+    return new Date(Number(dayOnly[1]), Number(dayOnly[2]) - 1, Number(dayOnly[3]));
+  }
+
   const parsed = new Date(text);
   if (!Number.isNaN(parsed.getTime())) {
     return parsed;
@@ -869,7 +876,13 @@ export default function EarningsReportScreen({ navigation, route }) {
     },
     [lastReceipt, tripHistory]
   );
-  const hasRuntimeHistory = runtimeHistory.length > 0;
+  // O relatório do servidor é a fonte dos ganhos. O histórico local do aparelho só entra
+  // quando o servidor não respondeu: ele guarda poucas corridas e não respeita o período.
+  const hasServerSeries =
+    !earningsLoadFailed &&
+    Array.isArray(earningsData?.dailySeries) &&
+    earningsData.dailySeries.length > 0;
+  const hasRuntimeHistory = runtimeHistory.length > 0 && !hasServerSeries;
 
   const normalizedSeries = useMemo(
     () =>
