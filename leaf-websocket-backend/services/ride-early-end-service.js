@@ -174,7 +174,8 @@ async function resolveDriverEarlyEndSettlement({
     driverId,
     startedAt: bookingData.startedAt || null,
     startLocation,
-    nowMs
+    nowMs,
+    allowPreStartTelemetry: true
   });
   const trustedPosition = metrics?.success ? parseLocation(metrics.endLocation) : null;
   if (!trustedPosition) {
