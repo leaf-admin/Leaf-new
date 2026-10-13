@@ -197,6 +197,7 @@ function buildNotificationDescriptor(session) {
 class PrototypeDriverTripAssistantService {
   constructor() {
     this.lastTrackingSessionKey = '';
+    this.onlinePresenceKey = null;
   }
 
   async loadSession() {
@@ -245,6 +246,32 @@ class PrototypeDriverTripAssistantService {
       await locationBufferService.clearActiveTripContext();
     } catch (error) {
       Logger.warn('⚠️ [PrototypeDriverTripAssistant] Falha ao limpar corrida ativa do tracking:', error?.message || error);
+    }
+  }
+
+  // Online sem corrida: o serviço de localização fica ativo para o motorista continuar
+  // na fila com o app em segundo plano (antes ele só rodava durante a corrida e o
+  // servidor marcava o motorista como offline segundos depois de ele sair do app).
+  async setOnlinePresence({ online = false, driverId = null } = {}) {
+    const nextKey = online && driverId ? String(driverId) : '';
+    if (this.onlinePresenceKey === nextKey) {
+      return;
+    }
+    this.onlinePresenceKey = nextKey;
+
+    try {
+      const locationBufferService = require('./LocationBufferService').default;
+      locationBufferService.setDriverPresenceContext(nextKey ? { driverId: nextKey } : null);
+    } catch (error) {
+      Logger.warn('⚠️ [PrototypeDriverTripAssistant] Falha ao registrar presença online:', error?.message || error);
+    }
+
+    if (nextKey) {
+      await this.ensureTrackingActive();
+      return;
+    }
+    if (!this.lastTrackingSessionKey) {
+      await this.stopTracking();
     }
   }
 
@@ -433,7 +460,9 @@ class PrototypeDriverTripAssistantService {
       await PersistentRideNotificationService.dismissRideNotification();
     }
     await this.clearBackgroundTripContext();
-    await this.stopTracking();
+    if (!this.onlinePresenceKey) {
+      await this.stopTracking();
+    }
   }
 
   async getLatestActionContext() {
