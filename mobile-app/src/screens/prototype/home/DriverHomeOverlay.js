@@ -1,5 +1,6 @@
 import leafTypography from '../../../components/prototype/LeafTypography';
 import LeafGlassSurface from "../../../components/design-system/LeafGlassSurface";
+import LeafAnimatedAmount from '../../../components/design-system/LeafAnimatedAmount';
 import React, { memo, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
@@ -888,7 +889,7 @@ function DriverHomeOverlay({
         >
           <LeafGlassSurface interactive pointerEvents="none" style={styles.driverEarningsPillGlass} />
           <View style={[styles.driverEarningsPillDot, (sliderStatus === "online" || sliderStatus === "ride") && styles.driverEarningsPillDotOnline]} />
-          <Text style={styles.driverEarningsPillValue} numberOfLines={1}>{currentGoalProgressLabel}</Text>
+          <LeafAnimatedAmount style={styles.driverEarningsPillValue} numberOfLines={1} label={currentGoalProgressLabel} />
           {/* Safety signal stays visible without expanding the panel. */}
           {onlineLimitHintVisible ? <Ionicons name="time-outline" size={16} color={DRIVER_HOME_COLOR.warningText} accessibilityLabel="Próximo ao limite de horas online" /> : null}
           <Ionicons name={earningsExpanded ? "chevron-up" : "chevron-down"} size={16} color="#6A6A6A" />
