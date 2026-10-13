@@ -1309,14 +1309,30 @@ export default function RobotaxiTripScreen({ navigation, route }) {
     () => buildExtensionPaymentData(rideExtension, activeBookingId),
     [activeBookingId, rideExtension]
   );
-  const pickupLabel =
-    String(
-      activeBooking?.pickupLocation?.add ||
-        activeBooking?.pickupAddress ||
-        route?.params?.originAddress ||
-        currentAddress ||
-        '',
-    ).trim() || 'Local combinado';
+  // O embarque é o que foi pedido, não onde o passageiro está agora. O endereço do GPS
+  // (currentAddress) muda a cada leitura, então o primeiro rótulo conhecido fica fixo por
+  // corrida e só é trocado por um rótulo vindo da própria corrida.
+  const bookingPickupLabel = String(
+    activeBooking?.pickupLocation?.add ||
+      activeBooking?.pickupAddress ||
+      route?.params?.originAddress ||
+      '',
+  ).trim();
+  const lockedPickupLabelRef = useRef({ bookingId: null, label: '', fromBooking: false });
+  const pickupLabelBookingKey = String(activeBookingId || '');
+  if (lockedPickupLabelRef.current.bookingId !== pickupLabelBookingKey) {
+    lockedPickupLabelRef.current = { bookingId: pickupLabelBookingKey, label: '', fromBooking: false };
+  }
+  if (bookingPickupLabel && !lockedPickupLabelRef.current.fromBooking) {
+    lockedPickupLabelRef.current = {
+      bookingId: pickupLabelBookingKey,
+      label: bookingPickupLabel,
+      fromBooking: true,
+    };
+  } else if (!lockedPickupLabelRef.current.label) {
+    lockedPickupLabelRef.current.label = String(currentAddress || '').trim();
+  }
+  const pickupLabel = lockedPickupLabelRef.current.label || 'Local combinado';
   const pickupPointLabel =
     pickupLabel.split(',').slice(0, 2).join(',').trim() || pickupLabel;
   const pickupCompactLabel = pickupLabel.split(',')[0]?.trim() || pickupPointLabel;
