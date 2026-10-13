@@ -324,6 +324,12 @@ class BackgroundLocationService {
                 return;
             }
             const { code, message } = describeTrackingError(error);
+            // Parar o que já não está rodando não é erro: o sistema já encerrou a tarefa.
+            if (/TaskNotFoundException|Task '.*' not found/i.test(String(message || ''))) {
+                this.lastStartFailure = null;
+                this.notifyTrackingStatus();
+                return;
+            }
             const report = `Erro ao parar tracking de background: [${code || 'sem código'}] ${message}`;
             if (wasTracking) {
                 Logger.error(`❌ ${report}`);
