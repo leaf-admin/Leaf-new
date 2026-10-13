@@ -103,6 +103,17 @@ describe('ride-live-activity-service', () => {
     });
   });
 
+  it('sends updatedAt as seconds since the Apple reference date, not as text', () => {
+    const before = Date.now() / 1000 - 978307200;
+    const service = new RideLiveActivityService();
+    const payload = service.buildApnsPayload({ status: 'accepted', bookingId: 'booking_1' });
+    const updatedAt = payload.aps['content-state'].updatedAt;
+
+    expect(typeof updatedAt).toBe('number');
+    expect(updatedAt).toBeGreaterThanOrEqual(Math.floor(before));
+    expect(updatedAt).toBeLessThan(before + 5);
+  });
+
   it('skips APNs updates safely when no activity token or credentials are available', async () => {
     const redis = buildRedis({
       hgetall: jest.fn().mockResolvedValue({})

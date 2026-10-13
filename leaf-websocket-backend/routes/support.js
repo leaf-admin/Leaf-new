@@ -466,13 +466,17 @@ router.post('/tickets/:ticketId/messages', supportRateLimit, sanitizeInput, auth
 
     const senderId = getRequesterId(req);
     const senderType = senderId === String(ticket.userId) ? 'user' : 'agent';
+    // Nota interna da equipe (inclusive as do orquestrador de suporte) nunca vai para o
+    // dono do ticket. Antes era gravada como pública e aparecia na conversa do cliente.
+    // O próprio cliente não consegue marcar uma mensagem como interna.
+    const isInternalNote = senderType === 'agent' && String(messageType || '').trim().toLowerCase() === 'internal_note';
     const newMessage = await supportTicketService.addMessage(ticketId, {
       senderId,
       senderType,
       message: message.trim(),
       messageType,
       attachments,
-      isInternal: false
+      isInternal: isInternalNote
     }, persistenceContext);
 
     await notifyParticipants(ticketId, newMessage, persistenceContext);
@@ -753,7 +757,8 @@ async function notifyParticipants(ticketId, message, persistenceContext = null) 
     const ticket = await supportTicketService.getTicket(ticketId, persistenceContext);
     publishSupportEvent(ioInstance, {
       dashboardEvent: persistenceContext?.namespace === 'sandbox' ? null : 'support:message:new',
-      ownerEvent: 'support:message:new',
+      // Nota interna só chega ao painel.
+      ownerEvent: message.isInternal === true ? null : 'support:message:new',
       dashboardPayload: payload,
       ownerPayload: payload,
       userId: ticket?.userId,

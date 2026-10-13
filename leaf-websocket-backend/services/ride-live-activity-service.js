@@ -50,6 +50,12 @@ const formatDistance = (value) => {
   return `${numeric.toFixed(numeric >= 10 ? 0 : 1).replace('.', ',')} km`;
 };
 
+const APPLE_REFERENCE_EPOCH_SECONDS = 978307200;
+
+function toAppleReferenceSeconds(epochMs) {
+  return Number((Number(epochMs) / 1000 - APPLE_REFERENCE_EPOCH_SECONDS).toFixed(3));
+}
+
 class RideLiveActivityService {
   constructor(redis = null) {
     this.redis = redis;
@@ -154,7 +160,9 @@ class RideLiveActivityService {
       distanceText,
       fareLabel,
       progress: STATUS_PROGRESS[status] ?? 0.25,
-      updatedAt: new Date().toISOString()
+      // O ActivityKit decodifica `Date` como segundos desde 2001-01-01 (referência da
+      // Apple). Em texto ISO o iOS descarta a atualização inteira, em silêncio.
+      updatedAt: toAppleReferenceSeconds(Date.now())
     };
   }
 
