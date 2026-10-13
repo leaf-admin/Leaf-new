@@ -1184,6 +1184,26 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
 
   const navigateBackToPrototype = useCallback(() => {
     terminalExitRef.current = true;
+    // The home is normally still under this receipt: go back to it. Replacing
+    // the receipt with a new home stacked one more home (and one more map) per
+    // ride, and the new map opened blank at city scale before zooming in.
+    const stackState =
+      typeof navigation.getState === "function" ? navigation.getState() : null;
+    const stackRoutes = Array.isArray(stackState?.routes) ? stackState.routes : [];
+    const currentIndex = Number.isInteger(stackState?.index)
+      ? stackState.index
+      : stackRoutes.length - 1;
+    let homeIndexBelow = -1;
+    for (let index = currentIndex - 1; index >= 0; index -= 1) {
+      if (stackRoutes[index]?.name === "RobotaxiPrototype") {
+        homeIndexBelow = index;
+        break;
+      }
+    }
+    if (homeIndexBelow >= 0 && typeof navigation.dispatch === "function") {
+      navigation.dispatch(StackActions.pop(currentIndex - homeIndexBelow));
+      return;
+    }
     if (typeof navigation.dispatch === "function") {
       navigation.dispatch(StackActions.replace("RobotaxiPrototype"));
       return;
