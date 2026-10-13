@@ -257,4 +257,198 @@ describe('register-socket-complete-trip-handler receipt generation', () => {
       mockFirebaseDb
     );
   });
+
+  describe('driver early end settlement', () => {
+    const bookingHash = {
+      bookingId: 'booking_1',
+      customerId: 'customer_1',
+      driverId: 'driver_1',
+      pickupAddress: 'Origem',
+      destinationAddress: 'Destino',
+      destinationLocation: JSON.stringify({ lat: -22.9827, lng: -43.3642 }),
+      estimatedTripDistanceKm: '10',
+      routeDurationSecs: '1200',
+      paymentMethod: 'pix'
+    };
+    const settlement = {
+      settlementType: 'EARLY_ENDED_BY_DRIVER',
+      originalFare: 40,
+      prepaidAmount: 40,
+      executedFare: 20,
+      estimatedRefund: 20,
+      executedDistanceKm: 5,
+      executedDurationSecs: 600
+    };
+
+    async function runCompleteTrip({ commandData, payload = {} }) {
+      const socket = createSocket();
+      const redis = {
+        hgetall: jest.fn(async (key) => (key === 'booking:booking_1' ? { ...bookingHash } : {})),
+        hset: jest.fn().mockResolvedValue(1)
+      };
+      const idempotencyService = {
+        generateKey: jest.fn(() => 'idem_booking_1_complete'),
+        beginRequest: jest.fn().mockResolvedValue({ isNew: true }),
+        cacheResult: jest.fn().mockResolvedValue(undefined),
+        releaseInflight: jest.fn().mockResolvedValue(undefined)
+      };
+      const CompleteTripCommand = jest.fn().mockImplementation(() => ({
+        execute: jest.fn().mockResolvedValue({
+          success: true,
+          data: {
+            bookingId: 'booking_1',
+            driverId: 'driver_1',
+            customerId: 'customer_1',
+            event: { type: 'ride.completed', data: { bookingId: 'booking_1' } },
+            tollFee: 0,
+            paymentDistribution: { status: 'PENDING' },
+            authoritativeSnapshot: true,
+            financialSnapshotSource: 'backend_final',
+            ...commandData
+          }
+        })
+      }));
+      const emitted = [];
+      const io = {
+        activeBookings: new Map(),
+        to: jest.fn((room) => ({
+          emit: jest.fn((event, data) => emitted.push({ room, event, data }))
+        }))
+      };
+
+      registerSocketCompleteTripHandler({
+        socket,
+        io,
+        extractTraceIdFromEvent: jest.fn(() => 'trace_1'),
+        traceContext: { runWithTraceId: jest.fn(async (_traceId, callback) => callback()) },
+        logStructured: jest.fn(),
+        rateLimiterService: { checkRateLimit: jest.fn().mockResolvedValue({ allowed: true }) },
+        validationService: {
+          validateEndpoint: jest.fn(() => ({
+            valid: true,
+            sanitized: {
+              bookingId: 'booking_1',
+              endLocation: { lat: -22.9827, lng: -43.3642 },
+              distance: 10,
+              fare: 40
+            }
+          }))
+        },
+        getSocketMetadata: jest.fn(() => ({})),
+        auditService: { logRideAction: jest.fn() },
+        redisPool: { getConnection: jest.fn(() => redis) },
+        idempotencyService,
+        getTracer: jest.fn(() => ({})),
+        createCommandSpan: jest.fn(() => ({})),
+        runInSpan: jest.fn(async (_span, callback) => callback()),
+        endSpanError: jest.fn(),
+        logCommand: jest.fn(),
+        createEventSpan: jest.fn(() => ({ spanContext: jest.fn(() => ({})) })),
+        eventBus: { publish: jest.fn().mockResolvedValue(undefined) },
+        logEvent: jest.fn(),
+        CompleteTripCommand,
+        fcmService: { sendRideStatusUpdate: jest.fn().mockResolvedValue(undefined) }
+      });
+
+      await socket.trigger('completeTrip', { bookingId: 'booking_1', ...payload });
+      await flushImmediate();
+      await flushImmediate();
+
+      const tripCompleted = (room) =>
+        emitted.find((entry) => entry.room === room && entry.event === 'tripCompleted')?.data;
+      return {
+        CompleteTripCommand,
+        redis,
+        driverPayload: tripCompleted('driver_driver_1'),
+        passengerPayload: tripCompleted('customer_customer_1')
+      };
+    }
+
+    it('sends the settled values and the same settlement shape to both apps', async () => {
+      const earlyEnd = { detected: true, remainingMeters: 4040, thresholdMeters: 500, driverReason: 'passenger_request' };
+      const { CompleteTripCommand, redis, driverPayload, passengerPayload } = await runCompleteTrip({
+        payload: { earlyEnd: { reason: 'passenger_request', remainingMeters: 4000 } },
+        commandData: {
+          endLocation: { lat: -22.95175, lng: -43.38515 },
+          finalFare: 20,
+          distance: 5,
+          duration: 600,
+          operationalFee: 0.99,
+          paymentIntermediationFee: 0.5,
+          totalFees: 1.49,
+          driverNetAmount: 18.51,
+          completionType: 'EARLY_ENDED_BY_DRIVER',
+          settlement,
+          earlyEnd
+        }
+      });
+
+      // O handler só repassa a declaração do motorista; quem decide é o command.
+      expect(CompleteTripCommand).toHaveBeenCalledWith(expect.objectContaining({
+        finalFare: 40,
+        earlyEnd: { reason: 'passenger_request', remainingMeters: 4000 }
+      }));
+
+      for (const payload of [driverPayload, passengerPayload]) {
+        expect(payload).toMatchObject({
+          completionType: 'EARLY_ENDED_BY_DRIVER',
+          settlement,
+          earlyEnd,
+          distance: 5,
+          duration: 600,
+          operationalFee: 0.99,
+          paymentIntermediationFee: 0.5,
+          driverNetAmount: 18.51,
+          endLocation: { lat: -22.95175, lng: -43.38515 }
+        });
+      }
+      expect(redis.hset).toHaveBeenCalledWith('booking:booking_1', expect.objectContaining({
+        earlyEndReviewStatus: 'PENDING_PASSENGER_FEEDBACK'
+      }));
+      // A persistência usa completionType como status: a corrida segue COMPLETED.
+      const persisted = mockPersistFinalRideDataWithOutbox.mock.calls[0][1];
+      expect(persisted).toMatchObject({ fare: 20, distance: 5, duration: 600, settlement });
+      expect(persisted.completionType).toBeUndefined();
+      expect(mockGenerateAndSaveReceipt).toHaveBeenCalledWith(
+        'booking_1',
+        expect.objectContaining({
+          finalFare: 20,
+          distanceKm: 5,
+          durationSeconds: 600,
+          driverNetAmount: 18.51,
+          completionType: 'EARLY_ENDED_BY_DRIVER',
+          settlement,
+          status: 'COMPLETED'
+        }),
+        mockFirebaseDb
+      );
+    });
+
+    it('keeps the completion payload unchanged when the command did not settle', async () => {
+      const { driverPayload, passengerPayload } = await runCompleteTrip({
+        payload: { earlyEnd: { reason: 'passenger_request', remainingMeters: 9000 } },
+        commandData: {
+          endLocation: { lat: -22.9827, lng: -43.3642 },
+          finalFare: 40,
+          distance: 10,
+          duration: 1200,
+          operationalFee: 1.49,
+          paymentIntermediationFee: 0.5,
+          totalFees: 1.99,
+          driverNetAmount: 38.01
+        }
+      });
+
+      for (const payload of [driverPayload, passengerPayload]) {
+        expect(payload.completionType).toBe('COMPLETED');
+        expect(payload.settlement).toBeUndefined();
+        expect(payload.earlyEnd).toBeUndefined();
+        expect(payload).toMatchObject({ distance: 10, duration: 1200, driverNetAmount: 38.01 });
+      }
+      const persisted = mockPersistFinalRideDataWithOutbox.mock.calls[0][1];
+      expect(persisted.fare).toBe(40);
+      expect(persisted.settlement).toBeUndefined();
+      expect(mockGenerateAndSaveReceipt.mock.calls[0][1].settlement).toBeUndefined();
+    });
+  });
 });

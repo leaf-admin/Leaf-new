@@ -10,6 +10,7 @@ function getRideLifecycleFeatureFlags() {
   return {
     rideExtensionFlow: normalizeFlag(process.env.ENABLE_RIDE_EXTENSION_FLOW, true),
     riderEarlyEnd: normalizeFlag(process.env.ENABLE_RIDER_EARLY_END, true),
+    driverEarlyEndSettlement: normalizeFlag(process.env.ENABLE_DRIVER_EARLY_END_SETTLEMENT, false),
     operationalReassignment: normalizeFlag(process.env.ENABLE_OPERATIONAL_REASSIGNMENT, false),
     multiLegBilling: normalizeFlag(process.env.ENABLE_MULTI_LEG_BILLING, false)
   };
@@ -21,6 +22,10 @@ function isRideExtensionFlowEnabled() {
 
 function isRiderEarlyEndEnabled() {
   return getRideLifecycleFeatureFlags().riderEarlyEnd;
+}
+
+function isDriverEarlyEndSettlementEnabled() {
+  return getRideLifecycleFeatureFlags().driverEarlyEndSettlement;
 }
 
 function isOperationalReassignmentEnabled() {
@@ -35,6 +40,7 @@ module.exports = {
   getRideLifecycleFeatureFlags,
   isRideExtensionFlowEnabled,
   isRiderEarlyEndEnabled,
+  isDriverEarlyEndSettlementEnabled,
   isOperationalReassignmentEnabled,
   isMultiLegBillingEnabled
 };

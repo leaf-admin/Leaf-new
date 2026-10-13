@@ -30,6 +30,7 @@ const { clearActiveTripForDriver } = require('../utils/active-trip-index');
 const tripLocationPersistenceService = require('../services/trip-location-persistence-service');
 const pricingH3ReadModelService = require('../services/pricing-h3-read-model-service');
 const { resolveFinancialContext } = require('../services/financial-runtime-context');
+const { recordPendingCancellationCredit } = require('../services/cancellation-credit-pending-service');
 
 const PASSENGER_CANCEL_FIXED_FEE_CENTS = Math.max(
     0,
@@ -397,7 +398,9 @@ class CancelRideCommand extends Command {
                         if (elapsedMinutes >= 5) {
                             const waitTimeFee = elapsedMinutes * 50; // R$ 0,50 por minuto esperado
                             const wooviFee = 50;
-                            const estimatedFare = parseInt(bookingData.estimatedFare || 0);
+                            // estimatedFare é gravado em reais ("45.07"). Lido como centavos, o
+                            // teto de 40% virava R$ 0,18 e a taxa de no-show nunca passava disso.
+                            const estimatedFare = normalizeMoneyToCents(bookingData.estimatedFare || bookingData.totalAmount || 0);
                             const maxFee = estimatedFare > 0 ? Math.floor(estimatedFare * 0.4) : 500; // Teto de 40%
 
                             let calculatedFee = wooviFee + waitTimeFee;
@@ -414,6 +417,7 @@ class CancelRideCommand extends Command {
 
                 // Processar reembolso se houver pagamento
                 let refundResult = null;
+                const refundStartedAt = Date.now();
                 const paymentRecord = await paymentService.getStoredPayment(
                     this.bookingId,
                     financialContext
@@ -501,6 +505,8 @@ class CancelRideCommand extends Command {
                     }
                 }
 
+                const refundLatencyMs = Date.now() - refundStartedAt;
+
                 // Atualizar estado da corrida
                 await RideStateManager.updateBookingState(
                     redis,
@@ -579,25 +585,54 @@ class CancelRideCommand extends Command {
                     }
                 }
 
-                // Flush final da trilha de localização (se existirem pontos) para manter integridade histórica
-                try {
-                    await tripLocationPersistenceService.forceFinalizeTrip(this.bookingId, {
-                        status: 'canceled',
-                        reason: 'ride_canceled',
-                        financialContext: bookingData.financialContext,
-                        financialNamespace: bookingData.financialNamespace,
-                        financialContextId: bookingData.financialContextId,
-                        providerEnvironment:
-                            bookingData.paymentProviderEnvironment || bookingData.providerEnvironment,
-                        paymentProfileId: bookingData.paymentProfileId,
-                        testUserSandbox: bookingData.testUserSandbox
-                    });
-                } catch (locationFinalizeError) {
-                    logStructured('warn', 'Falha ao finalizar trilha de localização da corrida cancelada', {
-                        service: 'cancel-ride-command',
-                        bookingId: this.bookingId,
-                        error: locationFinalizeError.message
-                    });
+                // Flush final da trilha de localização (se existirem pontos) para manter integridade histórica.
+                // A resposta do cancelamento não depende dele: o estado canônico já foi confirmado acima.
+                // Roda fora do caminho da resposta (mesmo padrão do EndRideEarlyByRiderCommand); a falha
+                // continua apenas registrada em log, como antes.
+                const bookingIdToFinalize = this.bookingId;
+                const finalizeTripLocation = async () => {
+                    try {
+                        await tripLocationPersistenceService.forceFinalizeTrip(bookingIdToFinalize, {
+                            status: 'canceled',
+                            reason: 'ride_canceled',
+                            financialContext: bookingData.financialContext,
+                            financialNamespace: bookingData.financialNamespace,
+                            financialContextId: bookingData.financialContextId,
+                            providerEnvironment:
+                                bookingData.paymentProviderEnvironment || bookingData.providerEnvironment,
+                            paymentProfileId: bookingData.paymentProfileId,
+                            testUserSandbox: bookingData.testUserSandbox
+                        });
+                    } catch (locationFinalizeError) {
+                        logStructured('warn', 'Falha ao finalizar trilha de localização da corrida cancelada', {
+                            service: 'cancel-ride-command',
+                            bookingId: bookingIdToFinalize,
+                            error: locationFinalizeError.message
+                        });
+                    }
+                };
+                finalizeTripLocation();
+
+                // A taxa já foi cobrada do passageiro. Registrar o crédito devido ao motorista antes
+                // de publicar o evento: se o evento se perder, o billing-worker credita pela pendência.
+                if (driverId && this.cancellationFee > 0) {
+                    try {
+                        await recordPendingCancellationCredit(redis, {
+                            bookingId: this.bookingId,
+                            driverId,
+                            cancellationFee: this.cancellationFee,
+                            financialContext,
+                            providerEnvironment: financialContext.providerEnvironment
+                        });
+                    } catch (pendingCreditError) {
+                        logStructured('error', 'Falha ao registrar pendência de crédito da taxa de cancelamento', {
+                            service: 'cancel-ride-command',
+                            bookingId: this.bookingId,
+                            driverId,
+                            cancellationFee: this.cancellationFee,
+                            error: pendingCreditError.message
+                        });
+                    }
                 }
 
                 // Criar evento canônico
@@ -623,6 +658,14 @@ class CancelRideCommand extends Command {
                     canceledBy: this.canceledBy,
                     reason: this.reason,
                     command: 'CancelRideCommand'
+                });
+                // Tempos no texto da mensagem: o formato de console só imprime a mensagem.
+                logStructured('info', `CancelRideCommand tempos: reembolso=${refundLatencyMs}ms total=${Date.now() - startTime}ms`, {
+                    bookingId: this.bookingId,
+                    command: 'CancelRideCommand',
+                    refundLatencyMs,
+                    refundAttempted: Boolean(refundResult),
+                    latency_ms: Date.now() - startTime
                 });
 
                 // ✅ OBSERVABILIDADE: Registrar métrica de sucesso

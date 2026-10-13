@@ -31,17 +31,18 @@ describe('pricing/calculateFare', () => {
     expect(result.breakdown.pickup_adjustment).toBe(2.5);
   });
 
-  test('fator dinâmico deve respeitar teto de 35%', () => {
+  test('fator dinâmico deve respeitar teto de 40%', () => {
     const result = calculateDynamicFare({
       distance_km: 7,
       duration_min_traffic: 14,
       eta_pickup_min: 5,
       score_pressao: 1,
-      score_excecao: 1
+      score_excecao: 1,
+      dynamic_markup_rate: 1
     });
 
-    expect(result.fator_dinamico).toBe(1.35);
-    expect(result.percentual_dinamico_aplicado).toBe(35);
+    expect(result.fator_dinamico).toBe(1.4);
+    expect(result.percentual_dinamico_aplicado).toBe(40);
   });
 
   test('corrida curta deve aplicar mínimo tarifário', () => {

@@ -249,7 +249,12 @@ async function resolveRideScope({
   const memoryScope = fromMemory
     ? { found: true, ...extractRideScope(fromMemory, safeBookingId), source: 'memory' }
     : null;
-  if (memoryScope && !preferPersistentTerminal) {
+  // A cópia em memória pertence a este gateway. Com mais de um gateway, a
+  // corrida pode ter sido aceita em outro: a cópia local fica sem o motorista e
+  // o participante era recusado (chat, suporte, incidente). Só confiar nela
+  // quando os dois participantes estão presentes; senão, ler o Redis.
+  const memoryScopeComplete = Boolean(memoryScope?.customerId && memoryScope?.driverId);
+  if (memoryScope && !preferPersistentTerminal && memoryScopeComplete) {
     const scopeError = validateCachedScope(fromMemory);
     if (scopeError) return scopeError;
     return memoryScope;

@@ -1644,7 +1644,8 @@ function registerSocketCreateBookingHandler({
                             userId,
                             eventType: 'createBooking'
                         },
-                        timeoutMs: createBookingAvailabilityTimeoutMs
+                        timeoutMs: createBookingAvailabilityTimeoutMs,
+                        transientRetries: 1
                     });
 
                     if (!createBookingAvailability.skipped) {

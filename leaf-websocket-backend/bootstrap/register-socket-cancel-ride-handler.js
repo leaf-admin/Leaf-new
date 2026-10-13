@@ -42,6 +42,7 @@ function registerSocketCancelRideHandler({
         let outerIdempotencyOwner = false;
         await traceContext.runWithTraceId(traceId, async () => {
             try {
+                const handlerStartedAt = Date.now();
                 const { bookingId, reason } = data;
                 let userId = socket.userId || socket.id;
                 let canonicalUserType = socket.userType;
@@ -357,22 +358,28 @@ function registerSocketCancelRideHandler({
                 }
 
                 // A persistência espelha apenas uma transição canônica já confirmada.
-                try {
-                    const ridePersistenceService = require('../services/ride-persistence-service');
-                    const cancelReason = reason || 'Cancelado pelo usuário';
-                    await ridePersistenceService.markRideCancelled(
-                        bookingId,
-                        cancelReason,
-                        bookingData
-                    );
-                } catch (persistError) {
-                    logStructured('error', 'Erro ao marcar corrida como cancelada no Firestore', {
-                        bookingId,
-                        eventType: 'cancelRide',
-                        error: persistError.message
-                    });
-                    // A transição Redis/evento já foi confirmada; o espelho será reconciliado.
-                }
+                // A resposta ao iniciador não depende do espelho: ele roda em paralelo com o
+                // restante do handler e só é aguardado depois dos emits. A falha continua
+                // registrada em log e reconciliada como antes.
+                const mirrorCancellationToFirestore = async () => {
+                    try {
+                        const ridePersistenceService = require('../services/ride-persistence-service');
+                        const cancelReason = reason || 'Cancelado pelo usuário';
+                        await ridePersistenceService.markRideCancelled(
+                            bookingId,
+                            cancelReason,
+                            bookingData
+                        );
+                    } catch (persistError) {
+                        logStructured('error', 'Erro ao marcar corrida como cancelada no Firestore', {
+                            bookingId,
+                            eventType: 'cancelRide',
+                            error: persistError.message
+                        });
+                        // A transição Redis/evento já foi confirmada; o espelho será reconciliado.
+                    }
+                };
+                const firestoreMirrorPromise = mirrorCancellationToFirestore();
 
                 // Command executado com sucesso (já processou reembolso e atualizou estado)
                 const { event } = result.data;
@@ -598,6 +605,14 @@ function registerSocketCancelRideHandler({
                         eventType: 'cancelRide'
                     });
                 }
+                // Tempos no texto da mensagem: o formato de console só imprime a mensagem.
+                logStructured('info', `cancelRide respondido ao iniciador em ${Date.now() - handlerStartedAt}ms (command=${commandLatency}ms)`, {
+                    bookingId,
+                    eventType: 'cancelRide',
+                    initiatorType,
+                    commandLatencyMs: commandLatency,
+                    latency_ms: Date.now() - handlerStartedAt
+                });
 
                 // ✅ NOVO: Atualizar Live Activity/Foreground Service (Silent Push)
                 try {
@@ -700,6 +715,10 @@ function registerSocketCancelRideHandler({
                         eventType: 'cancelRide'
                     });
                 }
+
+                // Espelho do Firestore iniciado antes da resposta; aguardado aqui para que o
+                // handler só termine com ele concluído (ou com a falha registrada).
+                await firestoreMirrorPromise;
 
                 scheduleMapH3Refresh(io, {
                     reason: 'ride_cancelled',

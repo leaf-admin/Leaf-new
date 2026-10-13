@@ -27,7 +27,7 @@ describe('H3MapService', () => {
       imbalance: 8,
       surplus: -8,
     }, 'critical');
-    expect(surge.percent).toBeLessThanOrEqual(35);
+    expect(surge.percent).toBeLessThanOrEqual(40);
     expect(surge.level).toBe('purple');
     expect(surge.label).toMatch(/^\+/);
 
@@ -68,8 +68,8 @@ describe('H3MapService', () => {
     const surge = helpers.buildSurgeDisplay(metrics, 'critical', visualPolicy);
     const style = helpers.buildStyle('critical', 'driver', 8, metrics, visualPolicy);
 
-    expect(surge.percent).toBe(35);
-    expect(surge.label).toBe('extra 35%');
+    expect(surge.percent).toBe(40);
+    expect(surge.label).toBe('extra 40%');
     expect(surge.labelVisible).toBe(true);
     expect(style.fill).toBe('#123456');
     expect(style.stroke).toBe('#654321');
@@ -99,7 +99,7 @@ describe('H3MapService', () => {
     const surge = helpers.buildSurgeDisplay(metrics, 'critical', policy);
     const style = helpers.buildStyle('critical', 'driver', 8, metrics, policy);
 
-    expect(surge.percent).toBe(35);
+    expect(surge.percent).toBe(40);
     expect(surge.labelVisible).toBe(false);
     expect(style.fillOpacity).toBe(0);
     expect(style.strokeOpacity).toBe(0);

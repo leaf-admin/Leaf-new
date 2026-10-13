@@ -131,6 +131,10 @@ function registerSocketCompleteTripHandler({
     const { buildTripCompletedPayload } = require('../utils/trip-completion-payload');
     const { scheduleMapH3Refresh } = require('../utils/map-h3-refresh-broadcaster');
     const {
+        DRIVER_EARLY_END_COMPLETION_TYPE,
+        resolveRideEarlyEnd
+    } = require('../services/ride-early-end-service');
+    const {
         hasRideOfflineIntentPayload,
         markRideOfflineIntentProcessed,
         markRideOfflineIntentRejected,
@@ -329,6 +333,8 @@ function registerSocketCompleteTripHandler({
                         tollFee: commandTollFee,
                         distance: commandDistanceKm,
                         duration: commandDurationSeconds,
+                        // Só o motivo declarado; o valor é decidido no servidor.
+                        earlyEnd: data?.earlyEnd,
                         traceId, // ✅ Passar traceId para o command
                         correlationId // ✅ Passar correlationId para o command
                     });
@@ -394,6 +400,14 @@ function registerSocketCompleteTripHandler({
                     duration: resultDuration,
                     paymentDistribution
                 } = result.data;
+                // Encerramento antecipado pelo motorista já liquidado pelo command
+                // (trecho percorrido). Sem isso a corrida segue exatamente como antes.
+                const driverEarlyEndSettlement =
+                    result.data?.completionType === DRIVER_EARLY_END_COMPLETION_TYPE &&
+                    result.data?.settlement &&
+                    typeof result.data.settlement === 'object'
+                        ? result.data.settlement
+                        : null;
 
                 const PaymentService = require('../services/payment-service');
                 const paymentService = new PaymentService();
@@ -479,12 +493,16 @@ function registerSocketCompleteTripHandler({
                     ...(bookingSnapshotBeforeComplete || {}),
                     ...(await redis.hgetall(`booking:${bookingId}`))
                 };
-                const receiptDistanceKm =
-                    resolveCanonicalDistanceKm(bookingSnapshot, resultDistance || distance) ||
-                    commandDistanceKm;
-                const receiptDurationSeconds =
-                    resolveCanonicalDurationSeconds(bookingSnapshot, resultDuration || duration) ||
-                    commandDurationSeconds;
+                // Na liquidação pelo trecho percorrido o recibo mostra a distância e o
+                // tempo executados, não os contratados.
+                const receiptDistanceKm = driverEarlyEndSettlement
+                    ? Number(driverEarlyEndSettlement.executedDistanceKm) || 0
+                    : resolveCanonicalDistanceKm(bookingSnapshot, resultDistance || distance) ||
+                        commandDistanceKm;
+                const receiptDurationSeconds = driverEarlyEndSettlement
+                    ? Number(driverEarlyEndSettlement.executedDurationSecs) || 0
+                    : resolveCanonicalDurationSeconds(bookingSnapshot, resultDuration || duration) ||
+                        commandDurationSeconds;
                 const tripCompletedData = buildTripCompletedPayload({
                     bookingId,
                     bookingData: bookingSnapshot,
@@ -494,12 +512,46 @@ function registerSocketCompleteTripHandler({
                     duration: receiptDurationSeconds,
                     fareBreakdown,
                     paymentDistribution,
+                    ...(driverEarlyEndSettlement
+                        ? {
+                            completionType: DRIVER_EARLY_END_COMPLETION_TYPE,
+                            settlement: driverEarlyEndSettlement
+                        }
+                        : {}),
                     rideLegs: bookingSnapshot?.rideLegs ? JSON.parse(bookingSnapshot.rideLegs) : null,
                     operationalContinuation: bookingSnapshot?.operationalContinuation
                         ? JSON.parse(bookingSnapshot.operationalContinuation)
                         : null,
                     persistence: 'accepted_background'
                 });
+
+                // Encerramento longe do destino: registra o fato no booking e avisa
+                // o passageiro, que responde se foi a pedido dele. Não muda valores:
+                // quando houve liquidação, ela já veio pronta do command e o aviso
+                // usa a mesma detecção feita lá com a posição do servidor.
+                const earlyEnd = (driverEarlyEndSettlement && result.data?.earlyEnd) || resolveRideEarlyEnd({
+                    endLocation: resultEndLocation || endLocation,
+                    destinationLocation: bookingSnapshot?.destinationLocation,
+                    driverStatement: data?.earlyEnd
+                });
+                if (earlyEnd) {
+                    tripCompletedData.earlyEnd = earlyEnd;
+                    await redis.hset(`booking:${bookingId}`, {
+                        earlyEnd: JSON.stringify({
+                            ...earlyEnd,
+                            detectedAt: new Date().toISOString()
+                        }),
+                        earlyEndReviewStatus: 'PENDING_PASSENGER_FEEDBACK'
+                    }).catch(() => null);
+                    logStructured('warn', 'Corrida encerrada antes do destino', {
+                        bookingId,
+                        driverId,
+                        remainingMeters: earlyEnd.remainingMeters,
+                        driverReason: earlyEnd.driverReason,
+                        eventType: 'completeTrip'
+                    });
+                }
+
                 await rideIdempotencyService.cacheResult(idempotencyKey, tripCompletedData);
                 if (offlineIntentValidation && !offlineIntentValidation.skipped) {
                     await markRideOfflineIntentProcessed({
@@ -551,6 +603,9 @@ function registerSocketCompleteTripHandler({
                             driverEarnings: null,
                             fareBreakdown,
                             financialBreakdown: paymentDistribution || null,
+                            // completionType fica de fora de propósito: a persistência
+                            // usa esse campo como status e a corrida continua COMPLETED.
+                            ...(driverEarlyEndSettlement ? { settlement: driverEarlyEndSettlement } : {}),
                             authoritativeSnapshot: result.data?.authoritativeSnapshot === true,
                             financialSnapshotSource: result.data?.financialSnapshotSource || 'backend_final',
                             financialSnapshot: result.data?.financialSnapshot || null,
@@ -642,6 +697,12 @@ function registerSocketCompleteTripHandler({
                                 fareBreakdown,
                                 financialBreakdown: paymentDistribution || bookingDataForReceipt.financialBreakdown || null,
                                 paymentDistribution,
+                                ...(driverEarlyEndSettlement
+                                    ? {
+                                        completionType: DRIVER_EARLY_END_COMPLETION_TYPE,
+                                        settlement: driverEarlyEndSettlement
+                                    }
+                                    : {}),
                                 financialSnapshot: result.data?.financialSnapshot || bookingDataForReceipt.financialSnapshot || null,
                                 financialSnapshotSource: result.data?.financialSnapshotSource || 'backend_final',
                                 authoritativeSnapshot: result.data?.authoritativeSnapshot === true,

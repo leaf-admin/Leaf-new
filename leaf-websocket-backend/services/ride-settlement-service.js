@@ -51,6 +51,8 @@ function buildEarlyEndedReviewSettlement(bookingHash = {}, options = {}) {
   const settlement = calculateExecutedFareSettlement(bookingHash, {
     ...options,
     settlementType: 'EARLY_ENDED_REVIEW',
+    // Encerramento com revisão manual não entrou na regra do pedágio: conta inalterada.
+    tollPassThrough: false,
     minChargeRatio: options.minChargeRatio ?? 0
   });
 
@@ -147,6 +149,8 @@ function buildAuthoritativeCompletionArtifacts({
   operationalContinuation = null,
   reviewContext = null,
   paymentDistribution = null,
+  financialSnapshot = null,
+  financialContext = null,
   driverId = null,
   customerId = null,
   traceId = null,
@@ -192,8 +196,28 @@ function buildAuthoritativeCompletionArtifacts({
     paymentDistribution: distribution
   };
 
+  // O worker de billing só liquida (estorno parcial + ledger + crédito do motorista)
+  // quando o evento carrega o snapshot financeiro final gerado pelo backend.
+  const financialFields = {
+    ...(financialSnapshot
+      ? {
+          authoritativeSnapshot: true,
+          financialSnapshotSource: 'backend_final',
+          financialSnapshot
+        }
+      : {}),
+    ...(financialContext
+      ? {
+          financialContext,
+          financialNamespace: financialContext.namespace,
+          financialContextId: financialContext.contextId
+        }
+      : {})
+  };
+
   const stateMetadata = {
     ...baseFields,
+    ...financialFields,
     ...(normalizedSettlement ? { settlement: normalizedSettlement } : {}),
     ...(Array.isArray(rideLegs) ? { rideLegs } : {}),
     ...(operationalContinuation ? { operationalContinuation } : {}),
@@ -207,7 +231,8 @@ function buildAuthoritativeCompletionArtifacts({
     ...(Array.isArray(rideLegs) ? { rideLegs } : {}),
     ...(operationalContinuation ? { operationalContinuation } : {}),
     ...(reviewContext ? { reviewContext } : {}),
-    financialSnapshotSource: 'backend_final'
+    financialSnapshotSource: 'backend_final',
+    ...financialFields
   };
 
   if (completionType === 'EARLY_ENDED_BY_RIDER' && normalizedSettlement) {
@@ -226,6 +251,7 @@ function buildAuthoritativeCompletionArtifacts({
   const eventData = {
     bookingId,
     ...baseFields,
+    ...financialFields,
     ...(normalizedSettlement ? { settlement: normalizedSettlement } : {}),
     ...(Array.isArray(rideLegs) ? { rideLegSettlements: rideLegs } : {}),
     ...(operationalContinuation ? { operationalContinuation } : {}),
@@ -237,6 +263,7 @@ function buildAuthoritativeCompletionArtifacts({
   const resultData = {
     bookingId,
     ...baseFields,
+    ...financialFields,
     ...(normalizedSettlement ? { settlement: normalizedSettlement } : {}),
     ...(Array.isArray(rideLegs) ? { rideLegs } : {}),
     ...(operationalContinuation ? { interruption: operationalContinuation } : {}),

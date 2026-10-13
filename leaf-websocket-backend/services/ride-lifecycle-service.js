@@ -414,7 +414,7 @@ function calculateExecutedFareSettlement(bookingHash = {}, options = {}) {
   const executedFare = roundMoney(Math.max(0, originalFare * appliedRatio));
   const estimatedRefund = roundMoney(Math.max(0, prepaidAmount - executedFare));
 
-  return {
+  const settlement = {
     settlementType: String(options.settlementType || 'EXECUTED_FARE_SETTLEMENT').trim(),
     originalFare: roundMoney(originalFare),
     prepaidAmount: roundMoney(prepaidAmount),
@@ -431,12 +431,85 @@ function calculateExecutedFareSettlement(bookingHash = {}, options = {}) {
     originalDurationSecs: Math.round(progress.originalDurationSecs),
     remainingReservedAmount: roundMoney(Math.max(0, prepaidAmount - executedFare))
   };
+
+  // A regra do pedágio só vale para quem pede (encerramento antecipado pelo
+  // passageiro e pelo motorista). Interrupção operacional e encerramento com
+  // revisão manual seguem com a proporção sobre a tarifa inteira.
+  return options.tollPassThrough === true
+    ? applyTollPassThroughRule(settlement)
+    : settlement;
 }
 
+function positiveMoneyToCents(value) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.round(parsed * 100) : 0;
+}
+
+/**
+ * Regra do pedágio no encerramento antecipado (passageiro e motorista).
+ *
+ * valor liquidado = pedágio + proporção × (tarifa − pedágio)
+ * estorno         = valor pré-pago − valor liquidado
+ *
+ * Pedágio é repasse e nunca entra na proporção. O servidor não sabe se a praça
+ * de pedágio foi de fato cruzada, então o pedágio contratado fica cobrado
+ * inteiro e a liquidação registra isso: se o passageiro contestar, o suporte
+ * estorna o pedágio manualmente.
+ *
+ * - Sem pedágio (ausente, não numérico, zero ou negativo) a liquidação volta
+ *   intacta, com os mesmos números de sempre.
+ * - Pedágio maior ou igual à tarifa: o dado do booking não fecha. A liquidação
+ *   mantém a conta antiga e sai marcada com `tollRuleSkippedReason`, para que
+ *   cada caminho decida o que fazer (o do motorista não liquida).
+ * - Nunca cobra mais que o pré-pago e o estorno nunca fica negativo.
+ */
+function applyTollPassThroughRule(settlement = {}) {
+  const tollFeeCents = positiveMoneyToCents(settlement.tollFee);
+  if (tollFeeCents <= 0) {
+    return settlement;
+  }
+
+  const originalFareCents = positiveMoneyToCents(settlement.originalFare);
+  const prepaidCents = positiveMoneyToCents(settlement.prepaidAmount);
+  const fareWithoutTollCents = originalFareCents - tollFeeCents;
+  if (!(fareWithoutTollCents > 0)) {
+    return {
+      ...settlement,
+      tollKeptWhole: false,
+      tollRuleSkippedReason: 'TOLL_NOT_BELOW_FARE'
+    };
+  }
+
+  const appliedRatio = clamp(parseMoneyValue(settlement.appliedRatio, 0), 0, 1);
+  const executedFareWithoutTollCents = Math.round(fareWithoutTollCents * appliedRatio);
+  const executedFareCents = Math.min(
+    tollFeeCents + executedFareWithoutTollCents,
+    prepaidCents
+  );
+  const estimatedRefundCents = Math.max(0, prepaidCents - executedFareCents);
+
+  return {
+    ...settlement,
+    executedFare: executedFareCents / 100,
+    tollFee: tollFeeCents / 100,
+    estimatedRefund: estimatedRefundCents / 100,
+    remainingReservedAmount: estimatedRefundCents / 100,
+    fareWithoutToll: fareWithoutTollCents / 100,
+    executedFareWithoutToll: Math.max(0, executedFareCents - tollFeeCents) / 100,
+    tollKeptWhole: true,
+    tollChargedAmount: tollFeeCents / 100,
+    tollCrossingVerified: false,
+    tollManualRefundOnDispute: true
+  };
+}
+
+// Encerramento antecipado: uma única conta para o passageiro e para o motorista
+// (`ride-early-end-service` chama esta mesma função).
 function calculateRiderEarlyEndSettlement(bookingHash = {}, options = {}) {
   return calculateExecutedFareSettlement(bookingHash, {
     ...options,
     settlementType: 'EARLY_ENDED_BY_RIDER',
+    tollPassThrough: true,
     minChargeRatio:
       options.minChargeRatio ??
       process.env.RIDER_EARLY_END_MIN_CHARGE_RATIO ??
@@ -448,6 +521,8 @@ function calculateOperationalInterruptionSettlement(bookingHash = {}, options = 
   return calculateExecutedFareSettlement(bookingHash, {
     ...options,
     settlementType: 'INTERRUPTED_OPERATIONAL',
+    // Interrupção operacional não entrou na regra do pedágio: conta inalterada.
+    tollPassThrough: false,
     minChargeRatio: options.minChargeRatio ?? 0
   });
 }

@@ -1,9 +1,4 @@
-# Firebase Test Phone Auth — smoke QA (registro histórico)
-
-> Registro da execução de 03/09/2026. Desde 15/09/2026, o fluxo normal de OTP
-> usa WhatsApp Cloud API da Meta e conclui a sessão com custom token do Firebase;
-> esta evidência continua válida apenas para a variante legada de QA que foi
-> executada naquele dia.
+# Firebase Test Phone Auth — smoke QA
 
 Data: **3 de setembro de 2026**
 Nível: **E2 — autenticação real no bundle Debug**

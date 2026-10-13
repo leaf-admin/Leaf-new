@@ -1,12 +1,7 @@
 # Leaf — TODO completo para sair do estado atual e iniciar produção
 
-> **Atualização executável — 15/09/2026:** o fechamento mais recente está em
-> [`REMAINING_GATES_CLOSURE_20260915.md`](REMAINING_GATES_CLOSURE_20260915.md).
-> Ele deve ser lido antes deste inventário histórico para distinguir os itens
-> locais já fechados dos gates externos de provider, device e publicação.
-
 **Data da fotografia:** 2026-09-09 (fotografia histórica)
-**Última atualização:** 2026-09-15 — E3 bilateral **PASS**; build local pós-ajustes **PASS**; gates externos permanecem separados
+**Última atualização:** 2026-09-12 — E3 bilateral **PASS**; B07 fechado para o piloto controlado
 **Estado:** **E3 PASS / piloto controlado pronto para decisão operacional**; a abertura ampla continua condicionada aos gates externos e pós-piloto
 **Abertura ampla:** depende das métricas e da decisão pós-piloto
 **Branch observado:** `codex/uiux-integration-validation`
@@ -34,11 +29,6 @@ indicado, no mesmo SHA/build quando a etapa exigir integração.
 > publicado ainda precisa receber o serviço contextualizado antes de ser chamado
 > de pronto para produção.
 
-> **Fechamento de build (15/09):** o build iOS simulator Release 1.0.4 (35)
-> foi compilado a partir deste snapshot, validado, instalado e lançado nos dois
-> simuladores. A evidência com hashes e screenshots está em
-> [`LOCAL_BUILD_EVIDENCE_20260915.json`](LOCAL_BUILD_EVIDENCE_20260915.json).
-
 ## Legenda e regra de aceite
 
 - `[x]` concluído para o estágio atual, com evidência local ou confirmação do
@@ -53,10 +43,10 @@ indicado, no mesmo SHA/build quando a etapa exigir integração.
 | Área | Estado atual | Evidência/limite |
 | --- | --- | --- |
 | Código e contratos críticos | `[x]` local | Governança, secret scans, guards de rotas, regras Firebase estáticas, observabilidade estática, `git diff --check` e contratos de pagamento/lifecycle passaram. |
-| Backend unitário | `[x]` | 273 suítes / 2.310 testes na execução completa de 12/09; os testes focados de Woovi (3 suítes / 50 testes) e KYC (14 suítes / 364 testes) foram repetidos em 15/09. |
+| Backend unitário | `[x]` | 273 suítes / 2.310 testes na execução completa de 12/09; os testes focados do dashboard também passaram. |
 | Backend integração | `[x]` | 6 suítes / 43 testes em `/tmp/leaf-go-live-backend-integration.log`; servidor/handlers locais, não runtime publicado. |
 | Backend arquitetura | `[x]` | 9 suítes / 171 testes em `/tmp/leaf-go-live-backend-architecture.log`; contrato local, não failover real. |
-| Mobile unitário | `[x]` | 157 suítes / 1.301 testes na execução completa de 15/09; a execução focada corrente também passou (4 suítes / 60 testes). |
+| Mobile unitário | `[x]` | 157 suítes / 1.299 testes em `/tmp/leaf-go-live-mobile-unit.log`. |
 | Dashboard | `[x]` local | QA agregado (contratos, lint, build e smoke) passou novamente após o patch do Next em `/tmp/leaf-go-live-dashboard-next1634.log`; smoke completo isolado também está em `/tmp/leaf-go-live-dashboard-smoke-escalated.log`. |
 | Geofence | `[x]` | 11 pontos / 5 trajetos locais; staging/região prontos conforme confirmação do responsável; a execução em device faz parte do E3. |
 | Lifecycle/CPF | `[x]` local | Exclusão em estágios, recuperação, índice CPF, revisão e testes unitários documentados em `ACCOUNT_LIFECYCLE_RUNBOOK.md` e `CPF_DELETION_POLICY.md`. |
@@ -67,7 +57,7 @@ indicado, no mesmo SHA/build quando a etapa exigir integração.
 | Device/automação | `[x]` | Staging/builds e automação confirmados pelo responsável; a instalação e coleta bilateral são o próprio E3. |
 | Evidência de corrida real | `[x]` | E3 bilateral PASS no mesmo `rideId`; evidências em `E3_RUN_20260912.md` e `e3-run-20260912/`. A coleta foi em dois simuladores iOS; o device físico permanece pendente de desbloqueio. |
 | Lojas e publicação | `[x]` | Lojas, legal, Data Safety, App Privacy, background location, account deletion, review notes e sign-offs confirmados pelo responsável. |
-| Worktree/RC | `[~]` | Worktree continua sujo por alterações anteriores preservadas; a consolidação do manifesto é pós-E3 e não bloqueia o staging já preparado. |
+| Worktree/RC | `[~]` | Worktree sujo (138 entradas no inventário desta fotografia); a consolidação do manifesto é pós-E3 e não bloqueia o staging já preparado. |
 
 ## Correção de estágio
 
@@ -162,11 +152,6 @@ sem bloquear a execução do E3 enquanto o risco estiver aceito pelo responsáve
 
 ## TODO 0 — fechar a versão candidata
 
-- [x] Gerar e validar o build iOS local Release 1.0.4 (35), instalar e lançar
-  nos dois simuladores; evidência e hashes em
-  [LOCAL_BUILD_EVIDENCE_20260915.json](LOCAL_BUILD_EVIDENCE_20260915.json).
-- [x] Revalidar o dashboard local com `qa:backoffice`: contratos de suporte,
-  KYC e RBAC, lint, build das 28 páginas e smoke das rotas protegidas.
 - [~] Inventário das 138 entradas gerado em
   [RC_CHANGE_INVENTORY_20260909.md](RC_CHANGE_INVENTORY_20260909.md), agrupado por
   domínio. Falta a revisão humana caminho a caminho e a limpeza controlada; não
@@ -270,11 +255,8 @@ sem bloquear a execução do E3 enquanto o risco estiver aceito pelo responsáve
   ativo, liveness, face compare, revisão manual, aprovação e bloqueio de online
   quando qualquer evidência estiver ausente. Nenhuma verificação durante corrida
   ativa fora do fluxo de incidente aprovado.
-- [ ] Ativar o OTP por WhatsApp em uma rodada futura, depois do piloto assistido:
-  o template Meta, os segredos do gateway e o smoke com número autorizado ainda
-  não foram concluídos. O artefato do piloto mantém `enableWhatsAppOtp=false` e
-  usa Firebase Phone Auth/SMS como transporte real, com Firebase Auth como
-  autoridade da sessão.
+- [x] Deixar OTP Firebase real configurado para os builds de staging/release. Manter OTP QA,
+  review account, `APP_REVIEW` e bypasses desligados nos artefatos de produção.
 
 ## TODO 3 — mobile e E3 bilateral
 
@@ -286,8 +268,7 @@ sem bloquear a execução do E3 enquanto o risco estiver aceito pelo responsáve
   versão, build number, bundle id e hash.
 - [x] Preparar dois papéis autenticados e isolados: um passageiro e um motorista.
   O motorista deve estar aprovado, online, dispatch-eligible e dentro da
-  geofence. O passageiro conclui a sessão pelo transporte OTP ativo no artefato
-  (Firebase Phone Auth/SMS no piloto; WhatsApp permanece em backlog).
+  geofence. O passageiro deve passar Firebase Phone Auth real.
 - [x] Fazer preflight de localização: `gps`, `network` e `fused` coerentes;
   pickup e destino dentro da região aprovada; nenhum override artificial não
   documentado. Se o preflight falhar, parar antes de Pix.

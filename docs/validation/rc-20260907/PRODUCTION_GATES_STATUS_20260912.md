@@ -1,11 +1,5 @@
 # Status dos gates de produção — 12/09/2026
 
-> **Snapshot corrente (15/09/2026):** consulte
-> [`REMAINING_GATES_CLOSURE_20260915.md`](REMAINING_GATES_CLOSURE_20260915.md)
-> para o fechamento do seletor Maestro, recovery de timeout, health atual e a
-> separação entre contratos fechados e evidências que ainda exigem provider ou
-> device real.
-
 ## Objetivo
 
 Registrar o que foi fechado após o E3 bilateral e separar os itens que ainda
@@ -17,10 +11,9 @@ controlado e a abertura ampla são decisões diferentes.
 | Gate | Estado | Evidência/ação restante |
 | --- | --- | --- |
 | E3 bilateral | **PASS** | Mesmo `rideId`, dois papéis iOS, Pix sandbox, lifecycle, movimento, conclusão, settlement e avaliações. |
-| Build local pós-ajustes | **PASS** | Release iOS simulator 1.0.4 (35) compilado, validado, instalado e lançado nos dois simuladores; hashes em [`LOCAL_BUILD_EVIDENCE_20260915.json`](LOCAL_BUILD_EVIDENCE_20260915.json). |
 | Reconciliação financeira | **PASS** | 14/14 checks; cotação, charge, holding, distribuição, ledger e recibo balanceados. |
 | Geofence | **PASS** | Pickup e destino aprovados pela região operacional. |
-| Pilot controlled | **PRONTO PARA DECISÃO** | `LEAF_PILOT_CONTROLLED=true`, coortes/região configuradas no runtime remoto, E3 bilateral PASS e 0 bloqueios técnicos locais; decisão formal deve aceitar a evidência sandbox. |
+| Pilot controlled | **CONFIGURADO** | `LEAF_PILOT_CONTROLLED=true`, coortes de passageiro/motorista e região configuradas no runtime remoto. |
 | KYC estrito | **CONFIGURADO / evidência operacional pendente** | Flags AWS, admission, cost guard e provedor aparecem configurados no `.env` remoto; não houve fluxo KYC real nesta E3. |
 | CPF review HMAC | **PASS — provisionado** | Chave dedicada gerada diretamente no host, registrada somente por fingerprint operacional e carregada nos três gateways; valor nunca foi escrito no Git ou na resposta. |
 | Dashboard contextualizado — código | **PASS** | Serviço e rotas locais selecionam coleções pelo `financialContext`; 76 testes focados passaram. |

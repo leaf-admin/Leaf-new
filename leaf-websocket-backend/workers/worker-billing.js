@@ -17,6 +17,13 @@ const { isMultiLegBillingEnabled } = require('../utils/ride-lifecycle-feature-fl
 const { validateAuthoritativeFinancialSnapshot } = require('../services/ride-financial-contract');
 const { resolveFinancialContext } = require('../services/financial-runtime-context');
 const { buildWorkerConsumerName } = require('./worker-consumer-identity');
+const redisPool = require('../utils/redis-pool');
+const {
+    MAX_AUTOMATIC_ATTEMPTS,
+    clearPendingCancellationCredit,
+    listDuePendingCancellationCredits,
+    registerPendingAttempt
+} = require('../services/cancellation-credit-pending-service');
 
 const driverApprovalService = typeof DriverApprovalService === 'function'
     ? new DriverApprovalService()
@@ -363,6 +370,20 @@ workerManager.registerListener(EVENT_TYPES.RIDE_COMPLETED, async (event) => {
         throw new Error(`Falha na distribuição de pagamento Woovi: ${distributionResult.error}`);
     }
 
+    if (distributionResult.passengerRefund?.manualReviewRequired === true) {
+        // Motorista creditado, mas o estorno parcial do passageiro não foi feito e não pode
+        // ser repetido automaticamente: fica registrado no pagamento da corrida
+        // (passengerRefundPending) e na reconciliação financeira para o suporte resolver.
+        logStructured('error', 'Estorno parcial do passageiro pendente de revisão manual após liquidação', {
+            bookingId,
+            driverId,
+            refundAmountCents: distributionResult.passengerRefund.refundAmountCents || 0,
+            code: distributionResult.passengerRefund.code || null,
+            error: distributionResult.passengerRefund.error || null,
+            providerDelivery: distributionResult.passengerRefund.providerDelivery || null
+        });
+    }
+
     logStructured('info', 'Processamento contábil concluído com sucesso', {
         bookingId,
         driverId,
@@ -376,20 +397,54 @@ workerManager.registerListener(EVENT_TYPES.RIDE_COMPLETED, async (event) => {
 });
 
 // ✅ CAOS SCENARIO: Processamento de Payout do Motorista em Cancelamentos
-workerManager.registerListener(EVENT_TYPES.RIDE_CANCELED, async (event) => {
-    const { bookingId, driverId, cancellationFee } = event.data;
-    const eventId = event.eventId || `cancel_${bookingId}`;
+async function clearCancellationCreditPending(bookingId) {
+    try {
+        await redisPool.ensureConnection();
+        await clearPendingCancellationCredit(redisPool.getConnection(), bookingId);
+    } catch (error) {
+        logStructured('warn', 'Falha ao limpar pendência de crédito de cancelamento', {
+            bookingId,
+            error: error.message
+        });
+    }
+}
+
+/**
+ * Credita ao motorista a taxa de cancelamento/no-show. Chamado pelo evento ride.canceled e
+ * pela varredura de pendências; a chave de idempotência garante um único crédito por corrida.
+ */
+async function processCancellationCredit(rideCanceled = {}, { source = 'event' } = {}) {
+    const { bookingId, driverId } = rideCanceled;
+    const cancellationFee = Number(rideCanceled.cancellationFee) || 0;
+    const eventId = rideCanceled.eventId || `cancel_${bookingId}`;
 
     // Apenas se houver multa e um motorista associado para receber
     if (!cancellationFee || cancellationFee <= 0 || !driverId) {
         return { success: true, reason: 'Sem multa ou motorista para processar' };
     }
 
+    const paymentService = new PaymentService();
+
+    // Taxa que não cobre o custo do provedor não gera repasse: não é falha a repetir.
+    const minimumDistributableFee = Number(paymentService.WOOVI_FEE_MINIMUM) || 0;
+    if (cancellationFee <= minimumDistributableFee) {
+        logStructured('warn', 'Taxa de cancelamento sem valor a repassar ao motorista', {
+            bookingId,
+            driverId,
+            cancellationFee,
+            minimumDistributableFee,
+            source
+        });
+        await clearCancellationCreditPending(bookingId);
+        return { success: true, skipped: true, reason: 'Taxa sem valor a repassar' };
+    }
+
     logStructured('info', 'Iniciando processamento contábil de multa (Cancelamento/No-Show)', {
         bookingId,
         driverId,
         cancellationFee,
-        eventId
+        eventId,
+        source
     });
 
     const idempotencyKey = idempotencyService.generateKey(
@@ -402,20 +457,29 @@ workerManager.registerListener(EVENT_TYPES.RIDE_CANCELED, async (event) => {
     if (!idempotencyCheck.isNew) {
         logStructured('warn', 'Idempotency detectado: Esta multa já teve processamento financeiro no worker', {
             bookingId,
-            driverId
+            driverId,
+            source
         });
-        return { success: true, reason: 'Duplicate Processing Avoided', data: idempotencyCheck.cachedResult };
+        // Só há resultado guardado quando o crédito terminou; sem ele outro processamento
+        // ainda está em andamento e a pendência continua valendo.
+        if (idempotencyCheck.cachedResult) {
+            await clearCancellationCreditPending(bookingId);
+        }
+        return {
+            success: true,
+            reason: 'Duplicate Processing Avoided',
+            inFlight: !idempotencyCheck.cachedResult,
+            data: idempotencyCheck.cachedResult
+        };
     }
-
-    const paymentService = new PaymentService();
 
     // Processar repasse da taxa de cancelamento excluindo o pedágio fixo (Woovi fee)
     const distributionResult = await paymentService.processCancellationDistribution({
         rideId: bookingId,
         driverId: driverId,
         cancellationFee: cancellationFee,
-        financialContext: event.data?.financialContext || null,
-        providerEnvironment: event.data?.providerEnvironment || event.data?.paymentProviderEnvironment || null
+        financialContext: rideCanceled.financialContext || null,
+        providerEnvironment: rideCanceled.providerEnvironment || rideCanceled.paymentProviderEnvironment || null
     });
 
     if (!distributionResult.success) {
@@ -427,14 +491,67 @@ workerManager.registerListener(EVENT_TYPES.RIDE_CANCELED, async (event) => {
     logStructured('info', 'Processamento de multa contábil concluído com sucesso', {
         bookingId,
         driverId,
-        netAmount: distributionResult.netAmount
+        netAmount: distributionResult.netAmount,
+        source
     });
 
     // Salvar cache atrelado a idempotência
     await idempotencyService.cacheResult(idempotencyKey, distributionResult, 604800);
+    await clearCancellationCreditPending(bookingId);
 
     return distributionResult;
+}
+
+workerManager.registerListener(EVENT_TYPES.RIDE_CANCELED, async (event) => {
+    // O evento chega como { data: { eventId, eventType, data: {...} } } (toJSON do evento canônico);
+    // ler só event.data deixava a multa indefinida e o motorista nunca era creditado.
+    return processCancellationCredit(unwrapCanonicalEventPayload(event), { source: 'event' });
 });
+
+/**
+ * Rede de segurança: credita taxas cuja pendência ficou para trás (evento perdido, worker
+ * parado ou tentativas do stream esgotadas).
+ */
+async function sweepPendingCancellationCredits({ now = Date.now() } = {}) {
+    await redisPool.ensureConnection();
+    const redis = redisPool.getConnection();
+    const dueEntries = await listDuePendingCancellationCredits(redis, { now });
+    const summary = { due: dueEntries.length, credited: 0, failed: 0, manualReview: 0 };
+
+    for (const entry of dueEntries) {
+        if ((Number(entry.attempts) || 0) >= MAX_AUTOMATIC_ATTEMPTS) {
+            summary.manualReview += 1;
+            continue;
+        }
+        try {
+            const result = await processCancellationCredit(entry, { source: 'pending_sweep' });
+            if (result?.inFlight) {
+                continue;
+            }
+            summary.credited += 1;
+        } catch (error) {
+            summary.failed += 1;
+            const updated = await registerPendingAttempt(redis, entry, error.message).catch(() => null);
+            logStructured('error', 'Crédito de taxa de cancelamento pendente falhou na varredura', {
+                bookingId: entry.bookingId,
+                driverId: entry.driverId,
+                cancellationFee: entry.cancellationFee,
+                attempts: updated?.attempts || null,
+                manualReviewRequired: (updated?.attempts || 0) >= MAX_AUTOMATIC_ATTEMPTS,
+                error: error.message
+            });
+        }
+    }
+
+    if (summary.due > 0) {
+        logStructured(
+            summary.manualReview > 0 || summary.failed > 0 ? 'error' : 'info',
+            'Varredura de créditos de cancelamento pendentes',
+            summary
+        );
+    }
+    return summary;
+}
 
 if (require.main === module) {
     // Tratamento de sinais para shutdown graceful
@@ -464,6 +581,16 @@ if (require.main === module) {
         process.exit(1);
     });
 
+    // Varredura das taxas de cancelamento cujo crédito ficou pendente
+    setInterval(() => {
+        sweepPendingCancellationCredits().catch(error => {
+            logStructured('error', 'Erro na varredura de créditos de cancelamento pendentes', {
+                service: 'billing-worker',
+                error: error.message
+            });
+        });
+    }, 60000);
+
     // Log de estatísticas a cada 60 segundos
     setInterval(() => {
         const stats = workerManager.getStats();
@@ -478,5 +605,7 @@ module.exports = {
     workerManager,
     normalizeMoneyToCents,
     buildRideBillingIdempotencyScope,
-    buildCancellationBillingIdempotencyScope
+    buildCancellationBillingIdempotencyScope,
+    processCancellationCredit,
+    sweepPendingCancellationCredits
 };

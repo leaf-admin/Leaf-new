@@ -26,7 +26,6 @@ const {
 } = require('../../utils/dispatch-config');
 const { resolveLaunchProfile } = require('../../utils/pilot-launch-flags');
 const { parseAllowlist } = require('../../services/pilot-access-control-service');
-const { getWhatsAppOtpConfig } = require('../../services/whatsapp-otp-service');
 const DockerDetector = require('../../utils/docker-detector');
 
 const REQUIRED_BASE = [
@@ -764,7 +763,6 @@ function main() {
     'REQUIRE_SOCKETIO_REDIS_ADAPTER',
     nodeEnv === 'production' && runtimeRole === 'gateway'
   );
-  const whatsappOtpConfig = getWhatsAppOtpConfig();
   const authOtpDiagnostics = {
     customOtpRouteMounted: true,
     productionNonBypassMode:
@@ -773,22 +771,7 @@ function main() {
         : 'redis_simulated_delivery',
     debugOtp: booleanDiagnostic('DEBUG_OTP', false),
     testBypass: booleanDiagnostic('AUTH_TEST_OTP_BYPASS_ENABLED', false),
-    reviewBypass: booleanDiagnostic('AUTH_REVIEW_OTP_BYPASS_ENABLED', false),
-    provider: {
-      name: whatsappOtpConfig.provider,
-      enabled: whatsappOtpConfig.enabled,
-      configured: whatsappOtpConfig.configured,
-      missing: whatsappOtpConfig.missing,
-      graphVersion: whatsappOtpConfig.graphVersion,
-      templateLanguage: whatsappOtpConfig.templateLanguage,
-      accessToken: presence(process.env.WHATSAPP_META_ACCESS_TOKEN),
-      phoneNumberId: presence(process.env.WHATSAPP_META_PHONE_NUMBER_ID),
-      templateName: presence(process.env.WHATSAPP_OTP_TEMPLATE_NAME),
-      hmacKey: {
-        configured: Boolean(String(process.env.AUTH_OTP_HMAC_KEY || '').trim()),
-        valid: Buffer.byteLength(String(process.env.AUTH_OTP_HMAC_KEY || '').trim()) >= 32
-      }
-    }
+    reviewBypass: booleanDiagnostic('AUTH_REVIEW_OTP_BYPASS_ENABLED', false)
   };
 
   if (adaptiveKycCadence.value && !onlineKycGate.value) {
@@ -1142,20 +1125,6 @@ function main() {
     if (authOtpDiagnostics.debugOtp.value) {
       blockers.push('DEBUG_OTP=true bloqueado em produção');
     }
-    if (runtimeRole === 'gateway') {
-      if (whatsappOtpConfig.provider !== 'whatsapp') {
-        blockers.push('AUTH_OTP_PROVIDER=whatsapp obrigatório em produção para o fluxo OTP');
-      } else if (!whatsappOtpConfig.configured) {
-        blockers.push(
-          `WhatsApp OTP incompleto em produção: configure ${whatsappOtpConfig.missing.join(', ') || 'as variáveis do provedor'}`
-        );
-      }
-
-      const authOtpHmacKey = String(process.env.AUTH_OTP_HMAC_KEY || '').trim();
-      if (Buffer.byteLength(authOtpHmacKey) < 32) {
-        blockers.push('OTP em produção exige AUTH_OTP_HMAC_KEY dedicada com pelo menos 32 bytes');
-      }
-    }
     if (boolEnv('AUTH_TEST_OTP_BYPASS_ENABLED')) {
       blockers.push('AUTH_TEST_OTP_BYPASS_ENABLED=true bloqueado em produção');
     }
@@ -1227,10 +1196,7 @@ function main() {
         process.env.WOOVI_WEBHOOK_AUTH_TOKEN ||
         process.env.OPENPIX_WEBHOOK_AUTH_TOKEN
       ),
-      LEAF_PIX_KEY: presence(process.env.LEAF_PIX_KEY),
-      AUTH_OTP_HMAC_KEY: presence(process.env.AUTH_OTP_HMAC_KEY),
-      WHATSAPP_META_ACCESS_TOKEN: presence(process.env.WHATSAPP_META_ACCESS_TOKEN),
-      WHATSAPP_META_PHONE_NUMBER_ID: presence(process.env.WHATSAPP_META_PHONE_NUMBER_ID)
+      LEAF_PIX_KEY: presence(process.env.LEAF_PIX_KEY)
     },
     diagnostics: {
       biometricReadiness,

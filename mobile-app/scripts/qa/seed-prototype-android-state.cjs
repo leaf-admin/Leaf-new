@@ -6,7 +6,7 @@ const https = require('https');
 const os = require('os');
 const path = require('path');
 const { execFileSync, spawnSync } = require('child_process');
-const { getIdTokenForUid } = require(path.join(
+const FIREBASE_ID_TOKEN_HELPER_PATH = path.join(
   __dirname,
   '..',
   '..',
@@ -17,7 +17,12 @@ const { getIdTokenForUid } = require(path.join(
   'backend',
   '__helpers__',
   'firebase-id-token.js',
-));
+);
+
+async function getIdTokenForUid(uid) {
+  const tokenHelper = require(FIREBASE_ID_TOKEN_HELPER_PATH);
+  return tokenHelper.getIdTokenForUid(uid);
+}
 
 const APP_ID = 'br.com.leaf.ride';
 const ROOT_DIR = path.resolve(__dirname, '../../..');

@@ -122,6 +122,7 @@ describe('driver-notification-dispatcher timeout cleanup', () => {
     redis = {
       get: jest.fn().mockResolvedValue(null),
       del: jest.fn().mockResolvedValue(1),
+      set: jest.fn().mockResolvedValue('OK'),
       hset: jest.fn().mockResolvedValue(1),
       hget: jest.fn().mockResolvedValue('SEARCHING'),
       hgetall: jest.fn().mockResolvedValue({}),
@@ -181,6 +182,19 @@ describe('driver-notification-dispatcher timeout cleanup', () => {
     expect(redis.hset).toHaveBeenCalledWith('booking:booking_123', expect.objectContaining({
       timeoutDriverId: 'driver_1'
     }));
+  });
+
+  it('applies the re-offer cooldown when the driver lets the offer time out', async () => {
+    dispatcher.scheduleDriverTimeout('driver_1', 'booking_123', 1);
+
+    await jest.advanceTimersByTimeAsync(1000);
+
+    expect(redis.set).toHaveBeenCalledWith(
+      'ride_reoffer_cooldown:booking_123:driver_1',
+      'timeout',
+      'EX',
+      30
+    );
   });
 
   it('restores the booking to the previous search state when timeout expires during awaiting response', async () => {

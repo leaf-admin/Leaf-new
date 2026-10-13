@@ -82,6 +82,25 @@ describe('ride-financial-contract', () => {
     });
   });
 
+  it('calculates Woovi intermediation on the full passenger transaction, including toll', () => {
+    const contract = buildRideFinancialContract({
+      passengerPaidCents: 10000,
+      tollFeeCents: 2000
+    });
+
+    expect(contract).toMatchObject({
+      passengerPaidCents: 10000,
+      grossFareCents: 8000,
+      tollFeeCents: 2000,
+      leafOperationalFeeCents: 240,
+      paymentIntermediationFeeCents: 80,
+      driverNetAmountCents: 9680,
+      retainedTotalCents: 320,
+      allocatedTotalCents: 10000,
+      balanced: true
+    });
+  });
+
   it('clamps fees instead of creating an unbalanced settlement for anomalous tiny fares', () => {
     const contract = buildRideFinancialContract({
       passengerPaidCents: 80,

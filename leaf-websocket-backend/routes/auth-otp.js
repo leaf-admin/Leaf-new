@@ -1,13 +1,6 @@
 const express = require('express');
 const admin = require('firebase-admin');
-const {
-    deleteChallenge,
-    consumeChallenge,
-    generateOtp,
-    generateVerificationId,
-    storeChallenge
-} = require('../services/otp-challenge-service');
-const whatsappOtpService = require('../services/whatsapp-otp-service');
+const redisPool = require('../utils/redis-pool');
 const { logger } = require('../utils/logger');
 const firebaseConfig = require('../firebase-config');
 const { getBypassOtpCode, isOtpBypassPhone, isReviewOtpBypassEnabled } = require('../utils/test-auth-bypass');
@@ -23,31 +16,8 @@ function respondOtpProviderNotConfigured(res) {
     return res.status(503).json({
         success: false,
         code: 'OTP_PROVIDER_NOT_CONFIGURED',
-        error: 'OTP provider not configured'
+        error: 'OTP provider not configured for production'
     });
-}
-
-function respondOtpDeliveryFailed(res) {
-    return res.status(502).json({
-        success: false,
-        code: 'OTP_DELIVERY_FAILED',
-        error: 'Não foi possível enviar o código agora. Tente novamente.'
-    });
-}
-
-function respondOtpSecurityNotConfigured(res) {
-    return res.status(503).json({
-        success: false,
-        code: 'OTP_SECURITY_NOT_CONFIGURED',
-        error: 'Não foi possível processar o código agora.'
-    });
-}
-
-function isSimulationAllowed() {
-    if (isProductionRuntime()) return false;
-    const raw = process.env.AUTH_OTP_SIMULATION_ENABLED;
-    if (raw == null || raw === '') return true;
-    return ['true', '1', 'yes', 'on', 'sim'].includes(String(raw).trim().toLowerCase());
 }
 
 function normalizePhoneDigits(phone) {
@@ -162,26 +132,15 @@ router.post('/request-otp', async (req, res) => {
         }
 
         const otpBypassEnabled = isOtpBypassPhone(normalizedPhone);
-        const providerConfig = whatsappOtpService.getWhatsAppOtpConfig();
-        const providerUnavailable =
-            (providerConfig.enabled && !providerConfig.configured) ||
-            (isProductionRuntime() && !providerConfig.enabled);
-        if (!otpBypassEnabled && providerUnavailable) {
-            logger.error('[CUSTOM OTP] OTP request blocked: WhatsApp provider is not configured', {
-                service: 'auth-otp-routes',
-                provider: providerConfig.provider,
-                missing: providerConfig.missing
-            });
-            return respondOtpProviderNotConfigured(res);
-        }
-        if (!otpBypassEnabled && !providerConfig.enabled && !isSimulationAllowed()) {
+        if (isProductionRuntime() && !otpBypassEnabled) {
+            logger.error('[CUSTOM OTP] Production request blocked: no real OTP delivery provider is configured');
             return respondOtpProviderNotConfigured(res);
         }
 
         const otp = otpBypassEnabled
             ? getBypassOtpCode(normalizedPhone)
-            : generateOtp();
-        const verificationId = generateVerificationId('vid');
+            : Math.floor(100000 + Math.random() * 900000).toString();
+        const verificationId = `vid_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
         let customToken = null;
         const otpRedisKeys = buildOtpRedisKeys({
             verificationId,
@@ -190,21 +149,15 @@ router.post('/request-otp', async (req, res) => {
         });
 
         if (!otpBypassEnabled) {
-            // Save only a keyed HMAC digest; the plaintext OTP never enters Redis.
+            // Save to Redis (expires in 5 minutes)
             try {
-                await storeChallenge({
-                    namespace: 'login',
-                    verificationId,
-                    phone: normalizedPhone,
-                    otp,
-                    keys: otpRedisKeys,
-                    ttlSeconds: OTP_TTL_SECONDS
-                });
+                const redisClient = redisPool.getConnection();
+                await Promise.all(
+                    otpRedisKeys.map((key) => redisClient.set(key, otp, 'EX', OTP_TTL_SECONDS))
+                );
             } catch (redisError) {
-                logger.error('Redis error storing OTP challenge', {
-                    service: 'auth-otp-routes',
-                    error: redisError?.message || String(redisError)
-                });
+                logger.error('Redis error storing OTP, falling back to mock response', redisError);
+                // In a real scenario we'd want memory fallback, but for now we throw
                 throw redisError;
             }
         }
@@ -228,51 +181,24 @@ router.post('/request-otp', async (req, res) => {
 
             await ensureRealtimeProfileForOtpUser({ uid, normalizedPhone });
             customToken = await admin.auth().createCustomToken(uid);
-        } else {
-            try {
-                if (providerConfig.enabled) {
-                    await whatsappOtpService.sendOtp({
-                        phoneNumber: normalizedPhone,
-                        otp,
-                        verificationId
-                    });
-                }
-            } catch (deliveryError) {
-                await deleteChallenge(otpRedisKeys).catch(() => undefined);
-                if (deliveryError?.code === 'WHATSAPP_OTP_NOT_CONFIGURED') {
-                    return respondOtpProviderNotConfigured(res);
-                }
-                logger.error('[CUSTOM OTP] WhatsApp delivery failed', {
-                    service: 'auth-otp-routes',
-                    verificationId,
-                    error: deliveryError?.message || String(deliveryError)
-                });
-                return respondOtpDeliveryFailed(res);
-            }
+        } else if (process.env.NODE_ENV !== 'production' || process.env.DEBUG_OTP === 'true') {
+            logger.info(`[CUSTOM OTP] OTP generated for ${normalizedPhone}`); // Do not print OTP value in production logs.
         }
+
+        // TODO: Integrate WhatsApp API (e.g. Meta Cloud API, Z-API) or Nodemailer here
+        // Example: await sendWhatsAppOTP(phone, otp);
 
         res.json({
             success: true,
             verificationId,
             otpBypassEnabled,
-            channel: otpBypassEnabled
-                ? 'test_bypass'
-                : providerConfig.enabled
-                    ? 'whatsapp'
-                    : 'simulation',
-            expiresIn: OTP_TTL_SECONDS,
             ...(customToken ? { customToken } : {}),
             message: otpBypassEnabled
                 ? 'OTP bypass enabled for test account'
-                : providerConfig.enabled
-                    ? 'Código enviado via WhatsApp'
-                    : 'OTP enviado (simulação local)'
+                : 'OTP sent successfully (Simulated)'
         });
     } catch (error) {
         logger.error('Error requesting OTP:', error);
-        if (error?.code === 'AUTH_OTP_HMAC_KEY_NOT_CONFIGURED') {
-            return respondOtpSecurityNotConfigured(res);
-        }
         res.status(500).json({ error: 'Internal server error' });
     }
 });
@@ -302,17 +228,8 @@ router.post('/verify-otp', async (req, res) => {
             return res.status(400).json({ error: 'Missing parameters' });
         }
 
-        const providerConfig = whatsappOtpService.getWhatsAppOtpConfig();
-        const providerUnavailable =
-            (providerConfig.enabled && !providerConfig.configured) ||
-            (isProductionRuntime() && !providerConfig.enabled) ||
-            (!providerConfig.enabled && !isSimulationAllowed());
-        if (!bypassAllowedForRequest && providerUnavailable) {
-            logger.error('[CUSTOM OTP] OTP verification blocked: WhatsApp provider is not configured', {
-                service: 'auth-otp-routes',
-                provider: providerConfig.provider,
-                missing: providerConfig.missing
-            });
+        if (isProductionRuntime() && !bypassAllowedForRequest) {
+            logger.error('[CUSTOM OTP] Production verification blocked: no real OTP delivery provider is configured');
             return respondOtpProviderNotConfigured(res);
         }
 
@@ -323,21 +240,29 @@ router.post('/verify-otp', async (req, res) => {
         } else if (bypassAttempt) {
             return res.status(400).json({ error: 'Invalid or expired OTP' });
         } else {
+            const redisClient = redisPool.getConnection();
             const otpRedisKeys = buildOtpRedisKeys({
                 verificationId,
                 originalPhone: rawPhone,
                 normalizedPhone
             });
-            const hasValidOtp = await consumeChallenge({
-                namespace: 'login',
-                verificationId,
-                phone: normalizedPhone,
-                otp,
-                keys: otpRedisKeys
-            });
+            let hasValidOtp = false;
+
+            for (const key of otpRedisKeys) {
+                const storedOtp = await redisClient.get(key);
+                if (storedOtp && String(storedOtp) === String(otp)) {
+                    hasValidOtp = true;
+                    break;
+                }
+            }
 
             if (!hasValidOtp) {
                 return res.status(400).json({ error: 'Invalid or expired OTP' });
+            }
+
+            // OTP is valid, mark as used
+            if (otpRedisKeys.length > 0) {
+                await redisClient.del(...otpRedisKeys);
             }
         }
 
@@ -362,9 +287,6 @@ router.post('/verify-otp', async (req, res) => {
         res.json({ success: true, customToken });
     } catch (error) {
         logger.error('Error verifying OTP:', error);
-        if (error?.code === 'AUTH_OTP_HMAC_KEY_NOT_CONFIGURED') {
-            return respondOtpSecurityNotConfigured(res);
-        }
         res.status(500).json({ error: 'Internal server error' });
     }
 });

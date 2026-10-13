@@ -1733,9 +1733,7 @@ router.post('/payment/withdrawals/:withdrawalId/process', authenticatePaymentAct
     }
 
     const { withdrawalId } = req.params;
-    // O operador autenticado é a única fonte confiável para a trilha de auditoria.
-    // Nunca aceitar actorId arbitrário enviado pelo cliente do dashboard.
-    const actorId = req.paymentActor?.id || req.paymentActor?.uid || 'system';
+    const actorId = req.body?.actorId || 'system';
 
     const result = await paymentService.processDriverWithdrawal(withdrawalId, actorId);
     if (result.success) {

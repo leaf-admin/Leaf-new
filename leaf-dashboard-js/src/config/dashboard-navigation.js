@@ -7,7 +7,7 @@ export const dashboardNavigationGroups = [
     items: [
       { href: "/dashboard", label: "Visão geral" },
       { href: "/support", label: "Suporte" },
-      { href: "/drivers/review-queue", label: "Aprovar cadastros", allowedRoles: ["admin", "super-admin", "manager"] },
+      { href: "/drivers/review-queue", label: "Cadastro motorista", allowedRoles: ["admin", "super-admin", "manager"] },
     ],
   },
   {
@@ -17,9 +17,9 @@ export const dashboardNavigationGroups = [
     href: "/drivers",
     items: [
       { href: "/drivers", label: "Motoristas", allowedRoles: ["admin", "super-admin", "manager"] },
-      { href: "/users", label: "Passageiros" },
-      { href: "/maps", label: "Corridas ao vivo", allowedRoles: ["admin", "super-admin", "manager", "development"] },
-      { href: "/waitlist", label: "Fila de ativação", allowedRoles: ["admin", "super-admin", "manager"] },
+      { href: "/users", label: "Usuários" },
+      { href: "/maps", label: "Mapa operacional", allowedRoles: ["admin", "super-admin", "manager", "development"] },
+      { href: "/waitlist", label: "Waitlist", allowedRoles: ["admin", "super-admin", "manager"] },
     ],
   },
   {
@@ -29,11 +29,9 @@ export const dashboardNavigationGroups = [
     href: "/subscriptions",
     items: [
       { href: "/subscriptions", label: "Assinaturas", allowedRoles: ["admin", "super-admin", "manager"] },
-      { href: "/withdrawals", label: "Saques", allowedRoles: ["admin", "super-admin", "manager"] },
-      { href: "/tolls", label: "Pedágios", allowedRoles: ["admin", "super-admin", "manager"] },
-      { href: "/financial-reconciliation", label: "Conferir pagamentos", allowedRoles: ["admin", "super-admin", "manager"] },
+      { href: "/financial-reconciliation", label: "Reconciliação", allowedRoles: ["admin", "super-admin", "manager"] },
       { href: "/reports", label: "Relatórios", allowedRoles: ["admin", "super-admin", "manager"] },
-      { href: "/payment-runtime", label: "Ambiente de cobrança", allowedRoles: ["admin", "super-admin", "manager"] },
+      { href: "/payment-runtime", label: "Perfil de pagamento", allowedRoles: ["admin", "super-admin", "manager"] },
       {
         href: "/financial-simulator",
         label: "Simulador",
@@ -63,15 +61,14 @@ export const dashboardNavigationGroups = [
   },
   {
     id: "system",
-    section: "Mais ferramentas",
+    section: "Sistema",
     label: "Saúde e auditoria",
     href: "/observability",
-    collapsible: true,
     items: [
-      { href: "/observability", label: "Saúde do sistema", allowedRoles: ["admin", "super-admin", "manager", "development"] },
-      { href: "/metrics", label: "Indicadores", allowedRoles: ["admin", "super-admin", "manager", "development"] },
+      { href: "/observability", label: "Observabilidade", allowedRoles: ["admin", "super-admin", "manager", "development"] },
+      { href: "/metrics", label: "Métricas", allowedRoles: ["admin", "super-admin", "manager", "development"] },
       { href: "/metrics/history", label: "Histórico", allowedRoles: ["admin", "super-admin", "manager", "development"] },
-      { href: "/metrics/marketplace", label: "Saúde do marketplace", allowedRoles: ["admin", "super-admin", "manager", "development"] },
+      { href: "/metrics/marketplace", label: "Marketplace", allowedRoles: ["admin", "super-admin", "manager", "development"] },
       { href: "/audit", label: "Auditoria", allowedRoles: ["admin", "super-admin", "manager", "development"] },
     ],
   },

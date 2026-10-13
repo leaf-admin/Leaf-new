@@ -1025,6 +1025,20 @@ describe('PaymentService financial rules', () => {
     });
   });
 
+  it('calculates Woovi on the full transaction when a high-value ride includes toll', () => {
+    const service = new PaymentService();
+    const calculation = service.calculateNetAmount(10000, 2000);
+
+    expect(calculation).toMatchObject({
+      totalAmount: 10000,
+      tollFee: 2000,
+      operationalFee: 240,
+      wooviFee: 80,
+      netAmount: 9680
+    });
+    expect(calculation.financialContract.balanced).toBe(true);
+  });
+
   it('prefers quote lock toll values when resolving Pix split tolls', () => {
     const service = new PaymentService();
 
@@ -1852,6 +1866,72 @@ describe('PaymentService financial rules', () => {
         totalAmount: 1506,
         netAmount: 1357
       })
+    });
+  });
+
+  it('refunds the unused part once and credits the settled net when a ride is settled below the prepaid amount', async () => {
+    const firestore = createInMemoryFirestore();
+    firebaseConfig.getFirestore.mockReturnValue(firestore);
+    await firestore.collection('ride_payments').doc('booking_driver_early_end').set({
+      rideId: 'booking_driver_early_end',
+      chargeId: 'charge_driver_early_end',
+      amount: 4000,
+      passengerId: 'customer_early_end',
+      status: 'PAID'
+    });
+    await firestore.collection('payment_holdings').doc('booking_driver_early_end').set({
+      rideId: 'booking_driver_early_end',
+      chargeId: 'charge_driver_early_end',
+      amount: 4000,
+      status: 'in_holding'
+    });
+    mockProcessRefund.mockReset();
+    mockProcessRefund.mockResolvedValue({ success: true, refundId: 'refund_driver_early_end' });
+    const service = new PaymentService();
+    // Mesmo evento que o CompleteTripCommand emite numa corrida liquidada pela
+    // metade: R$ 40,00 pagos, R$ 20,00 executados.
+    const settledRide = {
+      rideId: 'booking_driver_early_end',
+      driverId: 'driver_early_end',
+      totalAmount: 2000,
+      tollFee: 0,
+      financialSnapshot: {
+        authoritativeSnapshot: true,
+        financialSnapshotSource: 'backend_final',
+        passengerPaidCents: 2000,
+        tollFeeCents: 0,
+        operationalFeeCents: 99,
+        paymentIntermediationFeeCents: 50,
+        subscriptionRetainedFeeCents: 0,
+        driverNetAmountCents: 1851
+      }
+    };
+
+    const first = await service.processNetDistribution(settledRide);
+
+    expect(first).toMatchObject({ success: true, netAmount: 1851 });
+    expect(mockProcessRefund).toHaveBeenCalledTimes(1);
+    expect(mockProcessRefund.mock.calls[0][0]).toBe('charge_driver_early_end');
+    expect(mockProcessRefund.mock.calls[0][1]).toBe(2000);
+    expect(firestore.docs.get('ride_payments/booking_driver_early_end')).toMatchObject({
+      status: 'REFUNDED_PARTIAL',
+      refunded: true,
+      refundAmount: 2000,
+      refundId: 'refund_driver_early_end'
+    });
+    expect(firestore.docs.get('driver_balances/driver_early_end')).toMatchObject({
+      balance: 18.51,
+      totalEarnings: 18.51
+    });
+
+    // Reentrega do mesmo evento: nem novo estorno na Woovi, nem novo crédito.
+    const second = await service.processNetDistribution(settledRide);
+
+    expect(second.success).toBe(true);
+    expect(mockProcessRefund).toHaveBeenCalledTimes(1);
+    expect(firestore.docs.get('driver_balances/driver_early_end')).toMatchObject({
+      balance: 18.51,
+      totalEarnings: 18.51
     });
   });
 

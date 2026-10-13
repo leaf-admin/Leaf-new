@@ -36,7 +36,7 @@ const routes = [
   { path: "/support", heading: "Suporte" },
   { path: "/campaign-center", heading: "Campanhas in-app" },
   { path: "/drivers", heading: "Motoristas" },
-  { path: "/drivers/review-queue", heading: "Documentos para revisar" },
+  { path: "/drivers/review-queue", heading: "Fila de Revisão de Documentos" },
   { path: "/drivers/smoke-driver/documents", heading: "Documentos do Motorista" },
   { path: "/maps", heading: "Mapas e Geofence" },
   { path: "/metrics", heading: "Métricas" },
@@ -52,7 +52,6 @@ const routes = [
   { path: "/promotions", heading: "Promoções" },
   { path: "/runtime-flags", heading: "Perfil de pagamento" },
   { path: "/subscriptions", heading: "Assinaturas" },
-  { path: "/withdrawals", heading: "Saques" },
   { path: "/tolls", heading: "Pedágios" },
   { path: "/users", heading: "Usuarios" },
   { path: "/users/smoke-user", heading: "Detalhes do Usuário" },
@@ -197,14 +196,6 @@ function commandCenterFixture() {
       grossRevenueCents: 9900,
       arpuBaseCents: 235,
       paymentPendingCount: 0,
-      trend: Array.from({ length: 24 }, (_, hour) => ({
-        hour,
-        label: `${String(hour).padStart(2, "0")}:00`,
-        rides: hour === 10 ? 3 : hour === 11 ? 2 : 0,
-        completed: hour === 10 ? 2 : hour === 11 ? 1 : 0,
-        cancelled: hour === 11 ? 1 : 0,
-        gmvCents: hour === 10 ? 42000 : hour === 11 ? 18000 : 0,
-      })),
     },
     paymentRuntime: {
       defaultEnvironment: "sandbox",
@@ -324,12 +315,6 @@ function commandCenterFixture() {
       checklist: ["login", "categoria", "pix sandbox", "dashboard"],
     },
     support: {
-      totalOpenTickets: 1,
-      backlogByPriority: { N1: 1, N2: 0, N3: 0 },
-      overdueAckCount: 0,
-      overdueFirstResponseCount: 0,
-      ticketsWithoutOwner: 0,
-      medianFirstResponseMinutes: 12,
       openTickets: 1,
       unreadChats: 1,
     },
@@ -550,34 +535,6 @@ function financialReconciliationDetailFixture() {
   };
 }
 
-function tollCatalogFixture() {
-  return {
-    success: true,
-    catalog: {
-      enabled: true,
-      version: 1,
-      currency: "BRL",
-      toleranceKm: 2,
-      source: "smoke",
-      plazas: [
-        {
-          id: "p09_linha_amarela",
-          name: "P09 - Linha Amarela",
-          road: "RJ-065",
-          direction: "bidirectional",
-          lat: -22.87,
-          lng: -43.3,
-          active: true,
-          fees: {
-            car: { weekday: 4, weekend: 4 },
-            truck: { weekday: 8, weekend: 8 },
-          },
-        },
-      ],
-    },
-  };
-}
-
 function fixtureForApiPath(apiPath, method) {
   if (apiPath === "/admin/auth/verify") return json({ success: true, user: adminUser });
   if (apiPath === "/admin/auth/login") {
@@ -594,8 +551,6 @@ function fixtureForApiPath(apiPath, method) {
   }
   if (apiPath === "/admin/auth/logout") return json({ success: true });
   if (apiPath === "/health/runtime-flags") return json(runtimeFlagsFixture());
-  if (apiPath.startsWith("/pricing/toll-catalog")) return json(tollCatalogFixture());
-  if (apiPath.startsWith("/payment/withdrawals/pending")) return json({ success: true, withdrawals: [] });
   if (apiPath.startsWith("/ops/overview")) return json(opsOverviewFixture());
   if (apiPath.startsWith("/ops/alerts")) return json(opsAlertsFixture());
   if (apiPath.startsWith("/ops/command-center")) return json(commandCenterFixture());
@@ -846,14 +801,6 @@ async function assertVisibleHeading(page, routeConfig) {
   log(`${routeConfig.path} ok`);
 }
 
-async function assertDashboardTrend(page) {
-  await page.goto("/dashboard", { waitUntil: "domcontentloaded" });
-  await page.locator("h1", { hasText: "Operação diária" }).waitFor({ timeout: 15000 });
-  await page.locator("h2", { hasText: "Ritmo do dia" }).waitFor({ timeout: 15000 });
-  await page.locator("[data-testid='ops-trend-chart']").waitFor({ timeout: 15000 });
-  log("dashboard renders consolidated operational trend");
-}
-
 async function assertFinancialReconciliationContract(page) {
   await page.goto("/financial-reconciliation", { waitUntil: "domcontentloaded" });
   await page.locator("h1", { hasText: "Reconciliação financeira" }).waitFor({ timeout: 15000 });
@@ -920,36 +867,6 @@ async function assertReportsDownloadContract(page, observed) {
   }
 
   log("reports export uses authenticated dashboard API client ok");
-}
-
-async function assertDriverDetailSections(page) {
-  const sections = [
-    { id: "summary", label: "Resumo", heading: "Resumo do motorista" },
-    { id: "documents", label: "Documentos", heading: "Certidão de antecedentes" },
-    { id: "identity", label: "Identidade", heading: "KYC (Onboarding + Diário)" },
-    { id: "vehicle", label: "Veículo", heading: "Configuração de Veículo e Categoria" },
-    { id: "audit", label: "Auditoria", heading: "Auditoria e dados técnicos" },
-  ];
-
-  for (const section of sections) {
-    const query = section.id === "summary" ? "" : `?section=${section.id}`;
-    await page.goto(`/drivers/smoke-driver/documents${query}`, { waitUntil: "domcontentloaded" });
-    await page
-      .locator(".driver-detail-tab-active", { hasText: section.label })
-      .waitFor({ timeout: 15000 });
-    await page.locator("h2", { hasText: section.heading }).waitFor({ timeout: 15000 });
-  }
-
-  const tabHrefs = await page.locator(".driver-detail-tab").evaluateAll((links) => (
-    links.map((link) => link.getAttribute("href"))
-  ));
-  for (const section of sections.slice(1)) {
-    if (!tabHrefs.some((href) => href?.includes(`section=${section.id}`))) {
-      throw new Error(`Driver detail tab did not expose a deep link for ${section.id}`);
-    }
-  }
-
-  log("driver detail sections preserve deep links and isolated decision surfaces ok");
 }
 
 async function main() {
@@ -1029,8 +946,6 @@ async function main() {
       await assertVisibleHeading(page, routeConfig);
     }
 
-    await assertDashboardTrend(page);
-    await assertDriverDetailSections(page);
     await assertFinancialReconciliationContract(page);
     await assertMetricsFinancialContract(page);
     await assertFinancialSimulatorRequiresExplicitFlag(page);

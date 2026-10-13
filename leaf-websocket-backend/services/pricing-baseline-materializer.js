@@ -125,6 +125,8 @@ async function materializePricingBaselines({
           baselineSource,
           dynamicApplied: Number(engineResult.pricingPayload.dynamic_percentage || 0) > 0,
           minimumFareApplied: Boolean(engineResult.pricingPayload.minimum_fare_applied),
+          volumeDropAlert: Boolean(engineResult.pricingPayload.request_volume_monitoring?.alert),
+          volumeDropPercent: Number(engineResult.pricingPayload.request_volume_monitoring?.drop_percent || 0),
           scorePressao: Number(engineResult.pricingPayload.score_pressao || 0),
           scoreExcecao: Number(engineResult.pricingPayload.score_excecao || 0)
         });

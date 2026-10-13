@@ -4,6 +4,7 @@ const mockCheckAndSet = jest.fn();
 const mockGenerateKey = jest.fn();
 const mockGetDriverWooviAccount = jest.fn();
 const mockProcessNetDistribution = jest.fn();
+const mockProcessCancellationDistribution = jest.fn();
 const mockCreditDriverBalance = jest.fn();
 const mockSaveDistributionToFirestore = jest.fn();
 const mockUpdatePaymentHolding = jest.fn();
@@ -23,12 +24,18 @@ jest.mock('../../../workers/WorkerManager', () => {
 jest.mock('../../../services/payment-service', () =>
   jest.fn().mockImplementation(() => ({
     processNetDistribution: mockProcessNetDistribution,
+    processCancellationDistribution: mockProcessCancellationDistribution,
     toCents: (value) => Math.round(Number(value || 0) * 100),
     creditDriverBalance: mockCreditDriverBalance,
     saveDistributionToFirestore: mockSaveDistributionToFirestore,
     updatePaymentHolding: mockUpdatePaymentHolding
   }))
 );
+const mockRedis = { hset: jest.fn(), hdel: jest.fn(), hgetall: jest.fn() };
+jest.mock('../../../utils/redis-pool', () => ({
+  ensureConnection: jest.fn().mockResolvedValue(undefined),
+  getConnection: jest.fn(() => mockRedis)
+}));
 jest.mock('../../../services/driver-approval-service', () => ({
   getDriverWooviAccount: mockGetDriverWooviAccount
 }));
@@ -48,7 +55,8 @@ jest.mock('../../../utils/ride-lifecycle-feature-flags', () => ({
 const {
   normalizeMoneyToCents,
   buildRideBillingIdempotencyScope,
-  buildCancellationBillingIdempotencyScope
+  buildCancellationBillingIdempotencyScope,
+  sweepPendingCancellationCredits
 } = require('../../../workers/worker-billing');
 const { EVENT_TYPES } = require('../../../events');
 
@@ -133,6 +141,322 @@ describe('worker-billing money normalization', () => {
       driverPixKey: null
     });
     expect(mockReleaseInflight).not.toHaveBeenCalled();
+  });
+
+  it('settles a driver early end on the executed fare and skips a redelivered event', async () => {
+    const settledEvent = {
+      eventId: 'event_early_end',
+      data: {
+        bookingId: 'booking_1',
+        driverId: 'driver_1',
+        finalFare: 20,
+        tollFee: 0,
+        completionType: 'EARLY_ENDED_BY_DRIVER',
+        settlement: {
+          settlementType: 'EARLY_ENDED_BY_DRIVER',
+          prepaidAmount: 40,
+          executedFare: 20,
+          estimatedRefund: 20
+        },
+        paymentDistribution: { status: 'PENDING' },
+        financialSnapshot: {
+          authoritativeSnapshot: true,
+          financialSnapshotSource: 'backend_final',
+          passengerPaidCents: 2000,
+          tollFeeCents: 0,
+          operationalFeeCents: 99,
+          paymentIntermediationFeeCents: 50,
+          subscriptionRetainedFeeCents: 0,
+          driverNetAmountCents: 1851
+        }
+      }
+    };
+
+    await mockListeners[EVENT_TYPES.RIDE_COMPLETED](settledEvent);
+
+    // totalAmount abaixo do valor pago é o que faz o PaymentService estornar a diferença.
+    expect(mockProcessNetDistribution).toHaveBeenCalledTimes(1);
+    expect(mockProcessNetDistribution).toHaveBeenCalledWith(expect.objectContaining({
+      rideId: 'booking_1',
+      driverId: 'driver_1',
+      totalAmount: 2000,
+      tollFee: 0,
+      financialSnapshot: expect.objectContaining({
+        passengerPaidCents: 2000,
+        driverNetAmountCents: 1851
+      })
+    }));
+
+    mockCheckAndSet.mockResolvedValue({ isNew: false, cachedResult: { success: true } });
+    const replay = await mockListeners[EVENT_TYPES.RIDE_COMPLETED](settledEvent);
+
+    expect(replay).toMatchObject({ success: true, reason: 'Duplicate Processing Avoided' });
+    expect(mockProcessNetDistribution).toHaveBeenCalledTimes(1);
+  });
+
+  describe('passenger partial refund failures', () => {
+    const idempotencyService = require('../../../services/idempotency-service');
+    const { logStructured } = require('../../../utils/logger');
+    const earlyEndEvent = {
+      eventId: 'event_refund_pending',
+      data: {
+        bookingId: 'booking_refund_pending',
+        driverId: 'driver_1',
+        finalFare: 18.87,
+        tollFee: 8.95,
+        financialSnapshot: {
+          authoritativeSnapshot: true,
+          financialSnapshotSource: 'backend_final',
+          passengerPaidCents: 1887,
+          tollFeeCents: 895,
+          operationalFeeCents: 79,
+          paymentIntermediationFeeCents: 50,
+          subscriptionRetainedFeeCents: 0,
+          driverNetAmountCents: 1758
+        }
+      }
+    };
+
+    beforeEach(() => {
+      idempotencyService.cacheResult.mockClear();
+      logStructured.mockClear();
+    });
+
+    it('does not cache success and hands the event back to retry/DLQ while the refund is pending', async () => {
+      mockProcessNetDistribution.mockResolvedValue({
+        success: false,
+        code: 'PASSENGER_REFUND_RETRY_PENDING',
+        error: 'Estorno parcial do passageiro pendente (motorista já creditado)',
+        retryable: true,
+        driverCredited: true
+      });
+
+      await expect(mockListeners[EVENT_TYPES.RIDE_COMPLETED](earlyEndEvent))
+        .rejects.toThrow('Estorno parcial do passageiro pendente');
+
+      expect(mockReleaseInflight).toHaveBeenCalledTimes(1);
+      expect(idempotencyService.cacheResult).not.toHaveBeenCalled();
+    });
+
+    it('settles once the retried refund succeeds', async () => {
+      mockProcessNetDistribution
+        .mockResolvedValueOnce({ success: false, code: 'PASSENGER_REFUND_RETRY_PENDING', error: 'pendente' })
+        .mockResolvedValueOnce({ success: true, netAmount: 1758, passengerRefund: { success: true } });
+
+      await expect(mockListeners[EVENT_TYPES.RIDE_COMPLETED](earlyEndEvent)).rejects.toThrow('pendente');
+      const retried = await mockListeners[EVENT_TYPES.RIDE_COMPLETED](earlyEndEvent);
+
+      expect(retried).toMatchObject({ success: true, netAmount: 1758 });
+      expect(mockProcessNetDistribution).toHaveBeenCalledTimes(2);
+      expect(idempotencyService.cacheResult).toHaveBeenCalledTimes(1);
+    });
+
+    it('logs an error when the refund is left for manual review instead of finishing quietly', async () => {
+      mockProcessNetDistribution.mockResolvedValue({
+        success: true,
+        netAmount: 1758,
+        passengerRefundManualReviewRequired: true,
+        passengerRefund: {
+          manualReviewRequired: true,
+          refundAmountCents: 2974,
+          code: null,
+          error: 'Falha ao processar reembolso',
+          providerDelivery: 'UNKNOWN'
+        }
+      });
+
+      const result = await mockListeners[EVENT_TYPES.RIDE_COMPLETED](earlyEndEvent);
+
+      expect(result).toMatchObject({ success: true, passengerRefundManualReviewRequired: true });
+      expect(logStructured).toHaveBeenCalledWith(
+        'error',
+        'Estorno parcial do passageiro pendente de revisão manual após liquidação',
+        expect.objectContaining({
+          bookingId: 'booking_refund_pending',
+          refundAmountCents: 2974,
+          providerDelivery: 'UNKNOWN'
+        })
+      );
+      expect(idempotencyService.cacheResult).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('cancellation fee credit', () => {
+    // Formato real do stream: o handler publica { eventType, data: event.toJSON() },
+    // então os campos da corrida ficam em event.data.data.
+    const buildCanceledEvent = (overrides = {}) => ({
+      eventType: EVENT_TYPES.RIDE_CANCELED,
+      bookingId: 'booking_1',
+      driverId: 'driver_1',
+      data: {
+        eventId: 'event_cancel_1',
+        eventType: EVENT_TYPES.RIDE_CANCELED,
+        data: {
+          bookingId: 'booking_1',
+          driverId: 'driver_1',
+          canceledBy: 'driver',
+          cancellationFee: 300,
+          financialContext: { namespace: 'sandbox', contextId: 'ctx_1' },
+          providerEnvironment: 'sandbox',
+          ...overrides
+        }
+      }
+    });
+
+    beforeEach(() => {
+      mockProcessCancellationDistribution.mockResolvedValue({ success: true, netAmount: 250 });
+    });
+
+    it('credits the driver when the fee comes nested in the canonical event', async () => {
+      const result = await mockListeners[EVENT_TYPES.RIDE_CANCELED](buildCanceledEvent());
+
+      expect(mockProcessCancellationDistribution).toHaveBeenCalledWith({
+        rideId: 'booking_1',
+        driverId: 'driver_1',
+        cancellationFee: 300,
+        financialContext: { namespace: 'sandbox', contextId: 'ctx_1' },
+        providerEnvironment: 'sandbox'
+      });
+      expect(mockGenerateKey).toHaveBeenCalledWith(
+        'driver_1',
+        'billing.ride.canceled',
+        'booking_1:driver_1'
+      );
+      expect(result).toEqual({ success: true, netAmount: 250 });
+    });
+
+    it('still reads a flat event payload', async () => {
+      await mockListeners[EVENT_TYPES.RIDE_CANCELED]({
+        data: { bookingId: 'booking_2', driverId: 'driver_1', cancellationFee: 280 }
+      });
+
+      expect(mockProcessCancellationDistribution).toHaveBeenCalledWith(
+        expect.objectContaining({ rideId: 'booking_2', cancellationFee: 280 })
+      );
+    });
+
+    it('skips cancellations without fee or without driver', async () => {
+      await mockListeners[EVENT_TYPES.RIDE_CANCELED](buildCanceledEvent({ cancellationFee: 0 }));
+      await mockListeners[EVENT_TYPES.RIDE_CANCELED]({
+        data: { data: { bookingId: 'booking_3', cancellationFee: 300 } }
+      });
+
+      expect(mockProcessCancellationDistribution).not.toHaveBeenCalled();
+    });
+
+    it('does not credit twice when the event is redelivered', async () => {
+      mockCheckAndSet.mockResolvedValueOnce({ isNew: false, cachedResult: { success: true } });
+
+      await mockListeners[EVENT_TYPES.RIDE_CANCELED](buildCanceledEvent());
+
+      expect(mockProcessCancellationDistribution).not.toHaveBeenCalled();
+    });
+
+    it('reads the fee from the event exactly as the cancel command serializes it', async () => {
+      const RideCanceledEvent = jest.requireActual('../../../events/ride.canceled');
+      const canonical = new RideCanceledEvent({
+        bookingId: 'booking_real',
+        canceledBy: 'driver_1',
+        reason: 'no_show',
+        cancellationFee: 350,
+        driverId: 'driver_1',
+        traceId: 'trace_1'
+      }).toJSON();
+
+      // Mesmo caminho da produção: publish({ data: event.toJSON() }) -> stream -> WorkerManager.
+      await mockListeners[EVENT_TYPES.RIDE_CANCELED]({
+        eventType: EVENT_TYPES.RIDE_CANCELED,
+        data: JSON.parse(JSON.stringify(canonical))
+      });
+
+      expect(mockProcessCancellationDistribution).toHaveBeenCalledWith(
+        expect.objectContaining({ rideId: 'booking_real', driverId: 'driver_1', cancellationFee: 350 })
+      );
+    });
+
+    it('clears the pending credit only after the driver is credited', async () => {
+      await mockListeners[EVENT_TYPES.RIDE_CANCELED](buildCanceledEvent());
+      expect(mockRedis.hdel).toHaveBeenCalledWith('billing:cancellation_credit_pending', 'booking_1');
+
+      mockRedis.hdel.mockClear();
+      mockProcessCancellationDistribution.mockResolvedValueOnce({ success: false, error: 'ledger down' });
+      await expect(mockListeners[EVENT_TYPES.RIDE_CANCELED](buildCanceledEvent())).rejects.toThrow();
+      expect(mockRedis.hdel).not.toHaveBeenCalled();
+    });
+
+    it('keeps the pending credit while another processing is still in flight', async () => {
+      mockCheckAndSet.mockResolvedValueOnce({ isNew: false, cachedResult: null });
+
+      const result = await mockListeners[EVENT_TYPES.RIDE_CANCELED](buildCanceledEvent());
+
+      expect(result.inFlight).toBe(true);
+      expect(mockRedis.hdel).not.toHaveBeenCalled();
+    });
+
+    describe('pending sweep', () => {
+      const pendingEntry = (overrides = {}) =>
+        JSON.stringify({
+          bookingId: 'booking_lost',
+          driverId: 'driver_1',
+          cancellationFee: 300,
+          financialContext: { namespace: 'sandbox' },
+          providerEnvironment: 'sandbox',
+          createdAt: Date.now() - 10 * 60 * 1000,
+          attempts: 0,
+          ...overrides
+        });
+
+      it('credits a fee whose event never arrived', async () => {
+        mockRedis.hgetall.mockResolvedValue({ booking_lost: pendingEntry() });
+
+        const summary = await sweepPendingCancellationCredits();
+
+        expect(mockProcessCancellationDistribution).toHaveBeenCalledWith(
+          expect.objectContaining({ rideId: 'booking_lost', driverId: 'driver_1', cancellationFee: 300 })
+        );
+        expect(mockRedis.hdel).toHaveBeenCalledWith('billing:cancellation_credit_pending', 'booking_lost');
+        expect(summary).toMatchObject({ due: 1, credited: 1, failed: 0 });
+      });
+
+      it('leaves recent cancellations to the normal event path', async () => {
+        mockRedis.hgetall.mockResolvedValue({ booking_lost: pendingEntry({ createdAt: Date.now() - 5000 }) });
+
+        const summary = await sweepPendingCancellationCredits();
+
+        expect(mockProcessCancellationDistribution).not.toHaveBeenCalled();
+        expect(summary.due).toBe(0);
+      });
+
+      it('keeps the pending credit and counts the attempt when the credit fails', async () => {
+        mockRedis.hgetall.mockResolvedValue({ booking_lost: pendingEntry() });
+        mockProcessCancellationDistribution.mockResolvedValueOnce({ success: false, error: 'ledger down' });
+
+        const summary = await sweepPendingCancellationCredits();
+
+        expect(mockRedis.hdel).not.toHaveBeenCalled();
+        const [, , stored] = mockRedis.hset.mock.calls[0];
+        expect(JSON.parse(stored)).toMatchObject({ bookingId: 'booking_lost', attempts: 1 });
+        expect(summary).toMatchObject({ credited: 0, failed: 1 });
+      });
+
+      it('stops retrying after the automatic limit and reports it for manual review', async () => {
+        mockRedis.hgetall.mockResolvedValue({ booking_lost: pendingEntry({ attempts: 30 }) });
+
+        const summary = await sweepPendingCancellationCredits();
+
+        expect(mockProcessCancellationDistribution).not.toHaveBeenCalled();
+        expect(summary.manualReview).toBe(1);
+      });
+    });
+
+    it('releases the idempotency lock and fails when the credit fails', async () => {
+      mockProcessCancellationDistribution.mockResolvedValueOnce({ success: false, error: 'ledger down' });
+
+      await expect(mockListeners[EVENT_TYPES.RIDE_CANCELED](buildCanceledEvent())).rejects.toThrow(
+        'ledger down'
+      );
+      expect(mockReleaseInflight).toHaveBeenCalled();
+    });
   });
 
   it('rejects standard ride settlement without the backend-final financial snapshot', async () => {
