@@ -349,6 +349,8 @@ export default function WooviPaymentModal({
     const paymentDataRef = useRef(null);
     const paymentStatusRef = useRef(paymentStatus); // ✅ Ref para acessar status atualizado no intervalo
     const paymentConfirmedRef = useRef(false);
+    // A imagem remota do QR pode falhar; nesse caso desenhamos o QR a partir do código.
+    const [qrImageFailed, setQrImageFailed] = useState(false);
     const autoConfirmTimerRef = useRef(null);
     const qaAutoConfirmStartedRef = useRef(false);
     const isCheckingPaymentRef = useRef(false);
@@ -1866,12 +1868,23 @@ export default function WooviPaymentModal({
                     testID="payment-modal-qr-container"
                     accessibilityLabel="QR Code PIX"
                 >
-                    {hasQrImage ? (
+                    {paymentStatus === 'confirmed' ? (
+                        // Pago: o QR não serve mais (e a imagem remota às vezes sumia,
+                        // deixando um quadrado vazio). Mostra a confirmação no lugar.
+                        <View
+                            style={styles.qrUnavailable}
+                            testID="payment-modal-qr-confirmed"
+                            accessibilityLabel="Pagamento confirmado"
+                        >
+                            <Icon name="check-circle" type="material" color={PIX_SURFACE.success || '#1F7A3D'} size={64} />
+                        </View>
+                    ) : hasQrImage && !qrImageFailed ? (
                         <Image
                             source={{ uri: paymentData.qrCodeImage }}
                             style={styles.qrCodeImage}
                             resizeMode="contain"
                             testID="payment-modal-qr-image"
+                            onError={() => setQrImageFailed(true)}
                         />
                     ) : hasQrText ? (
                         <QRCode
