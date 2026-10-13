@@ -13,6 +13,7 @@ const mockGetUser = jest.fn();
 const mockDocs = new Map();
 const mockRequestDriverWithdrawal = jest.fn();
 const mockRecordDriverWithdrawalDenial = jest.fn();
+const mockListDriverWithdrawals = jest.fn();
 const mockEvaluateWithdrawalStepUp = jest.fn();
 
 function normalizePhone(phone) {
@@ -66,7 +67,8 @@ jest.mock('../../../firebase-config', () => ({
 
 jest.mock('../../../services/payment-service', () => jest.fn().mockImplementation(() => ({
   requestDriverWithdrawal: mockRequestDriverWithdrawal,
-  recordDriverWithdrawalDenial: mockRecordDriverWithdrawalDenial
+  recordDriverWithdrawalDenial: mockRecordDriverWithdrawalDenial,
+  listDriverWithdrawals: mockListDriverWithdrawals
 })));
 
 jest.mock('../../../services/kyc-policy-service', () => ({
@@ -294,5 +296,30 @@ describe('payment withdrawal password guard', () => {
     });
     expect(mockEvaluateWithdrawalStepUp).not.toHaveBeenCalled();
     expect(mockRequestDriverWithdrawal).not.toHaveBeenCalled();
+  });
+  it('lists the driver own withdrawals and refuses another driver', async () => {
+    mockListDriverWithdrawals.mockResolvedValue({
+      success: true,
+      withdrawals: [{ id: 'w1', amountCents: 5000, status: 'in_review', statusLabel: 'Em conferência' }]
+    });
+
+    const own = await request(createApp())
+      .get('/api/payment/driver-balance/driver-1/withdrawals?limit=5')
+      .set('Authorization', 'Bearer token');
+    expect(own.status).toBe(200);
+    expect(own.body.withdrawals[0]).toMatchObject({ id: 'w1', status: 'in_review' });
+    expect(mockListDriverWithdrawals).toHaveBeenCalledWith('driver-1', 5);
+
+    mockListDriverWithdrawals.mockClear();
+    const other = await request(createApp())
+      .get('/api/payment/driver-balance/driver-2/withdrawals')
+      .set('Authorization', 'Bearer token');
+    expect(other.status).toBe(403);
+    expect(mockListDriverWithdrawals).not.toHaveBeenCalled();
+  });
+
+  it('does not list withdrawals without authentication', async () => {
+    const response = await request(createApp()).get('/api/payment/driver-balance/driver-1/withdrawals');
+    expect(response.status).toBe(401);
   });
 });
