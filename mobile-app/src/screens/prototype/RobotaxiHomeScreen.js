@@ -5450,6 +5450,10 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     insets.bottom,
     windowHeight
   ]);
+  // Read on every render so the list is rebuilt when the day changes: kept
+  // inside the memo, yesterday's receipts stayed in "Ganhos de hoje" after
+  // midnight (seen on a device at 00:10).
+  const todayKey = new Date().toDateString();
   const driverFinancialHistory = useMemo(() => {
     const mergedHistory = [lastReceipt, ...(Array.isArray(tripHistory) ? tripHistory : [])]
       .filter(Boolean);
@@ -5457,13 +5461,17 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     // "Ganhos de hoje" used to add every stored receipt, whatever its day, so
     // the total moved by the difference between the newest ride and the
     // oldest one dropping out of the list. Count only today's receipts.
-    const todayKey = new Date().toDateString();
 
     return mergedHistory.filter((item, index) => {
-      const completedAt = item?.completedAt ? new Date(item.completedAt) : null;
+      // Only receipts known to be from today. One with no usable timestamp
+      // cannot be placed on a day, and counting it kept yesterday's rides in
+      // today's total.
+      const rawTimestamp =
+        item?.completedAt || item?.endedAt || item?.tripEndedAt || item?.createdAt || item?.timestamp;
+      const completedAt = rawTimestamp ? new Date(rawTimestamp) : null;
       if (
-        completedAt &&
-        !Number.isNaN(completedAt.getTime()) &&
+        !completedAt ||
+        Number.isNaN(completedAt.getTime()) ||
         completedAt.toDateString() !== todayKey
       ) {
         return false;
@@ -5483,7 +5491,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
       seenIds.add(id);
       return true;
     });
-  }, [lastReceipt, tripHistory]);
+  }, [lastReceipt, todayKey, tripHistory]);
   const driverTripTotals = useMemo(
     () => buildTripFinancialTotals(driverFinancialHistory, { role: 'driver' }),
     [driverFinancialHistory]
