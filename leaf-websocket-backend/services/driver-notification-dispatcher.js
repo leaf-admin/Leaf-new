@@ -900,7 +900,16 @@ class DriverNotificationDispatcher {
         try {
             if (!this.offerPushService) {
                 const FCMService = require('./fcm-service');
-                this.offerPushService = new FCMService();
+                this.offerPushService = new FCMService(this.redis);
+            }
+            // O serviço nasce sem inicializar: sem isto todo envio respondia
+            // "FCM Service não disponível" e o push nunca saía.
+            if (
+                typeof this.offerPushService.isServiceAvailable === 'function' &&
+                !this.offerPushService.isServiceAvailable() &&
+                typeof this.offerPushService.initialize === 'function'
+            ) {
+                await this.offerPushService.initialize();
             }
             return await this.offerPushService.sendNotificationToUser(
                 driverId,
