@@ -220,6 +220,34 @@ class PrototypeDriverTripAssistantService {
     }
   }
 
+  // The background location task only forwards a fix when it knows which ride
+  // is active. Nothing told it any more (the code that did belongs to a screen
+  // that is no longer used), so every fix taken with the app in the background
+  // was dropped: on a device the server received no position for a minute while
+  // the driver had another app in front.
+  async syncBackgroundTripContext(session) {
+    try {
+      const locationBufferService = require('./LocationBufferService').default;
+      await locationBufferService.setActiveTripContext({
+        bookingId: session.bookingId,
+        tripId: session.bookingId,
+        driverId: session.driverId || null,
+        tripStatus: session.status,
+      });
+    } catch (error) {
+      Logger.warn('⚠️ [PrototypeDriverTripAssistant] Falha ao registrar corrida ativa para o tracking:', error?.message || error);
+    }
+  }
+
+  async clearBackgroundTripContext() {
+    try {
+      const locationBufferService = require('./LocationBufferService').default;
+      await locationBufferService.clearActiveTripContext();
+    } catch (error) {
+      Logger.warn('⚠️ [PrototypeDriverTripAssistant] Falha ao limpar corrida ativa do tracking:', error?.message || error);
+    }
+  }
+
   async ensureTrackingActive() {
     try {
       const BackgroundLocationService = require('./BackgroundLocationService').default;
@@ -364,6 +392,7 @@ class PrototypeDriverTripAssistantService {
     const trackingSessionKey = `${String(session.bookingId || '').trim()}:${String(session.status || '').trim()}`;
     if (trackingSessionKey && this.lastTrackingSessionKey !== trackingSessionKey) {
       this.lastTrackingSessionKey = trackingSessionKey;
+      await this.syncBackgroundTripContext(session);
       await this.ensureTrackingActive();
     }
     await this.upsertPersistentNotification(session);
@@ -403,6 +432,7 @@ class PrototypeDriverTripAssistantService {
     if (!SHOULD_DISABLE_PERSISTENT_NOTIFICATIONS) {
       await PersistentRideNotificationService.dismissRideNotification();
     }
+    await this.clearBackgroundTripContext();
     await this.stopTracking();
   }
 

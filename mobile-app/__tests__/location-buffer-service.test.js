@@ -107,4 +107,36 @@ describe('LocationBufferService', () => {
       seq: 1,
     }));
   });
+
+  it('sends a background fix right away when the driver is connected', async () => {
+    await locationBufferService.setActiveTripContext({
+      bookingId: 'booking_1',
+      driverId: 'driver_1',
+      tripStatus: 'started',
+    });
+
+    const result = await locationBufferService.addDriverLocationFromBackground({
+      lat: -22.92,
+      lng: -43.18,
+      timestamp: 1710000005000,
+    });
+
+    expect(result).toMatchObject({ buffered: true, bookingId: 'booking_1' });
+    expect(socketManager.emitToServer).toHaveBeenCalledWith(
+      'updateLocation',
+      expect.objectContaining({
+        bookingId: 'booking_1',
+        lat: -22.92,
+        lng: -43.18,
+        source: 'background_task',
+      }),
+    );
+  });
+
+  it('drops a background fix only when no ride is active', async () => {
+    const result = await locationBufferService.addDriverLocationFromBackground({ lat: -22.92, lng: -43.18 });
+
+    expect(result).toEqual({ buffered: false, reason: 'no_active_trip' });
+    expect(socketManager.emitToServer).not.toHaveBeenCalled();
+  });
 });
