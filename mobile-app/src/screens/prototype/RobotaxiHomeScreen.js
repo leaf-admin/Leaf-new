@@ -9524,6 +9524,51 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     driverKycLivenessMode === 'aws'
     ? resolveAWSNativeLivenessScreen()
     : null;
+  // Stable props for the memoized map and driver overlays. As inline objects
+  // and arrows they changed identity on every render of this screen (about
+  // once a second with GPS), so the memo never held and all three re-rendered.
+  const homeLandingMapLeft = homeLandingMapFrame?.left;
+  const homeLandingMapTop = homeLandingMapFrame?.top;
+  const homeLandingMapWidth = homeLandingMapFrame?.width;
+  const homeLandingMapHeight = homeLandingMapFrame?.height;
+  const homeMapContainerStyle = useMemo(
+    () => (passengerMapInCard ? {
+      left: homeLandingMapLeft ?? 24, right: undefined, bottom: undefined,
+      top: homeLandingMapTop ?? insets.top + 164,
+      width: homeLandingMapWidth ?? windowWidth - 48,
+      height: homeLandingMapHeight ?? Math.max(0, windowHeight - insets.top - insets.bottom - 306),
+      borderTopLeftRadius: 24, borderTopRightRadius: 24, overflow: 'hidden',
+    } : {
+      left: 0, top: 0, right: undefined, bottom: undefined,
+      width: windowWidth, height: windowHeight,
+    }),
+    [homeLandingMapHeight, homeLandingMapLeft, homeLandingMapTop, homeLandingMapWidth,
+      insets.bottom, insets.top, passengerMapInCard, windowHeight, windowWidth],
+  );
+  const handleDriverLiveRideCardLayout = useCallback((event) => {
+    const nextHeight = event?.nativeEvent?.layout?.height;
+    if (Number.isFinite(nextHeight) && nextHeight > 0) {
+      setDriverLiveRideHeightMeasured(true);
+      setDriverLiveRideHeight(previous => (
+        previous === nextHeight ? previous : nextHeight
+      ));
+    }
+  }, []);
+  const handleDriverTripCompletedSuccess = useCallback((result) => {
+    navigation.navigate(
+      'RobotaxiPrototypeReceipt',
+      buildHomeReceiptParams({
+        receipt: result?.receipt || result?.lastReceipt || null,
+      })
+    );
+  }, [buildHomeReceiptParams, navigation]);
+  const handleOpenDriverEarnings = useCallback(() => {
+    navigation.navigate('EarningsReport', {
+      source: 'driver-home',
+      defaultRangeDays: 1,
+      maxRangeDays: 7
+    });
+  }, [navigation]);
   const presentedMapRegion =
     presentedSearchingMode && searchTargetRegion
       ? searchTargetRegion
@@ -9561,16 +9606,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
         {passengerMapInCard ? <View style={[StyleSheet.absoluteFillObject, { backgroundColor: '#FFFFFF' }]} /> : null}
 
         <PrototypeMapLayer
-          containerStyle={passengerMapInCard ? {
-            left: homeLandingMapFrame?.left ?? 24, right: undefined, bottom: undefined,
-            top: homeLandingMapFrame?.top ?? insets.top + 164,
-            width: homeLandingMapFrame?.width ?? windowWidth - 48,
-            height: homeLandingMapFrame?.height ?? Math.max(0, windowHeight - insets.top - insets.bottom - 306),
-            borderTopLeftRadius: 24, borderTopRightRadius: 24, overflow: 'hidden',
-          } : {
-            left: 0, top: 0, right: undefined, bottom: undefined,
-            width: windowWidth, height: windowHeight,
-          }}
+          containerStyle={homeMapContainerStyle}
           mapRef={mapRef}
           region={presentedMapRegion}
           userCoordinate={presentedUserCoordinate}
@@ -9900,15 +9936,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
               insetsTop={insets.top}
               insetsBottom={insets.bottom}
               bottomOffset={driverLiveRideBottomOffset}
-              onCardLayout={event => {
-                const nextHeight = event?.nativeEvent?.layout?.height;
-                if (Number.isFinite(nextHeight) && nextHeight > 0) {
-                  setDriverLiveRideHeightMeasured(true);
-                  setDriverLiveRideHeight(previous => (
-                    previous === nextHeight ? previous : nextHeight
-                  ));
-                }
-              }}
+              onCardLayout={handleDriverLiveRideCardLayout}
               driverOffers={driverOffers}
               driverActiveRide={driverActiveRide}
               driverTripMeta={driverTripMeta}
@@ -9931,14 +9959,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
               onOpenNavigation={handleOpenDriverNavigation}
               onOpenChat={handleOpenDriverChat}
               nativeNavigationVisible={showLeafNativeNavigation}
-              onTripCompletedSuccess={(result) =>
-                navigation.navigate(
-                  'RobotaxiPrototypeReceipt',
-                  buildHomeReceiptParams({
-                    receipt: result?.receipt || result?.lastReceipt || null,
-                  })
-                )
-              }
+              onTripCompletedSuccess={handleDriverTripCompletedSuccess}
             />
 
             {showDriverHomeOverlay ? (
@@ -9971,13 +9992,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
                 onCtaLayout={handleDriverCtaLayout}
                 onToggleOnline={handleDriverOnlineToggle}
                 onSaveDestinationMode={handleSaveDriverDestinationMode}
-                onOpenEarnings={() =>
-                  navigation.navigate('EarningsReport', {
-                    source: 'driver-home',
-                    defaultRangeDays: 1,
-                    maxRangeDays: 7
-                  })
-                }
+                onOpenEarnings={handleOpenDriverEarnings}
                 onOpenActivation={handleOpenDriverActivation}
                 onOpenIdentitySupport={handleOpenDriverIdentitySupport}
               />

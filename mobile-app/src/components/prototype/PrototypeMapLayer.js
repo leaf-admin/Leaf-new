@@ -7,6 +7,7 @@ import SearchRadarPulse from './SearchRadarPulse';
 
 // Camera glide between ride stages (zoom in to pickup, out to the full trip).
 const CAMERA_TRANSITION_MS = 450;
+const USE_NATIVE_ANDROID_VEHICLE_MARKER = true;
 // Re-framing threshold: ignore centre shifts and zoom changes under ~12%.
 const CAMERA_REFRAME_TOLERANCE = 0.12;
 
@@ -2419,14 +2420,36 @@ function PrototypeMapLayer({
     region,
     rotatedDriverVehiclePoint,
   ]);
+  // The car is a native map marker on Android. It used to be a React view
+  // positioned over the map from the visible region, which reaches JS a frame
+  // or more late: a recording showed the car trailing the map by up to ~250 px
+  // while panning. A native marker moves with the map camera on the UI thread.
   const shouldRenderProjectedDriverVehicleOverlay = Boolean(
-    projectedDriverVehicleOverlayPoint &&
+    !USE_NATIVE_ANDROID_VEHICLE_MARKER &&
+      projectedDriverVehicleOverlayPoint &&
       Platform.OS === 'android' &&
       driverMarkerMode === 'car' &&
       currentLocationMarkerMode !== 'car'
   );
+  const shouldRenderNativeCurrentLocationVehicle = Boolean(
+    USE_NATIVE_ANDROID_VEHICLE_MARKER &&
+      Platform.OS === 'android' &&
+      currentLocationMarkerMode === 'car'
+  );
   const shouldRenderCurrentLocationVehicleOverlay =
-    currentLocationMarkerMode === 'car';
+    currentLocationMarkerMode === 'car' && !shouldRenderNativeCurrentLocationVehicle;
+  // Android snapshots a custom marker view into a bitmap. Track it briefly so
+  // the car is captured after it has drawn, then freeze it.
+  const vehicleMarkerTrackingKey = [
+    driverVehicleMarkerColorToken, driverMarkerShapeKey, driverMarkerAssetUrl,
+    driverMarkerMode, currentLocationMarkerMode,
+  ].join('|');
+  const [vehicleMarkerTracking, setVehicleMarkerTracking] = useState(true);
+  useEffect(() => {
+    setVehicleMarkerTracking(true);
+    const timer = setTimeout(() => setVehicleMarkerTracking(false), 1500);
+    return () => clearTimeout(timer);
+  }, [vehicleMarkerTrackingKey]);
   const shouldSuppressNativeAndroidDriverVehicleMarker = Boolean(
     Platform.OS === 'android' &&
       shouldRenderDriverVehicleMarkerChild &&
@@ -3047,7 +3070,7 @@ function PrototypeMapLayer({
               anchor={{ x: 0.5, y: 0.5 }}
               flat={driverMarkerMode === 'car'}
               rotation={driverMarkerMode === 'car' ? displayedDriverHeading : 0}
-              tracksViewChanges={Platform.OS !== 'android' && shouldRenderDriverVehicleMarkerChild}
+              tracksViewChanges={Platform.OS === 'android' ? vehicleMarkerTracking : shouldRenderDriverVehicleMarkerChild}
               pinColor={undefined}
             >
               {driverMarkerMode === 'avatar' ? (
@@ -3120,6 +3143,27 @@ function PrototypeMapLayer({
                 );
               })
             : null}
+
+          {shouldShowCurrentLocationMarker && shouldRenderNativeCurrentLocationVehicle && !shouldShowUserAvatarMarker ? (
+            <Marker
+              key={`user-vehicle-marker-${driverVehicleMarkerColorToken}-${driverMarkerShapeKey}-${driverMarkerAssetUrl}`}
+              testID="map-user-vehicle-marker"
+              coordinate={{ latitude: markerCoordinate.latitude, longitude: markerCoordinate.longitude }}
+              zIndex={19}
+              anchor={{ x: 0.5, y: 0.5 }}
+              flat
+              rotation={displayedDriverHeading}
+              tracksViewChanges={vehicleMarkerTracking}
+              pinColor={undefined}
+            >
+              <VehicleMarkerContent
+                source={driverVehicleMarkerImageSource}
+                colorToken={driverVehicleMarkerColorToken}
+                shapeKey={driverMarkerShapeKey}
+                screenHeading={displayedDriverScreenHeading}
+              />
+            </Marker>
+          ) : null}
 
           {shouldShowCurrentLocationMarker &&
           (Platform.OS !== 'android' || (!shouldShowUserAvatarMarker && currentLocationMarkerMode !== 'car')) ? (
