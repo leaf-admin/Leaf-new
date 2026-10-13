@@ -801,4 +801,25 @@ describe('driver-notification-dispatcher timeout cleanup', () => {
 
     await expect(dispatcher.getDriverData('driver_missing')).resolves.toBeNull();
   });
+  it('initializes the push service before sending the new-offer push', async () => {
+    dispatcher = new DriverNotificationDispatcher(redis, null);
+    let available = false;
+    dispatcher.offerPushService = {
+      isServiceAvailable: jest.fn(() => available),
+      initialize: jest.fn(async () => {
+        available = true;
+      }),
+      sendNotificationToUser: jest.fn().mockResolvedValue({ success: true }),
+    };
+
+    await dispatcher.sendOfferPush('driver_1', { bookingId: 'booking_123' });
+    await dispatcher.sendOfferPush('driver_1', { bookingId: 'booking_124' });
+
+    expect(dispatcher.offerPushService.initialize).toHaveBeenCalledTimes(1);
+    expect(dispatcher.offerPushService.sendNotificationToUser).toHaveBeenCalledTimes(2);
+    expect(dispatcher.offerPushService.sendNotificationToUser).toHaveBeenCalledWith(
+      'driver_1',
+      expect.objectContaining({ title: 'Nova corrida', data: expect.objectContaining({ type: 'ride_offer' }) })
+    );
+  });
 });
