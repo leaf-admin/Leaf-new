@@ -10223,6 +10223,19 @@ function attachSocketListeners() {
       return;
     }
 
+    // A driver still looking at the receipt of the previous ride must see the
+    // new offer. With that receipt open, the home reopened it as soon as the
+    // offer brought the driver back, so the offer stayed hidden behind it: on a
+    // device the passenger waited while the server re-offered the ride twice.
+    // A new offer closes the previous ride's receipt, as tapping back would.
+    if (
+      resolveRuntimeRole() === "driver" &&
+      normalizeRuntimeLifecycleStatus(runtimeState.bookingStatus) === "completed" &&
+      String(runtimeState.lastReceipt?.id || "").trim() !== String(bookingId).trim()
+    ) {
+      dismissCompletedReceiptState();
+    }
+
     const offerReceivedAtMs = Date.now();
     const offerTimeoutSeconds = toPositiveRuntimeNumber(
       payload?.expiresInSec ??
