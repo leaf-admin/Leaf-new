@@ -4,6 +4,7 @@ const mockCheckAndSet = jest.fn();
 const mockGenerateKey = jest.fn();
 const mockGetDriverWooviAccount = jest.fn();
 const mockProcessNetDistribution = jest.fn();
+const mockProcessCancellationDistribution = jest.fn();
 const mockCreditDriverBalance = jest.fn();
 const mockSaveDistributionToFirestore = jest.fn();
 const mockUpdatePaymentHolding = jest.fn();
@@ -23,6 +24,7 @@ jest.mock('../../../workers/WorkerManager', () => {
 jest.mock('../../../services/payment-service', () =>
   jest.fn().mockImplementation(() => ({
     processNetDistribution: mockProcessNetDistribution,
+    processCancellationDistribution: mockProcessCancellationDistribution,
     toCents: (value) => Math.round(Number(value || 0) * 100),
     creditDriverBalance: mockCreditDriverBalance,
     saveDistributionToFirestore: mockSaveDistributionToFirestore,
@@ -270,6 +272,87 @@ describe('worker-billing money normalization', () => {
         })
       );
       expect(idempotencyService.cacheResult).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('cancellation fee credit', () => {
+    // Formato real do stream: o handler publica { eventType, data: event.toJSON() },
+    // então os campos da corrida ficam em event.data.data.
+    const buildCanceledEvent = (overrides = {}) => ({
+      eventType: EVENT_TYPES.RIDE_CANCELED,
+      bookingId: 'booking_1',
+      driverId: 'driver_1',
+      data: {
+        eventId: 'event_cancel_1',
+        eventType: EVENT_TYPES.RIDE_CANCELED,
+        data: {
+          bookingId: 'booking_1',
+          driverId: 'driver_1',
+          canceledBy: 'driver',
+          cancellationFee: 300,
+          financialContext: { namespace: 'sandbox', contextId: 'ctx_1' },
+          providerEnvironment: 'sandbox',
+          ...overrides
+        }
+      }
+    });
+
+    beforeEach(() => {
+      mockProcessCancellationDistribution.mockResolvedValue({ success: true, netAmount: 250 });
+    });
+
+    it('credits the driver when the fee comes nested in the canonical event', async () => {
+      const result = await mockListeners[EVENT_TYPES.RIDE_CANCELED](buildCanceledEvent());
+
+      expect(mockProcessCancellationDistribution).toHaveBeenCalledWith({
+        rideId: 'booking_1',
+        driverId: 'driver_1',
+        cancellationFee: 300,
+        financialContext: { namespace: 'sandbox', contextId: 'ctx_1' },
+        providerEnvironment: 'sandbox'
+      });
+      expect(mockGenerateKey).toHaveBeenCalledWith(
+        'driver_1',
+        'billing.ride.canceled',
+        'booking_1:driver_1'
+      );
+      expect(result).toEqual({ success: true, netAmount: 250 });
+    });
+
+    it('still reads a flat event payload', async () => {
+      await mockListeners[EVENT_TYPES.RIDE_CANCELED]({
+        data: { bookingId: 'booking_2', driverId: 'driver_1', cancellationFee: 280 }
+      });
+
+      expect(mockProcessCancellationDistribution).toHaveBeenCalledWith(
+        expect.objectContaining({ rideId: 'booking_2', cancellationFee: 280 })
+      );
+    });
+
+    it('skips cancellations without fee or without driver', async () => {
+      await mockListeners[EVENT_TYPES.RIDE_CANCELED](buildCanceledEvent({ cancellationFee: 0 }));
+      await mockListeners[EVENT_TYPES.RIDE_CANCELED]({
+        data: { data: { bookingId: 'booking_3', cancellationFee: 300 } }
+      });
+
+      expect(mockProcessCancellationDistribution).not.toHaveBeenCalled();
+    });
+
+    it('does not credit twice when the event is redelivered', async () => {
+      mockCheckAndSet.mockResolvedValueOnce({ isNew: false, cachedResult: { success: true } });
+
+      await mockListeners[EVENT_TYPES.RIDE_CANCELED](buildCanceledEvent());
+
+      expect(mockProcessCancellationDistribution).not.toHaveBeenCalled();
+    });
+
+    it('releases the idempotency lock and fails when the credit fails', async () => {
+      mockProcessCancellationDistribution.mockResolvedValueOnce({ success: false, error: 'ledger down' });
+
+      await expect(mockListeners[EVENT_TYPES.RIDE_CANCELED](buildCanceledEvent())).rejects.toThrow(
+        'ledger down'
+      );
+      expect(mockReleaseInflight).toHaveBeenCalled();
     });
   });
 
