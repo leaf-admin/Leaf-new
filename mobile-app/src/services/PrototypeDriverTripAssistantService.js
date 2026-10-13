@@ -125,6 +125,28 @@ function computeEtaMinutes({ remainingMeters, initialMeters, initialEtaMinutes }
   return Math.max(1, Math.round(kmRemaining / FALLBACK_SPEED_KM_PER_MIN));
 }
 
+// "R. das Pastorinhas, 4 - Jacarepaguá, Rio de Janeiro - RJ, 22723-260, Brasil" ocupa a
+// notificação inteira; rua, número e bairro bastam.
+function shortenAddress(address) {
+  const parts = String(address || '').split(',').map((part) => part.trim()).filter(Boolean);
+  if (parts.length === 0) return '';
+  // "Rua X, 4 - Bairro": o número vem depois da primeira vírgula.
+  const base = parts.length > 1 && /^\d/.test(parts[1]) ? `${parts[0]}, ${parts[1]}` : parts[0];
+  return base.split(' - ').slice(0, 2).join(' - ');
+}
+
+// Linha curta ao lado do nome do app: "4 min · 1 km".
+function buildEtaDistanceLabel(etaMinutes, remainingMeters) {
+  const parts = [];
+  if (Number.isFinite(Number(etaMinutes)) && Number(etaMinutes) > 0) {
+    parts.push(`${Math.round(Number(etaMinutes))} min`);
+  }
+  if (Number.isFinite(Number(remainingMeters)) && Number(remainingMeters) >= 0) {
+    parts.push(formatDistance(Number(remainingMeters)));
+  }
+  return parts.join(' · ');
+}
+
 function buildNotificationDescriptor(session) {
   const target = resolveTarget(session);
   const remainingMeters = Number(session?.remainingMeters);
@@ -150,7 +172,14 @@ function buildNotificationDescriptor(session) {
               buttonTitle: 'Cheguei'
             }
           ]
-        : []
+        : [],
+      ongoing: {
+        title: readyToArrive ? 'Você chegou ao embarque' : 'A caminho do embarque',
+        subtitle: readyToArrive ? 'Toque em Cheguei' : buildEtaDistanceLabel(etaMinutes, remainingMeters),
+        body: `Embarque: ${shortenAddress(target?.address) || 'Local de embarque'}`,
+        progress: readyToArrive ? 1 : progressRatio,
+        countdownSeconds: !readyToArrive && etaMinutes > 0 ? etaMinutes * 60 : 0
+      }
     };
   }
 
@@ -168,7 +197,14 @@ function buildNotificationDescriptor(session) {
           identifier: 'start_trip',
           buttonTitle: 'Iniciar'
         }
-      ]
+      ],
+      ongoing: {
+        title: 'Aguardando passageiro',
+        subtitle: 'Tempo de embarque',
+        body: `Embarque: ${shortenAddress(target?.address) || 'Local de embarque'}`,
+        progress: null,
+        countdownSeconds: Number(session?.boardingRemainingSec) > 0 ? Number(session.boardingRemainingSec) : 0
+      }
     };
   }
 
@@ -182,7 +218,14 @@ function buildNotificationDescriptor(session) {
           identifier: 'end_trip',
           buttonTitle: 'Encerrar'
         }
-      ]
+      ],
+      ongoing: {
+        title: 'Em viagem',
+        subtitle: buildEtaDistanceLabel(etaMinutes, remainingMeters),
+        body: `Destino: ${shortenAddress(target?.address) || 'Destino'} · ${fareLabel}`,
+        progress: progressRatio,
+        countdownSeconds: etaMinutes > 0 ? etaMinutes * 60 : 0
+      }
     };
   }
 
@@ -190,7 +233,13 @@ function buildNotificationDescriptor(session) {
     title: 'Corrida ativa',
     body: target?.address || 'Acompanhe a viagem.',
     categoryId: null,
-    androidActions: []
+    androidActions: [],
+    ongoing: {
+      title: 'Corrida ativa',
+      body: target?.address || 'Acompanhe a viagem.',
+      progress: null,
+      countdownSeconds: 0
+    }
   };
 }
 
@@ -382,6 +431,7 @@ class PrototypeDriverTripAssistantService {
       customBody: descriptor.body,
       notificationCategoryId: descriptor.categoryId,
       androidActions: descriptor.androidActions,
+      ongoing: descriptor.ongoing,
       boardingRemainingSec: session.boardingRemainingSec || 0,
       pickupAddress: session.pickupAddress || '',
       destinationAddress: session.destinationAddress || '',
@@ -480,4 +530,4 @@ class PrototypeDriverTripAssistantService {
 
 const prototypeDriverTripAssistantService = new PrototypeDriverTripAssistantService();
 export default prototypeDriverTripAssistantService;
-export { calculateDistanceMeters, PICKUP_TOLERANCE_METERS };
+export { buildNotificationDescriptor, calculateDistanceMeters, PICKUP_TOLERANCE_METERS };

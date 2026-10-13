@@ -115,6 +115,9 @@ const getGlobalNavigationRef = () => {
     return navigationContainerRef?.current || navigationContainerRef;
 };
 
+// Mesmo título do push enviado pelo servidor (services/offer-push.js).
+const RIDE_OFFER_PUSH_TITLE = 'Nova corrida';
+
 class FCMNotificationService {
     constructor() {
         this.isInitialized = false;
@@ -609,8 +612,35 @@ class FCMNotificationService {
             ) {
                 Logger.log('📱 App voltou ao foreground; processando notificações pendentes.');
                 this.schedulePendingNotificationsProcessing();
+                // Com o app na frente o cartão da oferta já está na tela.
+                void this.dismissRideOfferNotifications();
             }
         });
+    }
+
+    /**
+     * Remove da barra o aviso de "Nova corrida". Ele só serve enquanto a oferta está
+     * aberta e o app fora da frente: aceita, recusada ou expirada, ficava lá apontando
+     * para uma corrida que já não existe.
+     */
+    async dismissRideOfferNotifications() {
+        try {
+            const Notifications = require('expo-notifications');
+            const presented = await Notifications.getPresentedNotificationsAsync();
+            const offers = (Array.isArray(presented) ? presented : []).filter((item) => {
+                const content = item?.request?.content || {};
+                return content?.data?.type === 'ride_offer' || content?.title === RIDE_OFFER_PUSH_TITLE;
+            });
+            await Promise.all(
+                offers.map((item) =>
+                    Notifications.dismissNotificationAsync(item.request.identifier).catch(() => {})
+                )
+            );
+            return offers.length;
+        } catch (error) {
+            Logger.warn('⚠️ Falha ao remover aviso de nova corrida:', error?.message || error);
+            return 0;
+        }
     }
 
     schedulePendingNotificationsProcessing(delayMs = 0) {

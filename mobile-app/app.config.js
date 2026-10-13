@@ -430,6 +430,7 @@ module.exports = {
         "./plugins/withLeafFaceEmbedding",
         "./plugins/withLeafRideLiveActivity",
         "./plugins/withLeafMaterial",
+        "./plugins/withLeafNotificationIcon",
         [
             "expo-notifications",
             {
