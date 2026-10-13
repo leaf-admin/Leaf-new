@@ -1,4 +1,5 @@
 const { metrics } = require('../utils/prometheus-metrics');
+const { notifyPassengerRideStatus } = require('../services/ride-passenger-status-push');
 const pricingH3ReadModelService = require('../services/pricing-h3-read-model-service');
 const {
     collectPaymentReferences,
@@ -546,6 +547,18 @@ function registerSocketStartTripHandler({
                 const bookingKey = `booking:${bookingId}`;
                 const bookingDataRedis = await redis.hgetall(bookingKey);
                 const customerIdToNotify = customerId || bookingDataRedis?.customerId || bookingDataRedis?.customer;
+
+                // Live Activity / notificação de corrida do passageiro passa para "em viagem"
+                // mesmo com o app em segundo plano. Não bloqueia o fluxo.
+                if (customerIdToNotify) {
+                    notifyPassengerRideStatus({
+                        redis,
+                        customerId: customerIdToNotify,
+                        bookingId,
+                        status: 'started',
+                        bookingData: bookingDataRedis || {}
+                    }).catch(() => null);
+                }
 
                 // ✅ Debug: Log para verificar se customerId foi encontrado
                 if (!customerIdToNotify) {

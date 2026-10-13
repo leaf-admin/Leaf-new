@@ -1695,6 +1695,42 @@ router.post(
 );
 
 /**
+ * GET /api/payment/driver-balance/:driverId/withdrawals
+ * Saques do próprio motorista com o estado atual (em conferência, enviando, enviado).
+ */
+router.get(
+  '/payment/driver-balance/:driverId/withdrawals',
+  authenticatePaymentActor,
+  requireDriverScopeFromParam,
+  async (req, res) => {
+    try {
+      if (!isLaunchFeatureEnabled('driverWithdrawalsEnabled', false)) {
+        return respondWithdrawalsDisabled(res);
+      }
+
+      const result = await paymentService.listDriverWithdrawals(
+        req.params.driverId,
+        Number(req.query.limit || 20)
+      );
+      if (!result.success) {
+        return res.status(500).json({
+          success: false,
+          error: 'Não foi possível carregar seus saques agora.'
+        });
+      }
+
+      return res.status(200).json(result);
+    } catch (error) {
+      logError(error, '❌ Erro ao listar saques do motorista', { service: 'payment-routes' });
+      return res.status(500).json({
+        success: false,
+        error: 'Não foi possível carregar seus saques agora.'
+      });
+    }
+  }
+);
+
+/**
  * GET /api/payment/withdrawals/pending
  * Lista saques pendentes para processamento
  */

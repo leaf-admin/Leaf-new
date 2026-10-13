@@ -1,4 +1,5 @@
 const WooviDriverService = require('./woovi-driver-service');
+const { sortDriverWithdrawals, toDriverWithdrawalView } = require('./driver-withdrawal-view');
 const firebaseConfig = require('../firebase-config');
 const admin = require('firebase-admin');
 const crypto = require('crypto');
@@ -5211,6 +5212,31 @@ class PaymentService {
         code: error?.code || null
       };
     }
+  }
+
+  /**
+   * Saques do próprio motorista (mais recentes primeiro), no formato que o app mostra.
+   * Só leitura: não altera saldo nem o saque.
+   */
+  async listDriverWithdrawals(driverId, limit = 20) {
+    const firestore = firebaseConfig.getFirestore();
+    if (!firestore) {
+      return { success: false, error: 'Firestore não disponível' };
+    }
+
+    const safeLimit = Math.max(1, Math.min(Number(limit) || 20, 50));
+    // Sem orderBy para não depender de índice composto; ordena em memória.
+    const snapshot = await firestore
+      .collection('driver_withdrawals')
+      .where('driverId', '==', String(driverId))
+      .limit(200)
+      .get();
+
+    const withdrawals = sortDriverWithdrawals(
+      snapshot.docs.map((doc) => toDriverWithdrawalView(doc.id, doc.data() || {}))
+    ).slice(0, safeLimit);
+
+    return { success: true, withdrawals };
   }
 
   /**
