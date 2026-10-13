@@ -389,14 +389,14 @@ async function main() {
   const healthUrl = resolveHealthUrl(args.healthUrl, mobileEnv, backendEnv);
   const health = await httpGet(healthUrl);
 
+  // Saque do motorista saiu desta lista em 2026-10-13: ligado por decisão do responsável
+  // (pedido fica pendente até a conferência manual da operação).
   const mobileFlags = evaluateLaunchFlags('mobile', mobileEnv, 'EXPO_PUBLIC_LEAF_LAUNCH_PROFILE', [
-    'EXPO_PUBLIC_ENABLE_DRIVER_WITHDRAWALS',
     'EXPO_PUBLIC_ENABLE_REFERRAL_PROGRAMS',
     'EXPO_PUBLIC_ENABLE_SOFT_BAN_ENFORCEMENT',
     'EXPO_PUBLIC_ENABLE_ADMIN_MUTATIONS',
   ]);
   const backendFlags = evaluateLaunchFlags('backend', backendEnv, 'LEAF_LAUNCH_PROFILE', [
-    'ENABLE_DRIVER_WITHDRAWALS',
     'ENABLE_REFERRAL_PROGRAMS',
     'ENABLE_SOFT_BAN_ENFORCEMENT',
     'ENABLE_ADMIN_MUTATIONS',
