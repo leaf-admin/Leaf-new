@@ -252,7 +252,10 @@ class LocationBufferService {
             seq,
             capturedAt: location.timestamp || Date.now(),
             source: 'background_task'
-        }, 'driver', { attemptImmediateSend: false });
+        // Sent right away when connected (it stays buffered otherwise). These fixes used to be
+        // only stored until the app came back to the front: with the driver navigating in
+        // another app, the server and the passenger's map received nothing for the whole time.
+        }, 'driver');
 
         return {
             buffered: true,
