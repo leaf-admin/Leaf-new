@@ -842,23 +842,23 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
     const answers = {
       consented: answer(
         "early_end_consented",
-        `Passageiro confirmou que pediu para encerrar a ${distanceLabel} do destino.`,
+        `Passageiro confirmou que pediu para encerrar a ${distanceLabel} do destino em linha reta.`,
         "",
       ),
       not_consented: answer(
         "early_end_not_consented",
-        `Passageiro informou que o motorista encerrou a corrida a ${distanceLabel} do destino sem consentimento.`,
+        `Passageiro informou que o motorista encerrou a corrida a ${distanceLabel} do destino em linha reta sem consentimento.`,
         "Nossa equipe vai analisar esta corrida e falar com você.",
       ),
       trip_problem: answer(
         "early_end_trip_problem",
-        `Passageiro informou um problema que encerrou a corrida a ${distanceLabel} do destino.`,
+        `Passageiro informou um problema que encerrou a corrida a ${distanceLabel} do destino em linha reta.`,
         "Nossa equipe vai analisar esta corrida e falar com você.",
       ),
     };
     showLeafChoiceSheet({
       title: "A viagem terminou antes do destino",
-      message: `O motorista encerrou a corrida a ${distanceLabel} do destino. O que aconteceu?`,
+      message: `O motorista encerrou a corrida a ${distanceLabel} do destino em linha reta. O que aconteceu?`,
       options: [
         { key: "consented", label: "Eu pedi para descer aqui" },
         { key: "not_consented", label: "O motorista encerrou sem eu pedir", tone: "secondary" },
