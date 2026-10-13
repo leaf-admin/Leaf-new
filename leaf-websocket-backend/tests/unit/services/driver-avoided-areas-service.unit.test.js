@@ -2,6 +2,7 @@ const h3 = require('h3-js');
 const {
   AVOIDED_AREAS_H3_RESOLUTION,
   MAX_AVOIDED_CELLS,
+  buildAreaOutline,
   buildAvoidedAreasPatch,
   cellsAroundPoint,
   isDestinationAvoided,
@@ -167,6 +168,23 @@ describe('driver-avoided-areas-service', () => {
       expect(parseStoredAvoidedCells(null)).toEqual([]);
       expect(parseStoredAvoidedCells('{broken')).toEqual([]);
       expect(parseStoredAvoidedCells(JSON.stringify({ cells: 'x' }))).toEqual([]);
+    });
+  });
+  describe('buildAreaOutline', () => {
+    it('returns one closed outline for a single cell and for a ring of cells', () => {
+      const single = buildAreaOutline([COPACABANA_CELL]);
+      expect(single).toHaveLength(1);
+      expect(single[0]).toHaveLength(6);
+      expect(single[0][0]).toEqual({ latitude: expect.any(Number), longitude: expect.any(Number) });
+
+      const ring = buildAreaOutline(cellsAroundPoint(COPACABANA.lat, COPACABANA.lng, 1));
+      expect(ring).toHaveLength(1);
+      expect(ring[0].length).toBeGreaterThan(6);
+    });
+
+    it('returns nothing without valid cells', () => {
+      expect(buildAreaOutline([])).toEqual([]);
+      expect(buildAreaOutline(['x'])).toEqual([]);
     });
   });
 });

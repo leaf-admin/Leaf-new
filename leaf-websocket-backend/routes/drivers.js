@@ -11,6 +11,7 @@ const {
   MAX_AVOIDED_AREAS,
   MAX_AVOIDED_CELLS,
   MAX_AVOIDED_LABEL_LENGTH,
+  buildAreaOutline,
   buildAvoidedAreasPatch,
   cellsAroundPoint,
   normalizeAvoidedPoint
@@ -401,6 +402,7 @@ router.get('/api/drivers/me/avoided-areas', requireFirebaseUser, async (req, res
       cells: Array.isArray(stored?.cells) ? stored.cells : [],
       areas: Array.isArray(stored?.areas) ? stored.areas : [],
       maxCells: MAX_AVOIDED_CELLS,
+      maxAreas: MAX_AVOIDED_AREAS,
       resolution: AVOIDED_AREAS_H3_RESOLUTION,
       updatedAt: stored?.updatedAt || null
     });
@@ -458,7 +460,8 @@ router.put('/api/drivers/me/avoided-areas', requireFirebaseUser, async (req, res
         label: String(rawArea.label ?? '').trim().slice(0, MAX_AVOIDED_LABEL_LENGTH),
         center,
         ringSize,
-        cells
+        cells,
+        outline: buildAreaOutline(cells)
       });
     }
 
@@ -489,6 +492,7 @@ router.put('/api/drivers/me/avoided-areas', requireFirebaseUser, async (req, res
       cells,
       areas,
       maxCells: MAX_AVOIDED_CELLS,
+      maxAreas: MAX_AVOIDED_AREAS,
       resolution: AVOIDED_AREAS_H3_RESOLUTION,
       updatedAt
     });

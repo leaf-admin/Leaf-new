@@ -126,12 +126,31 @@ function cellsAroundPoint(lat, lng, ringSize = 0) {
   );
 }
 
+// Contorno da área para o app desenhar no mapa (anéis externos; o app não carrega h3).
+function buildAreaOutline(cells) {
+  const valid = normalizeAvoidedCells(cells);
+  if (valid.length === 0) return [];
+
+  try {
+    return h3.cellsToMultiPolygon(valid, false)
+      .map((polygon) => (Array.isArray(polygon?.[0]) ? polygon[0] : []))
+      .filter((ring) => ring.length >= 3)
+      .map((ring) => ring.map(([latitude, longitude]) => ({
+        latitude: Number(latitude.toFixed(6)),
+        longitude: Number(longitude.toFixed(6))
+      })));
+  } catch (error) {
+    return [];
+  }
+}
+
 module.exports = {
   AVOIDED_AREAS_H3_RESOLUTION,
   MAX_AVOIDED_AREAS,
   MAX_AVOIDED_CELLS,
   MAX_AVOIDED_LABEL_LENGTH,
   MAX_AVOIDED_RING_SIZE,
+  buildAreaOutline,
   buildAvoidedAreasPatch,
   cellsAroundPoint,
   isDestinationAvoided,
