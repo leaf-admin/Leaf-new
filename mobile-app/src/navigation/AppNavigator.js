@@ -48,6 +48,7 @@ import LeafSavedPlacesScreen from '../screens/prototype/LeafSavedPlacesScreen';
 import LeafSavedPlacePickerScreen from '../screens/prototype/LeafSavedPlacePickerScreen';
 import LeafAccountInfoScreen from '../screens/prototype/LeafAccountInfoScreen';
 import RobotaxiTripHistoryScreen from '../screens/prototype/RobotaxiTripHistoryScreen';
+import RobotaxiDriverAvoidedAreasScreen from '../screens/prototype/RobotaxiDriverAvoidedAreasScreen';
 import RobotaxiPaymentSuccessScreen from '../screens/prototype/RobotaxiPaymentSuccessScreen';
 import RobotaxiPaymentFailedScreen from '../screens/prototype/RobotaxiPaymentFailedScreen';
 import RobotaxiNoDriversScreen from '../screens/prototype/RobotaxiNoDriversScreen';
@@ -732,6 +733,11 @@ function renderSharedPrototypeScreens() {
       <Stack.Screen
         name="RobotaxiMenuTripHistory"
         component={RobotaxiTripHistoryScreen}
+        options={prototypeRootScreenOptions}
+      />
+      <Stack.Screen
+        name="RobotaxiDriverAvoidedAreas"
+        component={RobotaxiDriverAvoidedAreasScreen}
         options={prototypeRootScreenOptions}
       />
       <Stack.Screen
