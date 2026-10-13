@@ -391,8 +391,12 @@ workerManager.registerListener(EVENT_TYPES.RIDE_COMPLETED, async (event) => {
 
 // ✅ CAOS SCENARIO: Processamento de Payout do Motorista em Cancelamentos
 workerManager.registerListener(EVENT_TYPES.RIDE_CANCELED, async (event) => {
-    const { bookingId, driverId, cancellationFee } = event.data;
-    const eventId = event.eventId || `cancel_${bookingId}`;
+    // O evento chega como { data: { eventId, eventType, data: {...} } } (toJSON do evento canônico);
+    // ler só event.data deixava a multa indefinida e o motorista nunca era creditado.
+    const rideCanceled = unwrapCanonicalEventPayload(event);
+    const { bookingId, driverId } = rideCanceled;
+    const cancellationFee = Number(rideCanceled.cancellationFee) || 0;
+    const eventId = rideCanceled.eventId || `cancel_${bookingId}`;
 
     // Apenas se houver multa e um motorista associado para receber
     if (!cancellationFee || cancellationFee <= 0 || !driverId) {
@@ -428,8 +432,8 @@ workerManager.registerListener(EVENT_TYPES.RIDE_CANCELED, async (event) => {
         rideId: bookingId,
         driverId: driverId,
         cancellationFee: cancellationFee,
-        financialContext: event.data?.financialContext || null,
-        providerEnvironment: event.data?.providerEnvironment || event.data?.paymentProviderEnvironment || null
+        financialContext: rideCanceled.financialContext || null,
+        providerEnvironment: rideCanceled.providerEnvironment || rideCanceled.paymentProviderEnvironment || null
     });
 
     if (!distributionResult.success) {
