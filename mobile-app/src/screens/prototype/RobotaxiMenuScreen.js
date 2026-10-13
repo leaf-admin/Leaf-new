@@ -72,7 +72,7 @@ export default function RobotaxiMenuScreen({ navigation, route }) {
       ['trips', 'Ganhos e corridas', 'Saldo, viagens e recibos', 'wallet-outline', ['driver-earnings', 'driver-history']],
       ['registration', 'Cadastro e veículo', 'Ativação, documentos e cidade', 'document-text-outline', ['driver-activation', 'driver-documents', 'driver-vehicles', 'driver-waitlist-invites']],
       ['profile', 'Dados pessoais', 'Seu perfil e contato', 'person-outline', ['edit-profile', 'achievements']],
-      ['help', 'Ajuda e preferências', 'Suporte, configurações e privacidade', 'help-circle-outline', ['privacy-account-deletion', 'settings', 'help']],
+      ['help', 'Ajuda e preferências', 'Suporte, configurações e privacidade', 'help-circle-outline', ['help', 'settings', 'privacy-account-deletion']],
     ] : [
       ['trips', 'Viagens e pagamento', 'Histórico, recibos e Pix', 'time-outline', ['trip-history', 'payment-info']],
       ['places', 'Endereços salvos', 'Casa, trabalho e favoritos', 'location-outline', ['saved-places']],

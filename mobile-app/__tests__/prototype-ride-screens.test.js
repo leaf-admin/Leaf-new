@@ -4457,7 +4457,7 @@ describe('prototype ride screens', () => {
       const screen = render(<RobotaxiTripHistoryScreen navigation={navigation()} route={{ key: 'activity' }} />);
       await waitFor(() => expect(screen.getByText('Concluídas · 30 dias')).toBeTruthy());
       expect(screen.getByText('37')).toBeTruthy();
-      expect(screen.getByText('Total líquido · 30 dias')).toBeTruthy();
+      expect(screen.getByText('Líquido · 30 dias')).toBeTruthy();
       expect(screen.getByText('R$ 1.480,90')).toBeTruthy();
       expect(global.fetch).toHaveBeenCalledTimes(1);
       expect(global.fetch.mock.calls[0][0]).toMatch(/\/api\/drivers\/activity_user\/earnings$/);
