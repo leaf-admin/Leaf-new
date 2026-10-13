@@ -9,6 +9,7 @@
  */
 
 const redisPool = require('../utils/redis-pool');
+const { isOfferPushEnabled, buildOfferPushNotification } = require('./offer-push');
 const driverLockManager = require('./driver-lock-manager');
 const eventSourcing = require('./event-sourcing');
 const { EVENT_TYPES } = require('./event-sourcing');
@@ -887,6 +888,28 @@ class DriverNotificationDispatcher {
      * @param {Object} bookingData - Dados completos da corrida
      * @returns {Promise<boolean>} true se notificado com sucesso
      */
+    /**
+     * Push de nova corrida (ver services/offer-push.js). Nunca falha o envio da oferta.
+     */
+    async sendOfferPush(driverId, offer = {}) {
+        if (!isOfferPushEnabled()) {
+            return { success: false, skipped: true };
+        }
+        try {
+            if (!this.offerPushService) {
+                const FCMService = require('./fcm-service');
+                this.offerPushService = new FCMService();
+            }
+            return await this.offerPushService.sendNotificationToUser(
+                driverId,
+                buildOfferPushNotification(offer)
+            );
+        } catch (error) {
+            logger.warn(`⚠️ [Dispatcher] Push de nova corrida não enviado para ${driverId}: ${error.message}`);
+            return { success: false, error: error.message };
+        }
+    }
+
     async notifyDriver(driverId, bookingId, bookingData, options = {}) {
         let lockManagedForOffer = false;
         const releaseManagedOfferLock = async () => {
@@ -1316,6 +1339,13 @@ class DriverNotificationDispatcher {
             // 7. Enviar notificação via WebSocket
             // Usar room específico do motorista (driver_${driverId})
             this.io.to(driverRoom).emit('newRideRequest', notificationData);
+
+            // Aviso visível para o motorista que não está com o app aberto. A oferta só
+            // chegava pelo socket: com o app em segundo plano ele não via nada e a corrida
+            // expirava. Não bloqueia nem falha o envio da oferta.
+            if (process.env.NODE_ENV !== 'test' || this.offerPushService) {
+                this.sendOfferPush(driverId, notificationData).catch(() => null);
+            }
 
             if (options?.dispatchTrace?.type === 'direct') {
                 await recordDispatchDirectNotification(this.redis, bookingId, {
