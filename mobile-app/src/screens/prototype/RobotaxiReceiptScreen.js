@@ -1074,7 +1074,12 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
   const tightDriverLayout =
     isDriverView && (windowHeight <= 860 || driverRouteDensity >= 92);
   const routeTextLineLimit = tightDriverLayout ? 1 : 2;
-  const tripDistanceLabel = formatDistanceKm(tripDistance);
+  // A settled early end can have a measured distance of zero; that is a value,
+  // not a missing one.
+  const tripDistanceLabel =
+    selected?.settlementType && Number(tripDistance) === 0
+      ? "0 km"
+      : formatDistanceKm(tripDistance);
   const tripDurationLabel = formatDurationMin(tripDuration);
   const paymentStatusLabel = formatPaymentMethod(selected?.paymentMethod);
   const driverRatingSubmitted = Boolean(selected?.driverRatedPassengerAt);

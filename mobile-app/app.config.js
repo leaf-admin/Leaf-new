@@ -421,6 +421,7 @@ module.exports = {
         "@react-native-firebase/auth",
         "./plugins/withGoogleMapsApiKey",
         "./plugins/withDisableDevMenu",
+        "./plugins/withTaskServiceApplicationContext",
         "./plugins/withDevLauncherPortScanFix",
         "./plugins/withGradleNodeFix",
         "./plugins/withExpoModulesCoreFix",

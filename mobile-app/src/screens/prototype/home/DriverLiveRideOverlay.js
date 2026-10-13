@@ -2087,7 +2087,7 @@ function DriverLiveRideOverlay({
                 testID="driver-live-trip-cancel-confirm-button"
                 accessibilityLabel="Confirmar cancelamento"
               >
-                <Text style={styles.cancelPromptYesText}>Cancelar</Text>
+                <Text style={styles.cancelPromptYesText}>Cancelar corrida</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 activeOpacity={0.86}
@@ -2096,7 +2096,7 @@ function DriverLiveRideOverlay({
                 testID="driver-live-trip-cancel-dismiss-button"
                 accessibilityLabel="Continuar corrida"
               >
-                <Text style={styles.cancelPromptNoText}>Continuar</Text>
+                <Text style={styles.cancelPromptNoText}>Manter corrida</Text>
               </TouchableOpacity>
             </View>
           </View>
