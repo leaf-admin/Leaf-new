@@ -1,3 +1,5 @@
+const { isRideInAvoidedArea } = require('./driver-avoided-areas-service');
+
 const DEFAULT_DRIVER_DESTINATION_MIN_PROGRESS_KM = Math.max(
   0,
   Number.parseFloat(process.env.DRIVER_DESTINATION_MIN_PROGRESS_KM || '1') || 1
@@ -209,12 +211,32 @@ function driverMatchesDestinationMode(driverData = {}, requirements = {}) {
   };
 }
 
+// Áreas evitadas pelo motorista são bloqueio duro: embarque ou destino dentro delas nunca é ofertado.
+function driverMatchesAvoidedAreas(driverData = {}, requirements = {}) {
+  const destinationLocation =
+    requirements.destinationLocation ||
+    requirements.destination ||
+    requirements.drop ||
+    null;
+
+  const pickupLocation = requirements.pickupLocation || requirements.pickup || null;
+
+  if (isRideInAvoidedArea(driverData, { pickupLocation, destinationLocation })) {
+    return { ok: false, reason: 'DRIVER_AVOIDED_AREA' };
+  }
+
+  return { ok: true, reason: 'DRIVER_AVOIDED_AREA_NOT_MATCHED' };
+}
+
 function driverMatchesRidePreferences(driverData = {}, requirements = {}) {
   const leafDelas = driverMatchesLeafDelas(driverData, requirements);
   if (!leafDelas.ok) return leafDelas;
 
   const destinationMode = driverMatchesDestinationMode(driverData, requirements);
   if (!destinationMode.ok) return destinationMode;
+
+  const avoidedArea = driverMatchesAvoidedAreas(driverData, requirements);
+  if (!avoidedArea.ok) return avoidedArea;
 
   return {
     ok: true,
@@ -226,6 +248,7 @@ function driverMatchesRidePreferences(driverData = {}, requirements = {}) {
 }
 
 module.exports = {
+  driverMatchesAvoidedAreas,
   driverMatchesDestinationMode,
   driverMatchesLeafDelas,
   driverMatchesRidePreferences,

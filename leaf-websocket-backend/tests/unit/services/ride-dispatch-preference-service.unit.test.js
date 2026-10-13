@@ -1,3 +1,4 @@
+const h3 = require('h3-js');
 const {
   driverMatchesDestinationMode,
   driverMatchesLeafDelas,
@@ -76,6 +77,48 @@ describe('ride-dispatch-preference-service', () => {
     ).toMatchObject({
       ok: false,
       reason: 'DRIVER_DESTINATION_NO_PROGRESS'
+    });
+  });
+
+  describe('avoided areas (hard filter)', () => {
+    const DESTINATION = { lat: -22.9711, lng: -43.1822 };
+    const DESTINATION_CELL = h3.latLngToCell(DESTINATION.lat, DESTINATION.lng, 8);
+    const FAR_CELL = h3.latLngToCell(-23.0045, -43.3659, 8);
+
+    it('does not match a driver whose avoided cells contain the pickup', () => {
+      expect(
+        driverMatchesRidePreferences(
+          { driverId: 'driver_1', avoidedH3Cells: JSON.stringify([DESTINATION_CELL]) },
+          { pickupLocation: DESTINATION, destinationLocation: { lat: -22.95, lng: -43.2 } }
+        )
+      ).toMatchObject({ ok: false, reason: 'DRIVER_AVOIDED_AREA' });
+    });
+
+    it('does not match a driver whose avoided cells contain the destination', () => {
+      expect(
+        driverMatchesRidePreferences(
+          { driverId: 'driver_1', avoidedH3Cells: JSON.stringify([DESTINATION_CELL]) },
+          { pickupLocation: { lat: -22.95, lng: -43.2 }, destinationLocation: DESTINATION }
+        )
+      ).toMatchObject({ ok: false, reason: 'DRIVER_AVOIDED_AREA' });
+    });
+
+    it('matches a driver whose avoided cells are elsewhere', () => {
+      expect(
+        driverMatchesRidePreferences(
+          { driverId: 'driver_1', avoidedH3Cells: JSON.stringify([FAR_CELL]) },
+          { pickupLocation: { lat: -22.95, lng: -43.2 }, destinationLocation: DESTINATION }
+        )
+      ).toMatchObject({ ok: true });
+    });
+
+    it('matches when the ride has no destination', () => {
+      expect(
+        driverMatchesRidePreferences(
+          { driverId: 'driver_1', avoidedH3Cells: JSON.stringify([DESTINATION_CELL]) },
+          { pickupLocation: { lat: -22.95, lng: -43.2 } }
+        )
+      ).toMatchObject({ ok: true });
     });
   });
 });

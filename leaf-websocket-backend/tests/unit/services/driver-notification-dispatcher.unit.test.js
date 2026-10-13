@@ -132,7 +132,7 @@ describe('driver-notification-dispatcher timeout cleanup', () => {
       multi: jest.fn(() => createMultiMock()),
       pipeline: jest.fn(() =>
         createPipelineMock((signature) => {
-          if (signature === 'get|sismember|sismember|hmget|ttl|ttl|hget') {
+          if (signature === 'get|sismember|sismember|hmget|ttl|ttl|hget|get') {
             return [
               [null, null],
               [null, 0],
@@ -255,7 +255,7 @@ describe('driver-notification-dispatcher timeout cleanup', () => {
   it('does not notify a driver while the booking is in rejection cooldown', async () => {
     redis.pipeline.mockImplementationOnce(() =>
       createPipelineMock((signature) => {
-        if (signature === 'get|sismember|sismember|hmget|ttl|ttl|hget') {
+        if (signature === 'get|sismember|sismember|hmget|ttl|ttl|hget|get') {
           return [
             [null, null],
             [null, 0],
@@ -285,10 +285,51 @@ describe('driver-notification-dispatcher timeout cleanup', () => {
     expect(driverLockManager.acquireLock).not.toHaveBeenCalled();
   });
 
+  it('does not notify a driver whose stored avoided area contains the booking destination', async () => {
+    const h3 = require('h3-js');
+    const destination = { lat: -22.9711, lng: -43.1822 };
+    const avoidedCell = h3.latLngToCell(destination.lat, destination.lng, 8);
+    redis.pipeline.mockImplementationOnce(() =>
+      createPipelineMock((signature) => {
+        if (signature === 'get|sismember|sismember|hmget|ttl|ttl|hget|get') {
+          return [
+            [null, null],
+            [null, 0],
+            [null, 0],
+            [null, ['true', 'true', 'online', String(nowMs), new Date(nowMs).toISOString()]],
+            [null, -2],
+            [null, -2],
+            [null, '0'],
+            [null, JSON.stringify({ cells: [avoidedCell] })],
+          ];
+        }
+        return [];
+      })
+    );
+
+    dispatcher.getDispatchability = jest.fn().mockResolvedValue({
+      ok: true,
+      bookingData: {
+        bookingId: 'booking_123',
+        destinationLocation: JSON.stringify(destination),
+      },
+    });
+
+    const finishSpy = jest.spyOn(dispatcher, 'finishNotificationOutcome');
+    const notified = await dispatcher.notifyDriver('driver_1', 'booking_123', {
+      bookingId: 'booking_123',
+      destinationLocation: JSON.stringify(destination),
+    });
+
+    expect(notified).toBe(false);
+    expect(finishSpy).toHaveBeenLastCalledWith({}, false, 'DRIVER_AVOIDED_AREA', {});
+    expect(driverLockManager.acquireLock).not.toHaveBeenCalled();
+  });
+
   it('does not notify a driver once the booking reached the maximum rejection count', async () => {
     redis.pipeline.mockImplementationOnce(() =>
       createPipelineMock((signature) => {
-        if (signature === 'get|sismember|sismember|hmget|ttl|ttl|hget') {
+        if (signature === 'get|sismember|sismember|hmget|ttl|ttl|hget|get') {
           return [
             [null, null],
             [null, 0],
@@ -321,7 +362,7 @@ describe('driver-notification-dispatcher timeout cleanup', () => {
   it('does not notify a driver with stale liveness in preflight', async () => {
     redis.pipeline.mockImplementationOnce(() =>
       createPipelineMock((signature) => {
-        if (signature === 'get|sismember|sismember|hmget|ttl|ttl|hget') {
+        if (signature === 'get|sismember|sismember|hmget|ttl|ttl|hget|get') {
           const staleMs = nowMs - 120000;
           return [
             [null, null],
@@ -368,7 +409,7 @@ describe('driver-notification-dispatcher timeout cleanup', () => {
   ])('does not notify when dispatchEligible is %s', async (_label, dispatchEligible) => {
     redis.pipeline.mockImplementationOnce(() =>
       createPipelineMock((signature) => {
-        if (signature === 'get|sismember|sismember|hmget|ttl|ttl|hget') {
+        if (signature === 'get|sismember|sismember|hmget|ttl|ttl|hget|get') {
           return [
             [null, null],
             [null, 0],
@@ -504,7 +545,7 @@ describe('driver-notification-dispatcher timeout cleanup', () => {
     redis.pipeline
       .mockImplementationOnce(() =>
         createPipelineMock((signature) => {
-          if (signature === 'get|sismember|sismember|hmget|ttl|ttl|hget') {
+          if (signature === 'get|sismember|sismember|hmget|ttl|ttl|hget|get') {
             return [
               [null, null],
               [null, 0],
