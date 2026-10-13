@@ -642,6 +642,12 @@ class FCMNotificationService {
             // Determinar tipo de notificação
             const notificationType = data?.type || 'general';
 
+            // A new ride offer is already on screen (the offer card): the push
+            // exists for when the app is not in front.
+            if (notificationType === 'ride_offer') {
+                return;
+            }
+
             // Executar handler específico se existir
             if (this.notificationHandlers.has(notificationType)) {
                 await this.notificationHandlers.get(notificationType)(remoteMessage);
