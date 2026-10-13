@@ -285,6 +285,46 @@ describe('driver-notification-dispatcher timeout cleanup', () => {
     expect(driverLockManager.acquireLock).not.toHaveBeenCalled();
   });
 
+  it('does not notify a driver whose avoided area contains the booking destination', async () => {
+    const h3 = require('h3-js');
+    const destination = { lat: -22.9711, lng: -43.1822 };
+    const avoidedCell = h3.latLngToCell(destination.lat, destination.lng, 8);
+    redis.pipeline.mockImplementationOnce(() =>
+      createPipelineMock((signature) => {
+        if (signature === 'get|sismember|sismember|hmget|ttl|ttl|hget') {
+          return [
+            [null, null],
+            [null, 0],
+            [null, 0],
+            [null, ['true', 'true', 'online', String(nowMs), new Date(nowMs).toISOString(), JSON.stringify([avoidedCell])]],
+            [null, -2],
+            [null, -2],
+            [null, '0'],
+          ];
+        }
+        return [];
+      })
+    );
+
+    dispatcher.getDispatchability = jest.fn().mockResolvedValue({
+      ok: true,
+      bookingData: {
+        bookingId: 'booking_123',
+        destinationLocation: JSON.stringify(destination),
+      },
+    });
+
+    const finishSpy = jest.spyOn(dispatcher, 'finishNotificationOutcome');
+    const notified = await dispatcher.notifyDriver('driver_1', 'booking_123', {
+      bookingId: 'booking_123',
+      destinationLocation: JSON.stringify(destination),
+    });
+
+    expect(notified).toBe(false);
+    expect(finishSpy).toHaveBeenLastCalledWith({}, false, 'DRIVER_AVOIDED_AREA', {});
+    expect(driverLockManager.acquireLock).not.toHaveBeenCalled();
+  });
+
   it('does not notify a driver once the booking reached the maximum rejection count', async () => {
     redis.pipeline.mockImplementationOnce(() =>
       createPipelineMock((signature) => {
