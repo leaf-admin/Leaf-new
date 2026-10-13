@@ -154,7 +154,8 @@ function formatWeekdayLabel(dateISO) {
   if (!date) {
     return '--';
   }
-  return date.toLocaleDateString('pt-BR', { weekday: 'short' }).toUpperCase();
+  // Tabela fixa: no Android o formato curto do sistema devolve só uma letra ("T").
+  return ['DOM', 'SEG', 'TER', 'QUA', 'QUI', 'SEX', 'SÁB'][date.getDay()];
 }
 
 function normalizeDailySeries(report) {
@@ -1350,7 +1351,7 @@ export default function EarningsReportScreen({ navigation, route }) {
                             textAnchor="middle"
                             fontWeight="500"
                           >
-                            {bar.label.slice(0, 1)}
+                            {bars.length <= 3 ? bar.label : bar.label.slice(0, 1)}
                           </SvgText>
                         </React.Fragment>
                       ))}
