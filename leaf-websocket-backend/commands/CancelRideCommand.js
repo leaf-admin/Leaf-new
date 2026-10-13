@@ -30,6 +30,7 @@ const { clearActiveTripForDriver } = require('../utils/active-trip-index');
 const tripLocationPersistenceService = require('../services/trip-location-persistence-service');
 const pricingH3ReadModelService = require('../services/pricing-h3-read-model-service');
 const { resolveFinancialContext } = require('../services/financial-runtime-context');
+const { recordPendingCancellationCredit } = require('../services/cancellation-credit-pending-service');
 
 const PASSENGER_CANCEL_FIXED_FEE_CENTS = Math.max(
     0,
@@ -611,6 +612,28 @@ class CancelRideCommand extends Command {
                     }
                 };
                 finalizeTripLocation();
+
+                // A taxa já foi cobrada do passageiro. Registrar o crédito devido ao motorista antes
+                // de publicar o evento: se o evento se perder, o billing-worker credita pela pendência.
+                if (driverId && this.cancellationFee > 0) {
+                    try {
+                        await recordPendingCancellationCredit(redis, {
+                            bookingId: this.bookingId,
+                            driverId,
+                            cancellationFee: this.cancellationFee,
+                            financialContext,
+                            providerEnvironment: financialContext.providerEnvironment
+                        });
+                    } catch (pendingCreditError) {
+                        logStructured('error', 'Falha ao registrar pendência de crédito da taxa de cancelamento', {
+                            service: 'cancel-ride-command',
+                            bookingId: this.bookingId,
+                            driverId,
+                            cancellationFee: this.cancellationFee,
+                            error: pendingCreditError.message
+                        });
+                    }
+                }
 
                 // Criar evento canônico
                 const event = new RideCanceledEvent({

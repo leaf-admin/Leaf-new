@@ -31,6 +31,11 @@ jest.mock('../../../services/payment-service', () =>
     updatePaymentHolding: mockUpdatePaymentHolding
   }))
 );
+const mockRedis = { hset: jest.fn(), hdel: jest.fn(), hgetall: jest.fn() };
+jest.mock('../../../utils/redis-pool', () => ({
+  ensureConnection: jest.fn().mockResolvedValue(undefined),
+  getConnection: jest.fn(() => mockRedis)
+}));
 jest.mock('../../../services/driver-approval-service', () => ({
   getDriverWooviAccount: mockGetDriverWooviAccount
 }));
@@ -50,7 +55,8 @@ jest.mock('../../../utils/ride-lifecycle-feature-flags', () => ({
 const {
   normalizeMoneyToCents,
   buildRideBillingIdempotencyScope,
-  buildCancellationBillingIdempotencyScope
+  buildCancellationBillingIdempotencyScope,
+  sweepPendingCancellationCredits
 } = require('../../../workers/worker-billing');
 const { EVENT_TYPES } = require('../../../events');
 
@@ -344,6 +350,103 @@ describe('worker-billing money normalization', () => {
       await mockListeners[EVENT_TYPES.RIDE_CANCELED](buildCanceledEvent());
 
       expect(mockProcessCancellationDistribution).not.toHaveBeenCalled();
+    });
+
+    it('reads the fee from the event exactly as the cancel command serializes it', async () => {
+      const RideCanceledEvent = jest.requireActual('../../../events/ride.canceled');
+      const canonical = new RideCanceledEvent({
+        bookingId: 'booking_real',
+        canceledBy: 'driver_1',
+        reason: 'no_show',
+        cancellationFee: 350,
+        driverId: 'driver_1',
+        traceId: 'trace_1'
+      }).toJSON();
+
+      // Mesmo caminho da produção: publish({ data: event.toJSON() }) -> stream -> WorkerManager.
+      await mockListeners[EVENT_TYPES.RIDE_CANCELED]({
+        eventType: EVENT_TYPES.RIDE_CANCELED,
+        data: JSON.parse(JSON.stringify(canonical))
+      });
+
+      expect(mockProcessCancellationDistribution).toHaveBeenCalledWith(
+        expect.objectContaining({ rideId: 'booking_real', driverId: 'driver_1', cancellationFee: 350 })
+      );
+    });
+
+    it('clears the pending credit only after the driver is credited', async () => {
+      await mockListeners[EVENT_TYPES.RIDE_CANCELED](buildCanceledEvent());
+      expect(mockRedis.hdel).toHaveBeenCalledWith('billing:cancellation_credit_pending', 'booking_1');
+
+      mockRedis.hdel.mockClear();
+      mockProcessCancellationDistribution.mockResolvedValueOnce({ success: false, error: 'ledger down' });
+      await expect(mockListeners[EVENT_TYPES.RIDE_CANCELED](buildCanceledEvent())).rejects.toThrow();
+      expect(mockRedis.hdel).not.toHaveBeenCalled();
+    });
+
+    it('keeps the pending credit while another processing is still in flight', async () => {
+      mockCheckAndSet.mockResolvedValueOnce({ isNew: false, cachedResult: null });
+
+      const result = await mockListeners[EVENT_TYPES.RIDE_CANCELED](buildCanceledEvent());
+
+      expect(result.inFlight).toBe(true);
+      expect(mockRedis.hdel).not.toHaveBeenCalled();
+    });
+
+    describe('pending sweep', () => {
+      const pendingEntry = (overrides = {}) =>
+        JSON.stringify({
+          bookingId: 'booking_lost',
+          driverId: 'driver_1',
+          cancellationFee: 300,
+          financialContext: { namespace: 'sandbox' },
+          providerEnvironment: 'sandbox',
+          createdAt: Date.now() - 10 * 60 * 1000,
+          attempts: 0,
+          ...overrides
+        });
+
+      it('credits a fee whose event never arrived', async () => {
+        mockRedis.hgetall.mockResolvedValue({ booking_lost: pendingEntry() });
+
+        const summary = await sweepPendingCancellationCredits();
+
+        expect(mockProcessCancellationDistribution).toHaveBeenCalledWith(
+          expect.objectContaining({ rideId: 'booking_lost', driverId: 'driver_1', cancellationFee: 300 })
+        );
+        expect(mockRedis.hdel).toHaveBeenCalledWith('billing:cancellation_credit_pending', 'booking_lost');
+        expect(summary).toMatchObject({ due: 1, credited: 1, failed: 0 });
+      });
+
+      it('leaves recent cancellations to the normal event path', async () => {
+        mockRedis.hgetall.mockResolvedValue({ booking_lost: pendingEntry({ createdAt: Date.now() - 5000 }) });
+
+        const summary = await sweepPendingCancellationCredits();
+
+        expect(mockProcessCancellationDistribution).not.toHaveBeenCalled();
+        expect(summary.due).toBe(0);
+      });
+
+      it('keeps the pending credit and counts the attempt when the credit fails', async () => {
+        mockRedis.hgetall.mockResolvedValue({ booking_lost: pendingEntry() });
+        mockProcessCancellationDistribution.mockResolvedValueOnce({ success: false, error: 'ledger down' });
+
+        const summary = await sweepPendingCancellationCredits();
+
+        expect(mockRedis.hdel).not.toHaveBeenCalled();
+        const [, , stored] = mockRedis.hset.mock.calls[0];
+        expect(JSON.parse(stored)).toMatchObject({ bookingId: 'booking_lost', attempts: 1 });
+        expect(summary).toMatchObject({ credited: 0, failed: 1 });
+      });
+
+      it('stops retrying after the automatic limit and reports it for manual review', async () => {
+        mockRedis.hgetall.mockResolvedValue({ booking_lost: pendingEntry({ attempts: 30 }) });
+
+        const summary = await sweepPendingCancellationCredits();
+
+        expect(mockProcessCancellationDistribution).not.toHaveBeenCalled();
+        expect(summary.manualReview).toBe(1);
+      });
     });
 
     it('releases the idempotency lock and fails when the credit fails', async () => {

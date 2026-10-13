@@ -275,6 +275,12 @@ describe('CancelRideCommand authorization and terminal guards', () => {
 
     expect(result.success).toBe(true);
     expect(result.data.cancellationFee).toBe(299);
+    // Sem motorista atribuído não há a quem creditar: nenhuma pendência é registrada.
+    expect(
+      redisPool.getConnection.mock.results
+        .flatMap((entry) => entry.value?.hset?.mock?.calls || [])
+        .some(([key]) => key === 'billing:cancellation_credit_pending')
+    ).toBe(false);
     expect(processRideRefund).toHaveBeenCalledWith(
       expect.objectContaining({
         rideId: 'booking_canonical_fee',
@@ -330,6 +336,18 @@ describe('CancelRideCommand authorization and terminal guards', () => {
     expect(result.success).toBe(true);
     // 5 min x R$ 0,50 + R$ 0,50; the 40% cap is R$ 18,02, not R$ 0,18.
     expect(result.data.cancellationFee).toBe(300);
+    // O crédito devido ao motorista fica registrado antes do evento, para não depender só dele.
+    const pendingCall = require('../../../utils/redis-pool')
+      .getConnection.mock.results.flatMap((entry) => entry.value?.hset?.mock?.calls || [])
+      .find(([key]) => key === 'billing:cancellation_credit_pending');
+    expect(pendingCall).toBeDefined();
+    expect(pendingCall[1]).toBe(result.data.bookingId);
+    expect(JSON.parse(pendingCall[2])).toMatchObject({
+      bookingId: result.data.bookingId,
+      driverId: result.data.driverId,
+      cancellationFee: 300,
+      attempts: 0,
+    });
   });
 });
 
