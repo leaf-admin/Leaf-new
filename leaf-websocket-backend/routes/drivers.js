@@ -16,6 +16,7 @@ const {
   cellsAroundPoint,
   normalizeAvoidedPoint
 } = require('../services/driver-avoided-areas-service');
+const { findBairroAt, getBairroById, toBairroView } = require('../services/rio-bairros-service');
 const { getFinancialCollections } = require('../services/financial-runtime-context');
 const {
   resolveUserPersistenceScope,
@@ -415,6 +416,12 @@ router.get('/api/drivers/me/avoided-areas', requireFirebaseUser, async (req, res
   }
 });
 
+// Qual bairro fica neste ponto do mapa (toque para selecionar o bairro inteiro).
+router.get('/api/drivers/me/avoided-areas/bairro', requireFirebaseUser, (req, res) => {
+  const bairro = toBairroView(findBairroAt(req.query.lat, req.query.lng));
+  return res.json({ success: true, bairro });
+});
+
 router.put('/api/drivers/me/avoided-areas', requireFirebaseUser, async (req, res) => {
   try {
     const driverId = req.authenticatedUser.uid;
@@ -437,9 +444,35 @@ router.put('/api/drivers/me/avoided-areas', requireFirebaseUser, async (req, res
     }
 
     const areas = [];
+    const bairroIds = [];
     const distinctCells = new Set();
     for (let index = 0; index < rawAreas.length; index += 1) {
       const rawArea = rawAreas[index] || {};
+
+      // Bairro inteiro, pelo código oficial.
+      if (rawArea.bairroId !== undefined && rawArea.bairroId !== null && String(rawArea.bairroId).trim() !== '') {
+        const bairro = toBairroView(getBairroById(rawArea.bairroId));
+        if (!bairro) {
+          return res.status(400).json({
+            success: false,
+            code: 'AVOIDED_AREA_INVALID',
+            error: 'Bairro não encontrado.'
+          });
+        }
+        if (!bairroIds.includes(bairro.id)) {
+          bairroIds.push(bairro.id);
+          areas.push({
+            id: `bairro_${bairro.id}`,
+            type: 'bairro',
+            bairroId: bairro.id,
+            label: bairro.name,
+            center: bairro.center,
+            outline: bairro.outline
+          });
+        }
+        continue;
+      }
+
       const center = normalizeAvoidedPoint(rawArea.center);
       const ringSize = rawArea.ringSize === undefined || rawArea.ringSize === null
         ? 0
@@ -457,6 +490,7 @@ router.put('/api/drivers/me/avoided-areas', requireFirebaseUser, async (req, res
       cells.forEach((cell) => distinctCells.add(cell));
       areas.push({
         id: String(rawArea.id ?? '').trim().slice(0, 64) || `area_${index + 1}`,
+        type: 'free',
         label: String(rawArea.label ?? '').trim().slice(0, MAX_AVOIDED_LABEL_LENGTH),
         center,
         ringSize,
@@ -479,12 +513,12 @@ router.put('/api/drivers/me/avoided-areas', requireFirebaseUser, async (req, res
     // Fonte da verdade (sem TTL): é o que o dispatcher consulta antes de ofertar.
     await redis.set(
       `driver_avoided_areas:${driverId}`,
-      JSON.stringify({ cells, areas, updatedAt })
+      JSON.stringify({ cells, bairros: bairroIds, areas, updatedAt })
     );
     // Cópia no hash do motorista só se ele existir: criar o hash aqui deixaria um
     // registro de motorista incompleto e sem TTL.
     if (await redis.exists(`driver:${driverId}`)) {
-      await redis.hset(`driver:${driverId}`, buildAvoidedAreasPatch(cells, updatedAt));
+      await redis.hset(`driver:${driverId}`, buildAvoidedAreasPatch(cells, updatedAt, bairroIds));
     }
 
     return res.json({
