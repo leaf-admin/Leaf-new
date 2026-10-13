@@ -116,4 +116,48 @@ describe('BackgroundLocationService start/stop', () => {
     expect(mockLocation.stopLocationUpdatesAsync).not.toHaveBeenCalled();
     expect(mockLogger.error).not.toHaveBeenCalled();
   });
+
+  it('notifies subscribers of a start failure, of the recovery and of the stop, and does not retry the native start', async () => {
+    const listener = jest.fn();
+    const unsubscribe = service.subscribeTrackingStatus(listener);
+    mockLocation.startLocationUpdatesAsync.mockRejectedValueOnce(
+      nativeRejection(
+        "java.lang.NullPointerException: Attempt to invoke interface method 'java.util.Map android.content.SharedPreferences.getAll()' on a null object reference"
+      )
+    );
+
+    await service.startBackgroundTracking();
+
+    // The stale native TaskService cannot be reset from JS: exactly one native attempt.
+    expect(mockLocation.startLocationUpdatesAsync).toHaveBeenCalledTimes(1);
+    expect(listener).toHaveBeenCalledTimes(1);
+    expect(listener.mock.calls[0][0]).toEqual(
+      expect.objectContaining({
+        isTracking: false,
+        lastStartFailure: expect.objectContaining({ code: 'ERR_UNEXPECTED', count: 1 }),
+      })
+    );
+
+    await service.startBackgroundTracking();
+    expect(listener).toHaveBeenLastCalledWith({ isTracking: true, lastStartFailure: null });
+
+    await service.stopBackgroundTracking();
+    expect(listener).toHaveBeenLastCalledWith({ isTracking: false, lastStartFailure: null });
+
+    const callsBeforeUnsubscribe = listener.mock.calls.length;
+    unsubscribe();
+    await service.startBackgroundTracking();
+    expect(listener).toHaveBeenCalledTimes(callsBeforeUnsubscribe);
+  });
+
+  it('keeps working when a status subscriber throws', async () => {
+    service.subscribeTrackingStatus(() => {
+      throw new Error('listener boom');
+    });
+
+    await service.startBackgroundTracking();
+
+    expect(service.getTrackingStatus().isTracking).toBe(true);
+    expect(mockLogger.error).not.toHaveBeenCalled();
+  });
 });

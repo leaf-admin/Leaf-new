@@ -75,6 +75,7 @@ class BackgroundLocationService {
     isTracking = false;
     startInFlight = null;
     lastStartFailure = null;
+    trackingStatusListeners = new Set();
 
     static getInstance() {
         if (!BackgroundLocationService.instance) {
@@ -152,6 +153,32 @@ class BackgroundLocationService {
     }
 
     /**
+     * Observar mudanças do estado acima (início, falha ao iniciar, parada).
+     * @param {Function} listener - recebe o mesmo objeto de getTrackingStatus()
+     * @returns {Function} cancelar a inscrição
+     */
+    subscribeTrackingStatus(listener) {
+        if (typeof listener !== 'function') {
+            return () => {};
+        }
+        this.trackingStatusListeners.add(listener);
+        return () => {
+            this.trackingStatusListeners.delete(listener);
+        };
+    }
+
+    notifyTrackingStatus() {
+        const status = this.getTrackingStatus();
+        this.trackingStatusListeners.forEach((listener) => {
+            try {
+                listener(status);
+            } catch (listenerError) {
+                Logger.warn('⚠️ Listener de status do tracking falhou:', listenerError?.message || listenerError);
+            }
+        });
+    }
+
+    /**
      * Iniciar tracking de localização em background.
      * Idempotente: já ativo é no-op e chamadas concorrentes compartilham a mesma tentativa.
      */
@@ -215,6 +242,7 @@ class BackgroundLocationService {
             }
             this.lastStartFailure = null;
             Logger.log('✅ Tracking de background iniciado');
+            this.notifyTrackingStatus();
         } catch (error) {
             // ✅ Não lançar erro (evitar quebrar o fluxo), mas registrar a condição
             this.isTracking = false;
@@ -246,6 +274,7 @@ class BackgroundLocationService {
                 lastAt: now
             };
             Logger.log(`📍 Tracking de background segue indisponível (mesma falha, tentativa ${previous.count + 1}): [${code || 'sem código'}]`);
+            this.notifyTrackingStatus();
             return;
         }
 
@@ -262,6 +291,7 @@ class BackgroundLocationService {
             `❌ Erro ao iniciar tracking de background: [${code || 'sem código'}] ${message}`
             + ` (task nativa registrada: ${nativeTaskRegistered === null ? 'desconhecido' : nativeTaskRegistered})`
         );
+        this.notifyTrackingStatus();
     }
 
     /**
@@ -287,6 +317,7 @@ class BackgroundLocationService {
             if (wasTracking || isRunning) {
                 Logger.log('✅ Tracking de background parado');
             }
+            this.notifyTrackingStatus();
         } catch (error) {
             this.isTracking = false;
             if (Device.isDevice === false) {

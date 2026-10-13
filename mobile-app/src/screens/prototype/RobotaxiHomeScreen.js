@@ -108,6 +108,7 @@ import {
   shouldRevealNavigationRoute,
 } from '../../services/LeafNativeNavigationEngine';
 import {
+  buildDriverBackgroundTrackingNoticeModel,
   buildPrototypeConnectionIndicatorModel,
   resolvePrototypeConnectionAutomationConfig,
   shouldRunPrototypeConnectionAutomation,
@@ -116,7 +117,7 @@ import useCampaignAssetOverride from '../../hooks/useCampaignAssetOverride';
 import kycService from '../../services/KYCService';
 import nativeAwsLivenessService from '../../services/NativeAwsLivenessService';
 import { resolveKycLivenessErrorPresentation } from '../../components/KYC/kycLivenessErrorPresentation';
-import { BACKGROUND_LOCATION_DISCLOSURE_ACCEPTED_KEY } from '../../services/BackgroundLocationService';
+import backgroundLocationService, { BACKGROUND_LOCATION_DISCLOSURE_ACCEPTED_KEY } from '../../services/BackgroundLocationService';
 import {
   fetchCoordsfromPlace,
   fetchPlacesAutocomplete,
@@ -2067,6 +2068,9 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   const [showRecoveredConnectionHint, setShowRecoveredConnectionHint] = useState(false);
   const [qaConnectionVisualState, setQaConnectionVisualState] = useState(null);
   const [displayedConnectionIndicatorModel, setDisplayedConnectionIndicatorModel] = useState(null);
+  const [backgroundTrackingStatus, setBackgroundTrackingStatus] = useState(
+    () => backgroundLocationService?.getTrackingStatus?.() || null
+  );
   const [driverKycModalVisible, setDriverKycModalVisible] = useState(false);
   const [driverKycPendingReason, setDriverKycPendingReason] = useState('');
   const [driverKycChallengeContext, setDriverKycChallengeContext] = useState({
@@ -5276,9 +5280,19 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
       showRecoveredConnectionHint,
     ]
   );
+  const driverBackgroundTrackingNoticeModel = useMemo(
+    () =>
+      buildDriverBackgroundTrackingNoticeModel({
+        activeRole: resolvedRole,
+        driverRideActive: driverHasAcceptedOrActiveWork,
+        trackingStatus: backgroundTrackingStatus,
+      }),
+    [backgroundTrackingStatus, driverHasAcceptedOrActiveWork, resolvedRole]
+  );
   const effectiveConnectionIndicatorModel = useMemo(() => {
     if (!qaConnectionVisualState?.mode) {
-      return connectionIndicatorModel;
+      // Problemas de conexão têm prioridade; o aviso de tracking ocupa a mesma pílula.
+      return connectionIndicatorModel || driverBackgroundTrackingNoticeModel;
     }
 
     const indicatorBase = {
@@ -5323,6 +5337,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     return connectionIndicatorModel;
   }, [
     connectionIndicatorModel,
+    driverBackgroundTrackingNoticeModel,
     driverOnline,
     driverOnlinePending,
     normalizedBookingStatus,
@@ -5859,6 +5874,13 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
         connectionAutomationTimersRef.current = [];
       }
     };
+  }, []);
+
+  useEffect(() => {
+    if (typeof backgroundLocationService?.subscribeTrackingStatus !== 'function') {
+      return undefined;
+    }
+    return backgroundLocationService.subscribeTrackingStatus(setBackgroundTrackingStatus);
   }, []);
 
   useEffect(() => {

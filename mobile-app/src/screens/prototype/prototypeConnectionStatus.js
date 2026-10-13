@@ -191,6 +191,30 @@ function buildPrototypeConnectionIndicatorModel({
   return null;
 }
 
+// Aviso ao motorista quando o tracking de background não pôde iniciar durante
+// uma corrida: o app segue enviando a posição apenas enquanto está aberto.
+function buildDriverBackgroundTrackingNoticeModel({
+  activeRole,
+  driverRideActive,
+  trackingStatus,
+}) {
+  if (activeRole !== 'driver' || !driverRideActive) {
+    return null;
+  }
+
+  if (!trackingStatus || trackingStatus.isTracking || !trackingStatus.lastStartFailure) {
+    return null;
+  }
+
+  return {
+    tone: 'warning',
+    icon: 'navigate-circle-outline',
+    title: 'Localização em segundo plano indisponível',
+    message:
+      'Sua localização só é enviada com o app aberto. Mantenha o Leaf em primeiro plano.',
+  };
+}
+
 function resolvePrototypeConnectionAutomationConfig(
   routeParams = {},
   { activeRole = '', isDev = false, isE2E = false } = {},
@@ -264,6 +288,7 @@ function shouldRunPrototypeConnectionAutomation(
 }
 
 module.exports = {
+  buildDriverBackgroundTrackingNoticeModel,
   buildPrototypeConnectionIndicatorModel,
   normalizeBookingStatus,
   normalizeConnectionScenario,

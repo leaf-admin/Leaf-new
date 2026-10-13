@@ -1,4 +1,5 @@
 const {
+  buildDriverBackgroundTrackingNoticeModel,
   buildPrototypeConnectionIndicatorModel,
   resolvePrototypeConnectionAutomationConfig,
   shouldRunPrototypeConnectionAutomation,
@@ -164,5 +165,66 @@ describe('prototypeConnectionStatus', () => {
 
     expect(config.enabled).toBe(false);
     expect(config.scenario).toBe('');
+  });
+
+  describe('driver background tracking notice', () => {
+    const failedStatus = {
+      isTracking: false,
+      lastStartFailure: { code: 'ERR_UNEXPECTED', message: 'boom', count: 1 },
+    };
+
+    test('warns the driver in plain language when tracking could not start during a ride', () => {
+      const model = buildDriverBackgroundTrackingNoticeModel({
+        activeRole: 'driver',
+        driverRideActive: true,
+        trackingStatus: failedStatus,
+      });
+
+      expect(model).toEqual({
+        tone: 'warning',
+        icon: 'navigate-circle-outline',
+        title: 'Localização em segundo plano indisponível',
+        message:
+          'Sua localização só é enviada com o app aberto. Mantenha o Leaf em primeiro plano.',
+      });
+    });
+
+    test('stays silent without an active ride, for passengers, and when tracking is healthy or was never attempted', () => {
+      expect(
+        buildDriverBackgroundTrackingNoticeModel({
+          activeRole: 'driver',
+          driverRideActive: false,
+          trackingStatus: failedStatus,
+        }),
+      ).toBeNull();
+      expect(
+        buildDriverBackgroundTrackingNoticeModel({
+          activeRole: 'customer',
+          driverRideActive: true,
+          trackingStatus: failedStatus,
+        }),
+      ).toBeNull();
+      expect(
+        buildDriverBackgroundTrackingNoticeModel({
+          activeRole: 'driver',
+          driverRideActive: true,
+          trackingStatus: { isTracking: true, lastStartFailure: null },
+        }),
+      ).toBeNull();
+      expect(
+        buildDriverBackgroundTrackingNoticeModel({
+          activeRole: 'driver',
+          driverRideActive: true,
+          trackingStatus: { isTracking: false, lastStartFailure: null },
+        }),
+      ).toBeNull();
+      expect(
+        buildDriverBackgroundTrackingNoticeModel({
+          activeRole: 'driver',
+          driverRideActive: true,
+          trackingStatus: null,
+        }),
+      ).toBeNull();
+    });
   });
 });
