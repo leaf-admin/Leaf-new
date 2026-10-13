@@ -1,4 +1,5 @@
 import leafTypography from '../../components/prototype/LeafTypography';
+import { resolveFareSignal } from './fareSignal';
 import { returnToPrototypeHome } from '../../navigation/returnToPrototypeHome';
 import React, {
   useCallback,
@@ -2468,11 +2469,16 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
     selectedPlanFare,
     visiblePlans,
   ]);
+  // Warn only from 10% above normal, with how much and why.
+  const selectedFareSignal = useMemo(
+    () => resolveFareSignal(selectedPricingPayload),
+    [selectedPricingPayload],
+  );
   const tariffStatusLabel = pricingQuoteLoading
     ? "Atualizando tarifa"
-    : selectedDynamicNotice
-      ? "Tarifa alta"
-      : "Tarifa normal";
+    : selectedFareSignal.label;
+  const tariffStatusTone = pricingQuoteLoading ? null : selectedFareSignal.tone;
+  const tariffReasonText = pricingQuoteLoading ? "" : selectedFareSignal.reasonText;
   const selectedCategoryOption =
     categoryOptions.find((item) => item.id === selectedPlan) ||
     categoryOptions[0] ||
@@ -5106,19 +5112,37 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
                   </View>
                 </View>
 
+                {tariffReasonText ? (
+                  <Text
+                    style={styles.categoryFareReasonText}
+                    testID="passenger-destination-fare-reason"
+                  >
+                    Acima do normal agora: {tariffReasonText}.
+                  </Text>
+                ) : null}
                 <View style={styles.categoryStatusRow}>
                   <View
                     style={[
                       styles.categoryStatusPill,
-                      selectedDynamicNotice && styles.categoryStatusPillHigh,
+                      tariffStatusTone && {
+                        backgroundColor: tariffStatusTone.background,
+                        borderColor: tariffStatusTone.border,
+                      },
                     ]}
                     testID="passenger-destination-dynamic-pricing-badge"
-                    accessibilityLabel={tariffStatusLabel}
+                    accessibilityLabel={
+                      tariffReasonText
+                        ? `${tariffStatusLabel} acima do normal: ${tariffReasonText}`
+                        : tariffStatusLabel
+                    }
                   >
+                    {tariffStatusTone ? (
+                      <Ionicons name="trending-up" size={13} color={tariffStatusTone.text} />
+                    ) : null}
                     <Text
                       style={[
                         styles.categoryStatusText,
-                        selectedDynamicNotice && styles.categoryStatusTextHigh,
+                        tariffStatusTone && { color: tariffStatusTone.text },
                       ]}
                     >
                       {tariffStatusLabel}
@@ -6275,11 +6299,20 @@ const styles = StyleSheet.create({
     minHeight: 25,
     borderRadius: 13,
     paddingHorizontal: 10,
+    flexDirection: "row",
+    gap: 4,
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "#FFFFFF",
     borderWidth: 1,
     borderColor: "#E5E5E5",
+  },
+  categoryFareReasonText: {
+    ...leafTypography.regular,
+    fontSize: 12,
+    lineHeight: 16,
+    color: "#6A6A6A",
+    marginTop: 8,
   },
   categoryStatusPillHigh: {
     backgroundColor: "#FFF7ED",
