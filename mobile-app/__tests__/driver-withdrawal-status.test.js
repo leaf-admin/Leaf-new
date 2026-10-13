@@ -1,4 +1,6 @@
 import {
+  buildWithdrawalFeeNotice,
+  countWithdrawalsToday,
   describeDriverWithdrawal,
   describeDriverWithdrawals,
   summarizeOpenWithdrawals,
@@ -57,5 +59,44 @@ describe('driver withdrawal status', () => {
         { status: 'sending', amountCents: 3000 },
       ]),
     ).toBe('2 saques em conferência (R$ 150,00). Você recebe um aviso a cada Pix enviado.');
+  });
+
+  it('counts today withdrawals that were not refused', () => {
+    const now = new Date(2026, 9, 13, 18, 0);
+    const today = new Date(2026, 9, 13, 9, 0).toISOString();
+    const yesterday = new Date(2026, 9, 12, 23, 0).toISOString();
+    expect(
+      countWithdrawalsToday(
+        [
+          { status: 'in_review', requestedAt: today },
+          { status: 'paid', requestedAt: today },
+          { status: 'failed', requestedAt: today },
+          { status: 'paid', requestedAt: yesterday },
+          { status: 'paid' },
+        ],
+        now,
+      ),
+    ).toBe(2);
+  });
+
+  it('states the fee before the first withdrawal of the day and suggests one per day', () => {
+    expect(buildWithdrawalFeeNotice({ fee: 1, withdrawalsToday: 0 })).toEqual({
+      tone: 'neutral',
+      title: 'Taxa de R$ 1,00 por saque',
+      body: 'Cobrada pela Woovi a cada saque. Fazer um saque por dia evita pagar a taxa mais de uma vez.',
+    });
+  });
+
+  it('warns that another withdrawal on the same day pays the fee again', () => {
+    expect(buildWithdrawalFeeNotice({ fee: 1, withdrawalsToday: 1 })).toMatchObject({
+      tone: 'warning',
+      title: 'Taxa de R$ 1,00 neste saque',
+      body: 'Você já fez 1 saque hoje. A Woovi cobra R$ 1,00 por saque, então este também paga a taxa.',
+    });
+    expect(buildWithdrawalFeeNotice({ fee: 1, withdrawalsToday: 3 }).body).toMatch(/3 saques hoje/);
+  });
+
+  it('says when the amount has no fee', () => {
+    expect(buildWithdrawalFeeNotice({ fee: 0, withdrawalsToday: 2 }).title).toBe('Sem taxa neste valor');
   });
 });
