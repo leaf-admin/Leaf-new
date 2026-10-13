@@ -351,6 +351,9 @@ export default function WooviPaymentModal({
     const paymentConfirmedRef = useRef(false);
     // A imagem remota do QR pode falhar; nesse caso desenhamos o QR a partir do código.
     const [qrImageFailed, setQrImageFailed] = useState(false);
+    // Lembra que o fechamento veio de um pagamento confirmado, para manter a confirmação
+    // na tela durante a animação de saída (os dados são limpos antes dela terminar).
+    const closingAfterConfirmRef = useRef(false);
     const autoConfirmTimerRef = useRef(null);
     const qaAutoConfirmStartedRef = useRef(false);
     const isCheckingPaymentRef = useRef(false);
@@ -1666,6 +1669,11 @@ export default function WooviPaymentModal({
         const hasQrImage = Boolean(paymentData?.qrCodeImage);
         const hasQrText = Boolean(paymentData?.qrCodeText);
         const hasPaymentLink = Boolean(paymentData?.paymentLink);
+        if (paymentStatus === 'confirmed') {
+            closingAfterConfirmRef.current = true;
+        } else if (visible) {
+            closingAfterConfirmRef.current = false;
+        }
 
         if (terminalClosePendingRef.current && paymentStatus === 'expired') {
             return (
@@ -1752,6 +1760,23 @@ export default function WooviPaymentModal({
                                 </Text>
                             </TouchableOpacity>
                         </View>
+                    </View>
+                );
+            }
+
+            // Fechando (dados já limpos): não voltar a mostrar "Gerando cobrança" durante
+            // a animação de saída, como aparecia logo após o pagamento confirmado.
+            if (!visible) {
+                return (
+                    <View style={styles.loadingContainer}>
+                        {closingAfterConfirmRef.current ? (
+                            <>
+                                <Icon name="check-circle" type="material" color={PIX_SURFACE.success || '#1F7A3D'} size={64} />
+                                <Text style={[styles.loadingText, { color: color.text.primary }]}>
+                                    Pagamento confirmado
+                                </Text>
+                            </>
+                        ) : null}
                     </View>
                 );
             }
