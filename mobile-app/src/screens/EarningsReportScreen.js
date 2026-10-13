@@ -43,7 +43,12 @@ import { getSelfHostedApiUrl } from '../config/ApiConfig';
 import { getPilotLaunchFeatureSnapshot } from '../config/pilotLaunchProfile';
 import useFeatureFlag from '../hooks/useFeatureFlag';
 import { DriverBalanceService } from '../services/canonical/paymentService';
-import { describeDriverWithdrawals, summarizeOpenWithdrawals } from './driverWithdrawalStatus';
+import {
+  buildWithdrawalFeeNotice,
+  countWithdrawalsToday,
+  describeDriverWithdrawals,
+  summarizeOpenWithdrawals,
+} from './driverWithdrawalStatus';
 import kycService from '../services/KYCService';
 import { usePrototypeMapOcclusion } from './prototype/prototypeMapOcclusion';
 import { usePrototypeRideRuntime } from './prototype/prototypeRideRuntime';
@@ -1173,7 +1178,7 @@ export default function EarningsReportScreen({ navigation, route }) {
             </View>
             <View style={styles.cleanHairline} />
             <View style={styles.cleanSummaryRow}>
-              <Text style={styles.cleanSummaryMuted}>Tarifa</Text>
+              <Text style={styles.cleanSummaryMuted}>Taxa de saque (Woovi)</Text>
               <Text style={styles.cleanSummaryMutedValue}>R$ {formatCurrency(withdrawProcessingSummary.fee)}</Text>
             </View>
             {withdrawProcessingSummary.subscriptionSettlement > 0 ? (
@@ -1622,11 +1627,29 @@ export default function EarningsReportScreen({ navigation, route }) {
 
             <View style={styles.cleanHairline} />
 
-            <View style={styles.withdrawFeeNote}>
-              <Text style={styles.withdrawFeeNoteText}>
-                Saques abaixo de R$ 500,00 têm tarifa de R$ 1,00. A partir de R$ 500,00, não há tarifa.
-              </Text>
-            </View>
+            {(() => {
+              const feeNotice = buildWithdrawalFeeNotice({
+                fee: currentWithdrawAmount > 0 ? currentWithdrawBreakdown.fee : DriverBalanceService.WITHDRAW_FEE_BELOW_THRESHOLD,
+                withdrawalsToday: countWithdrawalsToday(recentWithdrawals),
+              });
+              return (
+                <View
+                  style={[styles.withdrawFeeNote, feeNotice.tone === 'warning' && styles.withdrawFeeNoteWarning]}
+                  testID="driver-earnings-withdraw-fee-notice"
+                  accessibilityRole="alert"
+                >
+                  <Ionicons
+                    name={feeNotice.tone === 'warning' ? 'alert-circle-outline' : 'information-circle-outline'}
+                    size={20}
+                    color={feeNotice.tone === 'warning' ? '#7A6337' : '#1A330E'}
+                  />
+                  <View style={styles.withdrawFeeNoteCopy}>
+                    <Text style={styles.withdrawFeeNoteTitle}>{feeNotice.title}</Text>
+                    <Text style={styles.withdrawFeeNoteText}>{feeNotice.body}</Text>
+                  </View>
+                </View>
+              );
+            })()}
 
             {withdrawError ? <Text style={styles.modalError}>{withdrawError}</Text> : null}
 
@@ -2209,22 +2232,34 @@ const styles = StyleSheet.create({
     borderRadius: 16,
   },
   withdrawFeeNote: {
-    minHeight: 58,
-    borderRadius: 0,
-    backgroundColor: '#FFFFFF',
     marginTop: 24,
-    paddingHorizontal: 0,
-    paddingVertical: 16,
-    justifyContent: 'center',
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderColor: '#E5E5E5',
+    borderRadius: 16,
+    backgroundColor: '#F1F5EE',
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+  },
+  withdrawFeeNoteWarning: {
+    backgroundColor: '#F5F1E6',
+  },
+  withdrawFeeNoteCopy: {
+    flex: 1,
+    minWidth: 0,
+  },
+  withdrawFeeNoteTitle: {
+    color: '#222222',
+    ...leafTypography.semiBold,
+    fontSize: 15,
+    lineHeight: 20,
   },
   withdrawFeeNoteText: {
+    marginTop: 2,
     color: '#6A6A6A',
-    ...leafTypography.medium,
-    fontSize: 14,
-    lineHeight: 20,
+    ...leafTypography.regular,
+    fontSize: 13,
+    lineHeight: 18,
   },
   cleanSummaryRow: {
     minHeight: 52,

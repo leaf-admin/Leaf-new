@@ -21,14 +21,17 @@ import { robotaxiPrototypeTokens } from '../../components/design-system/robotaxi
 import { usePrototypeRideRuntime } from './prototypeRideRuntime';
 import {
   fetchDriverAvoidedAreas,
+  lookupBairroAt,
   saveDriverAvoidedAreas,
 } from '../../services/DriverAvoidedAreasService';
 import {
   AVOIDED_AREA_SIZES,
   DEFAULT_AVOIDED_AREA_LIMITS,
   buildAvoidedAreaLabel,
-  buildAvoidedAreasSummary,
+  buildAvoidedAreasCounter,
   canAddAvoidedArea,
+  canAddAvoidedBairro,
+  describeAvoidedArea,
   describeAvoidedAreaLimit,
   resolveAvoidedAreaSize,
 } from './driverAvoidedAreas';
@@ -73,6 +76,11 @@ export default function RobotaxiDriverAvoidedAreasScreen({ navigation }) {
   const mapRef = useRef(null);
   const [center, setCenter] = useState(startCenter);
   const [ringSize, setRingSize] = useState(1);
+  // 'bairro': toque no mapa seleciona o bairro inteiro. 'free': área marcada pelo pino.
+  const [mode, setMode] = useState('bairro');
+  const [candidate, setCandidate] = useState(null);
+  const [lookingUp, setLookingUp] = useState(false);
+  const lookupSeqRef = useRef(0);
   const [areas, setAreas] = useState([]);
   const [limits, setLimits] = useState(DEFAULT_AVOIDED_AREA_LIMITS);
   const [loading, setLoading] = useState(true);
@@ -186,6 +194,61 @@ export default function RobotaxiDriverAvoidedAreasScreen({ navigation }) {
     );
   }, [addCheck, areas, busy, center, persist, ringSize]);
 
+  const handleMapPress = useCallback(async (event) => {
+    if (mode !== 'bairro' || busy) return;
+    const coordinate = event?.nativeEvent?.coordinate;
+    if (!Number.isFinite(coordinate?.latitude) || !Number.isFinite(coordinate?.longitude)) return;
+    const seq = lookupSeqRef.current + 1;
+    lookupSeqRef.current = seq;
+    haptic('selection');
+    setLookingUp(true);
+    setMessage('');
+    const payload = await lookupBairroAt(coordinate.latitude, coordinate.longitude);
+    if (!mountedRef.current || lookupSeqRef.current !== seq) return;
+    setLookingUp(false);
+    if (!payload?.success) {
+      setCandidate(null);
+      setMessage('Não foi possível identificar o bairro agora. Tente novamente.');
+      return;
+    }
+    if (!payload.bairro) {
+      setCandidate(null);
+      setMessage('Aqui não temos o limite do bairro. Use "Área livre" para marcar este lugar.');
+      return;
+    }
+    setCandidate(payload.bairro);
+    const points = (payload.bairro.outline || []).flat();
+    if (points.length) {
+      mapRef.current?.fitToCoordinates?.(points, {
+        edgePadding: { top: insets.top + 90, right: 40, bottom: 340, left: 40 },
+        animated: true,
+      });
+    }
+  }, [busy, insets.top, mode]);
+
+  const handleAddBairro = useCallback(async () => {
+    if (busy || !candidate) return;
+    const check = canAddAvoidedBairro(areas, candidate.id, limits);
+    if (!check.ok) {
+      setMessage(describeAvoidedAreaLimit(check.reason));
+      haptic('warning');
+      return;
+    }
+    const saved = await persist(
+      [...areas, { bairroId: candidate.id }],
+      `${candidate.name} marcado. Você não recebe corridas com embarque ou destino aí.`,
+    );
+    if (saved) setCandidate(null);
+  }, [areas, busy, candidate, limits, persist]);
+
+  const handleSelectMode = useCallback((nextMode) => {
+    if (nextMode === mode) return;
+    haptic('selection');
+    setMode(nextMode);
+    setCandidate(null);
+    setMessage('');
+  }, [mode]);
+
   const handleRemove = useCallback((area) => {
     if (busy) return;
     persist(
@@ -199,11 +262,19 @@ export default function RobotaxiDriverAvoidedAreasScreen({ navigation }) {
     const lng = Number(area?.center?.lng);
     if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
     haptic('selection');
+    const outlinePoints = area?.bairroId ? (area.outline || []).flat() : [];
+    if (outlinePoints.length) {
+      mapRef.current?.fitToCoordinates?.(outlinePoints, {
+        edgePadding: { top: insets.top + 90, right: 40, bottom: 340, left: 40 },
+        animated: true,
+      });
+      return;
+    }
     mapRef.current?.animateCamera?.(
       cameraAt({ latitude: lat, longitude: lng }, resolveAvoidedAreaSize(area.ringSize).mapZoom),
       { duration: 420 },
     );
-  }, []);
+  }, [insets.top]);
 
   const handleSelectSize = useCallback((nextRing) => {
     if (nextRing === ringSize) return;
@@ -236,6 +307,7 @@ export default function RobotaxiDriverAvoidedAreasScreen({ navigation }) {
         initialCamera={cameraAt(startCenter, selectedSize.mapZoom)}
         onRegionChange={handleRegionChange}
         onRegionChangeComplete={settleAt}
+        onPress={handleMapPress}
         rotateEnabled={false}
         pitchEnabled={false}
         toolbarEnabled={false}
@@ -258,7 +330,18 @@ export default function RobotaxiDriverAvoidedAreasScreen({ navigation }) {
             />
           )),
         )}
-        {moving ? null : (
+        {mode === 'bairro' && candidate
+          ? (candidate.outline || []).map((ring, index) => (
+              <Polygon
+                key={`candidate-${candidate.id}-${index}`}
+                coordinates={ring}
+                fillColor={PREVIEW_FILL}
+                strokeColor={PREVIEW_STROKE}
+                strokeWidth={2}
+              />
+            ))
+          : null}
+        {moving || mode !== 'free' ? null : (
           <Circle
             center={center}
             radius={selectedSize.previewRadiusMeters}
@@ -269,6 +352,7 @@ export default function RobotaxiDriverAvoidedAreasScreen({ navigation }) {
         )}
       </MapView>
 
+      {mode === 'free' ? (
       <View
         pointerEvents="none"
         style={[styles.pinLayer, { paddingTop: insets.top + 64, paddingBottom: 300 }]}
@@ -280,6 +364,7 @@ export default function RobotaxiDriverAvoidedAreasScreen({ navigation }) {
           </Animated.View>
         </View>
       </View>
+      ) : null}
 
       <View style={[styles.header, { top: insets.top + 12 }]}>
         <TouchableOpacity
@@ -293,7 +378,7 @@ export default function RobotaxiDriverAvoidedAreasScreen({ navigation }) {
         </TouchableOpacity>
         <View style={styles.headerPill}>
           <Text style={styles.headerPillText} numberOfLines={1}>
-            {loading ? 'Carregando…' : buildAvoidedAreasSummary(areas)}
+            {loading ? 'Carregando…' : buildAvoidedAreasCounter(areas, limits)}
           </Text>
         </View>
       </View>
@@ -301,41 +386,93 @@ export default function RobotaxiDriverAvoidedAreasScreen({ navigation }) {
       <View style={[styles.sheet, { paddingBottom: Math.max(insets.bottom, 12) + 12 }]}>
         <Text style={styles.title}>Áreas a evitar</Text>
         <Text style={styles.subtitle}>
-          Mova o mapa até o lugar e marque. Você não recebe corridas com embarque ou destino nessas áreas.
+          Você não recebe corridas com embarque ou destino nas regiões marcadas.
         </Text>
 
-        <View style={styles.sizes} accessibilityRole="radiogroup">
-          {AVOIDED_AREA_SIZES.map((size) => {
-            const selected = size.ringSize === ringSize;
+        <View style={styles.modes} accessibilityRole="radiogroup">
+          {[
+            { key: 'bairro', label: 'Bairro inteiro' },
+            { key: 'free', label: 'Área livre' },
+          ].map((option) => {
+            const selected = option.key === mode;
             return (
               <TouchableOpacity
-                key={size.ringSize}
+                key={option.key}
                 activeOpacity={0.86}
-                style={[styles.size, selected && styles.sizeSelected]}
-                onPress={() => handleSelectSize(size.ringSize)}
+                style={[styles.mode, selected && styles.modeSelected]}
+                onPress={() => handleSelectMode(option.key)}
                 accessibilityRole="radio"
                 accessibilityState={{ selected }}
-                accessibilityLabel={`${size.label}, ${size.detail}`}
-                testID={`driver-avoided-areas-size-${size.ringSize}`}
+                testID={`driver-avoided-areas-mode-${option.key}`}
               >
-                <Text style={[styles.sizeLabel, selected && styles.sizeLabelSelected]}>{size.label}</Text>
-                <Text style={[styles.sizeDetail, selected && styles.sizeDetailSelected]} numberOfLines={1}>
-                  {size.detail}
-                </Text>
+                <Text style={[styles.modeLabel, selected && styles.modeLabelSelected]}>{option.label}</Text>
               </TouchableOpacity>
             );
           })}
         </View>
 
-        <RobotaxiLifecycleButton
-          label={saving ? 'Salvando…' : 'Evitar esta área'}
-          icon={saving ? undefined : 'remove-circle-outline'}
-          tone="primary"
-          disabled={busy || moving}
-          onPress={handleAdd}
-          testID="driver-avoided-areas-add"
-          style={styles.addButton}
-        />
+        {mode === 'bairro' ? (
+          <>
+            <View style={styles.candidate} testID="driver-avoided-areas-candidate">
+              {lookingUp ? (
+                <ActivityIndicator color={color.text.secondary} />
+              ) : candidate ? (
+                <>
+                  <Ionicons name="location-outline" size={18} color={color.accent.primary} />
+                  <Text style={styles.candidateName} numberOfLines={1}>{candidate.name}</Text>
+                </>
+              ) : (
+                <>
+                  <Ionicons name="hand-left-outline" size={18} color={color.text.secondary} />
+                  <Text style={styles.candidateHint} numberOfLines={1}>Toque no bairro no mapa</Text>
+                </>
+              )}
+            </View>
+            <RobotaxiLifecycleButton
+              label={saving ? 'Salvando…' : candidate ? `Evitar ${candidate.name}` : 'Evitar bairro'}
+              icon={saving ? undefined : 'remove-circle-outline'}
+              tone="primary"
+              disabled={busy || lookingUp || !candidate}
+              onPress={handleAddBairro}
+              testID="driver-avoided-areas-add-bairro"
+              style={styles.addButton}
+            />
+          </>
+        ) : (
+          <>
+            <View style={styles.sizes} accessibilityRole="radiogroup">
+              {AVOIDED_AREA_SIZES.map((size) => {
+                const selected = size.ringSize === ringSize;
+                return (
+                  <TouchableOpacity
+                    key={size.ringSize}
+                    activeOpacity={0.86}
+                    style={[styles.size, selected && styles.sizeSelected]}
+                    onPress={() => handleSelectSize(size.ringSize)}
+                    accessibilityRole="radio"
+                    accessibilityState={{ selected }}
+                    accessibilityLabel={`${size.label}, ${size.detail}`}
+                    testID={`driver-avoided-areas-size-${size.ringSize}`}
+                  >
+                    <Text style={[styles.sizeLabel, selected && styles.sizeLabelSelected]}>{size.label}</Text>
+                    <Text style={[styles.sizeDetail, selected && styles.sizeDetailSelected]} numberOfLines={1}>
+                      {size.detail}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+            <RobotaxiLifecycleButton
+              label={saving ? 'Salvando…' : 'Evitar esta área'}
+              icon={saving ? undefined : 'remove-circle-outline'}
+              tone="primary"
+              disabled={busy || moving}
+              onPress={handleAdd}
+              testID="driver-avoided-areas-add"
+              style={styles.addButton}
+            />
+          </>
+        )}
 
         {message ? (
           <Text style={styles.message} accessibilityLiveRegion="polite" testID="driver-avoided-areas-message">
@@ -364,7 +501,7 @@ export default function RobotaxiDriverAvoidedAreasScreen({ navigation }) {
                   <View style={styles.rowCopy}>
                     <Text style={styles.rowTitle} numberOfLines={1}>{area.label || 'Área'}</Text>
                     <Text style={styles.rowDetail} numberOfLines={1}>
-                      {resolveAvoidedAreaSize(area.ringSize).label} · {resolveAvoidedAreaSize(area.ringSize).detail}
+                      {describeAvoidedArea(area)}
                     </Text>
                   </View>
                 </TouchableOpacity>
@@ -443,7 +580,37 @@ const styles = StyleSheet.create({
   },
   title: { ...leafTypography.semiBold, fontSize: 20, lineHeight: 26, color: color.text.primary },
   subtitle: { ...leafTypography.regular, fontSize: 13, lineHeight: 19, color: color.text.secondary, marginTop: 4 },
-  sizes: { flexDirection: 'row', gap: 8, marginTop: 16 },
+  modes: {
+    flexDirection: 'row',
+    marginTop: 14,
+    padding: 4,
+    borderRadius: 16,
+    backgroundColor: color.surface.secondary,
+  },
+  mode: { flex: 1, minHeight: 40, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  modeSelected: {
+    backgroundColor: color.surface.primary,
+    shadowColor: '#000000',
+    shadowOpacity: 0.08,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 2,
+  },
+  modeLabel: { ...leafTypography.medium, fontSize: 14, lineHeight: 18, color: color.text.secondary },
+  modeLabelSelected: { ...leafTypography.semiBold, color: color.text.primary },
+  candidate: {
+    minHeight: 54,
+    marginTop: 12,
+    borderRadius: 16,
+    backgroundColor: color.surface.secondary,
+    paddingHorizontal: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  candidateName: { ...leafTypography.semiBold, fontSize: 16, lineHeight: 22, color: color.text.primary, flex: 1 },
+  candidateHint: { ...leafTypography.regular, fontSize: 14, lineHeight: 20, color: color.text.secondary, flex: 1 },
+  sizes: { flexDirection: 'row', gap: 8, marginTop: 12 },
   size: {
     flex: 1,
     minHeight: 54,

@@ -6,7 +6,7 @@ export const AVOIDED_AREA_SIZES = [
   { ringSize: 2, label: 'Grande', detail: 'vários bairros', previewRadiusMeters: 2200, mapZoom: 12.3 },
 ];
 
-export const DEFAULT_AVOIDED_AREA_LIMITS = { maxCells: 60, maxAreas: 12 };
+export const DEFAULT_AVOIDED_AREA_LIMITS = { maxCells: 80, maxAreas: 4 };
 
 // Um disco hexagonal de raio r tem 1 + 3r(r + 1) células.
 export function cellsForRingSize(ringSize) {
@@ -46,6 +46,30 @@ export function canAddAvoidedArea(areas = [], ringSize = 0, limits = DEFAULT_AVO
   return { ok: true, reason: '' };
 }
 
+// Bairro inteiro: só conta contra o número de regiões, e não repete.
+export function canAddAvoidedBairro(areas = [], bairroId = '', limits = DEFAULT_AVOIDED_AREA_LIMITS) {
+  const list = Array.isArray(areas) ? areas : [];
+  if (list.some((area) => String(area?.bairroId || '') === String(bairroId))) {
+    return { ok: false, reason: 'ALREADY_AVOIDED' };
+  }
+  if (list.length >= (Number(limits?.maxAreas) || DEFAULT_AVOIDED_AREA_LIMITS.maxAreas)) {
+    return { ok: false, reason: 'MAX_AREAS' };
+  }
+  return { ok: true, reason: '' };
+}
+
+export function describeAvoidedArea(area = {}) {
+  if (area?.type === 'bairro' || area?.bairroId) return 'Bairro inteiro';
+  const size = resolveAvoidedAreaSize(area?.ringSize);
+  return `Área ${size.label.toLowerCase()} · ${size.detail}`;
+}
+
+export function buildAvoidedAreasCounter(areas = [], limits = DEFAULT_AVOIDED_AREA_LIMITS) {
+  const total = Array.isArray(areas) ? areas.length : 0;
+  const max = Number(limits?.maxAreas) || DEFAULT_AVOIDED_AREA_LIMITS.maxAreas;
+  return `${total} de ${max} regiões`;
+}
+
 export function buildAvoidedAreaLabel(reverseGeocodeResult, fallbackIndex = 1) {
   const first = Array.isArray(reverseGeocodeResult) ? reverseGeocodeResult[0] : reverseGeocodeResult;
   const label = [first?.district, first?.subregion, first?.street, first?.city]
@@ -56,7 +80,10 @@ export function buildAvoidedAreaLabel(reverseGeocodeResult, fallbackIndex = 1) {
 
 export function describeAvoidedAreaLimit(reason) {
   if (reason === 'MAX_AREAS') {
-    return 'Você chegou ao limite de áreas. Remova uma para marcar outra.';
+    return 'Você já marcou o máximo de regiões. Remova uma para marcar outra.';
+  }
+  if (reason === 'ALREADY_AVOIDED') {
+    return 'Esse bairro já está na sua lista.';
   }
   if (reason === 'MAX_CELLS' || reason === 'AVOIDED_AREAS_LIMIT_EXCEEDED') {
     return 'Suas áreas já cobrem o máximo permitido. Remova uma ou escolha um tamanho menor.';
