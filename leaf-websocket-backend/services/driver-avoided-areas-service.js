@@ -84,6 +84,29 @@ function isDestinationAvoided(driverData = {}, destinationLocation = null) {
   }
 }
 
+// Bloqueio vale para os dois extremos: o motorista não quer embarcar nem desembarcar ali.
+function isRideInAvoidedArea(driverData = {}, { pickupLocation = null, destinationLocation = null } = {}) {
+  return (
+    isDestinationAvoided(driverData, destinationLocation) ||
+    isDestinationAvoided(driverData, pickupLocation)
+  );
+}
+
+// `driver_avoided_areas:{uid}` é a fonte da verdade (sem TTL). O hash `driver:{uid}` expira
+// quando o motorista sai, então o campo `avoidedH3Cells` dele é só uma cópia para o shortlist.
+function parseStoredAvoidedCells(rawStored) {
+  if (!rawStored) return [];
+  let stored = rawStored;
+  if (typeof stored === 'string') {
+    try {
+      stored = JSON.parse(stored);
+    } catch (error) {
+      return [];
+    }
+  }
+  return normalizeAvoidedCells(stored?.cells);
+}
+
 function buildAvoidedAreasPatch(cells, updatedAt = new Date().toISOString()) {
   return {
     avoidedH3Cells: JSON.stringify(normalizeAvoidedCells(cells)),
@@ -112,7 +135,9 @@ module.exports = {
   buildAvoidedAreasPatch,
   cellsAroundPoint,
   isDestinationAvoided,
+  isRideInAvoidedArea,
   normalizeAvoidedCells,
   normalizeAvoidedPoint,
-  parseAvoidedCells
+  parseAvoidedCells,
+  parseStoredAvoidedCells
 };

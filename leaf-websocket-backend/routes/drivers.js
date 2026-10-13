@@ -383,7 +383,7 @@ router.get('/api/drivers/me/destination-policy', requireFirebaseUser, async (req
 });
 
 // 🚫 ÁREAS EVITADAS: o motorista marca áreas onde não quer receber ofertas.
-// O dispatcher lê apenas `avoidedH3Cells` do hash `driver:{uid}`; a lista de exibição fica em `driver_avoided_areas:{uid}`.
+// `driver_avoided_areas:{uid}` é a fonte da verdade; `avoidedH3Cells` no hash `driver:{uid}` é uma cópia para o shortlist.
 router.get('/api/drivers/me/avoided-areas', requireFirebaseUser, async (req, res) => {
   try {
     const driverId = req.authenticatedUser.uid;
@@ -473,11 +473,16 @@ router.put('/api/drivers/me/avoided-areas', requireFirebaseUser, async (req, res
     const cells = [...distinctCells];
     const updatedAt = new Date().toISOString();
     const redis = redisPool.getConnection();
-    await redis.hset(`driver:${driverId}`, buildAvoidedAreasPatch(cells, updatedAt));
+    // Fonte da verdade (sem TTL): é o que o dispatcher consulta antes de ofertar.
     await redis.set(
       `driver_avoided_areas:${driverId}`,
       JSON.stringify({ cells, areas, updatedAt })
     );
+    // Cópia no hash do motorista só se ele existir: criar o hash aqui deixaria um
+    // registro de motorista incompleto e sem TTL.
+    if (await redis.exists(`driver:${driverId}`)) {
+      await redis.hset(`driver:${driverId}`, buildAvoidedAreasPatch(cells, updatedAt));
+    }
 
     return res.json({
       success: true,

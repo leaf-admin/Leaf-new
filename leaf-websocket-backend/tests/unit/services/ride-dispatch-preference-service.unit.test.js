@@ -85,6 +85,15 @@ describe('ride-dispatch-preference-service', () => {
     const DESTINATION_CELL = h3.latLngToCell(DESTINATION.lat, DESTINATION.lng, 8);
     const FAR_CELL = h3.latLngToCell(-23.0045, -43.3659, 8);
 
+    it('does not match a driver whose avoided cells contain the pickup', () => {
+      expect(
+        driverMatchesRidePreferences(
+          { driverId: 'driver_1', avoidedH3Cells: JSON.stringify([DESTINATION_CELL]) },
+          { pickupLocation: DESTINATION, destinationLocation: { lat: -22.95, lng: -43.2 } }
+        )
+      ).toMatchObject({ ok: false, reason: 'DRIVER_AVOIDED_AREA' });
+    });
+
     it('does not match a driver whose avoided cells contain the destination', () => {
       expect(
         driverMatchesRidePreferences(

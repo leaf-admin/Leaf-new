@@ -18,6 +18,7 @@ const mockRedis = {
     mockRedisState.hashes.set(key, hash);
     return 1;
   },
+  exists: async (key) => (mockRedisState.hashes.has(key) ? 1 : 0),
   hgetall: async (key) => ({ ...(mockRedisState.hashes.get(key) || {}) })
 };
 
@@ -91,6 +92,7 @@ describe('driver avoided areas routes', () => {
   });
 
   it('PUT stores the cells on the driver hash and returns them', async () => {
+    mockRedisState.hashes.set(`driver:${DRIVER_UID}`, { id: DRIVER_UID, isOnline: 'true' });
     const app = createApp();
     const response = await putAreas(app, {
       areas: [{ id: 'a1', label: '  Copacabana  ', center: COPACABANA, ringSize: 0 }]
@@ -162,8 +164,21 @@ describe('driver avoided areas routes', () => {
     expect(mockRedisState.hashes.get(`driver:${DRIVER_UID}`)).toBeUndefined();
   });
 
+  it('PUT does not create the driver hash when the driver has none (offline)', async () => {
+    const app = createApp();
+    const response = await putAreas(app, {
+      areas: [{ id: 'a1', label: 'Centro', center: COPACABANA, ringSize: 0 }]
+    });
+
+    expect(response.status).toBe(200);
+    expect(mockRedisState.hashes.get(`driver:${DRIVER_UID}`)).toBeUndefined();
+    const stored = JSON.parse(mockRedisState.strings.get(`driver_avoided_areas:${DRIVER_UID}`));
+    expect(stored.cells).toEqual([COPACABANA_CELL]);
+  });
+
   it('PUT with empty areas clears the stored cells', async () => {
     const app = createApp();
+    mockRedisState.hashes.set(`driver:${DRIVER_UID}`, { id: DRIVER_UID, isOnline: 'true' });
     await putAreas(app, {
       areas: [{ id: 'a1', label: 'Centro', center: COPACABANA, ringSize: 0 }]
     });

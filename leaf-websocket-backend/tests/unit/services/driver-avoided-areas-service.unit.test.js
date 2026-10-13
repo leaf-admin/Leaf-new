@@ -5,8 +5,10 @@ const {
   buildAvoidedAreasPatch,
   cellsAroundPoint,
   isDestinationAvoided,
+  isRideInAvoidedArea,
   normalizeAvoidedCells,
-  parseAvoidedCells
+  parseAvoidedCells,
+  parseStoredAvoidedCells
 } = require('../../../services/driver-avoided-areas-service');
 
 const COPACABANA = { lat: -22.9711, lng: -43.1822 };
@@ -132,6 +134,39 @@ describe('driver-avoided-areas-service', () => {
     it('produces an empty JSON array when cleared', () => {
       expect(buildAvoidedAreasPatch([]).avoidedH3Cells).toBe('[]');
       expect(typeof buildAvoidedAreasPatch([]).avoidedAreasUpdatedAt).toBe('string');
+    });
+  });
+  describe('isRideInAvoidedArea', () => {
+    const driver = { avoidedH3Cells: [COPACABANA_CELL] };
+
+    it('blocks when the pickup is inside an avoided area', () => {
+      expect(isRideInAvoidedArea(driver, { pickupLocation: COPACABANA, destinationLocation: BARRA })).toBe(true);
+    });
+
+    it('blocks when the destination is inside an avoided area', () => {
+      expect(isRideInAvoidedArea(driver, { pickupLocation: BARRA, destinationLocation: COPACABANA })).toBe(true);
+    });
+
+    it('does not block when both ends are outside, or when nothing is known', () => {
+      expect(isRideInAvoidedArea(driver, { pickupLocation: BARRA, destinationLocation: BARRA })).toBe(false);
+      expect(isRideInAvoidedArea(driver)).toBe(false);
+      expect(isRideInAvoidedArea({}, { pickupLocation: COPACABANA })).toBe(false);
+    });
+  });
+
+  describe('parseStoredAvoidedCells', () => {
+    it('reads the cells of the stored display record', () => {
+      expect(parseStoredAvoidedCells(JSON.stringify({ cells: [COPACABANA_CELL, BARRA_CELL] }))).toEqual([
+        COPACABANA_CELL,
+        BARRA_CELL
+      ]);
+      expect(parseStoredAvoidedCells({ cells: [COPACABANA_CELL] })).toEqual([COPACABANA_CELL]);
+    });
+
+    it('returns nothing for a missing or broken record', () => {
+      expect(parseStoredAvoidedCells(null)).toEqual([]);
+      expect(parseStoredAvoidedCells('{broken')).toEqual([]);
+      expect(parseStoredAvoidedCells(JSON.stringify({ cells: 'x' }))).toEqual([]);
     });
   });
 });
