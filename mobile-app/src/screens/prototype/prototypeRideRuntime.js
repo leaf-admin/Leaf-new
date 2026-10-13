@@ -15797,6 +15797,21 @@ async function cancelPrototypeRide(options = {}) {
       clearRuntimeRideStateFromSync();
       return { success: true, alreadyEnded: true };
     }
+    // The answer to this request can be lost while the cancellation itself
+    // reaches the app another way (the ride event or the periodic sync). A
+    // device test showed the "ride cancelled" summary with a "could not
+    // cancel" alert on top of it, 20 s later. If the ride is already over
+    // here, the cancel worked: do not report a failure.
+    if (/timeout/i.test(String(error?.message || ""))) {
+      const currentBookingId = String(runtimeState.activeBookingId || "").trim();
+      const currentStatus = normalizeRuntimeLifecycleStatus(runtimeState.bookingStatus);
+      const rideEndedMeanwhile =
+        currentBookingId !== String(bookingId || "").trim() ||
+        ["", "idle", "canceled", "cancelled"].includes(currentStatus);
+      if (rideEndedMeanwhile) {
+        return { success: true, alreadyHandled: true };
+      }
+    }
     if (shouldQueueRuntimeLifecycleFailure(error)) {
       await queueRuntimeLifecycleIntent({
         bookingId,
