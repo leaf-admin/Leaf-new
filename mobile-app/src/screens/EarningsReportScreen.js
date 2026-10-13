@@ -43,6 +43,7 @@ import { getSelfHostedApiUrl } from '../config/ApiConfig';
 import { getPilotLaunchFeatureSnapshot } from '../config/pilotLaunchProfile';
 import useFeatureFlag from '../hooks/useFeatureFlag';
 import { DriverBalanceService } from '../services/canonical/paymentService';
+import { describeDriverWithdrawals, summarizeOpenWithdrawals } from './driverWithdrawalStatus';
 import kycService from '../services/KYCService';
 import { usePrototypeMapOcclusion } from './prototype/prototypeMapOcclusion';
 import { usePrototypeRideRuntime } from './prototype/prototypeRideRuntime';
@@ -386,6 +387,7 @@ export default function EarningsReportScreen({ navigation, route }) {
   const [withdrawRequestId, setWithdrawRequestId] = useState(null);
   const [isProcessingWithdraw, setIsProcessingWithdraw] = useState(false);
   const [withdrawProcessingSummary, setWithdrawProcessingSummary] = useState(null);
+  const [recentWithdrawals, setRecentWithdrawals] = useState([]);
 
   const [showWithdrawKYCModal, setShowWithdrawKYCModal] = useState(false);
   const [withdrawKycReason, setWithdrawKycReason] = useState('');
@@ -437,6 +439,23 @@ export default function EarningsReportScreen({ navigation, route }) {
       : subscriptionDailyFeeCents === 0
         ? 'Isenta'
       : `R$ ${formatCurrency(subscriptionDailyFeeValue)}`;
+
+  // Saques recentes e o estado de cada um. Recarrega depois de um novo pedido.
+  useEffect(() => {
+    let active = true;
+    if (!withdrawalsEnabled || !auth?.profile?.uid) {
+      setRecentWithdrawals([]);
+      return undefined;
+    }
+    DriverBalanceService.getDriverWithdrawals(auth.profile.uid, 5).then((result) => {
+      if (active && result?.success) {
+        setRecentWithdrawals(result.withdrawals);
+      }
+    });
+    return () => {
+      active = false;
+    };
+  }, [withdrawalsEnabled, auth?.profile?.uid, withdrawProcessingSummary]);
 
   useEffect(() => {
     const loadEarningsData = async () => {
@@ -1128,9 +1147,9 @@ export default function EarningsReportScreen({ navigation, route }) {
             >
               <Ionicons name="arrow-back" size={20} color="#222222" />
             </TouchableOpacity>
-            <Text style={styles.cleanHeaderTitle}>Saque em processamento</Text>
+            <Text style={styles.cleanHeaderTitle}>Saque em conferência</Text>
           </View>
-          <Text style={styles.cleanHeaderSubtitle}>Estamos preparando o envio via PIX.</Text>
+          <Text style={styles.cleanHeaderSubtitle}>Conferimos cada saque antes de enviar o Pix.</Text>
 
           <View style={styles.processingPulse}>
             <View style={styles.processingPulseInner}>
@@ -1142,7 +1161,7 @@ export default function EarningsReportScreen({ navigation, route }) {
 
           <Text style={styles.processingTitle}>Solicitação enviada</Text>
           <Text style={styles.processingSubtitle}>
-            Seu saque entrou na fila. Avisaremos quando o PIX for concluído.
+            Seu pedido entrou em conferência. Você recebe um aviso quando o Pix for enviado.
           </Text>
 
           <View style={styles.cleanSection}>
@@ -1428,6 +1447,47 @@ export default function EarningsReportScreen({ navigation, route }) {
                   <Text style={styles.cleanListAccent}>R$ {formatCurrency(saldoDisponivel)}</Text>
                 </View>
               </View>
+
+              {withdrawalsEnabled && recentWithdrawals.length > 0 ? (
+                <View style={styles.cleanSection} testID="driver-earnings-withdrawals">
+                  <Text style={styles.cleanSectionTitle}>Seus saques</Text>
+                  {summarizeOpenWithdrawals(recentWithdrawals) ? (
+                    <Text style={styles.cleanListSubtitle}>{summarizeOpenWithdrawals(recentWithdrawals)}</Text>
+                  ) : null}
+                  <View style={styles.cleanList}>
+                    {describeDriverWithdrawals(recentWithdrawals).map((item, index) => (
+                      <React.Fragment key={item.id}>
+                        {index > 0 ? <View style={styles.cleanHairline} /> : null}
+                        <View style={styles.cleanListRow}>
+                          <View style={styles.withdrawalRowCopy}>
+                            <Text style={styles.cleanListTitle}>{item.amountLabel}</Text>
+                            {item.details ? (
+                              <Text style={styles.cleanListSubtitle} numberOfLines={1}>{item.details}</Text>
+                            ) : null}
+                          </View>
+                          <View
+                            style={[
+                              styles.withdrawalStatusChip,
+                              item.tone === 'success' && styles.withdrawalStatusChipSuccess,
+                              item.tone === 'danger' && styles.withdrawalStatusChipDanger,
+                            ]}
+                          >
+                            <Text
+                              style={[
+                                styles.withdrawalStatusChipText,
+                                item.tone === 'success' && styles.withdrawalStatusChipTextSuccess,
+                                item.tone === 'danger' && styles.withdrawalStatusChipTextDanger,
+                              ]}
+                            >
+                              {item.statusLabel}
+                            </Text>
+                          </View>
+                        </View>
+                      </React.Fragment>
+                    ))}
+                  </View>
+                </View>
+              ) : null}
 
               <Text style={styles.driverContextText}>
                 {[profileName, `Nota ${ratingLabel}`, tierLabel, `Desde ${partnerSinceLabel}`].filter(Boolean).join(' · ')}
@@ -1926,6 +1986,35 @@ const styles = StyleSheet.create({
   },
   cleanSection: {
     marginTop: 28,
+  },
+  withdrawalRowCopy: {
+    flex: 1,
+    minWidth: 0,
+  },
+  withdrawalStatusChip: {
+    minHeight: 28,
+    paddingHorizontal: 10,
+    borderRadius: 14,
+    justifyContent: 'center',
+    backgroundColor: '#F5F1E6',
+  },
+  withdrawalStatusChipSuccess: {
+    backgroundColor: '#E7EFE1',
+  },
+  withdrawalStatusChipDanger: {
+    backgroundColor: '#FFF1F2',
+  },
+  withdrawalStatusChipText: {
+    color: '#7A6337',
+    ...leafTypography.semiBold,
+    fontSize: 12,
+    lineHeight: 16,
+  },
+  withdrawalStatusChipTextSuccess: {
+    color: '#1A330E',
+  },
+  withdrawalStatusChipTextDanger: {
+    color: '#D7153A',
   },
   cleanSectionTitle: {
     color: '#222222',
