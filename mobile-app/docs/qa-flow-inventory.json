@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-10-07T23:50:08.647Z",
+  "generatedAt": "2026-10-13T21:15:08.740Z",
   "coverageModel": "static-flow-definition-only",
   "releasePreconditions": [
     "Executar somente build release instalado (`br.com.leaf.ride`), sem Expo Go/dev-client como alvo.",
@@ -9,7 +9,7 @@
     "Evidências por rodada devem incluir JUnit XML, logs Maestro, screenshots e snapshot de runtime flags."
   ],
   "routeSurfaceCounts": {
-    "current": 44,
+    "current": 45,
     "compatibility_redirect": 26
   },
   "releaseCoverageMatrix": [
@@ -351,6 +351,11 @@
       "name": "Registration",
       "category": "auth-onboarding",
       "surfaceStatus": "compatibility_redirect"
+    },
+    {
+      "name": "RobotaxiDriverAvoidedAreas",
+      "category": "driver-ops",
+      "surfaceStatus": "current"
     },
     {
       "name": "RobotaxiMenuEditProfile",
