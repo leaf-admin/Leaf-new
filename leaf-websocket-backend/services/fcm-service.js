@@ -517,7 +517,12 @@ class FCMService {
                 },
                 android: {
                     priority: 'high',
+                    // Avisos com prazo (nova corrida): não entregar depois que venceram e
+                    // substituir o anterior do mesmo tipo.
+                    ...(Number(notification.ttlSeconds) > 0 && { ttl: Math.round(Number(notification.ttlSeconds) * 1000) }),
+                    ...(notification.collapseKey && { collapseKey: String(notification.collapseKey) }),
                     notification: {
+                        ...(notification.collapseKey && { tag: String(notification.collapseKey) }),
                         channelId: notification.channelId || 'default',
                         priority: 'high',
                         defaultSound: true,
@@ -535,6 +540,14 @@ class FCMService {
                     }
                 },
                 apns: {
+                    ...((notification.collapseKey || Number(notification.ttlSeconds) > 0) && {
+                        headers: {
+                            ...(notification.collapseKey && { 'apns-collapse-id': String(notification.collapseKey) }),
+                            ...(Number(notification.ttlSeconds) > 0 && {
+                                'apns-expiration': String(Math.floor(Date.now() / 1000) + Math.round(Number(notification.ttlSeconds)))
+                            })
+                        }
+                    }),
                     payload: {
                         aps: {
                             sound: 'default',

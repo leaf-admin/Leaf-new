@@ -205,4 +205,29 @@ describe('fcm-service', () => {
     expect(fallback).toHaveBeenCalledWith('UNAVAILABLE');
     expect(fcmService.removeInvalidToken).not.toHaveBeenCalled();
   });
+  test('a time-limited notice carries its expiry and collapse key on both platforms', async () => {
+    const send = jest.fn().mockResolvedValue('msg-id');
+    admin.messaging.mockReturnValue({ send });
+
+    await fcmService.sendToToken('token-1', {
+      title: 'Nova corrida',
+      body: 'x',
+      data: { type: 'ride_offer' },
+      collapseKey: 'leaf-ride-offer',
+      ttlSeconds: 20
+    });
+    await fcmService.sendToToken('token-1', { title: 'Outro', body: 'y', data: {} });
+
+    const [timed] = send.mock.calls[0];
+    expect(timed.android.ttl).toBe(20000);
+    expect(timed.android.collapseKey).toBe('leaf-ride-offer');
+    expect(timed.android.notification.tag).toBe('leaf-ride-offer');
+    expect(timed.apns.headers['apns-collapse-id']).toBe('leaf-ride-offer');
+    expect(Number(timed.apns.headers['apns-expiration'])).toBeGreaterThan(Date.now() / 1000);
+
+    const [plain] = send.mock.calls[1];
+    expect(plain.android.ttl).toBeUndefined();
+    expect(plain.android.notification.tag).toBeUndefined();
+    expect(plain.apns.headers).toBeUndefined();
+  });
 });
