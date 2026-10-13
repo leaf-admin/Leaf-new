@@ -1,4 +1,5 @@
 import leafTypography from '../../components/prototype/LeafTypography';
+import { returnToPrototypeHome } from '../../navigation/returnToPrototypeHome';
 import { RobotaxiLifecycleSummary } from '../../components/prototype/RobotaxiLifecycleUI';
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
@@ -232,7 +233,7 @@ export default function RobotaxiNoDriversScreen({ navigation, route }) {
 
   const handleRetryDestination = () => {
     clearFlowPreview();
-    navigation.replace("RobotaxiPrototype");
+    returnToPrototypeHome(navigation);
   };
 
   if (isSearchStillActive) {

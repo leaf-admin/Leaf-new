@@ -299,7 +299,19 @@ class BackgroundLocationService {
      * Consulta o estado nativo: uma task registrada sobrevive ao reinício do app,
      * enquanto `isTracking` (memória JS) volta a false.
      */
+    // Várias partes do app pedem a parada ao mesmo tempo quando a corrida termina. Sem
+    // isto, a segunda chamada encontrava a tarefa já removida e registrava um erro.
     async stopBackgroundTracking() {
+        if (this.stopInFlight) {
+            return this.stopInFlight;
+        }
+        this.stopInFlight = this.stopBackgroundTrackingOnce().finally(() => {
+            this.stopInFlight = null;
+        });
+        return this.stopInFlight;
+    }
+
+    async stopBackgroundTrackingOnce() {
         const wasTracking = this.isTracking;
         try {
             if (Device.isDevice === false) {

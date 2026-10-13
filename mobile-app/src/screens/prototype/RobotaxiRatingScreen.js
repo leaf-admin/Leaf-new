@@ -1,4 +1,5 @@
 import leafTypography from '../../components/prototype/LeafTypography';
+import { returnToPrototypeHome } from '../../navigation/returnToPrototypeHome';
 import { RobotaxiLifecycleSummary } from '../../components/prototype/RobotaxiLifecycleUI';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -201,17 +202,7 @@ export default function RobotaxiRatingScreen({ navigation, route }) {
       source: "rating_completed",
     };
 
-    if (typeof navigation.replace === "function") {
-      navigation.replace("RobotaxiPrototype", resetParams);
-      return;
-    }
-
-    if (typeof navigation.dispatch === "function") {
-      navigation.dispatch(StackActions.replace("RobotaxiPrototype", resetParams));
-      return;
-    }
-
-    navigation.navigate("RobotaxiPrototype", resetParams);
+    returnToPrototypeHome(navigation, resetParams);
   }, [navigation]);
 
   const handleDismiss = useCallback(() => {
