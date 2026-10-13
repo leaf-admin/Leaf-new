@@ -438,6 +438,43 @@ function hasUsableRuntimeLocationSnapshot(snapshot = {}) {
   );
 }
 
+const BOOTSTRAP_LAST_KNOWN_MAX_AGE_MS = 30 * 60 * 1000;
+const BOOTSTRAP_LAST_KNOWN_TIMEOUT_MS = 400;
+
+async function seedRuntimeLocationFromLastKnown() {
+  if (isRuntimeCoordinate(runtimeState.currentCoordinate)) {
+    return true;
+  }
+  try {
+    const position = await Promise.race([
+      Location.getLastKnownPositionAsync({
+        maxAge: BOOTSTRAP_LAST_KNOWN_MAX_AGE_MS,
+        requiredAccuracy: 1000,
+      }),
+      new Promise((resolve) => setTimeout(() => resolve(null), BOOTSTRAP_LAST_KNOWN_TIMEOUT_MS)),
+    ]);
+    const latitude = Number(position?.coords?.latitude);
+    const longitude = Number(position?.coords?.longitude);
+    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+      return false;
+    }
+    // A fresh fix may have landed while this was waiting.
+    if (!isRuntimeCoordinate(runtimeState.currentCoordinate)) {
+      const coordinate = { latitude, longitude };
+      setRuntimeState({
+        currentCoordinate: coordinate,
+        ...(normalizeRuntimeRole(runtimeState.activeRole) === "driver"
+          ? { driverCoordinate: coordinate }
+          : {}),
+      });
+    }
+    return true;
+  } catch (error) {
+    // No permission yet or no cached fix: the fresh fix path handles it.
+    return false;
+  }
+}
+
 async function waitForRuntimeBootstrapLocation(locationPromise, shouldWait) {
   if (!shouldWait) {
     return;
@@ -9367,28 +9404,6 @@ async function ensureCurrentLocation(options = {}) {
       timestamp: Number(position?.timestamp) || null,
     });
 
-    let currentAddress = runtimeState.currentAddress || "";
-    if (resolveAddress) {
-      try {
-        const reverse = await Location.reverseGeocodeAsync({
-          latitude,
-          longitude,
-        });
-        const first =
-          Array.isArray(reverse) && reverse.length > 0 ? reverse[0] : null;
-        if (first) {
-          currentAddress = [first.name, first.street, first.city]
-            .filter(Boolean)
-            .join(", ");
-        }
-      } catch (reverseError) {
-        Logger.warn(
-          "⚠️ [PrototypeRuntime] Reverse geocode indisponível:",
-          reverseError?.message || reverseError,
-        );
-      }
-    }
-
     const normalizedCoordinate = {
       latitude,
       longitude,
@@ -9400,6 +9415,8 @@ async function ensureCurrentLocation(options = {}) {
       normalizeRuntimeRole(runtimeState.activeRole) === "driver";
     const shouldIgnoreCoordinateHydration =
       shouldMirrorDriverCoordinate && runtimeDriverRoutePlaybackActive;
+    // The position goes out first; the address lookup below can take seconds
+    // and used to hold the map on its previous place meanwhile.
     setRuntimeState({
       ...(!shouldIgnoreCoordinateHydration
         ? {
@@ -9410,8 +9427,29 @@ async function ensureCurrentLocation(options = {}) {
           }
         : {}),
       ...(Number.isFinite(currentHeading) ? { currentHeading } : {}),
-      currentAddress: currentAddress || runtimeState.currentAddress,
     });
+
+    if (resolveAddress) {
+      try {
+        const reverse = await Location.reverseGeocodeAsync({
+          latitude,
+          longitude,
+        });
+        const first =
+          Array.isArray(reverse) && reverse.length > 0 ? reverse[0] : null;
+        const currentAddress = first
+          ? [first.name, first.street, first.city].filter(Boolean).join(", ")
+          : "";
+        if (currentAddress) {
+          setRuntimeState({ currentAddress });
+        }
+      } catch (reverseError) {
+        Logger.warn(
+          "⚠️ [PrototypeRuntime] Reverse geocode indisponível:",
+          reverseError?.message || reverseError,
+        );
+      }
+    }
 
     await startHeadingWatcher();
     await startForegroundLocationWatcher();
@@ -10421,12 +10459,18 @@ function attachSocketListeners() {
         .trim()
         .toUpperCase() === "REASSIGNMENT_PENDING" ||
       Boolean(operationalContinuation);
+    // Fare above normal (percent and reasons), shown on the offer card.
+    const offerFareSignalPayload =
+      payload?.fareSignal && typeof payload.fareSignal === "object"
+        ? payload.fareSignal
+        : null;
     const offerWithPricing =
       Number.isFinite(netPayoutFromPayload) && netPayoutFromPayload >= 0
         ? {
             ...createdOffer,
             ...(pickupCoordinate ? { pickupCoordinate } : {}),
             ...(pricingSnapshotMetadata || {}),
+            ...(offerFareSignalPayload ? { fareSignal: offerFareSignalPayload } : {}),
             ...(isOperationalContinuation
               ? {
                   isOperationalContinuation: true,
@@ -10452,6 +10496,7 @@ function attachSocketListeners() {
             ...createdOffer,
             ...(pickupCoordinate ? { pickupCoordinate } : {}),
             ...(pricingSnapshotMetadata || {}),
+            ...(offerFareSignalPayload ? { fareSignal: offerFareSignalPayload } : {}),
             ...(isOperationalContinuation
               ? {
                   isOperationalContinuation: true,
@@ -14067,9 +14112,15 @@ async function bootstrapRuntime(profile) {
           qaSeedLock = null;
         }
       }
+      // Open the map where the user is. The fresh fix above can take seconds;
+      // the system's last known position is available at once. With it the
+      // first frame is already in place and the launch no longer waits for
+      // the fresh fix, which keeps running and corrects the position.
+      const seededFromLastKnown = await seedRuntimeLocationFromLastKnown();
       await waitForRuntimeBootstrapLocation(
         initialLocationPromise,
-        !hasHydratedLocationSnapshot || shouldForceFreshBootstrapLocation,
+        !seededFromLastKnown &&
+          (!hasHydratedLocationSnapshot || shouldForceFreshBootstrapLocation),
       );
       setRuntimeState({
         ready: true,

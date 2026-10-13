@@ -3,6 +3,7 @@ import { Animated, Easing, Text } from 'react-native';
 import { useReducedMotion } from 'react-native-reanimated';
 
 const COUNT_DURATION_MS = 720;
+const SETTLE_WINDOW_MS = 6000;
 
 // "R$ 1.234,56" -> 1234.56. Returns null when the label is not a plain amount.
 export function parseBrlAmount(label) {
@@ -27,6 +28,9 @@ export default function LeafAnimatedAmount({ label, style, ...textProps }) {
   const target = parseBrlAmount(label);
   const [shown, setShown] = useState(label);
   const previousRef = useRef(target);
+  // While the screen is still loading, the first values replace each other
+  // (cached figure, then the server's). Those are not earnings going up.
+  const mountedAtRef = useRef(Date.now());
   const frameRef = useRef(null);
   const pulse = useRef(new Animated.Value(1)).current;
 
@@ -34,7 +38,8 @@ export default function LeafAnimatedAmount({ label, style, ...textProps }) {
     const from = previousRef.current;
     previousRef.current = target;
     if (frameRef.current) cancelAnimationFrame(frameRef.current);
-    if (reduceMotion || target === null || from === null || from === target) {
+    const settling = Date.now() - mountedAtRef.current < SETTLE_WINDOW_MS;
+    if (reduceMotion || settling || target === null || from === null || from === target) {
       setShown(label);
       return undefined;
     }

@@ -1,4 +1,5 @@
 import leafTypography from '../../../components/prototype/LeafTypography';
+import { resolveFareSignal } from '../fareSignal';
 import React, { memo } from "react";
 import {
   ActivityIndicator,
@@ -676,6 +677,9 @@ function PassengerHomeOverlay({
     visibleCategoryOptions.find((item) => item?.id === selectedCategoryId) ||
     visibleCategoryOptions[0] ||
     null;
+  const selectedFareSignal = resolveFareSignal(
+    selectedCategory?.fareBreakdown?.pricingPayload || selectedCategory?.pricingPayload || null,
+  );
   const selectedCategoryIndex = selectedCategory
     ? Math.max(
         0,
@@ -698,10 +702,13 @@ function PassengerHomeOverlay({
   const canShowFareBreakdown = Boolean(
     selectedCategory?.fare != null && fareBreakdownRows.length > 0,
   );
+  // Room for the "fare above normal" line when it is shown.
+  const categoryFareReasonHeight =
+    shouldShowCategoryCard && !fareBreakdownVisible && selectedFareSignal.aboveNormal ? 38 : 0;
   const categoryCardHeight =
-    shouldShowCategoryCard && fareBreakdownVisible
+    (shouldShowCategoryCard && fareBreakdownVisible
       ? HOME_CATEGORY_BREAKDOWN_CARD_HEIGHT
-      : HOME_CATEGORY_CARD_HEIGHT;
+      : HOME_CATEGORY_CARD_HEIGHT) + categoryFareReasonHeight;
   const searchDropdownHeight = shouldShowSearchDropdown
     ? Math.min(
         HOME_SEARCH_DROPDOWN_MAX_HEIGHT,
@@ -1287,16 +1294,36 @@ function PassengerHomeOverlay({
             <View style={styles.categoryPickerSurface}>
               {visibleCategoryOptions.map(category => {
                 const selected = category.id === selectedCategoryId;
+                const categoryFareSignal = resolveFareSignal(category?.fareBreakdown?.pricingPayload || category?.pricingPayload || null);
                 return <TouchableOpacity key={category.id} onPress={() => onCategorySelect?.(category.id)} activeOpacity={0.82}
                   style={styles.leafCategoryRow} accessibilityRole="button" accessibilityState={{ selected }}
                   testID={`passenger-home-category-${category.id}`} accessibilityLabel={`${category.label}, ${category.priceLabel || 'Preço em atualização'}`}>
                   {selected ? <View style={styles.leafCategoryMarker} /> : null}
                   <View style={styles.leafCategoryCopy}><Text style={styles.leafCategoryName}>{String(category.label || category.id).replace(/^Leaf\s*/i, '').toUpperCase()}</Text>
                     <Text style={styles.leafCategoryDetail} numberOfLines={1}>{category.description}</Text></View>
-                  <View style={styles.leafCategoryValue}><Text style={styles.leafCategoryPrice}>{category.priceLabel || '—'}</Text>
+                  <View style={styles.leafCategoryValue}>
+                    <View style={styles.leafCategoryPriceRow}>
+                      {categoryFareSignal.aboveNormal ? (
+                        <View
+                          style={[styles.leafCategoryFareChip, { backgroundColor: categoryFareSignal.tone.background, borderColor: categoryFareSignal.tone.border }]}
+                          testID={`passenger-home-category-fare-signal-${category.id}`}
+                          accessibilityLabel={`Tarifa ${categoryFareSignal.percent}% acima do normal`}
+                        >
+                          <Ionicons name="trending-up" size={11} color={categoryFareSignal.tone.text} />
+                          <Text style={[styles.leafCategoryFareChipText, { color: categoryFareSignal.tone.text }]}>+{categoryFareSignal.percent}%</Text>
+                        </View>
+                      ) : null}
+                      <Text style={styles.leafCategoryPrice}>{category.priceLabel || '—'}</Text>
+                    </View>
                     <Text style={styles.leafCategoryDetail} numberOfLines={1}>{formatCategoryArrivalFootnote(category)}</Text></View>
                 </TouchableOpacity>;
               })}
+              {/* Why the selected fare is above normal, when it is (10% or more). */}
+              {selectedFareSignal.aboveNormal ? (
+                <Text style={[styles.leafCategoryFareReason, { color: selectedFareSignal.tone.text }]} numberOfLines={2} testID="passenger-home-fare-signal-reason">
+                  Tarifa {selectedFareSignal.percent}% acima do normal{selectedFareSignal.reasonText ? `: ${selectedFareSignal.reasonText}` : ''}.
+                </Text>
+              ) : null}
               {/* Always rendered (muted until a breakdown exists) so the CTA does
                   not jump when the backend quote arrives. */}
               <TouchableOpacity onPress={() => setFareBreakdownVisible(current => !current)} disabled={!canShowFareBreakdown}
@@ -1500,6 +1527,31 @@ const styles = StyleSheet.create({
   // Fixed width: the footnote changes with selection; a content-sized column
   // reflowed the description and shifted every row below it.
   leafCategoryValue: { width: 128, alignItems: 'flex-end', gap: 2 },
+  leafCategoryPriceRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: 6,
+  },
+  leafCategoryFareChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    height: 20,
+    paddingHorizontal: 6,
+    borderRadius: 10,
+    borderWidth: 1,
+  },
+  leafCategoryFareChipText: {
+    fontSize: 11,
+    lineHeight: 14,
+    fontWeight: '600',
+  },
+  leafCategoryFareReason: {
+    fontSize: 12,
+    lineHeight: 16,
+    marginTop: 6,
+  },
   leafCategoryPrice: { ...leafTypography.semiBold, fontSize: 17, lineHeight: 26, fontVariant: ['tabular-nums'], color: '#222222' },
   leafCategoryBreakdownMuted: { opacity: 0.35 },
   leafCategoryBreakdown: { minHeight: 40, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },

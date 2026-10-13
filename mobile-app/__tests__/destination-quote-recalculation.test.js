@@ -722,7 +722,7 @@ describe("RobotaxiDestinationScreen", () => {
       expect(screen.getByText(/R\$ 17,77/)).toBeTruthy();
       expect(screen.getByTestId("passenger-destination-quote-price-plus")).toBeTruthy();
       expect(screen.getByTestId("passenger-destination-dynamic-pricing-badge")).toBeTruthy();
-      expect(screen.getByText("Tarifa alta")).toBeTruthy();
+      expect(screen.getByText("Tarifa +18%")).toBeTruthy();
     });
 
     fireEvent.press(screen.getByTestId("passenger-destination-confirm-button"));

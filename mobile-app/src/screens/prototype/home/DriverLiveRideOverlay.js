@@ -1,4 +1,5 @@
 import leafTypography from '../../../components/prototype/LeafTypography';
+import { resolveFareSignal } from '../fareSignal';
 import LeafSlideToConfirm from "../../../components/design-system/LeafSlideToConfirm";
 import { confirmDriverEarlyEnd } from "./driverEarlyEndConfirm";
 import useRideCardTransition from "../../../components/design-system/useRideCardTransition";
@@ -636,6 +637,7 @@ function DriverLiveRideOverlay({
   const activeRideNetAmount = isOperationalInterrupted
     ? resolveOperationalLegNetAmount(operationalContinuation)
     : resolveDisplayNetAmount(activeRide, driverTripMeta);
+  const offerFareSignal = resolveFareSignal(offer?.fareSignal || null);
   const fareLabel = hasActiveRide
     ? Number.isFinite(activeRideNetAmount)
       ? formatCurrency(activeRideNetAmount)
@@ -1619,6 +1621,22 @@ function DriverLiveRideOverlay({
                 <Text style={styles.offerFareValue} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}>{fareLabel}</Text>
                 <Text style={styles.offerFareLabel}>Líquido</Text>
               </View>
+              {offerFareSignal.aboveNormal ? (
+                <View
+                  style={[
+                    styles.offerFareSignal,
+                    { backgroundColor: offerFareSignal.tone.background, borderColor: offerFareSignal.tone.border },
+                  ]}
+                  testID="driver-live-offer-fare-signal"
+                  accessibilityLabel={`${offerFareSignal.label} acima do normal${offerFareSignal.reasonText ? `: ${offerFareSignal.reasonText}` : ''}`}
+                >
+                  <Ionicons name="trending-up" size={13} color={offerFareSignal.tone.text} />
+                  <Text style={[styles.offerFareSignalText, { color: offerFareSignal.tone.text }]} numberOfLines={1}>
+                    {offerFareSignal.label}
+                    {offerFareSignal.reasonText ? ` · ${offerFareSignal.reasonText}` : ''}
+                  </Text>
+                </View>
+              ) : null}
               <Text style={styles.offerTripLine} numberOfLines={1}>
                 {offerPickupEtaLabel} até o embarque · {distanceLabel} · {offerTripDurationLabel}
               </Text>
@@ -2120,6 +2138,24 @@ const styles = StyleSheet.create({
   offerTimerTextExpired: { color: '#8A1F2B' },
   offerFareRow: { marginTop: 10, flexDirection: 'row', alignItems: 'baseline', gap: 8 },
   offerFareValue: { ...leafTypography.semiBold, fontSize: compactSize(30, 26), lineHeight: compactSize(36, 31), color: '#111410', fontVariant: ['tabular-nums'] },
+  offerFareSignal: {
+    alignSelf: "flex-start",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    minHeight: 26,
+    maxWidth: "100%",
+    paddingHorizontal: 10,
+    borderRadius: 13,
+    borderWidth: 1,
+    marginTop: 6,
+  },
+  offerFareSignalText: {
+    ...leafTypography.medium,
+    fontSize: 12,
+    lineHeight: 16,
+    flexShrink: 1,
+  },
   offerFareLabel: { ...leafTypography.medium, fontSize: 15, color: '#6A6A6A' },
   offerTripLine: { ...leafTypography.regular, marginTop: 2, fontSize: 15, lineHeight: 20, color: '#4B5148' },
   offerRoute: { marginTop: 12 },
