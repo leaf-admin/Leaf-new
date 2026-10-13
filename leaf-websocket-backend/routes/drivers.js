@@ -6,6 +6,7 @@ const { getPolicyForDriver } = require('../services/driver-destination-mode-serv
 const { validateAuthoritativeFinancialSnapshot } = require('../services/ride-financial-contract');
 const { requireFirebaseUser, requireFirebaseSelf } = require('../middleware/firebase-user-auth');
 const { getOperationalDayKey } = require('../services/driver-online-time-policy-service');
+const { getFinancialCollections } = require('../services/financial-runtime-context');
 const {
   resolveUserPersistenceScope,
   assertStoredRecordMatchesScope
@@ -243,6 +244,106 @@ async function loadDriverRidesForEarningsReport(firestore, persistenceScope, dri
     rides.push(ride);
   });
   return rides;
+}
+
+// Prefixo do rideId gravado no crédito de saldo de multa de cancelamento/no-show
+// (PaymentService.processCancellationDistribution credita sob `cancel_<rideId>`).
+const CANCELLATION_CREDIT_RIDE_ID_PREFIX = 'cancel_';
+const CANCELLATION_DISTRIBUTION_STATUS = 'distributed_cancellation';
+
+function toPositiveIntegerCents(value) {
+  const cents = Number(value);
+  return Number.isInteger(cents) && cents > 0 ? cents : null;
+}
+
+// Créditos de multa de cancelamento/no-show do motorista na janela do relatório.
+//
+// A fonte é o extrato do saldo (`<driver_balances>/<motorista>/transactions`): o documento
+// é gravado na mesma transação que soma o saldo, então existe se, e só se, o motorista
+// recebeu. A corrida cancelada não guarda taxa nem crédito.
+//
+// Custo: uma consulta por faixa no campo `rideId` (índice automático de campo único), que
+// lê apenas os créditos `cancel_booking_<epoch ms>...` da janela, e, havendo créditos, uma
+// leitura em lote das distribuições dessas corridas para saber a multa cobrada do
+// passageiro. Sem a distribuição o bruto é o próprio crédito (retido desconhecido = 0).
+async function loadDriverCancellationCreditsForEarningsReport(firestore, persistenceScope, driverId, windowDays) {
+  const { collections } = getFinancialCollections(persistenceScope.financialContext);
+  const oldestCreditRideId =
+    `${CANCELLATION_CREDIT_RIDE_ID_PREFIX}booking_${Date.now() - (windowDays + 1) * DAY_IN_MS}`;
+  const snapshot = await firestore
+    .collection(collections.driverBalances)
+    .doc(driverId)
+    .collection('transactions')
+    .where('rideId', '>=', oldestCreditRideId)
+    .where('rideId', '<=', `${CANCELLATION_CREDIT_RIDE_ID_PREFIX}booking_`)
+    .get();
+
+  const credits = [];
+  snapshot.forEach((doc) => {
+    const transaction = doc.data() || {};
+    try {
+      // Mesmo isolamento das corridas: sandbox exige o contexto selado; operacional nunca lê sandbox.
+      assertStoredRecordMatchesScope(transaction, persistenceScope);
+    } catch (_error) {
+      return;
+    }
+    const creditCents = toPositiveIntegerCents(transaction.amountInCents);
+    const creditRideId = String(transaction.rideId || '');
+    const settledAt = toValidDate(transaction.createdAt);
+    if (
+      String(transaction.type || '') !== 'credit' ||
+      creditCents === null ||
+      !settledAt ||
+      !creditRideId.startsWith(CANCELLATION_CREDIT_RIDE_ID_PREFIX)
+    ) {
+      return;
+    }
+    credits.push({
+      rideId: creditRideId.slice(CANCELLATION_CREDIT_RIDE_ID_PREFIX.length),
+      creditCents,
+      grossCents: creditCents,
+      settledAt
+    });
+  });
+
+  if (credits.length === 0 || typeof firestore.getAll !== 'function') {
+    return credits;
+  }
+
+  try {
+    const distributionRefs = credits.map((credit) =>
+      firestore.collection(collections.paymentDistributions).doc(credit.rideId)
+    );
+    const distributionDocs = await firestore.getAll(...distributionRefs);
+    distributionDocs.forEach((doc, index) => {
+      if (!doc?.exists) {
+        return;
+      }
+      const distribution = doc.data() || {};
+      const credit = credits[index];
+      try {
+        assertStoredRecordMatchesScope(distribution, persistenceScope);
+      } catch (_error) {
+        return;
+      }
+      const chargedCents = toPositiveIntegerCents(parseObjectCandidate(distribution.calculation)?.totalAmount);
+      if (
+        distribution.status !== CANCELLATION_DISTRIBUTION_STATUS ||
+        distribution.driverId !== driverId ||
+        toPositiveIntegerCents(distribution.netAmount) !== credit.creditCents ||
+        chargedCents === null ||
+        chargedCents < credit.creditCents
+      ) {
+        return;
+      }
+      credit.grossCents = chargedCents;
+    });
+  } catch (error) {
+    // O crédito já é conhecido pelo extrato; só a multa cobrada fica sem detalhe.
+    logger.warn(`⚠️ [DriversRoute] Distribuições de multa indisponíveis no relatório de ganhos de ${driverId}: ${error.message}`);
+  }
+
+  return credits;
 }
 
 // 🚗 DRIVER APPROVAL APIs
@@ -1023,6 +1124,22 @@ router.get('/api/drivers/:id/earnings', requireDriverSelf, requireFirebase, asyn
       allDriverBookings = Object.values(bookingsSnapshot.val() || {});
     }
 
+    // Multas de cancelamento/no-show creditadas ao motorista. Se o extrato não responder,
+    // o relatório segue com as corridas e avisa em `cancellationCreditsAvailable`.
+    let cancellationCredits = [];
+    let cancellationCreditsAvailable = true;
+    try {
+      cancellationCredits = await loadDriverCancellationCreditsForEarningsReport(
+        firestore,
+        persistenceScope,
+        id,
+        dailyWindowDays
+      );
+    } catch (creditsError) {
+      cancellationCreditsAvailable = false;
+      logger.error(`❌ [DriversRoute] Créditos de multa de cancelamento indisponíveis no relatório de ganhos de ${id}: ${creditsError.message}`);
+    }
+
     const reportTimeZone = getReportTimeZone();
     const toDateKey = date => getOperationalDayKey(date.getTime(), reportTimeZone);
     const todayKey = toDateKey(new Date());
@@ -1038,6 +1155,7 @@ router.get('/api/drivers/:id/earnings', requireDriverSelf, requireFirebase, asyn
         feeAmount: 0,
         completedCount: 0,
         cancelledCount: 0,
+        cancellationCreditAmount: 0,
         color: '#A5D6A7'
       };
     }
@@ -1048,6 +1166,7 @@ router.get('/api/drivers/:id/earnings', requireDriverSelf, requireFirebase, asyn
     let totalGrossAmount = 0;
     let totalNetAmount = 0;
     let totalFeeAmount = 0;
+    let totalCancellationCreditAmount = 0;
     let financialSnapshotPendingCount = 0;
 
     allDriverBookings.forEach(booking => {
@@ -1113,6 +1232,30 @@ router.get('/api/drivers/:id/earnings', requireDriverSelf, requireFirebase, asyn
       }
     });
 
+    // Multa creditada entra no ganho do dia em que foi liquidada (crédito no saldo). Não é
+    // corrida concluída: as contagens ficam como estão e o cancelamento já foi contado acima.
+    // Bruto = multa cobrada do passageiro; taxa = a parte não repassada ao motorista.
+    cancellationCredits.forEach(credit => {
+      const seriesSlot = dailySeriesMap[toDateKey(credit.settledAt)];
+      if (!seriesSlot) {
+        return;
+      }
+
+      const creditAmount = centsToBrl(credit.creditCents);
+      const chargedAmount = centsToBrl(credit.grossCents);
+      const retainedAmount = centsToBrl(credit.grossCents - credit.creditCents);
+
+      seriesSlot.amount += creditAmount;
+      seriesSlot.grossAmount += chargedAmount;
+      seriesSlot.feeAmount += retainedAmount;
+      seriesSlot.cancellationCreditAmount += creditAmount;
+
+      totalNetAmount += creditAmount;
+      totalGrossAmount += chargedAmount;
+      totalFeeAmount += retainedAmount;
+      totalCancellationCreditAmount += creditAmount;
+    });
+
     const dailySeries = Object.values(dailySeriesMap).sort((a, b) => String(a.date).localeCompare(String(b.date)));
     const dailyEarningsArray = dailySeries.slice(-7).map(item => ({
       day: item.day,
@@ -1139,6 +1282,8 @@ router.get('/api/drivers/:id/earnings', requireDriverSelf, requireFirebase, asyn
       totalGrossAmount,
       totalNetAmount,
       totalFeeAmount,
+      totalCancellationCreditAmount,
+      cancellationCreditsAvailable,
       effectiveFeePct,
       financialSnapshotPendingCount,
       dailySeriesWindowDays: dailyWindowDays
