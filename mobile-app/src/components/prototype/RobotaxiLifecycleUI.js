@@ -1,6 +1,7 @@
 import leafTypography from './LeafTypography';
-import React from 'react';
+import React, { useRef } from 'react';
 import {
+  Animated,
   Image,
   Pressable,
   ScrollView,
@@ -11,9 +12,11 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import { useReducedMotion } from 'react-native-reanimated';
 import robotaxiPrototypeTokens from '../design-system/robotaxiPrototypeTokens';
 
 const TEXT_SCALE_CAP = 1.35;
+const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 const { color } = robotaxiPrototypeTokens;
 
 // Narrow phones (e.g. 360 dp Android) get a tighter scale (design-system).
@@ -137,12 +140,32 @@ export function RobotaxiLifecycleButton({
   accessibilityLabel,
 }) {
   const palette = resolveButtonTone(tone);
+  const reduceMotion = useReducedMotion();
+  // Press feedback: the button gives slightly under the finger and springs
+  // back, instead of only dimming.
+  const pressProgress = useRef(new Animated.Value(0)).current;
+  const animatePress = (toValue) => {
+    if (disabled) return;
+    Animated.spring(pressProgress, {
+      toValue,
+      speed: toValue ? 48 : 22,
+      bounciness: toValue ? 0 : 6,
+      useNativeDriver: true,
+    }).start();
+  };
+  const pressStyle = disabled ? null : {
+    opacity: pressProgress.interpolate({ inputRange: [0, 1], outputRange: [1, 0.86] }),
+    transform: reduceMotion
+      ? []
+      : [{ scale: pressProgress.interpolate({ inputRange: [0, 1], outputRange: [1, 0.97] }) }],
+  };
 
   return (
-    <TouchableOpacity
-      activeOpacity={disabled ? 1 : 0.86}
+    <AnimatedPressable
       disabled={disabled}
       onPress={disabled ? undefined : onPress}
+      onPressIn={() => animatePress(1)}
+      onPressOut={() => animatePress(0)}
       accessible
       accessibilityRole="button"
       accessibilityState={{ disabled }}
@@ -156,6 +179,7 @@ export function RobotaxiLifecycleButton({
         },
         disabled && styles.buttonDisabled,
         style,
+        pressStyle,
       ]}
     >
       {icon ? (
@@ -171,7 +195,7 @@ export function RobotaxiLifecycleButton({
       >
         {label}
       </Text>
-    </TouchableOpacity>
+    </AnimatedPressable>
   );
 }
 
