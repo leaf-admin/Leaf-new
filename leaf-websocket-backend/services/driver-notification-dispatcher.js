@@ -147,6 +147,28 @@ const DISPATCH_DRIVER_LIVENESS_GRACE_MS = parsePositiveInt(
 const DISPATCH_VERIFY_SOCKET_ROOM = process.env.DISPATCH_VERIFY_SOCKET_ROOM === 'true';
 const globalTimeoutHandlers = new Map();
 
+// O pricingPayload chega como objeto ou como texto JSON (vem do hash da corrida no Redis).
+function resolveOfferFareSignal(rawPricingPayload) {
+    let pricingPayload = rawPricingPayload;
+    if (typeof pricingPayload === 'string') {
+        try {
+            pricingPayload = JSON.parse(pricingPayload);
+        } catch (error) {
+            return null;
+        }
+    }
+    const signal = pricingPayload && typeof pricingPayload === 'object' ? pricingPayload.fare_signal : null;
+    if (!signal || typeof signal !== 'object' || signal.above_normal !== true) {
+        return null;
+    }
+    return {
+        percent: Number(signal.percent) || 0,
+        level: String(signal.level || 'moderate'),
+        reasons: Array.isArray(signal.reasons) ? signal.reasons.map(String) : [],
+        reasonLabels: Array.isArray(signal.reason_labels) ? signal.reason_labels.map(String) : []
+    };
+}
+
 class DriverNotificationDispatcher {
     constructor(redis, io) {
         this.redis = redis || redisPool.getConnection();
@@ -1224,6 +1246,13 @@ class DriverNotificationDispatcher {
                         || effectiveBookingData?.pricingSnapshotLocked === true,
                     pricingSnapshotLockedAt: effectiveBookingData?.pricingSnapshotLockedAt || null
                 });
+            }
+
+            // Sinal de tarifa acima do normal (percentual e motivos) calculado na cotação. Só
+            // informação para o cartão da oferta; nenhum valor é recalculado aqui.
+            const offerFareSignal = resolveOfferFareSignal(effectiveBookingData?.pricingPayload);
+            if (offerFareSignal) {
+                notificationData.fareSignal = offerFareSignal;
             }
 
             // 4. ✅ VERIFICAR CONEXÃO: Verificar se motorista está conectado antes de enviar

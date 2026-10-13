@@ -1,4 +1,5 @@
 const { calculatePressureScore } = require('./pressureScore');
+const { buildFareSignal } = require('./fareSignal');
 const { calculateDemandPressure } = require('./demandPressure');
 const { calculateExceptionScore } = require('./exceptionScore');
 const { STATES, classifyOperationalState } = require('./operationalState');
@@ -186,6 +187,14 @@ function buildPricingResponse(engineResult) {
     }),
     traffic_adjusted: Boolean(trafficNotice),
     traffic_notice: trafficNotice,
+    fare_signal: buildFareSignal({
+      dynamicPercent: fare.percentual_dinamico_aplicado,
+      nightPercent: fare.percentual_adicional_noturno,
+      trafficAdjusted: Boolean(trafficNotice),
+      demandPercent: engineResult.demandPressure.percent,
+      demandSupplyRatioNorm: engineResult.pressure?.breakdown?.demand_supply_ratio_norm,
+      pricingModelMode
+    }),
     demand_pressure: {
       score: Number(engineResult.demandPressure.score.toFixed(4)),
       percent: engineResult.demandPressure.percent,
