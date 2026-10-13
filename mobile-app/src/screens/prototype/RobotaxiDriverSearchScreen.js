@@ -1,4 +1,5 @@
 import leafTypography from '../../components/prototype/LeafTypography';
+import { LeafStatusTicker } from '../../components/design-system/LeafLiveSearch';
 import { returnToPrototypeHome } from '../../navigation/returnToPrototypeHome';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { StatusBar, StyleSheet, Text, View } from "react-native";
@@ -742,6 +743,15 @@ export default function RobotaxiDriverSearchScreen({ navigation, route }) {
                 fillTestID="passenger-driver-search-progress-fill"
               />
             </View>
+            {showSearchTimeoutDecision ? null : (
+              <View style={styles.searchLiveRow}>
+                <LeafStatusTicker
+                  text={searchPresentation.statusMessage || "Procurando motoristas perto de você"}
+                  style={styles.searchLiveText}
+                  testID="passenger-driver-search-status"
+                />
+              </View>
+            )}
             <View style={styles.searchFareRow}>
               <Text style={styles.searchFareLine} numberOfLines={1}>{fareLabel}</Text>
               <Text style={styles.searchFareMeta}>valor protegido</Text>
@@ -870,6 +880,15 @@ const styles = StyleSheet.create({
   },
   searchProgress: {
     marginTop: 16,
+  },
+  searchLiveRow: {
+    marginTop: 10,
+  },
+  searchLiveText: {
+    color: leafRideColors.secondary,
+    ...leafTypography.regular,
+    fontSize: 13,
+    lineHeight: 18,
   },
   tripDetailsToggle: {
     marginTop: 16,

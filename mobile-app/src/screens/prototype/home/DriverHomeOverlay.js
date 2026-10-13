@@ -1,5 +1,6 @@
 import leafTypography from '../../../components/prototype/LeafTypography';
 import LeafGlassSurface from "../../../components/design-system/LeafGlassSurface";
+import { LeafSearchingLine } from "../../../components/design-system/LeafLiveSearch";
 import LeafAnimatedAmount from '../../../components/design-system/LeafAnimatedAmount';
 import React, { memo, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -998,6 +999,13 @@ function DriverHomeOverlay({
         ]}
       >
         <LeafGlassSurface style={styles.driverControlCard}>
+          {/* Online and waiting: a moving line says the app is looking for rides. */}
+          {sliderStatus === "online" ? (
+            <View style={styles.driverSearchingRow} testID="driver-home-searching">
+              <LeafSearchingLine color={DRIVER_HOME_COLOR.leaf} />
+              <Text style={styles.driverSearchingText}>Procurando corridas perto de você</Text>
+            </View>
+          ) : null}
           <View style={styles.driverBottomActions}>
             <TouchableOpacity
               activeOpacity={0.88}
@@ -1388,6 +1396,18 @@ const styles = StyleSheet.create({
     fontSize: 15,
     lineHeight: 20,
     color: DRIVER_HOME_COLOR.leaf,
+  },
+  driverSearchingRow: {
+    paddingHorizontal: 8,
+    paddingTop: 4,
+    paddingBottom: 10,
+    gap: 7,
+  },
+  driverSearchingText: {
+    fontSize: 12,
+    lineHeight: 16,
+    color: "#5F665C",
+    textAlign: "center",
   },
   driverControlCard: {
     borderRadius: DRIVER_HOME_CARD_RADIUS,
