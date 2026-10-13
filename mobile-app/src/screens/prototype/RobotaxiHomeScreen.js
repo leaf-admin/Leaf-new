@@ -7039,7 +7039,10 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     }
     const camera = buildPickupMapCamera({
       coordinate,
-      zoom: 16.5,
+      // Not closer: from about zoom 16.5 Google's Android base map shades
+      // every built-up block dark grey under our style (measured on a device:
+      // grey at 16.5, normal at 15.8; style rules and layer props had no effect).
+      zoom: 15.8,
       height: mapHeight || windowHeight,
       nativeSafeArea: Platform.OS === 'ios' ? { top: insets.top, bottom: insets.bottom } : {},
       markerCenterY: resolveMapViewportCenterY({

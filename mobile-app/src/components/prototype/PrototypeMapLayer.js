@@ -2894,11 +2894,6 @@ function PrototypeMapLayer({
           initialRegion={region}
           region={iosNativeRegion}
           mapType="standard"
-          // Around zoom 16.5 (the wait at the pickup) Google shaded the built-up
-          // blocks dark grey on Android. The app draws no 3D buildings or indoor
-          // maps, so both layers are off.
-          showsBuildings={false}
-          showsIndoors={false}
           customMapStyle={mapStyleAppleLike}
           onMapLoaded={handleNativeMapLoaded}
           onMapReady={handleNativeMapReady}
