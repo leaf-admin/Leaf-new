@@ -349,6 +349,11 @@ export default function WooviPaymentModal({
     const paymentDataRef = useRef(null);
     const paymentStatusRef = useRef(paymentStatus); // ✅ Ref para acessar status atualizado no intervalo
     const paymentConfirmedRef = useRef(false);
+    // A imagem remota do QR pode falhar; nesse caso desenhamos o QR a partir do código.
+    const [qrImageFailed, setQrImageFailed] = useState(false);
+    // Lembra que o fechamento veio de um pagamento confirmado, para manter a confirmação
+    // na tela durante a animação de saída (os dados são limpos antes dela terminar).
+    const closingAfterConfirmRef = useRef(false);
     const autoConfirmTimerRef = useRef(null);
     const qaAutoConfirmStartedRef = useRef(false);
     const isCheckingPaymentRef = useRef(false);
@@ -1664,6 +1669,11 @@ export default function WooviPaymentModal({
         const hasQrImage = Boolean(paymentData?.qrCodeImage);
         const hasQrText = Boolean(paymentData?.qrCodeText);
         const hasPaymentLink = Boolean(paymentData?.paymentLink);
+        if (paymentStatus === 'confirmed') {
+            closingAfterConfirmRef.current = true;
+        } else if (visible) {
+            closingAfterConfirmRef.current = false;
+        }
 
         if (terminalClosePendingRef.current && paymentStatus === 'expired') {
             return (
@@ -1750,6 +1760,23 @@ export default function WooviPaymentModal({
                                 </Text>
                             </TouchableOpacity>
                         </View>
+                    </View>
+                );
+            }
+
+            // Fechando (dados já limpos): não voltar a mostrar "Gerando cobrança" durante
+            // a animação de saída, como aparecia logo após o pagamento confirmado.
+            if (!visible) {
+                return (
+                    <View style={styles.loadingContainer}>
+                        {closingAfterConfirmRef.current ? (
+                            <>
+                                <Icon name="check-circle" type="material" color={PIX_SURFACE.success || '#1F7A3D'} size={64} />
+                                <Text style={[styles.loadingText, { color: color.text.primary }]}>
+                                    Pagamento confirmado
+                                </Text>
+                            </>
+                        ) : null}
                     </View>
                 );
             }
@@ -1866,12 +1893,23 @@ export default function WooviPaymentModal({
                     testID="payment-modal-qr-container"
                     accessibilityLabel="QR Code PIX"
                 >
-                    {hasQrImage ? (
+                    {paymentStatus === 'confirmed' ? (
+                        // Pago: o QR não serve mais (e a imagem remota às vezes sumia,
+                        // deixando um quadrado vazio). Mostra a confirmação no lugar.
+                        <View
+                            style={styles.qrUnavailable}
+                            testID="payment-modal-qr-confirmed"
+                            accessibilityLabel="Pagamento confirmado"
+                        >
+                            <Icon name="check-circle" type="material" color={PIX_SURFACE.success || '#1F7A3D'} size={64} />
+                        </View>
+                    ) : hasQrImage && !qrImageFailed ? (
                         <Image
                             source={{ uri: paymentData.qrCodeImage }}
                             style={styles.qrCodeImage}
                             resizeMode="contain"
                             testID="payment-modal-qr-image"
+                            onError={() => setQrImageFailed(true)}
                         />
                     ) : hasQrText ? (
                         <QRCode
