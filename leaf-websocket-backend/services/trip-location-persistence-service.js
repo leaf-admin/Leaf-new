@@ -426,6 +426,39 @@ class TripLocationPersistenceService {
             };
         }
 
+        // A trilha pode começar antes do início da viagem (motorista ainda a caminho do
+        // embarque). A distância acumulada mistura esse trecho e não serve, mas a última
+        // posição recebida depois do início continua confiável. Quem pede
+        // `allowPreStartTelemetry` recebe essa posição e a distância em linha reta desde
+        // o início; sem isso o encerramento longe do destino ficava sem posição e a
+        // corrida era cobrada inteira.
+        const hasPreStartCanonicalMetadata = Boolean(
+            options.allowPreStartTelemetry === true &&
+            startedAtMs &&
+            String(metadata?.canonicalDriverId || '').trim() === driverId &&
+            canonicalLastLocation &&
+            canonicalFirstReceivedAt &&
+            canonicalLastReceivedAt &&
+            canonicalFirstReceivedAt < startedAtMs &&
+            canonicalLastReceivedAt >= startedAtMs
+        );
+        if (hasPreStartCanonicalMetadata) {
+            const startLocation = normalizePointLocation(options.startLocation);
+            const nowMs = normalizeTimestampMs(options.nowMs) || Date.now();
+            return {
+                success: true,
+                source: 'server_trip_location_last_point',
+                distanceKm: startLocation
+                    ? Number(haversineDistanceKm(startLocation, canonicalLastLocation).toFixed(3))
+                    : 0,
+                durationSecs: Math.max(0, Math.round((nowMs - startedAtMs) / 1000)),
+                endLocation: canonicalLastLocation,
+                startedAtMs,
+                lastReceivedAtMs: canonicalLastReceivedAt,
+                pointsCount: 1
+            };
+        }
+
         const rawPoints = typeof redis?.lrange === 'function'
             ? await redis.lrange(this.getBufferKey(tripId), 0, -1)
             : [];

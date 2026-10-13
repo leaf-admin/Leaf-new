@@ -122,6 +122,14 @@ describe('ride-early-end-service driver settlement decision', () => {
     });
   });
 
+  it('asks for the last trusted position even when telemetry started before the trip', async () => {
+    await decide();
+
+    expect(mockResolveCanonicalTripMetrics).toHaveBeenCalledWith(
+      expect.objectContaining({ tripId: 'booking_1', allowPreStartTelemetry: true })
+    );
+  });
+
   afterAll(() => {
     if (previousFlag === undefined) {
       delete process.env.ENABLE_DRIVER_EARLY_END_SETTLEMENT;
