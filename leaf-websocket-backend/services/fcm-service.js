@@ -14,6 +14,19 @@ function fingerprintToken(value) {
     return crypto.createHash('sha256').update(token).digest('hex').slice(0, 12);
 }
 
+
+// Token expirado ou desinstalado: erro daquele aparelho, não do serviço de push.
+function isInvalidTokenError(error) {
+    const code = String(error?.code || error?.errorInfo?.code || '');
+    if (
+        code === 'messaging/invalid-registration-token' ||
+        code === 'messaging/registration-token-not-registered'
+    ) {
+        return true;
+    }
+    return /NotRegistered|Requested entity was not found/i.test(String(error?.message || ''));
+}
+
 class FCMService {
     constructor(redis = null) {
         this.redis = redis;
@@ -450,6 +463,41 @@ class FCMService {
         }
     }
 
+    /**
+     * Envia pelo circuit breaker sem deixar um token inválido contar como falha do
+     * serviço. Antes, cinco tokens antigos de um mesmo usuário abriam o breaker, o token
+     * válido não era tentado e os inválidos nunca eram removidos (o fallback trocava o
+     * erro original por um genérico, sem código).
+     */
+    async sendMessageThroughBreaker(message, fallbackErrorMessage) {
+        const outcome = await circuitBreakerService.execute(
+            'fcm_send',
+            async () => {
+                try {
+                    return { messageId: await admin.messaging().send(message) };
+                } catch (sendError) {
+                    if (isInvalidTokenError(sendError)) {
+                        return { invalidTokenError: sendError };
+                    }
+                    throw sendError;
+                }
+            },
+            async () => {
+                // Fallback: retornar erro se circuit breaker aberto
+                throw new Error(fallbackErrorMessage);
+            },
+            {
+                failureThreshold: 5,
+                timeout: 60000
+            }
+        );
+
+        if (outcome?.invalidTokenError) {
+            throw outcome.invalidTokenError;
+        }
+        return outcome?.messageId;
+    }
+
     // Enviar notificação para um token específico
     async sendToToken(fcmToken, notification) {
         try {
@@ -501,19 +549,9 @@ class FCMService {
             };
 
             // Enviar com circuit breaker
-            const response = await circuitBreakerService.execute(
-                'fcm_send',
-                async () => {
-                    return await admin.messaging().send(message);
-                },
-                async () => {
-                    // Fallback: retornar erro se circuit breaker aberto
-                    throw new Error('Serviço de notificações temporariamente indisponível');
-                },
-                {
-                    failureThreshold: 5,
-                    timeout: 60000
-                }
+            const response = await this.sendMessageThroughBreaker(
+                message,
+                'Serviço de notificações temporariamente indisponível'
             );
 
             logStructured('info', 'Notificação FCM enviada', {
@@ -538,8 +576,7 @@ class FCMService {
             });
 
             // Se o token for inválido, removê-lo
-            if (error.code === 'messaging/invalid-registration-token' ||
-                error.code === 'messaging/registration-token-not-registered') {
+            if (isInvalidTokenError(error)) {
                 await this.removeInvalidToken(fcmToken);
             }
 
@@ -614,19 +651,9 @@ class FCMService {
             };
 
             // Enviar com circuit breaker
-            const response = await circuitBreakerService.execute(
-                'fcm_send',
-                async () => {
-                    return await admin.messaging().send(message);
-                },
-                async () => {
-                    // Fallback: retornar erro se circuit breaker aberto
-                    throw new Error('Serviço de notificações temporariamente indisponível');
-                },
-                {
-                    failureThreshold: 5,
-                    timeout: 60000
-                }
+            const response = await this.sendMessageThroughBreaker(
+                message,
+                'Serviço de notificações temporariamente indisponível'
             );
 
             logStructured('info', 'Notificação FCM interativa enviada', {
@@ -650,8 +677,7 @@ class FCMService {
                 errorCode: error.code || null
             });
 
-            if (error.code === 'messaging/invalid-registration-token' ||
-                error.code === 'messaging/registration-token-not-registered') {
+            if (isInvalidTokenError(error)) {
                 await this.removeInvalidToken(fcmToken);
             }
 
@@ -753,12 +779,7 @@ class FCMService {
                 };
 
                 try {
-                    await circuitBreakerService.execute(
-                        'fcm_send',
-                        async () => admin.messaging().send(message),
-                        async () => { throw new Error('Fallback Timeout'); },
-                        { failureThreshold: 5, timeout: 60000 }
-                    );
+                    await this.sendMessageThroughBreaker(message, 'Fallback Timeout');
                     successCount++;
                 } catch (err) {
                     logStructured('warn', 'Erro ao enviar push silencioso FCM', {
@@ -768,7 +789,7 @@ class FCMService {
                         error: err.message,
                         errorCode: err.code || null
                     });
-                    if (err.code === 'messaging/invalid-registration-token' || err.code === 'messaging/registration-token-not-registered') {
+                    if (isInvalidTokenError(err)) {
                         await this.removeInvalidToken(fcmToken);
                     }
                 }
