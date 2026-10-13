@@ -1,4 +1,5 @@
 const { assessDriverArrivalAtPickup } = require('../utils/pickup-arrival-policy');
+const { notifyPassengerRideStatus } = require('../services/ride-passenger-status-push');
 const { scheduleMapH3Refresh } = require('../utils/map-h3-refresh-broadcaster');
 const { buildActiveRideSnapshotForUser } = require('./active-ride-sync-utils');
 const RideStateManager = require('../services/ride-state-manager');
@@ -386,6 +387,16 @@ function registerSocketDriverControlHandlers({
 
                 io.to(customerRoom).emit('arrivedAtPickup', passengerArrivalPayload);
                 io.to(customerRoom).emit('driverArrived', passengerArrivalPayload);
+
+                // Com o app em segundo plano o socket não chega: avisa por push e
+                // atualiza a Live Activity / notificação de corrida. Não bloqueia o fluxo.
+                notifyPassengerRideStatus({
+                    redis,
+                    customerId,
+                    bookingId: rideId,
+                    status: 'arrived',
+                    bookingData: activeBookingData
+                }).catch(() => null);
 
                 try {
                     const activeRideSnapshot = await buildActiveRideSnapshotForUser(
