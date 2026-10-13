@@ -32,6 +32,7 @@ const {
     hasRideDispatchPreferences
 } = require('./ride-dispatch-preference-service');
 const driverEligibilityService = require('./driver-eligibility-service');
+const { isRideInAvoidedArea, parseStoredAvoidedCells } = require('./driver-avoided-areas-service');
 const {
     getDriverPaymentReservation,
     reservationMatchesContext
@@ -818,6 +819,7 @@ class DriverNotificationDispatcher {
                         cached.destinationModeArrivalRadiusKm ||
                         cached.driverDestinationArrivalRadiusKm ||
                         null,
+                    avoidedH3Cells: cached.avoidedH3Cells || null,
                     acceptsPlusWithElite: cached.acceptsPlusWithElite === 'true' || cached.acceptsPlusWithElite === true,
                     driverApproved: cached.driverApproved === 'true' || cached.driverApproved === true,
                     vehicleApproved: cached.vehicleApproved === 'true' || cached.vehicleApproved === true,
@@ -955,6 +957,8 @@ class DriverNotificationDispatcher {
             preflightPipeline.ttl(`driver_soft_ban:${driverId}`);
             preflightPipeline.ttl(this.getRideReofferCooldownKey(bookingId, driverId));
             preflightPipeline.hget(this.getRideRejectionCountKey(bookingId), driverId);
+            // Fonte da verdade das áreas evitadas (o hash do motorista expira quando ele sai).
+            preflightPipeline.get(`driver_avoided_areas:${driverId}`);
             const preflightResults = await preflightPipeline.exec();
 
             const currentActiveId = this.readPreflightPipelineResult(preflightResults, 0, null);
@@ -1028,6 +1032,27 @@ class DriverNotificationDispatcher {
                 return finish(false, 'DRIVER_REJECTION_COOLDOWN', {
                     ttlSeconds: rejectionMeta.cooldownTtlSeconds
                 });
+            }
+
+            // Áreas evitadas pelo motorista são bloqueio duro: embarque ou destino dentro delas não é ofertado.
+            const avoidedCells = parseStoredAvoidedCells(this.readPreflightPipelineResult(preflightResults, 7, null));
+            if (avoidedCells.length > 0) {
+                // Repõe a cópia usada pelo shortlist quando o hash foi recriado sem ela.
+                if (typeof this.redis.hsetnx === 'function') {
+                    Promise.resolve(this.redis.hsetnx(`driver:${driverId}`, 'avoidedH3Cells', JSON.stringify(avoidedCells))).catch(() => null);
+                }
+                const avoidedAreaBookingData = dispatchabilitySnapshot?.bookingData || bookingData || {};
+                const inAvoidedArea = isRideInAvoidedArea(
+                    { avoidedH3Cells: avoidedCells },
+                    {
+                        pickupLocation: this.safeJSONParse(avoidedAreaBookingData.pickupLocation, null),
+                        destinationLocation: this.safeJSONParse(avoidedAreaBookingData.destinationLocation, null)
+                    }
+                );
+                if (inAvoidedArea) {
+                    logger.info(`🚫 [Dispatcher] Driver ${driverId} evita a área de ${bookingId}`);
+                    return finish(false, 'DRIVER_AVOIDED_AREA');
+                }
             }
 
             // ✅ CORREÇÃO: Se já foi notificado para ESTA corrida, verificar se ainda está na tela

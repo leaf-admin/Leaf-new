@@ -6,6 +6,16 @@ const { getPolicyForDriver } = require('../services/driver-destination-mode-serv
 const { validateAuthoritativeFinancialSnapshot } = require('../services/ride-financial-contract');
 const { requireFirebaseUser, requireFirebaseSelf } = require('../middleware/firebase-user-auth');
 const { getOperationalDayKey } = require('../services/driver-online-time-policy-service');
+const {
+  AVOIDED_AREAS_H3_RESOLUTION,
+  MAX_AVOIDED_AREAS,
+  MAX_AVOIDED_CELLS,
+  MAX_AVOIDED_LABEL_LENGTH,
+  buildAreaOutline,
+  buildAvoidedAreasPatch,
+  cellsAroundPoint,
+  normalizeAvoidedPoint
+} = require('../services/driver-avoided-areas-service');
 const { getFinancialCollections } = require('../services/financial-runtime-context');
 const {
   resolveUserPersistenceScope,
@@ -369,6 +379,128 @@ router.get('/api/drivers/me/destination-policy', requireFirebaseUser, async (req
     return res.status(500).json({
       success: false,
       error: 'Não foi possível carregar os destinos de caminho agora.'
+    });
+  }
+});
+
+// 🚫 ÁREAS EVITADAS: o motorista marca áreas onde não quer receber ofertas.
+// `driver_avoided_areas:{uid}` é a fonte da verdade; `avoidedH3Cells` no hash `driver:{uid}` é uma cópia para o shortlist.
+router.get('/api/drivers/me/avoided-areas', requireFirebaseUser, async (req, res) => {
+  try {
+    const driverId = req.authenticatedUser.uid;
+    const redis = redisPool.getConnection();
+    const rawStored = await redis.get(`driver_avoided_areas:${driverId}`);
+    let stored = null;
+    try {
+      stored = rawStored ? JSON.parse(rawStored) : null;
+    } catch (error) {
+      stored = null;
+    }
+
+    return res.json({
+      success: true,
+      cells: Array.isArray(stored?.cells) ? stored.cells : [],
+      areas: Array.isArray(stored?.areas) ? stored.areas : [],
+      maxCells: MAX_AVOIDED_CELLS,
+      maxAreas: MAX_AVOIDED_AREAS,
+      resolution: AVOIDED_AREAS_H3_RESOLUTION,
+      updatedAt: stored?.updatedAt || null
+    });
+  } catch (error) {
+    logError(error, '❌ Erro ao buscar áreas evitadas do motorista:', { service: 'drivers-routes' });
+    return res.status(500).json({
+      success: false,
+      error: 'Não foi possível carregar as áreas evitadas agora.'
+    });
+  }
+});
+
+router.put('/api/drivers/me/avoided-areas', requireFirebaseUser, async (req, res) => {
+  try {
+    const driverId = req.authenticatedUser.uid;
+    const rawAreas = req.body?.areas;
+
+    if (!Array.isArray(rawAreas)) {
+      return res.status(400).json({
+        success: false,
+        code: 'AVOIDED_AREAS_INVALID',
+        error: 'Informe a lista de áreas evitadas.'
+      });
+    }
+
+    if (rawAreas.length > MAX_AVOIDED_AREAS) {
+      return res.status(400).json({
+        success: false,
+        code: 'AVOIDED_AREAS_LIMIT_EXCEEDED',
+        error: `Você pode evitar no máximo ${MAX_AVOIDED_AREAS} áreas.`
+      });
+    }
+
+    const areas = [];
+    const distinctCells = new Set();
+    for (let index = 0; index < rawAreas.length; index += 1) {
+      const rawArea = rawAreas[index] || {};
+      const center = normalizeAvoidedPoint(rawArea.center);
+      const ringSize = rawArea.ringSize === undefined || rawArea.ringSize === null
+        ? 0
+        : Number(rawArea.ringSize);
+
+      if (!center || ![0, 1, 2].includes(ringSize)) {
+        return res.status(400).json({
+          success: false,
+          code: 'AVOIDED_AREA_INVALID',
+          error: 'Cada área evitada precisa de centro válido e raio entre 0 e 2.'
+        });
+      }
+
+      const cells = cellsAroundPoint(center.lat, center.lng, ringSize);
+      cells.forEach((cell) => distinctCells.add(cell));
+      areas.push({
+        id: String(rawArea.id ?? '').trim().slice(0, 64) || `area_${index + 1}`,
+        label: String(rawArea.label ?? '').trim().slice(0, MAX_AVOIDED_LABEL_LENGTH),
+        center,
+        ringSize,
+        cells,
+        outline: buildAreaOutline(cells)
+      });
+    }
+
+    if (distinctCells.size > MAX_AVOIDED_CELLS) {
+      return res.status(400).json({
+        success: false,
+        code: 'AVOIDED_AREAS_LIMIT_EXCEEDED',
+        error: `As áreas evitadas somam ${distinctCells.size} células; o limite é ${MAX_AVOIDED_CELLS}.`
+      });
+    }
+
+    const cells = [...distinctCells];
+    const updatedAt = new Date().toISOString();
+    const redis = redisPool.getConnection();
+    // Fonte da verdade (sem TTL): é o que o dispatcher consulta antes de ofertar.
+    await redis.set(
+      `driver_avoided_areas:${driverId}`,
+      JSON.stringify({ cells, areas, updatedAt })
+    );
+    // Cópia no hash do motorista só se ele existir: criar o hash aqui deixaria um
+    // registro de motorista incompleto e sem TTL.
+    if (await redis.exists(`driver:${driverId}`)) {
+      await redis.hset(`driver:${driverId}`, buildAvoidedAreasPatch(cells, updatedAt));
+    }
+
+    return res.json({
+      success: true,
+      cells,
+      areas,
+      maxCells: MAX_AVOIDED_CELLS,
+      maxAreas: MAX_AVOIDED_AREAS,
+      resolution: AVOIDED_AREAS_H3_RESOLUTION,
+      updatedAt
+    });
+  } catch (error) {
+    logError(error, '❌ Erro ao salvar áreas evitadas do motorista:', { service: 'drivers-routes' });
+    return res.status(500).json({
+      success: false,
+      error: 'Não foi possível salvar as áreas evitadas agora.'
     });
   }
 });
