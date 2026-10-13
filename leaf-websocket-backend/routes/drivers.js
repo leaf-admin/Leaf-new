@@ -6,6 +6,10 @@ const { getPolicyForDriver } = require('../services/driver-destination-mode-serv
 const { validateAuthoritativeFinancialSnapshot } = require('../services/ride-financial-contract');
 const { requireFirebaseUser, requireFirebaseSelf } = require('../middleware/firebase-user-auth');
 const { getOperationalDayKey } = require('../services/driver-online-time-policy-service');
+const {
+  resolveUserPersistenceScope,
+  assertStoredRecordMatchesScope
+} = require('../services/sandbox-persistence-context');
 const { authenticateJWT, requireRole } = require('../middleware/jwt-auth');
 const { logger, logStructured, logError } = require('../utils/logger');
 const DRIVER_APPLICATION_ADMIN_ROLES = ['admin', 'super-admin', 'manager', 'support', 'development'];
@@ -107,6 +111,11 @@ function firstObjectCandidate(...values) {
 // (encerramento sem snapshot financeiro final do backend).
 const DRIVER_PAID_RIDE_STATUSES = new Set(['COMPLETED', 'EARLY_ENDED_BY_RIDER']);
 const EARLY_ENDED_BY_RIDER_STATUS = 'EARLY_ENDED_BY_RIDER';
+// Encerramento antecipado pelo motorista (flag): a corrida continua COMPLETED e o
+// completionType só indica que o valor liquidado é o do trecho percorrido.
+const EARLY_ENDED_BY_DRIVER_COMPLETION_TYPE = 'EARLY_ENDED_BY_DRIVER';
+const EARNINGS_REPORT_WINDOW_DAYS = 30;
+const DAY_IN_MS = 24 * 60 * 60 * 1000;
 
 // Valor executado (em centavos) de uma corrida encerrada antecipadamente, quando o
 // settlement foi persistido junto da corrida. Retorna undefined se não houver.
@@ -153,6 +162,14 @@ function toValidDate(value) {
   if (value === null || value === undefined || value === '') {
     return null;
   }
+  // Timestamp do Firestore (completedAt/cancelledAt da coleção de corridas).
+  if (typeof value === 'object' && !(value instanceof Date)) {
+    if (typeof value.toDate === 'function') {
+      return toValidDate(value.toDate());
+    }
+    const seconds = Number(value._seconds ?? value.seconds);
+    return Number.isFinite(seconds) ? toValidDate(seconds * 1000) : null;
+  }
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? null : date;
 }
@@ -178,6 +195,54 @@ function resolveBookingReportDate(booking = {}) {
 function centsToBrl(cents) {
   const amount = Number(cents);
   return Number.isFinite(amount) ? Math.max(0, amount) / 100 : 0;
+}
+
+function isMissingFirestoreIndexError(error) {
+  return (
+    error?.code === 9 ||
+    String(error?.code || '').toLowerCase() === 'failed-precondition' ||
+    String(error?.message || '').includes('FAILED_PRECONDITION')
+  );
+}
+
+// Corridas do motorista na coleção de corridas do namespace dele (`rides` ou
+// `sandbox_rides`): é onde a finalização grava status, completedAt e o snapshot
+// financeiro final. O nó `bookings` do Realtime Database não recebe essas corridas.
+//
+// A consulta usa só o índice automático de `driverId`. O recorte de tempo vem do ID do
+// documento (`booking_<epoch ms>_<passageiro>`), com um dia de folga antes da janela;
+// o dia de cada corrida continua sendo decidido por completedAt/cancelledAt. Um filtro
+// por completedAt exigiria índice composto, que não existe.
+async function loadDriverRidesForEarningsReport(firestore, persistenceScope, driverId, windowDays) {
+  const driverRidesQuery = firestore
+    .collection(persistenceScope.collections.rides)
+    .where('driverId', '==', driverId);
+  const oldestBookingId = `booking_${Date.now() - (windowDays + 1) * DAY_IN_MS}`;
+
+  let snapshot;
+  try {
+    snapshot = await driverRidesQuery.where('__name__', '>=', oldestBookingId).get();
+  } catch (error) {
+    if (!isMissingFirestoreIndexError(error)) {
+      throw error;
+    }
+    // Sem o recorte por ID o resultado é o mesmo; só lê o histórico inteiro do motorista.
+    logger.warn(`⚠️ [DriversRoute] Recorte por ID indisponível no relatório de ganhos de ${driverId}: ${error.message}`);
+    snapshot = await driverRidesQuery.get();
+  }
+
+  const rides = [];
+  snapshot.forEach((doc) => {
+    const ride = doc.data() || {};
+    try {
+      // Sandbox exige o mesmo contexto selado; operacional nunca lê registro sandbox.
+      assertStoredRecordMatchesScope(ride, persistenceScope);
+    } catch (_error) {
+      return;
+    }
+    rides.push(ride);
+  });
+  return rides;
 }
 
 // 🚗 DRIVER APPROVAL APIs
@@ -917,20 +982,50 @@ router.get('/api/drivers/:id/earnings', requireDriverSelf, requireFirebase, asyn
     }
     const user = userSnapshot.val();
 
-    // 2. Buscar carro ativo
-    const carsSnapshot = await db.ref('cars').once('value');
+    // 2. Namespace financeiro do motorista (operacional ou sandbox), como na lista de
+    // recibos da Atividade. Sem classificação segura o relatório não responde: zeros
+    // aqui seriam lidos pelo app como ganho real.
+    const firestore = typeof firebaseConfig.getFirestore === 'function' ? firebaseConfig.getFirestore() : null;
+    let persistenceScope = null;
+    if (firestore) {
+      try {
+        persistenceScope = await resolveUserPersistenceScope({
+          userId: id,
+          phone: req.authenticatedUser?.phoneNumber || null,
+          actor: req.authenticatedUser || null
+        });
+      } catch (scopeError) {
+        logger.error(`❌ [DriversRoute] Namespace financeiro indisponível para o relatório de ganhos de ${id}: ${scopeError.message}`);
+      }
+    }
+    if (!persistenceScope) {
+      return res.status(503).json({
+        success: false,
+        code: 'EARNINGS_REPORT_SOURCE_UNAVAILABLE',
+        message: 'Relatório de ganhos indisponível no momento'
+      });
+    }
+
+    // 3. Buscar carro ativo (consulta indexada por motorista, não o nó inteiro)
+    const carsSnapshot = await db.ref('cars').orderByChild('driver').equalTo(id).once('value');
     const cars = carsSnapshot.val() || {};
     const driverCar = Object.values(cars).find(car => car.driver === id);
 
-    // 3. Buscar viagens
-    const bookingsSnapshot = await db.ref('bookings').orderByChild('driver').equalTo(id).once('value');
-    const bookings = bookingsSnapshot.val() || {};
-    const allDriverBookings = Object.values(bookings);
+    // 4. Buscar viagens na fonte que recebe as corridas liquidadas
+    const dailyWindowDays = EARNINGS_REPORT_WINDOW_DAYS;
+    let allDriverBookings = await loadDriverRidesForEarningsReport(firestore, persistenceScope, id, dailyWindowDays);
+
+    // Legado: motoristas antigos com corridas só no nó `bookings` do Realtime Database.
+    // Vale apenas quando a fonte acima não tem nada, e nunca é somado a ela. O sandbox
+    // não tem legado.
+    if (allDriverBookings.length === 0 && persistenceScope.namespace === 'operational') {
+      const bookingsSnapshot = await db.ref('bookings').orderByChild('driver').equalTo(id).once('value');
+      allDriverBookings = Object.values(bookingsSnapshot.val() || {});
+    }
 
     const reportTimeZone = getReportTimeZone();
     const toDateKey = date => getOperationalDayKey(date.getTime(), reportTimeZone);
     const todayKey = toDateKey(new Date());
-    const dailyWindowDays = 30;
 
     const dailySeriesMap = {};
     for (let i = dailyWindowDays - 1; i >= 0; i--) {
@@ -963,7 +1058,9 @@ router.get('/api/drivers/:id/earnings', requireDriverSelf, requireFirebase, asyn
         return;
       }
 
-      const tripDate = resolveBookingReportDate(booking || {});
+      const tripDate =
+        (isCancelled ? toValidDate(booking?.cancelledAt) : null) ||
+        resolveBookingReportDate(booking || {});
       if (!tripDate) {
         return;
       }
@@ -983,7 +1080,8 @@ router.get('/api/drivers/:id/earnings', requireDriverSelf, requireFirebase, asyn
       // No encerramento antecipado vale o líquido liquidado sobre o valor executado, nunca o
       // contratado: um snapshot que não bate com o settlement fica pendente em vez de somar.
       const expectedSnapshot = {};
-      if (status === EARLY_ENDED_BY_RIDER_STATUS) {
+      const completionType = String(booking?.completionType || '').toUpperCase();
+      if (status === EARLY_ENDED_BY_RIDER_STATUS || completionType === EARLY_ENDED_BY_DRIVER_COMPLETION_TYPE) {
         const executedFareCents = resolveExecutedFareCents(booking);
         if (executedFareCents !== undefined) {
           expectedSnapshot.passengerPaidCents = executedFareCents;
