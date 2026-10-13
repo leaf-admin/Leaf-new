@@ -207,6 +207,37 @@ class DriverBalanceService {
   }
 
   /**
+   * Saques do próprio motorista com o estado atual (em conferência, enviando, enviado).
+   * @param {string} driverId
+   * @param {number} limit
+   * @returns {Promise<{success: boolean, withdrawals: Array}>}
+   */
+  async getDriverWithdrawals(driverId, limit = 5) {
+    if (!driverId || !isPilotFeatureEnabled('driverWithdrawalsEnabled', false)) {
+      return { success: false, withdrawals: [] };
+    }
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000);
+    try {
+      const response = await fetch(`${this.baseUrl}/driver-balance/${driverId}/withdrawals?limit=${limit}`, {
+        method: 'GET',
+        headers: await this.getAuthHeaders(),
+        signal: controller.signal
+      });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok || payload?.success !== true) {
+        return { success: false, withdrawals: [] };
+      }
+      return { success: true, withdrawals: Array.isArray(payload.withdrawals) ? payload.withdrawals : [] };
+    } catch (error) {
+      Logger.warn('⚠️ DriverBalanceService - Falha ao buscar saques:', error?.message || error);
+      return { success: false, withdrawals: [] };
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  }
+
+  /**
    * Solicita saque do motorista.
    * @param {string} driverId
    * @param {number} amount
