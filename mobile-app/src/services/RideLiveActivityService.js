@@ -14,6 +14,16 @@ const TERMINAL_STATUSES = new Set([
   'expired',
 ]);
 
+// A trilha do cartão mostra o trecho atual (até o embarque ou até o destino). Com a
+// distância real do trecho o carro anda de verdade; sem ela vale o ponto fixo da fase.
+function resolveLegProgress(status, rideData = {}) {
+  const leg = rideData?.ongoing?.progress ?? rideData?.legProgress;
+  if ((status === 'accepted' || status === 'started') && leg !== null && leg !== undefined && Number.isFinite(Number(leg))) {
+    return Math.min(1, Math.max(0.04, Number(leg)));
+  }
+  return STATUS_PROGRESS[status] ?? 0.25;
+}
+
 const STATUS_PROGRESS = {
   searching: 0.12,
   accepted: 0.35,
@@ -113,9 +123,14 @@ class RideLiveActivityService {
     const destinationAddress = pickAddress(rideData.destination, rideData.destinationAddress || 'destino');
     const pickupAddress = pickAddress(rideData.pickup, rideData.pickupAddress || 'embarque');
 
+    const vehicleLine = [rideData.vehicleModel || rideData.vehicle, rideData.vehiclePlate || rideData.plate]
+      .map((value) => String(value || '').trim())
+      .filter(Boolean)
+      .join(' · ');
     const passengerText = this.buildPassengerText(status, {
       driverName: rideData.driverName,
-      etaText,
+      vehicleLine,
+      pickupAddress,
       destinationAddress,
     });
     const driverText = this.buildDriverText(status, {
@@ -138,71 +153,72 @@ class RideLiveActivityService {
       etaText,
       distanceText,
       fareLabel,
-      progress: STATUS_PROGRESS[status] ?? 0.25,
+      progress: resolveLegProgress(status, rideData),
       updatedAt: new Date().toISOString(),
       staleAt: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
     };
   }
 
-  buildPassengerText(status, { driverName, etaText, destinationAddress }) {
+  // O tempo aparece grande no canto do cartão; o título diz o que está acontecendo.
+  buildPassengerText(status, { driverName, vehicleLine, pickupAddress, destinationAddress }) {
     switch (status) {
       case 'searching':
         return {
-          title: 'Buscando motorista',
-          subtitle: etaText ? `Estimativa ${etaText}` : '',
-          body: 'A corrida começa após a confirmação do motorista.',
+          title: 'Procurando seu motorista',
+          subtitle: '',
+          body: 'Avisamos assim que alguém aceitar.',
         };
       case 'accepted':
         return {
-          title: etaText || 'Motorista a caminho',
-          subtitle: driverName ? `${driverName} está a caminho` : 'Motorista a caminho',
-          body: 'Acompanhe a chegada pelo app.',
+          title: driverName ? `${driverName} está a caminho` : 'Motorista a caminho',
+          subtitle: vehicleLine,
+          body: `Embarque: ${pickupAddress}`,
         };
       case 'arrived':
         return {
-          title: 'Motorista chegou',
-          subtitle: driverName || '',
-          body: 'Dirija-se ao local de embarque.',
+          title: 'Seu motorista chegou',
+          subtitle: vehicleLine || driverName || '',
+          body: `Embarque: ${pickupAddress}`,
         };
       case 'started':
         return {
           title: `A caminho de ${destinationAddress}`,
-          subtitle: etaText ? `Chegada em ${etaText}` : '',
-          body: 'Viagem em andamento.',
+          subtitle: driverName ? `Com ${driverName}` : '',
+          body: '',
         };
       default:
         return {
           title: 'Corrida ativa',
-          subtitle: etaText || '',
+          subtitle: '',
           body: 'Acompanhe a corrida pela Leaf.',
         };
     }
   }
 
-  buildDriverText(status, { customerName, etaText, pickupAddress, destinationAddress }) {
+  buildDriverText(status, { customerName, pickupAddress, destinationAddress }) {
     switch (status) {
       case 'accepted':
         return {
-          title: etaText || 'Vá até o embarque',
-          subtitle: pickupAddress,
-          body: customerName ? `Passageiro: ${customerName}` : 'Passageiro aguardando.',
+          title: 'Vá até o embarque',
+          subtitle: customerName ? `Passageiro: ${customerName}` : '',
+          body: pickupAddress,
         };
       case 'arrived':
         return {
           title: 'Aguardando embarque',
-          subtitle: customerName || '',
-          body: 'Inicie a viagem após o passageiro embarcar.',
+          subtitle: customerName ? `Passageiro: ${customerName}` : '',
+          body: pickupAddress,
         };
       case 'started':
         return {
           title: `A caminho de ${destinationAddress}`,
-          subtitle: etaText ? `Chegada em ${etaText}` : '',
-          body: 'Viagem em andamento.',
+          subtitle: customerName ? `Com ${customerName}` : '',
+          body: '',
         };
       default:
         return {
           title: 'Corrida ativa',
-          subtitle: etaText || '',
+          subtitle: '',
           body: 'Acompanhe a corrida pela Leaf.',
         };
     }

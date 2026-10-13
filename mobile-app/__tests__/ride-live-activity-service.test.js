@@ -92,8 +92,10 @@ describe('RideLiveActivityService', () => {
       bookingId: 'booking-1',
       role: 'passenger',
       phase: 'accepted',
-      title: '8 min',
-      subtitle: 'Ana está a caminho',
+      title: 'Ana está a caminho',
+      subtitle: '',
+      body: 'Embarque: Estr. do Rio Grande',
+      etaText: '8 min',
       distanceText: '3,3 km',
       fareLabel: 'R$ 42,00',
       progress: 0.35
@@ -140,5 +142,35 @@ describe('RideLiveActivityService', () => {
       endedAt: expect.any(String)
     }));
     expect(RideLiveActivityService.activeActivities.has('booking-2')).toBe(false);
+  });
+
+  it('tells the passenger which car to look for and moves the track with the real leg progress', () => {
+    const payload = RideLiveActivityService.buildPayload({
+      bookingId: 'booking-2',
+      status: 'accepted',
+      userType: 'customer',
+      driverName: 'Ana',
+      vehicleModel: 'Onix',
+      vehiclePlate: 'ABC1D23',
+      pickup: { address: 'R. das Pastorinhas, 4' },
+      ongoing: { progress: 0.6 },
+    });
+
+    expect(payload).toMatchObject({
+      title: 'Ana está a caminho',
+      subtitle: 'Onix · ABC1D23',
+      body: 'Embarque: R. das Pastorinhas, 4',
+      progress: 0.6,
+    });
+  });
+
+  it('keeps the phase position on the track when no leg distance is known', () => {
+    expect(RideLiveActivityService.buildPayload({ bookingId: 'b', status: 'arrived', userType: 'driver', ongoing: { progress: null } }).progress).toBe(0.52);
+    expect(RideLiveActivityService.buildPayload({ bookingId: 'b', status: 'started', userType: 'driver', ongoing: { progress: 0 } }).progress).toBe(0.04);
+    expect(RideLiveActivityService.buildPayload({ bookingId: 'b', status: 'started', userType: 'driver', customerName: 'Rui', destination: { address: 'Via Parque' } })).toMatchObject({
+      title: 'A caminho de Via Parque',
+      subtitle: 'Com Rui',
+      progress: 0.76,
+    });
   });
 });

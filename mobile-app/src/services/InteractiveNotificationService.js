@@ -102,6 +102,26 @@ class InteractiveNotificationService {
     }
 
     /**
+     * Ação vinda de outra fonte que não o expo-notifications (notificação nativa de
+     * corrida no Android). Usa o mesmo executor.
+     */
+    async dispatchExternalAction({ actionIdentifier, data = {} } = {}) {
+        if (!actionIdentifier || !this.actionExecutor) {
+            return false;
+        }
+        try {
+            return Boolean(await this.actionExecutor({
+                actionIdentifier,
+                notification: { request: { content: { data } } },
+                data,
+            }));
+        } catch (error) {
+            Logger.error('❌ [InteractiveNotification] Ação externa falhou:', error);
+            return false;
+        }
+    }
+
+    /**
      * Inicializar o serviço
      */
     async initialize() {

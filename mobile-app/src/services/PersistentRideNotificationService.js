@@ -18,8 +18,19 @@ import * as Device from 'expo-device';
 import fcmService from './FCMNotificationService';
 import { requestExpoNotificationsPermissionWithDisclosure } from './AndroidPermissionDisclosure';
 import RideLiveActivityService from './RideLiveActivityService';
+import {
+    cancelOngoingRideNotification,
+    displayOngoingRideNotification,
+    isOngoingRideNotificationAvailable,
+    setOngoingRideActionListener,
+    ONGOING_RIDE_NOTIFICATION_ID,
+} from './LeafOngoingRideNotification';
 
 const RIDE_STATUS_NOTIFICATION_IDENTIFIER = 'leaf-ride-status';
+
+function stripLeadingEmoji(text) {
+    return String(text || '').replace(/^[^A-Za-zÀ-ÿ0-9]+/, '').trim();
+}
 
 
 class PersistentRideNotificationService {
@@ -28,6 +39,68 @@ class PersistentRideNotificationService {
         this.currentBookingId = null;
         this.updateInterval = null;
         this.isActive = false;
+        this.lastOngoingSignature = '';
+    }
+
+    /**
+     * Android com a biblioteca nativa: uma notificação só, atualizada no lugar, com
+     * barra de progresso e cronômetro. Devolve false quando o build não a inclui e o
+     * chamador segue pelo caminho antigo (texto).
+     */
+    async showNativeOngoing(rideData, fallbackContent) {
+        if (Platform.OS !== 'android' || !isOngoingRideNotificationAvailable()) {
+            return false;
+        }
+
+        const ongoing = rideData.ongoing || {
+            title: stripLeadingEmoji(rideData.customTitle || fallbackContent.title),
+            body: rideData.customBody || fallbackContent.body,
+            progress: null,
+            countdownSeconds:
+                Number(rideData.estimatedTime) > 0 && ['accepted', 'started'].includes(rideData.status)
+                    ? Number(rideData.estimatedTime) * 60
+                    : 0,
+        };
+        const actions = Array.isArray(rideData.androidActions) ? rideData.androidActions : [];
+        const progressPercent = Number.isFinite(Number(ongoing.progress))
+            && ongoing.progress !== null ? Math.round(Number(ongoing.progress) * 100) : -1;
+        // O cronômetro anda sozinho: só reexibe quando algo visível muda (minuto do ETA,
+        // percentual, texto ou botões), não a cada posição recebida.
+        const signature = [
+            rideData.bookingId,
+            rideData.status,
+            ongoing.title,
+            ongoing.subtitle || '',
+            ongoing.body,
+            progressPercent,
+            Math.ceil((Number(ongoing.countdownSeconds) || 0) / 60),
+            actions.map((action) => action.identifier).join(','),
+        ].join('|');
+        if (signature === this.lastOngoingSignature && this.currentNotificationId === ONGOING_RIDE_NOTIFICATION_ID) {
+            return true;
+        }
+
+        const shown = await displayOngoingRideNotification({
+            ...ongoing,
+            actions,
+            data: {
+                type: rideData.notificationDataType || 'ride_status',
+                bookingId: rideData.bookingId,
+                status: rideData.status,
+                userType: rideData.userType,
+            },
+        });
+        if (!shown) {
+            return false;
+        }
+
+        // Um build antigo pode ter deixado a notificação de texto na barra.
+        if (this.currentNotificationId !== ONGOING_RIDE_NOTIFICATION_ID) {
+            await Notifications.dismissNotificationAsync(RIDE_STATUS_NOTIFICATION_IDENTIFIER).catch(() => {});
+        }
+        this.lastOngoingSignature = signature;
+        this.currentNotificationId = ONGOING_RIDE_NOTIFICATION_ID;
+        return true;
     }
 
     /**
@@ -53,6 +126,12 @@ class PersistentRideNotificationService {
 
             // Register handler for FCM messages
             this.setupFCMHandler();
+
+            // Botões da notificação nativa seguem o mesmo executor das ações já existentes.
+            setOngoingRideActionListener(async ({ actionIdentifier, data }) => {
+                const interactiveNotificationService = require('./InteractiveNotificationService').default;
+                await interactiveNotificationService.dispatchExternalAction({ actionIdentifier, data });
+            });
 
             Logger.log('✅ [PersistentRideNotification] Serviço inicializado');
         } catch (error) {
@@ -191,6 +270,10 @@ class PersistentRideNotificationService {
                 fare
             });
 
+            if (await this.showNativeOngoing(rideData, { title, body })) {
+                return;
+            }
+
             // Cancelar notificação anterior se existir
             if (this.currentNotificationId) {
                 await Notifications.cancelScheduledNotificationAsync(this.currentNotificationId);
@@ -278,6 +361,10 @@ class PersistentRideNotificationService {
                 distance,
                 fare
             });
+
+            if (await this.showNativeOngoing(rideData, { title, body })) {
+                return;
+            }
 
             // No expo-notifications, precisamos cancelar e recriar para atualizar
             await Notifications.cancelScheduledNotificationAsync(this.currentNotificationId);
@@ -432,6 +519,12 @@ class PersistentRideNotificationService {
                 bookingId: rideData.bookingId || this.currentBookingId,
                 status: rideData.status || 'completed',
             });
+
+            await cancelOngoingRideNotification();
+            this.lastOngoingSignature = '';
+            if (this.currentNotificationId === ONGOING_RIDE_NOTIFICATION_ID) {
+                this.currentNotificationId = null;
+            }
 
             // Dismiss by the stable id too: after a JS reload currentNotificationId is lost.
             await Notifications.dismissNotificationAsync(RIDE_STATUS_NOTIFICATION_IDENTIFIER).catch(() => {});
