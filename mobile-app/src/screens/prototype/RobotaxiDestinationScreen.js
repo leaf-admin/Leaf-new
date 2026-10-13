@@ -1,4 +1,5 @@
 import leafTypography from '../../components/prototype/LeafTypography';
+import { returnToPrototypeHome } from '../../navigation/returnToPrototypeHome';
 import React, {
   useCallback,
   useEffect,
@@ -2937,7 +2938,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
           }
         : {};
 
-      navigation.replace("RobotaxiPrototype", params);
+      returnToPrototypeHome(navigation, params);
     },
     [clearFlowPreview, isExtensionFlow, navigation],
   );

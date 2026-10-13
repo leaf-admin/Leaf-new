@@ -1,4 +1,5 @@
 import leafTypography from '../../components/prototype/LeafTypography';
+import { returnToPrototypeHome } from '../../navigation/returnToPrototypeHome';
 import { RobotaxiLifecycleSummary } from '../../components/prototype/RobotaxiLifecycleUI';
 import React, { useCallback, useRef, useState } from 'react';
 import { StatusBar, StyleSheet, Text, View } from 'react-native';
@@ -77,7 +78,7 @@ export default function RobotaxiPaymentFailedScreen({ navigation, route }) {
 
   const handleRetry = useCallback(async () => {
     if (!confirmedRetryRequested) {
-      navigation.replace(retryRouteName, retryParams);
+      returnToPrototypeHome(navigation, retryParams);
       return;
     }
 

@@ -1,4 +1,5 @@
 import leafTypography from '../../components/prototype/LeafTypography';
+import { returnToPrototypeHome } from '../../navigation/returnToPrototypeHome';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { StatusBar, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -426,6 +427,10 @@ export default function RobotaxiDriverSearchScreen({ navigation, route }) {
       : "tempo de busca";
   const replaceAfterProtectedSearch = useCallback((routeName, params) => {
     protectedSearchExitRef.current = routeName;
+    if (routeName === "RobotaxiPrototype") {
+      returnToPrototypeHome(navigation, params);
+      return;
+    }
     if (typeof navigation.replace === "function") {
       navigation.replace(routeName, params);
       return;

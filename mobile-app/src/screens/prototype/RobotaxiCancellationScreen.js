@@ -1,4 +1,5 @@
 import leafTypography from '../../components/prototype/LeafTypography';
+import { returnToPrototypeHome } from '../../navigation/returnToPrototypeHome';
 import { RobotaxiLifecycleSummary } from '../../components/prototype/RobotaxiLifecycleUI';
 import React, { useCallback, useMemo, useState } from 'react';
 import { Alert, StatusBar, StyleSheet, Text, View } from 'react-native';
@@ -152,6 +153,10 @@ export default function RobotaxiCancellationScreen({ navigation, route }) {
         : 'A solicitação foi encerrada. Você pode pedir uma nova corrida quando quiser.';
 
   const replaceOrNavigate = useCallback((routeName, params) => {
+    if (routeName === 'RobotaxiPrototype') {
+      returnToPrototypeHome(navigation, params);
+      return;
+    }
     if (typeof navigation.replace === 'function') {
       if (params === undefined) {
         navigation.replace(routeName);
@@ -219,6 +224,10 @@ export default function RobotaxiCancellationScreen({ navigation, route }) {
           ...cancellationContext,
           reason: 'Cancelado pelo passageiro.',
         });
+        if (cancellationResponse?.alreadyHandled) {
+          // The app already learned of the cancellation and is showing its summary.
+          return;
+        }
         if (!cancellationResponse?.alreadyEnded) {
           // Same closing summary as a cancel during the search: what was paid,
           // what comes back and any fee, instead of dropping to the map.
