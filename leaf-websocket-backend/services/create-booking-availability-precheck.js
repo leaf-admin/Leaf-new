@@ -16,7 +16,7 @@ function resolveHasDrivers(availability) {
     return false;
 }
 
-async function performCreateBookingAvailabilityPrecheck({
+async function runCreateBookingAvailabilityPrecheckOnce({
     hasConfirmedPayment,
     pickupLocation,
     destinationLocation,
@@ -113,6 +113,29 @@ async function performCreateBookingAvailabilityPrecheck({
             error: error.message
         };
     }
+}
+
+// Falhas passageiras (tempo esgotado ou erro do checker) não dizem que falta motorista.
+const TRANSIENT_PRECHECK_FAILURE_CODES = new Set(['AVAILABILITY_CHECK_FAILED', 'AVAILABILITY_CHECK_ERROR']);
+
+/**
+ * `transientRetries` repete a checagem quando ela falha por um motivo passageiro. Sem isso, uma
+ * corrida já paga era recusada por uma única consulta lenta. "Sem motorista" nunca é repetido.
+ */
+async function performCreateBookingAvailabilityPrecheck({ transientRetries = 0, ...options } = {}) {
+    const maxRetries = Number.isInteger(transientRetries) && transientRetries > 0 ? transientRetries : 0;
+    let result = await runCreateBookingAvailabilityPrecheckOnce(options);
+    for (
+        let attempt = 0;
+        attempt < maxRetries &&
+        result.skipped !== true &&
+        result.success !== true &&
+        TRANSIENT_PRECHECK_FAILURE_CODES.has(result.code);
+        attempt += 1
+    ) {
+        result = await runCreateBookingAvailabilityPrecheckOnce(options);
+    }
+    return result;
 }
 
 function scheduleCreateBookingAvailabilityPrecheck(options) {

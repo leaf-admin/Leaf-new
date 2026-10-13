@@ -244,4 +244,64 @@ describe('create-booking-availability-precheck', () => {
       }
     );
   });
+
+  describe('transient retry', () => {
+    const base = {
+      hasConfirmedPayment: true,
+      pickupLocation: { lat: 1, lng: 2 },
+      requestedCarType: 'leaf_plus'
+    };
+
+    it('retries once after a failed check and accepts the second answer', async () => {
+      const checkAvailability = jest
+        .fn()
+        .mockRejectedValueOnce(new Error('availability_check_timeout'))
+        .mockResolvedValueOnce({ success: true, hasDrivers: true, drivers: [{ id: 'd1' }] });
+
+      const result = await performCreateBookingAvailabilityPrecheck({
+        ...base,
+        checkAvailability,
+        transientRetries: 1
+      });
+
+      expect(checkAvailability).toHaveBeenCalledTimes(2);
+      expect(result.success).toBe(true);
+    });
+
+    it('does not retry when the answer is that no driver is available', async () => {
+      const checkAvailability = jest
+        .fn()
+        .mockResolvedValue({ success: true, hasDrivers: false, drivers: [] });
+
+      const result = await performCreateBookingAvailabilityPrecheck({
+        ...base,
+        checkAvailability,
+        transientRetries: 1
+      });
+
+      expect(checkAvailability).toHaveBeenCalledTimes(1);
+      expect(result.code).toBe('NO_DRIVERS_AVAILABLE');
+    });
+
+    it('still fails after the retries are used up', async () => {
+      const checkAvailability = jest.fn().mockResolvedValue({ success: false });
+
+      const result = await performCreateBookingAvailabilityPrecheck({
+        ...base,
+        checkAvailability,
+        transientRetries: 1
+      });
+
+      expect(checkAvailability).toHaveBeenCalledTimes(2);
+      expect(result).toMatchObject({ success: false, code: 'AVAILABILITY_CHECK_FAILED' });
+    });
+
+    it('keeps a single attempt by default', async () => {
+      const checkAvailability = jest.fn().mockResolvedValue({ success: false });
+
+      await performCreateBookingAvailabilityPrecheck({ ...base, checkAvailability });
+
+      expect(checkAvailability).toHaveBeenCalledTimes(1);
+    });
+  });
 });
