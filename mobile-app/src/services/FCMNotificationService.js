@@ -677,6 +677,10 @@ class FCMNotificationService {
             if (notificationType === 'ride_offer') {
                 return;
             }
+            // Same for the driver's arrival: the trip screen already shows it.
+            if (notificationType === 'driver_arrived') {
+                return;
+            }
 
             // Executar handler específico se existir
             if (this.notificationHandlers.has(notificationType)) {
