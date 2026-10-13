@@ -1,0 +1,19 @@
+
+> governance:check
+> node scripts/validation/assert-agent-governance.cjs
+
+{
+  "ok": true,
+  "checkedFiles": [
+    "AGENTS.md",
+    "PROJECT_RULES.md",
+    "ARCHITECTURE.md",
+    "docs/tasks/README.md",
+    "docs/tasks/OPENCODE_GITHUB_AUTOMATION.md",
+    "docs/tasks/TASK_TEMPLATE.md",
+    ".github/ISSUE_TEMPLATE/task.md",
+    ".github/workflows/opencode.yml",
+    "opencode.json"
+  ],
+  "findings": []
+}

@@ -1,3 +1,4 @@
+import leafTypography from '../../prototype/LeafTypography';
 import React, { useRef, useState } from 'react';
 import {
     View,
@@ -10,13 +11,14 @@ import {
     Platform
 } from 'react-native';
 import auth from '@react-native-firebase/auth';
-import { fonts } from '../../../theme/runtimeTokens';
 import { Ionicons } from '@expo/vector-icons';
+import { LeafObjectIcon } from '../../prototype/LeafVisualElements';
 import {
     allowCustomOtpFallback,
     allowQaOtpForceFlow,
     isE2ETestBuild,
-    isSimulatorBuild
+    isSimulatorBuild,
+    isWhatsAppOtpEnabled
 } from '../../../config/runtimeAccessPolicy';
 import apiClient from '../../../services/httpClient';
 import UserAuthService from '../../../services/UserAuthService';
@@ -33,10 +35,10 @@ const Alert = {
     ...NativeAlert,
     alert: (title, message, buttons, options) =>
         NativeAlert.alert(
-            title || 'Atencao',
+            title || 'Atenção',
             toUserFriendlyMessage(message, {
                 context: 'auth',
-                fallbackMessage: 'Nao foi possivel concluir a autenticacao agora. Tente novamente.'
+                fallbackMessage: 'Não foi possível concluir a autenticação agora. Tente novamente.'
             }),
             buttons,
             options
@@ -88,7 +90,7 @@ function resolveAuthAlertTitle(error, friendlyMessage = '') {
         normalizedCode === 'AUTH/INVALID-PHONE-NUMBER' ||
         /invalid phone|numero de telefone invalido|telefone invalido/.test(normalizedText)
     ) {
-        return 'Telefone Invalido';
+        return 'Telefone inválido';
     }
 
     if (
@@ -103,10 +105,10 @@ function resolveAuthAlertTitle(error, friendlyMessage = '') {
         normalizedCode === 'AUTH/NETWORK-REQUEST-FAILED' ||
         /network|internet|conexao|connection/.test(normalizedText)
     ) {
-        return 'Erro de Conexao';
+        return 'Erro de Conexão';
     }
 
-    return 'Erro de Autenticacao';
+    return 'Erro de autenticação';
 }
 
 const PhoneInputStep = ({ onVerificationSent, onPasswordLoginSuccess, progressMeta }) => {
@@ -128,6 +130,8 @@ const PhoneInputStep = ({ onVerificationSent, onPasswordLoginSuccess, progressMe
     const continueInFlightRef = useRef(false);
 
     const enableCustomOtpFallback = allowCustomOtpFallback();
+    const useWhatsAppOtp = isWhatsAppOtpEnabled();
+    const otpChannelLabel = useWhatsAppOtp ? 'WhatsApp' : 'SMS';
     const allowForcedQaOtpFlow = allowQaOtpForceFlow();
     const shouldDisableFirebaseAppVerificationForE2E =
         allowForcedQaOtpFlow ||
@@ -200,7 +204,7 @@ const PhoneInputStep = ({ onVerificationSent, onPasswordLoginSuccess, progressMe
         } catch (error) {
             const friendlyError = toUserFriendlyError(error, {
                 context: 'auth',
-                fallbackMessage: 'Nao foi possivel enviar o codigo de recuperacao agora.'
+                fallbackMessage: 'Não foi possível enviar o código de recuperação agora.'
             });
             Alert.alert(resolveAuthAlertTitle(error, friendlyError.message), friendlyError.message);
         } finally {
@@ -275,7 +279,7 @@ const PhoneInputStep = ({ onVerificationSent, onPasswordLoginSuccess, progressMe
             Logger.error('❌ Erro no reset inline de senha:', error);
             const friendlyError = toUserFriendlyError(error, {
                 context: 'auth',
-                fallbackMessage: 'Nao foi possivel redefinir a senha agora.'
+                fallbackMessage: 'Não foi possível redefinir a senha agora.'
             });
             setPasswordError(friendlyError.message);
         } finally {
@@ -303,7 +307,7 @@ const PhoneInputStep = ({ onVerificationSent, onPasswordLoginSuccess, progressMe
             if (!canUsePasswordFallback) {
                 Alert.alert(
                     'Confirme seu telefone',
-                    'Para este telefone, continue com o código recebido por SMS.'
+                    'Para este telefone, continue com o código recebido pelo WhatsApp.'
                 );
                 return;
             }
@@ -316,7 +320,7 @@ const PhoneInputStep = ({ onVerificationSent, onPasswordLoginSuccess, progressMe
         } catch (error) {
             const friendlyError = toUserFriendlyError(error, {
                 context: 'auth',
-                fallbackMessage: 'Nao foi possivel validar esse telefone para login com senha.'
+                fallbackMessage: 'Não foi possível validar esse telefone para login com senha.'
             });
             Alert.alert(resolveAuthAlertTitle(error, friendlyError.message), friendlyError.message);
         } finally {
@@ -416,17 +420,54 @@ const PhoneInputStep = ({ onVerificationSent, onPasswordLoginSuccess, progressMe
             }
 
             // 📱 Primeiro acesso: OTP + criação de conta
-            if (forceCustomOtpFlow) {
-                Logger.log('📲 Forçando fluxo OTP customizado para conta QA controlada.');
+            const requestCustomOtp = async () => {
                 const response = await requestOtpWithFallback(fullPhoneNumber);
-                if (!response.data || !response.data.success) {
-                    throw new Error(response.data?.error || 'Erro ao enviar OTP');
+                if (!response?.data?.success || !response?.data?.verificationId) {
+                    throw new Error(response?.data?.error || 'Erro ao enviar OTP');
+                }
+                return {
+                    verificationId: response.data.verificationId,
+                    isCustomOtp: true,
+                    channel: response.data.channel || 'whatsapp',
+                    expiresIn: response.data.expiresIn || 300
+                };
+            };
+
+            const requestFirebaseOtp = async () => {
+                if (shouldDisableFirebaseAppVerificationForE2E) {
+                    try {
+                        auth().settings.appVerificationDisabledForTesting = true;
+                        Logger.log('🧪 Firebase app verification desativado para fallback legado de QA/E2E.');
+                    } catch (appVerificationError) {
+                        Logger.warn('⚠️ Não foi possível desativar app verification para fallback:', appVerificationError?.message || appVerificationError);
+                    }
+
+                    if (Platform.OS === 'android') {
+                        const preconfiguredSmsCode = QA_SMS_CODE_BY_PHONE.get(fullPhoneNumber);
+                        if (preconfiguredSmsCode) {
+                            try {
+                                await auth().settings.setAutoRetrievedSmsCodeForPhoneNumber(
+                                    fullPhoneNumber,
+                                    preconfiguredSmsCode
+                                );
+                            } catch (autoSmsError) {
+                                Logger.warn('⚠️ Falha ao configurar auto SMS para fallback:', autoSmsError?.message || autoSmsError);
+                            }
+                        }
+                    }
                 }
 
-                const confirmation = {
-                    verificationId: response.data.verificationId,
-                    isCustomOtp: true
-                };
+                const firebaseConfirmation = await auth().signInWithPhoneNumber(fullPhoneNumber);
+                // confirm() lives on the ConfirmationResult prototype; spreading drops it.
+                return Object.assign(firebaseConfirmation, {
+                    channel: 'sms',
+                    isCustomOtp: false
+                });
+            };
+
+            if (forceCustomOtpFlow) {
+                Logger.log('📲 Forçando fluxo OTP customizado para conta QA controlada.');
+                const confirmation = await requestCustomOtp();
 
                 if (onVerificationSent) {
                     onVerificationSent(confirmation, fullPhoneNumber, isExistingUser);
@@ -434,65 +475,41 @@ const PhoneInputStep = ({ onVerificationSent, onPasswordLoginSuccess, progressMe
                 return;
             }
 
-            Logger.log('📱 Enviando OTP via Firebase Auth...');
-            if (shouldDisableFirebaseAppVerificationForE2E) {
+            if (useWhatsAppOtp) {
+                Logger.log('📲 Enviando OTP via WhatsApp pelo backend Leaf...', {
+                    phoneNumber: fullPhoneNumber
+                });
                 try {
-                    auth().settings.appVerificationDisabledForTesting = true;
-                    Logger.log('🧪 Firebase app verification desativado para ambiente controlado de QA/E2E.');
-                } catch (appVerificationError) {
-                    Logger.warn('⚠️ Não foi possível desativar app verification para testes:', appVerificationError?.message || appVerificationError);
-                }
-
-                if (Platform.OS === 'android') {
-                    const preconfiguredSmsCode = QA_SMS_CODE_BY_PHONE.get(fullPhoneNumber);
-                    if (preconfiguredSmsCode) {
-                        try {
-                            await auth().settings.setAutoRetrievedSmsCodeForPhoneNumber(
-                                fullPhoneNumber,
-                                preconfiguredSmsCode
-                            );
-                            Logger.log('🧪 SMS auto-retrieval configurado para Android QA/E2E.', {
-                                phoneNumber: fullPhoneNumber
-                            });
-                        } catch (autoSmsError) {
-                            Logger.warn('⚠️ Falha ao configurar auto SMS para Android:', autoSmsError?.message || autoSmsError);
-                        }
+                    const confirmation = await requestCustomOtp();
+                    onVerificationSent?.(confirmation, fullPhoneNumber, isExistingUser);
+                    return;
+                } catch (whatsappError) {
+                    Logger.error('❌ Falha no envio OTP via WhatsApp:', whatsappError);
+                    if (!enableCustomOtpFallback) {
+                        throw whatsappError;
                     }
+                    Logger.warn('⚠️ Aplicando fallback legado de SMS somente no ambiente controlado.');
                 }
             }
+
             try {
-                const firebaseConfirmation = await auth().signInWithPhoneNumber(fullPhoneNumber);
-                if (onVerificationSent) {
-                    onVerificationSent(firebaseConfirmation, fullPhoneNumber, isExistingUser);
-                }
+                const confirmation = await requestFirebaseOtp();
+                onVerificationSent?.(confirmation, fullPhoneNumber, isExistingUser);
                 return;
             } catch (firebaseError) {
-                Logger.error('❌ Falha no envio OTP via Firebase:', firebaseError);
-                if (!enableCustomOtpFallback) {
-                    throw firebaseError;
+                if (!useWhatsAppOtp && enableCustomOtpFallback) {
+                    Logger.warn('⚠️ Firebase SMS indisponível; tentando OTP customizado somente no ambiente controlado.');
+                    const confirmation = await requestCustomOtp();
+                    onVerificationSent?.(confirmation, fullPhoneNumber, isExistingUser);
+                    return;
                 }
-                Logger.warn('⚠️ Aplicando fallback de OTP customizado para ambiente de suporte.');
-            }
-
-            // Fallback controlado (dev/review/suporte)
-            const response = await requestOtpWithFallback(fullPhoneNumber);
-            if (!response.data || !response.data.success) {
-                throw new Error(response.data?.error || 'Erro ao enviar OTP');
-            }
-
-            const confirmation = {
-                verificationId: response.data.verificationId,
-                isCustomOtp: true
-            };
-
-            if (onVerificationSent) {
-                onVerificationSent(confirmation, fullPhoneNumber, isExistingUser);
+                throw firebaseError;
             }
         } catch (error) {
             Logger.error("Erro no handleContinue:", error);
             const friendlyError = toUserFriendlyError(error, {
                 context: 'auth',
-                fallbackMessage: 'Nao foi possivel concluir a autenticacao agora. Tente novamente.'
+                fallbackMessage: 'Não foi possível concluir a autenticação agora. Tente novamente.'
             });
 
             Alert.alert(
@@ -513,29 +530,26 @@ const PhoneInputStep = ({ onVerificationSent, onPasswordLoginSuccess, progressMe
             keyboard
             showBack={false}
             progressMeta={progressMeta}
-            title="Bem-vindo à Leaf"
-            description="Digite seu celular para entrar ou criar sua conta. Vamos enviar um código por SMS."
-            scrollEnabled={requiresPassword || forgotPasswordMode}
+            headerTitle="Seu acesso"
+            leadObject="account"
+            title="Qual é seu número?"
+            description={`Vamos confirmar seu acesso por ${otpChannelLabel}.`}
             childrenStyle={styles.childrenWrap}
             footer={(
                 <View>
                     <ContinueButton
                         testID="auth-continue-btn"
-                        accessibilityLabel="auth-continue-btn"
                         onPress={handleContinue}
                         text={loading || checking
                             ? 'Continuando...'
                             : requiresPassword
                                 ? (forgotPasswordMode ? 'Redefinir senha' : 'Entrar')
                                 : 'Continuar'}
-                        disabled={phoneNumber.length < 10}
+                        disabled={loading || phoneNumber.length < 10}
                     />
 
                     {!requiresPassword ? (
                         <>
-                            <Text style={styles.firstAccessHint}>
-                                Esse passo ajuda a manter sua conta segura.
-                            </Text>
                             <Text style={styles.hiddenText}>
                                 Informe seu celular para confirmar sua conta com segurança.
                             </Text>
@@ -545,7 +559,9 @@ const PhoneInputStep = ({ onVerificationSent, onPasswordLoginSuccess, progressMe
                                 disabled={loading || checking || phoneNumber.length < 10}
                                 style={styles.passwordFallbackButton}
                                 testID="auth-password-fallback-btn"
-                                accessibilityLabel="auth-password-fallback-btn"
+                                accessibilityRole="button"
+                                accessibilityLabel="Já tenho senha"
+                                accessibilityHint="Entrar com a senha deste celular."
                             >
                                 <Text style={styles.passwordFallbackText}>Já tenho senha</Text>
                             </TouchableOpacity>
@@ -555,15 +571,24 @@ const PhoneInputStep = ({ onVerificationSent, onPasswordLoginSuccess, progressMe
             )}
         >
                 <View style={styles.contentCard}>
+                    <Text style={styles.fieldLabel}>Telefone com DDD</Text>
                     <View style={styles.inputContainer}>
-                        <TouchableOpacity style={styles.countrySelector}>
-                            <Text style={styles.countryCode}>+55</Text>
-                        </TouchableOpacity>
+                        <View
+                            style={styles.countrySelector}
+                            accessible
+                            accessibilityRole="text"
+                            accessibilityLabel="Código do país +55"
+                        >
+                            <Text style={styles.countryCode} accessible={false}>+55</Text>
+                        </View>
 
                         <TextInput
                             testID="auth-phone-input"
-                            placeholder="Seu celular"
+                            placeholder="DDD + número"
+                            accessibilityLabel="Número de celular com DDD"
+                            accessibilityHint="Digite o número com DDD, sem o código do país."
                             placeholderTextColor={color.textMuted}
+                            selectionColor="#222222"
                             keyboardType="phone-pad"
                             value={phoneNumber}
                             onChangeText={handlePhoneChanged}
@@ -578,6 +603,15 @@ const PhoneInputStep = ({ onVerificationSent, onPasswordLoginSuccess, progressMe
                             style={styles.input}
                         />
                     </View>
+
+                    {!requiresPassword ? (
+                        <View style={styles.accessHint}>
+                            <LeafObjectIcon name="privacy" size={32} />
+                            <Text style={styles.accessHintText}>
+                                Um código de 6 números confirma que este telefone é seu.
+                            </Text>
+                        </View>
+                    ) : null}
 
                     {requiresPassword ? (
                         <View style={styles.passwordInlineContainer}>
@@ -599,7 +633,7 @@ const PhoneInputStep = ({ onVerificationSent, onPasswordLoginSuccess, progressMe
                                     secureTextEntry={forgotPasswordMode ? !showNewPassword : !showPassword}
                                     editable={!loading}
                                     testID={forgotPasswordMode ? 'auth-reset-new-password-input' : 'auth-password-input'}
-                                    accessibilityLabel={forgotPasswordMode ? 'auth-reset-new-password-input' : 'auth-password-input'}
+                                    accessibilityLabel={forgotPasswordMode ? 'Nova senha' : 'Senha'}
                                     style={styles.passwordInput}
                                 />
                                 <TouchableOpacity
@@ -612,6 +646,12 @@ const PhoneInputStep = ({ onVerificationSent, onPasswordLoginSuccess, progressMe
                                         }
                                     }}
                                     disabled={loading}
+                                    accessibilityRole="button"
+                                    accessibilityLabel={
+                                        (forgotPasswordMode ? showNewPassword : showPassword)
+                                            ? 'Ocultar senha'
+                                            : 'Mostrar senha'
+                                    }
                                 >
                                     <Ionicons
                                         name={(forgotPasswordMode ? showNewPassword : showPassword) ? 'eye-off' : 'eye'}
@@ -624,7 +664,7 @@ const PhoneInputStep = ({ onVerificationSent, onPasswordLoginSuccess, progressMe
                             {forgotPasswordMode ? (
                                 <>
                                     <TextInput
-                                        placeholder="Código recebido por SMS"
+                                        placeholder="Código de recuperação"
                                         placeholderTextColor={color.textMuted}
                                         value={resetOtp}
                                         onChangeText={(value) => {
@@ -634,7 +674,7 @@ const PhoneInputStep = ({ onVerificationSent, onPasswordLoginSuccess, progressMe
                                         keyboardType="number-pad"
                                         editable={!loading}
                                         testID="auth-reset-otp-input"
-                                        accessibilityLabel="auth-reset-otp-input"
+                                        accessibilityLabel="Código de recuperação"
                                         style={styles.inlineTextInput}
                                     />
                                     <View style={styles.passwordInputContainer}>
@@ -651,13 +691,19 @@ const PhoneInputStep = ({ onVerificationSent, onPasswordLoginSuccess, progressMe
                                             secureTextEntry={!showConfirmNewPassword}
                                             editable={!loading}
                                             testID="auth-reset-confirm-password-input"
-                                            accessibilityLabel="auth-reset-confirm-password-input"
+                                            accessibilityLabel="Confirmar nova senha"
                                             style={styles.passwordInput}
                                         />
                                         <TouchableOpacity
                                             style={styles.passwordEyeButton}
                                             onPress={() => setShowConfirmNewPassword((prev) => !prev)}
                                             disabled={loading}
+                                            accessibilityRole="button"
+                                            accessibilityLabel={
+                                                showConfirmNewPassword
+                                                    ? 'Ocultar confirmação de senha'
+                                                    : 'Mostrar confirmação de senha'
+                                            }
                                         >
                                             <Ionicons
                                                 name={showConfirmNewPassword ? 'eye-off' : 'eye'}
@@ -671,6 +717,8 @@ const PhoneInputStep = ({ onVerificationSent, onPasswordLoginSuccess, progressMe
                                         onPress={() => handleForgotPasswordPressed(`+55${normalizePhoneInputValue(phoneNumber)}`)}
                                         disabled={loading}
                                         style={styles.inlineLinkButton}
+                                        accessibilityRole="button"
+                                        accessibilityLabel="Reenviar código"
                                     >
                                         <Text style={styles.inlineLinkText}>Reenviar código</Text>
                                     </TouchableOpacity>
@@ -702,7 +750,7 @@ const PhoneInputStep = ({ onVerificationSent, onPasswordLoginSuccess, progressMe
 
 const styles = StyleSheet.create({
     childrenWrap: {
-        marginTop: 54
+        marginTop: 24
     },
     keyboardContainer: {
         flex: 1,
@@ -726,18 +774,18 @@ const styles = StyleSheet.create({
     },
     title: {
         color: '#102018',
-        fontSize: 19,
-        lineHeight: 25,
-        fontFamily: fonts.Medium,
+        fontSize: 22,
+        lineHeight: 28,
+        ...leafTypography.medium,
         textAlign: 'left',
         letterSpacing: 0
     },
     subtitle: {
         marginTop: 8,
         color: '#66756B',
-        fontSize: 13,
-        lineHeight: 18,
-        fontFamily: fonts.Regular,
+        fontSize: 14,
+        lineHeight: 20,
+        ...leafTypography.regular,
         textAlign: 'left'
     },
     contentCard: {
@@ -767,7 +815,7 @@ const styles = StyleSheet.create({
         fontSize: 15,
         lineHeight: 20,
         color: color.textPrimary,
-        fontFamily: fonts.Medium
+        ...leafTypography.medium
     },
     passwordEyeButton: {
         paddingHorizontal: spacing.sm,
@@ -784,7 +832,7 @@ const styles = StyleSheet.create({
         fontSize: 15,
         lineHeight: 20,
         color: color.textPrimary,
-        fontFamily: fonts.Medium
+        ...leafTypography.medium
     },
     inlineLinkButton: {
         alignSelf: 'flex-start',
@@ -795,7 +843,7 @@ const styles = StyleSheet.create({
         color: color.textSecondary,
         fontSize: 13,
         lineHeight: 18,
-        fontFamily: fonts.SemiBold,
+        ...leafTypography.semiBold,
         textDecorationLine: 'underline'
     },
     inlineHintText: {
@@ -803,50 +851,70 @@ const styles = StyleSheet.create({
         color: color.textSecondary,
         fontSize: 12,
         lineHeight: 16,
-        fontFamily: fonts.Medium
+        ...leafTypography.medium
     },
     passwordErrorText: {
         marginTop: 6,
         color: color.error,
         fontSize: 12,
         lineHeight: 16,
-        fontFamily: fonts.Medium
+        ...leafTypography.medium
     },
     inputContainer: {
         flexDirection: 'row',
         alignItems: 'center',
-        backgroundColor: '#FFFFFF',
-        borderWidth: 1,
+        backgroundColor: color.surfaceMuted,
+        borderWidth: StyleSheet.hairlineWidth,
         borderColor: color.border,
-        borderRadius: 24,
+        borderRadius: 16,
         paddingRight: 18,
-        minHeight: 58
+        minHeight: 64
     },
     countrySelector: {
         width: 64,
         paddingHorizontal: 0,
+        paddingVertical: 0,
         justifyContent: 'center',
         borderRightWidth: 1,
         borderRightColor: color.border,
-        height: 58
+        minHeight: 24
+    },
+    fieldLabel: {
+        marginBottom: 10,
+        color: color.textSecondary,
+        fontSize: 13,
+        lineHeight: 18,
+        ...leafTypography.regular
+    },
+    accessHint: {
+        marginTop: 24,
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+        gap: 12
+    },
+    accessHintText: {
+        flex: 1,
+        color: color.textSecondary,
+        fontSize: 13,
+        lineHeight: 19,
+        ...leafTypography.regular
     },
     countryCode: {
         marginTop: 1,
         color: color.textPrimary,
         fontSize: 16,
-        lineHeight: 21,
-        fontFamily: fonts.Medium,
+        ...leafTypography.medium,
         textAlign: 'center'
     },
     input: {
         flex: 1,
-        height: 58,
+        minHeight: 58,
         paddingHorizontal: 18,
+        paddingVertical: 12,
         fontSize: 16,
-        lineHeight: 21,
         letterSpacing: 0,
         color: color.textPrimary,
-        fontFamily: fonts.Regular
+        ...leafTypography.regular
     },
     footer: {
         marginTop: 'auto',
@@ -868,7 +936,7 @@ const styles = StyleSheet.create({
     continueButtonText: {
         fontSize: 12,
         lineHeight: 16,
-        fontFamily: fonts.Medium
+        ...leafTypography.medium
     },
     firstAccessHint: {
         marginTop: 0,
@@ -876,7 +944,7 @@ const styles = StyleSheet.create({
         color: color.textMuted,
         fontSize: 11,
         lineHeight: 15,
-        fontFamily: fonts.Regular,
+        ...leafTypography.regular,
         paddingHorizontal: 14
     },
     hiddenText: {
@@ -895,7 +963,7 @@ const styles = StyleSheet.create({
         color: color.textSecondary,
         fontSize: 13,
         lineHeight: 18,
-        fontFamily: fonts.SemiBold,
+        ...leafTypography.semiBold,
         textDecorationLine: 'underline'
     }
 });

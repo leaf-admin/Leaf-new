@@ -1,6 +1,10 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { ScrollView, StatusBar, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
+import leafTypography from '../../components/prototype/LeafTypography';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ActivityIndicator, ScrollView, StatusBar, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
+import { useIsFocused } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { LeafRootTabs } from '../../components/prototype/PrototypeScaffold';
+import { LeafObjectIcon } from '../../components/prototype/LeafVisualElements';
 import { Ionicons } from '@expo/vector-icons';
 import PrototypeScreenTransition from '../../components/prototype/PrototypeScreenTransition';
 import PrototypeDismissibleSheet from '../../components/prototype/PrototypeDismissibleSheet';
@@ -9,40 +13,44 @@ import {
   PrototypeMenuSection,
   PrototypeMenuSurface,
 } from '../../components/prototype/PrototypeMenuSurface';
-import { ListSkeleton } from '../../components/LoadingStates';
-import { fonts } from '../../theme/runtimeTokens';
+import { ListSkeleton, SkeletonLoader } from '../../components/LoadingStates';
 import robotaxiPrototypeTokens from '../../components/design-system/robotaxiPrototypeTokens';
 import { usePrototypeMapOcclusion } from './prototypeMapOcclusion';
 import { usePrototypeRideRuntime } from './prototypeRideRuntime';
+import { navigateLeafRootTab } from '../../navigation/leafRootTabNavigation';
 import {
   buildTripFinancialTotals,
   formatCurrencyBRL,
   resolveTripDisplayLabel,
 } from './tripFinancialSummary';
 import { LeafButton, LeafEmptyState } from '../../components/prototype/LeafRideUI';
-import BookingHistoryService from '../../services/BookingHistoryService';
+import BookingHistoryService, { BOOKING_HISTORY_CACHE_TTL_MS } from '../../services/BookingHistoryService';
+import { buildDriverHistoryStats, resolveServerPeriodEarnings, useDriverEarningsReport } from './driverEarningsReport';
+import { formatTripDateLabel, resolveTripAddressLabel, shortTripAddressLabel } from './tripAddressPresentation';
 
 const { color, typography } = robotaxiPrototypeTokens;
-const SURFACE_TOP_PADDING = 16;
+const SURFACE_TOP_PADDING = 20;
 const SURFACE_BOTTOM_PADDING = 18;
 const BACKDROP_COLOR = 'transparent';
 
 export function splitRouteLabel(item) {
-  const pickup = String(
+  const pickup = resolveTripAddressLabel(
     item?.pickup ||
       item?.pickupAddress ||
       item?.pickupLocation?.add ||
       item?.originAddress ||
       '',
-  ).trim();
-  const dropoff = String(
+    item?.pickupAddress, item?.pickupLocation, item?.originAddress,
+  );
+  const dropoff = resolveTripAddressLabel(
     item?.destinationAddress ||
       item?.dropoff ||
       item?.dropoffAddress ||
       item?.drop ||
       item?.destinationLocation?.add ||
       '',
-  ).trim();
+    item?.dropoffAddress, item?.drop, item?.destinationLocation,
+  );
   if (pickup || dropoff) {
     return {
       pickup: pickup || 'Origem indisponível',
@@ -50,7 +58,7 @@ export function splitRouteLabel(item) {
     };
   }
 
-  const routeLabel = String(item?.route || '').trim();
+  const routeLabel = typeof item?.route === 'string' ? item.route.trim() : '';
   if (/→|->/.test(routeLabel)) {
     const [origin, destination] = routeLabel.split(/\s*(?:→|->)\s*/);
     return {
@@ -77,6 +85,7 @@ function buildHistoryStats(history, isDriverRole) {
   });
   const totalTrips = totals.count;
   const totalAmount = isDriverRole ? totals.totalNet : totals.totalGross;
+  const knownAmountCount = isDriverRole ? totals.netKnownCount : totals.grossKnownCount;
 
   return [
     {
@@ -87,7 +96,10 @@ function buildHistoryStats(history, isDriverRole) {
     {
       key: 'amount',
       label: isDriverRole ? 'Total líquido' : 'Total pago',
-      value: totalTrips > 0 ? formatCurrencyBRL(totalAmount) : '--',
+      value:
+        totalTrips > 0 && knownAmountCount === totalTrips
+          ? formatCurrencyBRL(totalAmount)
+          : 'Indisponível',
     },
   ];
 }
@@ -95,82 +107,104 @@ function buildHistoryStats(history, isDriverRole) {
 function HistoryRow({ item, isDriverRole = false, last = false, onPress }) {
   const routeLabels = splitRouteLabel(item);
   const valueLabel = formatHistoryValue(item, isDriverRole);
-  const counterpartyLabel = isDriverRole
-    ? String(item?.passengerName || 'Passageiro Leaf').trim()
-    : String(item?.driverName || 'Motorista Leaf').trim();
+  // Placeholder names are not information; show the counterparty only when known.
+  const counterpartyName = String(isDriverRole ? item?.passengerName || '' : item?.driverName || '').trim();
+  const counterpartyLabel = /^(passageiro|motorista) leaf$/i.test(counterpartyName) ? '' : counterpartyName;
   const counterpartyTitle = isDriverRole ? 'Passageiro' : 'Motorista';
+  const distance = Number(item?.distanceKm ?? item?.distance);
+  const duration = Number(item?.durationMinutes ?? item?.duration);
+  const metrics = [formatTripDateLabel(item?.date || item?.completedAt || item?.createdAt, { compact: true }),
+    Number.isFinite(distance) && distance > 0 ? `${distance.toLocaleString('pt-BR', { maximumFractionDigits: 1 })} km` : null,
+    Number.isFinite(duration) && duration > 0 ? `${Math.round(duration)} min` : null].filter(Boolean).join(' · ');
+  const status = String(item?.status || '').toUpperCase();
+  const completed = ['COMPLETE', 'COMPLETED'].includes(status);
+  const statusLabel = completed ? 'Concluída' : ['CANCELLED', 'CANCELED'].includes(status) ? 'Cancelada' : 'Registro da viagem';
 
   return (
     <TouchableOpacity
       activeOpacity={0.82}
       onPress={onPress}
-      style={[styles.historyRow, last && styles.historyRowLast]}
+      style={[styles.tripRow, last && styles.tripRowLast]}
       testID={`robotaxi-history-row-${item?.id || item?.rideId || 'receipt'}`}
+      accessibilityRole="button"
+      accessibilityLabel={`${routeLabels.dropoff}, ${valueLabel}, ${statusLabel}`}
     >
-      <View style={styles.historyHeader}>
-        <View style={styles.historyHeaderMeta}>
-          <View style={styles.historyDateWrap}>
-            <Ionicons name="time-outline" size={14} color={color.text.secondary} />
-            <Text style={styles.historyDate}>{String(item?.date || 'Registro recente').trim()}</Text>
-          </View>
-          <View style={styles.historyStatusPill}>
-            <Text style={styles.historyStatusPillText}>Concluída</Text>
-          </View>
+      <LeafObjectIcon name="activity" size={44} />
+      <View style={styles.tripCopy}>
+        <Text style={styles.tripDestination} numberOfLines={1}>{shortTripAddressLabel(routeLabels.dropoff)}</Text>
+        <Text style={styles.tripDetail} numberOfLines={1}>{metrics}</Text>
+        <View style={styles.tripAmountRow}>
+          <Text style={styles.tripAmount}>{valueLabel} · {isDriverRole ? 'líquido' : 'total pago'}</Text>
+          {completed ? null : <Text style={styles.tripStatus}>{statusLabel}</Text>}
         </View>
-        <View style={styles.historyAmountPill}>
-          <Text style={styles.historyAmountPillText}>{valueLabel}</Text>
-        </View>
+        <Text style={styles.tripDetail} numberOfLines={1}>Partida: {shortTripAddressLabel(routeLabels.pickup)}</Text>
+        {counterpartyLabel ? <Text style={styles.tripDetail} numberOfLines={1}>{counterpartyTitle}: {counterpartyLabel}</Text> : null}
       </View>
-
-      <View style={styles.historyCounterpartyRow}>
-        <View style={styles.historyCounterpartyAvatar}>
-          <Ionicons
-            name="person"
-            size={14}
-            color={isDriverRole ? '#1A330E' : '#365A6D'}
-          />
-        </View>
-        <View style={styles.historyCounterpartyCopy}>
-          <Text style={styles.historyCounterpartyLabel}>{counterpartyTitle}</Text>
-          <Text style={styles.historyCounterpartyValue}>{counterpartyLabel}</Text>
-        </View>
-      </View>
-
-      <View style={styles.routeLineWrap}>
-        <View style={styles.routeMarkerColumn}>
-          <View style={[styles.routeDot, styles.routeDotOrigin]} />
-          <View style={styles.routeConnector} />
-          <View style={[styles.routeDot, styles.routeDotDestination]} />
-        </View>
-
-        <View style={styles.routeCopyWrap}>
-          <View>
-            <Text style={styles.routeLabel}>Partida</Text>
-            <Text style={styles.routeValue}>{routeLabels.pickup}</Text>
-          </View>
-          <View style={styles.routeSpacer} />
-          <View>
-            <Text style={styles.routeLabel}>Chegada</Text>
-            <Text style={styles.routeValue}>{routeLabels.dropoff}</Text>
-          </View>
-        </View>
-      </View>
+      <Ionicons name="chevron-forward" size={13} color="#6A6A6A" />
     </TouchableOpacity>
   );
 }
 
 export default function RobotaxiTripHistoryScreen({ navigation, route }) {
   const insets = useSafeAreaInsets();
+  const isRootTab = route?.params?.rootTab === true;
   const { height: windowHeight } = useWindowDimensions();
-  const { activeRole, profileUid } = usePrototypeRideRuntime();
+  const { activeRole, profileUid, lastReceipt } = usePrototypeRideRuntime();
   const [panelHeight, setPanelHeight] = useState(windowHeight);
+  const isScreenFocused = useIsFocused();
   const isDriverRole = activeRole === 'driver';
-  const [history, setHistory] = useState([]);
-  const [loadingHistory, setLoadingHistory] = useState(true);
-  const [loadingMore, setLoadingMore] = useState(false);
-  const [historyError, setHistoryError] = useState('');
-  const [pageInfo, setPageInfo] = useState({ hasNextPage: false, endCursor: null });
-  const stats = useMemo(() => buildHistoryStats(history, isDriverRole), [history, isDriverRole]);
+  const historyRole = isDriverRole ? 'DRIVER' : 'CUSTOMER';
+  const historyRevision = lastReceipt?.receiptId || lastReceipt?.id || lastReceipt?.rideId || null;
+  const historyOwner = JSON.stringify([profileUid, historyRole, historyRevision]);
+  const initialHistory = useMemo(() => {
+    const options = { first: 10, after: null, ...(historyRevision ? { revision: historyRevision } : {}) };
+    const cached = profileUid
+      ? BookingHistoryService.getCachedBookingHistory?.(profileUid, historyRole, options)
+      : null;
+    return {
+      owner: historyOwner,
+      bookings: cached?.result?.bookings || [],
+      pageInfo: cached?.result?.pageInfo || { hasNextPage: false, endCursor: null },
+      updatedAt: cached?.updatedAt || 0,
+      loaded: Boolean(cached?.result?.success),
+      loading: !cached?.result?.success,
+      loadingMore: false,
+      refreshing: false,
+      error: '',
+    };
+  }, [historyOwner, historyRevision, historyRole, profileUid]);
+  const [historyState, setHistoryState] = useState(initialHistory);
+  // Never render the previous identity's data while its request is settling.
+  const visibleHistory = historyState.owner === historyOwner ? historyState : initialHistory;
+  const historyStateRef = useRef(visibleHistory);
+  historyStateRef.current = visibleHistory;
+  const liveOwnerRef = useRef(historyOwner);
+  liveOwnerRef.current = historyOwner;
+  const mountedRef = useRef(false);
+  const pendingHistoryRef = useRef(null);
+  const { bookings: history, loading: loadingHistory, loadingMore, refreshing, error: historyError, pageInfo } = visibleHistory;
+  const driverEarningsReport = useDriverEarningsReport({
+    driverId: isDriverRole ? profileUid : '',
+    enabled: isDriverRole && isScreenFocused,
+    refreshKey: String(historyRevision || ''),
+  });
+  const driverServerPeriod = useMemo(
+    () => (isDriverRole ? resolveServerPeriodEarnings(driverEarningsReport.report) : null),
+    [driverEarningsReport.report, isDriverRole],
+  );
+  const loadingSummary = loadingHistory || (isDriverRole && driverEarningsReport.pending);
+  const stats = useMemo(
+    () =>
+      isDriverRole
+        ? buildDriverHistoryStats({
+            serverPeriod: driverServerPeriod,
+            historyComplete: !pageInfo?.hasNextPage,
+            loadedListStats: buildHistoryStats(history, true),
+            loadedRideCount: Array.isArray(history) ? history.length : 0,
+          })
+        : buildHistoryStats(history, false),
+    [driverServerPeriod, history, isDriverRole, pageInfo?.hasNextPage],
+  );
   const primaryStat = stats[0] || null;
   const secondaryStat = stats[1] || null;
 
@@ -181,8 +215,12 @@ export default function RobotaxiTripHistoryScreen({ navigation, route }) {
   });
 
   const handleDismiss = useCallback(() => {
-    navigation.navigate('RobotaxiPrototype');
-  }, [navigation]);
+    if (route?.params?.returnToAccount && navigation.canGoBack()) {
+      navigation.goBack();
+      return;
+    }
+    navigateLeafRootTab(navigation, 'home');
+  }, [navigation, route?.params?.returnToAccount]);
 
   const handlePanelLayout = useCallback(event => {
     const nextHeight = event?.nativeEvent?.layout?.height;
@@ -191,39 +229,64 @@ export default function RobotaxiTripHistoryScreen({ navigation, route }) {
     }
   }, []);
 
-  const loadHistory = useCallback(async ({ append = false, after = null } = {}) => {
+  const loadHistory = useCallback(async ({ append = false, after = null, forceRefresh = false } = {}) => {
     if (!profileUid) {
-      setHistoryError('Entre na sua conta para consultar o histórico.');
-      setLoadingHistory(false);
+      setHistoryState({ ...initialHistory, loading: false, error: 'Entre na sua conta para consultar o histórico.' });
       return;
     }
-
+    const previous = historyStateRef.current;
+    if (!append && !forceRefresh && previous.loaded && Date.now() - previous.updatedAt < BOOKING_HISTORY_CACHE_TTL_MS) {
+      return;
+    }
+    if (pendingHistoryRef.current?.owner === historyOwner && !pendingHistoryRef.current.cancelled) return;
+    const request = { owner: historyOwner, cancelled: false };
+    pendingHistoryRef.current = request;
+    const isCurrentRequest = () => mountedRef.current && !request.cancelled && liveOwnerRef.current === historyOwner;
+    setHistoryState({
+      ...previous,
+      loading: !previous.loaded,
+      loadingMore: append,
+      refreshing: previous.loaded && !append,
+      error: '',
+    });
     try {
-      append ? setLoadingMore(true) : setLoadingHistory(true);
-      setHistoryError('');
       const result = await BookingHistoryService.getBookingHistory(
         profileUid,
-        isDriverRole ? 'DRIVER' : 'CUSTOMER',
-        { first: 10, after },
+        historyRole,
+        { first: 10, after, ...(historyRevision ? { revision: historyRevision } : {}), ...(forceRefresh ? { forceRefresh: true } : {}) },
       );
-      if (!result?.success) {
-        throw new Error(result?.error || 'Não foi possível carregar o histórico.');
-      }
+      if (!isCurrentRequest()) return;
+      if (!result?.success) throw new Error(result?.error || 'Não foi possível carregar o histórico.');
       const nextBookings = Array.isArray(result.bookings) ? result.bookings : [];
-      setHistory(previous => append ? [...previous, ...nextBookings] : nextBookings);
-      setPageInfo(result.pageInfo || { hasNextPage: false, endCursor: null });
+      setHistoryState(current => ({
+        ...current,
+        bookings: append ? [...current.bookings, ...nextBookings] : nextBookings,
+        pageInfo: result.pageInfo || { hasNextPage: false, endCursor: null },
+        updatedAt: Date.now(),
+        loaded: true,
+        error: '',
+      }));
     } catch (error) {
-      setHistoryError(error?.message || 'Não foi possível carregar o histórico.');
+      if (isCurrentRequest()) {
+        setHistoryState(current => ({ ...current, error: error?.message || 'Não foi possível carregar o histórico.' }));
+      }
     } finally {
-      setLoadingHistory(false);
-      setLoadingMore(false);
+      if (isCurrentRequest()) {
+        setHistoryState(current => ({ ...current, loading: false, loadingMore: false, refreshing: false }));
+      }
+      if (pendingHistoryRef.current === request) pendingHistoryRef.current = null;
     }
-  }, [isDriverRole, profileUid]);
+  }, [historyOwner, historyRevision, historyRole, initialHistory, profileUid]);
 
   useEffect(() => {
+    mountedRef.current = true;
     loadHistory();
     const removeFocus = navigation?.addListener?.('focus', () => loadHistory());
-    return () => removeFocus?.();
+    return () => {
+      mountedRef.current = false;
+      if (pendingHistoryRef.current) pendingHistoryRef.current.cancelled = true;
+      removeFocus?.();
+    };
   }, [loadHistory, navigation]);
 
   const openReceipt = useCallback((item) => {
@@ -254,7 +317,8 @@ export default function RobotaxiTripHistoryScreen({ navigation, route }) {
           <PrototypeMenuSurface
             onLayout={handlePanelLayout}
             eyebrow={isDriverRole ? 'Corridas concluídas' : 'Histórico de viagens'}
-            title={isDriverRole ? 'Viagens' : 'Histórico'}
+            title={isRootTab ? 'Atividade' : isDriverRole ? 'Viagens' : 'Histórico'}
+            pageTitle={isRootTab}
             subtitle={
               isDriverRole
                 ? 'Recibos, trajetos e valores líquidos em uma leitura direta.'
@@ -263,45 +327,65 @@ export default function RobotaxiTripHistoryScreen({ navigation, route }) {
             fullScreen
             style={{
               paddingTop: insets.top + SURFACE_TOP_PADDING,
-              paddingBottom: Math.max(insets.bottom, SURFACE_BOTTOM_PADDING),
+              paddingBottom: (isRootTab ? 92 : 0) + Math.max(insets.bottom, SURFACE_BOTTOM_PADDING),
             }}
             bodyStyle={styles.body}
-            headerAccessory={<PrototypeMenuCloseButton onPress={handleDismiss} />}
+            // Background refresh lives in the header: an inline row above the list
+            // pushed every trip down and back up on each visit.
+            headerAccessory={<View style={styles.headerAccessory}>
+              {refreshing ? <ActivityIndicator size="small" color="#6A6A6A" testID="robotaxi-history-refreshing"
+                accessibilityRole="progressbar" accessibilityLabel="Atualizando viagens" /> : null}
+              {isRootTab ? null : <PrototypeMenuCloseButton onPress={handleDismiss} />}
+            </View>}
           >
-            <View style={styles.summaryCardGrid}>
+            {loadingHistory || history.length > 0 ? <View style={styles.summaryCardGrid}>
               {primaryStat ? (
                 <View style={styles.summaryCard}>
                   <Text style={styles.summaryCardLabel}>{primaryStat.label}</Text>
-                  <Text style={styles.summaryCardValue}>{primaryStat.value}</Text>
+                  {loadingSummary ? (
+                    <View testID="robotaxi-history-summary-loading-rides" accessibilityRole="progressbar" accessibilityLabel="Carregando número de viagens">
+                      <SkeletonLoader width={48} height={28} style={{ marginTop: 6 }} />
+                    </View>
+                  ) : <Text style={styles.summaryCardValue}>{primaryStat.value}</Text>}
                 </View>
               ) : null}
               {secondaryStat ? (
                 <View style={[styles.summaryCard, styles.summaryCardAccent]}>
                   <Text style={styles.summaryCardLabel}>{secondaryStat.label}</Text>
-                  <Text style={[styles.summaryCardValue, styles.summaryCardValueAccent]}>
+                  {loadingSummary ? (
+                    <View testID="robotaxi-history-summary-loading-amount" accessibilityRole="progressbar" accessibilityLabel="Carregando total das viagens">
+                      <SkeletonLoader width={112} height={28} style={{ marginTop: 6 }} />
+                    </View>
+                  ) : <Text style={[styles.summaryCardValue, styles.summaryCardValueAccent]}>
                     {secondaryStat.value}
-                  </Text>
+                  </Text>}
                 </View>
               ) : null}
-            </View>
+            </View> : null}
 
-            <PrototypeMenuSection title={isDriverRole ? 'Recibos recentes' : 'Viagens recentes'}>
+            <PrototypeMenuSection title={isDriverRole ? 'Recibos recentes' : 'Viagens recentes'} style={styles.historySection}>
               <ScrollView style={styles.scroll} showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
                 {loadingHistory ? (
                   <View style={styles.centerState} testID="robotaxi-history-loading">
                     <ListSkeleton rows={4} rowHeight={56} />
                   </View>
-                ) : historyError ? (
+                ) : historyError && !history.length ? (
                   <LeafEmptyState
                     icon="cloud-offline-outline"
                     title="Histórico indisponível"
                     message={historyError}
                     actionLabel="Tentar novamente"
-                    onAction={() => loadHistory()}
+                    onAction={() => loadHistory({ forceRefresh: true })}
                     testID="robotaxi-history-error"
                   />
                 ) : history.length > 0 ? (
                   <>
+                  {historyError ? (
+                    <TouchableOpacity style={styles.refreshStatus} accessibilityRole="button" onPress={() => loadHistory({ forceRefresh: true })} testID="robotaxi-history-refresh-error">
+                      <Ionicons name="refresh" size={16} color="#6A6A6A" />
+                      <Text style={[styles.tripDetail, { flex: 1 }]}>Não foi possível atualizar. Toque para tentar novamente.</Text>
+                    </TouchableOpacity>
+                  ) : null}
                   {history.map((item, index) => (
                     <HistoryRow
                       key={item?.id || `trip-history-${index}`}
@@ -336,15 +420,26 @@ export default function RobotaxiTripHistoryScreen({ navigation, route }) {
             </PrototypeMenuSection>
           </PrototypeMenuSurface>
         </PrototypeDismissibleSheet>
+        {isRootTab ? <LeafRootTabs navigation={navigation} insets={insets} active="activity" /> : null}
       </View>
     </PrototypeScreenTransition>
   );
 }
 
 const styles = StyleSheet.create({
+  headerAccessory: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  refreshStatus: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 10 },
+  tripRow: { flexDirection: 'row', alignItems: 'center', gap: 14, paddingVertical: 14, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#E5E5E5' },
+  tripRowLast: { borderBottomWidth: 0 },
+  tripCopy: { flex: 1, minWidth: 0, gap: 3 },
+  tripAmountRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  tripDestination: { ...leafTypography.semiBold, fontSize: 16, lineHeight: 22, color: '#222222' },
+  tripDetail: { ...leafTypography.regular, fontSize: 13, lineHeight: 18, color: '#6A6A6A' },
+  tripAmount: { ...leafTypography.medium, fontSize: 14, lineHeight: 20, color: '#222222' },
+  tripStatus: { ...leafTypography.medium, fontSize: 12, lineHeight: 17, color: '#6A6A6A', paddingHorizontal: 8, paddingVertical: 1, borderRadius: 8, backgroundColor: '#F2F2F2', overflow: 'hidden' },
   container: {
     flex: 1,
-    backgroundColor: 'transparent',
+    backgroundColor: '#FFFFFF',
   },
   sheetWrap: {
     ...StyleSheet.absoluteFillObject,
@@ -360,21 +455,22 @@ const styles = StyleSheet.create({
   summaryCard: {
     flex: 1,
     minHeight: 86,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: 'rgba(17,26,39,0.08)',
-    backgroundColor: 'rgba(255,255,255,0.84)',
-    paddingHorizontal: 14,
+    borderRadius: 0,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderColor: '#E5E5E5',
+    backgroundColor: 'transparent',
+    paddingHorizontal: 0,
     paddingVertical: 12,
     justifyContent: 'center',
   },
   summaryCardAccent: {
-    backgroundColor: 'rgba(232,239,227,0.9)',
-    borderColor: 'rgba(26,51,14,0.12)',
+    backgroundColor: 'transparent',
+    borderColor: '#E5E5E5',
   },
   summaryCardLabel: {
     color: color.text.secondary,
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: typography.micro.size,
     lineHeight: typography.micro.lineHeight,
     textTransform: 'uppercase',
@@ -383,7 +479,7 @@ const styles = StyleSheet.create({
   summaryCardValue: {
     marginTop: 6,
     color: color.text.primary,
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 24,
     lineHeight: 28,
   },
@@ -391,8 +487,9 @@ const styles = StyleSheet.create({
     color: '#1A330E',
   },
   scroll: {
-    maxHeight: 320,
+    flex: 1,
   },
+  historySection: { flex: 1, minHeight: 0, marginBottom: 0 },
   scrollContent: {
     paddingBottom: 6,
   },
@@ -431,7 +528,7 @@ const styles = StyleSheet.create({
   },
   historyDate: {
     color: color.text.secondary,
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     fontSize: typography.caption.size,
     lineHeight: typography.caption.lineHeight,
   },
@@ -447,7 +544,7 @@ const styles = StyleSheet.create({
   },
   historyStatusPillText: {
     color: '#1A7F37',
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 10,
     lineHeight: 12,
     textTransform: 'uppercase',
@@ -466,7 +563,7 @@ const styles = StyleSheet.create({
   },
   historyAmountPillText: {
     color: color.text.primary,
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 13,
     lineHeight: 16,
   },
@@ -496,7 +593,7 @@ const styles = StyleSheet.create({
   },
   historyCounterpartyLabel: {
     color: color.text.secondary,
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 10,
     lineHeight: 12,
     textTransform: 'uppercase',
@@ -505,7 +602,7 @@ const styles = StyleSheet.create({
   historyCounterpartyValue: {
     marginTop: 2,
     color: color.text.primary,
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 13,
     lineHeight: 16,
   },
@@ -542,7 +639,7 @@ const styles = StyleSheet.create({
   },
   routeLabel: {
     color: color.text.muted,
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     fontSize: typography.micro.size,
     lineHeight: typography.micro.lineHeight,
     textTransform: 'uppercase',
@@ -551,7 +648,7 @@ const styles = StyleSheet.create({
   routeValue: {
     marginTop: 2,
     color: color.text.primary,
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     fontSize: 14,
     lineHeight: 18,
   },

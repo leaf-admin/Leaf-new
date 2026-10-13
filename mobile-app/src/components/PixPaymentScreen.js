@@ -267,7 +267,7 @@ const styles = StyleSheet.create({
   },
   title: {
     fontSize: 24,
-    fontWeight: 'bold',
+    fontFamily: 'Figtree-Bold',
     color: '#333',
     marginBottom: 5,
   },
@@ -301,7 +301,7 @@ const styles = StyleSheet.create({
   },
   tripTitle: {
     fontSize: 18,
-    fontWeight: 'bold',
+    fontFamily: 'Figtree-Bold',
     marginBottom: 10,
     color: '#333',
   },
@@ -338,7 +338,7 @@ const styles = StyleSheet.create({
   },
   timer: {
     fontSize: 24,
-    fontWeight: 'bold',
+    fontFamily: 'Figtree-Bold',
     color: '#ff6b35',
   },
   actionButtons: {
@@ -354,7 +354,7 @@ const styles = StyleSheet.create({
   actionButtonText: {
     color: '#fff',
     fontSize: 16,
-    fontWeight: 'bold',
+    fontFamily: 'Figtree-Bold',
   },
   statusContainer: {
     alignItems: 'center',
@@ -367,7 +367,7 @@ const styles = StyleSheet.create({
   },
   statusText: {
     fontSize: 16,
-    fontWeight: 'bold',
+    fontFamily: 'Figtree-Bold',
   },
   statusPending: {
     color: '#ff9800',
@@ -384,7 +384,7 @@ const styles = StyleSheet.create({
   cancelButtonText: {
     color: '#fff',
     fontSize: 16,
-    fontWeight: 'bold',
+    fontFamily: 'Figtree-Bold',
   },
   loadingText: {
     marginTop: 10,
@@ -412,7 +412,7 @@ const styles = StyleSheet.create({
   retryButtonText: {
     color: '#fff',
     fontSize: 16,
-    fontWeight: 'bold',
+    fontFamily: 'Figtree-Bold',
   },
 });
 

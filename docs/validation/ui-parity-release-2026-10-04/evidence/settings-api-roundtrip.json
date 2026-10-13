@@ -1,0 +1,66 @@
+{
+  "scope": "Existing QA passenger only; traffic preference round trip, original boolean restored; no ride/payment mutation",
+  "result": "PASS",
+  "records": [
+    {
+      "method": "GET",
+      "status": 200,
+      "success": true,
+      "preferences": {
+        "notificationsEnabled": true,
+        "trafficLayerEnabled": true,
+        "voiceGuidanceEnabled": false,
+        "schemaVersion": 1,
+        "updatedAt": null
+      }
+    },
+    {
+      "method": "PATCH",
+      "status": 200,
+      "success": true,
+      "preferences": {
+        "notificationsEnabled": true,
+        "trafficLayerEnabled": false,
+        "voiceGuidanceEnabled": false,
+        "schemaVersion": 1,
+        "updatedAt": "2026-10-04T15:13:44.249Z"
+      }
+    },
+    {
+      "method": "GET",
+      "status": 200,
+      "success": true,
+      "preferences": {
+        "notificationsEnabled": true,
+        "trafficLayerEnabled": false,
+        "voiceGuidanceEnabled": false,
+        "schemaVersion": 1,
+        "updatedAt": "2026-10-04T15:13:44.702Z"
+      }
+    },
+    {
+      "method": "PATCH",
+      "status": 200,
+      "success": true,
+      "preferences": {
+        "notificationsEnabled": true,
+        "trafficLayerEnabled": true,
+        "voiceGuidanceEnabled": false,
+        "schemaVersion": 1,
+        "updatedAt": "2026-10-04T15:13:45.622Z"
+      }
+    },
+    {
+      "method": "GET",
+      "status": 200,
+      "success": true,
+      "preferences": {
+        "notificationsEnabled": true,
+        "trafficLayerEnabled": true,
+        "voiceGuidanceEnabled": false,
+        "schemaVersion": 1,
+        "updatedAt": "2026-10-04T15:13:46.092Z"
+      }
+    }
+  ]
+}

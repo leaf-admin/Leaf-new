@@ -1,4 +1,5 @@
-import React, { useMemo, useState } from 'react';
+import leafTypography from '../../prototype/LeafTypography';
+import React, { useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   StyleSheet,
@@ -9,7 +10,6 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as DocumentPicker from 'expo-document-picker';
-import { fonts } from '../../../theme/runtimeTokens';
 import ContinueButton from '../common/ContinueButton';
 import onboardingTheme from '../common/onboardingTheme';
 import EditorialOnboardingScreen from '../common/EditorialOnboardingLayout';
@@ -92,7 +92,7 @@ function buildPdfMeta(asset = {}) {
 function formatExtractionLabel(result) {
   if (!result?.success) return 'Falha na extração';
   if (result?.usedFallback) return 'Extraído com OCR de fallback';
-  return `Extraído com ${result?.model || 'IA'}`;
+  return 'Dados lidos do documento';
 }
 
 const DocumentStep = ({ onSubmitted, onBack, initialData = {}, progressMeta }) => {
@@ -120,6 +120,8 @@ const DocumentStep = ({ onSubmitted, onBack, initialData = {}, progressMeta }) =
   });
   const [genderOptionsVisible, setGenderOptionsVisible] = useState(false);
   const [errors, setErrors] = useState({});
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const submitInFlightRef = useRef(false);
 
   const isFormValid = useMemo(() => {
     if (!isDriver) {
@@ -256,27 +258,42 @@ const DocumentStep = ({ onSubmitted, onBack, initialData = {}, progressMeta }) =
         [fieldErrorKey]:
           toUserFriendlyMessage(error, {
             context: 'document_upload',
-            fallbackMessage: 'Nao foi possivel processar o PDF enviado. Tente novamente.'
-          }) || 'Nao foi possivel processar o PDF enviado. Tente novamente.'
+            fallbackMessage: 'Não foi possível processar o PDF enviado. Tente novamente.'
+          }) || 'Não foi possível processar o PDF enviado. Tente novamente.'
       }));
     } finally {
       setIsExtracting(previous => ({ ...previous, [type]: false }));
     }
   };
 
+  const submitOnce = async (payload) => {
+    submitInFlightRef.current = true;
+    setIsSubmitting(true);
+    try {
+      await onSubmitted(payload);
+    } finally {
+      submitInFlightRef.current = false;
+      setIsSubmitting(false);
+    }
+  };
+
   const handleSubmit = () => {
+    if (submitInFlightRef.current) {
+      return;
+    }
+
     if (!validateFields()) {
       return;
     }
 
     if (!isDriver) {
-      onSubmitted({
+      submitOnce({
         email: documentData.email.trim().toLowerCase()
       });
       return;
     }
 
-    onSubmitted({
+    submitOnce({
       cpf: documentData.cpf,
       birthDate: documentData.birthDate,
       motherName: documentData.motherName,
@@ -331,7 +348,7 @@ const DocumentStep = ({ onSubmitted, onBack, initialData = {}, progressMeta }) =
       footer={(
         <ContinueButton
           onPress={handleSubmit}
-          disabled={!isFormValid || isExtracting.cnh || isExtracting.vehicle}
+          disabled={!isFormValid || isExtracting.cnh || isExtracting.vehicle || isSubmitting}
           text="Continuar"
         />
       )}
@@ -514,17 +531,17 @@ const styles = StyleSheet.create({
     justifyContent: 'center'
   },
   title: {
-    fontSize: 32,
-    lineHeight: 36,
+    fontSize: 22,
+    lineHeight: 28,
     color: color.textPrimary,
-    fontFamily: fonts.Bold,
+    ...leafTypography.bold,
     letterSpacing: 0
   },
   subtitle: {
-    fontSize: 15,
-    lineHeight: 21,
+    fontSize: 14,
+    lineHeight: 20,
     color: color.textSecondary,
-    fontFamily: fonts.Regular,
+    ...leafTypography.regular,
     marginTop: spacing.sm,
     marginBottom: spacing.lg
   },
@@ -541,12 +558,12 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 16,
     color: color.textSecondary,
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     marginBottom: 8
   },
   optionalTag: {
     color: color.textMuted,
-    fontFamily: fonts.Medium
+    ...leafTypography.medium
   },
   input: {
     borderWidth: 1,
@@ -556,7 +573,7 @@ const styles = StyleSheet.create({
     paddingVertical: 9,
     fontSize: 13,
     lineHeight: 17,
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     color: color.textPrimary,
     backgroundColor: color.surfaceMuted
   },
@@ -578,7 +595,7 @@ const styles = StyleSheet.create({
     marginRight: 8,
     fontSize: 13,
     lineHeight: 17,
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     color: color.textPrimary
   },
   selectPlaceholder: {
@@ -586,7 +603,7 @@ const styles = StyleSheet.create({
     marginRight: 8,
     fontSize: 13,
     lineHeight: 17,
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     color: color.textMuted
   },
   uploadContainer: {
@@ -618,21 +635,21 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 18,
     color: color.textPrimary,
-    fontFamily: fonts.SemiBold
+    ...leafTypography.semiBold
   },
   uploadFile: {
     marginTop: 2,
     fontSize: 10,
     lineHeight: 13,
     color: color.textSecondary,
-    fontFamily: fonts.Regular
+    ...leafTypography.regular
   },
   uploadMeta: {
     marginTop: 2,
     fontSize: 10,
     lineHeight: 13,
     color: color.textMuted,
-    fontFamily: fonts.Medium
+    ...leafTypography.medium
   },
   uploadProgress: {
     height: 6,
@@ -655,7 +672,7 @@ const styles = StyleSheet.create({
     color: color.error,
     fontSize: 12,
     lineHeight: 16,
-    fontFamily: fonts.Medium
+    ...leafTypography.medium
   },
   identityGrid: {
     flexDirection: 'row',
@@ -691,11 +708,11 @@ const styles = StyleSheet.create({
     marginRight: 12,
     fontSize: 14,
     lineHeight: 18,
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     color: color.textPrimary
   },
   genderOptionTextSelected: {
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     color: color.accent
   }
 });

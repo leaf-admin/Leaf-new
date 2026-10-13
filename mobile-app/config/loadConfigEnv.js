@@ -59,12 +59,30 @@ function loadConfigEnv(projectRoot = path.resolve(__dirname, '..')) {
     return;
   }
 
-  for (const fileName of DEFAULT_ENV_FILES) {
-    const filePath = path.join(projectRoot, fileName);
+  const explicitEnvFile = String(process.env.LEAF_ENV_FILE || '').trim();
+  const buildProfile = String(process.env.EAS_BUILD_PROFILE || process.env.LEAF_BUILD_PROFILE || '').trim();
+  const easPath = path.join(projectRoot, 'eas.json');
+  if (!explicitEnvFile && buildProfile && fs.existsSync(easPath)) {
+    const eas = JSON.parse(fs.readFileSync(easPath, 'utf8'));
+    const profile = eas.build?.[buildProfile];
+    if (!profile) throw new Error('Selected EAS build profile does not exist.');
+    for (const [key, value] of Object.entries(profile.env || {})) {
+      if (!process.env[key]) process.env[key] = String(value);
+    }
+  }
+  const fileNames = explicitEnvFile ? [explicitEnvFile] : DEFAULT_ENV_FILES;
+
+  for (const fileName of fileNames) {
+    const filePath = path.isAbsolute(fileName)
+      ? fileName
+      : path.resolve(projectRoot, fileName);
+    if (explicitEnvFile && !fs.existsSync(filePath)) {
+      throw new Error('LEAF_ENV_FILE points to a missing file.');
+    }
     const envValues = parseEnvFile(filePath);
 
     for (const [key, value] of Object.entries(envValues)) {
-      if (!process.env[key]) {
+      if (explicitEnvFile || !process.env[key]) {
         process.env[key] = value;
       }
     }

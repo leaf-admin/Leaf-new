@@ -1,0 +1,19 @@
+{
+  "path": "/Users/izaakdias/Documents/Leaf-new/mobile-app/android/app/build/outputs/bundle/release/app-release.aab",
+  "version": "1.0.6",
+  "versionCode": 132,
+  "runtimeVersion": "1.0.6",
+  "extra": {
+    "launchProfile": "pilot_controlled",
+    "pilotControlled": true,
+    "apiUrl": "https://api.leaf.app.br",
+    "backendUrl": "https://api.leaf.app.br",
+    "wsUrl": "https://socket.leaf.app.br",
+    "socketUrl": "https://socket.leaf.app.br",
+    "isReview": false,
+    "e2eTest": false,
+    "forcePaymentBypass": false,
+    "enableTestUserTools": false,
+    "allowClientDirectGoogleFallback": false
+  }
+}

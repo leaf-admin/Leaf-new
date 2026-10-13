@@ -1,7 +1,7 @@
+import leafTypography from '../../prototype/LeafTypography';
 import React, { useMemo, useState } from 'react';
 import { Alert, Linking, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { fonts } from '../../../theme/runtimeTokens';
 import ContinueButton from '../common/ContinueButton';
 import onboardingTheme from '../common/onboardingTheme';
 import EditorialOnboardingScreen from '../common/EditorialOnboardingLayout';
@@ -9,7 +9,7 @@ import { AppConfig } from '../../../../config/AppConfig';
 
 const { color, spacing } = onboardingTheme;
 
-const CredentialsStep = ({ onCreated, onBack, initialData = {}, progressMeta }) => {
+const CredentialsStep = ({ onCreated, onBack, initialData = {}, progressMeta, isSubmitting = false }) => {
   const isDriver = initialData?.profileSelection?.userType === 'driver';
 
   const [consents, setConsents] = useState({
@@ -93,13 +93,27 @@ const CredentialsStep = ({ onCreated, onBack, initialData = {}, progressMeta }) 
         : 'Revise os termos para finalizar sua conta.'}
       onBack={onBack}
       progressMeta={progressMeta}
-      footer={<ContinueButton onPress={handleSubmit} disabled={!isFormValid} text="Concluir" />}
+      footer={(
+        <ContinueButton
+          onPress={handleSubmit}
+          disabled={!isFormValid || isSubmitting}
+          text={isSubmitting ? 'Finalizando...' : 'Concluir'}
+        />
+      )}
     >
       <View style={styles.legalLinksRow}>
-        <TouchableOpacity onPress={() => openLegalLink(AppConfig.terms_of_service_url, 'Termos de Uso')}>
+        <TouchableOpacity
+          onPress={() => openLegalLink(AppConfig.terms_of_service_url, 'Termos de Uso')}
+          accessibilityRole="button"
+          accessibilityLabel="Ler Termos de Uso"
+        >
           <Text style={styles.legalLinkText}>Ler Termos de Uso</Text>
         </TouchableOpacity>
-        <TouchableOpacity onPress={() => openLegalLink(AppConfig.privacy_policy_url, 'Política de Privacidade')}>
+        <TouchableOpacity
+          onPress={() => openLegalLink(AppConfig.privacy_policy_url, 'Política de Privacidade')}
+          accessibilityRole="button"
+          accessibilityLabel="Ler Política de Privacidade"
+        >
           <Text style={styles.legalLinkText}>Ler Política de Privacidade</Text>
         </TouchableOpacity>
       </View>
@@ -110,15 +124,25 @@ const CredentialsStep = ({ onCreated, onBack, initialData = {}, progressMeta }) 
           checked={consents.acceptTerms}
           label="Aceito os Termos de Uso *"
           onPress={() => toggleConsent('acceptTerms')}
+          testID="auth-credentials-terms-consent"
         />
-        {errors.acceptTerms ? <Text style={styles.errorText}>{errors.acceptTerms}</Text> : null}
+        {errors.acceptTerms ? (
+          <Text style={styles.errorText} accessibilityRole="alert" accessibilityLiveRegion="polite">
+            {errors.acceptTerms}
+          </Text>
+        ) : null}
 
         <ConsentRow
           checked={consents.acceptPrivacy}
           label="Aceito a Política de Privacidade *"
           onPress={() => toggleConsent('acceptPrivacy')}
+          testID="auth-credentials-privacy-consent"
         />
-        {errors.acceptPrivacy ? <Text style={styles.errorText}>{errors.acceptPrivacy}</Text> : null}
+        {errors.acceptPrivacy ? (
+          <Text style={styles.errorText} accessibilityRole="alert" accessibilityLiveRegion="polite">
+            {errors.acceptPrivacy}
+          </Text>
+        ) : null}
 
         {isDriver ? (
           <>
@@ -126,9 +150,12 @@ const CredentialsStep = ({ onCreated, onBack, initialData = {}, progressMeta }) 
               checked={consents.consentBackgroundCheck}
               label="Autorizo checagem de antecedentes criminais e validação regulatória *"
               onPress={() => toggleConsent('consentBackgroundCheck')}
+              testID="auth-driver-background-check-consent"
             />
             {errors.consentBackgroundCheck ? (
-              <Text style={styles.errorText}>{errors.consentBackgroundCheck}</Text>
+              <Text style={styles.errorText} accessibilityRole="alert" accessibilityLiveRegion="polite">
+                {errors.consentBackgroundCheck}
+              </Text>
             ) : null}
 
             <Text style={styles.sectionLabel}>Opcional</Text>
@@ -136,6 +163,7 @@ const CredentialsStep = ({ onCreated, onBack, initialData = {}, progressMeta }) 
               checked={consents.marketingOptIn}
               label="Aceito receber comunicações promocionais (opcional)"
               onPress={() => toggleConsent('marketingOptIn')}
+              testID="auth-driver-marketing-consent"
             />
           </>
         ) : null}
@@ -144,9 +172,18 @@ const CredentialsStep = ({ onCreated, onBack, initialData = {}, progressMeta }) 
   );
 };
 
-function ConsentRow({ checked, label, onPress }) {
+function ConsentRow({ checked, label, onPress, testID }) {
   return (
-    <TouchableOpacity style={styles.consentRow} activeOpacity={0.86} onPress={onPress}>
+    <TouchableOpacity
+      style={styles.consentRow}
+      activeOpacity={0.86}
+      onPress={onPress}
+      testID={testID}
+      accessibilityRole="checkbox"
+      accessibilityLabel={label}
+      accessibilityState={{ checked }}
+      accessibilityHint={checked ? 'Toque duas vezes para desmarcar.' : 'Toque duas vezes para aceitar.'}
+    >
       <View style={[styles.checkbox, checked && styles.checkboxChecked]}>
         {checked ? <Ionicons name="checkmark" size={14} color={color.accentText} /> : null}
       </View>
@@ -179,17 +216,17 @@ const styles = StyleSheet.create({
     justifyContent: 'center'
   },
   title: {
-    fontSize: 32,
-    lineHeight: 36,
+    fontSize: 22,
+    lineHeight: 28,
     color: color.textPrimary,
-    fontFamily: fonts.Bold,
+    ...leafTypography.bold,
     letterSpacing: 0
   },
   subtitle: {
-    fontSize: 15,
-    lineHeight: 21,
+    fontSize: 14,
+    lineHeight: 20,
     color: color.textSecondary,
-    fontFamily: fonts.Regular,
+    ...leafTypography.regular,
     marginTop: spacing.sm,
     marginBottom: spacing.lg
   },
@@ -203,7 +240,7 @@ const styles = StyleSheet.create({
     lineHeight: 16,
     color: color.accent,
     textDecorationLine: 'underline',
-    fontFamily: fonts.Medium
+    ...leafTypography.medium
   },
   block: {
     borderWidth: 1,
@@ -218,7 +255,7 @@ const styles = StyleSheet.create({
     color: color.textSecondary,
     fontSize: 11,
     lineHeight: 14,
-    fontFamily: fonts.Bold,
+    ...leafTypography.bold,
     textTransform: 'uppercase',
     letterSpacing: 0.8
   },
@@ -248,7 +285,7 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 18,
     color: color.textPrimary,
-    fontFamily: fonts.Medium
+    ...leafTypography.medium
   },
   errorText: {
     marginTop: -4,
@@ -257,7 +294,7 @@ const styles = StyleSheet.create({
     color: color.error,
     fontSize: 12,
     lineHeight: 16,
-    fontFamily: fonts.Medium
+    ...leafTypography.medium
   }
 });
 

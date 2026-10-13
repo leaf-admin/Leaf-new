@@ -1,6 +1,8 @@
+import leafTypography from './LeafTypography';
 import React from 'react';
 import {
   Image,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -8,30 +10,37 @@ import {
   View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { fonts } from '../../theme/runtimeTokens';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import robotaxiPrototypeTokens from '../design-system/robotaxiPrototypeTokens';
 
 const TEXT_SCALE_CAP = 1.35;
 const { color } = robotaxiPrototypeTokens;
 
+// Narrow phones (e.g. 360 dp Android) get a tighter scale (design-system).
+import { compact, leafType } from '../design-system/leafTypeScale';
+
+export { compact };
+
 export const robotaxiLifecycleMetrics = Object.freeze({
-  cardHorizontalMargin: 24,
-  cardBottomGap: 16,
+  // Floating cards (not edge-to-edge sheets): inset from the sides and lifted
+  // above the home indicator, so the map reads around them.
+  cardHorizontalMargin: 12,
+  cardBottomGap: 12,
   cardRadius: 28,
-  cardPaddingHorizontal: 18,
+  cardPaddingHorizontal: compact(24, 20),
   cardPaddingTop: 10,
-  cardPaddingBottom: 18,
-  buttonHeight: 48,
-  buttonRadius: 24,
+  cardPaddingBottom: compact(18, 14),
+  buttonHeight: compact(54, 50),
+  buttonRadius: 12,
   buttonIconSize: 16,
   buttonIconGap: 6,
 });
 
 const buttonTones = Object.freeze({
   primary: {
-    backgroundColor: color.accent.primary,
-    borderColor: color.border.strong,
-    foregroundColor: color.accent.contrast,
+    backgroundColor: robotaxiPrototypeTokens.action.primary,
+    borderColor: robotaxiPrototypeTokens.action.primary,
+    foregroundColor: robotaxiPrototypeTokens.action.contrast,
   },
   secondary: {
     backgroundColor: color.surface.primary,
@@ -60,10 +69,14 @@ export function RobotaxiLifecycleCard({
   style,
   testID,
   accessibilityLabel,
+  showHandle = true,
   scrollEnabled = false,
   scrollStyle,
   contentContainerStyle,
   showsVerticalScrollIndicator = false,
+  onHandlePress,
+  onHandleSwipe,
+  handleTestID,
 }) {
   const content = scrollEnabled ? (
     <ScrollView
@@ -84,6 +97,29 @@ export function RobotaxiLifecycleCard({
       testID={testID}
       accessibilityLabel={accessibilityLabel}
     >
+      {showHandle && (onHandlePress || onHandleSwipe) ? (
+        // Interactive handle: tap or swipe to change the card height.
+        <GestureDetector
+          gesture={Gesture.Pan()
+            .runOnJS(true)
+            .activeOffsetY([-12, 12])
+            .onEnd((event) => {
+              if (event.translationY < -36 || event.velocityY < -700) onHandleSwipe?.(1);
+              else if (event.translationY > 36 || event.velocityY > 700) onHandleSwipe?.(-1);
+            })}
+        >
+          <Pressable
+            onPress={onHandlePress}
+            style={styles.handleArea}
+            accessibilityRole="adjustable"
+            accessibilityLabel="Altura do cartão"
+            accessibilityHint="Toque para alternar entre resumo, padrão e detalhes"
+            testID={handleTestID}
+          >
+            <View style={styles.handle} />
+          </Pressable>
+        </GestureDetector>
+      ) : showHandle ? <View style={styles.handleArea} pointerEvents="none" accessibilityElementsHidden importantForAccessibility="no-hide-descendants"><View style={styles.handle} /></View> : null}
       {content}
     </View>
   );
@@ -130,7 +166,7 @@ export function RobotaxiLifecycleButton({
         />
       ) : null}
       <Text
-        numberOfLines={1}
+        numberOfLines={2}
         style={[styles.buttonText, { color: palette.foregroundColor }, textStyle]}
       >
         {label}
@@ -164,9 +200,6 @@ export function RobotaxiLifecycleDisclosure({
 export function RobotaxiLifecycleMetric({ label, value, tone = 'default', style, testID }) {
   return (
     <View style={[styles.metric, style]} testID={testID}>
-      <Text maxFontSizeMultiplier={TEXT_SCALE_CAP} style={styles.metricLabel} numberOfLines={1}>
-        {label}
-      </Text>
       <Text
         style={[
           styles.metricValue,
@@ -174,15 +207,30 @@ export function RobotaxiLifecycleMetric({ label, value, tone = 'default', style,
           tone === 'danger' && styles.metricValueDanger,
         ]}
         numberOfLines={1}
+        adjustsFontSizeToFit
+        minimumFontScale={0.6}
       >
         {value}
+      </Text>
+      <Text maxFontSizeMultiplier={TEXT_SCALE_CAP} style={styles.metricLabel} numberOfLines={2}>
+        {label}
       </Text>
     </View>
   );
 }
 
+// Section labels read as sentence case ("Motorista a caminho"), never shouted.
+function toSentenceCase(value) {
+  const text = String(value || '').trim();
+  if (!text || text !== text.toUpperCase()) return text;
+  // Plain toLowerCase: Hermes on Android ignores locale-tagged variants.
+  const lower = text.toLowerCase();
+  return lower.charAt(0).toUpperCase() + lower.slice(1);
+}
+
 export function RobotaxiLifecycleSummary({
   eyebrow,
+  hero = false,
   title,
   subtitle,
   value,
@@ -191,30 +239,46 @@ export function RobotaxiLifecycleSummary({
   titleTestID,
   subtitleTestID,
   valueTestID,
+  valueLabelTestID,
 }) {
   return (
     <View style={[styles.summary, style]}>
       <View style={styles.summaryCopy}>
-        {eyebrow ? <Text maxFontSizeMultiplier={TEXT_SCALE_CAP} style={styles.eyebrow}>{eyebrow}</Text> : null}
-        <Text maxFontSizeMultiplier={TEXT_SCALE_CAP} style={styles.summaryTitle} numberOfLines={1} testID={titleTestID}>
+        {eyebrow ? <Text maxFontSizeMultiplier={TEXT_SCALE_CAP} style={styles.eyebrow}>{toSentenceCase(eyebrow)}</Text> : null}
+        {/* Hero values ("Chegada às 10:36", "Chega em 4 min") stay on one line and
+            shrink to fit; plain titles (addresses) may wrap to two. */}
+        <Text
+          maxFontSizeMultiplier={TEXT_SCALE_CAP}
+          style={[styles.summaryTitle, hero && styles.summaryHero]}
+          numberOfLines={hero ? 1 : 2}
+          adjustsFontSizeToFit={hero}
+          minimumFontScale={0.6}
+          testID={titleTestID}
+        >
           {title}
         </Text>
         {subtitle ? (
-          <Text maxFontSizeMultiplier={TEXT_SCALE_CAP} style={styles.summarySubtitle} numberOfLines={1} testID={subtitleTestID}>
+          <Text maxFontSizeMultiplier={TEXT_SCALE_CAP} style={styles.summarySubtitle} numberOfLines={2} testID={subtitleTestID}>
             {subtitle}
           </Text>
         ) : null}
       </View>
       {value ? (
         <View style={styles.summaryValueWrap}>
-          <Text maxFontSizeMultiplier={TEXT_SCALE_CAP} style={styles.summaryValue} numberOfLines={1} testID={valueTestID}>
+          <Text maxFontSizeMultiplier={TEXT_SCALE_CAP} style={styles.summaryValue} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6} testID={valueTestID}>
             {value}
           </Text>
-          {valueLabel ? <Text maxFontSizeMultiplier={TEXT_SCALE_CAP} style={styles.summaryValueLabel}>{valueLabel}</Text> : null}
+          {valueLabel ? <Text maxFontSizeMultiplier={TEXT_SCALE_CAP} style={styles.summaryValueLabel} testID={valueLabelTestID}>{valueLabel}</Text> : null}
         </View>
       ) : null}
     </View>
   );
+}
+
+// Only a real plate gets the plate badge; placeholders ("Placa não informada")
+// stay plain text so they never look like a plate to check.
+function looksLikePlate(value) {
+  return typeof value === 'string' && /^[A-Z0-9-]{5,8}$/i.test(value.trim());
 }
 
 export function RobotaxiLifecycleIdentity({
@@ -241,13 +305,13 @@ export function RobotaxiLifecycleIdentity({
           {name}
         </Text>
         {meta ? (
-          <Text maxFontSizeMultiplier={TEXT_SCALE_CAP} style={styles.identityMeta} numberOfLines={1} testID={fieldTestIDs.meta}>
+          <Text maxFontSizeMultiplier={TEXT_SCALE_CAP} style={styles.identityMeta} numberOfLines={2} testID={fieldTestIDs.meta}>
             {meta}
           </Text>
         ) : null}
       </View>
       {trailing ? (
-        <Text maxFontSizeMultiplier={TEXT_SCALE_CAP} style={styles.identityTrailing} numberOfLines={1} testID={fieldTestIDs.trailing}>
+        <Text maxFontSizeMultiplier={TEXT_SCALE_CAP} style={looksLikePlate(trailing) ? styles.identityTrailing : styles.identityTrailingPlain} numberOfLines={1} testID={fieldTestIDs.trailing}>
           {trailing}
         </Text>
       ) : null}
@@ -258,32 +322,35 @@ export function RobotaxiLifecycleIdentity({
 export function RobotaxiLifecycleSection({ title, children, style }) {
   return (
     <View style={[styles.section, style]}>
-      {title ? <Text maxFontSizeMultiplier={TEXT_SCALE_CAP} style={styles.sectionTitle}>{title}</Text> : null}
+      {title ? <Text maxFontSizeMultiplier={TEXT_SCALE_CAP} style={styles.sectionTitle}>{toSentenceCase(title)}</Text> : null}
       {children}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
+  handleArea: { height: 22, alignItems: 'center', justifyContent: 'flex-start' },
+  handle: { width: 32, height: 3, borderRadius: 2, backgroundColor: '#E5E5E5' },
   card: {
     borderRadius: robotaxiLifecycleMetrics.cardRadius,
-    borderWidth: 1,
+    borderWidth: StyleSheet.hairlineWidth,
     borderColor: color.border.subtle,
     backgroundColor: color.bg.panelSolid,
     paddingHorizontal: robotaxiLifecycleMetrics.cardPaddingHorizontal,
     paddingTop: robotaxiLifecycleMetrics.cardPaddingTop,
     paddingBottom: robotaxiLifecycleMetrics.cardPaddingBottom,
     shadowColor: color.shadow.base,
-    shadowOffset: { width: 0, height: -10 },
-    shadowOpacity: 0.07,
-    shadowRadius: 24,
-    elevation: 10,
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.12,
+    shadowRadius: 28,
+    elevation: 12,
   },
   button: {
     minHeight: robotaxiLifecycleMetrics.buttonHeight,
     borderRadius: robotaxiLifecycleMetrics.buttonRadius,
     borderWidth: 1,
     paddingHorizontal: 18,
+    paddingVertical: 10,
     alignItems: 'center',
     justifyContent: 'center',
     flexDirection: 'row',
@@ -294,27 +361,29 @@ const styles = StyleSheet.create({
     opacity: 0.56,
   },
   buttonText: {
-    fontFamily: fonts.SemiBold,
-    fontSize: 13,
-    lineHeight: 17,
+    ...leafTypography.semiBold,
+    fontSize: compact(16, 15),
+    lineHeight: compact(22, 20),
     flexShrink: 1,
+    textAlign: 'center',
   },
   metric: {
     flex: 1,
     minWidth: 0,
   },
   metricLabel: {
+    marginTop: 4,
     color: color.text.muted,
-    fontFamily: fonts.Regular,
-    fontSize: 10.5,
-    lineHeight: 14,
+    ...leafTypography.regular,
+    fontSize: 12,
+    lineHeight: 17,
   },
   metricValue: {
-    marginTop: 2,
     color: color.text.primary,
-    fontFamily: fonts.SemiBold,
-    fontSize: 12,
-    lineHeight: 16,
+    ...leafTypography.semiBold,
+    fontSize: compact(20, 18),
+    lineHeight: compact(25, 23),
+    fontVariant: ['tabular-nums'],
   },
   metricValueAccent: {
     color: color.accent.primary,
@@ -333,39 +402,39 @@ const styles = StyleSheet.create({
     minWidth: 0,
   },
   eyebrow: {
-    color: color.text.muted,
-    fontFamily: fonts.SemiBold,
-    fontSize: 11,
-    lineHeight: 15,
+    ...leafType.caption,
+  },
+  summaryHero: {
+    ...leafType.display,
   },
   summaryTitle: {
     marginTop: 2,
     color: color.text.primary,
-    fontFamily: fonts.SemiBold,
-    fontSize: 17,
-    lineHeight: 22,
+    ...leafTypography.semiBold,
+    fontSize: compact(24, 20),
+    lineHeight: compact(29, 25),
   },
   summarySubtitle: {
     marginTop: 2,
     color: color.text.secondary,
-    fontFamily: fonts.Regular,
-    fontSize: 11,
-    lineHeight: 15,
+    ...leafTypography.regular,
+    fontSize: 14,
+    lineHeight: 20,
   },
   summaryValueWrap: {
     alignItems: 'flex-end',
   },
   summaryValue: {
     color: color.text.primary,
-    fontFamily: fonts.SemiBold,
-    fontSize: 17,
-    lineHeight: 22,
+    ...leafTypography.semiBold,
+    fontSize: compact(20, 18),
+    lineHeight: compact(25, 23),
   },
   summaryValueLabel: {
     color: color.text.muted,
-    fontFamily: fonts.Regular,
-    fontSize: 10,
-    lineHeight: 13,
+    ...leafTypography.regular,
+    fontSize: 12,
+    lineHeight: 17,
   },
   identity: {
     minHeight: 44,
@@ -378,7 +447,7 @@ const styles = StyleSheet.create({
     height: 44,
     borderRadius: 22,
     overflow: 'hidden',
-    backgroundColor: color.bg.app,
+    backgroundColor: '#EEF0EC',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -388,9 +457,9 @@ const styles = StyleSheet.create({
   },
   avatarInitial: {
     color: color.text.primary,
-    fontFamily: fonts.SemiBold,
-    fontSize: 15.5,
-    lineHeight: 20,
+    ...leafTypography.semiBold,
+    fontSize: 16,
+    lineHeight: 22,
   },
   identityCopy: {
     flex: 1,
@@ -398,36 +467,43 @@ const styles = StyleSheet.create({
   },
   identityName: {
     color: color.text.primary,
-    fontFamily: fonts.SemiBold,
-    fontSize: 15.5,
-    lineHeight: 20,
+    ...leafTypography.semiBold,
+    fontSize: 16,
+    lineHeight: 22,
   },
   identityMeta: {
     color: color.text.secondary,
-    fontFamily: fonts.Regular,
-    fontSize: 11,
-    lineHeight: 15,
+    ...leafTypography.regular,
+    fontSize: 14,
+    lineHeight: 20,
   },
-  identityTrailing: {
-    maxWidth: 116,
-    color: color.text.primary,
-    fontFamily: fonts.SemiBold,
-    fontSize: 12,
-    lineHeight: 16,
+  identityTrailingPlain: {
+    ...leafType.caption,
+    maxWidth: 110,
     textAlign: 'right',
+  },
+  // Vehicle plate as a badge, like the physical plate the rider looks for.
+  identityTrailing: {
+    ...leafType.plate,
+    fontSize: compact(16, 15),
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+    borderWidth: 1.5,
+    borderColor: color.text.primary,
+    borderRadius: 9,
+    overflow: 'hidden',
+    textAlign: 'center',
   },
   section: {
     marginTop: 16,
     paddingTop: 16,
-    borderTopWidth: 1,
+    borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: color.border.subtle,
   },
   sectionTitle: {
     marginBottom: 10,
-    color: color.text.muted,
-    fontFamily: fonts.SemiBold,
-    fontSize: 10,
-    lineHeight: 13,
+    ...leafType.caption,
+    fontSize: 14,
   },
 });
 

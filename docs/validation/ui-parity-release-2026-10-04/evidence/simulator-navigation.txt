@@ -1,0 +1,22 @@
+Running on Leaf iPhone 17 Dedicated - iOS 26.5 - 6BC9EC30-C939-4598-A85D-A9E071E90CE5
+ > Flow Leaf RC final account history and saved-place navigation read-only
+Assert that id: leaf-passenger-landing is visible... COMPLETED
+Take screenshot home-final... COMPLETED
+Tap on "Conta"... COMPLETED
+Assert that id: robotaxi-menu-screen is visible... COMPLETED
+Assert that "avaliação: 5,00 ★" is visible... COMPLETED
+Assert that "viagens: 8" is visible... COMPLETED
+Take screenshot account-final... COMPLETED
+Tap on "Atividade"... COMPLETED
+Assert that id: robotaxi-trip-history-screen is visible... COMPLETED
+Assert that "R$ 122,94" is visible... COMPLETED
+Take screenshot activity-final... COMPLETED
+Tap on "Conta"... COMPLETED
+Assert that id: robotaxi-menu-screen is visible... COMPLETED
+Tap on id: leaf-account-group-places... COMPLETED
+Assert that id: leaf-saved-places-screen is visible... COMPLETED
+Take screenshot places-final... COMPLETED
+Tap on "Adicionar endereço"... COMPLETED
+Tap on "Buscar endereço"... COMPLETED
+Assert that id: leaf-saved-place-picker-screen is visible... COMPLETED
+Take screenshot place-picker-final... COMPLETED

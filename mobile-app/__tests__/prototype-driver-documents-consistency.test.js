@@ -10,13 +10,15 @@ describe('Robotaxi driver documents state consistency', () => {
   it('separates backend operational release from document approval', () => {
     expect(source).toContain('const documentsComplete = approvedCount === DRIVER_DOCS.length');
     expect(source).toContain('operationallyReleasedBeforeDocumentSync');
-    expect(source).toContain('Liberação operacional');
-    expect(source).toContain('Liberada pelo backend');
+    expect(source).toContain('Liberação para ficar online');
+    expect(source).toContain("driverCanGoOnline ? 'Liberada' : 'Pendente'");
+    // User-facing copy, no implementation jargon.
+    expect(source).not.toContain('pelo backend');
   });
 
   it('does not ask for duplicate uploads while released documents await synchronization', () => {
     expect(source).toContain('Documentos aguardando sincronização');
-    expect(source).toContain('A liberação operacional veio do backend. Atualize para consultar o status de CNH e CRLV.');
+    expect(source).toContain('Sua conta já está liberada. Atualize para consultar o status de CNH e CRLV.');
     expect(source).toContain('testID="robotaxi-driver-documents-sync-state"');
   });
 

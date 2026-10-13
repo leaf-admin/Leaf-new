@@ -1,3 +1,4 @@
+import leafTypography from '../components/prototype/LeafTypography';
 import Logger from '../utils/Logger';
 import React, { useEffect, useMemo, useState } from 'react';
 import {
@@ -18,11 +19,11 @@ import {
 } from 'react-native';
 import DatePicker from 'react-native-date-picker';
 import { Ionicons } from '@expo/vector-icons';
+import { LeafObjectIcon } from '../components/prototype/LeafVisualElements';
 import Svg, { Line, Rect, Text as SvgText } from 'react-native-svg';
 import { useSelector } from 'react-redux';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors } from '../theme/runtimeTokens';
-import { fonts } from '../theme/runtimeTokens';
 import { ListSkeleton } from '../components/LoadingStates';
 import robotaxiPrototypeTokens from '../components/design-system/robotaxiPrototypeTokens';
 import PrototypeDismissibleSheet from '../components/prototype/PrototypeDismissibleSheet';
@@ -73,6 +74,18 @@ function formatCurrency(value) {
     .replace(/\B(?=(\d{3})+(?!\d))/g, '.');
 }
 
+function formatOptionalCurrency(value) {
+  if (
+    value === null ||
+    value === undefined ||
+    (typeof value === 'string' && value.trim() === '') ||
+    !Number.isFinite(Number(value))
+  ) {
+    return '--';
+  }
+  return `R$ ${formatCurrency(value)}`;
+}
+
 function formatCurrencyCompact(value) {
   const numeric = toNumber(value, 0);
   if (numeric >= 1000) {
@@ -100,6 +113,13 @@ function parseDateFlexible(rawValue) {
   const text = String(rawValue).trim();
   if (!text) {
     return null;
+  }
+
+  // "AAAA-MM-DD" é um dia do calendário, não um instante: new Date() o leria em UTC
+  // e, no fuso do Brasil, ele cairia no dia anterior.
+  const dayOnly = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text);
+  if (dayOnly) {
+    return new Date(Number(dayOnly[1]), Number(dayOnly[2]) - 1, Number(dayOnly[3]));
   }
 
   const parsed = new Date(text);
@@ -134,7 +154,8 @@ function formatWeekdayLabel(dateISO) {
   if (!date) {
     return '--';
   }
-  return date.toLocaleDateString('en-US', { weekday: 'short' }).toUpperCase();
+  // Tabela fixa: no Android o formato curto do sistema devolve só uma letra ("T").
+  return ['DOM', 'SEG', 'TER', 'QUA', 'QUI', 'SEX', 'SÁB'][date.getDay()];
 }
 
 function normalizeDailySeries(report) {
@@ -265,9 +286,24 @@ function compressSeriesToMaxPoints(series, maxPoints = 5) {
 
     const first = chunk[0];
     const last = chunk[chunk.length - 1];
-    const netAmount = chunk.reduce((sum, item) => sum + toNumber(item.netAmount, 0), 0);
-    const grossAmount = chunk.reduce((sum, item) => sum + toNumber(item.grossAmount, 0), 0);
-    const feeAmount = chunk.reduce((sum, item) => sum + toNumber(item.feeAmount, 0), 0);
+    const netAmountComplete = chunk.every(item =>
+      item.netAmount !== null && item.netAmount !== undefined && Number.isFinite(Number(item.netAmount))
+    );
+    const grossAmountComplete = chunk.every(item =>
+      item.grossAmount !== null && item.grossAmount !== undefined && Number.isFinite(Number(item.grossAmount))
+    );
+    const feeAmountComplete = chunk.every(item =>
+      item.feeAmount !== null && item.feeAmount !== undefined && Number.isFinite(Number(item.feeAmount))
+    );
+    const netAmount = netAmountComplete
+      ? chunk.reduce((sum, item) => sum + toNumber(item.netAmount, 0), 0)
+      : null;
+    const grossAmount = grossAmountComplete
+      ? chunk.reduce((sum, item) => sum + toNumber(item.grossAmount, 0), 0)
+      : null;
+    const feeAmount = feeAmountComplete
+      ? chunk.reduce((sum, item) => sum + toNumber(item.feeAmount, 0), 0)
+      : null;
     const completedCount = chunk.reduce((sum, item) => sum + Math.round(toNumber(item.completedCount, 0)), 0);
     const cancelledCount = chunk.reduce((sum, item) => sum + Math.round(toNumber(item.cancelledCount, 0)), 0);
 
@@ -337,6 +373,8 @@ export default function EarningsReportScreen({ navigation, route }) {
   const { height: windowHeight } = useWindowDimensions();
 
   const [earningsData, setEarningsData] = useState(null);
+  // A failed load used to look like an empty account (R$ 0,00) with no notice.
+  const [earningsLoadFailed, setEarningsLoadFailed] = useState(false);
   const [isLoadingEarnings, setIsLoadingEarnings] = useState(true);
   const [panelHeight, setPanelHeight] = useState(windowHeight);
 
@@ -412,7 +450,17 @@ export default function EarningsReportScreen({ navigation, route }) {
         const baseUrl = getSelfHostedApiUrl('/api');
         Logger.log(`Trazendo Relatório de Faturamento: ${baseUrl}/drivers/${auth.profile.uid}/earnings`);
 
-        const response = await fetch(`${baseUrl}/drivers/${auth.profile.uid}/earnings`);
+        // O relatório é do próprio motorista: a rota exige o token dele.
+        let earningsHeaders = {};
+        try {
+          earningsHeaders = await DriverBalanceService.getAuthHeaders();
+        } catch (headerError) {
+          earningsHeaders = {};
+        }
+        const response = await fetch(`${baseUrl}/drivers/${auth.profile.uid}/earnings`, {
+          method: 'GET',
+          headers: earningsHeaders,
+        });
         const payload = await response.json();
 
         if (payload?.success && payload?.report) {
@@ -445,8 +493,9 @@ export default function EarningsReportScreen({ navigation, route }) {
           }
 
           setEarningsData(mergedReport);
+          setEarningsLoadFailed(false);
         } else {
-          setEarningsData({
+          setEarningsData((previous) => previous || {
             balance: 0,
             rating: 0,
             dailySeries: [],
@@ -454,10 +503,11 @@ export default function EarningsReportScreen({ navigation, route }) {
             tripsToday: 0,
             totalCancellations: 0
           });
+          setEarningsLoadFailed(true);
         }
       } catch (error) {
         Logger.error('Erro ao carregar dados de ganhos:', error);
-        setEarningsData({
+        setEarningsData((previous) => previous || {
           balance: 0,
           rating: 0,
           dailySeries: [],
@@ -465,6 +515,7 @@ export default function EarningsReportScreen({ navigation, route }) {
           tripsToday: 0,
           totalCancellations: 0
         });
+        setEarningsLoadFailed(true);
       } finally {
         setIsLoadingEarnings(false);
       }
@@ -545,7 +596,11 @@ export default function EarningsReportScreen({ navigation, route }) {
       const awsAvailable = providerResult.mode === 'aws';
       setWithdrawKycMode(awsAvailable ? 'aws' : 'unavailable');
       if (!awsAvailable) {
-        setWithdrawKycReason('Não foi possível preparar a validação agora. Tente novamente em alguns minutos.');
+        setWithdrawKycReason(
+          providerResult.mode === 'face_compare'
+            ? 'Saques sem validação facial ficam sujeitos à revisão manual.'
+            : 'Não foi possível preparar a validação agora. Tente novamente em alguns minutos.'
+        );
       }
       setIsWithdrawKycProviderLoading(false);
     };
@@ -678,7 +733,7 @@ export default function EarningsReportScreen({ navigation, route }) {
 
       if (!retryResult.success) {
         setWithdrawModalVisible(true);
-        setWithdrawError(retryResult.error || 'Falha ao solicitar saque após validação KYC');
+        setWithdrawError(retryResult.error || 'Não foi possível solicitar o saque após a validação de identidade.');
         return;
       }
 
@@ -706,7 +761,7 @@ export default function EarningsReportScreen({ navigation, route }) {
       if (!withdrawalsEnabled) {
         Alert.alert(
           'Saque fora do piloto',
-          'Durante o piloto controlado, os repasses do motorista serao tratados pela operacao assistida.'
+          'Durante o piloto controlado, os repasses do motorista serão tratados pela operação assistida.'
         );
         setWithdrawModalVisible(false);
         return;
@@ -822,7 +877,13 @@ export default function EarningsReportScreen({ navigation, route }) {
     },
     [lastReceipt, tripHistory]
   );
-  const hasRuntimeHistory = runtimeHistory.length > 0;
+  // O relatório do servidor é a fonte dos ganhos. O histórico local do aparelho só entra
+  // quando o servidor não respondeu: ele guarda poucas corridas e não respeita o período.
+  const hasServerSeries =
+    !earningsLoadFailed &&
+    Array.isArray(earningsData?.dailySeries) &&
+    earningsData.dailySeries.length > 0;
+  const hasRuntimeHistory = runtimeHistory.length > 0 && !hasServerSeries;
 
   const normalizedSeries = useMemo(
     () =>
@@ -849,18 +910,35 @@ export default function EarningsReportScreen({ navigation, route }) {
     () => buildTripFinancialTotals(runtimeHistory, { role: 'driver' }),
     [runtimeHistory]
   );
-  const summaryTotalNet = hasRuntimeHistory ? overallRuntimeTotals.totalNet : totalNet;
-  const summaryTotalGross = hasRuntimeHistory ? overallRuntimeTotals.totalGross : totalGross;
-  const summaryTotalFee = hasRuntimeHistory ? overallRuntimeTotals.totalFees : totalFee;
+  const summaryTotalNet = hasRuntimeHistory
+    ? overallRuntimeTotals.netKnownCount === overallRuntimeTotals.count
+      ? overallRuntimeTotals.totalNet
+      : null
+    : totalNet;
+  const summaryTotalGross = hasRuntimeHistory
+    ? overallRuntimeTotals.grossKnownCount === overallRuntimeTotals.count
+      ? overallRuntimeTotals.totalGross
+      : null
+    : totalGross;
+  const summaryTotalFee = hasRuntimeHistory
+    ? overallRuntimeTotals.feeKnownCount === overallRuntimeTotals.count
+      ? overallRuntimeTotals.totalFees
+      : null
+    : totalFee;
   const summaryTotalRides = hasRuntimeHistory ? overallRuntimeTotals.count : totalRides;
   const summaryEffectiveRate =
-    summaryTotalGross > 0 ? (summaryTotalFee / summaryTotalGross) * 100 : effectiveRate;
+    summaryTotalGross !== null && summaryTotalFee !== null && summaryTotalGross > 0
+      ? (summaryTotalFee / summaryTotalGross) * 100
+      : hasRuntimeHistory
+        ? null
+        : effectiveRate;
 
   const todayFallbackRides = activeFilterKey === 'today' ? Math.round(toNumber(earningsData?.tripsToday, 0)) : 0;
   const safeTotalRides = hasRuntimeHistory
     ? summaryTotalRides
     : Math.max(totalRides, todayFallbackRides);
   const safeTotalCancellations = Math.max(totalCancellations, Math.round(toNumber(earningsData?.totalCancellations, 0)));
+  const periodHasActivity = safeTotalRides > 0 || safeTotalCancellations > 0 || toNumber(summaryTotalNet, 0) > 0;
 
   const chartHeight = 152;
   const chartTop = 12;
@@ -873,15 +951,21 @@ export default function EarningsReportScreen({ navigation, route }) {
       return [];
     }
 
-    const maxValue = Math.max(1, ...barSeries.map(item => toNumber(item.netAmount, 0)));
+    const maxValue = Math.max(
+      1,
+      ...barSeries
+        .filter(item => item.netAmount !== null && item.netAmount !== undefined)
+        .map(item => toNumber(item.netAmount, 0)),
+    );
     const gap = 8;
     const barWidth = Math.max(16, Math.min(34, (chartInnerWidth - (barSeries.length - 1) * gap) / barSeries.length));
     const totalWidth = barSeries.length * barWidth + (barSeries.length - 1) * gap;
     const startX = Math.max(0, (chartInnerWidth - totalWidth) / 2);
 
     return barSeries.map((item, index) => {
-      const value = toNumber(item.netAmount, 0);
-      const height = Math.max(6, (value / maxValue) * chartInnerHeight);
+      const amountKnown = item.netAmount !== null && item.netAmount !== undefined;
+      const value = amountKnown ? toNumber(item.netAmount, 0) : 0;
+      const height = amountKnown ? Math.max(6, (value / maxValue) * chartInnerHeight) : 0;
       const x = startX + index * (barWidth + gap);
       const y = chartTop + chartInnerHeight - height;
       return {
@@ -892,7 +976,7 @@ export default function EarningsReportScreen({ navigation, route }) {
         height,
         width: barWidth,
         label: formatWeekdayLabel(item.date),
-        isPeak: value >= maxValue
+        isPeak: amountKnown && value >= maxValue
       };
     });
   }, [barSeries, chartInnerHeight, chartInnerWidth]);
@@ -908,7 +992,7 @@ export default function EarningsReportScreen({ navigation, route }) {
   const positiveDeltaColor = '#1A7F37';
   const negativeDeltaColor = '#B42318';
 
-  const tierLabel = String(earningsData?.tierName || earningsData?.driverTier || 'Gold Tier');
+  const tierLabel = String(earningsData?.tierName || earningsData?.driverTier || '');
 
   const activeSegment = useMemo(() => {
     if (activeFilterKey === 'd7') {
@@ -943,14 +1027,27 @@ export default function EarningsReportScreen({ navigation, route }) {
     yesterday.setDate(yesterday.getDate() - 1);
     const todayISO = toISODate(today);
     const yesterdayISO = toISODate(yesterday);
-    const todayValue = toNumber(normalizedSeries.find(item => item.date === todayISO)?.netAmount, 0);
-    const yesterdayValue = toNumber(normalizedSeries.find(item => item.date === yesterdayISO)?.netAmount, 0);
+    const todaySeriesItem = normalizedSeries.find(item => item.date === todayISO);
+    const yesterdaySeriesItem = normalizedSeries.find(item => item.date === yesterdayISO);
+    if (
+      (todaySeriesItem && todaySeriesItem.netAmount === null) ||
+      (yesterdaySeriesItem && yesterdaySeriesItem.netAmount === null)
+    ) {
+      return null;
+    }
+    const todayValue = toNumber(todaySeriesItem?.netAmount, 0);
+    const yesterdayValue = toNumber(yesterdaySeriesItem?.netAmount, 0);
     return todayValue - yesterdayValue;
   }, [normalizedSeries]);
 
-  const hasPositiveDelta = deltaFromYesterday >= 0;
+  const hasPositiveDelta = deltaFromYesterday !== null && deltaFromYesterday >= 0;
   const deltaPrefix = hasPositiveDelta ? '+' : '-';
-  const deltaAmountLabel = formatCurrency(Math.abs(deltaFromYesterday));
+  const deltaAmountLabel = deltaFromYesterday === null
+    ? '--'
+    : formatCurrency(Math.abs(deltaFromYesterday));
+  const hasIncompleteRepasseInPeriod = hasRuntimeHistory && filteredSeries.some(
+    item => item.netAmount === null,
+  );
   const activeFilterTitle = useMemo(() => {
     if (activeFilterKey === 'custom_range' || activeFilterKey === 'custom') {
       return 'Período personalizado';
@@ -1014,10 +1111,9 @@ export default function EarningsReportScreen({ navigation, route }) {
     return (
       <PrototypeScreenTransition>
         <View
-          style={[styles.cleanScreen, { paddingTop: Math.max(insets.top + 26, 58), paddingBottom: Math.max(insets.bottom, 18) }]}
+          style={[styles.cleanScreen, { paddingTop: insets.top + 20, paddingBottom: Math.max(insets.bottom, 18) }]}
           onLayout={handlePanelLayout}
           testID="driver-earnings-withdraw-processing"
-          accessibilityLabel="driver-earnings-withdraw-processing"
         >
           <StatusBar translucent backgroundColor="transparent" barStyle="dark-content" />
 
@@ -1027,9 +1123,10 @@ export default function EarningsReportScreen({ navigation, route }) {
               activeOpacity={0.76}
               onPress={() => setWithdrawProcessingSummary(null)}
               testID="driver-earnings-withdraw-back-button"
-              accessibilityLabel="driver-earnings-withdraw-back-button"
+              accessibilityRole="button"
+              accessibilityLabel="Voltar para ganhos"
             >
-              <Text style={styles.cleanBackText}>{'<'}</Text>
+              <Ionicons name="arrow-back" size={20} color="#222222" />
             </TouchableOpacity>
             <Text style={styles.cleanHeaderTitle}>Saque em processamento</Text>
           </View>
@@ -1110,22 +1207,22 @@ export default function EarningsReportScreen({ navigation, route }) {
           style={styles.earningsScreen}
           contentContainerStyle={[
             styles.earningsPage,
-            { paddingTop: Math.max(insets.top + 26, 58), paddingBottom: Math.max(insets.bottom + 20, 34) }
+            { paddingTop: insets.top + 20, paddingBottom: Math.max(insets.bottom + 20, 34) }
           ]}
           showsVerticalScrollIndicator={false}
           bounces={false}
           keyboardShouldPersistTaps="handled"
           onLayout={handlePanelLayout}
           testID="driver-earnings-screen"
-          accessibilityLabel="driver-earnings-screen"
         >
           <View style={styles.earningsHeaderRow}>
-            <Text style={styles.earningsTitle}>Ganhos</Text>
             <PrototypeMenuCloseButton
               onPress={handleBackPress}
               testID="driver-earnings-close-button"
               accessibilityLabel="Fechar ganhos"
             />
+            <Text style={styles.earningsTitle}>Ganhos</Text>
+            <LeafObjectIcon name="payment" size={42} />
           </View>
           <Text style={styles.earningsSubtitle}>
             {withdrawalsEnabled
@@ -1141,8 +1238,15 @@ export default function EarningsReportScreen({ navigation, route }) {
             <>
               <View style={styles.balanceRow}>
                 <View style={styles.balanceCopy}>
-                  <Text style={styles.balanceLabel}>Disponível para saque</Text>
+                  <Text style={styles.balanceLabel}>
+                    {withdrawalsEnabled ? 'Disponível para saque' : 'Saldo do motorista'}
+                  </Text>
                   <Text style={styles.balanceValue}>R$ {formatCurrency(saldoDisponivel)}</Text>
+                  {earningsLoadFailed ? (
+                    <Text style={styles.balanceLoadError} accessibilityRole="alert">
+                      Não conseguimos atualizar seus ganhos agora. Os valores podem estar desatualizados.
+                    </Text>
+                  ) : null}
                 </View>
 
                 {withdrawalsEnabled ? (
@@ -1151,7 +1255,8 @@ export default function EarningsReportScreen({ navigation, route }) {
                     activeOpacity={0.86}
                     onPress={() => setWithdrawModalVisible(true)}
                     testID="driver-earnings-withdraw-button"
-                    accessibilityLabel="driver-earnings-withdraw-button"
+                    accessibilityRole="button"
+                    accessibilityLabel="Realizar saque"
                   >
                     <Text style={styles.withdrawPillButtonText}>Realizar saque</Text>
                   </TouchableOpacity>
@@ -1162,15 +1267,19 @@ export default function EarningsReportScreen({ navigation, route }) {
                 )}
               </View>
 
-              <Text style={styles.pixHint}>PIX cadastrado para recebimento</Text>
-              <SecurePaymentBadge style={styles.pixSecurePaymentBadge} color="#8C9C94" />
+              {withdrawalsEnabled ? (
+                <>
+                  <Text style={styles.pixHint}>PIX cadastrado para recebimento</Text>
+                  <SecurePaymentBadge style={styles.pixSecurePaymentBadge} color="#8C9C94" />
+                </>
+              ) : null}
               <View style={styles.cleanDivider} />
 
               {!withdrawalsEnabled ? (
                 <View style={styles.pilotInfoBanner}>
                   <Ionicons name="information-circle-outline" size={18} color="#1A330E" />
                   <Text style={styles.pilotInfoBannerText}>
-                    Saque e repasse ficam fora do app neste piloto e serao conduzidos pela operacao assistida.
+                    Saque e repasse ficam fora do app neste piloto e serão conduzidos pela operação assistida.
                   </Text>
                 </View>
               ) : null}
@@ -1203,17 +1312,20 @@ export default function EarningsReportScreen({ navigation, route }) {
                   <Text style={styles.chartTitle}>
                     {activeSegment === 'daily' ? 'Resumo de hoje' : activeSegment === 'weekly' ? 'Resumo da semana' : 'Resumo do mês'}
                   </Text>
-                  <View style={styles.chartTrendBadge}>
+                  {/* A zero variation over an empty period is noise, not information. */}
+                  {periodHasActivity ? <View style={styles.chartTrendBadge}>
                     <Text style={styles.chartTrendBadgeText}>
-                      {`${hasPositiveDelta ? '+' : '-'}R$ ${deltaAmountLabel} vs ontem`}
+                      {deltaFromYesterday === null
+                        ? 'Variação indisponível'
+                        : `${deltaPrefix}R$ ${deltaAmountLabel} em relação a ontem`}
                     </Text>
-                  </View>
+                  </View> : null}
                 </View>
 
                 <View style={styles.chartWrap} onLayout={event => setChartWidth(event.nativeEvent.layout.width)}>
-                  {bars.length === 0 ? (
+                  {bars.length === 0 || !periodHasActivity ? (
                     <View style={styles.emptyChartWrap}>
-                      <Text style={styles.emptyChartText}>Sem dados para o período</Text>
+                      <Text style={styles.emptyChartText}>{activeSegment === 'daily' ? 'Nenhuma corrida hoje' : 'Nenhuma corrida no período'}</Text>
                     </View>
                   ) : (
                     <Svg width={chartInnerWidth} height={chartHeight}>
@@ -1229,23 +1341,28 @@ export default function EarningsReportScreen({ navigation, route }) {
                             height={bar.height}
                             rx={7}
                             ry={7}
-                            fill={bar.isPeak ? '#054414' : '#BAE5C7'}
+                            fill={bar.isPeak ? '#1A330E' : '#D6DDD4'}
                           />
                           <SvgText
                             x={bar.x + (bar.width / 2)}
                             y={chartHeight - 8}
-                            fontSize="10"
-                            fill="#8C9C94"
+                            fontSize="12"
+                            fill="#6A6A6A"
                             textAnchor="middle"
                             fontWeight="500"
                           >
-                            {bar.label.slice(0, 1)}
+                            {bars.length <= 3 ? bar.label : bar.label.slice(0, 1)}
                           </SvgText>
                         </React.Fragment>
                       ))}
                     </Svg>
                   )}
                 </View>
+                {hasIncompleteRepasseInPeriod ? (
+                  <Text style={styles.incompleteChartNote}>
+                    Alguns repasses aguardam dados confirmados; esses períodos não são plotados.
+                  </Text>
+                ) : null}
               </View>
 
               <View style={styles.cleanDivider} />
@@ -1255,11 +1372,11 @@ export default function EarningsReportScreen({ navigation, route }) {
                   <Text style={styles.metricLabel}>Corridas</Text>
                 </View>
                 <View style={styles.metricCellCenter}>
-                  <Text style={styles.metricValue}>R$ {formatCurrency(summaryTotalGross)}</Text>
+                  <Text style={styles.metricValue}>{formatOptionalCurrency(summaryTotalGross)}</Text>
                   <Text style={styles.metricLabel}>Bruto</Text>
                 </View>
                 <View style={styles.metricCellRight}>
-                  <Text style={styles.metricValue}>R$ {formatCurrency(summaryTotalNet)}</Text>
+                  <Text style={styles.metricValue}>{formatOptionalCurrency(summaryTotalNet)}</Text>
                   <Text style={styles.metricLabel}>Líquido</Text>
                 </View>
               </View>
@@ -1278,15 +1395,19 @@ export default function EarningsReportScreen({ navigation, route }) {
                     <Text style={styles.cleanListTitle}>Corridas finalizadas</Text>
                     <Text style={styles.cleanListSubtitle}>{safeTotalRides} viagens concluídas</Text>
                   </View>
-                  <Text style={styles.cleanListValue}>R$ {formatCurrency(summaryTotalNet)}</Text>
+                  <Text style={styles.cleanListValue}>{formatOptionalCurrency(summaryTotalNet)}</Text>
                 </View>
                 <View style={styles.cleanHairline} />
                 <View style={styles.cleanListRow}>
                   <View>
                     <Text style={styles.cleanListTitle}>Taxas e ajustes</Text>
-                    <Text style={styles.cleanListSubtitle}>Taxa média {summaryEffectiveRate.toFixed(2).replace('.', ',')}%</Text>
+                    <Text style={styles.cleanListSubtitle}>
+                      Taxa média {summaryEffectiveRate === null ? '--' : `${summaryEffectiveRate.toFixed(2).replace('.', ',')}%`}
+                    </Text>
                   </View>
-                  <Text style={styles.cleanListMuted}>-R$ {formatCurrency(summaryTotalFee)}</Text>
+                  <Text style={styles.cleanListMuted}>
+                    {summaryTotalFee === null ? '--' : `-R$ ${formatCurrency(summaryTotalFee)}`}
+                  </Text>
                 </View>
                 <View style={styles.cleanHairline} />
                 <View style={styles.cleanListRow}>
@@ -1309,7 +1430,7 @@ export default function EarningsReportScreen({ navigation, route }) {
               </View>
 
               <Text style={styles.driverContextText}>
-                {`${profileName} · Nota ${ratingLabel} · ${tierLabel} · Desde ${partnerSinceLabel}`}
+                {[profileName, `Nota ${ratingLabel}`, tierLabel, `Desde ${partnerSinceLabel}`].filter(Boolean).join(' · ')}
               </Text>
             </>
           )}
@@ -1320,6 +1441,7 @@ export default function EarningsReportScreen({ navigation, route }) {
         animationType="slide"
         transparent={false}
         onRequestClose={() => {
+          if (isProcessingWithdraw) return;
           setWithdrawModalVisible(false);
           setWithdrawPassword('');
           setWithdrawError('');
@@ -1328,7 +1450,7 @@ export default function EarningsReportScreen({ navigation, route }) {
       >
         <KeyboardAvoidingView
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          style={[styles.withdrawScreen, { paddingTop: Math.max(insets.top + 26, 58), paddingBottom: Math.max(insets.bottom, 16) }]}
+          style={[styles.withdrawScreen, { paddingTop: insets.top + 20, paddingBottom: Math.max(insets.bottom, 16) }]}
         >
           <ScrollView
             bounces={false}
@@ -1340,6 +1462,9 @@ export default function EarningsReportScreen({ navigation, route }) {
               <TouchableOpacity
                 style={styles.cleanBackHit}
                 activeOpacity={0.76}
+                accessibilityRole="button"
+                accessibilityLabel="Voltar"
+                disabled={isProcessingWithdraw}
                 onPress={() => {
                   setWithdrawModalVisible(false);
                   setWithdrawPassword('');
@@ -1347,7 +1472,7 @@ export default function EarningsReportScreen({ navigation, route }) {
                   setWithdrawRequestId(null);
                 }}
               >
-                <Text style={styles.cleanBackText}>{'<'}</Text>
+                <Ionicons name="arrow-back" size={20} color="#222222" />
               </TouchableOpacity>
               <Text style={styles.cleanHeaderTitle}>Realizar saque</Text>
             </View>
@@ -1380,7 +1505,8 @@ export default function EarningsReportScreen({ navigation, route }) {
                   value={withdrawValue}
                   onChangeText={handleWithdrawValueChange}
                   testID="driver-earnings-withdraw-amount-input"
-                  accessibilityLabel="driver-earnings-withdraw-amount-input"
+                  accessibilityLabel="Valor do saque em reais"
+                  accessibilityHint={`Saldo disponível: R$ ${formatCurrency(saldoDisponivel)}.`}
                 />
               </View>
             </View>
@@ -1405,7 +1531,8 @@ export default function EarningsReportScreen({ navigation, route }) {
                 }}
                 autoCapitalize="none"
                 testID="driver-earnings-withdraw-pix-key-input"
-                accessibilityLabel="driver-earnings-withdraw-pix-key-input"
+                accessibilityLabel="Chave Pix para recebimento"
+                accessibilityHint="Informe a chave Pix que receberá o repasse."
               />
               <SecurePaymentBadge style={styles.withdrawSecurePaymentBadge} color="#8C9C94" />
             </View>
@@ -1428,7 +1555,8 @@ export default function EarningsReportScreen({ navigation, route }) {
                 autoCorrect={false}
                 textContentType="password"
                 testID="driver-earnings-withdraw-password-input"
-                accessibilityLabel="driver-earnings-withdraw-password-input"
+                accessibilityLabel="Senha do aplicativo"
+                accessibilityHint="Obrigatória para confirmar o saque."
               />
             </View>
 
@@ -1466,6 +1594,10 @@ export default function EarningsReportScreen({ navigation, route }) {
                 <Text style={styles.cleanSummaryAccent}>Débito total</Text>
                 <Text style={styles.cleanSummaryAccent}>R$ {formatCurrency(currentWithdrawBreakdown.totalDebit)}</Text>
               </View>
+              <View style={styles.cleanSummaryRow}>
+                <Text style={styles.cleanSummaryLabel}>Você recebe</Text>
+                <Text style={styles.cleanSummaryValue}>R$ {formatCurrency(currentWithdrawAmount)}</Text>
+              </View>
             </View>
 
             <TouchableOpacity
@@ -1474,7 +1606,9 @@ export default function EarningsReportScreen({ navigation, route }) {
               disabled={withdrawDisabled}
               onPress={handleConfirmWithdraw}
               testID="driver-earnings-withdraw-confirm-button"
-              accessibilityLabel="driver-earnings-withdraw-confirm-button"
+              accessibilityRole="button"
+              accessibilityState={{ disabled: withdrawDisabled }}
+              accessibilityLabel={isProcessingWithdraw ? "Confirmando saque" : "Confirmar saque"}
             >
               <Text style={styles.cleanPrimaryButtonText}>
                 {isProcessingWithdraw ? 'Confirmando...' : 'Confirmar saque'}
@@ -1584,37 +1718,39 @@ const styles = StyleSheet.create({
   },
   cleanScreen: {
     flex: 1,
-    backgroundColor: '#F8FBF9',
-    paddingHorizontal: 32,
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 24,
   },
   earningsScreen: {
     flex: 1,
-    backgroundColor: '#F8FBF9',
+    backgroundColor: '#FFFFFF',
   },
   earningsPage: {
-    paddingHorizontal: 31,
+    paddingHorizontal: 24,
   },
   earningsHeaderRow: {
     minHeight: 44,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    gap: 14,
   },
   earningsTitle: {
-    color: '#0E1716',
-    fontFamily: fonts.SemiBold,
-    fontSize: 21,
-    lineHeight: 29,
+    color: '#222222',
+    ...leafTypography.semiBold,
+    fontSize: 22,
+    lineHeight: 28,
+    flex: 1,
   },
   earningsSubtitle: {
-    marginTop: 6,
-    color: '#5C6B63',
-    fontFamily: fonts.Regular,
-    fontSize: 13,
-    lineHeight: 19,
+    marginTop: 14,
+    color: '#6A6A6A',
+    ...leafTypography.regular,
+    fontSize: 14,
+    lineHeight: 20,
   },
   balanceRow: {
-    marginTop: 38,
+    marginTop: 28,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
@@ -1624,63 +1760,70 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   balanceLabel: {
-    color: '#5C6B63',
-    fontFamily: fonts.Medium,
-    fontSize: 11,
-    lineHeight: 15,
+    color: '#6A6A6A',
+    ...leafTypography.medium,
+    fontSize: 14,
+    lineHeight: 20,
+  },
+  balanceLoadError: {
+    marginTop: 6,
+    fontSize: 13,
+    lineHeight: 18,
+    color: '#B42318',
   },
   balanceValue: {
     marginTop: 8,
-    color: '#0E1716',
-    fontFamily: fonts.SemiBold,
-    fontSize: 30,
+    color: '#222222',
+    ...leafTypography.semiBold,
+    fontSize: 32,
     lineHeight: 38,
+    fontVariant: ['tabular-nums'],
   },
   withdrawPillButton: {
-    width: 134,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: '#054414',
+    width: 154,
+    height: 54,
+    borderRadius: 12,
+    backgroundColor: '#252525',
     alignItems: 'center',
     justifyContent: 'center',
   },
   withdrawPillButtonText: {
     color: '#FFFFFF',
-    fontFamily: fonts.SemiBold,
-    fontSize: 11,
-    lineHeight: 16,
+    ...leafTypography.semiBold,
+    fontSize: 16,
+    lineHeight: 22,
   },
   withdrawDisabledPill: {
     minWidth: 126,
     height: 32,
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: '#C9E5D1',
-    backgroundColor: '#ECF8EF',
+    borderColor: '#E5E5E5',
+    backgroundColor: '#F5F5F5',
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 14,
   },
   withdrawDisabledPillText: {
-    color: '#054414',
-    fontFamily: fonts.SemiBold,
-    fontSize: 10,
-    lineHeight: 15,
+    color: '#6A6A6A',
+    ...leafTypography.semiBold,
+    fontSize: 12,
+    lineHeight: 17,
   },
   pixHint: {
     marginTop: 8,
-    color: '#8C9C94',
-    fontFamily: fonts.Regular,
-    fontSize: 11,
-    lineHeight: 15,
+    color: '#6A6A6A',
+    ...leafTypography.regular,
+    fontSize: 13,
+    lineHeight: 18,
   },
   pixSecurePaymentBadge: {
     marginTop: 3,
   },
   cleanDivider: {
-    height: 1,
-    backgroundColor: '#DDE8E1',
-    marginTop: 26,
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: '#E5E5E5',
+    marginTop: 24,
   },
   periodTabs: {
     height: 57,
@@ -1692,48 +1835,50 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'flex-end',
+    minHeight: 44,
   },
   periodTabText: {
-    color: '#5C6B63',
-    fontFamily: fonts.Medium,
-    fontSize: 12,
-    lineHeight: 17,
+    color: '#6A6A6A',
+    ...leafTypography.medium,
+    fontSize: 14,
+    lineHeight: 20,
   },
   periodTabTextActive: {
-    color: '#054414',
-    fontFamily: fonts.SemiBold,
+    color: '#222222',
+    ...leafTypography.semiBold,
   },
   periodTabUnderline: {
     marginTop: 10,
     width: '100%',
-    height: 1,
-    backgroundColor: '#DDE8E1',
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: '#E5E5E5',
   },
   periodTabUnderlineActive: {
     width: 42,
     height: 3,
     borderRadius: 2,
-    backgroundColor: '#054414',
+    backgroundColor: '#222222',
   },
   chartSection: {
     paddingTop: 28,
   },
   chartTrendBadge: {
     minWidth: 110,
-    height: 26,
+    height: undefined,
     borderRadius: 13,
     borderWidth: 1,
-    borderColor: '#C9E5D1',
-    backgroundColor: '#ECF8EF',
+    borderColor: '#E5E5E5',
+    backgroundColor: '#F5F5F5',
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 10,
+    minHeight: 32,
   },
   chartTrendBadgeText: {
-    color: '#054414',
-    fontFamily: fonts.SemiBold,
-    fontSize: 10,
-    lineHeight: 15,
+    color: '#6A6A6A',
+    ...leafTypography.semiBold,
+    fontSize: 12,
+    lineHeight: 17,
   },
   metricsRow: {
     flexDirection: 'row',
@@ -1754,17 +1899,18 @@ const styles = StyleSheet.create({
     alignItems: 'flex-end',
   },
   metricValue: {
-    color: '#0E1716',
-    fontFamily: fonts.SemiBold,
-    fontSize: 16,
-    lineHeight: 22,
+    color: '#222222',
+    ...leafTypography.semiBold,
+    fontSize: 20,
+    lineHeight: 25,
+    fontVariant: ['tabular-nums'],
   },
   metricLabel: {
-    marginTop: 2,
-    color: '#8C9C94',
-    fontFamily: fonts.Regular,
-    fontSize: 10,
-    lineHeight: 14,
+    marginTop: 4,
+    color: '#6A6A6A',
+    ...leafTypography.regular,
+    fontSize: 12,
+    lineHeight: 17,
   },
   detailHeaderRow: {
     marginTop: 26,
@@ -1773,110 +1919,113 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   detailHeaderAction: {
-    color: '#054414',
-    fontFamily: fonts.SemiBold,
-    fontSize: 10,
-    lineHeight: 14,
+    color: '#222222',
+    ...leafTypography.semiBold,
+    fontSize: 14,
+    lineHeight: 20,
   },
   cleanSection: {
     marginTop: 28,
   },
   cleanSectionTitle: {
-    color: '#0E1716',
-    fontFamily: fonts.SemiBold,
-    fontSize: 13,
-    lineHeight: 18,
+    color: '#222222',
+    ...leafTypography.semiBold,
+    fontSize: 18,
+    lineHeight: 24,
   },
   cleanList: {
     marginTop: 16,
   },
   cleanListRow: {
-    minHeight: 48,
+    minHeight: 68,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: 16,
   },
   cleanListTitle: {
-    color: '#0E1716',
-    fontFamily: fonts.Medium,
-    fontSize: 12,
-    lineHeight: 17,
+    color: '#222222',
+    ...leafTypography.medium,
+    fontSize: 16,
+    lineHeight: 22,
   },
   cleanListSubtitle: {
     marginTop: 2,
-    color: '#8C9C94',
-    fontFamily: fonts.Regular,
-    fontSize: 10,
-    lineHeight: 14,
+    color: '#6A6A6A',
+    ...leafTypography.regular,
+    fontSize: 13,
+    lineHeight: 18,
   },
   cleanListValue: {
-    color: '#0E1716',
-    fontFamily: fonts.Medium,
-    fontSize: 12,
-    lineHeight: 17,
+    color: '#222222',
+    ...leafTypography.medium,
+    fontSize: 16,
+    lineHeight: 22,
     textAlign: 'right',
   },
   cleanListMuted: {
-    color: '#5C6B63',
-    fontFamily: fonts.Medium,
-    fontSize: 12,
-    lineHeight: 17,
+    color: '#6A6A6A',
+    ...leafTypography.medium,
+    fontSize: 16,
+    lineHeight: 22,
     textAlign: 'right',
   },
   cleanListAccent: {
-    color: '#054414',
-    fontFamily: fonts.SemiBold,
-    fontSize: 12,
-    lineHeight: 17,
+    color: '#1A330E',
+    ...leafTypography.semiBold,
+    fontSize: 16,
+    lineHeight: 22,
     textAlign: 'right',
   },
   cleanHairline: {
-    height: 1,
-    backgroundColor: '#DDE8E1',
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: '#E5E5E5',
   },
   driverContextText: {
     marginTop: 20,
-    color: '#8C9C94',
-    fontFamily: fonts.Medium,
-    fontSize: 11,
-    lineHeight: 16,
+    color: '#6A6A6A',
+    ...leafTypography.medium,
+    fontSize: 13,
+    lineHeight: 19,
   },
   cleanHeaderRow: {
-    minHeight: 32,
+    minHeight: 44,
     flexDirection: 'row',
     alignItems: 'center',
+    gap: 14,
   },
   cleanBackHit: {
-    width: 30,
-    height: 32,
-    alignItems: 'flex-start',
+    width: 44,
+    height: 44,
+    alignItems: 'center',
     justifyContent: 'center',
+    borderRadius: 22,
+    backgroundColor: '#F5F5F5',
   },
   cleanBackText: {
     color: '#0E1716',
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 22,
     lineHeight: 28,
   },
   cleanHeaderTitle: {
     flex: 1,
-    color: '#0E1716',
-    fontFamily: fonts.SemiBold,
-    fontSize: 21,
-    lineHeight: 29,
+    color: '#222222',
+    ...leafTypography.semiBold,
+    fontSize: 22,
+    lineHeight: 28,
   },
   cleanHeaderSubtitle: {
-    marginTop: 10,
-    color: '#5C6B63',
-    fontFamily: fonts.Regular,
-    fontSize: 13,
-    lineHeight: 19,
+    marginTop: 14,
+    color: '#6A6A6A',
+    ...leafTypography.regular,
+    fontSize: 14,
+    lineHeight: 20,
   },
   withdrawScreen: {
     flex: 1,
-    backgroundColor: '#F8FBF9',
-    paddingHorizontal: 32,
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 24,
   },
   withdrawScrollContent: {
     paddingBottom: 18,
@@ -1890,26 +2039,26 @@ const styles = StyleSheet.create({
   },
   withdrawBalanceValue: {
     marginTop: 8,
-    color: '#0E1716',
-    fontFamily: fonts.SemiBold,
-    fontSize: 24,
-    lineHeight: 31,
+    color: '#222222',
+    ...leafTypography.semiBold,
+    fontSize: 32,
+    lineHeight: 38,
   },
   pixSavedBadge: {
     width: 98,
     height: 28,
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: '#C9E5D1',
-    backgroundColor: '#ECF8EF',
+    borderColor: '#E5E5E5',
+    backgroundColor: '#F5F5F5',
     alignItems: 'center',
     justifyContent: 'center',
   },
   pixSavedBadgeText: {
-    color: '#054414',
-    fontFamily: fonts.SemiBold,
-    fontSize: 10,
-    lineHeight: 15,
+    color: '#222222',
+    ...leafTypography.semiBold,
+    fontSize: 12,
+    lineHeight: 17,
   },
   withdrawSecurePaymentBadge: {
     marginTop: 8,
@@ -1925,16 +2074,16 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   withdrawFieldLabel: {
-    color: '#5C6B63',
-    fontFamily: fonts.Medium,
-    fontSize: 11,
-    lineHeight: 15,
+    color: '#6A6A6A',
+    ...leafTypography.medium,
+    fontSize: 14,
+    lineHeight: 20,
   },
   withdrawFieldMeta: {
-    color: '#8C9C94',
-    fontFamily: fonts.Medium,
-    fontSize: 10,
-    lineHeight: 14,
+    color: '#6A6A6A',
+    ...leafTypography.medium,
+    fontSize: 13,
+    lineHeight: 18,
     textAlign: 'right',
   },
   withdrawAmountInputRow: {
@@ -1944,7 +2093,7 @@ const styles = StyleSheet.create({
   },
   withdrawAmountPrefix: {
     color: '#0E1716',
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 26,
     lineHeight: 32,
     marginRight: 7,
@@ -1954,91 +2103,97 @@ const styles = StyleSheet.create({
     minHeight: 40,
     padding: 0,
     color: '#0E1716',
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 26,
     lineHeight: 32,
   },
   withdrawTextInput: {
     marginTop: 8,
-    minHeight: 34,
+    minHeight: 54,
     padding: 0,
-    color: '#0E1716',
-    fontFamily: fonts.SemiBold,
+    color: '#222222',
+    ...leafTypography.semiBold,
     fontSize: 16,
     lineHeight: 22,
+    paddingHorizontal: 14,
+    backgroundColor: '#F5F5F5',
+    borderRadius: 16,
   },
   withdrawFeeNote: {
     minHeight: 58,
-    borderRadius: 18,
-    backgroundColor: '#FDF8EC',
+    borderRadius: 0,
+    backgroundColor: '#FFFFFF',
     marginTop: 24,
-    paddingHorizontal: 20,
-    paddingVertical: 17,
+    paddingHorizontal: 0,
+    paddingVertical: 16,
     justifyContent: 'center',
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderColor: '#E5E5E5',
   },
   withdrawFeeNoteText: {
-    color: '#7A5714',
-    fontFamily: fonts.Medium,
-    fontSize: 11,
-    lineHeight: 16,
+    color: '#6A6A6A',
+    ...leafTypography.medium,
+    fontSize: 14,
+    lineHeight: 20,
   },
   cleanSummaryRow: {
-    minHeight: 30,
+    minHeight: 52,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: 16,
   },
   cleanSummaryLabel: {
-    color: '#0E1716',
-    fontFamily: fonts.Medium,
-    fontSize: 12,
-    lineHeight: 17,
+    color: '#222222',
+    ...leafTypography.medium,
+    fontSize: 14,
+    lineHeight: 20,
   },
   cleanSummaryValue: {
     flexShrink: 1,
-    color: '#0E1716',
-    fontFamily: fonts.Medium,
-    fontSize: 12,
-    lineHeight: 17,
+    color: '#222222',
+    ...leafTypography.medium,
+    fontSize: 16,
+    lineHeight: 22,
     textAlign: 'right',
   },
   cleanSummaryMuted: {
-    color: '#5C6B63',
-    fontFamily: fonts.Medium,
-    fontSize: 12,
-    lineHeight: 17,
+    color: '#6A6A6A',
+    ...leafTypography.medium,
+    fontSize: 14,
+    lineHeight: 20,
   },
   cleanSummaryMutedValue: {
-    color: '#5C6B63',
-    fontFamily: fonts.Medium,
-    fontSize: 12,
-    lineHeight: 17,
+    color: '#6A6A6A',
+    ...leafTypography.medium,
+    fontSize: 16,
+    lineHeight: 22,
     textAlign: 'right',
   },
   cleanSummaryAccent: {
-    color: '#054414',
-    fontFamily: fonts.SemiBold,
-    fontSize: 12,
-    lineHeight: 17,
+    color: '#1A330E',
+    ...leafTypography.semiBold,
+    fontSize: 14,
+    lineHeight: 20,
     textAlign: 'right',
   },
   cleanPrimaryButton: {
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: '#054414',
+    height: 54,
+    borderRadius: 12,
+    backgroundColor: '#252525',
     alignItems: 'center',
     justifyContent: 'center',
     marginTop: 18,
   },
   cleanPrimaryButtonDisabled: {
-    backgroundColor: '#9BBEA5',
+    backgroundColor: '#D9D9D9',
   },
   cleanPrimaryButtonText: {
     color: '#FFFFFF',
-    fontFamily: fonts.SemiBold,
-    fontSize: 12,
-    lineHeight: 18,
+    ...leafTypography.semiBold,
+    fontSize: 16,
+    lineHeight: 22,
   },
   processingPulse: {
     alignSelf: 'center',
@@ -2071,35 +2226,36 @@ const styles = StyleSheet.create({
   },
   processingTitle: {
     marginTop: 34,
-    color: '#0E1716',
-    fontFamily: fonts.SemiBold,
-    fontSize: 19,
-    lineHeight: 26,
+    color: '#222222',
+    ...leafTypography.semiBold,
+    fontSize: 24,
+    lineHeight: 29,
     textAlign: 'center',
   },
   processingSubtitle: {
     alignSelf: 'center',
     marginTop: 10,
     maxWidth: 286,
-    color: '#5C6B63',
-    fontFamily: fonts.Regular,
-    fontSize: 13,
+    color: '#6A6A6A',
+    ...leafTypography.regular,
+    fontSize: 14,
     lineHeight: 20,
     textAlign: 'center',
   },
   processingNote: {
     minHeight: 56,
     borderRadius: 18,
-    backgroundColor: '#ECF8EF',
+    backgroundColor: '#F5F5F5',
     marginTop: 34,
     paddingHorizontal: 20,
     justifyContent: 'center',
+    borderColor: '#E5E5E5',
   },
   processingNoteText: {
-    color: '#054414',
-    fontFamily: fonts.Medium,
-    fontSize: 11,
-    lineHeight: 16,
+    color: '#6A6A6A',
+    ...leafTypography.medium,
+    fontSize: 13,
+    lineHeight: 19,
   },
   loadingWrap: {
     minHeight: 360,
@@ -2118,13 +2274,13 @@ const styles = StyleSheet.create({
   },
   earningsHintText: {
     color: tokenColor.text.secondary,
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     fontSize: 13,
     lineHeight: 18,
   },
   earningsDeltaText: {
     marginTop: 5,
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 13,
     lineHeight: 18,
   },
@@ -2141,7 +2297,7 @@ const styles = StyleSheet.create({
   },
   primaryActionButtonText: {
     color: '#FFFFFF',
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 16,
     letterSpacing: 0.12,
   },
@@ -2160,27 +2316,27 @@ const styles = StyleSheet.create({
   pilotInfoBannerText: {
     flex: 1,
     color: tokenColor.text.primary,
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     fontSize: 13,
     lineHeight: 18,
   },
   chartHeader: {
     marginBottom: 10,
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: 'column',
+    alignItems: 'flex-start',
     justifyContent: 'space-between',
     gap: 10,
   },
   chartTitle: {
-    color: '#0E1716',
-    fontFamily: fonts.SemiBold,
-    fontSize: 13,
-    lineHeight: 18,
+    color: '#222222',
+    ...leafTypography.semiBold,
+    fontSize: 18,
+    lineHeight: 24,
   },
   chartRange: {
     marginTop: 2,
     color: tokenColor.text.secondary,
-    fontFamily: fonts.Regular,
+    ...leafTypography.regular,
     fontSize: 13,
     lineHeight: 18,
   },
@@ -2195,9 +2351,18 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   emptyChartText: {
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 14,
     color: tokenColor.text.secondary,
+  },
+  incompleteChartNote: {
+    marginTop: 6,
+    paddingHorizontal: 0,
+    color: tokenColor.text.secondary,
+    ...leafTypography.regular,
+    fontSize: 13,
+    lineHeight: 19,
+    textAlign: 'center',
   },
   modalOverlay: {
     flex: 1,
@@ -2227,27 +2392,27 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF'
   },
   modalTitle: {
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 20,
     color: '#0F1728',
     marginBottom: 10
   },
   modalLabel: {
     color: '#5E6A7B',
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     fontSize: 13,
     marginBottom: 6,
     marginTop: 6
   },
   modalBalance: {
     color: '#0F1728',
-    fontFamily: fonts.Bold,
+    ...leafTypography.bold,
     fontSize: 24,
     marginBottom: 6
   },
   modalSubscriptionDailyFee: {
     color: '#0F1728',
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 15,
     marginBottom: 6
   },
@@ -2259,13 +2424,13 @@ const styles = StyleSheet.create({
   },
   modalSubscriptionDailyFeeStruck: {
     color: '#7A8699',
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     fontSize: 14,
     textDecorationLine: 'line-through'
   },
   modalSubscriptionFeeNote: {
     color: '#5E6A7B',
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     fontSize: 12,
     lineHeight: 16,
     marginBottom: 6
@@ -2277,19 +2442,19 @@ const styles = StyleSheet.create({
     borderColor: '#D8E1EB',
     paddingHorizontal: 12,
     color: '#101826',
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     fontSize: 15
   },
   modalError: {
     marginTop: 8,
     color: '#B42318',
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     fontSize: 13
   },
   modalBreakdown: {
     marginTop: 10,
     color: '#5E6A7B',
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     fontSize: 12,
     lineHeight: 16
   },
@@ -2309,7 +2474,7 @@ const styles = StyleSheet.create({
   },
   modalCancelText: {
     color: '#233143',
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 14
   },
   modalConfirmButton: {
@@ -2325,7 +2490,7 @@ const styles = StyleSheet.create({
   },
   modalConfirmText: {
     color: '#FFFFFF',
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 14
   },
   kycProviderLoadingContainer: {
@@ -2344,7 +2509,7 @@ const styles = StyleSheet.create({
   kycUnavailableText: {
     marginTop: 10,
     color: '#5E5955',
-    fontFamily: fonts.Regular,
+    ...leafTypography.regular,
     fontSize: 13,
     lineHeight: 18,
     textAlign: 'center'
@@ -2361,7 +2526,7 @@ const styles = StyleSheet.create({
   },
   kycUnavailableButtonText: {
     color: '#FFFFFF',
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 14,
     lineHeight: 19
   },
@@ -2391,6 +2556,6 @@ const styles = StyleSheet.create({
     color: '#2a2a2a',
     fontSize: 14,
     textAlign: 'center',
-    fontWeight: '600'
+    fontFamily: 'Figtree-SemiBold',
   }
 });

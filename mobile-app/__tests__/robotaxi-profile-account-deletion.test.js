@@ -9,6 +9,11 @@ import { useDispatch, useSelector } from 'react-redux';
 const mockGetCurrentProfile = jest.fn();
 const mockUpsertCurrentProfile = jest.fn();
 
+jest.mock('@react-navigation/native', () => ({
+  ...jest.requireActual('@react-navigation/native'),
+  useIsFocused: () => true,
+}));
+
 jest.mock('../src/services/MobileProfileService', () => ({
   __esModule: true,
   default: {
@@ -128,11 +133,11 @@ describe('RobotaxiProfileScreen account deletion entry point', () => {
 
     expect(navigation.replace).not.toHaveBeenCalled();
     expect(alertSpy).toHaveBeenCalledWith(
-      'Excluir Conta',
+      'Excluir conta',
       expect.stringContaining('irreversível'),
       expect.arrayContaining([
         expect.objectContaining({ text: 'Cancelar', style: 'cancel' }),
-        expect.objectContaining({ text: 'Excluir Conta', style: 'destructive' }),
+        expect.objectContaining({ text: 'Excluir conta', style: 'destructive' }),
       ]),
     );
   });

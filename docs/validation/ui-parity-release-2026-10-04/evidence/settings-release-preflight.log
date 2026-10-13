@@ -1,0 +1,36 @@
+[release-preflight] Perfil EAS: production
+[release-preflight][pass] APP_REVIEW não está ativo
+[release-preflight][pass] EXPO_PUBLIC_APP_REVIEW não está ativo
+[release-preflight][pass] EXPO_PUBLIC_E2E_TEST não está ativo
+[release-preflight][pass] EXPO_PUBLIC_FORCE_PAYMENT_BYPASS não está ativo
+[release-preflight][pass] EXPO_PUBLIC_BYPASS_PAYMENTS não está ativo
+[release-preflight][pass] EXPO_PUBLIC_ENABLE_TEST_USER_TOOLS não está ativo
+[release-preflight][pass] EXPO_PUBLIC_ENABLE_CUSTOM_OTP_FALLBACK não está ativo
+[release-preflight][pass] EXPO_PUBLIC_ENABLE_QA_OTP_FORCE_FLOW não está ativo
+[release-preflight][pass] EXPO_PUBLIC_ALLOW_CLIENT_DIRECT_GOOGLE_FALLBACK não está ativo
+[release-preflight][pass] EXPO_PUBLIC_ALLOW_INSECURE_HTTP não está ativo
+[release-preflight][pass] extra.isReview=false
+[release-preflight][pass] extra.e2eTest=false
+[release-preflight][pass] extra.forcePaymentBypass=false
+[release-preflight][pass] extra.enableTestUserTools=false
+[release-preflight][pass] extra.allowClientDirectGoogleFallback=false
+[release-preflight][pass] Android package correto: br.com.leaf.ride
+[release-preflight][pass] iOS bundleIdentifier correto: br.com.leaf.ride
+[release-preflight][pass] Expo config principal correta: Leaf/leafapp-reactnative v1.0.6 runtime 1.0.6
+[release-preflight][pass] Expo Updates usa canal production
+[release-preflight][pass] iOS ATS bloqueia HTTP inseguro
+[release-preflight][pass] iOS NSMicrophoneUsageDescription presente na config Expo
+[release-preflight][pass] iOS NSMicrophoneUsageDescription presente no Info.plist nativo
+[release-preflight][pass] Permissão Android presente: android.permission.ACCESS_FINE_LOCATION
+[release-preflight][pass] Permissão Android presente: android.permission.ACCESS_BACKGROUND_LOCATION
+[release-preflight][pass] Permissão Android presente: android.permission.FOREGROUND_SERVICE_LOCATION
+[release-preflight][pass] Permissão Android presente: android.permission.CAMERA
+[release-preflight][pass] Permissão Android presente: android.permission.RECORD_AUDIO
+[release-preflight][pass] Permissão Android bloqueada: android.permission.SYSTEM_ALERT_WINDOW
+[release-preflight][pass] Permissão Android bloqueada: android.permission.READ_EXTERNAL_STORAGE
+[release-preflight][pass] Permissão Android bloqueada: android.permission.WRITE_EXTERNAL_STORAGE
+[release-preflight][pass] Permissão Android bloqueada: android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK
+[release-preflight][pass] android.icon: 1024x1024
+[release-preflight][pass] android.adaptiveIcon.foregroundImage: 1024x1024
+[release-preflight][pass] expo-splash-screen android.image: 1152x1152
+[release-preflight] PASS

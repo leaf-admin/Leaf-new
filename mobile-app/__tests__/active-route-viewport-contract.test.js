@@ -113,8 +113,8 @@ describe('active route viewport contract', () => {
     expect(source).toContain('const routeViewportLayoutKey = useMemo(() => {');
     expect(source).toContain('Math.round(Number(mapWidth || windowWidth) || 0)');
     expect(source).toContain('Math.round(Number(mapHeight || windowHeight) || 0)');
-    expect(source).toContain('Math.round(routeViewportOcclusion.top)');
-    expect(source).toContain('Math.round(routeViewportOcclusion.bottom)');
+    expect(source).toContain('Math.round(routeViewportOcclusion.top / 24)');
+    expect(source).toContain('Math.round(routeViewportOcclusion.bottom / 24)');
     expect(source).toContain('const routeViewportOcclusion = effectiveRouteOcclusion;');
     expect(source).toContain('PASSENGER_HOME_CARD_METRICS.categoryBottomOffset');
     expect(source).toContain('PREBOOKING_ROUTE_SHORT_DELTA_MULTIPLIER');
@@ -126,7 +126,7 @@ describe('active route viewport contract', () => {
     expect(source).toContain('nativeNavigationRouteRevealKey === leafNativeNavigationKey');
     expect(source).toContain('const nextRouteFocusKey = `${routeViewportLayoutKey}|${routeFocusTrackingKey}`;');
     expect(source).toContain('lastRouteLayoutKeyRef.current = nextRouteFocusKey;');
-    expect(source).toContain('(hasActiveRoute && !driverNavigationCameraOwnsMap) ||');
+    expect(source).toContain('((hasActiveRoute || hasPresentedRoute) && !driverNavigationCameraOwnsMap) && !driverAwaitingNavigationCamera && isScreenFocused ||');
     expect(source).toContain('shouldForceHomePickupRegionUpdate');
     expectPrototypeMapLayerContract(source, {
       viewportPadding: 'homeRouteViewportPadding',

@@ -102,7 +102,7 @@ const styles = StyleSheet.create({
   },
   driverName: {
     fontSize: 16,
-    fontWeight: 'bold',
+    fontFamily: 'Figtree-Bold',
     color: '#1F2937',
     marginBottom: 4,
   },

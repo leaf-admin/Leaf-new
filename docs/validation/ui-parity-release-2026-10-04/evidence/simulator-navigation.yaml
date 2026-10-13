@@ -1,0 +1,36 @@
+appId: br.com.leaf.ride
+name: Leaf RC final account history and saved-place navigation read-only
+---
+- assertVisible:
+    id: "leaf-passenger-landing"
+- takeScreenshot: home-final
+- tapOn: "Conta"
+- assertVisible:
+    id: "robotaxi-menu-screen"
+- extendedWaitUntil:
+    visible: "avaliação: 5,00 ★"
+    timeout: 15000
+- assertVisible: "viagens: 8"
+- takeScreenshot: account-final
+- tapOn: "Atividade"
+- extendedWaitUntil:
+    visible:
+      id: "robotaxi-trip-history-screen"
+    timeout: 20000
+- assertVisible: "R$ 122,94"
+- takeScreenshot: activity-final
+- tapOn: "Conta"
+- assertVisible:
+    id: "robotaxi-menu-screen"
+- tapOn:
+    id: "leaf-account-group-places"
+- extendedWaitUntil:
+    visible:
+      id: "leaf-saved-places-screen"
+    timeout: 20000
+- takeScreenshot: places-final
+- tapOn: "Adicionar endereço"
+- tapOn: "Buscar endereço"
+- assertVisible:
+    id: "leaf-saved-place-picker-screen"
+- takeScreenshot: place-picker-final

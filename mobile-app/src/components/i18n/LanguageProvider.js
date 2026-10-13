@@ -7,14 +7,14 @@ import Logger from '../../utils/Logger';
  */
 
 import React, { createContext, useContext, useState, useEffect, useMemo, useCallback } from 'react';
-import { View, Text, ActivityIndicator, StyleSheet } from 'react-native';
+import LeafBootSplash from '../design-system/LeafBootSplash';
 import languageManager from '../../locales';
 
 
 const LanguageContext = createContext();
 
 export const LanguageProvider = ({ children }) => {
-  const [currentLang, setCurrentLang] = useState('en');
+  const [currentLang, setCurrentLang] = useState('pt');
   const [isLoading, setIsLoading] = useState(true);
   const [supportedLanguages, setSupportedLanguages] = useState([]);
 
@@ -76,7 +76,7 @@ export const LanguageProvider = ({ children }) => {
   /**
    * Formatar moeda (memoizado)
    */
-  const formatCurrency = useCallback((amount, currency = 'USD') => {
+  const formatCurrency = useCallback((amount, currency = 'BRL') => {
     try {
       return languageManager.formatCurrency(amount, currency);
     } catch (error) {
@@ -120,14 +120,9 @@ export const LanguageProvider = ({ children }) => {
   }), [currentLang, supportedLanguages, isLoading, changeLanguage, t, formatCurrency, formatTime, getDebugInfo]);
 
   if (isLoading) {
-    return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#1A330E" />
-        <Text style={styles.loadingText}>
-          🌍 Loading translations...
-        </Text>
-      </View>
-    );
+    // Same still green splash as native/auth/home: no extra white
+    // "Carregando" screen in the launch sequence.
+    return <LeafBootSplash testID="language-loading-splash" />;
   }
 
   return (
@@ -259,19 +254,5 @@ export const LanguageDebug = () => {
   );
 };
 
-// ✅ Otimização: StyleSheet para estilos de loading
-const styles = StyleSheet.create({
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#fff'
-  },
-  loadingText: {
-    marginTop: 10,
-    fontSize: 16,
-    color: '#666'
-  }
-});
 
 export default LanguageProvider;

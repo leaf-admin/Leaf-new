@@ -1,0 +1,50 @@
+[
+  {
+    "path": "mobile-app/eas.json",
+    "sha256": "e18febf0574c18a9c1640c29014232978878b56875dc8f0a12657c413bfc709e"
+  },
+  {
+    "path": "mobile-app/config/loadConfigEnv.js",
+    "sha256": "f1ca32605215097419bbd7d804552421d81327f88cfbb1630d5a7f245650912b"
+  },
+  {
+    "path": "mobile-app/scripts/source-local-build-env.sh",
+    "sha256": "3940291b7abb65bde21352624a902e8da8e319cc9f2fd8ee98b68d114390415c"
+  },
+  {
+    "path": "mobile-app/scripts/build-local-android.sh",
+    "sha256": "d46f2a89ba0906fdc9a1a9107fd40b5edda04edfeabd5b1595a4f457da61b771"
+  },
+  {
+    "path": "mobile-app/scripts/build-local-ios.sh",
+    "sha256": "64b7d0be2c4c3fc5bec615790172e8f0a3f433946b976074e8e084e4e8464c2e"
+  },
+  {
+    "path": "mobile-app/scripts/qa/validate-release-runtime-policy.cjs",
+    "sha256": "5e73e9636fe0c5d252b3e4b12e927ad868fe83284eb7ffdfe91b65d82a289b8e"
+  },
+  {
+    "path": "mobile-app/scripts/qa/e3-controlled-env.sh",
+    "sha256": "31153cbbf58c47b9d27d9a77a5abe0f3f8913716503e67b630a406e4c6b87ae0"
+  },
+  {
+    "path": "mobile-app/scripts/export-local-ios-ipa.sh",
+    "sha256": "5238dea75935f28d4de9032b8e0632e8ae20021ea94f3d27b729871096f10fd2"
+  },
+  {
+    "path": "mobile-app/package.json",
+    "sha256": "f1d2fb8577ce011134b5cdb18519917f65cb151eb9514887a49c1aa0b33c6ade"
+  },
+  {
+    "path": "mobile-app/__tests__/mobile-env-config-loader.test.js",
+    "sha256": "627eefb6856ecc5eeb0aed484d8314554356d7bb26372e95d9207cddfc5975f1"
+  },
+  {
+    "path": "mobile-app/__tests__/android-build-script.test.js",
+    "sha256": "cb35b081f869b0e0fbe20ba3310c13ffcd4af79ebd2a931bb873499333e010d7"
+  },
+  {
+    "path": "mobile-app/__tests__/ios-local-widget-version-contract.test.js",
+    "sha256": "ff09a5f59951c9123334109ac805a903f36d9eb7424328c6124a5e3e486d5040"
+  }
+]

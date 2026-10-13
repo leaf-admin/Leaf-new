@@ -69,7 +69,7 @@ describe('WebSocketManager support scope', () => {
     const promise = manager.createSupportTicket(
       'trip',
       'N2',
-      'Motorista nao encontrou o ponto.',
+      'Motorista não encontrou o ponto.',
       [],
       {
         bookingId: 'booking_1',

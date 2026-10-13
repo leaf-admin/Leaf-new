@@ -1,5 +1,5 @@
 import React from 'react';
-import { Alert } from 'react-native';
+import { Alert, StyleSheet } from 'react-native';
 import { fireEvent, render, waitFor } from '@testing-library/react-native';
 
 import PhoneInputStep, { normalizePhoneInputValue } from '../src/components/auth/steps/PhoneInputStep';
@@ -36,6 +36,7 @@ jest.mock('../src/config/runtimeAccessPolicy', () => ({
   allowReviewAccess: jest.fn(() => false),
   isE2ETestBuild: jest.fn(() => false),
   isSimulatorBuild: jest.fn(() => false),
+  isWhatsAppOtpEnabled: jest.fn(() => false),
 }));
 
 jest.mock('../src/services/httpClient', () => ({
@@ -69,7 +70,9 @@ jest.mock('../src/components/auth/common/ContinueButton', () => {
         onPress={onPress}
         disabled={disabled}
         testID={testID}
-        accessibilityLabel={accessibilityLabel}
+        accessibilityRole="button"
+        accessibilityState={{ disabled }}
+        accessibilityLabel={accessibilityLabel || text}
       >
         <Text>{text}</Text>
       </TouchableOpacity>
@@ -88,6 +91,14 @@ describe('PhoneInputStep', () => {
 
     const apiClient = require('../src/services/httpClient');
     apiClient.post.mockReset();
+    apiClient.post.mockResolvedValue({
+      data: {
+        success: true,
+        verificationId: 'vid_whatsapp_test',
+        channel: 'whatsapp',
+        expiresIn: 300,
+      },
+    });
 
     const runtimeAccessPolicy = require('../src/config/runtimeAccessPolicy');
     const reviewAccounts = require('../src/config/reviewAccounts');
@@ -96,11 +107,13 @@ describe('PhoneInputStep', () => {
     runtimeAccessPolicy.allowReviewAccess.mockReset();
     runtimeAccessPolicy.isE2ETestBuild.mockReset();
     runtimeAccessPolicy.isSimulatorBuild.mockReset();
+    runtimeAccessPolicy.isWhatsAppOtpEnabled.mockReset();
     runtimeAccessPolicy.allowQaOtpForceFlow.mockReturnValue(false);
     runtimeAccessPolicy.allowCustomOtpFallback.mockReturnValue(false);
     runtimeAccessPolicy.allowReviewAccess.mockReturnValue(false);
     runtimeAccessPolicy.isE2ETestBuild.mockReturnValue(false);
     runtimeAccessPolicy.isSimulatorBuild.mockReturnValue(false);
+    runtimeAccessPolicy.isWhatsAppOtpEnabled.mockReturnValue(false);
     reviewAccounts.isReviewAccount.mockReset();
     reviewAccounts.getReviewAccountInfo.mockReset();
     reviewAccounts.isReviewAccount.mockReturnValue(false);
@@ -124,8 +137,11 @@ describe('PhoneInputStep', () => {
     Alert.alert.mockRestore();
   });
 
-  test('shows a clear rate limit message when firebase throttles phone auth', async () => {
-    mockSignInWithPhoneNumber.mockRejectedValue({
+  test('shows a clear rate limit message when the OTP provider throttles delivery', async () => {
+    const apiClient = require('../src/services/httpClient');
+    const runtimeAccessPolicy = require('../src/config/runtimeAccessPolicy');
+    runtimeAccessPolicy.isWhatsAppOtpEnabled.mockReturnValue(true);
+    apiClient.post.mockRejectedValueOnce({
       code: 'auth/too-many-requests',
       nativeErrorCode: 17010,
       message: 'Firebase: Too many requests.',
@@ -144,11 +160,66 @@ describe('PhoneInputStep', () => {
     await waitFor(() => {
       expect(Alert.alert).toHaveBeenCalledWith(
         'Limite de Tentativas',
-        'Voce fez muitas tentativas em pouco tempo. Aguarde um pouco e tente novamente.',
+        'Você fez muitas tentativas em pouco tempo. Aguarde um pouco e tente novamente.',
         undefined,
         undefined,
       );
     });
+  });
+
+  test('rejects a short phone submitted from the keyboard before requesting an OTP', () => {
+    const apiClient = require('../src/services/httpClient');
+    const { getByTestId } = render(
+      <PhoneInputStep
+        onSwitchToRegister={jest.fn()}
+        onVerificationSent={jest.fn()}
+      />,
+    );
+
+    const phoneInput = getByTestId('auth-phone-input');
+    fireEvent.changeText(phoneInput, '123');
+    fireEvent(phoneInput, 'submitEditing');
+
+    expect(Alert.alert).toHaveBeenCalledWith(
+      'Erro',
+      'Por favor, insira um número de telefone válido.',
+      undefined,
+      undefined,
+    );
+    expect(apiClient.post).not.toHaveBeenCalled();
+    expect(mockSignInWithPhoneNumber).not.toHaveBeenCalled();
+  });
+
+  test('exposes user-facing accessibility names for phone entry and login actions', () => {
+    const { getByTestId } = render(
+      <PhoneInputStep
+        onSwitchToRegister={jest.fn()}
+        onVerificationSent={jest.fn()}
+      />,
+    );
+
+    expect(getByTestId('auth-phone-input').props.accessibilityLabel).toBe(
+      'Número de celular com DDD',
+    );
+    expect(getByTestId('auth-continue-btn').props.accessibilityLabel).toBe('Continuar');
+    expect(getByTestId('auth-password-fallback-btn').props.accessibilityLabel).toBe(
+      'Já tenho senha',
+    );
+    expect(getByTestId('auth-password-fallback-btn').props.accessibilityRole).toBe('button');
+  });
+
+  test('allows the phone input to grow with accessibility text scaling', () => {
+    const { getByTestId } = render(
+      <PhoneInputStep
+        onSwitchToRegister={jest.fn()}
+        onVerificationSent={jest.fn()}
+      />,
+    );
+    const inputStyle = StyleSheet.flatten(getByTestId('auth-phone-input').props.style);
+
+    expect(inputStyle.minHeight).toBe(58);
+    expect(inputStyle.height).toBeUndefined();
+    expect(inputStyle.lineHeight).toBeUndefined();
   });
 
   test('routes controlled QA phones through custom OTP without firebase custom token login', async () => {
@@ -239,10 +310,9 @@ describe('PhoneInputStep', () => {
     });
   });
 
-  test('keeps OTP flow for existing account when password is not configured', async () => {
+  test('sends Firebase SMS OTP for an existing account when WhatsApp is deferred', async () => {
     const onVerificationSent = jest.fn();
     const UserAuthService = require('../src/services/UserAuthService').default;
-    const firebaseConfirmation = { confirm: jest.fn() };
 
     UserAuthService.resolvePhoneAuthFlow.mockResolvedValueOnce({
       exists: true,
@@ -253,8 +323,7 @@ describe('PhoneInputStep', () => {
       hasPassword: false,
       source: 'firebase_auth',
     });
-    mockSignInWithPhoneNumber.mockResolvedValueOnce(firebaseConfirmation);
-
+    const apiClient = require('../src/services/httpClient');
     const { getByTestId } = render(
       <PhoneInputStep
         onSwitchToRegister={jest.fn()}
@@ -266,19 +335,52 @@ describe('PhoneInputStep', () => {
     fireEvent.press(getByTestId('auth-continue-btn'));
 
     await waitFor(() => {
-      expect(mockSignInWithPhoneNumber).toHaveBeenCalledWith('+5521102938475');
+      expect(apiClient.post).not.toHaveBeenCalledWith('/api/custom-otp/request-otp', {
+        phone: '+5521102938475',
+      });
       expect(onVerificationSent).toHaveBeenCalledWith(
-        firebaseConfirmation,
+        expect.objectContaining({ isCustomOtp: false, channel: 'sms' }),
         '+5521102938475',
         true,
       );
+      expect(mockSignInWithPhoneNumber).toHaveBeenCalledWith('+5521102938475');
     });
   });
 
-  test('keeps OTP as default even when account has password configured', async () => {
+  test('keeps the Firebase confirmation prototype so confirm() still works', async () => {
+    class FakeConfirmationResult {
+      constructor() {
+        this._verificationId = 'verification-123';
+      }
+
+      confirm(code) {
+        return Promise.resolve({ user: { uid: 'firebase-user-123' }, code });
+      }
+    }
+    mockSignInWithPhoneNumber.mockResolvedValueOnce(new FakeConfirmationResult());
+    const onVerificationSent = jest.fn();
+    const { getByTestId } = render(
+      <PhoneInputStep
+        onSwitchToRegister={jest.fn()}
+        onVerificationSent={onVerificationSent}
+      />,
+    );
+
+    fireEvent.changeText(getByTestId('auth-phone-input'), '21102938475');
+    fireEvent.press(getByTestId('auth-continue-btn'));
+
+    await waitFor(() => expect(onVerificationSent).toHaveBeenCalled());
+    const [confirmation] = onVerificationSent.mock.calls[0];
+    expect(confirmation).toEqual(expect.objectContaining({ isCustomOtp: false, channel: 'sms' }));
+    await expect(confirmation.confirm('992111')).resolves.toEqual(
+      expect.objectContaining({ code: '992111' }),
+    );
+  });
+
+  test('keeps Firebase SMS as default even when account has password configured', async () => {
     const UserAuthService = require('../src/services/UserAuthService').default;
     const onVerificationSent = jest.fn();
-    const firebaseConfirmation = { confirm: jest.fn() };
+    const apiClient = require('../src/services/httpClient');
 
     UserAuthService.resolvePhoneAuthFlow.mockResolvedValueOnce({
       exists: true,
@@ -289,8 +391,6 @@ describe('PhoneInputStep', () => {
       hasPassword: true,
       source: 'password_credentials',
     });
-    mockSignInWithPhoneNumber.mockResolvedValueOnce(firebaseConfirmation);
-
     const { getByTestId, queryByText } = render(
       <PhoneInputStep
         onSwitchToRegister={jest.fn()}
@@ -302,21 +402,26 @@ describe('PhoneInputStep', () => {
     fireEvent.press(getByTestId('auth-continue-btn'));
 
     await waitFor(() => {
-      expect(mockSignInWithPhoneNumber).toHaveBeenCalledWith('+5521102938475');
+      expect(apiClient.post).not.toHaveBeenCalledWith('/api/custom-otp/request-otp', {
+        phone: '+5521102938475',
+      });
       expect(onVerificationSent).toHaveBeenCalledWith(
-        firebaseConfirmation,
+        expect.objectContaining({ isCustomOtp: false, channel: 'sms' }),
         '+5521102938475',
         true,
       );
-      expect(queryByText('Esse passo ajuda a manter sua conta segura.')).not.toBeNull();
+      expect(mockSignInWithPhoneNumber).toHaveBeenCalledWith('+5521102938475');
+      expect(queryByText('Informe seu celular para confirmar sua conta com segurança.')).not.toBeNull();
     });
   });
 
-  test('routes controlled review account through Firebase Phone Auth even when password exists', async () => {
+  test('routes controlled review account through the explicit WhatsApp path when enabled', async () => {
     const UserAuthService = require('../src/services/UserAuthService').default;
     const reviewAccounts = require('../src/config/reviewAccounts');
     const onVerificationSent = jest.fn();
-    const firebaseConfirmation = { confirm: jest.fn() };
+    const apiClient = require('../src/services/httpClient');
+    const runtimeAccessPolicy = require('../src/config/runtimeAccessPolicy');
+    runtimeAccessPolicy.isWhatsAppOtpEnabled.mockReturnValue(true);
 
     reviewAccounts.getReviewAccountInfo.mockReturnValue({
       phoneNumber: '21123456789',
@@ -333,8 +438,6 @@ describe('PhoneInputStep', () => {
       hasPassword: true,
       source: 'password_credentials',
     });
-    mockSignInWithPhoneNumber.mockResolvedValueOnce(firebaseConfirmation);
-
     const { getByTestId, queryByTestId } = render(
       <PhoneInputStep
         onSwitchToRegister={jest.fn()}
@@ -347,12 +450,15 @@ describe('PhoneInputStep', () => {
 
     await waitFor(() => {
       expect(UserAuthService.resolvePhoneAuthFlow).toHaveBeenCalledWith('+5521123456789');
-      expect(mockSignInWithPhoneNumber).toHaveBeenCalledWith('+5521123456789');
+      expect(apiClient.post).toHaveBeenCalledWith('/api/custom-otp/request-otp', {
+        phone: '+5521123456789',
+      });
       expect(onVerificationSent).toHaveBeenCalledWith(
-        firebaseConfirmation,
+        expect.objectContaining({ isCustomOtp: true, channel: 'whatsapp' }),
         '+5521123456789',
         true,
       );
+      expect(mockSignInWithPhoneNumber).not.toHaveBeenCalled();
       expect(queryByTestId('auth-password-input')).toBeNull();
     });
   });

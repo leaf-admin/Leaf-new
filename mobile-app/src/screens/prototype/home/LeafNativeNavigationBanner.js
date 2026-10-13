@@ -1,10 +1,12 @@
-import React from 'react';
+import leafTypography from '../../../components/prototype/LeafTypography';
+import React, { useCallback, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
 import { Ionicons } from '@expo/vector-icons';
 import robotaxiPrototypeTokens from '../../../components/design-system/robotaxiPrototypeTokens';
-import { fonts } from '../../../theme/runtimeTokens';
 import { usePrototypeMapOcclusion } from '../prototypeMapOcclusion';
+import { compact } from '../../../components/prototype/RobotaxiLifecycleUI';
+import LeafGlassSurface from '../../../components/design-system/LeafGlassSurface';
 
 const { color } = robotaxiPrototypeTokens;
 
@@ -87,6 +89,10 @@ function ManeuverGlyph({ type, color: glyphColor }) {
   return <Ionicons name={fallbackIcon} size={30} color={glyphColor} />;
 }
 
+const BANNER_TOP_OFFSET = 70;
+const BANNER_FALLBACK_HEIGHT = 96;
+const BANNER_MAP_GAP = 12;
+
 export default function LeafNativeNavigationBanner({
   routeKey,
   insetsTop = 0,
@@ -97,10 +103,20 @@ export default function LeafNativeNavigationBanner({
   const isOffRoute = navigationModel?.isOffRoute === true;
   const isVisible = Boolean(navigationModel?.isVisible) && !isOffRoute;
 
+  // The map keeps the car and route below the banner, so the occlusion must be
+  // the banner's real bottom edge: its height grows with a two-line instruction.
+  const [bannerHeight, setBannerHeight] = useState(BANNER_FALLBACK_HEIGHT);
+  const handleBannerLayout = useCallback((event) => {
+    const height = Math.round(Number(event?.nativeEvent?.layout?.height) || 0);
+    if (height > 0) {
+      setBannerHeight((previous) => (Math.abs(previous - height) > 2 ? height : previous));
+    }
+  }, []);
+
   usePrototypeMapOcclusion({
     routeKey,
     layerId: `${routeKey || 'prototype-home'}-leaf-native-navigation`,
-    occludedTop: isVisible ? insetsTop + 132 : 0,
+    occludedTop: isVisible ? insetsTop + BANNER_TOP_OFFSET + bannerHeight + BANNER_MAP_GAP : 0,
   });
 
   if (!isVisible) {
@@ -116,14 +132,15 @@ export default function LeafNativeNavigationBanner({
   return (
     <View
       pointerEvents="box-none"
-      style={[styles.wrap, { top: insetsTop + 70 }]}
+      style={[styles.wrap, { top: insetsTop + BANNER_TOP_OFFSET }]}
+      onLayout={handleBannerLayout}
       testID="leaf-native-navigation-banner"
     >
-      <View style={[styles.card, isOffRoute && styles.cardWarning]}>
+      <LeafGlassSurface tone="dark" style={[styles.card, isOffRoute && styles.cardWarning]}>
         <View style={styles.iconWrap}>
           <ManeuverGlyph
             type={maneuverType}
-            color={isOffRoute ? '#8A3A06' : '#173B2F'}
+            color={isOffRoute ? '#8A3A06' : '#FFFFFF'}
           />
         </View>
 
@@ -139,6 +156,7 @@ export default function LeafNativeNavigationBanner({
         <View style={styles.meta}>
           <Text style={styles.metaDistance}>{navigationModel.remainingDistanceLabel}</Text>
           <Text style={styles.metaEta}>{navigationModel.etaLabel}</Text>
+          <View style={styles.metaActions}>
           {typeof onOpenNavigation === 'function' ? (
             <Pressable
               accessibilityRole="button"
@@ -157,10 +175,11 @@ export default function LeafNativeNavigationBanner({
             onPress={onHide}
             style={styles.hideButton}
           >
-            <Text style={styles.hideButtonText}>Ocultar</Text>
+            <Ionicons name="close" size={14} color="#FFFFFF" />
           </Pressable>
+          </View>
         </View>
-      </View>
+      </LeafGlassSurface>
     </View>
   );
 }
@@ -175,16 +194,13 @@ const styles = StyleSheet.create({
   },
   card: {
     width: '92%',
-    minHeight: 96,
+    minHeight: compact(96, 76),
     borderRadius: 22,
     paddingHorizontal: 14,
     paddingVertical: 12,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
-    backgroundColor: 'rgba(248,250,247,0.97)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.76)',
     shadowColor: '#183026',
     shadowOffset: { width: 0, height: 12 },
     shadowOpacity: 0.16,
@@ -196,67 +212,73 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(251,146,60,0.36)',
   },
   iconWrap: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
+    width: compact(52, 44),
+    height: compact(52, 44),
+    borderRadius: compact(26, 22),
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(65,210,116,0.15)',
+    backgroundColor: 'rgba(255,255,255,0.12)',
   },
   copy: {
     flex: 1,
     minWidth: 0,
   },
   title: {
-    fontFamily: fonts.SemiBold,
-    fontSize: 18,
-    lineHeight: 22,
-    color: color.text.primary,
+    ...leafTypography.semiBold,
+    fontSize: compact(22, 18),
+    lineHeight: compact(28, 23),
+    color: '#FFFFFF',
   },
   subtitle: {
-    fontFamily: fonts.Regular,
-    fontSize: 12,
-    lineHeight: 16,
-    color: '#667180',
+    ...leafTypography.regular,
+    fontSize: 14,
+    lineHeight: 20,
+    color: 'rgba(255,255,255,0.78)',
     marginTop: 4,
   },
   meta: {
-    width: 88,
+    width: compact(88, 96),
     alignItems: 'flex-end',
     gap: 2,
   },
   metaDistance: {
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 15,
-    color: color.text.primary,
+    color: '#FFFFFF',
   },
   metaEta: {
-    fontFamily: fonts.Regular,
+    ...leafTypography.regular,
     fontSize: 12,
-    color: '#667180',
+    color: 'rgba(255,255,255,0.72)',
+  },
+  metaActions: {
+    marginTop: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
   },
   navigationButton: {
-    marginTop: 8,
     paddingHorizontal: 8,
     paddingVertical: 5,
     borderRadius: 12,
-    backgroundColor: '#111A27',
+    backgroundColor: 'rgba(255,255,255,0.18)',
   },
   navigationButtonText: {
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 11,
     color: '#FFFFFF',
   },
   hideButton: {
-    marginTop: 3,
-    paddingHorizontal: 8,
-    paddingVertical: 5,
-    borderRadius: 12,
-    backgroundColor: 'rgba(17,26,39,0.06)',
+    width: 26,
+    height: 26,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 13,
+    backgroundColor: 'rgba(255,255,255,0.12)',
   },
   hideButtonText: {
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 11,
-    color: '#365A6D',
+    color: '#FFFFFF',
   },
 });

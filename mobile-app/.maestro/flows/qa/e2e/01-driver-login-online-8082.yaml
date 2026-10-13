@@ -1,7 +1,9 @@
 appId: br.com.leaf.ride
 ---
-- launchApp:
-    clearState: true
+# The E3 preflight owns the one-time reset via qa-session-reset-ios.yaml.
+# Keep this flow stateful so the Firebase session survives the login, KYC
+# admission, online gate, and every subsequent bilateral ride step.
+- launchApp
 
 - openLink: ${MAESTRO_METRO_URL_DRIVER}
 

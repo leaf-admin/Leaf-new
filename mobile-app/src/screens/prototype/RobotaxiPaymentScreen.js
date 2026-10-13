@@ -1,4 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
+import leafTypography from '../../components/prototype/LeafTypography';
+import { LeafObjectIcon } from '../../components/prototype/LeafVisualElements';
 import { Alert, StatusBar, StyleSheet, Text, View, useWindowDimensions } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { fonts } from "../../theme/runtimeTokens";
@@ -8,6 +10,7 @@ import {
   LeafButton,
   LeafDivider,
   LeafInfoRow,
+  LeafJourneyRoute,
   LeafMetricRow,
   LeafRideSheet,
   LeafStateHeader,
@@ -21,7 +24,7 @@ import { usePrototypeRideRuntime } from "./prototypeRideRuntime";
 import { resolveMeaningfulAddress } from "./addressLabelUtils";
 import { buildOverlaySheetViewportMetrics } from "./prototypeRouteViewport";
 
-const SHEET_BOTTOM_OFFSET = 0;
+const SHEET_BOTTOM_OFFSET = 12;
 const FALLBACK_CARD_HEIGHT = 356;
 const STATE_HEADER_TOP_OFFSET = 50;
 const STATE_HEADER_FALLBACK_HEIGHT = 76;
@@ -212,6 +215,9 @@ export default function RobotaxiPaymentScreen({ navigation, route }) {
     Number.isFinite(destinationCoordinate?.longitude),
   );
   const leafFee = resolveLockedLeafFeeParam(route?.params);
+  const visibleQuote = route?.params?.initialPricingQuote || route?.params?.pricingQuote || {};
+  const quotedDistanceKm = quoteLockReady ? normalizePositiveMoney(visibleQuote.distanceKm ?? visibleQuote.quote?.distanceKm) : null;
+  const quotedDurationMin = quoteLockReady ? normalizePositiveMoney(visibleQuote.durationMin ?? visibleQuote.quote?.durationMin) : null;
   const qaAutoConfirmPix = true;
 
   usePrototypeMapOcclusion({
@@ -496,18 +502,21 @@ export default function RobotaxiPaymentScreen({ navigation, route }) {
             scrollContentContainerStyle={styles.paymentScrollContent}
           >
             <View style={styles.headerRow}>
-              <Text style={styles.title}>Código Pix</Text>
-              <Text style={styles.price}>
-                {fareReady ? formatCurrency(fare) : "Cotação pendente"}
-              </Text>
+              <View style={{ flex: 1, gap: 4 }}>
+                <Text style={styles.title}>Pagar com Pix</Text>
+                <Text style={styles.detail}>Confirmação antes do embarque</Text>
+              </View>
+              <LeafObjectIcon name="payment" size={42} />
             </View>
+            <Text style={[styles.detail, { marginTop: 20 }]}>Total da viagem</Text>
+            <Text style={styles.price}>{fareReady ? formatCurrency(fare) : "Cotação pendente"}</Text>
 
             <LeafDivider style={styles.divider} />
 
             <LeafMetricRow
               metrics={[
-                { value: "4 min", label: "buscar" },
-                { value: "2,8 km", label: "distancia" },
+                { value: quotedDurationMin ? `${Math.round(quotedDurationMin)} min` : "—", label: "trajeto estimado" },
+                { value: quotedDistanceKm ? `${quotedDistanceKm.toLocaleString('pt-BR', { maximumFractionDigits: 1 })} km` : "—", label: "distância" },
                 {
                   value: leafFee == null ? "--" : formatCurrency(leafFee),
                   label: "taxa Leaf",
@@ -516,6 +525,8 @@ export default function RobotaxiPaymentScreen({ navigation, route }) {
             />
 
             <LeafDivider style={styles.dividerLarge} />
+            <LeafJourneyRoute origin={originAddress} destination={destinationAddress || destination} />
+            <Text style={[styles.detail, { marginTop: 14 }]}>{vehicle}</Text>
 
             <LeafInfoRow
               marker="$"
@@ -524,9 +535,6 @@ export default function RobotaxiPaymentScreen({ navigation, route }) {
               style={styles.paymentRow}
             />
             <SecurePaymentBadge style={styles.securePaymentBadge} />
-
-            <Text style={styles.hiddenText}>{destination}</Text>
-            <Text style={styles.hiddenText}>{vehicle}</Text>
 
             <View style={styles.actionsRow}>
               <LeafButton
@@ -547,7 +555,13 @@ export default function RobotaxiPaymentScreen({ navigation, route }) {
                 }
                 tone="primary"
                 testID="passenger-payment-pay-pix-button"
-                accessibilityLabel="passenger-payment-pay-pix-button"
+                accessibilityLabel={submitting
+                  ? "Enviando solicitação de corrida"
+                  : checkingAvailability
+                    ? "Verificando disponibilidade da corrida"
+                    : canRequestRide
+                      ? "Confirmar corrida e gerar Pix"
+                      : "Escolher destino"}
                 disabled={submitting || checkingAvailability}
                 onPress={handleOpenPixModal}
                 style={styles.ctaButton}
@@ -614,10 +628,8 @@ const styles = StyleSheet.create({
   },
   paymentCard: {
     minHeight: 356,
-    borderTopLeftRadius: 28,
-    borderTopRightRadius: 28,
-    borderBottomLeftRadius: 0,
-    borderBottomRightRadius: 0,
+    marginHorizontal: 12,
+    borderRadius: 28,
     paddingHorizontal: 24,
     paddingTop: 14,
   },
@@ -635,15 +647,16 @@ const styles = StyleSheet.create({
   },
   title: {
     color: leafRideColors.text,
-    fontFamily: fonts.SemiBold,
-    fontSize: 18,
-    lineHeight: 24,
+    ...leafTypography.semiBold,
+    fontSize: 22,
+    lineHeight: 44,
   },
+  detail: { ...leafTypography.regular, fontSize: 15, lineHeight: 44, color: '#6A6A6A' },
   price: {
     color: leafRideColors.text,
-    fontFamily: fonts.SemiBold,
-    fontSize: 20,
-    lineHeight: 26,
+    ...leafTypography.semiBold,
+    fontSize: 34,
+    lineHeight: 44,
   },
   divider: {
     marginTop: 16,
@@ -677,10 +690,10 @@ const styles = StyleSheet.create({
   pendingText: {
     marginTop: 10,
     color: leafRideColors.dangerText,
-    fontFamily: fonts.Regular,
-    fontSize: 11,
-    lineHeight: 15,
-    textAlign: "center",
+    ...leafTypography.regular,
+    fontSize: 15,
+    lineHeight: 20,
+    textAlign: "left",
   },
   hiddenText: {
     position: "absolute",

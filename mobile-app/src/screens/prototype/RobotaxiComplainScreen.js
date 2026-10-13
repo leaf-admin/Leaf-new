@@ -1,3 +1,6 @@
+import leafTypography from '../../components/prototype/LeafTypography';
+import { RobotaxiLifecycleSummary } from '../../components/prototype/RobotaxiLifecycleUI';
+import { LeafObjectIcon } from '../../components/prototype/LeafVisualElements';
 import React, { useCallback, useMemo, useState } from 'react';
 import {
   Alert,
@@ -14,7 +17,6 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { fonts } from '../../theme/runtimeTokens';
 import PrototypeScreenTransition from '../../components/prototype/PrototypeScreenTransition';
 import PrototypeDismissibleSheet from '../../components/prototype/PrototypeDismissibleSheet';
 import { CardHandle, PrototypeCard, PrototypePrimaryButton } from '../../components/prototype/PrototypeUI';
@@ -224,8 +226,7 @@ export default function RobotaxiComplainScreen({ navigation, route }) {
               >
                 <CardHandle />
 
-                <Text style={styles.title}>Relatar problema</Text>
-                <Text style={styles.subtitle}>Conte o que aconteceu nesta viagem.</Text>
+                <RobotaxiLifecycleSummary title="Relatar problema" subtitle="Conte o que aconteceu nesta viagem." object="help" />
 
                 <View style={styles.typeRow}>
                   {ISSUE_TYPES.map(item => {
@@ -237,7 +238,7 @@ export default function RobotaxiComplainScreen({ navigation, route }) {
                         style={[styles.typeChip, active && styles.typeChipActive]}
                         onPress={() => setSelectedTypeId(item.id)}
                       >
-                        <Ionicons name={item.icon} size={14} color={color.text.primary} />
+                        <LeafObjectIcon symbol={item.icon} size={32} />
                         <Text style={styles.typeChipText}>{item.label}</Text>
                       </TouchableOpacity>
                     );
@@ -253,7 +254,8 @@ export default function RobotaxiComplainScreen({ navigation, route }) {
                     placeholderTextColor={color.text.muted}
                     style={styles.input}
                     testID="robotaxi-complain-subject"
-                    accessibilityLabel="robotaxi-complain-subject"
+                    accessibilityLabel="Assunto da reclamação de suporte"
+                    accessibilityHint={selectedType.label}
                   />
                 </View>
 
@@ -266,7 +268,8 @@ export default function RobotaxiComplainScreen({ navigation, route }) {
                     placeholderTextColor={color.text.muted}
                     style={[styles.input, styles.textarea]}
                     testID="robotaxi-complain-description"
-                    accessibilityLabel="robotaxi-complain-description"
+                    accessibilityLabel="Detalhes da reclamação de suporte"
+                    accessibilityHint={`Descreva o ocorrido sobre ${selectedType.label.toLowerCase()}.`}
                     multiline
                     textAlignVertical="top"
                   />
@@ -278,7 +281,7 @@ export default function RobotaxiComplainScreen({ navigation, route }) {
                   onPress={supportLoading ? undefined : handleSubmit}
                   style={styles.submitButton}
                   testID="robotaxi-complain-submit"
-                  accessibilityLabel="robotaxi-complain-submit"
+                  accessibilityLabel={supportLoading ? 'Enviando reclamação de suporte' : 'Enviar relato de suporte'}
                 />
 
                 {ticketRows.length > 0 ? (
@@ -316,8 +319,8 @@ const styles = StyleSheet.create({
     width: '100%'
   },
   card: {
-    borderTopLeftRadius: 28,
-    borderTopRightRadius: 28,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
     borderBottomLeftRadius: 0,
     borderBottomRightRadius: 0,
     paddingHorizontal: 24,
@@ -329,24 +332,24 @@ const styles = StyleSheet.create({
   },
   title: {
     color: color.text.primary,
-    fontFamily: fonts.SemiBold,
-    fontSize: 18,
-    lineHeight: 24
+    ...leafTypography.semiBold,
+    fontSize: 22,
+    lineHeight: 28
   },
   subtitle: {
     marginTop: 1,
     color: color.text.secondary,
-    fontFamily: fonts.Regular,
-    fontSize: typography.caption.size,
-    lineHeight: typography.caption.lineHeight
+    ...leafTypography.regular,
+    fontSize: 14,
+    lineHeight: 20
   },
   typeRow: {
     marginTop: 10,
     gap: 8
   },
   typeChip: {
-    minHeight: 40,
-    borderRadius: 20,
+    minHeight: 54,
+    borderRadius: 12,
     borderWidth: 1,
     borderColor: color.border.subtle,
     backgroundColor: color.surface.secondary,
@@ -361,7 +364,7 @@ const styles = StyleSheet.create({
   },
   typeChipText: {
     color: color.text.primary,
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     fontSize: typography.caption.size,
     lineHeight: typography.caption.lineHeight
   },
@@ -373,22 +376,22 @@ const styles = StyleSheet.create({
   },
   inputLabel: {
     color: color.text.secondary,
-    fontFamily: fonts.Medium,
-    fontSize: typography.micro.size,
-    lineHeight: typography.micro.lineHeight
+    ...leafTypography.medium,
+    fontSize: 13,
+    lineHeight: 18
   },
   input: {
     marginTop: 4,
-    minHeight: 42,
-    borderRadius: 18,
+    minHeight: 54,
+    borderRadius: 12,
     borderWidth: 1,
     borderColor: color.border.subtle,
-    backgroundColor: color.surface.primary,
-    paddingHorizontal: 10,
+    backgroundColor: '#F5F5F5',
+    paddingHorizontal: 14,
     color: color.text.primary,
-    fontFamily: fonts.Regular,
-    fontSize: typography.caption.size,
-    lineHeight: typography.caption.lineHeight
+    ...leafTypography.regular,
+    fontSize: 16,
+    lineHeight: 22
   },
   textarea: {
     minHeight: 90,
@@ -416,20 +419,20 @@ const styles = StyleSheet.create({
   },
   historyId: {
     color: color.text.primary,
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     fontSize: typography.micro.size,
     lineHeight: typography.micro.lineHeight
   },
   historyStatus: {
     color: color.text.secondary,
-    fontFamily: fonts.Regular,
+    ...leafTypography.regular,
     fontSize: typography.micro.size,
     lineHeight: typography.micro.lineHeight
   },
   errorText: {
     marginTop: 8,
     color: '#8A1F2B',
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     fontSize: typography.caption.size,
     lineHeight: typography.caption.lineHeight
   }

@@ -4,10 +4,14 @@ const EARTH_RADIUS_METERS = 6371000;
 const CAMERA_LOOK_AHEAD_METERS = 55;
 export const NAVIGATION_CAMERA_ANCHOR_Y = 0.68;
 export const NAVIGATION_CAMERA_ANIMATION_MS = 800;
-export const NAVIGATION_CAMERA_MOVING_PITCH = 55;
-export const NAVIGATION_CAMERA_IDLE_PITCH = 42;
+// Keep the Leaf map in the standard top-down presentation. Route heading and
+// zoom still follow navigation, but the camera must never tilt into the old
+// isometric view during an active driver trip.
+export const NAVIGATION_CAMERA_TOP_DOWN_PITCH = 0;
 const NAVIGATION_CAMERA_MIN_ROUTE_ZOOM = 15.2;
-const NAVIGATION_CAMERA_MAX_ROUTE_ZOOM = 18.2;
+// 18.2 framed about 150 m of road: arriving at the pickup the map showed a
+// blank patch with no cross streets. 17.3 keeps the surrounding block visible.
+const NAVIGATION_CAMERA_MAX_ROUTE_ZOOM = 17.3;
 const NAVIGATION_CAMERA_NEAR_TARGET_METERS = 60;
 const NAVIGATION_CAMERA_MIN_ROUTE_REFERENCE_METERS = 1200;
 
@@ -168,9 +172,8 @@ export function shouldRevealNavigationRoute({
   );
 }
 
-export function resolveNavigationCameraPitch(speedKmh = 0) {
-  const normalizedSpeed = Math.max(0, Number(speedKmh) || 0);
-  return normalizedSpeed < 2 ? NAVIGATION_CAMERA_IDLE_PITCH : NAVIGATION_CAMERA_MOVING_PITCH;
+export function resolveNavigationCameraPitch() {
+  return NAVIGATION_CAMERA_TOP_DOWN_PITCH;
 }
 
 export function calculateNavigationDistanceMeters(left, right) {
@@ -584,7 +587,9 @@ function projectCoordinateToRouteMeasure(coordinate, routeCoordinates = []) {
 function buildSyntheticNavigationStepsFromRoute(
   routeCoordinates = [],
   totalDurationMinutes = null,
+  phase = 'destination',
 ) {
+  const targetLabel = phase === 'pickup' ? 'o embarque' : 'o destino';
   const coordinates = Array.isArray(routeCoordinates)
     ? routeCoordinates.map(normalizeNavigationCoordinate).filter(Boolean)
     : [];
@@ -673,7 +678,7 @@ function buildSyntheticNavigationStepsFromRoute(
   );
   if (finalDistanceMeters > 10 || steps.length === 0) {
     steps.push({
-      instruction: steps.length === 0 ? 'Siga até o destino' : 'Siga em frente até o destino',
+      instruction: steps.length === 0 ? `Siga até ${targetLabel}` : `Siga em frente até ${targetLabel}`,
       startLocation: coordinates[stepStartIndex],
       endLocation: coordinates[coordinates.length - 1],
       distanceMeters: Math.round(finalDistanceMeters),
@@ -914,6 +919,7 @@ export function buildLeafNativeNavigationState({
     normalizedSteps = buildSyntheticNavigationStepsFromRoute(
       routeGeometryCoordinates,
       totalDurationMinutes,
+      normalizedPhase,
     );
   }
   const currentStepIndex = resolveCurrentNavigationStepIndex({
@@ -924,7 +930,7 @@ export function buildLeafNativeNavigationState({
   const fallbackInstruction =
     normalizedPhase === 'destination'
       ? 'Siga até o destino'
-      : 'Siga até o local de embarque';
+      : 'Siga até o embarque';
   const routeRemainingMeters = calculateRemainingRouteMeters(
     current,
     routeGeometryCoordinates,
@@ -933,8 +939,16 @@ export function buildLeafNativeNavigationState({
   const fallbackRemainingMeters = Number.isFinite(Number(remainingDistanceMeters))
     ? Math.max(0, Number(remainingDistanceMeters))
     : calculateNavigationDistanceMeters(current, target);
+  // The caller's value is the one the ride card shows (near the pickup it is
+  // the straight-line distance). Never show a longer one in the banner: it
+  // said "30 m" while the card under it said "10 m".
   const remainingMeters = Number.isFinite(Number(routeRemainingMeters))
-    ? Math.max(0, Number(routeRemainingMeters))
+    ? Math.max(
+        0,
+        Number(remainingDistanceMeters) > 0
+          ? Math.min(Number(routeRemainingMeters), Number(remainingDistanceMeters))
+          : Number(routeRemainingMeters),
+      )
     : fallbackRemainingMeters;
   const upcomingTarget = resolveUpcomingNavigationTarget({
     current,
@@ -995,7 +1009,10 @@ export function buildLeafNativeNavigationState({
     maneuverDistanceMeters,
     maneuverDistanceLabel: formatDistanceLabel(maneuverDistanceMeters),
     maneuverDistanceTargetKind: upcomingTarget.distanceTargetKind,
-    maneuverDistanceTargetLabel: upcomingTarget.distanceTargetLabel,
+    maneuverDistanceTargetLabel:
+      upcomingTarget.distanceTargetKind === 'destination' && normalizedPhase === 'pickup'
+        ? 'o embarque'
+        : upcomingTarget.distanceTargetLabel,
     remainingDistanceMeters: remainingMeters,
     totalDistanceMeters: baselineMeters,
     remainingDistanceLabel: formatDistanceLabel(remainingMeters),
@@ -1007,7 +1024,7 @@ export function buildLeafNativeNavigationState({
       remainingMeters,
       baselineMeters,
     ),
-    cameraPitch: resolveNavigationCameraPitch(normalizedSpeedKmh),
+    cameraPitch: resolveNavigationCameraPitch(),
     cameraAnchorY: NAVIGATION_CAMERA_ANCHOR_Y,
     cameraAnimationDurationMs: NAVIGATION_CAMERA_ANIMATION_MS,
     currentSpeedKmh: normalizedSpeedKmh,

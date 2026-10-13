@@ -154,7 +154,7 @@ const styles = StyleSheet.create({
   text: {
     flex: 1,
     fontSize: 13,
-    fontWeight: '500',
+    fontFamily: 'Figtree-Medium',
     color: '#FFFFFF',
     textAlign: 'center',
     lineHeight: 18,

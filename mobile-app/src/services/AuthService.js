@@ -217,7 +217,7 @@ class AuthService {
             Logger.error('❌ Erro na requisição autenticada:', error);
             throw toUserFriendlyError(error, {
                 context: 'auth',
-                fallbackMessage: 'Nao foi possivel concluir a autenticacao agora. Tente novamente.'
+                fallbackMessage: 'Não foi possível concluir a autenticação agora. Tente novamente.'
             });
         }
     }
@@ -260,7 +260,7 @@ class AuthService {
                     },
                     {
                         context: 'api',
-                        fallbackMessage: 'Nao foi possivel concluir esta solicitacao agora.'
+                        fallbackMessage: 'Não foi possível concluir esta solicitação agora.'
                     }
                 );
             }
@@ -271,7 +271,7 @@ class AuthService {
             Logger.error('❌ Erro ao processar resposta da API:', error);
             throw toUserFriendlyError(error, {
                 context: 'api',
-                fallbackMessage: 'Nao foi possivel processar a resposta agora.'
+                fallbackMessage: 'Não foi possível processar a resposta agora.'
             });
         }
     }

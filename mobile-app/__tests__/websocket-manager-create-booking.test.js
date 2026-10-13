@@ -195,6 +195,39 @@ describe('WebSocketManager createBooking retries', () => {
     );
   });
 
+  it('keeps a slow but successful startTrip acknowledgement inside the client window', async () => {
+    jest.useFakeTimers();
+    try {
+      const manager = WebSocketManager.getInstance();
+      manager.socket = {
+        connected: true,
+        emit: jest.fn(),
+        on: jest.fn(),
+        off: jest.fn(),
+      };
+
+      const startPromise = manager.startTrip('booking_slow_start', {
+        lat: -22.97,
+        lng: -43.18,
+      });
+
+      await jest.advanceTimersByTimeAsync(15000);
+      manager.emit('tripStarted', {
+        success: true,
+        bookingId: 'booking_slow_start',
+      });
+
+      await expect(startPromise).resolves.toEqual(
+        expect.objectContaining({
+          success: true,
+          bookingId: 'booking_slow_start',
+        }),
+      );
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
   it('forwards ride outbox metadata with lifecycle commands', async () => {
     const manager = WebSocketManager.getInstance();
     manager.socket = {

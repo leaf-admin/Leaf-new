@@ -1,3 +1,4 @@
+import leafTypography from '../../components/prototype/LeafTypography';
 import React, { useCallback, useMemo, useState } from 'react';
 import {
   ScrollView,
@@ -8,7 +9,6 @@ import {
   useWindowDimensions,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { fonts } from '../../theme/runtimeTokens';
 import PrototypeDismissibleSheet from '../../components/prototype/PrototypeDismissibleSheet';
 import PrototypeScreenTransition from '../../components/prototype/PrototypeScreenTransition';
 import {
@@ -30,7 +30,7 @@ import { usePrototypeMapOcclusion } from './prototypeMapOcclusion';
 import { usePrototypeRideRuntime } from './prototypeRideRuntime';
 import { normalizeRuntimeRideStatus } from './rideLifecycleContract';
 
-const SURFACE_TOP_PADDING = 16;
+const SURFACE_TOP_PADDING = 20;
 const SURFACE_BOTTOM_PADDING = 18;
 const BACKDROP_COLOR = 'transparent';
 
@@ -135,7 +135,7 @@ export default function RobotaxiPublicTripTrackingScreen({ navigation, route }) 
               <PrototypeMenuCloseButton
                 onPress={handleDismiss}
                 testID="robotaxi-public-tracking-close-button"
-                accessibilityLabel="robotaxi-public-tracking-close-button"
+                accessibilityLabel="Fechar acompanhamento público da viagem"
               />
             )}
           >
@@ -179,7 +179,7 @@ export default function RobotaxiPublicTripTrackingScreen({ navigation, route }) 
                 onPress={handleDismiss}
                 style={styles.doneButton}
                 testID="robotaxi-public-tracking-back"
-                accessibilityLabel="robotaxi-public-tracking-back"
+                accessibilityLabel="Voltar para a viagem"
               />
             </ScrollView>
           </PrototypeMenuSurface>
@@ -220,7 +220,7 @@ const styles = StyleSheet.create({
   heroTitle: {
     flex: 1,
     color: leafRideColors.text,
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 20,
     lineHeight: 27,
   },

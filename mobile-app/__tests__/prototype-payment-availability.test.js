@@ -81,6 +81,7 @@ jest.mock('../src/components/prototype/LeafRideUI', () => {
       </TouchableOpacity>
     ),
     LeafDivider: ({ style }) => <View style={style} />,
+    LeafJourneyRoute: ({ origin, destination }) => <View>{renderText(origin)}{renderText(destination)}</View>,
     LeafInfoRow: ({ title, subtitle, style }) => (
       <View style={style}>
         {renderText(title)}
@@ -217,6 +218,9 @@ describe('RobotaxiPaymentScreen availability gate', () => {
       expect(checkRideAvailability).toHaveBeenCalledTimes(1);
       expect(screen.getByTestId('mock-woovi-payment-modal')).toBeTruthy();
     });
+    expect(screen.getByTestId('passenger-payment-pay-pix-button').props.accessibilityLabel).toBe(
+      'Confirmar corrida e gerar Pix',
+    );
     expect(screen.getByTestId('mock-woovi-payment-quote-lock-id').props.children).toBe(
       'ql_payment_test',
     );

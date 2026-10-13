@@ -1,7 +1,7 @@
+import leafTypography from '../../prototype/LeafTypography';
 import React, { useCallback, useMemo, useState } from 'react';
 import { Alert, Linking, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { fonts } from '../../../theme/runtimeTokens';
 import { saveStepData } from '../../../utils/secureOnboardingStorage';
 import ContinueButton from '../common/ContinueButton';
 import onboardingTheme from '../common/onboardingTheme';
@@ -12,7 +12,7 @@ const { color, spacing } = onboardingTheme;
 const EMAIL_REGEX = /\S+@\S+\.\S+/;
 const PASSWORD_REGEX = /(?=.*[A-Za-z])(?=.*\d)/;
 
-const ProfileDataStep = ({ onSubmitted, onBack, initialData = {}, progressMeta }) => {
+const ProfileDataStep = ({ onSubmitted, onBack, initialData = {}, progressMeta, isSubmitting = false }) => {
 	  const [profileData, setProfileData] = useState({
 	    fullName: initialData.fullName || [initialData.firstName, initialData.lastName].filter(Boolean).join(' ').trim(),
 	    email: initialData?.documentData?.email || initialData?.email || '',
@@ -193,8 +193,8 @@ const ProfileDataStep = ({ onSubmitted, onBack, initialData = {}, progressMeta }
       footer={(
         <ContinueButton
           onPress={handleSubmit}
-          disabled={!isFormValid}
-          text="Salvar e entrar"
+          disabled={!isFormValid || isSubmitting}
+          text={isSubmitting ? 'Salvando...' : 'Salvar e entrar'}
         />
       )}
     >
@@ -202,6 +202,9 @@ const ProfileDataStep = ({ onSubmitted, onBack, initialData = {}, progressMeta }
         <View style={styles.fieldContainer}>
           <Text style={styles.label}>Nome completo *</Text>
           <TextInput
+            testID="auth-profile-full-name-input"
+            accessibilityLabel="Nome completo"
+            accessibilityHint="Informe seu nome e sobrenome como aparecem nos documentos."
             style={[styles.input, errors.fullName && styles.inputError]}
             value={profileData.fullName}
             onChangeText={value => updateField('fullName', value)}
@@ -210,7 +213,11 @@ const ProfileDataStep = ({ onSubmitted, onBack, initialData = {}, progressMeta }
             autoCapitalize="words"
             autoCorrect={false}
           />
-          {errors.fullName ? <Text style={styles.errorText}>{errors.fullName}</Text> : null}
+          {errors.fullName ? (
+            <Text style={styles.errorText} accessibilityRole="alert" accessibilityLiveRegion="polite">
+              {errors.fullName}
+            </Text>
+          ) : null}
         </View>
 
         {!isDriver ? (
@@ -218,6 +225,9 @@ const ProfileDataStep = ({ onSubmitted, onBack, initialData = {}, progressMeta }
             <View style={styles.fieldContainer}>
               <Text style={styles.label}>E-mail *</Text>
               <TextInput
+                testID="auth-profile-email-input"
+                accessibilityLabel="E-mail"
+                accessibilityHint="Informe seu endereço de e-mail para concluir o cadastro."
                 style={[styles.input, errors.email && styles.inputError]}
                 value={profileData.email}
                 onChangeText={value => updateField('email', value)}
@@ -227,13 +237,20 @@ const ProfileDataStep = ({ onSubmitted, onBack, initialData = {}, progressMeta }
                 autoCorrect={false}
                 keyboardType="email-address"
               />
-              {errors.email ? <Text style={styles.errorText}>{errors.email}</Text> : null}
+              {errors.email ? (
+                <Text style={styles.errorText} accessibilityRole="alert" accessibilityLiveRegion="polite">
+                  {errors.email}
+                </Text>
+              ) : null}
             </View>
 
             <View style={styles.fieldContainer}>
               <Text style={styles.label}>Senha *</Text>
               <View style={[styles.passwordContainer, errors.password && styles.inputError]}>
                 <TextInput
+                  testID="auth-profile-password-input"
+                  accessibilityLabel="Senha"
+                  accessibilityHint="Use pelo menos 8 caracteres, incluindo letras e números."
                   style={styles.passwordInput}
                   value={profileData.password}
                   onChangeText={value => updateField('password', value)}
@@ -243,11 +260,22 @@ const ProfileDataStep = ({ onSubmitted, onBack, initialData = {}, progressMeta }
                   autoCapitalize="none"
                   autoCorrect={false}
                 />
-                <TouchableOpacity style={styles.eyeButton} onPress={() => setShowPassword(previous => !previous)}>
+                <TouchableOpacity
+                  style={styles.eyeButton}
+                  onPress={() => setShowPassword(previous => !previous)}
+                  testID="auth-profile-password-visibility-btn"
+                  accessibilityRole="button"
+                  accessibilityLabel={showPassword ? 'Ocultar senha' : 'Mostrar senha'}
+                  accessibilityHint="Alterna a visibilidade da senha digitada."
+                >
                   <Ionicons name={showPassword ? 'eye-off' : 'eye'} size={18} color={color.textMuted} />
                 </TouchableOpacity>
               </View>
-              {errors.password ? <Text style={styles.errorText}>{errors.password}</Text> : null}
+              {errors.password ? (
+                <Text style={styles.errorText} accessibilityRole="alert" accessibilityLiveRegion="polite">
+                  {errors.password}
+                </Text>
+              ) : null}
             </View>
 
             <View style={styles.fieldContainer}>
@@ -260,6 +288,9 @@ const ProfileDataStep = ({ onSubmitted, onBack, initialData = {}, progressMeta }
                 ]}
               >
                 <TextInput
+                  testID="auth-profile-confirm-password-input"
+                  accessibilityLabel="Confirmar senha"
+                  accessibilityHint="Digite novamente a senha escolhida."
                   style={styles.passwordInput}
                   value={profileData.confirmPassword}
                   onChangeText={value => updateField('confirmPassword', value)}
@@ -269,7 +300,14 @@ const ProfileDataStep = ({ onSubmitted, onBack, initialData = {}, progressMeta }
                   autoCapitalize="none"
                   autoCorrect={false}
                 />
-                <TouchableOpacity style={styles.eyeButton} onPress={() => setShowConfirmPassword(previous => !previous)}>
+                <TouchableOpacity
+                  style={styles.eyeButton}
+                  onPress={() => setShowConfirmPassword(previous => !previous)}
+                  testID="auth-profile-confirm-password-visibility-btn"
+                  accessibilityRole="button"
+                  accessibilityLabel={showConfirmPassword ? 'Ocultar confirmação de senha' : 'Mostrar confirmação de senha'}
+                  accessibilityHint="Alterna a visibilidade da confirmação de senha."
+                >
                   <Ionicons name={showConfirmPassword ? 'eye-off' : 'eye'} size={18} color={color.textMuted} />
                 </TouchableOpacity>
               </View>
@@ -285,20 +323,34 @@ const ProfileDataStep = ({ onSubmitted, onBack, initialData = {}, progressMeta }
                       styles.passwordMatchText,
                       !passwordMatchState.matches && styles.passwordMatchTextError
                     ]}
+                    accessibilityRole={passwordMatchState.matches ? 'text' : 'alert'}
+                    accessibilityLiveRegion="polite"
                   >
                     {passwordMatchState.text}
                   </Text>
                 </View>
               ) : null}
-              {errors.confirmPassword ? <Text style={styles.errorText}>{errors.confirmPassword}</Text> : null}
+              {errors.confirmPassword ? (
+                <Text style={styles.errorText} accessibilityRole="alert" accessibilityLiveRegion="polite">
+                  {errors.confirmPassword}
+                </Text>
+              ) : null}
             </View>
             <Text style={styles.helperText}>Você continuará entrando pelo telefone. A senha ajuda nos próximos acessos e na recuperação da conta.</Text>
 
 	            <View style={styles.legalLinksRow}>
-              <TouchableOpacity onPress={() => openLegalLink(AppConfig.terms_of_service_url, 'Termos de Uso')}>
+              <TouchableOpacity
+                onPress={() => openLegalLink(AppConfig.terms_of_service_url, 'Termos de Uso')}
+                accessibilityRole="button"
+                accessibilityLabel="Ler Termos de Uso"
+              >
                 <Text style={styles.legalLinkText}>Ler Termos de Uso</Text>
               </TouchableOpacity>
-              <TouchableOpacity onPress={() => openLegalLink(AppConfig.privacy_policy_url, 'Política de Privacidade')}>
+              <TouchableOpacity
+                onPress={() => openLegalLink(AppConfig.privacy_policy_url, 'Política de Privacidade')}
+                accessibilityRole="button"
+                accessibilityLabel="Ler Política de Privacidade"
+              >
                 <Text style={styles.legalLinkText}>Ler Política de Privacidade</Text>
               </TouchableOpacity>
             </View>
@@ -308,15 +360,25 @@ const ProfileDataStep = ({ onSubmitted, onBack, initialData = {}, progressMeta }
                 checked={profileData.acceptTerms}
                 label="Aceito os Termos de Uso *"
                 onPress={() => toggleConsent('acceptTerms')}
+                testID="auth-profile-terms-consent"
               />
-              {errors.acceptTerms ? <Text style={styles.errorText}>{errors.acceptTerms}</Text> : null}
+              {errors.acceptTerms ? (
+                <Text style={styles.errorText} accessibilityRole="alert" accessibilityLiveRegion="polite">
+                  {errors.acceptTerms}
+                </Text>
+              ) : null}
 
               <ConsentRow
                 checked={profileData.acceptPrivacy}
                 label="Aceito a Política de Privacidade *"
                 onPress={() => toggleConsent('acceptPrivacy')}
+                testID="auth-profile-privacy-consent"
               />
-              {errors.acceptPrivacy ? <Text style={styles.errorText}>{errors.acceptPrivacy}</Text> : null}
+              {errors.acceptPrivacy ? (
+                <Text style={styles.errorText} accessibilityRole="alert" accessibilityLiveRegion="polite">
+                  {errors.acceptPrivacy}
+                </Text>
+              ) : null}
             </View>
           </>
         ) : null}
@@ -325,9 +387,18 @@ const ProfileDataStep = ({ onSubmitted, onBack, initialData = {}, progressMeta }
   );
 };
 
-function ConsentRow({ checked, label, onPress }) {
+function ConsentRow({ checked, label, onPress, testID }) {
   return (
-    <TouchableOpacity style={styles.consentRow} activeOpacity={0.86} onPress={onPress}>
+    <TouchableOpacity
+      style={styles.consentRow}
+      activeOpacity={0.86}
+      onPress={onPress}
+      testID={testID}
+      accessibilityRole="checkbox"
+      accessibilityLabel={label}
+      accessibilityState={{ checked }}
+      accessibilityHint={checked ? 'Toque duas vezes para desmarcar.' : 'Toque duas vezes para aceitar.'}
+    >
       <View style={[styles.checkbox, checked && styles.checkboxChecked]}>
         {checked ? <Ionicons name="checkmark" size={14} color={color.accentText} /> : null}
       </View>
@@ -365,18 +436,18 @@ const styles = StyleSheet.create({
     justifyContent: 'center'
   },
   title: {
-    fontSize: 18,
-    lineHeight: 24,
+    fontSize: 22,
+    lineHeight: 28,
     color: '#102018',
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     textAlign: 'left',
     letterSpacing: 0
   },
   subtitle: {
-    fontSize: 13,
-    lineHeight: 18,
+    fontSize: 14,
+    lineHeight: 20,
     color: '#66756B',
-    fontFamily: fonts.Regular,
+    ...leafTypography.regular,
     marginTop: 7,
     marginBottom: 58
   },
@@ -397,7 +468,7 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 16,
     color: color.textSecondary,
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     marginBottom: 8
   },
 	  input: {
@@ -409,7 +480,7 @@ const styles = StyleSheet.create({
     minHeight: 54,
     fontSize: 15,
     lineHeight: 20,
-    fontFamily: fonts.Regular,
+    ...leafTypography.regular,
     color: color.textPrimary,
 	    backgroundColor: '#FFFFFF'
 	  },
@@ -428,7 +499,7 @@ const styles = StyleSheet.create({
 	    paddingVertical: 9,
 	    fontSize: 15,
 	    lineHeight: 20,
-	    fontFamily: fonts.Regular,
+	    ...leafTypography.regular,
 	    color: color.textPrimary
 	  },
 	  eyeButton: {
@@ -446,7 +517,7 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 16,
     marginTop: 4,
-    fontFamily: fonts.Medium
+    ...leafTypography.medium
   },
   helperText: {
     marginTop: 0,
@@ -454,7 +525,7 @@ const styles = StyleSheet.create({
     color: color.textSecondary,
     fontSize: 11,
     lineHeight: 14,
-    fontFamily: fonts.Regular
+    ...leafTypography.regular
   },
   passwordMatchRow: {
     flexDirection: 'row',
@@ -466,7 +537,7 @@ const styles = StyleSheet.create({
     color: color.success,
     fontSize: 11,
     lineHeight: 14,
-    fontFamily: fonts.Medium
+    ...leafTypography.medium
   },
   passwordMatchTextError: {
     color: color.error
@@ -482,7 +553,7 @@ const styles = StyleSheet.create({
     lineHeight: 14,
     color: color.accent,
     textDecorationLine: 'underline',
-    fontFamily: fonts.Medium
+    ...leafTypography.medium
   },
   consentsBlock: {
     marginTop: 0
@@ -513,7 +584,7 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 16,
     color: color.textPrimary,
-    fontFamily: fonts.Medium
+    ...leafTypography.medium
   },
   continueButton: {
     minHeight: 46,
@@ -525,7 +596,7 @@ const styles = StyleSheet.create({
   continueButtonText: {
     fontSize: 12,
     lineHeight: 16,
-    fontFamily: fonts.Medium
+    ...leafTypography.medium
   }
 });
 

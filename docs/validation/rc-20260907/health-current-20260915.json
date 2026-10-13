@@ -1,0 +1,38 @@
+{
+  "capturedAt": "2026-09-15T16:05:28.771Z",
+  "environment": "staging",
+  "endpoints": {
+    "api": {
+      "url": "https://api.leaf.app.br/health",
+      "timestamp": "2026-09-15T16:05:28.771Z",
+      "status": "healthy",
+      "redis": { "status": "healthy", "responseTimeMs": 0 },
+      "firestore": { "status": "healthy", "responseTimeMs": 199 },
+      "realtimeDatabase": { "status": "healthy", "responseTimeMs": 2 },
+      "websocket": {
+        "status": "healthy",
+        "connections": 0,
+        "redisAdapter": "ready"
+      },
+      "system": { "status": "healthy", "memoryUsagePercent": 35.4, "cpuUsagePercent": 19.5 }
+    },
+    "socket": {
+      "url": "https://socket.leaf.app.br/health",
+      "timestamp": "2026-09-15T16:05:25.602Z",
+      "status": "healthy",
+      "redis": { "status": "healthy", "responseTimeMs": 1 },
+      "firestore": { "status": "healthy", "responseTimeMs": 199 },
+      "realtimeDatabase": { "status": "healthy", "responseTimeMs": 2 },
+      "websocket": {
+        "status": "healthy",
+        "connections": 0,
+        "redisAdapter": "ready"
+      },
+      "system": { "status": "healthy", "memoryUsagePercent": 35.5, "cpuUsagePercent": 19.8 }
+    }
+  },
+  "limitations": [
+    "Health endpoints are read-only observations; they do not prove provider settlement or biometric completion.",
+    "The previous 2522 ms Firestore warning was not reproduced; current samples are healthy at 199 ms."
+  ]
+}

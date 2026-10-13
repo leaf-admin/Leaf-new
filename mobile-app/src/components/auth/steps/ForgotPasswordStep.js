@@ -1,3 +1,4 @@
+import leafTypography from '../../prototype/LeafTypography';
 import Logger from '../../../utils/Logger';
 /**
  * 🔑 TELA DE ESQUECI A SENHA
@@ -7,7 +8,6 @@ import Logger from '../../../utils/Logger';
 
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, KeyboardAvoidingView, Platform } from 'react-native';
-import { fonts } from '../../../theme/runtimeTokens';
 import auth from '@react-native-firebase/auth';
 import { Ionicons } from '@expo/vector-icons';
 import ContinueButton from '../common/ContinueButton';
@@ -25,6 +25,7 @@ const ForgotPasswordStep = ({ phoneNumber, onPasswordReset, onBack }) => {
     const [timer, setTimer] = useState(60);
     const [canResend, setCanResend] = useState(false);
     const [confirmation, setConfirmation] = useState(null);
+    const [verifiedOtp, setVerifiedOtp] = useState('');
     const [showPassword, setShowPassword] = useState(false);
     const [showConfirmPassword, setShowConfirmPassword] = useState(false);
     const inputRefs = useRef([]);
@@ -52,12 +53,28 @@ const ForgotPasswordStep = ({ phoneNumber, onPasswordReset, onBack }) => {
         setLoading(true);
         try {
             const result = await UserAuthService.requestPasswordReset(phoneNumber);
-            setConfirmation(result.confirmation);
+            setConfirmation(result.confirmation || {
+                verificationId: result.verificationId,
+                isCustomOtp: true,
+                channel: result.channel || 'whatsapp'
+            });
+            setVerifiedOtp('');
             setTimer(60);
             setCanResend(false);
-            Alert.alert('Sucesso', 'Código enviado para seu telefone!');
+            const sentChannel = String(result.confirmation?.channel || result.channel || '').toLowerCase();
+            Alert.alert(
+                'Sucesso',
+                sentChannel === 'whatsapp'
+                    ? 'Código enviado pelo WhatsApp.'
+                    : sentChannel === 'sms'
+                        ? 'Código enviado por SMS.'
+                        : 'Código enviado.'
+            );
         } catch (error) {
             Logger.error('❌ Erro ao solicitar OTP:', error);
+            // Envio falhou: libera o reenvio imediato em vez de esperar o timer.
+            setTimer(0);
+            setCanResend(true);
             if (error.message && error.message.includes('Muitas tentativas')) {
                 Alert.alert('Limite de Tentativas', error.message);
             } else {
@@ -106,6 +123,16 @@ const ForgotPasswordStep = ({ phoneNumber, onPasswordReset, onBack }) => {
 
         setLoading(true);
         try {
+            if (confirmation?.isCustomOtp && confirmation?.verificationId) {
+                // O backend consome o desafio junto com a nova senha. Guardamos
+                // o código nesta etapa para não criar uma segunda confirmação
+                // Firebase nem deixar um token temporário no dispositivo.
+                setVerifiedOtp(code);
+                setStep(2);
+                setOtp(['', '', '', '', '', '']);
+                return;
+            }
+
             // Verificar OTP usando o método confirm do Firebase
             let credential;
             
@@ -150,9 +177,27 @@ const ForgotPasswordStep = ({ phoneNumber, onPasswordReset, onBack }) => {
             return;
         }
 
-	        setLoading(true);
-	        try {
-	            const currentUser = auth().currentUser;
+        setLoading(true);
+        try {
+            if (confirmation?.isCustomOtp) {
+                if (!verifiedOtp) {
+                    throw new Error('Código de recuperação não confirmado');
+                }
+
+                await UserAuthService.resetPassword(
+                    phoneNumber,
+                    confirmation.verificationId,
+                    verifiedOtp,
+                    newPassword
+                );
+                const userData = await UserAuthService.loginWithPassword(phoneNumber, newPassword);
+
+                Alert.alert('Sucesso', 'Senha alterada com sucesso!');
+                onPasswordReset?.(userData);
+                return;
+            }
+
+            const currentUser = auth().currentUser;
 	            if (currentUser) {
 	                await UserAuthService.setupPassword(phoneNumber, newPassword);
 	                
@@ -273,6 +318,8 @@ const ForgotPasswordStep = ({ phoneNumber, onPasswordReset, onBack }) => {
                         <TouchableOpacity
                             style={styles.eyeButton}
                             onPress={() => setShowPassword(!showPassword)}
+                            accessibilityRole="button"
+                            accessibilityLabel={showPassword ? 'Ocultar senha' : 'Mostrar senha'}
                         >
                             <Ionicons
                                 name={showPassword ? 'eye-off' : 'eye'}
@@ -296,6 +343,8 @@ const ForgotPasswordStep = ({ phoneNumber, onPasswordReset, onBack }) => {
                         <TouchableOpacity
                             style={styles.eyeButton}
                             onPress={() => setShowConfirmPassword(!showConfirmPassword)}
+                            accessibilityRole="button"
+                            accessibilityLabel={showConfirmPassword ? 'Ocultar senha' : 'Mostrar senha'}
                         >
                             <Ionicons
                                 name={showConfirmPassword ? 'eye-off' : 'eye'}
@@ -352,15 +401,15 @@ const styles = StyleSheet.create({
         fontSize: 22,
         lineHeight: 28,
         color: color.textPrimary,
-        fontFamily: fonts.Bold,
+        ...leafTypography.bold,
         textAlign: 'left',
         marginBottom: 6
     },
     subtitle: {
-        fontSize: 13,
-        lineHeight: 19,
+        fontSize: 14,
+        lineHeight: 20,
         color: color.textSecondary,
-        fontFamily: fonts.Regular,
+        ...leafTypography.regular,
         marginBottom: spacing.sm
     },
     card: {
@@ -391,7 +440,7 @@ const styles = StyleSheet.create({
         borderRadius: radius.sm,
         textAlign: 'center',
         fontSize: 16,
-        fontFamily: fonts.Bold,
+        ...leafTypography.bold,
         color: color.textPrimary,
         backgroundColor: color.surfaceMuted
     },
@@ -405,18 +454,18 @@ const styles = StyleSheet.create({
         fontSize: 13,
         lineHeight: 18,
         color: color.textSecondary,
-        fontFamily: fonts.Medium
+        ...leafTypography.medium
     },
     resendLink: {
         color: color.accent,
         textDecorationLine: 'underline',
-        fontFamily: fonts.Medium,
+        ...leafTypography.medium,
         fontSize: 13,
         lineHeight: 18
     },
     timerText: {
         color: color.textMuted,
-        fontFamily: fonts.Medium,
+        ...leafTypography.medium,
         fontSize: 13,
         lineHeight: 18
     },
@@ -436,7 +485,7 @@ const styles = StyleSheet.create({
         paddingVertical: 10,
         fontSize: 14,
         lineHeight: 18,
-        fontFamily: fonts.Medium,
+        ...leafTypography.medium,
         color: color.textPrimary
     },
     eyeButton: {
@@ -456,7 +505,7 @@ const styles = StyleSheet.create({
         fontSize: 12,
         lineHeight: 16,
         color: color.textSecondary,
-        fontFamily: fonts.Regular,
+        ...leafTypography.regular,
         marginBottom: 4
     },
     backButton: {
@@ -468,7 +517,7 @@ const styles = StyleSheet.create({
         color: color.textSecondary,
         fontSize: 13,
         lineHeight: 18,
-        fontFamily: fonts.Medium,
+        ...leafTypography.medium,
         textDecorationLine: 'underline'
     }
 });

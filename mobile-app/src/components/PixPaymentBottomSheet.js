@@ -172,7 +172,7 @@ const styles = StyleSheet.create({
   },
   title: {
     fontSize: 24,
-    fontWeight: 'bold',
+    fontFamily: 'Figtree-Bold',
     color: '#2E8B57',
     marginBottom: 8,
   },
@@ -202,7 +202,7 @@ const styles = StyleSheet.create({
   },
   amount: {
     fontSize: 32,
-    fontWeight: 'bold',
+    fontFamily: 'Figtree-Bold',
     color: '#2E8B57',
     marginBottom: 8,
   },
@@ -225,7 +225,7 @@ const styles = StyleSheet.create({
   successText: {
     color: '#155724',
     fontSize: 16,
-    fontWeight: 'bold',
+    fontFamily: 'Figtree-Bold',
     textAlign: 'center',
   },
   errorContainer: {
@@ -237,7 +237,7 @@ const styles = StyleSheet.create({
   errorText: {
     color: '#721C24',
     fontSize: 16,
-    fontWeight: 'bold',
+    fontFamily: 'Figtree-Bold',
     textAlign: 'center',
   },
 });

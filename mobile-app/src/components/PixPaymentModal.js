@@ -242,7 +242,7 @@ const styles = StyleSheet.create({
     },
     title: {
         fontSize: 24,
-        fontWeight: 'bold',
+        fontFamily: 'Figtree-Bold',
         color: '#333',
     },
     securePaymentBadge: {
@@ -280,7 +280,7 @@ const styles = StyleSheet.create({
     retryButtonText: {
         color: '#FFF',
         fontSize: 16,
-        fontWeight: 'bold',
+        fontFamily: 'Figtree-Bold',
     },
     qrContainer: {
         alignItems: 'center',
@@ -291,7 +291,7 @@ const styles = StyleSheet.create({
     },
     amountText: {
         fontSize: 32,
-        fontWeight: 'bold',
+        fontFamily: 'Figtree-Bold',
         color: '#00D4AA',
     },
     customerText: {
@@ -338,7 +338,7 @@ const styles = StyleSheet.create({
         marginLeft: 5,
         color: '#00D4AA',
         fontSize: 14,
-        fontWeight: 'bold',
+        fontFamily: 'Figtree-Bold',
     },
     instructions: {
         backgroundColor: '#F8F9FA',
@@ -348,7 +348,7 @@ const styles = StyleSheet.create({
     },
     instructionsTitle: {
         fontSize: 16,
-        fontWeight: 'bold',
+        fontFamily: 'Figtree-Bold',
         color: '#333',
         marginBottom: 10,
     },

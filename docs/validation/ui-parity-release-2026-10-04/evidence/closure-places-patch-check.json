@@ -1,0 +1,35 @@
+{
+  "baseCommit": "3ddaefc7d7db10c107a61c79f7d95e8bb1bbbe35",
+  "candidateCommit": "f87ee33504091a90bbc5fdc96dd7f51ab61115ad",
+  "pr": "https://github.com/leaf-admin/Leaf-new/pull/222",
+  "patchSha256": "40fd1e380090ec83492819da006e1336ada4c3cfe580c7121f29c3c9ff37333d",
+  "patchAppliesToBase": true,
+  "reversePatchAppliesToCandidate": true,
+  "files": [
+    {
+      "path": "leaf-websocket-backend/routes/account-routes.js",
+      "baseSha256": "54e6f9066532f60c97b5d1431d2ab2fec8452e0212455395ec7765bd13fce324",
+      "candidateSha256": "a4d871026d99f8f68400c53d6ec3196d87087c3494a874eb411a58032f5df892",
+      "identicalToMobileRc": true
+    },
+    {
+      "path": "leaf-websocket-backend/services/account-saved-places.js",
+      "baseSha256": null,
+      "candidateSha256": "e6fef2ddc852bf8ab7461d9d8de7facccc7cb26cbad150ac345258c2d7d9c87a",
+      "identicalToMobileRc": true
+    },
+    {
+      "path": "leaf-websocket-backend/tests/unit/routes/account-routes.unit.test.js",
+      "baseSha256": "34f08963b89ee1f90b10393a10cdc1fe4de2ecdb697bfb1599ea39e062b6c064",
+      "candidateSha256": "4adfd9fe361233366741736e96709b73c7f16dccb8cfdf0e0958d788730977fa",
+      "identicalToMobileRc": true
+    },
+    {
+      "path": "leaf-websocket-backend/tests/unit/services/account-saved-places.unit.test.js",
+      "baseSha256": null,
+      "candidateSha256": "36c4a961678988cb948886deda2946cd8fbba97e7d59d246efc9800a3ed29505",
+      "identicalToMobileRc": true
+    }
+  ],
+  "deploymentExecuted": false
+}

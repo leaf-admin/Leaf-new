@@ -79,13 +79,13 @@ describe('AuthProvider startup shell', () => {
       loading: true,
     });
 
-    const { getByText, queryByText } = render(
+    const { getByTestId, queryByText } = render(
       <AuthProvider>
         <Text>app-ready-child</Text>
       </AuthProvider>
     );
 
-    expect(getByText('Bem vindo(a)')).toBeTruthy();
+    expect(getByTestId('auth-bootstrap-splash')).toBeTruthy();
     expect(queryByText('app-ready-child')).toBeNull();
   });
 
@@ -102,7 +102,7 @@ describe('AuthProvider startup shell', () => {
     );
 
     expect(getByText('app-ready-child')).toBeTruthy();
-    expect(queryByText('Bem vindo(a)')).toBeNull();
+    expect(queryByText('Bem-vindo(a)')).toBeNull();
   });
 
   it('does not keep the global bootstrap shell over a valid local session', async () => {
@@ -138,7 +138,7 @@ describe('AuthProvider startup shell', () => {
 
     await waitFor(() => {
       expect(getByText('app-ready-child')).toBeTruthy();
-      expect(queryByText('Bem vindo(a), Leaf')).toBeNull();
+      expect(queryByText('Bem-vindo(a), Leaf')).toBeNull();
     });
 
     expect(mockDispatch).toHaveBeenCalledWith(
@@ -202,7 +202,7 @@ describe('AuthProvider startup shell', () => {
     });
 
     await waitFor(() => {
-      expect(queryByText('Bem vindo(a)')).toBeNull();
+      expect(queryByText('Bem-vindo(a)')).toBeNull();
       expect(getByText('app-ready-child')).toBeTruthy();
     });
     expect(mobileProfileService.getCurrentProfile).toHaveBeenCalledTimes(1);
@@ -257,7 +257,7 @@ describe('AuthProvider startup shell', () => {
     });
 
     await waitFor(() => {
-      expect(queryByText('Bem vindo(a), Leaf')).toBeNull();
+      expect(queryByText('Bem-vindo(a), Leaf')).toBeNull();
       expect(getByText('app-ready-child')).toBeTruthy();
     });
     expect(mockDispatch).toHaveBeenCalledWith(
@@ -400,7 +400,7 @@ describe('AuthProvider startup shell', () => {
       ['@test_mode', 'true'],
     ]);
 
-    const { getByText } = render(
+    const { getByTestId } = render(
       <AuthProvider>
         <Text>app-ready-child</Text>
       </AuthProvider>
@@ -410,7 +410,7 @@ describe('AuthProvider startup shell', () => {
       expect(AsyncStorage.multiGet).toHaveBeenCalled();
     });
 
-    expect(getByText('Bem vindo(a)')).toBeTruthy();
+    expect(getByTestId('auth-bootstrap-splash')).toBeTruthy();
     expect(mockDispatch).not.toHaveBeenCalled();
   });
 
@@ -502,8 +502,8 @@ describe('AuthProvider startup shell', () => {
     });
 
     expect(getByText('app-ready-child')).toBeTruthy();
-    expect(queryByText('Bem vindo(a), Leaf')).toBeNull();
-    expect(queryByText('Bem vindo(a)')).toBeNull();
+    expect(queryByText('Bem-vindo(a), Leaf')).toBeNull();
+    expect(queryByText('Bem-vindo(a)')).toBeNull();
 
     await act(async () => {
       remoteProfileDeferred.resolve({

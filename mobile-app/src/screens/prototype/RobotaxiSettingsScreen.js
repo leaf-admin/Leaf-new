@@ -1,9 +1,11 @@
-import React, { useCallback, useEffect, useState } from 'react';
-import { Alert, ScrollView, StatusBar, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
+import leafTypography from '../../components/prototype/LeafTypography';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { ActivityIndicator, Alert, AppState, Linking, Platform, ScrollView, StatusBar, StyleSheet, Switch, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
+import * as Application from 'expo-application';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useSelector } from 'react-redux';
 import { Ionicons } from '@expo/vector-icons';
-import { fonts } from '../../theme/runtimeTokens';
+import { LeafObjectIcon } from '../../components/prototype/LeafVisualElements';
 import PrototypeScreenTransition from '../../components/prototype/PrototypeScreenTransition';
 import PrototypeDismissibleSheet from '../../components/prototype/PrototypeDismissibleSheet';
 import { usePrototypeMapOcclusion } from './prototypeMapOcclusion';
@@ -13,19 +15,22 @@ import { useAccountSessionReset } from '../../hooks/useAccountSessionReset';
 import Logger from '../../utils/Logger';
 import { isCurrentSurfaceUnavailable } from './currentSurfaceStatus';
 import { ROBOTAXI_SETTINGS_ITEMS } from './robotaxiSettingsConfig';
+import { useMobilePreferences } from '../../components/MobilePreferencesProvider';
+import FCMNotificationService from '../../services/FCMNotificationService';
+import { isLeafVoiceAvailable, stopLeafNavigationVoice } from '../../services/LeafVoiceGuidanceService';
 
-const SURFACE_TOP_PADDING = 28;
+const SURFACE_TOP_PADDING = 20;
 const SURFACE_BOTTOM_PADDING = 18;
 const BACKDROP_COLOR = 'transparent';
 const SETTINGS_COLOR = {
-  bg: '#F8F6F1',
-  text: '#171412',
-  title: '#171412',
-  secondary: '#756F68',
-  line: '#E9E2D8',
+  bg: '#FFFFFF',
+  text: '#222222',
+  title: '#222222',
+  secondary: '#6A6A6A',
+  line: '#E5E5E5',
   danger: '#9F2424',
   icon: '#514B45',
-  chevron: '#827B73',
+  chevron: '#767676',
 };
 
 function SettingRow({
@@ -35,27 +40,30 @@ function SettingRow({
   onPress,
   rowTestID,
   switchTestID,
+  switchValue,
+  onValueChange,
+  disabled = false,
   showChevron = false,
   tone = 'default',
   last = false,
 }) {
+  const informational = !onValueChange && !onPress;
+  const Container = onValueChange || informational ? View : TouchableOpacity;
   return (
-    <TouchableOpacity
+    <Container
       style={[styles.settingRow, last && styles.settingRowLast]}
       onPress={onPress}
+      disabled={disabled}
       activeOpacity={0.78}
       testID={rowTestID}
-      accessibilityLabel={title}
-      accessibilityHint={subtitle}
-      accessibilityRole="button"
-      accessibilityState={{ disabled: false }}
+      accessible={informational ? true : undefined}
+      accessibilityLabel={onValueChange ? undefined : title}
+      accessibilityHint={onValueChange ? undefined : subtitle}
+      accessibilityRole={onValueChange ? undefined : informational ? 'text' : 'button'}
+      accessibilityState={{ disabled }}
     >
       <View style={styles.rowIconSlot}>
-        <Ionicons
-          name={icon || 'ellipse-outline'}
-          size={17}
-          color={tone === 'danger' ? SETTINGS_COLOR.danger : SETTINGS_COLOR.icon}
-        />
+        <LeafObjectIcon symbol={icon} size={40} />
       </View>
       <View style={styles.settingTextWrap}>
         <Text style={[styles.settingTitle, tone === 'danger' && styles.settingTitleDanger]}>
@@ -63,7 +71,18 @@ function SettingRow({
         </Text>
         <Text style={styles.settingSubtitle}>{subtitle}</Text>
       </View>
-      <View testID={switchTestID} accessible={false} style={styles.hiddenSwitchTarget} />
+      {onValueChange ? <Switch
+        testID={switchTestID}
+        value={Boolean(switchValue)}
+        onValueChange={onValueChange}
+        disabled={disabled}
+        accessibilityLabel={title}
+        accessibilityHint={subtitle}
+        accessibilityState={{ disabled, checked: Boolean(switchValue) }}
+        trackColor={{ false: '#D7D7D7', true: '#1A330E' }}
+        thumbColor="#FFFFFF"
+        ios_backgroundColor="#D7D7D7"
+      /> : null}
       {showChevron ? (
         <Ionicons
           name="chevron-forward"
@@ -71,7 +90,7 @@ function SettingRow({
           color={tone === 'danger' ? SETTINGS_COLOR.danger : SETTINGS_COLOR.chevron}
         />
       ) : null}
-    </TouchableOpacity>
+    </Container>
   );
 }
 
@@ -79,9 +98,80 @@ export default function RobotaxiSettingsScreen({ navigation, route }) {
   const authProfile = useSelector(state => state?.auth?.profile);
   const insets = useSafeAreaInsets();
   const { height: windowHeight } = useWindowDimensions();
-  const { riderProfile } = usePrototypeRideRuntime();
+  const { riderProfile, activeRole } = usePrototypeRideRuntime();
   const [panelHeight, setPanelHeight] = useState(windowHeight);
   const deletionProfile = authProfile || riderProfile;
+  const isDriver = activeRole ? activeRole === 'driver' : deletionProfile?.userType === 'driver' || deletionProfile?.usertype === 'driver';
+  const { preferences, ready, loading, saving, error, refresh, update } = useMobilePreferences();
+  const [notificationPermission, setNotificationPermission] = useState(null);
+  const previousPermission = useRef(null);
+  const [permissionBusy, setPermissionBusy] = useState(false);
+  const [voiceAvailable, setVoiceAvailable] = useState(null);
+
+  const receivePermission = useCallback(granted => {
+    const newlyGranted = granted && previousPermission.current === false;
+    previousPermission.current = granted;
+    setNotificationPermission(granted);
+    if (newlyGranted) FCMNotificationService.getFCMToken().catch(failure => Logger.warn('Registro push pendente:', failure.message));
+  }, []);
+
+  useEffect(() => {
+    let live = true;
+    const syncPermission = () => FCMNotificationService.hasNotificationPermission()
+      .then(granted => { if (live) receivePermission(granted); });
+    syncPermission();
+    if (isDriver) isLeafVoiceAvailable().then(available => { if (live) setVoiceAvailable(available); });
+    const focus = navigation?.addListener?.('focus', () => { syncPermission(); refresh({ forceRefresh: true }); });
+    const subscription = AppState.addEventListener('change', state => { if (state === 'active') syncPermission(); });
+    return () => { live = false; focus?.(); subscription?.remove(); };
+  }, [navigation, isDriver, refresh, receivePermission]);
+
+  // Android: go straight to this app's notification screen instead of the
+  // generic "App info" page; fall back to it if the intent is unavailable.
+  const openNotificationSettings = useCallback(async () => {
+    if (Platform.OS === 'android' && Application.applicationId) {
+      try {
+        await Linking.sendIntent('android.settings.APP_NOTIFICATION_SETTINGS', [
+          { key: 'android.provider.extra.APP_PACKAGE', value: Application.applicationId },
+        ]);
+        return;
+      } catch { /* fall back to app settings */ }
+    }
+    await Linking.openSettings();
+  }, []);
+
+  const configureNotifications = useCallback(async () => {
+    if (permissionBusy) return;
+    setPermissionBusy(true);
+    try {
+      const granted = await FCMNotificationService.hasNotificationPermission();
+      if (granted) await openNotificationSettings();
+      else {
+        const enabled = await FCMNotificationService.requestUserPermission();
+        receivePermission(enabled);
+        if (!enabled) Alert.alert('Notificações desativadas', 'Ative as notificações da Leaf nos ajustes do dispositivo.', [
+          { text: 'Agora não', style: 'cancel' },
+          { text: 'Abrir ajustes', onPress: () => openNotificationSettings().catch(() => Alert.alert('Ajustes indisponíveis', 'Abra os ajustes do dispositivo e selecione Leaf.')) },
+        ]);
+      }
+    } catch { Alert.alert('Não foi possível abrir os ajustes', 'Tente novamente.'); }
+    finally { setPermissionBusy(false); }
+  }, [openNotificationSettings, permissionBusy, receivePermission]);
+
+  const savePreference = useCallback(async (key, value) => {
+    try {
+      if (key === 'voiceGuidanceEnabled' && value) {
+        const available = await isLeafVoiceAvailable();
+        setVoiceAvailable(available);
+        if (!available) {
+          Alert.alert('Voz indisponível', 'Instale uma voz em português do Brasil nos ajustes do dispositivo. Para versões anteriores do app, instale a atualização da Leaf.');
+          return;
+        }
+      }
+      if (key === 'voiceGuidanceEnabled' && !value) await stopLeafNavigationVoice();
+      await update({ [key]: value });
+    } catch (failure) { Alert.alert('Configuração não salva', failure.message); }
+  }, [update]);
   const { promptAccountDeletion } = useAccountDeletionFlow({
     navigation,
     profile: deletionProfile,
@@ -94,11 +184,10 @@ export default function RobotaxiSettingsScreen({ navigation, route }) {
   });
 
   useEffect(() => {
-    const hideStatusBar = () => StatusBar.setHidden(true, 'fade');
     const showStatusBar = () => StatusBar.setHidden(false, 'fade');
 
-    hideStatusBar();
-    const removeFocusListener = navigation?.addListener?.('focus', hideStatusBar);
+    showStatusBar();
+    const removeFocusListener = navigation?.addListener?.('focus', showStatusBar);
     const removeBlurListener = navigation?.addListener?.('blur', showStatusBar);
 
     return () => {
@@ -115,8 +204,12 @@ export default function RobotaxiSettingsScreen({ navigation, route }) {
   });
 
   const handleDismiss = useCallback(() => {
+    if (route?.params?.returnToAccount && navigation.canGoBack()) {
+      navigation.goBack();
+      return;
+    }
     navigation.navigate('RobotaxiPrototype');
-  }, [navigation]);
+  }, [navigation, route?.params?.returnToAccount]);
 
   const handlePanelLayout = useCallback(event => {
     const nextHeight = event?.nativeEvent?.layout?.height;
@@ -128,7 +221,7 @@ export default function RobotaxiSettingsScreen({ navigation, route }) {
   const promptLogout = useCallback(() => {
     Alert.alert(
       'Sair da conta',
-      'Tem certeza que deseja voltar para a entrada por telefone?',
+      'Tem certeza que deseja sair da sua conta Leaf?',
       [
         { text: 'Cancelar', style: 'cancel' },
         {
@@ -150,7 +243,10 @@ export default function RobotaxiSettingsScreen({ navigation, route }) {
       item: ROBOTAXI_SETTINGS_ITEMS.notifications,
       icon: 'notifications-outline',
       title: 'Notificações',
-      subtitle: 'Viagens, pagamentos e segurança',
+      subtitle: notificationPermission === null ? 'Verificando permissão' : notificationPermission ? 'Ativadas no dispositivo' : 'Desativadas no dispositivo',
+      onPress: configureNotifications,
+      disabled: permissionBusy,
+      showChevron: true,
       rowTestID: 'robotaxi-settings-row-notifications',
       switchTestID: 'robotaxi-settings-switch-notifications',
     },
@@ -159,6 +255,8 @@ export default function RobotaxiSettingsScreen({ navigation, route }) {
       icon: 'language-outline',
       title: 'Idioma',
       subtitle: 'Português do Brasil',
+      // Single language: informational row (no chevron/alert dead end) until
+      // a real language picker exists.
       rowTestID: 'robotaxi-settings-row-language',
     },
     {
@@ -168,14 +266,22 @@ export default function RobotaxiSettingsScreen({ navigation, route }) {
       subtitle: 'Condições de trânsito',
       rowTestID: 'robotaxi-settings-row-traffic',
       switchTestID: 'robotaxi-settings-switch-traffic',
+      switchValue: preferences.trafficLayerEnabled,
+      onValueChange: value => savePreference('trafficLayerEnabled', value),
+      disabled: !ready || loading || saving,
+      driverOnly: true,
     },
     {
       item: ROBOTAXI_SETTINGS_ITEMS.voice,
       icon: 'volume-medium-outline',
       title: 'Instruções por voz',
-      subtitle: 'Orientações de áudio',
+      subtitle: voiceAvailable === false ? 'Configure a voz do dispositivo' : 'Orientações durante a navegação',
       rowTestID: 'robotaxi-settings-row-voice',
       switchTestID: 'robotaxi-settings-switch-voice',
+      switchValue: preferences.voiceGuidanceEnabled,
+      onValueChange: value => savePreference('voiceGuidanceEnabled', value),
+      disabled: !ready || loading || saving,
+      driverOnly: true,
     },
     {
       item: ROBOTAXI_SETTINGS_ITEMS.privacy,
@@ -210,12 +316,13 @@ export default function RobotaxiSettingsScreen({ navigation, route }) {
       icon: 'help-circle-outline',
       title: 'Falar com suporte',
       subtitle: 'Ajuda sem sair do fluxo atual',
-      onPress: () => navigation.replace('RobotaxiPrototypeSupport'),
+      // Push (not replace): replacing removed Settings mid-transition and flashed the home map.
+      onPress: () => navigation.navigate('RobotaxiPrototypeSupport'),
       rowTestID: 'robotaxi-settings-open-support',
       showChevron: true,
       last: true,
     },
-  ].filter(({ item }) => !isCurrentSurfaceUnavailable(item.status));
+  ].filter(({ item, driverOnly }) => !isCurrentSurfaceUnavailable(item.status) && (!driverOnly || isDriver));
 
   return (
     <PrototypeScreenTransition>
@@ -223,7 +330,6 @@ export default function RobotaxiSettingsScreen({ navigation, route }) {
         style={styles.container}
         pointerEvents="box-none"
         testID="robotaxi-settings-screen"
-        accessibilityLabel="robotaxi-settings-screen"
       >
         <StatusBar translucent backgroundColor="transparent" barStyle="dark-content" />
         <PrototypeDismissibleSheet
@@ -243,28 +349,32 @@ export default function RobotaxiSettingsScreen({ navigation, route }) {
             ]}
           >
             <View style={styles.headerRow}>
-              <View style={styles.headerCopy}>
-                <Text style={styles.screenTitle}>Configurações</Text>
-                <Text style={styles.screenSubtitle}>
-                  Conta, privacidade e suporte.
-                </Text>
-              </View>
               <TouchableOpacity
                 style={styles.closeButton}
                 onPress={handleDismiss}
                 activeOpacity={0.78}
                 testID="robotaxi-settings-close-button"
-                accessibilityLabel="Fechar configurações"
+                accessibilityLabel="Voltar"
               >
-                <Ionicons name="close" size={18} color={SETTINGS_COLOR.text} />
+                <Ionicons name="arrow-back" size={20} color={SETTINGS_COLOR.text} />
               </TouchableOpacity>
+              <View style={styles.headerCopy}>
+                <Text style={styles.screenTitle}>Configurações</Text>
+              </View>
+              {/* Rows render from cache immediately; refresh/save status lives in
+                  the header so the list never shifts when it appears or clears. */}
+              {loading || saving ? <View testID={loading ? 'robotaxi-settings-loading' : 'robotaxi-settings-saving'}
+                accessibilityLabel={loading ? 'Carregando configurações' : 'Salvando configuração'} accessibilityLiveRegion="polite">
+                <ActivityIndicator size="small" color="#1A330E" />
+              </View> : null}
             </View>
 
             <ScrollView
               showsVerticalScrollIndicator={false}
               contentContainerStyle={styles.rowsContent}
             >
-              {visibleSettingRows.map(({ item, ...row }) => (
+              {error ? <TouchableOpacity testID="robotaxi-settings-retry" style={styles.feedback} onPress={() => refresh({ forceRefresh: true })}><Text style={styles.settingSubtitle}>Configurações não atualizadas · Tentar novamente</Text></TouchableOpacity> : null}
+              {visibleSettingRows.map(({ item, driverOnly, ...row }) => (
                 <SettingRow key={item.key} {...row} />
               ))}
             </ScrollView>
@@ -276,6 +386,7 @@ export default function RobotaxiSettingsScreen({ navigation, route }) {
 }
 
 const styles = StyleSheet.create({
+  feedback: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 12 },
   container: {
     flex: 1,
     backgroundColor: 'transparent',
@@ -290,43 +401,45 @@ const styles = StyleSheet.create({
   },
   headerRow: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
+    alignItems: 'center',
     justifyContent: 'space-between',
-    gap: 14,
+    gap: 12,
+    minHeight: 44,
+    marginBottom: 20,
   },
   headerCopy: {
     flex: 1,
     paddingRight: 4,
   },
   closeButton: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: SETTINGS_COLOR.line,
+    backgroundColor: '#F5F5F5',
   },
   screenTitle: {
     color: SETTINGS_COLOR.title,
-    fontFamily: fonts.SemiBold,
-    fontSize: 20,
-    lineHeight: 26,
+    ...leafTypography.semiBold,
+    fontSize: 22,
+    lineHeight: 28,
+    letterSpacing: -0.4,
   },
   screenSubtitle: {
     marginTop: 8,
     color: SETTINGS_COLOR.secondary,
-    fontFamily: fonts.Regular,
-    fontSize: 13,
-    lineHeight: 18,
+    ...leafTypography.regular,
+    fontSize: 14,
+    lineHeight: 20,
   },
   rowsContent: {
-    paddingTop: 18,
+    paddingTop: 4,
     paddingBottom: 28,
   },
   settingRow: {
-    minHeight: 60,
+    minHeight: 68,
+    paddingVertical: 10,
     flexDirection: 'row',
     alignItems: 'center',
     borderBottomWidth: StyleSheet.hairlineWidth,
@@ -342,9 +455,9 @@ const styles = StyleSheet.create({
   },
   settingTitle: {
     color: SETTINGS_COLOR.text,
-    fontFamily: fonts.Medium,
-    fontSize: 13,
-    lineHeight: 17,
+    ...leafTypography.medium,
+    fontSize: 16,
+    lineHeight: 22,
   },
   settingTitleDanger: {
     color: SETTINGS_COLOR.danger,
@@ -352,12 +465,12 @@ const styles = StyleSheet.create({
   settingSubtitle: {
     marginTop: 3,
     color: SETTINGS_COLOR.secondary,
-    fontFamily: fonts.Regular,
-    fontSize: 10,
-    lineHeight: 13,
+    ...leafTypography.regular,
+    fontSize: 13,
+    lineHeight: 18,
   },
   rowIconSlot: {
-    width: 28,
+    width: 52,
     alignItems: 'flex-start',
     justifyContent: 'center',
   },

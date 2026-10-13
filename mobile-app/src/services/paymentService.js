@@ -104,7 +104,7 @@ export const createPixCharge = async (chargeData = {}) => {
     Logger.error('❌ Erro ao criar cobrança PIX:', error?.response?.data || error.message);
     throw toUserFriendlyError(error, {
       context: 'payment',
-      fallbackMessage: 'Nao foi possivel gerar o pagamento Pix agora. Tente novamente.'
+      fallbackMessage: 'Não foi possível gerar o pagamento Pix agora. Tente novamente.'
     });
   }
 };
@@ -125,7 +125,7 @@ export const checkPaymentStatus = async (chargeId) => {
     Logger.error('❌ Erro ao verificar status do pagamento:', error?.response?.data || error.message);
     throw toUserFriendlyError(error, {
       context: 'payment',
-      fallbackMessage: 'Nao foi possivel verificar o status do pagamento agora.'
+      fallbackMessage: 'Não foi possível verificar o status do pagamento agora.'
     });
   }
 };
@@ -138,7 +138,7 @@ export const listCharges = async (filters = {}) => {
     Logger.error('❌ Erro ao listar cobranças:', error?.response?.data || error.message);
     throw toUserFriendlyError(error, {
       context: 'payment',
-      fallbackMessage: 'Nao foi possivel carregar as cobrancas agora.'
+      fallbackMessage: 'Não foi possível carregar as cobranças agora.'
     });
   }
 };
@@ -155,7 +155,7 @@ export const createRefund = async (chargeId, amount, reason) => {
     Logger.error('❌ Erro ao criar reembolso:', error?.response?.data || error.message);
     throw toUserFriendlyError(error, {
       context: 'payment',
-      fallbackMessage: 'Nao foi possivel processar o reembolso agora.'
+      fallbackMessage: 'Não foi possível processar o reembolso agora.'
     });
   }
 };
@@ -236,7 +236,7 @@ export const cancelTrip = async (tripId, reason) => {
     Logger.error('❌ Erro ao cancelar corrida:', error?.response?.data || error.message);
     throw toUserFriendlyError(error, {
       context: 'trip',
-      fallbackMessage: 'Nao foi possivel cancelar a viagem agora.'
+      fallbackMessage: 'Não foi possível cancelar a viagem agora.'
     });
   }
 };
@@ -260,7 +260,7 @@ export const getChargeDetails = async (chargeId) => {
     Logger.error('❌ Erro ao obter detalhes da cobrança:', error?.response?.data || error.message);
     throw toUserFriendlyError(error, {
       context: 'payment',
-      fallbackMessage: 'Nao foi possivel carregar os detalhes da cobranca agora.'
+      fallbackMessage: 'Não foi possível carregar os detalhes da cobrança agora.'
     });
   }
 };

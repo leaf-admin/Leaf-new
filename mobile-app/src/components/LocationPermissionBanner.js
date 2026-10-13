@@ -130,7 +130,7 @@ const styles = StyleSheet.create({
   },
   message: {
     fontSize: 14,
-    fontWeight: '500',
+    fontFamily: 'Figtree-Medium',
     color: '#333',
     lineHeight: 20,
     marginBottom: 12,
@@ -146,7 +146,7 @@ const styles = StyleSheet.create({
   },
   enableButtonText: {
     fontSize: 14,
-    fontWeight: '600',
+    fontFamily: 'Figtree-SemiBold',
     color: '#FFFFFF',
   },
 });

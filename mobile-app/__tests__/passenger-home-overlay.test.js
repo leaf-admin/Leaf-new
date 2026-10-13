@@ -2,8 +2,66 @@ import React from "react";
 import { fireEvent, render } from "@testing-library/react-native";
 
 import PassengerHomeOverlay from "../src/screens/prototype/home/PassengerHomeOverlay";
+import LeafPassengerSearch from "../src/screens/prototype/home/LeafPassengerSearch";
+
+jest.mock('react-native-safe-area-context', () => ({
+  useSafeAreaInsets: () => ({ top: 0, right: 0, bottom: 0, left: 0 }),
+}));
 
 describe("PassengerHomeOverlay", () => {
+  it("anchors the search field where the landing pill sits and lists rows below it", () => {
+    const screen = render(<LeafPassengerSearch kind="destination" query="" results={[]} keyboardHeight={300} />);
+    // Full-screen surface mirroring the landing: no bottom sheet that moves with the keyboard.
+    expect(screen.getByTestId('passenger-home-destination-search-sheet')).toHaveStyle({ top: 0, bottom: 0, paddingTop: 16 });
+    expect(screen.getByTestId('passenger-home-destination-search-close')).toBeTruthy();
+    screen.rerender(<LeafPassengerSearch kind="destination" query="" keyboardHeight={300}
+      results={[1, 2, 3].map(id => ({ item: { id }, display: { title: `Destino ${id}`, address: `Rua ${id}` } }))} />);
+    expect(screen.getByTestId('passenger-home-destination-search-sheet')).toHaveStyle({ top: 0, bottom: 0 });
+    expect(screen.getByTestId('passenger-home-destination-result-2')).toBeTruthy();
+  });
+
+  it("shows recent destinations only in the empty destination search and preserves the selected item", () => {
+    const recent = { id: 'recent-home', name: 'Casa', address: 'Rua das Flores, 24', coordinate: { latitude: -22.9, longitude: -43.2 } };
+    const onDestinationResultPress = jest.fn();
+    const screen = render(<PassengerHomeOverlay destinationSearchActive destinationSearchQuery=""
+      destinationSearchResults={[recent]} onDestinationResultPress={onDestinationResultPress} />);
+    expect(screen.getByText('Destinos recentes')).toBeTruthy();
+    expect(screen.getByText('Casa')).toBeTruthy();
+    expect(screen.getByText('Rua das Flores, 24')).toBeTruthy();
+    expect(screen.getByTestId('passenger-home-destination-result-0')).toHaveProp('accessibilityLabel', 'Destino recente: Casa');
+    fireEvent.press(screen.getByTestId('passenger-home-destination-result-0'));
+    expect(onDestinationResultPress).toHaveBeenCalledWith(recent);
+    screen.rerender(<PassengerHomeOverlay destinationSearchActive destinationSearchQuery="Casa"
+      destinationSearchResults={[recent]} onDestinationResultPress={onDestinationResultPress} />);
+    expect(screen.queryByText('Destinos recentes')).toBeNull();
+  });
+
+  it("keeps the search empty state concise and avoids premature no-results feedback", () => {
+    const screen = render(<PassengerHomeOverlay destinationSearchActive destinationSearchQuery="" destinationSearchResults={[]} />);
+    expect(screen.queryByText('Destinos recentes')).toBeNull();
+    expect(screen.queryByText('Seu próximo destino')).toBeNull();
+    expect(screen.getByText('Busque um endereço ou lugar.')).toBeTruthy();
+    screen.rerender(<PassengerHomeOverlay destinationSearchActive destinationSearchQuery="Ca" destinationSearchResults={[]} />);
+    expect(screen.queryByText('Nenhum lugar encontrado')).toBeNull();
+    expect(screen.getByText('Continue digitando para buscar.')).toBeTruthy();
+    // Debounce pending: the honest state is "searching", not "no results".
+    screen.rerender(<PassengerHomeOverlay destinationSearchActive destinationSearchQuery="Casa" destinationSearchResults={[]} />);
+    expect(screen.queryByText('Nenhum lugar encontrado')).toBeNull();
+    expect(screen.getByText('Buscando…')).toBeTruthy();
+    screen.rerender(<PassengerHomeOverlay destinationSearchActive destinationSearchQuery="Casa" destinationSearchSearching destinationSearchResults={[]} />);
+    screen.rerender(<PassengerHomeOverlay destinationSearchActive destinationSearchQuery="Casa" destinationSearchSearching={false} destinationSearchResults={[]} />);
+    expect(screen.getByText('Nenhum lugar encontrado')).toBeTruthy();
+  });
+
+  it("keeps pickup search distinct from destination recents and opens the map adjustment", () => {
+    const onPickupMapPress = jest.fn();
+    const screen = render(<PassengerHomeOverlay pickupSearchActive pickupSearchQuery="" pickupSearchResults={[]} onPickupMapPress={onPickupMapPress} />);
+    expect(screen.queryByText('Destinos recentes')).toBeNull();
+    expect(screen.queryByText('Seu próximo destino')).toBeNull();
+    fireEvent.press(screen.getByTestId('passenger-home-pickup-map-option'));
+    expect(onPickupMapPress).toHaveBeenCalledTimes(1);
+  });
+
   it("keeps recent destinations out of the initial passenger card", () => {
     const onDestinationPress = jest.fn();
     const onPickupPress = jest.fn();
@@ -142,12 +200,12 @@ describe("PassengerHomeOverlay", () => {
     );
 
     expect(getByTestId("passenger-home-category-card")).toHaveProp("accessible", true);
-    expect(getByText("Sua viagem")).toBeTruthy();
-    expect(getByText("Local de partida")).toBeTruthy();
-    expect(getByText("Local de destino")).toBeTruthy();
+    // Compact summary: addresses only, with origin/destination marks (no titles).
+    expect(queryByText("Sua viagem")).toBeNull();
+    expect(getByTestId("passenger-home-pickup-input")).toHaveProp("accessibilityLabel", expect.stringContaining("Origem:"));
+    expect(getByText("Mercadão de Madureira")).toBeTruthy();
     expect(getByText("R$ 18,55")).toBeTruthy();
-    expect(getByText("Chegada estimada")).toBeTruthy();
-    expect(getByText("15:30")).toBeTruthy();
+    expect(getByText("Chegada ~15:30")).toBeTruthy();
     fireEvent.press(getByTestId("passenger-home-pickup-input"));
     expect(onPickupPress).not.toHaveBeenCalled();
     expect(queryByText("27 min")).toBeNull();
@@ -187,7 +245,7 @@ describe("PassengerHomeOverlay", () => {
     expect(queryByText("Não foi possível validar motoristas agora.")).toBeNull();
   });
 
-  it("rolls category selection infinitely with side arrows", () => {
+  it("selects categories from the three typographic rows", () => {
     const onCategorySelect = jest.fn();
     const { getByTestId } = render(
       <PassengerHomeOverlay
@@ -204,10 +262,10 @@ describe("PassengerHomeOverlay", () => {
       />
     );
 
-    fireEvent.press(getByTestId("passenger-home-category-next"));
+    fireEvent.press(getByTestId("passenger-home-category-elite"));
     expect(onCategorySelect).toHaveBeenCalledWith("elite");
 
-    fireEvent.press(getByTestId("passenger-home-category-prev"));
+    fireEvent.press(getByTestId("passenger-home-category-moto"));
     expect(onCategorySelect).toHaveBeenCalledWith("moto");
   });
 

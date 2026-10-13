@@ -1,3 +1,4 @@
+import leafTypography from '../prototype/LeafTypography';
 import React, { memo, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -10,7 +11,6 @@ import {
   View,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { fonts } from "../../theme/runtimeTokens";
 import {
   dismissCampaign,
   loadCachedEligibleCampaigns,
@@ -252,7 +252,7 @@ const styles = StyleSheet.create({
   },
   eyebrow: {
     color: MUTED,
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     fontSize: 10,
     lineHeight: 13,
     textTransform: "uppercase",
@@ -260,14 +260,14 @@ const styles = StyleSheet.create({
   title: {
     marginTop: 1,
     color: TEXT,
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 14,
     lineHeight: 18,
   },
   body: {
     marginTop: 3,
     color: MUTED,
-    fontFamily: fonts.Regular,
+    ...leafTypography.regular,
     fontSize: 12,
     lineHeight: 16,
   },
@@ -283,7 +283,7 @@ const styles = StyleSheet.create({
   },
   ctaText: {
     color: LEAF_GREEN,
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 11,
     lineHeight: 14,
   },
@@ -312,7 +312,7 @@ const styles = StyleSheet.create({
   },
   previewText: {
     color: MUTED,
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     fontSize: 12,
   },
 });

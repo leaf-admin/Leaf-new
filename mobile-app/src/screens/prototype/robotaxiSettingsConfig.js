@@ -3,19 +3,19 @@ import { CURRENT_SURFACE_STATUS } from './currentSurfaceStatus';
 export const ROBOTAXI_SETTINGS_ITEMS = Object.freeze({
   notifications: Object.freeze({
     key: 'notifications',
-    status: CURRENT_SURFACE_STATUS.DISABLED,
+    status: CURRENT_SURFACE_STATUS.CURRENT,
   }),
   language: Object.freeze({
     key: 'language',
-    status: CURRENT_SURFACE_STATUS.DISABLED,
+    status: CURRENT_SURFACE_STATUS.CURRENT,
   }),
   traffic: Object.freeze({
     key: 'traffic',
-    status: CURRENT_SURFACE_STATUS.DISABLED,
+    status: CURRENT_SURFACE_STATUS.CURRENT,
   }),
   voice: Object.freeze({
     key: 'voice',
-    status: CURRENT_SURFACE_STATUS.DISABLED,
+    status: CURRENT_SURFACE_STATUS.CURRENT,
   }),
   privacy: Object.freeze({
     key: 'privacy',

@@ -100,6 +100,15 @@ jest.mock('../src/components/prototype/PrototypeScaffold', () => {
   };
 });
 
+jest.mock('../src/screens/prototype/home/LeafPassengerLanding', () => {
+  const React = require('react');
+  const { Text, TouchableOpacity, View } = require('react-native');
+  return ({ pickupLabel, onDestinationPress }) => <View>
+    <Text>{pickupLabel}</Text>
+    <TouchableOpacity testID="mock-passenger-destination-open" onPress={onDestinationPress}><Text>Abrir destino</Text></TouchableOpacity>
+  </View>;
+});
+
 jest.mock('../src/screens/prototype/home/PassengerHomeOverlay', () => {
   const React = require('react');
   const { Text, TouchableOpacity, View } = require('react-native');
@@ -605,6 +614,13 @@ describe('driver online toggle', () => {
       fare: null,
       priceLabel: '--',
     });
+  });
+
+  it('does not show a local estimate for unselected categories once a backend quote is required', () => {
+    const base = { isSelectedCategory: false, quotePending: false, backendQuoteRequired: true, backendFare: null, localFare: 83.42 };
+    expect(resolveHomeCategoryFarePresentation(base)).toEqual({ fare: null, priceLabel: 'Calculando' });
+    expect(resolveHomeCategoryFarePresentation({ ...base, quoteUnavailable: true })).toEqual({ fare: null, priceLabel: '--' });
+    expect(resolveHomeCategoryFarePresentation({ ...base, backendFare: 54.73 })).toEqual({ fare: 54.73, priceLabel: 'R$ 54,73' });
   });
 
   it('automatically refreshes an expired home quote at most twice', () => {
@@ -1114,13 +1130,13 @@ describe('driver online toggle', () => {
       goBack: jest.fn(),
     };
 
-    const { getByTestId, getByText, queryByTestId } = render(
+    const { getByTestId, getByLabelText, queryByTestId } = render(
       <RobotaxiHomeScreen navigation={navigation} route={{ params: {} }} />
     );
 
     expect(getByTestId('prototype-home-loading')).toBeTruthy();
-    expect(getByText('Bem vindo(a), Izaak')).toBeTruthy();
-    expect(getByTestId('passenger-home-overlay-skeleton')).toBeTruthy();
+    expect(getByLabelText('Bem-vindo(a), Izaak')).toBeTruthy();
+    expect(queryByTestId('passenger-home-overlay-skeleton')).toBeNull();
     expect(queryByTestId('prototype-top-controls')).toBeNull();
     expect(mockPrototypeMapLayer).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -1364,7 +1380,7 @@ describe('driver online toggle', () => {
 
     const loadingOverlay = queryByTestId('prototype-home-loading');
     expect(loadingOverlay).toBeTruthy();
-    expect(loadingOverlay.props.accessibilityLabel).toBe('Bem vindo(a), Izaak');
+    expect(loadingOverlay.props.accessibilityLabel).toBe('Bem-vindo(a), Izaak');
     expect(mockPrototypeMapLayer).toHaveBeenLastCalledWith(
       expect.objectContaining({
         interactionEnabled: false,
@@ -1415,7 +1431,7 @@ describe('driver online toggle', () => {
 
     expect(getAllByText('Local atual').length).toBeGreaterThan(0);
     expect(queryByText('Rua das Pastorinhas')).toBeNull();
-    expect(getByTestId('passenger-home-overlay-pickup-coordinate')).toHaveTextContent('none');
+    expect(mockPrototypeMapLayer.mock.calls.at(-1)[0].userCoordinate).toBeNull();
   });
 
   it('uses the live passenger location as the home pickup coordinate without reusing stale text', () => {
@@ -1437,9 +1453,6 @@ describe('driver online toggle', () => {
     );
 
     expect(queryByText('Carioca Shopping')).toBeNull();
-    expect(getByTestId('passenger-home-overlay-pickup-coordinate')).toHaveTextContent(
-      '-22.853586,-43.318168',
-    );
     const latestMapProps = mockPrototypeMapLayer.mock.calls.at(-1)?.[0] || {};
     expect(latestMapProps.forceRegionUpdate).toBe(true);
     expect(latestMapProps.userCoordinate).toEqual({

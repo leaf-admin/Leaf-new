@@ -7,12 +7,16 @@ import polyline from "@mapbox/polyline";
 import auth from "@react-native-firebase/auth";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import Logger from "../../utils/Logger";
-import { requestForegroundLocationPermissionWithDisclosure } from "../../services/AndroidPermissionDisclosure";
+import {
+  requestBackgroundLocationPermissionWithDisclosure,
+  requestForegroundLocationPermissionWithDisclosure,
+} from "../../services/AndroidPermissionDisclosure";
 import WebSocketManager from "../../services/WebSocketManager";
 import realtimeConnectionOrchestrator from "../../services/RealtimeConnectionOrchestrator";
 import receiptService from "../../services/ReceiptService";
 import RatingService from "../../services/RatingService";
 import interactiveNotificationService from "../../services/InteractiveNotificationService";
+import { isRideGoneOnServerError } from "./rideServerErrors";
 import prototypeDriverTripAssistantService, {
   calculateDistanceMeters,
   PICKUP_TOLERANCE_METERS,
@@ -520,7 +524,7 @@ const USER_DATA_STORAGE_KEY = "@user_data";
 const DEFAULT_RUNTIME_NOTIFICATIONS = Object.freeze([
   {
     id: "notif-welcome",
-    title: "Bem-vinda ao Leaf",
+    title: "Bem-vindo à Leaf",
     message: "Seu app está pronto para solicitar corridas.",
     kind: "system",
     scope: "both",
@@ -924,6 +928,29 @@ function shouldIgnoreStaleDriverOfflinePatch(patch, currentState) {
     return false;
   }
 
+  // The "offline" in the authentication answer describes the moment the
+  // connection opened, and that cached answer is re-applied many times. It is
+  // outdated while a ride is running (app reopened mid-ride) and once the
+  // server confirmed "online" on this same connection. A device test showed
+  // the driver silently offline after finishing a ride restored this way.
+  if (patchSource === "socket_authenticated_offline") {
+    const hasRideInProgress =
+      Boolean(currentState?.driverActiveRide?.bookingId) &&
+      ["accepted", "arrived", "started"].includes(
+        normalizeRuntimeLifecycleStatus(currentState?.bookingStatus),
+      );
+    if (hasRideInProgress) {
+      runtimeDriverOnlineReassertAfterRide = true;
+      return true;
+    }
+    if (
+      runtimeLastDriverOnlineConfirmedAt &&
+      runtimeLastDriverOnlineConfirmedAt > runtimeLastSocketConnectAt
+    ) {
+      return true;
+    }
+  }
+
   if (
     !runtimeLastDriverOnlineConfirmedAt ||
     Date.now() - runtimeLastDriverOnlineConfirmedAt >
@@ -1051,6 +1078,10 @@ let runtimeDeferredSocketBootstrapTimer = null;
 let runtimeQALockUntil = 0;
 let runtimeDriverOnlineEnablePromise = null;
 let runtimeLastSocketConnectAt = 0;
+// Set when the server reported the driver as offline in the middle of a ride
+// (app reopened: the new connection is not "online" for the server yet). The
+// ride goes on; the online request is repeated once the ride is over.
+let runtimeDriverOnlineReassertAfterRide = false;
 let runtimeLifecycleOutboxFlushPromise = null;
 let runtimeLastDriverCoordinateUpdateAt = 0;
 let runtimeLastDriverOnlineConfirmedAt = 0;
@@ -2344,13 +2375,43 @@ function hasIdleSyncTerminalAuthority(payload = {}) {
   );
 }
 
+// A driver's pre-start ride is protected from idle syncs only right after the
+// accept (server may not have persisted it yet). After that, an explicit sync
+// saying the driver has no ride means the server reassigned or cancelled it.
+const DRIVER_ACCEPT_SYNC_GRACE_MS = 45 * 1000;
+let runtimeDriverRideAssignedAtMs = 0;
+
+export function markRuntimeDriverRideAssigned(nowMs = Date.now()) {
+  runtimeDriverRideAssignedAtMs = nowMs;
+}
+
 export function shouldPreserveActiveRideOnIdleSync({
   source = runtimeState,
   payload = {},
   syncedBookingId = "",
+  nowMs = Date.now(),
+  driverRideAssignedAtMs = runtimeDriverRideAssignedAtMs,
 } = {}) {
   const localBookingId = String(source?.activeBookingId || "").trim();
   const incomingBookingId = String(syncedBookingId || payload?.bookingId || "").trim();
+  // Driver or passenger: before the trip starts, a server with no ride for
+  // this user (after the post-accept grace) means it was cancelled/reassigned.
+  const isDriverPreStartRide =
+    ["driver", "customer", "passenger"].includes(
+      String(source?.activeRole || "").trim().toLowerCase(),
+    ) &&
+    ["accepted", "arrived"].includes(
+      normalizeRuntimeLifecycleStatus(source?.bookingStatus),
+    );
+  if (
+    isDriverPreStartRide &&
+    payload?.source === "explicit_sync" &&
+    payload?.hasActiveRide === false &&
+    !incomingBookingId &&
+    nowMs - Number(driverRideAssignedAtMs || 0) > DRIVER_ACCEPT_SYNC_GRACE_MS
+  ) {
+    return false;
+  }
 
   return (
     hasRuntimeActiveRideContext(source) &&
@@ -3639,12 +3700,24 @@ function setRuntimeState(next) {
       guardAgeMs: Date.now() - runtimeLastDriverOnlineConfirmedAt,
       hasDriverOnlineDaily: Boolean(patch.driverOnlineDaily),
     });
+    const ignoredSource = normalizeDriverOnlineMutationSource(
+      patch.driverOnlineMutationSource,
+    );
     patch = { ...patch };
     delete patch.driverOnline;
     delete patch.driverOnlinePending;
     delete patch.driverOnlineStartedAt;
     delete patch.driverOnlineMutationSource;
     delete patch.driverOnlineDaily;
+    if (ignoredSource === "socket_authenticated_offline") {
+      // The same outdated answer also carries "no offers / no booking". Left
+      // in, each re-application wiped the offer on screen and the card kept
+      // closing and reopening during one offer.
+      delete patch.driverOffers;
+      delete patch.bookingStatus;
+      delete patch.activeBookingId;
+      delete patch.activeBooking;
+    }
   }
 
   if (patch.driverOnline === true) {
@@ -3830,6 +3903,24 @@ function stopPassengerRoutePlayback() {
     runtimePassengerRoutePlaybackInterval = null;
   }
   runtimePassengerRoutePlaybackActive = false;
+}
+
+// What the passenger picked ("Via Parque Shopping") travels with the booking
+// as "name - address", so the driver sees the place and not only its street.
+export function buildBookingDestinationLabel(destination = {}) {
+  const name = String(destination?.name || "").trim();
+  const address = String(destination?.address || "").trim();
+  if (!address) {
+    return name || "Destino";
+  }
+  if (
+    !name ||
+    name === "Destino" ||
+    address.toLowerCase().startsWith(name.toLowerCase())
+  ) {
+    return address;
+  }
+  return `${name} - ${address}`;
 }
 
 function parseNameFromDescription(description = "") {
@@ -5036,6 +5127,31 @@ function buildQuoteLockSnapshot({
   };
 }
 
+const RECEIPT_EARLY_END_METERS = 500;
+
+// A trip that ended well short of its destination. The server value wins when
+// present; otherwise it is measured from where the car was when it ended.
+export function resolveReceiptEarlyEnd(payload = {}, state = {}, destinationCoordinate = null) {
+  // The passenger ended the ride themselves: nothing to ask them about.
+  if (isRiderEarlyEndCompletion(payload)) {
+    return null;
+  }
+  if (payload?.earlyEnd && typeof payload.earlyEnd === "object") {
+    return { ...payload.earlyEnd };
+  }
+  const endCoordinate =
+    normalizeRuntimeCoordinate(payload?.endLocation) ||
+    normalizeRuntimeCoordinate(state?.driverCoordinate);
+  const destination = normalizeRuntimeCoordinate(destinationCoordinate);
+  if (!endCoordinate || !destination) {
+    return null;
+  }
+  const remainingMeters = calculateDistanceMeters(endCoordinate, destination);
+  return Number.isFinite(remainingMeters) && remainingMeters > RECEIPT_EARLY_END_METERS
+    ? { remainingMeters: Math.round(remainingMeters) }
+    : null;
+}
+
 function resolveCompletedReceiptRouteCoordinates(
   routeCoordinates = [],
   pickupCoordinate = null,
@@ -5760,7 +5876,7 @@ export function buildDriverRoutePlanWithCanonicalDestination({
           ? baseRoutePlan.pickupSteps
           : buildFallbackNavigationSteps({
               coordinates: pickupCoordinates,
-              instruction: "Siga até o local de embarque",
+              instruction: "Siga até o embarque",
               durationMinutes:
                 baseRoutePlan?.pickupDurationMinutes ||
                 pickupMetrics.durationMinutes,
@@ -6879,12 +6995,27 @@ function buildDriverTripAssistModel(snapshot) {
       activeBooking?.destinationLocation?.add,
     "Destino",
   );
+  // Arrival is a radius around the pickup point. The route distance alone can
+  // stay above it while the driver is right there (one-way streets, snapping).
+  const pickupStraightLineMeters = calculateDistanceMeters(
+    currentCoordinate,
+    targetCoordinate,
+  );
+  const pickupProximityMeters = [remainingMeters, pickupStraightLineMeters]
+    .filter((meters) => Number.isFinite(meters) && meters >= 0)
+    .reduce((nearest, meters) => Math.min(nearest, meters), Infinity);
   const proximityReached =
-    status === "accepted" && Number.isFinite(remainingMeters)
-      ? remainingMeters <= PICKUP_TOLERANCE_METERS
+    status === "accepted" && Number.isFinite(pickupProximityMeters)
+      ? pickupProximityMeters <= PICKUP_TOLERANCE_METERS
       : false;
+  // Once inside the pickup radius, show how far the pickup really is. The
+  // route distance kept saying "30 m" to a driver standing at the door, while
+  // the passenger's screen said 10 m.
+  const displayRemainingMeters = proximityReached
+    ? Math.round(pickupProximityMeters)
+    : remainingMeters;
   const remainingDistanceLabel = formatRuntimeNavigationDistanceLabel(
-    remainingMeters,
+    displayRemainingMeters,
   );
   const etaLabel =
     status === "arrived"
@@ -6900,7 +7031,7 @@ function buildDriverTripAssistModel(snapshot) {
     targetCoordinate,
     routeCoordinates: nativeRouteCoordinates,
     steps: nativeRouteSteps,
-    remainingDistanceMeters: remainingMeters,
+    remainingDistanceMeters: displayRemainingMeters,
     totalDistanceMeters:
       Number.isFinite(Number(nativeRouteDistanceKm)) && Number(nativeRouteDistanceKm) > 0
         ? Math.round(Number(nativeRouteDistanceKm) * 1000)
@@ -6919,7 +7050,7 @@ function buildDriverTripAssistModel(snapshot) {
     targetCoordinate,
     pickupAddress,
     destinationAddress,
-    remainingMeters,
+    remainingMeters: displayRemainingMeters,
     remainingDistanceLabel,
     progressRatio,
     etaMinutes,
@@ -6944,7 +7075,9 @@ function buildDriverTripAssistModel(snapshot) {
       status === "accepted"
         ? "Confirme quando chegar ao ponto de embarque."
         : status === "arrived"
-          ? "O passageiro foi avisado e tem 2 minutos para embarcar."
+          ? Number(snapshot?.boardingRemainingSec || 0) > 0
+            ? "O passageiro foi avisado e tem 2 minutos para embarcar."
+            : "O passageiro foi avisado. Você está aguardando no embarque."
           : "Encerre a corrida ao desembarque do passageiro.",
     navigationPhase,
     nativeNavigation,
@@ -7254,6 +7387,72 @@ function resolveConfirmedPaymentGrossAmount(previousState = runtimeState) {
   return null;
 }
 
+// The passenger ended the ride before the destination. The server settles it
+// by the part actually travelled and sends that settlement with the completion.
+export function isRiderEarlyEndCompletion(payload = {}) {
+  return (
+    String(payload?.completionType || "").trim().toUpperCase() === "EARLY_ENDED_BY_RIDER"
+  );
+}
+
+// A cancel that came from the other side resets the payment state. The
+// summary still needs the amount the passenger paid: taken from the cancel
+// event if the server sends it, else from the payment known before the reset.
+// Only when neither exists it is rebuilt from the event's own refund and fee
+// (paid = refund + fee); with one of them missing, or nothing refunded, it
+// stays unknown (null).
+export function resolveRemoteCancelSummaryContext(payload = {}, previous = {}) {
+  const data = payload?.data || {};
+  const toMoney = (value) => {
+    if (value === null || value === undefined || String(value).trim() === "") {
+      return null;
+    }
+    const numeric = Number(value);
+    return Number.isFinite(numeric) && numeric >= 0 ? numeric : null;
+  };
+  const previousPayment = previous?.paymentState || {};
+  const knownPaidAmount =
+    [
+      data.originalPaidAmount,
+      payload?.originalPaidAmount,
+      previousPayment.originalPaidAmount,
+      previousPayment.amount,
+      Number(previous?.activeBooking?.paymentData?.grossAmountInCents) / 100,
+    ]
+      .map(toMoney)
+      .find((value) => value !== null && value > 0) ?? null;
+  const refundAmount = toMoney(data.refundAmount ?? payload?.refundAmount);
+  const cancellationFee = toMoney(data.cancellationFee ?? payload?.cancellationFee);
+  const derivedPaidAmount =
+    refundAmount !== null && refundAmount > 0 && cancellationFee !== null
+      ? Number((refundAmount + cancellationFee).toFixed(2))
+      : null;
+  const cancelledBy = String(payload?.initiatedBy || "").trim().toLowerCase();
+  const cancellationReason = String(data.reason || payload?.reason || "").trim();
+
+  return {
+    originalPaidAmount: knownPaidAmount ?? derivedPaidAmount,
+    cancelledBy: cancelledBy || null,
+    cancellationReason: cancellationReason || null,
+  };
+}
+
+// Same settlement shape when the server settles a ride the driver ended far
+// from the destination (completionType EARLY_ENDED_BY_DRIVER).
+function isDriverEarlyEndCompletion(payload = {}) {
+  return (
+    String(payload?.completionType || "").trim().toUpperCase() === "EARLY_ENDED_BY_DRIVER"
+  );
+}
+
+function hasRiderEarlyEndSettlement(payload = {}) {
+  return (
+    (isRiderEarlyEndCompletion(payload) || isDriverEarlyEndCompletion(payload)) &&
+    Number.isFinite(Number(payload?.settlement?.executedFare)) &&
+    Number(payload.settlement.executedFare) >= 0
+  );
+}
+
 function isAuthoritativeOperationalInterruptionEndedCompletion(payload = {}) {
   if (!hasBackendFinalFinancialSnapshot(payload)) {
     return false;
@@ -7304,8 +7503,12 @@ export function resolveCompletedTripFinancialSnapshot(
 ) {
   const payloadHasBackendFinalFinancialSnapshot =
     hasBackendFinalFinancialSnapshot(payload);
+  // Both cases replace the fare locked at payment with the server's settled
+  // one. Without the early-end case the receipts kept showing the full fare
+  // (seen on devices: driver "+ R$ 44,23" for a ride the server paid R$ 1,59).
   const isAuthoritativeOperationalInterruptionEnded =
-    isAuthoritativeOperationalInterruptionEndedCompletion(payload);
+    isAuthoritativeOperationalInterruptionEndedCompletion(payload) ||
+    hasRiderEarlyEndSettlement(payload);
   const persistedLockedRideSnapshot = mergeLockedDriverRideSnapshot(
     previousState?.lastReceipt,
     previousState?.driverActiveRide,
@@ -7553,6 +7756,13 @@ export function resolveCompletedTripFinancialSnapshot(
     ...(hasPayloadSnapshot || tollFee > 0 ? { tollFee } : {}),
     ...(totalFees !== null ? { totalFees } : {}),
     ...(driverNetAmount !== null ? { driverNetAmount } : {}),
+    ...(hasRiderEarlyEndSettlement(payload)
+      ? {
+          settlementType: isDriverEarlyEndCompletion(payload)
+            ? "EARLY_ENDED_BY_DRIVER"
+            : "EARLY_ENDED_BY_RIDER",
+        }
+      : {}),
     ...(isAuthoritativeOperationalInterruptionEnded && originalPaidAmount !== null
       ? { originalPaidAmount }
       : {}),
@@ -7656,6 +7866,48 @@ function getPayloadOriginCoordinate(payload = {}) {
     normalizeRuntimeCoordinate(payload?.pickupCoordinate) ||
     getOriginCoordinate()
   );
+}
+
+// A route with only its two endpoints is a straight line, not a path. Receipts
+// take the first source with real geometry (server payload, the route on the
+// map, the booking, the driver route plan, the quote) and only then endpoints.
+export function resolveReceiptRouteGeometry(state = {}, primaryCandidates = []) {
+  const routePlan = extractDriverRoutePlan(state?.driverTripMeta);
+  const candidates = [
+    ...primaryCandidates,
+    getPrototypeMapRoute()?.coordinates,
+    state?.driverActiveRide?.routeCoordinates,
+    state?.activeBooking?.routeCoordinates,
+    routePlan?.destinationCoordinates,
+    routePlan?.combinedCoordinates,
+    state?.quoteLock?.coordinates,
+  ].map((candidate) => normalizeRuntimeRouteCoordinates(candidate));
+  return (
+    candidates.find((candidate) => candidate.length > 2) ||
+    candidates.find((candidate) => candidate.length >= 2) ||
+    []
+  );
+}
+
+// When a ride is reassigned because the accepted driver dropped off the
+// network, that driver is no longer part of it. Reconnecting must take them
+// home, not into the passenger's "searching for a replacement" state.
+export function resolveSyncedBookingStatusForRole(
+  snapshot = {},
+  role = resolveRuntimeRole(),
+) {
+  const status = resolveSyncedBookingStatus(snapshot);
+  const isAcceptedDriverRecovery =
+    String(snapshot?.recoveryMode || "").trim().toLowerCase() ===
+    "accepted_driver_reassignment";
+  if (
+    status === "searching_replacement" &&
+    isAcceptedDriverRecovery &&
+    role === "driver"
+  ) {
+    return "idle";
+  }
+  return status;
 }
 
 export function resolveSyncedBookingStatus(snapshot = {}) {
@@ -7929,15 +8181,10 @@ function buildReceiptFromSyncedSnapshot(
     null;
   const routePlan = extractDriverRoutePlan(previousState?.driverTripMeta);
   const receiptRouteCoordinates = resolveCompletedReceiptRouteCoordinates(
-    normalizeRuntimeRouteCoordinates(snapshot?.routeCoordinates).length >= 2
-      ? snapshot.routeCoordinates
-      : normalizeRuntimeRouteCoordinates(previousState?.lastReceipt?.routeCoordinates)
-            .length >= 2
-        ? previousState.lastReceipt.routeCoordinates
-        : normalizeRuntimeRouteCoordinates(routePlan?.destinationCoordinates)
-              .length >= 2
-          ? routePlan.destinationCoordinates
-          : routePlan?.combinedCoordinates || [],
+    resolveReceiptRouteGeometry(previousState, [
+      snapshot?.routeCoordinates,
+      previousState?.lastReceipt?.routeCoordinates,
+    ]),
     receiptPickupCoordinate,
     receiptDestinationCoordinate,
   );
@@ -8566,7 +8813,11 @@ function startBoardingCountdown(deadlineInput) {
   if (!Number.isFinite(deadlineMs) || deadlineMs <= Date.now()) {
     stopBoardingCountdownTimer();
     setRuntimeState({
-      boardingDeadlineAt: null,
+      // A deadline already in the past is kept: it is the only record of when
+      // the driver arrived, and the cards count the wait up from it.
+      boardingDeadlineAt: Number.isFinite(deadlineMs)
+        ? new Date(deadlineMs).toISOString()
+        : null,
       boardingRemainingSec: 0,
     });
     return;
@@ -8596,6 +8847,38 @@ function startBoardingCountdown(deadlineInput) {
   );
 }
 
+// Offers render on the driver home only. A driver browsing Conta/Atividade
+// would miss them (and time out), so bring the home screen forward.
+const DRIVER_OFFER_SURFACE_ROUTE = "RobotaxiPrototype";
+
+export function bringDriverToOfferSurface(navigationRef = globalThis.navigationRef) {
+  if (resolveRuntimeRole() !== "driver" || !navigationRef?.isReady?.()) {
+    return false;
+  }
+  const currentRouteName = navigationRef.getCurrentRoute?.()?.name;
+  if (!currentRouteName || currentRouteName === DRIVER_OFFER_SURFACE_ROUTE) {
+    return false;
+  }
+  writeRuntimeDebugProbe("driver_offer_surface_navigation", { from: currentRouteName });
+  navigationRef.navigate(DRIVER_OFFER_SURFACE_ROUTE);
+  return true;
+}
+
+function requestSearchTimeoutReconcile() {
+  writeRuntimeDebugProbe("search_timeout_reconcile_requested", {
+    bookingId: runtimeState.activeBookingId || null,
+    bookingStatus: runtimeState.bookingStatus || null,
+  });
+  WebSocketManager.getInstance()
+    .syncActiveRideWithAck(10000)
+    .catch((error) => {
+      Logger.warn(
+        "⚠️ [PrototypeRuntime] reconciliação do fim da busca falhou:",
+        error?.message || error,
+      );
+    });
+}
+
 function startSearchingTimer({ preserveElapsed = false } = {}) {
   stopSearchingTimer();
   if (!preserveElapsed) {
@@ -8605,7 +8888,8 @@ function startSearchingTimer({ preserveElapsed = false } = {}) {
   runtimeSearchTimer = setInterval(() => {
     setRuntimeState((previous) => {
       if (
-        previous.bookingStatus !== "searching"
+        previous.bookingStatus !== "searching" &&
+        previous.bookingStatus !== "searching_replacement"
       ) {
         stopSearchingTimer();
         return previous;
@@ -8618,6 +8902,9 @@ function startSearchingTimer({ preserveElapsed = false } = {}) {
 
       if (nextElapsed >= SEARCH_TOTAL_DURATION_SECONDS) {
         stopSearchingTimer();
+        // A missed noDriversFound would leave the passenger searching forever:
+        // ask the server for the ride state; an idle answer ends the search.
+        setTimeout(requestSearchTimeoutReconcile, 0);
       }
 
       return {
@@ -9289,16 +9576,66 @@ function attachSocketListeners() {
 
   const handleAuthenticated = (payload) => {
     const isDriverRuntime = resolveRuntimeRole() === "driver";
+    // The driver chose "online"; only the connection dropped. If the server
+    // marked them offline meanwhile, ask to go online again (the server still
+    // applies every eligibility rule) instead of silently staying offline.
+    const shouldRestoreOnlineIntent =
+      isDriverRuntime &&
+      runtimeState.driverOnline === true &&
+      runtimeState.driverOnlineMutationSource === "socket_disconnect_preserve_online_intent";
     const driverOnlineAuthPatch = isDriverRuntime
       ? buildAuthenticatedDriverOnlinePatch(payload)
       : null;
+    const restoringOnline =
+      shouldRestoreOnlineIntent && driverOnlineAuthPatch?.driverOnline === false;
+    // Mid-ride the driver is working whatever the fresh connection says, and
+    // asking to go online now would run eligibility checks during the ride.
+    // Keep the local state and repeat the request after the ride (a device
+    // test showed the driver silently offline after finishing such a ride).
+    const hasDriverRideInProgress =
+      isDriverRuntime &&
+      Boolean(runtimeState.driverActiveRide?.bookingId) &&
+      ["accepted", "arrived", "started"].includes(
+        normalizeRuntimeLifecycleStatus(runtimeState.bookingStatus),
+      );
+    if (
+      hasDriverRideInProgress &&
+      runtimeState.driverOnline === true &&
+      driverOnlineAuthPatch?.driverOnline === false
+    ) {
+      runtimeDriverOnlineReassertAfterRide = true;
+      delete driverOnlineAuthPatch.driverOnline;
+      delete driverOnlineAuthPatch.driverOnlinePending;
+      delete driverOnlineAuthPatch.driverOnlineMutationSource;
+      delete driverOnlineAuthPatch.driverOnlineStartedAt;
+    }
     setRuntimeState({
       connecting: false,
       isSocketAuthenticated: true,
       socketError: "",
       ...(driverOnlineAuthPatch || {}),
+      ...(restoringOnline
+        ? {
+            driverOnline: true,
+            driverOnlinePending: true,
+            driverOnlineMutationSource: "socket_reconnect_restore_online",
+          }
+        : {}),
     });
     flushRuntimeLifecycleOutbox("socket_authenticated");
+    if (restoringOnline && runtimeState.profile?.uid) {
+      writeRuntimeDebugProbe("driver_online_restore_after_reconnect", {
+        driverId: runtimeState.profile.uid,
+      });
+      enablePrototypeDriverOnline(runtimeState.profile, {
+        preserveOnlineOnFailure: false,
+      }).catch((error) => {
+        Logger.warn(
+          "⚠️ [PrototypeRuntime] não foi possível voltar a ficar online após reconexão:",
+          error?.message || error,
+        );
+      });
+    }
   };
 
   const handleActiveRideSync = (payload) => {
@@ -9326,7 +9663,7 @@ function attachSocketListeners() {
       return;
     }
 
-    const syncedStatus = resolveSyncedBookingStatus(payload);
+    const syncedStatus = resolveSyncedBookingStatusForRole(payload);
     if (
       syncedBookingId &&
       shouldIgnoreLifecycleRegression(
@@ -9380,7 +9717,27 @@ function attachSocketListeners() {
       return;
     }
 
-    if (shouldPreserveLocalPassengerSearch) {
+    // The server says the booking already ended (cancelled / no drivers), or
+    // has no ride during a replacement search (which the server itself started,
+    // so there is no indexing race): close the search instead of waiting.
+    if (
+      shouldPreserveLocalPassengerSearch &&
+      syncedStatus === "idle" &&
+      (hasIdleSyncTerminalAuthority(payload) ||
+        normalizedLocalBookingStatus === "searching_replacement")
+    ) {
+      handleNoDriversFound({
+        bookingId: runtimeState.activeBookingId || null,
+        code: "SEARCH_TERMINAL_RECONCILED",
+        message: "Nenhum motorista ficou disponível para sua corrida.",
+      });
+      return;
+    }
+
+    // Past the whole search window an idle answer is no longer an indexing
+    // race: the search ended on the server and the event was missed (app
+    // closed, connection dropped). Fall through to the timeout handling below.
+    if (shouldPreserveLocalPassengerSearch && !hasExpiredPassengerSearch) {
       writeRuntimeDebugProbe("event_active_ride_sync_preserved_passenger_search", {
         bookingId: runtimeState.activeBookingId || null,
         reason: "idle_sync_while_passenger_searching",
@@ -9511,7 +9868,20 @@ function attachSocketListeners() {
           normalizedLocalBookingStatus,
         )
       ) {
+        const droppedDriverRideId =
+          runtimeState.activeRole === "driver"
+            ? String(runtimeState.driverActiveRide?.bookingId || "").trim()
+            : "";
         clearRuntimeRideStateFromSync();
+        if (droppedDriverRideId) {
+          showDriverTransientCard({
+            type: "ride_no_longer_assigned",
+            bookingId: droppedDriverRideId,
+            title: "Corrida encerrada",
+            message:
+              "Essa corrida não está mais com você. Ela foi cancelada ou passada para outro motorista.",
+          });
+        }
       }
       return;
     }
@@ -10124,7 +10494,7 @@ function attachSocketListeners() {
         kind: "trip",
         scope: "driver",
       }),
-    );
+    );    bringDriverToOfferSurface();
   };
 
   const handleRideAccepted = async (payload) => {
@@ -10531,6 +10901,7 @@ function attachSocketListeners() {
 
     stopSearchingTimer();
     stopBoardingCountdownTimer();
+    markRuntimeDriverRideAssigned();
     setRuntimeState({
       bookingStatus: "accepted",
       activeBookingId: bookingId || runtimeState.activeBookingId,
@@ -11374,11 +11745,11 @@ function attachSocketListeners() {
         runtimeState.driverTripMeta?.destinationCoordinate ||
         null;
     const receiptRouteCoordinates = resolveCompletedReceiptRouteCoordinates(
-      completedRoute?.coordinates,
+      resolveReceiptRouteGeometry(runtimeState, [completedRoute?.coordinates]),
       receiptPickupCoordinate,
       receiptDestinationCoordinate,
     );
-    const distance = resolveCompletedTripDistanceKm({
+    const plannedDistance = resolveCompletedTripDistanceKm({
       payloadDistance: payload?.distance ?? payload?.distanceKm,
       runtimeDistance: runtimeState.tripDistanceKm,
       routeCoordinates: receiptRouteCoordinates,
@@ -11386,7 +11757,7 @@ function attachSocketListeners() {
       destinationCoordinate: receiptDestinationCoordinate,
       initialMeters: runtimeState.driverTripMeta?.initialMeters,
     });
-    const durationMinutes = resolveCompletedTripDurationMin({
+    const plannedDurationMinutes = resolveCompletedTripDurationMin({
       payloadDurationSeconds:
         payload?.duration ??
         payload?.durationSecs ??
@@ -11395,8 +11766,22 @@ function attachSocketListeners() {
       routeDurationMinutes:
         runtimeState.driverTripMeta?.routePlan?.destinationDurationMinutes ??
         runtimeState.driverTripMeta?.initialEtaMinutes,
-      distanceKm: distance,
+      distanceKm: plannedDistance,
     });
+    // A ride settled before its destination was shown with the planned trip
+    // ("15 km rodados, 20 min" after one minute without moving). When the
+    // server settled it, the receipt uses what the server measured.
+    const settledDistanceKm = Number(payload?.settlement?.executedDistanceKm);
+    const settledDurationSecs = Number(payload?.settlement?.executedDurationSecs);
+    const hasSettledTrip =
+      hasRiderEarlyEndSettlement(payload) &&
+      Number.isFinite(settledDistanceKm) &&
+      settledDistanceKm >= 0;
+    const distance = hasSettledTrip ? settledDistanceKm : plannedDistance;
+    const durationMinutes =
+      hasSettledTrip && Number.isFinite(settledDurationSecs) && settledDurationSecs >= 0
+        ? Math.max(1, Math.round(settledDurationSecs / 60))
+        : plannedDurationMinutes;
 
     const receipt = {
       pickupAddress: resolveCompletedReceiptPickupLabel(payload, runtimeState),
@@ -11448,6 +11833,15 @@ function attachSocketListeners() {
         : {}),
       ...(payload?.operationalContinuation
         ? { operationalContinuation: payload.operationalContinuation }
+        : {}),
+      ...(resolveReceiptEarlyEnd(payload, runtimeState, receiptDestinationCoordinate)
+        ? {
+            earlyEnd: resolveReceiptEarlyEnd(
+              payload,
+              runtimeState,
+              receiptDestinationCoordinate,
+            ),
+          }
         : {}),
       ...completedPricingSnapshot,
     };
@@ -11505,6 +11899,19 @@ function attachSocketListeners() {
       rideLocalSync: cloneDefaultRideLocalSyncState(),
       lastError: "",
     });
+    if (runtimeDriverOnlineReassertAfterRide) {
+      runtimeDriverOnlineReassertAfterRide = false;
+      if (shouldPreserveDriverOnlineAfterCompletion && runtimeState.profile?.uid) {
+        enablePrototypeDriverOnline(runtimeState.profile, {
+          preserveOnlineOnFailure: false,
+        }).catch((error) => {
+          Logger.warn(
+            "⚠️ [PrototypeRuntime] Falha ao voltar a ficar online após a corrida:",
+            error?.message || error,
+          );
+        });
+      }
+    }
     appendRuntimeNotification(
       createRuntimeNotification({
         title: "Viagem concluída",
@@ -11572,6 +11979,19 @@ function attachSocketListeners() {
     ) {
       return;
     }
+    if (isAcceptedDriverRecovery && resolveRuntimeRole() === "driver") {
+      clearRuntimeRideStateFromSync();
+      appendRuntimeNotification(
+        createRuntimeNotification({
+          title: "Corrida repassada",
+          message:
+            "Sua conexão caiu e a corrida foi repassada a outro motorista.",
+          kind: "warning",
+          scope: "driver",
+        }),
+      );
+      return;
+    }
     const message =
       payload?.message ||
       "Estamos procurando outro motorista para continuar a corrida.";
@@ -11588,6 +12008,7 @@ function attachSocketListeners() {
       driverActiveRide: null,
       lastError: "",
     });
+    startSearchingTimer();
 
     appendRuntimeNotification(
       createRuntimeNotification({
@@ -11712,6 +12133,9 @@ function attachSocketListeners() {
           cancellationFee: Number(
             payload?.data?.cancellationFee || payload?.cancellationFee || 0,
           ),
+          // Kept for the cancellation summary: what was paid, who cancelled
+          // and why. `amount` stays 0 so nothing treats the ride as paid.
+          ...resolveRemoteCancelSummaryContext(payload, previous),
           refundId: payload?.data?.refundId || payload?.refundId || null,
           chargeId: payload?.data?.chargeId || payload?.chargeId || null,
         },
@@ -12751,7 +13175,7 @@ function applySyncedActiveRideSnapshot(snapshot) {
 
   const runtimeRole = resolveRuntimeRole(runtimeState.profile);
   const normalizedStatus = String(snapshot.status || "").toUpperCase();
-  const bookingStatus = resolveSyncedBookingStatus(snapshot);
+  const bookingStatus = resolveSyncedBookingStatusForRole(snapshot);
   if (bookingStatus === "idle") {
     return false;
   }
@@ -12866,7 +13290,13 @@ function applySyncedActiveRideSnapshot(snapshot) {
         ...syncedOffer,
         ...(syncedPricingSnapshotMetadata || {}),
       };
-  const boardingDeadlineRaw = snapshot?.boardingDeadlineAt || null;
+  // The sync answer does not always carry the boarding deadline. After the
+  // app is reopened the one saved on the device is still valid for this ride;
+  // dropping it showed "0:00 para embarcar" with most of the wait left.
+  const boardingDeadlineRaw =
+    snapshot?.boardingDeadlineAt ||
+    (bookingStatus === "arrived" ? runtimeState.boardingDeadlineAt : null) ||
+    null;
   const parsedBoardingDeadline = boardingDeadlineRaw
     ? new Date(boardingDeadlineRaw)
     : null;
@@ -13000,6 +13430,7 @@ function applySyncedActiveRideSnapshot(snapshot) {
       runtimeState.driverCoordinate ||
       null,
   });
+  const syncedVehicleIdentity = resolveReceiptVehicleIdentity(snapshot, runtimeState);
   setRuntimeState((previous) => ({
     bookingStatus,
     activeBookingId: snapshot.bookingId || previous.activeBookingId,
@@ -13041,8 +13472,16 @@ function applySyncedActiveRideSnapshot(snapshot) {
         sanitizeText(snapshot?.driverName || snapshot?.driver?.name, "") ||
         previous.driverInfo?.name ||
         "Motorista",
-      plate: previous.driverInfo?.plate || "",
-      model: previous.driverInfo?.model || "",
+      // The server snapshot carries the vehicle too. Relying only on the
+      // rideAccepted event left the passenger with "Placa não informada"
+      // whenever that event was missed or arrived before the vehicle data.
+      plate: syncedVehicleIdentity.vehiclePlate || previous.driverInfo?.plate || "",
+      model:
+        syncedVehicleIdentity.vehicleLabel ||
+        syncedVehicleIdentity.vehicleModel ||
+        previous.driverInfo?.model ||
+        "",
+      color: syncedVehicleIdentity.vehicleColor || previous.driverInfo?.color || "",
       rating: previous.driverInfo?.rating || null,
     },
     driverCoordinate,
@@ -13143,7 +13582,7 @@ function applySyncedActiveRideSnapshot(snapshot) {
     lastError: "",
   }));
 
-  if (bookingStatus === "searching") {
+  if (bookingStatus === "searching" || bookingStatus === "searching_replacement") {
     startSearchingTimer({ preserveElapsed: true });
     stopBoardingCountdownTimer();
   } else {
@@ -13401,7 +13840,7 @@ async function ensureSocketReady(profile) {
     });
 
     if (!orchestratorReady) {
-      throw new Error("Sessao realtime ainda nao foi preparada.");
+      throw new Error("Sessão realtime ainda não foi preparada.");
     }
 
     const postAuthStatus = socket.getConnectionStatus?.() || {};
@@ -13411,7 +13850,7 @@ async function ensureSocketReady(profile) {
       postAuthStatus?.userId === userId &&
       (postAuthStatus?.userType === targetUserType || !postAuthStatus?.userType);
     if (!finallyAuthenticatedAsCurrentUser) {
-      throw new Error("Sessao do socket ainda nao foi autenticada.");
+      throw new Error("Sessão do socket ainda não foi autenticada.");
     }
 
     await writeRuntimeDebugProbe("socket_authenticated", {
@@ -13927,7 +14366,7 @@ function buildFallbackLiveRoutePlan({
   const destinationMetrics = resolveRouteLegMetrics(null, destinationCoordinates);
   const pickupSteps = buildFallbackNavigationSteps({
     coordinates: pickupCoordinates,
-    instruction: "Siga até o local de embarque",
+    instruction: "Siga até o embarque",
     durationMinutes: pickupMetrics.durationMinutes,
   });
   const destinationSteps = buildFallbackNavigationSteps({
@@ -14920,7 +15359,7 @@ async function requestPrototypeRide(profile, payload) {
     destinationLocation: {
       lat: Number(destination.coordinate.latitude),
       lng: Number(destination.coordinate.longitude),
-      add: destination.address || destination.name || "Destino",
+      add: buildBookingDestinationLabel(destination),
     },
     estimatedFare: Number.isFinite(fare) ? fare : 0,
     ...(routeDistanceKm !== null ? { routeDistanceKm } : {}),
@@ -15305,6 +15744,13 @@ async function cancelPrototypeRide(options = {}) {
   );
   const bookingId = getRuntimeBookingId(options);
   if (!bookingId) {
+    // The ride already ended on the server (e.g. no replacement driver was
+    // found) and only the screen was left behind. There is nothing to cancel:
+    // drop the stale state so the passenger gets back to the map.
+    if (resolveRuntimeRole() !== "driver") {
+      clearRuntimeRideStateFromSync();
+      return { success: true, alreadyEnded: true };
+    }
     throw new Error("Nenhuma corrida ativa para cancelar.");
   }
   const idempotencyKey = getRuntimeLifecycleIdempotencyKey(
@@ -15345,6 +15791,12 @@ async function cancelPrototypeRide(options = {}) {
       { idempotencyKey },
     );
   } catch (error) {
+    if (isRideGoneOnServerError(error) && resolveRuntimeRole() !== "driver") {
+      // The server no longer has this ride (the search already ended there).
+      // Nothing is left to cancel: release the passenger from the stale screen.
+      clearRuntimeRideStateFromSync();
+      return { success: true, alreadyEnded: true };
+    }
     if (shouldQueueRuntimeLifecycleFailure(error)) {
       await queueRuntimeLifecycleIntent({
         bookingId,
@@ -15364,9 +15816,10 @@ async function cancelPrototypeRide(options = {}) {
       error?.message || error,
     );
     setRuntimeState({
-      lastError:
-        error?.message ||
-        "Não foi possível cancelar no servidor. A corrida continua ativa.",
+      lastError: /timeout/i.test(String(error?.message || ""))
+        ? "O cancelamento demorou para responder. Tente de novo em instantes."
+        : error?.message ||
+          "Não foi possível cancelar no servidor. A corrida continua ativa.",
     });
     throw error;
   }
@@ -15633,6 +16086,81 @@ async function arrivePrototypePickup(profile, options = {}) {
   };
 }
 
+function isStartTripTimeoutError(error) {
+  const code = String(error?.code || error?.payload?.code || "")
+    .trim()
+    .toUpperCase();
+  if (code === "START_TRIP_TIMEOUT" || code === "STARTTRIP_TIMEOUT") {
+    return true;
+  }
+
+  const message = String(error?.message || error || "")
+    .trim()
+    .toLowerCase();
+  return message.includes("timeout") || message.includes("demorou mais");
+}
+
+async function recoverStartedTripAfterTimeout(bookingId) {
+  const normalizedBookingId = String(bookingId || "").trim();
+  if (!normalizedBookingId) {
+    return false;
+  }
+
+  const runtimeBookingId = String(runtimeState.activeBookingId || "").trim();
+  const runtimeStatus = resolveSyncedBookingStatus({
+    status:
+      runtimeState.bookingStatus || runtimeState.driverActiveRide?.status || "",
+  });
+  if (runtimeBookingId === normalizedBookingId && runtimeStatus === "started") {
+    await writeRuntimeDebugProbe("start_trip_timeout_recovered_from_runtime", {
+      bookingId: normalizedBookingId,
+    });
+    return true;
+  }
+
+  const socket = WebSocketManager.getInstance();
+  if (!socket?.isConnected?.()) {
+    return false;
+  }
+
+  try {
+    const snapshot = await socket.syncActiveRideWithAck(15000);
+    const snapshotBookingId = String(snapshot?.bookingId || "").trim();
+    const snapshotStatus = resolveSyncedBookingStatus(snapshot);
+    if (
+      snapshotBookingId !== normalizedBookingId ||
+      snapshotStatus !== "started"
+    ) {
+      return false;
+    }
+
+    const applied = applySyncedActiveRideSnapshot(snapshot);
+    const recoveredStatus = resolveSyncedBookingStatus({
+      status:
+        runtimeState.bookingStatus || runtimeState.driverActiveRide?.status || "",
+    });
+    const recovered = applied || recoveredStatus === "started";
+    await writeRuntimeDebugProbe(
+      recovered
+        ? "start_trip_timeout_recovered_from_active_ride_sync"
+        : "start_trip_timeout_sync_not_applied",
+      {
+        bookingId: normalizedBookingId,
+        snapshotStatus,
+        applied,
+      },
+    );
+    return recovered;
+  } catch (error) {
+    await writeRuntimeDebugProbe("start_trip_timeout_recovery_failed", {
+      bookingId: normalizedBookingId,
+      message: error?.message || String(error),
+      code: error?.code || null,
+    });
+    return false;
+  }
+}
+
 async function confirmPrototypeBoardingStatus(profile, boarded = true) {
   const bookingId = runtimeState.activeBookingId;
   if (!bookingId) {
@@ -15708,6 +16236,8 @@ async function startPrototypeTrip(options = {}) {
     bookingId,
   );
   let startLocation = null;
+  let recoveredFromAuthoritativeSync = false;
+  let startResponse = null;
 
   try {
     const socket = WebSocketManager.getInstance();
@@ -15727,7 +16257,7 @@ async function startPrototypeTrip(options = {}) {
         runtimeState.driverCoordinate?.longitude ||
         runtimeState.currentCoordinate?.longitude,
     };
-    const startResponse = await socket.startTrip(bookingId, startLocation, {
+    startResponse = await socket.startTrip(bookingId, startLocation, {
       idempotencyKey,
     });
     markRuntimeLifecycleIntentAcked(
@@ -15737,30 +16267,53 @@ async function startPrototypeTrip(options = {}) {
     );
   } catch (error) {
     if (!allowLocalFallback) {
-      if (shouldQueueRuntimeLifecycleFailure(error)) {
-        await queueRuntimeLifecycleIntent({
-          bookingId,
-          eventType: RIDE_EVENT_TYPES.START_TRIP,
-          payload: { startLocation },
-          error,
-        });
-      } else {
-        markRuntimeLifecycleIntentRejected(
-          RIDE_EVENT_TYPES.START_TRIP,
-          bookingId,
-          error,
+      recoveredFromAuthoritativeSync =
+        isStartTripTimeoutError(error) &&
+        (await recoverStartedTripAfterTimeout(bookingId));
+
+      if (!recoveredFromAuthoritativeSync) {
+        if (shouldQueueRuntimeLifecycleFailure(error)) {
+          await queueRuntimeLifecycleIntent({
+            bookingId,
+            eventType: RIDE_EVENT_TYPES.START_TRIP,
+            payload: { startLocation },
+            error,
+          });
+        } else {
+          markRuntimeLifecycleIntentRejected(
+            RIDE_EVENT_TYPES.START_TRIP,
+            bookingId,
+            error,
+          );
+        }
+        Logger.warn(
+          "⚠️ [PrototypeRuntime] startTrip remoto falhou; mantendo estado atual:",
+          error?.message || error,
         );
+        throw error;
       }
+
+      startResponse = {
+        success: true,
+        bookingId,
+        recoveredFromSync: true,
+      };
+      markRuntimeLifecycleIntentAcked(
+        RIDE_EVENT_TYPES.START_TRIP,
+        bookingId,
+        startResponse,
+      );
       Logger.warn(
-        "⚠️ [PrototypeRuntime] startTrip remoto falhou; mantendo estado atual:",
+        "⚠️ [PrototypeRuntime] startTrip excedeu o ACK, mas a sincronização autoritativa confirmou a viagem:",
         error?.message || error,
       );
-      throw error;
     }
-    Logger.warn(
-      "⚠️ [PrototypeRuntime] startTrip remoto falhou; fallback local permitido por QA:",
-      error?.message || error,
-    );
+    if (!recoveredFromAuthoritativeSync) {
+      Logger.warn(
+        "⚠️ [PrototypeRuntime] startTrip remoto falhou; fallback local permitido por QA:",
+        error?.message || error,
+      );
+    }
   }
 
   stopBoardingCountdownTimer();
@@ -15965,7 +16518,12 @@ async function startPrototypeTrip(options = {}) {
       : runtimeState.driverActiveRide,
     rideLocalSync: cloneDefaultRideLocalSyncState(),
   });
-  return { success: true };
+  return {
+    success: true,
+    ...(startResponse?.recoveredFromSync || recoveredFromAuthoritativeSync
+      ? { recoveredFromSync: true }
+      : {}),
+  };
 }
 
 async function completePrototypeTrip(options = {}) {
@@ -16002,7 +16560,7 @@ async function completePrototypeTrip(options = {}) {
     runtimeState.driverTripMeta?.destinationCoordinate ||
     null;
   const receiptRouteCoordinates = resolveCompletedReceiptRouteCoordinates(
-    completedRoute?.coordinates,
+    resolveReceiptRouteGeometry(runtimeState, [completedRoute?.coordinates]),
     receiptPickupCoordinate,
     receiptDestinationCoordinate,
   );
@@ -16156,7 +16714,7 @@ async function completePrototypeTrip(options = {}) {
         },
         distanceKm,
         fare,
-        { idempotencyKey },
+        { idempotencyKey, ...(options?.earlyEnd ? { earlyEnd: options.earlyEnd } : {}) },
       );
 
       if (remoteResult?.success !== false) {
@@ -17312,7 +17870,11 @@ async function resolveDriverOnlineLocationSeed() {
   });
 }
 
-async function resolveDriverOnlineLocationSeedWithTimeout(timeoutMs = 1800) {
+// iOS simulators (and cold-start physical devices) can take a few seconds to
+// deliver the first CLLocation even after permission is granted. Keep this
+// bounded by the native request timeout so the online gate does not race a
+// valid coordinate and incorrectly report LOCATION_REQUIRED.
+async function resolveDriverOnlineLocationSeedWithTimeout(timeoutMs = 12000) {
   const fallbackSeed = getDriverLocationPayload();
 
   const resolved = await Promise.race([
@@ -18507,6 +19069,17 @@ async function setPrototypeDriverOnline(profile, isOnline) {
     };
   }
 
+  // Ask for "always" location here, before any offer, so a ride never stops
+  // for a permission prompt. Declining keeps foreground-only tracking.
+  try {
+    await requestBackgroundLocationPermissionWithDisclosure();
+  } catch (error) {
+    Logger.warn(
+      "⚠️ [PrototypeRuntime] permissão de localização em segundo plano falhou:",
+      error?.message || error,
+    );
+  }
+
   const result = await enablePrototypeDriverOnline(resolvedProfile, {
     preserveOnlineOnFailure: false,
   });
@@ -18615,6 +19188,7 @@ async function acceptPrototypeDriverOffer(profile, offerInput = null) {
         plate: vehiclePlate,
       },
     });
+    markRuntimeDriverRideAssigned();
     await writeRuntimeDebugProbe("driver_accept_offer_remote_success", {
       bookingId,
       driverId,
@@ -18902,6 +19476,44 @@ async function acceptPrototypeDriverOffer(profile, offerInput = null) {
     bookingId,
     ride: activeRide,
   };
+}
+
+// Local fallback for a lost server offer_timeout clear: the offer deadline
+// passed, so drop it exactly as the server clear would. The backend stays the
+// authority; a later re-offer releases this suppression.
+function expirePrototypeDriverOffer(offerInput = null) {
+  const offer = resolveOfferInput(offerInput);
+  const bookingId = String(offer?.bookingId || offer?.id || "").trim();
+  if (!bookingId) {
+    return { success: false, bookingId: null };
+  }
+
+  const clearPresentation = resolveDriverOfferClearPresentation({
+    bookingId,
+    reason: "offer_timeout",
+  });
+  suppressBookingEvents(bookingId, clearPresentation.suppressReason, {
+    authoritativeAt: offer?.expiresAt || null,
+  });
+
+  let didDismissOffer = false;
+  setRuntimeState((previous) => {
+    const result = dismissDriverOfferRuntimeState(previous, bookingId);
+    didDismissOffer = result.didDismissOffer;
+    return result.patch ? { ...result.patch, lastError: "" } : {};
+  });
+
+  if (didDismissOffer) {
+    writeRuntimeDebugProbe("driver_offer_expired_locally", { bookingId });
+    showDriverTransientCard({
+      type: clearPresentation.transientType,
+      bookingId,
+      title: clearPresentation.title,
+      message: clearPresentation.transientMessage,
+    });
+  }
+
+  return { success: didDismissOffer, bookingId };
 }
 
 async function rejectPrototypeDriverOffer(
@@ -19552,7 +20164,7 @@ export function usePrototypeRideRuntime() {
       snapshot.bookingStatus,
     );
 
-    if (!["searching", "requesting"].includes(normalizedStatus)) {
+    if (!["searching", "requesting", "searching_replacement"].includes(normalizedStatus)) {
       return undefined;
     }
 
@@ -19900,15 +20512,22 @@ export function usePrototypeRideRuntime() {
     const updateDriverSignalAge = () => {
       setRuntimeState((previous) => {
         const heartbeat = previous.driverLocationHeartbeat || {};
+        if (String(heartbeat.bookingId || "") !== bookingId) {
+          // Corrida nova: a idade do sinal conta a partir de agora. Sem isto o horário da
+          // última localização da corrida anterior fazia o aviso "sinal instável há N min"
+          // aparecer logo depois do aceite.
+          return {
+            driverLocationHeartbeat: {
+              ...heartbeat,
+              bookingId,
+              lastReceivedAt: Date.now(),
+              stale: false,
+              ageSeconds: 0,
+            },
+          };
+        }
         const lastReceivedAt = Number(heartbeat.lastReceivedAt);
-        if (
-          !Number.isFinite(lastReceivedAt) ||
-          lastReceivedAt <= 0 ||
-          (
-            heartbeat.bookingId &&
-            String(heartbeat.bookingId) !== bookingId
-          )
-        ) {
+        if (!Number.isFinite(lastReceivedAt) || lastReceivedAt <= 0) {
           return null;
         }
 
@@ -21480,6 +22099,11 @@ export function usePrototypeRideRuntime() {
     [profile],
   );
 
+  const expireDriverOffer = useCallback(
+    (offer) => expirePrototypeDriverOffer(offer),
+    [],
+  );
+
   const respondToDriverExtension = useCallback(
     async (accepted) => {
       if (resolveRuntimeRole(profile) !== "driver") {
@@ -21723,6 +22347,7 @@ export function usePrototypeRideRuntime() {
     setDriverDestinationMode,
     acceptDriverOffer,
     rejectDriverOffer,
+    expireDriverOffer,
     respondToDriverExtension,
     interruptRideOperationalFlow,
     respondOperationalContinuationFlow,

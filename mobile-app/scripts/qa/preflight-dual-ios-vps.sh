@@ -21,7 +21,7 @@ REMOTE_KEY="${REMOTE_SSH_KEY:-${VPS_KEY:-${SSH_KEY_PATH:-${REMOTE_KEY:-}}}}"
 REMOTE_ENV_PATH="${REMOTE_ENV_PATH:-/opt/leaf-app/.env}"
 
 PASSENGER_UDID="${PASSENGER_UDID:-6BC9EC30-C939-4598-A85D-A9E071E90CE5}"
-DRIVER_UDID="${DRIVER_UDID:-C52FE30B-CB7E-4628-B352-27143BF6E9D7}"
+DRIVER_UDID="${DRIVER_UDID:-0DA1FB5E-2308-4F40-87DD-A8C04F7E7878}"
 SHARED_METRO_PORT="${SHARED_METRO_PORT:-8097}"
 PASSENGER_PORT="${PASSENGER_PORT:-${SHARED_METRO_PORT}}"
 DRIVER_PORT="${DRIVER_PORT:-${SHARED_METRO_PORT}}"
@@ -627,7 +627,10 @@ sleep 1
     EXPO_PUBLIC_WS_URL="${SOCKET_BASE_URL}" \
     EXPO_PUBLIC_SOCKET_URL="${SOCKET_BASE_URL}" \
     EXPO_PUBLIC_DASHBOARD_URL="${DASHBOARD_URL}" \
-    EXPO_PUBLIC_E2E_TEST="true" \
+    # E3 must use the production-shaped app. Keep the caller's explicit
+    # choice (e3-controlled-env.sh sets this to false) instead of silently
+    # enabling the test-only runtime path.
+    EXPO_PUBLIC_E2E_TEST="${EXPO_PUBLIC_E2E_TEST:-false}" \
     EXPO_PUBLIC_FORCE_PAYMENT_BYPASS="false" \
     EXPO_PUBLIC_BYPASS_PAYMENTS="false" \
     bash -lc "exec npx expo start --dev-client --port '${SHARED_METRO_PORT}' --host localhost --clear" \
@@ -680,6 +683,7 @@ for udid in "${PASSENGER_UDID}" "${DRIVER_UDID}"; do
     fail "simulator gps set failed (${udid})"
   fi
 done
+pass "one-time simulator reset complete; E3 login flows must preserve the session"
 
 assert_app_booted_and_dev_client_open "${PASSENGER_UDID}" passenger "${MAESTRO_METRO_URL_PASSENGER}"
 assert_app_booted_and_dev_client_open "${DRIVER_UDID}" driver "${MAESTRO_METRO_URL_DRIVER}"
@@ -721,6 +725,6 @@ fi
 log "preflight passed"
 log "next:"
 log "  source ${env_file}"
-log "  maestro test --udid ${DRIVER_UDID} .maestro/flows/qa/e2e/01-driver-login-online-8082.yaml"
+log "  maestro test --no-reinstall-driver --udid ${DRIVER_UDID} .maestro/flows/qa/e2e/01-driver-login-online-8082.yaml"
 log "  maestro test --udid ${PASSENGER_UDID} .maestro/flows/qa/e2e/02-passenger-login-8081.yaml"
 log "  maestro test --udid ${PASSENGER_UDID} .maestro/flows/qa/e2e/03-passenger-request-ride.yaml"

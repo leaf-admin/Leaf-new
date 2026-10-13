@@ -34,4 +34,8 @@ describe('Robotaxi reduced motion contract', () => {
     expect(mapSource).toContain('reduceMotion === true');
     expect(mapSource).toContain("'reduced_motion'");
   });
+
+  it('keeps the native map camera top-down for every role and navigation phase', () => {
+    expect(mapSource).toContain('pitchEnabled={false}');
+  });
 });

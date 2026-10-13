@@ -140,7 +140,7 @@ export function buildSerializableConfirmationMeta(confirmation) {
     return null;
   }
 
-  return {
+  const metadata = {
     verificationId: String(confirmation.verificationId || '').trim() || null,
     isCustomOtp: confirmation.isCustomOtp === true,
     isReviewAccount: confirmation.isReviewAccount === true,
@@ -148,6 +148,15 @@ export function buildSerializableConfirmationMeta(confirmation) {
     isTestNumber: confirmation.isTestNumber === true,
     source: confirmation.isCustomOtp ? 'custom_otp' : 'firebase_phone_auth',
   };
+
+  if (confirmation.channel) {
+    metadata.channel = confirmation.channel === 'sms' ? 'sms' : 'whatsapp';
+  }
+  if (Number.isFinite(Number(confirmation.expiresIn))) {
+    metadata.expiresIn = Number(confirmation.expiresIn);
+  }
+
+  return metadata;
 }
 
 export function resolveAuthFlowInitialStep(
@@ -300,4 +309,32 @@ export function buildRestoredAuthFlowData({
   }
 
   return savedData;
+}
+
+// After phone verification: a remote profile that already finished onboarding
+// (role defined, consents complete) logs straight in instead of asking the role
+// again. Returns null when the account is new, incomplete, or belongs to
+// another uid, so the regular onboarding continues.
+export function resolveExistingAccountLogin({ verifiedUser, remoteProfile } = {}) {
+  const verifiedUid = String(verifiedUser?.uid || '').trim();
+  if (!verifiedUid || !remoteProfile || typeof remoteProfile !== 'object') {
+    return null;
+  }
+  const remoteUid = String(remoteProfile.uid || remoteProfile.id || '').trim();
+  if (remoteUid && remoteUid !== verifiedUid) {
+    return null;
+  }
+  if (!isPersistedProfileOnboardingComplete(remoteProfile)) {
+    return null;
+  }
+  const userType = normalizeAuthFlowUserType(
+    remoteProfile.usertype || remoteProfile.userType || remoteProfile?.profile?.usertype || remoteProfile?.profile?.userType,
+  );
+  return {
+    ...remoteProfile,
+    uid: verifiedUid,
+    phoneNumber: remoteProfile.phoneNumber || verifiedUser?.phoneNumber || null,
+    usertype: userType,
+    userType,
+  };
 }

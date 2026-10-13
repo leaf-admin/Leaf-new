@@ -64,6 +64,9 @@ assert_exported_ipa() {
   local microphone_usage
   local updates_enabled
   local updates_channel
+  local signed_target
+  local signed_team
+  local profile_team
 
   tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/leaf-ios-ipa.XXXXXX")"
 
@@ -73,13 +76,23 @@ assert_exported_ipa() {
   widget_info_plist_path="$(find "${tmp_dir}/Payload" -path "*/Leaf.app/PlugIns/LeafRideActivityWidget.appex/Info.plist" -type f | head -n 1)"
   expo_plist_path="$(find "${tmp_dir}/Payload" -maxdepth 2 -path "*/Leaf.app/Expo.plist" -type f | head -n 1)"
 
+  for signed_target in "${tmp_dir}/Payload/Leaf.app" "${tmp_dir}/Payload/Leaf.app/PlugIns/LeafRideActivityWidget.appex"; do
+    codesign --verify --deep --strict "${signed_target}"
+    signed_team="$(codesign -dv --verbose=4 "${signed_target}" 2>&1 | sed -n 's/^TeamIdentifier=//p')"
+    assert_leaf_ios_team "${signed_team}"
+    security cms -D -i "${signed_target}/embedded.mobileprovision" > "${tmp_dir}/signing-profile.plist"
+    profile_team="$(/usr/libexec/PlistBuddy -c 'Print :TeamIdentifier:0' "${tmp_dir}/signing-profile.plist")"
+    assert_leaf_ios_team "${profile_team}"
+  done
+  echo "✅ App e widget assinados com o Team ID da Leaf: DTA8W5KA5D."
+
   if [[ -z "${app_config_path}" ]]; then
     echo "❌ EXConstants app.config ausente no IPA exportado."
     exit 1
   fi
 
-  expected_version="$(node -e "console.log(require('./config/AppConfig').AppConfig.ios_app_version)")"
-  expected_build_number="$(node -e "console.log(require('./config/AppConfig').AppConfig.ios_build_number)")"
+  expected_version="$(cd "${PROJECT_DIR}" && node -e "console.log(require('./config/AppConfig').AppConfig.ios_app_version)")"
+  expected_build_number="$(cd "${PROJECT_DIR}" && node -e "console.log(require('./config/AppConfig').AppConfig.ios_build_number)")"
   expected_runtime_version="${LEAF_RUNTIME_VERSION:-${EXPO_RUNTIME_VERSION:-${expected_version}}}"
 
   LEAF_EXPECTED_IOS_VERSION="${expected_version}" \
@@ -98,6 +111,27 @@ const expected = {
   version: expectedVersion,
   runtimeVersion: expectedRuntimeVersion,
 };
+
+if (config.extra?.launchProfile !== process.env.EXPO_PUBLIC_LEAF_LAUNCH_PROFILE) {
+  failures.push('extra.launchProfile diverge do perfil EAS selecionado');
+}
+if (config.extra?.pilotControlled !== true) {
+  failures.push('extra.pilotControlled deve permanecer true no candidato do piloto');
+}
+for (const key of ['apiUrl', 'backendUrl']) {
+  const expectedUrl = process.env.EXPO_PUBLIC_API_URL || process.env.EXPO_PUBLIC_BACKEND_URL;
+  if (config.extra?.[key] !== expectedUrl) failures.push(`extra.${key} diverge do perfil EAS selecionado`);
+}
+for (const key of ['wsUrl', 'socketUrl']) {
+  const expectedUrl = process.env.EXPO_PUBLIC_WS_URL || process.env.EXPO_PUBLIC_SOCKET_URL;
+  if (config.extra?.[key] !== expectedUrl) failures.push(`extra.${key} diverge do perfil EAS selecionado`);
+}
+if (config.extra?.isReview !== (process.env.APP_REVIEW === 'true')) {
+  failures.push('extra.isReview diverge do perfil EAS selecionado');
+}
+for (const key of ['e2eTest', 'forcePaymentBypass', 'enableTestUserTools', 'allowClientDirectGoogleFallback']) {
+  if (config.extra?.[key] === true) failures.push(`extra.${key} deve permanecer false no candidato público`);
+}
 
 for (const [key, value] of Object.entries(expected)) {
   if (config[key] !== value) {
@@ -193,6 +227,15 @@ main() {
   local export_method
   local team_id
   local export_options
+  local -a provisioning_flags=()
+
+  export EAS_BUILD_PROFILE="${EAS_BUILD_PROFILE:-production}"
+  export LEAF_BUILD_PROFILE="${LEAF_BUILD_PROFILE:-${EAS_BUILD_PROFILE}}"
+  export EXPO_UPDATE_CHANNEL="${EXPO_UPDATE_CHANNEL:-production}"
+  load_eas_build_profile_env
+  if [[ "${IOS_ALLOW_PROVISIONING_UPDATES:-0}" == "1" ]]; then
+    provisioning_flags+=("-allowProvisioningUpdates")
+  fi
 
   archive_path="${IOS_ARCHIVE_PATH:-$(resolve_default_archive)}"
   export_path="${IOS_EXPORT_PATH:-${PROJECT_DIR}/ios/build/export-appstore}"
@@ -208,6 +251,7 @@ main() {
     echo "❌ Team ID não resolvido. Defina IOS_DEVELOPMENT_TEAM=XXXXXXXXXX"
     exit 1
   fi
+  assert_leaf_ios_team "${team_id}"
 
   mkdir -p "${PROJECT_DIR}/ios/build"
   rm -rf "${export_path}"
@@ -247,7 +291,7 @@ PLIST
     -archivePath "${archive_path}" \
     -exportPath "${export_path}" \
     -exportOptionsPlist "${export_options}" \
-    -allowProvisioningUpdates
+    ${provisioning_flags[@]+"${provisioning_flags[@]}"}
 
   if [[ -f "${export_path}/Leaf.ipa" ]]; then
     assert_exported_ipa "${export_path}/Leaf.ipa"

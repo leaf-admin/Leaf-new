@@ -1,0 +1,18 @@
+{
+  "name": "Leaf",
+  "version": "1.0.6",
+  "runtimeVersion": "1.0.6",
+  "androidVersionCode": 132,
+  "publicRuntime": {
+    "launchProfile": "pilot_controlled",
+    "pilotControlled": true,
+    "apiUrl": "https://api.leaf.app.br",
+    "wsUrl": "https://socket.leaf.app.br",
+    "e2eTest": false,
+    "forcePaymentBypass": false,
+    "allowClientDirectGoogleFallback": false
+  },
+  "voiceModuleInDex": true,
+  "signatureCertificateSha256": "B8:A2:ED:46:34:36:06:A6:2C:C1:26:92:BE:62:32:3E:29:69:CD:F4:C8:3F:B5:41:80:D9:24:73:8A:7C:9B:F4",
+  "matchesPreviousCandidateCertificate": true
+}

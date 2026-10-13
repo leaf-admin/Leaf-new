@@ -275,6 +275,7 @@ export default function AWSNativeLivenessScreen({
   const activeRunRef = useRef(null);
   const abandoningSessionsRef = useRef(new Set());
   const onSuccessRef = useRef(onSuccess);
+  const reviewRequestedRef = useRef(false);
 
   useEffect(() => {
     onSuccessRef.current = onSuccess;
@@ -348,6 +349,7 @@ export default function AWSNativeLivenessScreen({
   const showFlowError = (run, error) => {
     if (!isCurrentRun(run) || run.successful === true) return;
     Logger.error('❌ [AWS NATIVE LIVENESS] Falha no fluxo nativo:', error);
+    reviewRequestedRef.current = false;
     setStatus(STATUS.ERROR);
     setErrorContext(error);
     setErrorPresentation(resolveKycLivenessErrorPresentation(error));
@@ -522,7 +524,11 @@ export default function AWSNativeLivenessScreen({
               && onRequestReview ? (
               <TouchableOpacity
                 style={styles.primaryButton}
-                onPress={() => onRequestReview(errorContext)}
+                onPress={() => {
+                  if (reviewRequestedRef.current) return;
+                  reviewRequestedRef.current = true;
+                  onRequestReview(errorContext);
+                }}
               >
                 <Text style={styles.primaryButtonText}>
                   {errorPresentation.primaryActionLabel || 'Solicitar análise'}
@@ -561,7 +567,7 @@ const styles = StyleSheet.create({
   },
   errorIcon: {
     width: 56,
-    height: 56,
+    minHeight: 48,
     borderRadius: 28,
     borderWidth: 3,
     borderColor: '#D92D20',
@@ -569,7 +575,7 @@ const styles = StyleSheet.create({
     fontSize: 34,
     lineHeight: 52,
     textAlign: 'center',
-    fontFamily: 'Inter_700Bold',
+    fontFamily: 'Figtree-Bold',
     marginBottom: 4,
   },
   title: {
@@ -577,7 +583,7 @@ const styles = StyleSheet.create({
     fontSize: 22,
     lineHeight: 28,
     color: '#111111',
-    fontFamily: 'Inter_700Bold',
+    fontFamily: 'Figtree-SemiBold',
     textAlign: 'center',
   },
   subtitle: {
@@ -585,22 +591,22 @@ const styles = StyleSheet.create({
     fontSize: 15,
     lineHeight: 22,
     color: '#6B7169',
-    fontFamily: 'Inter_400Regular',
+    fontFamily: 'Figtree-Regular',
     textAlign: 'center',
   },
   primaryButton: {
     marginTop: 24,
     width: '100%',
-    height: 56,
+    minHeight: 48,
     borderRadius: 28,
-    backgroundColor: '#1A330E',
+    backgroundColor: '#252525',
     alignItems: 'center',
     justifyContent: 'center',
   },
   primaryButtonText: {
     color: '#FFFFFF',
     fontSize: 16,
-    fontFamily: 'Inter_700Bold',
+    fontFamily: 'Figtree-Bold',
   },
   secondaryButton: {
     marginTop: 16,
@@ -612,6 +618,6 @@ const styles = StyleSheet.create({
   secondaryButtonText: {
     color: '#6B7169',
     fontSize: 16,
-    fontFamily: 'Inter_600SemiBold',
+    fontFamily: 'Figtree-SemiBold',
   },
 });

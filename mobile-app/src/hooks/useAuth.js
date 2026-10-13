@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
 import auth from '@react-native-firebase/auth';
+import apiClient from '../services/httpClient';
 
 export function useAuth() {
   const [user, setUser] = useState(null);
@@ -48,8 +49,32 @@ export function useAuth() {
     setLoading(true);
     setError(null);
     try {
-      const confirmation = await auth().signInWithPhoneNumber(phoneNumber);
-      return confirmation;
+      const response = await apiClient.post('/api/custom-otp/request-otp', {
+        phone: phoneNumber
+      });
+      const data = response?.data || {};
+      if (!data.success || !data.verificationId) {
+        throw new Error(data.error || 'Não foi possível enviar o código pelo WhatsApp.');
+      }
+
+      return {
+        verificationId: data.verificationId,
+        isCustomOtp: true,
+        channel: data.channel || 'whatsapp',
+        expiresIn: data.expiresIn || 300,
+        confirm: async (code) => {
+          const verificationResponse = await apiClient.post('/api/custom-otp/verify-otp', {
+            phone: phoneNumber,
+            verificationId: data.verificationId,
+            otp: code
+          });
+          const verificationData = verificationResponse?.data || {};
+          if (!verificationData.success || !verificationData.customToken) {
+            throw new Error(verificationData.error || 'Código inválido.');
+          }
+          return auth().signInWithCustomToken(verificationData.customToken);
+        }
+      };
     } catch (err) {
       setError(err);
       return null;
@@ -66,4 +91,4 @@ export function useAuth() {
     signOut,
     signInWithPhone,
   };
-} 
+}

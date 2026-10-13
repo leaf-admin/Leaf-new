@@ -1,7 +1,7 @@
+import leafTypography from './LeafTypography';
 import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { fonts } from '../../theme/runtimeTokens';
 import robotaxiPrototypeTokens from '../design-system/robotaxiPrototypeTokens';
 
 const { color, radius, spacing, elevation, typography } =
@@ -113,14 +113,14 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   title: {
-    fontFamily: fonts.SemiBold,
-    fontSize: typography.caption.size,
-    lineHeight: typography.caption.lineHeight,
+    ...leafTypography.semiBold,
+    fontSize: 22,
+    lineHeight: 28,
     letterSpacing: 0.1,
   },
   message: {
     marginTop: 2,
-    fontFamily: fonts.Regular,
+    ...leafTypography.regular,
     fontSize: 12,
     lineHeight: 16,
   },

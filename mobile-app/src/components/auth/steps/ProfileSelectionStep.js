@@ -1,7 +1,8 @@
+import leafTypography from '../../prototype/LeafTypography';
+import { LeafObjectIcon } from '../../prototype/LeafVisualElements';
 import Logger from '../../../utils/Logger';
 import React, { useCallback, useEffect, useState } from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { fonts } from '../../../theme/runtimeTokens';
 import { saveStepData } from '../../../utils/secureOnboardingStorage';
 import ContinueButton from '../common/ContinueButton';
 import onboardingTheme from '../common/onboardingTheme';
@@ -71,7 +72,7 @@ const ProfileSelectionStep = ({ onProfileSelected, onBack, initialData = {}, pro
       description="Conta pra gente como você quer usar a Leaf agora. Dá pra ajustar isso depois no perfil."
       onBack={onBack}
       backTestID="auth-profile-selection-back-btn"
-      backAccessibilityLabel="auth-profile-selection-back-btn"
+      backAccessibilityLabel="Voltar"
       progressMeta={progressMeta}
       footer={(
         <ContinueButton
@@ -79,7 +80,7 @@ const ProfileSelectionStep = ({ onProfileSelected, onBack, initialData = {}, pro
           disabled={!selected}
           text="Continuar"
           testID="auth-profile-selection-continue-btn"
-          accessibilityLabel="auth-profile-selection-continue-btn"
+          accessibilityLabel="Continuar"
         />
       )}
     >
@@ -93,11 +94,16 @@ const ProfileSelectionStep = ({ onProfileSelected, onBack, initialData = {}, pro
               onPress={() => handleOptionSelect(option)}
               activeOpacity={0.9}
               testID={`auth-profile-option-${option.key}`}
-              accessibilityLabel={`auth-profile-option-${option.key}`}
+              accessibilityRole="button"
+              accessibilityLabel={`${option.title}. ${option.description}`}
+              accessibilityHint={selectedOption
+                ? 'Perfil selecionado.'
+                : 'Toque para selecionar este perfil.'}
+              accessibilityState={{ selected: selectedOption }}
             >
               <View style={styles.roleTextWrap}>
                 <View style={styles.roleTopRow}>
-                  <View style={[styles.leafGlyph, selectedOption ? styles.leafGlyphSelected : null]} />
+                  <LeafObjectIcon name={option.key === 'driver' ? 'vehicle' : 'places'} size={48} />
                   {selectedOption ? (
                     <View style={styles.checkDot}>
                       <Text style={styles.checkDotText}>✓</Text>
@@ -135,7 +141,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF'
   },
   roleTopRow: {
-    minHeight: 24,
+    minHeight: 48,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
@@ -161,14 +167,14 @@ const styles = StyleSheet.create({
     color: color.textPrimary,
     fontSize: 20,
     lineHeight: 25,
-    fontFamily: fonts.Bold
+    ...leafTypography.bold
   },
   roleDescription: {
     marginTop: 5,
     color: color.textSecondary,
-    fontSize: 13,
-    lineHeight: 18,
-    fontFamily: fonts.Regular
+    fontSize: 14,
+    lineHeight: 20,
+    ...leafTypography.regular
   },
   checkDot: {
     width: 24,
@@ -180,7 +186,7 @@ const styles = StyleSheet.create({
   },
   checkDotText: {
     color: color.accentText,
-    fontFamily: fonts.Bold,
+    ...leafTypography.bold,
     fontSize: 13,
     lineHeight: 18
   }

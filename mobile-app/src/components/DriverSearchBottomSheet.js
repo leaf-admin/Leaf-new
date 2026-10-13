@@ -136,7 +136,7 @@ const styles = StyleSheet.create({
   },
   title: {
     fontSize: 24,
-    fontWeight: 'bold',
+    fontFamily: 'Figtree-Bold',
     color: '#2E8B57',
     marginBottom: 8,
   },

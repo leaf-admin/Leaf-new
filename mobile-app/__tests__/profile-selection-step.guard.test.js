@@ -50,4 +50,25 @@ describe('ProfileSelectionStep explicit choice guard', () => {
       expect.objectContaining({ userType: 'driver' }),
     );
   });
+
+  it('exposes readable role names and the selected state to screen readers', async () => {
+    const { getByTestId } = render(
+      <ProfileSelectionStep onProfileSelected={jest.fn()} onBack={jest.fn()} />,
+    );
+    const passenger = getByTestId('auth-profile-option-customer');
+    const driver = getByTestId('auth-profile-option-driver');
+
+    expect(getByTestId('auth-profile-selection-continue-btn').props.accessibilityLabel).toBe('Continuar');
+    expect(passenger.props.accessibilityRole).toBe('button');
+    expect(passenger.props.accessibilityLabel).toBe(
+      'Quero viajar. Solicite viagens com experiência premium',
+    );
+    expect(passenger.props.accessibilityState).toEqual({ selected: false });
+
+    fireEvent.press(driver);
+    await waitFor(() => {
+      expect(getByTestId('auth-profile-option-driver').props.accessibilityState)
+        .toEqual({ selected: true });
+    });
+  });
 });

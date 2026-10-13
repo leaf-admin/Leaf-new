@@ -221,7 +221,7 @@ class DriverBalanceService {
       if (!isPilotFeatureEnabled('driverWithdrawalsEnabled', false)) {
         return {
           success: false,
-          error: 'Saque indisponivel neste piloto controlado',
+          error: 'Saque indisponível neste piloto controlado',
           code: 'FEATURE_DISABLED_IN_LAUNCH_PROFILE',
           statusCode: 503
         };

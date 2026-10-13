@@ -51,6 +51,15 @@ export const allowReviewAccess = () => isReviewBuild();
 export const hasExplicitCustomOtpFallbackFlag = () =>
     normalizeFlag(process.env.EXPO_PUBLIC_ENABLE_CUSTOM_OTP_FALLBACK);
 
+// WhatsApp delivery is deliberately opt-in. The pilot release keeps Firebase
+// Phone Auth/SMS as the default until the Meta provider has passed a real
+// delivery smoke and the gateway has its production secrets.
+export const hasExplicitWhatsAppOtpFlag = () =>
+    normalizeFlag(process.env.EXPO_PUBLIC_ENABLE_WHATSAPP_OTP);
+
+export const isWhatsAppOtpEnabled = () =>
+    hasExplicitWhatsAppOtpFlag() || normalizeExtraFlag('enableWhatsAppOtp');
+
 export const hasExplicitQaOtpForceFlag = () =>
     normalizeFlag(process.env.EXPO_PUBLIC_ENABLE_QA_OTP_FORCE_FLOW);
 
@@ -116,6 +125,7 @@ export const getRuntimeAccessPolicySnapshot = () => ({
     isReviewBuild: isReviewBuild(),
     isE2ETestBuild: isE2ETestBuild(),
     allowReviewAccess: allowReviewAccess(),
+    isWhatsAppOtpEnabled: isWhatsAppOtpEnabled(),
     allowCustomOtpFallback: allowCustomOtpFallback(),
     allowQaOtpForceFlow: allowQaOtpForceFlow(),
     allowTestUserTools: allowTestUserTools(),
@@ -123,6 +133,7 @@ export const getRuntimeAccessPolicySnapshot = () => ({
     allowForcedPaymentBypass: allowForcedPaymentBypass(),
     hasExplicitClientDirectGoogleFallbackFlag: hasExplicitClientDirectGoogleFallbackFlag(),
     hasExplicitCustomOtpFallbackFlag: hasExplicitCustomOtpFallbackFlag(),
+    hasExplicitWhatsAppOtpFlag: hasExplicitWhatsAppOtpFlag(),
     hasExplicitQaOtpForceFlag: hasExplicitQaOtpForceFlag(),
     hasExplicitTestUserToolsFlag: hasExplicitTestUserToolsFlag(),
     hasExplicitPaymentBypassFlag: hasExplicitPaymentBypassFlag(),

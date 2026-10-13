@@ -1,0 +1,94 @@
+{
+  "codeManifestCounts": {
+    "current": 43,
+    "compatibility_redirect": 41,
+    "legacy": 56
+  },
+  "qaCoverageModel": "static-flow-definition-only",
+  "releaseFlowDefinitions": [
+    {
+      "id": "passenger_signup",
+      "status": "DEFINED",
+      "missing": [],
+      "flowCount": 2
+    },
+    {
+      "id": "driver_signup",
+      "status": "DEFINED",
+      "missing": [],
+      "flowCount": 2
+    },
+    {
+      "id": "login",
+      "status": "DEFINED",
+      "missing": [],
+      "flowCount": 9
+    },
+    {
+      "id": "driver_online",
+      "status": "DEFINED",
+      "missing": [],
+      "flowCount": 12
+    },
+    {
+      "id": "request_ride",
+      "status": "DEFINED",
+      "missing": [],
+      "flowCount": 30
+    },
+    {
+      "id": "driver_accept",
+      "status": "DEFINED",
+      "missing": [],
+      "flowCount": 4
+    },
+    {
+      "id": "navigation",
+      "status": "DEFINED",
+      "missing": [],
+      "flowCount": 18
+    },
+    {
+      "id": "chat",
+      "status": "DEFINED",
+      "missing": [],
+      "flowCount": 3
+    },
+    {
+      "id": "support",
+      "status": "DEFINED",
+      "missing": [],
+      "flowCount": 5
+    },
+    {
+      "id": "rating",
+      "status": "DEFINED",
+      "missing": [],
+      "flowCount": 7
+    }
+  ],
+  "executedThisCandidate": {
+    "simulator": [
+      "passenger_home",
+      "account_summary",
+      "trip_history",
+      "saved_places_navigation",
+      "saved_place_picker_navigation"
+    ],
+    "physicalIphone": [],
+    "physicalAndroid": [],
+    "bilateralIntegratedTrip": false
+  },
+  "preferencesUnavailable": [
+    "notifications",
+    "language",
+    "traffic",
+    "voice"
+  ],
+  "featuresOutsidePilot": [
+    "withdrawals",
+    "referrals",
+    "extras"
+  ],
+  "onboardingAndBadgesAcceptance": "deferred by prior review"
+}

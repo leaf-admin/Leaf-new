@@ -19,6 +19,7 @@ import { joinDriverWaitlist, loadDriverWaitlistStatus } from '../src/services/ru
 
 const mockListVehicles = jest.fn();
 const mockUpdateVehicle = jest.fn();
+const mockSelectVehicle = jest.fn();
 
 jest.mock('../src/services/MobileVehicleService', () => ({
   __esModule: true,
@@ -26,7 +27,7 @@ jest.mock('../src/services/MobileVehicleService', () => ({
     listVehicles: (...args) => mockListVehicles(...args),
     addVehicle: jest.fn(),
     updateVehicle: (...args) => mockUpdateVehicle(...args),
-    selectVehicle: jest.fn(),
+    selectVehicle: (...args) => mockSelectVehicle(...args),
     removeVehicle: jest.fn(),
   },
 }));
@@ -179,9 +180,19 @@ describe('prototype new surfaces', () => {
     expect(screen.getByText('Acompanhar viagem')).toBeTruthy();
     expect(screen.getByText('Copiar link')).toBeTruthy();
     expect(screen.queryByText('WhatsApp')).toBeNull();
+    expect(screen.getByTestId('robotaxi-share-trip-close-button').props.accessibilityLabel)
+      .toBe('Fechar compartilhamento da viagem');
+    expect(screen.getByTestId('robotaxi-share-copy-link').props.accessibilityLabel)
+      .toBe('Copiar link da viagem');
 
     fireEvent.press(screen.getByTestId('robotaxi-share-more-actions'));
     expect(screen.getByText('WhatsApp')).toBeTruthy();
+    expect(screen.getByTestId('robotaxi-share-more-actions').props.accessibilityLabel)
+      .toBe('Ocultar opções de compartilhamento');
+    expect(screen.getByTestId('robotaxi-share-whatsapp').props.accessibilityLabel)
+      .toBe('Compartilhar link pelo WhatsApp');
+    expect(screen.getByTestId('robotaxi-share-preview').props.accessibilityLabel)
+      .toBe('Visualizar prévia do link da viagem');
 
     fireEvent.press(screen.getByText('Prévia'));
 
@@ -214,6 +225,10 @@ describe('prototype new surfaces', () => {
     expect(screen.getByText('Chega em 8 min')).toBeTruthy();
     expect(screen.getByText('Motorista Leaf')).toBeTruthy();
     expect(screen.getByText('LEF-2042')).toBeTruthy();
+    expect(screen.getByTestId('robotaxi-public-tracking-close-button').props.accessibilityLabel)
+      .toBe('Fechar acompanhamento público da viagem');
+    expect(screen.getByTestId('robotaxi-public-tracking-back').props.accessibilityLabel)
+      .toBe('Voltar para a viagem');
 
     fireEvent.press(screen.getByText('Voltar para a viagem'));
     expect(navigation.navigate).toHaveBeenCalledWith('Splash');
@@ -261,8 +276,12 @@ describe('prototype new surfaces', () => {
       expect(screen.getByText('PSG-OLD')).toBeTruthy();
     });
 
-    fireEvent.changeText(screen.getByLabelText('robotaxi-invites-target-input'), '+5521999999999');
-    fireEvent.press(screen.getByText('Criar convite'));
+    const inviteTarget = screen.getByTestId('robotaxi-invites-target-input');
+    expect(inviteTarget.props.accessibilityLabel).toBe('Telefone ou email do passageiro convidado');
+    expect(screen.getByTestId('robotaxi-invites-create-button').props.accessibilityLabel)
+      .toBe('Criar convite para passageiro');
+    fireEvent.changeText(inviteTarget, '+5521999999999');
+    fireEvent.press(screen.getByTestId('robotaxi-invites-create-button'));
 
     await waitFor(() => {
       expect(createReferralInvite).toHaveBeenCalledWith(
@@ -288,7 +307,7 @@ describe('prototype new surfaces', () => {
       />
     );
 
-    expect(screen.getByText('Waitlist e convites')).toBeTruthy();
+    expect(screen.getByText('Lista de espera e convites')).toBeTruthy();
 
     await waitFor(() => {
       expect(screen.getByText('Rio de Janeiro')).toBeTruthy();
@@ -303,8 +322,12 @@ describe('prototype new surfaces', () => {
       expect(joinDriverWaitlist).toHaveBeenCalledWith({ city: 'Rio de Janeiro' });
     });
 
-    fireEvent.changeText(screen.getByLabelText('robotaxi-driver-invite-target-input'), 'driver@leaf.app.br');
-    fireEvent.press(screen.getByText('Criar convite'));
+    const inviteTarget = screen.getByTestId('robotaxi-driver-invite-target-input');
+    expect(inviteTarget.props.accessibilityLabel).toBe('Telefone ou email para convidar motorista');
+    expect(screen.getByTestId('robotaxi-driver-invite-create-button').props.accessibilityLabel)
+      .toBe('Criar convite para motorista');
+    fireEvent.changeText(inviteTarget, 'driver@leaf.app.br');
+    fireEvent.press(screen.getByTestId('robotaxi-driver-invite-create-button'));
 
     await waitFor(() => {
       expect(createReferralInvite).toHaveBeenCalledWith(
@@ -354,7 +377,11 @@ describe('prototype new surfaces', () => {
       expect(screen.getByText('Entre na lista da sua cidade')).toBeTruthy();
     });
 
-    fireEvent.press(screen.getByLabelText('robotaxi-driver-waitlist-status-join-button'));
+    expect(screen.getByTestId('robotaxi-driver-waitlist-status-city-input').props.accessibilityLabel)
+      .toBe('Cidade de operação');
+    const joinButton = screen.getByTestId('robotaxi-driver-waitlist-status-join-button');
+    expect(joinButton.props.accessibilityLabel).toBe('Entrar na lista');
+    fireEvent.press(joinButton);
 
     await waitFor(() => {
       expect(joinDriverWaitlist).toHaveBeenCalledWith({ city: 'Rio de Janeiro' });
@@ -381,13 +408,23 @@ describe('prototype new surfaces', () => {
       />
     );
 
-    expect(screen.getByText('Abrir ticket')).toBeTruthy();
+    expect(screen.getByText('Abrir chamado')).toBeTruthy();
+    const tripType = screen.getByTestId('robotaxi-support-ticket-type-trip');
+    expect(tripType.props.accessibilityRole).toBe('button');
+    expect(tripType.props.accessibilityLabel).toBe('Viagem');
+    expect(tripType.props.accessibilityState).toEqual({ expanded: false });
+    expect(screen.getByTestId('robotaxi-support-ticket-subject').props.accessibilityLabel)
+      .toBe('Assunto do chamado de suporte');
+    const description = screen.getByTestId('robotaxi-support-ticket-description');
+    expect(description.props.accessibilityLabel).toBe('Detalhes do chamado de suporte');
+    expect(screen.getByTestId('robotaxi-support-ticket-submit').props.accessibilityLabel)
+      .toBe('Enviar chamado de suporte');
 
     fireEvent.changeText(
-      screen.getByLabelText('robotaxi-support-ticket-description'),
+      description,
       'Motorista não encontrou o ponto combinado.',
     );
-    fireEvent.press(screen.getByText('Enviar ticket'));
+    fireEvent.press(screen.getByTestId('robotaxi-support-ticket-submit'));
 
     await waitFor(() => {
       expect(runtime.openSupportTicket).toHaveBeenCalledWith(
@@ -399,10 +436,10 @@ describe('prototype new surfaces', () => {
           bookingStatus: 'started',
         })
       );
-      expect(screen.getByText('Ticket #SUP-123 criado')).toBeTruthy();
+      expect(screen.getByText('Chamado #SUP-123 criado')).toBeTruthy();
     });
 
-    fireEvent.press(screen.getByText('Acompanhar ticket'));
+    fireEvent.press(screen.getByText('Acompanhar chamado'));
 
     expect(navigation.replace).toHaveBeenCalledWith(
       'RobotaxiPrototypeSupportThread',
@@ -440,17 +477,25 @@ describe('prototype new surfaces', () => {
       />
     );
 
-    expect(screen.getByLabelText('robotaxi-support-ticket-subject').props.value).toBe(
+    expect(screen.getByTestId('robotaxi-support-ticket-subject').props.accessibilityLabel)
+      .toBe('Assunto do pedido de revisão');
+    expect(screen.getByTestId('robotaxi-support-ticket-subject').props.value).toBe(
       'Revisão de identidade',
     );
-    expect(screen.getByLabelText('robotaxi-support-ticket-description').props.value).toContain(
+    expect(screen.getByTestId('robotaxi-support-ticket-description').props.accessibilityLabel)
+      .toBe('Detalhes do pedido de revisão');
+    expect(screen.getByTestId('robotaxi-support-ticket-description').props.value).toContain(
       'solicito uma análise',
     );
     expect(screen.getByTestId('robotaxi-support-ticket-type-account')).toBeTruthy();
+    expect(screen.getByTestId('robotaxi-support-ticket-type-account').props.accessibilityState)
+      .toEqual({ checked: true });
     expect(screen.queryByTestId('robotaxi-support-ticket-type-payment')).toBeNull();
     expect(screen.queryByTestId('robotaxi-support-ticket-type-trip')).toBeNull();
 
-    fireEvent.press(screen.getByLabelText('robotaxi-support-ticket-submit'));
+    expect(screen.getByTestId('robotaxi-support-ticket-submit').props.accessibilityLabel)
+      .toBe('Solicitar análise de identidade');
+    fireEvent.press(screen.getByTestId('robotaxi-support-ticket-submit'));
 
     await waitFor(() => {
       expect(runtime.openSupportTicket).toHaveBeenCalledWith(
@@ -516,7 +561,9 @@ describe('prototype new surfaces', () => {
       />
     );
 
-    fireEvent.press(screen.getByLabelText('robotaxi-support-ticket-close-button'));
+    expect(screen.getByTestId('robotaxi-support-ticket-close-button').props.accessibilityLabel)
+      .toBe('Fechar formulário de suporte');
+    fireEvent.press(screen.getByTestId('robotaxi-support-ticket-close-button'));
 
     expect(navigation.navigate).toHaveBeenCalledWith(
       'RobotaxiPrototypeTrip',
@@ -548,7 +595,7 @@ describe('prototype new surfaces', () => {
       />
     );
 
-    fireEvent.press(screen.getByLabelText('robotaxi-support-ticket-close-button'));
+    fireEvent.press(screen.getByTestId('robotaxi-support-ticket-close-button'));
 
     expect(navigation.navigate).toHaveBeenCalledWith(
       'RobotaxiPrototypeReceipt',
@@ -585,7 +632,13 @@ describe('prototype new surfaces', () => {
       />
     );
 
-    fireEvent.press(screen.getByLabelText('robotaxi-support-primary-action'));
+    const paymentOption = screen.getByTestId('robotaxi-support-option-payment');
+    expect(paymentOption.props.accessibilityRole).toBe('radio');
+    expect(paymentOption.props.accessibilityLabel).toBe('Problema com Pix');
+    expect(paymentOption.props.accessibilityState).toEqual({ checked: true });
+    const primaryAction = screen.getByTestId('robotaxi-support-primary-action');
+    expect(primaryAction.props.accessibilityLabel).toBe('Abrir chamado: Problema com Pix');
+    fireEvent.press(primaryAction);
 
     expect(navigation.navigate).toHaveBeenCalledWith(
       'RobotaxiPrototypeSupportTicket',
@@ -599,8 +652,13 @@ describe('prototype new surfaces', () => {
       })
     );
 
-    fireEvent.press(screen.getByTestId('robotaxi-support-option-safety'));
-    fireEvent.press(screen.getByLabelText('robotaxi-support-primary-action'));
+    const safetyOption = screen.getByTestId('robotaxi-support-option-safety');
+    fireEvent.press(safetyOption);
+    expect(safetyOption.props.accessibilityState).toEqual({ checked: true });
+    expect(screen.getByTestId('robotaxi-support-option-payment').props.accessibilityState)
+      .toEqual({ checked: false });
+    expect(primaryAction.props.accessibilityLabel).toBe('Registrar incidente de segurança');
+    fireEvent.press(primaryAction);
 
     await waitFor(() => {
       expect(runtime.reportIncident).toHaveBeenCalledWith(
@@ -615,8 +673,12 @@ describe('prototype new surfaces', () => {
       );
     });
 
-    fireEvent.press(screen.getByLabelText('robotaxi-support-more-actions'));
-    fireEvent.press(screen.getByLabelText('robotaxi-support-open-complain'));
+    fireEvent.press(screen.getByTestId('robotaxi-support-more-actions'));
+    expect(screen.getByTestId('robotaxi-support-more-actions').props.accessibilityLabel)
+      .toBe('Ocultar opções de suporte');
+    expect(screen.getByTestId('robotaxi-support-open-complain').props.accessibilityLabel)
+      .toBe('Abrir reclamação de suporte');
+    fireEvent.press(screen.getByTestId('robotaxi-support-open-complain'));
     expect(navigation.replace).toHaveBeenCalledWith(
       'RobotaxiPrototypeComplain',
       expect.objectContaining({
@@ -628,7 +690,9 @@ describe('prototype new surfaces', () => {
       })
     );
 
-    fireEvent.press(screen.getByLabelText('robotaxi-support-close-button'));
+    expect(screen.getByTestId('robotaxi-support-close-button').props.accessibilityLabel)
+      .toBe('Fechar suporte');
+    fireEvent.press(screen.getByTestId('robotaxi-support-close-button'));
     expect(navigation.navigate).toHaveBeenCalledWith(
       'RobotaxiPrototypeReceipt',
       expect.objectContaining({
@@ -657,9 +721,11 @@ describe('prototype new surfaces', () => {
       />
     );
 
-    expect(screen.queryByLabelText('robotaxi-support-open-chat')).toBeNull();
-    fireEvent.press(screen.getByLabelText('robotaxi-support-more-actions'));
-    fireEvent.press(screen.getByLabelText('robotaxi-support-open-chat'));
+    expect(screen.queryByTestId('robotaxi-support-open-chat')).toBeNull();
+    fireEvent.press(screen.getByTestId('robotaxi-support-more-actions'));
+    expect(screen.getByTestId('robotaxi-support-open-chat').props.accessibilityLabel)
+      .toBe('Abrir conversa com suporte');
+    fireEvent.press(screen.getByTestId('robotaxi-support-open-chat'));
 
     expect(navigation.replace).toHaveBeenCalledWith(
       'RobotaxiPrototypeSupportTicket',
@@ -696,16 +762,16 @@ describe('prototype new surfaces', () => {
     );
 
     fireEvent.changeText(
-      screen.getByLabelText('robotaxi-support-ticket-description'),
+      screen.getByTestId('robotaxi-support-ticket-description'),
       'Preciso de ajuda com minha conta.',
     );
-    fireEvent.press(screen.getByText('Enviar ticket'));
+    fireEvent.press(screen.getByTestId('robotaxi-support-ticket-submit'));
 
     await waitFor(() => {
-      expect(screen.getByText('Ticket #SUP-123 criado')).toBeTruthy();
+      expect(screen.getByText('Chamado #SUP-123 criado')).toBeTruthy();
     });
 
-    fireEvent.press(screen.getByText('Acompanhar ticket'));
+    fireEvent.press(screen.getByText('Acompanhar chamado'));
 
     expect(navigation.replace).toHaveBeenCalledWith(
       'RobotaxiPrototypeSupportThread',
@@ -741,7 +807,7 @@ describe('prototype new surfaces', () => {
       />
     );
 
-    fireEvent.press(screen.getByLabelText('robotaxi-support-close-button'));
+    fireEvent.press(screen.getByTestId('robotaxi-support-close-button'));
 
     expect(navigation.navigate).toHaveBeenCalledWith(
       'RobotaxiPrototypeReceipt',
@@ -773,11 +839,12 @@ describe('prototype new surfaces', () => {
       />
     );
 
-    fireEvent.changeText(
-      screen.getByLabelText('robotaxi-complain-description'),
-      'Valor cobrado não confere com o recibo.',
-    );
-    fireEvent.press(screen.getByLabelText('robotaxi-complain-submit'));
+    const description = screen.getByTestId('robotaxi-complain-description');
+    expect(description.props.accessibilityLabel).toBe('Detalhes da reclamação de suporte');
+    expect(screen.getByTestId('robotaxi-complain-submit').props.accessibilityLabel)
+      .toBe('Enviar relato de suporte');
+    fireEvent.changeText(description, 'Valor cobrado não confere com o recibo.');
+    fireEvent.press(screen.getByTestId('robotaxi-complain-submit'));
 
     await waitFor(() => {
       expect(runtime.openSupportTicket).toHaveBeenCalledWith(
@@ -813,10 +880,10 @@ describe('prototype new surfaces', () => {
     );
 
     fireEvent.changeText(
-      screen.getByLabelText('robotaxi-complain-description'),
+      screen.getByTestId('robotaxi-complain-description'),
       'Valor cobrado não confere com o recibo.',
     );
-    fireEvent.press(screen.getByLabelText('robotaxi-complain-submit'));
+    fireEvent.press(screen.getByTestId('robotaxi-complain-submit'));
 
     await waitFor(() => {
       expect(runtime.openSupportTicket).toHaveBeenCalledWith(
@@ -841,7 +908,7 @@ describe('prototype new surfaces', () => {
 
     expect(docs.getByText('Documentos')).toBeTruthy();
     expect(docs.getByText('CNH com EAR')).toBeTruthy();
-    expect(docs.getByText('Abrir ativação')).toBeTruthy();
+    expect(docs.getByText('Ativação')).toBeTruthy();
 
     const vehicles = render(
       <RobotaxiVehiclesScreen
@@ -855,6 +922,22 @@ describe('prototype new surfaces', () => {
       expect(vehicles.getAllByText('Nissan Leaf').length).toBeGreaterThan(0);
       expect(vehicles.getAllByText(/LEF-2042/).length).toBeGreaterThan(0);
       expect(vehicles.getByText('Adicionar veículo')).toBeTruthy();
+    });
+  });
+
+  it('refreshes the canonical vehicle identity after selecting a registered car', async () => {
+    const refreshDriverActivationRemote = jest.fn().mockResolvedValue(undefined);
+    usePrototypeRideRuntime.mockReturnValue(buildRuntime({ refreshDriverActivationRemote }));
+    mockListVehicles.mockResolvedValue([{ id: 'vehicle_silver', model: 'Honda City', color: 'Prata', approved: true, isActive: false }]);
+    mockSelectVehicle.mockResolvedValue('vehicle_silver');
+    const screen = render(<RobotaxiVehiclesScreen navigation={buildNavigation()} route={{ key: 'vehicle-selection', params: {} }} />);
+    await waitFor(() => expect(screen.getByTestId('robotaxi-vehicle-vehicle_silver')).toBeTruthy());
+    fireEvent.press(screen.getByTestId('robotaxi-vehicle-vehicle_silver'));
+    fireEvent.press(screen.getByTestId('robotaxi-vehicle-select-button'));
+    await waitFor(() => {
+      expect(mockSelectVehicle).toHaveBeenCalledWith('vehicle_silver');
+      expect(refreshDriverActivationRemote).toHaveBeenCalledTimes(1);
+      expect(screen.getByText('Selecionado')).toBeTruthy();
     });
   });
 

@@ -285,7 +285,7 @@ const styles = StyleSheet.create({
   },
   title: {
     fontSize: 18,
-    fontWeight: 'bold',
+    fontFamily: 'Figtree-Bold',
     color: '#333',
   },
   closeButton: {
@@ -332,7 +332,7 @@ const styles = StyleSheet.create({
   },
   appName: {
     fontSize: 16,
-    fontWeight: '600',
+    fontFamily: 'Figtree-SemiBold',
     marginBottom: 4,
   },
   appNameInstalled: {

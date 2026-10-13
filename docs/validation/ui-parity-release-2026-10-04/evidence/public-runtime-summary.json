@@ -1,0 +1,124 @@
+[
+  {
+    "origin": "https://api.leaf.app.br",
+    "httpStatus": 200,
+    "timestamp": "2026-10-04T06:53:21.209Z",
+    "woovi": {
+      "environment": "production",
+      "baseUrlConfigured": true,
+      "baseUrlMode": "production"
+    },
+    "launch": {
+      "launchProfile": "pilot_controlled",
+      "pilotControlled": true,
+      "driverWithdrawalsEnabled": false,
+      "referralProgramsEnabled": false,
+      "leafDelasEnabled": false
+    },
+    "launchAccess": {
+      "pilotControlled": true,
+      "acceptNewBookings": true,
+      "acceptNewPix": true,
+      "passengerAccessMode": "cohort",
+      "passengerCohortConfigured": true,
+      "passengerCohortSize": 1,
+      "driverCohortConfigured": true,
+      "driverCohortSize": 1
+    },
+    "realSandbox": {
+      "ready": false,
+      "blockers": [
+        "WOOVI_ENVIRONMENT != sandbox",
+        "WOOVI_BASE_URL n\u00e3o aponta para sandbox"
+      ]
+    },
+    "guards": {
+      "appReview": false,
+      "requirePaymentBeforeBooking": true,
+      "verifyPaymentBeforeBooking": true,
+      "requirePaymentChargeRefBeforeBooking": true,
+      "mockPaymentForTests": false,
+      "allowReviewMockPaymentOnCreateBooking": false,
+      "paymentBypassOnWooviFailure": false,
+      "paymentForceBypass": false,
+      "authTestOtpBypassEnabled": false,
+      "authReviewOtpBypassEnabled": false
+    },
+    "kyc": {
+      "configured": true,
+      "strictProductionMode": true,
+      "awsLivenessConfigured": false,
+      "livenessBypassEnabled": true,
+      "livenessMode": "face_compare",
+      "faceCompareProvider": "biometric-face-service",
+      "faceServiceConfigured": true,
+      "faceServiceApiKeyConfigured": true,
+      "activeTripAuthorityReady": true
+    }
+  },
+  {
+    "origin": "https://staging.leaf.app.br",
+    "status": "not_resolved_or_unreachable"
+  },
+  {
+    "origin": "https://api-staging.leaf.app.br",
+    "status": "not_resolved_or_unreachable"
+  },
+  {
+    "origin": "https://socket.leaf.app.br",
+    "httpStatus": 200,
+    "timestamp": "2026-10-04T06:53:21.935Z",
+    "woovi": {
+      "environment": "production",
+      "baseUrlConfigured": true,
+      "baseUrlMode": "production"
+    },
+    "launch": {
+      "launchProfile": "pilot_controlled",
+      "pilotControlled": true,
+      "driverWithdrawalsEnabled": false,
+      "referralProgramsEnabled": false,
+      "leafDelasEnabled": false
+    },
+    "launchAccess": {
+      "pilotControlled": true,
+      "acceptNewBookings": true,
+      "acceptNewPix": true,
+      "passengerAccessMode": "cohort",
+      "passengerCohortConfigured": true,
+      "passengerCohortSize": 1,
+      "driverCohortConfigured": true,
+      "driverCohortSize": 1
+    },
+    "realSandbox": {
+      "ready": false,
+      "blockers": [
+        "WOOVI_ENVIRONMENT != sandbox",
+        "WOOVI_BASE_URL n\u00e3o aponta para sandbox"
+      ]
+    },
+    "guards": {
+      "appReview": false,
+      "requirePaymentBeforeBooking": true,
+      "verifyPaymentBeforeBooking": true,
+      "requirePaymentChargeRefBeforeBooking": true,
+      "mockPaymentForTests": false,
+      "allowReviewMockPaymentOnCreateBooking": false,
+      "paymentBypassOnWooviFailure": false,
+      "paymentForceBypass": false,
+      "authTestOtpBypassEnabled": false,
+      "authReviewOtpBypassEnabled": false
+    },
+    "kyc": {
+      "configured": true,
+      "strictProductionMode": true,
+      "awsLivenessConfigured": false,
+      "livenessBypassEnabled": true,
+      "livenessMode": "face_compare",
+      "faceCompareProvider": "biometric-face-service",
+      "faceServiceConfigured": true,
+      "faceServiceApiKeyConfigured": true,
+      "activeTripAuthorityReady": true
+    }
+  }
+]

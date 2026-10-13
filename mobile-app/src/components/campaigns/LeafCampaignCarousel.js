@@ -1,3 +1,4 @@
+import leafTypography from '../prototype/LeafTypography';
 import React, { memo, useEffect, useMemo, useRef, useState } from "react";
 import {
   Animated,
@@ -10,7 +11,6 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import { fonts } from "../../theme/runtimeTokens";
 import {
   loadCachedEligibleCampaigns,
   recordCampaignEvent,
@@ -18,9 +18,9 @@ import {
 } from "../../services/runtime/campaignCenterService";
 
 const LEAF_GREEN = "#1A330E";
-const CARD_BORDER = "#ECE5DC";
-const TEXT_PRIMARY = "#171412";
-const TEXT_MUTED = "#827B73";
+const CARD_BORDER = "#E5E5E5";
+const TEXT_PRIMARY = "#222222";
+const TEXT_MUTED = "#767676";
 const DEFAULT_ROTATE_SECONDS = 6;
 const IS_TEST_ENV = typeof process !== "undefined" && process.env?.NODE_ENV === "test";
 
@@ -261,7 +261,7 @@ function LeafCampaignCarousel({
           {content.title}
         </Text>
         {content.body ? (
-          <Text style={[styles.body, { color: textOnImage ? "rgba(255,255,255,0.9)" : TEXT_MUTED }]} numberOfLines={3}>
+          <Text style={[styles.body, { color: textOnImage ? "rgba(255,255,255,0.9)" : TEXT_MUTED }]} numberOfLines={2}>
             {content.body}
           </Text>
         ) : null}
@@ -399,24 +399,28 @@ const styles = StyleSheet.create({
     paddingTop: 22,
     paddingBottom: 18,
   },
+  // Fixed-height card: clip the copy so long campaign text never runs under
+  // the CTA/footer (the footer keeps its own row below).
   copy: {
     flex: 1,
+    minHeight: 0,
+    overflow: "hidden",
   },
   eyebrow: {
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     fontSize: 11,
     lineHeight: 15,
   },
   title: {
     marginTop: 7,
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 22,
     lineHeight: 28,
   },
   body: {
     marginTop: 8,
     maxWidth: "88%",
-    fontFamily: fonts.Regular,
+    ...leafTypography.regular,
     fontSize: 13,
     lineHeight: 18,
   },
@@ -439,7 +443,7 @@ const styles = StyleSheet.create({
   },
   ctaText: {
     color: "#FFFFFF",
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 12,
     lineHeight: 16,
   },

@@ -34,3 +34,26 @@ Este plano consolida as frentes estrategicas que sairam das auditorias recentes 
 4. Criar cockpit dashboard para Leaf Delas, destino do motorista, dynamic pricing e smart push.
 5. Persistir serie temporal H3 e feedback de smart push para evoluir de heuristica para ML treinavel.
 6. Fazer rodada de UI final pos-canary, sem mexer nos cards iniciais de passageiro/motorista.
+
+## Backlog futuro — OTP por WhatsApp
+
+O transporte WhatsApp com Firebase Auth permanece implementado como caminho
+opt-in, mas fica adiado para uma melhoria posterior ao piloto assistido. A
+release do piloto usa Firebase Phone Auth/SMS, que não depende de uma conta Meta
+ou de credenciais adicionais no gateway.
+
+Para reabrir este item, a sequência mínima é:
+
+1. Criar ou confirmar o Business Portfolio/WABA pertencente à Leaf, sem usar o
+   portfólio de outra operação.
+2. Aprovar o template `AUTHENTICATION`, provisionar o system user com as
+   permissões mínimas e armazenar token, phone number ID e
+   `AUTH_OTP_HMAC_KEY` somente no runtime protegido.
+3. Habilitar `EXPO_PUBLIC_ENABLE_WHATSAPP_OTP` apenas em um build controlado,
+   executar entrega/expiração/reenvio/consumo com um número autorizado e
+   confirmar a sessão via Firebase custom token.
+4. Atualizar o runbook, o preflight das lojas e o plano de rollback antes de
+   trocar o canal padrão do piloto.
+
+O desenho técnico e os contratos já exercitados estão em
+[`WHATSAPP_OTP_FIREBASE_AUTH_20260915.md`](../validation/rc-20260907/WHATSAPP_OTP_FIREBASE_AUTH_20260915.md).

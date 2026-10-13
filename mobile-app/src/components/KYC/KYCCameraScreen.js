@@ -7,6 +7,8 @@
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  AppState,
+  Linking,
   View,
   Text,
   StyleSheet,
@@ -70,8 +72,24 @@ export default function KYCCameraScreen({ onCapture, onCancel }) {
 
     requestCameraPermission();
 
+    // Voltando de "Abrir ajustes": consulta sem abrir novo diálogo de permissão.
+    const appStateSubscription = AppState.addEventListener('change', async (nextState) => {
+      if (nextState !== 'active') {
+        return;
+      }
+      try {
+        const { status } = await Camera.getCameraPermissionsAsync();
+        if (mounted) {
+          setHasPermission(status === 'granted');
+        }
+      } catch (error) {
+        Logger.error('Erro ao consultar permissão da câmera:', error);
+      }
+    });
+
     return () => {
       mounted = false;
+      appStateSubscription?.remove();
       if (stepTimerRef.current) {
         clearInterval(stepTimerRef.current);
       }
@@ -160,8 +178,21 @@ export default function KYCCameraScreen({ onCapture, onCancel }) {
         <Text style={styles.permissionText}>
           Para ficar online, permita o acesso à câmera nas configurações do aparelho.
         </Text>
-        <TouchableOpacity style={styles.primaryButton} onPress={onCancel}>
-          <Text style={styles.primaryButtonText}>Voltar</Text>
+        <TouchableOpacity
+          style={styles.permissionPrimaryButton}
+          onPress={() => Linking.openSettings().catch(() => {})}
+          accessibilityRole="button"
+          testID="kyc-camera-open-settings"
+        >
+          <Text style={styles.permissionPrimaryButtonText}>Abrir ajustes</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={styles.permissionSecondaryButton}
+          onPress={onCancel}
+          accessibilityRole="button"
+          testID="kyc-camera-permission-back"
+        >
+          <Text style={styles.permissionSecondaryButtonText}>Voltar</Text>
         </TouchableOpacity>
       </View>
     );
@@ -185,7 +216,12 @@ export default function KYCCameraScreen({ onCapture, onCancel }) {
 
       <View style={styles.overlay} pointerEvents="box-none">
         <View style={styles.topBar}>
-          <TouchableOpacity style={styles.iconButton} onPress={onCancel}>
+          <TouchableOpacity
+            style={styles.iconButton}
+            onPress={onCancel}
+            accessibilityRole="button"
+            accessibilityLabel="Fechar"
+          >
             <MaterialCommunityIcons name="close" size={24} color="#fff" />
           </TouchableOpacity>
         </View>
@@ -258,11 +294,41 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 28,
   },
+  // The denied state used to reuse the round shutter button for "Voltar".
+  permissionPrimaryButton: {
+    marginTop: 28,
+    alignSelf: 'stretch',
+    minHeight: 54,
+    borderRadius: 12,
+    backgroundColor: '#222222',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  permissionPrimaryButtonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontFamily: 'Figtree-Bold',
+  },
+  permissionSecondaryButton: {
+    marginTop: 10,
+    alignSelf: 'stretch',
+    minHeight: 54,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#E5E5E5',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  permissionSecondaryButtonText: {
+    color: LEAF_TEXT,
+    fontSize: 16,
+    fontFamily: 'Figtree-Bold',
+  },
   permissionTitle: {
     marginTop: 18,
     color: LEAF_TEXT,
     fontSize: 22,
-    fontWeight: '700',
+    fontFamily: 'Figtree-Bold',
     textAlign: 'center',
   },
   permissionText: {
@@ -327,7 +393,7 @@ const styles = StyleSheet.create({
   title: {
     color: LEAF_TEXT,
     fontSize: 21,
-    fontWeight: '700',
+    fontFamily: 'Figtree-Bold',
   },
   instruction: {
     marginTop: 8,
@@ -345,14 +411,14 @@ const styles = StyleSheet.create({
     marginTop: 18,
     height: 54,
     borderRadius: 27,
-    backgroundColor: LEAF_GREEN,
+    backgroundColor: '#252525',
     alignItems: 'center',
     justifyContent: 'center',
   },
   primaryButtonText: {
     color: '#FFFFFF',
     fontSize: 16,
-    fontWeight: '700',
+    fontFamily: 'Figtree-Bold',
   },
   buttonDisabled: {
     opacity: 0.54,

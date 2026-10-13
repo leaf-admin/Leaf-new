@@ -1,5 +1,5 @@
 import React from 'react';
-import { fireEvent, render, waitFor } from '@testing-library/react-native';
+import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 import * as DocumentPicker from 'expo-document-picker';
 
 import DocumentStep from '../src/components/auth/steps/DocumentStep';
@@ -53,7 +53,7 @@ describe('DocumentStep (driver KYC docs)', () => {
     fireEvent.press(getByText('Toque para enviar o PDF da CNH'));
 
     expect(
-      await findByText('Sem conexao com a internet. Verifique sua rede e tente novamente.')
+      await findByText('Sem conexão com a internet. Verifique sua rede e tente novamente.')
     ).toBeTruthy();
     expect(baseProps.onSubmitted).not.toHaveBeenCalled();
   });
@@ -102,6 +102,31 @@ describe('DocumentStep (driver KYC docs)', () => {
     expect(payload.motherName).toBe('Maria da Silva');
     expect(payload.gender).toBe('F');
     expect(payload.cnhPdfMeta?.name).toBe('CNH-e.pdf');
+  });
+
+  test('ignores a second tap on Continuar while the submission is in flight', async () => {
+    let resolveSubmit;
+    const onSubmitted = jest.fn(() => new Promise((resolve) => { resolveSubmit = resolve; }));
+    const { getByText, getByPlaceholderText } = render(
+      <DocumentStep
+        {...baseProps}
+        onSubmitted={onSubmitted}
+        initialData={{ user: { uid: 'passenger-test-1' }, profileSelection: { userType: 'passenger' } }}
+      />
+    );
+
+    fireEvent.changeText(getByPlaceholderText('seu@email.com'), 'ana@example.com');
+    fireEvent.press(getByText('Continuar'));
+    fireEvent.press(getByText('Continuar'));
+
+    expect(onSubmitted).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      resolveSubmit();
+    });
+
+    fireEvent.press(getByText('Continuar'));
+    expect(onSubmitted).toHaveBeenCalledTimes(2);
   });
 
   test('accepts vehicle PDF extraction as an optional onboarding artifact for the driver', async () => {

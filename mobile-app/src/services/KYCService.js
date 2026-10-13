@@ -177,6 +177,10 @@ class KYCService {
 
     const provider = providerResult?.data?.provider || null;
     const config = providerResult?.data?.config || {};
+    const bypassEnabled = (
+      providerResult?.data?.mode === 'face_compare'
+      || config.bypassEnabled === true
+    );
     const awsReady = (
       config.enabled === true
       && config.credentialsEnabled === true
@@ -185,7 +189,7 @@ class KYCService {
 
     return {
       success: true,
-      mode: awsReady ? 'aws' : 'local',
+      mode: bypassEnabled ? 'face_compare' : (awsReady ? 'aws' : 'local'),
       provider,
       config
     };
@@ -702,6 +706,56 @@ class KYCService {
       };
     } catch (error) {
       Logger.error('❌ Erro na comparação canônica pós-liveness:', error);
+      return buildKycCaughtFailure(error, 'Não foi possível concluir a validação agora.');
+    }
+  }
+
+  async verifyDriverWithFaceCompare(driverId, selfieImageUri, options = {}) {
+    try {
+      if (!selfieImageUri) {
+        return buildKycFailureResult(
+          { status: 400 },
+          { code: 'KYC_SELFIE_IMAGE_REQUIRED' },
+          'Capture uma selfie para continuar.',
+        );
+      }
+
+      const formData = new FormData();
+      formData.append('userId', driverId);
+      formData.append('livenessBypass', 'true');
+      if (options?.challengeId) {
+        formData.append('challengeId', options.challengeId);
+      }
+      if (options?.requirement) {
+        formData.append('requirement', options.requirement);
+      }
+      formData.append('currentImage', {
+        uri: selfieImageUri,
+        name: 'driver-selfie.jpg',
+        type: 'image/jpeg'
+      });
+
+      const backendUrl = getSelfHostedApiUrl('/api/kyc/verify-driver/face-compare');
+      const response = await fetch(backendUrl, {
+        method: 'POST',
+        headers: await buildKycAuthHeaders({ json: false }),
+        body: formData,
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        return buildKycFailureResult(
+          response,
+          result,
+          'Não foi possível concluir a validação agora.',
+        );
+      }
+
+      return {
+        success: true,
+        data: result
+      };
+    } catch (error) {
+      Logger.error('❌ Erro na comparação facial sem liveness:', error);
       return buildKycCaughtFailure(error, 'Não foi possível concluir a validação agora.');
     }
   }

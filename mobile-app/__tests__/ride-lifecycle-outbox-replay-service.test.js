@@ -23,6 +23,68 @@ describe('RideLifecycleOutboxReplayService', () => {
     });
   });
 
+  it.each([
+    [RIDE_EVENT_TYPES.ARRIVED_AT_PICKUP, 'canceled', 'reject'],
+    [RIDE_EVENT_TYPES.START_TRIP, 'cancelled', 'reject'],
+    [RIDE_EVENT_TYPES.COMPLETE_TRIP, 'no_drivers_available', 'reject'],
+    [RIDE_EVENT_TYPES.CANCEL_RIDE, 'completed', 'reject'],
+    [RIDE_EVENT_TYPES.START_TRIP, 'trip_completed', 'ack'],
+    [RIDE_EVENT_TYPES.CANCEL_RIDE, 'CANCELLED', 'ack'],
+  ])(
+    'resolves %s against terminal status %s as %s',
+    (eventType, bookingStatus, action) => {
+      expect(
+        resolveRideLifecycleReplayDecision(
+          { bookingId: 'ride_terminal', eventType },
+          { activeBookingId: 'ride_terminal', bookingStatus },
+        ),
+      ).toMatchObject({ action });
+    },
+  );
+
+  it('rejects an action superseded by cancellation without falsely acknowledging it', async () => {
+    const socket = {
+      isConnected: jest.fn(() => true),
+      startTrip: jest.fn(),
+    };
+    const markAcked = jest.fn().mockResolvedValue(true);
+    const markRejected = jest.fn().mockResolvedValue(true);
+    const onSyncState = jest.fn();
+
+    const report = await replayPendingRideLifecycleIntents({
+      state: {
+        activeBookingId: 'ride_canceled',
+        bookingStatus: 'cancelled',
+        profileUid: 'driver_1',
+      },
+      socket,
+      actorId: 'driver_1',
+      listPendingIntents: jest.fn().mockResolvedValue([
+        {
+          bookingId: 'ride_canceled',
+          actorId: 'driver_1',
+          eventType: RIDE_EVENT_TYPES.START_TRIP,
+          idempotencyKey: 'idem_start_ride_canceled',
+        },
+      ]),
+      markAcked,
+      markRejected,
+      onSyncState,
+      logger: { warn: jest.fn() },
+    });
+
+    expect(report).toMatchObject({ replayed: 0, acked: 0, rejected: 1, held: 0 });
+    expect(socket.startTrip).not.toHaveBeenCalled();
+    expect(markAcked).not.toHaveBeenCalled();
+    expect(markRejected).toHaveBeenCalledWith({
+      idempotencyKey: 'idem_start_ride_canceled',
+      error: 'Ride was already terminal (canceled); pending event was superseded.',
+    });
+    expect(onSyncState).toHaveBeenLastCalledWith(
+      expect.objectContaining({ status: 'idle', bookingId: null }),
+    );
+  });
+
   it('replays complete trip with the original idempotency key when the ride is started', async () => {
     const socket = {
       isConnected: jest.fn(() => true),

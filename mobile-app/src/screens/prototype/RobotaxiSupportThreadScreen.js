@@ -1,3 +1,4 @@
+import leafTypography from '../../components/prototype/LeafTypography';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
@@ -13,7 +14,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { fonts } from '../../theme/runtimeTokens';
+import { LeafObjectIcon } from '../../components/prototype/LeafVisualElements';
 import PrototypeDismissibleSheet from '../../components/prototype/PrototypeDismissibleSheet';
 import PrototypeScreenTransition from '../../components/prototype/PrototypeScreenTransition';
 import {
@@ -26,7 +27,7 @@ import SupportTicketService from '../../services/SupportTicketService';
 import { usePrototypeMapOcclusion } from './prototypeMapOcclusion';
 import { normalizeRuntimeRideStatus } from './rideLifecycleContract';
 
-const SURFACE_TOP_PADDING = 16;
+const SURFACE_TOP_PADDING = 20;
 const SURFACE_BOTTOM_PADDING = 18;
 const BACKDROP_COLOR = 'transparent';
 export const SUPPORT_TICKET_POLL_MS = 12000;
@@ -138,7 +139,7 @@ export default function RobotaxiSupportThreadScreen({ navigation, route }) {
       if (mountedRef.current) {
         setInitialLoading(false);
         setRefreshing(false);
-        setError('Não encontramos o ticket para acompanhar.');
+        setError('Não encontramos o chamado para acompanhar.');
       }
       return false;
     }
@@ -166,7 +167,7 @@ export default function RobotaxiSupportThreadScreen({ navigation, route }) {
     }
 
     if (messagesResult.status === 'rejected') {
-      setError(messagesResult.reason?.message || 'Não foi possível atualizar as mensagens do ticket.');
+      setError(messagesResult.reason?.message || 'Não foi possível atualizar as mensagens do chamado.');
       setInitialLoading(false);
       setRefreshing(false);
       return false;
@@ -265,7 +266,7 @@ export default function RobotaxiSupportThreadScreen({ navigation, route }) {
             <PrototypeMenuSurface
               onLayout={handlePanelLayout}
               eyebrow="Suporte"
-              title={ticketId ? `Ticket #${ticketId}` : 'Ticket de suporte'}
+              title={ticketId ? `Chamado #${ticketId}` : 'Chamado de suporte'}
               subtitle="Acompanhe a resposta da operação e mantenha a conversa neste chamado."
               fullScreen
               style={{
@@ -277,7 +278,7 @@ export default function RobotaxiSupportThreadScreen({ navigation, route }) {
                 <PrototypeMenuCloseButton
                   onPress={handleDismiss}
                   testID="robotaxi-support-thread-close-button"
-                  accessibilityLabel="Fechar ticket de suporte"
+                  accessibilityLabel="Fechar chamado de suporte"
                 />
               )}
             >
@@ -291,7 +292,7 @@ export default function RobotaxiSupportThreadScreen({ navigation, route }) {
               <FlatList
                 ref={listRef}
                 testID="robotaxi-support-thread-list"
-                accessibilityLabel="Mensagens do ticket de suporte"
+                accessibilityLabel="Mensagens do chamado de suporte"
                 data={messages}
                 keyExtractor={item => item.id}
                 style={styles.list}
@@ -315,11 +316,7 @@ export default function RobotaxiSupportThreadScreen({ navigation, route }) {
                     {initialLoading ? (
                       <ListSkeleton rows={3} rowHeight={44} gap={10} />
                     ) : (
-                      <Ionicons
-                        name={error ? 'warning-outline' : 'chatbubble-ellipses-outline'}
-                        size={24}
-                        color={error ? leafRideColors.dangerText : leafRideColors.muted}
-                      />
+                      <LeafObjectIcon name="help" size={64} />
                     )}
                     <Text style={[styles.emptyTitle, error && styles.errorText]}>
                       {initialLoading
@@ -332,7 +329,7 @@ export default function RobotaxiSupportThreadScreen({ navigation, route }) {
                         icon="refresh-outline"
                         onPress={() => loadThread({ mode: 'refresh' })}
                         testID="robotaxi-support-thread-retry-button"
-                        accessibilityLabel="Tentar novamente carregar ticket"
+                        accessibilityLabel="Tentar novamente carregar chamado"
                         style={styles.retryButton}
                       />
                     ) : null}
@@ -353,7 +350,7 @@ export default function RobotaxiSupportThreadScreen({ navigation, route }) {
                   maxLength={1000}
                   editable={!sending && Boolean(ticketId)}
                   testID="robotaxi-support-thread-input"
-                  accessibilityLabel="Resposta do ticket"
+                  accessibilityLabel="Resposta do chamado"
                 />
                 <LeafButton
                   label={sending ? 'Enviando...' : 'Enviar resposta'}
@@ -362,7 +359,7 @@ export default function RobotaxiSupportThreadScreen({ navigation, route }) {
                   onPress={handleSend}
                   disabled={sending || !ticketId || !String(draft || '').trim()}
                   testID="robotaxi-support-thread-send-button"
-                  accessibilityLabel="Enviar resposta no ticket"
+                  accessibilityLabel="Enviar resposta no chamado"
                   style={styles.sendButton}
                 />
               </View>
@@ -405,24 +402,24 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   statusPill_open: {
-    backgroundColor: '#F4F0E7',
-    borderColor: '#E4D8BD',
+    backgroundColor: '#F5F5F5',
+    borderColor: '#E5E5E5',
   },
   statusPill_active: {
-    backgroundColor: '#EEF3EA',
-    borderColor: '#D9E3D3',
+    backgroundColor: '#F5F5F5',
+    borderColor: '#E5E5E5',
   },
   statusPill_success: {
     backgroundColor: '#EAF5ED',
     borderColor: '#CBE5D2',
   },
   statusText: {
-    fontFamily: fonts.SemiBold,
-    fontSize: 11,
-    lineHeight: 15,
+    ...leafTypography.semiBold,
+    fontSize: 12,
+    lineHeight: 17,
   },
   statusText_open: {
-    color: '#765B23',
+    color: '#222222',
   },
   statusText_active: {
     color: leafRideColors.leaf,
@@ -432,9 +429,9 @@ const styles = StyleSheet.create({
   },
   threadMetaText: {
     color: leafRideColors.muted,
-    fontFamily: fonts.Regular,
-    fontSize: 11,
-    lineHeight: 15,
+    ...leafTypography.regular,
+    fontSize: 12,
+    lineHeight: 17,
   },
   list: {
     flex: 1,
@@ -464,8 +461,8 @@ const styles = StyleSheet.create({
     paddingVertical: 11,
   },
   messageBubbleUser: {
-    backgroundColor: '#EEF3EA',
-    borderColor: '#D9E3D3',
+    backgroundColor: '#F5F5F5',
+    borderColor: '#E5E5E5',
     borderBottomRightRadius: 7,
   },
   messageBubbleAgent: {
@@ -475,23 +472,23 @@ const styles = StyleSheet.create({
   },
   messageAuthor: {
     color: leafRideColors.secondary,
-    fontFamily: fonts.SemiBold,
-    fontSize: 10,
-    lineHeight: 14,
+    ...leafTypography.semiBold,
+    fontSize: 12,
+    lineHeight: 17,
     marginBottom: 3,
   },
   messageText: {
     color: leafRideColors.text,
-    fontFamily: fonts.Regular,
-    fontSize: 13,
-    lineHeight: 19,
+    ...leafTypography.regular,
+    fontSize: 16,
+    lineHeight: 22,
   },
   messageTime: {
     marginTop: 5,
     color: leafRideColors.muted,
-    fontFamily: fonts.Regular,
-    fontSize: 10,
-    lineHeight: 13,
+    ...leafTypography.regular,
+    fontSize: 12,
+    lineHeight: 17,
     alignSelf: 'flex-end',
   },
   emptyState: {
@@ -503,9 +500,9 @@ const styles = StyleSheet.create({
   },
   emptyTitle: {
     color: leafRideColors.secondary,
-    fontFamily: fonts.Regular,
-    fontSize: 13,
-    lineHeight: 19,
+    ...leafTypography.regular,
+    fontSize: 14,
+    lineHeight: 20,
     textAlign: 'center',
   },
   errorText: {
@@ -518,9 +515,9 @@ const styles = StyleSheet.create({
   inlineError: {
     marginBottom: 8,
     color: leafRideColors.dangerText,
-    fontFamily: fonts.Medium,
-    fontSize: 11,
-    lineHeight: 15,
+    ...leafTypography.medium,
+    fontSize: 14,
+    lineHeight: 20,
   },
   composer: {
     borderTopWidth: StyleSheet.hairlineWidth,
@@ -529,19 +526,19 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   input: {
-    minHeight: 58,
+    minHeight: 54,
     maxHeight: 110,
-    borderRadius: 18,
+    borderRadius: 12,
     borderWidth: 1,
     borderColor: leafRideColors.line,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#F5F5F5',
     paddingHorizontal: 14,
     paddingTop: 11,
     paddingBottom: 10,
     color: leafRideColors.text,
-    fontFamily: fonts.Regular,
-    fontSize: 13,
-    lineHeight: 18,
+    ...leafTypography.regular,
+    fontSize: 16,
+    lineHeight: 22,
     textAlignVertical: 'top',
   },
   sendButton: {

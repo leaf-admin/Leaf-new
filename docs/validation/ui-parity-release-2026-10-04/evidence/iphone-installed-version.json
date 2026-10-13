@@ -1,0 +1,13 @@
+{
+  "bundleIdentifier": "br.com.leaf.ride",
+  "installedVersion": "1.0.5",
+  "installedBuild": "37",
+  "devicectlLaunch": "PASS",
+  "candidateInstalled": false,
+  "untrustedDeveloperDialog": {
+    "reportedByUser": true,
+    "certificateInDialog": "not_observed",
+    "newCandidateTeamId": "DTA8W5KA5D",
+    "newCandidateUploadedOrInstalled": false
+  }
+}

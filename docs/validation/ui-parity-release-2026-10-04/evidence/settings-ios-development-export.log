@@ -1,0 +1,19 @@
+✅ Xcode toolchain ativo (export IPA iOS): Xcode 26.6 Build version 17F113
+══════════════════════════════════════════════════════
+   Export iOS IPA Local
+══════════════════════════════════════════════════════
+📦 Archive: /tmp/leaf-ui-1.0.6-38.xcarchive
+🏷️  Team ID: DTA8W5KA5D
+🧭 Method: debugging
+📁 Output: /Users/izaakdias/Documents/Leaf-release-candidates/1.0.6/ios-export-settings-device
+2026-10-04 12:45:59.117 xcodebuild[35125:1687926] [MT] IDEDistribution: -[IDEDistributionLogging _createLoggingBundleAtPath:]: Created bundle at path "/var/folders/34/n2nyf19951sgyxgcxgfphsk00000gn/T/Leaf_2026-10-04_12-45-59.116.xcdistributionlogs".
+Exported Leaf to: /Users/izaakdias/Documents/Leaf-release-candidates/1.0.6/ios-export-settings-device
+** EXPORT SUCCEEDED **
+
+✅ App e widget assinados com o Team ID da Leaf: DTA8W5KA5D.
+✅ Config Expo do IPA exportado confere com o app Leaf.
+✅ CFBundleVersion do IPA confere: 38.
+✅ Versão do widget no IPA confere com o app: 1.0.6 (38).
+✅ NSMicrophoneUsageDescription do IPA presente.
+✅ Expo Updates do IPA usa canal production.
+✅ IPA exportado com sucesso: /Users/izaakdias/Documents/Leaf-release-candidates/1.0.6/ios-export-settings-device/Leaf.ipa

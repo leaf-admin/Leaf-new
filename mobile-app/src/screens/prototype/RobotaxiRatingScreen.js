@@ -1,3 +1,5 @@
+import leafTypography from '../../components/prototype/LeafTypography';
+import { RobotaxiLifecycleSummary } from '../../components/prototype/RobotaxiLifecycleUI';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
@@ -15,7 +17,6 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { StackActions } from "@react-navigation/native";
 import { Ionicons } from "@expo/vector-icons";
-import { fonts } from "../../theme/runtimeTokens";
 import PrototypeScreenTransition from "../../components/prototype/PrototypeScreenTransition";
 import {
   RobotaxiLifecycleButton,
@@ -138,6 +139,13 @@ export default function RobotaxiRatingScreen({ navigation, route }) {
     (reviewerType === "driver"
       ? receipt?.passengerName || "Passageiro Leaf"
       : receipt?.driverName || driverInfo?.name || "Motorista Leaf");
+  // "Motorista Leaf" / "Passageiro Leaf" are placeholders, not names.
+  const hasRealTargetName = !["motorista leaf", "passageiro leaf"].includes(
+    String(targetName || "").trim().toLowerCase(),
+  );
+  const targetFirstName = hasRealTargetName
+    ? String(targetName || "").trim().split(/\s+/)[0] || targetName
+    : "";
   const tripId = route?.params?.tripId || receipt?.id || null;
   const quickTags =
     reviewerType === "driver" ? DRIVER_REVIEW_TAGS : PASSENGER_REVIEW_TAGS;
@@ -145,11 +153,13 @@ export default function RobotaxiRatingScreen({ navigation, route }) {
     reviewerType === "driver" ? ["Pontualidade"] : ["Condução segura"],
   );
   const [airConditioningOk, setAirConditioningOk] = useState(null);
+  // Required answer: keep the button disabled and say why instead of an alert after tapping.
+  const awaitingAirConditioningAnswer = reviewerType === "passenger" && airConditioningOk === null;
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [secondaryActionsVisible, setSecondaryActionsVisible] = useState(false);
   const qaAutoSubmitStartedRef = useRef(false);
   const sheetBottom =
-    insets.bottom + SHEET_BOTTOM_OFFSET + robotaxiLifecycleMetrics.cardBottomGap;
+    SHEET_BOTTOM_OFFSET + robotaxiLifecycleMetrics.cardBottomGap + insets.bottom;
   const cardMaxHeight = Math.max(
     340,
     windowHeight - insets.top - insets.bottom - 86,
@@ -339,11 +349,8 @@ export default function RobotaxiRatingScreen({ navigation, route }) {
       );
 
       dismissCompletedReceipt();
+      // Back home without an extra confirmation tap.
       replaceWithPrototypeHome();
-      Alert.alert(
-        "Avaliação enviada",
-        `Sua nota para ${targetName} foi registrada com sucesso.`,
-      );
     } catch (error) {
       Alert.alert(
         "Não foi possível enviar",
@@ -410,6 +417,27 @@ export default function RobotaxiRatingScreen({ navigation, route }) {
           barStyle="dark-content"
         />
 
+        {/* Fills the space above the sheet instead of leaving it blank; hidden when it would not fit. */}
+        {windowHeight - sheetBottom - cardHeight - insets.top >= COMPLETION_HERO_MIN_SPACE ? (
+        <View
+          pointerEvents="none"
+          style={[styles.completionHero, { top: insets.top + 56 }]}
+          testID="rating-completion-hero"
+        >
+          <View style={styles.completionAvatar}>
+            <Text style={styles.completionAvatarInitial}>
+              {String(targetFirstName || targetName || "L").charAt(0).toUpperCase()}
+            </Text>
+          </View>
+          <Text style={styles.completionTitle}>Corrida concluída</Text>
+          {targetFirstName ? (
+            <Text style={styles.completionSubtitle} numberOfLines={1}>
+              {targetFirstName}
+            </Text>
+          ) : null}
+        </View>
+        ) : null}
+
         <KeyboardAvoidingView
           pointerEvents="box-none"
           behavior={Platform.OS === "ios" ? "padding" : undefined}
@@ -418,7 +446,7 @@ export default function RobotaxiRatingScreen({ navigation, route }) {
         >
           <RobotaxiLifecycleCard
             onLayout={handleCardLayout}
-            style={[styles.card, { maxHeight: cardMaxHeight }]}
+            style={[styles.card, { maxHeight: cardMaxHeight, paddingBottom: robotaxiLifecycleMetrics.cardPaddingBottom }]}
             testID={
               reviewerType === "driver"
                 ? "driver-rating-screen"
@@ -426,8 +454,8 @@ export default function RobotaxiRatingScreen({ navigation, route }) {
             }
             accessibilityLabel={
               reviewerType === "driver"
-                ? "driver-rating-screen"
-                : "passenger-rating-screen"
+                ? "Avaliação do passageiro"
+                : "Avaliação da viagem"
             }
           >
             <ScrollView
@@ -435,28 +463,35 @@ export default function RobotaxiRatingScreen({ navigation, route }) {
               keyboardShouldPersistTaps="handled"
               contentContainerStyle={styles.cardScroll}
             >
-              <Text style={styles.title}>
-              {reviewerType === "driver"
+              <RobotaxiLifecycleSummary
+                title={reviewerType === "driver"
                 ? "Avalie o passageiro"
                 : "Avalie a viagem"}
-              </Text>
-              <Text style={styles.subtitle}>
-              {reviewerType === "driver"
-                ? `Seu feedback sobre ${targetName} ajuda a melhorar a comunidade Leaf.`
-                : "Sua opinião ajuda a melhorar a próxima viagem."}
-              </Text>
+                subtitle={reviewerType === "driver"
+                ? targetFirstName ? `Como foi a corrida com ${targetFirstName}?` : "Como foi a corrida?"
+                : targetFirstName ? `Como foi sua viagem com ${targetFirstName}?` : "Como foi sua viagem?"}
+              />
 
-            <View style={styles.starsRow}>
+            <View
+              style={styles.starsRow}
+              accessibilityRole="radiogroup"
+              accessibilityLabel="Nota da avaliação"
+            >
               {[1, 2, 3, 4, 5].map((value) => {
                 const active = value <= rating;
                 return (
                   <TouchableOpacity
                     key={value}
+                    testID={`rating-star-${value}`}
                     onPress={() => {
                       triggerHaptic("tap");
                       setRating(value);
                     }}
                     activeOpacity={0.86}
+                    accessibilityRole="radio"
+                    accessibilityLabel={`${value} ${value === 1 ? "estrela" : "estrelas"}`}
+                    accessibilityHint="Seleciona a nota da avaliação."
+                    accessibilityState={{ checked: active }}
                   >
                     <Ionicons
                       name={active ? "star" : "star-outline"}
@@ -477,6 +512,10 @@ export default function RobotaxiRatingScreen({ navigation, route }) {
                     style={[styles.tagChip, active && styles.tagChipActive]}
                     activeOpacity={0.86}
                     onPress={() => toggleTag(tag)}
+                    accessibilityRole="checkbox"
+                    accessibilityLabel={tag}
+                    accessibilityHint="Inclui ou remove este marcador da avaliação."
+                    accessibilityState={{ checked: active }}
                   >
                     <Text
                       style={[styles.tagText, active && styles.tagTextActive]}
@@ -499,6 +538,12 @@ export default function RobotaxiRatingScreen({ navigation, route }) {
               placeholderTextColor={color.text.muted}
               style={styles.input}
               multiline
+              accessibilityLabel={
+                reviewerType === "driver"
+                  ? "Comentário sobre o passageiro"
+                  : "Comentário sobre a viagem"
+              }
+              accessibilityHint="Comentário opcional."
             />
 
             {reviewerType === "passenger" ? (
@@ -506,7 +551,11 @@ export default function RobotaxiRatingScreen({ navigation, route }) {
                 <Text style={styles.airConditioningTitle}>
                   O ar-condicionado permaneceu ligado durante toda a corrida?
                 </Text>
-                <View style={styles.airConditioningActions}>
+                <View
+                  style={styles.airConditioningActions}
+                  accessibilityRole="radiogroup"
+                  accessibilityLabel="O ar-condicionado permaneceu ligado durante toda a corrida?"
+                >
                   <TouchableOpacity
                     activeOpacity={0.86}
                     style={[
@@ -516,7 +565,9 @@ export default function RobotaxiRatingScreen({ navigation, route }) {
                     ]}
                     onPress={() => setAirConditioningOk(true)}
                     testID="passenger-rating-air-conditioning-yes"
-                    accessibilityLabel="passenger-rating-air-conditioning-yes"
+                    accessibilityRole="radio"
+                    accessibilityLabel="Sim, o ar-condicionado permaneceu ligado"
+                    accessibilityState={{ checked: airConditioningOk === true }}
                   >
                     <Text
                       style={[
@@ -537,7 +588,9 @@ export default function RobotaxiRatingScreen({ navigation, route }) {
                     ]}
                     onPress={() => setAirConditioningOk(false)}
                     testID="passenger-rating-air-conditioning-no"
-                    accessibilityLabel="passenger-rating-air-conditioning-no"
+                    accessibilityRole="radio"
+                    accessibilityLabel="Não, o ar-condicionado não permaneceu ligado"
+                    accessibilityState={{ checked: airConditioningOk === false }}
                   >
                     <Text
                       style={[
@@ -553,21 +606,25 @@ export default function RobotaxiRatingScreen({ navigation, route }) {
               </View>
             ) : null}
 
-            <Text numberOfLines={1} style={styles.summaryText}>
-              {summary
-                ? `Resumo: ${summary}`
-                : "Selecione uma opção ou escreva um comentário."}
-            </Text>
+            {!summary ? (
+              <Text numberOfLines={1} style={styles.summaryText}>
+                Selecione uma opção ou escreva um comentário.
+              </Text>
+            ) : null}
 
             <RobotaxiLifecycleButton
-              label={isSubmitting ? "Enviando..." : "Enviar avaliação"}
+              label={isSubmitting
+                ? "Enviando avaliação"
+                : awaitingAirConditioningAnswer
+                  ? "Responda sobre o ar-condicionado"
+                  : "Enviar avaliação"}
               icon="checkmark-outline"
               tone="primary"
               onPress={handleSubmit}
-              disabled={isSubmitting}
+              disabled={isSubmitting || awaitingAirConditioningAnswer}
               style={styles.submitButton}
               testID="passenger-rating-submit-button"
-              accessibilityLabel="passenger-rating-submit-button"
+              accessibilityLabel={isSubmitting ? "Enviando avaliação" : "Enviar avaliação"}
             />
             <RobotaxiLifecycleDisclosure
               expanded={secondaryActionsVisible}
@@ -584,7 +641,8 @@ export default function RobotaxiRatingScreen({ navigation, route }) {
                 onPress={handleDismiss}
                 style={styles.skipButton}
                 testID="rating-skip-to-map-button"
-                accessibilityLabel="rating-skip-to-map-button"
+                accessibilityLabel="Agora não"
+                accessibilityHint="Pula a avaliação e retorna ao mapa."
               />
             ) : null}
             </ScrollView>
@@ -595,10 +653,45 @@ export default function RobotaxiRatingScreen({ navigation, route }) {
   );
 }
 
+// Room needed above the sheet for the 'Corrida concluída' header.
+const COMPLETION_HERO_MIN_SPACE = 260;
+
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#F8F6F1",
+    backgroundColor: "#FFFFFF",
+  },
+  completionHero: {
+    position: "absolute",
+    left: 24,
+    right: 24,
+    alignItems: "center",
+  },
+  completionAvatar: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: "#EEF0EC",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  completionAvatarInitial: {
+    ...leafTypography.semiBold,
+    fontSize: 28,
+    color: color.text.primary,
+  },
+  completionTitle: {
+    ...leafTypography.semiBold,
+    marginTop: 14,
+    fontSize: 22,
+    lineHeight: 28,
+    color: color.text.primary,
+  },
+  completionSubtitle: {
+    ...leafTypography.regular,
+    marginTop: 2,
+    fontSize: 15,
+    color: color.text.secondary,
   },
   sheetWrap: {
     position: "absolute",
@@ -613,35 +706,35 @@ const styles = StyleSheet.create({
   },
   title: {
     color: color.text.primary,
-    fontFamily: fonts.SemiBold,
-    fontSize: 15.5,
-    lineHeight: 20,
-    textAlign: "center",
+    ...leafTypography.semiBold,
+    fontSize: 22,
+    lineHeight: 28,
+    textAlign: 'left',
   },
   subtitle: {
     marginTop: 2,
     color: color.text.secondary,
-    fontFamily: fonts.Regular,
-    fontSize: typography.caption.size,
-    lineHeight: typography.caption.lineHeight,
-    textAlign: "center",
+    ...leafTypography.regular,
+    fontSize: 15,
+    lineHeight: 20,
+    textAlign: 'left',
   },
   starsRow: {
-    marginTop: 10,
+    marginTop: 20,
     flexDirection: "row",
-    justifyContent: "center",
-    gap: 8,
+    justifyContent: "flex-start",
+    gap: 12,
   },
   tagsWrap: {
-    marginTop: 10,
+    marginTop: 18,
     flexDirection: "row",
     flexWrap: "wrap",
-    justifyContent: "center",
+    justifyContent: "flex-start",
     gap: 8,
   },
   tagChip: {
-    minHeight: 34,
-    borderRadius: 17,
+    minHeight: 44,
+    borderRadius: 12,
     borderWidth: 1,
     borderColor: color.border.subtle,
     backgroundColor: color.surface.secondary,
@@ -655,40 +748,39 @@ const styles = StyleSheet.create({
   },
   tagText: {
     color: color.text.secondary,
-    fontFamily: fonts.Medium,
-    fontSize: typography.micro.size,
-    lineHeight: typography.micro.lineHeight,
+    ...leafTypography.medium,
+    fontSize: 13,
+    lineHeight: 18,
   },
   tagTextActive: {
     color: color.text.primary,
   },
   input: {
     marginTop: 10,
-    minHeight: 72,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: color.border.subtle,
-    backgroundColor: color.surface.primary,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    color: color.text.primary,
-    fontFamily: fonts.Regular,
-    fontSize: typography.caption.size,
-    lineHeight: typography.caption.lineHeight,
-    textAlignVertical: "top",
-  },
-  airConditioningCard: {
-    marginTop: 10,
+    minHeight: 96,
     borderRadius: 12,
     borderWidth: 1,
     borderColor: color.border.subtle,
-    backgroundColor: color.surface.secondary,
-    paddingHorizontal: 10,
-    paddingVertical: 10,
+    backgroundColor: '#F5F5F5',
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    color: color.text.primary,
+    ...leafTypography.regular,
+    fontSize: 17,
+    lineHeight: 22,
+    textAlignVertical: "top",
+  },
+  airConditioningCard: {
+    marginTop: 18,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: '#E5E5E5',
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 0,
+    paddingVertical: 16,
   },
   airConditioningTitle: {
     color: color.text.primary,
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     fontSize: typography.caption.size,
     lineHeight: typography.caption.lineHeight,
   },
@@ -699,8 +791,8 @@ const styles = StyleSheet.create({
   },
   airConditioningButton: {
     flex: 1,
-    minHeight: 36,
-    borderRadius: 10,
+    minHeight: 44,
+    borderRadius: 12,
     borderWidth: 1,
     borderColor: color.border.subtle,
     backgroundColor: color.surface.primary,
@@ -713,7 +805,7 @@ const styles = StyleSheet.create({
   },
   airConditioningButtonText: {
     color: color.text.secondary,
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     fontSize: typography.caption.size,
     lineHeight: typography.caption.lineHeight,
   },
@@ -723,7 +815,7 @@ const styles = StyleSheet.create({
   summaryText: {
     marginTop: 8,
     color: color.text.secondary,
-    fontFamily: fonts.Regular,
+    ...leafTypography.regular,
     fontSize: typography.micro.size,
     lineHeight: typography.micro.lineHeight,
   },

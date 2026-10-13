@@ -1,0 +1,8 @@
+{
+  "nativeVoiceCompiled": true,
+  "nativeVoiceObjCBridgeCompiled": true,
+  "nativeVoiceClassInReleaseBinary": true,
+  "voiceUnavailableCodeInReleaseBinary": true,
+  "teamVerifiedByExportGuard": "DTA8W5KA5D",
+  "appAndWidgetIncluded": true
+}

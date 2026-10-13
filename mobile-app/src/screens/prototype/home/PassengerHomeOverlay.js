@@ -1,3 +1,4 @@
+import leafTypography from '../../../components/prototype/LeafTypography';
 import React, { memo } from "react";
 import {
   ActivityIndicator,
@@ -15,25 +16,29 @@ import {
   View,
   useWindowDimensions,
 } from "react-native";
+import { useReducedMotion } from "react-native-reanimated";
 import { Ionicons } from "@expo/vector-icons";
 import Svg, { Path } from "react-native-svg";
-import { fonts } from "../../../theme/runtimeTokens";
 import LeafCampaignCarousel from "../../../components/campaigns/LeafCampaignCarousel";
 import { leafButtonMetrics } from "../../../components/prototype/LeafRideUI";
+import LeafPassengerSearch from './LeafPassengerSearch';
 
+// Floating category picker (same language as the ride cards).
+const CATEGORY_CARD_INSET = 12;
+const CATEGORY_CARD_RADIUS = 28;
 const HOME_CARD_BOTTOM_OFFSET = 16;
 const HOME_CATEGORY_CARD_BOTTOM_OFFSET = 41;
 const LEAF_GREEN = "#1A330E";
 const CARD_SURFACE = "#FFFFFF";
-const CARD_BORDER = "#ECE5DC";
-const TEXT_PRIMARY = "#171412";
-const TEXT_MUTED = "#827B73";
+const CARD_BORDER = "#E5E5E5";
+const TEXT_PRIMARY = "#222222";
+const TEXT_MUTED = "#767676";
 // Cards grow with the user's system font size so no label/CTA truncates
 // under accessibility scaling; the positioning math below consumes the
 // same scaled constants, keeping map occlusion consistent.
 const ACCESSIBILITY_FONT_SCALE = Math.max(1, PixelRatio.getFontScale());
 const HOME_CARD_HEIGHT = Math.ceil(142 * ACCESSIBILITY_FONT_SCALE);
-const HOME_CATEGORY_ROUTE_SUMMARY_HEIGHT = Math.ceil(146 * ACCESSIBILITY_FONT_SCALE);
+const HOME_CATEGORY_ROUTE_SUMMARY_HEIGHT = Math.ceil(112 * ACCESSIBILITY_FONT_SCALE);
 const HOME_SEARCH_ACTIVE_CARD_HEIGHT = Math.ceil(92 * ACCESSIBILITY_FONT_SCALE);
 const HOME_CARD_HORIZONTAL_INSET = 24;
 const HOME_CARD_RADIUS = 28;
@@ -42,8 +47,9 @@ const HOME_CARD_PADDING_TOP = 22;
 const HOME_CARD_PADDING_BOTTOM = 18;
 const HOME_STACK_GAP = 18;
 const HOME_PROMO_CARD_HEIGHT = Math.ceil(188 * ACCESSIBILITY_FONT_SCALE);
-const HOME_CATEGORY_CARD_HEIGHT = Math.ceil(244 * ACCESSIBILITY_FONT_SCALE);
-const HOME_CATEGORY_BREAKDOWN_CARD_HEIGHT = Math.ceil(344 * ACCESSIBILITY_FONT_SCALE);
+// Sized for the type scale (17 pt rows) plus the floating card's bottom padding.
+const HOME_CATEGORY_CARD_HEIGHT = Math.ceil(346 * ACCESSIBILITY_FONT_SCALE);
+const HOME_CATEGORY_BREAKDOWN_CARD_HEIGHT = Math.ceil(478 * ACCESSIBILITY_FONT_SCALE);
 const HOME_SEARCH_DROPDOWN_MIN_HEIGHT = Math.ceil(72 * ACCESSIBILITY_FONT_SCALE);
 const HOME_SEARCH_DROPDOWN_MAX_HEIGHT = Math.ceil(168 * ACCESSIBILITY_FONT_SCALE);
 const HOME_SEARCH_DROPDOWN_ROW_HEIGHT = Math.ceil(56 * ACCESSIBILITY_FONT_SCALE);
@@ -62,7 +68,7 @@ const PASSENGER_HOME_FALLBACK_CAMPAIGNS = Object.freeze([
       eyebrow: "Leaf no Rio",
       title: "Viaje com mais conforto",
       body: "Motoristas verificados, ar ligado e uma experiência mais calma para chegar bem.",
-      backgroundColor: "#FBFCF8",
+      backgroundColor: "#F7F8F7",
       imageAlt: "Banner de boas-vindas da Leaf no Rio de Janeiro",
       displayMode: "text_overlay",
       hideTextOverlay: false,
@@ -335,6 +341,15 @@ function formatCurrencyBRL(value) {
   return `R$ ${amount.toFixed(2).replace(".", ",")}`;
 }
 
+// Row footnote: a real arrival time, the unavailability reason, or a neutral dash.
+function formatCategoryArrivalFootnote(category = {}) {
+  const arrival = String(category?.arrivalLabel || '').trim();
+  if (arrival && arrival !== '--') return `Chegada ~${arrival}`;
+  if (category?.pickupEtaLabel === 'Sem motorista') return 'Sem motorista';
+  const duration = formatCategoryDurationLabel(category);
+  return duration !== '--' ? `${duration} de viagem` : 'Chegada —';
+}
+
 function formatCategoryDurationLabel(category = {}) {
   const durationMin = Number(
     category?.durationMin ??
@@ -504,7 +519,7 @@ function buildFareBreakdownRows(category = {}) {
       String(row?.label || "").toLowerCase().includes("pedágio"),
     );
     return tollFee > 0 && !hasTollRow
-      ? [...normalizedRows, { label: "Pedágio", detail: "Pass-through", amount: tollFee }]
+      ? [...normalizedRows, { label: "Pedágio", detail: "Valor repassado ao pedágio", amount: tollFee }]
       : normalizedRows;
   }
 
@@ -512,7 +527,7 @@ function buildFareBreakdownRows(category = {}) {
   if (canonicalRows.length > 0) {
     const tollFee = resolveFareBreakdownTollFee(category, breakdown);
     return tollFee > 0
-      ? [...canonicalRows, { label: "Pedágio", detail: "Pass-through", amount: tollFee }]
+      ? [...canonicalRows, { label: "Pedágio", detail: "Valor repassado ao pedágio", amount: tollFee }]
       : canonicalRows;
   }
 
@@ -568,7 +583,7 @@ function buildFareBreakdownRows(category = {}) {
   if (tollFee > 0) {
     computedRows.push({
       label: "Pedágio",
-      detail: "Pass-through",
+      detail: "Valor repassado ao pedágio",
       amount: tollFee,
     });
   }
@@ -578,6 +593,7 @@ function buildFareBreakdownRows(category = {}) {
 
 function PassengerHomeOverlay({
   insetsBottom = 0,
+  rootNavigationInset = 0,
   userId = "",
   pickupLabel = "",
   pickupAddress = "",
@@ -625,6 +641,7 @@ function PassengerHomeOverlay({
           `address:${pickupAddress || resolvedPickupLabel || ""}`,
         ].join(";")
       : "";
+  const reduceMotion = useReducedMotion();
   const entrance = React.useRef(new Animated.Value(0)).current;
   const inputRef = React.useRef(null);
   const [keyboardHeight, setKeyboardHeight] = React.useState(0);
@@ -754,6 +771,7 @@ function PassengerHomeOverlay({
       return undefined;
     }
 
+    if (reduceMotion) { categorySlideProgress.setValue(0); return undefined; }
     categorySlideProgress.setValue(categorySlideDirectionRef.current);
     const animation = Animated.timing(categorySlideProgress, {
       toValue: 0,
@@ -764,7 +782,7 @@ function PassengerHomeOverlay({
 
     animation.start();
     return () => animation.stop();
-  }, [categorySlideProgress, selectedCategory?.id]);
+  }, [categorySlideProgress, selectedCategory?.id, reduceMotion]);
 
   React.useEffect(() => {
     if (!fareBreakdownVisible) {
@@ -802,6 +820,7 @@ function PassengerHomeOverlay({
   }, [activeSearchKind]);
 
   React.useEffect(() => {
+    if (reduceMotion) { entrance.setValue(1); return undefined; }
     const animation = Animated.timing(entrance, {
       toValue: 1,
       duration: 240,
@@ -810,7 +829,7 @@ function PassengerHomeOverlay({
     });
     animation.start();
     return () => animation.stop();
-  }, [entrance]);
+  }, [entrance, reduceMotion]);
 
   const submitPickupSearch = React.useCallback((value = null) => {
     const submittedText = String(value ?? pickupSearchQuery ?? "").trim();
@@ -881,11 +900,25 @@ function PassengerHomeOverlay({
     ],
   };
 
+  if (activeSearchKind) {
+    return <LeafPassengerSearch kind={activeSearchKind} pickupLabel={resolvedPickupLabel}
+      query={pickupSearchActive ? pickupSearchQuery : destinationSearchQuery}
+      results={activeResults.map(item => ({ item, display: resolveSearchResultDisplay(item, pickupSearchActive ? 'Partida' : 'Destino'), distance: formatResultDistanceLabel(pickupCoordinate, item?.coordinate) }))}
+      searching={activeSearchSearching} inputRef={inputRef} keyboardHeight={keyboardHeight}
+      onChange={pickupSearchActive ? onPickupSearchChange : onDestinationSearchChange}
+      onSubmit={pickupSearchActive ? handlePickupSubmit : handleDestinationSubmit}
+      onClose={pickupSearchActive ? onPickupSearchClose : onDestinationSearchClose}
+      onSelect={pickupSearchActive ? onPickupResultPress : onDestinationResultPress}
+      onVoice={onMicrophonePress} onMap={pickupSearchActive ? onPickupMapPress : undefined} onLayout={onCardLayout} />;
+  }
+
   return (
     <Animated.View
       onLayout={onCardLayout}
       style={[
         styles.homeStack,
+        // Category picker floats like the ride cards: inset and lifted.
+        shouldShowCategoryCard && { left: CATEGORY_CARD_INSET, right: CATEGORY_CARD_INSET },
         {
           height: stackHeight,
           bottom: activeSearchKind
@@ -893,7 +926,7 @@ function PassengerHomeOverlay({
                 safeBottom + HOME_CARD_BOTTOM_OFFSET,
                 effectiveKeyboardHeight - safeBottom + HOME_SEARCH_KEYBOARD_CLEARANCE,
               )
-            : safeBottom + restingBottomOffset,
+            : shouldShowCategoryCard ? safeBottom + CATEGORY_CARD_INSET : safeBottom + restingBottomOffset + rootNavigationInset,
         },
         {
           opacity: entrance.interpolate({
@@ -922,6 +955,7 @@ function PassengerHomeOverlay({
             },
           ]}
         >
+          {shouldShowCategoryCard ? <View style={styles.categorySheetHandle} pointerEvents="none" /> : null}
           <View
             style={[
               styles.searchCardMain,
@@ -931,7 +965,8 @@ function PassengerHomeOverlay({
           >
             {shouldShowCategoryCard ? (
               <View style={styles.categoryTripSummary}>
-                <Text style={styles.categoryTripSummaryTitle}>Sua viagem</Text>
+                {/* Compact route summary: the map above already shows the trip,
+                    so two dense rows replace the titled two-field box. */}
                 <View style={styles.categoryTripSummaryBox}>
                   <View
                     style={styles.categoryTripSummaryField}
@@ -939,9 +974,7 @@ function PassengerHomeOverlay({
                     accessibilityRole="text"
                     accessibilityLabel={`Origem: ${resolvedPickupLabel}. Para alterar, volte à etapa inicial.`}
                   >
-                    <Text style={styles.categoryRouteSummaryLabel} numberOfLines={1}>
-                      Local de partida
-                    </Text>
+                    <View style={styles.categoryTripSummaryOriginMark} />
                     <Text style={styles.categoryRouteSummaryValue} numberOfLines={1}>
                       {resolvedPickupLabel}
                     </Text>
@@ -958,9 +991,7 @@ function PassengerHomeOverlay({
                     accessibilityRole="button"
                     accessibilityLabel="Escolher destino da viagem"
                   >
-                    <Text style={styles.categoryRouteSummaryLabel} numberOfLines={1}>
-                      Local de destino
-                    </Text>
+                    <View style={styles.categoryTripSummaryDestinationMark} />
                     <Text style={styles.categoryRouteSummaryValue} numberOfLines={1}>
                       {destinationLabel}
                     </Text>
@@ -1235,7 +1266,7 @@ function PassengerHomeOverlay({
             styles.categoryCard,
             styles.categoryCardConnected,
             styles.promoCardInStack,
-            { height: categoryCardHeight },
+            { height: categoryCardHeight, paddingBottom: 20 },
           ]}
           testID="passenger-home-category-card"
           accessible
@@ -1245,72 +1276,34 @@ function PassengerHomeOverlay({
             <Text
               style={styles.hiddenPickupAddress}
               testID="passenger-destination-pickup-coordinate"
-              accessibilityLabel={`passenger-destination-pickup-coordinate ${pickupQaCoordinateLabel}`}
+              accessible={false}
+              accessibilityElementsHidden
+              importantForAccessibility="no-hide-descendants"
             >
               {pickupQaCoordinateLabel}
             </Text>
           ) : null}
           {fareBreakdownVisible ? null : (
             <View style={styles.categoryPickerSurface}>
-              <View style={styles.categorySectionHairline} />
-              <View style={styles.categoryPickerHeader}>
-                <TouchableOpacity
-                  activeOpacity={0.74}
-                  onPress={() => selectCategoryByOffset(-1)}
-                  style={styles.categoryArrowButton}
-                  testID="passenger-home-category-prev"
-                  accessibilityRole="button"
-                  accessibilityLabel="Categoria anterior"
-                >
-                  <CategoryChevron direction="left" />
-                </TouchableOpacity>
-                <Animated.View style={[styles.categoryPickerCopy, categorySlideStyle]}>
-                  <Text style={styles.categoryPickerTitle} numberOfLines={1}>
-                    {selectedCategory?.label || "Plus"}
-                  </Text>
-                  <Text style={styles.categoryPickerSubtitle} numberOfLines={1}>
-                    {selectedCategory?.description || "Confortável e acessível"}
-                  </Text>
-                </Animated.View>
-                <TouchableOpacity
-                  activeOpacity={0.74}
-                  onPress={() => selectCategoryByOffset(1)}
-                  style={styles.categoryArrowButton}
-                  testID="passenger-home-category-next"
-                  accessibilityRole="button"
-                  accessibilityLabel="Próxima categoria"
-                >
-                  <CategoryChevron />
-                </TouchableOpacity>
-              </View>
-              <Animated.View style={[styles.categoryPricePanel, categorySlideStyle]}>
-                <TouchableOpacity
-                  activeOpacity={canShowFareBreakdown ? 0.82 : 1}
-                  disabled={!canShowFareBreakdown}
-                  onPress={() => setFareBreakdownVisible((current) => !current)}
-                  style={styles.categoryPriceWrap}
-                  testID="passenger-home-fare-breakdown-trigger"
-                  accessibilityRole="button"
-                  accessibilityLabel="Ver composição do valor da corrida"
-                  accessibilityState={{ expanded: fareBreakdownVisible }}
-                >
-                  <Text style={styles.categoryPrice} numberOfLines={1}>
-                    {selectedCategory?.priceLabel || "--"}
-                  </Text>
-                  <View style={styles.categoryPriceCaptionRow}>
-                    <Text style={styles.categoryPriceCaption}>valor da corrida</Text>
-                    {canShowFareBreakdown ? (
-                      <Ionicons name="chevron-down" size={11} color={TEXT_MUTED} />
-                    ) : null}
-                  </View>
-                </TouchableOpacity>
-              </Animated.View>
-              <Animated.View style={[styles.categoryArrivalProof, categorySlideStyle]}>
-                <Text style={styles.categoryArrivalProofLabel}>Chegada estimada</Text>
-                <Text style={styles.categoryArrivalProofValue} numberOfLines={1}>
-                  {categoryArrivalProof || "--"}
-                </Text>
-              </Animated.View>
+              {visibleCategoryOptions.map(category => {
+                const selected = category.id === selectedCategoryId;
+                return <TouchableOpacity key={category.id} onPress={() => onCategorySelect?.(category.id)} activeOpacity={0.82}
+                  style={styles.leafCategoryRow} accessibilityRole="button" accessibilityState={{ selected }}
+                  testID={`passenger-home-category-${category.id}`} accessibilityLabel={`${category.label}, ${category.priceLabel || 'Preço em atualização'}`}>
+                  {selected ? <View style={styles.leafCategoryMarker} /> : null}
+                  <View style={styles.leafCategoryCopy}><Text style={styles.leafCategoryName}>{String(category.label || category.id).replace(/^Leaf\s*/i, '').toUpperCase()}</Text>
+                    <Text style={styles.leafCategoryDetail} numberOfLines={1}>{category.description}</Text></View>
+                  <View style={styles.leafCategoryValue}><Text style={styles.leafCategoryPrice}>{category.priceLabel || '—'}</Text>
+                    <Text style={styles.leafCategoryDetail} numberOfLines={1}>{formatCategoryArrivalFootnote(category)}</Text></View>
+                </TouchableOpacity>;
+              })}
+              {/* Always rendered (muted until a breakdown exists) so the CTA does
+                  not jump when the backend quote arrives. */}
+              <TouchableOpacity onPress={() => setFareBreakdownVisible(current => !current)} disabled={!canShowFareBreakdown}
+                style={[styles.leafCategoryBreakdown, !canShowFareBreakdown && styles.leafCategoryBreakdownMuted]} testID="passenger-home-fare-breakdown-trigger" accessibilityRole="button"
+                accessibilityLabel="Ver composição do valor da corrida" accessibilityState={{ expanded: fareBreakdownVisible, disabled: !canShowFareBreakdown }}>
+                <Text style={styles.leafCategoryDetail}>Composição do valor</Text><Ionicons name="chevron-forward" size={12} color="#6A6A6A" />
+              </TouchableOpacity>
             </View>
           )}
 
@@ -1320,6 +1313,15 @@ function PassengerHomeOverlay({
               testID="passenger-home-fare-breakdown"
               accessibilityLabel="Composição do valor da corrida"
             >
+              <View style={styles.fareBreakdownHeader}>
+                <Text style={styles.fareBreakdownTitle} accessibilityRole="header">
+                  Composição do valor · {String(selectedCategory?.label || selectedCategory?.id || '').replace(/^Leaf\s*/i, '').toUpperCase()}
+                </Text>
+                <TouchableOpacity onPress={() => setFareBreakdownVisible(false)} style={styles.fareBreakdownClose}
+                  testID="passenger-home-fare-breakdown-close" accessibilityRole="button" accessibilityLabel="Fechar composição do valor">
+                  <Ionicons name="close" size={18} color={TEXT_PRIMARY} />
+                </TouchableOpacity>
+              </View>
               {fareBreakdownRows.map((row, index) => (
                 <View
                   key={`${row.label}-${index}`}
@@ -1489,6 +1491,18 @@ export function PassengerHomeOverlaySkeleton({
 export default memo(PassengerHomeOverlay);
 
 const styles = StyleSheet.create({
+  categorySheetHandle: { width: 32, height: 3, borderRadius: 2, backgroundColor: '#E5E5E5', alignSelf: 'center', marginBottom: 14 },
+  leafCategoryRow: { minHeight: 58, paddingLeft: 12, paddingVertical: 8, flexDirection: 'row', alignItems: 'center', gap: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#E5E5E5' },
+  leafCategoryMarker: { position: 'absolute', left: 0, width: 3, height: 30, borderRadius: 2, backgroundColor: '#1A330E' },
+  leafCategoryCopy: { flex: 1, minWidth: 0, gap: 2 },
+  leafCategoryName: { ...leafTypography.bold, fontSize: 20, lineHeight: 26, letterSpacing: -0.3, color: '#222222' },
+  leafCategoryDetail: { ...leafTypography.regular, fontSize: 15, lineHeight: 26, color: '#6A6A6A' },
+  // Fixed width: the footnote changes with selection; a content-sized column
+  // reflowed the description and shifted every row below it.
+  leafCategoryValue: { width: 128, alignItems: 'flex-end', gap: 2 },
+  leafCategoryPrice: { ...leafTypography.semiBold, fontSize: 17, lineHeight: 26, fontVariant: ['tabular-nums'], color: '#222222' },
+  leafCategoryBreakdownMuted: { opacity: 0.35 },
+  leafCategoryBreakdown: { minHeight: 40, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   homeStack: {
     position: "absolute",
     left: HOME_CARD_HORIZONTAL_INSET,
@@ -1524,11 +1538,15 @@ const styles = StyleSheet.create({
     bottom: HOME_PROMO_CARD_HEIGHT + HOME_STACK_GAP,
   },
   searchCardReviewMode: {
-    borderRadius: 14,
+    borderRadius: CATEGORY_CARD_RADIUS,
     borderBottomLeftRadius: 0,
     borderBottomRightRadius: 0,
-    borderColor: "transparent",
-    backgroundColor: "rgba(255,255,255,0.97)",
+    // No border: a transparent 1px border leaves a ring where the map shows
+    // through on Android (background is painted inside the border).
+    borderWidth: 0,
+    // Opaque: it sits flush on the category panel, so any translucency shows
+    // map labels through the top half and a seam where the panels meet.
+    backgroundColor: CARD_SURFACE,
     paddingTop: 12,
     shadowOpacity: 0.08,
     shadowRadius: 18,
@@ -1541,7 +1559,7 @@ const styles = StyleSheet.create({
     borderRadius: HOME_CARD_RADIUS,
     borderWidth: 1,
     borderColor: CARD_BORDER,
-    backgroundColor: "#FBFCF8",
+    backgroundColor: "#F7F8F7",
     paddingHorizontal: 24,
     paddingTop: 22,
     paddingBottom: 18,
@@ -1561,7 +1579,7 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(255,255,255,0.96)",
   },
   skeletonPromoCard: {
-    backgroundColor: "rgba(251,252,248,0.96)",
+    backgroundColor: "rgba(247,248,247,0.96)",
   },
   searchCardMain: {
     minHeight: HOME_CARD_HEIGHT - HOME_CARD_PADDING_TOP - HOME_CARD_PADDING_BOTTOM,
@@ -1576,40 +1594,33 @@ const styles = StyleSheet.create({
     alignItems: "stretch",
   },
   categoryTripSummary: { flex: 1, minWidth: 0 },
-  categoryTripSummaryTitle: {
-    color: TEXT_PRIMARY,
-    fontFamily: fonts.Regular,
-    fontSize: 13,
-    lineHeight: 18,
-    marginBottom: 7,
-  },
   categoryTripSummaryBox: {
-    minHeight: 88,
     borderRadius: 12,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: "rgba(23,20,18,0.07)",
     backgroundColor: "rgba(23,20,18,0.04)",
     paddingHorizontal: 14,
-    paddingVertical: 9,
+    paddingVertical: 6,
   },
-  categoryTripSummaryField: { minHeight: 31, justifyContent: "center" },
+  categoryTripSummaryField: { minHeight: 30, flexDirection: "row", alignItems: "center", gap: 10 },
+  categoryTripSummaryOriginMark: { width: 8, height: 8, borderRadius: 4, backgroundColor: TEXT_PRIMARY },
+  categoryTripSummaryDestinationMark: { width: 8, height: 8, borderRadius: 2, backgroundColor: LEAF_GREEN },
   categoryTripSummaryDivider: {
     height: StyleSheet.hairlineWidth,
     backgroundColor: "rgba(23,20,18,0.075)",
-    marginVertical: 6,
+    marginLeft: 18,
   },
   categoryRouteSummaryLabel: {
     color: "rgba(23,20,18,0.50)",
-    fontFamily: fonts.Light,
-    fontSize: 10.5,
+    ...leafTypography.light,
+    fontSize: 11,
     lineHeight: 13,
   },
   categoryRouteSummaryValue: {
-    marginTop: 1,
+    flex: 1,
+    minWidth: 0,
     color: TEXT_PRIMARY,
-    fontFamily: fonts.Regular,
-    fontSize: 13,
-    lineHeight: 17,
+    ...leafTypography.regular,
+    fontSize: 15,
+    lineHeight: 19,
   },
   routeRail: {
     width: 13,
@@ -1628,7 +1639,7 @@ const styles = StyleSheet.create({
     marginTop: 5,
     marginBottom: 7,
     borderRadius: 1,
-    backgroundColor: "#E9E2D8",
+    backgroundColor: "#E5E5E5",
   },
   destinationDot: {
     width: 10,
@@ -1650,23 +1661,23 @@ const styles = StyleSheet.create({
   },
   label: {
     color: TEXT_MUTED,
-    fontFamily: fonts.Light,
+    ...leafTypography.light,
     fontSize: 11,
-    lineHeight: 15,
+    lineHeight: 20,
   },
   pickupText: {
     color: TEXT_MUTED,
-    fontFamily: fonts.Regular,
-    fontSize: 14,
+    ...leafTypography.regular,
+    fontSize: 15,
     lineHeight: 19,
   },
   pickupPrefix: {
     color: TEXT_MUTED,
-    fontFamily: fonts.Light,
+    ...leafTypography.light,
   },
   pickupLocationText: {
     color: TEXT_MUTED,
-    fontFamily: fonts.Regular,
+    ...leafTypography.regular,
   },
   inlineSearchRow: {
     marginTop: 1,
@@ -1678,7 +1689,7 @@ const styles = StyleSheet.create({
     flex: 1,
     minWidth: 0,
     color: TEXT_PRIMARY,
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 15,
     lineHeight: 20,
     paddingVertical: 0,
@@ -1690,7 +1701,7 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#F7F8F5",
+    backgroundColor: "#F5F6F5",
   },
   inlineSearchSubmitButton: {
     marginLeft: 10,
@@ -1701,7 +1712,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     borderWidth: 1,
     borderColor: "#DDE8D7",
-    backgroundColor: "#F5F8F2",
+    backgroundColor: "#F5F6F5",
   },
   hiddenPickupAddress: {
     position: "absolute",
@@ -1714,7 +1725,7 @@ const styles = StyleSheet.create({
     height: StyleSheet.hairlineWidth,
     marginTop: 3,
     marginBottom: 8,
-    backgroundColor: "#E9E2D8",
+    backgroundColor: "#E5E5E5",
   },
   destinationInput: {
     minHeight: 45,
@@ -1733,13 +1744,13 @@ const styles = StyleSheet.create({
   },
   destinationLabel: {
     color: LEAF_GREEN,
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 11,
     lineHeight: 15,
   },
   destinationText: {
     color: TEXT_PRIMARY,
-    fontFamily: fonts.Regular,
+    ...leafTypography.regular,
     fontSize: 17,
     lineHeight: 22,
   },
@@ -1760,14 +1771,14 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     borderWidth: 1,
     borderColor: "#DDE8D7",
-    backgroundColor: "#F5F8F2",
+    backgroundColor: "#F5F6F5",
   },
   destinationSearchInput: {
     flex: 1,
     minWidth: 0,
     color: TEXT_PRIMARY,
-    fontFamily: fonts.Regular,
-    fontSize: 16,
+    ...leafTypography.regular,
+    fontSize: 17,
     lineHeight: 21,
     paddingVertical: 0,
   },
@@ -1789,7 +1800,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     borderWidth: 1,
     borderColor: "#DDE8D7",
-    backgroundColor: "#F5F8F2",
+    backgroundColor: "#F5F6F5",
   },
   destinationSearchCloseButton: {
     marginLeft: 8,
@@ -1798,7 +1809,7 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#F7F8F5",
+    backgroundColor: "#F5F6F5",
   },
   destinationResultRow: {
     minHeight: HOME_SEARCH_DROPDOWN_ROW_HEIGHT,
@@ -1812,7 +1823,7 @@ const styles = StyleSheet.create({
     borderRadius: 15,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#F2F7F4",
+    backgroundColor: "#F5F6F5",
   },
   destinationResultCopy: {
     flex: 1,
@@ -1840,19 +1851,19 @@ const styles = StyleSheet.create({
   },
   pickupResultTitle: {
     color: TEXT_PRIMARY,
-    fontFamily: fonts.Regular,
+    ...leafTypography.regular,
     fontSize: 13,
     lineHeight: 18,
   },
   destinationResultTitle: {
     color: TEXT_PRIMARY,
-    fontFamily: fonts.Regular,
-    fontSize: 14,
+    ...leafTypography.regular,
+    fontSize: 15,
     lineHeight: 19,
   },
   destinationResultDistance: {
     color: TEXT_MUTED,
-    fontFamily: fonts.Regular,
+    ...leafTypography.regular,
     fontSize: 15,
     lineHeight: 20,
     textAlign: "right",
@@ -1860,9 +1871,9 @@ const styles = StyleSheet.create({
   destinationResultAddress: {
     marginTop: 2,
     color: TEXT_MUTED,
-    fontFamily: fonts.Regular,
-    fontSize: 12,
-    lineHeight: 15,
+    ...leafTypography.regular,
+    fontSize: 13,
+    lineHeight: 17,
   },
   destinationResultStatus: {
     minHeight: 60,
@@ -1873,15 +1884,15 @@ const styles = StyleSheet.create({
   },
   destinationResultStatusText: {
     color: TEXT_MUTED,
-    fontFamily: fonts.Medium,
-    fontSize: 12,
+    ...leafTypography.medium,
+    fontSize: 13,
     lineHeight: 16,
   },
   destinationResultEmpty: {
     paddingTop: 12,
     color: TEXT_MUTED,
-    fontFamily: fonts.Regular,
-    fontSize: 12,
+    ...leafTypography.regular,
+    fontSize: 13,
     lineHeight: 16,
   },
   dropdownInline: {
@@ -1893,11 +1904,10 @@ const styles = StyleSheet.create({
   },
   categoryCard: {
     position: "absolute",
-    borderRadius: 14,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: "rgba(23,20,18,0.045)",
+    borderRadius: 0,
+    borderWidth: 0,
     backgroundColor: CARD_SURFACE,
-    paddingHorizontal: 20,
+    paddingHorizontal: 24,
     paddingTop: 12,
     paddingBottom: 24,
     shadowColor: "#000000",
@@ -1909,6 +1919,8 @@ const styles = StyleSheet.create({
   categoryCardConnected: {
     borderTopLeftRadius: 0,
     borderTopRightRadius: 0,
+    borderBottomLeftRadius: CATEGORY_CARD_RADIUS,
+    borderBottomRightRadius: CATEGORY_CARD_RADIUS,
     borderTopWidth: 0,
     paddingTop: 0,
     shadowOpacity: 0.12,
@@ -1931,16 +1943,16 @@ const styles = StyleSheet.create({
   },
   categoryPickerTitle: {
     color: TEXT_PRIMARY,
-    fontFamily: fonts.Regular,
-    fontSize: 24,
+    ...leafTypography.regular,
+    fontSize: 22,
     lineHeight: 30,
   },
   categoryPickerSubtitle: {
     marginTop: 1,
     color: TEXT_MUTED,
-    fontFamily: fonts.Regular,
-    fontSize: 12,
-    lineHeight: 15,
+    ...leafTypography.regular,
+    fontSize: 13,
+    lineHeight: 17,
   },
   categoryHandle: {
     alignSelf: "center",
@@ -1952,8 +1964,8 @@ const styles = StyleSheet.create({
   },
   categoryEyebrow: {
     color: TEXT_PRIMARY,
-    fontFamily: fonts.SemiBold,
-    fontSize: 16,
+    ...leafTypography.semiBold,
+    fontSize: 17,
     lineHeight: 21,
   },
   categoryTabs: {
@@ -1961,7 +1973,7 @@ const styles = StyleSheet.create({
     minHeight: 44,
     flexDirection: "row",
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: "#E9E2D8",
+    borderBottomColor: "#E5E5E5",
   },
   categoryTab: {
     flex: 1,
@@ -1978,17 +1990,17 @@ const styles = StyleSheet.create({
     borderBottomWidth: 2,
     borderBottomColor: TEXT_PRIMARY,
     borderColor: "rgba(26,51,14,0.14)",
-    backgroundColor: "#F6F8F3",
+    backgroundColor: "#F5F6F5",
   },
   categoryTabText: {
     color: TEXT_MUTED,
-    fontFamily: fonts.SemiBold,
-    fontSize: 13.5,
+    ...leafTypography.semiBold,
+    fontSize: 13,
     lineHeight: 17,
   },
   categoryTabTextActive: {
     color: TEXT_PRIMARY,
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
   },
   categorySummaryRow: {
     minHeight: 38,
@@ -2014,8 +2026,8 @@ const styles = StyleSheet.create({
     flexShrink: 1,
     maxWidth: "58%",
     color: TEXT_PRIMARY,
-    fontFamily: fonts.SemiBold,
-    fontSize: 15.5,
+    ...leafTypography.semiBold,
+    fontSize: 15,
     lineHeight: 20,
   },
   categoryTariffPill: {
@@ -2036,9 +2048,9 @@ const styles = StyleSheet.create({
   },
   categoryTariffPillText: {
     color: LEAF_GREEN,
-    fontFamily: fonts.SemiBold,
-    fontSize: 8.8,
-    lineHeight: 11,
+    ...leafTypography.semiBold,
+    fontSize: 11,
+    lineHeight: 14,
   },
   categoryTariffPillTextHigh: {
     color: "#8A5A17",
@@ -2046,7 +2058,7 @@ const styles = StyleSheet.create({
   categorySummarySubtitle: {
     marginTop: 1,
     color: TEXT_MUTED,
-    fontFamily: fonts.Regular,
+    ...leafTypography.regular,
     fontSize: 11,
     lineHeight: 14,
   },
@@ -2056,15 +2068,15 @@ const styles = StyleSheet.create({
   },
   categoryPrice: {
     color: TEXT_PRIMARY,
-    fontFamily: fonts.Regular,
+    ...leafTypography.regular,
     fontSize: 28,
     lineHeight: 34,
     textAlign: "center",
   },
   categoryPriceCaption: {
     color: TEXT_MUTED,
-    fontFamily: fonts.Regular,
-    fontSize: 10.5,
+    ...leafTypography.regular,
+    fontSize: 11,
     lineHeight: 13,
   },
   categoryPricePanel: { marginTop: 8, alignItems: "center" },
@@ -2094,14 +2106,14 @@ const styles = StyleSheet.create({
   },
   categoryMetaLabel: {
     color: TEXT_MUTED,
-    fontFamily: fonts.Regular,
-    fontSize: 10,
-    lineHeight: 12,
+    ...leafTypography.regular,
+    fontSize: 11,
+    lineHeight: 17,
   },
   categoryMetaValue: {
     color: TEXT_PRIMARY,
-    fontFamily: fonts.Regular,
-    fontSize: 13.5,
+    ...leafTypography.regular,
+    fontSize: 13,
     lineHeight: 17,
   },
   categoryArrivalProof: {
@@ -2114,14 +2126,14 @@ const styles = StyleSheet.create({
   },
   categoryArrivalProofLabel: {
     color: TEXT_MUTED,
-    fontFamily: fonts.Regular,
+    ...leafTypography.regular,
     fontSize: 11,
-    lineHeight: 14,
+    lineHeight: 17,
   },
   categoryArrivalProofValue: {
     color: TEXT_PRIMARY,
-    fontFamily: fonts.Medium,
-    fontSize: 13.5,
+    ...leafTypography.medium,
+    fontSize: 13,
     lineHeight: 17,
   },
   categoryLeafDelasPill: {
@@ -2132,7 +2144,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#F7F8F5",
+    backgroundColor: "#F5F6F5",
     borderWidth: 1,
     borderColor: "rgba(26,51,14,0.08)",
   },
@@ -2142,9 +2154,9 @@ const styles = StyleSheet.create({
   },
   categoryLeafDelasText: {
     color: TEXT_MUTED,
-    fontFamily: fonts.SemiBold,
-    fontSize: 8.5,
-    lineHeight: 10,
+    ...leafTypography.semiBold,
+    fontSize: 11,
+    lineHeight: 14,
   },
   categoryLeafDelasTextActive: {
     color: "#FFFFFF",
@@ -2152,8 +2164,8 @@ const styles = StyleSheet.create({
   categoryNotice: {
     marginTop: 12,
     color: "#D21F4A",
-    fontFamily: fonts.Medium,
-    fontSize: 12,
+    ...leafTypography.medium,
+    fontSize: 13,
     lineHeight: 16,
     textAlign: "center",
   },
@@ -2173,9 +2185,9 @@ const styles = StyleSheet.create({
   },
   categoryConfirmText: {
     color: "#FFFFFF",
-    fontFamily: fonts.SemiBold,
-    fontSize: 12,
-    lineHeight: 15,
+    ...leafTypography.semiBold,
+    fontSize: 17,
+    lineHeight: 22,
   },
   categoryPriceCaptionRow: {
     marginTop: 1,
@@ -2184,6 +2196,28 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     gap: 3,
   },
+  fareBreakdownHeader: {
+    minHeight: 44,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+  },
+  fareBreakdownTitle: {
+    flex: 1,
+    color: TEXT_PRIMARY,
+    ...leafTypography.semiBold,
+    fontSize: 17,
+    lineHeight: 21,
+  },
+  fareBreakdownClose: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#F5F5F5",
+  },
   fareBreakdownPanel: {
     marginTop: 9,
     paddingTop: 9,
@@ -2191,7 +2225,8 @@ const styles = StyleSheet.create({
     borderTopColor: "rgba(23,20,18,0.12)",
   },
   fareBreakdownRow: {
-    minHeight: 24,
+    minHeight: 30,
+    paddingVertical: 3,
     flexDirection: "row",
     alignItems: "flex-start",
     justifyContent: "space-between",
@@ -2209,14 +2244,14 @@ const styles = StyleSheet.create({
   },
   fareBreakdownLabel: {
     color: TEXT_PRIMARY,
-    fontFamily: fonts.Regular,
-    fontSize: 11,
-    lineHeight: 14,
+    ...leafTypography.regular,
+    fontSize: 15,
+    lineHeight: 19,
   },
   fareBreakdownInfoButton: {
-    width: 15,
-    height: 15,
-    borderRadius: 8,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "#F4F8F1",
@@ -2225,22 +2260,22 @@ const styles = StyleSheet.create({
   },
   fareBreakdownInfoText: {
     color: LEAF_GREEN,
-    fontFamily: fonts.SemiBold,
-    fontSize: 9,
-    lineHeight: 11,
+    ...leafTypography.semiBold,
+    fontSize: 11,
+    lineHeight: 17,
   },
   fareBreakdownDetail: {
     marginTop: 0,
     color: TEXT_MUTED,
-    fontFamily: fonts.Regular,
-    fontSize: 9,
-    lineHeight: 11,
+    ...leafTypography.regular,
+    fontSize: 13,
+    lineHeight: 20,
   },
   fareBreakdownAmount: {
     color: TEXT_PRIMARY,
-    fontFamily: fonts.Medium,
-    fontSize: 11,
-    lineHeight: 14,
+    ...leafTypography.medium,
+    fontSize: 15,
+    lineHeight: 19,
     textAlign: "right",
   },
   fareBreakdownTotalRow: {
@@ -2251,23 +2286,23 @@ const styles = StyleSheet.create({
   },
   fareBreakdownTotalLabel: {
     color: TEXT_PRIMARY,
-    fontFamily: fonts.SemiBold,
-    fontSize: 11,
-    lineHeight: 14,
+    ...leafTypography.semiBold,
+    fontSize: 17,
+    lineHeight: 21,
   },
   fareBreakdownTotalAmount: {
     color: TEXT_PRIMARY,
-    fontFamily: fonts.SemiBold,
-    fontSize: 11,
-    lineHeight: 14,
+    ...leafTypography.semiBold,
+    fontSize: 17,
+    lineHeight: 21,
     textAlign: "right",
   },
   fareBreakdownRouteDetail: {
-    marginTop: 4,
+    marginTop: 8,
     color: TEXT_MUTED,
-    fontFamily: fonts.Regular,
-    fontSize: 11,
-    lineHeight: 15,
+    ...leafTypography.regular,
+    fontSize: 13,
+    lineHeight: 18,
     textAlign: "center",
   },
   pickupAdjustmentModalBackdrop: {
@@ -2283,7 +2318,7 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     paddingHorizontal: 14,
     paddingVertical: 12,
-    backgroundColor: "#171412",
+    backgroundColor: "#222222",
     shadowColor: "#000000",
     shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.14,
@@ -2297,13 +2332,13 @@ const styles = StyleSheet.create({
     width: 14,
     height: 14,
     borderRadius: 2,
-    backgroundColor: "#171412",
+    backgroundColor: "#222222",
     transform: [{ rotate: "45deg" }],
   },
   pickupAdjustmentBubbleText: {
     color: "#FFFFFF",
-    fontFamily: fonts.Regular,
-    fontSize: 12,
+    ...leafTypography.regular,
+    fontSize: 13,
     lineHeight: 16,
   },
   hiddenMicButton: {
@@ -2317,14 +2352,14 @@ const styles = StyleSheet.create({
   },
   promoEyebrow: {
     color: TEXT_MUTED,
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     fontSize: 11,
     lineHeight: 15,
   },
   promoTitle: {
     marginTop: 7,
     color: TEXT_PRIMARY,
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 22,
     lineHeight: 28,
   },
@@ -2332,7 +2367,7 @@ const styles = StyleSheet.create({
     marginTop: 8,
     maxWidth: "88%",
     color: TEXT_MUTED,
-    fontFamily: fonts.Regular,
+    ...leafTypography.regular,
     fontSize: 13,
     lineHeight: 18,
   },
@@ -2352,8 +2387,8 @@ const styles = StyleSheet.create({
   },
   promoPillText: {
     color: "#FFFFFF",
-    fontFamily: fonts.SemiBold,
-    fontSize: 12,
+    ...leafTypography.semiBold,
+    fontSize: 13,
     lineHeight: 16,
   },
   promoDots: {

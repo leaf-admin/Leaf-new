@@ -1,0 +1,5 @@
+{
+  "exitCode": 255,
+  "stdout": "",
+  "diagnostic": "@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\n@    WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!     @\n@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\nIT IS POSSIBLE THAT SOMEONE IS DOING SOMETHING NASTY!\nSomeone could be eavesdropping on you right now (man-in-the-middle attack)!\nIt is also possible that a host key has just been changed.\nThe fingerprint for the ED25519 key sent by the remote host is\nSHA256:Go/Zwa/PnjWiu7qChfmXfdKn44GmiYfyIeMCwtKOu54.\nPlease contact your system administrator.\nAdd correct host key in /Users/izaakdias/.ssh/known_hosts to get rid of this message.\nOffending ECDSA key in /Users/izaakdias/.ssh/known_hosts:21\nHost key for 169.58.32.212 has changed and you have requested strict checking.\nHost key verification failed."
+}

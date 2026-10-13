@@ -1,8 +1,8 @@
+import leafTypography from '../prototype/LeafTypography';
 import React, { useState } from 'react';
 import { View, TextInput, StyleSheet, Animated as RNAnimated, Platform } from 'react-native';
 import { Typography } from './Typography';
 import { colors } from '../../theme/runtimeTokens';
-import { fonts } from '../../theme/runtimeTokens';
 
 export const AnimatedInput = ({
     label,
@@ -111,7 +111,7 @@ const styles = StyleSheet.create({
     },
     input: {
         flex: 1,
-        fontFamily: fonts.Regular,
+        ...leafTypography.regular,
         fontSize: 16,
         color: colors.text.primary,
         height: '100%',

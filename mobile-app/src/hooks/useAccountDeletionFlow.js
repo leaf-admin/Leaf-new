@@ -31,21 +31,26 @@ export function useAccountDeletionFlow({
     const confirmationMessage = response?.message
       || 'Sua conta foi excluída com sucesso.';
 
-    await resetSessionToStart();
+    try {
+      await resetSessionToStart();
+    } catch (error) {
+      // A exclusão já foi confirmada pelo servidor; não reportar como falha.
+      Logger.error('Erro ao encerrar a sessão após excluir a conta:', error);
+    }
     Alert.alert('Conta excluída', confirmationMessage);
   }, [additionalInfo, profile, resetSessionToStart, source]);
 
   const promptAccountDeletion = useCallback(() => {
     Alert.alert(
-      'Excluir Conta',
-      'Essa ação é irreversível e removerá sua conta e seus dados do Leaf. Deseja continuar?',
+      'Excluir conta',
+      'Essa ação é irreversível e removerá sua conta e seus dados da Leaf. Deseja continuar?',
       [
         {
           text: 'Cancelar',
           style: 'cancel',
         },
         {
-          text: 'Excluir Conta',
+          text: 'Excluir conta',
           style: 'destructive',
           onPress: () => {
             confirmDeleteData().catch((error) => {

@@ -1,14 +1,52 @@
 import {
   buildOverlaySheetViewportMetrics,
+  buildPickupMapCamera,
   buildRouteViewportRegion,
   buildShortRouteViewportRegion,
   buildVisibleRouteEdgePadding,
   buildVisibleRouteViewportFrame,
   distanceBetweenCoordinatesKm,
+  resolveMapViewportCenterY,
   validateRoadRouteGeometry,
 } from '../src/screens/prototype/prototypeRouteViewport';
 
 describe('prototype route viewport', () => {
+  it.each([
+    [852, 184, 230, 403],
+    [667, 142, 242, 283.5],
+    [852, 184, 0, 518],
+    [100, 200, 200, 50],
+    [852, 700, 700, 762],
+  ])('centers the pickup marker inside %s pt with top %s and bottom %s', (height, top, bottom, center) => {
+    expect(resolveMapViewportCenterY({ height, top, bottom })).toBe(center);
+  });
+
+  it.each([
+    [16, { top: 62, bottom: 34 }],
+    [17, { top: 0, bottom: 0 }],
+  ])('positions the pickup coordinate beneath the pin at zoom %s without modifying it', (zoom, nativeSafeArea) => {
+    const coordinate = { latitude: 37.78584, longitude: -122.40642 };
+    const original = { ...coordinate };
+    const height = 852;
+    const markerCenterY = resolveMapViewportCenterY({ height, top: 184, bottom: 230 });
+    const camera = buildPickupMapCamera({ coordinate, zoom, height, markerCenterY, nativeSafeArea });
+    const mercatorY = latitude => (1 - Math.asinh(Math.tan(latitude * Math.PI / 180)) / Math.PI) / 2 * 256 * 2 ** zoom;
+    const projectedY = height / 2 + (nativeSafeArea.top - nativeSafeArea.bottom) / 2 +
+      mercatorY(coordinate.latitude) - mercatorY(camera.center.latitude);
+    expect(projectedY).toBeCloseTo(markerCenterY, 5);
+    expect(camera).toEqual(expect.objectContaining({ zoom, pitch: 0, heading: 0 }));
+    expect(camera.center.longitude).toBe(coordinate.longitude);
+    expect(coordinate).toEqual(original);
+  });
+
+  it('keeps a centered pickup camera centered and rejects unavailable coordinates', () => {
+    const coordinate = { latitude: -22.88, longitude: -43.34 };
+    expect(buildPickupMapCamera({ coordinate, zoom: 16, height: 852, markerCenterY: 426 }).center.latitude)
+      .toBeCloseTo(coordinate.latitude, 10);
+    expect(buildPickupMapCamera({ coordinate: null, zoom: 16, height: 852, markerCenterY: 426 })).toBeNull();
+    expect(buildPickupMapCamera({ coordinate, zoom: 16, height: 0, markerCenterY: 426 })).toBeNull();
+  });
+
   const shortRoute = [
     { latitude: -22.881, longitude: -43.343 },
     { latitude: -22.884, longitude: -43.348 },

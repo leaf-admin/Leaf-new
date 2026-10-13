@@ -1,9 +1,9 @@
+import leafTypography from '../../../components/prototype/LeafTypography';
 import React from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { PrototypeCard } from "../../../components/prototype/PrototypeUI";
 import robotaxiPrototypeTokens from "../../../components/design-system/robotaxiPrototypeTokens";
-import { fonts } from "../../../theme/runtimeTokens";
 
 const { color } = robotaxiPrototypeTokens;
 
@@ -70,7 +70,10 @@ export default function DriverTransientStateCard({
       pointerEvents="none"
       style={[styles.wrap, { bottom: insetsBottom + bottomOffset }]}
       testID="driver-transient-state-card"
-      accessibilityLabel="driver-transient-state-card"
+      accessible
+      accessibilityRole="alert"
+      accessibilityLiveRegion="polite"
+      accessibilityLabel={`${card?.title || "Atualização"}. ${card?.message || "O estado da solicitação foi atualizado."}`}
     >
       <PrototypeCard style={styles.card}>
         <View style={styles.row}>
@@ -133,14 +136,14 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   title: {
-    fontFamily: fonts.SemiBold,
-    fontSize: 16,
-    lineHeight: 20,
+    ...leafTypography.semiBold,
+    fontSize: 22,
+    lineHeight: 28,
     color: color.text.primary,
   },
   message: {
     marginTop: 4,
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     fontSize: 13,
     lineHeight: 17,
     color: color.text.secondary,

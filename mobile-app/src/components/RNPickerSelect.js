@@ -625,7 +625,7 @@ export const defaultStyles = StyleSheet.create({
     },
     done: {
         color: '#007aff',
-        fontWeight: '600',
+        fontFamily: 'Figtree-SemiBold',
         fontSize: 17,
         paddingTop: 1,
         paddingRight: 11,

@@ -1,0 +1,9 @@
+{
+  "timeUtc": "2026-10-04T07:36:04.137030+00:00",
+  "source": "local backend runtime env; endpoint origin not verified against VPS runtime",
+  "probe": "GET /health; no authentication or biometric images sent",
+  "configuredUrlPresent": true,
+  "remoteAccessVerified": false,
+  "loopbackEndpoint": false,
+  "errorType": "URLError"
+}

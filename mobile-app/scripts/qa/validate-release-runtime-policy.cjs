@@ -32,7 +32,17 @@ const REQUIRED_FALSE_FLAGS = [
   ...BLOCKED_TRUE_FLAGS
 ];
 
-const REQUIRED_ASSISTED_LAUNCH_PROFILE = 'ride_flow_validation';
+const ASSISTED_LAUNCH_PROFILES = new Set(['pilot_controlled', 'ride_flow_validation']);
+
+function validateAssistedLaunchProfile(name, env, issues) {
+  const launchProfile = normalize(env.EXPO_PUBLIC_LEAF_LAUNCH_PROFILE);
+  if (!ASSISTED_LAUNCH_PROFILES.has(launchProfile)) {
+    issues.push(`${name}: perfil de lançamento deve ser pilot_controlled ou ride_flow_validation durante o piloto assistido`);
+  }
+  if (launchProfile === 'pilot_controlled' && !isTruthy(env.EXPO_PUBLIC_PILOT_CONTROLLED)) {
+    issues.push(`${name}: EXPO_PUBLIC_PILOT_CONTROLLED=true obrigatório no perfil pilot_controlled`);
+  }
+}
 
 function readJson(filePath) {
   return JSON.parse(fs.readFileSync(filePath, 'utf8'));
@@ -61,11 +71,7 @@ function validateProductionProfile(name, profile = {}) {
     }
   });
 
-  if (normalize(env.EXPO_PUBLIC_LEAF_LAUNCH_PROFILE) !== REQUIRED_ASSISTED_LAUNCH_PROFILE) {
-    issues.push(
-      `${name}: EXPO_PUBLIC_LEAF_LAUNCH_PROFILE deve ser ${REQUIRED_ASSISTED_LAUNCH_PROFILE} durante o piloto assistido`
-    );
-  }
+  validateAssistedLaunchProfile(name, env, issues);
 
   ['EXPO_PUBLIC_API_URL', 'EXPO_PUBLIC_WS_URL', 'EXPO_PUBLIC_SOCKET_URL'].forEach((flag) => {
     const value = String(env[flag] || '').trim();
@@ -91,11 +97,7 @@ function validateReviewProfile(name, profile = {}) {
     issues.push(`${name}: APP_REVIEW deve estar true em profile de review`);
   }
 
-  if (normalize(env.EXPO_PUBLIC_LEAF_LAUNCH_PROFILE) !== REQUIRED_ASSISTED_LAUNCH_PROFILE) {
-    issues.push(
-      `${name}: EXPO_PUBLIC_LEAF_LAUNCH_PROFILE deve ser ${REQUIRED_ASSISTED_LAUNCH_PROFILE} durante o piloto assistido`
-    );
-  }
+  validateAssistedLaunchProfile(name, env, issues);
 
   return issues;
 }
@@ -125,4 +127,6 @@ function main() {
   process.exit(result.ok ? 0 : 1);
 }
 
-main();
+if (require.main === module) main();
+
+module.exports = { validateProductionProfile, validateReviewProfile };

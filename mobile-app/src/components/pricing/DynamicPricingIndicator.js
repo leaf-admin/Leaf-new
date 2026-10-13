@@ -233,7 +233,7 @@ const styles = StyleSheet.create({
     },
     percentageText: {
         color: '#FFFFFF',
-        fontWeight: 'bold',
+        fontFamily: 'Figtree-Bold',
         marginTop: 2,
     },
     detailsContainer: {
@@ -251,7 +251,7 @@ const styles = StyleSheet.create({
         zIndex: 1000,
     },
     demandLabel: {
-        fontWeight: 'bold',
+        fontFamily: 'Figtree-Bold',
         textAlign: 'center',
         marginBottom: 4,
     },
@@ -269,7 +269,7 @@ const styles = StyleSheet.create({
         opacity: 0.7,
     },
     finalPrice: {
-        fontWeight: 'bold',
+        fontFamily: 'Figtree-Bold',
     },
     description: {
         textAlign: 'center',
@@ -286,7 +286,7 @@ const styles = StyleSheet.create({
     compactText: {
         color: '#FFFFFF',
         fontSize: 10,
-        fontWeight: 'bold',
+        fontFamily: 'Figtree-Bold',
         marginLeft: 2,
     },
     chartContainer: {
@@ -296,7 +296,7 @@ const styles = StyleSheet.create({
     },
     chartTitle: {
         fontSize: 14,
-        fontWeight: 'bold',
+        fontFamily: 'Figtree-Bold',
         marginBottom: 8,
         textAlign: 'center',
     },

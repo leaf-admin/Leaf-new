@@ -1,3 +1,4 @@
+import leafTypography from '../../components/prototype/LeafTypography';
 import React, { useCallback, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
@@ -9,7 +10,6 @@ import {
   useWindowDimensions,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { fonts } from '../../theme/runtimeTokens';
 import PrototypeDismissibleSheet from '../../components/prototype/PrototypeDismissibleSheet';
 import PrototypeScreenTransition from '../../components/prototype/PrototypeScreenTransition';
 import {
@@ -23,7 +23,7 @@ import { LeafButton, LeafEmptyState, leafRideColors } from '../../components/pro
 import { usePrototypeMapOcclusion } from './prototypeMapOcclusion';
 import { usePrototypeRideRuntime } from './prototypeRideRuntime';
 
-const SURFACE_TOP_PADDING = 16;
+const SURFACE_TOP_PADDING = 20;
 const SURFACE_BOTTOM_PADDING = 18;
 const BACKDROP_COLOR = 'transparent';
 
@@ -125,7 +125,7 @@ export default function RobotaxiDriverDocumentsScreen({ navigation, route }) {
               <PrototypeMenuCloseButton
                 onPress={handleDismiss}
                 testID="robotaxi-driver-documents-close-button"
-                accessibilityLabel="robotaxi-driver-documents-close-button"
+                accessibilityLabel="Fechar documentos do motorista"
               />
             )}
           >
@@ -157,18 +157,19 @@ export default function RobotaxiDriverDocumentsScreen({ navigation, route }) {
 
               <PrototypeMenuSection title="Resumo">
                 <PrototypeMenuInfoRow
-                  label="Liberação operacional"
-                  value={driverCanGoOnline ? 'Liberada pelo backend' : 'Pendente'}
+                  label="Liberação para ficar online"
+                  value={driverCanGoOnline ? 'Liberada' : 'Pendente'}
                 />
-                <PrototypeMenuInfoRow label="Prazo de análise" value="Até 48 horas" />
-                <PrototypeMenuInfoRow label="Última sync" value={lastSyncedAt ? 'Atualizada' : 'Sem sync'} last />
+                {/* The SLA only matters while something is still under review. */}
+                {approvedCount < DRIVER_DOCS.length ? <PrototypeMenuInfoRow label="Prazo de análise" value="Até 48 horas" /> : null}
+                <PrototypeMenuInfoRow label="Última atualização" value={lastSyncedAt ? 'Atualizada agora' : 'Ainda não consultada'} last />
               </PrototypeMenuSection>
 
               {operationallyReleasedBeforeDocumentSync ? (
                 <LeafEmptyState
                   icon="sync-outline"
                   title="Documentos aguardando sincronização"
-                  message="A liberação operacional veio do backend. Atualize para consultar o status de CNH e CRLV."
+                  message="Sua conta já está liberada. Atualize para consultar o status de CNH e CRLV."
                   testID="robotaxi-driver-documents-sync-state"
                 />
               ) : approvedCount === 0 ? (
@@ -182,7 +183,7 @@ export default function RobotaxiDriverDocumentsScreen({ navigation, route }) {
 
               <View style={styles.actionsRow}>
                 <LeafButton
-                  label={refreshing ? 'Atualizando...' : 'Atualizar status'}
+                  label={refreshing ? 'Atualizando...' : 'Atualizar'}
                   icon="refresh-outline"
                   tone="ghost"
                   disabled={refreshing}
@@ -190,7 +191,7 @@ export default function RobotaxiDriverDocumentsScreen({ navigation, route }) {
                   style={styles.actionButton}
                 />
                 <LeafButton
-                  label="Abrir ativação"
+                  label="Ativação"
                   icon="arrow-forward-outline"
                   tone="primary"
                   onPress={() => navigation.navigate('RobotaxiPrototypeDriverActivation')}
@@ -239,7 +240,7 @@ const styles = StyleSheet.create({
   },
   feedbackText: {
     color: leafRideColors.secondary,
-    fontFamily: fonts.Regular,
+    ...leafTypography.regular,
     fontSize: 12,
     lineHeight: 17,
   },

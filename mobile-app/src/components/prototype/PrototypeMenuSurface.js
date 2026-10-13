@@ -1,18 +1,19 @@
+import leafTypography from './LeafTypography';
 import React from 'react';
 import { StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import Animated, { Easing, FadeInUp } from 'react-native-reanimated';
-import { fonts } from '../../theme/runtimeTokens';
+import Animated, { Easing, FadeInUp, useReducedMotion } from 'react-native-reanimated';
+import { LeafObjectIcon } from './LeafVisualElements';
 import robotaxiPrototypeTokens from '../design-system/robotaxiPrototypeTokens';
 
 const { color, typography, elevation, motion } = robotaxiPrototypeTokens;
 const contentEnterEasing = Easing.bezier(...motion.bezier.smoothOut);
 const LEAF_CARD_SURFACE = 'rgba(255,255,255,0.96)';
-const LEAF_CARD_BORDER = '#ECE5DC';
-const LEAF_BG = '#F8F6F1';
-const LEAF_TEXT = '#171412';
-const LEAF_MUTED = '#827B73';
-const LEAF_SECONDARY = '#756F68';
+const LEAF_CARD_BORDER = '#E5E5E5';
+const LEAF_BG = '#FFFFFF';
+const LEAF_TEXT = '#222222';
+const LEAF_MUTED = '#767676';
+const LEAF_SECONDARY = '#6A6A6A';
 const TEXT_SCALE_CAP = 1.35;
 
 function isLoadingValue(value) {
@@ -44,9 +45,11 @@ export function PrototypeMenuSurface({
   children,
   bodyStyle,
   fullScreen = false,
+  pageTitle = false,
   style,
 }) {
   const { width } = useWindowDimensions();
+  const reduceMotion = useReducedMotion();
   const panelWidth = Math.min(Math.max(width * 0.84, 292), 340);
 
   return (
@@ -59,25 +62,28 @@ export function PrototypeMenuSurface({
       ]}
     >
       <View style={styles.headerRow}>
+        {headerAccessory && !pageTitle ? <View style={styles.headerLeading}>{headerAccessory}</View> : null}
         <View style={styles.headerCopyWrap}>
           {eyebrow && !fullScreen ? <Text maxFontSizeMultiplier={TEXT_SCALE_CAP} style={styles.eyebrow}>{eyebrow}</Text> : null}
           {eyebrow && fullScreen ? <Text maxFontSizeMultiplier={TEXT_SCALE_CAP} style={styles.hiddenText}>{eyebrow}</Text> : null}
-          <Text maxFontSizeMultiplier={TEXT_SCALE_CAP} style={styles.title}>{title}</Text>
-          {subtitle ? <Text maxFontSizeMultiplier={TEXT_SCALE_CAP} style={styles.subtitle}>{subtitle}</Text> : null}
+          <Text maxFontSizeMultiplier={TEXT_SCALE_CAP} style={[styles.title, pageTitle && styles.pageTitle]}>{title}</Text>
+          {subtitle && !fullScreen ? <Text maxFontSizeMultiplier={TEXT_SCALE_CAP} style={styles.subtitle}>{subtitle}</Text> : null}
         </View>
 
-        {headerAccessory ? (
+        {headerAccessory && pageTitle ? (
           <View style={styles.headerAccessoryWrap}>{headerAccessory}</View>
-        ) : badgeLabel ? (
+        ) : !headerAccessory && badgeLabel ? (
           <View style={styles.badgePill}>
             <Text maxFontSizeMultiplier={TEXT_SCALE_CAP} style={styles.badgePillText}>{badgeLabel}</Text>
           </View>
         ) : null}
       </View>
 
-      <View style={styles.headerDivider} />
+      {subtitle && fullScreen ? <Text maxFontSizeMultiplier={TEXT_SCALE_CAP} style={[styles.subtitle, styles.pageDescription]}>{subtitle}</Text> : null}
+
+      {!fullScreen ? <View style={styles.headerDivider} /> : null}
       <Animated.View
-        entering={FadeInUp.duration(motion.timing.quick)
+        entering={reduceMotion ? undefined : FadeInUp.duration(motion.timing.quick)
           .easing(contentEnterEasing)
           .withInitialValues({ opacity: 0.98, transform: [{ translateY: 5 }] })}
         style={[styles.body, fullScreen && styles.bodyFullScreen, bodyStyle]}
@@ -120,6 +126,7 @@ export function PrototypeMenuRow({
   accessibilityLabel,
   accessibilityHint,
   disabled = false,
+  expanded,
 }) {
   const isInteractiveRow = Boolean(onPress) || disabled;
   const RowComponent = isInteractiveRow ? TouchableOpacity : View;
@@ -141,15 +148,11 @@ export function PrototypeMenuRow({
       accessibilityLabel={accessibilityLabel}
       accessibilityHint={accessibilityHint}
       accessibilityRole={isInteractiveRow ? 'button' : undefined}
-      accessibilityState={isInteractiveRow ? { disabled } : undefined}
+      accessibilityState={isInteractiveRow ? { disabled, ...(expanded === undefined ? {} : { expanded }) } : undefined}
     >
       <View style={[styles.rowIconSlot, compact && styles.rowIconSlotCompact]}>
         {iconName ? (
-          <Ionicons
-            name={iconName}
-            size={compact ? 16 : 17}
-            color={disabled ? color.text.muted : active ? color.accent.strong : '#4F5C54'}
-          />
+          <LeafObjectIcon symbol={iconName} size={40} />
         ) : null}
       </View>
 
@@ -229,7 +232,8 @@ export function PrototypeMenuStatRow({ items }) {
 
 export function PrototypeMenuCloseButton({
   onPress,
-  accessibilityLabel = 'Fechar',
+  accessibilityLabel = 'Voltar',
+  icon = 'arrow-back',
   testID,
 }) {
   return (
@@ -241,7 +245,7 @@ export function PrototypeMenuCloseButton({
       accessibilityLabel={accessibilityLabel}
       testID={testID}
     >
-      <Ionicons name="close" size={18} color={color.text.primary} />
+      <Ionicons name={icon} size={18} color={color.text.primary} />
     </TouchableOpacity>
   );
 }
@@ -276,11 +280,13 @@ const styles = StyleSheet.create({
     elevation: 0,
   },
   headerRow: {
+    minHeight: 44,
     flexDirection: 'row',
-    alignItems: 'flex-start',
+    alignItems: 'center',
     justifyContent: 'space-between',
     gap: 10,
   },
+  headerLeading: { marginRight: 2 },
   headerCopyWrap: {
     flex: 1,
     paddingRight: 10,
@@ -291,7 +297,7 @@ const styles = StyleSheet.create({
   eyebrow: {
     marginBottom: 2,
     color: LEAF_MUTED,
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     fontSize: typography.micro.size,
     lineHeight: typography.micro.lineHeight,
     textTransform: 'uppercase',
@@ -299,17 +305,20 @@ const styles = StyleSheet.create({
   },
   title: {
     color: LEAF_TEXT,
-    fontFamily: fonts.SemiBold,
-    fontSize: 20,
-    lineHeight: 26,
+    ...leafTypography.semiBold,
+    fontSize: 22,
+    lineHeight: 28,
   },
   subtitle: {
+    // SF hierarchy mirrors the approved native canvas.
     marginTop: 5,
     color: LEAF_SECONDARY,
-    fontFamily: fonts.Regular,
-    fontSize: 12.5,
-    lineHeight: 17,
+    ...leafTypography.regular,
+    fontSize: 14,
+    lineHeight: 20,
   },
+  pageDescription: { marginTop: 14 },
+  pageTitle: { fontSize: 26, lineHeight: 33, letterSpacing: -0.6 },
   badgePill: {
     minHeight: 28,
     borderRadius: 999,
@@ -322,7 +331,7 @@ const styles = StyleSheet.create({
   },
   badgePillText: {
     color: color.text.secondary,
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     fontSize: typography.micro.size,
     lineHeight: typography.micro.lineHeight,
   },
@@ -350,7 +359,7 @@ const styles = StyleSheet.create({
   },
   sectionTitle: {
     color: LEAF_MUTED,
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     fontSize: 11,
     lineHeight: 15,
     textTransform: 'uppercase',
@@ -363,7 +372,7 @@ const styles = StyleSheet.create({
     marginBottom: 2,
   },
   row: {
-    minHeight: 60,
+    minHeight: 68,
     flexDirection: 'row',
     alignItems: 'center',
     paddingVertical: 10,
@@ -371,8 +380,8 @@ const styles = StyleSheet.create({
     borderBottomColor: LEAF_CARD_BORDER,
   },
   rowCompact: {
-    minHeight: 54,
-    paddingVertical: 7,
+    minHeight: 68,
+    paddingVertical: 0,
   },
   rowActive: {
     backgroundColor: 'transparent',
@@ -385,12 +394,12 @@ const styles = StyleSheet.create({
     paddingBottom: 4,
   },
   rowIconSlot: {
-    width: 25,
+    width: 48,
     alignItems: 'flex-start',
     justifyContent: 'center',
   },
   rowIconSlotCompact: {
-    width: 24,
+    width: 48,
   },
   rowCopyWrap: {
     flex: 1,
@@ -398,9 +407,9 @@ const styles = StyleSheet.create({
   },
   rowTitle: {
     color: LEAF_TEXT,
-    fontFamily: fonts.Medium,
-    fontSize: 13,
-    lineHeight: 17,
+    ...leafTypography.medium,
+    fontSize: 16,
+    lineHeight: 21,
   },
   rowTitleActive: {
     color: color.accent.strong,
@@ -411,9 +420,9 @@ const styles = StyleSheet.create({
   rowSubtitle: {
     marginTop: 3,
     color: LEAF_SECONDARY,
-    fontFamily: fonts.Regular,
-    fontSize: 10,
-    lineHeight: 13,
+    ...leafTypography.regular,
+    fontSize: 13,
+    lineHeight: 18,
   },
   inlineBadge: {
     minWidth: 24,
@@ -429,7 +438,7 @@ const styles = StyleSheet.create({
   },
   inlineBadgeText: {
     color: color.text.secondary,
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: typography.micro.size,
     lineHeight: typography.micro.lineHeight,
   },
@@ -465,7 +474,7 @@ const styles = StyleSheet.create({
   },
   infoLabel: {
     color: color.text.muted,
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     fontSize: typography.micro.size,
     lineHeight: typography.micro.lineHeight,
     textTransform: 'uppercase',
@@ -474,7 +483,7 @@ const styles = StyleSheet.create({
   infoValue: {
     marginTop: 4,
     color: color.text.primary,
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     fontSize: typography.body.size,
     lineHeight: typography.body.lineHeight,
   },
@@ -494,7 +503,7 @@ const styles = StyleSheet.create({
   },
   statLabel: {
     color: color.text.muted,
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     fontSize: typography.micro.size,
     lineHeight: typography.micro.lineHeight,
     textTransform: 'uppercase',
@@ -503,7 +512,7 @@ const styles = StyleSheet.create({
   statValue: {
     marginTop: 4,
     color: color.text.primary,
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: typography.subtitle.size,
     lineHeight: typography.subtitle.lineHeight,
   },
@@ -514,12 +523,12 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(130,123,115,0.16)',
   },
   closeButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: LEAF_BG,
+    backgroundColor: '#F5F5F5',
     borderWidth: 0,
     borderColor: 'transparent',
   },

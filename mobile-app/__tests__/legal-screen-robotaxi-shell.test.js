@@ -10,12 +10,19 @@ describe('Legal screen Robotaxi shell', () => {
     path.join(__dirname, '..', 'src', 'navigation', 'AppNavigator.js'),
     'utf8',
   );
+  const privacySource = fs.readFileSync(
+    path.join(__dirname, '..', 'src', 'screens', 'PrivacyPolicyScreen.js'),
+    'utf8',
+  );
 
   it('uses the current tokens, safe areas and an accessible close action', () => {
     expect(source).toContain('robotaxiPrototypeTokens');
     expect(source).toContain('useSafeAreaInsets');
     expect(source).toContain('testID="legal-close-button"');
     expect(source).toContain('accessibilityLabel="Fechar informações legais"');
+    expect(source).not.toContain('accessibilityLabel="legal-screen"');
+    expect(privacySource).toContain('testID="privacy-policy-screen"');
+    expect(privacySource).not.toContain('accessibilityLabel="privacy-policy-screen"');
   });
 
   it('does not navigate to the unavailable legacy HelpScreen route', () => {

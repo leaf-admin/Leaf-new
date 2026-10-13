@@ -55,6 +55,7 @@ jest.mock('@react-native-async-storage/async-storage', () => mockAsyncStorage);
 
 const {
   BACKGROUND_LOCATION_DISCLOSURE_ACCEPTED_KEY,
+  BACKGROUND_LOCATION_DISCLOSURE_DECLINED_AT_KEY,
   requestBackgroundLocationPermissionWithDisclosure,
   requestForegroundLocationPermissionWithDisclosure,
   setAndroidPermissionDisclosurePresenter,
@@ -137,5 +138,29 @@ describe('AndroidPermissionDisclosure', () => {
       'true'
     );
     expect(mockLocation.requestBackgroundPermissionsAsync).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not nag again for 24h after the driver declines background location', async () => {
+    unregisterPresenter = setAndroidPermissionDisclosurePresenter(async (config) => {
+      events.push(`disclosure-${config.kind}`);
+      return false;
+    });
+
+    const declined = await requestBackgroundLocationPermissionWithDisclosure();
+    expect(declined.status).toBe('denied');
+    expect(mockAsyncStorage.setItem).toHaveBeenCalledWith(
+      BACKGROUND_LOCATION_DISCLOSURE_DECLINED_AT_KEY,
+      expect.any(String),
+    );
+
+    mockAsyncStorage.getItem.mockResolvedValueOnce(String(Date.now() - 60 * 1000));
+    const again = await requestBackgroundLocationPermissionWithDisclosure();
+    expect(again.status).toBe('denied');
+    expect(events).toEqual(['disclosure-background-location']);
+    expect(mockLocation.requestBackgroundPermissionsAsync).not.toHaveBeenCalled();
+
+    mockAsyncStorage.getItem.mockResolvedValueOnce(String(Date.now() - 25 * 60 * 60 * 1000));
+    await requestBackgroundLocationPermissionWithDisclosure();
+    expect(events).toEqual(['disclosure-background-location', 'disclosure-background-location']);
   });
 });

@@ -1,7 +1,7 @@
 export const fonts={
-    Bold:'Inter-Bold',
-    Regular:'Inter-Regular',
-    Medium:'Inter-Medium',
-    Light:'Inter-Light',
-    SemiBold:'Inter-SemiBold'
+    Bold:'Figtree-Bold',
+    Regular:'Figtree-Regular',
+    Medium:'Figtree-Medium',
+    Light:'Figtree-Light',
+    SemiBold:'Figtree-SemiBold'
 }

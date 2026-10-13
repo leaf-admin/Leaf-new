@@ -54,6 +54,8 @@ function normalizeCampaign(raw = {}) {
     placement: normalizeSlug(raw.placement),
     role: normalizeSlug(raw.role || raw.userType),
     priority: Number(raw.priority || 0) || 0,
+    startAt: raw.startAt || null,
+    endAt: raw.endAt || null,
     content: {
       eyebrow: normalizeText(content.eyebrow),
       title: normalizeText(content.title),

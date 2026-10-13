@@ -1,24 +1,26 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useContext, useEffect, useRef, useState } from 'react';
 import {
   Modal,
   Platform,
+  ScrollView,
+  StatusBar,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from 'react-native';
 import {
+  SafeAreaInsetsContext,
+  initialWindowMetrics,
+} from 'react-native-safe-area-context';
+import {
   setAndroidPermissionDisclosurePresenter,
 } from '../services/AndroidPermissionDisclosure';
 
 function getDetailItems(kind) {
   if (kind === 'background-location') {
-    return [
-      'Coletamos localização precisa somente enquanto você estiver online como motorista ou durante uma corrida.',
-      'Usada para receber corridas próximas, manter navegação ativa e compartilhar sua posição com o passageiro.',
-      'Pode continuar em segundo plano, mesmo quando o app estiver fechado ou não estiver em uso.',
-      'A Leaf não usa sua localização para anúncios.',
-    ];
+    // The message already carries the full prominent disclosure.
+    return [];
   }
 
   if (kind === 'foreground-location') {
@@ -51,6 +53,10 @@ export default function AndroidPermissionDisclosureHost() {
   const queueRef = useRef([]);
   const activeRequestRef = useRef(null);
   const [activeRequest, setActiveRequest] = useState(null);
+  // Mounted outside SafeAreaProvider, so fall back to the launch metrics.
+  const insets = useContext(SafeAreaInsetsContext)
+    || initialWindowMetrics?.insets
+    || { top: StatusBar.currentHeight || 24, bottom: 16 };
 
   const pumpQueue = useCallback(() => {
     if (activeRequestRef.current || queueRef.current.length === 0) {
@@ -103,13 +109,25 @@ export default function AndroidPermissionDisclosureHost() {
       animationType="fade"
       onRequestClose={() => finish(false)}
     >
-      <View style={styles.overlay} testID="android-permission-disclosure-overlay">
+      <View
+        style={[
+          styles.overlay,
+          { paddingTop: insets.top + 16, paddingBottom: insets.bottom + 16 },
+        ]}
+        testID="android-permission-disclosure-overlay"
+      >
         <View style={styles.card} testID="android-permission-disclosure-card">
           <View style={styles.handle} />
+          <ScrollView
+            style={styles.scroll}
+            bounces={false}
+            showsVerticalScrollIndicator={false}
+          >
           <Text style={styles.eyebrow}>Permissão do Android</Text>
           <Text style={styles.title}>{title}</Text>
           <Text style={styles.message}>{message}</Text>
 
+          {detailItems.length > 0 ? (
           <View style={styles.details}>
             {detailItems.map((item) => (
               <View key={item} style={styles.detailRow}>
@@ -118,10 +136,12 @@ export default function AndroidPermissionDisclosureHost() {
               </View>
             ))}
           </View>
+          ) : null}
 
           <Text style={styles.nextStep}>
             Ao continuar, o Android abrirá a solicitação de permissão.
           </Text>
+          </ScrollView>
 
           <View style={styles.actions}>
             <TouchableOpacity
@@ -153,9 +173,13 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(17, 19, 16, 0.44)',
     justifyContent: 'flex-end',
     paddingHorizontal: 18,
-    paddingBottom: 96,
+  },
+  scroll: {
+    flexGrow: 0,
+    flexShrink: 1,
   },
   card: {
+    maxHeight: '100%',
     backgroundColor: '#FFFFFF',
     borderRadius: 28,
     paddingHorizontal: 22,
@@ -178,7 +202,7 @@ const styles = StyleSheet.create({
     marginBottom: 18,
   },
   eyebrow: {
-    fontFamily: 'Inter-SemiBold',
+    fontFamily: 'Figtree-SemiBold',
     fontSize: 11,
     letterSpacing: 0.7,
     textTransform: 'uppercase',
@@ -186,14 +210,14 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   title: {
-    fontFamily: 'Inter-SemiBold',
+    fontFamily: 'Figtree-SemiBold',
     fontSize: 24,
     lineHeight: 29,
     color: '#111410',
     marginBottom: 10,
   },
   message: {
-    fontFamily: 'Inter-Regular',
+    fontFamily: 'Figtree-Regular',
     fontSize: 15,
     lineHeight: 21,
     color: '#4B5148',
@@ -216,13 +240,13 @@ const styles = StyleSheet.create({
   },
   detailText: {
     flex: 1,
-    fontFamily: 'Inter-Regular',
+    fontFamily: 'Figtree-Regular',
     fontSize: 13,
     lineHeight: 19,
     color: '#555C52',
   },
   nextStep: {
-    fontFamily: 'Inter-Regular',
+    fontFamily: 'Figtree-Regular',
     fontSize: 12,
     lineHeight: 17,
     color: '#7C8276',
@@ -245,7 +269,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
   },
   secondaryButtonText: {
-    fontFamily: 'Inter-SemiBold',
+    fontFamily: 'Figtree-SemiBold',
     fontSize: 14,
     color: '#4D544A',
   },
@@ -259,7 +283,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
   },
   primaryButtonText: {
-    fontFamily: 'Inter-SemiBold',
+    fontFamily: 'Figtree-SemiBold',
     fontSize: 14,
     color: '#FFFFFF',
   },

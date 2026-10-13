@@ -4,6 +4,7 @@ jest.mock('../src/services/AuthService', () => ({
   __esModule: true,
   default: {
     authenticatedRequest: (...args) => mockAuthenticatedRequest(...args),
+    getCurrentUser: async () => ({ uid: 'account-surface-test' }),
   },
 }));
 
@@ -18,7 +19,7 @@ function jsonResponse(payload, { ok = true, status = 200 } = {}) {
 
 describe('current account surface services', () => {
   beforeEach(() => {
-    jest.clearAllMocks();
+    mockAuthenticatedRequest.mockReset();
   });
 
   it('uses only authenticated Leaf account APIs for vehicle CRUD', async () => {

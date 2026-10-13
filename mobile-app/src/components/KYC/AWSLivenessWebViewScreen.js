@@ -58,7 +58,7 @@ function buildWebViewHtml({ sessionId, region, credentials }) {
 </head>
 <body>
   <div id="root">
-    <div class="fallback">Loading liveness...</div>
+    <div class="fallback">Carregando validação facial...</div>
   </div>
 
   <script type="module">
@@ -111,7 +111,7 @@ function buildWebViewHtml({ sessionId, region, credentials }) {
             postMessage({
               type: 'analysis_error',
               error: {
-                message: error?.error?.message || error?.message || 'Liveness error',
+                message: error?.error?.message || error?.message || 'Não foi possível concluir a validação facial.',
                 state: error?.state || null,
               },
             });
@@ -128,7 +128,7 @@ function buildWebViewHtml({ sessionId, region, credentials }) {
         postMessage({
           type: 'init_error',
           error: {
-            message: error?.message || 'Failed to initialize AWS liveness web view',
+            message: error?.message || 'Não foi possível iniciar a validação facial.',
           },
         });
       }
@@ -182,7 +182,7 @@ export default function AWSLivenessWebViewScreen({
 
     if (!createResult.success) {
       setStatus(STATUS.ERROR);
-      setErrorMessage(createResult.error || 'Nao foi possivel criar sessao de liveness');
+      setErrorMessage(createResult.error || 'Não foi possível preparar a validação facial');
       return;
     }
 
@@ -192,7 +192,7 @@ export default function AWSLivenessWebViewScreen({
     );
     if (!credentialsResult.success || !credentialsResult.data?.credentials) {
       setStatus(STATUS.ERROR);
-      setErrorMessage(credentialsResult.error || 'Nao foi possivel preparar credenciais seguras de liveness');
+      setErrorMessage(credentialsResult.error || 'Não foi possível preparar a validação facial com segurança');
       return;
     }
 
@@ -223,7 +223,7 @@ export default function AWSLivenessWebViewScreen({
 
       if (type === 'init_error' || type === 'analysis_error') {
         setStatus(STATUS.ERROR);
-        setErrorMessage(payload?.error?.message || 'Falha no detector de liveness');
+        setErrorMessage(payload?.error?.message || 'Não foi possível concluir a validação facial.');
         return;
       }
 
@@ -233,14 +233,14 @@ export default function AWSLivenessWebViewScreen({
         const resultResponse = await kycService.getAwsLivenessSessionResult(driverId, sessionData?.sessionId);
         if (!resultResponse.success) {
           setStatus(STATUS.ERROR);
-          setErrorMessage(resultResponse.error || 'Nao foi possivel validar o resultado de liveness');
+          setErrorMessage(resultResponse.error || 'Não foi possível conferir o resultado da validação facial');
           return;
         }
 
         const livenessData = resultResponse.data || {};
         if (livenessData?.livenessPassed !== true) {
           setStatus(STATUS.ERROR);
-          setErrorMessage('Liveness nao aprovado. Tente novamente com boa iluminacao e rosto centralizado.');
+          setErrorMessage('Não conseguimos confirmar seu rosto. Tente novamente com boa iluminação e o rosto centralizado.');
           return;
         }
 
@@ -252,7 +252,7 @@ export default function AWSLivenessWebViewScreen({
       }
     } catch (error) {
       setStatus(STATUS.ERROR);
-      setErrorMessage(error.message || 'Erro ao processar resposta do liveness');
+      setErrorMessage(error.message || 'Não foi possível concluir a validação facial.');
     }
   };
 
@@ -260,7 +260,7 @@ export default function AWSLivenessWebViewScreen({
     return (
       <View style={styles.centeredContainer}>
         <ActivityIndicator size="large" color="#1A330E" />
-        <Text style={styles.statusText}>Criando sessao segura de verificacao...</Text>
+        <Text style={styles.statusText}>Preparando a verificação segura...</Text>
       </View>
     );
   }
@@ -268,7 +268,7 @@ export default function AWSLivenessWebViewScreen({
   if (status === STATUS.ERROR) {
     return (
       <View style={styles.centeredContainer}>
-        <Text style={styles.errorTitle}>Nao foi possivel concluir o liveness AWS</Text>
+        <Text style={styles.errorTitle}>Nao foi possivel concluir a validação facial</Text>
         <Text style={styles.errorText}>{errorMessage}</Text>
 
         <TouchableOpacity style={styles.primaryButton} onPress={initializeSession}>
@@ -277,7 +277,7 @@ export default function AWSLivenessWebViewScreen({
 
         {typeof onFallbackLocal === 'function' ? (
           <TouchableOpacity style={styles.secondaryButton} onPress={onFallbackLocal}>
-            <Text style={styles.secondaryButtonText}>Usar validacao local</Text>
+            <Text style={styles.secondaryButtonText}>Usar validação local</Text>
           </TouchableOpacity>
         ) : null}
 
@@ -314,7 +314,7 @@ export default function AWSLivenessWebViewScreen({
       {status === STATUS.VERIFYING ? (
         <View style={styles.verifyingOverlay}>
           <ActivityIndicator size="large" color="#1A330E" />
-          <Text style={styles.statusText}>Validando resultado com o backend...</Text>
+          <Text style={styles.statusText}>Conferindo o resultado...</Text>
         </View>
       ) : null}
     </View>
@@ -359,7 +359,7 @@ const styles = StyleSheet.create({
   errorTitle: {
     color: '#111111',
     fontSize: 18,
-    fontWeight: '700',
+    fontFamily: 'Figtree-Bold',
     textAlign: 'center',
     marginBottom: 10,
   },
@@ -381,7 +381,7 @@ const styles = StyleSheet.create({
   primaryButtonText: {
     color: '#FFFFFF',
     fontSize: 15,
-    fontWeight: '700',
+    fontFamily: 'Figtree-Bold',
   },
   secondaryButton: {
     width: '100%',
@@ -396,7 +396,7 @@ const styles = StyleSheet.create({
   secondaryButtonText: {
     color: '#111111',
     fontSize: 14,
-    fontWeight: '600',
+    fontFamily: 'Figtree-SemiBold',
   },
   ghostButton: {
     paddingVertical: 8,
@@ -405,6 +405,6 @@ const styles = StyleSheet.create({
   ghostButtonText: {
     color: '#666666',
     fontSize: 13,
-    fontWeight: '600',
+    fontFamily: 'Figtree-SemiBold',
   },
 });

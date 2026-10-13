@@ -2,6 +2,16 @@ import { CURRENT_SURFACE_STATUS } from './currentSurfaceStatus';
 
 const COMMON_ITEMS = [
   {
+    key: 'achievements',
+    status: CURRENT_SURFACE_STATUS.CURRENT,
+    title: 'Conquistas',
+    icon: 'person-circle-outline',
+    route: 'LeafAccountInfo',
+    openDirect: true,
+    section: 'account',
+    subtitle: 'Sua história e emblemas',
+  },
+  {
     key: 'privacy-account-deletion',
     status: CURRENT_SURFACE_STATUS.CURRENT,
     title: 'Privacidade',
@@ -10,7 +20,7 @@ const COMMON_ITEMS = [
     detailRoute: 'PrivacyPolicy',
     openDirect: true,
     section: 'support',
-    subtitle: 'Dados e preferências da conta'
+    subtitle: 'Seus dados e direitos'
   },
   {
     key: 'settings',
@@ -21,7 +31,7 @@ const COMMON_ITEMS = [
     detailRoute: 'RobotaxiMenuSettings',
     openDirect: true,
     section: 'support',
-    subtitle: 'Notificações, mapa e acessibilidade'
+    subtitle: 'Conta, privacidade e suporte'
   },
   {
     key: 'help',
@@ -45,9 +55,31 @@ function withRole(items, role) {
 
 const PASSENGER_ITEMS = [
   {
+    key: 'payment-info',
+    status: CURRENT_SURFACE_STATUS.CURRENT,
+    title: 'Pagamento',
+    icon: 'wallet-outline',
+    route: 'LeafAccountInfo',
+    openDirect: true,
+    roles: ['customer'],
+    section: 'rides',
+    subtitle: 'Pix antes do embarque',
+  },
+  {
+    key: 'saved-places',
+    status: CURRENT_SURFACE_STATUS.CURRENT,
+    title: 'Endereços salvos',
+    icon: 'location-outline',
+    route: 'LeafSavedPlaces',
+    openDirect: true,
+    roles: ['customer'],
+    section: 'account',
+    subtitle: 'Casa, trabalho e favoritos'
+  },
+  {
     key: 'edit-profile',
     status: CURRENT_SURFACE_STATUS.CURRENT,
-    title: 'Editar perfil',
+    title: 'Dados pessoais',
     icon: 'person-outline',
     route: 'RobotaxiPrototypeProfile',
     detailRoute: 'RobotaxiMenuEditProfile',
@@ -142,7 +174,7 @@ const DRIVER_ITEMS = [
   {
     key: 'driver-waitlist-invites',
     status: CURRENT_SURFACE_STATUS.CURRENT,
-    title: 'Waitlist e convites',
+    title: 'Lista de espera e convites',
     icon: 'people-outline',
     route: 'RobotaxiPrototypeDriverWaitlist',
     openDirect: true,
@@ -216,14 +248,14 @@ export function getMenuItemsByRole(role, options = {}) {
       return {
         ...item,
         status: CURRENT_SURFACE_STATUS.OUT_OF_PILOT,
-        subtitle: 'Fora do piloto controlado',
+        subtitle: 'Indisponível no momento',
       };
     }
 
     if (!referralProgramsEnabled && item.key === 'driver-waitlist-invites') {
       return {
         ...item,
-        title: 'Waitlist',
+        title: 'Lista de espera',
         subtitle: 'Fila de ativação da cidade',
         status: CURRENT_SURFACE_STATUS.CURRENT,
       };

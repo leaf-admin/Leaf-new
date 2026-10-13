@@ -1,6 +1,6 @@
+import leafTypography from '../../prototype/LeafTypography';
 import React, { useRef } from 'react';
 import { Animated, Text, StyleSheet, Pressable } from 'react-native';
-import { fonts } from '../../../theme/runtimeTokens';
 import onboardingTheme from './onboardingTheme';
 
 const { color } = onboardingTheme;
@@ -57,7 +57,7 @@ const ContinueButton = ({
 const styles = StyleSheet.create({
     continueButton: {
         backgroundColor: color.accent,
-        borderRadius: 24,
+        borderRadius: 12,
         borderWidth: 1,
         borderColor: color.border,
         paddingVertical: 0,
@@ -70,7 +70,7 @@ const styles = StyleSheet.create({
         shadowOpacity: 0,
         shadowRadius: 30,
         elevation: 0,
-        minHeight: 48
+        minHeight: 54
     },
     continueButtonDisabled: {
         backgroundColor: color.accentSoft,
@@ -78,9 +78,9 @@ const styles = StyleSheet.create({
     },
     continueButtonText: {
         color: color.accentText,
-        fontSize: 13,
-        lineHeight: 17,
-        fontFamily: fonts.SemiBold,
+        fontSize: 16,
+        lineHeight: 22,
+        ...leafTypography.semiBold,
         textAlign: 'center'
     },
     continueButtonTextDisabled: {

@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { Alert, View, Platform, LogBox } from 'react-native';
 import { Provider } from 'react-redux';
+import { LeafChoiceSheetHost } from './src/components/design-system/LeafChoiceSheet';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import * as SplashScreen from 'expo-splash-screen';
@@ -8,6 +9,7 @@ import * as Font from 'expo-font';
 import { store } from './src/state/appStore';
 import AppNavigator from './src/navigation/AppNavigator';
 import AuthProvider from './src/components/AuthProvider';
+import { MobilePreferencesProvider } from './src/components/MobilePreferencesProvider';
 import { LanguageProvider } from './src/components/i18n/LanguageProvider';
 import FCMNotificationService from './src/services/FCMNotificationService';
 import InteractiveNotificationService from './src/services/InteractiveNotificationService';
@@ -50,6 +52,12 @@ const CANONICAL_FONT_ASSETS = {
   'Inter-SemiBold': require('@expo-google-fonts/inter/600SemiBold/Inter_600SemiBold.ttf'),
   'Inter-Bold': require('@expo-google-fonts/inter/700Bold/Inter_700Bold.ttf'),
   'Inter-Light': require('@expo-google-fonts/inter/300Light/Inter_300Light.ttf'),
+  // Ride lifecycle spec typeface (both platforms).
+  'Figtree-Regular': require('@expo-google-fonts/figtree/400Regular/Figtree_400Regular.ttf'),
+  'Figtree-Medium': require('@expo-google-fonts/figtree/500Medium/Figtree_500Medium.ttf'),
+  'Figtree-SemiBold': require('@expo-google-fonts/figtree/600SemiBold/Figtree_600SemiBold.ttf'),
+  'Figtree-Bold': require('@expo-google-fonts/figtree/700Bold/Figtree_700Bold.ttf'),
+  'Figtree-Light': require('@expo-google-fonts/figtree/300Light/Figtree_300Light.ttf'),
 };
 
 function getDevClient() {
@@ -337,17 +345,20 @@ export default function App() {
       <Provider store={store}>
         <LanguageProvider>
           <AuthProvider>
+            <MobilePreferencesProvider>
             {/* ✅ Banner de status de conexão (não bloqueante) */}
             <NetworkStatusBanner />
             <AndroidPermissionDisclosureHost />
+            <LeafChoiceSheetHost />
             
             {appIsReady ? (
               <AppNavigator />
             ) : (
               // Renderizar componente vazio enquanto não está pronto
               // A splash nativa continua visível via preventAutoHideAsync
-              <View style={{ flex: 1, backgroundColor: '#1A330E' }} />
+              <View style={{ flex: 1, backgroundColor: '#003002' }} />
             )}
+            </MobilePreferencesProvider>
           </AuthProvider>
         </LanguageProvider>
       </Provider>

@@ -1,3 +1,4 @@
+import auth from '@react-native-firebase/auth';
 import Logger from '../utils/Logger';
 /**
  * Serviço para monitorar disponibilidade de motoristas em tempo real
@@ -74,11 +75,19 @@ class DriverAvailabilityService {
             try {
                 const { getSelfHostedApiUrl } = require('../config/ApiConfig');
                 const backendUrl = getSelfHostedApiUrl('/api/drivers/nearby');
+                // A rota devolve posição de motoristas: vai com o token do usuário logado.
+                let authHeader = {};
+                try {
+                    const token = await auth().currentUser?.getIdToken();
+                    authHeader = token ? { Authorization: `Bearer ${token}` } : {};
+                } catch (tokenError) {
+                    authHeader = {};
+                }
                 const response = await fetch(
                     `${backendUrl}?lat=${this.currentLocation.lat}&lng=${this.currentLocation.lng}&radius=${this.radius}&limit=50`,
                     {
                         method: 'GET',
-                        headers: { 'Content-Type': 'application/json' },
+                        headers: { 'Content-Type': 'application/json', ...authHeader },
                     }
                 );
 

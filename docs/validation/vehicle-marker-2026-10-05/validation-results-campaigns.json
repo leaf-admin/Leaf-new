@@ -1,0 +1,40 @@
+{
+  "date": "2026-10-05",
+  "scope": "registered vehicle color and campaign marker artwork",
+  "mobile": {
+    "passed": true,
+    "suites": 180,
+    "tests": 1507,
+    "seconds": 47.452
+  },
+  "backendFocused": {
+    "passed": true,
+    "suites": 5,
+    "tests": 68,
+    "seconds": 1.292
+  },
+  "dashboard": {
+    "lint": "passed",
+    "productionBuild": "passed (webpack)",
+    "contracts": "passed",
+    "smoke": "passed (webpack, existing Chrome)",
+    "environmentRecovery": "isolated worktree reuses existing dashboard dependencies; Turbopack cannot follow the external node_modules symlink; downloaded Playwright browser is absent"
+  },
+  "guards": {
+    "diff": "passed",
+    "governance": "passed",
+    "trackedSecrets": "passed",
+    "hardcodedSecrets": "passed",
+    "mobileProduction": "passed"
+  },
+  "runtimeConfig": {
+    "validated": false,
+    "reason": "isolated checkout has no env loaded; validator reported missing Woovi config; no credentials loaded for this visual task"
+  },
+  "evidence": {
+    "browser": "shared vector and geometry, static map and illustrative coordinates",
+    "nativeDevice": "not executed for this change",
+    "productionCampaignActivated": false,
+    "releaseCandidateRebuilt": false
+  }
+}

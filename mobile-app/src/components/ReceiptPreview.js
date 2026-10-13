@@ -269,12 +269,12 @@ const styles = StyleSheet.create({
     },
     companyName: {
         fontSize: 24,
-        fontWeight: '700',
+        fontFamily: 'Figtree-Bold',
         color: '#2c5530',
     },
     receiptTitle: {
         fontSize: 16,
-        fontWeight: '600',
+        fontFamily: 'Figtree-SemiBold',
         color: '#2c5530',
         textAlign: 'center',
         marginVertical: 10,
@@ -282,7 +282,7 @@ const styles = StyleSheet.create({
     },
     receiptId: {
         fontSize: 18,
-        fontWeight: '600',
+        fontFamily: 'Figtree-SemiBold',
         color: '#4a7c59',
         marginBottom: 5,
     },
@@ -311,7 +311,7 @@ const styles = StyleSheet.create({
     },
     sectionTitle: {
         fontSize: 16,
-        fontWeight: '600',
+        fontFamily: 'Figtree-SemiBold',
         color: '#2c5530',
     },
     addressText: {
@@ -330,7 +330,7 @@ const styles = StyleSheet.create({
     },
     metricValue: {
         fontSize: 16,
-        fontWeight: '600',
+        fontFamily: 'Figtree-SemiBold',
         color: '#2c5530',
         marginTop: 5,
         marginBottom: 2,
@@ -357,7 +357,7 @@ const styles = StyleSheet.create({
     },
     paymentValue: {
         fontSize: 16,
-        fontWeight: '600',
+        fontFamily: 'Figtree-SemiBold',
         color: '#2c5530',
     },
     securePaymentBadge: {
@@ -381,7 +381,7 @@ const styles = StyleSheet.create({
     },
     breakdownValue: {
         fontSize: 14,
-        fontWeight: '600',
+        fontFamily: 'Figtree-SemiBold',
         color: '#333',
     },
     driverAmountRow: {
@@ -393,12 +393,12 @@ const styles = StyleSheet.create({
     },
     driverAmountLabel: {
         fontSize: 16,
-        fontWeight: '700',
+        fontFamily: 'Figtree-Bold',
         color: '#2c5530',
     },
     driverAmountValue: {
         fontSize: 18,
-        fontWeight: '700',
+        fontFamily: 'Figtree-Bold',
         color: '#4a7c59',
     },
     driverInfo: {
@@ -407,7 +407,7 @@ const styles = StyleSheet.create({
     },
     driverName: {
         fontSize: 18,
-        fontWeight: '600',
+        fontFamily: 'Figtree-SemiBold',
         color: '#2c5530',
         marginBottom: 5,
     },
@@ -425,7 +425,7 @@ const styles = StyleSheet.create({
     },
     legalTitle: {
         fontSize: 14,
-        fontWeight: '600',
+        fontFamily: 'Figtree-SemiBold',
         color: '#2c5530',
         marginBottom: 10,
     },
@@ -448,7 +448,7 @@ const styles = StyleSheet.create({
     footerText: {
         fontSize: 14,
         color: '#4a7c59',
-        fontWeight: '600',
+        fontFamily: 'Figtree-SemiBold',
     },
 });
 

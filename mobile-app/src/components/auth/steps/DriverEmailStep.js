@@ -1,6 +1,6 @@
+import leafTypography from '../../prototype/LeafTypography';
 import React, { useMemo, useState } from 'react';
 import { StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
-import { fonts } from '../../../theme/runtimeTokens';
 import ContinueButton from '../common/ContinueButton';
 import onboardingTheme from '../common/onboardingTheme';
 import EditorialOnboardingScreen from '../common/EditorialOnboardingLayout';
@@ -8,7 +8,7 @@ import EditorialOnboardingScreen from '../common/EditorialOnboardingLayout';
 const { color, spacing } = onboardingTheme;
 const EMAIL_REGEX = /\S+@\S+\.\S+/;
 
-const DriverEmailStep = ({ onSubmitted, onBack, initialData = {}, progressMeta }) => {
+const DriverEmailStep = ({ onSubmitted, onBack, initialData = {}, progressMeta, isSubmitting = false }) => {
   const [email, setEmail] = useState(initialData.email || '');
   const [error, setError] = useState('');
 
@@ -43,17 +43,21 @@ const DriverEmailStep = ({ onSubmitted, onBack, initialData = {}, progressMeta }
         <View>
           <ContinueButton
             onPress={() => handleSubmit(false)}
-            disabled={!isEmailValid}
-            text="Finalizar cadastro"
+            disabled={!isEmailValid || isSubmitting}
+            text={isSubmitting ? 'Finalizando...' : 'Finalizar cadastro'}
             testID="driver-email-continue-btn"
-            accessibilityLabel="driver-email-continue-btn"
+            accessibilityLabel={isSubmitting ? 'Finalizando cadastro' : 'Finalizar cadastro'}
           />
           <TouchableOpacity
-            style={styles.skipButton}
+            style={[styles.skipButton, isSubmitting && styles.skipButtonDisabled]}
             onPress={() => handleSubmit(true)}
             activeOpacity={0.86}
+            disabled={isSubmitting}
+            accessibilityState={{ disabled: isSubmitting }}
+            accessibilityRole="button"
+            accessibilityLabel="Preencher depois"
+            accessibilityHint="Concluir o cadastro sem informar um e-mail. Você poderá adicionar depois."
             testID="driver-email-skip-btn"
-            accessibilityLabel="driver-email-skip-btn"
           >
             <Text style={styles.skipLabel}>Preencher depois</Text>
           </TouchableOpacity>
@@ -71,13 +75,20 @@ const DriverEmailStep = ({ onSubmitted, onBack, initialData = {}, progressMeta }
           }}
           placeholder="seu@email.com"
           placeholderTextColor={color.textMuted}
+          accessibilityLabel="E-mail"
+          accessibilityHint={error
+            ? `Erro: ${error}. Corrija o endereço de e-mail.`
+            : 'Opcional. Usado para recibos e avisos importantes; você pode preencher depois.'}
           keyboardType="email-address"
           autoCapitalize="none"
           autoCorrect={false}
           testID="driver-email-input"
-          accessibilityLabel="driver-email-input"
         />
-        {error ? <Text style={styles.errorText}>{error}</Text> : null}
+        {error ? (
+          <Text style={styles.errorText} accessibilityRole="alert" accessibilityLiveRegion="polite">
+            {error}
+          </Text>
+        ) : null}
       </View>
     </EditorialOnboardingScreen>
   );
@@ -107,17 +118,17 @@ const styles = StyleSheet.create({
     justifyContent: 'center'
   },
   title: {
-    fontSize: 32,
-    lineHeight: 36,
+    fontSize: 22,
+    lineHeight: 28,
     color: color.textPrimary,
-    fontFamily: fonts.Bold,
+    ...leafTypography.bold,
     letterSpacing: 0
   },
   subtitle: {
-    fontSize: 15,
-    lineHeight: 21,
+    fontSize: 14,
+    lineHeight: 20,
     color: color.textSecondary,
-    fontFamily: fonts.Regular,
+    ...leafTypography.regular,
     marginTop: spacing.sm,
     marginBottom: spacing.lg
   },
@@ -128,21 +139,22 @@ const styles = StyleSheet.create({
     padding: 0
   },
   label: {
-    fontSize: 12,
-    lineHeight: 16,
+    fontSize: 13,
+    lineHeight: 18,
     color: color.textSecondary,
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     marginBottom: 8
   },
   input: {
     borderWidth: 1,
     borderColor: color.border,
-    borderRadius: 20,
+    minHeight: 54,
+    borderRadius: 12,
     paddingHorizontal: 18,
     paddingVertical: 12,
-    fontSize: 15,
-    lineHeight: 19,
-    fontFamily: fonts.Medium,
+    fontSize: 16,
+    lineHeight: 22,
+    ...leafTypography.medium,
     color: color.textPrimary,
     backgroundColor: color.surfaceMuted
   },
@@ -154,7 +166,7 @@ const styles = StyleSheet.create({
     color: color.error,
     fontSize: 12,
     lineHeight: 16,
-    fontFamily: fonts.Medium
+    ...leafTypography.medium
   },
   skipButton: {
     marginTop: 8,
@@ -162,11 +174,14 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     paddingHorizontal: 10
   },
+  skipButtonDisabled: {
+    opacity: 0.55
+  },
   skipLabel: {
     color: color.textSecondary,
     fontSize: 13,
     lineHeight: 18,
-    fontFamily: fonts.Medium
+    ...leafTypography.medium
   }
 });
 

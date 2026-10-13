@@ -1,0 +1,20 @@
+{
+  "ok": false,
+  "nodeEnv": "production",
+  "wooviEnv": "production",
+  "summary": {
+    "missingCommon": [],
+    "missingProd": [],
+    "blockers": [
+      "CPF review exige CPF_REVIEW_HMAC_KEY dedicada com pelo menos 32 bytes",
+      "REDIS_CRITICAL_DATASET_GENERATION deve identificar a gera\u00e7\u00e3o persistente esperada",
+      "PILOT_ALLOWED_PASSENGER_IDS deve conter o cohort autorizado do piloto",
+      "PILOT_ALLOWED_DRIVER_IDS deve conter o cohort autorizado do piloto"
+    ],
+    "warnings": [
+      "redis_noeviction exige vm.overcommit_memory=1 no host; o validator est\u00e1tico n\u00e3o altera nem atesta o kernel",
+      "readiness exige consumer vivo no grupo trip-location-workers com idle m\u00e1ximo de 30000ms; o validator est\u00e1tico n\u00e3o inicia workers",
+      "KYC_LIVENESS_BYPASS_ENABLED=true: a prova de vida AWS est\u00e1 desativada; a aprova\u00e7\u00e3o continua condicionada ao Face Compare server-side."
+    ]
+  }
+}

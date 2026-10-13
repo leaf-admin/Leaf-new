@@ -1,9 +1,15 @@
 import React from 'react';
-import { act, render } from '@testing-library/react-native';
+import { act, fireEvent, render } from '@testing-library/react-native';
 
 const mockAnimateToRegion = jest.fn();
 const mockFitToCoordinates = jest.fn();
 const mockAnimateCamera = jest.fn();
+jest.mock('../src/components/MobilePreferencesProvider', () => {
+  const React = require('react');
+  const Context = React.createContext({ preferences: { trafficLayerEnabled: true } });
+  return { useMobilePreferences: () => React.useContext(Context), TestPreferencesProvider: Context.Provider };
+});
+const { TestPreferencesProvider } = require('../src/components/MobilePreferencesProvider');
 
 jest.mock('react-native-maps', () => {
   const React = require('react');
@@ -49,13 +55,14 @@ jest.mock('react-native-maps', () => {
 jest.mock('react-native-svg', () => {
   const React = require('react');
   const { View } = require('react-native');
-  const MockView = ({ children }) => <View>{children}</View>;
+  const MockView = ({ children, ...props }) => <View {...props}>{children}</View>;
 
   return {
     __esModule: true,
     default: MockView,
     Path: MockView,
     Rect: MockView,
+    SvgXml: MockView,
   };
 });
 
@@ -84,6 +91,84 @@ describe('PrototypeMapLayer route viewport fitting', () => {
     latitudeDelta: 0.014,
     longitudeDelta: 0.014,
   };
+
+  it('renders the shared SVG vehicle in the native map marker', () => {
+    const { Platform } = require('react-native');
+    const originalPlatform = Platform.OS;
+    Platform.OS = 'ios';
+    try {
+      const screen = render(<PrototypeMapLayer
+        region={baseRegion}
+        driverCoordinate={routeCoordinates[0]}
+        driverHeading={90}
+        driverVehicleColor="prata"
+      />);
+      const vehicle = screen.getByTestId('leaf-vehicle-vector');
+      expect(vehicle.props.xml).toContain('linearGradient');
+      expect(vehicle.props.xml).toContain('#B6B8BC');
+      expect(vehicle.props.xml).not.toContain('<image');
+      screen.unmount();
+    } finally {
+      Platform.OS = originalPlatform;
+    }
+  });
+
+  it('updates the registered paint, replaces the shape and recovers from a failed custom image', () => {
+    const { Platform } = require('react-native');
+    const originalPlatform = Platform.OS;
+    Platform.OS = 'ios';
+    try {
+      const props = { region: baseRegion, driverCoordinate: routeCoordinates[0], driverHeading: 90 };
+      const screen = render(<PrototypeMapLayer {...props} driverVehicleColor="Branco" />);
+      expect(screen.getByTestId('leaf-vehicle-vector').props.xml).toContain('#F0F0F1');
+      screen.rerender(<PrototypeMapLayer {...props} driverVehicleColor="Marrom" />);
+      expect(screen.getByTestId('leaf-vehicle-vector').props.xml).toContain('#896955');
+      screen.rerender(<PrototypeMapLayer {...props} driverVehicleColor="Marrom" driverMarkerShapeKey="halloween_pumpkin" />);
+      expect(screen.getByTestId('leaf-vehicle-vector').props.xml).toContain('#E7933E');
+      screen.rerender(<PrototypeMapLayer {...props} driverVehicleColor="Prata" driverMarkerAssetUrl="https://cdn.leaf.test/custom.webp" />);
+      fireEvent(screen.getByTestId('leaf-vehicle-campaign-image'), 'error', {});
+      expect(screen.getByTestId('leaf-vehicle-vector').props.xml).toContain('#B6B8BC');
+      screen.unmount();
+    } finally {
+      Platform.OS = originalPlatform;
+    }
+  });
+
+  it.each([['Marrom', 'brown'], ['Bege', 'beige'], ['Laranja', 'orange'], ['Roxo', 'purple'], ['Rosa', 'pink'], ['BRANCA', 'white'], ['PRETA', 'black'], ['VERMELHA', 'red'], ['AMARELA', 'yellow'], ['ROXA', 'purple']])
+    ('recognizes the registered color %s', (label, token) => expect(resolveVehicleColorToken(label)).toBe(token));
+
+  it.each(['ios', 'android'])('anchors the blue location dot to the Google SDK coordinate on %s', os => {
+    const { Platform } = require('react-native');
+    const originalPlatform = Platform.OS;
+    Platform.OS = os;
+    try {
+      const screen = render(<PrototypeMapLayer region={baseRegion} userCoordinate={routeCoordinates[0]} />);
+      expect(screen.getByTestId('prototype-map-view').props.provider).toBe('google');
+      expect(screen.getByTestId('prototype-map-view').props.paddingAdjustmentBehavior).toBe('automatic');
+      const marker = screen.getByTestId('map-user-location-marker');
+      expect(marker.props.coordinate).toEqual(routeCoordinates[0]);
+      expect(marker.props.anchor).toEqual({ x: 0.5, y: 0.5 });
+      expect(screen.getAllByTestId('leaf-location-marker')).toHaveLength(1);
+      expect(screen.getByTestId('leaf-location-marker')).toHaveStyle({ width: 32, height: 32 });
+      expect(screen.getByTestId('leaf-location-marker-dot')).toHaveStyle({ backgroundColor: '#007AFF' });
+      screen.rerender(<PrototypeMapLayer region={baseRegion} userCoordinate={routeCoordinates[0]} hideUserMarker />);
+      expect(screen.queryByTestId('map-user-location-marker')).toBeNull();
+    } finally {
+      Platform.OS = originalPlatform;
+    }
+  });
+
+  it('keeps the same native map while its home frame expands to the full viewport', () => {
+    const mapRef = React.createRef();
+    const framed = { left: 24, top: 226, width: 345, height: 472, right: undefined, bottom: undefined };
+    const expanded = { left: 0, top: 0, width: 393, height: 852, right: undefined, bottom: undefined };
+    const screen = render(<PrototypeMapLayer mapRef={mapRef} region={baseRegion} containerStyle={framed} />);
+    const nativeMap = screen.getByTestId('prototype-map-view');
+    expect(screen.getByTestId('prototype-map-container')).toHaveStyle({ left: 24, top: 226, width: 345, height: 472 });
+    screen.rerender(<PrototypeMapLayer mapRef={mapRef} region={baseRegion} containerStyle={expanded} />);
+    expect(screen.getByTestId('prototype-map-view')).toBe(nativeMap);
+    expect(screen.getByTestId('prototype-map-container')).toHaveStyle({ left: 0, top: 0, width: 393, height: 852 });
+  });
 
   it('does not render a two-point partial route while route animation is waiting for its first frame', () => {
     expect(resolveRouteRenderCoordinates({
@@ -128,6 +213,16 @@ describe('PrototypeMapLayer route viewport fitting', () => {
     mockFitToCoordinates.mockClear();
   });
 
+  it('gates Google traffic with both backend policy and the confirmed account preference', () => {
+    const surface = (trafficLayerEnabled, policy = true) => <TestPreferencesProvider value={{ preferences: { trafficLayerEnabled } }}><PrototypeMapLayer region={baseRegion} showTraffic={policy} /></TestPreferencesProvider>;
+    const screen = render(surface(true));
+    expect(screen.getByTestId('prototype-map-view').props.showsTraffic).toBe(true);
+    screen.rerender(surface(false));
+    expect(screen.getByTestId('prototype-map-view').props.showsTraffic).toBe(false);
+    screen.rerender(surface(true, false));
+    expect(screen.getByTestId('prototype-map-view').props.showsTraffic).toBe(false);
+  });
+
   afterEach(() => {
     act(() => {
       jest.runOnlyPendingTimers();
@@ -162,7 +257,7 @@ describe('PrototypeMapLayer route viewport fitting', () => {
     });
   });
 
-  it('controls the native iOS region while active forceRegionUpdate is enabled', () => {
+  it('retains the last native iOS region prop when relinquishing camera control', () => {
     const { Platform } = require('react-native');
     const originalPlatform = Platform.OS;
     Platform.OS = 'ios';
@@ -192,13 +287,13 @@ describe('PrototypeMapLayer route viewport fitting', () => {
           forceRegionUpdate={false}
         />,
       );
-      expect(getByTestId('prototype-map-view').props.region).toBeUndefined();
+      expect(getByTestId('prototype-map-view').props.region).toBe(visibleRouteRegion);
     } finally {
       Platform.OS = originalPlatform;
     }
   });
 
-  it('temporarily releases the controlled iOS region during the manual camera hold', () => {
+  it('keeps the native region prop stable and suspends camera writes during manual hold', () => {
     const { Platform } = require('react-native');
     const originalPlatform = Platform.OS;
     Platform.OS = 'ios';
@@ -216,15 +311,21 @@ describe('PrototypeMapLayer route viewport fitting', () => {
         />,
       );
 
+      mockAnimateToRegion.mockClear();
       act(() => {
         getByTestId('prototype-map-view').props.onPanDrag({ nativeEvent: {} });
       });
-      expect(getByTestId('prototype-map-view').props.region).toBeUndefined();
+      expect(getByTestId('prototype-map-view').props.region).toBe(visibleRouteRegion);
+      act(() => {
+        jest.advanceTimersByTime(100);
+      });
+      expect(mockAnimateToRegion).not.toHaveBeenCalled();
 
       act(() => {
         jest.advanceTimersByTime(1020);
       });
       expect(getByTestId('prototype-map-view').props.region).toEqual(visibleRouteRegion);
+      expect(mockAnimateToRegion).toHaveBeenCalledWith(visibleRouteRegion, 450);
     } finally {
       Platform.OS = originalPlatform;
     }
@@ -339,6 +440,34 @@ describe('PrototypeMapLayer route viewport fitting', () => {
     );
 
     expect(UNSAFE_getAllByProps({ strokeWidth: 7 }).length).toBeGreaterThan(0);
+  });
+
+  it('keeps the full route visible when traffic covers only a small part of it', () => {
+    const { UNSAFE_getAllByProps } = render(
+      <PrototypeMapLayer
+        mapRef={React.createRef()}
+        region={baseRegion}
+        userCoordinate={routeCoordinates[0]}
+        routeCoordinates={routeCoordinates}
+        routeTrafficSegments={[
+          {
+            level: 'normal',
+            color: '#198754',
+            coordinates: [
+              routeCoordinates[0],
+              {
+                latitude: routeCoordinates[0].latitude + 0.0001,
+                longitude: routeCoordinates[0].longitude + 0.0001,
+              },
+            ],
+          },
+        ]}
+        routeMainColor="#123456"
+        animateRoute={false}
+      />,
+    );
+
+    expect(UNSAFE_getAllByProps({ strokeColor: '#123456' }).length).toBeGreaterThan(0);
   });
 
   it('does not paint an explicit traffic route with one uniform route color', () => {

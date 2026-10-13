@@ -1,9 +1,12 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import leafTypography from '../../components/prototype/LeafTypography';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useIsFocused } from '@react-navigation/native';
+import useAccountSummary from '../../hooks/useAccountSummary';
 import { ActivityIndicator, Alert, ScrollView, StatusBar, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useSelector } from 'react-redux';
+import { LeafAccountCard, LeafObjectIcon } from '../../components/prototype/LeafVisualElements';
 import { Ionicons } from '@expo/vector-icons';
-import { fonts } from '../../theme/runtimeTokens';
 import PrototypeScreenTransition from '../../components/prototype/PrototypeScreenTransition';
 import PrototypeDismissibleSheet from '../../components/prototype/PrototypeDismissibleSheet';
 import { usePrototypeMapOcclusion } from './prototypeMapOcclusion';
@@ -19,22 +22,22 @@ import {
   resolvePrototypeProfilePhone,
 } from './prototypeProfileIdentity';
 
-const SURFACE_TOP_PADDING = 28;
+const SURFACE_TOP_PADDING = 20;
 const SURFACE_BOTTOM_PADDING = 18;
 const BACKDROP_COLOR = 'transparent';
 const PROFILE_COLOR = {
-  bg: '#F8F6F1',
-  text: '#171412',
-  title: '#171412',
-  secondary: '#756F68',
-  muted: '#827B73',
-  line: '#E9E2D8',
+  bg: '#FFFFFF',
+  text: '#222222',
+  title: '#222222',
+  secondary: '#6A6A6A',
+  muted: '#767676',
+  line: '#E5E5E5',
   leaf: '#1A330E',
   dot: '#1A330E',
   avatar: '#F1F5EE',
   danger: '#9F2424',
   icon: '#514B45',
-  chevron: '#827B73',
+  chevron: '#767676',
 };
 
 const PASSENGER_ACTIONS = Object.freeze([
@@ -78,14 +81,12 @@ function ProfileRow({
       onPress={onPress}
       style={[styles.profileRow, last && styles.profileRowLast]}
       testID={testID}
-      accessibilityLabel={accessibilityLabel}
+      accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel || title}
+      accessibilityHint={subtitle}
     >
       <View style={styles.rowIconSlot}>
-        <Ionicons
-          name={icon || 'ellipse-outline'}
-          size={17}
-          color={tone === 'danger' ? PROFILE_COLOR.danger : PROFILE_COLOR.icon}
-        />
+        <LeafObjectIcon symbol={icon || 'person-outline'} size={40} />
       </View>
       <View style={styles.rowCopy}>
         <Text style={[styles.rowTitle, tone === 'danger' && styles.rowTitleDanger]}>
@@ -102,10 +103,25 @@ function ProfileRow({
   );
 }
 
+// "+5521102938475" -> "+55 21 10293-8475"; other shapes are returned as-is.
+export function formatBrazilPhoneLabel(value) {
+  const raw = String(value || '').trim();
+  const digits = raw.replace(/\D/g, '');
+  const local = digits.startsWith('55') && (digits.length === 12 || digits.length === 13) ? digits.slice(2) : '';
+  if (!local) return raw;
+  const area = local.slice(0, 2);
+  const number = local.slice(2);
+  const split = number.length - 4;
+  return `+55 ${area} ${number.slice(0, split)}-${number.slice(split)}`;
+}
+
 export default function RobotaxiProfileScreen({ navigation, route }) {
   const authProfile = useSelector(state => state?.auth?.profile);
-  const { riderProfile, activeRole, driverCanGoOnline, updateRiderProfile } = usePrototypeRideRuntime();
+  const { riderProfile, activeRole, driverCanGoOnline, updateRiderProfile, profileUid, lastReceipt } = usePrototypeRideRuntime();
   const insets = useSafeAreaInsets();
+  const focused = useIsFocused();
+  // Same summary source as the Conta card, so rating/trips are not "—" here.
+  const accountSummary = useAccountSummary({ uid: profileUid || riderProfile?.uid, role: activeRole, revision: lastReceipt?.receiptId || lastReceipt?.id || null, focused });
   const { height: windowHeight } = useWindowDimensions();
   const [panelHeight, setPanelHeight] = useState(windowHeight);
   const [remoteProfile, setRemoteProfile] = useState(null);
@@ -114,6 +130,7 @@ export default function RobotaxiProfileScreen({ navigation, route }) {
   const [editingProfile, setEditingProfile] = useState(false);
   const [savingProfile, setSavingProfile] = useState(false);
   const [profileDraft, setProfileDraft] = useState({ name: '', email: '' });
+  const initialEditorOpened = useRef(false);
   const isDriverRole = activeRole === 'driver';
   const profileName =
     resolvePrototypeProfileName(remoteProfile) ||
@@ -122,11 +139,11 @@ export default function RobotaxiProfileScreen({ navigation, route }) {
     'Sua conta';
   const profileInitial = String(profileName).trim().charAt(0).toUpperCase() || 'L';
   const actions = isDriverRole ? DRIVER_ACTIONS : PASSENGER_ACTIONS;
-  const phoneLabel =
+  const phoneLabel = formatBrazilPhoneLabel(
     resolvePrototypeProfilePhone(remoteProfile) ||
     resolvePrototypeProfilePhone(authProfile) ||
-    resolvePrototypeProfilePhone(riderProfile) ||
-    'Telefone não informado';
+    resolvePrototypeProfilePhone(riderProfile),
+  ) || 'Telefone não informado';
   const emailLabel =
     resolvePrototypeProfileEmail(remoteProfile) ||
     resolvePrototypeProfileEmail(authProfile) ||
@@ -180,26 +197,46 @@ export default function RobotaxiProfileScreen({ navigation, route }) {
     setEditingProfile(true);
   }, [emailLabel, profileName]);
 
+  // Opened to edit: keep the editor's title/layout while the profile loads, so
+  // the screen does not show a "Perfil" card with empty metrics and then swap.
+  const showEditorLayout = editingProfile || Boolean(route?.params?.editProfile && loadingProfile && !initialEditorOpened.current);
+
+  useEffect(() => {
+    if (route?.params?.editProfile && !loadingProfile && !profileError && !initialEditorOpened.current) {
+      initialEditorOpened.current = true;
+      startProfileEdit();
+    }
+  }, [loadingProfile, profileError, route?.params?.editProfile, startProfileEdit]);
+
+  // Opened from Conta to edit: leaving the editor returns there instead of
+  // revealing the legacy profile hub underneath.
+  const exitEditor = useCallback(() => {
+    if (route?.params?.editProfile && navigation.canGoBack?.()) {
+      navigation.goBack();
+      return;
+    }
+    setEditingProfile(false);
+  }, [navigation, route?.params?.editProfile]);
+
   const saveProfile = useCallback(async () => {
     try {
       setSavingProfile(true);
       const saved = await MobileProfileService.upsertCurrentProfileOrThrow(profileDraft);
       setRemoteProfile(saved || profileDraft);
       updateRiderProfile(profileDraft);
-      setEditingProfile(false);
+      exitEditor();
     } catch (error) {
       Alert.alert('Dados pessoais', error?.message || 'Não foi possível salvar seus dados.');
     } finally {
       setSavingProfile(false);
     }
-  }, [profileDraft, updateRiderProfile]);
+  }, [exitEditor, profileDraft, updateRiderProfile]);
 
   useEffect(() => {
-    const hideStatusBar = () => StatusBar.setHidden(true, 'fade');
     const showStatusBar = () => StatusBar.setHidden(false, 'fade');
 
-    hideStatusBar();
-    const removeFocusListener = navigation?.addListener?.('focus', hideStatusBar);
+    showStatusBar();
+    const removeFocusListener = navigation?.addListener?.('focus', showStatusBar);
     const removeBlurListener = navigation?.addListener?.('blur', showStatusBar);
 
     return () => {
@@ -216,8 +253,9 @@ export default function RobotaxiProfileScreen({ navigation, route }) {
   });
 
   const handleDismiss = useCallback(() => {
+    if (route?.params?.returnToAccount && navigation.canGoBack()) { navigation.goBack(); return; }
     navigation.navigate('RobotaxiPrototype');
-  }, [navigation]);
+  }, [navigation, route?.params?.returnToAccount]);
 
   const handlePanelLayout = useCallback(event => {
     const nextHeight = event?.nativeEvent?.layout?.height;
@@ -353,40 +391,28 @@ export default function RobotaxiProfileScreen({ navigation, route }) {
             ]}
           >
             <View style={styles.headerRow}>
-              <View style={styles.headerCopy}>
-                <Text style={styles.screenTitle}>
-                  {isDriverRole ? 'Perfil do motorista' : 'Perfil'}
-                </Text>
-                <Text style={styles.screenSubtitle}>
-                  Dados, atalhos e segurança em um só lugar.
-                </Text>
-              </View>
               <TouchableOpacity
                 style={styles.closeButton}
                 onPress={handleDismiss}
                 activeOpacity={0.78}
                 accessibilityRole="button"
-                accessibilityLabel="Fechar perfil"
+                accessibilityLabel="Voltar à conta"
               >
-                <Ionicons name="close" size={18} color={PROFILE_COLOR.text} />
+                <Ionicons name="arrow-back" size={20} color={PROFILE_COLOR.text} />
               </TouchableOpacity>
-            </View>
-
-            <View style={styles.identityRow}>
-              <View style={styles.avatarWrap}>
-                <Text style={styles.avatarLetter}>{profileInitial}</Text>
-              </View>
-              <View style={styles.identityCopy}>
-                <Text style={styles.identityName} numberOfLines={1}>
-                  {profileName}
-                </Text>
-                <Text style={styles.identityMeta} numberOfLines={1}>
-                  {isDriverRole ? accountStatus : preferenceLabel}
+              <View style={styles.headerCopy}>
+                <Text style={styles.screenTitle}>
+                  {showEditorLayout ? 'Dados pessoais' : isDriverRole ? 'Perfil do motorista' : 'Perfil'}
                 </Text>
               </View>
             </View>
 
-            <View style={styles.divider} />
+            {!showEditorLayout ? <LeafAccountCard name={profileName} role={activeRole}
+              profile={{ ...(riderProfile || {}), ...(authProfile || {}), ...(remoteProfile || {}), ...(accountSummary.summary?.profile || {}) }}
+              loadingMetrics={accountSummary.loading && !accountSummary.summary}
+              detail={isDriverRole ? accountStatus : String(riderProfile?.preference || '').trim() || undefined} motionEnabled={focused} /> : null}
+
+            {!showEditorLayout ? <View style={styles.divider} /> : null}
 
             <ScrollView
               showsVerticalScrollIndicator={false}
@@ -441,7 +467,7 @@ export default function RobotaxiProfileScreen({ navigation, route }) {
                   />
                   <TouchableOpacity
                     disabled={savingProfile}
-                    onPress={() => setEditingProfile(false)}
+                    onPress={exitEditor}
                     style={styles.secondaryAction}
                   >
                     <Text style={styles.secondaryActionText}>Cancelar</Text>
@@ -485,36 +511,37 @@ const styles = StyleSheet.create({
   },
   headerRow: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
+    alignItems: 'center',
     justifyContent: 'space-between',
-    gap: 14,
+    gap: 12,
+    minHeight: 44,
+    marginBottom: 20,
   },
   headerCopy: {
     flex: 1,
     paddingRight: 4,
   },
   closeButton: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: PROFILE_COLOR.line,
+    backgroundColor: '#F5F5F5',
   },
   screenTitle: {
     color: PROFILE_COLOR.title,
-    fontFamily: fonts.SemiBold,
-    fontSize: 20,
-    lineHeight: 26,
+    ...leafTypography.semiBold,
+    fontSize: 22,
+    lineHeight: 28,
+    letterSpacing: -0.4,
   },
   screenSubtitle: {
     marginTop: 8,
     color: PROFILE_COLOR.secondary,
-    fontFamily: fonts.Regular,
-    fontSize: 13,
-    lineHeight: 18,
+    ...leafTypography.regular,
+    fontSize: 14,
+    lineHeight: 20,
   },
   avatarWrap: {
     width: 68,
@@ -526,7 +553,7 @@ const styles = StyleSheet.create({
   },
   avatarLetter: {
     color: PROFILE_COLOR.leaf,
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 20,
     lineHeight: 26,
   },
@@ -542,14 +569,14 @@ const styles = StyleSheet.create({
   },
   identityName: {
     color: PROFILE_COLOR.text,
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 20,
     lineHeight: 26,
   },
   identityMeta: {
     marginTop: 2,
     color: PROFILE_COLOR.muted,
-    fontFamily: fonts.Regular,
+    ...leafTypography.regular,
     fontSize: 13,
     lineHeight: 17,
   },
@@ -576,40 +603,40 @@ const styles = StyleSheet.create({
   },
   fieldLabel: {
     color: PROFILE_COLOR.secondary,
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     fontSize: 12,
     lineHeight: 16,
   },
   fieldInput: {
-    minHeight: 52,
-    borderRadius: 18,
+    minHeight: 54,
+    borderRadius: 14,
     borderWidth: 1,
     borderColor: PROFILE_COLOR.line,
     backgroundColor: '#FFFFFF',
     color: PROFILE_COLOR.text,
-    fontFamily: fonts.Regular,
-    fontSize: 15,
+    ...leafTypography.regular,
+    fontSize: 16,
     paddingHorizontal: 16,
   },
   readOnlyField: {
     minHeight: 76,
-    borderRadius: 18,
+    borderRadius: 14,
     borderWidth: 1,
     borderColor: PROFILE_COLOR.line,
-    backgroundColor: '#F1EEE8',
+    backgroundColor: '#F5F5F5',
     paddingHorizontal: 16,
     paddingVertical: 12,
   },
   readOnlyValue: {
     color: PROFILE_COLOR.text,
-    fontFamily: fonts.Regular,
+    ...leafTypography.regular,
     fontSize: 15,
     lineHeight: 20,
   },
   readOnlyHint: {
     marginTop: 5,
     color: PROFILE_COLOR.muted,
-    fontFamily: fonts.Regular,
+    ...leafTypography.regular,
     fontSize: 11,
     lineHeight: 15,
   },
@@ -620,7 +647,7 @@ const styles = StyleSheet.create({
   },
   secondaryActionText: {
     color: PROFILE_COLOR.secondary,
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     fontSize: 13,
     lineHeight: 18,
   },
@@ -635,7 +662,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: 0,
   },
   rowIconSlot: {
-    width: 28,
+    width: 48,
     alignItems: 'flex-start',
     justifyContent: 'center',
   },
@@ -646,9 +673,9 @@ const styles = StyleSheet.create({
   },
   rowTitle: {
     color: PROFILE_COLOR.text,
-    fontFamily: fonts.Medium,
-    fontSize: 13,
-    lineHeight: 17,
+    ...leafTypography.medium,
+    fontSize: 16,
+    lineHeight: 21,
   },
   rowTitleDanger: {
     color: PROFILE_COLOR.danger,
@@ -656,8 +683,8 @@ const styles = StyleSheet.create({
   rowSubtitle: {
     marginTop: 3,
     color: PROFILE_COLOR.muted,
-    fontFamily: fonts.Regular,
-    fontSize: 10,
-    lineHeight: 13,
+    ...leafTypography.regular,
+    fontSize: 12,
+    lineHeight: 17,
   },
 });

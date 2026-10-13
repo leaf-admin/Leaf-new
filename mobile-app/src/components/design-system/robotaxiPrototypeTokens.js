@@ -1,8 +1,8 @@
 export const robotaxiPrototypeTokens = {
   color: {
     bg: {
-      app: '#F8F6F1',
-      map: '#F2F4EF',
+      app: '#FFFFFF',
+      map: '#F5F6F5',
       panel: 'rgba(255,255,255,0.96)',
       panelSoft: 'rgba(255,255,255,0.92)',
       panelSolid: '#FFFFFF',
@@ -10,16 +10,16 @@ export const robotaxiPrototypeTokens = {
     },
     surface: {
       primary: '#FFFFFF',
-      secondary: '#F8F6F1',
-      tertiary: '#F2F4EF',
+      secondary: '#F5F5F5',
+      tertiary: '#F5F6F5',
       activeSoft: '#F1F5EE',
       activeStrong: '#E7EFE1'
     },
     text: {
-      primary: '#171412',
-      secondary: '#756F68',
-      muted: '#827B73',
-      dark: '#171412'
+      primary: '#222222',
+      secondary: '#6A6A6A',
+      muted: '#767676',
+      dark: '#222222'
     },
     accent: {
       primary: '#1A330E',
@@ -40,31 +40,32 @@ export const robotaxiPrototypeTokens = {
       indicator: '#007AFF'
     },
     border: {
-      subtle: '#E9E2D8',
-      strong: '#E2DAD0',
-      separator: '#E9E2D8'
+      subtle: '#E5E5E5',
+      strong: '#D6D9D6',
+      separator: '#E5E5E5'
     },
     shadow: {
-      base: '#171412',
+      base: '#222222',
       accent: '#1A330E'
     }
   },
   // "Leaf Ambient" dark surface — green-black base (not pure black), four
   // elevation levels, warm off-white text. Depth comes from tonal surfaces
   // and borders, not shadows. Accent green stays; lime pops on dark.
+  action: { primary: '#252525', contrast: '#FFFFFF', secondary: '#F5F5F5' },
   colorDark: {
     bg: {
-      app: '#0E1409',
+      app: '#141414',
       map: '#0C1208',
       panel: 'rgba(22,29,16,0.96)',
       panelSoft: 'rgba(22,29,16,0.92)',
-      panelSolid: '#161D10',
+      panelSolid: '#202020',
       scrim: 'rgba(5,8,3,0.82)'
     },
     surface: {
-      primary: '#161D10',
-      secondary: '#0E1409',
-      tertiary: '#1F2815',
+      primary: '#202020',
+      secondary: '#141414',
+      tertiary: '#2A2A2A',
       activeSoft: '#24301B',
       activeStrong: '#2C3A20'
     },
@@ -119,12 +120,12 @@ export const robotaxiPrototypeTokens = {
     xxl: 32
   },
   typography: {
-    display: { size: 28, lineHeight: 34 },
+    display: { size: 26, lineHeight: 32 },
     title: { size: 22, lineHeight: 28 },
-    subtitle: { size: 18, lineHeight: 24 },
-    body: { size: 15, lineHeight: 22 },
+    subtitle: { size: 16, lineHeight: 22 },
+    body: { size: 16, lineHeight: 23 },
     caption: { size: 13, lineHeight: 18 },
-    micro: { size: 11, lineHeight: 14 },
+    micro: { size: 12, lineHeight: 17 },
     maxScale: 1.35
   },
   touch: {
@@ -148,10 +149,10 @@ export const robotaxiPrototypeTokens = {
   },
   motion: {
     timing: {
-      quick: 140,
-      standard: 220,
-      slow: 320,
-      map: 2000
+      quick: 160,
+      standard: 240,
+      slow: 360,
+      map: 650
     },
     spring: {
       sheet: {

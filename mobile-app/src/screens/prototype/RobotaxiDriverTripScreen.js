@@ -14,6 +14,8 @@ import PrototypeScreenTransition from "../../components/prototype/PrototypeScree
 import PrototypeDismissibleSheet from "../../components/prototype/PrototypeDismissibleSheet";
 import PrototypeConnectionStatusPill from "../../components/prototype/PrototypeConnectionStatusPill";
 import PrototypeMapLayer from "../../components/prototype/PrototypeMapLayer";
+import useCampaignAssetOverride from "../../hooks/useCampaignAssetOverride";
+import { resolveRegisteredVehicleColor } from '../../components/prototype/vehicleMarkerIdentity';
 import {
   RobotaxiLifecycleButton,
   RobotaxiLifecycleCard,
@@ -805,6 +807,8 @@ export default function RobotaxiDriverTripScreen({ navigation, route }) {
     activeBooking,
     driverActiveRide,
     driverTripMeta,
+    profile,
+    driverActivationRemote,
     selectedDestination,
     selectedFare,
     currentCoordinate,
@@ -822,6 +826,13 @@ export default function RobotaxiDriverTripScreen({ navigation, route }) {
     rideLocalSync,
     lastError,
   } = usePrototypeRideRuntime();
+  const vehicleColor = resolveRegisteredVehicleColor({
+    role: 'driver', activeBooking, driverActiveRide, driverTripMeta, driverActivationRemote, profile,
+  });
+  const vehicleMarkerCampaignAsset = useCampaignAssetOverride({
+    surface: 'ride_map', placement: 'vehicle_marker', role: 'driver', userId: profile?.uid || '',
+    context: { city: 'rio_de_janeiro' }, eventMetadata: { screen: 'robotaxi_driver_trip' },
+  });
   const insets = useSafeAreaInsets();
   const { height: windowHeight, width: windowWidth } = useWindowDimensions();
   const mapRef = useRef(null);
@@ -1609,6 +1620,15 @@ export default function RobotaxiDriverTripScreen({ navigation, route }) {
         : normalizedBookingStatus === "started"
           ? "Finalizar"
           : "Voltar";
+  const primaryAccessibilityLabel = busyAction
+    ? "Atualizando etapa da corrida"
+    : normalizedBookingStatus === "accepted"
+      ? "Confirmar chegada ao embarque"
+      : normalizedBookingStatus === "arrived"
+        ? "Iniciar corrida"
+        : normalizedBookingStatus === "started"
+          ? "Finalizar corrida"
+          : "Voltar ao mapa";
   const headerCopy = useMemo(() => {
     if (!hasActiveRide) {
       return {
@@ -2117,7 +2137,7 @@ export default function RobotaxiDriverTripScreen({ navigation, route }) {
             disabled={busyAction}
             onPress={handlePrimaryAction}
             testID={primaryActionTestID}
-            accessibilityLabel={primaryActionTestID}
+            accessibilityLabel={primaryAccessibilityLabel}
           />
         </View>
       </>
@@ -2146,7 +2166,7 @@ export default function RobotaxiDriverTripScreen({ navigation, route }) {
                 disabled
                 style={styles.primaryAction}
                 testID="driver-trip-missing-identity-button"
-                accessibilityLabel="driver-trip-missing-identity-button"
+                accessibilityLabel="Aguardando confirmação da corrida pelo servidor"
               />
             </View>
           </>
@@ -2162,7 +2182,7 @@ export default function RobotaxiDriverTripScreen({ navigation, route }) {
             onPress={handlePrimaryAction}
             style={styles.emptyBackButton}
             testID={primaryActionTestID}
-            accessibilityLabel={primaryActionTestID}
+            accessibilityLabel="Voltar ao mapa"
           />
           <Text style={styles.emptyTitle}>Nenhuma corrida ativa</Text>
           <Text style={styles.emptyText}>
@@ -2211,7 +2231,7 @@ export default function RobotaxiDriverTripScreen({ navigation, route }) {
               disabled
               style={styles.primaryAction}
               testID="driver-trip-operational-hold-button"
-              accessibilityLabel="driver-trip-operational-hold-button"
+              accessibilityLabel="Aguardando confirmação da corrida"
             />
           </View>
         </>
@@ -2311,7 +2331,7 @@ export default function RobotaxiDriverTripScreen({ navigation, route }) {
               onPress={handlePrimaryAction}
               style={styles.primaryAction}
               testID={primaryActionTestID}
-              accessibilityLabel={primaryActionTestID}
+              accessibilityLabel={primaryAccessibilityLabel}
             />
           </View>
         </>
@@ -2378,7 +2398,7 @@ export default function RobotaxiDriverTripScreen({ navigation, route }) {
               onPress={handlePrimaryAction}
               style={styles.primaryAction}
               testID={primaryActionTestID}
-              accessibilityLabel={primaryActionTestID}
+              accessibilityLabel={primaryAccessibilityLabel}
             />
           </View>
         </>
@@ -2462,7 +2482,7 @@ export default function RobotaxiDriverTripScreen({ navigation, route }) {
             onPress={handlePrimaryAction}
             style={styles.primaryAction}
             testID={primaryActionTestID}
-            accessibilityLabel={primaryActionTestID}
+            accessibilityLabel={primaryAccessibilityLabel}
           />
         </View>
       </>
@@ -2506,6 +2526,9 @@ export default function RobotaxiDriverTripScreen({ navigation, route }) {
           animateRoute={driverTripMapPresentation.animateRoute}
           manualCameraHoldMs={driverTripMapPresentation.manualCameraHoldMs}
           driverMarkerMode="car"
+          driverVehicleColor={vehicleColor}
+          driverMarkerAssetUrl={vehicleMarkerCampaignAsset.imageUrl}
+          driverMarkerShapeKey={vehicleMarkerCampaignAsset.shapeKey}
           driverMarkerLetter="M"
           destinationMarkerMode={normalizedBookingStatus === "started" ? "place" : "avatar"}
           destinationMarkerLetter={passengerInitial}
@@ -2552,7 +2575,7 @@ export default function RobotaxiDriverTripScreen({ navigation, route }) {
               ]}
               showsVerticalScrollIndicator={detailsExpanded}
               testID="driver-live-trip-screen"
-              accessibilityLabel="driver-live-trip-screen"
+              accessibilityLabel="Corrida ativa do motorista"
             >
               {renderDriverCard()}
 
@@ -2579,7 +2602,9 @@ export default function RobotaxiDriverTripScreen({ navigation, route }) {
                 isOperationalHoldSurface || isProtectedStatusWithoutRideIdentity
               }
               testID="driver-live-trip-screen"
-              accessibilityLabel="driver-live-trip-screen"
+              accessibilityLabel={hasActiveRide
+                ? "Estado protegido da corrida do motorista"
+                : "Situação das corridas do motorista"}
             >
               {renderDriverCard()}
 

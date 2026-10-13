@@ -1,3 +1,4 @@
+import leafTypography from '../components/prototype/LeafTypography';
 import React from 'react';
 import {
   StyleSheet,
@@ -6,7 +7,6 @@ import {
   ActivityIndicator,
   Text,
 } from 'react-native';
-import { fonts } from '../theme/runtimeTokens';
 import onboardingTheme from '../components/auth/common/onboardingTheme';
 
 const { color, spacing, radius } = onboardingTheme;
@@ -103,15 +103,15 @@ const styles = StyleSheet.create({
   },
   title: {
     color: color.textPrimary,
-    fontFamily: fonts.SemiBold,
-    fontSize: 20,
-    lineHeight: 25,
+    ...leafTypography.semiBold,
+    fontSize: 22,
+    lineHeight: 28,
     textAlign: 'center',
   },
   subtitle: {
     marginTop: spacing.sm,
     color: color.textSecondary,
-    fontFamily: fonts.Regular,
+    ...leafTypography.regular,
     fontSize: 14,
     lineHeight: 20,
     textAlign: 'center',

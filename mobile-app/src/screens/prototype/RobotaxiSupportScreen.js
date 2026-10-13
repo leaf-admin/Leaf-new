@@ -1,8 +1,8 @@
+import leafTypography from '../../components/prototype/LeafTypography';
 import React, { useCallback, useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, ScrollView, StatusBar, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { fonts } from '../../theme/runtimeTokens';
 import PrototypeScreenTransition from '../../components/prototype/PrototypeScreenTransition';
 import PrototypeDismissibleSheet from '../../components/prototype/PrototypeDismissibleSheet';
 import { PrototypePrimaryButton } from '../../components/prototype/PrototypeUI';
@@ -13,13 +13,14 @@ import {
   PrototypeMenuSurface,
 } from '../../components/prototype/PrototypeMenuSurface';
 import { LeafButton, leafRideColors } from '../../components/prototype/LeafRideUI';
+import { LeafObjectIcon } from '../../components/prototype/LeafVisualElements';
 import robotaxiPrototypeTokens from '../../components/design-system/robotaxiPrototypeTokens';
 import { usePrototypeMapOcclusion } from './prototypeMapOcclusion';
 import { usePrototypeRideRuntime } from './prototypeRideRuntime';
 import { normalizeRuntimeRideStatus } from './rideLifecycleContract';
 
 const { color } = robotaxiPrototypeTokens;
-const SURFACE_TOP_PADDING = 16;
+const SURFACE_TOP_PADDING = 20;
 const SURFACE_BOTTOM_PADDING = 18;
 const BACKDROP_COLOR = 'transparent';
 
@@ -133,16 +134,20 @@ function SupportOptionRow({ item, active, onPress, rowTestID, last = false }) {
       activeOpacity={0.78}
       onPress={onPress}
       testID={rowTestID}
-      accessibilityLabel={rowTestID}
+      accessibilityRole="radio"
+      accessibilityLabel={item.title}
+      accessibilityHint={item.subtitle}
+      accessibilityState={{ checked: active }}
     >
       <View style={styles.optionIconSlot}>
-        <Ionicons name={item.icon} size={18} color={active ? leafRideColors.leaf : leafRideColors.text} />
+        <LeafObjectIcon name={item.id === 'payment' ? 'payment' : item.id === 'safety' ? 'privacy' : 'help'} size={40} />
       </View>
       <View style={styles.optionCopyWrap}>
         <Text style={[styles.optionTitle, active && styles.optionTitleActive]}>{item.title}</Text>
         <Text style={styles.optionSubtitle}>{item.subtitle}</Text>
       </View>
-      <Ionicons name="chevron-forward" size={15} color={color.text.muted} />
+      {/* Radio, not a chevron: tapping selects the subject for "Abrir ticket"; it does not navigate. */}
+      <Ionicons name={active ? 'radio-button-on' : 'radio-button-off'} size={20} color={active ? '#1A330E' : color.text.muted} />
     </TouchableOpacity>
   );
 }
@@ -157,7 +162,12 @@ export default function RobotaxiSupportScreen({ navigation, route }) {
   const [showSecondaryActions, setShowSecondaryActions] = useState(false);
   const selectedOption = useMemo(() => SUPPORT_OPTIONS.find(item => item.id === selectedOptionId) || SUPPORT_OPTIONS[0], [selectedOptionId]);
   const incidentIsPrimary = selectedOption.id === 'safety';
-  const primaryActionLabel = incidentIsPrimary ? 'Registrar incidente' : 'Abrir ticket';
+  const primaryActionLabel = incidentIsPrimary ? 'Registrar incidente' : 'Abrir chamado';
+  const primaryActionAccessibilityLabel = supportLoading
+    ? 'Enviando solicitação de suporte'
+    : incidentIsPrimary
+      ? 'Registrar incidente de segurança'
+      : `Abrir chamado: ${selectedOption.title}`;
   const supportRideContext = useMemo(
     () => resolveSupportRideContext(route?.params, runtime),
     [
@@ -172,6 +182,14 @@ export default function RobotaxiSupportScreen({ navigation, route }) {
   const hasRideChatContext = Boolean(
     supportRideContext.bookingId || supportRideContext.rideId || supportRideContext.tripId,
   );
+  const openChatTitle = hasRideChatContext
+    ? 'Falar com motorista'
+    : supportLastTicket?.id
+      ? 'Acompanhar chamado'
+      : 'Abrir conversa com suporte';
+  const openChatSubtitle = hasRideChatContext
+    ? 'Enviar mensagem no chat desta corrida.'
+    : 'Usar a thread de atendimento da Leaf.';
 
   usePrototypeMapOcclusion({
     routeKey: route?.key,
@@ -274,7 +292,6 @@ export default function RobotaxiSupportScreen({ navigation, route }) {
         style={styles.container}
         pointerEvents="box-none"
         testID="robotaxi-support-screen"
-        accessibilityLabel="robotaxi-support-screen"
       >
         <StatusBar translucent backgroundColor="transparent" barStyle="dark-content" />
         <PrototypeDismissibleSheet
@@ -287,7 +304,6 @@ export default function RobotaxiSupportScreen({ navigation, route }) {
             onLayout={handlePanelLayout}
             eyebrow="Ajuda e segurança"
             title="Suporte"
-            subtitle="Escolha como deseja ajuda nesta corrida e siga para o canal certo."
             fullScreen
             style={{
               paddingTop: insets.top + SURFACE_TOP_PADDING,
@@ -298,7 +314,7 @@ export default function RobotaxiSupportScreen({ navigation, route }) {
               <PrototypeMenuCloseButton
                 onPress={handleDismiss}
                 testID="robotaxi-support-close-button"
-                accessibilityLabel="robotaxi-support-close-button"
+                accessibilityLabel="Fechar suporte"
               />
             )}
           >
@@ -307,6 +323,17 @@ export default function RobotaxiSupportScreen({ navigation, route }) {
               keyboardShouldPersistTaps="handled"
               contentContainerStyle={styles.content}
             >
+              <View style={styles.supportLead}>
+                <View style={styles.supportLeadCopy}>
+                  <Text style={styles.supportLeadTitle}>Como podemos ajudar?</Text>
+                  <Text style={styles.supportLeadDetail}>{hasRideChatContext
+                    ? 'Ajuda com esta viagem e sua segurança.'
+                    : runtime.activeRole === 'driver'
+                      ? 'Corridas, repasses e cadastro.'
+                      : 'Viagens, Pix e sua conta.'}</Text>
+                </View>
+                <LeafObjectIcon name="help" size={48} />
+              </View>
               <PrototypeMenuSection title="Assuntos">
                 {SUPPORT_OPTIONS.map((item, index) => (
                   <SupportOptionRow
@@ -327,7 +354,7 @@ export default function RobotaxiSupportScreen({ navigation, route }) {
                   onPress={supportLoading ? undefined : handlePrimarySupportAction}
                   style={styles.primaryButton}
                   testID="robotaxi-support-primary-action"
-                  accessibilityLabel="robotaxi-support-primary-action"
+                  accessibilityLabel={primaryActionAccessibilityLabel}
                 />
                 <LeafButton
                   label={showSecondaryActions ? 'Ocultar opções' : 'Mais opções'}
@@ -336,7 +363,7 @@ export default function RobotaxiSupportScreen({ navigation, route }) {
                   onPress={() => setShowSecondaryActions(value => !value)}
                   style={styles.secondaryActionsDisclosure}
                   testID="robotaxi-support-more-actions"
-                  accessibilityLabel="robotaxi-support-more-actions"
+                  accessibilityLabel={showSecondaryActions ? 'Ocultar opções de suporte' : 'Mais opções de suporte'}
                 />
               </View>
 
@@ -344,11 +371,12 @@ export default function RobotaxiSupportScreen({ navigation, route }) {
                 <PrototypeMenuSection title="Outras formas de ajuda">
                   <PrototypeMenuRow
                     icon="chatbubble-ellipses-outline"
-                    title={hasRideChatContext ? 'Falar com motorista' : supportLastTicket?.id ? 'Acompanhar ticket' : 'Abrir conversa com suporte'}
-                    subtitle={hasRideChatContext ? 'Enviar mensagem no chat desta corrida.' : 'Usar a thread de atendimento da Leaf.'}
+                    title={openChatTitle}
+                    subtitle={openChatSubtitle}
                     onPress={handleOpenChat}
                     testID="robotaxi-support-open-chat"
-                    accessibilityLabel="robotaxi-support-open-chat"
+                    accessibilityLabel={openChatTitle}
+                    accessibilityHint={openChatSubtitle}
                   />
                   <PrototypeMenuRow
                     icon="warning-outline"
@@ -362,7 +390,8 @@ export default function RobotaxiSupportScreen({ navigation, route }) {
                       severity: selectedOption.severity,
                     })}
                     testID="robotaxi-support-open-complain"
-                    accessibilityLabel="robotaxi-support-open-complain"
+                    accessibilityLabel="Abrir reclamação de suporte"
+                    accessibilityHint="Registra um relato detalhado e permite anexar evidências."
                   />
                 </PrototypeMenuSection>
               ) : null}
@@ -373,7 +402,7 @@ export default function RobotaxiSupportScreen({ navigation, route }) {
                   <Text style={styles.feedbackText}>Sincronizando com suporte...</Text>
                 </View>
               ) : null}
-              {supportLastTicket?.id ? <Text style={styles.feedbackText}>Ticket recente: #{supportLastTicket.id}</Text> : null}
+              {supportLastTicket?.id ? <Text style={styles.feedbackText}>Chamado recente: #{supportLastTicket.id}</Text> : null}
               {supportLastIncident?.id ? <Text style={styles.feedbackText}>Incidente recente: #{supportLastIncident.id}</Text> : null}
               {supportError ? <Text style={styles.errorText}>{supportError}</Text> : null}
             </ScrollView>
@@ -385,6 +414,10 @@ export default function RobotaxiSupportScreen({ navigation, route }) {
 }
 
 const styles = StyleSheet.create({
+  supportLead: { flexDirection: 'row', alignItems: 'flex-start', gap: 18, marginBottom: 8 },
+  supportLeadCopy: { flex: 1, minWidth: 0 },
+  supportLeadTitle: { ...leafTypography.semiBold, fontSize: 24, lineHeight: 30, letterSpacing: -0.5, color: '#222222' },
+  supportLeadDetail: { ...leafTypography.regular, fontSize: 14, lineHeight: 20, color: '#6A6A6A', marginTop: 8 },
   container: {
     flex: 1,
     backgroundColor: 'transparent',
@@ -401,7 +434,7 @@ const styles = StyleSheet.create({
     gap: 18,
   },
   optionRow: {
-    minHeight: 58,
+    minHeight: 78,
     flexDirection: 'row',
     alignItems: 'center',
     paddingVertical: 10,
@@ -416,7 +449,7 @@ const styles = StyleSheet.create({
     paddingBottom: 4,
   },
   optionIconSlot: {
-    width: 28,
+    width: 54,
     alignItems: 'flex-start',
   },
   optionCopyWrap: {
@@ -425,9 +458,9 @@ const styles = StyleSheet.create({
   },
   optionTitle: {
     color: leafRideColors.text,
-    fontFamily: fonts.SemiBold,
-    fontSize: 14,
-    lineHeight: 19,
+    ...leafTypography.semiBold,
+    fontSize: 16,
+    lineHeight: 22,
   },
   optionTitleActive: {
     color: leafRideColors.leaf,
@@ -435,9 +468,9 @@ const styles = StyleSheet.create({
   optionSubtitle: {
     marginTop: 1,
     color: leafRideColors.secondary,
-    fontFamily: fonts.Regular,
-    fontSize: 11,
-    lineHeight: 15,
+    ...leafTypography.regular,
+    fontSize: 14,
+    lineHeight: 20,
   },
   actionsBlock: {
     marginTop: 4,
@@ -458,14 +491,14 @@ const styles = StyleSheet.create({
   feedbackText: {
     marginTop: 8,
     color: leafRideColors.secondary,
-    fontFamily: fonts.Regular,
+    ...leafTypography.regular,
     fontSize: 12,
     lineHeight: 17,
   },
   errorText: {
     marginTop: 8,
     color: leafRideColors.dangerText,
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     fontSize: 12,
     lineHeight: 17,
   },

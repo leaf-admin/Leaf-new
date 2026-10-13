@@ -1,7 +1,7 @@
+import leafTypography from '../prototype/LeafTypography';
 import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { fonts } from '../../theme/runtimeTokens';
 
 const SecurePaymentBadge = ({
   label = 'Pagamento seguro',
@@ -27,7 +27,7 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   text: {
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     fontSize: 10,
     lineHeight: 13,
   },

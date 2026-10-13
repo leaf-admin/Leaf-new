@@ -203,7 +203,7 @@ const ProfileToggle = ({
           color={styles.text.color}
           style={{ marginRight: 6 }}
         />
-        <Text style={[styles.text, { fontWeight: '500' }]}>
+        <Text style={[styles.text, { fontFamily: 'Figtree-Medium' }]}>
           {getDisplayText()}
         </Text>
         {isLoading && (

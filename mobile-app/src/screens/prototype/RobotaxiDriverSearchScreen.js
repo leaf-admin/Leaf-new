@@ -1,7 +1,7 @@
+import leafTypography from '../../components/prototype/LeafTypography';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { StatusBar, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { fonts } from "../../theme/runtimeTokens";
 import PrototypeScreenTransition from "../../components/prototype/PrototypeScreenTransition";
 import PrototypeDismissibleSheet from "../../components/prototype/PrototypeDismissibleSheet";
 import {
@@ -210,6 +210,14 @@ const TERMINAL_SEARCH_STATUSES = new Set([
   "no_drivers",
 ]);
 
+function describeCancelFailure(error) {
+  const message = String(error?.message || "");
+  if (/timeout/i.test(message)) {
+    return "O cancelamento demorou para responder. Tente de novo em instantes.";
+  }
+  return message || "Não foi possível cancelar no servidor. A corrida continua ativa.";
+}
+
 export default function RobotaxiDriverSearchScreen({ navigation, route }) {
   const {
     activeBooking,
@@ -235,7 +243,7 @@ export default function RobotaxiDriverSearchScreen({ navigation, route }) {
   const terminalRouteHandledRef = useRef(false);
   const protectedSearchExitRef = useRef(false);
   const sheetBottom =
-    insets.bottom + SHEET_BOTTOM_OFFSET + robotaxiLifecycleMetrics.cardBottomGap;
+    SHEET_BOTTOM_OFFSET + robotaxiLifecycleMetrics.cardBottomGap + insets.bottom;
   const normalizedBookingStatus = normalizePassengerBookingStatus(bookingStatus);
   const passengerAutoRoute = resolvePassengerAutoRoute(bookingStatus);
   const noDriversRefundParams = useMemo(() => {
@@ -609,6 +617,15 @@ export default function RobotaxiDriverSearchScreen({ navigation, route }) {
     try {
       const cancellationResponse = await cancelRideSearch(searchCancellationContext);
       terminalRouteHandledRef.current = true;
+      if (cancellationResponse?.alreadyEnded) {
+        // The search had already ended on the server: no cancellation receipt
+        // to show, just take the passenger back to the map.
+        replaceAfterProtectedSearch("RobotaxiPrototype", {
+          source: "driver_search_already_ended",
+          searchCancelled: true,
+        });
+        return;
+      }
       replaceAfterProtectedSearch(
         "RobotaxiPrototypeCancellation",
         {
@@ -618,10 +635,7 @@ export default function RobotaxiDriverSearchScreen({ navigation, route }) {
         },
       );
     } catch (error) {
-      setCancelError(
-        error?.message ||
-          "Não foi possível cancelar no servidor. A corrida continua ativa.",
-      );
+      setCancelError(describeCancelFailure(error));
     } finally {
       setCancelPending(false);
     }
@@ -654,10 +668,7 @@ export default function RobotaxiDriverSearchScreen({ navigation, route }) {
         refundRequested: true,
       });
     } catch (error) {
-      setCancelError(
-        error?.message ||
-          "Não foi possível cancelar no servidor. A corrida continua ativa.",
-      );
+      setCancelError(describeCancelFailure(error));
     } finally {
       setCancelPending(false);
     }
@@ -703,17 +714,21 @@ export default function RobotaxiDriverSearchScreen({ navigation, route }) {
         >
           <RobotaxiLifecycleCard
             onLayout={handleCardLayout}
-            style={styles.searchingCard}
+            style={[styles.searchingCard, { paddingBottom: robotaxiLifecycleMetrics.cardPaddingBottom }]}
             testID={sheetTestID}
-            accessibilityLabel={sheetTestID}
+            accessibilityLabel={showSearchTimeoutDecision
+              ? "Escolha como continuar a busca por motorista"
+              : "Buscando motorista para sua viagem"}
           >
             <RobotaxiLifecycleSummary
-              eyebrow={showSearchTimeoutDecision ? "BUSCA MAIS LONGA" : "BUSCANDO MOTORISTA"}
-              title={showSearchTimeoutDecision ? "Continuar busca?" : progressPrimaryText}
-              subtitle={showSearchTimeoutDecision ? "Ainda procurando motoristas próximos." : progressMetaText}
-              value={fareLabel}
-              valueLabel="valor protegido"
-              titleTestID="passenger-driver-search-elapsed"
+              eyebrow={showSearchTimeoutDecision ? "BUSCA MAIS LONGA" : null}
+              title={showSearchTimeoutDecision ? "Continuar busca?" : "Procurando motorista"}
+              subtitle={showSearchTimeoutDecision
+                ? "Ainda procurando motoristas próximos."
+                : destinationLabel ? `Para ${destinationLabel}` : null}
+              value={progressPrimaryText}
+              valueLabel={progressMetaText}
+              valueTestID="passenger-driver-search-elapsed"
             />
 
             <View style={styles.searchProgress}>
@@ -721,6 +736,10 @@ export default function RobotaxiDriverSearchScreen({ navigation, route }) {
                 progress={searchPresentation.progress}
                 fillTestID="passenger-driver-search-progress-fill"
               />
+            </View>
+            <View style={styles.searchFareRow}>
+              <Text style={styles.searchFareLine} numberOfLines={1}>{fareLabel}</Text>
+              <Text style={styles.searchFareMeta}>valor protegido</Text>
             </View>
 
             <RobotaxiLifecycleDisclosure
@@ -766,8 +785,8 @@ export default function RobotaxiDriverSearchScreen({ navigation, route }) {
                     ? "passenger-driver-search-timeout-cancel-button"
                     : "passenger-driver-search-cancel-button"}
                   accessibilityLabel={showSearchTimeoutDecision
-                    ? "passenger-driver-search-timeout-cancel-button"
-                    : "passenger-driver-search-cancel-button"}
+                    ? "Cancelar busca de motorista"
+                    : "Cancelar busca"}
                 />
                 {isSearchReconciling || cancelError ||
                 (!cancelPending && searchPresentation.remainingSeconds === 0) ? (
@@ -777,7 +796,7 @@ export default function RobotaxiDriverSearchScreen({ navigation, route }) {
                     icon="chatbubble-ellipses-outline"
                     style={styles.supportButton}
                     testID="passenger-driver-search-support-button"
-                    accessibilityLabel="passenger-driver-search-support-button"
+                    accessibilityLabel="Falar com suporte"
                   />
                 ) : null}
               </RobotaxiLifecycleSection>
@@ -786,7 +805,7 @@ export default function RobotaxiDriverSearchScreen({ navigation, route }) {
             {showSearchTimeoutDecision ? (
               <View
                 testID="passenger-driver-search-timeout-decision"
-                accessibilityLabel="passenger-driver-search-timeout-decision"
+                accessibilityLabel="Decisão sobre a busca de motorista"
               >
                   <RobotaxiLifecycleButton
                     label="Continuar buscando"
@@ -794,8 +813,19 @@ export default function RobotaxiDriverSearchScreen({ navigation, route }) {
                     tone="primary"
                     style={styles.continueButton}
                     testID="passenger-driver-search-timeout-continue-button"
-                    accessibilityLabel="passenger-driver-search-timeout-continue-button"
+                    accessibilityLabel="Continuar buscando motorista"
                   />
+                  {!tripDetailsVisible ? (
+                    <RobotaxiLifecycleButton
+                      label={cancelPending ? "Cancelando..." : "Cancelar busca"}
+                      onPress={cancelPending ? undefined : handleCancelSearchAfterTimeout}
+                      disabled={cancelPending || isSearchReconciling || isBookingFinalizing}
+                      tone="danger"
+                      style={styles.supportButton}
+                      testID="passenger-driver-search-timeout-decline-button"
+                      accessibilityLabel="Cancelar busca de motorista"
+                    />
+                  ) : null}
               </View>
             ) : null}
           </RobotaxiLifecycleCard>
@@ -806,6 +836,21 @@ export default function RobotaxiDriverSearchScreen({ navigation, route }) {
 }
 
 const styles = StyleSheet.create({
+  searchFareRow: {
+    marginTop: 10,
+    flexDirection: "row",
+    alignItems: "baseline",
+    gap: 6,
+  },
+  searchFareLine: {
+    ...leafTypography.semiBold,
+    fontSize: 15,
+    color: "#111410",
+  },
+  searchFareMeta: {
+    ...leafTypography.regular,
+    color: "#6A6A6A",
+  },
   container: {
     flex: 1,
     backgroundColor: "transparent",
@@ -829,23 +874,23 @@ const styles = StyleSheet.create({
   },
   routeSummaryLabel: {
     color: leafRideColors.secondary,
-    fontFamily: fonts.Medium,
-    fontSize: 10,
+    ...leafTypography.medium,
+    fontSize: 11,
     lineHeight: 13,
     letterSpacing: 0.5,
   },
   routeSummaryValue: {
     marginTop: 2,
     color: leafRideColors.text,
-    fontFamily: fonts.Medium,
-    fontSize: 12,
+    ...leafTypography.medium,
+    fontSize: 13,
     lineHeight: 16,
   },
   routeSummaryMeta: {
     marginTop: 2,
     color: leafRideColors.secondary,
-    fontFamily: fonts.Regular,
-    fontSize: 12,
+    ...leafTypography.regular,
+    fontSize: 13,
     lineHeight: 16,
   },
   destinationLabel: {
@@ -854,7 +899,7 @@ const styles = StyleSheet.create({
   errorText: {
     marginTop: 12,
     color: leafRideColors.dangerText,
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     fontSize: 13,
     lineHeight: 17,
     textAlign: "center",

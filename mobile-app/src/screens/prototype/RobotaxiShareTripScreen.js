@@ -1,3 +1,4 @@
+import leafTypography from '../../components/prototype/LeafTypography';
 import React, { useCallback, useMemo, useState } from 'react';
 import {
   Alert,
@@ -13,7 +14,6 @@ import {
 } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { fonts } from '../../theme/runtimeTokens';
 import PrototypeDismissibleSheet from '../../components/prototype/PrototypeDismissibleSheet';
 import PrototypeScreenTransition from '../../components/prototype/PrototypeScreenTransition';
 import {
@@ -26,7 +26,7 @@ import { LeafButton, LeafEmptyState, leafRideColors } from '../../components/pro
 import { usePrototypeMapOcclusion } from './prototypeMapOcclusion';
 import { usePrototypeRideRuntime } from './prototypeRideRuntime';
 
-const SURFACE_TOP_PADDING = 16;
+const SURFACE_TOP_PADDING = 20;
 const SURFACE_BOTTOM_PADDING = 18;
 const BACKDROP_COLOR = 'transparent';
 const DEFAULT_PUBLIC_TRIP_BASE_URL = 'https://leaf.app.br/viagem';
@@ -189,7 +189,7 @@ export default function RobotaxiShareTripScreen({ navigation, route }) {
               <PrototypeMenuCloseButton
                 onPress={handleDismiss}
                 testID="robotaxi-share-trip-close-button"
-                accessibilityLabel="robotaxi-share-trip-close-button"
+                accessibilityLabel="Fechar compartilhamento da viagem"
               />
             )}
           >
@@ -209,7 +209,7 @@ export default function RobotaxiShareTripScreen({ navigation, route }) {
                   onPress={handleCopy}
                   style={styles.primaryActionButton}
                   testID="robotaxi-share-copy-link"
-                  accessibilityLabel="robotaxi-share-copy-link"
+                  accessibilityLabel={copied ? 'Link da viagem copiado' : 'Copiar link da viagem'}
                 />
                 <LeafButton
                   label={showMoreActions ? 'Ocultar opções' : 'Mais opções'}
@@ -218,7 +218,7 @@ export default function RobotaxiShareTripScreen({ navigation, route }) {
                   onPress={() => setShowMoreActions(value => !value)}
                   style={styles.moreActionsButton}
                   testID="robotaxi-share-more-actions"
-                  accessibilityLabel="robotaxi-share-more-actions"
+                  accessibilityLabel={showMoreActions ? 'Ocultar opções de compartilhamento' : 'Mais opções de compartilhamento'}
                 />
               </View>
 
@@ -226,7 +226,6 @@ export default function RobotaxiShareTripScreen({ navigation, route }) {
                 <View
                   style={styles.actionGrid}
                   testID="robotaxi-share-secondary-actions"
-                  accessibilityLabel="robotaxi-share-secondary-actions"
                 >
                 <LeafButton
                   label="WhatsApp"
@@ -235,7 +234,7 @@ export default function RobotaxiShareTripScreen({ navigation, route }) {
                   onPress={handleWhatsApp}
                   style={styles.actionButton}
                   testID="robotaxi-share-whatsapp"
-                  accessibilityLabel="robotaxi-share-whatsapp"
+                  accessibilityLabel="Compartilhar link pelo WhatsApp"
                 />
                 <LeafButton
                   label="Enviar"
@@ -244,7 +243,7 @@ export default function RobotaxiShareTripScreen({ navigation, route }) {
                   onPress={handleNativeShare}
                   style={styles.actionButton}
                   testID="robotaxi-share-native"
-                  accessibilityLabel="robotaxi-share-native"
+                  accessibilityLabel="Compartilhar link da viagem"
                 />
                 <LeafButton
                   label="Prévia"
@@ -253,7 +252,7 @@ export default function RobotaxiShareTripScreen({ navigation, route }) {
                   onPress={handlePreview}
                   style={styles.actionButton}
                   testID="robotaxi-share-preview"
-                  accessibilityLabel="robotaxi-share-preview"
+                  accessibilityLabel="Visualizar prévia do link da viagem"
                 />
                 </View>
               ) : null}
@@ -293,23 +292,22 @@ const styles = StyleSheet.create({
     gap: 18,
   },
   linkCard: {
-    borderRadius: 24,
-    borderWidth: 1,
-    borderColor: leafRideColors.line,
-    backgroundColor: 'rgba(255,255,255,0.96)',
-    paddingHorizontal: 18,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#E5E5E5',
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 0,
     paddingVertical: 16,
   },
   linkLabel: {
     color: leafRideColors.secondary,
-    fontFamily: fonts.Medium,
-    fontSize: 11,
-    lineHeight: 15,
+    ...leafTypography.medium,
+    fontSize: 13,
+    lineHeight: 18,
   },
   linkText: {
     marginTop: 6,
     color: leafRideColors.text,
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: 14,
     lineHeight: 20,
   },

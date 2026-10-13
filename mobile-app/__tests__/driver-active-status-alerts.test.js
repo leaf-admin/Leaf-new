@@ -292,7 +292,12 @@ describe("driver active status alerts", () => {
       />,
     );
 
-    expect(screen.getByTestId("driver-transient-state-card")).toBeTruthy();
+    const alertCard = screen.getByTestId("driver-transient-state-card");
+    expect(alertCard.props.accessibilityRole).toBe("alert");
+    expect(alertCard.props.accessibilityLiveRegion).toBe("polite");
+    expect(alertCard.props.accessibilityLabel).toBe(
+      "Corrida cancelada pelo passageiro. Essa solicitação foi cancelada antes do seu aceite. Você já voltou para o mapa.",
+    );
     expect(screen.getByText("Corrida cancelada pelo passageiro")).toBeTruthy();
     expect(
       screen.getByText(

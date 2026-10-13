@@ -39,4 +39,24 @@ describe('PrototypeTopControls accessibility contract', () => {
     expect(screen.getByLabelText('Voltar')).toBeTruthy();
     expect(screen.getAllByLabelText('Centralizar mapa')).toHaveLength(1);
   });
+
+  it('shows the notifications bell with an unread badge and count in its label', () => {
+    const onPressRight = jest.fn();
+    const screen = render(
+      <PrototypeTopControls
+        insets={{ top: 0 }}
+        leftIcon="locate"
+        rightIcon="bell"
+        showRightBadge
+        rightBadgeCount={2}
+        onPressLeft={jest.fn()}
+        onPressRight={onPressRight}
+      />
+    );
+
+    fireEvent.press(screen.getByLabelText('Notificações, 2 novas'));
+    expect(onPressRight).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId('prototype-top-right-control-badge')).toBeTruthy();
+    expect(screen.queryByLabelText('Abrir menu')).toBeNull();
+  });
 });

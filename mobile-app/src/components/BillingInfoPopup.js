@@ -212,7 +212,7 @@ const styles = StyleSheet.create({
 
   title: {
     fontSize: 20,
-    fontWeight: 'bold',
+    fontFamily: 'Figtree-Bold',
     color: '#2E8B57',
     marginTop: 8,
     textAlign: 'center',
@@ -247,14 +247,14 @@ const styles = StyleSheet.create({
 
   feeTitle: {
     fontSize: 16,
-    fontWeight: '600',
+    fontFamily: 'Figtree-SemiBold',
     color: '#333333',
     marginLeft: 8,
   },
 
   feeValue: {
     fontSize: 24,
-    fontWeight: 'bold',
+    fontFamily: 'Figtree-Bold',
     color: '#2E8B57',
     marginBottom: 4,
   },
@@ -270,7 +270,7 @@ const styles = StyleSheet.create({
 
   benefitsTitle: {
     fontSize: 18,
-    fontWeight: 'bold',
+    fontFamily: 'Figtree-Bold',
     color: '#333333',
     marginBottom: 16,
   },
@@ -308,14 +308,14 @@ const styles = StyleSheet.create({
 
   balanceTitle: {
     fontSize: 16,
-    fontWeight: '600',
+    fontFamily: 'Figtree-SemiBold',
     color: '#333333',
     marginBottom: 4,
   },
 
   balanceValue: {
     fontSize: 20,
-    fontWeight: 'bold',
+    fontFamily: 'Figtree-Bold',
     color: '#2E8B57',
     marginBottom: 4,
   },
@@ -331,7 +331,7 @@ const styles = StyleSheet.create({
 
   featuresTitle: {
     fontSize: 18,
-    fontWeight: 'bold',
+    fontFamily: 'Figtree-Bold',
     color: '#333333',
     marginBottom: 16,
   },
@@ -364,7 +364,7 @@ const styles = StyleSheet.create({
 
   understandButtonText: {
     fontSize: 16,
-    fontWeight: '600',
+    fontFamily: 'Figtree-SemiBold',
     color: '#FFFFFF',
   },
 });

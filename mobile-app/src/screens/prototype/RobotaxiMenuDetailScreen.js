@@ -1,9 +1,9 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import leafTypography from '../../components/prototype/LeafTypography';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, ScrollView, StatusBar, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useSelector } from 'react-redux';
 import { Ionicons } from '@expo/vector-icons';
-import { fonts } from '../../theme/runtimeTokens';
 import robotaxiPrototypeTokens from '../../components/design-system/robotaxiPrototypeTokens';
 import PrototypeScreenTransition from '../../components/prototype/PrototypeScreenTransition';
 import PrototypeDismissibleSheet from '../../components/prototype/PrototypeDismissibleSheet';
@@ -57,6 +57,7 @@ export default function RobotaxiMenuDetailScreen({ navigation, route }) {
   const [quickMessage, setQuickMessage] = useState('');
   const [helpDescription, setHelpDescription] = useState('');
   const [formBusy, setFormBusy] = useState('');
+  const supportSubmitInFlightRef = useRef(false);
   const [feedback, setFeedback] = useState('');
 
   const targetRoute = route?.name;
@@ -161,21 +162,27 @@ export default function RobotaxiMenuDetailScreen({ navigation, route }) {
   const handleOpenTicket = useCallback(async () => {
     const description = String(helpDescription || '').trim();
     if (!description) {
-      setFeedback('Descreva o que aconteceu antes de abrir ticket.');
+      setFeedback('Descreva o que aconteceu antes de abrir chamado.');
+      return;
+    }
+
+    if (supportSubmitInFlightRef.current) {
       return;
     }
 
     try {
+      supportSubmitInFlightRef.current = true;
       setFormBusy('ticket');
       await openSupportTicket({
         type: 'menu-help',
         priority: 'N3',
         description
       });
-      setFeedback('Ticket enviado para o suporte.');
+      setFeedback('Chamado enviado para o suporte.');
     } catch (error) {
-      Alert.alert('Não foi possível abrir ticket', error?.message || 'Falha de comunicação.');
+      Alert.alert('Não foi possível abrir chamado', error?.message || 'Falha de comunicação.');
     } finally {
+      supportSubmitInFlightRef.current = false;
       setFormBusy('');
     }
   }, [helpDescription, openSupportTicket]);
@@ -187,7 +194,12 @@ export default function RobotaxiMenuDetailScreen({ navigation, route }) {
       return;
     }
 
+    if (supportSubmitInFlightRef.current) {
+      return;
+    }
+
     try {
+      supportSubmitInFlightRef.current = true;
       setFormBusy('incident');
       await reportIncident({
         type: 'menu-help',
@@ -197,6 +209,7 @@ export default function RobotaxiMenuDetailScreen({ navigation, route }) {
     } catch (error) {
       Alert.alert('Não foi possível registrar', error?.message || 'Falha de comunicação.');
     } finally {
+      supportSubmitInFlightRef.current = false;
       setFormBusy('');
     }
   }, [helpDescription, reportIncident]);
@@ -311,6 +324,7 @@ export default function RobotaxiMenuDetailScreen({ navigation, route }) {
             <View style={styles.toggleSlot}>
               <Switch
                 value={notificationsEnabled}
+                accessibilityLabel="Alertas de corrida"
                 onValueChange={value => updateSettings({ notificationsEnabled: value })}
                 trackColor={SWITCH_TRACK_COLORS}
                 thumbColor={SWITCH_THUMB_COLOR}
@@ -333,6 +347,7 @@ export default function RobotaxiMenuDetailScreen({ navigation, route }) {
             <View style={styles.toggleSlot}>
               <Switch
                 value={trafficLayerEnabled}
+                accessibilityLabel="Camada de trânsito"
                 onValueChange={value => updateSettings({ trafficLayerEnabled: value })}
                 trackColor={SWITCH_TRACK_COLORS}
                 thumbColor={SWITCH_THUMB_COLOR}
@@ -355,6 +370,7 @@ export default function RobotaxiMenuDetailScreen({ navigation, route }) {
             <View style={styles.toggleSlot}>
               <Switch
                 value={voiceGuidanceEnabled}
+                accessibilityLabel="Instruções por voz"
                 onValueChange={value => updateSettings({ voiceGuidanceEnabled: value })}
                 trackColor={SWITCH_TRACK_COLORS}
                 thumbColor={SWITCH_THUMB_COLOR}
@@ -386,12 +402,12 @@ export default function RobotaxiMenuDetailScreen({ navigation, route }) {
           </View>
 
           <View style={styles.dualActionRow}>
-            <TouchableOpacity style={styles.halfGhostButton} activeOpacity={0.86} onPress={supportLoading ? undefined : handleOpenTicket}>
+            <TouchableOpacity style={styles.halfGhostButton} activeOpacity={0.86} disabled={Boolean(formBusy)} onPress={supportLoading ? undefined : handleOpenTicket}>
               <Ionicons name="document-text-outline" size={15} color={color.text.primary} />
-              <Text style={styles.inlineGhostButtonText}>{formBusy === 'ticket' ? 'Enviando...' : 'Ticket'}</Text>
+              <Text style={styles.inlineGhostButtonText}>{formBusy === 'ticket' ? 'Enviando...' : 'Chamado'}</Text>
             </TouchableOpacity>
 
-            <TouchableOpacity style={styles.halfGhostButton} activeOpacity={0.86} onPress={supportLoading ? undefined : handleReportIncident}>
+            <TouchableOpacity style={styles.halfGhostButton} activeOpacity={0.86} disabled={Boolean(formBusy)} onPress={supportLoading ? undefined : handleReportIncident}>
               <Ionicons name="alert-circle-outline" size={15} color={color.text.primary} />
               <Text style={styles.inlineGhostButtonText}>{formBusy === 'incident' ? 'Enviando...' : 'Incidente'}</Text>
             </TouchableOpacity>
@@ -399,7 +415,7 @@ export default function RobotaxiMenuDetailScreen({ navigation, route }) {
 
           <PrototypePrimaryButton label="Abrir central de suporte" icon="help-circle-outline" onPress={handleOpenFullModule} style={styles.inlinePrimaryButton} />
 
-          {supportLastTicket?.id ? <Text style={styles.metaText}>Ticket recente: #{supportLastTicket.id}</Text> : null}
+          {supportLastTicket?.id ? <Text style={styles.metaText}>Chamado recente: #{supportLastTicket.id}</Text> : null}
           {supportLastIncident?.id ? <Text style={styles.metaText}>Incidente recente: #{supportLastIncident.id}</Text> : null}
           {supportError ? <Text style={styles.errorText}>{supportError}</Text> : null}
         </View>
@@ -464,7 +480,13 @@ export default function RobotaxiMenuDetailScreen({ navigation, route }) {
                     </Text>
                   </View>
                 </View>
-                <TouchableOpacity style={styles.headerBackButton} activeOpacity={0.86} onPress={handleDismiss}>
+                <TouchableOpacity
+                  style={styles.headerBackButton}
+                  activeOpacity={0.86}
+                  onPress={handleDismiss}
+                  accessibilityRole="button"
+                  accessibilityLabel="Voltar"
+                >
                   <Ionicons name="arrow-back" size={18} color={color.text.primary} />
                 </TouchableOpacity>
               </View>
@@ -549,22 +571,22 @@ const styles = StyleSheet.create({
   },
   summaryPillText: {
     color: color.accent.strong,
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     fontSize: typography.micro.size,
     lineHeight: typography.micro.lineHeight
   },
   title: {
     color: color.text.dark,
-    fontFamily: fonts.SemiBold,
-    fontSize: typography.subtitle.size,
-    lineHeight: typography.subtitle.lineHeight
+    ...leafTypography.semiBold,
+    fontSize: 22,
+    lineHeight: 28
   },
   subtitle: {
     marginTop: 1,
     color: color.text.secondary,
-    fontFamily: fonts.Regular,
-    fontSize: typography.caption.size,
-    lineHeight: typography.caption.lineHeight
+    ...leafTypography.regular,
+    fontSize: 14,
+    lineHeight: 20
   },
   scroll: {
     marginTop: 10,
@@ -590,7 +612,7 @@ const styles = StyleSheet.create({
   },
   formLabel: {
     color: color.text.secondary,
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     fontSize: typography.micro.size,
     lineHeight: typography.micro.lineHeight
   },
@@ -603,7 +625,7 @@ const styles = StyleSheet.create({
     backgroundColor: color.surface.secondary,
     paddingHorizontal: 10,
     color: color.text.primary,
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     fontSize: typography.caption.size,
     lineHeight: typography.caption.lineHeight
   },
@@ -628,7 +650,7 @@ const styles = StyleSheet.create({
   },
   inlineGhostButtonText: {
     color: color.text.primary,
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     fontSize: typography.caption.size,
     lineHeight: typography.caption.lineHeight
   },
@@ -684,14 +706,14 @@ const styles = StyleSheet.create({
   },
   preferenceTitle: {
     color: color.text.primary,
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     fontSize: typography.caption.size,
     lineHeight: typography.caption.lineHeight
   },
   preferenceSubtitle: {
     marginTop: 1,
     color: color.text.secondary,
-    fontFamily: fonts.Regular,
+    ...leafTypography.regular,
     fontSize: typography.micro.size,
     lineHeight: typography.micro.lineHeight
   },
@@ -734,14 +756,14 @@ const styles = StyleSheet.create({
   },
   rowLabel: {
     color: color.text.secondary,
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     fontSize: typography.micro.size,
     lineHeight: typography.micro.lineHeight
   },
   rowValue: {
     marginTop: 1,
     color: color.text.dark,
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     fontSize: typography.caption.size,
     lineHeight: typography.caption.lineHeight
   },
@@ -771,20 +793,20 @@ const styles = StyleSheet.create({
   },
   detailRowLabel: {
     color: color.text.secondary,
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     fontSize: typography.micro.size,
     lineHeight: typography.micro.lineHeight
   },
   detailRowValue: {
     marginTop: 1,
     color: color.text.dark,
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     fontSize: typography.caption.size,
     lineHeight: typography.caption.lineHeight
   },
   detailBadge: {
     color: color.text.primary,
-    fontFamily: fonts.SemiBold,
+    ...leafTypography.semiBold,
     fontSize: typography.caption.size,
     lineHeight: typography.caption.lineHeight
   },
@@ -801,21 +823,21 @@ const styles = StyleSheet.create({
   metaText: {
     marginTop: 6,
     color: color.text.secondary,
-    fontFamily: fonts.Regular,
+    ...leafTypography.regular,
     fontSize: typography.micro.size,
     lineHeight: typography.micro.lineHeight
   },
   feedbackText: {
     marginTop: 10,
     color: color.text.secondary,
-    fontFamily: fonts.Regular,
+    ...leafTypography.regular,
     fontSize: typography.micro.size,
     lineHeight: typography.micro.lineHeight
   },
   errorText: {
     marginTop: 6,
     color: '#8A1F2B',
-    fontFamily: fonts.Medium,
+    ...leafTypography.medium,
     fontSize: typography.caption.size,
     lineHeight: typography.caption.lineHeight
   }

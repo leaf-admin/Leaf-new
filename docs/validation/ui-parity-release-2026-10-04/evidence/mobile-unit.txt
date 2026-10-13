@@ -1,0 +1,7 @@
+PASS __tests__/app-navigator-onboarding-guard.test.js
+
+Test Suites: 173 passed, 173 total
+Tests:       1441 passed, 1441 total
+Snapshots:   0 total
+Time:        46.851 s
+Ran all test suites.

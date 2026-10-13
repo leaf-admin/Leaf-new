@@ -69,13 +69,13 @@ const styles = StyleSheet.create({
   },
   title: {
     fontSize: 24,
-    fontWeight: 'bold',
+    fontFamily: 'Figtree-Bold',
     marginBottom: 20,
     color: colors.text,
   },
   section: {
     fontSize: 18,
-    fontWeight: 'bold',
+    fontFamily: 'Figtree-Bold',
     marginTop: 16,
     marginBottom: 8,
     color: colors.text,

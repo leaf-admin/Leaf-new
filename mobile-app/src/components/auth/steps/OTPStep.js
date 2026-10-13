@@ -1,7 +1,7 @@
+import leafTypography from '../../prototype/LeafTypography';
 import Logger from '../../../utils/Logger';
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { View, TextInput, TouchableOpacity, StyleSheet, Alert as NativeAlert, Text } from 'react-native';
-import { fonts } from '../../../theme/runtimeTokens';
+import { View, TextInput, TouchableOpacity, StyleSheet, Alert as NativeAlert, Text, Platform } from 'react-native';
 import auth from '@react-native-firebase/auth';
 import ContinueButton from '../common/ContinueButton';
 import EditorialOnboardingScreen from '../common/EditorialOnboardingLayout';
@@ -55,10 +55,10 @@ const Alert = {
     ...NativeAlert,
     alert: (title, message, buttons, options) =>
         NativeAlert.alert(
-            title || 'Atencao',
+            title || 'Atenção',
             toUserFriendlyMessage(message, {
                 context: 'auth',
-                fallbackMessage: 'Nao foi possivel validar o codigo agora. Tente novamente.'
+                fallbackMessage: 'Não foi possível validar o código agora. Tente novamente.'
             }),
             buttons,
             options
@@ -73,6 +73,9 @@ const OTPStep = ({ phoneNumber, confirmation, onVerified, onBack, progressMeta }
     const [currentConfirmation, setCurrentConfirmation] = useState(confirmation);
     const inputRefs = useRef([]);
     const verifyInFlightRef = useRef(false);
+    const otpChannelLabel = currentConfirmation?.isCustomOtp
+        ? (currentConfirmation?.channel === 'sms' ? 'SMS' : 'WhatsApp')
+        : 'SMS';
 
     useEffect(() => {
         setCurrentConfirmation(confirmation);
@@ -269,7 +272,7 @@ const OTPStep = ({ phoneNumber, confirmation, onVerified, onBack, progressMeta }
 
             if (error.message) {
                 if (error.message.includes('invalid') || error.message.includes('inválido')) {
-                    errorMessage = 'Código inválido. Verifique o código recebido por SMS e tente novamente.';
+                    errorMessage = `Código inválido. Verifique o código recebido pelo ${otpChannelLabel} e tente novamente.`;
                 } else if (error.message.includes('expired') || error.message.includes('expirado')) {
                     errorMessage = 'Código expirado. Solicite um novo código.';
                 } else if (
@@ -293,16 +296,30 @@ const OTPStep = ({ phoneNumber, confirmation, onVerified, onBack, progressMeta }
             verifyInFlightRef.current = false;
             setLoading(false);
         }
-    }, [otp, currentConfirmation, onVerified, loading, verifyOtpWithFallback, phoneNumber]);
+    }, [otp, currentConfirmation, onVerified, loading, verifyOtpWithFallback, phoneNumber, otpChannelLabel]);
 
     // Função para lidar com mudança de input
     const handleOtpChange = useCallback((value, index) => {
+        const digits = String(value || '').replace(/\D/g, '');
         const newOtp = [...otp];
-        newOtp[index] = value;
+
+        if (digits.length > 1) {
+            // Autofill/paste delivers the complete OTP to the focused input.
+            for (let currentIndex = index; currentIndex < newOtp.length; currentIndex += 1) {
+                newOtp[currentIndex] = '';
+            }
+
+            digits.slice(0, newOtp.length - index).split('').forEach((digit, offset) => {
+                newOtp[index + offset] = digit;
+            });
+        } else {
+            newOtp[index] = digits;
+        }
+
         setOtp(newOtp);
 
-        const otpString = newOtp.join('');
-        if (otpString.length === 6) {
+        if (newOtp.every(Boolean)) {
+            const otpString = newOtp.join('');
             // ✅ AUTO-VERIFICAR quando completar 6 dígitos
             // Pequeno delay para garantir que o estado foi atualizado
             setTimeout(() => {
@@ -313,7 +330,12 @@ const OTPStep = ({ phoneNumber, confirmation, onVerified, onBack, progressMeta }
         }
 
         // Mover para o próximo input
-        if (value && index < 5) {
+        if (digits.length > 1 && !newOtp.every(Boolean)) {
+            const nextEmptyIndex = newOtp.findIndex((digit, currentIndex) => currentIndex >= index && !digit);
+            if (nextEmptyIndex >= 0) {
+                inputRefs.current[nextEmptyIndex]?.focus();
+            }
+        } else if (digits && digits.length === 1 && index < 5) {
             inputRefs.current[index + 1]?.focus();
         }
     }, [otp, phoneNumber, loading, handleVerifyOTP]);
@@ -337,7 +359,9 @@ const OTPStep = ({ phoneNumber, confirmation, onVerified, onBack, progressMeta }
                 if (response.data && response.data.success) {
                     newConfirmation = {
                         verificationId: response.data.verificationId,
-                        isCustomOtp: true
+                        isCustomOtp: true,
+                        channel: response.data.channel || 'whatsapp',
+                        expiresIn: response.data.expiresIn || 300
                     };
                 } else {
                     throw new Error('Falha ao reenviar código.');
@@ -350,7 +374,7 @@ const OTPStep = ({ phoneNumber, confirmation, onVerified, onBack, progressMeta }
             setTimer(30);
             setCanResend(false);
             setOtp(['', '', '', '', '', '']);
-            Alert.alert('Código enviado', 'Enviamos um novo código por SMS.');
+            Alert.alert('Código enviado', `Enviamos um novo código pelo ${otpChannelLabel}.`);
         } catch (error) {
             Logger.error('Erro ao reenviar código:', error);
             Alert.alert('Erro', 'Não foi possível reenviar o código. Tente novamente.');
@@ -362,23 +386,54 @@ const OTPStep = ({ phoneNumber, confirmation, onVerified, onBack, progressMeta }
     return (
         <EditorialOnboardingScreen
             keyboard
-            title={'Confirme\nseu celular'}
-            description="Digite o código de 6 dígitos que enviamos por SMS."
+            headerTitle="Seu acesso"
+            leadObject="privacy"
+            title="Código de acesso"
+            description={`Digite os 6 números recebidos por ${otpChannelLabel}.`}
             onBack={onBack}
             backTestID="auth-otp-back-btn"
-            backAccessibilityLabel="auth-otp-back-btn"
+            backAccessibilityLabel="Voltar"
             progressMeta={progressMeta}
             childrenStyle={styles.childrenWrap}
             footer={(
+                <View>
                 <ContinueButton
                     onPress={() => handleVerifyOTP()}
                     disabled={!otp.every(digit => digit) || loading}
                     text={loading ? 'Confirmando...' : 'Confirmar'}
                     testID="auth-otp-verify-btn"
-                    accessibilityLabel="auth-otp-verify-btn"
+                    accessibilityLabel={loading ? 'Confirmando código' : 'Confirmar código'}
                 />
+                <View style={styles.resendContainer}>
+                    {canResend ? (
+                        <TouchableOpacity
+                            onPress={handleResendCode}
+                            disabled={loading}
+                            style={styles.footerLink}
+                            testID="auth-otp-resend-btn"
+                            accessibilityRole="button"
+                            accessibilityState={{ disabled: loading }}
+                            accessibilityLabel={`Reenviar código pelo ${otpChannelLabel}`}
+                            accessibilityHint="Solicita um novo código de verificação."
+                        >
+                            <Text style={styles.resendLink}>Reenviar código</Text>
+                        </TouchableOpacity>
+                    ) : (
+                        <Text style={styles.resendTimer}>Novo código em 00:{String(timer).padStart(2, '0')}</Text>
+                    )}
+                    <TouchableOpacity onPress={onBack} disabled={loading} style={styles.footerLink}
+                        accessibilityRole="button" accessibilityLabel="Alterar número" testID="auth-otp-change-number-btn">
+                        <Text style={styles.resendLink}>Alterar número</Text>
+                    </TouchableOpacity>
+                </View>
+                </View>
             )}
         >
+            <View style={styles.delivery}>
+                <Text style={styles.deliveryLabel}>Enviado para</Text>
+                <Text style={styles.deliveryPhone}>{String(phoneNumber || '').replace(/\D/g, '').length >= 6
+                    ? `+${String(phoneNumber).replace(/\D/g, '').slice(0, 2)} (${String(phoneNumber).replace(/\D/g, '').slice(2, 4)}) •••••-${String(phoneNumber).replace(/\D/g, '').slice(-4)}` : 'Seu celular'}</Text>
+            </View>
             <View style={styles.otpContainer}>
                 {otp.map((digit, index) => (
                     <TextInput
@@ -386,41 +441,37 @@ const OTPStep = ({ phoneNumber, confirmation, onVerified, onBack, progressMeta }
                         ref={ref => inputRefs.current[index] = ref}
                         style={styles.otpInput}
                         value={digit}
+                        placeholder="·"
+                        placeholderTextColor="#AAAAAA"
+                        selectionColor="#222222"
                         onChangeText={(value) => handleOtpChange(value, index)}
                         onKeyPress={(e) => handleKeyPress(e, index)}
                         keyboardType="number-pad"
-                        maxLength={1}
+                        maxLength={6}
                         selectTextOnFocus
                         autoFocus={index === 0}
+                        autoComplete={index === 0
+                            ? Platform.select({ ios: 'one-time-code', android: 'sms-otp' })
+                            : 'off'}
+                        importantForAutofill={index === 0 ? 'yes' : 'no'}
                         testID={`auth-otp-digit-${index}`}
-                        accessibilityLabel={`auth-otp-digit-${index}`}
+                        accessibilityLabel={`Dígito ${index + 1} de 6`}
+                        accessibilityHint={`Campo ${index + 1} de 6. Digite um número do código enviado pelo ${otpChannelLabel}.`}
                     />
                 ))}
             </View>
-            {otp.every(Boolean) ? <Text style={styles.successTick}>✓</Text> : null}
-
-            <View style={styles.resendContainer}>
-                {canResend ? (
-                    <TouchableOpacity
-                        onPress={handleResendCode}
-                        disabled={loading}
-                        testID="auth-otp-resend-btn"
-                        accessibilityLabel="auth-otp-resend-btn"
-                    >
-                        <Text style={styles.resendLink}>Enviar novamente</Text>
-                    </TouchableOpacity>
-                ) : (
-                    <Text style={styles.resendTimer}>Novo código em 00:{String(timer).padStart(2, '0')}</Text>
-                )}
-            </View>
+            <Text style={styles.deliveryHelp}>{otp.every(Boolean) ? 'Código preenchido.' : 'Não recebeu? Você pode reenviar ou corrigir o número abaixo.'}</Text>
         </EditorialOnboardingScreen>
     );
 };
 
 const styles = StyleSheet.create({
     childrenWrap: {
-        marginTop: 64
+        marginTop: 24
     },
+    delivery: { gap: 6, marginBottom: 20 },
+    deliveryLabel: { ...leafTypography.regular, fontSize: 13, lineHeight: 18, color: color.textSecondary },
+    deliveryPhone: { ...leafTypography.semiBold, fontSize: 16, lineHeight: 22, color: color.textPrimary },
     keyboardView: {
         flex: 1,
         width: '100%',
@@ -439,17 +490,17 @@ const styles = StyleSheet.create({
     },
     title: {
         color: '#102018',
-        fontSize: 19,
-        lineHeight: 25,
-        fontFamily: fonts.Medium,
+        fontSize: 22,
+        lineHeight: 28,
+        ...leafTypography.medium,
         letterSpacing: 0
     },
     subtitle: {
         marginTop: 8,
         color: '#66756B',
-        fontSize: 13,
-        lineHeight: 18,
-        fontFamily: fonts.Regular
+        fontSize: 14,
+        lineHeight: 20,
+        ...leafTypography.regular
     },
     card: {
         backgroundColor: 'transparent',
@@ -463,20 +514,21 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         justifyContent: 'space-between',
         marginBottom: 0,
-        gap: 10
+        gap: 8
     },
     otpInput: {
-        width: 46,
-        height: 56,
+        flex: 1,
+        minWidth: 0,
+        height: 64,
         borderWidth: 1,
         borderColor: color.border,
-        borderRadius: 18,
+        borderRadius: 12,
         textAlign: 'center',
-        fontSize: 18,
-        lineHeight: 24,
-        fontFamily: fonts.SemiBold,
+        fontSize: 28,
+        lineHeight: 34,
+        ...leafTypography.semiBold,
         color: color.textPrimary,
-        backgroundColor: '#FFFFFF'
+        backgroundColor: '#F5F5F5'
     },
     successTick: {
         alignSelf: 'center',
@@ -488,7 +540,7 @@ const styles = StyleSheet.create({
         color: color.accentText,
         fontSize: 22,
         lineHeight: 38,
-        fontFamily: fonts.Bold,
+        ...leafTypography.bold,
         textAlign: 'center',
         marginBottom: spacing.xs
     },
@@ -509,33 +561,37 @@ const styles = StyleSheet.create({
     verifyButtonText: {
         fontSize: 12,
         lineHeight: 16,
-        fontFamily: fonts.Medium
+        ...leafTypography.medium
     },
     resendContainer: {
         flexDirection: 'row',
         alignItems: 'center',
-        justifyContent: 'center',
-        marginTop: 26,
-        marginBottom: spacing.md
+        justifyContent: 'space-between',
+        gap: 16,
+        flexWrap: 'wrap',
+        marginTop: 12,
+        minHeight: 44
     },
+    footerLink: { minHeight: 44, justifyContent: 'center' },
+    deliveryHelp: { marginTop: 20, fontSize: 13, lineHeight: 19, color: color.textSecondary, ...leafTypography.regular },
     resendText: {
         fontSize: 12,
         lineHeight: 16,
         color: '#5F6B62',
-        fontFamily: fonts.Medium
+        ...leafTypography.medium
     },
     resendLink: {
         textDecorationLine: 'underline',
-        fontSize: 12,
-        lineHeight: 16,
+        fontSize: 14,
+        lineHeight: 20,
         color: color.accent,
-        fontFamily: fonts.SemiBold
+        ...leafTypography.semiBold
     },
     resendTimer: {
         fontSize: 12,
         lineHeight: 16,
         color: color.textSecondary,
-        fontFamily: fonts.Medium
+        ...leafTypography.medium
     },
     footer: {
         marginTop: 'auto',

@@ -67,7 +67,7 @@ export function OptionModal(props) {
                     : null}
                 {tripdata.carType && tripdata.carType.options ?
                     <View style={{ marginTop: 20,width:'100%'}}>
-                        <Text style={{ color: colors.BLACK, fontWeight: 'bold', fontSize: 16,textAlign:isRTL? 'right':'left' }}>{t('options')}</Text>
+                        <Text style={{ color: colors.BLACK, fontFamily: 'Figtree-Bold', fontSize: 16,textAlign:isRTL? 'right':'left' }}>{t('options')}</Text>
                         <RadioForm
                             initial={0}
                             formHorizontal={false}

@@ -1,0 +1,86 @@
+[
+  {
+    "path": "mobile-app/App.js",
+    "sha256": "28b7357d866f83fe3e35741e5a22757e7d179074c7eb9e021c60941a25ae8cb0"
+  },
+  {
+    "path": "mobile-app/src/services/MobilePreferencesService.js",
+    "sha256": "7a51ba00bb9bf4afec5a690bf1e5daaefeb717a80ec20d7645fa1549066d3628"
+  },
+  {
+    "path": "mobile-app/src/screens/prototype/RobotaxiSettingsScreen.js",
+    "sha256": "167c57ffa1a34be6afbb639413d2dd6d79424d15647296b5c652a0b6f6378c77"
+  },
+  {
+    "path": "mobile-app/src/screens/prototype/robotaxiSettingsConfig.js",
+    "sha256": "1f3276dd66e9e0c7d0b234b217fa358faae09259474826638ec4461b2bfd94c5"
+  },
+  {
+    "path": "mobile-app/src/components/prototype/PrototypeMapLayer.js",
+    "sha256": "94321d60a8230b840506ac7f7cb0b50eef5afc1eac8b153c5bed5bc724ae5185"
+  },
+  {
+    "path": "mobile-app/src/screens/prototype/RobotaxiHomeScreen.js",
+    "sha256": "2ab720f9dae9ec3ccd94217d2d51c1a7c8a0997e1af00f9e59ac93e6b87d8126"
+  },
+  {
+    "path": "mobile-app/src/locales/index.js",
+    "sha256": "e2b4ccf817bd665a5ed186a5bcf29c0a0fe49946059fba0d10c86627c3780eca"
+  },
+  {
+    "path": "mobile-app/plugins/withLeafMaterial.js",
+    "sha256": "5f183b24ceb9aab2239d5287e25ef6b28370f89929c5485b670a8f2fa5fc9815"
+  },
+  {
+    "path": "mobile-app/__tests__/robotaxi-settings-persistence.test.js",
+    "sha256": "9581289e163e8490b9d172b599e01ceeb27b900768946c8b23f09b5027ed3eb4"
+  },
+  {
+    "path": "mobile-app/src/components/i18n/LanguageProvider.js",
+    "sha256": "a3f8cc96bc95c254fb1d41ad2013a24264f9dcd03ce7f2ba55f5be38d9a905c0"
+  },
+  {
+    "path": "mobile-app/src/i18n/index.js",
+    "sha256": "b3e59944d008a2fe634a90805f5ecc4b504273c442dc8acd52b60f86ee72b0a6"
+  },
+  {
+    "path": "mobile-app/ios/Leaf.xcodeproj/project.pbxproj",
+    "sha256": "27362940dcf313a651e0283e6b6f71d408f59ba68a8e39cb1e977c437de5272e"
+  },
+  {
+    "path": "mobile-app/ios/Leaf/Info.plist",
+    "sha256": "1f8409b7f181fa3a5afad2a1a5ed524ca7130d6e957f08fbb9d0f8b86c81d78d"
+  },
+  {
+    "path": "mobile-app/android/app/src/main/java/br/com/leaf/ride/MainApplication.kt",
+    "sha256": "6b56cc9bbff3a317614fe9ebf52750cb3164dc7dcc932ae3e1eff6e9cf8695fa"
+  },
+  {
+    "path": "mobile-app/android/app/src/main/AndroidManifest.xml",
+    "sha256": "8ea5bfc5aaa415d4f9cda522d798c3a509f545625461ef73c1cc849eb6dcb1f3"
+  },
+  {
+    "path": "mobile-app/__tests__/prototype-map-layer-viewport.test.js",
+    "sha256": "be7b4872681483b598546e6dbf5332a85146e86fdd8a27d90f9bb62bda726f8b"
+  },
+  {
+    "path": "mobile-app/__tests__/current-account-surface-services.test.js",
+    "sha256": "2b4b69d3f9b37b1e1a04e9d3eb27694e840c6ada8c6b2f05f205b90e2f4ea554"
+  },
+  {
+    "path": "mobile-app/__tests__/current-account-surface-contract.test.js",
+    "sha256": "6c1b9047086dc675c51fc51c317953402e4168d504088779f6fc7685c2bd75dd"
+  },
+  {
+    "path": "mobile-app/scripts/build-local-ios.sh",
+    "sha256": "852a7b683cc28de34bc7eebaf07a32387401cd847c14bc4b485d0948dd206a65"
+  },
+  {
+    "path": "mobile-app/scripts/build-local-android.sh",
+    "sha256": "161d4420941cd33f53f298ce56621e301b1ebff7b8c5a4c4c344eff7690f3b12"
+  },
+  {
+    "path": "mobile-app/android/app/build.gradle",
+    "sha256": "0604e1bda456a45afbf5e490b305389086e90e14a8308e0971f52b64f9bfe052"
+  }
+]

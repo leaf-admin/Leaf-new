@@ -356,6 +356,9 @@ describe('prototype QA seeds', () => {
     expect(dualOpenRunner).toContain('SHARED_METRO_PORT="${SHARED_METRO_PORT:-8097}"');
     expect(dualDriverFlow).toContain('${MAESTRO_METRO_PORT}');
     expect(dualPassengerFlow).toContain('${MAESTRO_METRO_PORT}');
+    expect(dualDriverFlow).toContain('The E3 preflight owns the one-time reset');
+    expect(dualDriverFlow).not.toContain('clearState: true');
+    expect(dualPreflight).toContain('EXPO_PUBLIC_E2E_TEST="${EXPO_PUBLIC_E2E_TEST:-false}"');
   });
 
   it('keeps standalone QA coordinate fallbacks inside the active Rio pilot', () => {
