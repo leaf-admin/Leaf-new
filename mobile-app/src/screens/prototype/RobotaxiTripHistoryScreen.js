@@ -107,6 +107,42 @@ function buildHistoryStats(history, isDriverRole, { partial = false } = {}) {
   ];
 }
 
+// Period filter of the receipts list. The server returns newest first and has no
+// date parameter, so the list filters what is loaded and keeps loading older
+// pages until the chosen period is covered.
+const HISTORY_DATE_FILTERS = [
+  { key: 'all', label: 'Tudo', days: null },
+  { key: 'today', label: 'Hoje', days: 0 },
+  { key: '7d', label: '7 dias', days: 7 },
+  { key: '30d', label: '30 dias', days: 30 },
+];
+
+function resolveHistoryItemTimeMs(item) {
+  const value = item?.completedAt || item?.date || item?.tripdate || item?.startTime || item?.createdAt;
+  if (!value) return NaN;
+  const asNumber = Number(value);
+  if (Number.isFinite(asNumber)) return asNumber > 1e12 ? asNumber : asNumber * 1000;
+  return new Date(value).getTime();
+}
+
+export function resolveHistoryFilterStartMs(filterKey, nowMs = Date.now()) {
+  const filter = HISTORY_DATE_FILTERS.find((entry) => entry.key === filterKey);
+  if (!filter || filter.days === null) return null;
+  const start = new Date(nowMs);
+  start.setHours(0, 0, 0, 0);
+  if (filter.days > 0) start.setDate(start.getDate() - (filter.days - 1));
+  return start.getTime();
+}
+
+export function filterHistoryByStart(history, startMs) {
+  const list = Array.isArray(history) ? history : [];
+  if (startMs === null) return list;
+  return list.filter((item) => {
+    const timeMs = resolveHistoryItemTimeMs(item);
+    return Number.isFinite(timeMs) && timeMs >= startMs;
+  });
+}
+
 function HistoryRow({ item, isDriverRole = false, last = false, onPress }) {
   const routeLabels = splitRouteLabel(item);
   const valueLabel = formatHistoryValue(item, isDriverRole);
@@ -185,7 +221,23 @@ export default function RobotaxiTripHistoryScreen({ navigation, route }) {
   liveOwnerRef.current = historyOwner;
   const mountedRef = useRef(false);
   const pendingHistoryRef = useRef(null);
-  const { bookings: history, loading: loadingHistory, loadingMore, refreshing, error: historyError, pageInfo } = visibleHistory;
+  const { bookings: loadedHistory, loading: loadingHistory, loadingMore, refreshing, error: historyError, pageInfo } = visibleHistory;
+  const [dateFilterKey, setDateFilterKey] = useState('all');
+  const dateFilterStartMs = useMemo(() => resolveHistoryFilterStartMs(dateFilterKey), [dateFilterKey]);
+  const history = useMemo(
+    () => filterHistoryByStart(loadedHistory, dateFilterStartMs),
+    [dateFilterStartMs, loadedHistory],
+  );
+  const isDateFiltered = dateFilterStartMs !== null;
+  // Older pages may still hold rides of the chosen period.
+  const oldestLoadedMs = loadedHistory.length
+    ? resolveHistoryItemTimeMs(loadedHistory[loadedHistory.length - 1])
+    : NaN;
+  const periodNeedsMorePages = Boolean(
+    isDateFiltered &&
+      pageInfo?.hasNextPage &&
+      (!Number.isFinite(oldestLoadedMs) || oldestLoadedMs >= dateFilterStartMs),
+  );
   const driverEarningsReport = useDriverEarningsReport({
     driverId: isDriverRole ? profileUid : '',
     enabled: isDriverRole && isScreenFocused,
@@ -198,15 +250,17 @@ export default function RobotaxiTripHistoryScreen({ navigation, route }) {
   const loadingSummary = loadingHistory || (isDriverRole && driverEarningsReport.pending);
   const stats = useMemo(
     () =>
-      isDriverRole
+      isDateFiltered
+        ? buildHistoryStats(history, isDriverRole)
+        : isDriverRole
         ? buildDriverHistoryStats({
             serverPeriod: driverServerPeriod,
             historyComplete: !pageInfo?.hasNextPage,
             loadedListStats: buildHistoryStats(history, true),
             loadedRideCount: Array.isArray(history) ? history.length : 0,
           })
-        : buildHistoryStats(history, false, { partial: Boolean(pageInfo?.hasNextPage) }),
-    [driverServerPeriod, history, isDriverRole, pageInfo?.hasNextPage],
+        : buildHistoryStats(history, false, { partial: Boolean(pageInfo?.hasNextPage) && !isDateFiltered }),
+    [driverServerPeriod, history, isDateFiltered, isDriverRole, pageInfo?.hasNextPage],
   );
   const primaryStat = stats[0] || null;
   const secondaryStat = stats[1] || null;
@@ -292,6 +346,11 @@ export default function RobotaxiTripHistoryScreen({ navigation, route }) {
     };
   }, [loadHistory, navigation]);
 
+  useEffect(() => {
+    if (!periodNeedsMorePages || loadingHistory || loadingMore || refreshing) return;
+    loadHistory({ append: true, after: pageInfo.endCursor });
+  }, [loadHistory, loadingHistory, loadingMore, pageInfo?.endCursor, periodNeedsMorePages, refreshing]);
+
   const openReceipt = useCallback((item) => {
     navigation.navigate('RobotaxiPrototypeReceipt', {
       receipt: item,
@@ -341,6 +400,28 @@ export default function RobotaxiTripHistoryScreen({ navigation, route }) {
               {isRootTab ? null : <PrototypeMenuCloseButton onPress={handleDismiss} />}
             </View>}
           >
+            {loadedHistory.length > 0 ? (
+              <View style={styles.dateFilterRow} accessibilityRole="tablist" testID="robotaxi-history-date-filter">
+                {HISTORY_DATE_FILTERS.map((filter) => {
+                  const active = filter.key === dateFilterKey;
+                  return (
+                    <TouchableOpacity
+                      key={filter.key}
+                      onPress={() => setDateFilterKey(filter.key)}
+                      style={[styles.dateFilterChip, active && styles.dateFilterChipActive]}
+                      accessibilityRole="tab"
+                      accessibilityState={{ selected: active }}
+                      accessibilityLabel={`Período: ${filter.label}`}
+                      testID={`robotaxi-history-date-filter-${filter.key}`}
+                    >
+                      <Text style={[styles.dateFilterChipText, active && styles.dateFilterChipTextActive]}>
+                        {filter.label}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            ) : null}
             {loadingHistory || history.length > 0 ? <View style={styles.summaryCardGrid}>
               {primaryStat ? (
                 <View style={styles.summaryCard}>
@@ -398,7 +479,7 @@ export default function RobotaxiTripHistoryScreen({ navigation, route }) {
                       onPress={() => openReceipt(item)}
                     />
                   ))}
-                  {pageInfo.hasNextPage ? (
+                  {pageInfo.hasNextPage && !isDateFiltered ? (
                     <LeafButton
                       label={loadingMore ? 'Carregando...' : 'Carregar mais'}
                       tone="secondary"
@@ -407,6 +488,21 @@ export default function RobotaxiTripHistoryScreen({ navigation, route }) {
                     />
                   ) : null}
                   </>
+                ) : isDateFiltered && loadedHistory.length > 0 ? (
+                  periodNeedsMorePages || loadingMore ? (
+                    <View style={styles.centerState} testID="robotaxi-history-filter-loading">
+                      <ListSkeleton rows={3} rowHeight={56} />
+                    </View>
+                  ) : (
+                    <LeafEmptyState
+                      icon="calendar-outline"
+                      title="Nenhuma corrida neste período"
+                      message="Escolha outro período para ver mais recibos."
+                      actionLabel="Ver tudo"
+                      onAction={() => setDateFilterKey('all')}
+                      testID="robotaxi-history-filter-empty"
+                    />
+                  )
                 ) : (
                   <LeafEmptyState
                     icon="receipt-outline"
@@ -449,6 +545,33 @@ const styles = StyleSheet.create({
   },
   body: {
     flex: 1,
+  },
+  dateFilterRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 14,
+  },
+  dateFilterChip: {
+    minHeight: 36,
+    paddingHorizontal: 14,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: '#E3E3E0',
+    backgroundColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  dateFilterChipActive: {
+    borderColor: '#1A330E',
+    backgroundColor: '#1A330E',
+  },
+  dateFilterChipText: {
+    ...leafTypography.medium,
+    fontSize: 13,
+    color: '#3A3A38',
+  },
+  dateFilterChipTextActive: {
+    color: '#FFFFFF',
   },
   summaryCardGrid: {
     flexDirection: 'row',

@@ -10421,12 +10421,18 @@ function attachSocketListeners() {
         .trim()
         .toUpperCase() === "REASSIGNMENT_PENDING" ||
       Boolean(operationalContinuation);
+    // Fare above normal (percent and reasons), shown on the offer card.
+    const offerFareSignalPayload =
+      payload?.fareSignal && typeof payload.fareSignal === "object"
+        ? payload.fareSignal
+        : null;
     const offerWithPricing =
       Number.isFinite(netPayoutFromPayload) && netPayoutFromPayload >= 0
         ? {
             ...createdOffer,
             ...(pickupCoordinate ? { pickupCoordinate } : {}),
             ...(pricingSnapshotMetadata || {}),
+            ...(offerFareSignalPayload ? { fareSignal: offerFareSignalPayload } : {}),
             ...(isOperationalContinuation
               ? {
                   isOperationalContinuation: true,
@@ -10452,6 +10458,7 @@ function attachSocketListeners() {
             ...createdOffer,
             ...(pickupCoordinate ? { pickupCoordinate } : {}),
             ...(pricingSnapshotMetadata || {}),
+            ...(offerFareSignalPayload ? { fareSignal: offerFareSignalPayload } : {}),
             ...(isOperationalContinuation
               ? {
                   isOperationalContinuation: true,
