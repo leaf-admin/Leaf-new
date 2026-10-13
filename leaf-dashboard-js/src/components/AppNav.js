@@ -34,6 +34,7 @@ export default function AppNav() {
   const wasMobileOpenRef = useRef(false);
   const apiDocsHref = process.env.NEXT_PUBLIC_API_DOCS_URL || "/reports";
   const isApiDocsExternal = /^https?:\/\//i.test(apiDocsHref);
+  const campaignCenterVisible = runtimeFlags?.launch?.campaignCenterEnabled === true;
   const adminMutationsEnabled = runtimeFlags?.launch?.adminMutationsEnabled !== false;
 
   useEffect(() => {
@@ -149,7 +150,22 @@ export default function AppNav() {
           <span className="app-topbar-page">{activeItem?.label || activeGroup.label}</span>
         </div>
         <div className="app-topbar-right">
-          <span className="app-topbar-context">{activeGroup?.section || "Operação"}</span>
+          <Link href="/dashboard" className="app-topbar-link">
+            Visão geral
+          </Link>
+          <Link href="/support" className="app-topbar-link">
+            Suporte
+          </Link>
+          {campaignCenterVisible ? (
+            <Link href="/campaign-center" className="app-topbar-link">
+              Campanhas
+            </Link>
+          ) : null}
+          {canAccessItem({ allowedRoles: ["admin", "super-admin", "manager"] }, user) ? (
+            <Link href="/drivers/review-queue" className="app-topbar-link">
+              Cadastro
+            </Link>
+          ) : null}
           <Link
             href={apiDocsHref}
             className="app-topbar-link app-topbar-link-secondary"
@@ -187,56 +203,37 @@ export default function AppNav() {
         <nav id="app-sidebar-nav" className="app-sidebar-nav" aria-label="Navegação principal">
           {visibleGroups.map((group) => {
             const groupActive = group.id === activeGroup.id;
-            const headingClass = groupActive
-              ? "app-sidebar-group-heading app-sidebar-group-heading-active"
-              : "app-sidebar-group-heading";
-            const groupLinks = (
-              <div className="app-sidebar-links">
-                {group.items.map((item) => {
-                  const active = activeItem?.href === item.href;
-                  return (
-                    <Link
-                      key={item.href}
-                      href={item.href}
-                      className={active ? "app-sidebar-link app-sidebar-link-active" : "app-sidebar-link"}
-                      aria-current={active ? "page" : undefined}
-                    >
-                      {item.label}
-                    </Link>
-                  );
-                })}
-              </div>
-            );
-
-            if (group.collapsible) {
-              return (
-                <details
-                  key={group.id}
-                  className="app-sidebar-group app-sidebar-group-collapsible"
-                  open={groupActive}
-                  aria-label={`${group.section}: ${group.label}`}
-                >
-                  <summary className={headingClass}>
-                    <h3 className="app-sidebar-group-title">{group.section}</h3>
-                    <span className="app-sidebar-group-toggle" aria-hidden="true" />
-                  </summary>
-                  {groupLinks}
-                </details>
-              );
-            }
-
             return (
-              <section key={group.id} className="app-sidebar-group" aria-label={`${group.section}: ${group.label}`}>
-                <div className={headingClass}>
-                  <h3 className="app-sidebar-group-title">{group.section}</h3>
+              <section key={group.id} className="app-sidebar-group">
+                <p className="app-sidebar-section">{group.section}</p>
+                <h3 className={groupActive ? "app-sidebar-group-title app-sidebar-group-title-active" : "app-sidebar-group-title"}>
+                  {group.label}
+                </h3>
+                <div className="app-sidebar-links">
+                  {group.items.map((item) => {
+                    const active = activeItem?.href === item.href;
+                    return (
+                      <Link
+                        key={item.href}
+                        href={item.href}
+                        className={active ? "app-sidebar-link app-sidebar-link-active" : "app-sidebar-link"}
+                        aria-current={active ? "page" : undefined}
+                      >
+                        {item.label}
+                      </Link>
+                    );
+                  })}
                 </div>
-                {groupLinks}
               </section>
             );
           })}
         </nav>
 
         <div className="app-sidebar-foot">
+          <div className="app-sidebar-card">
+            <p className="app-sidebar-card-title">Live observability</p>
+            <p className="app-sidebar-card-text">Console limpo para operação assistida.</p>
+          </div>
           <div className="app-sidebar-user">
             <div className="app-sidebar-avatar">{userInitials}</div>
             <div>

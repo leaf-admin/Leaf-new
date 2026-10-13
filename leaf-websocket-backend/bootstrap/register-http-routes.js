@@ -19,7 +19,6 @@ function registerHttpRoutes({ app, logStructured, io = null }) {
     // Importar rotas Dashboard
     const dashboardRoutes = require('../routes/dashboard');
     const pricingRoutes = require('../routes/pricing');
-    const routeTollService = require('../services/route-toll-service');
 
     // Importar rotas de Métricas
     const metricsRoutes = require('../routes/metrics');
@@ -141,13 +140,6 @@ function registerHttpRoutes({ app, logStructured, io = null }) {
     // Rotas de Pricing
     app.use('/api', pricingRoutes);
     logStructured('info', 'Rotas de Pricing registradas', { service: 'server' });
-    routeTollService.loadTollCatalog().catch((error) => {
-        logStructured('warn', 'Catálogo de pedágios não carregado no boot; usando snapshot padrão', {
-            service: 'server',
-            operation: 'load_toll_catalog_boot',
-            error: error.message
-        });
-    });
 
     // Rotas de previsão de demanda e smart push
     const demandPredictionRoutes = require('../routes/demand-predictions');

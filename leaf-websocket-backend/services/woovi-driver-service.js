@@ -98,6 +98,34 @@ function normalizeChargeAmount(charge) {
   return Number.isFinite(numeric) ? numeric : 0;
 }
 
+// Falhas de rede em que a conexão com a Woovi nem chegou a ser aberta: o pedido
+// de reembolso com certeza não saiu daqui.
+const REFUND_NOT_SENT_ERROR_CODES = new Set([
+  'ECONNREFUSED',
+  'ENOTFOUND',
+  'EAI_AGAIN',
+  'ENETUNREACH',
+  'EHOSTUNREACH'
+]);
+
+/**
+ * Diz se o pedido de reembolso chegou à Woovi. A chamada de reembolso não leva
+ * id de idempotência, então só `NOT_SENT` pode ser repetido sem risco de
+ * estorno em dobro.
+ *
+ * - NOT_SENT: a conexão não foi aberta, nada foi enviado.
+ * - REJECTED: a Woovi respondeu 4xx recusando o pedido.
+ * - UNKNOWN: timeout, conexão derrubada no meio ou 5xx; o reembolso pode ter
+ *   sido feito.
+ */
+function classifyRefundProviderDelivery(error = {}) {
+  const status = Number(error?.response?.status);
+  if (Number.isFinite(status) && status > 0) {
+    return status >= 400 && status < 500 ? 'REJECTED' : 'UNKNOWN';
+  }
+  return REFUND_NOT_SENT_ERROR_CODES.has(String(error?.code || '')) ? 'NOT_SENT' : 'UNKNOWN';
+}
+
 class WooviDriverService {
   constructor(options = {}) {
     this.defaultConfig = options.wooviConfig || DEFAULT_WOOVI_CONFIG;
@@ -1036,7 +1064,10 @@ class WooviDriverService {
       logError(error, 'Erro ao processar reembolso', { service: 'woovi-driver-service', errorData: error.response?.data });
       return {
         success: false,
-        error: error.response?.data || error.message
+        error: error.response?.data || error.message,
+        httpStatus: error.response?.status || null,
+        errorCode: error.code || null,
+        providerDelivery: classifyRefundProviderDelivery(error)
       };
     }
   }
@@ -1368,5 +1399,7 @@ class WooviDriverService {
     }
   }
 }
+
+WooviDriverService.classifyRefundProviderDelivery = classifyRefundProviderDelivery;
 
 module.exports = WooviDriverService;

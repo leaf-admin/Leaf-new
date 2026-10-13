@@ -131,6 +131,14 @@ const DRIVER_REOFFER_MAX_REJECTIONS = parsePositiveInt(
     process.env.DRIVER_REOFFER_MAX_REJECTIONS,
     2
 );
+// Mesmo intervalo aplicado pelo ResponseHandler quando o motorista recusa.
+const parsedDriverReofferCooldownSeconds = parsePositiveInt(
+    process.env.DRIVER_REOFFER_COOLDOWN_SECONDS,
+    30
+);
+const DRIVER_REOFFER_COOLDOWN_SECONDS = process.env.NODE_ENV === 'test'
+    ? parsedDriverReofferCooldownSeconds
+    : Math.max(30, parsedDriverReofferCooldownSeconds);
 const DISPATCH_NOTIFY_CONCURRENCY = parsePositiveInt(process.env.DISPATCH_NOTIFY_CONCURRENCY, 4);
 const DISPATCH_DRIVER_LIVENESS_GRACE_MS = parsePositiveInt(
     process.env.DISPATCH_DRIVER_LIVENESS_GRACE_MS,
@@ -1573,6 +1581,20 @@ class DriverNotificationDispatcher {
                     // ✅ Limpar corrida ativa na tela do motorista (timeout)
                     await this.redis.del(`driver_active_notification:${driverId}`);
                     await clearOfferReservation(this.redis, bookingId, driverId).catch(() => null);
+
+                    // Oferta ignorada conta como recusa para o ritmo de reoferta: sem
+                    // isto, a próxima wave tocava a mesma corrida para o mesmo
+                    // motorista segundos depois.
+                    try {
+                        await this.redis.set(
+                            this.getRideReofferCooldownKey(bookingId, driverId),
+                            'timeout',
+                            'EX',
+                            DRIVER_REOFFER_COOLDOWN_SECONDS
+                        );
+                    } catch (cooldownError) {
+                        logger.warn(`⚠️ [Dispatcher] Falha ao aplicar cooldown de reoferta por timeout para ${driverId}: ${cooldownError.message}`);
+                    }
 
                     // ✅ Liberar lock órfão desta corrida para permitir novos dispatches.
                     const released = await driverLockManager.releaseLock(driverId, bookingId);

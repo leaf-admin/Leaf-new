@@ -285,4 +285,170 @@ describe('CancelRideCommand authorization and terminal guards', () => {
       })
     );
   });
+  it('charges the no-show wait fee in cents of a fare stored in reais', async () => {
+    const processRideRefund = jest.fn().mockResolvedValue({ success: true, refundId: 'refund_no_show_1' });
+    PaymentService.mockImplementation(() => ({
+      WOOVI_FEE_PERCENTAGE: 0.0099,
+      WOOVI_FEE_MINIMUM: 50,
+      getStoredPayment: jest.fn().mockResolvedValue({
+        status: 'PAID',
+        chargeId: 'charge_no_show_1',
+        amount: 4507,
+        passengerId: 'customer_1',
+      }),
+      processRideRefund,
+    }));
+    redisPool.getConnection.mockReturnValue({
+      hgetall: jest.fn().mockImplementation(async (key) => {
+        if (key === 'booking:booking_no_show') {
+          return {
+            customerId: 'customer_1',
+            driverId: 'driver_1',
+            status: 'ARRIVED',
+            driverArrivedAt: String(Date.now() - 5 * 60000 - 2000),
+            estimatedFare: '45.07',
+          };
+        }
+        return {};
+      }),
+      hset: jest.fn().mockResolvedValue(1),
+      hdel: jest.fn().mockResolvedValue(1),
+      get: jest.fn().mockResolvedValue('booking_no_show'),
+      del: jest.fn().mockResolvedValue(1),
+      geopos: jest.fn().mockResolvedValue([]),
+    });
+    RideStateManager.getBookingState.mockResolvedValue('ARRIVED');
+    RideStateManager.updateBookingState.mockResolvedValue({ success: true });
+
+    const result = await new CancelRideCommand({
+      bookingId: 'booking_no_show',
+      canceledBy: 'driver_1',
+      userType: 'driver',
+      reason: 'Passageiro não compareceu ao embarque.',
+    }).execute();
+
+    expect(result.success).toBe(true);
+    // 5 min x R$ 0,50 + R$ 0,50; the 40% cap is R$ 18,02, not R$ 0,18.
+    expect(result.data.cancellationFee).toBe(300);
+  });
+});
+
+describe('CancelRideCommand ordering of refund, state commit and post-commit work', () => {
+  const tripLocationPersistenceService = require('../../../services/trip-location-persistence-service');
+  const { logStructured } = require('../../../utils/logger');
+  const flushAsync = () => new Promise((resolve) => setImmediate(resolve));
+
+  const arrangeDriverCancel = ({ processRideRefund }) => {
+    PaymentService.mockImplementation(() => ({
+      WOOVI_FEE_PERCENTAGE: 0.0099,
+      WOOVI_FEE_MINIMUM: 50,
+      getStoredPayment: jest.fn().mockResolvedValue({
+        status: 'CONFIRMED',
+        chargeId: 'charge_driver_cancel',
+        amount: 4861,
+        passengerId: 'customer_1',
+      }),
+      processRideRefund,
+    }));
+    redisPool.getConnection.mockReturnValue({
+      hgetall: jest.fn().mockImplementation(async (key) => {
+        if (key === 'booking:booking_driver_cancel') {
+          return { customerId: 'customer_1', driverId: 'driver_1', status: 'ACCEPTED' };
+        }
+        return {};
+      }),
+      hset: jest.fn().mockResolvedValue(1),
+      hdel: jest.fn().mockResolvedValue(1),
+      get: jest.fn().mockResolvedValue('booking_driver_cancel'),
+      del: jest.fn().mockResolvedValue(1),
+      geopos: jest.fn().mockResolvedValue([]),
+    });
+    RideStateManager.getBookingState.mockResolvedValue('ACCEPTED');
+    RideStateManager.updateBookingState.mockResolvedValue({ success: true });
+    return new CancelRideCommand({
+      bookingId: 'booking_driver_cancel',
+      canceledBy: 'driver_1',
+      userType: 'driver',
+      reason: 'Motorista cancelou',
+    });
+  };
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    tripLocationPersistenceService.forceFinalizeTrip.mockReset();
+  });
+
+  it('answers after the refund and the state commit without waiting for the location trail flush', async () => {
+    const order = [];
+    const processRideRefund = jest.fn().mockImplementation(async () => {
+      order.push('refund');
+      return { success: true, refundId: 'refund_driver_cancel', amount: 4861 };
+    });
+    const command = arrangeDriverCancel({ processRideRefund });
+    RideStateManager.updateBookingState.mockImplementation(async () => {
+      order.push('state_commit');
+      return { success: true };
+    });
+    let releaseFlush;
+    tripLocationPersistenceService.forceFinalizeTrip.mockImplementation(() => {
+      order.push('location_flush_started');
+      return new Promise((resolve) => { releaseFlush = resolve; });
+    });
+
+    const result = await command.execute();
+
+    // O flush ainda está pendente e o command já respondeu.
+    expect(result.success).toBe(true);
+    expect(order).toEqual(['refund', 'state_commit', 'location_flush_started']);
+    expect(processRideRefund).toHaveBeenCalledTimes(1);
+    expect(processRideRefund).toHaveBeenCalledWith(expect.objectContaining({
+      rideId: 'booking_driver_cancel',
+      chargeId: 'charge_driver_cancel',
+      amount: 4861,
+      status: 'REFUNDED_FULL',
+    }));
+    expect(RideStateManager.updateBookingState).toHaveBeenCalledWith(
+      expect.anything(),
+      'booking_driver_cancel',
+      'CANCELED',
+      expect.objectContaining({ canceledBy: 'driver_1' })
+    );
+    expect(tripLocationPersistenceService.forceFinalizeTrip).toHaveBeenCalledWith(
+      'booking_driver_cancel',
+      expect.objectContaining({ status: 'canceled', reason: 'ride_canceled' })
+    );
+    expect(result.data.refundResult).toMatchObject({ success: true, refundId: 'refund_driver_cancel' });
+
+    releaseFlush({ success: true });
+    await flushAsync();
+  });
+
+  it('still fails the cancellation and commits nothing when the refund fails', async () => {
+    const processRideRefund = jest.fn().mockResolvedValue({ success: false, error: 'Falha ao processar reembolso' });
+    const command = arrangeDriverCancel({ processRideRefund });
+
+    const result = await command.execute();
+
+    expect(result.success).toBe(false);
+    expect(result.error).toBe('Falha ao processar reembolso');
+    expect(processRideRefund).toHaveBeenCalledTimes(1);
+    expect(RideStateManager.updateBookingState).not.toHaveBeenCalled();
+    expect(tripLocationPersistenceService.forceFinalizeTrip).not.toHaveBeenCalled();
+  });
+
+  it('still logs a location trail flush failure without failing the cancellation', async () => {
+    const processRideRefund = jest.fn().mockResolvedValue({ success: true, refundId: 'refund_driver_cancel' });
+    const command = arrangeDriverCancel({ processRideRefund });
+    tripLocationPersistenceService.forceFinalizeTrip.mockRejectedValue(new Error('firestore unavailable'));
+
+    const result = await command.execute();
+    await flushAsync();
+
+    expect(result.success).toBe(true);
+    expect(logStructured).toHaveBeenCalledWith(
+      'warn',
+      'Falha ao finalizar trilha de localização da corrida cancelada',
+      expect.objectContaining({ bookingId: 'booking_driver_cancel', error: 'firestore unavailable' })
+    );
+  });
 });

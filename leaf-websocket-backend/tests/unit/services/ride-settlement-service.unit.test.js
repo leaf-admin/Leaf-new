@@ -33,6 +33,24 @@ describe('ride-settlement-service', () => {
     expect(settlement.executedFare).toBeGreaterThanOrEqual(0);
   });
 
+  test('buildEarlyEndedReviewSettlement não aplica a regra do pedágio do encerramento antecipado', () => {
+    const settlement = buildEarlyEndedReviewSettlement(
+      {
+        estimatedFare: 48.61,
+        paymentAmountInCents: 4861,
+        tollFee: 8.95,
+        routeDistanceKm: 10,
+        routeDurationSecs: 600
+      },
+      { distanceKm: 2.5, durationSecs: 150, tollPassThrough: true }
+    );
+
+    // Conta inalterada: proporção sobre a tarifa inteira.
+    expect(settlement.executedFare).toBe(12.15);
+    expect(settlement.estimatedRefund).toBe(36.46);
+    expect(settlement.tollKeptWhole).toBeUndefined();
+  });
+
   test('buildInterruptedOperationalEndedSettlement consolida refund e legs', () => {
     const settlement = buildInterruptedOperationalEndedSettlement(
       {

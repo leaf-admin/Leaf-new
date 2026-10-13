@@ -375,6 +375,21 @@ const pricingExceptionScore = new promClient.Histogram({
     registers: [register]
 });
 
+const pricingVolumeDropAlerts = new promClient.Counter({
+    name: 'leaf_pricing_volume_drop_alert_total',
+    help: 'Total de avaliações de pricing que sinalizaram queda de volume acima do limiar',
+    labelNames: ['operational_state', 'baseline_source'],
+    registers: [register]
+});
+
+const pricingVolumeDropPercent = new promClient.Histogram({
+    name: 'leaf_pricing_volume_drop_percent',
+    help: 'Distribuição percentual da queda de volume observada contra o baseline de solicitações',
+    labelNames: ['baseline_source'],
+    buckets: [0, 5, 10, 20, 30, 40, 50, 75, 100],
+    registers: [register]
+});
+
 const pricingBaselineMaterializations = new promClient.Counter({
     name: 'leaf_pricing_baseline_materialization_total',
     help: 'Total de execuções da materialização de baseline de pricing',
@@ -706,6 +721,8 @@ const metrics = {
         baselineSource = 'unknown',
         dynamicApplied = false,
         minimumFareApplied = false,
+        volumeDropAlert = false,
+        volumeDropPercent = 0,
         scorePressao = 0,
         scoreExcecao = 0
     } = {}) => {
@@ -727,6 +744,20 @@ const metrics = {
             pricingMinimumFareApplied.inc({
                 operational_state: labels.operational_state
             });
+        }
+
+        if (volumeDropAlert) {
+            pricingVolumeDropAlerts.inc({
+                operational_state: labels.operational_state,
+                baseline_source: labels.baseline_source
+            });
+        }
+
+        if (Number.isFinite(volumeDropPercent) && volumeDropPercent >= 0) {
+            pricingVolumeDropPercent.observe(
+                { baseline_source: labels.baseline_source },
+                volumeDropPercent
+            );
         }
 
         pricingPressureScore.observe(

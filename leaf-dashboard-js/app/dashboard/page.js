@@ -1,9 +1,11 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import ProtectedRoute from "@/src/components/ProtectedRoute";
 import AppNav from "@/src/components/AppNav";
+import { useAuth } from "@/src/contexts/AuthContext";
 import { leafAPI } from "@/src/services/api";
 import Panel from "@/src/components/ui/Panel";
 import { ErrorText, LoadingState } from "@/src/components/ui/PageFeedback";
@@ -21,6 +23,10 @@ function formatCompact(value) {
     maximumFractionDigits: numeric >= 1000 ? 1 : 0,
     notation: numeric >= 10000 ? "compact" : "standard",
   });
+}
+
+function formatPercent(value) {
+  return `${(toNumber(value) * 100).toFixed(1)}%`;
 }
 
 function formatPercentValue(value) {
@@ -48,12 +54,9 @@ function formatUsd(value) {
   })}`;
 }
 
-function hasSnapshotData(snapshot) {
-  return Boolean(snapshot && typeof snapshot.status === "string" && snapshot.status.length > 0);
-}
-
-function snapshotText(snapshot, value) {
-  return hasSnapshotData(snapshot) ? value : "—";
+function formatMinutes(value) {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) return "-";
+  return `${Number(value).toFixed(1)} min`;
 }
 
 function formatTime(value) {
@@ -67,15 +70,19 @@ function formatTime(value) {
   });
 }
 
+function statusTone(status) {
+  if (status === "healthy") return "positive";
+  if (status === "warning") return "warning";
+  return "danger";
+}
+
 function statusClass(status) {
-  if (!status) return "meta-badge";
   if (status === "healthy") return "status-ok";
   if (status === "warning") return "status-warn";
   return "status-bad";
 }
 
 function statusLabel(status) {
-  if (!status) return "Sem leitura";
   if (status === "healthy") return "Operação saudável";
   if (status === "warning") return "Atenção operacional";
   return "Ação necessária";
@@ -176,113 +183,32 @@ function DomainHealthRows({ domains = [] }) {
   );
 }
 
-const TASK_COPY = {
-  "support-sla": {
-    title: "Responder tickets atrasados",
-    description: "Há atendimentos que já passaram do prazo combinado.",
-  },
-  "support-owner": {
-    title: "Distribuir tickets sem responsável",
-    description: "Atribua cada atendimento para alguém da equipe.",
-  },
-  "driver-docs": {
-    title: "Aprovar documentos de motoristas",
-    description: "Confira os documentos pendentes e decida na ficha do motorista.",
-  },
-  "payment-global-sandbox": {
-    title: "Revisar ambiente de cobrança",
-    description: "O ambiente de testes está ativo para toda a operação.",
-  },
-  "payment-canary-profile": {
-    title: "Preparar cobrança de teste",
-    description: "Configure um perfil sandbox antes de testar um pagamento.",
-  },
-  "workers-attention": {
-    title: "Verificar processamento",
-    description: "Há eventos aguardando processamento no sistema.",
-  },
-  "sku-cost-monitor": {
-    title: "Revisar custo por corrida",
-    description: "O custo operacional está acima do esperado.",
-  },
-  "ride-cost-anomaly": {
-    title: "Revisar custo de uma corrida",
-    description: "Uma corrida ficou acima do limite de custo configurado.",
-  },
-  "directions-anomaly": {
-    title: "Revisar uso de rotas",
-    description: "O uso de rotas por corrida está acima do limite de acompanhamento.",
-  },
-};
-
-function taskPriorityLabel(priority) {
-  if (priority === "alta") return "Urgente";
-  if (priority === "media") return "Hoje";
-  return "Acompanhar";
-}
-
-function presentTask(item) {
-  const id = String(item?.id || "");
-  const copy = TASK_COPY[id];
-  if (copy) return { ...item, ...copy };
-  if (id.startsWith("source-")) {
-    return {
-      ...item,
-      title: "Verificar serviço da plataforma",
-      description: [item?.title, item?.description].filter(Boolean).join(" · "),
-    };
-  }
-  return {
-    ...item,
-    title: item?.title || item?.label || "Tarefa operacional",
-    description: item?.description || item?.detail || "Verifique o fluxo indicado.",
-  };
-}
-
 function ActionItems({ items = [] }) {
   if (!items.length) return <p className="text-muted">Sem ações sugeridas agora.</p>;
   return (
-    <div className="metric-list task-queue-list">
-      {items.map((rawItem) => {
-        const item = presentTask(rawItem);
-        const tone = item.priority === "alta" ? "status-bad" : item.priority === "media" ? "status-warn" : "status-ok";
-        return (
-          <div className="row task-queue-row" key={item.id || item.title || item.description}>
-            <div className="label task-queue-main">
-              <span className={tone}>{taskPriorityLabel(item.priority)}</span>
-              <strong>{item.title}</strong>
-              <small>{item.description}</small>
-            </div>
-            <div className="value">
-              <Link className="task-queue-action" href={item.href || "/dashboard"}>Resolver</Link>
-            </div>
+    <div className="metric-list">
+      {items.map((item) => (
+        <div className="row" key={item.id}>
+          <div className="label">
+            <span
+              className={
+                item.priority === "alta"
+                  ? "status-bad"
+                  : item.priority === "media"
+                    ? "status-warn"
+                    : "status-ok"
+              }
+            >
+              {item.title || item.label || "Ação operacional"}
+            </span>
+            <small>{item.description || item.detail || "Verificar no fluxo indicado."}</small>
           </div>
-        );
-      })}
+          <div className="value">
+            <Link href={item.href || "/dashboard"}>{item.priority || item.status || "ver"}</Link>
+          </div>
+        </div>
+      ))}
     </div>
-  );
-}
-
-function DailyTaskQueue({ snapshot, items }) {
-  if (!hasSnapshotData(snapshot)) return null;
-  const hasTasks = items.length > 0;
-  return (
-    <section className="ops-attention-panel" aria-label="Tarefas de hoje">
-      <Panel
-        title="Tarefas de hoje"
-        subtitle="Resolva primeiro o que depende de uma decisão da equipe."
-      >
-        {hasTasks ? (
-          <ActionItems items={items} />
-        ) : (
-          <div className="task-queue-empty">
-            <span className="status-ok">Tudo em dia</span>
-            <strong>Nenhuma tarefa crítica agora</strong>
-            <p>A operação continua sendo acompanhada automaticamente.</p>
-          </div>
-        )}
-      </Panel>
-    </section>
   );
 }
 
@@ -296,6 +222,65 @@ function buildAttentionItems(snapshot) {
       return (rank[left.priority] ?? 3) - (rank[right.priority] ?? 3);
     })
     .slice(0, 6);
+}
+
+function CanaryPackPanel({ canaryPack }) {
+  if (!canaryPack) return <p className="text-muted">Canary Pack ainda não carregado.</p>;
+  return (
+    <div className="canary-pack">
+      <div className="canary-pack-summary">
+        <div>
+          <span>Pagamento</span>
+          <strong>{runtimeEnvironmentLabel(canaryPack.paymentRuntime?.defaultEnvironment)}</strong>
+          <small>
+            {canaryPack.paymentRuntime?.sandboxProfileCount || 0} perfil(is) sandbox ·{" "}
+            {canaryPack.paymentRuntime?.canarySandboxEnabled ? "canary habilitado" : "canary por produção"}
+          </small>
+        </div>
+        <Link href={canaryPack.paymentRuntime?.href || "/payment-runtime"}>Ajustar runtime</Link>
+      </div>
+
+      <div className="canary-readiness-grid">
+        {(canaryPack.readiness || []).map((item) => (
+          <article key={item.id} className="canary-readiness-item">
+            <span className={readinessClass(item.status)}>{readinessLabel(item.status)}</span>
+            <strong>{item.label}</strong>
+            <small>{item.detail}</small>
+          </article>
+        ))}
+      </div>
+
+      <div className="canary-link-row">
+        {(canaryPack.links || []).map((link) => (
+          <Link href={link.href} key={link.href}>{link.label}</Link>
+        ))}
+      </div>
+
+      <details className="support-advanced-drawer">
+        <summary>Checklist do canary</summary>
+        <div className="canary-checklist-grid">
+          <div>
+            <h3>Passos</h3>
+            <ul>
+              {(canaryPack.flowSteps || []).map((step) => <li key={step}>{step}</li>)}
+            </ul>
+          </div>
+          <div>
+            <h3>Sucesso</h3>
+            <ul>
+              {(canaryPack.successCriteria || []).map((criterion) => <li key={criterion}>{criterion}</li>)}
+            </ul>
+          </div>
+          <div>
+            <h3>Falha</h3>
+            <ul>
+              {(canaryPack.failureCriteria || []).map((criterion) => <li key={criterion}>{criterion}</li>)}
+            </ul>
+          </div>
+        </div>
+      </details>
+    </div>
+  );
 }
 
 function RideCostAnomalyBanner({ anomaly }) {
@@ -479,121 +464,6 @@ function CommandStat({ label, value, detail, tone = "default" }) {
   );
 }
 
-function OperationsTrendPanel({ points = [] }) {
-  const chartPoints = Array.isArray(points) ? points.slice(-24) : [];
-  const hasActivity = chartPoints.some(
-    (point) => toNumber(point?.rides) > 0 || toNumber(point?.gmvCents) > 0,
-  );
-
-  if (!chartPoints.length || !hasActivity) {
-    return (
-      <section className="ops-trend-panel" aria-label="Ritmo operacional">
-        <Panel
-          title="Ritmo do dia"
-          subtitle="Corridas e GMV por hora, consolidados pelo backend."
-        >
-          <div className="ops-trend-empty">
-            <strong>Sem movimentação registrada hoje</strong>
-            <span>O gráfico aparece quando houver uma série horária disponível.</span>
-          </div>
-        </Panel>
-      </section>
-    );
-  }
-
-  const width = 760;
-  const height = 210;
-  const padding = { top: 18, right: 18, bottom: 34, left: 18 };
-  const chartWidth = width - padding.left - padding.right;
-  const chartHeight = height - padding.top - padding.bottom;
-  const maxRides = Math.max(1, ...chartPoints.map((point) => toNumber(point.rides)));
-  const maxGmv = Math.max(1, ...chartPoints.map((point) => toNumber(point.gmvCents)));
-  const columnWidth = chartWidth / chartPoints.length;
-  const barWidth = Math.max(7, columnWidth * 0.42);
-  const gmvLine = chartPoints
-    .map((point, index) => {
-      const x = padding.left + columnWidth * index + columnWidth / 2;
-      const y = padding.top + chartHeight - (toNumber(point.gmvCents) / maxGmv) * chartHeight;
-      return `${x},${y}`;
-    })
-    .join(" ");
-
-  return (
-    <section className="ops-trend-panel" aria-label="Ritmo operacional">
-      <Panel
-        title="Ritmo do dia"
-        subtitle="Corridas e GMV por hora, consolidados pelo backend."
-        actions={<span className="meta-badge">últimas 24h</span>}
-      >
-        <div className="ops-trend-legend" aria-hidden="true">
-          <span><i className="ops-trend-dot ops-trend-dot-rides" /> Corridas</span>
-          <span><i className="ops-trend-dot ops-trend-dot-gmv" /> GMV</span>
-        </div>
-        <div className="ops-trend-chart-wrap">
-          <svg
-            className="ops-trend-chart"
-            data-testid="ops-trend-chart"
-            viewBox={`0 0 ${width} ${height}`}
-            role="img"
-            aria-label="Gráfico horário de corridas e GMV"
-          >
-            {[0.25, 0.5, 0.75, 1].map((ratio) => {
-              const y = padding.top + chartHeight - ratio * chartHeight;
-              return (
-                <line
-                  key={ratio}
-                  x1={padding.left}
-                  x2={width - padding.right}
-                  y1={y}
-                  y2={y}
-                  className="ops-trend-gridline"
-                />
-              );
-            })}
-            {chartPoints.map((point, index) => {
-              const rides = toNumber(point.rides);
-              const barHeight = (rides / maxRides) * chartHeight;
-              const x = padding.left + columnWidth * index + (columnWidth - barWidth) / 2;
-              const y = padding.top + chartHeight - barHeight;
-              const showLabel = index === 0 || index === chartPoints.length - 1 || index % 4 === 0;
-              return (
-                <g key={`${point.label || point.hour}-${index}`}>
-                  <rect
-                    x={x}
-                    y={y}
-                    width={barWidth}
-                    height={Math.max(2, barHeight)}
-                    rx="4"
-                    className="ops-trend-bar"
-                  >
-                    <title>{`${point.label || `${point.hour}:00`}: ${rides} corrida(s), ${brlFromCents(point.gmvCents)} GMV`}</title>
-                  </rect>
-                  {showLabel ? (
-                    <text
-                      x={padding.left + columnWidth * index + columnWidth / 2}
-                      y={height - 10}
-                      textAnchor="middle"
-                      className="ops-trend-axis-label"
-                    >
-                      {point.label || `${point.hour}:00`}
-                    </text>
-                  ) : null}
-                </g>
-              );
-            })}
-            <polyline points={gmvLine} className="ops-trend-line" />
-          </svg>
-        </div>
-        <div className="ops-trend-summary">
-          <span>{formatCompact(chartPoints.reduce((sum, point) => sum + toNumber(point.rides), 0))} corridas solicitadas</span>
-          <span>{formatCompact(chartPoints.reduce((sum, point) => sum + toNumber(point.completed), 0))} concluídas</span>
-          <span>{brlFromCents(chartPoints.reduce((sum, point) => sum + toNumber(point.gmvCents), 0))} GMV</span>
-        </div>
-      </Panel>
-    </section>
-  );
-}
-
 function WorkspaceCard({
   eyebrow,
   title,
@@ -634,145 +504,89 @@ function WorkspaceCard({
   );
 }
 
-function CommandCenterHealth({ snapshot }) {
-  const services = snapshot?.services || {};
-  const costControls = snapshot?.costControls || {};
-  const firestoreReadGuard = costControls.firestoreReadGuard || {};
-  const paymentRuntime = snapshot?.paymentRuntime || {};
-  const domains = Array.isArray(services.domainHealth) ? services.domainHealth : [];
-  const healthyDomains = domains.filter((domain) => domain.status === "healthy").length;
-  const canaryReadiness = Array.isArray(snapshot?.canaryPack?.readiness)
-    ? snapshot.canaryPack.readiness
-    : [];
-  const canaryNeedsAttention = canaryReadiness.some((item) => item.status !== "ready");
-
-  const healthItems = [
-    {
-      label: "Serviços",
-      value: statusLabel(snapshot?.status),
-      detail: domains.length ? `${healthyDomains}/${domains.length} domínios saudáveis` : "Leitura consolidada do backend",
-      tone: statusClass(snapshot?.status),
-      href: "/observability",
-    },
-    {
-      label: "Pagamento",
-      value: runtimeEnvironmentLabel(paymentRuntime.defaultEnvironment),
-      detail: `${formatCompact(paymentRuntime.sandboxProfileCount)} sandbox · ${formatCompact(snapshot?.dailyMetrics?.paymentPendingCount)} pendências`,
-      tone: paymentRuntime.globalSandboxEnabled ? "status-bad" : paymentRuntime.canarySandboxEnabled ? "status-ok" : "status-warn",
-      href: "/payment-runtime",
-    },
-    {
-      label: "Custo do dashboard",
-      value: costGuardLabel(firestoreReadGuard.budgetStatus),
-      detail: `${formatPercentValue(firestoreReadGuard.budgetUsagePercent)} do orçamento de reads`,
-      tone: costGuardClass(firestoreReadGuard.budgetStatus),
-      href: "/metrics",
-    },
-  ];
-
-  return (
-    <div className="ops-health-summary">
-      <div className="ops-health-list">
-        {healthItems.map((item) => (
-          <Link href={item.href} className="ops-health-row" key={item.label}>
-            <span>
-              <small>{item.label}</small>
-              <strong className={item.tone}>{item.value}</strong>
-            </span>
-            <span>
-              <small>{item.detail}</small>
-              <b aria-hidden="true">→</b>
-            </span>
-          </Link>
-        ))}
-      </div>
-      {canaryNeedsAttention ? (
-        <div className="ops-health-canary">
-          <div>
-            <span className="ops-workspace-eyebrow">Canary Pack</span>
-            <strong>{canaryReadiness.filter((item) => item.status === "ready").length}/{canaryReadiness.length} pronto</strong>
-          </div>
-          <div className="ops-health-canary-items">
-            {canaryReadiness.slice(0, 3).map((item) => (
-              <span key={item.id} className={readinessClass(item.status)}>
-                {item.label}: {readinessLabel(item.status)}
-              </span>
-            ))}
-          </div>
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
 function buildWorkspaces(snapshot) {
   const metrics = snapshot?.dailyMetrics || {};
   const support = snapshot?.support || {};
+  const campaigns = snapshot?.campaigns || {};
   const driverOnboarding = snapshot?.driverOnboarding || {};
+  const launchFlags = snapshot?.launchFlags || {};
   const supportBreaches = toNumber(support.overdueAckCount) + toNumber(support.overdueFirstResponseCount);
-  const hasData = hasSnapshotData(snapshot);
 
   return [
     {
-      id: "operations",
-      eyebrow: "Operação",
-      title: hasData ? `${formatCompact(metrics.activeRides)} em curso` : "Sem leitura",
-      description: "Corridas ao vivo e motoristas.",
-      href: "/maps",
-      actionLabel: "Ver corridas ao vivo",
-      tone: hasData && metrics.totalDrivers > 0 && metrics.activeDrivers === 0 ? "warning" : "default",
-      status: hasData && metrics.totalDrivers > 0 && metrics.activeDrivers === 0 ? "sem online" : null,
+      id: "overview",
+      eyebrow: "Visão geral",
+      title: statusLabel(snapshot?.status),
+      description: "Serviços, motoristas ativos, corridas, GMV e receita em um snapshot cacheado.",
+      href: "/dashboard",
+      actionLabel: "Abrir visão geral",
+      tone: statusTone(snapshot?.status),
+      status: snapshot?.cache?.status || "-",
+      footnote: `ARPU base ${brlFromCents(metrics.arpuBaseCents)} · ticket médio ${brlFromCents(metrics.averageRideTicketCents)}`,
       metrics: [
-        { label: "Motoristas online", value: snapshotText(snapshot, formatCompact(metrics.activeDrivers)) },
-        { label: "Finalizadas hoje", value: snapshotText(snapshot, formatCompact(metrics.completedRidesToday)) },
-      ],
-    },
-    {
-      id: "driver-onboarding",
-      eyebrow: "Cadastros",
-      title: hasData ? `${formatCompact(driverOnboarding.pendingDocuments)} pendentes` : "Sem leitura",
-      description: "Aprove ou peça correção nos documentos.",
-      href: "/drivers/review-queue",
-      actionLabel: "Aprovar cadastros",
-      tone: hasData && driverOnboarding.pendingDocuments > 0 ? "warning" : "default",
-      status: hasData && driverOnboarding.pendingDocuments > 0 ? "ação necessária" : null,
-      metrics: [
-        { label: "Rejeitados", value: snapshotText(snapshot, formatCompact(driverOnboarding.rejectedDocuments)) },
-        { label: "Fila total", value: snapshotText(snapshot, formatCompact(driverOnboarding.totalDocuments)) },
-      ],
-    },
-    {
-      id: "finance",
-      eyebrow: "Financeiro",
-      title: hasData ? `GMV ${brlFromCents(metrics.gmvCents)}` : "Sem leitura",
-      description: "Confira pagamentos e repasses.",
-      href: "/financial-reconciliation",
-      actionLabel: "Conferir pagamentos",
-      tone: hasData && metrics.paymentPendingCount > 0 ? "warning" : "default",
-      status: hasData && metrics.paymentPendingCount > 0 ? "pendência" : null,
-      metrics: [
-        { label: "Receita Leaf", value: snapshotText(snapshot, brlFromCents(metrics.grossRevenueCents)) },
-        { label: "Pagamentos pendentes", value: snapshotText(snapshot, formatCompact(metrics.paymentPendingCount)) },
+        { label: "Motoristas ativos", value: formatCompact(metrics.activeDrivers) },
+        { label: "Corridas agora", value: formatCompact(metrics.activeRides) },
+        { label: "GMV hoje", value: brlFromCents(metrics.gmvCents) },
+        { label: "Receita Leaf", value: brlFromCents(metrics.grossRevenueCents) },
       ],
     },
     {
       id: "support",
       eyebrow: "Suporte",
-      title: hasData ? `${formatCompact(support.totalOpenTickets)} abertos` : "Sem leitura",
-      description: "Atenda tickets e acompanhe prazos.",
+      title: `${formatCompact(support.totalOpenTickets)} tickets abertos`,
+      description: "Fila de atendimento, dono, SLA e classificação N1/N2/N3 para ação rápida.",
       href: "/support",
-      actionLabel: "Atender suporte",
-      tone: hasData && supportBreaches > 0 ? "danger" : "default",
-      status: hasData && supportBreaches > 0 ? "SLA" : null,
+      actionLabel: "Abrir suporte",
+      tone: supportBreaches > 0 ? "danger" : "positive",
+      status: supportBreaches > 0 ? "SLA" : "ok",
+      footnote: `1ª resposta mediana: ${formatMinutes(support.medianFirstResponseMinutes)}`,
       metrics: [
-        { label: "Fora do SLA", value: snapshotText(snapshot, formatCompact(supportBreaches)) },
-        { label: "Sem responsável", value: snapshotText(snapshot, formatCompact(support.ticketsWithoutOwner)) },
+        { label: "N1 / N2 / N3", value: `${formatCompact(support.backlogByPriority?.N1)} / ${formatCompact(support.backlogByPriority?.N2)} / ${formatCompact(support.backlogByPriority?.N3)}` },
+        { label: "Fora do SLA", value: formatCompact(supportBreaches) },
+        { label: "Sem responsável", value: formatCompact(support.ticketsWithoutOwner) },
+        { label: "Abertos", value: formatCompact(support.totalOpenTickets) },
+      ],
+    },
+    launchFlags.campaignCenterEnabled === true ? {
+      id: "campaigns",
+      eyebrow: "Campanhas",
+      title: `${formatCompact(campaigns.active)} campanhas ativas`,
+      description: "Monitor de banners, campanhas in-app, prazo, valor contratado e performance.",
+      href: "/campaign-center",
+      actionLabel: "Abrir campanhas",
+      tone: campaigns.active > 0 ? "positive" : "default",
+      status: campaigns.active > 0 ? "ativo" : "neutro",
+      footnote: `eCPM ${brlFromCents(campaigns.effectiveCpmCents)} · eCPC ${brlFromCents(campaigns.effectiveCpcCents)}`,
+      metrics: [
+        { label: "Impressões", value: formatCompact(campaigns.impressions) },
+        { label: "Cliques", value: formatCompact(campaigns.clicks) },
+        { label: "CTR", value: formatPercent(campaigns.ctr) },
+        { label: "Valor", value: brlFromCents(campaigns.campaignValueCents) },
+      ],
+    } : null,
+    {
+      id: "driver-onboarding",
+      eyebrow: "Cadastro motorista",
+      title: `${formatCompact(driverOnboarding.pendingDocuments)} documentos pendentes`,
+      description: "Fila de cadastro, KYC e documentos de motorista para aprovar sem perder contexto.",
+      href: "/drivers/review-queue",
+      actionLabel: "Abrir cadastro",
+      tone: driverOnboarding.pendingDocuments > 0 ? "warning" : "positive",
+      status: driverOnboarding.pendingDocuments > 0 ? "revisar" : "limpo",
+      footnote: `Fila total: ${formatCompact(driverOnboarding.totalDocuments)} documentos`,
+      metrics: [
+        { label: "Pendentes", value: formatCompact(driverOnboarding.pendingDocuments) },
+        { label: "Aprovados", value: formatCompact(driverOnboarding.approvedDocuments) },
+        { label: "Reprovados", value: formatCompact(driverOnboarding.rejectedDocuments) },
+        { label: "Fonte", value: driverOnboarding.reviewQueueSource || "all" },
       ],
     },
   ].filter(Boolean);
 }
 
 export default function DashboardPage() {
+  const { user, signOut } = useAuth();
+  const router = useRouter();
   const [snapshot, setSnapshot] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -817,13 +631,7 @@ export default function DashboardPage() {
   const services = snapshot?.services || {};
   const costControls = snapshot?.costControls || {};
   const firestoreReadGuard = costControls.firestoreReadGuard || {};
-  const driverOnboarding = snapshot?.driverOnboarding || {};
-  const support = snapshot?.support || {};
-  const supportBreaches = toNumber(support.overdueAckCount) + toNumber(support.overdueFirstResponseCount);
-  const pendingCount =
-    toNumber(driverOnboarding.pendingDocuments) +
-    toNumber(metrics.paymentPendingCount) +
-    supportBreaches;
+  const paymentRuntime = snapshot?.paymentRuntime || {};
 
   return (
     <ProtectedRoute>
@@ -838,6 +646,15 @@ export default function DashboardPage() {
               {statusLabel(snapshot?.status)}
             </span>
             <span className="meta-badge">Atualizado {formatTime(snapshot?.generatedAt)}</span>
+            <span className="meta-badge">Cache {snapshot?.cache?.status || "-"}</span>
+            <button
+              onClick={async () => {
+                await signOut();
+                router.replace("/login");
+              }}
+            >
+              Sair
+            </button>
           </div>
         </header>
 
@@ -846,28 +663,37 @@ export default function DashboardPage() {
 
         <section className="ops-command-strip" aria-label="Resumo operacional">
           <CommandStat
-            label="Corridas"
-            value={snapshotText(snapshot, `${formatCompact(metrics.activeRides)} em curso`)}
-            detail={snapshotText(snapshot, `${formatCompact(metrics.completedRidesToday)} finalizadas hoje`)}
+            label="Serviços"
+            value={statusLabel(snapshot?.status)}
+            detail={`TTL ${snapshot?.scope?.ttlSeconds || 0}s`}
+            tone={statusTone(snapshot?.status)}
           />
           <CommandStat
             label="Motoristas"
-            value={snapshotText(snapshot, `${formatCompact(metrics.activeDrivers)} online`)}
-            detail={snapshotText(snapshot, `${formatCompact(metrics.totalDrivers)} cadastrados`)}
+            value={formatCompact(metrics.activeDrivers)}
+            detail={`${formatCompact(metrics.totalDrivers)} cadastrados`}
+            tone={metrics.activeDrivers > 0 ? "positive" : "warning"}
           />
           <CommandStat
-            label="Vendas e receita"
-            value={snapshotText(snapshot, brlFromCents(metrics.gmvCents))}
-            detail={snapshotText(snapshot, `Leaf ${brlFromCents(metrics.grossRevenueCents)}`)}
+            label="Corridas"
+            value={formatCompact(metrics.activeRides)}
+            detail={`${formatCompact(metrics.completedRidesToday)} finalizadas hoje`}
           />
           <CommandStat
-            label="Pendências"
-            value={snapshotText(snapshot, formatCompact(pendingCount))}
-            detail={snapshotText(
-              snapshot,
-              `cadastros ${formatCompact(driverOnboarding.pendingDocuments)} · pagamentos ${formatCompact(metrics.paymentPendingCount)} · suporte ${formatCompact(supportBreaches)}`,
-            )}
-            tone={hasSnapshotData(snapshot) && pendingCount > 0 ? "warning" : "default"}
+            label="GMV"
+            value={brlFromCents(metrics.gmvCents)}
+            detail={`ticket ${brlFromCents(metrics.averageRideTicketCents)}`}
+          />
+          <CommandStat
+            label="Receita Leaf"
+            value={brlFromCents(metrics.grossRevenueCents)}
+            detail={`ARPU ${brlFromCents(metrics.arpuBaseCents)}`}
+          />
+          <CommandStat
+            label="Woovi"
+            value={runtimeEnvironmentLabel(paymentRuntime.defaultEnvironment)}
+            detail={`${formatCompact(paymentRuntime.sandboxProfileCount)} sandbox · ${formatCompact(metrics.paymentPendingCount)} pendências`}
+            tone={paymentRuntime.globalSandboxEnabled ? "danger" : paymentRuntime.canarySandboxEnabled ? "positive" : "warning"}
           />
         </section>
 
@@ -877,22 +703,22 @@ export default function DashboardPage() {
           ))}
         </section>
 
-        <OperationsTrendPanel points={metrics.trend} />
-
-        <DailyTaskQueue snapshot={snapshot} items={attentionItems} />
-
-        <section className="ops-health-panel" aria-label="Saúde da plataforma">
+        <section className="grid ops-detail-grid" aria-label="Atenção operacional">
           <Panel
-            title="Saúde da plataforma"
-            subtitle="Serviços, pagamentos e custos em uma única leitura."
+            title="Atenção agora"
+            subtitle="Itens priorizados pelo backend para a equipe decidir o próximo passo sem procurar em várias telas."
           >
-            <CommandCenterHealth snapshot={snapshot} />
+            <ActionItems items={attentionItems} />
+          </Panel>
+
+          <Panel
+            title="Canary Pack"
+            subtitle="Roteiro operacional para testar com backend como fonte de verdade, sem trocar build."
+          >
+            <CanaryPackPanel canaryPack={snapshot?.canaryPack} />
           </Panel>
         </section>
 
-        <details className="ops-advanced-panel">
-          <summary>Detalhes técnicos e custos</summary>
-          <div className="ops-advanced-panel-body">
         <section className="grid ops-detail-grid">
           <Panel
             title="Monitor SKU e margem"
@@ -1049,8 +875,6 @@ export default function DashboardPage() {
             <SourceRows sources={services.sources || []} />
           </Panel>
         </section>
-          </div>
-        </details>
 
         <ErrorText message={error} />
       </main>

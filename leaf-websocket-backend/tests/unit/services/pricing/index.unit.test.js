@@ -206,4 +206,49 @@ describe('pricing/index', () => {
       difference_from_active_price: expect.any(Number)
     }));
   });
+
+  test('aplica adicional noturno no horário da cotação e expõe a sinalização de volume', () => {
+    const result = runDynamicPricingEngine({
+      trip: {
+        distance_km: 6,
+        duration_min_traffic: 20,
+        eta_pickup_min: 4
+      },
+      quote: {
+        requested_at: '2026-09-22T02:00:00.000Z',
+        time_zone: 'America/Sao_Paulo'
+      },
+      operational: {
+        current: {
+          active_requests_5m: 6,
+          idle_drivers: 2,
+          avg_pickup_eta_min: 4,
+          trip_time_inflation: 1,
+          cancel_rate: 0.05,
+          accept_rate: 0.9,
+          avg_speed_kmh: 24
+        },
+        baseline: {
+          expected_requests_5m: 10,
+          expected_idle_drivers: 4,
+          expected_pickup_eta_min: 4,
+          expected_speed_kmh: 24,
+          expected_cancel_rate: 0.05
+        }
+      }
+    });
+
+    expect(result.pricingPayload.night_surcharge).toEqual(expect.objectContaining({
+      applied: true,
+      percentage: 15,
+      time_zone: 'America/Sao_Paulo',
+      local_hour: 23
+    }));
+    expect(result.pricingPayload.request_volume_monitoring).toEqual(expect.objectContaining({
+      current_5m: 6,
+      expected_5m: 10,
+      drop_percent: 40,
+      alert: true
+    }));
+  });
 });

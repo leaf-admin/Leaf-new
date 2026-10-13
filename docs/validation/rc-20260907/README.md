@@ -1,13 +1,5 @@
 # Preparação do piloto — fotografia corrigida de 09/09/2026
 
-> **Atualização de fechamento — 15/09/2026:** os dois itens locais que afetavam
-> a repetição da E3 foram fechados: o fluxo Maestro ideal foi alinhado à
-> superfície atual do passageiro e `startTrip` ganhou janela/recovery contra
-> falso timeout. Health de API/socket voltou a `healthy` (Firestore 199 ms).
-> A matriz completa, incluindo os limites de KYC/provider e a consolidação do
-> SHA, está em
-> [`REMAINING_GATES_CLOSURE_20260915.md`](REMAINING_GATES_CLOSURE_20260915.md).
-
 ## Objetivo
 
 Consolidar uma versão candidata verificável e fechar os gates até um piloto pago
@@ -36,23 +28,6 @@ publicação do serviço contextualizado no dashboard, confirmação do device f
 se exigida pelo runbook e gates pós-piloto de métricas/HA.
 O quadro executável está em
 [`PRODUCTION_GATES_STATUS_20260912.md`](PRODUCTION_GATES_STATUS_20260912.md).
-
-### Atualização de autenticação — 17/09/2026
-
-O OTP por WhatsApp foi movido para o backlog de melhoria futura. No piloto
-assistido, o app usa Firebase Phone Auth/SMS por padrão; o caminho WhatsApp
-continua disponível somente com flag explícita após o provisionamento da Meta.
-O desenho futuro, variáveis, testes e gates externos estão em
-[`WHATSAPP_OTP_FIREBASE_AUTH_20260915.md`](WHATSAPP_OTP_FIREBASE_AUTH_20260915.md).
-
-## Atualização operacional — 14/09/2026
-
-A tentativa de repetir o gate revelou um problema no orquestrador de QA: o
-fluxo de login do motorista limpava o estado depois do reset do preflight. O
-fluxo foi tornado persistente e os defaults de device foram alinhados ao
-simulador motorista ativo. O diagnóstico, a ordem de execução e os limites da
-evidência estão em
-[`E3_SESSION_ORCHESTRATION_20260914.md`](E3_SESSION_ORCHESTRATION_20260914.md).
 
 ## Estado corrigido em 09/09
 
@@ -156,9 +131,7 @@ Arquivos alterados: `leaf-websocket-backend/bootstrap/http-middleware.js` e
 `leaf-websocket-backend/tests/unit/routes/woovi-webhook-guards.unit.test.js`.
 Os quatro novos casos falharam inicialmente por um erro no harness; após ajustar
 o harness, somente os dois casos do alias novo falharam. A correção do middleware
-fechou 38/38 casos da suíte original, incluindo adulteração de assinatura; a
-execução focada corrente soma 50 testes aprovados nas três suítes de Woovi.
-Rollback: reverter somente esse delta;
+fechou 38/38 testes na suíte, incluindo adulteração de assinatura. Rollback: reverter somente esse delta;
 manter o alias sem captura não é configuração apta para aceite.
 
 ### RC-02 — impedir falso positivo de confirmação no gate financeiro

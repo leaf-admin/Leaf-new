@@ -3,7 +3,12 @@ const { calculateDemandPressure } = require('./demandPressure');
 const { calculateExceptionScore } = require('./exceptionScore');
 const { STATES, classifyOperationalState } = require('./operationalState');
 const { evaluateExceptionalMode } = require('./dynamicRules');
-const { calculateDynamicFare } = require('./calculateFare');
+const {
+  calculateDynamicFare,
+  MAX_DYNAMIC_MARKUP_PERCENT
+} = require('./calculateFare');
+const { resolveNightSurcharge } = require('./nightSurcharge');
+const { evaluateRequestVolume } = require('./volumeGuard');
 const { clamp } = require('./utils');
 
 function normalizeCurrent(current = {}) {
@@ -38,6 +43,16 @@ function normalizeStateContext(stateContext = {}) {
     degraded_neighbor_count: Number(stateContext.degraded_neighbor_count) || 0,
     is_special_zone: stateContext.is_special_zone === true,
     zone_type: stateContext.zone_type || null
+  };
+}
+
+function normalizeQuoteContext(input = {}) {
+  const quote = input.quote || input.pricing || {};
+  return {
+    requested_at: quote.requested_at || quote.quote_requested_at || null,
+    city: quote.city || quote.city_name || quote.pickup_city || null,
+    time_zone: quote.time_zone || quote.timezone || quote.city_time_zone || null,
+    pickup_location: quote.pickup_location || null
   };
 }
 
@@ -122,6 +137,8 @@ function buildPricingResponse(engineResult) {
     ? 'demand_pressure_v2'
     : 'legacy_combined_pressure';
   const trafficNotice = buildTrafficNotice(current);
+  const nightSurcharge = engineResult.nightSurcharge;
+  const requestVolume = engineResult.requestVolume;
 
   return {
     car_type: fare.car_type,
@@ -135,6 +152,24 @@ function buildPricingResponse(engineResult) {
     score_excecao: Number(scoreExcecao.toFixed(4)),
     dynamic_factor: fare.fator_dinamico,
     dynamic_percentage: fare.percentual_dinamico_aplicado,
+    dynamic_markup_value: fare.breakdown.dynamic_markup_value,
+    max_dynamic_markup_percent: MAX_DYNAMIC_MARKUP_PERCENT,
+    night_surcharge_applied: Boolean(nightSurcharge?.applied),
+    night_surcharge_percentage: fare.percentual_adicional_noturno,
+    night_surcharge_value: fare.breakdown.night_surcharge_value,
+    night_surcharge_notice: nightSurcharge?.applied
+      ? 'Adicional noturno de 15% aplicado entre 23h e 4h.'
+      : null,
+    night_surcharge: {
+      applied: Boolean(nightSurcharge?.applied),
+      percentage: fare.percentual_adicional_noturno,
+      value: fare.breakdown.night_surcharge_value,
+      requested_at: nightSurcharge?.requestedAt || null,
+      time_zone: nightSurcharge?.timeZone || null,
+      local_hour: nightSurcharge?.localHour ?? null,
+      window_start_hour: nightSurcharge?.windowStartHour ?? 23,
+      window_end_hour: nightSurcharge?.windowEndHour ?? 4
+    },
     pickup_adjustment: fare.adicional_pickup,
     minimum_fare_applied: fare.valor_minimo_aplicado,
     final_price: fare.preco_final,
@@ -156,6 +191,15 @@ function buildPricingResponse(engineResult) {
       percent: engineResult.demandPressure.percent,
       multiplier: engineResult.demandPressure.multiplier,
       breakdown: engineResult.demandPressure.breakdown
+    },
+    request_volume_monitoring: {
+      current_5m: requestVolume.current5m,
+      expected_5m: requestVolume.expected5m,
+      baseline_available: requestVolume.baselineAvailable,
+      drop_percent: requestVolume.dropPercent,
+      threshold_percent: requestVolume.thresholdPercent,
+      alert: requestVolume.alert,
+      source: requestVolume.source
     },
     pricing_shadow: pricingModelMode === 'dry_run'
       ? {
@@ -180,6 +224,17 @@ function runDynamicPricingEngine(input = {}) {
   const current = normalizeCurrent(input?.operational?.current || {});
   const baseline = normalizeBaseline(current, input?.operational?.baseline || {});
   const stateContext = normalizeStateContext(input?.operational?.state_context || {});
+  const quoteContext = normalizeQuoteContext(input);
+  const nightSurcharge = resolveNightSurcharge({
+    requestedAt: quoteContext.requested_at,
+    city: quoteContext.city,
+    timeZone: quoteContext.time_zone,
+    pickupLocation: quoteContext.pickup_location
+  });
+  const requestVolume = evaluateRequestVolume({
+    currentRequests5m: current.active_requests_5m,
+    expectedRequests5m: input?.operational?.baseline?.expected_requests_5m
+  });
   const trip = {
     distance_km: Number(input?.trip?.distance_km) || 0,
     duration_min_traffic: Number(input?.trip?.duration_min_traffic) || 0,
@@ -208,14 +263,16 @@ function runDynamicPricingEngine(input = {}) {
     eta_pickup_min: trip.eta_pickup_min,
     carType: trip.carType,
     score_pressao: pressure.score,
-    score_excecao: exception.score
+    score_excecao: exception.score,
+    night_surcharge_rate: nightSurcharge.rate
   });
   const demandFare = calculateDynamicFare({
     distance_km: trip.distance_km,
     duration_min_traffic: trip.duration_min_traffic,
     eta_pickup_min: trip.eta_pickup_min,
     carType: trip.carType,
-    dynamic_markup_rate: demandPressure.markupRate
+    dynamic_markup_rate: demandPressure.markupRate,
+    night_surcharge_rate: nightSurcharge.rate
   });
   const pricingModelMode = resolvePricingModelMode();
   const fare = pricingModelMode === 'active' ? demandFare : legacyFare;
@@ -232,7 +289,10 @@ function runDynamicPricingEngine(input = {}) {
     fare,
     legacyFare,
     demandFare,
-    pricingModelMode
+    pricingModelMode,
+    quoteContext,
+    nightSurcharge,
+    requestVolume
   };
 
   return {

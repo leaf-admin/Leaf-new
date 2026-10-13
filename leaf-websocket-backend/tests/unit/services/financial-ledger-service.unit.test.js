@@ -443,6 +443,60 @@ describe('FinancialLedgerService', () => {
     });
   });
 
+  it('flags a pending passenger partial refund until it is resolved', async () => {
+    const firestore = createInMemoryFirestore();
+    firebaseConfig.getFirestore.mockReturnValue(firestore);
+    const service = new FinancialLedgerService();
+    const seedPayment = (passengerRefundPending) => firestore.docs.set('ride_payments/booking_refund_pending', {
+      rideId: 'booking_refund_pending',
+      chargeId: 'charge_refund_pending',
+      amount: 4861,
+      status: 'CONFIRMED',
+      passengerRefundPending
+    });
+    await service.recordPaymentReceived({
+      rideId: 'booking_refund_pending',
+      chargeId: 'charge_refund_pending',
+      amountCents: 4861,
+      passengerId: 'passenger_1'
+    });
+    const pending = {
+      rideId: 'booking_refund_pending',
+      chargeId: 'charge_refund_pending',
+      amountCents: 2974,
+      code: null,
+      error: 'Falha ao processar reembolso | timeout of 30000ms exceeded',
+      providerDelivery: 'UNKNOWN',
+      attempts: 1,
+      lastFailedAtIso: '2026-10-12T12:00:00.000Z'
+    };
+
+    seedPayment({ ...pending, status: 'MANUAL_REVIEW_REQUIRED' });
+    const manual = await service.reconcileRideFinancials({ rideId: 'booking_refund_pending' });
+    expect(manual.report.ok).toBe(false);
+    expect(manual.report.issues).toEqual([
+      expect.objectContaining({
+        code: 'PASSENGER_REFUND_MANUAL_REVIEW_REQUIRED',
+        severity: 'high',
+        chargeId: 'charge_refund_pending',
+        refundAmountCents: 2974,
+        refundError: 'Falha ao processar reembolso | timeout of 30000ms exceeded',
+        providerDelivery: 'UNKNOWN',
+        attempts: 1
+      })
+    ]);
+
+    seedPayment({ ...pending, status: 'RETRY_PENDING', providerDelivery: 'NOT_SENT', attempts: 6 });
+    const retry = await service.reconcileRideFinancials({ rideId: 'booking_refund_pending' });
+    expect(retry.report.issues).toEqual([
+      expect.objectContaining({ code: 'PASSENGER_REFUND_RETRY_PENDING', attempts: 6 })
+    ]);
+
+    seedPayment({ ...pending, status: 'RESOLVED' });
+    const resolved = await service.reconcileRideFinancials({ rideId: 'booking_refund_pending' });
+    expect(resolved.report).toMatchObject({ ok: true, issues: [] });
+  });
+
   it('flags a temporary payment ledger event with a divergent amount', async () => {
     const firestore = createInMemoryFirestore();
     firebaseConfig.getFirestore.mockReturnValue(firestore);

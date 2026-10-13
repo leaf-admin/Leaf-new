@@ -3,14 +3,6 @@ const admin = require('firebase-admin');
 const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
 const redisPool = require('../utils/redis-pool');
-const {
-  deleteChallenge,
-  consumeChallenge,
-  generateOtp,
-  generateVerificationId,
-  storeChallenge
-} = require('../services/otp-challenge-service');
-const whatsappOtpService = require('../services/whatsapp-otp-service');
 const firebaseConfig = require('../firebase-config');
 const { logStructured, logError } = require('../utils/logger');
 const {
@@ -285,48 +277,11 @@ async function generateResetOtp(phoneDigits) {
   const otpBypassEnabled = isOtpBypassPhone(phoneDigits);
   const otp = otpBypassEnabled
     ? getBypassOtpCode(phoneDigits)
-    : generateOtp();
-  const verificationId = generateVerificationId('pwd');
-  const key = `password_reset_otp:${verificationId}:${phoneDigits}`;
+    : Math.floor(100000 + Math.random() * 900000).toString();
+  const verificationId = `pwd_${Date.now()}_${crypto.randomBytes(8).toString('hex')}`;
   if (!otpBypassEnabled) {
-    const providerConfig = whatsappOtpService.getWhatsAppOtpConfig();
-    if (
-      (!providerConfig.configured && providerConfig.enabled) ||
-      (String(process.env.NODE_ENV || '').trim().toLowerCase() === 'production' && !providerConfig.enabled)
-    ) {
-      const error = new Error('WhatsApp OTP provider is not configured');
-      error.code = 'OTP_PROVIDER_NOT_CONFIGURED';
-      error.status = 503;
-      throw error;
-    }
-
-    await storeChallenge({
-      namespace: 'password_reset',
-      verificationId,
-      phone: phoneDigits,
-      otp,
-      keys: [key],
-      ttlSeconds: PASSWORD_RESET_TTL_SECONDS
-    });
-
-    try {
-      if (providerConfig.enabled) {
-        await whatsappOtpService.sendOtp({
-          phoneNumber: formatPhoneE164(phoneDigits),
-          otp,
-          verificationId
-        });
-      }
-    } catch (deliveryError) {
-      await deleteChallenge([key]).catch(() => undefined);
-      if (deliveryError?.code === 'WHATSAPP_OTP_NOT_CONFIGURED') {
-        const error = new Error('WhatsApp OTP provider is not configured');
-        error.code = 'OTP_PROVIDER_NOT_CONFIGURED';
-        error.status = 503;
-        throw error;
-      }
-      throw deliveryError;
-    }
+    const redis = redisPool.getConnection();
+    await redis.set(`password_reset_otp:${verificationId}:${phoneDigits}`, otp, 'EX', PASSWORD_RESET_TTL_SECONDS);
   }
 
   if (otpBypassEnabled) {
@@ -343,11 +298,7 @@ async function generateResetOtp(phoneDigits) {
     });
   }
 
-  const providerConfig = whatsappOtpService.getWhatsAppOtpConfig();
-  return {
-    verificationId,
-    channel: otpBypassEnabled ? 'test_bypass' : (providerConfig.enabled ? 'whatsapp' : 'simulation')
-  };
+  return { verificationId };
 }
 
 async function verifyResetOtp({ phoneDigits, verificationId, otp }) {
@@ -364,14 +315,14 @@ async function verifyResetOtp({ phoneDigits, verificationId, otp }) {
     return false;
   }
 
+  const redis = redisPool.getConnection();
   const key = `password_reset_otp:${verificationId}:${phoneDigits}`;
-  return consumeChallenge({
-    namespace: 'password_reset',
-    verificationId,
-    phone: phoneDigits,
-    otp,
-    keys: [key]
-  });
+  const storedOtp = await redis.get(key);
+  if (!storedOtp || storedOtp !== otp) {
+    return false;
+  }
+  await redis.del(key);
+  return true;
 }
 
 router.post('/setup', requireFirebaseUser, async (req, res) => {
@@ -643,39 +594,17 @@ router.post('/reset/request', async (req, res) => {
     if (!otpBypassEnabled) {
       await redisPool.ensureConnection();
     }
-    const { verificationId, channel } = await generateResetOtp(phoneDigits);
+    const { verificationId } = await generateResetOtp(phoneDigits);
     await recordPasswordAudit('password_reset_requested', { phoneLast4: phoneDigits.slice(-4) });
 
     return res.status(200).json({
       success: true,
       verificationId,
       expiresIn: PASSWORD_RESET_TTL_SECONDS,
-      otpBypassEnabled,
-      channel
+      otpBypassEnabled
     });
   } catch (error) {
     logError(error, 'Erro ao solicitar reset de senha', { service: 'auth-password-routes' });
-    if (error?.code === 'OTP_PROVIDER_NOT_CONFIGURED') {
-      return res.status(503).json({
-        success: false,
-        code: 'OTP_PROVIDER_NOT_CONFIGURED',
-        error: 'Não foi possível enviar o código agora.'
-      });
-    }
-    if (error?.code === 'WHATSAPP_OTP_DELIVERY_FAILED') {
-      return res.status(502).json({
-        success: false,
-        code: 'OTP_DELIVERY_FAILED',
-        error: 'Não foi possível enviar o código agora. Tente novamente.'
-        });
-    }
-    if (error?.code === 'AUTH_OTP_HMAC_KEY_NOT_CONFIGURED') {
-      return res.status(503).json({
-        success: false,
-        code: 'OTP_SECURITY_NOT_CONFIGURED',
-        error: 'Não foi possível processar o código agora.'
-      });
-    }
     return res.status(500).json({ success: false, error: 'Erro interno do servidor' });
   }
 });
@@ -702,17 +631,6 @@ router.post('/reset/confirm', async (req, res) => {
     }
 
     if (!bypassAllowedForRequest) {
-      const providerConfig = whatsappOtpService.getWhatsAppOtpConfig();
-      if (
-        (!providerConfig.configured && providerConfig.enabled) ||
-        (String(process.env.NODE_ENV || '').trim().toLowerCase() === 'production' && !providerConfig.enabled)
-      ) {
-        return res.status(503).json({
-          success: false,
-          code: 'OTP_PROVIDER_NOT_CONFIGURED',
-          error: 'Não foi possível confirmar o código agora.'
-        });
-      }
       await redisPool.ensureConnection();
     }
     const otpValid = await verifyResetOtp({ phoneDigits, verificationId, otp });
@@ -742,13 +660,6 @@ router.post('/reset/confirm', async (req, res) => {
     return res.status(200).json({ success: true });
   } catch (error) {
     logError(error, 'Erro ao confirmar reset de senha', { service: 'auth-password-routes' });
-    if (error?.code === 'AUTH_OTP_HMAC_KEY_NOT_CONFIGURED') {
-      return res.status(503).json({
-        success: false,
-        code: 'OTP_SECURITY_NOT_CONFIGURED',
-        error: 'Não foi possível processar o código agora.'
-      });
-    }
     return res.status(500).json({ success: false, error: 'Erro interno do servidor' });
   }
 });

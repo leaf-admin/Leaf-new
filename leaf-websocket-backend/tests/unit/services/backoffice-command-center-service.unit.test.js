@@ -85,8 +85,7 @@ function createService(overrides = {}) {
         totalRides: 12,
         activeRides: 3,
         completedToday: 9,
-        cancellationRate: 4.2,
-        trend: [{ hour: 10, label: '10:00', rides: 3, completed: 2, cancelled: 0, gmvCents: 45025 }]
+        cancellationRate: 4.2
       }),
       getFinancialRidesStats: jest.fn().mockResolvedValue({
         totalValue: 450.25,
@@ -191,8 +190,7 @@ describe('backoffice-command-center-service', () => {
       grossRevenueCents: 3870,
       arpuBaseCents: 450,
       averageRideTicketCents: 5003,
-      paymentPendingCount: 0,
-      trend: [{ hour: 10, label: '10:00', rides: 3, completed: 2, cancelled: 0, gmvCents: 45025 }]
+      paymentPendingCount: 0
     });
     expect(snapshot.support.totalOpenTickets).toBe(4);
     expect(snapshot.campaigns.active).toBe(2);

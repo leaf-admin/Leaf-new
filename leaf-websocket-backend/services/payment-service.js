@@ -15,8 +15,7 @@ const {
 } = require('./financial-runtime-context');
 const {
   buildRideFinancialContract,
-  validateAuthoritativeFinancialSnapshot,
-  DEFAULT_POLICY
+  validateAuthoritativeFinancialSnapshot
 } = require('./ride-financial-contract');
 const paymentRuntimeProfileService = require('./payment-runtime-profile-service');
 const { logStructured, logError } = require('../utils/logger');
@@ -70,17 +69,15 @@ class PaymentService {
     this.paymentRuntimeProfileService = paymentRuntimeProfileService;
     this.financialLedgerService = new FinancialLedgerService();
     // Taxas operacionais por faixa de valor (regra vigente)
-    // A política financeira canônica vive em ride-financial-contract.js.
-    // Estes aliases preservam a API interna histórica sem duplicar valores.
-    this.OPERATIONAL_FEE_UP_TO_10 = DEFAULT_POLICY.operationalFeeUpTo10Cents;
-    this.OPERATIONAL_FEE_10_TO_25 = DEFAULT_POLICY.operationalFee10To25Cents;
-    this.OPERATIONAL_FEE_25_TO_50 = DEFAULT_POLICY.operationalFee25To50Cents;
-    this.OPERATIONAL_FEE_ABOVE_50_PERCENTAGE = DEFAULT_POLICY.operationalFeeAbove50Percentage;
-    this.THRESHOLD_10 = DEFAULT_POLICY.threshold10Cents;
-    this.THRESHOLD_25 = DEFAULT_POLICY.threshold25Cents;
-    this.THRESHOLD_50 = DEFAULT_POLICY.threshold50Cents;
-    this.WOOVI_FEE_PERCENTAGE = DEFAULT_POLICY.paymentIntermediationPercentage;
-    this.WOOVI_FEE_MINIMUM = DEFAULT_POLICY.paymentIntermediationMinimumCents;
+    this.OPERATIONAL_FEE_UP_TO_10 = 79; // R$ 0,79 para corridas até R$ 10,00 (em centavos)
+    this.OPERATIONAL_FEE_10_TO_25 = 99; // R$ 0,99 para corridas acima de R$ 10,00 até R$ 25,00 (em centavos)
+    this.OPERATIONAL_FEE_25_TO_50 = 149; // R$ 1,49 para corridas acima de R$ 25,00 até R$ 50,00 (em centavos)
+    this.OPERATIONAL_FEE_ABOVE_50_PERCENTAGE = 0.03; // 3% para corridas acima de R$ 50,00
+    this.THRESHOLD_10 = 1000; // R$ 10,00 em centavos
+    this.THRESHOLD_25 = 2500; // R$ 25,00 em centavos
+    this.THRESHOLD_50 = 5000; // R$ 50,00 em centavos
+    this.WOOVI_FEE_PERCENTAGE = 0.008; // 0,8% da transação
+    this.WOOVI_FEE_MINIMUM = 50; // R$ 0,50 mínimo (em centavos)
     this.WITHDRAW_FEE_THRESHOLD_CENTS = 50000; // R$ 500,00
     this.WITHDRAW_FEE_BELOW_THRESHOLD_CENTS = 100; // R$ 1,00
     this.SUBSCRIPTION_DAILY_BILLING_ENABLED =
@@ -1044,13 +1041,14 @@ class PaymentService {
         };
       }
 
+      // Consultas independentes por namespace: em paralelo, preservando a ordem dos resultados.
+      const snapshots = await Promise.all(['operational', 'sandbox'].map((namespace) => firestore
+        .collection(FINANCIAL_COLLECTIONS[namespace].paymentIntents)
+        .where('chargeId', '==', safeChargeId)
+        .limit(1)
+        .get()));
       const matches = [];
-      for (const namespace of ['operational', 'sandbox']) {
-        const snapshot = await firestore
-          .collection(FINANCIAL_COLLECTIONS[namespace].paymentIntents)
-          .where('chargeId', '==', safeChargeId)
-          .limit(1)
-          .get();
+      for (const snapshot of snapshots) {
         if (!snapshot.empty && snapshot.docs?.length) matches.push(snapshot.docs[0]);
       }
       if (matches.length === 0) return { found: false };
@@ -1303,12 +1301,13 @@ class PaymentService {
         return null;
       }
 
+      // Leituras independentes por namespace: em paralelo, preservando a ordem dos resultados.
+      const holdingDocs = await Promise.all(['operational', 'sandbox'].map((namespace) => firestore
+        .collection(FINANCIAL_COLLECTIONS[namespace].paymentHoldings)
+        .doc(rideId)
+        .get()));
       const matches = [];
-      for (const namespace of ['operational', 'sandbox']) {
-        const holdingDoc = await firestore
-          .collection(FINANCIAL_COLLECTIONS[namespace].paymentHoldings)
-          .doc(rideId)
-          .get();
+      for (const holdingDoc of holdingDocs) {
         if (holdingDoc.exists) matches.push(holdingDoc.data() || {});
       }
       if (matches.length !== 1) return null;
@@ -2977,7 +2976,8 @@ class PaymentService {
       return {
         success: false,
         code: 'REFUND_AMOUNT_REQUIRED',
-        error: 'Valor de reembolso deve ser maior que zero'
+        error: 'Valor de reembolso deve ser maior que zero',
+        providerDelivery: 'NOT_SENT'
       };
     }
 
@@ -2987,8 +2987,10 @@ class PaymentService {
       financialContext
     });
 
+    // `providerDelivery: 'NOT_SENT'` marca as falhas anteriores à chamada da Woovi:
+    // nada foi enviado, então repetir o reembolso não pode estornar em dobro.
     if (!resolvedPayment.success) {
-      return resolvedPayment;
+      return { ...resolvedPayment, providerDelivery: 'NOT_SENT' };
     }
 
     const canonicalRideId = resolvedPayment.rideId;
@@ -2997,7 +2999,7 @@ class PaymentService {
     const contextResult = resolveFinancialContext({
       financialContext: resolvedPayment.financialContext
     });
-    if (!contextResult.ok) return { success: false, ...contextResult };
+    if (!contextResult.ok) return { success: false, ...contextResult, providerDelivery: 'NOT_SENT' };
     const legacyOperationalCompatible =
       paymentRecord.financialContextLegacy === true &&
       contextResult.context.namespace === 'operational';
@@ -3005,7 +3007,8 @@ class PaymentService {
       return {
         success: false,
         code: 'FINANCIAL_CONTEXT_CONFLICT',
-        error: 'Contexto financeiro do reembolso diverge do pagamento'
+        error: 'Contexto financeiro do reembolso diverge do pagamento',
+        providerDelivery: 'NOT_SENT'
       };
     }
 
@@ -3013,7 +3016,8 @@ class PaymentService {
       return {
         success: false,
         code: 'PAYMENT_CHARGE_NOT_FOUND',
-        error: 'chargeId não encontrado para reembolso canônico'
+        error: 'chargeId não encontrado para reembolso canônico',
+        providerDelivery: 'NOT_SENT'
       };
     }
 
@@ -3043,7 +3047,8 @@ class PaymentService {
         ...claim,
         rideId: canonicalRideId,
         chargeId: canonicalChargeId,
-        amount: claim.refundAmount || refundAmount
+        amount: claim.refundAmount || refundAmount,
+        ...(claim.success ? {} : { providerDelivery: 'NOT_SENT' })
       };
     }
 
@@ -3086,6 +3091,7 @@ class PaymentService {
         success: false,
         code: 'REFUND_RECORD_FAILED',
         providerRefunded: true,
+        providerDelivery: 'SENT',
         rideId: canonicalRideId,
         chargeId: canonicalChargeId,
         refundId: refundResult.refundId,
@@ -3115,13 +3121,17 @@ class PaymentService {
    * @returns {Promise<Object>} - Resultado do reembolso
    */
   async processRefund(chargeId, amount, reason = 'No driver found', financialContext = null) {
+    // Vira true imediatamente antes de chamar a Woovi. Enquanto for false, qualquer
+    // falha aconteceu aqui dentro e o reembolso com certeza não foi enviado.
+    let providerCallStarted = false;
     try {
       logStructured('info', 'Processando reembolso', { service: 'PaymentService', chargeId, amount, reason });
 
       if (!chargeId || !amount) {
         return {
           success: false,
-          error: 'chargeId e amount são obrigatórios'
+          error: 'chargeId e amount são obrigatórios',
+          providerDelivery: 'NOT_SENT'
         };
       }
 
@@ -3129,7 +3139,8 @@ class PaymentService {
         if (String(process.env.APP_REVIEW || '').toLowerCase() !== 'true') {
           return {
             success: false,
-            error: 'Cobrança mock permitida apenas em APP_REVIEW=true'
+            error: 'Cobrança mock permitida apenas em APP_REVIEW=true',
+            providerDelivery: 'NOT_SENT'
           };
         }
 
@@ -3156,7 +3167,7 @@ class PaymentService {
         { financialContext },
         { allowLegacyOperational: true }
       );
-      if (!contextResult.ok) return { success: false, ...contextResult };
+      if (!contextResult.ok) return { success: false, ...contextResult, providerDelivery: 'NOT_SENT' };
       const chargeRuntime = await this.resolveWooviConfigForCharge(chargeId);
       if (
         contextResult.context.namespace === 'sandbox' &&
@@ -3165,7 +3176,8 @@ class PaymentService {
         return {
           success: false,
           code: 'FINANCIAL_SANDBOX_CONTEXT_LOST',
-          error: 'Não foi possível confirmar o ambiente sandbox do reembolso'
+          error: 'Não foi possível confirmar o ambiente sandbox do reembolso',
+          providerDelivery: 'NOT_SENT'
         };
       }
       const refundResult = await circuitBreakerService.execute(
@@ -3175,13 +3187,16 @@ class PaymentService {
           if (contextResult.context.namespace === 'sandbox') {
             refundArgs.push({ wooviConfig: chargeRuntime.wooviConfig });
           }
+          providerCallStarted = true;
           return await this.wooviDriverService.processRefund(...refundArgs);
         },
         async () => {
-          // Fallback: retornar erro se circuit breaker aberto
+          // Fallback: circuit breaker aberto (nada enviado) ou a chamada lançou erro
+          // depois de iniciada (resultado desconhecido).
           return {
             success: false,
-            error: 'Serviço de pagamento temporariamente indisponível'
+            error: 'Serviço de pagamento temporariamente indisponível',
+            providerDelivery: providerCallStarted ? 'UNKNOWN' : 'NOT_SENT'
           };
         },
         {
@@ -3194,7 +3209,11 @@ class PaymentService {
         return {
           success: false,
           error: 'Falha ao processar reembolso',
-          details: refundResult.error
+          details: refundResult.error,
+          httpStatus: refundResult.httpStatus || null,
+          errorCode: refundResult.errorCode || null,
+          // Sem classificação explícita o resultado é tratado como desconhecido.
+          providerDelivery: refundResult.providerDelivery || 'UNKNOWN'
         };
       }
 
@@ -3217,7 +3236,8 @@ class PaymentService {
       return {
         success: false,
         error: 'Erro interno do servidor',
-        details: error.message
+        details: error.message,
+        providerDelivery: providerCallStarted ? 'UNKNOWN' : 'NOT_SENT'
       };
     }
   }
@@ -3355,6 +3375,94 @@ class PaymentService {
   }
 
   /**
+   * Classifica a falha do estorno parcial do encerramento antecipado.
+   *
+   * A chamada de reembolso da Woovi não leva id de idempotência, então só é
+   * repetida a falha que com certeza não chegou ao provedor (`NOT_SENT`).
+   * Recusa do provedor, timeout, 5xx, resultado desconhecido ou reembolso feito
+   * sem registro ficam para revisão manual.
+   */
+  classifyPassengerRefundFailure(refundResult = {}) {
+    if (refundResult.providerRefunded === true) return 'MANUAL_REVIEW_REQUIRED';
+    return refundResult.providerDelivery === 'NOT_SENT' ? 'RETRY_PENDING' : 'MANUAL_REVIEW_REQUIRED';
+  }
+
+  /**
+   * Decide se o estorno parcial pode ser enviado à Woovi nesta execução.
+   * Qualquer rastro de tentativa anterior que não seja uma falha sabidamente
+   * não enviada bloqueia a nova chamada.
+   */
+  resolvePassengerRefundAttemptGate(paymentRecord = {}) {
+    const pending = paymentRecord.passengerRefundPending || null;
+    if (pending?.status === 'MANUAL_REVIEW_REQUIRED') {
+      return { allowed: false, reason: 'PASSENGER_REFUND_MANUAL_REVIEW_REQUIRED' };
+    }
+    if (paymentRecord.refundInProgress === true) {
+      // Reserva de reembolso sem desfecho: a execução anterior pode ter parado
+      // depois de chamar o provedor.
+      return { allowed: false, reason: 'PASSENGER_REFUND_PREVIOUS_ATTEMPT_UNRESOLVED' };
+    }
+    if (String(paymentRecord.refundStatus || '').toUpperCase() === 'FAILED' && pending?.status !== 'RETRY_PENDING') {
+      return { allowed: false, reason: 'PASSENGER_REFUND_PREVIOUS_FAILURE_UNCLASSIFIED' };
+    }
+    return { allowed: true, reason: null };
+  }
+
+  /**
+   * Grava no pagamento da corrida o estorno parcial que ficou pendente
+   * (`passengerRefundPending`). É esse registro que a reconciliação financeira
+   * lê para mostrar a pendência no dashboard.
+   */
+  async recordPassengerRefundPending({
+    rideId,
+    financialContext = null,
+    status,
+    chargeId = null,
+    amountCents = 0,
+    code = null,
+    error = null,
+    providerDelivery = null,
+    previous = null
+  } = {}) {
+    try {
+      const firestore = firebaseConfig.getFirestore();
+      if (!firestore || !rideId) return { success: false, error: 'Firestore não disponível' };
+      const contextResult = resolveFinancialContext(
+        { financialContext },
+        { allowLegacyOperational: true }
+      );
+      if (!contextResult.ok) return { success: false, code: contextResult.code, error: contextResult.error };
+      const { collections } = getFinancialCollections(contextResult.context);
+      const nowIso = new Date().toISOString();
+      const resolved = status === 'RESOLVED';
+      const pending = {
+        status,
+        rideId,
+        chargeId: chargeId || previous?.chargeId || null,
+        amountCents: Number(amountCents) || Number(previous?.amountCents) || 0,
+        code: resolved ? (previous?.code || null) : (code || null),
+        error: resolved ? (previous?.error || null) : (error || null),
+        providerDelivery: resolved ? (previous?.providerDelivery || null) : (providerDelivery || null),
+        attempts: (Number(previous?.attempts) || 0) + (resolved ? 0 : 1),
+        firstFailedAtIso: previous?.firstFailedAtIso || (resolved ? null : nowIso),
+        lastFailedAtIso: resolved ? (previous?.lastFailedAtIso || null) : nowIso,
+        resolvedAtIso: resolved ? nowIso : null,
+        source: 'processNetDistribution'
+      };
+      await firestore.collection(collections.ridePayments).doc(rideId).set({
+        passengerRefundPending: pending
+      }, { merge: true });
+      return { success: true, pending };
+    } catch (recordError) {
+      logError(recordError, 'Erro ao registrar estorno parcial pendente', {
+        service: 'PaymentService',
+        rideId
+      });
+      return { success: false, error: recordError.message };
+    }
+  }
+
+  /**
    * Processa distribuição líquida para o motorista após corrida finalizada
    * @param {Object} rideData - Dados da corrida finalizada
    * @param {string} rideData.rideId - ID da corrida
@@ -3409,11 +3517,75 @@ class PaymentService {
       // 0. ✅ CAOS SCENARIO: Checar se o valor cobrado final é menor que o estimado pago (Encerramento Antecipado)
       let passengerRefundAmount = 0;
       let passengerRefundResult = null;
+      // Rastro do estorno parcial: acompanha o resultado da liquidação (cache de idempotência
+      // e payment_distributions) para que uma corrida possa ser auditada sem depender de logs.
+      const passengerRefundTrace = {
+        attempted: false,
+        success: false,
+        skippedReason: null,
+        storedAmountCents: null,
+        finalAmountCents: Number.isFinite(Number(rideData.totalAmount)) ? Number(rideData.totalAmount) : null,
+        refundAmountCents: 0,
+        refundId: null,
+        code: null,
+        error: null,
+        // 'RETRY_PENDING' (o worker repete) ou 'MANUAL_REVIEW_REQUIRED' (fica para o suporte).
+        pendingStatus: null,
+        manualReviewRequired: false,
+        pendingRecorded: null,
+        providerDelivery: null
+      };
       try {
         const paymentRecord = storedPayment;
         const chargeIdToRefund = paymentRecord?.chargeId || paymentRecord?.paymentId;
-        if (paymentRecord && isCapturedPaymentStatus(paymentRecord.status) && chargeIdToRefund && paymentRecord.amount > rideData.totalAmount) {
+        const storedAmountCents = Number(paymentRecord?.amount);
+        passengerRefundTrace.storedAmountCents = Number.isFinite(storedAmountCents) ? storedAmountCents : null;
+        const refundDue = Boolean(
+          paymentRecord && isCapturedPaymentStatus(paymentRecord.status) && chargeIdToRefund && paymentRecord.amount > rideData.totalAmount
+        );
+        const refundAttemptGate = refundDue
+          ? this.resolvePassengerRefundAttemptGate(paymentRecord)
+          : { allowed: true, reason: null };
+        if (refundDue && !refundAttemptGate.allowed) {
+          // Uma tentativa anterior pode ter chegado à Woovi: não chamar o provedor de novo.
+          // O crédito do motorista segue (é idempotente) e a pendência fica para o suporte.
           passengerRefundAmount = paymentRecord.amount - rideData.totalAmount;
+          passengerRefundTrace.refundAmountCents = passengerRefundAmount;
+          passengerRefundTrace.skippedReason = refundAttemptGate.reason;
+          passengerRefundTrace.pendingStatus = 'MANUAL_REVIEW_REQUIRED';
+          passengerRefundTrace.manualReviewRequired = true;
+          const previousPending = paymentRecord.passengerRefundPending || null;
+          passengerRefundTrace.code = previousPending?.code || null;
+          passengerRefundTrace.error = previousPending?.error || paymentRecord.refundFailure || null;
+          if (previousPending?.status === 'MANUAL_REVIEW_REQUIRED') {
+            passengerRefundTrace.pendingRecorded = true;
+          } else {
+            const recordResult = await this.recordPassengerRefundPending({
+              rideId: rideData.rideId,
+              financialContext,
+              status: 'MANUAL_REVIEW_REQUIRED',
+              chargeId: chargeIdToRefund,
+              amountCents: passengerRefundAmount,
+              code: refundAttemptGate.reason,
+              error: typeof paymentRecord.refundFailure === 'string'
+                ? paymentRecord.refundFailure
+                : (paymentRecord.refundFailure ? JSON.stringify(paymentRecord.refundFailure) : null),
+              providerDelivery: 'UNKNOWN',
+              previous: previousPending
+            });
+            passengerRefundTrace.pendingRecorded = recordResult.success === true;
+          }
+          logStructured('error', 'Estorno parcial do passageiro aguardando revisão manual', {
+            service: 'PaymentService',
+            rideId: rideData.rideId,
+            chargeId: chargeIdToRefund,
+            refundAmount: passengerRefundAmount,
+            reason: refundAttemptGate.reason
+          });
+        } else if (refundDue) {
+          passengerRefundAmount = paymentRecord.amount - rideData.totalAmount;
+          passengerRefundTrace.attempted = true;
+          passengerRefundTrace.refundAmountCents = passengerRefundAmount;
           logStructured('info', 'Encerramento Antecipado detectado: processando estorno parcial para o passageiro', {
             service: 'PaymentService',
             rideId: rideData.rideId,
@@ -3436,14 +3608,110 @@ class PaymentService {
               finalAmountCents: rideData.totalAmount
             }
           });
+          passengerRefundTrace.success = passengerRefundResult.success === true;
+          passengerRefundTrace.refundId = passengerRefundResult.refundId || null;
+          passengerRefundTrace.code = passengerRefundResult.code || null;
           if (passengerRefundResult.success) {
-            logStructured('info', 'Estorno parcial do passageiro realizado com sucesso', { service: 'PaymentService', refundId: passengerRefundResult.refundId });
+            logStructured('info', 'Estorno parcial do passageiro realizado com sucesso', {
+              service: 'PaymentService',
+              rideId: rideData.rideId,
+              refundId: passengerRefundResult.refundId
+            });
+            if (paymentRecord.passengerRefundPending?.status === 'RETRY_PENDING') {
+              await this.recordPassengerRefundPending({
+                rideId: rideData.rideId,
+                financialContext,
+                status: 'RESOLVED',
+                previous: paymentRecord.passengerRefundPending
+              });
+            }
           } else {
-            logStructured('error', 'Falha ao processar estorno parcial do passageiro', { service: 'PaymentService', error: passengerRefundResult.error });
+            const refundError = passengerRefundResult.error || passengerRefundResult.details || null;
+            passengerRefundTrace.error = typeof refundError === 'string'
+              ? refundError
+              : (refundError ? JSON.stringify(refundError) : null);
+            logStructured('error', 'Falha ao processar estorno parcial do passageiro', {
+              service: 'PaymentService',
+              rideId: rideData.rideId,
+              chargeId: chargeIdToRefund,
+              refundAmount: passengerRefundAmount,
+              code: passengerRefundResult.code || null,
+              error: passengerRefundResult.error
+            });
+
+            // A falha não pode ficar só no log: fica gravada no pagamento da corrida.
+            const pendingStatus = this.classifyPassengerRefundFailure(passengerRefundResult);
+            passengerRefundTrace.pendingStatus = pendingStatus;
+            passengerRefundTrace.manualReviewRequired = pendingStatus === 'MANUAL_REVIEW_REQUIRED';
+            passengerRefundTrace.providerDelivery = passengerRefundResult.providerDelivery || 'UNKNOWN';
+            const refundDetails = passengerRefundResult.details || null;
+            const recordResult = await this.recordPassengerRefundPending({
+              rideId: rideData.rideId,
+              financialContext,
+              status: pendingStatus,
+              chargeId: chargeIdToRefund,
+              amountCents: passengerRefundAmount,
+              code: passengerRefundResult.code || null,
+              error: [
+                passengerRefundTrace.error,
+                typeof refundDetails === 'string' ? refundDetails : (refundDetails ? JSON.stringify(refundDetails) : null)
+              ].filter(Boolean).join(' | ') || null,
+              providerDelivery: passengerRefundTrace.providerDelivery,
+              previous: paymentRecord.passengerRefundPending || null
+            });
+            passengerRefundTrace.pendingRecorded = recordResult.success === true;
           }
+        } else if (paymentRecord && storedAmountCents > rideData.totalAmount) {
+          // Valor pago maior que o final, mas o estorno não foi tentado: registrar o motivo
+          // em vez de seguir em silêncio.
+          const alreadyRefunded = paymentRecord.refunded === true || isRefundedPaymentStatus(paymentRecord.status);
+          passengerRefundTrace.skippedReason = alreadyRefunded
+            ? 'PAYMENT_ALREADY_REFUNDED'
+            : (!chargeIdToRefund ? 'PAYMENT_CHARGE_ID_MISSING' : 'PAYMENT_STATUS_NOT_CAPTURED');
+          if (alreadyRefunded) {
+            passengerRefundTrace.refundId = paymentRecord.refundId || null;
+            passengerRefundTrace.refundAmountCents = Number(paymentRecord.refundAmount || 0) || 0;
+          }
+          logStructured(alreadyRefunded ? 'info' : 'warn', 'Estorno parcial do passageiro não tentado na liquidação', {
+            service: 'PaymentService',
+            rideId: rideData.rideId,
+            reason: passengerRefundTrace.skippedReason,
+            paymentStatus: paymentRecord.status || null,
+            originalAmount: storedAmountCents,
+            finalAmount: rideData.totalAmount
+          });
+        } else {
+          passengerRefundTrace.skippedReason = paymentRecord
+            ? 'NO_REFUND_DUE'
+            : 'PAYMENT_RECORD_NOT_FOUND';
         }
       } catch (refundCheckErr) {
-        logStructured('error', 'Erro ao checar necessidade de estorno parcial', { service: 'PaymentService', error: refundCheckErr.message });
+        passengerRefundTrace.code = 'REFUND_CHECK_EXCEPTION';
+        passengerRefundTrace.error = refundCheckErr.message;
+        logStructured('error', 'Erro ao checar necessidade de estorno parcial', {
+          service: 'PaymentService',
+          rideId: rideData.rideId,
+          error: refundCheckErr.message
+        });
+        if (passengerRefundTrace.attempted && !passengerRefundTrace.success) {
+          // A exceção veio depois de o estorno ter sido iniciado: não dá para saber se
+          // a Woovi recebeu o pedido. Vai para revisão manual, sem nova tentativa.
+          passengerRefundTrace.pendingStatus = 'MANUAL_REVIEW_REQUIRED';
+          passengerRefundTrace.manualReviewRequired = true;
+          passengerRefundTrace.providerDelivery = 'UNKNOWN';
+          const recordResult = await this.recordPassengerRefundPending({
+            rideId: rideData.rideId,
+            financialContext,
+            status: 'MANUAL_REVIEW_REQUIRED',
+            chargeId: storedPayment?.chargeId || storedPayment?.paymentId || null,
+            amountCents: passengerRefundAmount,
+            code: 'REFUND_CHECK_EXCEPTION',
+            error: refundCheckErr.message,
+            providerDelivery: 'UNKNOWN',
+            previous: storedPayment?.passengerRefundPending || null
+          });
+          passengerRefundTrace.pendingRecorded = recordResult.success === true;
+        }
       }
 
       // 1. Liquidar o snapshot final quando o evento canônico o fornece.
@@ -3710,6 +3978,7 @@ class PaymentService {
         balanceCreditId: creditResult.transactionId || plannedBalanceCreditId,
         ledgerEventId: ledgerResult.eventId || null,
         calculation: netCalculation,
+        passengerRefund: passengerRefundTrace,
         financialContext,
         financialNamespace: financialContext.namespace,
         financialContextId: financialContext.contextId,
@@ -3762,9 +4031,44 @@ class PaymentService {
         financialNamespace: financialContext.namespace
       });
 
+      // O motorista já foi creditado (uma única vez: ledger e crédito são idempotentes).
+      // Estorno parcial pendente não pode sair daqui como sucesso silencioso.
+      if (passengerRefundTrace.pendingStatus === 'RETRY_PENDING') {
+        // Falha que não chegou à Woovi: o worker de billing repete a liquidação
+        // (retry com backoff e, esgotado, DLQ).
+        return {
+          success: false,
+          code: 'PASSENGER_REFUND_RETRY_PENDING',
+          error: 'Estorno parcial do passageiro pendente (motorista já creditado)',
+          details: passengerRefundTrace.error,
+          retryable: true,
+          driverCredited: true,
+          netAmount: netCalculation.netAmount,
+          passengerRefund: passengerRefundTrace
+        };
+      }
+      if (passengerRefundTrace.manualReviewRequired && passengerRefundTrace.pendingRecorded !== true) {
+        // Sem o registro durável a pendência se perderia: repetir até gravar. A nova
+        // execução não chama a Woovi de novo (resolvePassengerRefundAttemptGate).
+        return {
+          success: false,
+          code: 'PASSENGER_REFUND_PENDING_RECORD_FAILED',
+          error: 'Estorno parcial do passageiro em revisão manual não pôde ser registrado',
+          retryable: true,
+          driverCredited: true,
+          netAmount: netCalculation.netAmount,
+          passengerRefund: passengerRefundTrace
+        };
+      }
+
       return {
         success: true,
-        message: 'Distribuição líquida processada com sucesso',
+        ...(passengerRefundTrace.manualReviewRequired
+          ? { passengerRefundManualReviewRequired: true }
+          : {}),
+        message: passengerRefundTrace.manualReviewRequired
+          ? 'Distribuição processada; estorno parcial do passageiro aguardando revisão manual'
+          : 'Distribuição líquida processada com sucesso',
         netAmount: netCalculation.netAmount,
         netAmountInReais: (netCalculation.netAmount / 100).toFixed(2),
         transferId: transferId || null, // Pode ser null se BaaS não estiver disponível
@@ -3772,6 +4076,7 @@ class PaymentService {
         balance: creditResult.newBalance || null, // Novo saldo do motorista
         calculation: netCalculation,
         retainedFees: distributionData.retainedFees,
+        passengerRefund: passengerRefundTrace,
         financialContext
       };
 
