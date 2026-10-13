@@ -142,7 +142,7 @@ describe('driver earnings report', () => {
       }),
     ).toEqual([
       { key: 'rides', label: 'Concluídas · 30 dias', value: '37' },
-      { key: 'amount', label: 'Total líquido · 30 dias', value: 'R$ 1.480,90' },
+      { key: 'amount', label: 'Líquido · 30 dias', value: 'R$ 1.480,90' },
     ]);
 
     expect(buildDriverHistoryStats({ loadedListStats, serverPeriod: null, historyComplete: false })).toEqual([

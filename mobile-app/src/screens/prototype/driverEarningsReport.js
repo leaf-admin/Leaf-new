@@ -150,7 +150,7 @@ export function buildDriverHistoryStats({
       { key: 'rides', label: `Concluídas · ${periodLabel}`, value: String(serverPeriod.count) },
       {
         key: 'amount',
-        label: `Total líquido · ${periodLabel}`,
+        label: `Líquido · ${periodLabel}`,
         value: formatCurrencyBRL(serverPeriod.net),
       },
     ];

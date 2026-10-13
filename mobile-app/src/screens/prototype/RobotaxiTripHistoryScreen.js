@@ -79,7 +79,10 @@ function formatHistoryValue(item, isDriverRole) {
   });
 }
 
-function buildHistoryStats(history, isDriverRole) {
+// `partial`: only the latest page is loaded. The passenger's Activity then said
+// "Viagens 10" while the account showed 58 trips; the labels now say these are
+// the latest trips, not the total.
+function buildHistoryStats(history, isDriverRole, { partial = false } = {}) {
   const totals = buildTripFinancialTotals(history, {
     role: isDriverRole ? 'driver' : 'passenger',
   });
@@ -90,12 +93,12 @@ function buildHistoryStats(history, isDriverRole) {
   return [
     {
       key: 'rides',
-      label: isDriverRole ? 'Concluídas' : 'Viagens',
+      label: isDriverRole ? 'Concluídas' : partial ? 'Últimas viagens' : 'Viagens',
       value: String(totalTrips),
     },
     {
       key: 'amount',
-      label: isDriverRole ? 'Total líquido' : 'Total pago',
+      label: isDriverRole ? 'Total líquido' : partial ? 'Pago nessas viagens' : 'Total pago',
       value:
         totalTrips > 0 && knownAmountCount === totalTrips
           ? formatCurrencyBRL(totalAmount)
@@ -202,7 +205,7 @@ export default function RobotaxiTripHistoryScreen({ navigation, route }) {
             loadedListStats: buildHistoryStats(history, true),
             loadedRideCount: Array.isArray(history) ? history.length : 0,
           })
-        : buildHistoryStats(history, false),
+        : buildHistoryStats(history, false, { partial: Boolean(pageInfo?.hasNextPage) }),
     [driverServerPeriod, history, isDriverRole, pageInfo?.hasNextPage],
   );
   const primaryStat = stats[0] || null;
