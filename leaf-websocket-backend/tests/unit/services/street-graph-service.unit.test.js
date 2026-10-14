@@ -116,3 +116,18 @@ describe('street graph service', () => {
     await expect(streetGraphService.getStreetGraphAround(memoryRedis(), {})).rejects.toMatchObject({ statusCode: 400 });
   });
 });
+
+describe('street graph neighbourhood cache', () => {
+  it('serves nearby pickups from the cached neighbourhood', async () => {
+    const graph = streetGraphService.buildStreetGraph(FIXTURE);
+    const redis = memoryRedis();
+    await streetGraphService.storeStreetGraph(redis, graph, {});
+    const hmget = jest.spyOn(redis, 'hmget');
+    const first = JSON.parse(await streetGraphService.getStreetGraphAroundCached(redis, { lat: -22.9468, lng: -43.3577, radiusM: 4000 }));
+    const second = JSON.parse(await streetGraphService.getStreetGraphAroundCached(redis, { lat: -22.94681, lng: -43.35771, radiusM: 4000 }));
+    expect(first.edges.length).toBe(2);
+    expect(second).toEqual(first);
+    expect(hmget).toHaveBeenCalledTimes(1);
+    expect(first.attribution).toContain('OpenStreetMap');
+  });
+});
