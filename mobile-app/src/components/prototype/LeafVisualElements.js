@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { Image, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import Svg, { Defs, Image as SvgImage, LinearGradient, Mask, Rect, Stop } from 'react-native-svg';
+import Svg, { Defs, Image as SvgImage, LinearGradient as SvgLinearGradient, Mask, Rect, Stop } from 'react-native-svg';
+import { LinearGradient } from 'expo-linear-gradient';
 import leafTypography from './LeafTypography';
 import LeafCardMaterial from './LeafCardMaterial';
 
@@ -53,22 +54,35 @@ const symbols = {
 export function LeafObjectIcon({ name, symbol, size = 44 }) {
   const glyph = objects[name || symbols[symbol]];
   if (!glyph) return <Ionicons name={symbol || 'ellipse-outline'} size={20} color="#555B55" />;
+  const iconSize = Math.round(size * 0.46);
+  // Duas camadas: a forma cheia em verde claro, levemente deslocada, sob o traço.
+  const filledGlyph = glyph.replace(/-outline$/, '');
   return (
-    <View
-      accessible={false}
+    <LinearGradient
+      colors={['#FBFCF9', '#EAF0E4']}
+      start={{ x: 0.2, y: 0 }}
+      end={{ x: 0.8, y: 1 }}
       style={[styles.lineIcon, { width: size, height: size, borderRadius: size / 2 }]}
     >
-      <Ionicons name={glyph} size={Math.round(size * 0.46)} color="#1A330E" />
-    </View>
+      <View accessible={false} style={styles.lineIconStack}>
+        <Ionicons
+          name={filledGlyph}
+          size={iconSize}
+          color="rgba(132,201,76,0.5)"
+          style={[styles.lineIconFill, { left: 1.5, top: 1.5 }]}
+        />
+        <Ionicons name={glyph} size={iconSize} color="#1A330E" />
+      </View>
+    </LinearGradient>
   );
 }
 
 function LeafBrandMark() {
   return <Svg width={62} height={32} viewBox="0 0 62 32" accessible={false}>
     <Defs>
-      <LinearGradient id="leafBrandColor" x1="0" y1="0" x2="1" y2="0">
+      <SvgLinearGradient id="leafBrandColor" x1="0" y1="0" x2="1" y2="0">
         <Stop offset="0" stopColor="#00B410" /><Stop offset="1" stopColor="#75D83B" />
-      </LinearGradient>
+      </SvgLinearGradient>
       <Mask id="leafBrandShape" x="0" y="0" width="62" height="32" maskUnits="userSpaceOnUse">
         <SvgImage href={require('../../../assets/leaf-ui/leafBrandTransparent.png')} x={-10} y={-25} width={82} height={82} />
       </Mask>
@@ -127,10 +141,11 @@ const styles = StyleSheet.create({
   lineIcon: {
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#F2F4EF',
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(26,51,14,0.08)',
+    borderColor: 'rgba(26,51,14,0.1)',
   },
+  lineIconStack: { alignItems: 'center', justifyContent: 'center' },
+  lineIconFill: { position: 'absolute' },
   cardShadow: { borderRadius: 24, backgroundColor: '#F5F5F5', shadowColor: '#000000', shadowOffset: { width: 0, height: 9 }, shadowRadius: 20, shadowOpacity: 0.1, elevation: 4 },
   card: { borderRadius: 24, padding: 22, borderWidth: 1, borderColor: 'rgba(255,255,255,0.8)', overflow: 'hidden' },
   cardTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 },

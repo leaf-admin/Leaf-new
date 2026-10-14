@@ -503,8 +503,10 @@ export function buildRouteViewportRegion({
   minVisibleHeight = DEFAULT_MIN_VISIBLE_HEIGHT,
   shortRouteLatitudeDeltaMultiplier = 3.1,
   shortRouteLongitudeDeltaMultiplier = 3.25,
-  longRouteLatitudeDeltaMultiplier = 2.08,
-  longRouteLongitudeDeltaMultiplier = 2.18,
+  // O ajuste à área visível (acima do card) já expande o enquadramento; com 2,08 por
+  // cima uma rota de 13 km virava ~70 km de mapa, com a rota pequena no topo.
+  longRouteLatitudeDeltaMultiplier = 1.5,
+  longRouteLongitudeDeltaMultiplier = 1.58,
 } = {}) {
   const points = Array.isArray(coordinates)
     ? coordinates.filter(isFiniteRouteCoordinate)

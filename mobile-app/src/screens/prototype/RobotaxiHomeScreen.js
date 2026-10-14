@@ -1883,6 +1883,12 @@ export function buildDriverIdentityReviewTicketParams(
   };
 }
 
+// Largura da tag de demanda pelo texto (fonte 12, semibold): sem depender da medição
+// do Android, que cortava a tag.
+function resolveSurgeFlagWidth(label) {
+  return Math.max(52, Math.round(String(label || '').length * 8.2 + 26));
+}
+
 export default function RobotaxiHomeScreen({ navigation, route }) {
   const {
     activeRole,
@@ -4903,11 +4909,9 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
         ].includes(normalizedBookingStatus)
       )
   );
-  const shouldShowTrafficLayer = Boolean(
-    isDriverRole
-    && shouldRenderRuntimeMapState
-    && driverH3RefreshPolicy?.trafficLayerEnabled !== false
-  );
+  // Camada de trânsito do Google desligada no motorista (2026-10-14): poluía o mapa e
+  // brigava com a linha da rota. O trânsito da própria rota continua nas cores dela.
+  const shouldShowTrafficLayer = false;
   const driverTripAssistNativeNavigation = driverTripAssist?.nativeNavigation || null;
   const { uid: preferencesUid, preferences: mobilePreferences } = useMobilePreferences();
   useLeafVoiceGuidance({
@@ -6154,21 +6158,6 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
       return null;
     }
 
-    const labelCandidates = [...surgeCells]
-      .filter((cell) => (
-        driverH3VisualPolicy?.label?.enabled !== false
-        && cell?.surge?.labelVisible !== false
-        && isCoordinateInsideRegion(cell?.center, visibleMapRegion, 0.035)
-      ))
-      .sort((left, right) => Number(right?.surge?.percent || 0) - Number(left?.surge?.percent || 0));
-    const labelCells = selectSeparatedH3Labels(labelCandidates, visibleMapRegion, {
-      maxVisible: Math.min(
-        5,
-        Math.max(0, Number(driverH3VisualPolicy?.label?.maxVisible ?? 5))
-      ),
-      minDistanceRatio: 0.18,
-    });
-
     return (
       <>
         {surgeCells.map((cell) => (
@@ -6186,57 +6175,37 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
             )}
           />
         ))}
-        {labelCells.map((cell) => {
-          const percent = Number(cell?.surge?.percent || 0);
-          const label = cell?.surge?.label || `+${Math.round(percent)}%`;
-          const anchor = resolveH3LabelAnchor(cell.center, visibleMapRegion);
-
-          return (
-            <Marker
-              key={`surge-label-${cell.h3Index}`}
-              coordinate={{
-                latitude: Number(cell.center.lat),
-                longitude: Number(cell.center.lng)
-              }}
-              anchor={anchor}
-              tracksViewChanges={Platform.OS === 'android'}
-            >
-              <View collapsable={false} style={styles.driverSurgeFlagWrap}>
-              <View
-                collapsable={false}
-                style={[
-                  styles.driverSurgeFlag,
-                  {
-                    backgroundColor: hexToRgba(
-                      driverH3VisualPolicy?.label?.backgroundColor || '#222222',
-                      Number(driverH3VisualPolicy?.label?.backgroundOpacity ?? 0.9)
-                    ),
-                    borderColor: hexToRgba(
-                      driverH3VisualPolicy?.label?.borderColor || '#FFFFFF',
-                      Number(driverH3VisualPolicy?.label?.borderOpacity ?? 0.82)
-                    )
-                  }
-                ]}
-              >
-                <Text
-                  style={[
-                    styles.driverSurgeFlagText,
-                    {
-                      color: driverH3VisualPolicy?.label?.textColor || '#FFFFFF',
-                      fontSize: Number(driverH3VisualPolicy?.label?.fontSize || 12),
-                      lineHeight: Number(driverH3VisualPolicy?.label?.fontSize || 12) + 2
-                    }
-                  ]}
-                >
-                  {label}
-                </Text>
-              </View>
-              </View>
-            </Marker>
-          );
-        })}
       </>
     );
+  }, [driverH3Cells, driverH3VisualPolicy, showDriverH3Overlay, visibleMapRegion]);
+
+  // Tags de demanda (+N%) desenhadas sobre o mapa, fora dele: como marcador nativo o
+  // Android capturava a tag antes de o texto ser medido e ela saía cortada ao meio.
+  const driverH3LabelCells = useMemo(() => {
+    if (
+      !showDriverH3Overlay
+      || driverH3VisualPolicy?.enabled === false
+      || driverH3VisualPolicy?.label?.enabled === false
+      || !Array.isArray(driverH3Cells)
+    ) {
+      return [];
+    }
+    const candidates = driverH3Cells
+      .filter((cell) => (
+        Number(cell?.surge?.percent || 0) > 0
+        && cell?.surge?.labelVisible !== false
+        && Number.isFinite(Number(cell?.center?.lat))
+        && Number.isFinite(Number(cell?.center?.lng))
+        && isCoordinateInsideRegion(cell?.center, visibleMapRegion, 0.035)
+      ))
+      .sort((left, right) => Number(right?.surge?.percent || 0) - Number(left?.surge?.percent || 0));
+    if (candidates.length === 0) {
+      return [];
+    }
+    return selectSeparatedH3Labels(candidates, visibleMapRegion, {
+      maxVisible: Math.min(5, Math.max(0, Number(driverH3VisualPolicy?.label?.maxVisible ?? 5))),
+      minDistanceRatio: 0.18,
+    });
   }, [driverH3Cells, driverH3VisualPolicy, showDriverH3Overlay, visibleMapRegion]);
 
   const getRouteEdgePadding = useCallback(() => {
@@ -9699,17 +9668,24 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     const timer = setTimeout(refreshLandingPickupAnchor, 900);
     return () => clearTimeout(timer);
   }, [refreshLandingPickupAnchor]);
+  const [driverLabelRegion, setDriverLabelRegion] = useState(null);
+  const [driverMapMoving, setDriverMapMoving] = useState(false);
   const handleHomeMapPanDragWithLanding = useCallback((...args) => {
     if (passengerLandingVisible) setLandingMapMoving(true);
+    if (isDriverRole) setDriverMapMoving(true);
     handleMapPanDrag(...args);
-  }, [handleMapPanDrag, passengerLandingVisible]);
+  }, [handleMapPanDrag, isDriverRole, passengerLandingVisible]);
   const handleHomeMapRegionChangeCompleteWithLanding = useCallback((nextRegion) => {
     handleMapRegionChangeComplete(nextRegion);
+    if (isDriverRole && nextRegion) {
+      setDriverMapMoving(false);
+      setDriverLabelRegion(nextRegion);
+    }
     if (passengerLandingVisible) {
       setLandingMapMoving(false);
       refreshLandingPickupAnchor(nextRegion);
     }
-  }, [handleMapRegionChangeComplete, passengerLandingVisible, refreshLandingPickupAnchor]);
+  }, [handleMapRegionChangeComplete, isDriverRole, passengerLandingVisible, refreshLandingPickupAnchor]);
   // While adjusting the pickup, the blue dot must stay on the real GPS position;
   // the centre pin is the pickup. Otherwise the dot followed the pin around.
   const presentedUserCoordinate =
@@ -9828,6 +9804,60 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
             onPressLeft={handleTopLeftPress}
             onPressRight={handleTopRightPress}
           />
+        ) : null}
+
+        {/* Tags de demanda sobre o mapa (ver driverH3LabelCells). Somem enquanto o mapa
+            se move e voltam presas ao centro do hexágono quando ele para. */}
+        {isDriverRole && !driverMapMoving && driverH3LabelCells.length ? (
+          <View pointerEvents="none" style={StyleSheet.absoluteFill} testID="driver-h3-label-overlay">
+            {driverH3LabelCells.map((cell) => {
+              const point = projectMapPoint(
+                driverLabelRegion || presentedMapRegion,
+                { latitude: Number(cell.center.lat), longitude: Number(cell.center.lng) },
+                windowWidth,
+                windowHeight,
+              );
+              if (!point || point.x < 0 || point.x > windowWidth || point.y < insets.top + 60 || point.y > windowHeight - 120) {
+                return null;
+              }
+              const percent = Number(cell?.surge?.percent || 0);
+              const label = cell?.surge?.label || `+${Math.round(percent)}%`;
+              const width = resolveSurgeFlagWidth(label);
+              return (
+                <View
+                  key={`surge-label-${cell.h3Index}`}
+                  style={[
+                    styles.driverSurgeFlag,
+                    {
+                      position: 'absolute',
+                      left: point.x - width / 2,
+                      top: point.y - 15,
+                      width,
+                      backgroundColor: hexToRgba(
+                        driverH3VisualPolicy?.label?.backgroundColor || '#222222',
+                        Number(driverH3VisualPolicy?.label?.backgroundOpacity ?? 0.9)
+                      ),
+                      borderColor: hexToRgba(
+                        driverH3VisualPolicy?.label?.borderColor || '#FFFFFF',
+                        Number(driverH3VisualPolicy?.label?.borderOpacity ?? 0.82)
+                      ),
+                    },
+                  ]}
+                >
+                  <Text
+                    numberOfLines={1}
+                    allowFontScaling={false}
+                    style={[
+                      styles.driverSurgeFlagText,
+                      { color: driverH3VisualPolicy?.label?.textColor || '#FFFFFF' },
+                    ]}
+                  >
+                    {label}
+                  </Text>
+                </View>
+              );
+            })}
+          </View>
         ) : null}
 
         {homePickupPickerVisible ? (
@@ -10632,14 +10662,16 @@ const styles = StyleSheet.create({
   },
   // Android rasterises a marker to the exact bounds of its root view, which
   // cut the pill's border and shadow. The transparent margin keeps them inside.
+  // Tamanho fixo: no Android o marcador vira imagem medida antes do texto, e a tag
+  // saía cortada ("6%" pela metade).
   driverSurgeFlagWrap: {
-    padding: 8,
+    height: 46,
+    paddingVertical: 8,
     alignItems: 'center',
     justifyContent: 'center',
   },
   driverSurgeFlag: {
-    minWidth: 52,
-    minHeight: 28,
+    height: 30,
     borderRadius: 999,
     paddingHorizontal: 10,
     paddingVertical: 5,

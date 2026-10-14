@@ -133,7 +133,8 @@ export function PrototypeBottomIsland({ insets = {}, active = 'home', onPressPro
                 name={item.icon}
                 size={22}
                 color={selected ? TAB_ACTIVE_COLOR : TAB_IDLE_COLOR}
-                strokeWidth={selected ? 2.1 : 1.75}
+                strokeWidth={selected ? 2 : 1.75}
+                active={selected}
                 signal={selected ? 1 : 0}
               />
               <Text style={[styles.tabLabel, selected && styles.tabLabelActive]}>{item.title}</Text>
@@ -312,11 +313,12 @@ const styles = StyleSheet.create({
     padding: ISLAND_PADDING,
     flexDirection: 'row',
     alignItems: 'center',
-    shadowColor: '#12261A',
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.1,
-    shadowRadius: 16,
-    elevation: 6,
+    // Sombra em duas medidas: perto (contorno) e longe (profundidade).
+    shadowColor: '#0E1F12',
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.18,
+    shadowRadius: 24,
+    elevation: 12,
   },
   islandHighlight: {
     position: 'absolute',
@@ -343,11 +345,11 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.97)',
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: 'rgba(17,20,16,0.08)',
-    shadowColor: '#12261A',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.1,
-    shadowRadius: 14,
-    elevation: 5,
+    shadowColor: '#0E1F12',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.18,
+    shadowRadius: 18,
+    elevation: 9,
   },
   tabLabel: { ...leafTypography.medium, fontSize: 11, lineHeight: 14, color: TAB_IDLE_COLOR, marginTop: 3 },
   tabLabelActive: { color: TAB_ACTIVE_COLOR, ...leafTypography.semiBold },

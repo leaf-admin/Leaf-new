@@ -120,9 +120,9 @@ const styles = StyleSheet.create({
     width: 44, height: 44, borderRadius: 22, backgroundColor: 'rgba(255,255,255,0.97)',
     alignItems: 'center', justifyContent: 'center',
     borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(17,20,16,0.08)',
-    shadowColor: '#12261A', shadowOpacity: 0.1, shadowOffset: { width: 0, height: 4 }, shadowRadius: 14, elevation: 5,
+    shadowColor: '#0E1F12', shadowOpacity: 0.18, shadowOffset: { width: 0, height: 8 }, shadowRadius: 18, elevation: 9,
   },
-  searchShadow: { borderRadius: 32, shadowColor: '#12261A', shadowOpacity: 0.1, shadowOffset: { width: 0, height: 6 }, shadowRadius: 16, elevation: 5 },
+  searchShadow: { borderRadius: 32, shadowColor: '#0E1F12', shadowOpacity: 0.16, shadowOffset: { width: 0, height: 10 }, shadowRadius: 22, elevation: 10 },
   search: {
     minHeight: 60, borderRadius: 32, backgroundColor: 'rgba(255,255,255,0.98)',
     borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(17,20,16,0.08)',
