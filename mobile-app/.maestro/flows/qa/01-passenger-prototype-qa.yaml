@@ -70,6 +70,7 @@ env:
     visible: ".*(Bem-vindo.*Leaf|Número|Verificação|Como você quer usar a Leaf\\?|Quero viajar|Para onde vamos\\?|Ganhos de hoje|Ficar Online|Ficar Offline|Ativação pendente).*"
     timeout: 90000
 
+- runFlow: ../_skip-onboarding-welcome.yaml
 - runFlow:
     when:
       visible:

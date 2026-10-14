@@ -1,6 +1,6 @@
 import Logger from '../../utils/Logger';
 import React, { useState, useCallback } from 'react';
-import { Alert, StatusBar, View, StyleSheet } from 'react-native';
+import { Alert, Linking, StatusBar, View, StyleSheet } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { FETCH_USER_SUCCESS } from '../../state/actionTypes';
 import store from '../../state/appStore';
@@ -36,6 +36,8 @@ import {
   PROFILE_SELECTION_STEP_INDEX
 } from '../../utils/onboardingSessionState';
 import { toUserFriendlyMessage } from '../../utils/friendlyErrorMessages';
+import { WelcomeScreen } from '../onboarding/onboardingSteps';
+import { AppConfig } from '../../../config/AppConfig';
 
 const { color } = onboardingTheme;
 const AUTH_UID_STORAGE_KEY = '@auth_uid';
@@ -58,8 +60,13 @@ const AuthFlow = ({
   screenshotStep = null,
   screenshotAuthData = null
 }) => {
+  // screenshotStep -1 = tela de boas-vindas (harness de captura).
   const [currentStep, setCurrentStep] = useState(() => (
-    Number.isInteger(screenshotStep) ? screenshotStep : 0
+    Number.isInteger(screenshotStep) ? Math.max(0, screenshotStep) : 0
+  ));
+  // Boas-vindas só no começo do zero; quem retoma um cadastro cai direto na etapa salva.
+  const [showWelcome, setShowWelcome] = useState(() => (
+    Number.isInteger(screenshotStep) ? screenshotStep === -1 : true
   ));
   const [authData, setAuthData] = useState(() => screenshotAuthData || {});
   const driverActivationSubmissionTracker = React.useRef(
@@ -110,7 +117,8 @@ const AuthFlow = ({
   // 🔍 DETERMINAR STEP INICIAL BASEADO NO PROGRESSO E CARREGAR DADOS SALVOS
   React.useEffect(() => {
     if (Number.isInteger(screenshotStep)) {
-      setCurrentStep(screenshotStep);
+      setCurrentStep(Math.max(0, screenshotStep));
+      setShowWelcome(screenshotStep === -1);
       setAuthData(screenshotAuthData || {});
       return undefined;
     }
@@ -156,6 +164,9 @@ const AuthFlow = ({
         }
 
         setCurrentStep(initialStep);
+        if (initialStep > 0) {
+          setShowWelcome(false);
+        }
         await saveCurrentStep(initialStep);
         Logger.log('AuthFlow - 🔄 Step inicial definido:', initialStep);
 
@@ -914,13 +925,31 @@ const AuthFlow = ({
     });
   }, [authData?.credentials, authData?.documentData, finalizeOnboarding, saveStepDataLocal]);
 
+  const openLegalUrl = useCallback((url) => {
+    const normalizedUrl = String(url || '').trim();
+    if (normalizedUrl) {
+      Linking.openURL(normalizedUrl).catch(() => {});
+    }
+  }, []);
+
   // Renderizar o step atual
   const renderCurrentStep = () => {
+    if (showWelcome && currentStep === 0) {
+      return (
+        <WelcomeScreen
+          onStart={() => setShowWelcome(false)}
+          onOpenTerms={() => openLegalUrl(AppConfig.terms_of_service_url)}
+          onOpenPrivacy={() => openLegalUrl(AppConfig.privacy_policy_url)}
+        />
+      );
+    }
+
     // Fluxo normal de cadastro
     switch (currentStep) {
       case 0:
         return (
           <PhoneInputStep
+            onBack={() => setShowWelcome(true)}
             onVerificationSent={handlePhoneVerificationSent}
             onPasswordLoginSuccess={handlePasswordLoginSuccess}
             progressMeta={editorialProgressMeta}
@@ -1014,8 +1043,8 @@ const AuthFlow = ({
     <View style={styles.safeArea}>
       <StatusBar
         translucent={false}
-        backgroundColor={color.background}
-        barStyle="dark-content"
+        backgroundColor={showWelcome && currentStep === 0 ? '#003002' : color.background}
+        barStyle={showWelcome && currentStep === 0 ? 'light-content' : 'dark-content'}
       />
       <View style={styles.contentHost}>
         <View style={styles.contentFrame}>

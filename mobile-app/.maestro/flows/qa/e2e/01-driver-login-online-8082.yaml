@@ -46,8 +46,9 @@ appId: br.com.leaf.ride
       - waitForAnimationToEnd
 
 - extendedWaitUntil:
-    visible: ".*(DEVELOPMENT SERVERS|Sign in to view updates|No development servers found|Connected to:|auth-phone-input|Bem-vindo\\(a\\) à Leaf|Número|Verificação|Como você quer usar a Leaf\\?|Ganhos do dia|META DIÁRIA|Ficar Online|Ficar online|Ficar Offline|Ficar offline|Ativação pendente).*"
+    visible: ".*(DEVELOPMENT SERVERS|Sign in to view updates|No development servers found|Connected to:|auth-phone-input|Seu app local|Bem-vindo\\(a\\) à Leaf|Número|Verificação|Como você quer usar a Leaf\\?|Ganhos do dia|META DIÁRIA|Ficar Online|Ficar online|Ficar Offline|Ficar offline|Ativação pendente).*"
     timeout: 120000
+- runFlow: ../../_skip-onboarding-welcome.yaml
 
 - runFlow:
     when:
@@ -143,9 +144,11 @@ appId: br.com.leaf.ride
       - tapOn: "Permitir Enquanto Usa o App"
 
 - extendedWaitUntil:
-    visible: ".*(auth-phone-input|Bem-vindo\\(a\\) à Leaf|Número|Verificação|Como você quer usar a Leaf\\?|Quero ser parceiro|Ganhos do dia|META DIÁRIA|Ficar Online|Ficar online|Ficar Offline|Ficar offline|Ativação pendente).*"
+    visible: ".*(auth-phone-input|Seu app local|Bem-vindo\\(a\\) à Leaf|Número|Verificação|Como você quer usar a Leaf\\?|Quero ser parceiro|Ganhos do dia|META DIÁRIA|Ficar Online|Ficar online|Ficar Offline|Ficar offline|Ativação pendente).*"
     timeout: 90000
+- runFlow: ../../_skip-onboarding-welcome.yaml
 
+- runFlow: ../../_skip-onboarding-welcome.yaml
 - runFlow:
     when:
       visible:

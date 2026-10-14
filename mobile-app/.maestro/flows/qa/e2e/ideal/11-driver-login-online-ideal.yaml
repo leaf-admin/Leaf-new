@@ -135,6 +135,7 @@ appId: br.com.leaf.ride
 # Firebase may restore the QA driver session from the native keychain even
 # after the simulator app data reset. Keep the login branch conditional so a
 # persisted Home session is accepted and a fresh phone/OTP flow still runs.
+- runFlow: ../../../_skip-onboarding-welcome.yaml
 - runFlow:
     when:
       visible:

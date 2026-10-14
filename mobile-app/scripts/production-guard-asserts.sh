@@ -127,7 +127,11 @@ require_pattern "src/components/auth/AuthFlow.js" "OnboardingProfileService.save
 require_pattern "src/components/auth/AuthFlow.js" "onPasswordLoginSuccess" "password login flow handoff"
 require_pattern "src/components/auth/steps/PhoneInputStep.js" "requiresPassword" "inline password gating"
 require_pattern "src/components/auth/steps/PhoneInputStep.js" "Esqueci minha senha" "inline forgot password action"
-require_pattern "src/components/auth/steps/ProfileDataStep.js" "confirmPassword" "single-screen passenger password confirmation"
+# Cadastro do passageiro sem senha (acesso por código + sessão salva); a senha é opcional e criada depois.
+require_pattern "src/components/auth/AuthFlow.js" "UserAuthService.setupPassword" "optional passenger password setup"
+if grep -Eq "confirmPassword|secureTextEntry" "src/components/auth/steps/ProfileDataStep.js"; then
+  fail "passenger signup must not ask for a password"
+fi
 require_pattern "src/screens/prototype/RobotaxiHomeScreen.js" "fetchDynamicPricingQuote" "canonical backend pricing call"
 require_pattern "src/screens/prototype/RobotaxiHomeScreen.js" "if \(!selectedHomeBackendQuoteReady \|\| !homeBackendQuote\?\.quote\)" "backend pricing unavailable guard"
 require_pattern "src/components/auth/steps/PhoneInputStep.js" "FORCE_CUSTOM_OTP_NUMBERS" "controlled review account gate"

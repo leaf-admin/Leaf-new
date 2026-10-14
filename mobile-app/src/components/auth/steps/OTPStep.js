@@ -383,13 +383,16 @@ const OTPStep = ({ phoneNumber, confirmation, onVerified, onBack, progressMeta }
         }
     };
 
+    const phoneDigits = String(phoneNumber || '').replace(/\D/g, '');
+    const maskedPhone = phoneDigits.length >= 6
+        ? `(${phoneDigits.slice(2, 4)}) •••••-${phoneDigits.slice(-4)}`
+        : 'o seu celular';
+
     return (
         <EditorialOnboardingScreen
             keyboard
-            headerTitle="Seu acesso"
-            leadObject="privacy"
-            title="Código de acesso"
-            description={`Digite os 6 números recebidos por ${otpChannelLabel}.`}
+            title="Digite o código"
+            description={`Enviamos 6 números pelo ${otpChannelLabel} para ${maskedPhone}.`}
             onBack={onBack}
             backTestID="auth-otp-back-btn"
             backAccessibilityLabel="Voltar"
@@ -400,7 +403,7 @@ const OTPStep = ({ phoneNumber, confirmation, onVerified, onBack, progressMeta }
                 <ContinueButton
                     onPress={() => handleVerifyOTP()}
                     disabled={!otp.every(digit => digit) || loading}
-                    text={loading ? 'Confirmando...' : 'Confirmar'}
+                    text={loading ? 'Confirmando…' : 'Confirmar'}
                     testID="auth-otp-verify-btn"
                     accessibilityLabel={loading ? 'Confirmando código' : 'Confirmar código'}
                 />
@@ -429,21 +432,14 @@ const OTPStep = ({ phoneNumber, confirmation, onVerified, onBack, progressMeta }
                 </View>
             )}
         >
-            <View style={styles.delivery}>
-                <Text style={styles.deliveryLabel}>Enviado para</Text>
-                <Text style={styles.deliveryPhone}>{String(phoneNumber || '').replace(/\D/g, '').length >= 6
-                    ? `+${String(phoneNumber).replace(/\D/g, '').slice(0, 2)} (${String(phoneNumber).replace(/\D/g, '').slice(2, 4)}) •••••-${String(phoneNumber).replace(/\D/g, '').slice(-4)}` : 'Seu celular'}</Text>
-            </View>
             <View style={styles.otpContainer}>
                 {otp.map((digit, index) => (
                     <TextInput
                         key={index}
                         ref={ref => inputRefs.current[index] = ref}
-                        style={styles.otpInput}
+                        style={[styles.otpInput, digit ? styles.otpInputFilled : null]}
                         value={digit}
-                        placeholder="·"
-                        placeholderTextColor="#AAAAAA"
-                        selectionColor="#222222"
+                        selectionColor={color.textPrimary}
                         onChangeText={(value) => handleOtpChange(value, index)}
                         onKeyPress={(e) => handleKeyPress(e, index)}
                         keyboardType="number-pad"
@@ -460,7 +456,7 @@ const OTPStep = ({ phoneNumber, confirmation, onVerified, onBack, progressMeta }
                     />
                 ))}
             </View>
-            <Text style={styles.deliveryHelp}>{otp.every(Boolean) ? 'Código preenchido.' : 'Não recebeu? Você pode reenviar ou corrigir o número abaixo.'}</Text>
+            <Text style={styles.deliveryHelp}>{otp.every(Boolean) ? 'Código preenchido.' : 'O código chega em alguns segundos.'}</Text>
         </EditorialOnboardingScreen>
     );
 };
@@ -519,16 +515,19 @@ const styles = StyleSheet.create({
     otpInput: {
         flex: 1,
         minWidth: 0,
-        height: 64,
-        borderWidth: 1,
+        height: 60,
+        borderWidth: 1.5,
         borderColor: color.border,
-        borderRadius: 12,
+        borderRadius: 14,
         textAlign: 'center',
-        fontSize: 28,
-        lineHeight: 34,
+        fontSize: 26,
+        lineHeight: 32,
         ...leafTypography.semiBold,
         color: color.textPrimary,
-        backgroundColor: '#F5F5F5'
+        backgroundColor: '#FFFFFF'
+    },
+    otpInputFilled: {
+        borderColor: color.borderStrong
     },
     successTick: {
         alignSelf: 'center',
@@ -573,7 +572,7 @@ const styles = StyleSheet.create({
         minHeight: 44
     },
     footerLink: { minHeight: 44, justifyContent: 'center' },
-    deliveryHelp: { marginTop: 20, fontSize: 13, lineHeight: 19, color: color.textSecondary, ...leafTypography.regular },
+    deliveryHelp: { marginTop: 16, fontSize: 13, lineHeight: 19, color: color.textMuted, ...leafTypography.regular },
     resendText: {
         fontSize: 12,
         lineHeight: 16,
@@ -584,14 +583,15 @@ const styles = StyleSheet.create({
         textDecorationLine: 'underline',
         fontSize: 14,
         lineHeight: 20,
-        color: color.accent,
-        ...leafTypography.semiBold
+        color: color.textPrimary,
+        ...leafTypography.medium
     },
     resendTimer: {
-        fontSize: 12,
-        lineHeight: 16,
-        color: color.textSecondary,
-        ...leafTypography.medium
+        fontSize: 14,
+        lineHeight: 20,
+        color: color.textMuted,
+        ...leafTypography.medium,
+        fontVariant: ['tabular-nums']
     },
     footer: {
         marginTop: 'auto',

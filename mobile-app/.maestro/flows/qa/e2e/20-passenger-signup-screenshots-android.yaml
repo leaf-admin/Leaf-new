@@ -61,8 +61,9 @@ env:
 
 - extendedWaitUntil:
     visible:
-      id: "auth-phone-input"
+      id: "(onboarding-welcome-start|auth-phone-input|onboarding-welcome-start)"
     timeout: 120000
+- runFlow: ../../_skip-onboarding-welcome.yaml
 
 - takeScreenshot: "01-passenger-cadastro-phone-screen"
 

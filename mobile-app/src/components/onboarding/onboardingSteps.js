@@ -137,7 +137,7 @@ export function CodeStep({ step, total, onBack, phoneDigits, code, onChangeCode,
 }
 
 // ── Perfil ──────────────────────────────────────────────────────────────────────────────────
-function RoleCard({ title, description, icon, selected, onPress, testID }) {
+export function RoleCard({ title, description, icon, selected, onPress, testID, accessibilityLabel }) {
   const haptic = useHapticFeedback();
   return (
     <LeafAnimatedPressable
@@ -146,6 +146,7 @@ function RoleCard({ title, description, icon, selected, onPress, testID }) {
       activeScale={0.985}
       accessibilityRole="radio"
       accessibilityState={{ selected }}
+      accessibilityLabel={accessibilityLabel || `${title}. ${description}`}
       testID={testID}
     >
       <View style={[roleStyles.icon, selected && roleStyles.iconSelected]}>
@@ -364,10 +365,17 @@ export function FaceIntroStep({ step, total, onBack, onStart }) {
 }
 
 // ── Consentimentos ──────────────────────────────────────────────────────────────────────────
-function ConsentRow({ title, description, required, checked, onToggle, onOpen, testID }) {
+export function ConsentRow({ title, description, required, checked, onToggle, onOpen, testID }) {
   const haptic = useHapticFeedback();
   return (
-    <Pressable onPress={() => { haptic('tap'); onToggle?.(); }} style={consent.row} accessibilityRole="checkbox" accessibilityState={{ checked }} testID={testID}>
+    <Pressable
+      onPress={() => { haptic('tap'); onToggle?.(); }}
+      style={consent.row}
+      accessibilityRole="checkbox"
+      accessibilityState={{ checked }}
+      accessibilityLabel={`${title}${required ? '' : ' (opcional)'}. ${description}`}
+      testID={testID}
+    >
       <View style={[consent.box, checked && consent.boxChecked]}>
         {checked ? <Reanimated.View entering={ZoomIn.duration(140)}><Ionicons name="checkmark" size={15} color="#FFFFFF" /></Reanimated.View> : null}
       </View>
@@ -447,7 +455,7 @@ const welcome = StyleSheet.create({
   logoLayer: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center' },
   logo: { width: SPLASH_LOGO_SIZE, height: SPLASH_LOGO_SIZE },
   bottom: { position: 'absolute', left: 24, right: 24, bottom: 0, gap: 16, alignItems: 'center' },
-  slogan: { ...leafTypography.medium, fontSize: 17, color: 'rgba(255,255,255,0.78)', marginBottom: 4 },
+  slogan: { ...leafTypography.semiBold, fontSize: 22, letterSpacing: -0.2, color: '#FFFFFF', marginBottom: 10 },
   legal: { ...leafTypography.regular, fontSize: 12.5, lineHeight: 18, color: 'rgba(255,255,255,0.55)', textAlign: 'center' },
   legalLink: { ...leafTypography.medium, color: 'rgba(255,255,255,0.9)', textDecorationLine: 'underline' },
 });

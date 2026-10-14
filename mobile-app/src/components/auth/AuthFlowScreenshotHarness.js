@@ -87,6 +87,10 @@ const driverCompletedData = {
 };
 
 const scenarios = {
+  welcome: {
+    step: -1,
+    data: {},
+  },
   'passenger-phone': {
     step: 0,
     data: {},

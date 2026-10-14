@@ -139,6 +139,7 @@ appId: br.com.leaf.ride
     commands:
       - tapOn: "Permitir Enquanto Usa o App"
 
+- runFlow: ../../_skip-onboarding-welcome.yaml
 - runFlow:
     when:
       visible:

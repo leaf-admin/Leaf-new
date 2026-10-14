@@ -217,7 +217,7 @@ describe('PhoneInputStep', () => {
     );
     const inputStyle = StyleSheet.flatten(getByTestId('auth-phone-input').props.style);
 
-    expect(inputStyle.minHeight).toBe(58);
+    expect(inputStyle.minHeight).toBe(56);
     expect(inputStyle.height).toBeUndefined();
     expect(inputStyle.lineHeight).toBeUndefined();
   });

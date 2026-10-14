@@ -108,6 +108,7 @@ function LoadingDots({ color }) {
 export function OnboardingField({
   label, value, onChangeText, placeholder, keyboardType, autoCapitalize = 'sentences', error, hint,
   autoFocus = false, prefix, testID, maxLength, textContentType, autoComplete, editable = true, rightAccessory,
+  accessibilityLabel, onSubmitEditing, returnKeyType, secureTextEntry,
 }) {
   const [focused, setFocused] = useState(false);
   const focus = useRef(new Animated.Value(0)).current;
@@ -139,6 +140,10 @@ export function OnboardingField({
           textContentType={textContentType}
           autoComplete={autoComplete}
           editable={editable}
+          accessibilityLabel={accessibilityLabel || label}
+          onSubmitEditing={onSubmitEditing}
+          returnKeyType={returnKeyType}
+          secureTextEntry={secureTextEntry}
         />
         {rightAccessory}
       </Animated.View>
