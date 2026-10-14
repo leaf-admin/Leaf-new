@@ -4,6 +4,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { FirebaseConfig } from '../../config/FirebaseConfig';
 import AccessKey from './AccessKey';
 import { getSelfHostedApiUrl } from '../config/ApiConfig';
+import { getPlacesRequestHeaders } from '../services/placesRequestHeaders';
 import { allowClientDirectGoogleFallback } from '../config/runtimeAccessPolicy';
 import rideCostTelemetryService, {
     RIDE_TELEMETRY_GOOGLE_SKUS
@@ -447,9 +448,7 @@ export const fetchPlacesAutocomplete = (searchKeyword, sessionToken, location = 
                 );
                 const backendResponse = await fetch(backendAutocompleteUrl, {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
+                    headers: await getPlacesRequestHeaders(),
                     body: JSON.stringify({
                         query: searchKeyword,
                         sessionToken: sessionToken || null,
@@ -632,9 +631,7 @@ async function saveToCache(query, placeData, location = null) {
         
         await fetch(saveUrl, {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
+            headers: await getPlacesRequestHeaders(),
             body: JSON.stringify({
                 query: query,
                 placeData: placeDetails,
@@ -680,9 +677,7 @@ export const fetchCoordsfromPlace = (place_id, telemetryContext = null, sessionT
 
             const backendResponse = await fetch(backendUrl, {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
+                headers: await getPlacesRequestHeaders(),
                 body: JSON.stringify({
                     placeId: place_id,
                     sessionToken: sessionToken || null,
@@ -1145,9 +1140,7 @@ export const getDirectionsApi = (startLoc, destLoc, waypoints, telemetryContext 
                 );
                 const backendResponse = await fetch(backendUrl, {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
+                    headers: await getPlacesRequestHeaders(),
                     body: JSON.stringify({
                         startLoc,
                         destLoc,

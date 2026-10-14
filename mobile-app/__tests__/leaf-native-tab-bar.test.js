@@ -4,6 +4,9 @@ import { fireEvent, render } from '@testing-library/react-native';
 import { LeafNativeTabBarProvider, useLeafNativeTabBar } from '../src/components/prototype/LeafNativeTabBar';
 
 jest.mock('react-native', () => {
+  // A tab nativa está desligada no app (tab flutuante em JS); estes testes cobrem a
+  // versão nativa. Ligada aqui porque a fábrica roda antes do módulo testado.
+  global.__LEAF_NATIVE_IOS_TABS__ = true;
   const React = require('react');
   const actual = jest.requireActual('react-native');
   return Object.defineProperties(Object.create(actual), {

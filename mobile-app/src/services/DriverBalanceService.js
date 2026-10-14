@@ -11,8 +11,7 @@ class DriverBalanceService {
   constructor() {
     this.baseUrl = getSelfHostedApiUrl('/api/payment');
     Logger.log('🔗 DriverBalanceService baseUrl:', this.baseUrl);
-    this.WITHDRAW_FEE_THRESHOLD = 500;
-    this.WITHDRAW_FEE_BELOW_THRESHOLD = 1;
+    this.WITHDRAW_FEE_FLAT = 1; // R$ 1,00 por saque, qualquer valor
     this.SUBSCRIPTION_DAILY_FEE_NOMINAL = 14.90;
   }
 
@@ -203,7 +202,7 @@ class DriverBalanceService {
   calculateWithdrawFee(amount) {
     const numeric = Number(amount);
     if (!Number.isFinite(numeric) || numeric <= 0) return 0;
-    return numeric < this.WITHDRAW_FEE_THRESHOLD ? this.WITHDRAW_FEE_BELOW_THRESHOLD : 0;
+    return this.WITHDRAW_FEE_FLAT;
   }
 
   /**

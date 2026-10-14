@@ -24,6 +24,7 @@ function isCameraTargetClose(a, b) {
 import robotaxiPrototypeTokens from '../design-system/robotaxiPrototypeTokens';
 import LeafLocationMarker from './LeafLocationMarker';
 import LeafVehicleMarker from './LeafVehicleMarker';
+import { resolveVehicleShapeKeyForCategory } from './leafVehicleArtwork';
 import {
   invalidateGlassBackdrop,
   isGlassBackdropSupported,
@@ -32,9 +33,73 @@ import {
 import { useMobilePreferences } from '../MobilePreferencesProvider';
 
 const { color, motion } = robotaxiPrototypeTokens;
-const ROUTE_ANIMATION_DURATION = Math.min(Number(motion.timing.map) || 840, 840);
+// Traçado da rota: 840 ms era rápido demais para acompanhar com o olho (pedido do Izaak).
+const ROUTE_ANIMATION_DURATION = 1500;
 const POINTS_PER_SEGMENT = 26;
 const MIN_ANIMATED_ROUTE_POINTS = 6;
+// Ponta luminosa da rota enquanto ela é desenhada (motion aprovado no lab).
+const ROUTE_COMET_GLOW = 'rgba(95,195,126,0.42)';
+const ROUTE_COMET_CORE = '#EAF8EE';
+// Elementos fixos da rota: escondidos com cor transparente e dois pontos iguais.
+const ROUTE_SLOT_HIDDEN = 'rgba(0,0,0,0)';
+const ROUTE_SLOT_HIDDEN_COLORS = [ROUTE_SLOT_HIDDEN, ROUTE_SLOT_HIDDEN];
+const ROUTE_SLOT_PLACEHOLDER = [
+  { latitude: 0, longitude: 0 },
+  { latitude: 0, longitude: 0 },
+];
+const ROUTE_TRAFFIC_SLOT_COUNT = 24;
+
+// Recorta os trechos de trânsito até a fração já desenhada da rota, na ordem do
+// percurso. Assim o traçado sai já nas cores finais, sem trocar de cor ao terminar.
+export function clipTrafficSegmentsByProgress(segments = [], progress = 1) {
+  const list = Array.isArray(segments) ? segments : [];
+  const ratio = Math.min(1, Math.max(0, Number(progress) || 0));
+  if (ratio >= 1) return list;
+  const lengthOf = (a, b) => Math.hypot(
+    (b.latitude - a.latitude),
+    (b.longitude - a.longitude) * Math.cos((a.latitude * Math.PI) / 180),
+  );
+  const total = list.reduce((sum, segment) => sum + (segment.coordinates || []).reduce(
+    (acc, point, index, points) => (index ? acc + lengthOf(points[index - 1], point) : acc), 0), 0);
+  let budget = total * ratio;
+  const clipped = [];
+  for (const segment of list) {
+    const points = segment.coordinates || [];
+    if (budget <= 0 || points.length < 2) break;
+    const kept = [points[0]];
+    for (let index = 1; index < points.length; index += 1) {
+      const step = lengthOf(points[index - 1], points[index]);
+      if (step <= budget) {
+        kept.push(points[index]);
+        budget -= step;
+      } else {
+        const t = step > 0 ? budget / step : 0;
+        const a = points[index - 1];
+        const b = points[index];
+        kept.push({ latitude: a.latitude + (b.latitude - a.latitude) * t, longitude: a.longitude + (b.longitude - a.longitude) * t });
+        budget = 0;
+        break;
+      }
+    }
+    if (kept.length >= 2) clipped.push({ ...segment, coordinates: kept });
+  }
+  return clipped;
+}
+
+// Trecho final da parte já desenhada: um rastro largo e um núcleo claro na ponta.
+export function resolveRouteCometSegments(drawnCoordinates = [], totalPointCount = 0) {
+  const drawn = Array.isArray(drawnCoordinates) ? drawnCoordinates : [];
+  const total = Number(totalPointCount) || 0;
+  if (drawn.length < 4 || total < 2 || drawn.length >= total) {
+    return { glow: null, core: null };
+  }
+  const glowLength = Math.max(4, Math.round(total * 0.06));
+  const coreLength = Math.max(2, Math.round(total * 0.018));
+  return {
+    glow: drawn.slice(Math.max(0, drawn.length - glowLength)),
+    core: drawn.slice(Math.max(0, drawn.length - coreLength)),
+  };
+}
 const ZERO_VIEWPORT_PADDING = Object.freeze({
   top: 0,
   right: 0,
@@ -1410,11 +1475,10 @@ function PrototypeMapLayer({
     Boolean(searchCenterCoordinate) &&
     Number.isFinite(searchCenterCoordinate?.latitude) &&
     Number.isFinite(searchCenterCoordinate?.longitude);
-  const hasSearchRadius = Number.isFinite(searchRadiusKm) && searchRadiusKm > 0;
-  const hasSearchPreviewRadius =
-    Number.isFinite(searchPreviewRadiusKm) &&
-    searchPreviewRadiusKm > 0 &&
-    searchPreviewRadiusKm > (searchRadiusKm || 0) + 0.04;
+  // Sem radar no mapa (decisão de produto 2026-10-14): na busca a esfera de rede da
+  // tela de busca já mostra que estamos procurando.
+  const hasSearchRadius = false;
+  const hasSearchPreviewRadius = false;
   const searchRadiusMeters = hasSearchRadius ? Math.round(searchRadiusKm * 1000) : 0;
   const searchPreviewRadiusMeters = hasSearchPreviewRadius
     ? Math.round(searchPreviewRadiusKm * 1000)
@@ -1576,9 +1640,11 @@ function PrototypeMapLayer({
   }, [normalizedAvatarUri, shouldRenderAvatarImage]);
   const shouldShowCurrentLocationMarker = Boolean(
     !hideUserMarker &&
+      !searchingMode &&
       !(Platform.OS !== 'android' && currentLocationMarkerMode === 'car')
   );
-  const shouldShowUserAvatarMarker = Boolean(searchingMode && shouldShowCurrentLocationMarker);
+  // A letra do passageiro no centro da busca não dizia nada; a esfera marca o lugar.
+  const shouldShowUserAvatarMarker = false;
   const userMarkerTracksViewChanges =
     Platform.OS === 'android' || shouldShowCurrentLocationMarker;
   const shouldAnimateRoute = resolveRouteAnimationEnabled({
@@ -1618,6 +1684,37 @@ function PrototypeMapLayer({
     staticRouteCoordinates,
   ]);
   const hasRenderableRoute = routeRenderCoordinates.length >= 2;
+  // Enquanto a rota é desenhada, as cores de trânsito (que cobrem a rota inteira) ficam
+  // de fora; senão a linha aparecia pronta de uma vez e só o brilho corria por cima.
+  const routeDrawInProgress = Boolean(
+    shouldAnimateRoute &&
+      hasRoute &&
+      denseRoute.length >= 2 &&
+      animatedRouteCoordinates.length < denseRoute.length,
+  );
+  const routeSlot = { visible: hasRenderableRoute };
+  const routeTrafficSlots = useMemo(() => {
+    const drawProgress = routeDrawInProgress && denseRoute.length > 0
+      ? animatedRouteCoordinates.length / denseRoute.length
+      : 1;
+    const segments = hasRenderableRoute
+      ? clipTrafficSegmentsByProgress(normalizedTrafficRouteSegments, drawProgress)
+      : [];
+    // Mais segmentos do que vagas: fica a linha base, que já está por baixo.
+    const usable = segments.length <= ROUTE_TRAFFIC_SLOT_COUNT ? segments : [];
+    return Array.from({ length: ROUTE_TRAFFIC_SLOT_COUNT }, (_, index) => {
+      const segment = usable[index];
+      return segment && Array.isArray(segment.coordinates) && segment.coordinates.length >= 2
+        ? { key: `route-traffic-${index}`, coordinates: segment.coordinates, color: segment.color }
+        : { key: `route-traffic-${index}`, coordinates: ROUTE_SLOT_PLACEHOLDER, color: ROUTE_SLOT_HIDDEN };
+    });
+  }, [animatedRouteCoordinates.length, denseRoute.length, hasRenderableRoute, normalizedTrafficRouteSegments, routeDrawInProgress]);
+  const routeComet = useMemo(
+    () => (shouldAnimateRoute
+      ? resolveRouteCometSegments(animatedRouteCoordinates, denseRoute.length)
+      : { glow: null, core: null }),
+    [animatedRouteCoordinates, denseRoute.length, shouldAnimateRoute],
+  );
   const displayedDriverCoordinate =
     smoothedDriverCoordinate || targetDriverCoordinate || normalizedDriverCoordinate;
   const hasDisplayedDriverCoordinate = Boolean(displayedDriverCoordinate);
@@ -2106,6 +2203,24 @@ function PrototypeMapLayer({
     routeViewportFitCoordinates,
     scheduleAndroidVisibleRegionUpdate,
   ]);
+
+  // Quando a prévia de rota sai (oferta expirada, corrida encerrada), a câmera volta
+  // ao enquadramento normal. Antes ela ficava no zoom da prévia: o motorista voltava
+  // para um mapa afastado, com o carro no canto.
+  const hadRouteViewportRef = useRef(Boolean(resolvedRouteViewportRegion));
+  useEffect(() => {
+    const had = hadRouteViewportRef.current;
+    hadRouteViewportRef.current = Boolean(resolvedRouteViewportRegion);
+    if (Date.now() < manualCameraHoldUntilRef.current) return;
+    // Prévia nova com o mesmo enquadramento da anterior (oferta reenviada): os valores
+    // não mudam, então nada reposicionava a câmera e a rota ficava fora da tela.
+    if (!had && resolvedRouteViewportRegion) {
+      mapRef?.current?.animateToRegion?.(resolvedRouteViewportRegion, 420);
+      return;
+    }
+    if (!had || resolvedRouteViewportRegion || !isValidMapRegion(region)) return;
+    mapRef?.current?.animateToRegion?.(region, 420);
+  }, [mapRef, region, resolvedRouteViewportRegion]);
 
   // Glass lens backdrop (Android + Skia): snapshot the settled map so floating
   // glass can refract it; any camera motion drops the snapshot immediately.
@@ -2714,6 +2829,12 @@ function PrototypeMapLayer({
           isRequesting: index === activeNearbyRequestIndex,
           source: vehicleMarkerImageSource,
           colorToken: vehicleMarkerColorToken,
+          shapeKey: resolveVehicleShapeKeyForCategory(
+            vehicle.carType,
+            vehicle.category,
+            vehicle.vehicle?.type,
+            vehicle.vehicle?.category,
+          ),
         };
       })
       .filter(Boolean);
@@ -2729,6 +2850,17 @@ function PrototypeMapLayer({
     searchingMode,
     shouldRenderProjectedNearbyVehicleOverlays,
   ]);
+
+  // A rota é refinada depois de aparecer (prévia -> rota do servidor -> trânsito). Para
+  // as mesmas pontas o traçado anima uma vez só; antes cada refinamento apagava a rota
+  // e redesenhava do zero (a "flickada").
+  const animatedRouteEndpointsKeyRef = useRef('');
+  const routeEndpointsKey = [
+    normalizedOriginCoordinate?.latitude?.toFixed?.(4),
+    normalizedOriginCoordinate?.longitude?.toFixed?.(4),
+    normalizedDestinationCoordinate?.latitude?.toFixed?.(4),
+    normalizedDestinationCoordinate?.longitude?.toFixed?.(4),
+  ].join(',');
 
   useEffect(() => {
     const emitRouteAnimationEvent = (phase, data = {}) => {
@@ -2752,6 +2884,9 @@ function PrototypeMapLayer({
     };
 
     if (!hasRoute || denseRoute.length < 2) {
+      if (!normalizedDestinationCoordinate) {
+        animatedRouteEndpointsKeyRef.current = '';
+      }
       setAnimatedRouteCoordinates([]);
       emitRouteAnimationEvent('reset', {
         reason: hasRoute ? 'insufficient_route_geometry' : 'no_route',
@@ -2773,6 +2908,17 @@ function PrototypeMapLayer({
       });
       return undefined;
     }
+
+    if (routeEndpointsKey && animatedRouteEndpointsKeyRef.current === routeEndpointsKey) {
+      setAnimatedRouteCoordinates(denseRoute);
+      emitRouteAnimationEvent('static', {
+        reason: 'same_endpoints_refined',
+        elapsedMs: 0,
+        visiblePointCount: denseRoute.length,
+      });
+      return undefined;
+    }
+    animatedRouteEndpointsKeyRef.current = routeEndpointsKey;
 
     let frameId = null;
     let completed = false;
@@ -2839,6 +2985,8 @@ function PrototypeMapLayer({
         });
       }
     };
+    // routeEndpointsKey/destino entram pela rota nova (denseRoute); não reanimar por eles.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     denseRoute,
     hasRoute,
@@ -2855,20 +3003,14 @@ function PrototypeMapLayer({
   // device when the driver cancelled an accepted ride. This lists every native
   // child exactly as rendered below, so any change of that list remounts the
   // map instead of mutating it. Keep it in sync with the children of <MapView>.
+  // Linha base só quando o trânsito não cobre a rota, ou enquanto ela é desenhada.
+  const routeMainVisible = routeSlot.visible && !trafficSegmentsCoverRoute;
   const iosNativeChildSignature = Platform.OS !== 'ios'
     ? 'prototype-map-native'
     : [
         nativeMapTopologyKey,
-        !useSimplifiedIosMap && searchingMode && hasSearchCenter && hasSearchPreviewRadius ? 'c1' : '',
-        !useSimplifiedIosMap && searchingMode && hasSearchCenter && hasSearchRadius ? 'c2' : '',
-        !useSimplifiedIosMap && hasRenderableRoute ? `shadow:${effectiveRouteShadowColor}` : '',
-        hasRenderableRoute && !trafficSegmentsCoverRoute ? 'base' : '',
-        hasRenderableRoute
-          ? `traffic:${normalizedTrafficRouteSegments.map(segment => segment.key).join(',')}`
-          : '',
-        !useSimplifiedIosMap && hasRenderableRoute && effectiveRouteHighlightColor ? 'highlight' : '',
-        hasOriginMarker ? 'origin' : '',
-        hasDestination && hasDestinationMarker ? 'destination' : '',
+        // Rota, trânsito, cometa e pontas são fixos (ver o bloco da rota).
+        `route-slots:${ROUTE_TRAFFIC_SLOT_COUNT}`,
         hasDisplayedDriverCoordinate &&
         !shouldRenderProjectedDriverVehicleOverlay &&
         !shouldSuppressNativeAndroidDriverVehicleMarker
@@ -2932,130 +3074,114 @@ function PrototypeMapLayer({
           showsMyLocationButton={false}
           showsTraffic={Boolean(showTraffic)}
         >
-          {!useSimplifiedIosMap && searchingMode && hasSearchCenter && hasSearchPreviewRadius ? (
-            <Circle
-              key="search-radius-preview"
-              center={searchCenterCoordinate}
-              radius={searchPreviewRadiusMeters}
-              strokeWidth={1}
-              strokeColor="rgba(42,77,29,0.14)"
-              fillColor="rgba(42,77,29,0.02)"
-            />
-          ) : null}
-
-          {!useSimplifiedIosMap && searchingMode && hasSearchCenter && hasSearchRadius ? (
-            <Circle
-              key="search-radius-current"
-              center={searchCenterCoordinate}
-              radius={searchRadiusMeters}
-              strokeWidth={1.7}
-              strokeColor="rgba(42,77,29,0.26)"
-              fillColor="rgba(42,77,29,0.05)"
-            />
-          ) : null}
-
-          {!useSimplifiedIosMap && hasRenderableRoute ? (
+          {/* Rota: tudo sempre montado e só escondido quando vazio. No iOS, cada vez que a
+              lista de elementos do mapa mudava o mapa inteiro era remontado (proteção contra
+              um crash do Google Maps) e piscava em branco: ao aparecer a rota, ao chegar o
+              trânsito, ao entrar na busca. */}
+          <Polyline
+            key="route-shadow"
+            coordinates={routeSlot.visible ? routeRenderCoordinates : ROUTE_SLOT_PLACEHOLDER}
+            strokeColor={routeSlot.visible ? effectiveRouteShadowColor : ROUTE_SLOT_HIDDEN}
+            strokeColors={routeSlot.visible ? [effectiveRouteShadowColor, effectiveRouteShadowColor] : ROUTE_SLOT_HIDDEN_COLORS}
+            strokeWidth={isSyntheticRoutePreview ? 7 : 7.5}
+            lineCap="round"
+            lineJoin="round"
+          />
+          <Polyline
+            key="route-main"
+            coordinates={routeMainVisible ? routeRenderCoordinates : ROUTE_SLOT_PLACEHOLDER}
+            strokeColor={routeMainVisible ? effectiveRouteMainColor : ROUTE_SLOT_HIDDEN}
+            strokeColors={routeMainVisible ? [effectiveRouteMainColor, effectiveRouteMainColor] : ROUTE_SLOT_HIDDEN_COLORS}
+            strokeWidth={4}
+            lineCap="round"
+            lineJoin="round"
+          />
+          {/* Trânsito: número fixo de vagas; as cores entram quando o traçado termina. */}
+          {routeTrafficSlots.map((slot) => (
             <Polyline
-              key={`route-shadow-${effectiveRouteShadowColor}`}
-              coordinates={routeRenderCoordinates}
-              strokeColor={effectiveRouteShadowColor}
-              strokeColors={[effectiveRouteShadowColor, effectiveRouteShadowColor]}
-              strokeWidth={isSyntheticRoutePreview ? 7 : 7.5}
+              key={slot.key}
+              coordinates={slot.coordinates}
+              strokeColor={slot.color}
+              strokeColors={[slot.color, slot.color]}
+              strokeWidth={4.6}
               lineCap="round"
               lineJoin="round"
             />
-          ) : null}
+          ))}
+          <Polyline
+            key="route-highlight"
+            coordinates={routeSlot.visible && effectiveRouteHighlightColor ? routeRenderCoordinates : ROUTE_SLOT_PLACEHOLDER}
+            strokeColor={routeSlot.visible && effectiveRouteHighlightColor ? effectiveRouteHighlightColor : ROUTE_SLOT_HIDDEN}
+            strokeWidth={2.6}
+            lineCap="round"
+            lineJoin="round"
+          />
+          <Polyline
+            key="route-comet-glow"
+            coordinates={routeComet.glow || ROUTE_SLOT_PLACEHOLDER}
+            strokeColor={routeComet.glow ? ROUTE_COMET_GLOW : ROUTE_SLOT_HIDDEN}
+            strokeColors={routeComet.glow ? [ROUTE_COMET_GLOW, ROUTE_COMET_GLOW] : ROUTE_SLOT_HIDDEN_COLORS}
+            strokeWidth={13}
+            lineCap="round"
+            lineJoin="round"
+          />
+          <Polyline
+            key="route-comet-core"
+            coordinates={routeComet.core || ROUTE_SLOT_PLACEHOLDER}
+            strokeColor={routeComet.core ? ROUTE_COMET_CORE : ROUTE_SLOT_HIDDEN}
+            strokeColors={routeComet.core ? [ROUTE_COMET_CORE, ROUTE_COMET_CORE] : ROUTE_SLOT_HIDDEN_COLORS}
+            strokeWidth={5}
+            lineCap="round"
+            lineJoin="round"
+          />
 
-          {/* Traffic colors replace the base line only when they cover the route;
-              partial segments (e.g. 3 points near the car) used to hide it. */}
-          {hasRenderableRoute && !trafficSegmentsCoverRoute ? (
-            <Polyline
-              key={`route-main-${effectiveRouteMainColor}`}
-              coordinates={routeRenderCoordinates}
-              strokeColor={effectiveRouteMainColor}
-              strokeColors={[effectiveRouteMainColor, effectiveRouteMainColor]}
-              strokeWidth={useSimplifiedIosMap ? 3.8 : 4}
-              lineCap="round"
-              lineJoin="round"
-            />
-          ) : null}
+          <Marker
+            key="origin-marker"
+            coordinate={hasOriginMarker ? normalizedOriginCoordinate : ROUTE_SLOT_PLACEHOLDER[0]}
+            opacity={hasOriginMarker ? 1 : 0}
+            zIndex={17}
+            anchor={{ x: 0.5, y: Platform.OS === 'android' || compactRouteEndpoints ? 0.5 : 0.9 }}
+            tracksViewChanges={endpointMarkersTracking}
+            pinColor={undefined}
+          >
+            {Platform.OS === 'android' || compactRouteEndpoints ? (
+              <RouteEndpointDotMarker tone="origin" />
+            ) : (
+              <RouteEndpointMarker label="Partida" tone="origin" />
+            )}
+          </Marker>
 
-          {hasRenderableRoute
-            ? normalizedTrafficRouteSegments.map(segment => (
-              <Polyline
-                key={`route-traffic-${segment.key}`}
-                coordinates={segment.coordinates}
-                strokeColor={segment.color}
-                strokeColors={[segment.color, segment.color]}
-                strokeWidth={useSimplifiedIosMap ? 4.2 : 4.6}
-                lineCap="round"
-                lineJoin="round"
-              />
-            ))
-            : null}
-
-          {!useSimplifiedIosMap &&
-          hasRenderableRoute &&
-          effectiveRouteHighlightColor ? (
-            <Polyline
-              key="route-highlight"
-              coordinates={routeRenderCoordinates}
-              strokeColor={effectiveRouteHighlightColor}
-              strokeWidth={2.6}
-              lineCap="round"
-              lineJoin="round"
-            />
-          ) : null}
-
-          {hasOriginMarker ? (
-            <Marker
-              key="origin-marker"
-              coordinate={normalizedOriginCoordinate}
-              zIndex={17}
-              anchor={{ x: 0.5, y: Platform.OS === 'android' || compactRouteEndpoints ? 0.5 : 0.9 }}
-              tracksViewChanges={endpointMarkersTracking}
-              pinColor={undefined}
-            >
-              {Platform.OS === 'android' || compactRouteEndpoints ? (
-                <RouteEndpointDotMarker tone="origin" />
-              ) : (
-                <RouteEndpointMarker label="Partida" tone="origin" />
-              )}
-            </Marker>
-          ) : null}
-
-          {hasDestination && hasDestinationMarker ? (
-            <Marker
-              key="destination-marker"
-              coordinate={normalizedDestinationCoordinate}
-              zIndex={18}
-              anchor={{ x: 0.5, y: destinationMarkerMode === 'avatar' || Platform.OS === 'android' || compactRouteEndpoints ? 0.5 : 0.9 }}
-              tracksViewChanges={endpointMarkersTracking}
-              pinColor={undefined}
-            >
-              <View collapsable={false}>
-                <View style={styles.destinationMarkerWrap}>
-                  {destinationMarkerMode === 'avatar' ? (
-                    <MapAvatarMarker
-                      letter={destinationMarkerLetter}
-                      tone="passenger"
-                    />
-                  ) : Platform.OS === 'android' || compactRouteEndpoints ? (
-                    <RouteEndpointDotMarker tone="destination" />
-                  ) : (
-                    <RouteEndpointMarker label="Chegada" tone="destination" />
-                  )}
-                </View>
-
-                {showMarkerCallouts ? (
-                  <View style={styles.calloutBubble}>
-                    <Text style={styles.calloutTitle}>{destinationLabel || 'Chegada'}</Text>
-                    <Text style={styles.calloutAddress}>{destinationAddress || 'Endereço de destino'}</Text>
-                  </View>
-                ) : null}
+          <Marker
+            key="destination-marker"
+            coordinate={hasDestination && hasDestinationMarker ? normalizedDestinationCoordinate : ROUTE_SLOT_PLACEHOLDER[0]}
+            opacity={hasDestination && hasDestinationMarker ? 1 : 0}
+            zIndex={18}
+            anchor={{ x: 0.5, y: destinationMarkerMode === 'avatar' || Platform.OS === 'android' || compactRouteEndpoints ? 0.5 : 0.9 }}
+            tracksViewChanges={endpointMarkersTracking}
+            pinColor={undefined}
+          >
+            <View collapsable={false}>
+              <View style={styles.destinationMarkerWrap}>
+                {destinationMarkerMode === 'avatar' ? (
+                  <MapAvatarMarker
+                    letter={destinationMarkerLetter}
+                    tone="passenger"
+                  />
+                ) : Platform.OS === 'android' || compactRouteEndpoints ? (
+                  <RouteEndpointDotMarker tone="destination" />
+                ) : (
+                  <RouteEndpointMarker label="Chegada" tone="destination" />
+                )}
               </View>
-            </Marker>
-          ) : null}
+
+              {showMarkerCallouts ? (
+                <View style={styles.calloutBubble}>
+                  <Text style={styles.calloutTitle}>{destinationLabel || 'Chegada'}</Text>
+                  <Text style={styles.calloutAddress}>{destinationAddress || 'Endereço de destino'}</Text>
+                </View>
+              ) : null}
+            </View>
+          </Marker>
 
           {hasDisplayedDriverCoordinate &&
           !shouldRenderProjectedDriverVehicleOverlay &&
@@ -3274,7 +3400,7 @@ function PrototypeMapLayer({
                 <VehicleMarkerContent
                   source={item.source}
                   colorToken={item.colorToken}
-                  shapeKey={driverMarkerShapeKey}
+                  shapeKey={driverMarkerShapeKey || item.shapeKey}
                   screenHeading={resolveScreenRelativeVehicleHeading(item.heading, normalizedMapCameraHeading)}
                 />
               </View>

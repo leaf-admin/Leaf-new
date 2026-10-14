@@ -138,12 +138,12 @@ describe('DriverBalanceService requestWithdrawal', () => {
     }
   });
 
-  it('calculates the Woovi withdrawal fee only below R$ 500,00', async () => {
+  it('calculates a flat R$ 1,00 withdrawal fee', async () => {
     const service = require('../src/services/DriverBalanceService').default;
 
     expect(service.calculateWithdrawFee(0)).toBe(0);
     expect(service.calculateWithdrawFee(499.99)).toBe(1);
-    expect(service.calculateWithdrawFee(500)).toBe(0);
-    expect(service.calculateWithdrawFee(1000)).toBe(0);
+    expect(service.calculateWithdrawFee(500)).toBe(1);
+    expect(service.calculateWithdrawFee(1000)).toBe(1);
   });
 });

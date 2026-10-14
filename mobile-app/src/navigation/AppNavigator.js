@@ -38,6 +38,8 @@ import SplashScreen from '../screens/SplashScreen';
 import AuthLoadingScreen from '../screens/AuthLoadingScreen';
 
 import RobotaxiPrototypeScreen from '../screens/RobotaxiPrototypeScreen';
+import HomeRouteRedirectScreen from './HomeRouteRedirectScreen';
+import LeafMotionLab from '../screens/prototype/lab/LeafMotionLab';
 import RobotaxiDestinationScreen from '../screens/prototype/RobotaxiDestinationScreen';
 import RobotaxiDriverSearchScreen from '../screens/prototype/RobotaxiDriverSearchScreen';
 import RobotaxiTripScreen from '../screens/prototype/RobotaxiTripScreen';
@@ -364,6 +366,7 @@ const appLinking = {
       RobotaxiMenuTripHistory: 'robotaxi/menu/history',
       RobotaxiMenuMessages: 'robotaxi/menu/messages',
       RobotaxiNotifications: 'robotaxi/notifications',
+      LeafMotionLab: 'dev/motion-lab',
       RobotaxiMenuHelp: 'robotaxi/menu/help',
       RobotaxiMenuSettings: 'robotaxi/menu/settings',
       EarningsReport: 'driver/earnings',
@@ -852,8 +855,8 @@ function renderSharedLegacyAliases() {
   return (
     <>
       {/* Compatibility aliases resolve to the canonical runtime only. */}
-      <Stack.Screen name="MapScreen" component={RobotaxiPrototypeScreen} />
-      <Stack.Screen name="TabRoot" component={RobotaxiPrototypeScreen} />
+      <Stack.Screen name="MapScreen" component={HomeRouteRedirectScreen} />
+      <Stack.Screen name="TabRoot" component={HomeRouteRedirectScreen} />
     </>
   );
 }
@@ -1091,14 +1094,23 @@ function MainNavigator() {
     >
       <Stack.Screen
         name="Map"
-        component={RobotaxiPrototypeScreen}
-        options={{ keyboardHandlingEnabled: false }}
+        component={HomeRouteRedirectScreen}
+        options={{ ...prototypeOverlayScreenOptions, keyboardHandlingEnabled: false }}
       />
 
       {allowPublicPrototypeQaScreens ? (
         <Stack.Screen
           name="AuthFlowScreenshotHarness"
           component={AuthFlowScreenshotHarness}
+          options={{ headerShown: false }}
+        />
+      ) : null}
+
+      {/* Development-only motion lab (micro-interaction prototypes). */}
+      {__DEV__ ? (
+        <Stack.Screen
+          name="LeafMotionLab"
+          component={LeafMotionLab}
           options={{ headerShown: false }}
         />
       ) : null}

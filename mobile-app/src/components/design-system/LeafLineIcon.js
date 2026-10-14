@@ -17,9 +17,15 @@ export const LEAF_ICON_STROKE = 1.75;
 
 const TAB_ICONS = new Set(['home', 'activity', 'account']);
 
+// Duas camadas: o traço e um preenchimento suave por baixo (2026-10-14: o traço puro
+// ficava simples demais). Selecionado, o preenchimento ganha o verde da Leaf.
+export const LEAF_ICON_FILL_IDLE = 'rgba(26,51,14,0.08)';
+export const LEAF_ICON_FILL_ACTIVE = 'rgba(132,201,76,0.42)';
+
 const PATHS = {
-  bell: (c, w) => (
+  bell: (c, w, f) => (
     <>
+      <Path d="M6 16.5V11a6 6 0 1 1 12 0v5.5l1.5 1.75h-15z" fill={f} />
       <Path
         d="M6 16.5V11a6 6 0 1 1 12 0v5.5l1.5 1.75h-15z"
         stroke={c}
@@ -28,12 +34,14 @@ const PATHS = {
         fill="none"
       />
       <Path d="M10 20.5a2.1 2.1 0 0 0 4 0" stroke={c} strokeWidth={w} strokeLinecap="round" fill="none" />
+      <Path d="M9 9.2a3.2 3.2 0 0 1 2.4-2.1" stroke={c} strokeWidth={w * 0.7} strokeLinecap="round" opacity={0.45} fill="none" />
     </>
   ),
-  locate: (c, w) => (
+  locate: (c, w, f) => (
     <>
+      <Circle cx="12" cy="12" r="6.5" fill={f} />
       <Circle cx="12" cy="12" r="6.5" stroke={c} strokeWidth={w} fill="none" />
-      <Circle cx="12" cy="12" r="2.25" fill={c} />
+      <Circle cx="12" cy="12" r="2.4" fill={c} />
       <Path d="M12 2.75v2.5M12 18.75v2.5M2.75 12h2.5M18.75 12h2.5" stroke={c} strokeWidth={w} strokeLinecap="round" />
     </>
   ),
@@ -47,17 +55,22 @@ const PATHS = {
       fill="none"
     />
   ),
-  home: (c, w) => (
-    <Path
-      d="M4.25 10.25 12 4l7.75 6.25V19a1.25 1.25 0 0 1-1.25 1.25H14.5v-5.5h-5v5.5H5.5A1.25 1.25 0 0 1 4.25 19z"
-      stroke={c}
-      strokeWidth={w}
-      strokeLinejoin="round"
-      fill="none"
-    />
-  ),
-  activity: (c, w) => (
+  home: (c, w, f) => (
     <>
+      <Path d="M4.25 10.25 12 4l7.75 6.25V19a1.25 1.25 0 0 1-1.25 1.25H5.5A1.25 1.25 0 0 1 4.25 19z" fill={f} />
+      <Path
+        d="M4.25 10.25 12 4l7.75 6.25V19a1.25 1.25 0 0 1-1.25 1.25H14.5v-5.5h-5v5.5H5.5A1.25 1.25 0 0 1 4.25 19z"
+        stroke={c}
+        strokeWidth={w}
+        strokeLinejoin="round"
+        fill="none"
+      />
+      <Path d="M9.5 20.25v-5.5h5v5.5z" fill={c} opacity={0.9} />
+    </>
+  ),
+  activity: (c, w, f) => (
+    <>
+      <Path d="M6 3.75h12v16.5l-2.4-1.5-2.4 1.5-1.2-.75-1.2.75-2.4-1.5L6 20.25z" fill={f} />
       <Path
         d="M6 3.75h12v16.5l-2.4-1.5-2.4 1.5-1.2-.75-1.2.75-2.4-1.5L6 20.25z"
         stroke={c}
@@ -65,13 +78,16 @@ const PATHS = {
         strokeLinejoin="round"
         fill="none"
       />
-      <Path d="M9.25 8.5h5.5M9.25 12h5.5M9.25 15.5h3" stroke={c} strokeWidth={w} strokeLinecap="round" />
+      <Path d="M9.25 8.5h5.5M9.25 12h5.5" stroke={c} strokeWidth={w} strokeLinecap="round" />
+      <Circle cx="10" cy="15.6" r="1.25" fill={c} />
+      <Path d="M12.4 15.6h2.35" stroke={c} strokeWidth={w} strokeLinecap="round" />
     </>
   ),
-  account: (c, w) => (
+  account: (c, w, f) => (
     <>
+      <Circle cx="12" cy="12" r="8.75" fill={f} />
       <Circle cx="12" cy="12" r="8.75" stroke={c} strokeWidth={w} fill="none" />
-      <Circle cx="12" cy="10" r="3" stroke={c} strokeWidth={w} fill="none" />
+      <Circle cx="12" cy="10" r="3" fill={c} opacity={0.92} />
       <Path d="M6.4 18.3a6.6 6.6 0 0 1 11.2 0" stroke={c} strokeWidth={w} strokeLinecap="round" fill="none" />
     </>
   ),
@@ -125,14 +141,14 @@ export function useLeafIconMotion(name, signal) {
   }));
 }
 
-export default function LeafLineIcon({ name, size = 22, color = '#111410', strokeWidth = LEAF_ICON_STROKE, signal = 0 }) {
+export default function LeafLineIcon({ name, size = 22, color = '#111410', strokeWidth = LEAF_ICON_STROKE, signal = 0, active = false, fill }) {
   const animatedStyle = useLeafIconMotion(name, signal);
 
   const draw = PATHS[name] || PATHS.close;
   return (
     <Reanimated.View style={[{ width: size, height: size }, name === 'bell' && { transformOrigin: 'top' }, animatedStyle]}>
       <Svg width={size} height={size} viewBox="0 0 24 24">
-        {draw(color, strokeWidth)}
+        {draw(color, strokeWidth, fill || (active ? LEAF_ICON_FILL_ACTIVE : LEAF_ICON_FILL_IDLE))}
       </Svg>
     </Reanimated.View>
   );

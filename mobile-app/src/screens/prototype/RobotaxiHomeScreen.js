@@ -1,5 +1,7 @@
 import leafTypography from '../../components/prototype/LeafTypography';
 import LeafBootSplash from '../../components/design-system/LeafBootSplash';
+import LeafSplashReveal from '../../components/design-system/LeafSplashReveal';
+import { projectMapPoint } from './home/projectMapPoint';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Keyboard, Linking, Modal, Platform, StatusBar, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -63,6 +65,8 @@ import useSearchElapsedClock from './useSearchElapsedClock';
 import { openDriverExternalNavigation } from '../../services/DriverExternalNavigationService';
 import {
   fetchH3CellsForRegion,
+  fetchDriverDemandHeat,
+  selectDemandHeatCellsInRegion,
   isCoordinateInsideRegion,
   resolveH3LabelAnchor,
   selectSeparatedH3Labels,
@@ -70,6 +74,8 @@ import {
 import WebSocketManager from '../../services/WebSocketManager';
 import driverAvailabilityService from '../../services/DriverAvailabilityService';
 import { getSelfHostedApiUrl } from '../../config/ApiConfig';
+import { getPlacesRequestHeaders } from '../../services/placesRequestHeaders';
+import LeafConfirmCard from '../../components/prototype/LeafConfirmCard';
 import { resolveMeaningfulAddress } from './addressLabelUtils';
 import { selectDisplayableDriverOffer } from './driverOfferPricingSnapshot';
 import {
@@ -342,6 +348,9 @@ const SEARCH_ZOOM_ANIMATION_MS = 1150;
 // needs the surroundings of the pickup, so the drawn area is capped.
 const SEARCH_VISUAL_MAX_RADIUS_KM = 1.2;
 const SEARCH_RADIUS_MARGIN = 1.34;
+// A câmera da busca não acompanha o raio crescendo: com a esfera por cima, cada recuo parecia o
+// mapa escorregando. Fica num enquadramento de bairro em volta do embarque.
+const SEARCH_CAMERA_MAX_RADIUS_KM = 1.2;
 const SEARCH_INITIAL_VIEWPORT_RADIUS_KM = 0.48;
 const MAP_OCCLUSION_REPOSITION_MS = 760;
 const MAP_RETURN_REPOSITION_MS = 820;
@@ -381,6 +390,7 @@ function isFollowRegionClose(previous, next) {
 const DRIVER_AT_PICKUP_ROUTE_METERS = 80;
 
 const NAV_ROUTE_REVEAL_MAX_SPAN_METERS = 4000;
+const NAV_ROUTE_REVEAL_MIN_SPAN_METERS = 400;
 // Diagonal of the bounding box of a route, in metres.
 function measureRouteSpanMeters(coordinates = []) {
   const points = (Array.isArray(coordinates) ? coordinates : []).filter(
@@ -413,6 +423,10 @@ function measureRouteLengthMeters(coordinates = []) {
 }
 
 const NAVIGATION_BANNER_CLEARANCE = 128;
+// Longest wait for the navigation camera after accepting before fitting the route.
+const DRIVER_NAVIGATION_HANDOVER_MS = 2000;
+// Ride keeps the camera this long after its last signal (offer -> ride hand-over).
+const DRIVER_RIDE_CAMERA_HOLD_MS = 3000;
 const NAVIGATION_CAR_VISIBLE_ANCHOR = 0.74;
 const DRIVER_DISCLOSURE_STORAGE_TIMEOUT_MS = Math.max(
   600,
@@ -938,9 +952,7 @@ async function fetchPassengerHomeRoutePreview({
 }) {
   const response = await fetch(getSelfHostedApiUrl('/api/places/directions'), {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
+    headers: await getPlacesRequestHeaders(),
     body: JSON.stringify({
       startLoc,
       destLoc,
@@ -1210,7 +1222,7 @@ async function fetchCachedPickupPlaceOnly(query, location = null) {
     try {
       const response = await fetch(getSelfHostedApiUrl('/api/places/search'), {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: await getPlacesRequestHeaders(),
         body: JSON.stringify({
           query,
           location,
@@ -1382,7 +1394,7 @@ async function fetchHomePickupReverseGeocode(coordinate, telemetry = null) {
   try {
     const response = await fetch(getSelfHostedApiUrl('/api/places/reverse-geocode'), {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: await getPlacesRequestHeaders(),
       body: JSON.stringify({
         location,
         telemetry,
@@ -1876,6 +1888,12 @@ export function buildDriverIdentityReviewTicketParams(
   };
 }
 
+// Largura da tag de demanda pelo texto (fonte 12, semibold): sem depender da medição
+// do Android, que cortava a tag.
+function resolveSurgeFlagWidth(label) {
+  return Math.max(52, Math.round(String(label || '').length * 8.2 + 26));
+}
+
 export default function RobotaxiHomeScreen({ navigation, route }) {
   const {
     activeRole,
@@ -1965,6 +1983,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   const lastManualMapPanAtRef = useRef(0);
   const wasSearchingRef = useRef(false);
   const lastSearchRadiusRef = useRef(null);
+  const lastSearchCameraTargetRef = useRef(null);
   const lastAutoNavigationPhaseRef = useRef('');
   const lastDriverAutomationExecutionRef = useRef('');
   const lastDriverAutomationSnapshotRef = useRef('');
@@ -2042,6 +2061,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   const homePickupDraftBeforePickerRef = useRef(null);
   const [homePickupPickerCardHeight, setHomePickupPickerCardHeight] = useState(HOME_PICKUP_PICKER_FALLBACK_HEIGHT);
   const [driverBottomCtaHeight, setDriverBottomCtaHeight] = useState(DRIVER_BOTTOM_CTA_FALLBACK_HEIGHT);
+  const [driverOfflineConfirmVisible, setDriverOfflineConfirmVisible] = useState(false);
   const [driverLiveRideHeight, setDriverLiveRideHeight] = useState(DRIVER_LIVE_RIDE_FALLBACK_HEIGHT);
   const [driverLiveRideHeightMeasured, setDriverLiveRideHeightMeasured] = useState(false);
   const lastPassengerHomeAvailabilityNoticeRef = useRef('');
@@ -2058,6 +2078,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     hasPrototypeHomeSurfaceHydratedInSession
   );
   const [driverH3Cells, setDriverH3Cells] = useState([]);
+  const [driverDemandHeatCells, setDriverDemandHeatCells] = useState([]);
   const [driverH3VisualPolicy, setDriverH3VisualPolicy] = useState(DEFAULT_DRIVER_H3_VISUAL_POLICY);
   const [driverH3RefreshPolicy, setDriverH3RefreshPolicy] = useState({
     pollIntervalMs: DRIVER_H3_DEFAULT_FETCH_INTERVAL_MS,
@@ -3311,7 +3332,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
 
     const viewportRegion = buildSearchViewportRegion({
       center: searchCenterCoordinate,
-      radiusKm: searchPreviewRadiusKm || searchRadiusKm,
+      radiusKm: Math.min(searchPreviewRadiusKm || searchRadiusKm, SEARCH_CAMERA_MAX_RADIUS_KM),
     });
 
     if (!viewportRegion) {
@@ -4896,11 +4917,9 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
         ].includes(normalizedBookingStatus)
       )
   );
-  const shouldShowTrafficLayer = Boolean(
-    isDriverRole
-    && shouldRenderRuntimeMapState
-    && driverH3RefreshPolicy?.trafficLayerEnabled !== false
-  );
+  // Camada de trânsito do Google desligada no motorista (2026-10-14): poluía o mapa e
+  // brigava com a linha da rota. O trânsito da própria rota continua nas cores dela.
+  const shouldShowTrafficLayer = false;
   const driverTripAssistNativeNavigation = driverTripAssist?.nativeNavigation || null;
   const { uid: preferencesUid, preferences: mobilePreferences } = useMobilePreferences();
   useLeafVoiceGuidance({
@@ -5051,6 +5070,25 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
       (hasDriverActiveRideContext ||
         (driverActivationResolved && hasDriverLiveOfferContext))
   );
+  // Accepting hands over from the offer to the ride; for a moment neither is
+  // set, so ownership also counts the booking status and holds briefly after
+  // the last signal (otherwise the user re-centre slipped in for one frame).
+  const driverRideCameraSignal = Boolean(
+    isDriverRole &&
+      (hasDriverLiveRideOverlay ||
+        driverOfferPreviewActive ||
+        Boolean(driverLiveOffer) ||
+        Boolean(driverActiveRide?.bookingId || driverActiveRide?.id) ||
+        isLiveRideRouteStatus),
+  );
+  const driverRideCameraSignalAtRef = useRef(0);
+  if (driverRideCameraSignal) {
+    driverRideCameraSignalAtRef.current = Date.now();
+  }
+  const driverRideOwnsCamera = Boolean(
+    driverRideCameraSignal ||
+      (isDriverRole && Date.now() - driverRideCameraSignalAtRef.current < DRIVER_RIDE_CAMERA_HOLD_MS),
+  );
   const leafNativeNavigationModel = driverTripAssistNativeNavigation;
   const leafNativeNavigationKey = String(leafNativeNavigationModel?.navigationKey || '');
   const leafNativeNavigationCameraHeading = leafNativeNavigationModel?.cameraHeadingDegrees;
@@ -5083,10 +5121,34 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   // the trip card were measured: with the card at its fallback height the
   // visible window was tiny, so the fit zoomed out to state level and then
   // straight back in. No route fit for a driver ride until both are measured.
+  // Accepting an offer: navigation takes the camera about a second later.
+  // Fitting the whole route in that gap was one more zoom out/in, so the fit
+  // waits briefly when a ride *becomes* live (not when the app reopens on one).
+  // Detected during render, not in an effect: the route-fit effect runs in the
+  // same commit as the status change and would otherwise fire before the hold.
+  const driverNavigationHandoverUntilRef = useRef(0);
+  const previousLiveRideStatusRef = useRef(isLiveRideRouteStatus);
+  if (isDriverRole && !previousLiveRideStatusRef.current && isLiveRideRouteStatus) {
+    driverNavigationHandoverUntilRef.current = Date.now() + DRIVER_NAVIGATION_HANDOVER_MS;
+  }
+  previousLiveRideStatusRef.current = isLiveRideRouteStatus;
+  const driverNavigationHandover = Date.now() < driverNavigationHandoverUntilRef.current;
+  const [, setDriverNavigationHandoverTick] = useState(0);
+  useEffect(() => {
+    if (!driverNavigationHandover) return undefined;
+    // Re-render when the hold ends so the route fit can run if navigation never came.
+    const remaining = Math.max(0, driverNavigationHandoverUntilRef.current - Date.now()) + 20;
+    const timer = setTimeout(() => setDriverNavigationHandoverTick((tick) => tick + 1), remaining);
+    return () => clearTimeout(timer);
+  }, [driverNavigationHandover]);
   const driverAwaitingNavigationCamera = Boolean(
     isDriverRole &&
       hasDriverLiveRideOverlay &&
-      (!(Number(mapHeight) > 0) || !driverLiveRideHeightMeasured)
+      (!(Number(mapHeight) > 0) ||
+        !driverLiveRideHeightMeasured ||
+        (driverNavigationHandover &&
+          !driverNavigationCameraOwnsMap &&
+          !(hiddenNativeNavigationKey && hiddenNativeNavigationKey === leafNativeNavigationKey)))
   );
   const shouldFreezeBackgroundMapCamera = freezeBackgroundMapCamera;
   const showDriverHomeOverlay = Boolean(
@@ -5619,6 +5681,22 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
         !showDriverHomeSkeleton
       )
   );
+  // Na primeira vez que o splash sai, o mapa sobe por baixo dele (motion aprovado).
+  // Coberturas posteriores dentro da sessão continuam saindo sem animação.
+  const [homeSplashRevealing, setHomeSplashRevealing] = useState(false);
+  const homeSplashRevealDoneRef = useRef(false);
+  const previousHomeLoadingVisibleRef = useRef(effectiveHomeSurfaceLoadingVisible);
+  useEffect(() => {
+    const wasVisible = previousHomeLoadingVisibleRef.current;
+    previousHomeLoadingVisibleRef.current = effectiveHomeSurfaceLoadingVisible;
+    if (wasVisible && !effectiveHomeSurfaceLoadingVisible && !homeSplashRevealDoneRef.current) {
+      homeSplashRevealDoneRef.current = true;
+      setHomeSplashRevealing(true);
+    }
+  }, [effectiveHomeSurfaceLoadingVisible]);
+  const handleHomeSplashRevealDone = useCallback(() => {
+    setHomeSplashRevealing(false);
+  }, []);
   const homeSurfaceInteractionBlocked = Boolean(
     effectiveHomeSurfaceLoadingVisible ||
       showPassengerHomeSkeleton ||
@@ -6066,17 +6144,40 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     };
   }, [scheduleDriverH3Refresh, showDriverH3Overlay]);
 
+  // Mapa de demanda com histórico: busca ao entrar no mapa inicial e a cada 5 min. É o mesmo
+  // para todos os motoristas e muda devagar, então não acompanha o arrasto do mapa.
+  useEffect(() => {
+    if (!showDriverH3Overlay || typeof fetchDriverDemandHeat !== 'function') {
+      return undefined;
+    }
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const cells = await fetchDriverDemandHeat();
+        if (!cancelled) setDriverDemandHeatCells(cells);
+      } catch (_error) {
+        // Mantém o último calor; o mapa segue funcionando sem ele.
+      }
+    };
+    load();
+    const timer = setInterval(load, 5 * 60 * 1000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [showDriverH3Overlay]);
+
   const driverH3MapChildren = useMemo(() => {
-    if (
-      !showDriverH3Overlay
-      || driverH3VisualPolicy?.enabled === false
-      || !Array.isArray(driverH3Cells)
-      || driverH3Cells.length === 0
-    ) {
+    if (!showDriverH3Overlay) {
       return null;
     }
 
-    const surgeCells = driverH3Cells.filter((cell) => (
+    const heatCells = typeof selectDemandHeatCellsInRegion === 'function'
+      ? selectDemandHeatCellsInRegion(driverDemandHeatCells, visibleMapRegion)
+      : [];
+    const surgeCells = (driverH3VisualPolicy?.enabled === false || !Array.isArray(driverH3Cells)
+      ? []
+      : driverH3Cells).filter((cell) => (
       Array.isArray(cell?.boundary)
       && cell.boundary.length >= 6
       && Number(cell?.surge?.percent || 0) > 0
@@ -6084,27 +6185,25 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
       && Number.isFinite(Number(cell?.center?.lng))
     ));
 
-    if (surgeCells.length === 0) {
+    if (surgeCells.length === 0 && heatCells.length === 0) {
       return null;
     }
 
-    const labelCandidates = [...surgeCells]
-      .filter((cell) => (
-        driverH3VisualPolicy?.label?.enabled !== false
-        && cell?.surge?.labelVisible !== false
-        && isCoordinateInsideRegion(cell?.center, visibleMapRegion, 0.035)
-      ))
-      .sort((left, right) => Number(right?.surge?.percent || 0) - Number(left?.surge?.percent || 0));
-    const labelCells = selectSeparatedH3Labels(labelCandidates, visibleMapRegion, {
-      maxVisible: Math.min(
-        5,
-        Math.max(0, Number(driverH3VisualPolicy?.label?.maxVisible ?? 5))
-      ),
-      minDistanceRatio: 0.18,
-    });
-
     return (
       <>
+        {heatCells.map((cell) => (
+          <Polygon
+            key={`heat-${cell.h3Index}`}
+            coordinates={cell.boundary.map((point) => ({
+              latitude: Number(point.lat),
+              longitude: Number(point.lng)
+            }))}
+            strokeWidth={0}
+            strokeColor="rgba(0,0,0,0)"
+            fillColor={`rgba(132,201,76,${(0.06 + 0.16 * Math.min(1, Math.max(0, Number(cell.intensity) || 0))).toFixed(3)})`}
+            zIndex={1}
+          />
+        ))}
         {surgeCells.map((cell) => (
           <Polygon
             key={`surge-${cell.h3Index}`}
@@ -6120,57 +6219,37 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
             )}
           />
         ))}
-        {labelCells.map((cell) => {
-          const percent = Number(cell?.surge?.percent || 0);
-          const label = cell?.surge?.label || `+${Math.round(percent)}%`;
-          const anchor = resolveH3LabelAnchor(cell.center, visibleMapRegion);
-
-          return (
-            <Marker
-              key={`surge-label-${cell.h3Index}`}
-              coordinate={{
-                latitude: Number(cell.center.lat),
-                longitude: Number(cell.center.lng)
-              }}
-              anchor={anchor}
-              tracksViewChanges={Platform.OS === 'android'}
-            >
-              <View collapsable={false} style={styles.driverSurgeFlagWrap}>
-              <View
-                collapsable={false}
-                style={[
-                  styles.driverSurgeFlag,
-                  {
-                    backgroundColor: hexToRgba(
-                      driverH3VisualPolicy?.label?.backgroundColor || '#222222',
-                      Number(driverH3VisualPolicy?.label?.backgroundOpacity ?? 0.9)
-                    ),
-                    borderColor: hexToRgba(
-                      driverH3VisualPolicy?.label?.borderColor || '#FFFFFF',
-                      Number(driverH3VisualPolicy?.label?.borderOpacity ?? 0.82)
-                    )
-                  }
-                ]}
-              >
-                <Text
-                  style={[
-                    styles.driverSurgeFlagText,
-                    {
-                      color: driverH3VisualPolicy?.label?.textColor || '#FFFFFF',
-                      fontSize: Number(driverH3VisualPolicy?.label?.fontSize || 12),
-                      lineHeight: Number(driverH3VisualPolicy?.label?.fontSize || 12) + 2
-                    }
-                  ]}
-                >
-                  {label}
-                </Text>
-              </View>
-              </View>
-            </Marker>
-          );
-        })}
       </>
     );
+  }, [driverDemandHeatCells, driverH3Cells, driverH3VisualPolicy, showDriverH3Overlay, visibleMapRegion]);
+
+  // Tags de demanda (+N%) desenhadas sobre o mapa, fora dele: como marcador nativo o
+  // Android capturava a tag antes de o texto ser medido e ela saía cortada ao meio.
+  const driverH3LabelCells = useMemo(() => {
+    if (
+      !showDriverH3Overlay
+      || driverH3VisualPolicy?.enabled === false
+      || driverH3VisualPolicy?.label?.enabled === false
+      || !Array.isArray(driverH3Cells)
+    ) {
+      return [];
+    }
+    const candidates = driverH3Cells
+      .filter((cell) => (
+        Number(cell?.surge?.percent || 0) > 0
+        && cell?.surge?.labelVisible !== false
+        && Number.isFinite(Number(cell?.center?.lat))
+        && Number.isFinite(Number(cell?.center?.lng))
+        && isCoordinateInsideRegion(cell?.center, visibleMapRegion, 0.035)
+      ))
+      .sort((left, right) => Number(right?.surge?.percent || 0) - Number(left?.surge?.percent || 0));
+    if (candidates.length === 0) {
+      return [];
+    }
+    return selectSeparatedH3Labels(candidates, visibleMapRegion, {
+      maxVisible: Math.min(5, Math.max(0, Number(driverH3VisualPolicy?.label?.maxVisible ?? 5))),
+      minDistanceRatio: 0.18,
+    });
   }, [driverH3Cells, driverH3VisualPolicy, showDriverH3Overlay, visibleMapRegion]);
 
   const getRouteEdgePadding = useCallback(() => {
@@ -6347,15 +6426,33 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   ]);
 
   const focusSearchArea = useCallback((animatedFit = true) => {
-    if (!mapRef.current || !homeMapInteractiveReady || !isSearchingMode || !searchTargetRegion) {
+    // The search-area zoom is the passenger waiting for a driver. A driver only
+    // passes through "searching" while an offer is up; zooming out there added
+    // a wide north-up jump to every accepted offer.
+    if (!mapRef.current || !homeMapInteractiveReady || !isSearchingMode || !searchTargetRegion || isDriverRole) {
       return;
     }
 
+    // Só move quando o enquadramento muda de verdade, e sempre animado: o card mudando de altura
+    // refazia o alvo e a câmera dava um salto seco (duração 0).
+    const last = lastSearchCameraTargetRef.current;
+    if (last) {
+      const centerShift = Math.hypot(
+        (searchTargetRegion.latitude - last.latitude) / last.latitudeDelta,
+        (searchTargetRegion.longitude - last.longitude) / last.longitudeDelta,
+      );
+      const zoomShift = Math.abs(searchTargetRegion.latitudeDelta / last.latitudeDelta - 1);
+      if (centerShift < 0.08 && zoomShift < 0.12) {
+        return;
+      }
+    }
+    lastSearchCameraTargetRef.current = searchTargetRegion;
     mapRef.current.animateToRegion(
       searchTargetRegion,
-      animatedFit ? SEARCH_ZOOM_ANIMATION_MS : 0
+      animatedFit ? SEARCH_ZOOM_ANIMATION_MS : 700
     );
   }, [
+    isDriverRole,
     homeMapInteractiveReady,
     isSearchingMode,
     searchTargetRegion
@@ -6403,7 +6500,10 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   ]);
 
   useEffect(() => {
-    if (!mapRef.current || !homeMapInteractiveReady || hasActiveRoute || isSearchingMode || shouldFreezeBackgroundMapCamera || !isScreenFocused) {
+    // From an offer until the ride ends the camera belongs to the ride (offer
+    // fit, then navigation). Re-centring on the user in between made accepting
+    // an offer jump three times (fit -> wide view without route -> follow).
+    if (!mapRef.current || !homeMapInteractiveReady || hasActiveRoute || isSearchingMode || shouldFreezeBackgroundMapCamera || !isScreenFocused || driverRideOwnsCamera) {
       return;
     }
 
@@ -6418,7 +6518,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     lastRouteLayoutKeyRef.current = '';
     lastFollowRegionRef.current = targetRegion;
     mapRef.current.animateToRegion(targetRegion, MAP_OCCLUSION_REPOSITION_MS);
-  }, [hasActiveRoute, homeMapInteractiveReady, isScreenFocused, isSearchingMode, mapFollowingUser, shouldFreezeBackgroundMapCamera, targetRegion]);
+  }, [driverRideOwnsCamera, hasActiveRoute, homeMapInteractiveReady, isScreenFocused, isSearchingMode, mapFollowingUser, shouldFreezeBackgroundMapCamera, targetRegion]);
 
   // Back on the home after another screen (e.g. the ride receipt) with no
   // route left: follow the user again at street level. Screens on top register
@@ -6428,14 +6528,14 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   useEffect(() => {
     const regainedFocus = isScreenFocused && !wasScreenFocusedRef.current;
     wasScreenFocusedRef.current = isScreenFocused;
-    if (!regainedFocus || hasActiveRoute || isSearchingMode || !mapRef.current || !homeMapInteractiveReady) {
+    if (!regainedFocus || hasActiveRoute || isSearchingMode || !mapRef.current || !homeMapInteractiveReady || driverRideOwnsCamera) {
       return;
     }
     lastRouteLayoutKeyRef.current = '';
     lastFollowRegionRef.current = targetRegion;
     setMapFollowingUser(true);
     mapRef.current.animateToRegion(targetRegion, MAP_OCCLUSION_REPOSITION_MS);
-  }, [hasActiveRoute, homeMapInteractiveReady, isScreenFocused, isSearchingMode, targetRegion]);
+  }, [driverRideOwnsCamera, hasActiveRoute, homeMapInteractiveReady, isScreenFocused, isSearchingMode, targetRegion]);
 
   useEffect(() => {
     if (!isSearchingMode) {
@@ -6527,8 +6627,17 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
       wasSearchingRef.current = true;
       return;
     }
+    lastSearchCameraTargetRef.current = null;
 
     if (!wasSearchingRef.current || !mapRef.current || !homeMapInteractiveReady) {
+      return;
+    }
+
+    // "Search ended" is a passenger moment. A driver passes through the
+    // searching status while an offer is up; re-centring here on accept put a
+    // wide north-up view between the offer fit and the navigation camera.
+    if (driverRideOwnsCamera) {
+      wasSearchingRef.current = false;
       return;
     }
 
@@ -6556,6 +6665,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   }, [
     activeRoute,
     driverNavigationCameraOwnsMap,
+    driverRideOwnsCamera,
     focusRoute,
     hasActiveRoute,
     homeMapInteractiveReady,
@@ -6653,7 +6763,13 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     // The reveal fits the whole leg in the small window between the banner
     // and the trip card. For a long leg that meant zooming out to the entire
     // city for a moment; skip it and go straight to following the car.
-    if (measureRouteSpanMeters(navigationRouteCoordinates) > NAV_ROUTE_REVEAL_MAX_SPAN_METERS) {
+    // A short leg (e.g. the driver already at pickup) has nothing to reveal:
+    // the reveal only turned the map north and zoomed before following again.
+    const navigationRouteSpanMeters = measureRouteSpanMeters(navigationRouteCoordinates);
+    if (
+      navigationRouteSpanMeters > NAV_ROUTE_REVEAL_MAX_SPAN_METERS ||
+      navigationRouteSpanMeters < NAV_ROUTE_REVEAL_MIN_SPAN_METERS
+    ) {
       lastNativeNavigationRouteRevealKeyRef.current = leafNativeNavigationKey;
       return;
     }
@@ -8500,14 +8616,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
       }
 
       if (driverOnline) {
-        Alert.alert(
-          'Ficar offline',
-          'Deseja parar de receber corridas agora?',
-          [
-            { text: 'Não', style: 'cancel' },
-            { text: 'Sim', onPress: () => runDriverOnlineMutation(false) }
-          ]
-        );
+        setDriverOfflineConfirmVisible(true);
         return;
       }
 
@@ -9475,7 +9584,8 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
 
   const [homeLandingMapFrame, setHomeLandingMapFrame] = useState(null);
   const passengerLandingVisible = Boolean(showRootNavigation && !isDriverRole && canShowPassengerHomeOverlay && !homeSurfaceInteractionBlocked);
-  const passengerMapInCard = Boolean(passengerLandingVisible || (passengerLandingMapLayout && !homeSurfaceInteractionBlocked));
+  // O mapa do passageiro é o fundo da tela (antes ficava dentro de um card).
+  const passengerMapInCard = false;
 
   const completedReceiptBookingId = String(
     lastReceipt?.bookingId ||
@@ -9576,6 +9686,58 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     presentedSearchingMode && searchTargetRegion
       ? searchTargetRegion
       : targetRegion;
+  // Onde o ponto de embarque está na tela, para a etiqueta "Seu embarque" ficar presa a ele.
+  const [landingPickupAnchor, setLandingPickupAnchor] = useState(null);
+  const [landingMapMoving, setLandingMapMoving] = useState(false);
+  const landingPickupLatitude = effectiveHomePickupCoordinate?.latitude;
+  const landingPickupLongitude = effectiveHomePickupCoordinate?.longitude;
+  const landingMapRegionRef = useRef(null);
+  const refreshLandingPickupAnchor = useCallback((regionOverride = null) => {
+    if (regionOverride) landingMapRegionRef.current = regionOverride;
+    const region = landingMapRegionRef.current || presentedMapRegion;
+    if (!passengerLandingVisible || !Number.isFinite(landingPickupLatitude) || !Number.isFinite(landingPickupLongitude)) {
+      setLandingPickupAnchor(null);
+      return;
+    }
+    const point = projectMapPoint(
+      region,
+      { latitude: landingPickupLatitude, longitude: landingPickupLongitude },
+      windowWidth,
+      windowHeight,
+    );
+    // Fora da área útil (atrás da busca ou da tab bar) a etiqueta não aparece.
+    const inside = Boolean(point)
+      && point.y > insets.top + 150 && point.y < windowHeight - insets.bottom - 150
+      && point.x > 40 && point.x < windowWidth - 40;
+    setLandingPickupAnchor((previous) => {
+      if (!inside) return null;
+      if (previous && Math.abs(previous.x - point.x) < 0.5 && Math.abs(previous.y - point.y) < 0.5) return previous;
+      return { x: point.x, y: point.y };
+    });
+  }, [insets.bottom, insets.top, landingPickupLatitude, landingPickupLongitude, passengerLandingVisible, presentedMapRegion, windowHeight, windowWidth]);
+  useEffect(() => {
+    refreshLandingPickupAnchor();
+    const timer = setTimeout(refreshLandingPickupAnchor, 900);
+    return () => clearTimeout(timer);
+  }, [refreshLandingPickupAnchor]);
+  const [driverLabelRegion, setDriverLabelRegion] = useState(null);
+  const [driverMapMoving, setDriverMapMoving] = useState(false);
+  const handleHomeMapPanDragWithLanding = useCallback((...args) => {
+    if (passengerLandingVisible) setLandingMapMoving(true);
+    if (isDriverRole) setDriverMapMoving(true);
+    handleMapPanDrag(...args);
+  }, [handleMapPanDrag, isDriverRole, passengerLandingVisible]);
+  const handleHomeMapRegionChangeCompleteWithLanding = useCallback((nextRegion) => {
+    handleMapRegionChangeComplete(nextRegion);
+    if (isDriverRole && nextRegion) {
+      setDriverMapMoving(false);
+      setDriverLabelRegion(nextRegion);
+    }
+    if (passengerLandingVisible) {
+      setLandingMapMoving(false);
+      refreshLandingPickupAnchor(nextRegion);
+    }
+  }, [handleMapRegionChangeComplete, isDriverRole, passengerLandingVisible, refreshLandingPickupAnchor]);
   // While adjusting the pickup, the blue dot must stay on the real GPS position;
   // the centre pin is the pickup. Otherwise the dot followed the pin around.
   const presentedUserCoordinate =
@@ -9668,9 +9830,9 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
           )}
           onMapLayout={handleMapLayout}
           onMapLoaded={handleHomeMapLoaded}
-          onMapPanDrag={handleMapPanDrag}
+          onMapPanDrag={handleHomeMapPanDragWithLanding}
           onMapReady={handleHomeMapReady}
-          onRegionChangeComplete={handleMapRegionChangeComplete}
+          onRegionChangeComplete={handleHomeMapRegionChangeCompleteWithLanding}
           // H3 cells stay through background re-syncs (they blinked before).
           mapChildren={shouldRenderRuntimeMapState || (isDriverRole && runtimeHomeSurfaceReady) ? driverH3MapChildren : null}
           mapSafetyProfile={isDriverRole ? 'driver' : 'default'}
@@ -9694,6 +9856,60 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
             onPressLeft={handleTopLeftPress}
             onPressRight={handleTopRightPress}
           />
+        ) : null}
+
+        {/* Tags de demanda sobre o mapa (ver driverH3LabelCells). Somem enquanto o mapa
+            se move e voltam presas ao centro do hexágono quando ele para. */}
+        {isDriverRole && !driverMapMoving && driverH3LabelCells.length ? (
+          <View pointerEvents="none" style={StyleSheet.absoluteFill} testID="driver-h3-label-overlay">
+            {driverH3LabelCells.map((cell) => {
+              const point = projectMapPoint(
+                driverLabelRegion || presentedMapRegion,
+                { latitude: Number(cell.center.lat), longitude: Number(cell.center.lng) },
+                windowWidth,
+                windowHeight,
+              );
+              if (!point || point.x < 0 || point.x > windowWidth || point.y < insets.top + 60 || point.y > windowHeight - 120) {
+                return null;
+              }
+              const percent = Number(cell?.surge?.percent || 0);
+              const label = cell?.surge?.label || `+${Math.round(percent)}%`;
+              const width = resolveSurgeFlagWidth(label);
+              return (
+                <View
+                  key={`surge-label-${cell.h3Index}`}
+                  style={[
+                    styles.driverSurgeFlag,
+                    {
+                      position: 'absolute',
+                      left: point.x - width / 2,
+                      top: point.y - 15,
+                      width,
+                      backgroundColor: hexToRgba(
+                        driverH3VisualPolicy?.label?.backgroundColor || '#222222',
+                        Number(driverH3VisualPolicy?.label?.backgroundOpacity ?? 0.9)
+                      ),
+                      borderColor: hexToRgba(
+                        driverH3VisualPolicy?.label?.borderColor || '#FFFFFF',
+                        Number(driverH3VisualPolicy?.label?.borderOpacity ?? 0.82)
+                      ),
+                    },
+                  ]}
+                >
+                  <Text
+                    numberOfLines={1}
+                    allowFontScaling={false}
+                    style={[
+                      styles.driverSurgeFlagText,
+                      { color: driverH3VisualPolicy?.label?.textColor || '#FFFFFF' },
+                    ]}
+                  >
+                    {label}
+                  </Text>
+                </View>
+              );
+            })}
+          </View>
         ) : null}
 
         {homePickupPickerVisible ? (
@@ -9824,8 +10040,26 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
           <DriverTransientStateCard
             card={driverTransientCard}
             insetsBottom={insets.bottom}
-            bottomOffset={DRIVER_BOTTOM_CTA_OFFSET + driverBottomCtaHeight + 12}
+            bottomOffset={DRIVER_BOTTOM_CTA_OFFSET + driverBottomCtaHeight + rootNavigationInset + 12}
             suppressActivationStatusAlerts={driverHasAcceptedOrActiveWork}
+          />
+        ) : null}
+
+        {isDriverRole ? (
+          <LeafConfirmCard
+            visible={driverOfflineConfirmVisible}
+            icon="logout"
+            title="Ficar offline?"
+            message="Você para de receber corridas até ficar online de novo."
+            cancelLabel="Manter online"
+            confirmLabel="Ficar offline"
+            bottomInset={insets.bottom}
+            testID="driver-offline-confirm"
+            onCancel={() => setDriverOfflineConfirmVisible(false)}
+            onConfirm={() => {
+              setDriverOfflineConfirmVisible(false);
+              runDriverOnlineMutation(false);
+            }}
           />
         ) : null}
 
@@ -9837,7 +10071,8 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
           onPickupPress={handleOpenHomePickupSearch}
           onSettingsPress={() => navigation.navigate('RobotaxiPrototypeSettings')}
           onRecenterPress={handleTopLeftPress}
-          onMapFrame={setHomeLandingMapFrame}
+          pickupAnchor={landingPickupAnchor}
+          mapMoving={landingMapMoving}
         /> : null}
 
         {canShowPassengerHomeOverlay && !passengerLandingVisible ? (
@@ -10073,6 +10308,11 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
             title={profileFirstName ? homeLoadingTitle : null}
             testID="prototype-home-loading"
             accessibilityLabel={homeLoadingTitle}
+            style={styles.homeLoadingOverlay}
+          />
+        ) : homeSplashRevealing ? (
+          <LeafSplashReveal
+            onDone={handleHomeSplashRevealDone}
             style={styles.homeLoadingOverlay}
           />
         ) : null}
@@ -10492,14 +10732,16 @@ const styles = StyleSheet.create({
   },
   // Android rasterises a marker to the exact bounds of its root view, which
   // cut the pill's border and shadow. The transparent margin keeps them inside.
+  // Tamanho fixo: no Android o marcador vira imagem medida antes do texto, e a tag
+  // saía cortada ("6%" pela metade).
   driverSurgeFlagWrap: {
-    padding: 8,
+    height: 46,
+    paddingVertical: 8,
     alignItems: 'center',
     justifyContent: 'center',
   },
   driverSurgeFlag: {
-    minWidth: 52,
-    minHeight: 28,
+    height: 30,
     borderRadius: 999,
     paddingHorizontal: 10,
     paddingVertical: 5,

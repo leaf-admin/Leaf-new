@@ -81,7 +81,7 @@ export function countWithdrawalsToday(withdrawals = [], now = new Date()) {
 }
 
 /**
- * Aviso da taxa no momento do saque. A taxa é por saque (cobrada pela Woovi), então
+ * Aviso da taxa no momento do saque. A taxa é fixa por saque, então
  * um saque por dia sai mais barato; quem faz mais de um precisa ver isso antes.
  * `fee` é a taxa que vale para o valor digitado (0 quando o valor é isento).
  */
@@ -90,8 +90,8 @@ export function buildWithdrawalFeeNotice({ fee = 0, withdrawalsToday = 0 } = {})
   if (!(Number(fee) > 0)) {
     return {
       tone: 'neutral',
-      title: 'Sem taxa neste valor',
-      body: 'A taxa de saque da Woovi é de R$ 1,00 por saque em valores abaixo de R$ 500,00.',
+      title: 'Taxa de saque',
+      body: 'Cada saque tem taxa fixa de R$ 1,00. Fazer um saque por dia evita pagar a taxa mais de uma vez.',
     };
   }
   if (withdrawalsToday > 0) {
@@ -100,13 +100,13 @@ export function buildWithdrawalFeeNotice({ fee = 0, withdrawalsToday = 0 } = {})
       title: `Taxa de ${feeLabel} neste saque`,
       body:
         withdrawalsToday === 1
-          ? `Você já fez 1 saque hoje. A Woovi cobra ${feeLabel} por saque, então este também paga a taxa.`
-          : `Você já fez ${withdrawalsToday} saques hoje. A Woovi cobra ${feeLabel} por saque, então este também paga a taxa.`,
+          ? `Você já fez 1 saque hoje. A taxa é de ${feeLabel} por saque, então este também paga a taxa.`
+          : `Você já fez ${withdrawalsToday} saques hoje. A taxa é de ${feeLabel} por saque, então este também paga a taxa.`,
     };
   }
   return {
     tone: 'neutral',
     title: `Taxa de ${feeLabel} por saque`,
-    body: 'Cobrada pela Woovi a cada saque. Fazer um saque por dia evita pagar a taxa mais de uma vez.',
+    body: 'Taxa fixa cobrada a cada saque. Fazer um saque por dia evita pagar a taxa mais de uma vez.',
   };
 }

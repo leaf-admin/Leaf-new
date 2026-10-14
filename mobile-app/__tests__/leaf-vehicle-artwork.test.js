@@ -1,4 +1,4 @@
-import { createLeafVehicleSvg, createLeafMapMarkerSvg, resolveVehicleMarkerShapeKey, resolveVehicleArtworkPose } from '../src/components/prototype/leafVehicleArtwork';
+import { createLeafVehicleSvg, createLeafMapMarkerSvg, resolveVehicleMarkerShapeKey, resolveVehicleArtworkPose, resolveVehicleShapeKeyForCategory } from '../src/components/prototype/leafVehicleArtwork';
 import { parse } from 'react-native-svg';
 
 describe('Leaf vehicle vector artwork', () => {
@@ -24,13 +24,13 @@ describe('Leaf vehicle vector artwork', () => {
     }
     expect(createLeafMapMarkerSvg({ shapeKey: 'leaf_vehicle', colorToken: 'white' })).toContain('#F0F0F1');
   });
-  it('uses a compact vector silhouette with subtle paint and a ground shadow', () => {
+  it('uses a detailed but bounded vector SUV with layered paint and a ground shadow', () => {
     const xml = createLeafVehicleSvg();
     expect(xml).toContain('viewBox="0 0 64 64"');
     expect(xml).toContain('linearGradient');
     expect(xml).toContain('<ellipse');
     expect(xml).not.toMatch(/skew|scale|matrix/);
-    expect((xml.match(/<path /g) || []).length).toBeLessThanOrEqual(9);
+    expect((xml.match(/<path /g) || []).length).toBeLessThanOrEqual(16);
     expect(xml).not.toMatch(/<image|<filter|data:image|https?:\/\/[^w]/);
   });
 
@@ -59,5 +59,17 @@ describe('Leaf vehicle vector artwork', () => {
     const xml = createLeafVehicleSvg({ idPrefix: 'car:two' });
     expect(xml).toContain('id="cartwo-paint"');
     expect(xml).toContain('url(#cartwo-paint)');
+  });
+
+  it('draws the Moto category as a motorcycle and keeps the car for the rest', () => {
+    expect(resolveVehicleShapeKeyForCategory('Leaf Moto')).toBe('leaf_moto');
+    expect(resolveVehicleShapeKeyForCategory(null, 'MOTO')).toBe('leaf_moto');
+    expect(resolveVehicleShapeKeyForCategory('Leaf Plus', 'carro')).toBe('');
+    for (const screenHeading of [0, 90, 180, 270]) {
+      const ast = parse(createLeafMapMarkerSvg({ shapeKey: 'leaf_moto', colorToken: 'red', screenHeading }));
+      expect(ast).not.toBeNull();
+      expect(ast.props.viewBox).toBe('0 0 64 64');
+    }
+    expect(createLeafMapMarkerSvg({ shapeKey: 'leaf_moto', idPrefix: 'moto:1' })).toContain('url(#moto1-helmet)');
   });
 });

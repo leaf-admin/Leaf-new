@@ -412,8 +412,8 @@ describe('prototype route viewport', () => {
       insets,
       viewportPadding,
       minVisibleHeight: 180,
-      longRouteLatitudeDeltaMultiplier: 1.72,
-      longRouteLongitudeDeltaMultiplier: 1.86,
+      longRouteLatitudeDeltaMultiplier: 1.12,
+      longRouteLongitudeDeltaMultiplier: 1.12,
     });
 
     expect(compactRegion.latitudeDelta).toBeLessThan(defaultRegion.latitudeDelta);
