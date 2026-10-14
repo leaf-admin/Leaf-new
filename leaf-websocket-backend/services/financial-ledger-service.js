@@ -493,7 +493,7 @@ class FinancialLedgerService {
         amountCents: fee,
         entityType: 'withdrawal',
         entityId: withdrawalId,
-        memo: 'Tarifa de saque abaixo do limite'
+        memo: 'Tarifa de saque'
       });
     }
 

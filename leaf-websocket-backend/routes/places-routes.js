@@ -10,6 +10,8 @@ const router = express.Router();
 const placesCacheService = require('../services/places-cache-service');
 const rideCostTelemetryService = require('../services/ride-cost-telemetry-service');
 const { logger } = require('../utils/logger');
+const { placesAccess } = require('../middleware/places-access');
+const { authenticateJWT, requireRole } = require('../middleware/jwt-auth');
 
 const AUTOCOMPLETE_CACHE_MIN_QUERY_LEN = 8;
 const DIRECTIONS_FALLBACK_SPEED_KMH = Number.parseFloat(
@@ -487,7 +489,7 @@ async function captureBookingOperationalTelemetry({
  *   "message": "Lugar não encontrado no backend."
  * }
  */
-router.post('/api/places/search', async (req, res) => {
+router.post('/api/places/search', placesAccess('search'), async (req, res) => {
   try {
     const { query, location } = req.body;
 
@@ -535,7 +537,7 @@ router.post('/api/places/search', async (req, res) => {
  * POST /api/places/reverse-geocode
  * Resolve endereço por coordenada com cache backend.
  */
-router.post('/api/places/reverse-geocode', async (req, res) => {
+router.post('/api/places/reverse-geocode', placesAccess('reverse-geocode'), async (req, res) => {
   try {
     const location = normalizeLatLng(req.body?.location || req.body);
     const forceFresh = normalizeBoolean(req.body?.forceFresh, false);
@@ -610,7 +612,7 @@ router.post('/api/places/reverse-geocode', async (req, res) => {
  * POST /api/places/autocomplete
  * Busca autocomplete com cache backend + fallback Google no servidor
  */
-router.post('/api/places/autocomplete', async (req, res) => {
+router.post('/api/places/autocomplete', placesAccess('autocomplete'), async (req, res) => {
   try {
     const query = normalizeText(req.body?.query, '');
     const sessionToken = normalizeText(req.body?.sessionToken, null);
@@ -701,7 +703,7 @@ router.post('/api/places/autocomplete', async (req, res) => {
  * POST /api/places/details
  * Busca Place Details no backend e registra telemetria por booking quando aplicável
  */
-router.post('/api/places/details', async (req, res) => {
+router.post('/api/places/details', placesAccess('details'), async (req, res) => {
   try {
     const placeId = normalizeText(req.body?.placeId || req.body?.place_id, '');
     const sessionToken = normalizeText(req.body?.sessionToken, null);
@@ -769,7 +771,7 @@ router.post('/api/places/details', async (req, res) => {
  * POST /api/places/directions
  * Proxy backend para Google Directions (com cache Redis + telemetria por booking)
  */
-router.post('/api/places/directions', async (req, res) => {
+router.post('/api/places/directions', placesAccess('directions'), async (req, res) => {
   try {
     const startLoc = normalizeText(req.body?.startLoc, '');
     const destLoc = normalizeText(req.body?.destLoc, '');
@@ -1019,7 +1021,7 @@ router.post('/api/places/directions', async (req, res) => {
  *   }
  * }
  */
-router.post('/api/places/save', async (req, res) => {
+router.post('/api/places/save', placesAccess('save'), async (req, res) => {
   try {
     const { query, placeData } = req.body;
     const location = normalizeLocation(req.body?.location);
@@ -1094,7 +1096,7 @@ router.get('/api/places/metrics', async (req, res) => {
  * POST /api/places/metrics/reset
  * Reseta métricas (útil para testes)
  */
-router.post('/api/places/metrics/reset', async (req, res) => {
+router.post('/api/places/metrics/reset', authenticateJWT, requireRole(['admin', 'super-admin']), async (req, res) => {
   try {
     await placesCacheService.resetMetrics();
     return res.json({

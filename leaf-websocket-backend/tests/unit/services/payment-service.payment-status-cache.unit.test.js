@@ -194,13 +194,13 @@ describe('PaymentService payment status cache', () => {
     expect(new PaymentService().isWooviDirectTransferOnRideCompletionEnabled()).toBe(true);
   });
 
-  it('charges the Woovi withdrawal fee only below R$ 500,00', () => {
+  it('charges a flat R$ 1,00 withdrawal fee on every withdrawal', () => {
     const service = new PaymentService();
 
     expect(service.calculateWithdrawFee(0)).toBe(0);
     expect(service.calculateWithdrawFee(49999)).toBe(100);
-    expect(service.calculateWithdrawFee(50000)).toBe(0);
-    expect(service.calculateWithdrawFee(100000)).toBe(0);
+    expect(service.calculateWithdrawFee(50000)).toBe(100);
+    expect(service.calculateWithdrawFee(100000)).toBe(100);
   });
 
   it('reads confirmed payment status from redis cache before falling back to external providers', async () => {
