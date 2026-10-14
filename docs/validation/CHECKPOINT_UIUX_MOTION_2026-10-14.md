@@ -69,4 +69,11 @@ em outra sessão/conta sem começar do zero.
 - Cena 2 · Rota — portada (`5f368989c`): ponta "cometa" no traçado real. Bug achado e corrigido: as cores de
   trânsito cobriam a rota inteira desde o primeiro quadro, então o traçado progressivo nunca aparecia.
   Validado no iPhone com a duração desacelerada temporariamente (já restaurada).
-- Próximas: Categoria, Busca, Encontrou.
+- Cena 3 · Categoria — portada (`8a2bb7186`): marca única desliza 220 ms até a linha escolhida + háptico.
+- Cena 4 · Busca — portada (`e9e69e15b`): `LeafNetworkSphere` (componente de produção) com véu claro na tela de
+  busca; o radar/círculo do mapa não é desenhado enquanto a esfera existe. Validado no iPhone em busca real.
+- Cena 5 · Encontrou — portada (`f0eee0834`): chips "⚡ Encontrado em N s" (< 30 s) e "Embarque rápido" (ETA < 2 min)
+  no cartão real; ações continuam as reais (Mensagem, Mais opções). Validado no iPhone ("Encontrado em 6 s").
+- Todas as 5 cenas portadas. Suíte mobile 205/1665 e production-guards OK. Nada enviado (push) ainda.
+- Pendentes: esfera se fechar ao aceitar (hoje a tela de busca sai antes); câmera recuar para o bairro na busca
+  (lab); marcador próprio para moto; push/PR quando o Izaak pedir.
