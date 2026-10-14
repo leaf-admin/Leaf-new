@@ -77,14 +77,17 @@ describe('legacy navigation isolation', () => {
   });
 
   it('mounts the canonical Robotaxi lifecycle as the only private map runtime', () => {
+    // Legacy home aliases forward to the single "RobotaxiPrototype" home instead
+    // of rendering a second home (a second live map) in the stack.
+    expect(appNavigatorSource).toMatch(/initialRouteName="RobotaxiPrototype"/);
     expect(appNavigatorSource).toMatch(
-      /name="Map"[\s\S]{0,120}?component=\{RobotaxiPrototypeScreen\}/,
+      /name="Map"[\s\S]{0,120}?component=\{HomeRouteRedirectScreen\}/,
     );
     expect(extractFunctionBody(appNavigatorSource, 'renderSharedLegacyAliases')).toMatch(
-      /name="MapScreen"\s+component=\{RobotaxiPrototypeScreen\}/,
+      /name="MapScreen"\s+component=\{HomeRouteRedirectScreen\}/,
     );
     expect(extractFunctionBody(appNavigatorSource, 'renderSharedLegacyAliases')).toMatch(
-      /name="TabRoot"\s+component=\{RobotaxiPrototypeScreen\}/,
+      /name="TabRoot"\s+component=\{HomeRouteRedirectScreen\}/,
     );
     expect(appNavigatorSource).not.toContain('allowPrototypePrivateScreens');
     expect(appNavigatorSource).not.toMatch(/import\s+NewMapScreen\s+from/);

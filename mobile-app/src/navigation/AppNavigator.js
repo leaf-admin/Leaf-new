@@ -38,6 +38,7 @@ import SplashScreen from '../screens/SplashScreen';
 import AuthLoadingScreen from '../screens/AuthLoadingScreen';
 
 import RobotaxiPrototypeScreen from '../screens/RobotaxiPrototypeScreen';
+import HomeRouteRedirectScreen from './HomeRouteRedirectScreen';
 import RobotaxiDestinationScreen from '../screens/prototype/RobotaxiDestinationScreen';
 import RobotaxiDriverSearchScreen from '../screens/prototype/RobotaxiDriverSearchScreen';
 import RobotaxiTripScreen from '../screens/prototype/RobotaxiTripScreen';
@@ -852,8 +853,8 @@ function renderSharedLegacyAliases() {
   return (
     <>
       {/* Compatibility aliases resolve to the canonical runtime only. */}
-      <Stack.Screen name="MapScreen" component={RobotaxiPrototypeScreen} />
-      <Stack.Screen name="TabRoot" component={RobotaxiPrototypeScreen} />
+      <Stack.Screen name="MapScreen" component={HomeRouteRedirectScreen} />
+      <Stack.Screen name="TabRoot" component={HomeRouteRedirectScreen} />
     </>
   );
 }
@@ -1091,8 +1092,8 @@ function MainNavigator() {
     >
       <Stack.Screen
         name="Map"
-        component={RobotaxiPrototypeScreen}
-        options={{ keyboardHandlingEnabled: false }}
+        component={HomeRouteRedirectScreen}
+        options={{ ...prototypeOverlayScreenOptions, keyboardHandlingEnabled: false }}
       />
 
       {allowPublicPrototypeQaScreens ? (
