@@ -19,6 +19,7 @@ import {
 } from "react-native";
 import { useReducedMotion } from "react-native-reanimated";
 import { Ionicons } from "@expo/vector-icons";
+import * as Haptics from "expo-haptics";
 import Svg, { Path } from "react-native-svg";
 import LeafCampaignCarousel from "../../../components/campaigns/LeafCampaignCarousel";
 import { leafButtonMetrics } from "../../../components/prototype/LeafRideUI";
@@ -592,6 +593,41 @@ function buildFareBreakdownRows(category = {}) {
   return computedRows;
 }
 
+const CATEGORY_MARKER_HEIGHT = 30;
+
+// Marca da categoria escolhida: uma só, que desliza até a linha nova (220 ms, sem
+// quique; é um detalhe, não um brinquedo). Antes ela sumia de uma linha e aparecia
+// na outra.
+function SlidingCategoryMarker({ layout, reduceMotion }) {
+  const translateY = React.useRef(new Animated.Value(0)).current;
+  const placedRef = React.useRef(false);
+  const targetY = layout ? layout.y + (layout.height - CATEGORY_MARKER_HEIGHT) / 2 : null;
+
+  React.useEffect(() => {
+    if (targetY === null) return;
+    if (!placedRef.current || reduceMotion) {
+      placedRef.current = true;
+      translateY.setValue(targetY);
+      return;
+    }
+    Animated.timing(translateY, {
+      toValue: targetY,
+      duration: 220,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start();
+  }, [reduceMotion, targetY, translateY]);
+
+  if (targetY === null) return null;
+  return (
+    <Animated.View
+      pointerEvents="none"
+      style={[styles.leafCategoryMarker, { top: 0, transform: [{ translateY }] }]}
+      testID="passenger-home-category-marker"
+    />
+  );
+}
+
 function PassengerHomeOverlay({
   insetsBottom = 0,
   rootNavigationInset = 0,
@@ -647,6 +683,16 @@ function PassengerHomeOverlay({
   const inputRef = React.useRef(null);
   const [keyboardHeight, setKeyboardHeight] = React.useState(0);
   const [fareBreakdownVisible, setFareBreakdownVisible] = React.useState(false);
+  const [categoryRowLayouts, setCategoryRowLayouts] = React.useState({});
+  const handleCategoryRowLayout = React.useCallback((id, event) => {
+    const { y, height } = event?.nativeEvent?.layout || {};
+    if (!Number.isFinite(y) || !Number.isFinite(height)) return;
+    setCategoryRowLayouts((current) => {
+      const previous = current[id];
+      if (previous && previous.y === y && previous.height === height) return current;
+      return { ...current, [id]: { y, height } };
+    });
+  }, []);
   const [pickupAdjustmentInfoVisible, setPickupAdjustmentInfoVisible] =
     React.useState(false);
   const activeSearchKind = pickupSearchActive ? "pickup" : destinationSearchActive ? "destination" : "";
@@ -1292,13 +1338,17 @@ function PassengerHomeOverlay({
           ) : null}
           {fareBreakdownVisible ? null : (
             <View style={styles.categoryPickerSurface}>
+              <SlidingCategoryMarker layout={categoryRowLayouts[selectedCategoryId] || null} reduceMotion={reduceMotion} />
               {visibleCategoryOptions.map(category => {
                 const selected = category.id === selectedCategoryId;
                 const categoryFareSignal = resolveFareSignal(category?.fareBreakdown?.pricingPayload || category?.pricingPayload || null);
-                return <TouchableOpacity key={category.id} onPress={() => onCategorySelect?.(category.id)} activeOpacity={0.82}
+                return <TouchableOpacity key={category.id} onPress={() => {
+                    if (!selected) Haptics.selectionAsync().catch(() => {});
+                    onCategorySelect?.(category.id);
+                  }} activeOpacity={0.82}
+                  onLayout={(event) => handleCategoryRowLayout(category.id, event)}
                   style={styles.leafCategoryRow} accessibilityRole="button" accessibilityState={{ selected }}
                   testID={`passenger-home-category-${category.id}`} accessibilityLabel={`${category.label}, ${category.priceLabel || 'Preço em atualização'}`}>
-                  {selected ? <View style={styles.leafCategoryMarker} /> : null}
                   <View style={styles.leafCategoryCopy}><Text style={styles.leafCategoryName}>{String(category.label || category.id).replace(/^Leaf\s*/i, '').toUpperCase()}</Text>
                     <Text style={styles.leafCategoryDetail} numberOfLines={1}>{category.description}</Text></View>
                   <View style={styles.leafCategoryValue}>
@@ -1520,7 +1570,7 @@ export default memo(PassengerHomeOverlay);
 const styles = StyleSheet.create({
   categorySheetHandle: { width: 32, height: 3, borderRadius: 2, backgroundColor: '#E5E5E5', alignSelf: 'center', marginBottom: 14 },
   leafCategoryRow: { minHeight: 58, paddingLeft: 12, paddingVertical: 8, flexDirection: 'row', alignItems: 'center', gap: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#E5E5E5' },
-  leafCategoryMarker: { position: 'absolute', left: 0, width: 3, height: 30, borderRadius: 2, backgroundColor: '#1A330E' },
+  leafCategoryMarker: { position: 'absolute', left: 0, width: 3, height: 30, borderRadius: 2, backgroundColor: '#1A330E', zIndex: 2 },
   leafCategoryCopy: { flex: 1, minWidth: 0, gap: 2 },
   leafCategoryName: { ...leafTypography.bold, fontSize: 20, lineHeight: 26, letterSpacing: -0.3, color: '#222222' },
   leafCategoryDetail: { ...leafTypography.regular, fontSize: 15, lineHeight: 26, color: '#6A6A6A' },
