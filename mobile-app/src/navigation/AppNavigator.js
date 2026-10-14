@@ -39,6 +39,7 @@ import AuthLoadingScreen from '../screens/AuthLoadingScreen';
 
 import RobotaxiPrototypeScreen from '../screens/RobotaxiPrototypeScreen';
 import HomeRouteRedirectScreen from './HomeRouteRedirectScreen';
+import LeafMotionLab from '../screens/prototype/lab/LeafMotionLab';
 import RobotaxiDestinationScreen from '../screens/prototype/RobotaxiDestinationScreen';
 import RobotaxiDriverSearchScreen from '../screens/prototype/RobotaxiDriverSearchScreen';
 import RobotaxiTripScreen from '../screens/prototype/RobotaxiTripScreen';
@@ -365,6 +366,7 @@ const appLinking = {
       RobotaxiMenuTripHistory: 'robotaxi/menu/history',
       RobotaxiMenuMessages: 'robotaxi/menu/messages',
       RobotaxiNotifications: 'robotaxi/notifications',
+      LeafMotionLab: 'dev/motion-lab',
       RobotaxiMenuHelp: 'robotaxi/menu/help',
       RobotaxiMenuSettings: 'robotaxi/menu/settings',
       EarningsReport: 'driver/earnings',
@@ -1100,6 +1102,15 @@ function MainNavigator() {
         <Stack.Screen
           name="AuthFlowScreenshotHarness"
           component={AuthFlowScreenshotHarness}
+          options={{ headerShown: false }}
+        />
+      ) : null}
+
+      {/* Development-only motion lab (micro-interaction prototypes). */}
+      {__DEV__ ? (
+        <Stack.Screen
+          name="LeafMotionLab"
+          component={LeafMotionLab}
           options={{ headerShown: false }}
         />
       ) : null}

@@ -9,6 +9,7 @@
   "routeCategories": {
     "current": [
       "AuthFlowScreenshotHarness",
+      "LeafMotionLab",
       "AuthLoading",
       "AuthLoadingScreen",
       "DriverInvite",
@@ -278,6 +279,7 @@
     { "path": "robotaxi/driver/waitlist", "category": "current", "route": "RobotaxiPrototypeDriverWaitlist" },
     { "path": "robotaxi/driver/waitlist/status", "category": "current", "route": "RobotaxiPrototypeDriverWaitlistStatus" },
     { "path": "auth/screenshots", "category": "current", "route": "AuthFlowScreenshotHarness" },
+    { "path": "dev/motion-lab", "category": "current", "route": "LeafMotionLab" },
     { "path": "robotaxi/profile", "category": "current", "route": "RobotaxiPrototypeProfile" },
     { "path": "robotaxi/settings", "category": "current", "route": "RobotaxiPrototypeSettings" },
     { "path": "robotaxi/menu", "category": "current", "route": "RobotaxiPrototypeMenu" },

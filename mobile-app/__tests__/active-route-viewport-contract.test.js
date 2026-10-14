@@ -23,6 +23,8 @@ const DIRECT_ROUTE_MAP_RENDERER_ALLOWLIST = [
   'src/components/ridelist.js',
   'src/components/prototype/PrototypeMapLayer.js',
   'src/screens/prototype/RobotaxiReceiptScreen.js',
+  // Development-only motion lab (sample data, not part of the ride flow).
+  'src/screens/prototype/lab/LeafMotionLab.js',
 ].sort();
 
 function isDirectRouteMapRenderer(source) {
