@@ -1,6 +1,7 @@
 import leafTypography from '../../components/prototype/LeafTypography';
 import LeafBootSplash from '../../components/design-system/LeafBootSplash';
 import LeafSplashReveal from '../../components/design-system/LeafSplashReveal';
+import { projectMapPoint } from './home/projectMapPoint';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Keyboard, Linking, Modal, Platform, StatusBar, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -9564,47 +9565,6 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   const passengerLandingVisible = Boolean(showRootNavigation && !isDriverRole && canShowPassengerHomeOverlay && !homeSurfaceInteractionBlocked);
   // O mapa do passageiro é o fundo da tela (antes ficava dentro de um card).
   const passengerMapInCard = false;
-  // Onde o ponto de embarque está na tela, para a etiqueta "Seu embarque" ficar presa a ele.
-  const [landingPickupAnchor, setLandingPickupAnchor] = useState(null);
-  const [landingMapMoving, setLandingMapMoving] = useState(false);
-  const landingPickupLatitude = effectiveHomePickupCoordinate?.latitude;
-  const landingPickupLongitude = effectiveHomePickupCoordinate?.longitude;
-  const refreshLandingPickupAnchor = useCallback(async () => {
-    if (!passengerLandingVisible || !Number.isFinite(landingPickupLatitude) || !Number.isFinite(landingPickupLongitude)) {
-      setLandingPickupAnchor(null);
-      return;
-    }
-    try {
-      const point = await mapRef.current?.pointForCoordinate?.({
-        latitude: landingPickupLatitude,
-        longitude: landingPickupLongitude,
-      });
-      if (Number.isFinite(point?.x) && Number.isFinite(point?.y)) {
-        // Fora da área útil (atrás da busca ou da tab bar) a etiqueta não aparece.
-        const inside = point.y > insets.top + 150 && point.y < windowHeight - insets.bottom - 150
-          && point.x > 40 && point.x < windowWidth - 40;
-        setLandingPickupAnchor(inside ? { x: point.x, y: point.y } : null);
-      }
-    } catch (_error) {
-      setLandingPickupAnchor(null);
-    }
-  }, [insets.bottom, insets.top, landingPickupLatitude, landingPickupLongitude, passengerLandingVisible, windowHeight, windowWidth]);
-  useEffect(() => {
-    refreshLandingPickupAnchor();
-    const timer = setTimeout(refreshLandingPickupAnchor, 900);
-    return () => clearTimeout(timer);
-  }, [refreshLandingPickupAnchor]);
-  const handleHomeMapPanDragWithLanding = useCallback((...args) => {
-    if (passengerLandingVisible) setLandingMapMoving(true);
-    handleMapPanDrag(...args);
-  }, [handleMapPanDrag, passengerLandingVisible]);
-  const handleHomeMapRegionChangeCompleteWithLanding = useCallback((nextRegion) => {
-    handleMapRegionChangeComplete(nextRegion);
-    if (passengerLandingVisible) {
-      setLandingMapMoving(false);
-      refreshLandingPickupAnchor();
-    }
-  }, [handleMapRegionChangeComplete, passengerLandingVisible, refreshLandingPickupAnchor]);
 
   const completedReceiptBookingId = String(
     lastReceipt?.bookingId ||
@@ -9705,6 +9665,51 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     presentedSearchingMode && searchTargetRegion
       ? searchTargetRegion
       : targetRegion;
+  // Onde o ponto de embarque está na tela, para a etiqueta "Seu embarque" ficar presa a ele.
+  const [landingPickupAnchor, setLandingPickupAnchor] = useState(null);
+  const [landingMapMoving, setLandingMapMoving] = useState(false);
+  const landingPickupLatitude = effectiveHomePickupCoordinate?.latitude;
+  const landingPickupLongitude = effectiveHomePickupCoordinate?.longitude;
+  const landingMapRegionRef = useRef(null);
+  const refreshLandingPickupAnchor = useCallback((regionOverride = null) => {
+    if (regionOverride) landingMapRegionRef.current = regionOverride;
+    const region = landingMapRegionRef.current || presentedMapRegion;
+    if (!passengerLandingVisible || !Number.isFinite(landingPickupLatitude) || !Number.isFinite(landingPickupLongitude)) {
+      setLandingPickupAnchor(null);
+      return;
+    }
+    const point = projectMapPoint(
+      region,
+      { latitude: landingPickupLatitude, longitude: landingPickupLongitude },
+      windowWidth,
+      windowHeight,
+    );
+    // Fora da área útil (atrás da busca ou da tab bar) a etiqueta não aparece.
+    const inside = Boolean(point)
+      && point.y > insets.top + 150 && point.y < windowHeight - insets.bottom - 150
+      && point.x > 40 && point.x < windowWidth - 40;
+    setLandingPickupAnchor((previous) => {
+      if (!inside) return null;
+      if (previous && Math.abs(previous.x - point.x) < 0.5 && Math.abs(previous.y - point.y) < 0.5) return previous;
+      return { x: point.x, y: point.y };
+    });
+  }, [insets.bottom, insets.top, landingPickupLatitude, landingPickupLongitude, passengerLandingVisible, presentedMapRegion, windowHeight, windowWidth]);
+  useEffect(() => {
+    refreshLandingPickupAnchor();
+    const timer = setTimeout(refreshLandingPickupAnchor, 900);
+    return () => clearTimeout(timer);
+  }, [refreshLandingPickupAnchor]);
+  const handleHomeMapPanDragWithLanding = useCallback((...args) => {
+    if (passengerLandingVisible) setLandingMapMoving(true);
+    handleMapPanDrag(...args);
+  }, [handleMapPanDrag, passengerLandingVisible]);
+  const handleHomeMapRegionChangeCompleteWithLanding = useCallback((nextRegion) => {
+    handleMapRegionChangeComplete(nextRegion);
+    if (passengerLandingVisible) {
+      setLandingMapMoving(false);
+      refreshLandingPickupAnchor(nextRegion);
+    }
+  }, [handleMapRegionChangeComplete, passengerLandingVisible, refreshLandingPickupAnchor]);
   // While adjusting the pickup, the blue dot must stay on the real GPS position;
   // the centre pin is the pickup. Otherwise the dot followed the pin around.
   const presentedUserCoordinate =
