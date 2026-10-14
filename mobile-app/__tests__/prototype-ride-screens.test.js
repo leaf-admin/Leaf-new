@@ -5644,6 +5644,42 @@ describe('prototype ride screens', () => {
     expect(navigation.replace).toHaveBeenCalledWith('RobotaxiPrototype');
   });
 
+  it('shows the refund from the runtime when it arrives after the no-drivers screen opened', () => {
+    usePrototypeRideRuntime.mockReturnValue(
+      buildPassengerRuntime({
+        bookingStatus: 'idle',
+        paymentState: { status: 'refunded', refundStatus: 'REFUNDED', refundAmount: 47.44, chargeId: 'c1' },
+        selectedDestination: { name: 'Ferry Building' },
+        selectedVehicle: 'Leaf Plus',
+      })
+    );
+    const { getByText } = render(
+      <RobotaxiNoDriversScreen
+        navigation={{ navigate: jest.fn(), replace: jest.fn() }}
+        route={{ params: { reason: 'Nenhum motorista disponível no momento.' } }}
+      />
+    );
+    expect(getByText('Estorno de R$ 47,44 iniciado automaticamente.')).toBeTruthy();
+  });
+
+  it('tells a paying passenger the refund is automatic before the server confirms it', () => {
+    usePrototypeRideRuntime.mockReturnValue(
+      buildPassengerRuntime({
+        bookingStatus: 'idle',
+        paymentState: { status: 'idle', refundStatus: null, refundAmount: 0, chargeId: 'c1' },
+        selectedDestination: { name: 'Ferry Building' },
+        selectedVehicle: 'Leaf Plus',
+      })
+    );
+    const { getByText } = render(
+      <RobotaxiNoDriversScreen
+        navigation={{ navigate: jest.fn(), replace: jest.fn() }}
+        route={{ params: { reason: 'Nenhum motorista disponível no momento.' } }}
+      />
+    );
+    expect(getByText('Pagamento confirmado. O estorno será processado automaticamente pelo sistema.')).toBeTruthy();
+  });
+
   it('returns to the quote by itself after showing no drivers', () => {
     const { Animated } = require('react-native');
     const timingSpy = jest.spyOn(Animated, 'timing').mockImplementation(() => ({

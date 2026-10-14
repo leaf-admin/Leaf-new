@@ -71,6 +71,7 @@ export default function RobotaxiNoDriversScreen({ navigation, route }) {
     tripArrivalText,
     driverInfo,
     clearFlowPreview,
+    paymentState,
   } =
     usePrototypeRideRuntime();
   const insets = useSafeAreaInsets();
@@ -79,16 +80,21 @@ export default function RobotaxiNoDriversScreen({ navigation, route }) {
   const sheetBottom =
     SHEET_BOTTOM_OFFSET + robotaxiLifecycleMetrics.cardBottomGap + insets.bottom;
   const reason = formatNoDriversReason(route?.params?.reason);
-  const refundStatus = String(route?.params?.refundStatus || "")
+  // O aviso de estorno do servidor pode chegar depois desta tela abrir: lê também do runtime.
+  const refundStatus = String(route?.params?.refundStatus || paymentState?.refundStatus || "")
     .trim()
     .toUpperCase();
-  const refundAmount = Number(route?.params?.refundAmount || 0);
+  const refundAmount = Number(route?.params?.refundAmount || paymentState?.refundAmount || 0);
+  // Houve cobrança e o estorno ainda não foi confirmado: avisa que o valor volta sozinho.
+  const paidAwaitingRefundStatus = !refundStatus && Boolean(
+    route?.params?.chargeId || paymentState?.chargeId,
+  );
   const hasRefundInfo =
-    refundStatus === "REFUNDED" || refundStatus === "REFUND_PENDING";
+    refundStatus === "REFUNDED" || refundStatus === "REFUND_PENDING" || paidAwaitingRefundStatus;
   const refundMessage =
     refundStatus === "REFUNDED"
       ? `Estorno de R$ ${refundAmount.toFixed(2).replace(".", ",")} iniciado automaticamente.`
-      : refundStatus === "REFUND_PENDING"
+      : refundStatus === "REFUND_PENDING" || paidAwaitingRefundStatus
         ? "Pagamento confirmado. O estorno será processado automaticamente pelo sistema."
         : "";
   const destination = useMemo(
