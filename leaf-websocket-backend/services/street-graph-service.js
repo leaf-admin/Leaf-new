@@ -18,7 +18,7 @@ const GRAPH_KEY = 'leaf:map:street-graph:v1';
 const META_KEY = 'leaf:map:street-graph:v1:meta';
 const DEFAULT_SOURCE_URL = 'https://download.bbbike.org/osm/bbbike/RiodeJaneiro/RiodeJaneiro.osm.pbf';
 const REBUILD_AFTER_MS = toPositiveInt(process.env.STREET_GRAPH_REBUILD_DAYS, 30) * 24 * 3600 * 1000;
-const MAX_RADIUS_M = 2000;
+const MAX_RADIUS_M = 4000;
 
 // Só onde passa carro: é por elas que o motorista chega ao embarque.
 const DRIVABLE = new Set([
@@ -181,8 +181,31 @@ async function rebuildStreetGraphIfStale(redis, { now = Date.now(), axios = requ
   return { rebuilt: true, cells, edges: graph.edgeCount };
 }
 
+// Mesma vizinhança para embarques próximos: a resposta pronta fica 6 h no Redis por célula H3
+// res 9 (~170 m), centrada no centro da célula. Montar 4 km leva ~300 ms; servir do cache, ~5 ms.
+const AROUND_CACHE_TTL_SECONDS = 6 * 3600;
+async function getStreetGraphAroundCached(redis, { lat, lng, radiusM = 1200 }) {
+  const latN = Number(lat);
+  const lngN = Number(lng);
+  if (!Number.isFinite(latN) || !Number.isFinite(lngN)) {
+    throw Object.assign(new Error('lat e lng são obrigatórios'), { statusCode: 400 });
+  }
+  const radius = Math.min(MAX_RADIUS_M, Math.max(200, Number(radiusM) || 1200));
+  const cell = h3.latLngToCell(latN, lngN, 9);
+  const meta = await getStreetGraphMeta(redis);
+  const cacheKey = `${GRAPH_KEY}:around:${meta?.builtAt || 'none'}:${cell}:${radius}`;
+  const cached = await redis.get(cacheKey);
+  if (cached) return cached;
+  const [cLat, cLng] = h3.cellToLatLng(cell);
+  const graph = await getStreetGraphAround(redis, { lat: cLat, lng: cLng, radiusM: radius });
+  const body = JSON.stringify({ success: true, attribution: '© OpenStreetMap contributors', ...graph });
+  await redis.set(cacheKey, body, 'EX', AROUND_CACHE_TTL_SECONDS);
+  return body;
+}
+
 module.exports = {
   buildStreetGraph,
+  getStreetGraphAroundCached,
   storeStreetGraph,
   getStreetGraphAround,
   getStreetGraphMeta,

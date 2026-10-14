@@ -499,13 +499,14 @@ async function captureBookingOperationalTelemetry({
  */
 router.get('/api/map/street-graph', requireFirebaseUser, async (req, res) => {
   try {
-    const graph = await streetGraphService.getStreetGraphAround(redisPool.getConnection(), {
+    const body = await streetGraphService.getStreetGraphAroundCached(redisPool.getConnection(), {
       lat: req.query.lat,
       lng: req.query.lng,
       radiusM: req.query.radius,
     });
     res.set('Cache-Control', 'private, max-age=3600');
-    return res.json({ success: true, attribution: '© OpenStreetMap contributors', ...graph });
+    res.type('application/json');
+    return res.send(body);
   } catch (error) {
     if (error?.statusCode === 400) {
       return res.status(400).json({ success: false, error: error.message });
