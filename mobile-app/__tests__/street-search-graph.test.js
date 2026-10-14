@@ -50,3 +50,25 @@ describe('street search graph', () => {
     expect(unreachable.revealM).toBe(Infinity);
   });
 });
+
+describe('wave distances', () => {
+  // Two streets that are close in a straight line but only connected far away.
+  const SPLIT = {
+    nodes: [
+      [-22.9500, -43.3600], // 0 pickup side
+      [-22.9500, -43.3590], // 1
+      [-22.9490, -43.3590], // 2 across the expressway, 111 m north of 1
+      [-22.9400, -43.3590], // 3 far connection point
+    ],
+    edges: [[0, 1], [1, 3], [3, 2]],
+  };
+
+  it('crosses a barrier with a small delay instead of the long detour', () => {
+    const { streetDistances, waveDistances } = require('../src/components/prototype/streetSearchGraph');
+    const street = streetDistances(SPLIT, 0);
+    const wave = waveDistances(SPLIT, 0, SPLIT.nodes[0], 1.3);
+    expect(street[2]).toBeGreaterThan(1500);
+    expect(wave[2]).toBeLessThan(250);
+    expect(wave[1]).toBeCloseTo(street[1], 0);
+  });
+});

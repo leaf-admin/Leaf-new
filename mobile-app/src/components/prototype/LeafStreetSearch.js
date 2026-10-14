@@ -9,7 +9,7 @@ import {
   carRevealDistances,
   nearestNodeIndex,
   segmentsToSvgPath,
-  streetDistances,
+  waveDistances,
 } from './streetSearchGraph';
 
 // Busca pelas ruas, desenhada por cima do mapa (não dentro dele: polylines no Google Maps fazem o
@@ -58,7 +58,7 @@ export default function LeafStreetSearch({
   const streets = useMemo(() => {
     if (!graph?.nodes?.length || !Number.isFinite(pickupLat) || !region || !width || !height) return null;
     const start = nearestNodeIndex(graph.nodes, [pickupLat, pickupLng]).index;
-    const dist = streetDistances(graph, start);
+    const dist = waveDistances(graph, start, [pickupLat, pickupLng]);
     const project = (lat, lng) => projectMapPoint(region, { latitude: lat, longitude: lng }, width, height);
     const bands = buildStreetBands({ graph, dist, maxDistanceM, bandCount: BAND_COUNT, project })
       .map(segmentsToSvgPath);
