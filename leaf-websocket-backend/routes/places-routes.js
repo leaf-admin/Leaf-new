@@ -11,6 +11,9 @@ const placesCacheService = require('../services/places-cache-service');
 const rideCostTelemetryService = require('../services/ride-cost-telemetry-service');
 const { logger } = require('../utils/logger');
 const { placesAccess } = require('../middleware/places-access');
+const { requireFirebaseUser } = require('../middleware/firebase-user-auth');
+const redisPool = require('../utils/redis-pool');
+const streetGraphService = require('../services/street-graph-service');
 const { authenticateJWT, requireRole } = require('../middleware/jwt-auth');
 
 const AUTOCOMPLETE_CACHE_MIN_QUERY_LEN = 8;
@@ -489,6 +492,29 @@ async function captureBookingOperationalTelemetry({
  *   "message": "Lugar não encontrado no backend."
  * }
  */
+/**
+ * GET /api/map/street-graph?lat&lng&radius
+ * Ruas em volta do embarque (OpenStreetMap, montadas uma vez por mês no worker) para a animação
+ * da busca. Só Redis: nenhuma API externa por chamada.
+ */
+router.get('/api/map/street-graph', requireFirebaseUser, async (req, res) => {
+  try {
+    const graph = await streetGraphService.getStreetGraphAround(redisPool.getConnection(), {
+      lat: req.query.lat,
+      lng: req.query.lng,
+      radiusM: req.query.radius,
+    });
+    res.set('Cache-Control', 'private, max-age=3600');
+    return res.json({ success: true, attribution: '© OpenStreetMap contributors', ...graph });
+  } catch (error) {
+    if (error?.statusCode === 400) {
+      return res.status(400).json({ success: false, error: error.message });
+    }
+    logger.warn(`[PlacesRoute] street-graph indisponível: ${error.message}`);
+    return res.json({ success: true, nodes: [], edges: [] });
+  }
+});
+
 router.post('/api/places/search', placesAccess('search'), async (req, res) => {
   try {
     const { query, location } = req.body;
