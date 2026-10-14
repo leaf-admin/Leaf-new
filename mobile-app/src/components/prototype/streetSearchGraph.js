@@ -81,6 +81,19 @@ export function streetDistances(graph, startIndex) {
   return dist;
 }
 
+// Distância da onda: o caminho pelas ruas, mas nunca mais que a linha reta x `detourFactor`.
+// Pelas ruas, o outro lado de uma via expressa só se liga por viadutos e passarelas e ficava
+// "longe" (ou nem era alcançado); assim a onda atravessa com um pequeno atraso em vez de parar.
+export function waveDistances(graph, startIndex, origin, detourFactor = 1.3) {
+  const street = streetDistances(graph, startIndex);
+  const out = new Float64Array(graph.nodes.length);
+  for (let i = 0; i < graph.nodes.length; i += 1) {
+    const straight = haversineMeters(origin, graph.nodes[i]) * detourFactor;
+    out[i] = Math.min(street[i], straight);
+  }
+  return out;
+}
+
 // Agrupa os trechos alcançados em `bandCount` faixas de distância e devolve, para cada faixa, os
 // trechos já em pixels: [[x1, y1, x2, y2], ...]. `project(lat, lng)` -> {x, y} | null.
 export function buildStreetBands({ graph, dist, maxDistanceM, bandCount, project }) {
