@@ -3144,7 +3144,11 @@ async function flushRuntimeSessionNow(reason = "manual", statePatch = null) {
   return true;
 }
 
-function scheduleRuntimeSessionPersist() {
+// Campos que mudam o tempo todo (contador da busca, bússola, posição): gravar a sessão inteira a
+// cada mudança era o maior custo de JS parado; vão juntos no máximo a cada 10 s.
+const RUNTIME_LOW_PRIORITY_PERSIST_FIELDS = new Set(["searchingElapsedSeconds", "currentHeading", "currentCoordinate"]);
+
+function scheduleRuntimeSessionPersist({ delayMs = 420, keepPending = false } = {}) {
   const safeUid = String(runtimeState?.profileUid || "").trim();
   if (!safeUid) {
     clearRuntimeSessionPersistTimer();
@@ -3160,6 +3164,9 @@ function scheduleRuntimeSessionPersist() {
     return;
   }
 
+  if (keepPending && runtimeSessionPersistTimer) {
+    return;
+  }
   clearRuntimeSessionPersistTimer();
   runtimeSessionPersistTimer = setTimeout(() => {
     persistRuntimeSession(safeUid).catch((error) => {
@@ -3168,7 +3175,7 @@ function scheduleRuntimeSessionPersist() {
         error?.message || error,
       );
     });
-  }, 420);
+  }, delayMs);
 }
 
 function normalizeHeading(headingValue) {
@@ -3803,6 +3810,10 @@ function setRuntimeState(next) {
           );
         },
       );
+    } else if (changedKeys.every((key) => RUNTIME_LOW_PRIORITY_PERSIST_FIELDS.has(key))) {
+      // Só campos de alta frequência mudaram: grava no máximo a cada 10 s. O tempo de busca
+      // também sai do horário de início e a posição volta com o GPS, então nada se perde.
+      scheduleRuntimeSessionPersist({ delayMs: 10000, keepPending: true });
     } else {
       scheduleRuntimeSessionPersist();
     }
