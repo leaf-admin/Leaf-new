@@ -3,7 +3,7 @@ import { getSelfHostedApiUrl } from '../config/ApiConfig';
 
 const REQUEST_TIMEOUT_MS = 10000;
 
-async function request(method, body) {
+async function request(method, body, path = '') {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   try {
@@ -12,7 +12,7 @@ async function request(method, body) {
     if (!token) {
       return { success: false, code: 'AUTH_REQUIRED' };
     }
-    const response = await fetch(getSelfHostedApiUrl('/api/drivers/me/avoided-areas'), {
+    const response = await fetch(getSelfHostedApiUrl(`/api/drivers/me/avoided-areas${path}`), {
       method,
       headers: {
         'Content-Type': 'application/json',
@@ -45,11 +45,24 @@ export function fetchDriverAvoidedAreas() {
 
 export function saveDriverAvoidedAreas(areas = []) {
   return request('PUT', {
-    areas: areas.map((area) => ({
-      id: area.id,
-      label: area.label,
-      center: area.center,
-      ringSize: area.ringSize,
-    })),
+    areas: areas.map((area) =>
+      area.bairroId
+        ? { bairroId: area.bairroId }
+        : {
+            id: area.id,
+            label: area.label,
+            center: area.center,
+            ringSize: area.ringSize,
+          },
+    ),
   });
+}
+
+// Bairro (limite oficial) no ponto tocado; `bairro` vem nulo fora do município do Rio.
+export function lookupBairroAt(latitude, longitude) {
+  return request(
+    'GET',
+    null,
+    `/bairro?lat=${encodeURIComponent(Number(latitude).toFixed(6))}&lng=${encodeURIComponent(Number(longitude).toFixed(6))}`,
+  );
 }

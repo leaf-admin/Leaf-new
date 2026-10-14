@@ -135,10 +135,12 @@ else
   ok "Sem referência ao host antigo nos arquivos de runtime/release"
 fi
 
-if rg -n "^EXPO_PUBLIC_ENABLE_DRIVER_WITHDRAWALS=false$" .env .env.production eas.json >/dev/null 2>&1; then
-  ok "Saque do motorista desligado por padrão nos artefatos de release"
+# Saque do motorista ligado por decisão do responsável em 2026-10-13 (aprovação após
+# conferência manual). O que não pode acontecer é o valor ficar implícito.
+if rg -n "^EXPO_PUBLIC_ENABLE_DRIVER_WITHDRAWALS=(true|false)$" .env .env.production >/dev/null 2>&1; then
+  ok "Saque do motorista definido explicitamente nos artefatos de release"
 else
-  bad "Saque do motorista não está claramente desligado nos artefatos de release"
+  bad "Saque do motorista sem valor explícito nos artefatos de release"
 fi
 
 if rg -n "allowReviewAccess|allowCustomOtpFallback|allowQaOtpForceFlow" src/config/runtimeAccessPolicy.js >/dev/null 2>&1; then
