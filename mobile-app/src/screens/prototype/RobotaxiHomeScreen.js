@@ -63,7 +63,7 @@ import { resolvePassengerAutoRoute, shouldAutoSyncPassengerRoute } from './passe
 import { normalizeRuntimeRideStatus } from './rideLifecycleContract';
 import { resolvePrototypeMapPresentation } from './prototypeMapPresentation';
 import { SEARCH_MAX_RADIUS_KM, getSearchPresentation } from './searchPresentation';
-import useSearchElapsedClock from './useSearchElapsedClock';
+import useSearchRadiusSteps from './useSearchRadiusSteps';
 import { openDriverExternalNavigation } from '../../services/DriverExternalNavigationService';
 import {
   fetchH3CellsForRegion,
@@ -353,6 +353,8 @@ const SEARCH_VISUAL_MAX_RADIUS_KM = 1.2;
 const SEARCH_RADIUS_MARGIN = 1.34;
 const HOME_MAP_SUSPENDED_STYLE = { display: 'none' };
 const EMPTY_NEARBY_VEHICLES = [];
+// A tela inicial não mostra o cronômetro da busca: ignora o contador por segundo do runtime.
+const HOME_RUNTIME_OPTIONS = { ignoreKeys: ['searchingElapsedSeconds'] };
 // A câmera da busca não acompanha o raio crescendo: com a esfera por cima, cada recuo parecia o
 // mapa escorregando. Fica num enquadramento de bairro em volta do embarque.
 // A busca anda pelas ruas até 4 km; a câmera enquadra esse raio inteiro.
@@ -1974,7 +1976,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     recoverCompletedReceipt,
     submitCompletedReceiptRating
   } =
-    usePrototypeRideRuntime();
+    usePrototypeRideRuntime(HOME_RUNTIME_OPTIONS);
   const insets = useSafeAreaInsets();
   const { height: windowHeight, width: windowWidth } = useWindowDimensions();
   const isScreenFocused = useIsFocused();
@@ -3190,14 +3192,10 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     activeBooking?.requestedAt ||
     activeBooking?.paymentData?.confirmedAt ||
     null;
-  const searchElapsedClock = useSearchElapsedClock(
+  const searchPresentation = useSearchRadiusSteps(
     searchingElapsedSeconds,
     isSearchingMode,
     searchAnchorTimestamp
-  );
-  const searchPresentation = useMemo(
-    () => getSearchPresentation(searchElapsedClock),
-    [searchElapsedClock]
   );
   const activeTab = isSettingsRoute ? 'settings' : isProfileRoute ? 'profile' : 'home';
   const passengerHomePreviewRouteActive = Boolean(

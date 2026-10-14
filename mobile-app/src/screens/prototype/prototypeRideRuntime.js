@@ -19674,7 +19674,7 @@ function clearDestinationPreview() {
   });
 }
 
-export function usePrototypeRideRuntime() {
+export function usePrototypeRideRuntime(options = null) {
   const authProfile = useSelector((state) => state?.auth?.profile);
   const authUid = useSelector((state) => state?.auth?.uid);
   const dispatch = useDispatch();
@@ -20009,8 +20009,28 @@ export function usePrototypeRideRuntime() {
   const [passengerPlaybackStaleTick, setPassengerPlaybackStaleTick] =
     useState(0);
 
+  // ignoreKeys: campos que esta tela não usa. Uma mudança só neles não re-renderiza a tela
+  // (ex.: a tela inicial e o contador por segundo da busca).
+  const ignoreKeysRef = useRef(options?.ignoreKeys || null);
   useEffect(() => {
-    return subscribeRuntime(setSnapshot);
+    const ignore = Array.isArray(ignoreKeysRef.current) && ignoreKeysRef.current.length > 0
+      ? new Set(ignoreKeysRef.current)
+      : null;
+    if (!ignore) {
+      return subscribeRuntime(setSnapshot);
+    }
+    return subscribeRuntime((next) => {
+      setSnapshot((previous) => {
+        if (previous === next) return previous;
+        for (const key in next) {
+          if (!ignore.has(key) && previous[key] !== next[key]) return next;
+        }
+        for (const key in previous) {
+          if (!ignore.has(key) && !(key in next)) return next;
+        }
+        return previous;
+      });
+    });
   }, []);
 
   useEffect(() => {
