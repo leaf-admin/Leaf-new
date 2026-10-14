@@ -1,5 +1,6 @@
 import leafTypography from '../../components/prototype/LeafTypography';
 import LeafBootSplash from '../../components/design-system/LeafBootSplash';
+import LeafSplashReveal from '../../components/design-system/LeafSplashReveal';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Keyboard, Linking, Modal, Platform, StatusBar, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -5667,6 +5668,22 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
         !showDriverHomeSkeleton
       )
   );
+  // Na primeira vez que o splash sai, o mapa sobe por baixo dele (motion aprovado).
+  // Coberturas posteriores dentro da sessão continuam saindo sem animação.
+  const [homeSplashRevealing, setHomeSplashRevealing] = useState(false);
+  const homeSplashRevealDoneRef = useRef(false);
+  const previousHomeLoadingVisibleRef = useRef(effectiveHomeSurfaceLoadingVisible);
+  useEffect(() => {
+    const wasVisible = previousHomeLoadingVisibleRef.current;
+    previousHomeLoadingVisibleRef.current = effectiveHomeSurfaceLoadingVisible;
+    if (wasVisible && !effectiveHomeSurfaceLoadingVisible && !homeSplashRevealDoneRef.current) {
+      homeSplashRevealDoneRef.current = true;
+      setHomeSplashRevealing(true);
+    }
+  }, [effectiveHomeSurfaceLoadingVisible]);
+  const handleHomeSplashRevealDone = useCallback(() => {
+    setHomeSplashRevealing(false);
+  }, []);
   const homeSurfaceInteractionBlocked = Boolean(
     effectiveHomeSurfaceLoadingVisible ||
       showPassengerHomeSkeleton ||
@@ -10143,6 +10160,11 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
             title={profileFirstName ? homeLoadingTitle : null}
             testID="prototype-home-loading"
             accessibilityLabel={homeLoadingTitle}
+            style={styles.homeLoadingOverlay}
+          />
+        ) : homeSplashRevealing ? (
+          <LeafSplashReveal
+            onDone={handleHomeSplashRevealDone}
             style={styles.homeLoadingOverlay}
           />
         ) : null}
