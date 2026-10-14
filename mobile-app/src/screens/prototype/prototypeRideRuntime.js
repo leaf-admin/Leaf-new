@@ -1,3 +1,4 @@
+import { compactPersistedRideRecord } from "./persistedRideCompaction";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import * as Device from "expo-device";
@@ -2698,6 +2699,10 @@ function buildPersistedRuntimeStateSnapshot(state) {
   RUNTIME_PERSISTED_FIELDS.forEach((field) => {
     payload[field] = source[field];
   });
+  if (Array.isArray(payload.tripHistory)) {
+    payload.tripHistory = payload.tripHistory.map(compactPersistedRideRecord);
+  }
+  payload.lastReceipt = compactPersistedRideRecord(payload.lastReceipt);
 
   return payload;
 }
