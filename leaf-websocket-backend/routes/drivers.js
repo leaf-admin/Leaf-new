@@ -17,6 +17,7 @@ const {
   normalizeAvoidedPoint
 } = require('../services/driver-avoided-areas-service');
 const { findBairroAt, getBairroById, toBairroView } = require('../services/rio-bairros-service');
+const demandHistoryService = require('../services/demand-history-service');
 const { getFinancialCollections } = require('../services/financial-runtime-context');
 const {
   resolveUserPersistenceScope,
@@ -386,6 +387,26 @@ router.get('/api/drivers/me/destination-policy', requireFirebaseUser, async (req
 
 // 🚫 ÁREAS EVITADAS: o motorista marca áreas onde não quer receber ofertas.
 // `driver_avoided_areas:{uid}` é a fonte da verdade; `avoidedH3Cells` no hash `driver:{uid}` é uma cópia para o shortlist.
+// Mapa de demanda com histórico (materializado pelo pricing-baseline-worker). Só leitura do Redis.
+router.get('/api/drivers/me/demand-heat', requireFirebaseUser, async (req, res) => {
+  try {
+    if (String(process.env.ENABLE_DEMAND_HISTORY_HEAT || 'true') === 'false') {
+      return res.json({ success: true, enabled: false, cells: [] });
+    }
+    const heat = await demandHistoryService.getDemandHeat(redisPool.getConnection());
+    res.set('Cache-Control', 'private, max-age=120');
+    return res.json({
+      success: true,
+      enabled: true,
+      generatedAt: heat?.generatedAt || null,
+      cells: Array.isArray(heat?.cells) ? heat.cells : []
+    });
+  } catch (error) {
+    logError(error, 'Falha ao ler mapa de demanda histórica', { service: 'drivers-route' });
+    return res.json({ success: true, enabled: true, generatedAt: null, cells: [] });
+  }
+});
+
 router.get('/api/drivers/me/avoided-areas', requireFirebaseUser, async (req, res) => {
   try {
     const driverId = req.authenticatedUser.uid;

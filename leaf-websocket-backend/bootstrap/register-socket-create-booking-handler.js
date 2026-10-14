@@ -1,4 +1,5 @@
 const PaymentService = require('../services/payment-service');
+const demandHistoryService = require('../services/demand-history-service');
 const paymentServiceSingleton = new PaymentService();
 const {
     collectPaymentReferences,
@@ -1913,6 +1914,18 @@ function registerSocketCreateBookingHandler({
                                 bookingId,
                                 eventType: 'createBooking',
                                 error: pricingReadModelError.message
+                            });
+                        }
+                        try {
+                            await demandHistoryService.recordRideRequest(redisPool.getConnection(), {
+                                bookingId,
+                                pickupLocation
+                            });
+                        } catch (demandHistoryError) {
+                            logStructured('warn', 'Falha ao registrar demanda histórica após createBooking', {
+                                bookingId,
+                                eventType: 'createBooking',
+                                error: demandHistoryError.message
                             });
                         }
                     });

@@ -38,6 +38,12 @@ jest.mock('../../../utils/logger', () => ({
   },
 }));
 
+jest.mock('../../../utils/redis-pool', () => ({ getConnection: () => null }));
+jest.mock('../../../middleware/jwt-auth', () => ({
+  authenticateJWT: (req, res) => res.status(401).json({ error: 'auth' }),
+  requireRole: () => (req, res, next) => next(),
+}));
+
 const placesRoutes = require('../../../routes/places-routes');
 
 function createApp() {
