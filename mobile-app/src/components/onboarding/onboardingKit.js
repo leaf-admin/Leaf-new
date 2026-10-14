@@ -27,8 +27,6 @@ export const ONB = {
   inkMuted: 'rgba(17,33,12,0.42)',
   leaf: '#1A330E',
   leafDeep: '#003002',
-  lime: '#D4E84A',
-  limeSoft: 'rgba(212,232,74,0.22)',
   surface: '#FFFFFF',
   surfaceSoft: '#F4F6F2',
   line: 'rgba(17,33,12,0.10)',
@@ -62,19 +60,19 @@ export function OnboardingProgress({ step, total }) {
 
 export function PrimaryButton({ label, onPress, disabled = false, loading = false, tone = 'dark', testID }) {
   const haptic = useHapticFeedback();
-  const lime = tone === 'lime';
+  const light = tone === 'light';
   return (
     <LeafAnimatedPressable
       onPress={disabled || loading ? undefined : () => { haptic('tap'); onPress?.(); }}
       disabled={disabled || loading}
       activeScale={0.98}
-      style={[styles.primary, lime && styles.primaryLime, (disabled || loading) && styles.primaryDisabled]}
+      style={[styles.primary, light && styles.primaryLight, (disabled || loading) && styles.primaryDisabled]}
       accessibilityRole="button"
       accessibilityState={{ disabled: disabled || loading, busy: loading }}
       testID={testID}
     >
-      {loading ? <LoadingDots color={lime ? ONB.leafDeep : '#FFFFFF'} /> : (
-        <Text style={[styles.primaryText, lime && styles.primaryTextLime]}>{label}</Text>
+      {loading ? <LoadingDots color={light ? ONB.leafDeep : '#FFFFFF'} /> : (
+        <Text style={[styles.primaryText, light && styles.primaryTextLight]}>{label}</Text>
       )}
     </LeafAnimatedPressable>
   );
@@ -118,7 +116,7 @@ export function OnboardingField({
   }, [focus, focused]);
   const borderColor = error
     ? ONB.danger
-    : focus.interpolate({ inputRange: [0, 1], outputRange: [ONB.line, ONB.leaf] });
+    : focus.interpolate({ inputRange: [0, 1], outputRange: [ONB.line, ONB.ink] });
   return (
     <View style={styles.fieldWrap}>
       {label ? <Text style={styles.fieldLabel}>{label}</Text> : null}
@@ -197,7 +195,7 @@ const styles = StyleSheet.create({
   backPlaceholder: { width: 44, height: 44 },
   progressWrap: { flex: 1 },
   progressTrack: { height: 4, borderRadius: 2, backgroundColor: ONB.surfaceSoft, overflow: 'hidden' },
-  progressFill: { height: 4, borderRadius: 2, backgroundColor: ONB.leaf },
+  progressFill: { height: 4, borderRadius: 2, backgroundColor: ONB.ink },
   body: { flex: 1 },
   bodyContent: { paddingHorizontal: 24, paddingTop: 28, paddingBottom: 24 },
   title: { ...leafTypography.semiBold, fontSize: 30, lineHeight: 36, letterSpacing: -0.4, color: ONB.ink },
@@ -208,10 +206,10 @@ const styles = StyleSheet.create({
     alignSelf: 'stretch', height: 56, borderRadius: 28, backgroundColor: ONB.action,
     alignItems: 'center', justifyContent: 'center',
   },
-  primaryLime: { backgroundColor: ONB.lime },
+  primaryLight: { backgroundColor: '#FFFFFF' },
   primaryDisabled: { opacity: 0.32 },
   primaryText: { ...leafTypography.semiBold, fontSize: 17, color: '#FFFFFF' },
-  primaryTextLime: { color: ONB.leafDeep },
+  primaryTextLight: { color: ONB.leafDeep },
   link: { ...leafTypography.medium, fontSize: 15, color: ONB.ink, textDecorationLine: 'underline' },
   linkLight: { color: 'rgba(255,255,255,0.82)' },
   dots: { flexDirection: 'row', gap: 6 },
