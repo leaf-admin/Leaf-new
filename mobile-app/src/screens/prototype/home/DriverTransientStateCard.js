@@ -15,6 +15,12 @@ function resolveIcon(type) {
   if (normalized === "accepted_by_other_driver_competitive") {
     return { name: "swap-horizontal-outline", color: "#365A6D", tone: styles.competitiveIconWrap };
   }
+  if (normalized === "night_surcharge_started") {
+    return { name: "moon", color: "#3B3270", tone: styles.nightIconWrap };
+  }
+  if (normalized === "night_surcharge_ended") {
+    return { name: "sunny-outline", color: "#7A5B10", tone: styles.expiredIconWrap };
+  }
   if (normalized === "offer_expired") {
     return { name: "time-outline", color: "#7A5B10", tone: styles.expiredIconWrap };
   }
@@ -112,6 +118,9 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "flex-start",
     gap: 12,
+  },
+  nightIconWrap: {
+    backgroundColor: "#ECEAF8",
   },
   iconWrap: {
     width: 38,

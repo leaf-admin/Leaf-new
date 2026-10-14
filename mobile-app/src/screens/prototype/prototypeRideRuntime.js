@@ -17,6 +17,11 @@ import receiptService from "../../services/ReceiptService";
 import RatingService from "../../services/RatingService";
 import interactiveNotificationService from "../../services/InteractiveNotificationService";
 import { isRideGoneOnServerError } from "./rideServerErrors";
+import {
+  buildNightSurchargeNotice,
+  isNightSurchargeActive,
+  nextNightSurchargeTransition,
+} from "./nightSurchargeNotice";
 import prototypeDriverTripAssistantService, {
   calculateDistanceMeters,
   PICKUP_TOLERANCE_METERS,
@@ -151,6 +156,8 @@ const QA_PASSENGER_PREBOOKING_SCENARIOS = new Set([
   "passenger-booking",
   "passenger-payment",
 ]);
+// Quando o bundle carregou (abertura do app).
+const RUNTIME_MODULE_LOADED_AT = Date.now();
 const DRIVER_LOCATION_HEARTBEAT_MS = 5000;
 const DRIVER_ONLINE_DAILY_LIMIT_CODE = "driver_online_daily_limit_reached";
 const DRIVER_ONLINE_DAILY_LIMIT_MESSAGE =
@@ -3832,7 +3839,10 @@ function buildDriverTransientCard(payload = {}) {
   const durationMs =
     type === "accepted_by_other_driver_competitive"
       ? DRIVER_COMPETITIVE_TRANSIENT_CARD_DURATION_MS
-      : DRIVER_TRANSIENT_CARD_DURATION_MS;
+      : type.startsWith("night_surcharge_")
+        // Aviso informativo: tempo para ler sem pressa.
+        ? 6500
+        : DRIVER_TRANSIENT_CARD_DURATION_MS;
   return {
     ...DEFAULT_DRIVER_TRANSIENT_CARD,
     id: String(payload.id || `driver-transient-${now}`),
@@ -20771,6 +20781,77 @@ export function usePrototypeRideRuntime() {
           error?.message || error,
         );
       });
+  }, [isRuntimeEffectOwner, driverOnlinePresenceUid]);
+
+  // Adicional noturno: o motorista online é avisado quando começa e quando termina
+  // (cartão na tela, central de notificações e notificação local para quem está com o
+  // app em segundo plano). Ao ficar online durante o período, um lembrete.
+  useEffect(() => {
+    if (!isRuntimeEffectOwner || !driverOnlinePresenceUid) {
+      return undefined;
+    }
+    let timer = null;
+    let scheduledNotificationId = null;
+    let cancelled = false;
+    const announce = (kind) => {
+      const notice = buildNightSurchargeNotice(kind);
+      showDriverTransientCard({ type: notice.type, title: notice.title, message: notice.message });
+      appendRuntimeNotification(
+        createRuntimeNotification({ title: notice.title, message: notice.message, kind: "system", scope: "driver" }),
+      );
+    };
+    const scheduleNext = () => {
+      const next = nextNightSurchargeTransition(new Date());
+      const delayMs = Math.max(1000, next.at.getTime() - Date.now());
+      // setTimeout de JS pode atrasar com o app parado; a notificação local cobre esse caso.
+      try {
+        const Notifications = require("expo-notifications");
+        const notice = buildNightSurchargeNotice(next.kind);
+        Notifications.scheduleNotificationAsync({
+          content: { title: notice.title, body: notice.message, data: { type: notice.type } },
+          trigger: { type: "date", date: next.at },
+        })
+          .then((id) => {
+            if (cancelled) {
+              Notifications.cancelScheduledNotificationAsync(id).catch(() => {});
+            } else {
+              scheduledNotificationId = id;
+            }
+          })
+          .catch(() => {});
+      } catch (_error) {
+        // sem notificações locais neste ambiente
+      }
+      timer = setTimeout(() => {
+        if (cancelled) return;
+        if (AppState.currentState === "active") {
+          announce(next.kind);
+        }
+        scheduledNotificationId = null;
+        scheduleNext();
+      }, Math.min(delayMs, 2 ** 31 - 1));
+    };
+    // Lembrete de que o adicional está valendo. Logo depois de abrir o app ele cairia
+    // embaixo do splash (que no Android espera o mapa); nesse caso espera mais.
+    const openedRecently = Date.now() - RUNTIME_MODULE_LOADED_AT < 30000;
+    const activeReminder = setTimeout(() => {
+      if (!cancelled && isNightSurchargeActive(new Date()) && AppState.currentState === "active") {
+        announce("active");
+      }
+    }, openedRecently ? 14000 : 1200);
+    scheduleNext();
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+      clearTimeout(activeReminder);
+      if (scheduledNotificationId) {
+        try {
+          require("expo-notifications").cancelScheduledNotificationAsync(scheduledNotificationId).catch(() => {});
+        } catch (_error) {
+          // sem notificações locais neste ambiente
+        }
+      }
+    };
   }, [isRuntimeEffectOwner, driverOnlinePresenceUid]);
 
   // Sem oferta aberta não há motivo para o aviso de "Nova corrida" continuar na barra

@@ -2055,7 +2055,7 @@ export default function WooviPaymentModal({
                 <View style={[
                     styles.modalContent,
                     robotaxiLifecycleCard && styles.robotaxiModalContent,
-                    robotaxiLifecycleCard && { paddingBottom: 18 + insets.bottom },
+                    robotaxiLifecycleCard && { marginBottom: 12 + insets.bottom },
                 ]}>
                     {robotaxiLifecycleCard ? null : <View style={styles.handle} />}
                     <View style={styles.modalHeader}>
@@ -2114,19 +2114,16 @@ const styles = StyleSheet.create({
         shadowRadius: 42,
         elevation: 8,
     },
+    // Card flutuante como o resto do app (antes era a única folha presa à borda).
     robotaxiModalContent: {
-        width: '100%',
-        maxWidth: width,
-        maxHeight: height - 64,
-        marginBottom: 0,
-        borderTopLeftRadius: 24,
-        borderTopRightRadius: 24,
-        borderBottomLeftRadius: 0,
-        borderBottomRightRadius: 0,
+        width: width - 24,
+        maxWidth: width - 24,
+        maxHeight: height - 96,
+        borderRadius: 28,
         borderWidth: 0,
         paddingHorizontal: 24,
         paddingTop: 24,
-        paddingBottom: 18,
+        paddingBottom: 20,
     },
     handle: {
         width: 54,
