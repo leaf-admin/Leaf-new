@@ -33,13 +33,13 @@ em outra sessão/conta sem começar do zero.
 
 - Conceitos: `mobile-app/src/screens/prototype/lab/labVehicleConcepts.js`
   - A · Sedã, B · Minimal (vidro único), C · Hatch/SUV. Proporção ~2.4:1, sombra em 2 camadas, rim light, reflexo no vidro, LEDs. Sem filtros SVG.
-- Izaak: "melhorou sim". Ainda NÃO escolheu entre A/B/C. Minha recomendação: B (ou A se quiser realismo).
+- 2026-10-14: Izaak escolheu **C (Hatch/SUV)**. Já portado para produção em `leafVehicleArtwork.js` (sombra segue a luz por heading, 13 cores, abóbora mantida).
 - Produção continua em `mobile-app/src/components/prototype/leafVehicleArtwork.js` (`createLeafVehicleSvg`) — só trocar depois da escolha; manter `resolveVehicleArtworkPose`, cores `PAINTS`, shape `halloween_pumpkin` e o teste `__tests__/leaf-vehicle-artwork.test.js`.
 - Pendente: marcador próprio para moto.
 
 ## Próximos passos
 
-1. Izaak escolher A/B/C → portar para `leafVehicleArtwork.js` + atualizar teste.
+1. ~~Escolher carro~~ feito (C, em produção no branch).
 2. Portar peças aprovadas do lab para as telas reais (passageiro): abertura, rota, categoria, busca, encontrou.
 3. Validar com rota/corrida real (não editar código durante corrida em andamento).
 4. Push das branches + PR quando Izaak autorizar.

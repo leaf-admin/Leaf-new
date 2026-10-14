@@ -24,13 +24,13 @@ describe('Leaf vehicle vector artwork', () => {
     }
     expect(createLeafMapMarkerSvg({ shapeKey: 'leaf_vehicle', colorToken: 'white' })).toContain('#F0F0F1');
   });
-  it('uses a compact vector silhouette with subtle paint and a ground shadow', () => {
+  it('uses a detailed but bounded vector SUV with layered paint and a ground shadow', () => {
     const xml = createLeafVehicleSvg();
     expect(xml).toContain('viewBox="0 0 64 64"');
     expect(xml).toContain('linearGradient');
     expect(xml).toContain('<ellipse');
     expect(xml).not.toMatch(/skew|scale|matrix/);
-    expect((xml.match(/<path /g) || []).length).toBeLessThanOrEqual(9);
+    expect((xml.match(/<path /g) || []).length).toBeLessThanOrEqual(16);
     expect(xml).not.toMatch(/<image|<filter|data:image|https?:\/\/[^w]/);
   });
 
