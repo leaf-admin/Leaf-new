@@ -1,10 +1,12 @@
 // 🚫 Áreas que o motorista evita (filtro duro de despacho).
 // Funções puras: a persistência fica na rota e no dispatcher.
 const h3 = require('h3-js');
+const { getBairroById, isPointInBairro } = require('./rio-bairros-service');
 
 const AVOIDED_AREAS_H3_RESOLUTION = 8;
-const MAX_AVOIDED_CELLS = 60;
-const MAX_AVOIDED_AREAS = 12;
+const MAX_AVOIDED_CELLS = 80;
+// Decisão de produto (2026-10-13): no máximo 4 regiões por motorista.
+const MAX_AVOIDED_AREAS = 4;
 const MAX_AVOIDED_LABEL_LENGTH = 60;
 const MAX_AVOIDED_RING_SIZE = 2;
 
@@ -84,11 +86,47 @@ function isDestinationAvoided(driverData = {}, destinationLocation = null) {
   }
 }
 
+// Bairros inteiros ficam guardados pelo código oficial; o ponto é testado contra o
+// limite do bairro (exato), não contra células.
+function normalizeAvoidedBairros(input) {
+  if (!Array.isArray(input)) return [];
+  const seen = new Set();
+  const ids = [];
+  for (const raw of input) {
+    const id = String(raw ?? '').trim();
+    if (!id || seen.has(id) || !getBairroById(id)) continue;
+    seen.add(id);
+    ids.push(id);
+  }
+  return ids;
+}
+
+function parseAvoidedBairros(driverData = {}) {
+  const raw = driverData?.avoidedBairros;
+  if (Array.isArray(raw)) return normalizeAvoidedBairros(raw);
+  if (typeof raw !== 'string' || raw.trim() === '') return [];
+  try {
+    return normalizeAvoidedBairros(JSON.parse(raw));
+  } catch (error) {
+    return [];
+  }
+}
+
+function isLocationInAvoidedBairro(driverData = {}, location = null) {
+  const bairros = parseAvoidedBairros(driverData);
+  if (bairros.length === 0) return false;
+  const point = normalizeAvoidedPoint(location);
+  if (!point) return false;
+  return bairros.some((id) => isPointInBairro(id, point.lat, point.lng));
+}
+
 // Bloqueio vale para os dois extremos: o motorista não quer embarcar nem desembarcar ali.
 function isRideInAvoidedArea(driverData = {}, { pickupLocation = null, destinationLocation = null } = {}) {
   return (
     isDestinationAvoided(driverData, destinationLocation) ||
-    isDestinationAvoided(driverData, pickupLocation)
+    isDestinationAvoided(driverData, pickupLocation) ||
+    isLocationInAvoidedBairro(driverData, destinationLocation) ||
+    isLocationInAvoidedBairro(driverData, pickupLocation)
   );
 }
 
@@ -107,9 +145,26 @@ function parseStoredAvoidedCells(rawStored) {
   return normalizeAvoidedCells(stored?.cells);
 }
 
-function buildAvoidedAreasPatch(cells, updatedAt = new Date().toISOString()) {
+function parseStoredAvoided(rawStored) {
+  if (!rawStored) return { cells: [], bairros: [] };
+  let stored = rawStored;
+  if (typeof stored === 'string') {
+    try {
+      stored = JSON.parse(stored);
+    } catch (error) {
+      return { cells: [], bairros: [] };
+    }
+  }
+  return {
+    cells: normalizeAvoidedCells(stored?.cells),
+    bairros: normalizeAvoidedBairros(stored?.bairros)
+  };
+}
+
+function buildAvoidedAreasPatch(cells, updatedAt = new Date().toISOString(), bairros = []) {
   return {
     avoidedH3Cells: JSON.stringify(normalizeAvoidedCells(cells)),
+    avoidedBairros: JSON.stringify(normalizeAvoidedBairros(bairros)),
     avoidedAreasUpdatedAt: updatedAt
   };
 }
@@ -154,9 +209,13 @@ module.exports = {
   buildAvoidedAreasPatch,
   cellsAroundPoint,
   isDestinationAvoided,
+  isLocationInAvoidedBairro,
   isRideInAvoidedArea,
+  normalizeAvoidedBairros,
   normalizeAvoidedCells,
   normalizeAvoidedPoint,
+  parseAvoidedBairros,
   parseAvoidedCells,
+  parseStoredAvoided,
   parseStoredAvoidedCells
 };
