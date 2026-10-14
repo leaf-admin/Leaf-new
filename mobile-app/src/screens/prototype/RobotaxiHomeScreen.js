@@ -12,7 +12,9 @@ import { Ionicons } from '@expo/vector-icons';
 import polyline from '@mapbox/polyline';
 import robotaxiPrototypeTokens from '../../components/design-system/robotaxiPrototypeTokens';
 import PrototypeScreenTransition from '../../components/prototype/PrototypeScreenTransition';
-import PrototypeMapLayer from '../../components/prototype/PrototypeMapLayer';
+import PrototypeMapLayer, { resolveVehicleColorToken } from '../../components/prototype/PrototypeMapLayer';
+import LeafStreetSearch from '../../components/prototype/LeafStreetSearch';
+import { resolveVehicleShapeKeyForCategory } from '../../components/prototype/leafVehicleArtwork';
 import { resolveRegisteredVehicleColor } from '../../components/prototype/vehicleMarkerIdentity';
 import { useMobilePreferences } from '../../components/MobilePreferencesProvider';
 import useLeafVoiceGuidance from '../../hooks/useLeafVoiceGuidance';
@@ -66,6 +68,7 @@ import { openDriverExternalNavigation } from '../../services/DriverExternalNavig
 import {
   fetchH3CellsForRegion,
   fetchDriverDemandHeat,
+  fetchStreetGraph,
   selectDemandHeatCellsInRegion,
   isCoordinateInsideRegion,
   resolveH3LabelAnchor,
@@ -349,9 +352,12 @@ const SEARCH_ZOOM_ANIMATION_MS = 1150;
 const SEARCH_VISUAL_MAX_RADIUS_KM = 1.2;
 const SEARCH_RADIUS_MARGIN = 1.34;
 const HOME_MAP_SUSPENDED_STYLE = { display: 'none' };
+const EMPTY_NEARBY_VEHICLES = [];
 // A câmera da busca não acompanha o raio crescendo: com a esfera por cima, cada recuo parecia o
 // mapa escorregando. Fica num enquadramento de bairro em volta do embarque.
-const SEARCH_CAMERA_MAX_RADIUS_KM = 1.2;
+// A busca anda pelas ruas até 4 km; a câmera enquadra esse raio inteiro.
+const SEARCH_CAMERA_MAX_RADIUS_KM = 4;
+const STREET_SEARCH_RADIUS_M = 4000;
 const SEARCH_INITIAL_VIEWPORT_RADIUS_KM = 0.48;
 const MAP_OCCLUSION_REPOSITION_MS = 760;
 const MAP_RETURN_REPOSITION_MS = 820;
@@ -9737,14 +9743,46 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     return () => clearTimeout(timer);
   }, [refreshLandingPickupAnchor]);
   const [driverLabelRegion, setDriverLabelRegion] = useState(null);
+  const [searchOverlayRegion, setSearchOverlayRegion] = useState(null);
+  // Busca pelas ruas (substitui a esfera): malha de 4 km em volta do embarque, uma vez por busca.
+  const [streetSearchGraph, setStreetSearchGraph] = useState(null);
+  const streetSearchCenterLat = Number(searchCenterCoordinate?.latitude);
+  const streetSearchCenterLng = Number(searchCenterCoordinate?.longitude);
+  useEffect(() => {
+    if (!presentedSearchingMode || typeof fetchStreetGraph !== 'function'
+      || !Number.isFinite(streetSearchCenterLat) || !Number.isFinite(streetSearchCenterLng)) {
+      setStreetSearchGraph(null);
+      return undefined;
+    }
+    let cancelled = false;
+    fetchStreetGraph({ latitude: streetSearchCenterLat, longitude: streetSearchCenterLng, radiusM: STREET_SEARCH_RADIUS_M })
+      .then((graph) => { if (!cancelled) setStreetSearchGraph(graph); })
+      .catch(() => { if (!cancelled) setStreetSearchGraph(null); });
+    return () => { cancelled = true; };
+  }, [presentedSearchingMode, streetSearchCenterLat, streetSearchCenterLng]);
+  const streetSearchCars = useMemo(() => (Array.isArray(nearbyDriverCoordinates) ? nearbyDriverCoordinates : [])
+    .map((driver) => ({
+      id: driver.id,
+      latitude: Number(driver?.coordinate?.latitude),
+      longitude: Number(driver?.coordinate?.longitude),
+      heading: Number(driver?.heading) || 0,
+      colorToken: resolveVehicleColorToken(driver?.vehicleColor, driver?.color) || 'black',
+      shapeKey: resolveVehicleShapeKeyForCategory(driver?.carType, driver?.category),
+    }))
+    .filter((car) => Number.isFinite(car.latitude) && Number.isFinite(car.longitude)), [nearbyDriverCoordinates]);
+  const streetSearchActive = Boolean(presentedSearchingMode && streetSearchGraph?.nodes?.length);
   const [driverMapMoving, setDriverMapMoving] = useState(false);
   const handleHomeMapPanDragWithLanding = useCallback((...args) => {
     if (passengerLandingVisible) setLandingMapMoving(true);
+    if (!isDriverRole) setSearchOverlayRegion(null);
     if (isDriverRole) setDriverMapMoving(true);
     handleMapPanDrag(...args);
   }, [handleMapPanDrag, isDriverRole, passengerLandingVisible]);
   const handleHomeMapRegionChangeCompleteWithLanding = useCallback((nextRegion) => {
     handleMapRegionChangeComplete(nextRegion);
+    if (!isDriverRole && nextRegion) {
+      setSearchOverlayRegion(nextRegion);
+    }
     if (isDriverRole && nextRegion) {
       setDriverMapMoving(false);
       setDriverLabelRegion(nextRegion);
@@ -9802,7 +9840,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
           searchCenterCoordinate={presentedSearchingMode ? searchCenterCoordinate : null}
           searchRadiusKm={presentedSearchingMode ? searchRadiusKm : null}
           searchPreviewRadiusKm={presentedSearchingMode ? searchPreviewRadiusKm : null}
-          nearbyVehicles={presentedNearbyVehicles}
+          nearbyVehicles={streetSearchActive ? EMPTY_NEARBY_VEHICLES : presentedNearbyVehicles}
           routeCoordinates={presentedRouteCoordinates}
           routeTrafficSegments={presentedRouteTrafficSegments}
           routeSynthetic={passengerHomePreviewRouteActive ? false : activeRoute.synthetic === true}
@@ -9855,6 +9893,23 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
           interactionEnabled={homeMapInteractionEnabled}
           manualCameraHoldMs={homeMapPresentation.manualCameraHoldMs}
         />
+        {streetSearchActive && searchOverlayRegion ? (
+          <>
+            <LeafStreetSearch
+              graph={streetSearchGraph}
+              pickup={searchCenterCoordinate}
+              cars={streetSearchCars}
+              region={searchOverlayRegion}
+              width={windowWidth}
+              height={windowHeight}
+              maxDistanceM={STREET_SEARCH_RADIUS_M}
+              testID="passenger-street-search"
+            />
+            <Text pointerEvents="none" style={[styles.streetSearchAttribution, { top: insets.top + 6 }]}>
+              © OpenStreetMap contributors
+            </Text>
+          </>
+        ) : null}
 
         {showHomeChrome && !passengerLandingVisible &&
         !homeDestinationSearchActive && !homePickupSearchActive &&
@@ -10338,6 +10393,12 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
 }
 
 const styles = StyleSheet.create({
+  streetSearchAttribution: {
+    position: 'absolute',
+    right: 12,
+    fontSize: 10,
+    color: 'rgba(17,33,12,0.55)',
+  },
   container: {
     flex: 1,
     backgroundColor: color.bg.map

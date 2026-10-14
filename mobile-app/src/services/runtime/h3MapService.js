@@ -170,6 +170,16 @@ export async function fetchH3CellsForRegion(region, options = {}) {
   return response?.data || response;
 }
 
+// Ruas em volta do embarque (OpenStreetMap, servidas pelo backend) para a busca pelas ruas.
+export async function fetchStreetGraph({ latitude, longitude, radiusM = 4000, signal } = {}) {
+  const response = await apiClient.get('/api/map/street-graph', {
+    params: { lat: latitude, lng: longitude, radius: radiusM },
+    signal,
+  });
+  const data = response?.data || response;
+  return Array.isArray(data?.nodes) && Array.isArray(data?.edges) ? data : null;
+}
+
 // Mapa de demanda com histórico (onde costuma haver pedidos nesta hora).
 export async function fetchDriverDemandHeat(options = {}) {
   const response = await apiClient.get('/api/drivers/me/demand-heat', { signal: options.signal });
@@ -198,6 +208,7 @@ export function selectDemandHeatCellsInRegion(cells = [], region, paddingRatio =
 }
 
 export default {
+  fetchStreetGraph,
   fetchDriverDemandHeat,
   selectDemandHeatCellsInRegion,
   estimateZoomFromRegion,

@@ -3,8 +3,6 @@ import { LeafStatusTicker } from '../../components/design-system/LeafLiveSearch'
 import { returnToPrototypeHome } from '../../navigation/returnToPrototypeHome';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { StatusBar, StyleSheet, Text, View, useWindowDimensions } from "react-native";
-import Reanimated, { FadeIn, FadeOut, useAnimatedStyle, useSharedValue, withTiming } from "react-native-reanimated";
-import LeafNetworkSphereView, { isLeafNetworkSphereAvailable } from "../../components/prototype/LeafNetworkSphere";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import PrototypeScreenTransition from "../../components/prototype/PrototypeScreenTransition";
 import PrototypeDismissibleSheet from "../../components/prototype/PrototypeDismissibleSheet";
@@ -443,37 +441,9 @@ export default function RobotaxiDriverSearchScreen({ navigation, route }) {
     navigation.navigate(routeName, params);
   }, [navigation]);
 
-  // Motorista encontrado: a esfera se fecha no centro e o véu clareia antes de sair, em vez de a
-  // tela de busca sumir de uma vez. Só no aceite; erro, cancelamento e "sem motoristas" saem direto.
-  const [sphereConverging, setSphereConverging] = useState(false);
-  const wasSearchActiveRef = useRef(isSearchActive);
-  const convergeStartedAtRef = useRef(0);
-  const veilOpacity = useSharedValue(1);
-  useEffect(() => {
-    const wasActive = wasSearchActiveRef.current;
-    wasSearchActiveRef.current = isSearchActive;
-    if (isSearchActive) {
-      veilOpacity.value = 1;
-      setSphereConverging(false);
-      return undefined;
-    }
-    const accepted = /accepted|arriv|driver_found|en_route|started|in_progress/i.test(String(bookingStatus || ""));
-    if (!wasActive || !accepted || lastError) {
-      return undefined;
-    }
-    convergeStartedAtRef.current = Date.now();
-    setSphereConverging(true);
-    veilOpacity.value = withTiming(0, { duration: 560 });
-    const timer = setTimeout(() => setSphereConverging(false), 620);
-    return () => clearTimeout(timer);
-  }, [bookingStatus, isSearchActive, lastError, veilOpacity]);
-  const veilStyle = useAnimatedStyle(() => ({ opacity: veilOpacity.value }));
 
   useEffect(() => {
     if (passengerAutoRoute === "RobotaxiPrototypeTrip") {
-      // Vindo direto da busca, espera a esfera fechar (~600 ms) antes de trocar de tela.
-      const sinceConverge = Date.now() - convergeStartedAtRef.current;
-      const waitMs = sinceConverge < 600 ? 600 - sinceConverge : 0;
       const goToTrip = () => replaceAfterProtectedSearch("RobotaxiPrototypeTrip", {
         destination,
         destinationAddress: routeDestinationAddress || bookingDestinationAddress,
@@ -489,10 +459,6 @@ export default function RobotaxiDriverSearchScreen({ navigation, route }) {
         elapsed,
         driverName: driverInfo?.name || "Motorista",
       });
-      if (waitMs > 0) {
-        const timer = setTimeout(goToTrip, waitMs);
-        return () => clearTimeout(timer);
-      }
       goToTrip();
     }
     return undefined;
@@ -738,15 +704,10 @@ export default function RobotaxiDriverSearchScreen({ navigation, route }) {
     }
   }, []);
 
-  if (!isSearchActive && !sphereConverging) {
+  if (!isSearchActive) {
     return null;
   }
 
-  // Espaço livre acima do cartão: a esfera fica no centro dele.
-  const sphereAreaTop = insets.top + 24;
-  const sphereAreaHeight = Math.max(0, windowHeight - (cardHeight || windowHeight * 0.42) - sheetBottom - sphereAreaTop - 12);
-  const sphereSize = Math.min(300, windowWidth - 48, sphereAreaHeight);
-  const showNetworkSphere = isLeafNetworkSphereAvailable() && !showSearchTimeoutDecision && sphereSize >= 160;
 
   return (
     <PrototypeScreenTransition animated={false}>
@@ -756,22 +717,7 @@ export default function RobotaxiDriverSearchScreen({ navigation, route }) {
           backgroundColor="transparent"
           barStyle="dark-content"
         />
-        {showNetworkSphere ? (
-          <Reanimated.View
-            pointerEvents="none"
-            entering={FadeIn.duration(500)}
-            exiting={FadeOut.duration(260)}
-            style={StyleSheet.absoluteFill}
-            testID="passenger-driver-search-network"
-          >
-            {/* Véu claro: o mapa e os carros da região ficam ao fundo, sem competir. */}
-            <Reanimated.View style={[StyleSheet.absoluteFill, styles.searchVeil, veilStyle]} />
-            <View style={[styles.sphereArea, { top: sphereAreaTop, height: sphereAreaHeight }]}>
-              <LeafNetworkSphereView size={sphereSize} active converged={sphereConverging} />
-            </View>
-          </Reanimated.View>
-        ) : null}
-        {sphereConverging ? null : (
+        {(
         <PrototypeDismissibleSheet
           onClose={handleProtectedDismiss}
           backdropDismissEnabled={false}
@@ -930,16 +876,6 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: "transparent",
-  },
-  searchVeil: {
-    backgroundColor: "rgba(255,255,255,0.62)",
-  },
-  sphereArea: {
-    position: "absolute",
-    left: 0,
-    right: 0,
-    alignItems: "center",
-    justifyContent: "center",
   },
   sheetWrap: {
     position: "absolute",
