@@ -24,7 +24,7 @@ function isCameraTargetClose(a, b) {
 import robotaxiPrototypeTokens from '../design-system/robotaxiPrototypeTokens';
 import LeafLocationMarker from './LeafLocationMarker';
 import LeafVehicleMarker from './LeafVehicleMarker';
-import { resolveVehicleShapeKeyForCategory } from './leafVehicleArtwork';
+import { resolveVehicleArtworkPose, resolveVehicleShapeKeyForCategory } from './leafVehicleArtwork';
 import {
   invalidateGlassBackdrop,
   isGlassBackdropSupported,
@@ -2565,6 +2565,19 @@ function PrototypeMapLayer({
     const timer = setTimeout(() => setVehicleMarkerTracking(false), 1500);
     return () => clearTimeout(timer);
   }, [vehicleMarkerTrackingKey]);
+  // iOS: com tracksViewChanges sempre ligado o Google Maps recapturava o carro e o ponto do
+  // usuário a cada frame (~40-60% de CPU numa corrida). A rotação é nativa; o desenho só muda
+  // com cor/forma ou a cada faixa de 5° da luz, então captura por um instante nessas trocas.
+  const iosDriverPoseBucket = resolveVehicleArtworkPose(displayedDriverScreenHeading).heading;
+  const [iosMarkerTracking, setIosMarkerTracking] = useState(true);
+  useEffect(() => {
+    if (Platform.OS === 'android') {
+      return undefined;
+    }
+    setIosMarkerTracking(true);
+    const timer = setTimeout(() => setIosMarkerTracking(false), 500);
+    return () => clearTimeout(timer);
+  }, [iosDriverPoseBucket, shouldShowCurrentLocationMarker, vehicleMarkerTrackingKey]);
   const shouldSuppressNativeAndroidDriverVehicleMarker = Boolean(
     Platform.OS === 'android' &&
       shouldRenderDriverVehicleMarkerChild &&
@@ -3196,7 +3209,7 @@ function PrototypeMapLayer({
               anchor={{ x: 0.5, y: 0.5 }}
               flat={driverMarkerMode === 'car'}
               rotation={driverMarkerMode === 'car' ? displayedDriverHeading : 0}
-              tracksViewChanges={Platform.OS === 'android' ? vehicleMarkerTracking : shouldRenderDriverVehicleMarkerChild}
+              tracksViewChanges={Platform.OS === 'android' ? vehicleMarkerTracking : shouldRenderDriverVehicleMarkerChild && iosMarkerTracking}
               pinColor={undefined}
             >
               {driverMarkerMode === 'avatar' ? (
@@ -3301,7 +3314,7 @@ function PrototypeMapLayer({
               // sees the car arrive on their dot instead of the dot hiding it.
               zIndex={18}
               anchor={{ x: 0.5, y: 0.5 }}
-              tracksViewChanges={userMarkerTracksViewChanges}
+              tracksViewChanges={Platform.OS === 'android' ? userMarkerTracksViewChanges : userMarkerTracksViewChanges && iosMarkerTracking}
               pinColor={undefined}
             >
               <View collapsable={false}>

@@ -348,6 +348,7 @@ const SEARCH_ZOOM_ANIMATION_MS = 1150;
 // needs the surroundings of the pickup, so the drawn area is capped.
 const SEARCH_VISUAL_MAX_RADIUS_KM = 1.2;
 const SEARCH_RADIUS_MARGIN = 1.34;
+const HOME_MAP_SUSPENDED_STYLE = { display: 'none' };
 // A câmera da busca não acompanha o raio crescendo: com a esfera por cima, cada recuo parecia o
 // mapa escorregando. Fica num enquadramento de bairro em volta do embarque.
 const SEARCH_CAMERA_MAX_RADIUS_KM = 1.2;
@@ -9641,6 +9642,21 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   const homeLandingMapTop = homeLandingMapFrame?.top;
   const homeLandingMapWidth = homeLandingMapFrame?.width;
   const homeLandingMapHeight = homeLandingMapFrame?.height;
+  // A tela da corrida tem mapa próprio e cobre a inicial inteira, mas fica por cima sem
+  // desanexar a de baixo: os dois mapas Google seguiam desenhando ao mesmo tempo (~2x GPU e CPU
+  // no iPhone). Depois que o mapa da corrida pinta, o da inicial sai da tela (sem desmontar,
+  // então volta na mesma câmera ao fechar a corrida).
+  const homeMapCoveredByTrip = !isScreenFocused && currentRouteName === 'RobotaxiPrototypeTrip';
+  const [homeMapSuspended, setHomeMapSuspended] = useState(false);
+  useEffect(() => {
+    if (!homeMapCoveredByTrip) {
+      setHomeMapSuspended(false);
+      return undefined;
+    }
+    const timer = setTimeout(() => setHomeMapSuspended(true), 1200);
+    return () => clearTimeout(timer);
+  }, [homeMapCoveredByTrip]);
+
   const homeMapContainerStyle = useMemo(
     () => (passengerMapInCard ? {
       left: homeLandingMapLeft ?? 24, right: undefined, bottom: undefined,
@@ -9771,7 +9787,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
         {passengerMapInCard ? <View style={[StyleSheet.absoluteFillObject, { backgroundColor: '#FFFFFF' }]} /> : null}
 
         <PrototypeMapLayer
-          containerStyle={homeMapContainerStyle}
+          containerStyle={homeMapSuspended ? [homeMapContainerStyle, HOME_MAP_SUSPENDED_STYLE] : homeMapContainerStyle}
           mapRef={mapRef}
           region={presentedMapRegion}
           userCoordinate={presentedUserCoordinate}
