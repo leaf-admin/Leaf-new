@@ -43,10 +43,26 @@ const ROUTE_COMET_CORE = '#EAF8EE';
 // Elementos fixos da rota: escondidos com cor transparente e dois pontos iguais.
 const ROUTE_SLOT_HIDDEN = 'rgba(0,0,0,0)';
 const ROUTE_SLOT_HIDDEN_COLORS = [ROUTE_SLOT_HIDDEN, ROUTE_SLOT_HIDDEN];
+// Vaga vazia: um traço minúsculo e transparente no oceano. Precisa ter comprimento: no iOS uma
+// linha de comprimento zero fazia o Google Maps redesenhar a cada quadro (~10% de CPU parado).
 const ROUTE_SLOT_PLACEHOLDER = [
   { latitude: 0, longitude: 0 },
-  { latitude: 0, longitude: 0 },
+  { latitude: 0.0001, longitude: 0.0001 },
 ];
+
+function hasDistinctPolylinePoints(coordinates) {
+  if (!Array.isArray(coordinates) || coordinates.length < 2) return false;
+  const first = coordinates[0];
+  if (!first) return false;
+  return coordinates.some((point) => point && (
+    Math.abs(Number(point.latitude) - Number(first.latitude)) > 1e-7
+    || Math.abs(Number(point.longitude) - Number(first.longitude)) > 1e-7
+  ));
+}
+
+function renderablePolylineCoordinates(coordinates) {
+  return hasDistinctPolylinePoints(coordinates) ? coordinates : ROUTE_SLOT_PLACEHOLDER;
+}
 const ROUTE_TRAFFIC_SLOT_COUNT = 24;
 
 // Recorta os trechos de trânsito até a fração já desenhada da rota, na ordem do
@@ -1704,7 +1720,7 @@ function PrototypeMapLayer({
     const usable = segments.length <= ROUTE_TRAFFIC_SLOT_COUNT ? segments : [];
     return Array.from({ length: ROUTE_TRAFFIC_SLOT_COUNT }, (_, index) => {
       const segment = usable[index];
-      return segment && Array.isArray(segment.coordinates) && segment.coordinates.length >= 2
+      return segment && hasDistinctPolylinePoints(segment.coordinates)
         ? { key: `route-traffic-${index}`, coordinates: segment.coordinates, color: segment.color }
         : { key: `route-traffic-${index}`, coordinates: ROUTE_SLOT_PLACEHOLDER, color: ROUTE_SLOT_HIDDEN };
     });
@@ -3093,7 +3109,7 @@ function PrototypeMapLayer({
               trânsito, ao entrar na busca. */}
           <Polyline
             key="route-shadow"
-            coordinates={routeSlot.visible ? routeRenderCoordinates : ROUTE_SLOT_PLACEHOLDER}
+            coordinates={routeSlot.visible ? renderablePolylineCoordinates(routeRenderCoordinates) : ROUTE_SLOT_PLACEHOLDER}
             strokeColor={routeSlot.visible ? effectiveRouteShadowColor : ROUTE_SLOT_HIDDEN}
             strokeColors={routeSlot.visible ? [effectiveRouteShadowColor, effectiveRouteShadowColor] : ROUTE_SLOT_HIDDEN_COLORS}
             strokeWidth={isSyntheticRoutePreview ? 7 : 7.5}
@@ -3102,7 +3118,7 @@ function PrototypeMapLayer({
           />
           <Polyline
             key="route-main"
-            coordinates={routeMainVisible ? routeRenderCoordinates : ROUTE_SLOT_PLACEHOLDER}
+            coordinates={routeMainVisible ? renderablePolylineCoordinates(routeRenderCoordinates) : ROUTE_SLOT_PLACEHOLDER}
             strokeColor={routeMainVisible ? effectiveRouteMainColor : ROUTE_SLOT_HIDDEN}
             strokeColors={routeMainVisible ? [effectiveRouteMainColor, effectiveRouteMainColor] : ROUTE_SLOT_HIDDEN_COLORS}
             strokeWidth={4}
@@ -3123,7 +3139,7 @@ function PrototypeMapLayer({
           ))}
           <Polyline
             key="route-highlight"
-            coordinates={routeSlot.visible && effectiveRouteHighlightColor ? routeRenderCoordinates : ROUTE_SLOT_PLACEHOLDER}
+            coordinates={routeSlot.visible && effectiveRouteHighlightColor ? renderablePolylineCoordinates(routeRenderCoordinates) : ROUTE_SLOT_PLACEHOLDER}
             strokeColor={routeSlot.visible && effectiveRouteHighlightColor ? effectiveRouteHighlightColor : ROUTE_SLOT_HIDDEN}
             strokeWidth={2.6}
             lineCap="round"
@@ -3131,7 +3147,7 @@ function PrototypeMapLayer({
           />
           <Polyline
             key="route-comet-glow"
-            coordinates={routeComet.glow || ROUTE_SLOT_PLACEHOLDER}
+            coordinates={renderablePolylineCoordinates(routeComet.glow)}
             strokeColor={routeComet.glow ? ROUTE_COMET_GLOW : ROUTE_SLOT_HIDDEN}
             strokeColors={routeComet.glow ? [ROUTE_COMET_GLOW, ROUTE_COMET_GLOW] : ROUTE_SLOT_HIDDEN_COLORS}
             strokeWidth={13}
@@ -3140,7 +3156,7 @@ function PrototypeMapLayer({
           />
           <Polyline
             key="route-comet-core"
-            coordinates={routeComet.core || ROUTE_SLOT_PLACEHOLDER}
+            coordinates={renderablePolylineCoordinates(routeComet.core)}
             strokeColor={routeComet.core ? ROUTE_COMET_CORE : ROUTE_SLOT_HIDDEN}
             strokeColors={routeComet.core ? [ROUTE_COMET_CORE, ROUTE_COMET_CORE] : ROUTE_SLOT_HIDDEN_COLORS}
             strokeWidth={5}

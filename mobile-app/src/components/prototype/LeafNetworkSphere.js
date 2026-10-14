@@ -3,6 +3,7 @@ import { TurboModuleRegistry } from 'react-native';
 import {
   Easing,
   useDerivedValue,
+  useFrameCallback,
   useReducedMotion,
   useSharedValue,
   withSpring,
@@ -49,17 +50,19 @@ const SPHERE_PAIRS = (() => {
   return pairs;
 })();
 const LIT_ORDER = [3, 47, 88, 21, 66, 109, 35, 74];
+// A rotação é lenta: 30 quadros por segundo bastam para ela correr lisa. Seguir o display
+// (até 120 Hz no ProMotion) redesenhava a esfera inteira 120x por segundo, ~40% de CPU no iPhone.
+const SPHERE_FRAME_MS = 1000 / 30;
 
 function LeafNetworkSphere({ size, radius, opacity, collapse, litCount, reduceMotion }) {
   if (!SkiaLib) return null;
-  const { Canvas, Path, Skia, BlurMask, useClock } = SkiaLib;
+  const { Canvas, Path, Skia, BlurMask } = SkiaLib;
   return (
     <SphereCanvas
       Canvas={Canvas}
       Path={Path}
       Skia={Skia}
       BlurMask={BlurMask}
-      useClock={useClock}
       size={size}
       radius={radius}
       opacity={opacity}
@@ -70,13 +73,18 @@ function LeafNetworkSphere({ size, radius, opacity, collapse, litCount, reduceMo
   );
 }
 
-function SphereCanvas({ Canvas, Path, Skia, BlurMask, useClock, size, radius, opacity, collapse, litCount, reduceMotion }) {
-  const clock = useClock();
+function SphereCanvas({ Canvas, Path, Skia, BlurMask, size, radius, opacity, collapse, litCount, reduceMotion }) {
   const points = SPHERE_POINTS;
   const pairs = SPHERE_PAIRS;
   const litOrder = LIT_ORDER;
-  const project = (now) => {
+  const tick = useSharedValue(0);
+  useFrameCallback((frame) => {
     'worklet';
+    if (frame.timestamp - tick.value >= SPHERE_FRAME_MS) tick.value = frame.timestamp;
+  });
+  // Uma projeção por quadro, compartilhada pelos cinco traços.
+  const projected = useDerivedValue(() => {
+    const now = tick.value;
     const rot = reduceMotion ? 0.6 : now * 0.00035;
     const tilt = 0.38;
     const ct = Math.cos(tilt); const st = Math.sin(tilt); const cr = Math.cos(rot); const sr = Math.sin(rot);
@@ -90,32 +98,32 @@ function SphereCanvas({ Canvas, Path, Skia, BlurMask, useClock, size, radius, op
       out.push([c + x1 * R, c + y2 * R, z2]);
     }
     return out;
-  };
+  });
   const frontLines = useDerivedValue(() => {
-    const proj = project(clock.value); const p = Skia.Path.Make();
+    const proj = projected.value; const p = Skia.Path.Make();
     for (let k = 0; k < pairs.length; k += 1) { const a = proj[pairs[k][0]]; const b = proj[pairs[k][1]]; if (a[2] + b[2] > 0) { p.moveTo(a[0], a[1]); p.lineTo(b[0], b[1]); } }
     return p;
   });
   const backLines = useDerivedValue(() => {
-    const proj = project(clock.value); const p = Skia.Path.Make();
+    const proj = projected.value; const p = Skia.Path.Make();
     for (let k = 0; k < pairs.length; k += 1) { const a = proj[pairs[k][0]]; const b = proj[pairs[k][1]]; if (a[2] + b[2] <= 0) { p.moveTo(a[0], a[1]); p.lineTo(b[0], b[1]); } }
     return p;
   });
   const dots = useDerivedValue(() => {
-    const proj = project(clock.value); const p = Skia.Path.Make();
+    const proj = projected.value; const p = Skia.Path.Make();
     for (let i = 0; i < proj.length; i += 1) { const d = (proj[i][2] + 1) / 2; p.addCircle(proj[i][0], proj[i][1], 0.8 + 1.4 * d); }
     return p;
   });
   const lit = useDerivedValue(() => {
-    const proj = project(clock.value); const p = Skia.Path.Make();
+    const proj = projected.value; const p = Skia.Path.Make();
     const n = Math.min(litOrder.length, Math.floor(litCount.value));
     for (let k = 0; k < n; k += 1) { const q = proj[litOrder[k]]; p.addCircle(q[0], q[1], 3); }
     return p;
   });
   const litGlow = useDerivedValue(() => {
-    const proj = project(clock.value); const p = Skia.Path.Make();
+    const proj = projected.value; const p = Skia.Path.Make();
     const n = Math.min(litOrder.length, Math.floor(litCount.value));
-    const pulse = reduceMotion ? 1 : 0.8 + 0.2 * Math.sin(clock.value / 260);
+    const pulse = reduceMotion ? 1 : 0.8 + 0.2 * Math.sin(tick.value / 260);
     for (let k = 0; k < n; k += 1) { const q = proj[litOrder[k]]; p.addCircle(q[0], q[1], 9 * pulse); }
     return p;
   });
