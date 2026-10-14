@@ -177,6 +177,27 @@ describe('registerSocketUpdateLocationHandler', () => {
     );
   });
 
+  it('treats a background driver location as a heartbeat so the cleanup keeps the driver online', async () => {
+    driverEligibilityService.isDriverEligibleForRide.mockResolvedValue({ eligible: true, code: 'ELIGIBLE' });
+    const { handlers, socket } = createHarness();
+    socket.lastHeartbeat = 1;
+    const before = Date.now();
+
+    await handlers.updateLocation({ lat: -22.91, lng: -43.17, source: 'background_presence', tripStatus: 'available' });
+
+    expect(socket.lastHeartbeat).toBeGreaterThanOrEqual(before);
+    expect(socket.lastDriverHeartbeatAt).toBe(socket.lastHeartbeat);
+  });
+
+  it('does not refresh the heartbeat for an invalid location', async () => {
+    const { handlers, socket } = createHarness();
+    socket.lastHeartbeat = 1;
+
+    await handlers.updateLocation({ lat: 'x', lng: null });
+
+    expect(socket.lastHeartbeat).toBe(1);
+  });
+
   it('passes the final eligible dispatch projection into the shared location writer', async () => {
     driverEligibilityService.isDriverEligibleForRide.mockResolvedValue({
       eligible: true,

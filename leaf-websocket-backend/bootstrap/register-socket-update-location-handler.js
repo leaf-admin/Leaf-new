@@ -285,6 +285,14 @@ function registerSocketUpdateLocationHandler({
                 };
             }
 
+            // Posição válida do motorista também prova que ele está vivo. Com a tela apagada o app
+            // só manda posição (presença em segundo plano), e sem renovar o heartbeat aqui a
+            // limpeza tirava o motorista do ar em ~2 min (STALE_HEARTBEAT) com o celular no bolso.
+            if (socket.vehicleLeaseSuperseded !== true) {
+                socket.lastHeartbeat = Date.now();
+                socket.lastDriverHeartbeatAt = socket.lastHeartbeat;
+            }
+
             // ✅ OTIMIZAÇÃO 4: TTL diferenciado por estado
             // - Em viagem: 30 segundos (dados críticos, precisa ser muito atualizado)
             // - Online disponível: 90 segundos (balanceia responsividade e tolerância a falhas)
