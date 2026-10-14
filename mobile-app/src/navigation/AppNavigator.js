@@ -41,6 +41,7 @@ import RobotaxiPrototypeScreen from '../screens/RobotaxiPrototypeScreen';
 import HomeRouteRedirectScreen from './HomeRouteRedirectScreen';
 import LeafMotionLab from '../screens/prototype/lab/LeafMotionLab';
 import LeafStreetSearchLab from '../screens/prototype/lab/LeafStreetSearchLab';
+import LeafOnboardingLab from '../screens/prototype/lab/LeafOnboardingLab';
 import RobotaxiDestinationScreen from '../screens/prototype/RobotaxiDestinationScreen';
 import RobotaxiDriverSearchScreen from '../screens/prototype/RobotaxiDriverSearchScreen';
 import RobotaxiTripScreen from '../screens/prototype/RobotaxiTripScreen';
@@ -356,6 +357,7 @@ const appLinking = {
       RobotaxiNotifications: 'robotaxi/notifications',
       LeafMotionLab: 'dev/motion-lab',
       LeafStreetSearchLab: 'dev/street-search',
+      LeafOnboardingLab: 'dev/onboarding',
       RobotaxiMenuHelp: 'robotaxi/menu/help',
       RobotaxiMenuSettings: 'robotaxi/menu/settings',
       EarningsReport: 'driver/earnings',
@@ -1105,6 +1107,9 @@ function MainNavigator() {
           component={LeafMotionLab}
           options={{ headerShown: false }}
         />
+      ) : null}
+      {__DEV__ ? (
+        <Stack.Screen name="LeafOnboardingLab" component={LeafOnboardingLab} options={{ headerShown: false }} />
       ) : null}
       {__DEV__ ? (
         <Stack.Screen
