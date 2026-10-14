@@ -381,6 +381,7 @@ function isFollowRegionClose(previous, next) {
 const DRIVER_AT_PICKUP_ROUTE_METERS = 80;
 
 const NAV_ROUTE_REVEAL_MAX_SPAN_METERS = 4000;
+const NAV_ROUTE_REVEAL_MIN_SPAN_METERS = 400;
 // Diagonal of the bounding box of a route, in metres.
 function measureRouteSpanMeters(coordinates = []) {
   const points = (Array.isArray(coordinates) ? coordinates : []).filter(
@@ -413,6 +414,10 @@ function measureRouteLengthMeters(coordinates = []) {
 }
 
 const NAVIGATION_BANNER_CLEARANCE = 128;
+// Longest wait for the navigation camera after accepting before fitting the route.
+const DRIVER_NAVIGATION_HANDOVER_MS = 2000;
+// Ride keeps the camera this long after its last signal (offer -> ride hand-over).
+const DRIVER_RIDE_CAMERA_HOLD_MS = 3000;
 const NAVIGATION_CAR_VISIBLE_ANCHOR = 0.74;
 const DRIVER_DISCLOSURE_STORAGE_TIMEOUT_MS = Math.max(
   600,
@@ -5051,6 +5056,25 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
       (hasDriverActiveRideContext ||
         (driverActivationResolved && hasDriverLiveOfferContext))
   );
+  // Accepting hands over from the offer to the ride; for a moment neither is
+  // set, so ownership also counts the booking status and holds briefly after
+  // the last signal (otherwise the user re-centre slipped in for one frame).
+  const driverRideCameraSignal = Boolean(
+    isDriverRole &&
+      (hasDriverLiveRideOverlay ||
+        driverOfferPreviewActive ||
+        Boolean(driverLiveOffer) ||
+        Boolean(driverActiveRide?.bookingId || driverActiveRide?.id) ||
+        isLiveRideRouteStatus),
+  );
+  const driverRideCameraSignalAtRef = useRef(0);
+  if (driverRideCameraSignal) {
+    driverRideCameraSignalAtRef.current = Date.now();
+  }
+  const driverRideOwnsCamera = Boolean(
+    driverRideCameraSignal ||
+      (isDriverRole && Date.now() - driverRideCameraSignalAtRef.current < DRIVER_RIDE_CAMERA_HOLD_MS),
+  );
   const leafNativeNavigationModel = driverTripAssistNativeNavigation;
   const leafNativeNavigationKey = String(leafNativeNavigationModel?.navigationKey || '');
   const leafNativeNavigationCameraHeading = leafNativeNavigationModel?.cameraHeadingDegrees;
@@ -5083,10 +5107,34 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   // the trip card were measured: with the card at its fallback height the
   // visible window was tiny, so the fit zoomed out to state level and then
   // straight back in. No route fit for a driver ride until both are measured.
+  // Accepting an offer: navigation takes the camera about a second later.
+  // Fitting the whole route in that gap was one more zoom out/in, so the fit
+  // waits briefly when a ride *becomes* live (not when the app reopens on one).
+  // Detected during render, not in an effect: the route-fit effect runs in the
+  // same commit as the status change and would otherwise fire before the hold.
+  const driverNavigationHandoverUntilRef = useRef(0);
+  const previousLiveRideStatusRef = useRef(isLiveRideRouteStatus);
+  if (isDriverRole && !previousLiveRideStatusRef.current && isLiveRideRouteStatus) {
+    driverNavigationHandoverUntilRef.current = Date.now() + DRIVER_NAVIGATION_HANDOVER_MS;
+  }
+  previousLiveRideStatusRef.current = isLiveRideRouteStatus;
+  const driverNavigationHandover = Date.now() < driverNavigationHandoverUntilRef.current;
+  const [, setDriverNavigationHandoverTick] = useState(0);
+  useEffect(() => {
+    if (!driverNavigationHandover) return undefined;
+    // Re-render when the hold ends so the route fit can run if navigation never came.
+    const remaining = Math.max(0, driverNavigationHandoverUntilRef.current - Date.now()) + 20;
+    const timer = setTimeout(() => setDriverNavigationHandoverTick((tick) => tick + 1), remaining);
+    return () => clearTimeout(timer);
+  }, [driverNavigationHandover]);
   const driverAwaitingNavigationCamera = Boolean(
     isDriverRole &&
       hasDriverLiveRideOverlay &&
-      (!(Number(mapHeight) > 0) || !driverLiveRideHeightMeasured)
+      (!(Number(mapHeight) > 0) ||
+        !driverLiveRideHeightMeasured ||
+        (driverNavigationHandover &&
+          !driverNavigationCameraOwnsMap &&
+          !(hiddenNativeNavigationKey && hiddenNativeNavigationKey === leafNativeNavigationKey)))
   );
   const shouldFreezeBackgroundMapCamera = freezeBackgroundMapCamera;
   const showDriverHomeOverlay = Boolean(
@@ -6347,7 +6395,10 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   ]);
 
   const focusSearchArea = useCallback((animatedFit = true) => {
-    if (!mapRef.current || !homeMapInteractiveReady || !isSearchingMode || !searchTargetRegion) {
+    // The search-area zoom is the passenger waiting for a driver. A driver only
+    // passes through "searching" while an offer is up; zooming out there added
+    // a wide north-up jump to every accepted offer.
+    if (!mapRef.current || !homeMapInteractiveReady || !isSearchingMode || !searchTargetRegion || isDriverRole) {
       return;
     }
 
@@ -6356,6 +6407,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
       animatedFit ? SEARCH_ZOOM_ANIMATION_MS : 0
     );
   }, [
+    isDriverRole,
     homeMapInteractiveReady,
     isSearchingMode,
     searchTargetRegion
@@ -6403,7 +6455,10 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   ]);
 
   useEffect(() => {
-    if (!mapRef.current || !homeMapInteractiveReady || hasActiveRoute || isSearchingMode || shouldFreezeBackgroundMapCamera || !isScreenFocused) {
+    // From an offer until the ride ends the camera belongs to the ride (offer
+    // fit, then navigation). Re-centring on the user in between made accepting
+    // an offer jump three times (fit -> wide view without route -> follow).
+    if (!mapRef.current || !homeMapInteractiveReady || hasActiveRoute || isSearchingMode || shouldFreezeBackgroundMapCamera || !isScreenFocused || driverRideOwnsCamera) {
       return;
     }
 
@@ -6418,7 +6473,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     lastRouteLayoutKeyRef.current = '';
     lastFollowRegionRef.current = targetRegion;
     mapRef.current.animateToRegion(targetRegion, MAP_OCCLUSION_REPOSITION_MS);
-  }, [hasActiveRoute, homeMapInteractiveReady, isScreenFocused, isSearchingMode, mapFollowingUser, shouldFreezeBackgroundMapCamera, targetRegion]);
+  }, [driverRideOwnsCamera, hasActiveRoute, homeMapInteractiveReady, isScreenFocused, isSearchingMode, mapFollowingUser, shouldFreezeBackgroundMapCamera, targetRegion]);
 
   // Back on the home after another screen (e.g. the ride receipt) with no
   // route left: follow the user again at street level. Screens on top register
@@ -6428,14 +6483,14 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   useEffect(() => {
     const regainedFocus = isScreenFocused && !wasScreenFocusedRef.current;
     wasScreenFocusedRef.current = isScreenFocused;
-    if (!regainedFocus || hasActiveRoute || isSearchingMode || !mapRef.current || !homeMapInteractiveReady) {
+    if (!regainedFocus || hasActiveRoute || isSearchingMode || !mapRef.current || !homeMapInteractiveReady || driverRideOwnsCamera) {
       return;
     }
     lastRouteLayoutKeyRef.current = '';
     lastFollowRegionRef.current = targetRegion;
     setMapFollowingUser(true);
     mapRef.current.animateToRegion(targetRegion, MAP_OCCLUSION_REPOSITION_MS);
-  }, [hasActiveRoute, homeMapInteractiveReady, isScreenFocused, isSearchingMode, targetRegion]);
+  }, [driverRideOwnsCamera, hasActiveRoute, homeMapInteractiveReady, isScreenFocused, isSearchingMode, targetRegion]);
 
   useEffect(() => {
     if (!isSearchingMode) {
@@ -6532,6 +6587,14 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
       return;
     }
 
+    // "Search ended" is a passenger moment. A driver passes through the
+    // searching status while an offer is up; re-centring here on accept put a
+    // wide north-up view between the offer fit and the navigation camera.
+    if (driverRideOwnsCamera) {
+      wasSearchingRef.current = false;
+      return;
+    }
+
     wasSearchingRef.current = false;
     lastSearchRadiusRef.current = null;
 
@@ -6556,6 +6619,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   }, [
     activeRoute,
     driverNavigationCameraOwnsMap,
+    driverRideOwnsCamera,
     focusRoute,
     hasActiveRoute,
     homeMapInteractiveReady,
@@ -6653,7 +6717,13 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     // The reveal fits the whole leg in the small window between the banner
     // and the trip card. For a long leg that meant zooming out to the entire
     // city for a moment; skip it and go straight to following the car.
-    if (measureRouteSpanMeters(navigationRouteCoordinates) > NAV_ROUTE_REVEAL_MAX_SPAN_METERS) {
+    // A short leg (e.g. the driver already at pickup) has nothing to reveal:
+    // the reveal only turned the map north and zoomed before following again.
+    const navigationRouteSpanMeters = measureRouteSpanMeters(navigationRouteCoordinates);
+    if (
+      navigationRouteSpanMeters > NAV_ROUTE_REVEAL_MAX_SPAN_METERS ||
+      navigationRouteSpanMeters < NAV_ROUTE_REVEAL_MIN_SPAN_METERS
+    ) {
       lastNativeNavigationRouteRevealKeyRef.current = leafNativeNavigationKey;
       return;
     }
