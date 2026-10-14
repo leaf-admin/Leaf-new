@@ -7,6 +7,8 @@ import {
   StyleSheet,
   Text,
   View,
+  Animated,
+  Easing,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -236,6 +238,27 @@ export default function RobotaxiNoDriversScreen({ navigation, route }) {
     returnToPrototypeHome(navigation);
   };
 
+  // Sem motorista: avisa, mostra o estorno e volta sozinho para a cotação (mesmo destino), como
+  // Uber/99. Abrir "Mais opções" pausa a volta.
+  const autoReturnProgress = React.useRef(new Animated.Value(1)).current;
+  useEffect(() => {
+    if (isSearchStillActive || secondaryActionsVisible) {
+      autoReturnProgress.stopAnimation();
+      autoReturnProgress.setValue(1);
+      return undefined;
+    }
+    const countdown = Animated.timing(autoReturnProgress, {
+      toValue: 0,
+      duration: NO_DRIVERS_AUTO_RETURN_MS,
+      easing: Easing.linear,
+      useNativeDriver: true,
+    });
+    countdown.start(({ finished }) => {
+      if (finished) handleRetryDestination();
+    });
+    return () => countdown.stop();
+  }, [isSearchStillActive, secondaryActionsVisible]);
+
   if (isSearchStillActive) {
     return null;
   }
@@ -273,14 +296,20 @@ export default function RobotaxiNoDriversScreen({ navigation, route }) {
               </View>
             ) : null}
 
+            {!secondaryActionsVisible ? (
+              <View style={styles.autoReturnTrack} testID="passenger-no-drivers-auto-return">
+                <Animated.View style={[styles.autoReturnFill, { transform: [{ scaleX: autoReturnProgress }] }]} />
+              </View>
+            ) : null}
+
             <RobotaxiLifecycleButton
-              label="Tentar com outro destino"
-              icon="search-outline"
+              label="Tentar de novo"
+              icon="refresh-outline"
               tone="primary"
               onPress={handleRetryDestination}
               style={styles.primaryButton}
               testID="passenger-no-drivers-retry-button"
-              accessibilityLabel="Tentar com outro destino"
+              accessibilityLabel="Tentar de novo com o mesmo destino"
             />
 
             <RobotaxiLifecycleDisclosure
@@ -321,7 +350,24 @@ export default function RobotaxiNoDriversScreen({ navigation, route }) {
   );
 }
 
+const NO_DRIVERS_AUTO_RETURN_MS = 4500;
+
 const styles = StyleSheet.create({
+  autoReturnTrack: {
+    height: 3,
+    borderRadius: 1.5,
+    backgroundColor: "rgba(26,51,14,0.10)",
+    overflow: "hidden",
+    marginTop: 4,
+    marginBottom: 12,
+  },
+  autoReturnFill: {
+    height: 3,
+    width: "100%",
+    borderRadius: 1.5,
+    backgroundColor: "rgba(26,51,14,0.45)",
+    transformOrigin: "left",
+  },
   container: {
     flex: 1,
     backgroundColor: "transparent",

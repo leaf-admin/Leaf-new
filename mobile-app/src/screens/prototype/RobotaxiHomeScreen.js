@@ -2622,6 +2622,13 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
           },
           {
             signal: controller.signal,
+            // Cotação parada tempo demais (a rota do servidor expirou): pede a rota de novo.
+            refreshRoute: () => fetchPassengerHomeRoutePreview({
+              startLoc: formatDirectionsCoordinate(homePricingPickupLocation),
+              destLoc: formatDirectionsCoordinate(homePricingDestinationLocation),
+              routeKey: homeRoutePreviewKey,
+              signal: controller.signal,
+            }).catch(() => null),
             headers: {
               'x-leaf-quote-session-id': homeBackendQuoteSessionId,
               ...(homeQuotePreviousSessionIdRef.current
