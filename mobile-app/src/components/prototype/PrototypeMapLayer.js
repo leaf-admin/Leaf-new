@@ -48,6 +48,43 @@ const ROUTE_SLOT_PLACEHOLDER = [
 ];
 const ROUTE_TRAFFIC_SLOT_COUNT = 24;
 
+// Recorta os trechos de trânsito até a fração já desenhada da rota, na ordem do
+// percurso. Assim o traçado sai já nas cores finais, sem trocar de cor ao terminar.
+export function clipTrafficSegmentsByProgress(segments = [], progress = 1) {
+  const list = Array.isArray(segments) ? segments : [];
+  const ratio = Math.min(1, Math.max(0, Number(progress) || 0));
+  if (ratio >= 1) return list;
+  const lengthOf = (a, b) => Math.hypot(
+    (b.latitude - a.latitude),
+    (b.longitude - a.longitude) * Math.cos((a.latitude * Math.PI) / 180),
+  );
+  const total = list.reduce((sum, segment) => sum + (segment.coordinates || []).reduce(
+    (acc, point, index, points) => (index ? acc + lengthOf(points[index - 1], point) : acc), 0), 0);
+  let budget = total * ratio;
+  const clipped = [];
+  for (const segment of list) {
+    const points = segment.coordinates || [];
+    if (budget <= 0 || points.length < 2) break;
+    const kept = [points[0]];
+    for (let index = 1; index < points.length; index += 1) {
+      const step = lengthOf(points[index - 1], points[index]);
+      if (step <= budget) {
+        kept.push(points[index]);
+        budget -= step;
+      } else {
+        const t = step > 0 ? budget / step : 0;
+        const a = points[index - 1];
+        const b = points[index];
+        kept.push({ latitude: a.latitude + (b.latitude - a.latitude) * t, longitude: a.longitude + (b.longitude - a.longitude) * t });
+        budget = 0;
+        break;
+      }
+    }
+    if (kept.length >= 2) clipped.push({ ...segment, coordinates: kept });
+  }
+  return clipped;
+}
+
 // Trecho final da parte já desenhada: um rastro largo e um núcleo claro na ponta.
 export function resolveRouteCometSegments(drawnCoordinates = [], totalPointCount = 0) {
   const drawn = Array.isArray(drawnCoordinates) ? drawnCoordinates : [];
@@ -1656,8 +1693,12 @@ function PrototypeMapLayer({
   );
   const routeSlot = { visible: hasRenderableRoute };
   const routeTrafficSlots = useMemo(() => {
-    const showTraffic = hasRenderableRoute && !routeDrawInProgress;
-    const segments = showTraffic ? normalizedTrafficRouteSegments : [];
+    const drawProgress = routeDrawInProgress && denseRoute.length > 0
+      ? animatedRouteCoordinates.length / denseRoute.length
+      : 1;
+    const segments = hasRenderableRoute
+      ? clipTrafficSegmentsByProgress(normalizedTrafficRouteSegments, drawProgress)
+      : [];
     // Mais segmentos do que vagas: fica a linha base, que já está por baixo.
     const usable = segments.length <= ROUTE_TRAFFIC_SLOT_COUNT ? segments : [];
     return Array.from({ length: ROUTE_TRAFFIC_SLOT_COUNT }, (_, index) => {
@@ -1666,7 +1707,7 @@ function PrototypeMapLayer({
         ? { key: `route-traffic-${index}`, coordinates: segment.coordinates, color: segment.color }
         : { key: `route-traffic-${index}`, coordinates: ROUTE_SLOT_PLACEHOLDER, color: ROUTE_SLOT_HIDDEN };
     });
-  }, [hasRenderableRoute, normalizedTrafficRouteSegments, routeDrawInProgress]);
+  }, [animatedRouteCoordinates.length, denseRoute.length, hasRenderableRoute, normalizedTrafficRouteSegments, routeDrawInProgress]);
   const routeComet = useMemo(
     () => (shouldAnimateRoute
       ? resolveRouteCometSegments(animatedRouteCoordinates, denseRoute.length)
@@ -2938,7 +2979,7 @@ function PrototypeMapLayer({
   // child exactly as rendered below, so any change of that list remounts the
   // map instead of mutating it. Keep it in sync with the children of <MapView>.
   // Linha base só quando o trânsito não cobre a rota, ou enquanto ela é desenhada.
-  const routeMainVisible = routeSlot.visible && (!trafficSegmentsCoverRoute || routeDrawInProgress);
+  const routeMainVisible = routeSlot.visible && !trafficSegmentsCoverRoute;
   const iosNativeChildSignature = Platform.OS !== 'ios'
     ? 'prototype-map-native'
     : [

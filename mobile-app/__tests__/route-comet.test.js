@@ -17,3 +17,25 @@ describe('route comet', () => {
     expect(resolveRouteCometSegments(null, 0)).toEqual({ glow: null, core: null });
   });
 });
+
+describe('traffic colours during the route draw', () => {
+  const { clipTrafficSegmentsByProgress } = require('../src/components/prototype/PrototypeMapLayer');
+  const segments = [
+    { key: 'a', color: 'green', coordinates: [{ latitude: 0, longitude: 0 }, { latitude: 1, longitude: 0 }] },
+    { key: 'b', color: 'orange', coordinates: [{ latitude: 1, longitude: 0 }, { latitude: 2, longitude: 0 }] },
+  ];
+
+  it('reveals the coloured segments in route order up to the drawn fraction', () => {
+    expect(clipTrafficSegmentsByProgress(segments, 0.25)).toEqual([
+      { key: 'a', color: 'green', coordinates: [{ latitude: 0, longitude: 0 }, { latitude: 0.5, longitude: 0 }] },
+    ]);
+    const threeQuarters = clipTrafficSegmentsByProgress(segments, 0.75);
+    expect(threeQuarters).toHaveLength(2);
+    expect(threeQuarters[1].coordinates[1].latitude).toBeCloseTo(1.5);
+  });
+
+  it('keeps every segment when the draw is done and none before it starts', () => {
+    expect(clipTrafficSegmentsByProgress(segments, 1)).toBe(segments);
+    expect(clipTrafficSegmentsByProgress(segments, 0)).toEqual([]);
+  });
+});
