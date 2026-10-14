@@ -7,6 +7,8 @@ import {
   StyleSheet,
   Text,
   View,
+  Animated,
+  Easing,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -69,6 +71,7 @@ export default function RobotaxiNoDriversScreen({ navigation, route }) {
     tripArrivalText,
     driverInfo,
     clearFlowPreview,
+    paymentState,
   } =
     usePrototypeRideRuntime();
   const insets = useSafeAreaInsets();
@@ -77,16 +80,21 @@ export default function RobotaxiNoDriversScreen({ navigation, route }) {
   const sheetBottom =
     SHEET_BOTTOM_OFFSET + robotaxiLifecycleMetrics.cardBottomGap + insets.bottom;
   const reason = formatNoDriversReason(route?.params?.reason);
-  const refundStatus = String(route?.params?.refundStatus || "")
+  // O aviso de estorno do servidor pode chegar depois desta tela abrir: lê também do runtime.
+  const refundStatus = String(route?.params?.refundStatus || paymentState?.refundStatus || "")
     .trim()
     .toUpperCase();
-  const refundAmount = Number(route?.params?.refundAmount || 0);
+  const refundAmount = Number(route?.params?.refundAmount || paymentState?.refundAmount || 0);
+  // Houve cobrança e o estorno ainda não foi confirmado: avisa que o valor volta sozinho.
+  const paidAwaitingRefundStatus = !refundStatus && Boolean(
+    route?.params?.chargeId || paymentState?.chargeId,
+  );
   const hasRefundInfo =
-    refundStatus === "REFUNDED" || refundStatus === "REFUND_PENDING";
+    refundStatus === "REFUNDED" || refundStatus === "REFUND_PENDING" || paidAwaitingRefundStatus;
   const refundMessage =
     refundStatus === "REFUNDED"
       ? `Estorno de R$ ${refundAmount.toFixed(2).replace(".", ",")} iniciado automaticamente.`
-      : refundStatus === "REFUND_PENDING"
+      : refundStatus === "REFUND_PENDING" || paidAwaitingRefundStatus
         ? "Pagamento confirmado. O estorno será processado automaticamente pelo sistema."
         : "";
   const destination = useMemo(
@@ -236,6 +244,27 @@ export default function RobotaxiNoDriversScreen({ navigation, route }) {
     returnToPrototypeHome(navigation);
   };
 
+  // Sem motorista: avisa, mostra o estorno e volta sozinho para a cotação (mesmo destino), como
+  // Uber/99. Abrir "Mais opções" pausa a volta.
+  const autoReturnProgress = React.useRef(new Animated.Value(1)).current;
+  useEffect(() => {
+    if (isSearchStillActive || secondaryActionsVisible) {
+      autoReturnProgress.stopAnimation();
+      autoReturnProgress.setValue(1);
+      return undefined;
+    }
+    const countdown = Animated.timing(autoReturnProgress, {
+      toValue: 0,
+      duration: NO_DRIVERS_AUTO_RETURN_MS,
+      easing: Easing.linear,
+      useNativeDriver: true,
+    });
+    countdown.start(({ finished }) => {
+      if (finished) handleRetryDestination();
+    });
+    return () => countdown.stop();
+  }, [isSearchStillActive, secondaryActionsVisible]);
+
   if (isSearchStillActive) {
     return null;
   }
@@ -273,14 +302,20 @@ export default function RobotaxiNoDriversScreen({ navigation, route }) {
               </View>
             ) : null}
 
+            {!secondaryActionsVisible ? (
+              <View style={styles.autoReturnTrack} testID="passenger-no-drivers-auto-return">
+                <Animated.View style={[styles.autoReturnFill, { transform: [{ scaleX: autoReturnProgress }] }]} />
+              </View>
+            ) : null}
+
             <RobotaxiLifecycleButton
-              label="Tentar com outro destino"
-              icon="search-outline"
+              label="Tentar de novo"
+              icon="refresh-outline"
               tone="primary"
               onPress={handleRetryDestination}
               style={styles.primaryButton}
               testID="passenger-no-drivers-retry-button"
-              accessibilityLabel="Tentar com outro destino"
+              accessibilityLabel="Tentar de novo com o mesmo destino"
             />
 
             <RobotaxiLifecycleDisclosure
@@ -321,7 +356,24 @@ export default function RobotaxiNoDriversScreen({ navigation, route }) {
   );
 }
 
+const NO_DRIVERS_AUTO_RETURN_MS = 4500;
+
 const styles = StyleSheet.create({
+  autoReturnTrack: {
+    height: 3,
+    borderRadius: 1.5,
+    backgroundColor: "rgba(26,51,14,0.10)",
+    overflow: "hidden",
+    marginTop: 4,
+    marginBottom: 12,
+  },
+  autoReturnFill: {
+    height: 3,
+    width: "100%",
+    borderRadius: 1.5,
+    backgroundColor: "rgba(26,51,14,0.45)",
+    transformOrigin: "left",
+  },
   container: {
     flex: 1,
     backgroundColor: "transparent",

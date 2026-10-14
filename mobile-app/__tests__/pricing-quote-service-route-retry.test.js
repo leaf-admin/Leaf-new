@@ -46,6 +46,35 @@ describe('pricing quote route-not-ready retry', () => {
     expect(apiClient.post).toHaveBeenCalledTimes(3);
   });
 
+  it('asks for the route again once when it stays missing (stale quote) and quotes again', async () => {
+    apiClient.post
+      .mockRejectedValueOnce(routeNotReadyError())
+      .mockRejectedValueOnce(routeNotReadyError())
+      .mockRejectedValueOnce(routeNotReadyError())
+      .mockResolvedValueOnce({ data: { finalFare: 51.1 } });
+    const refreshRoute = jest.fn(async () => ({}));
+
+    const pending = fetchDynamicPricingQuote({}, { refreshRoute });
+    await jest.advanceTimersByTimeAsync(600 + 1200);
+
+    await expect(pending).resolves.toEqual({ finalFare: 51.1 });
+    expect(refreshRoute).toHaveBeenCalledTimes(1);
+    expect(apiClient.post).toHaveBeenCalledTimes(4);
+  });
+
+  it('refreshes the route only once', async () => {
+    apiClient.post.mockRejectedValue(routeNotReadyError());
+    const refreshRoute = jest.fn(async () => ({}));
+
+    const pending = fetchDynamicPricingQuote({}, { refreshRoute });
+    const assertion = expect(pending).rejects.toThrow('Erro do servidor');
+    await jest.advanceTimersByTimeAsync((600 + 1200) * 2);
+
+    await assertion;
+    expect(refreshRoute).toHaveBeenCalledTimes(1);
+    expect(apiClient.post).toHaveBeenCalledTimes(6);
+  });
+
   it('does not retry other failures', async () => {
     const error = Object.assign(new Error('fora da área'), {
       response: { status: 422, data: { code: 'PICKUP_OUTSIDE_REGION' } },

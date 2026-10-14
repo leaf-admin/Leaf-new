@@ -31,7 +31,7 @@
         { "id": "operational_interruption", "question": "O que acontece se o motorista não puder continuar?", "primaryAction": "Escolher como continuar", "requiredTestIds": ["passenger-trip-screen", "passenger-trip-operational-title", "passenger-trip-operational-continue-button"] },
         { "id": "searching_replacement", "question": "Como sei que a continuidade já foi acionada?", "primaryAction": "Acompanhar busca de substituição", "requiredTestIds": ["passenger-trip-screen", "passenger-trip-searching-replacement-title"] },
         { "id": "completed", "question": "Quanto paguei e o que faço agora?", "primaryAction": "Avaliar viagem", "requiredTestIds": ["passenger-receipt-rate-trip-button"] },
-        { "id": "no_drivers", "question": "Estou protegido de cobrança quando não há motorista?", "primaryAction": "Tentar com outro destino", "requiredTestIds": ["passenger-no-drivers-screen"] },
+        { "id": "no_drivers", "question": "Estou protegido de cobrança quando não há motorista?", "primaryAction": "Tentar de novo", "requiredTestIds": ["passenger-no-drivers-screen"] },
         { "id": "payment_failed", "question": "Como recupero a tentativa sem repetir decisões?", "primaryAction": "Tentar novamente", "requiredTestIds": ["payment-failed-button-Tentar novamente"] }
       ]
     },

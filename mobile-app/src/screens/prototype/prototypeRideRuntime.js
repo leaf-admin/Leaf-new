@@ -1,3 +1,4 @@
+import { compactPersistedRideRecord } from "./persistedRideCompaction";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import * as Device from "expo-device";
@@ -2698,6 +2699,10 @@ function buildPersistedRuntimeStateSnapshot(state) {
   RUNTIME_PERSISTED_FIELDS.forEach((field) => {
     payload[field] = source[field];
   });
+  if (Array.isArray(payload.tripHistory)) {
+    payload.tripHistory = payload.tripHistory.map(compactPersistedRideRecord);
+  }
+  payload.lastReceipt = compactPersistedRideRecord(payload.lastReceipt);
 
   return payload;
 }
@@ -3144,7 +3149,11 @@ async function flushRuntimeSessionNow(reason = "manual", statePatch = null) {
   return true;
 }
 
-function scheduleRuntimeSessionPersist() {
+// Campos que mudam o tempo todo (contador da busca, bússola, posição): gravar a sessão inteira a
+// cada mudança era o maior custo de JS parado; vão juntos no máximo a cada 10 s.
+const RUNTIME_LOW_PRIORITY_PERSIST_FIELDS = new Set(["searchingElapsedSeconds", "currentHeading", "currentCoordinate"]);
+
+function scheduleRuntimeSessionPersist({ delayMs = 420, keepPending = false } = {}) {
   const safeUid = String(runtimeState?.profileUid || "").trim();
   if (!safeUid) {
     clearRuntimeSessionPersistTimer();
@@ -3160,6 +3169,9 @@ function scheduleRuntimeSessionPersist() {
     return;
   }
 
+  if (keepPending && runtimeSessionPersistTimer) {
+    return;
+  }
   clearRuntimeSessionPersistTimer();
   runtimeSessionPersistTimer = setTimeout(() => {
     persistRuntimeSession(safeUid).catch((error) => {
@@ -3168,7 +3180,7 @@ function scheduleRuntimeSessionPersist() {
         error?.message || error,
       );
     });
-  }, 420);
+  }, delayMs);
 }
 
 function normalizeHeading(headingValue) {
@@ -3803,6 +3815,10 @@ function setRuntimeState(next) {
           );
         },
       );
+    } else if (changedKeys.every((key) => RUNTIME_LOW_PRIORITY_PERSIST_FIELDS.has(key))) {
+      // Só campos de alta frequência mudaram: grava no máximo a cada 10 s. O tempo de busca
+      // também sai do horário de início e a posição volta com o GPS, então nada se perde.
+      scheduleRuntimeSessionPersist({ delayMs: 10000, keepPending: true });
     } else {
       scheduleRuntimeSessionPersist();
     }
@@ -19674,7 +19690,7 @@ function clearDestinationPreview() {
   });
 }
 
-export function usePrototypeRideRuntime() {
+export function usePrototypeRideRuntime(options = null) {
   const authProfile = useSelector((state) => state?.auth?.profile);
   const authUid = useSelector((state) => state?.auth?.uid);
   const dispatch = useDispatch();
@@ -20009,8 +20025,28 @@ export function usePrototypeRideRuntime() {
   const [passengerPlaybackStaleTick, setPassengerPlaybackStaleTick] =
     useState(0);
 
+  // ignoreKeys: campos que esta tela não usa. Uma mudança só neles não re-renderiza a tela
+  // (ex.: a tela inicial e o contador por segundo da busca).
+  const ignoreKeysRef = useRef(options?.ignoreKeys || null);
   useEffect(() => {
-    return subscribeRuntime(setSnapshot);
+    const ignore = Array.isArray(ignoreKeysRef.current) && ignoreKeysRef.current.length > 0
+      ? new Set(ignoreKeysRef.current)
+      : null;
+    if (!ignore) {
+      return subscribeRuntime(setSnapshot);
+    }
+    return subscribeRuntime((next) => {
+      setSnapshot((previous) => {
+        if (previous === next) return previous;
+        for (const key in next) {
+          if (!ignore.has(key) && previous[key] !== next[key]) return next;
+        }
+        for (const key in previous) {
+          if (!ignore.has(key) && !(key in next)) return next;
+        }
+        return previous;
+      });
+    });
   }, []);
 
   useEffect(() => {

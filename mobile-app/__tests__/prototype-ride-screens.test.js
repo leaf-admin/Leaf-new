@@ -5635,13 +5635,81 @@ describe('prototype ride screens', () => {
       'Nenhum motorista encontrado',
     );
     expect(getByTestId('passenger-no-drivers-retry-button').props.accessibilityLabel).toBe(
-      'Tentar com outro destino',
+      'Tentar de novo com o mesmo destino',
     );
 
     fireEvent.press(getByTestId('passenger-no-drivers-retry-button'));
 
     expect(clearFlowPreview).toHaveBeenCalled();
     expect(navigation.replace).toHaveBeenCalledWith('RobotaxiPrototype');
+  });
+
+  it('shows the refund from the runtime when it arrives after the no-drivers screen opened', () => {
+    usePrototypeRideRuntime.mockReturnValue(
+      buildPassengerRuntime({
+        bookingStatus: 'idle',
+        paymentState: { status: 'refunded', refundStatus: 'REFUNDED', refundAmount: 47.44, chargeId: 'c1' },
+        selectedDestination: { name: 'Ferry Building' },
+        selectedVehicle: 'Leaf Plus',
+      })
+    );
+    const { getByText } = render(
+      <RobotaxiNoDriversScreen
+        navigation={{ navigate: jest.fn(), replace: jest.fn() }}
+        route={{ params: { reason: 'Nenhum motorista disponível no momento.' } }}
+      />
+    );
+    expect(getByText('Estorno de R$ 47,44 iniciado automaticamente.')).toBeTruthy();
+  });
+
+  it('tells a paying passenger the refund is automatic before the server confirms it', () => {
+    usePrototypeRideRuntime.mockReturnValue(
+      buildPassengerRuntime({
+        bookingStatus: 'idle',
+        paymentState: { status: 'idle', refundStatus: null, refundAmount: 0, chargeId: 'c1' },
+        selectedDestination: { name: 'Ferry Building' },
+        selectedVehicle: 'Leaf Plus',
+      })
+    );
+    const { getByText } = render(
+      <RobotaxiNoDriversScreen
+        navigation={{ navigate: jest.fn(), replace: jest.fn() }}
+        route={{ params: { reason: 'Nenhum motorista disponível no momento.' } }}
+      />
+    );
+    expect(getByText('Pagamento confirmado. O estorno será processado automaticamente pelo sistema.')).toBeTruthy();
+  });
+
+  it('returns to the quote by itself after showing no drivers', () => {
+    const { Animated } = require('react-native');
+    const timingSpy = jest.spyOn(Animated, 'timing').mockImplementation(() => ({
+      start: (callback) => callback && callback({ finished: true }),
+      stop: jest.fn(),
+    }));
+    try {
+      const clearFlowPreview = jest.fn();
+      usePrototypeRideRuntime.mockReturnValue(
+        buildPassengerRuntime({
+          bookingStatus: 'idle',
+          clearFlowPreview,
+          selectedDestination: { name: 'Ferry Building' },
+          selectedVehicle: 'Leaf Plus',
+        })
+      );
+      const navigation = { navigate: jest.fn(), replace: jest.fn(), canGoBack: jest.fn(() => false), goBack: jest.fn() };
+      const { getByTestId } = render(
+        <RobotaxiNoDriversScreen
+          navigation={navigation}
+          route={{ params: { reason: 'Nenhum motorista disponível no momento.' } }}
+        />
+      );
+      expect(getByTestId('passenger-no-drivers-auto-return')).toBeTruthy();
+      expect(timingSpy).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ toValue: 0, duration: 4500 }));
+      expect(clearFlowPreview).toHaveBeenCalled();
+      expect(navigation.replace).toHaveBeenCalledWith('RobotaxiPrototype');
+    } finally {
+      timingSpy.mockRestore();
+    }
   });
 
   it.each(['notified', 'pending_driver', 'waiting_driver'])(

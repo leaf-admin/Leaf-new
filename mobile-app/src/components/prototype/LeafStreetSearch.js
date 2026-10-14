@@ -21,9 +21,18 @@ import {
 const BAND_COUNT = 10;
 const BAND_STEP_MS = 230;
 const BAND_FADE_IN_MS = 260;
-const TRAIL_OPACITY = 0.32;
+const TRAIL_OPACITY = 0.26;
 const WAVE_PAUSE_MS = 1600;
-const STREET_COLOR = '#2E8B4A';
+// Perto do embarque: verde mais forte e traço um pouco mais grosso; longe: mais fino e claro.
+const NEAR_COLOR = [46, 139, 74];
+const FAR_COLOR = [84, 164, 108];
+const bandColor = (i) => {
+  const t = i / Math.max(1, BAND_COUNT - 1);
+  const c = NEAR_COLOR.map((v, k) => Math.round(v + (FAR_COLOR[k] - v) * t));
+  return `rgb(${c[0]},${c[1]},${c[2]})`;
+};
+const bandWidth = (i, base) => base * (1.2 - 0.35 * (i / Math.max(1, BAND_COUNT - 1)));
+const PULSE_MS = 900;
 const WAVE_MS = BAND_COUNT * BAND_STEP_MS;
 // A faixa leva BAND_FADE_IN_MS para acender; o carro surge na metade disso.
 const carRevealDelayMs = (band) => band * BAND_STEP_MS + BAND_FADE_IN_MS * 0.5;
@@ -69,6 +78,8 @@ export default function LeafStreetSearch({
   }, [cars, graph, maxDistanceM, streets]);
 
   const bandOpacity = useRef(Array.from({ length: BAND_COUNT }, () => new Animated.Value(0))).current;
+  const pulse = useRef(new Animated.Value(0)).current;
+  const pickupPoint = streets ? streets.project(pickupLat, pickupLng) : null;
   const carScales = useRef(new Map()).current;
   const shownCars = useRef(new Set()).current;
   const waveStartRef = useRef(0);
@@ -95,6 +106,10 @@ export default function LeafStreetSearch({
     let current = null;
     const runCycle = () => {
       waveStartRef.current = Date.now();
+      pulse.setValue(0);
+      Animated.timing(pulse, {
+        toValue: 1, duration: PULSE_MS, easing: Easing.out(Easing.cubic), useNativeDriver: true,
+      }).start();
       current = Animated.sequence([
         Animated.parallel(bandOpacity.map((value, i) => Animated.sequence([
           Animated.delay(i * BAND_STEP_MS),
@@ -152,10 +167,20 @@ export default function LeafStreetSearch({
           renderToHardwareTextureAndroid
         >
           <Svg width={width} height={height}>
-            <Path d={d} stroke={STREET_COLOR} strokeWidth={strokeWidth} strokeLinecap="round" fill="none" />
+            <Path d={d} stroke={bandColor(i)} strokeWidth={bandWidth(i, strokeWidth)} strokeLinecap="round" strokeLinejoin="round" fill="none" />
           </Svg>
         </Animated.View>
       ) : null))}
+      {pickupPoint ? (
+        <Animated.View
+          style={[styles.pulse, {
+            left: pickupPoint.x - 30,
+            top: pickupPoint.y - 30,
+            opacity: pulse.interpolate({ inputRange: [0, 0.15, 1], outputRange: [0, 0.55, 0] }),
+            transform: [{ scale: pulse.interpolate({ inputRange: [0, 1], outputRange: [0.3, 1.6] }) }],
+          }]}
+        />
+      ) : null}
       {visibleCars.map((car) => (
         <Animated.View
           key={car.id}
@@ -176,6 +201,15 @@ export default function LeafStreetSearch({
 export const STREET_SEARCH_WAVE_MS = WAVE_MS;
 
 const styles = StyleSheet.create({
+  pulse: {
+    position: 'absolute',
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    borderWidth: 1.5,
+    borderColor: 'rgba(46,139,74,0.9)',
+    backgroundColor: 'rgba(46,139,74,0.08)',
+  },
   car: {
     position: 'absolute',
     width: 42,
