@@ -3339,7 +3339,8 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
 
     const viewportRegion = buildSearchViewportRegion({
       center: searchCenterCoordinate,
-      radiusKm: Math.min(searchPreviewRadiusKm || searchRadiusKm, SEARCH_CAMERA_MAX_RADIUS_KM),
+      // Enquadra os 4 km da busca pelas ruas desde o início (a onda vai até lá).
+      radiusKm: SEARCH_CAMERA_MAX_RADIUS_KM,
     });
 
     if (!viewportRegion) {
@@ -9748,10 +9749,13 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   const [streetSearchGraph, setStreetSearchGraph] = useState(null);
   const streetSearchCenterLat = Number(searchCenterCoordinate?.latitude);
   const streetSearchCenterLng = Number(searchCenterCoordinate?.longitude);
+  // Pré-carrega assim que o passageiro tem embarque (antes da busca), para a onda começar junto
+  // com a busca. Só busca de novo se o embarque andar ~200 m (a resposta vem do cache do servidor).
+  const streetSearchKey = Number.isFinite(streetSearchCenterLat) && Number.isFinite(streetSearchCenterLng)
+    ? `${streetSearchCenterLat.toFixed(3)}:${streetSearchCenterLng.toFixed(3)}`
+    : '';
   useEffect(() => {
-    if (!presentedSearchingMode || typeof fetchStreetGraph !== 'function'
-      || !Number.isFinite(streetSearchCenterLat) || !Number.isFinite(streetSearchCenterLng)) {
-      setStreetSearchGraph(null);
+    if (isDriverRole || !streetSearchKey || typeof fetchStreetGraph !== 'function') {
       return undefined;
     }
     let cancelled = false;
@@ -9759,7 +9763,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
       .then((graph) => { if (!cancelled) setStreetSearchGraph(graph); })
       .catch(() => { if (!cancelled) setStreetSearchGraph(null); });
     return () => { cancelled = true; };
-  }, [presentedSearchingMode, streetSearchCenterLat, streetSearchCenterLng]);
+  }, [isDriverRole, streetSearchKey]);
   const streetSearchCars = useMemo(() => (Array.isArray(nearbyDriverCoordinates) ? nearbyDriverCoordinates : [])
     .map((driver) => ({
       id: driver.id,
