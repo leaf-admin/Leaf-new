@@ -1,7 +1,11 @@
 import React, { createContext, useCallback, useContext, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Platform, StyleSheet, UIManager, View, requireNativeComponent } from 'react-native';
 
-const nativeAvailable = Platform.OS === 'ios' && UIManager.getViewManagerConfig('LeafRootTabView');
+// A tab nativa do iOS usava os ícones 3D. A mesma tab flutuante em JS vale para os dois
+// sistemas agora (2026-10-14); a nativa fica desligada até ser redesenhada.
+// `global.__LEAF_NATIVE_IOS_TABS__` só existe nos testes da versão nativa.
+const USE_NATIVE_IOS_TABS = global.__LEAF_NATIVE_IOS_TABS__ === true;
+const nativeAvailable = USE_NATIVE_IOS_TABS && Platform.OS === 'ios' && UIManager.getViewManagerConfig('LeafRootTabView');
 const NativeTabs = nativeAvailable ? requireNativeComponent('LeafRootTabView') : null;
 const TabBarContext = createContext(null);
 const tabKeys = ['home', 'activity', 'account'];

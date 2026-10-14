@@ -1,12 +1,10 @@
 import leafTypography from './LeafTypography';
 import React from 'react';
 import { useIsFocused } from '@react-navigation/native';
-import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Animated, Easing, Pressable, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import * as Haptics from 'expo-haptics';
 import { Ionicons } from '@expo/vector-icons';
-import LeafMaterialSurface from './LeafMaterialSurface';
-import LeafGlassSurface from '../design-system/LeafGlassSurface';
 import LeafLineIcon from '../design-system/LeafLineIcon';
-import LeafSoftIcon from '../design-system/LeafSoftIcon';
 import { useLeafNativeTabBar } from './LeafNativeTabBar';
 import { navigateLeafRootTab } from '../../navigation/leafRootTabNavigation';
 import robotaxiPrototypeTokens from '../design-system/robotaxiPrototypeTokens';
@@ -28,7 +26,7 @@ function PrototypeTopControlGlyph({ name, tintColor, signal }) {
     );
   }
   if (name === 'locate' || name === 'bell') {
-    return <LeafSoftIcon name={name} size={30} signal={signal} />;
+    return <LeafLineIcon name={name} size={22} color={tintColor} signal={signal} />;
   }
   if (name === 'arrow-back') {
     return <LeafLineIcon name="back" size={22} color={tintColor} />;
@@ -66,37 +64,48 @@ export function PrototypeTopControls({
 
   return (
     <View pointerEvents="box-none" style={[styles.topRow, { top: insets.top + 18 }]}>
-      <TouchableOpacity
-        style={styles.topButton}
-        activeOpacity={0.85}
+      <LeafFloatingButton
         onPress={onPressLeft}
-        accessibilityRole="button"
         accessibilityLabel={resolvedLeftLabel}
         testID={leftTestID}
       >
-        <LeafGlassSurface interactive pointerEvents="none" style={styles.topButtonGlass} />
         <PrototypeTopControlGlyph name={leftIcon} tintColor={color.text.primary} signal={leftSignal} />
-      </TouchableOpacity>
+      </LeafFloatingButton>
 
-      <TouchableOpacity
-        style={styles.topButton}
-        activeOpacity={0.85}
+      <LeafFloatingButton
         onPress={onPressRight}
-        accessibilityRole="button"
         accessibilityLabel={resolvedRightLabel}
         testID={rightTestID}
       >
-        <LeafGlassSurface interactive pointerEvents="none" style={styles.topButtonGlass} />
         <PrototypeTopControlGlyph name={rightIcon} tintColor={color.text.primary} signal={rightBadgeCount} />
         {showRightBadge ? <View style={styles.notificationDot} testID={`${rightTestID}-badge`} /> : null}
-      </TouchableOpacity>
+      </LeafFloatingButton>
     </View>
   );
 }
 
+const ISLAND_WIDTH = 274;
+const ISLAND_PADDING = 4;
+const ISLAND_ITEM_WIDTH = (ISLAND_WIDTH - ISLAND_PADDING * 2) / 3;
+const ISLAND_KEYS = ['home', 'activity', 'account'];
+// A tab bar é montada de novo a cada tela; lembrar onde o destaque estava deixa ele
+// deslizar até a aba nova em vez de aparecer pronto.
+let lastIslandIndex = 0;
+
 export function PrototypeBottomIsland({ insets = {}, active = 'home', onPressProfile, onPressHome, onPressSettings, onPressActivity }) {
   const focused = useIsFocused();
   const native = useLeafNativeTabBar({ active, focused, onPressProfile, onPressHome, onPressSettings, onPressActivity });
+  const activeIndex = Math.max(0, ISLAND_KEYS.indexOf(active));
+  const highlightX = React.useRef(new Animated.Value(lastIslandIndex * ISLAND_ITEM_WIDTH)).current;
+  React.useEffect(() => {
+    Animated.timing(highlightX, {
+      toValue: activeIndex * ISLAND_ITEM_WIDTH,
+      duration: 220,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start();
+    lastIslandIndex = activeIndex;
+  }, [activeIndex, highlightX]);
   if (native || !focused) return null;
   const items = [
     { key: 'home', title: 'Início', icon: 'home', onPress: onPressHome },
@@ -105,22 +114,68 @@ export function PrototypeBottomIsland({ insets = {}, active = 'home', onPressPro
   ];
   return (
     <View style={[styles.islandWrap, { bottom: (insets.bottom || 0) + 8 }]} pointerEvents="box-none">
-      <LeafMaterialSurface style={styles.island}>
-        {items.map(item => (
-          <TouchableOpacity key={item.key} style={[styles.islandAction, active === item.key && styles.islandActionActive]}
-            onPress={item.onPress} activeOpacity={0.85} accessibilityRole="tab"
-            accessibilityLabel={item.title} accessibilityState={{ selected: active === item.key }} testID={`leaf-root-tab-${item.key}`}>
-            <LeafSoftIcon
-              name={item.icon}
-              size={30}
-              active={active === item.key}
-              signal={active === item.key ? 1 : 0}
-            />
-            <Text style={[styles.tabLabel, active === item.key && styles.tabLabelActive]}>{item.title}</Text>
-          </TouchableOpacity>
-        ))}
-      </LeafMaterialSurface>
+      <View style={styles.island}>
+        <Animated.View
+          pointerEvents="none"
+          style={[styles.islandHighlight, { transform: [{ translateX: highlightX }] }]}
+        />
+        {items.map(item => {
+          const selected = active === item.key;
+          return (
+            <LeafPressScale key={item.key} style={styles.islandAction}
+              onPress={() => {
+                if (!selected) Haptics.selectionAsync().catch(() => {});
+                item.onPress?.();
+              }}
+              accessibilityRole="tab"
+              accessibilityLabel={item.title} accessibilityState={{ selected }} testID={`leaf-root-tab-${item.key}`}>
+              <LeafLineIcon
+                name={item.icon}
+                size={22}
+                color={selected ? TAB_ACTIVE_COLOR : TAB_IDLE_COLOR}
+                strokeWidth={selected ? 2.1 : 1.75}
+                signal={selected ? 1 : 0}
+              />
+              <Text style={[styles.tabLabel, selected && styles.tabLabelActive]}>{item.title}</Text>
+            </LeafPressScale>
+          );
+        })}
+      </View>
     </View>
+  );
+}
+
+// Toque com resposta física leve: encolhe um pouco e volta com mola curta.
+function LeafPressScale({ children, style, onPress, ...props }) {
+  const scale = React.useRef(new Animated.Value(1)).current;
+  const to = (value) => Animated.spring(scale, {
+    toValue: value,
+    speed: value < 1 ? 50 : 24,
+    bounciness: value < 1 ? 0 : 5,
+    useNativeDriver: true,
+  }).start();
+  return (
+    <Pressable onPress={onPress} onPressIn={() => to(0.94)} onPressOut={() => to(1)} {...props}>
+      <Animated.View style={[style, { transform: [{ scale }] }]}>{children}</Animated.View>
+    </Pressable>
+  );
+}
+
+// Botão redondo flutuante sobre o mapa: branco, linha bem sutil e sombra leve.
+export function LeafFloatingButton({ children, onPress, accessibilityLabel, testID, style }) {
+  return (
+    <LeafPressScale
+      onPress={() => {
+        Haptics.selectionAsync().catch(() => {});
+        onPress?.();
+      }}
+      accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel}
+      testID={testID}
+      style={[styles.floatingButton, style]}
+    >
+      {children}
+    </LeafPressScale>
   );
 }
 
@@ -248,32 +303,51 @@ const styles = StyleSheet.create({
     zIndex: 20
   },
   island: {
-    width: 274,
-    minHeight: 64,
-    borderRadius: 34,
-    backgroundColor: 'transparent',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.8)',
-    paddingHorizontal: 4,
-    paddingVertical: 4,
+    width: ISLAND_WIDTH,
+    minHeight: 62,
+    borderRadius: 31,
+    backgroundColor: 'rgba(255,255,255,0.97)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(17,20,16,0.08)',
+    padding: ISLAND_PADDING,
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    shadowColor: color.shadow.base,
-    shadowOffset: { width: 0, height: 16 },
-    shadowOpacity: 0.09,
-    shadowRadius: 26,
-    elevation: 4
+    shadowColor: '#12261A',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.1,
+    shadowRadius: 16,
+    elevation: 6,
+  },
+  islandHighlight: {
+    position: 'absolute',
+    left: ISLAND_PADDING,
+    top: ISLAND_PADDING,
+    bottom: ISLAND_PADDING,
+    width: ISLAND_ITEM_WIDTH,
+    borderRadius: 27,
+    backgroundColor: 'rgba(26,51,14,0.08)',
   },
   islandAction: {
-    flex: 1,
+    width: ISLAND_ITEM_WIDTH,
     minHeight: 54,
-    borderRadius: 26,
+    borderRadius: 27,
     alignItems: 'center',
     justifyContent: 'center'
   },
-  islandActionActive: {
-    backgroundColor: 'rgba(26,51,14,0.08)',
+  floatingButton: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.97)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(17,20,16,0.08)',
+    shadowColor: '#12261A',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 14,
+    elevation: 5,
   },
   tabLabel: { ...leafTypography.medium, fontSize: 11, lineHeight: 14, color: TAB_IDLE_COLOR, marginTop: 3 },
   tabLabelActive: { color: TAB_ACTIVE_COLOR, ...leafTypography.semiBold },
