@@ -5,6 +5,19 @@ appId: br.com.leaf.ride
 
 - extendedWaitUntil:
     visible:
+      id: "(onboarding-welcome-start|auth-phone-input)"
+    timeout: 120000
+
+- runFlow:
+    when:
+      visible:
+        id: "onboarding-welcome-start"
+    commands:
+      - tapOn:
+          id: "onboarding-welcome-start"
+
+- extendedWaitUntil:
+    visible:
       id: "auth-phone-input"
     timeout: 120000
 
@@ -82,25 +95,22 @@ appId: br.com.leaf.ride
             - tapOn:
                 id: "auth-otp-verify-btn"
 
-- runFlow:
-    when:
-      visible:
-        id: "auth-profile-selection-trigger"
-    commands:
-      - tapOn:
-          id: "auth-profile-selection-trigger"
-      - tapOn:
-          id: "auth-profile-option-driver"
-      - tapOn:
-          id: "auth-profile-selection-continue-btn"
+- extendedWaitUntil:
+    visible:
+      id: "auth-profile-option-driver"
+    timeout: 90000
+- tapOn:
+    id: "auth-profile-option-driver"
+- tapOn:
+    id: "auth-profile-selection-continue-btn"
 
 - extendedWaitUntil:
-    visible: ".*(Validação da CNH|Toque para enviar o PDF da CNH).*"
+    visible: ".*(Validação da CNH|Escolher o PDF da CNH).*"
     timeout: 120000
 
 - takeScreenshot: "signup-driver-before-cnh-upload"
 
-- tapOn: "Toque para enviar o PDF da CNH"
+- tapOn: "Escolher o PDF da CNH"
 
 - extendedWaitUntil:
     visible: ".*(CNH\\.pdf|Downloads|Recent|Recents|Arquivos|Files).*"
@@ -115,30 +125,23 @@ appId: br.com.leaf.ride
 - tapOn: ".*CNH\\.pdf.*"
 
 - extendedWaitUntil:
-    visible: ".*(Finalizar cadastro|Aceito os Termos de Uso|Autorizo checagem de antecedentes).*"
+    visible: ".*(Últimos combinados|Finalizar cadastro|Aceito os Termos de Uso|Autorizo checagem de antecedentes).*"
     timeout: 120000
 
 - takeScreenshot: "signup-driver-after-cnh-extraction"
 
-- runFlow:
-    when:
-      visible: ".*Termos de Uso.*"
-    commands:
-      - tapOn: ".*Termos de Uso.*"
+- tapOn:
+    id: "auth-credentials-terms-consent"
 
-- runFlow:
-    when:
-      visible: ".*Privacidade.*"
-    commands:
-      - tapOn: ".*Privacidade.*"
+- tapOn:
+    id: "auth-credentials-privacy-consent"
 
-- runFlow:
-    when:
-      visible: ".*checagem de antecedentes.*"
-    commands:
-      - tapOn: ".*checagem de antecedentes.*"
+- tapOn:
+    id: "auth-driver-background-check-consent"
 
-- tapOn: "Concluir"
+- tapOn:
+
+    id: "auth-credentials-submit"
 
 - runFlow:
     when:

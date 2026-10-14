@@ -284,6 +284,15 @@ export default function RobotaxiSettingsScreen({ navigation, route }) {
       driverOnly: true,
     },
     {
+      item: ROBOTAXI_SETTINGS_ITEMS.password,
+      icon: 'lock-closed-outline',
+      title: 'Senha de acesso',
+      subtitle: 'Entrar sem esperar o código',
+      onPress: () => navigation.navigate('LeafAccountPassword'),
+      rowTestID: 'robotaxi-settings-row-password',
+      showChevron: true,
+    },
+    {
       item: ROBOTAXI_SETTINGS_ITEMS.privacy,
       icon: 'shield-checkmark-outline',
       title: 'Privacidade',

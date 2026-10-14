@@ -11,6 +11,7 @@ const EMAIL_REGEX = /\S+@\S+\.\S+/;
 const DriverEmailStep = ({ onSubmitted, onBack, initialData = {}, progressMeta, isSubmitting = false }) => {
   const [email, setEmail] = useState(initialData.email || '');
   const [error, setError] = useState('');
+  const [focused, setFocused] = useState(false);
 
   const isEmailValid = useMemo(() => {
     const clean = String(email || '').trim();
@@ -35,8 +36,8 @@ const DriverEmailStep = ({ onSubmitted, onBack, initialData = {}, progressMeta, 
   return (
     <EditorialOnboardingScreen
       keyboard
-      title={'Contato\npor e-mail'}
-      description="Use para recibos, notificações importantes e informes. Dá para preencher depois."
+      title="Seu e-mail"
+      description="Para recibos e avisos importantes sobre o seu cadastro. Dá para preencher depois."
       onBack={onBack}
       progressMeta={progressMeta}
       footer={(
@@ -44,7 +45,7 @@ const DriverEmailStep = ({ onSubmitted, onBack, initialData = {}, progressMeta, 
           <ContinueButton
             onPress={() => handleSubmit(false)}
             disabled={!isEmailValid || isSubmitting}
-            text={isSubmitting ? 'Finalizando...' : 'Finalizar cadastro'}
+            text={isSubmitting ? 'Finalizando…' : 'Finalizar cadastro'}
             testID="driver-email-continue-btn"
             accessibilityLabel={isSubmitting ? 'Finalizando cadastro' : 'Finalizar cadastro'}
           />
@@ -65,15 +66,17 @@ const DriverEmailStep = ({ onSubmitted, onBack, initialData = {}, progressMeta, 
       )}
     >
       <View style={styles.card}>
-        <Text style={styles.label}>E-mail (opcional por agora)</Text>
+        <Text style={styles.label}>E-mail (opcional)</Text>
         <TextInput
-          style={[styles.input, error ? styles.inputError : null]}
+          style={[styles.input, focused && styles.inputFocused, error ? styles.inputError : null]}
           value={email}
           onChangeText={value => {
             setEmail(value);
             if (error) setError('');
           }}
-          placeholder="seu@email.com"
+          placeholder="voce@email.com"
+          onFocus={() => setFocused(true)}
+          onBlur={() => setFocused(false)}
           placeholderTextColor={color.textMuted}
           accessibilityLabel="E-mail"
           accessibilityHint={error
@@ -142,21 +145,22 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 18,
     color: color.textSecondary,
-    ...leafTypography.semiBold,
+    ...leafTypography.medium,
     marginBottom: 8
   },
   input: {
-    borderWidth: 1,
+    borderWidth: 1.5,
     borderColor: color.border,
-    minHeight: 54,
-    borderRadius: 12,
-    paddingHorizontal: 18,
-    paddingVertical: 12,
-    fontSize: 16,
-    lineHeight: 22,
-    ...leafTypography.medium,
+    borderRadius: 16,
+    paddingHorizontal: 16,
+    minHeight: 56,
+    fontSize: 18,
+    ...leafTypography.regular,
     color: color.textPrimary,
-    backgroundColor: color.surfaceMuted
+    backgroundColor: '#FFFFFF'
+  },
+  inputFocused: {
+    borderColor: color.borderStrong
   },
   inputError: {
     borderColor: color.error

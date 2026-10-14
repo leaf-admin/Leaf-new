@@ -61,8 +61,9 @@ env:
 
 - extendedWaitUntil:
     visible:
-      id: "auth-phone-input"
+      id: "(onboarding-welcome-start|auth-phone-input|onboarding-welcome-start)"
     timeout: 120000
+- runFlow: ../../_skip-onboarding-welcome.yaml
 
 - takeScreenshot: "01-driver-cadastro-phone-screen"
 
@@ -160,12 +161,12 @@ env:
           id: "auth-profile-selection-continue-btn"
 
 - extendedWaitUntil:
-    visible: ".*(Validação da CNH|Toque para enviar o PDF da CNH).*"
+    visible: ".*(Validação da CNH|Escolher o PDF da CNH).*"
     timeout: 120000
 
 - takeScreenshot: "07-driver-cadastro-cnh-upload-screen"
 
-- tapOn: "Toque para enviar o PDF da CNH"
+- tapOn: "Escolher o PDF da CNH"
 
 - extendedWaitUntil:
     visible: ".*(CNH\\.pdf|Downloads|Recent|Recents|Arquivos|Files).*"
@@ -182,32 +183,25 @@ env:
 - tapOn: ".*CNH\\.pdf.*"
 
 - extendedWaitUntil:
-    visible: ".*(Finalizar cadastro|Aceito os Termos de Uso|Autorizo checagem de antecedentes).*"
+    visible: ".*(Últimos combinados|Finalizar cadastro|Aceito os Termos de Uso|Autorizo checagem de antecedentes).*"
     timeout: 120000
 
 - takeScreenshot: "09-driver-cadastro-after-cnh-extraction"
 
-- runFlow:
-    when:
-      visible: ".*Termos de Uso.*"
-    commands:
-      - tapOn: ".*Termos de Uso.*"
+- tapOn:
+    id: "auth-credentials-terms-consent"
 
-- runFlow:
-    when:
-      visible: ".*Privacidade.*"
-    commands:
-      - tapOn: ".*Privacidade.*"
+- tapOn:
+    id: "auth-credentials-privacy-consent"
 
-- runFlow:
-    when:
-      visible: ".*checagem de antecedentes.*"
-    commands:
-      - tapOn: ".*checagem de antecedentes.*"
+- tapOn:
+    id: "auth-driver-background-check-consent"
 
 - takeScreenshot: "10-driver-cadastro-terms-checked"
 
-- tapOn: "Concluir"
+- tapOn:
+
+    id: "auth-credentials-submit"
 
 - runFlow:
     when:

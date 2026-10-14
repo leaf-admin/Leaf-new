@@ -1116,7 +1116,7 @@ function detectScreen(nodes) {
   }
   if (allText.includes("support-screen") || allText.includes("support-tab-")) return "support";
   if (allText.includes("driver-home-toggle-online") || allText.includes("driver")) return "driver_home";
-  if (allText.includes("auth-phone-input") || allText.includes("telefone") || allText.includes("entrar")) return "auth";
+  if (allText.includes("auth-phone-input") || allText.includes("onboarding-welcome") || allText.includes("telefone") || allText.includes("entrar")) return "auth";
   return allText.trim() ? "unknown" : "blank";
 }
 

@@ -1,7 +1,8 @@
 import leafTypography from '../../prototype/LeafTypography';
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ActivityIndicator,
+  Animated,
+  Easing,
   StyleSheet,
   Text,
   TextInput,
@@ -17,6 +18,30 @@ import driverDocumentExtractionService from '../../../services/DriverDocumentExt
 import { logFriendlyError, toUserFriendlyMessage } from '../../../utils/friendlyErrorMessages';
 
 const { color, spacing } = onboardingTheme;
+
+// Barra de leitura do PDF: um trecho que corre de um lado ao outro enquanto a Leaf lê o documento.
+function ReadingBar() {
+  const progress = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    const loop = Animated.loop(Animated.timing(progress, {
+      toValue: 1,
+      duration: 1100,
+      easing: Easing.inOut(Easing.quad),
+      useNativeDriver: true
+    }));
+    loop.start();
+    return () => loop.stop();
+  }, [progress]);
+  return (
+    <View style={styles.uploadProgress}>
+      <Animated.View
+        style={[styles.uploadProgressFill, {
+          transform: [{ translateX: progress.interpolate({ inputRange: [0, 1], outputRange: [-90, 240] }) }]
+        }]}
+      />
+    </View>
+  );
+}
 
 const EMAIL_REGEX = /\S+@\S+\.\S+/;
 const CPF_REGEX = /^(?:\d{3}\.\d{3}\.\d{3}-\d{2}|\d{11})$/;
@@ -313,24 +338,22 @@ const DocumentStep = ({ onSubmitted, onBack, initialData = {}, progressMeta }) =
       </Text>
       <TouchableOpacity
         activeOpacity={0.88}
-        style={[styles.uploadButton, error && styles.inputError]}
+        style={[styles.uploadButton, result?.success && styles.uploadButtonDone, error && styles.inputError]}
         onPress={onPress}
         disabled={loading}
+        accessibilityRole="button"
+        accessibilityLabel={`${title}. ${loading ? 'Lendo documento' : description}`}
       >
-        <View style={styles.uploadIconWrap}>
-          <Ionicons name={icon} size={18} color={color.textPrimary} />
+        <View style={[styles.uploadIconWrap, result?.success && styles.uploadIconDone]}>
+          <Ionicons name={result?.success ? 'checkmark' : icon} size={20} color={result?.success ? '#FFFFFF' : color.textPrimary} />
         </View>
         <View style={styles.uploadTextWrap}>
-          <Text style={styles.uploadTitle}>{loading ? 'Processando PDF...' : description}</Text>
+          <Text style={styles.uploadTitle}>{loading ? 'Lendo o documento…' : result?.success ? 'Documento lido' : description}</Text>
           {fileMeta?.name ? <Text style={styles.uploadFile}>{fileMeta.name}</Text> : null}
           {result ? <Text style={styles.uploadMeta}>{formatExtractionLabel(result)}</Text> : null}
-          {loading ? (
-            <View style={styles.uploadProgress}>
-              <View style={styles.uploadProgressFill} />
-            </View>
-          ) : null}
+          {loading ? <ReadingBar /> : null}
         </View>
-        {loading ? <ActivityIndicator size="small" color={color.textPrimary} /> : <Ionicons name="chevron-forward" size={18} color={color.textMuted} />}
+        {loading ? null : <Ionicons name={result?.success ? 'refresh' : 'chevron-forward'} size={18} color={color.textMuted} />}
       </TouchableOpacity>
       {error ? <Text style={styles.errorText}>{error}</Text> : null}
     </View>
@@ -338,9 +361,9 @@ const DocumentStep = ({ onSubmitted, onBack, initialData = {}, progressMeta }) =
 
   return (
     <EditorialOnboardingScreen
-      title={isDriver ? 'Envie sua\nCNH Digital' : 'Cadastro\nde passageiro'}
+      title={isDriver ? 'Envie sua CNH digital' : 'Cadastro de passageiro'}
       description={isDriver
-        ? 'A Leaf lê os dados do PDF automaticamente para deixar sua validação mais simples.'
+        ? 'Lemos os dados do PDF automaticamente. Você só confere.'
         : 'Informe seu e-mail para recibos e recuperação da conta.'}
       onBack={onBack}
       progressMeta={progressMeta}
@@ -372,8 +395,8 @@ const DocumentStep = ({ onSubmitted, onBack, initialData = {}, progressMeta }) =
         ) : (
           <>
             {renderUploadCard({
-              title: 'CNH Digital (PDF) *',
-              description: 'Toque para enviar o PDF da CNH',
+              title: 'CNH digital (PDF)',
+              description: 'Escolher o PDF da CNH',
               onPress: () => pickAndExtractPDF('cnh'),
               loading: isExtracting.cnh,
               result: documentData.cnhExtraction,
@@ -490,8 +513,8 @@ const DocumentStep = ({ onSubmitted, onBack, initialData = {}, progressMeta }) =
             </View>
 
             {renderUploadCard({
-              title: 'Documento do Veículo (PDF)',
-              description: 'Enviar agora ou deixar para o cadastro do 1º veículo',
+              title: 'Documento do veículo (CRLV)',
+              description: 'Enviar agora ou depois, ao cadastrar o veículo',
               onPress: () => pickAndExtractPDF('vehicle'),
               loading: isExtracting.vehicle,
               result: documentData.vehicleExtraction,
@@ -552,13 +575,13 @@ const styles = StyleSheet.create({
     padding: 0
   },
   fieldContainer: {
-    marginBottom: spacing.xs
+    marginBottom: 14
   },
   label: {
-    fontSize: 12,
-    lineHeight: 16,
+    fontSize: 13,
+    lineHeight: 18,
     color: color.textSecondary,
-    ...leafTypography.semiBold,
+    ...leafTypography.medium,
     marginBottom: 8
   },
   optionalTag: {
@@ -566,22 +589,24 @@ const styles = StyleSheet.create({
     ...leafTypography.medium
   },
   input: {
-    borderWidth: 1,
+    borderWidth: 1.5,
     borderColor: color.border,
-    borderRadius: 18,
+    borderRadius: 14,
     paddingHorizontal: 14,
-    paddingVertical: 9,
-    fontSize: 13,
-    lineHeight: 17,
+    paddingVertical: 12,
+    minHeight: 50,
+    fontSize: 15,
+    lineHeight: 20,
     ...leafTypography.medium,
     color: color.textPrimary,
-    backgroundColor: color.surfaceMuted
+    backgroundColor: '#FFFFFF'
   },
   readOnlyInput: {
-    opacity: 0.95
+    backgroundColor: color.surfaceMuted,
+    borderColor: 'transparent'
   },
   selectInput: {
-    minHeight: 37,
+    minHeight: 50,
     paddingVertical: 0,
     flexDirection: 'row',
     alignItems: 'center',
@@ -593,91 +618,100 @@ const styles = StyleSheet.create({
   selectValue: {
     flex: 1,
     marginRight: 8,
-    fontSize: 13,
-    lineHeight: 17,
+    fontSize: 15,
+    lineHeight: 20,
     ...leafTypography.medium,
     color: color.textPrimary
   },
   selectPlaceholder: {
     flex: 1,
     marginRight: 8,
-    fontSize: 13,
-    lineHeight: 17,
+    fontSize: 15,
+    lineHeight: 20,
     ...leafTypography.medium,
     color: color.textMuted
   },
   uploadContainer: {
-    marginBottom: spacing.xs
+    marginBottom: 18
   },
   uploadButton: {
-    borderWidth: 1,
-    borderColor: color.border,
-    borderRadius: 22,
-    backgroundColor: color.surfaceMuted,
-    paddingVertical: 14,
-    paddingHorizontal: 14,
+    borderWidth: 1.5,
+    borderStyle: 'dashed',
+    borderColor: 'rgba(17,33,12,0.22)',
+    borderRadius: 20,
+    backgroundColor: '#FFFFFF',
+    paddingVertical: 16,
+    paddingHorizontal: 16,
     flexDirection: 'row',
-    alignItems: 'flex-start'
+    alignItems: 'center',
+    gap: 14
+  },
+  uploadButtonDone: {
+    borderStyle: 'solid',
+    borderColor: color.borderStrong
   },
   uploadIconWrap: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    backgroundColor: color.accentSoft,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: color.surfaceMuted,
     alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 10
+    justifyContent: 'center'
+  },
+  uploadIconDone: {
+    backgroundColor: color.textPrimary
   },
   uploadTextWrap: {
     flex: 1
   },
   uploadTitle: {
-    fontSize: 14,
-    lineHeight: 18,
+    fontSize: 16,
+    lineHeight: 21,
     color: color.textPrimary,
     ...leafTypography.semiBold
   },
   uploadFile: {
-    marginTop: 2,
-    fontSize: 10,
-    lineHeight: 13,
+    marginTop: 3,
+    fontSize: 13,
+    lineHeight: 18,
     color: color.textSecondary,
     ...leafTypography.regular
   },
   uploadMeta: {
     marginTop: 2,
-    fontSize: 10,
-    lineHeight: 13,
+    fontSize: 13,
+    lineHeight: 18,
     color: color.textMuted,
     ...leafTypography.medium
   },
   uploadProgress: {
-    height: 6,
-    borderRadius: 999,
+    height: 4,
+    borderRadius: 2,
     overflow: 'hidden',
-    backgroundColor: 'rgba(17,23,25,0.08)',
-    marginTop: 8
+    backgroundColor: color.surfaceMuted,
+    marginTop: 10
   },
   uploadProgressFill: {
-    width: '72%',
+    width: 90,
     height: '100%',
-    borderRadius: 999,
-    backgroundColor: color.accent
+    borderRadius: 2,
+    backgroundColor: color.textPrimary
   },
   inputError: {
     borderColor: color.error
   },
   errorText: {
-    marginTop: 4,
+    marginTop: 6,
     color: color.error,
-    fontSize: 12,
-    lineHeight: 16,
+    fontSize: 13,
+    lineHeight: 18,
     ...leafTypography.medium
   },
   identityGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    columnGap: spacing.xs
+    columnGap: 12,
+    marginBottom: 4
   },
   identityField: {
     flexBasis: '48%',
@@ -686,11 +720,11 @@ const styles = StyleSheet.create({
   genderOptions: {
     flexBasis: '100%',
     overflow: 'hidden',
-    borderWidth: 1,
+    borderWidth: 1.5,
     borderColor: color.border,
-    borderRadius: 18,
-    backgroundColor: color.surfaceMuted,
-    marginBottom: spacing.xs
+    borderRadius: 14,
+    backgroundColor: '#FFFFFF',
+    marginBottom: 14
   },
   genderOption: {
     minHeight: 44,
@@ -713,7 +747,7 @@ const styles = StyleSheet.create({
   },
   genderOptionTextSelected: {
     ...leafTypography.semiBold,
-    color: color.accent
+    color: color.textPrimary
   }
 });
 

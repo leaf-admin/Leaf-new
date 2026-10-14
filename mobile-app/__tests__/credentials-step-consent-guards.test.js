@@ -10,14 +10,15 @@ describe('CredentialsStep driver consent guards', () => {
 
   it('keeps completion blocked until all three required consents are granted', () => {
     const onCreated = jest.fn();
-    const { getByLabelText, getByText } = render(
+    const { getByTestId } = render(
       <CredentialsStep
         initialData={initialData}
         onCreated={onCreated}
         onBack={jest.fn()}
       />,
     );
-    const completeButton = getByLabelText('Concluir');
+    const completeButton = getByTestId('auth-credentials-submit');
+    expect(completeButton.props.accessibilityLabel).toBe('Aceitar e enviar cadastro');
 
     expect(completeButton.props.accessibilityState).toEqual(
       expect.objectContaining({ disabled: true }),
@@ -25,23 +26,21 @@ describe('CredentialsStep driver consent guards', () => {
     fireEvent.press(completeButton);
     expect(onCreated).not.toHaveBeenCalled();
 
-    fireEvent.press(getByText('Aceito os Termos de Uso *'));
-    fireEvent.press(getByText('Aceito a Política de Privacidade *'));
+    fireEvent.press(getByTestId('auth-credentials-terms-consent'));
+    fireEvent.press(getByTestId('auth-credentials-privacy-consent'));
 
-    expect(getByLabelText('Concluir').props.accessibilityState).toEqual(
+    expect(getByTestId('auth-credentials-submit').props.accessibilityState).toEqual(
       expect.objectContaining({ disabled: true }),
     );
-    fireEvent.press(getByLabelText('Concluir'));
+    fireEvent.press(getByTestId('auth-credentials-submit'));
     expect(onCreated).not.toHaveBeenCalled();
 
-    fireEvent.press(
-      getByText('Autorizo checagem de antecedentes criminais e validação regulatória *'),
-    );
+    fireEvent.press(getByTestId('auth-driver-background-check-consent'));
 
-    expect(getByLabelText('Concluir').props.accessibilityState).toEqual(
+    expect(getByTestId('auth-credentials-submit').props.accessibilityState).toEqual(
       expect.objectContaining({ disabled: false }),
     );
-    fireEvent.press(getByLabelText('Concluir'));
+    fireEvent.press(getByTestId('auth-credentials-submit'));
 
     expect(onCreated).toHaveBeenCalledWith({
       acceptTerms: true,
@@ -67,7 +66,7 @@ describe('CredentialsStep driver consent guards', () => {
       />,
     );
 
-    const submitButton = getByLabelText('Finalizando...');
+    const submitButton = getByLabelText('Enviando…');
     expect(submitButton.props.accessibilityState).toEqual(
       expect.objectContaining({ disabled: true }),
     );
@@ -93,7 +92,7 @@ describe('CredentialsStep driver consent guards', () => {
     expect(getByTestId('auth-credentials-terms-consent').props.accessibilityState).toEqual({ checked: true });
     expect(getByTestId('auth-credentials-privacy-consent').props.accessibilityState).toEqual({ checked: false });
     expect(getByTestId('auth-driver-background-check-consent').props.accessibilityLabel)
-      .toContain('checagem de antecedentes');
+      .toContain('antecedentes criminais');
     expect(getByTestId('auth-driver-marketing-consent').props.accessibilityLabel)
       .toContain('comunicações promocionais');
   });

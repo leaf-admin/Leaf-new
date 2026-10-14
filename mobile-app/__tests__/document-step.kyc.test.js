@@ -50,7 +50,7 @@ describe('DocumentStep (driver KYC docs)', () => {
     });
 
     const { getByText, findByText } = render(<DocumentStep {...baseProps} />);
-    fireEvent.press(getByText('Toque para enviar o PDF da CNH'));
+    fireEvent.press(getByText('Escolher o PDF da CNH'));
 
     expect(
       await findByText('Sem conexão com a internet. Verifique sua rede e tente novamente.')
@@ -83,7 +83,7 @@ describe('DocumentStep (driver KYC docs)', () => {
 
     const onSubmitted = jest.fn();
     const { getByText, getByTestId } = render(<DocumentStep {...baseProps} onSubmitted={onSubmitted} />);
-    fireEvent.press(getByText('Toque para enviar o PDF da CNH'));
+    fireEvent.press(getByText('Escolher o PDF da CNH'));
 
     await waitFor(() => {
       expect(getByText('CNH-e.pdf')).toBeTruthy();
@@ -166,7 +166,7 @@ describe('DocumentStep (driver KYC docs)', () => {
       />,
     );
 
-    fireEvent.press(getByText('Enviar agora ou deixar para o cadastro do 1º veículo'));
+    fireEvent.press(getByText('Enviar agora ou depois, ao cadastrar o veículo'));
     await waitFor(() => {
       expect(driverDocumentExtractionService.extractVehicleFromPDF).toHaveBeenCalledTimes(1);
     });

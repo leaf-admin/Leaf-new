@@ -85,8 +85,9 @@ env:
 
 - extendedWaitUntil:
     visible:
-      id: "(auth-phone-input|passenger-home-destination-input)"
+      id: "(onboarding-welcome-start|auth-phone-input|passenger-home-destination-input)"
     timeout: 30000
+- runFlow: ../_skip-onboarding-welcome.yaml
 
 - runFlow:
     when:

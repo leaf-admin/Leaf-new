@@ -10,10 +10,12 @@ import {
   View,
   useWindowDimensions
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import Reanimated, { FadeInRight } from 'react-native-reanimated';
 import { SafeAreaInsetsContext } from 'react-native-safe-area-context';
 import onboardingTheme from './onboardingTheme';
-import { LeafObjectIcon } from '../../prototype/LeafVisualElements';
+import LeafLineIcon from '../../design-system/LeafLineIcon';
+import { LeafAnimatedPressable } from '../../prototype/LeafRideUI';
+import { OnboardingProgress } from '../../onboarding/onboardingKit';
 
 const { color, spacing } = onboardingTheme;
 const STICKY_FOOTER_MAX_FONT_SCALE = 1.4;
@@ -140,9 +142,11 @@ export default function EditorialOnboardingScreen({
         ]}
         testID="editorial-onboarding-scroll"
       >
+        {/* Topo do onboarding novo: voltar em círculo e progresso contínuo (sem "Seu acesso",
+            sem "1 de 3" e sem o ícone genérico); a etapa entra deslizando. */}
         <View style={styles.topRow}>
           {showBack ? (
-            <Pressable
+            <LeafAnimatedPressable
               style={styles.backButton}
               onPress={onBack}
               hitSlop={10}
@@ -150,22 +154,20 @@ export default function EditorialOnboardingScreen({
               accessibilityLabel={backAccessibilityLabel}
               testID={backTestID}
             >
-              <Ionicons name="arrow-back" size={20} color={color.textPrimary} />
-            </Pressable>
-          ) : (
-            <View style={styles.backButtonPlaceholder} />
-          )}
-          <Text style={styles.headerTitle}>{headerTitle}</Text>
-          <Text style={styles.stepNumber}>{meta.activeStep} de {meta.totalSteps}</Text>
+              <LeafLineIcon name="back" size={20} color={color.textPrimary} />
+            </LeafAnimatedPressable>
+          ) : null}
+          <View style={styles.progressWrap}>
+            <OnboardingProgress step={meta.activeStep} total={meta.totalSteps} />
+          </View>
         </View>
 
-        <View style={styles.lead}>
+        <Reanimated.View key={String(title || '')} entering={FadeInRight.duration(260)} style={styles.lead}>
           <View style={styles.leadCopy}>
             <Text style={styles.title} accessibilityRole="header">{String(title || '').replace(/\n/g, ' ')}</Text>
             {description ? <Text style={styles.description}>{description}</Text> : null}
           </View>
-          {leadObject ? <LeafObjectIcon name={leadObject} size={48} /> : null}
-        </View>
+        </Reanimated.View>
         <View style={[styles.childrenWrap, childrenStyle]}>{children}</View>
       {footer && !useStickyFooter ? (
         <View
@@ -224,16 +226,24 @@ const styles = StyleSheet.create({
     minHeight: 44,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
-    marginBottom: 24,
+    gap: 14,
+    marginBottom: 28,
   },
+  progressWrap: { flex: 1 },
   backButton: {
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: color.surfaceMuted,
+    backgroundColor: '#FFFFFF',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: color.border,
     alignItems: 'center',
-    justifyContent: 'center'
+    justifyContent: 'center',
+    shadowColor: '#0E1F12',
+    shadowOpacity: 0.10,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 4,
   },
   backButtonPlaceholder: {
     display: 'none',
@@ -273,25 +283,26 @@ const styles = StyleSheet.create({
   },
   title: {
     color: color.textPrimary,
-    fontSize: 24,
-    lineHeight: 30,
+    fontSize: 30,
+    lineHeight: 36,
     ...leafTypography.semiBold,
-    letterSpacing: -0.5
+    letterSpacing: -0.4
   },
   description: {
     marginTop: 8,
     color: color.textSecondary,
-    fontSize: 14,
-    lineHeight: 21,
+    fontSize: 16,
+    lineHeight: 23,
     ...leafTypography.regular,
     letterSpacing: 0
   },
   childrenWrap: {
-    marginTop: 24
+    marginTop: 28
   },
   footer: {
     paddingHorizontal: 24,
     paddingTop: 12,
+    gap: 14,
     backgroundColor: color.background
   },
   inlineFooter: {

@@ -1,13 +1,9 @@
-import leafTypography from '../../prototype/LeafTypography';
 import React, { useMemo, useState } from 'react';
-import { Alert, Linking, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import { Alert, Linking } from 'react-native';
 import ContinueButton from '../common/ContinueButton';
-import onboardingTheme from '../common/onboardingTheme';
 import EditorialOnboardingScreen from '../common/EditorialOnboardingLayout';
+import { ConsentRow } from '../../onboarding/onboardingSteps';
 import { AppConfig } from '../../../../config/AppConfig';
-
-const { color, spacing } = onboardingTheme;
 
 const CredentialsStep = ({ onCreated, onBack, initialData = {}, progressMeta, isSubmitting = false }) => {
   const isDriver = initialData?.profileSelection?.userType === 'driver';
@@ -85,11 +81,13 @@ const CredentialsStep = ({ onCreated, onBack, initialData = {}, progressMeta, is
     }
   };
 
+  const submitLabel = isDriver ? 'Aceitar e enviar cadastro' : 'Concluir';
+
   return (
     <EditorialOnboardingScreen
-      title={'Confirme\npermissões'}
+      title={isDriver ? 'Últimos combinados' : 'Termos da Leaf'}
       description={isDriver
-        ? 'Revise os consentimentos necessários para dirigir com segurança pela Leaf.'
+        ? 'Para dirigir com a Leaf precisamos do seu aceite nestes pontos.'
         : 'Revise os termos para finalizar sua conta.'}
       onBack={onBack}
       progressMeta={progressMeta}
@@ -97,205 +95,50 @@ const CredentialsStep = ({ onCreated, onBack, initialData = {}, progressMeta, is
         <ContinueButton
           onPress={handleSubmit}
           disabled={!isFormValid || isSubmitting}
-          text={isSubmitting ? 'Finalizando...' : 'Concluir'}
+          text={isSubmitting ? 'Enviando…' : submitLabel}
+          testID="auth-credentials-submit"
         />
       )}
     >
-      <View style={styles.legalLinksRow}>
-        <TouchableOpacity
-          onPress={() => openLegalLink(AppConfig.terms_of_service_url, 'Termos de Uso')}
-          accessibilityRole="button"
-          accessibilityLabel="Ler Termos de Uso"
-        >
-          <Text style={styles.legalLinkText}>Ler Termos de Uso</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          onPress={() => openLegalLink(AppConfig.privacy_policy_url, 'Política de Privacidade')}
-          accessibilityRole="button"
-          accessibilityLabel="Ler Política de Privacidade"
-        >
-          <Text style={styles.legalLinkText}>Ler Política de Privacidade</Text>
-        </TouchableOpacity>
-      </View>
-
-      <View style={styles.block}>
-        <Text style={styles.sectionLabel}>Obrigatório</Text>
-        <ConsentRow
-          checked={consents.acceptTerms}
-          label="Aceito os Termos de Uso *"
-          onPress={() => toggleConsent('acceptTerms')}
-          testID="auth-credentials-terms-consent"
-        />
-        {errors.acceptTerms ? (
-          <Text style={styles.errorText} accessibilityRole="alert" accessibilityLiveRegion="polite">
-            {errors.acceptTerms}
-          </Text>
-        ) : null}
-
-        <ConsentRow
-          checked={consents.acceptPrivacy}
-          label="Aceito a Política de Privacidade *"
-          onPress={() => toggleConsent('acceptPrivacy')}
-          testID="auth-credentials-privacy-consent"
-        />
-        {errors.acceptPrivacy ? (
-          <Text style={styles.errorText} accessibilityRole="alert" accessibilityLiveRegion="polite">
-            {errors.acceptPrivacy}
-          </Text>
-        ) : null}
-
-        {isDriver ? (
-          <>
-            <ConsentRow
-              checked={consents.consentBackgroundCheck}
-              label="Autorizo checagem de antecedentes criminais e validação regulatória *"
-              onPress={() => toggleConsent('consentBackgroundCheck')}
-              testID="auth-driver-background-check-consent"
-            />
-            {errors.consentBackgroundCheck ? (
-              <Text style={styles.errorText} accessibilityRole="alert" accessibilityLiveRegion="polite">
-                {errors.consentBackgroundCheck}
-              </Text>
-            ) : null}
-
-            <Text style={styles.sectionLabel}>Opcional</Text>
-            <ConsentRow
-              checked={consents.marketingOptIn}
-              label="Aceito receber comunicações promocionais (opcional)"
-              onPress={() => toggleConsent('marketingOptIn')}
-              testID="auth-driver-marketing-consent"
-            />
-          </>
-        ) : null}
-      </View>
+      <ConsentRow
+        title="Termos de Uso"
+        description="Regras de uso da plataforma."
+        required
+        checked={consents.acceptTerms}
+        onToggle={() => toggleConsent('acceptTerms')}
+        onOpen={() => openLegalLink(AppConfig.terms_of_service_url, 'os Termos de Uso')}
+        testID="auth-credentials-terms-consent"
+      />
+      <ConsentRow
+        title="Política de Privacidade"
+        description="Como cuidamos dos seus dados."
+        required
+        checked={consents.acceptPrivacy}
+        onToggle={() => toggleConsent('acceptPrivacy')}
+        onOpen={() => openLegalLink(AppConfig.privacy_policy_url, 'a Política de Privacidade')}
+        testID="auth-credentials-privacy-consent"
+      />
+      {isDriver ? (
+        <>
+          <ConsentRow
+            title="Checagem de antecedentes"
+            description="Autorizo a consulta de antecedentes criminais e a validação regulatória."
+            required
+            checked={consents.consentBackgroundCheck}
+            onToggle={() => toggleConsent('consentBackgroundCheck')}
+            testID="auth-driver-background-check-consent"
+          />
+          <ConsentRow
+            title="Novidades e promoções"
+            description="Aceito receber comunicações promocionais sobre campanhas e ganhos extras."
+            checked={consents.marketingOptIn}
+            onToggle={() => toggleConsent('marketingOptIn')}
+            testID="auth-driver-marketing-consent"
+          />
+        </>
+      ) : null}
     </EditorialOnboardingScreen>
   );
 };
-
-function ConsentRow({ checked, label, onPress, testID }) {
-  return (
-    <TouchableOpacity
-      style={styles.consentRow}
-      activeOpacity={0.86}
-      onPress={onPress}
-      testID={testID}
-      accessibilityRole="checkbox"
-      accessibilityLabel={label}
-      accessibilityState={{ checked }}
-      accessibilityHint={checked ? 'Toque duas vezes para desmarcar.' : 'Toque duas vezes para aceitar.'}
-    >
-      <View style={[styles.checkbox, checked && styles.checkboxChecked]}>
-        {checked ? <Ionicons name="checkmark" size={14} color={color.accentText} /> : null}
-      </View>
-      <Text style={styles.consentLabel}>{label}</Text>
-    </TouchableOpacity>
-  );
-}
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    paddingHorizontal: spacing.lg,
-    paddingTop: spacing.xl,
-    paddingBottom: spacing.xs
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    minHeight: 44,
-    marginBottom: spacing.md
-  },
-  backButton: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    borderWidth: 1,
-    borderColor: color.border,
-    backgroundColor: color.panelSoft,
-    alignItems: 'center',
-    justifyContent: 'center'
-  },
-  title: {
-    fontSize: 22,
-    lineHeight: 28,
-    color: color.textPrimary,
-    ...leafTypography.bold,
-    letterSpacing: 0
-  },
-  subtitle: {
-    fontSize: 14,
-    lineHeight: 20,
-    color: color.textSecondary,
-    ...leafTypography.regular,
-    marginTop: spacing.sm,
-    marginBottom: spacing.lg
-  },
-  legalLinksRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 18
-  },
-  legalLinkText: {
-    fontSize: 12,
-    lineHeight: 16,
-    color: color.accent,
-    textDecorationLine: 'underline',
-    ...leafTypography.medium
-  },
-  block: {
-    borderWidth: 1,
-    borderColor: color.border,
-    borderRadius: 24,
-    backgroundColor: color.surface,
-    padding: 18
-  },
-  sectionLabel: {
-    marginTop: 2,
-    marginBottom: spacing.xs,
-    color: color.textSecondary,
-    fontSize: 11,
-    lineHeight: 14,
-    ...leafTypography.bold,
-    textTransform: 'uppercase',
-    letterSpacing: 0.8
-  },
-  consentRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    marginBottom: spacing.xs
-  },
-  checkbox: {
-    width: 18,
-    height: 18,
-    borderRadius: 5,
-    borderWidth: 1,
-    borderColor: color.borderStrong,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 2,
-    marginRight: 8,
-    backgroundColor: color.surfaceMuted
-  },
-  checkboxChecked: {
-    borderColor: color.accent,
-    backgroundColor: color.accent
-  },
-  consentLabel: {
-    flex: 1,
-    fontSize: 13,
-    lineHeight: 18,
-    color: color.textPrimary,
-    ...leafTypography.medium
-  },
-  errorText: {
-    marginTop: -4,
-    marginBottom: 8,
-    marginLeft: 26,
-    color: color.error,
-    fontSize: 12,
-    lineHeight: 16,
-    ...leafTypography.medium
-  }
-});
 
 export default CredentialsStep;

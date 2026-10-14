@@ -5,6 +5,19 @@ appId: br.com.leaf.ride
 
 - extendedWaitUntil:
     visible:
+      id: "(onboarding-welcome-start|auth-phone-input)"
+    timeout: 120000
+
+- runFlow:
+    when:
+      visible:
+        id: "onboarding-welcome-start"
+    commands:
+      - tapOn:
+          id: "onboarding-welcome-start"
+
+- extendedWaitUntil:
+    visible:
       id: "auth-phone-input"
     timeout: 120000
 
@@ -94,31 +107,28 @@ appId: br.com.leaf.ride
             - tapOn:
                 id: "auth-otp-verify-btn"
 
-- runFlow:
-    when:
-      visible:
-        id: "auth-profile-selection-trigger"
-    commands:
-      - tapOn:
-          id: "auth-profile-selection-trigger"
-      - tapOn:
-          id: "auth-profile-option-customer"
-      - tapOn:
-          id: "auth-profile-selection-continue-btn"
+- extendedWaitUntil:
+    visible:
+      id: "auth-profile-option-customer"
+    timeout: 90000
+- tapOn:
+    id: "auth-profile-option-customer"
+- tapOn:
+    id: "auth-profile-selection-continue-btn"
 
-- runFlow:
-    when:
-      visible: "Digite seu nome completo"
-    commands:
-      - tapOn: "Digite seu nome completo"
-      - eraseText
-      - inputText: "QA Passageiro Signup"
-      - tapOn: ".*Termos de Uso.*"
-      - tapOn: ".*Privacidade.*"
-      - swipe:
-          start: "50%,82%"
-          end: "50%,36%"
-      - tapOn: "Continuar"
+- extendedWaitUntil:
+    visible:
+      id: "auth-profile-full-name-input"
+    timeout: 90000
+- tapOn:
+    id: "auth-profile-full-name-input"
+- eraseText
+- inputText: "QA Passageiro Signup"
+- hideKeyboard
+- tapOn:
+    id: "auth-profile-legal-consent"
+- tapOn:
+    id: "auth-profile-submit"
 
 - runFlow:
     when:

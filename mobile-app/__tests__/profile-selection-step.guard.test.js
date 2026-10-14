@@ -59,16 +59,16 @@ describe('ProfileSelectionStep explicit choice guard', () => {
     const driver = getByTestId('auth-profile-option-driver');
 
     expect(getByTestId('auth-profile-selection-continue-btn').props.accessibilityLabel).toBe('Continuar');
-    expect(passenger.props.accessibilityRole).toBe('button');
+    expect(passenger.props.accessibilityRole).toBe('radio');
     expect(passenger.props.accessibilityLabel).toBe(
-      'Quero viajar. Solicite viagens com experiência premium',
+      'Quero viajar. Peça corridas com preço fechado e pague com Pix.',
     );
-    expect(passenger.props.accessibilityState).toEqual({ selected: false });
+    expect(passenger.props.accessibilityState).toEqual(expect.objectContaining({ selected: false }));
 
     fireEvent.press(driver);
     await waitFor(() => {
       expect(getByTestId('auth-profile-option-driver').props.accessibilityState)
-        .toEqual({ selected: true });
+        .toEqual(expect.objectContaining({ selected: true }));
     });
   });
 });

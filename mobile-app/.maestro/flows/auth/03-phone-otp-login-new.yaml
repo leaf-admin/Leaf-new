@@ -45,8 +45,9 @@ env:
 
 - extendedWaitUntil:
     visible:
-      id: "auth-phone-input"
+      id: "(onboarding-welcome-start|auth-phone-input|onboarding-welcome-start)"
     timeout: 20000
+- runFlow: ../_skip-onboarding-welcome.yaml
 
 - tapOn:
     id: "auth-phone-input"

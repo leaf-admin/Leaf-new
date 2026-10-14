@@ -39,6 +39,7 @@ env:
       - tapOn: "http://10.0.2.2:8081"
       - waitForAnimationToEnd
 
+- runFlow: ../_skip-onboarding-welcome.yaml
 - runFlow:
     when:
       notVisible:
@@ -68,9 +69,11 @@ env:
 
 - extendedWaitUntil:
     visible:
-      id: "(auth-phone-input|auth-password-input|auth-otp-digit-0|passenger-home-destination-input)"
+      id: "(onboarding-welcome-start|auth-phone-input|auth-password-input|auth-otp-digit-0|passenger-home-destination-input)"
     timeout: 90000
+- runFlow: ../_skip-onboarding-welcome.yaml
 
+- runFlow: ../_skip-onboarding-welcome.yaml
 - runFlow:
     when:
       visible:
@@ -208,6 +211,7 @@ env:
           commands:
             - tapOn: "Permitir apenas desta vez"
 
+- runFlow: ../_skip-onboarding-welcome.yaml
 - runFlow:
     when:
       visible:

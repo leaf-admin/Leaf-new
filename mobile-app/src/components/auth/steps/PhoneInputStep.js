@@ -12,7 +12,6 @@ import {
 } from 'react-native';
 import auth from '@react-native-firebase/auth';
 import { Ionicons } from '@expo/vector-icons';
-import { LeafObjectIcon } from '../../prototype/LeafVisualElements';
 import {
     allowCustomOtpFallback,
     allowQaOtpForceFlow,
@@ -26,6 +25,7 @@ import Logger from '../../../utils/Logger';
 import onboardingTheme from '../common/onboardingTheme';
 import ContinueButton from '../common/ContinueButton';
 import EditorialOnboardingScreen from '../common/EditorialOnboardingLayout';
+import { formatBrazilPhone } from '../../onboarding/onboardingSteps';
 import { toUserFriendlyError, toUserFriendlyMessage } from '../../../utils/friendlyErrorMessages';
 import { getReviewAccountInfo } from '../../../config/reviewAccounts';
 
@@ -111,8 +111,9 @@ function resolveAuthAlertTitle(error, friendlyMessage = '') {
     return 'Erro de autenticação';
 }
 
-const PhoneInputStep = ({ onVerificationSent, onPasswordLoginSuccess, progressMeta }) => {
+const PhoneInputStep = ({ onVerificationSent, onPasswordLoginSuccess, progressMeta, onBack }) => {
     const [phoneNumber, setPhoneNumber] = useState('');
+    const [phoneFocused, setPhoneFocused] = useState(false);
     const [loading, setLoading] = useState(false);
     const [checking, setChecking] = useState(false);
     const [requiresPassword, setRequiresPassword] = useState(false);
@@ -528,12 +529,13 @@ const PhoneInputStep = ({ onVerificationSent, onPasswordLoginSuccess, progressMe
     return (
         <EditorialOnboardingScreen
             keyboard
-            showBack={false}
+            showBack={Boolean(onBack)}
+            onBack={onBack}
             progressMeta={progressMeta}
-            headerTitle="Seu acesso"
-            leadObject="account"
-            title="Qual é seu número?"
-            description={`Vamos confirmar seu acesso por ${otpChannelLabel}.`}
+            title={requiresPassword ? 'Bem-vindo de volta' : 'Qual é o seu número?'}
+            description={requiresPassword
+                ? 'Entre com a senha deste celular.'
+                : `Enviamos um código por ${otpChannelLabel} para confirmar que é você.`}
             childrenStyle={styles.childrenWrap}
             footer={(
                 <View>
@@ -541,7 +543,7 @@ const PhoneInputStep = ({ onVerificationSent, onPasswordLoginSuccess, progressMe
                         testID="auth-continue-btn"
                         onPress={handleContinue}
                         text={loading || checking
-                            ? 'Continuando...'
+                            ? 'Continuando…'
                             : requiresPassword
                                 ? (forgotPasswordMode ? 'Redefinir senha' : 'Entrar')
                                 : 'Continuar'}
@@ -572,7 +574,7 @@ const PhoneInputStep = ({ onVerificationSent, onPasswordLoginSuccess, progressMe
         >
                 <View style={styles.contentCard}>
                     <Text style={styles.fieldLabel}>Telefone com DDD</Text>
-                    <View style={styles.inputContainer}>
+                    <View style={[styles.inputContainer, phoneFocused && styles.inputContainerFocused]}>
                         <View
                             style={styles.countrySelector}
                             accessible
@@ -584,13 +586,13 @@ const PhoneInputStep = ({ onVerificationSent, onPasswordLoginSuccess, progressMe
 
                         <TextInput
                             testID="auth-phone-input"
-                            placeholder="DDD + número"
+                            placeholder="(21) 99999-9999"
                             accessibilityLabel="Número de celular com DDD"
                             accessibilityHint="Digite o número com DDD, sem o código do país."
                             placeholderTextColor={color.textMuted}
                             selectionColor="#222222"
                             keyboardType="phone-pad"
-                            value={phoneNumber}
+                            value={formatBrazilPhone(phoneNumber)}
                             onChangeText={handlePhoneChanged}
                             maxLength={16}
                             editable={!loading && !checking}
@@ -600,15 +602,17 @@ const PhoneInputStep = ({ onVerificationSent, onPasswordLoginSuccess, progressMe
                                 handleContinue();
                             }}
                             blurOnSubmit
+                            onFocus={() => setPhoneFocused(true)}
+                            onBlur={() => setPhoneFocused(false)}
                             style={styles.input}
                         />
                     </View>
 
                     {!requiresPassword ? (
                         <View style={styles.accessHint}>
-                            <LeafObjectIcon name="privacy" size={32} />
+                            <Ionicons name="lock-closed-outline" size={16} color={color.textMuted} />
                             <Text style={styles.accessHintText}>
-                                Um código de 6 números confirma que este telefone é seu.
+                                Seu número fica protegido e só é usado para acessar a Leaf.
                             </Text>
                         </View>
                     ) : null}
@@ -802,95 +806,96 @@ const styles = StyleSheet.create({
     passwordInputContainer: {
         flexDirection: 'row',
         alignItems: 'center',
-        backgroundColor: color.surfaceMuted,
-        borderWidth: 1,
+        backgroundColor: '#FFFFFF',
+        borderWidth: 1.5,
         borderColor: color.border,
-        borderRadius: radius.md,
-        minHeight: 52,
-        marginTop: spacing.xs
+        borderRadius: 16,
+        minHeight: 56,
+        marginTop: 12
     },
     passwordInput: {
         flex: 1,
-        paddingHorizontal: spacing.sm,
-        fontSize: 15,
-        lineHeight: 20,
+        paddingHorizontal: 16,
+        fontSize: 17,
+        lineHeight: 22,
         color: color.textPrimary,
-        ...leafTypography.medium
+        ...leafTypography.regular
     },
     passwordEyeButton: {
         paddingHorizontal: spacing.sm,
         paddingVertical: spacing.xs
     },
     inlineTextInput: {
-        backgroundColor: color.surfaceMuted,
-        borderWidth: 1,
+        backgroundColor: '#FFFFFF',
+        borderWidth: 1.5,
         borderColor: color.border,
-        borderRadius: radius.md,
-        minHeight: 52,
-        marginTop: spacing.xs,
-        paddingHorizontal: spacing.sm,
-        fontSize: 15,
-        lineHeight: 20,
+        borderRadius: 16,
+        minHeight: 56,
+        marginTop: 12,
+        paddingHorizontal: 16,
+        fontSize: 17,
+        lineHeight: 22,
         color: color.textPrimary,
-        ...leafTypography.medium
+        ...leafTypography.regular
     },
     inlineLinkButton: {
         alignSelf: 'flex-start',
-        marginTop: spacing.xs,
+        marginTop: 12,
         paddingVertical: 4
     },
     inlineLinkText: {
-        color: color.textSecondary,
-        fontSize: 13,
-        lineHeight: 18,
-        ...leafTypography.semiBold,
+        color: color.textPrimary,
+        fontSize: 14,
+        lineHeight: 20,
+        ...leafTypography.medium,
         textDecorationLine: 'underline'
     },
     inlineHintText: {
-        marginTop: 6,
-        color: color.textSecondary,
-        fontSize: 12,
-        lineHeight: 16,
-        ...leafTypography.medium
-    },
-    passwordErrorText: {
-        marginTop: 6,
-        color: color.error,
-        fontSize: 12,
-        lineHeight: 16,
-        ...leafTypography.medium
-    },
-    inputContainer: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        backgroundColor: color.surfaceMuted,
-        borderWidth: StyleSheet.hairlineWidth,
-        borderColor: color.border,
-        borderRadius: 16,
-        paddingRight: 18,
-        minHeight: 64
-    },
-    countrySelector: {
-        width: 64,
-        paddingHorizontal: 0,
-        paddingVertical: 0,
-        justifyContent: 'center',
-        borderRightWidth: 1,
-        borderRightColor: color.border,
-        minHeight: 24
-    },
-    fieldLabel: {
-        marginBottom: 10,
+        marginTop: 8,
         color: color.textSecondary,
         fontSize: 13,
         lineHeight: 18,
         ...leafTypography.regular
     },
-    accessHint: {
-        marginTop: 24,
+    passwordErrorText: {
+        marginTop: 8,
+        color: color.error,
+        fontSize: 13,
+        lineHeight: 18,
+        ...leafTypography.medium
+    },
+    inputContainer: {
         flexDirection: 'row',
-        alignItems: 'flex-start',
-        gap: 12
+        alignItems: 'center',
+        backgroundColor: '#FFFFFF',
+        borderWidth: 1.5,
+        borderColor: color.border,
+        borderRadius: 16,
+        paddingRight: 16,
+        minHeight: 60
+    },
+    inputContainerFocused: {
+        borderColor: color.borderStrong
+    },
+    countrySelector: {
+        width: 60,
+        justifyContent: 'center',
+        borderRightWidth: StyleSheet.hairlineWidth,
+        borderRightColor: color.border,
+        minHeight: 28
+    },
+    fieldLabel: {
+        marginBottom: 8,
+        color: color.textSecondary,
+        fontSize: 13,
+        lineHeight: 18,
+        ...leafTypography.medium
+    },
+    accessHint: {
+        marginTop: 16,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8
     },
     accessHintText: {
         flex: 1,
@@ -900,21 +905,20 @@ const styles = StyleSheet.create({
         ...leafTypography.regular
     },
     countryCode: {
-        marginTop: 1,
         color: color.textPrimary,
-        fontSize: 16,
-        ...leafTypography.medium,
+        fontSize: 18,
+        ...leafTypography.semiBold,
         textAlign: 'center'
     },
     input: {
         flex: 1,
-        minHeight: 58,
-        paddingHorizontal: 18,
+        minHeight: 56,
+        paddingHorizontal: 16,
         paddingVertical: 12,
-        fontSize: 16,
-        letterSpacing: 0,
+        fontSize: 20,
+        letterSpacing: 0.3,
         color: color.textPrimary,
-        ...leafTypography.regular
+        ...leafTypography.semiBold
     },
     footer: {
         marginTop: 'auto',
@@ -954,16 +958,16 @@ const styles = StyleSheet.create({
         opacity: 0
     },
     passwordFallbackButton: {
-        marginTop: spacing.xs,
+        marginTop: 14,
         alignSelf: 'center',
-        paddingHorizontal: spacing.sm,
-        paddingVertical: 4
+        paddingHorizontal: 12,
+        paddingVertical: 6
     },
     passwordFallbackText: {
-        color: color.textSecondary,
-        fontSize: 13,
-        lineHeight: 18,
-        ...leafTypography.semiBold,
+        color: color.textPrimary,
+        fontSize: 15,
+        lineHeight: 20,
+        ...leafTypography.medium,
         textDecorationLine: 'underline'
     }
 });
