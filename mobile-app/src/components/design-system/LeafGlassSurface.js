@@ -11,6 +11,11 @@ import { LinearGradient } from 'expo-linear-gradient';
 let GlassView = null;
 let liquidGlassAvailable = false;
 let AndroidBlurView = null;
+// O blur ao vivo (dimezis) recalcula o desfoque a cada redesenho da janela: com a barra de
+// "Procurando corridas" animando, eram ~60 desfoques por segundo por superfície (o app do
+// motorista passava de 100% de CPU parado). A lente Skia já refrata uma foto estática do
+// mapa; por baixo dela fica um branco mais denso, que lê bem mesmo sem a foto.
+const ANDROID_LIVE_BLUR = false;
 if (Platform.OS === 'android') {
   try {
     const { requireOptionalNativeModule } = require('expo-modules-core');
@@ -222,15 +227,17 @@ export default function LeafGlassSurface({
       viewProps.onLayout?.(event);
     };
     return (
-      <View style={[styles.base, styles.glassClip, isDark ? styles.androidGlassDark : styles.androidGlassLight, style]} testID={testID} {...viewProps} ref={surfaceRef} onLayout={handleLayout}>
-        <AndroidBlurView
-          intensity={isDark ? 60 : 70}
-          tint={isDark ? 'dark' : 'light'}
-          experimentalBlurMethod="dimezisBlurView"
-          blurReductionFactor={4}
-          style={[StyleSheet.absoluteFill, borderRadius != null && { borderRadius, overflow: 'hidden' }]}
-          pointerEvents="none"
-        />
+      <View style={[styles.base, styles.glassClip, isDark ? styles.androidGlassDark : styles.androidGlassLight, !ANDROID_LIVE_BLUR && (isDark ? styles.androidGlassDarkSolid : styles.androidGlassLightSolid), style]} testID={testID} {...viewProps} ref={surfaceRef} onLayout={handleLayout}>
+        {ANDROID_LIVE_BLUR ? (
+          <AndroidBlurView
+            intensity={isDark ? 60 : 70}
+            tint={isDark ? 'dark' : 'light'}
+            experimentalBlurMethod="dimezisBlurView"
+            blurReductionFactor={4}
+            style={[StyleSheet.absoluteFill, borderRadius != null && { borderRadius, overflow: 'hidden' }]}
+            pointerEvents="none"
+          />
+        ) : null}
         {/* Glass cues the blur alone lacks: a sheen falling from the top edge
             and a bright inner rim, so the surface reads as a lens, not paint. */}
         {Skia ? (
@@ -283,6 +290,12 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.4)',
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: 'rgba(17,20,16,0.14)',
+  },
+  androidGlassLightSolid: {
+    backgroundColor: 'rgba(255,255,255,0.86)',
+  },
+  androidGlassDarkSolid: {
+    backgroundColor: 'rgba(17,20,16,0.82)',
   },
   androidRim: {
     borderWidth: 1,

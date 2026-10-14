@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-10-14T02:25:32.651Z",
+  "generatedAt": "2026-10-14T16:47:15.200Z",
   "coverageModel": "static-flow-definition-only",
   "releasePreconditions": [
     "Executar somente build release instalado (`br.com.leaf.ride`), sem Expo Go/dev-client como alvo.",
@@ -9,7 +9,7 @@
     "Evidências por rodada devem incluir JUnit XML, logs Maestro, screenshots e snapshot de runtime flags."
   ],
   "routeSurfaceCounts": {
-    "current": 46,
+    "current": 47,
     "compatibility_redirect": 26
   },
   "releaseCoverageMatrix": [
@@ -280,6 +280,11 @@
     {
       "name": "LeafSavedPlaces",
       "category": "other",
+      "surfaceStatus": "current"
+    },
+    {
+      "name": "LeafStreetSearchLab",
+      "category": "account-support",
       "surfaceStatus": "current"
     },
     {
