@@ -98,6 +98,21 @@ function registerSocketDisconnectHandler({
         }
     };
 
+    const driverHasLiveSocket = async (driverId) => {
+        if (!driverId || typeof io?.in !== 'function') return false;
+        try {
+            const sockets = await io.in(`driver_${driverId}`).fetchSockets();
+            return Array.isArray(sockets) && sockets.some((candidate) => candidate.id !== socket.id);
+        } catch (error) {
+            logStructured('warn', 'Não foi possível checar sockets do motorista após a janela de graça', {
+                service: 'websocket',
+                userId: driverId,
+                error: error.message
+            });
+            return false;
+        }
+    };
+
     const finalizeDriverDisconnect = async () => {
         const disconnectedAtMs = Date.now();
         const disconnectedAtIso = new Date(disconnectedAtMs).toISOString();
@@ -290,7 +305,10 @@ function registerSocketDisconnectHandler({
                     }
 
                     const timeout = setTimeout(() => {
-                        finalizeDriverDisconnect()
+                        // A reconexão pode cair em outro gateway, onde este timer não é limpo:
+                        // pergunta a todos (adapter Redis) se o motorista já tem socket ativo.
+                        driverHasLiveSocket(socket.userId)
+                            .then((live) => (live ? null : finalizeDriverDisconnect()))
                             .catch((error) => {
                                 logStructured('error', 'Erro ao finalizar grace de desconexão do motorista', {
                                     service: 'websocket',

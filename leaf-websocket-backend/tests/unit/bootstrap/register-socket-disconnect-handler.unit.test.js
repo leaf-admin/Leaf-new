@@ -261,3 +261,83 @@ describe('registerSocketDisconnectHandler driver online time cleanup', () => {
         }
     });
 });
+
+describe('registerSocketDisconnectHandler grace window across gateways', () => {
+    const previousGrace = process.env.DRIVER_DISCONNECT_GRACE_MS;
+    afterEach(() => {
+        jest.useRealTimers();
+        jest.clearAllMocks();
+        if (previousGrace === undefined) delete process.env.DRIVER_DISCONNECT_GRACE_MS;
+        else process.env.DRIVER_DISCONNECT_GRACE_MS = previousGrace;
+    });
+
+    function setup(liveSockets) {
+        process.env.DRIVER_DISCONNECT_GRACE_MS = '60000';
+        jest.useFakeTimers();
+        const redis = {
+            status: 'ready',
+            connect: jest.fn().mockResolvedValue(undefined),
+            hgetall: jest.fn(async (key) => (key === 'driver:driver_1'
+                ? { lat: '-22.9', lng: '-43.2', heading: '0', speed: '0' }
+                : {})),
+            hset: jest.fn().mockResolvedValue(1),
+            expire: jest.fn().mockResolvedValue(1),
+            zrem: jest.fn().mockResolvedValue(1),
+            srem: jest.fn().mockResolvedValue(1),
+            del: jest.fn().mockResolvedValue(1)
+        };
+        const socket = {
+            id: 'socket_old',
+            userId: 'driver_1',
+            userType: 'driver',
+            on: jest.fn((event, handler) => { socket.handlers[event] = handler; }),
+            handlers: {}
+        };
+        const fetchSockets = jest.fn().mockResolvedValue(liveSockets);
+        const io = {
+            engine: { clientsCount: 1 },
+            connectedUsers: new Map([['driver_1', socket]]),
+            in: jest.fn(() => ({ fetchSockets }))
+        };
+        const saveDriverLocation = jest.fn().mockResolvedValue(undefined);
+        registerSocketDisconnectHandler({
+            socket,
+            io,
+            websocketRateLimiter: { unregisterConnection: jest.fn().mockResolvedValue(undefined) },
+            connectionMonitor: { unregisterConnection: jest.fn().mockResolvedValue(undefined) },
+            vehicleLockManager: { releaseLock: jest.fn().mockResolvedValue(true) },
+            redisPool: { getConnection: jest.fn(() => redis) },
+            saveDriverLocation,
+            logStructured: jest.fn(),
+            releaseAdmissionSlotIfNeeded: jest.fn()
+        });
+        return { socket, io, fetchSockets, saveDriverLocation };
+    }
+
+    const flush = async () => { for (let i = 0; i < 10; i += 1) await Promise.resolve(); };
+
+    it('keeps the driver online when it reconnected on another gateway during the grace window', async () => {
+        const { socket, io, saveDriverLocation } = setup([{ id: 'socket_new_on_gateway_2' }]);
+        await socket.handlers.disconnect('transport close');
+        expect(saveDriverLocation).not.toHaveBeenCalled();
+
+        jest.advanceTimersByTime(60000);
+        await flush();
+
+        expect(io.in).toHaveBeenCalledWith('driver_driver_1');
+        expect(saveDriverLocation).not.toHaveBeenCalled();
+    });
+
+    it('takes the driver offline after the grace window when no socket came back', async () => {
+        const { socket, saveDriverLocation } = setup([]);
+        await socket.handlers.disconnect('transport close');
+
+        jest.advanceTimersByTime(60000);
+        await flush();
+        await flush();
+
+        expect(saveDriverLocation).toHaveBeenCalledWith(
+            'driver_1', -22.9, -43.2, 0, 0, expect.any(Number), false, false, expect.anything()
+        );
+    });
+});
