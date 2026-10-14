@@ -170,7 +170,36 @@ export async function fetchH3CellsForRegion(region, options = {}) {
   return response?.data || response;
 }
 
+// Mapa de demanda com histórico (onde costuma haver pedidos nesta hora).
+export async function fetchDriverDemandHeat(options = {}) {
+  const response = await apiClient.get('/api/drivers/me/demand-heat', { signal: options.signal });
+  const data = response?.data || response;
+  return Array.isArray(data?.cells) ? data.cells : [];
+}
+
+// Só as células no que está na tela (com folga), para não desenhar a cidade inteira.
+export function selectDemandHeatCellsInRegion(cells = [], region, paddingRatio = 0.25) {
+  const bbox = bboxFromRegion(region);
+  if (!bbox || !Array.isArray(cells)) return [];
+  const padLat = (bbox.maxLat - bbox.minLat) * paddingRatio;
+  const padLng = (bbox.maxLng - bbox.minLng) * paddingRatio;
+  return cells.filter((cell) => {
+    const lat = Number(cell?.center?.lat);
+    const lng = Number(cell?.center?.lng);
+    return Number.isFinite(lat)
+      && Number.isFinite(lng)
+      && Array.isArray(cell?.boundary)
+      && cell.boundary.length >= 6
+      && lat >= bbox.minLat - padLat
+      && lat <= bbox.maxLat + padLat
+      && lng >= bbox.minLng - padLng
+      && lng <= bbox.maxLng + padLng;
+  });
+}
+
 export default {
+  fetchDriverDemandHeat,
+  selectDemandHeatCellsInRegion,
   estimateZoomFromRegion,
   bboxFromRegion,
   isCoordinateInsideRegion,

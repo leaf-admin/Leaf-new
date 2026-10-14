@@ -65,6 +65,8 @@ import useSearchElapsedClock from './useSearchElapsedClock';
 import { openDriverExternalNavigation } from '../../services/DriverExternalNavigationService';
 import {
   fetchH3CellsForRegion,
+  fetchDriverDemandHeat,
+  selectDemandHeatCellsInRegion,
   isCoordinateInsideRegion,
   resolveH3LabelAnchor,
   selectSeparatedH3Labels,
@@ -72,6 +74,8 @@ import {
 import WebSocketManager from '../../services/WebSocketManager';
 import driverAvailabilityService from '../../services/DriverAvailabilityService';
 import { getSelfHostedApiUrl } from '../../config/ApiConfig';
+import { getPlacesRequestHeaders } from '../../services/placesRequestHeaders';
+import LeafConfirmCard from '../../components/prototype/LeafConfirmCard';
 import { resolveMeaningfulAddress } from './addressLabelUtils';
 import { selectDisplayableDriverOffer } from './driverOfferPricingSnapshot';
 import {
@@ -344,6 +348,9 @@ const SEARCH_ZOOM_ANIMATION_MS = 1150;
 // needs the surroundings of the pickup, so the drawn area is capped.
 const SEARCH_VISUAL_MAX_RADIUS_KM = 1.2;
 const SEARCH_RADIUS_MARGIN = 1.34;
+// A câmera da busca não acompanha o raio crescendo: com a esfera por cima, cada recuo parecia o
+// mapa escorregando. Fica num enquadramento de bairro em volta do embarque.
+const SEARCH_CAMERA_MAX_RADIUS_KM = 1.2;
 const SEARCH_INITIAL_VIEWPORT_RADIUS_KM = 0.48;
 const MAP_OCCLUSION_REPOSITION_MS = 760;
 const MAP_RETURN_REPOSITION_MS = 820;
@@ -945,9 +952,7 @@ async function fetchPassengerHomeRoutePreview({
 }) {
   const response = await fetch(getSelfHostedApiUrl('/api/places/directions'), {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
+    headers: await getPlacesRequestHeaders(),
     body: JSON.stringify({
       startLoc,
       destLoc,
@@ -1217,7 +1222,7 @@ async function fetchCachedPickupPlaceOnly(query, location = null) {
     try {
       const response = await fetch(getSelfHostedApiUrl('/api/places/search'), {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: await getPlacesRequestHeaders(),
         body: JSON.stringify({
           query,
           location,
@@ -1389,7 +1394,7 @@ async function fetchHomePickupReverseGeocode(coordinate, telemetry = null) {
   try {
     const response = await fetch(getSelfHostedApiUrl('/api/places/reverse-geocode'), {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: await getPlacesRequestHeaders(),
       body: JSON.stringify({
         location,
         telemetry,
@@ -1978,6 +1983,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   const lastManualMapPanAtRef = useRef(0);
   const wasSearchingRef = useRef(false);
   const lastSearchRadiusRef = useRef(null);
+  const lastSearchCameraTargetRef = useRef(null);
   const lastAutoNavigationPhaseRef = useRef('');
   const lastDriverAutomationExecutionRef = useRef('');
   const lastDriverAutomationSnapshotRef = useRef('');
@@ -2055,6 +2061,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   const homePickupDraftBeforePickerRef = useRef(null);
   const [homePickupPickerCardHeight, setHomePickupPickerCardHeight] = useState(HOME_PICKUP_PICKER_FALLBACK_HEIGHT);
   const [driverBottomCtaHeight, setDriverBottomCtaHeight] = useState(DRIVER_BOTTOM_CTA_FALLBACK_HEIGHT);
+  const [driverOfflineConfirmVisible, setDriverOfflineConfirmVisible] = useState(false);
   const [driverLiveRideHeight, setDriverLiveRideHeight] = useState(DRIVER_LIVE_RIDE_FALLBACK_HEIGHT);
   const [driverLiveRideHeightMeasured, setDriverLiveRideHeightMeasured] = useState(false);
   const lastPassengerHomeAvailabilityNoticeRef = useRef('');
@@ -2071,6 +2078,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     hasPrototypeHomeSurfaceHydratedInSession
   );
   const [driverH3Cells, setDriverH3Cells] = useState([]);
+  const [driverDemandHeatCells, setDriverDemandHeatCells] = useState([]);
   const [driverH3VisualPolicy, setDriverH3VisualPolicy] = useState(DEFAULT_DRIVER_H3_VISUAL_POLICY);
   const [driverH3RefreshPolicy, setDriverH3RefreshPolicy] = useState({
     pollIntervalMs: DRIVER_H3_DEFAULT_FETCH_INTERVAL_MS,
@@ -3324,7 +3332,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
 
     const viewportRegion = buildSearchViewportRegion({
       center: searchCenterCoordinate,
-      radiusKm: searchPreviewRadiusKm || searchRadiusKm,
+      radiusKm: Math.min(searchPreviewRadiusKm || searchRadiusKm, SEARCH_CAMERA_MAX_RADIUS_KM),
     });
 
     if (!viewportRegion) {
@@ -6136,17 +6144,40 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     };
   }, [scheduleDriverH3Refresh, showDriverH3Overlay]);
 
+  // Mapa de demanda com histórico: busca ao entrar no mapa inicial e a cada 5 min. É o mesmo
+  // para todos os motoristas e muda devagar, então não acompanha o arrasto do mapa.
+  useEffect(() => {
+    if (!showDriverH3Overlay || typeof fetchDriverDemandHeat !== 'function') {
+      return undefined;
+    }
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const cells = await fetchDriverDemandHeat();
+        if (!cancelled) setDriverDemandHeatCells(cells);
+      } catch (_error) {
+        // Mantém o último calor; o mapa segue funcionando sem ele.
+      }
+    };
+    load();
+    const timer = setInterval(load, 5 * 60 * 1000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [showDriverH3Overlay]);
+
   const driverH3MapChildren = useMemo(() => {
-    if (
-      !showDriverH3Overlay
-      || driverH3VisualPolicy?.enabled === false
-      || !Array.isArray(driverH3Cells)
-      || driverH3Cells.length === 0
-    ) {
+    if (!showDriverH3Overlay) {
       return null;
     }
 
-    const surgeCells = driverH3Cells.filter((cell) => (
+    const heatCells = typeof selectDemandHeatCellsInRegion === 'function'
+      ? selectDemandHeatCellsInRegion(driverDemandHeatCells, visibleMapRegion)
+      : [];
+    const surgeCells = (driverH3VisualPolicy?.enabled === false || !Array.isArray(driverH3Cells)
+      ? []
+      : driverH3Cells).filter((cell) => (
       Array.isArray(cell?.boundary)
       && cell.boundary.length >= 6
       && Number(cell?.surge?.percent || 0) > 0
@@ -6154,12 +6185,25 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
       && Number.isFinite(Number(cell?.center?.lng))
     ));
 
-    if (surgeCells.length === 0) {
+    if (surgeCells.length === 0 && heatCells.length === 0) {
       return null;
     }
 
     return (
       <>
+        {heatCells.map((cell) => (
+          <Polygon
+            key={`heat-${cell.h3Index}`}
+            coordinates={cell.boundary.map((point) => ({
+              latitude: Number(point.lat),
+              longitude: Number(point.lng)
+            }))}
+            strokeWidth={0}
+            strokeColor="rgba(0,0,0,0)"
+            fillColor={`rgba(132,201,76,${(0.06 + 0.16 * Math.min(1, Math.max(0, Number(cell.intensity) || 0))).toFixed(3)})`}
+            zIndex={1}
+          />
+        ))}
         {surgeCells.map((cell) => (
           <Polygon
             key={`surge-${cell.h3Index}`}
@@ -6177,7 +6221,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
         ))}
       </>
     );
-  }, [driverH3Cells, driverH3VisualPolicy, showDriverH3Overlay, visibleMapRegion]);
+  }, [driverDemandHeatCells, driverH3Cells, driverH3VisualPolicy, showDriverH3Overlay, visibleMapRegion]);
 
   // Tags de demanda (+N%) desenhadas sobre o mapa, fora dele: como marcador nativo o
   // Android capturava a tag antes de o texto ser medido e ela saía cortada ao meio.
@@ -6389,9 +6433,23 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
       return;
     }
 
+    // Só move quando o enquadramento muda de verdade, e sempre animado: o card mudando de altura
+    // refazia o alvo e a câmera dava um salto seco (duração 0).
+    const last = lastSearchCameraTargetRef.current;
+    if (last) {
+      const centerShift = Math.hypot(
+        (searchTargetRegion.latitude - last.latitude) / last.latitudeDelta,
+        (searchTargetRegion.longitude - last.longitude) / last.longitudeDelta,
+      );
+      const zoomShift = Math.abs(searchTargetRegion.latitudeDelta / last.latitudeDelta - 1);
+      if (centerShift < 0.08 && zoomShift < 0.12) {
+        return;
+      }
+    }
+    lastSearchCameraTargetRef.current = searchTargetRegion;
     mapRef.current.animateToRegion(
       searchTargetRegion,
-      animatedFit ? SEARCH_ZOOM_ANIMATION_MS : 0
+      animatedFit ? SEARCH_ZOOM_ANIMATION_MS : 700
     );
   }, [
     isDriverRole,
@@ -6569,6 +6627,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
       wasSearchingRef.current = true;
       return;
     }
+    lastSearchCameraTargetRef.current = null;
 
     if (!wasSearchingRef.current || !mapRef.current || !homeMapInteractiveReady) {
       return;
@@ -8557,14 +8616,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
       }
 
       if (driverOnline) {
-        Alert.alert(
-          'Ficar offline',
-          'Deseja parar de receber corridas agora?',
-          [
-            { text: 'Não', style: 'cancel' },
-            { text: 'Sim', onPress: () => runDriverOnlineMutation(false) }
-          ]
-        );
+        setDriverOfflineConfirmVisible(true);
         return;
       }
 
@@ -9990,6 +10042,24 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
             insetsBottom={insets.bottom}
             bottomOffset={DRIVER_BOTTOM_CTA_OFFSET + driverBottomCtaHeight + rootNavigationInset + 12}
             suppressActivationStatusAlerts={driverHasAcceptedOrActiveWork}
+          />
+        ) : null}
+
+        {isDriverRole ? (
+          <LeafConfirmCard
+            visible={driverOfflineConfirmVisible}
+            icon="logout"
+            title="Ficar offline?"
+            message="Você para de receber corridas até ficar online de novo."
+            cancelLabel="Manter online"
+            confirmLabel="Ficar offline"
+            bottomInset={insets.bottom}
+            testID="driver-offline-confirm"
+            onCancel={() => setDriverOfflineConfirmVisible(false)}
+            onConfirm={() => {
+              setDriverOfflineConfirmVisible(false);
+              runDriverOnlineMutation(false);
+            }}
           />
         ) : null}
 

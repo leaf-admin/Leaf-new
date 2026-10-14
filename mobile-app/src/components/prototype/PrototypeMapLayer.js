@@ -24,6 +24,7 @@ function isCameraTargetClose(a, b) {
 import robotaxiPrototypeTokens from '../design-system/robotaxiPrototypeTokens';
 import LeafLocationMarker from './LeafLocationMarker';
 import LeafVehicleMarker from './LeafVehicleMarker';
+import { resolveVehicleShapeKeyForCategory } from './leafVehicleArtwork';
 import {
   invalidateGlassBackdrop,
   isGlassBackdropSupported,
@@ -2828,6 +2829,12 @@ function PrototypeMapLayer({
           isRequesting: index === activeNearbyRequestIndex,
           source: vehicleMarkerImageSource,
           colorToken: vehicleMarkerColorToken,
+          shapeKey: resolveVehicleShapeKeyForCategory(
+            vehicle.carType,
+            vehicle.category,
+            vehicle.vehicle?.type,
+            vehicle.vehicle?.category,
+          ),
         };
       })
       .filter(Boolean);
@@ -3393,7 +3400,7 @@ function PrototypeMapLayer({
                 <VehicleMarkerContent
                   source={item.source}
                   colorToken={item.colorToken}
-                  shapeKey={driverMarkerShapeKey}
+                  shapeKey={driverMarkerShapeKey || item.shapeKey}
                   screenHeading={resolveScreenRelativeVehicleHeading(item.heading, normalizedMapCameraHeading)}
                 />
               </View>

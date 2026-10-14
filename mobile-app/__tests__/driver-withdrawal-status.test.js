@@ -83,7 +83,7 @@ describe('driver withdrawal status', () => {
     expect(buildWithdrawalFeeNotice({ fee: 1, withdrawalsToday: 0 })).toEqual({
       tone: 'neutral',
       title: 'Taxa de R$ 1,00 por saque',
-      body: 'Cobrada pela Woovi a cada saque. Fazer um saque por dia evita pagar a taxa mais de uma vez.',
+      body: 'Taxa fixa cobrada a cada saque. Fazer um saque por dia evita pagar a taxa mais de uma vez.',
     });
   });
 
@@ -91,12 +91,12 @@ describe('driver withdrawal status', () => {
     expect(buildWithdrawalFeeNotice({ fee: 1, withdrawalsToday: 1 })).toMatchObject({
       tone: 'warning',
       title: 'Taxa de R$ 1,00 neste saque',
-      body: 'Você já fez 1 saque hoje. A Woovi cobra R$ 1,00 por saque, então este também paga a taxa.',
+      body: 'Você já fez 1 saque hoje. A taxa é de R$ 1,00 por saque, então este também paga a taxa.',
     });
     expect(buildWithdrawalFeeNotice({ fee: 1, withdrawalsToday: 3 }).body).toMatch(/3 saques hoje/);
   });
 
   it('says when the amount has no fee', () => {
-    expect(buildWithdrawalFeeNotice({ fee: 0, withdrawalsToday: 2 }).title).toBe('Sem taxa neste valor');
+    expect(buildWithdrawalFeeNotice({ fee: 0, withdrawalsToday: 2 }).title).toBe('Taxa de saque');
   });
 });

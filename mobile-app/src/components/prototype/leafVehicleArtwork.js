@@ -20,12 +20,18 @@ const PAINTS = Object.freeze({
 // back to the registered-color car; remote creatives use the existing upload.
 export const VEHICLE_MARKER_SHAPES = Object.freeze({
   leaf_vehicle: createLeafVehicleSvg,
+  leaf_moto: createLeafMotoSvg,
   halloween_pumpkin: createHalloweenPumpkinSvg,
 });
 
 export function resolveVehicleMarkerShapeKey(value) {
   const key = String(value || '').trim().toLowerCase();
   return Object.prototype.hasOwnProperty.call(VEHICLE_MARKER_SHAPES, key) ? key : '';
+}
+
+// Categoria Moto vira a moto vista de cima; o resto segue o carro.
+export function resolveVehicleShapeKeyForCategory(...values) {
+  return values.some((value) => /moto/i.test(String(value || ''))) ? 'leaf_moto' : '';
 }
 
 export function createLeafMapMarkerSvg({ shapeKey = '', ...options } = {}) {
@@ -138,5 +144,48 @@ export function createLeafVehicleSvg({ colorToken = 'black', screenHeading = 0, 
   <path d="M23.2 11Q24.4 9.6 27.8 9.5M40.8 11Q39.6 9.6 36.2 9.5" stroke="#FFFFFF" stroke-width="1.15" stroke-linecap="round" fill="none"/>
   <ellipse cx="32" cy="55" rx="10.6" ry="2.2" fill="url(#${id}-tail)"/>
   <path d="M22.8 53.3Q32 55.1 41.2 53.3" stroke="url(#${id}-led)" stroke-width="1.15" stroke-linecap="round" fill="none"/>
+</svg>`;
+}
+
+// Moto vista de cima (mesma luz e sombra do carro): pneus, tanque na cor do veículo, piloto de
+// capacete e guidão. Estreita e longa como uma moto real, para não parecer um carro pequeno.
+function createLeafMotoSvg({ colorToken = 'black', screenHeading = 0, idPrefix = 'leaf-moto' } = {}) {
+  const [highlight, paint, shade, edge] = PAINTS[colorToken] || PAINTS.black;
+  const pose = resolveVehicleArtworkPose(screenHeading);
+  const id = String(idPrefix).replace(/[^a-zA-Z0-9_-]/g, '') || 'leaf-moto';
+  const dx = 32 - pose.lightX;
+  const dy = 32 - pose.lightY;
+  const reach = Math.hypot(dx, dy) || 1;
+  const sx = Number((dx / reach * 1.4).toFixed(2));
+  const sy = Number((dy / reach * 1.4).toFixed(2));
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="42" height="42" viewBox="0 0 64 64">
+  <defs>
+    <linearGradient id="${id}-paint" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="${edge}"/><stop offset=".25" stop-color="${shade}"/><stop offset=".5" stop-color="${highlight}"/><stop offset=".75" stop-color="${shade}"/><stop offset="1" stop-color="${edge}"/>
+    </linearGradient>
+    <radialGradient id="${id}-helmet" gradientUnits="userSpaceOnUse" cx="${(32 + (pose.lightX - 32) * 0.12).toFixed(2)}" cy="${(31 + (pose.lightY - 32) * 0.12).toFixed(2)}" r="5.6">
+      <stop offset="0" stop-color="#F4F6F8"/><stop offset=".55" stop-color="#C9CED4"/><stop offset="1" stop-color="#7E858E"/>
+    </radialGradient>
+    <radialGradient id="${id}-soft" cx=".5" cy=".5" r=".5">
+      <stop offset="0" stop-color="#0A0E09" stop-opacity=".3"/><stop offset="1" stop-color="#0A0E09" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="${id}-head" cx=".5" cy=".5" r=".5">
+      <stop offset="0" stop-color="#FFFBE8" stop-opacity=".8"/><stop offset="1" stop-color="#FFFBE8" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <ellipse cx="${32 + sx}" cy="${33 + sy}" rx="9" ry="24" fill="url(#${id}-soft)"/>
+  <rect x="29.6" y="8.5" width="4.8" height="11" rx="2.4" fill="#16181B"/>
+  <rect x="29.4" y="44" width="5.2" height="12" rx="2.6" fill="#16181B"/>
+  <path d="M28.4 18Q32 15.6 35.6 18L36.6 30Q32 32 27.4 30Z" fill="url(#${id}-paint)" stroke="${edge}" stroke-width=".4"/>
+  <path d="M27.6 33Q32 31.4 36.4 33L35.8 47Q32 48.4 28.2 47Z" fill="#2A2D32" stroke="#16181B" stroke-width=".4"/>
+  <path d="M21.5 20.4Q32 17.6 42.5 20.4" stroke="#2A2D32" stroke-width="1.6" stroke-linecap="round" fill="none"/>
+  <circle cx="21.4" cy="20.4" r="1.2" fill="#16181B"/><circle cx="42.6" cy="20.4" r="1.2" fill="#16181B"/>
+  <path d="M26.2 27Q22.6 23.4 22.8 21.2M37.8 27Q41.4 23.4 41.2 21.2" stroke="${shade}" stroke-width="2.2" stroke-linecap="round" fill="none"/>
+  <ellipse cx="32" cy="34" rx="6.6" ry="5" fill="${paint}" fill-opacity=".9"/>
+  <circle cx="32" cy="31" r="5.4" fill="url(#${id}-helmet)" stroke="#5D646C" stroke-width=".4"/>
+  <path d="M28.6 28.2Q32 26.4 35.4 28.2" stroke="#1C2026" stroke-width="1.3" stroke-linecap="round" fill="none"/>
+  <ellipse cx="32" cy="8.6" rx="3.6" ry="1.8" fill="url(#${id}-head)"/>
+  <circle cx="32" cy="10" r=".9" fill="#FFFFFF"/>
+  <path d="M30.4 55.6L33.6 55.6" stroke="#E0362C" stroke-width="1.2" stroke-linecap="round"/>
 </svg>`;
 }

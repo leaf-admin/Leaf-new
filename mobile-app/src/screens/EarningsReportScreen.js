@@ -1178,7 +1178,7 @@ export default function EarningsReportScreen({ navigation, route }) {
             </View>
             <View style={styles.cleanHairline} />
             <View style={styles.cleanSummaryRow}>
-              <Text style={styles.cleanSummaryMuted}>Taxa de saque (Woovi)</Text>
+              <Text style={styles.cleanSummaryMuted}>Taxa de saque</Text>
               <Text style={styles.cleanSummaryMutedValue}>R$ {formatCurrency(withdrawProcessingSummary.fee)}</Text>
             </View>
             {withdrawProcessingSummary.subscriptionSettlement > 0 ? (
@@ -1629,7 +1629,7 @@ export default function EarningsReportScreen({ navigation, route }) {
 
             {(() => {
               const feeNotice = buildWithdrawalFeeNotice({
-                fee: currentWithdrawAmount > 0 ? currentWithdrawBreakdown.fee : DriverBalanceService.WITHDRAW_FEE_BELOW_THRESHOLD,
+                fee: currentWithdrawAmount > 0 ? currentWithdrawBreakdown.fee : DriverBalanceService.WITHDRAW_FEE_FLAT,
                 withdrawalsToday: countWithdrawalsToday(recentWithdrawals),
               });
               return (
@@ -1661,7 +1661,7 @@ export default function EarningsReportScreen({ navigation, route }) {
                 <Text style={styles.cleanSummaryValue}>R$ {formatCurrency(currentWithdrawAmount)}</Text>
               </View>
               <View style={styles.cleanSummaryRow}>
-                <Text style={styles.cleanSummaryMuted}>Taxa de saque (Woovi)</Text>
+                <Text style={styles.cleanSummaryMuted}>Taxa de saque</Text>
                 <Text style={styles.cleanSummaryMutedValue}>R$ {formatCurrency(currentWithdrawBreakdown.fee)}</Text>
               </View>
               {!subscriptionDailyFeeSuspended && currentWithdrawBreakdown.subscriptionSettlement > 0 ? (
