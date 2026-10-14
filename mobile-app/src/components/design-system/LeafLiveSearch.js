@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Animated, Easing, StyleSheet, View } from 'react-native';
 import { useReducedMotion } from 'react-native-reanimated';
 
+const SWEEP_REST_MS = 2600;
 const SWEEP_DURATION_MS = 1500;
 const TEXT_SWAP_MS = 240;
 
@@ -16,16 +17,31 @@ export function LeafSearchingLine({ color = '#1A330E', trackColor = 'rgba(26,51,
   useEffect(() => {
     if (reduceMotion || width <= 0) return undefined;
     progress.setValue(0);
-    const animation = Animated.loop(
-      Animated.timing(progress, {
+    // Varre e descansa: a linha fica na tela por horas enquanto o motorista está online, e
+    // animar sem pausa redesenhava a janela inteira ~60x/s (~55% de CPU no Android parado).
+    // A pausa é um timer comum, sem relógio de animação rodando.
+    let stopped = false;
+    let restTimer = null;
+    let sweep = null;
+    const run = () => {
+      if (stopped) return;
+      progress.setValue(0);
+      sweep = Animated.timing(progress, {
         toValue: 1,
         duration: SWEEP_DURATION_MS,
         easing: Easing.inOut(Easing.cubic),
         useNativeDriver: true,
-      }),
-    );
-    animation.start();
-    return () => animation.stop();
+      });
+      sweep.start(({ finished }) => {
+        if (finished && !stopped) restTimer = setTimeout(run, SWEEP_REST_MS);
+      });
+    };
+    run();
+    return () => {
+      stopped = true;
+      if (restTimer) clearTimeout(restTimer);
+      sweep?.stop();
+    };
   }, [progress, reduceMotion, width]);
 
   const segmentWidth = Math.max(40, width * 0.34);
