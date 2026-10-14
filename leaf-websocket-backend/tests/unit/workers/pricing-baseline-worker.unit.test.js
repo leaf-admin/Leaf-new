@@ -17,6 +17,14 @@ jest.mock('../../../services/pricing-baseline-materializer', () => ({
   })
 }));
 
+jest.mock('../../../services/demand-history-service', () => ({
+  materializeDemandHeat: jest.fn(async () => ({ cells: 0, sources: 0 })),
+}));
+
+jest.mock('../../../services/street-graph-service', () => ({
+  rebuildStreetGraphIfStale: jest.fn(async () => ({ rebuilt: false, reason: 'fresh' })),
+}));
+
 jest.mock('../../../utils/logger', () => ({
   logStructured: jest.fn(),
   logError: jest.fn()

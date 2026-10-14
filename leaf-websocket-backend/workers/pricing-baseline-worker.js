@@ -5,6 +5,7 @@ const { logStructured, logError } = require('../utils/logger');
 const { metrics } = require('../utils/prometheus-metrics');
 const { materializePricingBaselines } = require('../services/pricing-baseline-materializer');
 const demandHistoryService = require('../services/demand-history-service');
+const streetGraphService = require('../services/street-graph-service');
 const RedisLeaderLease = require('../utils/redis-leader-lease');
 const { buildWorkerConsumerName } = require('./worker-consumer-identity');
 
@@ -114,10 +115,31 @@ async function runPricingBaselineCycle(reason = 'interval') {
                 }
             }
 
+            // Malha de ruas (OSM) da animação de busca: reconstrói uma vez por mês.
+            let streetGraph = null;
+            if (String(process.env.ENABLE_STREET_GRAPH || 'true') !== 'false') {
+                try {
+                    streetGraph = await streetGraphService.rebuildStreetGraphIfStale(redis);
+                    if (streetGraph.rebuilt) {
+                        logStructured('info', 'Malha de ruas atualizada', {
+                            service: 'pricing-baseline-worker',
+                            cells: streetGraph.cells,
+                            edges: streetGraph.edges
+                        });
+                    }
+                } catch (streetGraphError) {
+                    logError(streetGraphError, 'Falha ao atualizar malha de ruas', {
+                        service: 'pricing-baseline-worker',
+                        reason
+                    });
+                }
+            }
+
             return {
                 success: true,
                 summary,
-                demandHeat
+                demandHeat,
+                streetGraph
             };
         } finally {
             await leaderLease.release();
