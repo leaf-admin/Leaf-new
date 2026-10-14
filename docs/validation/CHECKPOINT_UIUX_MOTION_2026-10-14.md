@@ -60,3 +60,13 @@ em outra sessão/conta sem começar do zero.
   a cada passo. Ler `LeafMotionLab.js` como referência; achar as telas reais com `rg`
   (ex.: `RobotaxiHomeScreen.js`, `passenger-driver-search`, `passenger-trip-accepted`).
 - Não editar código mobile durante corrida em andamento. Push/PR só quando o Izaak pedir.
+
+## Progresso do porte (2026-10-14, sessão seguinte)
+
+- Cena 1 · Abertura — portada (`968ec37e3`): `LeafSplashReveal` na home; capa idêntica ao splash
+  até o canvas Skia e o mapa do Android pintarem (280 ms), depois a borda convexa (760 ms).
+  Validado por gravação no Android; no iPhone a captura por screenshot é lenta demais para o quadro a quadro.
+- Cena 2 · Rota — portada (`5f368989c`): ponta "cometa" no traçado real. Bug achado e corrigido: as cores de
+  trânsito cobriam a rota inteira desde o primeiro quadro, então o traçado progressivo nunca aparecia.
+  Validado no iPhone com a duração desacelerada temporariamente (já restaurada).
+- Próximas: Categoria, Busca, Encontrou.
