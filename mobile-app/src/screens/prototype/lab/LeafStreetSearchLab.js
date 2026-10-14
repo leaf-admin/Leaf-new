@@ -14,8 +14,8 @@ import leafTypography from '../../../components/prototype/LeafTypography';
 // de exemplo em ruas a 300-1100 m. Serve para aprovar o visual e medir CPU antes de trocar a esfera.
 
 const PICKUP = { latitude: -22.9468, longitude: -43.3577 };
-const INITIAL_REGION = { ...PICKUP, latitudeDelta: 0.024, longitudeDelta: 0.024 };
-const RADIUS_M = 1200;
+const INITIAL_REGION = { ...PICKUP, latitudeDelta: 0.085, longitudeDelta: 0.085 };
+const RADIUS_M = 4000;
 const COLORS = ['black', 'white', 'silver', 'red', 'blue'];
 
 function pickDemoCars(graph) {
@@ -24,7 +24,7 @@ function pickDemoCars(graph) {
   const dist = streetDistances(graph, start);
   const candidates = [];
   for (let i = 0; i < graph.nodes.length; i += 1) {
-    if (dist[i] > 300 && dist[i] < 1100) candidates.push(i);
+    if (dist[i] > 600 && dist[i] < 3800) candidates.push(i);
   }
   const step = Math.max(1, Math.floor(candidates.length / 5));
   return candidates.filter((_, k) => k % step === 0).slice(0, 5).map((i, k) => ({
