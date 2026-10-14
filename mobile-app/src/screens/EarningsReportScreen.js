@@ -1265,7 +1265,7 @@ export default function EarningsReportScreen({ navigation, route }) {
                   <Text style={styles.balanceLabel}>
                     {withdrawalsEnabled ? 'Disponível para saque' : 'Saldo do motorista'}
                   </Text>
-                  <Text style={styles.balanceValue}>R$ {formatCurrency(saldoDisponivel)}</Text>
+                  <Text style={styles.balanceValue} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>R$ {formatCurrency(saldoDisponivel)}</Text>
                   {earningsLoadFailed ? (
                     <Text style={styles.balanceLoadError} accessibilityRole="alert">
                       Não conseguimos atualizar seus ganhos agora. Os valores podem estar desatualizados.
@@ -1661,7 +1661,7 @@ export default function EarningsReportScreen({ navigation, route }) {
                 <Text style={styles.cleanSummaryValue}>R$ {formatCurrency(currentWithdrawAmount)}</Text>
               </View>
               <View style={styles.cleanSummaryRow}>
-                <Text style={styles.cleanSummaryMuted}>Tarifa</Text>
+                <Text style={styles.cleanSummaryMuted}>Taxa de saque (Woovi)</Text>
                 <Text style={styles.cleanSummaryMutedValue}>R$ {formatCurrency(currentWithdrawBreakdown.fee)}</Text>
               </View>
               {!subscriptionDailyFeeSuspended && currentWithdrawBreakdown.subscriptionSettlement > 0 ? (
