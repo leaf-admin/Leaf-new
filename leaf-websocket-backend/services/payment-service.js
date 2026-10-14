@@ -79,8 +79,7 @@ class PaymentService {
     this.THRESHOLD_50 = 5000; // R$ 50,00 em centavos
     this.WOOVI_FEE_PERCENTAGE = 0.008; // 0,8% da transação
     this.WOOVI_FEE_MINIMUM = 50; // R$ 0,50 mínimo (em centavos)
-    this.WITHDRAW_FEE_THRESHOLD_CENTS = 50000; // R$ 500,00
-    this.WITHDRAW_FEE_BELOW_THRESHOLD_CENTS = 100; // R$ 1,00
+    this.WITHDRAW_FEE_FLAT_CENTS = 100; // R$ 1,00 por saque, qualquer valor
     this.SUBSCRIPTION_DAILY_BILLING_ENABLED =
       String(process.env.SUBSCRIPTION_DAILY_BILLING_ENABLED || 'false').toLowerCase() === 'true';
     this.SUBSCRIPTION_DAILY_FEE_NOMINAL_CENTS = Math.max(
@@ -4650,17 +4649,14 @@ class PaymentService {
 
   /**
    * Calcula taxa de saque para motorista.
-   * Regra: abaixo de R$ 500,00 cobra R$ 1,00.
+   * Regra aprovada: R$ 1,00 fixo por saque, qualquer valor.
    * @param {number} amountCents
    */
   calculateWithdrawFee(amountCents) {
     if (!Number.isFinite(amountCents) || amountCents <= 0) {
       return 0;
     }
-    if (amountCents < this.WITHDRAW_FEE_THRESHOLD_CENTS) {
-      return this.WITHDRAW_FEE_BELOW_THRESHOLD_CENTS;
-    }
-    return 0;
+    return this.WITHDRAW_FEE_FLAT_CENTS;
   }
 
   toReais(cents) {
@@ -4958,7 +4954,7 @@ class PaymentService {
             previousBalanceCents: currentBalanceCents - amountCents,
             newBalance: newBalance,
             newBalanceCents,
-            description: 'Taxa de saque abaixo de R$ 500,00'
+            description: 'Taxa de saque'
           });
         }
 

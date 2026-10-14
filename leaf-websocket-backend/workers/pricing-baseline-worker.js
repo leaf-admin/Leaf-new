@@ -4,6 +4,7 @@ const redisPool = require('../utils/redis-pool');
 const { logStructured, logError } = require('../utils/logger');
 const { metrics } = require('../utils/prometheus-metrics');
 const { materializePricingBaselines } = require('../services/pricing-baseline-materializer');
+const demandHistoryService = require('../services/demand-history-service');
 const RedisLeaderLease = require('../utils/redis-leader-lease');
 const { buildWorkerConsumerName } = require('./worker-consumer-identity');
 
@@ -95,9 +96,28 @@ async function runPricingBaselineCycle(reason = 'interval') {
                 candidateCells: summary.candidateCells
             });
 
+            // Mapa de demanda com histórico do motorista: roda no mesmo líder, falha isolada.
+            let demandHeat = null;
+            if (String(process.env.ENABLE_DEMAND_HISTORY_HEAT || 'true') !== 'false') {
+                try {
+                    demandHeat = await demandHistoryService.materializeDemandHeat(redis);
+                    logStructured('info', 'Mapa de demanda histórica atualizado', {
+                        service: 'pricing-baseline-worker',
+                        reason,
+                        cells: demandHeat.cells
+                    });
+                } catch (demandHeatError) {
+                    logError(demandHeatError, 'Falha ao atualizar mapa de demanda histórica', {
+                        service: 'pricing-baseline-worker',
+                        reason
+                    });
+                }
+            }
+
             return {
                 success: true,
-                summary
+                summary,
+                demandHeat
             };
         } finally {
             await leaderLease.release();
