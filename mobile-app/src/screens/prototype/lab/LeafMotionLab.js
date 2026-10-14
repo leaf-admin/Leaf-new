@@ -3,6 +3,8 @@ import { Image, Pressable, StyleSheet, Text, TurboModuleRegistry, useWindowDimen
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
 import Reanimated, {
   Easing,
+  FadeInDown,
+  ZoomIn,
   useAnimatedStyle,
   useDerivedValue,
   useReducedMotion,
@@ -13,6 +15,9 @@ import Reanimated, {
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
+import Svg, { Path as SvgPath, SvgXml } from 'react-native-svg';
+import LeafVehicleMarker from '../../../components/prototype/LeafVehicleMarker';
+import { VEHICLE_CONCEPTS } from './labVehicleConcepts';
 import mapStyleAppleLike from '../../../components/prototype/mapStyleAppleLike';
 import leafTypography from '../../../components/prototype/LeafTypography';
 
@@ -29,7 +34,6 @@ try {
   SkiaLib = null;
 }
 
-const CAR = require('../../../../assets/leaf-ui/leafAVehicle.png');
 const LOGO = require('../../../../assets/images/splash_android_icon.png');
 const BRAND = '#1A330E';
 const ROUTE_COLOR = '#2B5B21';
@@ -64,6 +68,16 @@ const CATEGORIES = [
   { id: 'moto', label: 'MOTO', detail: 'Mais rápido para ir sozinho', price: 32.05, arrival: '10:34', cars: [[0.002, -0.003], [-0.003, 0.002], [0.004, 0.004], [-0.004, -0.003], [0.001, 0.005], [0.005, -0.001]] },
 ];
 const ROW_HEIGHT = 58;
+// Cars around the region, seen faintly behind the search veil.
+const REGION_CARS = [
+  [0.031, -0.024, 40, 'white'], [-0.036, 0.019, 200, 'black'], [0.044, 0.021, 120, 'silver'],
+  [-0.022, -0.028, 300, 'gray'], [0.012, 0.03, 80, 'white'], [-0.041, -0.012, 170, 'black'],
+  [0.024, -0.031, 260, 'silver'], [-0.009, 0.027, 15, 'red'], [0.05, -0.006, 330, 'white'],
+  [-0.03, 0.03, 95, 'gray'], [0.004, -0.029, 210, 'black'], [-0.05, 0.004, 60, 'white'],
+];
+const CAR_COLORS = ['white', 'black', 'silver', 'gray', 'white', 'black'];
+const SPHERE_SIZE = 300;
+const SPLASH_GREEN = '#003002';
 
 function densify(points, perSegment) {
   const out = [points[0]];
@@ -203,6 +217,72 @@ function SphereCanvas({ Canvas, Path, Skia, BlurMask, useClock, size, radius, op
   );
 }
 
+/* ---------------- splash reveal (Skia) ---------------- */
+// The current splash stays as is. On exit the map rises from the bottom
+// through a convex edge (a big circle) that swallows the splash and its logo.
+function SplashReveal({ progress, width, height }) {
+  if (!SkiaLib) return null;
+  return <SplashRevealCanvas lib={SkiaLib} progress={progress} width={width} height={height} />;
+}
+
+function SplashRevealCanvas({ lib, progress, width, height }) {
+  const { Canvas, Group, Rect, Image: SkImage, Skia, useImage, FillType } = lib;
+  const logo = useImage(LOGO);
+  const radius = Math.max(width * 1.3, height * 0.62);
+  const evenOdd = FillType.EvenOdd;
+  const clip = useDerivedValue(() => {
+    // Top of the circle travels from below the screen to above it; at the end
+    // the circle covers every corner, so nothing of the splash is left.
+    const edge = height + 6 - progress.value * height * 1.2;
+    const p = Skia.Path.Make();
+    p.addRect(Skia.XYWHRect(0, 0, width, height));
+    p.addCircle(width / 2, edge + radius, radius);
+    p.setFillType(evenOdd);
+    return p;
+  });
+  return (
+    <Canvas style={{ width, height }} pointerEvents="none">
+      <Group clip={clip}>
+        <Rect x={0} y={0} width={width} height={height} color={SPLASH_GREEN} />
+        {logo ? <SkImage image={logo} x={(width - 288) / 2} y={(height - 288) / 2} width={288} height={288} fit="contain" /> : null}
+      </Group>
+    </Canvas>
+  );
+}
+
+/* ---------------- small icons ---------------- */
+function Bolt({ size = 12, color = '#F5C400' }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <SvgPath d="M13.5 2L4 13.5h6.5L9.5 22 20 9.5h-6.6L13.5 2z" fill={color} />
+    </Svg>
+  );
+}
+
+function Shield({ size = 14, color = BRAND }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <SvgPath d="M12 2l8 3v6c0 5-3.4 9.4-8 11-4.6-1.6-8-6-8-11V5l8-3z" fill={color} />
+      <SvgPath d="M8.5 12.2l2.4 2.4 4.6-4.8" fill="none" stroke="#FFFFFF" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
+    </Svg>
+  );
+}
+
+function ConceptCar({ concept, color, size = 42 }) {
+  const entry = VEHICLE_CONCEPTS.find((c) => c.key === concept);
+  const xml = useMemo(() => (entry ? entry.build({ colorToken: color, id: `${concept}-${color}` }) : null), [color, concept, entry]);
+  if (!xml) return <LeafVehicleMarker colorToken={color} screenHeading={0} />;
+  return <SvgXml xml={xml} width={size} height={size} />;
+}
+
+function MapCar({ coordinate, heading, color, visible, settled, concept }) {
+  return (
+    <Marker coordinate={coordinate} anchor={{ x: 0.5, y: 0.5 }} flat rotation={heading} opacity={visible ? 1 : 0} tracksViewChanges={!settled}>
+      <ConceptCar concept={concept} color={color} />
+    </Marker>
+  );
+}
+
 /* ---------------- rolling price ---------------- */
 // Price rolls up to its value whenever a quote arrives (rollKey changes).
 function RollingPrice({ value, rollKey, style, reduceMotion }) {
@@ -219,7 +299,7 @@ function RollingPrice({ value, rollKey, style, reduceMotion }) {
 /* ---------------- lab screen ---------------- */
 export default function LeafMotionLab({ navigation }) {
   const insets = useSafeAreaInsets();
-  const { height: screenHeight } = useWindowDimensions();
+  const { width: screenWidth, height: screenHeight } = useWindowDimensions();
   const reduceMotion = useReducedMotion();
   const mapRef = useRef(null);
   const runRef = useRef(0);
@@ -236,6 +316,14 @@ export default function LeafMotionLab({ navigation }) {
   const [elapsed, setElapsed] = useState(0);
   const [eta, setEta] = useState(4);
   const [active, setActive] = useState('');
+  const [regionCarsVisible, setRegionCarsVisible] = useState(false);
+  const [markersSettled, setMarkersSettled] = useState(false);
+  const [splashOn, setSplashOn] = useState(false);
+  const [foundKey, setFoundKey] = useState(0);
+  const [vehicleConcept, setVehicleConcept] = useState('current');
+  const [carsPickerOn, setCarsPickerOn] = useState(false);
+  const [foundIn, setFoundIn] = useState(0);
+  const elapsedRef = useRef(0);
 
   const catCardY = useSharedValue(520);
   const searchCardY = useSharedValue(520);
@@ -245,19 +333,17 @@ export default function LeafMotionLab({ navigation }) {
   const sphereOpacity = useSharedValue(0);
   const sphereCollapse = useSharedValue(0);
   const litCount = useSharedValue(0);
-  const carScale = useSharedValue(0.2);
-  const carOpacity = useSharedValue(0);
   const barY = useSharedValue(0);
-  const curtainY = useSharedValue(0);
-  const curtainOn = useSharedValue(0);
+  const splashProgress = useSharedValue(0);
+  const splashFade = useSharedValue(1);
 
   const catStyle = useAnimatedStyle(() => ({ transform: [{ translateY: catCardY.value }] }));
   const searchStyle = useAnimatedStyle(() => ({ transform: [{ translateY: searchCardY.value }] }));
   const foundStyle = useAnimatedStyle(() => ({ transform: [{ translateY: foundCardY.value }] }));
   const veilStyle = useAnimatedStyle(() => ({ opacity: veil.value }));
-  const carStyle = useAnimatedStyle(() => ({ opacity: carOpacity.value, transform: [{ scale: carScale.value }] }));
   const barStyle = useAnimatedStyle(() => ({ transform: [{ translateY: barY.value }] }));
-  const curtainStyle = useAnimatedStyle(() => ({ opacity: curtainOn.value, transform: [{ translateY: curtainY.value }] }));
+  // Without Skia the splash simply fades.
+  const splashFallbackStyle = useAnimatedStyle(() => ({ opacity: splashFade.value }));
 
   // Firm spring: settles without a visible bounce (cards are big surfaces).
   const spring = { damping: 26, stiffness: 220, overshootClamping: true };
@@ -272,26 +358,30 @@ export default function LeafMotionLab({ navigation }) {
     runRef.current += 1;
     setRouteCount(0); setRouteDrawing(false); setShowOrigin(false); setShowDestination(false);
     setDriverCount(0); setDriverVisible(false); setCarsVisible(false); setCategory('plus');
-    setElapsed(0); setEta(6); setStatus('Procurando motoristas por perto');
+    setElapsed(0); elapsedRef.current = 0; setEta(3); setStatus('Procurando motoristas por perto');
+    setRegionCarsVisible(false); setSplashOn(false); setFoundIn(0); setCarsPickerOn(false);
     catCardY.value = 520; searchCardY.value = 520; foundCardY.value = 520; veil.value = 0;
-    sphereOpacity.value = 0; sphereCollapse.value = 0; litCount.value = 0; carOpacity.value = 0; carScale.value = 0.2; barY.value = 0;
-    curtainOn.value = 0; curtainY.value = 0;
+    sphereOpacity.value = 0; sphereCollapse.value = 0; litCount.value = 0; barY.value = 0;
+    splashProgress.value = 0; splashFade.value = 1;
     return runRef.current;
-  }, [barY, carOpacity, carScale, catCardY, curtainOn, curtainY, foundCardY, litCount, searchCardY, sphereCollapse, sphereOpacity, veil]);
+  }, [barY, catCardY, foundCardY, litCount, searchCardY, sphereCollapse, sphereOpacity, splashFade, splashProgress, veil]);
 
   const alive = (id) => id === runRef.current;
 
   /* scene: opening exit (current splash stays; only its exit animates) */
   const sceneOpening = useCallback(async (id) => {
-    curtainOn.value = 1; curtainY.value = 0;
+    splashProgress.value = 0; splashFade.value = 1; setSplashOn(true);
     mapRef.current?.animateToRegion({ ...PICKUP, latitudeDelta: 0.03, longitudeDelta: 0.03 }, 0);
     await sleep(900); if (!alive(id)) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
-    curtainY.value = reduceMotion ? -screenHeight * 1.4 : withTiming(-screenHeight * 1.4, { duration: 760, easing: Easing.bezier(0.22, 0.9, 0.24, 1) });
-    await sleep(500); if (!alive(id)) return;
-    mapRef.current?.animateToRegion({ ...PICKUP, latitudeDelta: 0.012, longitudeDelta: 0.012 }, 1400);
-    await sleep(800); curtainOn.value = 0;
-  }, [curtainOn, curtainY, reduceMotion, screenHeight]);
+    // Slow start (the bump appears), fast middle, soft landing: like the reference.
+    const rise = { duration: 760, easing: Easing.bezier(0.55, 0, 0.2, 1) };
+    splashProgress.value = reduceMotion ? 1 : withTiming(1, rise);
+    splashFade.value = withTiming(0, { duration: 500 });
+    mapRef.current?.animateToRegion({ ...PICKUP, latitudeDelta: 0.012, longitudeDelta: 0.012 }, 1500);
+    await sleep(820); if (!alive(id)) return;
+    setSplashOn(false);
+  }, [reduceMotion, splashFade, splashProgress]);
 
   /* scene: route traced point to point */
   const sceneRoute = useCallback(async (id) => {
@@ -312,7 +402,8 @@ export default function LeafMotionLab({ navigation }) {
   const selectCategory = useCallback((id, fromUser) => {
     const index = CATEGORIES.findIndex((c) => c.id === id);
     setCategory(id);
-    barY.value = reduceMotion ? index * ROW_HEIGHT : withSpring(index * ROW_HEIGHT, { damping: 16, stiffness: 220 });
+    // Glides, no bounce: the bar is a small accent, not a toy.
+    barY.value = reduceMotion ? index * ROW_HEIGHT : withTiming(index * ROW_HEIGHT, { duration: 220, easing: Easing.out(Easing.cubic) });
     if (fromUser) Haptics.selectionAsync().catch(() => {});
     setCarsVisible(false);
     setTimeout(() => setCarsVisible(true), 180);
@@ -337,14 +428,21 @@ export default function LeafMotionLab({ navigation }) {
     // The trip line would cross the sphere: fade it out with the map.
     setShowDestination(false);
     runTween(420, (t) => { if (alive(id)) setRouteCount(Math.round((1 - t) * TRIP_ROUTE.length)); }, easeInOut, reduceMotion);
-    veil.value = withTiming(1, { duration: 500 });
+    // Pull back to the neighbourhood: the region's cars stay faintly visible.
+    mapRef.current?.animateToRegion({ ...PICKUP, latitudeDelta: 0.07, longitudeDelta: 0.07 }, 900);
+    veil.value = withTiming(0.8, { duration: 500 });
+    setTimeout(() => { if (alive(id)) setRegionCarsVisible(true); }, 350);
     await sleep(240); if (!alive(id)) return;
     slideIn(searchCardY);
     sphereCollapse.value = 0; sphereRadius.value = 12;
     sphereOpacity.value = withTiming(1, { duration: 500 });
     sphereRadius.value = reduceMotion ? 120 : withSpring(120, { damping: 12, stiffness: 90 });
     const start = Date.now();
-    const timer = setInterval(() => { if (!alive(id)) { clearInterval(timer); return; } setElapsed(Math.floor((Date.now() - start) / 1000)); }, 250);
+    const timer = setInterval(() => {
+      if (!alive(id)) { clearInterval(timer); return; }
+      elapsedRef.current = Math.floor((Date.now() - start) / 1000);
+      setElapsed(elapsedRef.current);
+    }, 250);
     const messages = ['Procurando motoristas por perto', '5 motoristas Plus a até 6 min', 'Falando com o mais próximo'];
     for (let k = 0; k < messages.length; k += 1) {
       setStatus(messages[k]);
@@ -354,28 +452,52 @@ export default function LeafMotionLab({ navigation }) {
     clearInterval(timer);
   }, [catCardY, litCount, reduceMotion, searchCardY, sphereCollapse, sphereOpacity, sphereRadius, veil]);
 
-  /* scene: driver found */
+
+  /* scene: driver found -> sphere converges, driver card takes over */
   const sceneFound = useCallback(async (id) => {
-    if (sphereOpacity.value < 0.5) { veil.value = 1; slideIn(searchCardY); sphereOpacity.value = 1; sphereRadius.value = 120; litCount.value = 6; await sleep(700); }
+    if (sphereOpacity.value < 0.5) {
+      veil.value = 0.8; slideIn(searchCardY); sphereOpacity.value = 1; sphereRadius.value = 120; litCount.value = 6;
+      elapsedRef.current = 12; setElapsed(12); setRegionCarsVisible(true);
+      mapRef.current?.animateToRegion({ ...PICKUP, latitudeDelta: 0.07, longitudeDelta: 0.07 }, 0);
+      await sleep(700); if (!alive(id)) return;
+    }
+    setFoundIn(Math.max(1, elapsedRef.current));
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
-    sphereCollapse.value = withTiming(1, { duration: 520, easing: Easing.in(Easing.quad) });
-    await sleep(380); if (!alive(id)) return;
-    carOpacity.value = withTiming(1, { duration: 300 });
-    carScale.value = reduceMotion ? 1 : withSpring(1, { damping: 11, stiffness: 160 });
-    sphereOpacity.value = withTiming(0, { duration: 300 });
+    litCount.value = 8;
+    sphereCollapse.value = withTiming(1, { duration: 480, easing: Easing.in(Easing.quad) });
+    sphereOpacity.value = withTiming(0, { duration: 520 });
+    await sleep(260); if (!alive(id)) return;
     slideOut(searchCardY);
-    await sleep(900); if (!alive(id)) return;
+    setRegionCarsVisible(false);
+    await sleep(240); if (!alive(id)) return;
+    setEta(3); setFoundKey((k) => k + 1);
     slideIn(foundCardY);
     veil.value = withTiming(0, { duration: 450 });
-    carScale.value = withTiming(0.15, { duration: 600, easing: Easing.inOut(Easing.cubic) });
-    carOpacity.value = withTiming(0, { duration: 600 });
     setRouteCount(0); setShowDestination(false);
-    fit([...DRIVER_ROUTE, PICKUP], 330 + insets.bottom);
+    fit([...DRIVER_ROUTE, PICKUP], 430 + insets.bottom);
     await sleep(650); if (!alive(id)) return;
     setDriverVisible(true); setShowOrigin(true);
     await runTween(1100, (t) => { if (alive(id)) setDriverCount(Math.max(2, Math.round(t * DRIVER_ROUTE.length))); }, easeInOut, reduceMotion);
-    for (let e = 6; e >= 4; e -= 1) { if (!alive(id)) return; setEta(e); await sleep(150); }
-  }, [carOpacity, carScale, fit, foundCardY, insets.bottom, litCount, reduceMotion, searchCardY, sphereCollapse, sphereOpacity, sphereRadius, veil]);
+    for (let e = 2; e >= 1; e -= 1) { await sleep(260); if (!alive(id)) return; setEta(e); }
+    Haptics.selectionAsync().catch(() => {});
+  }, [fit, foundCardY, insets.bottom, litCount, reduceMotion, searchCardY, sphereCollapse, sphereOpacity, sphereRadius, veil]);
+
+  /* scene: vehicle marker concepts on the real map */
+  const chooseConcept = useCallback((key) => {
+    setVehicleConcept(key);
+    // SVG markers must re-render natively before tracking is switched off again.
+    setMarkersSettled(false);
+    setTimeout(() => setMarkersSettled(true), 900);
+    Haptics.selectionAsync().catch(() => {});
+  }, []);
+  const sceneCars = useCallback(async (id) => {
+    setRouteCount(0); setShowDestination(false); setShowOrigin(true); setDriverVisible(false);
+    setCategory('plus'); setCarsVisible(true); setRegionCarsVisible(false); setCarsPickerOn(true);
+    mapRef.current?.animateToRegion({ latitude: PICKUP.latitude - 0.0035, longitude: PICKUP.longitude, latitudeDelta: 0.026, longitudeDelta: 0.026 }, 700);
+    setMarkersSettled(false);
+    await sleep(900); if (!alive(id)) return;
+    setMarkersSettled(true);
+  }, []);
 
   const scenes = useMemo(() => [
     { key: 'opening', label: 'Abertura', run: sceneOpening },
@@ -383,21 +505,27 @@ export default function LeafMotionLab({ navigation }) {
     { key: 'category', label: 'Categoria', run: sceneCategory },
     { key: 'search', label: 'Busca', run: sceneSearch },
     { key: 'found', label: 'Encontrou', run: sceneFound },
-  ], [sceneCategory, sceneFound, sceneOpening, sceneRoute, sceneSearch]);
+    { key: 'cars', label: 'Carros', run: sceneCars, solo: true },
+  ], [sceneCars, sceneCategory, sceneFound, sceneOpening, sceneRoute, sceneSearch]);
 
   const playOne = async (scene) => {
-    const id = scene.key === 'opening' || scene.key === 'route' ? resetAll() : ++runRef.current;
+    const id = scene.key === 'opening' || scene.key === 'route' || scene.solo ? resetAll() : ++runRef.current;
     setActive(scene.key);
     await scene.run(id);
   };
   const playAll = async () => {
     const id = resetAll();
-    for (const scene of scenes) { if (!alive(id)) return; setActive(scene.key); await scene.run(id); await sleep(700); }
+    for (const scene of scenes.filter((item) => !item.solo)) { if (!alive(id)) return; setActive(scene.key); await scene.run(id); await sleep(700); }
   };
 
   useEffect(() => { fit([PICKUP], 300, false); }, [fit]);
+  // SVG markers need a few frames to draw before tracking can be switched off.
+  useEffect(() => { const t = setTimeout(() => setMarkersSettled(true), 1200); return () => clearTimeout(t); }, []);
 
   const selected = CATEGORIES.find((c) => c.id === category) || CATEGORIES[0];
+  const categoryName = selected.label.charAt(0) + selected.label.slice(1).toLowerCase();
+  const quickPickup = eta < 2;
+  const fastMatch = foundIn > 0 && foundIn < 30;
   const comet = routeDrawing && routeCount > 4 ? TRIP_ROUTE.slice(Math.max(0, routeCount - 14), routeCount) : null;
   const cometCore = routeDrawing && routeCount > 3 ? TRIP_ROUTE.slice(Math.max(0, routeCount - 4), routeCount) : null;
 
@@ -430,26 +558,33 @@ export default function LeafMotionLab({ navigation }) {
         <Marker coordinate={DESTINATION} anchor={{ x: 0.5, y: 0.5 }} opacity={showDestination ? 1 : 0} tracksViewChanges={false}>
           <View style={styles.destOuter}><View style={styles.destInner} /></View>
         </Marker>
-        <Marker coordinate={DRIVER_START} anchor={{ x: 0.5, y: 0.5 }} opacity={driverVisible ? 1 : 0}>
-          <Image source={CAR} style={styles.mapCar} />
-        </Marker>
+        <MapCar coordinate={DRIVER_START} heading={140} color="white" visible={driverVisible} settled={markersSettled} concept={vehicleConcept} />
         {CATEGORIES.map((c) => c.cars.map(([dLat, dLng], i) => (
-          <Marker
+          <MapCar
             key={`${c.id}-${i}`}
             coordinate={{ latitude: PICKUP.latitude + dLat, longitude: PICKUP.longitude + dLng }}
-            anchor={{ x: 0.5, y: 0.5 }}
-            opacity={carsVisible && c.id === category ? 1 : 0}
-          >
-            <Image source={CAR} style={styles.nearCar} />
-          </Marker>
+            heading={(i * 67 + 25) % 360}
+            color={CAR_COLORS[i % CAR_COLORS.length]}
+            visible={carsVisible && c.id === category}
+            settled={markersSettled} concept={vehicleConcept}
+          />
         )))}
+        {REGION_CARS.map(([dLat, dLng, heading, color], i) => (
+          <MapCar
+            key={`region-${i}`}
+            coordinate={{ latitude: PICKUP.latitude + dLat, longitude: PICKUP.longitude + dLng }}
+            heading={heading}
+            color={color}
+            visible={regionCarsVisible}
+            settled={markersSettled} concept={vehicleConcept}
+          />
+        ))}
       </MapView>
 
       <Reanimated.View pointerEvents="none" style={[StyleSheet.absoluteFill, styles.veil, veilStyle]} />
 
-      <View pointerEvents="none" style={[styles.sphereWrap, { top: insets.top + 90 }]}>
-        <LeafNetworkSphere size={300} radius={sphereRadius} opacity={sphereOpacity} collapse={sphereCollapse} litCount={litCount} reduceMotion={reduceMotion} />
-        <Reanimated.Image source={CAR} style={[styles.bigCar, carStyle]} resizeMode="contain" />
+      <View pointerEvents="none" style={[styles.sphereWrap, { top: (screenHeight - SPHERE_SIZE) / 2 }]}>
+        <LeafNetworkSphere size={SPHERE_SIZE} radius={sphereRadius} opacity={sphereOpacity} collapse={sphereCollapse} litCount={litCount} reduceMotion={reduceMotion} />
       </View>
 
       {/* current price card structure */}
@@ -480,7 +615,11 @@ export default function LeafMotionLab({ navigation }) {
       </Reanimated.View>
 
       <Reanimated.View style={[styles.card, { bottom: insets.bottom + 12 }, searchStyle]}>
-        <Text style={styles.eyebrow}>{selected.label.charAt(0) + selected.label.slice(1).toLowerCase()} · valor protegido</Text>
+        <View style={styles.paidRow}>
+          <Shield />
+          <Text style={styles.paidLabel}>Valor protegido</Text>
+          <Text style={styles.paidValue}>{brl(selected.price)} · Pix</Text>
+        </View>
         <Text style={styles.searchTitle}>Encontrando seu motorista</Text>
         <Text style={styles.status}>{status}</Text>
         <View style={styles.track}><Shimmer reduceMotion={reduceMotion} /></View>
@@ -488,23 +627,82 @@ export default function LeafMotionLab({ navigation }) {
       </Reanimated.View>
 
       <Reanimated.View style={[styles.card, { bottom: insets.bottom + 12 }, foundStyle]}>
-        <Text style={styles.eyebrow}>Motorista a caminho</Text>
-        <Text style={styles.foundTitle} numberOfLines={1} adjustsFontSizeToFit>Chega em {eta} min</Text>
-        <View style={styles.between}><Text style={styles.rowDetail}>Plus · Onix branco</Text><Text style={styles.timer}>R$ 48,52</Text></View>
-        <View style={styles.driverRow}>
-          <View style={styles.avatar}><Text style={styles.avatarText}>C</Text></View>
-          <View style={{ flex: 1 }}><Text style={styles.driverName}>Carlos</Text><Text style={styles.rowDetailSmall}>★ 4,9 · 1.240 corridas</Text></View>
-          <View style={styles.plate}><Text style={styles.plateText}>RIO2A19</Text></View>
+        <View key={foundKey}>
+          <Reanimated.View entering={FadeInDown.duration(280)} style={styles.between}>
+            <Text style={styles.eyebrow}>Motorista a caminho</Text>
+            {fastMatch ? (
+              <Reanimated.View entering={ZoomIn.delay(260).duration(260)} style={styles.fastChip}>
+                <Bolt />
+                <Text style={styles.fastChipText}>Encontrado em {foundIn} s</Text>
+              </Reanimated.View>
+            ) : null}
+          </Reanimated.View>
+          <Reanimated.View entering={FadeInDown.delay(50).duration(280)} style={styles.titleRow}>
+            <Text style={styles.foundTitle} numberOfLines={1}>Chega em {eta} min</Text>
+            {quickPickup ? (
+              <Reanimated.View entering={ZoomIn.duration(240)} style={styles.quickChip}>
+                <Text style={styles.quickChipText}>Embarque rápido</Text>
+              </Reanimated.View>
+            ) : null}
+          </Reanimated.View>
+          <Reanimated.View entering={FadeInDown.delay(110).duration(280)} style={styles.driverRow}>
+            <View style={styles.avatar}><Text style={styles.avatarText}>C</Text></View>
+            <View style={styles.driverCopy}>
+              <Text style={styles.driverName}>Carlos Henrique</Text>
+              <Text style={styles.rowDetailSmall}>★ 4,9 · 1.240 corridas · na Leaf desde 2025</Text>
+            </View>
+          </Reanimated.View>
+          <Reanimated.View entering={FadeInDown.delay(160).duration(280)} style={styles.vehicleRow}>
+            <View style={styles.driverCopy}>
+              <Text style={styles.vehicleName}>Chevrolet Onix</Text>
+              <Text style={styles.rowDetailSmall}>Branco · {categoryName}</Text>
+            </View>
+            <View style={styles.plate}>
+              <View style={styles.plateBand}><Text style={styles.plateBandText}>BRASIL</Text></View>
+              <Text style={styles.plateText}>RIO2A19</Text>
+            </View>
+          </Reanimated.View>
+          <Reanimated.View entering={FadeInDown.delay(210).duration(280)} style={styles.paidRowFound}>
+            <Shield />
+            <Text style={styles.paidLabel}>Valor protegido</Text>
+            <Text style={styles.paidValue}>{brl(selected.price)} · Pix</Text>
+          </Reanimated.View>
+          <Reanimated.View entering={FadeInDown.delay(260).duration(280)} style={styles.actions}>
+            {['Mensagem', 'Compartilhar', 'Segurança'].map((label) => (
+              <Pressable key={label} style={({ pressed }) => [styles.action, pressed && { transform: [{ scale: 0.96 }] }]}>
+                <Text style={styles.actionText}>{label}</Text>
+              </Pressable>
+            ))}
+          </Reanimated.View>
         </View>
       </Reanimated.View>
 
-      {/* current splash, only its exit animates */}
-      {/* Taller than the screen so the curved bottom edge is only seen once it lifts. */}
-      <Reanimated.View pointerEvents="none" style={[styles.curtain, { height: screenHeight * 1.35 }, curtainStyle]}>
-        <View style={[styles.curtainFace, { height: screenHeight }]}>
-          <Image source={LOGO} style={styles.logo} resizeMode="contain" />
+      {carsPickerOn ? (
+        <View style={[styles.card, { bottom: insets.bottom + 12 }]}>
+          <Text style={styles.eyebrow}>Marcador do carro no mapa</Text>
+          <View style={styles.conceptRow}>
+            {[{ key: 'current', label: 'Atual' }, ...VEHICLE_CONCEPTS].map((c) => (
+              <Pressable key={c.key} onPress={() => chooseConcept(c.key)} style={[styles.conceptTile, vehicleConcept === c.key && styles.conceptTileOn]} testID={`leaf-motion-lab-car-${c.key}`}>
+                <ConceptCar concept={c.key} color="white" size={64} />
+                <Text style={styles.conceptLabel} numberOfLines={1}>{c.label}</Text>
+              </Pressable>
+            ))}
+          </View>
         </View>
-      </Reanimated.View>
+      ) : null}
+
+      {/* current splash, only its exit animates */}
+      {splashOn ? (
+        <View pointerEvents="none" style={StyleSheet.absoluteFill}>
+          {SkiaLib ? (
+            <SplashReveal progress={splashProgress} width={screenWidth} height={screenHeight} />
+          ) : (
+            <Reanimated.View style={[StyleSheet.absoluteFill, styles.splashFallback, splashFallbackStyle]}>
+              <Image source={LOGO} style={styles.logo} resizeMode="contain" />
+            </Reanimated.View>
+          )}
+        </View>
+      ) : null}
 
       <View style={[styles.controls, { top: insets.top + 8 }]}>
         <Pressable onPress={() => navigation?.goBack?.()} style={styles.chip}><Text style={styles.chipText}>✕</Text></Pressable>
@@ -536,10 +734,7 @@ function Shimmer({ reduceMotion }) {
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: '#ECEEE9' },
   veil: { backgroundColor: 'rgba(244,245,241,0.78)' },
-  sphereWrap: { position: 'absolute', left: 0, right: 0, alignItems: 'center', justifyContent: 'center', height: 300 },
-  bigCar: { position: 'absolute', width: 230, height: 200 },
-  mapCar: { width: 34, height: 30 },
-  nearCar: { width: 26, height: 23 },
+  sphereWrap: { position: 'absolute', left: 0, right: 0, alignItems: 'center', justifyContent: 'center', height: SPHERE_SIZE },
   originOuter: { width: 22, height: 22, borderRadius: 11, backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center' },
   originInner: { width: 11, height: 11, borderRadius: 6, backgroundColor: '#111410' },
   destOuter: { width: 22, height: 22, borderRadius: 6, backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center' },
@@ -569,15 +764,35 @@ const styles = StyleSheet.create({
   shimmer: { width: 120, height: 4, borderRadius: 2, backgroundColor: '#2E8B4A', opacity: 0.85 },
   between: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between' },
   timer: { ...leafTypography.bold, fontSize: 16, fontVariant: ['tabular-nums'], color: '#111410' },
-  foundTitle: { ...leafTypography.bold, fontSize: 32, lineHeight: 38, color: '#111410', fontVariant: ['tabular-nums'] },
+  foundTitle: { ...leafTypography.bold, fontSize: 30, lineHeight: 36, color: '#111410', fontVariant: ['tabular-nums'], flexShrink: 1 },
+  titleRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 2 },
+  fastChip: { flexDirection: 'row', alignItems: 'center', gap: 4, height: 24, paddingHorizontal: 9, borderRadius: 12, backgroundColor: '#111410' },
+  fastChipText: { ...leafTypography.semiBold, fontSize: 12, color: '#FFFFFF', fontVariant: ['tabular-nums'] },
+  quickChip: { height: 26, paddingHorizontal: 10, borderRadius: 13, backgroundColor: '#E3F1E6', justifyContent: 'center' },
+  quickChipText: { ...leafTypography.semiBold, fontSize: 13, color: '#1F6B36' },
   driverRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 14, paddingTop: 14, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: '#E5E5E5' },
+  driverCopy: { flex: 1, minWidth: 0 },
+  vehicleRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 12 },
+  vehicleName: { ...leafTypography.semiBold, fontSize: 16, color: '#111410' },
+  paidRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  paidRowFound: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 14, paddingTop: 12, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: '#E5E5E5' },
+  paidLabel: { ...leafTypography.medium, fontSize: 13, color: '#1F4D17', flex: 1 },
+  paidValue: { ...leafTypography.semiBold, fontSize: 13, color: '#111410', fontVariant: ['tabular-nums'] },
+  actions: { flexDirection: 'row', gap: 8, marginTop: 12 },
+  action: { flex: 1, height: 42, borderRadius: 14, backgroundColor: '#F1F3EE', alignItems: 'center', justifyContent: 'center' },
+  actionText: { ...leafTypography.semiBold, fontSize: 14, color: '#111410' },
   avatar: { width: 42, height: 42, borderRadius: 21, backgroundColor: '#E3EADD', alignItems: 'center', justifyContent: 'center' },
   avatarText: { ...leafTypography.bold, fontSize: 16, color: BRAND },
   driverName: { ...leafTypography.bold, fontSize: 16, color: '#111410' },
-  plate: { borderWidth: 1.5, borderColor: '#111410', borderRadius: 9, paddingHorizontal: 8, paddingVertical: 4 },
-  plateText: { ...leafTypography.bold, fontSize: 15, letterSpacing: 1.6, color: '#111410' },
-  curtain: { position: 'absolute', top: 0, left: 0, right: 0, backgroundColor: '#003002', borderBottomLeftRadius: 260, borderBottomRightRadius: 260 },
-  curtainFace: { alignItems: 'center', justifyContent: 'center' },
+  plate: { borderWidth: 1.5, borderColor: '#111410', borderRadius: 7, overflow: 'hidden', alignItems: 'center', minWidth: 96 },
+  plateBand: { alignSelf: 'stretch', backgroundColor: '#1B3F8B', alignItems: 'center', paddingVertical: 1 },
+  plateBandText: { ...leafTypography.bold, fontSize: 7, letterSpacing: 1.2, color: '#FFFFFF' },
+  plateText: { ...leafTypography.bold, fontSize: 15, letterSpacing: 1.6, color: '#111410', paddingHorizontal: 8, paddingVertical: 2 },
+  conceptRow: { flexDirection: 'row', gap: 8, marginTop: 10 },
+  conceptTile: { flex: 1, alignItems: 'center', paddingVertical: 8, borderRadius: 14, backgroundColor: '#F1F3EE', borderWidth: 1.5, borderColor: 'transparent' },
+  conceptTileOn: { borderColor: BRAND, backgroundColor: '#FFFFFF' },
+  conceptLabel: { ...leafTypography.semiBold, fontSize: 12, color: '#111410', marginTop: 2 },
+  splashFallback: { backgroundColor: SPLASH_GREEN, alignItems: 'center', justifyContent: 'center' },
   logo: { width: 288, height: 288 },
   controls: { position: 'absolute', left: 12, right: 12, flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
   chip: { paddingHorizontal: 12, height: 34, borderRadius: 17, backgroundColor: 'rgba(255,255,255,0.92)', justifyContent: 'center', borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(17,20,16,0.12)' },
