@@ -35,6 +35,24 @@ const { color, motion } = robotaxiPrototypeTokens;
 const ROUTE_ANIMATION_DURATION = Math.min(Number(motion.timing.map) || 840, 840);
 const POINTS_PER_SEGMENT = 26;
 const MIN_ANIMATED_ROUTE_POINTS = 6;
+// Ponta luminosa da rota enquanto ela é desenhada (motion aprovado no lab).
+const ROUTE_COMET_GLOW = 'rgba(95,195,126,0.42)';
+const ROUTE_COMET_CORE = '#EAF8EE';
+
+// Trecho final da parte já desenhada: um rastro largo e um núcleo claro na ponta.
+export function resolveRouteCometSegments(drawnCoordinates = [], totalPointCount = 0) {
+  const drawn = Array.isArray(drawnCoordinates) ? drawnCoordinates : [];
+  const total = Number(totalPointCount) || 0;
+  if (drawn.length < 4 || total < 2 || drawn.length >= total) {
+    return { glow: null, core: null };
+  }
+  const glowLength = Math.max(4, Math.round(total * 0.06));
+  const coreLength = Math.max(2, Math.round(total * 0.018));
+  return {
+    glow: drawn.slice(Math.max(0, drawn.length - glowLength)),
+    core: drawn.slice(Math.max(0, drawn.length - coreLength)),
+  };
+}
 const ZERO_VIEWPORT_PADDING = Object.freeze({
   top: 0,
   right: 0,
@@ -1618,6 +1636,20 @@ function PrototypeMapLayer({
     staticRouteCoordinates,
   ]);
   const hasRenderableRoute = routeRenderCoordinates.length >= 2;
+  // Enquanto a rota é desenhada, as cores de trânsito (que cobrem a rota inteira) ficam
+  // de fora; senão a linha aparecia pronta de uma vez e só o brilho corria por cima.
+  const routeDrawInProgress = Boolean(
+    shouldAnimateRoute &&
+      hasRoute &&
+      denseRoute.length >= 2 &&
+      animatedRouteCoordinates.length < denseRoute.length,
+  );
+  const routeComet = useMemo(
+    () => (shouldAnimateRoute
+      ? resolveRouteCometSegments(animatedRouteCoordinates, denseRoute.length)
+      : { glow: null, core: null }),
+    [animatedRouteCoordinates, denseRoute.length, shouldAnimateRoute],
+  );
   const displayedDriverCoordinate =
     smoothedDriverCoordinate || targetDriverCoordinate || normalizedDriverCoordinate;
   const hasDisplayedDriverCoordinate = Boolean(displayedDriverCoordinate);
@@ -2968,7 +3000,7 @@ function PrototypeMapLayer({
 
           {/* Traffic colors replace the base line only when they cover the route;
               partial segments (e.g. 3 points near the car) used to hide it. */}
-          {hasRenderableRoute && !trafficSegmentsCoverRoute ? (
+          {hasRenderableRoute && (!trafficSegmentsCoverRoute || routeDrawInProgress) ? (
             <Polyline
               key={`route-main-${effectiveRouteMainColor}`}
               coordinates={routeRenderCoordinates}
@@ -2980,7 +3012,7 @@ function PrototypeMapLayer({
             />
           ) : null}
 
-          {hasRenderableRoute
+          {hasRenderableRoute && !routeDrawInProgress
             ? normalizedTrafficRouteSegments.map(segment => (
               <Polyline
                 key={`route-traffic-${segment.key}`}
@@ -3002,6 +3034,29 @@ function PrototypeMapLayer({
               coordinates={routeRenderCoordinates}
               strokeColor={effectiveRouteHighlightColor}
               strokeWidth={2.6}
+              lineCap="round"
+              lineJoin="round"
+            />
+          ) : null}
+
+          {routeComet.glow ? (
+            <Polyline
+              key="route-comet-glow"
+              coordinates={routeComet.glow}
+              strokeColor={ROUTE_COMET_GLOW}
+              strokeColors={[ROUTE_COMET_GLOW, ROUTE_COMET_GLOW]}
+              strokeWidth={13}
+              lineCap="round"
+              lineJoin="round"
+            />
+          ) : null}
+          {routeComet.core ? (
+            <Polyline
+              key="route-comet-core"
+              coordinates={routeComet.core}
+              strokeColor={ROUTE_COMET_CORE}
+              strokeColors={[ROUTE_COMET_CORE, ROUTE_COMET_CORE]}
+              strokeWidth={5}
               lineCap="round"
               lineJoin="round"
             />
