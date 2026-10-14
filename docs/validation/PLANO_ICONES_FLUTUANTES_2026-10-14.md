@@ -53,3 +53,14 @@ outras é JS (OTA/Metro).
 ## Pendências que dependem do Izaak
 
 - Frames da referência de vídeo (não está nesta sessão) para calibrar sombra/linha.
+
+## Andamento (2026-10-14)
+
+- Fases 1–3 feitas (`9adb10d35`): ícones de traço no `LeafObjectIcon`, tab bar flutuante com
+  seleção deslizante (a mesma em JS no Android e iOS; a tab nativa do iOS foi desligada),
+  botões do topo flutuantes. Validado no Android e no iPhone.
+- Fase 4 feita (`343efa793`): mapa de fundo no passageiro e "Seu embarque" preso ao ponto
+  de embarque. Validado no iPhone.
+- Fase 5 feita: arquivos 3D sem uso removidos. Ficam `leafAHome/Activity/Account` e
+  `leafNav*`, ainda copiados pelo plugin `withLeafMaterial` para a tab nativa (desligada).
+  Remover junto com o redesenho ou a remoção definitiva da tab nativa (exige build nativo).
