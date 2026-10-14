@@ -4,6 +4,7 @@ import MapView, { Circle, Marker, Polyline, PROVIDER_GOOGLE } from 'react-native
 import { useReducedMotion } from 'react-native-reanimated';
 import mapStyleAppleLike from './mapStyleAppleLike';
 import SearchRadarPulse from './SearchRadarPulse';
+import { isLeafNetworkSphereAvailable } from './LeafNetworkSphere';
 
 // Camera glide between ride stages (zoom in to pickup, out to the full trip).
 const CAMERA_TRANSITION_MS = 450;
@@ -1428,8 +1429,13 @@ function PrototypeMapLayer({
     Boolean(searchCenterCoordinate) &&
     Number.isFinite(searchCenterCoordinate?.latitude) &&
     Number.isFinite(searchCenterCoordinate?.longitude);
-  const hasSearchRadius = Number.isFinite(searchRadiusKm) && searchRadiusKm > 0;
+  // Na busca, a esfera de rede (tela de busca) substitui o radar do mapa; os dois
+  // juntos disputavam o mesmo centro da tela.
+  const networkSphereReplacesRadar = Boolean(searchingMode) && isLeafNetworkSphereAvailable();
+  const hasSearchRadius =
+    !networkSphereReplacesRadar && Number.isFinite(searchRadiusKm) && searchRadiusKm > 0;
   const hasSearchPreviewRadius =
+    !networkSphereReplacesRadar &&
     Number.isFinite(searchPreviewRadiusKm) &&
     searchPreviewRadiusKm > 0 &&
     searchPreviewRadiusKm > (searchRadiusKm || 0) + 0.04;

@@ -2,7 +2,9 @@ import leafTypography from '../../components/prototype/LeafTypography';
 import { LeafStatusTicker } from '../../components/design-system/LeafLiveSearch';
 import { returnToPrototypeHome } from '../../navigation/returnToPrototypeHome';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { StatusBar, StyleSheet, Text, View } from "react-native";
+import { StatusBar, StyleSheet, Text, View, useWindowDimensions } from "react-native";
+import Reanimated, { FadeIn, FadeOut } from "react-native-reanimated";
+import LeafNetworkSphereView, { isLeafNetworkSphereAvailable } from "../../components/prototype/LeafNetworkSphere";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import PrototypeScreenTransition from "../../components/prototype/PrototypeScreenTransition";
 import PrototypeDismissibleSheet from "../../components/prototype/PrototypeDismissibleSheet";
@@ -237,6 +239,7 @@ export default function RobotaxiDriverSearchScreen({ navigation, route }) {
     cancelRideSearch,
   } = usePrototypeRideRuntime();
   const insets = useSafeAreaInsets();
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const [cardHeight, setCardHeight] = useState(FALLBACK_CARD_HEIGHT);
   const [cancelPending, setCancelPending] = useState(false);
   const [cancelError, setCancelError] = useState("");
@@ -704,6 +707,12 @@ export default function RobotaxiDriverSearchScreen({ navigation, route }) {
     return null;
   }
 
+  // Espaço livre acima do cartão: a esfera fica no centro dele.
+  const sphereAreaTop = insets.top + 24;
+  const sphereAreaHeight = Math.max(0, windowHeight - (cardHeight || windowHeight * 0.42) - sheetBottom - sphereAreaTop - 12);
+  const sphereSize = Math.min(300, windowWidth - 48, sphereAreaHeight);
+  const showNetworkSphere = isLeafNetworkSphereAvailable() && !showSearchTimeoutDecision && sphereSize >= 160;
+
   return (
     <PrototypeScreenTransition animated={false}>
       <View style={styles.container} pointerEvents="box-none">
@@ -712,6 +721,21 @@ export default function RobotaxiDriverSearchScreen({ navigation, route }) {
           backgroundColor="transparent"
           barStyle="dark-content"
         />
+        {showNetworkSphere ? (
+          <Reanimated.View
+            pointerEvents="none"
+            entering={FadeIn.duration(500)}
+            exiting={FadeOut.duration(260)}
+            style={StyleSheet.absoluteFill}
+            testID="passenger-driver-search-network"
+          >
+            {/* Véu claro: o mapa e os carros da região ficam ao fundo, sem competir. */}
+            <View style={[StyleSheet.absoluteFill, styles.searchVeil]} />
+            <View style={[styles.sphereArea, { top: sphereAreaTop, height: sphereAreaHeight }]}>
+              <LeafNetworkSphereView size={sphereSize} active />
+            </View>
+          </Reanimated.View>
+        ) : null}
         <PrototypeDismissibleSheet
           onClose={handleProtectedDismiss}
           backdropDismissEnabled={false}
@@ -869,6 +893,16 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: "transparent",
+  },
+  searchVeil: {
+    backgroundColor: "rgba(255,255,255,0.62)",
+  },
+  sphereArea: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    alignItems: "center",
+    justifyContent: "center",
   },
   sheetWrap: {
     position: "absolute",
