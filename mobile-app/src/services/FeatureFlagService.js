@@ -20,6 +20,7 @@ class FeatureFlagService {
     
     // 🚩 Feature Flags padrão
     const pilotFeatureDefaults = getPilotFeatureFlagDefaults();
+    this.buildDefinedFlags = pilotFeatureDefaults;
     this.defaultFlags = {
       // KYC (Know Your Customer)
       KYC_ENABLED: true,
@@ -55,9 +56,13 @@ class FeatureFlagService {
       
       if (storedFlags) {
         const parsedFlags = JSON.parse(storedFlags);
+        // As flags do perfil de lançamento vêm do build. O valor guardado de uma versão
+        // anterior não pode vencê-las: um recurso ligado numa atualização continuava
+        // desligado para quem já tinha o app instalado.
         const mergedFlags = {
           ...this.defaultFlags,
-          ...parsedFlags
+          ...parsedFlags,
+          ...this.buildDefinedFlags
         };
 
         this.flags = new Map(Object.entries(mergedFlags));
