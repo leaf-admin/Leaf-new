@@ -6,6 +6,8 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ActivityIndicator, Alert, Animated, StatusBar, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import Reanimated, { FadeInDown } from 'react-native-reanimated';
+import { resolveDriverFoundChips, resolveSearchFoundSeconds } from './driverFoundChips';
 import PrototypeScreenTransition from '../../components/prototype/PrototypeScreenTransition';
 import PrototypeDismissibleSheet from '../../components/prototype/PrototypeDismissibleSheet';
 import PrototypeMapLayer from '../../components/prototype/PrototypeMapLayer';
@@ -951,6 +953,17 @@ export default function RobotaxiTripScreen({ navigation, route }) {
     'searching_replacement',
   ].includes(normalizedStatus);
   const isAccepted = normalizedStatus === 'accepted' || normalizedStatus === 'arrived';
+  // Quanto a busca levou: medido quando o cartão abre já aceito, uma vez por corrida.
+  const foundSecondsRef = useRef({ bookingId: '', seconds: null });
+  const foundBookingKey = String(activeBookingId || activeBooking?.bookingId || driverActiveRide?.bookingId || '');
+  if (normalizedStatus === 'accepted' && foundBookingKey && foundSecondsRef.current.bookingId !== foundBookingKey) {
+    foundSecondsRef.current = {
+      bookingId: foundBookingKey,
+      seconds: resolveSearchFoundSeconds(
+        activeBooking?.requestedAt || activeBooking?.paymentData?.confirmedAt || null,
+      ),
+    };
+  }
   const isArrived = normalizedStatus === 'arrived';
   const isStarted = normalizedStatus === 'started';
   useRideStepHaptics(normalizedStatus, PASSENGER_STEP_HAPTICS);
@@ -2218,6 +2231,22 @@ export default function RobotaxiTripScreen({ navigation, route }) {
             titleTestID={passengerCardFieldTestIDs.pickup_eta}
             subtitleTestID={passengerCardFieldTestIDs.pickup_distance}
           />
+          {(() => {
+            const foundChips = resolveDriverFoundChips({
+              foundSeconds: foundSecondsRef.current.bookingId === foundBookingKey ? foundSecondsRef.current.seconds : null,
+              pickupEtaMinutes: resolvedPickupEtaMin,
+            });
+            return foundChips.length ? (
+              <Reanimated.View entering={FadeInDown.duration(320).delay(120)} style={styles.foundChips} testID="passenger-trip-found-chips">
+                {foundChips.map((chip) => (
+                  <View key={chip.key} style={styles.foundChip}>
+                    <Ionicons name={chip.icon} size={12} color={chip.key === 'fast_match' ? '#B88A00' : '#1A330E'} />
+                    <Text style={styles.foundChipText}>{chip.label}</Text>
+                  </View>
+                ))}
+              </Reanimated.View>
+            ) : null;
+          })()}
           <RobotaxiLifecycleIdentity
             initial={driverInitial}
             photoUri={driverPhotoUri}
@@ -3201,6 +3230,27 @@ const styles = StyleSheet.create({
   },
   compactLifecycleActionFull: {
     width: '100%',
+  },
+  foundChips: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginTop: 8,
+  },
+  foundChip: {
+    minHeight: 24,
+    paddingHorizontal: 9,
+    borderRadius: 12,
+    backgroundColor: '#F1F5EE',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  foundChipText: {
+    ...leafTypography.semiBold,
+    fontSize: 12,
+    lineHeight: 16,
+    color: '#1A330E',
   },
   compactIdentity: {
     marginTop: 14,
