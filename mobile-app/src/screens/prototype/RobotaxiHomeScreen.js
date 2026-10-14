@@ -9562,7 +9562,49 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
 
   const [homeLandingMapFrame, setHomeLandingMapFrame] = useState(null);
   const passengerLandingVisible = Boolean(showRootNavigation && !isDriverRole && canShowPassengerHomeOverlay && !homeSurfaceInteractionBlocked);
-  const passengerMapInCard = Boolean(passengerLandingVisible || (passengerLandingMapLayout && !homeSurfaceInteractionBlocked));
+  // O mapa do passageiro é o fundo da tela (antes ficava dentro de um card).
+  const passengerMapInCard = false;
+  // Onde o ponto de embarque está na tela, para a etiqueta "Seu embarque" ficar presa a ele.
+  const [landingPickupAnchor, setLandingPickupAnchor] = useState(null);
+  const [landingMapMoving, setLandingMapMoving] = useState(false);
+  const landingPickupLatitude = effectiveHomePickupCoordinate?.latitude;
+  const landingPickupLongitude = effectiveHomePickupCoordinate?.longitude;
+  const refreshLandingPickupAnchor = useCallback(async () => {
+    if (!passengerLandingVisible || !Number.isFinite(landingPickupLatitude) || !Number.isFinite(landingPickupLongitude)) {
+      setLandingPickupAnchor(null);
+      return;
+    }
+    try {
+      const point = await mapRef.current?.pointForCoordinate?.({
+        latitude: landingPickupLatitude,
+        longitude: landingPickupLongitude,
+      });
+      if (Number.isFinite(point?.x) && Number.isFinite(point?.y)) {
+        // Fora da área útil (atrás da busca ou da tab bar) a etiqueta não aparece.
+        const inside = point.y > insets.top + 150 && point.y < windowHeight - insets.bottom - 150
+          && point.x > 40 && point.x < windowWidth - 40;
+        setLandingPickupAnchor(inside ? { x: point.x, y: point.y } : null);
+      }
+    } catch (_error) {
+      setLandingPickupAnchor(null);
+    }
+  }, [insets.bottom, insets.top, landingPickupLatitude, landingPickupLongitude, passengerLandingVisible, windowHeight, windowWidth]);
+  useEffect(() => {
+    refreshLandingPickupAnchor();
+    const timer = setTimeout(refreshLandingPickupAnchor, 900);
+    return () => clearTimeout(timer);
+  }, [refreshLandingPickupAnchor]);
+  const handleHomeMapPanDragWithLanding = useCallback((...args) => {
+    if (passengerLandingVisible) setLandingMapMoving(true);
+    handleMapPanDrag(...args);
+  }, [handleMapPanDrag, passengerLandingVisible]);
+  const handleHomeMapRegionChangeCompleteWithLanding = useCallback((nextRegion) => {
+    handleMapRegionChangeComplete(nextRegion);
+    if (passengerLandingVisible) {
+      setLandingMapMoving(false);
+      refreshLandingPickupAnchor();
+    }
+  }, [handleMapRegionChangeComplete, passengerLandingVisible, refreshLandingPickupAnchor]);
 
   const completedReceiptBookingId = String(
     lastReceipt?.bookingId ||
@@ -9755,9 +9797,9 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
           )}
           onMapLayout={handleMapLayout}
           onMapLoaded={handleHomeMapLoaded}
-          onMapPanDrag={handleMapPanDrag}
+          onMapPanDrag={handleHomeMapPanDragWithLanding}
           onMapReady={handleHomeMapReady}
-          onRegionChangeComplete={handleMapRegionChangeComplete}
+          onRegionChangeComplete={handleHomeMapRegionChangeCompleteWithLanding}
           // H3 cells stay through background re-syncs (they blinked before).
           mapChildren={shouldRenderRuntimeMapState || (isDriverRole && runtimeHomeSurfaceReady) ? driverH3MapChildren : null}
           mapSafetyProfile={isDriverRole ? 'driver' : 'default'}
@@ -9924,7 +9966,8 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
           onPickupPress={handleOpenHomePickupSearch}
           onSettingsPress={() => navigation.navigate('RobotaxiPrototypeSettings')}
           onRecenterPress={handleTopLeftPress}
-          onMapFrame={setHomeLandingMapFrame}
+          pickupAnchor={landingPickupAnchor}
+          mapMoving={landingMapMoving}
         /> : null}
 
         {canShowPassengerHomeOverlay && !passengerLandingVisible ? (
