@@ -12,7 +12,8 @@ em outra sessão/conta sem começar do zero.
   - `afde8d8aa` câmera do motorista (vehicle-marker-refinement)
   - `4d2263eec` aliases Map/MapScreen/TabRoot redirecionam para a home única
   - `e5784358d` motion lab (dev-only)
-  - checkpoint deste documento: lab v2 + conceitos de carro
+  - `53e5f82ac` lab v2 + conceitos de carro + este checkpoint
+  - `1c0839a59` marcador SUV (conceito C) em produção — suíte mobile 1660/1660 e production-guards OK
 
 ## Motion lab (somente __DEV__)
 
@@ -50,3 +51,12 @@ em outra sessão/conta sem começar do zero.
 - `/Users/izaakdias/.codex/worktrees/qa-tools/` (DEVICE_PLAYBOOK.md, lib.sh).
 - Evidências: `qa-tools/evidence/motion-lab-v2-2026-10-13/`.
 - Metro roda a partir de `mobile-app` do worktree na porta 8081; driver do iPhone em `localhost:22087`.
+
+## Retomar daqui (estado final em 2026-10-14)
+
+- Árvore limpa (só `mobile-app/runtime-debug-history.json` não rastreado, ignorar).
+- Próxima tarefa: portar as animações aprovadas do lab para as telas reais do passageiro,
+  uma cena por vez (abertura → rota → categoria → busca → encontrou), com teste no iPhone
+  a cada passo. Ler `LeafMotionLab.js` como referência; achar as telas reais com `rg`
+  (ex.: `RobotaxiHomeScreen.js`, `passenger-driver-search`, `passenger-trip-accepted`).
+- Não editar código mobile durante corrida em andamento. Push/PR só quando o Izaak pedir.
