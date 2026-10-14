@@ -83,19 +83,6 @@ const LEAF_NAVIGATION_THEME = {
   colors: { ...DefaultTheme.colors, background: '#003002' },
 };
 
-function RobotaxiDriverSearchMapScreen(props) {
-  return (
-    <View style={{ flex: 1 }}>
-      <RobotaxiPrototypeScreen {...props} />
-      <View
-        pointerEvents="box-none"
-        style={{ position: 'absolute', top: 0, right: 0, bottom: 0, left: 0 }}
-      >
-        <RobotaxiDriverSearchScreen {...props} />
-      </View>
-    </View>
-  );
-}
 
 if (typeof globalThis !== 'undefined') {
   globalThis.navigationRef = rootNavigationRef;
@@ -777,8 +764,11 @@ function renderCustomerPrototypeScreens() {
       />
       <Stack.Screen
         name="RobotaxiPrototypeDriverSearch"
-        component={RobotaxiDriverSearchMapScreen}
-        options={prototypeOverlayScreenOptions}
+        // Overlay transparente sobre a tela inicial, que já entra em modo busca pelo status da
+        // corrida. Antes a rota montava uma segunda tela inicial inteira, com outro mapa Google
+        // (+~380 MB e ~50% de CPU no iPhone durante a busca).
+        component={RobotaxiDriverSearchScreen}
+        options={prototypeTransparentOverlayScreenOptions}
       />
       <Stack.Screen
         name="RobotaxiPrototypeTrip"
