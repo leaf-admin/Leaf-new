@@ -23,6 +23,14 @@ const MAX_CELLS = Number.parseInt(process.env.H3_MAP_MAX_CELLS || '500', 10);
 const BBOX_MAX_SPAN_DEGREES = Number.parseFloat(process.env.H3_MAP_MAX_BBOX_SPAN_DEGREES || '5');
 const SEARCH_SCAN_COUNT = Number.parseInt(process.env.H3_MAP_SCAN_COUNT || '250', 10);
 const SEARCH_SCAN_MAX_KEYS = Number.parseInt(process.env.H3_MAP_SCAN_MAX_KEYS || '4000', 10);
+// The map is polled every few seconds and each poll scanned the whole keyspace
+// for booking_search:*. Only the key list is reused for this long; the state of
+// every search is still read fresh on each request, so a new search shows up in
+// the heat map at most this late and a finished one disappears immediately.
+const SEARCH_KEYS_CACHE_TTL_MS = Math.max(
+  0,
+  Number.parseInt(process.env.H3_MAP_SEARCH_KEYS_CACHE_TTL_MS || '30000', 10) || 0
+);
 const OPEN_REQUEST_ACTIVE_WINDOW_MS = Number.parseInt(process.env.H3_MAP_OPEN_REQUEST_WINDOW_MS || String(10 * 60 * 1000), 10);
 const ACTIVE_BOOKING_STALE_MS = Number.parseInt(process.env.H3_MAP_ACTIVE_BOOKING_STALE_MS || String(12 * 60 * 60 * 1000), 10);
 const MAX_DYNAMIC_SURGE_PERCENT = MAX_DEMAND_MARKUP_PERCENT;
@@ -461,6 +469,27 @@ async function scanKeys(redis, pattern, count = SEARCH_SCAN_COUNT, maxKeys = SEA
 class H3MapService {
   constructor() {
     this.cache = new Map();
+    this.searchKeysCache = null; // { keys, expiresAt }
+    this.searchKeysInflight = null;
+  }
+
+  async listOpenSearchKeys(redis) {
+    const now = Date.now();
+    if (SEARCH_KEYS_CACHE_TTL_MS > 0 && this.searchKeysCache && this.searchKeysCache.expiresAt > now) {
+      return this.searchKeysCache.keys;
+    }
+    if (!this.searchKeysInflight) {
+      // Concurrent map requests share one scan instead of starting their own.
+      this.searchKeysInflight = scanKeys(redis, 'booking_search:*', SEARCH_SCAN_COUNT, SEARCH_SCAN_MAX_KEYS)
+        .then((keys) => {
+          this.searchKeysCache = { keys, expiresAt: Date.now() + SEARCH_KEYS_CACHE_TTL_MS };
+          return keys;
+        })
+        .finally(() => {
+          this.searchKeysInflight = null;
+        });
+    }
+    return this.searchKeysInflight;
   }
 
   getCacheKey({ bbox, resolution, surface, mode, includeEmpty, includeBoundary, visualPolicy }) {
@@ -762,7 +791,7 @@ class H3MapService {
   }
 
   async collectOpenRequests(redis, bbox) {
-    const searchKeys = await scanKeys(redis, 'booking_search:*', SEARCH_SCAN_COUNT, SEARCH_SCAN_MAX_KEYS);
+    const searchKeys = await this.listOpenSearchKeys(redis);
     if (!Array.isArray(searchKeys) || searchKeys.length === 0) {
       return [];
     }

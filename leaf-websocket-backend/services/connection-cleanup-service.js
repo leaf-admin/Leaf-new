@@ -32,8 +32,12 @@ class ConnectionCleanupService {
             cleanupInterval: 60000,        // Limpar a cada 1 minuto
             heartbeatTimeout: 120000,       // 2 minutos sem heartbeat = desconectado
             orphanedConnectionTTL: 300000,  // 5 minutos = conexão órfã
-            eligibleGeoStaleMs: Number.parseInt(process.env.ELIGIBLE_GEO_STALE_MS || '180000', 10) // 3 min
+            eligibleGeoStaleMs: Number.parseInt(process.env.ELIGIBLE_GEO_STALE_MS || '180000', 10), // 3 min
+            // A cada N ciclos (e no primeiro) varre o keyspace para reconciliar o índice de
+            // conexões e os contadores; nos demais ciclos lê só o índice.
+            reconcileEveryCycles: Math.max(1, Number.parseInt(process.env.CONNECTION_CLEANUP_RECONCILE_EVERY_CYCLES || '30', 10) || 30)
         };
+        this.cycle = 0;
     }
 
     /**
@@ -93,11 +97,14 @@ class ConnectionCleanupService {
             // 1. Limpar conexões sem heartbeat
             stats.heartbeatExpired = await this.cleanupExpiredHeartbeats();
 
-            // 2. Limpar conexões órfãs no Redis
-            stats.orphanedConnections = await this.cleanupOrphanedConnections();
+            const reconcile = this.cycle % this.config.reconcileEveryCycles === 0;
+            this.cycle += 1;
 
-            // 3. Limpar registros órfãos no Redis
-            stats.redisCleanup = await this.cleanupRedisOrphans();
+            // 2. Limpar conexões órfãs no Redis
+            stats.orphanedConnections = await this.cleanupOrphanedConnections({ reconcile });
+
+            // 3. Limpar registros órfãos no Redis (contadores já somem no unregister ao chegar a zero)
+            stats.redisCleanup = reconcile ? await this.cleanupRedisOrphans() : 0;
 
             // 4. Limpar pool GEO elegível com drivers stale/offline
             stats.eligibleGeoCleanup = await this.cleanupEligibleGeoStaleDrivers();
@@ -212,30 +219,44 @@ class ConnectionCleanupService {
      * Limpar conexões órfãs (registradas mas não conectadas)
      * @returns {Promise<number>} Número de conexões removidas
      */
-    async cleanupOrphanedConnections() {
+    async cleanupOrphanedConnections({ reconcile = true } = {}) {
         try {
             let removed = 0;
-            const RedisScan = require('../utils/redis-scan');
-            const connectionKeys = await RedisScan.scanKeys(this.redis, 'connection:*');
+            const indexKey = websocketRateLimiter.CONNECTION_INDEX_KEY || 'connections:index';
+            let socketIds;
+            if (reconcile) {
+                // Reconciliação: inclui conexões registradas antes do índice existir.
+                const RedisScan = require('../utils/redis-scan');
+                const connectionKeys = await RedisScan.scanKeys(this.redis, 'connection:*');
+                socketIds = connectionKeys.map((key) => key.replace('connection:', ''));
+                if (socketIds.length > 0) {
+                    await this.redis.sadd(indexKey, ...socketIds);
+                }
+            } else {
+                socketIds = await this.redis.smembers(indexKey);
+            }
 
-            for (const key of connectionKeys) {
+            for (const socketId of socketIds) {
+                const key = `connection:${socketId}`;
                 const connectionData = await this.redis.hgetall(key);
-                
-                if (connectionData && Object.keys(connectionData).length > 0) {
-                    const socketId = key.replace('connection:', '');
-                    const connectedAt = parseInt(connectionData.connectedAt || 0);
-                    const age = Date.now() - connectedAt;
 
-                    // Verificar se socket ainda existe
-                    const socket = this.io.sockets.sockets.get(socketId);
-                    
-                    if (!socket && age > this.config.orphanedConnectionTTL) {
-                        // Conexão órfã - remover
-                        await this.redis.del(key);
-                        await websocketRateLimiter.unregisterConnection({ id: socketId });
-                        removed++;
-                        logger.debug(`🗑️ [ConnectionCleanupService] Conexão órfã removida: ${socketId}`);
-                    }
+                if (!connectionData || Object.keys(connectionData).length === 0) {
+                    await this.redis.srem(indexKey, socketId);
+                    continue;
+                }
+
+                const connectedAt = parseInt(connectionData.connectedAt || 0);
+                const age = Date.now() - connectedAt;
+
+                // Verificar se socket ainda existe
+                const socket = this.io.sockets.sockets.get(socketId);
+                
+                if (!socket && age > this.config.orphanedConnectionTTL) {
+                    // Conexão órfã - remover
+                    await this.redis.del(key);
+                    await websocketRateLimiter.unregisterConnection({ id: socketId });
+                    removed++;
+                    logger.debug(`🗑️ [ConnectionCleanupService] Conexão órfã removida: ${socketId}`);
                 }
             }
 
