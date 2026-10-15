@@ -33,6 +33,34 @@ describe('firebase-storage-service', () => {
     expect(getFromRealtimeDBMock).toHaveBeenCalledWith('users/driver-1/documents/cnh');
   });
 
+  test('falls back to a direct HTTP download when the Admin SDK download fails', async () => {
+    const file = { download: jest.fn(async () => { throw new Error('admin sdk denied'); }) };
+    const storage = { bucket: jest.fn(() => ({ file: jest.fn(() => file) })) };
+    jest.doMock('../../../firebase-config', () => ({
+      initializeFirebase: jest.fn(),
+      getStorage: jest.fn(() => storage),
+      getFirestore: jest.fn(() => null),
+      getFromRealtimeDB: jest.fn()
+    }));
+
+    const FirebaseStorageService = require('../../../services/firebase-storage-service');
+    const { logError } = require('../../../utils/logger');
+    const service = new FirebaseStorageService();
+    service.storage = storage;
+    const downloadFromUrl = jest.spyOn(service, 'downloadFromUrl').mockResolvedValue(Buffer.from('from-http'));
+    const url = 'https://firebasestorage.googleapis.com/v0/b/leaf-bucket/o/kyc%2Fdriver-1%2Fselfie.jpg?alt=media';
+
+    // Before the fix the catch blocks threw ReferenceError (filePath) and the
+    // HTTP fallback never ran.
+    await expect(service.downloadFile(url)).resolves.toEqual(Buffer.from('from-http'));
+    expect(downloadFromUrl).toHaveBeenCalledWith(url);
+    expect(logError).toHaveBeenCalledWith(
+      expect.objectContaining({ message: 'admin sdk denied' }),
+      'Erro ao baixar do Firebase Storage',
+      expect.objectContaining({ bucketName: 'leaf-bucket', filePath: 'kyc/driver-1/selfie.jpg' })
+    );
+  });
+
   test('downloads the exact approved Storage generation and returns integrity metadata', async () => {
     const file = {
       download: jest.fn(async () => [Buffer.from('approved-cnh-pdf')]),
