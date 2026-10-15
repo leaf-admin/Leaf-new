@@ -504,6 +504,18 @@ class LeafApiService {
     return this.request(`/drivers/${driverId}/complete`);
   }
 
+  async getDriverApplication(driverId, context = {}) {
+    return this.requestKyc(`/drivers/applications/${encodeURIComponent(driverId)}`, {}, context);
+  }
+
+  // Aprovação final: o backend só aprova se o estado canônico de ativação estiver completo.
+  async approveDriverWithChecks(driverId, reason, evidence = []) {
+    return this.request(`/drivers/${encodeURIComponent(driverId)}/approve`, {
+      method: "POST",
+      body: JSON.stringify({ reason, evidence }),
+    });
+  }
+
   async getDriverDocuments(driverId, context = {}) {
     return this.requestKyc(`/drivers/${driverId}/documents`, {}, context);
   }

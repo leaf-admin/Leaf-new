@@ -5,6 +5,7 @@ const http = require("node:http");
 const net = require("node:net");
 const path = require("node:path");
 const { chromium } = require("playwright");
+const { driverApplicationsFixture } = require("./fixtures/driver-applications.cjs");
 
 const dashboardRoot = path.resolve(__dirname, "..", "..");
 const forbiddenPaidHosts = [
@@ -36,6 +37,7 @@ const routes = [
   { path: "/support", heading: "Suporte" },
   { path: "/campaign-center", heading: "Campanhas in-app" },
   { path: "/drivers", heading: "Motoristas" },
+  { path: "/drivers/smoke-driver", heading: "Maria Souza Lima" },
   { path: "/drivers/review-queue", heading: "Fila de Revisão de Documentos" },
   { path: "/drivers/smoke-driver/documents", heading: "Documentos do Motorista" },
   { path: "/maps", heading: "Mapas e Geofence" },
@@ -677,6 +679,18 @@ function fixtureForApiPath(apiPath, method) {
     return json({ success: true, slots: [] });
   }
 
+  if (apiPath.startsWith("/drivers/applications/")) {
+    const id = decodeURIComponent(apiPath.split("/")[3] || "");
+    const item = driverApplicationsFixture.find((entry) => entry.id === id);
+    return item ? json(item) : json({ success: false, message: "Motorista não encontrado." }, 404);
+  }
+  if (apiPath.startsWith("/drivers/applications")) {
+    return json({
+      applications: driverApplicationsFixture,
+      pagination: { page: 1, limit: 200, total: driverApplicationsFixture.length, pages: 1 },
+    });
+  }
+
   if (apiPath.startsWith("/drivers/documents/review-queue")) {
     return json({
       success: true,
@@ -799,6 +813,19 @@ async function assertVisibleHeading(page, routeConfig) {
     throw new Error(`${routeConfig.path} rendered an application error`);
   }
   log(`${routeConfig.path} ok`);
+}
+
+async function assertDriverReviewContract(page) {
+  await page.goto("/drivers?tab=review", { waitUntil: "domcontentloaded" });
+  await page.locator("[data-testid='driver-row-smoke-driver']").waitFor({ timeout: 15000 });
+  await page.locator("[data-testid='driver-row-smoke-driver-crlv']").waitFor({ timeout: 5000 });
+  if (await page.locator("[data-testid='driver-row-smoke-driver-approved']").count()) {
+    throw new Error("Approved driver must not appear in the review tab");
+  }
+  await page.goto("/drivers/smoke-driver", { waitUntil: "domcontentloaded" });
+  await page.locator("[data-testid='driver-status-banner']", { hasText: "CPF já usado em outra conta" }).waitFor({ timeout: 15000 });
+  await page.locator("[data-testid='driver-final-approve']").waitFor({ timeout: 5000 });
+  log("driver review list and detail ok");
 }
 
 async function assertFinancialReconciliationContract(page) {
@@ -945,6 +972,8 @@ async function main() {
     for (const routeConfig of routes) {
       await assertVisibleHeading(page, routeConfig);
     }
+
+    await assertDriverReviewContract(page);
 
     await assertFinancialReconciliationContract(page);
     await assertMetricsFinancialContract(page);

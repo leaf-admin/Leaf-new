@@ -705,6 +705,18 @@ class DriverApplicationService {
         acceptPlusWithElite: user.acceptPlusWithElite === true || user.acceptPlusRides === true || user.receivePlusRides === true,
         vehicles: userVehicleEntries
       },
+      // Mesmo estado canônico que o app do motorista mostra em "Seu cadastro".
+      activation: {
+        state: user.driverActivation?.activationState || null,
+        label: user.driverActivation?.activationStateLabel || null,
+        canGoOnline: user.driverActivation?.canGoOnline === true,
+        blockingReason: user.driverActivation?.blockingReason || null,
+        checklist: user.driverActivation?.checklist || {},
+        livenessPassed: user.driverActivation?.liveness?.passed === true,
+        vehicleReady: user.driverActivation?.vehicle?.approved === true && user.driverActivation?.vehicle?.active === true,
+        updatedAt: user.driverActivation?.updatedAt || null
+      },
+      autoApproval: user.autoApproval || null,
       totalDocuments: Object.keys(normalizedDocuments).length,
       source: canonicalProfileData ? 'firestore_profile_rtdb_activation' : 'rtdb_mirror',
       syncedAt: new Date().toISOString()
