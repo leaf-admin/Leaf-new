@@ -6,6 +6,7 @@ services:
       args:
         GIT_SHA: ${GIT_SHA:-unknown}
     container_name: leaf-trip-location-worker
+    cpu_shares: 4096
     logging:
       driver: json-file
       options:
@@ -91,6 +92,7 @@ services:
       args:
         GIT_SHA: ${GIT_SHA:-unknown}
     container_name: leaf-pricing-baseline-worker
+    cpu_shares: 4096
     logging:
       driver: json-file
       options:
@@ -163,6 +165,7 @@ services:
       args:
         GIT_SHA: ${GIT_SHA:-unknown}
     container_name: leaf-ride-health-monitor-worker
+    cpu_shares: 4096
     logging:
       driver: json-file
       options:

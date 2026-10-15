@@ -205,7 +205,9 @@ x-websocket-gateway-service: &websocket_gateway_service
     redis:
       condition: service_healthy
   restart: unless-stopped
-  cpus: "1.10"
+  # Leaf first on the shared VPS: higher CPU weight than other projects (1024 default).
+  cpus: "1.50"
+  cpu_shares: 4096
   mem_limit: 1536m
   pids_limit: 512
   ulimits:
@@ -223,12 +225,13 @@ x-websocket-gateway-service: &websocket_gateway_service
 
 services:
   redis:
-    cpus: "0.75"
+    cpus: "2.00"
     # Minimum headroom above maxmemory=2304mb; pressure/COW validation is still required.
     mem_limit: 3072m
 
   websocket:
-    cpus: "1.10"
+    cpus: "1.50"
+    cpu_shares: 4096
     mem_limit: 1536m
     env_file:
       - .env
@@ -423,6 +426,10 @@ services:
     <<: *websocket_gateway_service
     container_name: leaf-websocket-gateway-3
 
+  websocket-gateway-4:
+    <<: *websocket_gateway_service
+    container_name: leaf-websocket-gateway-4
+
   queue-worker:
     build:
       context: .
@@ -430,6 +437,7 @@ services:
       args:
         GIT_SHA: ${GIT_SHA:-unknown}
     container_name: leaf-queue-worker
+    cpu_shares: 4096
     logging:
       driver: json-file
       options:
@@ -512,4 +520,6 @@ services:
       websocket-gateway-2:
         condition: service_healthy
       websocket-gateway-3:
+        condition: service_healthy
+      websocket-gateway-4:
         condition: service_healthy
