@@ -101,7 +101,7 @@ router.put('/woovi/update-webhook/:webhookId', authenticateJWT, requireRole(WOOV
       res.status(400).json(result);
     }
   } catch (error) {
-    logError(error, 'Erro ao atualizar webhook', { service: 'woovi-routes', webhookId });
+    logError(error, 'Erro ao atualizar webhook', { service: 'woovi-routes', webhookId: req.params.webhookId });
     res.status(500).json({
       success: false,
       error: error.message
@@ -125,7 +125,7 @@ router.delete('/woovi/delete-webhook/:webhookId', authenticateJWT, requireRole(W
       res.status(400).json(result);
     }
   } catch (error) {
-    logError(error, 'Erro ao deletar webhook', { service: 'woovi-routes', webhookId });
+    logError(error, 'Erro ao deletar webhook', { service: 'woovi-routes', webhookId: req.params.webhookId });
     res.status(500).json({
       success: false,
       error: error.message

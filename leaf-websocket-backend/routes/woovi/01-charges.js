@@ -82,7 +82,7 @@ router.get('/woovi/check-status/:correlationID', authenticateJWT, requireRole(WO
     });
 
   } catch (error) {
-    logError(error, 'Erro ao verificar status', { service: 'woovi-routes', correlationID, errorData: error.response?.data });
+    logError(error, 'Erro ao verificar status', { service: 'woovi-routes', correlationID: req.params.correlationID, errorData: error.response?.data });
 
     // Fallback Mock was here. Removed to enforce real Sandbox testing.
 
