@@ -165,32 +165,37 @@ export default function SubscriptionsPage() {
               <option value="overdue">overdue</option>
               <option value="failed">failed</option>
             </select>
-            <input
-              type="number"
-              min="1"
-              max="90"
-              value={freeDays}
-              onChange={(e) => setFreeDays(e.target.value)}
-              disabled={readOnly}
-              style={{ width: 120 }}
-            />
-            <input
-              placeholder="onda (wave_1)"
-              value={waveDraft}
-              onChange={(e) => setWaveDraft(e.target.value)}
-              disabled={readOnly}
-              style={{ width: 140 }}
-            />
-            <input
-              type="number"
-              min="0"
-              step="10"
-              value={dailyFeeDraft}
-              onChange={(e) => setDailyFeeDraft(e.target.value)}
-              disabled={readOnly}
-              style={{ width: 130 }}
-              title="Taxa diária em centavos"
-            />
+            <label className="inline-field">
+              <span>Dias grátis</span>
+              <input
+                type="number"
+                min="1"
+                max="90"
+                value={freeDays}
+                onChange={(e) => setFreeDays(e.target.value)}
+                disabled={readOnly}
+              />
+            </label>
+            <label className="inline-field">
+              <span>Onda</span>
+              <input
+                placeholder="wave_1"
+                value={waveDraft}
+                onChange={(e) => setWaveDraft(e.target.value)}
+                disabled={readOnly}
+              />
+            </label>
+            <label className="inline-field">
+              <span>Taxa diária (centavos)</span>
+              <input
+                type="number"
+                min="0"
+                step="10"
+                value={dailyFeeDraft}
+                onChange={(e) => setDailyFeeDraft(e.target.value)}
+                disabled={readOnly}
+              />
+            </label>
             <button onClick={load}>Atualizar</button>
           </div>
         </header>

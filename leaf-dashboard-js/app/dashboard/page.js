@@ -1,11 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import ProtectedRoute from "@/src/components/ProtectedRoute";
 import AppNav from "@/src/components/AppNav";
-import { useAuth } from "@/src/contexts/AuthContext";
 import { leafAPI } from "@/src/services/api";
 import Panel from "@/src/components/ui/Panel";
 import { ErrorText, LoadingState } from "@/src/components/ui/PageFeedback";
@@ -187,8 +185,8 @@ function ActionItems({ items = [] }) {
   if (!items.length) return <p className="text-muted">Sem ações sugeridas agora.</p>;
   return (
     <div className="metric-list">
-      {items.map((item) => (
-        <div className="row" key={item.id}>
+      {items.map((item, index) => (
+        <div className="row" key={item.id || `${item.title || item.label || "item"}-${index}`}>
           <div className="label">
             <span
               className={
@@ -585,8 +583,6 @@ function buildWorkspaces(snapshot) {
 }
 
 export default function DashboardPage() {
-  const { user, signOut } = useAuth();
-  const router = useRouter();
   const [snapshot, setSnapshot] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -646,15 +642,6 @@ export default function DashboardPage() {
               {statusLabel(snapshot?.status)}
             </span>
             <span className="meta-badge">Atualizado {formatTime(snapshot?.generatedAt)}</span>
-            <span className="meta-badge">Cache {snapshot?.cache?.status || "-"}</span>
-            <button
-              onClick={async () => {
-                await signOut();
-                router.replace("/login");
-              }}
-            >
-              Sair
-            </button>
           </div>
         </header>
 
@@ -703,14 +690,22 @@ export default function DashboardPage() {
           ))}
         </section>
 
-        <section className="grid ops-detail-grid" aria-label="Atenção operacional">
+        <section className="grid" aria-label="Atenção operacional">
           <Panel
+            className="panel-span-full"
             title="Atenção agora"
-            subtitle="Itens priorizados pelo backend para a equipe decidir o próximo passo sem procurar em várias telas."
+            subtitle="O que pede uma decisão da equipe."
           >
             <ActionItems items={attentionItems} />
           </Panel>
+        </section>
 
+        <details className="ops-technical">
+          <summary>
+            <span>Saúde técnica e custos</span>
+            <small>Canary, custo por corrida, leitura do Firestore, saúde por domínio e fontes do snapshot</small>
+          </summary>
+        <section className="grid ops-detail-grid">
           <Panel
             title="Canary Pack"
             subtitle="Roteiro operacional para testar com backend como fonte de verdade, sem trocar build."
@@ -875,6 +870,7 @@ export default function DashboardPage() {
             <SourceRows sources={services.sources || []} />
           </Panel>
         </section>
+        </details>
 
         <ErrorText message={error} />
       </main>
