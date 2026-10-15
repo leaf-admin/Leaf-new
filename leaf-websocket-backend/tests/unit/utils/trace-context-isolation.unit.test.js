@@ -32,3 +32,34 @@ describe('traceContext.runWithTraceId', () => {
     expect(id).toMatch(/^req-\d+-[0-9a-f]{8}$/);
   });
 });
+
+describe('traceContext.setCurrentTraceId', () => {
+  test('never renames the trace of other work that shares the same context', async () => {
+    const seen = {};
+    await traceContext.runWithTraceId('trace-parent', async () => {
+      // Socket events and timers started from the same parent share its store;
+      // a handler calling setCurrentTraceId used to rename all of them.
+      const other = (async () => { await tick(20); seen.other = traceContext.getCurrentTraceId(); })();
+      (async () => { traceContext.setCurrentTraceId('trace-handler'); })();
+      await other;
+      seen.parent = traceContext.getCurrentTraceId();
+      // The supported way to scope a trace:
+      seen.scoped = await traceContext.runWithTraceId('trace-handler', async () => traceContext.getCurrentTraceId());
+    });
+
+    expect(seen).toEqual({ other: 'trace-parent', parent: 'trace-parent', scoped: 'trace-handler' });
+  });
+
+  test('a timer created inside a request keeps its own trace after another handler sets one', async () => {
+    let timerTrace = null;
+    await traceContext.runWithTraceId('trace-request', async () => {
+      setTimeout(() => { timerTrace = traceContext.getCurrentTraceId(); }, 15);
+    });
+    await traceContext.runWithTraceId('trace-other', async () => {
+      traceContext.setCurrentTraceId('trace-renamed');
+    });
+    await tick(30);
+
+    expect(timerTrace).toBe('trace-request');
+  });
+});
