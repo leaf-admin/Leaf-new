@@ -942,9 +942,10 @@ router.get('/api/reports/comprehensive', authenticateJWT, requireRole(DASHBOARD_
         // Relatório Operacional
         else if (reportType === 'operational') {
           const totalTrips = periodBookings.length;
-          const completedTrips = periodBookings.filter(b =>
+          const completedBookings = periodBookings.filter(b =>
             b.status === 'COMPLETE' || b.status === 'PAID'
-          ).length;
+          );
+          const completedTrips = completedBookings.length;
           const cancelledTrips = periodBookings.filter(b =>
             b.status === 'CANCELLED'
           ).length;
