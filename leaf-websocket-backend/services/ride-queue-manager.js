@@ -164,6 +164,13 @@ class RideQueueManager {
             regions: [],
             expiresAt: 0
         };
+        // Every enqueue SADDs the region index, so an empty index normally means an idle
+        // queue. Rescan the keyspace only on this interval to self-heal a missed SADD.
+        this.regionReconcileIntervalMs = Math.max(
+            5000,
+            Number.parseInt(process.env.RIDE_QUEUE_REGION_RECONCILE_INTERVAL_MS || '60000', 10) || 60000
+        );
+        this.lastRegionReconcileAt = 0;
     }
 
     /**
@@ -567,7 +574,9 @@ class RideQueueManager {
 
             let regions = await this.redis.smembers(this.activeRegionsSetKey);
 
-            if (!regions || regions.length === 0) {
+            const reconcileDue = now - this.lastRegionReconcileAt >= this.regionReconcileIntervalMs;
+            if ((!regions || regions.length === 0) && reconcileDue) {
+                this.lastRegionReconcileAt = now;
                 const RedisScan = require('../utils/redis-scan');
                 const queueKeys = await RedisScan.scanKeys(this.redis, 'ride_queue:*:pending');
                 const scannedRegions = new Set();

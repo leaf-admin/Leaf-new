@@ -124,6 +124,9 @@ function resolveTripPersistenceScope(primaryInput = {}, storedMetadata = {}) {
 const DEFAULT_WORKER_HEALTH_KEY = 'leaf:runtime:trip-location-worker:health';
 const DEFAULT_WORKER_HEALTH_TTL_SECONDS = 90;
 const WORKER_HEALTH_STATUSES = new Set(['healthy', 'idle', 'degraded']);
+const BUFFER_KEY_PREFIX = 'trip_loc_buffer:';
+const DEFAULT_BUFFER_INDEX_KEY = 'trip_loc_buffer_index';
+const DEFAULT_BUFFER_RECONCILE_INTERVAL_MS = 5 * 60 * 1000;
 
 class TripLocationPersistenceService {
     constructor() {
@@ -147,6 +150,20 @@ class TripLocationPersistenceService {
                 10
             ) || DEFAULT_WORKER_HEALTH_TTL_SECONDS
         );
+        // Index of trips with buffered points, so the periodic flush avoids a keyspace SCAN.
+        // Kept outside the trip_loc_buffer:* namespace so the reconcile SCAN never matches it.
+        this.bufferIndexKey = String(
+            process.env.TRIP_LOCATION_BUFFER_INDEX_KEY || DEFAULT_BUFFER_INDEX_KEY
+        ).trim() || DEFAULT_BUFFER_INDEX_KEY;
+        this.bufferReconcileIntervalMs = Math.max(
+            15000,
+            Number.parseInt(
+                process.env.TRIP_LOCATION_BUFFER_RECONCILE_INTERVAL_MS
+                    || String(DEFAULT_BUFFER_RECONCILE_INTERVAL_MS),
+                10
+            ) || DEFAULT_BUFFER_RECONCILE_INTERVAL_MS
+        );
+        this.lastBufferReconcileAt = 0;
     }
 
     getBufferKey(tripId) {
@@ -281,6 +298,7 @@ class TripLocationPersistenceService {
         }
 
         const bufferLength = await redis.rpush(bufferKey, JSON.stringify(point));
+        await redis.sadd(this.bufferIndexKey, point.tripId);
         const sameCanonicalDriver =
             String(previousMeta?.canonicalDriverId || '').trim() === point.driverId;
         const previousLocation = normalizePointLocation({
@@ -732,6 +750,26 @@ class TripLocationPersistenceService {
         };
     }
 
+    async listBufferedTripIds(redis) {
+        const tripIds = new Set(await redis.smembers(this.bufferIndexKey) || []);
+
+        // Rare SCAN only re-indexes buffers the index missed (pre-index data, failed SADD).
+        const now = Date.now();
+        if (now - this.lastBufferReconcileAt >= this.bufferReconcileIntervalMs) {
+            const keys = await RedisScan.scanKeys(redis, `${BUFFER_KEY_PREFIX}*`, 200);
+            this.lastBufferReconcileAt = now;
+            const missing = keys
+                .map((key) => key.slice(BUFFER_KEY_PREFIX.length))
+                .filter((tripId) => tripId && !tripIds.has(tripId));
+            if (missing.length > 0) {
+                await redis.sadd(this.bufferIndexKey, ...missing);
+                missing.forEach((tripId) => tripIds.add(tripId));
+            }
+        }
+
+        return Array.from(tripIds);
+    }
+
     async flushPendingTrips(maxTrips = this.flushMaxTripsPerCycle) {
         let redis = null;
         let processedTrips = 0;
@@ -755,12 +793,14 @@ class TripLocationPersistenceService {
                 return result;
             }
 
-            const keys = await RedisScan.scanKeys(redis, 'trip_loc_buffer:*', 200);
-            const selectedKeys = keys.slice(0, maxTrips);
+            const tripIds = await this.listBufferedTripIds(redis);
+            const selectedTripIds = tripIds.slice(0, maxTrips);
 
-            for (const key of selectedKeys) {
-                const tripId = key.replace('trip_loc_buffer:', '');
-                if (!tripId) {
+            for (const tripId of selectedTripIds) {
+                // Buffers expire (TTL) or drain; drop their index entry instead of flushing.
+                const length = await redis.llen(this.getBufferKey(tripId));
+                if (length <= 0) {
+                    await redis.srem(this.bufferIndexKey, tripId);
                     continue;
                 }
                 processedTrips += 1;
