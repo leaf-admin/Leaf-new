@@ -33,7 +33,7 @@ const adminUser = {
 };
 
 const routes = [
-  { path: "/dashboard", heading: "Operação diária" },
+  { path: "/dashboard", heading: "Hoje" },
   { path: "/support", heading: "Suporte" },
   { path: "/campaign-center", heading: "Campanhas in-app" },
   { path: "/drivers", heading: "Motoristas" },
