@@ -11,6 +11,7 @@ const RideStateManager = require('./ride-state-manager');
 const eventSourcing = require('./event-sourcing');
 const { logger } = require('../utils/logger');
 const { getVisibleBookingKey, BOOKING_VISIBILITY_TTL_SEC } = require('./booking-visibility-service');
+const { applyBookingSafetyTtl } = require('../utils/booking-redis-ttl');
 
 const CLAIM_PENDING_RIDE_SCRIPT = `
 local bookingId = ARGV[1]
@@ -195,6 +196,7 @@ class RideQueueManager {
             if (typeof this.redis.pipeline === 'function') {
                 const pipeline = this.redis.pipeline();
                 pipeline.hset(bookingKey, serializedSnapshot);
+                applyBookingSafetyTtl(pipeline, bookingKey);
                 pipeline.hset(visibleKey, {
                     ...serializedSnapshot,
                     visibilityUpdatedAt: timestamp
@@ -211,6 +213,7 @@ class RideQueueManager {
                 await pipeline.exec();
             } else {
                 await this.redis.hset(bookingKey, serializedSnapshot);
+                await applyBookingSafetyTtl(this.redis, bookingKey);
                 await this.redis.hset(visibleKey, {
                     ...serializedSnapshot,
                     visibilityUpdatedAt: timestamp

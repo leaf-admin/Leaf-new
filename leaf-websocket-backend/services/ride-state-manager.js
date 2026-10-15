@@ -8,6 +8,17 @@
 const { logger } = require('../utils/logger');
 const eventSourcing = require('./event-sourcing');
 
+// Finished rides are persisted to Firestore (rides + finalization outbox) and RTDB receipts,
+// so the Redis booking hash only needs to outlive late readers (webhooks, reports, ratings).
+const DEFAULT_TERMINAL_BOOKING_TTL_SECONDS = 72 * 60 * 60;
+// Awaiting manual review: ride-health-monitor rebuilds this queue from booking hashes.
+const TERMINAL_STATES_WITHOUT_TTL = new Set(['EARLY_ENDED_REVIEW']);
+
+function resolveTerminalBookingTtlSeconds() {
+    const parsed = Number.parseInt(process.env.RIDE_TERMINAL_BOOKING_TTL_SECONDS || '', 10);
+    return Number.isInteger(parsed) && parsed >= 3600 ? parsed : DEFAULT_TERMINAL_BOOKING_TTL_SECONDS;
+}
+
 class RideStateManager {
     static _scheduleSideEffects(task) {
         setImmediate(() => {
@@ -19,8 +30,28 @@ class RideStateManager {
         });
     }
 
+    static async expireTerminalBooking(redis, bookingId, newState) {
+        const normalizedState = RideStateManager.normalizeStateValue(newState);
+        if (
+            !RideStateManager.isTerminalStateValue(normalizedState)
+            || TERMINAL_STATES_WITHOUT_TTL.has(normalizedState)
+            || typeof redis?.expire !== 'function'
+        ) {
+            return false;
+        }
+
+        try {
+            await redis.expire(`booking:${bookingId}`, resolveTerminalBookingTtlSeconds());
+            return true;
+        } catch (error) {
+            logger.warn(`⚠️ Falha ao aplicar TTL na corrida finalizada ${bookingId}: ${error.message}`);
+            return false;
+        }
+    }
+
     static async _runStateSideEffects(redis, { bookingId, currentState, newState, updateData }, options = {}) {
         const { deferSideEffects = false } = options || {};
+        await RideStateManager.expireTerminalBooking(redis, bookingId, newState);
         const payload = {
             bookingId,
             previousState: currentState || null,

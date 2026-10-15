@@ -1,4 +1,5 @@
 const redisPool = require('../utils/redis-pool');
+const { applyBookingSafetyTtl } = require('../utils/booking-redis-ttl');
 const RideStateManager = require('./ride-state-manager');
 const GradualRadiusExpander = require('./gradual-radius-expander');
 const { logStructured } = require('../utils/logger');
@@ -216,6 +217,7 @@ async function markBookingPaymentConfirmed({
   };
 
   pipeline.hset(`booking:${bookingId}`, payload);
+  applyBookingSafetyTtl(pipeline, `booking:${bookingId}`);
   if (chargeId) {
     pipeline.set(`payment_charge_booking:${chargeId}`, bookingId, 'EX', PAYMENT_LINK_TTL_SECONDS);
   }

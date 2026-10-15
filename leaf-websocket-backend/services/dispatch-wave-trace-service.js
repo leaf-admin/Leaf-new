@@ -1,4 +1,5 @@
 const { logger } = require('../utils/logger');
+const { applyBookingSafetyTtl } = require('../utils/booking-redis-ttl');
 
 const parsePositiveInt = (value, fallback) => {
     const parsed = Number.parseInt(value, 10);
@@ -162,6 +163,7 @@ async function recordDispatchWave(redis, bookingId, payload = {}) {
         pipeline.rpush(traceKey, JSON.stringify(eventPayload));
         pipeline.ltrim(traceKey, -TRACE_MAX_EVENTS, -1);
         pipeline.expire(traceKey, TRACE_TTL_SECONDS);
+        applyBookingSafetyTtl(pipeline, bookingKey);
         pipeline.hdel(
             bookingKey,
             'dispatchWavePendingWave',
@@ -224,6 +226,7 @@ async function recordDispatchDirectNotification(redis, bookingId, payload = {}) 
         pipeline.rpush(traceKey, JSON.stringify(eventPayload));
         pipeline.ltrim(traceKey, -TRACE_MAX_EVENTS, -1);
         pipeline.expire(traceKey, TRACE_TTL_SECONDS);
+        applyBookingSafetyTtl(pipeline, bookingKey);
         await pipeline.exec();
 
         return {
@@ -355,6 +358,7 @@ async function recordDispatchWaveAcceptance(redis, bookingId, payload = {}) {
         }));
         pipeline.ltrim(traceKey, -TRACE_MAX_EVENTS, -1);
         pipeline.expire(traceKey, TRACE_TTL_SECONDS);
+        applyBookingSafetyTtl(pipeline, bookingKey);
         await pipeline.exec();
 
         return {
