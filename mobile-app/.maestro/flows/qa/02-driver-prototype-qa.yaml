@@ -139,6 +139,7 @@ env:
 
 - runFlow:
     when:
-      visible: ".*Ativação do motorista.*"
+      visible:
+        id: "driver-activation-progress"
     commands:
       - takeScreenshot: "qa-driver-03-activation"

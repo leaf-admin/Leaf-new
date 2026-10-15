@@ -36,7 +36,11 @@ import {
   PROFILE_SELECTION_STEP_INDEX
 } from '../../utils/onboardingSessionState';
 import { toUserFriendlyMessage } from '../../utils/friendlyErrorMessages';
-import { WelcomeScreen } from '../onboarding/onboardingSteps';
+import { LocationPrimingStep, WelcomeScreen } from '../onboarding/onboardingSteps';
+import {
+  getForegroundLocationDisclosureText,
+  requestForegroundLocationPermissionAfterInAppDisclosure,
+} from '../../services/AndroidPermissionDisclosure';
 import { AppConfig } from '../../../config/AppConfig';
 
 const { color } = onboardingTheme;
@@ -73,6 +77,9 @@ const AuthFlow = ({
     createDriverActivationSubmissionTracker(),
   );
   const finalizationGate = React.useRef(createSingleFlightGate()).current;
+  // Cadastro concluído aguardando a tela de localização (só quando a permissão ainda pode ser pedida).
+  const [locationPriming, setLocationPriming] = useState(null);
+  const [locationRequesting, setLocationRequesting] = useState(false);
   const [isFinalizing, setIsFinalizing] = useState(false);
   const isReviewEnv = allowReviewAccess();
   const editorialProgressMeta = React.useMemo(
@@ -214,6 +221,39 @@ const AuthFlow = ({
       isMounted = false;
     };
   }, [onboardingProgress, screenshotAuthData, screenshotStep]);
+
+  const completeAfterLocationPriming = useCallback(async (payload) => {
+    try {
+      const Location = require('expo-location');
+      const permission = await Location.getForegroundPermissionsAsync();
+      if (permission.status === 'granted' || permission.canAskAgain === false) {
+        onComplete?.(payload);
+        return;
+      }
+    } catch (error) {
+      Logger.warn('AuthFlow - permissão de localização indisponível:', error?.message || error);
+      onComplete?.(payload);
+      return;
+    }
+    setLocationPriming({ payload });
+  }, [onComplete]);
+
+  const finishLocationPriming = useCallback(async (enable) => {
+    const payload = locationPriming?.payload;
+    if (!payload) return;
+    if (enable) {
+      setLocationRequesting(true);
+      try {
+        await requestForegroundLocationPermissionAfterInAppDisclosure();
+      } catch (error) {
+        Logger.warn('AuthFlow - falha ao pedir localização:', error?.message || error);
+      } finally {
+        setLocationRequesting(false);
+      }
+    }
+    setLocationPriming(null);
+    onComplete?.(payload);
+  }, [locationPriming, onComplete]);
 
   // Função para obter o nome do step baseado no índice
   const getStepNameByIndex = useCallback((index) => {
@@ -858,7 +898,7 @@ const AuthFlow = ({
           }
         : null;
 
-      onComplete({
+      await completeAfterLocationPriming({
         ...onboardingData,
         usertype: normalizedUserType,
         userType: normalizedUserType,
@@ -934,6 +974,17 @@ const AuthFlow = ({
 
   // Renderizar o step atual
   const renderCurrentStep = () => {
+    if (locationPriming) {
+      return (
+        <LocationPrimingStep
+          role={normalizeAuthFlowUserType(authData?.profileSelection?.userType) === 'driver' ? 'driver' : 'customer'}
+          disclosure={getForegroundLocationDisclosureText()}
+          loading={locationRequesting}
+          onEnable={() => finishLocationPriming(true)}
+          onSkip={() => finishLocationPriming(false)}
+        />
+      );
+    }
     if (showWelcome && currentStep === 0) {
       return (
         <WelcomeScreen
