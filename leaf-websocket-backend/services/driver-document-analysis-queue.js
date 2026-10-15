@@ -751,6 +751,24 @@ async function recomputeDriverActivationStatus(driverId) {
     source: 'driver_activation_pipeline'
   });
 
+  if (canGoOnline) {
+    try {
+      // Carregado sob demanda para não criar ciclo de inicialização.
+      const { getDefaultDriverAutoApprovalService } = require('./driver-auto-approval-service');
+      await getDefaultDriverAutoApprovalService().maybeAutoApprove({
+        db,
+        driverId: safeDriverId,
+        canonicalState
+      });
+    } catch (error) {
+      logStructured('warn', 'Falha na aprovação automática do motorista', {
+        service: 'driver-activation-queue',
+        driverId: safeDriverId,
+        error: error?.message || String(error)
+      });
+    }
+  }
+
   return {
     driverId: safeDriverId,
     checklist,
