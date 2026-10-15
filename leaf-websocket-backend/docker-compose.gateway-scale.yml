@@ -1,4 +1,9 @@
 x-websocket-gateway-service: &websocket_gateway_service
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
   build:
     context: .
     dockerfile: Dockerfile
@@ -425,6 +430,11 @@ services:
       args:
         GIT_SHA: ${GIT_SHA:-unknown}
     container_name: leaf-queue-worker
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     command: ["node", "workers/queue-worker-process.js"]
     env_file:
       - .env

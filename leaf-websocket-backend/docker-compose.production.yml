@@ -41,6 +41,11 @@ services:
       args:
         GIT_SHA: ${GIT_SHA:-unknown}
     container_name: leaf-websocket
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     ports:
       - "127.0.0.1:3001:3001"
     environment:
@@ -375,6 +380,11 @@ services:
       args:
         GIT_SHA: ${GIT_SHA:-unknown}
     container_name: leaf-sideeffects-worker
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     command: ["bash", "scripts/runtime/start-sideeffects-worker.sh"]
     env_file:
       - .env
@@ -488,6 +498,11 @@ services:
       args:
         GIT_SHA: ${GIT_SHA:-unknown}
     container_name: leaf-billing-worker
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     command: ["node", "workers/worker-billing.js"]
     env_file:
       - .env
