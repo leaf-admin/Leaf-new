@@ -20,6 +20,7 @@ const { logger } = require('../utils/logger');
 const { clearOfferReservationsForBooking } = require('./offer-reservation-service');
 const { recordDispatchWave } = require('./dispatch-wave-trace-service');
 const { resolveRidePersistenceScope } = require('./sandbox-persistence-context');
+const bookingSearchIndex = require('./booking-search-index');
 const {
     getDriverResponseTimeoutSeconds,
     getDriverSearchDriversPerWave,
@@ -406,6 +407,7 @@ class GradualRadiusExpander {
                 state: 'SEARCHING'
             });
             await this.redis.expire(searchKey, 3600); // 1h de TTL de segurança
+            await bookingSearchIndex.addToIndex(this.redis, bookingId);
 
             // Primeira busca imediata (0.5km)
             const initialResult = await this.searchAndNotify(
@@ -691,6 +693,7 @@ class GradualRadiusExpander {
                 currentRadius: nextRadius,
                 lastExpansion: Date.now()
             });
+            await bookingSearchIndex.addToIndex(this.redis, bookingId);
 
             // FASE 10: Registrar expansão para métricas
             const metricsCollector = require('./metrics-collector');

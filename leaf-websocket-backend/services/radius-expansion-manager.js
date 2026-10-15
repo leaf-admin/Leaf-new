@@ -20,6 +20,7 @@ const eventSourcing = require('./event-sourcing');
 const { EVENT_TYPES } = require('./event-sourcing');
 const { logger } = require('../utils/logger');
 const { recordDispatchWave } = require('./dispatch-wave-trace-service');
+const bookingSearchIndex = require('./booking-search-index');
 const {
     getDriverSearchDriversPerWave,
     getDriverSearchMaxRadiusKm
@@ -404,20 +405,20 @@ class RadiusExpansionManager {
      */
     async findSearchingBookings() {
         try {
-            // ✅ CORRIGIDO: Usar SCAN ao invés de KEYS() (não bloqueante)
-            const RedisScan = require('../utils/redis-scan');
-            const searchKeys = await RedisScan.scanKeys(
-                this.redis,
-                'booking_search:*',
-                this.config.redisScanCount,
-                this.config.maxBookingsPerCycle
-            );
+            // Índice das buscas abertas (SCAN só na reconciliação periódica do índice).
+            const searchKeys = await bookingSearchIndex.listSearchKeys(this.redis);
             const searchingBookings = [];
+            const goneBookingIds = [];
 
             for (const key of searchKeys) {
                 const searchData = await this.redis.hgetall(key);
-                
-                if (searchData && searchData.state === 'SEARCHING') {
+
+                if (!searchData || Object.keys(searchData).length === 0) {
+                    goneBookingIds.push(key.replace('booking_search:', ''));
+                    continue;
+                }
+
+                if (searchData.state === 'SEARCHING') {
                     // Extrair bookingId do key (booking_search:bookingId)
                     const bookingId = key.replace('booking_search:', '');
                     
@@ -433,6 +434,7 @@ class RadiusExpansionManager {
                 }
             }
 
+            await bookingSearchIndex.removeFromIndex(this.redis, goneBookingIds);
             return searchingBookings;
         } catch (error) {
             logger.error(`❌ [RadiusExpansionManager] Erro ao buscar corridas em SEARCHING:`, error);

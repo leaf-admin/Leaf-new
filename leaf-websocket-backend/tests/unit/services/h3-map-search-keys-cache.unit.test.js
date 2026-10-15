@@ -1,11 +1,16 @@
 const { H3MapService } = require('../../../services/h3-map-service');
+const bookingSearchIndex = require('../../../services/booking-search-index');
 
 const BBOX = { minLat: -23.1, maxLat: -22.8, minLng: -43.6, maxLng: -43.1 };
 
 function createRedis(searches) {
-  const scan = jest.fn(async () => ['0', Object.keys(searches)]);
+  const index = new Set();
   return {
-    scan,
+    index,
+    scan: jest.fn(async () => ['0', Object.keys(searches)]),
+    sadd: jest.fn(async (_key, ...ids) => { ids.forEach((id) => index.add(id)); }),
+    srem: jest.fn(async (_key, ...ids) => { ids.forEach((id) => index.delete(id)); }),
+    smembers: jest.fn(async () => [...index]),
     pipeline() {
       const keys = [];
       return {
@@ -27,30 +32,34 @@ function search(state) {
   };
 }
 
-describe('H3MapService open search key cache', () => {
+describe('H3MapService open search keys', () => {
+  beforeEach(() => bookingSearchIndex.resetReconcileClockForTests());
   afterEach(() => jest.useRealTimers());
 
-  test('reuses the key list between polls but reads each search fresh', async () => {
+  test('reuses the key list for 30 s, reads each search fresh and prunes gone ones', async () => {
     jest.useFakeTimers().setSystemTime(new Date('2026-10-15T16:00:00.000Z'));
     const searches = { 'booking_search:b1': search('SEARCHING'), 'booking_search:b2': search('SEARCHING') };
     const redis = createRedis(searches);
     const service = new H3MapService();
 
     expect((await service.collectOpenRequests(redis, BBOX)).map((r) => r.bookingId)).toEqual(['b1', 'b2']);
+    expect(redis.scan).toHaveBeenCalledTimes(1); // first call reconciles the index
 
-    // b2 finished (hash deleted) and b3 started: b2 disappears at once, b3 waits for the next scan.
+    // b2 finished (hash deleted); b3 started and was indexed by its writer.
     delete searches['booking_search:b2'];
     searches['booking_search:b3'] = search('SEARCHING');
+    await bookingSearchIndex.addToIndex(redis, 'b3');
+
     jest.setSystemTime(new Date('2026-10-15T16:00:10.000Z'));
     expect((await service.collectOpenRequests(redis, BBOX)).map((r) => r.bookingId)).toEqual(['b1']);
-    expect(redis.scan).toHaveBeenCalledTimes(1);
+    expect(redis.index.has('b2')).toBe(false);
 
     jest.setSystemTime(new Date('2026-10-15T16:00:31.000Z'));
     expect((await service.collectOpenRequests(redis, BBOX)).map((r) => r.bookingId)).toEqual(['b1', 'b3']);
-    expect(redis.scan).toHaveBeenCalledTimes(2);
+    expect(redis.scan).toHaveBeenCalledTimes(1); // index read, no new scan inside the reconcile interval
   });
 
-  test('concurrent polls share one scan', async () => {
+  test('concurrent polls share one lookup', async () => {
     const redis = createRedis({ 'booking_search:b1': search('SEARCHING') });
     const service = new H3MapService();
 

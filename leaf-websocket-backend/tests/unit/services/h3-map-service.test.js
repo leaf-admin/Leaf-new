@@ -117,6 +117,7 @@ describe('H3MapService', () => {
       d2: { status: 'busy', isOnline: 'true' },
       d3: { status: 'available', isOnline: 'true' },
     };
+    const searchIndex = new Set();
     const searchHashes = {
       'booking_search:b1': {
         state: 'SEARCHING',
@@ -162,6 +163,10 @@ describe('H3MapService', () => {
       async scan(cursor, _matchLiteral, pattern) {
         return [String(0), pattern === 'booking_search:*' ? Object.keys(searchHashes) : []];
       },
+      // booking_search index (services/booking-search-index.js)
+      async sadd(_key, ...ids) { ids.forEach((id) => searchIndex.add(id)); return ids.length; },
+      async srem(_key, ...ids) { ids.forEach((id) => searchIndex.delete(id)); return ids.length; },
+      async smembers() { return [...searchIndex]; },
       async hgetall(key) {
         if (key === 'bookings:active') return activeHash;
         return {};
