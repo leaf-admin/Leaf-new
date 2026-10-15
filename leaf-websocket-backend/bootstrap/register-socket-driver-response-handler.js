@@ -129,7 +129,7 @@ function registerSocketDriverResponseHandler({ socket, io, logStructured }) {
                 service: 'websocket',
                 socketId: socket.id,
                 userId: socket.userId,
-                bookingId,
+                bookingId: data?.bookingId,
                 error: error.message,
                 stack: error.stack
             });
