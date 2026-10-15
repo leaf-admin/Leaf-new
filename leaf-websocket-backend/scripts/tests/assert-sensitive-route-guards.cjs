@@ -7,9 +7,10 @@ const backendRoot = path.resolve(__dirname, '..', '..');
 
 function read(relativePath) {
   const source = fs.readFileSync(path.join(backendRoot, relativePath), 'utf8');
-  // routes/dashboard.js é só o índice; as rotas ficam em routes/dashboard/*.js.
+  // Arquivos de rotas divididos (ex.: routes/dashboard.js, routes/woovi.js) são só o
+  // índice; as rotas ficam em routes/<nome>/*.js e precisam ser lidas junto.
   const partsDir = path.join(backendRoot, relativePath.replace(/\.js$/, ''));
-  if (relativePath !== 'routes/dashboard.js' || !fs.existsSync(partsDir)) {
+  if (!fs.existsSync(partsDir) || !fs.statSync(partsDir).isDirectory()) {
     return source;
   }
   const parts = fs.readdirSync(partsDir)
