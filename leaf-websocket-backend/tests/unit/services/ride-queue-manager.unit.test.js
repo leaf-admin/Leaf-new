@@ -34,7 +34,12 @@ jest.mock('../../../utils/logger', () => ({
   }
 }));
 
+jest.mock('../../../utils/redis-scan', () => ({
+  scanKeys: jest.fn()
+}));
+
 const redisPool = require('../../../utils/redis-pool');
+const RedisScan = require('../../../utils/redis-scan');
 
 describe('ride-queue-manager', () => {
   beforeEach(() => {
@@ -175,5 +180,64 @@ describe('ride-queue-manager', () => {
         ])
       })
     );
+  });
+});
+
+describe('ride-queue-manager active regions', () => {
+  let redis;
+  let manager;
+  let nowSpy;
+  let now;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    now = 1_000_000;
+    nowSpy = jest.spyOn(Date, 'now').mockImplementation(() => now);
+    redis = {
+      smembers: jest.fn().mockResolvedValue([]),
+      sadd: jest.fn().mockResolvedValue(1)
+    };
+    redisPool.getConnection.mockReturnValue(redis);
+    RedisScan.scanKeys.mockResolvedValue([]);
+    jest.isolateModules(() => {
+      manager = require('../../../services/ride-queue-manager');
+    });
+  });
+
+  afterEach(() => {
+    nowSpy.mockRestore();
+  });
+
+  it('does not rescan the keyspace on every cycle while the queue is idle', async () => {
+    await expect(manager.getActiveRegions()).resolves.toEqual([]);
+    expect(RedisScan.scanKeys).toHaveBeenCalledTimes(1);
+
+    // Past the 2s region cache but inside the 60s reconcile window.
+    for (let i = 0; i < 20; i += 1) {
+      now += 2500;
+      await expect(manager.getActiveRegions()).resolves.toEqual([]);
+    }
+
+    expect(redis.smembers).toHaveBeenCalledTimes(21);
+    expect(RedisScan.scanKeys).toHaveBeenCalledTimes(1);
+  });
+
+  it('reconciles a pending queue missing from the index once the interval elapses', async () => {
+    await manager.getActiveRegions();
+    RedisScan.scanKeys.mockResolvedValue(['ride_queue:orphan:pending']);
+
+    now += 60_000;
+    await expect(manager.getActiveRegions()).resolves.toEqual(['orphan']);
+
+    expect(RedisScan.scanKeys).toHaveBeenCalledTimes(2);
+    expect(redis.sadd).toHaveBeenCalledWith('ride_queue:regions', 'orphan');
+  });
+
+  it('serves regions from the index without scanning', async () => {
+    redis.smembers.mockResolvedValue(['region-a', 'region-b']);
+
+    await expect(manager.getActiveRegions()).resolves.toEqual(['region-a', 'region-b']);
+
+    expect(RedisScan.scanKeys).not.toHaveBeenCalled();
   });
 });
