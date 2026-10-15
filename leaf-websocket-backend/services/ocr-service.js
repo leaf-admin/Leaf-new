@@ -323,8 +323,9 @@ class OCRService {
         return embeddedImage;
       }
 
-      const { execSync } = require('child_process');
-      const fs = require('fs');
+      const { execFile } = require('child_process');
+      const { promisify } = require('util');
+      const fs = require('fs/promises');
       const path = require('path');
       const os = require('os');
 
@@ -333,34 +334,28 @@ class OCRService {
       const tempId = `ocr_${Date.now()}_${Math.random().toString(36).substring(7)}`;
       const tempPdfPath = path.join(tempDir, `${tempId}.pdf`);
       const tempImagePath = path.join(tempDir, `${tempId}-1.png`);
+      const removeTempFiles = () => Promise.all(
+        [tempPdfPath, tempImagePath].map((filePath) => fs.unlink(filePath).catch(() => null))
+      );
 
       // Salvar PDF temporário
-      fs.writeFileSync(tempPdfPath, pdfBuffer);
+      await fs.writeFile(tempPdfPath, pdfBuffer);
 
       try {
         // Tentar usar pdftoppm (poppler-utils) - mais confiável no Linux
         // Usar resolução muito alta (600 DPI) para melhor qualidade do OCR em documentos
-        // Isso é importante para CNH digital que é imagem em PDF
-        execSync(`pdftoppm -png -r 600 -f 1 -l 1 "${tempPdfPath}" "${path.join(tempDir, tempId)}"`, {
-          stdio: 'ignore',
-          timeout: 30000
-        });
+        // Isso é importante para CNH digital que é imagem em PDF.
+        // Assíncrono: a conversão leva segundos e não pode travar o event loop do gateway.
+        await promisify(execFile)(
+          'pdftoppm',
+          ['-png', '-r', '600', '-f', '1', '-l', '1', tempPdfPath, path.join(tempDir, tempId)],
+          { timeout: 30000 }
+        );
         logger.info('📄 PDF convertido para imagem em 600 DPI');
 
-        // Verificar se a imagem foi criada
-        if (fs.existsSync(tempImagePath)) {
-          const imageBuffer = fs.readFileSync(tempImagePath);
-          
-          // Limpar arquivos temporários
-          try {
-            fs.unlinkSync(tempPdfPath);
-            fs.unlinkSync(tempImagePath);
-          } catch (cleanupError) {
-            logger.warn('⚠️ Erro ao limpar arquivos temporários:', cleanupError);
-          }
-
-          return imageBuffer;
-        } else {
+        try {
+          return await fs.readFile(tempImagePath);
+        } catch (readError) {
           throw new Error('Imagem não foi gerada pelo pdftoppm');
         }
       } catch (execError) {
@@ -375,33 +370,14 @@ class OCRService {
           };
 
           await pdfPoppler.convert(tempPdfPath, options);
-          const imagePath = path.join(tempDir, `${tempId}-1.png`);
-          
-          if (fs.existsSync(imagePath)) {
-            const imageBuffer = fs.readFileSync(imagePath);
-            
-            // Limpar arquivos temporários
-            try {
-              fs.unlinkSync(tempPdfPath);
-              fs.unlinkSync(imagePath);
-            } catch (cleanupError) {
-              logger.warn('⚠️ Erro ao limpar arquivos temporários:', cleanupError);
-            }
-
-            return imageBuffer;
-          }
+          return await fs.readFile(tempImagePath);
         } catch (popplerError) {
           logger.warn('⚠️ pdf-poppler também falhou:', popplerError.message);
         }
 
-        // Limpar PDF temporário mesmo em caso de erro
-        try {
-          fs.unlinkSync(tempPdfPath);
-        } catch (cleanupError) {
-          // Ignorar
-        }
-
         throw new Error(`Falha ao converter PDF: ${execError.message}`);
+      } finally {
+        await removeTempFiles();
       }
     } catch (error) {
       logger.error('❌ Erro ao converter PDF para imagem:', error);
