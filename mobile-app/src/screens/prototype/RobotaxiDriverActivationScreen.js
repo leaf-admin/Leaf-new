@@ -1,5 +1,4 @@
 import leafTypography from '../../components/prototype/LeafTypography';
-import { LeafObjectIcon } from '../../components/prototype/LeafVisualElements';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, ScrollView, StatusBar, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -14,6 +13,7 @@ import { DRIVER_ONBOARDING_STAGE_KEYS } from '../../services/DriverOnboardingSer
 import { normalizeErrorMessage } from '../../services/DriverActivationService';
 import Logger from '../../utils/Logger';
 import { resolveCanonicalLivenessGate } from './driverActivationCanonicalContract';
+import { ONB, OnboardingProgress } from '../../components/onboarding/onboardingKit';
 
 const { color, typography } = robotaxiPrototypeTokens;
 const SURFACE_TOP_PADDING = 20;
@@ -115,6 +115,16 @@ function mapStatusLabel(status) {
   return 'Pendente';
 }
 
+// Linha do tempo: cada etapa vira um marcador com o estado (aprovado, em análise, ajuste...).
+function resolveTimelineNode(row) {
+  const status = row.fieldState?.status || FIELD_STATUS.PENDING;
+  if (row.stageBlocked) return { icon: 'lock-closed-outline', tone: ONB.inkMuted, filled: false };
+  if (status === FIELD_STATUS.APPROVED) return { icon: 'checkmark', tone: ONB.ink, filled: true };
+  if (status === FIELD_STATUS.IN_REVIEW) return { icon: 'time-outline', tone: ONB.inkSoft, filled: false };
+  if (status === FIELD_STATUS.FAILED) return { icon: 'alert', tone: ONB.danger, filled: false };
+  return { icon: 'ellipse-outline', tone: ONB.inkMuted, filled: false };
+}
+
 function mapFieldStatusLabel(status) {
   if (status === FIELD_STATUS.APPROVED) return 'Aprovado';
   if (status === FIELD_STATUS.IN_REVIEW) return 'Em análise';
@@ -212,14 +222,6 @@ function resolveActivationRowSubtitle(field, fieldState, vehicleLabel = '') {
   return mapFieldStatusLabel(status);
 }
 
-function resolveActivationRowIcon(field) {
-  if (field?.validator === 'cnh') return 'id-card-outline';
-  if (field?.validator === 'crlv') return 'document-text-outline';
-  if (field?.kind === 'consent') return 'shield-checkmark-outline';
-  if (field?.kind === 'task') return 'scan-outline';
-  if (field?.kind === 'readonly') return 'car-outline';
-  return 'checkmark-circle-outline';
-}
 
 function resolveDocumentTypeByField(field) {
   if (field?.validator === 'cnh') return 'cnh';
@@ -732,6 +734,8 @@ export default function RobotaxiDriverActivationScreen({ navigation, route }) {
     });
   }, [activationVehicleLabel, canonicalVehicleFieldState, getFieldState, stages, visibleStageKeys]);
 
+  const approvedRowCount = activationRows.filter(row => row.fieldState?.status === FIELD_STATUS.APPROVED).length;
+
   const firstActionableRow = activationRows.find(row => {
     const status = row.fieldState?.status || FIELD_STATUS.PENDING;
     return !row.stageBlocked && !row.isReadonly && status !== FIELD_STATUS.APPROVED && status !== FIELD_STATUS.IN_REVIEW;
@@ -787,9 +791,13 @@ export default function RobotaxiDriverActivationScreen({ navigation, route }) {
                 <Ionicons name="arrow-back" size={20} color={ACTIVATION_COLOR.text} />
               </TouchableOpacity>
               <View style={styles.activationHeaderCopy}>
-                <Text style={styles.activationTitle}>Ativação do motorista</Text>
+                <Text style={styles.activationTitle}>Seu cadastro</Text>
                 <Text style={styles.activationSubtitle}>
-                  Envie o essencial para ficar online.
+                  {activationComplete
+                    ? 'Tudo aprovado. Você já pode ficar online.'
+                    : firstActionableRow
+                      ? 'Envie o que falta para ficar online.'
+                      : `Em análise. Prazo: ${DOC_ANALYSIS_SLA_TEXT.toLowerCase()}.`}
                 </Text>
               </View>
             </View>
@@ -799,7 +807,18 @@ export default function RobotaxiDriverActivationScreen({ navigation, route }) {
               showsVerticalScrollIndicator={false}
               contentContainerStyle={styles.activationScrollContent}
             >
+              <View style={styles.timelineSummary} testID="driver-activation-progress">
+                <Text style={styles.timelineSummaryText}>
+                  {approvedRowCount} de {activationRows.length} aprovados
+                </Text>
+                <OnboardingProgress step={approvedRowCount} total={Math.max(1, activationRows.length)} />
+              </View>
               {activationRows.map((row, index) => {
+                const node = resolveTimelineNode(row);
+                const last = index === activationRows.length - 1;
+                const actionable = !row.isReadonly && !row.stageBlocked
+                  && row.fieldState?.status !== FIELD_STATUS.APPROVED
+                  && row.fieldState?.status !== FIELD_STATUS.IN_REVIEW;
                 const isBusy = busyFieldKey === row.stateKey;
                 const isDisabled = isBusy || row.isReadonly || row.stageBlocked;
                 return (
@@ -808,15 +827,20 @@ export default function RobotaxiDriverActivationScreen({ navigation, route }) {
                     activeOpacity={0.78}
                     disabled={isDisabled}
                     onPress={() => handleFieldAction(row.stageKey, row.field)}
-                    style={[
-                      styles.activationRow,
-                      index === activationRows.length - 1 && styles.activationRowLast,
-                    ]}
+                    style={styles.timelineItem}
+                    accessibilityRole={isDisabled ? 'text' : 'button'}
+                    accessibilityLabel={`${row.title}. ${row.subtitle}. ${row.actionLabel}`}
+                    testID={`driver-activation-row-${row.field.key}`}
                   >
-                    <View style={styles.activationIconSlot}>
-                      <LeafObjectIcon symbol={resolveActivationRowIcon(row.field)} size={40} />
+                    <View style={styles.timelineRail}>
+                      <View style={[styles.timelineNode, { borderColor: node.tone }, node.filled && { backgroundColor: node.tone }]}>
+                        <Ionicons name={node.icon} size={13} color={node.filled ? '#FFFFFF' : node.tone} />
+                      </View>
+                      {last ? null : (
+                        <View style={[styles.timelineLine, node.filled && styles.timelineLineDone]} />
+                      )}
                     </View>
-                    <View style={styles.activationRowCopy}>
+                    <View style={[styles.activationRowCopy, !last && styles.timelineCopyGap]}>
                       <Text style={styles.activationRowTitle}>{row.title}</Text>
                       <Text style={styles.activationRowSubtitle}>
                         {row.subtitle}
@@ -828,9 +852,13 @@ export default function RobotaxiDriverActivationScreen({ navigation, route }) {
                       ) : null}
                     </View>
                     {isBusy ? (
-                      <ActivityIndicator size="small" color={ACTIVATION_COLOR.leaf} />
+                      <ActivityIndicator size="small" color={ONB.ink} />
+                    ) : actionable ? (
+                      <View style={styles.timelineActionPill}>
+                        <Text style={styles.timelineActionPillText}>{row.actionLabel}</Text>
+                      </View>
                     ) : (
-                      <Text style={styles.activationRowAction}>{row.actionLabel}</Text>
+                      <Text style={[styles.activationRowAction, { color: node.tone }]}>{row.actionLabel}</Text>
                     )}
                   </TouchableOpacity>
                 );
@@ -892,17 +920,18 @@ const styles = StyleSheet.create({
     backgroundColor: '#F5F5F5',
   },
   activationTitle: {
-    color: ACTIVATION_COLOR.title,
+    color: ONB.ink,
     ...leafTypography.semiBold,
-    fontSize: 22,
-    lineHeight: 28,
+    fontSize: 26,
+    lineHeight: 32,
+    letterSpacing: -0.4
   },
   activationSubtitle: {
-    marginTop: 8,
-    color: ACTIVATION_COLOR.secondary,
+    marginTop: 4,
+    color: ONB.inkSoft,
     ...leafTypography.regular,
-    fontSize: 14,
-    lineHeight: 20,
+    fontSize: 15,
+    lineHeight: 21
   },
   activationScrollContent: {
     paddingTop: 18,
@@ -930,17 +959,17 @@ const styles = StyleSheet.create({
     paddingRight: 12,
   },
   activationRowTitle: {
-    color: ACTIVATION_COLOR.text,
-    ...leafTypography.medium,
+    color: ONB.ink,
+    ...leafTypography.semiBold,
     fontSize: 16,
-    lineHeight: 22,
+    lineHeight: 22
   },
   activationRowSubtitle: {
-    marginTop: 3,
-    color: ACTIVATION_COLOR.secondary,
+    marginTop: 2,
+    color: ONB.inkSoft,
     ...leafTypography.regular,
-    fontSize: 13,
-    lineHeight: 18,
+    fontSize: 13.5,
+    lineHeight: 19
   },
   activationRowError: {
     marginTop: 3,
@@ -950,12 +979,10 @@ const styles = StyleSheet.create({
     lineHeight: 18,
   },
   activationRowAction: {
-    width: 78,
-    color: ACTIVATION_COLOR.text,
     ...leafTypography.medium,
     fontSize: 13,
     lineHeight: 18,
-    textAlign: 'right',
+    marginLeft: 8
   },
   activationHint: {
     marginTop: 16,
@@ -965,19 +992,70 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
   activationButton: {
-    marginTop: 16,
-    minHeight: 54,
-    borderRadius: 12,
+    minHeight: 56,
+    borderRadius: 28,
+    backgroundColor: ONB.action,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#222222',
+    marginTop: 12
   },
   activationButtonText: {
     color: '#FFFFFF',
+    ...leafTypography.semiBold,
+    fontSize: 17
+  },
+  timelineSummary: {
+    gap: 10,
+    marginBottom: 24
+  },
+  timelineSummaryText: {
     ...leafTypography.medium,
-    fontSize: 16,
-    lineHeight: 22,
-    textAlign: 'center',
+    fontSize: 13,
+    color: ONB.inkSoft
+  },
+  timelineItem: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 14
+  },
+  timelineRail: {
+    width: 26,
+    alignItems: 'center',
+    alignSelf: 'stretch'
+  },
+  timelineNode: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    borderWidth: 1.5,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FFFFFF'
+  },
+  timelineLine: {
+    flex: 1,
+    width: 2,
+    minHeight: 18,
+    marginVertical: 4,
+    borderRadius: 1,
+    backgroundColor: ONB.line
+  },
+  timelineLineDone: {
+    backgroundColor: ONB.ink
+  },
+  timelineCopyGap: {
+    paddingBottom: 22
+  },
+  timelineActionPill: {
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderRadius: 16,
+    backgroundColor: ONB.action
+  },
+  timelineActionPillText: {
+    ...leafTypography.semiBold,
+    fontSize: 13,
+    color: '#FFFFFF'
   },
   body: {
     flex: 1,

@@ -219,23 +219,29 @@ function PulsingPin() {
   );
 }
 
-export function LocationPrimingStep({ step, total, onBack, onEnable, onSkip, role = 'customer' }) {
+export function LocationPrimingStep({ step, total, onBack, onEnable, onSkip, role = 'customer', disclosure = '', loading = false }) {
   return (
     <OnboardingShell
       stepKey="location" step={step} total={total} onBack={onBack}
       title="Ative sua localização"
       subtitle={role === 'driver'
-        ? 'Usamos sua localização para enviar corridas perto de você, inclusive com o app em segundo plano enquanto estiver online.'
+        ? 'Para receber corridas perto de você e navegar até o passageiro.'
         : 'Para achar seu ponto de embarque e mostrar os carros perto de você.'}
       testID="onboarding-location"
       footer={(
         <>
-          <PrimaryButton label="Ativar localização" onPress={onEnable} testID="onboarding-location-enable" />
+          <PrimaryButton
+            label={disclosure ? 'Concordo e ativar' : 'Ativar localização'}
+            onPress={onEnable}
+            loading={loading}
+            testID="onboarding-location-enable"
+          />
           <TextLink label="Agora não" onPress={onSkip} testID="onboarding-location-skip" />
         </>
       )}
     >
       <PulsingPin />
+      {disclosure ? <Text style={locStyles.disclosure} testID="onboarding-location-disclosure">{disclosure}</Text> : null}
     </OnboardingShell>
   );
 }
@@ -484,6 +490,7 @@ const roleStyles = StyleSheet.create({
   radioSelected: { backgroundColor: ONB.ink, borderColor: ONB.ink },
 });
 const locStyles = StyleSheet.create({
+  disclosure: { ...leafTypography.regular, fontSize: 13.5, lineHeight: 20, color: ONB.inkSoft, marginTop: 20 },
   illustration: { height: 220, borderRadius: 28, backgroundColor: ONB.surfaceSoft, alignItems: 'center', justifyContent: 'center', overflow: 'hidden', marginTop: 8 },
   ring: { position: 'absolute', width: 80, height: 80, borderRadius: 40, backgroundColor: 'rgba(17,33,12,0.14)' },
   dot: { width: 22, height: 22, borderRadius: 11, backgroundColor: ONB.ink, borderWidth: 4, borderColor: '#FFFFFF', shadowColor: '#0E1F12', shadowOpacity: 0.25, shadowRadius: 8, shadowOffset: { width: 0, height: 4 }, elevation: 5 },

@@ -126,6 +126,21 @@ export async function requestForegroundLocationPermissionWithDisclosure() {
   return Location.requestForegroundPermissionsAsync();
 }
 
+// Para telas que já mostram a divulgação completa dentro do app (ex.: ativação de localização
+// no fim do cadastro): o texto é o mesmo do modal, e o pedido do sistema vem direto em seguida.
+export function getForegroundLocationDisclosureText() {
+  return Platform.OS === 'android' ? ANDROID_FOREGROUND_LOCATION_DISCLOSURE.message : '';
+}
+
+export async function requestForegroundLocationPermissionAfterInAppDisclosure() {
+  const Location = getLocationModule();
+  const currentPermission = await Location.getForegroundPermissionsAsync();
+  if (currentPermission.status === 'granted' || currentPermission.canAskAgain === false) {
+    return currentPermission;
+  }
+  return Location.requestForegroundPermissionsAsync();
+}
+
 export async function requestBackgroundLocationPermissionWithDisclosure() {
   const Location = getLocationModule();
 

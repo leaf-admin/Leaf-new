@@ -88,7 +88,8 @@ tags:
     direction: DOWN
 - tapOn:
     id: "robotaxi-menu-item-driver-activation"
-- assertVisible: "Ativação do motorista"
+- assertVisible:
+    id: "driver-activation-progress"
 - tapOn: "Fechar ativação"
 - extendedWaitUntil:
     visible:
