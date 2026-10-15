@@ -1,0 +1,83 @@
+name: Uptime Monitor
+
+# External check of the public API and socket origins. Opens one issue
+# (label uptime-alert, assigned to the repo owner) while they are failing and
+# closes it on recovery, so GitHub notifies by email/app.
+# GitHub may delay scheduled runs by several minutes; this is a pilot-grade
+# alarm, not an SLA probe.
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: uptime-monitor
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      ALERT_LABEL: uptime-alert
+      ALERT_ASSIGNEE: ${{ github.repository_owner }}
+    steps:
+      - name: Probe endpoints
+        id: probe
+        shell: bash
+        run: |
+          set -u
+          failures=""
+          for url in https://api.leaf.app.br/health https://socket.leaf.app.br/health/liveness; do
+            ok=false
+            for attempt in 1 2 3; do
+              code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 "$url" || echo 000)
+              if [ "$code" = "200" ]; then ok=true; break; fi
+              sleep 20
+            done
+            if [ "$ok" = true ]; then
+              echo "ok   $url"
+            else
+              echo "FAIL $url (last status $code)"
+              failures="${failures}- \`${url}\` → HTTP ${code} after 3 attempts"$'\n'
+            fi
+          done
+          {
+            echo 'failures<<EOF'
+            printf '%s' "$failures"
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Open or update alert
+        if: steps.probe.outputs.failures != ''
+        shell: bash
+        env:
+          FAILURES: ${{ steps.probe.outputs.failures }}
+        run: |
+          gh label create "$ALERT_LABEL" --color B60205 --description 'Public health check failing' 2>/dev/null || true
+          body=$(printf 'Health check failing at %s UTC:\n\n%s\nRun: %s/%s/actions/runs/%s' \
+            "$(date -u +'%Y-%m-%d %H:%M')" "$FAILURES" "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID")
+          issue=$(gh issue list --label "$ALERT_LABEL" --state open --json number --jq '.[0].number // empty')
+          if [ -n "$issue" ]; then
+            gh issue comment "$issue" --body "$body"
+          else
+            gh issue create --title 'Monitor: public health check failing' --label "$ALERT_LABEL" \
+              --assignee "$ALERT_ASSIGNEE" --body "$body"
+          fi
+          exit 1
+
+      - name: Close recovered alert
+        if: steps.probe.outputs.failures == ''
+        shell: bash
+        run: |
+          issue=$(gh issue list --label "$ALERT_LABEL" --state open --json number --jq '.[0].number // empty' 2>/dev/null || true)
+          if [ -n "$issue" ]; then
+            gh issue close "$issue" --comment "Recovered at $(date -u +'%Y-%m-%d %H:%M') UTC."
+          fi

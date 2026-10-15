@@ -24,6 +24,21 @@ npm run ops:backup-recovery-preflight
 
 Credentials must come from `FIREBASE_SERVICE_ACCOUNT_PATH`, `GOOGLE_APPLICATION_CREDENTIALS` or Application Default Credentials. The script has no repository-relative service-account fallback.
 
+## Cópia fora da VPS (off-site)
+
+Desde 15/10/2026, o `leaf-backup-daily.service` (timer 03:15 America/Sao_Paulo) tem um drop-in
+`/etc/systemd/system/leaf-backup-daily.service.d/offsite.conf`. Depois que `backup-daily.sh`
+termina com sucesso, `scripts/ops/upload-backup-offsite.cjs` envia o conjunto verificado mais
+recente de Redis e Firestore (artefato, manifesto, checksum e recibo) para
+`gs://<FIREBASE_STORAGE_BUCKET>/ops-backups/leaf/<AAAA-MM-DD>/`. Objetos com mais de 30 dias
+(`BACKUP_OFFSITE_RETENTION_DAYS`) são removidos. As regras do Storage negam qualquer acesso de
+cliente; só service accounts leem esse prefixo. Reexecutar no mesmo dia não reenvia arquivos.
+
+Restaurar após perda da VPS: baixar a pasta do dia com uma service account do projeto, conferir
+o `.sha256` e seguir o restore drill (`verify-redis-restore.cjs` / `verify-firestore-restore.cjs`).
+
+Rollback: remover o drop-in e executar `systemctl daemon-reload`; o backup local continua igual.
+
 ## Gate de recuperação para lançamento amplo
 
 Antes do rolling deploy, a imagem candidata executa o preflight contra
