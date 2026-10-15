@@ -10,6 +10,9 @@
 const { logger } = require('../utils/logger');
 const redisPool = require('../utils/redis-pool');
 
+// Set com o socketId de cada conexão registrada em connection:{socketId}.
+const CONNECTION_INDEX_KEY = 'connections:index';
+
 class WebSocketRateLimiter {
     constructor() {
         this.redis = redisPool.getConnection();
@@ -97,7 +100,8 @@ class WebSocketRateLimiter {
             const socketId = socket.id;
             const timestamp = Date.now();
 
-            // Registrar no Redis
+            // Registrar no Redis (o índice evita varrer o keyspace na limpeza)
+            await this.redis.sadd(CONNECTION_INDEX_KEY, socketId);
             await this.redis.hset(`connection:${socketId}`, {
                 ip,
                 userId: userId || 'anonymous',
@@ -167,6 +171,7 @@ class WebSocketRateLimiter {
 
                 logger.debug(`🗑️ [WebSocketRateLimiter] Conexão removida: ${socketId}`);
             }
+            await this.redis.srem(CONNECTION_INDEX_KEY, socketId);
         } catch (error) {
             logger.error(`❌ [WebSocketRateLimiter] Erro ao remover conexão:`, error);
         }
@@ -258,4 +263,5 @@ class WebSocketRateLimiter {
 const websocketRateLimiter = new WebSocketRateLimiter();
 
 module.exports = websocketRateLimiter;
+module.exports.CONNECTION_INDEX_KEY = CONNECTION_INDEX_KEY;
 

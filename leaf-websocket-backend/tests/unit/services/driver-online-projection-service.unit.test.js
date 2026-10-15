@@ -422,7 +422,7 @@ describe('driver-online-projection-service', () => {
       'utf8'
     );
     const methodStart = cleanupSource.indexOf('async cleanupExpiredHeartbeats()');
-    const methodEnd = cleanupSource.indexOf('async cleanupOrphanedConnections()', methodStart);
+    const methodEnd = cleanupSource.indexOf('async cleanupOrphanedConnections(', methodStart);
     const methodSource = cleanupSource.slice(methodStart, methodEnd);
 
     expect(methodStart).toBeGreaterThan(-1);
