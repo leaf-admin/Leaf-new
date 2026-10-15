@@ -47,6 +47,15 @@ FILES_TO_DEPLOY=(
   "services/payment-service.js"
   "routes/payment.js"
   "routes/dashboard.js"
+  "routes/dashboard/01-users-and-driver-applications.js"
+  "routes/dashboard/02-financial-audit-metrics.js"
+  "routes/dashboard/03-overview-stats.js"
+  "routes/dashboard/04-support-map-reports.js"
+  "routes/dashboard/05-subscriptions-and-legacy-promotions.js"
+  "routes/dashboard/06-costs-monitoring-growth.js"
+  "routes/dashboard/07-promotions.js"
+  "routes/dashboard/08-driver-plans-and-status.js"
+  "routes/dashboard/shared.js"
   "server.js"
   "scripts/tests/test-subscription-grace-policy-mock.js"
 )
@@ -98,6 +107,7 @@ node --check "$BACKEND_DIR/services/daily-subscription-service.js"
 node --check "$BACKEND_DIR/services/payment-service.js"
 node --check "$BACKEND_DIR/routes/payment.js"
 node --check "$BACKEND_DIR/routes/dashboard.js"
+for part in "$BACKEND_DIR"/routes/dashboard/*.js; do node --check "$part"; done
 node --check "$BACKEND_DIR/server.js"
 echo "[rollout][ok] Sintaxe local validada."
 echo

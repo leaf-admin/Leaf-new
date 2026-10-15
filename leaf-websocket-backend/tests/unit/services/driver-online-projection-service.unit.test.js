@@ -1,6 +1,7 @@
 'use strict';
 
 const fs = require('node:fs');
+const { readDashboardRouteSource } = require('../../helpers/dashboard-route-source');
 const path = require('node:path');
 
 const {
@@ -404,10 +405,7 @@ describe('driver-online-projection-service', () => {
   });
 
   it('keeps administrative vehicle revocation on the atomic projection contract', () => {
-    const dashboardSource = fs.readFileSync(
-      path.resolve(__dirname, '../../../routes/dashboard.js'),
-      'utf8'
-    );
+    const dashboardSource = readDashboardRouteSource();
     const revocationStart = dashboardSource.indexOf('if (requestsOperationalRevocation)');
     const revocationEnd = dashboardSource.indexOf('// Melhor esforço: atualizar metadados', revocationStart);
     const revocationSource = dashboardSource.slice(revocationStart, revocationEnd);

@@ -1,4 +1,5 @@
 const fs = require('fs');
+const { readDashboardRouteSource } = require('../../helpers/dashboard-route-source');
 const path = require('path');
 
 describe('vehicle sharing policy boundaries', () => {
@@ -27,10 +28,7 @@ describe('vehicle sharing policy boundaries', () => {
   });
 
   it('keeps dashboard activation profile-scoped and online exclusivity in Redis', () => {
-    const dashboardSource = fs.readFileSync(
-      path.join(__dirname, '../../../routes/dashboard.js'),
-      'utf8'
-    );
+    const dashboardSource = readDashboardRouteSource();
     const driverControlSource = fs.readFileSync(
       path.join(__dirname, '../../../bootstrap/register-socket-driver-control-handlers.js'),
       'utf8'

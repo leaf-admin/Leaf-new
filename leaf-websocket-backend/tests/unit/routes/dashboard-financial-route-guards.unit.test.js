@@ -1,10 +1,8 @@
 const fs = require('fs');
+const { readDashboardRouteSource } = require('../../helpers/dashboard-route-source');
 const path = require('path');
 
-const source = fs.readFileSync(
-  path.join(__dirname, '../../../routes/dashboard.js'),
-  'utf8'
-);
+const source = readDashboardRouteSource();
 
 function extractBlockAfterMarker(text, marker) {
   const start = text.indexOf(marker);

@@ -82,6 +82,7 @@ echo "[deploy] Validando sintaxe local..."
 node --check "$BACKEND_LOCAL_DIR/bootstrap/register-socket-create-booking-handler.js"
 node --check "$BACKEND_LOCAL_DIR/commands/RequestRideCommand.js"
 node --check "$BACKEND_LOCAL_DIR/routes/dashboard.js"
+for part in "$BACKEND_LOCAL_DIR"/routes/dashboard/*.js; do node --check "$part"; done
 node --check "$BACKEND_LOCAL_DIR/routes/app-routes.js"
 node --check "$BACKEND_LOCAL_DIR/routes/pricing.js"
 node --check "$BACKEND_LOCAL_DIR/services/fare-estimation-service.js"
@@ -170,6 +171,10 @@ echo "[deploy] Enviando backend..."
 scp_cmd "$BACKEND_LOCAL_DIR/bootstrap/register-socket-create-booking-handler.js" "$VPS_USER@$VPS_IP:$REMOTE_BACKEND_DIR/bootstrap/register-socket-create-booking-handler.js"
 scp_cmd "$BACKEND_LOCAL_DIR/commands/RequestRideCommand.js" "$VPS_USER@$VPS_IP:$REMOTE_BACKEND_DIR/commands/RequestRideCommand.js"
 scp_cmd "$BACKEND_LOCAL_DIR/routes/dashboard.js" "$VPS_USER@$VPS_IP:$REMOTE_BACKEND_DIR/routes/dashboard.js"
+ssh_cmd "mkdir -p '$REMOTE_BACKEND_DIR/routes/dashboard'"
+for part in "$BACKEND_LOCAL_DIR"/routes/dashboard/*.js; do
+  scp_cmd "$part" "$VPS_USER@$VPS_IP:$REMOTE_BACKEND_DIR/routes/dashboard/$(basename "$part")"
+done
 scp_cmd "$BACKEND_LOCAL_DIR/routes/app-routes.js" "$VPS_USER@$VPS_IP:$REMOTE_BACKEND_DIR/routes/app-routes.js"
 scp_cmd "$BACKEND_LOCAL_DIR/routes/pricing.js" "$VPS_USER@$VPS_IP:$REMOTE_BACKEND_DIR/routes/pricing.js"
 scp_cmd "$BACKEND_LOCAL_DIR/services/dashboard-websocket.js" "$VPS_USER@$VPS_IP:$REMOTE_BACKEND_DIR/services/dashboard-websocket.js"
