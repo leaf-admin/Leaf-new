@@ -1719,6 +1719,7 @@ async function launchRide(windowSpec, windowReport) {
     await sleep(150);
 
     const startStart = nowMs();
+    flowMarks.startTripRequestedAt = startStart;
     await assignedDriver.client.startTrip({
       bookingId,
       startLocation: pickup
@@ -1777,7 +1778,9 @@ async function launchRide(windowSpec, windowReport) {
     );
     state.report.metrics.latencyMs.bookingToDispatch.push(flowMarks.dispatchDone - flowMarks.bookingDone);
     state.report.metrics.latencyMs.acceptRide.push(flowMarks.acceptDone - flowMarks.dispatchDone);
-    state.report.metrics.latencyMs.startTrip.push(flowMarks.startTripDone - flowMarks.acceptDone);
+    // Server round trip only (same as the window metric). acceptDone -> startTripDone
+    // also contains the scripted pickup waits (~400 ms) and is not a server cost.
+    state.report.metrics.latencyMs.startTrip.push(flowMarks.startTripDone - flowMarks.startTripRequestedAt);
     state.report.metrics.latencyMs.fullFlowToStart.push(flowMarks.startTripDone - flowMarks.start);
     state.report.dispatchRideSamples.push({
       bookingId,
