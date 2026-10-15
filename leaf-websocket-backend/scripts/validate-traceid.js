@@ -94,7 +94,12 @@ checks.routes.required = mainRoutes.length;
 for (const file of mainRoutes) {
   const routePath = path.join(__dirname, '../routes', file);
   if (fs.existsSync(routePath)) {
-    const content = fs.readFileSync(routePath, 'utf8');
+    // Arquivos divididos: o código fica em routes/<nome>/*.js.
+    const partsDir = routePath.replace(/\.js$/, '');
+    const parts = fs.existsSync(partsDir) && fs.statSync(partsDir).isDirectory()
+      ? fs.readdirSync(partsDir).filter((name) => name.endsWith('.js')).map((name) => path.join(partsDir, name))
+      : [];
+    const content = [routePath, ...parts].map((item) => fs.readFileSync(item, 'utf8')).join('\n');
     if (content.includes('traceId') || content.includes('traceContext')) {
       checks.routes.found++;
       checks.routes.files.push(`✅ ${file}`);
