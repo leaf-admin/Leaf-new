@@ -3318,3 +3318,40 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--text); outline-
 .auth-brand > span { width: 40px; height: 40px; border-radius: 12px; background: var(--text); }
 .auth-card button { min-height: 44px; font-size: 14px; }
 .auth-card input { min-height: 44px; font-size: 14px; }
+
+/* v2 — Home ("Hoje"): 4 números + "Precisa de você" */
+.home-stats {
+  display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
+  border: 1px solid var(--line); border-radius: var(--radius-xl); background: var(--surface);
+  margin-bottom: 16px; overflow: hidden;
+}
+.home-stats .ops-command-stat { padding: 20px 22px; border-right: 1px solid var(--line); display: grid; gap: 4px; }
+.home-stats .ops-command-stat:last-child { border-right: 0; }
+.home-stats .ops-command-stat span { font-size: 13px; color: var(--text-muted); }
+.home-stats .ops-command-stat strong { font-size: 30px; font-weight: 600; letter-spacing: -0.02em; line-height: 1.1; }
+.home-stats .ops-command-stat small { font-size: 12.5px; color: var(--text-muted); }
+.home-todo { padding: 8px 8px 8px; margin-bottom: 16px; gap: 0; }
+.home-todo-head { display: flex; align-items: baseline; justify-content: space-between; padding: 12px 14px 10px; }
+.home-todo-head h2 { font-size: 16px; }
+.home-todo-list { list-style: none; margin: 0; padding: 0; display: grid; }
+.home-todo-row {
+  display: grid; grid-template-columns: 10px 1fr 16px; align-items: center; gap: 14px;
+  padding: 14px; border-radius: 12px; color: var(--text); text-decoration: none;
+}
+.home-todo-row:hover { background: var(--bg-soft); color: var(--text); }
+.home-todo-list li + li .home-todo-row { border-top: 1px solid var(--line); border-radius: 0; }
+.home-todo-list li + li .home-todo-row:hover { border-radius: 12px; }
+.home-todo-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--line-strong); }
+.home-todo-dot-warn { background: var(--dot-warn); }
+.home-todo-dot-bad { background: var(--dot-bad); }
+.home-todo-copy { display: grid; gap: 2px; }
+.home-todo-copy strong { font-size: 14.5px; font-weight: 500; }
+.home-todo-copy span { font-size: 13px; color: var(--text-muted); }
+.home-todo-open { color: var(--text-muted); font-size: 18px; }
+.home-todo-empty { padding: 4px 14px 16px; color: var(--text-muted); margin: 0; }
+@media (max-width: 900px) {
+  .home-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .home-stats .ops-command-stat:nth-child(2) { border-right: 0; }
+  .home-stats .ops-command-stat:nth-child(-n + 2) { border-bottom: 1px solid var(--line); }
+}
+.dashboard-shell { align-content: start; }

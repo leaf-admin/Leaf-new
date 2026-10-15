@@ -136,8 +136,8 @@ function SourceRows({ sources = [] }) {
   if (!sources.length) return <p className="text-muted">Sem fontes carregadas.</p>;
   return (
     <div className="metric-list">
-      {sources.map((source) => (
-        <div className="row" key={source.id}>
+      {sources.map((source, index) => (
+        <div className="row" key={`${source.id || "source"}-${index}`}>
           <div className="label">
             <span
               className={
@@ -168,8 +168,8 @@ function DomainHealthRows({ domains = [] }) {
   if (!domains.length) return <p className="text-muted">Sem domínios carregados.</p>;
   return (
     <div className="metric-list">
-      {domains.map((domain) => (
-        <div className="row" key={domain.id}>
+      {domains.map((domain, index) => (
+        <div className="row" key={domain.id || domain.key || domain.label || `domain-${index}`}>
           <div className="label">
             <span className={statusClass(domain.status)}>{domain.label}</span>
             <small>{domain.action}</small>
@@ -462,124 +462,37 @@ function CommandStat({ label, value, detail, tone = "default" }) {
   );
 }
 
-function WorkspaceCard({
-  eyebrow,
-  title,
-  description,
-  href,
-  actionLabel,
-  tone = "default",
-  status,
-  metrics,
-  footnote,
-}) {
-  return (
-    <article className={`ops-workspace-card ops-workspace-card-${tone}`}>
-      <div className="ops-workspace-head">
-        <div>
-          <p className="ops-workspace-eyebrow">{eyebrow}</p>
-          <h2>{title}</h2>
-          <p>{description}</p>
-        </div>
-        {status ? <span className={`ops-workspace-status ops-workspace-status-${tone}`}>{status}</span> : null}
-      </div>
-
-      <div className="ops-workspace-metrics">
-        {metrics.map((metric) => (
-          <div key={metric.label}>
-            <span>{metric.label}</span>
-            <strong>{metric.value}</strong>
-          </div>
-        ))}
-      </div>
-
-      {footnote ? <p className="ops-workspace-footnote">{footnote}</p> : null}
-
-      <Link href={href} className="ops-workspace-link">
-        {actionLabel}
-      </Link>
-    </article>
-  );
-}
-
-function buildWorkspaces(snapshot) {
+// Lista curta do que pede ação: só entra o que tem pendência.
+function buildTodoItems(snapshot, attentionItems = []) {
   const metrics = snapshot?.dailyMetrics || {};
   const support = snapshot?.support || {};
-  const campaigns = snapshot?.campaigns || {};
   const driverOnboarding = snapshot?.driverOnboarding || {};
-  const launchFlags = snapshot?.launchFlags || {};
   const supportBreaches = toNumber(support.overdueAckCount) + toNumber(support.overdueFirstResponseCount);
-
-  return [
-    {
-      id: "overview",
-      eyebrow: "Visão geral",
-      title: statusLabel(snapshot?.status),
-      description: "Serviços, motoristas ativos, corridas, GMV e receita em um snapshot cacheado.",
-      href: "/dashboard",
-      actionLabel: "Abrir visão geral",
-      tone: statusTone(snapshot?.status),
-      status: snapshot?.cache?.status || "-",
-      footnote: `ARPU base ${brlFromCents(metrics.arpuBaseCents)} · ticket médio ${brlFromCents(metrics.averageRideTicketCents)}`,
-      metrics: [
-        { label: "Motoristas ativos", value: formatCompact(metrics.activeDrivers) },
-        { label: "Corridas agora", value: formatCompact(metrics.activeRides) },
-        { label: "GMV hoje", value: brlFromCents(metrics.gmvCents) },
-        { label: "Receita Leaf", value: brlFromCents(metrics.grossRevenueCents) },
-      ],
-    },
-    {
-      id: "support",
-      eyebrow: "Suporte",
-      title: `${formatCompact(support.totalOpenTickets)} tickets abertos`,
-      description: "Fila de atendimento, dono, SLA e classificação N1/N2/N3 para ação rápida.",
-      href: "/support",
-      actionLabel: "Abrir suporte",
-      tone: supportBreaches > 0 ? "danger" : "positive",
-      status: supportBreaches > 0 ? "SLA" : "ok",
-      footnote: `1ª resposta mediana: ${formatMinutes(support.medianFirstResponseMinutes)}`,
-      metrics: [
-        { label: "N1 / N2 / N3", value: `${formatCompact(support.backlogByPriority?.N1)} / ${formatCompact(support.backlogByPriority?.N2)} / ${formatCompact(support.backlogByPriority?.N3)}` },
-        { label: "Fora do SLA", value: formatCompact(supportBreaches) },
-        { label: "Sem responsável", value: formatCompact(support.ticketsWithoutOwner) },
-        { label: "Abertos", value: formatCompact(support.totalOpenTickets) },
-      ],
-    },
-    launchFlags.campaignCenterEnabled === true ? {
-      id: "campaigns",
-      eyebrow: "Campanhas",
-      title: `${formatCompact(campaigns.active)} campanhas ativas`,
-      description: "Monitor de banners, campanhas in-app, prazo, valor contratado e performance.",
-      href: "/campaign-center",
-      actionLabel: "Abrir campanhas",
-      tone: campaigns.active > 0 ? "positive" : "default",
-      status: campaigns.active > 0 ? "ativo" : "neutro",
-      footnote: `eCPM ${brlFromCents(campaigns.effectiveCpmCents)} · eCPC ${brlFromCents(campaigns.effectiveCpcCents)}`,
-      metrics: [
-        { label: "Impressões", value: formatCompact(campaigns.impressions) },
-        { label: "Cliques", value: formatCompact(campaigns.clicks) },
-        { label: "CTR", value: formatPercent(campaigns.ctr) },
-        { label: "Valor", value: brlFromCents(campaigns.campaignValueCents) },
-      ],
-    } : null,
-    {
-      id: "driver-onboarding",
-      eyebrow: "Cadastro motorista",
-      title: `${formatCompact(driverOnboarding.pendingDocuments)} documentos pendentes`,
-      description: "Fila de cadastro, KYC e documentos de motorista para aprovar sem perder contexto.",
-      href: "/drivers/review-queue",
-      actionLabel: "Abrir cadastro",
-      tone: driverOnboarding.pendingDocuments > 0 ? "warning" : "positive",
-      status: driverOnboarding.pendingDocuments > 0 ? "revisar" : "limpo",
-      footnote: `Fila total: ${formatCompact(driverOnboarding.totalDocuments)} documentos`,
-      metrics: [
-        { label: "Pendentes", value: formatCompact(driverOnboarding.pendingDocuments) },
-        { label: "Aprovados", value: formatCompact(driverOnboarding.approvedDocuments) },
-        { label: "Reprovados", value: formatCompact(driverOnboarding.rejectedDocuments) },
-        { label: "Fonte", value: driverOnboarding.reviewQueueSource || "all" },
-      ],
-    },
-  ].filter(Boolean);
+  const items = [];
+  const pendingDocs = toNumber(driverOnboarding.pendingDocuments);
+  if (pendingDocs > 0) {
+    items.push({ id: "drivers", tone: "warn", href: "/drivers?tab=review", title: `${pendingDocs} ${pendingDocs === 1 ? "documento de motorista" : "documentos de motorista"} para revisar`, detail: "Aprovar ou pedir reenvio" });
+  }
+  const openTickets = toNumber(support.totalOpenTickets);
+  if (openTickets > 0) {
+    items.push({ id: "support", tone: supportBreaches > 0 ? "bad" : "warn", href: "/support", title: `${openTickets} ${openTickets === 1 ? "chamado aberto" : "chamados abertos"} no suporte`, detail: supportBreaches > 0 ? `${supportBreaches} fora do prazo` : "Dentro do prazo" });
+  }
+  const pendingPayments = toNumber(metrics.paymentPendingCount);
+  if (pendingPayments > 0) {
+    items.push({ id: "payments", tone: "warn", href: "/financial-reconciliation", title: `${pendingPayments} ${pendingPayments === 1 ? "pagamento pendente" : "pagamentos pendentes"}`, detail: "Conferir na reconciliação" });
+  }
+  attentionItems
+    .filter((item) => item.priority === "alta" || item.priority === "media")
+    .forEach((item, index) => {
+      items.push({
+        id: `attention-${item.id || index}`,
+        tone: item.priority === "alta" ? "bad" : "warn",
+        href: item.href || "/observability",
+        title: item.title || item.label || "Alerta operacional",
+        detail: item.description || item.detail || null,
+      });
+    });
+  return items;
 }
 
 export default function DashboardPage() {
@@ -621,83 +534,76 @@ export default function DashboardPage() {
     };
   }, []);
 
-  const workspaces = useMemo(() => buildWorkspaces(snapshot), [snapshot]);
   const attentionItems = useMemo(() => buildAttentionItems(snapshot), [snapshot]);
+  const todoItems = useMemo(() => buildTodoItems(snapshot, attentionItems), [snapshot, attentionItems]);
   const metrics = snapshot?.dailyMetrics || {};
   const services = snapshot?.services || {};
   const costControls = snapshot?.costControls || {};
   const firestoreReadGuard = costControls.firestoreReadGuard || {};
-  const paymentRuntime = snapshot?.paymentRuntime || {};
 
   return (
     <ProtectedRoute>
       <main className="page-shell dashboard-shell">
         <header className="header dashboard-header">
           <div>
-            <h1>Operação diária</h1>
-            <p>Priorize o que precisa de ação agora; os detalhes ficam agrupados por contexto operacional.</p>
+            <h1>Hoje</h1>
+            <p>Atualizado às {formatTime(snapshot?.generatedAt)}</p>
           </div>
           <div className="filters">
             <span className={statusClass(snapshot?.status)}>
               {statusLabel(snapshot?.status)}
             </span>
-            <span className="meta-badge">Atualizado {formatTime(snapshot?.generatedAt)}</span>
           </div>
         </header>
 
         <AppNav />
         {loading ? <LoadingState message="Carregando operação diária..." /> : null}
 
-        <section className="ops-command-strip" aria-label="Resumo operacional">
+        <section className="home-stats" aria-label="Resumo de hoje">
           <CommandStat
-            label="Serviços"
-            value={statusLabel(snapshot?.status)}
-            detail={`TTL ${snapshot?.scope?.ttlSeconds || 0}s`}
-            tone={statusTone(snapshot?.status)}
-          />
-          <CommandStat
-            label="Motoristas"
+            label="Motoristas online"
             value={formatCompact(metrics.activeDrivers)}
             detail={`${formatCompact(metrics.totalDrivers)} cadastrados`}
-            tone={metrics.activeDrivers > 0 ? "positive" : "warning"}
           />
           <CommandStat
-            label="Corridas"
+            label="Corridas agora"
             value={formatCompact(metrics.activeRides)}
             detail={`${formatCompact(metrics.completedRidesToday)} finalizadas hoje`}
           />
           <CommandStat
-            label="GMV"
+            label="GMV hoje"
             value={brlFromCents(metrics.gmvCents)}
-            detail={`ticket ${brlFromCents(metrics.averageRideTicketCents)}`}
+            detail={`ticket médio ${brlFromCents(metrics.averageRideTicketCents)}`}
           />
           <CommandStat
-            label="Receita Leaf"
+            label="Receita Leaf hoje"
             value={brlFromCents(metrics.grossRevenueCents)}
-            detail={`ARPU ${brlFromCents(metrics.arpuBaseCents)}`}
-          />
-          <CommandStat
-            label="Woovi"
-            value={runtimeEnvironmentLabel(paymentRuntime.defaultEnvironment)}
-            detail={`${formatCompact(paymentRuntime.sandboxProfileCount)} sandbox · ${formatCompact(metrics.paymentPendingCount)} pendências`}
-            tone={paymentRuntime.globalSandboxEnabled ? "danger" : paymentRuntime.canarySandboxEnabled ? "positive" : "warning"}
           />
         </section>
 
-        <section className="ops-workspace-grid" aria-label="Janelas principais">
-          {workspaces.map((workspace) => (
-            <WorkspaceCard key={workspace.id} {...workspace} />
-          ))}
-        </section>
-
-        <section className="grid" aria-label="Atenção operacional">
-          <Panel
-            className="panel-span-full"
-            title="Atenção agora"
-            subtitle="O que pede uma decisão da equipe."
-          >
-            <ActionItems items={attentionItems} />
-          </Panel>
+        <section className="home-todo card" aria-label="Precisa de você">
+          <div className="home-todo-head">
+            <h2>Precisa de você</h2>
+            <span className="table-muted">{todoItems.length ? `${todoItems.length} ${todoItems.length === 1 ? "item" : "itens"}` : "Tudo em dia"}</span>
+          </div>
+          {todoItems.length === 0 ? (
+            <p className="home-todo-empty">Nada pendente agora. Motoristas, suporte e pagamentos estão em dia.</p>
+          ) : (
+            <ul className="home-todo-list">
+              {todoItems.map((item) => (
+                <li key={item.id}>
+                  <Link href={item.href} className="home-todo-row">
+                    <span className={`home-todo-dot home-todo-dot-${item.tone}`} aria-hidden="true" />
+                    <span className="home-todo-copy">
+                      <strong>{item.title}</strong>
+                      {item.detail ? <span>{item.detail}</span> : null}
+                    </span>
+                    <span className="home-todo-open" aria-hidden="true">›</span>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          )}
         </section>
 
         <details className="ops-technical">
