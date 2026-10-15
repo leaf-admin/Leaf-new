@@ -5,6 +5,17 @@ const DEFAULT_TTL_SECONDS = Math.max(
   Number.parseInt(process.env.DRIVER_SOCKET_PRESENCE_TTL_SECONDS || '90', 10) || 90
 );
 
+// Location updates and heartbeats refresh the presence every 1-2 s, but readers
+// only need it fresher than the TTL (+5 s), and the stale-driver cleanup only
+// acts after >= 30 s. An unchanged presence (same socket, rooms, worker,
+// source) written less than REFRESH_MS ago is not rewritten; any change writes
+// at once, and a disconnect forgets the cache entry.
+const REFRESH_MS = Math.max(
+  0,
+  Number.parseInt(process.env.DRIVER_SOCKET_PRESENCE_REFRESH_MS || '15000', 10) || 0
+);
+const lastPresenceWrites = new Map(); // driverId -> { signature, at }
+
 function getPresenceKey(driverId) {
   return `driver_socket_presence:${driverId}`;
 }
@@ -50,20 +61,45 @@ async function upsertDriverSocketPresence(redis, {
   const inDriverRoom = isDriverDispatchRoom(normalizedDriverId, rooms);
   const ttl = Math.max(30, Number.parseInt(ttlSeconds, 10) || DEFAULT_TTL_SECONDS);
   const updatedAt = new Date(nowMs).toISOString();
+  const workerId = resolveWorkerId(socket);
+  const connected = socket.connected === false ? 'false' : 'true';
+  const signature = [socketId, connected, inDriverRoom, JSON.stringify(rooms), workerId, source, ttl].join('|');
+  const lastWrite = lastPresenceWrites.get(normalizedDriverId);
+  if (REFRESH_MS > 0 && lastWrite && lastWrite.signature === signature && nowMs - lastWrite.at >= 0 && nowMs - lastWrite.at < REFRESH_MS) {
+    return {
+      success: true,
+      code: 'DRIVER_SOCKET_PRESENCE_RECORDED',
+      key: getPresenceKey(normalizedDriverId),
+      ttlSeconds: ttl,
+      inDriverRoom,
+      rooms,
+      skipped: true
+    };
+  }
 
-  await redis.hset(getPresenceKey(normalizedDriverId), {
+  const fields = {
     driverId: normalizedDriverId,
     socketId,
     userType: 'driver',
-    connected: socket.connected === false ? 'false' : 'true',
+    connected,
     inDriverRoom: inDriverRoom ? 'true' : 'false',
     rooms: JSON.stringify(rooms),
-    workerId: resolveWorkerId(socket),
+    workerId,
     source,
     updatedAt,
     updatedAtMs: String(nowMs)
-  });
-  await redis.expire(getPresenceKey(normalizedDriverId), ttl);
+  };
+  if (typeof redis.pipeline === 'function') {
+    await redis.pipeline()
+      .hset(getPresenceKey(normalizedDriverId), fields)
+      .expire(getPresenceKey(normalizedDriverId), ttl)
+      .exec();
+  } else {
+    await redis.hset(getPresenceKey(normalizedDriverId), fields);
+    await redis.expire(getPresenceKey(normalizedDriverId), ttl);
+  }
+  if (lastPresenceWrites.size >= 50000) lastPresenceWrites.clear();
+  lastPresenceWrites.set(normalizedDriverId, { signature, at: nowMs });
 
   return {
     success: true,
@@ -183,6 +219,7 @@ async function clearDriverSocketPresence(redis, {
   }
 
   const key = getPresenceKey(normalizedDriverId);
+  lastPresenceWrites.delete(normalizedDriverId);
   if (normalizedSocketId) {
     const presence = await redis.hgetall(key);
     const storedSocketId = String(presence?.socketId || '').trim();
@@ -204,8 +241,13 @@ async function clearDriverSocketPresence(redis, {
   };
 }
 
+function resetPresenceCacheForTests() {
+  lastPresenceWrites.clear();
+}
+
 module.exports = {
   DEFAULT_TTL_SECONDS,
+  resetPresenceCacheForTests,
   getPresenceKey,
   upsertDriverSocketPresence,
   readDriverSocketPresence,
