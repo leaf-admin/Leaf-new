@@ -342,7 +342,9 @@ async function materializePaymentForBooking({
       financialContextId: resolvedFinancialContext.contextId
     };
 
-    await firestore.collection(collections.paymentHoldings).doc(safeBookingId).set({
+    // Holding e ride payment canônicos numa única ida ao Firestore, e atômicos entre si.
+    const materializeBatch = firestore.batch();
+    materializeBatch.set(firestore.collection(collections.paymentHoldings).doc(safeBookingId), {
       ...(sourceHolding || {}),
       ...basePaymentReference,
       paymentMethod: sourceHolding?.paymentMethod || 'pix',
@@ -350,7 +352,7 @@ async function materializePaymentForBooking({
       confirmedAt: sourceHolding?.confirmedAt || nowIso
     }, { merge: true });
 
-    await firestore.collection(collections.ridePayments).doc(safeBookingId).set({
+    materializeBatch.set(firestore.collection(collections.ridePayments).doc(safeBookingId), {
       ...(sourceRidePayment || {}),
       rideId: safeBookingId,
       canonicalRideId: safeBookingId,
@@ -371,6 +373,7 @@ async function materializePaymentForBooking({
       financialNamespace: resolvedFinancialContext.namespace,
       financialContextId: resolvedFinancialContext.contextId
     }, { merge: true });
+    await materializeBatch.commit();
 
     if (resolvedFinancialContext.namespace === 'sandbox' && safeTemporaryRideId) {
       const aliasReference = {

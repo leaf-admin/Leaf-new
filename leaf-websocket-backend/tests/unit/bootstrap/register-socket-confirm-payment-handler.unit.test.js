@@ -193,3 +193,70 @@ describe('register-socket-confirm-payment-handler payment proof guard', () => {
     expect(paymentService.getPaymentStatus).not.toHaveBeenCalled();
   });
 });
+
+describe('register-socket-confirm-payment-handler local payment lookups', () => {
+  function createSlowFirestore(seed, delaysByPath) {
+    const base = createFirestoreWithDocs(seed);
+    const stats = { inFlight: 0, maxInFlight: 0, calls: 0 };
+    const track = (path, read) => {
+      stats.calls += 1;
+      stats.inFlight += 1;
+      stats.maxInFlight = Math.max(stats.maxInFlight, stats.inFlight);
+      return new Promise((resolve) => {
+        setTimeout(async () => {
+          stats.inFlight -= 1;
+          resolve(await read());
+        }, delaysByPath[path] ?? 5);
+      });
+    };
+    return {
+      stats,
+      collection(collectionName) {
+        const collection = base.collection(collectionName);
+        return {
+          doc(docId) {
+            const path = `${collectionName}/${docId}`;
+            return { get: () => track(path, () => collection.doc(docId).get()) };
+          },
+          where(field, operator, value) {
+            const path = `${collectionName}?${field}=${value}`;
+            const limited = collection.where(field, operator, value).limit(1);
+            return { limit: () => ({ get: () => track(path, () => limited.get()) }) };
+          },
+        };
+      },
+    };
+  }
+
+  it('starts every Firestore lookup at once and keeps the precedence order', async () => {
+    const webhookHolding = {
+      status: 'in_holding',
+      source: 'woovi_webhook',
+      chargeId: 'charge_1',
+      paymentId: 'charge_1',
+      amount: 8785,
+    };
+    const firestore = createSlowFirestore(
+      {
+        'payment_holdings/booking_1': { ...webhookHolding, marker: 'first-precedence' },
+        'ride_payments/charge_1': { ...webhookHolding, marker: 'later-precedence' },
+      },
+      // The highest-precedence read finishes last; it must still win.
+      { 'payment_holdings/booking_1': 30 }
+    );
+
+    const result = await resolveAuthoritativePaymentConfirmation({
+      paymentService: { getPaymentStatus: jest.fn() },
+      firestore,
+      bookingId: 'booking_1',
+      references: ['charge_1'],
+      expectedAmountInCents: 8785,
+    });
+
+    // 2 ids x (holding + ride payment) + 1 reference x 3 queries.
+    expect(firestore.stats.calls).toBe(7);
+    expect(firestore.stats.maxInFlight).toBe(7);
+    expect(result).toMatchObject({ success: true, source: 'woovi_webhook' });
+    expect(result.record.marker).toBe('first-precedence');
+  });
+});
