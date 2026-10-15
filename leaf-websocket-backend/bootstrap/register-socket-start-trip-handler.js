@@ -691,8 +691,8 @@ function registerSocketStartTripHandler({
                 logStructured('error', 'Erro ao iniciar viagem', {
                     service: 'websocket',
                     operation: 'startTrip',
-                    driverId,
-                    bookingId: data.bookingId,
+                    driverId: socket.userId || data?.driverId || data?.uid,
+                    bookingId: data?.bookingId,
                     error: error.message,
                     stack: error.stack
                 });

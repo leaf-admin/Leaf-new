@@ -138,7 +138,7 @@ function registerSocketRejectRideHandler({
             logStructured('error', 'Erro ao rejeitar corrida', {
                 service: 'websocket',
                 driverId,
-                bookingId: bookingIdToUse,
+                bookingId: data?.bookingId || data?.rideId || null,
                 error: error.message,
                 stack: error.stack
             });
