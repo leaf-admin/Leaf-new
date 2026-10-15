@@ -857,7 +857,7 @@ export default function RobotaxiDriverActivationScreen({ navigation, route }) {
                       <View style={styles.timelineActionPill}>
                         <Text style={styles.timelineActionPillText}>{row.actionLabel}</Text>
                       </View>
-                    ) : (
+                    ) : node.filled ? null : (
                       <Text style={[styles.activationRowAction, { color: node.tone }]}>{row.actionLabel}</Text>
                     )}
                   </TouchableOpacity>
