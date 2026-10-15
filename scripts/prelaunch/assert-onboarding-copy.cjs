@@ -8,7 +8,6 @@ const rootDir = path.resolve(__dirname, '..', '..');
 const files = [
   'mobile-app/src/components/auth/steps/PhoneInputStep.js',
   'mobile-app/src/components/auth/steps/OTPStep.js',
-  'mobile-app/src/components/auth/steps/ForgotPasswordStep.js',
   'mobile-app/src/components/auth/steps/ProfileDataStep.js'
 ];
 
