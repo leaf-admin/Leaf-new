@@ -3,6 +3,7 @@ services:
   redis:
     image: redis:7.4.9-alpine3.21@sha256:6ab0b6e7381779332f97b8ca76193e45b0756f38d4c0dcda72dbb3c32061ab99
     container_name: leaf-redis
+    cpu_shares: 4096
     environment:
       REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD must be set}
     command:
@@ -41,6 +42,7 @@ services:
       args:
         GIT_SHA: ${GIT_SHA:-unknown}
     container_name: leaf-websocket
+    cpu_shares: 4096
     logging:
       driver: json-file
       options:
@@ -380,6 +382,7 @@ services:
       args:
         GIT_SHA: ${GIT_SHA:-unknown}
     container_name: leaf-sideeffects-worker
+    cpu_shares: 4096
     logging:
       driver: json-file
       options:
@@ -498,6 +501,7 @@ services:
       args:
         GIT_SHA: ${GIT_SHA:-unknown}
     container_name: leaf-billing-worker
+    cpu_shares: 4096
     logging:
       driver: json-file
       options:
@@ -581,6 +585,7 @@ services:
   nginx:
     image: nginx:alpine
     container_name: leaf-nginx
+    cpu_shares: 4096
     ports:
       - "80:80"
       - "443:443"

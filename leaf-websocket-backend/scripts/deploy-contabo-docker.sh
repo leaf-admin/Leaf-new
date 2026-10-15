@@ -185,7 +185,7 @@ rollback_on_error() {
       done < '$REMOTE_BACKUP_DIR/container-images-before.txt'
 
       compose='docker compose -f $REMOTE_BASE_COMPOSE -f $REMOTE_SCALE_COMPOSE -f $REMOTE_OPS_COMPOSE'
-      for service in websocket-gateway-2 websocket-gateway-3 websocket; do
+      for service in websocket-gateway-2 websocket-gateway-3 websocket-gateway-4 websocket; do
         \$compose up -d --no-deps --no-build --force-recreate \"\$service\"
       done
 
@@ -308,6 +308,7 @@ remote "
     leaf-websocket \
     leaf-websocket-gateway-2 \
     leaf-websocket-gateway-3 \
+    leaf-websocket-gateway-4 \
     leaf-trip-location-worker \
     leaf-queue-worker \
     leaf-sideeffects-worker \
@@ -566,10 +567,10 @@ remote "
   cd '$REMOTE_BACKEND_DIR'
   compose='docker compose -f $REMOTE_BASE_COMPOSE -f $REMOTE_SCALE_COMPOSE -f $REMOTE_OPS_COMPOSE'
   if [ '$GATEWAY_ONLY_DEPLOY' = true ]; then
-    GIT_SHA='$RELEASE_SHA' \$compose build websocket websocket-gateway-2 websocket-gateway-3
+    GIT_SHA='$RELEASE_SHA' \$compose build websocket websocket-gateway-2 websocket-gateway-3 websocket-gateway-4
   else
     GIT_SHA='$RELEASE_SHA' \$compose build \
-      websocket websocket-gateway-2 websocket-gateway-3 \
+      websocket websocket-gateway-2 websocket-gateway-3 websocket-gateway-4 \
       sideeffects-worker billing-worker queue-worker \
       trip-location-worker pricing-baseline-worker ride-health-monitor-worker
   fi
@@ -688,6 +689,11 @@ remote "
   wait_healthy websocket-gateway-3 leaf-websocket-gateway-3
   wait_ready leaf-websocket-gateway-3
   verify_release leaf-websocket-gateway-3
+
+  \$compose up -d --no-deps websocket-gateway-4
+  wait_healthy websocket-gateway-4 leaf-websocket-gateway-4
+  wait_ready leaf-websocket-gateway-4
+  verify_release leaf-websocket-gateway-4
 
   \$compose up -d --no-deps websocket
   wait_healthy websocket leaf-websocket
