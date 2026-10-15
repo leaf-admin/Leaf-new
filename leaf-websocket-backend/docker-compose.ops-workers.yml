@@ -6,6 +6,11 @@ services:
       args:
         GIT_SHA: ${GIT_SHA:-unknown}
     container_name: leaf-trip-location-worker
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     command: ["node", "workers/worker-trip-location.js"]
     environment:
       - NODE_ENV=production
@@ -86,6 +91,11 @@ services:
       args:
         GIT_SHA: ${GIT_SHA:-unknown}
     container_name: leaf-pricing-baseline-worker
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     command: ["node", "workers/pricing-baseline-worker.js"]
     environment:
       - NODE_ENV=production
@@ -153,6 +163,11 @@ services:
       args:
         GIT_SHA: ${GIT_SHA:-unknown}
     container_name: leaf-ride-health-monitor-worker
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     command: ["node", "workers/ride-health-monitor-worker.js"]
     environment:
       - NODE_ENV=production
