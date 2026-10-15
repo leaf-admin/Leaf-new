@@ -24,7 +24,18 @@ function createFirestore() {
   return {
     collection: (collectionPath) => ({
       doc: (id) => createDocRef(`${collectionPath}/${id}`)
-    })
+    }),
+    batch: () => {
+      const writes = [];
+      return {
+        set: jest.fn((docRef, data, options) => {
+          writes.push([docRef.path, data, options]);
+        }),
+        commit: jest.fn(async () => {
+          writes.forEach(([path, data, options]) => writeDoc(path, data, options));
+        })
+      };
+    }
   };
 }
 
