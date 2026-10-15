@@ -1024,7 +1024,7 @@ class IntegratedKYCService {
     try {
       await this.notificationService.sendLivenessCheck(driverId, data);
     } catch (error) {
-      logError(error, 'Erro ao enviar notificação de liveness', { service: 'integrated-kyc-service', userId });
+      logError(error, 'Erro ao enviar notificação de liveness', { service: 'integrated-kyc-service', driverId });
     }
   }
 
@@ -1032,7 +1032,7 @@ class IntegratedKYCService {
     try {
       await this.notificationService.sendRetryAttempt(driverId, data);
     } catch (error) {
-      logError(error, 'Erro ao enviar notificação de retry', { service: 'integrated-kyc-service', userId });
+      logError(error, 'Erro ao enviar notificação de retry', { service: 'integrated-kyc-service', driverId });
     }
   }
 
@@ -1040,7 +1040,7 @@ class IntegratedKYCService {
     try {
       await this.notificationService.sendVerificationCompleted(driverId, data);
     } catch (error) {
-      logError(error, 'Erro ao enviar notificação de conclusão', { service: 'integrated-kyc-service', userId });
+      logError(error, 'Erro ao enviar notificação de conclusão', { service: 'integrated-kyc-service', driverId });
     }
   }
 
@@ -1062,7 +1062,7 @@ class IntegratedKYCService {
     try {
       this.retryService.configureRetry(options);
     } catch (error) {
-      logError(error, 'Erro ao configurar retry', { service: 'integrated-kyc-service', userId });
+      logError(error, 'Erro ao configurar retry', { service: 'integrated-kyc-service' });
       throw error;
     }
   }
@@ -1071,7 +1071,7 @@ class IntegratedKYCService {
   async cleanupOldData() {
     try {
       await this.analyticsService.cleanupOldData();
-      logStructured('info', 'Limpeza de dados antigos concluída', { service: 'integrated-kyc-service', deletedCount });
+      logStructured('info', 'Limpeza de dados antigos concluída', { service: 'integrated-kyc-service' });
     } catch (error) {
       logError(error, 'Erro na limpeza de dados', { service: 'integrated-kyc-service' });
     }

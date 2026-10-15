@@ -176,7 +176,7 @@ class FirebaseStorageService {
         try {
           return await this.downloadFromFirebaseStorage(fileUrl);
         } catch (firebaseError) {
-          logStructured('warn', 'Erro ao baixar via Admin SDK, tentando HTTP direto', { service: 'firebase-storage-service', error: firebaseError.message, filePath });
+          logStructured('warn', 'Erro ao baixar via Admin SDK, tentando HTTP direto', { service: 'firebase-storage-service', error: firebaseError.message, fileUrl });
           // Fallback para HTTP direto
         }
       }
@@ -185,7 +185,7 @@ class FirebaseStorageService {
       return await this.downloadFromUrl(fileUrl);
       
     } catch (error) {
-      logError(error, 'Erro ao baixar arquivo', { service: 'firebase-storage-service', filePath });
+      logError(error, 'Erro ao baixar arquivo', { service: 'firebase-storage-service', fileUrl });
       throw error;
     }
   }
@@ -262,6 +262,9 @@ class FirebaseStorageService {
    * @returns {Promise<Buffer>} Buffer do arquivo
    */
   async downloadFromFirebaseStorage(fileUrl) {
+    // Declarados fora do try para o log de erro abaixo conseguir lê-los.
+    let bucketName = null;
+    let filePath = null;
     try {
       if (!this.storage) {
         throw new Error('Firebase Storage não inicializado');
@@ -272,8 +275,6 @@ class FirebaseStorageService {
       const urlObj = new URL(fileUrl);
       
       // Tentar extrair bucket name e file path
-      let bucketName = null;
-      let filePath = null;
 
       // Formato 1: firebasestorage.googleapis.com/v0/b/BUCKET/o/PATH
       if (urlObj.pathname.includes('/b/')) {
