@@ -52,7 +52,8 @@ class RedisScan {
      */
     static async scanKeys(redis, pattern, count = DEFAULT_SCAN_COUNT, maxKeys = null) {
         try {
-            const keys = [];
+            // SCAN may return a key more than once while the keyspace changes.
+            const keys = new Set();
             let cursor = '0';
             const scanCount = normalizeScanCount(count);
             const maxResults = normalizeMaxKeys(maxKeys);
@@ -65,14 +66,14 @@ class RedisScan {
                 );
                 
                 cursor = result[0];
-                keys.push(...result[1]);
+                result[1].forEach((key) => keys.add(key));
 
-                if (maxResults !== null && keys.length >= maxResults) {
-                    return keys.slice(0, maxResults);
+                if (maxResults !== null && keys.size >= maxResults) {
+                    return Array.from(keys).slice(0, maxResults);
                 }
             } while (cursor !== '0');
 
-            return keys;
+            return Array.from(keys);
         } catch (error) {
             logger.error(`❌ [RedisScan] Erro ao escanear chaves com padrão ${pattern}:`, error);
             throw error;

@@ -4,7 +4,7 @@ const express = require('express');
 const request = require('supertest');
 
 const mockHset = jest.fn();
-const mockKeys = jest.fn();
+const mockScanKeys = jest.fn();
 const mockHgetall = jest.fn();
 const mockExists = jest.fn();
 const mockDel = jest.fn();
@@ -12,7 +12,6 @@ const mockRedisConnection = {
   status: 'ready',
   connect: jest.fn(),
   hset: mockHset,
-  keys: mockKeys,
   hgetall: mockHgetall,
   exists: mockExists,
   del: mockDel
@@ -55,7 +54,8 @@ jest.mock('../../../services/fcm-service', () => jest.fn(() => ({
 })));
 
 jest.mock('../../../utils/redis-scan', () => ({
-  scanIds: jest.fn()
+  scanIds: jest.fn(),
+  scanKeys: (...args) => mockScanKeys(...args)
 }));
 
 jest.mock('../../../utils/logger', () => ({
@@ -75,7 +75,7 @@ describe('notification schedule route auth', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockRedisConnection.status = 'ready';
-    mockKeys.mockResolvedValue(['scheduled_notifications:scheduled_1']);
+    mockScanKeys.mockResolvedValue(['scheduled_notifications:scheduled_1']);
     mockHgetall.mockResolvedValue({ id: 'scheduled_1', title: 'Teste' });
     mockExists.mockResolvedValue(1);
     mockDel.mockResolvedValue(1);

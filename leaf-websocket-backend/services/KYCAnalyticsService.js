@@ -6,6 +6,7 @@
  */
 
 const Redis = require('ioredis');
+const RedisScan = require('../utils/redis-scan');
 const { logStructured, logError } = require('../utils/logger');
 const DockerDetector = require('../utils/docker-detector');
 
@@ -299,7 +300,7 @@ class KYCAnalyticsService {
       const now = Date.now();
       const cutoffTime = now - (hours * 3600 * 1000);
       
-      const keys = await this.redis.keys(`${this.realtimePrefix}*`);
+      const keys = await RedisScan.scanKeys(this.redis, `${this.realtimePrefix}*`);
       const recentKeys = keys.filter(key => {
         const timestamp = parseInt(key.replace(this.realtimePrefix, ''));
         return timestamp > cutoffTime;
@@ -388,7 +389,7 @@ class KYCAnalyticsService {
       const cutoffTime = Date.now() - (this.retentionDays * 24 * 3600 * 1000);
       
       // Limpar dados em tempo real antigos
-      const realtimeKeys = await this.redis.keys(`${this.realtimePrefix}*`);
+      const realtimeKeys = await RedisScan.scanKeys(this.redis, `${this.realtimePrefix}*`);
       for (const key of realtimeKeys) {
         const timestamp = parseInt(key.replace(this.realtimePrefix, ''));
         if (timestamp < cutoffTime) {

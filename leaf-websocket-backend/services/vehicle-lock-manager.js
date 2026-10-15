@@ -14,6 +14,7 @@
  */
 
 const redisPool = require('../utils/redis-pool');
+const RedisScan = require('../utils/redis-scan');
 const { logger } = require('../utils/logger');
 
 const LEASE_SEPARATOR = '::lease::';
@@ -303,7 +304,7 @@ class VehicleLockManager {
     async cleanupExpiredLocks() {
         try {
             // Buscar todas as chaves de lock de veículo
-            const lockKeys = await this.redis.keys('vehicle_lock:*');
+            const lockKeys = await RedisScan.scanKeys(this.redis, 'vehicle_lock:*');
             let cleaned = 0;
 
             for (const key of lockKeys) {
@@ -333,7 +334,7 @@ class VehicleLockManager {
      */
     async getLockStats() {
         try {
-            const lockKeys = await this.redis.keys('vehicle_lock:*');
+            const lockKeys = await RedisScan.scanKeys(this.redis, 'vehicle_lock:*');
             const stats = {
                 total: lockKeys.length,
                 locks: []

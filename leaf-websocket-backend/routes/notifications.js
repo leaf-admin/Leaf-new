@@ -507,7 +507,7 @@ router.get('/scheduled', requireAdminManager, async (req, res) => {
                 }
             }
         }
-        const keys = await redis.keys('scheduled_notifications:*');
+        const keys = await RedisScan.scanKeys(redis, 'scheduled_notifications:*');
         const scheduledNotifications = [];
 
         for (const key of keys) {
@@ -570,7 +570,7 @@ router.get('/stats', requireAuth, async (req, res) => {
         const stats = await fcmService.getServiceStats();
         const redis = redisPool.getConnection();
         await ensureRedisConnection(redis);
-        const scheduledKeys = await redis.keys('scheduled_notifications:*');
+        const scheduledKeys = await RedisScan.scanKeys(redis, 'scheduled_notifications:*');
         const scheduledCount = scheduledKeys ? scheduledKeys.length : 0;
         
         res.json({

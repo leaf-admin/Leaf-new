@@ -6,6 +6,7 @@
  */
 
 const redisPool = require('../utils/redis-pool');
+const RedisScan = require('../utils/redis-scan');
 const { logger } = require('../utils/logger');
 
 class MetricsHistoryService {
@@ -285,7 +286,7 @@ class MetricsHistoryService {
             cutoffDate.setDate(cutoffDate.getDate() - this.config.retentionDays);
             
             // Buscar todas as chaves de histórico
-            const keys = await this.redis.keys(`${this.config.prefix}:*`);
+            const keys = await RedisScan.scanKeys(this.redis, `${this.config.prefix}:*`);
             
             let deleted = 0;
             for (const key of keys) {
@@ -364,7 +365,7 @@ class MetricsHistoryService {
             
             // Buscar corridas ativas do Redis
             try {
-                const activeBookings = await this.redis.keys('booking:*');
+                const activeBookings = await RedisScan.scanKeys(this.redis, 'booking:*');
                 metrics.rides.active = activeBookings.length;
                 
                 // Contar corridas por status (se disponível)
