@@ -79,8 +79,22 @@ function getServiceAccountPath() {
   return path.join(getProjectRoot(), 'leaf-reactnative-firebase-adminsdk-fbsvc-456a95e2fc.json');
 }
 
+// Emulator mode (local load tests): no real credential, no real Firebase project.
+function authEmulatorHost() {
+  return String(process.env.FIREBASE_AUTH_EMULATOR_HOST || '').trim();
+}
+
 function ensureFirebaseAdmin() {
   if (admin.apps.length) return admin.auth();
+
+  if (authEmulatorHost()) {
+    const projectId = process.env.GCLOUD_PROJECT || process.env.FIREBASE_PROJECT_ID || '';
+    if (!projectId.startsWith('demo-')) {
+      throw new Error('Emulador de Auth exige um projeto demo- (GCLOUD_PROJECT)');
+    }
+    admin.initializeApp({ projectId, databaseURL: process.env.FIREBASE_DATABASE_URL });
+    return admin.auth();
+  }
 
   const credentialPath = getServiceAccountPath();
   if (!fs.existsSync(credentialPath)) {
@@ -99,7 +113,10 @@ function ensureFirebaseAdmin() {
 }
 
 async function exchangeCustomTokenForIdToken(customToken, apiKey) {
-  const url = `https://identitytoolkit.googleapis.com/v1/accounts:signInWithCustomToken?key=${apiKey}`;
+  const host = authEmulatorHost();
+  const url = host
+    ? `http://${host}/identitytoolkit.googleapis.com/v1/accounts:signInWithCustomToken?key=${apiKey}`
+    : `https://identitytoolkit.googleapis.com/v1/accounts:signInWithCustomToken?key=${apiKey}`;
   const response = await axios.post(
     url,
     {
@@ -125,7 +142,7 @@ async function getIdTokenForUid(uid) {
     return cached.idToken;
   }
 
-  const apiKey = resolveFirebaseApiKey();
+  const apiKey = authEmulatorHost() ? 'emulator-key' : resolveFirebaseApiKey();
   if (!apiKey) {
     throw new Error('FIREBASE_API_KEY não encontrado para gerar token E2E');
   }

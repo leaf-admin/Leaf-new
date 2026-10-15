@@ -426,6 +426,10 @@ class WebSocketTestClient {
       const matchesSuccessPayload = (payload = {}) => {
         if (acceptedIdempotencyKeys.size === 0) return true;
         const eventKey = extractEventIdempotencyKey(payload);
+        // The server's bookingCreated does not echo the idempotency key; a
+        // keyless success received after this request started is ours (one
+        // createBooking in flight per client), like keyless errors below.
+        if (!eventKey) return true;
         return acceptedIdempotencyKeys.has(String(eventKey || '').trim());
       };
 
