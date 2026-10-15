@@ -329,6 +329,13 @@ function wsToHttp(raw) {
 }
 
 function canUseFirebaseProvisioning() {
+  // Local isolated stack: provision into the RTDB emulator of a demo- project.
+  if (
+    process.env.FIREBASE_DATABASE_EMULATOR_HOST &&
+    String(process.env.GCLOUD_PROJECT || '').startsWith('demo-')
+  ) {
+    return true;
+  }
   const hasJsonEnv =
     Boolean(process.env.FIREBASE_SERVICE_ACCOUNT_JSON) ||
     Boolean(process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON);
@@ -1125,6 +1132,31 @@ async function provisionDriverVehicle(driverSession, index) {
     updatedAt: nowIso
   };
 
+  // Local isolated stack only (demo- project on the emulators): mark the
+  // synthetic driver as fully activated (documents, KYC, liveness) so the
+  // canonical activation gate lets it go online. Never written to a real project.
+  if (
+    process.env.FIREBASE_DATABASE_EMULATOR_HOST &&
+    String(process.env.GCLOUD_PROJECT || '').startsWith('demo-')
+  ) {
+    updates[`driver_activation/${uid}`] = {
+      documents: {
+        cnh: { status: 'approved', updatedAt: nowIso },
+        mei: { status: 'approved', updatedAt: nowIso },
+        crlv: {
+          status: 'approved',
+          updatedAt: nowIso,
+          data: { plate, model: 'Model 3', color: 'White', year: '2024' }
+        }
+      },
+      consent: { backgroundCheck: { accepted: true, acceptedAt: nowIso } },
+      updatedAt: nowIso
+    };
+    updates[`users/${uid}/kycStatus`] = 'approved';
+    updates[`users/${uid}/kyc`] = { status: 'approved', passed: true, lastPassedAt: nowIso };
+    updates[`users/${uid}/driverActivation`] = { firstLivenessPassed: true, firstLivenessPassedAt: nowIso };
+  }
+
   await db.ref().update(updates);
   driverSession.vehicleId = vehicleId;
   driverSession.vehiclePlate = plate;
@@ -1624,6 +1656,9 @@ async function launchRide(windowSpec, windowReport) {
       }
 
       lastPaymentError = paymentResult.error || {};
+      if (process.env.LOADTEST_DEBUG) {
+        logLine(`[debug] paymentError ${JSON.stringify(lastPaymentError).slice(0, 400)}`);
+      }
       const noPartnerBlocked = isPaymentBlockedNoPartner(lastPaymentError);
 
       if (noPartnerBlocked) {
@@ -1684,6 +1719,7 @@ async function launchRide(windowSpec, windowReport) {
     await sleep(150);
 
     const startStart = nowMs();
+    flowMarks.startTripRequestedAt = startStart;
     await assignedDriver.client.startTrip({
       bookingId,
       startLocation: pickup
@@ -1713,6 +1749,9 @@ async function launchRide(windowSpec, windowReport) {
       startedAt: flowMarks.startTripDone,
       dueAt,
       holdSec,
+      // The fare the passenger paid; completeTrip must report the same value
+      // (the server rejects a final fare that diverges from the locked one).
+      fare: estimatedFare,
       marks: flowMarks
     };
 
@@ -1739,7 +1778,9 @@ async function launchRide(windowSpec, windowReport) {
     );
     state.report.metrics.latencyMs.bookingToDispatch.push(flowMarks.dispatchDone - flowMarks.bookingDone);
     state.report.metrics.latencyMs.acceptRide.push(flowMarks.acceptDone - flowMarks.dispatchDone);
-    state.report.metrics.latencyMs.startTrip.push(flowMarks.startTripDone - flowMarks.acceptDone);
+    // Server round trip only (same as the window metric). acceptDone -> startTripDone
+    // also contains the scripted pickup waits (~400 ms) and is not a server cost.
+    state.report.metrics.latencyMs.startTrip.push(flowMarks.startTripDone - flowMarks.startTripRequestedAt);
     state.report.metrics.latencyMs.fullFlowToStart.push(flowMarks.startTripDone - flowMarks.start);
     state.report.dispatchRideSamples.push({
       bookingId,
@@ -1814,7 +1855,7 @@ async function completeRide(ride, windowReport) {
     const payload = {
       bookingId: ride.bookingId,
       endLocation: ride.destination,
-      fare: Number((20 + Math.random() * 35).toFixed(2)),
+      fare: Number.isFinite(ride.fare) && ride.fare > 0 ? ride.fare : Number((20 + Math.random() * 35).toFixed(2)),
       distance: Number((2 + Math.random() * 11).toFixed(2)),
       duration: Math.max(60, Math.round((nowMs() - ride.startedAt) / 1000))
     };
