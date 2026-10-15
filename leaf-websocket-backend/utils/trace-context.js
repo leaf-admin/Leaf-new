@@ -40,23 +40,18 @@ class TraceContext {
             return store.traceId;
         }
         
-        // Fallback: usar contexto do processo atual (para compatibilidade)
-        return process.currentTraceId || null;
+        return null;
     }
 
     /**
      * Definir traceId no contexto atual
      */
-    setCurrentTraceId(traceId) {
-        // Dentro de runWithTraceId, troca o traceId só desta cadeia assíncrona.
-        const store = this.asyncLocalStorage.getStore();
-        if (store) {
-            store.traceId = traceId;
-            return;
-        }
-
-        // Fora de um contexto (scripts, inicialização): valor do processo.
-        process.currentTraceId = traceId;
+    setCurrentTraceId(_traceId) {
+        // Intencionalmente sem efeito. O store atual é compartilhado por tudo que
+        // herdou o mesmo contexto (timers, outros eventos, outros sockets): alterá-lo
+        // trocava o traceId deles, e enterWith vaza para quem chamou. Todos os
+        // chamadores já executam o trabalho dentro de runWithTraceId(traceId, ...),
+        // que é o único jeito de escopar um traceId.
     }
 
     /**
