@@ -1,202 +1,175 @@
 "use client";
 
-import { Suspense, useEffect, useMemo, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import ProtectedRoute from "@/src/components/ProtectedRoute";
 import AppNav from "@/src/components/AppNav";
 import { leafAPI } from "@/src/services/api";
 import KpiCard from "@/src/components/ui/KpiCard";
 import Panel from "@/src/components/ui/Panel";
 import { ErrorText, LoadingState } from "@/src/components/ui/PageFeedback";
-import { KeyValueGrid, TechnicalDetails } from "@/src/components/ui/DataViews";
+import {
+  DRIVER_TABS,
+  classifyDriver,
+  countByTab,
+  matchesSearch,
+  resolveDriverHeadline,
+  resolveDriverSteps,
+} from "@/src/utils/driver-review";
 
-const statusTone = {
-  approved: "status-ok",
-  active: "status-ok",
-  pending: "status-warn",
-  analyzing: "status-warn",
-  rejected: "status-bad",
+const DRIVERS_REFRESH_MS = 60000;
+const PAGE_LIMIT = 200;
+const TAB_TONES = { review: "warning", onboarding: "default", approved: "positive", rejected: "danger", all: "default" };
+const TAB_HINTS = {
+  review: "Precisam de uma decisão sua",
+  onboarding: "Ainda enviando documentos",
+  approved: "Podem ficar online",
+  rejected: "Recusados ou bloqueados",
+  all: "Todos os cadastros",
 };
-const DRIVERS_REFRESH_MS = 120000;
+
+function initials(name) {
+  const parts = String(name || "?").trim().split(/\s+/).filter(Boolean);
+  return `${parts[0]?.[0] || "?"}${parts[1]?.[0] || ""}`.toUpperCase();
+}
+
+function formatDate(value) {
+  const parsed = value ? new Date(value) : null;
+  if (!parsed || Number.isNaN(parsed.getTime())) return "-";
+  return parsed.toLocaleDateString("pt-BR", { day: "2-digit", month: "short" });
+}
+
+function StepDots({ steps }) {
+  return (
+    <div className="driver-steps" aria-label={steps.map((step) => `${step.title}: ${step.label}`).join(", ")}>
+      {steps.map((step) => (
+        <span key={step.key} className={`driver-step-dot driver-step-${step.tone}`} title={`${step.title}: ${step.label}`} />
+      ))}
+    </div>
+  );
+}
 
 function DriversPageContent() {
+  const router = useRouter();
   const searchParams = useSearchParams();
-  const kycPersistenceScope = String(searchParams.get("kycScope") || "")
-    .trim()
-    .toLowerCase() === "sandbox"
-    ? "sandbox"
-    : "operational";
-  const kycRequestContext = useMemo(
-    () => ({ scope: kycPersistenceScope }),
-    [kycPersistenceScope],
-  );
+  const kycScope = String(searchParams.get("kycScope") || "").trim().toLowerCase() === "sandbox" ? "sandbox" : "operational";
+  const kycRequestContext = useMemo(() => ({ scope: kycScope }), [kycScope]);
+  const requestedTab = String(searchParams.get("tab") || "review");
+  const tab = DRIVER_TABS.some((item) => item.id === requestedTab) ? requestedTab : "review";
   const [applications, setApplications] = useState([]);
-  const [summary, setSummary] = useState(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
-  const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
-  const [status, setStatus] = useState("all");
 
-  const load = async () => {
-    setLoading(true);
+  const load = useCallback(async () => {
     setError("");
     try {
-      const response = await leafAPI.getDrivers(page, 20, status, search, kycRequestContext);
-      setApplications(response?.applications || []);
-      setSummary(response?.summary || null);
+      const response = await leafAPI.getDrivers(1, PAGE_LIMIT, "all", "", kycRequestContext);
+      setApplications(Array.isArray(response?.applications) ? response.applications : []);
     } catch (err) {
-      setError(err?.message || "Falha ao carregar motoristas");
+      setError(err?.message || "Não foi possível carregar os motoristas.");
     } finally {
       setLoading(false);
     }
-  };
+  }, [kycRequestContext]);
 
   useEffect(() => {
-    let mounted = true;
-    const run = async () => {
-      if (!mounted) return;
-      if (typeof document !== "undefined" && document.hidden) return;
-      await load();
-    };
-    run();
-    const timer = setInterval(run, DRIVERS_REFRESH_MS);
-    return () => {
-      mounted = false;
-      clearInterval(timer);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page, status, search, kycRequestContext]);
+    load();
+    const timer = setInterval(() => {
+      if (typeof document === "undefined" || !document.hidden) load();
+    }, DRIVERS_REFRESH_MS);
+    return () => clearInterval(timer);
+  }, [load]);
 
-  const counters = useMemo(() => {
-    const base = { all: applications.length, pending: 0, approved: 0, rejected: 0 };
-    applications.forEach((item) => {
-      const key = String(item?.status || "pending").toLowerCase();
-      if (key in base) base[key] += 1;
-    });
-    return base;
-  }, [applications]);
+  const counts = useMemo(() => countByTab(applications), [applications]);
+  const rows = useMemo(
+    () => applications
+      .filter((item) => tab === "all" || classifyDriver(item) === tab)
+      .filter((item) => matchesSearch(item, search)),
+    [applications, search, tab],
+  );
+
+  const scopeQuery = kycScope === "sandbox" ? "&kycScope=sandbox" : "";
+  const selectTab = (nextTab) => router.replace(`/drivers?tab=${nextTab}${scopeQuery}`, { scroll: false });
+  const detailHref = (id) => `/drivers/${encodeURIComponent(id)}${kycScope === "sandbox" ? "?kycScope=sandbox" : ""}`;
 
   return (
     <ProtectedRoute>
       <main className="page-shell">
         <header className="header">
-          <h1>Motoristas</h1>
+          <div>
+            <h1>Motoristas</h1>
+            <p className="muted">Quem passa em todas as regras é aprovado sozinho. Aqui ficam só as decisões que precisam de você.</p>
+          </div>
           <div className="filters">
             <input
-              placeholder="buscar motorista..."
+              type="search"
+              placeholder="Buscar por nome, telefone, CPF ou placa"
               value={search}
-              onChange={(e) => {
-                setPage(1);
-                setSearch(e.target.value);
-              }}
+              onChange={(event) => setSearch(event.target.value)}
+              aria-label="Buscar motorista"
             />
-            <select
-              value={status}
-              onChange={(e) => {
-                setPage(1);
-                setStatus(e.target.value);
-              }}
-            >
-              <option value="all">Todos</option>
-              <option value="pending">Pendentes</option>
-              <option value="approved">Aprovados</option>
-              <option value="rejected">Rejeitados</option>
-            </select>
-            <Link href={kycPersistenceScope === "sandbox" ? "/drivers/review-queue?kycScope=sandbox" : "/drivers/review-queue"}>Fila de Documentos</Link>
-            <Link href={kycPersistenceScope === "sandbox" ? "/drivers" : "/drivers?kycScope=sandbox"}>
-              {kycPersistenceScope === "sandbox" ? "Voltar ao operacional" : "Abrir sandbox"}
+            <Link href={kycScope === "sandbox" ? "/drivers" : "/drivers?kycScope=sandbox"}>
+              {kycScope === "sandbox" ? "Voltar ao operacional" : "Ver sandbox"}
             </Link>
           </div>
         </header>
 
         <AppNav />
-        {loading ? <LoadingState message="Carregando motoristas..." /> : null}
 
-        <section className="grid grid-kpi">
-          <KpiCard title="Lista atual" value={counters.all} />
-          <KpiCard title="Pendentes" value={counters.pending} tone="warning" />
-          <KpiCard title="Aprovados" value={counters.approved} tone="positive" />
-          <KpiCard title="Rejeitados" value={counters.rejected} tone="danger" />
+        <section className="grid grid-kpi" role="tablist" aria-label="Situação do cadastro">
+          {DRIVER_TABS.filter((item) => item.id !== "all").map((item) => (
+            <KpiCard
+              key={item.id}
+              title={item.label}
+              value={loading ? "…" : counts[item.id]}
+              subtitle={TAB_HINTS[item.id]}
+              tone={TAB_TONES[item.id]}
+              selected={tab === item.id}
+              onClick={() => selectTab(item.id)}
+            />
+          ))}
         </section>
 
         <section className="grid">
           <Panel
-            title="Resumo operacional"
-            subtitle="Visão rápida de aprovação, pendências e status de análise."
-          >
-            <KeyValueGrid
-              data={summary || {}}
-              labels={{
-                totalApplications: "Aplicações no período",
-                pending: "Pendentes",
-                approved: "Aprovadas",
-                rejected: "Rejeitadas",
-                inReview: "Em revisão",
-              }}
-            />
-            <TechnicalDetails title="Ver detalhes técnicos da listagem" data={summary || {}} />
-          </Panel>
-
-          <Panel
             className="panel-span-full"
-            title="Aplicações"
-            subtitle="Ações de revisão com acesso direto à ficha documental."
+            title={DRIVER_TABS.find((item) => item.id === tab)?.label || "Motoristas"}
+            subtitle={TAB_HINTS[tab]}
+            actions={tab === "all" ? null : <button type="button" className="button-secondary" onClick={() => selectTab("all")}>Ver todos ({counts.all})</button>}
           >
-            <div className="table-shell">
-              <table className="table table-compact">
-                <thead>
-                  <tr>
-                    <th>Motorista</th>
-                    <th>Contato</th>
-                    <th>Status</th>
-                    <th>Score</th>
-                    <th>Ações</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {applications.length === 0 ? (
-                    <tr>
-                      <td colSpan={5}>Nenhum motorista encontrado para os filtros atuais.</td>
-                    </tr>
-                  ) : (
-                    applications.map((item, idx) => {
-                      const itemId = item?.id;
-                      const itemStatus = String(item?.status || "pending").toLowerCase();
-                      const badgeClass = statusTone[itemStatus] || "status-warn";
-
-                      return (
-                        <tr key={itemId || item?.driver?.id || `d-${idx}`}>
-                          <td>
-                            <strong>{item?.driver?.name || "-"}</strong>
-                            <span className="table-muted">{item?.driver?.id || itemId || "-"}</span>
-                          </td>
-                          <td>
-                            <div>{item?.driver?.email || "-"}</div>
-                            <span className="table-muted">{item?.driver?.phone || "-"}</span>
-                          </td>
-                          <td>
-                            <span className={badgeClass}>{itemStatus}</span>
-                          </td>
-                          <td>{item?.score ?? "-"}</td>
-                          <td>
-                            <div className="actions-cell">
-                              {itemId ? <Link href={`/drivers/${itemId}/documents`}>Documentos</Link> : null}
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })
-                  )}
-                </tbody>
-              </table>
-            </div>
-            <div className="pager">
-              <button onClick={() => setPage((p) => Math.max(1, p - 1))}>Anterior</button>
-              <span>Pagina {page}</span>
-              <button onClick={() => setPage((p) => p + 1)}>Proxima</button>
-            </div>
+            {loading ? <LoadingState message="Carregando motoristas..." /> : null}
+            {!loading && rows.length === 0 ? (
+              <p className="driver-empty">
+                {tab === "review" ? "Nenhuma decisão pendente. Bom trabalho." : "Nenhum motorista nesta lista."}
+              </p>
+            ) : null}
+            {rows.length > 0 ? (
+              <ul className="driver-list">
+                {rows.map((item) => {
+                  const id = item.id || item.driver?.id;
+                  const steps = resolveDriverSteps(item);
+                  const bucket = classifyDriver(item);
+                  const vehicle = item.vehicleConfig || {};
+                  return (
+                    <li key={id}>
+                      <Link href={detailHref(id)} className="driver-row" data-testid={`driver-row-${id}`}>
+                        <span className="driver-avatar" aria-hidden="true">{initials(item.driver?.name)}</span>
+                        <span className="driver-main">
+                          <strong>{item.driver?.name || "Sem nome"}</strong>
+                          <span className="table-muted">{item.driver?.phone || "-"}{vehicle.activeVehiclePlate ? ` · ${vehicle.activeVehiclePlate}` : ""}</span>
+                        </span>
+                        <StepDots steps={steps} />
+                        <span className={`driver-headline driver-headline-${bucket}`}>{resolveDriverHeadline(item)}</span>
+                        <span className="table-muted driver-date">{formatDate(item.submissionDate)}</span>
+                        <span className="driver-open" aria-hidden="true">›</span>
+                      </Link>
+                    </li>
+                  );
+                })}
+              </ul>
+            ) : null}
           </Panel>
         </section>
 
