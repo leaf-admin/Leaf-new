@@ -9,6 +9,46 @@ const DEFAULT_MAX_STALE_MS = Math.max(
   1000,
   Number.parseInt(process.env.PRICING_H3_READMODEL_MAX_STALE_MS || '15000', 10) || 15000
 );
+// Location updates arrive every ~1-2 s per driver and almost always land in
+// the same cell with the same availability. Those writes changed nothing but
+// timestamps (hget + hset + expire + meta set each time). An unchanged
+// snapshot is now skipped for UNCHANGED_REFRESH_MS, and the meta key, which
+// readers only need fresher than DEFAULT_MAX_STALE_MS, is touched at most
+// every META_TOUCH_INTERVAL_MS per process. Every real change still reads the
+// previous state from Redis, so cell counters stay exact.
+const UNCHANGED_REFRESH_MS = Math.max(
+  0,
+  Number.parseInt(process.env.PRICING_H3_UNCHANGED_REFRESH_MS || '10000', 10) || 0
+);
+const META_TOUCH_INTERVAL_MS = Math.max(
+  0,
+  Number.parseInt(process.env.PRICING_H3_META_TOUCH_INTERVAL_MS || '3000', 10) || 0
+);
+const SNAPSHOT_CACHE_MAX_ENTRIES = 50000;
+const lastDriverWrites = new Map(); // `${resolution}:${driverId}` -> { signature, at }
+const lastBookingWrites = new Map(); // `${resolution}:${bookingId}` -> { signature, at }
+const lastMetaTouchAt = new Map(); // resolution -> ms
+
+function rememberWrite(cache, key, signature) {
+  if (cache.size >= SNAPSHOT_CACHE_MAX_ENTRIES) cache.clear();
+  cache.set(key, { signature, at: Date.now() });
+}
+
+function isUnchangedRecently(cache, key, signature) {
+  if (UNCHANGED_REFRESH_MS <= 0) return false;
+  const entry = cache.get(key);
+  return Boolean(entry && entry.signature === signature && Date.now() - entry.at < UNCHANGED_REFRESH_MS);
+}
+
+function isMetaTouchDue(resolution) {
+  return META_TOUCH_INTERVAL_MS <= 0 || Date.now() - (lastMetaTouchAt.get(resolution) || 0) >= META_TOUCH_INTERVAL_MS;
+}
+
+async function touchMetaIfDue(redis, resolution, updatedAtIso) {
+  if (!isMetaTouchDue(resolution) || typeof redis.set !== 'function') return;
+  lastMetaTouchAt.set(resolution, Date.now());
+  await redis.set(buildMetaKey(resolution), updatedAtIso, 'EX', CELL_TTL_SECONDS);
+}
 
 const SEARCHABLE_STATES = new Set(['SEARCHING', 'PENDING', 'EXPANDED', 'NOTIFIED', 'AWAITING_RESPONSE', 'REASSIGNMENT_PENDING']);
 const ACTIVE_TRIP_STATES = new Set(['MATCHED', 'ACCEPTED', 'ARRIVED', 'IN_PROGRESS', 'REASSIGNED_IN_PROGRESS', 'STARTED']);
@@ -165,6 +205,8 @@ function queueCellUpdate(pipeline, resolution, h3Index, field, delta, updatedAtI
 }
 
 function queueMetaTouch(pipeline, resolution, updatedAtIso) {
+  if (!isMetaTouchDue(resolution)) return;
+  lastMetaTouchAt.set(resolution, Date.now());
   pipeline.set(buildMetaKey(resolution), updatedAtIso, 'EX', CELL_TTL_SECONDS);
 }
 
@@ -174,8 +216,14 @@ async function applyDriverSnapshot(redis, payload, options = {}) {
   const resolution = Number.isFinite(options.resolution) ? options.resolution : DEFAULT_RESOLUTION;
   const driverStateKey = buildDriverStateKey(resolution);
   const updatedAtIso = options.updatedAt || new Date().toISOString();
-  const previous = parseState(await redis.hget(driverStateKey, payload.driverId));
   const next = normalizeDriverSnapshot(payload, resolution);
+  const cacheKey = `${resolution}:${payload.driverId}`;
+  const signature = `${next?.cell || ''}|${Boolean(next?.available)}|${Boolean(next?.isOnline)}`;
+  if (isUnchangedRecently(lastDriverWrites, cacheKey, signature)) {
+    await touchMetaIfDue(redis, resolution, updatedAtIso);
+    return;
+  }
+  const previous = parseState(await redis.hget(driverStateKey, payload.driverId));
 
   const pipeline = redis.pipeline();
 
@@ -206,6 +254,7 @@ async function applyDriverSnapshot(redis, payload, options = {}) {
 
   queueMetaTouch(pipeline, resolution, updatedAtIso);
   await pipeline.exec();
+  rememberWrite(lastDriverWrites, cacheKey, signature);
 }
 
 async function removeDriverSnapshot(redis, driverId, options = {}) {
@@ -226,6 +275,12 @@ async function applyBookingSnapshot(redis, bookingLike, options = {}) {
   if (!normalized?.bookingId) return;
 
   const updatedAtIso = options.updatedAt || new Date().toISOString();
+  const cacheKey = `${resolution}:${normalized.bookingId}`;
+  const signature = `${normalized.status}|${normalized.searchCell || ''}|${normalized.tripCell || ''}`;
+  if (isUnchangedRecently(lastBookingWrites, cacheKey, signature)) {
+    await touchMetaIfDue(redis, resolution, updatedAtIso);
+    return;
+  }
   const previous = parseState(await redis.hget(bookingStateKey, normalized.bookingId));
   const pipeline = redis.pipeline();
 
@@ -274,6 +329,7 @@ async function applyBookingSnapshot(redis, bookingLike, options = {}) {
 
   queueMetaTouch(pipeline, resolution, updatedAtIso);
   await pipeline.exec();
+  rememberWrite(lastBookingWrites, cacheKey, signature);
 }
 
 async function clearBookingSnapshot(redis, bookingId, options = {}) {
@@ -281,6 +337,7 @@ async function clearBookingSnapshot(redis, bookingId, options = {}) {
   const resolution = Number.isFinite(options.resolution) ? options.resolution : DEFAULT_RESOLUTION;
   const bookingStateKey = buildBookingStateKey(resolution);
   const updatedAtIso = options.updatedAt || new Date().toISOString();
+  lastBookingWrites.delete(`${resolution}:${bookingId}`);
   const previous = parseState(await redis.hget(bookingStateKey, bookingId));
   if (!previous) return;
 
@@ -431,7 +488,14 @@ async function getAggregatedCells(redis, {
   };
 }
 
+function resetSnapshotCachesForTests() {
+  lastDriverWrites.clear();
+  lastBookingWrites.clear();
+  lastMetaTouchAt.clear();
+}
+
 module.exports = {
+  resetSnapshotCachesForTests,
   DEFAULT_MAX_STALE_MS,
   DEFAULT_RESOLUTION,
   applyDriverSnapshot,
