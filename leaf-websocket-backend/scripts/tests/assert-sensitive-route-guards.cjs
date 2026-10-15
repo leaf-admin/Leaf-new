@@ -6,7 +6,16 @@ const path = require('path');
 const backendRoot = path.resolve(__dirname, '..', '..');
 
 function read(relativePath) {
-  return fs.readFileSync(path.join(backendRoot, relativePath), 'utf8');
+  const source = fs.readFileSync(path.join(backendRoot, relativePath), 'utf8');
+  // routes/dashboard.js é só o índice; as rotas ficam em routes/dashboard/*.js.
+  const partsDir = path.join(backendRoot, relativePath.replace(/\.js$/, ''));
+  if (relativePath !== 'routes/dashboard.js' || !fs.existsSync(partsDir)) {
+    return source;
+  }
+  const parts = fs.readdirSync(partsDir)
+    .filter((name) => name.endsWith('.js'))
+    .sort((a, b) => (a === 'shared.js' ? -1 : b === 'shared.js' ? 1 : a.localeCompare(b)));
+  return [source, ...parts.map((name) => fs.readFileSync(path.join(partsDir, name), 'utf8'))].join('\n');
 }
 
 function routeLines(source) {

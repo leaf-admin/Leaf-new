@@ -1,11 +1,9 @@
 const fs = require('fs');
+const { readDashboardRouteSource } = require('../../helpers/dashboard-route-source');
 const path = require('path');
 
 describe('dashboard KYC identity review boundary', () => {
-  const source = fs.readFileSync(
-    path.join(__dirname, '../../../routes/dashboard.js'),
-    'utf8'
-  );
+  const source = readDashboardRouteSource();
   const start = source.indexOf("'/api/drivers/:driverId/kyc/identity-reviews/reconcile'");
   const recoveryStart = source.indexOf(
     "'/api/drivers/:driverId/kyc/orphan-identity-hold/recovery'"
@@ -165,7 +163,7 @@ describe('dashboard KYC identity review boundary', () => {
 
   it('imports the policy service used to create recovery and false-positive retry challenges', () => {
     expect(source).toContain(
-      "const kycPolicyService = require('../services/kyc-policy-service')"
+      "const kycPolicyService = require('../../services/kyc-policy-service')"
     );
   });
 

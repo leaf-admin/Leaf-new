@@ -1,11 +1,9 @@
 const fs = require('fs');
+const { readDashboardRouteSource } = require('../../helpers/dashboard-route-source');
 const path = require('path');
 
 describe('dashboard driver quick approval boundary', () => {
-  const source = fs.readFileSync(
-    path.join(__dirname, '../../../routes/dashboard.js'),
-    'utf8'
-  );
+  const source = readDashboardRouteSource();
 
   it('disables legacy mass application mutations', () => {
     const applicationApproveStart = source.indexOf("router.post('/api/drivers/applications/:id/approve'");
@@ -74,7 +72,8 @@ describe('dashboard driver quick approval boundary', () => {
 
   it('streams the current document through an authenticated and audited Leaf boundary', () => {
     const routeStart = source.indexOf("'/api/drivers/:driverId/documents/:documentType/content'");
-    const routeEnd = source.indexOf("function dashboardActivationDocumentReviewError", routeStart);
+    // The route ends where the next route registration starts.
+    const routeEnd = source.indexOf('\nrouter.', routeStart);
     const routeSource = source.slice(routeStart, routeEnd);
 
     expect(routeStart).toBeGreaterThan(-1);
