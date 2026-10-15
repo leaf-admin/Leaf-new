@@ -700,37 +700,6 @@ class ResponseHandler {
                 // Não falhar o fluxo se a notificação falhar
             }
 
-            // ✅ NOVO: Atualizar Live Activity/Foreground Service (Silent Push)
-            try {
-                // Para o passageiro
-                await this.fcmService.sendRideStatusUpdate(booking.customerId, {
-                    bookingId: bookingId,
-                    status: 'accepted',
-                    userType: 'customer',
-                    driverName: driverName,
-                    pickup: { address: pickupAddress, lat: pickupLat, lng: pickupLng },
-                    destination: booking.destination || booking.destinationLocation || {},
-                    estimatedTime: booking.estimatedPickupTime || '5',
-                    distance: booking.distance || '0',
-                    fare: booking.estimatedFare || '0'
-                });
-
-                // Para o motorista
-                await this.fcmService.sendRideStatusUpdate(driverId, {
-                    bookingId: bookingId,
-                    status: 'accepted',
-                    userType: 'driver',
-                    customerName: passengerName,
-                    pickup: { address: pickupAddress, lat: pickupLat, lng: pickupLng },
-                    destination: booking.destination || booking.destinationLocation || {},
-                    estimatedTime: booking.estimatedPickupTime || '5',
-                    distance: booking.distance || '0',
-                    fare: booking.estimatedFare || '0'
-                });
-            } catch (silentPushError) {
-                logger.error(`❌ [ResponseHandler] Erro ao enviar silent push de status:`, silentPushError);
-            }
-
             // 15.2. ✅ Atualizar activeBookings com wooviAccountId (se disponível)
             if (this.io && this.io.activeBookings) {
                 const activeBooking = this.io.activeBookings.get(bookingId);

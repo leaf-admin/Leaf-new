@@ -1,6 +1,5 @@
 const express = require('express');
 const admin = require('firebase-admin');
-// const graphqlAuth = require('../middleware/graphql-auth');
 // const firebaseConfig = require('../firebase-config');
 const { logger, logStructured } = require('../utils/logger');
 
@@ -207,72 +206,6 @@ router.post('/verify', async (req, res) => {
       success: false,
       message: 'Erro ao verificar token',
       valid: false
-    });
-  }
-});
-
-// Endpoint para refresh de token
-router.post('/refresh', async (req, res) => {
-  try {
-    const authHeader = req.headers.authorization;
-
-    if (!authHeader) {
-      return res.status(401).json({
-        success: false,
-        message: 'Token não fornecido'
-      });
-    }
-
-    const decoded = graphqlAuth.verifyToken(authHeader);
-
-    // Gerar novo token
-    const newToken = graphqlAuth.generateToken({
-      userId: decoded.userId,
-      email: decoded.email,
-      phone: decoded.phone,
-      userType: decoded.userType,
-      name: decoded.name
-    });
-
-    res.json({
-      success: true,
-      token: newToken,
-      expiresIn: '24h'
-    });
-
-  } catch (error) {
-    res.status(401).json({
-      success: false,
-      message: error.message
-    });
-  }
-});
-
-// Endpoint para logout
-router.post('/logout', async (req, res) => {
-  try {
-    const authHeader = req.headers.authorization;
-
-    if (authHeader) {
-      const decoded = graphqlAuth.verifyToken(authHeader);
-
-      // Log de auditoria
-      graphqlAuth.logAuditEvent(decoded.userId, 'LOGOUT', {
-        ip: req.ip,
-        userAgent: req.get('User-Agent')
-      });
-    }
-
-    res.json({
-      success: true,
-      message: 'Logout realizado com sucesso'
-    });
-
-  } catch (error) {
-    // Mesmo com erro, considerar logout bem-sucedido
-    res.json({
-      success: true,
-      message: 'Logout realizado'
     });
   }
 });
