@@ -45,6 +45,15 @@ fi
 FILES_TO_DEPLOY=(
   "services/daily-subscription-service.js"
   "services/payment-service.js"
+  "services/payment-service/01-intent-and-split.js"
+  "services/payment-service/02-events-and-status-cache.js"
+  "services/payment-service/03-advance-and-confirmation.js"
+  "services/payment-service/04-refunds-and-release.js"
+  "services/payment-service/05-distribution.js"
+  "services/payment-service/06-driver-balance.js"
+  "services/payment-service/07-withdrawals.js"
+  "services/payment-service/08-status-and-holding.js"
+  "services/payment-service/shared.js"
   "routes/payment.js"
   "routes/dashboard.js"
   "routes/dashboard/01-users-and-driver-applications.js"
@@ -105,6 +114,7 @@ echo
 echo "[rollout] 1/6 Validando sintaxe local..."
 node --check "$BACKEND_DIR/services/daily-subscription-service.js"
 node --check "$BACKEND_DIR/services/payment-service.js"
+for part in "$BACKEND_DIR"/services/payment-service/*.js; do node --check "$part"; done
 node --check "$BACKEND_DIR/routes/payment.js"
 node --check "$BACKEND_DIR/routes/dashboard.js"
 for part in "$BACKEND_DIR"/routes/dashboard/*.js; do node --check "$part"; done
