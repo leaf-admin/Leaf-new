@@ -7,6 +7,7 @@
  */
 
 const { randomUUID } = require('crypto');
+const { AsyncLocalStorage } = require('async_hooks');
 
 /**
  * Classe para gerenciar contexto de trace
@@ -14,6 +15,8 @@ const { randomUUID } = require('crypto');
 class TraceContext {
     constructor() {
         this.contexts = new Map(); // Map<traceId, context>
+        // Um store por cadeia assíncrona: requisições simultâneas não compartilham traceId.
+        this.asyncLocalStorage = new AsyncLocalStorage();
     }
 
     /**
@@ -32,12 +35,9 @@ class TraceContext {
      * Se não existir, gera um novo
      */
     getCurrentTraceId() {
-        // Usar AsyncLocalStorage se disponível (Node 13+)
-        if (typeof AsyncLocalStorage !== 'undefined') {
-            const store = this.asyncLocalStorage?.getStore();
-            if (store?.traceId) {
-                return store.traceId;
-            }
+        const store = this.asyncLocalStorage.getStore();
+        if (store?.traceId) {
+            return store.traceId;
         }
         
         // Fallback: usar contexto do processo atual (para compatibilidade)
@@ -48,11 +48,14 @@ class TraceContext {
      * Definir traceId no contexto atual
      */
     setCurrentTraceId(traceId) {
-        if (typeof AsyncLocalStorage !== 'undefined') {
-            this.asyncLocalStorage?.run({ traceId }, () => {});
+        // Dentro de runWithTraceId, troca o traceId só desta cadeia assíncrona.
+        const store = this.asyncLocalStorage.getStore();
+        if (store) {
+            store.traceId = traceId;
+            return;
         }
-        
-        // Fallback
+
+        // Fora de um contexto (scripts, inicialização): valor do processo.
         process.currentTraceId = traceId;
     }
 
@@ -63,25 +66,7 @@ class TraceContext {
      */
     async runWithTraceId(traceId, fn) {
         const finalTraceId = traceId || this.generateTraceId();
-        
-        if (typeof AsyncLocalStorage !== 'undefined') {
-            const { AsyncLocalStorage } = require('async_hooks');
-            if (!this.asyncLocalStorage) {
-                this.asyncLocalStorage = new AsyncLocalStorage();
-            }
-            
-            return this.asyncLocalStorage.run({ traceId: finalTraceId }, fn);
-        }
-        
-        // Fallback: usar closure
-        const oldTraceId = process.currentTraceId;
-        process.currentTraceId = finalTraceId;
-        
-        try {
-            return await fn();
-        } finally {
-            process.currentTraceId = oldTraceId;
-        }
+        return this.asyncLocalStorage.run({ traceId: finalTraceId }, fn);
     }
 
     /**
