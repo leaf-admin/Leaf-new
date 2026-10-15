@@ -7,6 +7,15 @@ function readBackendSource(relativePath) {
   return fs.readFileSync(path.resolve(__dirname, '../../..', relativePath), 'utf8');
 }
 
+// routes/kyc-routes.js is an index; the route code lives in routes/kyc-routes/.
+function readKycRoutesSource() {
+  const partsDir = path.resolve(__dirname, '../../..', 'routes/kyc-routes');
+  const parts = fs.readdirSync(partsDir).filter((name) => name.endsWith('.js')).sort();
+  return [readBackendSource('routes/kyc-routes.js')]
+    .concat(parts.map((name) => fs.readFileSync(path.join(partsDir, name), 'utf8')))
+    .join('\n');
+}
+
 describe('KYC runtime scope wiring', () => {
   test('online gate resolves the authoritative runtime before consulting legacy operational state', () => {
     const source = readBackendSource('server.js');
@@ -64,7 +73,7 @@ describe('KYC runtime scope wiring', () => {
   });
 
   test('liveness claims the durable retry inside the no-trip window before starting the challenge', () => {
-    const source = readBackendSource('routes/kyc-routes.js');
+    const source = readKycRoutesSource();
     const start = source.indexOf("'/liveness/aws/session'");
     const end = source.indexOf("'/liveness/aws/session/:sessionId/abandon'", start);
     const sessionRoute = source.slice(start, end);
