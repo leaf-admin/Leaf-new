@@ -12,11 +12,13 @@ const { trace } = require('@opentelemetry/api');
 const { logStructured } = require('./logger');
 
 // Importações opcionais (verificar se instaladas)
-let NodeSDK, OTLPTraceExporter, resources, SemanticResourceAttributes;
+let NodeSDK, OTLPTraceExporter, resources, SemanticResourceAttributes, ParentBasedSampler, TraceIdRatioBasedSampler;
 
 try {
     const sdkNode = require('@opentelemetry/sdk-node');
     NodeSDK = sdkNode.node.NodeSDK || sdkNode.NodeSDK;
+    ParentBasedSampler = sdkNode.tracing?.ParentBasedSampler;
+    TraceIdRatioBasedSampler = sdkNode.tracing?.TraceIdRatioBasedSampler;
     // ✅ Usar OTLP exporter para Tempo (ao invés de Jaeger)
     const otlpExporter = require('@opentelemetry/exporter-trace-otlp-http');
     OTLPTraceExporter = otlpExporter.OTLPTraceExporter;
@@ -48,17 +50,30 @@ function getSamplingRate() {
     }
 }
 
+// Coletor real configurado? Sem ele o exporter apontava para o próprio gateway
+// (/otel/v1/traces), que só descarta: em produção todo span era criado,
+// serializado e enviado por HTTP para lugar nenhum, e o shutdown esperava ~8 s
+// esvaziando essa fila. Sem coletor, o SDK não é iniciado e a API usa o tracer
+// no-op (custo ~zero). OTEL_EXPORT_TO_LOCAL_SINK=true mantém o comportamento antigo.
+function resolveCollectorEndpoint() {
+    const configured = process.env.TEMPO_ENDPOINT || process.env.OTEL_EXPORTER_OTLP_ENDPOINT || '';
+    if (configured) return configured;
+    if (String(process.env.OTEL_EXPORT_TO_LOCAL_SINK || '').toLowerCase() === 'true') {
+        return `http://127.0.0.1:${process.env.PORT || 3001}/otel`;
+    }
+    return null;
+}
+
 // Configuração do exporter (OTLP para Tempo)
 function getExporter() {
     if (process.env.OTEL_ENABLED === 'false') {
         return null;
     }
 
-    // ✅ Usar OTLP HTTP para Tempo
-    const tempoEndpoint =
-        process.env.TEMPO_ENDPOINT ||
-        process.env.OTEL_EXPORTER_OTLP_ENDPOINT ||
-        `http://127.0.0.1:${process.env.PORT || 3001}/otel`;
+    const tempoEndpoint = resolveCollectorEndpoint();
+    if (!tempoEndpoint) {
+        return null;
+    }
 
     return new OTLPTraceExporter({
         url: `${tempoEndpoint}/v1/traces`,
@@ -69,10 +84,14 @@ function getExporter() {
 
 // Inicializar SDK
 let sdk = null;
+let disabledTracer = null; // memoizado: getTracer() não reinicializa nem loga a cada chamada
 
 function initializeTracer() {
     if (sdk) {
         return trace.getTracer('leaf-backend');
+    }
+    if (disabledTracer) {
+        return disabledTracer;
     }
 
     // Se pacotes não estão instalados, retornar tracer mock
@@ -82,18 +101,21 @@ function initializeTracer() {
             operation: 'initialize',
             fallback: 'mock-tracer'
         });
-        return trace.getTracer('leaf-backend-mock');
+        disabledTracer = trace.getTracer('leaf-backend-mock');
+        return disabledTracer;
     }
 
     const samplingRate = getSamplingRate();
     const exporter = getExporter();
 
     if (!exporter) {
-        logStructured('warn', 'OpenTelemetry desabilitado via OTEL_ENABLED=false', {
+        logStructured('info', 'OpenTelemetry sem coletor configurado: tracer no-op', {
             service: 'opentelemetry',
-            operation: 'initialize'
+            operation: 'initialize',
+            reason: process.env.OTEL_ENABLED === 'false' ? 'OTEL_ENABLED=false' : 'no TEMPO_ENDPOINT/OTEL_EXPORTER_OTLP_ENDPOINT'
         });
-        return trace.getTracer('leaf-backend-disabled');
+        disabledTracer = trace.getTracer('leaf-backend-disabled');
+        return disabledTracer;
     }
 
     // Criar resource usando resourceFromAttributes
@@ -119,6 +141,11 @@ function initializeTracer() {
     sdk = new NodeSDK({
         resource: resource,
         traceExporter: exporter,
+        // A taxa por ambiente (getSamplingRate) era calculada mas nunca aplicada:
+        // o SDK ficava no padrão e gravava 100% dos spans.
+        ...(ParentBasedSampler && TraceIdRatioBasedSampler
+            ? { sampler: new ParentBasedSampler({ root: new TraceIdRatioBasedSampler(samplingRate) }) }
+            : {}),
         // Sampling manual (não usar auto-instrumentation)
         // Vamos criar spans manualmente nos pontos críticos
     });
@@ -137,7 +164,8 @@ function initializeTracer() {
             error: error.message
         });
         sdk = null;
-        return trace.getTracer('leaf-backend-mock');
+        disabledTracer = trace.getTracer('leaf-backend-mock');
+        return disabledTracer;
     }
 
     return trace.getTracer('leaf-backend');
