@@ -1,4 +1,5 @@
 const redisPool = require('../utils/redis-pool');
+const { applyBookingSafetyTtl } = require('../utils/booking-redis-ttl');
 const { logStructured } = require('../utils/logger');
 const rideCostAlertService = require('./ride-cost-alert-service');
 const dailyEarningsReportService = require('./daily-earnings-report-service');
@@ -1128,6 +1129,7 @@ class RideCostTelemetryService {
       costTelemetryDriverDirectionsRequests: String(report.totals?.google?.directions?.byUserType?.driver || 0),
       costTelemetryPassengerDirectionsRequests: String(report.totals?.google?.directions?.byUserType?.customer || 0),
     });
+    await applyBookingSafetyTtl(redis, `booking:${normalizedBookingId}`);
 
     logStructured('info', 'Telemetria de custo da corrida atualizada', {
       bookingId: normalizedBookingId,
@@ -1229,6 +1231,7 @@ class RideCostTelemetryService {
         fallbackReport.totals?.google?.directions?.byUserType?.customer || 0,
       ),
     });
+    await applyBookingSafetyTtl(redis, `booking:${normalizedBookingId}`);
 
     return fallbackReport;
   }

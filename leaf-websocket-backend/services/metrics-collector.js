@@ -122,6 +122,7 @@ class MetricsCollector {
             });
             
             await this.redis.expire(key, 3600);
+            await this.redis.expire(`${key}:notified`, 3600);
             
             logger.debug(`📊 [Metrics] Notificação registrada: ${bookingId} → ${driverId}`);
         } catch (error) {
