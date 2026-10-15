@@ -8,6 +8,27 @@
 const redisPool = require('../utils/redis-pool');
 const { logStructured, logError } = require('../utils/logger');
 
+// Same rule as the step-by-step path in checkRateLimit, in one atomic round trip:
+// first hit creates the counter with the window TTL; at or over the limit the
+// request is denied without incrementing; otherwise INCR and make sure a TTL exists.
+// Returns { allowed (1|0), count after the call, ttl seconds (only when denied) }.
+const RATE_LIMIT_SCRIPT = `
+local current = redis.call('GET', KEYS[1])
+if not current then
+  redis.call('SET', KEYS[1], 1, 'EX', tonumber(ARGV[1]))
+  return {1, 1, -2}
+end
+local count = tonumber(current)
+if count >= tonumber(ARGV[2]) then
+  return {0, count, redis.call('TTL', KEYS[1])}
+end
+local nextCount = redis.call('INCR', KEYS[1])
+if redis.call('TTL', KEYS[1]) == -1 then
+  redis.call('EXPIRE', KEYS[1], tonumber(ARGV[1]))
+end
+return {1, nextCount, -2}
+`;
+
 class RateLimiterService {
   constructor() {
     const toPositiveInt = (value, fallback) => {
@@ -132,6 +153,37 @@ class RateLimiterService {
         }
       }
       
+      // Um round trip atômico (mesma regra do caminho abaixo, que fica como
+      // fallback para clientes sem EVAL): antes eram GET + INCR + TTL
+      // sequenciais em todo evento de socket, inclusive cada atualização de
+      // localização.
+      if (typeof redis.eval === 'function') {
+        const [allowedFlag, count, ttlSeconds] = await redis.eval(
+          RATE_LIMIT_SCRIPT,
+          1,
+          key,
+          config.window,
+          config.limit
+        );
+        if (Number(allowedFlag) === 1) {
+          return {
+            allowed: true,
+            remaining: config.limit - Number(count),
+            resetAt: Date.now() + (config.window * 1000),
+            ...(Number(count) === 1 ? {} : { scopeKey })
+          };
+        }
+        logStructured('warn', 'Rate limit excedido [AUDITORIA]', { service: 'rate-limiter', endpoint, userId, count: Number(count), limit: config.limit, scopeKey });
+        return {
+          allowed: false,
+          remaining: 0,
+          resetAt: Date.now() + (Number(ttlSeconds) * 1000),
+          limit: config.limit,
+          window: config.window,
+          scopeKey
+        };
+      }
+
       // Buscar contador atual
       let current = await redis.get(key);
       
