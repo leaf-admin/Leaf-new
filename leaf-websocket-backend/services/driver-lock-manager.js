@@ -8,6 +8,7 @@
  */
 
 const redisPool = require('../utils/redis-pool');
+const RedisScan = require('../utils/redis-scan');
 const { logger } = require('../utils/logger');
 const RideStateManager = require('./ride-state-manager');
 
@@ -219,7 +220,7 @@ class DriverLockManager {
     async cleanupExpiredLocks() {
         try {
             // Buscar todas as chaves de lock
-            const lockKeys = await this.redis.keys('driver_lock:*');
+            const lockKeys = await RedisScan.scanKeys(this.redis, 'driver_lock:*');
             let cleaned = 0;
 
             for (const key of lockKeys) {
@@ -249,7 +250,7 @@ class DriverLockManager {
      */
     async getLockStats() {
         try {
-            const lockKeys = await this.redis.keys('driver_lock:*');
+            const lockKeys = await RedisScan.scanKeys(this.redis, 'driver_lock:*');
             const stats = {
                 total: lockKeys.length,
                 locks: []

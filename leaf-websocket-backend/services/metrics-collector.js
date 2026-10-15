@@ -10,6 +10,7 @@
  */
 
 const redisPool = require('../utils/redis-pool');
+const RedisScan = require('../utils/redis-scan');
 const { logger } = require('../utils/logger');
 
 class MetricsCollector {
@@ -272,7 +273,7 @@ class MetricsCollector {
                 const hourKey = this.getHourKey(now - (i * 3600000));
                 
                 // Buscar notificações (contar chaves de acceptance)
-                const acceptanceKeys = await this.redis.keys(`${this.config.prefix.acceptance}:*:${hourKey}:notified`);
+                const acceptanceKeys = await RedisScan.scanKeys(this.redis, `${this.config.prefix.acceptance}:*:${hourKey}:notified`);
                 for (const key of acceptanceKeys) {
                     const count = await this.redis.scard(key);
                     totalNotifications += count || 0;

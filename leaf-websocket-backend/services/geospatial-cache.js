@@ -11,6 +11,7 @@
  */
 
 const redisPool = require('../utils/redis-pool');
+const RedisScan = require('../utils/redis-scan');
 const { logger } = require('../utils/logger');
 
 class GeospatialCache {
@@ -163,7 +164,7 @@ class GeospatialCache {
             
             // Buscar todas as chaves de cache para esta região
             const pattern = `${this.config.prefix}:${gridLat.toFixed(4)}:${gridLng.toFixed(4)}:*`;
-            const keys = await this.redis.keys(pattern);
+            const keys = await RedisScan.scanKeys(this.redis, pattern);
             
             // Deletar apenas chaves com raio <= maxRadius
             let deleted = 0;
@@ -191,7 +192,7 @@ class GeospatialCache {
      */
     async clear() {
         try {
-            const keys = await this.redis.keys(`${this.config.prefix}:*`);
+            const keys = await RedisScan.scanKeys(this.redis, `${this.config.prefix}:*`);
             if (keys.length > 0) {
                 await Promise.all(keys.map(key => this.redis.del(key)));
                 logger.info(`🗑️ [GeoCache] ${keys.length} chave(s) deletada(s)`);
@@ -207,7 +208,7 @@ class GeospatialCache {
      */
     async getStats() {
         try {
-            const keys = await this.redis.keys(`${this.config.prefix}:*`);
+            const keys = await RedisScan.scanKeys(this.redis, `${this.config.prefix}:*`);
             
             let totalDrivers = 0;
             let oldestCache = null;

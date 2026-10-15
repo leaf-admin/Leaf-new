@@ -1,4 +1,5 @@
 const Redis = require('ioredis');
+const RedisScan = require('../utils/redis-scan');
 const KYCFaceWorker = require('./KYCFaceWorker');
 const KYCRetryService = require('./KYCRetryService');
 const KYCAnalyticsService = require('./KYCAnalyticsService');
@@ -527,9 +528,9 @@ class IntegratedKYCService {
 
   async getStats() {
     try {
-      const encodingKeys = await this.redisClient.keys('face_encoding:*');
-      const metadataKeys = await this.redisClient.keys('face_metadata:*');
-      const verificationKeys = await this.redisClient.keys('verification_result:*');
+      const encodingKeys = await RedisScan.scanKeys(this.redisClient, 'face_encoding:*');
+      const metadataKeys = await RedisScan.scanKeys(this.redisClient, 'face_metadata:*');
+      const verificationKeys = await RedisScan.scanKeys(this.redisClient, 'verification_result:*');
       
       const workerStats = this.faceWorker.getStats();
       
