@@ -2,6 +2,7 @@ const h3 = require('h3-js');
 const { logStructured } = require('../utils/logger');
 const { metrics } = require('../utils/prometheus-metrics');
 const { normalizeDriverStatus } = require('./dashboard-live-data-service');
+const bookingSearchIndex = require('./booking-search-index');
 const {
   MAX_DEMAND_MARKUP_PERCENT,
   calculateDemandPressure
@@ -21,7 +22,6 @@ const DRIVER_TRAFFIC_LAYER_ENABLED = !['0', 'false', 'off', 'no'].includes(
 );
 const MAX_CELLS = Number.parseInt(process.env.H3_MAP_MAX_CELLS || '500', 10);
 const BBOX_MAX_SPAN_DEGREES = Number.parseFloat(process.env.H3_MAP_MAX_BBOX_SPAN_DEGREES || '5');
-const SEARCH_SCAN_COUNT = Number.parseInt(process.env.H3_MAP_SCAN_COUNT || '250', 10);
 const SEARCH_SCAN_MAX_KEYS = Number.parseInt(process.env.H3_MAP_SCAN_MAX_KEYS || '4000', 10);
 // The map is polled every few seconds and each poll scanned the whole keyspace
 // for booking_search:*. Only the key list is reused for this long; the state of
@@ -444,28 +444,6 @@ function extractRedisReplyValue(reply) {
   return reply;
 }
 
-async function scanKeys(redis, pattern, count = SEARCH_SCAN_COUNT, maxKeys = SEARCH_SCAN_MAX_KEYS) {
-  const keys = [];
-  const safeCount = Math.max(10, Number.parseInt(count, 10) || SEARCH_SCAN_COUNT);
-  const safeMaxKeys = Number.isFinite(Number(maxKeys)) && Number(maxKeys) > 0
-    ? Number(maxKeys)
-    : null;
-  let cursor = '0';
-
-  do {
-    const response = await redis.scan(cursor, 'MATCH', pattern, 'COUNT', safeCount);
-    cursor = Array.isArray(response) ? String(response[0]) : '0';
-    const batch = Array.isArray(response?.[1]) ? response[1] : [];
-    keys.push(...batch);
-
-    if (safeMaxKeys !== null && keys.length >= safeMaxKeys) {
-      return keys.slice(0, safeMaxKeys);
-    }
-  } while (cursor !== '0');
-
-  return keys;
-}
-
 class H3MapService {
   constructor() {
     this.cache = new Map();
@@ -480,7 +458,7 @@ class H3MapService {
     }
     if (!this.searchKeysInflight) {
       // Concurrent map requests share one scan instead of starting their own.
-      this.searchKeysInflight = scanKeys(redis, 'booking_search:*', SEARCH_SCAN_COUNT, SEARCH_SCAN_MAX_KEYS)
+      this.searchKeysInflight = bookingSearchIndex.listSearchKeys(redis, { maxKeys: SEARCH_SCAN_MAX_KEYS })
         .then((keys) => {
           this.searchKeysCache = { keys, expiresAt: Date.now() + SEARCH_KEYS_CACHE_TTL_MS };
           return keys;
@@ -813,6 +791,7 @@ class H3MapService {
     }
     const now = Date.now();
     const requests = [];
+    const goneBookingIds = [];
 
     for (let index = 0; index < searchKeys.length; index += 1) {
       const key = searchKeys[index];
@@ -826,6 +805,10 @@ class H3MapService {
           createdAt: Array.isArray(replyValue) ? replyValue[2] : null
         }
         : (replyValue || {});
+      if (!hash.state && !hash.pickupLocation && !hash.createdAt) {
+        goneBookingIds.push(key.replace(/^booking_search:/, ''));
+        continue;
+      }
       const state = String(hash.state || '').trim().toUpperCase();
       if (!SEARCHABLE_STATES.has(state)) continue;
 
@@ -844,6 +827,9 @@ class H3MapService {
       });
     }
 
+    if (goneBookingIds.length > 0) {
+      await bookingSearchIndex.removeFromIndex(redis, goneBookingIds).catch(() => null);
+    }
     return requests;
   }
 
