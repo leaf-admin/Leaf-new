@@ -70,6 +70,7 @@ describe('blocking KEYS usage', () => {
 // choice: prefer an index set, and only then raise the budget here.
 const SCAN_BUDGET = {
   'services/IntegratedKYCService.js': 3,
+  'services/booking-search-index.js': 1, // reconcile at most once a minute (#310)
   'services/KYCAnalyticsService.js': 2,
   'services/KYCFaceProcessor.js': 2,
   'services/connection-cleanup-service.js': 4, // reconcile every 30 cycles
