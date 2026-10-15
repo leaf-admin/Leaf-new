@@ -1,6 +1,7 @@
 const winston = require('winston');
 const path = require('path');
 const fs = require('fs');
+const os = require('os');
 const traceContext = require('./trace-context');
 const {
   redactSensitiveText,
@@ -23,12 +24,54 @@ winston.addColors(colors);
 // permissão em `logs/`; o transporte de arquivo então nunca abre, o buffer dele enche e o
 // winston para de entregar para TODOS os transportes, inclusive o console: o serviço seguia
 // funcionando sem gravar mais nenhum log. Lá a saída padrão já é coletada pelo Docker.
-const LOG_DIRECTORY = path.join(__dirname, '../logs');
+const LOG_ROOT = path.join(__dirname, '../logs');
+const LOG_SCOPE_MARKER = '.leaf-log-scope';
+// Em produção os gateways e workers montam a MESMA pasta `logs/` do host. Arquivos comuns a
+// vários processos colidem na rotação, então cada processo de container ganha a sua subpasta
+// (`<script>-<container>`), que sobrevive ao deploy. Fora de container tudo segue em `logs/`.
+function resolveLogDirectory() {
+  const explicitScope = String(process.env.LEAF_LOG_SCOPE || '').trim();
+  if (!explicitScope && !fs.existsSync('/.dockerenv')) {
+    return LOG_ROOT;
+  }
+  const role = path.basename(process.argv[1] || 'node', '.js');
+  const scope = (explicitScope || `${role}-${os.hostname()}`).replace(/[^A-Za-z0-9._-]+/g, '-');
+  return path.join(LOG_ROOT, scope);
+}
+const LOG_DIRECTORY = resolveLogDirectory();
+
+// Remove só subpastas criadas por este logger (marcador) sem escrita há mais de N dias.
+function pruneStaleLogDirectories(retentionDays) {
+  const cutoffMs = Date.now() - retentionDays * 24 * 60 * 60 * 1000;
+  for (const entry of fs.readdirSync(LOG_ROOT, { withFileTypes: true })) {
+    const directory = path.join(LOG_ROOT, entry.name);
+    if (!entry.isDirectory() || directory === LOG_DIRECTORY
+      || !fs.existsSync(path.join(directory, LOG_SCOPE_MARKER))) {
+      continue;
+    }
+    const newestWriteMs = Math.max(...fs.readdirSync(directory)
+      .map((name) => fs.statSync(path.join(directory, name)).mtimeMs));
+    if (newestWriteMs < cutoffMs) {
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
+  }
+}
+
 function canWriteLogFiles() {
   if (String(process.env.LOG_TO_FILES || '').toLowerCase() === 'false') {
     return false;
   }
   try {
+    if (LOG_DIRECTORY !== LOG_ROOT) {
+      fs.mkdirSync(LOG_DIRECTORY, { recursive: true });
+      fs.writeFileSync(path.join(LOG_DIRECTORY, LOG_SCOPE_MARKER), `${os.hostname()}\n`);
+      try {
+        const retentionDays = Number.parseInt(process.env.LOG_DIRECTORY_RETENTION_DAYS || '7', 10);
+        pruneStaleLogDirectories(Number.isInteger(retentionDays) && retentionDays > 0 ? retentionDays : 7);
+      } catch (error) {
+        // Limpeza é best-effort; nunca impede o log.
+      }
+    }
     fs.accessSync(LOG_DIRECTORY, fs.constants.W_OK);
     return true;
   } catch (error) {
@@ -101,7 +144,7 @@ const transports = [
   
   // Arquivo para logs de erro
   createFileTransport({
-    filename: path.join(__dirname, '../logs/error.log'),
+    filename: path.join(LOG_DIRECTORY, 'error.log'),
     level: 'error',
     format: logFormat,
     maxsize: 5242880, // 5MB
@@ -110,7 +153,7 @@ const transports = [
   
   // Arquivo para todos os logs
   createFileTransport({
-    filename: path.join(__dirname, '../logs/combined.log'),
+    filename: path.join(LOG_DIRECTORY, 'combined.log'),
     format: logFormat,
     maxsize: 5242880, // 5MB
     maxFiles: 10
@@ -118,7 +161,7 @@ const transports = [
   
   // Arquivo específico para WebSocket
   createFileTransport({
-    filename: path.join(__dirname, '../logs/websocket.log'),
+    filename: path.join(LOG_DIRECTORY, 'websocket.log'),
     level: 'info',
     format: logFormat,
     maxsize: 5242880, // 5MB
@@ -127,13 +170,31 @@ const transports = [
   
   // Arquivo específico para Redis
   createFileTransport({
-    filename: path.join(__dirname, '../logs/redis.log'),
+    filename: path.join(LOG_DIRECTORY, 'redis.log'),
     level: 'info',
     format: logFormat,
     maxsize: 5242880, // 5MB
     maxFiles: 5
   })
 ];
+
+// Erros (nível error) também vão para o Sentry quando SENTRY_DSN está configurado.
+if (String(process.env.SENTRY_DSN || '').trim()) {
+  const Transport = require('winston-transport');
+  const { captureLogEntry } = require('./sentry');
+  class SentryTransport extends Transport {
+    log(info, callback) {
+      setImmediate(() => this.emit('logged', info));
+      try {
+        captureLogEntry(info);
+      } catch (error) {
+        // Falha no envio nunca derruba o log local.
+      }
+      callback();
+    }
+  }
+  transports.push(new SentryTransport({ level: 'error' }));
+}
 
 // Criar logger principal
 const logger = winston.createLogger({
@@ -149,7 +210,7 @@ const websocketLogger = winston.createLogger({
   format: logFormat,
   transports: [
     createFileTransport({
-      filename: path.join(__dirname, '../logs/websocket.log'),
+      filename: path.join(LOG_DIRECTORY, 'websocket.log'),
       maxsize: 5242880,
       maxFiles: 5
     }),
@@ -169,7 +230,7 @@ const redisLogger = winston.createLogger({
   format: logFormat,
   transports: [
     createFileTransport({
-      filename: path.join(__dirname, '../logs/redis.log'),
+      filename: path.join(LOG_DIRECTORY, 'redis.log'),
       maxsize: 5242880,
       maxFiles: 5
     }),
@@ -189,7 +250,7 @@ const securityLogger = winston.createLogger({
   format: logFormat,
   transports: [
     createFileTransport({
-      filename: path.join(__dirname, '../logs/security.log'),
+      filename: path.join(LOG_DIRECTORY, 'security.log'),
       maxsize: 5242880,
       maxFiles: 10
     }),
