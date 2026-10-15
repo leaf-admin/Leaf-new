@@ -549,4 +549,15 @@ describe('production compose launch-control contract', () => {
     expect(dockerfileSource).toContain('redis \\\n    poppler-utils');
     expect(workerCompose).not.toContain("redis.ensureConnection().then(()=>process.exit(0))");
   });
+
+  it('keeps simple worker healthchecks on redis-cli instead of booting Node', () => {
+    // A full Node boot per check took ~5s of a 0.5-CPU worker quota in production.
+    const legacyHealthcheck = "redis.ensureConnection().then(()=>process.exit(0))";
+
+    for (const source of [composeSource, gatewayScaleSource, opsWorkersSource]) {
+      expect(source).not.toContain(legacyHealthcheck);
+    }
+    expect(workerSource).toContain('--raw ping | grep -qx PONG');
+    expect(billingWorkerSource).toContain('--raw ping | grep -qx PONG');
+  });
 });
