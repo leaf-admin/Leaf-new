@@ -135,6 +135,9 @@ Otherwise a failover runs the previous release.
 
 ## Housekeeping
 
-- Remove the Leaf gateways and workers from Contabo, and delete their images.
-- Keep on Contabo: Redis (replica), face compare, the OCR worker, the dashboard, backups and the relays.
-- Point the daily backup at the new primary.
+- **Contabo** keeps:
+  - Redis, as the replica.
+  - The cold standby images. Refresh them after each deploy.
+  - Face compare, the OCR worker, the dashboard and the relays.
+  - The daily backup, which reads the replica.
+- **Host health:** `leaf-host-health.timer` on both hosts writes `/health/host`, and the Uptime Monitor alerts when a check fails or the summary goes stale.
