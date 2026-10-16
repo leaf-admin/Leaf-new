@@ -1,0 +1,62 @@
+# Santiago realtime host (Vultr, 4 dedicated vCPU = 2 physical cores).
+# Layered on top of docker-compose.production.yml + docker-compose.gateway-scale.yml
+# + docker-compose.ops-workers.yml:
+#
+#   docker compose -f docker-compose.production.yml -f docker-compose.gateway-scale.yml \
+#     -f docker-compose.ops-workers.yml -f docker-compose.santiago.yml up -d
+#
+# Two gateways (load tests: ~250-300 concurrent rides on this box). The face
+# compare service stays on the support host and is reached over WireGuard.
+#
+# Before cutover, set LEAF_SANTIAGO_PRIMARY=false in the shell: jobs that would
+# run twice next to the current primary (earnings report, cancellation credit
+# sweep, pricing baseline) stay off, and the workers that own them are not
+# started (profile "primary"). At cutover: LEAF_SANTIAGO_PRIMARY=true and
+# --profile primary.
+
+x-santiago-gateway-env: &santiago_gateway_env
+  BIOMETRIC_FACE_SERVICE_URL: ${SANTIAGO_FACE_COMPARE_URL:-http://10.77.0.2:8008}
+  DAILY_EARNINGS_REPORT_ENABLED: ${LEAF_SANTIAGO_PRIMARY:-false}
+  RIDE_FINALIZATION_OUTBOX_ENABLED: ${LEAF_SANTIAGO_PRIMARY:-false}
+
+services:
+  redis:
+    cpus: "1.00"
+
+  websocket:
+    cpus: "1.60"
+    environment:
+      <<: *santiago_gateway_env
+
+  websocket-gateway-2:
+    cpus: "1.60"
+    environment:
+      <<: *santiago_gateway_env
+
+  websocket-gateway-3:
+    profiles: ["unused-on-santiago"]
+
+  websocket-gateway-4:
+    profiles: ["unused-on-santiago"]
+
+  billing-worker:
+    profiles: ["primary"]
+
+  pricing-baseline-worker:
+    profiles: ["primary"]
+
+  ride-health-monitor-worker:
+    profiles: ["primary"]
+
+  nginx:
+    # Leaf network only (the shared host also attaches other projects' edges).
+    networks: !override
+      - leaf-network
+    depends_on: !override
+      - websocket
+      - websocket-gateway-2
+    volumes: !override
+      - ./nginx.santiago.conf:/etc/nginx/nginx.conf:ro
+      - ./ssl:/etc/nginx/ssl:ro
+      - ./certbot/www:/var/www/certbot:ro
+      - ./certbot/conf:/etc/letsencrypt:ro
