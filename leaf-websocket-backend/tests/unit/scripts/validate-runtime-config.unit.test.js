@@ -47,6 +47,12 @@ describe('validate-runtime-config Woovi webhook production gates', () => {
     WOOVI_BASE_URL: 'https://api.woovi.com/api/v1',
     WOOVI_API_TOKEN: 'woovi-token',
     LEAF_PIX_KEY: 'pix-key',
+    AUTH_OTP_PROVIDER: 'whatsapp',
+    AUTH_OTP_HMAC_KEY: 'ci-test-only-auth-otp-hmac-key-32-bytes-minimum',
+    WHATSAPP_META_ACCESS_TOKEN: 'ci-test-only-whatsapp-token',
+    WHATSAPP_META_PHONE_NUMBER_ID: '123456789012345',
+    WHATSAPP_OTP_TEMPLATE_NAME: 'leaf_authentication',
+    WHATSAPP_OTP_TEMPLATE_LANGUAGE: 'pt_BR',
     CORS_ORIGIN: 'https://api.leaf.example',
     KYC_AWS_COST_GUARD_ENABLED: 'true',
     KYC_AWS_COST_PER_USER_DAILY_SESSION_LIMIT: '20',
@@ -767,6 +773,12 @@ describe('validate-runtime-config Woovi webhook production gates', () => {
       WOOVI_BASE_URL: 'https://api.woovi-sandbox.com/api/v1',
       WOOVI_API_TOKEN: 'woovi-token',
       LEAF_PIX_KEY: 'pix-key',
+      AUTH_OTP_PROVIDER: 'whatsapp',
+      AUTH_OTP_HMAC_KEY: 'ci-test-only-auth-otp-hmac-key-32-bytes-minimum',
+      WHATSAPP_META_ACCESS_TOKEN: 'ci-test-only-whatsapp-token',
+      WHATSAPP_META_PHONE_NUMBER_ID: '123456789012345',
+      WHATSAPP_OTP_TEMPLATE_NAME: 'leaf_authentication',
+      WHATSAPP_OTP_TEMPLATE_LANGUAGE: 'pt_BR',
       CORS_ORIGIN: 'https://api.leaf.example',
       KYC_AWS_COST_GUARD_ENABLED: 'true',
       KYC_AWS_COST_PER_USER_DAILY_SESSION_LIMIT: '20',
@@ -813,6 +825,12 @@ describe('validate-runtime-config Woovi webhook production gates', () => {
       WOOVI_BASE_URL: 'https://api.woovi-sandbox.com/api/v1',
       WOOVI_API_TOKEN: 'woovi-token',
       LEAF_PIX_KEY: 'pix-key',
+      AUTH_OTP_PROVIDER: 'whatsapp',
+      AUTH_OTP_HMAC_KEY: 'ci-test-only-auth-otp-hmac-key-32-bytes-minimum',
+      WHATSAPP_META_ACCESS_TOKEN: 'ci-test-only-whatsapp-token',
+      WHATSAPP_META_PHONE_NUMBER_ID: '123456789012345',
+      WHATSAPP_OTP_TEMPLATE_NAME: 'leaf_authentication',
+      WHATSAPP_OTP_TEMPLATE_LANGUAGE: 'pt_BR',
       CORS_ORIGIN: 'https://api.leaf.example',
       LEAF_APPROVED_FINANCIAL_POLICY_ID: 'runtime_tiered_percent_above_50_v1',
       LEAF_FINANCIAL_POLICY_APPROVAL_REF: 'policy-test-approval',
@@ -1206,6 +1224,78 @@ describe('validate-runtime-config Woovi webhook production gates', () => {
     });
   });
 
+  it('accepts Firebase Phone Auth/SMS as the production gateway auth path without Meta credentials', () => {
+    const result = runValidator({
+      ...baseProdEnv,
+      ...strictKycProdEnv,
+      AUTH_OTP_PROVIDER: 'firebase',
+      AUTH_OTP_HMAC_KEY: '',
+      WHATSAPP_META_ACCESS_TOKEN: '',
+      WHATSAPP_META_PHONE_NUMBER_ID: '',
+      WHATSAPP_OTP_TEMPLATE_NAME: ''
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.report.ok).toBe(true);
+    expect(result.report.summary.blockers).not.toContain(
+      'AUTH_OTP_PROVIDER=firebase ou whatsapp obrigatório em produção para o fluxo OTP'
+    );
+    expect(result.report.diagnostics.authOtp).toMatchObject({
+      productionNonBypassMode: 'firebase_phone_auth_primary_custom_otp_fail_closed',
+      primaryAuthPath: 'firebase_phone_auth_sms',
+      provider: {
+        name: 'firebase',
+        enabled: false,
+        configured: false,
+        hmacKey: { configured: false, valid: false, required: false }
+      }
+    });
+    expect(result.stdout).not.toContain('ci-test-only-whatsapp-token');
+  });
+
+  it('rejects simulation as a production gateway auth path', () => {
+    const result = runValidator({
+      ...baseProdEnv,
+      AUTH_OTP_PROVIDER: 'simulation',
+      AUTH_OTP_HMAC_KEY: '',
+      WHATSAPP_META_ACCESS_TOKEN: '',
+      WHATSAPP_META_PHONE_NUMBER_ID: '',
+      WHATSAPP_OTP_TEMPLATE_NAME: ''
+    });
+
+    expect(result.status).toBe(1);
+    expect(result.report.summary.blockers).toEqual(expect.arrayContaining([
+      'AUTH_OTP_PROVIDER=firebase ou whatsapp obrigatório em produção para o fluxo OTP'
+    ]));
+    expect(result.report.diagnostics.authOtp.provider).toMatchObject({
+      name: 'simulation',
+      enabled: false,
+      configured: false,
+      hmacKey: { configured: false, valid: false, required: true }
+    });
+    expect(result.stdout).not.toContain('ci-test-only-whatsapp-token');
+  });
+
+  it('still requires the dedicated HMAC when WhatsApp custom OTP is selected', () => {
+    const result = runValidator({
+      ...baseProdEnv,
+      ...strictKycProdEnv,
+      AUTH_OTP_PROVIDER: 'whatsapp',
+      AUTH_OTP_HMAC_KEY: 'short'
+    });
+
+    expect(result.status).toBe(1);
+    expect(result.report.summary.blockers).toContain(
+      'OTP em produção exige AUTH_OTP_HMAC_KEY dedicada com pelo menos 32 bytes'
+    );
+    expect(result.report.diagnostics.authOtp.provider.hmacKey).toMatchObject({
+      configured: true,
+      valid: false,
+      required: true
+    });
+    expect(result.stdout).not.toContain('short');
+  });
+
   it('reports push diagnostics with FCM configured', () => {
     const result = runValidator({
       ...baseProdEnv,
@@ -1365,6 +1455,38 @@ describe('validate-runtime-config Woovi webhook production gates', () => {
       maxConcurrentSessions: 70,
       maxWaitMs: 0
     });
+  });
+
+  it('does not require AWS admission controls when the controlled no-AWS liveness bypass is active', () => {
+    const result = runValidator({
+      ...baseProdEnv,
+      ...strictKycProdEnv,
+      KYC_LIVENESS_BYPASS_ENABLED: 'true',
+      KYC_AWS_LIVENESS_ENABLED: 'false',
+      KYC_AWS_LIVENESS_CREDENTIALS_ENABLED: 'false',
+      KYC_FACE_COMPARE_PROVIDER: 'biometric-face-service',
+      BIOMETRIC_FACE_SERVICE_URL: 'https://face.leaf.internal',
+      BIOMETRIC_FACE_SERVICE_API_KEY: 'face-key',
+      ENABLE_CNH_FACE_BIOMETRICS: 'true',
+      KYC_AWS_COMPARE_FACES_ENABLED: 'false',
+      KYC_AWS_ADMISSION_CONTROL_ENABLED: 'false',
+      KYC_AWS_ADMISSION_MAX_WAIT_MS: '15000'
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.report.ok).toBe(true);
+    expect(result.report.diagnostics.biometricReadiness).toMatchObject({
+      ok: true,
+      policy: { livenessBypassEnabled: true }
+    });
+    expect(result.report.diagnostics.awsKycAdmissionControl).toMatchObject({
+      enabled: { value: false },
+      configValid: false,
+      maxWaitMs: 15000
+    });
+    expect(result.report.summary.blockers).not.toContain(
+      'KYC_PRODUCTION_BIOMETRICS_ENABLED=true exige KYC_AWS_ADMISSION_CONTROL_ENABLED=true em produção'
+    );
   });
 
   it('blocks strict biometric production when AWS admission tries to hold requests', () => {

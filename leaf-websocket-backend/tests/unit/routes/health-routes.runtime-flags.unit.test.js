@@ -777,6 +777,51 @@ describe('health runtime flags route', () => {
     expect(readiness.body.failedDependencies).toContain('kycStrict');
   });
 
+  it('allows strict production KYC readiness with internal Face Compare and AWS disabled', async () => {
+    Object.assign(process.env, {
+      NODE_ENV: 'production',
+      RUNTIME_ROLE: 'gateway',
+      REDIS_HOST: 'redis',
+      FIREBASE_SERVICE_ACCOUNT_JSON: '{"project_id":"leaf"}',
+      WOOVI_API_TOKEN: 'test-token',
+      WOOVI_BASE_URL: 'https://api.woovi.com/api/v1',
+      LEAF_PIX_KEY: 'pix-key',
+      GOOGLE_MAPS_API_KEY: 'maps-key',
+      LEAF_LAUNCH_PROFILE: 'pilot_controlled',
+      LEAF_PILOT_CONTROLLED: 'true',
+      PILOT_ALLOWED_PASSENGER_IDS: 'passenger-1',
+      PILOT_ALLOWED_DRIVER_IDS: 'driver-1',
+      KYC_PRODUCTION_BIOMETRICS_ENABLED: 'true',
+      KYC_STRICT_PRODUCTION_MODE: 'true',
+      KYC_LIVENESS_BYPASS_ENABLED: 'true',
+      KYC_AWS_LIVENESS_ENABLED: 'false',
+      AWS_LIVENESS_ENABLED: 'false',
+      KYC_AWS_LIVENESS_CREDENTIALS_ENABLED: 'false',
+      KYC_AWS_COMPARE_FACES_ENABLED: 'false',
+      KYC_FACE_COMPARE_PROVIDER: 'biometric-face-service',
+      BIOMETRIC_FACE_SERVICE_URL: 'http://leaf-face-compare-service:8008',
+      BIOMETRIC_FACE_SERVICE_API_KEY: 'test-face-key',
+      ENABLE_CNH_FACE_BIOMETRICS: 'true',
+      KYC_REQUIRE_TRUSTED_BIOMETRIC_MATCH: 'true',
+      DAILY_KYC_ONLINE_GATE_ENABLED: 'true',
+      KYC_TRUST_CADENCE_ENABLED: 'true',
+      ENABLE_ACTIVE_TRIP_INDEX: 'true',
+      KYC_ACTIVE_TRIP_AUTHORITY_MODE: 'redis_noeviction',
+      KYC_TRUST_POLICY_VERSION: 'driver_identity_recurring_v2',
+      KYC_TRUST_T1_MIN_DISTINCT_SUCCESS_DAYS: '7',
+      KYC_TRUST_T2_MIN_AGE_DAYS: '30',
+      KYC_TRUST_T2_MIN_SUCCESS_COUNT: '14',
+      KYC_TRUST_T2_MIN_DISTINCT_SUCCESS_DAYS: '14',
+      KYC_TRUSTED_RANDOM_AUDIT_PERCENT: '10',
+      MOBILE_FACE_EMBEDDING_ENABLED: 'false'
+    });
+
+    const response = await request(createApp()).get('/health/readiness');
+
+    expect(response.body.dependencies.kycStrict).toBe(true);
+    expect(response.body.failedDependencies).not.toContain('kycStrict');
+  });
+
   it('keeps strict AWS KYC readiness red when the review threshold is not below approval', async () => {
     process.env.NODE_ENV = 'production';
     process.env.RUNTIME_ROLE = 'gateway';

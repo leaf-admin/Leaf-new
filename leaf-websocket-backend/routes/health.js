@@ -239,6 +239,7 @@ function buildKycSection(redisAuthorityAttestation = null) {
       && awsCompareReviewThreshold < awsCompareApproveThreshold
     );
   const faceServiceConfigured = presence('BIOMETRIC_FACE_SERVICE_URL');
+  const faceServiceApiKeyConfigured = presence('BIOMETRIC_FACE_SERVICE_API_KEY');
   const awsCredentialSource = String(process.env.KYC_AWS_CREDENTIAL_SOURCE || '')
     .trim()
     .toLowerCase();
@@ -293,6 +294,9 @@ function buildKycSection(redisAuthorityAttestation = null) {
     productionBiometricsEnabled: envBool('KYC_PRODUCTION_BIOMETRICS_ENABLED', false),
     strictProductionMode: envBool('KYC_STRICT_PRODUCTION_MODE', false),
     awsLivenessConfigured: envBool('KYC_AWS_LIVENESS_ENABLED', false) || envBool('AWS_LIVENESS_ENABLED', false),
+    livenessBypassEnabled: envBool('KYC_LIVENESS_BYPASS_ENABLED', false),
+    livenessMode: envBool('KYC_LIVENESS_BYPASS_ENABLED', false) ? 'face_compare' : 'aws',
+    awsCompareFacesEnabled: envBool('KYC_AWS_COMPARE_FACES_ENABLED', false),
     awsLivenessCredentialsEnabled: envBool('KYC_AWS_LIVENESS_CREDENTIALS_ENABLED', false),
     awsLivenessIdempotentRetryValid,
     awsLivenessRetryDelaySeconds,
@@ -307,6 +311,7 @@ function buildKycSection(redisAuthorityAttestation = null) {
     awsBaseCredentialsConfigured,
     faceCompareProvider,
     faceServiceConfigured,
+    faceServiceApiKeyConfigured,
     awsCompareFacesConfigured,
     awsCompareApproveThreshold,
     awsCompareReviewThreshold,
@@ -406,6 +411,33 @@ async function buildRoleReadiness(health) {
   const pilotAccess = getPublicPilotAccessSnapshot();
   const paymentRole = ['gateway', 'billing', 'payment', 'payments'].includes(runtimeRole);
   const realtimeRole = ['gateway', 'realtime', 'socket', 'sideeffects', 'worker', 'workers'].includes(runtimeRole);
+  const internalFaceCompareBypassReady =
+    kyc.livenessBypassEnabled
+    && !kyc.awsLivenessConfigured
+    && !kyc.awsLivenessCredentialsEnabled
+    && !kyc.awsCompareFacesEnabled
+    && ['leaf_face_compare_service', 'biometric-face-service'].includes(kyc.faceCompareProvider)
+    && kyc.faceServiceConfigured
+    && kyc.faceServiceApiKeyConfigured
+    && kyc.cnhFaceBiometricsConfigured;
+  const awsKycProviderReady =
+    !kyc.livenessBypassEnabled
+    && kyc.awsLivenessConfigured
+    && kyc.awsLivenessCredentialsEnabled
+    && kyc.awsLivenessIdempotentRetryValid
+    && kyc.awsAssumeRoleConfigured
+    && kyc.awsAssumeRoleExternalIdConfigured
+    && kyc.awsStsSessionNamePrefixConfigured
+    && kyc.awsBaseCredentialsConfigured
+    && kyc.canonicalFaceCompareConfigured
+    && kyc.awsCompareThresholdsValid
+    && kyc.awsCostGuardEnabled
+    && kyc.awsCostPerUserDailyLimitValid
+    && kyc.awsCostRetentionValid
+    && kyc.awsCompareResultPersistenceValid
+    && kyc.awsCostTimeZoneUtc
+    && (kyc.faceCompareProvider !== 'aws_rekognition_compare_faces' || kyc.legacyCnhEmbeddingDisabled);
+  const strictKycProviderReady = internalFaceCompareBypassReady || awsKycProviderReady;
   const dependencies = {
     quickHealth: health?.status === 'healthy',
     redisConfigured: !realtimeRole || socket.configured,
@@ -428,21 +460,7 @@ async function buildRoleReadiness(health) {
     kycStrict: runtimeRole !== 'gateway' || !kyc.strictReadinessRequired || (
       kyc.productionBiometricsEnabled &&
       kyc.strictProductionMode &&
-      kyc.awsLivenessConfigured &&
-      kyc.awsLivenessCredentialsEnabled &&
-      kyc.awsLivenessIdempotentRetryValid &&
-      kyc.awsAssumeRoleConfigured &&
-      kyc.awsAssumeRoleExternalIdConfigured &&
-      kyc.awsStsSessionNamePrefixConfigured &&
-      kyc.awsBaseCredentialsConfigured &&
-      kyc.canonicalFaceCompareConfigured &&
-      kyc.awsCompareThresholdsValid &&
-      kyc.awsCostGuardEnabled &&
-      kyc.awsCostPerUserDailyLimitValid &&
-      kyc.awsCostRetentionValid &&
-      kyc.awsCompareResultPersistenceValid &&
-      kyc.awsCostTimeZoneUtc &&
-      (kyc.faceCompareProvider !== 'aws_rekognition_compare_faces' || kyc.legacyCnhEmbeddingDisabled) &&
+      strictKycProviderReady &&
       kyc.requireTrustedBiometricMatch &&
       kyc.onlineGateEnabled &&
       kyc.adaptiveCadenceEnabled &&
