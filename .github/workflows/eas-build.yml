@@ -131,6 +131,7 @@ jobs:
           KYC_ALLOW_LEGACY_DEVICE_SIGNATURE: 'false'
           KYC_ALLOW_AWS_LIVENESS_ONLY_MATCH: 'false'
           MOBILE_FACE_EMBEDDING_LOCAL_COMPARE_FALLBACK: 'false'
+          AUTH_OTP_PROVIDER: firebase
         run: npm run config:validate
 
       - name: Validate versioned pilot geofence matrix

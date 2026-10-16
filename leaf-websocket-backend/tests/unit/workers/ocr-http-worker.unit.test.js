@@ -1,3 +1,5 @@
+// The unit setup mocks express globally; this worker needs the real one.
+jest.unmock('express');
 jest.mock('../../../firebase-config', () => ({ initializeFirebase: jest.fn() }));
 jest.mock('../../../routes/ocr-routes', () => {
   const express = require('express');
