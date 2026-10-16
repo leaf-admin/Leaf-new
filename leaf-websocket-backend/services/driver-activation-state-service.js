@@ -188,7 +188,7 @@ function isCanonicalVehicleApproved(vehicle = {}) {
     (status === 'approved' || status === 'active');
 }
 
-async function readActiveVehicleRecord(db, driverId, entries = []) {
+async function readActiveVehicleRecord(db, driverId, entries = [], prefetched = null) {
   const activeEntry = entries.find((vehicle) =>
     vehicle?.isActive === true && isCanonicalVehicleApproved(vehicle)
   );
@@ -205,7 +205,11 @@ async function readActiveVehicleRecord(db, driverId, entries = []) {
   }
 
   try {
-    const snapshot = await db.ref(`vehicles/${vehicleId}`).once('value');
+    // A read of the same vehicle started alongside the first round is just as
+    // fresh; any other vehicle is read now, as before.
+    const snapshot = prefetched?.vehicleId === vehicleId && prefetched.snapshot
+      ? await prefetched.snapshot
+      : await db.ref(`vehicles/${vehicleId}`).once('value');
     const data = snapshot.val();
     return {
       attempted: true,
@@ -391,7 +395,8 @@ async function resolveDriverActivationState({
   driverId,
   db = null,
   activationNode = null,
-  userData = null
+  userData = null,
+  vehicleIdHint = null
 } = {}) {
   const safeDriverId = String(driverId || '').trim();
   if (!safeDriverId) {
@@ -405,6 +410,16 @@ async function resolveDriverActivationState({
 
   // Independent reads go out together: one round trip instead of two before
   // the active vehicle record (which depends on user_vehicles).
+  // vehicleIdHint (e.g. the cached profile's activeVehicleId): read that
+  // vehicle record in the same round trip; used only if it is still the active one.
+  const safeVehicleIdHint = firstText(vehicleIdHint);
+  const prefetchedVehicle = safeVehicleIdHint
+    ? {
+      vehicleId: safeVehicleIdHint,
+      snapshot: realtimeDb.ref(`vehicles/${safeVehicleIdHint}`).once('value')
+    }
+    : null;
+  prefetchedVehicle?.snapshot?.catch?.(() => {});
   const [resolvedActivationSnapshot, resolvedUserSnapshot, vehicles] = await Promise.all([
     activationNode ? Promise.resolve(null) : realtimeDb.ref(`driver_activation/${safeDriverId}`).once('value'),
     userData ? Promise.resolve(null) : realtimeDb.ref(`users/${safeDriverId}`).once('value'),
@@ -413,7 +428,7 @@ async function resolveDriverActivationState({
 
   const resolvedActivationNode = activationNode || resolvedActivationSnapshot?.val?.() || {};
   const resolvedUserData = userData || resolvedUserSnapshot?.val?.() || {};
-  const activeVehicleRead = await readActiveVehicleRecord(realtimeDb, safeDriverId, vehicles);
+  const activeVehicleRead = await readActiveVehicleRecord(realtimeDb, safeDriverId, vehicles, prefetchedVehicle);
   const canonicalCrlvNode = resolvedActivationNode?.documents?.crlv || null;
   const crlvPresent = Boolean(canonicalCrlvNode);
   const crlvStatus = normalizeStatus(canonicalCrlvNode?.status || 'pending');

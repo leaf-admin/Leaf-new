@@ -870,4 +870,57 @@ describe('driver-activation-state-service', () => {
       identityComplete: true
     }));
   });
+
+  describe('vehicle id hint', () => {
+    function createTrackingDb(dataByPath) {
+      const reads = [];
+      return {
+        reads,
+        ref(path) {
+          return {
+            once: async () => {
+              reads.push(path);
+              return { val: () => dataByPath[path] || null };
+            }
+          };
+        }
+      };
+    }
+
+    const driverId = 'driver_hint';
+    const data = {
+      [`driver_activation/${driverId}`]: createApprovedActivation(),
+      [`users/${driverId}`]: {
+        status: 'approved',
+        kycFirstAccessVerifiedAt: '2026-05-14T10:00:00.000Z'
+      },
+      [`user_vehicles/${driverId}`]: { vehicleA: createApprovedVehicle() },
+      'vehicles/vehicleA': createCatalogVehicle(),
+      'vehicles/vehicleB': createCatalogVehicle({ plate: 'XXX0000' })
+    };
+
+    it('reads the hinted vehicle in the first round and gives the same result', async () => {
+      const plainDb = createTrackingDb(data);
+      const hintedDb = createTrackingDb(data);
+
+      const plain = await resolveDriverActivationState({ driverId, db: plainDb });
+      const hinted = await resolveDriverActivationState({ driverId, db: hintedDb, vehicleIdHint: 'vehicleA' });
+
+      expect(hinted).toEqual(plain);
+      expect(hintedDb.reads.filter((path) => path === 'vehicles/vehicleA')).toHaveLength(1);
+      // The vehicle read was issued before the user_vehicles round completed.
+      expect(hintedDb.reads.indexOf('vehicles/vehicleA')).toBeLessThan(hintedDb.reads.indexOf(`user_vehicles/${driverId}`));
+    });
+
+    it('ignores a stale hint and reads the active vehicle', async () => {
+      const plainDb = createTrackingDb(data);
+      const hintedDb = createTrackingDb(data);
+
+      const plain = await resolveDriverActivationState({ driverId, db: plainDb });
+      const hinted = await resolveDriverActivationState({ driverId, db: hintedDb, vehicleIdHint: 'vehicleB' });
+
+      expect(hinted).toEqual(plain);
+      expect(hintedDb.reads).toContain('vehicles/vehicleA');
+    });
+  });
 });

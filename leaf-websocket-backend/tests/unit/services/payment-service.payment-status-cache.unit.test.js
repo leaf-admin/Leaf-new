@@ -2578,6 +2578,43 @@ describe('PaymentService refund terminal status handling', () => {
     });
   });
 
+  it('reuses the intent the caller already resolved and still consumes it in a transaction', async () => {
+    const firestore = createInMemoryFirestore();
+    firebaseConfig.getFirestore.mockReturnValue(firestore);
+    const service = new PaymentService();
+    const paymentIntentId = service.buildAdvancePaymentIntentId('temp_ride_known');
+    await firestore.collection('payment_intents').doc(paymentIntentId).set({
+      status: 'charge_created',
+      chargeId: 'charge_known',
+      passengerId: 'customer_1'
+    });
+    const knownIntent = await service.getAdvancePaymentIntent('temp_ride_known');
+    const lookup = jest.spyOn(service, 'getAdvancePaymentIntent');
+
+    const result = await service.markAdvancePaymentIntentConsumed({
+      rideId: 'temp_ride_known',
+      bookingId: 'booking_known',
+      chargeId: 'charge_known',
+      resolvedIntent: knownIntent
+    });
+
+    expect(result).toBe(true);
+    expect(lookup).not.toHaveBeenCalled();
+    expect(firestore.docs.get(`payment_intents/${paymentIntentId}`)).toMatchObject({
+      status: 'consumed',
+      bookingId: 'booking_known'
+    });
+
+    // An intent for another document is never reused.
+    await service.markAdvancePaymentIntentConsumed({
+      rideId: 'temp_ride_known',
+      bookingId: 'booking_known',
+      chargeId: 'charge_known',
+      resolvedIntent: { ...knownIntent, paymentIntentId: 'other_intent' }
+    });
+    expect(lookup).toHaveBeenCalledWith('temp_ride_known');
+  });
+
   it('does not overwrite an advance payment intent consumed by another booking', async () => {
     const firestore = createInMemoryFirestore();
     firebaseConfig.getFirestore.mockReturnValue(firestore);
