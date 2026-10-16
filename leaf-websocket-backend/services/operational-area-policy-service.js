@@ -98,28 +98,49 @@ class OperationalAreaPolicyService {
     this.firebase = firebase;
     this.redisPool = redis;
     this.evaluationCache = null;
+    this.evaluationLoad = null;
+    this.evaluationGeneration = 0;
   }
 
   invalidateEvaluationCache() {
     this.evaluationCache = null;
+    this.evaluationLoad = null;
+    // A read already in flight must not repopulate the cache with old data.
+    this.evaluationGeneration += 1;
   }
 
   async loadAllPolicies({ allowCached = false } = {}) {
     const now = Date.now();
-    if (
-      allowCached &&
-      EVALUATION_CACHE_TTL_MS > 0 &&
-      this.evaluationCache &&
-      now - this.evaluationCache.loadedAt < EVALUATION_CACHE_TTL_MS
-    ) {
-      return this.evaluationCache.policies;
+    if (allowCached && EVALUATION_CACHE_TTL_MS > 0) {
+      if (this.evaluationCache && now - this.evaluationCache.loadedAt < EVALUATION_CACHE_TTL_MS) {
+        return this.evaluationCache.policies;
+      }
+      // Concurrent requests share one in-flight read.
+      if (this.evaluationLoad) return this.evaluationLoad;
     }
     const collection = this.policyCollection();
     if (!collection) return [];
-    const snapshot = await collection.get();
-    const policies = snapshot.docs.map((doc) => normalizePolicy(doc.id, doc.data()));
-    this.evaluationCache = { loadedAt: now, policies };
-    return policies;
+    const generation = this.evaluationGeneration;
+    const load = collection.get().then((snapshot) => {
+      const policies = snapshot.docs.map((doc) => normalizePolicy(doc.id, doc.data()));
+      if (generation === this.evaluationGeneration) {
+        this.evaluationCache = { loadedAt: now, policies };
+      }
+      return policies;
+    });
+    if (allowCached) {
+      this.evaluationLoad = load;
+      const clear = () => {
+        if (this.evaluationLoad === load) this.evaluationLoad = null;
+      };
+      load.then(clear, clear);
+    }
+    return load;
+  }
+
+  /** Start loading the policies used by request evaluation (no-op when cached). */
+  warmEvaluationCache() {
+    return this.loadAllPolicies({ allowCached: true }).catch(() => []);
   }
 
   getFirestore() {
