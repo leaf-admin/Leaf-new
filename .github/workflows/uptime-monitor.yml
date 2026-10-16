@@ -49,6 +49,32 @@ jobs:
               failures="${failures}- \`${url}\` → HTTP ${code} after 3 attempts"$'\n'
             fi
           done
+          # Host health summaries (scripts/ops/host-health-report.py): alert on
+          # any failing check or a summary older than 5 minutes (timer stopped).
+          for url in https://api.leaf.app.br/health/host https://dashboard.leaf.app.br/health/host; do
+            body=""
+            for attempt in 1 2 3; do
+              body=$(curl -fsS --max-time 15 "$url" 2>/dev/null) && break
+              body=""
+              sleep 20
+            done
+            if [ -z "$body" ]; then
+              echo "FAIL $url (unreachable)"
+              failures="${failures}- \`${url}\` → unreachable after 3 attempts"$'\n'
+              continue
+            fi
+            verdict=$(printf '%s' "$body" | jq -r --argjson now "$(date +%s)" '
+              (if ($now - (.generatedAt // 0)) > 300 then ["stale(" + (($now - (.generatedAt // 0)) | tostring) + "s)"] else [] end)
+              + ([.checks | to_entries[] | select(.value.status == "fail")
+                  | .key + "=" + ((.value.detail // .value.value // "fail") | tostring)])
+              | join(", ")' 2>/dev/null || echo "invalid_json")
+            if [ -z "$verdict" ]; then
+              echo "ok   $url"
+            else
+              echo "FAIL $url ($verdict)"
+              failures="${failures}- \`${url}\` → ${verdict}"$'\n'
+            fi
+          done
           {
             echo 'failures<<EOF'
             printf '%s' "$failures"

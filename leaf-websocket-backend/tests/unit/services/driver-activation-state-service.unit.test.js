@@ -887,6 +887,8 @@ describe('driver-activation-state-service', () => {
       };
     }
 
+    // updatedAt is a wall-clock stamp; compare everything else.
+    const withoutClock = ({ updatedAt, ...rest }) => rest;
     const driverId = 'driver_hint';
     const data = {
       [`driver_activation/${driverId}`]: createApprovedActivation(),
@@ -906,7 +908,7 @@ describe('driver-activation-state-service', () => {
       const plain = await resolveDriverActivationState({ driverId, db: plainDb });
       const hinted = await resolveDriverActivationState({ driverId, db: hintedDb, vehicleIdHint: 'vehicleA' });
 
-      expect(hinted).toEqual(plain);
+      expect(withoutClock(hinted)).toEqual(withoutClock(plain));
       expect(hintedDb.reads.filter((path) => path === 'vehicles/vehicleA')).toHaveLength(1);
       // The vehicle read was issued before the user_vehicles round completed.
       expect(hintedDb.reads.indexOf('vehicles/vehicleA')).toBeLessThan(hintedDb.reads.indexOf(`user_vehicles/${driverId}`));
@@ -919,7 +921,7 @@ describe('driver-activation-state-service', () => {
       const plain = await resolveDriverActivationState({ driverId, db: plainDb });
       const hinted = await resolveDriverActivationState({ driverId, db: hintedDb, vehicleIdHint: 'vehicleB' });
 
-      expect(hinted).toEqual(plain);
+      expect(withoutClock(hinted)).toEqual(withoutClock(plain));
       expect(hintedDb.reads).toContain('vehicles/vehicleA');
     });
   });
