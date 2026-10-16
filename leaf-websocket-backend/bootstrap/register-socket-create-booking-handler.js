@@ -836,6 +836,34 @@ function registerSocketCreateBookingHandler({
                         return;
                     }
 
+                    // Payment intent lookups are independent of the trust and
+                    // active-ride guards: start them now (same conditional chain,
+                    // same reads) so they overlap with those round trips. Results
+                    // are only used below, in the original order of checks.
+                    const prefetchChargeId = String(data?.paymentData?.chargeId || data?.paymentId || '').trim();
+                    const prefetchRideId = String(data?.paymentData?.rideId || data?.rideId || '').trim();
+                    const intentByRidePromise = prefetchRideId
+                        ? paymentServiceSingleton.getAdvancePaymentIntent(prefetchRideId)
+                        : null;
+                    const intentByChargePromise = (async () => {
+                        const byRide = intentByRidePromise ? await intentByRidePromise : null;
+                        if (byRide?.found || byRide?.unavailable) return null;
+                        if (String(byRide?.status || '').trim().toLowerCase() === 'consumed') return null;
+                        if (!prefetchChargeId || typeof paymentServiceSingleton.getAdvancePaymentIntentByChargeId !== 'function') {
+                            return null;
+                        }
+                        return paymentServiceSingleton.getAdvancePaymentIntentByChargeId(prefetchChargeId);
+                    })();
+                    // A guard may return before these are awaited.
+                    intentByRidePromise?.catch?.(() => {});
+                    intentByChargePromise.catch(() => {});
+                    // Same for the area policies evaluated further down (cached per process).
+                    try {
+                        require('../services/operational-area-policy-service').warmEvaluationCache?.();
+                    } catch (_warmError) {
+                        // Evaluation loads them itself.
+                    }
+
                     if (customerId) {
                         try {
                             const passengerTrustService = require('../services/passenger-trust-service');
@@ -943,8 +971,7 @@ function registerSocketCreateBookingHandler({
                     const requestedCarType = sanitizedCarType || data?.carType || null;
 
                     if (paymentReferenceRideId) {
-                        advancePaymentIntent =
-                            await paymentServiceSingleton.getAdvancePaymentIntent(paymentReferenceRideId);
+                        advancePaymentIntent = await intentByRidePromise;
                         if (advancePaymentIntent?.unavailable) {
                             socket.emit('bookingError', {
                                 error: 'Validação de pagamento indisponível',
@@ -973,8 +1000,7 @@ function registerSocketCreateBookingHandler({
                         paymentChargeId &&
                         typeof paymentServiceSingleton.getAdvancePaymentIntentByChargeId === 'function'
                     ) {
-                        advancePaymentIntent =
-                            await paymentServiceSingleton.getAdvancePaymentIntentByChargeId(paymentChargeId);
+                        advancePaymentIntent = await intentByChargePromise;
                         if (advancePaymentIntent?.unavailable) {
                             socket.emit('bookingError', {
                                 error: 'Validação de pagamento indisponível',

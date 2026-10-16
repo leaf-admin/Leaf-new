@@ -445,6 +445,44 @@ describe('registerSocketCreateBookingHandler payment and availability guards', (
     expect(harness.RequestRideCommand).not.toHaveBeenCalled();
   });
 
+  it('starts the payment intent lookup while the passenger trust guard is still pending', async () => {
+    let releaseTrust;
+    passengerTrustService.checkEligibility.mockReturnValueOnce(new Promise((resolve) => {
+      releaseTrust = () => resolve({ allowed: true });
+    }));
+    const harness = createHarness();
+
+    const pending = harness.handlers.createBooking(createRequestPayload());
+    await new Promise((resolve) => process.nextTick(resolve));
+
+    expect(passengerTrustService.checkEligibility).toHaveBeenCalled();
+    expect(mockPaymentServiceInstance.getAdvancePaymentIntent).toHaveBeenCalled();
+    releaseTrust();
+    await pending;
+    // The ride-id intent was found, so the charge-id lookup never runs.
+    expect(mockPaymentServiceInstance.getAdvancePaymentIntentByChargeId).not.toHaveBeenCalled();
+  });
+
+  it('keeps the trust block ahead of payment intent outcomes', async () => {
+    passengerTrustService.checkEligibility.mockResolvedValueOnce({
+      allowed: false,
+      code: 'PASSENGER_TRUST_BLOCKED',
+      reason: 'blocked'
+    });
+    mockPaymentServiceInstance.getAdvancePaymentIntent.mockResolvedValue({
+      found: true,
+      status: 'consumed'
+    });
+    const harness = createHarness();
+
+    await harness.handlers.createBooking(createRequestPayload());
+
+    const bookingErrors = harness.socket.emit.mock.calls.filter(([event]) => event === 'bookingError');
+    expect(bookingErrors).toHaveLength(1);
+    expect(bookingErrors[0][1]).toEqual(expect.objectContaining({ code: 'PASSENGER_TRUST_BLOCKED' }));
+    expect(harness.RequestRideCommand).not.toHaveBeenCalled();
+  });
+
   it('fails closed when active ride guard cannot validate duplicate rides', async () => {
     const harness = createHarness();
     harness.redis.get.mockRejectedValueOnce(new Error('redis unavailable'));
