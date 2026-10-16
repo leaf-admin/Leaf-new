@@ -856,12 +856,16 @@ class PaymentServiceIntentAndSplitMethods {
         };
       }
       const paymentIntentId = this.buildAdvancePaymentIntentId(safeRideId);
+      // Independent reads per namespace: in parallel, results in namespace order.
+      const namespaces = ['operational', 'sandbox'];
+      const intentDocs = await Promise.all(namespaces.map((namespace) => firestore
+        .collection(FINANCIAL_COLLECTIONS[namespace].paymentIntents)
+        .doc(paymentIntentId)
+        .get()));
       const matches = [];
-      for (const namespace of ['operational', 'sandbox']) {
-        const collectionName = FINANCIAL_COLLECTIONS[namespace].paymentIntents;
-        const intentDoc = await firestore.collection(collectionName).doc(paymentIntentId).get();
-        if (intentDoc.exists) matches.push({ namespace, intentDoc });
-      }
+      intentDocs.forEach((intentDoc, index) => {
+        if (intentDoc.exists) matches.push({ namespace: namespaces[index], intentDoc });
+      });
       if (matches.length === 0) return { found: false, paymentIntentId };
       if (matches.length > 1) {
         return {

@@ -1462,7 +1462,7 @@ router.post('/api/drivers/:driverId/vehicle/config', authenticateJWT, requireRol
         ),
         lastVehicleConfigUpdate: nowIso
       });
-      await redis.del(`driver_eligibility_profile:${driverId}`);
+      await redis.del(`driver_eligibility_profile:${driverId}`, `driver_activation_gate:${driverId}`);
     } catch (redisSyncError) {
       cacheSyncPending = true;
       logStructured('warn', 'Falha ao sincronizar configuração de veículo no Redis', {

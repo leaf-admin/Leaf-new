@@ -465,7 +465,12 @@ describe('driver-notification-dispatcher timeout cleanup', () => {
     });
 
     expect(notified).toBe(false);
-    expect(driverEligibilityService.isDriverEligibleForRide).toHaveBeenCalledWith('driver_1', null);
+    expect(driverEligibilityService.isDriverEligibleForRide).toHaveBeenCalledWith(
+      'driver_1',
+      null,
+      {},
+      { allowCachedActivation: true }
+    );
     expect(driverLockManager.acquireLock).not.toHaveBeenCalled();
     expect(outcomeSpy).toHaveBeenCalledWith(
       expect.objectContaining({

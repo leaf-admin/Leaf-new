@@ -177,7 +177,7 @@ async function clearDriverRuntimeState(userId, status, reasonCode) {
 
   try {
     try {
-      await redis.del(`driver_eligibility_profile:${userId}`);
+      await redis.del(`driver_eligibility_profile:${userId}`, `driver_activation_gate:${userId}`);
     } catch (error) {
       logStructured('warn', 'Falha ao invalidar cache de elegibilidade do motorista', {
         service: 'dashboard-user-management-service',

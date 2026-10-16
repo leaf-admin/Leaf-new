@@ -351,25 +351,31 @@ function registerSocketAcceptRideHandler({
                     }
                 }
 
-                // ✅ NOVO: Atualizar motorista da corrida no Firestore
+                // Atualizar motorista da corrida no Firestore. Não bloqueia a
+                // aceitação (Redis é a autoridade da corrida ativa), então não
+                // segura a resposta ao motorista: roda em segundo plano.
+                const logPersistError = (persistError) => {
+                    logStructured('error', 'Erro ao atualizar motorista da corrida no Firestore', {
+                        bookingId: bookingIdToUse,
+                        driverId,
+                        eventType: 'acceptRide',
+                        error: persistError?.message || String(persistError)
+                    });
+                };
                 try {
                     const ridePersistenceService = require('../services/ride-persistence-service');
                     const persistenceBookingData = await redisPool
                         .getConnection()
                         .hgetall(`booking:${bookingIdToUse}`);
-                    await ridePersistenceService.updateRideDriver(
-                        bookingIdToUse,
-                        driverId,
-                        persistenceBookingData
-                    );
+                    Promise.resolve()
+                        .then(() => ridePersistenceService.updateRideDriver(
+                            bookingIdToUse,
+                            driverId,
+                            persistenceBookingData
+                        ))
+                        .catch(logPersistError);
                 } catch (persistError) {
-                    logStructured('error', 'Erro ao atualizar motorista da corrida no Firestore', {
-                        bookingId: bookingIdToUse,
-                        driverId,
-                        eventType: 'acceptRide',
-                        error: persistError.message
-                    });
-                    // Não bloquear aceitação se persistência falhar
+                    logPersistError(persistError);
                 }
 
                 let driverRedisProfile = {};
