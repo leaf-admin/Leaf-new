@@ -108,16 +108,32 @@ OCR_WORKER_REDIS_HOST=10.77.0.1 OCR_WORKER_BIND=10.77.0.2 docker compose -p leaf
    - The uptime monitor.
    - Contabo nginx access logs, which should taper off as DNS expires.
 
-## Rollback
+## Failover to Contabo (Santiago lost) and failback
 
-1. Owner: point DNS back at `62.169.31.231`.
-2. On Contabo:
-   - Restore the nginx backup and reload it.
-   - Promote Contabo's Redis with `REPLICAOF NO ONE`. Skip this if step 7 did not run yet: Contabo's Redis is then still the old primary, but it misses the writes made since the cutover.
-   - Start the stopped containers.
-3. On Santiago: stop the app services and run `REPLICAOF 10.77.0.2 6379` on its Redis.
+Contabo keeps a **cold standby**: the gateway and worker images are prebuilt,
+but no containers run, and the nginx variants sit next to the live config:
+- `nginx.multi-gateway.local-gateways.conf`: Contabo serves Leaf itself.
+- `nginx.multi-gateway.forward-to-santiago.conf.health`: the normal mode, forwarding to Santiago.
 
-## After 24–48 h stable
+Drill on 2026-10-16, run with DNS untouched and verified through `curl --resolve` against Contabo:
+
+| Step | Script | Time |
+|---|---|---|
+| Fail over: stop Santiago app, promote the Contabo Redis, start 4 gateways + 6 workers, point nginx at the local gateways | `scripts/ops/failover/failover-to-contabo.sh` | **32 s** to HTTPS 200 and WebSocket 101 on Contabo |
+| Fail back: stop the Contabo app, resync Santiago Redis from Contabo and promote it, start Santiago, forward again, make Contabo the replica | `scripts/ops/failover/failback-to-santiago.sh` | **31 s** to HTTPS 200 on Santiago |
+
+During a real incident, add the DNS step:
+- **Owner:** point `api` and `socket` at `62.169.31.231`, then back to `64.176.9.163` for failback. The TTL is 300 s.
+- **Until DNS moves:** clients keep resolving Santiago, so a full Santiago outage is still visible to them for up to the TTL.
+- **If Santiago is unreachable:** skip its stop step. Contabo's Redis keeps only what had replicated, which is seconds behind.
+
+**Keep the standby current.** After each backend deploy to Santiago, refresh the Contabo images:
+- Stream the code tree over the tunnel, excluding `.env*`, credentials, `certbot`, `ssl`, `docker-compose*.yml` and `nginx*.conf`.
+- Run `docker compose ... build` for the gateway and worker services. Never `up`.
+
+Otherwise a failover runs the previous release.
+
+## Housekeeping
 
 - Remove the Leaf gateways and workers from Contabo, and delete their images.
 - Keep on Contabo: Redis (replica), face compare, the OCR worker, the dashboard, backups and the relays.
