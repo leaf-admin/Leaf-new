@@ -197,9 +197,15 @@ if (String(process.env.SENTRY_DSN || '').trim()) {
 }
 
 // Criar logger principal
+// winston runs the format chain (including redaction) before checking the
+// level, so drop disabled levels first: debug calls on hot paths stay cheap.
+const dropDisabledLevels = winston.format((info) => (
+  logger.isLevelEnabled(info.level) ? info : false
+));
+
 const logger = winston.createLogger({
   level: process.env.LOG_LEVEL || 'info',
-  format: logFormat,
+  format: winston.format.combine(dropDisabledLevels(), logFormat),
   transports: transports.filter(Boolean),
   exitOnError: false
 });
@@ -314,6 +320,8 @@ const logError = (error, context = {}) => {
 
 // Função para log estruturado (padrão Uber/99)
 const logStructured = (level, message, meta = {}) => {
+  // Skip redaction work for levels the logger would drop anyway (hot paths log at debug).
+  if (typeof logger.isLevelEnabled === 'function' && !logger.isLevelEnabled(level)) return;
   const traceId = traceContext.getCurrentTraceId();
   const structuredMeta = {
     traceId,
