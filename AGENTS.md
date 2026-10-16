@@ -17,6 +17,16 @@ It is intentionally short, strict, and scoped to prevent hallucinated work.
 - Maps: Google Maps SDK in app, backend/cache for Places, Routes, geocoding, and paid routing policy.
 - KYC: AWS liveness when enabled, Leaf face compare service, backend policy as source of truth.
 
+## Backend Hosts
+
+- Realtime production backend (primary since 2026-10-16): Vultr Santiago, `ssh leaf-scl-test` (`root@64.176.9.163`, key `~/.ssh/leaf_vultr_sp_test_ed25519`). `api.leaf.app.br` and `socket.leaf.app.br` point here. Backend directory: `/opt/leaf-app`.
+- Support host: Contabo, `ssh leaf-vps` (`root@62.169.31.231`, key `~/.ssh/leaf_contabo_20260412_ed25519`). It runs the dashboard (`dashboard.leaf.app.br`), face compare, the OCR worker, the Redis replica, daily backups and the shared nginx edge, which other projects also use. It no longer runs Leaf gateways or workers.
+- The two hosts talk over WireGuard: Santiago is 10.77.0.1, Contabo is 10.77.0.2. Keep strict host verification enabled on both.
+- Deploy the backend with `leaf-websocket-backend/scripts/deploy-santiago-docker.sh`, from a clean `main` checkout. Never point `deploy-contabo-docker.sh` at Contabo again.
+- Read `docs/operations/SANTIAGO_CUTOVER_RUNBOOK.md` before host access, deploys or failover. On Contabo, edit only the Leaf blocks of the shared nginx; never sync compose or nginx wholesale.
+- The IP in `Desktop/dump/contabo.txt` identifies another host. It is not a Leaf API/socket origin.
+- Do not ask again for credentials already available locally. Before you read a connection failure as a credential or host-key change, confirm the current DNS and the known host identity.
+
 ## Required Rules
 
 - Always read the issue/task and this file before editing.
@@ -76,7 +86,7 @@ Stop and ask for human direction when:
 - A task requires changing a business rule.
 - A task requires using production credentials, generating secrets, or rotating keys.
 - A task could increase paid API usage.
-- A task needs a store submission, production deploy, DNS, Cloudflare, Contabo, Firebase, Woovi, AWS, or Apple/Google console action.
+- A task needs a store submission, production deploy, DNS, Cloudflare, Contabo, Vultr, Firebase, Woovi, AWS, or Apple/Google console action.
 - A task requires removing legacy code that still appears in `rg` results.
 - A task requires a native build but the issue only authorized OTA or JS changes.
 - Evidence cannot be collected honestly without a real device, real session, or real provider response.
