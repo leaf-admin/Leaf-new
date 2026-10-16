@@ -2321,7 +2321,17 @@ function registerSocketCreateBookingHandler({
                                     source: 'createBooking_paid_immediate',
                                     force: true,
                                     maxAttempts: paidDispatchMaxAttempts,
-                                    retryDelayMs: paidDispatchRetryDelayMs
+                                    retryDelayMs: paidDispatchRetryDelayMs,
+                                    // Same financial context as the materialization above.
+                                    financialContext: commandPaymentData.financialContext || null,
+                                    financialNamespace: commandPaymentData.financialNamespace || null,
+                                    financialContextId: commandPaymentData.financialContextId || null,
+                                    providerEnvironment:
+                                        commandPaymentData.paymentProviderEnvironment ||
+                                        commandPaymentData.providerEnvironment ||
+                                        null,
+                                    testUserSandbox:
+                                        commandPaymentData.financialContext?.testUserSandbox === true
                                 });
 
                                 const intentConsumed = await intentConsumedPromise;

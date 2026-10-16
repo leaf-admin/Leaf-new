@@ -490,4 +490,85 @@ describe('payment-dispatch-service', () => {
     });
     expect(startGradualSearch).toHaveBeenCalledTimes(1);
   });
+
+  describe('financial context of the dispatch caller', () => {
+    function sandboxContext() {
+      return sealFinancialContext({
+        providerEnvironment: 'sandbox',
+        paymentProfileId: 'qa-test-users-sandbox-durable',
+        paymentProfileSource: 'firestore',
+        testUserSandbox: true
+      });
+    }
+
+    function storeSandboxBooking(bookingId, financialContext, overrides = {}) {
+      mockRedisState.hashes.set(`booking:${bookingId}`, {
+        bookingId,
+        customerId: 'qa_passenger',
+        state: 'PENDING',
+        paymentStatus: 'in_holding',
+        paymentLedgerStatus: 'posted',
+        pickupLocation: JSON.stringify({ lat: -22.853586, lng: -43.318168 }),
+        financialContext: JSON.stringify(financialContext),
+        financialNamespace: 'sandbox',
+        financialContextId: financialContext.contextId,
+        providerEnvironment: 'sandbox',
+        paymentProviderEnvironment: 'sandbox',
+        testUserSandbox: 'true',
+        ...overrides
+      });
+    }
+
+    it('dispatches a sandbox booking in its own sealed context when the caller states none', async () => {
+      const startGradualSearch = jest.fn(async () => undefined);
+      GradualRadiusExpander.mockImplementation(() => ({ startGradualSearch }));
+      storeSandboxBooking('booking_sandbox_internal', sandboxContext());
+
+      const result = await triggerDispatchAfterPayment({
+        bookingId: 'booking_sandbox_internal',
+        io: {},
+        pickupLocation: { lat: -22.853586, lng: -43.318168 },
+        source: 'unit_test',
+        force: true,
+        maxAttempts: 1
+      });
+
+      expect(result).toMatchObject({ success: true, bookingId: 'booking_sandbox_internal' });
+      expect(startGradualSearch).toHaveBeenCalledTimes(1);
+    });
+
+    it('still refuses a sandbox booking to a caller that states the operational context', async () => {
+      const startGradualSearch = jest.fn(async () => undefined);
+      GradualRadiusExpander.mockImplementation(() => ({ startGradualSearch }));
+      storeSandboxBooking('booking_sandbox_operational_caller', sandboxContext());
+
+      await expect(triggerDispatchAfterPayment({
+        bookingId: 'booking_sandbox_operational_caller',
+        io: {},
+        pickupLocation: { lat: -22.853586, lng: -43.318168 },
+        source: 'unit_test',
+        force: true,
+        maxAttempts: 1,
+        providerEnvironment: 'production',
+        testUserSandbox: false
+      })).rejects.toMatchObject({ code: 'SANDBOX_RECORD_OPERATIONAL_ACCESS_DENIED' });
+      expect(startGradualSearch).not.toHaveBeenCalled();
+    });
+
+    it('fails closed when the booking lost its sealed context but keeps a sandbox signal', async () => {
+      const startGradualSearch = jest.fn(async () => undefined);
+      GradualRadiusExpander.mockImplementation(() => ({ startGradualSearch }));
+      storeSandboxBooking('booking_sandbox_lost_seal', sandboxContext(), { financialContext: '{not json' });
+
+      await expect(triggerDispatchAfterPayment({
+        bookingId: 'booking_sandbox_lost_seal',
+        io: {},
+        pickupLocation: { lat: -22.853586, lng: -43.318168 },
+        source: 'unit_test',
+        force: true,
+        maxAttempts: 1
+      })).rejects.toBeTruthy();
+      expect(startGradualSearch).not.toHaveBeenCalled();
+    });
+  });
 });
