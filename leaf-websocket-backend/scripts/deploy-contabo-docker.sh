@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Modular production rollout for the Contabo host.
+# Modular production rollout for the realtime host (Santiago since 2026-10-16;
+# use scripts/deploy-santiago-docker.sh, which sets the target below).
 #
 # This script never tears down the compose project, Redis, or named volumes.
 # It never converts or restarts Redis. The Redis authority must be activated
@@ -26,6 +27,9 @@ set -euo pipefail
 #   UPDATE_WORKERS=true
 #   RUN_PUBLIC_SMOKE=true
 #   AUTO_ROLLBACK=true
+#   REMOTE_BASE_COMPOSE=docker-compose.yml
+#   REMOTE_EXTRA_COMPOSE=""          (host overlay, e.g. docker-compose.santiago.yml)
+#   GATEWAY_SERVICES="websocket-gateway-2 websocket-gateway-3 websocket-gateway-4"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BACKEND_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -51,9 +55,31 @@ HEALTH_TIMEOUT_SECONDS="${HEALTH_TIMEOUT_SECONDS:-120}"
 BASE_COMPOSE="docker-compose.production.yml"
 SCALE_COMPOSE="docker-compose.gateway-scale.yml"
 OPS_COMPOSE="docker-compose.ops-workers.yml"
-REMOTE_BASE_COMPOSE="docker-compose.yml"
+REMOTE_BASE_COMPOSE="${REMOTE_BASE_COMPOSE:-docker-compose.yml}"
 REMOTE_SCALE_COMPOSE="docker-compose.gateway-scale.yml"
 REMOTE_OPS_COMPOSE="docker-compose.ops-workers.yml"
+REMOTE_EXTRA_COMPOSE="${REMOTE_EXTRA_COMPOSE:-}"
+# Gateways besides the primary "websocket" service, rolled one at a time.
+GATEWAY_SERVICES="${GATEWAY_SERVICES:-websocket-gateway-2 websocket-gateway-3 websocket-gateway-4}"
+
+REMOTE_COMPOSE_FILES="-f $REMOTE_BASE_COMPOSE -f $REMOTE_SCALE_COMPOSE -f $REMOTE_OPS_COMPOSE"
+if [[ -n "$REMOTE_EXTRA_COMPOSE" ]]; then
+  if [[ "$REMOTE_EXTRA_COMPOSE" = /* || "$REMOTE_EXTRA_COMPOSE" == *".."* || "$REMOTE_EXTRA_COMPOSE" == *" "* ]]; then
+    echo "[deploy][error] Invalid REMOTE_EXTRA_COMPOSE: $REMOTE_EXTRA_COMPOSE" >&2
+    exit 2
+  fi
+  REMOTE_COMPOSE_FILES="$REMOTE_COMPOSE_FILES -f $REMOTE_EXTRA_COMPOSE"
+fi
+for gateway_service in $GATEWAY_SERVICES; do
+  if [[ ! "$gateway_service" =~ ^websocket-gateway-[0-9]+$ ]]; then
+    echo "[deploy][error] Invalid gateway service: $gateway_service" >&2
+    exit 2
+  fi
+done
+GATEWAY_CONTAINERS=""
+for gateway_service in $GATEWAY_SERVICES; do
+  GATEWAY_CONTAINERS="$GATEWAY_CONTAINERS leaf-$gateway_service"
+done
 
 if [[ "$CONFIRM_PRODUCTION_DEPLOY" != "true" ]]; then
   echo "[deploy][error] Set CONFIRM_PRODUCTION_DEPLOY=true to authorize the production rollout." >&2
@@ -175,6 +201,9 @@ rollback_on_error() {
       cp '$REMOTE_BACKUP_DIR/$REMOTE_BASE_COMPOSE' '$REMOTE_BASE_COMPOSE'
       cp '$REMOTE_BACKUP_DIR/$REMOTE_SCALE_COMPOSE' '$REMOTE_SCALE_COMPOSE'
       cp '$REMOTE_BACKUP_DIR/$REMOTE_OPS_COMPOSE' '$REMOTE_OPS_COMPOSE'
+      if [ -n '$REMOTE_EXTRA_COMPOSE' ]; then
+        cp '$REMOTE_BACKUP_DIR/$REMOTE_EXTRA_COMPOSE' '$REMOTE_EXTRA_COMPOSE'
+      fi
 
       while IFS='|' read -r container configured_image previous_image rollback_tag; do
         test -n \"\$container\"
@@ -184,8 +213,8 @@ rollback_on_error() {
         docker image tag \"\$previous_image\" \"\$configured_image\"
       done < '$REMOTE_BACKUP_DIR/container-images-before.txt'
 
-      compose='docker compose -f $REMOTE_BASE_COMPOSE -f $REMOTE_SCALE_COMPOSE -f $REMOTE_OPS_COMPOSE'
-      for service in websocket-gateway-2 websocket-gateway-3 websocket-gateway-4 websocket; do
+      compose='docker compose $REMOTE_COMPOSE_FILES'
+      for service in $GATEWAY_SERVICES websocket; do
         \$compose up -d --no-deps --no-build --force-recreate \"\$service\"
       done
 
@@ -260,7 +289,8 @@ if [[ "$GATEWAY_ONLY_DEPLOY" == "true" ]]; then
 fi
 
 echo "[deploy] Target: $VPS_USER@$CONTABO_HOST:$REMOTE_BACKEND_DIR"
-echo "[deploy] Compose: $BASE_COMPOSE + $SCALE_COMPOSE"
+echo "[deploy] Compose (remote): $REMOTE_COMPOSE_FILES"
+echo "[deploy] Gateways: websocket $GATEWAY_SERVICES"
 echo "[deploy] Release SHA: $RELEASE_SHA"
 
 if [[ "$SKIP_LOCAL_TESTS" != "true" ]]; then
@@ -300,15 +330,13 @@ remote "
   cd '$REMOTE_BACKEND_DIR'
   cp .env '$REMOTE_BACKUP_DIR/.env.before'
   chmod 600 '$REMOTE_BACKUP_DIR/.env.before'
-  docker compose -f '$REMOTE_BASE_COMPOSE' -f '$REMOTE_SCALE_COMPOSE' ps \
+  docker compose $REMOTE_COMPOSE_FILES ps \
     > '$REMOTE_BACKUP_DIR/compose-ps-before.txt'
   docker image ls --digests > '$REMOTE_BACKUP_DIR/docker-images-before.txt'
   : > '$REMOTE_BACKUP_DIR/container-images-before.txt'
   for container in \
     leaf-websocket \
-    leaf-websocket-gateway-2 \
-    leaf-websocket-gateway-3 \
-    leaf-websocket-gateway-4 \
+    $GATEWAY_CONTAINERS \
     leaf-trip-location-worker \
     leaf-queue-worker \
     leaf-sideeffects-worker \
@@ -328,6 +356,9 @@ remote "
   cp '$REMOTE_BASE_COMPOSE' '$REMOTE_BACKUP_DIR/$REMOTE_BASE_COMPOSE'
   cp '$REMOTE_SCALE_COMPOSE' '$REMOTE_BACKUP_DIR/$REMOTE_SCALE_COMPOSE'
   cp '$REMOTE_OPS_COMPOSE' '$REMOTE_BACKUP_DIR/$REMOTE_OPS_COMPOSE'
+  if [ -n '$REMOTE_EXTRA_COMPOSE' ]; then
+    cp '$REMOTE_EXTRA_COMPOSE' '$REMOTE_BACKUP_DIR/$REMOTE_EXTRA_COMPOSE'
+  fi
   tar \
     --exclude='./node_modules' \
     --exclude='./logs' \
@@ -557,7 +588,7 @@ remote "
     --entrypoint node \
     \"\$validator_image\" \
     scripts/deploy/validate-runtime-config.js
-  docker compose --env-file .env -f '$REMOTE_BASE_COMPOSE' -f '$REMOTE_SCALE_COMPOSE' -f '$REMOTE_OPS_COMPOSE' config --services \
+  docker compose --env-file .env $REMOTE_COMPOSE_FILES config --services \
     > '$REMOTE_BACKUP_DIR/compose-services-after-sync.txt'
 "
 
@@ -565,12 +596,12 @@ echo "[deploy] 4/7 Building modular services"
 remote "
   set -e
   cd '$REMOTE_BACKEND_DIR'
-  compose='docker compose -f $REMOTE_BASE_COMPOSE -f $REMOTE_SCALE_COMPOSE -f $REMOTE_OPS_COMPOSE'
+  compose='docker compose $REMOTE_COMPOSE_FILES'
   if [ '$GATEWAY_ONLY_DEPLOY' = true ]; then
-    GIT_SHA='$RELEASE_SHA' \$compose build websocket websocket-gateway-2 websocket-gateway-3 websocket-gateway-4
+    GIT_SHA='$RELEASE_SHA' \$compose build websocket $GATEWAY_SERVICES
   else
     GIT_SHA='$RELEASE_SHA' \$compose build \
-      websocket websocket-gateway-2 websocket-gateway-3 websocket-gateway-4 \
+      websocket $GATEWAY_SERVICES \
       sideeffects-worker billing-worker queue-worker \
       trip-location-worker pricing-baseline-worker ride-health-monitor-worker
   fi
@@ -623,7 +654,7 @@ echo "[deploy] 5/7 Rolling gateways"
 remote "
   set -e
   cd '$REMOTE_BACKEND_DIR'
-  compose='docker compose -f $REMOTE_BASE_COMPOSE -f $REMOTE_SCALE_COMPOSE -f $REMOTE_OPS_COMPOSE'
+  compose='docker compose $REMOTE_COMPOSE_FILES'
 
   wait_healthy() {
     service=\"\$1\"
@@ -680,20 +711,12 @@ remote "
   fi
   wait_healthy trip-location-worker leaf-trip-location-worker
 
-  \$compose up -d --no-deps websocket-gateway-2
-  wait_healthy websocket-gateway-2 leaf-websocket-gateway-2
-  wait_ready leaf-websocket-gateway-2
-  verify_release leaf-websocket-gateway-2
-
-  \$compose up -d --no-deps websocket-gateway-3
-  wait_healthy websocket-gateway-3 leaf-websocket-gateway-3
-  wait_ready leaf-websocket-gateway-3
-  verify_release leaf-websocket-gateway-3
-
-  \$compose up -d --no-deps websocket-gateway-4
-  wait_healthy websocket-gateway-4 leaf-websocket-gateway-4
-  wait_ready leaf-websocket-gateway-4
-  verify_release leaf-websocket-gateway-4
+  for gateway_service in $GATEWAY_SERVICES; do
+    \$compose up -d --no-deps \"\$gateway_service\"
+    wait_healthy \"\$gateway_service\" \"leaf-\$gateway_service\"
+    wait_ready \"leaf-\$gateway_service\"
+    verify_release \"leaf-\$gateway_service\"
+  done
 
   \$compose up -d --no-deps websocket
   wait_healthy websocket leaf-websocket
@@ -709,7 +732,7 @@ if [[ "$UPDATE_WORKERS" == "true" ]]; then
   remote "
     set -e
     cd '$REMOTE_BACKEND_DIR'
-    compose='docker compose -f $REMOTE_BASE_COMPOSE -f $REMOTE_SCALE_COMPOSE -f $REMOTE_OPS_COMPOSE'
+    compose='docker compose $REMOTE_COMPOSE_FILES'
     wait_worker() {
       container=\"\$1\"
       elapsed=0
@@ -754,7 +777,7 @@ echo "[deploy] 7/7 Health and public smoke"
 remote "
   set -e
   cd '$REMOTE_BACKEND_DIR'
-  docker compose -f '$REMOTE_BASE_COMPOSE' -f '$REMOTE_SCALE_COMPOSE' -f '$REMOTE_OPS_COMPOSE' ps
+  docker compose $REMOTE_COMPOSE_FILES ps
   curl -fsS --max-time 15 http://127.0.0.1:3001/health/liveness >/dev/null
   curl -fsS --max-time 15 http://127.0.0.1:3001/health/readiness >/dev/null
   docker exec leaf-nginx nginx -t

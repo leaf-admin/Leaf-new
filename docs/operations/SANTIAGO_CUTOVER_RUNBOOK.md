@@ -1,7 +1,25 @@
 # Santiago realtime host: topology and cutover runbook
 
-Status on 2026-10-16: Santiago is built and running as a **live Redis replica** of
-production. Its app services are stopped. DNS still points at Contabo.
+Status: **cutover done on 2026-10-16 02:41 UTC.**
+- Santiago is the primary. `api` and `socket.leaf.app.br` point at 64.176.9.163.
+- Contabo's `leaf-redis` replicates from Santiago, and Contabo nginx forwards Leaf stragglers over the tunnel.
+- The Leaf gateways and workers on Contabo are stopped and kept for rollback.
+- TLS is split. `api` and `socket` renew on Santiago (`/etc/cron.d/leaf-certbot-renew`), and `dashboard` renews on Contabo.
+
+## Deploying (since the cutover)
+
+Run from the clean `main` checkout:
+
+```bash
+cd leaf-websocket-backend
+CONFIRM_PRODUCTION_DEPLOY=true PRODUCTION_RELEASE_SHA=$(git rev-parse HEAD) \
+  DEPLOY_TRACKED_PATHS="..." bash scripts/deploy-santiago-docker.sh
+```
+
+- The wrapper targets 64.176.9.163, two gateways and the `docker-compose.santiago.yml` overlay.
+- Santiago's `.env` sets `LEAF_SANTIAGO_PRIMARY=true` and `COMPOSE_PROFILES=primary`. Any manual compose command there runs the full primary set, as long as it uses the same `-f` list as the script: `docker-compose.yml`, `docker-compose.gateway-scale.yml`, `docker-compose.ops-workers.yml` and `docker-compose.santiago.yml`.
+- `deploy-contabo-docker.sh` must not be pointed at Contabo any more.
+- A full deploy of `main` (without `DEPLOY_TRACKED_PATHS`) is blocked until the KYC biometric policy in `main` matches the production `.env`.
 
 ## Topology
 
