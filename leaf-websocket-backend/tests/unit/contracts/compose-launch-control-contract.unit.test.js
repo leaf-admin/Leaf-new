@@ -524,8 +524,9 @@ describe('production compose launch-control contract', () => {
     const tripWorkerUp = deploySource.indexOf(
       '\\$compose up -d --no-deps trip-location-worker',
     );
+    // Gateways roll one at a time from GATEWAY_SERVICES (host-specific list).
     const firstGatewayUp = deploySource.indexOf(
-      '\\$compose up -d --no-deps websocket-gateway-2',
+      '\\$compose up -d --no-deps \\"\\$gateway_service\\"',
     );
     expect(tripWorkerUp).toBeGreaterThan(-1);
     expect(firstGatewayUp).toBeGreaterThan(tripWorkerUp);
