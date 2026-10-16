@@ -1,0 +1,13 @@
+# Writes the host health summary served at /health/host (see
+# scripts/ops/host-health-report.py). Per-host arguments live in
+# /etc/default/leaf-host-health, e.g.:
+#   LEAF_HOST_HEALTH_ARGS=--role santiago --out /opt/leaf-app/certbot/www/leaf-host-health.json --cert /opt/leaf-app/certbot/conf/live/api.leaf.app.br/fullchain.pem
+[Unit]
+Description=Leaf host health summary
+After=docker.service
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/default/leaf-host-health
+ExecStart=/usr/bin/python3 /opt/leaf-app/scripts/ops/host-health-report.py $LEAF_HOST_HEALTH_ARGS
+Nice=10
