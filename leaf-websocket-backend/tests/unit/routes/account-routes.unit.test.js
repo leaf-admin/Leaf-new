@@ -789,7 +789,10 @@ describe('account deletion route', () => {
     }));
     expect(Object.keys(updates).some(path => path.startsWith('vehicles/'))).toBe(false);
     expect(Object.keys(updates).some(path => path.startsWith('vehicle_plate_index/'))).toBe(false);
-    expect(mockRedisDel).toHaveBeenCalledWith('driver_eligibility_profile:review-user');
+    expect(mockRedisDel).toHaveBeenCalledWith(
+      'driver_eligibility_profile:review-user',
+      'driver_activation_gate:review-user'
+    );
   });
 
   it('does not attach an edited plate to an unverified global catalog record', async () => {
