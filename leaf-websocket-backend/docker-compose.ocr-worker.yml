@@ -1,0 +1,61 @@
+# Dedicated OCR worker for the support host (Contabo). Layer it on the
+# production compose there:
+#
+#   OCR_WORKER_BIND=10.77.0.2 docker compose -p leaf-app -f docker-compose.production.yml \
+#     -f docker-compose.gateway-scale.yml -f docker-compose.ops-workers.yml \
+#     -f docker-compose.ocr-worker.yml up -d --no-deps ocr-worker
+#
+# OCR_WORKER_BIND is the WireGuard address, so only the realtime host reaches
+# it; nginx on the realtime host routes /api/ocr/ to it. OCR_WORKER_REDIS_HOST
+# follows the Redis primary (see below).
+services:
+  ocr-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        GIT_SHA: ${GIT_SHA:-unknown}
+    container_name: leaf-ocr-worker
+    command: ["node", "workers/ocr-http-worker.js"]
+    env_file:
+      - .env
+    environment:
+      - NODE_ENV=production
+      - RUNTIME_ROLE=ocr
+      - OCR_WORKER_PORT=3110
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - GOOGLE_APPLICATION_CREDENTIALS=/app/firebase-credentials.json
+      - FIREBASE_PROJECT_ID=${FIREBASE_PROJECT_ID:-leaf-reactnative}
+      - FIREBASE_DATABASE_URL=${FIREBASE_DATABASE_URL:-https://leaf-reactnative-default-rtdb.firebaseio.com}
+      - FIREBASE_STORAGE_BUCKET=${FIREBASE_STORAGE_BUCKET:-leaf-reactnative.firebasestorage.app}
+      # Only the Firebase circuit breaker state lives in Redis here. Point it at
+      # the primary: the local redis before the cutover, the realtime host's
+      # WireGuard address (10.77.0.1) after it.
+      - REDIS_HOST=${OCR_WORKER_REDIS_HOST:-redis}
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=${REDIS_PASSWORD:?REDIS_PASSWORD is required}
+      - REDIS_DB=${REDIS_DB:-0}
+      - REDIS_URL=redis://:${REDIS_PASSWORD:?REDIS_PASSWORD is required}@${OCR_WORKER_REDIS_HOST:-redis}:6379/${REDIS_DB:-0}
+      - REDIS_MODE=standalone
+    ports:
+      - "${OCR_WORKER_BIND:-127.0.0.1}:3110:3110"
+    volumes:
+      - ./firebase-credentials.json:/app/firebase-credentials.json:ro
+      - ./logs:/app/logs
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    restart: unless-stopped
+    mem_limit: 1536m
+    cpus: "1.50"
+    pids_limit: 256
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3110/health >/dev/null 2>&1 || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    networks:
+      - leaf-network
