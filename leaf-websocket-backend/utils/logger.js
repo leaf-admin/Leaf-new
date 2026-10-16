@@ -122,6 +122,10 @@ const logFormat = winston.format.combine(
     if (meta.eventType) relevantMeta.eventType = meta.eventType;
     if (meta.command) relevantMeta.command = meta.command;
     if (meta.listener) relevantMeta.listener = meta.listener;
+    // Warnings and errors carry their cause in error/code: keep them visible.
+    if (meta.error) relevantMeta.error = typeof meta.error === 'string' ? meta.error : (meta.error.message || String(meta.error));
+    if (meta.code) relevantMeta.code = meta.code;
+    if (meta.reason) relevantMeta.reason = meta.reason;
     
     if (Object.keys(relevantMeta).length > 0) {
       log += ` ${JSON.stringify(relevantMeta)}`;
