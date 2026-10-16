@@ -158,6 +158,60 @@ describe('kyc biometric production policy', () => {
     expect(result.blockers).toEqual([]);
   });
 
+  test('accepts controlled production readiness without AWS liveness when server-side Face Compare is configured', () => {
+    const result = evaluateProductionReadiness({
+      NODE_ENV: 'production',
+      KYC_PRODUCTION_BIOMETRICS_ENABLED: 'true',
+      KYC_STRICT_PRODUCTION_MODE: 'true',
+      KYC_LIVENESS_BYPASS_ENABLED: 'true',
+      KYC_AWS_LIVENESS_ENABLED: 'false',
+      KYC_FACE_COMPARE_PROVIDER: 'biometric-face-service',
+      BIOMETRIC_FACE_SERVICE_URL: 'https://face.internal',
+      BIOMETRIC_FACE_SERVICE_API_KEY: 'face-key',
+      ENABLE_CNH_FACE_BIOMETRICS: 'true',
+      KYC_ACTIVE_TRIP_AUTHORITY_MODE: 'redis_noeviction',
+      MOBILE_FACE_EMBEDDING_ENABLED: 'false',
+      MOBILE_FACE_EMBEDDING_LOCAL_COMPARE_FALLBACK: 'false',
+      KYC_REQUIRE_TRUSTED_BIOMETRIC_MATCH: 'true',
+      KYC_ALLOW_LEGACY_DEVICE_SIGNATURE: 'false',
+      KYC_ALLOW_AWS_LIVENESS_ONLY_MATCH: 'false',
+      BIOMETRIC_FACE_APPROVE_THRESHOLD: '0.61',
+      BIOMETRIC_FACE_REVIEW_THRESHOLD: '0.40'
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.policy.livenessBypassEnabled).toBe(true);
+    expect(result.blockers).toEqual([]);
+    expect(result.warnings).toContain(
+      'KYC_LIVENESS_BYPASS_ENABLED=true: a prova de vida AWS está desativada; a aprovação continua condicionada ao Face Compare server-side.'
+    );
+  });
+
+  test('blocks the no-AWS bypass when the Face Compare provider is AWS', () => {
+    const result = evaluateProductionReadiness({
+      NODE_ENV: 'production',
+      KYC_PRODUCTION_BIOMETRICS_ENABLED: 'true',
+      KYC_STRICT_PRODUCTION_MODE: 'true',
+      KYC_LIVENESS_BYPASS_ENABLED: 'true',
+      KYC_AWS_LIVENESS_ENABLED: 'false',
+      KYC_FACE_COMPARE_PROVIDER: 'aws_rekognition_compare_faces',
+      KYC_AWS_COMPARE_FACES_ENABLED: 'true',
+      KYC_AWS_COMPARE_FACES_APPROVE_THRESHOLD: '0.95',
+      KYC_AWS_COMPARE_FACES_REVIEW_THRESHOLD: '0.80',
+      KYC_ACTIVE_TRIP_AUTHORITY_MODE: 'redis_noeviction',
+      MOBILE_FACE_EMBEDDING_ENABLED: 'false',
+      MOBILE_FACE_EMBEDDING_LOCAL_COMPARE_FALLBACK: 'false',
+      KYC_REQUIRE_TRUSTED_BIOMETRIC_MATCH: 'true',
+      KYC_ALLOW_LEGACY_DEVICE_SIGNATURE: 'false',
+      KYC_ALLOW_AWS_LIVENESS_ONLY_MATCH: 'false'
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.blockers).toContain(
+      'KYC_LIVENESS_BYPASS_ENABLED=true exige um Face Compare server-side não-AWS para manter o fluxo sem chamadas AWS.'
+    );
+  });
+
   test('blocks an AWS canonical approval threshold below 0.95', () => {
     const result = evaluateProductionReadiness({
       NODE_ENV: 'production',

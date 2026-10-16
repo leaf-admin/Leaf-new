@@ -26,6 +26,10 @@ const {
 } = require('../../utils/dispatch-config');
 const { resolveLaunchProfile } = require('../../utils/pilot-launch-flags');
 const { parseAllowlist } = require('../../services/pilot-access-control-service');
+const {
+  getWhatsAppOtpConfig,
+  isFirebasePhoneAuthProvider
+} = require('../../services/whatsapp-otp-service');
 const DockerDetector = require('../../utils/docker-detector');
 
 const REQUIRED_BASE = [
@@ -684,6 +688,8 @@ function main() {
     || boolEnv('KYC_AWS_COMPARE_FACES_ENABLED', false)
     || adaptiveKycCadence.value
     || onlineKycGate.value;
+  const awsKycAdmissionRequired = biometricReadiness.enabled
+    && biometricReadiness.policy?.livenessBypassEnabled !== true;
   const trustPolicyVersion = String(
     process.env.KYC_TRUST_POLICY_VERSION || (
       adaptiveKycCadence.value
@@ -763,15 +769,36 @@ function main() {
     'REQUIRE_SOCKETIO_REDIS_ADAPTER',
     nodeEnv === 'production' && runtimeRole === 'gateway'
   );
+  const whatsappOtpConfig = getWhatsAppOtpConfig();
+  const firebasePhoneAuthProvider = isFirebasePhoneAuthProvider();
   const authOtpDiagnostics = {
     customOtpRouteMounted: true,
     productionNonBypassMode:
       nodeEnv === 'production'
-        ? 'fail_closed_without_real_provider'
+        ? (firebasePhoneAuthProvider
+          ? 'firebase_phone_auth_primary_custom_otp_fail_closed'
+          : 'fail_closed_without_real_provider')
         : 'redis_simulated_delivery',
     debugOtp: booleanDiagnostic('DEBUG_OTP', false),
     testBypass: booleanDiagnostic('AUTH_TEST_OTP_BYPASS_ENABLED', false),
-    reviewBypass: booleanDiagnostic('AUTH_REVIEW_OTP_BYPASS_ENABLED', false)
+    reviewBypass: booleanDiagnostic('AUTH_REVIEW_OTP_BYPASS_ENABLED', false),
+    primaryAuthPath: firebasePhoneAuthProvider ? 'firebase_phone_auth_sms' : 'custom_otp_provider',
+    provider: {
+      name: whatsappOtpConfig.provider,
+      enabled: whatsappOtpConfig.enabled,
+      configured: whatsappOtpConfig.configured,
+      missing: whatsappOtpConfig.missing,
+      graphVersion: whatsappOtpConfig.graphVersion,
+      templateLanguage: whatsappOtpConfig.templateLanguage,
+      accessToken: presence(process.env.WHATSAPP_META_ACCESS_TOKEN),
+      phoneNumberId: presence(process.env.WHATSAPP_META_PHONE_NUMBER_ID),
+      templateName: presence(process.env.WHATSAPP_OTP_TEMPLATE_NAME),
+      hmacKey: {
+        configured: Boolean(String(process.env.AUTH_OTP_HMAC_KEY || '').trim()),
+        valid: Buffer.byteLength(String(process.env.AUTH_OTP_HMAC_KEY || '').trim()) >= 32,
+        required: !firebasePhoneAuthProvider
+      }
+    }
   };
 
   if (adaptiveKycCadence.value && !onlineKycGate.value) {
@@ -789,10 +816,10 @@ function main() {
   if (nodeEnv === 'production' && biometricReadiness.enabled && !activeTripIndex.value) {
     blockers.push('KYC_PRODUCTION_BIOMETRICS_ENABLED=true exige ENABLE_ACTIVE_TRIP_INDEX=true em produção');
   }
-  if (nodeEnv === 'production' && biometricReadiness.enabled && !awsAdmissionControl.value) {
+  if (nodeEnv === 'production' && awsKycAdmissionRequired && !awsAdmissionControl.value) {
     blockers.push('KYC_PRODUCTION_BIOMETRICS_ENABLED=true exige KYC_AWS_ADMISSION_CONTROL_ENABLED=true em produção');
   }
-  if (nodeEnv === 'production' && biometricReadiness.enabled && !awsAdmissionConfigValid) {
+  if (nodeEnv === 'production' && awsKycAdmissionRequired && !awsAdmissionConfigValid) {
     blockers.push('Admissão AWS KYC inválida: TPS/burst devem ficar entre 1 e 25, concorrência entre 1 e 75, lease entre 60 e 180s e KYC_AWS_ADMISSION_MAX_WAIT_MS deve ser exatamente 0');
   }
   if (!activeTripAuthorityModeValid) {
@@ -1125,6 +1152,25 @@ function main() {
     if (authOtpDiagnostics.debugOtp.value) {
       blockers.push('DEBUG_OTP=true bloqueado em produção');
     }
+    if (runtimeRole === 'gateway') {
+      if (firebasePhoneAuthProvider) {
+        // The published mobile app owns the Firebase Phone Auth/SMS exchange.
+        // Custom OTP routes remain fail-closed unless WhatsApp is explicitly
+        // selected; this mode must never silently fall back to simulation.
+      } else if (whatsappOtpConfig.provider !== 'whatsapp') {
+        blockers.push('AUTH_OTP_PROVIDER=firebase ou whatsapp obrigatório em produção para o fluxo OTP');
+      } else {
+        if (!whatsappOtpConfig.configured) {
+          blockers.push(
+            `WhatsApp OTP incompleto em produção: configure ${whatsappOtpConfig.missing.join(', ') || 'as variáveis do provedor'}`
+          );
+        }
+        const authOtpHmacKey = String(process.env.AUTH_OTP_HMAC_KEY || '').trim();
+        if (Buffer.byteLength(authOtpHmacKey) < 32) {
+          blockers.push('OTP em produção exige AUTH_OTP_HMAC_KEY dedicada com pelo menos 32 bytes');
+        }
+      }
+    }
     if (boolEnv('AUTH_TEST_OTP_BYPASS_ENABLED')) {
       blockers.push('AUTH_TEST_OTP_BYPASS_ENABLED=true bloqueado em produção');
     }
@@ -1196,7 +1242,10 @@ function main() {
         process.env.WOOVI_WEBHOOK_AUTH_TOKEN ||
         process.env.OPENPIX_WEBHOOK_AUTH_TOKEN
       ),
-      LEAF_PIX_KEY: presence(process.env.LEAF_PIX_KEY)
+      LEAF_PIX_KEY: presence(process.env.LEAF_PIX_KEY),
+      AUTH_OTP_HMAC_KEY: presence(process.env.AUTH_OTP_HMAC_KEY),
+      WHATSAPP_META_ACCESS_TOKEN: presence(process.env.WHATSAPP_META_ACCESS_TOKEN),
+      WHATSAPP_META_PHONE_NUMBER_ID: presence(process.env.WHATSAPP_META_PHONE_NUMBER_ID)
     },
     diagnostics: {
       biometricReadiness,

@@ -281,6 +281,17 @@ describe('kyc-policy-service', () => {
     expect(result).toBe(true);
   });
 
+  test('isLivenessSatisfied accepts only the explicit server-controlled bypass marker', () => {
+    expect(service.isLivenessSatisfied({
+      livenessBypass: true,
+      livenessBypassSource: 'backend_configured'
+    })).toBe(false);
+    expect(service.isLivenessSatisfied({
+      livenessBypass: true,
+      livenessBypassSource: 'backend_configured'
+    }, { allowServerBypass: true })).toBe(true);
+  });
+
   test('a pending review in any durable store wins over an approved replica', async () => {
     jest.spyOn(service, 'getDriverKycState').mockResolvedValue({
       usersDoc: { kycStatus: 'pending_review', kycBlocked: false },

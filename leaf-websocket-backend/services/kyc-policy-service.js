@@ -275,6 +275,10 @@ class KYCPolicyService {
       enforceFirstAccessLiveness: getBoolEnv(
         'KYC_FIRST_ACCESS_ENFORCE_LIVENESS',
         DEFAULTS.enforceFirstAccessLiveness
+      ),
+      livenessBypassEnabled: getBoolEnv(
+        'KYC_LIVENESS_BYPASS_ENABLED',
+        false
       )
     };
   }
@@ -1148,17 +1152,30 @@ class KYCPolicyService {
     });
   }
 
-  isLivenessSatisfied(payload = {}) {
+  isLivenessSatisfied(payload = {}, { allowServerBypass = false } = {}) {
     // Accept only provider-backed liveness evidence.
     // Client-declared flags such as `livenessPassed` or `isLive` are not trusted alone.
     if (payload.azure?.liveness?.passed === true) return true;
     if (payload.azureLivenessPassed === true) return true;
     if (payload.aws?.passed === true) return true;
     if (payload.awsLivenessPassed === true) return true;
+    if (
+      allowServerBypass === true
+      && payload.livenessBypass === true
+      && payload.livenessBypassSource === 'backend_configured'
+    ) {
+      return true;
+    }
     return false;
   }
 
-  async resolveStepUpChallenge({ challengeId, driverId, requirement, verificationPayload = {} }) {
+  async resolveStepUpChallenge({
+    challengeId,
+    driverId,
+    requirement,
+    verificationPayload = {},
+    allowLivenessBypass = false
+  }) {
     if (!challengeId) {
       return {
         success: false,
@@ -1177,7 +1194,10 @@ class KYCPolicyService {
     }
 
     const effectiveRequirement = challenge.requirement || requirement || 'VERIFY_REQUIRED';
-    if (effectiveRequirement === 'LIVENESS_REQUIRED' && !this.isLivenessSatisfied(verificationPayload)) {
+    if (
+      effectiveRequirement === 'LIVENESS_REQUIRED'
+      && !this.isLivenessSatisfied(verificationPayload, { allowServerBypass: allowLivenessBypass })
+    ) {
       return {
         success: false,
         error: 'Liveness obrigatorio para concluir este desafio',
@@ -1217,7 +1237,9 @@ class KYCPolicyService {
           resolution: {
             requirement: effectiveRequirement,
             provider: verificationPayload.provider || verificationPayload.mode || 'unknown',
-            livenessPassed: this.isLivenessSatisfied(verificationPayload),
+            livenessPassed: this.isLivenessSatisfied(verificationPayload, {
+              allowServerBypass: allowLivenessBypass
+            }),
             similarityScore: Number(verificationPayload.similarityScore || 0),
             confidence: Number(verificationPayload.confidence || 0)
           },
@@ -1229,6 +1251,9 @@ class KYCPolicyService {
     await this.recordVerificationSuccess(challenge.driverId, {
       source: `challenge:${effectiveRequirement}`,
       verifiedAt: nowIso,
+      livenessBypassed: allowLivenessBypass === true
+        && verificationPayload.livenessBypass === true
+        && verificationPayload.livenessBypassSource === 'backend_configured',
       // Compatibility challenges may record freshness, but only canonical
       // AWS + trusted server-side compare may clear an identity reverify gate.
       clearReverify: false
@@ -1439,6 +1464,13 @@ class KYCPolicyService {
       realtimePayload.kycFirstAccessVerifiedAt = verifiedAtIso;
       if (firestorePayload) {
         firestorePayload.kycFirstAccessVerifiedAt = admin.firestore.FieldValue.serverTimestamp();
+      }
+    }
+
+    if (options.livenessBypassed) {
+      realtimePayload.kycLivenessBypassedAt = verifiedAtIso;
+      if (firestorePayload) {
+        firestorePayload.kycLivenessBypassedAt = admin.firestore.FieldValue.serverTimestamp();
       }
     }
 
