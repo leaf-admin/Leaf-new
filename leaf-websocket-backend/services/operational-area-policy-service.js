@@ -4,6 +4,12 @@ const redisPool = require('../utils/redis-pool');
 const POLICY_COLLECTION = 'ops_area_policies';
 const REQUEST_COUNTER_PREFIX = 'ops:area:requests';
 const MODES = new Set(['normal', 'monitoring', 'tight', 'restricted']);
+// createBooking evaluates the policies on every request; they change rarely
+// (dashboard). Cache the collection briefly per process for that path only.
+const EVALUATION_CACHE_TTL_MS = Math.max(
+  0,
+  Number.parseInt(process.env.OPERATIONAL_AREA_POLICY_CACHE_TTL_MS || '30000', 10) || 0
+);
 
 function toIso(value, fallback = null) {
   if (!value) return fallback;
@@ -91,6 +97,29 @@ class OperationalAreaPolicyService {
   constructor({ firebase = firebaseConfig, redis = redisPool } = {}) {
     this.firebase = firebase;
     this.redisPool = redis;
+    this.evaluationCache = null;
+  }
+
+  invalidateEvaluationCache() {
+    this.evaluationCache = null;
+  }
+
+  async loadAllPolicies({ allowCached = false } = {}) {
+    const now = Date.now();
+    if (
+      allowCached &&
+      EVALUATION_CACHE_TTL_MS > 0 &&
+      this.evaluationCache &&
+      now - this.evaluationCache.loadedAt < EVALUATION_CACHE_TTL_MS
+    ) {
+      return this.evaluationCache.policies;
+    }
+    const collection = this.policyCollection();
+    if (!collection) return [];
+    const snapshot = await collection.get();
+    const policies = snapshot.docs.map((doc) => normalizePolicy(doc.id, doc.data()));
+    this.evaluationCache = { loadedAt: now, policies };
+    return policies;
   }
 
   getFirestore() {
@@ -106,12 +135,8 @@ class OperationalAreaPolicyService {
     return firestore ? firestore.collection(POLICY_COLLECTION) : null;
   }
 
-  async listPolicies({ city = null, regionHash = null, activeOnly = false } = {}) {
-    const collection = this.policyCollection();
-    if (!collection) return [];
-
-    const snapshot = await collection.get();
-    let policies = snapshot.docs.map((doc) => normalizePolicy(doc.id, doc.data()));
+  async listPolicies({ city = null, regionHash = null, activeOnly = false, allowCached = false } = {}) {
+    let policies = [...await this.loadAllPolicies({ allowCached })];
 
     if (city) {
       policies = policies.filter((policy) => policy.city === inferCity({ city }));
@@ -170,6 +195,7 @@ class OperationalAreaPolicyService {
     });
 
     await collection.doc(policyId).set(policy, { merge: true });
+    this.invalidateEvaluationCache();
     return policy;
   }
 
@@ -205,6 +231,7 @@ class OperationalAreaPolicyService {
     });
 
     await collection.doc(policyId).set(patch, { merge: true });
+    this.invalidateEvaluationCache();
     return patch;
   }
 
@@ -217,7 +244,7 @@ class OperationalAreaPolicyService {
   }
 
   async getApplicablePolicy({ city, regionHash, now = new Date() } = {}) {
-    const policies = await this.listPolicies({ city, regionHash, activeOnly: true });
+    const policies = await this.listPolicies({ city, regionHash, activeOnly: true, allowCached: true });
     return policies[0] || null;
   }
 

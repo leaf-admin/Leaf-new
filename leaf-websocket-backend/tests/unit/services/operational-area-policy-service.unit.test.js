@@ -107,4 +107,45 @@ describe('operational-area-policy-service', () => {
     expect(count).toBe(1);
     expect(redis.incr).toHaveBeenCalled();
   });
+
+  it('caches policies for request evaluation but not for the dashboard listing', async () => {
+    const firestore = createFirestoreMock();
+    const collectionGet = jest.fn();
+    const originalCollection = firestore.collection.bind(firestore);
+    firestore.collection = () => {
+      const collection = originalCollection();
+      const get = collection.get.bind(collection);
+      collection.get = async () => {
+        collectionGet();
+        return get();
+      };
+      return collection;
+    };
+    const service = new OperationalAreaPolicyService({
+      firebase: { getFirestore: () => firestore },
+      redis: { getConnection: () => null }
+    });
+    const policy = await service.createPolicy({
+      city: 'rio',
+      regionHash: 'abc123',
+      dispatchMode: 'restricted',
+      actorId: 'ops-1'
+    });
+    await service.activatePolicy(policy.policyId, { actorId: 'ops-1' });
+
+    collectionGet.mockClear();
+    await service.getApplicablePolicy({ city: 'rio', regionHash: 'abc123' });
+    await service.getApplicablePolicy({ city: 'rio', regionHash: 'abc123' });
+    expect(collectionGet).toHaveBeenCalledTimes(1);
+
+    await service.listPolicies({ city: 'rio' });
+    expect(collectionGet).toHaveBeenCalledTimes(2);
+
+    // A policy change on this process drops the evaluation cache.
+    await service.deactivatePolicy(policy.policyId, { actorId: 'ops-1' });
+    collectionGet.mockClear();
+    const after = await service.getApplicablePolicy({ city: 'rio', regionHash: 'abc123' });
+    expect(collectionGet).toHaveBeenCalledTimes(1);
+    expect(after).toBeNull();
+  });
 });

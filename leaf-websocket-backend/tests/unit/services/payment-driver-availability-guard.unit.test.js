@@ -122,7 +122,8 @@ describe('payment-driver-availability-guard', () => {
     expect(driverEligibilityService.isDriverEligibleForRide).toHaveBeenCalledWith(
       'driver-1',
       'Leaf Plus',
-      expect.objectContaining({ status: 'AVAILABLE' })
+      expect.objectContaining({ status: 'AVAILABLE' }),
+      { allowCachedActivation: true }
     );
   });
 
@@ -414,7 +415,8 @@ describe('payment-driver-availability-guard', () => {
     expect(driverEligibilityService.isDriverEligibleForRide).toHaveBeenCalledWith(
       'driver-1',
       'Leaf Plus',
-      expect.objectContaining({ status: 'AVAILABLE' })
+      expect.objectContaining({ status: 'AVAILABLE' }),
+      { allowCachedActivation: true }
     );
   });
 

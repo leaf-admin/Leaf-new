@@ -403,14 +403,16 @@ async function resolveDriverActivationState({
     throw new Error('FIREBASE_RTDB_UNAVAILABLE');
   }
 
-  const [resolvedActivationSnapshot, resolvedUserSnapshot] = await Promise.all([
+  // Independent reads go out together: one round trip instead of two before
+  // the active vehicle record (which depends on user_vehicles).
+  const [resolvedActivationSnapshot, resolvedUserSnapshot, vehicles] = await Promise.all([
     activationNode ? Promise.resolve(null) : realtimeDb.ref(`driver_activation/${safeDriverId}`).once('value'),
-    userData ? Promise.resolve(null) : realtimeDb.ref(`users/${safeDriverId}`).once('value')
+    userData ? Promise.resolve(null) : realtimeDb.ref(`users/${safeDriverId}`).once('value'),
+    readUserVehicles(realtimeDb, safeDriverId)
   ]);
 
   const resolvedActivationNode = activationNode || resolvedActivationSnapshot?.val?.() || {};
   const resolvedUserData = userData || resolvedUserSnapshot?.val?.() || {};
-  const vehicles = await readUserVehicles(realtimeDb, safeDriverId);
   const activeVehicleRead = await readActiveVehicleRecord(realtimeDb, safeDriverId, vehicles);
   const canonicalCrlvNode = resolvedActivationNode?.documents?.crlv || null;
   const crlvPresent = Boolean(canonicalCrlvNode);

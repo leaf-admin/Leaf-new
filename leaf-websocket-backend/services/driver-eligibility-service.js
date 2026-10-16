@@ -16,6 +16,18 @@ const {
 const { evaluatePilotAccess } = require('./pilot-access-control-service');
 
 const PROFILE_CACHE_TTL_SECONDS = 90;
+// Activation gate (account, documents, KYC) cached briefly for candidate
+// filtering only (availability pre-check, dispatch offers). Accepting a ride
+// and going online always resolve it live; invalidated with the profile cache.
+const ACTIVATION_GATE_CACHE_TTL_SECONDS = Math.max(
+    0,
+    Number.parseInt(process.env.DRIVER_ACTIVATION_GATE_CACHE_TTL_SECONDS || '20', 10) || 0
+);
+const ACTIVATION_GATE_UNAVAILABLE_STATE = 'DRIVER_ACTIVATION_STATE_UNAVAILABLE';
+
+function activationGateCacheKey(driverId) {
+    return `driver_activation_gate:${driverId}`;
+}
 const PROFILE_CACHE_FALLBACK_TTL_SECONDS = Number.parseInt(
     process.env.DRIVER_ELIGIBILITY_FALLBACK_CACHE_TTL_SECONDS || '30',
     10
@@ -68,9 +80,40 @@ class DriverEligibilityService {
         this.catalogLoadedAt = 0;
     }
 
-    async _resolveActivationGate(driverId) {
+    async _readCachedActivationGate(driverId) {
+        if (ACTIVATION_GATE_CACHE_TTL_SECONDS <= 0) return null;
         try {
-            return await resolveDriverActivationState({ driverId });
+            const raw = await this.redis.get(activationGateCacheKey(driverId));
+            return raw ? JSON.parse(raw) : null;
+        } catch (_error) {
+            return null;
+        }
+    }
+
+    async _writeCachedActivationGate(driverId, activationState) {
+        if (ACTIVATION_GATE_CACHE_TTL_SECONDS <= 0 || !activationState) return;
+        if (activationState.state === ACTIVATION_GATE_UNAVAILABLE_STATE) return;
+        try {
+            await this.redis.set(
+                activationGateCacheKey(driverId),
+                JSON.stringify(activationState),
+                'EX',
+                ACTIVATION_GATE_CACHE_TTL_SECONDS
+            );
+        } catch (_error) {
+            // Cache is an optimization; the live result is still returned.
+        }
+    }
+
+    async _resolveActivationGate(driverId, { allowCached = false } = {}) {
+        if (allowCached) {
+            const cached = await this._readCachedActivationGate(driverId);
+            if (cached) return cached;
+        }
+        try {
+            const activationState = await resolveDriverActivationState({ driverId });
+            await this._writeCachedActivationGate(driverId, activationState);
+            return activationState;
         } catch (error) {
             logStructured('error', 'DriverEligibility: falha ao resolver estado canonico de ativacao', {
                 service: 'driver-eligibility-service',
@@ -454,7 +497,12 @@ class DriverEligibilityService {
         return profile;
     }
 
-    async isDriverEligibleForRide(driverId, requestedCategory, fallbackDriverData = {}) {
+    /**
+     * options.allowCachedActivation: use the activation gate cached in the last
+     * ACTIVATION_GATE_CACHE_TTL_SECONDS. Only for candidate filtering; callers
+     * that commit a driver (accept, go online) must leave it off.
+     */
+    async isDriverEligibleForRide(driverId, requestedCategory, fallbackDriverData = {}, options = {}) {
         const pilotAccess = evaluatePilotAccess({
             userId: driverId,
             role: 'driver',
@@ -469,7 +517,9 @@ class DriverEligibilityService {
             };
         }
 
-        const activationState = await this._resolveActivationGate(driverId);
+        const activationState = await this._resolveActivationGate(driverId, {
+            allowCached: options?.allowCachedActivation === true
+        });
         if (!activationState?.canGoOnline) {
             return {
                 eligible: false,
@@ -613,3 +663,4 @@ class DriverEligibilityService {
 
 module.exports = new DriverEligibilityService();
 module.exports.normalizeCategory = normalizeCategory;
+module.exports.activationGateCacheKey = activationGateCacheKey;

@@ -140,7 +140,10 @@ describe('dashboard-user-management-service', () => {
         payload: expect.objectContaining({ status: 'blocked', operationalBlocked: true })
       })
     ]));
-    expect(mockRedis.del).toHaveBeenCalledWith('driver_eligibility_profile:driver_1');
+    expect(mockRedis.del).toHaveBeenCalledWith(
+      'driver_eligibility_profile:driver_1',
+      'driver_activation_gate:driver_1'
+    );
     expect(mockCommitDriverOnlineProjection).toHaveBeenCalledWith(
       mockRedis,
       expect.objectContaining({

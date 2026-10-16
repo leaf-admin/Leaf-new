@@ -335,7 +335,8 @@ async function hasPaymentEligibleDriver({
       const categoryEligibility = await driverEligibilityService.isDriverEligibleForRide(
         driverId,
         carType,
-        driverData
+        driverData,
+        { allowCachedActivation: true }
       );
       if (!categoryEligibility?.eligible) {
         rejections.categoryMismatch += 1;

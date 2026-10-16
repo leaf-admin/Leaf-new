@@ -692,7 +692,8 @@ async function findAvailableDriversForPickup(pickupLocation, options = {}) {
             const eligibility = await driverEligibilityService.isDriverEligibleForRide(
                 driverId,
                 rideRequirements.carType,
-                driverData
+                driverData,
+                { allowCachedActivation: true }
             );
             if (!eligibility?.eligible) continue;
         }

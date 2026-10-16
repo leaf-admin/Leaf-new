@@ -1083,9 +1083,12 @@ class DriverNotificationDispatcher {
             const requestedCategory = resolveRequestedCategory(eligibilityBookingData);
             let canonicalEligibility;
             try {
+                // Offer filter only: accepting re-validates live (AcceptRideCommand).
                 canonicalEligibility = await driverEligibilityService.isDriverEligibleForRide(
                     driverId,
-                    requestedCategory
+                    requestedCategory,
+                    {},
+                    { allowCachedActivation: true }
                 );
             } catch (error) {
                 logger.warn(`⏭️ [Dispatcher] Driver ${driverId} ignorado: falha na validação canônica antes da oferta`, error);

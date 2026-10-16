@@ -559,7 +559,7 @@ async function invalidateDriverEligibilityCache(userId) {
   try {
     await redisPool.ensureConnection?.();
     const redis = redisPool.getConnection?.();
-    await redis?.del?.(`driver_eligibility_profile:${userId}`);
+    await redis?.del?.(`driver_eligibility_profile:${userId}`, `driver_activation_gate:${userId}`);
   } catch (error) {
     logger.warn(`Falha ao invalidar cache de elegibilidade do motorista ${userId}: ${error.message}`);
   }
