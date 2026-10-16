@@ -817,7 +817,8 @@ const saveDriverLocation = async (
         });
 
         if (isOnline) {
-            logStructured('info', `Motorista ${isInTrip ? 'EM VIAGEM' : 'ONLINE'} salvo no Redis (GEO ativo)`, {
+            // Runs on every location update (hot path): debug only.
+            logStructured('debug', `Motorista ${isInTrip ? 'EM VIAGEM' : 'ONLINE'} salvo no Redis (GEO ativo)`, {
                 service: 'server',
                 driverId,
                 status: isInTrip ? 'IN_TRIP' : 'ONLINE',

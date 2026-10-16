@@ -1356,7 +1356,7 @@ class DriverNotificationDispatcher {
                     awaitingResponseAt: notificationTimestamp,
                     awaitingResponsePreviousState: resumeState
                 });
-                logger.info(
+                logger.debug(
                     `📊 [Dispatcher] Motorista ${driverId} notificado para ${bookingId} (corrida em AWAITING_RESPONSE, retorno previsto para ${resumeState})`
                 );
             } else {
@@ -1443,7 +1443,7 @@ class DriverNotificationDispatcher {
                 logger.warn(`⚠️ [Dispatcher] Falha ao registrar métrica de notificação (${bookingId}/${driverId}): ${metricError.message}`);
             });
 
-            logger.info(`📱 [Dispatcher] Notificação enviada para driver ${driverId} (booking: ${bookingId})`);
+            logger.debug(`📱 [Dispatcher] Notificação enviada para driver ${driverId} (booking: ${bookingId})`);
 
             return finish(true, 'NOTIFIED', {
                 socketsInRoom: socketsInRoomCount
