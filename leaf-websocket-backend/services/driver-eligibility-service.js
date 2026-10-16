@@ -111,7 +111,13 @@ class DriverEligibilityService {
             if (cached) return cached;
         }
         try {
-            const activationState = await resolveDriverActivationState({ driverId });
+            let vehicleIdHint = null;
+            try {
+                vehicleIdHint = await this.redis.hget(`driver_eligibility_profile:${driverId}`, 'activeVehicleId');
+            } catch (_hintError) {
+                vehicleIdHint = null;
+            }
+            const activationState = await resolveDriverActivationState({ driverId, vehicleIdHint });
             await this._writeCachedActivationGate(driverId, activationState);
             return activationState;
         } catch (error) {

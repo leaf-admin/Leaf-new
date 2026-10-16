@@ -774,7 +774,12 @@ class PaymentServiceIntentAndSplitMethods {
     }
   }
 
-  async markAdvancePaymentIntentConsumed({ rideId, bookingId, chargeId } = {}) {
+  /**
+   * resolvedIntent: the intent already read (and validated) for this ride id by
+   * the caller; reused only when it is the same document, to skip one lookup.
+   * The transaction below re-reads the document either way.
+   */
+  async markAdvancePaymentIntentConsumed({ rideId, bookingId, chargeId, resolvedIntent: knownIntent = null } = {}) {
     const safeRideId = String(rideId || '').trim();
     const safeBookingId = String(bookingId || '').trim();
     if (!safeRideId || !safeBookingId) return false;
@@ -783,7 +788,12 @@ class PaymentServiceIntentAndSplitMethods {
       const firestore = firebaseConfig.getFirestore();
       if (!firestore) return false;
       const paymentIntentId = this.buildAdvancePaymentIntentId(safeRideId);
-      const resolvedIntent = await this.getAdvancePaymentIntent(safeRideId);
+      const reusableIntent = knownIntent?.found === true &&
+        knownIntent.financialContext &&
+        knownIntent.paymentIntentId === paymentIntentId
+        ? knownIntent
+        : null;
+      const resolvedIntent = reusableIntent || await this.getAdvancePaymentIntent(safeRideId);
       if (!resolvedIntent.found || !resolvedIntent.financialContext) return false;
       const { collections } = getFinancialCollections(resolvedIntent.financialContext);
       const intentRef = firestore.collection(collections.paymentIntents).doc(paymentIntentId);

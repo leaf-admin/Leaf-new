@@ -2278,13 +2278,19 @@ function registerSocketCreateBookingHandler({
                                         commandPaymentData.financialContext?.testUserSandbox === true
                                 });
 
-                                const intentConsumed = paymentReferenceRideId
-                                    ? await paymentServiceSingleton.markAdvancePaymentIntentConsumed({
-                                        rideId: paymentReferenceRideId,
-                                        bookingId,
-                                        chargeId: paymentChargeId
-                                    })
-                                    : false;
+                                // Consuming the intent never throws and dispatch never
+                                // depended on its result (it is only logged): start it
+                                // here as before, but do not hold the driver offer on it.
+                                const intentConsumedPromise = paymentReferenceRideId
+                                    ? Promise.resolve()
+                                        .then(() => paymentServiceSingleton.markAdvancePaymentIntentConsumed({
+                                            rideId: paymentReferenceRideId,
+                                            bookingId,
+                                            chargeId: paymentChargeId,
+                                            resolvedIntent: advancePaymentIntent
+                                        }))
+                                        .catch(() => false)
+                                    : Promise.resolve(false);
                                 let paymentDriverReservationConsumed = false;
                                 if (paymentDriverReservation?.reservationId) {
                                     try {
@@ -2308,6 +2314,17 @@ function registerSocketCreateBookingHandler({
                                     }
                                 }
 
+                                const dispatchResult = await paymentDispatchService.triggerDispatchAfterPayment({
+                                    bookingId,
+                                    io,
+                                    pickupLocation,
+                                    source: 'createBooking_paid_immediate',
+                                    force: true,
+                                    maxAttempts: paidDispatchMaxAttempts,
+                                    retryDelayMs: paidDispatchRetryDelayMs
+                                });
+
+                                const intentConsumed = await intentConsumedPromise;
                                 logStructured('info', 'createBooking: pagamento materializado para booking canônico', {
                                     bookingId,
                                     eventType: 'createBooking',
@@ -2319,16 +2336,6 @@ function registerSocketCreateBookingHandler({
                                     amountInCents: materializeResult?.amountInCents || null,
                                     intentConsumed,
                                     paymentDriverReservationConsumed
-                                });
-
-                                const dispatchResult = await paymentDispatchService.triggerDispatchAfterPayment({
-                                    bookingId,
-                                    io,
-                                    pickupLocation,
-                                    source: 'createBooking_paid_immediate',
-                                    force: true,
-                                    maxAttempts: paidDispatchMaxAttempts,
-                                    retryDelayMs: paidDispatchRetryDelayMs
                                 });
 
                                 logStructured('info', 'createBooking: dispatch imediato para corrida paga processado', {
