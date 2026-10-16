@@ -463,6 +463,29 @@ async function materializePaymentForBooking({
   };
 }
 
+function bookingOwnPersistenceInput(bookingData = {}) {
+  let storedContext = bookingData.financialContext;
+  if (typeof storedContext === 'string') {
+    try {
+      storedContext = JSON.parse(storedContext);
+    } catch (_error) {
+      storedContext = null;
+    }
+  }
+  const input = {
+    financialContext: storedContext && typeof storedContext === 'object' ? storedContext : null,
+    financialNamespace: bookingData.financialNamespace || null,
+    financialContextId: bookingData.financialContextId || null,
+    providerEnvironment: bookingData.providerEnvironment || null
+  };
+  if (bookingData.testUserSandbox === 'true' || bookingData.testUserSandbox === true) {
+    input.testUserSandbox = true;
+  } else if (bookingData.testUserSandbox === 'false' || bookingData.testUserSandbox === false) {
+    input.testUserSandbox = false;
+  }
+  return input;
+}
+
 async function triggerDispatchAttempt({
   bookingId,
   io,
@@ -497,13 +520,17 @@ async function triggerDispatchAttempt({
     return { success: false, skipped: true, reason: 'BOOKING_NOT_FOUND' };
   }
 
-  const persistenceInput = {
-    financialContext,
-    financialNamespace,
-    financialContextId,
-    providerEnvironment
-  };
-  if (typeof testUserSandbox === 'boolean') {
+  // A caller that states a financial context is held to it (an operational
+  // caller still cannot dispatch a sandbox booking). Internal callers that
+  // only know the booking id act in the booking's own sealed context; the seal
+  // is still validated, so a lost or forged context fails closed.
+  const callerStatedContext = Boolean(
+    financialContext || financialNamespace || financialContextId || providerEnvironment
+  ) || typeof testUserSandbox === 'boolean';
+  const persistenceInput = callerStatedContext
+    ? { financialContext, financialNamespace, financialContextId, providerEnvironment }
+    : bookingOwnPersistenceInput(bookingData);
+  if (callerStatedContext && typeof testUserSandbox === 'boolean') {
     persistenceInput.testUserSandbox = testUserSandbox;
   }
   const persistenceScope = resolveRidePersistenceScope(persistenceInput);
