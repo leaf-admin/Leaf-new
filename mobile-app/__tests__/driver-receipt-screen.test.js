@@ -490,6 +490,52 @@ describe("driver receipt screen", () => {
     expect(screen.queryByText("Total pago")).toBeNull();
   });
 
+  it("shows the paid Pix, the toll refund and the final value when the car avoided the plaza", () => {
+    usePrototypeRideRuntime.mockReturnValue(
+      buildRuntime({ activeRole: "passenger" }),
+    );
+    const receipt = buildOperationalInterruptedReceipt({
+      id: "trip_toll_avoided",
+      completionType: "COMPLETED",
+      settlementType: "TOLL_NOT_CROSSED",
+      fare: 40,
+      finalFare: 40,
+      grossAmount: 40,
+      tollFee: 0,
+      totalFees: 1.99,
+      driverNetAmount: 38.01,
+      originalPaidAmount: 46.5,
+      estimatedRefund: 6.5,
+      remainingReservedAmount: 6.5,
+      operationalContinuation: null,
+      rideLegs: [],
+    });
+    const navigation = {
+      replace: jest.fn(),
+      navigate: jest.fn(),
+      canGoBack: jest.fn(() => false),
+      goBack: jest.fn(),
+    };
+
+    const screen = render(
+      <RobotaxiReceiptScreen
+        navigation={navigation}
+        route={{ params: { fromTrip: true, receipt } }}
+      />,
+    );
+
+    expect(screen.getByTestId("passenger-receipt-original-paid-amount")).toHaveTextContent(
+      "R$ 46,50",
+    );
+    expect(screen.getByTestId("passenger-receipt-refund-amount")).toHaveTextContent(
+      "R$ 6,50",
+    );
+    expect(screen.getByText("Pedágio não cobrado: o trajeto não passou pela praça")).toBeTruthy();
+    expect(screen.getByTestId("passenger-receipt-final-amount")).toHaveTextContent(
+      "R$ 40,00",
+    );
+  });
+
   it("keeps the driver interruption receipt on executed fare and zero net", () => {
     usePrototypeRideRuntime.mockReturnValue(buildRuntime({ activeRole: "driver" }));
     const receipt = buildOperationalInterruptedReceipt();

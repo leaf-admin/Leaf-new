@@ -450,9 +450,12 @@ function resolveCanonicalOperationalInterruptionSettlement(receipt = {}) {
   // Same breakdown for a ride the passenger ended before the destination:
   // the runtime only stores a paid amount plus a refund for settlements that
   // came from the server.
+  const receiptSettlementType = String(receipt?.settlementType || "")
+    .trim()
+    .toUpperCase();
   const hasServerRefundSettlement =
-    ["EARLY_ENDED_BY_RIDER", "EARLY_ENDED_BY_DRIVER"].includes(
-      String(receipt?.settlementType || "").trim().toUpperCase(),
+    ["EARLY_ENDED_BY_RIDER", "EARLY_ENDED_BY_DRIVER", "TOLL_NOT_CROSSED"].includes(
+      receiptSettlementType,
     ) &&
     Number(receipt?.estimatedRefund) > 0 &&
     Number(receipt?.originalPaidAmount) > 0;
@@ -504,6 +507,7 @@ function resolveCanonicalOperationalInterruptionSettlement(receipt = {}) {
     originalPaidAmount,
     refundAmount,
     finalAmount,
+    isTollRefund: receiptSettlementType === "TOLL_NOT_CROSSED",
     refundLabel: ["PENDING", "PROCESSING", "REQUESTED", "INITIATED"].includes(
       refundStatus,
     )
@@ -1911,14 +1915,18 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
                   <>
                     {renderCleanValueRow({
                       title: operationalInterruptionSettlement.refundLabel,
-                      subtitle: "Devolução referente ao trecho não realizado",
+                      subtitle: operationalInterruptionSettlement.isTollRefund
+                        ? "Pedágio não cobrado: o trajeto não passou pela praça"
+                        : "Devolução referente ao trecho não realizado",
                       value: formatCurrency(operationalInterruptionSettlement.refundAmount),
                       testID: "passenger-receipt-refund-row",
                       valueTestID: "passenger-receipt-refund-amount",
                     })}
                     {renderCleanValueRow({
                       title: "Valor final",
-                      subtitle: "Trecho executado e taxas confirmadas",
+                      subtitle: operationalInterruptionSettlement.isTollRefund
+                        ? "Corrida sem o pedágio não cruzado"
+                        : "Trecho executado e taxas confirmadas",
                       value: formatCurrency(operationalInterruptionSettlement.finalAmount),
                       testID: "passenger-receipt-final-row",
                       valueTestID: "passenger-receipt-final-amount",

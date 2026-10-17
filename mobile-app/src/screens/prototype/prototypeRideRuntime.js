@@ -7516,6 +7516,18 @@ function hasRiderEarlyEndSettlement(payload = {}) {
   );
 }
 
+// Ride that reached the destination but never crossed the booked toll plaza:
+// the server refunds that toll and sends the final amount in `tollAdjustment`.
+function hasUncrossedTollRefund(payload = {}) {
+  const adjustment = payload?.tollAdjustment;
+  return (
+    hasBackendFinalFinancialSnapshot(payload) &&
+    String(adjustment?.type || "").trim().toUpperCase() === "TOLL_NOT_CROSSED" &&
+    Number(adjustment?.estimatedRefund) > 0 &&
+    Number(adjustment?.originalPaidAmount) > 0
+  );
+}
+
 function isAuthoritativeOperationalInterruptionEndedCompletion(payload = {}) {
   if (!hasBackendFinalFinancialSnapshot(payload)) {
     return false;
@@ -7569,9 +7581,11 @@ export function resolveCompletedTripFinancialSnapshot(
   // Both cases replace the fare locked at payment with the server's settled
   // one. Without the early-end case the receipts kept showing the full fare
   // (seen on devices: driver "+ R$ 44,23" for a ride the server paid R$ 1,59).
+  const isUncrossedTollRefund = hasUncrossedTollRefund(payload);
   const isAuthoritativeOperationalInterruptionEnded =
     isAuthoritativeOperationalInterruptionEndedCompletion(payload) ||
-    hasRiderEarlyEndSettlement(payload);
+    hasRiderEarlyEndSettlement(payload) ||
+    isUncrossedTollRefund;
   const persistedLockedRideSnapshot = mergeLockedDriverRideSnapshot(
     previousState?.lastReceipt,
     previousState?.driverActiveRide,
@@ -7601,6 +7615,7 @@ export function resolveCompletedTripFinancialSnapshot(
     ? pickPreferredRuntimeMoney(
         payload?.settlement?.prepaidAmount,
         payload?.settlement?.originalFare,
+        isUncrossedTollRefund ? payload?.tollAdjustment?.originalPaidAmount : null,
         confirmedPaymentFinalFare,
       )
     : null;
@@ -7608,6 +7623,7 @@ export function resolveCompletedTripFinancialSnapshot(
     ? pickPreferredRuntimeMoney(
         payload?.settlement?.estimatedRefund,
         payload?.operationalContinuation?.estimatedRefund,
+        isUncrossedTollRefund ? payload?.tollAdjustment?.estimatedRefund : null,
       )
     : null;
   const remainingReservedAmount = isAuthoritativeOperationalInterruptionEnded
@@ -7825,7 +7841,9 @@ export function resolveCompletedTripFinancialSnapshot(
             ? "EARLY_ENDED_BY_DRIVER"
             : "EARLY_ENDED_BY_RIDER",
         }
-      : {}),
+      : isUncrossedTollRefund
+        ? { settlementType: "TOLL_NOT_CROSSED" }
+        : {}),
     ...(isAuthoritativeOperationalInterruptionEnded && originalPaidAmount !== null
       ? { originalPaidAmount }
       : {}),
