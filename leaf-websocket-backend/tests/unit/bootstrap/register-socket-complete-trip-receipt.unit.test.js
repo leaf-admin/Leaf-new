@@ -424,6 +424,35 @@ describe('register-socket-complete-trip-handler receipt generation', () => {
       );
     });
 
+    it('sends the uncrossed toll refund to both apps and persists it', async () => {
+      const tollAdjustment = {
+        type: 'TOLL_NOT_CROSSED',
+        bookedTollFee: 6.5,
+        chargedTollFee: 0,
+        refundedTollFee: 6.5,
+        crossedPlazas: [],
+        originalPaidAmount: 46.5,
+        finalAmount: 40,
+        estimatedRefund: 6.5
+      };
+      const { driverPayload, passengerPayload } = await runCompleteTrip({
+        commandData: {
+          endLocation: { lat: -22.9827, lng: -43.3642 },
+          finalFare: 40,
+          distance: 10,
+          duration: 1200,
+          tollAdjustment
+        }
+      });
+
+      for (const payload of [driverPayload, passengerPayload]) {
+        expect(payload.completionType).toBe('COMPLETED');
+        expect(payload.tollAdjustment).toEqual(tollAdjustment);
+      }
+      expect(mockPersistFinalRideDataWithOutbox.mock.calls[0][1].tollAdjustment).toEqual(tollAdjustment);
+      expect(mockGenerateAndSaveReceipt.mock.calls[0][1].tollAdjustment).toEqual(tollAdjustment);
+    });
+
     it('keeps the completion payload unchanged when the command did not settle', async () => {
       const { driverPayload, passengerPayload } = await runCompleteTrip({
         payload: { earlyEnd: { reason: 'passenger_request', remainingMeters: 9000 } },

@@ -269,10 +269,89 @@ async function resolveDriverEarlyEndSettlement({
   };
 }
 
+/**
+ * Corrida que chegou ao destino com pedágio contratado: se a telemetria do
+ * servidor registrou as travessias e o carro não passou pela praça (desvio),
+ * o pedágio não cruzado volta ao passageiro. O pedágio é repasse; a tarifa
+ * sem ele não muda.
+ *
+ * Sem registro de travessias, corrida com trechos/continuação ou extensão, ou
+ * qualquer dúvida: `applied: false` e a corrida segue com o pedágio contratado.
+ */
+async function resolveUncrossedTollRefund({
+  redis,
+  bookingId,
+  driverId,
+  bookingData = {},
+  tollFee,
+  nowMs = Date.now(),
+  env = process.env
+} = {}) {
+  if (String(env.TOLL_CROSSING_REFUND_ENABLED ?? 'true').trim().toLowerCase() === 'false') {
+    return notApplied('DISABLED');
+  }
+  const bookedTollFeeCents = moneyToCents(bookingData.tollFee);
+  if (!(bookedTollFeeCents > 0)) {
+    return notApplied('NO_BOOKED_TOLL');
+  }
+  if (tollFee !== undefined && tollFee !== null && moneyToCents(tollFee) !== bookedTollFeeCents) {
+    return notApplied('TOLL_AMOUNT_MISMATCH');
+  }
+  if (hasRideLegsOrContinuation(bookingData)) {
+    return notApplied('MULTI_LEG_RIDE');
+  }
+  if (hasConfirmedExtension(bookingData)) {
+    return notApplied('RIDE_EXTENSION');
+  }
+
+  const tripLocationPersistenceService = require('./trip-location-persistence-service');
+  if (typeof tripLocationPersistenceService.resolveCanonicalTripMetrics !== 'function') {
+    return notApplied('TOLL_CROSSINGS_UNTRACKED');
+  }
+  const metrics = await tripLocationPersistenceService.resolveCanonicalTripMetrics({
+    redis,
+    tripId: bookingId,
+    driverId,
+    startedAt: bookingData.startedAt || null,
+    startLocation: parseLocation(bookingData.startLocation || bookingData.pickupLocation),
+    nowMs,
+    allowPreStartTelemetry: true
+  });
+  const { summarizeTollCrossings } = require('./route-toll-service');
+  const crossing = metrics?.success
+    ? summarizeTollCrossings(metrics, { startedAtMs: Number(metrics.startedAtMs) || null })
+    : { verified: false };
+  if (!crossing.verified) {
+    return notApplied('TOLL_CROSSINGS_UNTRACKED');
+  }
+
+  const chargedTollFeeCents = Math.min(
+    bookedTollFeeCents,
+    Math.max(0, Math.round(Number(crossing.crossedTollFee || 0) * 100))
+  );
+  const refundedTollFeeCents = bookedTollFeeCents - chargedTollFeeCents;
+  if (!(refundedTollFeeCents > 0)) {
+    return notApplied('TOLL_CROSSED');
+  }
+
+  return {
+    applied: true,
+    tollAdjustment: {
+      type: 'TOLL_NOT_CROSSED',
+      bookedTollFee: bookedTollFeeCents / 100,
+      chargedTollFee: chargedTollFeeCents / 100,
+      refundedTollFee: refundedTollFeeCents / 100,
+      crossedPlazas: crossing.plazas || [],
+      metricsSource: metrics.source || 'server_trip_location_telemetry'
+    }
+  };
+}
+
 module.exports = {
   DEFAULT_EARLY_END_DISTANCE_METERS,
   DEFAULT_MAX_POSITION_AGE_SECONDS,
   DRIVER_EARLY_END_COMPLETION_TYPE,
   resolveRideEarlyEnd,
-  resolveDriverEarlyEndSettlement
+  resolveDriverEarlyEndSettlement,
+  resolveUncrossedTollRefund
 };

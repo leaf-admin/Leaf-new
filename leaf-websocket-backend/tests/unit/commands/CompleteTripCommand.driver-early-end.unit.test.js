@@ -633,4 +633,80 @@ describe('CompleteTripCommand driver early end settlement', () => {
     expect(RideCompletedEvent).toHaveBeenCalledTimes(1);
     expect(mockResolveCanonicalTripMetrics).toHaveBeenCalledTimes(1);
   });
+
+  describe('toll on a ride that reached the destination', () => {
+    it('refunds the booked toll when the server saw the car avoid the plaza', async () => {
+      useTollBooking({ fare: 46.5, toll: 6.5 });
+      serverSaw(DESTINATION, { distanceKm: 10.2, durationSecs: 1250, tollCrossings: [] });
+
+      const result = await buildCommand({ finalFare: 46.5, tollFee: 6.5 }).execute();
+
+      expect(result.success).toBe(true);
+      expect(result.data.completionType).toBeUndefined();
+      expect(result.data.finalFare).toBe(40);
+      expect(result.data.tollFee).toBe(0);
+      expect(result.data.event.finalFare).toBe(40);
+      expect(result.data.event.tollFee).toBe(0);
+      expect(result.data.tollAdjustment).toMatchObject({
+        type: 'TOLL_NOT_CROSSED',
+        bookedTollFee: 6.5,
+        chargedTollFee: 0,
+        refundedTollFee: 6.5,
+        originalPaidAmount: 46.5,
+        finalAmount: 40,
+        estimatedRefund: 6.5
+      });
+      const snapshotCheck = validateAuthoritativeFinancialSnapshot(result.data.financialSnapshot, {
+        passengerPaidCents: 4000,
+        tollFeeCents: 0
+      });
+      expect(snapshotCheck.valid).toBe(true);
+      const stored = redis.store['booking:booking_1'];
+      expect(stored.finalFare).toBe('40');
+      expect(stored.tollFee).toBe('0');
+      expect(JSON.parse(stored.tollAdjustment)).toMatchObject({ refundedTollFee: 6.5 });
+    });
+
+    it('keeps the toll when the server saw the car cross the plaza', async () => {
+      useTollBooking({ fare: 46.5, toll: 6.5 });
+      serverSaw(DESTINATION, {
+        distanceKm: 10.2,
+        durationSecs: 1250,
+        tollCrossings: [{ id: 'p18_sapucaia', amount: 6.5, at: Date.now() - 60000 }]
+      });
+
+      const result = await buildCommand({ finalFare: 46.5, tollFee: 6.5 }).execute();
+
+      expect(result.data.finalFare).toBe(46.5);
+      expect(result.data.tollFee).toBe(6.5);
+      expect(result.data.tollAdjustment).toBeUndefined();
+      expect(redis.store['booking:booking_1'].tollAdjustment).toBeUndefined();
+    });
+
+    it('keeps the toll when the ride has no crossing record', async () => {
+      useTollBooking({ fare: 46.5, toll: 6.5 });
+      serverSaw(DESTINATION, { distanceKm: 10.2, durationSecs: 1250 });
+
+      const result = await buildCommand({ finalFare: 46.5, tollFee: 6.5 }).execute();
+
+      expect(result.data.finalFare).toBe(46.5);
+      expect(result.data.tollFee).toBe(6.5);
+      expect(result.data.tollAdjustment).toBeUndefined();
+    });
+
+    it('can be switched off', async () => {
+      process.env.TOLL_CROSSING_REFUND_ENABLED = 'false';
+      try {
+        useTollBooking({ fare: 46.5, toll: 6.5 });
+        serverSaw(DESTINATION, { distanceKm: 10.2, durationSecs: 1250, tollCrossings: [] });
+
+        const result = await buildCommand({ finalFare: 46.5, tollFee: 6.5 }).execute();
+
+        expect(result.data.finalFare).toBe(46.5);
+        expect(result.data.tollAdjustment).toBeUndefined();
+      } finally {
+        delete process.env.TOLL_CROSSING_REFUND_ENABLED;
+      }
+    });
+  });
 });

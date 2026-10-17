@@ -524,6 +524,12 @@ function registerSocketCompleteTripHandler({
                         : null,
                     persistence: 'accepted_background'
                 });
+                // Pedágio contratado não cruzado devolvido ao passageiro (recibo mostra
+                // valor pago, reembolso e valor final).
+                const tollAdjustment = result.data?.tollAdjustment || null;
+                if (tollAdjustment) {
+                    tripCompletedData.tollAdjustment = tollAdjustment;
+                }
 
                 // Encerramento longe do destino: registra o fato no booking e avisa
                 // o passageiro, que responde se foi a pedido dele. Não muda valores:
@@ -606,6 +612,7 @@ function registerSocketCompleteTripHandler({
                             // completionType fica de fora de propósito: a persistência
                             // usa esse campo como status e a corrida continua COMPLETED.
                             ...(driverEarlyEndSettlement ? { settlement: driverEarlyEndSettlement } : {}),
+                            ...(tollAdjustment ? { tollAdjustment } : {}),
                             authoritativeSnapshot: result.data?.authoritativeSnapshot === true,
                             financialSnapshotSource: result.data?.financialSnapshotSource || 'backend_final',
                             financialSnapshot: result.data?.financialSnapshot || null,
@@ -703,6 +710,7 @@ function registerSocketCompleteTripHandler({
                                         settlement: driverEarlyEndSettlement
                                     }
                                     : {}),
+                                ...(tollAdjustment ? { tollAdjustment } : {}),
                                 financialSnapshot: result.data?.financialSnapshot || bookingDataForReceipt.financialSnapshot || null,
                                 financialSnapshotSource: result.data?.financialSnapshotSource || 'backend_final',
                                 authoritativeSnapshot: result.data?.authoritativeSnapshot === true,
