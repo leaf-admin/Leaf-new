@@ -517,7 +517,7 @@ const styles = StyleSheet.create({
         minWidth: 0,
         height: 60,
         borderWidth: 1.5,
-        borderColor: color.border,
+        borderColor: color.fieldBorder,
         borderRadius: 14,
         textAlign: 'center',
         fontSize: 26,

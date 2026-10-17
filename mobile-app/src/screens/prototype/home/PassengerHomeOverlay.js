@@ -1447,6 +1447,10 @@ function PassengerHomeOverlay({
             </View>
           ) : null}
 
+          {/* Pagamento antes da corrida é o ponto mais diferente do mercado: dito na hora de decidir. */}
+          <Text style={styles.categoryPaymentNote} testID="passenger-home-category-payment-note">
+            Você paga por Pix ao confirmar. Se nenhum motorista aceitar, o valor volta automaticamente.
+          </Text>
           <TouchableOpacity
             activeOpacity={categoryConfirmDisabled ? 1 : 0.88}
             disabled={categoryConfirmDisabled}
@@ -2398,6 +2402,16 @@ const styles = StyleSheet.create({
     fontSize: 17,
     lineHeight: 21,
     textAlign: "right",
+  },
+  categoryPaymentNote: {
+    ...leafTypography.regular,
+    fontSize: 13,
+    lineHeight: 18,
+    color: "rgba(17,33,12,0.70)",
+    textAlign: "center",
+    marginTop: 10,
+    marginBottom: 2,
+    paddingHorizontal: 8,
   },
   fareBreakdownRouteDetail: {
     marginTop: 8,

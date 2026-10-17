@@ -10,13 +10,13 @@ const options = [
   {
     key: 'customer',
     title: 'Quero viajar',
-    description: 'Peça corridas com preço fechado e pague com Pix.',
+    description: 'Preço fechado, pago por Pix antes da corrida. Sem motorista, o valor volta para você.',
     icon: 'navigate-outline'
   },
   {
     key: 'driver',
     title: 'Quero dirigir',
-    description: 'Ganhe dirigindo com a Leaf, no seu horário.',
+    description: 'Taxa de R$ 0,79 a R$ 1,49 por corrida até R$ 50. A corrida já chega paga.',
     icon: 'car-outline'
   }
 ];

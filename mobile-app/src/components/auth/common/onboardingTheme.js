@@ -10,12 +10,16 @@ export const onboardingTheme = {
     panel: '#FFFFFF',
     panelSoft: '#FFFFFF',
     border: 'rgba(17,33,12,0.10)',
+    // Borda de campo de texto: 3,1:1 sobre branco (WCAG 1.4.11). `border` fica
+    // para divisores decorativos.
+    fieldBorder: 'rgba(17,33,12,0.48)',
     borderStrong: '#11210C',
     glassStroke: '#E5E5E5',
     glassStrokeSoft: '#F1F2F1',
     textPrimary: '#11210C',
-    textSecondary: 'rgba(17,33,12,0.62)',
-    textMuted: 'rgba(17,33,12,0.42)',
+    textSecondary: 'rgba(17,33,12,0.70)',
+    // Texto de apoio: 4,8:1 sobre branco (WCAG 1.4.3 AA).
+    textMuted: 'rgba(17,33,12,0.62)',
     accent: '#191B18',
     accentSoft: '#F4F6F2',
     accentText: '#FFFFFF',

@@ -8,6 +8,7 @@ import leafTypography from '../prototype/LeafTypography';
 import { LeafAnimatedPressable } from '../prototype/LeafRideUI';
 import { useHapticFeedback } from '../../hooks/useHapticFeedback';
 import { ONB, OnboardingField, OnboardingShell, PrimaryButton, TextLink } from './onboardingKit';
+import { PILOT_SERVICE_AREA_LABEL } from '../../config/driverFeePolicy';
 
 // Telas do onboarding (apresentação). Recebem estado e callbacks por props: o laboratório usa
 // dados de exemplo e o fluxo real liga os serviços de OTP, perfil, OCR e ativação.
@@ -27,7 +28,7 @@ export function formatBrazilPhone(digits) {
 const SPLASH_GREEN = '#003002';
 const SPLASH_LOGO_SIZE = 288;
 
-export function WelcomeScreen({ onStart, onOpenTerms, onOpenPrivacy }) {
+export function WelcomeScreen({ onStart, onStartDriver, onOpenTerms, onOpenPrivacy }) {
   const insets = useSafeAreaInsets();
   return (
     <View style={welcome.root} testID="onboarding-welcome">
@@ -36,7 +37,15 @@ export function WelcomeScreen({ onStart, onOpenTerms, onOpenPrivacy }) {
       </View>
       <Reanimated.View entering={FadeInDown.delay(250).duration(500)} style={[welcome.bottom, { paddingBottom: Math.max(20, insets.bottom + 8) }]}>
         <Text style={welcome.slogan}>Seu app local</Text>
+        <Text style={welcome.pitch} testID="onboarding-welcome-pitch">
+          {`Corridas com preço fechado e Pix. Por enquanto na ${PILOT_SERVICE_AREA_LABEL}.`}
+        </Text>
         <PrimaryButton label="Começar" tone="light" onPress={onStart} testID="onboarding-welcome-start" />
+        {onStartDriver ? (
+          <Pressable onPress={onStartDriver} hitSlop={10} accessibilityRole="button" testID="onboarding-welcome-driver">
+            <Text style={welcome.driverLink}>Quero dirigir com a Leaf</Text>
+          </Pressable>
+        ) : null}
         <Text style={welcome.legal}>
           Ao continuar, você concorda com os{' '}
           <Text style={welcome.legalLink} onPress={onOpenTerms}>Termos de Uso</Text> e a{' '}
@@ -68,7 +77,7 @@ export function PhoneStep({ step, total, onBack, phoneDigits, onChangePhone, onS
         autoComplete="tel"
         autoFocus
         error={error}
-        hint="Sem SMS caro: o código chega no WhatsApp. Se não chegar, mandamos por SMS."
+        hint="O código chega no seu WhatsApp. Se não chegar, mandamos por SMS."
         testID="onboarding-phone-input"
       />
     </OnboardingShell>
@@ -172,8 +181,8 @@ export function RoleStep({ step, total, onBack, role, onSelectRole, onSubmit }) 
       testID="onboarding-role"
       footer={<PrimaryButton label="Continuar" onPress={onSubmit} disabled={!role} testID="onboarding-role-submit" />}
     >
-      <RoleCard title="Quero viajar" description="Peça corridas com preço fechado e pague com Pix." icon="navigate-outline" selected={role === 'customer'} onPress={() => onSelectRole?.('customer')} testID="onboarding-role-customer" />
-      <RoleCard title="Quero dirigir" description="Ganhe dirigindo com a Leaf, no seu horário." icon="car-outline" selected={role === 'driver'} onPress={() => onSelectRole?.('driver')} testID="onboarding-role-driver" />
+      <RoleCard title="Quero viajar" description="Preço fechado, pago por Pix antes da corrida. Sem motorista, o valor volta para você." icon="navigate-outline" selected={role === 'customer'} onPress={() => onSelectRole?.('customer')} testID="onboarding-role-customer" />
+      <RoleCard title="Quero dirigir" description="Taxa de R$ 0,79 a R$ 1,49 por corrida até R$ 50. A corrida já chega paga." icon="car-outline" selected={role === 'driver'} onPress={() => onSelectRole?.('driver')} testID="onboarding-role-driver" />
     </OnboardingShell>
   );
 }
@@ -225,7 +234,7 @@ export function LocationPrimingStep({ step, total, onBack, onEnable, onSkip, rol
       stepKey="location" step={step} total={total} onBack={onBack}
       title="Ative sua localização"
       subtitle={role === 'driver'
-        ? 'Para receber corridas perto de você e navegar até o passageiro.'
+        ? 'Para receber corridas perto de você e navegar até o passageiro. Enquanto você estiver online, a localização segue ativa mesmo com o app em segundo plano.'
         : 'Para achar seu ponto de embarque e mostrar os carros perto de você.'}
       testID="onboarding-location"
       footer={(
@@ -419,7 +428,7 @@ const STATUS_META = {
   rejected: { icon: 'close', color: ONB.danger, label: 'Precisa de ajuste' },
 };
 
-export function ReviewStatusStep({ items = [], etaText = 'Costuma levar até 24 horas. Avisamos por notificação a cada etapa.', onAction, onDone }) {
+export function ReviewStatusStep({ items = [], etaText = 'Avisamos por notificação a cada etapa.', onAction, onDone }) {
   const insets = useSafeAreaInsets();
   return (
     <View style={[review.root, { paddingTop: insets.top + 32, paddingBottom: Math.max(16, insets.bottom + 8) }]} testID="onboarding-review">
@@ -461,7 +470,9 @@ const welcome = StyleSheet.create({
   logoLayer: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center' },
   logo: { width: SPLASH_LOGO_SIZE, height: SPLASH_LOGO_SIZE },
   bottom: { position: 'absolute', left: 24, right: 24, bottom: 0, gap: 16, alignItems: 'center' },
-  slogan: { ...leafTypography.semiBold, fontSize: 22, letterSpacing: -0.2, color: '#FFFFFF', marginBottom: 10 },
+  slogan: { ...leafTypography.semiBold, fontSize: 22, letterSpacing: -0.2, color: '#FFFFFF' },
+  pitch: { ...leafTypography.regular, fontSize: 15, lineHeight: 21, color: 'rgba(255,255,255,0.82)', textAlign: 'center', marginBottom: 10 },
+  driverLink: { ...leafTypography.semiBold, fontSize: 15, color: '#FFFFFF', textDecorationLine: 'underline' },
   legal: { ...leafTypography.regular, fontSize: 12.5, lineHeight: 18, color: 'rgba(255,255,255,0.55)', textAlign: 'center' },
   legalLink: { ...leafTypography.medium, color: 'rgba(255,255,255,0.9)', textDecorationLine: 'underline' },
 });

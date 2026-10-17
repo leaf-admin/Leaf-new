@@ -150,7 +150,7 @@ const styles = StyleSheet.create({
   },
   input: {
     borderWidth: 1.5,
-    borderColor: color.border,
+    borderColor: color.fieldBorder,
     borderRadius: 16,
     paddingHorizontal: 16,
     minHeight: 56,

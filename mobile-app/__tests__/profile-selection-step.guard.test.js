@@ -61,7 +61,7 @@ describe('ProfileSelectionStep explicit choice guard', () => {
     expect(getByTestId('auth-profile-selection-continue-btn').props.accessibilityLabel).toBe('Continuar');
     expect(passenger.props.accessibilityRole).toBe('radio');
     expect(passenger.props.accessibilityLabel).toBe(
-      'Quero viajar. Peça corridas com preço fechado e pague com Pix.',
+      'Quero viajar. Preço fechado, pago por Pix antes da corrida. Sem motorista, o valor volta para você.',
     );
     expect(passenger.props.accessibilityState).toEqual(expect.objectContaining({ selected: false }));
 
