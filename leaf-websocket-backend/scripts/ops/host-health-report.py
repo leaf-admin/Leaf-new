@@ -7,7 +7,7 @@ uptime workflow alerts when the overall status is "fail" or the file is
 stale. Only coarse numbers and statuses are published, no identifiers.
 
 usage: host-health-report.py --role santiago|contabo --out <file>
-       [--cert <fullchain.pem>] [--backup-dir <dir>]
+       [--cert <fullchain.pem>]... [--backup-dir <dir>]
 """
 import argparse
 import datetime as dt
@@ -144,6 +144,18 @@ def cert_check(path):
     return check(threshold(days, 21, 14, higher_is_worse=False), days)
 
 
+def certs_check(paths):
+    # Worst certificate wins; detail keeps each lineage's days left. Contabo
+    # checks its dashboard certificate and the api/socket copy it needs to
+    # serve during a failover (sync-api-cert-to-contabo.sh refreshes it).
+    results = {}
+    for path in paths:
+        results[os.path.basename(os.path.dirname(path)) or path] = cert_check(path)
+    worst = max(results.values(), key=lambda c: (RANK[c['status']], -(c.get('value') or 0)))
+    detail = {name: c.get('value', c.get('detail')) for name, c in results.items()}
+    return check(worst['status'], worst.get('value'), detail if len(results) > 1 else worst.get('detail'))
+
+
 def backup_check(directory):
     files = glob.glob(os.path.join(directory, 'redis', '*.rdb.gz'))
     if not files:
@@ -156,7 +168,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--role', choices=sorted(LEAF_CONTAINERS), required=True)
     parser.add_argument('--out', required=True)
-    parser.add_argument('--cert')
+    parser.add_argument('--cert', action='append')
     parser.add_argument('--backup-dir')
     args = parser.parse_args()
 
@@ -168,7 +180,7 @@ def main():
     }
     checks.update(redis_checks(args.role))
     if args.cert:
-        checks['tlsCertificate'] = cert_check(args.cert)
+        checks['tlsCertificate'] = certs_check(args.cert)
     if args.backup_dir:
         checks['backup'] = backup_check(args.backup_dir)
 

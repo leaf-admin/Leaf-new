@@ -140,4 +140,6 @@ Otherwise a failover runs the previous release, and serves a certificate that ma
   - The cold standby images. Refresh them after each deploy.
   - Face compare, the OCR worker, the dashboard and the relays.
   - The daily backup, which reads the replica.
-- **Host health:** `leaf-host-health.timer` on both hosts writes `/health/host`, and the Uptime Monitor alerts when a check fails or the summary goes stale.
+- **Host health:** `leaf-host-health.timer` on both hosts writes `/health/host`, and the Uptime Monitor alerts when a check fails or the summary goes stale. Contabo checks the dashboard certificate and its failover copy of `api`/`socket` (`--cert` can be repeated), so a copy that stops being refreshed alerts 21 days before it expires.
+- **TLS keys:** `certbot/` and `ssl/` are excluded from the app image (`.dockerignore`). On 2026-10-17 the `api`/`socket` and dashboard certificates were reissued with new keys, and the older ones were revoked as key-compromised, because images built before #334 contained `/app/certbot`.
+- **Device QA:** `scripts/ops/renew-qa-trust-window.sh` renews the sandbox QA online trust window for up to 23 h through Redis, with no `.env` edit and no gateway restart. The window still has to be enabled in `.env`, and it only covers the listed QA UIDs on the sandbox profile.
