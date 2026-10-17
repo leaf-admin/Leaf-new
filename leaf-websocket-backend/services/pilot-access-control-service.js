@@ -56,6 +56,16 @@ function resolvePassengerAccessMode() {
   return 'cohort';
 }
 
+// Motoristas: 'cohort' (padrão) exige a allowlist do piloto; 'approved' libera
+// todo motorista aprovado. A aprovação continua sendo cobrada pelos portões de
+// ativação, documentos e KYC antes de ficar online e de receber corridas.
+function resolveDriverAccessMode() {
+  const normalized = String(process.env.PILOT_DRIVER_ACCESS_MODE || 'cohort')
+    .trim()
+    .toLowerCase();
+  return normalized === 'approved' ? 'approved' : 'cohort';
+}
+
 function isPassengerCohortRequired() {
   return resolvePassengerAccessMode() !== 'broad';
 }
@@ -94,6 +104,13 @@ function evaluatePilotAccess({ userId, role = 'passenger', operation = 'booking'
     return {
       allowed: true,
       code: 'PILOT_PASSENGER_BROAD_ACCESS'
+    };
+  }
+
+  if (normalizedRole === 'driver' && resolveDriverAccessMode() === 'approved') {
+    return {
+      allowed: true,
+      code: 'PILOT_DRIVER_APPROVED_ACCESS'
     };
   }
 
@@ -141,6 +158,8 @@ function getPublicPilotAccessSnapshot() {
     passengerCohortRequired: passengerAccessMode !== 'broad',
     passengerCohortConfigured: passengerAllowlist.size > 0,
     passengerCohortSize: passengerAllowlist.size,
+    driverAccessMode: resolveDriverAccessMode(),
+    driverCohortRequired: resolveDriverAccessMode() !== 'approved',
     driverCohortConfigured: driverAllowlist.size > 0,
     driverCohortSize: driverAllowlist.size,
     driverCohortMaxSize: resolveDriverCohortMaxSize(),
@@ -157,5 +176,6 @@ module.exports = {
   evaluatePilotAccess,
   getPublicPilotAccessSnapshot,
   isPassengerCohortRequired,
-  parseAllowlist
+  parseAllowlist,
+  resolveDriverAccessMode
 };
