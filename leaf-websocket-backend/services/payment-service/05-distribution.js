@@ -289,7 +289,8 @@ class PaymentServiceDistributionMethods {
         tollFee: rideData.tollFee || 0
       });
 
-      // 0. ✅ CAOS SCENARIO: Checar se o valor cobrado final é menor que o estimado pago (Encerramento Antecipado)
+      // 0. ✅ Valor final menor que o pago: encerramento antecipado ou pedágio
+      // contratado que não foi cruzado. A diferença volta ao passageiro.
       let passengerRefundAmount = 0;
       let passengerRefundResult = null;
       // Rastro do estorno parcial: acompanha o resultado da liquidação (cache de idempotência
@@ -361,7 +362,7 @@ class PaymentServiceDistributionMethods {
           passengerRefundAmount = paymentRecord.amount - rideData.totalAmount;
           passengerRefundTrace.attempted = true;
           passengerRefundTrace.refundAmountCents = passengerRefundAmount;
-          logStructured('info', 'Encerramento Antecipado detectado: processando estorno parcial para o passageiro', {
+          logStructured('info', 'Valor final menor que o pago: processando estorno parcial para o passageiro', {
             service: 'PaymentService',
             rideId: rideData.rideId,
             originalAmount: paymentRecord.amount,
@@ -373,7 +374,7 @@ class PaymentServiceDistributionMethods {
             rideId: rideData.rideId,
             chargeId: chargeIdToRefund,
             amount: passengerRefundAmount,
-            reason: 'Estorno de Encerramento Antecipado (recalculo de rota)',
+            reason: 'Estorno parcial da corrida (valor final menor que o pago)',
             status: 'REFUNDED_PARTIAL',
             passengerId: paymentRecord.passengerId || rideData.passengerId || null,
             financialContext,

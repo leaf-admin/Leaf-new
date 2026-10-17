@@ -66,7 +66,8 @@ jest.mock('../../../services/driver-online-projection-service', () => ({
 const {
   DriverIdentityTrustService,
   TRUST_TIERS,
-  DEFAULTS
+  DEFAULTS,
+  QA_ONLINE_TRUST_WINDOW_REDIS_KEY
 } = require('../../../services/driver-identity-trust-service');
 const { sealFinancialContext } = require('../../../services/financial-runtime-context');
 
@@ -568,6 +569,52 @@ describe('driver-identity-trust-service', () => {
     expect(harness.kycPolicy.requireApprovedKyc).toHaveBeenCalledWith(driverId);
     expect(harness.firestore.documents).toEqual(new Map());
     expect(harness.redis.values).toEqual(new Map());
+  });
+
+  test('renews the QA window from Redis without changing the env, keeping the 24h cap', async () => {
+    const driverId = 'driver-qa-window-renewed';
+    const sandboxContext = sealFinancialContext({
+      providerEnvironment: 'sandbox',
+      paymentProfileId: 'qa-test-users-sandbox-durable',
+      paymentProfileSource: 'firestore',
+      testUserSandbox: true
+    });
+    const env = {
+      KYC_QA_ONLINE_TRUST_WINDOW_ENABLED: 'true',
+      KYC_QA_ONLINE_TRUST_WINDOW_UIDS: driverId,
+      KYC_QA_ONLINE_TRUST_WINDOW_PROFILE_ID: 'qa-test-users-sandbox-durable',
+      KYC_QA_ONLINE_TRUST_WINDOW_ACK: 'QA_SANDBOX_ONLY',
+      // Expired in the env (harness clock is 2026-07-01T15:00Z).
+      KYC_QA_ONLINE_TRUST_WINDOW_UNTIL: '2026-06-30T10:00:00.000Z',
+      KYC_QA_ONLINE_TRUST_WINDOW_REASON: 'Sessao QA sandbox autorizada para validar o ciclo de corrida.'
+    };
+
+    const expired = createHarness({ persistenceContext: sandboxContext, env });
+    await expect(expired.service.evaluateExplicitQaOnlineTrustWindow(driverId))
+      .resolves.toEqual(expect.objectContaining({ allowed: false, code: 'KYC_QA_TRUST_WINDOW_CONFIG_INVALID' }));
+
+    const renewed = createHarness({ persistenceContext: sandboxContext, env });
+    renewed.redis.values.set(QA_ONLINE_TRUST_WINDOW_REDIS_KEY, '2026-07-02T09:00:00.000Z');
+    await expect(renewed.service.evaluateExplicitQaOnlineTrustWindow(driverId))
+      .resolves.toEqual(expect.objectContaining({
+        allowed: true,
+        code: 'KYC_QA_SANDBOX_TRUST_WINDOW',
+        expiresAt: '2026-07-02T09:00:00.000Z'
+      }));
+
+    const tooLong = createHarness({ persistenceContext: sandboxContext, env });
+    tooLong.redis.values.set(QA_ONLINE_TRUST_WINDOW_REDIS_KEY, '2026-07-03T09:00:00.000Z');
+    const denied = await tooLong.service.evaluateExplicitQaOnlineTrustWindow(driverId);
+    expect(denied).toEqual(expect.objectContaining({ allowed: false, code: 'KYC_QA_TRUST_WINDOW_CONFIG_INVALID' }));
+    expect(denied.details.errors).toContain('expiration_exceeds_24h');
+
+    // A Redis renewal never enables the window by itself.
+    const disabled = createHarness({
+      persistenceContext: sandboxContext,
+      env: { ...env, KYC_QA_ONLINE_TRUST_WINDOW_ENABLED: 'false' }
+    });
+    disabled.redis.values.set(QA_ONLINE_TRUST_WINDOW_REDIS_KEY, '2026-07-02T09:00:00.000Z');
+    await expect(disabled.service.evaluateExplicitQaOnlineTrustWindow(driverId)).resolves.toBeNull();
   });
 
   test('fails closed when the QA window is not sandbox-scoped or has an invalid expiry', async () => {

@@ -228,7 +228,7 @@ describe('PaymentService.processNetDistribution - estorno parcial no encerrament
     expect(mockProcessRefund).toHaveBeenCalledWith(
       chargeId,
       3646,
-      expect.stringContaining('Estorno de Encerramento Antecipado'),
+      expect.stringContaining('Estorno parcial da corrida'),
       expect.objectContaining({ wooviConfig: expect.objectContaining({ environment: 'sandbox' }) })
     );
     expect(result).toMatchObject({

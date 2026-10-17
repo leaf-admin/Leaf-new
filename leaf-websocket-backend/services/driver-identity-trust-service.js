@@ -55,6 +55,10 @@ const DEFAULTS = Object.freeze({
 
 const QA_ONLINE_TRUST_WINDOW_ACK = 'QA_SANDBOX_ONLY';
 const QA_ONLINE_TRUST_WINDOW_MAX_MS = 24 * 60 * 60 * 1000;
+// Renovação da janela de QA sem editar o .env nem recriar gateways
+// (scripts/ops/renew-qa-trust-window.sh). Só substitui o prazo: habilitação,
+// UIDs, perfil sandbox, ACK, motivo e o teto de 24 h continuam vindo do env.
+const QA_ONLINE_TRUST_WINDOW_REDIS_KEY = 'kyc:qa_online_trust_window:until';
 
 function boolFromEnv(value, fallback) {
   if (value == null || value === '') return fallback;
@@ -86,7 +90,7 @@ function splitEnvironmentList(value) {
     .filter(Boolean);
 }
 
-function readQaOnlineTrustWindowConfig(env, nowMs) {
+function readQaOnlineTrustWindowConfig(env, nowMs, renewedUntil = null) {
   if (!boolFromEnv(env.KYC_QA_ONLINE_TRUST_WINDOW_ENABLED, false)) {
     return { enabled: false };
   }
@@ -95,7 +99,9 @@ function readQaOnlineTrustWindowConfig(env, nowMs) {
   const profileId = String(env.KYC_QA_ONLINE_TRUST_WINDOW_PROFILE_ID || '').trim();
   const acknowledgment = String(env.KYC_QA_ONLINE_TRUST_WINDOW_ACK || '').trim();
   const reason = String(env.KYC_QA_ONLINE_TRUST_WINDOW_REASON || '').trim();
-  const expiresAtMs = toMillis(env.KYC_QA_ONLINE_TRUST_WINDOW_UNTIL);
+  const envExpiresAtMs = toMillis(env.KYC_QA_ONLINE_TRUST_WINDOW_UNTIL);
+  const renewedExpiresAtMs = toMillis(renewedUntil);
+  const expiresAtMs = Math.max(envExpiresAtMs, renewedExpiresAtMs);
   const errors = [];
 
   if (allowedDriverIds.length === 0) errors.push('uid_allowlist_missing');
@@ -1041,7 +1047,16 @@ class DriverIdentityTrustService {
     const safeDriverId = String(driverId || '').trim();
     if (!safeDriverId) return null;
 
-    const config = readQaOnlineTrustWindowConfig(this.env, this.now().getTime());
+    if (!boolFromEnv(this.env.KYC_QA_ONLINE_TRUST_WINDOW_ENABLED, false)) return null;
+    let renewedUntil = null;
+    try {
+      renewedUntil = typeof this.redis?.get === 'function'
+        ? await this.redis.get(QA_ONLINE_TRUST_WINDOW_REDIS_KEY)
+        : null;
+    } catch (_error) {
+      renewedUntil = null;
+    }
+    const config = readQaOnlineTrustWindowConfig(this.env, this.now().getTime(), renewedUntil);
     if (!config.enabled) return null;
 
     const deny = (code, reason, details = {}) => ({
@@ -2401,3 +2416,4 @@ module.exports.DriverIdentityTrustService = DriverIdentityTrustService;
 module.exports.createScopedDriverIdentityTrustService = createScopedDriverIdentityTrustService;
 module.exports.TRUST_TIERS = TRUST_TIERS;
 module.exports.DEFAULTS = DEFAULTS;
+module.exports.QA_ONLINE_TRUST_WINDOW_REDIS_KEY = QA_ONLINE_TRUST_WINDOW_REDIS_KEY;
