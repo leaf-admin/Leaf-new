@@ -190,7 +190,7 @@ export function resolveAuthFlowInitialStep(
 
   if (completedSteps.includes('profile_selection')) {
     if (normalizedType === 'driver') {
-      return 4;
+      return completedSteps.includes('driver_intro') ? 4 : 7;
     }
     return 3;
   }

@@ -33,12 +33,15 @@ export function resolveEditorialProgressMeta(stepIndex = 0, userType = null) {
   const isCustomer = normalizedUserType === 'customer';
 
   if (isDriver) {
+    // Celular, código, perfil, "Como funciona" (índice 7), CNH e aceites.
+    // O e-mail saiu do caminho principal (fica no perfil).
     const stepMap = {
       0: 1,
       1: 2,
       2: 3,
-      4: 4,
-      5: 5,
+      7: 4,
+      4: 5,
+      5: 6,
       6: 6
     };
     const stepNumber = stepMap[stepIndex] || Math.min(Math.max(stepIndex + 1, 1), 6);

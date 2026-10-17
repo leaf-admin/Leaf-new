@@ -25,6 +25,9 @@ export const ONBOARDING_SESSION_STORAGE_KEYS = [
 
 export const PHONE_VALIDATION_STEP = 'phone_validation';
 export const PROFILE_SELECTION_STEP_INDEX = 2;
+// "Como funciona dirigir na Leaf": entre o perfil e a CNH do motorista. Índice
+// próprio para não renumerar os passos já salvos em cadastros em andamento.
+export const DRIVER_INTRO_STEP_INDEX = 7;
 
 const safeJsonParse = (value, fallback = {}) => {
   if (!value) {
