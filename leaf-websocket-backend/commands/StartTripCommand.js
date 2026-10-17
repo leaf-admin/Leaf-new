@@ -52,6 +52,10 @@ class StartTripCommand extends Command {
         this.bookingId = data.bookingId;
         this.startLocation = data.startLocation;
         this.skipProviderPaymentProof = data.skipProviderPaymentProof === true;
+        // Prova já resolvida pelo handler do socket nesta mesma requisição.
+        // Só é aceita quando é bem-sucedida e da mesma corrida; senão o
+        // comando resolve a prova de novo.
+        this.verifiedPaymentProof = data.verifiedPaymentProof || null;
         // ✅ VALIDAÇÃO: Garantir traceId válido
         this.traceId = validateAndEnsureTraceIdInCommand(data, 'StartTrip');
         this.correlationId = data.correlationId || this.bookingId; // ✅ Adicionar correlationId
@@ -200,7 +204,13 @@ class StartTripCommand extends Command {
 
             // Verificar prova autoritativa do pagamento.
             span.addEvent('Checking payment status');
-            if (!this.skipProviderPaymentProof) {
+            const proofAlreadyVerified =
+                this.verifiedPaymentProof?.success === true &&
+                this.verifiedPaymentProof.bookingId === this.bookingId;
+            if (proofAlreadyVerified) {
+                span.setAttribute('payment.proof_source', this.verifiedPaymentProof.source || 'unknown');
+                span.setAttribute('payment.proof_reused', true);
+            } else if (!this.skipProviderPaymentProof) {
                 const paymentService = new PaymentService();
                 const paymentReferences = collectPaymentReferences(
                     bookingData.paymentChargeId,

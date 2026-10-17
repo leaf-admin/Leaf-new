@@ -345,4 +345,52 @@ describe('StartTripCommand', () => {
     expect(result.error).toContain('após registrar chegada');
     expect(RideStateManager.updateBookingState).not.toHaveBeenCalled();
   });
+  it('reuses the payment proof the socket handler already verified for this booking', async () => {
+    RideStateManager.getBookingState.mockResolvedValue('ARRIVED');
+
+    const command = new StartTripCommand({
+      driverId: 'driver_1',
+      bookingId: 'booking_1',
+      startLocation: { lat: -23.55, lng: -46.63 },
+      verifiedPaymentProof: { success: true, bookingId: 'booking_1', source: 'woovi_provider' }
+    });
+
+    const result = await command.execute();
+
+    expect(result.success).toBe(true);
+    expect(mockGetPaymentStatus).not.toHaveBeenCalled();
+    expect(RideStateManager.updateBookingState).toHaveBeenCalledWith(
+      redis,
+      'booking_1',
+      'IN_PROGRESS',
+      expect.any(Object)
+    );
+  });
+
+  it('ignores a verified proof from another booking and checks payment again', async () => {
+    RideStateManager.getBookingState.mockResolvedValue('ARRIVED');
+    mockGetPaymentStatus.mockResolvedValue({
+      success: true,
+      status: 'pending',
+      source: 'woovi_provider',
+      chargeId: 'charge_1',
+      amount: 3840,
+      providerEnvironment: 'sandbox',
+      paymentProfileId: 'test-user-sandbox'
+    });
+
+    const command = new StartTripCommand({
+      driverId: 'driver_1',
+      bookingId: 'booking_1',
+      startLocation: { lat: -23.55, lng: -46.63 },
+      verifiedPaymentProof: { success: true, bookingId: 'booking_other', source: 'woovi_provider' }
+    });
+
+    const result = await command.execute();
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('Pagamento não confirmado');
+    expect(mockGetPaymentStatus).toHaveBeenCalled();
+    expect(RideStateManager.updateBookingState).not.toHaveBeenCalled();
+  });
 });
