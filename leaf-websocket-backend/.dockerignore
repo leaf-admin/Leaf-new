@@ -28,3 +28,14 @@ tmp
 minio-config/certs
 *.log
 minio-config/
+# Host-only TLS material and runtime state. Root-level patterns above do not
+# reach subdirectories, so these keep certificates and keys out of the image.
+certbot
+ssl
+logs
+host-health
+**/*.pem
+**/*.key
+**/.env
+**/.env.*
+*.backup-*
