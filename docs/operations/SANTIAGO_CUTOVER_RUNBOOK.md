@@ -4,7 +4,7 @@ Status: **cutover done on 2026-10-16 02:41 UTC.**
 - Santiago is the primary. `api` and `socket.leaf.app.br` point at 64.176.9.163.
 - Contabo's `leaf-redis` replicates from Santiago, and Contabo nginx forwards Leaf stragglers over the tunnel.
 - The Leaf gateways and workers on Contabo are stopped and kept for rollback.
-- TLS is split. `api` and `socket` renew on Santiago (`/etc/cron.d/leaf-certbot-renew`), and `dashboard` renews on Contabo.
+- TLS is split. `api` and `socket` renew on Santiago (`/etc/cron.d/leaf-certbot-renew`), and `dashboard` renews on Contabo. Each deploy copies the `api`/`socket` certificate to Contabo for failover.
 
 ## Deploying (since the cutover)
 
@@ -127,11 +127,11 @@ During a real incident, add the DNS step:
 - **Until DNS moves:** clients keep resolving Santiago, so a full Santiago outage is still visible to them for up to the TTL.
 - **If Santiago is unreachable:** skip its stop step. Contabo's Redis keeps only what had replicated, which is seconds behind.
 
-**Keep the standby current.** After each backend deploy to Santiago, refresh the Contabo images:
-- Stream the code tree over the tunnel, excluding `.env*`, credentials, `certbot`, `ssl`, `docker-compose*.yml` and `nginx*.conf`.
-- Run `docker compose ... build` for the gateway and worker services. Never `up`.
+**Keep the fallback current.** `deploy-santiago-docker.sh` does this after each successful rollout (set `REFRESH_CONTABO_FALLBACK=false` to skip). A failure there only warns; rerun the script by hand.
+- `scripts/ops/refresh-contabo-standby.sh` copies the code tree to Contabo, excluding `.env*`, credentials, `certbot`, `ssl`, `docker-compose*.yml` and `nginx*.conf`. It then runs `docker compose ... build` for the gateway and worker services. It never runs `up`. It takes about 4.5 minutes.
+- `scripts/ops/sync-api-cert-to-contabo.sh` copies the `api`/`socket` certificate that Santiago renews into Contabo's certbot tree, runs `nginx -t` and reloads nginx. It does nothing when Contabo already has the same certificate.
 
-Otherwise a failover runs the previous release.
+Otherwise a failover runs the previous release, and serves a certificate that may have expired.
 
 ## Housekeeping
 
