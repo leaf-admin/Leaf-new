@@ -61,9 +61,11 @@ export function resolveEditorialProgressMeta(stepIndex = 0, userType = null) {
     };
   }
 
-  const stepNumber = Math.min(Math.max(stepIndex + 1, 1), 3);
+  // Perfil ainda não escolhido: conta como passageiro (4 etapas), para a
+  // contagem não mudar de "1 de 3" para "3 de 4" na tela seguinte.
+  const stepNumber = Math.min(Math.max(stepIndex + 1, 1), 4);
   return {
-    totalSteps: 3,
+    totalSteps: 4,
     activeStep: stepNumber,
     stepNumber
   };
@@ -200,6 +202,10 @@ export default function EditorialOnboardingScreen({
         </View>
       ) : null}
       </View>
+      {/* A barra de status é transparente: sem esta faixa, o texto rolado passa por baixo do relógio. */}
+      {insets.top > 0 ? (
+        <View pointerEvents="none" style={[styles.statusBarScrim, { height: insets.top }]} />
+      ) : null}
     </Root>
   );
 }
@@ -207,6 +213,13 @@ export default function EditorialOnboardingScreen({
 const styles = StyleSheet.create({
   root: {
     flex: 1,
+    backgroundColor: color.background
+  },
+  statusBarScrim: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
     backgroundColor: color.background
   },
   keyboardContent: {

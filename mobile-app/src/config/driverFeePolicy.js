@@ -109,7 +109,7 @@ export function buildDriverFeeRows(policy = DRIVER_FEE_POLICY) {
     },
     {
       key: 'subscription',
-      title: 'Mensalidade',
+      title: 'Plano diário',
       value: 'Nenhuma hoje',
       detail: `Se o plano diário for ativado, ele só vale depois de ${policy.dailySubscriptionMinAccountAgeDays} dias de conta e com ${policy.dailySubscriptionNoticeDays} dias de aviso. O valor depende do quanto você faturou no dia: ${describeDailySubscriptionTiers(policy)}.`,
     },
