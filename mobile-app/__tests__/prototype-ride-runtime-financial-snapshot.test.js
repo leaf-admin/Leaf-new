@@ -504,6 +504,54 @@ describe('prototype ride runtime financial snapshot', () => {
     expect(snapshot.financialSnapshotSource).toBe('backend_final');
   });
 
+  it('shows the toll refund when the server saw the car avoid the booked plaza', () => {
+    const previous = {
+      paymentState: { status: 'confirmed', paymentId: 'pix_1', amount: 46.5 },
+      activeBooking: { grossAmount: 46.5, estimatedFare: 46.5 },
+      driverActiveRide: { grossAmount: 46.5, tollFee: 6.5, pricingSnapshotLocked: true },
+    };
+    const snapshot = resolveCompletedTripFinancialSnapshot(
+      {
+        bookingId: 'booking_toll_avoided',
+        completionType: 'COMPLETED',
+        grossAmount: 40,
+        finalFare: 40,
+        tollFee: 0,
+        operationalFee: 1.49,
+        paymentIntermediationFee: 0.5,
+        totalFees: 1.99,
+        driverNetAmount: 38.01,
+        authoritativeSnapshot: true,
+        financialSnapshotSource: 'backend_final',
+        tollAdjustment: {
+          type: 'TOLL_NOT_CROSSED',
+          bookedTollFee: 6.5,
+          chargedTollFee: 0,
+          refundedTollFee: 6.5,
+          originalPaidAmount: 46.5,
+          finalAmount: 40,
+          estimatedRefund: 6.5,
+        },
+      },
+      previous,
+    );
+
+    expect(snapshot.finalFare).toBeCloseTo(40, 2);
+    expect(snapshot.tollFee).toBe(0);
+    expect(snapshot.driverNetAmount).toBeCloseTo(38.01, 2);
+    expect(snapshot.settlementType).toBe('TOLL_NOT_CROSSED');
+    expect(snapshot.originalPaidAmount).toBeCloseTo(46.5, 2);
+    expect(snapshot.estimatedRefund).toBeCloseTo(6.5, 2);
+
+    // Without backend-final provenance the adjustment is ignored.
+    const untrusted = resolveCompletedTripFinancialSnapshot(
+      { grossAmount: 40, tollAdjustment: { type: 'TOLL_NOT_CROSSED', originalPaidAmount: 46.5, estimatedRefund: 6.5 } },
+      previous,
+    );
+    expect(untrusted.settlementType).toBeUndefined();
+    expect(untrusted.finalFare).toBeCloseTo(46.5, 2);
+  });
+
   it('keeps backend-final zero toll instead of a stale locked estimate', () => {
     const snapshot = resolveCompletedTripFinancialSnapshot(
       {
