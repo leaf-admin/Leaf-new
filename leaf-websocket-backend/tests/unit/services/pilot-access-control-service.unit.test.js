@@ -54,6 +54,37 @@ describe('pilot-access-control-service', () => {
     }));
   });
 
+  it('lets every approved driver in when the driver access mode is approved', () => {
+    process.env.PILOT_PASSENGER_ACCESS_MODE = 'broad';
+    process.env.PILOT_DRIVER_ACCESS_MODE = 'approved';
+    process.env.PILOT_ALLOWED_DRIVER_IDS = '';
+    const { evaluatePilotAccess, getPublicPilotAccessSnapshot } = require('../../../services/pilot-access-control-service');
+
+    expect(evaluatePilotAccess({ userId: 'driver-outside', role: 'driver', operation: 'driver_online' }))
+      .toEqual(expect.objectContaining({ allowed: true, code: 'PILOT_DRIVER_APPROVED_ACCESS' }));
+    expect(getPublicPilotAccessSnapshot()).toEqual(expect.objectContaining({
+      driverAccessMode: 'approved',
+      driverCohortRequired: false
+    }));
+  });
+
+  it('keeps the kill switches above the approved driver mode', () => {
+    process.env.PILOT_DRIVER_ACCESS_MODE = 'approved';
+    process.env.LEAF_ACCEPT_NEW_BOOKINGS = 'false';
+    const { evaluatePilotAccess } = require('../../../services/pilot-access-control-service');
+
+    expect(evaluatePilotAccess({ userId: 'driver-any', role: 'driver', operation: 'booking' }))
+      .toEqual(expect.objectContaining({ allowed: false, code: 'NEW_BOOKINGS_PAUSED' }));
+  });
+
+  it('falls back to the cohort for an unknown driver access mode', () => {
+    process.env.PILOT_DRIVER_ACCESS_MODE = 'everyone';
+    const { evaluatePilotAccess } = require('../../../services/pilot-access-control-service');
+
+    expect(evaluatePilotAccess({ userId: 'driver-outside', role: 'driver', operation: 'driver_online' }))
+      .toEqual(expect.objectContaining({ allowed: false, code: 'PILOT_COHORT_ACCESS_DENIED' }));
+  });
+
   it('fails closed when the configured driver cohort exceeds the assisted-launch cap', () => {
     process.env.PILOT_MAX_DRIVER_COHORT_SIZE = '1';
     const { evaluatePilotAccess, getPublicPilotAccessSnapshot } = require('../../../services/pilot-access-control-service');

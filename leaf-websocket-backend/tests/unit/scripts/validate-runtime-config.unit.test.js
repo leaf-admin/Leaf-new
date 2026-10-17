@@ -363,6 +363,53 @@ describe('validate-runtime-config Woovi webhook production gates', () => {
     }));
   });
 
+  it('accepts approved drivers in a controlled pilot without a driver allowlist', () => {
+    const result = runValidator({
+      ...baseProdEnv,
+      ...strictKycProdEnv,
+      LEAF_BROAD_LAUNCH_APPROVED: 'false',
+      LEAF_LAUNCH_PROFILE: 'pilot_controlled',
+      LEAF_PILOT_CONTROLLED: 'true',
+      PILOT_PASSENGER_ACCESS_MODE: 'broad',
+      PILOT_DRIVER_ACCESS_MODE: 'approved',
+      PILOT_ALLOWED_PASSENGER_IDS: '',
+      PILOT_ALLOWED_DRIVER_IDS: '',
+      PILOT_MAX_DRIVER_COHORT_SIZE: '250',
+      LEAF_RUNTIME_POLICY_VERSION: 'assisted-launch-v1',
+      GEOFENCE_FAIL_CLOSED: 'true',
+      GEOFENCE_REQUIRE_DESTINATION_INSIDE_REGION: 'true',
+      GEOFENCE_REGION_FILE: 'config/geofence.json'
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.report.summary.blockers).toEqual([]);
+    expect(result.report.diagnostics.launchControl).toEqual(expect.objectContaining({
+      driverAccessMode: 'approved',
+      driverCohortRequired: false,
+      driverCohortSize: 0
+    }));
+  });
+
+  it('blocks an invalid driver access mode', () => {
+    const result = runValidator({
+      ...baseProdEnv,
+      ...strictKycProdEnv,
+      LEAF_BROAD_LAUNCH_APPROVED: 'false',
+      LEAF_LAUNCH_PROFILE: 'pilot_controlled',
+      LEAF_PILOT_CONTROLLED: 'true',
+      PILOT_DRIVER_ACCESS_MODE: 'everyone',
+      PILOT_ALLOWED_DRIVER_IDS: 'driver-1',
+      LEAF_RUNTIME_POLICY_VERSION: 'assisted-launch-v1',
+      GEOFENCE_FAIL_CLOSED: 'true',
+      GEOFENCE_REQUIRE_DESTINATION_INSIDE_REGION: 'true',
+      GEOFENCE_REGION_FILE: 'config/geofence.json'
+    });
+
+    expect(result.report.summary.blockers).toEqual(
+      expect.arrayContaining(['PILOT_DRIVER_ACCESS_MODE deve ser cohort ou approved'])
+    );
+  });
+
   it('blocks a controlled pilot whose driver allowlist exceeds the configured cap', () => {
     const result = runValidator({
       ...baseProdEnv,

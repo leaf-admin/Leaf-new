@@ -404,6 +404,9 @@ function resolveLaunchControlDiagnostic() {
   const passengerAccessMode = String(process.env.PILOT_PASSENGER_ACCESS_MODE || 'cohort')
     .trim()
     .toLowerCase();
+  const driverAccessMode = String(process.env.PILOT_DRIVER_ACCESS_MODE || 'cohort')
+    .trim()
+    .toLowerCase();
   const driverCohortSize = parseAllowlist(
     process.env.PILOT_ALLOWED_DRIVER_IDS || process.env.LEAF_PILOT_ALLOWED_DRIVER_IDS
   ).size;
@@ -422,6 +425,9 @@ function resolveLaunchControlDiagnostic() {
     passengerAccessModeValid: ['cohort', 'broad'].includes(passengerAccessMode),
     passengerCohortRequired: passengerAccessMode !== 'broad',
     passengerCohortSize,
+    driverAccessMode,
+    driverAccessModeValid: ['cohort', 'approved'].includes(driverAccessMode),
+    driverCohortRequired: driverAccessMode !== 'approved',
     driverCohortSize,
     driverCohortMaxSize,
     driverCohortMaxSizeValid: Number.isFinite(driverCohortMaxSize) && driverCohortMaxSize > 0,
@@ -994,7 +1000,13 @@ function main() {
       ) {
         blockers.push('PILOT_ALLOWED_PASSENGER_IDS deve conter o cohort autorizado do piloto');
       }
-      if (launchControlDiagnostic.driverCohortSize < 1) {
+      if (!launchControlDiagnostic.driverAccessModeValid) {
+        blockers.push('PILOT_DRIVER_ACCESS_MODE deve ser cohort ou approved');
+      }
+      if (
+        launchControlDiagnostic.driverCohortRequired
+        && launchControlDiagnostic.driverCohortSize < 1
+      ) {
         blockers.push('PILOT_ALLOWED_DRIVER_IDS deve conter o cohort autorizado do piloto');
       }
       if (!launchControlDiagnostic.driverCohortMaxSizeValid) {
@@ -1030,7 +1042,10 @@ function main() {
       ) {
         blockers.push('ride_flow_validation exige exatamente 1 passageiro na allowlist');
       }
-      if (launchControlDiagnostic.driverCohortSize !== 1) {
+      if (
+        launchControlDiagnostic.driverAccessMode !== 'cohort'
+        || launchControlDiagnostic.driverCohortSize !== 1
+      ) {
         blockers.push('ride_flow_validation exige exatamente 1 motorista na allowlist');
       }
       if (!launchControlDiagnostic.acceptNewPix.value) {
