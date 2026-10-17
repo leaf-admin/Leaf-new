@@ -39,7 +39,8 @@ const { buildAuthoritativeFinancialSnapshot } = require('../services/ride-financ
 const { resolveFinancialContext } = require('../services/financial-runtime-context');
 const {
     DRIVER_EARLY_END_COMPLETION_TYPE,
-    resolveDriverEarlyEndSettlement
+    resolveDriverEarlyEndSettlement,
+    resolveUncrossedTollRefund
 } = require('../services/ride-early-end-service');
 
 function toMoney(value) {
@@ -619,6 +620,63 @@ class CompleteTripCommand extends Command {
                             (driverEarlyEnd || driverEarlyEndSkip)?.earlyEnd?.remainingMeters ?? null
                     });
                 }
+                // Corrida que não foi liquidada pelo trecho percorrido: se o servidor
+                // viu que o carro não passou pela praça do pedágio contratado, o
+                // pedágio não cruzado volta ao passageiro (o billing estorna a
+                // diferença entre o pago e o valor final). Qualquer dúvida mantém o
+                // valor integral; a finalização nunca falha por causa disto.
+                let tollAdjustment = null;
+                if (!driverEarlyEnd && !offlineSettlementReview && Number(this.tollFee || 0) > 0) {
+                    try {
+                        const tollDecision = await resolveUncrossedTollRefund({
+                            redis,
+                            bookingId: this.bookingId,
+                            driverId: this.driverId,
+                            bookingData,
+                            tollFee: this.tollFee
+                        });
+                        if (tollDecision?.applied) {
+                            const adjustment = tollDecision.tollAdjustment;
+                            const refundedCents = Math.round(adjustment.refundedTollFee * 100);
+                            const adjustedFare = Math.round(Number(this.finalFare || 0) * 100 - refundedCents) / 100;
+                            const adjustedBreakdown = adjustedFare > 0
+                                ? paymentService.calculateFareBreakdownFromReais(
+                                    adjustedFare,
+                                    adjustment.chargedTollFee,
+                                    { subscriptionRetainedFeeCents: extensionRetainedOperationalFeeCents }
+                                )
+                                : null;
+                            const adjustedNetCents = Math.round(Number(adjustedBreakdown?.driverNetAmount || 0) * 100);
+                            if (adjustedBreakdown && adjustedNetCents - Math.round(adjustment.chargedTollFee * 100) > 0) {
+                                tollAdjustment = {
+                                    ...adjustment,
+                                    originalPaidAmount: Number(this.finalFare || 0),
+                                    finalAmount: adjustedFare,
+                                    estimatedRefund: refundedCents / 100,
+                                    at: new Date().toISOString()
+                                };
+                                completedFareBreakdown = adjustedBreakdown;
+                                this.finalFare = adjustedFare;
+                                this.tollFee = adjustment.chargedTollFee;
+                                logStructured('info', 'Pedágio não cruzado devolvido ao passageiro', {
+                                    service: 'complete-trip-command',
+                                    bookingId: this.bookingId,
+                                    driverId: this.driverId,
+                                    bookedTollFee: adjustment.bookedTollFee,
+                                    refundedTollFee: adjustment.refundedTollFee
+                                });
+                            }
+                        }
+                    } catch (tollError) {
+                        tollAdjustment = null;
+                        logStructured('error', 'Falha ao avaliar travessia de pedágio; pedágio contratado mantido', {
+                            service: 'complete-trip-command',
+                            bookingId: this.bookingId,
+                            driverId: this.driverId,
+                            error: tollError.message
+                        });
+                    }
+                }
                 const finalFinancialSnapshot = buildAuthoritativeFinancialSnapshot({
                     passengerPaidCents: Math.round(Number(this.finalFare || 0) * 100),
                     tollFeeCents: Math.round(Number(this.tollFee || 0) * 100),
@@ -717,7 +775,8 @@ class CompleteTripCommand extends Command {
                         financialNamespace: financialContext.namespace,
                         financialContextId: financialContext.contextId,
                         ...driverEarlyEndFields,
-                        ...(driverEarlyEndSkipped ? { earlyEndSettlementSkipped: driverEarlyEndSkipped } : {})
+                        ...(driverEarlyEndSkipped ? { earlyEndSettlementSkipped: driverEarlyEndSkipped } : {}),
+                        ...(tollAdjustment ? { tollAdjustment } : {})
                     }
                 );
 
@@ -757,6 +816,7 @@ class CompleteTripCommand extends Command {
                     ...(driverEarlyEndSkipped
                         ? { earlyEndSettlementSkipped: JSON.stringify(driverEarlyEndSkipped) }
                         : {}),
+                    ...(tollAdjustment ? { tollAdjustment: JSON.stringify(tollAdjustment) } : {}),
                     ...(rideLegSettlements.length > 0 ? { rideLegs: JSON.stringify(rideLegSettlements) } : {}),
                     ...(completedContinuation ? { operationalContinuation: JSON.stringify(completedContinuation) } : {})
                 });
@@ -938,7 +998,8 @@ class CompleteTripCommand extends Command {
                             earlyEnd: driverEarlyEnd.earlyEnd
                         }
                         : {}),
-                    ...(driverEarlyEndSkipped ? { earlyEndSettlementSkipped: driverEarlyEndSkipped } : {})
+                    ...(driverEarlyEndSkipped ? { earlyEndSettlementSkipped: driverEarlyEndSkipped } : {}),
+                    ...(tollAdjustment ? { tollAdjustment } : {})
                 });
 
             } catch (error) {
