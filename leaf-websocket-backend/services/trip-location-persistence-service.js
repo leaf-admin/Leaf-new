@@ -8,7 +8,32 @@ const {
     resolveRidePersistenceScope
 } = require('./sandbox-persistence-context');
 
+const { findCrossedTolls, mergeTollCrossings } = require('./route-toll-service');
+
 const EARTH_RADIUS_KM = 6371;
+// Valor gravado quando a detecção de praça falha: a corrida fica sem
+// travessias verificadas em vez de parecer que não cruzou nenhuma.
+const TOLL_CROSSINGS_UNTRACKED = 'untracked';
+
+function parseTollCrossings(raw) {
+    if (raw === undefined || raw === null || raw === '' || raw === TOLL_CROSSINGS_UNTRACKED) {
+        return null;
+    }
+    try {
+        const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+        return Array.isArray(parsed) ? parsed : null;
+    } catch (_error) {
+        return null;
+    }
+}
+
+function detectTollCrossings(from, to, at) {
+    return findCrossedTolls([from, to]).map((toll) => ({
+        id: toll.id,
+        amount: toll.amount,
+        at
+    }));
+}
 
 function normalizePointLocation(value = {}) {
     const lat = Number(value.lat ?? value.latitude);
@@ -344,6 +369,28 @@ class TripLocationPersistenceService {
             ? previousReceivedAt
             : point.receivedAt;
 
+        // Praças cruzadas acompanham a mesma cadeia da distância canônica. Uma
+        // cadeia que começou antes deste registro existir fica sem o campo e o
+        // encerramento antecipado trata o pedágio como não verificado.
+        const previousTollCrossings = parseTollCrossings(previousMeta?.canonicalTollCrossings);
+        let tollCrossingsValue = null;
+        try {
+            if (isStaleCanonicalPoint) {
+                tollCrossingsValue = previousTollCrossings ? JSON.stringify(previousTollCrossings) : null;
+            } else if (canAppendCanonicalMetric) {
+                tollCrossingsValue = previousTollCrossings
+                    ? JSON.stringify(mergeTollCrossings(
+                        previousTollCrossings,
+                        detectTollCrossings(previousLocation, point, point.receivedAt)
+                    ))
+                    : null;
+            } else {
+                tollCrossingsValue = '[]';
+            }
+        } catch (_tollError) {
+            tollCrossingsValue = TOLL_CROSSINGS_UNTRACKED;
+        }
+
         await redis.expire(bufferKey, this.bufferTtlSeconds);
         await redis.hset(metaKey, {
             tripId: point.tripId,
@@ -362,6 +409,7 @@ class TripLocationPersistenceService {
             canonicalLastLat: String(canonicalLastLocation.lat),
             canonicalLastLng: String(canonicalLastLocation.lng),
             canonicalLastReceivedAt: String(canonicalLastReceivedAt),
+            ...(tollCrossingsValue !== null ? { canonicalTollCrossings: tollCrossingsValue } : {}),
             ...buildPersistenceEnvelope(persistenceScope, { redis: true })
         });
         await redis.expire(metaKey, this.bufferTtlSeconds);
@@ -429,9 +477,23 @@ class TripLocationPersistenceService {
                 : 0;
             const nowMs = normalizeTimestampMs(options.nowMs) || Date.now();
             const durationStartMs = startedAtMs || canonicalFirstReceivedAt;
+            const storedTollCrossings = parseTollCrossings(metadata?.canonicalTollCrossings);
+            let tollCrossings = storedTollCrossings;
+            if (storedTollCrossings && startLocation) {
+                try {
+                    tollCrossings = mergeTollCrossings(
+                        detectTollCrossings(startLocation, canonicalFirstLocation, canonicalFirstReceivedAt),
+                        storedTollCrossings
+                    );
+                } catch (_tollError) {
+                    tollCrossings = null;
+                }
+            }
             return {
                 success: true,
                 source: 'server_trip_location_telemetry',
+                tollCrossings: tollCrossings || [],
+                tollCrossingsTracked: Boolean(tollCrossings),
                 distanceKm: Number((startDistanceKm + canonicalDistanceKm).toFixed(3)),
                 durationSecs: Math.max(0, Math.round((nowMs - durationStartMs) / 1000)),
                 endLocation: canonicalLastLocation,
@@ -463,9 +525,15 @@ class TripLocationPersistenceService {
         if (hasPreStartCanonicalMetadata) {
             const startLocation = normalizePointLocation(options.startLocation);
             const nowMs = normalizeTimestampMs(options.nowMs) || Date.now();
+            const storedTollCrossings = parseTollCrossings(metadata?.canonicalTollCrossings);
             return {
                 success: true,
                 source: 'server_trip_location_last_point',
+                // A cadeia começou antes do início: só contam as travessias depois dele.
+                tollCrossings: (storedTollCrossings || []).filter(
+                    (crossing) => Number(crossing.at) >= startedAtMs
+                ),
+                tollCrossingsTracked: Boolean(storedTollCrossings),
                 distanceKm: startLocation
                     ? Number(haversineDistanceKm(startLocation, canonicalLastLocation).toFixed(3))
                     : 0,
@@ -534,9 +602,22 @@ class TripLocationPersistenceService {
         const durationSecs = Math.max(0, Math.round((nowMs - durationStartMs) / 1000));
         const latestPoint = deduplicatedPoints[deduplicatedPoints.length - 1];
 
+        let tollCrossings = null;
+        try {
+            tollCrossings = findCrossedTolls(routePoints).map((toll) => ({
+                id: toll.id,
+                amount: toll.amount,
+                at: null
+            }));
+        } catch (_tollError) {
+            tollCrossings = null;
+        }
+
         return {
             success: true,
             source: 'server_trip_location_telemetry',
+            tollCrossings: tollCrossings || [],
+            tollCrossingsTracked: Boolean(tollCrossings),
             distanceKm: Number(distanceKm.toFixed(3)),
             durationSecs,
             endLocation: {

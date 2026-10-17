@@ -4,6 +4,13 @@ const DEFAULT_TOLERANCE_KM = Math.max(
   Number.parseFloat(process.env.ROUTE_TOLL_DETECTION_TOLERANCE_KM || '2') || 2
 );
 
+// Tolerância para dizer que um trecho percorrido passou pela praça. Bem menor
+// que a da estimativa de rota: um embarque a 2 km da praça não a cruzou.
+const DEFAULT_CROSSING_TOLERANCE_KM = Math.max(
+  0.05,
+  Number.parseFloat(process.env.TOLL_CROSSING_TOLERANCE_KM || '0.25') || 0.25
+);
+
 const TOLL_PLAZAS = Object.freeze([
   { id: 'p01_casimiro_de_abreu', name: 'P01 - Casimiro de Abreu', road: 'BR-101', direction: 'bidirectional', lat: -22.476441, lng: -42.088519, fees: { car: { weekday: 7.1, weekend: 7.1 }, truck: { weekday: 14.2, weekend: 14.2 } } },
   { id: 'p02_conselheiro_josino', name: 'P02 - Conselheiro Josino', road: 'BR-101', direction: 'bidirectional', lat: -21.552594, lng: -41.331597, fees: { car: { weekday: 7.1, weekend: 7.1 }, truck: { weekday: 14.2, weekend: 14.2 } } },
@@ -170,7 +177,10 @@ function findRouteTolls(routeCoordinates = [], options = {}) {
     return [];
   }
 
-  const toleranceKm = Math.max(0.1, Number(options.toleranceKm) || DEFAULT_TOLERANCE_KM);
+  const toleranceKm = Math.max(
+    Number(options.minToleranceKm) || 0.1,
+    Number(options.toleranceKm) || DEFAULT_TOLERANCE_KM
+  );
   const vehicleClass = normalizeVehicleTollClass(options.vehicleType);
   const now = options.now || new Date();
   const found = [];
@@ -209,6 +219,54 @@ function findRouteTolls(routeCoordinates = [], options = {}) {
   });
 
   return found;
+}
+
+/**
+ * Praças cruzadas por um trecho realmente percorrido (pontos de GPS da
+ * corrida, em ordem). Usa a tolerância de travessia e o sentido da praça.
+ */
+function findCrossedTolls(pathCoordinates = [], options = {}) {
+  return findRouteTolls(pathCoordinates, {
+    ...options,
+    minToleranceKm: 0.05,
+    toleranceKm: Number(options.toleranceKm) || DEFAULT_CROSSING_TOLERANCE_KM
+  });
+}
+
+// Mesma praça vista em dois trechos seguidos é uma travessia só; uma nova
+// passagem pela mesma praça só conta depois deste intervalo.
+const TOLL_RECROSSING_WINDOW_MS = 10 * 60 * 1000;
+
+function mergeTollCrossings(existing = [], added = []) {
+  const merged = Array.isArray(existing) ? [...existing] : [];
+  (Array.isArray(added) ? added : []).forEach((crossing) => {
+    const repeated = merged.some((previous) =>
+      previous.id === crossing.id &&
+      Math.abs(Number(previous.at || 0) - Number(crossing.at || 0)) < TOLL_RECROSSING_WINDOW_MS
+    );
+    if (!repeated) merged.push(crossing);
+  });
+  return merged;
+}
+
+/**
+ * Pedágio que de fato pode ser cobrado no encerramento antecipado, a partir
+ * das travessias registradas pela telemetria da corrida.
+ * `verified: false` quando a corrida não tem registro de travessias (telemetria
+ * ausente ou corrida iniciada antes deste registro existir).
+ */
+function summarizeTollCrossings(metrics = {}, { startedAtMs = null } = {}) {
+  if (!metrics || metrics.tollCrossingsTracked !== true || !Array.isArray(metrics.tollCrossings)) {
+    return { verified: false, crossedTollFee: null, plazas: [] };
+  }
+  const crossings = metrics.tollCrossings.filter((crossing) =>
+    !startedAtMs || !Number.isFinite(Number(crossing.at)) || Number(crossing.at) >= startedAtMs
+  );
+  return {
+    verified: true,
+    crossedTollFee: roundMoney(crossings.reduce((sum, crossing) => sum + Number(crossing.amount || 0), 0)),
+    plazas: crossings.map((crossing) => crossing.id)
+  };
 }
 
 function estimateRouteTollsFromCoordinates(routeCoordinates = [], options = {}) {
@@ -290,6 +348,9 @@ module.exports = {
   TOLL_PLAZAS,
   decodePolyline,
   findRouteTolls,
+  findCrossedTolls,
+  mergeTollCrossings,
+  summarizeTollCrossings,
   estimateRouteTolls,
   estimateRouteTollsFromCoordinates,
   estimateRouteTollsFromPolyline,

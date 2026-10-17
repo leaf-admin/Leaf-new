@@ -122,8 +122,10 @@ jest.mock('../../../utils/active-trip-index', () => ({
   clearActiveTripForDriver: jest.fn().mockResolvedValue(true)
 }));
 
+const mockResolveCanonicalTripMetrics = jest.fn().mockResolvedValue({ success: false });
 jest.mock('../../../services/trip-location-persistence-service', () => ({
-  forceFinalizeTrip: jest.fn().mockResolvedValue(undefined)
+  forceFinalizeTrip: jest.fn().mockResolvedValue(undefined),
+  resolveCanonicalTripMetrics: (...args) => mockResolveCanonicalTripMetrics(...args)
 }));
 
 jest.mock('../../../services/kyc-policy-service', () => ({
@@ -294,6 +296,32 @@ describe('EndRideEarlyByRiderCommand -> billing worker', () => {
     ).toBe(1887);
     // valor executado + estorno = pré-pago
     expect(snapshot.passengerPaidCents + Math.round(result.data.settlement.estimatedRefund * 100)).toBe(4861);
+  });
+
+  it('refunds the toll when the server trail shows the plaza was not crossed', async () => {
+    setBooking({ estimatedFare: '48.61', paymentAmountInCents: '4861', tollFee: '8.95' });
+    mockResolveCanonicalTripMetrics.mockResolvedValueOnce({
+      success: true,
+      startedAtMs: Date.now() - 60000,
+      tollCrossingsTracked: true,
+      tollCrossings: []
+    });
+
+    const result = await endEarly();
+
+    // 0 + 25% × (48,61 − 8,95) = 9,92; estorno 38,69
+    expect(result.data.settlement).toMatchObject({
+      executedFare: 9.92,
+      estimatedRefund: 38.69,
+      tollFee: 0,
+      bookedTollFee: 8.95,
+      tollCrossingVerified: true,
+      tollKeptWhole: false
+    });
+    expect(validateAuthoritativeFinancialSnapshot(result.data.financialSnapshot, {
+      passengerPaidCents: 992,
+      tollFeeCents: 0
+    })).toMatchObject({ valid: true });
   });
 
   it('keeps today\'s unsettled outcome when the booked toll is not below the fare', async () => {

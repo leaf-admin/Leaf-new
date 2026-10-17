@@ -85,3 +85,81 @@ describe('trip metrics when telemetry started before the trip', () => {
     expect(metrics.source).not.toBe('server_trip_location_last_point');
   });
 });
+
+describe('toll crossings recorded with the canonical trail', () => {
+  const PLAZA = { lat: -22.9194989223804, lng: -43.3962833 };
+
+  function createWritableRedis(meta = {}) {
+    const store = { ...meta };
+    return {
+      store,
+      hgetall: jest.fn(async () => ({ ...store })),
+      hset: jest.fn(async (_key, values) => { Object.assign(store, values); }),
+      set: jest.fn().mockResolvedValue('OK'),
+      rpush: jest.fn().mockResolvedValue(1),
+      sadd: jest.fn().mockResolvedValue(1),
+      expire: jest.fn().mockResolvedValue(1),
+      lrange: jest.fn().mockResolvedValue([])
+    };
+  }
+
+  async function buffer(redis, point) {
+    require('../../../utils/redis-pool').getConnection.mockReturnValue(redis);
+    await service.bufferLocationEvent({ tripId: 'booking_1', driverId: 'driver_1', ...point });
+  }
+
+  it('records a plaza the car drove through and reports it after the start', async () => {
+    const redis = createWritableRedis();
+    await buffer(redis, { lat: PLAZA.lat - 0.003, lng: PLAZA.lng, receivedAt: STARTED_AT_MS + 1000, seq: 1 });
+    await buffer(redis, { lat: PLAZA.lat + 0.003, lng: PLAZA.lng, receivedAt: STARTED_AT_MS + 20000, seq: 2 });
+
+    expect(JSON.parse(redis.store.canonicalTollCrossings)).toEqual([
+      expect.objectContaining({ id: 'p10a_transolimpica', at: STARTED_AT_MS + 20000 })
+    ]);
+
+    const metrics = await service.resolveCanonicalTripMetrics({
+      redis,
+      tripId: 'booking_1',
+      driverId: 'driver_1',
+      startedAt: new Date(STARTED_AT_MS).toISOString(),
+      nowMs: STARTED_AT_MS + 30000
+    });
+    expect(metrics.tollCrossingsTracked).toBe(true);
+    expect(metrics.tollCrossings.map((crossing) => crossing.id)).toEqual(['p10a_transolimpica']);
+  });
+
+  it('reports no crossing for the production early end beside the pickup', async () => {
+    const metrics = await service.resolveCanonicalTripMetrics({
+      ...baseOptions,
+      redis: createRedis({ ...META, canonicalTollCrossings: '[]' }),
+      allowPreStartTelemetry: true
+    });
+
+    expect(metrics).toMatchObject({ tollCrossingsTracked: true, tollCrossings: [] });
+  });
+
+  it('leaves a trail that started before crossings were recorded as untracked', async () => {
+    const redis = createWritableRedis({
+      canonicalDriverId: 'driver_1',
+      canonicalFirstLat: String(PLAZA.lat - 0.003),
+      canonicalFirstLng: String(PLAZA.lng),
+      canonicalLastLat: String(PLAZA.lat - 0.003),
+      canonicalLastLng: String(PLAZA.lng),
+      canonicalFirstReceivedAt: String(STARTED_AT_MS + 1000),
+      canonicalLastReceivedAt: String(STARTED_AT_MS + 1000),
+      canonicalDistanceKm: '0',
+      canonicalPointsCount: '1'
+    });
+    await buffer(redis, { lat: PLAZA.lat + 0.003, lng: PLAZA.lng, receivedAt: STARTED_AT_MS + 20000, seq: 2 });
+
+    expect(redis.store.canonicalTollCrossings).toBeUndefined();
+    const metrics = await service.resolveCanonicalTripMetrics({
+      redis,
+      tripId: 'booking_1',
+      driverId: 'driver_1',
+      startedAt: new Date(STARTED_AT_MS).toISOString(),
+      nowMs: STARTED_AT_MS + 30000
+    });
+    expect(metrics.tollCrossingsTracked).toBe(false);
+  });
+});
