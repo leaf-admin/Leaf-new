@@ -205,6 +205,7 @@ function registerSocketStartTripHandler({
                 }
 
                 // ✅ VALIDAÇÃO CRÍTICA: Verificar se pagamento está confirmado
+                let verifiedPaymentProof = null;
                 if (!paymentMockEnabled) {
                     try {
                         const bookingSnapshot = await redis.hgetall(`booking:${bookingId}`);
@@ -270,6 +271,11 @@ function registerSocketStartTripHandler({
                             return;
                         }
 
+                        verifiedPaymentProof = {
+                            success: true,
+                            bookingId,
+                            source: paymentProof.source || 'unknown'
+                        };
                         logStructured('info', 'Pagamento confirmado para corrida', {
                             service: 'websocket',
                             operation: 'startTrip',
@@ -347,7 +353,8 @@ function registerSocketStartTripHandler({
                         startLocation,
                         traceId, // ✅ Passar traceId para o command
                         correlationId, // ✅ Passar correlationId para o command
-                        skipProviderPaymentProof: paymentMockEnabled
+                        skipProviderPaymentProof: paymentMockEnabled,
+                        verifiedPaymentProof
                     });
 
                     result = await runInSpan(commandSpan, async () => {
