@@ -531,11 +531,13 @@ class CompleteTripCommand extends Command {
                         });
                         if (decision?.applied) {
                             const settledFare = toMoney(decision.settlement?.executedFare);
+                            // Pedágio desta liquidação: só o das praças cruzadas.
+                            const settledTollFee = toMoney(decision.settlement?.tollFee) ?? Number(this.tollFee || 0);
                             const settledBreakdown =
                                 settledFare !== null && settledFare > 0 && settledFare < this.finalFare
                                     ? paymentService.calculateFareBreakdownFromReais(
                                         settledFare,
-                                        Number(this.tollFee || 0),
+                                        settledTollFee,
                                         { subscriptionRetainedFeeCents: extensionRetainedOperationalFeeCents }
                                     )
                                     : null;
@@ -543,7 +545,7 @@ class CompleteTripCommand extends Command {
                                 ? resolveDriverEarlyEndInconsistency({
                                     settlement: decision.settlement,
                                     breakdown: settledBreakdown,
-                                    tollFee: this.tollFee,
+                                    tollFee: settledTollFee,
                                     fullFare: this.finalFare,
                                     fareTolerance
                                 })
@@ -561,6 +563,7 @@ class CompleteTripCommand extends Command {
                                 driverEarlyEnd = decision;
                                 completedFareBreakdown = settledBreakdown;
                                 this.finalFare = settledFare;
+                                this.tollFee = settledTollFee;
                                 this.distance = decision.settlement.executedDistanceKm;
                                 this.duration = decision.settlement.executedDurationSecs;
                                 this.endLocation = {

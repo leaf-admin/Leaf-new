@@ -78,6 +78,56 @@ describe('ride-lifecycle-service', () => {
       });
     });
 
+    it('charges no toll when the trip telemetry saw no plaza crossed', () => {
+      const settlement = calculateRiderEarlyEndSettlement(tollBooking(), {
+        distanceKm: 0,
+        durationSecs: 5,
+        tollCrossing: { verified: true, crossedTollFee: 0, plazas: [] }
+      });
+
+      // 0 + 25% × (48,61 − 8,95) = 9,92; estorno 38,69
+      expect(settlement).toMatchObject({
+        tollFee: 0,
+        bookedTollFee: 8.95,
+        executedFareWithoutToll: 9.92,
+        executedFare: 9.92,
+        estimatedRefund: 38.69,
+        tollKeptWhole: false,
+        tollChargedAmount: 0,
+        tollCrossingVerified: true,
+        tollCrossedPlazas: [],
+        tollManualRefundOnDispute: false
+      });
+    });
+
+    it('charges the booked toll when the crossed plaza was seen, capped at the booked amount', () => {
+      const crossed = calculateRiderEarlyEndSettlement(tollBooking(), {
+        distanceKm: 2,
+        durationSecs: 120,
+        tollCrossing: { verified: true, crossedTollFee: 8.95, plazas: ['p10a_transolimpica'] }
+      });
+      const overCrossed = calculateRiderEarlyEndSettlement(tollBooking(), {
+        distanceKm: 2,
+        durationSecs: 120,
+        tollCrossing: { verified: true, crossedTollFee: 30, plazas: ['a', 'b'] }
+      });
+
+      expect(crossed).toMatchObject({ tollFee: 8.95, tollKeptWhole: true, tollCrossingVerified: true });
+      expect(crossed.tollCrossedPlazas).toEqual(['p10a_transolimpica']);
+      expect(overCrossed.tollFee).toBe(8.95);
+      expect(cents(overCrossed.executedFare) + cents(overCrossed.estimatedRefund)).toBe(4861);
+    });
+
+    it('keeps the booked toll whole when crossings were not tracked', () => {
+      const settlement = calculateRiderEarlyEndSettlement(tollBooking(), {
+        distanceKm: 0,
+        durationSecs: 5,
+        tollCrossing: { verified: false, crossedTollFee: null, plazas: [] }
+      });
+
+      expect(settlement).toMatchObject({ tollFee: 8.95, executedFare: 18.87, tollManualRefundOnDispute: true });
+    });
+
     it('never scales the toll, whatever the travelled share', () => {
       [[0, 0], [2, 120], [5, 300], [7.5, 450], [10, 600], [14, 900]].forEach(([distanceKm, durationSecs]) => {
         const settlement = calculateRiderEarlyEndSettlement(tollBooking(), { distanceKm, durationSecs });

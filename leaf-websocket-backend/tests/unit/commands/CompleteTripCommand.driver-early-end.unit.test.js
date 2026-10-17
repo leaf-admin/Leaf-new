@@ -155,10 +155,11 @@ function createRedis(bookingOverrides = {}) {
   };
 }
 
-function serverSaw(position, { distanceKm = 5, durationSecs = 600, ageMs = 5000 } = {}) {
+function serverSaw(position, { distanceKm = 5, durationSecs = 600, ageMs = 5000, tollCrossings } = {}) {
   mockResolveCanonicalTripMetrics.mockResolvedValue({
     success: true,
     source: 'server_trip_location_telemetry',
+    ...(tollCrossings ? { tollCrossings, tollCrossingsTracked: true } : {}),
     distanceKm,
     durationSecs,
     endLocation: position,
@@ -481,6 +482,39 @@ describe('CompleteTripCommand driver early end settlement', () => {
       estimatedRefund: 30,
       tollKeptWhole: true
     });
+  });
+
+  it('charges no toll when the server saw the car end before the plaza', async () => {
+    useTollBooking({ fare: 46.5, toll: 6.5 });
+    serverSaw(JUST_AFTER_PICKUP, { distanceKm: 0.2, durationSecs: 60, tollCrossings: [] });
+
+    const result = await buildCommand({ finalFare: 46.5, tollFee: 6.5 }).execute();
+
+    // 0 + 25% × 40,00 = 10,00; estorno 36,50. Líquido: 10,00 − 0,79 − 0,50 = 8,71.
+    expectConsistentSettlement(result, { fare: 46.5, toll: 0, executedFare: 10, driverNet: 8.71 });
+    expect(result.data.settlement).toMatchObject({
+      bookedTollFee: 6.5,
+      tollChargedAmount: 0,
+      tollKeptWhole: false,
+      tollCrossingVerified: true,
+      tollManualRefundOnDispute: false,
+      estimatedRefund: 36.5
+    });
+    expect(redis.store['booking:booking_1'].tollFee).toBe('0');
+  });
+
+  it('keeps the toll when the server saw the car cross the plaza', async () => {
+    useTollBooking({ fare: 46.5, toll: 6.5 });
+    serverSaw(HALFWAY, {
+      distanceKm: 5,
+      durationSecs: 600,
+      tollCrossings: [{ id: 'p18_sapucaia', amount: 6.5, at: Date.now() - 60000 }]
+    });
+
+    const result = await buildCommand({ finalFare: 46.5, tollFee: 6.5 }).execute();
+
+    expectConsistentSettlement(result, { fare: 46.5, toll: 6.5, executedFare: 26.5, driverNet: 25.01 });
+    expect(result.data.settlement).toMatchObject({ tollCrossingVerified: true, tollCrossedPlazas: ['p18_sapucaia'] });
   });
 
   it('stays consistent when the toll is larger than the minimum charge', async () => {

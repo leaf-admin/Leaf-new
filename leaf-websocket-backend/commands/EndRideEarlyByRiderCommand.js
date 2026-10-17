@@ -11,6 +11,7 @@ const { SpanStatusCode } = require('@opentelemetry/api');
 const { validateAndEnsureTraceIdInCommand } = require('../utils/trace-validator');
 const { clearActiveTripForDriver } = require('../utils/active-trip-index');
 const tripLocationPersistenceService = require('../services/trip-location-persistence-service');
+const { summarizeTollCrossings } = require('../services/route-toll-service');
 const { resolveFinancialContext } = require('../services/financial-runtime-context');
 const {
   calculateRiderEarlyEndSettlement,
@@ -159,9 +160,35 @@ class EndRideEarlyByRiderCommand extends Command {
           return CommandResult.failure(`Corrida não pode ser encerrada antecipadamente no estado atual: ${currentState}`);
         }
 
+        // Pedágio só das praças que a telemetria do servidor viu o carro cruzar.
+        // Sem telemetria o pedágio contratado segue cobrado (revisão manual).
+        let tollCrossing = null;
+        try {
+          const startedAtMs = Date.parse(context.bookingHash.startedAt || '') || null;
+          const tripMetrics = await tripLocationPersistenceService.resolveCanonicalTripMetrics({
+            redis,
+            tripId: this.bookingId,
+            driverId,
+            startedAt: context.bookingHash.startedAt || null,
+            startLocation: parseJsonObject(context.bookingHash.startLocation) ||
+              parseJsonObject(context.bookingHash.pickupLocation),
+            allowPreStartTelemetry: true
+          });
+          tollCrossing = tripMetrics?.success
+            ? summarizeTollCrossings(tripMetrics, { startedAtMs: Number(tripMetrics.startedAtMs) || startedAtMs })
+            : null;
+        } catch (tollCrossingError) {
+          logStructured('warn', 'Travessias de pedágio indisponíveis no encerramento antecipado', {
+            service: 'end-ride-early-command',
+            bookingId: this.bookingId,
+            error: tollCrossingError.message
+          });
+        }
+
         const settlement = calculateRiderEarlyEndSettlement(context.bookingHash, {
           distanceKm: this.distanceKm,
-          durationSecs: this.durationSecs
+          durationSecs: this.durationSecs,
+          tollCrossing
         });
         const completedAt = new Date().toISOString();
         const normalizedEndLocation = normalizeLocation(this.endLocation) || this.endLocation;

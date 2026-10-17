@@ -218,10 +218,13 @@ async function resolveDriverEarlyEndSettlement({
   const executedDurationSecs = Math.max(0, Number(metrics.durationSecs) || 0);
 
   // Mesma conta do encerramento pelo passageiro, pedágio incluído.
+  // Pedágio só das praças que a telemetria viu o carro cruzar.
   const { calculateRiderEarlyEndSettlement } = require('./ride-lifecycle-service');
+  const { summarizeTollCrossings } = require('./route-toll-service');
   const proportionalSettlement = calculateRiderEarlyEndSettlement(bookingData, {
     distanceKm: executedDistanceKm,
-    durationSecs: executedDurationSecs
+    durationSecs: executedDurationSecs,
+    tollCrossing: summarizeTollCrossings(metrics, { startedAtMs: Number(metrics.startedAtMs) || null })
   });
 
   // Sem distância contratada o progresso cairia para o mínimo de cobrança por
@@ -237,7 +240,7 @@ async function resolveDriverEarlyEndSettlement({
     return notApplied('TOLL_AMOUNT_MISMATCH', detected);
   }
 
-  // A regra do pedágio (pedágio inteiro + proporção da tarifa sem ele) já vem
+  // A regra do pedágio (pedágio cruzado + proporção da tarifa sem ele) já vem
   // aplicada pela conta compartilhada com o encerramento pelo passageiro.
   // Quando o pedágio não é menor que a tarifa a conta não fecha: não liquida.
   const baseSettlement = proportionalSettlement;

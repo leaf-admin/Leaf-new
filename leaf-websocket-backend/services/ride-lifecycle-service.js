@@ -436,7 +436,7 @@ function calculateExecutedFareSettlement(bookingHash = {}, options = {}) {
   // passageiro e pelo motorista). Interrupção operacional e encerramento com
   // revisão manual seguem com a proporção sobre a tarifa inteira.
   return options.tollPassThrough === true
-    ? applyTollPassThroughRule(settlement)
+    ? applyTollPassThroughRule(settlement, options.tollCrossing)
     : settlement;
 }
 
@@ -451,10 +451,13 @@ function positiveMoneyToCents(value) {
  * valor liquidado = pedágio + proporção × (tarifa − pedágio)
  * estorno         = valor pré-pago − valor liquidado
  *
- * Pedágio é repasse e nunca entra na proporção. O servidor não sabe se a praça
- * de pedágio foi de fato cruzada, então o pedágio contratado fica cobrado
- * inteiro e a liquidação registra isso: se o passageiro contestar, o suporte
- * estorna o pedágio manualmente.
+ * Pedágio é repasse e nunca entra na proporção. Só é cobrado o pedágio das
+ * praças que a telemetria da corrida viu o carro cruzar depois do início
+ * (`tollCrossing.verified`), limitado ao pedágio contratado; sem travessia,
+ * nada de pedágio. A proporção continua sobre a tarifa sem o pedágio
+ * contratado. Quando a corrida não tem registro de travessias, o pedágio
+ * contratado fica cobrado inteiro e a liquidação registra isso: se o
+ * passageiro contestar, o suporte estorna o pedágio manualmente.
  *
  * - Sem pedágio (ausente, não numérico, zero ou negativo) a liquidação volta
  *   intacta, com os mesmos números de sempre.
@@ -463,7 +466,7 @@ function positiveMoneyToCents(value) {
  *   cada caminho decida o que fazer (o do motorista não liquida).
  * - Nunca cobra mais que o pré-pago e o estorno nunca fica negativo.
  */
-function applyTollPassThroughRule(settlement = {}) {
+function applyTollPassThroughRule(settlement = {}, tollCrossing = null) {
   const tollFeeCents = positiveMoneyToCents(settlement.tollFee);
   if (tollFeeCents <= 0) {
     return settlement;
@@ -480,10 +483,15 @@ function applyTollPassThroughRule(settlement = {}) {
     };
   }
 
+  const crossingVerified = tollCrossing?.verified === true;
+  const chargedTollCents = crossingVerified
+    ? Math.min(tollFeeCents, Math.max(0, Math.round(Number(tollCrossing.crossedTollFee || 0) * 100)))
+    : tollFeeCents;
+
   const appliedRatio = clamp(parseMoneyValue(settlement.appliedRatio, 0), 0, 1);
   const executedFareWithoutTollCents = Math.round(fareWithoutTollCents * appliedRatio);
   const executedFareCents = Math.min(
-    tollFeeCents + executedFareWithoutTollCents,
+    chargedTollCents + executedFareWithoutTollCents,
     prepaidCents
   );
   const estimatedRefundCents = Math.max(0, prepaidCents - executedFareCents);
@@ -491,15 +499,19 @@ function applyTollPassThroughRule(settlement = {}) {
   return {
     ...settlement,
     executedFare: executedFareCents / 100,
-    tollFee: tollFeeCents / 100,
+    // `tollFee` é o pedágio desta liquidação (repasse ao motorista, recibo e
+    // snapshot); o contratado fica em `bookedTollFee`.
+    tollFee: chargedTollCents / 100,
+    bookedTollFee: tollFeeCents / 100,
     estimatedRefund: estimatedRefundCents / 100,
     remainingReservedAmount: estimatedRefundCents / 100,
     fareWithoutToll: fareWithoutTollCents / 100,
-    executedFareWithoutToll: Math.max(0, executedFareCents - tollFeeCents) / 100,
-    tollKeptWhole: true,
-    tollChargedAmount: tollFeeCents / 100,
-    tollCrossingVerified: false,
-    tollManualRefundOnDispute: true
+    executedFareWithoutToll: Math.max(0, executedFareCents - chargedTollCents) / 100,
+    tollKeptWhole: chargedTollCents === tollFeeCents,
+    tollChargedAmount: chargedTollCents / 100,
+    tollCrossingVerified: crossingVerified,
+    tollCrossedPlazas: crossingVerified && Array.isArray(tollCrossing.plazas) ? tollCrossing.plazas : [],
+    tollManualRefundOnDispute: !crossingVerified
   };
 }
 
