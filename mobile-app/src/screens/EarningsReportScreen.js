@@ -56,6 +56,7 @@ import {
   buildRuntimeHistorySeries,
   buildTripFinancialTotals,
 } from './prototype/tripFinancialSummary';
+import { buildDriverFeeRows } from '../config/driverFeePolicy';
 
 const MAIN_COLOR = colors.TAXIPRIMARY;
 const { color: tokenColor, elevation: tokenElevation } = robotaxiPrototypeTokens;
@@ -1493,6 +1494,25 @@ export default function EarningsReportScreen({ navigation, route }) {
                   </View>
                 </View>
               ) : null}
+
+              {/* Transparência total das taxas (decisão de 17/10/2026), mesmas linhas do onboarding. */}
+              <View style={styles.cleanSection} testID="driver-earnings-fees">
+                <Text style={styles.cleanSectionTitle}>Taxas da Leaf</Text>
+                <View style={styles.cleanList}>
+                  {buildDriverFeeRows().map((row, index) => (
+                    <React.Fragment key={row.key}>
+                      {index > 0 ? <View style={styles.cleanHairline} /> : null}
+                      <View style={styles.cleanListRow}>
+                        <View style={styles.withdrawalRowCopy}>
+                          <Text style={styles.cleanListTitle}>{row.title}</Text>
+                          <Text style={styles.cleanListSubtitle}>{row.detail}</Text>
+                        </View>
+                        <Text style={styles.cleanListTitle}>{row.value}</Text>
+                      </View>
+                    </React.Fragment>
+                  ))}
+                </View>
+              </View>
 
               <Text style={styles.driverContextText}>
                 {[profileName, `Nota ${ratingLabel}`, tierLabel, `Desde ${partnerSinceLabel}`].filter(Boolean).join(' · ')}

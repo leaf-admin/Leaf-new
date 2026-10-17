@@ -590,7 +590,7 @@ const styles = StyleSheet.create({
   },
   input: {
     borderWidth: 1.5,
-    borderColor: color.border,
+    borderColor: color.fieldBorder,
     borderRadius: 14,
     paddingHorizontal: 14,
     paddingVertical: 12,
@@ -721,7 +721,7 @@ const styles = StyleSheet.create({
     flexBasis: '100%',
     overflow: 'hidden',
     borderWidth: 1.5,
-    borderColor: color.border,
+    borderColor: color.fieldBorder,
     borderRadius: 14,
     backgroundColor: '#FFFFFF',
     marginBottom: 14

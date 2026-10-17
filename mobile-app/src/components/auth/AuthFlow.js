@@ -33,7 +33,8 @@ import { createSingleFlightGate } from './authFlowSubmission';
 import {
   persistPhoneValidatedOnboardingSession,
   sanitizeAuthUserForOnboarding,
-  PROFILE_SELECTION_STEP_INDEX
+  PROFILE_SELECTION_STEP_INDEX,
+  DRIVER_INTRO_STEP_INDEX
 } from '../../utils/onboardingSessionState';
 import { toUserFriendlyMessage } from '../../utils/friendlyErrorMessages';
 import { LocationPrimingStep, WelcomeScreen } from '../onboarding/onboardingSteps';
@@ -55,6 +56,7 @@ import ProfileDataStep from './steps/ProfileDataStep';
 import DocumentStep from './steps/DocumentStep';
 import CredentialsStep from './steps/CredentialsStep';
 import DriverEmailStep from './steps/DriverEmailStep';
+import DriverIntroStep from './steps/DriverIntroStep';
 
 const AuthFlow = ({
   visible,
@@ -79,6 +81,8 @@ const AuthFlow = ({
   const finalizationGate = React.useRef(createSingleFlightGate()).current;
   // Cadastro concluído aguardando a tela de localização (só quando a permissão ainda pode ser pedida).
   const [locationPriming, setLocationPriming] = useState(null);
+  // Perfil escolhido já nas boas-vindas ("Quero dirigir com a Leaf"): só pré-seleciona.
+  const [preferredRole, setPreferredRole] = useState(null);
   const [locationRequesting, setLocationRequesting] = useState(false);
   const [isFinalizing, setIsFinalizing] = useState(false);
   const isReviewEnv = allowReviewAccess();
@@ -265,6 +269,7 @@ const AuthFlow = ({
       case 4: return 'document_data';
       case 5: return 'credentials';
       case 6: return 'driver_contact';
+      case DRIVER_INTRO_STEP_INDEX: return 'driver_intro';
       default: return null;
     }
   }, []);
@@ -288,7 +293,11 @@ const AuthFlow = ({
     let prevStep = Math.max(0, currentStep - 1);
 
     // Fluxo motorista: pula o step de nome manual
+    // CNH volta para "Como funciona", que volta para o perfil.
     if (isDriver && currentStep === 4) {
+      prevStep = DRIVER_INTRO_STEP_INDEX;
+    }
+    if (currentStep === DRIVER_INTRO_STEP_INDEX) {
       prevStep = 2;
     }
 
@@ -673,13 +682,19 @@ const AuthFlow = ({
     // Marcar seleção de perfil como completa
     await completeStep('profile_selection');
     if (normalizedSelection.userType === 'driver') {
-      // Fluxo motorista: OTP -> seleção de perfil -> CNH
-      setCurrentStep(4);
-      await saveCurrentStep(4);
+      // Fluxo motorista: OTP -> seleção de perfil -> "Como funciona" -> CNH
+      setCurrentStep(DRIVER_INTRO_STEP_INDEX);
+      await saveCurrentStep(DRIVER_INTRO_STEP_INDEX);
       return;
     }
     goToNextStep();
   }, [saveStepDataLocal, completeStep, goToNextStep]);
+
+  const handleDriverIntroContinue = useCallback(async () => {
+    await completeStep('driver_intro');
+    setCurrentStep(4);
+    await saveCurrentStep(4);
+  }, []);
 
   // Função para lidar com o envio dos dados do perfil
   const handleProfileDataSubmitted = useCallback(async (profileData) => {
@@ -930,13 +945,8 @@ const AuthFlow = ({
     // Marcar credenciais como completo
     await completeStep('credentials');
 
-    if (normalizedUserType === 'driver') {
-      // Após consentimentos do motorista, pedir e-mail (com opção de pular)
-      setCurrentStep(6);
-      await saveCurrentStep(6);
-      return;
-    }
-
+    // O e-mail do motorista saiu do caminho principal (é opcional e fica no
+    // perfil): depois dos aceites o cadastro já é enviado.
     await finalizeOnboarding({ credentialsOverride: credentials });
   }, [saveStepDataLocal, completeStep, authData?.profileSelection?.userType, finalizeOnboarding]);
 
@@ -989,6 +999,10 @@ const AuthFlow = ({
       return (
         <WelcomeScreen
           onStart={() => setShowWelcome(false)}
+          onStartDriver={() => {
+            setPreferredRole('driver');
+            setShowWelcome(false);
+          }}
           onOpenTerms={() => openLegalUrl(AppConfig.terms_of_service_url)}
           onOpenPrivacy={() => openLegalUrl(AppConfig.privacy_policy_url)}
         />
@@ -1021,7 +1035,7 @@ const AuthFlow = ({
           <ProfileSelectionStep
             onProfileSelected={handleProfileSelected}
             onBack={goToPreviousStep}
-            initialData={authData.profileSelection || {}}
+            initialData={authData.profileSelection || (preferredRole ? { userType: preferredRole } : {})}
             progressMeta={editorialProgressMeta}
           />
         );
@@ -1066,6 +1080,14 @@ const AuthFlow = ({
               profileSelection: authData.profileSelection || {},
               ...(authData.credentials || {})
             }}
+            progressMeta={editorialProgressMeta}
+          />
+        );
+      case DRIVER_INTRO_STEP_INDEX:
+        return (
+          <DriverIntroStep
+            onContinue={handleDriverIntroContinue}
+            onBack={goToPreviousStep}
             progressMeta={editorialProgressMeta}
           />
         );

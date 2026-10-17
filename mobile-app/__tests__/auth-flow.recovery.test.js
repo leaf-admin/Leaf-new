@@ -16,10 +16,20 @@ describe('auth flow recovery helpers', () => {
     expect(resolveAuthFlowInitialStep([], 0, null)).toBe(0);
   });
 
-  it('restores driver onboarding directly to documents after profile selection', () => {
+  it('restores driver onboarding to "how it works" after profile selection', () => {
     expect(
       resolveAuthFlowInitialStep(
         ['phone_validation', 'profile_selection'],
+        0,
+        'driver',
+      ),
+    ).toBe(7);
+  });
+
+  it('restores driver onboarding to documents once "how it works" was seen', () => {
+    expect(
+      resolveAuthFlowInitialStep(
+        ['phone_validation', 'profile_selection', 'driver_intro'],
         0,
         'driver',
       ),

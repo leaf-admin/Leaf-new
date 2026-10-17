@@ -808,7 +808,7 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         backgroundColor: '#FFFFFF',
         borderWidth: 1.5,
-        borderColor: color.border,
+        borderColor: color.fieldBorder,
         borderRadius: 16,
         minHeight: 56,
         marginTop: 12
@@ -828,7 +828,7 @@ const styles = StyleSheet.create({
     inlineTextInput: {
         backgroundColor: '#FFFFFF',
         borderWidth: 1.5,
-        borderColor: color.border,
+        borderColor: color.fieldBorder,
         borderRadius: 16,
         minHeight: 56,
         marginTop: 12,
@@ -869,7 +869,7 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         backgroundColor: '#FFFFFF',
         borderWidth: 1.5,
-        borderColor: color.border,
+        borderColor: color.fieldBorder,
         borderRadius: 16,
         paddingRight: 16,
         minHeight: 60

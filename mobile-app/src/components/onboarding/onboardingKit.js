@@ -23,14 +23,17 @@ import { useHapticFeedback } from '../../hooks/useHapticFeedback';
 
 export const ONB = {
   ink: '#11210C',
-  inkSoft: 'rgba(17,33,12,0.62)',
-  inkMuted: 'rgba(17,33,12,0.42)',
+  inkSoft: 'rgba(17,33,12,0.70)',
+  // Texto de apoio: 4,8:1 sobre branco (WCAG 1.4.3 AA).
+  inkMuted: 'rgba(17,33,12,0.62)',
   leaf: '#1A330E',
   leafDeep: '#003002',
   surface: '#FFFFFF',
   surfaceSoft: '#F4F6F2',
   line: 'rgba(17,33,12,0.10)',
   lineStrong: 'rgba(17,33,12,0.22)',
+  // Borda de campo de texto: 3,1:1 sobre branco (WCAG 1.4.11).
+  fieldLine: 'rgba(17,33,12,0.48)',
   danger: '#B4232F',
   dangerSoft: '#FFF1F2',
   success: '#2E8B4A',
@@ -47,13 +50,17 @@ export function OnboardingProgress({ step, total }) {
       useNativeDriver: false,
     }).start();
   }, [progress, step, total]);
+  const current = Math.min(Math.max(Number(step) || 0, 0), total || 0);
   return (
-    <View style={styles.progressTrack} accessibilityRole="progressbar" accessibilityValue={{ min: 0, max: total, now: step }}>
-      <Animated.View
-        style={[styles.progressFill, {
-          width: progress.interpolate({ inputRange: [0, 1], outputRange: ['0%', '100%'] }),
-        }]}
-      />
+    <View accessibilityRole="progressbar" accessibilityLabel={`Etapa ${current} de ${total}`} accessibilityValue={{ min: 0, max: total, now: current }}>
+      <View style={styles.progressTrack}>
+        <Animated.View
+          style={[styles.progressFill, {
+            width: progress.interpolate({ inputRange: [0, 1], outputRange: ['0%', '100%'] }),
+          }]}
+        />
+      </View>
+      {total ? <Text style={styles.progressLabel} testID="onboarding-progress-label">{`Etapa ${current} de ${total}`}</Text> : null}
     </View>
   );
 }
@@ -117,7 +124,7 @@ export function OnboardingField({
   }, [focus, focused]);
   const borderColor = error
     ? ONB.danger
-    : focus.interpolate({ inputRange: [0, 1], outputRange: [ONB.line, ONB.ink] });
+    : focus.interpolate({ inputRange: [0, 1], outputRange: [ONB.fieldLine, ONB.ink] });
   return (
     <View style={styles.fieldWrap}>
       {label ? <Text style={styles.fieldLabel}>{label}</Text> : null}
@@ -201,6 +208,7 @@ const styles = StyleSheet.create({
   progressWrap: { flex: 1 },
   progressTrack: { height: 4, borderRadius: 2, backgroundColor: ONB.surfaceSoft, overflow: 'hidden' },
   progressFill: { height: 4, borderRadius: 2, backgroundColor: ONB.ink },
+  progressLabel: { ...leafTypography.medium, fontSize: 12.5, color: ONB.inkMuted, marginTop: 6 },
   body: { flex: 1 },
   bodyContent: { paddingHorizontal: 24, paddingTop: 28, paddingBottom: 24 },
   title: { ...leafTypography.semiBold, fontSize: 30, lineHeight: 36, letterSpacing: -0.4, color: ONB.ink },
@@ -229,5 +237,5 @@ const styles = StyleSheet.create({
   fieldPrefix: { ...leafTypography.semiBold, fontSize: 18, color: ONB.ink, marginRight: 10 },
   fieldInput: { flex: 1, ...leafTypography.regular, fontSize: 18, color: ONB.ink, paddingVertical: 14 },
   fieldError: { ...leafTypography.medium, fontSize: 13, color: ONB.danger, marginTop: 8 },
-  fieldHint: { ...leafTypography.regular, fontSize: 13, color: ONB.inkMuted, marginTop: 8 },
+  fieldHint: { ...leafTypography.regular, fontSize: 14, lineHeight: 20, color: ONB.inkMuted, marginTop: 8 },
 });
