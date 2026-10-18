@@ -142,6 +142,13 @@ function resolveIncidentSeverity({ type, description, requestedSeverity, request
     };
 }
 
+// Respostas do passageiro à pergunta "a viagem terminou antes do destino".
+const EARLY_END_ANSWER_STATUS = Object.freeze({
+    early_end_consented: 'PASSENGER_CONSENTED',
+    early_end_not_consented: 'PASSENGER_DISPUTED',
+    early_end_trip_problem: 'PASSENGER_REPORTED_PROBLEM'
+});
+
 function registerSocketSafetySupportHandlers({
     socket,
     io,
@@ -199,6 +206,37 @@ function registerSocketSafetySupportHandlers({
             bookingId: participant.scope?.bookingId || bookingId,
             participant
         };
+    }
+
+    async function recordEarlyEndPassengerAnswer({ type, bookingScope, incidentId }) {
+        const status = EARLY_END_ANSWER_STATUS[String(type || '').trim().toLowerCase()];
+        if (
+            !status
+            || !bookingScope?.bookingId
+            || bookingScope.participant?.participantRole !== 'passenger'
+            || typeof redisPool?.getConnection !== 'function'
+        ) {
+            return;
+        }
+        try {
+            const redis = redisPool.getConnection();
+            const bookingKey = `booking:${bookingScope.bookingId}`;
+            const current = await redis.hget(bookingKey, 'earlyEndReviewStatus');
+            if (!current) {
+                return;
+            }
+            await redis.hset(bookingKey, {
+                earlyEndReviewStatus: status,
+                earlyEndPassengerAnsweredAt: new Date().toISOString(),
+                earlyEndPassengerIncidentId: String(incidentId || '')
+            });
+        } catch (error) {
+            logStructured('warn', 'Resposta do encerramento antecipado não gravada no booking', {
+                service: 'server',
+                bookingId: bookingScope.bookingId,
+                error: error.message
+            });
+        }
     }
 
     async function resolveIncidentPersistenceContext(bookingScope, identity) {
@@ -280,6 +318,14 @@ function registerSocketSafetySupportHandlers({
                 location: location || null,
                 actorId: identity.userId,
                 persistenceContext
+            });
+
+            // Resposta do passageiro ao encerramento antecipado: registra no booking
+            // (a operação vê o que ele disse e o recibo para de perguntar).
+            await recordEarlyEndPassengerAnswer({
+                type,
+                bookingScope,
+                incidentId: incidentData.incidentId
             });
 
             // Emitir confirmação
