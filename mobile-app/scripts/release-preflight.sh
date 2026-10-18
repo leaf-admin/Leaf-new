@@ -150,6 +150,28 @@ else
   fail "Expo config principal divergente: name=${APP_NAME:-<vazio>} slug=${APP_SLUG:-<vazio>} version=${APP_VERSION:-<vazio>} runtime=${APP_RUNTIME_VERSION:-<vazio>}"
 fi
 
+# A runtime do Expo Updates também fica gravada nos projetos nativos (que não são
+# regenerados a cada build). Se ela ficar para trás, o app novo baixa os OTAs da
+# versão anterior e volta a rodar o JavaScript antigo (visto no 1.0.7 em 17/10/2026).
+NATIVE_IOS_EXPO_PLIST="${ROOT_DIR}/ios/Leaf/Supporting/Expo.plist"
+NATIVE_ANDROID_STRINGS="${ROOT_DIR}/android/app/src/main/res/values/strings.xml"
+if [[ -f "$NATIVE_IOS_EXPO_PLIST" ]]; then
+  NATIVE_IOS_RUNTIME="$(/usr/libexec/PlistBuddy -c "Print :EXUpdatesRuntimeVersion" "$NATIVE_IOS_EXPO_PLIST" 2>/dev/null || true)"
+  if [[ "$NATIVE_IOS_RUNTIME" == "$APP_RUNTIME_VERSION" ]]; then
+    pass "Runtime nativa iOS (Expo.plist) confere: $NATIVE_IOS_RUNTIME"
+  else
+    fail "Runtime nativa iOS divergente: Expo.plist=${NATIVE_IOS_RUNTIME:-<vazio>} config=${APP_RUNTIME_VERSION:-<vazio>}"
+  fi
+fi
+if [[ -f "$NATIVE_ANDROID_STRINGS" ]]; then
+  NATIVE_ANDROID_RUNTIME="$(sed -n 's:.*<string name="expo_runtime_version">\([^<]*\)</string>.*:\1:p' "$NATIVE_ANDROID_STRINGS" | head -1)"
+  if [[ "$NATIVE_ANDROID_RUNTIME" == "$APP_RUNTIME_VERSION" ]]; then
+    pass "Runtime nativa Android (strings.xml) confere: $NATIVE_ANDROID_RUNTIME"
+  else
+    fail "Runtime nativa Android divergente: strings.xml=${NATIVE_ANDROID_RUNTIME:-<vazio>} config=${APP_RUNTIME_VERSION:-<vazio>}"
+  fi
+fi
+
 if [[ "$UPDATES_ENABLED" == "false" ]]; then
   pass "Expo Updates desativado explicitamente"
 elif [[ "$UPDATES_CHANNEL" == "production" ]]; then
