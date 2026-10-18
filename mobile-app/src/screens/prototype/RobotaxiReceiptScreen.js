@@ -30,6 +30,11 @@ import robotaxiPrototypeTokens from "../../components/design-system/robotaxiProt
 import { usePrototypeMapOcclusion } from "./prototypeMapOcclusion";
 import { usePrototypeRideRuntime } from "./prototypeRideRuntime";
 import {
+  isEarlyEndAnsweredStatus,
+  loadEarlyEndAnsweredIds,
+  markEarlyEndAnswered,
+} from "./earlyEndAnswerStore";
+import {
   formatCurrencyBRL,
   resolveTripFeeAmount,
   resolveTripGrossAmount,
@@ -802,11 +807,13 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
       !isScreenFocused ||
       !receiptId ||
       !Number.isFinite(earlyEndRemainingMeters) ||
-      earlyEndPromptedReceiptIds.has(receiptId)
+      earlyEndPromptedReceiptIds.has(receiptId) ||
+      isEarlyEndAnsweredStatus(selected?.earlyEndReviewStatus)
     ) {
       return;
     }
     earlyEndPromptedReceiptIds.add(receiptId);
+    let cancelled = false;
     const distanceLabel = earlyEndRemainingMeters >= 1000
       ? `${(earlyEndRemainingMeters / 1000).toFixed(1).replace(".", ",")} km`
       : `${Math.round(earlyEndRemainingMeters / 10) * 10} m`;
@@ -821,6 +828,7 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
         }),
       )
         .then(() => {
+          markEarlyEndAnswered(receiptId);
           if (thanks) {
             Alert.alert("Obrigado por avisar", thanks, undefined, {
               __skipFriendlyAlertPatch: true,
@@ -861,6 +869,20 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
         "Nossa equipe vai analisar esta corrida e falar com você.",
       ),
     };
+    // Já respondido neste aparelho (mesmo em outra sessão): não pergunta de novo.
+    loadEarlyEndAnsweredIds().then((answered) => {
+      if (cancelled) {
+        earlyEndPromptedReceiptIds.delete(receiptId);
+        return;
+      }
+      if (answered.has(receiptId)) return;
+      showEarlyEndQuestion();
+    });
+    return () => {
+      cancelled = true;
+    };
+
+    function showEarlyEndQuestion() {
     showLeafChoiceSheet({
       title: "A viagem terminou antes do destino",
       message: `O motorista encerrou a corrida a ${distanceLabel} do destino em linha reta. O que aconteceu?`,
@@ -873,7 +895,8 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
       if (answers[key]) answers[key]();
       else earlyEndPromptedReceiptIds.delete(receiptId);
     });
-  }, [earlyEndRemainingMeters, isDriverView, isScreenFocused, reportIncident, selected?.id]);
+    }
+  }, [earlyEndRemainingMeters, isDriverView, isScreenFocused, reportIncident, selected?.id, selected?.earlyEndReviewStatus]);
 
   useEffect(() => {
     if (

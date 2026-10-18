@@ -263,6 +263,75 @@ describe('registerSocketSafetySupportHandlers support chat scope', () => {
     );
   });
 
+  it('records the passenger answer to an early end on the booking', async () => {
+    const store = {
+      'booking:booking_1': {
+        bookingId: 'booking_1',
+        customerId: 'user_1',
+        driverId: 'driver_1',
+        status: 'COMPLETED',
+        earlyEndReviewStatus: 'PENDING_PASSENGER_FEEDBACK'
+      }
+    };
+    const redis = {
+      hgetall: jest.fn(async (key) => ({ ...(store[key] || {}) })),
+      hget: jest.fn(async (key, field) => (store[key] || {})[field] ?? null),
+      hset: jest.fn(async (key, values) => { Object.assign(store[key], values); return 1; }),
+      get: jest.fn(async () => null),
+      sismember: jest.fn(async () => 0),
+      exists: jest.fn(async () => 1)
+    };
+    const activeBookings = new Map([
+      ['booking_1', { bookingId: 'booking_1', customerId: 'user_1', driverId: 'driver_1', status: 'COMPLETED' }]
+    ]);
+    const { handlers, socket } = createHarness({}, { activeBookings, redisPool: { getConnection: () => redis } });
+
+    await handlers.reportIncident({
+      bookingId: 'booking_1',
+      type: 'early_end_consented',
+      description: 'Passageiro confirmou que pediu para encerrar a 8,1 km do destino em linha reta.',
+      source: 'passenger-early-end-feedback'
+    });
+
+    expect(socket.emit).toHaveBeenCalledWith('incidentReported', expect.objectContaining({ success: true }));
+    expect(store['booking:booking_1']).toEqual(expect.objectContaining({
+      earlyEndReviewStatus: 'PASSENGER_CONSENTED',
+      earlyEndPassengerIncidentId: 'incident_1'
+    }));
+  });
+
+  it('does not let the driver answer the early-end question for the passenger', async () => {
+    const store = {
+      'booking:booking_1': {
+        bookingId: 'booking_1',
+        customerId: 'user_2',
+        driverId: 'user_1',
+        status: 'COMPLETED',
+        earlyEndReviewStatus: 'PENDING_PASSENGER_FEEDBACK'
+      }
+    };
+    const redis = {
+      hgetall: jest.fn(async (key) => ({ ...(store[key] || {}) })),
+      hget: jest.fn(async (key, field) => (store[key] || {})[field] ?? null),
+      hset: jest.fn(async (key, values) => { Object.assign(store[key], values); return 1; }),
+      get: jest.fn(async () => null),
+      sismember: jest.fn(async () => 0),
+      exists: jest.fn(async () => 1)
+    };
+    const activeBookings = new Map([
+      ['booking_1', { bookingId: 'booking_1', customerId: 'user_2', driverId: 'user_1', status: 'COMPLETED' }]
+    ]);
+    const { handlers } = createHarness({ userType: 'driver' }, { activeBookings, redisPool: { getConnection: () => redis } });
+
+    await handlers.reportIncident({
+      bookingId: 'booking_1',
+      type: 'early_end_not_consented',
+      description: 'Tentativa de responder pelo passageiro.'
+    });
+
+    expect(store['booking:booking_1'].earlyEndReviewStatus).toBe('PENDING_PASSENGER_FEEDBACK');
+  });
+
   it('allows a ride participant to report an incident for the scoped booking', async () => {
     const activeBookings = new Map([
       ['booking_1', {
