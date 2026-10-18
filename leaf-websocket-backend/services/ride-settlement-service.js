@@ -142,6 +142,7 @@ function buildAuthoritativeCompletionArtifacts({
   completionReason = 'COMPLETED',
   endLocation = null,
   finalFare,
+  tollFee,
   distance,
   duration,
   settlement = null,
@@ -175,7 +176,12 @@ function buildAuthoritativeCompletionArtifacts({
       0
     )
   );
-  const normalizedTollFee = roundMoney(parseMoneyValue(bookingHash.tollFee || 0, 0));
+  // O pedágio da liquidação (só o das praças cruzadas) vence o contratado: o
+  // evento, o booking e o snapshot financeiro precisam do mesmo valor, senão o
+  // billing recusa a liquidação (FINANCIAL_SNAPSHOT_TOLL_MISMATCH).
+  const normalizedTollFee = roundMoney(
+    parseMoneyValue(tollFee ?? normalizedSettlement?.tollFee ?? bookingHash.tollFee ?? 0, 0)
+  );
   const distribution =
     paymentDistribution ||
     buildPendingPaymentDistribution({
