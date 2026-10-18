@@ -322,6 +322,22 @@ describe('EndRideEarlyByRiderCommand -> billing worker', () => {
       passengerPaidCents: 992,
       tollFeeCents: 0
     })).toMatchObject({ valid: true });
+
+    // Evento, booking e snapshot com o mesmo pedágio: o billing liquida (antes
+    // do fix o evento levava o pedágio contratado e o billing recusava com
+    // FINANCIAL_SNAPSHOT_TOLL_MISMATCH, em produção em 18/10/2026).
+    const bookingPatch = mockHset.mock.calls.find(([key]) => key === 'booking:booking_1')[1];
+    expect(Number(bookingPatch.tollFee)).toBe(0);
+    const billingResult = await mockListeners[EVENT_TYPES.RIDE_COMPLETED]({
+      eventId: 'event_early_end_toll_refund',
+      eventType: EVENT_TYPES.RIDE_COMPLETED,
+      data: result.data.event
+    });
+    expect(billingResult).toMatchObject({ success: true });
+    expect(mockProcessNetDistribution).toHaveBeenCalledWith(expect.objectContaining({
+      totalAmount: 992,
+      tollFee: 0
+    }));
   });
 
   it('keeps today\'s unsettled outcome when the booked toll is not below the fare', async () => {
