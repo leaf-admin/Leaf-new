@@ -9616,24 +9616,6 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
       (isDriverRole || lastReceipt?.id),
   );
 
-  if (shouldPresentCompletedReceipt) {
-    return (
-      <RobotaxiReceiptScreen
-        navigation={navigation}
-        route={{
-          key: 'robotaxi-home-completed-receipt',
-          name: 'RobotaxiPrototypeReceipt',
-          params: {
-            fromTrip: true,
-            bookingId: completedReceiptBookingId,
-            rideId: completedReceiptBookingId,
-            tripId: completedReceiptBookingId,
-            ...(isDriverRole ? { activeRole: 'driver' } : {}),
-          },
-        }}
-      />
-    );
-  }
 
   const DriverKycCameraScreen = driverKycModalVisible &&
     !driverKycProviderLoading &&
@@ -9826,6 +9808,29 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
       homeMapPresentation.interactionEnabled &&
       (!isPassengerRideLifecycleLocked || isLiveTripMapInteractionAllowed)
   );
+
+  // Recibo da corrida concluída: sai só depois de todos os hooks. Antes saía no
+  // meio do componente; quando a corrida aparecia como concluída depois do
+  // primeiro render (app reaberto com o recibo pendente) o React quebrava com
+  // "Rendered fewer hooks than expected" (motorista no Android, 18/10/2026).
+  if (shouldPresentCompletedReceipt) {
+    return (
+      <RobotaxiReceiptScreen
+        navigation={navigation}
+        route={{
+          key: 'robotaxi-home-completed-receipt',
+          name: 'RobotaxiPrototypeReceipt',
+          params: {
+            fromTrip: true,
+            bookingId: completedReceiptBookingId,
+            rideId: completedReceiptBookingId,
+            tripId: completedReceiptBookingId,
+            ...(isDriverRole ? { activeRole: 'driver' } : {}),
+          },
+        }}
+      />
+    );
+  }
 
   return (
     <PrototypeScreenTransition>
