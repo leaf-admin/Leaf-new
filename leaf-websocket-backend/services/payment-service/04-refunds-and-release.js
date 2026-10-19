@@ -466,9 +466,16 @@ class PaymentServiceRefundsAndReleaseMethods {
         await paymentRef.set(updates, { merge: true });
       }
 
-      // ✅ NOVO: Atualizar payment_holdings também
+      // Estorno parcial feito dentro do repasse (valor final menor que o pago, como
+      // no encerramento antecipado): o repasse ao motorista vem logo em seguida e
+      // fecha o holding como distributed. Marcar refunded (estado final) aqui fazia
+      // o repasse falhar com "Transição de estado inválida: refunded → distributed".
+      // O cancelamento com taxa não passa por aqui e segue fechando como refunded.
+      const refundPrecedesDistribution = refundData.metadata?.source === 'processNetDistribution';
       const holdingUpdate = {
-        status: hasProviderRefund ? 'refunded' : 'cancelled',
+        ...(refundPrecedesDistribution
+          ? { partialRefundBeforeDistribution: true }
+          : { status: hasProviderRefund ? 'refunded' : 'cancelled' }),
         refunded: hasProviderRefund,
         refundInProgress: false,
         refundStatus: status,

@@ -2146,6 +2146,63 @@ describe('PaymentService refund terminal status handling', () => {
     });
   });
 
+  it('keeps the holding open after the partial refund of an early end so the distribution can close it', async () => {
+    const firestore = createInMemoryFirestore();
+    firebaseConfig.getFirestore.mockReturnValue(firestore);
+    const bookingId = 'booking_early_end_partial_1';
+    await firestore.collection('ride_payments').doc(bookingId).set({
+      rideId: bookingId, chargeId: 'charge_early_end_1', amount: 4054, passengerId: 'customer_1', status: 'PAID'
+    });
+    await firestore.collection('payment_holdings').doc(bookingId).set({
+      rideId: bookingId, chargeId: 'charge_early_end_1', amount: 4054, status: 'in_holding'
+    });
+    const service = new PaymentService();
+
+    const refund = await service.markPaymentRefunded(bookingId, {
+      refundAmount: 3264,
+      status: 'REFUNDED_PARTIAL',
+      reason: 'Estorno parcial da corrida (valor final menor que o pago)',
+      metadata: { source: 'processNetDistribution', originalAmountCents: 4054, finalAmountCents: 790 }
+    });
+
+    expect(refund).toMatchObject({ success: true });
+    expect(firestore.docs.get(`payment_holdings/${bookingId}`)).toMatchObject({
+      status: 'in_holding',
+      refunded: true,
+      refundAmount: 3264,
+      partialRefundBeforeDistribution: true
+    });
+    expect(firestore.docs.get(`ride_payments/${bookingId}`)).toMatchObject({ status: 'REFUNDED_PARTIAL', refundAmount: 3264 });
+
+    const distributed = await service.updatePaymentHolding(bookingId, { status: 'distributed' });
+    expect(distributed).toMatchObject({ success: true });
+    expect(firestore.docs.get(`payment_holdings/${bookingId}`)).toMatchObject({ status: 'distributed', refundAmount: 3264 });
+  });
+
+  it('still closes the holding as refunded for a cancellation with a fee', async () => {
+    const firestore = createInMemoryFirestore();
+    firebaseConfig.getFirestore.mockReturnValue(firestore);
+    const bookingId = 'booking_cancel_fee_partial_1';
+    await firestore.collection('ride_payments').doc(bookingId).set({
+      rideId: bookingId, chargeId: 'charge_cancel_fee_1', amount: 4118, passengerId: 'customer_1', status: 'PAID'
+    });
+    await firestore.collection('payment_holdings').doc(bookingId).set({
+      rideId: bookingId, chargeId: 'charge_cancel_fee_1', amount: 4118, status: 'in_holding'
+    });
+    const service = new PaymentService();
+
+    await service.markPaymentRefunded(bookingId, {
+      refundAmount: 3838,
+      cancellationFee: 280,
+      status: 'REFUNDED_PARTIAL',
+      reason: 'Cancelado pelo usuário',
+      metadata: { source: 'cancel_ride_command' }
+    });
+
+    expect(firestore.docs.get(`payment_holdings/${bookingId}`)).toMatchObject({ status: 'refunded', refundAmount: 3838 });
+    expect(firestore.docs.get(`payment_holdings/${bookingId}`).partialRefundBeforeDistribution).toBeUndefined();
+  });
+
   it('keeps a materialized sandbox holding alias aligned with canonical distribution without new financial records', async () => {
     const firestore = createInMemoryFirestore();
     firebaseConfig.getFirestore.mockReturnValue(firestore);
