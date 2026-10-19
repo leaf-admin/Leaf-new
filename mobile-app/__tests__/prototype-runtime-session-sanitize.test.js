@@ -412,7 +412,7 @@ describe("sanitizePersistedRuntimeSessionForProfile", () => {
     });
   });
 
-  it("does not restore a stale driver online pending state without an active ride", () => {
+  it("keeps the driver online after the app reopens with no ride (stays online until the driver goes offline)", () => {
     const restored = sanitizePersistedRuntimeSessionForProfile(
       {
         activeRole: "driver",
@@ -422,17 +422,35 @@ describe("sanitizePersistedRuntimeSessionForProfile", () => {
         driverOnline: false,
         driverOnlinePending: true,
         driverOnlineStartedAt: null,
-        driverOnlineMutationSource: "bootstrap_restore_online_intent",
+        driverOnlineMutationSource: "trip_completed_preserve_online_intent",
+      },
+      driverProfile,
+    );
+
+    expect(restored.driverOnline).toBe(true);
+    expect(restored.driverOnlinePending).toBe(false);
+    expect(typeof restored.driverOnlineStartedAt).toBe("string");
+    expect(restored.driverOnlineMutationSource).toBe("bootstrap_restore_online_intent");
+  });
+
+  it("keeps the driver offline after the app reopens when the driver went offline", () => {
+    const restored = sanitizePersistedRuntimeSessionForProfile(
+      {
+        activeRole: "driver",
+        bookingStatus: "idle",
+        activeBookingId: null,
+        driverActiveRide: null,
+        driverOnline: false,
+        driverOnlinePending: false,
+        driverOnlineStartedAt: null,
+        driverOnlineMutationSource: "toggle_off_remote_confirmed",
       },
       driverProfile,
     );
 
     expect(restored.driverOnline).toBe(false);
     expect(restored.driverOnlinePending).toBe(false);
-    expect(restored.driverOnlineStartedAt).toBeNull();
-    expect(restored.driverOnlineMutationSource).toBe(
-      "bootstrap_clear_stale_online_intent",
-    );
+    expect(restored.driverOnlineMutationSource).toBe("toggle_off_remote_confirmed");
   });
 
   it("drops persisted driver offers because pending offers are not active rides", () => {
@@ -459,9 +477,11 @@ describe("sanitizePersistedRuntimeSessionForProfile", () => {
     expect(restored.activeBookingId).toBeNull();
     expect(restored.activeBooking).toBeNull();
     expect(restored.driverOffers).toEqual([]);
-    expect(restored.driverOnline).toBe(false);
+    // The stale offer goes away; the driver stays online (owner's rule, 2026-10-19).
+    expect(restored.driverOnline).toBe(true);
     expect(restored.driverOnlinePending).toBe(false);
-    expect(restored.driverOnlineStartedAt).toBeNull();
+    expect(restored.driverOnlineStartedAt).not.toBe("2026-06-27T09:00:00.000Z");
+    expect(restored.driverOnlineMutationSource).toBe("bootstrap_restore_online_intent");
     expect(restored.driverCoordinate).toBeNull();
   });
 
@@ -569,9 +589,9 @@ describe("sanitizePersistedRuntimeSessionForProfile", () => {
       { preserveQaSeededDriverOnlineWaiting: true },
     );
 
-    expect(normalRestore.driverOnline).toBe(false);
+    expect(normalRestore.driverOnline).toBe(true);
     expect(normalRestore.driverOnlineMutationSource).toBe(
-      "bootstrap_clear_stale_online_intent",
+      "bootstrap_restore_online_intent",
     );
     expect(qaRestore.driverOnline).toBe(true);
     expect(qaRestore.driverOnlinePending).toBe(false);
