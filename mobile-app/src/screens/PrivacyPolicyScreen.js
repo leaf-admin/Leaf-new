@@ -128,7 +128,7 @@ const PrivacyPolicyScreen = ({ navigation, route }) => {
         {renderDetailRow({ icon: 'car-outline', title: 'Fornecer transporte', description: 'Conectar passageiros, motoristas, rotas e corridas.' })}
         {renderDetailRow({ icon: 'shield-checkmark-outline', title: 'Garantir segurança', description: 'Prevenir fraude, abuso e incidentes operacionais.' })}
         {renderDetailRow({ icon: 'chatbubble-ellipses-outline', title: 'Prestar suporte', description: 'Resolver problemas da conta, pagamentos e viagens.' })}
-        {renderDetailRow({ icon: 'analytics-outline', title: 'Melhorar o serviço', description: 'Analisar desempenho e qualidade da experiência.', last: true })}
+        {renderDetailRow({ icon: 'analytics-outline', title: 'Melhorar o serviço', description: 'Analisar erros, desempenho e uso do app, sem nome, telefone ou documentos. Você pode desligar os dados de uso em Configurações.', last: true })}
       </PrototypeMenuSection>
     </View>
   );
@@ -138,7 +138,8 @@ const PrivacyPolicyScreen = ({ navigation, route }) => {
       <PrototypeMenuSection title="Compartilhamento">
         {renderDetailRow({ icon: 'business-outline', title: 'Processadores de pagamento', description: 'Dados necessários para processar cobranças e recibos.' })}
         {renderDetailRow({ icon: 'document-text-outline', title: 'Autoridades legais', description: 'Somente quando exigido por obrigação legal.' })}
-        {renderDetailRow({ icon: 'car-sport-outline', title: 'Motoristas parceiros', description: 'Dados limitados para executar a viagem.', last: true })}
+        {renderDetailRow({ icon: 'car-sport-outline', title: 'Motoristas parceiros', description: 'Dados limitados para executar a viagem.' })}
+        {renderDetailRow({ icon: 'pulse-outline', title: 'Monitoramento do app', description: 'Ferramentas de erros e de uso recebem um identificador da conta, sem dados pessoais.', last: true })}
       </PrototypeMenuSection>
 
       <PrototypeMenuSection title="Nota">

@@ -2,6 +2,10 @@ import 'react-native-gesture-handler';
 import { registerRootComponent } from 'expo';
 import * as SplashScreen from 'expo-splash-screen';
 import { registerFCMBackgroundMessageHandler } from './src/services/FCMBackgroundMessageHandler';
+import { initObservability, wrapRootComponent } from './src/services/observability/AppObservability';
+
+// Sentry e PostHog antes de qualquer outra coisa, para pegar erros do boot.
+initObservability();
 
 try {
   registerFCMBackgroundMessageHandler();
@@ -19,4 +23,4 @@ try {
 
 import App from './App';
 
-registerRootComponent(App);
+registerRootComponent(wrapRootComponent(App));

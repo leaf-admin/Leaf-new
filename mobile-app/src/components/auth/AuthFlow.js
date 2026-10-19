@@ -1,5 +1,5 @@
 import Logger from '../../utils/Logger';
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { Alert, Linking, StatusBar, View, StyleSheet } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { FETCH_USER_SUCCESS } from '../../state/actionTypes';
@@ -38,6 +38,7 @@ import {
 } from '../../utils/onboardingSessionState';
 import { toUserFriendlyMessage } from '../../utils/friendlyErrorMessages';
 import { LocationPrimingStep, WelcomeScreen } from '../onboarding/onboardingSteps';
+import { track } from '../../services/observability/AppObservability';
 import {
   getForegroundLocationDisclosureText,
   requestForegroundLocationPermissionAfterInAppDisclosure,
@@ -227,6 +228,7 @@ const AuthFlow = ({
   }, [onboardingProgress, screenshotAuthData, screenshotStep]);
 
   const completeAfterLocationPriming = useCallback(async (payload) => {
+    track('signup_completed', { role: normalizeAuthFlowUserType(payload?.userType || payload?.usertype) || null });
     try {
       const Location = require('expo-location');
       const permission = await Location.getForegroundPermissionsAsync();
@@ -273,6 +275,16 @@ const AuthFlow = ({
       default: return null;
     }
   }, []);
+
+  // Funil do cadastro no PostHog: uma visualização por etapa.
+  const onboardingRole = authData?.profileSelection?.userType || null;
+  useEffect(() => {
+    // 0 e 1 dividem o nome "phone_validation"; no funil o código é etapa própria.
+    const stepName = currentStep === 1 ? 'phone_code' : getStepNameByIndex(currentStep);
+    if (stepName) {
+      track('onboarding_step_viewed', { step: stepName, step_index: currentStep, role: onboardingRole });
+    }
+  }, [currentStep, getStepNameByIndex, onboardingRole]);
 
   // Função para avançar para o próximo step
   const goToNextStep = useCallback(async () => {
@@ -559,6 +571,7 @@ const AuthFlow = ({
       store.dispatch({ type: 'SET_AUTH_STATUS', payload: { authenticated: true, user: persistedExisting } });
       await completeStep('phone_validation');
       Logger.log('✅ Conta existente reconhecida após OTP; login direto.', { userType: persistedExisting.userType });
+      track('login_completed', { method: 'phone_otp', role: persistedExisting.userType || null });
       if (onComplete) {
         onComplete({ ...persistedExisting, phoneValidated: true, authMethod: 'phone_otp' });
       }
@@ -662,6 +675,7 @@ const AuthFlow = ({
     });
 
     await completeStep('phone_validation');
+    track('login_completed', { method: 'phone_password', role: persistedLoginPayload?.userType || null });
 
     if (onComplete) {
       onComplete({
