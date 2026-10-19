@@ -136,3 +136,12 @@ describe('AppObservability', () => {
     expect(await observability.loadAnalyticsPreference()).toBe(true);
   });
 });
+
+describe('AppObservability build config', () => {
+  it('reads every EXPO_PUBLIC key literally so Expo inlines it into the release bundle', () => {
+    const source = require('fs').readFileSync(require('path').join(__dirname, '../src/services/observability/AppObservability.js'), 'utf8');
+    expect(source).not.toMatch(/process\.env\[/);
+    ['EXPO_PUBLIC_SENTRY_DSN', 'EXPO_PUBLIC_POSTHOG_API_KEY', 'EXPO_PUBLIC_POSTHOG_HOST', 'EXPO_PUBLIC_SENTRY_ENVIRONMENT']
+      .forEach((key) => expect(source).toContain(`process.env.${key}`));
+  });
+});
