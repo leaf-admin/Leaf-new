@@ -2,7 +2,6 @@ const admin = require('firebase-admin');
 const crypto = require('crypto');
 const Redis = require('ioredis');
 const { logger, logStructured } = require('../utils/logger');
-const path = require('path');
 const circuitBreakerService = require('./circuit-breaker-service');
 const traceContext = require('../utils/trace-context');
 const RideLiveActivityService = require('./ride-live-activity-service');
@@ -88,20 +87,16 @@ class FCMService {
         try {
             // Verificar se Firebase Admin já foi inicializado
             if (!admin.apps.length) {
-                // Inicializar Firebase Admin se não estiver
-                const serviceAccountPath = path.join(__dirname, '..', '..', 'mobile-app', 'config', 'leaf-reactnative-firebase-adminsdk-fbsvc-456a95e2fc.json');
-
-                try {
-                    admin.initializeApp({
-                        credential: admin.credential.cert(serviceAccountPath),
-                        databaseURL: process.env.FIREBASE_DATABASE_URL || 'https://leaf-reactnative-default-rtdb.firebaseio.com'
-                    });
-                    logger.info(`✅ Firebase Admin inicializado em ${Date.now() - startTime}ms`);
-                } catch (initError) {
-                    logger.error('❌ Erro ao inicializar Firebase Admin:', initError);
+                // Mesma credencial do resto do backend (GOOGLE_APPLICATION_CREDENTIALS
+                // montado no container). Nos workers ninguém inicializou o Firebase
+                // antes, e o caminho fixo do app mobile não existe na imagem.
+                const { initializeFirebase } = require('../firebase-config');
+                if (!initializeFirebase()) {
+                    logger.error('❌ Erro ao inicializar Firebase Admin para o FCM');
                     this.isInitialized = false;
                     return;
                 }
+                logger.info(`✅ Firebase Admin inicializado em ${Date.now() - startTime}ms`);
             }
 
             this.isInitialized = true;

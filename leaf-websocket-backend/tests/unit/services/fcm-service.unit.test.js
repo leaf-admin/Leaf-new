@@ -230,4 +230,39 @@ describe('fcm-service', () => {
     expect(plain.android.notification.tag).toBeUndefined();
     expect(plain.apns.headers).toBeUndefined();
   });
+
+  test('initialize uses the shared Firebase credentials when no app exists yet (workers)', async () => {
+    jest.resetModules();
+    const initializeFirebase = jest.fn(() => ({ name: '[DEFAULT]' }));
+    jest.doMock('../../../firebase-config', () => ({ initializeFirebase }));
+    const freshAdmin = require('firebase-admin');
+    freshAdmin.apps.length = 0;
+    try {
+      const FreshFCMService = require('../../../services/fcm-service');
+      const service = new FreshFCMService(mockRedis);
+      await service.initialize();
+
+      expect(initializeFirebase).toHaveBeenCalledTimes(1);
+      expect(freshAdmin.initializeApp).not.toHaveBeenCalled();
+      expect(service.isInitialized).toBe(true);
+    } finally {
+      freshAdmin.apps.push('mock-app');
+    }
+  });
+
+  test('initialize stays unavailable when the shared Firebase credentials fail', async () => {
+    jest.resetModules();
+    jest.doMock('../../../firebase-config', () => ({ initializeFirebase: jest.fn(() => null) }));
+    const freshAdmin = require('firebase-admin');
+    freshAdmin.apps.length = 0;
+    try {
+      const FreshFCMService = require('../../../services/fcm-service');
+      const service = new FreshFCMService(mockRedis);
+      await service.initialize();
+
+      expect(service.isInitialized).toBe(false);
+    } finally {
+      freshAdmin.apps.push('mock-app');
+    }
+  });
 });
