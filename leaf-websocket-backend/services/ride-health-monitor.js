@@ -302,6 +302,34 @@ async function syncDriverSignalForRide(redis, { bookingId, lastLocationAt = null
   return true;
 }
 
+// A última posição do motorista pode chegar depois do fim da corrida e pôr a
+// corrida de volta no índice; quando o hash da corrida expira, ela fica ali
+// para sempre e vira alerta falso. Antes de alertar, tira do índice as corridas
+// paradas que já terminaram ou não existem mais.
+async function pruneFinishedDriverSignalEntries(redis, { nowMs = Date.now(), staleMs = DEFAULT_DRIVER_SIGNAL_STALE_MS, limit = 100 } = {}) {
+  if (!isRedisDriverSignalIndexUsable(redis) || typeof redis.hgetall !== 'function' || typeof redis.zrangebyscore !== 'function') {
+    return 0;
+  }
+  const staleIds = await redis.zrangebyscore(DRIVER_SIGNAL_ACTIVE_KEY, 0, nowMs - staleMs, 'LIMIT', 0, limit).catch(() => []);
+  let removed = 0;
+  for (const bookingId of staleIds) {
+    const bookingHash = await redis.hgetall(`booking:${bookingId}`).catch(() => null);
+    if (!bookingHash) continue;
+    const state = String(bookingHash.state || bookingHash.status || '').trim().toUpperCase();
+    if (Object.keys(bookingHash).length === 0 || DRIVER_SIGNAL_TERMINAL_STATES.has(state)) {
+      await redis.zrem(DRIVER_SIGNAL_ACTIVE_KEY, bookingId);
+      removed += 1;
+    }
+  }
+  if (removed) {
+    logStructured('info', 'Corridas encerradas removidas do índice de sinal do motorista', {
+      service: 'ride-health-monitor',
+      removed
+    });
+  }
+  return removed;
+}
+
 async function getRideOperationsSnapshot(redis, options = {}) {
   const nowIso = options.nowIso || new Date().toISOString();
   const nowMs = normalizeNowMs(nowIso);
@@ -486,6 +514,10 @@ function buildReviewAlert(snapshot, options = {}) {
 }
 
 async function evaluateRideOperationsAlerts(redis, options = {}) {
+  await pruneFinishedDriverSignalEntries(redis, {
+    nowMs: normalizeNowMs(options.nowIso || new Date().toISOString()),
+    staleMs: Math.max(30000, toNumber(options.driverSignalStaleMs, DEFAULT_DRIVER_SIGNAL_STALE_MS))
+  });
   const snapshot = await getRideOperationsSnapshot(redis, options);
   const alerts = [];
   const alertClient = options.alertClient || alertService;
@@ -546,6 +578,7 @@ module.exports = {
   getRideOperationsSnapshot,
   isRedisRideHealthBackfillUsable,
   isRedisRideHealthUsable,
+  pruneFinishedDriverSignalEntries,
   parseSortedSetRows,
   resolveTrackedRideState,
   resolveTrackedRideTimestampMs,

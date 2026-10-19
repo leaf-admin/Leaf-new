@@ -265,7 +265,9 @@ class AlertService {
    * Logar alerta
    */
   logAlert(alert) {
-    const level = alert.severity === 'critical' ? 'error' : 'warn';
+    // O alerta já sai pelo Discord. Logado como erro, cada alerta virava também
+    // uma issue no Sentry, duplicando o aviso.
+    const level = 'warn';
     logStructured(level, `🚨 Alerta: ${alert.metric}`, {
       service: 'alert-service',
       metric: alert.metric,

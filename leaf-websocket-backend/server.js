@@ -861,7 +861,8 @@ const saveDriverLocation = async (
 
 // ✅ LOG DE DEBUG: Capturar erros de conexão
 io.engine.on('connection_error', (err) => {
-    logStructured('error', 'Erro de conexão Socket.IO', {
+    // Handshake ruim do cliente (rede do celular, sessão velha): aviso, não falha nossa.
+    logStructured('warn', 'Erro de conexão Socket.IO', {
         service: 'websocket',
         url: err.req?.url,
         error: err.message
