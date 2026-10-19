@@ -10,8 +10,17 @@ import { createRageTapDetector, maskPii, sanitizeProperties, scrubSentryEvent } 
 
 const ANALYTICS_OPT_OUT_KEY = 'leaf:analytics-opt-out:v1';
 
-const env = (key) => String(process.env[key] || '').trim();
-const enabledInThisBuild = () => !__DEV__ || env('EXPO_PUBLIC_OBSERVABILITY_IN_DEV') === 'true';
+// O Expo só embute no bundle as variáveis lidas de forma literal
+// (process.env.EXPO_PUBLIC_X). Leitura por nome dinâmico volta vazia em produção.
+const clean = (value) => String(value || '').trim();
+const readConfig = () => ({
+  inDev: clean(process.env.EXPO_PUBLIC_OBSERVABILITY_IN_DEV) === 'true',
+  sentryDsn: clean(process.env.EXPO_PUBLIC_SENTRY_DSN),
+  sentryEnvironment: clean(process.env.EXPO_PUBLIC_SENTRY_ENVIRONMENT),
+  posthogApiKey: clean(process.env.EXPO_PUBLIC_POSTHOG_API_KEY),
+  posthogHost: clean(process.env.EXPO_PUBLIC_POSTHOG_HOST),
+});
+const enabledInThisBuild = (config) => !__DEV__ || config.inDev;
 
 let Sentry = null;
 let posthog = null;
@@ -25,14 +34,14 @@ function releaseName() {
   return `${appId}@${Application.nativeApplicationVersion || '0'}+${Application.nativeBuildVersion || '0'}`;
 }
 
-function initSentry() {
-  const dsn = env('EXPO_PUBLIC_SENTRY_DSN');
+function initSentry(config) {
+  const dsn = config.sentryDsn;
   if (!dsn) return;
   try {
     Sentry = require('@sentry/react-native');
     Sentry.init({
       dsn,
-      environment: env('EXPO_PUBLIC_SENTRY_ENVIRONMENT') || (__DEV__ ? 'development' : 'production'),
+      environment: config.sentryEnvironment || (__DEV__ ? 'development' : 'production'),
       release: releaseName(),
       dist: String(Application.nativeBuildVersion || ''),
       sendDefaultPii: false,
@@ -53,13 +62,13 @@ function initSentry() {
   }
 }
 
-function initPosthog() {
-  const apiKey = env('EXPO_PUBLIC_POSTHOG_API_KEY');
+function initPosthog(config) {
+  const apiKey = config.posthogApiKey;
   if (!apiKey) return;
   try {
     const PostHog = require('posthog-react-native').default;
     posthog = new PostHog(apiKey, {
-      host: env('EXPO_PUBLIC_POSTHOG_HOST') || 'https://eu.i.posthog.com',
+      host: config.posthogHost || 'https://eu.i.posthog.com',
       captureAppLifecycleEvents: true,
       personProfiles: 'identified_only',
       flushAt: 20,
@@ -83,9 +92,10 @@ function initPosthog() {
 }
 
 export function initObservability() {
-  if (!enabledInThisBuild()) return;
-  if (!Sentry) initSentry();
-  if (!posthog) initPosthog();
+  const config = readConfig();
+  if (!enabledInThisBuild(config)) return;
+  if (!Sentry) initSentry(config);
+  if (!posthog) initPosthog(config);
 }
 
 /** Envolve o componente raiz com o boundary do Sentry quando ele está ativo. */
