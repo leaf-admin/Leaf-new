@@ -508,7 +508,11 @@ class FCMService {
                 },
                 data: {
                     ...notification.data,
-                    timestamp: new Date().toISOString()
+                    timestamp: new Date().toISOString(),
+                    ...(notification.actions && notification.actions.length > 0 && {
+                        hasActions: 'true',
+                        actions: JSON.stringify(notification.actions)
+                    })
                 },
                 android: {
                     priority: 'high',
@@ -522,15 +526,10 @@ class FCMService {
                         priority: 'high',
                         defaultSound: true,
                         defaultVibrateTimings: true,
-                        // ✅ Adicionar ações interativas (botões) se fornecidas
+                        // A API do FCM não tem botões em android.notification; as ações
+                        // seguem no data (hasActions/actions) e o app monta os botões.
                         ...(notification.actions && notification.actions.length > 0 && {
-                            clickAction: 'FLUTTER_NOTIFICATION_CLICK',
-                            // Ações aparecem como botões na notificação
-                            actions: notification.actions.map(action => ({
-                                action: action.id,
-                                title: action.title,
-                                icon: action.icon || 'ic_notification'
-                            }))
+                            clickAction: 'FLUTTER_NOTIFICATION_CLICK'
                         })
                     }
                 },
@@ -632,16 +631,9 @@ class FCMService {
                         priority: 'high',
                         defaultSound: true,
                         defaultVibrateTimings: true,
-                        // ✅ Ações interativas para Android
-                        clickAction: 'FLUTTER_NOTIFICATION_CLICK',
-                        // Incluir ações no payload de dados para processamento no app
-                        ...(actions.length > 0 && {
-                            actions: actions.map(action => ({
-                                action: action.id,
-                                title: action.title,
-                                icon: action.icon || 'ic_notification'
-                            }))
-                        })
+                        // As ações vão no data (dataWithActions): o FCM recusa a mensagem
+                        // inteira com "Unknown name actions" em android.notification.
+                        clickAction: 'FLUTTER_NOTIFICATION_CLICK'
                     }
                 },
                 apns: {

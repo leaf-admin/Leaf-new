@@ -265,4 +265,20 @@ describe('fcm-service', () => {
       freshAdmin.apps.push('mock-app');
     }
   });
+
+  test('interactive pushes carry the actions in data, never in android.notification (FCM rejects it)', async () => {
+    const send = jest.fn().mockResolvedValue('msg-id');
+    admin.messaging.mockReturnValue({ send });
+    const actions = [{ id: 'accept', title: 'Aceitar' }, { id: 'reject', title: 'Recusar' }];
+
+    await fcmService.sendInteractiveNotification('token-1', { title: 'Nova corrida', body: 'x', data: { type: 'ride_offer' } }, actions, 'RIDE_OFFER');
+    await fcmService.sendToToken('token-1', { title: 'Outro', body: 'y', data: {}, actions });
+
+    for (const [message] of send.mock.calls) {
+      expect(message.android.notification.actions).toBeUndefined();
+      expect(message.data.hasActions).toBe('true');
+      expect(JSON.parse(message.data.actions)).toEqual(actions);
+      Object.values(message.data).forEach((value) => expect(typeof value).toBe('string'));
+    }
+  });
 });
