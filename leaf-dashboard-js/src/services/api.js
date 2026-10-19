@@ -396,6 +396,10 @@ class LeafApiService {
     return this.request(`/ops/overview?hours=${encodeURIComponent(hours)}`);
   }
 
+  async getExternalInsights({ forceRefresh = false } = {}) {
+    return this.request(`/ops/external-insights${forceRefresh ? "?forceRefresh=true" : ""}`);
+  }
+
   async getOpsAlerts(hours = 1) {
     return this.request(`/ops/alerts?hours=${encodeURIComponent(hours)}`);
   }

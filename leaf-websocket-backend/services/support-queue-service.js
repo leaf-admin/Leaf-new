@@ -382,6 +382,12 @@ class SupportQueueService {
         N2: tickets.filter((ticket) => ticket.priority === 'N2').length,
         N3: tickets.filter((ticket) => ticket.priority === 'N3').length
       },
+      backlogByResolutionClass: ['A', 'B', 'C', 'D', 'unclassified'].reduce((counts, resolutionClass) => ({
+        ...counts,
+        [resolutionClass]: tickets.filter((ticket) => (
+          (ticket.metadata?.supportClassification?.resolutionClass || 'unclassified') === resolutionClass
+        )).length
+      }), {}),
       overdueAckCount: tickets.filter((ticket) => ticket.queue?.overdueAck).length,
       overdueFirstResponseCount: tickets.filter((ticket) => ticket.queue?.overdueFirstResponse).length,
       ticketsWithoutOwner: tickets.filter((ticket) => !ticket.assignedAgent).length,
