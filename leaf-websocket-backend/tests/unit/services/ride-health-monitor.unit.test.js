@@ -23,6 +23,7 @@ const {
   evaluateRideOperationsAlerts,
   getRideOperationsSnapshot,
   syncDriverSignalForRide,
+  DRIVER_SIGNAL_ACTIVE_KEY,
   syncTrackedRideState
 } = require('../../../services/ride-health-monitor');
 
@@ -243,6 +244,7 @@ describe('ride-health-monitor', () => {
 
   it('alerta e limpa o índice de sinal do motorista quando a corrida termina', async () => {
     const redis = createRedisMock();
+    redis.seedHash('booking:booking-signal-stale', { state: 'IN_PROGRESS' });
 
     await syncDriverSignalForRide(redis, {
       bookingId: 'booking-signal-stale',
@@ -369,5 +371,32 @@ describe('ride-health-monitor', () => {
     expect(snapshot.reassignmentPending.total).toBe(1);
     expect(snapshot.earlyEndedReview.total).toBe(1);
     expect(snapshot.earlyEndedReview.bookingIds).toEqual(['review-a']);
+  });
+
+  it('tira do índice as corridas paradas que já terminaram ou sumiram, e só alerta as ativas', async () => {
+    const redis = createRedisMock();
+    redis.seedHash('booking:ride-active', { state: 'IN_PROGRESS' });
+    redis.seedHash('booking:ride-done', { state: 'COMPLETED' });
+    redis.seedHash('booking:ride-early', { status: 'EARLY_ENDED_BY_RIDER' });
+    const stale = Date.parse('2026-03-30T11:50:00.000Z');
+    for (const bookingId of ['ride-active', 'ride-done', 'ride-early', 'canary-without-hash']) {
+      await syncDriverSignalForRide(redis, { bookingId, lastLocationAt: stale });
+    }
+    await syncDriverSignalForRide(redis, { bookingId: 'ride-fresh', lastLocationAt: Date.parse('2026-03-30T11:59:50.000Z') });
+
+    const result = await evaluateRideOperationsAlerts(redis, {
+      nowIso: '2026-03-30T12:00:00.000Z',
+      driverSignalStaleMs: 60 * 1000,
+      driverSignalCriticalCount: 1
+    });
+
+    expect(await redis.zrange(DRIVER_SIGNAL_ACTIVE_KEY, 0, -1)).toEqual(['ride-active', 'ride-fresh']);
+    expect(result.alerts).toEqual([
+      expect.objectContaining({
+        metric: 'driver_signal_stale',
+        value: 1,
+        details: expect.objectContaining({ bookingIds: ['ride-active'] })
+      })
+    ]);
   });
 });

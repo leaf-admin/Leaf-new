@@ -39,7 +39,8 @@ function createSocketServer({ server, socketIo, corsOptions, app, logStructured 
 
     // ✅ DEBUG: Log de conexões e erros
     io.engine.on('connection_error', (err) => {
-        logStructured('error', 'Socket.IO Engine - Erro de conexão', {
+        // Handshake ruim do cliente (rede do celular, sessão velha): aviso, não falha nossa.
+        logStructured('warn', 'Socket.IO Engine - Erro de conexão', {
             service: 'websocket',
             error: err.message,
             reqUrl: err.req?.url,
