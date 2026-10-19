@@ -158,6 +158,47 @@ describe('PrototypeMapLayer route viewport fitting', () => {
     }
   });
 
+  it.each(['android', 'ios'])('shows a single car for a driver looking at their own map on %s, even when GPS and navigation diverge', os => {
+    const { Platform } = require('react-native');
+    const originalPlatform = Platform.OS;
+    Platform.OS = os;
+    try {
+      const gps = routeCoordinates[0];
+      const snappedToRoute = { latitude: gps.latitude + 0.0004, longitude: gps.longitude + 0.0004 };
+      const screen = render(
+        <PrototypeMapLayer
+          region={baseRegion}
+          userCoordinate={gps}
+          driverCoordinate={snappedToRoute}
+          driverMarkerMode="car"
+          currentLocationMarkerMode="car"
+        />
+      );
+      const cars = [
+        ...screen.queryAllByTestId('map-user-vehicle-marker'),
+        ...screen.queryAllByTestId('map-driver-vehicle-marker'),
+      ];
+      expect(cars).toHaveLength(1);
+    } finally {
+      Platform.OS = originalPlatform;
+    }
+  });
+
+  it('keeps the assigned driver car for the passenger on Android', () => {
+    const { Platform } = require('react-native');
+    const originalPlatform = Platform.OS;
+    Platform.OS = 'android';
+    try {
+      const screen = render(
+        <PrototypeMapLayer region={baseRegion} userCoordinate={routeCoordinates[0]} driverCoordinate={routeCoordinates[1]} driverMarkerMode="car" />
+      );
+      expect(screen.queryAllByTestId('map-driver-vehicle-marker')).toHaveLength(1);
+      expect(screen.queryAllByTestId('map-user-vehicle-marker')).toHaveLength(0);
+    } finally {
+      Platform.OS = originalPlatform;
+    }
+  });
+
   it('keeps the same native map while its home frame expands to the full viewport', () => {
     const mapRef = React.createRef();
     const framed = { left: 24, top: 226, width: 345, height: 472, right: undefined, bottom: undefined };

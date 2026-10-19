@@ -2594,11 +2594,16 @@ function PrototypeMapLayer({
     const timer = setTimeout(() => setIosMarkerTracking(false), 500);
     return () => clearTimeout(timer);
   }, [iosDriverPoseBucket, shouldShowCurrentLocationMarker, vehicleMarkerTrackingKey]);
+  // Com o carro na posição atual (motorista vendo o próprio mapa), o marcador
+  // de "motorista da corrida" é o mesmo carro. Desde que o carro da posição
+  // atual virou marcador nativo (13/10), essa regra não cobria mais o caso e
+  // surgiam dois carros quando a navegação e o GPS divergiam a caminho do embarque.
   const shouldSuppressNativeAndroidDriverVehicleMarker = Boolean(
     Platform.OS === 'android' &&
       shouldRenderDriverVehicleMarkerChild &&
       (shouldRenderProjectedDriverVehicleOverlay ||
-        shouldRenderCurrentLocationVehicleOverlay)
+        shouldRenderCurrentLocationVehicleOverlay ||
+        (shouldShowCurrentLocationMarker && shouldRenderNativeCurrentLocationVehicle))
   );
   const rotatedCurrentLocationPoint = useRotatedMapPoint({
     mapRef,
@@ -3217,6 +3222,7 @@ function PrototypeMapLayer({
           !shouldSuppressNativeAndroidDriverVehicleMarker ? (
             <Marker
               key={`driver-marker-${driverVehicleMarkerColorToken}-${driverMarkerShapeKey}-${driverMarkerAssetUrl}`}
+              testID="map-driver-vehicle-marker"
               coordinate={{
                 latitude: displayedDriverCoordinate.latitude,
                 longitude: displayedDriverCoordinate.longitude,
