@@ -54,4 +54,65 @@ describe('support-severity-classifier', () => {
       prioritySource: 'trusted_requested_priority'
     });
   });
+
+  describe('resolution class (A-D)', () => {
+    const classify = (subject, description, category = 'general', extra = {}) => (
+      classifySupportTicketSeverity({ subject, description, category, ...extra })
+    );
+
+    it('lets the bot answer plain how-to and status questions', () => {
+      expect(classify('Recibo', 'Como vejo o recibo da minha última corrida?')).toMatchObject({
+        resolutionClass: 'A',
+        resolutionOwner: 'bot',
+        autoReplyAllowed: true
+      });
+      expect(classify('Saldo', 'Como faço o saque do meu saldo?', 'account')).toMatchObject({
+        resolutionClass: 'A'
+      });
+    });
+
+    it('sends reported app bugs to triage as B', () => {
+      expect(classify('App', 'A tela de pagamento fica branca e não carrega', 'technical')).toMatchObject({
+        resolutionClass: 'B',
+        resolutionOwner: 'bot_ota_fix',
+        autoReplyAllowed: false
+      });
+    });
+
+    it('keeps money, safety, KYC disputes, legal and blocks with the owner', () => {
+      const cases = [
+        classify('Emergência', 'O motorista me ameaçou'),
+        classify('Pix', 'Quero saber se o pix caiu', 'payment'),
+        classify('Cobrança', 'Fui cobrado duas vezes, quero estorno'),
+        classify('Saque', 'Meu saque não caiu na conta'),
+        classify('Documento', 'Minha CNH foi recusada e está certa'),
+        classify('Conta', 'Minha conta foi bloqueada sem motivo', 'account'),
+        classify('LGPD', 'Vou acionar o Procon e um advogado')
+      ];
+      cases.forEach((result) => {
+        expect(result).toMatchObject({
+          resolutionClass: 'D',
+          resolutionOwner: 'owner_decision',
+          autoReplyAllowed: false
+        });
+      });
+    });
+
+    it('only trusted sources can raise the class, and never lower it', () => {
+      expect(classify('Recibo', 'Onde vejo meu recibo?', 'general', {
+        metadata: { resolutionClass: 'D' }
+      }).resolutionClass).toBe('A');
+
+      expect(classify('Recibo', 'Onde vejo meu recibo?', 'general', {
+        metadata: { source: 'support_agent', resolutionClass: 'C' }
+      })).toMatchObject({
+        resolutionClass: 'C',
+        resolutionOwner: 'bot_backend_fix'
+      });
+
+      expect(classify('Cobrança', 'Quero estorno', 'general', {
+        metadata: { source: 'support_agent', resolutionClass: 'A' }
+      }).resolutionClass).toBe('D');
+    });
+  });
 });

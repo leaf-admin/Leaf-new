@@ -216,6 +216,7 @@ describe('support-queue-service', () => {
 
     expect(summary.overdueAckCount).toBe(1);
     expect(summary.backlogByPriority.N1).toBe(1);
+    expect(summary.backlogByResolutionClass).toEqual({ A: 0, B: 0, C: 0, D: 0, unclassified: 1 });
     expect(ticketService.escalateTicket).toHaveBeenCalledWith('ticket-1', expect.objectContaining({
       reason: 'SLA de ack excedido'
     }));

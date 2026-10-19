@@ -10,6 +10,7 @@ const rideCostAlertService = require('../services/ride-cost-alert-service');
 const dailyEarningsReportService = require('../services/daily-earnings-report-service');
 const backofficeCommandCenterService = require('../services/backoffice-command-center-service');
 const backofficeCostGuardService = require('../services/backoffice-cost-guard-service');
+const externalInsightsService = require('../services/external-insights-service');
 const { logError } = require('../utils/logger');
 
 const router = express.Router();
@@ -100,6 +101,22 @@ router.get('/command-center', async (req, res) => {
   } catch (error) {
     logError(error, { service: 'ops-routes', operation: 'command-center' });
     res.status(500).json({ success: false, error: 'Erro ao buscar command center operacional' });
+  }
+});
+
+// Sentry, PostHog, UptimeRobot, Cloudflare e App Store, lidos com as chaves do
+// servidor e guardados em cache. Só quem pode mutar ignora o cache.
+router.get('/external-insights', async (req, res) => {
+  try {
+    const requestedForceRefresh = req.query?.forceRefresh === 'true';
+    const snapshot = await externalInsightsService.getSnapshot({
+      forceRefresh: requestedForceRefresh && userCanBypassCommandCenterCache(req.user)
+    });
+    res.set('X-Leaf-External-Insights-Cache', snapshot.cache || 'UNKNOWN');
+    res.json({ success: true, ...snapshot });
+  } catch (error) {
+    logError(error, { service: 'ops-routes', operation: 'external-insights' });
+    res.status(500).json({ success: false, error: 'Erro ao buscar dados externos' });
   }
 });
 

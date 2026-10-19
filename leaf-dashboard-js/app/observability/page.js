@@ -7,6 +7,7 @@ import { leafAPI } from "@/src/services/api";
 import Panel from "@/src/components/ui/Panel";
 import { ErrorText, LoadingState } from "@/src/components/ui/PageFeedback";
 import { TechnicalDetails } from "@/src/components/ui/DataViews";
+import ExternalInsightsPanels from "@/src/components/observability/ExternalInsightsPanels";
 
 const grafanaBase = process.env.NEXT_PUBLIC_GRAFANA_URL || "";
 const POLL_INTERVAL_MS = Math.max(
@@ -682,6 +683,8 @@ export default function ObservabilityPage() {
                 ]}
               />
             </Panel>
+
+            <ExternalInsightsPanels />
 
             <Panel
               title="DLQ Inspector"
