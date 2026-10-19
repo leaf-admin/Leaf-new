@@ -21,6 +21,10 @@ export const ROBOTAXI_SETTINGS_ITEMS = Object.freeze({
     key: 'password',
     status: CURRENT_SURFACE_STATUS.CURRENT,
   }),
+  usageData: Object.freeze({
+    key: 'usage-data',
+    status: CURRENT_SURFACE_STATUS.CURRENT,
+  }),
   privacy: Object.freeze({
     key: 'privacy',
     status: CURRENT_SURFACE_STATUS.CURRENT,

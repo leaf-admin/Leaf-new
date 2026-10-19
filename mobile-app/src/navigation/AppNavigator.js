@@ -18,6 +18,7 @@ import {
 } from '../config/runtimeAccessPolicy';
 import { getPilotLaunchFeatureSnapshot } from '../config/pilotLaunchProfile';
 import { USER_SIGN_OUT } from '../services/runtime/authTypesBridge';
+import { identifyUser, resetUser, trackScreen } from '../services/observability/AppObservability';
 import { normalizeManifestDeepLinkPath } from './surfaceManifestContract';
 import {
   isPersistedProfileOnboardingComplete,
@@ -1213,16 +1214,41 @@ function PrototypeQaDeepLinkGuard({ navigationRef }) {
   return null;
 }
 
+// Sentry e PostHog só recebem o uid do Firebase e o papel; sem login, zera.
+function ObservabilityIdentityBridge() {
+  const uid = useSelector(state => state.auth?.profile?.uid || null);
+  const role = useSelector(state => state.auth?.profile?.usertype || state.auth?.profile?.userType || null);
+
+  useEffect(() => {
+    if (uid) {
+      identifyUser({ uid, role });
+    } else {
+      resetUser();
+    }
+  }, [uid, role]);
+
+  return null;
+}
+
+const trackCurrentRoute = () => trackScreen(rootNavigationRef.getCurrentRoute?.()?.name);
+
 export default function AppNavigator() {
   return (
     <LeafNativeTabBarProvider>
-      <NavigationContainer ref={rootNavigationRef} linking={appLinking} theme={LEAF_NAVIGATION_THEME}>
+      <NavigationContainer
+        ref={rootNavigationRef}
+        linking={appLinking}
+        theme={LEAF_NAVIGATION_THEME}
+        onReady={trackCurrentRoute}
+        onStateChange={trackCurrentRoute}
+      >
         <MainNavigator />
       </NavigationContainer>
       <PrototypeQaDeepLinkGuard navigationRef={rootNavigationRef} />
       <PrototypeReceiptDeepLinkGuard navigationRef={rootNavigationRef} />
       <RealtimeConnectionGuard />
       <SessionTerminatedGuard navigationRef={rootNavigationRef} />
+      <ObservabilityIdentityBridge />
     </LeafNativeTabBarProvider>
   );
 }

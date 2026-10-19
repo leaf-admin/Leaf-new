@@ -1,8 +1,10 @@
-const { getDefaultConfig } = require('expo/metro-config');
+// Config padrão do Expo com o serializer do Sentry, que grava um debug ID no
+// bundle e no source map para os erros do app aparecerem com o código original.
+const { getSentryExpoConfig } = require('@sentry/react-native/metro');
 const fs = require('fs');
 const path = require('path');
 
-const config = getDefaultConfig(__dirname);
+const config = getSentryExpoConfig(__dirname);
 const { resolve } = config.resolver;
 const resolveAxiosBrowserEntry = () => {
   try {

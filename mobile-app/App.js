@@ -20,6 +20,7 @@ import NetworkStatusBanner from './src/components/NetworkStatusBanner';
 import AndroidPermissionDisclosureHost from './src/components/AndroidPermissionDisclosureHost';
 import { toUserFriendlyMessage } from './src/utils/friendlyErrorMessages';
 import { registerPortraitOrientationGuard } from './src/utils/appOrientationGuard';
+import { trackTouch } from './src/services/observability/AppObservability';
 import './src/i18n'; // Inicializar i18n
 import './src/utils/ReanimatedWrapper'; // Suprimir warnings do Reanimated
 
@@ -341,7 +342,10 @@ export default function App() {
   // A splash screen nativa permanece visível via preventAutoHideAsync até hideAsync ser chamado
   // Isso evita problemas de timing com hooks do Redux
   return (
-    <GestureHandlerRootView style={{ flex: 1 }}>
+    <GestureHandlerRootView
+      style={{ flex: 1 }}
+      onTouchStart={(event) => trackTouch(event?.nativeEvent?.pageX, event?.nativeEvent?.pageY)}
+    >
       <Provider store={store}>
         <LanguageProvider>
           <AuthProvider>

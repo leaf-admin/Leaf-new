@@ -18,6 +18,7 @@ import { ROBOTAXI_SETTINGS_ITEMS } from './robotaxiSettingsConfig';
 import { useMobilePreferences } from '../../components/MobilePreferencesProvider';
 import FCMNotificationService from '../../services/FCMNotificationService';
 import { isLeafVoiceAvailable, stopLeafNavigationVoice } from '../../services/LeafVoiceGuidanceService';
+import { loadAnalyticsPreference, setAnalyticsEnabled } from '../../services/observability/AppObservability';
 
 const SURFACE_TOP_PADDING = 20;
 const SURFACE_BOTTOM_PADDING = 18;
@@ -107,6 +108,18 @@ export default function RobotaxiSettingsScreen({ navigation, route }) {
   const previousPermission = useRef(null);
   const [permissionBusy, setPermissionBusy] = useState(false);
   const [voiceAvailable, setVoiceAvailable] = useState(null);
+  const [usageDataEnabled, setUsageDataEnabled] = useState(null);
+
+  useEffect(() => {
+    let live = true;
+    loadAnalyticsPreference().then(enabled => { if (live) setUsageDataEnabled(enabled); });
+    return () => { live = false; };
+  }, []);
+
+  const toggleUsageData = useCallback(value => {
+    setUsageDataEnabled(value);
+    setAnalyticsEnabled(value).then(setUsageDataEnabled);
+  }, []);
 
   const receivePermission = useCallback(granted => {
     const newlyGranted = granted && previousPermission.current === false;
@@ -291,6 +304,17 @@ export default function RobotaxiSettingsScreen({ navigation, route }) {
       onPress: () => navigation.navigate('LeafAccountPassword'),
       rowTestID: 'robotaxi-settings-row-password',
       showChevron: true,
+    },
+    {
+      item: ROBOTAXI_SETTINGS_ITEMS.usageData,
+      icon: 'analytics-outline',
+      title: 'Dados de uso',
+      subtitle: 'Ajuda a melhorar o app, sem dados pessoais',
+      rowTestID: 'robotaxi-settings-row-usage-data',
+      switchTestID: 'robotaxi-settings-switch-usage-data',
+      switchValue: usageDataEnabled,
+      onValueChange: toggleUsageData,
+      disabled: usageDataEnabled === null,
     },
     {
       item: ROBOTAXI_SETTINGS_ITEMS.privacy,
