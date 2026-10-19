@@ -15,8 +15,13 @@ ANDROID_WORKLETS_BUILD_DIR=""
 ANDROID_WORKLETS_BUILD_BACKUP=""
 ANDROID_WORKLETS_BUILD_LINK_TARGET=""
 ANDROID_WORKLETS_BUILD_LINKED=0
+ANDROID_LIBRARY_BUILD_LINKS=()
 
 cleanup_external_build_script() {
+  local library_link
+  for library_link in "${ANDROID_LIBRARY_BUILD_LINKS[@]+"${ANDROID_LIBRARY_BUILD_LINKS[@]}"}"; do
+    [[ -L "${library_link}" ]] && rm "${library_link}"
+  done
   if [[ "${ANDROID_WORKLETS_BUILD_LINKED}" == "1" && -n "${ANDROID_WORKLETS_BUILD_DIR}" && -L "${ANDROID_WORKLETS_BUILD_DIR}" && "$(readlink "${ANDROID_WORKLETS_BUILD_DIR}")" == "${ANDROID_WORKLETS_BUILD_LINK_TARGET}" ]]; then
     rm "${ANDROID_WORKLETS_BUILD_DIR}"
   fi
@@ -244,6 +249,36 @@ prepare_external_worklets_build_link() {
   echo "ℹ️  O caminho CMake de react-native-worklets aponta temporariamente para a saída externa."
 }
 
+# O CMake do autolinking (e de libs como safe-area-context, screens e picker)
+# lê o codegen em node_modules/<lib>/android/build, mas a build grava a saída
+# de cada módulo em ${ANDROID_BUILD_OUTPUT_PATH}/modules/<projeto>. Numa
+# instalação limpa essa pasta não existe e a build quebra no CMake. Liga cada
+# android/build ausente à saída externa durante a build; o trap desfaz.
+prepare_external_library_build_links() {
+  [[ -n "${ANDROID_BUILD_OUTPUT_PATH}" ]] || return 0
+
+  local modules_root="${PROJECT_DIR}/../node_modules"
+  local gradle_file android_dir package_dir package_name project_name link
+  while IFS= read -r gradle_file; do
+    android_dir="$(dirname "${gradle_file}")"
+    package_dir="$(dirname "${android_dir}")"
+    package_name="${package_dir#"${modules_root}/"}"
+    [[ "${package_name}" == "react-native-worklets" || "${package_name}" == "react-native" ]] && continue
+    # Nome do projeto Gradle: "@scope/nome" vira "scope_nome".
+    project_name="${package_name#@}"
+    project_name="${project_name/\//_}"
+    link="${android_dir}/build"
+    [[ -e "${link}" || -L "${link}" ]] && continue
+    mkdir -p "${ANDROID_BUILD_OUTPUT_PATH}/modules/${project_name}"
+    ln -s "${ANDROID_BUILD_OUTPUT_PATH}/modules/${project_name}" "${link}"
+    ANDROID_LIBRARY_BUILD_LINKS+=("${link}")
+  done < <(find "${modules_root}" -mindepth 3 -maxdepth 4 -path '*/android/build.gradle' -not -path '*/node_modules/*/node_modules/*' 2>/dev/null)
+
+  if [[ "${#ANDROID_LIBRARY_BUILD_LINKS[@]}" -gt 0 ]]; then
+    echo "ℹ️  ${#ANDROID_LIBRARY_BUILD_LINKS[@]} pastas android/build de bibliotecas apontam temporariamente para a saída externa."
+  fi
+}
+
 show_artifact_path() {
   local app_build_root="${PROJECT_DIR}/android/app/build"
   if [[ -n "${ANDROID_BUILD_OUTPUT_PATH}" ]]; then
@@ -284,6 +319,7 @@ main() {
   sync_android_inter_fonts
   prepare_external_build_output
   prepare_external_worklets_build_link
+  prepare_external_library_build_links
 
   case "${MODE}" in
     debug) run_gradle "assembleDebug" ;;

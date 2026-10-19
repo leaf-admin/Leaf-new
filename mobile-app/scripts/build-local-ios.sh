@@ -129,6 +129,32 @@ ensure_smithy_codegen_cli_alias() {
   return 0
 }
 
+# A fase "[Hermes] Replace Hermes for the right configuration" só extrai o
+# Hermes certo quando Pods/.last_build_configuration difere da configuração
+# da build. O marcador sobrevive ao pod install, que reextrai o Hermes de
+# debug: em 19/10/2026 o archive de release da 1.0.8 saiu com Hermes de debug
+# e o app fechava ao abrir (SIGSEGV no Hermes). Força a extração a cada build
+# e exige o tarball da configuração.
+prepare_hermes_for_configuration() {
+  local configuration="$1"
+  local pods_dir="${PROJECT_DIR}/ios/Pods"
+  [[ -d "${pods_dir}/hermes-engine-artifacts" ]] || return 0
+
+  local rn_version flavor tarball opposite
+  rn_version="$(node -p "require(require.resolve('react-native/package.json', { paths: ['${PROJECT_DIR}'] })).version")"
+  flavor="$(printf '%s' "${configuration}" | tr '[:upper:]' '[:lower:]')"
+  tarball="${pods_dir}/hermes-engine-artifacts/hermes-ios-${rn_version}-${flavor}.tar.gz"
+  if [[ ! -f "${tarball}" ]]; then
+    echo "❌ Falta o Hermes ${configuration}: ${tarball}"
+    echo "💡 Baixe https://repo1.maven.org/maven2/com/facebook/react/react-native-artifacts/${rn_version}/react-native-artifacts-${rn_version}-hermes-ios-${flavor}.tar.gz (confira o .sha1) para esse caminho."
+    exit 1
+  fi
+  opposite="Debug"
+  [[ "${configuration}" == "Debug" ]] && opposite="Release"
+  printf '%s' "${opposite}" > "${pods_dir}/.last_build_configuration"
+  echo "ℹ️  Hermes ${configuration} será extraído nesta build."
+}
+
 run_xcodebuild_with_smithy_retry() {
   local configuration="$1"
   shift
@@ -432,6 +458,12 @@ main() {
   if [[ "$(uname -m)" == "arm64" ]]; then
     sim_extra_args+=("EXCLUDED_ARCHS=x86_64")
   fi
+  if [[ "${MODE}" == "archive" ]]; then
+    prepare_hermes_for_configuration Release
+  elif [[ "${MODE}" == "simulator" ]]; then
+    prepare_hermes_for_configuration "${IOS_SIMULATOR_CONFIGURATION}"
+  fi
+
   case "${MODE}" in
     simulator)
       export LEAF_DISABLE_UPDATES_FOR_SIMULATOR=1
