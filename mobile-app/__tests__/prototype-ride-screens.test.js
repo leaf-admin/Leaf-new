@@ -3740,7 +3740,10 @@ describe('prototype ride screens', () => {
     fireEvent.press(getByTestId('passenger-receipt-back-to-map-button'));
 
     expect(dismissCompletedReceipt).toHaveBeenCalled();
-    expect(navigation.navigate).toHaveBeenCalledWith('RobotaxiPrototype');
+    expect(navigation.navigate).toHaveBeenCalledWith('RobotaxiPrototype', expect.objectContaining({
+      resetPassengerHomeSearch: true,
+      source: 'passenger_receipt_back',
+    }));
     expect(navigation.goBack).not.toHaveBeenCalled();
   });
 
@@ -3780,7 +3783,10 @@ describe('prototype ride screens', () => {
 
     expect(event.preventDefault).toHaveBeenCalled();
     expect(dismissCompletedReceipt).toHaveBeenCalledTimes(1);
-    expect(navigation.navigate).toHaveBeenCalledWith('RobotaxiPrototype');
+    expect(navigation.navigate).toHaveBeenCalledWith('RobotaxiPrototype', expect.objectContaining({
+      resetPassengerHomeSearch: true,
+      source: 'passenger_receipt_back',
+    }));
     expect(navigation.goBack).not.toHaveBeenCalled();
   });
 
@@ -3876,7 +3882,10 @@ describe('prototype ride screens', () => {
     fireEvent.press(getByTestId('passenger-receipt-back-to-map-button'));
 
     expect(dismissCompletedReceipt).toHaveBeenCalled();
-    expect(navigation.navigate).toHaveBeenCalledWith('RobotaxiPrototype');
+    expect(navigation.navigate).toHaveBeenCalledWith('RobotaxiPrototype', expect.objectContaining({
+      resetPassengerHomeSearch: true,
+      source: 'passenger_receipt_back',
+    }));
     expect(navigation.goBack).not.toHaveBeenCalled();
   });
 
@@ -4200,7 +4209,10 @@ describe('prototype ride screens', () => {
     fireEvent.press(getByTestId('passenger-receipt-back-to-map-button'));
 
     expect(dismissCompletedReceipt).toHaveBeenCalled();
-    expect(navigation.navigate).toHaveBeenCalledWith('RobotaxiPrototype');
+    expect(navigation.navigate).toHaveBeenCalledWith('RobotaxiPrototype', expect.objectContaining({
+      resetPassengerHomeSearch: true,
+      source: 'passenger_receipt_back',
+    }));
     expect(navigation.goBack).not.toHaveBeenCalled();
   });
 
