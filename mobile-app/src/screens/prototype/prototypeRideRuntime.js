@@ -20811,6 +20811,25 @@ export function usePrototypeRideRuntime(options = null) {
           return true;
         }
 
+        // "Navegar" na notificação: volta ao app de navegação na fase atual.
+        if (action === "open_navigation") {
+          const target = latestContext?.target;
+          if (!target?.coordinate) {
+            return true;
+          }
+          // Carregado só aqui: o módulo traz a interface de escolha do app.
+          const {
+            openPreferredDriverNavigation,
+          } = require("../../services/driverNavigationPreference");
+          await openPreferredDriverNavigation({
+            coordinate: target.coordinate,
+            destinationLabel: target.address,
+            phase: target.phase,
+            finalDestinationCoordinate: latestContext?.destinationCoordinate || null,
+          });
+          return true;
+        }
+
         return false;
       },
     );
@@ -20995,7 +21014,6 @@ export function usePrototypeRideRuntime(options = null) {
         passengerName:
           snapshot.driverActiveRide?.passenger ||
           snapshot.activeBooking?.customerName ||
-          snapshot.profileName ||
           "Passageiro",
         ...(Number.isFinite(Number(snapshot.driverTripMeta?.driverNetAmount))
           ? {

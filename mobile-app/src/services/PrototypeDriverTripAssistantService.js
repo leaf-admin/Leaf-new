@@ -3,6 +3,7 @@ import * as Device from 'expo-device';
 import { Platform } from 'react-native';
 import Logger from '../utils/Logger';
 import PersistentRideNotificationService from './PersistentRideNotificationService';
+import { cancelRideArrivalAlert, displayRideArrivalAlert } from './LeafOngoingRideNotification';
 
 const STORAGE_KEY = 'prototype_driver_trip_assistant_v1';
 const ACTIVE_STATUSES = new Set(['accepted', 'arrived', 'started']);
@@ -11,6 +12,11 @@ const ACTIVE_STATUSES = new Set(['accepted', 'arrived', 'started']);
 // are already standing at the pickup point.
 const PICKUP_TOLERANCE_METERS = 80;
 const FALLBACK_SPEED_KM_PER_MIN = 0.45;
+// Distância do destino em que o motorista é avisado para encerrar a corrida. A mesma
+// do encerramento sem a pergunta "Encerrar antes do destino?" (driverEarlyEndConfirm).
+// O fim da rota de um shopping ou de um aeroporto fica a centenas de metros do ponto
+// do lugar.
+const DESTINATION_ALERT_METERS = 500;
 const SHOULD_DISABLE_PERSISTENT_NOTIFICATIONS =
   Platform.OS === 'ios' && !Device.isDevice;
 
@@ -147,7 +153,22 @@ function buildEtaDistanceLabel(etaMinutes, remainingMeters) {
   return parts.join(' · ');
 }
 
-function buildNotificationDescriptor(session) {
+// "Ana Paula Souza" vira "Ana"; o nome genérico não entra no título.
+function firstName(name) {
+  const first = String(name || '').trim().split(/\s+/)[0] || '';
+  return /^passageir[oa]$/i.test(first) ? '' : first;
+}
+
+// Hora prevista de chegada, no relógio do aparelho: "14:32".
+function formatArrivalClock(etaMinutes, now) {
+  if (!Number.isFinite(Number(etaMinutes)) || Number(etaMinutes) <= 0) return '';
+  const at = new Date(now + Math.round(Number(etaMinutes)) * 60000);
+  return `${String(at.getHours()).padStart(2, '0')}:${String(at.getMinutes()).padStart(2, '0')}`;
+}
+
+const NAVIGATE_ACTION = { identifier: 'open_navigation', buttonTitle: 'Navegar' };
+
+function buildNotificationDescriptor(session, { now = Date.now() } = {}) {
   const target = resolveTarget(session);
   const remainingMeters = Number(session?.remainingMeters);
   const initialMeters = Number(session?.initialMeters);
@@ -159,6 +180,9 @@ function buildNotificationDescriptor(session) {
   const etaMinutes = Number(session?.etaMinutes || 0);
   const fareLabel = String(session?.fareLabel || formatCurrency(session?.fare || 0)).trim();
 
+  const passenger = firstName(session?.passengerName);
+  const arrivalClock = formatArrivalClock(etaMinutes, now);
+
   if (session?.status === 'accepted') {
     const readyToArrive = Boolean(session?.pickupToleranceReached);
     return {
@@ -169,13 +193,19 @@ function buildNotificationDescriptor(session) {
         ? [
             {
               identifier: 'arrived_at_pickup',
-              buttonTitle: 'Cheguei'
+              buttonTitle: 'Cheguei ao embarque'
             }
           ]
-        : [],
+        : [NAVIGATE_ACTION],
       ongoing: {
-        title: readyToArrive ? 'Você chegou ao embarque' : 'A caminho do embarque',
-        subtitle: readyToArrive ? 'Toque em Cheguei' : buildEtaDistanceLabel(etaMinutes, remainingMeters),
+        title: readyToArrive
+          ? 'Você chegou ao embarque'
+          : (passenger ? `Buscar ${passenger}` : 'A caminho do embarque'),
+        subtitle: readyToArrive
+          ? 'Avise o passageiro'
+          : [buildEtaDistanceLabel(etaMinutes, remainingMeters), arrivalClock && `até ${arrivalClock}`]
+            .filter(Boolean)
+            .join(' · '),
         body: `Embarque: ${shortenAddress(target?.address) || 'Local de embarque'}`,
         progress: readyToArrive ? 1 : progressRatio,
         countdownSeconds: !readyToArrive && etaMinutes > 0 ? etaMinutes * 60 : 0
@@ -195,11 +225,11 @@ function buildNotificationDescriptor(session) {
       androidActions: [
         {
           identifier: 'start_trip',
-          buttonTitle: 'Iniciar'
+          buttonTitle: 'Iniciar corrida'
         }
       ],
       ongoing: {
-        title: 'Aguardando passageiro',
+        title: passenger ? `Aguardando ${passenger}` : 'Aguardando passageiro',
         subtitle: 'Tempo de embarque',
         body: `Embarque: ${shortenAddress(target?.address) || 'Local de embarque'}`,
         progress: null,
@@ -214,13 +244,14 @@ function buildNotificationDescriptor(session) {
       body: `ETA ${etaMinutes || '—'} min • ${formatDistance(remainingMeters)} restantes\n${progressBar} ${Math.round(progressRatio * 100)}%\nDestino: ${target?.address || 'Destino'} • ${fareLabel}`,
       categoryId: 'DRIVER_TRIP_ACTIVE',
       androidActions: [
+        NAVIGATE_ACTION,
         {
           identifier: 'end_trip',
           buttonTitle: 'Encerrar'
         }
       ],
       ongoing: {
-        title: 'Em viagem',
+        title: arrivalClock ? `Chegada às ${arrivalClock}` : 'Em viagem',
         subtitle: buildEtaDistanceLabel(etaMinutes, remainingMeters),
         body: `Destino: ${shortenAddress(target?.address) || 'Destino'} · ${fareLabel}`,
         progress: progressRatio,
@@ -241,6 +272,33 @@ function buildNotificationDescriptor(session) {
       countdownSeconds: 0
     }
   };
+}
+
+// Os dois momentos em que o motorista, com o mapa em tela cheia, precisa voltar ao
+// Leaf: chegou ao embarque e está chegando ao destino. Um aviso por corrida e fase.
+function resolveArrivalAlert(session) {
+  const bookingId = String(session?.bookingId || '').trim();
+  if (!bookingId) return null;
+  const passenger = firstName(session?.passengerName);
+  if (session?.status === 'accepted' && session?.pickupToleranceReached) {
+    return {
+      key: `${bookingId}:pickup`,
+      title: 'Você chegou ao embarque',
+      body: passenger ? `Avise ${passenger} que você chegou.` : 'Avise o passageiro que você chegou.',
+      actions: [{ identifier: 'arrived_at_pickup', buttonTitle: 'Cheguei ao embarque' }],
+    };
+  }
+  const remainingMeters = Number(session?.remainingMeters);
+  if (session?.status === 'started' && Number.isFinite(remainingMeters) && remainingMeters <= DESTINATION_ALERT_METERS) {
+    const destination = shortenAddress(session?.destinationAddress) || 'destino';
+    return {
+      key: `${bookingId}:destination`,
+      title: 'Chegando ao destino',
+      body: `${destination} · encerre a corrida no Leaf`,
+      actions: [{ identifier: 'end_trip', buttonTitle: 'Encerrar corrida' }],
+    };
+  }
+  return null;
 }
 
 class PrototypeDriverTripAssistantService {
@@ -442,10 +500,41 @@ class PrototypeDriverTripAssistantService {
 
     if (PersistentRideNotificationService.isNotificationActive()) {
       await PersistentRideNotificationService.updateRideNotification(payload);
+    } else {
+      await PersistentRideNotificationService.showRideNotification(payload);
+    }
+    await this.syncArrivalAlert(session);
+  }
+
+  async syncArrivalAlert(session) {
+    const alert = resolveArrivalAlert(session);
+    if (!alert) {
+      // A corrida passou da fase do aviso (o motorista já tocou em Cheguei, por
+      // exemplo): o aviso sai da tela. Uma vez por aviso.
+      const shownKey = String(session.arrivalAlertKey || '');
+      const shownPhase = shownKey.split(':').pop();
+      const stillInThatPhase =
+        (shownPhase === 'pickup' && session.status === 'accepted') ||
+        (shownPhase === 'destination' && session.status === 'started');
+      if (shownKey && !stillInThatPhase && this.cancelledArrivalAlertKey !== shownKey) {
+        this.cancelledArrivalAlertKey = shownKey;
+        await cancelRideArrivalAlert();
+      }
       return;
     }
-
-    await PersistentRideNotificationService.showRideNotification(payload);
+    if (session.arrivalAlertKey === alert.key) {
+      return;
+    }
+    const shown = await displayRideArrivalAlert({
+      title: alert.title,
+      body: alert.body,
+      actions: alert.actions,
+      data: { bookingId: session.bookingId, status: session.status, type: 'ride_arrival_alert' },
+    });
+    if (shown) {
+      session.arrivalAlertKey = alert.key;
+      await this.saveSession(session);
+    }
   }
 
   async syncSession(sessionInput) {
@@ -482,15 +571,19 @@ class PrototypeDriverTripAssistantService {
       return null;
     }
 
+    // Distância e ETA saem da posição nova. Herdados da sessão, ficavam parados no
+    // último valor do app em primeiro plano enquanto o motorista usava o Waze.
     const session = this.buildSession(
       {
         ...previous,
+        remainingMeters: undefined,
+        etaMinutes: undefined,
         lastDriverLocation: {
           latitude: Number(location?.lat ?? location?.latitude),
           longitude: Number(location?.lng ?? location?.longitude)
         }
       },
-      previous
+      { ...previous, remainingMeters: undefined, etaMinutes: undefined }
     );
 
     await this.saveSession(session);
@@ -507,6 +600,7 @@ class PrototypeDriverTripAssistantService {
       Logger.warn('⚠️ [PrototypeDriverTripAssistant] Falha ao limpar sessão:', error?.message || error);
     }
 
+    await cancelRideArrivalAlert();
     if (!SHOULD_DISABLE_PERSISTENT_NOTIFICATIONS) {
       await PersistentRideNotificationService.dismissRideNotification({
         bookingId: previous?.bookingId,
@@ -533,4 +627,10 @@ class PrototypeDriverTripAssistantService {
 
 const prototypeDriverTripAssistantService = new PrototypeDriverTripAssistantService();
 export default prototypeDriverTripAssistantService;
-export { buildNotificationDescriptor, calculateDistanceMeters, PICKUP_TOLERANCE_METERS };
+export {
+  buildNotificationDescriptor,
+  calculateDistanceMeters,
+  DESTINATION_ALERT_METERS,
+  PICKUP_TOLERANCE_METERS,
+  resolveArrivalAlert,
+};

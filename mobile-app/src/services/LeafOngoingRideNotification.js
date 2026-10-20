@@ -143,6 +143,78 @@ export async function displayOngoingRideNotification(descriptor = {}) {
   }
 }
 
+// Aviso que aparece por cima do Waze ou do Google Maps nos dois momentos em que o
+// motorista precisa agir: chegou ao embarque e está chegando ao destino. A notificação
+// da corrida fica silenciosa atrás do mapa; este aviso toca e some sozinho.
+export const RIDE_ARRIVAL_CHANNEL_ID = 'leaf_ride_arrival';
+export const RIDE_ARRIVAL_NOTIFICATION_ID = 'leaf-ride-arrival';
+let arrivalChannelReady = false;
+
+export function buildRideArrivalAlert(descriptor = {}) {
+  const data = {};
+  Object.entries(descriptor.data || {}).forEach(([key, value]) => {
+    if (value === undefined || value === null) return;
+    data[key] = typeof value === 'string' ? value : JSON.stringify(value);
+  });
+  return {
+    id: RIDE_ARRIVAL_NOTIFICATION_ID,
+    title: String(descriptor.title || ''),
+    body: String(descriptor.body || ''),
+    data,
+    android: {
+      channelId: RIDE_ARRIVAL_CHANNEL_ID,
+      smallIcon: 'ic_stat_leaf',
+      color: BRAND_COLOR,
+      autoCancel: true,
+      // Some da bandeja se o motorista não tocar: a notificação da corrida continua lá.
+      timeoutAfter: 2 * 60 * 1000,
+      pressAction: { id: 'default', launchActivity: 'default' },
+      actions: (Array.isArray(descriptor.actions) ? descriptor.actions : [])
+        .filter((action) => action?.identifier && action?.buttonTitle)
+        .slice(0, 2)
+        .map((action) => ({
+          title: String(action.buttonTitle),
+          pressAction: { id: String(action.identifier), launchActivity: 'default' },
+        })),
+    },
+  };
+}
+
+export async function displayRideArrivalAlert(descriptor = {}) {
+  const mod = loadNotifee();
+  if (!mod) return false;
+  try {
+    if (!arrivalChannelReady) {
+      await mod.default.createChannel({
+        id: RIDE_ARRIVAL_CHANNEL_ID,
+        name: 'Chegada no embarque e no destino',
+        description: 'Avisa por cima do app de navegação quando é hora de agir na corrida',
+        importance: mod.AndroidImportance.HIGH,
+        visibility: mod.AndroidVisibility.PUBLIC,
+        vibration: true,
+        sound: 'default',
+      });
+      arrivalChannelReady = true;
+    }
+    await mod.default.displayNotification(buildRideArrivalAlert(descriptor));
+    return true;
+  } catch (error) {
+    Logger.warn('⚠️ [OngoingRideNotification] Falha ao exibir aviso de chegada:', error?.message || error);
+    return false;
+  }
+}
+
+export async function cancelRideArrivalAlert() {
+  const mod = loadNotifee();
+  if (!mod) return false;
+  try {
+    await mod.default.cancelNotification(RIDE_ARRIVAL_NOTIFICATION_ID);
+    return true;
+  } catch (error) {
+    return false;
+  }
+}
+
 export async function cancelOngoingRideNotification() {
   const mod = loadNotifee();
   if (!mod) return false;

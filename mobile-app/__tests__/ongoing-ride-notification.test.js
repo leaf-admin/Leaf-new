@@ -81,26 +81,41 @@ describe('driver trip notification descriptor', () => {
     etaMinutes: 4,
     fareLabel: 'R$ 31,20',
   };
+  // 14:28 no relógio do aparelho; com 4 min de ETA a chegada é 14:32.
+  const now = new Date(2026, 9, 20, 14, 28, 0).getTime();
 
   it('describes the way to pickup with progress, time and no block characters', () => {
-    const descriptor = buildNotificationDescriptor({ ...base, status: 'accepted' });
+    const descriptor = buildNotificationDescriptor({ ...base, status: 'accepted' }, { now });
 
     expect(descriptor.ongoing).toEqual({
       title: 'A caminho do embarque',
-      subtitle: '4 min · 1 km',
+      subtitle: '4 min · 1 km · até 14:32',
       body: 'Embarque: R. das Pastorinhas, 4',
       progress: 0.75,
       countdownSeconds: 240,
     });
     expect(descriptor.ongoing.body).not.toMatch(/[█░]/);
+    expect(descriptor.androidActions).toEqual([{ identifier: 'open_navigation', buttonTitle: 'Navegar' }]);
   });
 
-  it('offers "Cheguei" once the driver is at the pickup', () => {
-    const descriptor = buildNotificationDescriptor({ ...base, status: 'accepted', pickupToleranceReached: true });
+  it('names the passenger, never the generic placeholder', () => {
+    const named = buildNotificationDescriptor({ ...base, status: 'accepted', passengerName: 'Ana Paula Souza' }, { now });
+    expect(named.ongoing.title).toBe('Buscar Ana');
+
+    const generic = buildNotificationDescriptor({ ...base, status: 'accepted', passengerName: 'Passageiro' }, { now });
+    expect(generic.ongoing.title).toBe('A caminho do embarque');
+
+    const waiting = buildNotificationDescriptor({ ...base, status: 'arrived', passengerName: 'Ana Paula' }, { now });
+    expect(waiting.ongoing.title).toBe('Aguardando Ana');
+    expect(waiting.androidActions).toEqual([{ identifier: 'start_trip', buttonTitle: 'Iniciar corrida' }]);
+  });
+
+  it('offers "Cheguei ao embarque" once the driver is at the pickup', () => {
+    const descriptor = buildNotificationDescriptor({ ...base, status: 'accepted', pickupToleranceReached: true }, { now });
 
     expect(descriptor.ongoing.title).toBe('Você chegou ao embarque');
-    expect(descriptor.ongoing).toMatchObject({ subtitle: 'Toque em Cheguei', progress: 1, countdownSeconds: 0 });
-    expect(descriptor.androidActions).toEqual([{ identifier: 'arrived_at_pickup', buttonTitle: 'Cheguei' }]);
+    expect(descriptor.ongoing).toMatchObject({ subtitle: 'Avise o passageiro', progress: 1, countdownSeconds: 0 });
+    expect(descriptor.androidActions).toEqual([{ identifier: 'arrived_at_pickup', buttonTitle: 'Cheguei ao embarque' }]);
   });
 
   it('counts down the boarding window while waiting, without a progress bar', () => {
@@ -131,12 +146,17 @@ describe('driver trip notification descriptor', () => {
   });
 
   it('shows destination and the driver net fare during the trip', () => {
-    const descriptor = buildNotificationDescriptor({ ...base, status: 'started' });
+    const descriptor = buildNotificationDescriptor({ ...base, status: 'started' }, { now });
 
     expect(descriptor.ongoing).toMatchObject({
-      title: 'Em viagem',
+      title: 'Chegada às 14:32',
+      subtitle: '4 min · 1 km',
       body: 'Destino: Via Parque Shopping · R$ 31,20',
       progress: 0.75,
     });
+    expect(descriptor.androidActions.map((action) => action.identifier)).toEqual(['open_navigation', 'end_trip']);
+
+    const noEta = buildNotificationDescriptor({ ...base, status: 'started', etaMinutes: 0 }, { now });
+    expect(noEta.ongoing.title).toBe('Em viagem');
   });
 });
