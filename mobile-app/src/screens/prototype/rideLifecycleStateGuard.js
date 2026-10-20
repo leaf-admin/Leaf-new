@@ -30,6 +30,11 @@ const EVENT_SCOPED_NON_MONOTONIC_TRANSITIONS = new Set([
   'rideAcceptedDriverRecovery:accepted:searching_replacement',
   'rideOperationalReleased:operational_interrupted:idle',
   'rideOperationalReleased:searching_replacement:idle',
+  // A sync that finds the booking index but not the booking (expired in Redis)
+  // answers idle with the bookingId. The sync handler decides whether that ends
+  // the search; dropping it here kept the passenger searching forever.
+  'activeRideSync:searching:idle',
+  'activeRideSync:searching_replacement:idle',
 ]);
 
 function normalizeStatus(value) {
