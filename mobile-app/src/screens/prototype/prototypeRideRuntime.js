@@ -1,4 +1,5 @@
 import { compactPersistedRideRecord } from "./persistedRideCompaction";
+import { resolveDriverActionLocation } from "../../services/driverActionLocation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import * as Device from "expo-device";
@@ -20788,13 +20789,15 @@ export function usePrototypeRideRuntime(options = null) {
           .toLowerCase();
         const latestContext =
           await prototypeDriverTripAssistantService.getLatestActionContext();
-        const locationOverride =
-          latestContext?.lastDriverLocation ||
-          latestContext?.currentDriverLocation ||
-          null;
+        const locationOverride = await resolveDriverActionLocation(latestContext);
 
         if (action === "arrived_at_pickup") {
-          if (!latestContext?.pickupToleranceReached) {
+          // A sessão pode estar atrasada; a leitura do aparelho também conta.
+          const meters = calculateDistanceMeters(locationOverride, latestContext?.pickupCoordinate);
+          const reached =
+            latestContext?.pickupToleranceReached ||
+            (Number.isFinite(meters) && meters <= PICKUP_TOLERANCE_METERS);
+          if (!reached) {
             return true;
           }
           await arrivePrototypePickup(profile, { locationOverride });
