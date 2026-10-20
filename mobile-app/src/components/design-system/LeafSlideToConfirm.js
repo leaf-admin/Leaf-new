@@ -15,6 +15,8 @@ import leafTypography from '../prototype/LeafTypography';
 const KNOB_SIZE = 48;
 const TRACK_PADDING = 5;
 const CONFIRM_RATIO = 0.85;
+// No overshoot: a bouncy return carried the knob over the button to its left.
+const RELEASE_SPRING = { damping: 18, stiffness: 220, overshootClamping: true };
 
 // Slide-to-confirm for irreversible ride actions (ending a trip): a stray tap
 // can't trigger it. Screen readers confirm through the "activate" action.
@@ -28,23 +30,34 @@ export default function LeafSlideToConfirm({
   accessibilityLabel,
 }) {
   const [trackWidth, setTrackWidth] = useState(0);
+  // The action went through: the knob stays at the end with the busy label
+  // until the screen changes (a device recording showed it springing back
+  // under "Encerrando..." and past the start of the track).
+  const [held, setHeld] = useState(false);
   const offset = useSharedValue(0);
   const maxOffset = Math.max(0, trackWidth - KNOB_SIZE - TRACK_PADDING * 2);
-  const locked = disabled || busy;
+  const locked = disabled || busy || held;
 
   // When the action does not go through (the user backs out of a follow-up
   // question, or it fails) the knob returns, so the control is usable again
-  // instead of staying parked at the end of the track.
+  // instead of staying parked at the end of the track. onConfirm resolving
+  // `true` means it went through.
   const confirm = useCallback(() => {
     if (locked) {
       return;
     }
     const release = () => {
-      offset.value = withSpring(0, { damping: 18, stiffness: 220 });
+      offset.value = withSpring(0, RELEASE_SPRING);
     };
     Promise.resolve()
       .then(() => onConfirm?.())
-      .then(release, release);
+      .then((outcome) => {
+        if (outcome === true) {
+          setHeld(true);
+          return;
+        }
+        release();
+      }, release);
   }, [locked, offset, onConfirm]);
 
   const pan = Gesture.Pan()
@@ -57,7 +70,7 @@ export default function LeafSlideToConfirm({
         offset.value = withTiming(maxOffset, { duration: 120 });
         runOnJS(confirm)();
       } else {
-        offset.value = withSpring(0, { damping: 18, stiffness: 220 });
+        offset.value = withSpring(0, RELEASE_SPRING);
       }
     });
 
@@ -77,14 +90,14 @@ export default function LeafSlideToConfirm({
       accessibilityRole="adjustable"
       accessibilityLabel={accessibilityLabel || label}
       accessibilityHint="Deslize para a direita para confirmar"
-      accessibilityState={{ disabled: locked, busy }}
+      accessibilityState={{ disabled: locked, busy: busy || held }}
       accessibilityActions={[{ name: 'activate', label }]}
       onAccessibilityAction={(event) => {
         if (event?.nativeEvent?.actionName === 'activate') confirm();
       }}
     >
       <Reanimated.Text style={[styles.label, labelStyle]} numberOfLines={1}>
-        {busy ? busyLabel || label : label}
+        {busy || held ? busyLabel || label : label}
       </Reanimated.Text>
       <GestureDetector gesture={pan}>
         <Reanimated.View style={[styles.knob, knobStyle]}>
