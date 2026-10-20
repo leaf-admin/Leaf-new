@@ -31,8 +31,8 @@ const TOLL_PLAZAS = Object.freeze([
   { id: 'p18_sapucaia', name: 'P18 - Sapucaia', road: 'RJ-116', direction: 'bidirectional', lat: -21.994, lng: -42.914, fees: { car: { weekday: 6.5, weekend: 6.5 }, truck: { weekday: 13, weekend: 13 } } },
   { id: 'p19_paraiba_do_sul', name: 'P19 - Paraiba do Sul', road: 'RJ-116', direction: 'bidirectional', lat: -22.158, lng: -43.29, fees: { car: { weekday: 6.5, weekend: 6.5 }, truck: { weekday: 13, weekend: 13 } } },
   { id: 'p20_barra_do_pirai', name: 'P20 - Barra do Pirai', road: 'RJ-116', direction: 'bidirectional', lat: -22.471, lng: -43.826, fees: { car: { weekday: 6.5, weekend: 6.5 }, truck: { weekday: 13, weekend: 13 } } },
-  { id: 'p10a_transolimpica', name: 'P10a - Transolimpica', road: 'RJ-066', direction: 'north', lat: -22.9194989223804, lng: -43.3962833, fees: { car: { weekday: 8.95, weekend: 8.95 }, truck: { weekday: 17.9, weekend: 17.9 } } },
-  { id: 'p10b_transolimpica', name: 'P10b - Transolimpica', road: 'RJ-066', direction: 'south', lat: -22.9193061842793, lng: -43.3967711, fees: { car: { weekday: 8.95, weekend: 8.95 }, truck: { weekday: 17.9, weekend: 17.9 } } }
+  { id: 'p10a_transolimpica', name: 'P10a - Transolimpica', road: 'RJ-066', direction: 'north', twinGroup: 'p10_transolimpica', lat: -22.9194989223804, lng: -43.3962833, fees: { car: { weekday: 8.95, weekend: 8.95 }, truck: { weekday: 17.9, weekend: 17.9 } } },
+  { id: 'p10b_transolimpica', name: 'P10b - Transolimpica', road: 'RJ-066', direction: 'south', twinGroup: 'p10_transolimpica', lat: -22.9193061842793, lng: -43.3967711, fees: { car: { weekday: 8.95, weekend: 8.95 }, truck: { weekday: 17.9, weekend: 17.9 } } }
 ]);
 
 function toRad(value) {
@@ -145,7 +145,7 @@ function bearingToDirection(bearing) {
   return 'west';
 }
 
-function directionMatches(toll, routeCoordinates, nearestSegmentIndex) {
+function directionMatches(toll, routeCoordinates, nearestSegmentIndex, minSegmentKm = 0) {
   if (!toll.direction || toll.direction === 'bidirectional') {
     return true;
   }
@@ -153,6 +153,11 @@ function directionMatches(toll, routeCoordinates, nearestSegmentIndex) {
   const start = routeCoordinates[nearestSegmentIndex];
   const end = routeCoordinates[nearestSegmentIndex + 1];
   if (!start || !end) {
+    return false;
+  }
+  // Poucos metros de oscilação do GPS, ou um ponto que chegou fora de ordem,
+  // apontam para qualquer lado: não dizem em que sentido o carro passou.
+  if (minSegmentKm > 0 && distanceToSegmentKm(start, end, end) < minSegmentKm) {
     return false;
   }
 
@@ -204,11 +209,12 @@ function findRouteTolls(routeCoordinates = [], options = {}) {
 
     if (
       nearestDistanceKm <= toleranceKm &&
-      directionMatches(toll, coordinates, nearestSegmentIndex)
+      directionMatches(toll, coordinates, nearestSegmentIndex, Number(options.minDirectionSegmentKm) || 0)
     ) {
       foundIds.add(toll.id);
       found.push({
         id: toll.id,
+        ...(toll.twinGroup ? { twinGroup: toll.twinGroup } : {}),
         name: toll.name,
         road: toll.road,
         direction: toll.direction,
@@ -226,22 +232,40 @@ function findRouteTolls(routeCoordinates = [], options = {}) {
  * corrida, em ordem). Usa a tolerância de travessia e o sentido da praça.
  */
 function findCrossedTolls(pathCoordinates = [], options = {}) {
-  return findRouteTolls(pathCoordinates, {
+  const crossed = findRouteTolls(pathCoordinates, {
     ...options,
+    minDirectionSegmentKm: MIN_CROSSING_DIRECTION_SEGMENT_KM,
     minToleranceKm: 0.05,
     toleranceKm: Number(options.toleranceKm) || DEFAULT_CROSSING_TOLERANCE_KM
   });
+  // Das duas cabines de uma praça, fica a mais próxima do trajeto.
+  return crossed.filter((toll) => !toll.twinGroup || !crossed.some((other) =>
+    other !== toll && other.twinGroup === toll.twinGroup && other.distanceKm < toll.distanceKm
+  ));
 }
 
 // Mesma praça vista em dois trechos seguidos é uma travessia só; uma nova
 // passagem pela mesma praça só conta depois deste intervalo.
 const TOLL_RECROSSING_WINDOW_MS = 10 * 60 * 1000;
+// Menor passo da telemetria que serve para dizer o sentido de uma praça de mão única.
+const MIN_CROSSING_DIRECTION_SEGMENT_KM = 0.015;
+
+// As duas cabines de uma praça (P10a sentido norte, P10b sentido sul) ficam a
+// ~50 m uma da outra: uma passagem ficou dentro da tolerância das duas e um passo
+// com oscilação contou a cabine do sentido oposto (QA, 2026-10-20). Dentro da
+// janela de nova passagem, a travessia de uma cabine esconde a gêmea.
+function twinGroupOf(crossing) {
+  if (crossing?.twinGroup) return crossing.twinGroup;
+  const plaza = TOLL_PLAZAS.find((toll) => toll.id === crossing?.id);
+  return plaza?.twinGroup || null;
+}
 
 function mergeTollCrossings(existing = [], added = []) {
   const merged = Array.isArray(existing) ? [...existing] : [];
   (Array.isArray(added) ? added : []).forEach((crossing) => {
+    const twinGroup = twinGroupOf(crossing);
     const repeated = merged.some((previous) =>
-      previous.id === crossing.id &&
+      (previous.id === crossing.id || (twinGroup && twinGroupOf(previous) === twinGroup)) &&
       Math.abs(Number(previous.at || 0) - Number(crossing.at || 0)) < TOLL_RECROSSING_WINDOW_MS
     );
     if (!repeated) merged.push(crossing);

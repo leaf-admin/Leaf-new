@@ -86,4 +86,40 @@ describe('route-toll-service', () => {
       expect(summarizeTollCrossings(null).verified).toBe(false);
     });
   });
+
+  describe('praça de duas cabines (P10 Transolímpica)', () => {
+    // Passagem real no sentido sul, pontos da rota sugerida da QA (2026-10-20).
+    const southbound = [
+      { latitude: -22.91885, longitude: -43.39671 },
+      { latitude: -22.91910, longitude: -43.39671 },
+      { latitude: -22.91942, longitude: -43.39674 },
+      { latitude: -22.91966, longitude: -43.39677 },
+      { latitude: -22.92005, longitude: -43.39683 },
+    ];
+
+    test('uma passagem no sentido sul conta só a P10b', () => {
+      expect(findCrossedTolls(southbound).map((toll) => toll.id)).toEqual(['p10b_transolimpica']);
+    });
+
+    test('oscilação de poucos metros para o norte não conta a P10a', () => {
+      const jitter = [
+        { latitude: -22.91942, longitude: -43.39674 },
+        { latitude: -22.91938, longitude: -43.39674 },
+      ];
+      expect(findCrossedTolls(jitter)).toEqual([]);
+    });
+
+    test('a cabine gêmea não soma na mesma janela de passagem', () => {
+      const at = 1792481675018;
+      const merged = mergeTollCrossings(
+        [{ id: 'p10b_transolimpica', amount: 8.95, at }],
+        [{ id: 'p10a_transolimpica', amount: 8.95, at: at + 10800 }]
+      );
+      expect(merged.map((crossing) => crossing.id)).toEqual(['p10b_transolimpica']);
+      expect(summarizeTollCrossings({ tollCrossingsTracked: true, tollCrossings: merged }).crossedTollFee).toBe(8.95);
+
+      const laterReturn = mergeTollCrossings(merged, [{ id: 'p10a_transolimpica', amount: 8.95, at: at + 11 * 60 * 1000 }]);
+      expect(laterReturn.map((crossing) => crossing.id)).toEqual(['p10b_transolimpica', 'p10a_transolimpica']);
+    });
+  });
 });
