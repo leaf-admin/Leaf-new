@@ -216,11 +216,27 @@ export function calculateNavigationBearingDegrees(left, right) {
   return normalizeDegrees(toDegrees(Math.atan2(y, x)));
 }
 
+// A rota e os passos chegam no mesmo array a cada posição: normalizar centenas de
+// pontos de novo a cada segundo ocupava boa parte do JS do motorista (perfil da QA,
+// 2026-10-20). O resultado fica guardado pelo array de origem e não é alterado.
+const normalizedStepsCache = new WeakMap();
+const routeGeometryCache = new WeakMap();
+const syntheticStepsCache = new WeakMap();
+
 export function normalizeNavigationSteps(steps = []) {
   if (!Array.isArray(steps)) {
     return [];
   }
+  const cached = normalizedStepsCache.get(steps);
+  if (cached) {
+    return cached;
+  }
+  const normalized = computeNormalizedNavigationSteps(steps);
+  normalizedStepsCache.set(steps, normalized);
+  return normalized;
+}
 
+function computeNormalizedNavigationSteps(steps) {
   return steps
     .map((step) => {
       const startLocation = normalizeNavigationCoordinate(step?.startLocation || step?.start_location);
@@ -736,6 +752,19 @@ function findRouteCoordinateAhead(currentCoordinate, routeCoordinates = [], look
 }
 
 function buildRouteGeometryCoordinates(routeCoordinates = [], steps = []) {
+  if (Array.isArray(routeCoordinates) && routeCoordinates.length >= 2) {
+    const cached = routeGeometryCache.get(routeCoordinates);
+    if (cached) {
+      return cached;
+    }
+    const geometry = computeRouteGeometryCoordinates(routeCoordinates, steps);
+    routeGeometryCache.set(routeCoordinates, geometry);
+    return geometry;
+  }
+  return computeRouteGeometryCoordinates(routeCoordinates, steps);
+}
+
+function computeRouteGeometryCoordinates(routeCoordinates = [], steps = []) {
   const normalizedRouteCoordinates = Array.isArray(routeCoordinates)
     ? routeCoordinates.map(normalizeNavigationCoordinate).filter(Boolean)
     : [];
@@ -919,11 +948,18 @@ export function buildLeafNativeNavigationState({
     normalizedSteps,
   );
   if (normalizedSteps.length === 0 && routeGeometryCoordinates.length >= 2) {
-    normalizedSteps = buildSyntheticNavigationStepsFromRoute(
-      routeGeometryCoordinates,
-      totalDurationMinutes,
-      normalizedPhase,
-    );
+    const cacheKey = `${totalDurationMinutes}|${normalizedPhase}`;
+    const cachedSynthetic = syntheticStepsCache.get(routeGeometryCoordinates);
+    if (cachedSynthetic?.key === cacheKey) {
+      normalizedSteps = cachedSynthetic.steps;
+    } else {
+      normalizedSteps = buildSyntheticNavigationStepsFromRoute(
+        routeGeometryCoordinates,
+        totalDurationMinutes,
+        normalizedPhase,
+      );
+      syntheticStepsCache.set(routeGeometryCoordinates, { key: cacheKey, steps: normalizedSteps });
+    }
   }
   const currentStepIndex = resolveCurrentNavigationStepIndex({
     currentCoordinate: current,
