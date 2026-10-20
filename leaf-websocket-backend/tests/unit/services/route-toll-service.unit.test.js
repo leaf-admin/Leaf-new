@@ -122,4 +122,24 @@ describe('route-toll-service', () => {
       expect(laterReturn.map((crossing) => crossing.id)).toEqual(['p10b_transolimpica', 'p10a_transolimpica']);
     });
   });
+
+  describe('praça de duas cabines (P06/P07 Viúva Graça)', () => {
+    const throughPlaza = [
+      { latitude: -22.74, longitude: -43.49 },
+      { latitude: -22.7525, longitude: -43.5005 },
+      { latitude: -22.765, longitude: -43.51 },
+    ];
+
+    test('a rota estimada cobra uma cabine só', () => {
+      const result = estimateRouteTollsFromCoordinates(throughPlaza, {
+        now: new Date('2026-10-20T12:00:00.000Z'),
+      });
+      expect(result.tolls).toHaveLength(1);
+      expect(result.tollFee).toBe(16.4);
+    });
+
+    test('a travessia real conta uma cabine só', () => {
+      expect(findCrossedTolls(throughPlaza)).toHaveLength(1);
+    });
+  });
 });

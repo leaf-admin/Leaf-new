@@ -17,8 +17,8 @@ const TOLL_PLAZAS = Object.freeze([
   { id: 'p03_rio_bonito', name: 'P03 - Rio Bonito', road: 'BR-101', direction: 'bidirectional', lat: -22.687469, lng: -42.539855, fees: { car: { weekday: 7.1, weekend: 7.1 }, truck: { weekday: 14.2, weekend: 14.2 } } },
   { id: 'p04_sao_goncalo', name: 'P04 - Sao Goncalo', road: 'BR-101', direction: 'north', lat: -22.774713, lng: -42.9455, fees: { car: { weekday: 7.1, weekend: 7.1 }, truck: { weekday: 14.2, weekend: 14.2 } } },
   { id: 'p05_serrinha', name: 'P05 - Serrinha', road: 'BR-101', direction: 'bidirectional', lat: -22.04975, lng: -41.685157, fees: { car: { weekday: 7.1, weekend: 7.1 }, truck: { weekday: 14.2, weekend: 14.2 } } },
-  { id: 'p06_viuva_graca', name: 'P06 - Viuva Graca', road: 'BR-116', direction: 'bidirectional', lat: -22.752, lng: -43.5, fees: { car: { weekday: 16.4, weekend: 16.4 }, truck: { weekday: 32.8, weekend: 32.8 } } },
-  { id: 'p07_viuva_graca_b', name: 'P07 - Viuva Graca B', road: 'BR-116', direction: 'bidirectional', lat: -22.753, lng: -43.501, fees: { car: { weekday: 16.4, weekend: 16.4 }, truck: { weekday: 32.8, weekend: 32.8 } } },
+  { id: 'p06_viuva_graca', name: 'P06 - Viuva Graca', road: 'BR-116', direction: 'bidirectional', twinGroup: 'p06_viuva_graca', lat: -22.752, lng: -43.5, fees: { car: { weekday: 16.4, weekend: 16.4 }, truck: { weekday: 32.8, weekend: 32.8 } } },
+  { id: 'p07_viuva_graca_b', name: 'P07 - Viuva Graca B', road: 'BR-116', direction: 'bidirectional', twinGroup: 'p06_viuva_graca', lat: -22.753, lng: -43.501, fees: { car: { weekday: 16.4, weekend: 16.4 }, truck: { weekday: 32.8, weekend: 32.8 } } },
   { id: 'p08_ponte_rio_niteroi', name: 'P08 - Ponte Rio-Niteroi', road: 'BR-101', direction: 'bidirectional', lat: -22.895, lng: -43.12, fees: { car: { weekday: 6.2, weekend: 6.2 }, truck: { weekday: 12.4, weekend: 12.4 } } },
   { id: 'p09_linha_amarela', name: 'P09 - Linha Amarela', road: 'RJ-065', direction: 'bidirectional', lat: -22.87, lng: -43.3, fees: { car: { weekday: 4, weekend: 4 }, truck: { weekday: 8, weekend: 8 } } },
   { id: 'p11_transoeste', name: 'P11 - Transoeste', road: 'RJ-070', direction: 'bidirectional', lat: -22.89, lng: -43.5, fees: { car: { weekday: 4.7, weekend: 4.7 }, truck: { weekday: 9.4, weekend: 9.4 } } },
@@ -227,6 +227,18 @@ function findRouteTolls(routeCoordinates = [], options = {}) {
   return found;
 }
 
+// Das duas cabines de uma praça, fica a mais próxima do trajeto. P06/P07
+// (Viúva Graça) são cabines da mesma praça a ~150 m, ambas nos dois sentidos:
+// sem isso a rota estimada cobrava as duas (R$ 32,80 em vez de R$ 16,40).
+function keepNearestTwin(tolls = []) {
+  return tolls.filter((toll) => !toll.twinGroup || !tolls.some((other) =>
+    other !== toll && other.twinGroup === toll.twinGroup && (
+      other.distanceKm < toll.distanceKm ||
+      (other.distanceKm === toll.distanceKm && tolls.indexOf(other) < tolls.indexOf(toll))
+    )
+  ));
+}
+
 /**
  * Praças cruzadas por um trecho realmente percorrido (pontos de GPS da
  * corrida, em ordem). Usa a tolerância de travessia e o sentido da praça.
@@ -238,10 +250,7 @@ function findCrossedTolls(pathCoordinates = [], options = {}) {
     minToleranceKm: 0.05,
     toleranceKm: Number(options.toleranceKm) || DEFAULT_CROSSING_TOLERANCE_KM
   });
-  // Das duas cabines de uma praça, fica a mais próxima do trajeto.
-  return crossed.filter((toll) => !toll.twinGroup || !crossed.some((other) =>
-    other !== toll && other.twinGroup === toll.twinGroup && other.distanceKm < toll.distanceKm
-  ));
+  return keepNearestTwin(crossed);
 }
 
 // Mesma praça vista em dois trechos seguidos é uma travessia só; uma nova
@@ -294,7 +303,7 @@ function summarizeTollCrossings(metrics = {}, { startedAtMs = null } = {}) {
 }
 
 function estimateRouteTollsFromCoordinates(routeCoordinates = [], options = {}) {
-  const tolls = findRouteTolls(routeCoordinates, options);
+  const tolls = keepNearestTwin(findRouteTolls(routeCoordinates, options));
   const tollFee = roundMoney(tolls.reduce((sum, toll) => sum + Number(toll.amount || 0), 0));
   return {
     tollFee,
