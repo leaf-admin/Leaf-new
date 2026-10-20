@@ -147,7 +147,22 @@ function buildEtaDistanceLabel(etaMinutes, remainingMeters) {
   return parts.join(' · ');
 }
 
-function buildNotificationDescriptor(session) {
+// "Ana Paula Souza" vira "Ana"; o nome genérico não entra no título.
+function firstName(name) {
+  const first = String(name || '').trim().split(/\s+/)[0] || '';
+  return /^passageir[oa]$/i.test(first) ? '' : first;
+}
+
+// Hora prevista de chegada, no relógio do aparelho: "14:32".
+function formatArrivalClock(etaMinutes, now) {
+  if (!Number.isFinite(Number(etaMinutes)) || Number(etaMinutes) <= 0) return '';
+  const at = new Date(now + Math.round(Number(etaMinutes)) * 60000);
+  return `${String(at.getHours()).padStart(2, '0')}:${String(at.getMinutes()).padStart(2, '0')}`;
+}
+
+const NAVIGATE_ACTION = { identifier: 'open_navigation', buttonTitle: 'Navegar' };
+
+function buildNotificationDescriptor(session, { now = Date.now() } = {}) {
   const target = resolveTarget(session);
   const remainingMeters = Number(session?.remainingMeters);
   const initialMeters = Number(session?.initialMeters);
@@ -159,6 +174,9 @@ function buildNotificationDescriptor(session) {
   const etaMinutes = Number(session?.etaMinutes || 0);
   const fareLabel = String(session?.fareLabel || formatCurrency(session?.fare || 0)).trim();
 
+  const passenger = firstName(session?.passengerName);
+  const arrivalClock = formatArrivalClock(etaMinutes, now);
+
   if (session?.status === 'accepted') {
     const readyToArrive = Boolean(session?.pickupToleranceReached);
     return {
@@ -169,13 +187,19 @@ function buildNotificationDescriptor(session) {
         ? [
             {
               identifier: 'arrived_at_pickup',
-              buttonTitle: 'Cheguei'
+              buttonTitle: 'Cheguei ao embarque'
             }
           ]
-        : [],
+        : [NAVIGATE_ACTION],
       ongoing: {
-        title: readyToArrive ? 'Você chegou ao embarque' : 'A caminho do embarque',
-        subtitle: readyToArrive ? 'Toque em Cheguei' : buildEtaDistanceLabel(etaMinutes, remainingMeters),
+        title: readyToArrive
+          ? 'Você chegou ao embarque'
+          : (passenger ? `Buscar ${passenger}` : 'A caminho do embarque'),
+        subtitle: readyToArrive
+          ? 'Avise o passageiro'
+          : [buildEtaDistanceLabel(etaMinutes, remainingMeters), arrivalClock && `até ${arrivalClock}`]
+            .filter(Boolean)
+            .join(' · '),
         body: `Embarque: ${shortenAddress(target?.address) || 'Local de embarque'}`,
         progress: readyToArrive ? 1 : progressRatio,
         countdownSeconds: !readyToArrive && etaMinutes > 0 ? etaMinutes * 60 : 0
@@ -195,11 +219,11 @@ function buildNotificationDescriptor(session) {
       androidActions: [
         {
           identifier: 'start_trip',
-          buttonTitle: 'Iniciar'
+          buttonTitle: 'Iniciar corrida'
         }
       ],
       ongoing: {
-        title: 'Aguardando passageiro',
+        title: passenger ? `Aguardando ${passenger}` : 'Aguardando passageiro',
         subtitle: 'Tempo de embarque',
         body: `Embarque: ${shortenAddress(target?.address) || 'Local de embarque'}`,
         progress: null,
@@ -214,13 +238,14 @@ function buildNotificationDescriptor(session) {
       body: `ETA ${etaMinutes || '—'} min • ${formatDistance(remainingMeters)} restantes\n${progressBar} ${Math.round(progressRatio * 100)}%\nDestino: ${target?.address || 'Destino'} • ${fareLabel}`,
       categoryId: 'DRIVER_TRIP_ACTIVE',
       androidActions: [
+        NAVIGATE_ACTION,
         {
           identifier: 'end_trip',
           buttonTitle: 'Encerrar'
         }
       ],
       ongoing: {
-        title: 'Em viagem',
+        title: arrivalClock ? `Chegada às ${arrivalClock}` : 'Em viagem',
         subtitle: buildEtaDistanceLabel(etaMinutes, remainingMeters),
         body: `Destino: ${shortenAddress(target?.address) || 'Destino'} · ${fareLabel}`,
         progress: progressRatio,
