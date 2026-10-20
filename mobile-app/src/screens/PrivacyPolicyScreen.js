@@ -96,7 +96,7 @@ const PrivacyPolicyScreen = ({ navigation, route }) => {
         {renderDetailRow({ icon: 'checkmark-circle-outline', title: 'Não vendemos seus dados pessoais' })}
         {renderDetailRow({ icon: 'options-outline', title: 'Você controla suas preferências de privacidade' })}
         {renderDetailRow({ icon: 'lock-closed-outline', title: 'Dados protegidos por controles de segurança' })}
-        {renderDetailRow({ icon: 'document-text-outline', title: 'Fluxos alinhados à LGPD', last: true })}
+        {renderDetailRow({ icon: 'document-text-outline', title: 'Em conformidade com a LGPD', last: true })}
       </PrototypeMenuSection>
 
       <PrototypeMenuSection title="Conta">

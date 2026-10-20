@@ -5,7 +5,7 @@ const COMMON_ITEMS = [
     key: 'achievements',
     status: CURRENT_SURFACE_STATUS.CURRENT,
     title: 'Conquistas',
-    icon: 'person-circle-outline',
+    icon: 'ribbon-outline',
     route: 'LeafAccountInfo',
     openDirect: true,
     section: 'account',
@@ -86,7 +86,7 @@ const PASSENGER_ITEMS = [
     openDirect: true,
     roles: ['customer'],
     section: 'account',
-    subtitle: 'Dados pessoais e preferências'
+    subtitle: 'Seu perfil e contato'
   },
   {
     key: 'trip-history',

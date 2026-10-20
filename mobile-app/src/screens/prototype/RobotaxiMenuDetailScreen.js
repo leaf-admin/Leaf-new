@@ -219,7 +219,7 @@ export default function RobotaxiMenuDetailScreen({ navigation, route }) {
       const profileRows = [
         { key: 'name', label: 'Nome', value: draftName, setter: setDraftName, keyboardType: 'default' },
         { key: 'phone', label: 'Telefone', value: draftPhone, setter: setDraftPhone, keyboardType: 'phone-pad' },
-        { key: 'email', label: 'Email', value: draftEmail, setter: setDraftEmail, keyboardType: 'email-address' },
+        { key: 'email', label: 'E-mail', value: draftEmail, setter: setDraftEmail, keyboardType: 'email-address' },
         { key: 'preference', label: 'Preferência', value: draftPreference, setter: setDraftPreference, keyboardType: 'default' }
       ];
 

@@ -424,7 +424,7 @@ export default function RobotaxiSettingsScreen({ navigation, route }) {
       item: ROBOTAXI_SETTINGS_ITEMS.logout,
       icon: 'log-out-outline',
       title: 'Sair da conta',
-      subtitle: 'Voltar para inserir telefone',
+      subtitle: 'Para entrar de novo, use seu telefone',
       onPress: promptLogout,
       rowTestID: 'robotaxi-settings-row-logout',
       showChevron: true,
@@ -443,7 +443,7 @@ export default function RobotaxiSettingsScreen({ navigation, route }) {
       item: ROBOTAXI_SETTINGS_ITEMS.support,
       icon: 'help-circle-outline',
       title: 'Falar com suporte',
-      subtitle: 'Ajuda sem sair do fluxo atual',
+      subtitle: 'Fale com a equipe Leaf',
       // Push (not replace): replacing removed Settings mid-transition and flashed the home map.
       onPress: () => navigation.navigate('RobotaxiPrototypeSupport'),
       rowTestID: 'robotaxi-settings-open-support',

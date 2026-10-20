@@ -19,6 +19,10 @@ const objects = {
   vehicle: 'car-outline',
   places: 'location-outline',
   invites: 'people-outline',
+  achievements: 'ribbon-outline',
+  language: 'language-outline',
+  lock: 'lock-closed-outline',
+  trash: 'trash-outline',
   notifications: 'notifications-outline',
   logout: 'log-out-outline',
   home: 'home-outline',
@@ -33,11 +37,11 @@ const symbols = {
   'settings-outline': 'settings', 'document-text-outline': 'documents',
   'car-outline': 'vehicle', 'people-outline': 'invites',
   'notifications-outline': 'notifications', 'log-out-outline': 'logout',
-  'trash-outline': 'privacy', 'language-outline': 'settings',
+  'trash-outline': 'trash', 'language-outline': 'language',
   'volume-medium-outline': 'settings',
   'information-circle-outline': 'help', 'server-outline': 'documents',
   'options-outline': 'settings', 'share-social-outline': 'invites',
-  'lock-closed-outline': 'privacy', 'shield-outline': 'privacy',
+  'lock-closed-outline': 'lock', 'shield-outline': 'privacy',
   'card-outline': 'payment', 'business-outline': 'payment',
   'car-sport-outline': 'vehicle', 'refresh-outline': 'documents',
   'download-outline': 'documents', 'mail-outline': 'notifications',
@@ -49,6 +53,7 @@ const symbols = {
   'cloud-upload-outline': 'documents', 'sync-outline': 'documents',
   'id-card-outline': 'documents', 'scan-outline': 'privacy',
   'checkmark-circle-outline': 'help',
+  'ribbon-outline': 'achievements',
 };
 
 export function LeafObjectIcon({ name, symbol, size = 44 }) {
