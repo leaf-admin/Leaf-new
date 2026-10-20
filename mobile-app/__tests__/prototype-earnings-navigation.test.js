@@ -23,7 +23,7 @@ describe('Robotaxi driver earnings navigation', () => {
       /withdrawalsEnabled\s*\?\s*'Disponível para saque'\s*:\s*'Saldo do motorista'/,
     );
     expect(source).toMatch(
-      /\{withdrawalsEnabled\s*\?\s*\(\s*<>\s*<Text style=\{styles\.pixHint\}>PIX cadastrado para recebimento/,
+      /\{withdrawalsEnabled\s*\?\s*\(\s*<>\s*<Text style=\{styles\.pixHint\}>Pix cadastrado para recebimento/,
     );
     expect(source).toContain(
       'Saque e repasse ficam fora do app neste piloto e serão conduzidos pela operação assistida.',

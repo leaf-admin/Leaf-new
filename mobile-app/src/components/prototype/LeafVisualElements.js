@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Image, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import Svg, { Defs, Image as SvgImage, LinearGradient as SvgLinearGradient, Mask, Rect, Stop } from 'react-native-svg';
+import MaskedView from '@react-native-masked-view/masked-view';
 import { LinearGradient } from 'expo-linear-gradient';
 import leafTypography from './LeafTypography';
 import LeafCardMaterial from './LeafCardMaterial';
@@ -77,18 +77,16 @@ export function LeafObjectIcon({ name, symbol, size = 44 }) {
   );
 }
 
+// Máscara de SVG com imagem não aparecia no iOS (o cartão do passageiro ficava sem
+// logo); a MaskedView recorta o gradiente pela imagem nas duas plataformas.
 function LeafBrandMark() {
-  return <Svg width={62} height={32} viewBox="0 0 62 32" accessible={false}>
-    <Defs>
-      <SvgLinearGradient id="leafBrandColor" x1="0" y1="0" x2="1" y2="0">
-        <Stop offset="0" stopColor="#00B410" /><Stop offset="1" stopColor="#75D83B" />
-      </SvgLinearGradient>
-      <Mask id="leafBrandShape" x="0" y="0" width="62" height="32" maskUnits="userSpaceOnUse">
-        <SvgImage href={require('../../../assets/leaf-ui/leafBrandTransparent.png')} x={-10} y={-25} width={82} height={82} />
-      </Mask>
-    </Defs>
-    <Rect width={62} height={32} fill="url(#leafBrandColor)" mask="url(#leafBrandShape)" />
-  </Svg>;
+  return <MaskedView
+    style={styles.brandMark}
+    accessible={false}
+    maskElement={<Image source={require('../../../assets/leaf-ui/leafBrandTransparent.png')} style={styles.brandMarkImage} />}
+  >
+    <LinearGradient colors={['#00B410', '#75D83B']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={StyleSheet.absoluteFill} />
+  </MaskedView>;
 }
 
 // Time since account creation ("4 meses", "1 ano", "Novo"); "—" when unknown.
@@ -150,6 +148,8 @@ const styles = StyleSheet.create({
   card: { borderRadius: 24, padding: 22, borderWidth: 1, borderColor: 'rgba(255,255,255,0.8)', overflow: 'hidden' },
   cardTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 },
   brand: { width: 62, height: 32, overflow: 'hidden', alignItems: 'center', justifyContent: 'center' },
+  brandMark: { width: 62, height: 32 },
+  brandMarkImage: { position: 'absolute', left: -10, top: -25, width: 82, height: 82 },
   role: { ...leafTypography.regular, fontSize: 14, lineHeight: 20, color: '#6A6A6A', marginTop: 5 },
   identity: { flexDirection: 'row', alignItems: 'center', gap: 16 },
   initial: { width: 62, height: 62, borderRadius: 31, backgroundColor: 'rgba(255,255,255,0.65)', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: 'rgba(255,255,255,0.8)' },
