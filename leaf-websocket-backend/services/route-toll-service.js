@@ -31,8 +31,8 @@ const TOLL_PLAZAS = Object.freeze([
   { id: 'p18_sapucaia', name: 'P18 - Sapucaia', road: 'RJ-116', direction: 'bidirectional', lat: -21.994, lng: -42.914, fees: { car: { weekday: 6.5, weekend: 6.5 }, truck: { weekday: 13, weekend: 13 } } },
   { id: 'p19_paraiba_do_sul', name: 'P19 - Paraiba do Sul', road: 'RJ-116', direction: 'bidirectional', lat: -22.158, lng: -43.29, fees: { car: { weekday: 6.5, weekend: 6.5 }, truck: { weekday: 13, weekend: 13 } } },
   { id: 'p20_barra_do_pirai', name: 'P20 - Barra do Pirai', road: 'RJ-116', direction: 'bidirectional', lat: -22.471, lng: -43.826, fees: { car: { weekday: 6.5, weekend: 6.5 }, truck: { weekday: 13, weekend: 13 } } },
-  { id: 'p10a_transolimpica', name: 'P10a - Transolimpica', road: 'RJ-066', direction: 'north', twinGroup: 'p10_transolimpica', lat: -22.9194989223804, lng: -43.3962833, fees: { car: { weekday: 8.95, weekend: 8.95 }, truck: { weekday: 17.9, weekend: 17.9 } } },
-  { id: 'p10b_transolimpica', name: 'P10b - Transolimpica', road: 'RJ-066', direction: 'south', twinGroup: 'p10_transolimpica', lat: -22.9193061842793, lng: -43.3967711, fees: { car: { weekday: 8.95, weekend: 8.95 }, truck: { weekday: 17.9, weekend: 17.9 } } }
+  { id: 'p10a_transolimpica', name: 'P10a - Transolimpica', road: 'RJ-066', direction: 'north', twinGroup: 'p10_transolimpica', lat: -22.9194989223804, lng: -43.3962833, fees: { car: { weekday: 9.95, weekend: 9.95 }, truck: { weekday: 19.9, weekend: 19.9 } } },
+  { id: 'p10b_transolimpica', name: 'P10b - Transolimpica', road: 'RJ-066', direction: 'south', twinGroup: 'p10_transolimpica', lat: -22.9193061842793, lng: -43.3967711, fees: { car: { weekday: 9.95, weekend: 9.95 }, truck: { weekday: 19.9, weekend: 19.9 } } }
 ]);
 
 function toRad(value) {
