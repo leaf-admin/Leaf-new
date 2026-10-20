@@ -1,5 +1,6 @@
 const { metrics } = require('../utils/prometheus-metrics');
 const { notifyPassengerRideStatus } = require('../services/ride-passenger-status-push');
+const { isDriverSelfActionPushEnabled } = require('../utils/ride-lifecycle-feature-flags');
 const pricingH3ReadModelService = require('../services/pricing-h3-read-model-service');
 const {
     collectPaymentReferences,
@@ -614,7 +615,9 @@ function registerSocketStartTripHandler({
                     const destinationAddress = destinationLocation?.address || destinationLocation?.add || 'destino';
 
                     // Buscar FCM token do motorista
-                    const driverFcmToken = await redis.hget(`driver:${driverId}`, 'fcmToken');
+                    const driverFcmToken = isDriverSelfActionPushEnabled()
+                        ? await redis.hget(`driver:${driverId}`, 'fcmToken')
+                        : null;
 
                     if (driverFcmToken && destinationAddress) {
                         // Usar singleton
