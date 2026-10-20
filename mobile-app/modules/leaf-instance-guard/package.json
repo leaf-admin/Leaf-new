@@ -1,0 +1,6 @@
+{
+  "name": "leaf-instance-guard",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Reports React instance exceptions that Expo swallows in release (Android)."
+}
