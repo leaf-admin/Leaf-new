@@ -11,6 +11,7 @@ const dailyEarningsReportService = require('../services/daily-earnings-report-se
 const backofficeCommandCenterService = require('../services/backoffice-command-center-service');
 const backofficeCostGuardService = require('../services/backoffice-cost-guard-service');
 const externalInsightsService = require('../services/external-insights-service');
+const pilotKpiService = require('../services/pilot-kpi-service');
 const { logError } = require('../utils/logger');
 
 const router = express.Router();
@@ -117,6 +118,26 @@ router.get('/external-insights', async (req, res) => {
   } catch (error) {
     logError(error, { service: 'ops-routes', operation: 'external-insights' });
     res.status(500).json({ success: false, error: 'Erro ao buscar dados externos' });
+  }
+});
+
+// KPIs do piloto (corridas por motorista, ticket, espera, retenção, Pix), só agregados
+// e em cache. days aceita 1, 7 ou 30; só quem pode mutar ignora o cache.
+router.get('/pilot-kpis', async (req, res) => {
+  try {
+    const days = Number.parseInt(req.query?.days, 10);
+    if (req.query?.days !== undefined && !pilotKpiService.ALLOWED_DAYS.includes(days)) {
+      return res.status(400).json({ success: false, error: 'days deve ser 1, 7 ou 30' });
+    }
+    const snapshot = await pilotKpiService.getSnapshot({
+      days: Number.isFinite(days) ? days : 1,
+      forceRefresh: req.query?.forceRefresh === 'true' && userCanBypassCommandCenterCache(req.user)
+    });
+    res.set('X-Leaf-Pilot-Kpis-Cache', snapshot.cache || 'UNKNOWN');
+    return res.json({ success: true, ...snapshot });
+  } catch (error) {
+    logError(error, { service: 'ops-routes', operation: 'pilot-kpis' });
+    return res.status(500).json({ success: false, error: 'Erro ao calcular os KPIs do piloto' });
   }
 });
 
