@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Reanimated, {
@@ -42,6 +42,15 @@ export default function LeafSlideToConfirm({
   // question, or it fails) the knob returns, so the control is usable again
   // instead of staying parked at the end of the track. onConfirm resolving
   // `true` means it went through.
+  // The caller's handler changes on every render during a trip (it reads the
+  // live distance). Read it through a ref so the gesture below is not rebuilt
+  // mid-drag: a rebuilt gesture is cancelled, which left the knob parked at the
+  // end with nothing sent, or not following the finger at all (device QA).
+  const onConfirmRef = useRef(onConfirm);
+  useEffect(() => {
+    onConfirmRef.current = onConfirm;
+  }, [onConfirm]);
+
   const confirm = useCallback(() => {
     if (locked) {
       return;
@@ -50,7 +59,7 @@ export default function LeafSlideToConfirm({
       offset.value = withSpring(0, RELEASE_SPRING);
     };
     Promise.resolve()
-      .then(() => onConfirm?.())
+      .then(() => onConfirmRef.current?.())
       .then((outcome) => {
         if (outcome === true) {
           setHeld(true);
@@ -58,21 +67,32 @@ export default function LeafSlideToConfirm({
         }
         release();
       }, release);
-  }, [locked, offset, onConfirm]);
+  }, [locked, offset]);
 
-  const pan = Gesture.Pan()
-    .enabled(!locked && maxOffset > 0)
-    .onUpdate((event) => {
-      offset.value = Math.min(maxOffset, Math.max(0, event.translationX));
-    })
-    .onEnd(() => {
-      if (offset.value >= maxOffset * CONFIRM_RATIO) {
-        offset.value = withTiming(maxOffset, { duration: 120 });
-        runOnJS(confirm)();
-      } else {
-        offset.value = withSpring(0, RELEASE_SPRING);
-      }
-    });
+  const pan = useMemo(
+    () =>
+      Gesture.Pan()
+        .enabled(!locked && maxOffset > 0)
+        .activeOffsetX(8)
+        .onUpdate((event) => {
+          offset.value = Math.min(maxOffset, Math.max(0, event.translationX));
+        })
+        .onEnd(() => {
+          if (offset.value >= maxOffset * CONFIRM_RATIO) {
+            offset.value = withTiming(maxOffset, { duration: 120 });
+            runOnJS(confirm)();
+          } else {
+            offset.value = withSpring(0, RELEASE_SPRING);
+          }
+        })
+        .onFinalize((_event, success) => {
+          // Cancelled by the system (a notification, another touch): back to the start.
+          if (!success) {
+            offset.value = withSpring(0, RELEASE_SPRING);
+          }
+        }),
+    [confirm, locked, maxOffset, offset],
+  );
 
   const knobStyle = useAnimatedStyle(() => ({
     transform: [{ translateX: offset.value }],

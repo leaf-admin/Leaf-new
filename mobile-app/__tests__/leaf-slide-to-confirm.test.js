@@ -48,4 +48,22 @@ describe('LeafSlideToConfirm', () => {
     await activate(screen);
     expect(screen.getByText('Deslize para encerrar')).toBeTruthy();
   });
+
+  it('calls the latest handler when the parent re-renders mid-trip', async () => {
+    const first = jest.fn(() => Promise.resolve(undefined));
+    const latest = jest.fn(() => Promise.resolve(true));
+    const screen = render(
+      <LeafSlideToConfirm testID="slide" label="Deslize para encerrar" busyLabel="Encerrando..." onConfirm={first} />
+    );
+    // A location update re-renders the overlay with a new handler.
+    screen.rerender(
+      <LeafSlideToConfirm testID="slide" label="Deslize para encerrar" busyLabel="Encerrando..." onConfirm={latest} />
+    );
+
+    await activate(screen);
+
+    expect(first).not.toHaveBeenCalled();
+    expect(latest).toHaveBeenCalledTimes(1);
+    expect(screen.getByText('Encerrando...')).toBeTruthy();
+  });
 });
