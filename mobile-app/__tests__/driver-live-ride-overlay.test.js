@@ -68,6 +68,31 @@ describe("DriverLiveRideOverlay", () => {
     expect(screen.queryByText("Local combinado")).toBeNull();
   });
 
+  it("tells the driver how much toll the offer already includes", () => {
+    const offer = {
+      bookingId: "booking_offer_toll",
+      passenger: "Passageira Leaf",
+      pickup: "R. das Pastorinhas, 4",
+      dropoff: "Via Parque Shopping",
+      estimatedDriverNetAmount: 46.22,
+      payout: "R$ 46,22",
+      estimatedTripDistanceKm: 16.6,
+      estimatedTripDurationMin: 23,
+      eta: "1 min",
+    };
+    const renderOffer = (extra) => render(
+      <DriverLiveRideOverlay
+        driverOffers={[{ ...offer, ...extra }]}
+        paymentMethod="pix"
+        acceptDriverOffer={jest.fn()}
+        rejectDriverOffer={jest.fn()}
+      />,
+    );
+
+    expect(renderOffer({ tollFee: 8.95 }).getByText("Inclui R$ 8,95 de pedágio")).toBeTruthy();
+    expect(renderOffer({ tollFee: 0 }).queryByTestId("driver-live-offer-toll")).toBeNull();
+  });
+
   it("renders the authoritative offer countdown and blocks expired actions", () => {
     const acceptDriverOffer = jest.fn();
     const rejectDriverOffer = jest.fn();
