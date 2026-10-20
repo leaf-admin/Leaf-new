@@ -124,6 +124,12 @@ class RideOverlayController {
     isRideOverlayEnabled().then((enabled) => { this.enabled = enabled; });
     this.subscription = AppState.addEventListener('change', (next) => {
       this.appState = next;
+      if (next === 'active') {
+        // De volta ao Leaf: o balão sai sempre, mesmo que uma atualização em segundo
+        // plano ainda estivesse sendo desenhada.
+        this.hideOverlay();
+        return;
+      }
       this.render().catch(() => {});
     });
   }
@@ -143,6 +149,10 @@ class RideOverlayController {
     try {
       if (this.appState !== 'active' && this.enabled) {
         this.overlayShown = Boolean(await native.showOverlay(this.state));
+        // O app pode ter voltado para a frente enquanto o balão era desenhado.
+        if (this.appState === 'active') {
+          await this.hideOverlay();
+        }
       } else if (this.overlayShown) {
         await this.hideOverlay();
       }

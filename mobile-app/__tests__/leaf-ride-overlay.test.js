@@ -82,4 +82,18 @@ describe('ride overlay over the navigation app (Android)', () => {
     await controller.update({ bookingId: 'b1', title: 'Buscar Ana' });
     expect(native.showOverlay).not.toHaveBeenCalled();
   });
+
+  it('hides the bubble when Leaf comes back while a background update was drawing it', async () => {
+    const controller = overlay.default;
+    controller.appState = 'background';
+    let finishShow;
+    native.showOverlay.mockImplementationOnce(() => new Promise((resolve) => { finishShow = resolve; }));
+    const pending = controller.update({ bookingId: 'b1', title: 'Buscar Ana' });
+    await new Promise((resolve) => setImmediate(resolve));
+    changeListener('active');
+    finishShow(true);
+    await pending;
+    expect(native.hideOverlay).toHaveBeenCalled();
+    expect(controller.overlayShown).toBe(false);
+  });
 });
