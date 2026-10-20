@@ -88,4 +88,22 @@ describe('driver navigation preference', () => {
       Platform.OS = original;
     }
   });
+
+  it('sends both legs to Google Maps on the way to pickup, and one leg to Waze', async () => {
+    const destination = { latitude: -22.98953, longitude: -43.36513 };
+    await setPreferredNavigationApp('google_maps');
+    await openPreferredDriverNavigation({ coordinate: pickup, phase: 'pickup', finalDestinationCoordinate: destination });
+    expect(Linking.openURL).toHaveBeenLastCalledWith(
+      'https://www.google.com/maps/dir/?api=1&destination=-22.98953,-43.36513&waypoints=-22.9208,-43.406&travelmode=driving&dir_action=navigate'
+    );
+
+    await openPreferredDriverNavigation({ coordinate: destination, phase: 'destination', finalDestinationCoordinate: destination });
+    expect(Linking.openURL).toHaveBeenLastCalledWith(
+      'https://www.google.com/maps/dir/?api=1&destination=-22.98953,-43.36513&travelmode=driving&dir_action=navigate'
+    );
+
+    await setPreferredNavigationApp('waze');
+    await openPreferredDriverNavigation({ coordinate: pickup, phase: 'pickup', finalDestinationCoordinate: destination });
+    expect(Linking.openURL).toHaveBeenLastCalledWith('https://waze.com/ul?ll=-22.9208,-43.406&navigate=yes');
+  });
 });

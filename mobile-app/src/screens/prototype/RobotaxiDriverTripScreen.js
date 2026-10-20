@@ -1842,6 +1842,7 @@ export default function RobotaxiDriverTripScreen({ navigation, route }) {
         coordinate: navigationTargetCoordinate,
         destinationLabel: navigationTargetLabel,
         phase: navigationPhase,
+        finalDestinationCoordinate: dropoffCoordinate,
       });
     } catch (error) {
       Alert.alert(
@@ -1850,6 +1851,7 @@ export default function RobotaxiDriverTripScreen({ navigation, route }) {
       );
     }
   }, [
+    dropoffCoordinate,
     hasActiveRide,
     navigationPhase,
     navigationTargetCoordinate,

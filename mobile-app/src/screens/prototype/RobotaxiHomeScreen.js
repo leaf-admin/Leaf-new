@@ -8734,7 +8734,8 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
           driverTripAssist.navigationPhase === 'pickup'
             ? driverTripAssist.pickupAddress
             : driverTripAssist.destinationAddress,
-        phase: driverTripAssist.navigationPhase
+        phase: driverTripAssist.navigationPhase,
+        finalDestinationCoordinate: driverTripAssist.destinationCoordinate,
       });
     } catch (error) {
       Alert.alert('Não foi possível abrir a navegação', error?.message || 'Tente novamente.');

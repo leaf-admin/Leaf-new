@@ -79,13 +79,36 @@ export async function choosePreferredNavigationApp({ allowAskEveryTime = false }
 }
 
 // Abre a rota no app preferido. Sem preferência, pergunta uma vez e guarda.
-export async function openPreferredDriverNavigation({ coordinate, destinationLabel = '', phase = 'pickup' }) {
+// A caminho do embarque, o Google Maps recebe as duas pernas de uma vez
+// (embarque como parada, destino no fim); Waze e Mapas da Apple só aceitam um
+// destino por link, então recebem o embarque e, ao iniciar, o destino.
+export async function openPreferredDriverNavigation({
+  coordinate,
+  destinationLabel = '',
+  phase = 'pickup',
+  finalDestinationCoordinate = null,
+}) {
   let app = await getPreferredNavigationApp();
   if (!app) {
     app = await choosePreferredNavigationApp();
     if (!app) return null;
   }
-  return openDriverExternalNavigation({ coordinate, destinationLabel, phase, app });
+  const bothLegs = app === 'google_maps' && phase === 'pickup' && hasCoordinate(finalDestinationCoordinate);
+  return openDriverExternalNavigation({
+    coordinate: bothLegs ? finalDestinationCoordinate : coordinate,
+    stopover: bothLegs ? coordinate : null,
+    destinationLabel,
+    phase,
+    app,
+  });
+}
+
+function hasCoordinate(value) {
+  return Boolean(
+    value
+      && Number.isFinite(Number(value.latitude ?? value.lat))
+      && Number.isFinite(Number(value.longitude ?? value.lng))
+  );
 }
 
 // Abertura automática: uma vez por corrida e fase (embarque, destino), também

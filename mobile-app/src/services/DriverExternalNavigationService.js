@@ -70,7 +70,10 @@ export async function openDriverExternalNavigation({
   phase = 'pickup',
   // App escolhido pelo motorista (waze, google_maps, apple_maps): abre direto,
   // sem o menu de escolha.
-  app = null
+  app = null,
+  // Parada antes do destino (o embarque). Só o Google Maps aceita parada no
+  // link; Waze e Mapas da Apple recebem um destino só.
+  stopover = null
 }) {
   if (!isCoordinateValid(coordinate)) {
     throw new Error('Destino de navegação indisponível.');
@@ -80,7 +83,10 @@ export async function openDriverExternalNavigation({
   const googleAppUrl = `comgooglemaps://?daddr=${latitude},${longitude}&directionsmode=driving`;
   // Link universal do Google: abre o app instalado já na navegação de carro.
   // "directionsmode" só vale no app de iOS; no Android o Maps abria "A pé".
-  const googleWebUrl = `https://www.google.com/maps/dir/?api=1&destination=${latitude},${longitude}&travelmode=driving&dir_action=navigate`;
+  const stop = isCoordinateValid(stopover) ? normalizeCoordinate(stopover) : null;
+  const googleWebUrl = `https://www.google.com/maps/dir/?api=1&destination=${latitude},${longitude}`
+    + (stop ? `&waypoints=${stop.latitude},${stop.longitude}` : '')
+    + '&travelmode=driving&dir_action=navigate';
   const wazeAppUrl = `waze://?ll=${latitude},${longitude}&navigate=yes`;
   const wazeWebUrl = `https://waze.com/ul?ll=${latitude},${longitude}&navigate=yes`;
   const appleMapsUrl = `http://maps.apple.com/?daddr=${latitude},${longitude}&dirflg=d`;
