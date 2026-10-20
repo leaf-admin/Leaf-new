@@ -52,6 +52,7 @@ const HOME_PROMO_CARD_HEIGHT = Math.ceil(188 * ACCESSIBILITY_FONT_SCALE);
 // Sized for the type scale (17 pt rows) plus the floating card's bottom padding.
 const HOME_CATEGORY_CARD_HEIGHT = Math.ceil(346 * ACCESSIBILITY_FONT_SCALE);
 const HOME_CATEGORY_BREAKDOWN_CARD_HEIGHT = Math.ceil(478 * ACCESSIBILITY_FONT_SCALE);
+const HOME_CATEGORY_CARD_PADDING_BOTTOM = 20;
 const HOME_SEARCH_DROPDOWN_MIN_HEIGHT = Math.ceil(72 * ACCESSIBILITY_FONT_SCALE);
 const HOME_SEARCH_DROPDOWN_MAX_HEIGHT = Math.ceil(168 * ACCESSIBILITY_FONT_SCALE);
 const HOME_SEARCH_DROPDOWN_ROW_HEIGHT = Math.ceil(56 * ACCESSIBILITY_FONT_SCALE);
@@ -750,11 +751,19 @@ function PassengerHomeOverlay({
   );
   // Room for the "fare above normal" line when it is shown.
   const categoryFareReasonHeight =
-    shouldShowCategoryCard && !fareBreakdownVisible && selectedFareSignal.aboveNormal ? 38 : 0;
-  const categoryCardHeight =
+    shouldShowCategoryCard && !fareBreakdownVisible && selectedFareSignal.aboveNormal && selectedFareSignal.reasonText ? 38 : 0;
+  // A altura fixa não acompanhava o conteúdo (a nota do Pix tem duas linhas e a
+  // fonte pode estar ampliada): o botão de confirmar saía do card. O card usa o
+  // maior entre a altura prevista e a medida.
+  const [categoryContentHeight, setCategoryContentHeight] = React.useState(0);
+  const categoryCardHeight = Math.max(
     (shouldShowCategoryCard && fareBreakdownVisible
       ? HOME_CATEGORY_BREAKDOWN_CARD_HEIGHT
-      : HOME_CATEGORY_CARD_HEIGHT) + categoryFareReasonHeight;
+      : HOME_CATEGORY_CARD_HEIGHT) + categoryFareReasonHeight,
+    shouldShowCategoryCard && categoryContentHeight > 0
+      ? categoryContentHeight + HOME_CATEGORY_CARD_PADDING_BOTTOM
+      : 0,
+  );
   const searchDropdownHeight = shouldShowSearchDropdown
     ? Math.min(
         HOME_SEARCH_DROPDOWN_MAX_HEIGHT,
@@ -1319,12 +1328,19 @@ function PassengerHomeOverlay({
             styles.categoryCard,
             styles.categoryCardConnected,
             styles.promoCardInStack,
-            { height: categoryCardHeight, paddingBottom: 20 },
+            { height: categoryCardHeight, paddingBottom: HOME_CATEGORY_CARD_PADDING_BOTTOM },
           ]}
           testID="passenger-home-category-card"
           accessible
           accessibilityLabel="Escolha a categoria da corrida"
         >
+          <View
+            testID="passenger-home-category-card-content"
+            onLayout={(event) => {
+              const measured = Math.ceil(event?.nativeEvent?.layout?.height || 0);
+              setCategoryContentHeight((current) => (Math.abs(current - measured) > 1 ? measured : current));
+            }}
+          >
           {pickupQaCoordinateLabel ? (
             <Text
               style={styles.hiddenPickupAddress}
@@ -1368,8 +1384,9 @@ function PassengerHomeOverlay({
                     <Text style={styles.leafCategoryDetail} numberOfLines={1}>{formatCategoryArrivalFootnote(category)}</Text></View>
                 </TouchableOpacity>;
               })}
-              {/* Why the selected fare is above normal, when it is (10% or more). */}
-              {selectedFareSignal.aboveNormal ? (
+              {/* Why the selected fare is above normal. The row chips already show the
+                  percentage, so the line only appears when there is a reason to tell. */}
+              {selectedFareSignal.aboveNormal && selectedFareSignal.reasonText ? (
                 <Text style={[styles.leafCategoryFareReason, { color: selectedFareSignal.tone.text }]} numberOfLines={2} testID="passenger-home-fare-signal-reason">
                   Tarifa {selectedFareSignal.percent}% acima do normal{selectedFareSignal.reasonText ? `: ${selectedFareSignal.reasonText}` : ''}.
                 </Text>
@@ -1492,6 +1509,7 @@ function PassengerHomeOverlay({
               </View>
             </TouchableOpacity>
           </Modal>
+          </View>
         </View>
 	      ) : showCampaignCard ? (
 	        <LeafCampaignCarousel
@@ -1654,8 +1672,11 @@ const styles = StyleSheet.create({
     // map labels through the top half and a seam where the panels meet.
     backgroundColor: CARD_SURFACE,
     paddingTop: 12,
+    // Upward only: this card sits above the category panel, and a downward
+    // shadow drew a grey band across the top of the category list.
+    shadowOffset: { width: 0, height: -6 },
     shadowOpacity: 0.08,
-    shadowRadius: 18,
+    shadowRadius: 12,
   },
   promoCard: {
     position: "absolute",

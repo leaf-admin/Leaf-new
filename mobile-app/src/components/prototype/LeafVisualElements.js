@@ -1,10 +1,12 @@
 import React, { useState } from 'react';
-import { Image, StyleSheet, Text, View } from 'react-native';
+import { Image, Platform, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import MaskedView from '@react-native-masked-view/masked-view';
 import Svg, { Defs, Image as SvgImage, LinearGradient as SvgLinearGradient, Mask, Rect, Stop } from 'react-native-svg';
 import { LinearGradient } from 'expo-linear-gradient';
 import leafTypography from './LeafTypography';
-import LeafCardMaterial from './LeafCardMaterial';
+import LeafCardMaterial, { useLeafCardTilt } from './LeafCardMaterial';
+import Animated, { useAnimatedStyle } from 'react-native-reanimated';
 
 // Ícones de traço no lugar dos objetos 3D (decisão de 2026-10-14: o 3D não combina
 // com o app). Mesmos nomes de antes, então os 28 usos mudam juntos.
@@ -19,6 +21,15 @@ const objects = {
   vehicle: 'car-outline',
   places: 'location-outline',
   invites: 'people-outline',
+  achievements: 'ribbon-outline',
+  language: 'language-outline',
+  lock: 'lock-closed-outline',
+  trash: 'trash-outline',
+  map: 'map-outline',
+  navigate: 'navigate-outline',
+  voice: 'volume-medium-outline',
+  layers: 'layers-outline',
+  analytics: 'analytics-outline',
   notifications: 'notifications-outline',
   logout: 'log-out-outline',
   home: 'home-outline',
@@ -33,22 +44,25 @@ const symbols = {
   'settings-outline': 'settings', 'document-text-outline': 'documents',
   'car-outline': 'vehicle', 'people-outline': 'invites',
   'notifications-outline': 'notifications', 'log-out-outline': 'logout',
-  'trash-outline': 'privacy', 'language-outline': 'settings',
-  'volume-medium-outline': 'settings',
+  'trash-outline': 'trash', 'language-outline': 'language',
+  'volume-medium-outline': 'voice',
   'information-circle-outline': 'help', 'server-outline': 'documents',
   'options-outline': 'settings', 'share-social-outline': 'invites',
-  'lock-closed-outline': 'privacy', 'shield-outline': 'privacy',
+  'lock-closed-outline': 'lock', 'shield-outline': 'privacy',
   'card-outline': 'payment', 'business-outline': 'payment',
   'car-sport-outline': 'vehicle', 'refresh-outline': 'documents',
   'download-outline': 'documents', 'mail-outline': 'notifications',
   'location-outline': 'places',
-  'receipt-outline': 'activity', 'map-outline': 'activity',
+  'receipt-outline': 'activity', 'map-outline': 'map',
   'chatbubble-ellipses-outline': 'help', 'clipboard-outline': 'documents',
-  'analytics-outline': 'activity', 'calendar-outline': 'activity',
+  'analytics-outline': 'analytics', 'calendar-outline': 'activity',
   'cloud-offline-outline': 'help', 'leaf-outline': 'account',
   'cloud-upload-outline': 'documents', 'sync-outline': 'documents',
   'id-card-outline': 'documents', 'scan-outline': 'privacy',
   'checkmark-circle-outline': 'help',
+  'ribbon-outline': 'achievements',
+  'navigate-outline': 'navigate',
+  'layers-outline': 'layers',
 };
 
 export function LeafObjectIcon({ name, symbol, size = 44 }) {
@@ -77,18 +91,32 @@ export function LeafObjectIcon({ name, symbol, size = 44 }) {
   );
 }
 
+const LEAF_BRAND_IMAGE = require('../../../assets/leaf-ui/leafBrandTransparent.png');
+
+// Cada plataforma com a técnica que ela desenha: no iOS a máscara de SVG com imagem
+// não aparecia (o cartão do passageiro ficava sem logo); no Android a MaskedView some
+// dentro do cartão inclinado em 3D.
 function LeafBrandMark() {
-  return <Svg width={62} height={32} viewBox="0 0 62 32" accessible={false}>
-    <Defs>
-      <SvgLinearGradient id="leafBrandColor" x1="0" y1="0" x2="1" y2="0">
-        <Stop offset="0" stopColor="#00B410" /><Stop offset="1" stopColor="#75D83B" />
-      </SvgLinearGradient>
-      <Mask id="leafBrandShape" x="0" y="0" width="62" height="32" maskUnits="userSpaceOnUse">
-        <SvgImage href={require('../../../assets/leaf-ui/leafBrandTransparent.png')} x={-10} y={-25} width={82} height={82} />
-      </Mask>
-    </Defs>
-    <Rect width={62} height={32} fill="url(#leafBrandColor)" mask="url(#leafBrandShape)" />
-  </Svg>;
+  if (Platform.OS === 'android') {
+    return <Svg width={62} height={32} viewBox="0 0 62 32" accessible={false}>
+      <Defs>
+        <SvgLinearGradient id="leafBrandColor" x1="0" y1="0" x2="1" y2="0">
+          <Stop offset="0" stopColor="#00B410" /><Stop offset="1" stopColor="#75D83B" />
+        </SvgLinearGradient>
+        <Mask id="leafBrandShape" x="0" y="0" width="62" height="32" maskUnits="userSpaceOnUse">
+          <SvgImage href={LEAF_BRAND_IMAGE} x={-10} y={-25} width={82} height={82} />
+        </Mask>
+      </Defs>
+      <Rect width={62} height={32} fill="url(#leafBrandColor)" mask="url(#leafBrandShape)" />
+    </Svg>;
+  }
+  return <MaskedView
+    style={styles.brandMark}
+    accessible={false}
+    maskElement={<Image source={LEAF_BRAND_IMAGE} style={styles.brandMarkImage} />}
+  >
+    <LinearGradient colors={['#00B410', '#75D83B']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={StyleSheet.absoluteFill} />
+  </MaskedView>;
 }
 
 // Time since account creation ("4 meses", "1 ano", "Novo"); "—" when unknown.
@@ -110,10 +138,23 @@ export function LeafAccountCard({ name, role, profile = {}, detail, onLayout, mo
   const trips = rawTrips !== null && rawTrips !== undefined && Number.isFinite(Number(rawTrips)) && Number(rawTrips) >= 0 ? Math.floor(Number(rawTrips)) : null;
   const membership = formatLeafMembership(profile.createdAt);
   const initials = String(name || 'L').trim().split(/\s+/).filter(Boolean).slice(0, 2).map(part => part.charAt(0)).join('').toUpperCase();
+  const { tilt, sensor } = useLeafCardTilt(motionEnabled);
+  // O cartão inclina de leve com o celular e a sombra corre para o lado oposto,
+  // como um cartão de verdade erguido sobre a tela.
+  const liftStyle = useAnimatedStyle(() => ({
+    shadowOffset: { width: -tilt.value.x * 10, height: 16 - tilt.value.y * 6 },
+    transform: [
+      { perspective: 900 },
+      { rotateY: `${tilt.value.x * 7}deg` },
+      { rotateX: `${-tilt.value.y * 6}deg` },
+      { translateX: tilt.value.x * 3 },
+    ],
+  }));
   return (
-    <View style={styles.cardShadow}>
+    <Animated.View style={[styles.cardShadow, liftStyle]}>
+    {sensor}
     <View onLayout={event => { setSize(event.nativeEvent.layout); onLayout?.(event); }} style={styles.card}>
-      <LeafCardMaterial width={size.width} height={size.height} motionEnabled={motionEnabled} />
+      <LeafCardMaterial width={size.width} height={size.height} tilt={tilt} />
       <View style={styles.cardTop}>
         <Text style={styles.detail}>Seu perfil Leaf</Text>
         <View style={styles.brand}><LeafBrandMark /></View>
@@ -133,7 +174,7 @@ export function LeafAccountCard({ name, role, profile = {}, detail, onLayout, mo
           </View>)}
       </View>
     </View>
-    </View>
+    </Animated.View>
   );
 }
 
@@ -146,10 +187,12 @@ const styles = StyleSheet.create({
   },
   lineIconStack: { alignItems: 'center', justifyContent: 'center' },
   lineIconFill: { position: 'absolute' },
-  cardShadow: { borderRadius: 24, backgroundColor: '#F5F5F5', shadowColor: '#000000', shadowOffset: { width: 0, height: 9 }, shadowRadius: 20, shadowOpacity: 0.1, elevation: 4 },
+  cardShadow: { borderRadius: 24, backgroundColor: '#F5F5F5', shadowColor: '#0B1A06', shadowOffset: { width: 0, height: 16 }, shadowRadius: 26, shadowOpacity: 0.22, elevation: 14 },
   card: { borderRadius: 24, padding: 22, borderWidth: 1, borderColor: 'rgba(255,255,255,0.8)', overflow: 'hidden' },
   cardTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 },
   brand: { width: 62, height: 32, overflow: 'hidden', alignItems: 'center', justifyContent: 'center' },
+  brandMark: { width: 62, height: 32 },
+  brandMarkImage: { position: 'absolute', left: -10, top: -25, width: 82, height: 82 },
   role: { ...leafTypography.regular, fontSize: 14, lineHeight: 20, color: '#6A6A6A', marginTop: 5 },
   identity: { flexDirection: 'row', alignItems: 'center', gap: 16 },
   initial: { width: 62, height: 62, borderRadius: 31, backgroundColor: 'rgba(255,255,255,0.65)', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: 'rgba(255,255,255,0.8)' },

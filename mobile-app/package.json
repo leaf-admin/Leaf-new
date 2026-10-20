@@ -17,7 +17,7 @@
     }
   },
   "scripts": {
-    "postinstall": "node scripts/fix-react-native-maps-ios-modules.js",
+    "postinstall": "node scripts/fix-react-native-maps-ios-modules.js && node scripts/fix-expo-task-manager-pending-job-data.js",
     "eas-build-post-install": "bash scripts/eas-build-post-install.sh",
     "start": "node ../node_modules/expo/bin/cli start",
     "android": "node ../node_modules/expo/bin/cli run:android",

@@ -31,9 +31,9 @@ export default function LeafAccountInfoScreen({ navigation, route }) {
     </View>
     <ScrollView contentContainerStyle={styles.content}>
       <View style={styles.notice}>
-        <LeafObjectIcon name={payment ? 'payment' : 'account'} size={64} />
+        <LeafObjectIcon name={payment ? 'payment' : 'achievements'} size={64} />
         <View style={styles.noticeCopy}>
-          <Text style={styles.section}>{payment ? 'Pix na Leaf' : 'Sua história na Leaf.'}</Text>
+          <Text style={styles.section}>{payment ? 'Pix na Leaf' : 'Sua história na Leaf'}</Text>
           <Text style={styles.support}>{payment ? 'O pagamento é confirmado antes do embarque.' : activeRole === 'driver' ? 'Trajetos e tempo de parceria.' : 'Viagens e tempo de casa.'}</Text>
         </View>
       </View>

@@ -31,6 +31,7 @@ import DriverHomeOverlay, {
   isDriverIdentitySupportRequired,
 } from './home/DriverHomeOverlay';
 import DriverLiveRideOverlay from './home/DriverLiveRideOverlay';
+import { resolveDriverOfferDeadlineMs } from './driverOfferCountdown';
 import DriverTripStatusBanner from './home/DriverTripStatusBanner';
 import LeafNativeNavigationBanner from './home/LeafNativeNavigationBanner';
 import DriverTransientStateCard from './home/DriverTransientStateCard';
@@ -137,7 +138,14 @@ import { confirmDriverEarlyEnd } from './home/driverEarlyEndConfirm';
 import Logger from '../../utils/Logger';
 import { resolveHomeQuoteFailurePresentation } from './home/homeQuoteFailurePresentation';
 import { useLiveRouteTiming } from './liveRouteTiming';
+import { leafButtonMetrics } from '../../components/prototype/LeafRideUI';
 
+// Telas empilhadas por cima da Início de onde uma oferta nova traz o motorista de volta.
+const OFFER_RETURNS_HOME_FROM_ROUTES = new Set([
+  'RobotaxiMenuTripHistory',
+  'RobotaxiPrototypeMenu',
+  'RobotaxiPrototypeReceipt',
+]);
 const { color } = robotaxiPrototypeTokens;
 const HOME_CARD_BOTTOM_OFFSET = 16;
 const HOME_CARD_FALLBACK_HEIGHT = PASSENGER_HOME_CARD_METRICS.stackHeight;
@@ -3440,6 +3448,25 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     () => selectDisplayableDriverOffer(driverOffers),
     [driverOffers]
   );
+  // Atividade, Conta e o recibo ficam empilhados por cima da Início, onde a oferta
+  // aparece: com o motorista numa dessas telas ela ficava coberta e expirava.
+  // Uma vez por oferta e só se ainda estiver valendo: uma oferta vencida que ficou
+  // na lista devolvia o motorista à Início a cada troca de aba.
+  const driverLiveOfferBookingId = String(driverLiveOffer?.bookingId || driverLiveOffer?.id || '');
+  // Mesma chave de instância do card da oferta: uma reoferta da mesma corrida conta de novo.
+  const driverLiveOfferInstance = driverLiveOfferBookingId
+    ? `${driverLiveOfferBookingId}|${driverLiveOffer?.expiresAt || driverLiveOffer?.responseDeadlineAt || driverLiveOffer?.timestamp || driverLiveOffer?.receivedAt || ''}`
+    : '';
+  const offerReturnedHomeRef = useRef('');
+  useEffect(() => {
+    if (!isDriverRole || !driverLiveOfferInstance || driverActiveRide) return;
+    if (offerReturnedHomeRef.current === driverLiveOfferInstance) return;
+    if (!OFFER_RETURNS_HOME_FROM_ROUTES.has(currentRouteName)) return;
+    const deadlineMs = resolveDriverOfferDeadlineMs(driverLiveOffer, Date.now());
+    if (Number.isFinite(deadlineMs) && deadlineMs <= Date.now()) return;
+    offerReturnedHomeRef.current = driverLiveOfferInstance;
+    navigateLeafRootTab(navigation, 'home');
+  }, [currentRouteName, driverActiveRide, driverLiveOffer, driverLiveOfferInstance, isDriverRole, navigation]);
   const buildHomeReceiptParams = useCallback((overrides = {}) => {
     const receipt = overrides.receipt || overrides.lastReceipt || null;
     const bookingId = String(
@@ -8795,6 +8822,9 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   const hasAutoNavigationTarget = Boolean(
     driverTripAssist?.targetCoordinate && driverTripAssist?.navigationPhase === autoNavigationPhase
   );
+  // Já no raio do embarque, não há rota a seguir: o Maps abria só para dizer "chegou".
+  const autoNavigationAlreadyAtPickup =
+    autoNavigationPhase === 'pickup' && Boolean(driverTripAssist?.proximityReached);
   useEffect(() => {
     if (!autoNavigationPhase || !autoNavigationBookingId || !hasAutoNavigationTarget) {
       return undefined;
@@ -8803,13 +8833,20 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     const timer = setTimeout(async () => {
       if (cancelled || AppState.currentState !== 'active') return;
       if (!(await claimAutoNavigationOpen(autoNavigationBookingId, autoNavigationPhase))) return;
+      if (autoNavigationAlreadyAtPickup) return;
       handleOpenDriverNavigation();
     }, 1200);
     return () => {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [autoNavigationBookingId, autoNavigationPhase, handleOpenDriverNavigation, hasAutoNavigationTarget]);
+  }, [
+    autoNavigationAlreadyAtPickup,
+    autoNavigationBookingId,
+    autoNavigationPhase,
+    handleOpenDriverNavigation,
+    hasAutoNavigationTarget,
+  ]);
 
   const handleOpenDriverChat = useCallback(() => {
     const bookingId = String(
@@ -10630,8 +10667,8 @@ const styles = StyleSheet.create({
   },
   homePickupSecondaryButton: {
     minWidth: 112,
-    height: 48,
-    borderRadius: 24,
+    height: leafButtonMetrics.height,
+    borderRadius: leafButtonMetrics.radius,
     borderWidth: 1,
     borderColor: '#E5E5E5',
     backgroundColor: '#FFFFFF',
@@ -10647,8 +10684,8 @@ const styles = StyleSheet.create({
   },
   homePickupPrimaryButton: {
     flex: 1,
-    height: 48,
-    borderRadius: 24,
+    height: leafButtonMetrics.height,
+    borderRadius: leafButtonMetrics.radius,
     backgroundColor: '#252525',
     alignItems: 'center',
     justifyContent: 'center',
@@ -10713,9 +10750,9 @@ const styles = StyleSheet.create({
   },
   driverKycUnavailableButton: {
     minWidth: 176,
-    height: 48,
+    height: leafButtonMetrics.height,
     marginTop: 24,
-    borderRadius: 24,
+    borderRadius: leafButtonMetrics.radius,
     backgroundColor: '#1A330E',
     alignItems: 'center',
     justifyContent: 'center',

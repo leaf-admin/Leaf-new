@@ -2194,7 +2194,7 @@ const styles = StyleSheet.create({
   offerActions: { marginTop: 14, flexDirection: 'row', alignItems: 'center', gap: 10 },
   offerAction: { width: '100%', minWidth: 0, paddingHorizontal: 12 },
   offerAcceptWrap: { flex: 1, minWidth: 0 },
-  offerDeclineButton: { width: 56, height: 56, borderRadius: 28, alignItems: 'center', justifyContent: 'center', backgroundColor: '#F2F3F0' },
+  offerDeclineButton: { width: leafButtonMetrics.height, height: leafButtonMetrics.height, borderRadius: leafButtonMetrics.radius, alignItems: 'center', justifyContent: 'center', backgroundColor: '#F2F3F0' },
   offerButtonDisabled: { opacity: 0.45 },
   offerTimeTrack: { position: 'absolute', left: 18, right: 18, bottom: 6, height: 3, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.22)', overflow: 'hidden' },
   offerTimeFill: { height: 3, borderRadius: 2, backgroundColor: '#FFFFFF' },

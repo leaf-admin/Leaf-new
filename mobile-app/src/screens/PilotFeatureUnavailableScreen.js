@@ -3,6 +3,7 @@ import React, { useMemo } from 'react';
 import { StatusBar, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { leafButtonMetrics } from '../components/prototype/LeafRideUI';
 
 const DEFAULT_MESSAGE = 'Este recurso fica fora do escopo do piloto controlado e sera operado manualmente nesta fase.';
 
@@ -102,8 +103,8 @@ const styles = StyleSheet.create({
   },
   button: {
     marginTop: 22,
-    minHeight: 50,
-    borderRadius: 18,
+    minHeight: leafButtonMetrics.height,
+    borderRadius: leafButtonMetrics.radius,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: '#1A330E',

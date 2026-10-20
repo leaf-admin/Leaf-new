@@ -22,6 +22,18 @@ export function isRideOverlayAvailable() {
   return Boolean(nativeModule());
 }
 
+// Texto da pílula recolhida quando não há ETA: cabe em poucos caracteres.
+function shortStageLabel(status, actionId) {
+  if (actionId === 'arrived_at_pickup') return 'No embarque';
+  if (actionId === 'end_trip') return 'Chegando';
+  switch (String(status || '').trim().toLowerCase()) {
+    case 'accepted': return 'A caminho';
+    case 'arrived': return 'Embarque';
+    case 'started': return 'Em viagem';
+    default: return 'Corrida';
+  }
+}
+
 /** Monta o que o balão e o Live Update mostram a partir da notificação da corrida. */
 export function buildRideOverlayState({ bookingId, status, ongoing = {}, actions = [], nearDestination = false } = {}) {
   // "Encerrar" grande num balão sobre o mapa, a viagem inteira, é um toque acidental
@@ -34,6 +46,7 @@ export function buildRideOverlayState({ bookingId, status, ongoing = {}, actions
     ? -1
     : Math.min(1, Math.max(0, Number(ongoing.progress)));
   return {
+    pillText: shortStageLabel(status, stageAction?.identifier),
     bookingId: String(bookingId || ''),
     title: String(ongoing.title || 'Corrida em andamento'),
     subtitle: String(ongoing.subtitle || ''),

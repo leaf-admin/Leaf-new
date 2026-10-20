@@ -37,6 +37,8 @@ describe('external navigation at the end of the ride', () => {
     expect(IntentLauncher.startActivityAsync).toHaveBeenCalledWith('android.intent.action.VIEW', {
       data: 'geo:-22.98,-43.36?z=16',
       packageName: 'com.google.android.apps.maps',
+      className: 'com.google.android.maps.MapsActivity',
+      flags: 0x10000000,
     });
     expect(await getRecentExternalNavigation()).toBeNull();
   });
