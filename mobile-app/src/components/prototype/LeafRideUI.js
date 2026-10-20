@@ -399,6 +399,69 @@ export function LeafProgressBar({ progress = 0, tone = "leaf", fillTestID }) {
   );
 }
 
+const TRIP_TRACK_CAR_SIZE = 26;
+
+// The ride as a line: the car glides from the start to the destination pin as the
+// trip advances. It only moves forward, and eases between updates instead of jumping.
+export function LeafTripProgressTrack({ progress = 0, progressKey, testID, fillTestID }) {
+  const reduceMotion = useReducedMotion();
+  const [width, setWidth] = React.useState(0);
+  const numeric = Number(progress);
+  const normalized = Number.isFinite(numeric) ? Math.max(0, Math.min(1, numeric)) : 0;
+  const anim = React.useRef(new Animated.Value(normalized)).current;
+  const maxRef = React.useRef(normalized);
+  const keyRef = React.useRef(progressKey);
+
+  React.useEffect(() => {
+    if (keyRef.current !== progressKey) {
+      keyRef.current = progressKey;
+      maxRef.current = normalized;
+      anim.setValue(normalized);
+      return undefined;
+    }
+    const next = Math.max(maxRef.current, normalized);
+    maxRef.current = next;
+    if (reduceMotion) {
+      anim.setValue(next);
+      return undefined;
+    }
+    const animation = Animated.timing(anim, {
+      toValue: next,
+      duration: 1400,
+      easing: Easing.inOut(Easing.quad),
+      useNativeDriver: false,
+    });
+    animation.start();
+    return () => animation.stop();
+  }, [anim, normalized, progressKey, reduceMotion]);
+
+  const usable = Math.max(0, width - TRIP_TRACK_CAR_SIZE);
+  const carLeft = anim.interpolate({ inputRange: [0, 1], outputRange: [0, usable] });
+  const fillWidth = anim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [TRIP_TRACK_CAR_SIZE / 2, usable + TRIP_TRACK_CAR_SIZE / 2],
+  });
+
+  return (
+    <View
+      style={styles.tripTrack}
+      onLayout={(event) => setWidth(event.nativeEvent.layout.width)}
+      testID={testID}
+      accessibilityRole="progressbar"
+      accessibilityValue={{ min: 0, max: 100, now: Math.round(normalized * 100) }}
+    >
+      <View style={styles.tripTrackRail} />
+      <Animated.View testID={fillTestID} style={[styles.tripTrackFill, { width: fillWidth }]} />
+      <View style={styles.tripTrackPin}>
+        <Ionicons name="location" size={18} color={leafRideColors.text} />
+      </View>
+      <Animated.View style={[styles.tripTrackCar, { left: carLeft }]}>
+        <Ionicons name="car-sport" size={15} color="#FFFFFF" />
+      </Animated.View>
+    </View>
+  );
+}
+
 export function LeafRouteProgress({
   originLabel = "Partida",
   destinationLabel = "Chegada",
@@ -893,6 +956,42 @@ export function LeafEmptyState({
 }
 
 const styles = StyleSheet.create({
+  tripTrack: {
+    height: TRIP_TRACK_CAR_SIZE,
+    justifyContent: "center",
+  },
+  tripTrackRail: {
+    position: "absolute",
+    left: TRIP_TRACK_CAR_SIZE / 2,
+    right: TRIP_TRACK_CAR_SIZE / 2,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: leafRideColors.line,
+  },
+  tripTrackFill: {
+    position: "absolute",
+    left: 0,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: leafRideColors.accent,
+  },
+  tripTrackPin: {
+    position: "absolute",
+    right: 0,
+    width: TRIP_TRACK_CAR_SIZE,
+    alignItems: "center",
+  },
+  tripTrackCar: {
+    position: "absolute",
+    width: TRIP_TRACK_CAR_SIZE,
+    height: TRIP_TRACK_CAR_SIZE,
+    borderRadius: TRIP_TRACK_CAR_SIZE / 2,
+    backgroundColor: leafRideColors.accent,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 2,
+    borderColor: "#FFFFFF",
+  },
   journeyRoute: {
     paddingVertical: 14,
     borderTopWidth: StyleSheet.hairlineWidth,

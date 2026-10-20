@@ -52,6 +52,17 @@ function resolveManeuverType(instruction, isOffRoute) {
 }
 
 function ManeuverGlyph({ type, color: glyphColor }) {
+  if (type === 'arrived') {
+    return (
+      <Ionicons
+        name="flag"
+        size={28}
+        color={glyphColor}
+        testID="leaf-native-arrived-glyph"
+        accessibilityLabel="Chegada"
+      />
+    );
+  }
   if (type === 'turn-right' || type === 'turn-left') {
     const isRight = type === 'turn-right';
     const turnPath =
@@ -124,10 +135,14 @@ export default function LeafNativeNavigationBanner({
   }
 
   const title = navigationModel.currentInstruction;
-  const subtitle = `${navigationModel.maneuverDistanceLabel} até ${
-    navigationModel.maneuverDistanceTargetLabel || 'o destino'
-  }`;
-  const maneuverType = resolveManeuverType(title, isOffRoute);
+  const subtitle = navigationModel.hasArrived && navigationModel.arrivalHint
+    ? navigationModel.arrivalHint
+    : `${navigationModel.maneuverDistanceLabel} até ${
+        navigationModel.maneuverDistanceTargetLabel || 'o destino'
+      }`;
+  const maneuverType = navigationModel.hasArrived && !isOffRoute
+    ? 'arrived'
+    : resolveManeuverType(title, isOffRoute);
 
   return (
     <View

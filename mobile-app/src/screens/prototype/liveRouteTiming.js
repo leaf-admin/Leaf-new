@@ -68,8 +68,16 @@ export function resolveArrivalTimestamp(minutes, nowMs = Date.now()) {
   return Number(nowMs) + numericMinutes * 60000;
 }
 
+// Number(null) is 0, a valid date: 31/12/1969 21:00 in Brasília. At the end of a
+// ride the ETA reached zero and the passenger card read "Chegada às 21:00".
+function toArrivalMs(value) {
+  if (value === null || value === undefined || value === "") return NaN;
+  const numeric = Number(value);
+  return Number.isFinite(numeric) && numeric > 0 ? numeric : NaN;
+}
+
 export function resolveDisplayEtaMinutes(arrivalTimestampMs, nowMs = Date.now()) {
-  const numericArrival = Number(arrivalTimestampMs);
+  const numericArrival = toArrivalMs(arrivalTimestampMs);
   if (!Number.isFinite(numericArrival)) {
     return null;
   }
@@ -78,7 +86,7 @@ export function resolveDisplayEtaMinutes(arrivalTimestampMs, nowMs = Date.now())
 }
 
 export function formatArrivalClockLabelFromTimestamp(arrivalTimestampMs) {
-  const numericArrival = Number(arrivalTimestampMs);
+  const numericArrival = toArrivalMs(arrivalTimestampMs);
   if (!Number.isFinite(numericArrival)) {
     return "Chegada prevista em instantes";
   }
@@ -159,15 +167,36 @@ export function resolveMonotonicArrivalState(
   };
 }
 
+// Share of the leg already driven, from distances: 1 - remaining / total. The
+// total is the longest remaining distance seen on this route, so it works when
+// the booking has no initial distance. Time-based progress stood still when the
+// booking had no initial duration (total fell back to the remaining time).
+export function resolveDistanceProgressState(previousState, { routeKey, remainingKm }) {
+  const key = String(routeKey || "live-route");
+  const remaining =
+    remainingKm === null || remainingKm === undefined || remainingKm === "" ? NaN : Number(remainingKm);
+  const base = previousState && previousState.routeKey === key ? previousState : { routeKey: key, totalKm: null };
+  if (!Number.isFinite(remaining) || remaining < 0) {
+    return { ...base, progress: null };
+  }
+  const totalKm = Math.max(Number(base.totalKm) || 0, remaining);
+  if (!(totalKm > 0)) {
+    return { routeKey: key, totalKm, progress: null };
+  }
+  return { routeKey: key, totalKm, progress: clamp(1 - remaining / totalKm, 0, 1) };
+}
+
 export function useLiveRouteTiming({
   routeKey,
   remainingMinutes,
   totalMinutes,
   startedAt,
+  remainingKm = null,
   active = true,
 }) {
   const [clockTick, setClockTick] = useState(0);
   const arrivalStateRef = useRef(null);
+  const distanceStateRef = useRef(null);
 
   useEffect(() => {
     if (!active) {
@@ -182,12 +211,19 @@ export function useLiveRouteTiming({
   }, [active, routeKey]);
 
   const nowMs = Date.now();
-  const routeProgress = resolveRouteProgress({
-    remainingMinutes,
-    totalMinutes,
-    startedAt,
-    nowMs,
+  const distanceState = resolveDistanceProgressState(distanceStateRef.current, {
+    routeKey,
+    remainingKm,
   });
+  distanceStateRef.current = distanceState;
+  const routeProgress = Number.isFinite(distanceState.progress)
+    ? distanceState.progress
+    : resolveRouteProgress({
+        remainingMinutes,
+        totalMinutes,
+        startedAt,
+        nowMs,
+      });
   const arrivalState = resolveMonotonicArrivalState(arrivalStateRef.current, {
     routeKey,
     remainingMinutes,

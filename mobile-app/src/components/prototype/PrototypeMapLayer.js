@@ -1320,7 +1320,8 @@ const AndroidRouteEndpointOverlay = React.memo(function AndroidRouteEndpointOver
   }
 
   const isDestination = tone === 'destination';
-  const overlayWidth = 104;
+  // Short tags keep the old 104 pt; "Destino · chegada às 14:32" needs more.
+  const overlayWidth = clampNumber(Math.round(34 + String(label || '').length * 6.4), 104, 210);
   const overlayHeight = 31;
   const left = clampNumber(point.x - overlayWidth / 2 + xOffset, 12, Math.max(12, layoutWidth - overlayWidth - 12));
   const top = clampNumber(point.y - 52 + yOffset, 78, Math.max(78, layoutHeight - 410));
@@ -1404,6 +1405,10 @@ function PrototypeMapLayer({
   // Dots only (no "Partida"/"Chegada" labels): keeps a preview route readable
   // without the label clutter that originally led to hiding the endpoints.
   compactRouteEndpoints = false,
+  // Endpoint tags. The passenger's live map names them "Embarque" and
+  // "Destino · chegada às 14:32".
+  originMarkerLabel = 'Partida',
+  destinationMarkerLabel = 'Chegada',
   driverMarkerMode = 'car',
   driverMarkerOccludedBottom = 0,
   currentLocationMarkerMode = 'dot',
@@ -3181,7 +3186,7 @@ function PrototypeMapLayer({
             {Platform.OS === 'android' || compactRouteEndpoints ? (
               <RouteEndpointDotMarker tone="origin" />
             ) : (
-              <RouteEndpointMarker label="Partida" tone="origin" />
+              <RouteEndpointMarker label={originMarkerLabel} tone="origin" />
             )}
           </Marker>
 
@@ -3204,7 +3209,7 @@ function PrototypeMapLayer({
                 ) : Platform.OS === 'android' || compactRouteEndpoints ? (
                   <RouteEndpointDotMarker tone="destination" />
                 ) : (
-                  <RouteEndpointMarker label="Chegada" tone="destination" />
+                  <RouteEndpointMarker label={destinationMarkerLabel} tone="destination" />
                 )}
               </View>
 
@@ -3461,7 +3466,7 @@ function PrototypeMapLayer({
         <View pointerEvents="none" style={styles.androidRouteEndpointOverlayLayer}>
           <AndroidRouteEndpointOverlay
             point={hasOriginMarker ? projectedRouteEndpointOverlayPoints.origin : null}
-            label="Partida"
+            label={originMarkerLabel}
             tone="origin"
             layoutWidth={androidProjectionLayout.width}
             layoutHeight={androidProjectionLayout.height}
@@ -3470,7 +3475,7 @@ function PrototypeMapLayer({
           />
           <AndroidRouteEndpointOverlay
             point={projectedRouteEndpointOverlayPoints.destination}
-            label="Chegada"
+            label={destinationMarkerLabel}
             tone="destination"
             layoutWidth={androidProjectionLayout.width}
             layoutHeight={androidProjectionLayout.height}
@@ -3650,14 +3655,14 @@ const styles = StyleSheet.create({
     alignItems: 'center'
   },
   routeEndpointMarker: {
-    width: 108,
+    width: 210,
     height: 58,
     alignItems: 'center',
     justifyContent: 'flex-end'
   },
   routeEndpointBubble: {
     minWidth: 88,
-    maxWidth: 108,
+    maxWidth: 210,
     minHeight: 31,
     borderRadius: 16,
     paddingHorizontal: 11,

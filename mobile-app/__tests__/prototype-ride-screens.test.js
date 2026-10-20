@@ -349,6 +349,14 @@ jest.mock('../src/components/prototype/LeafRideUI', () => {
         />
       </View>
     ),
+    LeafTripProgressTrack: ({ progress = 0, fillTestID }) => (
+      <View>
+        <View
+          testID={fillTestID}
+          style={[{ width: `${Math.round(Math.max(0, Math.min(1, Number(progress) || 0)) * 100)}%` }]}
+        />
+      </View>
+    ),
     LeafRideSheet: ({
       children,
       onLayout,
@@ -857,7 +865,9 @@ describe('prototype ride screens', () => {
     const screen = render(<RobotaxiTripScreen navigation={navigation} route={{ params: {} }} />);
 
     expect(screen.getByTestId('passenger-trip-screen')).toBeTruthy();
-    expect(screen.getByText('Motorista a caminho')).toBeTruthy();
+    expect(screen.getAllByText('Motorista a caminho').length).toBeGreaterThan(0);
+    // Without an ETA there is no "Chega em 1 min" made up from a null arrival time.
+    expect(screen.queryByText('Chega em 1 min')).toBeNull();
     expect(screen.getByText('Motorista Leaf')).toBeTruthy();
   });
 

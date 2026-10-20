@@ -20,7 +20,7 @@ import {
   LeafAnimatedPressable,
   LeafDivider,
   LeafJourneyRoute,
-  LeafProgressBar,
+  LeafTripProgressTrack,
   LeafRouteProgress,
   leafButtonMetrics,
   leafRideColors,
@@ -38,6 +38,7 @@ import {
 import { usePrototypeMapOcclusion } from './prototypeMapOcclusion';
 import { usePrototypeRideRuntime } from './prototypeRideRuntime';
 import { useLiveRouteTiming } from './liveRouteTiming';
+import { resolveLivePickupLeg, trimRouteAhead, trimTrafficAhead } from './passengerRouteAhead';
 import { formatCurrencyBRL } from './tripFinancialSummary';
 import { resolveBoardingWait, resolvePassengerBoardingWaitCopy } from './boardingWaitPolicy';
 import { PROTOTYPE_ORIGIN_COORDINATE, PROTOTYPE_REGION } from './robotaxiPrototypeData';
@@ -904,7 +905,7 @@ export default function RobotaxiTripScreen({ navigation, route }) {
         route?.params?.driverPhoto ||
         '',
     ).trim() || null;
-  const resolvedPickupDistanceKm =
+  const bookedPickupDistanceKm =
     toNonNegativeNumber(route?.params?.driverDistanceToPickupKm) ??
     toNonNegativeNumber(route?.params?.pickupDistanceKm) ??
     toNonNegativeNumber(activeBooking?.driverDistanceToPickupKm) ??
@@ -915,7 +916,7 @@ export default function RobotaxiTripScreen({ navigation, route }) {
     toNonNegativeNumber(driverActiveRide?.driverToPickupDistanceKm) ??
     toPositiveNumber(driverTripMeta?.pickupDistanceKm) ??
     null;
-  const resolvedPickupEtaMin =
+  const bookedPickupEtaMin =
     toPositiveNumber(route?.params?.estimatedArrivalToPickupMin) ??
     toPositiveNumber(route?.params?.pickupEtaMinutes) ??
     toPositiveNumber(activeBooking?.estimatedArrivalToPickupMin) ??
@@ -928,7 +929,6 @@ export default function RobotaxiTripScreen({ navigation, route }) {
     toPositiveNumber(driverTripMeta?.initialEtaMinutes) ??
     null;
   const tripDistanceLabel = formatDistanceLabel(resolvedTripDistanceKm);
-  const pickupDistanceLabel = formatDistanceLabel(resolvedPickupDistanceKm);
   const fareLabel = Number.isFinite(resolvedFare) ? formatCurrency(resolvedFare) : '--';
   const routeQaStatus = String(route?.params?.qaStatus || '').trim();
   const normalizedStatus = normalizePassengerBookingStatus(
@@ -971,17 +971,6 @@ export default function RobotaxiTripScreen({ navigation, route }) {
     normalizedStatus,
     isTripExpanded ? 'expanded' : isTripPeek ? 'peek' : 'compact',
   );
-  const pickupEtaValue =
-    Number.isFinite(resolvedPickupEtaMin) && resolvedPickupEtaMin > 0
-      ? `${Math.max(1, Math.round(resolvedPickupEtaMin))} min`
-      : null;
-  const pickupLegDistanceLabel =
-    pickupDistanceLabel && pickupDistanceLabel !== '--'
-      ? pickupDistanceLabel
-      : pickupEtaValue || '--';
-  const distanceLabel = isAccepted && !isStarted
-    ? pickupLegDistanceLabel
-    : tripDistanceLabel;
   const extensionStatus = String(rideExtension?.status || 'idle').trim().toLowerCase();
   const rawBoardingSeconds = Number(boardingRemainingSec);
   const boardingTimerSeconds = Number.isFinite(rawBoardingSeconds)
@@ -1155,6 +1144,39 @@ export default function RobotaxiTripScreen({ navigation, route }) {
     tripDriverCoordinate,
     tripPickupCoordinate,
   ]);
+  // The map and the card follow the driver: the route starts at the car, and the
+  // pickup distance and ETA come from the live position instead of the values
+  // booked at accept (the car reached the pickup while the card still said
+  // "680 m até o embarque").
+  const tripRouteAheadCoordinates = useMemo(
+    () => (tripDriverCoordinate
+      ? trimRouteAhead(tripRouteCoordinates, tripDriverCoordinate)
+      : tripRouteCoordinates),
+    [tripDriverCoordinate?.latitude, tripDriverCoordinate?.longitude, tripRouteCoordinates],
+  );
+  const livePickupLeg = isAccepted && !isArrived && !isStarted
+    ? resolveLivePickupLeg({
+        driverCoordinate: tripDriverCoordinate,
+        pickupCoordinate: tripPickupCoordinate,
+        routeAhead: tripRouteAheadCoordinates,
+        bookedDistanceKm: bookedPickupDistanceKm,
+        bookedEtaMinutes: bookedPickupEtaMin,
+      })
+    : null;
+  const resolvedPickupDistanceKm = livePickupLeg?.distanceKm ?? bookedPickupDistanceKm;
+  const resolvedPickupEtaMin = livePickupLeg?.etaMinutes ?? bookedPickupEtaMin;
+  const pickupDistanceLabel = formatDistanceLabel(resolvedPickupDistanceKm);
+  const pickupEtaValue =
+    Number.isFinite(resolvedPickupEtaMin) && resolvedPickupEtaMin > 0
+      ? `${Math.max(1, Math.round(resolvedPickupEtaMin))} min`
+      : null;
+  const pickupLegDistanceLabel =
+    pickupDistanceLabel && pickupDistanceLabel !== '--'
+      ? pickupDistanceLabel
+      : pickupEtaValue || '--';
+  const distanceLabel = isAccepted && !isStarted
+    ? pickupLegDistanceLabel
+    : tripDistanceLabel;
   const tripRouteTrafficSegments = useMemo(() => {
     if (tripRouteCoordinates.length < 3) {
       return [];
@@ -1228,6 +1250,12 @@ export default function RobotaxiTripScreen({ navigation, route }) {
     route?.params?.pickupTrafficSegments,
     tripRouteCoordinates.length,
   ]);
+  const tripRouteAheadTrafficSegments = useMemo(
+    () => (tripDriverCoordinate
+      ? trimTrafficAhead(tripRouteTrafficSegments, tripRouteCoordinates, tripDriverCoordinate)
+      : tripRouteTrafficSegments),
+    [tripDriverCoordinate?.latitude, tripDriverCoordinate?.longitude, tripRouteCoordinates, tripRouteTrafficSegments],
+  );
   const tripRouteOriginCoordinate =
     Array.isArray(tripRouteCoordinates) && tripRouteCoordinates.length >= 2
       ? tripRouteCoordinates[0]
@@ -1505,6 +1533,7 @@ export default function RobotaxiTripScreen({ navigation, route }) {
     remainingMinutes: resolvedTripDurationMin,
     totalMinutes: routeTotalMinutes,
     startedAt: routeStartedAt,
+    remainingKm: resolvedTripDistanceKm,
     active: isStarted,
   });
   const stableEtaValue =
@@ -1527,6 +1556,14 @@ export default function RobotaxiTripScreen({ navigation, route }) {
     const clockMatch = String(arrivalClockLabel || '').match(/\b\d{1,2}:\d{2}\b/);
     return clockMatch?.[0] || compactEtaValue;
   }, [arrivalClockLabel, compactEtaValue]);
+  const tripMapArrivalClock = isStarted
+    ? String(arrivalClockLabel || '').match(/\b\d{1,2}:\d{2}\b/)?.[0] || ''
+    : '';
+  const tripMapDestinationTag = isAccepted || isArrived
+    ? 'Embarque'
+    : tripMapArrivalClock
+      ? `Destino · chegada às ${tripMapArrivalClock}`
+      : 'Destino';
   const shouldUseCompactTripCard =
     (isAccepted || isArrived || isStarted || isOperationalDecisionPending) &&
     !isOperationalSearching &&
@@ -2124,8 +2161,9 @@ export default function RobotaxiTripScreen({ navigation, route }) {
             dense
           />
           <View style={styles.startedProgressTrack} testID="passenger-trip-route-progress">
-            <LeafProgressBar
+            <LeafTripProgressTrack
               progress={routeProgress}
+              progressKey={liveRouteKey || 'passenger-trip-route'}
               fillTestID={passengerCardFieldTestIDs.route_progress}
             />
             <View style={styles.startedProgressMetaRow}>
@@ -2317,8 +2355,9 @@ export default function RobotaxiTripScreen({ navigation, route }) {
         />
         {isStarted ? (
           <View style={styles.startedProgressTrack} testID="passenger-trip-route-progress">
-            <LeafProgressBar
+            <LeafTripProgressTrack
               progress={routeProgress}
+              progressKey={liveRouteKey || 'passenger-trip-route'}
               fillTestID={passengerCardFieldTestIDs.route_progress}
             />
             <Text
@@ -2454,8 +2493,8 @@ export default function RobotaxiTripScreen({ navigation, route }) {
           userAvatarLetter="L"
           driverCoordinate={tripDriverCoordinate}
           driverHeading={tripDriverHeading}
-          routeCoordinates={tripRouteCoordinates}
-          routeTrafficSegments={tripRouteTrafficSegments}
+          routeCoordinates={tripRouteAheadCoordinates}
+          routeTrafficSegments={tripRouteAheadTrafficSegments}
           // The route line already carries traffic colours; the city-wide
           // traffic layer on top of it only cluttered the passenger map.
           showTraffic={false}
@@ -2471,7 +2510,10 @@ export default function RobotaxiTripScreen({ navigation, route }) {
           onMapLayout={handleMapLayout}
           animateRoute={tripMapPresentation.animateRoute}
           manualCameraHoldMs={tripMapPresentation.manualCameraHoldMs}
-          hideRouteEndpointMarkers
+          // The route starts at the car: no origin tag. Its end reads "Embarque"
+          // on the way to the pickup and "Destino · chegada às 14:32" on board.
+          hideRouteOriginMarker
+          destinationMarkerLabel={tripMapDestinationTag}
           driverMarkerMode="car"
           driverVehicleColor={vehicleColorLabel}
           driverMarkerAssetUrl={vehicleMarkerCampaignAsset.imageUrl}
