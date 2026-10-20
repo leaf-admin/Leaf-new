@@ -463,10 +463,14 @@ class PrototypeDriverTripAssistantService {
       return;
     }
 
-    try {
-      await PersistentRideNotificationService.requestPermissions();
-    } catch (_error) {
-      // best effort
+    // Uma vez por sessão: chamava o módulo nativo de permissões a cada posição recebida.
+    if (!this.notificationPermissionAsked) {
+      this.notificationPermissionAsked = true;
+      try {
+        await PersistentRideNotificationService.requestPermissions();
+      } catch (_error) {
+        // best effort
+      }
     }
 
     const descriptor = buildNotificationDescriptor(session);

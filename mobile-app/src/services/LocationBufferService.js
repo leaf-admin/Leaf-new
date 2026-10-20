@@ -11,6 +11,19 @@ import { fetchNetInfo } from '../utils/NetInfoSafe';
 
 const DRIVER_PRESENCE_MIN_INTERVAL_MS = 5000;
 
+// Posição guardada há mais tempo que isso não serve mais ao servidor (corrida
+// encerrada há horas, que ele recusa): sem o corte, ela ficava no buffer para sempre.
+const BUFFERED_LOCATION_MAX_AGE_MS = 2 * 60 * 60 * 1000;
+const BUFFER_PERSIST_DELAY_MS = 5000;
+
+export function pruneStaleLocations(buffer = [], now = Date.now()) {
+    if (!Array.isArray(buffer)) return [];
+    return buffer.filter((item) => {
+        const at = Number(item?.capturedAt || item?.timestamp);
+        return Number.isFinite(at) && now - at <= BUFFERED_LOCATION_MAX_AGE_MS;
+    });
+}
+
 class LocationBufferService {
     constructor() {
         this.bufferKey = '@location_buffer';
@@ -19,6 +32,9 @@ class LocationBufferService {
         this.syncInterval = null;
         this.isOnline = true;
         this.activeTripContextCache = null;
+        // Buffer em memória, gravado no armazenamento no máximo a cada BUFFER_PERSIST_DELAY_MS.
+        this.bufferCache = null;
+        this.bufferPersistTimer = null;
         this.driverPresenceContext = null;
         this.lastPresenceSentAt = 0;
     }
@@ -94,30 +110,27 @@ class LocationBufferService {
                 source: location.source || 'foreground'
             };
 
-            // Carregar buffer atual
-            const buffer = await this.getBuffer();
-
-            // Adicionar localização
-            buffer.push(locationData);
-
-            // Limitar tamanho do buffer
-            if (buffer.length > this.maxBufferSize) {
-                buffer.shift(); // Remover localização mais antiga
-            }
-
-            // Salvar buffer
-            await AsyncStorage.setItem(this.bufferKey, JSON.stringify(buffer));
-
-            Logger.log(`📍 [LocationBuffer] Localização adicionada ao buffer (${buffer.length} total)`);
-
-            // Se estiver online, tentar enviar imediatamente
+            // Conectado: envia direto e não toca no armazenamento. Antes cada posição
+            // lia e regravava o buffer inteiro duas vezes (gravar, enviar, remover); com
+            // pontos antigos que nunca saíam, eram ~430 KB de JSON por segundo e o app do
+            // motorista travava no meio da corrida (QA, 2026-10-20).
             const attemptImmediateSend = options.attemptImmediateSend !== false;
             if (this.isOnline && attemptImmediateSend) {
                 const sent = await this.sendLocation(locationData);
                 if (sent) {
-                    await this.removeBufferedEventById(locationData.eventId);
+                    return;
                 }
             }
+
+            // Sem envio: guarda para o próximo sincronismo.
+            const buffer = pruneStaleLocations(await this.getBuffer());
+            buffer.push(locationData);
+            while (buffer.length > this.maxBufferSize) {
+                buffer.shift(); // Remover localização mais antiga
+            }
+            await this.writeBuffer(buffer);
+
+            Logger.log(`📍 [LocationBuffer] Localização adicionada ao buffer (${buffer.length} total)`);
 
         } catch (error) {
             Logger.error('❌ Erro ao adicionar localização ao buffer:', error);
@@ -129,13 +142,41 @@ class LocationBufferService {
      * @returns {Promise<Array>}
      */
     async getBuffer() {
+        if (Array.isArray(this.bufferCache)) {
+            return [...this.bufferCache];
+        }
         try {
             const bufferData = await AsyncStorage.getItem(this.bufferKey);
-            return bufferData ? JSON.parse(bufferData) : [];
+            const parsed = bufferData ? JSON.parse(bufferData) : [];
+            this.bufferCache = Array.isArray(parsed) ? parsed : [];
         } catch (error) {
             Logger.error('❌ Erro ao obter buffer:', error);
-            return [];
+            this.bufferCache = [];
         }
+        return [...this.bufferCache];
+    }
+
+    // Grava o buffer. Posições chegam a cada segundo: regravar o JSON inteiro a cada uma
+    // custava mais que a corrida toda. Só o sincronismo grava na hora.
+    async writeBuffer(buffer = [], { immediate = false } = {}) {
+        this.bufferCache = Array.isArray(buffer) ? [...buffer] : [];
+        if (immediate) {
+            await this.persistBufferNow();
+            return;
+        }
+        if (!this.bufferPersistTimer) {
+            this.bufferPersistTimer = setTimeout(() => {
+                this.persistBufferNow().catch(() => {});
+            }, BUFFER_PERSIST_DELAY_MS);
+        }
+    }
+
+    async persistBufferNow() {
+        if (this.bufferPersistTimer) {
+            clearTimeout(this.bufferPersistTimer);
+            this.bufferPersistTimer = null;
+        }
+        await AsyncStorage.setItem(this.bufferKey, JSON.stringify(this.bufferCache || []));
     }
 
     async removeBufferedEventById(eventId) {
@@ -144,7 +185,7 @@ class LocationBufferService {
         }
         const buffer = await this.getBuffer();
         const filtered = buffer.filter((item) => item.eventId !== eventId);
-        await AsyncStorage.setItem(this.bufferKey, JSON.stringify(filtered));
+        await this.writeBuffer(filtered);
     }
 
     async setActiveTripContext(context = {}) {
@@ -467,9 +508,13 @@ class LocationBufferService {
         }
 
         try {
-            const buffer = await this.getBuffer();
+            const storedBuffer = await this.getBuffer();
+            const buffer = pruneStaleLocations(storedBuffer);
 
             if (buffer.length === 0) {
+                if (storedBuffer.length > 0) {
+                    await this.writeBuffer([], { immediate: true });
+                }
                 return;
             }
 
@@ -507,8 +552,13 @@ class LocationBufferService {
                 }
             }
 
-            // Atualizar buffer (manter apenas as que falharam)
-            await AsyncStorage.setItem(this.bufferKey, JSON.stringify(failed));
+            // Mantém o que não foi enviado, inclusive posições que chegaram durante o envio.
+            const syncedIds = new Set(synced.map((item) => item.eventId));
+            const current = await this.getBuffer();
+            await this.writeBuffer(
+                pruneStaleLocations(current).filter((item) => !syncedIds.has(item.eventId)),
+                { immediate: true }
+            );
 
             Logger.log(`✅ [LocationBuffer] ${synced.length} localizações sincronizadas, ${failed.length} mantidas no buffer`);
 
@@ -525,7 +575,7 @@ class LocationBufferService {
         try {
             const buffer = await this.getBuffer();
             const filtered = buffer.filter(loc => loc.bookingId !== bookingId);
-            await AsyncStorage.setItem(this.bufferKey, JSON.stringify(filtered));
+            await this.writeBuffer(filtered, { immediate: true });
             Logger.log(`🗑️ [LocationBuffer] Buffer limpo para corrida ${bookingId}`);
         } catch (error) {
             Logger.error('❌ Erro ao limpar buffer:', error);
