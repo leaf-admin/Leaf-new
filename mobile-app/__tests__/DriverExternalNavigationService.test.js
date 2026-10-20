@@ -79,7 +79,7 @@ describe("DriverExternalNavigationService", () => {
     ).resolves.toBe("google_maps");
 
     expect(Linking.openURL).toHaveBeenCalledWith(
-      "https://maps.google.com/?daddr=37.7749,-122.4194&directionsmode=driving",
+      "https://www.google.com/maps/dir/?api=1&destination=37.7749,-122.4194&travelmode=driving&dir_action=navigate",
     );
   });
 
