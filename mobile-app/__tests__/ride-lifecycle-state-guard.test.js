@@ -131,6 +131,28 @@ describe('ride lifecycle state guard', () => {
     })).toEqual({ ignore: true, reason: 'lifecycle_order_regression' });
   });
 
+  it('lets an idle sync for the same booking reach the search handling', () => {
+    // syncActiveRide answers { hasActiveRide: false, bookingId, stale: true }
+    // when the booking expired in Redis; the passenger must not stay searching.
+    ['searching', 'searching_replacement'].forEach((currentStatus) => {
+      expect(shouldIgnoreRideLifecycleEvent({
+        eventName: 'activeRideSync',
+        currentStatus,
+        nextStatus: 'idle',
+        activeBookingId: 'booking_1',
+        incomingBookingId: 'booking_1',
+      })).toEqual({ ignore: false, reason: null });
+    });
+
+    expect(shouldIgnoreRideLifecycleEvent({
+      eventName: 'activeRideSync',
+      currentStatus: 'accepted',
+      nextStatus: 'idle',
+      activeBookingId: 'booking_1',
+      incomingBookingId: 'booking_1',
+    })).toEqual({ ignore: true, reason: 'lifecycle_order_regression' });
+  });
+
   it('keeps the lifecycle order stable for normal forward transitions', () => {
     expect(getRideLifecycleOrder('accepted')).toBeLessThan(getRideLifecycleOrder('arrived'));
     expect(shouldIgnoreRideLifecycleEvent({
