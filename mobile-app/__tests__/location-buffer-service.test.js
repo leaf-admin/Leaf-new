@@ -1,5 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import locationBufferService from '../src/services/LocationBufferService';
+import locationBufferService, { pruneStaleLocations } from '../src/services/LocationBufferService';
 import WebSocketManager from '../src/services/WebSocketManager';
 
 jest.mock('../src/services/WebSocketManager', () => ({
@@ -11,11 +11,13 @@ jest.mock('../src/services/WebSocketManager', () => ({
 
 describe('LocationBufferService', () => {
   let socketManager;
+  const NOW = Date.now();
 
   beforeEach(async () => {
     await AsyncStorage.clear();
     jest.clearAllMocks();
     locationBufferService.activeTripContextCache = null;
+    locationBufferService.bufferCache = null;
     locationBufferService.isOnline = true;
     socketManager = {
       authenticatedUserId: 'driver_1',
@@ -42,7 +44,7 @@ describe('LocationBufferService', () => {
         lat: -22.92,
         lng: -43.18,
         seq: 2,
-        capturedAt: 1710000005000,
+        capturedAt: NOW - 5000,
         source: 'background_task',
       },
       'driver',
@@ -54,7 +56,7 @@ describe('LocationBufferService', () => {
         lat: -22.91,
         lng: -43.17,
         seq: 1,
-        capturedAt: 1710000000000,
+        capturedAt: NOW - 10000,
         source: 'background_task',
       },
       'driver',
@@ -71,8 +73,8 @@ describe('LocationBufferService', () => {
         isInTrip: true,
         source: 'location_buffer_batch',
         locations: [
-          expect.objectContaining({ seq: 1, capturedAt: 1710000000000 }),
-          expect.objectContaining({ seq: 2, capturedAt: 1710000005000 }),
+          expect.objectContaining({ seq: 1, capturedAt: NOW - 10000 }),
+          expect.objectContaining({ seq: 2, capturedAt: NOW - 5000 }),
         ],
       }),
     );
@@ -92,7 +94,7 @@ describe('LocationBufferService', () => {
         lat: -22.93,
         lng: -43.19,
         seq: 1,
-        capturedAt: 1710000010000,
+        capturedAt: NOW - 1000,
       },
       'driver',
       { attemptImmediateSend: false, driverId: 'driver_1' },
@@ -138,5 +140,54 @@ describe('LocationBufferService', () => {
 
     expect(result).toEqual({ buffered: false, reason: 'no_active_trip' });
     expect(socketManager.emitToServer).not.toHaveBeenCalled();
+  });
+
+  it('sends a connected fix without touching storage', async () => {
+    await locationBufferService.addLocation(
+      'booking_1',
+      { lat: -22.92, lng: -43.18, capturedAt: NOW },
+      'driver',
+      { driverId: 'driver_1' },
+    );
+
+    expect(socketManager.emitToServer).toHaveBeenCalledWith('updateLocation', expect.objectContaining({ lat: -22.92 }));
+    expect(AsyncStorage.setItem.mock.calls.filter(([key]) => key === '@location_buffer')).toEqual([]);
+    await expect(locationBufferService.getBuffer()).resolves.toEqual([]);
+  });
+
+  it('keeps a fix that could not be sent, and drops fixes older than two hours', async () => {
+    socketManager.isConnected.mockReturnValue(false);
+    await AsyncStorage.setItem('@location_buffer', JSON.stringify([
+      { eventId: 'old', bookingId: 'booking_days_ago', userType: 'driver', lat: -22.9, lng: -43.1, capturedAt: NOW - 3 * 24 * 60 * 60 * 1000 },
+    ]));
+
+    await locationBufferService.addLocation(
+      'booking_1',
+      { lat: -22.92, lng: -43.18, capturedAt: NOW },
+      'driver',
+      { driverId: 'driver_1' },
+    );
+
+    const buffer = await locationBufferService.getBuffer();
+    expect(buffer.map((item) => item.bookingId)).toEqual(['booking_1']);
+    expect(pruneStaleLocations([{ capturedAt: NOW - 3 * 60 * 60 * 1000 }, { timestamp: NOW - 60000 }], NOW)).toHaveLength(1);
+  });
+
+  it('writes the buffer at most every few seconds while the socket is down', async () => {
+    socketManager.isConnected.mockReturnValue(false);
+    for (let index = 0; index < 50; index += 1) {
+      await locationBufferService.addLocation(
+        'booking_1',
+        { lat: -22.92 + index / 10000, lng: -43.18, capturedAt: NOW + index },
+        'driver',
+        { driverId: 'driver_1' },
+      );
+    }
+
+    const writes = AsyncStorage.setItem.mock.calls.filter(([key]) => key === '@location_buffer');
+    expect(writes.length).toBeLessThanOrEqual(1);
+    await expect(locationBufferService.getBuffer()).resolves.toHaveLength(50);
+    await locationBufferService.persistBufferNow();
+    expect(JSON.parse(await AsyncStorage.getItem('@location_buffer'))).toHaveLength(50);
   });
 });
