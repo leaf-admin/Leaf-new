@@ -2926,11 +2926,17 @@ export function sanitizePersistedRuntimeSessionForProfile(
             ? "bootstrap_restore_qa_seeded_driver_offer"
             : "bootstrap_restore_active_driver_session";
       } else {
-        restored.driverOnline = false;
+        // Regra do produto (19/10/2026): o motorista fica online até ele mesmo
+        // sair ou bater o limite diário de 12 h. Reabrir o app depois de uma
+        // corrida (sistema fechou o app, OTA, reinício) não pode deixá-lo
+        // offline. Restaura a intenção; ao autenticar, se o servidor o tiver
+        // tirado do ar, o app pede para voltar e o servidor aplica limite,
+        // KYC e elegibilidade.
+        // O início real da sessão vem do servidor (driverOnlineDaily) ao autenticar.
+        restored.driverOnline = true;
         restored.driverOnlinePending = false;
-        restored.driverOnlineStartedAt = null;
-        restored.driverOnlineMutationSource =
-          "bootstrap_clear_stale_online_intent";
+        restored.driverOnlineStartedAt = new Date().toISOString();
+        restored.driverOnlineMutationSource = "bootstrap_restore_online_intent";
       }
     } else {
       restored.driverOnline = false;
@@ -9664,7 +9670,10 @@ function attachSocketListeners() {
     const shouldRestoreOnlineIntent =
       isDriverRuntime &&
       runtimeState.driverOnline === true &&
-      runtimeState.driverOnlineMutationSource === "socket_disconnect_preserve_online_intent";
+      [
+        "socket_disconnect_preserve_online_intent",
+        "bootstrap_restore_online_intent",
+      ].includes(runtimeState.driverOnlineMutationSource);
     const driverOnlineAuthPatch = isDriverRuntime
       ? buildAuthenticatedDriverOnlinePatch(payload)
       : null;
