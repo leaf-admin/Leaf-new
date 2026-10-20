@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Reanimated, {
@@ -15,6 +15,8 @@ import leafTypography from '../prototype/LeafTypography';
 const KNOB_SIZE = 48;
 const TRACK_PADDING = 5;
 const CONFIRM_RATIO = 0.85;
+// No overshoot: a bouncy return carried the knob over the button to its left.
+const RELEASE_SPRING = { damping: 18, stiffness: 220, overshootClamping: true };
 
 // Slide-to-confirm for irreversible ride actions (ending a trip): a stray tap
 // can't trigger it. Screen readers confirm through the "activate" action.
@@ -28,38 +30,69 @@ export default function LeafSlideToConfirm({
   accessibilityLabel,
 }) {
   const [trackWidth, setTrackWidth] = useState(0);
+  // The action went through: the knob stays at the end with the busy label
+  // until the screen changes (a device recording showed it springing back
+  // under "Encerrando..." and past the start of the track).
+  const [held, setHeld] = useState(false);
   const offset = useSharedValue(0);
   const maxOffset = Math.max(0, trackWidth - KNOB_SIZE - TRACK_PADDING * 2);
-  const locked = disabled || busy;
+  const locked = disabled || busy || held;
 
   // When the action does not go through (the user backs out of a follow-up
   // question, or it fails) the knob returns, so the control is usable again
-  // instead of staying parked at the end of the track.
+  // instead of staying parked at the end of the track. onConfirm resolving
+  // `true` means it went through.
+  // The caller's handler changes on every render during a trip (it reads the
+  // live distance). Read it through a ref so the gesture below is not rebuilt
+  // mid-drag: a rebuilt gesture is cancelled, which left the knob parked at the
+  // end with nothing sent, or not following the finger at all (device QA).
+  const onConfirmRef = useRef(onConfirm);
+  useEffect(() => {
+    onConfirmRef.current = onConfirm;
+  }, [onConfirm]);
+
   const confirm = useCallback(() => {
     if (locked) {
       return;
     }
     const release = () => {
-      offset.value = withSpring(0, { damping: 18, stiffness: 220 });
+      offset.value = withSpring(0, RELEASE_SPRING);
     };
     Promise.resolve()
-      .then(() => onConfirm?.())
-      .then(release, release);
-  }, [locked, offset, onConfirm]);
+      .then(() => onConfirmRef.current?.())
+      .then((outcome) => {
+        if (outcome === true) {
+          setHeld(true);
+          return;
+        }
+        release();
+      }, release);
+  }, [locked, offset]);
 
-  const pan = Gesture.Pan()
-    .enabled(!locked && maxOffset > 0)
-    .onUpdate((event) => {
-      offset.value = Math.min(maxOffset, Math.max(0, event.translationX));
-    })
-    .onEnd(() => {
-      if (offset.value >= maxOffset * CONFIRM_RATIO) {
-        offset.value = withTiming(maxOffset, { duration: 120 });
-        runOnJS(confirm)();
-      } else {
-        offset.value = withSpring(0, { damping: 18, stiffness: 220 });
-      }
-    });
+  const pan = useMemo(
+    () =>
+      Gesture.Pan()
+        .enabled(!locked && maxOffset > 0)
+        .activeOffsetX(8)
+        .onUpdate((event) => {
+          offset.value = Math.min(maxOffset, Math.max(0, event.translationX));
+        })
+        .onEnd(() => {
+          if (offset.value >= maxOffset * CONFIRM_RATIO) {
+            offset.value = withTiming(maxOffset, { duration: 120 });
+            runOnJS(confirm)();
+          } else {
+            offset.value = withSpring(0, RELEASE_SPRING);
+          }
+        })
+        .onFinalize((_event, success) => {
+          // Cancelled by the system (a notification, another touch): back to the start.
+          if (!success) {
+            offset.value = withSpring(0, RELEASE_SPRING);
+          }
+        }),
+    [confirm, locked, maxOffset, offset],
+  );
 
   const knobStyle = useAnimatedStyle(() => ({
     transform: [{ translateX: offset.value }],
@@ -77,14 +110,14 @@ export default function LeafSlideToConfirm({
       accessibilityRole="adjustable"
       accessibilityLabel={accessibilityLabel || label}
       accessibilityHint="Deslize para a direita para confirmar"
-      accessibilityState={{ disabled: locked, busy }}
+      accessibilityState={{ disabled: locked, busy: busy || held }}
       accessibilityActions={[{ name: 'activate', label }]}
       onAccessibilityAction={(event) => {
         if (event?.nativeEvent?.actionName === 'activate') confirm();
       }}
     >
       <Reanimated.Text style={[styles.label, labelStyle]} numberOfLines={1}>
-        {busy ? busyLabel || label : label}
+        {busy || held ? busyLabel || label : label}
       </Reanimated.Text>
       <GestureDetector gesture={pan}>
         <Reanimated.View style={[styles.knob, knobStyle]}>

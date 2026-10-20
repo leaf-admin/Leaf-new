@@ -571,6 +571,8 @@ function DriverLiveRideOverlay({
         const result = await completeTripFlow(earlyEnd ? { earlyEnd } : {});
         if (result?.success !== false) {
           onTripCompletedSuccess?.(result);
+          // Tells the slide control the trip ended, so its knob stays put.
+          return true;
         }
       }
     } catch (error) {
