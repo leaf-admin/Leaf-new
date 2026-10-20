@@ -52,6 +52,7 @@ describe('ride overlay over the navigation app (Android)', () => {
       actionId: 'end_trip',
       actionLabel: 'Encerrar',
       legKey: 'b1:started',
+      pillText: 'Chegando',
     });
     expect(overlay.buildRideOverlayState({ bookingId: 'b1', status: 'arrived', ongoing: { progress: null } }).progress).toBe(-1);
     // Mid-trip, far from the destination: no "Encerrar" in the bubble.
@@ -62,6 +63,16 @@ describe('ride overlay over the navigation app (Android)', () => {
       actions: [{ identifier: 'open_navigation', buttonTitle: 'Navegar' }, { identifier: 'end_trip', buttonTitle: 'Encerrar' }],
     });
     expect(midTrip.actionId).toBe('');
+    expect(midTrip.pillText).toBe('Em viagem');
+  });
+
+  it('gives the collapsed pill a short label for each stage', () => {
+    const label = (status, actions = []) =>
+      overlay.buildRideOverlayState({ bookingId: 'b1', status, ongoing: {}, actions }).pillText;
+    expect(label('accepted')).toBe('A caminho');
+    expect(label('accepted', [{ identifier: 'arrived_at_pickup', buttonTitle: 'Cheguei ao embarque' }])).toBe('No embarque');
+    expect(label('arrived')).toBe('Embarque');
+    expect(label('started')).toBe('Em viagem');
   });
 
   it('shows the bubble only while Leaf is in the background, and clears it at the end of the ride', async () => {

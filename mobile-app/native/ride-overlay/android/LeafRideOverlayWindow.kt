@@ -35,10 +35,11 @@ import kotlin.math.min
 /**
  * A corrida por cima do app de navegação, no lugar de uma notificação aberta no topo
  * da tela. Um só por processo. Toque no card abre o Leaf; o botão abre o Leaf já
- * executando a ação da etapa (Cheguei, Iniciar, Encerrar). Depois de 8 s (ou ao
- * arrastar para cima) recolhe numa pílula logo abaixo da faixa de instruções do
- * Waze/Maps; abre de novo ao tocar na pílula, quando a etapa muda ou quando o botão
- * da etapa aparece. A pílula pode ser arrastada na vertical e guarda a posição.
+ * executando a ação da etapa (Cheguei, Iniciar, Encerrar). Sem botão, recolhe depois
+ * de 8 s (ou ao arrastar para cima) numa pílula logo abaixo da faixa de instruções do
+ * Waze/Maps; com botão, fica aberto até o motorista agir ou arrastar. Abre de novo
+ * ao tocar na pílula, quando a etapa muda ou quando o botão aparece. A pílula pode
+ * ser arrastada na vertical e guarda a posição.
  */
 @SuppressLint("StaticFieldLeak")
 object LeafRideOverlayWindow {
@@ -176,11 +177,16 @@ object LeafRideOverlayWindow {
     val eta = next.shortText.trim()
     etaView?.text = eta
     etaView?.visibility = if (eta.isEmpty()) View.GONE else View.VISIBLE
-    pillTextView?.text = if (eta.isNotEmpty()) eta else next.title
+    pillTextView?.text = when {
+      eta.isNotEmpty() -> eta
+      next.pillText.isNotBlank() -> next.pillText
+      else -> next.title
+    }
     subtitleView?.text = listOf(next.subtitle, next.body).filter { it.isNotBlank() }.joinToString(" · ")
     subtitleView?.visibility = if (subtitleView?.text.isNullOrBlank()) View.GONE else View.VISIBLE
     val stageChanged = renderedLegKey != null && renderedLegKey != next.legKey
     val actionAppeared = next.actionId.isNotBlank() && next.actionId != renderedActionId
+    val actionGone = !renderedActionId.isNullOrBlank() && next.actionId.isBlank()
     renderedActionId = next.actionId
     if (renderedLegKey != next.legKey) {
       renderedLegKey = next.legKey
@@ -201,13 +207,17 @@ object LeafRideOverlayWindow {
       }
     }
     if (stageChanged || actionAppeared) {
-      // Etapa nova ou botão novo: mostra o card aberto por mais 8 s.
+      // Etapa nova ou botão novo: mostra o card aberto.
       if (collapsed) setCollapsed(context, false) else scheduleAutoCollapse()
+    } else if (actionGone && !collapsed) {
+      scheduleAutoCollapse()
     }
   }
 
+  /** Com o botão da etapa na tela, o card não recolhe sozinho. */
   private fun scheduleAutoCollapse() {
     mainHandler.removeCallbacks(autoCollapse)
+    if (state?.hasAction == true) return
     mainHandler.postDelayed(autoCollapse, AUTO_COLLAPSE_MS)
   }
 

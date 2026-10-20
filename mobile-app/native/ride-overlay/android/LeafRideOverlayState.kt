@@ -19,8 +19,12 @@ data class LeafRideOverlayState(
   val actionId: String,
   val actionLabel: String,
   /** Muda quando a etapa muda (embarque → viagem): a trilha recomeça do zero. */
-  val legKey: String
+  val legKey: String,
+  /** Texto curto da pílula recolhida ("A caminho", "No embarque"). */
+  val pillText: String
 ) {
+  val hasAction: Boolean get() = actionId.isNotBlank() && actionLabel.isNotBlank()
+
   companion object {
     fun fromMap(map: ReadableMap?): LeafRideOverlayState {
       fun text(key: String) = if (map != null && map.hasKey(key) && !map.isNull(key)) map.getString(key) ?: "" else ""
@@ -34,7 +38,8 @@ data class LeafRideOverlayState(
         shortText = text("shortText"),
         actionId = text("actionId"),
         actionLabel = text("actionLabel"),
-        legKey = text("legKey")
+        legKey = text("legKey"),
+        pillText = text("pillText")
       )
     }
 
