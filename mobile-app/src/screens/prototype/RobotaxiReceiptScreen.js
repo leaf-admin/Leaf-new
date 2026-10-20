@@ -1210,10 +1210,22 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
     occludedBottom: sheetBottom + cardHeight,
   });
 
+  // Passageiro: depois da corrida a home volta limpa. Sem o reset, a home que
+  // ficou embaixo do recibo reaparecia na escolha de categoria com o destino
+  // anterior e fazia uma nova cotação.
   const navigateBackToPrototype = useCallback(() => {
     terminalExitRef.current = true;
-    returnToPrototypeHome(navigation);
-  }, [navigation]);
+    returnToPrototypeHome(
+      navigation,
+      isDriverView
+        ? undefined
+        : {
+            resetPassengerHomeSearch: true,
+            resetPassengerHomeSearchAt: new Date().toISOString(),
+            source: "passenger_receipt_back",
+          },
+    );
+  }, [isDriverView, navigation]);
 
   const handleDismiss = useCallback(() => {
     const shouldReturnToPrototypeHome =
