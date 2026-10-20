@@ -6,6 +6,7 @@ import android.app.NotificationManager
 import android.content.Context
 import android.graphics.drawable.Icon
 import android.os.Build
+import android.os.Bundle
 import androidx.annotation.RequiresApi
 
 /**
@@ -73,7 +74,9 @@ object LeafRideLiveUpdate {
       .setOnlyAlertOnce(true)
       .setShowWhen(false)
       .setCategory(Notification.CATEGORY_NAVIGATION)
-      .setRequestPromotedOngoing(true)
+      // Pedido de Live Update (EXTRA_REQUEST_PROMOTED_ONGOING): o sistema promove se a
+      // notificação cumprir as regras (ongoing, com título, sem cor de fundo).
+      .addExtras(Bundle().apply { putBoolean("android.requestPromotedOngoing", true) })
       .setContentIntent(LeafRideOverlayState.openLeafIntent(context, null, state.bookingId, REQUEST_OPEN))
 
     if (state.shortText.isNotBlank()) {
