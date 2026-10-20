@@ -358,7 +358,7 @@ export default function RobotaxiSettingsScreen({ navigation, route }) {
     },
     {
       item: ROBOTAXI_SETTINGS_ITEMS.navigationApp,
-      icon: 'map-outline',
+      icon: 'navigate-outline',
       title: 'App de navegação',
       subtitle: navigationApp ? NAVIGATION_APP_LABELS[navigationApp] : 'Perguntar na próxima corrida',
       onPress: chooseNavigationApp,
