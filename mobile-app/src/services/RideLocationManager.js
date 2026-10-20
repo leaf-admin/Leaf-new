@@ -130,7 +130,7 @@ class RideLocationManager {
             await locationBufferService.clearActiveTripContext(this.currentRideId);
 
             // ✅ 2. REMOVER NOTIFICAÇÃO PERSISTENTE
-            await PersistentRideNotificationService.dismissRideNotification();
+            await PersistentRideNotificationService.dismissRideNotification({ bookingId: this.currentRideId });
 
             // ✅ 3. LIMPAR ESTADO
             this.currentRideId = null;
