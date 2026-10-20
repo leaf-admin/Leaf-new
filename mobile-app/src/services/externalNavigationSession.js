@@ -9,6 +9,12 @@ const LAST_KEY = 'leaf:driver-external-navigation:last:v1';
 // Uma navegação aberta há mais tempo que isso não é desta corrida.
 const RECENT_MS = 6 * 60 * 60 * 1000;
 const GOOGLE_MAPS_PACKAGE = 'com.google.android.apps.maps';
+// O expo-intent-launcher só usa o pacote junto com a classe. Sem ela, o geo: vai para
+// o app padrão do aparelho, que pode ser o Waze.
+const GOOGLE_MAPS_ACTIVITY = 'com.google.android.maps.MapsActivity';
+// Sem nova tarefa, o Maps abre outra tela dentro da tarefa do Leaf e não vê a navegação
+// que está rodando: nada de "Sair da navegação?".
+const FLAG_ACTIVITY_NEW_TASK = 0x10000000;
 
 export const EXTERNAL_NAVIGATION_APP_LABELS = {
   google_maps: 'Google Maps',
@@ -61,11 +67,13 @@ export async function closeExternalNavigation({ app, coordinate = null } = {}) {
     if (app === 'google_maps' && Platform.OS === 'android') {
       // Carregado só aqui: o módulo nativo não existe nos testes.
       const IntentLauncher = require('expo-intent-launcher');
-      // Sem esperar o resultado: a activity do Maps só termina quando ele sai.
+      // Sem esperar o resultado: com nova tarefa ele volta na hora, sem valor útil.
       IntentLauncher.startActivityAsync('android.intent.action.VIEW', {
         data: `geo:${position}?z=16`,
         packageName: GOOGLE_MAPS_PACKAGE,
-      }).catch(() => Linking.openURL(`geo:${position}?z=16`).catch(() => {}));
+        className: GOOGLE_MAPS_ACTIVITY,
+        flags: FLAG_ACTIVITY_NEW_TASK,
+      }).catch(() => Linking.openURL(`https://www.google.com/maps/search/?api=1&query=${position}`).catch(() => {}));
     } else if (app === 'google_maps') {
       await Linking.openURL(`comgooglemaps://?center=${position}`);
     } else if (app === 'waze') {

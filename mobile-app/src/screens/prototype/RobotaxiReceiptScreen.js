@@ -29,6 +29,7 @@ import { PrototypeMenuCloseButton } from "../../components/prototype/PrototypeMe
 import robotaxiPrototypeTokens from "../../components/design-system/robotaxiPrototypeTokens";
 import { usePrototypeMapOcclusion } from "./prototypeMapOcclusion";
 import { usePrototypeRideRuntime } from "./prototypeRideRuntime";
+import { formatVehicleDisplayText } from "../../utils/vehicleDisplayText";
 import {
   closeExternalNavigation,
   getRecentExternalNavigation,
@@ -1557,7 +1558,10 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
     : "";
   const receiptVehicleLabel = isDriverView
     ? `${passengersCount} passageiro${passengersCount > 1 ? "s" : ""}`
-    : [receiptVehicleModel, receiptVehicleColor]
+    : [
+        receiptVehicleModel && formatVehicleDisplayText(receiptVehicleModel),
+        receiptVehicleColor && formatVehicleDisplayText(receiptVehicleColor, { maxWords: 2 }),
+      ]
         .filter(Boolean)
         .join(" · ") || "Veículo não informado";
   const receiptPlateLabel = !isDriverView
@@ -3325,7 +3329,8 @@ const styles = StyleSheet.create({
   receiptCleanTotalRow: {
     minHeight: 62,
     flexDirection: "row",
-    alignItems: "center",
+    // O selo acompanha o valor, não o bloco de rótulo + valor.
+    alignItems: "flex-end",
     justifyContent: "space-between",
     gap: 14,
     marginTop: 20,
@@ -3344,7 +3349,6 @@ const styles = StyleSheet.create({
     lineHeight: 44,
   },
   receiptCleanPill: {
-    minWidth: 120,
     height: 26,
     borderRadius: 13,
     borderWidth: 1,
@@ -3362,6 +3366,7 @@ const styles = StyleSheet.create({
   },
   receiptCleanPillColumn: {
     alignItems: "flex-end",
+    marginBottom: 9,
   },
   receiptSecurePaymentBadge: {
     marginTop: 4,

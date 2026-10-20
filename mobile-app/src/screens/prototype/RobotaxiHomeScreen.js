@@ -139,6 +139,12 @@ import { resolveHomeQuoteFailurePresentation } from './home/homeQuoteFailurePres
 import { useLiveRouteTiming } from './liveRouteTiming';
 import { leafButtonMetrics } from '../../components/prototype/LeafRideUI';
 
+// Telas empilhadas por cima da Início de onde uma oferta nova traz o motorista de volta.
+const OFFER_RETURNS_HOME_FROM_ROUTES = new Set([
+  'RobotaxiMenuTripHistory',
+  'RobotaxiPrototypeMenu',
+  'RobotaxiPrototypeReceipt',
+]);
 const { color } = robotaxiPrototypeTokens;
 const HOME_CARD_BOTTOM_OFFSET = 16;
 const HOME_CARD_FALLBACK_HEIGHT = PASSENGER_HOME_CARD_METRICS.stackHeight;
@@ -3441,6 +3447,14 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     () => selectDisplayableDriverOffer(driverOffers),
     [driverOffers]
   );
+  // Atividade, Conta e o recibo ficam empilhados por cima da Início, onde a oferta
+  // aparece: com o motorista numa dessas telas ela ficava coberta e expirava.
+  const driverLiveOfferKey = String(driverLiveOffer?.bookingId || driverLiveOffer?.id || '');
+  useEffect(() => {
+    if (!isDriverRole || !driverLiveOfferKey) return;
+    if (!OFFER_RETURNS_HOME_FROM_ROUTES.has(currentRouteName)) return;
+    navigateLeafRootTab(navigation, 'home');
+  }, [currentRouteName, driverLiveOfferKey, isDriverRole, navigation]);
   const buildHomeReceiptParams = useCallback((overrides = {}) => {
     const receipt = overrides.receipt || overrides.lastReceipt || null;
     const bookingId = String(
@@ -8796,6 +8810,9 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   const hasAutoNavigationTarget = Boolean(
     driverTripAssist?.targetCoordinate && driverTripAssist?.navigationPhase === autoNavigationPhase
   );
+  // Já no raio do embarque, não há rota a seguir: o Maps abria só para dizer "chegou".
+  const autoNavigationAlreadyAtPickup =
+    autoNavigationPhase === 'pickup' && Boolean(driverTripAssist?.proximityReached);
   useEffect(() => {
     if (!autoNavigationPhase || !autoNavigationBookingId || !hasAutoNavigationTarget) {
       return undefined;
@@ -8804,13 +8821,20 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     const timer = setTimeout(async () => {
       if (cancelled || AppState.currentState !== 'active') return;
       if (!(await claimAutoNavigationOpen(autoNavigationBookingId, autoNavigationPhase))) return;
+      if (autoNavigationAlreadyAtPickup) return;
       handleOpenDriverNavigation();
     }, 1200);
     return () => {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [autoNavigationBookingId, autoNavigationPhase, handleOpenDriverNavigation, hasAutoNavigationTarget]);
+  }, [
+    autoNavigationAlreadyAtPickup,
+    autoNavigationBookingId,
+    autoNavigationPhase,
+    handleOpenDriverNavigation,
+    hasAutoNavigationTarget,
+  ]);
 
   const handleOpenDriverChat = useCallback(() => {
     const bookingId = String(

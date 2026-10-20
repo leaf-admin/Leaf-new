@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Device from 'expo-device';
-import { Platform } from 'react-native';
+import { AppState, Platform } from 'react-native';
 import Logger from '../utils/Logger';
 import PersistentRideNotificationService from './PersistentRideNotificationService';
 import { cancelRideArrivalAlert, displayRideArrivalAlert } from './LeafOngoingRideNotification';
@@ -589,6 +589,11 @@ class PrototypeDriverTripAssistantService {
       return;
     }
     if (session.arrivalAlertKey === alert.key) {
+      return;
+    }
+    // Com o Leaf na tela, o próprio app já mostra o botão: o aviso só cobria o banner.
+    // Fica sem marcar, para tocar se o motorista for para o Maps ainda nesta fase.
+    if (AppState.currentState === 'active') {
       return;
     }
     const shown = await displayRideArrivalAlert({
