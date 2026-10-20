@@ -304,8 +304,9 @@ module.exports = {
             "POST_NOTIFICATIONS",
             "VIBRATE"
         ],
+        // SYSTEM_ALERT_WINDOW saiu daqui: o balão da corrida por cima do Waze/Maps
+        // precisa dela (plugins/withLeafRideOverlay, aprovado em 2026-10-20).
         blockedPermissions: [
-            "android.permission.SYSTEM_ALERT_WINDOW",
             "android.permission.READ_EXTERNAL_STORAGE",
             "android.permission.WRITE_EXTERNAL_STORAGE",
             "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"
@@ -429,6 +430,7 @@ module.exports = {
         "./plugins/withLeafAwsLiveness",
         "./plugins/withLeafFaceEmbedding",
         "./plugins/withLeafRideLiveActivity",
+        "./plugins/withLeafRideOverlay",
         "./plugins/withLeafMaterial",
         "./plugins/withLeafNotificationIcon",
         [

@@ -65,6 +65,7 @@ import { resolvePrototypeMapPresentation } from './prototypeMapPresentation';
 import { SEARCH_MAX_RADIUS_KM, getSearchPresentation } from './searchPresentation';
 import useSearchRadiusSteps from './useSearchRadiusSteps';
 import { claimAutoNavigationOpen, openPreferredDriverNavigation } from '../../services/driverNavigationPreference';
+import { maybeAskRideOverlayPermission } from '../../services/LeafRideOverlay';
 import {
   fetchH3CellsForRegion,
   fetchDriverDemandHeat,
@@ -8549,6 +8550,14 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
           'Modo motorista',
           resultError
         );
+        return;
+      }
+
+      if (nextValue) {
+        // Uma vez: oferece o balão da corrida por cima do app de navegação (Android).
+        setTimeout(() => {
+          maybeAskRideOverlayPermission().catch(() => {});
+        }, 1500);
       }
     } catch (error) {
       if (nextValue && isDriverIdentityReviewHoldResult(error)) {

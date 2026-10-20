@@ -26,6 +26,13 @@ import {
   setAutoNavigationEnabled,
 } from '../../services/driverNavigationPreference';
 import { loadAnalyticsPreference, setAnalyticsEnabled } from '../../services/observability/AppObservability';
+import {
+  getRideOverlayStatus,
+  isRideOverlayAvailable,
+  isRideOverlayEnabled,
+  openRideOverlaySettings,
+  setRideOverlayEnabled,
+} from '../../services/LeafRideOverlay';
 
 const SURFACE_TOP_PADDING = 20;
 const SURFACE_BOTTOM_PADDING = 18;
@@ -134,6 +141,33 @@ export default function RobotaxiSettingsScreen({ navigation, route }) {
     setAutoNavigation(value);
     setAutoNavigationEnabled(value).then(setAutoNavigation);
   }, []);
+
+  // Balão da corrida por cima do Waze/Maps (Android, build 1.0.9+). Ligado = preferência
+  // ativa e permissão "Sobrepor a outros apps" concedida.
+  const [rideOverlayOn, setRideOverlayOn] = useState(null);
+  const refreshRideOverlay = useCallback(async () => {
+    if (!isRideOverlayAvailable()) return;
+    const [enabled, status] = await Promise.all([isRideOverlayEnabled(), getRideOverlayStatus()]);
+    setRideOverlayOn(Boolean(enabled && status.canDrawOverlays));
+  }, []);
+  useEffect(() => {
+    refreshRideOverlay();
+    const subscription = AppState.addEventListener('change', next => {
+      if (next === 'active') refreshRideOverlay();
+    });
+    return () => subscription?.remove?.();
+  }, [refreshRideOverlay]);
+  const toggleRideOverlay = useCallback(async value => {
+    setRideOverlayOn(value);
+    await setRideOverlayEnabled(value);
+    if (value) {
+      const status = await getRideOverlayStatus();
+      if (!status.canDrawOverlays) {
+        await openRideOverlaySettings();
+      }
+    }
+    refreshRideOverlay();
+  }, [refreshRideOverlay]);
   const [usageDataEnabled, setUsageDataEnabled] = useState(null);
 
   useEffect(() => {
@@ -345,6 +379,18 @@ export default function RobotaxiSettingsScreen({ navigation, route }) {
       disabled: autoNavigation === null,
       driverOnly: true,
     },
+    ...(isRideOverlayAvailable() ? [{
+      item: ROBOTAXI_SETTINGS_ITEMS.rideOverlay,
+      icon: 'layers-outline',
+      title: 'Corrida por cima da navegação',
+      subtitle: 'Tempo, destino e botões num balão sobre o Waze ou o Maps',
+      rowTestID: 'robotaxi-settings-row-ride-overlay',
+      switchTestID: 'robotaxi-settings-switch-ride-overlay',
+      switchValue: rideOverlayOn,
+      onValueChange: toggleRideOverlay,
+      disabled: rideOverlayOn === null,
+      driverOnly: true,
+    }] : []),
     {
       item: ROBOTAXI_SETTINGS_ITEMS.password,
       icon: 'lock-closed-outline',

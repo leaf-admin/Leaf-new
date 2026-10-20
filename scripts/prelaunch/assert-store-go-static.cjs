@@ -133,10 +133,11 @@ try {
   }
 });
 
+// SYSTEM_ALERT_WINDOW saiu da lista em 1.0.9: o balão da corrida do motorista por
+// cima do app de navegação precisa dela (plugins/withLeafRideOverlay).
 [
   'READ_EXTERNAL_STORAGE',
   'WRITE_EXTERNAL_STORAGE',
-  'SYSTEM_ALERT_WINDOW',
 ].forEach((permission) => {
   const blockedLiteral = `"android.permission.${permission}"`;
   if (appConfigText.includes(blockedLiteral)) {
