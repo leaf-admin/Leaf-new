@@ -25,6 +25,7 @@ import {
     setOngoingRideActionListener,
     ONGOING_RIDE_NOTIFICATION_ID,
 } from './LeafOngoingRideNotification';
+import { findStaleRideAlertIds } from './rideAlertCleanup';
 
 const RIDE_STATUS_NOTIFICATION_IDENTIFIER = 'leaf-ride-status';
 
@@ -535,11 +536,29 @@ class PersistentRideNotificationService {
                 Logger.log('✅ [PersistentRideNotification] Notificação removida');
             }
 
+            await this.dismissStaleRideAlerts(rideData.bookingId || this.currentBookingId);
+
             this.currentBookingId = null;
             this.isActive = false;
             this.stopPeriodicUpdate();
         } catch (error) {
             Logger.error('❌ [PersistentRideNotification] Erro ao remover notificação:', error);
+        }
+    }
+
+    /**
+     * Pushes do servidor ("Corrida aceita", "A caminho do destino") ficam na
+     * bandeja depois do fim da corrida. Remove os que são desta corrida.
+     */
+    async dismissStaleRideAlerts(bookingId) {
+        if (!bookingId) return;
+        try {
+            const presented = await Notifications.getPresentedNotificationsAsync();
+            for (const identifier of findStaleRideAlertIds(presented, bookingId)) {
+                await Notifications.dismissNotificationAsync(identifier).catch(() => {});
+            }
+        } catch (error) {
+            Logger.warn('⚠️ [PersistentRideNotification] Não foi possível limpar avisos da corrida:', error?.message);
         }
     }
 

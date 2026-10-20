@@ -500,6 +500,7 @@ class PrototypeDriverTripAssistantService {
 
   async clearSession() {
     this.lastTrackingSessionKey = '';
+    const previous = await this.loadSession();
     try {
       await AsyncStorage.removeItem(STORAGE_KEY);
     } catch (error) {
@@ -507,7 +508,9 @@ class PrototypeDriverTripAssistantService {
     }
 
     if (!SHOULD_DISABLE_PERSISTENT_NOTIFICATIONS) {
-      await PersistentRideNotificationService.dismissRideNotification();
+      await PersistentRideNotificationService.dismissRideNotification({
+        bookingId: previous?.bookingId,
+      });
     }
     await this.clearBackgroundTripContext();
     if (!this.onlinePresenceKey) {
