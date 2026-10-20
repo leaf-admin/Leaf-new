@@ -23,6 +23,7 @@ const eventSourcing = require('./event-sourcing');
 const { EVENT_TYPES } = require('./event-sourcing');
 const { logger } = require('../utils/logger');
 const FCMService = require('./fcm-service');
+const { isDriverSelfActionPushEnabled } = require('../utils/ride-lifecycle-feature-flags');
 const {
     getDriverResponseTimeoutSeconds,
     getDriverSearchMaxRadiusKm
@@ -612,7 +613,9 @@ class ResponseHandler {
             // 15.1. Enviar notificação interativa para o motorista (com botões de ação)
             try {
                 // Buscar FCM token do motorista
-                const driverFcmToken = await this.redis.hget(`driver:${driverId}`, 'fcmToken');
+                const driverFcmToken = isDriverSelfActionPushEnabled()
+                    ? await this.redis.hget(`driver:${driverId}`, 'fcmToken')
+                    : null;
 
                 if (driverFcmToken) {
                     // ✅ Garantir que pickupLocation está parseado
@@ -692,7 +695,7 @@ class ResponseHandler {
                     );
 
                     logger.info(`📱 [ResponseHandler] Notificação interativa enviada para motorista ${driverId} com nome do passageiro: ${passengerName}`);
-                } else {
+                } else if (isDriverSelfActionPushEnabled()) {
                     logger.warn(`⚠️ [ResponseHandler] FCM token não encontrado para motorista ${driverId}. Verifique se o token foi salvo no Redis em driver:${driverId} -> fcmToken`);
                 }
             } catch (fcmError) {
