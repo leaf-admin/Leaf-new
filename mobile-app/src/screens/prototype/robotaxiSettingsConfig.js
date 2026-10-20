@@ -25,6 +25,10 @@ export const ROBOTAXI_SETTINGS_ITEMS = Object.freeze({
     key: 'auto-navigation',
     status: CURRENT_SURFACE_STATUS.CURRENT,
   }),
+  rideOverlay: Object.freeze({
+    key: 'ride-overlay',
+    status: CURRENT_SURFACE_STATUS.CURRENT,
+  }),
   password: Object.freeze({
     key: 'password',
     status: CURRENT_SURFACE_STATUS.CURRENT,

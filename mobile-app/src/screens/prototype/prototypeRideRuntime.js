@@ -1,10 +1,11 @@
 import { compactPersistedRideRecord } from "./persistedRideCompaction";
+import { parseRideActionLink } from "../../services/rideActionLink";
 import { resolveDriverActionLocation } from "../../services/driverActionLocation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import * as Device from "expo-device";
 import * as Location from "expo-location";
-import { AppState, Platform } from "react-native";
+import { AppState, Linking, Platform } from "react-native";
 import polyline from "@mapbox/polyline";
 import auth from "@react-native-firebase/auth";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -20837,8 +20838,35 @@ export function usePrototypeRideRuntime(options = null) {
       },
     );
 
+    // Botões do balão por cima da navegação e do Live Update (Android): abrem o Leaf
+    // por deep link com a ação da etapa. Só valem para a corrida em andamento.
+    const rideLinkSubscription = Linking.addEventListener("url", ({ url }) => {
+      const link = parseRideActionLink(url);
+      if (!link) {
+        return;
+      }
+      prototypeDriverTripAssistantService
+        .getLatestActionContext()
+        .then((context) => {
+          if (link.bookingId && String(context?.bookingId || "") !== link.bookingId) {
+            return;
+          }
+          return interactiveNotificationService.dispatchExternalAction({
+            actionIdentifier: link.action,
+            data: { bookingId: link.bookingId || context?.bookingId || "" },
+          });
+        })
+        .catch((error) => {
+          Logger.warn(
+            "⚠️ [PrototypeRuntime] Ação do balão falhou:",
+            error?.message || error,
+          );
+        });
+    });
+
     return () => {
       interactiveNotificationService.clearActionExecutor();
+      rideLinkSubscription?.remove?.();
     };
   }, [isRuntimeEffectOwner, profile]);
 

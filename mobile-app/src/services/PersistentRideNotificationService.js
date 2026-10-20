@@ -26,6 +26,7 @@ import {
     ONGOING_RIDE_NOTIFICATION_ID,
 } from './LeafOngoingRideNotification';
 import { findStaleRideAlertIds } from './rideAlertCleanup';
+import rideOverlay, { buildRideOverlayState, isRideOverlayAvailable } from './LeafRideOverlay';
 
 const RIDE_STATUS_NOTIFICATION_IDENTIFIER = 'leaf-ride-status';
 
@@ -79,6 +80,27 @@ class PersistentRideNotificationService {
         ].join('|');
         if (signature === this.lastOngoingSignature && this.currentNotificationId === ONGOING_RIDE_NOTIFICATION_ID) {
             return true;
+        }
+
+        // Motorista: o mesmo estado vai para o balão por cima do app de navegação e, no
+        // Android 16, para o Live Update, que substitui a notificação do notifee.
+        if (rideData.userType === 'driver' && isRideOverlayAvailable()) {
+            const overlayState = buildRideOverlayState({
+                bookingId: rideData.bookingId,
+                status: rideData.status,
+                ongoing,
+                actions,
+                nearDestination: rideData.nearDestination === true,
+            });
+            await rideOverlay.update(overlayState);
+            if (await rideOverlay.showLiveUpdate(overlayState)) {
+                if (this.currentNotificationId === ONGOING_RIDE_NOTIFICATION_ID) {
+                    await cancelOngoingRideNotification();
+                }
+                this.lastOngoingSignature = signature;
+                this.currentNotificationId = ONGOING_RIDE_NOTIFICATION_ID;
+                return true;
+            }
         }
 
         const shown = await displayOngoingRideNotification({
@@ -522,6 +544,7 @@ class PersistentRideNotificationService {
             });
 
             await cancelOngoingRideNotification();
+            await rideOverlay.dismiss();
             this.lastOngoingSignature = '';
             if (this.currentNotificationId === ONGOING_RIDE_NOTIFICATION_ID) {
                 this.currentNotificationId = null;

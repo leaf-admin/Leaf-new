@@ -216,8 +216,9 @@ for permission in "${required_android_permissions[@]}"; do
   fi
 done
 
+# SYSTEM_ALERT_WINDOW is allowed since 1.0.9: the driver's ride bubble over the
+# navigation app (plugins/withLeafRideOverlay), switched on by the driver.
 blocked_android_permissions=(
-  android.permission.SYSTEM_ALERT_WINDOW
   android.permission.READ_EXTERNAL_STORAGE
   android.permission.WRITE_EXTERNAL_STORAGE
   android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK

@@ -65,6 +65,7 @@ import { resolvePrototypeMapPresentation } from './prototypeMapPresentation';
 import { SEARCH_MAX_RADIUS_KM, getSearchPresentation } from './searchPresentation';
 import useSearchRadiusSteps from './useSearchRadiusSteps';
 import { claimAutoNavigationOpen, openPreferredDriverNavigation } from '../../services/driverNavigationPreference';
+import { maybeAskRideOverlayPermission } from '../../services/LeafRideOverlay';
 import {
   fetchH3CellsForRegion,
   fetchDriverDemandHeat,
@@ -8497,6 +8498,9 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     profileUid,
   ]);
 
+  const rideOverlayOfferTimerRef = useRef(null);
+  useEffect(() => () => clearTimeout(rideOverlayOfferTimerRef.current), []);
+
   const runDriverOnlineMutation = useCallback(async (nextValue) => {
     try {
       const result = await setDriverOnline(nextValue);
@@ -8549,6 +8553,16 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
           'Modo motorista',
           resultError
         );
+        return;
+      }
+
+      if (nextValue) {
+        // Uma vez: oferece o balão da corrida por cima do app de navegação (Android).
+        clearTimeout(rideOverlayOfferTimerRef.current);
+        rideOverlayOfferTimerRef.current = setTimeout(() => {
+          rideOverlayOfferTimerRef.current = null;
+          maybeAskRideOverlayPermission().catch(() => {});
+        }, 1500);
       }
     } catch (error) {
       if (nextValue && isDriverIdentityReviewHoldResult(error)) {
