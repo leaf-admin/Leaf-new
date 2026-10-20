@@ -67,7 +67,10 @@ function finishNavigationPrompt(promptKey) {
 export async function openDriverExternalNavigation({
   coordinate,
   destinationLabel = '',
-  phase = 'pickup'
+  phase = 'pickup',
+  // App escolhido pelo motorista (waze, google_maps, apple_maps): abre direto,
+  // sem o menu de escolha.
+  app = null
 }) {
   if (!isCoordinateValid(coordinate)) {
     throw new Error('Destino de navegação indisponível.');
@@ -96,6 +99,15 @@ export async function openDriverExternalNavigation({
     await Linking.openURL(canOpenNative ? wazeAppUrl : wazeWebUrl);
     return 'waze';
   };
+
+  const directOpeners = {
+    waze: openWaze,
+    google_maps: openGoogleMaps,
+    ...(Platform.OS === 'ios' ? { apple_maps: openAppleMaps } : {})
+  };
+  if (app && directOpeners[app]) {
+    return directOpeners[app]();
+  }
 
   const phaseLabel = phase === 'destination' ? 'destino' : 'embarque';
   const targetLabel = String(destinationLabel || '').trim() || (phase === 'destination' ? 'Destino' : 'Local de embarque');

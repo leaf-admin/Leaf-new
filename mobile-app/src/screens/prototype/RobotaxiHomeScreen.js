@@ -3,7 +3,7 @@ import LeafBootSplash from '../../components/design-system/LeafBootSplash';
 import LeafSplashReveal from '../../components/design-system/LeafSplashReveal';
 import { projectMapPoint } from './home/projectMapPoint';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Keyboard, Linking, Modal, Platform, StatusBar, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
+import { ActivityIndicator, Alert, AppState, Keyboard, Linking, Modal, Platform, StatusBar, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useIsFocused, useNavigationState } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -64,7 +64,7 @@ import { normalizeRuntimeRideStatus } from './rideLifecycleContract';
 import { resolvePrototypeMapPresentation } from './prototypeMapPresentation';
 import { SEARCH_MAX_RADIUS_KM, getSearchPresentation } from './searchPresentation';
 import useSearchRadiusSteps from './useSearchRadiusSteps';
-import { openDriverExternalNavigation } from '../../services/DriverExternalNavigationService';
+import { claimAutoNavigationOpen, openPreferredDriverNavigation } from '../../services/driverNavigationPreference';
 import {
   fetchH3CellsForRegion,
   fetchDriverDemandHeat,
@@ -8728,7 +8728,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     }
 
     try {
-      await openDriverExternalNavigation({
+      await openPreferredDriverNavigation({
         coordinate: driverTripAssist.targetCoordinate,
         destinationLabel:
           driverTripAssist.navigationPhase === 'pickup'
@@ -8740,6 +8740,34 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
       Alert.alert('Não foi possível abrir a navegação', error?.message || 'Tente novamente.');
     }
   }, [driverTripAssist]);
+
+  // A Leaf não tem navegação própria: ao aceitar, a rota até o embarque abre no
+  // app do motorista; ao iniciar, a rota até o destino. Uma vez por fase.
+  const autoNavigationBookingId = String(driverActiveRide?.bookingId || activeBookingId || '').trim();
+  const autoNavigationPhase =
+    isDriverRole && normalizedBookingStatus === 'accepted'
+      ? 'pickup'
+      : isDriverRole && normalizedBookingStatus === 'started'
+        ? 'destination'
+        : null;
+  const hasAutoNavigationTarget = Boolean(
+    driverTripAssist?.targetCoordinate && driverTripAssist?.navigationPhase === autoNavigationPhase
+  );
+  useEffect(() => {
+    if (!autoNavigationPhase || !autoNavigationBookingId || !hasAutoNavigationTarget) {
+      return undefined;
+    }
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      if (cancelled || AppState.currentState !== 'active') return;
+      if (!(await claimAutoNavigationOpen(autoNavigationBookingId, autoNavigationPhase))) return;
+      handleOpenDriverNavigation();
+    }, 1200);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [autoNavigationBookingId, autoNavigationPhase, handleOpenDriverNavigation, hasAutoNavigationTarget]);
 
   const handleOpenDriverChat = useCallback(() => {
     const bookingId = String(

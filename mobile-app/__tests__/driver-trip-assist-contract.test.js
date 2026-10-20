@@ -29,7 +29,7 @@ describe('driver trip assist contract', () => {
 
   it('keeps standalone driver navigation phase-aware and centralized', () => {
     expect(driverTripSource).toContain(
-      'import { openDriverExternalNavigation } from "../../services/DriverExternalNavigationService";',
+      'import { openPreferredDriverNavigation } from "../../services/driverNavigationPreference";',
     );
     expect(driverTripSource).toContain(
       'normalizedBookingStatus === "started" ? "destination" : "pickup"',
@@ -37,7 +37,7 @@ describe('driver trip assist contract', () => {
     expect(driverTripSource).toContain(
       'navigationPhase === "destination" ? dropoffCoordinate : pickupCoordinate',
     );
-    expect(driverTripSource).toContain('openDriverExternalNavigation({');
+    expect(driverTripSource).toContain('openPreferredDriverNavigation({');
     expect(driverTripSource).not.toContain('comgooglemaps://?daddr=');
     expect(driverTripSource).not.toContain('waze://?ll=');
   });
