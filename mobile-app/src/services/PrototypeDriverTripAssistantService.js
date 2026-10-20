@@ -3,6 +3,7 @@ import * as Device from 'expo-device';
 import { Platform } from 'react-native';
 import Logger from '../utils/Logger';
 import PersistentRideNotificationService from './PersistentRideNotificationService';
+import { cancelRideArrivalAlert, displayRideArrivalAlert } from './LeafOngoingRideNotification';
 
 const STORAGE_KEY = 'prototype_driver_trip_assistant_v1';
 const ACTIVE_STATUSES = new Set(['accepted', 'arrived', 'started']);
@@ -11,6 +12,8 @@ const ACTIVE_STATUSES = new Set(['accepted', 'arrived', 'started']);
 // are already standing at the pickup point.
 const PICKUP_TOLERANCE_METERS = 80;
 const FALLBACK_SPEED_KM_PER_MIN = 0.45;
+// Distância do destino em que o motorista é avisado para encerrar a corrida.
+const DESTINATION_ALERT_METERS = 300;
 const SHOULD_DISABLE_PERSISTENT_NOTIFICATIONS =
   Platform.OS === 'ios' && !Device.isDevice;
 
@@ -268,6 +271,33 @@ function buildNotificationDescriptor(session, { now = Date.now() } = {}) {
   };
 }
 
+// Os dois momentos em que o motorista, com o mapa em tela cheia, precisa voltar ao
+// Leaf: chegou ao embarque e está chegando ao destino. Um aviso por corrida e fase.
+function resolveArrivalAlert(session) {
+  const bookingId = String(session?.bookingId || '').trim();
+  if (!bookingId) return null;
+  const passenger = firstName(session?.passengerName);
+  if (session?.status === 'accepted' && session?.pickupToleranceReached) {
+    return {
+      key: `${bookingId}:pickup`,
+      title: 'Você chegou ao embarque',
+      body: passenger ? `Avise ${passenger} que você chegou.` : 'Avise o passageiro que você chegou.',
+      actions: [{ identifier: 'arrived_at_pickup', buttonTitle: 'Cheguei ao embarque' }],
+    };
+  }
+  const remainingMeters = Number(session?.remainingMeters);
+  if (session?.status === 'started' && Number.isFinite(remainingMeters) && remainingMeters <= DESTINATION_ALERT_METERS) {
+    const destination = shortenAddress(session?.destinationAddress) || 'destino';
+    return {
+      key: `${bookingId}:destination`,
+      title: 'Chegando ao destino',
+      body: `${destination} · encerre a corrida no Leaf`,
+      actions: [{ identifier: 'end_trip', buttonTitle: 'Encerrar corrida' }],
+    };
+  }
+  return null;
+}
+
 class PrototypeDriverTripAssistantService {
   constructor() {
     this.lastTrackingSessionKey = '';
@@ -467,10 +497,41 @@ class PrototypeDriverTripAssistantService {
 
     if (PersistentRideNotificationService.isNotificationActive()) {
       await PersistentRideNotificationService.updateRideNotification(payload);
+    } else {
+      await PersistentRideNotificationService.showRideNotification(payload);
+    }
+    await this.syncArrivalAlert(session);
+  }
+
+  async syncArrivalAlert(session) {
+    const alert = resolveArrivalAlert(session);
+    if (!alert) {
+      // A corrida passou da fase do aviso (o motorista já tocou em Cheguei, por
+      // exemplo): o aviso sai da tela. Uma vez por aviso.
+      const shownKey = String(session.arrivalAlertKey || '');
+      const shownPhase = shownKey.split(':').pop();
+      const stillInThatPhase =
+        (shownPhase === 'pickup' && session.status === 'accepted') ||
+        (shownPhase === 'destination' && session.status === 'started');
+      if (shownKey && !stillInThatPhase && this.cancelledArrivalAlertKey !== shownKey) {
+        this.cancelledArrivalAlertKey = shownKey;
+        await cancelRideArrivalAlert();
+      }
       return;
     }
-
-    await PersistentRideNotificationService.showRideNotification(payload);
+    if (session.arrivalAlertKey === alert.key) {
+      return;
+    }
+    const shown = await displayRideArrivalAlert({
+      title: alert.title,
+      body: alert.body,
+      actions: alert.actions,
+      data: { bookingId: session.bookingId, status: session.status, type: 'ride_arrival_alert' },
+    });
+    if (shown) {
+      session.arrivalAlertKey = alert.key;
+      await this.saveSession(session);
+    }
   }
 
   async syncSession(sessionInput) {
@@ -507,15 +568,19 @@ class PrototypeDriverTripAssistantService {
       return null;
     }
 
+    // Distância e ETA saem da posição nova. Herdados da sessão, ficavam parados no
+    // último valor do app em primeiro plano enquanto o motorista usava o Waze.
     const session = this.buildSession(
       {
         ...previous,
+        remainingMeters: undefined,
+        etaMinutes: undefined,
         lastDriverLocation: {
           latitude: Number(location?.lat ?? location?.latitude),
           longitude: Number(location?.lng ?? location?.longitude)
         }
       },
-      previous
+      { ...previous, remainingMeters: undefined, etaMinutes: undefined }
     );
 
     await this.saveSession(session);
@@ -531,6 +596,7 @@ class PrototypeDriverTripAssistantService {
       Logger.warn('⚠️ [PrototypeDriverTripAssistant] Falha ao limpar sessão:', error?.message || error);
     }
 
+    await cancelRideArrivalAlert();
     if (!SHOULD_DISABLE_PERSISTENT_NOTIFICATIONS) {
       await PersistentRideNotificationService.dismissRideNotification();
     }
@@ -555,4 +621,10 @@ class PrototypeDriverTripAssistantService {
 
 const prototypeDriverTripAssistantService = new PrototypeDriverTripAssistantService();
 export default prototypeDriverTripAssistantService;
-export { buildNotificationDescriptor, calculateDistanceMeters, PICKUP_TOLERANCE_METERS };
+export {
+  buildNotificationDescriptor,
+  calculateDistanceMeters,
+  DESTINATION_ALERT_METERS,
+  PICKUP_TOLERANCE_METERS,
+  resolveArrivalAlert,
+};
