@@ -31,6 +31,7 @@ import DriverHomeOverlay, {
   isDriverIdentitySupportRequired,
 } from './home/DriverHomeOverlay';
 import DriverLiveRideOverlay from './home/DriverLiveRideOverlay';
+import { resolveDriverOfferDeadlineMs } from './driverOfferCountdown';
 import DriverTripStatusBanner from './home/DriverTripStatusBanner';
 import LeafNativeNavigationBanner from './home/LeafNativeNavigationBanner';
 import DriverTransientStateCard from './home/DriverTransientStateCard';
@@ -3449,12 +3450,23 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   );
   // Atividade, Conta e o recibo ficam empilhados por cima da Início, onde a oferta
   // aparece: com o motorista numa dessas telas ela ficava coberta e expirava.
-  const driverLiveOfferKey = String(driverLiveOffer?.bookingId || driverLiveOffer?.id || '');
+  // Uma vez por oferta e só se ainda estiver valendo: uma oferta vencida que ficou
+  // na lista devolvia o motorista à Início a cada troca de aba.
+  const driverLiveOfferBookingId = String(driverLiveOffer?.bookingId || driverLiveOffer?.id || '');
+  // Mesma chave de instância do card da oferta: uma reoferta da mesma corrida conta de novo.
+  const driverLiveOfferInstance = driverLiveOfferBookingId
+    ? `${driverLiveOfferBookingId}|${driverLiveOffer?.expiresAt || driverLiveOffer?.responseDeadlineAt || driverLiveOffer?.timestamp || driverLiveOffer?.receivedAt || ''}`
+    : '';
+  const offerReturnedHomeRef = useRef('');
   useEffect(() => {
-    if (!isDriverRole || !driverLiveOfferKey) return;
+    if (!isDriverRole || !driverLiveOfferInstance || driverActiveRide) return;
+    if (offerReturnedHomeRef.current === driverLiveOfferInstance) return;
     if (!OFFER_RETURNS_HOME_FROM_ROUTES.has(currentRouteName)) return;
+    const deadlineMs = resolveDriverOfferDeadlineMs(driverLiveOffer, Date.now());
+    if (Number.isFinite(deadlineMs) && deadlineMs <= Date.now()) return;
+    offerReturnedHomeRef.current = driverLiveOfferInstance;
     navigateLeafRootTab(navigation, 'home');
-  }, [currentRouteName, driverLiveOfferKey, isDriverRole, navigation]);
+  }, [currentRouteName, driverActiveRide, driverLiveOffer, driverLiveOfferInstance, isDriverRole, navigation]);
   const buildHomeReceiptParams = useCallback((overrides = {}) => {
     const receipt = overrides.receipt || overrides.lastReceipt || null;
     const bookingId = String(
