@@ -58,7 +58,7 @@ import {
 } from "./rideLifecycleContract";
 import { getRideLifecycleOrder } from "./rideLifecycleStateGuard";
 import { resolvePrototypeMapPresentation } from "./prototypeMapPresentation";
-import { openDriverExternalNavigation } from "../../services/DriverExternalNavigationService";
+import { openPreferredDriverNavigation } from "../../services/driverNavigationPreference";
 
 const SHEET_BOTTOM_OFFSET = 0;
 const FALLBACK_CARD_HEIGHT = 318;
@@ -1838,10 +1838,11 @@ export default function RobotaxiDriverTripScreen({ navigation, route }) {
     }
 
     try {
-      await openDriverExternalNavigation({
+      await openPreferredDriverNavigation({
         coordinate: navigationTargetCoordinate,
         destinationLabel: navigationTargetLabel,
         phase: navigationPhase,
+        finalDestinationCoordinate: dropoffCoordinate,
       });
     } catch (error) {
       Alert.alert(
@@ -1850,6 +1851,7 @@ export default function RobotaxiDriverTripScreen({ navigation, route }) {
       );
     }
   }, [
+    dropoffCoordinate,
     hasActiveRide,
     navigationPhase,
     navigationTargetCoordinate,

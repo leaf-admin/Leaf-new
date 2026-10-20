@@ -18,6 +18,13 @@ import { ROBOTAXI_SETTINGS_ITEMS } from './robotaxiSettingsConfig';
 import { useMobilePreferences } from '../../components/MobilePreferencesProvider';
 import FCMNotificationService from '../../services/FCMNotificationService';
 import { isLeafVoiceAvailable, stopLeafNavigationVoice } from '../../services/LeafVoiceGuidanceService';
+import {
+  NAVIGATION_APP_LABELS,
+  choosePreferredNavigationApp,
+  getPreferredNavigationApp,
+  isAutoNavigationEnabled,
+  setAutoNavigationEnabled,
+} from '../../services/driverNavigationPreference';
 import { loadAnalyticsPreference, setAnalyticsEnabled } from '../../services/observability/AppObservability';
 
 const SURFACE_TOP_PADDING = 20;
@@ -108,6 +115,25 @@ export default function RobotaxiSettingsScreen({ navigation, route }) {
   const previousPermission = useRef(null);
   const [permissionBusy, setPermissionBusy] = useState(false);
   const [voiceAvailable, setVoiceAvailable] = useState(null);
+  const [navigationApp, setNavigationApp] = useState(undefined);
+  const [autoNavigation, setAutoNavigation] = useState(null);
+
+  useEffect(() => {
+    let live = true;
+    getPreferredNavigationApp().then(app => { if (live) setNavigationApp(app); });
+    isAutoNavigationEnabled().then(enabled => { if (live) setAutoNavigation(enabled); });
+    return () => { live = false; };
+  }, []);
+
+  const chooseNavigationApp = useCallback(async () => {
+    const chosen = await choosePreferredNavigationApp({ allowAskEveryTime: true });
+    if (chosen !== undefined) setNavigationApp(chosen);
+  }, []);
+
+  const toggleAutoNavigation = useCallback(value => {
+    setAutoNavigation(value);
+    setAutoNavigationEnabled(value).then(setAutoNavigation);
+  }, []);
   const [usageDataEnabled, setUsageDataEnabled] = useState(null);
 
   useEffect(() => {
@@ -294,6 +320,29 @@ export default function RobotaxiSettingsScreen({ navigation, route }) {
       switchValue: preferences.voiceGuidanceEnabled,
       onValueChange: value => savePreference('voiceGuidanceEnabled', value),
       disabled: !ready || loading || saving,
+      driverOnly: true,
+    },
+    {
+      item: ROBOTAXI_SETTINGS_ITEMS.navigationApp,
+      icon: 'map-outline',
+      title: 'App de navegação',
+      subtitle: navigationApp ? NAVIGATION_APP_LABELS[navigationApp] : 'Perguntar na próxima corrida',
+      onPress: chooseNavigationApp,
+      disabled: navigationApp === undefined,
+      showChevron: true,
+      rowTestID: 'robotaxi-settings-row-navigation-app',
+      driverOnly: true,
+    },
+    {
+      item: ROBOTAXI_SETTINGS_ITEMS.autoNavigation,
+      icon: 'car-outline',
+      title: 'Abrir navegação na corrida',
+      subtitle: 'Ao aceitar e ao iniciar a corrida',
+      rowTestID: 'robotaxi-settings-row-auto-navigation',
+      switchTestID: 'robotaxi-settings-switch-auto-navigation',
+      switchValue: autoNavigation,
+      onValueChange: toggleAutoNavigation,
+      disabled: autoNavigation === null,
       driverOnly: true,
     },
     {

@@ -67,7 +67,13 @@ function finishNavigationPrompt(promptKey) {
 export async function openDriverExternalNavigation({
   coordinate,
   destinationLabel = '',
-  phase = 'pickup'
+  phase = 'pickup',
+  // App escolhido pelo motorista (waze, google_maps, apple_maps): abre direto,
+  // sem o menu de escolha.
+  app = null,
+  // Parada antes do destino (o embarque). Só o Google Maps aceita parada no
+  // link; Waze e Mapas da Apple recebem um destino só.
+  stopover = null
 }) {
   if (!isCoordinateValid(coordinate)) {
     throw new Error('Destino de navegação indisponível.');
@@ -75,7 +81,12 @@ export async function openDriverExternalNavigation({
 
   const { latitude, longitude } = normalizeCoordinate(coordinate);
   const googleAppUrl = `comgooglemaps://?daddr=${latitude},${longitude}&directionsmode=driving`;
-  const googleWebUrl = `https://maps.google.com/?daddr=${latitude},${longitude}&directionsmode=driving`;
+  // Link universal do Google: abre o app instalado já na navegação de carro.
+  // "directionsmode" só vale no app de iOS; no Android o Maps abria "A pé".
+  const stop = isCoordinateValid(stopover) ? normalizeCoordinate(stopover) : null;
+  const googleWebUrl = `https://www.google.com/maps/dir/?api=1&destination=${latitude},${longitude}`
+    + (stop ? `&waypoints=${stop.latitude},${stop.longitude}` : '')
+    + '&travelmode=driving&dir_action=navigate';
   const wazeAppUrl = `waze://?ll=${latitude},${longitude}&navigate=yes`;
   const wazeWebUrl = `https://waze.com/ul?ll=${latitude},${longitude}&navigate=yes`;
   const appleMapsUrl = `http://maps.apple.com/?daddr=${latitude},${longitude}&dirflg=d`;
@@ -96,6 +107,15 @@ export async function openDriverExternalNavigation({
     await Linking.openURL(canOpenNative ? wazeAppUrl : wazeWebUrl);
     return 'waze';
   };
+
+  const directOpeners = {
+    waze: openWaze,
+    google_maps: openGoogleMaps,
+    ...(Platform.OS === 'ios' ? { apple_maps: openAppleMaps } : {})
+  };
+  if (app && directOpeners[app]) {
+    return directOpeners[app]();
+  }
 
   const phaseLabel = phase === 'destination' ? 'destino' : 'embarque';
   const targetLabel = String(destinationLabel || '').trim() || (phase === 'destination' ? 'Destino' : 'Local de embarque');
