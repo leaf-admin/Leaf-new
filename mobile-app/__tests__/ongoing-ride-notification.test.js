@@ -4,7 +4,7 @@ import {
   ONGOING_RIDE_CHANNEL_ID,
   ONGOING_RIDE_NOTIFICATION_ID,
 } from '../src/services/LeafOngoingRideNotification';
-import { buildNotificationDescriptor } from '../src/services/PrototypeDriverTripAssistantService';
+import { buildNotificationDescriptor, buildTripSession } from '../src/services/PrototypeDriverTripAssistantService';
 
 jest.mock('../src/services/PersistentRideNotificationService', () => ({
   __esModule: true,
@@ -158,5 +158,44 @@ describe('driver trip notification descriptor', () => {
 
     const noEta = buildNotificationDescriptor({ ...base, status: 'started', etaMinutes: 0 }, { now });
     expect(noEta.ongoing.title).toBe('Em viagem');
+  });
+
+  describe('progress and ETA per leg', () => {
+    const pickup = { latitude: -22.9200, longitude: -43.4000 };
+    const destination = { latitude: -22.9700, longitude: -43.3600 };
+    const started = (location, extra = {}) => ({
+      bookingId: 'b1',
+      status: 'started',
+      pickupCoordinate: pickup,
+      destinationCoordinate: destination,
+      currentDriverLocation: location,
+      ...extra,
+    });
+
+    it('starts the trip bar at zero even when the pickup leg measured the route', () => {
+      const accepted = buildTripSession({
+        bookingId: 'b1', status: 'accepted', pickupCoordinate: pickup, destinationCoordinate: destination,
+        currentDriverLocation: { latitude: -22.9190, longitude: -43.4000 }, initialMeters: 8000, remainingMeters: 120,
+      });
+      // The runtime still sends the pickup leg's route baseline (8 km) at the start.
+      const trip = buildTripSession(started(pickup, { initialMeters: 8000, remainingMeters: 8000, etaMinutes: 11 }), accepted);
+      expect(trip.progressRatio).toBe(0);
+      expect(buildNotificationDescriptor(trip).ongoing.progress).toBe(0);
+    });
+
+    it('keeps the bar, distance and ETA coherent in the background (straight line only)', () => {
+      const start = buildTripSession(started(pickup, { remainingMeters: 9000, etaMinutes: 12 }), null);
+      // Halfway in a straight line, with no route distance (background update).
+      const halfway = { latitude: -22.9450, longitude: -43.3800 };
+      const background = buildTripSession(
+        { ...start, remainingMeters: undefined, etaMinutes: undefined, lastDriverLocation: halfway },
+        { ...start, remainingMeters: undefined, etaMinutes: undefined },
+      );
+      expect(background.progressRatio).toBeCloseTo(0.5, 1);
+      expect(background.etaMinutes).toBe(6);
+      // The route/straight ratio from the start of the leg scales the remaining distance.
+      expect(background.remainingMeters).toBeGreaterThan(4000);
+      expect(background.remainingMeters).toBeLessThan(5000);
+    });
   });
 });

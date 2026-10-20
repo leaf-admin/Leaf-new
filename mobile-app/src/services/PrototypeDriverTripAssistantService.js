@@ -166,14 +166,121 @@ function formatArrivalClock(etaMinutes, now) {
   return `${String(at.getHours()).padStart(2, '0')}:${String(at.getMinutes()).padStart(2, '0')}`;
 }
 
+// Base de cada etapa (embarque, viagem), medida no primeiro ponto da etapa. A barra
+// compara linha reta com linha reta: em segundo plano só há a distância em linha reta
+// até o alvo, e dividi-la pela distância da rota levava a barra a ~55% no começo da
+// viagem. A razão rota/linha reta do início estima o que falta pela rua, e o ETA da
+// rota no início dá o ritmo.
+function resolveLegBaseline({ legChanged, previous, input, straightMeters }) {
+  const carried = legChanged ? {} : previous || {};
+  const legStraightMeters = Number(carried.legStraightMeters) > 0
+    ? Number(carried.legStraightMeters)
+    : Number(straightMeters) > 0 ? Number(straightMeters) : null;
+  const providedRouteMeters = Number(input?.remainingMeters);
+  const legRouteMeters = Number(carried.legRouteMeters) > 0
+    ? Number(carried.legRouteMeters)
+    : providedRouteMeters > 0 ? providedRouteMeters : null;
+  const providedEta = Number(input?.etaMinutes);
+  const legEtaMinutes = Number(carried.legEtaMinutes) > 0
+    ? Number(carried.legEtaMinutes)
+    : providedEta > 0 ? providedEta
+      : legChanged && Number(input?.initialEtaMinutes) > 0 ? Number(input.initialEtaMinutes) : null;
+  const detour = legRouteMeters && legStraightMeters ? legRouteMeters / legStraightMeters : null;
+  return {
+    legStraightMeters,
+    legRouteMeters,
+    legEtaMinutes,
+    // Rota de 1x a 3x a linha reta; fora disso a medida do início não serve.
+    detourFactor: detour && detour >= 1 && detour <= 3 ? detour : 1
+  };
+}
+
+function buildTripSession(input = {}, previous = null) {
+  const next = {
+    ...(previous || {}),
+    ...input
+  };
+  const legChanged =
+    !previous ||
+    String(previous.bookingId || '') !== String(next.bookingId || '') ||
+    String(previous.status || '') !== String(next.status || '');
+
+  const target = resolveTarget(next);
+  const currentLocation =
+    normalizeCoordinate(next.lastDriverLocation) ||
+    normalizeCoordinate(next.currentDriverLocation) ||
+    normalizeCoordinate(previous?.lastDriverLocation) ||
+    normalizeCoordinate(previous?.currentDriverLocation);
+  const straightMeters = target?.coordinate && currentLocation
+    ? calculateDistanceMeters(currentLocation, target.coordinate)
+    : null;
+  const baseline = resolveLegBaseline({ legChanged, previous, input, next, straightMeters });
+
+  const providedRemainingMeters = Number(next.remainingMeters);
+  const remainingMeters = Number.isFinite(providedRemainingMeters)
+    ? Math.max(0, providedRemainingMeters)
+    : Number.isFinite(straightMeters)
+      ? Math.round(straightMeters * baseline.detourFactor)
+      : null;
+  const initialMeters = legChanged
+    ? (Number(input?.initialMeters) > 0 ? Number(input.initialMeters) : remainingMeters)
+    : Number.isFinite(Number(next.initialMeters)) && Number(next.initialMeters) > 0
+      ? Number(next.initialMeters)
+      : remainingMeters;
+  const etaSource = legChanged ? input || {} : next;
+  const initialEtaMinutes =
+    Number(etaSource.initialEtaMinutes) > 0
+      ? Number(etaSource.initialEtaMinutes)
+      : Number(etaSource.etaMinutes) > 0
+        ? Number(etaSource.etaMinutes)
+        : null;
+  const straightRatio = Number.isFinite(straightMeters) && baseline.legStraightMeters
+    ? clamp(straightMeters / baseline.legStraightMeters, 0, 1)
+    : null;
+  const providedEtaMinutes = Number(next.etaMinutes);
+  const etaMinutes = Number.isFinite(providedEtaMinutes) && providedEtaMinutes >= 0
+    ? Math.max(0, Math.round(providedEtaMinutes))
+    : straightRatio !== null && baseline.legEtaMinutes
+      ? (straightMeters > 0 ? Math.max(1, Math.round(baseline.legEtaMinutes * straightRatio)) : 0)
+      : computeEtaMinutes({
+          remainingMeters,
+          initialMeters,
+          initialEtaMinutes
+        });
+  const progressRatio = straightRatio !== null
+    ? 1 - straightRatio
+    : Number.isFinite(initialMeters) && initialMeters > 0 && Number.isFinite(remainingMeters)
+      ? clamp(1 - remainingMeters / initialMeters, 0, 1)
+      : 0;
+
+  return {
+    ...next,
+    lastDriverLocation: currentLocation,
+    initialMeters,
+    initialEtaMinutes,
+    remainingMeters,
+    etaMinutes,
+    legStraightMeters: baseline.legStraightMeters,
+    legRouteMeters: baseline.legRouteMeters,
+    legEtaMinutes: baseline.legEtaMinutes,
+    progressRatio,
+    pickupToleranceReached:
+      next.status === 'accepted' && Number.isFinite(remainingMeters)
+        ? remainingMeters <= PICKUP_TOLERANCE_METERS
+        : false,
+    updatedAt: new Date().toISOString()
+  };
+}
+
 const NAVIGATE_ACTION = { identifier: 'open_navigation', buttonTitle: 'Navegar' };
 
 function buildNotificationDescriptor(session, { now = Date.now() } = {}) {
   const target = resolveTarget(session);
   const remainingMeters = Number(session?.remainingMeters);
   const initialMeters = Number(session?.initialMeters);
-  const progressRatio =
-    Number.isFinite(initialMeters) && initialMeters > 0 && Number.isFinite(remainingMeters)
+  const progressRatio = Number.isFinite(Number(session?.progressRatio))
+    ? clamp(Number(session.progressRatio), 0, 1)
+    : Number.isFinite(initialMeters) && initialMeters > 0 && Number.isFinite(remainingMeters)
       ? clamp(1 - remainingMeters / initialMeters, 0, 1)
       : 0;
   const progressBar = buildProgressText(progressRatio);
@@ -405,57 +512,7 @@ class PrototypeDriverTripAssistantService {
   }
 
   buildSession(input = {}, previous = null) {
-    const next = {
-      ...(previous || {}),
-      ...input
-    };
-
-    const target = resolveTarget(next);
-    const currentLocation =
-      normalizeCoordinate(next.lastDriverLocation) ||
-      normalizeCoordinate(next.currentDriverLocation) ||
-      normalizeCoordinate(previous?.lastDriverLocation) ||
-      normalizeCoordinate(previous?.currentDriverLocation);
-    const providedRemainingMeters = Number(next.remainingMeters);
-    const remainingMeters = Number.isFinite(providedRemainingMeters)
-      ? Math.max(0, providedRemainingMeters)
-      : target?.coordinate && currentLocation
-        ? calculateDistanceMeters(currentLocation, target.coordinate)
-        : null;
-    const initialMeters =
-      Number.isFinite(Number(next.initialMeters)) && Number(next.initialMeters) > 0
-        ? Number(next.initialMeters)
-        : Number.isFinite(remainingMeters)
-          ? remainingMeters
-          : null;
-    const initialEtaMinutes =
-      Number.isFinite(Number(next.initialEtaMinutes)) && Number(next.initialEtaMinutes) > 0
-        ? Number(next.initialEtaMinutes)
-        : Number.isFinite(Number(next.etaMinutes)) && Number(next.etaMinutes) > 0
-          ? Number(next.etaMinutes)
-          : null;
-    const providedEtaMinutes = Number(next.etaMinutes);
-    const etaMinutes = Number.isFinite(providedEtaMinutes) && providedEtaMinutes >= 0
-      ? Math.max(0, Math.round(providedEtaMinutes))
-      : computeEtaMinutes({
-          remainingMeters,
-          initialMeters,
-          initialEtaMinutes
-        });
-
-    return {
-      ...next,
-      lastDriverLocation: currentLocation,
-      initialMeters,
-      initialEtaMinutes,
-      remainingMeters,
-      etaMinutes,
-      pickupToleranceReached:
-        next.status === 'accepted' && Number.isFinite(remainingMeters)
-          ? remainingMeters <= PICKUP_TOLERANCE_METERS
-          : false,
-      updatedAt: new Date().toISOString()
-    };
+    return buildTripSession(input, previous);
   }
 
   async upsertPersistentNotification(session) {
@@ -638,6 +695,7 @@ const prototypeDriverTripAssistantService = new PrototypeDriverTripAssistantServ
 export default prototypeDriverTripAssistantService;
 export {
   buildNotificationDescriptor,
+  buildTripSession,
   calculateDistanceMeters,
   DESTINATION_ALERT_METERS,
   PICKUP_TOLERANCE_METERS,
