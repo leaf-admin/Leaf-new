@@ -49,48 +49,62 @@ function nearestRoutePoint(coordinates, position) {
   return { index, meters };
 }
 
-/** The route from the driver onwards: the driver's point, then the points ahead. */
-export function trimRouteAhead(coordinates = [], position, maxSnapMeters = MAX_SNAP_METERS) {
+// The route on the map changes in steps of this many points, not on every fix: a
+// new polyline per second is what Google Maps on iOS pays for in memory, and the
+// car marker covers the few metres between steps.
+const ROUTE_AHEAD_STEP_POINTS = 5;
+
+/** Index where the route ahead starts, in steps; 0 when the driver is off the route. */
+export function routeAheadStartIndex(coordinates = [], position, maxSnapMeters = MAX_SNAP_METERS) {
   const point = toPoint(position);
-  if (!point || !Array.isArray(coordinates) || coordinates.length < 2) return coordinates;
-  const { index: nearestIndex, meters: nearestMeters } = nearestRoutePoint(coordinates, point);
-  if (nearestIndex < 0 || nearestMeters > maxSnapMeters) return coordinates;
-  const ahead = coordinates.slice(nearestIndex + 1);
-  return ahead.length > 0 ? [point, ...ahead] : [point, coordinates[coordinates.length - 1]];
+  if (!point || !Array.isArray(coordinates) || coordinates.length < 2) return 0;
+  const { index, meters } = nearestRoutePoint(coordinates, point);
+  if (index < 0 || meters > maxSnapMeters) return 0;
+  // Near the end, point by point: the line has to vanish at the arrival.
+  if (coordinates.length - index <= ROUTE_AHEAD_STEP_POINTS) {
+    return Math.min(index, coordinates.length - 2);
+  }
+  return Math.floor(index / ROUTE_AHEAD_STEP_POINTS) * ROUTE_AHEAD_STEP_POINTS;
+}
+
+/** Metres left along the route from the driver (straight line when off the route). */
+export function remainingRouteMeters(coordinates = [], position, maxSnapMeters = MAX_SNAP_METERS) {
+  const point = toPoint(position);
+  if (!point || !Array.isArray(coordinates) || coordinates.length < 2) return NaN;
+  const { index, meters } = nearestRoutePoint(coordinates, point);
+  if (index < 0 || meters > maxSnapMeters) return NaN;
+  const ahead = coordinates.slice(index + 1);
+  return ahead.length > 0 ? distanceMeters(point, ahead[0]) + routeLengthMeters(ahead) : 0;
+}
+
+/** Traffic colours of the route from `startIndex` on. */
+export function trafficFromIndex(segments = [], coordinates = [], startIndex = 0) {
+  if (!Array.isArray(segments) || segments.length === 0 || !(startIndex > 0)) return segments;
+  return segments.filter((segment) => {
+    const points = Array.isArray(segment?.coordinates) ? segment.coordinates : [];
+    if (points.length === 0) return false;
+    return nearestRoutePoint(coordinates, points[points.length - 1]).index > startIndex;
+  });
 }
 
 /**
- * Live distance and ETA of the leg to the pickup. Distance along the route ahead
- * (straight line without a route); ETA keeps the pace booked at accept.
+ * Live distance and ETA of the leg to the pickup. Distance along the route from the
+ * car (straight line off the route); ETA keeps the pace booked at accept.
  */
 export function resolveLivePickupLeg({
   driverCoordinate,
   pickupCoordinate,
-  routeAhead = [],
+  routeCoordinates = [],
   bookedDistanceKm = null,
   bookedEtaMinutes = null,
 } = {}) {
   if (!toPoint(driverCoordinate) || !toPoint(pickupCoordinate)) return null;
-  const meters = Array.isArray(routeAhead) && routeAhead.length >= 2
-    ? routeLengthMeters(routeAhead)
-    : distanceMeters(driverCoordinate, pickupCoordinate);
+  const alongRoute = remainingRouteMeters(routeCoordinates, driverCoordinate);
+  const meters = Number.isFinite(alongRoute) ? alongRoute : distanceMeters(driverCoordinate, pickupCoordinate);
   if (!Number.isFinite(meters)) return null;
   const km = meters / 1000;
   const bookedKm = Number(bookedDistanceKm);
   const bookedEta = Number(bookedEtaMinutes);
   const kmPerMin = bookedKm > 0 && bookedEta > 0 ? bookedKm / bookedEta : FALLBACK_KM_PER_MIN;
   return { distanceKm: km, etaMinutes: Math.max(1, Math.round(km / kmPerMin)) };
-}
-
-/** Traffic colours of the route ahead only; the ones behind the car are dropped. */
-export function trimTrafficAhead(segments = [], coordinates = [], position, maxSnapMeters = MAX_SNAP_METERS) {
-  const point = toPoint(position);
-  if (!point || !Array.isArray(segments) || segments.length === 0 || coordinates.length < 2) return segments;
-  const driver = nearestRoutePoint(coordinates, point);
-  if (driver.index < 0 || driver.meters > maxSnapMeters) return segments;
-  return segments.filter((segment) => {
-    const points = Array.isArray(segment?.coordinates) ? segment.coordinates : [];
-    if (points.length === 0) return false;
-    return nearestRoutePoint(coordinates, points[points.length - 1]).index > driver.index;
-  });
 }

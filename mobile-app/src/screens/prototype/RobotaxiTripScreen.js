@@ -38,7 +38,7 @@ import {
 import { usePrototypeMapOcclusion } from './prototypeMapOcclusion';
 import { usePrototypeRideRuntime } from './prototypeRideRuntime';
 import { useLiveRouteTiming } from './liveRouteTiming';
-import { resolveLivePickupLeg, trimRouteAhead, trimTrafficAhead } from './passengerRouteAhead';
+import { resolveLivePickupLeg, routeAheadStartIndex, trafficFromIndex } from './passengerRouteAhead';
 import { formatCurrencyBRL } from './tripFinancialSummary';
 import { resolveBoardingWait, resolvePassengerBoardingWaitCopy } from './boardingWaitPolicy';
 import { PROTOTYPE_ORIGIN_COORDINATE, PROTOTYPE_REGION } from './robotaxiPrototypeData';
@@ -1148,17 +1148,20 @@ export default function RobotaxiTripScreen({ navigation, route }) {
   // pickup distance and ETA come from the live position instead of the values
   // booked at accept (the car reached the pickup while the card still said
   // "680 m até o embarque").
-  const tripRouteAheadCoordinates = useMemo(
-    () => (tripDriverCoordinate
-      ? trimRouteAhead(tripRouteCoordinates, tripDriverCoordinate)
-      : tripRouteCoordinates),
+  const tripRouteAheadStart = useMemo(
+    () => routeAheadStartIndex(tripRouteCoordinates, tripDriverCoordinate),
     [tripDriverCoordinate?.latitude, tripDriverCoordinate?.longitude, tripRouteCoordinates],
+  );
+  // Same array until the car moves to the next step, so the map keeps its polyline.
+  const tripRouteAheadCoordinates = useMemo(
+    () => (tripRouteAheadStart > 0 ? tripRouteCoordinates.slice(tripRouteAheadStart) : tripRouteCoordinates),
+    [tripRouteAheadStart, tripRouteCoordinates],
   );
   const livePickupLeg = isAccepted && !isArrived && !isStarted
     ? resolveLivePickupLeg({
         driverCoordinate: tripDriverCoordinate,
         pickupCoordinate: tripPickupCoordinate,
-        routeAhead: tripRouteAheadCoordinates,
+        routeCoordinates: tripRouteCoordinates,
         bookedDistanceKm: bookedPickupDistanceKm,
         bookedEtaMinutes: bookedPickupEtaMin,
       })
@@ -1251,10 +1254,8 @@ export default function RobotaxiTripScreen({ navigation, route }) {
     tripRouteCoordinates.length,
   ]);
   const tripRouteAheadTrafficSegments = useMemo(
-    () => (tripDriverCoordinate
-      ? trimTrafficAhead(tripRouteTrafficSegments, tripRouteCoordinates, tripDriverCoordinate)
-      : tripRouteTrafficSegments),
-    [tripDriverCoordinate?.latitude, tripDriverCoordinate?.longitude, tripRouteCoordinates, tripRouteTrafficSegments],
+    () => trafficFromIndex(tripRouteTrafficSegments, tripRouteCoordinates, tripRouteAheadStart),
+    [tripRouteAheadStart, tripRouteCoordinates, tripRouteTrafficSegments],
   );
   const tripRouteOriginCoordinate =
     Array.isArray(tripRouteCoordinates) && tripRouteCoordinates.length >= 2
