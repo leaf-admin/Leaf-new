@@ -1,8 +1,8 @@
 import {
   resolveLivePickupLeg,
+  routeAheadStartIndex,
   routeLengthMeters,
-  trimRouteAhead,
-  trimTrafficAhead,
+  trafficFromIndex,
 } from '../src/screens/prototype/passengerRouteAhead';
 
 const route = [
@@ -15,29 +15,22 @@ const route = [
 const pickup = route[route.length - 1];
 
 describe('passenger map follows the driver to the pickup', () => {
-  it('drops the part of the route the driver already drove', () => {
-    const ahead = trimRouteAhead(route, { latitude: -22.92352, longitude: -43.40752 });
-    expect(ahead).toHaveLength(3);
-    expect(ahead[ahead.length - 1]).toEqual(pickup);
-    expect(routeLengthMeters(ahead)).toBeLessThan(routeLengthMeters(route) / 2);
-  });
-
   it('keeps the whole route when the driver is off it', () => {
-    expect(trimRouteAhead(route, { latitude: -22.95, longitude: -43.45 })).toBe(route);
+    expect(routeAheadStartIndex(route, { latitude: -22.95, longitude: -43.45 })).toBe(0);
   });
 
   it('shrinks distance and ETA as the driver gets closer, keeping the booked pace', () => {
     const start = resolveLivePickupLeg({
       driverCoordinate: route[0],
       pickupCoordinate: pickup,
-      routeAhead: route,
+      routeCoordinates: route,
       bookedDistanceKm: 0.68,
       bookedEtaMinutes: 2,
     });
     const atDoor = resolveLivePickupLeg({
       driverCoordinate: pickup,
       pickupCoordinate: pickup,
-      routeAhead: trimRouteAhead(route, pickup),
+      routeCoordinates: route,
       bookedDistanceKm: 0.68,
       bookedEtaMinutes: 2,
     });
@@ -48,13 +41,16 @@ describe('passenger map follows the driver to the pickup', () => {
     expect(resolveLivePickupLeg({ driverCoordinate: null, pickupCoordinate: pickup })).toBeNull();
   });
 
-  it('drops traffic colours behind the car', () => {
-    const segments = [
-      { coordinates: [route[0], route[1]], level: 'slow' },
-      { coordinates: [route[1], route[2]], level: 'normal' },
-      { coordinates: [route[3], route[4]], level: 'normal' },
-    ];
-    expect(trimTrafficAhead(segments, route, route[2])).toEqual([segments[2]]);
-    expect(trimTrafficAhead(segments, route, { latitude: -22.95, longitude: -43.45 })).toBe(segments);
+  it('moves the route start in steps, so the polyline does not change on every fix', () => {
+    const long = Array.from({ length: 40 }, (_, index) => ({ latitude: -22.9265 + index * 0.00015, longitude: -43.4085 }));
+    expect(routeAheadStartIndex(long, long[7])).toBe(5);
+    expect(routeAheadStartIndex(long, long[9])).toBe(5);
+    expect(routeAheadStartIndex(long, long[10])).toBe(10);
+    // The last steps go point by point, so the line vanishes at the arrival.
+    expect(routeAheadStartIndex(long, long[37])).toBe(37);
+    expect(routeAheadStartIndex(long, { latitude: -22.95, longitude: -43.45 })).toBe(0);
+    const segments = [{ coordinates: [long[0], long[4]] }, { coordinates: [long[10], long[20]] }];
+    expect(trafficFromIndex(segments, long, 5)).toEqual([segments[1]]);
+    expect(trafficFromIndex(segments, long, 0)).toBe(segments);
   });
 });
