@@ -30,6 +30,10 @@ import robotaxiPrototypeTokens from "../../components/design-system/robotaxiProt
 import { usePrototypeMapOcclusion } from "./prototypeMapOcclusion";
 import { usePrototypeRideRuntime } from "./prototypeRideRuntime";
 import {
+  closeExternalNavigation,
+  getRecentExternalNavigation,
+} from "../../services/externalNavigationSession";
+import {
   isEarlyEndAnsweredStatus,
   loadEarlyEndAnsweredIds,
   markEarlyEndAnswered,
@@ -686,6 +690,17 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
   const [cardHeight, setCardHeight] = useState(FALLBACK_CARD_HEIGHT);
   const [showFeeBreakdown, setShowFeeBreakdown] = useState(false);
   const [receiptOptionsVisible, setReceiptOptionsVisible] = useState(false);
+  // Waze/Maps aberto nesta corrida: o recibo do motorista oferece fechar a navegação.
+  const [openExternalNavigation, setOpenExternalNavigation] = useState(null);
+  useEffect(() => {
+    let active = true;
+    getRecentExternalNavigation().then((value) => {
+      if (active) setOpenExternalNavigation(value);
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
   const [receiptRecoveryState, setReceiptRecoveryState] = useState("idle");
   const runtimeHistory = Array.isArray(tripHistory) ? tripHistory : [];
   const routeReceipt =
@@ -2091,8 +2106,23 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
             {selected?.id ? <View style={styles.receiptReference}>
               <Text style={styles.receiptCleanRowSubtitle}>Referência</Text><Text selectable numberOfLines={1} ellipsizeMode="middle" accessibilityLabel={`Referência da corrida ${selected.id}`} style={styles.receiptReferenceValue}>{selected.id}</Text>
             </View> : null}
+            {isDriverView && openExternalNavigation ? (
+              <LeafButton
+                label={`Fechar navegação no ${openExternalNavigation.label}`}
+                tone="secondary"
+                onPress={() => {
+                  closeExternalNavigation({
+                    app: openExternalNavigation.app,
+                    coordinate: selected?.destinationCoordinate,
+                  });
+                  setOpenExternalNavigation(null);
+                }}
+                testID="driver-receipt-close-navigation-button"
+                style={{ marginTop: 20 }}
+              />
+            ) : null}
             {/* Secondary: "Avaliar corrida" is the primary action on this screen. */}
-            <LeafButton label="Concluir" tone="secondary" onPress={handleDismiss} testID="receipt-done-button" style={{ marginTop: 20 }} />
+            <LeafButton label="Concluir" tone="secondary" onPress={handleDismiss} testID="receipt-done-button" style={{ marginTop: isDriverView && openExternalNavigation ? 10 : 20 }} />
           </View>
         </ScrollView>
       </View>

@@ -166,6 +166,40 @@ describe("driver receipt screen", () => {
     expect(navigation.goBack).not.toHaveBeenCalled();
   });
 
+  it("offers to close the Maps/Waze navigation opened during the ride", async () => {
+    const asyncStorageModule = require("@react-native-async-storage/async-storage");
+    const AsyncStorage = asyncStorageModule.default || asyncStorageModule;
+    const { rememberExternalNavigation } = require("../src/services/externalNavigationSession");
+    await AsyncStorage.clear();
+    await rememberExternalNavigation("waze");
+    usePrototypeRideRuntime.mockReturnValue(buildRuntime({ dismissCompletedReceipt: jest.fn() }));
+    const receipt = {
+      id: "trip_nav_receipt",
+      authoritativeSnapshot: true,
+      financialSnapshotSource: "backend_final",
+      fare: 25,
+      finalFare: 25,
+      driverNetAmount: 21.34,
+      totalFees: 3.66,
+      paymentMethod: "pix",
+      passengerId: "passenger_1",
+      passengerName: "Passageiro Rota",
+      pickupAddress: "Rua Origem, Centro",
+      destinationAddress: "Rua Destino, Botafogo",
+    };
+    const screen = render(
+      <RobotaxiReceiptScreen
+        navigation={{ navigate: jest.fn(), canGoBack: jest.fn(() => true), goBack: jest.fn() }}
+        route={{ params: { fromTrip: true, receipt } }}
+      />,
+    );
+
+    const button = await screen.findByTestId("driver-receipt-close-navigation-button");
+    expect(screen.getByText("Fechar navegação no Waze")).toBeTruthy();
+    fireEvent.press(button);
+    expect(screen.queryByTestId("driver-receipt-close-navigation-button")).toBeNull();
+  });
+
   it("opens driver rating with the passenger target from the receipt", () => {
     usePrototypeRideRuntime.mockReturnValue(buildRuntime());
     const navigation = {
