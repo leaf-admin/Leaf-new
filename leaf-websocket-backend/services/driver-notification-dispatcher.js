@@ -16,7 +16,7 @@ const { EVENT_TYPES } = require('./event-sourcing');
 const { logger, logStructured, logError } = require('../utils/logger');
 const { performance } = require('perf_hooks');
 const PaymentService = require('./payment-service');
-const { resolveEstimatedFareSnapshot } = require('../utils/fare-snapshot-utils');
+const { resolveEstimatedFareSnapshot, toFiniteMoney } = require('../utils/fare-snapshot-utils');
 const {
     reserveOffer,
     clearOfferReservation
@@ -1308,6 +1308,13 @@ class DriverNotificationDispatcher {
                         || effectiveBookingData?.pricingSnapshotLocked === true,
                     pricingSnapshotLockedAt: effectiveBookingData?.pricingSnapshotLockedAt || null
                 });
+            }
+
+            // Pedágio da cotação, já incluso na tarifa e no líquido: o cartão da oferta
+            // mostra "Inclui R$ X de pedágio" para o motorista saber o que é repasse.
+            const offerTollFee = toFiniteMoney(effectiveBookingData?.tollFee);
+            if (offerTollFee !== null && offerTollFee > 0) {
+                notificationData.estimatedTollFee = offerTollFee;
             }
 
             // Sinal de tarifa acima do normal (percentual e motivos) calculado na cotação. Só

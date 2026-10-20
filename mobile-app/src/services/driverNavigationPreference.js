@@ -5,6 +5,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
 import { showLeafChoiceSheet } from '../components/design-system/LeafChoiceSheet';
 import { openDriverExternalNavigation } from './DriverExternalNavigationService';
+import { rememberExternalNavigation } from './externalNavigationSession';
 
 const APP_KEY = 'leaf:driver-navigation-app:v1';
 const AUTO_KEY = 'leaf:driver-navigation-auto:v1';
@@ -94,13 +95,16 @@ export async function openPreferredDriverNavigation({
     if (!app) return null;
   }
   const bothLegs = app === 'google_maps' && phase === 'pickup' && hasCoordinate(finalDestinationCoordinate);
-  return openDriverExternalNavigation({
+  const openedApp = await openDriverExternalNavigation({
     coordinate: bothLegs ? finalDestinationCoordinate : coordinate,
     stopover: bothLegs ? coordinate : null,
     destinationLabel,
     phase,
     app,
   });
+  // Lembra o app aberto: no fim da corrida o recibo oferece fechar a navegação.
+  if (openedApp) await rememberExternalNavigation(openedApp);
+  return openedApp;
 }
 
 function hasCoordinate(value) {
