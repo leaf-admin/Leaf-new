@@ -268,6 +268,21 @@ class SafetyIncidentService {
       await this.markBookingForOpsReview(bookingId, incident, persistenceScope);
     }
 
+    if (persistenceScope.namespace !== 'sandbox') {
+      require('./bot-event-service').emit('safety.incident_created', {
+        incidentId,
+        ticketId: ticket?.id || null,
+        bookingId,
+        category: normalizedCategory,
+        priority,
+        userType
+      }, {
+        dedupeKey: incidentId,
+        severity: priority,
+        money: normalizedCategory === 'payment'
+      }).catch(() => null);
+    }
+
     return {
       ...incident,
       ticketId: ticket?.id || incident.ticketId || null,

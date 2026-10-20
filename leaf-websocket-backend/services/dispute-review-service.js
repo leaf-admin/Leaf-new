@@ -117,6 +117,14 @@ class DisputeReviewService {
     });
 
     await collection.doc(disputeId).set(dispute, { merge: true });
+    require('./bot-event-service').emit('dispute.opened', {
+      disputeId,
+      bookingId,
+      ticketId,
+      reasonCode,
+      userType,
+      status: 'OPEN'
+    }, { dedupeKey: disputeId, severity: 'N2', money: true }).catch(() => null);
     return dispute;
   }
 

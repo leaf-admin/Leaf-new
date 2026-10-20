@@ -155,6 +155,18 @@ function startHttpServer({
                     });
                 }
 
+                // Entrega os eventos do app para os bots do OpenBot (fila com novas tentativas).
+                if (boolEnv('BOT_EVENTS_ENABLED', false)) {
+                    try {
+                        require('../services/bot-event-service').startDispatcher();
+                    } catch (botEventsError) {
+                        logStructured('warn', 'Falha ao iniciar a entrega de eventos para os bots', {
+                            service: 'bot-events',
+                            error: botEventsError.message
+                        });
+                    }
+                }
+
                 // Reprocessa finalizacoes pendentes (outbox) para garantir persistencia no Firestore.
                 if (boolEnv('RIDE_FINALIZATION_OUTBOX_ENABLED', true)) {
                     try {
