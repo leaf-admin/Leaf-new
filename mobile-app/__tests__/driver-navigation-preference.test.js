@@ -51,7 +51,7 @@ describe('driver navigation preference', () => {
   it('opens Google Maps with driving directions', async () => {
     await setPreferredNavigationApp('google_maps');
     await openPreferredDriverNavigation({ coordinate: pickup });
-    expect(Linking.openURL).toHaveBeenCalledWith('https://maps.google.com/?daddr=-22.9208,-43.406&directionsmode=driving');
+    expect(Linking.openURL).toHaveBeenCalledWith('https://www.google.com/maps/dir/?api=1&destination=-22.9208,-43.406&travelmode=driving&dir_action=navigate');
   });
 
   it('does not open anything when the driver dismisses the first question', async () => {

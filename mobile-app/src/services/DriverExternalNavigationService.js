@@ -78,7 +78,9 @@ export async function openDriverExternalNavigation({
 
   const { latitude, longitude } = normalizeCoordinate(coordinate);
   const googleAppUrl = `comgooglemaps://?daddr=${latitude},${longitude}&directionsmode=driving`;
-  const googleWebUrl = `https://maps.google.com/?daddr=${latitude},${longitude}&directionsmode=driving`;
+  // Link universal do Google: abre o app instalado já na navegação de carro.
+  // "directionsmode" só vale no app de iOS; no Android o Maps abria "A pé".
+  const googleWebUrl = `https://www.google.com/maps/dir/?api=1&destination=${latitude},${longitude}&travelmode=driving&dir_action=navigate`;
   const wazeAppUrl = `waze://?ll=${latitude},${longitude}&navigate=yes`;
   const wazeWebUrl = `https://waze.com/ul?ll=${latitude},${longitude}&navigate=yes`;
   const appleMapsUrl = `http://maps.apple.com/?daddr=${latitude},${longitude}&dirflg=d`;
