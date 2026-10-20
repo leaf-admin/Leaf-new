@@ -23,8 +23,12 @@ export function isRideOverlayAvailable() {
 }
 
 /** Monta o que o balão e o Live Update mostram a partir da notificação da corrida. */
-export function buildRideOverlayState({ bookingId, status, ongoing = {}, actions = [] } = {}) {
-  const stageAction = (Array.isArray(actions) ? actions : []).find((action) => STAGE_ACTIONS.has(action?.identifier));
+export function buildRideOverlayState({ bookingId, status, ongoing = {}, actions = [], nearDestination = false } = {}) {
+  // "Encerrar" grande num balão sobre o mapa, a viagem inteira, é um toque acidental
+  // esperando para acontecer (e pelo balão não há a pergunta "Encerrar antes do
+  // destino?"): só aparece perto do destino.
+  const stageAction = (Array.isArray(actions) ? actions : []).find((action) =>
+    STAGE_ACTIONS.has(action?.identifier) && (action.identifier !== 'end_trip' || nearDestination));
   const countdownSeconds = Number(ongoing.countdownSeconds);
   const progress = ongoing.progress === null || ongoing.progress === undefined || !Number.isFinite(Number(ongoing.progress))
     ? -1

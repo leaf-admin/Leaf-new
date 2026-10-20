@@ -90,6 +90,7 @@ class PersistentRideNotificationService {
                 status: rideData.status,
                 ongoing,
                 actions,
+                nearDestination: rideData.nearDestination === true,
             });
             await rideOverlay.update(overlayState);
             if (await rideOverlay.showLiveUpdate(overlayState)) {

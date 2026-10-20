@@ -499,7 +499,12 @@ class PrototypeDriverTripAssistantService {
       destinationAddress: session.destinationAddress || '',
       pickupToleranceReached: Boolean(session.pickupToleranceReached),
       passengerName: session.passengerName || '',
-      bookingPhase: session.status
+      bookingPhase: session.status,
+      // O balão só oferece "Encerrar" perto do destino (a mesma regra do aviso).
+      nearDestination:
+        session.status === 'started' &&
+        Number.isFinite(Number(session.remainingMeters)) &&
+        Number(session.remainingMeters) <= DESTINATION_ALERT_METERS
     };
 
     if (PersistentRideNotificationService.isNotificationActive()) {
