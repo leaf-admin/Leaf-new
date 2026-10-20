@@ -12,8 +12,11 @@ const ACTIVE_STATUSES = new Set(['accepted', 'arrived', 'started']);
 // are already standing at the pickup point.
 const PICKUP_TOLERANCE_METERS = 80;
 const FALLBACK_SPEED_KM_PER_MIN = 0.45;
-// Distância do destino em que o motorista é avisado para encerrar a corrida.
-const DESTINATION_ALERT_METERS = 300;
+// Distância do destino em que o motorista é avisado para encerrar a corrida. A mesma
+// do encerramento sem a pergunta "Encerrar antes do destino?" (driverEarlyEndConfirm).
+// O fim da rota de um shopping ou de um aeroporto fica a centenas de metros do ponto
+// do lugar.
+const DESTINATION_ALERT_METERS = 500;
 const SHOULD_DISABLE_PERSISTENT_NOTIFICATIONS =
   Platform.OS === 'ios' && !Device.isDevice;
 

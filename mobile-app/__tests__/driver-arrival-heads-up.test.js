@@ -51,7 +51,7 @@ describe('arrival heads-up while the driver navigates in Waze or Google Maps', (
         actions: [{ identifier: 'arrived_at_pickup', buttonTitle: 'Cheguei ao embarque' }],
       });
     expect(resolveArrivalAlert({ bookingId: 'b1', status: 'started', remainingMeters: DESTINATION_ALERT_METERS + 1 })).toBeNull();
-    expect(resolveArrivalAlert({ bookingId: 'b1', status: 'started', remainingMeters: 120, destinationAddress: 'Via Parque Shopping - Barra' }))
+    expect(resolveArrivalAlert({ bookingId: 'b1', status: 'started', remainingMeters: 330, destinationAddress: 'Via Parque Shopping - Barra' }))
       .toMatchObject({
         key: 'b1:destination',
         title: 'Chegando ao destino',
