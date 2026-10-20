@@ -11,6 +11,7 @@ import kycService from '../../services/KYCService';
 import nativeAwsLivenessService from '../../services/NativeAwsLivenessService';
 import Logger from '../../utils/Logger';
 import { resolveKycLivenessErrorPresentation } from './kycLivenessErrorPresentation';
+import { leafButtonMetrics } from '../prototype/LeafRideUI';
 
 const STATUS = {
   PREPARING: 'preparing',
@@ -597,8 +598,8 @@ const styles = StyleSheet.create({
   primaryButton: {
     marginTop: 24,
     width: '100%',
-    minHeight: 48,
-    borderRadius: 28,
+    minHeight: leafButtonMetrics.height,
+    borderRadius: leafButtonMetrics.radius,
     backgroundColor: '#252525',
     alignItems: 'center',
     justifyContent: 'center',

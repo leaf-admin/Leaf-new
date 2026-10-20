@@ -13,6 +13,7 @@ import {
 import apiClient from '../../../services/httpClient';
 import onboardingTheme from '../common/onboardingTheme';
 import { toUserFriendlyMessage } from '../../../utils/friendlyErrorMessages';
+import { leafButtonMetrics } from '../../prototype/LeafRideUI';
 
 const QA_FIXED_OTP_BY_PHONE = new Map([
     ['+5521102938475', '992111'],
@@ -550,8 +551,8 @@ const styles = StyleSheet.create({
         top: 482
     },
     verifyButton: {
-        minHeight: 46,
-        borderRadius: 23,
+        minHeight: leafButtonMetrics.height,
+        borderRadius: leafButtonMetrics.radius,
         marginTop: 0,
         marginBottom: 0,
         shadowOpacity: 0,

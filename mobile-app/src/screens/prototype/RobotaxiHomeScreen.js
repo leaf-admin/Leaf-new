@@ -137,6 +137,7 @@ import { confirmDriverEarlyEnd } from './home/driverEarlyEndConfirm';
 import Logger from '../../utils/Logger';
 import { resolveHomeQuoteFailurePresentation } from './home/homeQuoteFailurePresentation';
 import { useLiveRouteTiming } from './liveRouteTiming';
+import { leafButtonMetrics } from '../../components/prototype/LeafRideUI';
 
 const { color } = robotaxiPrototypeTokens;
 const HOME_CARD_BOTTOM_OFFSET = 16;
@@ -10630,8 +10631,8 @@ const styles = StyleSheet.create({
   },
   homePickupSecondaryButton: {
     minWidth: 112,
-    height: 48,
-    borderRadius: 24,
+    height: leafButtonMetrics.height,
+    borderRadius: leafButtonMetrics.radius,
     borderWidth: 1,
     borderColor: '#E5E5E5',
     backgroundColor: '#FFFFFF',
@@ -10647,8 +10648,8 @@ const styles = StyleSheet.create({
   },
   homePickupPrimaryButton: {
     flex: 1,
-    height: 48,
-    borderRadius: 24,
+    height: leafButtonMetrics.height,
+    borderRadius: leafButtonMetrics.radius,
     backgroundColor: '#252525',
     alignItems: 'center',
     justifyContent: 'center',
@@ -10713,9 +10714,9 @@ const styles = StyleSheet.create({
   },
   driverKycUnavailableButton: {
     minWidth: 176,
-    height: 48,
+    height: leafButtonMetrics.height,
     marginTop: 24,
-    borderRadius: 24,
+    borderRadius: leafButtonMetrics.radius,
     backgroundColor: '#1A330E',
     alignItems: 'center',
     justifyContent: 'center',

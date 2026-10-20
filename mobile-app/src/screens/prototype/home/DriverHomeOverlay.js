@@ -1705,8 +1705,8 @@ const styles = StyleSheet.create({
   },
   driverPreferencesAction: {
     width: 56,
-    height: 56,
-    borderRadius: 28,
+    height: leafButtonMetrics.height,
+    borderRadius: leafButtonMetrics.radius,
     borderWidth: 1,
     borderColor: "#D6D9D6",
     backgroundColor: DRIVER_HOME_COLOR.sheet,

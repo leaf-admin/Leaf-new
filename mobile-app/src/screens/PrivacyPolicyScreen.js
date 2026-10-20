@@ -20,6 +20,7 @@ import {
   PrototypeMenuSurface,
 } from '../components/prototype/PrototypeMenuSurface';
 import robotaxiPrototypeTokens from '../components/design-system/robotaxiPrototypeTokens';
+import { leafButtonMetrics } from '../components/prototype/LeafRideUI';
 
 const { color, typography } = robotaxiPrototypeTokens;
 const SURFACE_TOP_PADDING = 16;
@@ -376,8 +377,8 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   accountDeletionButton: {
-    minHeight: 44,
-    borderRadius: 8,
+    minHeight: leafButtonMetrics.height,
+    borderRadius: leafButtonMetrics.radius,
     backgroundColor: '#c0392b',
     flexDirection: 'row',
     alignItems: 'center',

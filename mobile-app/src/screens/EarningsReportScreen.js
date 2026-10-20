@@ -57,6 +57,7 @@ import {
   buildTripFinancialTotals,
 } from './prototype/tripFinancialSummary';
 import { buildDriverFeeRows } from '../config/driverFeePolicy';
+import { leafButtonMetrics } from '../components/prototype/LeafRideUI';
 
 const MAIN_COLOR = colors.TAXIPRIMARY;
 const { color: tokenColor, elevation: tokenElevation } = robotaxiPrototypeTokens;
@@ -2429,8 +2430,8 @@ const styles = StyleSheet.create({
     lineHeight: 18,
   },
   primaryActionButton: {
-    height: 52,
-    borderRadius: 16,
+    height: leafButtonMetrics.height,
+    borderRadius: leafButtonMetrics.radius,
     backgroundColor: tokenColor.accent.strong,
     paddingHorizontal: 18,
     flexDirection: 'row',
@@ -2660,9 +2661,9 @@ const styles = StyleSheet.create({
   },
   kycUnavailableButton: {
     minWidth: 176,
-    height: 48,
+    height: leafButtonMetrics.height,
     marginTop: 24,
-    borderRadius: 24,
+    borderRadius: leafButtonMetrics.radius,
     backgroundColor: '#1A330E',
     alignItems: 'center',
     justifyContent: 'center',

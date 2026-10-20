@@ -14,6 +14,7 @@ import { normalizeErrorMessage } from '../../services/DriverActivationService';
 import Logger from '../../utils/Logger';
 import { resolveCanonicalLivenessGate } from './driverActivationCanonicalContract';
 import { ONB, OnboardingProgress } from '../../components/onboarding/onboardingKit';
+import { leafButtonMetrics } from '../../components/prototype/LeafRideUI';
 
 const { color, typography } = robotaxiPrototypeTokens;
 const SURFACE_TOP_PADDING = 20;
@@ -992,8 +993,8 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
   activationButton: {
-    minHeight: 56,
-    borderRadius: 28,
+    minHeight: leafButtonMetrics.height,
+    borderRadius: leafButtonMetrics.radius,
     backgroundColor: ONB.action,
     alignItems: 'center',
     justifyContent: 'center',

@@ -20,6 +20,7 @@ import {
 import { Camera, CameraView } from 'expo-camera';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import Logger from '../../utils/Logger';
+import { leafButtonMetrics } from '../prototype/LeafRideUI';
 
 const { width } = Dimensions.get('window');
 
@@ -409,8 +410,8 @@ const styles = StyleSheet.create({
   },
   primaryButton: {
     marginTop: 18,
-    height: 54,
-    borderRadius: 27,
+    height: leafButtonMetrics.height,
+    borderRadius: leafButtonMetrics.radius,
     backgroundColor: '#252525',
     alignItems: 'center',
     justifyContent: 'center',

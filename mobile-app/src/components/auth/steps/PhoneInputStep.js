@@ -28,6 +28,7 @@ import EditorialOnboardingScreen from '../common/EditorialOnboardingLayout';
 import { formatBrazilPhone } from '../../onboarding/onboardingSteps';
 import { toUserFriendlyError, toUserFriendlyMessage } from '../../../utils/friendlyErrorMessages';
 import { getReviewAccountInfo } from '../../../config/reviewAccounts';
+import { leafButtonMetrics } from '../../prototype/LeafRideUI';
 
 const { color, radius, spacing } = onboardingTheme;
 
@@ -930,8 +931,8 @@ const styles = StyleSheet.create({
         paddingBottom: spacing.xl
     },
     continueButton: {
-        minHeight: 46,
-        borderRadius: 23,
+        minHeight: leafButtonMetrics.height,
+        borderRadius: leafButtonMetrics.radius,
         marginTop: 0,
         marginBottom: 22,
         shadowOpacity: 0,
