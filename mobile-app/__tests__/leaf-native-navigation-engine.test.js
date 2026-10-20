@@ -297,3 +297,50 @@ describe('LeafNativeNavigationEngine', () => {
     ).toBeNull();
   });
 });
+
+describe('arrival in the Leaf navigation banner', () => {
+  it('says the driver arrived instead of "Siga até o destino · 0 m"', () => {
+    const arrived = buildLeafNativeNavigationState({
+      bookingId: 'booking_nav_arrival',
+      phase: 'destination',
+      status: 'started',
+      currentCoordinate: routeCoordinates[2],
+      targetCoordinate: routeCoordinates[2],
+      routeCoordinates,
+      steps,
+      totalDistanceMeters: 213,
+      totalDurationMinutes: 3,
+    });
+    expect(arrived.hasArrived).toBe(true);
+    expect(arrived.currentInstruction).toBe('Você chegou ao destino');
+    expect(arrived.arrivalHint).toBe('Deslize para encerrar a corrida');
+    expect(arrived.etaLabel).toBe('');
+
+    const pickup = buildLeafNativeNavigationState({
+      bookingId: 'booking_nav_arrival',
+      phase: 'pickup',
+      status: 'accepted',
+      currentCoordinate: routeCoordinates[2],
+      targetCoordinate: routeCoordinates[2],
+      routeCoordinates,
+      steps,
+      totalDistanceMeters: 213,
+      totalDurationMinutes: 3,
+    });
+    expect(pickup.currentInstruction).toBe('Você chegou ao embarque');
+
+    const onTheWay = buildLeafNativeNavigationState({
+      bookingId: 'booking_nav_arrival',
+      phase: 'destination',
+      status: 'started',
+      currentCoordinate: routeCoordinates[0],
+      targetCoordinate: routeCoordinates[2],
+      routeCoordinates,
+      steps,
+      totalDistanceMeters: 213,
+      totalDurationMinutes: 3,
+    });
+    expect(onTheWay.hasArrived).toBe(false);
+    expect(onTheWay.currentInstruction).not.toMatch(/chegou/);
+  });
+});

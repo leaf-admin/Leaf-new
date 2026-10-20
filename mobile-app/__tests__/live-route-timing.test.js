@@ -108,3 +108,31 @@ describe("live route timing", () => {
     expect(nextRouteState.arrivalTimestampMs).toBe(301000);
   });
 });
+
+describe('passenger trip card at the end of the ride and on the way', () => {
+  const {
+    formatArrivalClockLabelFromTimestamp: formatClock,
+    resolveDisplayEtaMinutes: displayEta,
+    resolveDistanceProgressState: distanceProgress,
+  } = require('../src/screens/prototype/liveRouteTiming');
+
+  it('never reads "Chegada às 21:00" when the ETA reaches zero', () => {
+    expect(formatClock(null)).toBe('Chegada prevista em instantes');
+    expect(formatClock(undefined)).toBe('Chegada prevista em instantes');
+    expect(formatClock(0)).toBe('Chegada prevista em instantes');
+    expect(displayEta(null)).toBeNull();
+  });
+
+  it('moves the car by distance driven, with the longest remaining distance as the total', () => {
+    let state = distanceProgress(null, { routeKey: 'b1', remainingKm: 12 });
+    expect(state.progress).toBe(0);
+    state = distanceProgress(state, { routeKey: 'b1', remainingKm: 9 });
+    expect(state.progress).toBeCloseTo(0.25);
+    state = distanceProgress(state, { routeKey: 'b1', remainingKm: 0.3 });
+    expect(state.progress).toBeCloseTo(0.975);
+    // A new ride starts over.
+    state = distanceProgress(state, { routeKey: 'b2', remainingKm: 5 });
+    expect(state.progress).toBe(0);
+    expect(distanceProgress(state, { routeKey: 'b2', remainingKm: null }).progress).toBeNull();
+  });
+});

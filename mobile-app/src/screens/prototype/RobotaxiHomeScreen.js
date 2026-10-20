@@ -135,6 +135,7 @@ import { fetchDynamicPricingQuote } from '../../services/runtime/pricingQuoteSer
 import { confirmDriverEarlyEnd } from './home/driverEarlyEndConfirm';
 import Logger from '../../utils/Logger';
 import { resolveHomeQuoteFailurePresentation } from './home/homeQuoteFailurePresentation';
+import { useLiveRouteTiming } from './liveRouteTiming';
 
 const { color } = robotaxiPrototypeTokens;
 const HOME_CARD_BOTTOM_OFFSET = 16;
@@ -4908,6 +4909,32 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     'operational_interrupted',
     'searching_replacement',
   ].includes(normalizedBookingStatus);
+  // Passenger live map: the pickup reads "Embarque" and, once on board, the
+  // destination reads "Destino · chegada às 14:32" (same clock as the trip card).
+  // A route end is the pickup only when it sits on the booked pickup point; on
+  // the way to the pickup the route starts at the car, which gets no tag.
+  const passengerMapTiming = useLiveRouteTiming({
+    routeKey: `${activeBookingId || 'passenger'}:map`,
+    remainingMinutes: tripDurationMin,
+    active: !isDriverRole && normalizedBookingStatus === 'started',
+  });
+  const passengerMapArrivalClock =
+    String(passengerMapTiming.arrivalClockLabel || '').match(/\b\d{1,2}:\d{2}\b/)?.[0] || '';
+  const passengerBookedPickup = activeBooking?.pickupLocation || activeBooking?.pickup || null;
+  const isPassengerBookedPickup = (point) => {
+    const meters = calculateHomePickupDistanceMeters(point, passengerBookedPickup);
+    return Number.isFinite(meters) && meters <= 60;
+  };
+  const passengerLiveMapTags = !isDriverRole && isLiveTripMapActive
+    ? {
+        origin: isPassengerBookedPickup(presentedRouteOrigin) ? 'Embarque' : null,
+        destination: isPassengerBookedPickup(presentedRouteDestination)
+          ? 'Embarque'
+          : normalizedBookingStatus === 'started' && passengerMapArrivalClock
+            ? `Destino · chegada às ${passengerMapArrivalClock}`
+            : 'Destino',
+      }
+    : null;
   const isPassengerPreBookingRoutePreview = Boolean(
     !isDriverRole &&
       !activeBookingId &&
@@ -9865,6 +9892,8 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
           destinationAddress={presentedRouteDestinationAddress}
           originLabel="Partida"
           originAddress={homePickupDisplayAddress || 'Sua localização atual'}
+          originMarkerLabel={passengerLiveMapTags?.origin || 'Partida'}
+          destinationMarkerLabel={passengerLiveMapTags?.destination || 'Chegada'}
           hideUserMarker={
             mapShouldHideUserMarker && !shouldRenderDriverCurrentLocationCar
           }
@@ -9876,9 +9905,9 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
           routeMainColor={routeMainColor}
           routeShadowColor={routeShadowColor}
           routeHighlightColor={routeHighlightColor}
-          hideRouteEndpointMarkers={isLiveTripMapActive && !isDriverRole}
-          // Driver: the route starts at the car, so only the target pin matters.
-          hideRouteOriginMarker={isLiveTripMapActive && isDriverRole}
+          // Driver: the route starts at the car, so only the target pin matters. The
+          // passenger sees the origin tag only when the route starts at the pickup.
+          hideRouteOriginMarker={isLiveTripMapActive && (isDriverRole || !passengerLiveMapTags?.origin)}
           // Driver live map: native dot/square pins move with the follow camera;
           // the projected label overlay lagged behind and floated near the car.
           compactRouteEndpoints={passengerHomePreviewRouteActive || (isLiveTripMapActive && isDriverRole)}

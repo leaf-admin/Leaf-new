@@ -1,5 +1,8 @@
 const DEFAULT_ADVANCE_THRESHOLD_METERS = 35;
 const DEFAULT_OFF_ROUTE_THRESHOLD_METERS = 100;
+// Remaining route distance at which the banner says the driver arrived, instead
+// of "Siga até o destino · 0 m". Same radius as marking arrival at the pickup.
+const ARRIVAL_BANNER_METERS = 80;
 const EARTH_RADIUS_METERS = 6371000;
 const CAMERA_LOOK_AHEAD_METERS = 55;
 export const NAVIGATION_CAMERA_ANCHOR_Y = 0.68;
@@ -992,8 +995,20 @@ export function buildLeafNativeNavigationState({
     Number.isFinite(distanceToRouteMeters) &&
     distanceToRouteMeters > offRouteThresholdMeters;
 
+  // Off the route the projected remaining distance can read zero: not an arrival.
+  const hasArrived =
+    !isOffRoute && Number.isFinite(remainingMeters) && remainingMeters <= ARRIVAL_BANNER_METERS;
+  const arrivalInstruction = normalizedPhase === 'destination'
+    ? 'Você chegou ao destino'
+    : 'Você chegou ao embarque';
+  const arrivalHint = normalizedPhase === 'destination'
+    ? 'Deslize para encerrar a corrida'
+    : 'Toque em Cheguei ao embarque';
+
   return {
     isVisible: true,
+    hasArrived,
+    arrivalHint: hasArrived ? arrivalHint : '',
     navigationKey: [
       String(bookingId || 'current'),
       normalizedPhase,
@@ -1005,7 +1020,7 @@ export function buildLeafNativeNavigationState({
     targetCoordinate: target,
     routeCoordinates: routeGeometryCoordinates,
     currentStepIndex,
-    currentInstruction: upcomingTarget.instruction,
+    currentInstruction: hasArrived ? arrivalInstruction : upcomingTarget.instruction,
     maneuverDistanceMeters,
     maneuverDistanceLabel: formatDistanceLabel(maneuverDistanceMeters),
     maneuverDistanceTargetKind: upcomingTarget.distanceTargetKind,
@@ -1017,7 +1032,7 @@ export function buildLeafNativeNavigationState({
     totalDistanceMeters: baselineMeters,
     remainingDistanceLabel: formatDistanceLabel(remainingMeters),
     remainingDurationMinutes,
-    etaLabel: formatEtaLabel(remainingDurationMinutes),
+    etaLabel: hasArrived ? '' : formatEtaLabel(remainingDurationMinutes),
     cameraHeadingDegrees,
     cameraZoom: resolveNavigationCameraZoom(
       normalizedSpeedKmh,

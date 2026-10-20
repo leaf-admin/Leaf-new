@@ -20,7 +20,7 @@ import {
   LeafAnimatedPressable,
   LeafDivider,
   LeafJourneyRoute,
-  LeafProgressBar,
+  LeafTripProgressTrack,
   LeafRouteProgress,
   leafButtonMetrics,
   leafRideColors,
@@ -1505,6 +1505,7 @@ export default function RobotaxiTripScreen({ navigation, route }) {
     remainingMinutes: resolvedTripDurationMin,
     totalMinutes: routeTotalMinutes,
     startedAt: routeStartedAt,
+    remainingKm: resolvedTripDistanceKm,
     active: isStarted,
   });
   const stableEtaValue =
@@ -2124,8 +2125,9 @@ export default function RobotaxiTripScreen({ navigation, route }) {
             dense
           />
           <View style={styles.startedProgressTrack} testID="passenger-trip-route-progress">
-            <LeafProgressBar
+            <LeafTripProgressTrack
               progress={routeProgress}
+              progressKey={liveRouteKey || 'passenger-trip-route'}
               fillTestID={passengerCardFieldTestIDs.route_progress}
             />
             <View style={styles.startedProgressMetaRow}>
@@ -2317,8 +2319,9 @@ export default function RobotaxiTripScreen({ navigation, route }) {
         />
         {isStarted ? (
           <View style={styles.startedProgressTrack} testID="passenger-trip-route-progress">
-            <LeafProgressBar
+            <LeafTripProgressTrack
               progress={routeProgress}
+              progressKey={liveRouteKey || 'passenger-trip-route'}
               fillTestID={passengerCardFieldTestIDs.route_progress}
             />
             <Text
