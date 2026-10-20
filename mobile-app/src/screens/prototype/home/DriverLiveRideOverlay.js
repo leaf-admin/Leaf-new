@@ -640,6 +640,11 @@ function DriverLiveRideOverlay({
     ? resolveOperationalLegNetAmount(operationalContinuation)
     : resolveDisplayNetAmount(activeRide, driverTripMeta);
   const offerFareSignal = resolveFareSignal(offer?.fareSignal || null);
+  // Pedágio da cotação, já incluso no líquido: o motorista vê o que é repasse.
+  const offerTollFee = Number(offer?.tollFee ?? offer?.estimatedTollFee);
+  const offerTollLabel = Number.isFinite(offerTollFee) && offerTollFee > 0
+    ? `Inclui ${formatCurrency(offerTollFee)} de pedágio`
+    : "";
   const fareLabel = hasActiveRide
     ? Number.isFinite(activeRideNetAmount)
       ? formatCurrency(activeRideNetAmount)
@@ -1639,6 +1644,16 @@ function DriverLiveRideOverlay({
                   </Text>
                 </View>
               ) : null}
+              {offerTollLabel ? (
+                <View
+                  style={styles.offerTollPill}
+                  testID="driver-live-offer-toll"
+                  accessibilityLabel={offerTollLabel}
+                >
+                  <Ionicons name="cash-outline" size={13} color="#1A330E" />
+                  <Text style={styles.offerTollText} numberOfLines={1}>{offerTollLabel}</Text>
+                </View>
+              ) : null}
               <Text style={styles.offerTripLine} numberOfLines={1}>
                 {offerPickupEtaLabel} até o embarque · {distanceLabel} · {offerTripDurationLabel}
               </Text>
@@ -2159,6 +2174,21 @@ const styles = StyleSheet.create({
     flexShrink: 1,
   },
   offerFareLabel: { ...leafTypography.medium, fontSize: 15, color: '#6A6A6A' },
+  offerTollPill: {
+    alignSelf: "flex-start",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    minHeight: 26,
+    maxWidth: "100%",
+    paddingHorizontal: 10,
+    borderRadius: 13,
+    borderWidth: 1,
+    borderColor: "#E7EFE1",
+    backgroundColor: "#F1F5EE",
+    marginTop: 6,
+  },
+  offerTollText: { ...leafTypography.medium, fontSize: 12, lineHeight: 16, color: "#1A330E", flexShrink: 1 },
   offerTripLine: { ...leafTypography.regular, marginTop: 2, fontSize: 15, lineHeight: 20, color: '#4B5148' },
   offerRoute: { marginTop: 12 },
   offerActions: { marginTop: 14, flexDirection: 'row', alignItems: 'center', gap: 10 },

@@ -538,6 +538,34 @@ describe('driver-notification-dispatcher timeout cleanup', () => {
     }));
   });
 
+  it('sends the quote toll with the offer so the card can show it as included', async () => {
+    const offerFor = async (bookingExtra) => {
+      const emit = jest.fn();
+      const to = jest.fn(() => ({ emit }));
+      dispatcher = new DriverNotificationDispatcher(redis, { to });
+      dispatcher.getDispatchability = jest.fn().mockResolvedValue({
+        ok: true,
+        state: RideStateManager.STATES.SEARCHING,
+        bookingData: {
+          bookingId: 'booking_123',
+          customerId: 'customer_1',
+          pickupLocation: JSON.stringify({ lat: -22.857, lng: -43.309 }),
+          destinationLocation: JSON.stringify({ lat: -22.9, lng: -43.2 }),
+          estimatedFare: '48.21',
+          ...bookingExtra,
+        },
+      });
+      driverLockManager.acquireLock.mockResolvedValueOnce(false);
+      driverLockManager.getLockedBooking.mockResolvedValue('booking_123');
+      driverLockManager.renewLock.mockResolvedValue(true);
+      await dispatcher.notifyDriver('driver_1', 'booking_123', { bookingId: 'booking_123', customerId: 'customer_1' });
+      return emit.mock.calls.find(([event]) => event === 'newRideRequest')?.[1];
+    };
+
+    expect((await offerFor({ tollFee: '8.95' })).estimatedTollFee).toBe(8.95);
+    expect(await offerFor({ tollFee: '0' })).not.toHaveProperty('estimatedTollFee');
+  });
+
   it('releases a renewed same-booking lock when post-lock validation rejects the offer', async () => {
     dispatcher.getDispatchability = jest.fn().mockResolvedValue({
       ok: true,

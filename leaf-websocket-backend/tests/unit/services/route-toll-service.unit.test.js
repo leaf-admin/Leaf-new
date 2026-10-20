@@ -101,6 +101,10 @@ describe('route-toll-service', () => {
       expect(findCrossedTolls(southbound).map((toll) => toll.id)).toEqual(['p10b_transolimpica']);
     });
 
+    test('cobra a tarifa atual de carro (R$ 9,95, conferida em 2026-10-20)', () => {
+      expect(findCrossedTolls(southbound)[0].amount).toBe(9.95);
+    });
+
     test('oscilação de poucos metros para o norte não conta a P10a', () => {
       const jitter = [
         { latitude: -22.91942, longitude: -43.39674 },
