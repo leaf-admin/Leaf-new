@@ -124,7 +124,7 @@ const DRIVER_ITEMS = [
     openDirect: true,
     roles: ['driver'],
     section: 'operations',
-    subtitle: 'Saldo, taxa efetiva e leitura financeira'
+    subtitle: 'Saldo, saques e taxas'
   },
   {
     key: 'driver-history',

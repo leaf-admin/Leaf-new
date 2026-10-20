@@ -139,7 +139,7 @@ export default function RobotaxiDriverDocumentsScreen({ navigation, route }) {
                       icon="document-text-outline"
                       title={doc.title}
                       subtitle={doc.subtitle}
-                      badge={status}
+                      badge={status ? status.charAt(0).toUpperCase() + status.slice(1) : status}
                       badgeTone={
                         status === 'aprovado'
                           ? 'success'

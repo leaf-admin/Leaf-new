@@ -15,6 +15,7 @@ import Logger from '../../utils/Logger';
 import { resolveCanonicalLivenessGate } from './driverActivationCanonicalContract';
 import { ONB, OnboardingProgress } from '../../components/onboarding/onboardingKit';
 import { leafButtonMetrics } from '../../components/prototype/LeafRideUI';
+import { formatVehicleDisplayText } from '../../utils/vehicleDisplayText';
 
 const { color, typography } = robotaxiPrototypeTokens;
 const SURFACE_TOP_PADDING = 20;
@@ -194,7 +195,11 @@ function resolveActivationVehicleLabel({ driverActivationRemote, documentAnalysi
     crlvData?.placa,
     crlvData?.vehiclePlate,
   );
-  const modelAndColor = [model, colorLabel].filter(Boolean).join(' ');
+  // O cadastro vem em caixa alta ("NOVA SAVEIRO RB MBVS BRANCO"): mostra como no resto do app.
+  const modelAndColor = [
+    model && formatVehicleDisplayText(model, { maxWords: 2 }),
+    colorLabel && formatVehicleDisplayText(colorLabel, { maxWords: 2 }),
+  ].filter(Boolean).join(' · ');
 
   if (modelAndColor && plate) {
     return `${modelAndColor} · ${plate}`;

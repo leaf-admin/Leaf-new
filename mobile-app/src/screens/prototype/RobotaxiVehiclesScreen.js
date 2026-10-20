@@ -25,6 +25,7 @@ import { LeafButton, LeafEmptyState, LeafPill, leafRideColors } from '../../comp
 import { usePrototypeMapOcclusion } from './prototypeMapOcclusion';
 import { usePrototypeRideRuntime } from './prototypeRideRuntime';
 import MobileVehicleService from '../../services/MobileVehicleService';
+import { formatVehicleDisplayText } from '../../utils/vehicleDisplayText';
 
 const SURFACE_TOP_PADDING = 20;
 const SURFACE_BOTTOM_PADDING = 18;
@@ -281,8 +282,8 @@ export default function RobotaxiVehiclesScreen({ navigation, route }) {
                         <TouchableOpacity style={styles.vehicleHeader} onPress={() => setExpandedId(expanded ? '' : vehicle.id)} testID={`robotaxi-vehicle-${vehicle.id}`}>
                           <LeafObjectIcon name="vehicle" size={48} />
                           <View style={styles.vehicleCopy}>
-                            <Text style={styles.vehicleModel}>{[vehicle.brand, vehicle.model].filter(Boolean).join(' ') || 'Veículo'}</Text>
-                            <Text style={styles.vehiclePlate}>{vehicle.plate || 'Placa pendente'} · {[vehicle.color, vehicle.year].filter(Boolean).join(' · ') || 'Ano pendente'}</Text>
+                            <Text style={styles.vehicleModel}>{formatVehicleDisplayText([vehicle.brand, vehicle.model].filter(Boolean).join(' ')) || 'Veículo'}</Text>
+                            <Text style={styles.vehiclePlate}>{vehicle.plate || 'Placa pendente'} · {[vehicle.color && formatVehicleDisplayText(vehicle.color, { maxWords: 2 }), vehicle.year].filter(Boolean).join(' · ') || 'Ano pendente'}</Text>
                           </View>
                           <LeafPill label={vehicle.isActive ? 'Selecionado' : status} tone={vehicle.isActive || status === 'Aprovado' ? 'leaf' : 'warning'} />
                         </TouchableOpacity>
