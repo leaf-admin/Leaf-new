@@ -13,6 +13,8 @@ import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.RippleDrawable
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.text.TextUtils
 import android.util.TypedValue
 import android.view.Gravity
@@ -33,15 +35,19 @@ import kotlin.math.min
 /**
  * A corrida por cima do app de navegação, no lugar de uma notificação aberta no topo
  * da tela. Um só por processo. Toque no card abre o Leaf; o botão abre o Leaf já
- * executando a ação da etapa (Cheguei, Iniciar, Encerrar). Arrastar para cima recolhe
- * numa pílula pequena (para liberar a faixa de instruções do Waze/Maps); tocar ou
- * puxar a pílula para baixo abre de novo.
+ * executando a ação da etapa (Cheguei, Iniciar, Encerrar). Depois de 8 s (ou ao
+ * arrastar para cima) recolhe numa pílula logo abaixo da faixa de instruções do
+ * Waze/Maps; abre de novo ao tocar na pílula, quando a etapa muda ou quando o botão
+ * da etapa aparece. A pílula pode ser arrastada na vertical e guarda a posição.
  */
 @SuppressLint("StaticFieldLeak")
 object LeafRideOverlayWindow {
   private const val REQUEST_OPEN = 7710
   private const val REQUEST_ACTION = 7711
   private const val MAX_CARD_WIDTH_DP = 480
+  private const val AUTO_COLLAPSE_MS = 8000L
+  /** Abaixo da faixa de instruções do Waze e do Google Maps (sem faixas de pista). */
+  private const val PILL_DEFAULT_Y_FRACTION = 0.2
 
   /** Cores do app (robotaxiPrototypeTokens): claro de dia, "Leaf Ambient" à noite. */
   private class Palette(
@@ -103,6 +109,10 @@ object LeafRideOverlayWindow {
   private var collapsed = false
   private var palette: Palette = LIGHT
   private var fonts: Fonts? = null
+  private var renderedActionId: String? = null
+  private var pillY: Int? = null
+  private val mainHandler = Handler(Looper.getMainLooper())
+  private val autoCollapse = Runnable { root?.let { setCollapsed(it.context, true) } }
 
   fun show(context: Context, next: LeafRideOverlayState) {
     state = next
@@ -124,14 +134,11 @@ object LeafRideOverlayWindow {
           @Suppress("DEPRECATION") WindowManager.LayoutParams.TYPE_PHONE,
         WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
         PixelFormat.TRANSLUCENT
-      ).apply {
-        gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
-        x = 0
-        y = statusBarHeight(context)
-      }
+      )
       params = layoutParams
       applyMode(context, layoutParams)
       windowManager.addView(root, layoutParams)
+      if (!collapsed) scheduleAutoCollapse()
     }
     render(context, next)
   }
@@ -143,6 +150,7 @@ object LeafRideOverlayWindow {
   }
 
   private fun removeView() {
+    mainHandler.removeCallbacks(autoCollapse)
     val view = root ?: return
     try {
       (view.context.getSystemService(Context.WINDOW_SERVICE) as WindowManager).removeView(view)
@@ -160,6 +168,7 @@ object LeafRideOverlayWindow {
     actionView = null
     params = null
     renderedLegKey = null
+    renderedActionId = null
   }
 
   private fun render(context: Context, next: LeafRideOverlayState) {
@@ -170,6 +179,9 @@ object LeafRideOverlayWindow {
     pillTextView?.text = if (eta.isNotEmpty()) eta else next.title
     subtitleView?.text = listOf(next.subtitle, next.body).filter { it.isNotBlank() }.joinToString(" · ")
     subtitleView?.visibility = if (subtitleView?.text.isNullOrBlank()) View.GONE else View.VISIBLE
+    val stageChanged = renderedLegKey != null && renderedLegKey != next.legKey
+    val actionAppeared = next.actionId.isNotBlank() && next.actionId != renderedActionId
+    renderedActionId = next.actionId
     if (renderedLegKey != next.legKey) {
       renderedLegKey = next.legKey
       trackView?.reset()
@@ -188,6 +200,15 @@ object LeafRideOverlayWindow {
         setOnClickListener(null)
       }
     }
+    if (stageChanged || actionAppeared) {
+      // Etapa nova ou botão novo: mostra o card aberto por mais 8 s.
+      if (collapsed) setCollapsed(context, false) else scheduleAutoCollapse()
+    }
+  }
+
+  private fun scheduleAutoCollapse() {
+    mainHandler.removeCallbacks(autoCollapse)
+    mainHandler.postDelayed(autoCollapse, AUTO_COLLAPSE_MS)
   }
 
   private fun setCollapsed(context: Context, value: Boolean) {
@@ -205,15 +226,24 @@ object LeafRideOverlayWindow {
       return
     }
     view.animate().alpha(1f).translationY(0f).setDuration(180).setInterpolator(DecelerateInterpolator()).start()
+    if (value) mainHandler.removeCallbacks(autoCollapse) else scheduleAutoCollapse()
   }
 
   private fun applyMode(context: Context, layoutParams: WindowManager.LayoutParams) {
     card?.visibility = if (collapsed) View.GONE else View.VISIBLE
     pill?.visibility = if (collapsed) View.VISIBLE else View.GONE
-    layoutParams.width = if (collapsed) {
-      WindowManager.LayoutParams.WRAP_CONTENT
+    // A margem em volta do card deixa a sombra aparecer dentro da janela.
+    val shadowRoom = dp(context, 8)
+    root?.setPadding(shadowRoom, dp(context, 4), shadowRoom, shadowRoom + dp(context, 4))
+    layoutParams.gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+    layoutParams.x = 0
+    if (collapsed) {
+      layoutParams.width = WindowManager.LayoutParams.WRAP_CONTENT
+      layoutParams.y = pillY ?: (context.resources.displayMetrics.heightPixels * PILL_DEFAULT_Y_FRACTION).toInt()
     } else {
-      min(context.resources.displayMetrics.widthPixels, dp(context, MAX_CARD_WIDTH_DP))
+      layoutParams.width = min(context.resources.displayMetrics.widthPixels, dp(context, MAX_CARD_WIDTH_DP))
+      // A janela já começa abaixo da barra de status.
+      layoutParams.y = 0
     }
   }
 
@@ -221,10 +251,7 @@ object LeafRideOverlayWindow {
   private fun build(context: Context) {
     val p = palette
     val f = fonts ?: Fonts.load(context).also { fonts = it }
-    // A margem em volta do card deixa a sombra aparecer dentro da janela.
-    val shadowRoom = dp(context, 8)
     val container = FrameLayout(context).apply {
-      setPadding(shadowRoom, dp(context, 4), shadowRoom, shadowRoom + dp(context, 4))
       clipToPadding = false
       clipChildren = false
     }
@@ -354,16 +381,15 @@ object LeafRideOverlayWindow {
     val pillView = LinearLayout(context).apply {
       orientation = LinearLayout.HORIZONTAL
       gravity = Gravity.CENTER_VERTICAL
-      setPadding(dp(context, 12), dp(context, 8), dp(context, 14), dp(context, 8))
+      setPadding(dp(context, 12), 0, dp(context, 14), 0)
       background = GradientDrawable().apply {
-        cornerRadius = dp(context, 20).toFloat()
-        setColor(p.panel)
-        setStroke(dp(context, 1), p.border)
+        cornerRadius = dp(context, 18).toFloat()
+        setColor(p.accent)
       }
       elevation = dp(context, 6).toFloat()
       layoutParams = FrameLayout.LayoutParams(
         ViewGroup.LayoutParams.WRAP_CONTENT,
-        ViewGroup.LayoutParams.WRAP_CONTENT,
+        dp(context, 36),
         Gravity.CENTER_HORIZONTAL
       )
       visibility = View.GONE
@@ -371,24 +397,23 @@ object LeafRideOverlayWindow {
     val pillDot = View(context).apply {
       background = GradientDrawable().apply {
         shape = GradientDrawable.OVAL
-        setColor(LIME)
-        setStroke(dp(context, 2), p.accent)
+        setColor(if (p === DARK) p.onAccent else LIME)
       }
-      layoutParams = LinearLayout.LayoutParams(dp(context, 10), dp(context, 10)).apply {
-        marginEnd = dp(context, 8)
+      layoutParams = LinearLayout.LayoutParams(dp(context, 8), dp(context, 8)).apply {
+        marginEnd = dp(context, 6)
       }
     }
     pillTextView = TextView(context).apply {
-      setTextColor(p.text)
+      setTextColor(p.onAccent)
       setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
       typeface = f.semiBold
       maxLines = 1
       ellipsize = TextUtils.TruncateAt.END
-      maxWidth = dp(context, 200)
+      maxWidth = dp(context, 140)
       includeFontPadding = false
     }
-    pillView.addView(carIcon(context, p.icon, 18), LinearLayout.LayoutParams(dp(context, 18), dp(context, 18)).apply {
-      marginEnd = dp(context, 8)
+    pillView.addView(carIcon(context, p.onAccent, 18), LinearLayout.LayoutParams(dp(context, 18), dp(context, 18)).apply {
+      marginEnd = dp(context, 6)
     })
     pillView.addView(pillDot)
     pillView.addView(pillTextView)
@@ -403,41 +428,61 @@ object LeafRideOverlayWindow {
   }
 
   /**
-   * Toque abre o Leaf (ou abre a pílula). Arrastar para cima recolhe, para baixo
-   * abre. O card acompanha o dedo só na vertical e volta ao lugar ao soltar.
+   * Card aberto: toque abre o Leaf; arrastar para cima recolhe (o card acompanha o
+   * dedo e volta ao lugar). Pílula: toque abre o card; arrastar move a pílula na
+   * vertical e a posição fica guardada. Com o dedo no card, o recolhimento espera.
    */
   @SuppressLint("ClickableViewAccessibility")
   private fun attachGestures(context: Context, container: FrameLayout) {
     val touchSlop = ViewConfiguration.get(context).scaledTouchSlop
     val swipeDistance = dp(context, 36)
     var downRawY = 0f
+    var startY = 0
     var dragging = false
     container.setOnTouchListener { view, event ->
+      val layoutParams = params ?: return@setOnTouchListener false
       when (event.actionMasked) {
         MotionEvent.ACTION_DOWN -> {
           downRawY = event.rawY
+          startY = layoutParams.y
           dragging = false
+          mainHandler.removeCallbacks(autoCollapse)
           true
         }
         MotionEvent.ACTION_MOVE -> {
           val dy = event.rawY - downRawY
           if (!dragging && abs(dy) > touchSlop) dragging = true
-          if (dragging && !collapsed) view.translationY = min(0f, dy)
+          if (dragging && collapsed) {
+            val maxY = context.resources.displayMetrics.heightPixels - view.height
+            layoutParams.y = (startY + dy).toInt().coerceIn(0, maxY.coerceAtLeast(0))
+            pillY = layoutParams.y
+            try {
+              (context.getSystemService(Context.WINDOW_SERVICE) as WindowManager).updateViewLayout(view, layoutParams)
+            } catch (_: Exception) {
+              // janela já removida
+            }
+          } else if (dragging) {
+            view.translationY = min(0f, dy)
+          }
           true
         }
         MotionEvent.ACTION_UP -> {
           val dy = event.rawY - downRawY
-          view.animate().translationY(0f).setDuration(120).start()
+          if (!collapsed) view.animate().translationY(0f).setDuration(120).start()
           when {
-            dragging && dy <= -swipeDistance && !collapsed -> setCollapsed(context, true)
-            dragging && dy >= swipeDistance && collapsed -> setCollapsed(context, false)
-            !dragging && collapsed -> setCollapsed(context, false)
+            collapsed && !dragging -> setCollapsed(context, false)
+            collapsed -> Unit
+            dragging && dy <= -swipeDistance -> setCollapsed(context, true)
             !dragging -> send(LeafRideOverlayState.openLeafIntent(context, null, state?.bookingId ?: "", REQUEST_OPEN))
           }
+          if (!collapsed) scheduleAutoCollapse()
           true
         }
         MotionEvent.ACTION_CANCEL -> {
-          view.animate().translationY(0f).setDuration(120).start()
+          if (!collapsed) {
+            view.animate().translationY(0f).setDuration(120).start()
+            scheduleAutoCollapse()
+          }
           true
         }
         else -> false
@@ -464,11 +509,6 @@ object LeafRideOverlayWindow {
   private fun paletteFor(context: Context): Palette {
     val night = context.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK
     return if (night == Configuration.UI_MODE_NIGHT_YES) DARK else LIGHT
-  }
-
-  private fun statusBarHeight(context: Context): Int {
-    val id = context.resources.getIdentifier("status_bar_height", "dimen", "android")
-    return if (id > 0) context.resources.getDimensionPixelSize(id) else dp(context, 24)
   }
 
   private fun dp(context: Context, value: Int): Int =
