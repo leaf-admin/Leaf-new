@@ -135,6 +135,34 @@ describe('LocationBufferService', () => {
     );
   });
 
+  it('passes the Android mocked flag of a background fix to the server', async () => {
+    await locationBufferService.setActiveTripContext({
+      bookingId: 'booking_1',
+      driverId: 'driver_1',
+      tripStatus: 'started',
+    });
+
+    await locationBufferService.addDriverLocationFromBackground({ lat: -22.92, lng: -43.18, mocked: true });
+    await locationBufferService.addDriverLocationFromBackground({ lat: -22.93, lng: -43.19 });
+
+    const sent = socketManager.emitToServer.mock.calls.map(([, payload]) => payload);
+    expect(sent[0]).toMatchObject({ lat: -22.92, mocked: true });
+    expect(sent[1]).not.toHaveProperty('mocked');
+  });
+
+  it('keeps the mocked flag on buffered fixes sent later as a batch', async () => {
+    socketManager.isConnected.mockReturnValue(false);
+    await locationBufferService.addLocation(
+      'booking_1',
+      { lat: -22.92, lng: -43.18, capturedAt: NOW, seq: 1, mocked: true },
+      'driver',
+      { driverId: 'driver_1' },
+    );
+
+    const [stored] = await locationBufferService.getBuffer();
+    expect(stored.mocked).toBe(true);
+  });
+
   it('drops a background fix only when no ride is active', async () => {
     const result = await locationBufferService.addDriverLocationFromBackground({ lat: -22.92, lng: -43.18 });
 

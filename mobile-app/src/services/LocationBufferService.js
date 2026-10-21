@@ -107,7 +107,8 @@ class LocationBufferService {
                 driverId: location.driverId || options.driverId || null,
                 seq: Number.isFinite(Number(location.seq)) ? Number(location.seq) : null,
                 capturedAt: location.capturedAt || location.timestamp || Date.now(),
-                source: location.source || 'foreground'
+                source: location.source || 'foreground',
+                mocked: location.mocked === true
             };
 
             // Conectado: envia direto e não toca no armazenamento. Antes cada posição
@@ -327,7 +328,8 @@ class LocationBufferService {
             accuracy: location.accuracy || null,
             timestamp: location.timestamp || now,
             isInTrip: false,
-            source: 'background_presence'
+            source: 'background_presence',
+            ...(location.mocked === true ? { mocked: true } : {})
         });
 
         return { buffered: false, sent: true, reason: 'presence_sent' };
@@ -352,7 +354,8 @@ class LocationBufferService {
             tripId: context.tripId || context.bookingId,
             seq,
             capturedAt: location.timestamp || Date.now(),
-            source: 'background_task'
+            source: 'background_task',
+            mocked: location.mocked === true
         // Sent right away when connected (it stays buffered otherwise). These fixes used to be
         // only stored until the app came back to the front: with the driver navigating in
         // another app, the server and the passenger's map received nothing for the whole time.
@@ -395,7 +398,8 @@ class LocationBufferService {
                     tripId: locationData.tripId,
                     seq: locationData.seq,
                     capturedAt: locationData.capturedAt,
-                    source: locationData.source || 'foreground'
+                    source: locationData.source || 'foreground',
+                    ...(locationData.mocked === true ? { mocked: true } : {})
                 });
             } else {
                 // Customer - enviar localização do passageiro

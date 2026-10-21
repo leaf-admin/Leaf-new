@@ -1097,6 +1097,8 @@ let runtimeChatCatchUpPromise = null;
 let runtimeHeadingSubscription = null;
 let runtimeHeadingWatcherStarted = false;
 let runtimeForegroundLocationSubscription = null;
+// Última posição do GPS marcada como simulada pelo Android (app de GPS falso).
+let runtimeLastPositionMocked = false;
 let runtimeForegroundLocationWatcherStarted = false;
 let runtimeDriverHeartbeatInterval = null;
 let runtimeDriverRoutePlaybackInterval = null;
@@ -3290,6 +3292,7 @@ async function startForegroundLocationWatcher() {
         const latitude = Number(position?.coords?.latitude);
         const longitude = Number(position?.coords?.longitude);
         const nextHeading = normalizeHeading(position?.coords?.heading);
+        runtimeLastPositionMocked = position?.mocked === true;
         const nextSpeed = Number(position?.coords?.speed);
 
         if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
@@ -18455,7 +18458,10 @@ async function pushDriverLocationNow(profile, socketInstance = null) {
     location.lng,
     location.heading,
     location.speed,
-    routePlanShare?.payload || {},
+    {
+      ...(routePlanShare?.payload || {}),
+      ...(runtimeLastPositionMocked ? { mocked: true } : {}),
+    },
   );
   if (routePlanShare?.signature) {
     runtimeLastSharedDriverRoutePlanKey = routePlanShare.signature;
