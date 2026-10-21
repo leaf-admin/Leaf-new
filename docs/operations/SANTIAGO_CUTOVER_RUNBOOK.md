@@ -127,6 +127,15 @@ During a real incident, add the DNS step:
 - **Until DNS moves:** clients keep resolving Santiago, so a full Santiago outage is still visible to them for up to the TTL.
 - **If Santiago is unreachable:** skip its stop step. Contabo's Redis keeps only what had replicated, which is seconds behind.
 
+**The Contabo replica survives restarts.** Contabo's Redis gets `--masterauth` and `--replicaof $REDIS_REPLICAOF` from its compose. `REDIS_REPLICAOF=10.77.0.1 6379` lives in Contabo's `.env`.
+- `failover-to-contabo.sh` empties it, so a restart during the failover keeps Contabo the master.
+- `failback-to-santiago.sh` writes it back.
+
+Background: from about 18/10 to 21/10 the replica was off.
+- `replicaof` and `masterauth` had been set at runtime only, so a Contabo restart dropped them.
+- During that time the daily backup copied stale data, and a failover would have started from 18/10 data.
+- `host-health` reported `redisReplica: fail` the whole time. The Uptime Monitor opened #346, but the alert reached only GitHub. Host alerts must also reach Discord.
+
 **Keep the fallback current.** `deploy-santiago-docker.sh` does this after each successful rollout (set `REFRESH_CONTABO_FALLBACK=false` to skip). A failure there only warns; rerun the script by hand.
 - `scripts/ops/refresh-contabo-standby.sh` copies the code tree to Contabo, excluding `.env*`, credentials, `certbot`, `ssl`, `docker-compose*.yml` and `nginx*.conf`. It then runs `docker compose ... build` for the gateway and worker services. It never runs `up`. It takes about 4.5 minutes.
 - `scripts/ops/sync-api-cert-to-contabo.sh` copies the `api`/`socket` certificate that Santiago renews into Contabo's certbot tree, runs `nginx -t` and reloads nginx. It does nothing when Contabo already has the same certificate.
