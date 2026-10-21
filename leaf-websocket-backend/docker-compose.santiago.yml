@@ -59,6 +59,12 @@ services:
     depends_on: !override
       - websocket
       - websocket-gateway-2
+    # Load balancer listeners (PROXY protocol). Published on the VPC address only:
+    # set SANTIAGO_LB_BIND_IP to this node's VPC IP; the loopback default keeps
+    # them closed until the load balancer exists.
+    ports:
+      - "${SANTIAGO_LB_BIND_IP:-127.0.0.1}:8080:8080"
+      - "${SANTIAGO_LB_BIND_IP:-127.0.0.1}:8443:8443"
     volumes: !override
       - ./nginx.santiago.conf:/etc/nginx/nginx.conf:ro
       - ./nginx.d:/etc/nginx/leaf.d:ro
