@@ -8,16 +8,57 @@
  *
  * Uso:
  *   node scripts/create-admin-profile-user.js
- *   node scripts/create-admin-profile-user.js --profile support --email suporte@leaf.app.br --password "SenhaForte123!" --name "Equipe Suporte"
+ *   node scripts/create-admin-profile-user.js --profile support --email suporte@leaf.app.br --name "Equipe Suporte"
  */
 
 const bcrypt = require('bcryptjs');
 const admin = require('firebase-admin');
 const readline = require('readline');
+const fs = require('fs');
+const path = require('path');
+
+function parseServiceAccountJson(rawValue) {
+  try {
+    const parsed = JSON.parse(rawValue);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      throw new Error('invalid_service_account_shape');
+    }
+    return parsed;
+  } catch (_error) {
+    throw new Error('Firebase credentials JSON inválido');
+  }
+}
+
+function loadServiceAccount() {
+  const inlineCredentials =
+    process.env.FIREBASE_SERVICE_ACCOUNT_JSON ||
+    process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON;
+  if (inlineCredentials) return parseServiceAccountJson(inlineCredentials);
+
+  const configuredPath = String(process.env.GOOGLE_APPLICATION_CREDENTIALS || '').trim();
+  if (!configuredPath) {
+    throw new Error('Credencial Firebase ausente; configure GOOGLE_APPLICATION_CREDENTIALS');
+  }
+  const credentialsPath = path.isAbsolute(configuredPath) ? configuredPath : path.resolve(configuredPath);
+
+  if (!fs.existsSync(credentialsPath)) {
+    throw new Error('Credencial Firebase ausente; configure GOOGLE_APPLICATION_CREDENTIALS');
+  }
+
+  try {
+    return parseServiceAccountJson(fs.readFileSync(credentialsPath, 'utf8'));
+  } catch (_error) {
+    throw new Error('Credencial Firebase indisponível ou inválida');
+  }
+}
 
 try {
-  const firebaseConfig = require('../firebase-config');
-  firebaseConfig.initializeFirebase();
+  if (!admin.apps.length) {
+    admin.initializeApp({
+      credential: admin.credential.cert(loadServiceAccount()),
+      databaseURL: process.env.FIREBASE_DATABASE_URL || 'https://leaf-reactnative-default-rtdb.firebaseio.com'
+    });
+  }
   console.log('✅ Firebase inicializado');
 } catch (error) {
   console.error('❌ Erro ao inicializar Firebase:', error.message);
@@ -31,6 +72,49 @@ const rl = readline.createInterface({
 
 function question(query) {
   return new Promise((resolve) => rl.question(query, resolve));
+}
+
+function questionHidden(query) {
+  return new Promise((resolve, reject) => {
+    const stdin = process.stdin;
+    if (!stdin.isTTY || typeof stdin.setRawMode !== 'function') {
+      reject(new Error('Digite a senha em um Terminal interativo'));
+      return;
+    }
+
+    let value = '';
+    const cleanup = () => {
+      stdin.removeListener('data', onData);
+      stdin.setRawMode(false);
+      stdin.pause();
+    };
+    const onData = (chunk) => {
+      for (const character of chunk.toString('utf8')) {
+        if (character === '\u0003') {
+          cleanup();
+          process.stdout.write('\n');
+          reject(new Error('Entrada cancelada'));
+          return;
+        }
+        if (character === '\r' || character === '\n') {
+          cleanup();
+          process.stdout.write('\n');
+          resolve(value);
+          return;
+        }
+        if (character === '\u007f' || character === '\b') {
+          value = Array.from(value).slice(0, -1).join('');
+          continue;
+        }
+        value += character;
+      }
+    };
+
+    process.stdout.write(query);
+    stdin.setRawMode(true);
+    stdin.resume();
+    stdin.on('data', onData);
+  });
 }
 
 const PROFILE_DEFINITIONS = {
@@ -144,7 +228,6 @@ function parseArgs(argv = []) {
   const args = {
     profile: null,
     email: null,
-    password: null,
     name: null
   };
 
@@ -161,10 +244,8 @@ function parseArgs(argv = []) {
       i += 1;
       continue;
     }
-    if (current === '--password' && next) {
-      args.password = String(next);
-      i += 1;
-      continue;
+    if (current === '--password') {
+      throw new Error('Não passe a senha como argumento; o script a solicitará sem exibi-la');
     }
     if (current === '--name' && next) {
       args.name = String(next).trim();
@@ -205,18 +286,19 @@ async function collectInput(initialArgs) {
     throw new Error('Email inválido');
   }
 
-  if (!result.password) {
-    result.password = await question('🔒 Senha (mín. 10 caracteres): ');
-  }
-  if (!result.password || result.password.length < 10) {
-    throw new Error('Senha deve ter pelo menos 10 caracteres');
-  }
-
   if (!result.name) {
     result.name = (await question('👤 Nome completo: ')).trim();
   }
   if (!result.name) {
     result.name = 'Administrador Leaf';
+  }
+
+  if (!result.password) {
+    rl.close();
+    result.password = await questionHidden('🔒 Senha (mín. 10 caracteres; entrada oculta): ');
+  }
+  if (!result.password || result.password.length < 10) {
+    throw new Error('Senha deve ter pelo menos 10 caracteres');
   }
 
   return result;
@@ -284,10 +366,6 @@ async function main() {
     console.log(`   Financeiro: ${profile.financialAccess ? 'Sim' : 'Não'}`);
     console.log(`   Monitoramento: ${profile.monitoringAccess ? 'Sim' : 'Não'}`);
     console.log(`   Pode excluir dados: ${profile.canDeleteData ? 'Sim' : 'Não'}`);
-    console.log('\n🔐 Credenciais de login:');
-    console.log(`   Email: ${input.email}`);
-    console.log(`   Senha: ${input.password}`);
-    console.log('\n⚠️  Guarde estas credenciais em local seguro.');
   } catch (error) {
     console.error('\n❌ Erro:', error.message);
     process.exitCode = 1;
