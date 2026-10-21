@@ -103,6 +103,10 @@ function captureLogEntry(info = {}) {
 
     const { level, message: _message, timestamp, stack, error, ...context } = info;
     const errorValue = error instanceof Error ? error : null;
+    // Muitos logs passam só error.message: sem isso o Sentry recebe a mensagem sem a causa.
+    if (!errorValue && error !== undefined && error !== null) {
+        context.error = error;
+    }
     client.withScope((scope) => {
         if (info.service) scope.setTag('component', String(info.service));
         if (info.traceId) scope.setTag('traceId', String(info.traceId));

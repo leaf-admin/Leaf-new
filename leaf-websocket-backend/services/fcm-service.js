@@ -23,7 +23,13 @@ function isInvalidTokenError(error) {
     ) {
         return true;
     }
-    return /NotRegistered|Requested entity was not found/i.test(String(error?.message || ''));
+    const message = String(error?.message || '');
+    // 400 INVALID_ARGUMENT também vem de payload errado: só conta quando o FCM diz que o
+    // token não é válido, para um bug de payload não apagar os tokens de todo mundo.
+    if (code === 'messaging/invalid-argument') {
+        return /registration token is not a valid FCM registration token/i.test(message);
+    }
+    return /NotRegistered|Requested entity was not found/i.test(message);
 }
 
 class FCMService {
@@ -465,6 +471,7 @@ class FCMService {
      * erro original por um genérico, sem código).
      */
     async sendMessageThroughBreaker(message, fallbackErrorMessage) {
+        let sendFailure = null;
         const outcome = await circuitBreakerService.execute(
             'fcm_send',
             async () => {
@@ -474,12 +481,14 @@ class FCMService {
                     if (isInvalidTokenError(sendError)) {
                         return { invalidTokenError: sendError };
                     }
+                    sendFailure = sendError;
                     throw sendError;
                 }
             },
             async () => {
-                // Fallback: retornar erro se circuit breaker aberto
-                throw new Error(fallbackErrorMessage);
+                // Fallback: com o breaker aberto não houve envio e o erro é genérico; se o
+                // envio falhou agora, repassa o erro original do FCM, com o código.
+                throw sendFailure || new Error(fallbackErrorMessage);
             },
             {
                 failureThreshold: 5,
@@ -936,6 +945,17 @@ class FCMService {
         return true;
     }
 
+    // O token antigo em user:/driver: voltaria pelo resolveUserTokens a cada envio.
+    async clearLegacyToken(redis, userId, fcmToken) {
+        if (typeof redis.hget !== 'function') return;
+        for (const key of [`user:${userId}`, `driver:${userId}`]) {
+            const legacyToken = String(await redis.hget(key, 'fcmToken') || '').trim();
+            if (legacyToken && legacyToken === String(fcmToken || '').trim()) {
+                await redis.hdel(key, 'fcmToken');
+            }
+        }
+    }
+
     // Remover token inválido
     async removeInvalidToken(fcmToken) {
         try {
@@ -951,6 +971,7 @@ class FCMService {
 
             for (const userId of indexedUserIds) {
                 await redis.hdel(`fcm_tokens:${userId}`, fcmToken);
+                await this.clearLegacyToken(redis, userId, fcmToken);
                 logger.info(`Token inválido removido de fcm_tokens:${userId}`);
             }
 
@@ -970,6 +991,7 @@ class FCMService {
                 for (const [token, data] of Object.entries(tokens)) {
                     if (token === fcmToken) {
                         await redis.hdel(key, token);
+                        await this.clearLegacyToken(redis, key.slice('fcm_tokens:'.length), fcmToken);
                         logger.info(`Token inválido removido de ${key}`);
                         break;
                     }
