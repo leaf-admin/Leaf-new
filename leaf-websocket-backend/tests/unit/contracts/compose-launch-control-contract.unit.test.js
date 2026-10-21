@@ -488,6 +488,10 @@ describe('production compose launch-control contract', () => {
     expect(deploySource).toContain('--exclude "leaf-reactnative-firebase-adminsdk-*.json"');
     expect(tripWorkerCompose).toContain('TRIP_LOCATION_STREAM_NAME=${TRIP_LOCATION_STREAM_NAME:-trip_location_events}');
     expect(tripWorkerCompose).toContain('LEAF_WORKER_INSTANCE_ID=${LEAF_WORKER_INSTANCE_ID:-}');
+    // O salto de localização nasce neste worker: sem estas chaves o sinal é gravado e não avisa o bot.
+    expect(tripWorkerCompose).toContain('BOT_EVENTS_ENABLED=${BOT_EVENTS_ENABLED:-false}');
+    expect(tripWorkerCompose).toContain('BOT_EVENTS_SEGURANCA_URL=${BOT_EVENTS_SEGURANCA_URL:-}');
+    expect(tripWorkerCompose).toContain('BOT_EVENTS_SEGURANCA_SECRET=${BOT_EVENTS_SEGURANCA_SECRET:-}');
     expect(tripWorkerCompose).toContain('TRIP_LOCATION_WORKER_CONSUMER=${TRIP_LOCATION_WORKER_CONSUMER:-}');
     expect(tripWorkerCompose).toContain("buildWorkerConsumerName('trip-location-worker',{includePid:false})");
     expect(tripWorkerCompose).toContain('TRIP_LOCATION_WORKER_DLQ_STREAM_NAME=${TRIP_LOCATION_WORKER_DLQ_STREAM_NAME:-trip_location_events_dlq}');
