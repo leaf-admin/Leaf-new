@@ -37,7 +37,7 @@ const ROUTES = Object.freeze({
   'refund.processed': ['cfo'],
   'refund.failed': ['cfo', 'suporte'],
   'refund.record_failed': ['cfo', 'cto'],
-  'sentry.issue_alert': ['estabilidade'],
+  'sentry.issue_alert': ['operacao'],
   'uptime.monitor_down': ['operacao', 'cto'],
   'uptime.monitor_up': ['operacao'],
   'safety.signal': ['seguranca'],
