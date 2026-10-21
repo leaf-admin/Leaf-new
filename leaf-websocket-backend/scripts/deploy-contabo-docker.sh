@@ -58,6 +58,12 @@ NGINX_DRAIN_SECONDS="${NGINX_DRAIN_SECONDS:-5}"
 # Rides in progress block the rollout until they end or the wait runs out.
 DEPLOY_ACTIVE_RIDE_WAIT_SECONDS="${DEPLOY_ACTIVE_RIDE_WAIT_SECONDS:-900}"
 ALLOW_DEPLOY_WITH_ACTIVE_RIDES="${ALLOW_DEPLOY_WITH_ACTIVE_RIDES:-false}"
+# Prebuilt image from CI (.github/workflows/backend-image.yml). auto: pull it and
+# fall back to a host build if it never shows up; registry: pull or fail; build:
+# always build on the host.
+BACKEND_IMAGE_REPO="${BACKEND_IMAGE_REPO:-ghcr.io/leaf-admin/leaf-backend}"
+BACKEND_IMAGE_SOURCE="${BACKEND_IMAGE_SOURCE:-auto}"
+BACKEND_IMAGE_WAIT_SECONDS="${BACKEND_IMAGE_WAIT_SECONDS:-600}"
 
 BASE_COMPOSE="docker-compose.production.yml"
 SCALE_COMPOSE="docker-compose.gateway-scale.yml"
@@ -100,6 +106,14 @@ UPSTREAM_FN="
     echo \"[deploy][nginx] upstream down=\${down:-none}\"
   }
 "
+case "$BACKEND_IMAGE_SOURCE" in
+  auto|registry|build) ;;
+  *) echo "[deploy][error] BACKEND_IMAGE_SOURCE must be auto, registry or build." >&2; exit 2 ;;
+esac
+if [[ ! "$BACKEND_IMAGE_WAIT_SECONDS" =~ ^[0-9]+$ || ! "$BACKEND_IMAGE_REPO" =~ ^[a-z0-9./_-]+$ ]]; then
+  echo "[deploy][error] Invalid BACKEND_IMAGE_WAIT_SECONDS or BACKEND_IMAGE_REPO." >&2
+  exit 2
+fi
 if [[ -n "$REMOTE_EXTRA_COMPOSE" ]]; then
   if [[ "$REMOTE_EXTRA_COMPOSE" = /* || "$REMOTE_EXTRA_COMPOSE" == *".."* || "$REMOTE_EXTRA_COMPOSE" == *" "* ]]; then
     echo "[deploy][error] Invalid REMOTE_EXTRA_COMPOSE: $REMOTE_EXTRA_COMPOSE" >&2
@@ -637,12 +651,35 @@ remote "
   cd '$REMOTE_BACKEND_DIR'
   compose='docker compose $REMOTE_COMPOSE_FILES'
   if [ '$GATEWAY_ONLY_DEPLOY' = true ]; then
-    GIT_SHA='$RELEASE_SHA' \$compose build websocket $GATEWAY_SERVICES
+    services='websocket $GATEWAY_SERVICES'
   else
-    GIT_SHA='$RELEASE_SHA' \$compose build \
-      websocket $GATEWAY_SERVICES \
-      sideeffects-worker billing-worker queue-worker \
-      trip-location-worker pricing-baseline-worker ride-health-monitor-worker
+    services='websocket $GATEWAY_SERVICES sideeffects-worker billing-worker queue-worker trip-location-worker pricing-baseline-worker ride-health-monitor-worker'
+  fi
+  image_ref='$BACKEND_IMAGE_REPO:$RELEASE_SHA'
+  pulled=false
+  if [ '$BACKEND_IMAGE_SOURCE' != build ]; then
+    waited=0
+    while :; do
+      if docker pull -q \"\$image_ref\" >/dev/null 2>&1; then
+        # Compose runs project-named images (leaf-app-<service>); one pull feeds all.
+        for service in \$services; do docker tag \"\$image_ref\" \"leaf-app-\$service:latest\"; done
+        pulled=true
+        echo \"[deploy][image] pulled \$image_ref\"
+        break
+      fi
+      if [ \"\$waited\" -ge '$BACKEND_IMAGE_WAIT_SECONDS' ]; then break; fi
+      echo \"[deploy][image] \$image_ref not published yet; waiting (\${waited}s)\"
+      sleep 20
+      waited=\$((waited + 20))
+    done
+    if [ \"\$pulled\" != true ] && [ '$BACKEND_IMAGE_SOURCE' = registry ]; then
+      echo \"[deploy][image][error] \$image_ref not available\" >&2
+      exit 1
+    fi
+  fi
+  if [ \"\$pulled\" != true ]; then
+    echo '[deploy][image] building on the host'
+    GIT_SHA='$RELEASE_SHA' \$compose build \$services
   fi
   # docker compose images reports the image of the still-running container
   # during a rolling deploy. Inspect the deterministic build tag instead.

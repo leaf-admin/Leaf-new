@@ -13,6 +13,7 @@ SANTIAGO_SSH="${SANTIAGO_SSH:-leaf-scl-test}"
 CONTABO_SSH="${CONTABO_SSH:-leaf-vps}"
 RELEASE_LABEL="${1:-standby-$(date -u +%Y%m%dT%H%M%SZ)}"
 STAGING_DIR=/root/standby-code
+BACKEND_IMAGE_REPO="${BACKEND_IMAGE_REPO:-ghcr.io/leaf-admin/leaf-backend}"
 SERVICES="websocket websocket-gateway-2 websocket-gateway-3 websocket-gateway-4 queue-worker sideeffects-worker billing-worker trip-location-worker pricing-baseline-worker ride-health-monitor-worker"
 
 EXCLUDES="--exclude=./node_modules --exclude=./logs --exclude=./backups --exclude=./certbot \
@@ -31,6 +32,12 @@ ssh "$CONTABO_SSH" "set -e
   if docker ps --format '{{.Names}}' | grep -qx leaf-websocket; then
     echo '[standby][warn] Contabo is serving Leaf (failover active); only images are rebuilt'
   fi
-  GIT_SHA='$RELEASE_LABEL' docker compose -p leaf-app -f docker-compose.yml -f docker-compose.gateway-scale.yml \
-    -f docker-compose.ops-workers.yml build -q $SERVICES
-  echo '[standby] images rebuilt ($RELEASE_LABEL); no containers started'"
+  # Prefer the CI image for this commit; build on the host only if it is missing.
+  if docker pull -q '$BACKEND_IMAGE_REPO:$RELEASE_LABEL' >/dev/null 2>&1; then
+    for service in $SERVICES; do docker tag '$BACKEND_IMAGE_REPO:$RELEASE_LABEL' \"leaf-app-\$service:latest\"; done
+    echo '[standby] images pulled ($BACKEND_IMAGE_REPO:$RELEASE_LABEL); no containers started'
+  else
+    GIT_SHA='$RELEASE_LABEL' docker compose -p leaf-app -f docker-compose.yml -f docker-compose.gateway-scale.yml \
+      -f docker-compose.ops-workers.yml build -q $SERVICES
+    echo '[standby] images rebuilt ($RELEASE_LABEL); no containers started'
+  fi"
