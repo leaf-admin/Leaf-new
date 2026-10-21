@@ -57,6 +57,16 @@ describe('utils/sentry', () => {
     expect(mockScope.setTag).toHaveBeenCalledWith('component', 'queue');
   });
 
+  it('keeps an error passed as text in the extras (logs that pass error.message)', () => {
+    process.env.SENTRY_DSN = 'https://public@o0.ingest.sentry.io/1';
+    const sentry = load();
+
+    sentry.captureLogEntry({ level: 'error', message: 'Erro ao enviar notificação FCM', error: 'Requested entity was not found.', errorCode: null });
+
+    expect(mockSentry.captureMessage).toHaveBeenCalledWith('Erro ao enviar notificação FCM', 'error');
+    expect(mockScope.setExtras).toHaveBeenCalledWith(expect.objectContaining({ error: 'Requested entity was not found.' }));
+  });
+
   it('removes secrets and personal data before sending', () => {
     const { scrubEvent } = load();
 

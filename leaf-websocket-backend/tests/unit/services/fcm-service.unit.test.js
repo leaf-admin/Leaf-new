@@ -205,6 +205,90 @@ describe('fcm-service', () => {
     expect(fallback).toHaveBeenCalledWith('UNAVAILABLE');
     expect(fcmService.removeInvalidToken).not.toHaveBeenCalled();
   });
+  test('when the breaker falls back after a send failure, the original FCM error and code reach the log', async () => {
+    const circuitBreaker = require('../../../services/circuit-breaker-service');
+    // Como o breaker real: o fallback é chamado sem argumentos.
+    circuitBreaker.execute.mockImplementation(async (name, fn, fallback) => {
+      try {
+        return await fn();
+      } catch (error) {
+        return fallback();
+      }
+    });
+    const sendError = new Error('Request contains an invalid argument.');
+    sendError.code = 'messaging/internal-error';
+    admin.messaging.mockReturnValue({ send: jest.fn().mockRejectedValue(sendError) });
+
+    const result = await fcmService.sendToToken('token-1', { title: 't', body: 'b', data: {} });
+
+    expect(result).toEqual({ success: false, error: 'Request contains an invalid argument.' });
+    const { logStructured } = require('../../../utils/logger');
+    expect(logStructured).toHaveBeenCalledWith('error', 'Erro ao enviar notificação FCM', expect.objectContaining({
+      error: 'Request contains an invalid argument.',
+      errorCode: 'messaging/internal-error'
+    }));
+  });
+
+  test('with the breaker open (no send), the fallback stays generic', async () => {
+    const circuitBreaker = require('../../../services/circuit-breaker-service');
+    circuitBreaker.execute.mockImplementation(async (name, fn, fallback) => fallback());
+    const send = jest.fn();
+    admin.messaging.mockReturnValue({ send });
+
+    const result = await fcmService.sendToToken('token-1', { title: 't', body: 'b', data: {} });
+
+    expect(send).not.toHaveBeenCalled();
+    expect(result).toEqual({ success: false, error: 'Serviço de notificações temporariamente indisponível' });
+  });
+
+  test('a 400 for a malformed token is an invalid token; a 400 for a bad payload is not', async () => {
+    const circuitBreaker = require('../../../services/circuit-breaker-service');
+    let failures = 0;
+    circuitBreaker.execute.mockImplementation(async (name, fn, fallback) => {
+      try {
+        return await fn();
+      } catch (error) {
+        failures += 1;
+        return fallback();
+      }
+    });
+    const badToken = new Error('The registration token is not a valid FCM registration token');
+    badToken.code = 'messaging/invalid-argument';
+    const badPayload = new Error('Invalid JSON payload received. Unknown name "actions" at \'message.android.notification\'');
+    badPayload.code = 'messaging/invalid-argument';
+    admin.messaging.mockReturnValue({
+      send: jest.fn(async (message) => {
+        throw message.token === 'malformed-token' ? badToken : badPayload;
+      })
+    });
+    fcmService.removeInvalidToken = jest.fn().mockResolvedValue(undefined);
+
+    await fcmService.sendToToken('malformed-token', { title: 't', body: 'b', data: {} });
+    expect(failures).toBe(0);
+    expect(fcmService.removeInvalidToken).toHaveBeenCalledWith('malformed-token');
+
+    await fcmService.sendToToken('good-token', { title: 't', body: 'b', data: {} });
+    expect(failures).toBe(1);
+    expect(fcmService.removeInvalidToken).toHaveBeenCalledTimes(1);
+  });
+
+  test('removeInvalidToken also clears the legacy user:/driver: token, so resolveUserTokens does not bring it back', async () => {
+    mockRedis.smembers.mockResolvedValue(['u1']);
+    mockRedis.del = jest.fn().mockResolvedValue(1);
+    mockRedis.hget = jest.fn(async (key) => (key === 'driver:u1' ? 'dead-token' : 'other-token'));
+
+    await fcmService.removeInvalidToken('dead-token');
+
+    expect(mockRedis.hdel).toHaveBeenCalledWith('fcm_tokens:u1', 'dead-token');
+    expect(mockRedis.hdel).toHaveBeenCalledWith('driver:u1', 'fcmToken');
+    expect(mockRedis.hdel).not.toHaveBeenCalledWith('user:u1', 'fcmToken');
+
+    mockRedis.hgetall.mockResolvedValue({});
+    mockRedis.hget.mockResolvedValue(null);
+    const tokens = await fcmService.resolveUserTokens('u1');
+    expect(tokens.map((t) => t.fcmToken)).not.toContain('dead-token');
+  });
+
   test('a time-limited notice carries its expiry and collapse key on both platforms', async () => {
     const send = jest.fn().mockResolvedValue('msg-id');
     admin.messaging.mockReturnValue({ send });
