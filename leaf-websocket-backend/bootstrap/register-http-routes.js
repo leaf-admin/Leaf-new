@@ -104,6 +104,11 @@ function registerHttpRoutes({ app, logStructured, io = null }) {
     const supportChatRoutes = require('../routes/support-chat');
     app.use('/api/support', supportChatRoutes);
 
+    // Alertas do Sentry e do UptimeRobot para os bots. Antes de /api/ops, que exige login:
+    // aqui a autenticação é a assinatura do Sentry ou o token do UptimeRobot.
+    const opsAlertRelayRoutes = require('../routes/ops-alert-relay');
+    app.use('/api/ops/alerts', opsAlertRelayRoutes);
+
     const opsRoutes = require('../routes/ops');
     app.use('/api/ops', opsRoutes);
 

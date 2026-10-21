@@ -35,6 +35,9 @@ Chamados e corridas de sandbox não geram evento.
 | `refund.processed` | `processRideRefund` com sucesso (`ledgerRecorded` diz se o ledger registrou) | cfo |
 | `refund.failed` | `processRideRefund`, o provedor recusou | cfo, suporte |
 | `refund.record_failed` | `processRideRefund`, o dinheiro saiu e o registro falhou | cfo, cto |
+| `sentry.issue_alert` | `POST /api/ops/alerts/sentry` (issue novo, regressão ou regra de alerta) | estabilidade |
+| `uptime.monitor_down` | `POST /api/ops/alerts/uptimerobot`, monitor caiu | operacao, cto |
+| `uptime.monitor_up` | `POST /api/ops/alerts/uptimerobot`, monitor voltou | operacao |
 
 Um destino sem URL e segredo é ignorado; os outros recebem normalmente.
 
@@ -70,12 +73,66 @@ Precisa da aprovação do Izaak: liga um processo novo de entrega e muda o `.env
 3. **Teste:** abra um chamado de teste pelo app com um usuário real de QA fora do sandbox. Em até
    1 min o Suporte deve rodar a rotina "Evento do app".
 
-## Fontes externas
+## Fontes externas (Sentry e UptimeRobot)
 
-Sentry e UptimeRobot não conseguem chamar uma rotina do OpenBot direto, porque não geram o cabeçalho
-`x-openbot-signature`. Para eles, o caminho é um repasse pelo backend: uma rota que recebe o alerta
-(com o segredo de cada provedor) e chama `botEventService.emit`. Isso não está feito ainda. Até lá,
-Estabilidade e Operação continuam nas rotinas por horário.
+Sentry e UptimeRobot não geram o cabeçalho `x-openbot-signature`, então não chamam o OpenBot
+direto. Eles chamam o backend, que confere a origem, tira só o mínimo e emite o evento pela
+mesma fila. Código: `routes/ops-alert-relay.js` e `services/external-alert-relay-service.js`.
+
+- As rotas ficam antes de `/api/ops` e não usam login: a autenticação é o segredo de cada
+  provedor. Sem o segredo no `.env`, a rota responde 503 e não repassa nada.
+- Limite de 60 requisições por minuto por IP e corpo de até 256 KB (acima disso, 413).
+- O título do erro sai com e-mail, CPF e telefone mascarados e cortado em 120 caracteres.
+  Nada do evento do Sentry (usuário, tags, stack, request) é repassado.
+- Sentry: só `issue` com `created` (novo) ou `unresolved` (regressão), e `event_alert` com
+  `triggered` (regra de alerta). O resto recebe 202 e é ignorado. Severidade: `fatal` = N1,
+  `error` ou regressão = N2, o resto N3. Pagamento, Pix, estorno ou saque no título marca
+  `money = true`.
+- UptimeRobot: `alertType` 1 (caiu, N1) e 2 (voltou, N3). Aceita JSON, formulário ou query.
+
+### Ligar (precisa do Izaak)
+
+1. **OpenBot:** crie a rotina "Evento do app" (gatilho Webhook, mesma instrução acima) na
+   **Estabilidade** e na **Operação**. O CTO já tem a dele. Copie URL e segredo.
+2. **Segredos novos:** gere o token do UptimeRobot com `openssl rand -hex 32`. O segredo do
+   Sentry vem do passo 3.
+3. **Sentry** → Settings → Developer Settings → Custom Integrations → New Internal Integration:
+   - Webhook URL: `https://api.leaf.app.br/api/ops/alerts/sentry`
+   - Permissions: Issue & Event = Read. Webhooks: marque `issue`.
+   - Habilite "Alert Rule Action" para poder usar a integração nas regras de alerta.
+   - Salve e copie o **Client Secret** para `SENTRY_WEBHOOK_SECRET`.
+   - Nas regras de alerta dos projetos backend e mobile, adicione a ação "Send a notification
+     via" esta integração.
+4. **UptimeRobot** → My Settings → Alert Contacts → Add → Webhook:
+   - URL to notify: `https://api.leaf.app.br/api/ops/alerts/uptimerobot`
+   - Se o plano permitir cabeçalho próprio, mande o token em `x-leaf-alert-token`. Só se não
+     permitir, use `?token=<token>` na URL: aí o token aparece no log de acesso do nginx e em
+     logs de bloqueio do WAF, então troque-o se esses logs forem compartilhados.
+   - POST value (JSON):
+
+     ```json
+     {"monitorID":"*monitorID*","monitorFriendlyName":"*monitorFriendlyName*","alertType":"*alertType*","alertDetails":"*alertDetails*","alertDuration":"*alertDuration*"}
+     ```
+
+   - Marque "Send as JSON" e ligue o contato nos monitores de api, socket e dashboard.
+5. **Santiago** (`/opt/leaf-app/.env`, com backup):
+
+   ```
+   BOT_EVENTS_ESTABILIDADE_URL=...
+   BOT_EVENTS_ESTABILIDADE_SECRET=whsec_...
+   BOT_EVENTS_OPERACAO_URL=...
+   BOT_EVENTS_OPERACAO_SECRET=whsec_...
+   SENTRY_WEBHOOK_SECRET=...
+   UPTIMEROBOT_WEBHOOK_TOKEN=...
+   ```
+
+   Recrie os gateways e os workers.
+6. **Teste:** no Sentry, "Send test" na integração (vem como `issue`; o backend responde 202).
+   No UptimeRobot, "Test" no contato, ou pause e retome um monitor de teste. A Operação deve
+   rodar a rotina em até 1 min.
+
+As rotinas por horário da Estabilidade (1 vez por dia) e da Operação (3 vezes por dia)
+continuam como rede de segurança.
 
 ## Desligar e voltar atrás
 
