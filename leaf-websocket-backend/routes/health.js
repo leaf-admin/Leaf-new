@@ -640,6 +640,10 @@ router.get('/health/quick', async (req, res) => {
  * Readiness probe (Kubernetes/Docker)
  */
 router.get('/health/readiness', async (req, res) => {
+  // Em drain o gateway já saiu do nginx; 503 garante que nada o considere pronto.
+  if (process.__leafIsShuttingDown) {
+    return res.status(503).json({ status: 'draining', timestamp: new Date().toISOString() });
+  }
   try {
     const health = await healthCheckService.quickCheck();
     const roleReadiness = await buildRoleReadiness(health);

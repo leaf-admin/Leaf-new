@@ -116,6 +116,7 @@ const traceContext = require('./utils/trace-context');
 const { traceIdSocketMiddleware, traceIdExpressMiddleware, extractTraceIdFromEvent } = require('./middleware/trace-id-middleware');
 // ==================== FASE 1.3: OPENTELEMETRY ====================
 const { initializeTracer, getTracer, shutdown: shutdownTracer } = require('./utils/tracer');
+const { drainConnections } = require('./bootstrap/graceful-drain');
 const {
     createSocketSpan,
     createCommandSpan,
@@ -1301,13 +1302,23 @@ io.on('connection', async (socket) => {
             process.__leafIsShuttingDown = true;
             logStructured('info', `Recebido ${signal}, fechando servidor`, { service: 'server' });
 
-            const hardTimeoutMs = Number.parseInt(process.env.SHUTDOWN_FORCE_TIMEOUT_MS || '15000', 10);
+            // Abaixo do stop_grace_period (45s) do compose, para o Docker não matar antes.
+            const hardTimeoutMs = Number.parseInt(process.env.SHUTDOWN_FORCE_TIMEOUT_MS || '40000', 10);
             const hardTimeout = setTimeout(() => {
                 logStructured('error', 'Timeout de shutdown atingido, encerrando processo forçadamente', { service: 'server' });
                 process.exit(1);
             }, hardTimeoutMs);
             if (typeof hardTimeout.unref === 'function') {
                 hardTimeout.unref();
+            }
+
+            try {
+                await drainConnections({ io, server, logStructured });
+            } catch (drainError) {
+                logStructured('warn', 'Falha no drain do gateway durante shutdown', {
+                    service: 'server',
+                    error: drainError.message
+                });
             }
 
             try {

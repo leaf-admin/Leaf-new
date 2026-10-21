@@ -23,13 +23,17 @@ services:
   redis:
     cpus: "1.00"
 
+  # 45s: the gateway drains (readiness 503, sockets closed in batches) before
+  # Docker sends SIGKILL; SHUTDOWN_FORCE_TIMEOUT_MS defaults to 40s.
   websocket:
     cpus: "1.60"
+    stop_grace_period: 45s
     environment:
       <<: *santiago_gateway_env
 
   websocket-gateway-2:
     cpus: "1.60"
+    stop_grace_period: 45s
     environment:
       <<: *santiago_gateway_env
 
@@ -57,6 +61,7 @@ services:
       - websocket-gateway-2
     volumes: !override
       - ./nginx.santiago.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx.d:/etc/nginx/leaf.d:ro
       - ./ssl:/etc/nginx/ssl:ro
       - ./certbot/www:/var/www/certbot:ro
       - ./certbot/conf:/etc/letsencrypt:ro

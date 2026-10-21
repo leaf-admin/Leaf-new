@@ -20,6 +20,7 @@ export CONTABO_KEY="${SANTIAGO_KEY:-$HOME/.ssh/leaf_vultr_sp_test_ed25519}"
 export REMOTE_BASE_COMPOSE="${REMOTE_BASE_COMPOSE:-docker-compose.yml}"
 export REMOTE_EXTRA_COMPOSE="docker-compose.santiago.yml"
 export GATEWAY_SERVICES="websocket-gateway-2"
+export NGINX_UPSTREAM_FILE="nginx.d/upstream-leaf-backend.conf"
 
 bash "$SCRIPT_DIR/deploy-contabo-docker.sh" "$@"
 

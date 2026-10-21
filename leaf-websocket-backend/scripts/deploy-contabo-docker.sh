@@ -51,6 +51,13 @@ UPDATE_WORKERS="${UPDATE_WORKERS:-true}"
 RUN_PUBLIC_SMOKE="${RUN_PUBLIC_SMOKE:-true}"
 AUTO_ROLLBACK="${AUTO_ROLLBACK:-true}"
 HEALTH_TIMEOUT_SECONDS="${HEALTH_TIMEOUT_SECONDS:-120}"
+# Zero downtime (Santiago): the upstream servers live in an included file that the
+# rollout rewrites, taking each gateway out of nginx before it is recreated.
+NGINX_UPSTREAM_FILE="${NGINX_UPSTREAM_FILE:-}"
+NGINX_DRAIN_SECONDS="${NGINX_DRAIN_SECONDS:-5}"
+# Rides in progress block the rollout until they end or the wait runs out.
+DEPLOY_ACTIVE_RIDE_WAIT_SECONDS="${DEPLOY_ACTIVE_RIDE_WAIT_SECONDS:-900}"
+ALLOW_DEPLOY_WITH_ACTIVE_RIDES="${ALLOW_DEPLOY_WITH_ACTIVE_RIDES:-false}"
 
 BASE_COMPOSE="docker-compose.production.yml"
 SCALE_COMPOSE="docker-compose.gateway-scale.yml"
@@ -63,6 +70,36 @@ REMOTE_EXTRA_COMPOSE="${REMOTE_EXTRA_COMPOSE:-}"
 GATEWAY_SERVICES="${GATEWAY_SERVICES:-websocket-gateway-2 websocket-gateway-3 websocket-gateway-4}"
 
 REMOTE_COMPOSE_FILES="-f $REMOTE_BASE_COMPOSE -f $REMOTE_SCALE_COMPOSE -f $REMOTE_OPS_COMPOSE"
+if [[ -n "$NGINX_UPSTREAM_FILE" ]] && [[ "$NGINX_UPSTREAM_FILE" = /* || "$NGINX_UPSTREAM_FILE" == *".."* || "$NGINX_UPSTREAM_FILE" == *" "* ]]; then
+  echo "[deploy][error] Invalid NGINX_UPSTREAM_FILE: $NGINX_UPSTREAM_FILE" >&2
+  exit 2
+fi
+if [[ ! "$NGINX_DRAIN_SECONDS" =~ ^[0-9]+$ || ! "$DEPLOY_ACTIVE_RIDE_WAIT_SECONDS" =~ ^[0-9]+$ ]]; then
+  echo "[deploy][error] NGINX_DRAIN_SECONDS and DEPLOY_ACTIVE_RIDE_WAIT_SECONDS must be integers." >&2
+  exit 2
+fi
+
+# Remote shell function: rewrite the upstream file with one gateway marked down
+# (or none) and reload nginx, which also re-resolves recreated containers.
+UPSTREAM_FN="
+  write_upstream() {
+    down=\"\$1\"
+    [ -n '$NGINX_UPSTREAM_FILE' ] || return 0
+    servers='websocket $GATEWAY_SERVICES'
+    count=0; for svc in \$servers; do count=\$((count + 1)); done
+    [ \"\$count\" -gt 1 ] || down=''
+    tmp='$NGINX_UPSTREAM_FILE.tmp'
+    : > \"\$tmp\"
+    for svc in \$servers; do
+      flag=''; [ \"\$svc\" = \"\$down\" ] && flag=' down'
+      printf '        server %s:3001 max_fails=3 fail_timeout=10s%s;\\n' \"\$svc\" \"\$flag\" >> \"\$tmp\"
+    done
+    mv \"\$tmp\" '$NGINX_UPSTREAM_FILE'
+    docker exec leaf-nginx nginx -t >/dev/null 2>&1
+    docker exec leaf-nginx nginx -s reload
+    echo \"[deploy][nginx] upstream down=\${down:-none}\"
+  }
+"
 if [[ -n "$REMOTE_EXTRA_COMPOSE" ]]; then
   if [[ "$REMOTE_EXTRA_COMPOSE" = /* || "$REMOTE_EXTRA_COMPOSE" == *".."* || "$REMOTE_EXTRA_COMPOSE" == *" "* ]]; then
     echo "[deploy][error] Invalid REMOTE_EXTRA_COMPOSE: $REMOTE_EXTRA_COMPOSE" >&2
@@ -240,6 +277,8 @@ rollback_on_error() {
         sleep 3
         elapsed=\$((elapsed + 3))
       done
+      $UPSTREAM_FN
+      write_upstream ''
       docker exec leaf-nginx nginx -t
       docker exec leaf-nginx nginx -s reload
       cmp -s .env '$REMOTE_BACKUP_DIR/.env.before'
@@ -655,6 +694,43 @@ remote "
   set -e
   cd '$REMOTE_BACKEND_DIR'
   compose='docker compose $REMOTE_COMPOSE_FILES'
+  $UPSTREAM_FN
+
+  # Rides in progress: wait for them to end before touching any gateway.
+  active_rides() {
+    docker exec leaf-redis sh -c 'export REDISCLI_AUTH=\"\$REDIS_PASSWORD\"; for k in \$(redis-cli --scan --pattern \"booking:*\" --count 500); do [ \"\$(redis-cli type \"\$k\")\" = hash ] || continue; s=\$(redis-cli hget \"\$k\" status | tr a-z A-Z); case \"\$s\" in \"\"|COMPLETE|COMPLETED|CANCELED|CANCELLED|REJECTED|EXPIRED|SUPERSEDED|NO_DRIVERS_AVAILABLE|NO_DRIVERS_FOUND|EARLY_ENDED_BY_RIDER|INTERRUPTED_OPERATIONAL_ENDED|EARLY_ENDED_REVIEW) ;; *) echo \"\$k \$s\";; esac; done'
+  }
+  waited=0
+  while :; do
+    rides=\$(active_rides)
+    [ -z \"\$rides\" ] && break
+    count=\$(printf '%s\\n' \"\$rides\" | wc -l | tr -d ' ')
+    if [ '$ALLOW_DEPLOY_WITH_ACTIVE_RIDES' = true ]; then
+      echo \"[deploy][rides] \$count active ride(s); continuing because ALLOW_DEPLOY_WITH_ACTIVE_RIDES=true\"
+      break
+    fi
+    if [ \"\$waited\" -ge '$DEPLOY_ACTIVE_RIDE_WAIT_SECONDS' ]; then
+      echo \"[deploy][rides][error] \$count active ride(s) after \${waited}s:\" >&2
+      printf '%s\\n' \"\$rides\" | head -10 >&2
+      echo '[deploy][rides][error] Wait for them to end or rerun with ALLOW_DEPLOY_WITH_ACTIVE_RIDES=true.' >&2
+      exit 1
+    fi
+    echo \"[deploy][rides] \$count active ride(s); waiting (\${waited}s)\"
+    sleep 15
+    waited=\$((waited + 15))
+  done
+
+  # One-time migration: nginx must mount the directory with the upstream file.
+  if [ -n '$NGINX_UPSTREAM_FILE' ]; then
+    upstream_dir=\$(dirname '$NGINX_UPSTREAM_FILE')
+    if ! docker inspect leaf-nginx --format '{{range .Mounts}}{{.Destination}} {{end}}' | grep -q '/etc/nginx/leaf.d'; then
+      echo '[deploy][nginx] recreating nginx to mount the upstream directory (one-time)'
+      write_upstream ''  || true
+      \$compose up -d --no-deps --force-recreate nginx
+      sleep 3
+    fi
+    write_upstream ''
+  fi
 
   wait_healthy() {
     service=\"\$1\"
@@ -711,17 +787,23 @@ remote "
   fi
   wait_healthy trip-location-worker leaf-trip-location-worker
 
-  for gateway_service in $GATEWAY_SERVICES; do
-    \$compose up -d --no-deps \"\$gateway_service\"
-    wait_healthy \"\$gateway_service\" \"leaf-\$gateway_service\"
-    wait_ready \"leaf-\$gateway_service\"
-    verify_release \"leaf-\$gateway_service\"
-  done
+  roll_gateway() {
+    service=\"\$1\"
+    container=\"leaf-\$service\"
+    # Out of nginx first; the old process then drains (readiness 503, sockets in batches).
+    write_upstream \"\$service\"
+    [ -n '$NGINX_UPSTREAM_FILE' ] && sleep '$NGINX_DRAIN_SECONDS'
+    \$compose up -d --no-deps \"\$service\"
+    wait_healthy \"\$service\" \"\$container\"
+    wait_ready \"\$container\"
+    verify_release \"\$container\"
+    write_upstream ''
+  }
 
-  \$compose up -d --no-deps websocket
-  wait_healthy websocket leaf-websocket
-  wait_ready leaf-websocket
-  verify_release leaf-websocket
+  for gateway_service in $GATEWAY_SERVICES; do
+    roll_gateway \"\$gateway_service\"
+  done
+  roll_gateway websocket
 
   docker exec leaf-nginx nginx -t
   docker exec leaf-nginx nginx -s reload
