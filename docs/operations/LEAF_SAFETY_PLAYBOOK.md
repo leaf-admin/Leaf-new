@@ -49,8 +49,8 @@ O evento leva só id do sinal, tipo, corrida, motivo curto e pontuação. O deta
 2. Cruza com o que já existe: outros sinais em 30 dias, incidentes (`/api/ops/incidents`),
    chamados, disputas e estornos da mesma corrida.
 3. Classifica pela tabela abaixo e grava a entrega para o CTO com a ficha de triagem.
-4. Publica no `#seguranca` só o que for N1 ou N2 com reincidência. Sinal isolado e explicável
-   fica no resumo diário.
+4. Publica no `#alertas` só o que for N1, com ids e tipo, sem dados pessoais. N2 vai como
+   entrega ao CTO; sinal isolado e explicável (N3) fica no resumo diário das 21:00.
 
 | Nível | Exemplos | Para quem | Prazo |
 | --- | --- | --- | --- |
