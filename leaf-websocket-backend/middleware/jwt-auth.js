@@ -3,6 +3,7 @@ const admin = require('firebase-admin');
 const { logError } = require('../utils/logger');
 const { resolveJwtSecret } = require('../utils/jwt-secret-resolver');
 const { getAdminUser } = require('../utils/admin-user-cache');
+const { rejectReadOnlyWrite } = require('./read-only-user');
 
 const JWT_SECRET = resolveJwtSecret(['JWT_SECRET', 'ADMIN_JWT_SECRET'], {
   context: 'jwt-auth'
@@ -53,9 +54,11 @@ const authenticateJWT = async (req, res, next) => {
       id: decoded.userId,
       email: decoded.email || userData.email,
       role: userData.role || 'viewer',
-      permissions: Array.isArray(userData.permissions) ? userData.permissions : []
+      permissions: Array.isArray(userData.permissions) ? userData.permissions : [],
+      ...(userData.readOnly === true ? { readOnly: true } : {})
     };
 
+    if (rejectReadOnlyWrite(req, res)) return;
     next();
   } catch (error) {
     logError(error, 'Erro no middleware JWT', {
