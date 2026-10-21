@@ -83,13 +83,11 @@ describe('bot event service', () => {
     }
   });
 
-  it('matches the Standard Webhooks signature test vector', () => {
-    expect(signPayload({
-      secret: 'whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw',
-      id: 'msg_p5jXN8AQM9LWM0D4loKWxJek',
-      timestamp: '1614265330',
-      body: '{"test": 2432232314}',
-    })).toBe('v1,g0hM9SsE+OTPJTGt/tmIKtSyZlE3uFJELVlNIOLJ1OE=');
+  it('signs in the OpenBot webhook format the app verifies', () => {
+    const body = '{"id":"evt_1","type":"test.ping"}';
+    const expected = crypto.createHmac('sha256', SECRET).update('1792544000.evt_1.').update(body).digest('hex');
+    expect(signPayload({ secret: SECRET, id: 'evt_1', timestamp: '1792544000', body })).toBe(`sha256=${expected}`);
+    expect(signPayload({ secret: SECRET, id: 'evt_1', timestamp: '1792544000', body })).toMatch(/^sha256=[a-f0-9]{64}$/);
   });
 
   it('does nothing while the flag is off', async () => {
@@ -130,11 +128,16 @@ describe('bot event service', () => {
     });
     expect(body).not.toMatch(/uid-123|Maria|99999|123\.456/);
 
-    const { 'webhook-id': id, 'webhook-timestamp': timestamp, 'webhook-signature': signature } = options.headers;
+    const {
+      'x-openbot-delivery-id': id,
+      'x-openbot-timestamp': timestamp,
+      'x-openbot-signature': signature,
+    } = options.headers;
     expect(id).toBe(result.id);
-    const key = Buffer.from(SECRET.replace(/^whsec_/, ''), 'base64');
-    const expected = crypto.createHmac('sha256', key).update(`${id}.${timestamp}.${body}`).digest('base64');
-    expect(signature).toBe(`v1,${expected}`);
+    expect(id).toMatch(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/);
+    expect(timestamp).toMatch(/^[0-9]{1,12}$/);
+    const expected = crypto.createHmac('sha256', SECRET).update(`${timestamp}.${id}.`).update(body).digest('hex');
+    expect(signature).toBe(`sha256=${expected}`);
   });
 
   it('sends one event to every configured destination and skips the rest', async () => {

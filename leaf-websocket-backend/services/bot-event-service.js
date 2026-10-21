@@ -4,8 +4,8 @@
 // - Desligado por padrão (BOT_EVENTS_ENABLED=true liga). Desligado, emit() não faz nada.
 // - Cada destino tem uma rotina de webhook no OpenBot: BOT_EVENTS_<DESTINO>_URL e
 //   BOT_EVENTS_<DESTINO>_SECRET (whsec_..., gerado pelo OpenBot).
-// - Entrega assinada no padrão Standard Webhooks (webhook-id, webhook-timestamp,
-//   webhook-signature), com fila no Redis e novas tentativas por até 24 h, porque o
+// - Entrega assinada no formato de webhook do OpenBot (x-openbot-timestamp,
+//   x-openbot-delivery-id, x-openbot-signature), com fila no Redis e novas tentativas por até 24 h, porque o
 //   OpenBot roda no Mac do Izaak e pode estar offline.
 // - O payload só leva tipo, ids técnicos (chamado, incidente, disputa, corrida),
 //   categoria, severidade, sinal de dinheiro e valores. Nunca nome, telefone, documento,
@@ -80,11 +80,11 @@ function normalizeSeverity(value) {
   return ['N1', 'N2', 'N3'].includes(severity) ? severity : 'N3';
 }
 
-// Standard Webhooks: base64(HMAC-SHA256(segredo, "<id>.<timestamp>.<corpo>")).
+// Formato do OpenBot (o mesmo que o app verifica): "sha256=" + hex(HMAC-SHA256(segredo,
+// "<timestamp>.<delivery-id>.<corpo>")), com o segredo inteiro (whsec_...) como chave.
 function signPayload({ secret, id, timestamp, body }) {
-  const key = Buffer.from(String(secret).replace(/^whsec_/, ''), 'base64');
-  const signature = crypto.createHmac('sha256', key).update(`${id}.${timestamp}.${body}`).digest('base64');
-  return `v1,${signature}`;
+  const digest = crypto.createHmac('sha256', String(secret)).update(`${timestamp}.${id}.`).update(body).digest('hex');
+  return `sha256=${digest}`;
 }
 
 function retryDelayMs(attempts) {
@@ -157,9 +157,9 @@ class BotEventService {
       await this.http.post(config.url, body, {
         headers: {
           'content-type': 'application/json',
-          'webhook-id': item.event.id,
-          'webhook-timestamp': timestamp,
-          'webhook-signature': signPayload({ secret: config.secret, id: item.event.id, timestamp, body }),
+          'x-openbot-timestamp': timestamp,
+          'x-openbot-delivery-id': item.event.id,
+          'x-openbot-signature': signPayload({ secret: config.secret, id: item.event.id, timestamp, body }),
         },
         timeout: 8000,
         transformRequest: [(value) => value],
