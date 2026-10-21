@@ -4,6 +4,7 @@ const { logError } = require('../utils/logger');
 const firebaseConfig = require('../firebase-config');
 const { resolveJwtSecretList } = require('../utils/jwt-secret-resolver');
 const { getAdminUser } = require('../utils/admin-user-cache');
+const { rejectReadOnlyWrite } = require('./read-only-user');
 
 const SUPPORT_TIER_ROLES = ['support', 'support_n1', 'support_n2', 'support_n3'];
 const ADMIN_ROLES = new Set(['admin', 'manager', 'super-admin', 'viewer', ...SUPPORT_TIER_ROLES, 'development']);
@@ -67,6 +68,9 @@ async function verifyAdminToken(token) {
           if (Array.isArray(data.permissions)) {
             user.permissions = data.permissions;
           }
+          if (data.readOnly === true) {
+            user.readOnly = true;
+          }
           user.email = user.email || data.email || null;
         }
       } catch {
@@ -113,6 +117,7 @@ async function authenticateSupport(req, res, next) {
     const adminUser = await verifyAdminToken(token);
     if (adminUser) {
       req.user = adminUser;
+      if (rejectReadOnlyWrite(req, res)) return undefined;
       return next();
     }
 
