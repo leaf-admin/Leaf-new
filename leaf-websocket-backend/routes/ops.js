@@ -1,6 +1,7 @@
 const express = require('express');
 const { authenticateSupport, requireSupportRoles } = require('../middleware/support-auth');
 const safetyIncidentService = require('../services/safety-incident-service');
+const safetySignalService = require('../services/safety-signal-service');
 const passengerTrustService = require('../services/passenger-trust-service');
 const operationalAreaPolicyService = require('../services/operational-area-policy-service');
 const disputeReviewService = require('../services/dispute-review-service');
@@ -257,6 +258,31 @@ router.get('/incidents', async (req, res) => {
   } catch (error) {
     logError(error, { service: 'ops-routes', operation: 'listIncidents' });
     res.status(500).json({ success: false, error: 'Erro ao listar incidentes' });
+  }
+});
+
+// Sinais automáticos de segurança de conta (salto de localização, GPS simulado, KYC
+// reprovado). Só leitura: o bot de Segurança monta o dossiê a partir daqui.
+router.get('/safety/signals', async (req, res) => {
+  try {
+    const signals = await safetySignalService.list({ limit: req.query.limit });
+    res.json({ success: true, signals });
+  } catch (error) {
+    logError(error, { service: 'ops-routes', operation: 'listSafetySignals' });
+    res.status(500).json({ success: false, error: 'Erro ao listar sinais de segurança' });
+  }
+});
+
+router.get('/safety/signals/:signalId', async (req, res) => {
+  try {
+    const signal = await safetySignalService.get(req.params.signalId);
+    if (!signal) {
+      return res.status(404).json({ success: false, error: 'Sinal não encontrado' });
+    }
+    return res.json({ success: true, signal });
+  } catch (error) {
+    logError(error, { service: 'ops-routes', operation: 'getSafetySignal' });
+    return res.status(500).json({ success: false, error: 'Erro ao buscar sinal de segurança' });
   }
 });
 

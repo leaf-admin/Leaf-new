@@ -38,6 +38,7 @@ Chamados e corridas de sandbox não geram evento.
 | `sentry.issue_alert` | `POST /api/ops/alerts/sentry` (issue novo, regressão ou regra de alerta) | estabilidade |
 | `uptime.monitor_down` | `POST /api/ops/alerts/uptimerobot`, monitor caiu | operacao, cto |
 | `uptime.monitor_up` | `POST /api/ops/alerts/uptimerobot`, monitor voltou | operacao |
+| `safety.signal` | `safety-signal-service.record` (salto de localização, GPS simulado, KYC reprovado; ver [LEAF_SAFETY_PLAYBOOK](LEAF_SAFETY_PLAYBOOK.md)) | seguranca |
 
 Um destino sem URL e segredo é ignorado; os outros recebem normalmente.
 

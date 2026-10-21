@@ -9,11 +9,15 @@ const {
 } = require('./sandbox-persistence-context');
 
 const { findCrossedTolls, mergeTollCrossings } = require('./route-toll-service');
+const safetySignalService = require('./safety-signal-service');
 
 const EARTH_RADIUS_KM = 6371;
 // Valor gravado quando a detecção de praça falha: a corrida fica sem
 // travessias verificadas em vez de parecer que não cruzou nenhuma.
 const TOLL_CROSSINGS_UNTRACKED = 'untracked';
+const SAFETY_JUMP_MIN_KM = Number(process.env.SAFETY_JUMP_MIN_KM || 0.5);
+const SAFETY_JUMP_MAX_KMH = Number(process.env.SAFETY_JUMP_MAX_KMH || 180);
+const SAFETY_JUMP_MAX_ACCURACY_M = Number(process.env.SAFETY_JUMP_MAX_ACCURACY_M || 200);
 
 function parseTollCrossings(raw) {
     if (raw === undefined || raw === null || raw === '' || raw === TOLL_CROSSINGS_UNTRACKED) {
@@ -391,6 +395,13 @@ class TripLocationPersistenceService {
             tollCrossingsValue = TOLL_CROSSINGS_UNTRACKED;
         }
 
+        const canonicalLastCapturedAt = isStaleCanonicalPoint
+            ? normalizeTimestampMs(previousMeta?.canonicalLastCapturedAt)
+            : point.capturedAt;
+        if (canAppendCanonicalMetric) {
+            this.checkLocationJump(point, previousLocation, previousMeta);
+        }
+
         await redis.expire(bufferKey, this.bufferTtlSeconds);
         await redis.hset(metaKey, {
             tripId: point.tripId,
@@ -409,6 +420,7 @@ class TripLocationPersistenceService {
             canonicalLastLat: String(canonicalLastLocation.lat),
             canonicalLastLng: String(canonicalLastLocation.lng),
             canonicalLastReceivedAt: String(canonicalLastReceivedAt),
+            ...(canonicalLastCapturedAt ? { canonicalLastCapturedAt: String(canonicalLastCapturedAt) } : {}),
             ...(tollCrossingsValue !== null ? { canonicalTollCrossings: tollCrossingsValue } : {}),
             ...buildPersistenceEnvelope(persistenceScope, { redis: true })
         });
@@ -428,6 +440,41 @@ class TripLocationPersistenceService {
             tripId: point.tripId,
             bufferedCount: bufferLength
         };
+    }
+
+    // Salto impossível entre dois pontos seguidos da mesma corrida: distância e velocidade
+    // calculadas pelo horário de captura no aparelho, para que pontos reenviados em lote
+    // depois de uma queda de sinal não pareçam teletransporte. Ponto impreciso não conta;
+    // corrida de teste fica registrada sem avisar. Só registra e avisa o bot de Segurança.
+    checkLocationJump(point, previousLocation, previousMeta = {}) {
+        try {
+            const previousCapturedAt = normalizeTimestampMs(previousMeta?.canonicalLastCapturedAt);
+            if (!previousCapturedAt) return null;
+            if (point.accuracy !== null && point.accuracy > SAFETY_JUMP_MAX_ACCURACY_M) return null;
+            const elapsedSeconds = (point.capturedAt - previousCapturedAt) / 1000;
+            if (!(elapsedSeconds > 0)) return null;
+            const distanceKm = haversineDistanceKm(previousLocation, point);
+            const speedKmh = distanceKm / (elapsedSeconds / 3600);
+            if (distanceKm < SAFETY_JUMP_MIN_KM || speedKmh <= SAFETY_JUMP_MAX_KMH) return null;
+            safetySignalService.record({
+                type: 'location_jump',
+                driverId: point.driverId,
+                bookingId: point.tripId,
+                reason: `Salto de ${distanceKm.toFixed(1)} km em ${Math.round(elapsedSeconds)} s na corrida`,
+                score: Math.round(speedKmh),
+                details: {
+                    distanceKm: Number(distanceKm.toFixed(3)),
+                    elapsedSeconds: Math.round(elapsedSeconds),
+                    speedKmh: Math.round(speedKmh),
+                    accuracy: point.accuracy
+                },
+                sandbox: point.testUserSandbox === true || point.financialNamespace === 'sandbox',
+                dedupeKey: point.tripId
+            });
+            return { distanceKm, speedKmh };
+        } catch (_error) {
+            return null;
+        }
     }
 
     async resolveCanonicalTripMetrics(options = {}) {

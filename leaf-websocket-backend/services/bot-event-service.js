@@ -40,6 +40,7 @@ const ROUTES = Object.freeze({
   'sentry.issue_alert': ['estabilidade'],
   'uptime.monitor_down': ['operacao', 'cto'],
   'uptime.monitor_up': ['operacao'],
+  'safety.signal': ['seguranca'],
 });
 
 // Únicos campos que saem do backend em data.
@@ -49,6 +50,7 @@ const DATA_FIELDS = Object.freeze([
   'senderType', 'status', 'amountCents', 'reason', 'providerRefunded', 'ledgerRecorded',
   'issueId', 'shortId', 'title', 'project', 'level', 'release', 'link', 'alertKind',
   'monitorId', 'monitor', 'durationSeconds',
+  'signalId', 'score',
 ]);
 
 function boolEnv(name, fallback = false) {

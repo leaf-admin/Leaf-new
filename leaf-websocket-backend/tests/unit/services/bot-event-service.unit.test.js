@@ -149,6 +149,7 @@ describe('bot event service', () => {
     await flush();
 
     expect(ROUTES['refund.record_failed']).toEqual(['cfo', 'cto']);
+    expect(ROUTES['safety.signal']).toEqual(['seguranca']);
     expect(partial.queued).toBe(1);
     expect(post.mock.calls.map(([url]) => url).sort()).toEqual([
       'https://relay.example.test/hooks/cfo',

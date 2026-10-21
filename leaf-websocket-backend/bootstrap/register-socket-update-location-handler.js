@@ -25,6 +25,7 @@ const {
     buildPublicDriverCohortDenial,
     enforceDriverOnlineCohort
 } = require('../services/driver-online-cohort-guard-service');
+const safetySignalService = require('../services/safety-signal-service');
 
 const ENABLE_ACTIVE_TRIP_INDEX = process.env.ENABLE_ACTIVE_TRIP_INDEX !== 'false';
 const ENABLE_TRIP_LOCATION_STREAM = process.env.ENABLE_TRIP_LOCATION_STREAM !== 'false';
@@ -871,6 +872,25 @@ function registerSocketUpdateLocationHandler({
                             paymentProfileId: activeBookingData?.paymentProfileId,
                             testUserSandbox: activeBookingData?.testUserSandbox
                         };
+                        // Android marca a posição de app de GPS simulado (mocked). Só registra e
+                        // avisa o bot de Segurança, uma vez por hora por motorista; não bloqueia
+                        // nem atrasa o GPS da corrida.
+                        if (data.mocked === true) {
+                            safetySignalService.record({
+                                type: 'mock_location',
+                                driverId: String(driverId),
+                                bookingId: String(activeTripId),
+                                reason: 'Posição marcada como simulada pelo aparelho durante a corrida',
+                                details: {
+                                    lat: Number(latNum.toFixed(4)),
+                                    lng: Number(lngNum.toFixed(4)),
+                                    accuracy: locationEventData.accuracy
+                                },
+                                sandbox: String(activeBookingData?.testUserSandbox) === 'true'
+                                    || activeBookingData?.financialNamespace === 'sandbox',
+                                dedupeKey: String(driverId)
+                            });
+                        }
                         if (seqIsValid) {
                             locationEventData.orderStatus = orderStatus;
                             locationEventData.outOfOrderWindow = TRIP_LOCATION_OUT_OF_ORDER_WINDOW;

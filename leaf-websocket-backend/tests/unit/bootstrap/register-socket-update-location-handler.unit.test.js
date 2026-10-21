@@ -22,7 +22,12 @@ jest.mock('../../../services/driver-online-projection-service', () => ({
   commitDriverOnlineProjection: jest.fn().mockResolvedValue({ success: true })
 }));
 
+jest.mock('../../../services/safety-signal-service', () => ({
+  record: jest.fn().mockResolvedValue({ recorded: true })
+}));
+
 const driverEligibilityService = require('../../../services/driver-eligibility-service');
+const safetySignalService = require('../../../services/safety-signal-service');
 const activeTripIndex = require('../../../utils/active-trip-index');
 const {
   commitDriverOnlineProjection
@@ -548,6 +553,47 @@ describe('registerSocketUpdateLocationHandler', () => {
         acceptedCount: 2
       })
     );
+  });
+
+  it('records a mocked in-trip location as a safety signal without blocking the stream', async () => {
+    driverEligibilityService.isDriverEligibleForRide.mockResolvedValue({ eligible: true, code: 'ELIGIBLE' });
+    activeTripIndex.resolveActiveTripForDriver.mockResolvedValue({
+      tripId: 'booking_mock_1',
+      customerId: 'customer_1'
+    });
+    const { handlers, redis } = createHarness();
+    redis.hgetall.mockImplementation(async (key) => {
+      if (key === 'booking:booking_mock_1') {
+        return {
+          bookingId: 'booking_mock_1',
+          driverId: 'driver_1',
+          customerId: 'customer_1',
+          status: 'IN_PROGRESS'
+        };
+      }
+      return {};
+    });
+
+    await handlers.updateLocationBatch({
+      bookingId: 'booking_mock_1',
+      tripStatus: 'started',
+      isInTrip: true,
+      batchId: 'batch_mock',
+      locations: [
+        { eventId: 'loc_1', lat: -22.91, lng: -43.17, seq: 1, capturedAt: 1710000000000 },
+        { eventId: 'loc_2', lat: -22.92, lng: -43.18, seq: 2, capturedAt: 1710000005000, mocked: true }
+      ]
+    });
+
+    expect(redis.xadd).toHaveBeenCalledTimes(2);
+    expect(safetySignalService.record).toHaveBeenCalledTimes(1);
+    expect(safetySignalService.record).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'mock_location',
+      driverId: 'driver_1',
+      bookingId: 'booking_mock_1',
+      sandbox: false,
+      dedupeKey: 'driver_1'
+    }));
   });
 
   it('does not stream or fan out a ride location when lease renewal is rejected', async () => {
