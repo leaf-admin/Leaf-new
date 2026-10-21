@@ -4,6 +4,11 @@ const mockCreateChargeWithSplit = jest.fn();
 const mockTransferDirectToDriver = jest.fn();
 const mockProcessRefund = jest.fn();
 
+const mockBotEmit = jest.fn().mockResolvedValue({ queued: 1 });
+jest.mock('../../../services/bot-event-service', () => ({
+  emit: (...args) => mockBotEmit(...args)
+}));
+
 jest.mock('../../../services/woovi-driver-service', () =>
   jest.fn().mockImplementation(() => ({
     getChargeStatus: jest.fn().mockResolvedValue({
@@ -2402,6 +2407,14 @@ describe('PaymentService refund terminal status handling', () => {
       refundAmount: 1200,
       refundId: 'refund_provider_1'
     });
+    expect(mockBotEmit).toHaveBeenCalledWith('refund.processed', {
+      bookingId: 'booking_refund_2',
+      amountCents: 1200,
+      reason: 'unit canonical refund',
+      status: 'REFUNDED_PARTIAL',
+      providerRefunded: true,
+      ledgerRecorded: true
+    }, expect.objectContaining({ severity: 'N3', money: true }));
   });
 
   it('resolves a sandbox refund by charge without reading operational poison records', async () => {
@@ -2550,6 +2563,11 @@ describe('PaymentService refund terminal status handling', () => {
       refundLedgerStatus: 'pending',
       refundLedgerError: 'ledger unavailable'
     });
+    expect(mockBotEmit).toHaveBeenCalledWith(
+      'refund.processed',
+      expect.objectContaining({ bookingId: 'booking_refund_ledger_fail', ledgerRecorded: false }),
+      expect.objectContaining({ severity: 'N2', money: true })
+    );
   });
 
   it('marks an advance payment intent as consumed inside a Firestore transaction', async () => {

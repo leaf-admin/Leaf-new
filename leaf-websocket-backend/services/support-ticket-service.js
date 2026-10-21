@@ -8,6 +8,25 @@ const {
 } = require('./sandbox-persistence-context');
 
 const LEGACY_TICKETS_PATH = 'support_tickets';
+const MONEY_REASONS = new Set(['payment_category_is_money', 'money_dispute', 'balance_dispute']);
+const BOT_MESSAGE_COALESCE_MS = 5 * 60 * 1000;
+
+// Avisa o bot de suporte do OpenBot. Não espera nem lança: o chamado nunca depende disso.
+function notifySupportBot(type, ticket = {}, { dedupeKey, senderType = null } = {}) {
+  if (!ticket?.id || ticket.financialNamespace === 'sandbox') return;
+  const classification = ticket.metadata?.supportClassification || {};
+  const reasons = [...(classification.reasons || []), ...(classification.resolutionReasons || [])];
+  const money = ticket.category === 'payment' || reasons.some((reason) => MONEY_REASONS.has(reason));
+  require('./bot-event-service').emit(type, {
+    ticketId: ticket.id,
+    category: ticket.category,
+    priority: ticket.priority,
+    resolutionClass: classification.resolutionClass,
+    userType: ticket.userType,
+    source: ticket.metadata?.source,
+    senderType
+  }, { dedupeKey, severity: ticket.priority, money }).catch(() => null);
+}
 const LEGACY_MESSAGES_PATH = 'support_messages';
 const MESSAGES_SUBCOLLECTION = 'messages';
 const OPEN_TICKET_STATUSES = new Set(['open', 'assigned', 'in_progress', 'escalated']);
@@ -531,6 +550,8 @@ class SupportTicketService {
       this.mirrorLegacyMessage(ticketId, initialMessage, persistenceScope)
     ]);
 
+    notifySupportBot('support.ticket_created', ticket, { dedupeKey: ticketId });
+
     return { ticket, initialMessage };
   }
 
@@ -600,6 +621,14 @@ class SupportTicketService {
       this.mirrorLegacyMessage(ticketId, newMessage, persistenceScope),
       this.mirrorLegacyTicket(ticket, persistenceScope)
     ]);
+
+    // Só mensagem do usuário acorda o bot, no máximo uma vez a cada 5 min por chamado.
+    if (senderType === 'user' && isInternal !== true) {
+      notifySupportBot('support.message_created', ticket, {
+        dedupeKey: `${ticketId}:${Math.floor(Date.now() / BOT_MESSAGE_COALESCE_MS)}`,
+        senderType
+      });
+    }
 
     return newMessage;
   }

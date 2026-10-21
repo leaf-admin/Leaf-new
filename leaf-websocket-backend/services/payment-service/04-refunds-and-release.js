@@ -16,6 +16,13 @@ const {
   isRefundedPaymentStatus,
 } = require('./shared');
 
+// Avisa CFO, Suporte e CTO do OpenBot sobre estornos. Só informa: não muda valor,
+// estado nem fluxo do reembolso, não espera e não lança.
+function notifyRefundBots(type, financialContext, data, dedupeKey, severity) {
+  if (financialContext?.namespace === 'sandbox') return;
+  require('../bot-event-service').emit(type, data, { dedupeKey, severity, money: true }).catch(() => null);
+}
+
 class PaymentServiceRefundsAndReleaseMethods {
   buildRefundRequestId({ rideId, chargeId, amount, reason, status }) {
     return crypto
@@ -649,6 +656,12 @@ class PaymentServiceRefundsAndReleaseMethods {
         error: refundResult.error || refundResult.details || 'Falha ao processar reembolso',
         financialContext: contextResult.context
       });
+      notifyRefundBots('refund.failed', contextResult.context, {
+        bookingId: canonicalRideId,
+        amountCents: refundAmount,
+        reason,
+        providerRefunded: false
+      }, `${claim.refundRequestId}:failed`, 'N2');
       return refundResult;
     }
 
@@ -670,6 +683,12 @@ class PaymentServiceRefundsAndReleaseMethods {
     });
 
     if (!markResult.success) {
+      notifyRefundBots('refund.record_failed', contextResult.context, {
+        bookingId: canonicalRideId,
+        amountCents: refundAmount,
+        reason,
+        providerRefunded: true
+      }, `${claim.refundRequestId}:record_failed`, 'N1');
       return {
         success: false,
         code: 'REFUND_RECORD_FAILED',
@@ -682,6 +701,15 @@ class PaymentServiceRefundsAndReleaseMethods {
         error: markResult.error || 'Reembolso processado, mas registro canônico falhou'
       };
     }
+
+    notifyRefundBots('refund.processed', contextResult.context, {
+      bookingId: canonicalRideId,
+      amountCents: refundAmount,
+      reason,
+      status,
+      providerRefunded: true,
+      ledgerRecorded: Boolean(markResult.ledgerRecorded)
+    }, `${claim.refundRequestId}:processed`, markResult.ledgerRecorded ? 'N3' : 'N2');
 
     return {
       ...refundResult,

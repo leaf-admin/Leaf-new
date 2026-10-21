@@ -442,6 +442,30 @@ class SupportChatService {
         }
     }
 
+    // Avisa o bot de suporte, no máximo uma vez a cada 5 min por conversa. O id do
+    // usuário só entra na chave de deduplicação (com hash); o bot lê a caixa de
+    // entrada do chat pela API. Não espera nem lança.
+    notifySupportBot(userId, text) {
+        try {
+            const { classifySupportTicketSeverity } = require('./support-severity-classifier');
+            const classification = classifySupportTicketSeverity({ description: text });
+            const money = classification.resolutionReasons.some((reason) => ['money_dispute', 'balance_dispute'].includes(reason));
+            require('./bot-event-service').emit('support.chat_message', {
+                category: money ? 'payment' : 'chat',
+                priority: classification.priority,
+                resolutionClass: classification.resolutionClass,
+                senderType: 'user',
+                source: 'app_chat'
+            }, {
+                dedupeKey: `${userId}:${Math.floor(Date.now() / (5 * 60 * 1000))}`,
+                severity: classification.priority,
+                money
+            }).catch(() => null);
+        } catch (_error) {
+            // o chat nunca depende do aviso aos bots
+        }
+    }
+
     /**
      * Enviar mensagem de suporte
      * @param {string} userId - ID do usuário
@@ -472,6 +496,10 @@ class SupportChatService {
             );
 
             logger.info(`💬 Mensagem publicada no Redis: ${messageId} (user: ${userId})`);
+
+            if (senderType === 'user') {
+                this.notifySupportBot(userId, messageData.message);
+            }
 
             return {
                 success: true,
