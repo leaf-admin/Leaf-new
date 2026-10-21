@@ -4607,6 +4607,8 @@ class WebSocketManager {
               ...(metadata.destinationAddress
                 ? { destinationAddress: String(metadata.destinationAddress) }
                 : {}),
+              // Posição de app de GPS simulado (Android): o servidor só registra e avisa.
+              ...(metadata.mocked === true ? { mocked: true } : {}),
             }
           : {};
 
@@ -4673,6 +4675,7 @@ class WebSocketManager {
               isInTrip: item.isInTrip !== undefined ? Boolean(item.isInTrip) : Boolean(isInTrip),
               bookingId: item.bookingId || bookingId || tripId || null,
               tripId: item.tripId || tripId || bookingId || null,
+              ...(item.mocked === true ? { mocked: true } : {}),
             };
           })
           .filter(Boolean)

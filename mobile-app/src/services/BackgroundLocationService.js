@@ -45,7 +45,9 @@ if (!TaskManager.isTaskDefined(LOCATION_TASK_NAME)) {
                         speed: Number.isFinite(Number(coords.speed)) ? Number(coords.speed) : null,
                         timestamp: Number.isFinite(Number(locationItem?.timestamp))
                             ? Number(locationItem.timestamp)
-                            : Date.now()
+                            : Date.now(),
+                        // Android marca a posição vinda de app de GPS simulado.
+                        mocked: locationItem?.mocked === true
                     });
 
                     await prototypeDriverTripAssistantService.handleBackgroundLocationUpdate({
