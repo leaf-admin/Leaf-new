@@ -28,6 +28,10 @@ jobs:
       GH_REPO: ${{ github.repository }}
       ALERT_LABEL: uptime-alert
       ALERT_ASSIGNEE: ${{ github.repository_owner }}
+      # Discord #alertas-criticos: posts when the alert opens, about hourly while it
+      # stays open, and on recovery. Unset secrets skip the post.
+      DISCORD_WEBHOOK: ${{ secrets.DISCORD_CRITICAL_ALERT_WEBHOOK_URL }}
+      DISCORD_MENTION: ${{ secrets.DISCORD_ALERT_MENTION }}
     steps:
       - name: Probe endpoints
         id: probe
@@ -91,11 +95,25 @@ jobs:
           body=$(printf 'Health check failing at %s UTC:\n\n%s\nRun: %s/%s/actions/runs/%s' \
             "$(date -u +'%Y-%m-%d %H:%M')" "$FAILURES" "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID")
           issue=$(gh issue list --label "$ALERT_LABEL" --state open --json number --jq '.[0].number // empty')
+          notify=false
           if [ -n "$issue" ]; then
             gh issue comment "$issue" --body "$body"
+            # Every 12th failing run (~1 h at */5) repeats the Discord alert.
+            comments=$(gh issue view "$issue" --json comments --jq '.comments | length')
+            [ $((comments % 12)) -eq 0 ] && notify=true
+            title="Ainda falhando"
           else
-            gh issue create --title 'Monitor: public health check failing' --label "$ALERT_LABEL" \
-              --assignee "$ALERT_ASSIGNEE" --body "$body"
+            issue=$(gh issue create --title 'Monitor: public health check failing' --label "$ALERT_LABEL" \
+              --assignee "$ALERT_ASSIGNEE" --body "$body" | grep -o '[0-9]*$')
+            notify=true
+            title="Falha de saúde"
+          fi
+          if [ "$notify" = true ] && [ -n "${DISCORD_WEBHOOK:-}" ]; then
+            text=$(printf '%s 🔴 **%s** (api/socket/hosts)\n%s\nIssue: %s/%s/issues/%s' \
+              "${DISCORD_MENTION:-}" "$title" "$FAILURES" "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$issue")
+            jq -n --arg content "${text:0:1900}" '{content: $content, allowed_mentions: {parse: ["users", "roles"]}}' |
+              curl -fsS -X POST -H 'Content-Type: application/json' --data @- "$DISCORD_WEBHOOK" >/dev/null ||
+              echo '::warning::Discord post failed'
           fi
           exit 1
 
@@ -106,4 +124,11 @@ jobs:
           issue=$(gh issue list --label "$ALERT_LABEL" --state open --json number --jq '.[0].number // empty' 2>/dev/null || true)
           if [ -n "$issue" ]; then
             gh issue close "$issue" --comment "Recovered at $(date -u +'%Y-%m-%d %H:%M') UTC."
+            if [ -n "${DISCORD_WEBHOOK:-}" ]; then
+              text=$(printf '🟢 **Normalizado** às %s UTC (issue %s/%s/issues/%s fechada)' \
+                "$(date -u +'%H:%M')" "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$issue")
+              jq -n --arg content "$text" '{content: $content}' |
+                curl -fsS -X POST -H 'Content-Type: application/json' --data @- "$DISCORD_WEBHOOK" >/dev/null ||
+                echo '::warning::Discord post failed'
+            fi
           fi
