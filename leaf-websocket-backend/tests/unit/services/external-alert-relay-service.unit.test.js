@@ -15,7 +15,7 @@ describe('external alert relay service', () => {
   });
 
   it('routes the new event types to the stability, operations and CTO bots', () => {
-    expect(ROUTES['sentry.issue_alert']).toEqual(['estabilidade']);
+    expect(ROUTES['sentry.issue_alert']).toEqual(['operacao']);
     expect(ROUTES['uptime.monitor_down']).toEqual(['operacao', 'cto']);
     expect(ROUTES['uptime.monitor_up']).toEqual(['operacao']);
   });
