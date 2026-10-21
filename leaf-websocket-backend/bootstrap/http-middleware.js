@@ -2,7 +2,8 @@ function shouldCaptureSignedWebhookRawBody(req) {
     const requestUrl = String(req.originalUrl || req.url || '');
     return requestUrl.includes('/api/woovi/webhook')
         || requestUrl.includes('/api/woovi-webhook')
-        || requestUrl.includes('/api/webhooks/woovi');
+        || requestUrl.includes('/api/webhooks/woovi')
+        || requestUrl.includes('/api/ops/alerts/sentry');
 }
 
 function captureSignedWebhookRawBody(req, _res, buffer) {
@@ -106,3 +107,5 @@ function configureHttpMiddleware({
 }
 
 module.exports = configureHttpMiddleware;
+module.exports.captureSignedWebhookRawBody = captureSignedWebhookRawBody;
+module.exports.shouldCaptureSignedWebhookRawBody = shouldCaptureSignedWebhookRawBody;

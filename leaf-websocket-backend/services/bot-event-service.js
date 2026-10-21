@@ -37,6 +37,9 @@ const ROUTES = Object.freeze({
   'refund.processed': ['cfo'],
   'refund.failed': ['cfo', 'suporte'],
   'refund.record_failed': ['cfo', 'cto'],
+  'sentry.issue_alert': ['estabilidade'],
+  'uptime.monitor_down': ['operacao', 'cto'],
+  'uptime.monitor_up': ['operacao'],
 });
 
 // Únicos campos que saem do backend em data.
@@ -44,6 +47,8 @@ const DATA_FIELDS = Object.freeze([
   'ticketId', 'incidentId', 'disputeId', 'bookingId', 'chargeRef',
   'category', 'priority', 'resolutionClass', 'reasonCode', 'userType', 'source',
   'senderType', 'status', 'amountCents', 'reason', 'providerRefunded', 'ledgerRecorded',
+  'issueId', 'shortId', 'title', 'project', 'level', 'release', 'link', 'alertKind',
+  'monitorId', 'monitor', 'durationSeconds',
 ]);
 
 function boolEnv(name, fallback = false) {
