@@ -8,8 +8,10 @@ horário. Código: `leaf-websocket-backend/services/bot-event-service.js`.
 1. Um serviço do backend grava o fato e chama `botEventService.emit(tipo, dados)`. A chamada não
    espera nem lança erro: o fluxo do app nunca depende do aviso.
 2. O evento entra numa fila no Redis (`bot_events:outbox`), uma entrada por destino configurado.
-3. A entrega faz um POST assinado no padrão Standard Webhooks (`webhook-id`, `webhook-timestamp`,
-   `webhook-signature`) para a rotina de webhook do bot no OpenBot.
+3. A entrega faz um POST assinado no formato de webhook do OpenBot para a rotina do bot:
+   `x-openbot-timestamp` (segundos), `x-openbot-delivery-id` (id do evento) e
+   `x-openbot-signature: sha256=<hex>`, o HMAC-SHA256 de `<timestamp>.<delivery-id>.<corpo>` com o segredo
+   inteiro (`whsec_...`) como chave. Não é o padrão Standard Webhooks: o OpenBot recusa esse formato com 401.
 4. Se o OpenBot estiver offline (o Mac desligado), a entrega tenta de novo com espera crescente:
    30 s, 1 min, 2 min, até 30 min, por até 24 h. Depois disso, ou com erro 4xx permanente, o evento
    vai para `bot_events:dead` (últimos 200). Só um processo entrega por vez (trava no Redis).
@@ -68,16 +70,12 @@ Precisa da aprovação do Izaak: liga um processo novo de entrega e muda o `.env
 3. **Teste:** abra um chamado de teste pelo app com um usuário real de QA fora do sandbox. Em até
    1 min o Suporte deve rodar a rotina "Evento do app".
 
-## Fontes externas (sem código no backend)
+## Fontes externas
 
-- **Sentry → Estabilidade:** crie no OpenBot uma rotina de webhook no agente Estabilidade.
-  No Sentry, vá em Settings → Developer Settings → Internal Integration, coloque a URL como
-  Webhook URL e marque `issue`. Depois crie uma Alert Rule ("A new issue is created" e "The issue
-  changes state from resolved to unresolved") com a ação de enviar para essa integração.
-  O Sentry assina com o próprio esquema, não com Standard Webhooks; se a rotina exigir assinatura,
-  use a URL sem filtro de assinatura ou um repasse.
-- **UptimeRobot → Operação:** crie uma rotina de webhook no agente Operação. No UptimeRobot, vá em
-  My Settings → Alert Contacts → Add → Webhook, coloque a URL, envie JSON e associe os 4 monitores.
+Sentry e UptimeRobot não conseguem chamar uma rotina do OpenBot direto, porque não geram o cabeçalho
+`x-openbot-signature`. Para eles, o caminho é um repasse pelo backend: uma rota que recebe o alerta
+(com o segredo de cada provedor) e chama `botEventService.emit`. Isso não está feito ainda. Até lá,
+Estabilidade e Operação continuam nas rotinas por horário.
 
 ## Desligar e voltar atrás
 
