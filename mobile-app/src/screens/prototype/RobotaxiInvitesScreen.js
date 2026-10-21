@@ -264,7 +264,7 @@ export default function RobotaxiInvitesScreen({ navigation, route }) {
             onLayout={handlePanelLayout}
             eyebrow="Convites"
             title="Convide passageiros"
-            subtitle="Fluxo convite-only para passageiros: gere links, compartilhe e acompanhe aceites."
+            subtitle="Convide pessoas para a Leaf e veja quem já aceitou."
             fullScreen
             style={{
               paddingTop: insets.top + SURFACE_TOP_PADDING,
@@ -353,7 +353,7 @@ export default function RobotaxiInvitesScreen({ navigation, route }) {
                   message={
                     loading
                       ? 'Sincronizando convites e aceites recentes.'
-                      : 'Crie o primeiro convite para liberar acompanhamento de uso e aceite.'
+                      : 'Quando alguém aceitar seu convite, aparece aqui.'
                   }
                   loading={loading}
                   testID="robotaxi-invites-empty-state"

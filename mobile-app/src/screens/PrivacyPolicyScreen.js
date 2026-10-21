@@ -20,6 +20,7 @@ import {
   PrototypeMenuSurface,
 } from '../components/prototype/PrototypeMenuSurface';
 import robotaxiPrototypeTokens from '../components/design-system/robotaxiPrototypeTokens';
+import { leafButtonMetrics } from '../components/prototype/LeafRideUI';
 
 const { color, typography } = robotaxiPrototypeTokens;
 const SURFACE_TOP_PADDING = 16;
@@ -95,7 +96,7 @@ const PrivacyPolicyScreen = ({ navigation, route }) => {
         {renderDetailRow({ icon: 'checkmark-circle-outline', title: 'Não vendemos seus dados pessoais' })}
         {renderDetailRow({ icon: 'options-outline', title: 'Você controla suas preferências de privacidade' })}
         {renderDetailRow({ icon: 'lock-closed-outline', title: 'Dados protegidos por controles de segurança' })}
-        {renderDetailRow({ icon: 'document-text-outline', title: 'Fluxos alinhados à LGPD', last: true })}
+        {renderDetailRow({ icon: 'document-text-outline', title: 'Em conformidade com a LGPD', last: true })}
       </PrototypeMenuSection>
 
       <PrototypeMenuSection title="Conta">
@@ -376,8 +377,8 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   accountDeletionButton: {
-    minHeight: 44,
-    borderRadius: 8,
+    minHeight: leafButtonMetrics.height,
+    borderRadius: leafButtonMetrics.radius,
     backgroundColor: '#c0392b',
     flexDirection: 'row',
     alignItems: 'center',

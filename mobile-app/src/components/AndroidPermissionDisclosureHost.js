@@ -16,6 +16,7 @@ import {
 import {
   setAndroidPermissionDisclosurePresenter,
 } from '../services/AndroidPermissionDisclosure';
+import { leafButtonMetrics } from './prototype/LeafRideUI';
 
 function getDetailItems(kind) {
   if (kind === 'background-location') {
@@ -259,8 +260,8 @@ const styles = StyleSheet.create({
   },
   secondaryButton: {
     flex: 0.86,
-    minHeight: 52,
-    borderRadius: 999,
+    minHeight: leafButtonMetrics.height,
+    borderRadius: leafButtonMetrics.radius,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: '#F6F6F3',
@@ -275,8 +276,8 @@ const styles = StyleSheet.create({
   },
   primaryButton: {
     flex: 1.22,
-    minHeight: 52,
-    borderRadius: 999,
+    minHeight: leafButtonMetrics.height,
+    borderRadius: leafButtonMetrics.radius,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: '#1A330E',

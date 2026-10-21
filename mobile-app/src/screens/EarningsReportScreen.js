@@ -57,6 +57,7 @@ import {
   buildTripFinancialTotals,
 } from './prototype/tripFinancialSummary';
 import { buildDriverFeeRows } from '../config/driverFeePolicy';
+import { leafButtonMetrics } from '../components/prototype/LeafRideUI';
 
 const MAIN_COLOR = colors.TAXIPRIMARY;
 const { color: tokenColor, elevation: tokenElevation } = robotaxiPrototypeTokens;
@@ -704,7 +705,7 @@ export default function EarningsReportScreen({ navigation, route }) {
       fee,
       totalDebit: totalToShow,
       subscriptionSettlement: settlementToShow,
-      pixKey: pixKeyToShow || 'PIX cadastrado'
+      pixKey: pixKeyToShow || 'Pix cadastrado'
     });
   }
 
@@ -876,7 +877,7 @@ export default function EarningsReportScreen({ navigation, route }) {
     : require('../../assets/images/profilePic.png');
 
   const partnerSinceLabel = resolvePartnerSinceLabel(auth?.profile);
-  const ratingLabel = toNumber(earningsData?.rating, 0).toFixed(1);
+  const ratingLabel = toNumber(earningsData?.rating, 0).toFixed(2).replace('.', ',');
   const runtimeHistory = useMemo(
     () => {
       const mergedHistory = [lastReceipt, ...(Array.isArray(tripHistory) ? tripHistory : [])]
@@ -1195,7 +1196,7 @@ export default function EarningsReportScreen({ navigation, route }) {
             ) : null}
             <View style={styles.cleanHairline} />
             <View style={styles.cleanSummaryRow}>
-              <Text style={styles.cleanSummaryLabel}>Chave PIX</Text>
+              <Text style={styles.cleanSummaryLabel}>Chave Pix</Text>
               <Text style={styles.cleanSummaryValue} numberOfLines={1}>
                 {withdrawProcessingSummary.pixKey}
               </Text>
@@ -1294,7 +1295,7 @@ export default function EarningsReportScreen({ navigation, route }) {
 
               {withdrawalsEnabled ? (
                 <>
-                  <Text style={styles.pixHint}>PIX cadastrado para recebimento</Text>
+                  <Text style={styles.pixHint}>Pix cadastrado para recebimento</Text>
                   <SecurePaymentBadge style={styles.pixSecurePaymentBadge} color="#8C9C94" />
                 </>
               ) : null}
@@ -1447,8 +1448,8 @@ export default function EarningsReportScreen({ navigation, route }) {
                 <View style={styles.cleanHairline} />
                 <View style={styles.cleanListRow}>
                   <View>
-                    <Text style={styles.cleanListAccent}>Total disponível</Text>
-                    <Text style={styles.cleanListSubtitle}>Pronto para saque via PIX</Text>
+                    <Text style={[styles.cleanListAccent, styles.cleanListAccentLabel]}>Total disponível</Text>
+                    <Text style={styles.cleanListSubtitle}>Pronto para saque via Pix</Text>
                   </View>
                   <Text style={styles.cleanListAccent}>R$ {formatCurrency(saldoDisponivel)}</Text>
                 </View>
@@ -1520,6 +1521,7 @@ export default function EarningsReportScreen({ navigation, route }) {
             </>
           )}
         </ScrollView>
+        <View pointerEvents="none" style={[styles.statusBarScrim, { height: insets.top }]} />
 
       <Modal
         visible={withdrawalsEnabled && withdrawModalVisible}
@@ -1569,7 +1571,7 @@ export default function EarningsReportScreen({ navigation, route }) {
                 <Text style={styles.withdrawBalanceValue}>R$ {formatCurrency(saldoDisponivel)}</Text>
               </View>
               <View style={styles.pixSavedBadge}>
-                <Text style={styles.pixSavedBadgeText}>{pixKey ? 'PIX salvo' : 'PIX manual'}</Text>
+                <Text style={styles.pixSavedBadgeText}>{pixKey ? 'Pix salvo' : 'Pix manual'}</Text>
               </View>
             </View>
 
@@ -1600,7 +1602,7 @@ export default function EarningsReportScreen({ navigation, route }) {
 
             <View style={styles.withdrawField}>
               <View style={styles.withdrawFieldHeader}>
-                <Text style={styles.withdrawFieldLabel}>Chave PIX</Text>
+                <Text style={styles.withdrawFieldLabel}>Chave Pix</Text>
                 <Text style={styles.withdrawFieldMeta}>Alterar</Text>
               </View>
               <TextInput
@@ -2070,6 +2072,7 @@ const styles = StyleSheet.create({
   },
   cleanListRow: {
     minHeight: 68,
+    paddingVertical: 12,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
@@ -2108,6 +2111,17 @@ const styles = StyleSheet.create({
     fontSize: 16,
     lineHeight: 22,
     textAlign: 'right',
+  },
+  cleanListAccentLabel: {
+    textAlign: 'left',
+  },
+  // O cabeçalho rola junto: sem esta faixa, o texto passava por baixo do relógio.
+  statusBarScrim: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: '#FFFFFF',
   },
   cleanHairline: {
     height: StyleSheet.hairlineWidth,
@@ -2165,7 +2179,8 @@ const styles = StyleSheet.create({
   withdrawBalanceTop: {
     marginTop: 34,
     flexDirection: 'row',
-    alignItems: 'center',
+    // O selo acompanha o saldo, não o bloco de rótulo + saldo.
+    alignItems: 'flex-end',
     justifyContent: 'space-between',
     gap: 16,
   },
@@ -2177,7 +2192,8 @@ const styles = StyleSheet.create({
     lineHeight: 38,
   },
   pixSavedBadge: {
-    width: 98,
+    marginBottom: 5,
+    paddingHorizontal: 12,
     height: 28,
     borderRadius: 14,
     borderWidth: 1,
@@ -2429,8 +2445,8 @@ const styles = StyleSheet.create({
     lineHeight: 18,
   },
   primaryActionButton: {
-    height: 52,
-    borderRadius: 16,
+    height: leafButtonMetrics.height,
+    borderRadius: leafButtonMetrics.radius,
     backgroundColor: tokenColor.accent.strong,
     paddingHorizontal: 18,
     flexDirection: 'row',
@@ -2660,9 +2676,9 @@ const styles = StyleSheet.create({
   },
   kycUnavailableButton: {
     minWidth: 176,
-    height: 48,
+    height: leafButtonMetrics.height,
     marginTop: 24,
-    borderRadius: 24,
+    borderRadius: leafButtonMetrics.radius,
     backgroundColor: '#1A330E',
     alignItems: 'center',
     justifyContent: 'center',

@@ -435,7 +435,7 @@ export default function RobotaxiProfileScreen({ navigation, route }) {
                 <View style={styles.editor} testID="robotaxi-profile-editor">
                   {[
                     ['name', 'Nome', 'Seu nome'],
-                    ['email', 'Email', 'voce@email.com'],
+                    ['email', 'E-mail', 'voce@email.com'],
                   ].map(([key, label, placeholder]) => (
                     <View key={key} style={styles.fieldWrap}>
                       <Text style={styles.fieldLabel}>{label}</Text>

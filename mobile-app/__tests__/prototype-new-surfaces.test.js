@@ -1023,7 +1023,7 @@ describe('prototype new surfaces', () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByText('Nissan Leaf PRATA · LEF-2042')).toBeTruthy();
+      expect(screen.getByText('Nissan Leaf · Prata · LEF-2042')).toBeTruthy();
     });
     expect(screen.queryByText('Honda City branco')).toBeNull();
   });
@@ -1092,7 +1092,7 @@ describe('prototype new surfaces', () => {
     });
     expect(screen.queryByText('Atualizado após CRLV')).toBeNull();
     expect(screen.queryByText('Automático')).toBeNull();
-    expect(screen.queryByText('Honda City BRANCO · RJA-2D41')).toBeNull();
+    expect(screen.queryByText('Honda City · Branco · RJA-2D41')).toBeNull();
     expect(screen.queryByText('Iniciar validação')).toBeNull();
     fireEvent.press(screen.getByTestId('driver-activation-continue-button'));
     expect(navigation.navigate).not.toHaveBeenCalledWith(
@@ -1129,7 +1129,7 @@ describe('prototype new surfaces', () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByText('Honda City BRANCO · RJA-2D41')).toBeTruthy();
+      expect(screen.getByText('Honda City · Branco · RJA-2D41')).toBeTruthy();
       expect(screen.getByText('Iniciar validação')).toBeTruthy();
     });
     expect(screen.queryByText('Cadastro do veículo pendente')).toBeNull();
@@ -1221,7 +1221,7 @@ describe('prototype new surfaces', () => {
       />
     );
 
-    expect(docs.getAllByText('revisar').length).toBeGreaterThanOrEqual(2);
+    expect(docs.getAllByText('Revisar').length).toBeGreaterThanOrEqual(2);
     expect(docs.queryByText('pendente')).toBeNull();
     docs.unmount();
 

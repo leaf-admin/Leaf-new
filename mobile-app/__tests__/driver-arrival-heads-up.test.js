@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { AppState } from 'react-native';
 import prototypeDriverTripAssistantService, {
   DESTINATION_ALERT_METERS,
   resolveArrivalAlert,
@@ -100,5 +101,29 @@ describe('arrival heads-up while the driver navigates in Waze or Google Maps', (
     await prototypeDriverTripAssistantService.handleBackgroundLocationUpdate({ lat: -22.98900, lng: -43.36540 });
     expect(displayRideArrivalAlert).toHaveBeenCalledTimes(2);
     expect(displayRideArrivalAlert.mock.calls[1][0].actions[0].identifier).toBe('end_trip');
+  });
+
+  it('stays quiet while Leaf is on screen, and still fires if the driver then leaves for Maps', async () => {
+    const originalState = AppState.currentState;
+    try {
+      AppState.currentState = 'active';
+      await prototypeDriverTripAssistantService.syncSession({
+        bookingId: 'b2',
+        status: 'accepted',
+        pickupCoordinate: PICKUP,
+        destinationCoordinate: DESTINATION,
+        currentDriverLocation: { latitude: -22.92085, longitude: -43.40610 },
+        remainingMeters: 10,
+        etaMinutes: 1,
+      });
+      await prototypeDriverTripAssistantService.handleBackgroundLocationUpdate({ lat: -22.92084, lng: -43.40608 });
+      expect(displayRideArrivalAlert).not.toHaveBeenCalled();
+
+      AppState.currentState = 'background';
+      await prototypeDriverTripAssistantService.handleBackgroundLocationUpdate({ lat: -22.92085, lng: -43.40609 });
+      expect(displayRideArrivalAlert).toHaveBeenCalledTimes(1);
+    } finally {
+      AppState.currentState = originalState;
+    }
   });
 });

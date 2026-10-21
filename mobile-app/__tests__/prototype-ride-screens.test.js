@@ -3546,7 +3546,7 @@ describe('prototype ride screens', () => {
     );
 
     expect(getByTestId('passenger-receipt-vehicle-model-color').props.children).toBe(
-      'Honda City · BRANCO'
+      'Honda City · Branco'
     );
     expect(getByTestId('passenger-receipt-vehicle-plate').props.children).toBe('RJA2D41');
   });
@@ -3582,7 +3582,7 @@ describe('prototype ride screens', () => {
 
     expect(getByText('Carlos Motorista')).toBeTruthy();
     expect(getByTestId('passenger-receipt-vehicle-model-color').props.children).toBe(
-      'Toyota Corolla · PRETO'
+      'Toyota Corolla · Preto'
     );
     expect(getByTestId('passenger-receipt-vehicle-plate').props.children).toBe('RJA2D41');
   });
