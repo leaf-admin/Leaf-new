@@ -1,0 +1,90 @@
+name: Backend Image
+
+# Builds the leaf-websocket-backend image once per commit on main and publishes
+# it to GHCR (public). The deploy and the Contabo standby pull it instead of
+# building on the production hosts; they fall back to a host build when the
+# image for a commit is missing. Image: ghcr.io/leaf-admin/leaf-backend:<sha>.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'leaf-websocket-backend/**'
+      - '.github/workflows/backend-image.yml'
+  # Pull requests build and verify the image without publishing it.
+  pull_request:
+    paths:
+      - 'leaf-websocket-backend/Dockerfile'
+      - 'leaf-websocket-backend/package*.json'
+      - '.github/workflows/backend-image.yml'
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Commit or branch to build (default: the selected branch)'
+        required: false
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: backend-image-${{ github.event.inputs.ref || github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      IMAGE: ghcr.io/leaf-admin/leaf-backend
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.ref || github.sha }}
+
+      - name: Resolve commit
+        id: commit
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to GHCR
+        if: github.event_name != 'pull_request'
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Build
+        env:
+          SHA: ${{ steps.commit.outputs.sha }}
+        run: |
+          # The last main image seeds the layer cache (npm ci layer, mostly).
+          docker pull -q "$IMAGE:main" || true
+          DOCKER_BUILDKIT=1 docker build \
+            --build-arg GIT_SHA="$SHA" \
+            --build-arg BUILDKIT_INLINE_CACHE=1 \
+            --cache-from "$IMAGE:main" \
+            --label org.opencontainers.image.source=https://github.com/${{ github.repository }} \
+            -t "$IMAGE:$SHA" \
+            leaf-websocket-backend
+
+      - name: Verify
+        env:
+          SHA: ${{ steps.commit.outputs.sha }}
+        run: |
+          test "$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$IMAGE:$SHA")" = "$SHA"
+          docker image inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$IMAGE:$SHA" | grep -Fxq "GIT_SHA=$SHA"
+          # No secrets or host files in the image.
+          if docker run --rm --entrypoint sh "$IMAGE:$SHA" -c 'ls -a /app' | grep -E '^\.env|firebase-credentials\.json|adminsdk|\.pem$'; then
+            echo '::error::secret-like files inside the image'
+            exit 1
+          fi
+          docker run --rm --entrypoint node "$IMAGE:$SHA" --check server.js
+
+      - name: Push
+        if: github.event_name != 'pull_request'
+        env:
+          SHA: ${{ steps.commit.outputs.sha }}
+        run: |
+          docker push -q "$IMAGE:$SHA"
+          if [ "${{ github.ref }}" = refs/heads/main ] && [ -z "${{ github.event.inputs.ref }}" ]; then
+            docker tag "$IMAGE:$SHA" "$IMAGE:main"
+            docker push -q "$IMAGE:main"
+          fi
+          echo "Published $IMAGE:$SHA" >> "$GITHUB_STEP_SUMMARY"
