@@ -113,6 +113,7 @@ class KycFailedBiometricEvidenceService {
     this.auditService = options.auditService || auditService;
     this.now = options.now || (() => new Date());
     this.idGenerator = options.idGenerator || defaultEvidenceId;
+    this.safetySignals = options.safetySignals || null;
     this.persistenceScope = resolveKycPersistenceScope(options.persistenceContext || {}, {
       allowLegacyOperational: true,
       allowExplicitSandboxAccess: options.allowExplicitSandboxAccess === true
@@ -451,6 +452,7 @@ class KycFailedBiometricEvidenceService {
         }
       });
 
+      this.notifySafetySignal(metadata);
       return metadata;
     } catch (error) {
       if (uploaded) {
@@ -473,6 +475,30 @@ class KycFailedBiometricEvidenceService {
         await docRef.delete();
       }
       throw error;
+    }
+  }
+
+  // Avisa o bot de Segurança da reprovação, sem esperar e sem afetar a captura. Só leva o
+  // id da evidência e a pontuação; a foto continua restrita a este serviço.
+  notifySafetySignal(metadata) {
+    try {
+      const safetySignals = this.safetySignals || require('./safety-signal-service');
+      Promise.resolve(safetySignals.record({
+        type: 'kyc_biometric_rejected',
+        driverId: metadata.driverId,
+        evidenceId: metadata.evidenceId,
+        reason: 'Rosto da selfie não confere com a CNH',
+        score: metadata.similarityScore,
+        details: {
+          threshold: metadata.threshold,
+          compareProvider: metadata.compareProvider,
+          ticketId: metadata.ticketId,
+          caseId: metadata.caseId
+        },
+        sandbox: metadata.financialNamespace === 'sandbox'
+      })).catch(() => {});
+    } catch (_error) {
+      // O sinal nunca derruba a captura da evidência.
     }
   }
 

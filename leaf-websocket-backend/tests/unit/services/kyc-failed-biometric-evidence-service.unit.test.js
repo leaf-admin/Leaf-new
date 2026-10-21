@@ -192,7 +192,9 @@ function createHarness({ auditSuccess = true } = {}) {
         : { success: false, error: 'audit unavailable' };
     })
   };
+  const safetySignals = { record: jest.fn().mockResolvedValue({ recorded: true }) };
   const service = new KycFailedBiometricEvidenceService({
+    safetySignals,
     firestoreProvider: () => firestore,
     storageProvider: () => storage,
     auditService: audit,
@@ -203,6 +205,7 @@ function createHarness({ auditSuccess = true } = {}) {
 
   return {
     service,
+    safetySignals,
     values,
     objects,
     storageCalls: calls,
@@ -264,6 +267,30 @@ function containsBuffer(value) {
 }
 
 describe('kyc-failed-biometric-evidence-service', () => {
+  test('warns the Segurança bot with only the evidence id and score after a rejected comparison', async () => {
+    const harness = createHarness();
+
+    await harness.service.captureRejectedComparisonEvidence(buildInput());
+
+    expect(harness.safetySignals.record).toHaveBeenCalledTimes(1);
+    const signal = harness.safetySignals.record.mock.calls[0][0];
+    expect(signal).toMatchObject({
+      type: 'kyc_biometric_rejected',
+      driverId: DRIVER_ID,
+      evidenceId: EVIDENCE_ID,
+      score: 0.42,
+      sandbox: false
+    });
+    expect(containsBuffer(signal)).toBe(false);
+  });
+
+  test('does not warn when the capture fails', async () => {
+    const harness = createHarness({ auditSuccess: false });
+
+    await expect(harness.service.captureRejectedComparisonEvidence(buildInput())).rejects.toThrow();
+    expect(harness.safetySignals.record).not.toHaveBeenCalled();
+  });
+
   test('stores only a canonical failed ReferenceImage in a private opaque object with 30-day metadata', async () => {
     const harness = createHarness();
     const input = buildInput();
