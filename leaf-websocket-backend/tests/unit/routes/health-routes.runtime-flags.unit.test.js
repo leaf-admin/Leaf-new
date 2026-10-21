@@ -162,6 +162,17 @@ describe('health runtime flags route', () => {
     expect(JSON.stringify(response.body.launchAccess)).not.toContain('driver-1');
   });
 
+  it('answers 503 draining while the gateway shuts down', async () => {
+    process.__leafIsShuttingDown = true;
+    try {
+      const response = await request(createApp()).get('/health/readiness');
+      expect(response.status).toBe(503);
+      expect(response.body.status).toBe('draining');
+    } finally {
+      delete process.__leafIsShuttingDown;
+    }
+  });
+
   it('fails production readiness when gateway role dependencies are incomplete', async () => {
     process.env.NODE_ENV = 'production';
     process.env.RUNTIME_ROLE = 'gateway';

@@ -526,10 +526,21 @@ describe('production compose launch-control contract', () => {
     );
     // Gateways roll one at a time from GATEWAY_SERVICES (host-specific list).
     const firstGatewayUp = deploySource.indexOf(
-      '\\$compose up -d --no-deps \\"\\$gateway_service\\"',
+      'roll_gateway \\"\\$gateway_service\\"',
     );
     expect(tripWorkerUp).toBeGreaterThan(-1);
     expect(firstGatewayUp).toBeGreaterThan(tripWorkerUp);
+    // Zero downtime: each gateway leaves nginx before it is recreated and comes back after.
+    const rollStart = deploySource.indexOf('roll_gateway() {');
+    const takeOut = deploySource.indexOf('write_upstream \\"\\$service\\"', rollStart);
+    const recreate = deploySource.indexOf('\\$compose up -d --no-deps \\"\\$service\\"', rollStart);
+    const putBack = deploySource.indexOf("write_upstream ''", recreate);
+    expect(rollStart).toBeGreaterThan(-1);
+    expect(takeOut).toBeGreaterThan(rollStart);
+    expect(recreate).toBeGreaterThan(takeOut);
+    expect(putBack).toBeGreaterThan(recreate);
+    expect(deploySource).toContain('ALLOW_DEPLOY_WITH_ACTIVE_RIDES');
+    expect(deploySource.indexOf('active_rides()')).toBeLessThan(rollStart);
     expect(deploySource).toContain(
       'wait_healthy trip-location-worker leaf-trip-location-worker',
     );
