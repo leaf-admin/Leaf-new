@@ -31,6 +31,9 @@ function buildOfferPushNotification(offer = {}) {
     : 30;
   return {
     title: 'Nova corrida',
+    // Canal HIGH criado pelo app (InteractiveNotificationService): aviso no topo da tela
+    // mesmo com o Waze/Maps aberto. Sem ele o aviso caía num canal sem prioridade.
+    channelId: 'driver_actions',
     collapseKey: OFFER_PUSH_COLLAPSE_KEY,
     ttlSeconds,
     body: parts.length ? parts.join(' · ') : 'Toque para ver e aceitar.',

@@ -11,6 +11,7 @@ describe('new ride offer push', () => {
       })
     ).toEqual({
       title: 'Nova corrida',
+      channelId: 'driver_actions',
       collapseKey: 'leaf-ride-offer',
       ttlSeconds: 30,
       body: 'R$ 38,43 líquido · 3 min até o embarque',
