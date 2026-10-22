@@ -236,6 +236,39 @@ describe('support routes admin operations', () => {
     });
   });
 
+  it('accepts a neutral safety category from an authenticated app user', async () => {
+    const response = await request(createApp())
+      .post('/support/tickets')
+      .set('Authorization', 'Bearer user-token')
+      .send({
+        subject: 'Segurança',
+        description: 'Preciso conversar sobre minha viagem.',
+        category: 'safety',
+        priority: 'N3'
+      });
+
+    expect(response.status).toBe(201);
+    expect(mockCreateSupportTicket).toHaveBeenCalledWith(expect.objectContaining({
+      category: 'safety',
+      requesterId: 'smoke_customer_1',
+      requesterIsAgent: false
+    }));
+  });
+
+  it('still rejects unknown support categories before creating a ticket', async () => {
+    const response = await request(createApp())
+      .post('/support/tickets')
+      .set('Authorization', 'Bearer user-token')
+      .send({
+        subject: 'Ajuda',
+        description: 'Preciso conversar sobre minha viagem.',
+        category: 'unknown-category'
+      });
+
+    expect(response.status).toBe(400);
+    expect(mockCreateSupportTicket).not.toHaveBeenCalled();
+  });
+
   it('creates a ticket from an app user and lets support resolve it with history', async () => {
     const io = createIoMock();
     const app = createApp({ io });
