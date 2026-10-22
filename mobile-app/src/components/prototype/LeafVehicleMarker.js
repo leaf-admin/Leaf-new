@@ -6,6 +6,7 @@ const LeafVehicleMarker = React.memo(function LeafVehicleMarker({
   colorToken = 'black',
   shapeKey = '',
   screenHeading = 0,
+  size = 42,
 }) {
   const id = useId();
   const poseHeading = resolveVehicleArtworkPose(screenHeading).heading;
@@ -16,7 +17,7 @@ const LeafVehicleMarker = React.memo(function LeafVehicleMarker({
     idPrefix: `leaf-vehicle-${id}`,
   }), [colorToken, id, poseHeading, shapeKey]);
 
-  return <SvgXml xml={xml} width={42} height={42} testID="leaf-vehicle-vector" />;
+  return <SvgXml xml={xml} width={size} height={size} testID="leaf-vehicle-vector" />;
 });
 
 export default LeafVehicleMarker;

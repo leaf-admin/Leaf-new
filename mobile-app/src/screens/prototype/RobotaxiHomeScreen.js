@@ -5242,6 +5242,19 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   // Not tied to presentationSyncing: background re-syncs toggled ownership,
   // so the camera kept switching between route fit (zoom out) and car follow
   // (zoom in) every few seconds.
+  // Fechar o banner de navegação no X não pode parar a câmera: antes o mapa ficava
+  // parado e o carro saía da tela. Com o banner fechado ela continua seguindo o carro.
+  const driverTripAssistStatus = String(driverTripAssist?.status || '').trim().toLowerCase();
+  const driverFollowCameraActive = Boolean(
+    showLeafNativeNavigation ||
+      (runtimeHomeSurfaceReady &&
+        isDriverRole &&
+        isHomeRoute &&
+        isLiveTripMapActive &&
+        leafNativeNavigationKey &&
+        hiddenNativeNavigationKey === leafNativeNavigationKey &&
+        ['accepted', 'started'].includes(driverTripAssistStatus))
+  );
   const driverNavigationCameraOwnsMap = Boolean(
     runtimeHomeSurfaceReady &&
       isDriverRole &&
@@ -5249,8 +5262,8 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
       isLiveTripMapActive &&
       driverTripAssist &&
       (
-        showLeafNativeNavigation ||
-        String(driverTripAssist.status || '').trim().toLowerCase() === 'arrived'
+        driverFollowCameraActive ||
+        driverTripAssistStatus === 'arrived'
       )
   );
   // Reopening the app mid-ride used to fit the whole route before the map and
@@ -6961,11 +6974,11 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
 
   useEffect(() => {
     if (
-      !showLeafNativeNavigation ||
+      !driverFollowCameraActive ||
       !mapRef.current ||
       !homeMapInteractiveReady ||
       !activeDriverNavigationCoordinate ||
-      nativeNavigationRouteRevealKey === leafNativeNavigationKey ||
+      (leafNativeNavigationKey && nativeNavigationRouteRevealKey === leafNativeNavigationKey) ||
       isSearchingMode ||
       shouldFreezeBackgroundMapCamera
     ) {
@@ -7099,7 +7112,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     routeViewportOcclusion.bottom,
     routeViewportOcclusion.top,
     shouldFreezeBackgroundMapCamera,
-    showLeafNativeNavigation,
+    driverFollowCameraActive,
     insets.top,
     windowHeight,
   ]);
@@ -10039,7 +10052,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
           userAvatarLetter={profileInitial}
           driverCoordinate={presentedDriverCoordinate}
           driverHeading={presentedDriverHeading}
-          mapCameraHeading={showLeafNativeNavigation ? leafNativeNavigationCameraHeading : 0}
+          mapCameraHeading={driverFollowCameraActive ? leafNativeNavigationCameraHeading ?? 0 : 0}
           showTraffic={shouldShowTrafficLayer}
           searchingMode={presentedSearchingMode}
           searchCenterCoordinate={presentedSearchingMode ? searchCenterCoordinate : null}

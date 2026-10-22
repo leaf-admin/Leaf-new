@@ -187,10 +187,10 @@ describe('LeafNativeNavigationEngine', () => {
   });
 
   it('keeps navigation camera pitch top-down while zoom adapts by driver speed', () => {
-    expect(resolveNavigationCameraZoom(0)).toBe(17.8);
-    expect(resolveNavigationCameraZoom(30)).toBe(17);
-    expect(resolveNavigationCameraZoom(55)).toBe(16);
-    expect(resolveNavigationCameraZoom(80)).toBe(15);
+    expect(resolveNavigationCameraZoom(0)).toBe(15.8);
+    expect(resolveNavigationCameraZoom(30)).toBe(15.5);
+    expect(resolveNavigationCameraZoom(55)).toBe(15.2);
+    expect(resolveNavigationCameraZoom(90)).toBe(14.9);
     expect(resolveNavigationCameraPitch(0)).toBe(0);
     expect(resolveNavigationCameraPitch(12)).toBe(0);
 
@@ -219,22 +219,19 @@ describe('LeafNativeNavigationEngine', () => {
     });
 
     expect(stoppedState.cameraZoom).toBeGreaterThan(fastState.cameraZoom);
-    expect(stoppedState.cameraZoom).toBeGreaterThan(16);
+    expect(stoppedState.cameraZoom).toBe(15.8);
     expect(stoppedState.cameraPitch).toBe(0);
     expect(fastState.currentSpeedKmh).toBe(72);
     expect(fastState.cameraZoom).toBeGreaterThanOrEqual(15);
     expect(fastState.cameraPitch).toBe(0);
   });
 
-  it('zooms in progressively as the remaining route becomes shorter', () => {
+  it('keeps one steady zoom along the leg instead of closing in as the target gets near', () => {
     const farZoom = resolveNavigationCameraZoom(30, 5000, 5000);
-    const middleZoom = resolveNavigationCameraZoom(30, 1500, 5000);
-    const nearZoom = resolveNavigationCameraZoom(30, 250, 5000);
-    const arrivalZoom = resolveNavigationCameraZoom(30, 40, 5000);
-
-    expect(middleZoom).toBeGreaterThan(farZoom);
-    expect(nearZoom).toBeGreaterThan(middleZoom);
-    expect(arrivalZoom).toBeGreaterThan(nearZoom);
+    const nearZoom = resolveNavigationCameraZoom(30, 40, 5000);
+    expect(nearZoom).toBe(farZoom);
+    // Never above the zoom where the Android base map shades the blocks.
+    expect(resolveNavigationCameraZoom(0)).toBeLessThanOrEqual(15.8);
   });
 
   it('reveals each new pickup or destination route exactly once per navigation phase', () => {
