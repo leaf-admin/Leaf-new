@@ -3767,6 +3767,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
       }
 
       if (!canRequestRide) {
+        setPreferenceModalVisible(false);
         Alert.alert(
           "Selecione um destino",
           "Defina um destino válido antes de confirmar o pagamento.",
@@ -3775,6 +3776,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
       }
 
       if (routeGuardBlocked) {
+        setPreferenceModalVisible(false);
         Alert.alert(
           "Região indisponível",
           routeGuardMessage || OUT_OF_COVERAGE_MESSAGE,
@@ -3783,6 +3785,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
       }
 
       if (!canonicalPaymentConfirmation.ok) {
+        setPreferenceModalVisible(false);
         Alert.alert(
           "Pagamento inconsistente",
           canonicalPaymentConfirmation.message ||
@@ -3798,7 +3801,6 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
         }
         setSubmittingRide(true);
         setPixModalVisible(false);
-        setPreferenceModalVisible(false);
 
         await requestRide({
           destination: {
@@ -3872,6 +3874,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
       } finally {
         submittingRideGuardRef.current = false;
         setSubmittingRide(false);
+        setPreferenceModalVisible(false);
       }
     },
     [
@@ -3931,7 +3934,8 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
     pendingPaymentConfirmationRef.current = null;
     setPreferenceProgress(1);
     setPreferenceDropdownKey(null);
-    setPreferenceModalVisible(false);
+    // O modal fica aberto até a corrida ser criada: fechado antes, a tela mostrava por
+    // um instante o passo "Escolha a categoria" que fica por baixo (QA 2026-10-22).
     submitRideAfterPreferences(
       paymentConfirmation,
       latestRidePreferencesRef.current || {},

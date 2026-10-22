@@ -1659,9 +1659,10 @@ function PrototypeMapLayer({
   const resolvedAvatarSource = useMemo(() => {
     return shouldRenderAvatarImage ? { uri: normalizedAvatarUri } : null;
   }, [normalizedAvatarUri, shouldRenderAvatarImage]);
+  // Também na busca: a onda nasce do passageiro, e esconder o marcador ao entrar na busca
+  // trocava a topologia nativa e remontava o mapa no iOS (tela em branco, QA 2026-10-22).
   const shouldShowCurrentLocationMarker = Boolean(
     !hideUserMarker &&
-      !searchingMode &&
       !(Platform.OS !== 'android' && currentLocationMarkerMode === 'car')
   );
   // A letra do passageiro no centro da busca não dizia nada; a esfera marca o lugar.
@@ -3061,6 +3062,11 @@ function PrototypeMapLayer({
         shouldShowCurrentLocationMarker ? 'user' : '',
         shouldRenderExternalMapChildren ? `children:${mapChildrenCount}` : '',
       ].join('|');
+
+  // QA: cada troca desta chave remonta o mapa no iOS (tela em branco e câmera de volta à região).
+  useEffect(() => {
+    if (__DEV__ && Platform.OS === 'ios') console.log('[MapRemount]', iosNativeChildSignature);
+  }, [iosNativeChildSignature]);
 
   return (
     <View ref={mapContainerRef} style={[styles.mapArea, containerStyle]} testID="prototype-map-container">

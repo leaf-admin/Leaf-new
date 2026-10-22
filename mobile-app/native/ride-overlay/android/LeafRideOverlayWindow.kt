@@ -357,6 +357,21 @@ object LeafRideOverlayWindow {
     texts.addView(subtitleView)
     header.addView(iconTile)
     header.addView(texts)
+    // Recolher na pílula: botão visível (o arrasto para cima continua valendo). Antes só o
+    // arrasto recolhia, e com o botão da etapa na tela o card nunca recolhia sozinho.
+    val collapseButton = FrameLayout(context).apply {
+      background = RippleDrawable(ColorStateList.valueOf(p.ripple), GradientDrawable().apply {
+        shape = GradientDrawable.OVAL
+        setColor(p.iconTile)
+      }, null)
+      contentDescription = "Recolher"
+      layoutParams = LinearLayout.LayoutParams(dp(context, 36), dp(context, 36)).apply {
+        marginStart = dp(context, 10)
+      }
+      addView(ChevronView(context, p.icon), FrameLayout.LayoutParams(dp(context, 16), dp(context, 16), Gravity.CENTER))
+      setOnClickListener { setCollapsed(context, true) }
+    }
+    header.addView(collapseButton)
 
     trackView = TrackView(context, p).apply {
       layoutParams = LinearLayout.LayoutParams(
@@ -616,6 +631,27 @@ object LeafRideOverlayWindow {
           fallback
         }
       }
+    }
+  }
+
+  /** Seta para cima do botão Recolher. */
+  private class ChevronView(context: Context, color: Int) : View(context) {
+    private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+      this.color = color
+      style = Paint.Style.STROKE
+      strokeWidth = 2.2f * context.resources.displayMetrics.density
+      strokeCap = Paint.Cap.ROUND
+      strokeJoin = Paint.Join.ROUND
+    }
+    override fun onDraw(canvas: Canvas) {
+      val w = width.toFloat()
+      val h = height.toFloat()
+      val path = android.graphics.Path().apply {
+        moveTo(w * 0.15f, h * 0.68f)
+        lineTo(w * 0.5f, h * 0.32f)
+        lineTo(w * 0.85f, h * 0.68f)
+      }
+      canvas.drawPath(path, paint)
     }
   }
 

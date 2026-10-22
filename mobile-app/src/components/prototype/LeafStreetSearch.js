@@ -3,7 +3,6 @@ import { Animated, Easing, StyleSheet, View } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
 import { useReducedMotion } from 'react-native-reanimated';
 import { projectMapPoint } from '../../screens/prototype/home/projectMapPoint';
-import LeafLocationMarker, { LEAF_LOCATION_MARKER_SIZE } from './LeafLocationMarker';
 import LeafVehicleMarker from './LeafVehicleMarker';
 import {
   buildStreetBands,
@@ -182,18 +181,6 @@ export default function LeafStreetSearch({
           }]}
         />
       ) : null}
-      {pickupPoint ? (
-        // O mapa esconde o marcador do passageiro durante a busca; a onda nasce dele, então ele fica.
-        <View
-          testID={`${testID}-pickup`}
-          style={[styles.pickup, {
-            left: pickupPoint.x - LEAF_LOCATION_MARKER_SIZE / 2,
-            top: pickupPoint.y - LEAF_LOCATION_MARKER_SIZE / 2,
-          }]}
-        >
-          <LeafLocationMarker />
-        </View>
-      ) : null}
       {visibleCars.map((car) => (
         <Animated.View
           key={car.id}
@@ -222,11 +209,6 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
     borderColor: 'rgba(46,139,74,0.9)',
     backgroundColor: 'rgba(46,139,74,0.08)',
-  },
-  pickup: {
-    position: 'absolute',
-    width: LEAF_LOCATION_MARKER_SIZE,
-    height: LEAF_LOCATION_MARKER_SIZE,
   },
   car: {
     position: 'absolute',
