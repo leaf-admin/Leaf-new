@@ -31,6 +31,7 @@ const {
   isFirebasePhoneAuthProvider
 } = require('../../services/whatsapp-otp-service');
 const DockerDetector = require('../../utils/docker-detector');
+const { configErrors: driverIntroFeeConfigErrors } = require('../../services/driver-intro-fee-config');
 
 const REQUIRED_BASE = [
   'NODE_ENV'
@@ -585,7 +586,7 @@ function main() {
     ? checkRequired(REQUIRED_PROD_PAYMENT_PROVIDER)
     : [];
   const warnings = [];
-  const blockers = [];
+  const blockers = driverIntroFeeConfigErrors(process.env);
   if (nodeEnv === 'production' || process.env.CPF_REVIEW_ENABLED === 'true') {
     if (Buffer.byteLength(process.env.CPF_REVIEW_HMAC_KEY || '') < 32) {
       blockers.push('CPF review exige CPF_REVIEW_HMAC_KEY dedicada com pelo menos 32 bytes');

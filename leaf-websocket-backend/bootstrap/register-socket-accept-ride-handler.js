@@ -3,6 +3,8 @@ const pricingH3ReadModelService = require('../services/pricing-h3-read-model-ser
 const { resolveAcceptRidePayload, toFiniteNumber } = require('../utils/accept-ride-payload');
 const { ensureAcceptedRideCanonicalState } = require('../utils/accepted-ride-state');
 const { resolveAcceptedDriverIdentity } = require('../utils/accepted-driver-identity');
+const { acceptedContext } = require('../services/driver-intro-fee-service');
+const { resolveEstimatedFareSnapshot } = require('../utils/fare-snapshot-utils');
 const { metrics } = require('../utils/prometheus-metrics');
 const { recordDispatchWaveAcceptance } = require('../services/dispatch-wave-trace-service');
 const driverEligibilityService = require('../services/driver-eligibility-service');
@@ -262,7 +264,8 @@ function registerSocketAcceptRideHandler({
                     estimatedFare,
                     driverAcceptedLocation,
                     driverDistanceToPickupKm,
-                    estimatedArrivalToPickupMin
+                    estimatedArrivalToPickupMin,
+                    bookingData: acceptedBookingData
                 } = await resolveAcceptRidePayload(redisPool.getConnection(), bookingIdToUse, result.data);
 
                 // Encerrar imediatamente a busca desta corrida e liberar motoristas concorrentes.
@@ -420,6 +423,11 @@ function registerSocketAcceptRideHandler({
                     : null;
 
                 let estimatedBreakdown = null;
+                const driverIntroFee = acceptedContext(acceptedBookingData || {}, driverId);
+                const acceptedSnapshot = driverIntroFee ? resolveEstimatedFareSnapshot({
+                    payload: acceptedBookingData, paymentService, estimatedFare,
+                    tollFee: acceptedBookingData.tollFee, driverIntroFee
+                }) : null;
                 if (Number.isFinite(estimatedFare) && estimatedFare >= 0) {
                     estimatedBreakdown = paymentService.calculateFareBreakdownFromReais(estimatedFare, 0);
                 }
@@ -446,6 +454,8 @@ function registerSocketAcceptRideHandler({
                         estimatedTotalFees: estimatedBreakdown.totalFees,
                         estimatedDriverNetAmount: estimatedBreakdown.driverNetAmount
                     } : {}),
+                    ...(acceptedSnapshot || {}),
+                    ...(driverIntroFee ? { driverIntroFee } : {}),
                     driver: {
                         id: driverId,
                         name: acceptedDriverIdentity.name,

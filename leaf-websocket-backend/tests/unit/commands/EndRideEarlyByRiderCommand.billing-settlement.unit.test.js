@@ -17,11 +17,12 @@ jest.mock('../../../workers/WorkerManager', () => {
 jest.mock('../../../services/payment-service', () =>
   jest.fn().mockImplementation(() => ({
     processNetDistribution: mockProcessNetDistribution,
-    calculateFareBreakdownFromReais: (fare = 0, toll = 0) => {
+    calculateFareBreakdownFromReais: (fare = 0, toll = 0, options = {}) => {
       const { buildRideFinancialContract } = jest.requireActual('../../../services/ride-financial-contract');
       const contract = buildRideFinancialContract({
         passengerPaidCents: Math.round(Number(fare || 0) * 100),
-        tollFeeCents: Math.round(Number(toll || 0) * 100)
+        tollFeeCents: Math.round(Number(toll || 0) * 100),
+        driverIntroFee: options.driverIntroFee
       });
       return {
         operationalFee: contract.leafOperationalFeeCents / 100,
@@ -133,6 +134,7 @@ jest.mock('../../../services/kyc-policy-service', () => ({
 }));
 
 const EndRideEarlyByRiderCommand = require('../../../commands/EndRideEarlyByRiderCommand');
+const driverIntroFeeService = require('../../../services/driver-intro-fee-service');
 const { EVENT_TYPES } = require('../../../events');
 const { validateAuthoritativeFinancialSnapshot } = require('../../../services/ride-financial-contract');
 require('../../../workers/worker-billing');
@@ -226,6 +228,24 @@ describe('EndRideEarlyByRiderCommand -> billing worker', () => {
       passengerPaidCents: 1137,
       driverNetAmountCents: 988
     });
+  });
+
+  it('keeps the accepted promotional fee through early-end billing and releases its unconsumed slot', async () => {
+    const { buildDriverIntroFeeContext } = require('../../../services/driver-intro-fee-policy');
+    const context = buildDriverIntroFeeContext({ driverId: 'driver_1', qualifiedCompletedRides: 24, historyVerified: true, historySnapshotId: 'synthetic-history' });
+    setBooking({ estimatedFare: '240', paymentAmountInCents: '24000', driverIntroFee: JSON.stringify(context) });
+    const record = jest.spyOn(driverIntroFeeService, 'recordCompletion').mockImplementation(async () => {
+      const patch = mockHset.mock.calls.find(([key]) => key === 'booking:booking_1')[1];
+      expect(patch.status).toBe('EARLY_ENDED_BY_RIDER');
+      return { qualifiedCompletedRides: 24 };
+    });
+    const result = await endEarly();
+    expect(result.success).toBe(true);
+    expect(result.data.financialSnapshot).toMatchObject({ passengerPaidCents: 6000, operationalFeeCents: 99, driverIntroFee: context });
+    expect(record).toHaveBeenCalledWith(mockRedis, 'driver_1', 'booking_1');
+    await mockListeners[EVENT_TYPES.RIDE_COMPLETED]({ eventId: 'event_intro_early', eventType: EVENT_TYPES.RIDE_COMPLETED, data: result.data.event });
+    expect(mockProcessNetDistribution).toHaveBeenCalledWith(expect.objectContaining({ driverId: 'driver_1', totalAmount: 6000,
+      financialSnapshot: expect.objectContaining({ operationalFeeCents: 99, driverIntroFee: context }) }));
   });
 
   it('keeps the toll whole and outside the travelled share in the executed-fare snapshot', async () => {

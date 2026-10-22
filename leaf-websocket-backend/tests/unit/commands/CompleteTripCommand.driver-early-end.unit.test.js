@@ -29,10 +29,11 @@ jest.mock('../../../services/ride-state-manager', () => ({
 jest.mock('../../../services/payment-service', () => {
   const { buildRideFinancialContract } = jest.requireActual('../../../services/ride-financial-contract');
   return jest.fn().mockImplementation(() => ({
-    calculateFareBreakdownFromReais: jest.fn((fare = 0, toll = 0) => {
+    calculateFareBreakdownFromReais: jest.fn((fare = 0, toll = 0, options = {}) => {
       const contract = buildRideFinancialContract({
         passengerPaidCents: Math.round(Number(fare || 0) * 100),
-        tollFeeCents: Math.round(Number(toll || 0) * 100)
+        tollFeeCents: Math.round(Number(toll || 0) * 100),
+        driverIntroFee: options.driverIntroFee
       });
       return {
         totalFare: contract.passengerPaidCents / 100,
@@ -116,6 +117,9 @@ const redisPool = require('../../../utils/redis-pool');
 const heartbeatService = require('../../../services/heartbeat-service');
 const { validateAuthoritativeFinancialSnapshot } = require('../../../services/ride-financial-contract');
 const CompleteTripCommand = require('../../../commands/CompleteTripCommand');
+const driverIntroFeeService = require('../../../services/driver-intro-fee-service');
+const driverLockManager = require('../../../services/driver-lock-manager');
+const { buildDriverIntroFeeContext } = require('../../../services/driver-intro-fee-policy');
 
 const PICKUP = { lat: -22.9208, lng: -43.4061 };
 const DESTINATION = { lat: -22.9827, lng: -43.3642 };
@@ -204,6 +208,7 @@ describe('CompleteTripCommand driver early end settlement', () => {
     mockBookingState.value = 'IN_PROGRESS';
     process.env.ENABLE_DRIVER_EARLY_END_SETTLEMENT = 'true';
     heartbeatService.getAndResetOfflineTime.mockResolvedValue(0);
+    driverLockManager.isDriverLocked.mockResolvedValue({ isLocked: false });
     redis = createRedis();
     redisPool.getConnection.mockReturnValue(redis);
     immediateTasks = [];
@@ -232,6 +237,56 @@ describe('CompleteTripCommand driver early end settlement', () => {
     expect(result.data.earlyEndSettlementSkipped).toBeUndefined();
     expect(redis.store['booking:booking_1'].earlyEndSettlementSkipped).toBeUndefined();
     expect(redis.store['booking:booking_1'].status).toBe('COMPLETED');
+  });
+
+  const introContext = () => buildDriverIntroFeeContext({ driverId: 'driver_1', qualifiedCompletedRides: 24, historyVerified: true, historySnapshotId: 'synthetic-24' });
+
+  it('settles the accepted 99-cent fee and counts the destination before unlocking the driver', async () => {
+    redis.store['booking:booking_1'].driverIntroFee = JSON.stringify(introContext());
+    serverSaw(DESTINATION, { distanceKm: 10, durationSecs: 1200 });
+    driverLockManager.isDriverLocked.mockResolvedValue({ isLocked: true, bookingId: 'booking_1' });
+    const record = jest.spyOn(driverIntroFeeService, 'recordCompletion').mockImplementation(async () => {
+      expect(redis.store['booking:booking_1'].status).toBe('COMPLETED');
+      expect(JSON.parse(redis.store['booking:booking_1'].driverIntroFeeCompletion)).toMatchObject({ qualified: true });
+      return { qualifiedCompletedRides: 25 };
+    });
+    const result = await buildCommand().execute();
+    expect(result.success).toBe(true);
+    expect(result.data.financialSnapshot).toMatchObject({ operationalFeeCents: 99, passengerPaidCents: 4000, driverIntroFee: introContext() });
+    expect(result.data.driverIntroFeeCompletion).toMatchObject({ qualified: true, reason: 'SERVER_DESTINATION_COMPLETION' });
+    expect(record).toHaveBeenCalledWith(redis, 'driver_1', 'booking_1');
+    expect(record.mock.invocationCallOrder[0]).toBeLessThan(driverLockManager.releaseLock.mock.invocationCallOrder[0]);
+  });
+
+  it('keeps the accepted fee on an early end but excludes that ride from the quota', async () => {
+    redis.store['booking:booking_1'].driverIntroFee = JSON.stringify(introContext());
+    serverSaw(HALFWAY, { distanceKm: 5, durationSecs: 600 });
+    jest.spyOn(driverIntroFeeService, 'recordCompletion').mockResolvedValue({ qualifiedCompletedRides: 24 });
+    const result = await buildCommand().execute();
+    expect(result.success).toBe(true);
+    expect(result.data.finalFare).toBeLessThan(40);
+    expect(result.data.financialSnapshot.operationalFeeCents).toBe(99);
+    expect(result.data.driverIntroFeeCompletion).toMatchObject({ qualified: false, reviewRequired: false, reason: 'EARLY_END' });
+  });
+
+  it('finishes the physical ride with its frozen fee even when counting must retry', async () => {
+    redis.store['booking:booking_1'].driverIntroFee = JSON.stringify(introContext());
+    serverSaw(DESTINATION);
+    jest.spyOn(driverIntroFeeService, 'recordCompletion').mockRejectedValue(new Error('synthetic Redis interruption'));
+    const result = await buildCommand().execute();
+    expect(result.success).toBe(true);
+    expect(result.data.financialSnapshot.operationalFeeCents).toBe(99);
+    expect(redis.store['booking:booking_1'].status).toBe('COMPLETED');
+  });
+
+  it('does not use the client destination as proof when server telemetry is unavailable', async () => {
+    redis.store['booking:booking_1'].driverIntroFee = JSON.stringify(introContext());
+    mockResolveCanonicalTripMetrics.mockResolvedValue({ success: false });
+    jest.spyOn(driverIntroFeeService, 'recordCompletion').mockResolvedValue({ qualifiedCompletedRides: 24 });
+    const result = await buildCommand({ endLocation: DESTINATION }).execute();
+    expect(result.success).toBe(true);
+    expect(result.data.driverIntroFeeCompletion).toMatchObject({ qualified: false, reviewRequired: true });
+    expect(result.data.financialSnapshot.operationalFeeCents).toBe(99);
   });
 
   it('settles on the travelled share when the server saw the car far from the destination', async () => {

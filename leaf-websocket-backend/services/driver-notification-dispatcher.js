@@ -16,6 +16,7 @@ const { EVENT_TYPES } = require('./event-sourcing');
 const { logger, logStructured, logError } = require('../utils/logger');
 const { performance } = require('perf_hooks');
 const PaymentService = require('./payment-service');
+const driverIntroFeeService = require('./driver-intro-fee-service');
 const { resolveEstimatedFareSnapshot, toFiniteMoney } = require('../utils/fare-snapshot-utils');
 const {
     reserveOffer,
@@ -1295,12 +1296,26 @@ class DriverNotificationDispatcher {
                 ?? effectiveBookingData.fare
                 ?? 0
             );
+            let driverIntroFee = null;
+            try {
+                driverIntroFee = await driverIntroFeeService.resolveOfferContext(this.redis, driverId, effectiveBookingData);
+            } catch (error) {
+                await releaseManagedOfferLock();
+                logStructured('warn', 'Oferta aguardando estado financeiro promocional verificável', {
+                    service: 'driver-intro-fee', bookingId, driverId, code: error.code || 'HISTORY_UNAVAILABLE'
+                });
+                return finish(false, error.code || 'DRIVER_INTRO_FEE_UNAVAILABLE');
+            }
             const estimatedSnapshot = resolveEstimatedFareSnapshot({
-                payload: effectiveBookingData,
+                // Passenger quote has no driver; calculate this offer with the
+                // receiving driver's verified context, not its generic snapshot.
+                payload: driverIntroFee ? null : effectiveBookingData,
                 paymentService: this.paymentService,
                 estimatedFare,
-                tollFee: effectiveBookingData?.tollFee
+                tollFee: effectiveBookingData?.tollFee,
+                driverIntroFee
             });
+            if (driverIntroFee) notificationData.driverIntroFee = driverIntroFee;
             if (estimatedSnapshot) {
                 Object.assign(notificationData, estimatedSnapshot, {
                     pricingSnapshotLocked:
@@ -1378,7 +1393,8 @@ class DriverNotificationDispatcher {
             await reserveOffer(this.redis, bookingId, driverId, {
                 ttlSeconds: responseTimeoutSeconds,
                 metadata: {
-                    status: 'AWAITING_RESPONSE'
+                    status: 'AWAITING_RESPONSE',
+                    ...(driverIntroFee ? { driverIntroFee, estimatedFareSnapshot: estimatedSnapshot } : {})
                 }
             });
 

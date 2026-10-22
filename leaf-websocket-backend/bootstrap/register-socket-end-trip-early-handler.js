@@ -3,6 +3,7 @@ const ridePersistenceService = require('../services/ride-persistence-service');
 const pricingH3ReadModelService = require('../services/pricing-h3-read-model-service');
 const { isRiderEarlyEndEnabled } = require('../utils/ride-lifecycle-feature-flags');
 const { buildTripCompletedPayload } = require('../utils/trip-completion-payload');
+const { acceptedContext } = require('../services/driver-intro-fee-service');
 
 function registerSocketEndTripEarlyHandler({
   socket,
@@ -70,7 +71,8 @@ function registerSocketEndTripEarlyHandler({
         const paymentService = new PaymentService();
         const fareBreakdown = paymentService.calculateFareBreakdownFromReais(
           Number(finalFare || 0),
-          Number(tollFee || 0)
+          Number(tollFee || 0),
+          { driverIntroFee: acceptedContext(bookingSnapshot, driverId) }
         );
 
         const tripCompletedData = buildTripCompletedPayload({

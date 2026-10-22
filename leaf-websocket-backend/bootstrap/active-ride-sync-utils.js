@@ -289,6 +289,7 @@ async function buildActiveRideSnapshotForUser(redis, userId, userType) {
         estimatedPaymentIntermediationFee: parseNumericValue(bookingData.estimatedPaymentIntermediationFee),
         estimatedTotalFees: parseNumericValue(bookingData.estimatedTotalFees),
         estimatedDriverNetAmount: parseNumericValue(bookingData.estimatedDriverNetAmount),
+        ...(bookingData.driverIntroFee ? { driverIntroFee: parseJsonSafe(bookingData.driverIntroFee, null) } : {}),
         pricingSnapshotLocked:
             String(bookingData.pricingSnapshotLocked || '').trim().toLowerCase() === 'true'
             || bookingData.pricingSnapshotLocked === true,

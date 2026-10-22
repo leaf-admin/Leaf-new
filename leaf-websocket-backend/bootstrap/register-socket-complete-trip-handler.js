@@ -617,6 +617,10 @@ function registerSocketCompleteTripHandler({
                             authoritativeSnapshot: result.data?.authoritativeSnapshot === true,
                             financialSnapshotSource: result.data?.financialSnapshotSource || 'backend_final',
                             financialSnapshot: result.data?.financialSnapshot || null,
+                            ...(result.data?.financialSnapshot?.driverIntroFee ? {
+                                driverIntroFee: result.data.financialSnapshot.driverIntroFee,
+                                driverIntroFeeCompletion: result.data.driverIntroFeeCompletion || bookingSnapshot.driverIntroFeeCompletion || null
+                            } : {}),
                             financialContext: bookingSnapshot?.financialContext || null,
                             financialNamespace: bookingSnapshot?.financialNamespace || null,
                             financialContextId: bookingSnapshot?.financialContextId || null,

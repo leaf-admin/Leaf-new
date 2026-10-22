@@ -70,6 +70,9 @@ const driverLockManager = require('../../../services/driver-lock-manager');
 const driverEligibilityService = require('../../../services/driver-eligibility-service');
 const RideStateManager = require('../../../services/ride-state-manager');
 const DriverNotificationDispatcher = require('../../../services/driver-notification-dispatcher');
+const driverIntroFeeService = require('../../../services/driver-intro-fee-service');
+const { buildDriverIntroFeeContext } = require('../../../services/driver-intro-fee-policy');
+const { buildRideFinancialContract } = require('../../../services/ride-financial-contract');
 const nowMs = Date.parse('2026-04-08T20:00:00.000Z');
 
 function createPipelineMock(resultResolver) {
@@ -536,6 +539,39 @@ describe('driver-notification-dispatcher timeout cleanup', () => {
     expect(emit).toHaveBeenCalledWith('newRideRequest', expect.objectContaining({
       bookingId: 'booking_123',
     }));
+  });
+
+  it('replaces the passenger generic estimate with this driver fee and reserves the same snapshot', async () => {
+    const emit = jest.fn();
+    dispatcher = new DriverNotificationDispatcher(redis, { to: jest.fn(() => ({ emit })) });
+    const context = buildDriverIntroFeeContext({ driverId: 'driver_1', qualifiedCompletedRides: 24, historyVerified: true, historySnapshotId: 'synthetic-history' });
+    jest.spyOn(driverIntroFeeService, 'resolveOfferContext').mockResolvedValue(context);
+    dispatcher.getDispatchability = jest.fn().mockResolvedValue({ ok: true, state: 'SEARCHING', bookingData: {
+      bookingId: 'booking_123', customerId: 'customer_1', estimatedFare: '53.67', tollFee: '10',
+      estimatedOperationalFee: '9.99', estimatedDriverNetAmount: '1',
+      pickupLocation: JSON.stringify({ lat: -22.9, lng: -43.2 }), destinationLocation: JSON.stringify({ lat: -22.8, lng: -43.1 })
+    } });
+    dispatcher.paymentService.calculateFareBreakdownFromReais = jest.fn((fare, toll, options) => {
+      const contract = buildRideFinancialContract({ passengerPaidCents: Math.round(fare * 100), tollFeeCents: Math.round(toll * 100), ...options });
+      return { operationalFee: contract.leafOperationalFeeCents / 100, paymentIntermediationFee: contract.paymentIntermediationFeeCents / 100,
+        totalFees: contract.retainedTotalCents / 100, driverNetAmount: contract.driverNetAmountCents / 100 };
+    });
+    expect(await dispatcher.notifyDriver('driver_1', 'booking_123', { bookingId: 'booking_123' })).toBe(true);
+    const payload = emit.mock.calls.find(([name]) => name === 'newRideRequest')[1];
+    expect(payload).toMatchObject({ driverIntroFee: context, estimatedOperationalFee: 0.99, estimatedTollFee: 10 });
+    expect(payload.estimatedDriverNetAmount).toBeGreaterThan(50);
+    const reservationCall = redis.multi.mock.results.flatMap(({ value }) => value.set.mock.calls).find(([key]) => key === 'offer_reservation:booking_123:driver_1');
+    expect(JSON.parse(reservationCall[1])).toMatchObject({ driverIntroFee: context, estimatedFareSnapshot: { estimatedOperationalFee: 0.99, estimatedDriverNetAmount: payload.estimatedDriverNetAmount } });
+  });
+
+  it('releases the offer lock if the driver history cannot determine the fee', async () => {
+    const emit = jest.fn();
+    dispatcher = new DriverNotificationDispatcher(redis, { to: jest.fn(() => ({ emit })) });
+    dispatcher.getDispatchability = jest.fn().mockResolvedValue({ ok: true, state: 'SEARCHING', bookingData: { bookingId: 'booking_123', estimatedFare: '40' } });
+    jest.spyOn(driverIntroFeeService, 'resolveOfferContext').mockRejectedValue(Object.assign(new Error('uninitialized'), { code: 'DRIVER_INTRO_FEE_HISTORY_UNINITIALIZED' }));
+    expect(await dispatcher.notifyDriver('driver_1', 'booking_123', { bookingId: 'booking_123' })).toBe(false);
+    expect(driverLockManager.releaseLock).toHaveBeenCalledWith('driver_1', 'booking_123');
+    expect(emit).not.toHaveBeenCalledWith('newRideRequest', expect.anything());
   });
 
   it('sends the quote toll with the offer so the card can show it as included', async () => {

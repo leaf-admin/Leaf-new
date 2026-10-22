@@ -12,6 +12,7 @@ const { validateAndEnsureTraceIdInCommand } = require('../utils/trace-validator'
 const { clearActiveTripForDriver } = require('../utils/active-trip-index');
 const tripLocationPersistenceService = require('../services/trip-location-persistence-service');
 const { resolveFinancialContext } = require('../services/financial-runtime-context');
+const driverIntroFeeService = require('../services/driver-intro-fee-service');
 const {
   loadBookingContext,
   normalizeLocation,
@@ -181,12 +182,6 @@ class EndRideWithReviewCommand extends Command {
           correlationId: this.correlationId
         });
 
-        const lockStatus = await driverLockManager.isDriverLocked(driverId);
-        if (lockStatus.isLocked && lockStatus.bookingId === this.bookingId) {
-          await driverLockManager.releaseLock(driverId, this.bookingId);
-          logger.info(`🔓 [EndRideWithReviewCommand] Lock de motorista ${driverId} liberado.`);
-        }
-
         await RideStateManager.updateBookingState(
           redis,
           this.bookingId,
@@ -195,6 +190,12 @@ class EndRideWithReviewCommand extends Command {
         );
 
         await persistBookingPatch(redis, this.bookingId, completion.bookingPatch);
+        await driverIntroFeeService.recordTerminalBooking(redis, this.bookingId, context.bookingHash);
+        const lockStatus = await driverLockManager.isDriverLocked(driverId);
+        if (lockStatus.isLocked && lockStatus.bookingId === this.bookingId) {
+          await driverLockManager.releaseLock(driverId, this.bookingId);
+          logger.info(`🔓 [EndRideWithReviewCommand] Lock de motorista ${driverId} liberado.`);
+        }
 
         if (customerId) {
           const customerActiveBookingKey = `customer_active_booking:${customerId}`;

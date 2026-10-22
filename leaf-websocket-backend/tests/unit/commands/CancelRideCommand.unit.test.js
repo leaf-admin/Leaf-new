@@ -394,6 +394,28 @@ describe('CancelRideCommand ordering of refund, state commit and post-commit wor
   beforeEach(() => {
     jest.clearAllMocks();
     tripLocationPersistenceService.forceFinalizeTrip.mockReset();
+    require('../../../services/driver-lock-manager').isDriverLocked.mockResolvedValue({ isLocked: false });
+  });
+
+  it('clears the promotional reservation after persisting cancellation and before unlocking', async () => {
+    const driverIntroFeeService = require('../../../services/driver-intro-fee-service');
+    const driverLockManager = require('../../../services/driver-lock-manager');
+    const { buildDriverIntroFeeContext } = require('../../../services/driver-intro-fee-policy');
+    const command = arrangeDriverCancel({ processRideRefund: jest.fn().mockResolvedValue({ success: true, amount: 4861 }) });
+    const redis = redisPool.getConnection();
+    redis.hgetall.mockImplementation(async key => key === 'booking:booking_driver_cancel' ? {
+      customerId: 'customer_1', driverId: 'driver_1', status: 'ACCEPTED', driverIntroFee: JSON.stringify(buildDriverIntroFeeContext({
+        driverId: 'driver_1', qualifiedCompletedRides: 24, historyVerified: true, historySnapshotId: 'synthetic-history'
+      }))
+    } : {});
+    driverLockManager.isDriverLocked.mockResolvedValue({ isLocked: true, bookingId: 'booking_driver_cancel' });
+    const record = jest.spyOn(driverIntroFeeService, 'recordCompletion').mockImplementation(async () => {
+      expect(redis.hset).toHaveBeenCalledWith('booking:booking_driver_cancel', expect.objectContaining({ status: 'CANCELED' }));
+      return { qualifiedCompletedRides: 24 };
+    });
+    expect((await command.execute()).success).toBe(true);
+    expect(record).toHaveBeenCalledWith(redis, 'driver_1', 'booking_driver_cancel');
+    expect(record.mock.invocationCallOrder[0]).toBeLessThan(driverLockManager.releaseLock.mock.invocationCallOrder[0]);
   });
 
   it('answers after the refund and the state commit without waiting for the location trail flush', async () => {

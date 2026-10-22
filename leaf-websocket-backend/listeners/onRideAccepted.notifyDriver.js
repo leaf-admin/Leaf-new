@@ -13,6 +13,8 @@ const { metrics } = require('../utils/prometheus-metrics');
 const redisPool = require('../utils/redis-pool');
 const PaymentService = require('../services/payment-service');
 const { resolveAcceptRidePayload } = require('../utils/accept-ride-payload');
+const { acceptedContext } = require('../services/driver-intro-fee-service');
+const { resolveEstimatedFareSnapshot } = require('../utils/fare-snapshot-utils');
 
 const paymentService = new PaymentService();
 
@@ -101,6 +103,13 @@ async function notifyDriver(event, io) {
 
                 const redis = redisPool.getConnection();
                 const acceptRidePayload = await resolveAcceptRidePayload(redis, bookingId, payload);
+                const acceptedBooking = acceptRidePayload.bookingData || {};
+                const driverIntroFee = acceptedContext(acceptedBooking, driverId);
+                const acceptedSnapshot = driverIntroFee ? resolveEstimatedFareSnapshot({
+                    payload: acceptedBooking, paymentService,
+                    estimatedFare: acceptRidePayload.estimatedFare,
+                    tollFee: acceptedBooking.tollFee, driverIntroFee
+                }) : null;
 
                 let estimatedBreakdown = null;
                 if (Number.isFinite(acceptRidePayload.estimatedFare) && acceptRidePayload.estimatedFare >= 0) {
@@ -129,7 +138,9 @@ async function notifyDriver(event, io) {
                         estimatedPaymentIntermediationFee: estimatedBreakdown.paymentIntermediationFee,
                         estimatedTotalFees: estimatedBreakdown.totalFees,
                         estimatedDriverNetAmount: estimatedBreakdown.driverNetAmount
-                    } : {})
+                    } : {}),
+                    ...(acceptedSnapshot || {}),
+                    ...(driverIntroFee ? { driverIntroFee } : {})
                 });
 
                 logStructured('info', 'notifyDriver concluído', {

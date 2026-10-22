@@ -13,6 +13,7 @@ const { logger } = require('../utils/logger');
 const crypto = require('crypto');
 const PDFDocument = require('pdfkit');
 const PaymentService = require('./payment-service');
+const { acceptedContext } = require('./driver-intro-fee-service');
 const {
     resolveFinancialContext
 } = require('./financial-runtime-context');
@@ -575,7 +576,9 @@ class ReceiptService {
             rideData.financialBreakdown?.toll_fee,
             rideData.financialBreakdown?.driverTollPassThrough
         ) ?? 0;
-        const breakdown = this.paymentService.calculateFareBreakdownFromReais(totalFare, tollFee);
+        const driverIntroFee = acceptedContext(rideData);
+        const breakdown = this.paymentService.calculateFareBreakdownFromReais(totalFare, tollFee,
+            ...(driverIntroFee ? [{ driverIntroFee }] : []));
         const explicitBreakdown = rideData.fareBreakdown || rideData.paymentBreakdown || {};
         const firstFinite = (...values) => {
             for (const value of values) {

@@ -101,6 +101,12 @@ describe('RideStateManager state machine', () => {
 });
 
 describe('RideStateManager terminal booking TTL', () => {
+  beforeEach(() => {
+    // These assertions own TTL only. Do not enqueue unrelated event/health work
+    // that would import modules after this test environment has been torn down.
+    jest.spyOn(RideStateManager, '_scheduleSideEffects').mockImplementation(() => {});
+  });
+
   function buildRedis(currentState) {
     return {
       hget: jest.fn().mockResolvedValue(currentState),

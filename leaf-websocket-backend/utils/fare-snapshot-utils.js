@@ -32,7 +32,7 @@ function readEstimatedFareSnapshot(payload = {}) {
     };
 }
 
-function buildEstimatedFareSnapshot(paymentService, estimatedFare, tollFee = 0) {
+function buildEstimatedFareSnapshot(paymentService, estimatedFare, tollFee = 0, driverIntroFee = null) {
     if (!paymentService || typeof paymentService.calculateFareBreakdownFromReais !== 'function') {
         return null;
     }
@@ -46,7 +46,8 @@ function buildEstimatedFareSnapshot(paymentService, estimatedFare, tollFee = 0) 
 
     const breakdown = paymentService.calculateFareBreakdownFromReais(
         normalizedEstimatedFare,
-        normalizedTollFee !== null && normalizedTollFee >= 0 ? normalizedTollFee : 0
+        normalizedTollFee !== null && normalizedTollFee >= 0 ? normalizedTollFee : 0,
+        ...(driverIntroFee ? [{ driverIntroFee }] : [])
     );
 
     return {
@@ -61,14 +62,15 @@ function resolveEstimatedFareSnapshot({
     payload = null,
     paymentService = null,
     estimatedFare = null,
-    tollFee = 0
+    tollFee = 0,
+    driverIntroFee = null
 } = {}) {
     const existingSnapshot = readEstimatedFareSnapshot(payload);
     if (existingSnapshot) {
         return existingSnapshot;
     }
 
-    return buildEstimatedFareSnapshot(paymentService, estimatedFare, tollFee);
+    return buildEstimatedFareSnapshot(paymentService, estimatedFare, tollFee, driverIntroFee);
 }
 
 module.exports = {

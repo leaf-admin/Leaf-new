@@ -18,6 +18,8 @@ const { Command, CommandResult } = require('./index');
 const RideCompletedEvent = require('../events/ride.completed');
 const RideStateManager = require('../services/ride-state-manager');
 const PaymentService = require('../services/payment-service');
+const driverIntroFeeService = require('../services/driver-intro-fee-service');
+const { assessDestinationCompletion } = require('../utils/driver-intro-fee-completion');
 const driverLockManager = require('../services/driver-lock-manager');
 const redisPool = require('../utils/redis-pool');
 const { logger, logStructured } = require('../utils/logger');
@@ -388,6 +390,7 @@ class CompleteTripCommand extends Command {
                     return CommandResult.failure(financialContextResult.error);
                 }
                 const financialContext = financialContextResult.context;
+                const driverIntroFee = driverIntroFeeService.acceptedContext(bookingData, this.driverId);
 
                 // Verificar se motorista é o dono da corrida
                 if (bookingData.driverId !== this.driverId) {
@@ -404,6 +407,13 @@ class CompleteTripCommand extends Command {
                     currentState === RideStateManager.STATES.COMPLETED ||
                     String(bookingData.status || '').toUpperCase() === RideStateManager.STATES.COMPLETED
                 ) {
+                    if (driverIntroFee) {
+                        await driverIntroFeeService.recordCompletion(redis, this.driverId, this.bookingId).catch(error => {
+                            logStructured('error', 'Contagem promocional pendente na repetição da conclusão', {
+                                service: 'driver-intro-fee', bookingId: this.bookingId, code: error.code || 'COUNT_PENDING'
+                            });
+                        });
+                    }
                     logStructured('info', 'CompleteTripCommand idempotente: corrida ja finalizada', {
                         bookingId: this.bookingId,
                         driverId: this.driverId,
@@ -427,6 +437,7 @@ class CompleteTripCommand extends Command {
                             : { status: 'PENDING', message: 'Processamento assíncrono em andamento' },
                         ...resolveCompletedFinancialResultFields(bookingData),
                         ...resolveCompletedDriverEarlyEndFields(bookingData),
+                        ...(driverIntroFee ? { driverIntroFeeCompletion: safeJsonParse(bookingData.driverIntroFeeCompletion, null) } : {}),
                         financialContext,
                         idempotentReplay: true
                     });
@@ -507,7 +518,7 @@ class CompleteTripCommand extends Command {
                 let completedFareBreakdown = paymentService.calculateFareBreakdownFromReais(
                     Number(this.finalFare || 0),
                     Number(this.tollFee || 0),
-                    { subscriptionRetainedFeeCents: extensionRetainedOperationalFeeCents }
+                    { subscriptionRetainedFeeCents: extensionRetainedOperationalFeeCents, driverIntroFee }
                 );
 
                 // Encerramento antecipado pelo motorista: mesma regra do encerramento
@@ -539,7 +550,7 @@ class CompleteTripCommand extends Command {
                                     ? paymentService.calculateFareBreakdownFromReais(
                                         settledFare,
                                         settledTollFee,
-                                        { subscriptionRetainedFeeCents: extensionRetainedOperationalFeeCents }
+                                        { subscriptionRetainedFeeCents: extensionRetainedOperationalFeeCents, driverIntroFee }
                                     )
                                     : null;
                             const inconsistency = settledBreakdown
@@ -643,7 +654,7 @@ class CompleteTripCommand extends Command {
                                 ? paymentService.calculateFareBreakdownFromReais(
                                     adjustedFare,
                                     adjustment.chargedTollFee,
-                                    { subscriptionRetainedFeeCents: extensionRetainedOperationalFeeCents }
+                                    { subscriptionRetainedFeeCents: extensionRetainedOperationalFeeCents, driverIntroFee }
                                 )
                                 : null;
                             const adjustedNetCents = Math.round(Number(adjustedBreakdown?.driverNetAmount || 0) * 100);
@@ -687,7 +698,8 @@ class CompleteTripCommand extends Command {
                     subscriptionRetainedFeeCents: Math.round(
                         Number(completedFareBreakdown.subscriptionRetainedFee || 0) * 100
                     ),
-                    driverNetAmountCents: Math.round(Number(completedFareBreakdown.driverNetAmount || 0) * 100)
+                    driverNetAmountCents: Math.round(Number(completedFareBreakdown.driverNetAmount || 0) * 100),
+                    driverIntroFee
                 });
                 const existingRideLegs = resolveRideLegs(bookingData);
                 const operationalContinuation = resolveOperationalContinuation(bookingData);
@@ -736,11 +748,22 @@ class CompleteTripCommand extends Command {
                 // o evento `RIDE_COMPLETED`. O request principal de finalização não fica
                 // mais bloqueado aguardando chamadas HTTP a gateways de pagamento de terceiros.
 
-                // Liberar lock de motorista
-                const lockStatus = await driverLockManager.isDriverLocked(this.driverId);
-                if (lockStatus.isLocked && lockStatus.bookingId === this.bookingId) {
-                    await driverLockManager.releaseLock(this.driverId, this.bookingId);
-                    logger.info(`🔓 [CompleteTripCommand] Lock de motorista ${this.driverId} liberado.`);
+                let driverIntroFeeCompletion = null;
+                if (driverIntroFee) {
+                    let trustedMetrics = null;
+                    try {
+                        trustedMetrics = await tripLocationPersistenceService.resolveCanonicalTripMetrics({
+                            redis, tripId: this.bookingId, driverId: this.driverId,
+                            startedAt: bookingData.startedAt || null, allowPreStartTelemetry: true
+                        });
+                    } catch (_) {
+                        // End the physical ride safely; a missing proof queues review
+                        // and never grants another slot from an assumed zero count.
+                    }
+                    driverIntroFeeCompletion = assessDestinationCompletion({
+                        booking: bookingData, metrics: trustedMetrics,
+                        earlyEnd: driverEarlyEnd || (driverEarlyEndSkip?.detected ? driverEarlyEndSkip : null)
+                    });
                 }
 
                 // Atualizar estado da corrida
@@ -765,6 +788,7 @@ class CompleteTripCommand extends Command {
                         authoritativeSnapshot: true,
                         financialSnapshotSource: 'backend_final',
                         financialSnapshot: finalFinancialSnapshot,
+                        ...(driverIntroFeeCompletion ? { driverIntroFeeCompletion: JSON.stringify(driverIntroFeeCompletion) } : {}),
                         completedAt,
                         rideLegs: rideLegSettlements,
                         operationalContinuation: completedContinuation,
@@ -798,6 +822,7 @@ class CompleteTripCommand extends Command {
                     authoritativeSnapshot: 'true',
                     financialSnapshotSource: 'backend_final',
                     financialSnapshot: JSON.stringify(finalFinancialSnapshot),
+                    ...(driverIntroFeeCompletion ? { driverIntroFeeCompletion: JSON.stringify(driverIntroFeeCompletion) } : {}),
                     completedAt,
                     paymentDistribution: JSON.stringify(paymentDistribution),
                     financialContext: JSON.stringify(financialContext),
@@ -820,6 +845,21 @@ class CompleteTripCommand extends Command {
                     ...(rideLegSettlements.length > 0 ? { rideLegs: JSON.stringify(rideLegSettlements) } : {}),
                     ...(completedContinuation ? { operationalContinuation: JSON.stringify(completedContinuation) } : {})
                 });
+
+                if (driverIntroFee) {
+                    await driverIntroFeeService.recordCompletion(redis, this.driverId, this.bookingId).catch(error => {
+                        // The accepted context keeps an inflight marker. Dispatch
+                        // repairs this terminal booking before making another offer.
+                        logStructured('error', 'Contagem promocional pendente após conclusão', {
+                            service: 'driver-intro-fee', bookingId: this.bookingId, code: error.code || 'COUNT_PENDING'
+                        });
+                    });
+                }
+                const lockStatus = await driverLockManager.isDriverLocked(this.driverId);
+                if (lockStatus.isLocked && lockStatus.bookingId === this.bookingId) {
+                    await driverLockManager.releaseLock(this.driverId, this.bookingId);
+                    logger.info(`🔓 [CompleteTripCommand] Lock de motorista ${this.driverId} liberado.`);
+                }
 
                 if (customerId) {
                     const customerActiveBookingKey = `customer_active_booking:${customerId}`;
@@ -941,6 +981,7 @@ class CompleteTripCommand extends Command {
                     settlementReviewRequired: !!offlineSettlementReview,
                     paymentDistribution,
                     financialSnapshot: finalFinancialSnapshot,
+                    ...(driverIntroFee ? { driverIntroFee, driverIntroFeeCompletion } : {}),
                     financialContext,
                     financialNamespace: financialContext.namespace,
                     financialContextId: financialContext.contextId,
@@ -990,6 +1031,7 @@ class CompleteTripCommand extends Command {
                     financialSnapshotSource: 'backend_final',
                     financialSnapshot: finalFinancialSnapshot,
                     financialContext,
+                    ...(driverIntroFeeCompletion ? { driverIntroFeeCompletion } : {}),
                     ...(driverEarlyEnd
                         ? {
                             completionType: driverEarlyEndFields.completionType,
