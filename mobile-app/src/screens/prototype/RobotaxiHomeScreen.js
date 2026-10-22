@@ -70,7 +70,7 @@ import {
   openPreferredDriverNavigation,
   promptNavigationOnTripStart,
 } from '../../services/driverNavigationPreference';
-import rideOverlay, { buildOfferOverlayState, maybeAskRideOverlayPermission } from '../../services/LeafRideOverlay';
+import rideOverlay, { buildOfferCardState, maybeAskRideOverlayPermission } from '../../services/LeafRideOverlay';
 import {
   fetchH3CellsForRegion,
   fetchDriverDemandHeat,
@@ -3487,14 +3487,22 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
       return;
     }
     const tripKm = Number(driverLiveOffer?.distanceKm ?? driverLiveOffer?.tripDistanceKm ?? driverLiveOffer?.estimatedTripDistanceKm);
-    rideOverlay.showOffer(buildOfferOverlayState({
+    const tripMin = Number(driverLiveOffer?.tripDurationMin ?? driverLiveOffer?.estimatedTripDurationMin);
+    const toll = Number(driverLiveOffer?.tollFee ?? driverLiveOffer?.estimatedTollFee);
+    const shortStop = (value) => String(value || '').split(/,| - /)[0].trim();
+    const issuedMs = Date.parse(driverLiveOffer?.timestamp || driverLiveOffer?.receivedAt || '') || 0;
+    rideOverlay.showOffer(buildOfferCardState({
       bookingId: driverLiveOfferBookingId,
       fareLabel: getDriverOfferPayoutLabel(driverLiveOffer) || '',
       pickupEtaLabel: String(driverLiveOffer?.eta || '').trim(),
       distanceLabel: Number.isFinite(tripKm) && tripKm > 0 ? `${tripKm.toFixed(1).replace('.', ',')} km` : '',
+      durationLabel: Number.isFinite(tripMin) && tripMin > 0 ? `${Math.round(tripMin)} min` : '',
       perKmLabel: getDriverOfferNetPerKmLabel(driverLiveOffer, tripKm) || '',
-      dropoffLabel: String(driverLiveOffer?.dropoff || driverLiveOffer?.dropoffAddress || '').split(',')[0].trim(),
+      tollLabel: Number.isFinite(toll) && toll > 0 ? `Inclui R$ ${toll.toFixed(2).replace('.', ',')} de pedágio` : '',
+      pickupLabel: shortStop(driverLiveOffer?.pickup || driverLiveOffer?.pickupAddress),
+      dropoffLabel: shortStop(driverLiveOffer?.dropoff || driverLiveOffer?.dropoffAddress),
       expiresAtMs: Number.isFinite(deadlineMs) ? deadlineMs : 0,
+      totalMs: Number.isFinite(deadlineMs) && issuedMs > 0 && deadlineMs > issuedMs ? deadlineMs - issuedMs : 20000,
     })).catch(() => {});
   }, [driverLiveOffer, driverLiveOfferBookingId, driverLiveOfferInstance, isDriverRole]);
   const buildHomeReceiptParams = useCallback((overrides = {}) => {

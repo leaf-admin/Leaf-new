@@ -583,6 +583,10 @@ object LeafRideOverlayWindow {
   private fun dp(context: Context, value: Int): Int =
     TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, value.toFloat(), context.resources.displayMetrics).toInt()
 
+  /** Figtree do app para o card de oferta (LeafOfferCardWindow). */
+  fun font(context: Context, weight: String, fallbackStyle: Int): Typeface =
+    Fonts.font(context, weight, fallbackStyle)
+
   /**
    * Figtree, a fonte do app. O bundle do RN a põe em res/raw; Typeface só lê de
    * arquivo, então copiamos uma vez para o cache. Sem ela, a fonte do sistema.
@@ -595,7 +599,7 @@ object LeafRideOverlayWindow {
         bold = font(context, "figtree_700bold", Typeface.BOLD)
       )
 
-      private fun font(context: Context, weight: String, fallbackStyle: Int): Typeface {
+      fun font(context: Context, weight: String, fallbackStyle: Int): Typeface {
         val fallback = Typeface.create("sans-serif", fallbackStyle)
         return try {
           val name = "_node_modules_expogooglefonts_figtree_${weight}_figtree_$weight"

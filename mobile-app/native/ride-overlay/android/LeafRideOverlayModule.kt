@@ -68,6 +68,32 @@ class LeafRideOverlayModule(
     }
   }
 
+  /** Nova corrida por cima de outros apps: o card de oferta inteiro (LeafOfferCardWindow). */
+  @ReactMethod
+  fun showOfferCard(options: ReadableMap, promise: Promise) {
+    if (!canDrawOverlays()) {
+      promise.resolve(false)
+      return
+    }
+    val state = LeafOfferCardState.fromMap(options)
+    UiThreadUtil.runOnUiThread {
+      try {
+        LeafOfferCardWindow.show(reactContext.applicationContext, state)
+        promise.resolve(true)
+      } catch (error: Exception) {
+        promise.reject("OFFER_CARD_SHOW_FAILED", error.message, error)
+      }
+    }
+  }
+
+  @ReactMethod
+  fun hideOfferCard(promise: Promise) {
+    UiThreadUtil.runOnUiThread {
+      LeafOfferCardWindow.hide()
+      promise.resolve(true)
+    }
+  }
+
   @ReactMethod
   fun hideOverlay(promise: Promise) {
     UiThreadUtil.runOnUiThread {

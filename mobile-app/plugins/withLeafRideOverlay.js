@@ -13,6 +13,7 @@ const KOTLIN_FILES = [
   'LeafRideOverlayState.kt',
   'LeafRideOverlayWindow.kt',
   'LeafRideLiveUpdate.kt',
+  'LeafOfferCardWindow.kt',
 ];
 const PERMISSIONS = [
   // Balão por cima do Waze/Google Maps durante a corrida. O motorista liga em

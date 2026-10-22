@@ -19254,6 +19254,22 @@ function resolveOfferInput(offerInput = null) {
   return offerInput;
 }
 
+// "Aceitar corrida" no card por cima do Waze/Maps abre o Leaf com a oferta. Com o app em
+// segundo plano o socket pode não ter entregue a oferta ao estado: espera um pouco a
+// sincronização e, se ela não vier, aceita só pelo id (o servidor confere tudo).
+async function acceptOfferFromOverlay(profile, bookingId) {
+  const id = String(bookingId || "").trim();
+  if (!id) return null;
+  const findOffer = () => (Array.isArray(runtimeState.driverOffers) ? runtimeState.driverOffers : [])
+    .find((offer) => String(offer?.bookingId || offer?.id || "") === id);
+  let offer = findOffer();
+  for (let attempt = 0; !offer && attempt < 8; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    offer = findOffer();
+  }
+  return acceptPrototypeDriverOffer(profile, offer || { bookingId: id });
+}
+
 async function acceptPrototypeDriverOffer(profile, offerInput = null) {
   const offer = resolveOfferInput(offerInput);
   const bookingId = offer?.bookingId || runtimeState.activeBookingId;
@@ -20849,6 +20865,15 @@ export function usePrototypeRideRuntime(options = null) {
     const rideLinkSubscription = Linking.addEventListener("url", ({ url }) => {
       const link = parseRideActionLink(url);
       if (!link) {
+        return;
+      }
+      if (link.action === "accept_offer") {
+        acceptOfferFromOverlay(profile, link.bookingId).catch((error) => {
+          Logger.warn(
+            "⚠️ [PrototypeRuntime] Aceite pelo card sobre outros apps falhou:",
+            error?.message || error,
+          );
+        });
         return;
       }
       prototypeDriverTripAssistantService

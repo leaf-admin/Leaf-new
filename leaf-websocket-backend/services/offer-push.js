@@ -13,6 +13,11 @@ function isOfferPushEnabled(env = process.env) {
 function buildOfferPushNotification(offer = {}) {
   const netAmount = Number(offer.estimatedDriverNetAmount);
   const pickupMinutes = Number(offer.estimatedArrivalToPickupMin);
+  const tripKm = Number(offer.estimatedTripDistanceKm);
+  const tollFee = Number(offer.tollFee ?? offer.estimatedTollFee);
+  const dropoff = String(offer.destinationAddress || '').split(/,| - /)[0].trim().slice(0, 60);
+  const pickup = String(offer.pickupAddress || '').split(/,| - /)[0].trim().slice(0, 60);
+  const tripMinutes = Number(offer.estimatedTripDurationMin);
   const parts = [];
   if (Number.isFinite(netAmount) && netAmount > 0) {
     parts.push(`R$ ${netAmount.toFixed(2).replace('.', ',')} líquido`);
@@ -41,7 +46,16 @@ function buildOfferPushNotification(offer = {}) {
       type: 'ride_offer',
       bookingId: String(offer.bookingId || ''),
       screen: 'RobotaxiPrototype',
-      expiresAt: String(offer.expiresAt || '')
+      expiresAt: String(offer.expiresAt || ''),
+      // Para o card por cima de outros apps (Android), montado direto do push com o Leaf em
+      // segundo plano. Só valores da oferta; o endereço vai curto (primeira parte).
+      ...(Number.isFinite(netAmount) && netAmount > 0 ? { netAmount: netAmount.toFixed(2) } : {}),
+      ...(Number.isFinite(pickupMinutes) && pickupMinutes > 0 ? { pickupMinutes: String(Math.round(pickupMinutes)) } : {}),
+      ...(Number.isFinite(tripKm) && tripKm > 0 ? { tripKm: tripKm.toFixed(1) } : {}),
+      ...(Number.isFinite(tollFee) && tollFee > 0 ? { tollFee: tollFee.toFixed(2) } : {}),
+      ...(Number.isFinite(tripMinutes) && tripMinutes > 0 ? { tripMinutes: String(Math.round(tripMinutes)) } : {}),
+      ...(pickup ? { pickup } : {}),
+      ...(dropoff ? { dropoff } : {})
     }
   };
 }
