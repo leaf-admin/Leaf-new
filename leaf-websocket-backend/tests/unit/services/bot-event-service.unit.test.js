@@ -229,6 +229,26 @@ describe('bot event service', () => {
     await expect(service.emit('unknown.type', {})).resolves.toEqual({ queued: 0, skipped: 'unknown_type' });
   });
 
+  it('routes the ride driver alerts to Operação and keeps only their ids and times', () => {
+    expect(ROUTES['ride.driver_location_stale']).toEqual(['operacao']);
+    expect(ROUTES['ride.driver_offline_during_active']).toEqual(['operacao']);
+    expect(sanitizeData({
+      bookingId: 'ride-1',
+      driverId: 'driver-1',
+      status: 'IN_PROGRESS',
+      staleSeconds: 75,
+      lastLocationAt: '2026-10-22T12:00:00.000Z',
+      driverName: 'Fulano',
+      phone: '+5521999999999',
+    })).toEqual({
+      bookingId: 'ride-1',
+      driverId: 'driver-1',
+      status: 'IN_PROGRESS',
+      staleSeconds: 75,
+      lastLocationAt: '2026-10-22T12:00:00.000Z',
+    });
+  });
+
   it('keeps only scalar allowed fields and caps their size', () => {
     expect(sanitizeData({ ticketId: 'x'.repeat(300), amountCents: 1500, money: 'no', nested: { a: 1 }, providerRefunded: false }))
       .toEqual({ ticketId: 'x'.repeat(120), amountCents: 1500, providerRefunded: false });

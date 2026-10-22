@@ -41,6 +41,10 @@ const ROUTES = Object.freeze({
   'uptime.monitor_down': ['operacao', 'cto'],
   'uptime.monitor_up': ['operacao'],
   'safety.signal': ['seguranca'],
+  // Motorista sem posição com corrida em andamento (ride-health-monitor) e motorista
+  // derrubado da sessão com corrida ativa (connection-cleanup-service).
+  'ride.driver_location_stale': ['operacao'],
+  'ride.driver_offline_during_active': ['operacao'],
 });
 
 // Únicos campos que saem do backend em data.
@@ -51,6 +55,8 @@ const DATA_FIELDS = Object.freeze([
   'issueId', 'shortId', 'title', 'project', 'level', 'release', 'link', 'alertKind',
   'monitorId', 'monitor', 'durationSeconds',
   'signalId', 'score',
+  // Só ids e tempos do alerta de motorista: driverId é o id técnico pedido pela operação.
+  'driverId', 'staleSeconds', 'lastLocationAt',
 ]);
 
 function boolEnv(name, fallback = false) {

@@ -10,6 +10,10 @@ const traceContext = require('../utils/trace-context');
 const { getTracer } = require('../utils/tracer');
 const { createListenerSpan, runInSpan, endSpanSuccess, endSpanError } = require('../utils/span-helpers');
 const { metrics } = require('../utils/prometheus-metrics');
+const {
+    buildRideAcceptedPush,
+    loadAcceptedBookingData
+} = require('../services/ride-passenger-status-push');
 
 function normalizeAcceptedPayload(event) {
     const rawData = event?.data && typeof event.data === 'object' ? event.data : {};
@@ -83,14 +87,10 @@ async function sendPush(event, io) {
                 const redis = redisPool.getConnection();
                 fcmService.setRedis(redis);
 
+                // Nome, veículo e previsão já estão no booking gravado no aceite (sem chamada paga).
+                const acceptedBookingData = await loadAcceptedBookingData(redis, bookingId).catch(() => ({}));
                 const notification = {
-                    title: 'Corrida Aceita!',
-                    body: 'Um motorista aceitou sua corrida. Em breve ele estará a caminho.',
-                    data: {
-                        type: 'RIDE_ACCEPTED',
-                        bookingId: String(bookingId),
-                        driverId: String(driverId)
-                    },
+                    ...buildRideAcceptedPush({ bookingId, driverId, bookingData: acceptedBookingData }),
                     channelId: 'trip_updates',
                     badge: 1
                 };

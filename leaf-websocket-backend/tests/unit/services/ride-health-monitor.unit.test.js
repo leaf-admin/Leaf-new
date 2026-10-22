@@ -2,6 +2,10 @@ jest.mock('../../../services/alert-service', () => ({
   sendAlert: jest.fn().mockResolvedValue(true)
 }));
 
+jest.mock('../../../services/bot-event-service', () => ({
+  emit: jest.fn().mockResolvedValue({ queued: 0, skipped: 'disabled' })
+}));
+
 jest.mock('../../../utils/prometheus-metrics', () => ({
   metrics: {
     setRideHealthStateCount: jest.fn(),
@@ -257,7 +261,7 @@ describe('ride-health-monitor', () => {
       driverSignalCriticalCount: 1
     });
 
-    expect(result.alerts).toEqual([
+    expect(result.alerts.filter((alert) => alert.metric === 'driver_signal_stale')).toEqual([
       expect.objectContaining({
         metric: 'driver_signal_stale',
         severity: 'critical',
@@ -391,7 +395,7 @@ describe('ride-health-monitor', () => {
     });
 
     expect(await redis.zrange(DRIVER_SIGNAL_ACTIVE_KEY, 0, -1)).toEqual(['ride-active', 'ride-fresh']);
-    expect(result.alerts).toEqual([
+    expect(result.alerts.filter((alert) => alert.metric === 'driver_signal_stale')).toEqual([
       expect.objectContaining({
         metric: 'driver_signal_stale',
         value: 1,

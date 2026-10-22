@@ -1,3 +1,4 @@
+const { notifyPassengerRideStatus } = require('../services/ride-passenger-status-push');
 function parseMaybeJsonObject(value) {
     if (!value || typeof value !== 'string') {
         return value && typeof value === 'object' ? value : {};
@@ -734,6 +735,18 @@ function registerSocketCompleteTripHandler({
                                 eventType: 'completeTrip',
                                 error: receiptError.message
                             });
+                        }
+
+                        // Aviso visível ao passageiro (o silent push abaixo continua para Live Activity).
+                        if (customerIdToNotify) {
+                            notifyPassengerRideStatus({
+                                redis,
+                                fcmService,
+                                customerId: customerIdToNotify,
+                                bookingId,
+                                status: 'completed',
+                                sendStatusUpdate: false
+                            }).catch(() => null);
                         }
 
                         try {

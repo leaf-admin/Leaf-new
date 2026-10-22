@@ -118,6 +118,15 @@ const getGlobalNavigationRef = () => {
 // Mesmo título do push enviado pelo servidor (services/offer-push.js).
 const RIDE_OFFER_PUSH_TITLE = 'Nova corrida';
 
+// Avisos de etapa da corrida para o passageiro (backend: ride-passenger-status-push).
+const PASSENGER_TRIP_STEP_TYPES = new Set([
+    'driver_arrived',
+    'RIDE_ACCEPTED',
+    'passenger_trip_started',
+    'passenger_trip_completed',
+    'passenger_ride_cancelled',
+]);
+
 class FCMNotificationService {
     constructor() {
         this.isInitialized = false;
@@ -677,8 +686,9 @@ class FCMNotificationService {
             if (notificationType === 'ride_offer') {
                 return;
             }
-            // Same for the driver's arrival: the trip screen already shows it.
-            if (notificationType === 'driver_arrived') {
+            // Same for the driver's arrival and the other passenger trip steps:
+            // the trip screen already shows them.
+            if (PASSENGER_TRIP_STEP_TYPES.has(notificationType)) {
                 return;
             }
 
