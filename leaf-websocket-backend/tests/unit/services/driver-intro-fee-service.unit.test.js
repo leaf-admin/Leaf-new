@@ -62,12 +62,27 @@ describe('introductory fee service boundaries', () => {
     expect(tx.set).toHaveBeenCalledTimes(1);
     expect(tx.set.mock.calls[0][1]).toMatchObject({ approvedGeneration: generation, baselineCount: 0 });
   });
-  it('does not use operational history for sandbox', async () => {
+  it('counts sandbox (QA) rides on a separate counter and collection, never the operational one', async () => {
     const { sealFinancialContext } = require('../../../services/financial-runtime-context');
-    const { service, redis, ref } = setup();
-    expect(await service.resolveOfferContext(redis, 'driver-1', { financialContext: sealFinancialContext({ providerEnvironment: 'sandbox' }) })).toBe(null);
-    expect(ref.get).not.toHaveBeenCalled();
-    expect(redis.get).not.toHaveBeenCalled();
+    const { service, redis, ref, firestore, auth, tx } = setup();
+    ref.get.mockResolvedValue({ exists: false });
+    tx.get.mockResolvedValue({ exists: false });
+    auth.getUser.mockResolvedValue({ metadata: { creationTime: '2026-10-22T01:00:00Z' } });
+    const booking = { financialContext: sealFinancialContext({ providerEnvironment: 'sandbox' }) };
+    expect(await service.resolveOfferContext(redis, 'driver-1', booking))
+      .toMatchObject({ namespace: 'sandbox', eligible: true, qualifiedCompletedRides: 0, operationalFeeCents: 99 });
+    const stateKeys = redis.get.mock.calls.map(([key]) => key).filter(key => key.startsWith('driver_intro_fee:'));
+    expect(stateKeys).toEqual(['driver_intro_fee:sandbox:driver-1']);
+    expect(firestore.collection).toHaveBeenCalledWith('sandbox_driver_intro_fee_states');
+    expect(firestore.collection).not.toHaveBeenCalledWith('driver_intro_fee_states');
+    expect(redis.hget).toHaveBeenCalledWith('driver_intro_fee:sandbox:pending_checkpoints', 'driver_intro_fee:sandbox:driver-1');
+    expect(tx.set.mock.calls[0][1]).toMatchObject({ namespace: 'sandbox', baselineCount: 0 });
+  });
+  it('rejects an accepted context whose namespace differs from the booking', () => {
+    const { sealFinancialContext } = require('../../../services/financial-runtime-context');
+    const operational = initial();
+    expect(() => acceptedContext({ driverId: 'driver-1', driverIntroFee: operational,
+      financialContext: sealFinancialContext({ providerEnvironment: 'sandbox' }) })).toThrow();
   });
   it('queues review without changing the account status', async () => {
     const { service, redis } = setup();

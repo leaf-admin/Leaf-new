@@ -199,7 +199,7 @@ describe('AcceptRideCommand', () => {
     expect(clearOfferReservationsForBooking).toHaveBeenCalledWith(redis, 'booking_1');
     expect(redis.eval).toHaveBeenCalledWith(
       expect.stringContaining('ERR_KYC_VERIFICATION_IN_PROGRESS'),
-      12,
+      13,
       'booking:booking_1',
       'active_trip_by_driver:driver_1',
       'active_trip_customer_by_driver:driver_1',
@@ -212,6 +212,7 @@ describe('AcceptRideCommand', () => {
       'driver_active_notification:driver_1',
       'driver_lock:driver_1',
       'driver_intro_fee:operational:driver_1',
+      'driver_intro_fee:sandbox:driver_1',
       'driver_1',
       'ACCEPTED',
       expect.any(String),

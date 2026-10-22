@@ -4,6 +4,8 @@ const DRIVER_INTRO_FEE_POLICY = Object.freeze({
   qualifyingRideLimit: 25,
   operationalFeeCents: 99
 });
+// Sandbox (QA) rides count on their own counter, never on the operational one.
+const DRIVER_INTRO_FEE_NAMESPACES = Object.freeze(['operational', 'sandbox']);
 
 function policyError(code) {
   const error = new Error(code);
@@ -17,7 +19,8 @@ function buildDriverIntroFeeContext({
   driverId,
   qualifiedCompletedRides,
   historyVerified,
-  historySnapshotId
+  historySnapshotId,
+  namespace = 'operational'
 } = {}) {
   if (historyVerified !== true || typeof historySnapshotId !== 'string' || !historySnapshotId.trim()) {
     throw policyError('DRIVER_INTRO_FEE_HISTORY_UNVERIFIED');
@@ -28,9 +31,11 @@ function buildDriverIntroFeeContext({
   ) {
     throw policyError('DRIVER_INTRO_FEE_CONTEXT_INVALID');
   }
+  if (!DRIVER_INTRO_FEE_NAMESPACES.includes(namespace)) throw policyError('DRIVER_INTRO_FEE_CONTEXT_INVALID');
   const eligible = qualifiedCompletedRides < DRIVER_INTRO_FEE_POLICY.qualifyingRideLimit;
   return Object.freeze({
     policyId: DRIVER_INTRO_FEE_POLICY.policyId,
+    namespace,
     driverId: driverId.trim(),
     qualifiedCompletedRides,
     historyVerified: true,
@@ -52,6 +57,7 @@ function normalizeDriverIntroFeeContext(context) {
 
 module.exports = {
   DRIVER_INTRO_FEE_POLICY,
+  DRIVER_INTRO_FEE_NAMESPACES,
   buildDriverIntroFeeContext,
   normalizeDriverIntroFeeContext
 };

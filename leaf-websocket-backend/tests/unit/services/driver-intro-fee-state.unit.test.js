@@ -35,7 +35,7 @@ describe('bounded, durable introductory fee state', () => {
   it.each([
     { baselineCount: -1 }, { qualifiedCompletedRides: 1 }, { historyVerified: false },
     { completedBookingIds: ['duplicate', 'duplicate'], qualifiedCompletedRides: 2 },
-    { completedBookingIds: {} }, { historyThrough: 'unknown' }, { namespace: 'sandbox' }
+    { completedBookingIds: {} }, { historyThrough: 'unknown' }, { namespace: 'staging' }
   ])('refuses invalid stored state %p', (change) => {
     expect(() => normalizeState({ ...seed(), ...change })).toThrow();
   });

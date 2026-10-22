@@ -632,7 +632,7 @@ class AcceptRideCommand extends Command {
                 if (!redisResult) {
                     redisResult = await redis.eval(
                         luaScript,
-                        12,
+                        13,
                         bookingKey,
                         activeTripKey(this.driverId),
                         activeTripCustomerKey(this.driverId),
@@ -645,6 +645,7 @@ class AcceptRideCommand extends Command {
                         activeNotificationKey,
                         `driver_lock:${this.driverId}`,
                         driverIntroFeeService.keyForDriver(this.driverId),
+                        driverIntroFeeService.keyForDriver(this.driverId, 'sandbox'),
                         this.driverId,
                         newState,
                         updatedAt,

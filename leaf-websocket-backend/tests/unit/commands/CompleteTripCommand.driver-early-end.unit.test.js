@@ -254,7 +254,7 @@ describe('CompleteTripCommand driver early end settlement', () => {
     expect(result.success).toBe(true);
     expect(result.data.financialSnapshot).toMatchObject({ operationalFeeCents: 99, passengerPaidCents: 4000, driverIntroFee: introContext() });
     expect(result.data.driverIntroFeeCompletion).toMatchObject({ qualified: true, reason: 'SERVER_DESTINATION_COMPLETION' });
-    expect(record).toHaveBeenCalledWith(redis, 'driver_1', 'booking_1');
+    expect(record).toHaveBeenCalledWith(redis, 'driver_1', 'booking_1', 'operational');
     expect(record.mock.invocationCallOrder[0]).toBeLessThan(driverLockManager.releaseLock.mock.invocationCallOrder[0]);
   });
 

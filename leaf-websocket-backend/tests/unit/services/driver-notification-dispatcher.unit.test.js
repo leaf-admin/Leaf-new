@@ -574,6 +574,21 @@ describe('driver-notification-dispatcher timeout cleanup', () => {
     expect(emit).not.toHaveBeenCalledWith('newRideRequest', expect.anything());
   });
 
+  it('keeps a sandbox (QA) offer flowing without the promo when its counter is unavailable', async () => {
+    const { sealFinancialContext } = require('../../../services/financial-runtime-context');
+    const emit = jest.fn();
+    dispatcher = new DriverNotificationDispatcher(redis, { to: jest.fn(() => ({ emit })) });
+    dispatcher.getDispatchability = jest.fn().mockResolvedValue({ ok: true, state: 'SEARCHING', bookingData: {
+      bookingId: 'booking_123', customerId: 'customer_1', estimatedFare: '40',
+      financialContext: JSON.stringify(sealFinancialContext({ providerEnvironment: 'sandbox' })),
+      pickupLocation: JSON.stringify({ lat: -22.9, lng: -43.2 }), destinationLocation: JSON.stringify({ lat: -22.8, lng: -43.1 })
+    } });
+    jest.spyOn(driverIntroFeeService, 'resolveOfferContext').mockRejectedValue(Object.assign(new Error('uninitialized'), { code: 'DRIVER_INTRO_FEE_HISTORY_UNINITIALIZED' }));
+    expect(await dispatcher.notifyDriver('driver_1', 'booking_123', { bookingId: 'booking_123' })).toBe(true);
+    const payload = emit.mock.calls.find(([name]) => name === 'newRideRequest')[1];
+    expect(payload.driverIntroFee).toBeUndefined();
+  });
+
   it('sends the quote toll with the offer so the card can show it as included', async () => {
     const offerFor = async (bookingExtra) => {
       const emit = jest.fn();

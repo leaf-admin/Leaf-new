@@ -408,7 +408,7 @@ class CompleteTripCommand extends Command {
                     String(bookingData.status || '').toUpperCase() === RideStateManager.STATES.COMPLETED
                 ) {
                     if (driverIntroFee) {
-                        await driverIntroFeeService.recordCompletion(redis, this.driverId, this.bookingId).catch(error => {
+                        await driverIntroFeeService.recordCompletion(redis, this.driverId, this.bookingId, driverIntroFee.namespace).catch(error => {
                             logStructured('error', 'Contagem promocional pendente na repetição da conclusão', {
                                 service: 'driver-intro-fee', bookingId: this.bookingId, code: error.code || 'COUNT_PENDING'
                             });
@@ -847,7 +847,7 @@ class CompleteTripCommand extends Command {
                 });
 
                 if (driverIntroFee) {
-                    await driverIntroFeeService.recordCompletion(redis, this.driverId, this.bookingId).catch(error => {
+                    await driverIntroFeeService.recordCompletion(redis, this.driverId, this.bookingId, driverIntroFee.namespace).catch(error => {
                         // The accepted context keeps an inflight marker. Dispatch
                         // repairs this terminal booking before making another offer.
                         logStructured('error', 'Contagem promocional pendente após conclusão', {
