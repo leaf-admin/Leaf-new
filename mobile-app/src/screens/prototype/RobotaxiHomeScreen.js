@@ -65,7 +65,11 @@ import { normalizeRuntimeRideStatus } from './rideLifecycleContract';
 import { resolvePrototypeMapPresentation } from './prototypeMapPresentation';
 import { SEARCH_MAX_RADIUS_KM, getSearchPresentation } from './searchPresentation';
 import useSearchRadiusSteps from './useSearchRadiusSteps';
-import { claimAutoNavigationOpen, openPreferredDriverNavigation } from '../../services/driverNavigationPreference';
+import {
+  claimAutoNavigationOpen,
+  openPreferredDriverNavigation,
+  promptNavigationOnTripStart,
+} from '../../services/driverNavigationPreference';
 import rideOverlay, { buildOfferOverlayState, maybeAskRideOverlayPermission } from '../../services/LeafRideOverlay';
 import {
   fetchH3CellsForRegion,
@@ -8859,7 +8863,16 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     let cancelled = false;
     const timer = setTimeout(async () => {
       if (cancelled || AppState.currentState !== 'active') return;
-      if (!(await claimAutoNavigationOpen(autoNavigationBookingId, autoNavigationPhase))) return;
+      if (!(await claimAutoNavigationOpen(autoNavigationBookingId, autoNavigationPhase))) {
+        if (
+          autoNavigationPhase === 'destination'
+          && !cancelled
+          && (await promptNavigationOnTripStart(autoNavigationBookingId, autoNavigationPhase))
+        ) {
+          handleOpenDriverNavigation();
+        }
+        return;
+      }
       if (autoNavigationAlreadyAtPickup) return;
       handleOpenDriverNavigation();
     }, 1200);

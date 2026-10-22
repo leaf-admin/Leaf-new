@@ -92,7 +92,9 @@ export async function openDriverExternalNavigation({
   const appleMapsUrl = `http://maps.apple.com/?daddr=${latitude},${longitude}&dirflg=d`;
 
   const openGoogleMaps = async () => {
-    const canOpenNative = await safeCanOpenURL(googleAppUrl);
+    // Com parada (embarque), só o link universal leva as duas pernas; o esquema nativo
+    // comgooglemaps:// não tem parada.
+    const canOpenNative = !stop && await safeCanOpenURL(googleAppUrl);
     await Linking.openURL(canOpenNative ? googleAppUrl : googleWebUrl);
     return 'google_maps';
   };
@@ -196,3 +198,17 @@ export async function openDriverExternalNavigation({
 export default {
   openDriverExternalNavigation
 };
+
+// Quais apps de navegação estão no aparelho. Precisa das consultas declaradas no
+// app.config (iOS: LSApplicationQueriesSchemes; Android: <queries> em withLeafMaterial).
+// Mapas da Apple vem com o iOS. Sem resposta confiável, conta como instalado.
+export async function detectInstalledNavigationApps(platform = Platform.OS) {
+  const probes = platform === 'ios'
+    ? { waze: 'waze://', google_maps: 'comgooglemaps://' }
+    : { waze: 'waze://', google_maps: 'google.navigation:q=0,0' };
+  const result = platform === 'ios' ? { apple_maps: true } : {};
+  await Promise.all(Object.entries(probes).map(async ([key, url]) => {
+    result[key] = await safeCanOpenURL(url);
+  }));
+  return result;
+}

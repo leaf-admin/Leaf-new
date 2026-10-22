@@ -16,6 +16,7 @@ import { resolveCanonicalLivenessGate } from './driverActivationCanonicalContrac
 import { ONB, OnboardingProgress } from '../../components/onboarding/onboardingKit';
 import { leafButtonMetrics } from '../../components/prototype/LeafRideUI';
 import { formatVehicleDisplayText } from '../../utils/vehicleDisplayText';
+import DriverAppSetupSection from './DriverAppSetupSection';
 
 const { color, typography } = robotaxiPrototypeTokens;
 const SURFACE_TOP_PADDING = 20;
@@ -875,6 +876,8 @@ export default function RobotaxiDriverActivationScreen({ navigation, route }) {
                   Próximas etapas liberam após aprovação dos documentos.
                 </Text>
               ) : null}
+
+              <DriverAppSetupSection />
             </ScrollView>
 
             <TouchableOpacity

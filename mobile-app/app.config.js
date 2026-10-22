@@ -361,6 +361,8 @@ module.exports = {
         deploymentTarget: "17.0",
         infoPlist: {
             ITSAppUsesNonExemptEncryption: false,
+            // Saber se Waze e Google Maps estão instalados (escolha do app de navegação).
+            LSApplicationQueriesSchemes: ["comgooglemaps", "waze"],
             UIRequiresFullScreen: true,
             UISupportedInterfaceOrientations: ["UIInterfaceOrientationPortrait"],
             "UISupportedInterfaceOrientations~ipad": ["UIInterfaceOrientationPortrait"],
