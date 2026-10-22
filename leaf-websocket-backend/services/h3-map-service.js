@@ -967,6 +967,7 @@ class H3MapService {
         maxLat: bbox.maxLat
       },
       resolution: aggregated.resolution,
+      ...(aggregated.nightSurcharge ? { nightSurcharge: aggregated.nightSurcharge } : {}),
       visualPolicy,
       summary,
       cells: aggregated.cells

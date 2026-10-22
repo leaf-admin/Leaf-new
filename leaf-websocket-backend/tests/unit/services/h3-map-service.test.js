@@ -189,6 +189,8 @@ describe('H3MapService', () => {
     expect(result.summary).toHaveProperty('maxSurgePercent');
     expect(result.source).toBe('leaf_internal_supply_demand');
     expect(result.paidProviderCalls).toBe(false);
+    // O app do motorista mostra o selo do adicional noturno a partir deste campo.
+    expect(result.nightSurcharge).toEqual(expect.objectContaining({ active: expect.any(Boolean), percent: expect.any(Number) }));
     expect(result.refreshPolicy.pollIntervalMs).toBeGreaterThanOrEqual(30000);
     expect(result.refreshPolicy.trafficLayerEnabled).toBe(true);
     expect(result.cells.reduce((sum, cell) => sum + cell.metrics.demand, 0)).toBe(1);
