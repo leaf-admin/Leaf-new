@@ -910,9 +910,11 @@ function DriverLiveRideOverlay({
         : activeTripMetrics.filter((metric) => metric.key !== "net"),
     [activeTripMetrics, isOperationalInterrupted],
   );
+  const arrivedAtDestination = normalizedActiveStatus === "started" &&
+    driverTripAssist?.nativeNavigation?.hasArrived === true;
   const navigationModeLabel =
     normalizedActiveStatus === "started"
-      ? "Em viagem"
+      ? arrivedAtDestination ? "Você chegou ao destino" : "Em viagem"
       : normalizedActiveStatus === "arrived"
         ? "Embarque"
         : "Até o passageiro";

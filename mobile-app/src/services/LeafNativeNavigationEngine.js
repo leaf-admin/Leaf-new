@@ -16,6 +16,8 @@ const NAVIGATION_CAMERA_MIN_ROUTE_ZOOM = 15.2;
 // blank patch with no cross streets. 17.3 keeps the surrounding block visible.
 const NAVIGATION_CAMERA_MAX_ROUTE_ZOOM = 17.3;
 const NAVIGATION_CAMERA_NEAR_TARGET_METERS = 60;
+// Chegou: o motorista para e procura o número/portão, então o mapa fecha no ponto final.
+const NAVIGATION_CAMERA_ARRIVAL_ZOOM = 18.6;
 const NAVIGATION_CAMERA_MIN_ROUTE_REFERENCE_METERS = 1200;
 
 function toFiniteNumber(value) {
@@ -1034,11 +1036,13 @@ export function buildLeafNativeNavigationState({
     remainingDurationMinutes,
     etaLabel: hasArrived ? '' : formatEtaLabel(remainingDurationMinutes),
     cameraHeadingDegrees,
-    cameraZoom: resolveNavigationCameraZoom(
-      normalizedSpeedKmh,
-      remainingMeters,
-      baselineMeters,
-    ),
+    cameraZoom: hasArrived && normalizedPhase === 'destination'
+      ? NAVIGATION_CAMERA_ARRIVAL_ZOOM
+      : resolveNavigationCameraZoom(
+        normalizedSpeedKmh,
+        remainingMeters,
+        baselineMeters,
+      ),
     cameraPitch: resolveNavigationCameraPitch(),
     cameraAnchorY: NAVIGATION_CAMERA_ANCHOR_Y,
     cameraAnimationDurationMs: NAVIGATION_CAMERA_ANIMATION_MS,
