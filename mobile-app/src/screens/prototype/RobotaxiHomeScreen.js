@@ -418,6 +418,22 @@ const DRIVER_AT_PICKUP_ROUTE_METERS = 80;
 
 const NAV_ROUTE_REVEAL_MAX_SPAN_METERS = 4000;
 const NAV_ROUTE_REVEAL_MIN_SPAN_METERS = 400;
+// Trecho longo: o reveal mostra o começo da rota (não a cidade toda) antes de seguir o carro.
+const NAV_ROUTE_REVEAL_LONG_LEG_PREFIX_METERS = 2500;
+
+// Início da rota até `maxMeters` (inclui o ponto que passa do limite).
+function routePrefixWithinMeters(coordinates = [], maxMeters = 0) {
+  const points = Array.isArray(coordinates) ? coordinates : [];
+  if (points.length < 2) return points;
+  const prefix = [points[0]];
+  let meters = 0;
+  for (let index = 1; index < points.length; index += 1) {
+    meters += measureRouteLengthMeters([points[index - 1], points[index]]);
+    prefix.push(points[index]);
+    if (meters >= maxMeters) break;
+  }
+  return prefix;
+}
 // Diagonal of the bounding box of a route, in metres.
 function measureRouteSpanMeters(coordinates = []) {
   const points = (Array.isArray(coordinates) ? coordinates : []).filter(
@@ -3358,7 +3374,9 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     return buildSearchRegion(searchCenterCoordinate, searchRadiusKm);
   }, [isSearchingMode, searchCenterCoordinate, searchRadiusKm]);
   const searchTargetRegion = useMemo(() => {
-    if (!isSearchingMode || !searchRadiusKm) {
+    // Não espera o raio do primeiro passo: o enquadramento usa o raio máximo fixo, e esperar
+    // fazia o mapa nascer fechado no passageiro e abrir em seguida (salto na entrada da busca).
+    if (!isSearchingMode) {
       return null;
     }
 
@@ -4850,7 +4868,17 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     loadRecentDestinations,
   ]);
 
-  const shouldRenderRuntimeMapState = runtimeVisualStateReady;
+  // Durante a sincronização com o servidor (logo depois do pedido) o mapa mantém o que já
+  // mostrava. Antes o estado da corrida sumia e voltava duas vezes em menos de 1 s; no iOS
+  // cada troca remonta o mapa (tela em branco e câmera de volta). Só segura depois da
+  // primeira vez pronto nesta tela: na abertura do app continua esperando a sincronização.
+  const runtimeMapStateHeldRef = useRef(false);
+  if (runtimeVisualStateReady) {
+    runtimeMapStateHeldRef.current = true;
+  } else if (!ready || initializing) {
+    runtimeMapStateHeldRef.current = false;
+  }
+  const shouldRenderRuntimeMapState = runtimeVisualStateReady || runtimeMapStateHeldRef.current;
   const presentedSearchingMode = Boolean(
     shouldRenderRuntimeMapState && !isDriverRole && isSearchingMode,
   );
@@ -4860,8 +4888,10 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   const isLiveRideRouteStatus = ['accepted', 'arrived', 'started'].includes(
     normalizedBookingStatus,
   );
+  // Na busca o passageiro vê a onda, não a rota: tirar a rota já no primeiro quadro da busca
+  // evita uma segunda remontagem do mapa no iOS logo depois de entrar nela.
   const shouldPresentMapRoute = Boolean(
-    shouldRenderRuntimeMapState || passengerHomePreviewRouteActive,
+    (shouldRenderRuntimeMapState || passengerHomePreviewRouteActive) && !presentedSearchingMode,
   );
   // While an offer is on screen the driver previews the trip (pickup →
   // destination) the dispatcher already sent; no extra routing request.
@@ -5039,7 +5069,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     normalizedBookingStatus === 'arrived';
   const mapShouldHideUserMarker =
     isDriverRole ||
-    (shouldRenderRuntimeMapState && (isLiveTripMapActive || hasActiveRoute));
+    (shouldRenderRuntimeMapState && (isLiveTripMapActive || (hasActiveRoute && !presentedSearchingMode)));
   const shouldRenderDriverCurrentLocationCar = Boolean(isDriverRole && isHomeRoute);
   const activeDriverNavigationCoordinate =
     shouldRenderRuntimeMapState && isDriverRole
@@ -6872,14 +6902,16 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     // city for a moment; skip it and go straight to following the car.
     // A short leg (e.g. the driver already at pickup) has nothing to reveal:
     // the reveal only turned the map north and zoomed before following again.
+    // A long leg (e.g. 14 km to the destination) used to skip the reveal, so accepting or
+    // starting the trip looked like nothing happened: now it frames the first ~2.5 km.
     const navigationRouteSpanMeters = measureRouteSpanMeters(navigationRouteCoordinates);
-    if (
-      navigationRouteSpanMeters > NAV_ROUTE_REVEAL_MAX_SPAN_METERS ||
-      navigationRouteSpanMeters < NAV_ROUTE_REVEAL_MIN_SPAN_METERS
-    ) {
+    if (navigationRouteSpanMeters < NAV_ROUTE_REVEAL_MIN_SPAN_METERS) {
       lastNativeNavigationRouteRevealKeyRef.current = leafNativeNavigationKey;
       return;
     }
+    const revealRouteCoordinates = navigationRouteSpanMeters > NAV_ROUTE_REVEAL_MAX_SPAN_METERS
+      ? routePrefixWithinMeters(navigationRouteCoordinates, NAV_ROUTE_REVEAL_LONG_LEG_PREFIX_METERS)
+      : navigationRouteCoordinates;
 
     lastNativeNavigationRouteRevealKeyRef.current = leafNativeNavigationKey;
     lastNativeNavigationCameraAtRef.current = Date.now();
@@ -6891,11 +6923,10 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     focusRoute(
       {
         ...activeRoute,
-        coordinates: navigationRouteCoordinates,
-        destination:
-          driverTripAssistNativeNavigation?.targetCoordinate ||
-          activeRoute?.destination ||
-          null,
+        coordinates: revealRouteCoordinates,
+        destination: revealRouteCoordinates === navigationRouteCoordinates
+          ? driverTripAssistNativeNavigation?.targetCoordinate || activeRoute?.destination || null
+          : revealRouteCoordinates[revealRouteCoordinates.length - 1] || null,
       },
       true,
     );
@@ -9917,6 +9948,11 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     }))
     .filter((car) => Number.isFinite(car.latitude) && Number.isFinite(car.longitude)), [nearbyDriverCoordinates]);
   const streetSearchActive = Boolean(presentedSearchingMode && streetSearchGraph?.nodes?.length);
+  // Ao entrar na busca o mapa troca de modo (e no iOS remonta): a região guardada é a do mapa
+  // anterior e a onda saía desalinhada. Espera a região do mapa novo.
+  useEffect(() => {
+    if (presentedSearchingMode) setSearchOverlayRegion(null);
+  }, [presentedSearchingMode]);
   const [driverMapMoving, setDriverMapMoving] = useState(false);
   const handleHomeMapPanDragWithLanding = useCallback((...args) => {
     if (passengerLandingVisible) setLandingMapMoving(true);
