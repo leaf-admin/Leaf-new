@@ -23,6 +23,7 @@ set -euo pipefail
 #   VALIDATE_LOCAL_RUNTIME_CONFIG=true
 #   DEPLOY_TRACKED_PATHS="relative/path.js another/path.js"
 #   GATEWAY_ONLY_DEPLOY=false
+#   FORCE_GATEWAY_RECREATE=<GATEWAY_ONLY_DEPLOY>  (recreate gateways even when the image is unchanged)
 #   UPDATE_COMPOSE_FILES=true
 #   UPDATE_WORKERS=true
 #   RUN_PUBLIC_SMOKE=true
@@ -46,6 +47,10 @@ SKIP_LOCAL_TESTS="${SKIP_LOCAL_TESTS:-false}"
 VALIDATE_LOCAL_RUNTIME_CONFIG="${VALIDATE_LOCAL_RUNTIME_CONFIG:-true}"
 DEPLOY_TRACKED_PATHS="${DEPLOY_TRACKED_PATHS:-}"
 GATEWAY_ONLY_DEPLOY="${GATEWAY_ONLY_DEPLOY:-false}"
+# Compose only recreates a container whose image or config changed, so rolling out the
+# same release left every gateway running (found in the 2026-10-22 mid-ride drill). A
+# gateway-only deploy exists to roll the gateways, so it forces the recreate by default.
+FORCE_GATEWAY_RECREATE="${FORCE_GATEWAY_RECREATE:-$GATEWAY_ONLY_DEPLOY}"
 UPDATE_COMPOSE_FILES="${UPDATE_COMPOSE_FILES:-true}"
 UPDATE_WORKERS="${UPDATE_WORKERS:-true}"
 RUN_PUBLIC_SMOKE="${RUN_PUBLIC_SMOKE:-true}"
@@ -66,6 +71,8 @@ BACKEND_IMAGE_SOURCE="${BACKEND_IMAGE_SOURCE:-auto}"
 BACKEND_IMAGE_WAIT_SECONDS="${BACKEND_IMAGE_WAIT_SECONDS:-600}"
 
 BASE_COMPOSE="docker-compose.production.yml"
+GATEWAY_RECREATE_FLAG=""
+[[ "$FORCE_GATEWAY_RECREATE" == "true" ]] && GATEWAY_RECREATE_FLAG="--force-recreate"
 SCALE_COMPOSE="docker-compose.gateway-scale.yml"
 OPS_COMPOSE="docker-compose.ops-workers.yml"
 REMOTE_BASE_COMPOSE="${REMOTE_BASE_COMPOSE:-docker-compose.yml}"
@@ -141,6 +148,7 @@ for boolean_name in \
   SKIP_LOCAL_TESTS \
   VALIDATE_LOCAL_RUNTIME_CONFIG \
   GATEWAY_ONLY_DEPLOY \
+  FORCE_GATEWAY_RECREATE \
   UPDATE_COMPOSE_FILES \
   UPDATE_WORKERS \
   RUN_PUBLIC_SMOKE \
@@ -830,7 +838,7 @@ remote "
     # Out of nginx first; the old process then drains (readiness 503, sockets in batches).
     write_upstream \"\$service\"
     [ -n '$NGINX_UPSTREAM_FILE' ] && sleep '$NGINX_DRAIN_SECONDS'
-    \$compose up -d --no-deps \"\$service\"
+    \$compose up -d --no-deps $GATEWAY_RECREATE_FLAG \"\$service\"
     wait_healthy \"\$service\" \"\$container\"
     wait_ready \"\$container\"
     verify_release \"\$container\"
