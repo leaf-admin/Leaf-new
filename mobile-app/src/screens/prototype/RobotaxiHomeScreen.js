@@ -66,7 +66,7 @@ import { resolvePrototypeMapPresentation } from './prototypeMapPresentation';
 import { SEARCH_MAX_RADIUS_KM, getSearchPresentation } from './searchPresentation';
 import useSearchRadiusSteps from './useSearchRadiusSteps';
 import { claimAutoNavigationOpen, openPreferredDriverNavigation } from '../../services/driverNavigationPreference';
-import { maybeAskRideOverlayPermission } from '../../services/LeafRideOverlay';
+import rideOverlay, { buildOfferOverlayState, maybeAskRideOverlayPermission } from '../../services/LeafRideOverlay';
 import {
   fetchH3CellsForRegion,
   fetchDriverDemandHeat,
@@ -82,7 +82,11 @@ import { getSelfHostedApiUrl } from '../../config/ApiConfig';
 import { getPlacesRequestHeaders } from '../../services/placesRequestHeaders';
 import LeafConfirmCard from '../../components/prototype/LeafConfirmCard';
 import { resolveMeaningfulAddress } from './addressLabelUtils';
-import { selectDisplayableDriverOffer } from './driverOfferPricingSnapshot';
+import {
+  getDriverOfferNetPerKmLabel,
+  getDriverOfferPayoutLabel,
+  selectDisplayableDriverOffer,
+} from './driverOfferPricingSnapshot';
 import {
   resolveDriverHomeAutomationConfig,
   resolveEffectiveDriverHomeAutomationConfig,
@@ -2097,6 +2101,8 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     hasPrototypeHomeSurfaceHydratedInSession
   );
   const [driverH3Cells, setDriverH3Cells] = useState([]);
+  // Adicional noturno vale para a cidade toda: selo no topo do mapa, não hexágono.
+  const [driverNightSurcharge, setDriverNightSurcharge] = useState(null);
   const [driverDemandHeatCells, setDriverDemandHeatCells] = useState([]);
   const [driverH3VisualPolicy, setDriverH3VisualPolicy] = useState(DEFAULT_DRIVER_H3_VISUAL_POLICY);
   const [driverH3RefreshPolicy, setDriverH3RefreshPolicy] = useState({
@@ -3467,6 +3473,26 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     offerReturnedHomeRef.current = driverLiveOfferInstance;
     navigateLeafRootTab(navigation, 'home');
   }, [currentRouteName, driverActiveRide, driverLiveOffer, driverLiveOfferInstance, isDriverRole, navigation]);
+  // Oferta com o Leaf em segundo plano (motorista no Waze/Maps): card por cima dos outros
+  // apps, como Uber e 99. O balão só aparece com o Leaf fora da tela (ver LeafRideOverlay).
+  useEffect(() => {
+    if (!isDriverRole) return;
+    const deadlineMs = driverLiveOffer ? resolveDriverOfferDeadlineMs(driverLiveOffer, Date.now()) : NaN;
+    if (!driverLiveOfferInstance || (Number.isFinite(deadlineMs) && deadlineMs <= Date.now())) {
+      rideOverlay.clearOffer().catch(() => {});
+      return;
+    }
+    const tripKm = Number(driverLiveOffer?.distanceKm ?? driverLiveOffer?.tripDistanceKm ?? driverLiveOffer?.estimatedTripDistanceKm);
+    rideOverlay.showOffer(buildOfferOverlayState({
+      bookingId: driverLiveOfferBookingId,
+      fareLabel: getDriverOfferPayoutLabel(driverLiveOffer) || '',
+      pickupEtaLabel: String(driverLiveOffer?.eta || '').trim(),
+      distanceLabel: Number.isFinite(tripKm) && tripKm > 0 ? `${tripKm.toFixed(1).replace('.', ',')} km` : '',
+      perKmLabel: getDriverOfferNetPerKmLabel(driverLiveOffer, tripKm) || '',
+      dropoffLabel: String(driverLiveOffer?.dropoff || driverLiveOffer?.dropoffAddress || '').split(',')[0].trim(),
+      expiresAtMs: Number.isFinite(deadlineMs) ? deadlineMs : 0,
+    })).catch(() => {});
+  }, [driverLiveOffer, driverLiveOfferBookingId, driverLiveOfferInstance, isDriverRole]);
   const buildHomeReceiptParams = useCallback((overrides = {}) => {
     const receipt = overrides.receipt || overrides.lastReceipt || null;
     const bookingId = String(
@@ -5958,6 +5984,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
         driverH3LastFetchKeyRef.current = requestKey;
         driverH3LastFetchAtRef.current = Date.now();
         setDriverH3Cells(Array.isArray(response?.cells) ? response.cells : []);
+        setDriverNightSurcharge(response?.nightSurcharge?.active ? response.nightSurcharge : null);
         setDriverH3VisualPolicy(response?.visualPolicy || DEFAULT_DRIVER_H3_VISUAL_POLICY);
         setDriverH3RefreshPolicy({
           pollIntervalMs: Math.max(
@@ -10052,6 +10079,20 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
           />
         ) : null}
 
+        {isDriverRole && showDriverH3Overlay && driverNightSurcharge && !hasDriverLiveRideOverlay ? (
+          <View
+            pointerEvents="none"
+            style={[styles.driverNightChip, { top: insets.top + 64 }]}
+            testID="driver-night-surcharge-chip"
+            accessibilityLabel={`Adicional noturno de ${Math.round(Number(driverNightSurcharge.percent) || 0)}% em todas as corridas`}
+          >
+            <Ionicons name="moon" size={13} color="#F4E7A1" />
+            <Text style={styles.driverNightChipText}>
+              Adicional noturno +{Math.round(Number(driverNightSurcharge.percent) || 0)}%
+            </Text>
+          </View>
+        ) : null}
+
         {/* Tags de demanda sobre o mapa (ver driverH3LabelCells). Somem enquanto o mapa
             se move e voltam presas ao centro do hexágono quando ele para. */}
         {isDriverRole && !driverMapMoving && driverH3LabelCells.length ? (
@@ -10939,6 +10980,24 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  driverNightChip: {
+    position: 'absolute',
+    alignSelf: 'center',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    height: 30,
+    paddingHorizontal: 12,
+    borderRadius: 999,
+    backgroundColor: 'rgba(23,20,18,0.9)',
+    borderWidth: 1,
+    borderColor: 'rgba(244,231,161,0.6)',
+  },
+  driverNightChipText: {
+    ...leafTypography.semiBold,
+    fontSize: 13,
+    color: '#FFFFFF',
   },
   driverSurgeFlag: {
     height: 30,

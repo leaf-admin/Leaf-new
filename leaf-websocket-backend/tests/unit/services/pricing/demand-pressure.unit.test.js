@@ -47,4 +47,10 @@ describe('pricing/demandPressure', () => {
 
     expect(withTrafficNoise).toEqual(baseline);
   });
+
+  test('one or two open requests are not demand: the request that just rang one driver gave +6%', () => {
+    expect(calculateDemandPressure({ open_requests: 1, available_drivers: 1 }).percent).toBe(0);
+    expect(calculateDemandPressure({ open_requests: 2, available_drivers: 1 }).percent).toBe(0);
+    expect(calculateDemandPressure({ open_requests: 3, available_drivers: 1 }).percent).toBeGreaterThan(0);
+  });
 });

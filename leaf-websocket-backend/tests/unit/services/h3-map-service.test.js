@@ -247,4 +247,14 @@ describe('H3MapService', () => {
     expect(trips[0].bookingId).toBe('keep_active');
     expect(deleted.sort()).toEqual(['drop_completed', 'drop_stale']);
   });
+
+  test('night surcharge shows next to the dynamic part on the hexagon label', () => {
+    const metrics = { demand: 8, availableDrivers: 0, openRequests: 8, activeTrips: 0 };
+    const surge = helpers.buildSurgeDisplay(metrics, 'critical', {}, 15);
+    expect(surge.nightPercent).toBe(15);
+    expect(surge.label).toBe(`15% + ${surge.percent}%`);
+    const quiet = helpers.buildSurgeDisplay({ demand: 1, availableDrivers: 1, openRequests: 1 }, 'low', {}, 15);
+    expect(quiet.percent).toBe(0);
+    expect(quiet.label).toBe('');
+  });
 });

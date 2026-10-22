@@ -94,10 +94,13 @@ object LeafRideOverlayWindow {
   )
 
   private const val LIME = 0xFFD4E84A.toInt()
+  /** Verde do halo "ativo" da pílula. */
+  private const val GLOW = 0xFF3FBF6A.toInt()
 
   private var root: FrameLayout? = null
   private var card: LinearLayout? = null
-  private var pill: LinearLayout? = null
+  private var pill: FrameLayout? = null
+  private var glowAnimator: ValueAnimator? = null
   private var titleView: TextView? = null
   private var etaView: TextView? = null
   private var subtitleView: TextView? = null
@@ -114,6 +117,8 @@ object LeafRideOverlayWindow {
   private var pillY: Int? = null
   private val mainHandler = Handler(Looper.getMainLooper())
   private val autoCollapse = Runnable { root?.let { setCollapsed(it.context, true) } }
+  // Oferta vencida: o JS pode estar parado em segundo plano, então o card some daqui.
+  private val expire = Runnable { if ((state?.expiresAtMs ?: 0L) > 0L) hide() }
 
   fun show(context: Context, next: LeafRideOverlayState) {
     state = next
@@ -152,6 +157,9 @@ object LeafRideOverlayWindow {
 
   private fun removeView() {
     mainHandler.removeCallbacks(autoCollapse)
+    mainHandler.removeCallbacks(expire)
+    glowAnimator?.cancel()
+    glowAnimator = null
     val view = root ?: return
     try {
       (view.context.getSystemService(Context.WINDOW_SERVICE) as WindowManager).removeView(view)
@@ -173,6 +181,10 @@ object LeafRideOverlayWindow {
   }
 
   private fun render(context: Context, next: LeafRideOverlayState) {
+    mainHandler.removeCallbacks(expire)
+    if (next.expiresAtMs > 0L) {
+      mainHandler.postDelayed(expire, (next.expiresAtMs - System.currentTimeMillis()).coerceAtLeast(0L))
+    }
     titleView?.text = next.title
     val eta = next.shortText.trim()
     etaView?.text = eta
@@ -242,6 +254,8 @@ object LeafRideOverlayWindow {
   private fun applyMode(context: Context, layoutParams: WindowManager.LayoutParams) {
     card?.visibility = if (collapsed) View.GONE else View.VISIBLE
     pill?.visibility = if (collapsed) View.VISIBLE else View.GONE
+    // O halo só respira com a pílula na tela.
+    glowAnimator?.let { if (collapsed && !it.isStarted) it.start() else if (!collapsed) it.cancel() }
     // A margem em volta do card deixa a sombra aparecer dentro da janela.
     val shadowRoom = dp(context, 8)
     root?.setPadding(shadowRoom, dp(context, 4), shadowRoom, shadowRoom + dp(context, 4))
@@ -388,29 +402,61 @@ object LeafRideOverlayWindow {
     cardView.addView(grabber)
 
     // ---- pílula recolhida ----
+    // Marca Leaf + ponto vivo com halo verde que respira: o motorista sabe, por cima do
+    // Waze/Maps, que o Leaf está acompanhando a corrida.
+    val halo = GradientDrawable().apply {
+      cornerRadius = dp(context, 24).toFloat()
+      setColor(GLOW)
+      alpha = 70
+    }
+    val pillFrame = FrameLayout(context).apply {
+      background = halo
+      setPadding(dp(context, 4), dp(context, 4), dp(context, 4), dp(context, 4))
+      clipToPadding = false
+      layoutParams = FrameLayout.LayoutParams(
+        ViewGroup.LayoutParams.WRAP_CONTENT,
+        ViewGroup.LayoutParams.WRAP_CONTENT,
+        Gravity.CENTER_HORIZONTAL
+      )
+      visibility = View.GONE
+    }
     val pillView = LinearLayout(context).apply {
       orientation = LinearLayout.HORIZONTAL
       gravity = Gravity.CENTER_VERTICAL
       setPadding(dp(context, 12), 0, dp(context, 14), 0)
       background = GradientDrawable().apply {
-        cornerRadius = dp(context, 18).toFloat()
+        cornerRadius = dp(context, 20).toFloat()
         setColor(p.accent)
+        setStroke(dp(context, 1), GLOW)
       }
       elevation = dp(context, 6).toFloat()
       layoutParams = FrameLayout.LayoutParams(
         ViewGroup.LayoutParams.WRAP_CONTENT,
-        dp(context, 36),
-        Gravity.CENTER_HORIZONTAL
+        dp(context, 40)
       )
-      visibility = View.GONE
     }
     val pillDot = View(context).apply {
       background = GradientDrawable().apply {
         shape = GradientDrawable.OVAL
         setColor(if (p === DARK) p.onAccent else LIME)
+        setStroke(dp(context, 2), GLOW)
       }
-      layoutParams = LinearLayout.LayoutParams(dp(context, 8), dp(context, 8)).apply {
-        marginEnd = dp(context, 6)
+      layoutParams = LinearLayout.LayoutParams(dp(context, 10), dp(context, 10)).apply {
+        marginEnd = dp(context, 8)
+      }
+    }
+    val brandView = TextView(context).apply {
+      text = "Leaf"
+      setTextColor(p.onAccent)
+      setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
+      typeface = f.bold
+      includeFontPadding = false
+    }
+    val separator = View(context).apply {
+      setBackgroundColor((p.onAccent and 0x00FFFFFF) or 0x55000000)
+      layoutParams = LinearLayout.LayoutParams(dp(context, 1), dp(context, 16)).apply {
+        marginStart = dp(context, 9)
+        marginEnd = dp(context, 9)
       }
     }
     pillTextView = TextView(context).apply {
@@ -422,18 +468,31 @@ object LeafRideOverlayWindow {
       maxWidth = dp(context, 140)
       includeFontPadding = false
     }
-    pillView.addView(carIcon(context, p.onAccent, 18), LinearLayout.LayoutParams(dp(context, 18), dp(context, 18)).apply {
-      marginEnd = dp(context, 6)
-    })
     pillView.addView(pillDot)
+    pillView.addView(brandView)
+    pillView.addView(separator)
     pillView.addView(pillTextView)
+    pillFrame.addView(pillView)
+    glowAnimator?.cancel()
+    glowAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
+      duration = 1400
+      repeatCount = ValueAnimator.INFINITE
+      repeatMode = ValueAnimator.REVERSE
+      interpolator = DecelerateInterpolator()
+      addUpdateListener {
+        val t = it.animatedValue as Float
+        halo.alpha = (50 + 110 * t).toInt()
+        pillDot.scaleX = 0.85f + 0.3f * t
+        pillDot.scaleY = 0.85f + 0.3f * t
+      }
+    }
 
     container.addView(cardView)
-    container.addView(pillView)
+    container.addView(pillFrame)
 
     attachGestures(context, container)
     card = cardView
-    pill = pillView
+    pill = pillFrame
     root = container
   }
 
