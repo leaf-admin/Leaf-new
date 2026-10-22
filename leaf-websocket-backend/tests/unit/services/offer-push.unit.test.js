@@ -7,10 +7,13 @@ describe('new ride offer push', () => {
         bookingId: 'booking_1',
         estimatedDriverNetAmount: 38.43,
         estimatedArrivalToPickupMin: 3,
+        estimatedTripDistanceKm: 15.04,
+        destinationAddress: 'Via Parque Shopping, Av. Ayrton Senna - Barra',
         expiresAt: '2026-10-13T18:00:20.000Z'
       })
     ).toEqual({
       title: 'Nova corrida',
+      channelId: 'driver_actions',
       collapseKey: 'leaf-ride-offer',
       ttlSeconds: 30,
       body: 'R$ 38,43 líquido · 3 min até o embarque',
@@ -18,7 +21,11 @@ describe('new ride offer push', () => {
         type: 'ride_offer',
         bookingId: 'booking_1',
         screen: 'RobotaxiPrototype',
-        expiresAt: '2026-10-13T18:00:20.000Z'
+        expiresAt: '2026-10-13T18:00:20.000Z',
+        netAmount: '38.43',
+        pickupMinutes: '3',
+        tripKm: '15.0',
+        dropoff: 'Via Parque Shopping'
       }
     });
   });

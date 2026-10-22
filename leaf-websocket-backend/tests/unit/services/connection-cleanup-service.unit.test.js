@@ -8,6 +8,11 @@ const mockRedis = {
   zrem: jest.fn(),
 };
 const mockCommitDriverOnlineProjection = jest.fn();
+const mockAlertDriverOfflineDuringActiveRide = jest.fn();
+
+jest.mock('../../../services/ride-health-monitor', () => ({
+  alertDriverOfflineDuringActiveRide: (...args) => mockAlertDriverOfflineDuringActiveRide(...args),
+}));
 
 jest.mock('../../../utils/redis-pool', () => ({
   getConnection: jest.fn(() => mockRedis),
@@ -116,6 +121,35 @@ describe('ConnectionCleanupService', () => {
           totalMs: 32 * 60 * 1000,
           sessionStartedAtMs: null,
         }),
+      })
+    );
+    expect(socket.disconnect).toHaveBeenCalledWith(true);
+  });
+
+  it('avisa o alerta de motorista offline com corrida ativa ao derrubar a sessão por heartbeat', async () => {
+    const lastHeartbeat = Date.parse('2026-06-25T12:00:00.000Z');
+    const socket = {
+      id: 'socket_alert',
+      userId: 'driver_alert',
+      userType: 'driver',
+      lastHeartbeat,
+      emit: jest.fn(),
+      disconnect: jest.fn(),
+    };
+    const service = new ConnectionCleanupService({
+      connectedUsers: new Map([['driver_alert', socket]]),
+      sockets: { fetchSockets: jest.fn(), sockets: new Map() },
+    });
+    service.config.heartbeatTimeout = 120000;
+
+    await service.cleanupExpiredHeartbeats();
+
+    expect(mockAlertDriverOfflineDuringActiveRide).toHaveBeenCalledWith(
+      mockRedis,
+      expect.objectContaining({
+        driverId: 'driver_alert',
+        lastSignalAtMs: lastHeartbeat,
+        nowMs: Date.parse('2026-06-25T12:03:00.000Z'),
       })
     );
     expect(socket.disconnect).toHaveBeenCalledWith(true);

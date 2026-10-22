@@ -1,6 +1,7 @@
 const alertService = require('./alert-service');
 const { metrics } = require('../utils/prometheus-metrics');
 const { logStructured, logError } = require('../utils/logger');
+const { resolveActiveTripForDriver } = require('../utils/active-trip-index');
 
 const REASSIGNMENT_PENDING_KEY = process.env.RIDE_HEALTH_REASSIGNMENT_PENDING_KEY || 'ride_health:reassignment_pending';
 const EARLY_ENDED_REVIEW_KEY = process.env.RIDE_HEALTH_EARLY_REVIEW_KEY || 'ride_health:early_ended_review';
@@ -13,6 +14,15 @@ const DEFAULT_REVIEW_WINDOW_MS = Number.parseInt(process.env.RIDE_HEALTH_EARLY_R
 const DEFAULT_DRIVER_SIGNAL_STALE_MS = Number.parseInt(process.env.RIDE_HEALTH_DRIVER_SIGNAL_STALE_MS || '90000', 10);
 const DEFAULT_DRIVER_SIGNAL_STALE_CRITICAL_COUNT = Number.parseInt(process.env.RIDE_HEALTH_DRIVER_SIGNAL_STALE_CRITICAL_COUNT || '3', 10);
 const DEFAULT_TOP_BOOKINGS_LIMIT = Number.parseInt(process.env.RIDE_HEALTH_TOP_BOOKINGS_LIMIT || '5', 10);
+// Corrida em andamento (aceita/chegou/iniciada) sem posição aceita por este tempo vira alerta crítico por corrida.
+const DEFAULT_DRIVER_LOCATION_CRITICAL_STALE_MS = Number.parseInt(process.env.RIDE_HEALTH_DRIVER_LOCATION_CRITICAL_STALE_MS || '60000', 10);
+// Cooldown por corrida: a mesma corrida não gera o mesmo alerta de novo antes deste intervalo.
+const DEFAULT_DRIVER_LOCATION_ALERT_COOLDOWN_MS = Number.parseInt(process.env.RIDE_HEALTH_DRIVER_LOCATION_ALERT_COOLDOWN_MS || '600000', 10);
+const DEFAULT_DRIVER_LOCATION_ALERT_MAX_PER_CYCLE = Number.parseInt(process.env.RIDE_HEALTH_DRIVER_LOCATION_ALERT_MAX_PER_CYCLE || '20', 10);
+const DRIVER_LOCATION_ALERT_COOLDOWN_PREFIX = 'ride_health:driver_location_alert:';
+const DRIVER_OFFLINE_ALERT_COOLDOWN_PREFIX = 'ride_health:driver_offline_alert:';
+const IN_PROGRESS_RIDE_STATUSES = new Set(['ACCEPTED', 'ARRIVED', 'IN_PROGRESS', 'STARTED']);
+const localAlertCooldowns = new Map();
 
 const TRACKED_STATES = {
   REASSIGNMENT_PENDING: REASSIGNMENT_PENDING_KEY,
@@ -513,9 +523,182 @@ function buildReviewAlert(snapshot, options = {}) {
   };
 }
 
+function normalizeRideStatus(value) {
+  return String(value || '').trim().toUpperCase();
+}
+
+// Status de corrida em andamento a partir do hash da corrida (state ou status).
+function resolveInProgressRideStatus(bookingHash = {}) {
+  return [bookingHash.state, bookingHash.status]
+    .map(normalizeRideStatus)
+    .find((value) => IN_PROGRESS_RIDE_STATUSES.has(value)) || null;
+}
+
+// Cooldown compartilhado entre réplicas via SET NX PX. Sem Redis utilizável, usa a memória do processo.
+async function claimRideAlertCooldown(redis, key, ttlMs, nowMs = Date.now()) {
+  const ttl = Math.max(1000, toNumber(ttlMs, DEFAULT_DRIVER_LOCATION_ALERT_COOLDOWN_MS));
+  if (redis && typeof redis.set === 'function') {
+    try {
+      return (await redis.set(key, String(nowMs), 'PX', ttl, 'NX')) === 'OK';
+    } catch (error) {
+      logStructured('warn', 'Cooldown de alerta de corrida usando memória local', {
+        service: 'ride-health-monitor',
+        error: error.message
+      });
+    }
+  }
+  const until = localAlertCooldowns.get(key);
+  if (until && until > nowMs) {
+    return false;
+  }
+  localAlertCooldowns.set(key, nowMs + ttl);
+  if (localAlertCooldowns.size > 1000) {
+    for (const [storedKey, storedUntil] of localAlertCooldowns) {
+      if (storedUntil <= nowMs) localAlertCooldowns.delete(storedKey);
+    }
+  }
+  return true;
+}
+
+// Nunca lança: falha no envio ao bot não pode quebrar o monitor nem a desconexão.
+async function emitRideBotEvent(type, data, { dedupeKey, severity = 'N2' } = {}) {
+  try {
+    const botEventService = require('./bot-event-service');
+    return await botEventService.emit(type, data, { dedupeKey, severity });
+  } catch (error) {
+    logStructured('warn', 'Falha ao enviar evento de corrida para os bots', {
+      service: 'ride-health-monitor',
+      type,
+      error: error.message
+    });
+    return { queued: 0, skipped: 'error' };
+  }
+}
+
+function buildDriverLocationStaleAlert(rides = [], { thresholdMs = DEFAULT_DRIVER_LOCATION_CRITICAL_STALE_MS } = {}) {
+  const oldest = rides.reduce((worst, ride) => (ride.staleSeconds > worst.staleSeconds ? ride : worst), rides[0]);
+  return {
+    severity: 'critical',
+    metric: 'driver_location_stale_active_ride',
+    value: rides.length,
+    threshold: 1,
+    service: 'ride-health-monitor',
+    message: `${rides.length} corrida(s) em andamento sem posição do motorista acima de ${formatDurationMs(thresholdMs)}. Mais antiga: ${formatDurationMs(oldest.staleSeconds * 1000)}.`,
+    details: {
+      bookingIds: rides.map((ride) => ride.bookingId),
+      oldestBookingId: oldest.bookingId
+    }
+  };
+}
+
+// Corridas em andamento cuja última posição aceita passou do limiar crítico. Cada corrida
+// só entra aqui uma vez por janela de cooldown.
+async function evaluateDriverLocationStaleRides(redis, {
+  nowMs = Date.now(),
+  staleMs = DEFAULT_DRIVER_LOCATION_CRITICAL_STALE_MS,
+  cooldownMs = DEFAULT_DRIVER_LOCATION_ALERT_COOLDOWN_MS,
+  maxPerCycle = DEFAULT_DRIVER_LOCATION_ALERT_MAX_PER_CYCLE
+} = {}) {
+  if (!isRedisDriverSignalIndexUsable(redis) || typeof redis.hgetall !== 'function') {
+    return [];
+  }
+
+  const rows = await redis.zrangebyscore(
+    DRIVER_SIGNAL_ACTIVE_KEY,
+    0,
+    nowMs - staleMs,
+    'WITHSCORES',
+    'LIMIT',
+    0,
+    Math.max(1, maxPerCycle)
+  ).catch(() => []);
+
+  const rides = [];
+  for (const { bookingId, scoreMs } of parseSortedSetRows(rows)) {
+    try {
+      const bookingHash = await redis.hgetall(`booking:${bookingId}`).catch(() => null);
+      if (!bookingHash || Object.keys(bookingHash).length === 0) continue;
+
+      const status = resolveInProgressRideStatus(bookingHash);
+      if (!status) continue;
+
+      const claimed = await claimRideAlertCooldown(
+        redis,
+        `${DRIVER_LOCATION_ALERT_COOLDOWN_PREFIX}${bookingId}`,
+        cooldownMs,
+        nowMs
+      );
+      if (!claimed) continue;
+
+      rides.push({
+        bookingId: String(bookingId),
+        driverId: bookingHash.driverId ? String(bookingHash.driverId) : null,
+        status,
+        staleSeconds: Math.max(0, Math.round((nowMs - scoreMs) / 1000)),
+        lastLocationAt: new Date(scoreMs).toISOString(),
+        cooldownBucket: Math.floor(nowMs / Math.max(1000, cooldownMs))
+      });
+    } catch (error) {
+      logError(error, 'Falha ao avaliar sinal do motorista de uma corrida', {
+        service: 'ride-health-monitor',
+        bookingId
+      });
+    }
+  }
+  return rides;
+}
+
+// Chamado quando a sessão online do motorista é derrubada por falta de heartbeat.
+// Só alerta se o motorista tem corrida em andamento; cooldown por corrida.
+async function alertDriverOfflineDuringActiveRide(redis, {
+  driverId,
+  lastSignalAtMs,
+  nowMs = Date.now(),
+  cooldownMs = DEFAULT_DRIVER_LOCATION_ALERT_COOLDOWN_MS
+} = {}) {
+  try {
+    if (!redis || !driverId) return { alerted: false, reason: 'missing_input' };
+
+    const { tripId } = await resolveActiveTripForDriver(redis, driverId);
+    if (!tripId) return { alerted: false, reason: 'no_active_ride' };
+
+    const bookingHash = await redis.hgetall(`booking:${tripId}`).catch(() => null);
+    const status = bookingHash ? resolveInProgressRideStatus(bookingHash) : null;
+    if (!status) return { alerted: false, reason: 'ride_not_in_progress' };
+
+    const claimed = await claimRideAlertCooldown(
+      redis,
+      `${DRIVER_OFFLINE_ALERT_COOLDOWN_PREFIX}${tripId}`,
+      cooldownMs,
+      nowMs
+    );
+    if (!claimed) return { alerted: false, reason: 'cooldown' };
+
+    const lastSignalAtValid = Number.isFinite(lastSignalAtMs) && lastSignalAtMs > 0;
+    const result = await emitRideBotEvent('ride.driver_offline_during_active', {
+      bookingId: String(tripId),
+      driverId: String(driverId),
+      status,
+      staleSeconds: lastSignalAtValid ? Math.max(0, Math.round((nowMs - lastSignalAtMs) / 1000)) : null,
+      lastLocationAt: lastSignalAtValid ? new Date(lastSignalAtMs).toISOString() : null
+    }, {
+      dedupeKey: `driver_offline_during_active:${tripId}:${Math.floor(nowMs / Math.max(1000, cooldownMs))}`,
+      severity: 'N2'
+    });
+    return { alerted: true, result };
+  } catch (error) {
+    logStructured('warn', 'Falha ao avaliar motorista offline com corrida ativa', {
+      service: 'ride-health-monitor',
+      error: error.message
+    });
+    return { alerted: false, reason: 'error' };
+  }
+}
+
 async function evaluateRideOperationsAlerts(redis, options = {}) {
+  const nowIsoForRun = options.nowIso || new Date().toISOString();
   await pruneFinishedDriverSignalEntries(redis, {
-    nowMs: normalizeNowMs(options.nowIso || new Date().toISOString()),
+    nowMs: normalizeNowMs(nowIsoForRun),
     staleMs: Math.max(30000, toNumber(options.driverSignalStaleMs, DEFAULT_DRIVER_SIGNAL_STALE_MS))
   });
   const snapshot = await getRideOperationsSnapshot(redis, options);
@@ -540,6 +723,59 @@ async function evaluateRideOperationsAlerts(redis, options = {}) {
     }
   }
 
+  // Regra por corrida (limiar crítico, cooldown por corrida): Discord e evento ao bot Operação.
+  const driverLocationStaleThresholdMs = Math.max(
+    15000,
+    toNumber(options.driverLocationCriticalStaleMs, DEFAULT_DRIVER_LOCATION_CRITICAL_STALE_MS)
+  );
+  const driverLocationCooldownMs = Math.max(
+    1000,
+    toNumber(options.driverLocationAlertCooldownMs, DEFAULT_DRIVER_LOCATION_ALERT_COOLDOWN_MS)
+  );
+  let driverLocationStaleRides = [];
+  try {
+    driverLocationStaleRides = await evaluateDriverLocationStaleRides(redis, {
+      nowMs: normalizeNowMs(nowIsoForRun),
+      staleMs: driverLocationStaleThresholdMs,
+      cooldownMs: driverLocationCooldownMs,
+      maxPerCycle: toNumber(options.driverLocationAlertMaxPerCycle, DEFAULT_DRIVER_LOCATION_ALERT_MAX_PER_CYCLE)
+    });
+  } catch (error) {
+    logError(error, 'Falha ao avaliar sinal do motorista por corrida', {
+      service: 'ride-health-monitor'
+    });
+  }
+
+  if (driverLocationStaleRides.length) {
+    const locationAlert = buildDriverLocationStaleAlert(driverLocationStaleRides, {
+      thresholdMs: driverLocationStaleThresholdMs
+    });
+    try {
+      await alertClient.sendAlert(locationAlert);
+      metrics.recordRideHealthAlert(locationAlert.metric, locationAlert.severity);
+      alerts.push(locationAlert);
+    } catch (error) {
+      logError(error, 'Falha ao enviar alerta de posição do motorista', {
+        service: 'ride-health-monitor',
+        metric: locationAlert.metric,
+        severity: locationAlert.severity
+      });
+    }
+
+    for (const ride of driverLocationStaleRides) {
+      await emitRideBotEvent('ride.driver_location_stale', {
+        bookingId: ride.bookingId,
+        driverId: ride.driverId,
+        status: ride.status,
+        staleSeconds: ride.staleSeconds,
+        lastLocationAt: ride.lastLocationAt
+      }, {
+        dedupeKey: `driver_location_stale:${ride.bookingId}:${ride.cooldownBucket}`,
+        severity: 'N2'
+      });
+    }
+  }
+
   logStructured('info', 'Ciclo de ride health avaliado', {
     service: 'ride-health-monitor',
     reassignmentPending: snapshot.reassignmentPending.total,
@@ -548,6 +784,7 @@ async function evaluateRideOperationsAlerts(redis, options = {}) {
     earlyEndedReviewRecent: snapshot.earlyEndedReview.recent,
     driverSignalActive: snapshot.driverSignal.total,
     driverSignalStale: snapshot.driverSignal.stale,
+    driverLocationStaleRides: driverLocationStaleRides.length,
     alerts: alerts.length
   });
 
@@ -558,6 +795,13 @@ async function evaluateRideOperationsAlerts(redis, options = {}) {
 }
 
 module.exports = {
+  DEFAULT_DRIVER_LOCATION_CRITICAL_STALE_MS,
+  DEFAULT_DRIVER_LOCATION_ALERT_COOLDOWN_MS,
+  DEFAULT_DRIVER_LOCATION_ALERT_MAX_PER_CYCLE,
+  alertDriverOfflineDuringActiveRide,
+  buildDriverLocationStaleAlert,
+  claimRideAlertCooldown,
+  evaluateDriverLocationStaleRides,
   DEFAULT_REVIEW_WINDOW_MS,
   DEFAULT_REVIEW_WARNING_COUNT,
   DEFAULT_REVIEW_CRITICAL_COUNT,

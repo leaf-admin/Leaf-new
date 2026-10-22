@@ -4,12 +4,13 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
 import { showLeafChoiceSheet } from '../components/design-system/LeafChoiceSheet';
-import { openDriverExternalNavigation } from './DriverExternalNavigationService';
+import { detectInstalledNavigationApps, openDriverExternalNavigation } from './DriverExternalNavigationService';
 import { rememberExternalNavigation } from './externalNavigationSession';
 
 const APP_KEY = 'leaf:driver-navigation-app:v1';
 const AUTO_KEY = 'leaf:driver-navigation-auto:v1';
 const LAST_AUTO_OPEN_KEY = 'leaf:driver-navigation-last-auto-open:v1';
+const LAST_PROMPT_KEY = 'leaf:driver-navigation-last-prompt:v1';
 
 export const NAVIGATION_APP_LABELS = Object.freeze({
   waze: 'Waze',
@@ -63,11 +64,15 @@ export async function setAutoNavigationEnabled(enabled) {
 }
 
 export async function choosePreferredNavigationApp({ allowAskEveryTime = false } = {}) {
+  const installed = await detectInstalledNavigationApps();
+  const options = navigationAppOptions().map((option) => (installed[option.key] === false
+    ? { ...option, label: `${option.label} · não instalado`, tone: 'secondary' }
+    : option));
   const key = await showLeafChoiceSheet({
     title: 'Qual app você usa para navegar?',
-    message: 'A rota da corrida abre nele. Dá para trocar em Configurações.',
+    message: 'Quando a corrida começar, a rota abre direto nele. Dá para trocar em Configurações.',
     options: [
-      ...navigationAppOptions(),
+      ...options,
       ...(allowAskEveryTime ? [{ key: 'ask', label: 'Perguntar toda vez', tone: 'secondary' }] : []),
     ],
     dismissible: true,
@@ -123,4 +128,22 @@ export async function claimAutoNavigationOpen(bookingId, phase) {
   if (!(await isAutoNavigationEnabled())) return false;
   await write(LAST_AUTO_OPEN_KEY, key);
   return true;
+}
+
+// Abertura automática desligada: ao iniciar a viagem, pergunta uma vez se abre a rota.
+export async function promptNavigationOnTripStart(bookingId, phase = 'destination') {
+  const key = `${String(bookingId || '').trim()}:${String(phase || '').trim()}`;
+  if (!bookingId || (await isAutoNavigationEnabled()) || (await read(LAST_PROMPT_KEY)) === key) return false;
+  await write(LAST_PROMPT_KEY, key);
+  const app = await getPreferredNavigationApp();
+  const answer = await showLeafChoiceSheet({
+    title: 'Iniciar a navegação até o destino?',
+    message: 'A rota abre no seu app de navegação. O Leaf continua acompanhando a corrida.',
+    options: [
+      { key: 'open', label: app ? `Abrir no ${NAVIGATION_APP_LABELS[app]}` : 'Escolher app e abrir' },
+      { key: 'later', label: 'Agora não', tone: 'secondary' },
+    ],
+    dismissible: true,
+  });
+  return answer === 'open';
 }

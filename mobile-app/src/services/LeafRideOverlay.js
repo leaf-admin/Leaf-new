@@ -59,6 +59,42 @@ export function buildRideOverlayState({ bookingId, status, ongoing = {}, actions
   };
 }
 
+/**
+ * Oferta de corrida por cima do Waze/Maps (como Uber e 99): o mesmo card da tela do
+ * motorista (valor, R$/km, pedágio, embarque e destino, tempo). "Aceitar corrida" abre o
+ * Leaf e aceita pelo caminho normal (rideAction=accept_offer).
+ */
+export function buildOfferCardState({
+  bookingId,
+  fareLabel = '',
+  pickupEtaLabel = '',
+  distanceLabel = '',
+  durationLabel = '',
+  perKmLabel = '',
+  tollLabel = '',
+  pickupLabel = '',
+  dropoffLabel = '',
+  expiresAtMs = 0,
+  totalMs = 20000,
+} = {}) {
+  const clean = (value) => (value && value !== '--' ? String(value) : '');
+  return {
+    bookingId: String(bookingId || ''),
+    fareLabel: clean(fareLabel),
+    perKmLabel: clean(perKmLabel),
+    tollLabel: clean(tollLabel),
+    tripLine: [
+      clean(pickupEtaLabel) && `${pickupEtaLabel} até o embarque`,
+      clean(distanceLabel),
+      clean(durationLabel),
+    ].filter(Boolean).join(' · '),
+    pickupLabel: clean(pickupLabel),
+    dropoffLabel: clean(dropoffLabel),
+    expiresAtMs: Number(expiresAtMs) > 0 ? Number(expiresAtMs) : 0,
+    totalMs: Number(totalMs) > 0 ? Number(totalMs) : 20000,
+  };
+}
+
 export async function isRideOverlayEnabled() {
   try {
     return (await AsyncStorage.getItem(ENABLED_KEY)) !== 'false';
@@ -129,6 +165,7 @@ export async function maybeAskRideOverlayPermission() {
 class RideOverlayController {
   constructor() {
     this.state = null;
+    this.offerState = null;
     this.enabled = true;
     this.appState = AppState.currentState;
     this.subscription = null;
@@ -142,12 +179,14 @@ class RideOverlayController {
     this.subscription = AppState.addEventListener('change', (next) => {
       this.appState = next;
       if (next === 'active') {
-        // De volta ao Leaf: o balão sai sempre, mesmo que uma atualização em segundo
-        // plano ainda estivesse sendo desenhada.
+        // De volta ao Leaf: o balão e o card de oferta saem sempre, mesmo que uma
+        // atualização em segundo plano ainda estivesse sendo desenhada.
         this.hideOverlay();
+        this.hideOfferCard();
         return;
       }
       this.render().catch(() => {});
+      this.renderOffer().catch(() => {});
     });
   }
 
@@ -160,12 +199,58 @@ class RideOverlayController {
     return true;
   }
 
+  /** Oferta nova: o card de oferta por cima de outros apps, só com o Leaf em segundo plano. */
+  async showOffer(offerState) {
+    if (!isRideOverlayAvailable() || !offerState?.bookingId) return false;
+    this.ensureListening();
+    const key = `${offerState.bookingId}:${offerState.expiresAtMs}`;
+    if (this.offerKey === key) return true;
+    this.offerKey = key;
+    this.offerState = offerState;
+    await this.renderOffer();
+    return true;
+  }
+
+  /** Oferta aceita, recusada ou vencida: o card sai. */
+  async clearOffer() {
+    if (!this.offerState) return;
+    this.offerState = null;
+    this.offerKey = '';
+    await this.hideOfferCard();
+  }
+
+  async renderOffer() {
+    const native = nativeModule();
+    if (!native?.showOfferCard || !this.offerState) return;
+    // Estado de agora, não o guardado: o push chega com o app em segundo plano antes de
+    // qualquer evento de AppState ter atualizado o controle.
+    this.appState = AppState.currentState || this.appState;
+    if (this.appState === 'active' || !this.enabled) return;
+    if (this.offerState.expiresAtMs && this.offerState.expiresAtMs <= Date.now()) return;
+    try {
+      await native.showOfferCard(this.offerState);
+      if (this.appState === 'active') await this.hideOfferCard();
+    } catch (error) {
+      Logger.warn('⚠️ [RideOverlay] Falha ao mostrar a oferta:', error?.message || error);
+    }
+  }
+
+  async hideOfferCard() {
+    try {
+      await nativeModule()?.hideOfferCard?.();
+    } catch (_error) {
+      // já escondido
+    }
+  }
+
   async render() {
     const native = nativeModule();
-    if (!native || !this.state) return;
+    const visibleState = this.state;
+    if (!native || !visibleState) return;
+    this.appState = AppState.currentState || this.appState;
     try {
       if (this.appState !== 'active' && this.enabled) {
-        this.overlayShown = Boolean(await native.showOverlay(this.state));
+        this.overlayShown = Boolean(await native.showOverlay(visibleState));
         // O app pode ter voltado para a frente enquanto o balão era desenhado.
         if (this.appState === 'active') {
           await this.hideOverlay();

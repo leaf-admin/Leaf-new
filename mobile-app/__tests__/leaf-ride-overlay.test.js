@@ -16,6 +16,8 @@ describe('ride overlay over the navigation app (Android)', () => {
       showLiveUpdate: jest.fn().mockResolvedValue(false),
       cancelLiveUpdate: jest.fn().mockResolvedValue(true),
       openOverlaySettings: jest.fn().mockResolvedValue(true),
+      showOfferCard: jest.fn().mockResolvedValue(true),
+      hideOfferCard: jest.fn().mockResolvedValue(true),
     };
     NativeModules.LeafRideOverlay = native;
     jest.spyOn(AppState, 'addEventListener').mockImplementation((event, listener) => {
@@ -77,10 +79,12 @@ describe('ride overlay over the navigation app (Android)', () => {
 
   it('shows the bubble only while Leaf is in the background, and clears it at the end of the ride', async () => {
     const controller = overlay.default;
+    AppState.currentState = 'active';
     controller.appState = 'active';
     await controller.update({ bookingId: 'b1', title: 'Buscar Ana' });
     expect(native.showOverlay).not.toHaveBeenCalled();
 
+    AppState.currentState = 'background';
     controller.appState = 'background';
     await controller.render();
     expect(native.showOverlay).toHaveBeenCalledWith(expect.objectContaining({ title: 'Buscar Ana' }));
@@ -98,6 +102,7 @@ describe('ride overlay over the navigation app (Android)', () => {
   it('stays off when the driver turned the bubble off', async () => {
     await overlay.setRideOverlayEnabled(false);
     const controller = overlay.default;
+    AppState.currentState = 'background';
     controller.appState = 'background';
     await controller.update({ bookingId: 'b1', title: 'Buscar Ana' });
     expect(native.showOverlay).not.toHaveBeenCalled();
@@ -105,6 +110,7 @@ describe('ride overlay over the navigation app (Android)', () => {
 
   it('hides the bubble when Leaf comes back while a background update was drawing it', async () => {
     const controller = overlay.default;
+    AppState.currentState = 'background';
     controller.appState = 'background';
     let finishShow;
     native.showOverlay.mockImplementationOnce(() => new Promise((resolve) => { finishShow = resolve; }));
@@ -115,5 +121,29 @@ describe('ride overlay over the navigation app (Android)', () => {
     await pending;
     expect(native.hideOverlay).toHaveBeenCalled();
     expect(controller.overlayShown).toBe(false);
+  });
+
+  it('shows the full offer card over other apps only in the background, and clears it', async () => {
+    const controller = overlay.default;
+    const card = overlay.buildOfferCardState({
+      bookingId: 'b9',
+      fareLabel: 'R$ 40,09',
+      pickupEtaLabel: '2 min',
+      distanceLabel: '14,7 km',
+      durationLabel: '20 min',
+      perKmLabel: 'R$ 2,06/km',
+      pickupLabel: 'R. das Pastorinhas',
+      dropoffLabel: 'Via Parque Shopping',
+      expiresAtMs: Date.now() + 15000,
+    });
+    expect(card.tripLine).toBe('2 min até o embarque · 14,7 km · 20 min');
+    AppState.currentState = 'active';
+    await controller.showOffer(card);
+    expect(native.showOfferCard).not.toHaveBeenCalled();
+    AppState.currentState = 'background';
+    await controller.showOffer({ ...card, expiresAtMs: card.expiresAtMs + 1 });
+    expect(native.showOfferCard).toHaveBeenCalledWith(expect.objectContaining({ bookingId: 'b9', fareLabel: 'R$ 40,09' }));
+    await controller.clearOffer();
+    expect(native.hideOfferCard).toHaveBeenCalled();
   });
 });

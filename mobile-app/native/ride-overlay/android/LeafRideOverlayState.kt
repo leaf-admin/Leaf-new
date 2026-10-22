@@ -21,7 +21,9 @@ data class LeafRideOverlayState(
   /** Muda quando a etapa muda (embarque → viagem): a trilha recomeça do zero. */
   val legKey: String,
   /** Texto curto da pílula recolhida ("A caminho", "No embarque"). */
-  val pillText: String
+  val pillText: String,
+  /** Oferta de corrida: hora (epoch ms) em que o card some sozinho; 0 = não some. */
+  val expiresAtMs: Long = 0L
 ) {
   val hasAction: Boolean get() = actionId.isNotBlank() && actionLabel.isNotBlank()
 
@@ -39,7 +41,8 @@ data class LeafRideOverlayState(
         actionId = text("actionId"),
         actionLabel = text("actionLabel"),
         legKey = text("legKey"),
-        pillText = text("pillText")
+        pillText = text("pillText"),
+        expiresAtMs = if (map != null && map.hasKey("expiresAtMs") && !map.isNull("expiresAtMs")) map.getDouble("expiresAtMs").toLong() else 0L
       )
     }
 

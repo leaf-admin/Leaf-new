@@ -149,6 +149,24 @@ export function getDriverOfferPayoutLabel(offer = {}) {
   return payoutLabel || null;
 }
 
+// Quanto o motorista ganha por km da viagem. O pedágio é repasse, não ganho: sai da conta.
+export function getDriverOfferNetPerKmLabel(offer = {}, tripDistanceKm) {
+  const distanceKm = Number(tripDistanceKm);
+  if (!Number.isFinite(distanceKm) || distanceKm < 0.5) {
+    return null;
+  }
+  const normalizedOffer = normalizeDriverOfferPricingSnapshot(offer);
+  if (!hasAuthoritativeDriverOfferPricing(normalizedOffer)) {
+    return null;
+  }
+  const toll = Number(normalizedOffer?.tollFee ?? normalizedOffer?.estimatedTollFee);
+  const earned = getDriverOfferNetAmount(normalizedOffer) - (Number.isFinite(toll) && toll > 0 ? toll : 0);
+  if (!(earned > 0)) {
+    return null;
+  }
+  return `${formatCurrencyBR(earned / distanceKm)}/km`;
+}
+
 export function selectDisplayableDriverOffer(driverOffers = []) {
   if (!Array.isArray(driverOffers) || driverOffers.length === 0) {
     return null;

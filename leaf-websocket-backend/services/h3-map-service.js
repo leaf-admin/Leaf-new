@@ -7,6 +7,7 @@ const {
   MAX_DEMAND_MARKUP_PERCENT,
   calculateDemandPressure
 } = require('./pricing/demandPressure');
+const { resolveNightSurcharge } = require('./pricing/nightSurcharge');
 
 const CACHE_TTL_MS = Number.parseInt(process.env.H3_MAP_CACHE_TTL_MS || '10000', 10);
 const CLIENT_REFRESH_INTERVAL_MS = Math.max(
@@ -290,19 +291,23 @@ function formatSurgeLabel(template, percent) {
   return String(template || '+{percent}%').replaceAll('{percent}', String(percent));
 }
 
-function buildSurgeDisplay(metrics = {}, level = 'low', visualPolicy = {}) {
+function buildSurgeDisplay(metrics = {}, level = 'low', visualPolicy = {}, nightPercent = 0) {
   const demandPressure = calculateDemandPressure({
     demand: metrics.demand,
     openRequests: metrics.openRequests,
     availableDrivers: metrics.availableDrivers
   });
   const percent = demandPressure.percent;
+  const night = Number(nightPercent) > 0 ? Math.round(Number(nightPercent)) : 0;
+  const dynamicLabel = percent > 0 ? formatSurgeLabel(visualPolicy?.label?.template, percent) : '';
 
   return {
     percent,
+    nightPercent: night,
     multiplier: demandPressure.multiplier,
     level: demandPressure.level,
-    label: percent > 0 ? formatSurgeLabel(visualPolicy?.label?.template, percent) : '',
+    // Transparência: com o adicional noturno a etiqueta mostra as duas partes ("15% + 6%").
+    label: dynamicLabel && night > 0 ? `${night}% + ${percent}%` : dynamicLabel,
     labelVisible:
       visualPolicy?.enabled !== false
       &&
@@ -817,6 +822,8 @@ class H3MapService {
 
       const createdAt = normalizeNumber(hash.createdAt, now);
       const isRecent = now - createdAt <= OPEN_REQUEST_ACTIVE_WINDOW_MS;
+      // Busca esquecida no Redis não é demanda de agora.
+      if (!isRecent) continue;
 
       requests.push({
         bookingId: key.replace(/^booking_search:/, ''),
@@ -1027,6 +1034,7 @@ class H3MapService {
       });
     }
 
+    const nightSurcharge = resolveNightSurcharge({ requestedAt: new Date() });
     const normalizedCells = Array.from(cells.values())
       .map((cell) => {
         const center = h3.cellToLatLng(cell.h3Index);
@@ -1051,7 +1059,7 @@ class H3MapService {
           imbalance,
           surplus
         };
-        const surge = buildSurgeDisplay(styleInput, demandLevel, visualPolicy);
+        const surge = buildSurgeDisplay(styleInput, demandLevel, visualPolicy, nightSurcharge.percentage);
 
         return {
           h3Index: cell.h3Index,
@@ -1081,6 +1089,13 @@ class H3MapService {
 
     return {
       resolution,
+      // O adicional noturno vale para a cidade toda: o app mostra um selo, não um hexágono.
+      nightSurcharge: {
+        active: nightSurcharge.applied,
+        percent: nightSurcharge.percentage,
+        startHour: nightSurcharge.windowStartHour,
+        endHour: nightSurcharge.windowEndHour
+      },
       cells: normalizedCells
     };
   }

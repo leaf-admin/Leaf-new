@@ -1,6 +1,12 @@
 const { clamp, normalizeRange } = require('./utils');
 
 const MAX_DEMAND_MARKUP_PERCENT = 40;
+// Um pedido sozinho não é demanda: era o próprio pedido que tocou para o motorista que
+// virava +6% no mapa (1 pedido ÷ 1 motorista). Abaixo deste número a pressão é zero.
+const MIN_DEMAND_REQUESTS = Math.max(
+  1,
+  Number.parseInt(process.env.DEMAND_PRESSURE_MIN_REQUESTS || '3', 10) || 3
+);
 
 const DEMAND_SUPPLY_BREAKPOINTS = [
   { x: 0.8, y: 0 },
@@ -36,7 +42,7 @@ function calculateDemandPressure(input = {}) {
     )
   );
 
-  if (demand <= 0) {
+  if (demand <= 0 || demand < MIN_DEMAND_REQUESTS) {
     return {
       score: 0,
       percent: 0,
@@ -98,6 +104,7 @@ function calculateDemandPressure(input = {}) {
 }
 
 module.exports = {
+  MIN_DEMAND_REQUESTS,
   MAX_DEMAND_MARKUP_PERCENT,
   calculateDemandPressure
 };

@@ -53,6 +53,17 @@ module.exports = function withLeafMaterial(config) {
     if (!queries.intent.some(intent => intent.action?.some(action => action.$?.['android:name'] === 'android.intent.action.TTS_SERVICE'))) {
       queries.intent.push({ action: [{ $: { 'android:name': 'android.intent.action.TTS_SERVICE' } }] });
     }
+    // Waze e Google Maps instalados? (escolha do app de navegação; Android 11+ esconde
+    // os outros apps sem esta consulta).
+    for (const scheme of ['waze', 'google.navigation']) {
+      const declared = queries.intent.some(intent => intent.data?.some(data => data.$?.['android:scheme'] === scheme));
+      if (!declared) {
+        queries.intent.push({
+          action: [{ $: { 'android:name': 'android.intent.action.VIEW' } }],
+          data: [{ $: { 'android:scheme': scheme } }],
+        });
+      }
+    }
     return config;
   });
   config = withDangerousMod(config, ['ios', async config => {

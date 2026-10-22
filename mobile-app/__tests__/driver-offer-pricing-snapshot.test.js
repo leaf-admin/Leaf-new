@@ -1,4 +1,5 @@
 const {
+  getDriverOfferNetPerKmLabel,
   getDriverOfferPayoutLabel,
   hasAuthoritativeDriverOfferPricing,
   mergeDriverOfferEntry,
@@ -188,5 +189,12 @@ describe('driverOfferPricingSnapshot', () => {
         status: 'accepted',
       }),
     );
+  });
+
+  it('shows the net earned per km without the toll pass-through', () => {
+    const offer = { bookingId: 'b1', estimatedDriverNetAmount: 43.87, tollFee: 9.95 };
+    expect(getDriverOfferNetPerKmLabel(offer, 15)).toBe(getDriverOfferPayoutLabel({ estimatedDriverNetAmount: 33.92 / 15 }) + '/km');
+    expect(getDriverOfferNetPerKmLabel(offer, 0)).toBeNull();
+    expect(getDriverOfferNetPerKmLabel({ bookingId: 'b2' }, 10)).toBeNull();
   });
 });

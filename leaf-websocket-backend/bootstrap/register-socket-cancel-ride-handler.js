@@ -1,3 +1,4 @@
+const { notifyPassengerRideStatus } = require('../services/ride-passenger-status-push');
 const { assertRideParticipant } = require('../services/socket-scope-guard');
 const { resolveFinancialContext } = require('../services/financial-runtime-context');
 const {
@@ -628,6 +629,20 @@ function registerSocketCancelRideHandler({
                     if (drvIdToNotify) await fcmService.sendRideStatusUpdate(drvIdToNotify, { ...payloadData, userType: 'driver' });
                 } catch (silentPushError) {
                     logStructured('error', 'Erro ao enviar silent push em cancelRide', { error: silentPushError.message });
+                }
+
+                // Aviso visível ao passageiro. Não avisa quando foi o próprio passageiro que cancelou.
+                const cancelledByPassenger = initiatorType === 'customer' || initiatorType === 'passenger';
+                if (passengerId && !cancelledByPassenger) {
+                    notifyPassengerRideStatus({
+                        redis,
+                        fcmService,
+                        customerId: passengerId,
+                        bookingId,
+                        status: 'cancelled',
+                        bookingData,
+                        sendStatusUpdate: false
+                    }).catch(() => null);
                 }
 
                 // ✅ Também emitir para o passageiro se houver (e for diferente do iniciador)

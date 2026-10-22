@@ -11,6 +11,7 @@ const { logger } = require('../utils/logger');
 const redisPool = require('../utils/redis-pool');
 const connectionMonitor = require('./connection-monitor');
 const websocketRateLimiter = require('../middleware/websocket-rate-limiter');
+const { alertDriverOfflineDuringActiveRide } = require('./ride-health-monitor');
 const {
     closeDriverOnlineSessionAt
 } = require('./driver-online-time-policy-service');
@@ -199,6 +200,17 @@ class ConnectionCleanupService {
                             });
                         } catch (error) {
                             logger.error(`❌ [ConnectionCleanupService] Erro ao fechar tempo online stale do motorista ${driverId}:`, error);
+                        }
+
+                        // Motorista derrubado com corrida em andamento: aviso ao bot Operação (cooldown por corrida).
+                        try {
+                            await alertDriverOfflineDuringActiveRide(this.redis, {
+                                driverId,
+                                lastSignalAtMs: lastHeartbeat,
+                                nowMs: now
+                            });
+                        } catch (error) {
+                            logger.warn(`⚠️ [ConnectionCleanupService] Falha ao avisar corrida ativa com motorista offline: ${error.message}`);
                         }
                     }
 

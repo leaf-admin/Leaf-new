@@ -12,6 +12,7 @@ const {
   getPreferredNavigationApp,
   navigationAppOptions,
   openPreferredDriverNavigation,
+  promptNavigationOnTripStart,
   setAutoNavigationEnabled,
   setPreferredNavigationApp,
 } = require('../src/services/driverNavigationPreference');
@@ -105,5 +106,25 @@ describe('driver navigation preference', () => {
     await setPreferredNavigationApp('waze');
     await openPreferredDriverNavigation({ coordinate: pickup, phase: 'pickup', finalDestinationCoordinate: destination });
     expect(Linking.openURL).toHaveBeenLastCalledWith('https://waze.com/ul?ll=-22.9208,-43.406&navigate=yes');
+  });
+
+  it('marks apps that are not installed in the chooser', async () => {
+    Linking.canOpenURL.mockImplementation(async (url) => url.startsWith('waze'));
+    mockShowLeafChoiceSheet.mockResolvedValueOnce('waze');
+    await choosePreferredNavigationApp();
+    const labels = mockShowLeafChoiceSheet.mock.calls[0][0].options.map((o) => o.label);
+    expect(labels[0]).toBe('Waze');
+    expect(labels[1]).toMatch(/não instalado/);
+  });
+
+  it('asks once on trip start when automatic opening is off', async () => {
+    await setAutoNavigationEnabled(false);
+    await setPreferredNavigationApp('waze');
+    mockShowLeafChoiceSheet.mockResolvedValueOnce('open');
+    expect(await promptNavigationOnTripStart('booking_9')).toBe(true);
+    expect(mockShowLeafChoiceSheet.mock.calls[0][0].options[0].label).toBe('Abrir no Waze');
+    expect(await promptNavigationOnTripStart('booking_9')).toBe(false);
+    await setAutoNavigationEnabled(true);
+    expect(await promptNavigationOnTripStart('booking_10')).toBe(false);
   });
 });
