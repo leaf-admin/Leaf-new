@@ -414,7 +414,7 @@ describe('CancelRideCommand ordering of refund, state commit and post-commit wor
       return { qualifiedCompletedRides: 24 };
     });
     expect((await command.execute()).success).toBe(true);
-    expect(record).toHaveBeenCalledWith(redis, 'driver_1', 'booking_driver_cancel');
+    expect(record).toHaveBeenCalledWith(redis, 'driver_1', 'booking_driver_cancel', 'operational');
     expect(record.mock.invocationCallOrder[0]).toBeLessThan(driverLockManager.releaseLock.mock.invocationCallOrder[0]);
   });
 

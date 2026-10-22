@@ -79,11 +79,17 @@ const ACCEPT_CONTEXT = `
 local introState = nil
 local introContext = nil
 local introSnapshot = nil
+local introKey = KEYS[12]
 local reservationRaw = redis.call('GET', offerReservationKey)
 local reservation = reservationRaw and cjson.decode(reservationRaw) or {}
 if reservation.driverIntroFee then
   introContext = reservation.driverIntroFee
-  local stateRaw = redis.call('GET', KEYS[12])
+  -- KEYS[12] is the operational counter, KEYS[13] the sandbox (QA) one.
+  local introNamespace = introContext.namespace or 'operational'
+  local bookingSandbox = redis.call('HGET', bookingKey, 'financialNamespace') == 'sandbox'
+  if (introNamespace == 'sandbox') ~= bookingSandbox then return 'ERR_INTRO_FEE_STALE_OFFER' end
+  if introNamespace == 'sandbox' then introKey = KEYS[13] end
+  local stateRaw = redis.call('GET', introKey)
   if not stateRaw then return 'ERR_INTRO_FEE_STATE' end
   introState = cjson.decode(stateRaw)
   if redis.call('GET', datasetGenerationKey) ~= introState.generation or redis.call('TTL', datasetGenerationKey) ~= -1 then return 'ERR_INTRO_FEE_STATE' end
@@ -107,7 +113,7 @@ if introContext then
   introState.inflightBookingId = bookingId
   local encoded = cjson.encode(introState)
   encoded = string.gsub(encoded, '"completedBookingIds":{}', '"completedBookingIds":[]')
-  redis.call('SET', KEYS[12], encoded)
+  redis.call('SET', introKey, encoded)
   redis.call('HSET', bookingKey, 'driverIntroFee', cjson.encode(introContext),
     'estimatedOperationalFee', tostring(introSnapshot.estimatedOperationalFee),
     'estimatedPaymentIntermediationFee', tostring(introSnapshot.estimatedPaymentIntermediationFee),

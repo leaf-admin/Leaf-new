@@ -23,11 +23,14 @@ const runtime = {
 const documents = new Map();
 const io = { reads: 0, writes: 0, fail: false, afterRead: null };
 let transactionQueue = Promise.resolve();
-const snapshot = driverId => ({ exists: documents.has(driverId), data: () => structuredClone(documents.get(driverId)) });
+// Documents are keyed by collection, so sandbox and operational never collide.
+const snapshot = docKey => ({ exists: documents.has(docKey), data: () => structuredClone(documents.get(docKey)) });
+const storedDoc = (driverId, collection = 'driver_intro_fee_states') => documents.get(`${collection}|${driverId}`);
 const firestore = {
-  collection: () => ({ doc: id => {
+  collection: collection => ({ doc: id => {
     const driverId = decodeURIComponent(id.split('__')[1]);
-    return { driverId, get: async () => { io.reads++; return snapshot(driverId); } };
+    const docKey = `${collection}|${driverId}`;
+    return { driverId: docKey, get: async () => { io.reads++; return snapshot(docKey); } };
   } }),
   runTransaction(callback) {
     const task = transactionQueue.then(async () => {
@@ -78,7 +81,7 @@ return 'OK'
 
 async function seed(count = 24, driverId = 'driver-1') {
   const state = { ...buildSeedState({ driverId, qualifiedCompletedRides: count, historySnapshotId: 'synthetic-history', historyThrough: cutoff }), approvedGeneration: generation };
-  documents.set(driverId, state);
+  documents.set(`driver_intro_fee_states|${driverId}`, state);
   await redis.set(generationKey, generation);
   const context = await service.resolveOfferContext(redis, driverId, {});
   return context;
@@ -91,12 +94,13 @@ async function accept(bookingId, { driverId = 'driver-1', context } = {}) {
     estimatedOperationalFee: fee.eligible ? 0.99 : 1.49, estimatedPaymentIntermediationFee: 0.24,
     estimatedTotalFees: fee.eligible ? 1.23 : 1.73, estimatedDriverNetAmount: fee.eligible ? 28.77 : 28.27
   } }));
-  const keys = Array.from({ length: 12 }, (_, i) => `unused:${i}`);
+  const keys = Array.from({ length: 13 }, (_, i) => `unused:${i}`);
   keys[0] = `booking:${bookingId}`;
   keys[7] = generationKey;
   keys[8] = reservation;
   keys[11] = keyForDriver(driverId);
-  return redis.eval(acceptScript, 12, ...keys, driverId, 'ACCEPTED', '', '', bookingId, '', '', '', '', '', runtime.DRIVER_INTRO_FEE_ENABLED === 'true' ? '1' : '0');
+  keys[12] = keyForDriver(driverId, 'sandbox');
+  return redis.eval(acceptScript, 13, ...keys, driverId, 'ACCEPTED', '', '', bookingId, '', '', '', '', '', runtime.DRIVER_INTRO_FEE_ENABLED === 'true' ? '1' : '0');
 }
 
 async function terminal(bookingId, outcome = { qualified: true }, status = 'COMPLETED') {
@@ -109,7 +113,8 @@ async function check(name, callback) {
   documents.clear();
   Object.assign(io, { reads: 0, writes: 0, fail: false, afterRead: null });
   runtime.DRIVER_INTRO_FEE_ENABLED = 'true';
-  service.checkpointCursor = '0';
+  service.checkpointCursors = { operational: '0', sandbox: '0' };
+  service.getAuth = () => ({ getUser: async () => { throw new Error('auth not stubbed'); } });
   await callback();
   results.push(name);
 }
@@ -135,7 +140,7 @@ async function main() {
     assert.equal(io.writes, 0);
     assert.equal(await redis.hlen(CHECKPOINTS_KEY), 1);
     assert.deepEqual(await service.flushPendingCheckpoints(redis), { processed: 1, failed: 0 });
-    assert.equal(documents.get('driver-1').qualifiedCompletedRides, 25);
+    assert.equal(storedDoc('driver-1').qualifiedCompletedRides, 25);
     assert.equal(await redis.hlen(CHECKPOINTS_KEY), 0);
     assert.equal(io.writes, 1);
     assert.equal(await accept('later'), 'OK');
@@ -179,16 +184,39 @@ async function main() {
     await seed();
     await accept('handover');
     await redis.hset('booking:handover', 'state', 'SEARCHING');
-    const keys = Array.from({ length: 12 }, (_, i) => `unused:${i}`);
+    const keys = Array.from({ length: 13 }, (_, i) => `unused:${i}`);
     keys[0] = 'booking:handover';
     keys[7] = generationKey;
     keys[8] = 'offer_reservation:handover:driver-2';
     keys[11] = keyForDriver('driver-2');
+    keys[12] = keyForDriver('driver-2', 'sandbox');
     await redis.set(keys[8], JSON.stringify({ status: 'AWAITING_RESPONSE' }));
     await redis.hset('booking:handover', 'financialNamespace', 'sandbox');
-    assert.equal(await redis.eval(acceptScript, 12, ...keys, 'driver-2', 'ACCEPTED', '', '', 'handover', '', '', '', '', '', '1'), 'OK');
+    assert.equal(await redis.eval(acceptScript, 13, ...keys, 'driver-2', 'ACCEPTED', '', '', 'handover', '', '', '', '', '', '1'), 'OK');
     assert.equal(await redis.hget('booking:handover', 'driverIntroFee'), null);
     assert.equal(await redis.hget('booking:handover', 'driverId'), 'driver-2');
+  });
+  await check('sandbox (QA) rides use their own counter and collection; operational stays untouched', async () => {
+    const operational = await seed(24);
+    const { sealFinancialContext } = require('../../services/financial-runtime-context');
+    const sandboxBooking = { financialContext: JSON.stringify(sealFinancialContext({ providerEnvironment: 'sandbox' })) };
+    service.getAuth = () => ({ getUser: async () => ({ metadata: { creationTime: cutoff } }) });
+    const context = await service.resolveOfferContext(redis, 'driver-1', sandboxBooking);
+    assert.equal(context.namespace, 'sandbox');
+    assert.equal(context.qualifiedCompletedRides, 0);
+    await redis.hset('booking:qa-ride', 'financialNamespace', 'sandbox', 'financialContext', sandboxBooking.financialContext);
+    assert.equal(await accept('qa-ride', { context }), 'OK');
+    await redis.hset('booking:qa-ride', 'status', 'COMPLETED', 'state', 'COMPLETED', 'driverIntroFeeCompletion', JSON.stringify({ qualified: true }));
+    const after = await service.recordCompletion(redis, 'driver-1', 'qa-ride', 'sandbox');
+    assert.equal(after.qualifiedCompletedRides, 1);
+    assert.equal(JSON.parse(await redis.get(keyForDriver('driver-1'))).qualifiedCompletedRides, 24);
+    assert.equal(await redis.hlen(CHECKPOINTS_KEY), 0);
+    await service.flushPendingCheckpoints(redis);
+    assert.equal(storedDoc('driver-1', 'sandbox_driver_intro_fee_states').qualifiedCompletedRides, 1);
+    assert.equal(storedDoc('driver-1').qualifiedCompletedRides, 24);
+    // An operational offer cannot be accepted on a sandbox booking, and vice versa.
+    await redis.hset('booking:mixed', 'financialNamespace', 'sandbox');
+    assert.equal(await accept('mixed', { context: operational }), 'ERR_INTRO_FEE_STALE_OFFER');
   });
   await check('terminal-state crash is repaired before the next offer; active ride stays reserved', async () => {
     await seed();
@@ -205,7 +233,7 @@ async function main() {
     assert.equal(state.qualifiedCompletedRides, 24);
     await assert.rejects(service.resolveOfferContext(redis, 'driver-1', {}), { code: 'DRIVER_INTRO_FEE_HISTORY_REVIEW_REQUIRED' });
     await service.flushPendingCheckpoints(redis);
-    assert.equal(documents.get('driver-1').reviewRequiredBookingId, 'unverified');
+    assert.equal(storedDoc('driver-1').reviewRequiredBookingId, 'unverified');
   });
   await check('Firestore outage keeps a retryable checkpoint; a retry cannot decrement the count', async () => {
     await seed();
@@ -216,7 +244,7 @@ async function main() {
     assert.equal(await redis.hlen(CHECKPOINTS_KEY), 1);
     io.fail = false;
     await service.flushPendingCheckpoints(redis);
-    assert.equal(documents.get('driver-1').qualifiedCompletedRides, 25);
+    assert.equal(storedDoc('driver-1').qualifiedCompletedRides, 25);
   });
   await check('checkpoint acknowledgement cannot erase a newer concurrent completion', async () => {
     await seed(23);
@@ -224,10 +252,10 @@ async function main() {
     await terminal('first');
     io.afterRead = async () => { await accept('second'); await terminal('second'); };
     await service.flushPendingCheckpoints(redis);
-    assert.equal(documents.get('driver-1').qualifiedCompletedRides, 24);
+    assert.equal(storedDoc('driver-1').qualifiedCompletedRides, 24);
     assert.equal(await redis.hlen(CHECKPOINTS_KEY), 1);
     await service.flushPendingCheckpoints(redis);
-    assert.equal(documents.get('driver-1').qualifiedCompletedRides, 25);
+    assert.equal(storedDoc('driver-1').qualifiedCompletedRides, 25);
     assert.equal(await redis.hlen(CHECKPOINTS_KEY), 0);
   });
   await check('counter loss restores a pending snapshot but never an older durable count', async () => {
@@ -256,7 +284,7 @@ async function main() {
     await service.flushPendingCheckpoints(redis);
     const stored = JSON.parse(await redis.hget('booking:accepted-before-rollback', 'driverIntroFee'));
     assert.equal(stored.operationalFeeCents, 99);
-    assert.equal(documents.get('driver-1').qualifiedCompletedRides, 25);
+    assert.equal(storedDoc('driver-1').qualifiedCompletedRides, 25);
   });
   console.log(JSON.stringify({ ok: true, cases: results.length, storage: 'private local Redis', firestore: 'in-memory transaction adapter', results }, null, 2));
 }

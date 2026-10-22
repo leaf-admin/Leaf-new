@@ -242,7 +242,7 @@ describe('EndRideEarlyByRiderCommand -> billing worker', () => {
     const result = await endEarly();
     expect(result.success).toBe(true);
     expect(result.data.financialSnapshot).toMatchObject({ passengerPaidCents: 6000, operationalFeeCents: 99, driverIntroFee: context });
-    expect(record).toHaveBeenCalledWith(mockRedis, 'driver_1', 'booking_1');
+    expect(record).toHaveBeenCalledWith(mockRedis, 'driver_1', 'booking_1', 'operational');
     await mockListeners[EVENT_TYPES.RIDE_COMPLETED]({ eventId: 'event_intro_early', eventType: EVENT_TYPES.RIDE_COMPLETED, data: result.data.event });
     expect(mockProcessNetDistribution).toHaveBeenCalledWith(expect.objectContaining({ driverId: 'driver_1', totalAmount: 6000,
       financialSnapshot: expect.objectContaining({ operationalFeeCents: 99, driverIntroFee: context }) }));

@@ -1,4 +1,4 @@
-const { DRIVER_INTRO_FEE_POLICY, buildDriverIntroFeeContext } = require('./driver-intro-fee-policy');
+const { DRIVER_INTRO_FEE_POLICY, DRIVER_INTRO_FEE_NAMESPACES, buildDriverIntroFeeContext } = require('./driver-intro-fee-policy');
 
 function fail(code) {
   const error = new Error(code);
@@ -15,7 +15,7 @@ function parseObject(value) {
 
 function normalizeState(value) {
   const state = parseObject(value);
-  if (!state || state.version !== 1 || state.policyId !== DRIVER_INTRO_FEE_POLICY.policyId || state.namespace !== 'operational') {
+  if (!state || state.version !== 1 || state.policyId !== DRIVER_INTRO_FEE_POLICY.policyId || !DRIVER_INTRO_FEE_NAMESPACES.includes(state.namespace)) {
     fail('DRIVER_INTRO_FEE_INVALID_STATE');
   }
   const ids = state.completedBookingIds;
@@ -30,11 +30,11 @@ function normalizeState(value) {
   return { ...state, ...context, completedBookingIds: [...ids] };
 }
 
-function buildSeedState({ driverId, qualifiedCompletedRides, historySnapshotId, historyThrough }) {
-  const context = buildDriverIntroFeeContext({ driverId, qualifiedCompletedRides, historySnapshotId, historyVerified: true });
+function buildSeedState({ driverId, qualifiedCompletedRides, historySnapshotId, historyThrough, namespace = 'operational' }) {
+  const context = buildDriverIntroFeeContext({ driverId, qualifiedCompletedRides, historySnapshotId, historyVerified: true, namespace });
   return normalizeState({
     ...context,
-    namespace: 'operational',
+    namespace,
     qualifiedCompletedRides: Math.min(25, qualifiedCompletedRides),
     baselineCount: Math.min(25, qualifiedCompletedRides),
     completedBookingIds: [],
@@ -47,7 +47,7 @@ function mergeCheckpoint(stored, incoming) {
   const next = normalizeState(incoming);
   const previous = normalizeState(stored);
   if (
-    previous.driverId !== next.driverId || previous.historySnapshotId !== next.historySnapshotId ||
+    previous.driverId !== next.driverId || previous.namespace !== next.namespace || previous.historySnapshotId !== next.historySnapshotId ||
     previous.historyThrough !== next.historyThrough || previous.baselineCount !== next.baselineCount ||
     previous.approvedGeneration !== next.approvedGeneration
   ) fail('DRIVER_INTRO_FEE_CHECKPOINT_CONFLICT');

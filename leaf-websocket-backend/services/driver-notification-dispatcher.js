@@ -1300,11 +1300,20 @@ class DriverNotificationDispatcher {
             try {
                 driverIntroFee = await driverIntroFeeService.resolveOfferContext(this.redis, driverId, effectiveBookingData);
             } catch (error) {
-                await releaseManagedOfferLock();
-                logStructured('warn', 'Oferta aguardando estado financeiro promocional verificável', {
+                // QA (sandbox) rides keep flowing without the promo; operational
+                // offers wait for a verifiable counter instead of guessing the fee.
+                let sandboxRide = false;
+                try { sandboxRide = driverIntroFeeService.bookingNamespace(effectiveBookingData) === 'sandbox'; } catch (_) {}
+                logStructured('warn', sandboxRide
+                    ? 'Oferta sandbox segue sem tarifa promocional: estado indisponível'
+                    : 'Oferta aguardando estado financeiro promocional verificável', {
                     service: 'driver-intro-fee', bookingId, driverId, code: error.code || 'HISTORY_UNAVAILABLE'
                 });
-                return finish(false, error.code || 'DRIVER_INTRO_FEE_UNAVAILABLE');
+                if (!sandboxRide) {
+                    await releaseManagedOfferLock();
+                    return finish(false, error.code || 'DRIVER_INTRO_FEE_UNAVAILABLE');
+                }
+                driverIntroFee = null;
             }
             const estimatedSnapshot = resolveEstimatedFareSnapshot({
                 // Passenger quote has no driver; calculate this offer with the
