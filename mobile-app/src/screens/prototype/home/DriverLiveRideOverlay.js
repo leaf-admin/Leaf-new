@@ -43,6 +43,7 @@ import {
 } from "../../../components/prototype/RobotaxiLifecycleUI";
 import SecurePaymentBadge from "../../../components/payment/SecurePaymentBadge";
 import {
+  getDriverOfferNetPerKmLabel,
   getDriverOfferPayoutLabel,
   selectDisplayableDriverOffer,
 } from "../driverOfferPricingSnapshot";
@@ -697,6 +698,7 @@ function DriverLiveRideOverlay({
     offer?.durationMinutes,
   );
   const distanceLabel = formatDistanceKm(offerTripDistanceKm);
+  const offerPerKmLabel = hasActiveRide ? null : getDriverOfferNetPerKmLabel(offer, offerTripDistanceKm);
   const offerPickupEtaLabel =
     resolveFirstUsableLabel(
       formatDurationMinutes(
@@ -1627,6 +1629,11 @@ function DriverLiveRideOverlay({
               <View style={styles.offerFareRow}>
                 <Text style={styles.offerFareValue} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}>{fareLabel}</Text>
                 <Text style={styles.offerFareLabel}>Líquido</Text>
+                {offerPerKmLabel ? (
+                  <View style={styles.offerPerKmPill} testID="driver-live-offer-per-km">
+                    <Text style={styles.offerPerKmText} numberOfLines={1}>{offerPerKmLabel}</Text>
+                  </View>
+                ) : null}
               </View>
               {offerFareSignal.aboveNormal ? (
                 <View
@@ -2174,6 +2181,16 @@ const styles = StyleSheet.create({
     flexShrink: 1,
   },
   offerFareLabel: { ...leafTypography.medium, fontSize: 15, color: '#6A6A6A' },
+  offerPerKmPill: {
+    marginLeft: "auto",
+    alignSelf: "center",
+    paddingHorizontal: 10,
+    minHeight: 26,
+    justifyContent: "center",
+    borderRadius: 13,
+    backgroundColor: "#EEF4EA",
+  },
+  offerPerKmText: { ...leafTypography.semiBold, fontSize: 14, color: "#1A330E", fontVariant: ["tabular-nums"] },
   offerTollPill: {
     alignSelf: "flex-start",
     flexDirection: "row",
