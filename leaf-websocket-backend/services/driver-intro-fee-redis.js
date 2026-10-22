@@ -32,8 +32,11 @@ if state.inflightBookingId and state.inflightBookingId ~= bookingId then return 
 local owner = redis.call('HGET', KEYS[3], 'driverId')
 if owner ~= ARGV[2] then return 'ERR_BOOKING_OWNER' end
 local status = string.upper(redis.call('HGET', KEYS[3], 'status') or redis.call('HGET', KEYS[3], 'state') or '')
-local complete = status == 'COMPLETED' or status == 'COMPLETE'
-local excluded = status == 'CANCELED' or status == 'CANCELLED' or string.find(status, 'EARLY') or string.find(status, 'INTERRUPTED')
+-- Mirrors RideStateManager.TERMINAL_STATE_ALIASES: any other terminal state
+-- releases the slot without counting it.
+local complete = status == 'COMPLETED' or status == 'COMPLETE' or status == 'TRIP_COMPLETED'
+local excluded = string.find(status, 'CANCEL') or string.find(status, 'EARLY') or string.find(status, 'INTERRUPTED')
+  or status == 'REJECTED' or status == 'EXPIRED' or status == 'SUPERSEDED' or string.find(status, '^NO_DRIVERS')
 if not complete and not excluded then return 'ERR_RIDE_ACTIVE' end
 local contextRaw = redis.call('HGET', KEYS[3], 'driverIntroFee')
 if not contextRaw then return 'ERR_CONTEXT_MISSING' end
@@ -47,7 +50,8 @@ if complete and state.qualifiedCompletedRides < 25 then
     table.insert(ids, bookingId)
     state.qualifiedCompletedRides = math.min(25, state.baselineCount + #ids)
     changed = true
-  elseif outcome.reviewRequired == true or outcome.qualified ~= false then
+  elseif (outcome.reviewRequired == true or outcome.qualified ~= false) and not state.reviewRequiredBookingId then
+    -- Keep the first pending review, as the Firestore checkpoint merge does.
     state.reviewRequiredBookingId = bookingId
     changed = true
   end
@@ -109,6 +113,9 @@ if introContext then
     'estimatedPaymentIntermediationFee', tostring(introSnapshot.estimatedPaymentIntermediationFee),
     'estimatedTotalFees', tostring(introSnapshot.estimatedTotalFees),
     'estimatedDriverNetAmount', tostring(introSnapshot.estimatedDriverNetAmount))
+else
+  -- A previous driver's context must not follow the booking to a new owner.
+  redis.call('HDEL', bookingKey, 'driverIntroFee', 'driverIntroFeeCompletion')
 end
 `;
 

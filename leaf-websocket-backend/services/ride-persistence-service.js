@@ -599,7 +599,14 @@ class RidePersistenceService {
                 retried += 1;
             }
 
-            const checkpointStats = await require('./driver-intro-fee-service').flushPendingCheckpoints(redis, limit);
+            // A checkpoint failure must not discard the outbox stats above.
+            let checkpointStats = { processed: 0, failed: 0 };
+            try {
+                checkpointStats = await require('./driver-intro-fee-service').flushPendingCheckpoints(redis, limit);
+            } catch (checkpointError) {
+                logger.error(`❌ Erro ao persistir checkpoints da tarifa promocional: ${checkpointError.message}`);
+                checkpointStats = { processed: 0, failed: 1 };
+            }
             return {
                 processed, retried, failed,
                 ...(checkpointStats.processed || checkpointStats.failed ? { driverIntroFeeCheckpoints: checkpointStats } : {})

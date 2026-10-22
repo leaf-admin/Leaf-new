@@ -512,7 +512,19 @@ class PaymentServiceDistributionMethods {
         }
         netCalculation = snapshotResult.calculation;
       } else {
-        netCalculation = this.calculateNetAmount(rideData.totalAmount, rideData.tollFee || 0);
+        // Legacy path without a final snapshot: settle with the accepted intro
+        // fee context so settlement matches the offer and the receipt.
+        let driverIntroFee = null;
+        try {
+          driverIntroFee = require('../driver-intro-fee-service').acceptedContext(rideData);
+        } catch (error) {
+          return {
+            success: false,
+            error: 'Contexto da tarifa promocional inválido para liquidação',
+            code: error.code || 'DRIVER_INTRO_FEE_CONTEXT_INVALID'
+          };
+        }
+        netCalculation = this.calculateNetAmount(rideData.totalAmount, rideData.tollFee || 0, 0, { driverIntroFee });
       }
 
       if (netCalculation.netAmount <= 0) {

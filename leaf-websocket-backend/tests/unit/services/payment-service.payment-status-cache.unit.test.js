@@ -1893,6 +1893,54 @@ describe('PaymentService financial rules', () => {
     });
   });
 
+  it('settles a legacy ride without final snapshot with the accepted intro fee', async () => {
+    const { buildDriverIntroFeeContext } = require('../../../services/driver-intro-fee-policy');
+    const firestore = createInMemoryFirestore();
+    firebaseConfig.getFirestore.mockReturnValue(firestore);
+    const service = new PaymentService();
+    const calculateNetAmount = jest.spyOn(service, 'calculateNetAmount');
+    const driverIntroFee = buildDriverIntroFeeContext({
+      driverId: 'driver_intro_legacy',
+      qualifiedCompletedRides: 3,
+      historyVerified: true,
+      historySnapshotId: 'verified-history'
+    });
+
+    const result = await service.processNetDistribution({
+      rideId: 'booking_intro_legacy',
+      driverId: 'driver_intro_legacy',
+      totalAmount: 800,
+      tollFee: 0,
+      driverIntroFee: JSON.stringify(driverIntroFee)
+    });
+
+    expect(calculateNetAmount).toHaveBeenCalledWith(800, 0, 0, { driverIntroFee });
+    expect(result).toMatchObject({ success: true, retainedFees: { operationalFee: 99 } });
+  });
+
+  it('rejects legacy settlement when the stored intro fee belongs to another driver', async () => {
+    const { buildDriverIntroFeeContext } = require('../../../services/driver-intro-fee-policy');
+    const firestore = createInMemoryFirestore();
+    firebaseConfig.getFirestore.mockReturnValue(firestore);
+    const service = new PaymentService();
+    const driverIntroFee = buildDriverIntroFeeContext({
+      driverId: 'driver_previous',
+      qualifiedCompletedRides: 3,
+      historyVerified: true,
+      historySnapshotId: 'verified-history'
+    });
+
+    const result = await service.processNetDistribution({
+      rideId: 'booking_intro_mismatch',
+      driverId: 'driver_current',
+      totalAmount: 800,
+      tollFee: 0,
+      driverIntroFee: JSON.stringify(driverIntroFee)
+    });
+
+    expect(result).toMatchObject({ success: false, code: 'DRIVER_INTRO_FEE_DRIVER_MISMATCH' });
+  });
+
   it('refunds the unused part once and credits the settled net when a ride is settled below the prepaid amount', async () => {
     const firestore = createInMemoryFirestore();
     firebaseConfig.getFirestore.mockReturnValue(firestore);

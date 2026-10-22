@@ -165,6 +165,31 @@ async function main() {
     assert.equal(await redis.hlen(CHECKPOINTS_KEY), 0);
     assert.equal((await service.resolveOfferContext(redis, 'driver-1', {})).eligible, true);
   });
+  await check('other terminal aliases release or count the slot like RideStateManager', async () => {
+    await seed(0);
+    for (const status of ['TRIP_CANCELED', 'SUPERSEDED', 'EXPIRED']) {
+      await accept(`alias-${status}`);
+      assert.equal((await terminal(`alias-${status}`, { qualified: false }, status)).qualifiedCompletedRides, 0);
+    }
+    await accept('alias-trip-completed');
+    assert.equal((await terminal('alias-trip-completed', { qualified: true }, 'TRIP_COMPLETED')).qualifiedCompletedRides, 1);
+    assert.equal((await service.resolveOfferContext(redis, 'driver-1', {})).eligible, true);
+  });
+  await check('a new owner without context clears the previous driver context', async () => {
+    await seed();
+    await accept('handover');
+    await redis.hset('booking:handover', 'state', 'SEARCHING');
+    const keys = Array.from({ length: 12 }, (_, i) => `unused:${i}`);
+    keys[0] = 'booking:handover';
+    keys[7] = generationKey;
+    keys[8] = 'offer_reservation:handover:driver-2';
+    keys[11] = keyForDriver('driver-2');
+    await redis.set(keys[8], JSON.stringify({ status: 'AWAITING_RESPONSE' }));
+    await redis.hset('booking:handover', 'financialNamespace', 'sandbox');
+    assert.equal(await redis.eval(acceptScript, 12, ...keys, 'driver-2', 'ACCEPTED', '', '', 'handover', '', '', '', '', '', '1'), 'OK');
+    assert.equal(await redis.hget('booking:handover', 'driverIntroFee'), null);
+    assert.equal(await redis.hget('booking:handover', 'driverId'), 'driver-2');
+  });
   await check('terminal-state crash is repaired before the next offer; active ride stays reserved', async () => {
     await seed();
     await accept('crashed');
