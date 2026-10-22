@@ -218,6 +218,22 @@ async function main() {
     await redis.hset('booking:mixed', 'financialNamespace', 'sandbox');
     assert.equal(await accept('mixed', { context: operational }), 'ERR_INTRO_FEE_STALE_OFFER');
   });
+  await check('a ride that lost its driver (back to dispatch or expired) releases the slot without counting', async () => {
+    await seed(24);
+    await accept('lost-owner');
+    // Disconnect before start: the booking goes back to SEARCHING without a driver.
+    await redis.hdel('booking:lost-owner', 'driverId');
+    await redis.hset('booking:lost-owner', 'state', 'SEARCHING', 'status', 'SEARCHING');
+    const context = await service.resolveOfferContext(redis, 'driver-1', {});
+    assert.equal(context.eligible, true);
+    assert.equal(context.qualifiedCompletedRides, 24);
+    assert.equal(JSON.parse(await redis.get(keyForDriver('driver-1'))).inflightBookingId, undefined);
+    assert.equal(await redis.hlen(CHECKPOINTS_KEY), 0);
+    // Expired booking hash: same release.
+    assert.equal(await accept('expired'), 'OK');
+    await redis.del('booking:expired');
+    assert.equal((await service.resolveOfferContext(redis, 'driver-1', {})).qualifiedCompletedRides, 24);
+  });
   await check('terminal-state crash is repaired before the next offer; active ride stays reserved', async () => {
     await seed();
     await accept('crashed');
