@@ -237,7 +237,9 @@ class BackgroundLocationService {
 
             // Iniciar tracking de localização
             await Location.startLocationUpdatesAsync(LOCATION_TASK_NAME, {
-                accuracy: Location.Accuracy.Balanced,
+                // High: com Balanced o Android (FLP) só entregava posição a cada 30-60 s com o
+                // Leaf em segundo plano, mesmo pedindo 2 s (QA de 2026-10-22, HyperOS 2).
+                accuracy: Location.Accuracy.High,
                 timeInterval: BACKGROUND_LOCATION_TIME_INTERVAL_MS,
                 distanceInterval: BACKGROUND_LOCATION_DISTANCE_INTERVAL_M,
                 foregroundService: {

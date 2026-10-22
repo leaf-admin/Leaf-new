@@ -14,6 +14,14 @@
           "react-native-masked-text"
         ]
       }
+    },
+    "autolinking": {
+      "android": {
+        "buildFromSource": [
+          "expo-task-manager",
+          "unimodules-app-loader"
+        ]
+      }
     }
   },
   "scripts": {
