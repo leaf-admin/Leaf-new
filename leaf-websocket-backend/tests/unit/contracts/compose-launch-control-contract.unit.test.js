@@ -537,7 +537,10 @@ describe('production compose launch-control contract', () => {
     // Zero downtime: each gateway leaves nginx before it is recreated and comes back after.
     const rollStart = deploySource.indexOf('roll_gateway() {');
     const takeOut = deploySource.indexOf('write_upstream \\"\\$service\\"', rollStart);
-    const recreate = deploySource.indexOf('\\$compose up -d --no-deps \\"\\$service\\"', rollStart);
+    const recreate = deploySource.indexOf(
+      '\\$compose up -d --no-deps $GATEWAY_RECREATE_FLAG \\"\\$service\\"',
+      rollStart,
+    );
     const putBack = deploySource.indexOf("write_upstream ''", recreate);
     expect(rollStart).toBeGreaterThan(-1);
     expect(takeOut).toBeGreaterThan(rollStart);
@@ -545,6 +548,10 @@ describe('production compose launch-control contract', () => {
     expect(putBack).toBeGreaterThan(recreate);
     expect(deploySource).toContain('ALLOW_DEPLOY_WITH_ACTIVE_RIDES');
     expect(deploySource.indexOf('active_rides()')).toBeLessThan(rollStart);
+    // Same-image rollouts must still restart the gateways (2026-10-22 mid-ride drill):
+    // a gateway-only deploy forces the recreate unless FORCE_GATEWAY_RECREATE=false.
+    expect(deploySource).toContain('FORCE_GATEWAY_RECREATE="${FORCE_GATEWAY_RECREATE:-$GATEWAY_ONLY_DEPLOY}"');
+    expect(deploySource).toContain('[[ "$FORCE_GATEWAY_RECREATE" == "true" ]] && GATEWAY_RECREATE_FLAG="--force-recreate"');
     expect(deploySource).toContain(
       'wait_healthy trip-location-worker leaf-trip-location-worker',
     );
