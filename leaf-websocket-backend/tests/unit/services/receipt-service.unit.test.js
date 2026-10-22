@@ -39,6 +39,17 @@ describe('ReceiptService financial snapshot', () => {
     return service;
   };
 
+  it('uses the frozen promotional context in a receipt with a legacy driver field', () => {
+    const { buildDriverIntroFeeContext } = require('../../../services/driver-intro-fee-policy');
+    const driverIntroFee = buildDriverIntroFeeContext({ driverId: 'driver_1', qualifiedCompletedRides: 24, historyVerified: true, historySnapshotId: 'synthetic-history' });
+    const service = createReceiptService();
+    const financial = service.calculateFinancialBreakdown({ driver: 'driver_1', finalFare: 85, finalPrice: 85, tollFee: 15, financialSnapshot: { driverIntroFee } });
+    expect(financial.totalPaid.amount).toBe(85);
+    expect(financial.breakdown.operationalCost.amount).toBe(0.99);
+    expect(financial.breakdown.wooviFee.amount).toBe(0.68);
+    expect(financial.breakdown.driverAmount.amount).toBe(83.33);
+  });
+
   it('preserves the final backend fee breakdown instead of recalculating it', () => {
     const service = createReceiptService();
     service.paymentService.calculateFareBreakdownFromReais = jest.fn(() => ({

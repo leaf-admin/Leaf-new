@@ -31,6 +31,7 @@ const tripLocationPersistenceService = require('../services/trip-location-persis
 const pricingH3ReadModelService = require('../services/pricing-h3-read-model-service');
 const { resolveFinancialContext } = require('../services/financial-runtime-context');
 const { recordPendingCancellationCredit } = require('../services/cancellation-credit-pending-service');
+const driverIntroFeeService = require('../services/driver-intro-fee-service');
 
 const PASSENGER_CANCEL_FIXED_FEE_CENTS = Math.max(
     0,
@@ -303,15 +304,6 @@ class CancelRideCommand extends Command {
 
                 // Parsear dados da corrida
 
-                // Liberar lock de motorista se houver
-                if (driverId) {
-                    const lockStatus = await driverLockManager.isDriverLocked(driverId);
-                    if (lockStatus.isLocked && lockStatus.bookingId === this.bookingId) {
-                        await driverLockManager.releaseLock(driverId, this.bookingId);
-                        logger.info(`🔓 [CancelRideCommand] Lock de motorista ${driverId} liberado.`);
-                    }
-                }
-
                 const paymentService = new PaymentService();
 
                 // ✅ Regra de negócio (passageiro):
@@ -528,6 +520,15 @@ class CancelRideCommand extends Command {
                     cancellationFee: String(this.cancellationFee),
                     cancelledAt: new Date().toISOString()
                 });
+
+                await driverIntroFeeService.recordTerminalBooking(redis, this.bookingId, bookingData);
+                if (driverId) {
+                    const lockStatus = await driverLockManager.isDriverLocked(driverId);
+                    if (lockStatus.isLocked && lockStatus.bookingId === this.bookingId) {
+                        await driverLockManager.releaseLock(driverId, this.bookingId);
+                        logger.info(`🔓 [CancelRideCommand] Lock de motorista ${driverId} liberado.`);
+                    }
+                }
 
                 if (customerId) {
                     const customerActiveBookingKey = `customer_active_booking:${customerId}`;

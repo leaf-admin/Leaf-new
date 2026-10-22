@@ -23,6 +23,8 @@ const driverEligibilityService = require('../services/driver-eligibility-service
 const { logger, logStructured } = require('../utils/logger');
 const eventSourcing = require('../services/event-sourcing');
 const redisCriticalAuthorityService = require('../services/redis-critical-authority-service');
+const driverIntroFeeService = require('../services/driver-intro-fee-service');
+const { ACCEPT_CONTEXT, PERSIST_ACCEPTED_CONTEXT } = require('../services/driver-intro-fee-redis');
 const traceContext = require('../utils/trace-context');
 const { metrics } = require('../utils/prometheus-metrics');
 const { validateAndEnsureTraceIdInCommand } = require('../utils/trace-validator');
@@ -603,6 +605,8 @@ class AcceptRideCommand extends Command {
                         return 'ERR_INVALID_STATE_' .. (currentStateUpper ~= '' and currentStateUpper or 'NULL')
                     end
 
+                    ${ACCEPT_CONTEXT}
+
                     -- Realiza o update atômico
                     redis.call('HMSET', bookingKey, 
                         'state', newState, 
@@ -613,6 +617,7 @@ class AcceptRideCommand extends Command {
                         'updatedAt', updatedAt, 
                         'acceptedAt', updatedAt
                     )
+                    ${PERSIST_ACCEPTED_CONTEXT}
 
                     -- Retorna dados complementares concatenados (customerId|||pickupLocation)
                     local customerId = redis.call('HGET', bookingKey, 'customerId')
@@ -627,7 +632,7 @@ class AcceptRideCommand extends Command {
                 if (!redisResult) {
                     redisResult = await redis.eval(
                         luaScript,
-                        11,
+                        12,
                         bookingKey,
                         activeTripKey(this.driverId),
                         activeTripCustomerKey(this.driverId),
@@ -639,6 +644,7 @@ class AcceptRideCommand extends Command {
                         getOfferReservationKey(this.bookingId, this.driverId),
                         activeNotificationKey,
                         `driver_lock:${this.driverId}`,
+                        driverIntroFeeService.keyForDriver(this.driverId),
                         this.driverId,
                         newState,
                         updatedAt,
@@ -648,7 +654,8 @@ class AcceptRideCommand extends Command {
                         requiredDatasetGeneration,
                         newOwnershipAuthorityAuthorized ? '1' : '0',
                         criticalAuthorityMode === 'redis_noeviction' ? '1' : '0',
-                        String(acceptedRideLockTtlSeconds)
+                        String(acceptedRideLockTtlSeconds),
+                        driverIntroFeeService.enabled() ? '1' : '0'
                     );
                 }
 
@@ -680,6 +687,9 @@ class AcceptRideCommand extends Command {
                     }
                     if (redisResult === 'ERR_OFFER_EXPIRED') {
                         return CommandResult.failure('Oferta expirada para este motorista. Aguarde uma nova solicitação.');
+                    }
+                    if (redisResult.startsWith('ERR_INTRO_FEE_')) {
+                        return CommandResult.failure('Condição financeira da oferta expirada. Aguarde uma nova solicitação.');
                     }
                     if (redisResult === 'ERR_KYC_VERIFICATION_IN_PROGRESS') {
                         return CommandResult.failure('Validação de identidade em andamento. Conclua antes de aceitar uma corrida.');
@@ -807,7 +817,14 @@ class AcceptRideCommand extends Command {
                     ownerDriverId: this.driverId,
                     bookingOwnershipToken,
                     acceptedAt: updatedAt,
-                    updatedAt
+                    updatedAt,
+                    ...(bookingSnapshot.driverIntroFee ? {
+                        driverIntroFee: bookingSnapshot.driverIntroFee,
+                        estimatedOperationalFee: bookingSnapshot.estimatedOperationalFee,
+                        estimatedPaymentIntermediationFee: bookingSnapshot.estimatedPaymentIntermediationFee,
+                        estimatedTotalFees: bookingSnapshot.estimatedTotalFees,
+                        estimatedDriverNetAmount: bookingSnapshot.estimatedDriverNetAmount
+                    } : {})
                 });
 
                 const enrichedPayload = await resolveAcceptRidePayload(redis, this.bookingId, {
@@ -874,6 +891,9 @@ class AcceptRideCommand extends Command {
                     driverAcceptedLocation,
                     driverDistanceToPickupKm,
                     estimatedArrivalToPickupMin,
+                    ...(bookingSnapshot.driverIntroFee ? {
+                        driverIntroFee: driverIntroFeeService.acceptedContext(bookingSnapshot, this.driverId)
+                    } : {}),
                     idempotentAccept: alreadyAcceptedBySameDriver,
                     isReassignment
                 });

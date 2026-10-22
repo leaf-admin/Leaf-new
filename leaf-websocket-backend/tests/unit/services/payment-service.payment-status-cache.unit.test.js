@@ -1030,6 +1030,25 @@ describe('PaymentService financial rules', () => {
     });
   });
 
+  it.each([0, 24, 25])('keeps the approved intro fee in the cents and reais APIs at %i qualifying rides', (count) => {
+    const { buildDriverIntroFeeContext } = require('../../../services/driver-intro-fee-policy');
+    const service = new PaymentService();
+    const driverIntroFee = buildDriverIntroFeeContext({
+      driverId: 'driver-intro',
+      qualifiedCompletedRides: count,
+      historyVerified: true,
+      historySnapshotId: 'verified-history'
+    });
+    const cents = service.calculateNetAmount(10000, 2000, 300, { driverIntroFee });
+    const reais = service.calculateFareBreakdownFromReais(100, 20, { subscriptionRetainedFeeCents: 300, driverIntroFee });
+    expect(cents.operationalFee).toBe(count < 25 ? 99 : 240);
+    expect(reais.operationalFee * 100).toBe(cents.operationalFee);
+    expect(reais.driverNetAmount * 100).toBeCloseTo(cents.netAmount, 6);
+    expect(reais.paymentIntermediationFee).toBe(0.8);
+    expect(reais.subscriptionRetainedFee).toBe(3);
+    expect(cents.financialContract.feePolicy.driverIntroFee).toEqual(driverIntroFee);
+  });
+
   it('calculates Woovi on the full transaction when a high-value ride includes toll', () => {
     const service = new PaymentService();
     const calculation = service.calculateNetAmount(10000, 2000);
@@ -1872,6 +1891,54 @@ describe('PaymentService financial rules', () => {
         netAmount: 1357
       })
     });
+  });
+
+  it('settles a legacy ride without final snapshot with the accepted intro fee', async () => {
+    const { buildDriverIntroFeeContext } = require('../../../services/driver-intro-fee-policy');
+    const firestore = createInMemoryFirestore();
+    firebaseConfig.getFirestore.mockReturnValue(firestore);
+    const service = new PaymentService();
+    const calculateNetAmount = jest.spyOn(service, 'calculateNetAmount');
+    const driverIntroFee = buildDriverIntroFeeContext({
+      driverId: 'driver_intro_legacy',
+      qualifiedCompletedRides: 3,
+      historyVerified: true,
+      historySnapshotId: 'verified-history'
+    });
+
+    const result = await service.processNetDistribution({
+      rideId: 'booking_intro_legacy',
+      driverId: 'driver_intro_legacy',
+      totalAmount: 800,
+      tollFee: 0,
+      driverIntroFee: JSON.stringify(driverIntroFee)
+    });
+
+    expect(calculateNetAmount).toHaveBeenCalledWith(800, 0, 0, { driverIntroFee });
+    expect(result).toMatchObject({ success: true, retainedFees: { operationalFee: 99 } });
+  });
+
+  it('rejects legacy settlement when the stored intro fee belongs to another driver', async () => {
+    const { buildDriverIntroFeeContext } = require('../../../services/driver-intro-fee-policy');
+    const firestore = createInMemoryFirestore();
+    firebaseConfig.getFirestore.mockReturnValue(firestore);
+    const service = new PaymentService();
+    const driverIntroFee = buildDriverIntroFeeContext({
+      driverId: 'driver_previous',
+      qualifiedCompletedRides: 3,
+      historyVerified: true,
+      historySnapshotId: 'verified-history'
+    });
+
+    const result = await service.processNetDistribution({
+      rideId: 'booking_intro_mismatch',
+      driverId: 'driver_current',
+      totalAmount: 800,
+      tollFee: 0,
+      driverIntroFee: JSON.stringify(driverIntroFee)
+    });
+
+    expect(result).toMatchObject({ success: false, code: 'DRIVER_INTRO_FEE_DRIVER_MISMATCH' });
   });
 
   it('refunds the unused part once and credits the settled net when a ride is settled below the prepaid amount', async () => {

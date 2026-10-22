@@ -199,7 +199,7 @@ describe('AcceptRideCommand', () => {
     expect(clearOfferReservationsForBooking).toHaveBeenCalledWith(redis, 'booking_1');
     expect(redis.eval).toHaveBeenCalledWith(
       expect.stringContaining('ERR_KYC_VERIFICATION_IN_PROGRESS'),
-      11,
+      12,
       'booking:booking_1',
       'active_trip_by_driver:driver_1',
       'active_trip_customer_by_driver:driver_1',
@@ -211,6 +211,7 @@ describe('AcceptRideCommand', () => {
       'offer_reservation:booking_1:driver_1',
       'driver_active_notification:driver_1',
       'driver_lock:driver_1',
+      'driver_intro_fee:operational:driver_1',
       'driver_1',
       'ACCEPTED',
       expect.any(String),
@@ -220,7 +221,8 @@ describe('AcceptRideCommand', () => {
       '',
       '1',
       '0',
-      '3600'
+      '3600',
+      '0'
     );
     expect(redis.eval.mock.calls[0][0]).toContain('identity_reverification_pending_after_trip');
     expect(redis.eval.mock.calls[0][0]).toContain('kyc_recheck_pending_after_trip');

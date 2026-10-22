@@ -586,7 +586,10 @@ function buildRideLegSettlement({
   const normalizedDistanceKm = roundMoney(Math.max(0, parseMoneyValue(distanceKm, 0)));
   const normalizedDurationSecs = Math.round(Math.max(0, parseMoneyValue(durationSecs, 0)));
   const normalizedBonus = roundMoney(Math.max(0, parseMoneyValue(rescueBonus, 0)));
-  const rawBreakdown = paymentService.calculateFareBreakdownFromReais(normalizedGrossAmount, 0);
+  const { acceptedContext } = require('./driver-intro-fee-service');
+  const driverIntroFee = acceptedContext(bookingHash, driverId);
+  const rawBreakdown = paymentService.calculateFareBreakdownFromReais(normalizedGrossAmount, 0,
+    ...(driverIntroFee ? [{ driverIntroFee }] : []));
   const rawOperationalFee = roundMoney(rawBreakdown.operationalFee);
   const rawPaymentIntermediationFee = roundMoney(rawBreakdown.paymentIntermediationFee);
   const retainedOperationalFee = absorbedOperationalFee ? 0 : rawOperationalFee;

@@ -403,6 +403,8 @@ class RidePersistenceService {
                 'reviewContext',
                 'fareBreakdown',
                 'financialSnapshot',
+                'driverIntroFee',
+                'driverIntroFeeCompletion',
                 'financialSnapshotSource',
                 'authoritativeSnapshot',
                 'tollFee'
@@ -597,7 +599,18 @@ class RidePersistenceService {
                 retried += 1;
             }
 
-            return { processed, retried, failed };
+            // A checkpoint failure must not discard the outbox stats above.
+            let checkpointStats = { processed: 0, failed: 0 };
+            try {
+                checkpointStats = await require('./driver-intro-fee-service').flushPendingCheckpoints(redis, limit);
+            } catch (checkpointError) {
+                logger.error(`❌ Erro ao persistir checkpoints da tarifa promocional: ${checkpointError.message}`);
+                checkpointStats = { processed: 0, failed: 1 };
+            }
+            return {
+                processed, retried, failed,
+                ...(checkpointStats.processed || checkpointStats.failed ? { driverIntroFeeCheckpoints: checkpointStats } : {})
+            };
         } catch (error) {
             logger.error(`❌ Erro ao processar outbox de finalizacao: ${error.message}`);
             return { processed: 0, retried: 0, failed: 0, error: error.message };
