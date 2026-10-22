@@ -1,3 +1,5 @@
+const { normalizeDriverIntroFeeContext } = require('./driver-intro-fee-policy');
+
 const DEFAULT_POLICY = Object.freeze({
   policyId: 'runtime_tiered_percent_above_50_v1',
   operationalFeeUpTo10Cents: 79,
@@ -137,12 +139,16 @@ function buildRideFinancialContract({
   passengerPaidCents = 0,
   tollFeeCents = 0,
   subscriptionRetainedFeeCents = 0,
+  driverIntroFee = null,
   policy = DEFAULT_POLICY
 } = {}) {
   const totalAmountCents = toCents(passengerPaidCents);
   const tollPassThroughCents = clampCents(tollFeeCents, totalAmountCents);
   const grossFareCents = Math.max(0, totalAmountCents - tollPassThroughCents);
-  const operationalFee = resolveOperationalFee(grossFareCents, policy);
+  const introFeeContext = normalizeDriverIntroFeeContext(driverIntroFee);
+  const operationalFee = introFeeContext?.eligible
+    ? { feeCents: introFeeContext.operationalFeeCents, feeType: introFeeContext.policyId }
+    : resolveOperationalFee(grossFareCents, policy);
   const requestedOperationalFeeCents = toCents(operationalFee.feeCents);
   const leafOperationalFeeCents = clampCents(requestedOperationalFeeCents, grossFareCents);
   const remainingAfterOperationalFeeCents = Math.max(0, grossFareCents - leafOperationalFeeCents);
@@ -190,6 +196,7 @@ function buildRideFinancialContract({
     allocatedTotalCents,
     balanced: allocatedTotalCents === totalAmountCents,
     feePolicy: {
+      ...(introFeeContext ? { driverIntroFee: introFeeContext } : {}),
       operationalFeeType: operationalFee.feeType,
       requestedOperationalFeeCents,
       requestedPaymentIntermediationFeeCents,
@@ -222,7 +229,8 @@ function buildAuthoritativeFinancialSnapshot({
   operationalFeeCents,
   paymentIntermediationFeeCents,
   subscriptionRetainedFeeCents = 0,
-  driverNetAmountCents
+  driverNetAmountCents,
+  driverIntroFee = null
 } = {}) {
   const passengerPaid = resolveRequiredCents(passengerPaidCents, 'passengerPaidCents');
   const tollPassThrough = resolveRequiredCents(tollFeeCents, 'tollFeeCents');
@@ -236,6 +244,12 @@ function buildAuthoritativeFinancialSnapshot({
     'subscriptionRetainedFeeCents'
   );
   const driverNetAmount = resolveRequiredCents(driverNetAmountCents, 'driverNetAmountCents');
+  const introFeeContext = normalizeDriverIntroFeeContext(driverIntroFee);
+  if (introFeeContext?.eligible && operationalFee !== Math.min(introFeeContext.operationalFeeCents, passengerPaid - tollPassThrough)) {
+    const error = new Error('Tarifa Leaf final diverge da promoção aceita');
+    error.code = 'DRIVER_INTRO_FEE_SNAPSHOT_MISMATCH';
+    throw error;
+  }
   const retainedTotalCents = operationalFee + paymentIntermediationFee + subscriptionRetainedFee;
   const allocatedTotalCents = driverNetAmount + retainedTotalCents;
 
@@ -247,6 +261,7 @@ function buildAuthoritativeFinancialSnapshot({
 
   return {
     version: 'ride_financial_snapshot_v1',
+    ...(introFeeContext ? { driverIntroFee: introFeeContext } : {}),
     currency: 'BRL',
     authoritativeSnapshot: true,
     financialSnapshotSource: 'backend_final',
@@ -274,6 +289,9 @@ function validateAuthoritativeFinancialSnapshot(snapshot = {}, expected = {}) {
     }
 
     const normalized = buildAuthoritativeFinancialSnapshot(snapshot);
+    if (normalized.driverIntroFee && expected.driverId !== undefined && normalized.driverIntroFee.driverId !== expected.driverId) {
+      return { valid: false, code: 'DRIVER_INTRO_FEE_DRIVER_MISMATCH' };
+    }
     if (
       expected.passengerPaidCents !== undefined &&
       normalized.passengerPaidCents !== resolveRequiredCents(expected.passengerPaidCents, 'expectedPassengerPaidCents')

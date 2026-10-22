@@ -21,11 +21,12 @@ class PaymentServiceDistributionMethods {
    * Constroi o contrato financeiro canonico da corrida.
    * O pedágio é passthrough do motorista e as taxas são calculadas sobre a corrida sem pedágio.
    */
-  buildRideFinancialContract({ passengerPaidCents, tollFeeCents = 0, subscriptionRetainedFeeCents = 0 } = {}) {
+  buildRideFinancialContract({ passengerPaidCents, tollFeeCents = 0, subscriptionRetainedFeeCents = 0, driverIntroFee = null } = {}) {
     return buildRideFinancialContract({
       passengerPaidCents,
       tollFeeCents,
       subscriptionRetainedFeeCents,
+      driverIntroFee,
       policy: {
         operationalFeeUpTo10Cents: this.OPERATIONAL_FEE_UP_TO_10,
         operationalFee10To25Cents: this.OPERATIONAL_FEE_10_TO_25,
@@ -46,11 +47,12 @@ class PaymentServiceDistributionMethods {
    * @param {number} tollFee - Valor do pedágio em centavos (padrão 0)
    * @returns {Object} - Cálculo detalhado
    */
-  calculateNetAmount(totalAmount, tollFee = 0, subscriptionRetainedFee = 0) {
+  calculateNetAmount(totalAmount, tollFee = 0, subscriptionRetainedFee = 0, options = {}) {
     const financialContract = this.buildRideFinancialContract({
       passengerPaidCents: totalAmount,
       tollFeeCents: tollFee,
-      subscriptionRetainedFeeCents: subscriptionRetainedFee
+      subscriptionRetainedFeeCents: subscriptionRetainedFee,
+      driverIntroFee: options.driverIntroFee
     });
     const totalAmountCents = financialContract.passengerPaidCents;
     const operationalFee = financialContract.leafOperationalFeeCents;
@@ -90,7 +92,7 @@ class PaymentServiceDistributionMethods {
     const subscriptionRetainedFeeCents = Number.isFinite(Number(options.subscriptionRetainedFeeCents))
       ? Math.max(0, Math.round(Number(options.subscriptionRetainedFeeCents)))
       : this.toCents(options.subscriptionRetainedFeeReais || 0);
-    const calculation = this.calculateNetAmount(totalAmountCents, tollFeeCents, subscriptionRetainedFeeCents);
+    const calculation = this.calculateNetAmount(totalAmountCents, tollFeeCents, subscriptionRetainedFeeCents, options);
 
     const operationalFee = this.toReais(calculation.operationalFee);
     const paymentIntermediationFee = this.toReais(calculation.wooviFee);
@@ -497,7 +499,8 @@ class PaymentServiceDistributionMethods {
       if (hasAuthoritativeFinancialSnapshot) {
         const snapshotResult = this.resolveAuthoritativeNetCalculation(rideData.financialSnapshot, {
           passengerPaidCents: rideData.totalAmount,
-          tollFeeCents: rideData.tollFee || 0
+          tollFeeCents: rideData.tollFee || 0,
+          driverId: rideData.driverId
         });
         if (!snapshotResult.success) {
           return {
