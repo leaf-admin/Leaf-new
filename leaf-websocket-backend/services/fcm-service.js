@@ -7,6 +7,17 @@ const traceContext = require('../utils/trace-context');
 const RideLiveActivityService = require('./ride-live-activity-service');
 const { metrics } = require('../utils/prometheus-metrics');
 
+// O APNs recusa o push inteiro quando o apns-collapse-id passa de 64 bytes, e as chaves
+// por corrida ("leaf-ride-arrived-booking_<ms>_<uid>") têm ~68. Acima do limite, o fim da
+// chave vira um hash curto: continua única por corrida e o Android mantém a chave inteira.
+const APNS_COLLAPSE_ID_MAX_BYTES = 64;
+function toApnsCollapseId(collapseKey) {
+    const key = String(collapseKey);
+    if (Buffer.byteLength(key, 'utf8') <= APNS_COLLAPSE_ID_MAX_BYTES) return key;
+    const hash = crypto.createHash('sha256').update(key).digest('hex').slice(0, 16);
+    return `${key.slice(0, APNS_COLLAPSE_ID_MAX_BYTES - hash.length - 1)}-${hash}`;
+}
+
 function fingerprintToken(value) {
     const token = String(value || '').trim();
     if (!token) return null;
@@ -545,7 +556,7 @@ class FCMService {
                 apns: {
                     ...((notification.collapseKey || Number(notification.ttlSeconds) > 0) && {
                         headers: {
-                            ...(notification.collapseKey && { 'apns-collapse-id': String(notification.collapseKey) }),
+                            ...(notification.collapseKey && { 'apns-collapse-id': toApnsCollapseId(notification.collapseKey) }),
                             ...(Number(notification.ttlSeconds) > 0 && {
                                 'apns-expiration': String(Math.floor(Date.now() / 1000) + Math.round(Number(notification.ttlSeconds)))
                             })
@@ -1097,3 +1108,4 @@ class FCMService {
 }
 
 module.exports = FCMService;
+module.exports.toApnsCollapseId = toApnsCollapseId;
