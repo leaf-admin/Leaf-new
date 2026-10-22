@@ -594,7 +594,10 @@ class FCMService {
             };
 
         } catch (error) {
-            logStructured('error', 'Erro ao enviar notificação FCM', {
+            // Token morto é do aparelho, não do serviço: removemos e registramos
+            // como aviso, para não virar erro no Sentry nem disparar alerta.
+            const deadToken = isInvalidTokenError(error);
+            logStructured(deadToken ? 'warn' : 'error', 'Erro ao enviar notificação FCM', {
                 service: 'fcm',
                 operation: 'sendToToken',
                 tokenFingerprint: fingerprintToken(fcmToken),
@@ -603,7 +606,7 @@ class FCMService {
             });
 
             // Se o token for inválido, removê-lo
-            if (isInvalidTokenError(error)) {
+            if (deadToken) {
                 await this.removeInvalidToken(fcmToken);
             }
 
@@ -689,7 +692,10 @@ class FCMService {
             };
 
         } catch (error) {
-            logStructured('error', 'Erro ao enviar notificação FCM interativa', {
+            // Token morto é do aparelho, não do serviço: removemos e registramos
+            // como aviso, para não virar erro no Sentry nem disparar alerta.
+            const deadToken = isInvalidTokenError(error);
+            logStructured(deadToken ? 'warn' : 'error', 'Erro ao enviar notificação FCM interativa', {
                 service: 'fcm',
                 operation: 'sendInteractiveNotification',
                 tokenFingerprint: fingerprintToken(fcmToken),
@@ -697,7 +703,7 @@ class FCMService {
                 errorCode: error.code || null
             });
 
-            if (isInvalidTokenError(error)) {
+            if (deadToken) {
                 await this.removeInvalidToken(fcmToken);
             }
 

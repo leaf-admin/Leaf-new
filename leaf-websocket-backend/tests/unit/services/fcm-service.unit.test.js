@@ -272,6 +272,41 @@ describe('fcm-service', () => {
     expect(fcmService.removeInvalidToken).toHaveBeenCalledTimes(1);
   });
 
+  test('a dead token is logged as a warning, not as an error that reaches Sentry', async () => {
+    const circuitBreaker = require('../../../services/circuit-breaker-service');
+    circuitBreaker.execute.mockImplementation(async (name, fn, fallback) => {
+      try {
+        return await fn();
+      } catch (error) {
+        return fallback();
+      }
+    });
+    const deadToken = new Error('NotRegistered');
+    deadToken.code = 'messaging/registration-token-not-registered';
+    const outage = new Error('UNAVAILABLE');
+    outage.code = 'messaging/server-unavailable';
+    admin.messaging.mockReturnValue({
+      send: jest.fn(async (message) => { throw message.token === 'dead-token' ? deadToken : outage; })
+    });
+    fcmService.removeInvalidToken = jest.fn().mockResolvedValue(undefined);
+    const { logStructured } = require('../../../utils/logger');
+    logStructured.mockClear();
+
+    await fcmService.sendToToken('dead-token', { title: 't', body: 'b', data: {} });
+    await fcmService.sendInteractiveNotification('dead-token', { title: 't', body: 'b', data: {} }, []);
+    await fcmService.sendToToken('live-token', { title: 't', body: 'b', data: {} });
+
+    const levels = logStructured.mock.calls
+      .filter(([, message]) => String(message).startsWith('Erro ao enviar notificação FCM'))
+      .map(([level, message]) => `${level}:${message}`);
+    expect(levels).toEqual([
+      'warn:Erro ao enviar notificação FCM',
+      'warn:Erro ao enviar notificação FCM interativa',
+      'error:Erro ao enviar notificação FCM'
+    ]);
+    expect(fcmService.removeInvalidToken).toHaveBeenCalledTimes(2);
+  });
+
   test('removeInvalidToken also clears the legacy user:/driver: token, so resolveUserTokens does not bring it back', async () => {
     mockRedis.smembers.mockResolvedValue(['u1']);
     mockRedis.del = jest.fn().mockResolvedValue(1);
