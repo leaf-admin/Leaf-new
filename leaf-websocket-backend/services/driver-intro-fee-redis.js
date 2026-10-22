@@ -30,7 +30,16 @@ local ids = state.completedBookingIds
 for _, id in ipairs(ids) do if id == bookingId then return raw end end
 if state.inflightBookingId and state.inflightBookingId ~= bookingId then return 'ERR_OTHER_RIDE' end
 local owner = redis.call('HGET', KEYS[3], 'driverId')
-if owner ~= ARGV[2] then return 'ERR_BOOKING_OWNER' end
+if owner ~= ARGV[2] then
+  -- The ride went back to dispatch, to another driver or expired: this driver
+  -- can no longer finish it, so the reserved slot is released without counting.
+  if state.inflightBookingId ~= bookingId then return 'ERR_BOOKING_OWNER' end
+  state.inflightBookingId = nil
+  local released = cjson.encode(state)
+  released = string.gsub(released, '"completedBookingIds":{}', '"completedBookingIds":[]')
+  redis.call('SET', KEYS[1], released)
+  return released
+end
 local status = string.upper(redis.call('HGET', KEYS[3], 'status') or redis.call('HGET', KEYS[3], 'state') or '')
 -- Mirrors RideStateManager.TERMINAL_STATE_ALIASES: any other terminal state
 -- releases the slot without counting it.
