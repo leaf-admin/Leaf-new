@@ -638,7 +638,7 @@ function registerSocketSafetySupportHandlers({
             const { ticket, queue } = await supportQueueService.createSupportTicket({
                 subject: data.subject || `${type} support request`,
                 description,
-                category: ['technical', 'payment', 'account', 'general'].includes(type) ? type : 'general',
+                category: ['technical', 'payment', 'account', 'general', 'safety'].includes(type) ? type : 'general',
                 priority: priority || 'N3',
                 requesterId: identity.userId,
                 userType: identity.userType || 'passenger',

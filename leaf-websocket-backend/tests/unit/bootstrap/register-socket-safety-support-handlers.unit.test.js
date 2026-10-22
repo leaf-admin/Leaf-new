@@ -548,6 +548,37 @@ describe('registerSocketSafetySupportHandlers support chat scope', () => {
     );
   });
 
+  it('preserves the safety category when forwarding a neutral report to the queue', async () => {
+    const { handlers } = createHarness();
+
+    await handlers.createSupportTicket({
+      type: 'safety',
+      priority: 'N3',
+      subject: 'Segurança',
+      description: 'Preciso conversar sobre minha viagem.'
+    });
+
+    expect(supportQueueService.createSupportTicket).toHaveBeenCalledWith(expect.objectContaining({
+      category: 'safety',
+      priority: 'N3',
+      requesterId: 'user_1',
+      metadata: expect.objectContaining({ source: 'socket_support' })
+    }));
+  });
+
+  it('keeps unknown support types in the general category', async () => {
+    const { handlers } = createHarness();
+
+    await handlers.createSupportTicket({
+      type: 'unknown-type',
+      description: 'Preciso conversar sobre minha viagem.'
+    });
+
+    expect(supportQueueService.createSupportTicket).toHaveBeenCalledWith(expect.objectContaining({
+      category: 'general'
+    }));
+  });
+
   it('returns a public ticket and publishes only to authenticated dashboard and owner rooms', async () => {
     const { handlers, socket, io } = createHarness();
 

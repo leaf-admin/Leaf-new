@@ -72,7 +72,7 @@ const validateTicketData = (req, res, next) => {
     return res.status(400).json({ error: 'Descrição muito longa (máximo 2000 caracteres)' });
   }
 
-  const validCategories = ['technical', 'payment', 'account', 'general'];
+  const validCategories = ['technical', 'payment', 'account', 'general', 'safety'];
   if (category && !validCategories.includes(category)) {
     return res.status(400).json({ error: 'Categoria inválida' });
   }

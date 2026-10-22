@@ -77,6 +77,39 @@ describe('support-queue-service', () => {
     }));
   });
 
+  it('persists a neutral safety report with N1 SLA and human-only resolution', async () => {
+    const ticketService = {
+      createTicket: jest.fn(async (payload) => ({
+        ticket: { id: 'ticket-neutral-safety', ...payload, status: 'open' }
+      }))
+    };
+    const service = new SupportQueueService({ ticketService });
+
+    const result = await service.createSupportTicket({
+      subject: 'Segurança',
+      description: 'Preciso conversar sobre minha viagem.',
+      category: 'safety',
+      priority: 'N3',
+      requesterId: 'passenger_1',
+      metadata: { source: 'socket_support' }
+    });
+
+    expect(result.ticket.priority).toBe('N1');
+    expect(result.queue.slaMinutes).toEqual({ ack: 5, firstResponse: 10 });
+    expect(ticketService.createTicket).toHaveBeenCalledWith(expect.objectContaining({
+      category: 'safety',
+      priority: 'N1',
+      metadata: expect.objectContaining({
+        supportClassification: expect.objectContaining({
+          resolutionClass: 'D',
+          resolutionOwner: 'owner_decision',
+          autoReplyAllowed: false
+        }),
+        queue: expect.objectContaining({ slaMinutes: { ack: 5, firstResponse: 10 } })
+      })
+    }));
+  });
+
   it('ignores untrusted app priority inflation for standard tickets', async () => {
     const ticketService = {
       createTicket: jest.fn(async (payload) => ({

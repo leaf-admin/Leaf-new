@@ -28,6 +28,48 @@ describe('support-severity-classifier', () => {
     });
   });
 
+  it.each([
+    ['safety', 'N3'],
+    [' SAFETY ', 'N2'],
+    ['safety', 'N1']
+  ])('keeps neutral %s reports with requested priority %s in N1 and human resolution', (category, requestedPriority) => {
+    const result = classifySupportTicketSeverity({
+      subject: 'Segurança',
+      description: 'Preciso conversar sobre minha viagem.',
+      category,
+      requestedPriority,
+      metadata: { source: 'socket_support' }
+    });
+
+    expect(result).toMatchObject({
+      priority: 'N1',
+      computedPriority: 'N1',
+      severity: 'critical',
+      prioritySource: 'classifier',
+      requestedPriorityTrusted: false,
+      resolutionClass: 'D',
+      resolutionOwner: 'owner_decision',
+      autoReplyAllowed: false
+    });
+    expect(result.reasons).toContain('safety_category_minimum');
+  });
+
+  it('does not let a trusted requested class downgrade a neutral safety report', () => {
+    expect(classifySupportTicketSeverity({
+      subject: 'Segurança',
+      description: 'Preciso conversar sobre minha viagem.',
+      category: 'safety',
+      requestedPriority: 'N3',
+      requesterIsAgent: true,
+      metadata: { source: 'support_agent', resolutionClass: 'A' }
+    })).toMatchObject({
+      priority: 'N1',
+      resolutionClass: 'D',
+      resolutionOwner: 'owner_decision',
+      autoReplyAllowed: false
+    });
+  });
+
   it('does not trust app user priority inflation without matching severity evidence', () => {
     expect(classifySupportTicketSeverity({
       subject: 'Dúvida sobre perfil',

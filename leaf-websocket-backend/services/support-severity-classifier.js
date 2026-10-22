@@ -165,6 +165,11 @@ function classifySupportTicketSeverity({
   let computedPriority = textClassification.priority;
   const reasons = [...textClassification.reasons];
 
+  if (normalizedCategory === 'safety') {
+    computedPriority = strongerPriority(computedPriority, 'N1');
+    reasons.push('safety_category_minimum');
+  }
+
   if (normalizedCategory === 'payment') {
     computedPriority = strongerPriority(computedPriority, 'N2');
     reasons.push('payment_category_minimum');
