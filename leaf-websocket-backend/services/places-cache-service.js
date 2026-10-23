@@ -64,6 +64,11 @@ const ROUTES_API_TRAFFIC_FIELD_MASK = [
   'routes.legs.staticDuration',
   'routes.legs.polyline.encodedPolyline',
   'routes.legs.travelAdvisory.speedReadingIntervals',
+  'routes.legs.steps.navigationInstruction',
+  'routes.legs.steps.distanceMeters',
+  'routes.legs.steps.staticDuration',
+  'routes.legs.steps.startLocation',
+  'routes.legs.steps.endLocation',
 ].join(',');
 const TRAFFIC_SEGMENT_COLORS = Object.freeze({
   normal: '#198754',
@@ -554,10 +559,12 @@ function stripHtmlInstruction(value) {
 }
 
 function normalizeGoogleStep(step = {}) {
-  const startLat = Number(step?.start_location?.lat);
-  const startLng = Number(step?.start_location?.lng);
-  const endLat = Number(step?.end_location?.lat);
-  const endLng = Number(step?.end_location?.lng);
+  const start = step?.startLocation?.latLng || step?.start_location;
+  const end = step?.endLocation?.latLng || step?.end_location;
+  const startLat = Number(start?.latitude ?? start?.lat);
+  const startLng = Number(start?.longitude ?? start?.lng);
+  const endLat = Number(end?.latitude ?? end?.lat);
+  const endLng = Number(end?.longitude ?? end?.lng);
 
   if (
     !Number.isFinite(startLat) ||
@@ -568,11 +575,15 @@ function normalizeGoogleStep(step = {}) {
     return null;
   }
 
-  const distanceMeters = Number(step?.distance?.value);
-  const durationSeconds = Number(step?.duration?.value);
+  const distanceMeters = Number(step?.distanceMeters ?? step?.distance?.value);
+  const durationSeconds = step?.staticDuration !== undefined
+    ? parseGoogleDurationSeconds(step.staticDuration)
+    : Number(step?.duration?.value);
+  const maneuver = step?.navigationInstruction?.maneuver || step?.maneuver;
 
   return {
-    instruction: stripHtmlInstruction(step?.html_instructions) || 'Siga em frente',
+    instruction: stripHtmlInstruction(step?.navigationInstruction?.instructions || step?.html_instructions) || 'Siga em frente',
+    ...(maneuver ? { maneuver: String(maneuver).toUpperCase().replace(/-/g, '_') } : {}),
     startLocation: {
       lat: startLat,
       lng: startLng,
@@ -1312,7 +1323,7 @@ class PlacesCacheService {
         end_location: null,
         start_address: '',
         end_address: '',
-        steps: [],
+        steps: normalizeGoogleSteps(leg?.steps),
         polylinePoints: legPolyline,
         trafficSegments: legTrafficSegments,
       };
@@ -1374,7 +1385,7 @@ class PlacesCacheService {
           tollCount: tollEstimate.tollCount,
         },
         legs: normalizedLegs,
-        steps: [],
+        steps: normalizedLegs.flatMap((leg) => leg.steps),
         routeProvider: 'routes_api',
       },
       stats,

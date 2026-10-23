@@ -5057,10 +5057,12 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   // brigava com a linha da rota. O trânsito da própria rota continua nas cores dela.
   const shouldShowTrafficLayer = false;
   const driverTripAssistNativeNavigation = driverTripAssist?.nativeNavigation || null;
-  const { uid: preferencesUid, preferences: mobilePreferences } = useMobilePreferences();
+  const { uid: preferencesUid } = useMobilePreferences();
   useLeafVoiceGuidance({
     uid: preferencesUid,
-    enabled: isDriverRole && mobilePreferences.voiceGuidanceEnabled,
+    // This trip surface provides visual guidance only; the preferred external
+    // navigator remains responsible for voice and continuous rerouting.
+    enabled: false,
     focused: isScreenFocused && currentRouteName === 'RobotaxiPrototype',
     navigationModel: driverTripAssistNativeNavigation,
   });
@@ -6999,8 +7001,10 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
       leafNativeNavigationCameraHeading,
     );
     // Dead zone: parked or crawling, GPS jitter alone must not move the camera.
+    // A measured banner/card resize still needs a camera update while parked.
+    const navigationViewportKey = [mapHeight, routeViewportOcclusion.top, routeViewportOcclusion.bottom].join(':');
     const lastPose = lastNativeNavigationCameraPoseRef.current;
-    if (lastPose && lastPose.key === leafNativeNavigationKey) {
+    if (lastPose && lastPose.key === leafNativeNavigationKey && lastPose.viewportKey === navigationViewportKey) {
       const movedMeters = measureRouteLengthMeters([lastPose.coordinate, activeDriverNavigationCoordinate]);
       const headingDelta = Number.isFinite(Number(resolvedCameraHeading)) && Number.isFinite(Number(lastPose.heading))
         ? Math.abs(((Number(resolvedCameraHeading) - Number(lastPose.heading) + 540) % 360) - 180)
@@ -7011,6 +7015,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     }
     lastNativeNavigationCameraPoseRef.current = {
       key: leafNativeNavigationKey,
+      viewportKey: navigationViewportKey,
       coordinate: activeDriverNavigationCoordinate,
       heading: resolvedCameraHeading,
     };

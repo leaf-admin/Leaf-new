@@ -488,7 +488,7 @@ describe('places-cache-service directions steps', () => {
     );
   });
 
-  it('uses Routes API traffic-aware polyline segments when enabled', async () => {
+  it('returns traffic and provider steps from the same Routes API request', async () => {
     process.env.ENABLE_ROUTES_API_TRAFFIC_POLYLINE = 'true';
     const placesCacheService = loadService();
     placesCacheService.googleApiKey = 'test-google-key';
@@ -524,6 +524,13 @@ describe('places-cache-service directions steps', () => {
                 distanceMeters: 2500,
                 duration: '600s',
                 staticDuration: '420s',
+                steps: [{
+                  navigationInstruction: { instructions: 'Vire à direita na Rua A', maneuver: 'TURN_RIGHT' },
+                  distanceMeters: 180,
+                  staticDuration: '50s',
+                  startLocation: { latLng: { latitude: -22.9712, longitude: -43.1822 } },
+                  endLocation: { latLng: { latitude: -22.9701, longitude: -43.1811 } },
+                }],
                 polyline: {
                   encodedPolyline: VALID_POLYLINE,
                 },
@@ -545,6 +552,13 @@ describe('places-cache-service directions steps', () => {
                 distanceMeters: 900,
                 duration: '180s',
                 staticDuration: '150s',
+                steps: [{
+                  navigationInstruction: { instructions: 'Siga pela Rua B', maneuver: 'STRAIGHT' },
+                  distanceMeters: 900,
+                  staticDuration: '150s',
+                  startLocation: { latLng: { latitude: -22.9701, longitude: -43.1811 } },
+                  endLocation: { latLng: { latitude: -22.9673, longitude: -43.1790 } },
+                }],
                 polyline: {
                   encodedPolyline: VALID_LEG_POLYLINE,
                 },
@@ -607,6 +621,20 @@ describe('places-cache-service directions steps', () => {
       VALID_LEG_POLYLINE,
     ]);
     expect(result.stats.googleRequests).toBe(1);
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    expect(result.data.legs[0].steps[0]).toMatchObject({
+      instruction: 'Vire à direita na Rua A', maneuver: 'TURN_RIGHT', distanceMeters: 180,
+      durationSeconds: 50, startLocation: { lat: -22.9712, lng: -43.1822 },
+    });
+    expect(result.data.legs[1].steps[0].maneuver).toBe('STRAIGHT');
+    expect(result.data.steps).toHaveLength(2);
+    const [requestUrl, request] = global.fetch.mock.calls[0];
+    expect(requestUrl).toBe('https://routes.googleapis.com/directions/v2:computeRoutes');
+    expect(request.headers['X-Goog-FieldMask']).toContain('routes.legs.steps.navigationInstruction');
+    expect(request.headers['X-Goog-FieldMask']).not.toContain('routes.legs.steps.polyline');
+    expect(JSON.parse(request.body)).toMatchObject({
+      routingPreference: 'TRAFFIC_AWARE_OPTIMAL', extraComputations: ['TRAFFIC_ON_POLYLINE'],
+    });
     expect(mockRedisConnection.setex).toHaveBeenCalledWith(
       expect.stringContaining('provider:routes_api'),
       90,

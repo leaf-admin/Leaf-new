@@ -93,7 +93,7 @@ describe('LeafNativeNavigationEngine', () => {
     expect(state.maneuverDistanceTargetLabel).toBe('o destino');
   });
 
-  it('synthesizes the next turn from route geometry when cached directions omit steps', () => {
+  it('keeps summary guidance when cached directions omit provider steps', () => {
     const state = buildLeafNativeNavigationState({
       bookingId: 'booking_nav_synthetic',
       phase: 'destination',
@@ -106,10 +106,25 @@ describe('LeafNativeNavigationEngine', () => {
       totalDurationMinutes: 3,
     });
 
-    expect(state.hasSteps).toBe(true);
-    expect(state.currentInstruction).toBe('Vire à esquerda');
-    expect(state.maneuverDistanceTargetLabel).toBe('a próxima curva');
+    expect(state.hasSteps).toBe(false);
+    expect(state.currentInstruction).toBe('Siga até o destino');
+    expect(state.maneuverDistanceTargetLabel).toBe('o destino');
     expect(state.maneuverDistanceMeters).toBeGreaterThan(80);
+  });
+
+  it('ignores inferred steps in old plans and preserves the provider maneuver', () => {
+    const state = buildLeafNativeNavigationState({
+      bookingId: 'provider_steps', phase: 'pickup', status: 'accepted',
+      currentCoordinate: routeCoordinates[0], targetCoordinate: routeCoordinates[2],
+      routeCoordinates,
+      steps: [
+        { ...steps[0], synthetic: true, instruction: 'Vire à esquerda' },
+        { ...steps[1], instruction: 'Pegue a saída indicada', maneuver: 'RAMP_RIGHT' },
+      ],
+      totalDistanceMeters: 213, totalDurationMinutes: 3,
+    });
+    expect(state.currentInstruction).toBe('Pegue a saída indicada');
+    expect(state.maneuver).toBe('RAMP_RIGHT');
   });
 
   it('keeps maneuver distance decreasing as the driver advances along the route', () => {
