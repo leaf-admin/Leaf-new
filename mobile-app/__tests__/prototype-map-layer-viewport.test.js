@@ -435,6 +435,27 @@ describe('PrototypeMapLayer route viewport fitting', () => {
     });
   });
 
+  it.each(['ios', 'android'])('keeps the fallback region when a pickup route disappears within metres on %s', os => {
+    const { Platform } = require('react-native');
+    const originalPlatform = Platform.OS;
+    Platform.OS = os;
+    try {
+      const pickup = { latitude: -22.920809, longitude: -43.406063 };
+      const nearbyDriver = { latitude: pickup.latitude + 0.00001, longitude: pickup.longitude };
+      const fallback = { ...pickup, latitudeDelta: 0.006, longitudeDelta: 0.006 };
+      const props = { mapRef: React.createRef(), region: fallback, forceRegionUpdate: true,
+        userCoordinate: pickup, driverCoordinate: nearbyDriver, originCoordinate: nearbyDriver, destinationCoordinate: pickup };
+      const screen = render(<PrototypeMapLayer {...props} routeCoordinates={[nearbyDriver, pickup]} routeViewportRegion={visibleRouteRegion} />);
+      mockFitToCoordinates.mockClear();
+      mockAnimateToRegion.mockClear();
+      screen.rerender(<PrototypeMapLayer {...props} routeCoordinates={[]} routeViewportRegion={null} />);
+      act(() => { jest.runOnlyPendingTimers(); });
+      expect(mockAnimateToRegion).toHaveBeenCalledWith(fallback, expect.any(Number));
+      expect(mockFitToCoordinates).not.toHaveBeenCalled();
+      screen.unmount();
+    } finally { Platform.OS = originalPlatform; }
+  });
+
   it('re-applies the canonical home region when no route geometry exists', () => {
     render(
       <PrototypeMapLayer

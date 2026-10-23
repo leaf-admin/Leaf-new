@@ -4,6 +4,11 @@ import locationBufferService from '../src/services/LocationBufferService';
 import WebSocketManager from '../src/services/WebSocketManager';
 import prototypeDriverTripAssistantService from '../src/services/PrototypeDriverTripAssistantService';
 import BackgroundLocationService from '../src/services/BackgroundLocationService';
+import realtimeConnectionOrchestrator from '../src/services/RealtimeConnectionOrchestrator';
+
+jest.mock('../src/services/RealtimeConnectionOrchestrator', () => ({
+  __esModule: true, default: { ensureReady: jest.fn().mockResolvedValue(true) },
+}));
 
 jest.mock('../src/services/WebSocketManager', () => ({
   __esModule: true,
@@ -43,6 +48,8 @@ describe('driver online with the app in the background', () => {
     jest.clearAllMocks();
     locationBufferService.activeTripContextCache = null;
     locationBufferService.setDriverPresenceContext(null);
+    locationBufferService.backgroundReconnectPromise = null;
+    locationBufferService.lastBackgroundReconnectAt = null;
     prototypeDriverTripAssistantService.onlinePresenceKey = null;
     prototypeDriverTripAssistantService.lastTrackingSessionKey = '';
     socketManager = {
@@ -104,6 +111,61 @@ describe('driver online with the app in the background', () => {
 
     expect(result.reason).toBe('socket_unavailable');
     expect(socketManager.emitToServer).not.toHaveBeenCalled();
+  });
+
+  it('asks the existing orchestrator to reconnect an online driver without waiting for foreground', async () => {
+    socketManager.isConnected.mockReturnValue(false);
+    socketManager.getConnectionStatus.mockReturnValue({ authenticated: false, userId: 'driver_1' });
+    locationBufferService.setDriverPresenceContext({ driverId: 'driver_1' });
+    await locationBufferService.addDriverLocationFromBackground(FIX);
+    await Promise.resolve();
+    expect(realtimeConnectionOrchestrator.ensureReady).toHaveBeenCalledWith(
+      { userId: 'driver_1', userType: 'driver' }, expect.objectContaining({ reason: 'background_location' }),
+    );
+    expect(socketManager.emitToServer).not.toHaveBeenCalled();
+  });
+
+  it('buffers an accepted ride fix and coalesces reconnect attempts instead of blocking the native task', async () => {
+    socketManager.isConnected.mockReturnValue(false);
+    socketManager.getConnectionStatus.mockReturnValue({ authenticated: false, userId: 'driver_1' });
+    await locationBufferService.setActiveTripContext({ bookingId: 'booking_1', driverId: 'driver_1', tripStatus: 'accepted' });
+    let finish;
+    realtimeConnectionOrchestrator.ensureReady.mockReturnValue(new Promise(resolve => { finish = resolve; }));
+    const first = await locationBufferService.addDriverLocationFromBackground(FIX);
+    const second = await locationBufferService.addDriverLocationFromBackground({ ...FIX, timestamp: FIX.timestamp + 1000 });
+    expect(first).toMatchObject({ buffered: true, bookingId: 'booking_1' });
+    expect(second).toMatchObject({ buffered: true, bookingId: 'booking_1' });
+    expect(realtimeConnectionOrchestrator.ensureReady).toHaveBeenCalledTimes(1);
+    finish(false);
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+
+  it('does not reconnect another account using a persisted driver context', async () => {
+    socketManager.isConnected.mockReturnValue(false);
+    socketManager.getConnectionStatus.mockReturnValue({ authenticated: false, userId: 'other-user' });
+    locationBufferService.setDriverPresenceContext({ driverId: 'driver_1' });
+    await locationBufferService.addDriverLocationFromBackground(FIX);
+    expect(realtimeConnectionOrchestrator.ensureReady).not.toHaveBeenCalled();
+  });
+
+  it('waits for the retry interval after a failed background reconnection', async () => {
+    const clock = jest.spyOn(Date, 'now').mockReturnValue(FIX.timestamp);
+    try {
+      socketManager.isConnected.mockReturnValue(false);
+      socketManager.getConnectionStatus.mockReturnValue({ authenticated: false, userId: 'driver_1' });
+      locationBufferService.setDriverPresenceContext({ driverId: 'driver_1' });
+      realtimeConnectionOrchestrator.ensureReady.mockResolvedValue(true)
+        .mockRejectedValueOnce(new Error('network unavailable'));
+      await locationBufferService.addDriverLocationFromBackground(FIX);
+      await locationBufferService.backgroundReconnectPromise;
+      await locationBufferService.addDriverLocationFromBackground(FIX);
+      expect(realtimeConnectionOrchestrator.ensureReady).toHaveBeenCalledTimes(1);
+      clock.mockReturnValue(FIX.timestamp + 10000);
+      await locationBufferService.addDriverLocationFromBackground(FIX);
+      await locationBufferService.backgroundReconnectPromise;
+      expect(realtimeConnectionOrchestrator.ensureReady).toHaveBeenCalledTimes(2);
+    } finally { clock.mockRestore(); }
   });
 
   it('keeps the location service running after a ride ends while the driver stays online', async () => {

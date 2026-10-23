@@ -7,6 +7,7 @@ const {
     recoverAcceptedBooking
 } = require('./accepted-ride-recovery-service');
 const { setActiveTripForDriver } = require('../utils/active-trip-index');
+const { readDriverSocketPresence } = require('./driver-socket-presence-service');
 const { getTTL } = require('../config/redis-ttl-config');
 const { logStructured } = require('../utils/logger');
 
@@ -85,13 +86,13 @@ class AcceptedRideRecoveryMonitor {
         });
     }
 
-    isDriverConnected(driverId) {
-        if (!driverId || !this.io?.connectedUsers) {
-            return false;
-        }
-
-        const socket = this.io.connectedUsers.get(String(driverId));
-        return Boolean(socket && socket.connected && socket.userType === 'driver');
+    async isDriverConnected(driverId) {
+        if (!driverId) return false;
+        const socket = this.io?.connectedUsers?.get(String(driverId));
+        if (socket?.connected && socket.userType === 'driver') return true;
+        // The local socket map does not include other gateway processes.
+        const presence = await readDriverSocketPresence(this.redis, driverId);
+        return presence.reachable === true;
     }
 
     parseDriverLastSeenMs(driverData) {
@@ -165,10 +166,19 @@ class AcceptedRideRecoveryMonitor {
                 redis.get(`active_trip_by_driver:${driverId}`)
             ]);
 
-            const driverConnected = this.isDriverConnected(driverId);
+            const driverConnected = await this.isDriverConnected(driverId);
             const driverExists = Boolean(driverData && Object.keys(driverData).length > 0);
             const driverOnline = driverExists && normalizeBoolean(driverData.isOnline);
             const activeTripMatches = Boolean(activeTripId && String(activeTripId) === String(bookingId));
+
+            const reconnectUntilMs = Number(driverData?.socketReconnectUntilMs);
+            const disconnectGraceMs = Math.max(0, Number.parseInt(process.env.DRIVER_DISCONNECT_GRACE_MS || '0', 10) || 0);
+            const reconnectCheckMs = Date.now();
+            if (!driverConnected && Number.isFinite(reconnectUntilMs)
+                && reconnectUntilMs > reconnectCheckMs && reconnectUntilMs - reconnectCheckMs <= disconnectGraceMs) {
+                stats.skippedGrace += 1;
+                continue;
+            }
 
             if (driverConnected && !activeTripMatches) {
                 await setActiveTripForDriver(redis, driverId, bookingId, bookingData.customerId || null);
