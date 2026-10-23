@@ -403,7 +403,7 @@ const TRIP_TRACK_CAR_SIZE = 26;
 
 // The ride as a line: the car glides from the start to the destination pin as the
 // trip advances. It only moves forward, and eases between updates instead of jumping.
-export function LeafTripProgressTrack({ progress = 0, progressKey, testID, fillTestID }) {
+export function LeafTripProgressTrack({ progress = 0, progressKey, testID, fillTestID, variant = 'car' }) {
   const reduceMotion = useReducedMotion();
   const [width, setWidth] = React.useState(0);
   const numeric = Number(progress);
@@ -435,29 +435,36 @@ export function LeafTripProgressTrack({ progress = 0, progressKey, testID, fillT
     return () => animation.stop();
   }, [anim, normalized, progressKey, reduceMotion]);
 
-  const usable = Math.max(0, width - TRIP_TRACK_CAR_SIZE);
+  const isLine = variant === 'line';
+  const usable = Math.max(0, width - (isLine ? 0 : TRIP_TRACK_CAR_SIZE));
   const carLeft = anim.interpolate({ inputRange: [0, 1], outputRange: [0, usable] });
   const fillWidth = anim.interpolate({
     inputRange: [0, 1],
-    outputRange: [TRIP_TRACK_CAR_SIZE / 2, usable + TRIP_TRACK_CAR_SIZE / 2],
+    outputRange: isLine ? [0, usable] : [TRIP_TRACK_CAR_SIZE / 2, usable + TRIP_TRACK_CAR_SIZE / 2],
   });
 
   return (
     <View
-      style={styles.tripTrack}
+      style={isLine ? styles.tripTrackLine : styles.tripTrack}
       onLayout={(event) => setWidth(event.nativeEvent.layout.width)}
       testID={testID}
+      accessible={isLine ? true : undefined}
       accessibilityRole="progressbar"
+      accessibilityLabel={isLine ? 'Progresso da viagem' : undefined}
       accessibilityValue={{ min: 0, max: 100, now: Math.round(normalized * 100) }}
     >
-      <View style={styles.tripTrackRail} />
-      <Animated.View testID={fillTestID} style={[styles.tripTrackFill, { width: fillWidth }]} />
-      <View style={styles.tripTrackPin}>
-        <Ionicons name="location" size={18} color={leafRideColors.text} />
-      </View>
-      <Animated.View style={[styles.tripTrackCar, { left: carLeft }]}>
-        <Ionicons name="car-sport" size={15} color="#FFFFFF" />
-      </Animated.View>
+      <View style={[styles.tripTrackRail, isLine && styles.tripTrackLineRail]} />
+      <Animated.View testID={fillTestID} style={[styles.tripTrackFill, isLine && styles.tripTrackLineFill, { width: fillWidth }]} />
+      {!isLine ? (
+        <>
+          <View style={styles.tripTrackPin}>
+            <Ionicons name="location" size={18} color={leafRideColors.text} />
+          </View>
+          <Animated.View style={[styles.tripTrackCar, { left: carLeft }]}>
+            <Ionicons name="car-sport" size={15} color="#FFFFFF" />
+          </Animated.View>
+        </>
+      ) : null}
     </View>
   );
 }
@@ -960,6 +967,14 @@ const styles = StyleSheet.create({
     height: TRIP_TRACK_CAR_SIZE,
     justifyContent: "center",
   },
+  tripTrackLine: {
+    height: 5,
+    borderRadius: 3,
+    overflow: 'hidden',
+    justifyContent: 'center',
+  },
+  tripTrackLineRail: { left: 0, right: 0, height: 5 },
+  tripTrackLineFill: { height: 5 },
   tripTrackRail: {
     position: "absolute",
     left: TRIP_TRACK_CAR_SIZE / 2,

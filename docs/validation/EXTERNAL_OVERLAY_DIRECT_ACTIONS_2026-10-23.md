@@ -2,7 +2,7 @@
 
 ## Objetivo e escopo concluído
 
-O botão da etapa no flutuante deve executar a ação sem abrir o Leaf e exigir outro toque. O corpo do card continua abrindo o aplicativo. O visual deste flutuante e o card do passageiro aguardam escolha entre seis propostas de cada; não foram alterados em produção neste PR.
+O botão da etapa no flutuante deve executar a ação sem abrir o Leaf e exigir outro toque. O corpo do card continua abrindo o aplicativo. Após a escolha de Izaak, os desenhos Faixa (motorista dentro/fora) e Horizonte (passageiro) foram implementados em um commit separado neste PR. Escopo e evidências visuais estão em `FLOATING_CARDS_FAIXA_HORIZONTE_2026-10-23.md`. Nenhuma dessas alterações foi publicada nesta etapa.
 
 O botão nativo agora emite um evento para o runtime existente, com corrida, ação e identificador da solicitação. A janela mostra confirmação em andamento, bloqueia toques duplicados e recebe sucesso somente após o comando existente confirmar a execução. Falhas e ausência de confirmação aparecem na própria janela, sem abrir Activity automaticamente.
 
@@ -38,4 +38,4 @@ O timeout da janela não desfaz uma ação já recebida pelo servidor. A conclus
 
 Reverter este PR e gerar/republicar o Android anterior pelo processo autorizado. Não há migração ou exclusão de dados. O retorno ao comportamento nativo anterior exige build, não somente OTA.
 
-Intocados: backend, Pix, promoção, pedágio, ledger, regras de corrida, voz, banner interno aprovado, visual de produção do passageiro, iOS, lojas e provedores pagos.
+Intocados: backend, Pix, promoção, pedágio, ledger, regras de corrida, voz, demais telas e controles, lojas e provedores pagos. Os novos desenhos de componentes JS também se aplicam ao iOS quando uma versão autorizada os distribuir; a janela nativa externa continua sendo Android.
