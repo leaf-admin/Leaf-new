@@ -1,4 +1,4 @@
-import { Alert, AppState, NativeModules, Platform } from 'react-native';
+import { Alert, AppState, DeviceEventEmitter, NativeModules, Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Logger from '../utils/Logger';
 
@@ -171,6 +171,51 @@ class RideOverlayController {
     this.subscription = null;
     this.overlayShown = false;
     this.liveUpdateShown = false;
+    this.actionSubscription = null;
+    this.actionExecutor = null;
+    this.actionInFlight = null;
+  }
+
+  setActionExecutor(executor) {
+    this.actionExecutor = typeof executor === 'function' ? executor : null;
+    if (!this.actionExecutor) {
+      this.actionSubscription?.remove?.();
+      this.actionSubscription = null;
+      return;
+    }
+    if (!this.actionSubscription && nativeModule()?.completeOverlayAction) {
+      this.actionSubscription = DeviceEventEmitter.addListener('LeafRideOverlayAction', (request) => {
+        void this.handleAction(request);
+      });
+    }
+  }
+
+  async handleAction({ requestId, bookingId, actionIdentifier } = {}) {
+    const native = nativeModule();
+    if (!requestId || !native?.completeOverlayAction) return;
+    // A duplicate native event must not re-execute (or resolve) its active request.
+    if (this.actionInFlight === requestId) return;
+    let success = false;
+    let message = 'Não foi possível confirmar. Tente novamente.';
+    const ownsRequest = !this.actionInFlight;
+    try {
+      if (!ownsRequest || !this.actionExecutor || !bookingId ||
+          this.state?.bookingId !== bookingId || this.state?.actionId !== actionIdentifier ||
+          !STAGE_ACTIONS.has(actionIdentifier)) {
+        throw new Error('Ação indisponível. Aguarde a atualização da corrida.');
+      }
+      this.actionInFlight = requestId;
+      const result = await this.actionExecutor({ bookingId, actionIdentifier });
+      success = result?.success === true;
+      if (!success) throw new Error('O servidor não confirmou a ação.');
+      message = 'Confirmado';
+    } catch (error) {
+      message = error?.message || message;
+      Logger.warn('⚠️ [RideOverlay] Ação não confirmada:', message);
+    } finally {
+      if (ownsRequest) this.actionInFlight = null;
+      await native.completeOverlayAction(requestId, success, message).catch(() => {});
+    }
   }
 
   ensureListening() {

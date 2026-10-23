@@ -11,6 +11,7 @@ import com.facebook.react.bridge.ReactContextBaseJavaModule
 import com.facebook.react.bridge.ReactMethod
 import com.facebook.react.bridge.ReadableMap
 import com.facebook.react.bridge.UiThreadUtil
+import com.facebook.react.modules.core.DeviceEventManagerModule
 
 /**
  * Corrida em andamento fora do app, para o motorista que navega com o Waze ou o
@@ -18,14 +19,46 @@ import com.facebook.react.bridge.UiThreadUtil
  *  - balão flutuante por cima de outros apps (Android 8+, permissão "sobrepor");
  *  - Live Update no Android 16 (carro na trilha da notificação e ETA no chip da
  *    barra de status).
- * Os botões abrem o Leaf por deep link (`leafapp://robotaxi/home?rideAction=...`)
- * e o JS executa a ação pelo mesmo caminho das ações da notificação.
+ * O botão do balão envia a ação ao executor JS sem abrir uma Activity. O resultado
+ * confirmado pelo backend volta para a própria janela. O corpo ainda abre o Leaf.
  */
 class LeafRideOverlayModule(
   private val reactContext: ReactApplicationContext
 ) : ReactContextBaseJavaModule(reactContext) {
 
   override fun getName(): String = "LeafRideOverlay"
+
+  override fun initialize() {
+    super.initialize()
+    LeafRideOverlayWindow.setActionListener { requestId, bookingId, actionId ->
+      if (!reactContext.hasActiveReactInstance()) {
+        false
+      } else {
+        try {
+          reactContext.getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
+            .emit("LeafRideOverlayAction", Arguments.createMap().apply {
+              putString("requestId", requestId)
+              putString("bookingId", bookingId)
+              putString("actionIdentifier", actionId)
+            })
+          true
+        } catch (_: Exception) { false }
+      }
+    }
+  }
+
+  override fun invalidate() {
+    LeafRideOverlayWindow.setActionListener(null)
+    super.invalidate()
+  }
+
+  @ReactMethod
+  fun completeOverlayAction(requestId: String, success: Boolean, message: String, promise: Promise) {
+    UiThreadUtil.runOnUiThread {
+      LeafRideOverlayWindow.completeAction(requestId, success, message)
+      promise.resolve(true)
+    }
+  }
 
   @ReactMethod
   fun getStatus(promise: Promise) {

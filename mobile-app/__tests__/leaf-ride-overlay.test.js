@@ -1,4 +1,4 @@
-import { AppState, NativeModules, Platform } from 'react-native';
+import { AppState, DeviceEventEmitter, NativeModules, Platform } from 'react-native';
 
 describe('ride overlay over the navigation app (Android)', () => {
   let native;
@@ -18,6 +18,7 @@ describe('ride overlay over the navigation app (Android)', () => {
       openOverlaySettings: jest.fn().mockResolvedValue(true),
       showOfferCard: jest.fn().mockResolvedValue(true),
       hideOfferCard: jest.fn().mockResolvedValue(true),
+      completeOverlayAction: jest.fn().mockResolvedValue(true),
     };
     NativeModules.LeafRideOverlay = native;
     jest.spyOn(AppState, 'addEventListener').mockImplementation((event, listener) => {
@@ -75,6 +76,46 @@ describe('ride overlay over the navigation app (Android)', () => {
     expect(label('accepted', [{ identifier: 'arrived_at_pickup', buttonTitle: 'Cheguei ao embarque' }])).toBe('No embarque');
     expect(label('arrived')).toBe('Embarque');
     expect(label('started')).toBe('Em viagem');
+  });
+
+  it('executes a background action once and confirms only after the lifecycle ACK', async () => {
+    const controller = overlay.default;
+    let ack;
+    const executor = jest.fn(() => new Promise((resolve) => { ack = resolve; }));
+    controller.setActionExecutor(executor);
+    controller.state = { bookingId: 'b1', actionId: 'start_trip' };
+    AppState.currentState = 'background';
+    const request = { requestId: 'r1', bookingId: 'b1', actionIdentifier: 'start_trip' };
+    const pending = controller.handleAction(request);
+    await controller.handleAction(request);
+    expect(executor).toHaveBeenCalledTimes(1);
+    expect(native.completeOverlayAction).not.toHaveBeenCalled();
+    ack({ success: true });
+    await pending;
+    expect(native.completeOverlayAction).toHaveBeenCalledWith('r1', true, 'Confirmado');
+    controller.setActionExecutor(null);
+  });
+
+  it('rejects stale ride buttons and backend failures without reporting success', async () => {
+    const controller = overlay.default;
+    const executor = jest.fn().mockRejectedValue(new Error('Pagamento ainda não confirmado.'));
+    controller.setActionExecutor(executor);
+    controller.state = { bookingId: 'b1', actionId: 'start_trip' };
+    await controller.handleAction({ requestId: 'old', bookingId: 'b0', actionIdentifier: 'start_trip' });
+    expect(executor).not.toHaveBeenCalled();
+    expect(native.completeOverlayAction).toHaveBeenLastCalledWith('old', false, expect.any(String));
+    await controller.handleAction({ requestId: 'current', bookingId: 'b1', actionIdentifier: 'start_trip' });
+    expect(native.completeOverlayAction).toHaveBeenLastCalledWith('current', false, 'Pagamento ainda não confirmado.');
+    controller.setActionExecutor(null);
+  });
+
+  it('receives native events only while the driver executor is registered', async () => {
+    const remove = jest.fn();
+    const listen = jest.spyOn(DeviceEventEmitter, 'addListener').mockReturnValue({ remove });
+    overlay.default.setActionExecutor(jest.fn());
+    expect(listen).toHaveBeenCalledWith('LeafRideOverlayAction', expect.any(Function));
+    overlay.default.setActionExecutor(null);
+    expect(remove).toHaveBeenCalledTimes(1);
   });
 
   it('shows the bubble only while Leaf is in the background, and clears it at the end of the ride', async () => {

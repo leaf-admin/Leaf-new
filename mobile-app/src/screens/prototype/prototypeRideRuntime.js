@@ -1,5 +1,7 @@
 import { compactPersistedRideRecord } from "./persistedRideCompaction";
 import { parseRideActionLink } from "../../services/rideActionLink";
+import rideOverlay from "../../services/LeafRideOverlay";
+import { executeDriverOverlayAction } from "../../services/executeDriverOverlayAction";
 import { resolveDriverActionLocation } from "../../services/driverActionLocation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
@@ -20802,8 +20804,20 @@ export function usePrototypeRideRuntime(options = null) {
     const role = resolveRuntimeRole(profile);
     if (role !== "driver") {
       interactiveNotificationService.clearActionExecutor();
+      rideOverlay.setActionExecutor(null);
       return undefined;
     }
+
+    rideOverlay.setActionExecutor((request) => executeDriverOverlayAction(request, {
+      getContext: async () => {
+        const context = await prototypeDriverTripAssistantService.getLatestActionContext();
+        return runtimeState.activeBookingId === context?.bookingId ? context : null;
+      },
+      resolveLocation: resolveDriverActionLocation,
+      arrive: (options) => arrivePrototypePickup(profile, options),
+      start: startPrototypeTrip,
+      complete: completePrototypeTrip,
+    }));
 
     interactiveNotificationService.setActionExecutor(
       async ({ actionIdentifier }) => {
@@ -20897,6 +20911,7 @@ export function usePrototypeRideRuntime(options = null) {
 
     return () => {
       interactiveNotificationService.clearActionExecutor();
+      rideOverlay.setActionExecutor(null);
       rideLinkSubscription?.remove?.();
     };
   }, [isRuntimeEffectOwner, profile]);

@@ -29,13 +29,14 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 import java.io.File
+import java.util.UUID
 import kotlin.math.abs
 import kotlin.math.min
 
 /**
  * A corrida por cima do app de navegação, no lugar de uma notificação aberta no topo
- * da tela. Um só por processo. Toque no card abre o Leaf; o botão abre o Leaf já
- * executando a ação da etapa (Cheguei, Iniciar, Encerrar). Sem botão, recolhe depois
+ * da tela. Um só por processo. Toque no card abre o Leaf; o botão executa a ação da
+ * etapa em segundo plano (Cheguei, Iniciar, Encerrar). Sem botão, recolhe depois
  * de 8 s (ou ao arrastar para cima) numa pílula logo abaixo da faixa de instruções do
  * Waze/Maps; com botão, fica aberto até o motorista agir ou arrastar. Abre de novo
  * ao tocar na pílula, quando a etapa muda ou quando o botão aparece. A pílula pode
@@ -44,7 +45,7 @@ import kotlin.math.min
 @SuppressLint("StaticFieldLeak")
 object LeafRideOverlayWindow {
   private const val REQUEST_OPEN = 7710
-  private const val REQUEST_ACTION = 7711
+  private const val ACTION_TIMEOUT_MS = 45000L
   private const val MAX_CARD_WIDTH_DP = 480
   private const val AUTO_COLLAPSE_MS = 8000L
   /** Abaixo da faixa de instruções do Waze e do Google Maps (sem faixas de pista). */
@@ -115,10 +116,46 @@ object LeafRideOverlayWindow {
   private var fonts: Fonts? = null
   private var renderedActionId: String? = null
   private var pillY: Int? = null
+  private data class PendingAction(val requestId: String, val bookingId: String, val actionId: String)
+  @Volatile private var actionListener: ((String, String, String) -> Boolean)? = null
+  private var pendingAction: PendingAction? = null
+  private var confirmedActionKey: String? = null
+  private var actionError: String? = null
   private val mainHandler = Handler(Looper.getMainLooper())
+  private val actionTimeout = Runnable {
+    pendingAction?.let { completeAction(it.requestId, false, "Sem confirmação. Tente novamente.") }
+  }
   private val autoCollapse = Runnable { root?.let { setCollapsed(it.context, true) } }
   // Oferta vencida: o JS pode estar parado em segundo plano, então o card some daqui.
   private val expire = Runnable { if ((state?.expiresAtMs ?: 0L) > 0L) hide() }
+
+  fun setActionListener(listener: ((String, String, String) -> Boolean)?) {
+    actionListener = listener
+  }
+
+  fun completeAction(requestId: String, success: Boolean, message: String) {
+    val request = pendingAction ?: return
+    if (request.requestId != requestId) return
+    mainHandler.removeCallbacks(actionTimeout)
+    pendingAction = null
+    val current = state ?: return
+    if (request.bookingId != current.bookingId || request.actionId != current.actionId) return
+    confirmedActionKey = if (success) "${request.bookingId}:${request.actionId}" else null
+    actionError = if (success) null else message.take(140)
+    root?.let { render(it.context, current) }
+  }
+
+  private fun performAction(context: Context, current: LeafRideOverlayState) {
+    if (pendingAction != null || confirmedActionKey == "${current.bookingId}:${current.actionId}") return
+    val request = PendingAction(UUID.randomUUID().toString(), current.bookingId, current.actionId)
+    pendingAction = request
+    actionError = null
+    render(context, current)
+    mainHandler.postDelayed(actionTimeout, ACTION_TIMEOUT_MS)
+    if (actionListener?.invoke(request.requestId, request.bookingId, request.actionId) != true) {
+      completeAction(request.requestId, false, "Sem conexão com o Leaf. Abra o app para reconectar.")
+    }
+  }
 
   fun show(context: Context, next: LeafRideOverlayState) {
     state = next
@@ -156,6 +193,10 @@ object LeafRideOverlayWindow {
   }
 
   private fun removeView() {
+    mainHandler.removeCallbacks(actionTimeout)
+    pendingAction = null
+    confirmedActionKey = null
+    actionError = null
     mainHandler.removeCallbacks(autoCollapse)
     mainHandler.removeCallbacks(expire)
     glowAnimator?.cancel()
@@ -181,6 +222,16 @@ object LeafRideOverlayWindow {
   }
 
   private fun render(context: Context, next: LeafRideOverlayState) {
+    if ((renderedLegKey != null && renderedLegKey != next.legKey) ||
+        (renderedActionId != null && renderedActionId != next.actionId)) actionError = null
+    val key = "${next.bookingId}:${next.actionId}"
+    val pending = pendingAction
+    if (pending != null && (pending.bookingId != next.bookingId || pending.actionId != next.actionId)) {
+      mainHandler.removeCallbacks(actionTimeout)
+      pendingAction = null
+      actionError = null
+    }
+    if (confirmedActionKey != null && confirmedActionKey != key) confirmedActionKey = null
     mainHandler.removeCallbacks(expire)
     if (next.expiresAtMs > 0L) {
       mainHandler.postDelayed(expire, (next.expiresAtMs - System.currentTimeMillis()).coerceAtLeast(0L))
@@ -208,15 +259,27 @@ object LeafRideOverlayWindow {
     if (next.progress >= 0) trackView?.animateTo(next.progress.coerceIn(0.0, 1.0).toFloat())
     actionView?.apply {
       if (next.actionId.isNotBlank() && next.actionLabel.isNotBlank()) {
-        text = next.actionLabel
+        text = when {
+          pendingAction != null -> "Confirmando…"
+          confirmedActionKey == key -> "Confirmado"
+          actionError != null -> "Tentar novamente"
+          else -> next.actionLabel
+        }
+        isEnabled = pendingAction == null && confirmedActionKey != key
+        alpha = if (isEnabled) 1f else 0.65f
+        contentDescription = actionError ?: text
         visibility = View.VISIBLE
         setOnClickListener {
-          send(LeafRideOverlayState.openLeafIntent(context, next.actionId, next.bookingId, REQUEST_ACTION))
+          performAction(context, next)
         }
       } else {
         visibility = View.GONE
         setOnClickListener(null)
       }
+    }
+    if (actionError != null) {
+      subtitleView?.text = actionError
+      subtitleView?.visibility = View.VISIBLE
     }
     if (stageChanged || actionAppeared) {
       // Etapa nova ou botão novo: mostra o card aberto.
