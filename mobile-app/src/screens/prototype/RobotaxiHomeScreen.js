@@ -124,6 +124,7 @@ import {
   NAVIGATION_CAMERA_ANIMATION_MS,
   resolveNavigationCameraPitch,
   resolveNavigationCameraZoom,
+  resolveStableNavigationCameraZoom,
   shouldRevealNavigationRoute,
 } from '../../services/LeafNativeNavigationEngine';
 import {
@@ -2014,11 +2015,18 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   const insets = useSafeAreaInsets();
   const { height: windowHeight, width: windowWidth } = useWindowDimensions();
   const isScreenFocused = useIsFocused();
+  const [mapAppActive, setMapAppActive] = useState(() => AppState.currentState === 'active');
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', state => setMapAppActive(state === 'active'));
+    return () => subscription?.remove?.();
+  }, []);
   const currentRouteName = useNavigationState(state => state.routes[state.index]?.name || 'RobotaxiPrototype');
   const mapRef = useRef(null);
   const lastRouteLayoutKeyRef = useRef('');
   const lastNativeNavigationCameraAtRef = useRef(0);
   const lastNativeNavigationHeadingRef = useRef(null);
+  const [followCameraHeading, setFollowCameraHeading] = useState(0);
+  const lastCameraDebugAtRef = useRef(0);
   const lastNativeNavigationCameraPoseRef = useRef(null);
   const lastFollowRegionRef = useRef(null);
   const lastNativeNavigationRouteRevealKeyRef = useRef('');
@@ -6977,6 +6985,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   useEffect(() => {
     if (
       !driverFollowCameraActive ||
+      !isScreenFocused || !mapAppActive ||
       !mapRef.current ||
       !homeMapInteractiveReady ||
       !activeDriverNavigationCoordinate ||
@@ -7013,22 +7022,27 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
         return;
       }
     }
-    lastNativeNavigationCameraPoseRef.current = {
-      key: leafNativeNavigationKey,
-      viewportKey: navigationViewportKey,
-      coordinate: activeDriverNavigationCoordinate,
-      heading: resolvedCameraHeading,
-    };
-    lastNativeNavigationCameraAtRef.current = now;
-    lastNativeNavigationHeadingRef.current = resolvedCameraHeading;
     const navigationSpeedKmh = Number(driverTripAssistNativeNavigation?.currentSpeedKmh);
-    const resolvedCameraZoom = Number.isFinite(Number(driverTripAssistNativeNavigation?.cameraZoom))
+    const requestedCameraZoom = Number.isFinite(Number(driverTripAssistNativeNavigation?.cameraZoom))
       ? Number(driverTripAssistNativeNavigation.cameraZoom)
       : resolveNavigationCameraZoom(
           navigationSpeedKmh,
           driverTripAssistNativeNavigation?.remainingDistanceMeters,
           driverTripAssistNativeNavigation?.totalDistanceMeters,
         );
+    const resolvedCameraZoom = resolveStableNavigationCameraZoom(
+      navigationSpeedKmh,
+      lastPose?.key === leafNativeNavigationKey ? lastPose.zoom : null,
+      requestedCameraZoom,
+    );
+    lastNativeNavigationCameraPoseRef.current = {
+      key: leafNativeNavigationKey, viewportKey: navigationViewportKey,
+      coordinate: activeDriverNavigationCoordinate, heading: resolvedCameraHeading,
+      zoom: resolvedCameraZoom,
+    };
+    lastNativeNavigationCameraAtRef.current = now;
+    lastNativeNavigationHeadingRef.current = resolvedCameraHeading;
+    setFollowCameraHeading(resolvedCameraHeading ?? 0);
     // Driver navigation stays top-down. The previous speed-based pitch made
     // the map tilt into an isometric view after accepting/starting a ride.
     const resolvedCameraPitch = resolveNavigationCameraPitch();
@@ -7078,29 +7092,35 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
       },
       { duration: animationDurationMs }
     );
-    appendPrototypeRuntimeDebugStep('leaf_native_camera_follow', {
-      key: leafNativeNavigationKey,
-      latitude: Number(activeDriverNavigationCoordinate.latitude.toFixed(6)),
-      longitude: Number(activeDriverNavigationCoordinate.longitude.toFixed(6)),
-      cameraLatitude: Number(cameraCenterCoordinate.latitude.toFixed(6)),
-      cameraLongitude: Number(cameraCenterCoordinate.longitude.toFixed(6)),
-      heading: Number.isFinite(Number(resolvedCameraHeading))
-        ? Number(Number(resolvedCameraHeading).toFixed(1))
-        : 0,
-      routeHeading: Number.isFinite(Number(leafNativeNavigationCameraHeading))
-        ? Number(Number(leafNativeNavigationCameraHeading).toFixed(1))
-        : null,
-      zoom: resolvedCameraZoom,
-      pitch: resolvedCameraPitch,
-      anchorY: resolvedCameraAnchorY,
-      speedKmh: Number.isFinite(navigationSpeedKmh)
-        ? Number(navigationSpeedKmh.toFixed(1))
-        : 0,
-      lookAheadKm,
-      throttleMs: LEAF_NATIVE_NAV_CAMERA_THROTTLE_MS,
-      animationMs: animationDurationMs,
-    });
+    // Keep normal camera breadcrumbs bounded; stage/error events remain unsampled.
+    if (now - lastCameraDebugAtRef.current >= 5000) {
+      lastCameraDebugAtRef.current = now;
+      appendPrototypeRuntimeDebugStep('leaf_native_camera_follow', {
+        key: leafNativeNavigationKey,
+        latitude: Number(activeDriverNavigationCoordinate.latitude.toFixed(6)),
+        longitude: Number(activeDriverNavigationCoordinate.longitude.toFixed(6)),
+        cameraLatitude: Number(cameraCenterCoordinate.latitude.toFixed(6)),
+        cameraLongitude: Number(cameraCenterCoordinate.longitude.toFixed(6)),
+        heading: Number.isFinite(Number(resolvedCameraHeading))
+          ? Number(Number(resolvedCameraHeading).toFixed(1))
+          : 0,
+        routeHeading: Number.isFinite(Number(leafNativeNavigationCameraHeading))
+          ? Number(Number(leafNativeNavigationCameraHeading).toFixed(1))
+          : null,
+        zoom: resolvedCameraZoom,
+        pitch: resolvedCameraPitch,
+        anchorY: resolvedCameraAnchorY,
+        speedKmh: Number.isFinite(navigationSpeedKmh)
+          ? Number(navigationSpeedKmh.toFixed(1))
+          : 0,
+        lookAheadKm,
+        throttleMs: LEAF_NATIVE_NAV_CAMERA_THROTTLE_MS,
+        animationMs: animationDurationMs,
+      });
+    }
   }, [
+    isScreenFocused,
+    mapAppActive,
     activeDriverNavigationCoordinate,
     driverTripAssistNativeNavigation?.cameraAnchorY,
     driverTripAssistNativeNavigation?.cameraAnimationDurationMs,
@@ -10057,7 +10077,8 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
           userAvatarLetter={profileInitial}
           driverCoordinate={presentedDriverCoordinate}
           driverHeading={presentedDriverHeading}
-          mapCameraHeading={driverFollowCameraActive ? leafNativeNavigationCameraHeading ?? 0 : 0}
+          mapCameraHeading={driverFollowCameraActive ? followCameraHeading : 0}
+          motionEnabled={isScreenFocused && !homeMapSuspended}
           showTraffic={shouldShowTrafficLayer}
           searchingMode={presentedSearchingMode}
           searchCenterCoordinate={presentedSearchingMode ? searchCenterCoordinate : null}

@@ -4,6 +4,7 @@ import {
   calculateDistanceToRouteMeters,
   resolveNavigationCameraPitch,
   resolveNavigationCameraZoom,
+  resolveStableNavigationCameraZoom,
   resolveCurrentNavigationStepIndex,
   shouldRevealNavigationRoute,
 } from '../src/services/LeafNativeNavigationEngine';
@@ -32,6 +33,23 @@ const steps = [
 ];
 
 describe('LeafNativeNavigationEngine', () => {
+  it.each([[15.8, 25, 29, 15.5], [15.5, 50, 54, 15.2], [15.2, 80, 84, 14.9]])(
+    'holds zoom %s through speed noise around %s km/h, then changes at %s', (zoom, boundary, exit, nextZoom) => {
+      for (const speed of [boundary - 1, boundary + 1, boundary - 0.5, boundary + 2]) {
+        expect(resolveStableNavigationCameraZoom(speed, zoom)).toBe(zoom);
+      }
+      expect(resolveStableNavigationCameraZoom(exit, zoom)).toBe(nextZoom);
+    });
+
+  it('returns to closer zoom on deceleration and honors explicit arrival framing', () => {
+    expect(resolveStableNavigationCameraZoom(79, 14.9)).toBe(14.9);
+    expect(resolveStableNavigationCameraZoom(76, 14.9)).toBe(15.2);
+    expect(resolveStableNavigationCameraZoom(46, 15.2)).toBe(15.5);
+    expect(resolveStableNavigationCameraZoom(21, 15.5)).toBe(15.8);
+    expect(resolveStableNavigationCameraZoom(60, 15.2, 15.8)).toBe(15.8);
+    expect(resolveStableNavigationCameraZoom(90, null)).toBe(14.9);
+  });
+
   it('chooses the step closest to the driver position', () => {
     const currentStepIndex = resolveCurrentNavigationStepIndex({
       currentCoordinate: { latitude: -22.9694, longitude: -43.1790 },
