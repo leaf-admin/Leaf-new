@@ -288,7 +288,9 @@ describe('registerSocketDisconnectHandler grace window across gateways', () => {
             expire: jest.fn().mockResolvedValue(1),
             zrem: jest.fn().mockResolvedValue(1),
             srem: jest.fn().mockResolvedValue(1),
-            del: jest.fn().mockResolvedValue(1)
+            del: jest.fn().mockResolvedValue(1),
+            set: jest.fn().mockResolvedValue('OK'),
+            get: jest.fn().mockResolvedValue(null)
         };
         const socket = {
             id: 'socket_old',
@@ -325,9 +327,8 @@ describe('registerSocketDisconnectHandler grace window across gateways', () => {
         resolveAcceptedBookingCandidatesForDriver.mockResolvedValueOnce({ bookingIds: ['booking_1'] });
         const disconnectedAt = Date.now();
         await socket.handlers.disconnect('transport error');
-        expect(redis.hset).toHaveBeenCalledWith('driver:driver_1', {
-            socketReconnectUntilMs: String(disconnectedAt + 60000)
-        });
+        expect(redis.set).toHaveBeenCalledWith('driver_socket_reconnect_grace:driver_1',
+            JSON.stringify({ socketId: socket.id, deadlineMs: disconnectedAt + 60000 }), 'PX', 60000);
         expect(saveDriverLocation).not.toHaveBeenCalled();
         expect(recoverAcceptedBooking).not.toHaveBeenCalled();
         jest.advanceTimersByTime(59999);
@@ -388,6 +389,17 @@ describe('registerSocketDisconnectHandler grace window across gateways', () => {
         fetchSockets.mockRejectedValue(new Error('adapter unavailable'));
         await socket.handlers.disconnect('transport error');
         jest.advanceTimersByTime(60000);
+        await flush();
+        expect(saveDriverLocation).not.toHaveBeenCalled();
+        expect(recoverAcceptedBooking).not.toHaveBeenCalled();
+    });
+
+    it('does not let an older gateway timer bypass a newer disconnect window', async () => {
+        const { socket, redis, saveDriverLocation } = setup([]);
+        await socket.handlers.disconnect('transport error');
+        jest.advanceTimersByTime(30000);
+        redis.get.mockResolvedValue(JSON.stringify({ socketId: 'new_socket_other_gateway', deadlineMs: Date.now() + 60000 }));
+        jest.advanceTimersByTime(30000);
         await flush();
         expect(saveDriverLocation).not.toHaveBeenCalled();
         expect(recoverAcceptedBooking).not.toHaveBeenCalled();

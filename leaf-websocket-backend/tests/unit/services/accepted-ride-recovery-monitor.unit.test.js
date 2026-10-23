@@ -18,11 +18,12 @@ describe('accepted ride recovery across gateways and reconnect grace', () => {
       hkeys: jest.fn().mockResolvedValue(['booking_1']),
       hgetall: jest.fn(async key => {
         if (key === 'booking:booking_1') return { driverId: 'driver_1', status: 'ACCEPTED', acceptedAt: new Date(now - 600000).toISOString() };
-        if (key === 'driver:driver_1') return { isOnline: 'true', lastSeen: String(now - 300000), ...(deadline ? { socketReconnectUntilMs: String(deadline) } : {}) };
+        if (key === 'driver:driver_1') return { isOnline: 'true', lastSeen: String(now - 300000) };
         if (key === 'driver_socket_presence:driver_1') return presence;
         return {};
       }),
-      get: jest.fn().mockResolvedValue('booking_1'),
+      get: jest.fn(async key => key === 'active_trip_by_driver:driver_1' ? 'booking_1'
+        : deadline ? JSON.stringify({ socketId: 'old_socket', deadlineMs: deadline }) : null),
       hdel: jest.fn(),
     };
     redisPool.getConnection.mockReturnValue(redis);

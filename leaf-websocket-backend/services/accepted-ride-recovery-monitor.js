@@ -7,7 +7,7 @@ const {
     recoverAcceptedBooking
 } = require('./accepted-ride-recovery-service');
 const { setActiveTripForDriver } = require('../utils/active-trip-index');
-const { readDriverSocketPresence } = require('./driver-socket-presence-service');
+const { readDriverSocketPresence, readDriverSocketReconnectGrace } = require('./driver-socket-presence-service');
 const { getTTL } = require('../config/redis-ttl-config');
 const { logStructured } = require('../utils/logger');
 
@@ -92,7 +92,12 @@ class AcceptedRideRecoveryMonitor {
         if (socket?.connected && socket.userType === 'driver') return true;
         // The local socket map does not include other gateway processes.
         const presence = await readDriverSocketPresence(this.redis, driverId);
-        return presence.reachable === true;
+        if (presence.reachable === true) return true;
+        if (typeof this.io?.in !== 'function') return false;
+        // An idle driver's location/presence cache may expire while its socket
+        // remains alive on another gateway. Absence of cache is not absence of socket.
+        const sockets = await this.io.in(`driver_${driverId}`).fetchSockets();
+        return Array.isArray(sockets) && sockets.some(socket => socket?.id && socket.connected !== false);
     }
 
     parseDriverLastSeenMs(driverData) {
@@ -171,11 +176,11 @@ class AcceptedRideRecoveryMonitor {
             const driverOnline = driverExists && normalizeBoolean(driverData.isOnline);
             const activeTripMatches = Boolean(activeTripId && String(activeTripId) === String(bookingId));
 
-            const reconnectUntilMs = Number(driverData?.socketReconnectUntilMs);
             const disconnectGraceMs = Math.max(0, Number.parseInt(process.env.DRIVER_DISCONNECT_GRACE_MS || '0', 10) || 0);
-            const reconnectCheckMs = Date.now();
-            if (!driverConnected && Number.isFinite(reconnectUntilMs)
-                && reconnectUntilMs > reconnectCheckMs && reconnectUntilMs - reconnectCheckMs <= disconnectGraceMs) {
+            const reconnectGrace = !driverConnected && await readDriverSocketReconnectGrace(redis, driverId, {
+                maxGraceMs: disconnectGraceMs
+            });
+            if (reconnectGrace) {
                 stats.skippedGrace += 1;
                 continue;
             }

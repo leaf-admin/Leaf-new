@@ -245,11 +245,38 @@ function resetPresenceCacheForTests() {
   lastPresenceWrites.clear();
 }
 
+// Location hashes can expire in 60 s, independently of a longer reconnect
+// window. Keep the disconnect deadline in its own expiring Redis record.
+async function recordDriverSocketReconnectGrace(redis, {
+  driverId, socketId, graceMs, nowMs = Date.now()
+}) {
+  const duration = Math.max(0, Number.parseInt(graceMs, 10) || 0);
+  if (!driverId || !socketId || !duration) throw new Error('INVALID_DRIVER_SOCKET_RECONNECT_GRACE');
+  const grace = { socketId: String(socketId), deadlineMs: nowMs + duration };
+  await redis.set(`driver_socket_reconnect_grace:${driverId}`, JSON.stringify(grace), 'PX', duration);
+  return grace;
+}
+
+async function readDriverSocketReconnectGrace(redis, driverId, { maxGraceMs, nowMs }) {
+  if (!driverId || !(maxGraceMs > 0)) return null;
+  const raw = await redis.get(`driver_socket_reconnect_grace:${driverId}`);
+  if (!raw) return null;
+  let grace;
+  try { grace = JSON.parse(raw); } catch (_) { return null; }
+  const deadlineMs = Number(grace?.deadlineMs);
+  const checkedAt = nowMs ?? Date.now();
+  if (typeof grace?.socketId !== 'string' || !grace.socketId.trim() || !Number.isFinite(deadlineMs)
+    || deadlineMs <= checkedAt || deadlineMs - checkedAt > maxGraceMs) return null;
+  return { socketId: grace.socketId, deadlineMs };
+}
+
 module.exports = {
   DEFAULT_TTL_SECONDS,
   resetPresenceCacheForTests,
   getPresenceKey,
   upsertDriverSocketPresence,
   readDriverSocketPresence,
+  recordDriverSocketReconnectGrace,
+  readDriverSocketReconnectGrace,
   clearDriverSocketPresence
 };
