@@ -2515,7 +2515,8 @@ describe('PaymentService refund terminal status handling', () => {
     expect(mockProcessRefund).toHaveBeenCalledWith(
       'charge_refund_2',
       1200,
-      'Reembolso Leaf - unit canonical refund'
+      'Reembolso Leaf - unit canonical refund',
+      { refundCorrelationId: expect.any(String) }
     );
     expect(firestore.docs.get('ride_payments/booking_refund_2')).toMatchObject({
       status: 'REFUNDED_PARTIAL',

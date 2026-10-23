@@ -109,9 +109,9 @@ const REFUND_NOT_SENT_ERROR_CODES = new Set([
 ]);
 
 /**
- * Diz se o pedido de reembolso chegou à Woovi. A chamada de reembolso não leva
- * id de idempotência, então só `NOT_SENT` pode ser repetido sem risco de
- * estorno em dobro.
+ * Diz se o pedido de reembolso chegou à Woovi. O correlationID rastreia a
+ * operação; sem comprovar o resultado no provedor, apenas `NOT_SENT` pode
+ * ser repetido automaticamente sem risco de estorno em dobro.
  *
  * - NOT_SENT: a conexão não foi aberta, nada foi enviado.
  * - REJECTED: a Woovi respondeu 4xx recusando o pedido.
@@ -1047,16 +1047,26 @@ class WooviDriverService {
    */
   async processRefund(chargeId, amount, reason, options = {}) {
     try {
+      const correlationID = String(options.refundCorrelationId || '').trim();
+      if (!correlationID) {
+        return { success: false, code: 'REFUND_CORRELATION_ID_REQUIRED',
+          error: 'Identificador durável do reembolso é obrigatório', providerDelivery: 'NOT_SENT' };
+      }
       const api = options.wooviConfig ? this.createApi(options.wooviConfig) : this.api;
       const refundData = {
+        correlationID,
         value: amount, // Se não informado, reembolsa total
-        ...(reason && { comment: reason })
+        ...(reason && { comment: String(reason).slice(0, 140) })
       };
 
-      const response = await api.post(`/charge/${chargeId}/refund`, refundData);
+      const response = await api.post(`/charge/${encodeURIComponent(String(chargeId))}/refund`, refundData);
 
       // createApi resolves 4xx for inspection; an HTTP refusal is not a refund.
       if (!(response.status >= 200 && response.status < 300)) {
+        logStructured('warn', 'Resposta HTTP recusada no reembolso', {
+          service: 'woovi-driver-service', httpStatus: response.status || null,
+          providerDelivery: classifyRefundProviderDelivery({ response })
+        });
         return {
           success: false,
           error: response.data || `Woovi respondeu HTTP ${response.status}`,
@@ -1067,7 +1077,7 @@ class WooviDriverService {
       
       return {
         success: true,
-        refundId: response.data.refund?.id,
+        refundId: response.data.refund?.id || response.data.refund?.correlationID,
         refund: response.data.refund
       };
     } catch (error) {

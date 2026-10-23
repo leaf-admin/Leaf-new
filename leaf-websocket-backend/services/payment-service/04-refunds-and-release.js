@@ -653,7 +653,8 @@ class PaymentServiceRefundsAndReleaseMethods {
       canonicalChargeId,
       refundAmount,
       reason,
-      contextResult.context
+      contextResult.context,
+      { refundRequestId: claim.refundRequestId }
     );
     if (!refundResult.success) {
       await this.clearRideRefundClaim({
@@ -738,7 +739,7 @@ class PaymentServiceRefundsAndReleaseMethods {
    * @param {string} reason - Motivo do reembolso
    * @returns {Promise<Object>} - Resultado do reembolso
    */
-  async processRefund(chargeId, amount, reason = 'No driver found', financialContext = null) {
+  async processRefund(chargeId, amount, reason = 'No driver found', financialContext = null, { refundRequestId = null } = {}) {
     // Vira true imediatamente antes de chamar a Woovi. Enquanto for false, qualquer
     // falha aconteceu aqui dentro e o reembolso com certeza não foi enviado.
     let providerCallStarted = false;
@@ -801,10 +802,10 @@ class PaymentServiceRefundsAndReleaseMethods {
       const refundResult = await circuitBreakerService.execute(
         'woovi_refund',
         async () => {
-          const refundArgs = [chargeId, amount, `Reembolso Leaf - ${reason}`];
-          if (contextResult.context.namespace === 'sandbox') {
-            refundArgs.push({ wooviConfig: chargeRuntime.wooviConfig });
-          }
+          const refundArgs = [chargeId, amount, `Reembolso Leaf - ${reason}`, {
+            refundCorrelationId: refundRequestId,
+            ...(contextResult.context.namespace === 'sandbox' ? { wooviConfig: chargeRuntime.wooviConfig } : {})
+          }];
           providerCallStarted = true;
           return await this.wooviDriverService.processRefund(...refundArgs);
         },
