@@ -181,6 +181,7 @@ export function normalizeNavigationSteps(steps = []) {
         startLocation,
         endLocation,
         ...(maneuverLocation ? { maneuverLocation } : {}),
+        ...(step?.maneuver ? { maneuver: String(step.maneuver) } : {}),
         distanceMeters: distanceMeters !== null && distanceMeters >= 0 ? distanceMeters : 0,
         durationSeconds: durationSeconds !== null && durationSeconds >= 0 ? durationSeconds : 0,
         polylinePoints: step?.polylinePoints || null,
@@ -719,6 +720,12 @@ function isCurveInstruction(instruction) {
   );
 }
 
+function isTurningStep(step) {
+  return isCurveInstruction(step.instruction) || Boolean(
+    step.maneuver && !['DEPART', 'STRAIGHT', 'MANEUVER_UNSPECIFIED'].includes(step.maneuver),
+  );
+}
+
 function resolveUpcomingNavigationTarget({
   current,
   target,
@@ -738,7 +745,7 @@ function resolveUpcomingNavigationTarget({
   const routeCursorMeters = Number(currentMeasure?.routeMeters);
   const candidateCurveSteps = normalizedSteps
     .slice(safeCurrentStepIndex)
-    .filter((step) => isCurveInstruction(step.instruction));
+    .filter(isTurningStep);
   const upcomingCurveStep = candidateCurveSteps.find((step) => {
     const coordinate =
       step?.maneuverLocation ||
@@ -767,6 +774,7 @@ function resolveUpcomingNavigationTarget({
     );
     return {
       instruction: upcomingCurveStep.instruction,
+      maneuver: upcomingCurveStep.maneuver || null,
       distanceTargetKind: 'curve',
       distanceTargetLabel: 'a próxima curva',
       distanceTargetCoordinate: upcomingCurveCoordinate,
@@ -781,7 +789,7 @@ function resolveUpcomingNavigationTarget({
 
   return {
     instruction:
-      currentStep && !isCurveInstruction(currentStep.instruction)
+      currentStep && !isTurningStep(currentStep)
         ? currentStep.instruction
         : fallbackInstruction,
     distanceTargetKind: 'destination',
@@ -845,6 +853,7 @@ export function buildLeafNativeNavigationState({
   currentSpeedKmh = null,
   currentSpeedMetersPerSecond = null,
   offRouteThresholdMeters = DEFAULT_OFF_ROUTE_THRESHOLD_METERS,
+  allowSyntheticSteps = false,
 } = {}) {
   const normalizedStatus = String(status || '').trim().toLowerCase();
   const normalizedPhase = phase === 'destination' ? 'destination' : 'pickup';
@@ -855,12 +864,16 @@ export function buildLeafNativeNavigationState({
     return null;
   }
 
-  let normalizedSteps = normalizeNavigationSteps(steps);
+  // Old cached plans may contain inferred turns. Visual guidance uses provider
+  // steps only; missing steps must never trigger a new directions request.
+  let normalizedSteps = normalizeNavigationSteps(steps).filter((step) => (
+    allowSyntheticSteps || !step.synthetic
+  ));
   const routeGeometryCoordinates = buildRouteGeometryCoordinates(
     routeCoordinates,
     normalizedSteps,
   );
-  if (normalizedSteps.length === 0 && routeGeometryCoordinates.length >= 2) {
+  if (allowSyntheticSteps && normalizedSteps.length === 0 && routeGeometryCoordinates.length >= 2) {
     normalizedSteps = buildSyntheticNavigationStepsFromRoute(
       routeGeometryCoordinates,
       totalDurationMinutes,
@@ -963,6 +976,7 @@ export function buildLeafNativeNavigationState({
     routeCoordinates: routeGeometryCoordinates,
     currentStepIndex,
     currentInstruction: hasArrived ? arrivalInstruction : upcomingTarget.instruction,
+    maneuver: hasArrived || isOffRoute ? null : upcomingTarget.maneuver || null,
     maneuverDistanceMeters,
     maneuverDistanceLabel: formatDistanceLabel(maneuverDistanceMeters),
     maneuverDistanceTargetKind: upcomingTarget.distanceTargetKind,

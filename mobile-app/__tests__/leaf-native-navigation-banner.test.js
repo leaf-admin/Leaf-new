@@ -40,13 +40,12 @@ describe('LeafNativeNavigationBanner', () => {
     expect(getByText('Vire à direita na Av. Atlântica')).toBeTruthy();
     expect(getByTestId('leaf-native-turn-right-glyph')).toBeTruthy();
     expect(getByText('180 m até a próxima curva')).toBeTruthy();
-    expect(getByText('2 km')).toBeTruthy();
-    expect(getByText('7 min')).toBeTruthy();
-    expect(getByText('Navegar')).toBeTruthy();
+    expect(getByText('2 km · 7 min')).toBeTruthy();
+    expect(getByText('Abrir navegador')).toBeTruthy();
     expect(usePrototypeMapOcclusion).toHaveBeenCalledWith(
       expect.objectContaining({
-        // insetsTop (24) + banner offset (70) + fallback height (96) + gap (12)
-        occludedTop: 202,
+        // The initial camera clearance reserves the whole new banner.
+        occludedTop: 250,
       }),
     );
 
@@ -56,6 +55,25 @@ describe('LeafNativeNavigationBanner', () => {
     fireEvent.press(getByLabelText('Ocultar navegação LEAF'));
 
     expect(onHide).toHaveBeenCalledTimes(1);
+  });
+
+  it('updates camera clearance from the actual banner height', () => {
+    const { getByTestId } = render(
+      <LeafNativeNavigationBanner routeKey="home" insetsTop={24} navigationModel={baseNavigationModel} />,
+    );
+    fireEvent(getByTestId('leaf-native-navigation-banner'), 'layout', {
+      nativeEvent: { layout: { width: 294, height: 198 } },
+    });
+    expect(usePrototypeMapOcclusion).toHaveBeenLastCalledWith(expect.objectContaining({ occludedTop: 304 }));
+  });
+
+  it('uses the provider maneuver when the instruction does not name a direction', () => {
+    const { getByTestId } = render(
+      <LeafNativeNavigationBanner routeKey="home" navigationModel={{
+        ...baseNavigationModel, currentInstruction: 'Pegue a saída indicada', maneuver: 'RAMP_RIGHT',
+      }} />,
+    );
+    expect(getByTestId('leaf-native-turn-right-glyph')).toBeTruthy();
   });
 
   it('uses destination copy when there are no more curves', () => {
