@@ -33,7 +33,7 @@ describe('WooviDriverService - entrega do pedido de reembolso', () => {
     const post = jest.fn()
       .mockRejectedValueOnce(Object.assign(new Error('connect ECONNREFUSED'), { code: 'ECONNREFUSED' }))
       .mockRejectedValueOnce(Object.assign(new Error('timeout of 30000ms exceeded'), { code: 'ECONNABORTED' }))
-      .mockResolvedValueOnce({ data: { refund: { id: 'refund_1' } } });
+      .mockResolvedValueOnce({ status: 200, data: { refund: { id: 'refund_1' } } });
     const service = Object.create(WooviDriverService.prototype);
     service.api = { post };
 
@@ -53,5 +53,20 @@ describe('WooviDriverService - entrega do pedido de reembolso', () => {
       refund: { id: 'refund_1' }
     });
     expect(post).toHaveBeenCalledWith('/charge/charge_1/refund', { value: 3646, comment: 'motivo' });
+  });
+
+  it.each([400, 401, 404, 422, 502])('não registra sucesso se o Axios resolver uma resposta HTTP %s', async (status) => {
+    const error = { errors: [{ message: 'provider refusal' }] };
+    const post = jest.fn().mockResolvedValue({ status, data: error });
+    const service = Object.create(WooviDriverService.prototype);
+    service.api = { post };
+
+    await expect(service.processRefund('charge_1', 3646, 'motivo')).resolves.toMatchObject({
+      success: false,
+      error,
+      httpStatus: status,
+      providerDelivery: status < 500 ? 'REJECTED' : 'UNKNOWN'
+    });
+    expect(post).toHaveBeenCalledTimes(1);
   });
 });

@@ -117,6 +117,12 @@ inválido”; consulta com o perfil original `qa-test-users-sandbox-durable`
 respondeu COMPLETED, valor 4.934 centavos. Essa consulta não prova, isoladamente,
 ausência de estorno parcial. Credenciais não foram exibidas, editadas ou copiadas.
 
+Reconciliação posterior às 05:50:16.976Z: GET somente de leitura dos reembolsos
+da cobrança, com o perfil original sandbox, respondeu HTTP 200,
+`refunds: []` (nenhum estorno registrado naquele instante).
+Endpoint conferido na [referência oficial OpenPix/Woovi](https://developers.openpix.com.br/api).
+Conferir novamente esse estado imediatamente antes de qualquer nova tentativa.
+
 A correção local, vinculada à issue #415, em
 `services/payment-service/02-events-and-status-cache.js`
 busca o documento pelo ID do perfil original para cobranças sandbox originadas
@@ -125,9 +131,17 @@ liquidar cobrança existente; perfil ausente, ambiente divergente ou erro de lei
 impedem usar credenciais genéricas. O caminho operacional permanece inalterado.
 Exige uma leitura adicional desse perfil por resolução; não cria provider ou job.
 
+A revisão do mesmo fluxo também reproduziu uma falha no cliente HTTP: `createApi`
+resolve respostas 4xx, mas `processRefund` as devolvia como sucesso. O complemento
+em `services/woovi-driver-service.js` exige HTTP 2xx antes de informar sucesso,
+classificando 4xx como REJECTED e 5xx como UNKNOWN, sem retry novo. Essa validação
+é compartilhada entre ambientes; não altera valores ou política financeira.
+Os cinco casos novos (400/401/404/422/502) falharam antes da correção.
+
 Validação local do complemento financeiro: a nova regressão falhou antes da
 correção (8 falhas / 4 aprovações) e passou depois. Testes direcionados de resolução
-e liquidação parcial: 24 aprovados. Backend completo final: **352 suítes / 3.098
+e liquidação parcial: 24 aprovados; cliente HTTP: 9 aprovados.
+Backend completo final: **352 suítes / 3.103
 testes aprovados**. Fixtures dos testes antigos passaram a incluir o perfil
 original e a conferir a credencial escolhida; sem mudar suas expectativas de
 valor, saldo, duplicação ou revisão de resultado ambíguo. Houve falhas intermediárias
@@ -138,18 +152,20 @@ validação, com dependências já existentes; nenhuma instalação/substituiç�
 dependências do usuário. Configuração de desenvolvimento/sandbox sintética,
 governança, segredos e diff check aprovados.
 
-A corrida QA continua aberta até reconciliação e cancelamento. Contadores
+A corrida QA continua aberta até cancelamento, após nova conferência do provedor. Contadores
 conferidos: sandbox 2, operacional 0. Mock GPS foi parado, permissões e sessões
 preservadas; Leaf motorista foi trazido à frente. Não declarar motorista Offline
 ou passageiro no mapa inicial antes de confirmar a conclusão dessa limpeza.
 Novo deploy e intervenção para recuperar o cancelamento exigem aprovação própria.
 
-Rollback da correção financeira: reverter somente o resolver e republicar esse
-arquivo pelo rollout guardado, sem tocar credenciais ou dados financeiros. Isso
-restabelece a limitação conhecida de reembolso por perfil. A correção não resolve
+Rollback da correção financeira: reverter os dois arquivos de runtime e
+republicá-los pelo rollout guardado, sem tocar credenciais ou dados financeiros.
+Isso restabelece a limitação de perfil e o tratamento incorreto de respostas 4xx.
+A correção não resolve
 rotação de credenciais dentro do mesmo documento; depende do perfil original
-continuar disponível com credenciais válidas. O POST ambíguo anterior requer
-reconciliação antes de qualquer repetição.
+continuar disponível com credenciais válidas. A ausência de reembolsos foi
+reconciliada somente no instante descrito acima; exige nova conferência antes
+de qualquer repetição.
 
 Rollback: reverter o complemento e republicar os três arquivos anteriores pelo
 rollout guardado; a chave nova expira sozinha. Backend/OTA do #412 têm rollback
