@@ -231,6 +231,8 @@ describe('PaymentService.processNetDistribution - estorno parcial no encerrament
     expect(mockProcessRefund).toHaveBeenCalledTimes(1);
     expect(mockProcessRefund.mock.calls[0][3].wooviConfig.authorizationAppId)
       .toBe('original-sandbox-test-credential');
+    expect(mockProcessRefund.mock.calls[0][3].refundCorrelationId)
+      .toBe(firestore.docs.get(`sandbox_ride_payments/${bookingId}`).refundRequestId);
     expect(mockProcessRefund).toHaveBeenCalledWith(
       chargeId,
       3646,
@@ -393,6 +395,9 @@ describe('PaymentService.processNetDistribution - estorno parcial no encerrament
       });
       expect(second.passengerRefundManualReviewRequired).toBeUndefined();
       expect(mockProcessRefund).toHaveBeenCalledTimes(2);
+      expect(mockProcessRefund.mock.calls[0][3].refundCorrelationId).toEqual(expect.any(String));
+      expect(mockProcessRefund.mock.calls[1][3].refundCorrelationId)
+        .toBe(mockProcessRefund.mock.calls[0][3].refundCorrelationId);
       expect(paymentDoc()).toMatchObject({
         status: 'REFUNDED_PARTIAL',
         refunded: true,
