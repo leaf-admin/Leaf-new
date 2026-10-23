@@ -1,5 +1,9 @@
 # Waze, reconexão após aceite e câmera do passageiro
 
+Atualização: o #412 foi publicado e o ciclo físico foi executado. Consulte
+[resultados e complemento](WAZE_SOCKET_E2E_RESULTADOS_2026-10-23.md) para o estado
+atual; as etapas pendentes abaixo registram o plano anterior à publicação.
+
 ## Objetivo e escopo
 
 Investigar a perda da corrida aceita com o Waze em primeiro plano e o zoom

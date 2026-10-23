@@ -2,7 +2,9 @@ const {
     closeDriverOnlineSessionAt
 } = require('../services/driver-online-time-policy-service');
 const {
-    clearDriverSocketPresence
+    clearDriverSocketPresence,
+    recordDriverSocketReconnectGrace,
+    readDriverSocketReconnectGrace
 } = require('../services/driver-socket-presence-service');
 const {
     commitDriverOnlineProjection
@@ -298,8 +300,10 @@ function registerSocketDisconnectHandler({
                 if (shouldDelayOffline) {
                     // The recovery monitor runs in other processes too. Share
                     // this same deadline so it cannot bypass the socket grace.
-                    await redis.hset(`driver:${socket.userId}`, {
-                        socketReconnectUntilMs: String(Date.now() + DRIVER_DISCONNECT_GRACE_MS)
+                    await recordDriverSocketReconnectGrace(redis, {
+                        driverId: socket.userId,
+                        socketId: socket.id,
+                        graceMs: DRIVER_DISCONNECT_GRACE_MS
                     });
                     const disconnectGraceTimers = getDisconnectGraceTimers();
                     const existingTimer = disconnectGraceTimers.get(socket.userId);
@@ -311,10 +315,15 @@ function registerSocketDisconnectHandler({
                         // A reconexão pode cair em outro gateway, onde este timer não é limpo:
                         // pergunta a todos (adapter Redis) se o motorista já tem socket ativo.
                         driverHasLiveSocket(socket.userId)
-                            .then((live) => (
-                                live || getDisconnectGraceTimers().get(socket.userId)?.socketId !== socket.id
-                                    ? null : finalizeDriverDisconnect()
-                            ))
+                            .then(async (live) => {
+                                if (live || getDisconnectGraceTimers().get(socket.userId)?.socketId !== socket.id) return;
+                                // A newer disconnect on another gateway owns its
+                                // own window; this older local timer must wait.
+                                const grace = await readDriverSocketReconnectGrace(redis, socket.userId, {
+                                    maxGraceMs: DRIVER_DISCONNECT_GRACE_MS
+                                });
+                                if (!grace) await finalizeDriverDisconnect();
+                            })
                             .catch((error) => {
                                 logStructured('error', 'Erro ao finalizar grace de desconexão do motorista', {
                                     service: 'websocket',
