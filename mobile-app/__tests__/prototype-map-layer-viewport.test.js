@@ -4,6 +4,8 @@ import { act, fireEvent, render } from '@testing-library/react-native';
 const mockAnimateToRegion = jest.fn();
 const mockFitToCoordinates = jest.fn();
 const mockAnimateCamera = jest.fn();
+const mockPointForCoordinate = jest.fn();
+const mockGetCamera = jest.fn();
 jest.mock('../src/components/MobilePreferencesProvider', () => {
   const React = require('react');
   const Context = React.createContext({ preferences: { trafficLayerEnabled: true } });
@@ -27,6 +29,8 @@ jest.mock('react-native-maps', () => {
       animateCamera: mockAnimateCamera,
       animateToRegion: mockAnimateToRegion,
       fitToCoordinates: mockFitToCoordinates,
+      pointForCoordinate: mockPointForCoordinate,
+      getCamera: mockGetCamera,
     }));
 
     return (
@@ -252,6 +256,70 @@ describe('PrototypeMapLayer route viewport fitting', () => {
     mockAnimateCamera.mockClear();
     mockAnimateToRegion.mockClear();
     mockFitToCoordinates.mockClear();
+    mockPointForCoordinate.mockReset().mockResolvedValue({ x: 120, y: 240 });
+    mockGetCamera.mockReset().mockResolvedValue({ heading: 0 });
+  });
+
+  it.each(['car', 'dot'])('keeps native cars positioned without projection queries with current location mode %s', async (currentLocationMarkerMode) => {
+    const { AppState, Platform } = require('react-native');
+    const previousState = AppState.currentState;
+    const previousPlatform = Platform.OS;
+    Platform.OS = 'android';
+    AppState.currentState = 'active';
+    const screen = render(<PrototypeMapLayer
+      mapRef={React.createRef()}
+      region={baseRegion}
+      userCoordinate={routeCoordinates[0]}
+      driverCoordinate={routeCoordinates[1]}
+      driverMarkerMode="car"
+      currentLocationMarkerMode={currentLocationMarkerMode}
+      mapCameraHeading={90}
+    />);
+    try {
+      await act(async () => { jest.advanceTimersByTime(400); });
+      expect(screen.getAllByTestId(currentLocationMarkerMode === 'car'
+        ? 'map-user-vehicle-marker' : 'map-driver-vehicle-marker')).toHaveLength(1);
+      expect(mockPointForCoordinate).not.toHaveBeenCalled();
+    } finally {
+      screen.unmount();
+      AppState.currentState = previousState;
+      Platform.OS = previousPlatform;
+    }
+  });
+
+  it('pauses camera inspection in Waze and resumes it when the Leaf map returns', async () => {
+    const { AppState, Platform } = require('react-native');
+    const previousState = AppState.currentState;
+    const previousPlatform = Platform.OS;
+    Platform.OS = 'android';
+    AppState.currentState = 'active';
+    let onAppState;
+    const remove = jest.fn();
+    const subscription = jest.spyOn(AppState, 'addEventListener').mockImplementation((event, listener) => {
+      onAppState = listener;
+      return { remove };
+    });
+    const mapRef = React.createRef();
+    const screen = render(<PrototypeMapLayer mapRef={mapRef} region={baseRegion} mapCameraHeading={90} />);
+    try {
+      await act(async () => {});
+      expect(mockGetCamera).toHaveBeenCalled();
+      mockGetCamera.mockClear();
+      act(() => onAppState('background'));
+      screen.rerender(<PrototypeMapLayer mapRef={mapRef} region={visibleRouteRegion} mapCameraHeading={180} />);
+      await act(async () => { jest.advanceTimersByTime(500); });
+      expect(mockGetCamera).not.toHaveBeenCalled();
+      act(() => onAppState('active'));
+      await act(async () => {});
+      expect(mockGetCamera).toHaveBeenCalledTimes(1);
+      screen.unmount();
+      expect(remove).toHaveBeenCalled();
+    } finally {
+      screen.unmount();
+      subscription.mockRestore();
+      AppState.currentState = previousState;
+      Platform.OS = previousPlatform;
+    }
   });
 
   it('gates Google traffic with both backend policy and the confirmed account preference', () => {

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Animated, Easing, Image, Platform, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { Animated, AppState, Easing, Image, Platform, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import MapView, { Circle, Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
 import { useReducedMotion } from 'react-native-reanimated';
 import mapStyleAppleLike from './mapStyleAppleLike';
@@ -1435,6 +1435,14 @@ function PrototypeMapLayer({
   const { preferences } = useMobilePreferences();
   const showTraffic = Boolean(requestedTraffic && preferences.trafficLayerEnabled);
   const reduceMotion = useReducedMotion();
+  const [isMapActive, setIsMapActive] = useState(() => AppState.currentState === 'active');
+  useEffect(() => {
+    if (Platform.OS !== 'android') return undefined;
+    const subscription = AppState.addEventListener('change', (state) => {
+      setIsMapActive(state === 'active');
+    });
+    return () => subscription?.remove?.();
+  }, []);
   const mapProvider =
     Platform.OS === 'ios' || Platform.OS === 'android'
       ? PROVIDER_GOOGLE
@@ -2495,7 +2503,7 @@ function PrototypeMapLayer({
   // the real camera heading is tracked as well.
   const [androidActualMapHeading, setAndroidActualMapHeading] = useState(0);
   useEffect(() => {
-    if (Platform.OS !== 'android') {
+    if (Platform.OS !== 'android' || !isMapActive) {
       return undefined;
     }
     const map = mapRef?.current;
@@ -2516,7 +2524,7 @@ function PrototypeMapLayer({
     return () => {
       cancelled = true;
     };
-  }, [androidVisibleRegion, mapCameraHeading, mapRef]);
+  }, [androidVisibleRegion, isMapActive, mapCameraHeading, mapRef]);
   const isHeadingRotated = (heading) =>
     Math.abs(((Number(heading) || 0) % 360 + 540) % 360 - 180) > 1;
   const androidMapIsRotated =
@@ -2525,7 +2533,11 @@ function PrototypeMapLayer({
   const rotatedDriverVehiclePoint = useRotatedMapPoint({
     mapRef,
     coordinate: displayedDriverCoordinate,
-    enabled: androidMapIsRotated && driverMarkerMode === 'car' && hasDisplayedDriverCoordinate,
+    // Native cars already follow the SDK camera. Querying their unused overlay
+    // entered getProjection on resume from Waze and hung the Android UI in QA.
+    enabled: isMapActive && !USE_NATIVE_ANDROID_VEHICLE_MARKER &&
+      androidMapIsRotated && driverMarkerMode === 'car' &&
+      currentLocationMarkerMode !== 'car' && hasDisplayedDriverCoordinate,
     regionKey: androidVisibleRegion,
   });
   const projectedDriverVehicleOverlayPoint = useMemo(() => {
@@ -2631,7 +2643,7 @@ function PrototypeMapLayer({
   const rotatedCurrentLocationPoint = useRotatedMapPoint({
     mapRef,
     coordinate: markerCoordinate,
-    enabled: androidMapIsRotated && currentLocationMarkerMode === 'car',
+    enabled: isMapActive && androidMapIsRotated && shouldRenderCurrentLocationVehicleOverlay,
     regionKey: androidVisibleRegion,
   });
   const projectedUserOverlayPoint = useMemo(() => {
