@@ -156,6 +156,10 @@ describe('PaymentService.processNetDistribution - estorno parcial no encerrament
   let financialContext;
 
   const seedSandboxPayment = (overrides = {}) => {
+    firestore.docs.set('payment_runtime_profiles/qa-test-users-sandbox-durable', {
+      environment: 'sandbox',
+      authorizationAppId: 'original-sandbox-test-credential'
+    });
     firestore.docs.set(`sandbox_payment_intents/${service.buildAdvancePaymentIntentId(temporaryRideId)}`, {
       paymentIntentId: service.buildAdvancePaymentIntentId(temporaryRideId),
       rideId: temporaryRideId,
@@ -225,6 +229,8 @@ describe('PaymentService.processNetDistribution - estorno parcial no encerrament
     const result = await settle();
 
     expect(mockProcessRefund).toHaveBeenCalledTimes(1);
+    expect(mockProcessRefund.mock.calls[0][3].wooviConfig.authorizationAppId)
+      .toBe('original-sandbox-test-credential');
     expect(mockProcessRefund).toHaveBeenCalledWith(
       chargeId,
       3646,
