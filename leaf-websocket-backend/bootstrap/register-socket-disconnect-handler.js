@@ -109,7 +109,7 @@ function registerSocketDisconnectHandler({
                 userId: driverId,
                 error: error.message
             });
-            return false;
+            throw error;
         }
     };
 
@@ -290,14 +290,17 @@ function registerSocketDisconnectHandler({
                         error: presenceError.message
                     });
                 });
-                const acceptedRideCandidates = await resolveAcceptedBookingCandidatesForDriver(redis, socket.userId, {
-                    scanLimit: 300
-                }).catch(() => ({ bookingIds: [] }));
-                const hasAcceptedRideCandidates = Array.isArray(acceptedRideCandidates?.bookingIds) &&
-                    acceptedRideCandidates.bookingIds.length > 0;
-                const shouldDelayOffline = DRIVER_DISCONNECT_GRACE_MS > 0 && !hasAcceptedRideCandidates;
+                // Navigation apps put Leaf in the background. A transient
+                // transport failure must get the same configured reconnect
+                // window after acceptance as it gets while waiting for offers.
+                const shouldDelayOffline = DRIVER_DISCONNECT_GRACE_MS > 0;
 
                 if (shouldDelayOffline) {
+                    // The recovery monitor runs in other processes too. Share
+                    // this same deadline so it cannot bypass the socket grace.
+                    await redis.hset(`driver:${socket.userId}`, {
+                        socketReconnectUntilMs: String(Date.now() + DRIVER_DISCONNECT_GRACE_MS)
+                    });
                     const disconnectGraceTimers = getDisconnectGraceTimers();
                     const existingTimer = disconnectGraceTimers.get(socket.userId);
                     if (existingTimer?.timeout) {
@@ -308,7 +311,10 @@ function registerSocketDisconnectHandler({
                         // A reconexão pode cair em outro gateway, onde este timer não é limpo:
                         // pergunta a todos (adapter Redis) se o motorista já tem socket ativo.
                         driverHasLiveSocket(socket.userId)
-                            .then((live) => (live ? null : finalizeDriverDisconnect()))
+                            .then((live) => (
+                                live || getDisconnectGraceTimers().get(socket.userId)?.socketId !== socket.id
+                                    ? null : finalizeDriverDisconnect()
+                            ))
                             .catch((error) => {
                                 logStructured('error', 'Erro ao finalizar grace de desconexão do motorista', {
                                     service: 'websocket',
@@ -319,7 +325,9 @@ function registerSocketDisconnectHandler({
                             })
                             .finally(() => {
                                 const activeTimers = getDisconnectGraceTimers();
-                                activeTimers.delete(socket.userId);
+                                if (activeTimers.get(socket.userId)?.socketId === socket.id) {
+                                    activeTimers.delete(socket.userId);
+                                }
                             });
                     }, DRIVER_DISCONNECT_GRACE_MS);
 

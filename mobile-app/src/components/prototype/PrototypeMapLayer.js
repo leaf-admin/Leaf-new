@@ -2203,6 +2203,14 @@ function PrototypeMapLayer({
       return true;
     }
 
+    // At pickup the approach line can disappear. Fitting its nearly identical
+    // endpoints would discard the caller's bounded fallback (and zoom to a
+    // few metres). Keep the supplied region until road geometry returns.
+    if (!hasRoute && typeof mapRef.current.animateToRegion === 'function') {
+      mapRef.current.animateToRegion(region, duration);
+      return true;
+    }
+
     if (
       routeViewportFitCoordinates.length >= 2 &&
       typeof mapRef.current.fitToCoordinates === 'function'
@@ -2226,6 +2234,7 @@ function PrototypeMapLayer({
     return false;
   }, [
     forceRegionUpdate,
+    hasRoute,
     mapRef,
     region,
     resolvedRouteViewportRegion,

@@ -10,6 +10,7 @@ import Logger from '../utils/Logger';
 import { fetchNetInfo } from '../utils/NetInfoSafe';
 
 const DRIVER_PRESENCE_MIN_INTERVAL_MS = 5000;
+const BACKGROUND_RECONNECT_MIN_INTERVAL_MS = 10000;
 
 // Posição guardada há mais tempo que isso não serve mais ao servidor (corrida
 // encerrada há horas, que ele recusa): sem o corte, ela ficava no buffer para sempre.
@@ -37,6 +38,8 @@ class LocationBufferService {
         this.bufferPersistTimer = null;
         this.driverPresenceContext = null;
         this.lastPresenceSentAt = 0;
+        this.backgroundReconnectPromise = null;
+        this.lastBackgroundReconnectAt = null;
     }
 
     buildEventId() {
@@ -293,6 +296,28 @@ class LocationBufferService {
         return this.driverPresenceContext;
     }
 
+    requestBackgroundDriverReconnect(driverId) {
+        const { AppState } = require('react-native');
+        if (!driverId || AppState?.currentState === 'active') return;
+        const webSocketManager = require('./WebSocketManager').default.getInstance();
+        const status = webSocketManager.getConnectionStatus();
+        if (status?.userId && status.userId !== driverId) return;
+        if (webSocketManager.isConnected() && status?.authenticated) return;
+        const now = Date.now();
+        if (this.backgroundReconnectPromise || (this.lastBackgroundReconnectAt !== null
+            && now - this.lastBackgroundReconnectAt < BACKGROUND_RECONNECT_MIN_INTERVAL_MS)) return;
+        this.lastBackgroundReconnectAt = now;
+        // Reuse the authenticated session orchestrator; never wait for network
+        // recovery inside the native location task or create one retry per fix.
+        this.backgroundReconnectPromise = Promise.resolve()
+            .then(() => require('./RealtimeConnectionOrchestrator').default.ensureReady(
+                { userId: driverId, userType: 'driver' },
+                { reason: 'background_location', authTimeoutMs: 10000 }
+            ))
+            .catch(error => Logger.warn('⚠️ Reconexão de localização em segundo plano pendente:', error?.code || 'SOCKET_UNAVAILABLE'))
+            .finally(() => { this.backgroundReconnectPromise = null; });
+    }
+
     async sendDriverPresenceFromBackground(location = {}) {
         const presence = this.driverPresenceContext;
         if (!presence?.driverId) {
@@ -314,6 +339,7 @@ class LocationBufferService {
         const webSocketManager = WebSocketManager.getInstance();
         const status = webSocketManager.getConnectionStatus();
         if (!webSocketManager.isConnected() || !status?.authenticated) {
+            this.requestBackgroundDriverReconnect(presence.driverId);
             return { buffered: false, reason: 'socket_unavailable' };
         }
 
@@ -340,6 +366,8 @@ class LocationBufferService {
         if (!context?.bookingId) {
             return this.sendDriverPresenceFromBackground(location);
         }
+
+        this.requestBackgroundDriverReconnect(context.driverId);
 
         const seq = await this.reserveNextSeq(context.bookingId);
         await this.addLocation(context.bookingId, {

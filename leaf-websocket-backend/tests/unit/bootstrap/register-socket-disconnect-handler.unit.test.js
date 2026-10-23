@@ -10,6 +10,7 @@ const registerSocketDisconnectHandler = require('../../../bootstrap/register-soc
 const {
     commitDriverOnlineProjection
 } = require('../../../services/driver-online-projection-service');
+const { resolveAcceptedBookingCandidatesForDriver, recoverAcceptedBooking } = require('../../../services/accepted-ride-recovery-service');
 
 describe('registerSocketDisconnectHandler driver online time cleanup', () => {
     afterEach(() => {
@@ -264,6 +265,9 @@ describe('registerSocketDisconnectHandler driver online time cleanup', () => {
 
 describe('registerSocketDisconnectHandler grace window across gateways', () => {
     const previousGrace = process.env.DRIVER_DISCONNECT_GRACE_MS;
+    beforeEach(() => {
+        resolveAcceptedBookingCandidatesForDriver.mockResolvedValue({ bookingIds: [] });
+    });
     afterEach(() => {
         jest.useRealTimers();
         jest.clearAllMocks();
@@ -311,10 +315,48 @@ describe('registerSocketDisconnectHandler grace window across gateways', () => {
             logStructured: jest.fn(),
             releaseAdmissionSlotIfNeeded: jest.fn()
         });
-        return { socket, io, fetchSockets, saveDriverLocation };
+        return { socket, io, fetchSockets, saveDriverLocation, redis };
     }
 
     const flush = async () => { for (let i = 0; i < 10; i += 1) await Promise.resolve(); };
+
+    it('preserves an accepted ride during the same reconnect grace as an idle driver', async () => {
+        const { socket, saveDriverLocation, redis } = setup([]);
+        resolveAcceptedBookingCandidatesForDriver.mockResolvedValueOnce({ bookingIds: ['booking_1'] });
+        const disconnectedAt = Date.now();
+        await socket.handlers.disconnect('transport error');
+        expect(redis.hset).toHaveBeenCalledWith('driver:driver_1', {
+            socketReconnectUntilMs: String(disconnectedAt + 60000)
+        });
+        expect(saveDriverLocation).not.toHaveBeenCalled();
+        expect(recoverAcceptedBooking).not.toHaveBeenCalled();
+        jest.advanceTimersByTime(59999);
+        await flush();
+        expect(recoverAcceptedBooking).not.toHaveBeenCalled();
+    });
+
+    it('does not recover an accepted ride after the driver reconnects on another gateway', async () => {
+        const { socket, saveDriverLocation } = setup([{ id: 'socket_new_on_gateway_2' }]);
+        resolveAcceptedBookingCandidatesForDriver.mockResolvedValue({ bookingIds: ['booking_1'] });
+        await socket.handlers.disconnect('transport error');
+        jest.advanceTimersByTime(60000);
+        await flush();
+        expect(saveDriverLocation).not.toHaveBeenCalled();
+        expect(recoverAcceptedBooking).not.toHaveBeenCalled();
+        resolveAcceptedBookingCandidatesForDriver.mockResolvedValue({ bookingIds: [] });
+    });
+
+    it('still recovers an accepted ride after grace expires without reconnection', async () => {
+        const { socket } = setup([]);
+        resolveAcceptedBookingCandidatesForDriver.mockResolvedValue({ bookingIds: ['booking_1'] });
+        await socket.handlers.disconnect('transport error');
+        expect(recoverAcceptedBooking).not.toHaveBeenCalled();
+        jest.advanceTimersByTime(60000);
+        await flush();
+        await flush();
+        expect(recoverAcceptedBooking).toHaveBeenCalledWith(expect.objectContaining({ bookingId: 'booking_1', expectedDriverId: 'driver_1' }));
+        resolveAcceptedBookingCandidatesForDriver.mockResolvedValue({ bookingIds: [] });
+    });
 
     it('keeps the driver online when it reconnected on another gateway during the grace window', async () => {
         const { socket, io, saveDriverLocation } = setup([{ id: 'socket_new_on_gateway_2' }]);
@@ -339,5 +381,15 @@ describe('registerSocketDisconnectHandler grace window across gateways', () => {
         expect(saveDriverLocation).toHaveBeenCalledWith(
             'driver_1', -22.9, -43.2, 0, 0, expect.any(Number), false, false, expect.anything()
         );
+    });
+
+    it('does not interpret a cross-gateway lookup failure as proof that the driver is gone', async () => {
+        const { socket, fetchSockets, saveDriverLocation } = setup([]);
+        fetchSockets.mockRejectedValue(new Error('adapter unavailable'));
+        await socket.handlers.disconnect('transport error');
+        jest.advanceTimersByTime(60000);
+        await flush();
+        expect(saveDriverLocation).not.toHaveBeenCalled();
+        expect(recoverAcceptedBooking).not.toHaveBeenCalled();
     });
 });
