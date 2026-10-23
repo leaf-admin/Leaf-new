@@ -91,6 +91,9 @@ class PersistentRideNotificationService {
                 ongoing,
                 actions,
                 nearDestination: rideData.nearDestination === true,
+                distanceKm: rideData.distance,
+                pickupAddress: rideData.pickupAddress || rideData.pickup?.address,
+                destinationAddress: rideData.destinationAddress || rideData.destination?.address,
             });
             await rideOverlay.update(overlayState);
             if (await rideOverlay.showLiveUpdate(overlayState)) {

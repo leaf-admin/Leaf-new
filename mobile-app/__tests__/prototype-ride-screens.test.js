@@ -3266,9 +3266,15 @@ describe('prototype ride screens', () => {
     expect(mapView.props.mapPadding.top).toBeGreaterThanOrEqual(72);
     expect(mapView.props.mapPadding.bottom).toBeGreaterThanOrEqual(420);
     expect(screen.getByTestId('passenger-trip-route-progress')).toBeTruthy();
+    expect(screen.getByTestId('passenger-trip-horizon')).toBeTruthy();
     expect(screen.getByTestId('passenger-trip-started-action-dock')).toBeTruthy();
     expect(screen.queryByLabelText('Segurança')).toBeNull();
     expect(screen.getByLabelText('Mais opções')).toBeTruthy();
+    fireEvent.press(screen.getByLabelText('Mensagem'));
+    expect(navigation.navigate).toHaveBeenCalledWith(
+      'RobotaxiPrototypeChat',
+      expect.objectContaining({ bookingId: 'booking_1' }),
+    );
     expect(screen.queryByLabelText('Chat')).toBeNull();
     expect(screen.queryByLabelText('Compartilhar')).toBeNull();
     expect(screen.queryByLabelText('Alterar destino')).toBeNull();

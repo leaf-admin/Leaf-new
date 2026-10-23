@@ -60,7 +60,7 @@ function ManeuverGlyph({ type, color: glyphColor }) {
     return (
       <Ionicons
         name="flag"
-        size={28}
+        size={22}
         color={glyphColor}
         testID="leaf-native-arrived-glyph"
         accessibilityLabel="Chegada"
@@ -74,8 +74,8 @@ function ManeuverGlyph({ type, color: glyphColor }) {
 
     return (
       <Svg
-        width={34}
-        height={34}
+        width={22}
+        height={22}
         viewBox="0 0 40 36"
         testID={`leaf-native-${type}-glyph`}
         accessibilityLabel={isRight ? 'Virar à direita' : 'Virar à esquerda'}
@@ -101,11 +101,11 @@ function ManeuverGlyph({ type, color: glyphColor }) {
             ? 'arrow-up-outline'
             : 'navigate-outline';
 
-  return <Ionicons name={fallbackIcon} size={30} color={glyphColor} />;
+  return <Ionicons name={fallbackIcon} size={22} color={glyphColor} />;
 }
 
 const BANNER_TOP_OFFSET = 70;
-const BANNER_FALLBACK_HEIGHT = 144;
+const BANNER_FALLBACK_HEIGHT = 168;
 const BANNER_MAP_GAP = 12;
 
 export default function LeafNativeNavigationBanner({
@@ -139,11 +139,9 @@ export default function LeafNativeNavigationBanner({
   }
 
   const title = navigationModel.currentInstruction;
-  const subtitle = navigationModel.hasArrived && navigationModel.arrivalHint
-    ? navigationModel.arrivalHint
-    : `${navigationModel.maneuverDistanceLabel} até ${
-        navigationModel.maneuverDistanceTargetLabel || 'o destino'
-      }`;
+  const distanceTarget = navigationModel.hasArrived
+    ? 'você chegou'
+    : String(navigationModel.maneuverDistanceTargetLabel || 'o destino').replace(/^(a|o)\s+/i, '');
   const maneuverType = navigationModel.hasArrived && !isOffRoute
     ? 'arrived'
     : resolveManeuverType(title, isOffRoute, navigationModel.maneuver);
@@ -151,7 +149,7 @@ export default function LeafNativeNavigationBanner({
     ? 'VOCÊ CHEGOU'
     : navigationModel.phase === 'destination' ? 'ATÉ O DESTINO' : 'ATÉ O EMBARQUE';
   const mainDistance = navigationModel.hasArrived
-    ? 'Chegada'
+    ? 'Chegou'
     : navigationModel.maneuverDistanceLabel;
 
   return (
@@ -163,13 +161,21 @@ export default function LeafNativeNavigationBanner({
     >
       <View style={styles.card}>
         <View style={styles.main}>
-          <View style={styles.iconWrap}>
-            <ManeuverGlyph type={maneuverType} color={color.accent.primary} />
+          <View style={styles.metric}>
+            <Text style={styles.distance} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75}>{mainDistance}</Text>
+            <Text style={styles.metricLabel} numberOfLines={2}>{distanceTarget}</Text>
           </View>
           <View style={styles.copy}>
             <Text style={styles.phase}>{phaseLabel}</Text>
-            <Text style={styles.distance} numberOfLines={1}>{mainDistance}</Text>
-            <Text style={styles.title} numberOfLines={2}>{title}</Text>
+            <View style={styles.instruction}>
+              <View style={styles.iconWrap}>
+                <ManeuverGlyph type={maneuverType} color={color.accent.primary} />
+              </View>
+              <Text style={styles.title} numberOfLines={4}>{title}</Text>
+            </View>
+            {navigationModel.hasArrived && navigationModel.arrivalHint ? (
+              <Text style={styles.subtitle} numberOfLines={2}>{navigationModel.arrivalHint}</Text>
+            ) : null}
           </View>
           <Pressable
             accessibilityRole="button"
@@ -182,7 +188,6 @@ export default function LeafNativeNavigationBanner({
         </View>
         <View style={styles.footer}>
           <View style={styles.summary}>
-            <Text style={styles.subtitle} numberOfLines={2}>{subtitle}</Text>
             {!navigationModel.hasArrived ? (
               <Text style={styles.metaDistance} numberOfLines={2}>
                 {navigationModel.remainingDistanceLabel}{navigationModel.etaLabel ? ` · ${navigationModel.etaLabel}` : ''}
@@ -217,9 +222,7 @@ const styles = StyleSheet.create({
   card: {
     width: '92%',
     maxWidth: 480,
-    borderRadius: 24,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
+    borderRadius: 20,
     backgroundColor: color.bg.panelSolid,
     shadowColor: color.shadow.base,
     shadowOffset: { width: 0, height: 6 },
@@ -228,23 +231,47 @@ const styles = StyleSheet.create({
     elevation: 8,
   },
   main: {
+    minHeight: 108,
+    paddingHorizontal: 14,
+    paddingVertical: 16,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
+    gap: 8,
   },
   iconWrap: {
-    width: 48,
-    height: 48,
-    borderRadius: 16,
+    width: 24,
+    height: 30,
+    overflow: 'hidden',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: color.surface.activeSoft,
+  },
+  metric: {
+    width: 88,
+    alignSelf: 'stretch',
+    justifyContent: 'center',
+    paddingRight: 12,
+    borderRightWidth: StyleSheet.hairlineWidth,
+    borderRightColor: color.border.separator,
+  },
+  metricLabel: {
+    ...leafTypography.regular,
+    fontSize: 11,
+    lineHeight: 15,
+    color: color.text.secondary,
+    marginTop: 4,
+  },
+  instruction: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    marginTop: 4,
   },
   copy: {
     flex: 1,
     minWidth: 0,
   },
   title: {
+    flex: 1,
     ...leafTypography.semiBold,
     fontSize: 16,
     lineHeight: 21,
@@ -252,15 +279,15 @@ const styles = StyleSheet.create({
   },
   phase: {
     ...leafTypography.semiBold,
-    fontSize: 10,
+    fontSize: 11,
     lineHeight: 14,
     letterSpacing: 1,
     color: color.text.secondary,
   },
   distance: {
     ...leafTypography.bold,
-    fontSize: 28,
-    lineHeight: 33,
+    fontSize: 24,
+    lineHeight: 29,
     color: color.accent.primary,
   },
   subtitle: {
@@ -270,8 +297,8 @@ const styles = StyleSheet.create({
     color: color.text.secondary,
   },
   footer: {
-    marginTop: 10,
-    paddingTop: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: color.border.separator,
     flexDirection: 'row',
@@ -281,7 +308,7 @@ const styles = StyleSheet.create({
   },
   summary: {
     flexGrow: 1,
-    flexBasis: 120,
+    flexBasis: 96,
     minWidth: 0,
   },
   metaDistance: {
@@ -292,9 +319,7 @@ const styles = StyleSheet.create({
   },
   navigationButton: {
     minHeight: 44,
-    paddingHorizontal: 10,
-    borderRadius: 14,
-    backgroundColor: color.surface.activeSoft,
+    paddingHorizontal: 0,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
@@ -306,6 +331,7 @@ const styles = StyleSheet.create({
   },
   hideButton: {
     width: 44,
+    marginLeft: -6,
     height: 44,
     alignSelf: 'flex-start',
     alignItems: 'center',

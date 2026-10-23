@@ -3,6 +3,7 @@ import leafTypography from '../../components/prototype/LeafTypography';
 import useRideCardTransition from '../../components/design-system/useRideCardTransition';
 import useRideStepHaptics from '../../hooks/useRideStepHaptics';
 import { shortTripAddressLabel } from './tripAddressPresentation';
+import PassengerTripHorizon from './PassengerTripHorizon';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Animated, StatusBar, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -1802,9 +1803,9 @@ export default function RobotaxiTripScreen({ navigation, route }) {
   );
 
   // Message is one tap away (ride-app standard); call/share/cancel live in "Mais opções".
-  const renderCompactContactActions = (moreOptionsTestID) => (
+  const renderCompactContactActions = (moreOptionsTestID, style) => (
     <View
-      style={styles.compactLifecycleActions}
+      style={[styles.compactLifecycleActions, style]}
       testID={passengerCardFieldTestIDs.contact_actions}
     >
       <RobotaxiLifecycleButton
@@ -1827,10 +1828,7 @@ export default function RobotaxiTripScreen({ navigation, route }) {
       accessibilityLabel="Ações da viagem ativa"
     >
       {compact ? (
-        renderCompactMoreOptionsButton(
-          'passenger-trip-more-actions-button',
-          styles.compactStartedMoreButton
-        )
+        renderCompactContactActions('passenger-trip-more-actions-button', styles.horizonContactActions)
       ) : (
         <View style={styles.expandedStartedActions}>
           <RobotaxiLifecycleButton
@@ -2130,44 +2128,20 @@ export default function RobotaxiTripScreen({ navigation, route }) {
         renderOperationalDecisionCompactCard()
       ) : isStarted ? (
         <>
-          <RobotaxiLifecycleSummary
-            eyebrow="EM VIAGEM"
-            hero
-            title={compactArrivalTime && compactArrivalTime !== '--'
+          <PassengerTripHorizon
+            arrivalLabel={compactArrivalTime && compactArrivalTime !== '--'
               ? `Chegada ${arrivalClockLabel ? 'às' : 'em'} ${compactArrivalTime}`
               : 'Em viagem'}
-            subtitle={compactEtaValue && compactEtaValue !== '--' ? `${compactEtaValue} restantes` : null}
-            value={fareLabel}
-            valueLabel={vehicle}
-            titleTestID={passengerCardFieldTestIDs.eta_final}
-            valueTestID={passengerCardFieldTestIDs.fare}
-            valueLabelTestID={passengerCardFieldTestIDs.vehicle_type}
-          />
-          <LeafJourneyRoute
+            etaLabel={compactEtaValue}
+            distanceLabel={distanceLabel}
+            fareLabel={fareLabel}
+            vehicleLabel={vehicle}
             origin={pickupPointLabel}
             destination={shortTripAddressLabel(destination || destinationAddress)}
-            destinationTestID={passengerCardFieldTestIDs.destination_address}
-            testID="passenger-trip-route-details"
-            style={styles.journeyRoute}
-            dense
+            progress={routeProgress}
+            progressKey={liveRouteKey || 'passenger-trip-route'}
+            fieldTestIDs={passengerCardFieldTestIDs}
           />
-          <View style={styles.startedProgressTrack} testID="passenger-trip-route-progress">
-            <LeafTripProgressTrack
-              progress={routeProgress}
-              progressKey={liveRouteKey || 'passenger-trip-route'}
-              fillTestID={passengerCardFieldTestIDs.route_progress}
-            />
-            <View style={styles.startedProgressMetaRow}>
-              <Text style={styles.startedProgressMetaLabel}>Você está a caminho</Text>
-              <Text
-                style={styles.startedProgressMetaValue}
-                numberOfLines={1}
-                testID={passengerCardFieldTestIDs.distance_remaining}
-              >
-                {distanceLabel && distanceLabel !== '--' ? `${distanceLabel} ${/^1\s/.test(distanceLabel) ? 'restante' : 'restantes'}` : 'Em rota'}
-              </Text>
-            </View>
-          </View>
           <RobotaxiLifecycleIdentity
             initial={driverInitial}
             photoUri={driverPhotoUri}
@@ -2180,7 +2154,7 @@ export default function RobotaxiTripScreen({ navigation, route }) {
               </>
             )}
             trailing={plateLabel}
-            style={styles.compactIdentity}
+            style={[styles.compactIdentity, styles.horizonIdentity]}
             testID="passenger-trip-driver-identity"
             fieldTestIDs={{
               avatar: passengerCardFieldTestIDs.driver_photo,
@@ -2347,6 +2321,7 @@ export default function RobotaxiTripScreen({ navigation, route }) {
         {isStarted ? (
           <View style={styles.startedProgressTrack} testID="passenger-trip-route-progress">
             <LeafTripProgressTrack
+              variant="line"
               progress={routeProgress}
               progressKey={liveRouteKey || 'passenger-trip-route'}
               fillTestID={passengerCardFieldTestIDs.route_progress}
@@ -3343,6 +3318,8 @@ const styles = StyleSheet.create({
   startedActionDockCompact: {
     marginTop: 16
   },
+  horizonContactActions: { flex: 1, marginTop: 0 },
+  horizonIdentity: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: leafRideColors.line, paddingTop: 16 },
   startedActionDockExpanded: {
     marginTop: 14,
     borderTopWidth: 1,

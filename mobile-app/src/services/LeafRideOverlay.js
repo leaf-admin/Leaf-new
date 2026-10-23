@@ -1,4 +1,4 @@
-import { Alert, AppState, NativeModules, Platform } from 'react-native';
+import { Alert, AppState, DeviceEventEmitter, NativeModules, Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Logger from '../utils/Logger';
 
@@ -35,7 +35,10 @@ function shortStageLabel(status, actionId) {
 }
 
 /** Monta o que o balão e o Live Update mostram a partir da notificação da corrida. */
-export function buildRideOverlayState({ bookingId, status, ongoing = {}, actions = [], nearDestination = false } = {}) {
+export function buildRideOverlayState({
+  bookingId, status, ongoing = {}, actions = [], nearDestination = false,
+  distanceKm, pickupAddress = '', destinationAddress = '',
+} = {}) {
   // "Encerrar" grande num balão sobre o mapa, a viagem inteira, é um toque acidental
   // esperando para acontecer (e pelo balão não há a pergunta "Encerrar antes do
   // destino?"): só aparece perto do destino.
@@ -45,6 +48,16 @@ export function buildRideOverlayState({ bookingId, status, ongoing = {}, actions
   const progress = ongoing.progress === null || ongoing.progress === undefined || !Number.isFinite(Number(ongoing.progress))
     ? -1
     : Math.min(1, Math.max(0, Number(ongoing.progress)));
+  const hasDistance = distanceKm !== null && distanceKm !== undefined && Number.isFinite(Number(distanceKm)) && Number(distanceKm) >= 0;
+  const distanceLabel = hasDistance
+    ? Number(distanceKm) < 1
+      ? `${Math.round(Number(distanceKm) * 1000)} m`
+      : `${Number(distanceKm).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} km`
+    : '';
+  const isBoarding = status === 'arrived';
+  const isPickup = status === 'accepted';
+  const atStageAction = Boolean(stageAction) && !isBoarding;
+  const shortText = countdownSeconds > 0 ? `${Math.max(1, Math.ceil(countdownSeconds / 60))} min` : '';
   return {
     pillText: shortStageLabel(status, stageAction?.identifier),
     bookingId: String(bookingId || ''),
@@ -52,10 +65,23 @@ export function buildRideOverlayState({ bookingId, status, ongoing = {}, actions
     subtitle: String(ongoing.subtitle || ''),
     body: String(ongoing.body || ''),
     progress,
-    shortText: countdownSeconds > 0 ? `${Math.max(1, Math.ceil(countdownSeconds / 60))} min` : '',
+    shortText,
     actionId: stageAction?.identifier || '',
     actionLabel: stageAction?.buttonTitle || '',
     legKey: `${bookingId || ''}:${status || ''}`,
+    // Only the floating window uses these presentation fields. Notification and
+    // Live Update copy/actions remain unchanged, including on older native builds.
+    ribbonMetric: isBoarding ? '0:00' : (atStageAction ? distanceLabel : shortText || distanceLabel) || '—',
+    ribbonMetricLabel: isBoarding ? 'para embarcar' : isPickup ? 'até o embarque' : 'até o destino',
+    ribbonPhase: isBoarding ? 'EMBARQUE' : isPickup ? 'ATÉ O EMBARQUE' : 'EM VIAGEM',
+    ribbonTitle: status === 'started'
+      ? nearDestination ? 'Chegando ao destino' : destinationAddress || 'Em viagem'
+      : String(ongoing.title || 'Corrida em andamento'),
+    ribbonDetail: status === 'started'
+      ? [nearDestination ? destinationAddress : '', distanceLabel && `${distanceLabel} restantes`].filter(Boolean).join(' · ') || String(ongoing.body || '')
+      : String(pickupAddress || ongoing.body || ''),
+    ribbonSummary: status === 'started' ? String(ongoing.title || 'Em viagem') : 'LEAF',
+    ribbonCountdownSeconds: isBoarding && Number.isFinite(countdownSeconds) && countdownSeconds > 0 ? countdownSeconds : 0,
   };
 }
 
@@ -171,6 +197,51 @@ class RideOverlayController {
     this.subscription = null;
     this.overlayShown = false;
     this.liveUpdateShown = false;
+    this.actionSubscription = null;
+    this.actionExecutor = null;
+    this.actionInFlight = null;
+  }
+
+  setActionExecutor(executor) {
+    this.actionExecutor = typeof executor === 'function' ? executor : null;
+    if (!this.actionExecutor) {
+      this.actionSubscription?.remove?.();
+      this.actionSubscription = null;
+      return;
+    }
+    if (!this.actionSubscription && nativeModule()?.completeOverlayAction) {
+      this.actionSubscription = DeviceEventEmitter.addListener('LeafRideOverlayAction', (request) => {
+        void this.handleAction(request);
+      });
+    }
+  }
+
+  async handleAction({ requestId, bookingId, actionIdentifier } = {}) {
+    const native = nativeModule();
+    if (!requestId || !native?.completeOverlayAction) return;
+    // A duplicate native event must not re-execute (or resolve) its active request.
+    if (this.actionInFlight === requestId) return;
+    let success = false;
+    let message = 'Não foi possível confirmar. Tente novamente.';
+    const ownsRequest = !this.actionInFlight;
+    try {
+      if (!ownsRequest || !this.actionExecutor || !bookingId ||
+          this.state?.bookingId !== bookingId || this.state?.actionId !== actionIdentifier ||
+          !STAGE_ACTIONS.has(actionIdentifier)) {
+        throw new Error('Ação indisponível. Aguarde a atualização da corrida.');
+      }
+      this.actionInFlight = requestId;
+      const result = await this.actionExecutor({ bookingId, actionIdentifier });
+      success = result?.success === true;
+      if (!success) throw new Error('O servidor não confirmou a ação.');
+      message = 'Confirmado';
+    } catch (error) {
+      message = error?.message || message;
+      Logger.warn('⚠️ [RideOverlay] Ação não confirmada:', message);
+    } finally {
+      if (ownsRequest) this.actionInFlight = null;
+      await native.completeOverlayAction(requestId, success, message).catch(() => {});
+    }
   }
 
   ensureListening() {

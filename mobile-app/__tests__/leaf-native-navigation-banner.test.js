@@ -39,13 +39,14 @@ describe('LeafNativeNavigationBanner', () => {
 
     expect(getByText('Vire à direita na Av. Atlântica')).toBeTruthy();
     expect(getByTestId('leaf-native-turn-right-glyph')).toBeTruthy();
-    expect(getByText('180 m até a próxima curva')).toBeTruthy();
+    expect(getByText('180 m')).toBeTruthy();
+    expect(getByText('próxima curva')).toBeTruthy();
     expect(getByText('2 km · 7 min')).toBeTruthy();
     expect(getByText('Abrir navegador')).toBeTruthy();
     expect(usePrototypeMapOcclusion).toHaveBeenCalledWith(
       expect.objectContaining({
         // The initial camera clearance reserves the whole new banner.
-        occludedTop: 250,
+        occludedTop: 274,
       }),
     );
 
@@ -89,7 +90,8 @@ describe('LeafNativeNavigationBanner', () => {
       />,
     );
 
-    expect(getByText('3 km até o destino')).toBeTruthy();
+    expect(getByText('3 km')).toBeTruthy();
+    expect(getByText('destino')).toBeTruthy();
   });
 
   it('uses the left-turn maneuver glyph when the instruction asks for it', () => {

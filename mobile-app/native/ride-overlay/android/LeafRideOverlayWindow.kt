@@ -15,6 +15,7 @@ import android.graphics.drawable.RippleDrawable
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.text.TextUtils
 import android.util.TypedValue
 import android.view.Gravity
@@ -25,17 +26,18 @@ import android.view.ViewGroup
 import android.view.WindowManager
 import android.view.animation.DecelerateInterpolator
 import android.widget.FrameLayout
-import android.widget.ImageView
+import android.widget.Chronometer
 import android.widget.LinearLayout
 import android.widget.TextView
 import java.io.File
+import java.util.UUID
 import kotlin.math.abs
 import kotlin.math.min
 
 /**
  * A corrida por cima do app de navegação, no lugar de uma notificação aberta no topo
- * da tela. Um só por processo. Toque no card abre o Leaf; o botão abre o Leaf já
- * executando a ação da etapa (Cheguei, Iniciar, Encerrar). Sem botão, recolhe depois
+ * da tela. Um só por processo. Toque no card abre o Leaf; o botão executa a ação da
+ * etapa em segundo plano (Cheguei, Iniciar, Encerrar). Sem botão, recolhe depois
  * de 8 s (ou ao arrastar para cima) numa pílula logo abaixo da faixa de instruções do
  * Waze/Maps; com botão, fica aberto até o motorista agir ou arrastar. Abre de novo
  * ao tocar na pílula, quando a etapa muda ou quando o botão aparece. A pílula pode
@@ -44,7 +46,7 @@ import kotlin.math.min
 @SuppressLint("StaticFieldLeak")
 object LeafRideOverlayWindow {
   private const val REQUEST_OPEN = 7710
-  private const val REQUEST_ACTION = 7711
+  private const val ACTION_TIMEOUT_MS = 45000L
   private const val MAX_CARD_WIDTH_DP = 480
   private const val AUTO_COLLAPSE_MS = 8000L
   /** Abaixo da faixa de instruções do Waze e do Google Maps (sem faixas de pista). */
@@ -93,7 +95,6 @@ object LeafRideOverlayWindow {
     ripple = 0x33D4E84A
   )
 
-  private const val LIME = 0xFFD4E84A.toInt()
   /** Verde do halo "ativo" da pílula. */
   private const val GLOW = 0xFF3FBF6A.toInt()
 
@@ -102,7 +103,11 @@ object LeafRideOverlayWindow {
   private var pill: FrameLayout? = null
   private var glowAnimator: ValueAnimator? = null
   private var titleView: TextView? = null
-  private var etaView: TextView? = null
+  private var etaView: Chronometer? = null
+  private var metricLabelView: TextView? = null
+  private var phaseView: TextView? = null
+  private var summaryView: TextView? = null
+  private var countdownDeadlineMs = 0L
   private var subtitleView: TextView? = null
   private var pillTextView: TextView? = null
   private var trackView: TrackView? = null
@@ -115,13 +120,51 @@ object LeafRideOverlayWindow {
   private var fonts: Fonts? = null
   private var renderedActionId: String? = null
   private var pillY: Int? = null
+  private data class PendingAction(val requestId: String, val bookingId: String, val actionId: String)
+  @Volatile private var actionListener: ((String, String, String) -> Boolean)? = null
+  private var pendingAction: PendingAction? = null
+  private var confirmedActionKey: String? = null
+  private var actionError: String? = null
   private val mainHandler = Handler(Looper.getMainLooper())
+  private val actionTimeout = Runnable {
+    pendingAction?.let { completeAction(it.requestId, false, "Sem confirmação. Tente novamente.") }
+  }
   private val autoCollapse = Runnable { root?.let { setCollapsed(it.context, true) } }
   // Oferta vencida: o JS pode estar parado em segundo plano, então o card some daqui.
   private val expire = Runnable { if ((state?.expiresAtMs ?: 0L) > 0L) hide() }
 
+  fun setActionListener(listener: ((String, String, String) -> Boolean)?) {
+    actionListener = listener
+  }
+
+  fun completeAction(requestId: String, success: Boolean, message: String) {
+    val request = pendingAction ?: return
+    if (request.requestId != requestId) return
+    mainHandler.removeCallbacks(actionTimeout)
+    pendingAction = null
+    val current = state ?: return
+    if (request.bookingId != current.bookingId || request.actionId != current.actionId) return
+    confirmedActionKey = if (success) "${request.bookingId}:${request.actionId}" else null
+    actionError = if (success) null else message.take(140)
+    root?.let { render(it.context, current) }
+  }
+
+  private fun performAction(context: Context, current: LeafRideOverlayState) {
+    if (pendingAction != null || confirmedActionKey == "${current.bookingId}:${current.actionId}") return
+    val request = PendingAction(UUID.randomUUID().toString(), current.bookingId, current.actionId)
+    pendingAction = request
+    actionError = null
+    render(context, current)
+    mainHandler.postDelayed(actionTimeout, ACTION_TIMEOUT_MS)
+    if (actionListener?.invoke(request.requestId, request.bookingId, request.actionId) != true) {
+      completeAction(request.requestId, false, "Sem conexão com o Leaf. Abra o app para reconectar.")
+    }
+  }
+
   fun show(context: Context, next: LeafRideOverlayState) {
     state = next
+    countdownDeadlineMs = if (next.ribbonCountdownSeconds.isFinite() && next.ribbonCountdownSeconds > 0)
+      SystemClock.elapsedRealtime() + (next.ribbonCountdownSeconds * 1000).toLong() else 0L
     val windowManager = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
     val wantedPalette = paletteFor(context)
     if (root != null && wantedPalette !== palette) {
@@ -156,6 +199,11 @@ object LeafRideOverlayWindow {
   }
 
   private fun removeView() {
+    etaView?.stop()
+    mainHandler.removeCallbacks(actionTimeout)
+    pendingAction = null
+    confirmedActionKey = null
+    actionError = null
     mainHandler.removeCallbacks(autoCollapse)
     mainHandler.removeCallbacks(expire)
     glowAnimator?.cancel()
@@ -171,6 +219,9 @@ object LeafRideOverlayWindow {
     pill = null
     titleView = null
     etaView = null
+    metricLabelView = null
+    phaseView = null
+    summaryView = null
     subtitleView = null
     pillTextView = null
     trackView = null
@@ -181,20 +232,43 @@ object LeafRideOverlayWindow {
   }
 
   private fun render(context: Context, next: LeafRideOverlayState) {
+    if ((renderedLegKey != null && renderedLegKey != next.legKey) ||
+        (renderedActionId != null && renderedActionId != next.actionId)) actionError = null
+    val key = "${next.bookingId}:${next.actionId}"
+    val pending = pendingAction
+    if (pending != null && (pending.bookingId != next.bookingId || pending.actionId != next.actionId)) {
+      mainHandler.removeCallbacks(actionTimeout)
+      pendingAction = null
+      actionError = null
+    }
+    if (confirmedActionKey != null && confirmedActionKey != key) confirmedActionKey = null
     mainHandler.removeCallbacks(expire)
     if (next.expiresAtMs > 0L) {
       mainHandler.postDelayed(expire, (next.expiresAtMs - System.currentTimeMillis()).coerceAtLeast(0L))
     }
-    titleView?.text = next.title
+    titleView?.text = next.ribbonTitle.ifBlank { next.title }
     val eta = next.shortText.trim()
-    etaView?.text = eta
-    etaView?.visibility = if (eta.isEmpty()) View.GONE else View.VISIBLE
+    etaView?.apply {
+      stop()
+      if (countdownDeadlineMs > SystemClock.elapsedRealtime()) {
+        isCountDown = true
+        base = countdownDeadlineMs
+        start()
+      } else {
+        text = next.ribbonMetric.ifBlank { eta.ifBlank { "—" } }
+      }
+    }
+    metricLabelView?.text = next.ribbonMetricLabel.ifBlank { next.pillText }
+    phaseView?.text = next.ribbonPhase.ifBlank { next.pillText.ifBlank { "LEAF" } }
+    summaryView?.text = next.ribbonSummary.ifBlank { next.title }
     pillTextView?.text = when {
       eta.isNotEmpty() -> eta
       next.pillText.isNotBlank() -> next.pillText
       else -> next.title
     }
-    subtitleView?.text = listOf(next.subtitle, next.body).filter { it.isNotBlank() }.joinToString(" · ")
+    subtitleView?.text = next.ribbonDetail.ifBlank {
+      listOf(next.subtitle, next.body).filter { it.isNotBlank() }.joinToString(" · ")
+    }
     subtitleView?.visibility = if (subtitleView?.text.isNullOrBlank()) View.GONE else View.VISIBLE
     val stageChanged = renderedLegKey != null && renderedLegKey != next.legKey
     val actionAppeared = next.actionId.isNotBlank() && next.actionId != renderedActionId
@@ -208,21 +282,48 @@ object LeafRideOverlayWindow {
     if (next.progress >= 0) trackView?.animateTo(next.progress.coerceIn(0.0, 1.0).toFloat())
     actionView?.apply {
       if (next.actionId.isNotBlank() && next.actionLabel.isNotBlank()) {
-        text = next.actionLabel
+        text = when {
+          pendingAction != null -> "Confirmando…"
+          confirmedActionKey == key -> "Confirmado"
+          actionError != null -> "Tentar novamente"
+          else -> next.actionLabel
+        }
+        isEnabled = pendingAction == null && confirmedActionKey != key
+        alpha = if (isEnabled) 1f else 0.65f
+        contentDescription = actionError ?: text
         visibility = View.VISIBLE
         setOnClickListener {
-          send(LeafRideOverlayState.openLeafIntent(context, next.actionId, next.bookingId, REQUEST_ACTION))
+          performAction(context, next)
         }
       } else {
         visibility = View.GONE
         setOnClickListener(null)
       }
     }
+    if (actionError != null) {
+      subtitleView?.text = actionError
+      subtitleView?.visibility = View.VISIBLE
+    }
     if (stageChanged || actionAppeared) {
       // Etapa nova ou botão novo: mostra o card aberto.
       if (collapsed) setCollapsed(context, false) else scheduleAutoCollapse()
     } else if (actionGone && !collapsed) {
       scheduleAutoCollapse()
+    }
+    // A mensagem de erro ou um endereço longo pode aumentar o card depois de
+    // abrir. Reconfere o limite inferior usando a altura já preenchida.
+    val layoutParams = params
+    val view = root
+    if (!collapsed && layoutParams != null && view != null) {
+      val previousY = layoutParams.y
+      applyMode(context, layoutParams)
+      if (previousY != layoutParams.y) {
+        try {
+          (context.getSystemService(Context.WINDOW_SERVICE) as WindowManager).updateViewLayout(view, layoutParams)
+        } catch (_: Exception) {
+          // Janela removida ao retornar ao Leaf.
+        }
+      }
     }
   }
 
@@ -266,8 +367,15 @@ object LeafRideOverlayWindow {
       layoutParams.y = pillY ?: (context.resources.displayMetrics.heightPixels * PILL_DEFAULT_Y_FRACTION).toInt()
     } else {
       layoutParams.width = min(context.resources.displayMetrics.widthPixels, dp(context, MAX_CARD_WIDTH_DP))
-      // A janela já começa abaixo da barra de status.
-      layoutParams.y = 0
+      // A Faixa abre na posição escolhida na pílula, abaixo das instruções do
+      // navegador. O motorista pode recolher e reposicionar sem sair da corrida.
+      val wantedY = pillY ?: (context.resources.displayMetrics.heightPixels * PILL_DEFAULT_Y_FRACTION).toInt()
+      root?.measure(
+        View.MeasureSpec.makeMeasureSpec(layoutParams.width, View.MeasureSpec.EXACTLY),
+        View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
+      )
+      val maxY = context.resources.displayMetrics.heightPixels - (root?.measuredHeight ?: dp(context, 240)) - dp(context, 24)
+      layoutParams.y = wantedY.coerceIn(0, maxY.coerceAtLeast(0))
     }
   }
 
@@ -283,12 +391,11 @@ object LeafRideOverlayWindow {
     // ---- card aberto ----
     val cardView = LinearLayout(context).apply {
       orientation = LinearLayout.VERTICAL
-      setPadding(dp(context, 14), dp(context, 12), dp(context, 14), dp(context, 8))
       background = GradientDrawable().apply {
-        cornerRadius = dp(context, 22).toFloat()
+        cornerRadius = dp(context, 20).toFloat()
         setColor(p.panel)
-        setStroke(dp(context, 1), p.border)
       }
+      clipToOutline = true
       elevation = dp(context, 6).toFloat()
       layoutParams = FrameLayout.LayoutParams(
         ViewGroup.LayoutParams.MATCH_PARENT,
@@ -299,53 +406,73 @@ object LeafRideOverlayWindow {
     val header = LinearLayout(context).apply {
       orientation = LinearLayout.HORIZONTAL
       gravity = Gravity.CENTER_VERTICAL
+      setPadding(dp(context, 14), dp(context, 16), dp(context, 10), dp(context, 16))
+      minimumHeight = dp(context, 108)
     }
-    val iconTile = FrameLayout(context).apply {
-      background = GradientDrawable().apply {
-        cornerRadius = dp(context, 12).toFloat()
-        setColor(p.iconTile)
+    val metric = LinearLayout(context).apply {
+      orientation = LinearLayout.VERTICAL
+      gravity = Gravity.CENTER_VERTICAL
+      setPadding(0, 0, dp(context, 12), 0)
+      layoutParams = LinearLayout.LayoutParams(dp(context, 88), ViewGroup.LayoutParams.WRAP_CONTENT)
+    }
+    etaView = Chronometer(context).apply {
+      setTextColor(p.accent)
+      setTextSize(TypedValue.COMPLEX_UNIT_SP, 27f)
+      typeface = f.bold
+      maxLines = 1
+      includeFontPadding = false
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        setAutoSizeTextTypeUniformWithConfiguration(18, 27, 1, TypedValue.COMPLEX_UNIT_SP)
       }
-      layoutParams = LinearLayout.LayoutParams(dp(context, 40), dp(context, 40)).apply {
-        marginEnd = dp(context, 12)
+      layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+      setOnChronometerTickListener {
+        if (base <= SystemClock.elapsedRealtime()) { stop(); text = "0:00" }
       }
-      addView(carIcon(context, p.icon, 22), FrameLayout.LayoutParams(dp(context, 22), dp(context, 22), Gravity.CENTER))
+    }
+    metricLabelView = TextView(context).apply {
+      setTextColor(p.secondary)
+      setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f)
+      typeface = f.regular
+      maxLines = 2
+      includeFontPadding = false
+      layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+        topMargin = dp(context, 5)
+      }
+    }
+    metric.addView(etaView)
+    metric.addView(metricLabelView)
+    val divider = View(context).apply {
+      setBackgroundColor(p.border)
+      layoutParams = LinearLayout.LayoutParams(dp(context, 1), dp(context, 64)).apply { marginEnd = dp(context, 12) }
     }
     val texts = LinearLayout(context).apply {
       orientation = LinearLayout.VERTICAL
       layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
     }
-    val titleRow = LinearLayout(context).apply {
-      orientation = LinearLayout.HORIZONTAL
-      gravity = Gravity.CENTER_VERTICAL
+    phaseView = TextView(context).apply {
+      setTextColor(p.secondary)
+      setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f)
+      typeface = f.semiBold
+      letterSpacing = 0.06f
+      maxLines = 2
+      includeFontPadding = false
     }
     titleView = TextView(context).apply {
       setTextColor(p.text)
-      setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
+      setTextSize(TypedValue.COMPLEX_UNIT_SP, 17f)
       typeface = f.semiBold
-      maxLines = 1
+      maxLines = 3
       ellipsize = TextUtils.TruncateAt.END
       includeFontPadding = false
-      layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+      layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+        topMargin = dp(context, 4)
+      }
     }
-    etaView = TextView(context).apply {
-      setTextColor(p.accent)
-      setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
-      typeface = f.bold
-      maxLines = 1
-      includeFontPadding = false
-      layoutParams = LinearLayout.LayoutParams(
-        ViewGroup.LayoutParams.WRAP_CONTENT,
-        ViewGroup.LayoutParams.WRAP_CONTENT
-      ).apply { marginStart = dp(context, 10) }
-      visibility = View.GONE
-    }
-    titleRow.addView(titleView)
-    titleRow.addView(etaView)
     subtitleView = TextView(context).apply {
       setTextColor(p.secondary)
-      setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
+      setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
       typeface = f.regular
-      maxLines = 1
+      maxLines = 3
       ellipsize = TextUtils.TruncateAt.END
       includeFontPadding = false
       layoutParams = LinearLayout.LayoutParams(
@@ -353,20 +480,22 @@ object LeafRideOverlayWindow {
         ViewGroup.LayoutParams.WRAP_CONTENT
       ).apply { topMargin = dp(context, 4) }
     }
-    texts.addView(titleRow)
+    texts.addView(phaseView)
+    texts.addView(titleView)
     texts.addView(subtitleView)
-    header.addView(iconTile)
+    header.addView(metric)
+    header.addView(divider)
     header.addView(texts)
     // Recolher na pílula: botão visível (o arrasto para cima continua valendo). Antes só o
     // arrasto recolhia, e com o botão da etapa na tela o card nunca recolhia sozinho.
     val collapseButton = FrameLayout(context).apply {
       background = RippleDrawable(ColorStateList.valueOf(p.ripple), GradientDrawable().apply {
         shape = GradientDrawable.OVAL
-        setColor(p.iconTile)
+        setColor(android.graphics.Color.TRANSPARENT)
       }, null)
       contentDescription = "Recolher"
-      layoutParams = LinearLayout.LayoutParams(dp(context, 36), dp(context, 36)).apply {
-        marginStart = dp(context, 10)
+      layoutParams = LinearLayout.LayoutParams(dp(context, 44), dp(context, 44)).apply {
+        marginStart = dp(context, 4)
       }
       addView(ChevronView(context, p.icon), FrameLayout.LayoutParams(dp(context, 16), dp(context, 16), Gravity.CENTER))
       setOnClickListener { setCollapsed(context, true) }
@@ -376,9 +505,37 @@ object LeafRideOverlayWindow {
     trackView = TrackView(context, p).apply {
       layoutParams = LinearLayout.LayoutParams(
         ViewGroup.LayoutParams.MATCH_PARENT,
-        dp(context, 18)
-      ).apply { topMargin = dp(context, 10) }
+        dp(context, 4)
+      ).apply { leftMargin = dp(context, 14); rightMargin = dp(context, 14) }
     }
+
+    val footer = LinearLayout(context).apply {
+      orientation = LinearLayout.HORIZONTAL
+      gravity = Gravity.CENTER_VERTICAL
+      setPadding(dp(context, 14), dp(context, 4), dp(context, 14), dp(context, 4))
+    }
+    summaryView = TextView(context).apply {
+      setTextColor(p.secondary)
+      setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
+      typeface = f.regular
+      maxLines = 2
+      ellipsize = TextUtils.TruncateAt.END
+      includeFontPadding = false
+      layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { marginEnd = dp(context, 8) }
+    }
+    val openLeaf = TextView(context).apply {
+      text = "Abrir Leaf ↗"
+      setTextColor(p.accent)
+      setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
+      typeface = f.semiBold
+      gravity = Gravity.CENTER
+      minHeight = dp(context, 44)
+      setOnClickListener {
+        send(LeafRideOverlayState.openLeafIntent(context, null, state?.bookingId ?: "", REQUEST_OPEN))
+      }
+    }
+    footer.addView(summaryView)
+    footer.addView(openLeaf)
 
     actionView = TextView(context).apply {
       setTextColor(p.onAccent)
@@ -386,35 +543,23 @@ object LeafRideOverlayWindow {
       typeface = f.semiBold
       gravity = Gravity.CENTER
       includeFontPadding = false
-      minHeight = dp(context, 46)
+      minHeight = dp(context, 54)
+      setPadding(dp(context, 14), dp(context, 12), dp(context, 14), dp(context, 12))
       val shape = GradientDrawable().apply {
-        cornerRadius = dp(context, 14).toFloat()
         setColor(p.accent)
       }
       background = RippleDrawable(ColorStateList.valueOf(p.ripple), shape, null)
       layoutParams = LinearLayout.LayoutParams(
         ViewGroup.LayoutParams.MATCH_PARENT,
         ViewGroup.LayoutParams.WRAP_CONTENT
-      ).apply { topMargin = dp(context, 12) }
+      )
       visibility = View.GONE
-    }
-
-    // Puxador: avisa que o card sobe (recolhe).
-    val grabber = View(context).apply {
-      background = GradientDrawable().apply {
-        cornerRadius = dp(context, 2).toFloat()
-        setColor(p.grabber)
-      }
-      layoutParams = LinearLayout.LayoutParams(dp(context, 36), dp(context, 4)).apply {
-        gravity = Gravity.CENTER_HORIZONTAL
-        topMargin = dp(context, 10)
-      }
     }
 
     cardView.addView(header)
     cardView.addView(trackView)
+    cardView.addView(footer)
     cardView.addView(actionView)
-    cardView.addView(grabber)
 
     // ---- pílula recolhida ----
     // Marca Leaf + ponto vivo com halo verde que respira: o motorista sabe, por cima do
@@ -441,8 +586,7 @@ object LeafRideOverlayWindow {
       setPadding(dp(context, 12), 0, dp(context, 14), 0)
       background = GradientDrawable().apply {
         cornerRadius = dp(context, 20).toFloat()
-        setColor(p.accent)
-        setStroke(dp(context, 1), GLOW)
+        setColor(p.panel)
       }
       elevation = dp(context, 6).toFloat()
       layoutParams = FrameLayout.LayoutParams(
@@ -453,7 +597,7 @@ object LeafRideOverlayWindow {
     val pillDot = View(context).apply {
       background = GradientDrawable().apply {
         shape = GradientDrawable.OVAL
-        setColor(if (p === DARK) p.onAccent else LIME)
+        setColor(p.accent)
         setStroke(dp(context, 2), GLOW)
       }
       layoutParams = LinearLayout.LayoutParams(dp(context, 10), dp(context, 10)).apply {
@@ -462,20 +606,20 @@ object LeafRideOverlayWindow {
     }
     val brandView = TextView(context).apply {
       text = "Leaf"
-      setTextColor(p.onAccent)
+      setTextColor(p.accent)
       setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
       typeface = f.bold
       includeFontPadding = false
     }
     val separator = View(context).apply {
-      setBackgroundColor((p.onAccent and 0x00FFFFFF) or 0x55000000)
+      setBackgroundColor(p.border)
       layoutParams = LinearLayout.LayoutParams(dp(context, 1), dp(context, 16)).apply {
         marginStart = dp(context, 9)
         marginEnd = dp(context, 9)
       }
     }
     pillTextView = TextView(context).apply {
-      setTextColor(p.onAccent)
+      setTextColor(p.accent)
       setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
       typeface = f.semiBold
       maxLines = 1
@@ -582,14 +726,6 @@ object LeafRideOverlayWindow {
     }
   }
 
-  private fun carIcon(context: Context, color: Int, sizeDp: Int): ImageView =
-    ImageView(context).apply {
-      val id = context.resources.getIdentifier("leaf_ride_car", "drawable", context.packageName)
-      if (id != 0) setImageResource(id)
-      imageTintList = ColorStateList.valueOf(color)
-      layoutParams = ViewGroup.LayoutParams(dp(context, sizeDp), dp(context, sizeDp))
-    }
-
   private fun paletteFor(context: Context): Palette {
     val night = context.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK
     return if (night == Configuration.UI_MODE_NIGHT_YES) DARK else LIGHT
@@ -655,7 +791,7 @@ object LeafRideOverlayWindow {
     }
   }
 
-  /** A corrida como linha fina: trilho, parte percorrida, ponto de chegada e a posição. */
+  /** Progresso discreto da Faixa, sem marcador sobre a linha. */
   private class TrackView(context: Context, palette: Palette) : View(context) {
     private var progress = 0f
     private var animator: ValueAnimator? = null
@@ -666,12 +802,6 @@ object LeafRideOverlayWindow {
     private val done = Paint(Paint.ANTI_ALIAS_FLAG).apply {
       color = palette.accent; strokeWidth = 4 * density; strokeCap = Paint.Cap.ROUND
     }
-    private val endFill = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = palette.panel }
-    private val endRing = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-      color = palette.accent; style = Paint.Style.STROKE; strokeWidth = 2.5f * density
-    }
-    private val head = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = palette.accent }
-    private val headCore = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = LIME }
 
     fun reset() {
       animator?.cancel()
@@ -692,17 +822,12 @@ object LeafRideOverlayWindow {
     }
 
     override fun onDraw(canvas: Canvas) {
-      val headRadius = 7 * density
       val y = height / 2f
-      val start = headRadius
-      val end = width - headRadius
+      val start = 2 * density
+      val end = width - start
       val headX = start + (end - start) * progress
       canvas.drawLine(start, y, end, y, rail)
       if (headX > start) canvas.drawLine(start, y, headX, y, done)
-      canvas.drawCircle(end, y, 5 * density, endFill)
-      canvas.drawCircle(end, y, 5 * density, endRing)
-      canvas.drawCircle(headX, y, headRadius, head)
-      canvas.drawCircle(headX, y, 3 * density, headCore)
     }
   }
 }
