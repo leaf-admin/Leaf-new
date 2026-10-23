@@ -11,14 +11,9 @@ export const NAVIGATION_CAMERA_ANIMATION_MS = 800;
 // zoom still follow navigation, but the camera must never tilt into the old
 // isometric view during an active driver trip.
 export const NAVIGATION_CAMERA_TOP_DOWN_PITCH = 0;
-const NAVIGATION_CAMERA_MIN_ROUTE_ZOOM = 15.2;
-// 18.2 framed about 150 m of road: arriving at the pickup the map showed a
-// blank patch with no cross streets. 17.3 keeps the surrounding block visible.
-const NAVIGATION_CAMERA_MAX_ROUTE_ZOOM = 17.3;
-const NAVIGATION_CAMERA_NEAR_TARGET_METERS = 60;
-// Chegou: o motorista para e procura o número/portão, então o mapa fecha no ponto final.
-const NAVIGATION_CAMERA_ARRIVAL_ZOOM = 18.6;
-const NAVIGATION_CAMERA_MIN_ROUTE_REFERENCE_METERS = 1200;
+const NAVIGATION_CAMERA_MAX_ROUTE_ZOOM = 15.8;
+// Chegou ao destino: mesmo zoom da navegação, sem fechar de repente no ponto final.
+const NAVIGATION_CAMERA_ARRIVAL_ZOOM = NAVIGATION_CAMERA_MAX_ROUTE_ZOOM;
 
 function toFiniteNumber(value) {
   const numeric = Number(value);
@@ -83,78 +78,23 @@ function normalizeNavigationSpeedKmh({
   return 0;
 }
 
-function resolveNavigationSpeedZoomOutPenalty(speedKmh = 0) {
+// Zoom estável, só pela velocidade. A rampa pela distância restante (15,2 longe do
+// ponto até 17,3 perto, 18,6 na chegada) fechava o mapa a cada poucos metros e dava
+// um salto ao tocar "Cheguei", quando a câmera de espera volta a 15,8. A partir de ~16
+// o mapa base do Android escurece as quadras (visto no Xiaomi de QA a 16,3), então o
+// teto é o mesmo 15,8 da espera.
+export function resolveNavigationCameraZoom(speedKmh = 0) {
   const normalizedSpeed = Math.max(0, Number(speedKmh) || 0);
-
-  if (normalizedSpeed <= 20) {
-    return 0;
+  if (normalizedSpeed <= 25) {
+    return NAVIGATION_CAMERA_MAX_ROUTE_ZOOM;
   }
-  if (normalizedSpeed <= 40) {
-    return 0.25;
+  if (normalizedSpeed <= 50) {
+    return 15.5;
   }
-  if (normalizedSpeed <= 70) {
-    return 0.55;
+  if (normalizedSpeed <= 80) {
+    return 15.2;
   }
-  return 0.8;
-}
-
-export function resolveNavigationCameraZoom(
-  speedKmh = 0,
-  remainingDistanceMeters = null,
-  totalDistanceMeters = null,
-) {
-  const normalizedSpeed = Math.max(0, Number(speedKmh) || 0);
-  const hasRemainingDistance =
-    remainingDistanceMeters !== null &&
-    remainingDistanceMeters !== undefined &&
-    remainingDistanceMeters !== '';
-  const remainingMeters = Number(remainingDistanceMeters);
-
-  if (!hasRemainingDistance || !Number.isFinite(remainingMeters) || remainingMeters < 0) {
-    if (normalizedSpeed <= 20) {
-      return 17.8;
-    }
-    if (normalizedSpeed <= 40) {
-      return 17;
-    }
-    if (normalizedSpeed <= 70) {
-      return 16;
-    }
-    return 15;
-  }
-
-  const totalMeters = Number(totalDistanceMeters);
-  const routeReferenceMeters = Math.max(
-    NAVIGATION_CAMERA_MIN_ROUTE_REFERENCE_METERS,
-    remainingMeters,
-    Number.isFinite(totalMeters) && totalMeters > 0 ? totalMeters : 0,
-  );
-  const clampedRemainingMeters = Math.max(
-    NAVIGATION_CAMERA_NEAR_TARGET_METERS,
-    Math.min(routeReferenceMeters, remainingMeters),
-  );
-  const logarithmicRange = Math.log(
-    routeReferenceMeters / NAVIGATION_CAMERA_NEAR_TARGET_METERS,
-  );
-  const routeProgress = logarithmicRange > 0
-    ? 1 - (
-        Math.log(clampedRemainingMeters / NAVIGATION_CAMERA_NEAR_TARGET_METERS) /
-        logarithmicRange
-      )
-    : 1;
-  const distanceZoom =
-    NAVIGATION_CAMERA_MIN_ROUTE_ZOOM +
-    (NAVIGATION_CAMERA_MAX_ROUTE_ZOOM - NAVIGATION_CAMERA_MIN_ROUTE_ZOOM) *
-      Math.max(0, Math.min(1, routeProgress));
-  const speedAdjustedZoom =
-    distanceZoom - resolveNavigationSpeedZoomOutPenalty(normalizedSpeed);
-
-  return Number(
-    Math.max(
-      15,
-      Math.min(NAVIGATION_CAMERA_MAX_ROUTE_ZOOM, speedAdjustedZoom),
-    ).toFixed(2),
-  );
+  return 14.9;
 }
 
 export function shouldRevealNavigationRoute({
@@ -1038,11 +978,7 @@ export function buildLeafNativeNavigationState({
     cameraHeadingDegrees,
     cameraZoom: hasArrived && normalizedPhase === 'destination'
       ? NAVIGATION_CAMERA_ARRIVAL_ZOOM
-      : resolveNavigationCameraZoom(
-        normalizedSpeedKmh,
-        remainingMeters,
-        baselineMeters,
-      ),
+      : resolveNavigationCameraZoom(normalizedSpeedKmh),
     cameraPitch: resolveNavigationCameraPitch(),
     cameraAnchorY: NAVIGATION_CAMERA_ANCHOR_Y,
     cameraAnimationDurationMs: NAVIGATION_CAMERA_ANIMATION_MS,

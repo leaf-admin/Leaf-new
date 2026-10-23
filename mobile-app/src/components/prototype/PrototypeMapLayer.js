@@ -139,6 +139,9 @@ const NEARBY_VEHICLE_CLUSTER_CLEARANCE_PX = 58;
 const IS_TEST_ENV = typeof process !== 'undefined' && process.env?.NODE_ENV === 'test';
 const MIN_VISIBLE_VIEWPORT_HEIGHT = 180;
 const MIN_VISIBLE_VIEWPORT_WIDTH = 160;
+// O carro da corrida (o do motorista que vem buscar e o do próprio motorista) é maior
+// que os carros próximos da busca: no mapa claro o de 42 dp sumia.
+const ACTIVE_VEHICLE_MARKER_SIZE = 56;
 const DRIVER_MARKER_IMAGE_SOURCES = Object.freeze({
   black: require('../../assets/map/leaf-map-car-marker-black.png'),
   white: require('../../assets/map/leaf-map-car-marker-white.png'),
@@ -1116,6 +1119,7 @@ const VehicleMarkerContent = React.memo(function VehicleMarkerContent({
   colorToken = 'black',
   shapeKey = '',
   screenHeading = 0,
+  size = 42,
 }) {
   const [failedImageUrl, setFailedImageUrl] = useState('');
   useEffect(() => setFailedImageUrl(''), [source?.uri]);
@@ -1127,18 +1131,18 @@ const VehicleMarkerContent = React.memo(function VehicleMarkerContent({
   );
 
   return (
-    <View collapsable={false} style={styles.vehicleMarkerWrap}>
+    <View collapsable={false} style={[styles.vehicleMarkerWrap, { width: size, height: size }]}>
       {shouldRenderRemoteImage ? (
         <Image
           source={source}
-          style={styles.vehicleMarkerImage}
+          style={[styles.vehicleMarkerImage, { width: size - 4, height: size - 4 }]}
           resizeMode="contain"
           fadeDuration={0}
           onError={() => setFailedImageUrl(source.uri)}
           testID="leaf-vehicle-campaign-image"
         />
       ) : (
-        <LeafVehicleMarker colorToken={colorToken} shapeKey={shapeKey} screenHeading={screenHeading} />
+        <LeafVehicleMarker colorToken={colorToken} shapeKey={shapeKey} screenHeading={screenHeading} size={size} />
       )}
     </View>
   );
@@ -1151,6 +1155,7 @@ const ProjectedVehicleOverlay = React.memo(function ProjectedVehicleOverlay({
   source,
   colorToken = 'black',
   shapeKey = '',
+  size = ACTIVE_VEHICLE_MARKER_SIZE,
 }) {
   if (!Number.isFinite(pointX) || !Number.isFinite(pointY)) {
     return null;
@@ -1165,13 +1170,16 @@ const ProjectedVehicleOverlay = React.memo(function ProjectedVehicleOverlay({
         style={[
           styles.androidDriverVehicleOverlay,
           {
-            left: pointX - 21,
-            top: pointY - 21,
+            left: pointX - size / 2,
+            top: pointY - size / 2,
+            width: size,
+            height: size,
+            borderRadius: size / 2,
             transform: [{ rotate: `${normalizeHeadingDegrees(heading) ?? 0}deg` }],
           },
         ]}
       >
-        <VehicleMarkerContent source={effectiveSource} colorToken={colorToken} shapeKey={shapeKey} screenHeading={heading} />
+        <VehicleMarkerContent source={effectiveSource} colorToken={colorToken} shapeKey={shapeKey} screenHeading={heading} size={size} />
       </View>
     </View>
   );
@@ -3253,6 +3261,7 @@ function PrototypeMapLayer({
                   colorToken={driverVehicleMarkerColorToken}
                   shapeKey={driverMarkerShapeKey}
                   screenHeading={displayedDriverScreenHeading}
+                  size={ACTIVE_VEHICLE_MARKER_SIZE}
                 />
               ) : null}
             </Marker>
@@ -3333,6 +3342,7 @@ function PrototypeMapLayer({
                 colorToken={driverVehicleMarkerColorToken}
                 shapeKey={driverMarkerShapeKey}
                 screenHeading={displayedDriverScreenHeading}
+                size={ACTIVE_VEHICLE_MARKER_SIZE}
               />
             </Marker>
           ) : null}

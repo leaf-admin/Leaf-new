@@ -88,8 +88,8 @@ export function createLeafVehicleSvg({ colorToken = 'black', screenHeading = 0, 
   const dx = 32 - pose.lightX;
   const dy = 32 - pose.lightY;
   const reach = Math.hypot(dx, dy) || 1;
-  const shadowX = Number((dx / reach * 1.6).toFixed(2));
-  const shadowY = Number((dy / reach * 1.6).toFixed(2));
+  const shadowX = Number((dx / reach * 2.2).toFixed(2));
+  const shadowY = Number((dy / reach * 2.2).toFixed(2));
   const tyres = WHEELS.map(([y, h]) => `<rect x="20.2" y="${y}" width="2.4" height="${h}" rx="1.1" fill="#15171A"/><rect x="41.4" y="${y}" width="2.4" height="${h}" rx="1.1" fill="#15171A"/>`).join('');
   return `<svg xmlns="http://www.w3.org/2000/svg" width="42" height="42" viewBox="0 0 64 64">
   <defs>
@@ -112,7 +112,7 @@ export function createLeafVehicleSvg({ colorToken = 'black', screenHeading = 0, 
       <stop offset="0" stop-color="#FFFFFF" stop-opacity=".34"/><stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
     </linearGradient>
     <radialGradient id="${id}-soft" cx=".5" cy=".5" r=".5">
-      <stop offset="0" stop-color="#0A0E09" stop-opacity=".3"/><stop offset=".55" stop-color="#0A0E09" stop-opacity=".12"/><stop offset="1" stop-color="#0A0E09" stop-opacity="0"/>
+      <stop offset="0" stop-color="#0A0E09" stop-opacity=".42"/><stop offset=".55" stop-color="#0A0E09" stop-opacity=".18"/><stop offset="1" stop-color="#0A0E09" stop-opacity="0"/>
     </radialGradient>
     <radialGradient id="${id}-head" cx=".5" cy=".5" r=".5">
       <stop offset="0" stop-color="#FFFBE8" stop-opacity=".75"/><stop offset="1" stop-color="#FFFBE8" stop-opacity="0"/>
@@ -125,9 +125,10 @@ export function createLeafVehicleSvg({ colorToken = 'black', screenHeading = 0, 
     </linearGradient>
   </defs>
   <ellipse cx="${32 + shadowX}" cy="${32.5 + shadowY}" rx="15.5" ry="26" fill="url(#${id}-soft)"/>
-  <path d="${BODY}" fill="#0A0E09" fill-opacity=".3" transform="translate(${shadowX} ${shadowY})"/>
+  <path d="${BODY}" fill="#0A0E09" fill-opacity=".38" transform="translate(${shadowX} ${shadowY})"/>
   ${tyres}
-  <path d="${BODY}" fill="url(#${id}-paint)" stroke="${edge}" stroke-opacity=".8" stroke-width=".4"/>
+  <path d="${BODY}" fill="none" stroke="#FFFFFF" stroke-opacity="${dark ? '.85' : '.6'}" stroke-width="2.6" stroke-linejoin="round"/>
+  <path d="${BODY}" fill="url(#${id}-paint)" stroke="#1E2227" stroke-opacity="${dark ? '.55' : '.7'}" stroke-width="1.1" stroke-linejoin="round"/>
   <path d="${BODY}" fill="url(#${id}-length)"/>
   <path d="${BODY}" fill="none" stroke="url(#${id}-rim)" stroke-width=".9"/>
   <path d="M27.6 11Q27.3 15.4 26.5 19.8M36.4 11Q36.7 15.4 37.5 19.8" stroke="${shade}" stroke-opacity=".7" stroke-width=".45" fill="none" stroke-linecap="round"/>
