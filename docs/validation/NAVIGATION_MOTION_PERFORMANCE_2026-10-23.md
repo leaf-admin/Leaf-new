@@ -82,3 +82,17 @@ Rollback: reverter exclusivamente o commit desta tarefa e, somente com autoriza�
 ## Fora do escopo e intocado
 
 Layout e ações dos cards/faixas, restante da interface, backend, socket, GPS transmitido, regras de segurança, Pix/promoção/tarifa/ledger, provedores, gatilhos/corpos/cache de requisições de rota, dependências, infraestrutura, build nativo, lojas e publicação de OTA. Nenhum provedor ou nova chamada paga foi adicionado.
+
+## Preparação do QA físico — continuação de 2026-10-23
+
+- Xiaomi USB `irsgaiscr4j7cenv` e iPhone passageiro detectados. Leaf foi trazido à frente; motorista offline e passageiro na Home foram observados nas sessões existentes. A automação HTTP do iPhone foi restabelecida.
+- APK original Android 1.0.11 (144) copiado para os artefatos locais. Assinatura verificada: certificado Android Debug de QA; não foi necessário usar assinatura de produção. O ID da OTA que executava não foi estabelecido.
+- Gerado APK completo do candidato `9080cbfd8af8fd8240246c6cdec23358bad4817d`: release, arm64, mesma assinatura do instalado, `expo.modules.updates.ENABLED=false`, check `NEVER`. Nenhum upload automático de source maps, build remoto ou publicação foi realizado.
+- Build usa cópia isolada do commit e projeto nativo completo de 1.0.11. Os templates nativos dos cards correspondem ao PR #421. Source map do bundle confirma conteúdo exato dos quatro arquivos de implementação desta tarefa.
+- Dois problemas de ambiente foram corrigidos somente na cópia de QA: checkout sem dependência Sentry e resolução Metro das dependências compartilhadas. Usada a árvore completa já existente de 1.0.11 e explicitados os caminhos reais de observação/resolução. Nenhum pacote foi instalado e nenhum código do produto foi alterado nesta continuação.
+- Ensaio local `PerformanceMap.js`, fora do Git, monta MapLayer/SDK Google reais com a rota de 655 pontos registrada no QA anterior e fixes sintéticos a cada 1 s. Tem modos motorista, passageiro e mapa oculto; câmera recebe comandos de 800 ms. Não monta runtime financeiro nem solicita novas rotas. Seus resultados devem ser identificados como medição do componente com GPS reproduzido, sem extrapolar para navegação operacional ou consumo do app inteiro.
+- Os três APKs locais concluíram o build: app completo candidato, ensaio candidato e ensaio de referência. As 43 entradas DEX/bibliotecas nativas dos dois ensaios são idênticas; muda o componente MapLayer em JavaScript. Assinaturas dos três APKs coincidem com a cópia original de QA.
+- Coletor de CPU do processo Leaf, RSS e `gfxinfo` preparado; `CLK_TCK=100` confirmado no aparelho. Smoke de cinco segundos validou a leitura, sem produzir baseline de navegação. O ring buffer de frames e a cobertura parcial da superfície Google estão documentados no coletor.
+- O Xiaomi bloqueou durante o build. Desbloqueio foi solicitado a Izaak. Até esse ponto, **nenhum candidato foi instalado e nenhuma medição A/B em movimento ou nova corrida sandbox foi executada**. Não houve limpeza de dados, desinstalação, senha/OTP, mudança de configuração do telefone nem ativação de mock GPS.
+
+Artefatos de build ficam em `/Volumes/LEAF_PILOT_BUILD/navigation-motion-422/`; evidência e roteiro, em `navigation-motion-performance/device-preflight` nos arquivos locais desta conversa. APK original guardado permite retorno por instalação de atualização, preservando dados, após conferir novamente assinatura e estado sem corrida ativa. Publicação/OTA e uso de credencial administrativa para a rodada sandbox continuam sujeitos à autorização aplicável.
