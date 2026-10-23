@@ -1054,6 +1054,16 @@ class WooviDriverService {
       };
 
       const response = await api.post(`/charge/${chargeId}/refund`, refundData);
+
+      // createApi resolves 4xx for inspection; an HTTP refusal is not a refund.
+      if (!(response.status >= 200 && response.status < 300)) {
+        return {
+          success: false,
+          error: response.data || `Woovi respondeu HTTP ${response.status}`,
+          httpStatus: response.status || null,
+          providerDelivery: classifyRefundProviderDelivery({ response })
+        };
+      }
       
       return {
         success: true,

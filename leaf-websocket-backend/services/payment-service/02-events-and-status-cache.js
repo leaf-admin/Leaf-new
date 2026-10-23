@@ -328,8 +328,37 @@ class PaymentServiceEventsAndStatusCacheMethods {
       const providerEnvironment = String(paymentIntent.providerEnvironment || '').trim().toLowerCase();
       if (!providerEnvironment) return null;
 
+      let configOverrides = { environment: providerEnvironment };
+      const context = paymentIntent.financialContext || {};
+      if (providerEnvironment === 'sandbox' && context.paymentProfileSource === 'firestore') {
+        const profileId = String(context.paymentProfileId || '').trim();
+        if (!profileId || (paymentIntent.paymentProfileId && paymentIntent.paymentProfileId !== profileId)) {
+          return null;
+        }
+        const firestore = firebaseConfig.getFirestore();
+        if (!firestore) return null;
+        const profileDoc = await firestore.collection('payment_runtime_profiles').doc(profileId).get();
+        if (!profileDoc.exists) return null;
+        const profile = profileDoc.data() || {};
+        if (String(profile.environment || '').trim().toLowerCase() !== 'sandbox'
+          || String(profile.provider || 'woovi').trim().toLowerCase() !== 'woovi') return null;
+
+        // Settle the existing charge in its original account. A paused/expired
+        // profile may stop new charges, but must not redirect an existing refund.
+        configOverrides = {
+          environment: 'sandbox',
+          baseUrl: profile.baseUrl,
+          authorizationAppId: profile.authorizationAppId,
+          apiToken: profile.apiToken,
+          clientId: profile.clientId,
+          clientSecret: profile.clientSecret,
+          masterApiToken: profile.masterApiToken,
+          masterAppId: profile.masterAppId
+        };
+      }
+
       return {
-        wooviConfig: getWooviConfig({ environment: providerEnvironment }),
+        wooviConfig: getWooviConfig(configOverrides),
         paymentIntentId: paymentIntent.paymentIntentId,
         providerEnvironment,
         paymentProfileId: paymentIntent.paymentProfileId || null,
