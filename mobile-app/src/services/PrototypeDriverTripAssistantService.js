@@ -4,13 +4,10 @@ import { AppState, Platform } from 'react-native';
 import Logger from '../utils/Logger';
 import PersistentRideNotificationService from './PersistentRideNotificationService';
 import { cancelRideArrivalAlert, displayRideArrivalAlert } from './LeafOngoingRideNotification';
+import { PICKUP_ARRIVAL_METERS as PICKUP_TOLERANCE_METERS } from './LeafNativeNavigationEngine';
 
 const STORAGE_KEY = 'prototype_driver_trip_assistant_v1';
 const ACTIVE_STATUSES = new Set(['accepted', 'arrived', 'started']);
-// Pickup radius in which the driver may mark arrival. Phone GPS is commonly
-// off by 20-40 m in cities and indoors, so a tighter radius blocks drivers who
-// are already standing at the pickup point.
-const PICKUP_TOLERANCE_METERS = 80;
 const FALLBACK_SPEED_KM_PER_MIN = 0.45;
 // Distância do destino em que o motorista é avisado para encerrar a corrida. A mesma
 // do encerramento sem a pergunta "Encerrar antes do destino?" (driverEarlyEndConfirm).
@@ -265,8 +262,8 @@ function buildTripSession(input = {}, previous = null) {
     legEtaMinutes: baseline.legEtaMinutes,
     progressRatio,
     pickupToleranceReached:
-      next.status === 'accepted' && Number.isFinite(remainingMeters)
-        ? remainingMeters <= PICKUP_TOLERANCE_METERS
+      next.status === 'accepted' && Number.isFinite(straightMeters)
+        ? straightMeters <= PICKUP_TOLERANCE_METERS
         : false,
     updatedAt: new Date().toISOString()
   };

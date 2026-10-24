@@ -68,6 +68,20 @@ describe('LeafNativeNavigationEngine', () => {
     expect(currentStepIndex).toBe(1);
   });
 
+  it('keeps pickup arrival at the server default radius without changing destination hints', () => {
+    const build = (phase, meters, projectedMeters = meters) => buildLeafNativeNavigationState({
+      bookingId: 'arrival-radius', phase,
+      status: phase === 'pickup' ? 'accepted' : 'started',
+      currentCoordinate: { latitude: routeCoordinates[2].latitude - meters / 111195, longitude: routeCoordinates[2].longitude },
+      targetCoordinate: routeCoordinates[2], routeCoordinates: [], steps: [],
+      remainingDistanceMeters: projectedMeters, totalDistanceMeters: 1000, totalDurationMinutes: 4,
+    });
+    expect(build('pickup', 50).hasArrived).toBe(false);
+    expect(build('pickup', 50, 0).hasArrived).toBe(false);
+    expect(build('pickup', 10).hasArrived).toBe(true);
+    expect(build('destination', 50).hasArrived).toBe(true);
+  });
+
   it('detects off-route positions above the 100m threshold', () => {
     const distanceToRouteMeters = calculateDistanceToRouteMeters(
       { latitude: -22.9695, longitude: -43.1765 },
@@ -373,4 +387,55 @@ describe('arrival in the Leaf navigation banner', () => {
     expect(onTheWay.hasArrived).toBe(false);
     expect(onTheWay.currentInstruction).not.toMatch(/chegou/);
   });
+});
+
+
+describe('shared maneuver route measurement', () => {
+  it('builds the route geometry once for current position and multiple candidate turns', () => {
+    const fs = require('fs');
+    const vm = require('vm');
+    const source = fs.readFileSync(require.resolve('../src/services/LeafNativeNavigationEngine'), 'utf8');
+    const start = source.indexOf('function resolveUpcomingNavigationTarget(');
+    const end = source.indexOf('export function resolveCurrentNavigationStepIndex', start);
+    const prepared = { segments: ['prepared-once'] };
+    const buildRouteMeasureSegments = jest.fn(() => prepared);
+    const projectCoordinateToRouteMeasure = jest.fn((coordinate, coordinates, measure) => {
+      expect(measure).toBe(prepared);
+      return { routeMeters: coordinate.meters };
+    });
+    const input = {
+      current: { meters: 100 }, target: { meters: 1000 }, routeGeometryCoordinates: ['route'],
+      normalizedSteps: [110, 120, 200].map(meters => ({ startLocation: { meters }, instruction: 'Vire à direita' })),
+      currentStepIndex: 0, remainingMeters: 900, fallbackInstruction: 'Siga',
+    };
+    const result = vm.runInNewContext(`${source.slice(start, end)}\nresolveUpcomingNavigationTarget(input);`, {
+      input, buildRouteMeasureSegments, projectCoordinateToRouteMeasure,
+      isTurningStep: () => true, DEFAULT_ADVANCE_THRESHOLD_METERS: 35,
+      calculateNavigationDistanceMeters: () => 100,
+      calculateRouteDistanceToCoordinateMeters: () => 100,
+    });
+    expect(result.distanceTargetCoordinate.meters).toBe(200);
+    expect(buildRouteMeasureSegments).toHaveBeenCalledTimes(1);
+    expect(projectCoordinateToRouteMeasure).toHaveBeenCalledTimes(4);
+  });
+});
+
+
+it('preserves partial-segment route distance when sharing prepared maneuver geometry', () => {
+  const state = buildLeafNativeNavigationState({
+    bookingId: 'partial-segment', phase: 'destination', status: 'started',
+    currentCoordinate: { latitude: 0, longitude: 0.005 },
+    targetCoordinate: { latitude: 0, longitude: 0.02 },
+    routeCoordinates: [0, 0.01, 0.02].map(longitude => ({ latitude: 0, longitude })),
+    steps: [{
+      instruction: 'Vire à direita', maneuver: 'TURN_RIGHT',
+      startLocation: { latitude: 0, longitude: 0 },
+      endLocation: { latitude: 0, longitude: 0.01 },
+      maneuverLocation: { latitude: 0, longitude: 0.01 },
+    }],
+  });
+  expect(state.remainingDistanceMeters).toBeGreaterThan(1600);
+  expect(state.remainingDistanceMeters).toBeLessThan(1700);
+  expect(state.maneuverDistanceMeters).toBeGreaterThan(500);
+  expect(state.maneuverDistanceMeters).toBeLessThan(600);
 });

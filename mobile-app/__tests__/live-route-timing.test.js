@@ -136,3 +136,19 @@ describe('passenger trip card at the end of the ride and on the way', () => {
     expect(distanceProgress(state, { routeKey: 'b2', remainingKm: null }).progress).toBeNull();
   });
 });
+
+
+describe('distance progress after resuming a trip', () => {
+  const { resolveDistanceProgressState } = require('../src/screens/prototype/liveRouteTiming');
+  it('uses the known trip distance when the screen first opens midway', () => {
+    expect(resolveDistanceProgressState(null, { routeKey: 'r', remainingKm: 4, totalKm: 16 }).progress).toBe(0.75);
+  });
+  it('shows completion at zero even when the first resumed position is the destination', () => {
+    expect(resolveDistanceProgressState(null, { routeKey: 'r', remainingKm: 0, totalKm: 16 }).progress).toBe(1);
+  });
+  it('keeps the observed-distance fallback and resets for another leg', () => {
+    const first = resolveDistanceProgressState(null, { routeKey: 'r', remainingKm: 4 });
+    expect(resolveDistanceProgressState(first, { routeKey: 'r', remainingKm: 2 }).progress).toBe(0.5);
+    expect(resolveDistanceProgressState(first, { routeKey: 'other', remainingKm: 2, totalKm: 8 }).progress).toBe(0.75);
+  });
+});

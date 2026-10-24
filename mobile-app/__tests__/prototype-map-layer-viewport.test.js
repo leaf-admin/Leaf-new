@@ -6,6 +6,9 @@ const mockFitToCoordinates = jest.fn();
 const mockAnimateCamera = jest.fn();
 const mockPointForCoordinate = jest.fn();
 const mockGetCamera = jest.fn();
+const mockMarkerNativeProps = jest.fn();
+const mockMarkerRenders = jest.fn();
+let mockMarkerImperativeEnabled = false;
 jest.mock('react-native-reanimated', () => ({
   ...require('react-native-reanimated/mock'), useReducedMotion: () => false,
 }));
@@ -53,7 +56,14 @@ jest.mock('react-native-maps', () => {
     __esModule: true,
     default: MockMapView,
     Circle: MockView,
-    Marker: MockView,
+    Marker: React.forwardRef((props, ref) => {
+      mockMarkerRenders(props);
+      React.useImperativeHandle(ref, () => ({ setNativeProps: next => {
+        if (!mockMarkerImperativeEnabled) throw new Error('Mock native updates unavailable');
+        mockMarkerNativeProps(next);
+      } }));
+      return <MockView {...props} />;
+    }),
     Polyline: jest.fn(MockView),
     PROVIDER_GOOGLE: 'google',
   };
@@ -819,4 +829,38 @@ describe('PrototypeMapLayer route viewport fitting', () => {
       }),
     );
   });
+
+it('updates the native vehicle pose without reconciling the marker for each straight-line frame', () => {
+  const { Platform } = require('react-native');
+  const previousPlatform = Platform.OS;
+  Platform.OS = 'android';
+  mockMarkerImperativeEnabled = true;
+  const start = { latitude: -22.881, longitude: -43.343 };
+  const end = { latitude: -22.8808, longitude: -43.343 };
+  const props = { region: baseRegion, driverCoordinate: start, animateRoute: false,
+    routeCoordinates: [start, { latitude: -22.879, longitude: -43.343 }] };
+  const screen = render(<PrototypeMapLayer {...props} />);
+  try {
+    act(() => jest.advanceTimersByTime(1700));
+    screen.rerender(<PrototypeMapLayer {...props} driverCoordinate={end} />);
+    mockMarkerNativeProps.mockClear();
+    mockMarkerRenders.mockClear();
+    act(() => jest.advanceTimersByTime(500));
+    expect(mockMarkerNativeProps.mock.calls.length).toBeGreaterThan(3);
+    expect(mockMarkerRenders.mock.calls.length).toBeLessThanOrEqual(1);
+    const latest = mockMarkerNativeProps.mock.calls.at(-1)[0];
+    expect(latest.coordinate.latitude).toBeGreaterThan(start.latitude);
+    expect(latest.coordinate.longitude).toBeCloseTo(start.longitude, 6);
+    expect(latest.rotation).toBeCloseTo(0, 4);
+    screen.rerender(<PrototypeMapLayer {...props} driverCoordinate={end} motionEnabled={false} />);
+    mockMarkerNativeProps.mockClear();
+    act(() => jest.advanceTimersByTime(6000));
+    expect(mockMarkerNativeProps).not.toHaveBeenCalled();
+  } finally {
+    screen.unmount();
+    mockMarkerImperativeEnabled = false;
+    Platform.OS = previousPlatform;
+  }
+});
+
 });

@@ -1150,22 +1150,30 @@ const VehicleMarkerContent = React.memo(function VehicleMarkerContent({
 
 // Keep visual frames inside the marker. Updating MapLayer here would reconcile
 // every route/traffic polyline for each interpolated position.
-function useDriverMarkerMotion({ coordinate, heading, routeMeters, routeMetrics, enabled, reduceMotion, predict = true }) {
+function useDriverMarkerMotion({ coordinate, heading, routeMeters, routeMetrics, enabled, reduceMotion, predict = true, onFrame = null, visualHeadingOffset = 0 }) {
   const [pose, setPose] = useState(() => ({ coordinate, heading }));
   const poseRef = useRef(pose);
+  const frameHandlerRef = useRef(onFrame);
+  const headingOffsetRef = useRef(visualHeadingOffset);
+  frameHandlerRef.current = onFrame;
+  headingOffsetRef.current = visualHeadingOffset;
   const sampleRef = useRef(null);
   const wasEnabledRef = useRef(false);
   useEffect(() => {
     const wasEnabled = wasEnabledRef.current;
     wasEnabledRef.current = enabled;
-    const commit = (nextCoordinate, nextHeading) => {
+    const commit = (nextCoordinate, nextHeading, forceRender = false) => {
       const next = { coordinate: nextCoordinate, heading: normalizeHeadingDegrees(nextHeading) ?? 0 };
       poseRef.current = next;
-      setPose(previous => (
-        previous.coordinate?.latitude === next.coordinate?.latitude &&
-        previous.coordinate?.longitude === next.coordinate?.longitude &&
-        previous.heading === next.heading ? previous : next
-      ));
+      const nativeApplied = frameHandlerRef.current?.(next) === true;
+      setPose(previous => {
+        if (nativeApplied && !forceRender &&
+            resolveVehicleArtworkPose(previous.heading - headingOffsetRef.current).heading ===
+              resolveVehicleArtworkPose(next.heading - headingOffsetRef.current).heading) return previous;
+        return previous.coordinate?.latitude === next.coordinate?.latitude &&
+          previous.coordinate?.longitude === next.coordinate?.longitude &&
+          previous.heading === next.heading ? previous : next;
+      });
     };
     if (!enabled) {
       poseRef.current = { coordinate, heading };
@@ -1187,7 +1195,7 @@ function useDriverMarkerMotion({ coordinate, heading, routeMeters, routeMetrics,
     const distance = calculateCoordinateDistanceMeters(previous.coordinate, coordinate);
     if (!wasEnabled || !coordinate || !previous.coordinate || reduceMotion ||
         !Number.isFinite(distance) || distance > DRIVER_MARKER_SMOOTH_SNAP_METERS) {
-      commit(coordinate, targetHeading);
+      commit(coordinate, targetHeading, true);
       return undefined;
     }
     const moves = distance >= 1;
@@ -1240,7 +1248,7 @@ function useDriverMarkerMotion({ coordinate, heading, routeMeters, routeMetrics,
     frame = requestAnimationFrame(animate);
     return () => { cancelled = true; cancelAnimationFrame(frame); };
   }, [coordinate, heading, routeMeters, routeMetrics, enabled, reduceMotion, predict]);
-  return enabled ? pose : { coordinate, heading };
+  return enabled ? (onFrame ? poseRef.current : pose) : { coordinate, heading };
 }
 
 const MovingVehicleMarker = React.memo(function MovingVehicleMarker({
@@ -1254,9 +1262,21 @@ const MovingVehicleMarker = React.memo(function MovingVehicleMarker({
   const routeHeading = useMemo(() => Number.isFinite(routeMeters) ? resolveVehicleRouteFrame({
     routeMetrics, startMeters: routeMeters, endMeters: routeMeters, progress: 1,
   })?.heading : null, [routeMeters, routeMetrics]);
+  const markerRef = useRef(null);
+  const applyNativePose = useCallback(next => {
+    if (typeof markerRef.current?.setNativeProps !== 'function') return false;
+    try {
+      markerRef.current.setNativeProps({ coordinate: next.coordinate, rotation: next.heading });
+      return true;
+    } catch (_error) {
+      // Retain React updates if this mounted SDK view cannot accept an imperative update.
+      return false;
+    }
+  }, []);
   const pose = useDriverMarkerMotion({
     coordinate: snapsToRoute ? projection.coordinate : coordinate,
     heading: routeHeading ?? heading, routeMeters, routeMetrics, enabled, reduceMotion,
+    onFrame: applyNativePose, visualHeadingOffset: cameraHeading,
   });
   const screenHeading = resolveScreenRelativeVehicleHeading(pose.heading, cameraHeading);
   const poseBucket = resolveVehicleArtworkPose(screenHeading).heading;
@@ -1269,7 +1289,7 @@ const MovingVehicleMarker = React.memo(function MovingVehicleMarker({
   }, [source, colorToken, shapeKey, enabled, Platform.OS === 'ios' ? poseBucket : null]);
   if (!pose.coordinate) return null;
   return (
-    <Marker testID={testID} coordinate={pose.coordinate} zIndex={19}
+    <Marker ref={markerRef} testID={testID} coordinate={pose.coordinate} zIndex={19}
       anchor={{ x: 0.5, y: 0.5 }} flat rotation={pose.heading}
       tracksViewChanges={tracking} pinColor={undefined}>
       <VehicleMarkerContent source={source} colorToken={colorToken} shapeKey={shapeKey}

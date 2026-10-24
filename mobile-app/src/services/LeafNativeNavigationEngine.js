@@ -1,8 +1,9 @@
 const DEFAULT_ADVANCE_THRESHOLD_METERS = 35;
 const DEFAULT_OFF_ROUTE_THRESHOLD_METERS = 100;
-// Remaining route distance at which the banner says the driver arrived, instead
-// of "Siga até o destino · 0 m". Same radius as marking arrival at the pickup.
-const ARRIVAL_BANNER_METERS = 80;
+// Match the existing server pickup-arrival default; the backend validates the
+// command independently. Destination's visual hint keeps its existing radius.
+export const PICKUP_ARRIVAL_METERS = 20;
+const DESTINATION_ARRIVAL_BANNER_METERS = 80;
 const EARTH_RADIUS_METERS = 6371000;
 const CAMERA_LOOK_AHEAD_METERS = 55;
 export const NAVIGATION_CAMERA_ANCHOR_Y = 0.68;
@@ -390,8 +391,9 @@ function calculateRouteDistanceToCoordinateMeters(
     return Number.isFinite(Number(fallbackMeters)) ? Math.max(0, Number(fallbackMeters)) : null;
   }
 
-  const currentMeasure = projectCoordinateToRouteMeasure(current, coordinates);
-  const targetMeasure = projectCoordinateToRouteMeasure(target, coordinates);
+  const routeMeasure = buildRouteMeasureSegments(coordinates);
+  const currentMeasure = projectCoordinateToRouteMeasure(current, coordinates, routeMeasure);
+  const targetMeasure = projectCoordinateToRouteMeasure(target, coordinates, routeMeasure);
   if (
     currentMeasure &&
     targetMeasure &&
@@ -494,9 +496,12 @@ function buildRouteMeasureSegments(routeCoordinates = []) {
   return { coordinates, origin, segments, totalMeters };
 }
 
-function projectCoordinateToRouteMeasure(coordinate, routeCoordinates = []) {
+function projectCoordinateToRouteMeasure(
+  coordinate,
+  routeCoordinates = [],
+  routeMeasure = buildRouteMeasureSegments(routeCoordinates),
+) {
   const current = normalizeNavigationCoordinate(coordinate);
-  const routeMeasure = buildRouteMeasureSegments(routeCoordinates);
 
   if (!current || !routeMeasure) {
     return null;
@@ -754,10 +759,10 @@ function resolveUpcomingNavigationTarget({
   const safeCurrentStepIndex = Math.max(0, Number(currentStepIndex) || 0);
   const currentStep =
     currentStepIndex >= 0 ? normalizedSteps[currentStepIndex] : null;
-  const currentMeasure = projectCoordinateToRouteMeasure(
-    current,
-    routeGeometryCoordinates,
-  );
+  // Current position and candidate turns share this geometry. Rebuilding all
+  // segments for each turn multiplied route normalization/trigonometry work.
+  const routeMeasure = buildRouteMeasureSegments(routeGeometryCoordinates);
+  const currentMeasure = projectCoordinateToRouteMeasure(current, routeGeometryCoordinates, routeMeasure);
   const routeCursorMeters = Number(currentMeasure?.routeMeters);
   const candidateCurveSteps = normalizedSteps
     .slice(safeCurrentStepIndex)
@@ -767,10 +772,7 @@ function resolveUpcomingNavigationTarget({
       step?.maneuverLocation ||
       step?.startLocation ||
       step?.endLocation;
-    const targetMeasure = projectCoordinateToRouteMeasure(
-      coordinate,
-      routeGeometryCoordinates,
-    );
+    const targetMeasure = projectCoordinateToRouteMeasure(coordinate, routeGeometryCoordinates, routeMeasure);
 
     if (!Number.isFinite(routeCursorMeters) || !Number.isFinite(targetMeasure?.routeMeters)) {
       return true;
@@ -967,8 +969,12 @@ export function buildLeafNativeNavigationState({
     distanceToRouteMeters > offRouteThresholdMeters;
 
   // Off the route the projected remaining distance can read zero: not an arrival.
+  const arrivalBannerMeters = normalizedPhase === 'pickup'
+    ? PICKUP_ARRIVAL_METERS : DESTINATION_ARRIVAL_BANNER_METERS;
+  const arrivalDistanceMeters = normalizedPhase === 'pickup'
+    ? calculateNavigationDistanceMeters(current, target) : remainingMeters;
   const hasArrived =
-    !isOffRoute && Number.isFinite(remainingMeters) && remainingMeters <= ARRIVAL_BANNER_METERS;
+    !isOffRoute && Number.isFinite(arrivalDistanceMeters) && arrivalDistanceMeters <= arrivalBannerMeters;
   const arrivalInstruction = normalizedPhase === 'destination'
     ? 'Você chegou ao destino'
     : 'Você chegou ao embarque';
