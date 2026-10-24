@@ -129,7 +129,7 @@ const DRIVER_MARKER_MIN_HEADING_DISTANCE_METERS = 0.85;
 const DRIVER_ROUTE_SNAP_MAX_METERS = 42;
 const DRIVER_DEAD_RECKONING_MAX_MS = 4200;
 const DRIVER_DEAD_RECKONING_MAX_SPEED_MPS = 18;
-const DRIVER_DEAD_RECKONING_FRAME_MS = 42;
+const DRIVER_VISUAL_FRAME_MS = 32;
 const EARTH_RADIUS_METERS = 6371000;
 const USER_RADAR_DURATION_MS = 2200;
 const NEARBY_VEHICLE_REVEAL_DELAY_MS = 15000;
@@ -1148,6 +1148,136 @@ const VehicleMarkerContent = React.memo(function VehicleMarkerContent({
   );
 });
 
+// Keep visual frames inside the marker. Updating MapLayer here would reconcile
+// every route/traffic polyline for each interpolated position.
+function useDriverMarkerMotion({ coordinate, heading, routeMeters, routeMetrics, enabled, reduceMotion, predict = true }) {
+  const [pose, setPose] = useState(() => ({ coordinate, heading }));
+  const poseRef = useRef(pose);
+  const sampleRef = useRef(null);
+  const wasEnabledRef = useRef(false);
+  useEffect(() => {
+    const wasEnabled = wasEnabledRef.current;
+    wasEnabledRef.current = enabled;
+    const commit = (nextCoordinate, nextHeading) => {
+      const next = { coordinate: nextCoordinate, heading: normalizeHeadingDegrees(nextHeading) ?? 0 };
+      poseRef.current = next;
+      setPose(previous => (
+        previous.coordinate?.latitude === next.coordinate?.latitude &&
+        previous.coordinate?.longitude === next.coordinate?.longitude &&
+        previous.heading === next.heading ? previous : next
+      ));
+    };
+    if (!enabled) {
+      poseRef.current = { coordinate, heading };
+      sampleRef.current = null;
+      return undefined;
+    }
+    const previous = poseRef.current;
+    const targetHeading = resolveDriverMarkerHeading({
+      explicitHeading: heading, startCoordinate: previous.coordinate,
+      endCoordinate: coordinate, fallbackHeading: previous.heading,
+    });
+    const now = Date.now();
+    const lastSample = sampleRef.current;
+    const elapsed = lastSample && lastSample.routeMetrics === routeMetrics ? now - lastSample.at : 0;
+    const speed = elapsed > 0 && Number.isFinite(routeMeters) && Number.isFinite(lastSample?.routeMeters)
+      ? clampDriverSpeedMetersPerSecond((routeMeters - lastSample.routeMeters) * 1000 / elapsed)
+      : 0;
+    sampleRef.current = { at: now, routeMeters, routeMetrics };
+    const distance = calculateCoordinateDistanceMeters(previous.coordinate, coordinate);
+    if (!wasEnabled || !coordinate || !previous.coordinate || reduceMotion ||
+        !Number.isFinite(distance) || distance > DRIVER_MARKER_SMOOTH_SNAP_METERS) {
+      commit(coordinate, targetHeading);
+      return undefined;
+    }
+    const moves = distance >= 1;
+    const turns = Math.abs(resolveShortestHeadingDeltaDegrees(previous.heading, targetHeading)) >= 0.6;
+    if (!moves && !turns) {
+      commit(coordinate, targetHeading);
+      return undefined;
+    }
+    const startProjection = findNearestRouteProjection(previous.coordinate, routeMetrics);
+    const followsRoute = Boolean(startProjection &&
+      startProjection.snappedDistanceMeters <= DRIVER_ROUTE_SNAP_MAX_METERS &&
+      Number.isFinite(routeMeters) &&
+      Math.abs(routeMeters - startProjection.routeMeters) <= distance * 3 + 20);
+    // Match recent fixes without introducing a long visual delay after sparse GPS.
+    const duration = moves
+      ? elapsed > 0 ? Math.max(350, Math.min(DRIVER_MARKER_SMOOTH_MS, elapsed)) : DRIVER_MARKER_SMOOTH_MS
+      : DRIVER_MARKER_HEADING_SMOOTH_MS;
+    const canPredict = predict && followsRoute && speed > 0.3;
+    let frame;
+    let lastFrameAt = -Infinity;
+    let cancelled = false;
+    const animate = () => {
+      if (cancelled) return;
+      const at = Date.now();
+      const age = Math.max(0, at - now);
+      const progress = Math.min(1, age / duration);
+      const predictionMs = age - duration;
+      if (at - lastFrameAt >= DRIVER_VISUAL_FRAME_MS || (progress === 1 && !canPredict)) {
+        lastFrameAt = at;
+        const predicting = canPredict && predictionMs > 0;
+        const routeFrame = followsRoute && moves ? resolveVehicleRouteFrame({
+          routeMetrics,
+          startMeters: predicting ? routeMeters : startProjection.routeMeters,
+          endMeters: predicting
+            ? routeMeters + speed * Math.min(predictionMs, DRIVER_DEAD_RECKONING_MAX_MS) / 1000
+            : routeMeters,
+          progress: predicting ? 1 : progress,
+        }) : null;
+        const nextHeading = routeFrame?.heading ?? targetHeading;
+        commit(routeFrame?.coordinate || (moves
+          ? interpolateCoordinate(previous.coordinate, coordinate, progress) : coordinate),
+        predicting ? interpolateHeadingDegrees(poseRef.current.heading, nextHeading, 0.25)
+          : interpolateHeadingDegrees(previous.heading, nextHeading,
+            routeFrame ? Math.min(1, progress / 0.22) : 1 - Math.pow(1 - progress, 3)));
+      }
+      if (progress < 1 || (canPredict && predictionMs < DRIVER_DEAD_RECKONING_MAX_MS)) {
+        frame = requestAnimationFrame(animate);
+      }
+    };
+    frame = requestAnimationFrame(animate);
+    return () => { cancelled = true; cancelAnimationFrame(frame); };
+  }, [coordinate, heading, routeMeters, routeMetrics, enabled, reduceMotion, predict]);
+  return enabled ? pose : { coordinate, heading };
+}
+
+const MovingVehicleMarker = React.memo(function MovingVehicleMarker({
+  coordinate, heading, routeMetrics, enabled, reduceMotion, cameraHeading,
+  source, colorToken, shapeKey, testID,
+}) {
+  const projection = useMemo(() => findNearestRouteProjection(coordinate, routeMetrics),
+    [coordinate?.latitude, coordinate?.longitude, routeMetrics]);
+  const snapsToRoute = projection?.snappedDistanceMeters <= DRIVER_ROUTE_SNAP_MAX_METERS;
+  const routeMeters = snapsToRoute ? projection.routeMeters : null;
+  const routeHeading = useMemo(() => Number.isFinite(routeMeters) ? resolveVehicleRouteFrame({
+    routeMetrics, startMeters: routeMeters, endMeters: routeMeters, progress: 1,
+  })?.heading : null, [routeMeters, routeMetrics]);
+  const pose = useDriverMarkerMotion({
+    coordinate: snapsToRoute ? projection.coordinate : coordinate,
+    heading: routeHeading ?? heading, routeMeters, routeMetrics, enabled, reduceMotion,
+  });
+  const screenHeading = resolveScreenRelativeVehicleHeading(pose.heading, cameraHeading);
+  const poseBucket = resolveVehicleArtworkPose(screenHeading).heading;
+  const [tracking, setTracking] = useState(true);
+  useEffect(() => {
+    if (!enabled) { setTracking(false); return undefined; }
+    setTracking(true);
+    const timer = setTimeout(() => setTracking(false), Platform.OS === 'android' ? 1500 : 500);
+    return () => clearTimeout(timer);
+  }, [source, colorToken, shapeKey, enabled, Platform.OS === 'ios' ? poseBucket : null]);
+  if (!pose.coordinate) return null;
+  return (
+    <Marker testID={testID} coordinate={pose.coordinate} zIndex={19}
+      anchor={{ x: 0.5, y: 0.5 }} flat rotation={pose.heading}
+      tracksViewChanges={tracking} pinColor={undefined}>
+      <VehicleMarkerContent source={source} colorToken={colorToken} shapeKey={shapeKey}
+        screenHeading={screenHeading} size={ACTIVE_VEHICLE_MARKER_SIZE} />
+    </Marker>
+  );
+});
+
 const ProjectedVehicleOverlay = React.memo(function ProjectedVehicleOverlay({
   pointX,
   pointY,
@@ -1431,18 +1561,19 @@ function PrototypeMapLayer({
   forceRegionUpdate = false,
   manualCameraHoldMs = 0,
   mapCameraHeading = 0,
+  motionEnabled = true,
 }) {
   const { preferences } = useMobilePreferences();
   const showTraffic = Boolean(requestedTraffic && preferences.trafficLayerEnabled);
   const reduceMotion = useReducedMotion();
   const [isMapActive, setIsMapActive] = useState(() => AppState.currentState === 'active');
   useEffect(() => {
-    if (Platform.OS !== 'android') return undefined;
     const subscription = AppState.addEventListener('change', (state) => {
       setIsMapActive(state === 'active');
     });
     return () => subscription?.remove?.();
   }, []);
+  const isVisualMotionActive = isMapActive && motionEnabled;
   const mapProvider =
     Platform.OS === 'ios' || Platform.OS === 'android'
       ? PROVIDER_GOOGLE
@@ -1655,20 +1786,9 @@ function PrototypeMapLayer({
   const [androidVisibleRegion, setAndroidVisibleRegion] = useState(region);
   const [nativeMapReadyVersion, setNativeMapReadyVersion] = useState(0);
   const [userAvatarFailed, setUserAvatarFailed] = useState(false);
-  const [smoothedDriverCoordinate, setSmoothedDriverCoordinate] = useState(targetDriverCoordinate);
-  const [smoothedDriverHeading, setSmoothedDriverHeading] = useState(
-    targetDriverHeading ?? normalizedUserHeading,
-  );
   const androidPendingRegionRef = useRef(region);
   const androidRegionFrameRef = useRef(null);
   const nativeMapLayoutKeyRef = useRef('');
-  const driverSmoothFrameRef = useRef(null);
-  const driverPredictionFrameRef = useRef(null);
-  const driverPredictionBaseRef = useRef(null);
-  const driverLastRouteSampleRef = useRef(null);
-  const driverLastPredictionFrameAtRef = useRef(0);
-  const smoothedDriverCoordinateRef = useRef(targetDriverCoordinate);
-  const smoothedDriverHeadingRef = useRef(targetDriverHeading ?? normalizedUserHeading);
   const showMarkerCallouts = false;
   const normalizedAvatarUri = String(userAvatarUri || '').trim();
   const shouldRenderAvatarImage = Boolean(normalizedAvatarUri) && !userAvatarFailed;
@@ -1753,11 +1873,18 @@ function PrototypeMapLayer({
       : { glow: null, core: null }),
     [animatedRouteCoordinates, denseRoute.length, shouldAnimateRoute],
   );
-  const displayedDriverCoordinate =
-    smoothedDriverCoordinate || targetDriverCoordinate || normalizedDriverCoordinate;
+  const legacyDriverPose = useDriverMarkerMotion({
+    coordinate: targetDriverCoordinate, heading: targetDriverHeading ?? normalizedUserHeading,
+    routeMeters: targetDriverRouteMeters, routeMetrics: routeMotionMetrics,
+    // Native cars own their visual state; legacy avatar/overlay paths stay local.
+    enabled: isVisualMotionActive && (driverMarkerMode !== 'car' ||
+      Platform.OS === 'android' && !USE_NATIVE_ANDROID_VEHICLE_MARKER),
+    reduceMotion, predict: driverMarkerMode === 'car',
+  });
+  const displayedDriverCoordinate = legacyDriverPose.coordinate;
   const hasDisplayedDriverCoordinate = Boolean(displayedDriverCoordinate);
   const displayedDriverHeading =
-    normalizeHeadingDegrees(smoothedDriverHeading) ??
+    normalizeHeadingDegrees(legacyDriverPose.heading) ??
     normalizedDriverHeading ??
     normalizedUserHeading;
   const displayedDriverScreenHeading = resolveScreenRelativeVehicleHeading(
@@ -1877,17 +2004,6 @@ function PrototypeMapLayer({
     setUserAvatarFailed(true);
   }, []);
 
-  const commitSmoothedDriverCoordinate = useCallback((nextCoordinate) => {
-    smoothedDriverCoordinateRef.current = nextCoordinate;
-    setSmoothedDriverCoordinate(nextCoordinate);
-  }, []);
-
-  const commitSmoothedDriverHeading = useCallback((nextHeading) => {
-    const normalizedHeading = normalizeHeadingDegrees(nextHeading) ?? 0;
-    smoothedDriverHeadingRef.current = normalizedHeading;
-    setSmoothedDriverHeading(normalizedHeading);
-  }, []);
-
   useEffect(() => {
     setUserAvatarFailed(false);
   }, [normalizedAvatarUri]);
@@ -1928,262 +2044,30 @@ function PrototypeMapLayer({
       if (androidRegionFrameRef.current) {
         cancelAnimationFrame(androidRegionFrameRef.current);
       }
-      if (driverSmoothFrameRef.current) {
-        cancelAnimationFrame(driverSmoothFrameRef.current);
-      }
-      if (driverPredictionFrameRef.current) {
-        cancelAnimationFrame(driverPredictionFrameRef.current);
-      }
     };
   }, []);
 
-  useEffect(() => {
-    if (driverSmoothFrameRef.current) {
-      cancelAnimationFrame(driverSmoothFrameRef.current);
-      driverSmoothFrameRef.current = null;
-    }
-
-    if (!targetDriverCoordinate) {
-      commitSmoothedDriverCoordinate(null);
-      commitSmoothedDriverHeading(targetDriverHeading ?? smoothedDriverHeadingRef.current);
-      driverPredictionBaseRef.current = null;
-      driverLastRouteSampleRef.current = null;
-      return undefined;
-    }
-
-    const startCoordinate = smoothedDriverCoordinateRef.current || targetDriverCoordinate;
-    const startHeading = smoothedDriverHeadingRef.current;
-    const targetHeading = resolveDriverMarkerHeading({
-      explicitHeading: targetDriverHeading,
-      startCoordinate,
-      endCoordinate: targetDriverCoordinate,
-      fallbackHeading: startHeading,
-    });
-    const distanceMeters = calculateCoordinateDistanceMeters(
-      startCoordinate,
-      targetDriverCoordinate,
-    );
-    const headingDelta = Math.abs(
-      resolveShortestHeadingDeltaDegrees(startHeading, targetHeading),
-    );
-    const now = Date.now();
-    const previousRouteSample = driverLastRouteSampleRef.current;
-    const startProjection = findNearestRouteProjection(startCoordinate, routeMotionMetrics);
-    const followsReceivedRoute = Boolean(
-      startProjection &&
-      startProjection.snappedDistanceMeters <= DRIVER_ROUTE_SNAP_MAX_METERS &&
-      Number.isFinite(targetDriverRouteMeters) &&
-      Math.abs(targetDriverRouteMeters - startProjection.routeMeters) <= distanceMeters * 3 + 20
-    );
-
-    if (Number.isFinite(targetDriverRouteMeters)) {
-      let estimatedSpeed = 0;
-      if (
-        previousRouteSample &&
-        previousRouteSample.routeMetrics === routeMotionMetrics &&
-        Number.isFinite(previousRouteSample.routeMeters) &&
-        Number.isFinite(previousRouteSample.at) &&
-        now > previousRouteSample.at
-      ) {
-        const routeDeltaMeters = targetDriverRouteMeters - previousRouteSample.routeMeters;
-        const elapsedSeconds = (now - previousRouteSample.at) / 1000;
-        const speedCandidate = routeDeltaMeters / elapsedSeconds;
-        if (Number.isFinite(speedCandidate) && speedCandidate > 0.3) {
-          estimatedSpeed = speedCandidate;
-        }
-      }
-
-      driverLastRouteSampleRef.current = {
-        routeMeters: targetDriverRouteMeters,
-        at: now,
-        routeMetrics: routeMotionMetrics,
-      };
-      driverPredictionBaseRef.current = {
-        routeMeters: targetDriverRouteMeters,
-        at: now,
-        speedMetersPerSecond: clampDriverSpeedMetersPerSecond(estimatedSpeed),
-        heading: targetHeading,
-      };
-    } else {
-      driverPredictionBaseRef.current = null;
-      driverLastRouteSampleRef.current = null;
-    }
-
-    if (reduceMotion || !Number.isFinite(distanceMeters) || distanceMeters > DRIVER_MARKER_SMOOTH_SNAP_METERS) {
-      commitSmoothedDriverCoordinate(targetDriverCoordinate);
-      commitSmoothedDriverHeading(targetHeading);
-      return undefined;
-    }
-
-    const shouldAnimateCoordinate = distanceMeters >= 1;
-    const shouldAnimateHeading = headingDelta >= 0.6;
-
-    if (!shouldAnimateCoordinate && !shouldAnimateHeading) {
-      commitSmoothedDriverCoordinate(targetDriverCoordinate);
-      commitSmoothedDriverHeading(targetHeading);
-      return undefined;
-    }
-
-    const startedAt = Date.now();
-    const animationDuration = shouldAnimateCoordinate
-      ? DRIVER_MARKER_SMOOTH_MS
-      : DRIVER_MARKER_HEADING_SMOOTH_MS;
-    const animateDriverMarker = () => {
-      const progress = Math.min(1, (Date.now() - startedAt) / animationDuration);
-      const eased = 1 - Math.pow(1 - progress, 3);
-      const routeFrame = followsReceivedRoute && shouldAnimateCoordinate
-        ? resolveVehicleRouteFrame({
-            routeMetrics: routeMotionMetrics,
-            startMeters: startProjection.routeMeters,
-            endMeters: targetDriverRouteMeters,
-            progress: eased,
-          })
-        : null;
-      commitSmoothedDriverCoordinate(
-        routeFrame?.coordinate || (shouldAnimateCoordinate
-          ? interpolateCoordinate(
-              startCoordinate,
-              targetDriverCoordinate,
-              eased,
-            )
-          : targetDriverCoordinate),
-      );
-      commitSmoothedDriverHeading(
-        routeFrame?.heading !== null && routeFrame?.heading !== undefined
-          ? interpolateHeadingDegrees(startHeading, routeFrame.heading, Math.min(1, eased / 0.22))
-          : shouldAnimateHeading
-          ? interpolateHeadingDegrees(startHeading, targetHeading, eased)
-          : targetHeading,
-      );
-
-      if (progress < 1) {
-        driverSmoothFrameRef.current = requestAnimationFrame(animateDriverMarker);
-      } else {
-        driverSmoothFrameRef.current = null;
-        commitSmoothedDriverCoordinate(targetDriverCoordinate);
-        commitSmoothedDriverHeading(routeFrame?.heading ?? targetHeading);
-      }
-    };
-
-    driverSmoothFrameRef.current = requestAnimationFrame(animateDriverMarker);
-
-    return () => {
-      if (driverSmoothFrameRef.current) {
-        cancelAnimationFrame(driverSmoothFrameRef.current);
-        driverSmoothFrameRef.current = null;
-      }
-    };
-  }, [
-    commitSmoothedDriverCoordinate,
-    commitSmoothedDriverHeading,
-    reduceMotion,
-    routeMotionMetrics,
-    targetDriverCoordinate,
-    targetDriverHeading,
-    targetDriverRouteMeters,
-  ]);
-
-  useEffect(() => {
-    if (driverPredictionFrameRef.current) {
-      cancelAnimationFrame(driverPredictionFrameRef.current);
-      driverPredictionFrameRef.current = null;
-    }
-
-    if (
-      IS_TEST_ENV ||
-      reduceMotion ||
-      driverMarkerMode !== 'car' ||
-      !routeMotionMetrics ||
-      !Number.isFinite(targetDriverRouteMeters)
-    ) {
-      return undefined;
-    }
-
-    const runPredictionFrame = () => {
-      const base = driverPredictionBaseRef.current;
-      if (
-        !base ||
-        !Number.isFinite(base.routeMeters) ||
-        !Number.isFinite(base.at) ||
-        !(base.speedMetersPerSecond > 0)
-      ) {
-        driverPredictionFrameRef.current = null;
-        return;
-      }
-
-      const now = Date.now();
-      const elapsedMs = now - base.at;
-      const shouldThrottle =
-        now - Number(driverLastPredictionFrameAtRef.current || 0) <
-        DRIVER_DEAD_RECKONING_FRAME_MS;
-
-      if (!shouldThrottle && elapsedMs > DRIVER_MARKER_SMOOTH_MS) {
-        const predictionMs = elapsedMs - DRIVER_MARKER_SMOOTH_MS;
-
-        if (predictionMs <= DRIVER_DEAD_RECKONING_MAX_MS) {
-          const predictedRouteMeters =
-            base.routeMeters +
-            clampDriverSpeedMetersPerSecond(base.speedMetersPerSecond) *
-              (predictionMs / 1000);
-          const predictedPosition = resolveVehicleRouteFrame({
-            routeMetrics: routeMotionMetrics,
-            startMeters: base.routeMeters,
-            endMeters: predictedRouteMeters,
-            progress: 1,
-          });
-
-          if (predictedPosition?.coordinate) {
-            driverLastPredictionFrameAtRef.current = now;
-            commitSmoothedDriverCoordinate(predictedPosition.coordinate);
-            commitSmoothedDriverHeading(
-              interpolateHeadingDegrees(
-                smoothedDriverHeadingRef.current,
-                predictedPosition.heading ?? base.heading,
-                0.25,
-              ),
-            );
-          }
-        } else {
-          driverPredictionFrameRef.current = null;
-          return;
-        }
-      }
-
-      driverPredictionFrameRef.current = requestAnimationFrame(runPredictionFrame);
-    };
-
-    driverPredictionFrameRef.current = requestAnimationFrame(runPredictionFrame);
-
-    return () => {
-      if (driverPredictionFrameRef.current) {
-        cancelAnimationFrame(driverPredictionFrameRef.current);
-        driverPredictionFrameRef.current = null;
-      }
-    };
-  }, [
-    commitSmoothedDriverCoordinate,
-    commitSmoothedDriverHeading,
-    driverMarkerMode,
-    reduceMotion,
-    routeMotionMetrics,
-    targetDriverRouteMeters,
-  ]);
-
+  const needsVisibleRegion = Boolean(
+    (Platform.OS === 'android' && hasRoute && shouldRenderRouteEndpointMarkers && !compactRouteEndpoints) ||
+    (searchingMode && normalizedNearbyVehicles.length > 0) ||
+    (Platform.OS === 'android' && !USE_NATIVE_ANDROID_VEHICLE_MARKER &&
+      (driverMarkerMode === 'car' || currentLocationMarkerMode === 'car'))
+  );
   const scheduleAndroidVisibleRegionUpdate = useCallback(nextRegion => {
-    if (!isValidMapRegion(nextRegion)) {
-      return;
-    }
-
+    if (!isVisualMotionActive || !needsVisibleRegion || !isValidMapRegion(nextRegion)) return;
     androidPendingRegionRef.current = nextRegion;
-    if (androidRegionFrameRef.current) {
-      return;
-    }
-
+    if (androidRegionFrameRef.current) return;
     androidRegionFrameRef.current = requestAnimationFrame(() => {
       androidRegionFrameRef.current = null;
       setAndroidVisibleRegion(androidPendingRegionRef.current);
     });
-  }, []);
+  }, [isVisualMotionActive, needsVisibleRegion]);
+  useEffect(() => {
+    if (!isVisualMotionActive && androidRegionFrameRef.current) {
+      cancelAnimationFrame(androidRegionFrameRef.current);
+      androidRegionFrameRef.current = null;
+    }
+  }, [isVisualMotionActive]);
 
   // True while the next framing belongs to a map that just mounted or loaded.
   const snapNextFramingRef = useRef(true);
@@ -2503,7 +2387,7 @@ function PrototypeMapLayer({
   // the real camera heading is tracked as well.
   const [androidActualMapHeading, setAndroidActualMapHeading] = useState(0);
   useEffect(() => {
-    if (Platform.OS !== 'android' || !isMapActive) {
+    if (Platform.OS !== 'android' || !isVisualMotionActive || USE_NATIVE_ANDROID_VEHICLE_MARKER) {
       return undefined;
     }
     const map = mapRef?.current;
@@ -2524,7 +2408,7 @@ function PrototypeMapLayer({
     return () => {
       cancelled = true;
     };
-  }, [androidVisibleRegion, isMapActive, mapCameraHeading, mapRef]);
+  }, [androidVisibleRegion, isVisualMotionActive, mapCameraHeading, mapRef]);
   const isHeadingRotated = (heading) =>
     Math.abs(((Number(heading) || 0) % 360 + 540) % 360 - 180) > 1;
   const androidMapIsRotated =
@@ -2535,14 +2419,14 @@ function PrototypeMapLayer({
     coordinate: displayedDriverCoordinate,
     // Native cars already follow the SDK camera. Querying their unused overlay
     // entered getProjection on resume from Waze and hung the Android UI in QA.
-    enabled: isMapActive && !USE_NATIVE_ANDROID_VEHICLE_MARKER &&
+    enabled: isVisualMotionActive && !USE_NATIVE_ANDROID_VEHICLE_MARKER &&
       androidMapIsRotated && driverMarkerMode === 'car' &&
       currentLocationMarkerMode !== 'car' && hasDisplayedDriverCoordinate,
     regionKey: androidVisibleRegion,
   });
   const projectedDriverVehicleOverlayPoint = useMemo(() => {
     if (
-      Platform.OS !== 'android' ||
+      USE_NATIVE_ANDROID_VEHICLE_MARKER || Platform.OS !== 'android' ||
       driverMarkerMode !== 'car' ||
       !hasDisplayedDriverCoordinate ||
       !androidProjectionLayout.hasLayout
@@ -2616,10 +2500,8 @@ function PrototypeMapLayer({
     const timer = setTimeout(() => setVehicleMarkerTracking(false), 1500);
     return () => clearTimeout(timer);
   }, [vehicleMarkerTrackingKey]);
-  // iOS: com tracksViewChanges sempre ligado o Google Maps recapturava o carro e o ponto do
-  // usuário a cada frame (~40-60% de CPU numa corrida). A rotação é nativa; o desenho só muda
-  // com cor/forma ou a cada faixa de 5° da luz, então captura por um instante nessas trocas.
-  const iosDriverPoseBucket = resolveVehicleArtworkPose(displayedDriverScreenHeading).heading;
+  // The car owns its bitmap tracking in MovingVehicleMarker. The static location
+  // dot must not restart MapLayer tracking every time the car changes heading.
   const [iosMarkerTracking, setIosMarkerTracking] = useState(true);
   useEffect(() => {
     if (Platform.OS === 'android') {
@@ -2628,7 +2510,7 @@ function PrototypeMapLayer({
     setIosMarkerTracking(true);
     const timer = setTimeout(() => setIosMarkerTracking(false), 500);
     return () => clearTimeout(timer);
-  }, [iosDriverPoseBucket, shouldShowCurrentLocationMarker, vehicleMarkerTrackingKey]);
+  }, [shouldShowCurrentLocationMarker, vehicleMarkerTrackingKey]);
   // Com o carro na posição atual (motorista vendo o próprio mapa), o marcador
   // de "motorista da corrida" é o mesmo carro. Desde que o carro da posição
   // atual virou marcador nativo (13/10), essa regra não cobria mais o caso e
@@ -2643,7 +2525,7 @@ function PrototypeMapLayer({
   const rotatedCurrentLocationPoint = useRotatedMapPoint({
     mapRef,
     coordinate: markerCoordinate,
-    enabled: isMapActive && androidMapIsRotated && shouldRenderCurrentLocationVehicleOverlay,
+    enabled: isVisualMotionActive && androidMapIsRotated && shouldRenderCurrentLocationVehicleOverlay,
     regionKey: androidVisibleRegion,
   });
   const projectedUserOverlayPoint = useMemo(() => {
@@ -3260,32 +3142,48 @@ function PrototypeMapLayer({
           {hasDisplayedDriverCoordinate &&
           !shouldRenderProjectedDriverVehicleOverlay &&
           !shouldSuppressNativeAndroidDriverVehicleMarker ? (
-            <Marker
-              key={`driver-marker-${driverVehicleMarkerColorToken}-${driverMarkerShapeKey}-${driverMarkerAssetUrl}`}
-              testID="map-driver-vehicle-marker"
-              coordinate={{
-                latitude: displayedDriverCoordinate.latitude,
-                longitude: displayedDriverCoordinate.longitude,
-              }}
-              zIndex={19}
-              anchor={{ x: 0.5, y: 0.5 }}
-              flat={driverMarkerMode === 'car'}
-              rotation={driverMarkerMode === 'car' ? displayedDriverHeading : 0}
-              tracksViewChanges={Platform.OS === 'android' ? vehicleMarkerTracking : shouldRenderDriverVehicleMarkerChild && iosMarkerTracking}
-              pinColor={undefined}
-            >
-              {driverMarkerMode === 'avatar' ? (
-                <MapAvatarMarker letter={driverMarkerLetter} tone="driver" />
-              ) : shouldRenderDriverVehicleMarkerChild ? (
-                <VehicleMarkerContent
-                  source={driverVehicleMarkerImageSource}
-                  colorToken={driverVehicleMarkerColorToken}
-                  shapeKey={driverMarkerShapeKey}
-                  screenHeading={displayedDriverScreenHeading}
-                  size={ACTIVE_VEHICLE_MARKER_SIZE}
-                />
-              ) : null}
-            </Marker>
+            driverMarkerMode === 'car' ? (
+              <MovingVehicleMarker
+                key={`driver-marker-${driverVehicleMarkerColorToken}-${driverMarkerShapeKey}-${driverMarkerAssetUrl}`}
+                testID="map-driver-vehicle-marker"
+                coordinate={normalizedDriverCoordinate}
+                heading={normalizedDriverHeading ?? normalizedUserHeading}
+                routeMetrics={routeMotionMetrics}
+                enabled={isVisualMotionActive}
+                reduceMotion={reduceMotion}
+                cameraHeading={normalizedMapCameraHeading}
+                source={driverVehicleMarkerImageSource}
+                colorToken={driverVehicleMarkerColorToken}
+                shapeKey={driverMarkerShapeKey}
+              />
+            ) : (
+              <Marker
+                key={`driver-marker-${driverVehicleMarkerColorToken}-${driverMarkerShapeKey}-${driverMarkerAssetUrl}`}
+                testID="map-driver-vehicle-marker"
+                coordinate={{
+                  latitude: displayedDriverCoordinate.latitude,
+                  longitude: displayedDriverCoordinate.longitude,
+                }}
+                zIndex={19}
+                anchor={{ x: 0.5, y: 0.5 }}
+                flat={driverMarkerMode === 'car'}
+                rotation={driverMarkerMode === 'car' ? displayedDriverHeading : 0}
+                tracksViewChanges={Platform.OS === 'android' ? vehicleMarkerTracking : shouldRenderDriverVehicleMarkerChild && iosMarkerTracking}
+                pinColor={undefined}
+              >
+                {driverMarkerMode === 'avatar' ? (
+                  <MapAvatarMarker letter={driverMarkerLetter} tone="driver" />
+                ) : shouldRenderDriverVehicleMarkerChild ? (
+                  <VehicleMarkerContent
+                    source={driverVehicleMarkerImageSource}
+                    colorToken={driverVehicleMarkerColorToken}
+                    shapeKey={driverMarkerShapeKey}
+                    screenHeading={displayedDriverScreenHeading}
+                    size={ACTIVE_VEHICLE_MARKER_SIZE}
+                  />
+                ) : null}
+              </Marker>
+            )
           ) : null}
 
           {!useSimplifiedIosMap && searchingMode && !shouldRenderProjectedNearbyVehicleOverlays
@@ -3347,25 +3245,19 @@ function PrototypeMapLayer({
             : null}
 
           {shouldShowCurrentLocationMarker && shouldRenderNativeCurrentLocationVehicle && !shouldShowUserAvatarMarker ? (
-            <Marker
+            <MovingVehicleMarker
               key={`user-vehicle-marker-${driverVehicleMarkerColorToken}-${driverMarkerShapeKey}-${driverMarkerAssetUrl}`}
               testID="map-user-vehicle-marker"
-              coordinate={{ latitude: markerCoordinate.latitude, longitude: markerCoordinate.longitude }}
-              zIndex={19}
-              anchor={{ x: 0.5, y: 0.5 }}
-              flat
-              rotation={displayedDriverHeading}
-              tracksViewChanges={vehicleMarkerTracking}
-              pinColor={undefined}
-            >
-              <VehicleMarkerContent
-                source={driverVehicleMarkerImageSource}
-                colorToken={driverVehicleMarkerColorToken}
-                shapeKey={driverMarkerShapeKey}
-                screenHeading={displayedDriverScreenHeading}
-                size={ACTIVE_VEHICLE_MARKER_SIZE}
-              />
-            </Marker>
+              coordinate={markerCoordinate}
+              heading={targetDriverHeading ?? normalizedUserHeading}
+              routeMetrics={routeMotionMetrics}
+              enabled={isVisualMotionActive}
+              reduceMotion={reduceMotion}
+              cameraHeading={normalizedMapCameraHeading}
+              source={driverVehicleMarkerImageSource}
+              colorToken={driverVehicleMarkerColorToken}
+              shapeKey={driverMarkerShapeKey}
+            />
           ) : null}
 
           {shouldShowCurrentLocationMarker &&

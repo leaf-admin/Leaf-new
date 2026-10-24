@@ -7,6 +7,7 @@ import PassengerTripHorizon from './PassengerTripHorizon';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Animated, StatusBar, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useIsFocused } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import Reanimated, { FadeInDown } from 'react-native-reanimated';
 import { resolveDriverFoundChips, resolveSearchFoundSeconds } from './driverFoundChips';
@@ -606,6 +607,7 @@ function IconActionButton({ icon, label, onPress, tone = 'ghost', testID, style,
 }
 
 export default function RobotaxiTripScreen({ navigation, route }) {
+  const isScreenFocused = useIsFocused();
   const {
     bookingStatus,
     activeBooking,
@@ -2452,6 +2454,7 @@ export default function RobotaxiTripScreen({ navigation, route }) {
         <StatusBar translucent backgroundColor="transparent" barStyle="dark-content" />
         <PrototypeMapLayer
           mapRef={mapRef}
+          motionEnabled={isScreenFocused}
           region={tripMapRegion}
           forceRegionUpdate
           userCoordinate={normalizeMapCoordinate(currentCoordinate) || tripPickupCoordinate}

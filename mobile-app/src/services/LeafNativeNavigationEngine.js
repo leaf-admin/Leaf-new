@@ -97,6 +97,22 @@ export function resolveNavigationCameraZoom(speedKmh = 0) {
   return 14.9;
 }
 
+// A small speed dead band prevents repeated zoom changes around each boundary.
+// An explicit stage zoom (e.g. arrival) still takes precedence.
+export function resolveStableNavigationCameraZoom(speedKmh, previousZoom, requestedZoom = resolveNavigationCameraZoom(speedKmh)) {
+  const speed = Math.max(0, Number(speedKmh) || 0);
+  if (requestedZoom !== resolveNavigationCameraZoom(speed)) return requestedZoom;
+  const bands = [
+    { zoom: 15.8, min: 0, max: 28 },
+    { zoom: 15.5, min: 22, max: 53 },
+    { zoom: 15.2, min: 47, max: 83 },
+    { zoom: 14.9, min: 77, max: Infinity },
+  ];
+  const previousBand = bands.find(band => band.zoom === previousZoom);
+  return previousBand && speed >= previousBand.min && speed <= previousBand.max
+    ? previousZoom : requestedZoom;
+}
+
 export function shouldRevealNavigationRoute({
   lastRevealedNavigationKey = '',
   navigationKey = '',

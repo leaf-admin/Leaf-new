@@ -6,6 +6,9 @@ const mockFitToCoordinates = jest.fn();
 const mockAnimateCamera = jest.fn();
 const mockPointForCoordinate = jest.fn();
 const mockGetCamera = jest.fn();
+jest.mock('react-native-reanimated', () => ({
+  ...require('react-native-reanimated/mock'), useReducedMotion: () => false,
+}));
 jest.mock('../src/components/MobilePreferencesProvider', () => {
   const React = require('react');
   const Context = React.createContext({ preferences: { trafficLayerEnabled: true } });
@@ -51,7 +54,7 @@ jest.mock('react-native-maps', () => {
     default: MockMapView,
     Circle: MockView,
     Marker: MockView,
-    Polyline: MockView,
+    Polyline: jest.fn(MockView),
     PROVIDER_GOOGLE: 'google',
   };
 });
@@ -253,6 +256,7 @@ describe('PrototypeMapLayer route viewport fitting', () => {
 
   beforeEach(() => {
     jest.useFakeTimers();
+    require('react-native').AppState.currentState = 'active';
     mockAnimateCamera.mockClear();
     mockAnimateToRegion.mockClear();
     mockFitToCoordinates.mockClear();
@@ -287,7 +291,7 @@ describe('PrototypeMapLayer route viewport fitting', () => {
     }
   });
 
-  it('pauses camera inspection in Waze and resumes it when the Leaf map returns', async () => {
+  it('avoids camera inspection for native markers before, during and after Waze', async () => {
     const { AppState, Platform } = require('react-native');
     const previousState = AppState.currentState;
     const previousPlatform = Platform.OS;
@@ -303,7 +307,7 @@ describe('PrototypeMapLayer route viewport fitting', () => {
     const screen = render(<PrototypeMapLayer mapRef={mapRef} region={baseRegion} mapCameraHeading={90} />);
     try {
       await act(async () => {});
-      expect(mockGetCamera).toHaveBeenCalled();
+      expect(mockGetCamera).not.toHaveBeenCalled();
       mockGetCamera.mockClear();
       act(() => onAppState('background'));
       screen.rerender(<PrototypeMapLayer mapRef={mapRef} region={visibleRouteRegion} mapCameraHeading={180} />);
@@ -311,7 +315,7 @@ describe('PrototypeMapLayer route viewport fitting', () => {
       expect(mockGetCamera).not.toHaveBeenCalled();
       act(() => onAppState('active'));
       await act(async () => {});
-      expect(mockGetCamera).toHaveBeenCalledTimes(1);
+      expect(mockGetCamera).not.toHaveBeenCalled();
       screen.unmount();
       expect(remove).toHaveBeenCalled();
     } finally {
@@ -320,6 +324,158 @@ describe('PrototypeMapLayer route viewport fitting', () => {
       AppState.currentState = previousState;
       Platform.OS = previousPlatform;
     }
+  });
+
+  it.each([['android', 'car'], ['android', 'dot'], ['ios', 'dot']])(
+    'moves the visible %s car (%s) between fixes without re-rendering route polylines', (os, ownMode) => {
+      const { Platform } = require('react-native');
+      const { Polyline } = require('react-native-maps');
+      const previousPlatform = Platform.OS;
+      Platform.OS = os;
+      const start = { latitude: -22.881, longitude: -43.343 };
+      const end = { latitude: -22.8808, longitude: -43.343 };
+      const props = { region: baseRegion, driverCoordinate: start, userCoordinate: start,
+        currentLocationMarkerMode: ownMode, animateRoute: false,
+        routeCoordinates: [start, { latitude: -22.879, longitude: -43.343 }] };
+      const screen = render(<PrototypeMapLayer {...props} />);
+      const id = ownMode === 'car' ? 'map-user-vehicle-marker' : 'map-driver-vehicle-marker';
+      try {
+        act(() => jest.advanceTimersByTime(1700));
+        screen.rerender(<PrototypeMapLayer {...props} driverCoordinate={end} userCoordinate={end} />);
+        expect(screen.getByTestId(id).props.coordinate.latitude).toBeCloseTo(start.latitude, 8);
+        Polyline.mockClear();
+        act(() => jest.advanceTimersByTime(425));
+        const midway = screen.getByTestId(id).props.coordinate.latitude;
+        expect(midway).toBeGreaterThan(start.latitude);
+        expect(midway).toBeLessThan(end.latitude);
+        expect(Polyline).not.toHaveBeenCalled();
+        act(() => jest.advanceTimersByTime(500));
+        // The existing bounded route prediction may already be just ahead of the fix.
+        expect(Math.abs(screen.getByTestId(id).props.coordinate.latitude - end.latitude)).toBeLessThan(0.00002);
+        expect(Polyline).not.toHaveBeenCalled();
+      } finally { screen.unmount(); Platform.OS = previousPlatform; }
+    });
+
+  it.each(['hidden', 'background'])('stops visual frames when %s and resumes at the latest fix', reason => {
+    const { AppState, Platform } = require('react-native');
+    const { Polyline } = require('react-native-maps');
+    const previousPlatform = Platform.OS;
+    Platform.OS = 'android';
+    let onAppState;
+    const subscription = jest.spyOn(AppState, 'addEventListener').mockImplementation((_, listener) => {
+      onAppState = listener;
+      return { remove: jest.fn() };
+    });
+    const start = { latitude: -22.881, longitude: -43.343 };
+    const end = { latitude: -22.8808, longitude: -43.343 };
+    const latest = { latitude: -22.8806, longitude: -43.343 };
+    const props = { region: baseRegion, userCoordinate: start, driverCoordinate: start,
+      currentLocationMarkerMode: 'car', animateRoute: false };
+    const screen = render(<PrototypeMapLayer {...props} />);
+    try {
+      act(() => jest.advanceTimersByTime(1700));
+      screen.rerender(<PrototypeMapLayer {...props} userCoordinate={end} driverCoordinate={end} />);
+      act(() => jest.advanceTimersByTime(200));
+      if (reason === 'background') act(() => onAppState('background'));
+      screen.rerender(<PrototypeMapLayer {...props} userCoordinate={latest} driverCoordinate={latest}
+        motionEnabled={reason !== 'hidden'} />);
+      Polyline.mockClear();
+      const frames = jest.spyOn(global, 'requestAnimationFrame');
+      try {
+        act(() => jest.advanceTimersByTime(6000));
+        expect(Polyline).not.toHaveBeenCalled();
+        expect(frames).not.toHaveBeenCalled();
+      } finally { frames.mockRestore(); }
+      if (reason === 'background') act(() => onAppState('active'));
+      screen.rerender(<PrototypeMapLayer {...props} userCoordinate={latest} driverCoordinate={latest} />);
+      expect(screen.getByTestId('map-user-vehicle-marker').props.coordinate).toEqual(latest);
+    } finally { screen.unmount(); subscription.mockRestore(); Platform.OS = previousPlatform; }
+  });
+
+  it('bounds prediction after a missing GPS fix and stops scheduling visual frames', () => {
+    const { Platform } = require('react-native');
+    const previousPlatform = Platform.OS;
+    Platform.OS = 'android';
+    const start = { latitude: -22.881, longitude: -43.343 };
+    const end = { latitude: -22.8808, longitude: -43.343 };
+    const props = { region: baseRegion, driverCoordinate: start, animateRoute: false,
+      routeCoordinates: [start, { latitude: -22.879, longitude: -43.343 }] };
+    const screen = render(<PrototypeMapLayer {...props} />);
+    try {
+      act(() => jest.advanceTimersByTime(1700));
+      screen.rerender(<PrototypeMapLayer {...props} driverCoordinate={end} />);
+      act(() => jest.advanceTimersByTime(6000));
+      const last = screen.getByTestId('map-driver-vehicle-marker').props.coordinate;
+      expect(last.latitude).toBeGreaterThan(end.latitude);
+      // 18 m/s maximum, 4.2 s maximum prediction: less than 76 m beyond the fix.
+      expect((last.latitude - end.latitude) * 111195).toBeLessThanOrEqual(76);
+      const frames = jest.spyOn(global, 'requestAnimationFrame');
+      try {
+        act(() => jest.advanceTimersByTime(6000));
+        expect(screen.getByTestId('map-driver-vehicle-marker').props.coordinate).toEqual(last);
+        expect(frames).not.toHaveBeenCalled();
+      } finally { frames.mockRestore(); }
+    } finally { screen.unmount(); Platform.OS = previousPlatform; }
+  });
+
+  it('follows a right-angle route instead of cutting across the corner', () => {
+    const start = { latitude: -22.881, longitude: -43.343 };
+    const corner = { latitude: -22.8809, longitude: -43.343 };
+    const end = { latitude: -22.8809, longitude: -43.3429 };
+    const props = { region: baseRegion, driverCoordinate: start, animateRoute: false,
+      routeCoordinates: [start, corner, end] };
+    const screen = render(<PrototypeMapLayer {...props} />);
+    try {
+      act(() => jest.advanceTimersByTime(1700));
+      screen.rerender(<PrototypeMapLayer {...props} driverCoordinate={end} />);
+      for (let index = 0; index < 8; index++) {
+        act(() => jest.advanceTimersByTime(100));
+        const current = screen.getByTestId('map-driver-vehicle-marker').props.coordinate;
+        expect(Math.min(Math.abs(current.longitude - start.longitude),
+          Math.abs(current.latitude - corner.latitude))).toBeLessThan(0.0000001);
+      }
+    } finally { screen.unmount(); }
+  });
+
+  it('retargets an in-flight marker from its visible pose and cancels frames on unmount', () => {
+    const start = { latitude: -22.881, longitude: -43.343 };
+    const end = { latitude: -22.8808, longitude: -43.343 };
+    const next = { latitude: -22.8806, longitude: -43.343 };
+    const props = { region: baseRegion, driverCoordinate: start, driverHeading: 350, animateRoute: false };
+    const screen = render(<PrototypeMapLayer {...props} />);
+    try {
+      act(() => jest.advanceTimersByTime(1700));
+      screen.rerender(<PrototypeMapLayer {...props} driverCoordinate={end} driverHeading={10} />);
+      act(() => jest.advanceTimersByTime(200));
+      const marker = screen.getByTestId('map-driver-vehicle-marker');
+      const visible = marker.props.coordinate;
+      expect(marker.props.rotation > 350 || marker.props.rotation < 10).toBe(true);
+      screen.rerender(<PrototypeMapLayer {...props} driverCoordinate={next} driverHeading={10} />);
+      expect(screen.getByTestId('map-driver-vehicle-marker').props.coordinate).toEqual(visible);
+      screen.unmount();
+      const frames = jest.spyOn(global, 'requestAnimationFrame');
+      try {
+        act(() => jest.advanceTimersByTime(6000));
+        expect(frames).not.toHaveBeenCalled();
+      } finally { frames.mockRestore(); }
+    } finally { screen.unmount(); }
+  });
+
+  it('keeps native-only region callbacks free of camera and projection queries', async () => {
+    const { Platform } = require('react-native');
+    const previousPlatform = Platform.OS;
+    Platform.OS = 'android';
+    const screen = render(<PrototypeMapLayer region={baseRegion} mapRef={React.createRef()} />);
+    try {
+      for (let index = 0; index < 30; index++) {
+        fireEvent(screen.getByTestId('prototype-map-view'), 'regionChange', {
+          ...baseRegion, latitude: baseRegion.latitude + index * 0.000001,
+        });
+        await act(async () => { jest.advanceTimersByTime(17); });
+      }
+      expect(mockGetCamera).not.toHaveBeenCalled();
+      expect(mockPointForCoordinate).not.toHaveBeenCalled();
+    } finally { screen.unmount(); Platform.OS = previousPlatform; }
   });
 
   it('gates Google traffic with both backend policy and the confirmed account preference', () => {
