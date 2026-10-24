@@ -809,15 +809,19 @@ export default function RobotaxiTripScreen({ navigation, route }) {
     driverActiveRide?.driver?.vehicle?.plate,
     driverActiveRide?.vehicle?.plate,
   );
+  // Navigation params are the initial estimate. Live runtime metrics must win,
+  // including zero at the destination, or the card/progress stays at trip start.
+  const liveDistanceKm = tripDistanceKm == null || tripDistanceKm === ''
+    ? null : toNonNegativeNumber(tripDistanceKm);
+  const liveDurationMin = tripDurationMin == null || tripDurationMin === ''
+    ? null : toNonNegativeNumber(tripDurationMin);
   const resolvedTripDistanceKm =
-    toPositiveNumber(route?.params?.tripDistanceKm) ??
-    toPositiveNumber(tripDistanceKm);
+    liveDistanceKm ?? toPositiveNumber(route?.params?.tripDistanceKm);
   const resolvedTripDurationMin =
-    toPositiveNumber(route?.params?.tripDurationMin) ??
-    toPositiveNumber(tripDurationMin);
+    liveDurationMin ?? toPositiveNumber(route?.params?.tripDurationMin);
   const resolvedTripArrivalText =
-    route?.params?.tripArrivalText ||
     tripArrivalText ||
+    route?.params?.tripArrivalText ||
     (Number.isFinite(resolvedTripDurationMin) && resolvedTripDurationMin > 0
       ? `Chegada estimada em ${resolvedTripDurationMin} min`
       : '');
@@ -1528,6 +1532,8 @@ export default function RobotaxiTripScreen({ navigation, route }) {
     totalMinutes: routeTotalMinutes,
     startedAt: routeStartedAt,
     remainingKm: resolvedTripDistanceKm,
+    totalKm: toPositiveNumber(activeBooking?.routeDistanceKm) ??
+      toPositiveNumber(route?.params?.tripDistanceKm),
     active: isStarted,
   });
   const stableEtaValue =

@@ -18,6 +18,14 @@ const LeafVehicleMarker = React.memo(function LeafVehicleMarker({
   }), [colorToken, id, poseHeading, shapeKey]);
 
   return <SvgXml xml={xml} width={size} height={size} testID="leaf-vehicle-vector" />;
-});
+}, (previous, next) => (
+  previous.colorToken === next.colorToken &&
+  previous.shapeKey === next.shapeKey &&
+  previous.size === next.size &&
+  // Native marker rotation stays continuous; only SVG lighting is quantized.
+  // Matching the existing artwork bucket avoids reconciling an unchanged SVG.
+  resolveVehicleArtworkPose(previous.screenHeading).heading ===
+    resolveVehicleArtworkPose(next.screenHeading).heading
+));
 
 export default LeafVehicleMarker;

@@ -171,7 +171,7 @@ export function resolveMonotonicArrivalState(
 // total is the longest remaining distance seen on this route, so it works when
 // the booking has no initial distance. Time-based progress stood still when the
 // booking had no initial duration (total fell back to the remaining time).
-export function resolveDistanceProgressState(previousState, { routeKey, remainingKm }) {
+export function resolveDistanceProgressState(previousState, { routeKey, remainingKm, totalKm: knownTotalKm = null }) {
   const key = String(routeKey || "live-route");
   const remaining =
     remainingKm === null || remainingKm === undefined || remainingKm === "" ? NaN : Number(remainingKm);
@@ -179,7 +179,9 @@ export function resolveDistanceProgressState(previousState, { routeKey, remainin
   if (!Number.isFinite(remaining) || remaining < 0) {
     return { ...base, progress: null };
   }
-  const totalKm = Math.max(Number(base.totalKm) || 0, remaining);
+  const knownTotal = Number(knownTotalKm);
+  const totalKm = Math.max(Number(base.totalKm) || 0, remaining,
+    Number.isFinite(knownTotal) && knownTotal > 0 ? knownTotal : 0);
   if (!(totalKm > 0)) {
     return { routeKey: key, totalKm, progress: null };
   }
@@ -192,6 +194,7 @@ export function useLiveRouteTiming({
   totalMinutes,
   startedAt,
   remainingKm = null,
+  totalKm = null,
   active = true,
 }) {
   const [clockTick, setClockTick] = useState(0);
@@ -214,6 +217,7 @@ export function useLiveRouteTiming({
   const distanceState = resolveDistanceProgressState(distanceStateRef.current, {
     routeKey,
     remainingKm,
+    totalKm,
   });
   distanceStateRef.current = distanceState;
   const routeProgress = Number.isFinite(distanceState.progress)

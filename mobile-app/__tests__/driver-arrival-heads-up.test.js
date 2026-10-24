@@ -2,6 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { AppState } from 'react-native';
 import prototypeDriverTripAssistantService, {
   DESTINATION_ALERT_METERS,
+  PICKUP_TOLERANCE_METERS,
   resolveArrivalAlert,
 } from '../src/services/PrototypeDriverTripAssistantService';
 import { buildRideArrivalAlert, cancelRideArrivalAlert, displayRideArrivalAlert } from '../src/services/LeafOngoingRideNotification';
@@ -41,6 +42,21 @@ describe('arrival heads-up while the driver navigates in Waze or Google Maps', (
     jest.clearAllMocks();
     prototypeDriverTripAssistantService.lastTrackingSessionKey = '';
     prototypeDriverTripAssistantService.cancelledArrivalAlertKey = undefined;
+  });
+
+  it('does not offer pickup arrival at 50 m when the backend default requires 20 m', async () => {
+    expect(PICKUP_TOLERANCE_METERS).toBe(20);
+    await prototypeDriverTripAssistantService.syncSession({
+      bookingId: 'pickup-radius', status: 'accepted', pickupCoordinate: PICKUP,
+      remainingMeters: 0, // A route projection at its end is not proof of pickup proximity.
+      destinationCoordinate: DESTINATION,
+      currentDriverLocation: { latitude: PICKUP.latitude - 0.00045, longitude: PICKUP.longitude },
+    });
+    expect((await prototypeDriverTripAssistantService.loadSession()).pickupToleranceReached).toBe(false);
+    await prototypeDriverTripAssistantService.handleBackgroundLocationUpdate({
+      lat: PICKUP.latitude - 0.00009, lng: PICKUP.longitude,
+    });
+    expect((await prototypeDriverTripAssistantService.loadSession()).pickupToleranceReached).toBe(true);
   });
 
   it('asks for "Cheguei ao embarque" at the pickup and "Encerrar corrida" near the destination', () => {

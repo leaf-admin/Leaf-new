@@ -5685,17 +5685,9 @@ function getCachedDriverRoutePlan({
   for (const cacheKey of cacheKeys) {
     const cachedRoutePlan = runtimeRoutePlanCache.get(cacheKey);
     if (cachedRoutePlan) {
-      const normalizedRoutePlan = extractDriverRoutePlan({
-        routePlan: cachedRoutePlan,
-      });
-      if (
-        normalizedRoutePlan?.synthetic !== true &&
-        hasCompleteRoadRoutePlanGeometry(normalizedRoutePlan)
-      ) {
-        return normalizedRoutePlan;
-      }
-      cacheKeys.forEach((key) => runtimeRoutePlanCache.delete(key));
-      return null;
+      // This private cache only receives normalized, validated plans below.
+      // Geometry is frozen on insertion, so GPS renders can reuse it directly.
+      return cachedRoutePlan;
     }
   }
   return null;
@@ -5722,6 +5714,11 @@ function cacheDriverRoutePlan({
     return null;
   }
 
+  ["pickupCoordinates", "destinationCoordinates", "combinedCoordinates"].forEach((key) => {
+    normalizedRoutePlan[key].forEach((coordinate) => Object.freeze(coordinate));
+    Object.freeze(normalizedRoutePlan[key]);
+  });
+  Object.freeze(normalizedRoutePlan);
   cacheKeys.forEach((cacheKey) => {
     runtimeRoutePlanCache.set(cacheKey, normalizedRoutePlan);
   });
@@ -5985,6 +5982,21 @@ function ensurePersistedDriverRoutePlan({
   canonicalDestinationRoute = null,
   fallbackOriginCoordinate = null,
 } = {}) {
+  // Hydration runs for GPS/meta patches too. If the validated private-cache
+  // plan already has at least the canonical geometry, rebuilding it here would
+  // replace every coordinate/array identity even though the route is unchanged.
+  const cachedRoutePlanForHydration = getCachedDriverRoutePlan({
+    bookingId, pickupCoordinate, destinationCoordinate,
+  });
+  const canonicalCoordinateCount = Array.isArray(canonicalDestinationRoute?.coordinates)
+    ? canonicalDestinationRoute.coordinates.length : 0;
+  if (
+    routePlan && routePlan === cachedRoutePlanForHydration &&
+    routePlan.destinationCoordinates.length >= canonicalCoordinateCount
+  ) {
+    return routePlan;
+  }
+
   const routePlanWithCanonicalDestination =
     buildDriverRoutePlanWithCanonicalDestination({
       routePlan,
@@ -6062,7 +6074,7 @@ function resolveDriverRoutePlan({
     pickupCoordinate,
     destinationCoordinate,
   });
-  if (cachedRoutePlan && hasCompleteRoadRoutePlanGeometry(cachedRoutePlan)) {
+  if (cachedRoutePlan) {
     return cachedRoutePlan;
   }
 
@@ -6829,10 +6841,21 @@ function buildLiveTripProgressModel(snapshot, role) {
       ? snapshot?.currentCoordinate || snapshot?.driverCoordinate || null
       : snapshot?.driverCoordinate || null;
 
+  // A resumed passenger may only have the destination route. Do not use the
+  // shrinking live distance/ETA (or pickup-leg metadata) as the trip baseline.
+  const canonicalTripDistanceKm = navigationPhase === "destination"
+    ? toPositiveRuntimeNumber(activeBooking?.routeDistanceKm ?? activeBooking?.estimatedTripDistanceKm ??
+        activeRide?.routeDistanceKm ?? activeRide?.estimatedTripDistanceKm)
+    : null;
+  const canonicalTripDurationMin = navigationPhase === "destination"
+    ? resolveRouteDurationMinutesFromSource(activeBooking) ?? resolveRouteDurationMinutesFromSource(activeRide)
+    : null;
+  const distanceBaselineKm = canonicalTripDistanceKm ?? activeRouteDistanceKm;
+  const durationBaselineMin = canonicalTripDurationMin ?? activeRouteDurationMinutes;
   const baselineMeters = Number(
-    (Number.isFinite(Number(activeRouteDistanceKm)) &&
-    Number(activeRouteDistanceKm) > 0
-      ? Math.round(Number(activeRouteDistanceKm) * 1000)
+    (Number.isFinite(Number(distanceBaselineKm)) &&
+    Number(distanceBaselineKm) > 0
+      ? Math.round(Number(distanceBaselineKm) * 1000)
       : null) ||
       snapshot?.driverTripMeta?.initialMeters ||
       (Number.isFinite(Number(snapshot?.tripDistanceKm))
@@ -6840,9 +6863,9 @@ function buildLiveTripProgressModel(snapshot, role) {
         : 0),
   );
   const baselineEtaMinutes = Number(
-    (Number.isFinite(Number(activeRouteDurationMinutes)) &&
-    Number(activeRouteDurationMinutes) > 0
-      ? Number(activeRouteDurationMinutes)
+    (Number.isFinite(Number(durationBaselineMin)) &&
+    Number(durationBaselineMin) > 0
+      ? Number(durationBaselineMin)
       : null) ||
       snapshot?.driverTripMeta?.initialEtaMinutes ||
       snapshot?.tripDurationMin ||
@@ -7077,9 +7100,10 @@ function buildDriverTripAssistModel(snapshot) {
     currentCoordinate,
     targetCoordinate,
   );
-  const pickupProximityMeters = [remainingMeters, pickupStraightLineMeters]
-    .filter((meters) => Number.isFinite(meters) && meters >= 0)
-    .reduce((nearest, meters) => Math.min(nearest, meters), Infinity);
+  // A projected route can end at zero before the vehicle reaches the pickup.
+  // Only the point-to-point radius can enable the arrival command.
+  const pickupProximityMeters = Number.isFinite(pickupStraightLineMeters)
+    ? pickupStraightLineMeters : Infinity;
   const proximityReached =
     status === "accepted" && Number.isFinite(pickupProximityMeters)
       ? pickupProximityMeters <= PICKUP_TOLERANCE_METERS
@@ -7087,8 +7111,9 @@ function buildDriverTripAssistModel(snapshot) {
   // Once inside the pickup radius, show how far the pickup really is. The
   // route distance kept saying "30 m" to a driver standing at the door, while
   // the passenger's screen said 10 m.
-  const displayRemainingMeters = proximityReached
-    ? Math.round(pickupProximityMeters)
+  const displayRemainingMeters = status === "accepted" && Number.isFinite(pickupProximityMeters)
+    ? Math.round(proximityReached
+        ? pickupProximityMeters : Math.max(remainingMeters || 0, pickupProximityMeters))
     : remainingMeters;
   const remainingDistanceLabel = formatRuntimeNavigationDistanceLabel(
     displayRemainingMeters,
@@ -11166,6 +11191,11 @@ function attachSocketListeners() {
   };
 
   const handleDriverArrived = (payload) => {
+    // The command response uses this event for rejections too. Do not acknowledge
+    // a rejected intent or advance the local ride before the server accepts it.
+    if (!payload || payload.success === false || payload.error) {
+      return;
+    }
     const bookingId = String(
       payload?.bookingId ||
         payload?.rideId ||
