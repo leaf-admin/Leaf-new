@@ -19,6 +19,7 @@ Produto: `PrototypeMapLayer.js`, `LeafVehicleMarker.js`, `prototypeRideRuntime.j
 
 - 229 suítes e 1.849 testes unitários passaram. Comando: `npm --prefix mobile-app run test:unit -- --watchman=false --resolver=<resolver local de QA> --runInBand`. O resolver existente fora do produto seleciona uma única instalação React/dependências no workspace; não foi incluído no pacote.
 - Governança, `qa:production-guards`, varredura de segredos rastreados, secret guard backend e `git diff --check` passaram.
+- CI do código `a0ea0f9c4`: mobile completo, backend, regras Firebase e segurança passaram. Dashboard falhou antes de lint/build/smoke ao instalar Chromium: `Playwright does not support chromium on ubuntu26.04-x64`. Falha de compatibilidade do runner; workflow/dependências do dashboard não alterados neste PR. [Execução](https://github.com/leaf-admin/Leaf-new/actions/runs/40103102300).
 - Testes executam os blocos privados reais de eventos/cache/métricas com dependências controladas, sem inicializar Auth/GPS. Não adicionam exports de teste ao runtime.
 - Equivalência local: rota real de 784 pontos, 39 manobras simuladas e 112 posições, resultados de destino idênticos entre a implementação anterior e a geometria compartilhada. Três amostras de 336 avaliações: aproximadamente 19,7–20,4 s antes e 11,6–12,0 s depois. Ensaio JavaScript local, sem representar desempenho do aparelho.
 
@@ -40,7 +41,11 @@ A substituta `booking_1792808979216_3tEQ8pQ2QzeWbMKhLGsXHHhnOGL2` confirmou cheg
 
 Izaak autorizou um ciclo adicional de até duas corridas. A primeira é `booking_1792847887503_3tEQ8pQ2QzeWbMKhLGsXHHhnOGL2`: Pix sandbox R$ 45,62, chegada/início normais, percurso simulado sobre a geometria recebida nessa solicitação, sem sobrescrever estado via API. Não houve segunda solicitação neste ciclo. Repetições de trecho para benchmarking tornam a distância acumulada inadequada como medida de percurso comercial real.
 
-No iPhone, o QA detectou os 16 km iniciais presos no card apesar do marcador mover. A versão final passou a exibir 4 km e depois 400 m/1 min durante a aproximação, com a barra avançada após reiniciar a tela. Conclusão, recibo, contador e limpeza serão registrados após finalizar pelo aparelho do motorista, que bloqueou por inatividade.
+No iPhone, o QA detectou os 16 km iniciais presos no card apesar do marcador mover. A versão final passou a exibir 4 km e depois 400 m/1 min durante a aproximação, com a barra avançada após reiniciar a tela. Após desbloqueio, o servidor recebeu a coordenada do destino (erro inferior a 1 m). O iPhone exibiu `0 m restantes` e o Xiaomi `Você chegou ao destino`/`0 m`. Um único gesto normal de encerramento registrou `COMPLETED` às 14:41:25Z, qualificação `SERVER_DESTINATION_COMPLETION`, sem confirmação antecipada nem sobrescrita de estado.
+
+Recibo persistido e ledger sandbox confirmaram 4.562 centavos pagos, 4.413 para o motorista, 99 Leaf e 50 Pix; pedágio de 995 incluído e repassado. Débito/crédito de 4.562 balanceados, evento `ride_settlement` postado. O recibo passageiro exibiu R$ 45,62 e o motorista R$ 44,13; os componentes de recibo existentes agrupam retenções em R$ 1,49. O campo legado `paymentStatus` permanece `in_holding` mesmo com settlement postado: não foi usado isoladamente como prova de liquidação.
+
+Contador Redis e Firestore: sandbox 6 → 7, ID da corrida aparece uma única vez no histórico durável, operacional permanece 0. Perfis sem corrida ativa; motorista offline e passageiro de volta ao início. Janela temporária ausente, sem nova renovação; GPS simulado parado e serviço mock ausente. Evidências: `completed-financials.json`, `destination-confirmed.json`, `after-end.json`, `cleanup.json`, capturas dos recibos e árvores Leaf dos aparelhos. Os números de 16 km/28 min do recibo são métricas persistidas da estimativa; o longo replay de desempenho não valida duração/distância comerciais reais.
 
 ## Medição comparativa do app completo
 
