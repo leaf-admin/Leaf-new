@@ -35,7 +35,7 @@ describe('Robotaxi reduced motion contract', () => {
     expect(mapSource).toContain("'reduced_motion'");
   });
 
-  it('keeps the native map camera top-down for every role and navigation phase', () => {
+  it('keeps manual pitch gestures disabled; driver-follow pitch is programmatic', () => {
     expect(mapSource).toContain('pitchEnabled={false}');
   });
 });

@@ -3,6 +3,7 @@ import {
   calculateNavigationBearingDegrees,
   calculateDistanceToRouteMeters,
   resolveNavigationCameraPitch,
+  resolveNavigationCameraPadding,
   resolveNavigationCameraZoom,
   resolveStableNavigationCameraZoom,
   resolveCurrentNavigationStepIndex,
@@ -48,6 +49,26 @@ describe('LeafNativeNavigationEngine', () => {
     expect(resolveStableNavigationCameraZoom(21, 15.5)).toBe(15.8);
     expect(resolveStableNavigationCameraZoom(60, 15.2, 15.8)).toBe(15.8);
     expect(resolveStableNavigationCameraZoom(90, null)).toBe(14.9);
+  });
+
+  it.each([[860, 220, 260], [740, 180, 300], [930, 0, 0]])(
+    'anchors the native camera target below centre between cards at %s px height', (height, top, bottom) => {
+      const padding = resolveNavigationCameraPadding({ mapHeight: height, occludedTop: top, occludedBottom: bottom });
+      const nativeTargetY = (padding.top + height - padding.bottom) / 2;
+      const expectedCarY = top + (height - top - bottom) * 0.72;
+      expect(nativeTargetY).toBeCloseTo(expectedCarY, 6);
+      expect(padding.left).toBe(padding.right);
+      expect(height - padding.top - padding.bottom).toBeGreaterThanOrEqual(80);
+    },
+  );
+
+  it('keeps native padding finite and leaves a usable viewport when cards grow', () => {
+    expect(resolveNavigationCameraPadding({ mapHeight: 0 })).toBeNull();
+    expect(resolveNavigationCameraPadding({ mapHeight: NaN })).toBeNull();
+    const padding = resolveNavigationCameraPadding({ mapHeight: 740, occludedTop: 900,
+      occludedBottom: 1000, anchorY: Infinity });
+    expect(Object.values(padding).every(Number.isFinite)).toBe(true);
+    expect(740 - padding.top - padding.bottom).toBeGreaterThanOrEqual(80);
   });
 
   it('chooses the step closest to the driver position', () => {
@@ -228,18 +249,18 @@ describe('LeafNativeNavigationEngine', () => {
     expect(Number.isFinite(state.cameraHeadingDegrees)).toBe(true);
     expect(state.cameraHeadingDegrees).toBeGreaterThanOrEqual(0);
     expect(state.cameraHeadingDegrees).toBeLessThan(360);
-    expect(state.cameraAnchorY).toBe(0.68);
+    expect(state.cameraAnchorY).toBe(0.72);
     expect(state.cameraAnimationDurationMs).toBe(800);
     expect(state.routeCoordinates).toEqual(routeCoordinates);
   });
 
-  it('keeps navigation camera pitch top-down while zoom adapts by driver speed', () => {
+  it('keeps a fixed driver-follow perspective while zoom adapts by speed', () => {
     expect(resolveNavigationCameraZoom(0)).toBe(15.8);
     expect(resolveNavigationCameraZoom(30)).toBe(15.5);
     expect(resolveNavigationCameraZoom(55)).toBe(15.2);
     expect(resolveNavigationCameraZoom(90)).toBe(14.9);
-    expect(resolveNavigationCameraPitch(0)).toBe(0);
-    expect(resolveNavigationCameraPitch(12)).toBe(0);
+    expect(resolveNavigationCameraPitch(0)).toBe(40);
+    expect(resolveNavigationCameraPitch(12)).toBe(40);
 
     const stoppedState = buildLeafNativeNavigationState({
       bookingId: 'booking_nav_camera_stopped',
@@ -267,10 +288,10 @@ describe('LeafNativeNavigationEngine', () => {
 
     expect(stoppedState.cameraZoom).toBeGreaterThan(fastState.cameraZoom);
     expect(stoppedState.cameraZoom).toBe(15.8);
-    expect(stoppedState.cameraPitch).toBe(0);
+    expect(stoppedState.cameraPitch).toBe(40);
     expect(fastState.currentSpeedKmh).toBe(72);
     expect(fastState.cameraZoom).toBeGreaterThanOrEqual(15);
-    expect(fastState.cameraPitch).toBe(0);
+    expect(fastState.cameraPitch).toBe(40);
   });
 
   it('keeps one steady zoom along the leg instead of closing in as the target gets near', () => {

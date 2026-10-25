@@ -132,6 +132,21 @@ describe('PrototypeMapLayer route viewport fitting', () => {
     }
   });
 
+  it.each(['android', 'ios'])('uses SDK padding for driver-follow perspective without shifting passenger previews on %s', os => {
+    const { Platform } = require('react-native');
+    const previousPlatform = Platform.OS;
+    Platform.OS = os;
+    const padding = { top: 340, bottom: 240, left: 0, right: 0 };
+    const props = { region: baseRegion, routeCoordinates, routeViewportRegion: visibleRouteRegion,
+      navigationCameraPadding: padding };
+    const screen = render(<PrototypeMapLayer {...props} mapSafetyProfile="driver" />);
+    try {
+      expect(screen.getByTestId('prototype-map-view').props.mapPadding).toEqual(padding);
+      screen.rerender(<PrototypeMapLayer {...props} mapSafetyProfile="default" />);
+      expect(screen.getByTestId('prototype-map-view').props.mapPadding).toEqual({ top: 0, bottom: 0, left: 0, right: 0 });
+    } finally { screen.unmount(); Platform.OS = previousPlatform; }
+  });
+
   it('snapshots the complete Android driver artwork once, keeping its image centred on the route', async () => {
     const { Platform, PixelRatio, StyleSheet } = require('react-native');
     const previousPlatform = Platform.OS;

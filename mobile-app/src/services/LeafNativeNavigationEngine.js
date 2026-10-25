@@ -6,12 +6,10 @@ export const PICKUP_ARRIVAL_METERS = 20;
 const DESTINATION_ARRIVAL_BANNER_METERS = 80;
 const EARTH_RADIUS_METERS = 6371000;
 const CAMERA_LOOK_AHEAD_METERS = 55;
-export const NAVIGATION_CAMERA_ANCHOR_Y = 0.68;
+export const NAVIGATION_CAMERA_ANCHOR_Y = 0.72;
 export const NAVIGATION_CAMERA_ANIMATION_MS = 800;
-// Keep the Leaf map in the standard top-down presentation. Route heading and
-// zoom still follow navigation, but the camera must never tilt into the old
-// isometric view during an active driver trip.
-export const NAVIGATION_CAMERA_TOP_DOWN_PITCH = 0;
+// Fixed perspective during driver guidance: no speed-driven pitch oscillation.
+export const NAVIGATION_CAMERA_FOLLOW_PITCH = 40;
 const NAVIGATION_CAMERA_MAX_ROUTE_ZOOM = 15.8;
 // Chegou ao destino: mesmo zoom da navegação, sem fechar de repente no ponto final.
 const NAVIGATION_CAMERA_ARRIVAL_ZOOM = NAVIGATION_CAMERA_MAX_ROUTE_ZOOM;
@@ -135,7 +133,29 @@ export function shouldRevealNavigationRoute({
 }
 
 export function resolveNavigationCameraPitch() {
-  return NAVIGATION_CAMERA_TOP_DOWN_PITCH;
+  return NAVIGATION_CAMERA_FOLLOW_PITCH;
+}
+
+// Google positions camera.center in the centre of its padded viewport, even
+// with pitch. Add virtual space above that centre to leave the car lower in
+// the *visible* map. Unlike a flat metres-per-pixel offset, this stays correct
+// when the perspective changes, without querying screen points every frame.
+export function resolveNavigationCameraPadding({
+  mapHeight, occludedTop = 0, occludedBottom = 0,
+  anchorY = NAVIGATION_CAMERA_ANCHOR_Y,
+} = {}) {
+  const height = toFiniteNumber(mapHeight);
+  if (height === null || height < 180) return null;
+  const top = Math.min(height - 120, Math.max(0, toFiniteNumber(occludedTop) || 0));
+  const bottom = Math.min(height - top - 120, Math.max(0, toFiniteNumber(occludedBottom) || 0));
+  const visibleHeight = height - top - bottom;
+  const anchor = Math.max(0.5, Math.min(0.8, toFiniteNumber(anchorY) || NAVIGATION_CAMERA_ANCHOR_Y));
+  return {
+    top: Math.min(height - bottom - 80, top + (2 * anchor - 1) * visibleHeight),
+    bottom,
+    left: 0,
+    right: 0,
+  };
 }
 
 export function calculateNavigationDistanceMeters(left, right) {

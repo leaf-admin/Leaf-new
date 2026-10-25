@@ -886,7 +886,7 @@ function clampNumber(value, min, max) {
   return Math.min(Math.max(value, min), max);
 }
 
-function normalizeViewportPadding(padding = {}, layout = {}) {
+function normalizeViewportPadding(padding = {}, layout = {}, minimumHeight = MIN_VISIBLE_VIEWPORT_HEIGHT) {
   const resolvedPadding = padding && typeof padding === 'object' ? padding : {};
   const height = Number(layout.height);
   const width = Number(layout.width);
@@ -894,8 +894,8 @@ function normalizeViewportPadding(padding = {}, layout = {}) {
   const rawBottom = Math.max(0, Number(resolvedPadding.bottom) || 0);
   const rawLeft = Math.max(0, Number(resolvedPadding.left) || 0);
   const rawRight = Math.max(0, Number(resolvedPadding.right) || 0);
-  const maxBottom = Number.isFinite(height) && height > MIN_VISIBLE_VIEWPORT_HEIGHT
-    ? Math.max(0, height - rawTop - MIN_VISIBLE_VIEWPORT_HEIGHT)
+  const maxBottom = Number.isFinite(height) && height > minimumHeight
+    ? Math.max(0, height - rawTop - minimumHeight)
     : rawBottom;
   const maxRight = Number.isFinite(width) && width > MIN_VISIBLE_VIEWPORT_WIDTH
     ? Math.max(0, width - rawLeft - MIN_VISIBLE_VIEWPORT_WIDTH)
@@ -1622,6 +1622,7 @@ function PrototypeMapLayer({
   destinationMarkerMode = 'place',
   destinationMarkerLetter = 'P',
   viewportPadding = null,
+  navigationCameraPadding = null,
   routeViewportRegion = null,
   forceRegionUpdate = false,
   manualCameraHoldMs = 0,
@@ -1667,9 +1668,13 @@ function PrototypeMapLayer({
   );
   // routeViewportRegion already accounts for the bottomsheet. Applying native
   // map padding as well would shift the camera twice on Google Maps.
-  const resolvedMapPadding = resolvedRouteViewportRegion
+  const resolvedNavigationCameraPadding = useMemo(() => (
+    mapSafetyProfile === 'driver' && navigationCameraPadding
+      ? normalizeViewportPadding(navigationCameraPadding, windowLayout, 80) : null
+  ), [mapSafetyProfile, navigationCameraPadding, windowLayout.height, windowLayout.width]);
+  const resolvedMapPadding = resolvedNavigationCameraPadding || (resolvedRouteViewportRegion
     ? ZERO_VIEWPORT_PADDING
-    : resolvedViewportPadding;
+    : resolvedViewportPadding);
   const markerCoordinate = userCoordinate || region;
   const normalizedManualCameraHoldMs = Math.max(0, Number(manualCameraHoldMs) || 0);
   const manualCameraHoldUntilRef = useRef(0);
@@ -3061,7 +3066,7 @@ function PrototypeMapLayer({
           testID="prototype-map-view"
           accessibilityLabel="Mapa"
           style={StyleSheet.absoluteFillObject}
-          mapPadding={iosControlledRegion ? ZERO_VIEWPORT_PADDING : resolvedMapPadding}
+          mapPadding={resolvedNavigationCameraPadding || (iosControlledRegion ? ZERO_VIEWPORT_PADDING : resolvedMapPadding)}
           // Keep Google's attribution inside the device safe area. Pickup camera
           // anchoring explicitly accounts for this additional native offset.
           paddingAdjustmentBehavior="automatic"
