@@ -105,7 +105,7 @@ function ManeuverGlyph({ type, color: glyphColor }) {
 }
 
 const BANNER_TOP_OFFSET = 70;
-const BANNER_FALLBACK_HEIGHT = 168;
+const BANNER_FALLBACK_HEIGHT = 120;
 const BANNER_MAP_GAP = 12;
 
 export default function LeafNativeNavigationBanner({
@@ -171,7 +171,7 @@ export default function LeafNativeNavigationBanner({
               <View style={styles.iconWrap}>
                 <ManeuverGlyph type={maneuverType} color={color.accent.primary} />
               </View>
-              <Text style={styles.title} numberOfLines={4}>{title}</Text>
+              <Text style={styles.title} numberOfLines={2}>{title}</Text>
             </View>
             {navigationModel.hasArrived && navigationModel.arrivalHint ? (
               <Text style={styles.subtitle} numberOfLines={2}>{navigationModel.arrivalHint}</Text>
@@ -231,9 +231,9 @@ const styles = StyleSheet.create({
     elevation: 8,
   },
   main: {
-    minHeight: 108,
-    paddingHorizontal: 14,
-    paddingVertical: 16,
+    minHeight: 72,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
@@ -246,10 +246,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   metric: {
-    width: 88,
+    width: 76,
     alignSelf: 'stretch',
     justifyContent: 'center',
-    paddingRight: 12,
+    paddingRight: 8,
     borderRightWidth: StyleSheet.hairlineWidth,
     borderRightColor: color.border.separator,
   },
@@ -273,8 +273,8 @@ const styles = StyleSheet.create({
   title: {
     flex: 1,
     ...leafTypography.semiBold,
-    fontSize: 16,
-    lineHeight: 21,
+    fontSize: 14,
+    lineHeight: 18,
     color: color.text.primary,
   },
   phase: {
@@ -298,7 +298,7 @@ const styles = StyleSheet.create({
   },
   footer: {
     paddingHorizontal: 14,
-    paddingVertical: 8,
+    paddingVertical: 0,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: color.border.separator,
     flexDirection: 'row',

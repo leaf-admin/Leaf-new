@@ -9,6 +9,8 @@ const mockGetCamera = jest.fn();
 const mockMarkerNativeProps = jest.fn();
 const mockMarkerRenders = jest.fn();
 let mockMarkerImperativeEnabled = false;
+const mockCaptureRef = jest.fn();
+jest.mock('react-native-view-shot', () => ({ captureRef: (...args) => mockCaptureRef(...args) }));
 jest.mock('react-native-reanimated', () => ({
   ...require('react-native-reanimated/mock'), useReducedMotion: () => false,
 }));
@@ -127,6 +129,38 @@ describe('PrototypeMapLayer route viewport fitting', () => {
       screen.unmount();
     } finally {
       Platform.OS = originalPlatform;
+    }
+  });
+
+  it('snapshots the complete Android driver artwork once, keeping its image centred on the route', async () => {
+    const { Platform, PixelRatio, StyleSheet } = require('react-native');
+    const previousPlatform = Platform.OS;
+    Platform.OS = 'android';
+    mockCaptureRef.mockResolvedValue('data:image/png;base64,driver-art');
+    const props = { region: baseRegion, userCoordinate: routeCoordinates[0],
+      driverCoordinate: routeCoordinates[0], currentLocationMarkerMode: 'car',
+      routeCoordinates, animateRoute: false };
+    const screen = render(<PrototypeMapLayer {...props} />, { createNodeMock: () => ({}) });
+    try {
+      fireEvent(screen.getByTestId('driver-vehicle-bitmap-source'), 'layout', {
+        nativeEvent: { layout: { width: 56, height: 56 } },
+      });
+      await act(async () => { jest.advanceTimersByTime(100); await Promise.resolve(); });
+      expect(mockCaptureRef).toHaveBeenCalledTimes(1);
+      expect(mockCaptureRef).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+        result: 'data-uri', width: PixelRatio.getPixelSizeForLayoutSize(56),
+        height: PixelRatio.getPixelSizeForLayoutSize(56),
+      }));
+      const marker = screen.getByTestId('map-user-vehicle-marker');
+      expect(marker.props.image).toEqual({ uri: 'data:image/png;base64,driver-art' });
+      expect(marker.props.anchor).toEqual({ x: 0.5, y: 0.5 });
+      expect(StyleSheet.flatten(marker.props.style)).toMatchObject({ width: 56, height: 56 });
+      expect(screen.queryByTestId('driver-vehicle-bitmap-source')).toBeNull();
+      screen.rerender(<PrototypeMapLayer {...props} userCoordinate={routeCoordinates[1]} driverCoordinate={routeCoordinates[1]} />);
+      await act(async () => { jest.advanceTimersByTime(1500); });
+      expect(mockCaptureRef).toHaveBeenCalledTimes(1);
+    } finally {
+      screen.unmount(); Platform.OS = previousPlatform; mockCaptureRef.mockClear();
     }
   });
 
