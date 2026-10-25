@@ -35,3 +35,13 @@ APK SHA-256 `b5529d4ff43c84726a1005ca19ce1a9d9fc99540985991c27eb525f34e3769aa`; 
 Limites: perspectiva pode mudar legibilidade, foreshortening do carro e custo de renderização nativa; não há alegação de ganho de FPS/autonomia. Redimensionamento dos cards precisa ser conferido com a câmera inclinada. O problema de conexão observado no QA anterior não foi alterado. PR deve permanecer sem aprovação visual para publicação até o QA.
 
 Reversão: reverter somente o commit da perspectiva para restaurar câmera plana e a compensação anterior, preservando o commit do carrinho/cards. Fora do escopo: passageiro, banner externo, regras financeiras/KYC, backend/socket, frequência de provedores, deploy, OTA, Sentry e lojas.
+
+## Pré-voo físico autorizado em 25/10 — E2E ainda não iniciado
+
+Izaak autorizou uma nova corrida sandbox, limitada aos mesmos dois perfis, até duas rotas e uma busca pelos gatilhos normais, Pix sandbox e janela temporária apenas se necessária. A autorização ainda não foi consumida por uma solicitação. O pré-voo às 05:44Z confirmou motorista offline, nenhum dos dois perfis com corrida ativa, contador sandbox 8 e operacional 0. Nenhuma janela foi renovada, pedido criado ou pagamento confirmado nesta rodada.
+
+O APK inicialmente preparado (`b5529d4…`) foi instalado, mas falhou no bootstrap (`queueMicrotask` ausente). A causa foi o serializer Metro local: o caminho do módulo de inicialização RN apontava para uma árvore diferente daquela resolvida no bundle. A configuração **fora do repositório** passou a preservar os módulos de pré-inicialização RN e Expo com seus caminhos reais. Nenhuma fonte do produto, dependência ou recurso nativo foi alterado. O erro inicial não é evidência de falha da câmera.
+
+Pacote corrigido e instalado: APK SHA-256 `9c7fba631f386b13c660a52139c088c7c7d8ce2adb43e019d0d34213b4d95b56`; bundle `d94c0f43372ca45d4e1d3f4db3c8e9427f862415683c81f2501f44dc8818d269`. Mesmos 43 arquivos DEX/SO, certificado QA e base anterior; bytes conservados fora de JS/assinatura conferidos novamente. O log de nova inicialização não repetiu o erro anterior. **Smoke visual e câmera em navegação continuam pendentes.**
+
+Bloqueio físico: Xiaomi bloqueado por inatividade; o runner do iPhone falhou ao habilitar automação com “Autenticação cancelada”. Solicitado ao proprietário desbloquear os dois e deixá-los no Leaf; nenhuma senha/OTP foi acessada. Não há captura nova de navegação, medida de desempenho ou conclusão E2E desta perspectiva. O próximo passo é conferir o carregamento visual e executar a única corrida já autorizada, registrando ambos os trechos e a limpeza final. Reversão local disponível em `before-camera.apk`, sem apagar dados.
