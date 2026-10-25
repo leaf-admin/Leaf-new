@@ -21,14 +21,16 @@ O Google documenta que o alvo da câmera corresponde ao centro da região com pa
 
 - **229 suítes / 1.857 testes passaram** na suíte mobile completa; log `/tmp/leaf-driver-perspective-full-tests.log`. Comando `npm --prefix mobile-app run test:unit -- --watchman=false --resolver=<resolver local de QA existente> --runInBand`.
 - Testes focados: 150 passaram. Cobrem geometria da âncora com alturas/oclusões diferentes, padding finito em layouts apertados, perspectiva fixa com velocidades distintas, ambas as fases ativas, prioridade do padding no motorista Android/iOS e preservação do preview do passageiro.
-- Governança, guards mobile de produção, secret scan rastreado, secret guard backend e diff check passaram.
+- Governança, guards mobile de produção, secret scan rastreado, secret guard backend e diff check passaram. No CI de `96e314230`, mobile completo, backend, regras Firebase e segurança passaram. Dashboard falhou antes de lint/build/smoke: `Playwright does not support chromium on ubuntu26.04-x64`. [Execução](https://github.com/leaf-admin/Leaf-new/actions/runs/40156593004).
 - **Ainda não há captura física da câmera a 40°.** A imagem em `DRIVER_NAVIGATION_VISIBILITY_2026-10-24.md` foi feita em `75bd63bd5`, com câmera plana: comprova o carrinho/cards anteriores e não deve ser apresentada como evidência desta perspectiva.
 
 ## QA pendente, riscos e reversão
 
 Os dois pedidos sandbox do ciclo autorizado anterior já foram concluídos. Nova corrida para validar esta mudança precisa de autorização específica para uso das credenciais/perfis QA, Pix sandbox e até duas rotas/uma busca pelos gatilhos normais, sem forçar misses. Janela temporária somente se necessária e removida ao finalizar. Não há autorização de publicação nesta tarefa.
 
-O volume externo de build está desconectado. Foi preservada uma cópia local do APK atual do Xiaomi; a preparação de JS usa apenas dependências existentes/versões do lockfile em pasta de QA fora do produto. Sem alteração de binário nativo ou dependências do repositório. Nenhum novo APK desta perspectiva foi instalado até a validação autorizada.
+O volume externo de build está desconectado. Pacote local preparado em `~/.codex/visualizations/2026/10/22/01a16498-a3ec-7093-bfae-c4c373c52628/driver-camera-perspective-2026-10-24/driver-camera-qa.apk`, usando cópia das fontes e dependências locais/versões do lockfile, fora do produto. O pacote do SDK Updates já declarado foi recuperado do cache npm local; nenhum manifesto/lockfile foi alterado. O resolver local mantém uma instância de React/RN; um plugin de assets somente de QA preserva os nomes de recursos compilados da base, evitando perder fontes/ícones devido aos caminhos de outro diretório. Sem patch no código ou nos recursos nativos.
+
+APK SHA-256 `b5529d4ff43c84726a1005ca19ce1a9d9fc99540985991c27eb525f34e3769aa`; bundle `bc297a5401acee4a703e45ead66ca061267738e54afb0ce1c86e69b57fdf23d9`. Base guardada `before-camera.apk`, SHA-256 `5191dbff903ed1b9c14ee61c31859ba7b75cb494840c2cce02edc33659653b24`. Verificações confirmaram mesmo certificado QA, mesma versão do bytecode Hermes, mesmos 43 DEX/bibliotecas nativas e bytes iguais em todos os arquivos conservados fora do bundle/assinatura. OTA desativada. Nenhum APK desta perspectiva foi instalado; o pacote ainda precisa do smoke/QA autorizados.
 
 Limites: perspectiva pode mudar legibilidade, foreshortening do carro e custo de renderização nativa; não há alegação de ganho de FPS/autonomia. Redimensionamento dos cards precisa ser conferido com a câmera inclinada. O problema de conexão observado no QA anterior não foi alterado. PR deve permanecer sem aprovação visual para publicação até o QA.
 
