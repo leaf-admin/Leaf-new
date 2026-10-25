@@ -1,5 +1,7 @@
 # Câmera de navegação do motorista com perspectiva
 
+**Estado atual em 25/10:** a limpeza e a nova rodada E2E foram concluídas; ver [relatório final](DRIVER_CAMERA_E2E_2026-10-25.md). As seções abaixo preservam o registro histórico de preparação e interrupção, cujas pendências de corrida/limpeza já foram resolvidas. Desempenho continua sem aprovação de fluidez para publicação.
+
 ## Objetivo e escopo concluído no código
 
 Pedido adicional de Izaak: visualização de condução parecida com a do Waze, tanto indo buscar (`accepted`) quanto durante a corrida (`started`), mantendo Google Maps e as instruções visuais existentes. Implementação após `75bd63bd5`, que corrigiu o carro cortado e compactou os cards.
