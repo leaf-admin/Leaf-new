@@ -45,3 +45,29 @@ O APK inicialmente preparado (`b5529d4…`) foi instalado, mas falhou no bootstr
 Pacote corrigido e instalado: APK SHA-256 `9c7fba631f386b13c660a52139c088c7c7d8ce2adb43e019d0d34213b4d95b56`; bundle `d94c0f43372ca45d4e1d3f4db3c8e9427f862415683c81f2501f44dc8818d269`. Mesmos 43 arquivos DEX/SO, certificado QA e base anterior; bytes conservados fora de JS/assinatura conferidos novamente. O log de nova inicialização não repetiu o erro anterior. **Smoke visual e câmera em navegação continuam pendentes.**
 
 Bloqueio físico: Xiaomi bloqueado por inatividade; o runner do iPhone falhou ao habilitar automação com “Autenticação cancelada”. Solicitado ao proprietário desbloquear os dois e deixá-los no Leaf; nenhuma senha/OTP foi acessada. Não há captura nova de navegação, medida de desempenho ou conclusão E2E desta perspectiva. O próximo passo é conferir o carregamento visual e executar a única corrida já autorizada, registrando ambos os trechos e a limpeza final. Reversão local disponível em `before-camera.apk`, sem apagar dados.
+
+## QA físico em 25/10 — evidência parcial, corrida ainda aberta
+
+Após desbloqueio dos aparelhos, o bundle corrigido abriu o Leaf com sessão preservada. Pré-voo às 10:44Z confirmou nenhuma corrida ativa e contador sandbox 8/operacional 0. Janela QA renovada somente para o motorista autorizado até `2026-10-25T11:45:05.772Z`.
+
+Uma solicitação, `booking_1792925169808_3tEQ8pQ2QzeWbMKhLGsXHHhnOGL2`, Pix sandbox R$ 43,43, destino Via Parque Shopping. A primeira oferta expirou antes do toque; o mesmo pedido foi redistribuído, sem novo pagamento, e aceito às 10:48:04Z. No aceite e no início o app abriu o navegador externo conforme a preferência existente; Leaf foi trazido de volta, sem operar o navegador. Chegada aceita com GPS QA a aproximadamente 8 m do embarque; servidor `ARRIVED`. Início às 10:52:14Z, servidor `IN_PROGRESS`.
+
+Capturas físicas mostram a perspectiva configurada a 40° nas fases accepted/started, carro inteiro e espaço à frente entre os cards. Gesto manual deslocou a câmera; captura posterior mostra retomada do acompanhamento. Não é reprodução do Waze nem validação da câmera no iPhone motorista: o iPhone está como passageiro. A aproximação utilizou replay de ~409 m da geometria existente, em sentido de aproximação, após reposicionar o GPS QA; não é uma trajetória real de deslocamento do aparelho. O início da viagem usou a geometria da própria solicitação, GPS 1 Hz.
+
+![Busca — acompanhamento retomado](evidence/navigation-perspective-pickup-2026-10-25.png)
+
+![Em viagem — rota à frente](evidence/navigation-perspective-trip-2026-10-25.png)
+
+Três janelas completas, sem captura de tela Android dentro da medição:
+
+| Janela | Duração | CPU (% de um núcleo) | Frames janky / total | p95 gfxinfo |
+| --- | --- | --- | --- | --- |
+| Aproximação inicial | 20,29 s | 122,6% | 13/898 | 14 ms |
+| Aproximação final (inclui parada) | 20,33 s | 80,3% | 6/618 | 13 ms |
+| Em viagem, trecho inicial | 20,29 s | 115,2% | 7/980 | 14 ms |
+
+**Não há comparação controlada antes/depois nesta rodada.** Velocidades/fases distintas, janelas curtas; o gfxinfo não cobre toda a superfície/GPU do Google Maps. Sem alegação de melhoria de FPS, bateria ou ausência de regressão sustentada. Valores acima de 100% de CPU representam uso agregado de mais de um núcleo.
+
+Às ~10:53Z o Xiaomi desapareceu do ADB. O replay GPS encerrou com erro de dispositivo ausente e não pôde confirmar a parada do serviço mock. A segunda amostra em viagem (`trip-perspective-02`) foi interrompida e está **descartada**, sem métricas finais. Às 10:54:11Z o backend ainda registrava a mesma corrida `IN_PROGRESS`, contador sandbox 8 com reserva inflight e operacional 0. Solicitada reconexão do cabo, aparelho desbloqueado no Leaf.
+
+**Pendente:** retomar e encerrar essa corrida pelo fluxo normal, conferir recibo/ledger/contador, colocar motorista offline, parar serviço GPS e remover somente a janela criada por esta rodada. Não há publicação nem nova solicitação autorizada. Evidência local: `driver-camera-perspective-2026-10-24/{performance-valid-windows.json,usb-interrupted.json,payment-confirmation.log}`; fontes do produto permanecem iguais a `96e314230`.
