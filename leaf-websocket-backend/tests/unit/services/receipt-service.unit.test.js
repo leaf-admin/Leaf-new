@@ -461,7 +461,7 @@ describe('ReceiptService financial snapshot', () => {
         }
       })
     }));
-    equalTo.mockReturnValue({ once });
+    equalTo.mockReturnValue({ limitToLast: jest.fn(() => ({ once })) });
     orderByChild.mockReturnValue({ equalTo });
     const firebaseDb = {
       ref: jest.fn(() => ({ orderByChild }))
@@ -493,6 +493,48 @@ describe('ReceiptService financial snapshot', () => {
     expect(result.receipts.map((receipt) => receipt.rideId)).toEqual(['ride_older']);
   });
 
+  it('serves the newest legacy receipts when a driver passes the legacy window', async () => {
+    const service = createReceiptService();
+    const sandboxContext = sealFinancialContext({
+      providerEnvironment: 'sandbox',
+      paymentProfileId: 'qa-test-users-sandbox-durable',
+      paymentProfileSource: 'firestore',
+      testUserSandbox: true
+    });
+    const base = Date.UTC(2026, 9, 1);
+    const window = {};
+    // limitToLast(201) returns the newest 201 keys of a longer history.
+    for (let index = 0; index < 201; index += 1) {
+      const at = base + index * 60000;
+      window[`booking_${at}_passenger`] = {
+        receiptId: `LEAF-${index}`,
+        rideId: `booking_${at}_passenger`,
+        driver: { id: 'driver_1' },
+        trip: { dateTime: new Date(at).toISOString() },
+        financialContext: sandboxContext
+      };
+    }
+    const limitToLast = jest.fn(() => ({ once: async () => ({ val: () => window }) }));
+    const firebaseDb = { ref: jest.fn(() => ({ orderByChild: () => ({ equalTo: () => ({ limitToLast }) }) })) };
+
+    const first = await service.listStoredReceiptsByUser({
+      firebaseDb, userId: 'driver_1', role: 'driver', financialContext: sandboxContext, limit: 10
+    });
+    expect(limitToLast).toHaveBeenCalledWith(201);
+    expect(first.receipts[0].receiptId).toBe('LEAF-200');
+    expect(first).toMatchObject({ total: null, hasMore: true, historyWindow: 'recent' });
+
+    const last = await service.listStoredReceiptsByUser({
+      firebaseDb, userId: 'driver_1', role: 'driver', financialContext: sandboxContext, limit: 10, offset: 190
+    });
+    expect(last.receipts.map((receipt) => receipt.receiptId).at(-1)).toBe('LEAF-1');
+    expect(last.hasMore).toBe(false);
+
+    await expect(service.listStoredReceiptsByUser({
+      firebaseDb, userId: 'driver_1', role: 'driver', financialContext: sandboxContext, offset: 200
+    })).rejects.toMatchObject({ statusCode: 503, code: 'RECEIPT_HISTORY_MIGRATION_REQUIRED' });
+  });
+
   it('scopes persisted receipt listing by driver owner path', async () => {
     const service = createReceiptService();
     const sandboxContext = sealFinancialContext({
@@ -513,7 +555,7 @@ describe('ReceiptService financial snapshot', () => {
         }
       })
     }));
-    const equalTo = jest.fn(() => ({ once }));
+    const equalTo = jest.fn(() => ({ limitToLast: () => ({ once }) }));
     const orderByChild = jest.fn(() => ({ equalTo }));
     const firebaseDb = { ref: jest.fn(() => ({ orderByChild })) };
 

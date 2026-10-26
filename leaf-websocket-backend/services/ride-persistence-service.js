@@ -1,3 +1,4 @@
+const metricProjections = require('./metrics-projection-store');
 const { logger } = require('../utils/logger');
 const redisPool = require('../utils/redis-pool');
 const firebaseConfig = require('../firebase-config');
@@ -258,14 +259,12 @@ class RidePersistenceService {
             // Salvar com retry
             await this.retryOperation(
                 async () => {
-                    await this.firestore
-                        .collection(persistenceScope.collections.rides)
-                        .doc(rideId)
-                        .set(rideDoc, { merge: false });
+                    await metricProjections.write(this.firestore, this.firestore
+                        .collection(persistenceScope.collections.rides).doc(rideId), rideDoc);
                 },
                 'saveRide (Firestore)'
             );
-            this.incrementOperationTelemetry(telemetry, 'database', 'write', 1);
+            this.incrementOperationTelemetry(telemetry, 'database', 'write', metricProjections.enabled() ? 2 : 1);
             
             logger.info(`✅ Corrida ${rideId} salva no Firestore (snapshot inicial)`);
             
@@ -431,11 +430,11 @@ class RidePersistenceService {
                         persistenceScope,
                         { validateStoredRecord: persistenceScope.namespace === 'sandbox' }
                     );
-                    await docRef.update(updateData);
+                    await metricProjections.write(this.firestore, docRef, updateData, { method: 'update' });
                 },
                 'saveFinalRideData (Firestore)'
             );
-            this.incrementOperationTelemetry(telemetry, 'database', 'write', 1);
+            this.incrementOperationTelemetry(telemetry, 'database', 'write', metricProjections.enabled() ? 2 : 1);
             
             logger.info(`✅ Dados finais da corrida ${rideId} salvos no Firestore`);
             
@@ -535,6 +534,9 @@ class RidePersistenceService {
     }
 
     async processFinalizationOutboxBatch(limit = 20) {
+        if (this.outboxBatchRunning) return { processed: 0, retried: 0, failed: 0, skipped: true };
+        this.outboxBatchRunning = true;
+        limit = Math.min(100, Math.max(1, Number.parseInt(limit, 10) || 20));
         try {
             const redis = redisPool.getConnection();
             if (!redis || (redis.status !== 'ready' && redis.status !== 'connect')) {
@@ -542,14 +544,35 @@ class RidePersistenceService {
             }
 
             const outboxKey = this.getFinalizationOutboxKey();
-            const items = await redis.hgetall(outboxKey);
+            if (!this.outboxScanPage?.length) {
+                const [cursor, fields] = await redis.hscan(outboxKey, this.outboxScanCursor || '0', 'COUNT', limit);
+                if (fields.length > 2000 || Buffer.byteLength(JSON.stringify(fields)) > 2 * 1024 * 1024) {
+                    throw new Error('Finalization outbox scan budget exceeded');
+                }
+                this.outboxScanCursor = cursor;
+                this.outboxScanPage = [];
+                for (let i = 0; i < fields.length; i += 2) this.outboxScanPage.push([fields[i], fields[i + 1]]);
+            }
+            const items = this.outboxScanPage.splice(0, limit);
+            const compareAndSet = async (id, expected, next = null) => redis.eval(`
+                if redis.call('HGET', KEYS[1], ARGV[1]) ~= ARGV[2] then return 0 end
+                if ARGV[3] == 'delete' then return redis.call('HDEL', KEYS[1], ARGV[1]) end
+                redis.call('HSET', KEYS[1], ARGV[1], ARGV[3]); return 1
+            `, 1, outboxKey, id, expected, next === null ? 'delete' : next);
             const now = Date.now();
             let processed = 0;
             let retried = 0;
             let failed = 0;
             let scanned = 0;
 
-            for (const [outboxEntryId, raw] of Object.entries(items || {})) {
+            const admissionStartedAt = Date.now();
+            for (let itemIndex = 0; itemIndex < items.length; itemIndex++) {
+                if (Date.now() - admissionStartedAt >= 10000) {
+                    this.outboxScanPage.unshift(...items.slice(itemIndex));
+                    break;
+                }
+                const [outboxEntryId, raw] = items[itemIndex];
+                if (await redis.hget(outboxKey, outboxEntryId) !== raw) continue;
                 if (scanned >= limit) break;
                 scanned += 1;
 
@@ -557,17 +580,23 @@ class RidePersistenceService {
                 try {
                     payload = JSON.parse(raw);
                 } catch (parseError) {
-                    await redis.hdel(outboxKey, outboxEntryId);
+                    // Preserve malformed financial work for explicit reconciliation.
                     failed += 1;
                     continue;
                 }
 
-                const rideId = payload?.rideId || outboxEntryId;
-
-                if (!payload || payload.status === 'completed') {
-                    await redis.hdel(outboxKey, outboxEntryId);
+                if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+                    failed += 1;
                     continue;
                 }
+                const rideId = payload.rideId || outboxEntryId;
+
+                if (payload.status === 'completed') {
+                    await compareAndSet(outboxEntryId, raw);
+                    continue;
+                }
+
+                if (payload.status === 'failed') { failed += 1; continue; }
 
                 if (payload.nextRetryAt && payload.nextRetryAt > now) {
                     continue;
@@ -575,7 +604,7 @@ class RidePersistenceService {
 
                 const result = await this.saveFinalRideData(rideId, payload.finalData || {});
                 if (result.success) {
-                    await redis.hdel(outboxKey, outboxEntryId);
+                    await compareAndSet(outboxEntryId, raw);
                     processed += 1;
                     continue;
                 }
@@ -586,7 +615,7 @@ class RidePersistenceService {
                     payload.attempts = attempts;
                     payload.updatedAt = now;
                     payload.lastError = result.error || 'retry_failed';
-                    await redis.hset(outboxKey, outboxEntryId, JSON.stringify(payload));
+                    await compareAndSet(outboxEntryId, raw, JSON.stringify(payload));
                     failed += 1;
                     continue;
                 }
@@ -595,7 +624,7 @@ class RidePersistenceService {
                 payload.updatedAt = now;
                 payload.lastError = result.error || 'retry_failed';
                 payload.nextRetryAt = now + Math.min(60000, 2000 * attempts);
-                await redis.hset(outboxKey, outboxEntryId, JSON.stringify(payload));
+                await compareAndSet(outboxEntryId, raw, JSON.stringify(payload));
                 retried += 1;
             }
 
@@ -607,13 +636,19 @@ class RidePersistenceService {
                 logger.error(`❌ Erro ao persistir checkpoints da tarifa promocional: ${checkpointError.message}`);
                 checkpointStats = { processed: 0, failed: 1 };
             }
+            let projectionStats;
+            try { projectionStats = await metricProjections.drain(this.firestore, limit); }
+            catch (error) { projectionStats = { processed: 0, failed: 1, code: 'PROJECTION_DRAIN_UNAVAILABLE' }; }
             return {
                 processed, retried, failed,
+                metricProjections: projectionStats,
                 ...(checkpointStats.processed || checkpointStats.failed ? { driverIntroFeeCheckpoints: checkpointStats } : {})
             };
         } catch (error) {
             logger.error(`❌ Erro ao processar outbox de finalizacao: ${error.message}`);
             return { processed: 0, retried: 0, failed: 0, error: error.message };
+        } finally {
+            this.outboxBatchRunning = false;
         }
     }
     
@@ -640,12 +675,12 @@ class RidePersistenceService {
                         persistenceScope,
                         { validateStoredRecord: persistenceScope.namespace === 'sandbox' }
                     );
-                    await docRef.update({
+                    await metricProjections.write(this.firestore, docRef, {
                         driverId: driverId,
                         status: 'accepted',
                         acceptedAt: admin.firestore.FieldValue.serverTimestamp(),
                         ...persistenceEnvelope
-                    });
+                    }, { method: 'update' });
                 },
                 'updateRideDriver (Firestore)'
             );
@@ -681,11 +716,11 @@ class RidePersistenceService {
                         persistenceScope,
                         { validateStoredRecord: persistenceScope.namespace === 'sandbox' }
                     );
-                    await docRef.update({
+                    await metricProjections.write(this.firestore, docRef, {
                         status: 'in_progress',
                         startedAt: admin.firestore.FieldValue.serverTimestamp(),
                         ...persistenceEnvelope
-                    });
+                    }, { method: 'update' });
                 },
                 'markRideStarted (Firestore)'
             );
@@ -732,7 +767,7 @@ class RidePersistenceService {
                         persistenceScope,
                         { validateStoredRecord: persistenceScope.namespace === 'sandbox' }
                     );
-                    await docRef.update(updateData);
+                    await metricProjections.write(this.firestore, docRef, updateData, { method: 'update' });
                 },
                 'markRideCancelled (Firestore)'
             );

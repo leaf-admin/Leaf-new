@@ -1,3 +1,4 @@
+const readBudget = require('../../utils/metrics-read-budget');
 // Gerado a partir de routes/dashboard.js (divisão mecânica, mesma ordem de registro).
 // Assinaturas, listas ativas e indicadores do painel
 
@@ -49,7 +50,7 @@ router.get('/api/subscriptions', async (req, res) => {
     res.json(subscriptions);
   } catch (error) {
     logError(error, 'Erro ao buscar assinaturas:', { service: 'dashboard-routes' });
-    res.status(500).json({ error: 'Erro interno do servidor' });
+    res.status(error.statusCode || 500).json({ error: error.statusCode === 503 ? 'Métricas temporariamente indisponíveis' : 'Erro interno do servidor' });
   }
 });
 
@@ -80,7 +81,7 @@ router.get('/api/subscriptions/stats', async (req, res) => {
     res.json(stats);
   } catch (error) {
     logError(error, 'Erro ao buscar stats de assinaturas:', { service: 'dashboard-routes' });
-    res.status(500).json({ error: 'Erro interno do servidor' });
+    res.status(error.statusCode || 500).json({ error: error.statusCode === 503 ? 'Métricas temporariamente indisponíveis' : 'Erro interno do servidor' });
   }
 });
 
@@ -103,7 +104,7 @@ router.get('/api/drivers/active', async (req, res) => {
     res.json(drivers);
   } catch (error) {
     logError(error, 'Erro ao buscar motoristas ativos:', { service: 'dashboard-routes' });
-    res.status(500).json({ error: 'Erro interno do servidor' });
+    res.status(error.statusCode || 500).json({ error: error.statusCode === 503 ? 'Métricas temporariamente indisponíveis' : 'Erro interno do servidor' });
   }
 });
 
@@ -123,7 +124,7 @@ router.get('/api/passengers/active', async (req, res) => {
     res.json(passengers);
   } catch (error) {
     logError(error, 'Erro ao buscar passageiros ativos:', { service: 'dashboard-routes' });
-    res.status(500).json({ error: 'Erro interno do servidor' });
+    res.status(error.statusCode || 500).json({ error: error.statusCode === 503 ? 'Métricas temporariamente indisponíveis' : 'Erro interno do servidor' });
   }
 });
 
@@ -146,7 +147,7 @@ router.get('/api/trips/active', async (req, res) => {
     res.json(trips);
   } catch (error) {
     logError(error, 'Erro ao buscar corridas ativas:', { service: 'dashboard-routes' });
-    res.status(500).json({ error: 'Erro interno do servidor' });
+    res.status(error.statusCode || 500).json({ error: error.statusCode === 503 ? 'Métricas temporariamente indisponíveis' : 'Erro interno do servidor' });
   }
 });
 
@@ -167,31 +168,30 @@ router.get('/api/live/stats', async (req, res) => {
       // Dados reais do Redis
       const totalDrivers = await redis.zcard('driver_locations') || 0;
       const onlineUsers = await redis.scard('online_users') || 0;
-      const activeBookings = await RedisScan.countKeys(redis, 'bookings:*');
-      const availableDrivers = await redis.scard('available_drivers') || Math.floor(totalDrivers * 0.6);
-      const sampledBookingKeys = await sampleRedisKeys(redis, 'bookings:*', 120);
-      const sampledBookings = await loadBookingHashes(redis, sampledBookingKeys);
-      const avgWaitTime = calculateAverageWaitTime(sampledBookings);
-      const avgTripTime = calculateAverageTripTime(sampledBookings);
+      const activeBookings = await modernMetricsService.getActiveRidesCount();
+      const availableDrivers = await redis.scard('available_drivers');
+      // No keyspace scan or arbitrary sample called an exact average.
+      const avgWaitTime = null;
+      const avgTripTime = null;
 
       stats = {
         driversOnline: totalDrivers,
         driversAvailable: availableDrivers,
         passengerWaiting: Math.max(0, onlineUsers - totalDrivers), // Passageiros sem motorista
         activeTrips: activeBookings,
-        avgWaitTime: Number(avgWaitTime.toFixed(1)),
-        avgTripTime: Number(avgTripTime.toFixed(1))
+        avgWaitTime: avgWaitTime,
+        avgTripTime: avgTripTime
       };
 
     } catch (redisError) {
       logStructured('warn', '⚠️ Redis não disponível para stats ao vivo:', redisError.message, { service: 'dashboard-routes' });
-      // stats permanece zerado
+      throw readBudget.unavailable();
     }
 
     res.json(stats);
   } catch (error) {
     logError(error, 'Erro ao buscar stats em tempo real:', { service: 'dashboard-routes' });
-    res.status(500).json({ error: 'Erro interno do servidor' });
+    res.status(error.statusCode || 500).json({ error: error.statusCode === 503 ? 'Métricas temporariamente indisponíveis' : 'Erro interno do servidor' });
   }
 });
 
@@ -211,6 +211,7 @@ router.get('/api/rides/stats', async (req, res) => {
       const stats = await modernMetricsService.getRidesStats({ period, startDate, endDate });
       return res.json(stats);
     } catch (modernError) {
+      readBudget.requireLegacyFallback();
       logStructured('warn', 'Fallback RTDB em /api/rides/stats', {
         service: 'dashboard-routes',
         reason: modernError.message
@@ -228,7 +229,7 @@ router.get('/api/rides/stats', async (req, res) => {
     try {
       if (firebaseConfig && firebaseConfig.getRealtimeDB) {
         const db = firebaseConfig.getRealtimeDB();
-        const bookingsSnapshot = await db.ref('bookings').once('value');
+        const bookingsSnapshot = await readBudget.realtimeSnapshot(db.ref('bookings'));
         const bookings = bookingsSnapshot.val() || {};
         const bookingArray = Object.keys(bookings).map(key => ({ id: key, ...bookings[key] }));
 
@@ -262,18 +263,26 @@ router.get('/api/rides/stats', async (req, res) => {
       }
     } catch (error) {
       logError(error, 'Erro ao buscar stats de corridas:', { service: 'dashboard-routes' });
+      throw error;
     }
 
     res.json(stats);
   } catch (error) {
     logError(error, 'Erro ao buscar stats de corridas:', { service: 'dashboard-routes' });
-    res.status(500).json({ error: 'Erro interno do servidor' });
+    res.status(error.statusCode || 500).json({ error: error.statusCode === 503 ? 'Métricas temporariamente indisponíveis' : 'Erro interno do servidor' });
   }
 });
 
 // 💰 Revenue Stats
 router.get('/api/revenue/stats', async (req, res) => {
   try {
+    if (process.env.ENABLE_OPS_METRIC_READS === 'true') {
+      const today = await modernMetricsService.getFinancialRidesStats({ period: 'today' });
+      const month = await modernMetricsService.getFinancialRidesStats({ period: 'month' });
+      return res.json({ todayRevenue: today.totalValue, monthlyRevenue: month.totalValue,
+        averageTicket: month.averageValue, growthRate: 0, metadata: month.metadata });
+    }
+
     let stats = {
       todayRevenue: 0,
       monthlyRevenue: 0,
@@ -284,7 +293,7 @@ router.get('/api/revenue/stats', async (req, res) => {
     try {
       if (firebaseConfig && firebaseConfig.getRealtimeDB) {
         const db = firebaseConfig.getRealtimeDB();
-        const bookingsSnapshot = await db.ref('bookings').once('value');
+        const bookingsSnapshot = await readBudget.realtimeSnapshot(db.ref('bookings'));
         const bookings = bookingsSnapshot.val() || {};
         const bookingArray = Object.keys(bookings).map(key => ({ id: key, ...bookings[key] }));
 
@@ -322,12 +331,13 @@ router.get('/api/revenue/stats', async (req, res) => {
       }
     } catch (error) {
       logError(error, 'Erro ao buscar stats de receita:', { service: 'dashboard-routes' });
+      throw error;
     }
 
     res.json(stats);
   } catch (error) {
     logError(error, 'Erro ao buscar stats de receita:', { service: 'dashboard-routes' });
-    res.status(500).json({ error: 'Erro interno do servidor' });
+    res.status(error.statusCode || 500).json({ error: error.statusCode === 503 ? 'Métricas temporariamente indisponíveis' : 'Erro interno do servidor' });
   }
 });
 
@@ -343,7 +353,7 @@ router.get('/api/conversion/stats', async (req, res) => {
     try {
       if (firebaseConfig && firebaseConfig.getRealtimeDB) {
         const db = firebaseConfig.getRealtimeDB();
-        const bookingsSnapshot = await db.ref('bookings').once('value');
+        const bookingsSnapshot = await readBudget.realtimeSnapshot(db.ref('bookings'));
         const bookings = bookingsSnapshot.val() || {};
         const bookingArray = Object.keys(bookings).map(key => ({ id: key, ...bookings[key] }));
 
@@ -361,12 +371,13 @@ router.get('/api/conversion/stats', async (req, res) => {
       }
     } catch (error) {
       logError(error, 'Erro ao buscar stats de conversão:', { service: 'dashboard-routes' });
+      throw error;
     }
 
     res.json(stats);
   } catch (error) {
     logError(error, 'Erro ao buscar stats de conversão:', { service: 'dashboard-routes' });
-    res.status(500).json({ error: 'Erro interno do servidor' });
+    res.status(error.statusCode || 500).json({ error: error.statusCode === 503 ? 'Métricas temporariamente indisponíveis' : 'Erro interno do servidor' });
   }
 });
 
@@ -384,7 +395,7 @@ router.get('/api/kyc-analytics/stats', async (req, res) => {
       // Usar Realtime Database onde os dados de drivers estão
       if (firebaseConfig && firebaseConfig.getRealtimeDB) {
         const db = firebaseConfig.getRealtimeDB();
-        const usersSnapshot = await db.ref('users').orderByChild('usertype').equalTo('driver').once('value');
+        const usersSnapshot = await readBudget.realtimeSnapshot(db.ref('users').orderByChild('usertype').equalTo('driver'));
         const drivers = usersSnapshot.val() || {};
 
         let approved = 0;
@@ -413,12 +424,13 @@ router.get('/api/kyc-analytics/stats', async (req, res) => {
       }
     } catch (error) {
       logError(error, 'Erro ao buscar stats de KYC:', { service: 'dashboard-routes' });
+      throw error;
     }
 
     res.json(stats);
   } catch (error) {
     logError(error, 'Erro ao buscar stats de KYC:', { service: 'dashboard-routes' });
-    res.status(500).json({ error: 'Erro interno do servidor' });
+    res.status(error.statusCode || 500).json({ error: error.statusCode === 503 ? 'Métricas temporariamente indisponíveis' : 'Erro interno do servidor' });
   }
 });
 
@@ -476,7 +488,7 @@ router.get('/api/system/status', async (req, res) => {
     res.json(services);
   } catch (error) {
     logError(error, 'Erro ao buscar status do sistema:', { service: 'dashboard-routes' });
-    res.status(500).json({ error: 'Erro interno do servidor' });
+    res.status(error.statusCode || 500).json({ error: error.statusCode === 503 ? 'Métricas temporariamente indisponíveis' : 'Erro interno do servidor' });
   }
 });
 
@@ -500,7 +512,7 @@ router.get('/api/activity/recent', async (req, res) => {
 
       if (activities.length === 0 && firebaseConfig && firebaseConfig.getRealtimeDB) {
         const db = firebaseConfig.getRealtimeDB();
-        const bookingsSnapshot = await db.ref('bookings').once('value');
+        const bookingsSnapshot = await readBudget.realtimeSnapshot(db.ref('bookings'));
         const bookings = bookingsSnapshot.val() || {};
         const bookingArray = Object.keys(bookings).map(key => ({ id: key, ...bookings[key] }));
 
@@ -508,11 +520,12 @@ router.get('/api/activity/recent', async (req, res) => {
       }
     } catch (error) {
       logError(error, 'Erro ao buscar atividades recentes:', { service: 'dashboard-routes' });
+      throw error;
     }
 
     res.json(activities);
   } catch (error) {
     logError(error, 'Erro ao buscar atividades recentes:', { service: 'dashboard-routes' });
-    res.status(500).json({ error: 'Erro interno do servidor' });
+    res.status(error.statusCode || 500).json({ error: error.statusCode === 503 ? 'Métricas temporariamente indisponíveis' : 'Erro interno do servidor' });
   }
 });

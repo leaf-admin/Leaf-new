@@ -6,6 +6,7 @@ import GeofenceApiClient from "@/src/services/geofence-api";
 class LeafApiService {
   constructor() {
     this.baseURL = config.api.baseUrl;
+    this.userPageCursors = new Map();
     this.timeoutMs = config.api.timeoutMs;
     this.supportOrchestratorBaseURL = config.supportOrchestrator?.baseUrl || "";
     this.supportOrchestratorTimeoutMs = config.supportOrchestrator?.timeoutMs || this.timeoutMs;
@@ -484,13 +485,40 @@ class LeafApiService {
   }
 
   async getUsers(params = {}) {
-    const query = new URLSearchParams();
-    Object.entries(params).forEach(([key, value]) => {
-      if (value !== undefined && value !== null && value !== "") {
-        query.append(key, String(value));
+    const page = Math.max(1, Number.parseInt(params.page, 10) || 1);
+    const entries = Object.entries(params).filter(([key, value]) =>
+      !["page", "cursor", "before", "pagination"].includes(key) && value !== undefined && value !== null && value !== ""
+    ).sort(([a], [b]) => a.localeCompare(b));
+    const key = JSON.stringify(entries);
+    const state = this.userPageCursors.get(key) || { anchors: new Map([[1, {}]]), last: null };
+    this.userPageCursors.delete(key);
+    this.userPageCursors.set(key, state);
+    if (this.userPageCursors.size > 8) this.userPageCursors.delete(this.userPageCursors.keys().next().value);
+    let anchor = page === 1 ? {} : state.anchors.get(page);
+    if (params.cursor || params.before) anchor = { ...(params.cursor ? { cursor: params.cursor } : {}), ...(params.before ? { before: params.before } : {}) };
+    if (!anchor && state.last?.page === page + 1 && state.last.prevCursor) anchor = { before: state.last.prevCursor };
+    if (!anchor && state.last?.page === page - 1 && state.last.nextCursor) anchor = { cursor: state.last.nextCursor };
+    const query = new URLSearchParams(entries);
+    query.set("page", String(page));
+    if (anchor && !params.searchTerm) {
+      query.set("pagination", "cursor");
+      Object.entries(anchor).forEach(([name, value]) => query.set(name, value));
+    }
+    const result = await this.request(`/users?${query.toString()}`);
+    if (result?.pagination?.mode === "keyset") {
+      state.anchors.set(page, anchor || {});
+      if (result.pagination.nextCursor) state.anchors.set(page + 1, { cursor: result.pagination.nextCursor });
+      while (state.anchors.size > 64) {
+        const oldest = [...state.anchors.keys()].find(value => value !== page && value !== page + 1 && value !== 1);
+        if (oldest === undefined) break;
+        state.anchors.delete(oldest);
       }
-    });
-    return this.request(`/users?${query.toString()}`);
+      state.last = { page, nextCursor: result.pagination.nextCursor, prevCursor: result.pagination.prevCursor };
+    } else {
+      state.anchors = new Map([[1, {}]]);
+      state.last = null;
+    }
+    return result;
   }
 
   async getUserDetails(userId) {

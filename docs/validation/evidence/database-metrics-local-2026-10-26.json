@@ -1,0 +1,62 @@
+{
+  "environment": "Private Firestore1.19.8 emulator, loopback,256MiB; no ADC/providers",
+  "queryRows": [
+    {
+      "historicalRides": 100,
+      "calendarDays": 31,
+      "bucketDocuments": 496,
+      "controlReads": 2,
+      "canonicalRideReads": 0
+    },
+    {
+      "historicalRides": 1000,
+      "calendarDays": 31,
+      "bucketDocuments": 496,
+      "controlReads": 2,
+      "canonicalRideReads": 0
+    },
+    {
+      "historicalRides": 10000,
+      "calendarDays": 31,
+      "bucketDocuments": 496,
+      "controlReads": 2,
+      "canonicalRideReads": 0
+    }
+  ],
+  "contention": [
+    {
+      "mode": "single-hot-shard",
+      "events": 64,
+      "concurrency": 4,
+      "transactionAttempts": 67,
+      "durationMs": 3528.1272910000007,
+      "p95Ms": 2017.958125
+    },
+    {
+      "mode": "balanced-16",
+      "events": 64,
+      "concurrency": 4,
+      "transactionAttempts": 64,
+      "durationMs": 183.3665000000001,
+      "p95Ms": 13.928375000000415
+    }
+  ],
+  "checks": [
+    "Canonical write + pending work atomic",
+    "Pending/missing readiness never returns fake zero",
+    "Replay and parallel project idempotent",
+    "Financial correction/cancellation subtract old contribution",
+    "Driver reassignment preserves one completed trip",
+    "Historical stats remain incomplete until attested",
+    "Sandbox context separate",
+    "Audit lifetime and distribution own-source buckets",
+    "Concurrent source update leaves newest contribution",
+    "Repeated read has zero database calls"
+  ],
+  "limitations": [
+    "Large read-model fixture seeded from synthetic oracle; lifecycle writer tested separately",
+    "496 bucket reads plus2 control reads per cold31-day window; missing docs may also be billed outside emulator",
+    "60s/process cache explicitly reports freshness",
+    "Does not measure production capacity, actual bill or deployed indexes"
+  ]
+}

@@ -3,6 +3,8 @@ const { logStructured } = require('../utils/logger');
 const { metrics } = require('../utils/prometheus-metrics');
 const { normalizeDriverStatus } = require('./dashboard-live-data-service');
 const bookingSearchIndex = require('./booking-search-index');
+const mapRegionalIndex = require('./map-regional-index');
+const BoundedTtlCache = require('../utils/bounded-ttl-cache');
 const {
   MAX_DEMAND_MARKUP_PERCENT,
   calculateDemandPressure
@@ -23,7 +25,12 @@ const DRIVER_TRAFFIC_LAYER_ENABLED = !['0', 'false', 'off', 'no'].includes(
 );
 const MAX_CELLS = Number.parseInt(process.env.H3_MAP_MAX_CELLS || '500', 10);
 const BBOX_MAX_SPAN_DEGREES = Number.parseFloat(process.env.H3_MAP_MAX_BBOX_SPAN_DEGREES || '5');
-const SEARCH_SCAN_MAX_KEYS = Number.parseInt(process.env.H3_MAP_SCAN_MAX_KEYS || '4000', 10);
+// Legacy (pre-regional-index) reads stay bounded, sized to the same 2000-row
+// ceiling as the driver layer. Above it the regional index must be enabled.
+const LEGACY_MAP_MAX_ROWS = 2000;
+const LEGACY_MAP_MAX_BYTES = 8 * 1024 * 1024;
+const SEARCH_SCAN_MAX_KEYS = LEGACY_MAP_MAX_ROWS;
+const MAX_REGIONAL_DRIVERS = 2000;
 // The map is polled every few seconds and each poll scanned the whole keyspace
 // for booking_search:*. Only the key list is reused for this long; the state of
 // every search is still read fresh on each request, so a new search shows up in
@@ -451,7 +458,8 @@ function extractRedisReplyValue(reply) {
 
 class H3MapService {
   constructor() {
-    this.cache = new Map();
+    this.cache = new BoundedTtlCache({ ttlMs: Math.max(1, CACHE_TTL_MS), maxEntries: 256, maxBytes: 8 * 1024 * 1024 });
+    this.inflight = new Map();
     this.searchKeysCache = null; // { keys, expiresAt }
     this.searchKeysInflight = null;
   }
@@ -463,7 +471,7 @@ class H3MapService {
     }
     if (!this.searchKeysInflight) {
       // Concurrent map requests share one scan instead of starting their own.
-      this.searchKeysInflight = bookingSearchIndex.listSearchKeys(redis, { maxKeys: SEARCH_SCAN_MAX_KEYS })
+      this.searchKeysInflight = bookingSearchIndex.listSearchKeys(redis, { maxKeys: SEARCH_SCAN_MAX_KEYS, bounded: true })
         .then((keys) => {
           this.searchKeysCache = { keys, expiresAt: Date.now() + SEARCH_KEYS_CACHE_TTL_MS };
           return keys;
@@ -483,25 +491,17 @@ class H3MapService {
       mode,
       includeEmpty ? '1' : '0',
       includeBoundary ? '1' : '0',
-      Number(visualPolicy?.version || 1)
+      Number(visualPolicy?.version || 1),
+      mapRegionalIndex.enabledReads() ? 'regional-v1' : 'legacy-bounded'
     ].join(':');
   }
 
   getCached(key) {
-    const cached = this.cache.get(key);
-    if (!cached) return null;
-    if (cached.expiresAt <= Date.now()) {
-      this.cache.delete(key);
-      return null;
-    }
-    return cached.value;
+    return this.cache.get(key);
   }
 
   setCached(key, value) {
-    this.cache.set(key, {
-      value,
-      expiresAt: Date.now() + CACHE_TTL_MS
-    });
+    if (CACHE_TTL_MS > 0) this.cache.set(key, value);
   }
 
   async getCells({
@@ -550,6 +550,14 @@ class H3MapService {
     }
 
     metrics.recordH3CellsCache(surface, mode, false);
+    if (this.inflight.has(cacheKey)) return this.inflight.get(cacheKey);
+    if (this.inflight.size >= 8) throw createHttpError(503, 'Mapa temporariamente ocupado; tente novamente');
+    const pending = this.computeCells({ redis, bbox, resolution, surface, mode, includeEmpty, includeBoundary, visualPolicy, cacheKey });
+    this.inflight.set(cacheKey, pending);
+    try { return await pending; } finally { this.inflight.delete(cacheKey); }
+  }
+
+  async computeCells({ redis, bbox, resolution, surface, mode, includeEmpty, includeBoundary, visualPolicy, cacheKey }) {
     const startedAt = Date.now();
     const snapshot = await this.collectSnapshot(redis, bbox);
 
@@ -586,15 +594,7 @@ class H3MapService {
     };
 
     this.setCached(
-      this.getCacheKey({
-        bbox,
-        resolution: payload.resolution,
-        surface,
-        mode,
-        includeEmpty,
-        includeBoundary,
-        visualPolicy
-      }),
+      cacheKey,
       payload
     );
 
@@ -642,7 +642,7 @@ class H3MapService {
           'BYBOX',
           geoWindow.widthKm,
           geoWindow.heightKm,
-          'km'
+          'km', 'COUNT', MAX_REGIONAL_DRIVERS + 1
         );
         if (Array.isArray(members)) {
           return members;
@@ -659,7 +659,7 @@ class H3MapService {
           geoWindow.centerLng,
           geoWindow.centerLat,
           geoWindow.radiusKm,
-          'km'
+          'km', 'COUNT', MAX_REGIONAL_DRIVERS + 1
         );
         if (Array.isArray(members)) {
           return members;
@@ -669,7 +669,8 @@ class H3MapService {
       }
     }
 
-    return redis.zrange('driver_locations', 0, -1).catch(() => []);
+    if (await redis.zcard('driver_locations') > MAX_REGIONAL_DRIVERS) throw createHttpError(503, 'GEO indisponível; fallback excede orçamento');
+    return redis.zrange('driver_locations', 0, MAX_REGIONAL_DRIVERS);
   }
 
   async collectEligibleDriversSet(redis, driverIds) {
@@ -705,6 +706,7 @@ class H3MapService {
           const rows = await pipeline.exec();
           const eligible = new Set();
           rows.forEach((row, index) => {
+            if (row[0]) throw row[0];
             const score = extractRedisReplyValue(row);
             if (score !== null && score !== undefined) {
               eligible.add(driverIds[index]);
@@ -712,12 +714,13 @@ class H3MapService {
           });
           return eligible;
         }
-      } catch (_error) {
-        // fallback para zrange
+      } catch (error) {
+        throw createHttpError(503, 'Falha no índice de elegibilidade', { cause: error.message });
       }
     }
 
-    const eligibleDriverIds = await redis.zrange('driver_locations_eligible', 0, -1).catch(() => []);
+    if (await redis.zcard('driver_locations_eligible') > MAX_REGIONAL_DRIVERS) throw createHttpError(503, 'Índice de elegibilidade excede orçamento legado');
+    const eligibleDriverIds = await redis.zrange('driver_locations_eligible', 0, MAX_REGIONAL_DRIVERS);
     return new Set(Array.isArray(eligibleDriverIds) ? eligibleDriverIds : []);
   }
 
@@ -728,13 +731,15 @@ class H3MapService {
       return [];
     }
 
+    if (driverIds.length > MAX_REGIONAL_DRIVERS) throw createHttpError(503, 'Região densa; aproxime o mapa');
     const eligibleSet = await this.collectEligibleDriversSet(redis, driverIds);
     let rows = [];
     if (typeof redis.pipeline === 'function') {
       const pipeline = redis.pipeline();
       driverIds.forEach((driverId) => {
         pipeline.geopos('driver_locations', driverId);
-        pipeline.hgetall(`driver:${driverId}`);
+        if (typeof pipeline.hmget === 'function') pipeline.hmget(`driver:${driverId}`, 'status', 'isOnline');
+        else pipeline.hgetall(`driver:${driverId}`);
       });
       rows = await pipeline.exec();
     }
@@ -744,12 +749,15 @@ class H3MapService {
       const driverId = driverIds[index];
       const geoReply = rows.length > 0
         ? rows[index * 2]
-        : await redis.geopos('driver_locations', driverId).catch(() => null);
+        : [null, await redis.geopos('driver_locations', driverId)];
       const hashReply = rows.length > 0
         ? rows[index * 2 + 1]
-        : await redis.hgetall(`driver:${driverId}`).catch(() => ({}));
+        : [null, await redis.hmget(`driver:${driverId}`, 'status', 'isOnline')];
       const geoResult = extractRedisReplyValue(geoReply);
-      const driverHash = extractRedisReplyValue(hashReply) || {};
+      if (geoReply[0]) throw geoReply[0];
+      if (hashReply[0]) throw hashReply[0];
+      const hashValue = extractRedisReplyValue(hashReply) || {};
+      const driverHash = Array.isArray(hashValue) ? { status: hashValue[0], isOnline: hashValue[1] } : hashValue;
       const coords = Array.isArray(geoResult) ? geoResult[0] : null;
       if (!coords || coords.length < 2) continue;
 
@@ -774,6 +782,24 @@ class H3MapService {
   }
 
   async collectOpenRequests(redis, bbox) {
+    if (mapRegionalIndex.enabledReads()) {
+      await mapRegionalIndex.assertReady(redis);
+      const candidates = await mapRegionalIndex.read(redis, 'search', bboxToGeoWindow(bbox));
+      if (!candidates.length) return [];
+      const pipeline = redis.pipeline();
+      candidates.forEach(row => pipeline.hmget(`booking_search:${row.bookingId}`, 'state', 'pickupLocation', 'createdAt'));
+      const replies = await pipeline.exec();
+      return candidates.flatMap((row, i) => {
+        if (replies[i][0]) throw replies[i][0];
+        const [state, pickup, at] = replies[i][1];
+        const pickupLocation = parseLocation(pickup);
+        const createdAt = normalizeNumber(at, Date.now());
+        return SEARCHABLE_STATES.has(state) && isPointInBBox(pickupLocation, bbox)
+          && Date.now() - createdAt <= OPEN_REQUEST_ACTIVE_WINDOW_MS
+          ? [{ bookingId: row.bookingId, pickupLocation, createdAt, isRecent: true, state, indexedAt: row.indexedAt }] : [];
+      });
+    }
+    if (await redis.scard(bookingSearchIndex.INDEX_KEY) > SEARCH_SCAN_MAX_KEYS) throw createHttpError(503, 'Busca do mapa excede orçamento legado');
     const searchKeys = await this.listOpenSearchKeys(redis);
     if (!Array.isArray(searchKeys) || searchKeys.length === 0) {
       return [];
@@ -840,8 +866,44 @@ class H3MapService {
     return requests;
   }
 
+  // Paged with HSCAN so a large hash never runs inside one Redis script.
+  async readLegacyActiveTrips(redis) {
+    if (await redis.hlen('bookings:active') > LEGACY_MAP_MAX_ROWS) {
+      throw createHttpError(503, 'Corridas ativas excedem orçamento legado do mapa');
+    }
+    const activeHash = {};
+    let cursor = '0';
+    let bytes = 0;
+    do {
+      const [nextCursor, entries] = await redis.hscan('bookings:active', cursor, 'COUNT', 500);
+      cursor = String(nextCursor);
+      for (let index = 0; index < entries.length; index += 2) {
+        bytes += Buffer.byteLength(entries[index]) + Buffer.byteLength(entries[index + 1] || '');
+        if (bytes > LEGACY_MAP_MAX_BYTES) throw createHttpError(503, 'Corridas ativas excedem orçamento legado do mapa');
+        activeHash[entries[index]] = entries[index + 1];
+      }
+    } while (cursor !== '0');
+    return activeHash;
+  }
+
   async collectActiveTrips(redis, bbox) {
-    const activeHash = await redis.hgetall('bookings:active').catch(() => ({}));
+    if (mapRegionalIndex.enabledReads()) {
+      await mapRegionalIndex.assertReady(redis);
+      const candidates = await mapRegionalIndex.read(redis, 'trip', bboxToGeoWindow(bbox));
+      if (!candidates.length) return [];
+      const pipeline = redis.pipeline();
+      candidates.forEach(row => pipeline.hmget(`booking:${row.bookingId}`, 'status', 'state', 'driverId'));
+      const replies = await pipeline.exec();
+      return candidates.flatMap((row, i) => {
+        if (replies[i][0]) throw replies[i][0];
+        const [status, state, driverId] = replies[i][1];
+        const canonical = normalizeBookingStatus(status, state);
+        return ACTIVE_TRIP_STATES.has(canonical) && !TERMINAL_TRIP_STATES.has(String(state).toUpperCase())
+          && isPointInBBox(row.location, bbox) ? [{ bookingId: row.bookingId, driverId,
+            location: row.location, status: canonical, indexedAt: row.indexedAt }] : [];
+      });
+    }
+    const activeHash = await this.readLegacyActiveTrips(redis);
     const entries = Object.entries(activeHash || {});
     if (entries.length === 0) {
       return [];
@@ -953,6 +1015,9 @@ class H3MapService {
       generatedAt: new Date().toISOString(),
       source: 'leaf_internal_supply_demand',
       paidProviderCalls: false,
+      readModel: { mode: mapRegionalIndex.enabledReads() ? 'regional-v1' : 'legacy-bounded',
+        maxObservedIndexAgeMs: mapRegionalIndex.enabledReads()
+          ? Math.max(0, ...snapshot.openRequests.concat(snapshot.activeTrips).map(row => Date.now() - row.indexedAt)) : null },
       refreshPolicy: {
         pollIntervalMs: CLIENT_REFRESH_INTERVAL_MS,
         staleAfterMs: CLIENT_STALE_AFTER_MS,

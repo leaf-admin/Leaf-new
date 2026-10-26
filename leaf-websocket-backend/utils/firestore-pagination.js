@@ -31,6 +31,7 @@ class FirestorePagination {
             const pageNum = Math.max(1, parseInt(page) || 1);
             const limitNum = Math.min(100, Math.max(1, parseInt(limit) || 50)); // Máximo 100 por página
             const offset = (pageNum - 1) * limitNum;
+            if (offset > 1000) throw new Error('Legacy pagination budget exceeded; use an explicit cursor');
 
             // Aplicar ordenação
             let orderedQuery = query.orderBy(orderBy, orderDirection);
@@ -110,6 +111,7 @@ class FirestorePagination {
             const pageNum = Math.max(1, parseInt(page) || 1);
             const limitNum = Math.min(100, Math.max(1, parseInt(limit) || 50));
             
+            if (pageNum * limitNum > 1000) throw new Error('Legacy pagination budget exceeded; use an explicit cursor');
             // Firebase Realtime DB não tem paginação nativa eficiente
             // Vamos buscar tudo e paginar em memória (não ideal, mas necessário)
             // TODO: Migrar para Firestore para ter paginação real

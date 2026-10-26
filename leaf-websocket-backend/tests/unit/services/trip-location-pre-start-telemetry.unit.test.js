@@ -93,6 +93,11 @@ describe('toll crossings recorded with the canonical trail', () => {
     const store = { ...meta };
     return {
       store,
+      eval: jest.fn(async (...args) => {
+        const patch = JSON.parse(args[9]);
+        Object.assign(store, patch, { bufferVersion: String(Number(args[7]) + 1) });
+        return [1, 1];
+      }),
       hgetall: jest.fn(async () => ({ ...store })),
       hset: jest.fn(async (_key, values) => { Object.assign(store, values); }),
       set: jest.fn().mockResolvedValue('OK'),

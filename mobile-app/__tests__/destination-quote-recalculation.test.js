@@ -2279,7 +2279,8 @@ describe("RobotaxiDestinationScreen", () => {
     fireEvent.press(screen.getByText("Leblon"));
 
     await waitFor(() => {
-      expect(screen.getByTestId("passenger-destination-confirm-button")).toBeTruthy();
+      // Quote/availability can still be settling while the button is visible.
+      expect(screen.getByTestId("passenger-destination-confirm-button")).toBeEnabled();
     });
     fireEvent.press(screen.getByTestId("passenger-destination-confirm-button"));
 

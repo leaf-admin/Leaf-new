@@ -45,7 +45,8 @@ describe('Ride lifecycle source contract audit', () => {
     expect(confirmPaymentHandler).toContain("socket.emit('paymentConfirmed'");
     expect(updateLocationHandler).toContain("socket.on('updateLocation'");
     expect(updateLocationHandler).toContain("io.to(`customer_${customerId}`).emit('driverLocation'");
-    expect(updateLocationHandler).toContain("'type', 'trip.location.v1'");
+    expect(updateLocationHandler).toContain('await appendTripLocation(');
+    expect(read('leaf-websocket-backend/utils/trip-location-stream-write.js')).toContain("'type', 'trip.location.v1'");
     expect(server).not.toContain('registerSocketUpdateTripLocationHandler');
     expect(server).not.toContain("socket.on('updateTripLocation'");
     expect(websocketManager).not.toContain('async updateTripLocation(');

@@ -1,0 +1,27 @@
+{
+  "environment": "Private Firestore/RTDB emulators and Redis Unix socket; synthetic data only, no Auth provider",
+  "receiptRows": 43,
+  "receiptDryRunPages": 5,
+  "metricsRows": 45,
+  "receiptParity": {
+    "count": 43,
+    "xor": "db414f97ee83604dc818f7f764cfcca209cbf1f8e70f500acd785a51792e2267",
+    "sum": "61f991c6293a9a2886a96d884deac8d5173ce93753209b6802a9abc2a1ada989"
+  },
+  "checks": [
+    "Dry-run writes nothing",
+    "Cursor resume/repeated batch idempotent",
+    "Numeric RTDB keys preserve database order",
+    "Canonical receipts unchanged",
+    "Legacy owner aliases included",
+    "Historical readiness never automatically set",
+    "Regional seed includes unindexed search and rejects generation switch",
+    "Trusted-new-user initializer preserves concurrent totals"
+  ],
+  "limitations": [
+    "No production adapter or credentials executed; apply library requires an explicit maintenance reference",
+    "Completed scan is not a readiness attestation; operator parity and homogeneous shadow writers are still required",
+    "Auth UserRecord is a synthetic fixture; real Admin Auth response path only verified by code/tests",
+    "Initializer only wired to newly-created users in backend custom OTP; other registration paths remain conservative until migrated"
+  ]
+}

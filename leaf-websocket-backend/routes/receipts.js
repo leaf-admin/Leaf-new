@@ -330,7 +330,7 @@ router.post(
 router.get('/api/receipts/user/:userId', authenticateSupport, requireReceiptUserScope, async (req, res) => {
     try {
         const { userId } = req.params;
-        const { limit = 10, offset = 0, role = 'customer' } = req.query;
+        const { limit = 10, offset = 0, role = 'customer', cursor = null, pagination = null } = req.query;
         const safeLimit = Math.min(50, Math.max(1, Number.parseInt(limit, 10) || 10));
         const safeOffset = Math.max(0, Number.parseInt(offset, 10) || 0);
 
@@ -358,7 +358,9 @@ router.get('/api/receipts/user/:userId', authenticateSupport, requireReceiptUser
             role,
             financialContext: persistenceScope.financialContext,
             limit: safeLimit,
-            offset: safeOffset
+            offset: safeOffset,
+            cursor,
+            pagination
         });
         const receipts = result.receipts.map((receipt) => buildStoredReceiptSummary(receipt, role));
 
@@ -369,7 +371,9 @@ router.get('/api/receipts/user/:userId', authenticateSupport, requireReceiptUser
             limit: result.limit,
             offset: result.offset,
             nextOffset: result.nextOffset,
-            hasMore: result.hasMore
+            hasMore: result.hasMore,
+            nextCursor: result.nextCursor ?? null,
+            pagination: result.pagination || 'legacy-offset'
         });
 
     } catch (error) {

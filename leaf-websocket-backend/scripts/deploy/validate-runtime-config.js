@@ -586,7 +586,7 @@ function main() {
     ? checkRequired(REQUIRED_PROD_PAYMENT_PROVIDER)
     : [];
   const warnings = [];
-  const blockers = driverIntroFeeConfigErrors(process.env);
+  const blockers = [...driverIntroFeeConfigErrors(process.env), ...require('../../utils/database-scale-config')(process.env)];
   if (nodeEnv === 'production' || process.env.CPF_REVIEW_ENABLED === 'true') {
     if (Buffer.byteLength(process.env.CPF_REVIEW_HMAC_KEY || '') < 32) {
       blockers.push('CPF review exige CPF_REVIEW_HMAC_KEY dedicada com pelo menos 32 bytes');

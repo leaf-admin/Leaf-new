@@ -108,6 +108,18 @@ describe('receipts routes auth', () => {
     });
   });
 
+  it('negotiates cursor pagination within the authenticated owner scope', async () => {
+    mockListStoredReceiptsByUser.mockResolvedValue({ receipts: [], total: null, limit: 10, offset: 0,
+      nextOffset: null, hasMore: true, nextCursor: 'next-v1', pagination: 'keyset' });
+    const response = await request(createApp()).get('/api/receipts/user/passenger_1?pagination=cursor&cursor=previous-v1')
+      .set('Authorization', 'Bearer passenger_1');
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({ total: null, pagination: 'keyset', nextCursor: 'next-v1' });
+    expect(mockListStoredReceiptsByUser).toHaveBeenCalledWith(expect.objectContaining({
+      userId: 'passenger_1', cursor: 'previous-v1', pagination: 'cursor'
+    }));
+  });
+
   it('keeps receipt health public and before dynamic ride routes', async () => {
     const response = await request(createApp()).get('/api/receipts/health');
 

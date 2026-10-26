@@ -1,0 +1,47 @@
+{
+  "environment": "Private Redis real Lua; immutable in-memory Firestore adapter; external imports blocked",
+  "cases": [
+    "XADD failure leaves no dedup marker; retry inserts once",
+    "Outage and crash after durable write preserve points; retry uses same chunk even after append",
+    "Expired ownership cannot trim; next owner confirms existing durable chunk",
+    "Sandbox remains in its sealed namespace; context mismatch rejected",
+    "Bounded finalization drains through existing worker; late points refresh summary",
+    "A fix arriving during summary write prevents finalization ACK and is drained later",
+    "At most four external chunk writes per service process; excess stays pending",
+    "Overlapping periodic cycles are rejected",
+    "Concurrent metadata updates retry CAS without losing the canonical point chain",
+    "Oversized fallback returns incomplete telemetry instead of reading an unlimited route",
+    "CAS retry followed by lost worker ACK replay preserves nullable identity and deduplicates once"
+  ],
+  "fairness": [
+    {
+      "total": 199,
+      "cycles": 1,
+      "distinctServed": 199
+    },
+    {
+      "total": 200,
+      "cycles": 1,
+      "distinctServed": 200
+    },
+    {
+      "total": 201,
+      "cycles": 2,
+      "distinctServed": 201
+    },
+    {
+      "total": 1000,
+      "cycles": 5,
+      "distinctServed": 1000
+    }
+  ],
+  "firestoreAdapter": {
+    "createsAttempted": 18,
+    "duplicateRecoveryReads": 2,
+    "durableDocuments": 16
+  },
+  "limitations": [
+    "No real Firebase latency/billing/query plan",
+    "No deployed host/device evidence or capacity claim"
+  ]
+}

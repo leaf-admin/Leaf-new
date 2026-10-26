@@ -63,6 +63,21 @@
         "customer/id",
         "driver/id"
       ]
+    },
+    "receipt_history_v1": {
+      "$namespace": {
+        "$context": {
+          "$role": {
+            "$owner": {
+              "items": {
+                ".indexOn": [
+                  "sortKey"
+                ]
+              }
+            }
+          }
+        }
+      }
     }
   }
 }

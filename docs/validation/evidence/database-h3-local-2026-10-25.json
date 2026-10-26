@@ -1,0 +1,106 @@
+{
+  "environment": "Private Redis, real regional writers and H3 reader; no credentials or external imports",
+  "rows": [
+    {
+      "outsideRecordsPerKind": 1000,
+      "regionalRecordsPerKind": 2,
+      "commands": 18,
+      "replyBytes": 1306,
+      "operations": [
+        "geosearch",
+        "mget",
+        "mget",
+        "zmscore",
+        "geosearch",
+        "geosearch",
+        "geopos",
+        "hmget",
+        "geopos",
+        "hmget",
+        "hmget",
+        "hmget",
+        "zmscore",
+        "zmscore",
+        "hmget",
+        "hmget",
+        "hmget",
+        "hmget"
+      ],
+      "beforeActiveTripsOnly": {
+        "commands": 1,
+        "replyBytes": 119187
+      }
+    },
+    {
+      "outsideRecordsPerKind": 10000,
+      "regionalRecordsPerKind": 2,
+      "commands": 18,
+      "replyBytes": 1306,
+      "operations": [
+        "geosearch",
+        "mget",
+        "mget",
+        "zmscore",
+        "geosearch",
+        "geosearch",
+        "hmget",
+        "hmget",
+        "zmscore",
+        "geopos",
+        "hmget",
+        "geopos",
+        "hmget",
+        "zmscore",
+        "hmget",
+        "hmget",
+        "hmget",
+        "hmget"
+      ],
+      "beforeActiveTripsOnly": {
+        "commands": 1,
+        "replyBytes": 1199187
+      }
+    },
+    {
+      "outsideRecordsPerKind": 100000,
+      "regionalRecordsPerKind": 2,
+      "commands": 18,
+      "replyBytes": 1306,
+      "operations": [
+        "geosearch",
+        "mget",
+        "mget",
+        "zmscore",
+        "geosearch",
+        "geosearch",
+        "hmget",
+        "hmget",
+        "geopos",
+        "hmget",
+        "geopos",
+        "hmget",
+        "zmscore",
+        "zmscore",
+        "hmget",
+        "hmget",
+        "hmget",
+        "hmget"
+      ],
+      "beforeActiveTripsOnly": {
+        "commands": 1,
+        "replyBytes": 12089187
+      }
+    }
+  ],
+  "checks": [
+    "Terminal filtered by canonical backend status",
+    "Movement removes old-region membership",
+    "Dataset-generation change blocks unready projection",
+    "Dense viewport fails explicitly instead of truncation",
+    "Legacy active hash rejects more than 200 rides"
+  ],
+  "limitations": [
+    "Outside fixtures populate spatial indexes only; only regional canonical records are read",
+    "Operation/byte evidence, not CPU latency/Santiago throughput or deployed index parity"
+  ]
+}

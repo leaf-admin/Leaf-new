@@ -29,6 +29,7 @@ jest.mock('../../../middleware/support-auth', () => ({
 jest.mock('../../../firebase-config', () => ({
   getRealtimeDB: () => ({
     ref: jest.fn((path) => ({
+      limitToFirst: jest.fn().mockReturnThis(),
       once: jest.fn().mockResolvedValue({
         val: () => (path === 'bookings' ? mockBookings : {}),
       }),
@@ -54,6 +55,7 @@ jest.mock('../../../utils/logger', () => ({
 }));
 
 const metricsRoutes = require('../../../routes/metrics');
+const originalLegacyMetrics = process.env.ENABLE_LEGACY_METRICS_FALLBACK;
 const originalEnableFinancialSimulator = process.env.ENABLE_FINANCIAL_SIMULATOR;
 
 function createApp() {
@@ -70,6 +72,7 @@ describe('metrics financial routes', () => {
   );
 
   beforeEach(() => {
+    process.env.ENABLE_LEGACY_METRICS_FALLBACK = 'true';
     delete process.env.ENABLE_FINANCIAL_SIMULATOR;
     mockBookings = {
       final_backend_snapshot: {
@@ -92,11 +95,20 @@ describe('metrics financial routes', () => {
   });
 
   afterAll(() => {
+    if (originalLegacyMetrics === undefined) delete process.env.ENABLE_LEGACY_METRICS_FALLBACK;
+    else process.env.ENABLE_LEGACY_METRICS_FALLBACK = originalLegacyMetrics;
     if (originalEnableFinancialSimulator === undefined) {
-      delete process.env.ENABLE_FINANCIAL_SIMULATOR;
+      process.env.ENABLE_LEGACY_METRICS_FALLBACK = 'true';
+    delete process.env.ENABLE_FINANCIAL_SIMULATOR;
     } else {
       process.env.ENABLE_FINANCIAL_SIMULATOR = originalEnableFinancialSimulator;
     }
+  });
+
+  it('fails explicitly without reading RTDB after modern metrics fail by default', async () => {
+    delete process.env.ENABLE_LEGACY_METRICS_FALLBACK;
+    const response = await request(createApp()).get('/api/metrics/financial/rides');
+    expect(response.status).toBe(503);
   });
 
   it('RTDB fallback for financial rides excludes completed rides without backend_final snapshot from money totals', async () => {

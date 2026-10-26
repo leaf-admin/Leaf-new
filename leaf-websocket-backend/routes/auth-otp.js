@@ -8,6 +8,15 @@ const { getBypassOtpCode, isOtpBypassPhone, isReviewOtpBypassEnabled } = require
 const router = express.Router();
 const OTP_TTL_SECONDS = 300;
 
+async function initializeNewReadModels(userRecord) {
+    try {
+        const result = await require('../services/new-user-read-models').initialize(userRecord);
+        if (result.failed) logger.warn('[READ_MODELS] New account initialization incomplete; conservative readers remain available');
+    } catch (_) {
+        logger.warn('[READ_MODELS] New account initialization deferred; no historical readiness assumed');
+    }
+}
+
 function isProductionRuntime() {
     return String(process.env.NODE_ENV || '').trim().toLowerCase() === 'production';
 }
@@ -173,6 +182,7 @@ router.post('/request-otp', async (req, res) => {
             } catch (authError) {
                 if (authError.code === 'auth/user-not-found') {
                     const newUser = await admin.auth().createUser({ phoneNumber: normalizedPhone });
+                    await initializeNewReadModels(newUser);
                     uid = newUser.uid;
                 } else {
                     throw authError;
@@ -275,6 +285,7 @@ router.post('/verify-otp', async (req, res) => {
             if (authError.code === 'auth/user-not-found') {
                 // If it doesn't exist, create it
                 const newUser = await admin.auth().createUser({ phoneNumber: normalizedPhone });
+                await initializeNewReadModels(newUser);
                 uid = newUser.uid;
             } else {
                 throw authError; // bubble up

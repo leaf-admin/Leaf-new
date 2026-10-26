@@ -1,4 +1,5 @@
 const h3 = require('h3-js');
+const mapRegionalIndex = require('./map-regional-index');
 
 const DEFAULT_RESOLUTION = Number.parseInt(process.env.PRICING_H3_RESOLUTION || '9', 10);
 const CELL_TTL_SECONDS = Math.max(
@@ -329,6 +330,7 @@ async function applyBookingSnapshot(redis, bookingLike, options = {}) {
 
   queueMetaTouch(pipeline, resolution, updatedAtIso);
   await pipeline.exec();
+  await mapRegionalIndex.indexTrip(redis, bookingLike);
   rememberWrite(lastBookingWrites, cacheKey, signature);
 }
 
@@ -338,6 +340,7 @@ async function clearBookingSnapshot(redis, bookingId, options = {}) {
   const bookingStateKey = buildBookingStateKey(resolution);
   const updatedAtIso = options.updatedAt || new Date().toISOString();
   lastBookingWrites.delete(`${resolution}:${bookingId}`);
+  await mapRegionalIndex.remove(redis, 'trip', bookingId);
   const previous = parseState(await redis.hget(bookingStateKey, bookingId));
   if (!previous) return;
 

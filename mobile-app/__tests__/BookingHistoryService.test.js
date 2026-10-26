@@ -21,6 +21,30 @@ describe('BookingHistoryService', () => {
 
   afterEach(() => jest.restoreAllMocks());
 
+  it('passes an opaque cursor through without converting it into an offset or an exact total', async () => {
+    mockGet.mockResolvedValue({ data: { success: true, receipts: [{ rideId: 'r1', grossAmount: 30 }],
+      total: null, hasMore: true, pagination: 'keyset', nextCursor: 'opaque-cursor-v1' } });
+    const service = require('../src/services/BookingHistoryService').default;
+    const first = await service.getBookingHistory('cursor_user', 'CUSTOMER', { first: 10 });
+    expect(first.pageInfo.endCursor).toBe('opaque-cursor-v1');
+    expect(first.totalCountKnown).toBe(false);
+    const next = await service.getBookingHistory('cursor_user', 'CUSTOMER', { first: 10, after: first.pageInfo.endCursor });
+    expect(mockGet).toHaveBeenLastCalledWith('/receipts/user/cursor_user', { params: {
+      role: 'customer', limit: 10, offset: 0, pagination: 'cursor', cursor: 'opaque-cursor-v1'
+    } });
+    expect(next.pageInfo.hasPreviousPage).toBe(true);
+  });
+
+  it('keeps the next cursor when local filters exclude all rows in the current page', async () => {
+    mockGet.mockResolvedValue({ data: { success: true, receipts: [{ rideId: 'r1', status: 'completed', grossAmount: 30 }],
+      total: null, hasMore: true, pagination: 'keyset', nextCursor: 'next-filtered-page' } });
+    const service = require('../src/services/BookingHistoryService').default;
+    const result = await service.getBookingHistory('filtered_user', 'CUSTOMER', { status: 'CANCELLED' });
+    expect(result.bookings).toEqual([]);
+    expect(result.pageInfo.endCursor).toBe('next-filtered-page');
+    expect(result.pageInfo.hasNextPage).toBe(true);
+  });
+
   describe('short-lived activity cache', () => {
     const response = { data: { success: true, receipts: [{ receiptId: 'receipt_cache', rideId: 'ride_cache', grossAmount: 22.4, driverNetAmount: 18.9 }], total: 1, hasMore: false } };
 
@@ -78,7 +102,7 @@ describe('BookingHistoryService', () => {
         ['user_cache', 'CUSTOMER', { forceRefresh: true }],
       ]) await service.getBookingHistory(uid, role, options);
       expect(mockGet).toHaveBeenCalledTimes(9);
-      expect(mockGet).toHaveBeenLastCalledWith('/receipts/user/user_cache', { params: { role: 'customer', limit: 50, offset: 0 } });
+      expect(mockGet).toHaveBeenLastCalledWith('/receipts/user/user_cache', { params: { role: 'customer', limit: 50, offset: 0, pagination: 'cursor' } });
     });
 
     it('does not cache failures and releases the pending request for retry', async () => {
@@ -142,7 +166,8 @@ describe('BookingHistoryService', () => {
       params: {
         role: 'customer',
         limit: 20,
-        offset: 0
+        offset: 0,
+        pagination: 'cursor'
       }
     });
     expect(result.success).toBe(true);
@@ -282,7 +307,8 @@ describe('BookingHistoryService', () => {
       params: {
         role: 'driver',
         limit: 50,
-        offset: 10
+        offset: 10,
+        pagination: 'cursor'
       }
     });
     expect(result.success).toBe(true);
