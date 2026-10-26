@@ -1,24 +1,8 @@
 name: Leaf Release Gate
 
 on:
+  # These checks are required by Protect main, so every PR must emit them.
   pull_request:
-    paths:
-      - 'leaf-websocket-backend/**'
-      - 'mobile-app/**'
-      - 'leaf-dashboard-js/**'
-      - 'observability/**'
-      - 'docker-compose.observability.yml'
-      - 'package.json'
-      - 'package-lock.json'
-      - 'scripts/maintenance/security/**'
-      - 'scripts/validation/**'
-      - 'scripts/tests/firestore-rules-emulator.cjs'
-      - 'scripts/tests/firebase-rtdb-storage-rules-emulator.cjs'
-      - 'config/firebase/**'
-      - 'services/support-agent-orchestrator/package.json'
-      - 'AGENTS.md'
-      - 'PROJECT_RULES.md'
-      - '.github/workflows/eas-build.yml'
   workflow_dispatch:
     inputs:
       platform:
