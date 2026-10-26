@@ -195,12 +195,15 @@ class BookingHistoryService {
             const normalizedUserType = String(userType || 'CUSTOMER').toUpperCase();
             const role = normalizedUserType === 'DRIVER' ? 'driver' : 'customer';
             const offset = Number.isFinite(Number(after)) ? Number(after) : 0;
+            const cursor = after && !Number.isFinite(Number(after)) ? String(after) : null;
 
             const response = await this.axiosInstance.get(`/receipts/user/${encodeURIComponent(userId)}`, {
                 params: {
                     role,
                     limit: first,
-                    offset
+                    offset,
+                    pagination: 'cursor',
+                    ...(cursor ? { cursor } : {})
                 }
             });
 
@@ -217,10 +220,11 @@ class BookingHistoryService {
                 bookings: filteredBookings,
                 pageInfo: {
                     hasNextPage: Boolean(response?.data?.hasMore),
-                    hasPreviousPage: offset > 0,
-                    startCursor: filteredBookings.length > 0 ? String(offset) : null,
-                    endCursor: filteredBookings.length > 0
-                        ? String(response?.data?.nextOffset ?? offset + receipts.length)
+                    hasPreviousPage: Boolean(cursor) || offset > 0,
+                    startCursor: receipts.length > 0 ? String(after || 0) : null,
+                    endCursor: receipts.length > 0
+                        ? response?.data?.pagination === 'keyset' ? response.data.nextCursor
+                            : String(response?.data?.nextOffset ?? offset + receipts.length)
                         : null
                 },
                 totalCount: Number(response?.data?.total ?? filteredBookings.length),

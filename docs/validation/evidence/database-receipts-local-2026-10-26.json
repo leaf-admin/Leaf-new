@@ -1,0 +1,37 @@
+{
+  "environment": "Private RTDB emulator4.11.2, cached JAR,256MiB heap, loopback, deny rules plus declared index; no ADC/provider access",
+  "rows": [
+    {
+      "totalHistory": 10,
+      "returned": 10,
+      "summariesRead": 10,
+      "readRequests": 3,
+      "replyBytes": 11051
+    },
+    {
+      "totalHistory": 1000,
+      "returned": 10,
+      "summariesRead": 11,
+      "readRequests": 3,
+      "replyBytes": 11822
+    },
+    {
+      "totalHistory": 10000,
+      "returned": 10,
+      "summariesRead": 11,
+      "readRequests": 3,
+      "replyBytes": 11831
+    }
+  ],
+  "checks": [
+    "All10000 IDs paged once including equal dates",
+    "Date correction updates same item and invalidates old cursor",
+    "Owner change refused; concurrent first insert admits one identity",
+    "Sandbox remains in exact context",
+    "Legacy reads reject201 records"
+  ],
+  "limitations": [
+    "Emulator query/response evidence; no billing/latency or production index parity evidence",
+    "Large fixture seeds summary projection;10 receipts exercise canonical+projection atomic writer"
+  ]
+}

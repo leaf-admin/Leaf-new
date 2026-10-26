@@ -13,6 +13,9 @@ const { logger } = require('../utils/logger');
 const crypto = require('crypto');
 const PDFDocument = require('pdfkit');
 const PaymentService = require('./payment-service');
+const receiptHistoryIndex = require('./receipt-history-index');
+// Legacy (pre-index) listing reads at most this many recent receipts.
+const LEGACY_RECEIPT_WINDOW = 200;
 const { acceptedContext } = require('./driver-intro-fee-service');
 const {
     resolveFinancialContext
@@ -886,7 +889,9 @@ class ReceiptService {
         role = 'customer',
         financialContext,
         limit = 10,
-        offset = 0
+        offset = 0,
+        cursor = null,
+        pagination = null
     } = {}) {
         if (!firebaseDb) {
             const error = new Error('Serviço de database não disponível');
@@ -923,13 +928,36 @@ class ReceiptService {
         const ownerPath = role === 'driver' ? 'driver/id' : 'customer/id';
         const safeLimit = Math.min(50, Math.max(1, Number.parseInt(limit, 10) || 10));
         const safeOffset = Math.max(0, Number.parseInt(offset, 10) || 0);
+        if (pagination === 'cursor' || cursor) {
+            const indexed = await receiptHistoryIndex.readPage({ db: firebaseDb, scope: persistenceScope,
+                role, userId: normalizedUserId, limit: safeLimit, cursor,
+                ownerOf: this.resolveStoredReceiptOwnerId.bind(this), assertRecord: assertStoredRecordMatchesScope });
+            if (indexed) {
+                if (safeOffset) throw Object.assign(new Error('Atualize o histórico para usar paginação por cursor'), { statusCode: 409 });
+                return indexed;
+            }
+        }
+        if (safeOffset >= LEGACY_RECEIPT_WINDOW) {
+            throw Object.assign(new Error('Histórico requer migração para continuar'), { statusCode: 503, code: 'RECEIPT_HISTORY_MIGRATION_REQUIRED' });
+        }
+        // Equal owner values are ordered by key, and ride keys carry their
+        // creation time (booking_<ms>_...). The last keys are the newest rides,
+        // so the legacy path serves the recent window instead of failing once a
+        // driver passes the window. Older pages wait for the cursor index.
         const snapshot = await firebaseDb
             .ref(persistenceScope.collections.receipts)
             .orderByChild(ownerPath)
             .equalTo(normalizedUserId)
+            .limitToLast(LEGACY_RECEIPT_WINDOW + 1)
             .once('value');
 
-        const receipts = Object.entries(snapshot.val() || {})
+        const rawReceipts = snapshot.val() || {};
+        if (Buffer.byteLength(JSON.stringify(rawReceipts)) > 2 * 1024 * 1024) {
+            throw Object.assign(new Error('Histórico requer migração para continuar'), { statusCode: 503, code: 'RECEIPT_HISTORY_MIGRATION_REQUIRED' });
+        }
+        const windowTruncated = Object.keys(rawReceipts).length > LEGACY_RECEIPT_WINDOW;
+
+        const sortedReceipts = Object.entries(rawReceipts)
             .map(([rideId, receipt]) => ({
                 ...(receipt || {}),
                 rideId: receipt?.rideId || rideId
@@ -951,15 +979,21 @@ class ReceiptService {
             .sort((left, right) =>
                 this.resolveStoredReceiptTimestamp(right) - this.resolveStoredReceiptTimestamp(left)
             );
+        // The extra record only signals that older receipts exist.
+        const receipts = windowTruncated ? sortedReceipts.slice(0, LEGACY_RECEIPT_WINDOW) : sortedReceipts;
         const page = receipts.slice(safeOffset, safeOffset + safeLimit);
 
         return {
             receipts: page,
-            total: receipts.length,
+            // Unknown beyond the recent window; clients treat null as unknown.
+            total: windowTruncated ? null : receipts.length,
             limit: safeLimit,
             offset: safeOffset,
             nextOffset: safeOffset + page.length,
             hasMore: safeOffset + page.length < receipts.length,
+            ...(windowTruncated ? { historyWindow: 'recent', historyWindowSize: LEGACY_RECEIPT_WINDOW } : {}),
+            nextCursor: null,
+            pagination: 'legacy-offset',
             financialNamespace: requestedContext.namespace
         };
     }
@@ -1001,6 +1035,29 @@ class ReceiptService {
                 savedAt: new Date().toISOString(),
                 savedTimestamp: Date.now()
             };
+
+            if (receiptHistoryIndex.enabledWrites()) {
+                const options = { ownerOf: this.resolveStoredReceiptOwnerId.bind(this), timestampOf: this.resolveStoredReceiptTimestamp.bind(this) };
+                const previous = (await firebaseDb.ref(`${persistenceScope.collections.receipts}/${receipt.rideId}`).once('value')).val();
+                if (previous) {
+                    assertStoredRecordMatchesScope(previous, persistenceScope);
+                    for (const role of ['customer', 'driver']) {
+                        if (options.ownerOf(previous, role) !== options.ownerOf(receiptData, role)) {
+                            throw new Error('Alteração de proprietário do recibo requer conciliação');
+                        }
+                    }
+                }
+                await receiptHistoryIndex.claimIdentity(firebaseDb, receiptData, persistenceScope, options);
+                await firebaseDb.ref().update({
+                    [`${persistenceScope.collections.receipts}/${receipt.rideId}`]: receiptData,
+                    [`${persistenceScope.collections.bookings}/${receipt.rideId}/receipt`]: {
+                        receiptId: receipt.receiptId, hash: receipt.hash, savedAt: receiptData.savedAt,
+                        financialContext, financialNamespace: financialContext.namespace, financialContextId: financialContext.contextId
+                    },
+                    ...receiptHistoryIndex.buildUpdates(receiptData, persistenceScope, options)
+                });
+                return true;
+            }
 
             // Salvar na coleção receipts
             await firebaseDb
