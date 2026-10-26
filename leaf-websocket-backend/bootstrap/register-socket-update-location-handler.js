@@ -26,8 +26,36 @@ const {
     enforceDriverOnlineCohort
 } = require('../services/driver-online-cohort-guard-service');
 const safetySignalService = require('../services/safety-signal-service');
+const { readLocationBooking } = require('../utils/active-trip-location-snapshot');
 
 const ENABLE_ACTIVE_TRIP_INDEX = process.env.ENABLE_ACTIVE_TRIP_INDEX !== 'false';
+const ACTIVE_TRIP_RECOVERY_INTERVAL_SECONDS = 30;
+const ACTIVE_TRIP_RECOVERY_MAX_ACTIVE_RIDES = 2000;
+
+// Rare repair path for a missing active-trip lease. One attempt per driver per
+// interval keeps it off the per-fix hot path; HSCAN pages bound each call.
+async function recoverActiveTripFromActiveBookings(redis, driverId) {
+    if (typeof redis.hscan !== 'function') return null;
+    const gate = await redis.set(`active_trip_recovery:${driverId}`, '1', 'NX', 'EX', ACTIVE_TRIP_RECOVERY_INTERVAL_SECONDS);
+    if (!gate) return null;
+    if (await redis.hlen('bookings:active') > ACTIVE_TRIP_RECOVERY_MAX_ACTIVE_RIDES) return null;
+    let cursor = '0';
+    do {
+        const [nextCursor, entries] = await redis.hscan('bookings:active', cursor, 'COUNT', 200);
+        cursor = String(nextCursor);
+        for (let index = 0; index < entries.length; index += 2) {
+            try {
+                const booking = JSON.parse(entries[index + 1]);
+                if (String(booking?.driverId || '') === String(driverId)) {
+                    return { tripId: String(entries[index]), customerId: booking?.customerId || booking?.customer || null };
+                }
+            } catch (_error) {
+                // Malformed legacy entries are skipped; the booking hash stays authoritative.
+            }
+        }
+    } while (cursor !== '0');
+    return null;
+}
 const ENABLE_TRIP_LOCATION_STREAM = process.env.ENABLE_TRIP_LOCATION_STREAM !== 'false';
 const TRIP_LOCATION_OUT_OF_ORDER_WINDOW = Number.parseInt(process.env.TRIP_LOCATION_OUT_OF_ORDER_WINDOW || '15', 10);
 const TRIP_LOCATION_DEDUP_TTL_SECONDS = Number.parseInt(process.env.TRIP_LOCATION_DEDUP_TTL_SECONDS || String(6 * 60 * 60), 10);
@@ -693,30 +721,46 @@ function registerSocketUpdateLocationHandler({
                     // inconclusivo, tentar novamente antes do fallback backend.
                     let indexedTrip = canonicalActiveTrip || { tripId: null, customerId: null };
                     if (!activeTripIndexResolved && ENABLE_ACTIVE_TRIP_INDEX) {
-                        indexedTrip = await resolveActiveTripForDriver(redis, driverId)
-                            || { tripId: null, customerId: null };
+                        try {
+                            indexedTrip = await resolveActiveTripForDriver(redis, driverId)
+                                || { tripId: null, customerId: null };
+                        } catch (error) {
+                            error.code = 'ACTIVE_TRIP_RECOVERY_REQUIRED';
+                            throw error;
+                        }
                     }
                     activeTripId = indexedTrip.tripId || null;
 
-                    // Fallback sem KEYS: usar hash de corridas ativas se índice ainda não estiver populado
-                    if (!activeTripId) {
-                        const activeBookings = await redis.hgetall('bookings:active');
-                        for (const [bookingId, bookingRaw] of Object.entries(activeBookings || {})) {
-                            try {
-                                const bookingData = JSON.parse(bookingRaw);
-                                if (String(bookingData?.driverId || '') === String(driverId)) {
-                                    activeTripId = bookingId;
-                                    customerId = bookingData?.customerId || bookingData?.customer || null;
-                                    break;
-                                }
-                            } catch (parseError) {
-                                continue;
-                            }
+                    // The lease is missing although the driver is in a trip. Repair
+                    // it from the backend ride list, at most once per interval per
+                    // driver, so the passenger does not lose the car until the end
+                    // of the ride. The booking is validated below before any use.
+                    if (!activeTripId && ENABLE_ACTIVE_TRIP_INDEX) {
+                        const recoveredTrip = await recoverActiveTripFromActiveBookings(redis, driverId)
+                            .catch((error) => {
+                                logStructured('warn', 'updateLocation: recuperação do vínculo de corrida falhou', {
+                                    service: 'websocket', operation: sourceEvent, driverId, error: error.message
+                                });
+                                return null;
+                            });
+                        if (recoveredTrip?.tripId) {
+                            activeTripId = recoveredTrip.tripId;
+                            logStructured('warn', 'updateLocation: vínculo de corrida recuperado da lista de corridas ativas', {
+                                service: 'websocket', operation: sourceEvent, driverId, bookingId: activeTripId
+                            });
                         }
+                    }
+                    if (!activeTripId) {
+                        const recoveryError = new Error('Vínculo da corrida aguardando recuperação');
+                        recoveryError.code = 'ACTIVE_TRIP_RECOVERY_REQUIRED';
+                        throw recoveryError;
                     }
 
                     if (activeTripId) {
-                        const bookingData = await redis.hgetall(`booking:${activeTripId}`);
+                        const bookingData = await readLocationBooking(redis, activeTripId).catch((error) => {
+                            error.code = 'ACTIVE_TRIP_RECOVERY_REQUIRED';
+                            throw error;
+                        });
                         const bookingDriverId = bookingData?.driverId;
                         const bookingStatus = String(bookingData?.status || '').toUpperCase();
                         const bookingState = String(bookingData?.state || '').toUpperCase();
@@ -775,6 +819,12 @@ function registerSocketUpdateLocationHandler({
                             activeTripId = null;
                             customerId = null;
                         }
+                    }
+
+                    if (!activeTripId) {
+                        const recoveryError = new Error('Vínculo da corrida não confirmado pelo backend');
+                        recoveryError.code = 'ACTIVE_TRIP_RECOVERY_REQUIRED';
+                        throw recoveryError;
                     }
 
                     if (activeTripId && seqIsValid) {
@@ -1004,6 +1054,19 @@ function registerSocketUpdateLocationHandler({
                 } catch (locationError) {
                     activeTripId = null;
                     customerId = null;
+                    if (locationError.code === 'ACTIVE_TRIP_RECOVERY_REQUIRED') {
+                        const recoveryPayload = {
+                            success: false, retryable: true,
+                            code: 'ACTIVE_TRIP_RECOVERY_REQUIRED',
+                            message: 'Aguardando confirmação da corrida para sincronizar o trajeto',
+                            driverId, seq: seqIsValid ? parsedSeq : null
+                        };
+                        // Position/presence was saved, but this fix has NOT been
+                        // persisted for a trip. Do not acknowledge its batch as
+                        // delivered; the authenticated client can keep/retry it.
+                        socket.emit('locationUpdated', recoveryPayload);
+                        return recoveryPayload;
+                    }
                     logStructured('warn', 'Erro ao buscar booking ativo para enviar localização', {
                         service: 'websocket',
                         operation: 'updateLocation',

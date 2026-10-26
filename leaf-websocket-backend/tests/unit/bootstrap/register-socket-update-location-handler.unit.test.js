@@ -683,6 +683,90 @@ describe('registerSocketUpdateLocationHandler', () => {
     );
   });
 
+  it.each([100, 1000, 10000])('never scans %i unrelated rides when the binding resolver is unavailable', async (count) => {
+    activeTripIndex.resolveActiveTripForDriver.mockRejectedValue(new Error('synthetic index failure'));
+    const { handlers, redis, socket, roomEmit, enforceDailyKYCForOnline } = createHarness();
+    redis.hgetall.mockImplementation(async (key) => {
+      if (key === 'bookings:active') throw new Error(`Forbidden global read of ${count} rides`);
+      return { isOnline: 'true', dispatchEligible: 'false' };
+    });
+    await handlers.updateLocationBatch({ bookingId: 'client_cannot_select_ride', locations: [
+      { lat: -22.91, lng: -43.17, seq: 1, capturedAt: 1710000000000 }
+    ] });
+    expect(activeTripIndex.resolveActiveTripForDriver).toHaveBeenCalledTimes(2);
+    expect(redis.hgetall).not.toHaveBeenCalledWith('bookings:active');
+    expect(redis.xadd).not.toHaveBeenCalled();
+    expect(redis.set).not.toHaveBeenCalledWith(expect.stringContaining('trip_loc_dedupe:'), expect.anything(), expect.anything(), expect.anything(), expect.anything());
+    expect(roomEmit).not.toHaveBeenCalled();
+    expect(enforceDailyKYCForOnline).not.toHaveBeenCalled();
+    expect(socket.emit).toHaveBeenCalledWith('locationBatchUpdated', expect.objectContaining({
+      success: false, acceptedCount: 0, results: [expect.objectContaining({ code: 'ACTIVE_TRIP_RECOVERY_REQUIRED' })]
+    }));
+  });
+
+  it('repairs a missing lease from the active ride list, once per interval', async () => {
+    activeTripIndex.resolveActiveTripForDriver.mockRejectedValueOnce(new Error('recovering')).mockResolvedValue(null);
+    const { handlers, redis, socket } = createHarness();
+    const booking = { bookingId: 'trip_x', driverId: 'driver_1', customerId: 'owner', status: 'IN_PROGRESS' };
+    redis.hlen = jest.fn().mockResolvedValue(2);
+    redis.hscan = jest.fn().mockResolvedValue(['0', [
+      'trip_other', JSON.stringify({ driverId: 'driver_2' }),
+      'trip_x', JSON.stringify({ driverId: 'driver_1', customerId: 'owner' })
+    ]]);
+    redis.hgetall.mockImplementation(async key => key === 'booking:trip_x' ? booking : {});
+    await handlers.updateLocation({ lat: -22.91, lng: -43.17, seq: 1, capturedAt: 1710000000000 });
+    expect(redis.set).toHaveBeenCalledWith('active_trip_recovery:driver_1', '1', 'NX', 'EX', 30);
+    expect(redis.hgetall).not.toHaveBeenCalledWith('bookings:active');
+    expect(activeTripIndex.setActiveTripForDriver).toHaveBeenCalledWith(redis, 'driver_1', 'trip_x', 'owner');
+    expect(redis.xadd).toHaveBeenCalledTimes(1);
+    expect(socket.emit).toHaveBeenCalledWith('locationUpdated', expect.objectContaining({ success: true, tripId: 'trip_x' }));
+  });
+
+  it.each([
+    ['inside the retry interval', { gate: null, activeRides: 2 }],
+    ['above the active ride budget', { gate: 'OK', activeRides: 5000 }]
+  ])('does not read the active ride list %s', async (_label, { gate, activeRides }) => {
+    activeTripIndex.resolveActiveTripForDriver.mockRejectedValueOnce(new Error('recovering')).mockResolvedValue(null);
+    const { handlers, redis, socket } = createHarness();
+    redis.set.mockImplementation(async key => key.startsWith('active_trip_recovery:') ? gate : 'OK');
+    redis.hlen = jest.fn().mockResolvedValue(activeRides);
+    redis.hscan = jest.fn();
+    await handlers.updateLocation({ lat: -22.91, lng: -43.17, seq: 1, capturedAt: 1710000000000 });
+    expect(redis.hscan).not.toHaveBeenCalled();
+    expect(redis.xadd).not.toHaveBeenCalled();
+    expect(socket.emit).toHaveBeenCalledWith('locationUpdated', expect.objectContaining({ code: 'ACTIVE_TRIP_RECOVERY_REQUIRED' }));
+  });
+
+  it('reads only the bounded booking fields and resumes on the next confirmed binding', async () => {
+    activeTripIndex.resolveActiveTripForDriver.mockRejectedValueOnce(new Error('recovering'))
+      .mockResolvedValueOnce(null).mockResolvedValue({ tripId: 'confirmed', customerId: 'owner' });
+    const { handlers, redis, socket } = createHarness();
+    const booking = { bookingId: 'confirmed', driverId: 'driver_1', customerId: 'owner', status: 'IN_PROGRESS', financialNamespace: 'sandbox' };
+    redis.hmget = jest.fn(async (_key, ...fields) => fields.map(field => booking[field] ?? null));
+    const point = { lat: -22.91, lng: -43.17, seq: 1, capturedAt: 1710000000000 };
+    await handlers.updateLocation(point);
+    expect(redis.xadd).not.toHaveBeenCalled();
+    await handlers.updateLocation(point);
+    expect(redis.xadd).toHaveBeenCalledTimes(1);
+    expect(redis.hmget.mock.calls[0][0]).toBe('booking:confirmed');
+    expect(redis.hmget.mock.calls[0]).not.toContain('routePlan');
+    expect(redis.hgetall).not.toHaveBeenCalledWith('booking:confirmed');
+    expect(socket.emit).toHaveBeenCalledWith('locationUpdated', expect.objectContaining({ success: true, tripId: 'confirmed' }));
+  });
+
+  it.each([
+    { driverId: 'other_driver', status: 'IN_PROGRESS' },
+    { driverId: 'driver_1', status: 'COMPLETED' }
+  ])('does not acknowledge or route GPS for an invalid backend booking %j', async (booking) => {
+    activeTripIndex.resolveActiveTripForDriver.mockResolvedValue({ tripId: 'stale', customerId: 'other_customer' });
+    const { handlers, redis, socket, roomEmit } = createHarness();
+    redis.hgetall.mockImplementation(async key => key === 'booking:stale' ? booking : {});
+    await handlers.updateLocation({ lat: -22.91, lng: -43.17, seq: 1 });
+    expect(redis.xadd).not.toHaveBeenCalled();
+    expect(roomEmit).not.toHaveBeenCalled();
+    expect(socket.emit).toHaveBeenCalledWith('locationUpdated', expect.objectContaining({ success: false, retryable: true }));
+  });
+
   describe('safe stream retention', () => {
     const { trimTripLocationStreamSafely } = registerSocketUpdateLocationHandler.__private__;
 

@@ -1,0 +1,75 @@
+{
+  "environment": "Private local Redis; synthetic records; no Firebase or production credentials",
+  "rows": [
+    {
+      "unrelatedActiveRides": 100,
+      "missing": [
+        {
+          "command": "eval",
+          "bytes": 7
+        }
+      ],
+      "recovered": [
+        {
+          "command": "eval",
+          "bytes": 11
+        },
+        {
+          "command": "hmget",
+          "bytes": 110
+        },
+        {
+          "command": "eval",
+          "bytes": 1
+        }
+      ]
+    },
+    {
+      "unrelatedActiveRides": 1000,
+      "missing": [
+        {
+          "command": "eval",
+          "bytes": 7
+        }
+      ],
+      "recovered": [
+        {
+          "command": "eval",
+          "bytes": 16
+        },
+        {
+          "command": "hmget",
+          "bytes": 110
+        },
+        {
+          "command": "eval",
+          "bytes": 1
+        }
+      ]
+    },
+    {
+      "unrelatedActiveRides": 10000,
+      "missing": [
+        {
+          "command": "eval",
+          "bytes": 7
+        }
+      ],
+      "recovered": [
+        {
+          "command": "eval",
+          "bytes": 16
+        },
+        {
+          "command": "hmget",
+          "bytes": 110
+        },
+        {
+          "command": "eval",
+          "bytes": 1
+        }
+      ]
+    }
+  ],
+  "limitations": "Command/byte and lease recovery evidence; not app throughput or deployed-state evidence"
+}
