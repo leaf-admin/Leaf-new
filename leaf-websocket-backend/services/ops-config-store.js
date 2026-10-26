@@ -7,9 +7,12 @@
 const { logStructured } = require('../utils/logger');
 
 const COLLECTION = 'operational_configs';
+// `json` encoding stores the config serialized: geofence polygons are nested
+// arrays, which Firestore rejects. City activation stays as plain fields
+// because the waitlist reads that document directly.
 const CONFIGS = Object.freeze({
-  cityActivation: { rtdbPath: 'operations/geography/cityActivation', docId: 'city_activation' },
-  geofenceAdmin: { rtdbPath: 'operations/geography/geofenceConfig', docId: 'geofence_admin' }
+  cityActivation: { rtdbPath: 'operations/geography/cityActivation', docId: 'city_activation', encoding: 'fields' },
+  geofenceAdmin: { rtdbPath: 'operations/geography/geofenceConfig', docId: 'geofence_admin', encoding: 'json' }
 });
 // Bookkeeping fields from the one-off legacy import; never part of the config.
 const META_FIELDS = ['source', 'importedAt'];
@@ -33,14 +36,21 @@ function clean(value) {
 async function readFirestore(firebaseConfig, key) {
   const firestore = firebaseConfig?.getFirestore?.();
   if (!firestore) throw new Error('Firestore indisponível para configuração operacional');
-  const snapshot = await firestore.collection(COLLECTION).doc(definition(key).docId).get();
-  return snapshot.exists ? clean(snapshot.data()) : null;
+  const { docId, encoding } = definition(key);
+  const snapshot = await firestore.collection(COLLECTION).doc(docId).get();
+  if (!snapshot.exists) return null;
+  const data = snapshot.data();
+  return encoding === 'json' ? clean(JSON.parse(data.json)) : clean(data);
 }
 
 async function writeFirestore(firebaseConfig, key, value) {
   const firestore = firebaseConfig?.getFirestore?.();
   if (!firestore) throw new Error('Firestore indisponível para configuração operacional');
-  await firestore.collection(COLLECTION).doc(definition(key).docId).set(clean(value));
+  const { docId, encoding } = definition(key);
+  const body = encoding === 'json'
+    ? { schema: 1, encoding: 'json', json: JSON.stringify(clean(value)), updatedAt: new Date().toISOString() }
+    : clean(value);
+  await firestore.collection(COLLECTION).doc(docId).set(body);
 }
 
 // Returns the raw stored config (null when absent) and where it came from.

@@ -94,4 +94,19 @@ describe('ops config store (RTDB exit, domain 2)', () => {
     expect(applied.results[1]).toEqual({ key: 'geofenceAdmin', rtdbPresent: true, equal: true, written: true });
     expect(fake.docs.get(CITY_DOC)).toMatchObject({ source: 'legacy_rtdb_import' }); // equal config is left untouched
   });
+
+  it('stores geofence polygons (nested arrays) as JSON and reads them back intact', async () => {
+    process.env.ENABLE_OPS_CONFIG_FIRESTORE_WRITES = 'true';
+    process.env.ENABLE_OPS_CONFIG_FIRESTORE_READS = 'true';
+    const fake = fakeConfig();
+    const geofence = { enabled: true, region: { type: 'Polygon', coordinates: [[[-43.2, -22.9], [-43.1, -22.9], [-43.1, -22.8]]] } };
+    await store.persist(fake, 'geofenceAdmin', geofence);
+    const stored = fake.docs.get('operational_configs/geofence_admin');
+    const hasNestedArray = value => Array.isArray(value)
+      ? value.some(item => Array.isArray(item) || hasNestedArray(item))
+      : Boolean(value && typeof value === 'object' && Object.values(value).some(hasNestedArray));
+    expect(hasNestedArray(stored)).toBe(false);
+    expect(stored).toMatchObject({ schema: 1, encoding: 'json' });
+    await expect(store.load(fake, 'geofenceAdmin')).resolves.toEqual({ raw: geofence, source: 'firestore' });
+  });
 });
