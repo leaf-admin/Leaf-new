@@ -2027,6 +2027,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   const [followCameraHeading, setFollowCameraHeading] = useState(0);
   const lastCameraDebugAtRef = useRef(0);
   const lastNativeNavigationCameraPoseRef = useRef(null);
+  const [navigationCameraSettleVersion, setNavigationCameraSettleVersion] = useState(0);
   const lastFollowRegionRef = useRef(null);
   const lastNativeNavigationRouteRevealKeyRef = useRef('');
   const nativeNavigationRouteRevealTimerRef = useRef(null);
@@ -2123,6 +2124,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   const [mapFollowingUser, setMapFollowingUser] = useState(true);
   const [visibleMapRegion, setVisibleMapRegion] = useState(PROTOTYPE_REGION);
   const [homeMapReady, setHomeMapReady] = useState(hasPrototypeHomeSurfaceHydratedInSession);
+  const [homeMapLoadVersion, setHomeMapLoadVersion] = useState(0);
   const [homeMapLayoutReady, setHomeMapLayoutReady] = useState(IS_TEST_ENV);
   const [homeSurfaceHydrated, setHomeSurfaceHydrated] = useState(
     hasPrototypeHomeSurfaceHydratedInSession
@@ -5392,6 +5394,9 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   }, [scheduleHomeMapReady]);
 
   const handleHomeMapLoaded = useCallback(() => {
+    // Tile/style loading can settle after the first follow command. A parked
+    // GPS fix must still reapply guidance once the native map finishes loading.
+    setHomeMapLoadVersion(version => version + 1);
     scheduleHomeMapReady();
   }, [scheduleHomeMapReady]);
 
@@ -6885,7 +6890,8 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   useEffect(() => {
     lastNativeNavigationCameraAtRef.current = 0;
     lastNativeNavigationHeadingRef.current = null;
-  }, [leafNativeNavigationKey]);
+    lastNativeNavigationCameraPoseRef.current = null;
+  }, [leafNativeNavigationKey, mapAppActive, isScreenFocused, homeMapInteractiveReady, homeMapLoadVersion]);
 
   useEffect(() => () => {
     if (nativeNavigationRouteRevealTimerRef.current) {
@@ -6961,6 +6967,9 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     });
 
     nativeNavigationRouteRevealTimerRef.current = setTimeout(() => {
+      // The reveal moved the native camera, even if the GPS fix is unchanged.
+      // Let follow mode reapply its pose instead of treating this as GPS jitter.
+      lastNativeNavigationCameraPoseRef.current = null;
       setNativeNavigationRouteRevealKey(previousKey => (
         previousKey === leafNativeNavigationKey ? '' : previousKey
       ));
@@ -6993,6 +7002,21 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   }, [driverFollowCameraActive, leafNativeNavigationKey, nativeNavigationRouteRevealKey,
     mapHeight, windowHeight, routeViewportOcclusion.top, routeViewportOcclusion.bottom,
     insets.top, driverTripAssistNativeNavigation?.cameraAnchorY]);
+
+  useEffect(() => {
+    if (!driverFollowCameraActive || !driverFollowCameraPadding ||
+        !homeMapInteractiveReady || !mapAppActive || !isScreenFocused) return undefined;
+    // A layout/native-load update inside the throttle window can be skipped
+    // while parked, with no later GPS change to retry it. Reassert once after
+    // the viewport settles; this never runs on ordinary position updates.
+    const timer = setTimeout(() => {
+      lastNativeNavigationCameraPoseRef.current = null;
+      lastNativeNavigationCameraAtRef.current = 0;
+      setNavigationCameraSettleVersion(version => version + 1);
+    }, LEAF_NATIVE_NAV_CAMERA_THROTTLE_MS + 40);
+    return () => clearTimeout(timer);
+  }, [driverFollowCameraActive, driverFollowCameraPadding, homeMapInteractiveReady,
+    homeMapLoadVersion, mapAppActive, isScreenFocused]);
 
   useEffect(() => {
     if (
@@ -7116,6 +7140,8 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     homeMapInteractiveReady,
     isSearchingMode,
     leafNativeNavigationCameraHeading,
+    homeMapLoadVersion,
+    navigationCameraSettleVersion,
     leafNativeNavigationKey,
     mapHeight,
     nativeNavigationRouteRevealKey,

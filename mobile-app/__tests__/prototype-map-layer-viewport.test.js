@@ -147,6 +147,49 @@ describe('PrototypeMapLayer route viewport fitting', () => {
     } finally { screen.unmount(); Platform.OS = previousPlatform; }
   });
 
+  it('does not let preview cleanup overwrite driver follow framing while parked', () => {
+    const { Platform } = require('react-native'); const previous = Platform.OS; Platform.OS = 'android';
+    const props = { region: baseRegion, mapRef: React.createRef(), routeCoordinates,
+      routeViewportRegion: visibleRouteRegion, mapSafetyProfile: 'driver', forceRegionUpdate: false };
+    const screen = render(<PrototypeMapLayer {...props} />);
+    try {
+      mockAnimateToRegion.mockClear();
+      const padding = { top: 360, bottom: 300, left: 0, right: 0 };
+      screen.rerender(<PrototypeMapLayer {...props} navigationCameraPadding={padding} routeViewportRegion={null} />);
+      expect(mockAnimateToRegion).not.toHaveBeenCalled();
+      expect(screen.getByTestId('prototype-map-view').props.showsBuildings).toBe(false);
+      expect(screen.getByTestId('prototype-map-view').props.customMapStyle.at(-1)).toMatchObject({
+        featureType: 'landscape.man_made', stylers: [{ visibility: 'off' }],
+      });
+      screen.rerender(<PrototypeMapLayer {...props} navigationCameraPadding={padding} />);
+      expect(mockAnimateToRegion).not.toHaveBeenCalled();
+      screen.rerender(<PrototypeMapLayer {...props} mapSafetyProfile="default" navigationCameraPadding={padding} />);
+      expect(screen.getByTestId('prototype-map-view').props.showsBuildings).toBe(true);
+      expect(screen.getByTestId('prototype-map-view').props.customMapStyle.at(-1).featureType).not.toBe('landscape.man_made');
+    } finally { screen.unmount(); Platform.OS = previous; }
+  });
+
+  it('rejects a late preview map-loaded callback after guidance takes the camera', () => {
+    const { Platform } = require('react-native');
+    const previousPlatform = Platform.OS;
+    Platform.OS = 'android';
+    const props = { region: baseRegion, mapRef: React.createRef(), routeCoordinates,
+      routeViewportRegion: visibleRouteRegion, mapSafetyProfile: 'driver', forceRegionUpdate: true };
+    const onMapLoaded = jest.fn();
+    const screen = render(<PrototypeMapLayer {...props} onMapLoaded={onMapLoaded} />);
+    try {
+      const latePreviewCallback = screen.getByTestId('prototype-map-view').props.onMapLoaded;
+      screen.rerender(<PrototypeMapLayer {...props} onMapLoaded={onMapLoaded}
+        forceRegionUpdate={false} navigationCameraPadding={{ top: 360, bottom: 300, left: 0, right: 0 }} />);
+      mockAnimateToRegion.mockClear();
+      mockFitToCoordinates.mockClear();
+      act(() => latePreviewCallback({}));
+      expect(mockAnimateToRegion).not.toHaveBeenCalled();
+      expect(mockFitToCoordinates).not.toHaveBeenCalled();
+      expect(onMapLoaded).toHaveBeenCalledTimes(1);
+    } finally { screen.unmount(); Platform.OS = previousPlatform; }
+  });
+
   it('snapshots the complete Android driver artwork once, keeping its image centred on the route', async () => {
     const { Platform, PixelRatio, StyleSheet } = require('react-native');
     const previousPlatform = Platform.OS;
@@ -176,6 +219,30 @@ describe('PrototypeMapLayer route viewport fitting', () => {
       expect(mockCaptureRef).toHaveBeenCalledTimes(1);
     } finally {
       screen.unmount(); Platform.OS = previousPlatform; mockCaptureRef.mockClear();
+    }
+  });
+
+  it('rotates the static driver bitmap natively without a React render for each artwork bucket', async () => {
+    const { Platform } = require('react-native');
+    const previousPlatform = Platform.OS; Platform.OS = 'android'; mockMarkerImperativeEnabled = true;
+    mockCaptureRef.mockResolvedValue('data:image/png;base64,driver-art');
+    const start = { latitude: 0, longitude: 0 };
+    const middle = { latitude: .0001, longitude: 0 };
+    const end = { latitude: .0001, longitude: .0001 };
+    const props = { region: baseRegion, userCoordinate: start, driverCoordinate: start,
+      currentLocationMarkerMode: 'car', routeCoordinates: [start, middle, end], animateRoute: false };
+    const screen = render(<PrototypeMapLayer {...props} />, { createNodeMock: () => ({}) });
+    try {
+      fireEvent(screen.getByTestId('driver-vehicle-bitmap-source'), 'layout', { nativeEvent: { layout: { width: 56, height: 56 } } });
+      await act(async () => { jest.advanceTimersByTime(1700); await Promise.resolve(); });
+      screen.rerender(<PrototypeMapLayer {...props} userCoordinate={end} driverCoordinate={end} />);
+      mockMarkerRenders.mockClear(); mockMarkerNativeProps.mockClear();
+      act(() => jest.advanceTimersByTime(500));
+      expect(mockMarkerNativeProps.mock.calls.length).toBeGreaterThan(3);
+      expect(mockMarkerNativeProps.mock.calls.at(-1)[0].rotation).toBeGreaterThan(10);
+      expect(mockMarkerRenders.mock.calls.length).toBeLessThanOrEqual(1);
+    } finally {
+      screen.unmount(); Platform.OS = previousPlatform; mockMarkerImperativeEnabled = false; mockCaptureRef.mockClear();
     }
   });
 

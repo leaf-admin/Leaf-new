@@ -6,6 +6,14 @@ import { useReducedMotion } from 'react-native-reanimated';
 import mapStyleAppleLike from './mapStyleAppleLike';
 import SearchRadarPulse from './SearchRadarPulse';
 
+// At road-level zoom the SDK can still draw gray building footprints after
+// extrusions are disabled. Hide their geometry only in driver guidance.
+const DRIVER_GUIDANCE_MAP_STYLE = [...mapStyleAppleLike, {
+  featureType: 'landscape.man_made',
+  elementType: 'geometry',
+  stylers: [{ visibility: 'off' }],
+}];
+
 // Camera glide between ride stages (zoom in to pickup, out to the full trip).
 const CAMERA_TRANSITION_MS = 450;
 const USE_NATIVE_ANDROID_VEHICLE_MARKER = true;
@@ -1153,13 +1161,15 @@ const VehicleMarkerContent = React.memo(function VehicleMarkerContent({
 
 // Keep visual frames inside the marker. Updating MapLayer here would reconcile
 // every route/traffic polyline for each interpolated position.
-function useDriverMarkerMotion({ coordinate, heading, routeMeters, routeMetrics, enabled, reduceMotion, predict = true, onFrame = null, visualHeadingOffset = 0 }) {
+function useDriverMarkerMotion({ coordinate, heading, routeMeters, routeMetrics, enabled, reduceMotion, predict = true, onFrame = null, visualHeadingOffset = 0, staticArtwork = false }) {
   const [pose, setPose] = useState(() => ({ coordinate, heading }));
   const poseRef = useRef(pose);
   const frameHandlerRef = useRef(onFrame);
   const headingOffsetRef = useRef(visualHeadingOffset);
+  const staticArtworkRef = useRef(staticArtwork);
   frameHandlerRef.current = onFrame;
   headingOffsetRef.current = visualHeadingOffset;
+  staticArtworkRef.current = staticArtwork;
   const sampleRef = useRef(null);
   const wasEnabledRef = useRef(false);
   useEffect(() => {
@@ -1170,9 +1180,9 @@ function useDriverMarkerMotion({ coordinate, heading, routeMeters, routeMetrics,
       poseRef.current = next;
       const nativeApplied = frameHandlerRef.current?.(next) === true;
       setPose(previous => {
-        if (nativeApplied && !forceRender &&
+        if (nativeApplied && !forceRender && (staticArtworkRef.current ||
             resolveVehicleArtworkPose(previous.heading - headingOffsetRef.current).heading ===
-              resolveVehicleArtworkPose(next.heading - headingOffsetRef.current).heading) return previous;
+              resolveVehicleArtworkPose(next.heading - headingOffsetRef.current).heading)) return previous;
         return previous.coordinate?.latitude === next.coordinate?.latitude &&
           previous.coordinate?.longitude === next.coordinate?.longitude &&
           previous.heading === next.heading ? previous : next;
@@ -1311,6 +1321,7 @@ const MovingVehicleMarker = React.memo(function MovingVehicleMarker({
     coordinate: snapsToRoute ? projection.coordinate : coordinate,
     heading: routeHeading ?? heading, routeMeters, routeMetrics, enabled, reduceMotion,
     onFrame: applyNativePose, visualHeadingOffset: cameraHeading,
+    staticArtwork: Boolean(useDriverBitmap && bitmapUri),
   });
   const screenHeading = resolveScreenRelativeVehicleHeading(pose.heading, cameraHeading);
   const poseBucket = resolveVehicleArtworkPose(screenHeading).heading;
@@ -2145,10 +2156,12 @@ function PrototypeMapLayer({
   const markNativeMapReady = useCallback(() => {
     setNativeMapReadyVersion(previous => previous + 1);
   }, []);
+  const navigationOwnsCameraRef = useRef(false);
+  navigationOwnsCameraRef.current = Boolean(resolvedNavigationCameraPadding);
 
   const applyForcedRegionUpdate = useCallback((duration = Platform.OS === 'android' ? 0 : 180) => {
     const targetViewportRegion = resolvedRouteViewportRegion || region;
-    if (!forceRegionUpdate || !mapRef?.current || !isValidMapRegion(targetViewportRegion)) {
+    if (navigationOwnsCameraRef.current || !forceRegionUpdate || !mapRef?.current || !isValidMapRegion(targetViewportRegion)) {
       return false;
     }
 
@@ -2213,6 +2226,9 @@ function PrototypeMapLayer({
   useEffect(() => {
     const had = hadRouteViewportRef.current;
     hadRouteViewportRef.current = Boolean(resolvedRouteViewportRegion);
+    // Guidance owns the camera. Preview cleanup must not overwrite its native
+    // heading/pitch/zoom when a ride resumes or its initial reveal finishes.
+    if (resolvedNavigationCameraPadding) return;
     if (Date.now() < manualCameraHoldUntilRef.current) return;
     // Prévia nova com o mesmo enquadramento da anterior (oferta reenviada): os valores
     // não mudam, então nada reposicionava a câmera e a rota ficava fora da tela.
@@ -2222,7 +2238,7 @@ function PrototypeMapLayer({
     }
     if (!had || resolvedRouteViewportRegion || !isValidMapRegion(region)) return;
     mapRef?.current?.animateToRegion?.(region, 420);
-  }, [mapRef, region, resolvedRouteViewportRegion]);
+  }, [mapRef, region, resolvedRouteViewportRegion, resolvedNavigationCameraPadding]);
 
   // Glass lens backdrop (Android + Skia): snapshot the settled map so floating
   // glass can refract it; any camera motion drops the snapshot immediately.
@@ -3083,17 +3099,18 @@ function PrototypeMapLayer({
           }}
           onPanDrag={interactionEnabled ? handleMapPanDrag : undefined}
           provider={mapProvider}
+          showsBuildings={!resolvedNavigationCameraPadding}
           initialRegion={region}
           region={iosNativeRegion}
           mapType="standard"
-          customMapStyle={mapStyleAppleLike}
+          customMapStyle={resolvedNavigationCameraPadding ? DRIVER_GUIDANCE_MAP_STYLE : mapStyleAppleLike}
           onMapLoaded={handleNativeMapLoaded}
           onMapReady={handleNativeMapReady}
           scrollEnabled={interactionEnabled}
           zoomEnabled={interactionEnabled}
           rotateEnabled={interactionEnabled}
-          // Keep the product map top-down; navigation may rotate/zoom, but
-          // users should never enter the legacy isometric pitch view.
+          // Lock pitch gestures; driver guidance controls perspective
+          // programmatically while the other map surfaces stay top-down.
           pitchEnabled={false}
           toolbarEnabled={false}
           showsCompass={false}

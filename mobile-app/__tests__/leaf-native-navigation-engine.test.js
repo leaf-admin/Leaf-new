@@ -34,7 +34,7 @@ const steps = [
 ];
 
 describe('LeafNativeNavigationEngine', () => {
-  it.each([[15.8, 25, 29, 15.5], [15.5, 50, 54, 15.2], [15.2, 80, 84, 14.9]])(
+  it.each([[16.5, 25, 29, 16.2], [16.2, 50, 54, 15.9], [15.9, 80, 84, 15.6]])(
     'holds zoom %s through speed noise around %s km/h, then changes at %s', (zoom, boundary, exit, nextZoom) => {
       for (const speed of [boundary - 1, boundary + 1, boundary - 0.5, boundary + 2]) {
         expect(resolveStableNavigationCameraZoom(speed, zoom)).toBe(zoom);
@@ -43,12 +43,12 @@ describe('LeafNativeNavigationEngine', () => {
     });
 
   it('returns to closer zoom on deceleration and honors explicit arrival framing', () => {
-    expect(resolveStableNavigationCameraZoom(79, 14.9)).toBe(14.9);
-    expect(resolveStableNavigationCameraZoom(76, 14.9)).toBe(15.2);
-    expect(resolveStableNavigationCameraZoom(46, 15.2)).toBe(15.5);
-    expect(resolveStableNavigationCameraZoom(21, 15.5)).toBe(15.8);
-    expect(resolveStableNavigationCameraZoom(60, 15.2, 15.8)).toBe(15.8);
-    expect(resolveStableNavigationCameraZoom(90, null)).toBe(14.9);
+    expect(resolveStableNavigationCameraZoom(79, 15.6)).toBe(15.6);
+    expect(resolveStableNavigationCameraZoom(76, 15.6)).toBe(15.9);
+    expect(resolveStableNavigationCameraZoom(46, 15.9)).toBe(16.2);
+    expect(resolveStableNavigationCameraZoom(21, 16.2)).toBe(16.5);
+    expect(resolveStableNavigationCameraZoom(60, 15.9, 16.5)).toBe(16.5);
+    expect(resolveStableNavigationCameraZoom(90, null)).toBe(15.6);
   });
 
   it.each([[860, 220, 260], [740, 180, 300], [930, 0, 0]])(
@@ -255,12 +255,12 @@ describe('LeafNativeNavigationEngine', () => {
   });
 
   it('keeps a fixed driver-follow perspective while zoom adapts by speed', () => {
-    expect(resolveNavigationCameraZoom(0)).toBe(15.8);
-    expect(resolveNavigationCameraZoom(30)).toBe(15.5);
-    expect(resolveNavigationCameraZoom(55)).toBe(15.2);
-    expect(resolveNavigationCameraZoom(90)).toBe(14.9);
-    expect(resolveNavigationCameraPitch(0)).toBe(40);
-    expect(resolveNavigationCameraPitch(12)).toBe(40);
+    expect(resolveNavigationCameraZoom(0)).toBe(16.5);
+    expect(resolveNavigationCameraZoom(30)).toBe(16.2);
+    expect(resolveNavigationCameraZoom(55)).toBe(15.9);
+    expect(resolveNavigationCameraZoom(90)).toBe(15.6);
+    expect(resolveNavigationCameraPitch(0)).toBe(50);
+    expect(resolveNavigationCameraPitch(12)).toBe(50);
 
     const stoppedState = buildLeafNativeNavigationState({
       bookingId: 'booking_nav_camera_stopped',
@@ -287,11 +287,11 @@ describe('LeafNativeNavigationEngine', () => {
     });
 
     expect(stoppedState.cameraZoom).toBeGreaterThan(fastState.cameraZoom);
-    expect(stoppedState.cameraZoom).toBe(15.8);
-    expect(stoppedState.cameraPitch).toBe(40);
+    expect(stoppedState.cameraZoom).toBe(16.5);
+    expect(stoppedState.cameraPitch).toBe(50);
     expect(fastState.currentSpeedKmh).toBe(72);
     expect(fastState.cameraZoom).toBeGreaterThanOrEqual(15);
-    expect(fastState.cameraPitch).toBe(40);
+    expect(fastState.cameraPitch).toBe(50);
   });
 
   it('keeps one steady zoom along the leg instead of closing in as the target gets near', () => {
@@ -299,7 +299,7 @@ describe('LeafNativeNavigationEngine', () => {
     const nearZoom = resolveNavigationCameraZoom(30, 40, 5000);
     expect(nearZoom).toBe(farZoom);
     // Never above the zoom where the Android base map shades the blocks.
-    expect(resolveNavigationCameraZoom(0)).toBeLessThanOrEqual(15.8);
+    expect(resolveNavigationCameraZoom(0)).toBeLessThanOrEqual(16.5);
   });
 
   it('reveals each new pickup or destination route exactly once per navigation phase', () => {
@@ -459,4 +459,55 @@ it('preserves partial-segment route distance when sharing prepared maneuver geom
   expect(state.remainingDistanceMeters).toBeLessThan(1700);
   expect(state.maneuverDistanceMeters).toBeGreaterThan(500);
   expect(state.maneuverDistanceMeters).toBeLessThan(600);
+});
+
+
+describe('immutable navigation geometry', () => {
+  const build = route => buildLeafNativeNavigationState({ status: 'started', phase: 'destination',
+    currentCoordinate: { latitude: -22.97, longitude: -43.18 },
+    targetCoordinate: { latitude: -22.96, longitude: -43.17 }, routeCoordinates: route });
+  it('keeps the geometry identity stable over GPS updates without freezing caller data', () => {
+    const route = Object.freeze(routeCoordinates.map(p => Object.freeze({ ...p })));
+    const a = build(route), b = build(route);
+    expect(b.routeCoordinates).toBe(a.routeCoordinates);
+    expect(Object.isFrozen(a.routeCoordinates[0])).toBe(true);
+    const mutable = routeCoordinates.map(p => ({ ...p }));
+    build(mutable);
+    expect(Object.isFrozen(mutable)).toBe(false);
+    expect(Object.isFrozen(mutable[0])).toBe(false);
+  });
+  it.each([false, true])('observes edits to mutable points even in a frozen array=%s', freezeArray => {
+    const route = routeCoordinates.map(p => ({ ...p }));
+    if (freezeArray) Object.freeze(route);
+    const a = build(route);
+    route[1].longitude += 0.01;
+    const b = build(route);
+    expect(b.routeCoordinates[1].longitude).toBe(route[1].longitude);
+    expect(b.routeCoordinates).not.toBe(a.routeCoordinates);
+    expect(b.remainingDistanceMeters).not.toBe(a.remainingDistanceMeters);
+  });
+  it('replaces immutable geometry for a new route instead of reusing an old plan', () => {
+    const old = Object.freeze(routeCoordinates.map(p => Object.freeze({ ...p })));
+    const next = Object.freeze(routeCoordinates.map(p => Object.freeze({ ...p, longitude: p.longitude + 0.001 })));
+    expect(build(next).routeCoordinates).not.toBe(build(old).routeCoordinates);
+  });
+});
+
+
+describe('road-oriented follow camera', () => {
+  const route = Object.freeze([{latitude: 0, longitude: 0},
+    {latitude: .01, longitude: 0}, {latitude: .01, longitude: .01}].map(Object.freeze));
+  const build = current => buildLeafNativeNavigationState({ status: 'started', phase: 'destination',
+    currentCoordinate: current, targetCoordinate: route[2], routeCoordinates: route });
+  it('does not skip the current long segment when the closest vertex is its end', () => {
+    expect(build({ latitude: .008, longitude: 0 }).cameraHeadingDegrees).toBeCloseTo(0, 3);
+  });
+  it('does not swing the follow camera sideways with lateral GPS noise', () => {
+    for (const longitude of [-.0001, .0001]) {
+      expect(build({ latitude: .008, longitude }).cameraHeadingDegrees).toBeCloseTo(0, 3);
+    }
+  });
+  it('keeps the final road direction when the endpoint is already passed', () => {
+    expect(build({ latitude: .01, longitude: .0101 }).cameraHeadingDegrees).toBeCloseTo(90, 2);
+  });
 });

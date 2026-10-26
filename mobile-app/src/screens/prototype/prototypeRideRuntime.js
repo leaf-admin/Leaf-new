@@ -7141,7 +7141,9 @@ function buildDriverTripAssistModel(snapshot) {
       Number.isFinite(Number(nativeRouteDurationMinutes)) && Number(nativeRouteDurationMinutes) > 0
         ? Number(nativeRouteDurationMinutes)
         : baselineEtaMinutes,
-    currentSpeedMetersPerSecond: Number(currentCoordinate?.speed),
+    // Coordinate normalization intentionally keeps geometry to lat/lng. Speed
+    // belongs to the GPS sample, otherwise every camera band sees a parked car.
+    currentSpeedMetersPerSecond: rawCurrentCoordinate?.speed,
   });
 
   return {
