@@ -1,0 +1,168 @@
+{
+  "environment": {
+    "node": "v20.20.2",
+    "platform": "darwin",
+    "arch": "arm64",
+    "cpu": "Apple M1 Pro",
+    "baselineRef": "794edfcb7",
+    "redis": "8.6.3",
+    "connection": "new private Unix socket, no production endpoints",
+    "maxmemoryMiB": 256
+  },
+  "cacheInvalidation": [
+    {
+      "fixtureKeysTarget": 1000,
+      "actualKeyspaceBeforeQueries": 1000,
+      "beforeStats": {
+        "ms": 1.6628330000000062,
+        "commands": [
+          "keys",
+          "keys",
+          "keys",
+          "keys",
+          "keys",
+          "keys",
+          "keys",
+          "keys",
+          "keys",
+          "keys",
+          "keys",
+          "keys",
+          "info"
+        ],
+        "redisReplyBytes": 4966
+      },
+      "afterStats": {
+        "ms": 0.09866700000000606,
+        "commands": [
+          "info"
+        ],
+        "redisReplyBytes": 1754
+      },
+      "beforeInvalidate": {
+        "ms": 0.2642089999999939,
+        "commands": [
+          "keys",
+          "del"
+        ],
+        "redisReplyBytes": 3193
+      },
+      "afterInvalidate": {
+        "ms": 0.33745799999999804,
+        "commands": [
+          "set"
+        ],
+        "redisReplyBytes": 4
+      }
+    },
+    {
+      "fixtureKeysTarget": 10000,
+      "actualKeyspaceBeforeQueries": 9901,
+      "beforeStats": {
+        "ms": 4.529624999999982,
+        "commands": [
+          "keys",
+          "keys",
+          "keys",
+          "keys",
+          "keys",
+          "keys",
+          "keys",
+          "keys",
+          "keys",
+          "keys",
+          "keys",
+          "keys",
+          "info"
+        ],
+        "redisReplyBytes": 31483
+      },
+      "afterStats": {
+        "ms": 0.047667000000018334,
+        "commands": [
+          "info"
+        ],
+        "redisReplyBytes": 1760
+      },
+      "beforeInvalidate": {
+        "ms": 1.6932079999999985,
+        "commands": [
+          "keys",
+          "del"
+        ],
+        "redisReplyBytes": 29704
+      },
+      "afterInvalidate": {
+        "ms": 0.10258399999997891,
+        "commands": [
+          "set"
+        ],
+        "redisReplyBytes": 4
+      }
+    },
+    {
+      "fixtureKeysTarget": 100000,
+      "actualKeyspaceBeforeQueries": 99001,
+      "beforeStats": {
+        "ms": 38.50749999999999,
+        "commands": [
+          "keys",
+          "keys",
+          "keys",
+          "keys",
+          "keys",
+          "keys",
+          "keys",
+          "keys",
+          "keys",
+          "keys",
+          "keys",
+          "keys",
+          "info"
+        ],
+        "redisReplyBytes": 307793
+      },
+      "afterStats": {
+        "ms": 0.13154200000002447,
+        "commands": [
+          "info"
+        ],
+        "redisReplyBytes": 1770
+      },
+      "beforeInvalidate": {
+        "ms": 13.349333999999999,
+        "commands": [
+          "keys",
+          "del"
+        ],
+        "redisReplyBytes": 306005
+      },
+      "afterInvalidate": {
+        "ms": 0.13387500000004593,
+        "commands": [
+          "set"
+        ],
+        "redisReplyBytes": 4
+      }
+    }
+  ],
+  "viewportCache": [
+    {
+      "variant": "before",
+      "distinctViewports": 10000,
+      "retainedEntries": 10000,
+      "retainedSerializedBytes": null
+    },
+    {
+      "variant": "after",
+      "distinctViewports": 10000,
+      "retainedEntries": 256,
+      "retainedSerializedBytes": 9216
+    }
+  ],
+  "limitations": [
+    "Local command/serialization microbenchmark, not full-app throughput or Santiago capacity",
+    "Ordered single runs; timing is illustrative. Command counts/resource ceilings are deterministic gates",
+    "No Firebase billing/query-plan evidence; no paid provider calls"
+  ]
+}

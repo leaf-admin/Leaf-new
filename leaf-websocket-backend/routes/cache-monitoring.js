@@ -4,6 +4,11 @@
 const express = require('express');
 const router = express.Router();
 const advancedCache = require('../utils/advanced-cache');
+const { authenticateSupport, requireSupportRoles } = require('../middleware/support-auth');
+const rateLimit = require('express-rate-limit');
+
+router.use(authenticateSupport, requireSupportRoles(['admin', 'super-admin', 'development']));
+router.use(rateLimit({ windowMs: 60000, max: 20, standardHeaders: true, legacyHeaders: false }));
 
 // Endpoint para estatísticas do cache
 router.get('/stats', async (req, res) => {
@@ -15,7 +20,7 @@ router.get('/stats', async (req, res) => {
       timestamp: new Date().toISOString()
     });
   } catch (error) {
-    res.status(500).json({
+    res.status(error.statusCode || 503).json({
       success: false,
       error: error.message
     });
@@ -32,7 +37,7 @@ router.get('/health', async (req, res) => {
       timestamp: new Date().toISOString()
     });
   } catch (error) {
-    res.status(500).json({
+    res.status(error.statusCode || 503).json({
       success: false,
       error: error.message
     });
@@ -43,7 +48,7 @@ router.get('/health', async (req, res) => {
 router.post('/invalidate/:queryType', async (req, res) => {
   try {
     const { queryType } = req.params;
-    const { context } = req.body;
+    const { context } = req.body || {};
     
     const invalidated = await advancedCache.invalidate(queryType, context);
     
@@ -51,13 +56,14 @@ router.post('/invalidate/:queryType', async (req, res) => {
       success: true,
       data: {
         queryType,
-        invalidatedKeys: invalidated,
-        message: `${invalidated} chaves invalidadas para ${queryType}`
+        invalidation: invalidated,
+        invalidatedKeys: null,
+        message: 'Namespace do cache invalidado; valores antigos expiram pelo TTL'
       },
       timestamp: new Date().toISOString()
     });
   } catch (error) {
-    res.status(500).json({
+    res.status(error.statusCode || 503).json({
       success: false,
       error: error.message
     });
@@ -75,13 +81,14 @@ router.post('/invalidate-user/:userId', async (req, res) => {
       success: true,
       data: {
         userId,
-        invalidatedKeys: invalidated,
-        message: `${invalidated} chaves invalidadas para usuário ${userId}`
+        invalidation: invalidated,
+        invalidatedKeys: null,
+        message: 'Namespace do usuário invalidado'
       },
       timestamp: new Date().toISOString()
     });
   } catch (error) {
-    res.status(500).json({
+    res.status(error.statusCode || 503).json({
       success: false,
       error: error.message
     });
@@ -96,13 +103,14 @@ router.post('/clear', async (req, res) => {
     res.json({
       success: true,
       data: {
-        clearedKeys: cleared,
-        message: `${cleared} chaves removidas do cache`
+        invalidation: cleared,
+        clearedKeys: null,
+        message: 'Namespace global invalidado'
       },
       timestamp: new Date().toISOString()
     });
   } catch (error) {
-    res.status(500).json({
+    res.status(error.statusCode || 503).json({
       success: false,
       error: error.message
     });
@@ -127,13 +135,14 @@ router.post('/invalidate-pattern', async (req, res) => {
       success: true,
       data: {
         pattern,
-        invalidatedKeys: invalidated,
-        message: `${invalidated} chaves invalidadas para padrão ${pattern}`
+        invalidation: invalidated,
+        invalidatedKeys: null,
+        message: 'Namespace invalidado'
       },
       timestamp: new Date().toISOString()
     });
   } catch (error) {
-    res.status(500).json({
+    res.status(error.statusCode || 503).json({
       success: false,
       error: error.message
     });

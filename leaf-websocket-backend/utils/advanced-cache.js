@@ -35,10 +35,9 @@ class AdvancedCache {
     
     // Criar hash dos parâmetros para chave única
     const paramsHash = crypto
-      .createHash('md5')
+      .createHash('sha256')
       .update(JSON.stringify({ ...params, ...context }))
-      .digest('hex')
-      .substring(0, 8);
+      .digest('hex');
     
     // Incluir contexto de usuário se disponível
     const userId = context.userId || 'anonymous';
@@ -54,7 +53,7 @@ class AdvancedCache {
   // Obter dados do cache
   async get(queryType, params = {}, context = {}) {
     try {
-      const key = this.generateCacheKey(queryType, params, context);
+      const key = await this.versionedKey(queryType, this.generateCacheKey(queryType, params, context), context);
       const cached = await this.redis.get(key);
       
       if (cached) {
@@ -74,7 +73,7 @@ class AdvancedCache {
   async set(queryType, data, params = {}, context = {}) {
     try {
       const config = this.cacheConfig[queryType] || { prefix: 'def', ttl: this.defaultTTL };
-      const key = this.generateCacheKey(queryType, params, context);
+      const key = await this.versionedKey(queryType, this.generateCacheKey(queryType, params, context), context);
       const ttl = config.ttl;
       
       // Limpar dados de objetos circulares antes de armazenar
@@ -83,8 +82,6 @@ class AdvancedCache {
       await this.redis.setex(key, ttl, JSON.stringify(cleanData));
       console.log(`📊 Cache SET: ${queryType} - TTL: ${ttl}s - ${key}`);
       
-      // Adicionar à lista de chaves para invalidação
-      await this.addToInvalidationList(queryType, key);
       
       return true;
     } catch (error) {
@@ -93,112 +90,65 @@ class AdvancedCache {
     }
   }
 
-  // Invalidar cache por tipo de query
-  async invalidate(queryType, context = {}) {
-    try {
-      const pattern = `graphql:*:${queryType}:*`;
-      const keys = await this.redis.keys(pattern);
-      
-      if (keys.length > 0) {
-        await this.redis.del(...keys);
-        console.log(`🗑️ Cache invalidado: ${queryType} - ${keys.length} chaves`);
-      }
-      
-      return keys.length;
-    } catch (error) {
-      console.error(`❌ Erro ao invalidar cache: ${error.message}`);
-      return 0;
-    }
+  // Version invalidation is constant work. Old cache values expire naturally;
+  // they are never enumerated or deleted as one unbounded Redis command.
+  async versionedKey(queryType, baseKey, context = {}) {
+    const user = crypto.createHash('sha256').update(String(context.userId || 'anonymous')).digest('hex');
+    const versions = await this.redis.mget('graphql:version:all',
+      `graphql:version:type:${queryType}`, `graphql:version:user:${user}`);
+    const generation = crypto.createHash('sha256').update(JSON.stringify(versions)).digest('hex');
+    return `graphql:v2:${generation}:${baseKey}`;
   }
 
-  // Invalidar cache por contexto de usuário
+  async rotateVersion(key) {
+    await this.redis.set(key, crypto.randomUUID(), 'EX', 7200);
+    // This is one logical invalidation, not a claim about how many keys existed.
+    return { invalidated: true, strategy: 'namespace-version', deletedKeys: 0 };
+  }
+
+  async invalidate(queryType) {
+    if (!/^[a-zA-Z0-9_-]{1,80}$/.test(queryType)) throw new Error('Invalid cache type');
+    return this.rotateVersion(`graphql:version:type:${queryType}`);
+  }
+
   async invalidateUserContext(userId) {
-    try {
-      const userHash = crypto
-        .createHash('md5')
-        .update(userId)
-        .digest('hex')
-        .substring(0, 4);
-      
-      const pattern = `graphql:*:*:${userHash}:*`;
-      const keys = await this.redis.keys(pattern);
-      
-      if (keys.length > 0) {
-        await this.redis.del(...keys);
-        console.log(`🗑️ Cache de usuário invalidado: ${userId} - ${keys.length} chaves`);
-      }
-      
-      return keys.length;
-    } catch (error) {
-      console.error(`❌ Erro ao invalidar cache de usuário: ${error.message}`);
-      return 0;
-    }
+    const hash = crypto.createHash('sha256').update(String(userId)).digest('hex');
+    return this.rotateVersion(`graphql:version:user:${hash}`);
   }
 
-  // Invalidar cache por padrão
   async invalidatePattern(pattern) {
-    try {
-      const keys = await this.redis.keys(pattern);
-      
-      if (keys.length > 0) {
-        await this.redis.del(...keys);
-        console.log(`🗑️ Cache invalidado por padrão: ${pattern} - ${keys.length} chaves`);
-      }
-      
-      return keys.length;
-    } catch (error) {
-      console.error(`❌ Erro ao invalidar cache por padrão: ${error.message}`);
-      return 0;
-    }
-  }
-
-  // Adicionar chave à lista de invalidação
-  async addToInvalidationList(queryType, key) {
-    try {
-      const listKey = `graphql:invalidation:${queryType}`;
-      await this.redis.lpush(listKey, key);
-      await this.redis.expire(listKey, 3600); // 1 hora
-    } catch (error) {
-      console.error(`❌ Erro ao adicionar à lista de invalidação: ${error.message}`);
-    }
+    if (pattern === 'graphql:*') return this.clearAll();
+    const type = /^graphql:[a-zA-Z0-9_*]+:([a-zA-Z0-9_-]+):\*$/.exec(String(pattern));
+    if (type) return this.invalidate(type[1]);
+    const error = new Error('Use invalidação por tipo/usuário; padrões arbitrários não são suportados');
+    error.statusCode = 400;
+    throw error;
   }
 
   // Cache com fallback automático
   async getOrSet(queryType, fetchFunction, params = {}, context = {}) {
+    let key = null;
     try {
-      // Tentar obter do cache primeiro
-      let data = await this.get(queryType, params, context);
-      
-      if (data) {
-        return data;
-      }
-      
-      // Se não estiver no cache, buscar dados
-      console.log(`📊 Buscando dados para cache: ${queryType}`);
-      data = await fetchFunction();
-      
-      // Armazenar no cache (já limpa referências circulares)
-      if (data) {
-        await this.set(queryType, data, params, context);
-      }
-      
-      return data;
-    } catch (error) {
-      console.error(`❌ Erro no getOrSet: ${error.message}`);
-      // Em caso de erro, tentar buscar dados diretamente
+      key = await this.versionedKey(queryType, this.generateCacheKey(queryType, params, context), context);
+      const cached = await this.redis.get(key);
+      if (cached) return JSON.parse(cached);
+    } catch (_) { /* Cache failure must not amplify the upstream request. */ }
+    const data = await fetchFunction();
+    if (data && key) {
       try {
-        return await fetchFunction();
-      } catch (fetchError) {
-        console.error(`❌ Erro ao buscar dados: ${fetchError.message}`);
-        throw fetchError;
-      }
+        // Pin the generation before fetching. An invalidation during the fetch
+        // must not put an old result into the new namespace.
+        const ttl = this.cacheConfig[queryType]?.ttl || this.defaultTTL;
+        await this.redis.setex(key, ttl, JSON.stringify(this.cleanCircularReferences(data)));
+      } catch (_) { /* Cache writes are optional. */ }
     }
+    return data;
   }
 
   // Cache de métricas em tempo real
   async getMetricsCache(metricType, params = {}) {
     try {
-      const key = `graphql:metrics:${metricType}:${JSON.stringify(params)}`;
+      const key = await this.versionedKey(metricType, `graphql:metrics:${metricType}:${JSON.stringify(params)}`);
       const cached = await this.redis.get(key);
       
       if (cached) {
@@ -226,7 +176,7 @@ class AdvancedCache {
   // Armazenar métricas em cache
   async setMetricsCache(metricType, data, params = {}) {
     try {
-      const key = `graphql:metrics:${metricType}:${JSON.stringify(params)}`;
+      const key = await this.versionedKey(metricType, `graphql:metrics:${metricType}:${JSON.stringify(params)}`);
       const cacheData = {
         value: data,
         timestamp: Date.now()
@@ -246,7 +196,7 @@ class AdvancedCache {
   async getSpatialCache(queryType, location, radius, params = {}) {
     try {
       const locationKey = `${location.latitude},${location.longitude},${radius}`;
-      const key = `graphql:spatial:${queryType}:${locationKey}`;
+      const key = await this.versionedKey(queryType, `graphql:spatial:${queryType}:${locationKey}`);
       const cached = await this.redis.get(key);
       
       if (cached) {
@@ -265,7 +215,7 @@ class AdvancedCache {
   async setSpatialCache(queryType, location, radius, data, params = {}) {
     try {
       const locationKey = `${location.latitude},${location.longitude},${radius}`;
-      const key = `graphql:spatial:${queryType}:${locationKey}`;
+      const key = await this.versionedKey(queryType, `graphql:spatial:${queryType}:${locationKey}`);
       
       await this.redis.setex(key, this.spatialTTL, JSON.stringify(data));
       console.log(`📊 Cache espacial SET: ${queryType} - ${locationKey}`);
@@ -277,54 +227,18 @@ class AdvancedCache {
     }
   }
 
-  // Estatísticas do cache
+  // Global occupancy by pattern is intentionally not computed on a request.
+  // Unknown counts are explicit, rather than returning a fabricated zero.
   async getCacheStats() {
-    try {
-      const stats = {
-        totalKeys: 0,
-        byType: {},
-        memoryUsage: 0,
-        hitRate: 0
-      };
-      
-      // Contar chaves por tipo
-      for (const queryType in this.cacheConfig) {
-        const pattern = `graphql:${this.cacheConfig[queryType].prefix}:${queryType}:*`;
-        const keys = await this.redis.keys(pattern);
-        stats.byType[queryType] = keys.length;
-        stats.totalKeys += keys.length;
-      }
-      
-      // Informações de memória
-      const info = await this.redis.info('memory');
-      const memoryMatch = info.match(/used_memory:(\d+)/);
-      if (memoryMatch) {
-        stats.memoryUsage = parseInt(memoryMatch[1]);
-      }
-      
-      return stats;
-    } catch (error) {
-      console.error(`❌ Erro ao obter estatísticas do cache: ${error.message}`);
-      return null;
-    }
+    const info = await this.redis.info('memory');
+    const memory = /used_memory:(\d+)/.exec(info);
+    return { totalKeys: null, byType: null, hitRate: null,
+      memoryUsage: memory ? Number(memory[1]) : null,
+      countsAvailable: false, invalidationStrategy: 'namespace-version' };
   }
 
-  // Limpar todo o cache
   async clearAll() {
-    try {
-      const pattern = 'graphql:*';
-      const keys = await this.redis.keys(pattern);
-      
-      if (keys.length > 0) {
-        await this.redis.del(...keys);
-        console.log(`🗑️ Cache limpo: ${keys.length} chaves removidas`);
-      }
-      
-      return keys.length;
-    } catch (error) {
-      console.error(`❌ Erro ao limpar cache: ${error.message}`);
-      return 0;
-    }
+    return this.rotateVersion('graphql:version:all');
   }
 
   // Limpar referências circulares dos dados

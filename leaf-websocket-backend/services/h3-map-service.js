@@ -3,6 +3,7 @@ const { logStructured } = require('../utils/logger');
 const { metrics } = require('../utils/prometheus-metrics');
 const { normalizeDriverStatus } = require('./dashboard-live-data-service');
 const bookingSearchIndex = require('./booking-search-index');
+const BoundedTtlCache = require('../utils/bounded-ttl-cache');
 const {
   MAX_DEMAND_MARKUP_PERCENT,
   calculateDemandPressure
@@ -451,7 +452,8 @@ function extractRedisReplyValue(reply) {
 
 class H3MapService {
   constructor() {
-    this.cache = new Map();
+    this.cache = new BoundedTtlCache({ ttlMs: Math.max(1, CACHE_TTL_MS), maxEntries: 256, maxBytes: 8 * 1024 * 1024 });
+    this.inflight = new Map();
     this.searchKeysCache = null; // { keys, expiresAt }
     this.searchKeysInflight = null;
   }
@@ -488,20 +490,11 @@ class H3MapService {
   }
 
   getCached(key) {
-    const cached = this.cache.get(key);
-    if (!cached) return null;
-    if (cached.expiresAt <= Date.now()) {
-      this.cache.delete(key);
-      return null;
-    }
-    return cached.value;
+    return this.cache.get(key);
   }
 
   setCached(key, value) {
-    this.cache.set(key, {
-      value,
-      expiresAt: Date.now() + CACHE_TTL_MS
-    });
+    if (CACHE_TTL_MS > 0) this.cache.set(key, value);
   }
 
   async getCells({
@@ -550,6 +543,14 @@ class H3MapService {
     }
 
     metrics.recordH3CellsCache(surface, mode, false);
+    if (this.inflight.has(cacheKey)) return this.inflight.get(cacheKey);
+    if (this.inflight.size >= 8) throw createHttpError(503, 'Mapa temporariamente ocupado; tente novamente');
+    const pending = this.computeCells({ redis, bbox, resolution, surface, mode, includeEmpty, includeBoundary, visualPolicy, cacheKey });
+    this.inflight.set(cacheKey, pending);
+    try { return await pending; } finally { this.inflight.delete(cacheKey); }
+  }
+
+  async computeCells({ redis, bbox, resolution, surface, mode, includeEmpty, includeBoundary, visualPolicy, cacheKey }) {
     const startedAt = Date.now();
     const snapshot = await this.collectSnapshot(redis, bbox);
 
@@ -586,15 +587,7 @@ class H3MapService {
     };
 
     this.setCached(
-      this.getCacheKey({
-        bbox,
-        resolution: payload.resolution,
-        surface,
-        mode,
-        includeEmpty,
-        includeBoundary,
-        visualPolicy
-      }),
+      cacheKey,
       payload
     );
 
