@@ -1,4 +1,5 @@
 const admin = require('firebase-admin');
+const readBudget = require('../utils/metrics-read-budget');
 const redisPool = require('../utils/redis-pool');
 const {
   countActiveRidesFromActiveHash,
@@ -144,11 +145,14 @@ async function getActiveRidesCount() {
   const redis = redisPool.getConnection();
 
   try {
+    const size = await redis.hlen('bookings:active');
+    if (!Number.isSafeInteger(size) || size > 200) throw readBudget.unavailable();
     const activeHash = await redis.hgetall('bookings:active');
+    readBudget.assertPayload(activeHash, Object.keys(activeHash || {}).length, 200);
     if (activeHash && typeof activeHash === 'object' && Object.keys(activeHash).length > 0) {
       return countActiveRidesFromActiveHash(activeHash);
     }
-  } catch (_) {}
+  } catch (error) { return null; }
 
   try {
     const activeSetCount = await redis.scard('active_bookings');
@@ -157,7 +161,7 @@ async function getActiveRidesCount() {
     }
   } catch (_) {}
 
-  return 0;
+  throw readBudget.unavailable();
 }
 
 async function getReserveFundLosses() {
@@ -167,13 +171,14 @@ async function getReserveFundLosses() {
     const costStr = await redis.hget('metrics:financial', 'assumed_cancellation_costs');
     return costStr ? toNumber(costStr) : 0;
   } catch (_) {
-    return 0;
+    return null;
   }
 }
 
 async function runCountAggregate(query, fallback = 0) {
   try {
-    const snapshot = await query.count().get();
+    const snapshot = await query.limit(10001).count().get();
+    if (Number(snapshot?.data?.().count) > 10000) return null;
     return Number(snapshot?.data?.().count || 0);
   } catch (error) {
     console.warn('[modern-metrics-service] Firestore count aggregate failed:', error?.message || error);
@@ -186,11 +191,11 @@ async function countUsersByType(usersCollection, userType) {
   if (primary !== null && primary > 0) return primary;
 
   const secondary = await runCountAggregate(usersCollection.where('userType', '==', userType), null);
-  if (secondary !== null) {
-    return Math.max(Number(primary || 0), secondary);
+  if (primary !== null && secondary !== null) {
+    return Math.max(primary, secondary);
   }
 
-  return Math.max(Number(primary || 0), 0);
+  throw readBudget.unavailable();
 }
 
 async function countRecentUsersByType(usersCollection, userType, startIso) {
@@ -204,15 +209,16 @@ async function countRecentUsersByType(usersCollection, userType, startIso) {
     usersCollection.where('userType', '==', userType).where('createdAt', '>=', startIso),
     null
   );
-  if (secondary !== null) {
-    return Math.max(Number(primary || 0), secondary);
+  if (primary !== null && secondary !== null) {
+    return Math.max(primary, secondary);
   }
 
   try {
     const snapshot = await usersCollection
       .where('createdAt', '>=', startIso)
-      .limit(USER_METRICS_RECENT_FALLBACK_LIMIT)
+      .limit(Math.min(2000, USER_METRICS_RECENT_FALLBACK_LIMIT) + 1)
       .get();
+    readBudget.assertPayload(snapshot.docs.map(doc => doc.data()), snapshot.docs.length, Math.min(2000, USER_METRICS_RECENT_FALLBACK_LIMIT));
     return snapshot.docs.reduce((count, doc) => {
       const raw = doc.data() || {};
       const type = String(raw.usertype || raw.userType || raw.role || '').trim().toLowerCase();
@@ -220,21 +226,21 @@ async function countRecentUsersByType(usersCollection, userType, startIso) {
     }, 0);
   } catch (error) {
     console.warn('[modern-metrics-service] Firestore recent users fallback failed:', error?.message || error);
-    return Math.max(Number(primary || 0), 0);
+    throw readBudget.unavailable();
   }
 }
 
 class ModernMetricsService {
+  async getActiveRidesCount() { return getActiveRidesCount(); }
   async getRidesForWindow({ period = 'today', startDate, endDate } = {}) {
     const firestore = getFirestore();
-    if (!firestore) return [];
+    if (!firestore) throw readBudget.unavailable();
 
     const { start, end } = getWindow(period, startDate, endDate);
-    const snapshot = await firestore
+    const snapshot = await readBudget.firestoreSnapshot(firestore
       .collection('rides')
       .where('createdAt', '>=', start)
-      .where('createdAt', '<=', end)
-      .get();
+      .where('createdAt', '<=', end));
 
     return snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
   }
@@ -305,14 +311,7 @@ class ModernMetricsService {
 
   async getUsersStatusStats() {
     const firestore = getFirestore();
-    if (!firestore) {
-      return {
-        customers: { total: 0, online: 0, offline: 0 },
-        drivers: { total: 0, online: 0, offline: 0 },
-        newCustomersToday: 0,
-        newDriversToday: 0
-      };
-    }
+    if (!firestore) throw readBudget.unavailable();
 
     const usersCollection = firestore.collection('users');
     const todayStart = new Date();
@@ -321,12 +320,13 @@ class ModernMetricsService {
 
     const redis = redisPool.getConnection();
     const [onlineUsersSet, onlineDriversSet] = await Promise.all([
-      redis.smembers('online_users').catch(() => []),
-      redis.smembers('online_drivers').catch(() => [])
+      redis.scard('online_users'),
+      redis.scard('online_drivers')
     ]);
 
-    const onlineUsers = new Set(onlineUsersSet || []);
-    const onlineDrivers = new Set(onlineDriversSet || []);
+    const onlineUsers = Number(onlineUsersSet);
+    const onlineDrivers = Number(onlineDriversSet);
+    if (![onlineUsers, onlineDrivers].every(Number.isSafeInteger)) throw readBudget.unavailable();
     const [
       customersTotal,
       driversTotal,
@@ -339,10 +339,10 @@ class ModernMetricsService {
       countRecentUsersByType(usersCollection, 'driver', todayIso)
     ]);
 
-    const driversOnline = Math.min(driversTotal, onlineDrivers.size || 0);
+    const driversOnline = Math.min(driversTotal, onlineDrivers);
     const customersOnline = Math.min(
       customersTotal,
-      Math.max(0, (onlineUsers.size || 0) - driversOnline)
+      Math.max(0, (onlineUsers) - driversOnline)
     );
 
     return {
@@ -389,23 +389,13 @@ class ModernMetricsService {
 
   async getOperationalFeeStats({ period = 'today', startDate, endDate } = {}) {
     const firestore = getFirestore();
-    if (!firestore) {
-      return {
-        totalOperationalFee: 0,
-        totalRides: 0,
-        averageFee: 0,
-        period,
-        startDate: null,
-        endDate: null
-      };
-    }
+    if (!firestore) throw readBudget.unavailable();
 
     const { start, end } = getWindow(period, startDate, endDate);
-    const distributionSnapshot = await firestore
+    const distributionSnapshot = await readBudget.firestoreSnapshot(firestore
       .collection('payment_distributions')
       .where('createdAt', '>=', start)
-      .where('createdAt', '<=', end)
-      .get();
+      .where('createdAt', '<=', end));
 
     let totalOperationalFee = 0;
     let totalRides = 0;

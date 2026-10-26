@@ -8,6 +8,7 @@ module.exports = function loadUsers(firestore) {
   const safeRequire = name => {
     if (name === 'firebase-admin') return { firestore: () => firestore };
     if (name === 'node:crypto') return require(name);
+    if (name === '../utils/metrics-read-budget') return require('../../utils/metrics-read-budget');
     if (name === '../utils/bounded-ttl-cache') return require('../../utils/bounded-ttl-cache');
     if (name === '../utils/logger') return { logError() {} };
     if (name === './audit-service') return { logEvent() { throw new Error('Mutations forbidden in list benchmark'); } };

@@ -245,11 +245,13 @@ class OptimizedDataLoader {
                     const passengerBookings = await db.ref('bookings')
                         .orderByChild('passengerId')
                         .equalTo(userId)
+                        .limitToFirst(201)
                         .once('value');
                     
                     const driverBookings = await db.ref('bookings')
                         .orderByChild('driverId')
                         .equalTo(userId)
+                        .limitToFirst(201)
                         .once('value');
                     
                     const passenger = passengerBookings.val() || {};
@@ -257,6 +259,9 @@ class OptimizedDataLoader {
                     
                     // Combinar e converter para array
                     const allBookings = { ...passenger, ...driver };
+                    if (Object.keys(passenger).length > 200 || Object.keys(driver).length > 200 || Buffer.byteLength(JSON.stringify(allBookings)) > 2 * 1024 * 1024) {
+                        return new Error('User booking history exceeds legacy budget; use receipt cursor API');
+                    }
                     return Object.keys(allBookings).map(key => ({
                         id: key,
                         ...allBookings[key]

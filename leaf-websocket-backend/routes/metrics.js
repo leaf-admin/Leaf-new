@@ -1,3 +1,4 @@
+const readBudget = require('../utils/metrics-read-budget');
 const express = require('express');
 const admin = require('firebase-admin');
 const { logger, logStructured, logError } = require('../utils/logger');
@@ -217,6 +218,7 @@ router.get('/api/metrics/rides/daily', async (req, res) => {
       res.set('X-Leaf-Metrics-Cache', 'MISS');
       return res.json(stats);
     } catch (modernError) {
+      readBudget.requireLegacyFallback();
       logStructured('warn', 'Fallback RTDB em /api/metrics/rides/daily', {
         service: 'metrics-routes',
         reason: modernError.message
@@ -238,7 +240,7 @@ router.get('/api/metrics/rides/daily', async (req, res) => {
     const db = firebaseConfig.getRealtimeDB();
 
     // Buscar todas as corridas
-    const bookingsSnapshot = await db.ref('bookings').once('value');
+    const bookingsSnapshot = await readBudget.realtimeSnapshot(db.ref('bookings'));
     const bookings = bookingsSnapshot.val() || {};
     const bookingArray = Object.keys(bookings).map(key => ({ id: key, ...bookings[key] }));
 
@@ -289,7 +291,7 @@ router.get('/api/metrics/rides/daily', async (req, res) => {
     res.json(stats);
   } catch (error) {
     logError(error, 'Erro ao buscar métricas de corridas diárias:', { service: 'metrics-routes' });
-    res.status(500).json({ error: 'Erro interno do servidor' });
+    res.status(error.statusCode || 500).json({ error: error.statusCode === 503 ? 'Métricas temporariamente indisponíveis' : 'Erro interno do servidor' });
   }
 });
 
@@ -304,6 +306,7 @@ router.get('/api/metrics/users/status', async (req, res) => {
       const stats = await modernMetricsService.getUsersStatusStats();
       return res.json(stats);
     } catch (modernError) {
+      readBudget.requireLegacyFallback();
       logStructured('warn', 'Fallback RTDB em /api/metrics/users/status', {
         service: 'metrics-routes',
         reason: modernError.message
@@ -334,7 +337,7 @@ router.get('/api/metrics/users/status', async (req, res) => {
 
     try {
       // Buscar usuários do Firebase
-      const usersSnapshot = await db.ref('users').once('value');
+      const usersSnapshot = await readBudget.realtimeSnapshot(db.ref('users'));
       const users = usersSnapshot.val() || {};
       const userArray = Object.keys(users).map(key => ({ id: key, ...users[key] }));
 
@@ -386,12 +389,13 @@ router.get('/api/metrics/users/status', async (req, res) => {
 
     } catch (error) {
       logStructured('warn', '⚠️ Erro ao buscar status de usuários:', error.message, { service: 'metrics-routes' });
+      throw error;
     }
 
     res.json(stats);
   } catch (error) {
     logError(error, 'Erro ao buscar métricas de usuários:', { service: 'metrics-routes' });
-    res.status(500).json({ error: 'Erro interno do servidor' });
+    res.status(error.statusCode || 500).json({ error: error.statusCode === 503 ? 'Métricas temporariamente indisponíveis' : 'Erro interno do servidor' });
   }
 });
 
@@ -408,6 +412,7 @@ router.get('/api/metrics/financial/rides', async (req, res) => {
       const stats = await modernMetricsService.getFinancialRidesStats({ period, startDate, endDate });
       return res.json(stats);
     } catch (modernError) {
+      readBudget.requireLegacyFallback();
       logStructured('warn', 'Fallback RTDB em /api/metrics/financial/rides', {
         service: 'metrics-routes',
         reason: modernError.message
@@ -432,7 +437,7 @@ router.get('/api/metrics/financial/rides', async (req, res) => {
     const redis = redisPool.getConnection();
 
     // Buscar corridas
-    const bookingsSnapshot = await db.ref('bookings').once('value');
+    const bookingsSnapshot = await readBudget.realtimeSnapshot(db.ref('bookings'));
     const bookings = bookingsSnapshot.val() || {};
     const bookingArray = Object.keys(bookings).map(key => ({ id: key, ...bookings[key] }));
 
@@ -497,7 +502,7 @@ router.get('/api/metrics/financial/rides', async (req, res) => {
     res.json(stats);
   } catch (error) {
     logError(error, 'Erro ao buscar métricas financeiras de corridas:', { service: 'metrics-routes' });
-    res.status(500).json({ error: 'Erro interno do servidor' });
+    res.status(error.statusCode || 500).json({ error: error.statusCode === 503 ? 'Métricas temporariamente indisponíveis' : 'Erro interno do servidor' });
   }
 });
 
@@ -514,6 +519,7 @@ router.get('/api/metrics/financial/operational-fee', async (req, res) => {
       const stats = await modernMetricsService.getOperationalFeeStats({ period, startDate, endDate });
       return res.json(stats);
     } catch (modernError) {
+      readBudget.requireLegacyFallback();
       logStructured('warn', 'Fallback RTDB em /api/metrics/financial/operational-fee', {
         service: 'metrics-routes',
         reason: modernError.message
@@ -536,7 +542,7 @@ router.get('/api/metrics/financial/operational-fee', async (req, res) => {
     const db = firebaseConfig.getRealtimeDB();
 
     // Buscar corridas
-    const bookingsSnapshot = await db.ref('bookings').once('value');
+    const bookingsSnapshot = await readBudget.realtimeSnapshot(db.ref('bookings'));
     const bookings = bookingsSnapshot.val() || {};
     const bookingArray = Object.keys(bookings).map(key => ({ id: key, ...bookings[key] }));
 
@@ -590,7 +596,7 @@ router.get('/api/metrics/financial/operational-fee', async (req, res) => {
     res.json(stats);
   } catch (error) {
     logError(error, 'Erro ao buscar taxa operacional:', { service: 'metrics-routes' });
-    res.status(500).json({ error: 'Erro interno do servidor' });
+    res.status(error.statusCode || 500).json({ error: error.statusCode === 503 ? 'Métricas temporariamente indisponíveis' : 'Erro interno do servidor' });
   }
 });
 
@@ -610,7 +616,7 @@ router.get('/api/metrics/maps/rides-by-region', async (req, res) => {
     const db = firebaseConfig.getRealtimeDB();
 
     // Buscar corridas
-    const bookingsSnapshot = await db.ref('bookings').once('value');
+    const bookingsSnapshot = await readBudget.realtimeSnapshot(db.ref('bookings'));
     const bookings = bookingsSnapshot.val() || {};
     const bookingArray = Object.keys(bookings).map(key => ({ id: key, ...bookings[key] }));
 
@@ -686,7 +692,7 @@ router.get('/api/metrics/maps/rides-by-region', async (req, res) => {
     res.json({ regions: Object.values(regions) });
   } catch (error) {
     logError(error, 'Erro ao buscar corridas por região:', { service: 'metrics-routes' });
-    res.status(500).json({ error: 'Erro interno do servidor' });
+    res.status(error.statusCode || 500).json({ error: error.statusCode === 503 ? 'Métricas temporariamente indisponíveis' : 'Erro interno do servidor' });
   }
 });
 
@@ -708,7 +714,7 @@ router.get('/api/metrics/maps/demand-by-region', async (req, res) => {
 
     try {
       // Buscar usuários
-      const usersSnapshot = await db.ref('users').once('value');
+      const usersSnapshot = await readBudget.realtimeSnapshot(db.ref('users'));
       const users = usersSnapshot.val() || {};
 
       // Buscar localizações ativas (do Redis ou Firebase)
@@ -790,12 +796,13 @@ router.get('/api/metrics/maps/demand-by-region', async (req, res) => {
 
     } catch (error) {
       logStructured('warn', '⚠️ Erro ao buscar demanda por região:', error.message, { service: 'metrics-routes' });
+      throw error;
     }
 
     res.json({ regions: Object.values(regions) });
   } catch (error) {
     logError(error, 'Erro ao buscar demanda por região:', { service: 'metrics-routes' });
-    res.status(500).json({ error: 'Erro interno do servidor' });
+    res.status(error.statusCode || 500).json({ error: error.statusCode === 503 ? 'Métricas temporariamente indisponíveis' : 'Erro interno do servidor' });
   }
 });
 
@@ -810,6 +817,7 @@ router.get('/api/metrics/subscriptions/active', async (req, res) => {
       const stats = await driverSubscriptionService.getActiveSubscriptionMetrics();
       return res.json(stats);
     } catch (modernError) {
+      readBudget.requireLegacyFallback();
       logStructured('warn', 'Fallback RTDB em /api/metrics/subscriptions/active', {
         service: 'metrics-routes',
         reason: modernError.message
@@ -830,11 +838,11 @@ router.get('/api/metrics/subscriptions/active', async (req, res) => {
     const db = firebaseConfig.getRealtimeDB();
 
     // Buscar motoristas
-    const usersSnapshot = await db.ref('users').once('value');
+    const usersSnapshot = await readBudget.realtimeSnapshot(db.ref('users'));
     const users = usersSnapshot.val() || {};
 
     // Buscar assinaturas
-    const subscriptionsSnapshot = await db.ref('subscriptions').once('value');
+    const subscriptionsSnapshot = await readBudget.realtimeSnapshot(db.ref('subscriptions'));
     const subscriptions = subscriptionsSnapshot.val() || {};
 
     const now = new Date();
@@ -885,7 +893,7 @@ router.get('/api/metrics/subscriptions/active', async (req, res) => {
     res.json(stats);
   } catch (error) {
     logError(error, 'Erro ao buscar assinaturas ativas:', { service: 'metrics-routes' });
-    res.status(500).json({ error: 'Erro interno do servidor' });
+    res.status(error.statusCode || 500).json({ error: error.statusCode === 503 ? 'Métricas temporariamente indisponíveis' : 'Erro interno do servidor' });
   }
 });
 
@@ -968,7 +976,7 @@ router.get('/api/metrics/waitlist/landing', async (req, res) => {
     res.json({ waitlist, stats });
   } catch (error) {
     logError(error, 'Erro ao buscar lista de espera:', { service: 'metrics-routes' });
-    res.status(500).json({ error: 'Erro interno do servidor' });
+    res.status(error.statusCode || 500).json({ error: error.statusCode === 503 ? 'Métricas temporariamente indisponíveis' : 'Erro interno do servidor' });
   }
 });
 
@@ -1077,7 +1085,7 @@ router.get('/api/metrics/landing-page/analytics', async (req, res) => {
     res.json(stats);
   } catch (error) {
     logError(error, 'Erro ao buscar analytics da landing page:', { service: 'metrics-routes' });
-    res.status(500).json({ error: 'Erro interno do servidor' });
+    res.status(error.statusCode || 500).json({ error: error.statusCode === 503 ? 'Métricas temporariamente indisponíveis' : 'Erro interno do servidor' });
   }
 });
 
@@ -1469,8 +1477,8 @@ router.get('/api/metrics/marketplace', async (req, res) => {
       });
 
     const [bookingsSnapshot, usersSnapshot, supportSummary] = await Promise.all([
-      db.ref('bookings').once('value'),
-      db.ref('users').once('value'),
+      readBudget.realtimeSnapshot(db.ref('bookings')),
+      readBudget.realtimeSnapshot(db.ref('users')),
       supportSummaryPromise
     ]);
 

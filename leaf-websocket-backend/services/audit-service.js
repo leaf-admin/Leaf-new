@@ -1,3 +1,4 @@
+const readBudget = require('../utils/metrics-read-budget');
 /**
  * Audit Service
  * 
@@ -358,6 +359,7 @@ class AuditService {
    */
   async getAuditLogs(filters = {}, limit = 100) {
     try {
+      limit = Math.min(200, Math.max(1, Number.parseInt(limit, 10) || 100));
       const firestore = firebaseConfig.getFirestore();
       if (!firestore) {
         return { success: false, error: 'Firestore não disponível' };
@@ -390,33 +392,9 @@ class AuditService {
         query = query.where('timestamp', '<=', filters.endDate);
       }
 
-      // Ordenar por timestamp (mais recentes primeiro)
-      // Se houver filtros, tentar ordenar (pode precisar de índice composto)
-      // Se falhar, ordenar em memória
-      let snapshot;
-      let needsInMemorySort = false;
-
-      try {
-        query = query.orderBy('timestamp', 'desc').limit(limit);
-        snapshot = await query.get();
-      } catch (indexError) {
-        // Se precisar de índice composto, buscar sem ordenação e ordenar em memória
-        logStructured('warn', 'Índice composto não disponível, ordenando em memória', { service: 'audit-service' });
-        needsInMemorySort = true;
-        // Remover orderBy e buscar mais documentos
-        query = firestore.collection(this.collectionName);
-
-        // Reaplicar filtros
-        if (filters.userId) query = query.where('userId', '==', filters.userId);
-        if (filters.action) query = query.where('action', '==', filters.action);
-        if (filters.resource) query = query.where('resource', '==', filters.resource);
-        if (filters.severity) query = query.where('severity', '==', filters.severity);
-        if (filters.startDate) query = query.where('timestamp', '>=', filters.startDate);
-        if (filters.endDate) query = query.where('timestamp', '<=', filters.endDate);
-
-        query = query.limit(limit * 2); // Buscar mais para garantir que temos os mais recentes
-        snapshot = await query.get();
-      }
+      const needsInMemorySort = false;
+      const snapshot = await query.orderBy('timestamp', 'desc').limit(limit).get();
+      readBudget.assertPayload(snapshot.docs.map(doc => doc.data()), snapshot.docs.length, limit);
 
       const logs = [];
 
@@ -480,7 +458,7 @@ class AuditService {
         query = query.where('timestamp', '<=', endDate);
       }
 
-      const snapshot = await query.get();
+      const snapshot = await readBudget.firestoreSnapshot(query);
 
       const stats = {
         total: 0,

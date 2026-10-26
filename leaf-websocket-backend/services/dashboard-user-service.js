@@ -1,3 +1,4 @@
+const readBudget = require('../utils/metrics-read-budget');
 const { createHash } = require('node:crypto');
 const BoundedTtlCache = require('../utils/bounded-ttl-cache');
 const admin = require('firebase-admin');
@@ -119,14 +120,15 @@ function getTodayStart() {
 
 async function runCountAggregate(query, context = {}) {
   try {
-    const snapshot = await query.count().get();
+    const snapshot = await query.limit(10001).count().get();
+    if (Number(snapshot?.data?.().count) > 10000) return null;
     return Number(snapshot?.data?.().count || 0);
   } catch (error) {
     logError(error, 'Erro ao executar count agregado de usuarios do dashboard', {
       service: 'dashboard-user-service',
       ...context
     });
-    return Object.prototype.hasOwnProperty.call(context, 'fallback') ? context.fallback : 0;
+    return Object.prototype.hasOwnProperty.call(context, 'fallback') ? context.fallback : null;
   }
 }
 
@@ -211,7 +213,7 @@ async function searchUsersByExactFields(params = {}) {
       return;
     }
     (snapshot.docs || []).forEach((doc) => {
-      if (byId.size < safeLimit) byId.set(doc.id, normalizeUserRecord(doc));
+      byId.set(doc.id, normalizeUserRecord(doc));
     });
   };
 
@@ -224,6 +226,7 @@ async function searchUsersByExactFields(params = {}) {
   ];
 
   const results = await Promise.allSettled(tasks);
+  if (results.some(result => result.status === 'rejected')) throw readBudget.unavailable('Busca de usuários temporariamente indisponível');
   results.forEach((result) => {
     if (result.status === 'fulfilled') addSnapshotDocs(result.value);
   });
@@ -238,8 +241,11 @@ async function searchUsersByExactFields(params = {}) {
     pagination: {
       page: 1,
       limit: safeLimit,
-      total: rows.length,
-      pages: rows.length > 0 ? 1 : 0,
+      total: null,
+      pages: null,
+      hasMore: false,
+      totalMode: 'bounded-exact-matches',
+      truncated: byId.size > safeLimit || results.some(result => result.value?.docs?.length >= safeLimit),
       searchMode: 'exact'
     }
   };
@@ -363,6 +369,7 @@ async function listUsers(params = {}) {
     }
   } else if (start > 0) query = query.offset(start);
   const snapshot = await query[cursorMode && params.before ? 'limitToLast' : 'limit'](safeLimit + (cursorMode ? 1 : 0)).get();
+  readBudget.assertPayload(snapshot.docs.map(doc => doc.data()), snapshot.docs.length, safeLimit + (cursorMode ? 1 : 0));
   const docs = cursorMode ? params.before ? snapshot.docs.slice(-safeLimit) : snapshot.docs.slice(0, safeLimit) : snapshot.docs;
   let rows = docs.map(normalizeUserRecord);
   if (safeStatus) rows = rows.filter(user => String(user.status || '').toLowerCase() === safeStatus);
@@ -405,7 +412,7 @@ async function countUsersByType(collection, userType, context = {}) {
     collection.where('usertype', '==', userType),
     { ...context, field: 'usertype', userType }
   );
-  if (primary > 0) return primary;
+  if (primary === null || primary > 0) return primary;
 
   return runCountAggregate(
     collection.where('userType', '==', userType),
@@ -431,8 +438,9 @@ async function countNewUsersByType(collection, userType, startIso, context = {})
   try {
     const snapshot = await collection
       .where('createdAt', '>=', startIso)
-      .limit(USER_STATS_RECENT_FALLBACK_LIMIT)
+      .limit(Math.min(2000, USER_STATS_RECENT_FALLBACK_LIMIT) + 1)
       .get();
+    readBudget.assertPayload(snapshot.docs.map(doc => doc.data()), snapshot.docs.length, Math.min(2000, USER_STATS_RECENT_FALLBACK_LIMIT));
     return snapshot.docs.reduce((count, doc) => {
       const type = normalizeUserType(doc.data() || {});
       return type === userType ? count + 1 : count;
@@ -444,7 +452,7 @@ async function countNewUsersByType(collection, userType, startIso, context = {})
       userType,
       limit: USER_STATS_RECENT_FALLBACK_LIMIT
     });
-    return Math.max(Number(primary || 0), 0);
+    return null;
   }
 }
 
@@ -485,8 +493,8 @@ async function getUserStats(redis, options = {}) {
     countNewUsersByType(collection, 'customer', periodStartIso, { source: 'getUserStats.newCustomersInPeriod' })
   ]);
 
-  let activeToday = 0;
-  let conversionRate = 0;
+  let activeToday = null;
+  let conversionRate = null;
   if (redis) {
     try {
       activeToday = Number(await redis.scard('online_users')) || 0;
@@ -517,7 +525,7 @@ async function getUserStats(redis, options = {}) {
       newCustomers: newCustomersInPeriod
     },
     activeToday,
-    growthRate: newThisMonth > 0
+    growthRate: total === null || newThisMonth === null ? null : newThisMonth > 0
       ? Number(((newThisMonth / Math.max(total - newThisMonth, 1)) * 100).toFixed(1))
       : 0,
     conversionRate,
@@ -525,6 +533,7 @@ async function getUserStats(redis, options = {}) {
     countMode: 'firestore-aggregate'
   };
 
+  if (userStatsCache.size >= 16) userStatsCache.delete(userStatsCache.keys().next().value);
   userStatsCache.set(cacheKey, {
     timestamp: Date.now(),
     payload

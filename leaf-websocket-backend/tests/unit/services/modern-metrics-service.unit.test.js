@@ -24,6 +24,7 @@ describe('modern-metrics-service rounding', () => {
       collection: jest.fn(() => ({
         where: jest.fn(() => ({
           where: jest.fn(() => ({
+            limit: jest.fn().mockReturnThis(),
             get: jest.fn().mockResolvedValue({
               docs: [
                 {
@@ -79,6 +80,7 @@ describe('modern-metrics-service rounding', () => {
       collection: jest.fn(() => ({
         where: jest.fn(() => ({
           where: jest.fn(() => ({
+            limit: jest.fn().mockReturnThis(),
             get: jest.fn().mockResolvedValue({
               docs: [
                 {
@@ -126,6 +128,7 @@ describe('modern-metrics-service rounding', () => {
       collection: jest.fn(() => ({
         where: jest.fn(() => ({
           where: jest.fn(() => ({
+            limit: jest.fn().mockReturnThis(),
             get: jest.fn().mockResolvedValue({
               docs: [
                 {
