@@ -85,7 +85,7 @@ const PrivacyPolicyScreen = ({ navigation, route }) => {
   const renderOverview = () => (
     <View style={styles.sectionContent}>
       <PrototypeMenuSection title="Resumo">
-        <PrototypeMenuInfoRow label="Atualização" value="28 de julho de 2025" />
+        <PrototypeMenuInfoRow label="Atualização" value="26 de outubro de 2026" />
         <Text style={styles.bodyCopy}>
           A Leaf respeita sua privacidade e está comprometida em proteger seus dados pessoais.
           Esta política descreve como coletamos, usamos e protegemos suas informações.
@@ -96,7 +96,7 @@ const PrivacyPolicyScreen = ({ navigation, route }) => {
         {renderDetailRow({ icon: 'checkmark-circle-outline', title: 'Não vendemos seus dados pessoais' })}
         {renderDetailRow({ icon: 'options-outline', title: 'Você controla suas preferências de privacidade' })}
         {renderDetailRow({ icon: 'lock-closed-outline', title: 'Dados protegidos por controles de segurança' })}
-        {renderDetailRow({ icon: 'document-text-outline', title: 'Em conformidade com a LGPD', last: true })}
+        {renderDetailRow({ icon: 'document-text-outline', title: 'Direitos previstos na LGPD', last: true })}
       </PrototypeMenuSection>
 
       <PrototypeMenuSection title="Conta">
@@ -107,6 +107,18 @@ const PrivacyPolicyScreen = ({ navigation, route }) => {
           last
           onPress={() => setSelectedSection('user-rights')}
           accessibilityLabel="Excluir conta"
+        />
+      </PrototypeMenuSection>
+
+      <PrototypeMenuSection title="Informações legais">
+        <PrototypeMenuRow
+          icon="document-text-outline"
+          title="Situação regulatória"
+          subtitle="Solicitação administrativa no Rio de Janeiro"
+          onPress={() => navigation.navigate('Legal', { initialSection: 'compliance' })}
+          accessibilityLabel="Situação regulatória da Leaf"
+          testID="privacy-open-regulatory-status"
+          last
         />
       </PrototypeMenuSection>
     </View>
