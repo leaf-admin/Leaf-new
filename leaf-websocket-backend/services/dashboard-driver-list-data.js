@@ -96,13 +96,13 @@ async function readPage({ db, firestore: providedFirestore, getFirestore, params
   const statsByDriver = new Map();
   if (ids.length) {
     const refs = ids.map(id => firestore.collection('ops_driver_stats_v1').doc(hash(id)));
-    const snapshots = await firestore.getAll(...refs, { fieldMask: ['driverId', 'namespace', 'schema', 'complete', 'source', 'completedTrips', 'driverNetMinor', 'updatedAt'] });
+    const snapshots = await firestore.getAll(...refs, { fieldMask: ['driverId', 'namespace', 'schema', 'complete', 'source', 'completedTrips', 'driverNetMinor', 'pendingFinancialTrips', 'updatedAt'] });
     if (snapshots.length !== ids.length) throw error('DASHBOARD_STATS_INCOMPLETE', 'Estatísticas indisponíveis');
     snapshots.forEach((doc, i) => {
       const data = doc.exists ? doc.data() : null;
       const valid = data?.schema === 1 && data?.complete === true && data?.namespace === 'operational'
         && data?.driverId === ids[i] && data?.source === 'ride_finalization_v1'
-        && Number.isSafeInteger(data.completedTrips) && Number.isSafeInteger(data.driverNetMinor);
+        && Number(data.pendingFinancialTrips || 0) === 0 && Number.isSafeInteger(data.completedTrips) && Number.isSafeInteger(data.driverNetMinor);
       statsByDriver.set(ids[i], { totalTrips: null, completedTrips: valid ? data.completedTrips : null,
         totalEarnings: valid ? data.driverNetMinor / 100 : null, source: valid ? 'aggregate-v1' : 'unavailable' });
     });

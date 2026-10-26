@@ -1,3 +1,5 @@
+const projectionStore = require('./metrics-projection-store');
+const projectionSummary = require('./metrics-projection-summary');
 const admin = require('firebase-admin');
 const readBudget = require('../utils/metrics-read-budget');
 const redisPool = require('../utils/redis-pool');
@@ -231,6 +233,15 @@ async function countRecentUsersByType(usersCollection, userType, startIso) {
 }
 
 class ModernMetricsService {
+  async getProjectedWindow(params = {}, kind = 'ride') {
+    if (process.env.ENABLE_OPS_METRIC_READS !== 'true') return null;
+    const firestore = getFirestore();
+    if (!firestore) throw readBudget.unavailable();
+    const window = projectionSummary.calendarWindow(params.period, params.startDate, params.endDate);
+    const { metrics, ...metadata } = await projectionStore.readDays(firestore, kind, window.start, window.end);
+    return { metrics, metadata: { ...metadata, calendarAligned: true }, ...window };
+  }
+
   async getActiveRidesCount() { return getActiveRidesCount(); }
   async getRidesForWindow({ period = 'today', startDate, endDate } = {}) {
     const firestore = getFirestore();
@@ -246,6 +257,16 @@ class ModernMetricsService {
   }
 
   async getRidesDailyStats() {
+    const projected = await this.getProjectedWindow({ period: 'today' });
+    if (projected) {
+      const m = projected.metrics;
+      const average = key => m[`${key}Count`] ? Number((m[`${key}Ms`] / m[`${key}Count`] / 60000).toFixed(2)) : null;
+      return { totalToday: m.requests || 0, completedToday: m.completed || 0,
+        cancelledAfterAcceptance: m.cancelledAccepted || 0,
+        cancellationRate: m.accepted ? Number(((m.cancelledAccepted || 0) / m.accepted * 100).toFixed(2)) : 0,
+        activeRides: await getActiveRidesCount(), averageWaitMinutes: average('wait'), averagePickupMinutes: average('pickup'),
+        averagePaymentApprovalToPickupMinutes: average('paidPickup'), metadata: projected.metadata };
+    }
     const rides = await this.getRidesForWindow({ period: 'today' });
     const normalizedRides = rides.map((ride) => {
       const paymentData = parseObjectSafe(ride.paymentData);
@@ -362,6 +383,15 @@ class ModernMetricsService {
   }
 
   async getFinancialRidesStats({ period = 'today', startDate, endDate } = {}) {
+    const projected = await this.getProjectedWindow({ period, startDate, endDate });
+    if (projected) {
+      const m = projected.metrics; const totalValue = roundMoney((m.revenueUnits || 0) / 1000000);
+      return { totalValue, totalRides: m.completed || 0, reconciledRides: m.reconciled || 0,
+        pendingReconciliationRides: (m.completed || 0) - (m.reconciled || 0),
+        averageValue: m.reconciled ? Number((totalValue / m.reconciled).toFixed(2)) : 0,
+        reserveFundLosses: await getReserveFundLosses(), period,
+        startDate: projected.start.toISOString(), endDate: projected.end.toISOString(), metadata: projected.metadata };
+    }
     const rides = await this.getRidesForWindow({ period, startDate, endDate });
     const { start, end } = getWindow(period, startDate, endDate);
     const completedRides = rides.filter((ride) => COMPLETED_STATUSES.has(ride.status));
@@ -388,6 +418,18 @@ class ModernMetricsService {
   }
 
   async getOperationalFeeStats({ period = 'today', startDate, endDate } = {}) {
+    let projected = await this.getProjectedWindow({ period, startDate, endDate }, 'distribution');
+    if (projected) {
+      const fromDistributions = Boolean(projected.metrics.distributions);
+      if (!fromDistributions) projected = await this.getProjectedWindow({ period, startDate, endDate });
+      const m = projected.metrics;
+      const totalRides = fromDistributions ? m.distributions : m.completed || 0;
+      const reconciledRides = fromDistributions ? totalRides : m.reconciled || 0;
+      const totalOperationalFee = roundMoney((m.feeUnits || 0) / 1000000);
+      return { totalOperationalFee, totalRides, reconciledRides, pendingReconciliationRides: totalRides - reconciledRides,
+        averageFee: reconciledRides ? Number((totalOperationalFee / reconciledRides).toFixed(2)) : 0, period,
+        startDate: projected.start.toISOString(), endDate: projected.end.toISOString(), metadata: projected.metadata };
+    }
     const firestore = getFirestore();
     if (!firestore) throw readBudget.unavailable();
 
@@ -443,6 +485,15 @@ class ModernMetricsService {
   }
 
   async getRidesStats({ period = 'today', startDate, endDate } = {}) {
+    const projected = await this.getProjectedWindow({ period, startDate, endDate });
+    if (projected) {
+      const m = projected.metrics; const totalValue = roundMoney((m.revenueUnits || 0) / 1000000);
+      return { totalRides: m.requests || 0, activeRides: await getActiveRidesCount(),
+        completedToday: period === 'today' ? m.completed || 0 : 0, totalValue,
+        averageValue: m.reconciled ? Number((totalValue / m.reconciled).toFixed(2)) : 0,
+        reconciledRides: m.reconciled || 0, pendingReconciliationRides: (m.completed || 0) - (m.reconciled || 0),
+        reserveFundLosses: await getReserveFundLosses(), growthRate: 0, metadata: projected.metadata };
+    }
     const rides = await this.getRidesForWindow({ period, startDate, endDate });
     const completedRides = rides.filter((ride) => COMPLETED_STATUSES.has(ride.status));
     const reconciledCompletedRides = completedRides.filter(

@@ -137,7 +137,12 @@ class AuditService {
 
       // Salvar no Firestore
       const auditRef = firestore.collection(persistenceScope.collections.auditLogs);
-      const docRef = await auditRef.add(logDocument);
+      let docRef;
+      const projections = require('./metrics-projection-store');
+      if (projections.enabled()) {
+        docRef = auditRef.doc();
+        await projections.write(firestore, docRef, logDocument);
+      } else docRef = await auditRef.add(logDocument);
 
       // Log no console para desenvolvimento
       if (process.env.NODE_ENV !== 'production') {
@@ -446,6 +451,20 @@ class AuditService {
       const firestore = firebaseConfig.getFirestore();
       if (!firestore) {
         return { success: false, error: 'Firestore não disponível' };
+      }
+
+      if (process.env.ENABLE_OPS_METRIC_READS === 'true') {
+        const store = require('./metrics-projection-store');
+        const summary = require('./metrics-projection-summary');
+        const window = startDate && endDate ? summary.calendarWindow('custom', startDate, endDate) : null;
+        if (Boolean(startDate) !== Boolean(endDate)) throw new Error('Informe início e fim para o resumo');
+        const { metrics, ...metadata } = await store.readDays(firestore, 'audit', window?.start, window?.end);
+        const total = metrics.logs || 0;
+        const dimensions = prefix => Object.fromEntries(Object.entries(metrics).filter(([key]) => key.startsWith(`${prefix}:`))
+          .map(([key, count]) => [Buffer.from(key.slice(prefix.length + 1), 'base64url').toString('utf8'), count]));
+        return { success: true, stats: { total, bySeverity: dimensions('severity'), byAction: dimensions('action'),
+          byResource: dimensions('resource'), successRate: total ? (metrics.successes || 0) / total * 100 : 0,
+          errorRate: total ? (total - (metrics.successes || 0)) / total * 100 : 0 }, metadata };
       }
 
       let query = firestore.collection(this.collectionName);

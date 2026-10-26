@@ -41,6 +41,20 @@
           "order": "DESCENDING"
         }
       ]
+    },
+    {
+      "collectionGroup": "ops_projection_pending_v1",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "namespace",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "kind",
+          "order": "ASCENDING"
+        }
+      ]
     }
   ],
   "fieldOverrides": []

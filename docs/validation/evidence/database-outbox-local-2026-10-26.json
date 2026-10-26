@@ -1,0 +1,29 @@
+{
+  "environment": "Private Redis Unix socket,256MiB,noeviction,no persistence/network; canonical persistence adapter in memory",
+  "rows": [
+    {
+      "pending": 201,
+      "cycles": 16,
+      "maximumSelectedPerCycle": 20,
+      "maximumHscanPerCycle": 1
+    },
+    {
+      "pending": 1000,
+      "cycles": 71,
+      "maximumSelectedPerCycle": 20,
+      "maximumHscanPerCycle": 1
+    }
+  ],
+  "checks": [
+    "No HGETALL/KEYS/SMEMBERS",
+    "Bounded spill page preserves HSCAN fairness",
+    "CAS ACK preserves newer work",
+    "Malformed financial work retained",
+    "Overlapping process cycles rejected"
+  ],
+  "limitations": [
+    "HSCAN COUNT is a hint; page capped at1000 entries/2MiB and may reject larger legacy payloads",
+    "Canonical writer is substituted in this outbox-only experiment; Firestore transaction evidence is separate",
+    "Does not introduce source-version arbitration for pre-existing concurrent canonical finalization writes"
+  ]
+}

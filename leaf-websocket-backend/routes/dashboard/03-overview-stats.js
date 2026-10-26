@@ -276,6 +276,13 @@ router.get('/api/rides/stats', async (req, res) => {
 // 💰 Revenue Stats
 router.get('/api/revenue/stats', async (req, res) => {
   try {
+    if (process.env.ENABLE_OPS_METRIC_READS === 'true') {
+      const today = await modernMetricsService.getFinancialRidesStats({ period: 'today' });
+      const month = await modernMetricsService.getFinancialRidesStats({ period: 'month' });
+      return res.json({ todayRevenue: today.totalValue, monthlyRevenue: month.totalValue,
+        averageTicket: month.averageValue, growthRate: 0, metadata: month.metadata });
+    }
+
     let stats = {
       todayRevenue: 0,
       monthlyRevenue: 0,

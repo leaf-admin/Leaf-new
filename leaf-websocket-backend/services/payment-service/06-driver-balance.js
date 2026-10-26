@@ -311,7 +311,7 @@ class PaymentServiceDriverBalanceMethods {
         .collection(collections.paymentDistributions)
         .doc(distributionData.rideId);
 
-      await distributionRef.set({
+      await require('../metrics-projection-store').write(firestore, distributionRef, {
         ...distributionData,
         financialContext: contextResult.context,
         financialNamespace: contextResult.context.namespace,
