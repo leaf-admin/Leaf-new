@@ -303,14 +303,14 @@ class TripLocationPersistenceService {
             lng,
             capturedAt,
             receivedAt: Number.isFinite(Number(eventData.receivedAt)) ? Number(eventData.receivedAt) : Date.now(),
-            accuracy: Number.isFinite(Number(eventData.accuracy)) ? Number(eventData.accuracy) : null,
-            heading: Number.isFinite(Number(eventData.heading)) ? Number(eventData.heading) : null,
-            speed: Number.isFinite(Number(eventData.speed)) ? Number(eventData.speed) : null,
+            accuracy: eventData.accuracy != null && Number.isFinite(Number(eventData.accuracy)) ? Number(eventData.accuracy) : null,
+            heading: eventData.heading != null && Number.isFinite(Number(eventData.heading)) ? Number(eventData.heading) : null,
+            speed: eventData.speed != null && Number.isFinite(Number(eventData.speed)) ? Number(eventData.speed) : null,
             orderStatus: eventData.orderStatus ? String(eventData.orderStatus) : null,
-            outOfOrderWindow: Number.isInteger(Number(eventData.outOfOrderWindow))
+            outOfOrderWindow: eventData.outOfOrderWindow != null && Number.isInteger(Number(eventData.outOfOrderWindow))
                 ? Number(eventData.outOfOrderWindow)
                 : null,
-            lastAcceptedSeq: Number.isInteger(Number(eventData.lastAcceptedSeq))
+            lastAcceptedSeq: eventData.lastAcceptedSeq != null && Number.isInteger(Number(eventData.lastAcceptedSeq))
                 ? Number(eventData.lastAcceptedSeq)
                 : null,
             ...buildPersistenceEnvelope(persistenceScope)

@@ -1,0 +1,15 @@
+{
+  "environment": "Private Redis; synthetic CAS conflict followed by lost worker ACK replay; no external access",
+  "rows": [
+    {
+      "variant": "3e318ac15",
+      "pointsAfterCasAndReplay": 2,
+      "replayDeduplicated": false
+    },
+    {
+      "variant": "candidate",
+      "pointsAfterCasAndReplay": 1,
+      "replayDeduplicated": true
+    }
+  ]
+}

@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const withPrivateRedis = require('./private-redis.cjs');
 const loadService = require('./isolated-gps-service.cjs');
 const { appendTripLocation } = require('../../utils/trip-location-stream-write');
-const { ACK_CHUNK, CLAIM_TRIPS } = require('../../utils/trip-location-buffer-ops');
+const { ACK_CHUNK, CLAIM_TRIPS, APPEND_BUFFER } = require('../../utils/trip-location-buffer-ops');
 const { sealFinancialContext } = require('../../services/financial-runtime-context');
 
 withPrivateRedis(async redis => {
@@ -33,8 +33,10 @@ withPrivateRedis(async redis => {
     };
   } }) };
   let dropAck = false;
+  let forceCasRetry = false;
   const client = new Proxy(redis, { get(target, method) {
     if (method === 'eval') return async (...args) => {
+      if (args[0] === APPEND_BUFFER && forceCasRetry) { forceCasRetry = false; return [-1, 0]; }
       if (args[0] === ACK_CHUNK && dropAck) { dropAck = false; throw new Error('synthetic crash before ACK'); }
       return target.eval(...args);
     };
@@ -135,6 +137,14 @@ withPrivateRedis(async redis => {
   assert.equal((await service.resolveCanonicalTripMetrics({ tripId: 'large', driverId: 'driver', redis })).reason,
     'canonical_telemetry_recovery_budget_exceeded');
   cases.push('Oversized fallback returns incomplete telemetry instead of reading an unlimited route');
+
+  const nullable = point('nullable-retry', 1, { accuracy: undefined, heading: undefined, speed: undefined });
+  forceCasRetry = true;
+  await service.bufferLocationEvent(nullable);
+  assert.equal((await service.bufferLocationEvent(nullable)).duplicate, true);
+  assert.equal(await redis.llen(service.getBufferKey('nullable-retry')), 1);
+  assert.equal(await redis.hget(service.getMetaKey('nullable-retry'), 'canonicalPointsCount'), '1');
+  cases.push('CAS retry followed by lost worker ACK replay preserves nullable identity and deduplicates once');
 
   const fairness = [];
   for (const total of [199, 200, 201, 1000]) {

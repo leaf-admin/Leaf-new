@@ -125,6 +125,15 @@ describe('trip-location-persistence-service', () => {
     }
   });
 
+  test('normalization is idempotent across CAS and stream retries with nullable fields', () => {
+    const normalized = service.normalizeLocationEvent({ tripId: 'retry', driverId: 'driver',
+      lat: -23, lng: -46, seq: null, capturedAt: 1710000000000, receivedAt: 1710000000100 });
+    expect(service.normalizeLocationEvent(normalized)).toEqual(normalized);
+    for (const field of ['seq', 'accuracy', 'heading', 'speed', 'outOfOrderWindow', 'lastAcceptedSeq']) {
+      expect(normalized[field]).toBeNull();
+    }
+  });
+
   test('normalizeLocationEvent should include ordering metadata', () => {
     const normalized = service.normalizeLocationEvent({
       tripId: 'trip-1',
