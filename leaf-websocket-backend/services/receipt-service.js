@@ -14,6 +14,7 @@ const crypto = require('crypto');
 const PDFDocument = require('pdfkit');
 const PaymentService = require('./payment-service');
 const receiptHistoryIndex = require('./receipt-history-index');
+const receiptFirestoreStore = require('./receipt-firestore-store');
 // Legacy (pre-index) listing reads at most this many recent receipts.
 const LEGACY_RECEIPT_WINDOW = 200;
 const { acceptedContext } = require('./driver-intro-fee-service');
@@ -998,6 +999,32 @@ class ReceiptService {
         };
     }
 
+    getReceiptFirestore() {
+        return require('../firebase-config').getFirestore();
+    }
+
+    /**
+     * Copia o recibo já salvo no RTDB para o Firestore (saída do RTDB, etapa 1).
+     * O RTDB segue como fonte: uma falha aqui não desfaz nem bloqueia o recibo;
+     * a cópia do histórico com conferência repara o que faltar.
+     */
+    async mirrorReceiptToFirestoreStore(receiptData, persistenceScope) {
+        if (!receiptFirestoreStore.enabledWrites()) return { mirrored: false, reason: 'disabled' };
+        try {
+            return await receiptFirestoreStore.mirror(this.getReceiptFirestore(), receiptData, persistenceScope, {
+                ownerOf: this.resolveStoredReceiptOwnerId.bind(this),
+                timestampOf: this.resolveStoredReceiptTimestamp.bind(this)
+            });
+        } catch (error) {
+            logger.warn('⚠️ Recibo não espelhado no Firestore; será reparado pela cópia do histórico', {
+                rideId: receiptData?.rideId || null,
+                code: error?.code || null,
+                error: error?.message
+            });
+            return { mirrored: false, reason: error?.code || 'mirror_failed' };
+        }
+    }
+
     /**
      * Salva recibo no Firestore
      * @param {Object} receipt - Recibo gerado
@@ -1056,6 +1083,7 @@ class ReceiptService {
                     },
                     ...receiptHistoryIndex.buildUpdates(receiptData, persistenceScope, options)
                 });
+                await this.mirrorReceiptToFirestoreStore(receiptData, persistenceScope);
                 return true;
             }
 
@@ -1077,6 +1105,7 @@ class ReceiptService {
                 });
 
             logger.info(`✅ Recibo salvo no Firestore: ${receipt.receiptId}`);
+            await this.mirrorReceiptToFirestoreStore(receiptData, persistenceScope);
             return true;
 
         } catch (error) {
