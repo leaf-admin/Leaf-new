@@ -1,6 +1,10 @@
 const express = require('express');
 const router = express.Router();
 const admin = require('firebase-admin');
+const { createRouter: createRtdbRootRouter } = require('../services/rtdb-root-router');
+// RTDB exit: roots routed to Firestore are honored here as in firebase-config;
+// with no roots configured this is the plain admin.database() client.
+const realtimeDb = () => createRtdbRootRouter(admin.database(), { getFirestore: () => admin.firestore() });
 const { logger } = require('../utils/logger');
 const { assertAccountWritable, saveAccountProfile, projectRealtimeProfile, runAccountDeletion } = require('../services/account-lifecycle-service');
 const { readPlaces, mutatePlaces, normalizePlace, validatePlaceId } = require('../services/account-saved-places');
@@ -440,7 +444,7 @@ function sanitizePreferencePatch(input = {}) {
 }
 
 async function readUserVehicles(userId) {
-  const snapshot = await admin.database().ref(`user_vehicles/${userId}`).once('value');
+  const snapshot = await realtimeDb().ref(`user_vehicles/${userId}`).once('value');
   if (!snapshot.exists()) return [];
   const records = [];
   snapshot.forEach((childSnapshot) => {
@@ -450,19 +454,19 @@ async function readUserVehicles(userId) {
 }
 
 async function readVehicleCatalogRecord(vehicleId) {
-  const snapshot = await admin.database().ref(`vehicles/${vehicleId}`).once('value');
+  const snapshot = await realtimeDb().ref(`vehicles/${vehicleId}`).once('value');
   return snapshot.exists() ? { id: vehicleId, ...(snapshot.val() || {}) } : null;
 }
 
 async function findVehicleCatalogRecordByPlate(plate) {
-  const indexed = await admin.database().ref(`vehicle_plate_index/${plate}`).once('value');
+  const indexed = await realtimeDb().ref(`vehicle_plate_index/${plate}`).once('value');
   const indexedVehicleId = indexed.exists() ? String(indexed.val() || '').trim() : '';
   if (indexedVehicleId) {
     const indexedVehicle = await readVehicleCatalogRecord(indexedVehicleId);
     if (indexedVehicle) return indexedVehicle;
   }
 
-  const catalogSnapshot = await admin.database().ref('vehicles').once('value');
+  const catalogSnapshot = await realtimeDb().ref('vehicles').once('value');
   if (!catalogSnapshot.exists()) return null;
   let match = null;
   catalogSnapshot.forEach((childSnapshot) => {
@@ -535,7 +539,7 @@ async function requireDriverAccount(req, res, next) {
 }
 
 async function findUserVehicleIdForVehicle(userId, vehicleId) {
-  const snapshot = await admin.database().ref(`user_vehicles/${userId}`).once('value');
+  const snapshot = await realtimeDb().ref(`user_vehicles/${userId}`).once('value');
   if (!snapshot.exists()) return null;
 
   let matchedUserVehicleId = null;
@@ -665,7 +669,7 @@ function composeProfileRecord(userId, existingProfile = {}, incomingProfile = {}
 
 async function getRealtimeProfile(userId) {
   try {
-    const db = admin.database();
+    const db = realtimeDb();
     const snapshot = await db.ref(`users/${userId}`).once('value');
     return snapshot.exists() ? snapshot.val() || {} : null;
   } catch (error) {
@@ -680,7 +684,7 @@ async function mirrorProfileToRealtimeDB(userId, profile) {
   }
 
   try {
-    const db = admin.database();
+    const db = realtimeDb();
     const serialized = serializeForClient(profile);
     await projectRealtimeProfile(userId, {
       ...serialized,
@@ -916,7 +920,7 @@ router.put('/api/account/profile', requireFirebase, async (req, res) => {
     if (normalizedCpf) {
       await claimCpf({
         firestore: admin.firestore(),
-        realtimeDb: admin.database(),
+        realtimeDb: realtimeDb(),
         userId,
         cpf: normalizedCpf.digits,
         profile: nextProfile
@@ -1129,7 +1133,7 @@ router.post('/api/account/vehicles', requireFirebase, requireDriverAccount, requ
       createdAt: nowIso,
       updatedAt: nowIso
     };
-    await admin.database().ref().update(updates);
+    await realtimeDb().ref().update(updates);
     await invalidateDriverEligibilityCache(userId);
 
     return res.status(201).json({
@@ -1221,7 +1225,7 @@ router.patch('/api/account/vehicles/:vehicleId', requireFirebase, requireDriverA
       updates[`users/${userId}/activeVehicleId`] = '';
     }
 
-    await admin.database().ref().update(updates);
+    await realtimeDb().ref().update(updates);
     await invalidateDriverEligibilityCache(userId);
 
     return res.json({
@@ -1279,7 +1283,7 @@ router.patch('/api/account/vehicles/:vehicleId/active', requireFirebase, require
     });
     updates[`users/${userId}/activeVehicleId`] = canonicalVehicleId;
     updates[`users/${userId}/updatedAt`] = nowIso;
-    await admin.database().ref().update(updates);
+    await realtimeDb().ref().update(updates);
     await invalidateDriverEligibilityCache(userId);
 
     return res.json({ success: true, activeVehicleId: canonicalVehicleId });
@@ -1306,7 +1310,7 @@ router.delete('/api/account/vehicles/:vehicleId', requireFirebase, requireDriver
     if (target.isActive === true) {
       updates[`users/${userId}/activeVehicleId`] = '';
     }
-    await admin.database().ref().update(updates);
+    await realtimeDb().ref().update(updates);
     await invalidateDriverEligibilityCache(userId);
 
     return res.json({ success: true, removedVehicleId: vehicleId });
@@ -1381,7 +1385,7 @@ router.post('/api/vehicles/ocr-data', requireFirebase, async (req, res) => {
       nowIso
     });
 
-    await admin.database().ref().update(updates);
+    await realtimeDb().ref().update(updates);
 
     await admin.firestore()
       .collection('vehicle_ocr_data')
