@@ -1,6 +1,7 @@
 jest.mock('../../../utils/redis-pool', () => ({
   getConnection: jest.fn(() => ({
     hgetall: jest.fn().mockResolvedValue({}),
+    eval: jest.fn().mockResolvedValue([1]),
     hlen: jest.fn().mockResolvedValue(0),
     scard: jest.fn().mockResolvedValue(0),
     hget: jest.fn().mockResolvedValue('0')

@@ -3,6 +3,7 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const withRedis = require('./private-redis.cjs');
+const metricsBudget = require('../../utils/metrics-read-budget');
 const loadOutbox = require('./isolated-finalization-outbox.cjs');
 
 withRedis(async redis => {
@@ -12,6 +13,14 @@ withRedis(async redis => {
     if (['hscan', 'hget', 'eval'].includes(name)) return async (...args) => { commands.push(name); return target[name](...args); };
     return typeof target[name] === 'function' ? target[name].bind(target) : target[name];
   } });
+  await redis.hset('bookings:active', ...Array.from({ length: 201 }, (_, i) => [String(i), '{}']).flat());
+  await assert.rejects(metricsBudget.activeRideHash(measured), /indisponíveis/);
+  await redis.del('bookings:active');
+  await redis.hset('bookings:active', 'large', 'x'.repeat(4194305));
+  await assert.rejects(metricsBudget.activeRideHash(measured), /indisponíveis/);
+  await redis.del('bookings:active');
+  await redis.hset('bookings:active', 'valid', '{}');
+  assert.equal(Object.keys(await metricsBudget.activeRideHash(measured)).length, 1);
   const service = loadOutbox(measured);
   const key = service.getFinalizationOutboxKey();
   const entry = i => JSON.stringify({ rideId: `ride-${i}`, finalData: { version: 1 }, status: 'pending', nextRetryAt: 0 });
@@ -54,7 +63,7 @@ withRedis(async redis => {
   release({ success: true }); await first;
   return { environment: 'Private Redis Unix socket,256MiB,noeviction,no persistence/network; canonical persistence adapter in memory', rows,
     checks: ['No HGETALL/KEYS/SMEMBERS', 'Bounded spill page preserves HSCAN fairness', 'CAS ACK preserves newer work',
-      'Malformed financial work retained', 'Overlapping process cycles rejected'],
+      'Malformed financial work retained', 'Overlapping process cycles rejected', 'Active metric count/bytes checked atomically before transfer'],
     limitations: ['HSCAN COUNT is a hint; page capped at1000 entries/2MiB and may reject larger legacy payloads',
       'Canonical writer is substituted in this outbox-only experiment; Firestore transaction evidence is separate',
       'Does not introduce source-version arbitration for pre-existing concurrent canonical finalization writes'] };

@@ -31,9 +31,27 @@ async function realtimeSnapshot(query, limit = 2000) {
   return snapshot;
 }
 
+const ACTIVE_HASH = `
+if redis.call('HLEN', KEYS[1]) > 200 then return {0} end
+local rows = redis.call('HGETALL', KEYS[1])
+local bytes = 0
+for _, value in ipairs(rows) do bytes = bytes + string.len(value) end
+if bytes > 4194304 then return {0} end
+table.insert(rows, 1, 1)
+return rows
+`;
+
+async function activeRideHash(redis) {
+  const [allowed, ...rows] = await redis.eval(ACTIVE_HASH, 1, 'bookings:active');
+  if (Number(allowed) !== 1) throw unavailable();
+  const result = {};
+  for (let i = 0; i < rows.length; i += 2) Object.defineProperty(result, rows[i], { value: rows[i + 1], enumerable: true });
+  return result;
+}
+
 function requireLegacyFallback() {
   // An outage must not automatically move a query to the historical root.
   if (process.env.ENABLE_LEGACY_METRICS_FALLBACK !== 'true') throw unavailable();
 }
 
-module.exports = { unavailable, assertPayload, firestoreSnapshot, realtimeSnapshot, requireLegacyFallback, admit };
+module.exports = { unavailable, assertPayload, firestoreSnapshot, realtimeSnapshot, requireLegacyFallback, admit, activeRideHash, ACTIVE_HASH };

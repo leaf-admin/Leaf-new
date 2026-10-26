@@ -147,10 +147,7 @@ async function getActiveRidesCount() {
   const redis = redisPool.getConnection();
 
   try {
-    const size = await redis.hlen('bookings:active');
-    if (!Number.isSafeInteger(size) || size > 200) throw readBudget.unavailable();
-    const activeHash = await redis.hgetall('bookings:active');
-    readBudget.assertPayload(activeHash, Object.keys(activeHash || {}).length, 200);
+    const activeHash = await readBudget.activeRideHash(redis);
     if (activeHash && typeof activeHash === 'object' && Object.keys(activeHash).length > 0) {
       return countActiveRidesFromActiveHash(activeHash);
     }
