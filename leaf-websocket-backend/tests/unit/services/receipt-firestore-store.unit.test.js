@@ -146,17 +146,32 @@ describe('receipt Firestore mirror', () => {
     expect(() => backfill.parseArgs(['--collection', 'receipts', '--apply'])).toThrow('--ref');
     const rows = {
       booking_1_capacity_x: { rideId: 'booking_1_capacity_x', customer: { id: 'c' } },
+      booking_1_cap_ff_passenger_1: { rideId: 'booking_1_cap_ff_passenger_1', customer: { id: 'c' } },
       booking_2_real: { rideId: 'booking_2_real', receiptId: 'LEAF-2', savedTimestamp: 1, customer: { id: 'customer_1' }, driver: { id: 'driver_1' } }
     };
     const db = { ref: () => ({ orderByKey: () => ({ limitToFirst: () => ({ once: async () => ({ val: () => rows }) }),
       startAfter: () => ({ limitToFirst: () => ({ once: async () => ({ val: () => ({}) }) }) }) }) }) };
+
+    // A short page (RTDB returns n-1 rows after startAfter) must not end the scan.
+    const sorted = Array.from({ length: 250 }, (_, i) => `booking_${String(i).padStart(4, '0')}_x`);
+    const paged = { ref: () => ({ orderByKey: () => {
+      const page = after => ({ limitToFirst: n => ({ once: async () => {
+        const start = after ? sorted.indexOf(after) + 1 : 0;
+        const keys = sorted.slice(start, start + (after ? n - 1 : n));
+        return { val: () => Object.fromEntries(keys.map(k => [k, { rideId: k, customer: { id: 'p' } }])) };
+      } }) });
+      return { ...page(null), startAfter: after => page(after) };
+    } }) };
+    const fullScan = await backfill.run({ collection: 'receipts', apply: false, limit: Infinity },
+      { db: paged, firestore: {}, log: () => {} });
+    expect(fullScan.scanned).toBe(250);
     const saved = new Map();
     const write = jest.spyOn(store, 'write').mockImplementation(async (_fs, receipt) => { saved.set(receipt.rideId, JSON.parse(JSON.stringify(receipt))); });
     const get = jest.spyOn(store, 'getByRideId').mockImplementation(async (_fs, _scope, id) => saved.get(id) || null);
     const quiet = () => {};
 
     const dry = await backfill.run({ collection: 'receipts', apply: false, limit: Infinity }, { db, firestore: {}, log: quiet });
-    expect(dry).toMatchObject({ scanned: 2, skippedFixtures: 1, wouldWrite: 1, written: 0 });
+    expect(dry).toMatchObject({ scanned: 3, skippedFixtures: 2, wouldWrite: 1, written: 0 });
     expect(write).not.toHaveBeenCalled();
 
     const applied = await backfill.run({ collection: 'receipts', apply: true, ref: 'test', limit: Infinity }, { db, firestore: {}, log: quiet });

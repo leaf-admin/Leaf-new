@@ -6,8 +6,8 @@
 //
 //   node scripts/maintenance/backfill-receipts-firestore.cjs --collection receipts [--apply --ref <maintenance-ref>]
 //
-// Capacity/E2E fixtures (ids containing "capacity" or "e2e_") are skipped and
-// counted. A receipt whose sealed context does not belong to the collection is
+// Capacity/E2E fixtures (ids containing "capacity", "_cap_" or "e2e_") are
+// skipped and counted. A receipt whose sealed context does not belong to the collection is
 // reported, never written.
 const { isDeepStrictEqual } = require('node:util');
 const firebaseConfig = require('../../firebase-config');
@@ -16,7 +16,7 @@ const store = require('../../services/receipt-firestore-store');
 const { resolveRidePersistenceScope } = require('../../services/sandbox-persistence-context');
 
 const PAGE_SIZE = 100;
-const TEST_FIXTURE = /capacity|e2e_/i;
+const TEST_FIXTURE = /capacity|_cap_|e2e_/i;
 
 function parseArgs(argv) {
   const args = { collection: null, apply: false, ref: null, limit: Infinity };
@@ -75,7 +75,8 @@ async function run({ collection, apply, ref, limit }, { db, firestore, service =
         stats.problems.push({ key, problem: error.code || error.message });
       }
     }
-    if (keys.length < PAGE_SIZE) break;
+    // RTDB startAfter + limitToFirst(n) returns n-1 rows, so a short page is
+    // not the end; only an empty page is.
   }
   stats.problems = stats.problems.slice(0, 50);
   log(JSON.stringify(stats));
