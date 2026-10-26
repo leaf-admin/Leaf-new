@@ -39,6 +39,7 @@ function isolated(file, baseline, proxy) {
     if (name === '../utils/prometheus-metrics') return { metrics: new Proxy({}, { get: () => () => {} }) };
     if (name === './dashboard-live-data-service') return { normalizeDriverStatus: status => status };
     if (name === './booking-search-index') return {};
+    if (name === './map-regional-index') return require(path.join(backend, 'services/map-regional-index'));
     if (name === './pricing/demandPressure') return { MAX_DEMAND_MARKUP_PERCENT: 40, calculateDemandPressure() {} };
     if (name === './pricing/nightSurcharge') return { resolveNightSurcharge() {} };
     throw new Error(`Benchmark module attempted an unapproved import: ${name}`);

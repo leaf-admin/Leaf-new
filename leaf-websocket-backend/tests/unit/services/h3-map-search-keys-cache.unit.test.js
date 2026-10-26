@@ -4,9 +4,11 @@ const bookingSearchIndex = require('../../../services/booking-search-index');
 const BBOX = { minLat: -23.1, maxLat: -22.8, minLng: -43.6, maxLng: -43.1 };
 
 function createRedis(searches) {
-  const index = new Set();
+  const index = new Set(Object.keys(searches).map(key => key.replace('booking_search:', '')));
   return {
     index,
+    scard: jest.fn(async () => index.size),
+    eval: jest.fn(async () => [...index]),
     scan: jest.fn(async () => ['0', Object.keys(searches)]),
     sadd: jest.fn(async (_key, ...ids) => { ids.forEach((id) => index.add(id)); }),
     srem: jest.fn(async (_key, ...ids) => { ids.forEach((id) => index.delete(id)); }),
@@ -43,7 +45,7 @@ describe('H3MapService open search keys', () => {
     const service = new H3MapService();
 
     expect((await service.collectOpenRequests(redis, BBOX)).map((r) => r.bookingId)).toEqual(['b1', 'b2']);
-    expect(redis.scan).toHaveBeenCalledTimes(1); // first call reconciles the index
+    expect(redis.eval).toHaveBeenCalledTimes(1); // bounded atomic index lookup
 
     // b2 finished (hash deleted); b3 started and was indexed by its writer.
     delete searches['booking_search:b2'];
@@ -56,7 +58,8 @@ describe('H3MapService open search keys', () => {
 
     jest.setSystemTime(new Date('2026-10-15T16:00:31.000Z'));
     expect((await service.collectOpenRequests(redis, BBOX)).map((r) => r.bookingId)).toEqual(['b1', 'b3']);
-    expect(redis.scan).toHaveBeenCalledTimes(1); // index read, no new scan inside the reconcile interval
+    expect(redis.eval).toHaveBeenCalledTimes(2);
+    expect(redis.scan).not.toHaveBeenCalled();
   });
 
   test('concurrent polls share one lookup', async () => {
@@ -65,6 +68,7 @@ describe('H3MapService open search keys', () => {
 
     await Promise.all([1, 2, 3].map(() => service.collectOpenRequests(redis, BBOX)));
 
-    expect(redis.scan).toHaveBeenCalledTimes(1);
+    expect(redis.eval).toHaveBeenCalledTimes(1);
+    expect(redis.scan).not.toHaveBeenCalled();
   });
 });

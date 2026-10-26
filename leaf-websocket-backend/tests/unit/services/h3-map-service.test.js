@@ -117,7 +117,7 @@ describe('H3MapService', () => {
       d2: { status: 'busy', isOnline: 'true' },
       d3: { status: 'available', isOnline: 'true' },
     };
-    const searchIndex = new Set();
+    const searchIndex = new Set(['b1']);
     const searchHashes = {
       'booking_search:b1': {
         state: 'SEARCHING',
@@ -134,6 +134,11 @@ describe('H3MapService', () => {
     };
 
     const redis = {
+      async scard() { return searchIndex.size; },
+      async zcard() { return 3; },
+      async eval() { return [...searchIndex]; },
+      async hlen() { return Object.keys(activeHash).length; },
+      async hscan() { return ['0', Object.entries(activeHash).flat()]; },
       async zrange(key) {
         if (key === 'driver_locations') return Object.keys(driverGeo);
         if (key === 'driver_locations_eligible') return ['d1', 'd3'];
@@ -199,6 +204,18 @@ describe('H3MapService', () => {
     expect(result.cells[0].boundary.length).toBeGreaterThanOrEqual(6);
   });
 
+  test('legacy map pages active trips and fails closed only above 2000 rides', async () => {
+    const service = new H3MapService();
+    const pages = [['7', ['a', '{"status":"IN_PROGRESS"}']], ['0', ['b', '{"status":"ACCEPTED"}']]];
+    const redis = { hlen: jest.fn().mockResolvedValue(250), hscan: jest.fn(async () => pages.shift()) };
+    await expect(service.readLegacyActiveTrips(redis)).resolves.toEqual({
+      a: '{"status":"IN_PROGRESS"}', b: '{"status":"ACCEPTED"}'
+    });
+    expect(redis.hscan).toHaveBeenCalledTimes(2);
+    redis.hlen.mockResolvedValue(2001);
+    await expect(service.readLegacyActiveTrips(redis)).rejects.toMatchObject({ statusCode: 503 });
+  });
+
   test('collectActiveTrips limpa bookings terminais e stale do hash ativo', async () => {
     const service = new H3MapService();
     const deleted = [];
@@ -222,6 +239,8 @@ describe('H3MapService', () => {
     };
 
     const redis = {
+      async hlen() { return Object.keys(activeHash).length; },
+      async hscan() { return ['0', Object.entries(activeHash).flat()]; },
       async hgetall(key) {
         if (key === 'bookings:active') return activeHash;
         return {};
