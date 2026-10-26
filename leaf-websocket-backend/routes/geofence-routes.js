@@ -17,8 +17,9 @@ try {
 }
 
 const ADMIN_ROLES = ['admin', 'super-admin', 'manager', 'development'];
-const CITY_ACTIVATION_DB_PATH = 'operations/geography/cityActivation';
-const GEOFENCE_ADMIN_DB_PATH = 'operations/geography/geofenceConfig';
+const opsConfigStore = require('../services/ops-config-store');
+const CITY_ACTIVATION_DB_PATH = opsConfigStore.CONFIGS.cityActivation.rtdbPath;
+const GEOFENCE_ADMIN_DB_PATH = opsConfigStore.CONFIGS.geofenceAdmin.rtdbPath;
 const DEFAULT_MAX_ACTIVE_DRIVERS_PER_CITY = Number.parseInt(
     process.env.DEFAULT_MAX_ACTIVE_DRIVERS_PER_CITY || '300',
     10
@@ -306,11 +307,11 @@ async function loadCityActivationConfig() {
         return { config: deepClone(inMemoryCityActivationConfig), storage: 'memory' };
     }
 
-    const rawConfig = await firebaseConfig.getFromRealtimeDB(CITY_ACTIVATION_DB_PATH);
+    const { raw: rawConfig } = await opsConfigStore.load(firebaseConfig, 'cityActivation');
     const normalized = normalizeConfig(rawConfig);
 
     if (!rawConfig) {
-        await firebaseConfig.setRealtimeDB(CITY_ACTIVATION_DB_PATH, normalized);
+        await opsConfigStore.persist(firebaseConfig, 'cityActivation', normalized);
         logStructured('info', 'Config geografia inicializada com base no RJ', {
             service: 'geofence-routes',
             path: CITY_ACTIVATION_DB_PATH
@@ -330,7 +331,7 @@ async function persistCityActivationConfig(configToPersist, storage) {
         throw new Error('Firebase Realtime DB indisponivel');
     }
 
-    await firebaseConfig.setRealtimeDB(CITY_ACTIVATION_DB_PATH, configToPersist);
+    await opsConfigStore.persist(firebaseConfig, 'cityActivation', configToPersist);
 }
 
 async function loadGeofenceAdminConfig() {
@@ -343,12 +344,12 @@ async function loadGeofenceAdminConfig() {
         return { config: deepClone(inMemoryGeofenceAdminConfig), storage: 'memory' };
     }
 
-    const rawConfig = await firebaseConfig.getFromRealtimeDB(GEOFENCE_ADMIN_DB_PATH);
+    const { raw: rawConfig } = await opsConfigStore.load(firebaseConfig, 'geofenceAdmin');
     const normalized = normalizeGeofenceAdminConfig(rawConfig);
     const applied = applyGeofenceAdminConfig(normalized);
 
     if (!rawConfig) {
-        await firebaseConfig.setRealtimeDB(GEOFENCE_ADMIN_DB_PATH, applied);
+        await opsConfigStore.persist(firebaseConfig, 'geofenceAdmin', applied);
         logStructured('info', 'Config geofence admin inicializada', {
             service: 'geofence-routes',
             path: GEOFENCE_ADMIN_DB_PATH
@@ -368,7 +369,7 @@ async function persistGeofenceAdminConfig(configToPersist, storage) {
         throw new Error('Firebase Realtime DB indisponivel');
     }
 
-    await firebaseConfig.setRealtimeDB(GEOFENCE_ADMIN_DB_PATH, configToPersist);
+    await opsConfigStore.persist(firebaseConfig, 'geofenceAdmin', configToPersist);
 }
 
 function extractAdminId(req) {
