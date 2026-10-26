@@ -72,7 +72,10 @@ async function runAccountDeletion({ userId, metadata, purge, immediate = true, r
       await checkpoint('queued', { status: 'queued' });
       return { deleted: false };
     }
-    await db.ref(`users/${userId}`).set({ status: 'deleted', accountDisabled: true });
+    // With users served by Firestore the canonical profile is purged by the
+    // Firestore step below; only the RTDB mirror is wiped here.
+    const realtimeTarget = db.__rtdbRootRouter?.servedByFirestore?.('users') ? db.__rtdbRootRouter.raw : db;
+    await realtimeTarget.ref(`users/${userId}`).set({ status: 'deleted', accountDisabled: true });
     await checkpoint('realtime_purged');
     await userRef.set(purge, { merge: true });
     await checkpoint('profile_purged');
