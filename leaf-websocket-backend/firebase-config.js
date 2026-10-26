@@ -133,7 +133,11 @@ function initializeFirebase() {
 
         firebaseApp = appCandidate;
         firestore = firestoreCandidate;
-        realtimeDB = realtimeDBCandidate;
+        // RTDB exit: roots listed in RTDB_FIRESTORE_WRITE_ROOTS/READ_ROOTS are
+        // routed to Firestore; with no roots configured this is the raw client.
+        realtimeDB = require('./services/rtdb-root-router').createRouter(realtimeDBCandidate, {
+            getFirestore: () => firestore
+        });
         storage = storageCandidate;
         recordRealtimeDbMetric('initialize', 'success');
 
