@@ -61,11 +61,15 @@
       "queryScope": "COLLECTION",
       "fields": [
         {
-          "fieldPath": "customerId",
+          "fieldPath": "historyIndex.customerId",
           "order": "ASCENDING"
         },
         {
-          "fieldPath": "savedAt",
+          "fieldPath": "historyIndex.listedAt",
+          "order": "DESCENDING"
+        },
+        {
+          "fieldPath": "__name__",
           "order": "DESCENDING"
         }
       ]
@@ -75,11 +79,15 @@
       "queryScope": "COLLECTION",
       "fields": [
         {
-          "fieldPath": "driverId",
+          "fieldPath": "historyIndex.driverId",
           "order": "ASCENDING"
         },
         {
-          "fieldPath": "savedAt",
+          "fieldPath": "historyIndex.listedAt",
+          "order": "DESCENDING"
+        },
+        {
+          "fieldPath": "__name__",
           "order": "DESCENDING"
         }
       ]
@@ -89,15 +97,19 @@
       "queryScope": "COLLECTION",
       "fields": [
         {
-          "fieldPath": "financialContextId",
+          "fieldPath": "historyIndex.contextId",
           "order": "ASCENDING"
         },
         {
-          "fieldPath": "customerId",
+          "fieldPath": "historyIndex.customerId",
           "order": "ASCENDING"
         },
         {
-          "fieldPath": "savedAt",
+          "fieldPath": "historyIndex.listedAt",
+          "order": "DESCENDING"
+        },
+        {
+          "fieldPath": "__name__",
           "order": "DESCENDING"
         }
       ]
@@ -107,15 +119,19 @@
       "queryScope": "COLLECTION",
       "fields": [
         {
-          "fieldPath": "financialContextId",
+          "fieldPath": "historyIndex.contextId",
           "order": "ASCENDING"
         },
         {
-          "fieldPath": "driverId",
+          "fieldPath": "historyIndex.driverId",
           "order": "ASCENDING"
         },
         {
-          "fieldPath": "savedAt",
+          "fieldPath": "historyIndex.listedAt",
+          "order": "DESCENDING"
+        },
+        {
+          "fieldPath": "__name__",
           "order": "DESCENDING"
         }
       ]

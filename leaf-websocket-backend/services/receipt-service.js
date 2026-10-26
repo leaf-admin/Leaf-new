@@ -929,6 +929,13 @@ class ReceiptService {
         const ownerPath = role === 'driver' ? 'driver/id' : 'customer/id';
         const safeLimit = Math.min(50, Math.max(1, Number.parseInt(limit, 10) || 10));
         const safeOffset = Math.max(0, Number.parseInt(offset, 10) || 0);
+        if (receiptFirestoreStore.enabledReads()) {
+            return receiptFirestoreStore.listPage(this.getReceiptFirestore(), {
+                scope: persistenceScope, role, userId: normalizedUserId, limit: safeLimit,
+                offset: safeOffset, cursor, assertRecord: assertStoredRecordMatchesScope,
+                ownerOf: this.resolveStoredReceiptOwnerId.bind(this)
+            });
+        }
         if (pagination === 'cursor' || cursor) {
             const indexed = await receiptHistoryIndex.readPage({ db: firebaseDb, scope: persistenceScope,
                 role, userId: normalizedUserId, limit: safeLimit, cursor,
@@ -1129,15 +1136,24 @@ class ReceiptService {
      */
     async getReceiptFromFirestore(rideId, firebaseDb, scopeInput = {}) {
         try {
-            if (!firebaseDb) {
+            if (!firebaseDb && !receiptFirestoreStore.enabledReads()) {
                 return null;
             }
 
             const persistenceScope = resolveRidePersistenceScope(scopeInput);
-            const snapshot = await firebaseDb
-                .ref(`${persistenceScope.collections.receipts}/${rideId}`)
-                .once('value');
-            const value = snapshot.val();
+            let value = null;
+            if (receiptFirestoreStore.enabledReads()) {
+                value = await receiptFirestoreStore.getByRideId(this.getReceiptFirestore(), persistenceScope, rideId);
+                // Until RTDB writes stop, a receipt missing here still falls back.
+                if (!value) logger.warn('⚠️ Recibo ausente no Firestore; lendo do RTDB', { rideId });
+            }
+            if (!value) {
+                if (!firebaseDb) return null;
+                const snapshot = await firebaseDb
+                    .ref(`${persistenceScope.collections.receipts}/${rideId}`)
+                    .once('value');
+                value = snapshot.val();
+            }
             if (!value) return null;
 
             const financialContext = assertStoredRecordMatchesScope(value, persistenceScope);

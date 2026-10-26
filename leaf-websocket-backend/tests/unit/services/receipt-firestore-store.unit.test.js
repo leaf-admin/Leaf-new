@@ -40,12 +40,14 @@ describe('receipt Firestore mirror', () => {
   it('builds a queryable document without undefined values', () => {
     const { rideId, document } = store.buildDocument(receipt(), scope, options);
     expect(rideId).toBe('booking_1792947972712_owner');
-    expect(document).toMatchObject({
-      schema: 1, customerId: 'customer_1', driverId: 'driver_1', financialNamespace: 'operational',
-      financialContextId: 'operational', savedAt: { ms: 1792947990000 }, mirroredFrom: 'rtdb',
-      financial: { grossAmount: 42.14, driverNetAmount: 40.65, tollAmount: 9.95 }
+    expect(document.historyIndex).toEqual({
+      schema: 1, customerId: 'customer_1', driverId: 'driver_1', namespace: 'operational',
+      contextId: 'operational', listedAt: { ms: 1792947990000 }
     });
     expect('optional' in document).toBe(false);
+    // The stored body keeps the RTDB shape; only historyIndex is added.
+    const { optional: _drop, ...original } = receipt();
+    expect(store.readBody(document)).toEqual(original);
   });
 
   it('rejects documents above the Firestore size budget', () => {
@@ -67,11 +69,11 @@ describe('receipt Firestore mirror', () => {
     expect(fresh.firestore.collection).toHaveBeenCalledWith('receipts');
     expect(fresh.writes).toHaveLength(1);
 
-    const same = fakeFirestore({ customerId: 'customer_1', driverId: 'driver_1', financialContextId: 'operational' });
+    const same = fakeFirestore({ historyIndex: { customerId: 'customer_1', driverId: 'driver_1', contextId: 'operational' } });
     await store.mirror(same.firestore, receipt(), scope, options);
     expect(same.writes).toHaveLength(1);
 
-    const other = fakeFirestore({ customerId: 'customer_2', driverId: 'driver_1', financialContextId: 'operational' });
+    const other = fakeFirestore({ historyIndex: { customerId: 'customer_2', driverId: 'driver_1', contextId: 'operational' } });
     await expect(store.mirror(other.firestore, receipt(), scope, options))
       .rejects.toMatchObject({ code: 'RECEIPT_FIRESTORE_OWNER_CONFLICT' });
     expect(other.writes).toHaveLength(0);
@@ -94,5 +96,74 @@ describe('receipt Firestore mirror', () => {
     mirror.mockRejectedValueOnce(Object.assign(new Error('firestore down'), { code: 'unavailable' }));
     await expect(service.saveReceiptToFirestore(operational, firebaseDb)).resolves.toBe(true);
     mirror.mockRestore();
+  });
+
+  it('rejects malformed history cursors', () => {
+    expect(() => store.decodeCursor('not-a-cursor')).toThrow(expect.objectContaining({ code: 'RECEIPT_HISTORY_CURSOR_INVALID', statusCode: 400 }));
+    const valid = Buffer.from(JSON.stringify({ v: 1, t: 1792947990000, id: 'booking_1' })).toString('base64url');
+    expect(store.decodeCursor(valid)).toEqual({ v: 1, t: 1792947990000, id: 'booking_1' });
+  });
+
+  it('routes listing and lookup to Firestore only when both flags are on, with RTDB fallback for a missing receipt', async () => {
+    process.env.ENABLE_RECEIPT_FIRESTORE_WRITES = 'true';
+    const service = new ReceiptService();
+    service.getReceiptFirestore = () => ({});
+    const listPage = jest.spyOn(store, 'listPage').mockResolvedValue({ receipts: [], pagination: 'keyset' });
+    const getByRideId = jest.spyOn(store, 'getByRideId').mockResolvedValue(null);
+    const rtdbReceipt = { rideId: 'booking_1', receiptId: 'LEAF-1', customer: { id: 'customer_1' } };
+    const firebaseDb = { ref: jest.fn(() => ({
+      once: async () => ({ val: () => rtdbReceipt }),
+      orderByChild: () => ({ equalTo: () => ({ limitToLast: () => ({ once: async () => ({ val: () => ({}) }) }) }) })
+    })) };
+
+    const { sealFinancialContext } = require('../../../services/financial-runtime-context');
+    const financialContext = sealFinancialContext({ providerEnvironment: 'production' });
+    delete process.env.ENABLE_RECEIPT_FIRESTORE_READS;
+    await service.listStoredReceiptsByUser({ firebaseDb, userId: 'customer_1', role: 'customer', financialContext });
+    expect(listPage).not.toHaveBeenCalled();
+
+    process.env.ENABLE_RECEIPT_FIRESTORE_READS = 'true';
+    await expect(service.listStoredReceiptsByUser({ firebaseDb, userId: 'customer_1', role: 'customer', financialContext, limit: 5, cursor: 'c' }))
+      .resolves.toEqual({ receipts: [], pagination: 'keyset' });
+    expect(listPage.mock.calls[0][1]).toMatchObject({ role: 'customer', userId: 'customer_1', limit: 5, cursor: 'c' });
+
+    await expect(service.getReceiptFromFirestore('booking_1', firebaseDb)).resolves.toMatchObject({ receiptId: 'LEAF-1' });
+    expect(getByRideId).toHaveBeenCalled();
+    expect(firebaseDb.ref).toHaveBeenCalledWith('receipts/booking_1');
+
+    getByRideId.mockResolvedValueOnce({ rideId: 'booking_1', receiptId: 'LEAF-FS' });
+    firebaseDb.ref.mockClear();
+    await expect(service.getReceiptFromFirestore('booking_1', firebaseDb)).resolves.toMatchObject({ receiptId: 'LEAF-FS' });
+    expect(firebaseDb.ref).not.toHaveBeenCalled();
+
+    delete process.env.ENABLE_RECEIPT_FIRESTORE_READS;
+    listPage.mockRestore();
+    getByRideId.mockRestore();
+  });
+
+  it('backfill skips fixtures, writes only on --apply and verifies parity', async () => {
+    const backfill = require('../../../scripts/maintenance/backfill-receipts-firestore.cjs');
+    expect(() => backfill.parseArgs(['--collection', 'receipts', '--apply'])).toThrow('--ref');
+    const rows = {
+      booking_1_capacity_x: { rideId: 'booking_1_capacity_x', customer: { id: 'c' } },
+      booking_2_real: { rideId: 'booking_2_real', receiptId: 'LEAF-2', savedTimestamp: 1, customer: { id: 'customer_1' }, driver: { id: 'driver_1' } }
+    };
+    const db = { ref: () => ({ orderByKey: () => ({ limitToFirst: () => ({ once: async () => ({ val: () => rows }) }),
+      startAfter: () => ({ limitToFirst: () => ({ once: async () => ({ val: () => ({}) }) }) }) }) }) };
+    const saved = new Map();
+    const write = jest.spyOn(store, 'write').mockImplementation(async (_fs, receipt) => { saved.set(receipt.rideId, JSON.parse(JSON.stringify(receipt))); });
+    const get = jest.spyOn(store, 'getByRideId').mockImplementation(async (_fs, _scope, id) => saved.get(id) || null);
+    const quiet = () => {};
+
+    const dry = await backfill.run({ collection: 'receipts', apply: false, limit: Infinity }, { db, firestore: {}, log: quiet });
+    expect(dry).toMatchObject({ scanned: 2, skippedFixtures: 1, wouldWrite: 1, written: 0 });
+    expect(write).not.toHaveBeenCalled();
+
+    const applied = await backfill.run({ collection: 'receipts', apply: true, ref: 'test', limit: Infinity }, { db, firestore: {}, log: quiet });
+    expect(applied).toMatchObject({ written: 1, parityMismatch: 0, errors: 0 });
+    const again = await backfill.run({ collection: 'receipts', apply: true, ref: 'test', limit: Infinity }, { db, firestore: {}, log: quiet });
+    expect(again).toMatchObject({ written: 0, alreadyEqual: 1 });
+    write.mockRestore();
+    get.mockRestore();
   });
 });
