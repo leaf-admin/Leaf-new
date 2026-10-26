@@ -1,0 +1,213 @@
+/* Shared pages for the Leaf V2 local draft. */
+.inner-main { padding-block: 16px 64px; }
+.inner-heading { position: relative; isolation: isolate; padding: 44px 48px; border-radius: 24px; background: var(--leaf); overflow: hidden; margin-bottom: 44px; }
+.inner-heading::after { content: ''; position: absolute; z-index: -1; width: 290px; height: 200px; right: -65px; bottom: -110px; border: 4px solid rgba(20,37,27,.22); border-radius: 80px; pointer-events: none; }
+.inner-heading .eyebrow { color: var(--ink); margin-bottom: 24px; }
+.inner-heading h1 { max-width: 1000px; font-size: clamp(42px, 5vw, 68px); font-weight: 650; letter-spacing: -.06em; line-height: 1.06; overflow-wrap: break-word; }
+.inner-lead { max-width: 790px; margin-top: 22px; font-size: 15px; line-height: 1.8; color: #334c2b; }
+.document-layout { display: grid; grid-template-columns: 190px minmax(0,1fr); gap: 64px; align-items: start; padding-inline: 16px; }
+.document-nav { position: sticky; top: 120px; display: flex; flex-direction: column; gap: 13px; padding: 8px 0 20px; font-size: 12px; line-height: 1.6; }
+.document-nav a { color: var(--muted); text-decoration: none; text-underline-offset: 4px; }
+.document-nav a:hover { color: var(--ink); text-decoration: underline; }
+.document-nav strong { font-size: 11px; color: var(--ink); margin-bottom: 8px; letter-spacing: .035em; text-transform: uppercase; }
+.document-content { min-width: 0; max-width: 850px; font-size: 14px; line-height: 1.85; color: #455248; }
+.document-content > :first-child { margin-top: 0; }
+.document-content h2 { margin: 36px 0 17px; color: var(--ink); font-size: 26px; font-weight: 650; letter-spacing: -.035em; line-height: 1.25; }
+.document-content h3 { margin: 26px 0 13px; color: var(--ink); font-size: 19px; font-weight: 650; line-height: 1.4; }
+.document-content h4 { margin: 21px 0 10px; font-size: 16px; color: var(--ink); }
+.document-content p { margin: 13px 0; line-height: 1.85; }
+.document-content ul,.document-content ol { padding-left: 23px; margin-block: 16px; }
+.document-content li { padding-left: 4px; margin-block: 9px; line-height: 1.85; }
+.document-content a { color: #285c26; text-underline-offset: 4px; overflow-wrap: anywhere; }
+.document-content section { scroll-margin-top: 110px; }
+.document-meta { color: #64715e; font-size: 12px; margin-bottom: 23px; }
+.document-content table { border-collapse: collapse; width: 100%; margin: 25px 0; font-size: 13px; }
+.document-content td,.document-content th { padding: 15px 12px; text-align: left; border-bottom: 1px solid var(--line); vertical-align: top; }
+.important-note,.warning-box { background: #f1f6e9; border-left: 3px solid #83af4f; padding: 20px 24px; margin: 25px 0; border-radius: 0 12px 12px 0; font-size: 13px; line-height: 1.8; color: #3b512f; }
+.contact-section { padding-top: 12px; }
+.contact-info { padding: 20px 24px; background: var(--soft); border-radius: 14px; }
+.info-grid,.support-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 28px 42px; margin-block: 32px; }
+.info-card,.support-card { min-width: 0; padding: 28px 0; border-top: 1px solid #bdcdb3; }
+.info-card h2,.support-card h2 { margin: 0 0 16px; font-size: 28px; font-weight: 600; line-height: 1.2; color: var(--ink); letter-spacing: -.045em; }
+.info-card h3,.support-card h3 { margin-bottom: 14px; font-size: 21px; color: var(--ink); }
+.info-card p,.support-card p { margin-block: 10px; font-size: 14px; color: var(--muted); line-height: 1.85; }
+.info-card ul,.support-card ul { padding-left: 22px; color: var(--muted); font-size: 14px; line-height: 1.9; }
+.info-card li,.support-card li { margin-block: 8px; }
+.info-card a,.support-card a { text-underline-offset: 4px; overflow-wrap: anywhere; }
+.info-card .eyebrow { margin-bottom: 18px; }
+.info-card .btn,.support-card .btn { margin-top: 16px; }
+.page-section { margin-block: 42px; }
+.inner-page .section-heading { margin-top: 36px; }
+.inner-page .section-heading h2 { font-size: 35px; font-weight: 600; letter-spacing: -.045em; }
+.fee-intro { padding: 35px 38px; background: #edf6e1; border-radius: 20px; }
+.fee-intro .eyebrow { margin-bottom: 20px; }
+.fee-intro > h2 { font-size: 43px; line-height: 1.05; margin-bottom: 23px; }
+.fee-intro > p:not(.eyebrow) { max-width: 790px; margin-block: 13px; font-size: 14px; line-height: 1.85; color: #4a5e3e; }
+.fee-intro .fee-more { margin-top: 15px; }
+.cities-list { columns: 3; column-gap: 30px; }
+.cities-list li { break-inside: avoid; }
+.page-section > h2,.support-faq > h2 { margin-bottom: 24px; font-size: 35px; font-weight: 600; line-height: 1.15; color: var(--ink); letter-spacing: -.045em; }
+.page-cta { padding: 32px 36px; border-radius: 20px; background: var(--ink); color: #fff; margin-top: 42px; display: flex; align-items: center; justify-content: space-between; gap: 30px; }
+.page-cta h2 { font-size: 28px; font-weight: 600; line-height: 1.2; margin-bottom: 12px; }
+.page-cta p { max-width: 670px; font-size: 14px; color: #c9d4c3; }
+.page-cta .btn { flex-shrink: 0; background: var(--leaf); color: var(--ink); }
+.support-shortcuts { display: flex; flex-wrap: wrap; gap: 12px 25px; margin: 25px 0; font-size: 13px; }
+.support-shortcuts a { text-underline-offset: 5px; }
+.faq-item { border-top: 1px solid var(--line); padding: 22px 0; }
+.faq-item:last-child { border-bottom: 1px solid var(--line); }
+.faq-item summary { cursor: pointer; color: var(--ink); font-size: 17px; font-weight: 600; line-height: 1.5; padding-right: 16px; }
+.faq-item summary:focus-visible { outline: 3px solid #5f9635; outline-offset: 6px; }
+.faq-content { margin-top: 19px; font-size: 14px; color: var(--muted); line-height: 1.9; }
+.faq-content p { margin-block: 12px; }
+.faq-content ul,.faq-content ol { padding-left: 24px; }
+.faq-content li { margin-block: 8px; }
+.footer-groups { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 30px; margin-left: auto; }
+.footer-group { display: flex; flex-direction: column; gap: 11px; }
+.footer-group h2 { font-size: 11px; font-weight: 700; letter-spacing: .025em; text-transform: uppercase; margin-bottom: 5px; }
+.footer-group a { color: var(--muted); text-decoration: none; font-size: 12px; line-height: 1.6; }
+.footer-group a:hover { color: var(--ink); text-decoration: underline; text-underline-offset: 4px; }
+.leaf-urban .footer-main:has(.footer-groups) { align-items: start; gap: 60px; padding-block: 35px; }
+
+/* Driver price and the same explanation on the calculator. */
+.leaf-urban .launch-label { font-size: 17px; font-weight: 650; }
+.leaf-urban .launch-note { margin: 17px 0 0; padding-top: 18px; }
+.launch-costs { margin: 22px 0 13px; padding: 18px 0; border-top: 1px solid #42503f; border-bottom: 1px solid #42503f; }
+.launch-costs p { font-size: 13px; line-height: 1.8; color: #f0f5ec; }
+.launch-costs small { display: block; margin-top: 10px; color: #c0cdb8; font-size: 12px; line-height: 1.75; }
+.fee-more { display: inline-flex; align-self: flex-start; align-items: center; gap: 8px; font-size: 13px; line-height: 1.6; text-underline-offset: 5px; color: inherit; }
+.driver-action .fee-more { color: var(--leaf); margin-bottom: 24px; }
+.fees-dialog-open { overflow: hidden; }
+.fees-dialog { width: min(650px,calc(100vw - 32px)); max-height: min(88dvh,850px); padding: 0; border: 0; border-radius: 24px; background: #fff; color: var(--ink); box-shadow: 0 24px 100px rgba(0,0,0,.22); overscroll-behavior: contain; }
+.fees-dialog::backdrop { background: rgba(10,24,15,.57); backdrop-filter: blur(5px); }
+.fees-dialog-heading { position: sticky; top: 0; z-index: 2; padding: 35px 68px 31px 35px; background: var(--leaf); }
+.fees-dialog-heading .eyebrow { color: var(--ink); margin-bottom: 17px; font-size: 10px; }
+.fees-dialog-heading h2 { font-size: 34px; font-weight: 650; line-height: 1.08; letter-spacing: -.05em; }
+.dialog-close { position: absolute; right: 17px; top: 17px; display: grid; place-items: center; width: 40px; height: 40px; border-radius: 50%; border: 1px solid rgba(20,37,27,.3); background: transparent; color: var(--ink); font-size: 27px; line-height: 1; }
+.dialog-close:hover { background: rgba(255,255,255,.45); }
+.fees-dialog-content { padding: 9px 35px 33px; }
+.fees-dialog-content section { padding-top: 24px; }
+.fees-dialog-content h3 { font-size: 18px; font-weight: 650; line-height: 1.35; margin-bottom: 10px; letter-spacing: -.025em; }
+.fees-dialog-content p { font-size: 13px; line-height: 1.85; color: #53604f; margin-top: 10px; }
+.fee-example { margin-top: 25px; padding: 19px 22px; background: #f1f6e9; border-radius: 15px; }
+.fee-example p { margin: 0 0 14px; color: var(--ink); }
+.fee-example dl { margin: 0; }
+.fee-example dl > div { display: flex; justify-content: space-between; gap: 24px; padding: 9px 0; border-top: 1px solid #dae5d0; font-size: 13px; }
+.fee-example dt { color: #506047; }
+.fee-example dd { margin: 0; font-weight: 650; white-space: nowrap; }
+.fees-dialog-content .fees-small-print { font-size: 11px; margin-top: 22px; }
+.fees-detail-link { display: inline-block; font-size: 12px; line-height: 1.7; margin-top: 20px; text-underline-offset: 4px; }
+.leaf-urban .calc-page { max-width: none; padding-top: 16px; }
+.leaf-urban .calc-page .intro { margin-bottom: 36px; }
+.leaf-urban .calc-page .intro-copy { color: #334c2b; max-width: 740px; font-size: 15px; }
+.leaf-urban .calc-card { border-radius: 24px; grid-template-columns: 1.2fr .8fr; }
+.leaf-urban .calc-main { background: #fff; padding: 42px; }
+.leaf-urban .calc-main h2 { font-size: 29px; font-weight: 600; }
+.leaf-urban .calc-aside { padding: 42px 34px; }
+.leaf-urban .calc-aside h2 { font-size: 27px; font-weight: 600; }
+.leaf-urban .net-card { background: var(--leaf); box-shadow: none; border: 0; border-radius: 17px; }
+.leaf-urban .net-card strong { font-weight: 650; }
+.leaf-urban .processing-note { font-size: 12px; line-height: 1.85; }
+.leaf-urban .processing-note .fee-more { margin-top: 13px; color: var(--leaf); font-size: 12px; }
+.pix-calculation-note { font-size: 12px; color: var(--muted); line-height: 1.75; margin-top: 14px; }
+.fees-table-wrap { overflow-x: auto; }
+.fees-table { width: 100%; border-collapse: collapse; margin-block: 24px; font-size: 14px; }
+.fees-table th,.fees-table td { padding: 18px 15px; text-align: left; border-bottom: 1px solid var(--line); }
+.fees-table th { font-size: 11px; letter-spacing: .03em; text-transform: uppercase; }
+.fees-table td:last-child,.fees-table th:last-child { text-align: right; white-space: nowrap; }
+.fees-table .highlight td { background: #eef6e4; font-weight: 650; }
+
+/* Existing account-deletion flow, with presentation only. */
+.account-delete { max-width: 820px; margin-inline: auto; }
+.account-delete .document-content { max-width: none; }
+.account-delete .form-group { margin: 25px 0; }
+.account-delete label,.account-delete .form-label { display: block; font-size: 14px; font-weight: 600; color: var(--ink); margin-bottom: 11px; }
+.account-delete input,.account-delete textarea { width: 100%; border: 1px solid #cbd8c2; border-radius: 12px; background: #fff; padding: 15px 17px; color: var(--ink); font: inherit; font-size: 15px; }
+.account-delete input[type=radio],.account-delete input[type=checkbox] { width: auto; padding: 0; flex-shrink: 0; accent-color: #436d2c; }
+.account-delete textarea { resize: vertical; min-height: 120px; }
+.account-delete .radio-group { display: flex; flex-wrap: wrap; gap: 15px 27px; }
+.account-delete .radio-option { display: flex; align-items: center; gap: 10px; font-size: 14px; }
+.account-delete .radio-option label { margin: 0; font-weight: 500; }
+.account-delete .required { color: #a33925; }
+.account-delete .char-count { font-size: 11px; color: var(--muted); text-align: right; }
+.account-delete .confirmation-box,.account-delete .error-message,.account-delete .success-message { display: none; margin: 22px 0; padding: 23px; border-radius: 14px; font-size: 14px; line-height: 1.85; }
+.account-delete .confirmation-box { background: #f6f1df; border: 1px solid #e2d3a1; }
+.account-delete .error-message { background: #f9ede8; border: 1px solid #e6b6a5; color: #80321f; }
+.account-delete .success-message { background: #eef6e5; border: 1px solid #bfd7a3; color: #3c5d27; }
+.account-delete .show { display: block; }
+.account-delete .btn-danger { background: #9b3525; color: #fff; }
+.account-delete .btn-secondary { background: #e9ede4; color: var(--ink); }
+.account-delete .btn:disabled { opacity: .5; cursor: default; }
+
+@media(max-width:1000px) {
+  .document-layout { gap: 40px; grid-template-columns: 160px minmax(0,1fr); padding-inline: 0; }
+  .leaf-urban .calc-card { grid-template-columns: 1.05fr .95fr; }
+  .leaf-urban .calc-main { padding: 32px; }
+  .leaf-urban .calc-aside { padding: 32px 26px; }
+  .inner-heading { padding: 38px; }
+}
+@media(max-width:800px) {
+  .cities-list { columns: 2; }
+  .document-layout { grid-template-columns: 1fr; gap: 28px; }
+  .document-nav { position: static; flex-direction: row; flex-wrap: wrap; gap: 12px 20px; border-bottom: 1px solid var(--line); padding-bottom: 25px; }
+  .document-nav strong { width: 100%; margin: 0; }
+  .page-cta { align-items: flex-start; flex-direction: column; gap: 24px; }
+  .footer-groups { gap: 25px; }
+  .leaf-urban .footer-main:has(.footer-groups) { flex-direction: column; gap: 33px; }
+  .footer-groups { margin-left: 0; width: 100%; }
+  .leaf-urban .calc-card { grid-template-columns: 1fr; }
+}
+@media(max-width:600px) {
+  .inner-page .section-heading h2 { font-size: 30px; }
+  .fee-intro { padding: 30px 25px; }
+  .fee-intro > h2 { font-size: 34px; }
+  .fee-intro > p:not(.eyebrow) { font-size: 13px; }
+  .cities-list { columns: 1; }
+  .inner-main { padding-top: 0; padding-bottom: 44px; }
+  .inner-heading { padding: 33px 26px; border-radius: 20px; margin-bottom: 31px; }
+  .inner-heading .eyebrow { font-size: 9px; margin-bottom: 22px; }
+  .inner-heading h1 { font-size: clamp(35px,10.4vw,47px); letter-spacing: -.055em; }
+  .inner-lead { font-size: 13px; margin-top: 21px; }
+  .document-content { font-size: 13px; }
+  .document-content h2 { font-size: 24px; margin-top: 32px; }
+  .document-content h3 { font-size: 18px; }
+  .info-grid,.support-grid { grid-template-columns: 1fr; gap: 8px; margin-block: 25px; }
+  .info-card,.support-card { padding-block: 25px; }
+  .info-card h2,.support-card h2 { font-size: 27px; }
+  .info-card p,.support-card p,.info-card ul,.support-card ul { font-size: 13px; }
+  .page-section { margin-block: 31px; }
+  .page-section > h2,.support-faq > h2 { font-size: 30px; }
+  .page-cta { padding: 30px 26px; border-radius: 18px; }
+  .page-cta h2 { font-size: 28px; }
+  .page-cta p { font-size: 13px; }
+  .page-cta .btn { width: 100%; font-size: 13px; }
+  .faq-item summary { font-size: 16px; }
+  .faq-content { font-size: 13px; }
+  .contact-info,.important-note,.warning-box { padding: 18px; }
+  .footer-groups { grid-template-columns: 1fr 1fr; gap: 30px 25px; }
+  .footer-group a { font-size: 11px; min-height: 30px; }
+  .fees-dialog { width: calc(100vw - 24px); max-height: 91dvh; border-radius: 20px; }
+  .fees-dialog-heading { padding: 31px 57px 26px 25px; }
+  .fees-dialog-heading h2 { font-size: 29px; }
+  .fees-dialog-content { padding: 5px 25px 28px; }
+  .fees-dialog-content h3 { font-size: 17px; }
+  .fees-dialog-content p { font-size: 12px; }
+  .fee-example { padding: 16px; }
+  .fee-example dl > div { font-size: 12px; gap: 18px; }
+  .launch-costs p { font-size: 12px; }
+  .launch-costs small { font-size: 11px; }
+  .driver-action .fee-more { font-size: 12px; }
+  .leaf-urban .calc-page { padding-top: 0; }
+  .leaf-urban .calc-page .intro-copy { font-size: 13px; }
+  .leaf-urban .calc-main,.leaf-urban .calc-aside { padding: 30px 24px; }
+  .leaf-urban .calc-main h2 { font-size: 27px; }
+  .leaf-urban .calc-aside h2 { font-size: 25px; }
+  .leaf-urban .processing-note { font-size: 12px; }
+  .fees-table th,.fees-table td { padding: 15px 9px; font-size: 12px; }
+  .fees-table th { font-size: 9px; }
+  .fees-table td:first-child { min-width: 125px; }
+  .account-delete .radio-group { flex-direction: column; gap: 13px; }
+  .account-delete .btn { width: 100%; margin-top: 10px; }
+}
+@media(prefers-reduced-motion:no-preference) {
+  .fees-dialog[open] { animation: leaf-enter .22s var(--ease-out) both; }
+}

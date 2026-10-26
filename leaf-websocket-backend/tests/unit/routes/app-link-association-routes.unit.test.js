@@ -18,7 +18,7 @@ describe('app-link-association routes', () => {
       .expect(200);
 
     expect(response.headers['content-type']).toContain('text/html');
-    expect(response.text).toContain('O app que respeita quem dirige. E quem paga.');
+    expect(response.text).toContain('Leaf — Seu novo jeito de ir e vir.');
   });
 
   it('does not serve the marketing landing page on the API host', async () => {

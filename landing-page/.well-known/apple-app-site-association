@@ -8,17 +8,37 @@
         ],
         "components": [
           {
+            "/": "/convite",
+            "comment": "Convites de passageiros Leaf"
+          },
+          {
             "/": "/convite/*",
             "comment": "Convites de passageiros Leaf"
           },
           {
+            "/": "/motorista/convite",
+            "comment": "Convites e waitlist de motoristas Leaf"
+          },
+          {
             "/": "/motorista/convite/*",
             "comment": "Convites e waitlist de motoristas Leaf"
+          },
+          {
+            "/": "/viagem",
+            "comment": "Acompanhamento publico de viagens Leaf"
+          },
+          {
+            "/": "/viagem/*",
+            "comment": "Acompanhamento publico de viagens Leaf"
           }
         ],
         "paths": [
+          "/convite",
           "/convite/*",
-          "/motorista/convite/*"
+          "/motorista/convite",
+          "/motorista/convite/*",
+          "/viagem",
+          "/viagem/*"
         ]
       }
     ]

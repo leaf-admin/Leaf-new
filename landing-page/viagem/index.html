@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Acompanhar viagem | Leaf</title>
+  <meta name="description" content="Abra este link no app Leaf para acompanhar a viagem compartilhada com dados seguros.">
+  <style>
+    :root { color-scheme: light; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      padding: 28px;
+      background: #f6f7f4;
+      color: #101510;
+      font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", sans-serif;
+    }
+    main {
+      width: min(100%, 440px);
+      padding: 28px;
+      border: 1px solid rgba(16, 21, 16, 0.1);
+      border-radius: 28px;
+      background: rgba(255, 255, 255, 0.92);
+      box-shadow: 0 18px 48px rgba(16, 21, 16, 0.12);
+    }
+    h1 { margin: 0 0 10px; font-size: 30px; line-height: 1.08; }
+    p { margin: 0 0 22px; color: #5f675f; font-size: 16px; line-height: 1.5; }
+    a {
+      display: inline-flex;
+      width: 100%;
+      min-height: 52px;
+      align-items: center;
+      justify-content: center;
+      border-radius: 999px;
+      background: #1a330e;
+      color: #fff;
+      font-weight: 700;
+      text-decoration: none;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Acompanhar viagem</h1>
+    <p>Abra este link no app Leaf para acompanhar a viagem compartilhada com dados seguros.</p>
+    <a id="open-app" href="leafapp://viagem">Abrir no app</a>
+  </main>
+  <script>
+    const tripId = window.location.pathname.split('/').filter(Boolean)[1];
+    if (tripId) {
+      document.getElementById('open-app').href = `leafapp://viagem/${encodeURIComponent(tripId)}`;
+    }
+  </script>
+</body>
+</html>

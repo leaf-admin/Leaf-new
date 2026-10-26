@@ -1,226 +1,92 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Termos de Uso | Leaf App</title>
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-        
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-            line-height: 1.6;
-            color: #1a1a1a;
-            background: #f8f9fa;
-        }
-        
-        header {
-            background: #003002;
-            color: white;
-            padding: 2rem 0;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.3);
-        }
-        
-        .header-content {
-            max-width: 1200px;
-            margin: 0 auto;
-            padding: 0 24px;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-        }
-        
-        .logo {
-            cursor: pointer;
-        }
-        
-        .logo a {
-            display: inline-block;
-            text-decoration: none;
-        }
-        
-        .logo img {
-            height: 43px;
-            width: auto;
-            transition: opacity 0.3s;
-        }
-        
-        .logo:hover img {
-            opacity: 0.8;
-        }
-        
-        .back-link {
-            color: white;
-            text-decoration: none;
-            font-weight: 600;
-            padding: 0.5rem 1rem;
-            border-radius: 8px;
-            transition: background 0.3s;
-        }
-        
-        .back-link:hover {
-            background: rgba(255,255,255,0.1);
-        }
-        
-        .container {
-            max-width: 900px;
-            margin: 0 auto;
-            padding: 3rem 24px;
-            background: white;
-            margin-top: 2rem;
-            margin-bottom: 2rem;
-        }
-        
-        h1 {
-            font-size: 2.5rem;
-            font-weight: 700;
-            color: #1a1a1a;
-            margin-bottom: 1rem;
-        }
-        
-        .last-updated {
-            color: #666;
-            font-size: 0.9rem;
-            margin-bottom: 3rem;
-            padding-bottom: 1rem;
-            border-bottom: 2px solid #e0e0e0;
-        }
-        
-        h2 {
-            font-size: 1.8rem;
-            font-weight: 700;
-            color: #1a1a1a;
-            margin-top: 2.5rem;
-            margin-bottom: 1rem;
-        }
-        
-        h3 {
-            font-size: 1.4rem;
-            font-weight: 600;
-            color: #1a1a1a;
-            margin-top: 1.5rem;
-            margin-bottom: 0.75rem;
-        }
-        
-        p, ul {
-            margin-bottom: 1rem;
-            color: #333;
-            line-height: 1.8;
-        }
-        
-        ul {
-            margin-left: 1.5rem;
-        }
-        
-        li {
-            margin-bottom: 0.5rem;
-        }
-        
-        .contact-section {
-            background: #f8f9fa;
-            padding: 2rem;
-            margin-top: 3rem;
-            border-left: 2px solid #666;
-        }
-        
-        .contact-section h3 {
-            color: #1a1a1a;
-            margin-top: 0;
-        }
-        
-        .contact-info {
-            margin-top: 1rem;
-        }
-        
-        .contact-info p {
-            margin-bottom: 0.5rem;
-        }
-        
-        .important-note {
-            background: #f8f9fa;
-            border-left: 2px solid #666;
-            padding: 1.5rem;
-            margin: 2rem 0;
-        }
-        
-        .important-note p {
-            margin-bottom: 0.5rem;
-            color: #333;
-        }
-        
-        @media (max-width: 768px) {
-            h1 {
-                font-size: 2rem;
-            }
-            
-            h2 {
-                font-size: 1.5rem;
-            }
-            
-            h3 {
-                font-size: 1.2rem;
-            }
-            
-            .container {
-                padding: 2rem 16px;
-            }
-        }
-    </style>
-</head>
-<body>
-    <header>
-        <div class="header-content">
-            <div class="logo">
-                <a href="index.html">
-                    <img src="assets/logo-leaf.jpg" alt="LEAF">
-                </a>
-            </div>
-            <a href="index.html" class="back-link">← Voltar</a>
-        </div>
-    </header>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
 
-    <div class="container">
-        <h1>TERMOS DE USO</h1>
-        <div style="margin-bottom: 2rem; padding-bottom: 1rem; border-bottom: 1px solid #e0e0e0;">
-            <p style="margin-bottom: 0.5rem;"><strong>Plataforma:</strong> LEAF</p>
-            <p style="margin-bottom: 0.5rem;"><strong>Controladora:</strong> Freedom Tecnologia e Serviços LTDA</p>
-            <p style="margin-bottom: 0.5rem;"><strong>CNPJ:</strong> 54.027.374/0001-20</p>
-            <p style="margin-bottom: 0.5rem;"><strong>Nome fantasia:</strong> Bora.app</p>
-            <p style="margin-bottom: 0;"><strong>E-mail de contato:</strong> suporte@leaf.app.br</p>
+  <meta name="theme-color" content="#ffffff">
+  <title>Termos de Uso | Leaf App</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;650;700;750;800&amp;display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/assets/leaf-v2.css">
+  <link rel="stylesheet" href="/assets/leaf-v2-urban.css">
+  <link rel="stylesheet" href="/assets/leaf-v2-pages.css">
+  <script src="/assets/leaf-v2-motion.js" defer></script>
+<link rel="canonical" href="https://leaf.app.br/terms-of-service"></head>
+<body class="leaf-urban inner-page">
+<a class="skip-link" href="#conteudo">Ir para o conteúdo</a>
+<header class="site-header">
+  <div class="wrap header-inner">
+    <a class="brand" href="/" aria-label="Leaf, página inicial"><img src="/assets/leaf-logo-ink.png" width="110" height="34" alt="Leaf"></a>
+    <nav class="nav-links" aria-label="Navegação principal">
+      <a href="/#a-leaf">A Leaf</a>
+      <a href="/calculadora">Calculadora</a>
+      <a href="/support/">Suporte</a><a href="tel:+5521988739192">SAC 24h: (21) 98873-9192</a>
+    </nav>
+    <a class="back-link" href="/"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H5M12 5l-7 7 7 7"/></svg> Voltar à Leaf</a>
+  </div>
+</header>
+<main class="wrap inner-main" id="conteudo">
+  <div class="inner-heading">
+    <p class="eyebrow">Informações legais</p>
+    <h1>TERMOS DE USO</h1>
+    <p class="inner-lead"><strong>Última atualização:</strong> 26 de outubro de 2026</p>
+  </div>
+  <div class="document-layout">
+    <aside class="document-nav" aria-label="Nesta página">
+      <p>Nesta página</p>
+      <a href="#1-aceitacao-dos-termos">1. Aceitação dos Termos</a>
+      <a href="#2-descricao-do-servico">2. Descrição do Serviço</a>
+      <a href="#3-elegibilidade">3. Elegibilidade</a>
+      <a href="#4-uso-do-servico">4. Uso do Serviço</a>
+      <a href="#5-pagamentos-e-taxas">5. Pagamentos e Taxas</a>
+      <a href="#6-seguranca-e-responsabilidades">6. Segurança e Responsabilidades</a>
+      <a href="#7-limitacoes-de-responsabilidade">7. Limitações de Responsabilidade</a>
+      <a href="#8-propriedade-intelectual">8. Propriedade Intelectual</a>
+      <a href="#9-privacidade-e-protecao-de-dados">9. Privacidade e Proteção de Dados</a>
+      <a href="#10-modificacoes">10. Modificações</a>
+      <a href="#11-rescisao">11. Rescisão</a>
+      <a href="#12-lei-aplicavel">12. Lei Aplicável</a>
+      <a href="#13-disposicoes-gerais">13. Disposições Gerais</a>
+      <a href="#14-contato">14. Contato</a>
+    </aside>
+    <article class="document-content" aria-label="TERMOS DE USO">
+<div class="document-meta">
+            <p><strong>Plataforma:</strong> LEAF</p>
+            <p><strong>Controladora:</strong> Freedom Tecnologia e Serviços LTDA</p>
+            <p><strong>CNPJ:</strong> 54.027.374/0001-20</p>
+            <p><strong>Nome fantasia:</strong> Bora.app</p>
+            <p><strong>E-mail de contato:</strong> suporte@leaf.app.br</p>
         </div>
-        <p class="last-updated"><strong>Última atualização:</strong> 26 de outubro de 2026</p>
 
         <div class="important-note">
             <p><strong>IMPORTANTE:</strong> A Leaf atua como plataforma de tecnologia que conecta motoristas independentes a usuários. A Leaf não presta serviços de transporte diretamente. Motoristas são prestadores de serviços independentes e são responsáveis por suas próprias ações.</p>
         </div>
-
-        <h2>1. Aceitação dos Termos</h2>
-        <p>Ao usar o aplicativo Leaf, você concorda com estes termos de serviço. Se você não concordar com qualquer parte destes termos, não poderá usar nossos serviços.</p>
-
-        <h2>2. Descrição do Serviço</h2>
-        <p>O Leaf é uma plataforma de mobilidade urbana que conecta passageiros a motoristas parceiros. Nossos serviços incluem:</p>
+    <section id="1-aceitacao-dos-termos">
+      <h2>1. Aceitação dos Termos</h2>
+<p>Ao usar o aplicativo Leaf, você concorda com estes termos de serviço. Se você não concordar com qualquer parte destes termos, não poderá usar nossos serviços.</p>
+    </section>
+    <section id="2-descricao-do-servico">
+      <h2>2. Descrição do Serviço</h2>
+<p>O Leaf é uma plataforma de mobilidade urbana que conecta passageiros a motoristas parceiros. Nossos serviços incluem:</p>
         <ul>
             <li>Agendamento de corridas</li>
             <li>Processamento de pagamentos</li>
             <li>Comunicação entre usuários</li>
             <li>Suporte ao cliente</li>
         </ul>
-        <p><strong>Serviços de Terceiros:</strong> O Leaf pode utilizar serviços de terceiros para operação da plataforma. O uso desses serviços está sujeito aos termos e políticas de privacidade dos respectivos provedores. Para informações detalhadas sobre compartilhamento de dados, consulte nossa <a href="privacy-policy.html" style="color: #0066cc; text-decoration: underline;">Política de Privacidade</a>.</p>
-
+        <p><strong>Serviços de Terceiros:</strong> O Leaf pode utilizar serviços de terceiros para operação da plataforma. O uso desses serviços está sujeito aos termos e políticas de privacidade dos respectivos provedores. Para informações detalhadas sobre compartilhamento de dados, consulte nossa <a href="/privacy-policy">Política de Privacidade</a>.</p>
         <section id="situacao-administrativa-rio" aria-labelledby="situacao-administrativa-rio-titulo">
             <h3 id="situacao-administrativa-rio-titulo">2.1 Solicitação administrativa — Rio de Janeiro</h3>
             <p>A Leaf protocolou solicitação de credenciamento junto à Secretaria Municipal de Transportes do Município do Rio de Janeiro em <strong>11/07/2025</strong>, sob o número <strong>MTRCAP202522637</strong>.</p>
             <p>Situação informada pela Leaf em <strong>26/10/2026</strong>: aguardando decisão administrativa.</p>
             <p>Este protocolo identifica uma solicitação administrativa e não representa autorização ou credenciamento municipal concedido. A informação se refere exclusivamente ao Município do Rio de Janeiro.</p>
         </section>
-
-        <h2>3. Elegibilidade</h2>
-        
-        <h3>3.1 Requisitos para Usuários</h3>
+    </section>
+    <section id="3-elegibilidade">
+      <h2>3. Elegibilidade</h2>
+<h3>3.1 Requisitos para Usuários</h3>
         <ul>
             <li>Idade mínima de 18 anos</li>
             <li>Capacidade legal para contratar</li>
@@ -234,10 +100,10 @@
             <li>Seguro adequado</li>
             <li>Verificação de antecedentes</li>
         </ul>
-
-        <h2>4. Uso do Serviço</h2>
-        
-        <h3>4.1 Responsabilidades do Usuário</h3>
+    </section>
+    <section id="4-uso-do-servico">
+      <h2>4. Uso do Serviço</h2>
+<h3>4.1 Responsabilidades do Usuário</h3>
         <ul>
             <li>Fornecer informações precisas e atualizadas</li>
             <li>Manter confidencialidade da conta e senha</li>
@@ -262,10 +128,10 @@
             <li>O usuário concede à Leaf licença para usar, exibir e distribuir o conteúdo gerado na plataforma</li>
             <li>A Leaf não se responsabiliza por conteúdo gerado por terceiros</li>
         </ul>
-
-        <h2>5. Pagamentos e Taxas</h2>
-        
-        <h3>5.1 Estrutura de Preços</h3>
+    </section>
+    <section id="5-pagamentos-e-taxas">
+      <h2>5. Pagamentos e Taxas</h2>
+<h3>5.1 Estrutura de Preços</h3>
         <ul>
             <li>Tarifas baseadas em distância e tempo</li>
             <li>Taxas de serviço aplicáveis</li>
@@ -289,10 +155,10 @@
             <li>Processo de disputa disponível para casos específicos</li>
             <li>Prazos para solicitação de reembolso conforme política da plataforma</li>
         </ul>
-
-        <h2>6. Segurança e Responsabilidades</h2>
-        
-        <h3>6.1 Medidas de Segurança</h3>
+    </section>
+    <section id="6-seguranca-e-responsabilidades">
+      <h2>6. Segurança e Responsabilidades</h2>
+<h3>6.1 Medidas de Segurança</h3>
         <ul>
             <li>Verificação de motoristas</li>
             <li>Monitoramento de viagens</li>
@@ -308,10 +174,10 @@
             <li>A Leaf não se responsabiliza por ações de terceiros (motoristas, passageiros ou outros usuários)</li>
             <li>A Leaf atua como plataforma intermediadora, não como prestadora direta de serviços de transporte</li>
         </ul>
-
-        <h2>7. Limitações de Responsabilidade</h2>
-        
-        <h3>7.1 Exclusões</h3>
+    </section>
+    <section id="7-limitacoes-de-responsabilidade">
+      <h2>7. Limitações de Responsabilidade</h2>
+<h3>7.1 Exclusões</h3>
         <ul>
             <li>Atrasos ou cancelamentos</li>
             <li>Danos a propriedades</li>
@@ -325,10 +191,10 @@
             <li>Exclusão de danos indiretos</li>
             <li>Limites de indenização</li>
         </ul>
-
-        <h2>8. Propriedade Intelectual</h2>
-        
-        <h3>8.1 Direitos do Leaf</h3>
+    </section>
+    <section id="8-propriedade-intelectual">
+      <h2>8. Propriedade Intelectual</h2>
+<h3>8.1 Direitos do Leaf</h3>
         <ul>
             <li>Propriedade do aplicativo</li>
             <li>Marcas registradas</li>
@@ -341,20 +207,20 @@
             <li>Proibição de uso comercial</li>
             <li>Restrições de modificação</li>
         </ul>
-
-        <h2>9. Privacidade e Proteção de Dados</h2>
-        
-        <h3>9.1 Política de Privacidade</h3>
+    </section>
+    <section id="9-privacidade-e-protecao-de-dados">
+      <h2>9. Privacidade e Proteção de Dados</h2>
+<h3>9.1 Política de Privacidade</h3>
         <ul>
             <li>Coleta e uso de dados pessoais</li>
             <li>Compartilhamento de informações</li>
             <li>Direitos de privacidade</li>
         </ul>
-        <p><strong>Conformidade com LGPD:</strong> O tratamento de dados pessoais é realizado conforme a Lei Geral de Proteção de Dados (Lei nº 13.709/2018 – LGPD) e demais legislações aplicáveis. Para mais informações, consulte nossa <a href="privacy-policy.html" style="color: #0066cc; text-decoration: underline;">Política de Privacidade</a>.</p>
-
-        <h2>10. Modificações</h2>
-        
-        <h3>10.1 Alterações nos Termos</h3>
+        <p><strong>Conformidade com LGPD:</strong> O tratamento de dados pessoais é realizado conforme a Lei Geral de Proteção de Dados (Lei nº 13.709/2018 – LGPD) e demais legislações aplicáveis. Para mais informações, consulte nossa <a href="/privacy-policy">Política de Privacidade</a>.</p>
+    </section>
+    <section id="10-modificacoes">
+      <h2>10. Modificações</h2>
+<h3>10.1 Alterações nos Termos</h3>
         <ul>
             <li>Direito de modificar termos</li>
             <li>Notificação de alterações significativas</li>
@@ -367,10 +233,10 @@
             <li>Adição ou remoção de funcionalidades</li>
             <li>Notificação de mudanças importantes</li>
         </ul>
-
-        <h2>11. Rescisão</h2>
-        
-        <h3>11.1 Encerramento de Conta</h3>
+    </section>
+    <section id="11-rescisao">
+      <h2>11. Rescisão</h2>
+<h3>11.1 Encerramento de Conta</h3>
         <ul>
             <li>Direito de encerrar conta</li>
             <li>Processo de exclusão</li>
@@ -383,19 +249,19 @@
             <li>Liquidação de obrigações</li>
             <li>Exclusão de dados conforme política</li>
         </ul>
-
-        <h2>12. Lei Aplicável</h2>
-        
-        <h3>12.1 Jurisdição</h3>
+    </section>
+    <section id="12-lei-aplicavel">
+      <h2>12. Lei Aplicável</h2>
+<h3>12.1 Jurisdição</h3>
         <ul>
             <li>Lei brasileira aplicável</li>
             <li>Foro competente: Fica eleito o foro do domicílio da controladora (Freedom Tecnologia e Serviços LTDA) para dirimir quaisquer questões oriundas destes termos de uso</li>
             <li>Resolução de disputas</li>
         </ul>
-
-        <h2>13. Disposições Gerais</h2>
-        
-        <h3>13.1 Integralidade</h3>
+    </section>
+    <section id="13-disposicoes-gerais">
+      <h2>13. Disposições Gerais</h2>
+<h3>13.1 Integralidade</h3>
         <ul>
             <li>Termos constituem acordo completo</li>
             <li>Supremacia sobre comunicações anteriores</li>
@@ -408,10 +274,10 @@
             <li>Necessidade de renúncia por escrito</li>
             <li>Efeitos da renúncia</li>
         </ul>
-
-        <h2>14. Contato</h2>
-        
-        <div class="contact-section">
+    </section>
+    <section id="14-contato">
+      <h2>14. Contato</h2>
+<div class="contact-section">
             <h3>14.1 Informações de Contato</h3>
             <div class="contact-info">
                 <p><strong>Email:</strong> suporte@leaf.app.br</p>
@@ -421,17 +287,31 @@
                 <p><strong>CNPJ:</strong> 54.027.374/0001-20</p>
                 <p><strong>Nome fantasia:</strong> Bora.app</p>
             </div>
-            
-            <h3 style="margin-top: 2rem;">14.2 Suporte</h3>
+
+            <h3>14.2 Suporte</h3>
             <div class="contact-info">
                 <p>Para questões sobre estes termos, entre em contato conosco através dos canais listados acima.</p>
             </div>
         </div>
 
-        <p style="margin-top: 3rem; padding-top: 2rem; border-top: 2px solid #e0e0e0; color: #666; text-align: center;">
+        <p>
             <strong>Para questões sobre estes termos, entre em contato conosco através dos canais listados acima.</strong>
         </p>
-    </div>
+    </section>
+    </article>
+  </div>
+</main>
+
+<footer class="site-footer wrap">
+  <div class="footer-main">
+    <a class="brand" href="/" aria-label="Leaf, página inicial"><img src="/assets/leaf-logo-ink.png" width="94" height="29" alt="Leaf" loading="lazy"></a>
+    <nav class="footer-groups" aria-label="Explore a Leaf">
+      <div class="footer-group"><h2>A Leaf</h2><a href="/quem-somos">Quem somos</a><a href="/cidades">Cidades</a><a href="/categorias-passageiro">Para passageiros</a><a href="/categorias-motorista">Para motoristas</a><a href="/em-breve">Próximos passos</a></div>
+      <div class="footer-group"><h2>Seu caminho</h2><a href="/calculadora">Calculadora de ganhos</a><a href="/taxas">Taxas, às claras</a><a href="/support/">Suporte</a><a href="tel:+5521988739192">SAC 24h: (21) 98873-9192</a><a href="/excluir-conta/">Excluir conta</a></div>
+      <div class="footer-group"><h2>Informações</h2><a href="/terms-of-service">Termos de uso</a><a href="/privacy-policy">Privacidade</a><a href="/refund-policy">Reembolsos</a></div>
+    </nav>
+  </div>
+  <div class="footer-bottom"><span>© 2026 Leaf. Todos os direitos reservados.</span><span>Feito para a sua cidade.</span></div>
+</footer>
 </body>
 </html>
-

@@ -1,0 +1,388 @@
+/* Leaf V2: cidade em movimento. Scoped to this local draft. */
+.leaf-urban {
+  --ink: #14251b;
+  --muted: #566158;
+  --leaf: #b3f348;
+  --leaf-dark: #315b22;
+  --line: #dce3d8;
+  --soft: #f5f6f1;
+  background: #fdfefb;
+}
+
+.leaf-urban .wrap { width: min(1320px, calc(100% - 80px)); }
+.leaf-urban .header-inner { height: 94px; }
+.leaf-urban .brand img { width: 118px; }
+.leaf-urban .nav-links { gap: 32px; }
+.leaf-urban .nav-links a { font-size: 13px; font-weight: 600; }
+.leaf-urban .header-download { background: var(--ink); color: #fff; }
+.leaf-urban .header-download:hover { background: #304b2e; }
+.leaf-urban .eyebrow { font-size: 11px; font-weight: 700; letter-spacing: .035em; }
+.leaf-urban .btn { border-radius: 12px; }
+
+/* A green field, an offset photo, and one continuous route. */
+.leaf-urban .hero { padding-top: 10px; }
+.leaf-urban .hero-frame {
+  position: relative;
+  isolation: isolate;
+  grid-template-columns: 1.1fr .9fr;
+  min-height: 662px;
+  border: 0;
+  border-radius: 28px;
+  background: var(--leaf);
+  box-shadow: none;
+  overflow: hidden;
+}
+.leaf-urban .hero-copy { position: relative; z-index: 2; padding: 54px 26px 64px 56px; }
+.leaf-urban .hero-copy .eyebrow { margin-bottom: 30px; color: var(--ink); }
+.leaf-urban .hero-copy .dot { width: 8px; height: 8px; }
+.leaf-urban .hero-copy h1 {
+  font-size: clamp(68px, 7.2vw, 104px);
+  font-weight: 750;
+  letter-spacing: -.072em;
+  line-height: .99;
+}
+.leaf-urban .hero-copy h1 span { color: var(--ink); }
+.leaf-urban .hero-description { margin-top: 28px; font-size: 16px; line-height: 1.6; color: #2d4628; }
+.leaf-urban .hero-actions { gap: 10px; margin-top: 28px; }
+.leaf-urban .hero-actions .btn { min-height: 54px; padding: 17px 22px; font-size: 13px; }
+.leaf-urban .hero-actions .btn-ghost { border-color: rgba(20,37,27,.42); color: var(--ink); }
+.leaf-urban .hero-actions .btn-ghost:hover { background: rgba(255,255,255,.35); }
+.leaf-urban .hero-photo {
+  z-index: 1;
+  margin: 54px 28px 28px 0;
+  border-radius: 150px 18px 18px 18px;
+  overflow: hidden;
+}
+.leaf-urban .hero-photo > img { object-position: 49% 50%; }
+.leaf-urban .hero-photo::after { inset: 57% 0 0; background: linear-gradient(transparent, rgba(9,27,14,.7)); }
+.photo-caption {
+  position: absolute;
+  z-index: 2;
+  inset: auto 27px 28px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 20px;
+  color: #fff;
+  font-size: 29px;
+  font-weight: 600;
+  letter-spacing: -.045em;
+  line-height: 1.08;
+}
+.photo-caption .icon { width: 39px; height: 39px; color: var(--leaf); stroke-width: 1.5; }
+.hero-route { position: absolute; z-index: 0; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.hero-route path { stroke: var(--ink); stroke-width: 9; stroke-linecap: round; }
+.hero-route circle { fill: var(--leaf); stroke: var(--ink); stroke-width: 7; }
+.leaf-urban .hero-details { gap: 0; padding: 24px 0 0; }
+.leaf-urban .hero-detail { gap: 12px; padding: 5px 20px; font-size: 12px; color: var(--ink); }
+.leaf-urban .hero-detail + .hero-detail { border-left: 1px solid var(--line); }
+.detail-index { color: #697565; font-size: 10px; font-weight: 600; letter-spacing: .03em; }
+
+/* The audience selector remains the main card. Benefits breathe inside it. */
+.leaf-urban .audience-section { padding-top: 92px; }
+.leaf-urban .section-heading { margin-bottom: 34px; }
+.leaf-urban .section-heading h2 { font-size: clamp(35px, 3.7vw, 52px); font-weight: 600; line-height: 1.1; letter-spacing: -.055em; }
+.leaf-urban .section-heading .eyebrow { margin-bottom: 20px; }
+.leaf-urban .section-heading > p { color: var(--muted); font-size: 14px; }
+.leaf-urban .audience-card { border-color: #ccd5c7; border-radius: 24px; box-shadow: none; }
+.leaf-urban .audience-tabs { gap: 6px; padding: 9px; background: #fff; }
+.leaf-urban .audience-tab { font-size: 14px; font-weight: 650; border-radius: 15px; }
+.leaf-urban .tab-indicator { border-radius: 15px; }
+.leaf-urban .audience-panel { grid-template-columns: 1.15fr .85fr; min-height: 625px; }
+.leaf-urban .audience-content { padding: 46px 46px 38px; background: #fff; }
+.leaf-urban .audience-content > h3 { max-width: 460px; font-size: 43px; font-weight: 650; letter-spacing: -.055em; line-height: 1.06; text-wrap: initial; }
+.leaf-urban .audience-content > .panel-description { margin-top: 17px; max-width: 440px; font-size: 14px; }
+.leaf-urban .benefit-list { gap: 0; margin-top: 26px; }
+.leaf-urban .benefit {
+  gap: 17px;
+  padding: 22px 0;
+  border: 0;
+  border-top: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  transform: none;
+}
+.leaf-urban .benefit:last-child { padding-bottom: 0; }
+.leaf-urban .benefit-icon { width: 29px; height: 29px; flex-basis: 29px; border: 0; border-radius: 0; background: transparent; color: var(--ink); }
+.leaf-urban .benefit-icon .icon { width: 24px; height: 24px; stroke-width: 1.6; }
+.leaf-urban .benefit h4 { margin-bottom: 5px; font-size: 16px; font-weight: 650; line-height: 1.35; letter-spacing: -.025em; }
+.leaf-urban .benefit p { max-width: 425px; font-size: 13px; line-height: 1.65; }
+.leaf-urban .benefit-featured h4 { margin-bottom: 9px; font-size: 30px; font-weight: 600; letter-spacing: -.045em; line-height: 1.08; }
+.leaf-urban .benefit-featured .benefit-icon { margin-top: 3px; }
+.leaf-urban .audience-action { justify-content: flex-end; padding: 48px 43px; background: var(--leaf); }
+.leaf-urban .audience-action::before { display: none; }
+.leaf-urban .audience-action .eyebrow { color: var(--ink); margin-bottom: 29px; }
+.leaf-urban .audience-action h3 { font-size: 45px; font-weight: 600; letter-spacing: -.055em; line-height: 1.06; }
+.leaf-urban .action-description { color: #324d2a; margin-top: 22px; font-size: 14px; }
+.leaf-urban .action-route { position: absolute; inset: 0; width: 100%; height: 100%; stroke: rgba(20,37,27,.12); stroke-width: 3; pointer-events: none; }
+.action-route circle { fill: var(--leaf); stroke: var(--ink); stroke-width: 3; }
+.leaf-urban .store-buttons { margin-top: 29px; }
+.leaf-urban .store-button { min-height: 63px; border-radius: 12px; padding: 15px 18px; box-shadow: none; }
+.leaf-urban .store-button strong { font-size: 16px; }
+.leaf-urban .action-footnote { color: #314b29; margin-top: 23px; font-size: 11px; }
+.leaf-urban .driver-action { background: var(--ink); justify-content: center; }
+.leaf-urban .driver-action .eyebrow { color: var(--leaf); }
+.leaf-urban .launch-price { font-size: clamp(70px, 7vw, 98px); color: var(--leaf); letter-spacing: -.075em; }
+.leaf-urban .launch-note { font-size: 13px; }
+.leaf-urban .calc-link { border-radius: 12px; font-size: 14px; }
+.leaf-urban .signup-link { font-size: 13px; }
+
+/* Security is an open editorial band, not another rounded container. */
+.leaf-urban .care-section { padding-top: 70px; }
+.leaf-urban .care-band { grid-template-columns: .85fr 1.15fr; gap: 52px; padding: 32px 0 45px; border-radius: 0; border-top: 1px solid #cdd6c7; background: transparent; color: var(--ink); }
+.leaf-urban .care-title .eyebrow { color: var(--leaf-dark); margin-bottom: 22px; }
+.leaf-urban .care-title h2 { max-width: 420px; font-size: 38px; font-weight: 600; letter-spacing: -.05em; }
+.leaf-urban .care-points { gap: 30px; align-items: start; padding-top: 5px; }
+.leaf-urban .care-point .icon { color: var(--ink); width: 28px; height: 28px; margin-bottom: 21px; stroke-width: 1.5; }
+.leaf-urban .care-point h3 { font-size: 14px; font-weight: 650; }
+.leaf-urban .care-point p { color: var(--muted); font-size: 13px; }
+
+/* Actual product screen; the map is illustrative, never a service-area claim. */
+.leaf-urban .how-section { padding-block: 40px 94px; }
+.how-layout { display: grid; grid-template-columns: 1fr 1fr; gap: 90px; align-items: center; }
+.product-stage { position: relative; isolation: isolate; display: flex; flex-direction: column; align-items: center; justify-content: center; min-width: 0; margin: 0; padding: 40px 35px 23px; border-radius: 180px 24px 24px 24px; background: #e9f0e2; overflow: hidden; }
+.product-route { position: absolute; z-index: -1; inset: 0; width: 100%; height: 100%; stroke: var(--ink); stroke-width: 4; }
+.product-route circle { fill: var(--leaf); stroke-width: 4; }
+.app-device { width: min(260px, 72%); padding: 6px; background: #142019; border: 1px solid #0a160d; border-radius: 37px; overflow: hidden; transform: rotate(-5deg); box-shadow: 18px 22px 0 -1px rgba(20,37,27,.11); }
+.app-device img { width: 100%; height: auto; border-radius: 30px; }
+.product-stage figcaption { color: #586451; margin-top: 29px; text-align: center; font-size: 10px; line-height: 1.5; }
+.leaf-urban .how-heading { display: block; margin-bottom: 33px; }
+.leaf-urban .how-heading .eyebrow { margin-bottom: 20px; }
+.leaf-urban .how-heading h2 { font-size: clamp(45px, 4.5vw, 63px); font-weight: 600; line-height: 1.02; letter-spacing: -.055em; }
+.leaf-urban .how-heading h2 span { color: #4c782a; }
+.leaf-urban .steps { display: grid; grid-template-columns: 1fr; gap: 0; }
+.leaf-urban .step { position: relative; display: flex; gap: 19px; padding: 15px 0; border: 0; border-radius: 0; background: transparent; box-shadow: none; transform: none; }
+.leaf-urban .step:not(:last-child)::after { content: ''; position: absolute; left: 14px; top: 45px; bottom: -10px; width: 1px; background: #c1ceba; }
+.leaf-urban .step-number { position: relative; z-index: 1; width: 30px; min-height: 30px; height: 30px; flex: 0 0 30px; margin: 0; border: 1px solid #acbfa1; border-radius: 50%; background: #fdfefb; color: var(--ink); font-size: 10px; font-weight: 600; }
+.leaf-urban .step:first-child .step-number { background: var(--leaf); border-color: var(--leaf); }
+.leaf-urban .step h3 { font-size: 16px; font-weight: 650; margin: 3px 0 5px; letter-spacing: -.02em; }
+.leaf-urban .step p { font-size: 13px; max-width: 350px; }
+
+/* One direct invitation at the end. */
+.leaf-urban .download-section { padding-bottom: 56px; }
+.leaf-urban .download-card { grid-template-columns: 1.2fr 1fr; gap: 45px; padding: 53px 52px; border: 0; border-radius: 24px; background: var(--leaf); }
+.leaf-urban .download-card::after { width: 260px; height: 260px; left: 34%; bottom: -207px; border: 3px solid var(--ink); opacity: 1; border-radius: 75px; }
+.leaf-urban .download-copy h2 { font-size: clamp(40px, 4.8vw, 66px); font-weight: 600; letter-spacing: -.065em; }
+.leaf-urban .download-copy > p { max-width: 350px; font-size: 14px; color: #304a28; }
+.leaf-urban .download-action .store-button strong { font-size: 14px; }
+.leaf-urban .driver-signup { color: #304a28; font-size: 12px; }
+.leaf-urban .footer-main { padding-top: 25px; }
+.leaf-urban .footer-links a { font-weight: 500; }
+
+@media (hover: hover) and (pointer: fine) {
+  .leaf-urban .benefit:hover, .leaf-urban .step:hover { transform: none; box-shadow: none; }
+  .leaf-urban .benefit:hover .benefit-icon { background: transparent; transform: none; }
+  .leaf-urban .step:hover .step-number { background: var(--leaf); border-color: var(--leaf); }
+}
+
+@media (min-width: 1600px) {
+  .leaf-urban .hero-frame { min-height: 695px; }
+  .leaf-urban .hero-copy { padding-left: 62px; }
+  .leaf-urban .hero-copy h1 { font-size: 110px; }
+}
+
+@media (max-width: 1100px) {
+  .leaf-urban .wrap { width: calc(100% - 56px); }
+  .leaf-urban .hero-frame { min-height: 595px; grid-template-columns: 1.12fr .88fr; }
+  .leaf-urban .hero-copy { padding: 44px 25px 49px 35px; }
+  .leaf-urban .hero-copy h1 { font-size: clamp(68px, 8vw, 84px); }
+  .leaf-urban .hero-photo { margin: 45px 21px 21px 0; border-top-left-radius: 115px; }
+  .leaf-urban .hero-description { font-size: 14px; }
+  .leaf-urban .hero-actions .btn { padding: 16px 17px; font-size: 12px; }
+  .photo-caption { inset: auto 22px 24px; font-size: 26px; }
+  .leaf-urban .audience-content { padding: 36px 31px; }
+  .leaf-urban .audience-content > h3 { font-size: 38px; }
+  .leaf-urban .audience-action { padding: 37px 31px; }
+  .leaf-urban .audience-action h3 { font-size: 39px; }
+  .leaf-urban .launch-price { font-size: 77px; }
+  .leaf-urban .benefit { gap: 14px; padding: 20px 0; }
+  .leaf-urban .benefit h4 { font-size: 15px; }
+  .leaf-urban .benefit-featured h4 { font-size: 28px; }
+  .leaf-urban .care-band { gap: 35px; }
+  .leaf-urban .care-title h2 { font-size: 33px; }
+  .leaf-urban .care-points { gap: 20px; }
+  .how-layout { gap: 60px; }
+  .product-stage { padding: 35px 28px 24px; border-top-left-radius: 140px; }
+  .app-device { width: min(240px, 83%); }
+  .leaf-urban .download-card { padding: 42px 37px; gap: 30px; }
+}
+
+@media (max-width: 800px) {
+  .leaf-urban .header-inner { height: 82px; }
+  .leaf-urban .brand img { width: 100px; }
+  .leaf-urban .nav-links { gap: 19px; }
+  .leaf-urban .nav-links a { font-size: 11px; }
+  .leaf-urban .hero-frame { min-height: 550px; }
+  .leaf-urban .hero-copy { padding: 35px 22px 43px 27px; }
+  .leaf-urban .hero-copy h1 { font-size: clamp(54px, 8.5vw, 68px); }
+  .leaf-urban .hero-copy .eyebrow { font-size: 9px; margin-bottom: 26px; }
+  .leaf-urban .hero-description { font-size: 13px; margin-top: 24px; }
+  .leaf-urban .hero-actions { gap: 8px; margin-top: 25px; }
+  .leaf-urban .hero-actions .btn { min-height: 45px; padding: 13px 14px; }
+  .leaf-urban .hero-photo { margin: 30px 16px 16px 0; border-radius: 95px 14px 14px; }
+  .photo-caption { inset: auto 18px 23px; font-size: 24px; }
+  .photo-caption .icon { width: 29px; height: 29px; }
+  .leaf-urban .hero-detail { gap: 9px; padding: 4px 10px; font-size: 10px; }
+  .leaf-urban .audience-section { padding-top: 68px; }
+  .leaf-urban .section-heading h2 { font-size: 36px; }
+  .leaf-urban .section-heading > p { font-size: 12px; }
+  .leaf-urban .audience-panel { grid-template-columns: 1.1fr .9fr; min-height: 620px; }
+  .leaf-urban .audience-content { padding: 32px 25px; }
+  .leaf-urban .audience-content > h3 { font-size: 33px; }
+  .leaf-urban .audience-content > .panel-description { font-size: 13px; }
+  .leaf-urban .benefit { gap: 12px; padding: 20px 0; }
+  .leaf-urban .benefit h4 { font-size: 14px; }
+  .leaf-urban .benefit-featured h4 { font-size: 25px; }
+  .leaf-urban .benefit p { font-size: 12px; }
+  .leaf-urban .benefit-icon { width: 25px; height: 25px; flex-basis: 25px; }
+  .leaf-urban .benefit-icon .icon { width: 22px; height: 22px; }
+  .leaf-urban .audience-action { padding: 32px 25px; }
+  .leaf-urban .audience-action h3 { font-size: 34px; }
+  .leaf-urban .action-description { font-size: 13px; }
+  .leaf-urban .launch-price { font-size: 61px; }
+  .leaf-urban .launch-note { font-size: 12px; }
+  .leaf-urban .calc-link { font-size: 12px; padding: 17px 15px; }
+  .leaf-urban .signup-link { font-size: 12px; }
+  .leaf-urban .care-band { grid-template-columns: 1fr; gap: 33px; padding-block: 30px; }
+  .leaf-urban .care-title h2 br { display: none; }
+  .leaf-urban .care-title h2 { max-width: none; font-size: 35px; }
+  .leaf-urban .care-points { gap: 29px; }
+  .leaf-urban .how-section { padding-block: 36px 65px; }
+  .how-layout { gap: 36px; }
+  .product-stage { padding: 34px 20px 22px; border-top-left-radius: 105px; }
+  .app-device { width: 88%; padding: 4px; border-radius: 28px; box-shadow: 11px 15px 0 -1px rgba(20,37,27,.11); }
+  .app-device img { border-radius: 23px; }
+  .leaf-urban .how-heading { margin-bottom: 22px; }
+  .leaf-urban .how-heading h2 { font-size: 45px; }
+  .leaf-urban .step { gap: 13px; padding: 13px 0; }
+  .leaf-urban .step h3 { font-size: 14px; }
+  .leaf-urban .step p { font-size: 12px; }
+  .leaf-urban .download-card { grid-template-columns: 1fr; padding: 37px; gap: 30px; }
+  .leaf-urban .download-copy h2 { font-size: 51px; }
+}
+
+@media (min-width: 601px) and (max-width: 700px) {
+  .leaf-urban .audience-panel { grid-template-columns: 1fr; min-height: 0; }
+  .leaf-urban .audience-content { padding: 36px; }
+  .leaf-urban .audience-action { padding: 38px 36px; }
+  .leaf-urban .audience-action .store-buttons { grid-template-columns: 1fr 1fr; max-width: 440px; }
+  .leaf-urban .audience-action h3 { font-size: 41px; }
+  .leaf-urban .launch-price { font-size: 82px; }
+  .leaf-urban .calc-link { max-width: 400px; font-size: 14px; }
+  .leaf-urban .signup-link { justify-content: flex-start; font-size: 13px; }
+}
+
+@media (max-width: 600px) {
+  .leaf-urban .wrap { width: calc(100% - 32px); }
+  .leaf-urban .header-inner { height: 76px; }
+  .leaf-urban .brand img { width: 96px; }
+  .leaf-urban .header-download { font-size: 11px; border-radius: 10px; padding: 12px 16px; }
+  .leaf-urban .hero { padding-top: 0; }
+  .leaf-urban .hero-frame { display: flex; flex-direction: column; min-height: 0; border-radius: 22px; }
+  .leaf-urban .hero-copy { padding: 33px 26px 32px; }
+  .leaf-urban .hero-copy .eyebrow { margin-bottom: 24px; font-size: 9px; }
+  .leaf-urban .hero-copy h1 { font-size: clamp(55px, 16.4vw, 83px); line-height: .99; letter-spacing: -.065em; }
+  .leaf-urban .hero-description { font-size: 13px; margin-top: 23px; }
+  .leaf-urban .hero-actions { flex-direction: row; gap: 8px; margin-top: 25px; }
+  .leaf-urban .hero-actions .btn { font-size: 11px; padding: 14px 11px; min-height: 47px; }
+  .leaf-urban .hero-photo { flex: none; height: 304px; margin: 0 16px 16px 36px; border-radius: 100px 14px 14px; }
+  .leaf-urban .hero-photo > img { object-position: 50% 42%; }
+  .photo-caption { inset: auto 23px 24px; font-size: 27px; }
+  .hero-route { inset: auto auto -32px -47%; width: 150%; height: 450px; }
+  .hero-route path { stroke-width: 9; }
+  .leaf-urban .hero-details { grid-template-columns: repeat(3, 1fr); padding-top: 20px; gap: 0; }
+  .leaf-urban .hero-detail { align-items: flex-start; justify-content: flex-start; flex-direction: column; gap: 6px; padding: 0 10px; font-size: 10px; line-height: 1.5; }
+  .leaf-urban .hero-detail:first-child { padding-left: 2px; }
+  .detail-index { font-size: 9px; }
+  .leaf-urban .audience-section { padding-top: 57px; }
+  .leaf-urban .section-heading { margin-bottom: 27px; }
+  .leaf-urban .section-heading .eyebrow { margin-bottom: 17px; font-size: 9px; }
+  .leaf-urban .section-heading h2 { font-size: clamp(29px, 8.4vw, 41px); line-height: 1.1; }
+  .leaf-urban .section-heading > p { font-size: 13px; margin-top: 19px; }
+  .leaf-urban .section-heading > p br { display: none; }
+  .leaf-urban .audience-card { border-radius: 20px; }
+  .leaf-urban .audience-tabs { padding: 8px; gap: 4px; }
+  .leaf-urban .audience-tab { font-size: 12px; min-height: 49px; border-radius: 12px; }
+  .leaf-urban .tab-indicator { border-radius: 12px; }
+  .leaf-urban .audience-panel { grid-template-columns: 1fr; min-height: 0; }
+  .leaf-urban .audience-content { padding: 33px 25px 30px; }
+  .leaf-urban .audience-content > h3 { font-size: 37px; }
+  .leaf-urban .audience-content > .panel-description { font-size: 13px; margin-top: 15px; }
+  .leaf-urban .benefit-list { margin-top: 25px; }
+  .leaf-urban .benefit { gap: 15px; padding: 23px 0; }
+  .leaf-urban .benefit h4 { font-size: 15px; }
+  .leaf-urban .benefit p { font-size: 13px; }
+  .leaf-urban .benefit-featured h4 { font-size: 29px; }
+  .leaf-urban .benefit-icon { flex-basis: 26px; width: 26px; height: 26px; }
+  .leaf-urban .audience-action { padding: 36px 27px; }
+  .leaf-urban .audience-action h3 { font-size: 41px; }
+  .leaf-urban .audience-action .eyebrow { font-size: 10px; margin-bottom: 23px; }
+  .leaf-urban .action-description { font-size: 13px; margin-top: 19px; }
+  .leaf-urban .audience-action .store-buttons { grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 27px; }
+  .leaf-urban .store-button { padding: 14px 12px; gap: 9px; min-height: 58px; }
+  .leaf-urban .store-button strong { font-size: 12px; }
+  .leaf-urban .store-button small { font-size: 8px; }
+  .leaf-urban .action-footnote { margin-top: 22px; font-size: 10px; }
+  .leaf-urban .launch-price { font-size: clamp(65px, 20vw, 85px); }
+  .leaf-urban .launch-note { font-size: 12px; }
+  .leaf-urban .calc-link { font-size: 13px; padding: 19px; }
+  .leaf-urban .signup-link { font-size: 12px; }
+  .leaf-urban .care-section { padding-top: 43px; }
+  .leaf-urban .care-band { padding-block: 28px 0; gap: 30px; }
+  .leaf-urban .care-title .eyebrow { font-size: 9px; margin-bottom: 17px; }
+  .leaf-urban .care-title h2 { max-width: 300px; font-size: 33px; }
+  .leaf-urban .care-title h2 br { display: initial; }
+  .leaf-urban .care-points { grid-template-columns: 1fr; gap: 25px; }
+  .leaf-urban .care-point { column-gap: 17px; }
+  .leaf-urban .care-point .icon { width: 25px; height: 25px; margin: 2px 0 0; }
+  .leaf-urban .care-point h3 { font-size: 14px; }
+  .leaf-urban .care-point p { font-size: 13px; }
+  .leaf-urban .how-section { padding-block: 53px 55px; }
+  .how-layout { grid-template-columns: 1fr; gap: 37px; }
+  .how-content { grid-row: 1; }
+  .leaf-urban .how-heading .eyebrow { font-size: 9px; }
+  .leaf-urban .how-heading h2 { font-size: 51px; }
+  .leaf-urban .steps { margin-top: 24px; }
+  .leaf-urban .step { gap: 20px; padding: 15px 0; }
+  .leaf-urban .step h3 { font-size: 15px; }
+  .leaf-urban .step p { font-size: 13px; }
+  .product-stage { padding: 31px 28px 22px; border-radius: 120px 22px 22px; }
+  .app-device { width: min(230px, 76%); border-radius: 32px; padding: 5px; }
+  .app-device img { border-radius: 26px; }
+  .product-stage figcaption { font-size: 9px; }
+  .leaf-urban .download-section { padding-bottom: 40px; }
+  .leaf-urban .download-card { padding: 36px 26px; border-radius: 20px; gap: 27px; }
+  .leaf-urban .download-copy h2 { font-size: 42px; }
+  .leaf-urban .download-copy > p { font-size: 13px; margin-top: 17px; }
+  .leaf-urban .download-action .store-button { padding: 14px 11px; gap: 8px; }
+  .leaf-urban .download-action .store-button strong { font-size: 12px; }
+  .leaf-urban .driver-signup { font-size: 11px; }
+}
+
+@media (max-width: 360px) {
+  .leaf-urban .hero-copy { padding-inline: 22px; }
+  .leaf-urban .hero-copy h1 { font-size: 54px; }
+  .leaf-urban .hero-actions .btn { font-size: 10px; padding-inline: 9px; gap: 8px; }
+  .leaf-urban .hero-photo { height: 270px; margin-left: 28px; }
+  .leaf-urban .hero-detail { font-size: 9px; padding-inline: 9px; }
+  .leaf-urban .audience-content { padding-inline: 21px; }
+  .leaf-urban .audience-content > h3 { font-size: 34px; }
+  .leaf-urban .benefit { gap: 12px; }
+  .leaf-urban .benefit h4 { font-size: 14px; }
+  .leaf-urban .benefit-featured h4 { font-size: 27px; }
+  .leaf-urban .audience-action { padding-inline: 23px; }
+  .leaf-urban .audience-action h3 { font-size: 37px; }
+  .leaf-urban .audience-action .store-buttons, .leaf-urban .download-action .store-buttons { grid-template-columns: 1fr; }
+  .leaf-urban .store-button strong, .leaf-urban .download-action .store-button strong { font-size: 15px; }
+  .leaf-urban .store-button small { font-size: 10px; }
+  .leaf-urban .download-copy h2 { font-size: 37px; }
+}
+
+@keyframes leaf-route-arrive {
+  from { stroke-dashoffset: 1; }
+  to { stroke-dashoffset: 0; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .hero-route .route-line { stroke-dasharray: 1; animation: leaf-route-arrive 1.35s .12s var(--ease-out) both; }
+}
