@@ -172,17 +172,30 @@ function startHttpServer({
                     try {
                         const ridePersistenceService = require('../services/ride-persistence-service');
                         const outboxIntervalMs = Number.parseInt(process.env.RIDE_FINALIZATION_OUTBOX_INTERVAL_MS || '10000', 10);
-                        setInterval(async () => {
-                            const stats = await ridePersistenceService.processFinalizationOutboxBatch(30);
-                            if ((stats.processed || 0) > 0 || (stats.retried || 0) > 0 || (stats.failed || 0) > 0) {
-                                logStructured('info', 'Outbox de finalizacao processado', {
-                                    service: 'ride-persistence',
-                                    processed: stats.processed || 0,
-                                    retried: stats.retried || 0,
-                                    failed: stats.failed || 0
-                                });
+                        require('../utils/bounded-work-loop')({
+                            idleMs: outboxIntervalMs,
+                            busyMs: 250,
+                            productive: stats => (stats?.processed || 0) > 0 ||
+                                (process.env.ENABLE_OPS_METRIC_WRITES === 'true' && (stats?.metricProjections?.processed || 0) > 0),
+                            onError: error => logStructured('error', 'Falha no ciclo da outbox de finalizacao', {
+                                service: 'ride-persistence', error: error.message
+                            }),
+                            run: async () => {
+                                const stats = await ridePersistenceService.processFinalizationOutboxBatch(30);
+                                const projected = stats.metricProjections || {};
+                                if ((stats.processed || 0) > 0 || (stats.retried || 0) > 0 || (stats.failed || 0) > 0 ||
+                                    (projected.processed || 0) > 0 || (projected.failed || 0) > 0) {
+                                    logStructured('info', 'Outbox de finalizacao processado', {
+                                        service: 'ride-persistence',
+                                        processed: stats.processed || 0, retried: stats.retried || 0, failed: stats.failed || 0,
+                                        metricProjectionProcessed: projected.processed || 0,
+                                        metricProjectionFailed: projected.failed || 0,
+                                        metricProjectionDeferred: projected.deferred || 0
+                                    });
+                                }
+                                return stats;
                             }
-                        }, outboxIntervalMs);
+                        });
                     } catch (outboxInitError) {
                         logStructured('error', 'Falha ao iniciar processador de outbox de finalizacao', {
                             service: 'ride-persistence',

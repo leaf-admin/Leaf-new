@@ -31,7 +31,7 @@ Gate obrigatório de GPS: buffers pendentes sem TTL destrutivo exigem memória m
 
 ## Simulação e migração por lotes
 
-Biblioteca `leaf-websocket-backend/scripts/maintenance/database-read-models.cjs` recebe adapters explicitamente; não carrega credenciais, cria endpoint ou agenda trabalho. `apply=false` é padrão. Escritas exigem referência explícita de manutenção; essa string é trilha operacional e prevenção de acidente, não substitui autorização humana ou autenticação. Nenhum marcador de prontidão é criado pela biblioteca.
+Biblioteca `leaf-websocket-backend/scripts/maintenance/database-read-models.cjs` recebe adapters explicitamente; não carrega credenciais, cria endpoint ou agenda trabalho. `apply=false` é padrão. Escritas exigem referência explícita de manutenção; essa string é trilha operacional e prevenção de acidente, não substitui autorização humana ou autenticação. Nenhum marcador de prontidão é criado pela biblioteca. O validador de configuração recusa readers sem writers e métricas escritas com a outbox consumidora desabilitada.
 
 CLI local reproduzível, somente em stores privados sintéticos:
 
@@ -89,6 +89,8 @@ Cache por processo não é cache compartilhado: múltiplas instâncias multiplic
 Não houve mudança de retenção. Campo `expiresAt` não comprova TTL ativo. Checkpoints derivados crescem com histórico e são necessários para idempotência; apagar checkpoint sozinho pode duplicar contribuição. Estimar bytes por corrida com amostra aprovada, incluindo trilha, resumos, índices e outboxes. Qualquer TTL, retenção financeira, limpeza de fonte canônica ou configuração de console exige decisão separada. Não criar cron de limpeza paralelo; reutilizar manutenção existente com orçamento e aprovação.
 
 ## Ativação, observação e rollback
+
+O ciclo existente da outbox usa lote30 no bootstrap (serviço padrão20, teto100),4 transações simultâneas de projeção e250ms entre ciclos produtivos. Vazio/falha total volta ao intervalo ocioso existente,10s por padrão; o próximo ciclo só começa após o anterior terminar. Não admite novos itens depois de10s no lote, preservando os não iniciados; I/O já em voo não é cancelado. Falha total não acelera polling. Isso remove o teto artificial de3tarefas/s do timer antigo, mas não prova taxa de I/O real. Carga permanente pode manter relatórios em503/atualização se o backlog não zerar: essa degradação não pode atingir corridas.
 
 Primeiro writers aditivos homogêneos; depois backfill/paridade e atestados; só então leitores por superfície/coorte. Antes de cada ação externa, obter a autorização específica. Observar p95/p99 críticos, erros, rejeições administrativas, event-loop, memória Redis/RSS, idade/volume de buffers e tarefas, retries, lag e idade do cache. Sem labels por usuário/rideId. Métricas derivadas são relatórios; não substituir fonte financeira.
 

@@ -565,7 +565,13 @@ class RidePersistenceService {
             let failed = 0;
             let scanned = 0;
 
-            for (const [outboxEntryId, raw] of items) {
+            const admissionStartedAt = Date.now();
+            for (let itemIndex = 0; itemIndex < items.length; itemIndex++) {
+                if (Date.now() - admissionStartedAt >= 10000) {
+                    this.outboxScanPage.unshift(...items.slice(itemIndex));
+                    break;
+                }
+                const [outboxEntryId, raw] = items[itemIndex];
                 if (await redis.hget(outboxKey, outboxEntryId) !== raw) continue;
                 if (scanned >= limit) break;
                 scanned += 1;

@@ -100,11 +100,13 @@ async function project(firestore, path, { backfill = false } = {}) {
 async function drain(firestore, limit = 20) {
   if (!enabled() || !firestore || draining) return { processed: 0, failed: 0, skipped: true };
   draining = true;
-  const stats = { processed: 0, failed: 0 };
+  const stats = { processed: 0, failed: 0, deferred: 0 };
   try {
     const tasks = await firestore.collection(PENDING).where('nextAttemptAt', '<=', Date.now())
       .orderBy('nextAttemptAt').limit(Math.min(100, Math.max(1, Number.parseInt(limit, 10) || 20))).get();
+    const deadline = Date.now() + 10000;
     await mapWithConcurrency(tasks.docs, 4, async task => {
+      if (Date.now() >= deadline) { stats.deferred++; return; }
       try { const result = await project(firestore, task.data().sourcePath); if (result.processed) stats.processed++; }
       catch (error) {
         stats.failed++;

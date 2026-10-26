@@ -52,4 +52,26 @@ describe('canonical analytics contributions', () => {
       if (prior === undefined) delete process.env.ENABLE_OPS_METRIC_WRITES; else process.env.ENABLE_OPS_METRIC_WRITES = prior;
     }
   });
+
+  test('slow materialization stops admitting tasks after10s and leaves deferred work intact', async () => {
+    const previous = process.env.ENABLE_OPS_METRIC_WRITES; process.env.ENABLE_OPS_METRIC_WRITES = 'true';
+    jest.useFakeTimers();
+    let release;
+    const held = new Promise(resolve => { release = resolve; });
+    const tasks = Array.from({ length: 20 }, (_, i) => ({ data: () => ({ sourcePath: `rides/task-${i}` }), ref: { update: jest.fn() } }));
+    const query = { where: jest.fn().mockReturnThis(), orderBy: jest.fn().mockReturnThis(), limit: jest.fn().mockReturnThis(),
+      get: jest.fn().mockResolvedValue({ docs: tasks }), doc: jest.fn(id => ({ path: id })) };
+    const firestore = { collection: () => query, runTransaction: jest.fn(() => held) };
+    try {
+      const running = store.drain(firestore);
+      await jest.advanceTimersByTimeAsync(0); expect(firestore.runTransaction).toHaveBeenCalledTimes(4);
+      await jest.advanceTimersByTimeAsync(15000); release({ processed: true });
+      await expect(running).resolves.toMatchObject({ processed: 4, deferred: 16, failed: 0 });
+      expect(firestore.runTransaction).toHaveBeenCalledTimes(4);
+      tasks.forEach(task => expect(task.ref.update).not.toHaveBeenCalled());
+    } finally {
+      release({ processed: true }); jest.useRealTimers();
+      if (previous === undefined) delete process.env.ENABLE_OPS_METRIC_WRITES; else process.env.ENABLE_OPS_METRIC_WRITES = previous;
+    }
+  });
 });
