@@ -175,7 +175,8 @@ jobs:
 
   validate-dashboard:
     name: Dashboard Lint Build And Smoke
-    runs-on: ubuntu-latest
+    # Playwright 1.60 supports Ubuntu 24.04; avoid OS changes via ubuntu-latest.
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: ./leaf-dashboard-js
