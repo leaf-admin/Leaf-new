@@ -93,6 +93,7 @@ function renderPage({ title, subtitle, sections, req }) {
     <footer>
       Leaf Tecnologia e Mobilidade. Última atualização: ${new Date().toLocaleDateString('pt-BR')}.<br />
       Contato: <a href="mailto:suporte@leaf.app.br">suporte@leaf.app.br</a><br />
+      SAC telefônico 24 horas: <a href="tel:+5521988739192">(21) 98873-9192</a><br />
       Base pública: <a href="${getBaseUrl(req)}">${getBaseUrl(req)}</a>
     </footer>
   </main>
@@ -139,7 +140,8 @@ function sendPrivacyPolicy(req, res) {
           title: '5. Segurança e contato',
           paragraphs: [
             'Adotamos controles técnicos e organizacionais para mitigar acesso indevido, uso indevido e vazamentos de dados.',
-            'Em caso de dúvidas, contate suporte@leaf.app.br.'
+            'Em caso de dúvidas, contate suporte@leaf.app.br.',
+            'As informações sobre a solicitação administrativa da Leaf no Município do Rio de Janeiro estão nos <a href="/terms">Termos de Uso — Situação administrativa</a>.'
           ]
         }
       ]
@@ -187,6 +189,14 @@ function sendTermsOfService(req, res) {
           paragraphs: [
             'Podemos atualizar estes termos periodicamente. Alterações relevantes serão comunicadas no aplicativo.',
             'Dúvidas podem ser enviadas para suporte@leaf.app.br.'
+          ]
+        },
+        {
+          title: '6. Solicitação administrativa — Rio de Janeiro',
+          paragraphs: [
+            'A Leaf protocolou solicitação de credenciamento junto à Secretaria Municipal de Transportes do Município do Rio de Janeiro em 11/07/2025, sob o número MTRCAP202522637.',
+            'Situação informada pela Leaf em 26/10/2026: aguardando decisão administrativa.',
+            'Este protocolo identifica uma solicitação administrativa e não representa autorização ou credenciamento municipal concedido. A informação se refere exclusivamente ao Município do Rio de Janeiro.'
           ]
         }
       ]

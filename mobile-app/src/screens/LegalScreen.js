@@ -18,13 +18,16 @@ import { Ionicons } from '@expo/vector-icons';
 import { useSelector } from 'react-redux';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { apiClient } from '../services/httpClient';
+import { AppConfig } from '../../config/AppConfig';
 import robotaxiPrototypeTokens from '../components/design-system/robotaxiPrototypeTokens';
 
 const { color, radius, spacing, touch } = robotaxiPrototypeTokens;
 
 const LegalScreen = ({ navigation, route }) => {
   const insets = useSafeAreaInsets();
-  const [selectedSection, setSelectedSection] = useState('terms');
+  const [selectedSection, setSelectedSection] = useState(() =>
+    route?.params?.initialSection === 'compliance' ? 'compliance' : 'terms'
+  );
   const [legalData, setLegalData] = useState({
     terms: '',
     privacy: '',
@@ -44,12 +47,18 @@ const LegalScreen = ({ navigation, route }) => {
     { id: 'privacy', label: 'Privacidade', icon: 'privacy-tip' },
     { id: 'cookies', label: 'Cookies', icon: 'cookie' },
     { id: 'licenses', label: 'Licenças', icon: 'copyright' },
-    { id: 'compliance', label: 'Conformidade', icon: 'verified' }
+    { id: 'compliance', label: 'Situação regulatória', icon: 'gavel' }
   ];
 
   useEffect(() => {
     loadLegalData();
   }, []);
+
+  useEffect(() => {
+    if (route?.params?.initialSection === 'compliance') {
+      setSelectedSection('compliance');
+    }
+  }, [route?.params?.initialSection]);
 
   const loadLegalData = async () => {
     try {
@@ -102,10 +111,24 @@ const LegalScreen = ({ navigation, route }) => {
     }
   };
 
+  const renderRioAdministrativeRequest = () => (
+    <View style={styles.legalCard} testID="legal-rio-administrative-request">
+      <Text style={styles.complianceTitle}>Solicitação administrativa — Rio de Janeiro</Text>
+      <Text style={styles.legalText}>
+        A Leaf protocolou solicitação de credenciamento junto à Secretaria Municipal de Transportes
+        do Município do Rio de Janeiro em 11/07/2025, sob o número MTRCAP202522637.{'\n\n'}
+        Situação informada pela Leaf em 26/10/2026: aguardando decisão administrativa.{'\n\n'}
+        Este protocolo identifica uma solicitação administrativa e não representa autorização
+        ou credenciamento municipal concedido. A informação se refere exclusivamente ao Município
+        do Rio de Janeiro.
+      </Text>
+    </View>
+  );
+
   const renderTerms = () => (
     <View style={styles.sectionContent}>
       <Text style={styles.sectionTitle}>Termos de Uso</Text>
-      <Text style={styles.lastUpdated}>Última atualização: 28 de Julho de 2025</Text>
+      <Text style={styles.lastUpdated}>Última atualização: 26 de outubro de 2026</Text>
       
       <View style={styles.legalCard}>
         <Text style={styles.legalText}>
@@ -147,8 +170,18 @@ const LegalScreen = ({ navigation, route }) => {
           
           <Text style={styles.boldText}>10. Contato</Text>{'\n\n'}
           Para dúvidas sobre estes termos, entre em contato conosco através do suporte do aplicativo.
+          {'\n\n'}SAC telefônico 24 horas:{' '}
+          <Text
+            style={styles.linkText}
+            onPress={() => handleLinkPress(`tel:${AppConfig.support_phone}`, 'o SAC telefônico da Leaf')}
+            accessibilityRole="link"
+            accessibilityLabel={`Ligar para o SAC da Leaf: ${AppConfig.support_phone_display}`}
+          >
+            {AppConfig.support_phone_display}
+          </Text>
         </Text>
       </View>
+      {renderRioAdministrativeRequest()}
     </View>
   );
 
@@ -290,84 +323,21 @@ const LegalScreen = ({ navigation, route }) => {
 
   const renderCompliance = () => (
     <View style={styles.sectionContent}>
-      <Text style={styles.sectionTitle}>Conformidade Legal</Text>
-      
-      <View style={styles.complianceList}>
-        <View style={styles.complianceItem}>
-          <Icon name="gavel" type="material" color="#3498db" size={24} />
-          <View style={styles.complianceInfo}>
-            <Text style={styles.complianceTitle}>LGPD - Lei Geral de Proteção de Dados</Text>
-            <Text style={styles.complianceDescription}>
-              Conformidade total com a Lei nº 13.709/2018, garantindo proteção adequada 
-              aos dados pessoais dos usuários.
-            </Text>
-          </View>
-        </View>
-        
-        <View style={styles.complianceItem}>
-          <Icon name="security" type="material" color="#27ae60" size={24} />
-          <View style={styles.complianceInfo}>
-            <Text style={styles.complianceTitle}>ISO 27001 - Segurança da Informação</Text>
-            <Text style={styles.complianceDescription}>
-              Implementação de controles de segurança da informação conforme 
-              padrões internacionais.
-            </Text>
-          </View>
-        </View>
-        
-        <View style={styles.complianceItem}>
-          <Icon name="verified-user" type="material" color="#f39c12" size={24} />
-          <View style={styles.complianceInfo}>
-            <Text style={styles.complianceTitle}>PCI DSS - Segurança de Pagamentos</Text>
-            <Text style={styles.complianceDescription}>
-              Conformidade com padrões de segurança para processamento de pagamentos 
-              via PIX.
-            </Text>
-          </View>
-        </View>
-        
-        <View style={styles.complianceItem}>
-          <Icon name="business" type="material" color="#9b59b6" size={24} />
-          <View style={styles.complianceInfo}>
-            <Text style={styles.complianceTitle}>Regulamentações de Transporte</Text>
-            <Text style={styles.complianceDescription}>
-              Conformidade com regulamentações locais de transporte e mobilidade urbana 
-              em todas as cidades atendidas.
-            </Text>
-          </View>
-        </View>
-      </View>
-      
-      <View style={styles.certificationsContainer}>
-        <Text style={styles.certificationsTitle}>Certificações e Auditorias</Text>
-        
-        <View style={styles.certificationItem}>
-          <Icon name="check-circle" type="material" color="#27ae60" size={20} />
-          <Text style={styles.certificationText}>
-            Auditoria anual de segurança da informação
-          </Text>
-        </View>
-        
-        <View style={styles.certificationItem}>
-          <Icon name="check-circle" type="material" color="#27ae60" size={20} />
-          <Text style={styles.certificationText}>
-            Certificação de conformidade LGPD
-          </Text>
-        </View>
-        
-        <View style={styles.certificationItem}>
-          <Icon name="check-circle" type="material" color="#27ae60" size={20} />
-          <Text style={styles.certificationText}>
-            Validação de segurança de pagamentos
-          </Text>
-        </View>
-        
-        <View style={styles.certificationItem}>
-          <Icon name="check-circle" type="material" color="#27ae60" size={20} />
-          <Text style={styles.certificationText}>
-            Monitoramento contínuo de compliance
-          </Text>
-        </View>
+      <Text style={styles.sectionTitle}>Situação regulatória</Text>
+      {renderRioAdministrativeRequest()}
+      <View style={styles.legalCard}>
+        <Text style={styles.complianceTitle}>Regras aplicáveis ao serviço</Text>
+        <Text style={styles.legalText}>
+          O transporte por aplicativo está sujeito às normas federais, estaduais e municipais
+          aplicáveis. Os procedimentos e requisitos locais podem variar conforme o município.
+        </Text>
+        <TouchableOpacity
+          style={styles.licenseLink}
+          accessibilityRole="link"
+          onPress={() => handleLinkPress(AppConfig.terms_of_service_url, 'os Termos de Uso públicos')}
+        >
+          <Text style={styles.linkText}>Consultar Termos de Uso públicos</Text>
+        </TouchableOpacity>
       </View>
     </View>
   );

@@ -29,5 +29,7 @@ module.exports.AppConfig = {
     terms_of_service_url: process.env.EXPO_PUBLIC_TERMS_OF_SERVICE_URL || `${legalBaseUrl}/terms`,
     refund_policy_url: process.env.EXPO_PUBLIC_REFUND_POLICY_URL || `${legalBaseUrl}/refund-policy`,
     account_deletion_url: process.env.EXPO_PUBLIC_ACCOUNT_DELETION_URL || `${legalBaseUrl}/delete-account`,
-    support_email: process.env.EXPO_PUBLIC_SUPPORT_EMAIL || 'suporte@leaf.app.br'
+    support_email: process.env.EXPO_PUBLIC_SUPPORT_EMAIL || 'suporte@leaf.app.br',
+    support_phone: '+5521988739192',
+    support_phone_display: '(21) 98873-9192'
 };

@@ -1,6 +1,7 @@
 import leafTypography from '../../components/prototype/LeafTypography';
 import React, { useCallback, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, ScrollView, StatusBar, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
+import { ActivityIndicator, Alert, Linking, ScrollView, StatusBar, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
+import { AppConfig } from '../../../config/AppConfig';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import PrototypeScreenTransition from '../../components/prototype/PrototypeScreenTransition';
@@ -212,6 +213,14 @@ export default function RobotaxiSupportScreen({ navigation, route }) {
     }
   }, []);
 
+  const handleCallSupport = useCallback(async () => {
+    try {
+      await Linking.openURL(`tel:${AppConfig.support_phone}`);
+    } catch (_error) {
+      Alert.alert('SAC telefônico 24 horas', `Ligue para ${AppConfig.support_phone_display}.`);
+    }
+  }, []);
+
   const handleCreateTicket = useCallback(() => {
     navigation.navigate('RobotaxiPrototypeSupportTicket', {
       type: selectedOption.id,
@@ -334,6 +343,18 @@ export default function RobotaxiSupportScreen({ navigation, route }) {
                 </View>
                 <LeafObjectIcon name="help" size={48} />
               </View>
+              <PrototypeMenuSection title="Atendimento 24 horas">
+                <PrototypeMenuRow
+                  icon="call-outline"
+                  title={AppConfig.support_phone_display}
+                  subtitle="SAC telefônico da Leaf"
+                  onPress={handleCallSupport}
+                  testID="robotaxi-support-call-sac"
+                  accessibilityLabel={`Ligar para o SAC da Leaf: ${AppConfig.support_phone_display}, atendimento 24 horas`}
+                  last
+                />
+              </PrototypeMenuSection>
+
               <PrototypeMenuSection title="Assuntos">
                 {SUPPORT_OPTIONS.map((item, index) => (
                   <SupportOptionRow
