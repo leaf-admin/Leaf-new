@@ -10,8 +10,16 @@
 //   source. Writes are applied with RTDB semantics inside one Firestore
 //   transaction, then replayed on RTDB as a mirror.
 //
-// Storage: `rtdb_<root>/<key>` holds `{ schema, json }` with the exact RTDB
-// subtree, so shapes (nested arrays, odd keys) are preserved as they are.
+// Storage per root:
+// - native (RTDB_FIRESTORE_NATIVE_COLLECTIONS=root:collection[:merge],...): each
+//   record is a real Firestore document with the record's fields. Reads through
+//   this API see Timestamps as ISO strings; writes only touch the top-level
+//   fields that changed and keep a Timestamp a Timestamp. `merge` marks shared
+//   canonical collections (fields that only Firestore has must survive):
+//   mirror copies only RTDB's fields and a whole-record set is refused.
+// - json (transitional, not native): `rtdb_<root>/<key>` = { schema, json }.
+const { FieldPath, FieldValue, Timestamp } = require('@google-cloud/firestore');
+const { isDeepStrictEqual } = require('node:util');
 const { logStructured } = require('../utils/logger');
 
 const SCHEMA = 1;
@@ -24,8 +32,77 @@ function rootList(value) {
 function readConfig(env = process.env) {
   const writes = new Set(rootList(env.RTDB_FIRESTORE_WRITE_ROOTS));
   const reads = new Set(rootList(env.RTDB_FIRESTORE_READ_ROOTS).filter(root => writes.has(root)));
-  return { writes, reads };
+  const native = new Map();
+  for (const entry of rootList(env.RTDB_FIRESTORE_NATIVE_COLLECTIONS)) {
+    const [root, collection, flag] = entry.split(':').map(part => part.trim());
+    if (!root || !/^[A-Za-z0-9_-]+$/.test(collection || '')) throw fail('RTDB_ROUTER_CONFIG', `Mapeamento nativo inválido: ${entry}`);
+    native.set(root, { collection, merge: flag === 'merge' });
+  }
+  return { writes, reads, native };
 }
+
+const NESTED_ARRAY_FIELD = 'rtdbNestedArray';
+
+// Firestore value -> the JSON shape RTDB consumers expect.
+function toView(value) {
+  if (value === null || value === undefined) return null;
+  if (value instanceof Timestamp || (typeof value?.toDate === 'function' && typeof value?.toMillis === 'function')) {
+    return value.toDate().toISOString();
+  }
+  if (typeof value?.latitude === 'number' && typeof value?.longitude === 'number' && typeof value?.isEqual === 'function') {
+    return { latitude: value.latitude, longitude: value.longitude };
+  }
+  if (typeof value?.path === 'string' && value?.firestore) return value.path;
+  if (Buffer.isBuffer(value) || value instanceof Uint8Array) return Buffer.from(value).toString('base64');
+  if (Array.isArray(value)) return value.map(toView);
+  if (typeof value === 'object') {
+    const keys = Object.keys(value);
+    if (keys.length === 1 && keys[0] === NESTED_ARRAY_FIELD && Array.isArray(value[NESTED_ARRAY_FIELD])) {
+      return value[NESTED_ARRAY_FIELD].map(toView);
+    }
+    const result = {};
+    for (const [key, child] of Object.entries(value)) result[key] = toView(child);
+    return result;
+  }
+  return value;
+}
+
+// RTDB-shaped value -> Firestore value, keeping existing Timestamps as Timestamps.
+function fromView(value, current) {
+  if (value === null || value === undefined) return null;
+  const isTimestamp = current instanceof Timestamp || (typeof current?.toDate === 'function' && typeof current?.toMillis === 'function');
+  if (isTimestamp && (typeof value === 'string' || typeof value === 'number')) {
+    const date = new Date(value);
+    if (!Number.isNaN(date.getTime())) return Timestamp.fromDate(date);
+  }
+  if (Array.isArray(value)) {
+    // Firestore rejects arrays inside arrays: an inner array becomes a map
+    // { rtdbNestedArray: [...] } and is decoded back by toView.
+    return value.map((item, index) => {
+      const previous = Array.isArray(current) ? current[index] : undefined;
+      return Array.isArray(item)
+        ? { [NESTED_ARRAY_FIELD]: fromView(item, previous?.[NESTED_ARRAY_FIELD]) }
+        : fromView(item, previous);
+    });
+  }
+  if (typeof value === 'object') {
+    const result = {};
+    for (const [key, child] of Object.entries(value)) {
+      if (/^__.*__$/.test(key)) throw fail('RTDB_ROUTER_INVALID_KEY', `Campo reservado no Firestore: ${key}`);
+      result[key] = fromView(child, current && typeof current === 'object' ? current[key] : undefined);
+    }
+    return result;
+  }
+  return value;
+}
+
+const PRIMITIVE_FIELD = 'rtdbValue';
+const docView = data => {
+  if (!data) return null;
+  const keys = Object.keys(data);
+  if (keys.length === 1 && keys[0] === PRIMITIVE_FIELD) return toView(data[PRIMITIVE_FIELD]);
+  return normalize(toView(data));
+};
 
 const segmentsOf = path => String(path || '').split('/').filter(Boolean);
 const collectionFor = root => `rtdb_${root}`;
@@ -165,42 +242,93 @@ function createRouter(rawDb, { getFirestore, env = process.env, log = logStructu
     return instance;
   };
   const modeOf = root => config.reads.has(root) ? 'firestore' : config.writes.has(root) ? 'mirror' : 'rtdb';
-  const docRef = (root, key) => { assertDocKey(key); return firestore().collection(collectionFor(root)).doc(key); };
+  const nativeOf = root => config.native.get(root) || null;
+  const collectionName = root => nativeOf(root)?.collection || collectionFor(root);
+  const docRef = (root, key) => { assertDocKey(key); return firestore().collection(collectionName(root)).doc(key); };
+  const assertSize = (root, key, data) => {
+    if (Buffer.byteLength(JSON.stringify(toView(data))) > MAX_DOC_BYTES) {
+      throw fail('RTDB_ROUTER_DOC_TOO_LARGE', `${root}/${key} excede o documento do Firestore`);
+    }
+  };
   const encode = (root, key, value) => {
     const json = JSON.stringify(value);
     if (Buffer.byteLength(json) > MAX_DOC_BYTES) throw fail('RTDB_ROUTER_DOC_TOO_LARGE', `${root}/${key} excede o documento do Firestore`);
     return { schema: SCHEMA, json, updatedAt: new Date().toISOString() };
   };
-  const decode = data => (data ? JSON.parse(data.json) : null);
+  const decode = (root, data) => {
+    if (!data) return null;
+    return nativeOf(root) ? docView(data) : JSON.parse(data.json);
+  };
+
+  // Write the new RTDB-shaped value of one record into its document.
+  // keepAbsent (mirror copy into a canonical collection): fields missing from
+  // the RTDB record are left alone instead of deleted.
+  function writeRecord(tx, root, key, raw, next, { keepAbsent = false } = {}) {
+    const ref = docRef(root, key);
+    if (!nativeOf(root)) {
+      if (next === null) tx.delete(ref);
+      else tx.set(ref, encode(root, key, next));
+      return;
+    }
+    if (next === null) {
+      if (nativeOf(root).merge) throw fail('RTDB_ROUTER_CANONICAL_DELETE', `Remoção de registro canônico não suportada: ${root}/${key}`);
+      tx.delete(ref);
+      return;
+    }
+    if (typeof next !== 'object' || Array.isArray(next)) {
+      tx.set(ref, { [PRIMITIVE_FIELD]: fromView(next, raw?.[PRIMITIVE_FIELD]) });
+      return;
+    }
+    if (!raw || Object.keys(raw).length === 1 && PRIMITIVE_FIELD in raw) {
+      const data = fromView(next, undefined);
+      assertSize(root, key, data);
+      tx.set(ref, data);
+      return;
+    }
+    const before = docView(raw) || {};
+    const updates = [];
+    const keys = new Set([...Object.keys(before), ...Object.keys(next)]);
+    for (const field of keys) {
+      if (isDeepStrictEqual(before[field] ?? null, next[field] ?? null)) continue;
+      if (next[field] === undefined || next[field] === null) {
+        if (keepAbsent) continue;
+        updates.push(new FieldPath(field), FieldValue.delete());
+      } else {
+        updates.push(new FieldPath(field), fromView(next[field], raw[field]));
+      }
+    }
+    if (updates.length) tx.update(ref, ...updates);
+  }
 
   async function readFirestore(segments, query) {
     const [root, key, ...rest] = segments;
     if (!key) {
-      const docs = await firestore().collection(collectionFor(root)).get();
+      const docs = await firestore().collection(collectionName(root)).get();
       const value = {};
-      docs.docs.forEach(doc => { value[doc.id] = decode(doc.data()); });
+      docs.docs.forEach(doc => { value[doc.id] = decode(root, doc.data()); });
       return applyQuery(normalize(value), query);
     }
     const doc = await docRef(root, key).get();
-    return applyQuery(getIn(doc.exists ? decode(doc.data()) : null, rest), query);
+    return applyQuery(getIn(doc.exists ? decode(root, doc.data()) : null, rest), query);
   }
 
   // Copy touched records from RTDB (the source in mirror mode) to Firestore.
   async function mirrorFromRtdb(root, keys) {
     try {
+      const merge = nativeOf(root)?.merge === true;
       if (keys === null) {
-        const value = (await rawDb.ref(root).once('value')).val() || {};
-        const existing = await firestore().collection(collectionFor(root)).get();
-        const batch = firestore().batch();
-        existing.docs.forEach(doc => { if (!(doc.id in value)) batch.delete(doc.ref); });
-        Object.entries(value).forEach(([key, child]) => batch.set(docRef(root, key), encode(root, key, child)));
-        await batch.commit();
-        return;
+        if (merge) throw fail('RTDB_ROUTER_CANONICAL_ROOT', `Cópia da raiz inteira não suportada para ${root}`);
+        keys = Object.keys((await rawDb.ref(root).once('value')).val() || {});
+        const existing = await firestore().collection(collectionName(root)).get();
+        for (const doc of existing.docs) if (!keys.includes(doc.id)) await doc.ref.delete();
       }
       for (const key of keys) {
         const value = (await rawDb.ref(`${root}/${key}`).once('value')).val();
-        if (value === null) await docRef(root, key).delete();
-        else await docRef(root, key).set(encode(root, key, value));
+        if (value === null && merge) continue;
+        await firestore().runTransaction(async tx => {
+          const current = await tx.get(docRef(root, key));
+          writeRecord(tx, root, key, current.exists ? current.data() : null, normalize(value), { keepAbsent: merge });
+        });
       }
     } catch (error) {
       log('warn', 'Cópia Firestore do RTDB falhou; será reparada pela cópia com paridade', {
@@ -223,10 +351,14 @@ function createRouter(rawDb, { getFirestore, env = process.env, log = logStructu
       const docs = [...byDoc.values()];
       const current = await Promise.all(docs.map(doc => tx.get(docRef(doc.root, doc.key))));
       docs.forEach((doc, index) => {
-        let value = current[index].exists ? decode(current[index].data()) : null;
-        for (const [rest, next] of doc.ops) value = setIn(value, rest, next);
-        if (value === null) tx.delete(docRef(doc.root, doc.key));
-        else tx.set(docRef(doc.root, doc.key), encode(doc.root, doc.key, value));
+        const raw = current[index].exists ? current[index].data() : null;
+        let value = decode(doc.root, raw);
+        const merge = nativeOf(doc.root)?.merge === true;
+        for (const [rest, next] of doc.ops) {
+          if (merge && !rest.length) throw fail('RTDB_ROUTER_CANONICAL_SET', `Gravação do registro inteiro não suportada em ${doc.root}; atualize campos`);
+          value = setIn(value, rest, next);
+        }
+        writeRecord(tx, doc.root, doc.key, raw, value);
       });
     });
   }
@@ -348,12 +480,11 @@ function createRouter(rawDb, { getFirestore, env = process.env, log = logStructu
         let committedValue = null;
         const committed = await firestore().runTransaction(async tx => {
           const doc = await tx.get(docRef(root, key));
-          const whole = doc.exists ? decode(doc.data()) : null;
+          const raw = doc.exists ? doc.data() : null;
+          const whole = decode(root, raw);
           const next = update(clone(getIn(whole, rest)));
           if (next === undefined) { committedValue = getIn(whole, rest); return false; }
-          const value = setIn(whole, rest, next);
-          if (value === null) tx.delete(docRef(root, key));
-          else tx.set(docRef(root, key), encode(root, key, value));
+          writeRecord(tx, root, key, raw, setIn(whole, rest, next));
           committedValue = normalize(clone(next));
           return true;
         });
@@ -404,7 +535,8 @@ function createRouter(rawDb, { getFirestore, env = process.env, log = logStructu
         };
       }
       if (property === '__rtdbRootRouter') {
-        return { config, readFirestore, mirrorFromRtdb, collectionFor, servedByFirestore: root => modeOf(root) === 'firestore' };
+        return { config, readFirestore, mirrorFromRtdb, collectionFor, collectionName, decode, writeRecord, raw: rawDb,
+          servedByFirestore: root => modeOf(root) === 'firestore', nativeOf };
       }
       const value = target[property];
       return typeof value === 'function' ? value.bind(target) : value;
@@ -412,4 +544,4 @@ function createRouter(rawDb, { getFirestore, env = process.env, log = logStructu
   });
 }
 
-module.exports = { createRouter, readConfig, normalize, setIn, getIn, applyQuery, collectionFor };
+module.exports = { createRouter, readConfig, normalize, setIn, getIn, applyQuery, collectionFor, toView, fromView, docView };

@@ -57,7 +57,8 @@ if (require.main === module) {
     const rawDb = admin.database();
     const roots = args.roots.join(',');
     const routedDb = createRouter(rawDb, { getFirestore: () => firebaseConfig.getFirestore(),
-      env: { RTDB_FIRESTORE_WRITE_ROOTS: roots, RTDB_FIRESTORE_READ_ROOTS: roots } });
+      env: { RTDB_FIRESTORE_WRITE_ROOTS: roots, RTDB_FIRESTORE_READ_ROOTS: roots,
+        RTDB_FIRESTORE_NATIVE_COLLECTIONS: process.env.RTDB_FIRESTORE_NATIVE_COLLECTIONS || '' } });
     const linked = Object.keys((await rawDb.ref('user_vehicles').once('value')).val() || {});
     const activated = Object.keys((await rawDb.ref('driver_activation').once('value')).val() || {});
     const users = (await rawDb.ref('users').once('value')).val() || {};

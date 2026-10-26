@@ -57,3 +57,25 @@ describe('rtdb root router (RTDB exit)', () => {
     expect(again.roots.vehicles.equal).toBe(2);
   });
 });
+
+describe('native migration merge rule (RTDB exit)', () => {
+  const { mergeRecords } = require('../../../scripts/maintenance/migrate-rtdb-roots-native.cjs');
+  it('unions fields and lets the newer record win conflicts', () => {
+    const conflicts = [];
+    const firestore = { name: 'Leaf', approved: false, onlyFs: 1, nested: { a: 1, b: 2 } };
+    const rtdb = { name: 'Motorista', approved: true, onlyRtdb: 2, nested: { b: 3, c: 4 } };
+    expect(mergeRecords(firestore, rtdb, true, 'users/u1', conflicts))
+      .toEqual({ name: 'Motorista', approved: true, onlyFs: 1, onlyRtdb: 2, nested: { a: 1, b: 3, c: 4 } });
+    expect(conflicts.map(c => c.path)).toEqual(['users/u1/name', 'users/u1/approved', 'users/u1/nested/b']);
+    const tie = [];
+    expect(mergeRecords(firestore, rtdb, false, 'users/u1', tie).approved).toBe(false);
+    expect(tie.every(c => c.winner === 'firestore')).toBe(true);
+  });
+
+  it('keeps nested arrays native through the encoding round trip', () => {
+    const value = { landmarks: [[1, 2], [3, [4, 5]]], tags: ['a'] };
+    const stored = router.fromView(value, undefined);
+    expect(stored.landmarks[0]).toEqual({ rtdbNestedArray: [1, 2] });
+    expect(router.toView(stored)).toEqual(value);
+  });
+});
