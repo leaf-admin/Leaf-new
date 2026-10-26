@@ -24,5 +24,7 @@ module.exports = function loadReceiptService() {
     return module.exports;
   }
   const ReceiptService = load(path.join(backend, 'services/receipt-service.js'));
-  return new ReceiptService();
+  const service = new ReceiptService();
+  service.migrationContext = load(path.join(backend, 'services/sandbox-persistence-context.js'));
+  return service;
 };

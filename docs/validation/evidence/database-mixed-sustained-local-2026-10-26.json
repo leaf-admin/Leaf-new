@@ -1,0 +1,338 @@
+{
+  "criticalLatencyGate": null,
+  "environment": {
+    "node": "v20.20.2",
+    "platform": "darwin arm64",
+    "cpu": "Apple M1 Pro",
+    "logicalCpus": 8,
+    "redis": "8.6.3",
+    "redisMemoryLimit": "256MiB noeviction",
+    "connection": "private Unix socket",
+    "externalHistory": 10000
+  },
+  "rows": [
+    {
+      "mode": "candidate",
+      "administrativeReaders": 20,
+      "durationMs": 47997.940958,
+      "gpsDrivers": 1000,
+      "gpsHzPerDriver": 1,
+      "produced": 48000,
+      "backlogSamples": [
+        {
+          "second": 0,
+          "produced": 0,
+          "persisted": 0,
+          "buffered": 0
+        },
+        {
+          "second": 1,
+          "produced": 1040,
+          "persisted": 0,
+          "buffered": 1040
+        },
+        {
+          "second": 2,
+          "produced": 2064,
+          "persisted": 0,
+          "buffered": 2064
+        },
+        {
+          "second": 3,
+          "produced": 3093,
+          "persisted": 0,
+          "buffered": 3093
+        },
+        {
+          "second": 4,
+          "produced": 4118,
+          "persisted": 0,
+          "buffered": 4118
+        },
+        {
+          "second": 5,
+          "produced": 5151,
+          "persisted": 0,
+          "buffered": 5151
+        },
+        {
+          "second": 6,
+          "produced": 6116,
+          "persisted": 0,
+          "buffered": 6116
+        },
+        {
+          "second": 7,
+          "produced": 7147,
+          "persisted": 0,
+          "buffered": 7147
+        },
+        {
+          "second": 8,
+          "produced": 8174,
+          "persisted": 0,
+          "buffered": 8174
+        },
+        {
+          "second": 9,
+          "produced": 9206,
+          "persisted": 0,
+          "buffered": 9206
+        },
+        {
+          "second": 10,
+          "produced": 10282,
+          "persisted": 0,
+          "buffered": 10282
+        },
+        {
+          "second": 11,
+          "produced": 11033,
+          "persisted": 0,
+          "buffered": 11033
+        },
+        {
+          "second": 12,
+          "produced": 12058,
+          "persisted": 0,
+          "buffered": 12058
+        },
+        {
+          "second": 13,
+          "produced": 13087,
+          "persisted": 0,
+          "buffered": 13087
+        },
+        {
+          "second": 14,
+          "produced": 14115,
+          "persisted": 0,
+          "buffered": 14115
+        },
+        {
+          "second": 15,
+          "produced": 15414,
+          "persisted": 0,
+          "buffered": 15414
+        },
+        {
+          "second": 16,
+          "produced": 16408,
+          "persisted": 0,
+          "buffered": 16408
+        },
+        {
+          "second": 17,
+          "produced": 17356,
+          "persisted": 3400,
+          "buffered": 13956
+        },
+        {
+          "second": 18,
+          "produced": 18180,
+          "persisted": 4216,
+          "buffered": 13964
+        },
+        {
+          "second": 19,
+          "produced": 19246,
+          "persisted": 4216,
+          "buffered": 15030
+        },
+        {
+          "second": 20,
+          "produced": 20268,
+          "persisted": 4216,
+          "buffered": 16052
+        },
+        {
+          "second": 21,
+          "produced": 21019,
+          "persisted": 4216,
+          "buffered": 16803
+        },
+        {
+          "second": 22,
+          "produced": 22051,
+          "persisted": 4216,
+          "buffered": 17835
+        },
+        {
+          "second": 23,
+          "produced": 23074,
+          "persisted": 4216,
+          "buffered": 18858
+        },
+        {
+          "second": 24,
+          "produced": 24096,
+          "persisted": 4216,
+          "buffered": 19880
+        },
+        {
+          "second": 25,
+          "produced": 25123,
+          "persisted": 4216,
+          "buffered": 20907
+        },
+        {
+          "second": 26,
+          "produced": 26158,
+          "persisted": 4216,
+          "buffered": 21942
+        },
+        {
+          "second": 27,
+          "produced": 27191,
+          "persisted": 4216,
+          "buffered": 22975
+        },
+        {
+          "second": 28,
+          "produced": 28217,
+          "persisted": 4216,
+          "buffered": 24001
+        },
+        {
+          "second": 29,
+          "produced": 29494,
+          "persisted": 7416,
+          "buffered": 22078
+        },
+        {
+          "second": 30,
+          "produced": 30466,
+          "persisted": 13864,
+          "buffered": 16602
+        },
+        {
+          "second": 31,
+          "produced": 31094,
+          "persisted": 16448,
+          "buffered": 14646
+        },
+        {
+          "second": 32,
+          "produced": 32124,
+          "persisted": 16448,
+          "buffered": 15676
+        },
+        {
+          "second": 33,
+          "produced": 33101,
+          "persisted": 19648,
+          "buffered": 13453
+        },
+        {
+          "second": 34,
+          "produced": 34277,
+          "persisted": 20416,
+          "buffered": 13861
+        },
+        {
+          "second": 35,
+          "produced": 35020,
+          "persisted": 20416,
+          "buffered": 14604
+        },
+        {
+          "second": 36,
+          "produced": 36040,
+          "persisted": 20416,
+          "buffered": 15624
+        },
+        {
+          "second": 37,
+          "produced": 37072,
+          "persisted": 20416,
+          "buffered": 16656
+        },
+        {
+          "second": 38,
+          "produced": 38096,
+          "persisted": 20416,
+          "buffered": 17680
+        },
+        {
+          "second": 39,
+          "produced": 39122,
+          "persisted": 20416,
+          "buffered": 18706
+        },
+        {
+          "second": 40,
+          "produced": 40154,
+          "persisted": 20416,
+          "buffered": 19738
+        },
+        {
+          "second": 41,
+          "produced": 41177,
+          "persisted": 20416,
+          "buffered": 20761
+        },
+        {
+          "second": 42,
+          "produced": 42202,
+          "persisted": 20416,
+          "buffered": 21786
+        },
+        {
+          "second": 43,
+          "produced": 43222,
+          "persisted": 20416,
+          "buffered": 22806
+        },
+        {
+          "second": 44,
+          "produced": 44245,
+          "persisted": 20416,
+          "buffered": 23829
+        },
+        {
+          "second": 45,
+          "produced": 45238,
+          "persisted": 32016,
+          "buffered": 13222
+        },
+        {
+          "second": 46,
+          "produced": 46154,
+          "persisted": 42169,
+          "buffered": 3985
+        },
+        {
+          "second": 47,
+          "produced": 47188,
+          "persisted": 42372,
+          "buffered": 4816
+        }
+      ],
+      "persistedAfterDrain": 48000,
+      "bufferedBeforeDrain": 5628,
+      "gpsP50Ms": 1.0076659999976982,
+      "gpsP95Ms": 3.535749999999098,
+      "gpsP99Ms": 39.50149999999849,
+      "schedulingP99Ms": 3.9259579999998095,
+      "adminP95Ms": 4.695374999999331,
+      "adminRejected": 576,
+      "eventLoopP99Ms": 12.034047,
+      "maxRssBytes": 127959040,
+      "processCpuMs": 21104.886,
+      "syntheticPersistenceFailures": 752,
+      "gpsCalls": 298827,
+      "gpsBytes": 77789972,
+      "adminBytes": 117280
+    }
+  ],
+  "comparisons": [],
+  "limitations": [
+    "Single laboratory run; no production/device/Socket.IO/provider evidence and no capacity extrapolation",
+    "Same current GPS pipeline in both modes, compares impact of administrative H3 implementation794edfcb7 versus candidate",
+    "Legacy search reconciliation replaced by identical two-key fixture; varied viewports force cache misses",
+    "Immutable persistence adapter uses2ms artificial latency and2.5s outage; managed Firebase not measured",
+    "Direct stream dispatch to real buffer method, not XREADGROUP consumer scheduling; XDEL only after successful buffer",
+    "Pipeline reply bytes omitted from administrative trace; direct global-hash bytes counted in baseline",
+    "End drain is explicit laboratory cleanup; batching interval/sample frequency unchanged while measured"
+  ]
+}

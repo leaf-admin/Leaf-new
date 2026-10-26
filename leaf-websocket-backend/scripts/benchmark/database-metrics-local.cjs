@@ -40,6 +40,12 @@ async function run() {
     assert.equal(result.metrics.requests, 1); assert.equal(result.metrics.revenueUnits, 55000000);
     assert.equal((await firestore.doc(`ops_driver_stats_v1/${summary.hash('driver-a')}`).get()).data().completedTrips, 0);
     assert.equal((await firestore.doc(`ops_driver_stats_v1/${summary.hash('driver-b')}`).get()).data().completedTrips, 1);
+    const previousVector = summary.contribution(source.path, { ...data, finalPrice: 55, driverId: 'driver-b', driverNetAmount: 52 });
+    const moved = { ...data, finalPrice: 55, driverId: 'driver-b', driverNetAmount: 52, createdAt: new Date('2026-10-12T14:00:00Z') };
+    await store.write(firestore, source, { createdAt: moved.createdAt }, { method: 'update' }); await store.drain(firestore);
+    assert.equal((await firestore.doc(`${store.BUCKETS}/${summary.bucketId(previousVector)}`).get()).data().metrics.requests || 0, 0);
+    assert.equal((await firestore.doc(`${store.BUCKETS}/${summary.bucketId(summary.contribution(source.path, moved))}`).get()).data().metrics.requests, 1);
+    await store.write(firestore, source, { createdAt: data.createdAt }, { method: 'update' }); await store.drain(firestore);
     await store.write(firestore, source, { status: 'cancelled' }, { method: 'update' });
     await store.drain(firestore); store.resetReadCache();
     result = await store.readDays(firestore, 'ride', window.start, window.end);
@@ -136,7 +142,7 @@ async function run() {
     }
     const resultEvidence = { environment: 'Private Firestore1.19.8 emulator, loopback,256MiB; no ADC/providers', queryRows, contention,
       checks: ['Canonical write + pending work atomic', 'Pending/missing readiness never returns fake zero', 'Replay and parallel project idempotent',
-        'Financial correction/cancellation subtract old contribution', 'Driver reassignment preserves one completed trip', 'Historical stats remain incomplete until attested',
+        'Financial correction/cancellation subtract old contribution', 'Late timestamp correction moves daily bucket without duplicating totals', 'Driver reassignment preserves one completed trip', 'Historical stats remain incomplete until attested',
         'Sandbox context separate', 'Audit lifetime and distribution own-source buckets', 'Concurrent source update leaves newest contribution', 'Repeated read has zero database calls'],
       limitations: ['Large read-model fixture seeded from synthetic oracle; lifecycle writer tested separately',
         '496 bucket reads plus2 control reads per cold31-day window; missing docs may also be billed outside emulator',
