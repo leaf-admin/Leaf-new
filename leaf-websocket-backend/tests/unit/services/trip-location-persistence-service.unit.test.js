@@ -7,10 +7,6 @@ jest.mock('../../../firebase-config', () => ({
   getFirestore: jest.fn()
 }));
 
-jest.mock('../../../utils/redis-scan', () => ({
-  scanKeys: jest.fn()
-}));
-
 jest.mock('../../../utils/logger', () => ({
   logStructured: jest.fn(),
   logError: jest.fn()
@@ -28,7 +24,6 @@ describe('trip-location-persistence-service', () => {
   let service;
   let redisPool;
   let firebaseConfig;
-  let RedisScan;
   let redisMock;
 
   beforeEach(() => {
@@ -41,7 +36,6 @@ describe('trip-location-persistence-service', () => {
 
     redisPool = require('../../../utils/redis-pool');
     firebaseConfig = require('../../../firebase-config');
-    RedisScan = require('../../../utils/redis-scan');
 
     redisMock = {
       set: jest.fn(),
@@ -58,8 +52,31 @@ describe('trip-location-persistence-service', () => {
       sadd: jest.fn(),
       srem: jest.fn(),
       smembers: jest.fn().mockResolvedValue([]),
-      scan: jest.fn()
+      scan: jest.fn().mockResolvedValue(['0', []]),
+      sscan: jest.fn().mockResolvedValue(['0', []]),
+      zadd: jest.fn(), zrem: jest.fn(), hdel: jest.fn(),
+      eval: jest.fn(), queueIds: []
     };
+
+    const { APPEND_BUFFER, CLAIM_TRIPS, CLAIM_CHUNK, ACK_CHUNK } = require('../../../utils/trip-location-buffer-ops');
+    redisMock.zadd.mockImplementation(async (_key, ...args) => {
+      const id = args[args.length - 1];
+      if (!redisMock.queueIds.includes(id)) redisMock.queueIds.push(id);
+    });
+    // Adapter for JS calculations/health contracts only. Real Lua, CAS and ACK
+    // failure behavior are tested separately against private Redis.
+    redisMock.eval.mockImplementation(async (...args) => {
+      if (args[0] === APPEND_BUFFER) {
+        const count = await redisMock.rpush(args[2], args[8]) || 1;
+        await redisMock.hset(args[3], { ...JSON.parse(args[9]), bufferVersion: String(Number(args[7]) + 1) });
+        await redisMock.sadd(args[5], args[10]);
+        return [1, count];
+      }
+      if (args[0] === CLAIM_TRIPS) return redisMock.queueIds;
+      if (args[0] === CLAIM_CHUNK) return args[5];
+      if (args[0] === ACK_CHUNK) return JSON.parse(args[10]).length;
+      return 0;
+    });
 
     redisPool.ensureConnection.mockResolvedValue(true);
     redisPool.getConnection.mockReturnValue(redisMock);
@@ -94,6 +111,20 @@ describe('trip-location-persistence-service', () => {
     };
   }
 
+  test.each(['0', '-1', '1000000', 'invalid'])('bounds chunk size for configuration %s', value => {
+    const previous = process.env.TRIP_LOCATION_CHUNK_SIZE;
+    try {
+      process.env.TRIP_LOCATION_CHUNK_SIZE = value;
+      jest.resetModules();
+      const configured = require('../../../services/trip-location-persistence-service');
+      expect(configured.chunkSize).toBeGreaterThanOrEqual(1);
+      expect(configured.chunkSize).toBeLessThanOrEqual(100);
+    } finally {
+      if (previous === undefined) delete process.env.TRIP_LOCATION_CHUNK_SIZE;
+      else process.env.TRIP_LOCATION_CHUNK_SIZE = previous;
+    }
+  });
+
   test('normalizeLocationEvent should include ordering metadata', () => {
     const normalized = service.normalizeLocationEvent({
       tripId: 'trip-1',
@@ -114,7 +145,7 @@ describe('trip-location-persistence-service', () => {
   });
 
   test('bufferLocationEvent should short-circuit on duplicate worker dedupe key', async () => {
-    redisMock.set.mockResolvedValue(null);
+    redisMock.eval.mockResolvedValueOnce([0, 0]);
 
     const result = await service.bufferLocationEvent({
       tripId: 'trip-1',
@@ -227,7 +258,7 @@ describe('trip-location-persistence-service', () => {
 
   test('flushTripChunks should persist chunk with retention timestamp', async () => {
     const addMock = jest.fn().mockResolvedValue({ id: 'chunk-1' });
-    const collectionMock = jest.fn(() => ({ add: addMock }));
+    const collectionMock = jest.fn(() => ({ doc: jest.fn(() => ({ create: addMock })) }));
     firebaseConfig.getFirestore.mockReturnValue({
       collection: collectionMock
     });
@@ -241,7 +272,7 @@ describe('trip-location-persistence-service', () => {
     redisMock.ltrim.mockResolvedValue('OK');
     redisMock.hincrby.mockResolvedValue(2);
     redisMock.hset.mockResolvedValue('OK');
-    redisMock.get.mockResolvedValue('different-lock'); // evita del em lock que não pertence
+    redisMock.get.mockResolvedValue(null);
 
     const result = await service.flushTripChunks('trip-1', {
       force: false,
@@ -262,7 +293,7 @@ describe('trip-location-persistence-service', () => {
   });
 
   test('flushPendingTrips publishes idle heartbeat when the Firestore client is available', async () => {
-    RedisScan.scanKeys.mockResolvedValue([]);
+    redisMock.scan.mockResolvedValue(['0', []]);
 
     const result = await service.flushPendingTrips();
 
@@ -301,7 +332,7 @@ describe('trip-location-persistence-service', () => {
       failures: 1,
       reason: 'firestore_unavailable'
     });
-    expect(RedisScan.scanKeys).not.toHaveBeenCalled();
+    expect(redisMock.scan).not.toHaveBeenCalled();
     expect(redisMock.hset).toHaveBeenCalledWith(
       'leaf:test:trip-location-worker:health',
       expect.objectContaining({
@@ -318,7 +349,7 @@ describe('trip-location-persistence-service', () => {
   });
 
   test('flushPendingTrips publishes healthy status when existing flushes all succeed', async () => {
-    RedisScan.scanKeys.mockResolvedValue(['trip_loc_buffer:trip-1']);
+    redisMock.scan.mockResolvedValue(['0', ['trip_loc_buffer:trip-1']]);
     redisMock.llen.mockResolvedValue(4);
     jest.spyOn(service, 'flushTripChunks').mockResolvedValue({
       success: true,
@@ -345,10 +376,7 @@ describe('trip-location-persistence-service', () => {
   });
 
   test('flushPendingTrips returns success=false and degraded heartbeat after a partial failure', async () => {
-    RedisScan.scanKeys.mockResolvedValue([
-      'trip_loc_buffer:trip-1',
-      'trip_loc_buffer:trip-2'
-    ]);
+    redisMock.scan.mockResolvedValue(['0', ['trip_loc_buffer:trip-1', 'trip_loc_buffer:trip-2']]);
     redisMock.llen.mockResolvedValue(3);
     jest.spyOn(service, 'flushTripChunks')
       .mockResolvedValueOnce({ success: true, flushedPoints: 3 })
@@ -374,7 +402,7 @@ describe('trip-location-persistence-service', () => {
   });
 
   test('flushPendingTrips attempts degraded heartbeat when an external scan fails', async () => {
-    RedisScan.scanKeys.mockRejectedValue(new Error('external scan failure'));
+    redisMock.scan.mockRejectedValue(new Error('external scan failure'));
 
     await expect(service.flushPendingTrips()).rejects.toThrow('external scan failure');
 
@@ -410,34 +438,34 @@ describe('trip-location-persistence-service', () => {
   });
 
   test('flushPendingTrips reads the index and only reconciles with SCAN on its interval', async () => {
-    redisMock.smembers.mockResolvedValue(['trip-1']);
+    redisMock.sscan.mockResolvedValue(['0', ['trip-1']]);
     redisMock.llen.mockResolvedValue(2);
-    RedisScan.scanKeys.mockResolvedValue(['trip_loc_buffer:trip-1', 'trip_loc_buffer:trip-orphan']);
+    redisMock.scan.mockResolvedValue(['0', ['trip_loc_buffer:trip-1', 'trip_loc_buffer:trip-orphan']]);
     const flushSpy = jest.spyOn(service, 'flushTripChunks').mockResolvedValue({
       success: true,
       flushedPoints: 2
     });
 
     const first = await service.flushPendingTrips();
-    expect(RedisScan.scanKeys).toHaveBeenCalledTimes(1);
-    expect(redisMock.sadd).toHaveBeenCalledWith('trip_loc_buffer_index', 'trip-orphan');
+    expect(redisMock.scan).toHaveBeenCalledTimes(1);
+    expect(redisMock.zadd).toHaveBeenCalledWith(service.bufferQueueKey, 'NX', expect.any(Number), 'trip-orphan');
     expect(flushSpy.mock.calls.map(([tripId]) => tripId)).toEqual(['trip-1', 'trip-orphan']);
     expect(first.processedTrips).toBe(2);
 
     await service.flushPendingTrips();
     await service.flushPendingTrips();
-    expect(RedisScan.scanKeys).toHaveBeenCalledTimes(1);
+    expect(redisMock.scan).toHaveBeenCalledTimes(1);
   });
 
   test('flushPendingTrips drops index entries whose buffer drained or expired', async () => {
     service.lastBufferReconcileAt = Date.now();
-    redisMock.smembers.mockResolvedValue(['trip-gone']);
+    redisMock.queueIds = ['trip-gone'];
     redisMock.llen.mockResolvedValue(0);
     const flushSpy = jest.spyOn(service, 'flushTripChunks');
 
     const result = await service.flushPendingTrips();
 
-    expect(RedisScan.scanKeys).not.toHaveBeenCalled();
+    expect(redisMock.scan).not.toHaveBeenCalled();
     expect(flushSpy).not.toHaveBeenCalled();
     expect(redisMock.srem).toHaveBeenCalledWith('trip_loc_buffer_index', 'trip-gone');
     expect(result).toEqual({

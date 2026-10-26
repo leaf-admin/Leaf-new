@@ -1,7 +1,8 @@
 const admin = require('firebase-admin');
 const redisPool = require('../utils/redis-pool');
 const firebaseConfig = require('../firebase-config');
-const RedisScan = require('../utils/redis-scan');
+const { randomUUID } = require('node:crypto');
+const { digest, APPEND_BUFFER, CLAIM_TRIPS, CLAIM_CHUNK, ACK_CHUNK, REQUEST_FINALIZATION, FINISH_FINALIZATION } = require('../utils/trip-location-buffer-ops');
 const { logStructured, logError } = require('../utils/logger');
 const {
     SandboxPersistenceContextError,
@@ -159,7 +160,7 @@ const DEFAULT_BUFFER_RECONCILE_INTERVAL_MS = 5 * 60 * 1000;
 
 class TripLocationPersistenceService {
     constructor() {
-        this.chunkSize = Number.parseInt(process.env.TRIP_LOCATION_CHUNK_SIZE || '30', 10);
+        this.chunkSize = Math.min(100, Math.max(1, Number.parseInt(process.env.TRIP_LOCATION_CHUNK_SIZE || '30', 10) || 30));
         this.bufferTtlSeconds = Number.parseInt(process.env.TRIP_LOCATION_BUFFER_TTL_SECONDS || String(24 * 60 * 60), 10);
         this.workerIdempotencyTtlSeconds = Number.parseInt(process.env.TRIP_LOCATION_WORKER_IDEMPOTENCY_TTL_SECONDS || String(24 * 60 * 60), 10);
         this.flushLockTtlSeconds = Number.parseInt(process.env.TRIP_LOCATION_FLUSH_LOCK_TTL_SECONDS || '15', 10);
@@ -193,6 +194,14 @@ class TripLocationPersistenceService {
             ) || DEFAULT_BUFFER_RECONCILE_INTERVAL_MS
         );
         this.lastBufferReconcileAt = 0;
+        this.bufferQueueKey = `${this.bufferIndexKey}:due:v2`;
+        this.reconcileCursor = '0';
+        this.flushInProgress = false;
+        this.activeFlushes = 0;
+        this.flushCycleBudgetMs = 10000;
+        this.periodicFlushMs = Math.max(1000, Number(process.env.TRIP_LOCATION_PERIODIC_FLUSH_MS) || 15000);
+        this.maxChunkBytes = 512 * 1024;
+        this.maxTelemetryRecoveryPoints = 2000;
     }
 
     getBufferKey(tripId) {
@@ -236,6 +245,7 @@ class TripLocationPersistenceService {
             failures: String(Math.max(0, Number(counters.failures) || 0))
         };
 
+        if (typeof redis.zcard === 'function') payload.pendingTrips = String(await redis.zcard(this.bufferQueueKey));
         await redis.hset(this.workerHealthKey, payload);
         await redis.expire(this.workerHealthKey, this.workerHealthTtlSeconds);
 
@@ -273,12 +283,12 @@ class TripLocationPersistenceService {
         const driverId = String(eventData.driverId || '');
         const lat = Number(eventData.lat);
         const lng = Number(eventData.lng);
-        const seq = Number.isInteger(Number(eventData.seq)) ? Number(eventData.seq) : null;
+        const seq = eventData.seq != null && Number.isInteger(Number(eventData.seq)) ? Number(eventData.seq) : null;
         const capturedAt = Number.isFinite(Number(eventData.capturedAt))
             ? Number(eventData.capturedAt)
             : Date.now();
 
-        if (!tripId || !driverId || !Number.isFinite(lat) || !Number.isFinite(lng)) {
+        if (!tripId || !driverId || tripId.length > 256 || driverId.length > 256 || !Number.isFinite(lat) || !Number.isFinite(lng)) {
             throw new Error('Evento de localização inválido: tripId/driverId/lat/lng obrigatórios');
         }
 
@@ -307,7 +317,7 @@ class TripLocationPersistenceService {
         };
     }
 
-    async bufferLocationEvent(eventData = {}) {
+    async bufferLocationEvent(eventData = {}, attempt = 0) {
         const point = this.normalizeLocationEvent(eventData);
         const persistenceScope = resolveRidePersistenceScope(point);
         const redis = await this.getRedis();
@@ -318,16 +328,6 @@ class TripLocationPersistenceService {
             : {};
         assertScopeMatchesStoredEnvelope(persistenceScope, previousMeta);
 
-        if (point.seq !== null) {
-            const workerDedupKey = this.getWorkerDedupKey(point.tripId, point.driverId, point.seq, point.capturedAt);
-            const dedupResult = await redis.set(workerDedupKey, '1', 'NX', 'EX', this.workerIdempotencyTtlSeconds);
-            if (!dedupResult) {
-                return { success: true, duplicate: true, tripId: point.tripId };
-            }
-        }
-
-        const bufferLength = await redis.rpush(bufferKey, JSON.stringify(point));
-        await redis.sadd(this.bufferIndexKey, point.tripId);
         const sameCanonicalDriver =
             String(previousMeta?.canonicalDriverId || '').trim() === point.driverId;
         const previousLocation = normalizePointLocation({
@@ -402,15 +402,13 @@ class TripLocationPersistenceService {
             this.checkLocationJump(point, previousLocation, previousMeta);
         }
 
-        await redis.expire(bufferKey, this.bufferTtlSeconds);
-        await redis.hset(metaKey, {
+        const patch = {
             tripId: point.tripId,
             driverId: point.driverId,
             customerId: point.customerId || '',
             lastSeq: point.seq !== null ? String(point.seq) : '',
             lastCapturedAt: String(point.capturedAt),
             lastBufferedAt: String(Date.now()),
-            bufferedCount: String(bufferLength),
             canonicalDriverId: point.driverId,
             canonicalDistanceKm: canonicalDistanceKm.toFixed(6),
             canonicalPointsCount: String(canonicalPointsCount),
@@ -423,17 +421,22 @@ class TripLocationPersistenceService {
             ...(canonicalLastCapturedAt ? { canonicalLastCapturedAt: String(canonicalLastCapturedAt) } : {}),
             ...(tollCrossingsValue !== null ? { canonicalTollCrossings: tollCrossingsValue } : {}),
             ...buildPersistenceEnvelope(persistenceScope, { redis: true })
-        });
-        await redis.expire(metaKey, this.bufferTtlSeconds);
-
-        if (bufferLength >= this.chunkSize) {
-            await this.flushTripChunks(point.tripId, {
-                force: false,
-                maxChunks: 1,
-                reason: 'threshold',
-                ...buildPersistenceEnvelope(persistenceScope)
-            });
+        };
+        const rawPoint = JSON.stringify(point);
+        if (Buffer.byteLength(rawPoint) > 16 * 1024) throw new Error('Location point exceeds byte budget');
+        const result = await redis.eval(APPEND_BUFFER, 5, bufferKey, metaKey,
+            `trip_loc_worker_dedup:${point.tripId}:${digest(rawPoint)}`,
+            this.bufferIndexKey, this.bufferQueueKey, previousMeta?.bufferVersion || '0',
+            rawPoint, JSON.stringify(patch), point.tripId, String(Date.now()), String(this.workerIdempotencyTtlSeconds),
+            String(this.periodicFlushMs), String(Math.min(100, Math.max(1, this.chunkSize))));
+        if (Number(result[0]) === 0) return { success: true, duplicate: true, tripId: point.tripId };
+        if (Number(result[0]) === -1) {
+            if (attempt >= 3) throw new Error('Concurrent location update; retry stream event');
+            return this.bufferLocationEvent(point, attempt + 1);
         }
+        const bufferLength = Number(result[1]);
+        // Firestore flush runs only in the existing periodic/finalization path.
+        // Stream ingestion never waits for external storage.
 
         return {
             success: true,
@@ -592,9 +595,15 @@ class TripLocationPersistenceService {
             };
         }
 
+        if (typeof redis?.llen === 'function' && await redis.llen(this.getBufferKey(tripId)) > this.maxTelemetryRecoveryPoints) {
+            return { success: false, reason: 'canonical_telemetry_recovery_budget_exceeded' };
+        }
         const rawPoints = typeof redis?.lrange === 'function'
-            ? await redis.lrange(this.getBufferKey(tripId), 0, -1)
+            ? await redis.lrange(this.getBufferKey(tripId), 0, this.maxTelemetryRecoveryPoints)
             : [];
+        if (rawPoints.length > this.maxTelemetryRecoveryPoints) {
+            return { success: false, reason: 'canonical_telemetry_recovery_budget_exceeded' };
+        }
         const candidates = (rawPoints || []).map((raw) => {
             try {
                 return typeof raw === 'string' ? JSON.parse(raw) : raw;
@@ -678,119 +687,85 @@ class TripLocationPersistenceService {
     }
 
     async flushTripChunks(tripId, options = {}) {
-        const force = options.force === true;
-        const reason = options.reason || 'periodic';
-        const maxChunks = Number.isInteger(options.maxChunks) && options.maxChunks > 0
-            ? options.maxChunks
-            : this.flushMaxChunksPerTrip;
+        if (this.activeFlushes >= 4) return { success: false, pending: true, reason: 'flush_capacity' };
+        this.activeFlushes++;
+        try { return await this.flushTripChunksWithinBudget(tripId, options); }
+        finally { this.activeFlushes--; }
+    }
 
+    async flushTripChunksWithinBudget(tripId, options = {}) {
+        const maxChunks = Math.min(4, Math.max(1, Number(options.maxChunks) || this.flushMaxChunksPerTrip));
         const redis = await this.getRedis();
-        const storedMetadata = typeof redis.hgetall === 'function'
-            ? await redis.hgetall(this.getMetaKey(tripId))
-            : {};
-        const persistenceScope = resolveTripPersistenceScope(options, storedMetadata);
+        const storedMetadata = await redis.hgetall(this.getMetaKey(tripId));
+        const scope = resolveTripPersistenceScope(options, storedMetadata || {});
         const firestore = this.getFirestore();
+        if (!firestore) return { success: false, flushedPoints: 0, reason: 'firestore_unavailable' };
         const lockKey = this.getFlushLockKey(tripId);
-        const lockValue = `${process.pid}:${Date.now()}`;
-        const lockAcquired = await redis.set(lockKey, lockValue, 'NX', 'EX', this.flushLockTtlSeconds);
-
-        if (!lockAcquired) {
+        const lockValue = randomUUID();
+        const claimKey = `trip_loc_chunk_claim:${tripId}`;
+        if (!await redis.set(lockKey, lockValue, 'NX', 'EX', this.flushLockTtlSeconds)) {
             return { success: true, flushedPoints: 0, skipped: true, reason: 'locked' };
         }
-
         let flushedPoints = 0;
         let flushedChunks = 0;
-
+        const startedAt = Date.now();
         try {
-            while (flushedChunks < maxChunks) {
-                const length = await redis.llen(this.getBufferKey(tripId));
-                if (length <= 0) {
-                    break;
+            while (flushedChunks < maxChunks && Date.now() - startedAt < this.flushCycleBudgetMs) {
+                let manifest = await redis.get(claimKey);
+                if (!manifest) {
+                    const raw = await redis.lrange(this.getBufferKey(tripId), 0, Math.min(100, this.chunkSize) - 1);
+                    if (!raw.length) break;
+                    const selected = [];
+                    let bytes = 0;
+                    for (const point of raw) {
+                        const size = Buffer.byteLength(point);
+                        if (size > this.maxChunkBytes) throw new Error('Single buffered point exceeds chunk budget');
+                        if (bytes + size > this.maxChunkBytes) break;
+                        selected.push(point); bytes += size;
+                    }
+                    manifest = await redis.eval(CLAIM_CHUNK, 2, lockKey, claimKey, lockValue,
+                        JSON.stringify({ count: selected.length, digest: digest(JSON.stringify(selected)) }));
+                    if (!manifest) return { success: false, reason: 'lock_lost', flushedPoints, flushedChunks };
                 }
-
-                const currentChunkSize = force ? Math.min(length, this.chunkSize) : Math.min(length, this.chunkSize);
-                if (currentChunkSize <= 0) {
-                    break;
-                }
-
-                const rawPoints = await redis.lrange(this.getBufferKey(tripId), 0, currentChunkSize - 1);
-                const points = rawPoints
-                    .map((raw) => {
-                        try {
-                            return JSON.parse(raw);
-                        } catch (error) {
-                            return null;
-                        }
-                    })
-                    .filter(Boolean);
-
-                if (points.length === 0) {
-                    await redis.ltrim(this.getBufferKey(tripId), currentChunkSize, -1);
-                    continue;
-                }
-
-                points.forEach((point) => {
-                    assertScopeMatchesStoredEnvelope(
-                        persistenceScope,
-                        point,
-                        'trip_location_buffer_point'
-                    );
-                });
-
-                if (!firestore) {
-                    return {
-                        success: false,
-                        flushedPoints,
-                        flushedChunks,
-                        reason: 'firestore_unavailable'
-                    };
-                }
-
+                const claim = JSON.parse(manifest);
+                if (!Number.isInteger(claim.count) || claim.count < 1 || claim.count > 100) throw new Error('Invalid chunk claim');
+                const rawPoints = await redis.lrange(this.getBufferKey(tripId), 0, claim.count - 1);
+                if (digest(JSON.stringify(rawPoints)) !== claim.digest) throw new Error('Chunk prefix changed before persistence');
+                const points = rawPoints.map(raw => JSON.parse(raw));
+                points.forEach(point => assertScopeMatchesStoredEnvelope(scope, point, 'trip_location_buffer_point'));
                 const chunkDoc = {
-                    tripId,
-                    driverId: points[0].driverId || null,
-                    customerId: points[0].customerId || null,
-                    points,
-                    pointsCount: points.length,
-                    firstSeq: points[0].seq || null,
-                    lastSeq: points[points.length - 1].seq || null,
+                    tripId, driverId: points[0].driverId || null, customerId: points[0].customerId || null,
+                    points, pointsCount: points.length, chunkDigest: claim.digest,
+                    firstSeq: points[0].seq ?? null, lastSeq: points[points.length - 1].seq ?? null,
                     firstCapturedAt: points[0].capturedAt || null,
                     lastCapturedAt: points[points.length - 1].capturedAt || null,
                     createdAt: admin.firestore.FieldValue.serverTimestamp(),
                     expiresAt: this.buildRetentionTimestamp(points[points.length - 1].capturedAt),
-                    source: 'trip-location-worker',
-                    reason,
-                    ...buildPersistenceEnvelope(persistenceScope)
+                    source: 'trip-location-worker', reason: options.reason || 'periodic',
+                    ...buildPersistenceEnvelope(scope)
                 };
-
-                await firestore
-                    .collection(persistenceScope.collections.tripLocationChunks)
-                    .add(chunkDoc);
-                await redis.ltrim(this.getBufferKey(tripId), currentChunkSize, -1);
-                await redis.hincrby(this.getMetaKey(tripId), 'persistedPoints', points.length);
-                await redis.hset(this.getMetaKey(tripId), {
-                    lastPersistedAt: String(Date.now())
-                });
-
-                flushedPoints += points.length;
-                flushedChunks += 1;
-
-                if (!force) {
-                    break;
+                const ref = firestore.collection(scope.collections.tripLocationChunks)
+                    .doc(`v2_${digest(String(tripId)).slice(0, 24)}_${claim.digest}`);
+                try {
+                    await ref.create(chunkDoc);
+                } catch (error) {
+                    if (error.code !== 6 && error.code !== 'already-exists') throw error;
+                    const existing = await ref.get();
+                    if (!existing.exists || existing.data().chunkDigest !== claim.digest) throw error;
                 }
+                const acknowledged = Number(await redis.eval(ACK_CHUNK, 6, lockKey, claimKey,
+                    this.getBufferKey(tripId), this.getMetaKey(tripId), this.bufferQueueKey, this.bufferIndexKey,
+                    lockValue, manifest, JSON.stringify(rawPoints), String(Date.now()), String(tripId), String(this.bufferTtlSeconds)));
+                if (acknowledged !== points.length) {
+                    return { success: false, reason: 'chunk_ack_conflict', flushedPoints, flushedChunks };
+                }
+                flushedPoints += acknowledged;
+                flushedChunks++;
+                if (!options.force) break;
             }
-
-            return {
-                success: true,
-                tripId,
-                flushedPoints,
-                flushedChunks
-            };
+            return { success: true, tripId, flushedPoints, flushedChunks };
         } finally {
-            const currentLockValue = await redis.get(lockKey);
-            if (currentLockValue === lockValue) {
-                await redis.del(lockKey);
-            }
+            await redis.eval("if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEYS[1]) else return 0 end", 1, lockKey, lockValue);
         }
     }
 
@@ -814,40 +789,25 @@ class TripLocationPersistenceService {
     }
 
     async forceFinalizeTrip(tripId, metadata = {}) {
-        const persistenceScope = resolveRidePersistenceScope(normalizeScopeInput(metadata));
         const redis = await this.getRedis();
+        const persistenceScope = resolveTripPersistenceScope(metadata, await redis.hgetall(this.getMetaKey(tripId)) || {});
         let totalFlushedPoints = 0;
         let totalFlushedChunks = 0;
 
-        while (true) {
-            const length = await redis.llen(this.getBufferKey(tripId));
-            if (length <= 0) {
-                break;
-            }
-
-            const result = await this.flushTripChunks(tripId, {
-                force: true,
-                maxChunks: this.flushMaxChunksPerTrip,
-                reason: metadata.reason || 'finalization',
-                ...buildPersistenceEnvelope(persistenceScope)
-            });
-
-            if (!result.success) {
-                return {
-                    success: false,
-                    tripId,
-                    reason: result.reason || 'flush_failed',
-                    totalFlushedPoints,
-                    totalFlushedChunks
-                };
-            }
-
-            totalFlushedPoints += result.flushedPoints || 0;
-            totalFlushedChunks += result.flushedChunks || 0;
-
-            if ((result.flushedPoints || 0) === 0) {
-                break;
-            }
+        const finalizationConfig = JSON.stringify({ ...metadata, ...buildPersistenceEnvelope(persistenceScope) });
+        await redis.eval(REQUEST_FINALIZATION, 2, this.getMetaKey(tripId), this.bufferQueueKey,
+            finalizationConfig, String(Date.now()), String(tripId));
+        const result = await this.flushTripChunks(tripId, {
+            force: true, maxChunks: this.flushMaxChunksPerTrip,
+            reason: metadata.reason || 'finalization', ...buildPersistenceEnvelope(persistenceScope)
+        });
+        totalFlushedPoints = result.flushedPoints || 0;
+        totalFlushedChunks = result.flushedChunks || 0;
+        const remaining = await redis.llen(this.getBufferKey(tripId));
+        if (!result.success || remaining > 0) {
+            await redis.zadd(this.bufferQueueKey, 'NX', Date.now(), String(tripId));
+            return { success: false, pending: true, tripId, reason: result.reason || 'finalization_pending',
+                totalFlushedPoints, totalFlushedChunks };
         }
 
         const meta = await redis.hgetall(this.getMetaKey(tripId));
@@ -866,10 +826,16 @@ class TripLocationPersistenceService {
             ...buildPersistenceEnvelope(persistenceScope)
         };
 
-        await this.writeTripSummary(tripId, summary);
+        const written = await this.writeTripSummary(tripId, summary);
+        if (!written.success) {
+            await redis.zadd(this.bufferQueueKey, 'NX', Date.now(), String(tripId));
+            return { success: false, pending: true, reason: written.reason };
+        }
 
-        await redis.expire(this.getMetaKey(tripId), this.bufferTtlSeconds);
-        await redis.expire(this.getBufferKey(tripId), 60);
+        const finished = Number(await redis.eval(FINISH_FINALIZATION, 4, this.getMetaKey(tripId), this.bufferQueueKey,
+            this.bufferIndexKey, this.getBufferKey(tripId), meta.bufferVersion || '0', String(tripId),
+            String(this.bufferTtlSeconds), String(Date.now())));
+        if (!finished) return { success: false, pending: true, reason: 'late_points_during_summary' };
 
         return {
             success: true,
@@ -878,27 +844,29 @@ class TripLocationPersistenceService {
         };
     }
 
-    async listBufferedTripIds(redis) {
-        const tripIds = new Set(await redis.smembers(this.bufferIndexKey) || []);
-
-        // Rare SCAN only re-indexes buffers the index missed (pre-index data, failed SADD).
+    async listBufferedTripIds(redis, maxTrips = this.flushMaxTripsPerCycle) {
+        // Incremental migration/reconciliation only. Never collect a complete
+        // keyspace or set. COUNT is a hint: reject oversized pages explicitly.
         const now = Date.now();
-        if (now - this.lastBufferReconcileAt >= this.bufferReconcileIntervalMs) {
-            const keys = await RedisScan.scanKeys(redis, `${BUFFER_KEY_PREFIX}*`, 200);
+        if (this.reconcileCursor !== '0' || this.keyReconcileCursor || now - this.lastBufferReconcileAt >= this.bufferReconcileIntervalMs) {
+            const [cursor, ids] = await redis.sscan(this.bufferIndexKey, this.reconcileCursor, 'COUNT', 100);
+            if (ids.length > 1000) throw new Error('Legacy buffer index page exceeds migration budget');
+            this.reconcileCursor = cursor;
+            for (const id of ids) await redis.zadd(this.bufferQueueKey, 'NX', now, id);
+            const [keyCursor, keys] = await redis.scan(this.keyReconcileCursor || '0', 'MATCH', `${BUFFER_KEY_PREFIX}*`, 'COUNT', 100);
+            if (keys.length > 1000) throw new Error('Legacy buffer key page exceeds migration budget');
+            this.keyReconcileCursor = keyCursor === '0' ? null : keyCursor;
+            for (const key of keys) await redis.zadd(this.bufferQueueKey, 'NX', now, key.slice(BUFFER_KEY_PREFIX.length));
             this.lastBufferReconcileAt = now;
-            const missing = keys
-                .map((key) => key.slice(BUFFER_KEY_PREFIX.length))
-                .filter((tripId) => tripId && !tripIds.has(tripId));
-            if (missing.length > 0) {
-                await redis.sadd(this.bufferIndexKey, ...missing);
-                missing.forEach((tripId) => tripIds.add(tripId));
-            }
         }
-
-        return Array.from(tripIds);
+        return redis.eval(CLAIM_TRIPS, 1, this.bufferQueueKey, String(now),
+            String(Math.min(200, Math.max(1, Number(maxTrips) || 1))), String(now + this.flushLockTtlSeconds * 1000));
     }
 
     async flushPendingTrips(maxTrips = this.flushMaxTripsPerCycle) {
+        if (this.flushInProgress) return { success: true, skipped: true, reason: 'cycle_running' };
+        this.flushInProgress = true;
+        const cycleStartedAt = Date.now();
         let redis = null;
         let processedTrips = 0;
         let flushedPoints = 0;
@@ -921,14 +889,20 @@ class TripLocationPersistenceService {
                 return result;
             }
 
-            const tripIds = await this.listBufferedTripIds(redis);
-            const selectedTripIds = tripIds.slice(0, maxTrips);
+            const tripIds = await this.listBufferedTripIds(redis, maxTrips);
+            const selectedTripIds = tripIds;
 
-            for (const tripId of selectedTripIds) {
-                // Buffers expire (TTL) or drain; drop their index entry instead of flushing.
+            let nextTrip = 0;
+            const processTrips = async () => {
+              while (nextTrip < selectedTripIds.length && Date.now() - cycleStartedAt < this.flushCycleBudgetMs) {
+                const tripId = selectedTripIds[nextTrip++];
+                // Legacy buffers may have expired; never trim an unpersisted live buffer.
                 const length = await redis.llen(this.getBufferKey(tripId));
                 if (length <= 0) {
                     await redis.srem(this.bufferIndexKey, tripId);
+                    await redis.zrem(this.bufferQueueKey, tripId);
+                    const meta = await redis.hgetall(this.getMetaKey(tripId));
+                    if (meta?.finalizationRequested) await this.forceFinalizeTrip(tripId, JSON.parse(meta.finalizationRequested));
                     continue;
                 }
                 processedTrips += 1;
@@ -943,14 +917,28 @@ class TripLocationPersistenceService {
                         continue;
                     }
                     flushedPoints += result.flushedPoints || 0;
+                    const meta = await redis.hgetall(this.getMetaKey(tripId));
+                    if (meta?.finalizationRequested) await this.forceFinalizeTrip(tripId, JSON.parse(meta.finalizationRequested));
                 } catch (error) {
                     failures += 1;
                     logError(error, 'Falha ao flush periódico de trip location', {
                         service: 'trip-location-persistence',
                         tripId
                     });
+                } finally {
+                    const remaining = await redis.llen(this.getBufferKey(tripId));
+                    if (remaining > 0) {
+                        const meta = await redis.hgetall(this.getMetaKey(tripId));
+                        const delay = failures > 0 ? this.periodicFlushMs
+                            : remaining >= this.chunkSize || meta?.finalizationRequested ? 0 : this.periodicFlushMs;
+                        await redis.zadd(this.bufferQueueKey, Date.now() + delay, tripId);
+                    }
                 }
-            }
+              }
+            };
+            const workers = await Promise.allSettled(Array.from({ length: 4 }, () => processTrips()));
+            const rejected = workers.find(worker => worker.status === 'rejected');
+            if (rejected) throw rejected.reason;
 
             const success = failures === 0;
             const status = success
@@ -972,6 +960,8 @@ class TripLocationPersistenceService {
                 failures
             }, redis);
             throw error;
+        } finally {
+            this.flushInProgress = false;
         }
     }
 }

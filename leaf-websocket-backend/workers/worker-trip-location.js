@@ -66,20 +66,27 @@ workerManager.registerListener('trip.location.v1', async (event) => {
 const periodicFlushMs = Number.parseInt(process.env.TRIP_LOCATION_PERIODIC_FLUSH_MS || '15000', 10);
 const statsLogMs = Number.parseInt(process.env.TRIP_LOCATION_STATS_LOG_MS || '60000', 10);
 
-const flushTimer = setInterval(async () => {
+let shuttingDown = false;
+let flushTimer;
+const runPeriodicFlush = async () => {
+    let nextDelay = periodicFlushMs;
     try {
         const result = await tripLocationPersistenceService.flushPendingTrips();
+        if (result.success && result.processedTrips > 0) nextDelay = 250;
         logStructured('info', 'Flush periódico de trip location executado', {
-            service: 'trip-location-worker',
-            ...result
+            service: 'trip-location-worker', ...result
         });
     } catch (error) {
         logStructured('error', 'Erro no flush periódico de trip location', {
-            service: 'trip-location-worker',
-            error: error.message
+            service: 'trip-location-worker', error: error.message
         });
+    } finally {
+        // Same existing worker, one cycle at a time. Continue draining due full
+        // chunks; idle/partial buffers keep the normal batching interval.
+        if (!shuttingDown) flushTimer = setTimeout(runPeriodicFlush, nextDelay);
     }
-}, periodicFlushMs);
+};
+flushTimer = setTimeout(runPeriodicFlush, periodicFlushMs);
 
 const statsTimer = setInterval(() => {
     const stats = workerManager.getStats();
@@ -93,7 +100,8 @@ const gracefulShutdown = async (signal) => {
     logStructured('info', `${signal} recebido, encerrando trip-location-worker`, {
         service: 'trip-location-worker'
     });
-    clearInterval(flushTimer);
+    shuttingDown = true;
+    clearTimeout(flushTimer);
     clearInterval(statsTimer);
     await workerManager.stop();
     process.exit(0);

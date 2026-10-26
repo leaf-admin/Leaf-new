@@ -1,3 +1,4 @@
+const { appendTripLocation } = require('../utils/trip-location-stream-write');
 const {
     renewActiveTripForDriver,
     resolveActiveTripForDriver,
@@ -827,64 +828,6 @@ function registerSocketUpdateLocationHandler({
                         throw recoveryError;
                     }
 
-                    if (activeTripId && seqIsValid) {
-                        const seqStateKey = `trip_loc_seq_state:${activeTripId}:${driverId}`;
-                        const rawLastSeq = await redis.get(seqStateKey);
-                        lastAcceptedSeq = Number.isInteger(Number(rawLastSeq)) ? Number(rawLastSeq) : null;
-
-                        if (lastAcceptedSeq === null || parsedSeq > lastAcceptedSeq) {
-                            orderStatus = 'in_order';
-                            lastAcceptedSeq = parsedSeq;
-                            await redis.set(seqStateKey, String(parsedSeq), 'EX', TRIP_LOCATION_DEDUP_TTL_SECONDS);
-                        } else if (parsedSeq >= (lastAcceptedSeq - TRIP_LOCATION_OUT_OF_ORDER_WINDOW)) {
-                            orderStatus = parsedSeq === lastAcceptedSeq ? 'duplicate_seq' : 'out_of_order';
-                        } else {
-                            orderStatus = 'stale_ignored';
-                            socket.emit('locationUpdated', {
-                                message: 'Localização fora da janela de aceitação',
-                                driverId,
-                                tripId: activeTripId,
-                                seq: parsedSeq,
-                                stale: true,
-                                orderStatus,
-                                lastAcceptedSeq,
-                                outOfOrderWindow: TRIP_LOCATION_OUT_OF_ORDER_WINDOW
-                            });
-                            return {
-                                success: true,
-                                ignored: true,
-                                stale: true,
-                                tripId: activeTripId,
-                                seq: parsedSeq,
-                                orderStatus,
-                                lastAcceptedSeq
-                            };
-                        }
-
-                        const dedupeKey = `trip_loc_dedupe:${activeTripId}:${driverId}:${parsedSeq}`;
-                        const dedupeResult = await redis.set(dedupeKey, '1', 'EX', TRIP_LOCATION_DEDUP_TTL_SECONDS, 'NX');
-                        if (!dedupeResult) {
-                            socket.emit('locationUpdated', {
-                                message: 'Localização duplicada ignorada',
-                                driverId,
-                                tripId: activeTripId,
-                                seq: parsedSeq,
-                                orderStatus: 'duplicate_dedupe',
-                                lastAcceptedSeq,
-                                duplicate: true
-                            });
-                            return {
-                                success: true,
-                                ignored: true,
-                                duplicate: true,
-                                tripId: activeTripId,
-                                seq: parsedSeq,
-                                orderStatus: 'duplicate_dedupe',
-                                lastAcceptedSeq
-                            };
-                        }
-                    }
-
                     if (activeTripId) {
                         await rideHealthMonitor.syncDriverSignalForRide(redis, {
                             bookingId: activeTripId,
@@ -946,27 +889,19 @@ function registerSocketUpdateLocationHandler({
                             locationEventData.outOfOrderWindow = TRIP_LOCATION_OUT_OF_ORDER_WINDOW;
                             locationEventData.lastAcceptedSeq = lastAcceptedSeq;
                         }
-                        await redis.xadd(
-                            'trip_location_events',
-                            '*',
-                            'type', 'trip.location.v1',
-                            'data', JSON.stringify(locationEventData),
-                            'bookingId', String(activeTripId),
-                            'tripId', String(activeTripId),
-                            'driverId', String(driverId),
-                            'customerId', customerId ? String(customerId) : '',
-                            'seq', seqIsValid ? String(parsedSeq) : '',
-                            'lat', String(latNum),
-                            'lng', String(lngNum),
-                            'capturedAt', String(capturedAtValue),
-                            'receivedAt', String(Date.now()),
-                            'accuracy', accuracy !== undefined && accuracy !== null ? String(accuracy) : '',
-                            'heading', heading !== undefined && heading !== null ? String(heading) : '',
-                            'speed', speed !== undefined && speed !== null ? String(speed) : '',
-                            'orderStatus', seqIsValid ? String(orderStatus) : '',
-                            'lastAcceptedSeq', seqIsValid && lastAcceptedSeq !== null ? String(lastAcceptedSeq) : '',
-                            'outOfOrderWindow', seqIsValid ? String(TRIP_LOCATION_OUT_OF_ORDER_WINDOW) : ''
-                        );
+                        const appended = await appendTripLocation(redis, locationEventData, {
+                            window: TRIP_LOCATION_OUT_OF_ORDER_WINDOW,
+                            ttl: TRIP_LOCATION_DEDUP_TTL_SECONDS
+                        });
+                        orderStatus = appended.orderStatus;
+                        lastAcceptedSeq = appended.lastAcceptedSeq;
+                        if (!appended.inserted) {
+                            const ignoredPayload = { success: true, ignored: true, driverId,
+                                tripId: activeTripId, seq: parsedSeq, orderStatus, lastAcceptedSeq,
+                                stale: appended.stale, duplicate: appended.duplicate };
+                            socket.emit('locationUpdated', ignoredPayload);
+                            return ignoredPayload;
+                        }
 
                         if (shouldCheckTripLocationStreamRetention()) {
                             // Retenção é control plane: nunca bloqueia o fanout de GPS.
@@ -1054,25 +989,18 @@ function registerSocketUpdateLocationHandler({
                 } catch (locationError) {
                     activeTripId = null;
                     customerId = null;
-                    if (locationError.code === 'ACTIVE_TRIP_RECOVERY_REQUIRED') {
-                        const recoveryPayload = {
-                            success: false, retryable: true,
-                            code: 'ACTIVE_TRIP_RECOVERY_REQUIRED',
-                            message: 'Aguardando confirmação da corrida para sincronizar o trajeto',
-                            driverId, seq: seqIsValid ? parsedSeq : null
-                        };
-                        // Position/presence was saved, but this fix has NOT been
-                        // persisted for a trip. Do not acknowledge its batch as
-                        // delivered; the authenticated client can keep/retry it.
-                        socket.emit('locationUpdated', recoveryPayload);
-                        return recoveryPayload;
-                    }
-                    logStructured('warn', 'Erro ao buscar booking ativo para enviar localização', {
-                        service: 'websocket',
-                        operation: 'updateLocation',
-                        driverId,
-                        error: locationError.message
-                    });
+                    const recoveryPayload = {
+                        success: false, retryable: true,
+                        code: locationError.code === 'ACTIVE_TRIP_RECOVERY_REQUIRED'
+                            ? 'ACTIVE_TRIP_RECOVERY_REQUIRED' : 'TRIP_LOCATION_RETRY_REQUIRED',
+                        message: 'Aguardando confirmação da corrida para sincronizar o trajeto',
+                        driverId, seq: seqIsValid ? parsedSeq : null
+                    };
+                    // Position/presence was saved, but this fix has NOT been
+                    // persisted for a trip. Do not acknowledge its batch as
+                    // delivered; the authenticated client can keep/retry it.
+                    socket.emit('locationUpdated', recoveryPayload);
+                    return recoveryPayload;
                 }
             }
 

@@ -1,3 +1,13 @@
+// Socket boundary tests use a stream adapter; real Lua and failure windows are
+// exercised by scripts/benchmark/database-gps-local.cjs with private Redis.
+jest.mock('../../../utils/trip-location-stream-write', () => ({
+  appendTripLocation: jest.fn(async (redis, data) => {
+    const orderStatus = Number.isInteger(data.seq) ? 'in_order' : 'no_seq';
+    await redis.xadd('trip_location_events', '*', 'type', 'trip.location.v1', 'data', JSON.stringify({ ...data, orderStatus }));
+    return { inserted: true, orderStatus, lastAcceptedSeq: data.seq };
+  })
+}));
+
 jest.mock('../../../services/driver-eligibility-service', () => ({
   isDriverEligibleForRide: jest.fn()
 }));
@@ -765,6 +775,18 @@ describe('registerSocketUpdateLocationHandler', () => {
     expect(redis.xadd).not.toHaveBeenCalled();
     expect(roomEmit).not.toHaveBeenCalled();
     expect(socket.emit).toHaveBeenCalledWith('locationUpdated', expect.objectContaining({ success: false, retryable: true }));
+  });
+
+  it('does not confirm a fix when durable stream insertion fails', async () => {
+    activeTripIndex.resolveActiveTripForDriver.mockResolvedValue({ tripId: 'confirmed', customerId: 'owner' });
+    const { handlers, redis, socket, roomEmit } = createHarness();
+    redis.hgetall.mockImplementation(async key => key === 'booking:confirmed'
+      ? { bookingId: 'confirmed', driverId: 'driver_1', customerId: 'owner', status: 'IN_PROGRESS' } : {});
+    require('../../../utils/trip-location-stream-write').appendTripLocation.mockRejectedValueOnce(new Error('stream unavailable'));
+    await handlers.updateLocation({ lat: -22.91, lng: -43.17, seq: 1 });
+    expect(socket.emit).toHaveBeenCalledWith('locationUpdated', expect.objectContaining({ success: false, code: 'TRIP_LOCATION_RETRY_REQUIRED' }));
+    expect(socket.emit).not.toHaveBeenCalledWith('locationUpdated', expect.objectContaining({ success: true }));
+    expect(roomEmit).not.toHaveBeenCalled();
   });
 
   describe('safe stream retention', () => {
