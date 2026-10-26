@@ -334,7 +334,11 @@ class KYCPolicyService {
       };
     }
 
-    const userRef = this.getStrictRealtimeDatabase().ref(`users/${driverId}`);
+    const database = this.getStrictRealtimeDatabase();
+    const userRef = database.ref(`users/${driverId}`);
+    // RTDB exit: with users served by Firestore the transaction reads the
+    // stored value directly, so the RTDB cache pin below is not needed.
+    const usersServedByFirestore = database.__rtdbRootRouter?.servedByFirestore?.('users') === true;
     const stateUnavailableError = (error, message) => {
       const normalized = error instanceof Error ? error : new Error(message);
       normalized.code = 'KYC_REVERIFY_STATE_UNAVAILABLE';
@@ -365,25 +369,27 @@ class KYCPolicyService {
     // cache before transaction() starts.
     // applyLocally=false prevents an uncommitted mutation from being projected.
     try {
-      if (typeof userRef.on !== 'function' || typeof userRef.off !== 'function') {
+      if (!usersServedByFirestore && (typeof userRef.on !== 'function' || typeof userRef.off !== 'function')) {
         throw stateUnavailableError(
           null,
           'RTDB nao oferece listener autoritativo para o challenge KYC'
         );
       }
-      try {
-        userRef.on('value', cachePinListener, (error) => {
-          cachePinError = stateUnavailableError(
+      if (!usersServedByFirestore) {
+        try {
+          userRef.on('value', cachePinListener, (error) => {
+            cachePinError = stateUnavailableError(
+              error,
+              'Listener RTDB do challenge KYC foi cancelado'
+            );
+          });
+          cachePinAttached = true;
+        } catch (error) {
+          throw stateUnavailableError(
             error,
-            'Listener RTDB do challenge KYC foi cancelado'
+            'RTDB nao iniciou o listener autoritativo do challenge KYC'
           );
-        });
-        cachePinAttached = true;
-      } catch (error) {
-        throw stateUnavailableError(
-          error,
-          'RTDB nao iniciou o listener autoritativo do challenge KYC'
-        );
+        }
       }
 
       const preflightUser = await readCurrentUser();

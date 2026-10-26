@@ -1,4 +1,7 @@
 const admin = require('firebase-admin');
+const { createRouter: createRtdbRootRouter } = require('./rtdb-root-router');
+// RTDB exit: roots routed to Firestore are honored; plain client otherwise.
+const routedRealtimeDb = () => createRtdbRootRouter(admin.database(), { getFirestore: () => admin.firestore() });
 
 function assertAccountWritable(data = {}) {
   if (data.accountDisabled === true || ['deletion_pending', 'deleted'].includes(data.status)) {
@@ -19,7 +22,7 @@ async function saveAccountProfile({ firestore = admin.firestore(), userId, profi
 }
 
 // A tombstone makes delayed projections abort atomically, including after Auth removal.
-async function projectRealtimeProfile(userId, profile, db = admin.database()) {
+async function projectRealtimeProfile(userId, profile, db = routedRealtimeDb()) {
   const result = await db.ref(`users/${userId}`).transaction(current => {
     if (current?.accountDisabled || ['deleted', 'deletion_pending'].includes(current?.status)) return;
     return { ...current, ...profile };
@@ -28,7 +31,7 @@ async function projectRealtimeProfile(userId, profile, db = admin.database()) {
 }
 
 async function runAccountDeletion({ userId, metadata, purge, immediate = true, removeAuth = true,
-  recoveryActor = null, recoverySourceRef = null, firestore = admin.firestore(), db = admin.database(), auth = admin.auth(),
+  recoveryActor = null, recoverySourceRef = null, firestore = admin.firestore(), db = routedRealtimeDb(), auth = admin.auth(),
   releaseCpf }) {
   const userRef = firestore.collection('users').doc(userId);
   const jobRef = firestore.collection('account_deletions').doc(userId);

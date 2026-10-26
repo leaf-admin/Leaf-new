@@ -275,8 +275,15 @@ function createRouter(rawDb, { getFirestore, env = process.env, log = logStructu
         return result;
       },
       get: async () => (await next({}).once('value')),
-      on: () => { throw fail('RTDB_ROUTER_UNSUPPORTED', 'Listeners não suportados em raiz roteada'); },
-      off: () => { throw fail('RTDB_ROUTER_UNSUPPORTED', 'Listeners não suportados em raiz roteada'); }
+      // In mirror mode RTDB is still the source, so listeners stay on RTDB.
+      on: (...args) => {
+        if (modeOf(segments[0]) === 'firestore') throw fail('RTDB_ROUTER_UNSUPPORTED', 'Listeners não suportados em raiz servida pelo Firestore');
+        return raw().on(...args);
+      },
+      off: (...args) => {
+        if (modeOf(segments[0]) === 'firestore') throw fail('RTDB_ROUTER_UNSUPPORTED', 'Listeners não suportados em raiz servida pelo Firestore');
+        return raw().off(...args);
+      }
     };
   }
 
@@ -396,7 +403,9 @@ function createRouter(rawDb, { getFirestore, env = process.env, log = logStructu
           return modeOf(segments[0]) === 'rtdb' ? target.ref(path) : routedRef(path);
         };
       }
-      if (property === '__rtdbRootRouter') return { config, readFirestore, mirrorFromRtdb, collectionFor };
+      if (property === '__rtdbRootRouter') {
+        return { config, readFirestore, mirrorFromRtdb, collectionFor, servedByFirestore: root => modeOf(root) === 'firestore' };
+      }
       const value = target[property];
       return typeof value === 'function' ? value.bind(target) : value;
     }

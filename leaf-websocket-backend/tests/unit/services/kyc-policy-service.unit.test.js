@@ -1733,6 +1733,34 @@ describe('kyc-policy-service', () => {
     expect(mockRedis.eval).toHaveBeenCalledTimes(1);
   });
 
+  test('does not pin an RTDB listener when users are served by Firestore (RTDB exit)', async () => {
+    const driverId = 'driver-users-in-firestore';
+    const challengeId = 'idrev_users_in_firestore';
+    let currentUser = {
+      identityReverification: { challengeId, requirement: 'IDENTITY_REVERIFICATION', status: 'requested', metrics: {} },
+      kycReverifyRequired: true
+    };
+    const on = jest.fn(() => { throw new Error('listener must not be used'); });
+    const off = jest.fn();
+    const once = jest.fn(async () => mockRealtimeSnapshot(currentUser));
+    // Firestore-served transactions receive the stored value on the first call.
+    const transaction = jest.fn(async (updater) => {
+      currentUser = updater(currentUser);
+      return { committed: true, snapshot: mockRealtimeSnapshot(currentUser) };
+    });
+    installMockRealtimeRef({ once, transaction, on, off });
+    mockRealtimeDatabase.__rtdbRootRouter = { servedByFirestore: root => root === 'users' };
+    try {
+      const result = await service.recordIdentityReverificationStarted(driverId, { challengeId, requirement: 'IDENTITY_REVERIFICATION' });
+      expect(result).toEqual(expect.objectContaining({ recorded: true, driverId }));
+      expect(on).not.toHaveBeenCalled();
+      expect(off).not.toHaveBeenCalled();
+      expect(currentUser.identityReverification.validationStartedAt).toEqual(expect.any(String));
+    } finally {
+      delete mockRealtimeDatabase.__rtdbRootRouter;
+    }
+  });
+
   test('keeps a committed identity start when listener cleanup reports a local failure', async () => {
     const driverId = 'driver-rtdb-listener-cleanup';
     const challengeId = 'idrev_rtdb_listener_cleanup';
