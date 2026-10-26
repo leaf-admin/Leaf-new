@@ -905,7 +905,7 @@ async function main() {
 
   const server = spawn(
     process.platform === "win32" ? "npm.cmd" : "npm",
-    ["run", "dev", "--", "--hostname", "localhost", "--port", String(port)],
+    ["run", "dev", "--", ...(process.env.LEAF_SMOKE_WEBPACK === "true" ? ["--webpack"] : []), "--hostname", "localhost", "--port", String(port)],
     {
       cwd: dashboardRoot,
       env: {
