@@ -1124,29 +1124,25 @@ function DriverLiveRideOverlay({
         testID="driver-live-trip-compact-summary"
         accessibilityLabel="Resumo da corrida do motorista"
       >
-        <RobotaxiLifecycleSummary
-          eyebrow={isOperationalInterrupted
-            ? "INTERRUPÇÃO REGISTRADA"
-            : navigationModeLabel.toUpperCase()}
-          object={isOperationalInterrupted ? 'help' : normalizedActiveStatus === 'arrived' ? 'privacy' : normalizedActiveStatus === 'started' ? 'activity' : 'places'}
-          title={isOperationalInterrupted
-            ? "Aguardando decisão do passageiro"
-            : normalizedActiveStatus === "started"
-              ? dropoffLabel
-              : normalizedActiveStatus === "arrived"
-                ? "Aguardando o passageiro"
-                : pickupLabel}
-          subtitle={isOperationalInterrupted
-            ? "Você já está liberado de novas ações nesta corrida."
-            : normalizedActiveStatus === "arrived"
-              ? pickupLabel
-              : null}
-          titleTestID={isOperationalInterrupted
-            ? "driver-live-operational-hold-title"
-            : isSearchingReplacement
-              ? "driver-live-searching-replacement-title"
-              : undefined}
-        />
+        {isOperationalInterrupted ? (
+          <RobotaxiLifecycleSummary
+            eyebrow="INTERRUPÇÃO REGISTRADA"
+            title="Aguardando decisão do passageiro"
+            subtitle="Você já está liberado de novas ações nesta corrida."
+            titleTestID="driver-live-operational-hold-title"
+          />
+        ) : (
+          <View style={styles.navigationTripHeading}>
+            <Text style={styles.navigationTripEyebrow}>{navigationModeLabel}</Text>
+            <Text style={styles.navigationTripTitle} numberOfLines={2}>
+              {normalizedActiveStatus === "started" ? dropoffLabel
+                : normalizedActiveStatus === "arrived" ? "Aguardando o passageiro" : pickupLabel}
+            </Text>
+            {normalizedActiveStatus === "arrived" ? (
+              <Text style={styles.navigationTripSubtitle} numberOfLines={1}>{pickupLabel}</Text>
+            ) : null}
+          </View>
+        )}
 
         {!isTripPeek ? (
           <>
@@ -1526,7 +1522,7 @@ function DriverLiveRideOverlay({
     hasOffer
       ? 16
       : shouldUseCompactTripCard
-        ? robotaxiLifecycleMetrics.cardPaddingBottom
+        ? 12
         : 16;
 
   return (
@@ -2153,7 +2149,7 @@ function DriverLiveRideOverlay({
 export default memo(DriverLiveRideOverlay);
 
 const styles = StyleSheet.create({
-  lifecycleHandleArea: { height: 30, alignItems: 'center', justifyContent: 'flex-start' },
+  lifecycleHandleArea: { height: 18, alignItems: 'center', justifyContent: 'flex-start' },
   lifecycleHandle: { width: 32, height: 3, borderRadius: 2, backgroundColor: '#E5E5E5' },
   lifecycleJourneyRoute: { marginTop: 16 },
   offerHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
@@ -2255,19 +2251,40 @@ const styles = StyleSheet.create({
     marginHorizontal: robotaxiLifecycleMetrics.cardHorizontalMargin,
     borderRadius: robotaxiLifecycleMetrics.cardRadius,
     paddingHorizontal: robotaxiLifecycleMetrics.cardPaddingHorizontal,
-    paddingTop: robotaxiLifecycleMetrics.cardPaddingTop,
+    paddingTop: 8,
     paddingBottom: robotaxiLifecycleMetrics.cardPaddingBottom,
     backgroundColor: color.bg.panelSolid,
   },
   lifecycleTripSummary: {
     minWidth: 0,
   },
+  navigationTripHeading: { minWidth: 0 },
+  navigationTripEyebrow: {
+    ...leafTypography.medium,
+    color: color.text.secondary,
+    fontSize: 11,
+    lineHeight: 14,
+  },
+  navigationTripTitle: {
+    ...leafTypography.semiBold,
+    color: color.text.primary,
+    fontSize: 18,
+    lineHeight: 23,
+    marginTop: 2,
+  },
+  navigationTripSubtitle: {
+    ...leafTypography.regular,
+    color: color.text.secondary,
+    fontSize: 12,
+    lineHeight: 16,
+    marginTop: 2,
+  },
   lifecycleTripIdentity: {
-    marginTop: 14,
+    marginTop: 8,
   },
   lifecycleTripMetricRow: {
-    marginTop: 14,
-    paddingTop: 12,
+    marginTop: 8,
+    paddingTop: 8,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: color.border.subtle,
     flexDirection: "row",
@@ -2315,7 +2332,7 @@ const styles = StyleSheet.create({
     flexBasis: "46%",
   },
   lifecycleTripActionStack: {
-    marginTop: 16,
+    marginTop: 10,
     gap: 10,
   },
   offerPassengerRow: {

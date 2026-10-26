@@ -1,0 +1,33 @@
+{
+  "environment": "Node VM local, not device frame evidence",
+  "points": 653,
+  "steps": 30,
+  "fixes": 120,
+  "allGuidanceOutputsEquivalent": true,
+  "rows": [
+    {
+      "beforeMs": 3408.676958,
+      "afterMs": 1055.5838750000003
+    },
+    {
+      "beforeMs": 3540.846209000001,
+      "afterMs": 1018.9240829999999
+    },
+    {
+      "beforeMs": 3412.3464999999997,
+      "afterMs": 991.9844159999993
+    },
+    {
+      "beforeMs": 3405.487541999999,
+      "afterMs": 1111.1375420000004
+    },
+    {
+      "beforeMs": 3539.136957999999,
+      "afterMs": 1130.9240419999987
+    },
+    {
+      "beforeMs": 3509.502625000001,
+      "afterMs": 1066.8213340000038
+    }
+  ]
+}

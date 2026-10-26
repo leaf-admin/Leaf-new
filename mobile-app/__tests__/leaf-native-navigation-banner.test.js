@@ -46,7 +46,7 @@ describe('LeafNativeNavigationBanner', () => {
     expect(usePrototypeMapOcclusion).toHaveBeenCalledWith(
       expect.objectContaining({
         // The initial camera clearance reserves the whole new banner.
-        occludedTop: 274,
+        occludedTop: 226,
       }),
     );
 

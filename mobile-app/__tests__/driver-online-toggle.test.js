@@ -3088,7 +3088,7 @@ describe('driver online toggle', () => {
     );
   });
 
-  it('does not force overview fitting while native driver navigation owns the camera', async () => {
+  it.each(['accepted', 'started'])('keeps native driver follow framing during %s without forcing overview', async (status) => {
     const routeCoordinates = [
       { latitude: 37.7772, longitude: -122.4193 },
       { latitude: 37.7782, longitude: -122.4182 },
@@ -3109,19 +3109,19 @@ describe('driver online toggle', () => {
 
     usePrototypeRideRuntime.mockReturnValue(
       buildDriverRuntime({
-        bookingStatus: 'started',
+        bookingStatus: status,
         driverCoordinate: routeCoordinates[0],
         currentCoordinate: routeCoordinates[0],
         driverActiveRide: {
           bookingId: 'booking_driver_started_native',
           id: 'booking_driver_started_native',
-          status: 'started',
+          status,
           pickupAddress: '1540 Mission St, San Francisco',
           dropoffAddress: '1 Ferry Building, San Francisco',
           estimatedDriverNetAmount: 15.01,
         },
         driverTripAssist: {
-          status: 'started',
+          status,
           nativeNavigation: {
             isVisible: true,
             navigationKey: 'booking_driver_started_native:destination:started',
@@ -3154,6 +3154,9 @@ describe('driver online toggle', () => {
       const latestMapProps = mockPrototypeMapLayer.mock.calls.at(-1)?.[0] || {};
       expect(latestMapProps.interactionEnabled).toBe(true);
       expect(latestMapProps.forceRegionUpdate).toBe(false);
+      expect(latestMapProps.navigationCameraPadding).toEqual(expect.objectContaining({
+        top: expect.any(Number), bottom: expect.any(Number), left: 0, right: 0,
+      }));
       expect(latestMapProps.routeViewportRegion).toEqual(expect.objectContaining({
         latitude: expect.any(Number),
         longitude: expect.any(Number),

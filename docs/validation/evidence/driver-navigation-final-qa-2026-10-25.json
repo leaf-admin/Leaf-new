@@ -1,0 +1,53 @@
+{
+  "bookingId": "booking_1792947972712_3tEQ8pQ2QzeWbMKhLGsXHHhnOGL2",
+  "finalReadAt": "2026-10-25T23:58:21.296Z",
+  "bookingStatus": "COMPLETED",
+  "qualification": {
+    "qualified": true,
+    "reviewRequired": false,
+    "reason": "SERVER_DESTINATION_COMPLETION",
+    "telemetryReceivedAtMs": 1792972678887
+  },
+  "financialNamespace": "sandbox",
+  "amountsCents": {
+    "passengerPaidCents": 4214,
+    "driverNetAmountCents": 4065,
+    "tollFeeCents": 995,
+    "operationalFeeCents": 99,
+    "paymentIntermediationFeeCents": 50
+  },
+  "ledger": {
+    "eventType": "ride_settlement",
+    "status": "posted",
+    "totalDebitCents": 4214,
+    "totalCreditCents": 4214,
+    "balanced": true
+  },
+  "sandboxCounterBefore": 9,
+  "sandboxCounterRedis": 10,
+  "sandboxCounterFirestore": 10,
+  "bookingCountInDurableHistory": 1,
+  "operationalCounterRedis": 0,
+  "operationalCounterFirestore": 0,
+  "cleanup": {
+    "at": "2026-10-25T23:58:41.849Z",
+    "activeTripId": null,
+    "activeBookingId": null,
+    "driverOnline": "false",
+    "ownWindowRemoved": false,
+    "windowAbsent": true,
+    "otherWindowPreserved": false
+  },
+  "device": {
+    "installedApkSha256": "9c3010c74bc7a4f254ed9799bf6a6f1477bfc81d00c9bf8452abe81d7b1203e6",
+    "expectedApkSha256": "9c3010c74bc7a4f254ed9799bf6a6f1477bfc81d00c9bf8452abe81d7b1203e6",
+    "mockGpsServiceAbsent": true,
+    "gpsLoopStopped": true
+  },
+  "limitations": [
+    "One ride with repeated QA route prefix and long paused interval; not commercial elapsed time/distance",
+    "Receipt/ledger/counter validation, not payout/withdrawal audit",
+    "iPhone passenger session was used initially; final iPhone UI automation unavailable, backend receipt checked",
+    "Payment hash remains in_holding; posted ledger is the settlement evidence"
+  ]
+}

@@ -1,0 +1,507 @@
+{
+  "protocol": "One active sandbox ride; same 2225m prefix, nominal20m/s, 25s warmup,12s replay before two20s windows per run; sequential ABC cycles3/4/5; no recording inside windows",
+  "summary": {
+    "A": {
+      "runs": [
+        3,
+        4,
+        5
+      ],
+      "windows": 6,
+      "cpuMedianOneCorePercent": 161.49678332634733,
+      "jankyFrames": 723,
+      "totalFrames": 5657,
+      "jankFraction": 0.12780625773378115,
+      "p95MedianMs": 21.5,
+      "p99MedianMs": 27.5,
+      "rssEndMedianMiB": 342.60546875,
+      "temperatureRangeC": [
+        41.0,
+        42.0
+      ],
+      "perRun": {
+        "3": {
+          "cpuMedianOneCorePercent": 161.49678332634733,
+          "jankFraction": 0.10204081632653061
+        },
+        "4": {
+          "cpuMedianOneCorePercent": 165.16144480268076,
+          "jankFraction": 0.12195121951219512
+        },
+        "5": {
+          "cpuMedianOneCorePercent": 129.4135015071975,
+          "jankFraction": 0.17489421720733428
+        }
+      }
+    },
+    "B": {
+      "runs": [
+        3,
+        4,
+        5
+      ],
+      "windows": 6,
+      "cpuMedianOneCorePercent": 155.3624478560995,
+      "jankyFrames": 661,
+      "totalFrames": 6006,
+      "jankFraction": 0.11005661005661006,
+      "p95MedianMs": 21.0,
+      "p99MedianMs": 26.5,
+      "rssEndMedianMiB": 389.6875,
+      "temperatureRangeC": [
+        41.0,
+        43.0
+      ],
+      "perRun": {
+        "3": {
+          "cpuMedianOneCorePercent": 159.30696727181223,
+          "jankFraction": 0.10403800475059383
+        },
+        "4": {
+          "cpuMedianOneCorePercent": 155.02827617513006,
+          "jankFraction": 0.1010004764173416
+        },
+        "5": {
+          "cpuMedianOneCorePercent": 153.81680897848844,
+          "jankFraction": 0.12763596004439512
+        }
+      }
+    },
+    "C": {
+      "runs": [
+        3,
+        4,
+        5
+      ],
+      "windows": 6,
+      "cpuMedianOneCorePercent": 155.39203433547692,
+      "jankyFrames": 445,
+      "totalFrames": 6193,
+      "jankFraction": 0.07185532052317133,
+      "p95MedianMs": 21.0,
+      "p99MedianMs": 27.5,
+      "rssEndMedianMiB": 314.30859375,
+      "temperatureRangeC": [
+        41.0,
+        42.0
+      ],
+      "perRun": {
+        "3": {
+          "cpuMedianOneCorePercent": 177.52084544166075,
+          "jankFraction": 0.08542713567839195
+        },
+        "4": {
+          "cpuMedianOneCorePercent": 149.34596145524125,
+          "jankFraction": 0.06328478151682572
+        },
+        "5": {
+          "cpuMedianOneCorePercent": 155.19304193151774,
+          "jankFraction": 0.06557377049180328
+        }
+      }
+    }
+  },
+  "CvsA": {
+    "jankRelativeChangePercent": -43.77793247585336,
+    "cpuRelativeChangePercent": -3.780105625097274,
+    "p95ChangeMs": -0.5,
+    "p99ChangeMs": 0.0
+  },
+  "rows": [
+    {
+      "variant": "A",
+      "run": 3,
+      "window": 1,
+      "elapsed": 20.34192829200765,
+      "cpu": 160.2109668865789,
+      "rssStartKiB": 426692,
+      "rssEndKiB": 416552,
+      "frames": 1024,
+      "jank": 88,
+      "jankFraction": 0.0859375,
+      "p95": 20,
+      "p99": 26,
+      "temperatureBefore": 41.0,
+      "temperatureAfter": 41.0
+    },
+    {
+      "variant": "A",
+      "run": 3,
+      "window": 2,
+      "elapsed": 20.352298124984372,
+      "cpu": 162.7825997661158,
+      "rssStartKiB": 398104,
+      "rssEndKiB": 379896,
+      "frames": 1083,
+      "jank": 127,
+      "jankFraction": 0.1172668513388735,
+      "p95": 21,
+      "p99": 28,
+      "temperatureBefore": 41.0,
+      "temperatureAfter": 41.0
+    },
+    {
+      "variant": "A",
+      "run": 4,
+      "window": 1,
+      "elapsed": 20.358037333004177,
+      "cpu": 167.2558088141365,
+      "rssStartKiB": 320124,
+      "rssEndKiB": 313300,
+      "frames": 1044,
+      "jank": 118,
+      "jankFraction": 0.11302681992337164,
+      "p95": 22,
+      "p99": 26,
+      "temperatureBefore": 41.0,
+      "temperatureAfter": 41.0
+    },
+    {
+      "variant": "A",
+      "run": 4,
+      "window": 2,
+      "elapsed": 20.34745445800945,
+      "cpu": 163.06708079122507,
+      "rssStartKiB": 296800,
+      "rssEndKiB": 321760,
+      "frames": 1088,
+      "jank": 142,
+      "jankFraction": 0.13051470588235295,
+      "p95": 21,
+      "p99": 27,
+      "temperatureBefore": 41.0,
+      "temperatureAfter": 41.0
+    },
+    {
+      "variant": "A",
+      "run": 5,
+      "window": 1,
+      "elapsed": 20.379981375008356,
+      "cpu": 146.66352951948048,
+      "rssStartKiB": 410956,
+      "rssEndKiB": 387248,
+      "frames": 915,
+      "jank": 63,
+      "jankFraction": 0.06885245901639345,
+      "p95": 23,
+      "p99": 28,
+      "temperatureBefore": 42.0,
+      "temperatureAfter": 42.0
+    },
+    {
+      "variant": "A",
+      "run": 5,
+      "window": 2,
+      "elapsed": 20.826744457997847,
+      "cpu": 112.16347349491454,
+      "rssStartKiB": 375580,
+      "rssEndKiB": 280660,
+      "frames": 503,
+      "jank": 185,
+      "jankFraction": 0.36779324055666,
+      "p95": 42,
+      "p99": 73,
+      "temperatureBefore": 42.0,
+      "temperatureAfter": 42.0
+    },
+    {
+      "variant": "B",
+      "run": 3,
+      "window": 1,
+      "elapsed": 20.375355749973096,
+      "cpu": 155.3837900476501,
+      "rssStartKiB": 410044,
+      "rssEndKiB": 410624,
+      "frames": 994,
+      "jank": 99,
+      "jankFraction": 0.09959758551307847,
+      "p95": 21,
+      "p99": 26,
+      "temperatureBefore": 41.0,
+      "temperatureAfter": 41.0
+    },
+    {
+      "variant": "B",
+      "run": 3,
+      "window": 2,
+      "elapsed": 20.419022542017046,
+      "cpu": 163.23014449597434,
+      "rssStartKiB": 408472,
+      "rssEndKiB": 387456,
+      "frames": 1111,
+      "jank": 120,
+      "jankFraction": 0.10801080108010801,
+      "p95": 21,
+      "p99": 27,
+      "temperatureBefore": 41.0,
+      "temperatureAfter": 41.0
+    },
+    {
+      "variant": "B",
+      "run": 4,
+      "window": 1,
+      "elapsed": 20.3809544579708,
+      "cpu": 155.34110566454885,
+      "rssStartKiB": 399944,
+      "rssEndKiB": 423488,
+      "frames": 1006,
+      "jank": 121,
+      "jankFraction": 0.12027833001988071,
+      "p95": 21,
+      "p99": 25,
+      "temperatureBefore": 41.0,
+      "temperatureAfter": 41.0
+    },
+    {
+      "variant": "B",
+      "run": 4,
+      "window": 2,
+      "elapsed": 20.379348459013272,
+      "cpu": 154.71544668571127,
+      "rssStartKiB": 403392,
+      "rssEndKiB": 426320,
+      "frames": 1093,
+      "jank": 91,
+      "jankFraction": 0.08325709057639524,
+      "p95": 20,
+      "p99": 26,
+      "temperatureBefore": 41.0,
+      "temperatureAfter": 41.0
+    },
+    {
+      "variant": "B",
+      "run": 5,
+      "window": 1,
+      "elapsed": 20.384018415992614,
+      "cpu": 146.83071506900686,
+      "rssStartKiB": 306360,
+      "rssEndKiB": 307920,
+      "frames": 745,
+      "jank": 159,
+      "jankFraction": 0.2134228187919463,
+      "p95": 29,
+      "p99": 57,
+      "temperatureBefore": 43.0,
+      "temperatureAfter": 43.0
+    },
+    {
+      "variant": "B",
+      "run": 5,
+      "window": 2,
+      "elapsed": 20.366547749959864,
+      "cpu": 160.80290288797002,
+      "rssStartKiB": 302180,
+      "rssEndKiB": 324408,
+      "frames": 1057,
+      "jank": 71,
+      "jankFraction": 0.06717123935666983,
+      "p95": 23,
+      "p99": 27,
+      "temperatureBefore": 43.0,
+      "temperatureAfter": 43.0
+    },
+    {
+      "variant": "C",
+      "run": 3,
+      "window": 1,
+      "elapsed": 20.395501041959506,
+      "cpu": 174.0579940986305,
+      "rssStartKiB": 340216,
+      "rssEndKiB": 372872,
+      "frames": 1089,
+      "jank": 67,
+      "jankFraction": 0.06152433425160698,
+      "p95": 19,
+      "p99": 27,
+      "temperatureBefore": 41.0,
+      "temperatureAfter": 41.0
+    },
+    {
+      "variant": "C",
+      "run": 3,
+      "window": 2,
+      "elapsed": 20.3885767920292,
+      "cpu": 180.98369678469098,
+      "rssStartKiB": 348360,
+      "rssEndKiB": 341336,
+      "frames": 1100,
+      "jank": 120,
+      "jankFraction": 0.10909090909090909,
+      "p95": 20,
+      "p99": 28,
+      "temperatureBefore": 41.0,
+      "temperatureAfter": 41.0
+    },
+    {
+      "variant": "C",
+      "run": 4,
+      "window": 1,
+      "elapsed": 20.377696666982956,
+      "cpu": 148.34846398013312,
+      "rssStartKiB": 311920,
+      "rssEndKiB": 320344,
+      "frames": 936,
+      "jank": 70,
+      "jankFraction": 0.07478632478632478,
+      "p95": 21,
+      "p99": 29,
+      "temperatureBefore": 42.0,
+      "temperatureAfter": 42.0
+    },
+    {
+      "variant": "C",
+      "run": 4,
+      "window": 2,
+      "elapsed": 20.38000204198761,
+      "cpu": 150.34345893034936,
+      "rssStartKiB": 319412,
+      "rssEndKiB": 318748,
+      "frames": 1055,
+      "jank": 56,
+      "jankFraction": 0.05308056872037915,
+      "p95": 21,
+      "p99": 26,
+      "temperatureBefore": 42.0,
+      "temperatureAfter": 42.0
+    },
+    {
+      "variant": "C",
+      "run": 5,
+      "window": 1,
+      "elapsed": 20.356442207994405,
+      "cpu": 160.4406097406045,
+      "rssStartKiB": 289196,
+      "rssEndKiB": 317124,
+      "frames": 976,
+      "jank": 63,
+      "jankFraction": 0.06454918032786885,
+      "p95": 21,
+      "p99": 32,
+      "temperatureBefore": 42.0,
+      "temperatureAfter": 42.0
+    },
+    {
+      "variant": "C",
+      "run": 5,
+      "window": 2,
+      "elapsed": 20.400749124994036,
+      "cpu": 149.945474122431,
+      "rssStartKiB": 300012,
+      "rssEndKiB": 323360,
+      "frames": 1037,
+      "jank": 69,
+      "jankFraction": 0.0665380906460945,
+      "p95": 21,
+      "p99": 27,
+      "temperatureBefore": 42.0,
+      "temperatureAfter": 42.0
+    }
+  ],
+  "artifacts": {
+    "same43NativeEntries": true,
+    "otaEnabled": false,
+    "artifacts": [
+      {
+        "variant": "A",
+        "file": "baseline.apk",
+        "apkSha256": "9c7fba631f386b13c660a52139c088c7c7d8ce2adb43e019d0d34213b4d95b56",
+        "bundleSha256": "d94c0f43372ca45d4e1d3f4db3c8e9427f862415683c81f2501f44dc8818d269"
+      },
+      {
+        "variant": "B",
+        "file": "optimized-old-camera.apk",
+        "apkSha256": "bae0189381d30bbb2b715c548ef81dd95093cb5e1d67143d46dc9828838961cc",
+        "bundleSha256": "7a2bc38bb8b54f6ef1370f5557f3b238b22ae9f3333e8d70b67f047125c91b89"
+      },
+      {
+        "variant": "C",
+        "file": "candidate.apk",
+        "apkSha256": "170b4ef5aba82310af234cec1193ad05e5f421a80b7cf10a473428577ce231ab",
+        "bundleSha256": "46e0acc4d24f7c55a41e92845bf63d3c1201010757aec978e0ae2bbe0da9d6c9"
+      }
+    ],
+    "excluded": {
+      "C0": "camera before ownership/dead-zone fix, c0-1-* samples excluded from final C comparison",
+      "CX": "ownership fixed but 3D buildings visible at close zoom; cx-1-* excluded from final C comparison",
+      "CY": "extrusions removed but gray footprints remained at low speed; cy-2-* excluded from final comparison"
+    },
+    "finalAcceptanceRuns": {
+      "A": [
+        3,
+        4,
+        5
+      ],
+      "B": [
+        3,
+        4,
+        5
+      ],
+      "C": [
+        3,
+        4,
+        5
+      ]
+    },
+    "postComparisonResumeFix": {
+      "identity": {
+        "apkSha256": "dbccad039e6185c40f4eeb87c93e5043d122cc275f082704b0fba8e0ab2439be",
+        "bundleSha256": "a0258180464c45613fe93c0e069577f4881a56c3a75482664203a06229ae57b2",
+        "baseApkSha256": "5191dbff903ed1b9c14ee61c31859ba7b75cb494840c2cce02edc33659653b24",
+        "sameNativeEntries": 43,
+        "sameCertificate": true,
+        "onlyJavaScriptChanged": true,
+        "otaEnabled": false
+      },
+      "note": "C3/C4/C5 measured before this map-loaded readiness and stale-callback guard; preserved as candidate-measured-before-load-fix.apk; final source separately validated in C6+"
+    },
+    "postComparisonSettleFix": {
+      "identity": {
+        "apkSha256": "9c3010c74bc7a4f254ed9799bf6a6f1477bfc81d00c9bf8452abe81d7b1203e6",
+        "bundleSha256": "f9becf83d70a0dc8374672f051e09efeb38b2acb22908058487d5d2ba4845096",
+        "baseApkSha256": "5191dbff903ed1b9c14ee61c31859ba7b75cb494840c2cce02edc33659653b24",
+        "sameNativeEntries": 43,
+        "sameCertificate": true,
+        "onlyJavaScriptChanged": true,
+        "otaEnabled": false
+      },
+      "note": "C6/C7 load-only fix did not consistently restore parked framing; preserved as candidate-load-only.apk; C8+ includes one-shot viewport settle retry"
+    }
+  },
+  "limitations": [
+    "gfxinfo app frames, not a full Maps GPU/FPS trace",
+    "Short test and thermal observations do not prove battery or sustained load",
+    "Same route replay reset for each run; no commercial distance inference",
+    "C0 is excluded; it predates follow ownership fix",
+    "A1/A2/B1/B2 are pilots excluded from final acceptance to match final C source",
+    "CX/CY are intermediate camera/style variants excluded; preserved raw data",
+    "Sequential order and warmed thermal state limit causal attribution; one Xiaomi, local QA native base (not debuggable)",
+    "C6/C7 follow-up uses intermediate load-only fix, outside final ABC comparison",
+    "C8 comparison interrupted after long interval with no GPS loop; no valid performance sample",
+    "Final installed APK9c3010 includes viewport settle retry; no controlled performance acceptance for that last lifecycle change"
+  ],
+  "sensitivityWithoutCycle5": {
+    "reason": "Cycle5 contains large A/B stalls and41-43C temperature variation; retained in primary, removal shown as sensitivity only",
+    "summary": {
+      "A": {
+        "jankFraction": 0.1120547298891248,
+        "cpuMedianOneCorePercent": 162.92484027867044,
+        "p95MedianMs": 21.0,
+        "p99MedianMs": 26.5
+      },
+      "B": {
+        "jankFraction": 0.10252140818268315,
+        "cpuMedianOneCorePercent": 155.3624478560995,
+        "p95MedianMs": 21.0,
+        "p99MedianMs": 26.0
+      },
+      "C": {
+        "jankFraction": 0.07488038277511962,
+        "cpuMedianOneCorePercent": 162.20072651448993,
+        "p95MedianMs": 20.5,
+        "p99MedianMs": 27.5
+      }
+    },
+    "CvsAJankRelativeChangePercent": -33.175169982372196,
+    "CvsACpuRelativeChangePercent": -0.4444465085507998
+  }
+}

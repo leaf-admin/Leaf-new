@@ -123,6 +123,7 @@ import {
   NAVIGATION_CAMERA_ANCHOR_Y,
   NAVIGATION_CAMERA_ANIMATION_MS,
   resolveNavigationCameraPitch,
+  resolveNavigationCameraPadding,
   resolveNavigationCameraZoom,
   resolveStableNavigationCameraZoom,
   shouldRevealNavigationRoute,
@@ -392,7 +393,6 @@ const HOME_AUTOMATION_WATCHDOG_MS = 250;
 const LEAF_NATIVE_NAV_CAMERA_THROTTLE_MS = 800;
 const LEAF_NATIVE_NAV_MANUAL_PAN_PAUSE_MS = 8000;
 const LEAF_NATIVE_NAV_ROUTE_REVEAL_MS = 1600;
-const MERCATOR_METERS_PER_PIXEL_AT_ZOOM_0 = 156543.03392;
 // Navigation camera: room kept for the top banner, and where the car sits in
 // the visible window (0 = top, 1 = bottom) so most of it shows the road ahead.
 // Camera dead zones: GPS wobbles a few metres even when parked; following every
@@ -471,7 +471,6 @@ const NAVIGATION_BANNER_CLEARANCE = 128;
 const DRIVER_NAVIGATION_HANDOVER_MS = 2000;
 // Ride keeps the camera this long after its last signal (offer -> ride hand-over).
 const DRIVER_RIDE_CAMERA_HOLD_MS = 3000;
-const NAVIGATION_CAR_VISIBLE_ANCHOR = 0.74;
 const DRIVER_DISCLOSURE_STORAGE_TIMEOUT_MS = Math.max(
   600,
   Number.parseInt(
@@ -2028,6 +2027,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   const [followCameraHeading, setFollowCameraHeading] = useState(0);
   const lastCameraDebugAtRef = useRef(0);
   const lastNativeNavigationCameraPoseRef = useRef(null);
+  const [navigationCameraSettleVersion, setNavigationCameraSettleVersion] = useState(0);
   const lastFollowRegionRef = useRef(null);
   const lastNativeNavigationRouteRevealKeyRef = useRef('');
   const nativeNavigationRouteRevealTimerRef = useRef(null);
@@ -2124,6 +2124,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   const [mapFollowingUser, setMapFollowingUser] = useState(true);
   const [visibleMapRegion, setVisibleMapRegion] = useState(PROTOTYPE_REGION);
   const [homeMapReady, setHomeMapReady] = useState(hasPrototypeHomeSurfaceHydratedInSession);
+  const [homeMapLoadVersion, setHomeMapLoadVersion] = useState(0);
   const [homeMapLayoutReady, setHomeMapLayoutReady] = useState(IS_TEST_ENV);
   const [homeSurfaceHydrated, setHomeSurfaceHydrated] = useState(
     hasPrototypeHomeSurfaceHydratedInSession
@@ -5393,6 +5394,9 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   }, [scheduleHomeMapReady]);
 
   const handleHomeMapLoaded = useCallback(() => {
+    // Tile/style loading can settle after the first follow command. A parked
+    // GPS fix must still reapply guidance once the native map finishes loading.
+    setHomeMapLoadVersion(version => version + 1);
     scheduleHomeMapReady();
   }, [scheduleHomeMapReady]);
 
@@ -6886,7 +6890,8 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   useEffect(() => {
     lastNativeNavigationCameraAtRef.current = 0;
     lastNativeNavigationHeadingRef.current = null;
-  }, [leafNativeNavigationKey]);
+    lastNativeNavigationCameraPoseRef.current = null;
+  }, [leafNativeNavigationKey, mapAppActive, isScreenFocused, homeMapInteractiveReady, homeMapLoadVersion]);
 
   useEffect(() => () => {
     if (nativeNavigationRouteRevealTimerRef.current) {
@@ -6962,6 +6967,9 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     });
 
     nativeNavigationRouteRevealTimerRef.current = setTimeout(() => {
+      // The reveal moved the native camera, even if the GPS fix is unchanged.
+      // Let follow mode reapply its pose instead of treating this as GPS jitter.
+      lastNativeNavigationCameraPoseRef.current = null;
       setNativeNavigationRouteRevealKey(previousKey => (
         previousKey === leafNativeNavigationKey ? '' : previousKey
       ));
@@ -6981,6 +6989,34 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     shouldFreezeBackgroundMapCamera,
     showLeafNativeNavigation,
   ]);
+
+  const driverFollowCameraPadding = useMemo(() => {
+    if (!driverFollowCameraActive ||
+        (leafNativeNavigationKey && nativeNavigationRouteRevealKey === leafNativeNavigationKey)) return null;
+    return resolveNavigationCameraPadding({
+      mapHeight: Number(mapHeight) > 0 ? Number(mapHeight) : windowHeight,
+      occludedTop: Math.max(Number(routeViewportOcclusion.top) || 0, insets.top + NAVIGATION_BANNER_CLEARANCE),
+      occludedBottom: routeViewportOcclusion.bottom,
+      anchorY: driverTripAssistNativeNavigation?.cameraAnchorY ?? NAVIGATION_CAMERA_ANCHOR_Y,
+    });
+  }, [driverFollowCameraActive, leafNativeNavigationKey, nativeNavigationRouteRevealKey,
+    mapHeight, windowHeight, routeViewportOcclusion.top, routeViewportOcclusion.bottom,
+    insets.top, driverTripAssistNativeNavigation?.cameraAnchorY]);
+
+  useEffect(() => {
+    if (!driverFollowCameraActive || !driverFollowCameraPadding ||
+        !homeMapInteractiveReady || !mapAppActive || !isScreenFocused) return undefined;
+    // A layout/native-load update inside the throttle window can be skipped
+    // while parked, with no later GPS change to retry it. Reassert once after
+    // the viewport settles; this never runs on ordinary position updates.
+    const timer = setTimeout(() => {
+      lastNativeNavigationCameraPoseRef.current = null;
+      lastNativeNavigationCameraAtRef.current = 0;
+      setNavigationCameraSettleVersion(version => version + 1);
+    }, LEAF_NATIVE_NAV_CAMERA_THROTTLE_MS + 40);
+    return () => clearTimeout(timer);
+  }, [driverFollowCameraActive, driverFollowCameraPadding, homeMapInteractiveReady,
+    homeMapLoadVersion, mapAppActive, isScreenFocused]);
 
   useEffect(() => {
     if (
@@ -7043,40 +7079,12 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     lastNativeNavigationCameraAtRef.current = now;
     lastNativeNavigationHeadingRef.current = resolvedCameraHeading;
     setFollowCameraHeading(resolvedCameraHeading ?? 0);
-    // Driver navigation stays top-down. The previous speed-based pitch made
-    // the map tilt into an isometric view after accepting/starting a ride.
+    // Native padding anchors the camera target below the centre of the visible
+    // map. Keep its geographic centre on the driver; a flat geographic offset
+    // would double-shift the car and become inaccurate with the tilted camera.
     const resolvedCameraPitch = resolveNavigationCameraPitch();
-    const resolvedCameraAnchorY = Number.isFinite(Number(driverTripAssistNativeNavigation?.cameraAnchorY))
-      ? Number(driverTripAssistNativeNavigation.cameraAnchorY)
-      : NAVIGATION_CAMERA_ANCHOR_Y;
-    // Place the car in the lower part of the map that is actually visible
-    // (between the navigation banner and the floating card), so the road
-    // ahead fills that window. Anchoring on the full map height put the car,
-    // and the route ahead of it, behind the card.
-    const safeMapHeight = Number(mapHeight) > 0 ? Number(mapHeight) : windowHeight;
-    const visibleTop = Math.max(Number(routeViewportOcclusion.top) || 0, insets.top + NAVIGATION_BANNER_CLEARANCE);
-    const visibleBottom = Math.max(
-      visibleTop + 120,
-      safeMapHeight - (Number(routeViewportOcclusion.bottom) || 0),
-    );
-    const carScreenY = visibleTop + (visibleBottom - visibleTop) * NAVIGATION_CAR_VISIBLE_ANCHOR;
-    const latitudeCosine = Math.max(
-      0.18,
-      Math.cos((Number(activeDriverNavigationCoordinate.latitude) * Math.PI) / 180),
-    );
-    const metersPerPixel =
-      (MERCATOR_METERS_PER_PIXEL_AT_ZOOM_0 * latitudeCosine) / (2 ** resolvedCameraZoom);
-    // Positive: camera centre ahead of the car; negative: behind it.
-    const lookAheadKm = Number.isFinite(Number(resolvedCameraHeading))
-      ? ((carScreenY - safeMapHeight / 2) * metersPerPixel) / 1000
-      : 0;
-    const cameraCenterCoordinate = Number.isFinite(Number(resolvedCameraHeading)) && lookAheadKm !== 0
-      ? offsetCoordinateByDistance(
-          activeDriverNavigationCoordinate,
-          Math.abs(lookAheadKm),
-          lookAheadKm > 0 ? resolvedCameraHeading : (resolvedCameraHeading + 180) % 360,
-        )
-      : activeDriverNavigationCoordinate;
+    const resolvedCameraAnchorY = driverTripAssistNativeNavigation?.cameraAnchorY ?? NAVIGATION_CAMERA_ANCHOR_Y;
+    const cameraCenterCoordinate = activeDriverNavigationCoordinate;
     const animationDurationMs = Number.isFinite(Number(driverTripAssistNativeNavigation?.cameraAnimationDurationMs))
       ? Number(driverTripAssistNativeNavigation.cameraAnimationDurationMs)
       : NAVIGATION_CAMERA_ANIMATION_MS;
@@ -7113,7 +7121,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
         speedKmh: Number.isFinite(navigationSpeedKmh)
           ? Number(navigationSpeedKmh.toFixed(1))
           : 0,
-        lookAheadKm,
+        viewportPadding: driverFollowCameraPadding,
         throttleMs: LEAF_NATIVE_NAV_CAMERA_THROTTLE_MS,
         animationMs: animationDurationMs,
       });
@@ -7123,6 +7131,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     mapAppActive,
     activeDriverNavigationCoordinate,
     driverTripAssistNativeNavigation?.cameraAnchorY,
+    driverFollowCameraPadding,
     driverTripAssistNativeNavigation?.cameraAnimationDurationMs,
     driverTripAssistNativeNavigation?.cameraZoom,
     driverTripAssistNativeNavigation?.currentSpeedKmh,
@@ -7131,6 +7140,8 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     homeMapInteractiveReady,
     isSearchingMode,
     leafNativeNavigationCameraHeading,
+    homeMapLoadVersion,
+    navigationCameraSettleVersion,
     leafNativeNavigationKey,
     mapHeight,
     nativeNavigationRouteRevealKey,
@@ -10123,6 +10134,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
           destinationMarkerMode={destinationMarkerMode}
           destinationMarkerLetter={passengerMarkerLetter}
           viewportPadding={homeRouteViewportPadding}
+          navigationCameraPadding={driverFollowCameraPadding}
           routeViewportRegion={homeRouteViewportRegion}
           forceRegionUpdate={Boolean(
             ((hasActiveRoute || hasPresentedRoute) && !driverNavigationCameraOwnsMap) && !driverAwaitingNavigationCamera && isScreenFocused ||

@@ -1,9 +1,18 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Animated, AppState, Easing, Image, Platform, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { Animated, AppState, Easing, Image, PixelRatio, Platform, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { captureRef } from 'react-native-view-shot';
 import MapView, { Circle, Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
 import { useReducedMotion } from 'react-native-reanimated';
 import mapStyleAppleLike from './mapStyleAppleLike';
 import SearchRadarPulse from './SearchRadarPulse';
+
+// At road-level zoom the SDK can still draw gray building footprints after
+// extrusions are disabled. Hide their geometry only in driver guidance.
+const DRIVER_GUIDANCE_MAP_STYLE = [...mapStyleAppleLike, {
+  featureType: 'landscape.man_made',
+  elementType: 'geometry',
+  stylers: [{ visibility: 'off' }],
+}];
 
 // Camera glide between ride stages (zoom in to pickup, out to the full trip).
 const CAMERA_TRANSITION_MS = 450;
@@ -885,7 +894,7 @@ function clampNumber(value, min, max) {
   return Math.min(Math.max(value, min), max);
 }
 
-function normalizeViewportPadding(padding = {}, layout = {}) {
+function normalizeViewportPadding(padding = {}, layout = {}, minimumHeight = MIN_VISIBLE_VIEWPORT_HEIGHT) {
   const resolvedPadding = padding && typeof padding === 'object' ? padding : {};
   const height = Number(layout.height);
   const width = Number(layout.width);
@@ -893,8 +902,8 @@ function normalizeViewportPadding(padding = {}, layout = {}) {
   const rawBottom = Math.max(0, Number(resolvedPadding.bottom) || 0);
   const rawLeft = Math.max(0, Number(resolvedPadding.left) || 0);
   const rawRight = Math.max(0, Number(resolvedPadding.right) || 0);
-  const maxBottom = Number.isFinite(height) && height > MIN_VISIBLE_VIEWPORT_HEIGHT
-    ? Math.max(0, height - rawTop - MIN_VISIBLE_VIEWPORT_HEIGHT)
+  const maxBottom = Number.isFinite(height) && height > minimumHeight
+    ? Math.max(0, height - rawTop - minimumHeight)
     : rawBottom;
   const maxRight = Number.isFinite(width) && width > MIN_VISIBLE_VIEWPORT_WIDTH
     ? Math.max(0, width - rawLeft - MIN_VISIBLE_VIEWPORT_WIDTH)
@@ -1120,6 +1129,7 @@ const VehicleMarkerContent = React.memo(function VehicleMarkerContent({
   shapeKey = '',
   screenHeading = 0,
   size = 42,
+  onImageReady,
 }) {
   const [failedImageUrl, setFailedImageUrl] = useState('');
   useEffect(() => setFailedImageUrl(''), [source?.uri]);
@@ -1139,6 +1149,7 @@ const VehicleMarkerContent = React.memo(function VehicleMarkerContent({
           resizeMode="contain"
           fadeDuration={0}
           onError={() => setFailedImageUrl(source.uri)}
+          onLoadEnd={onImageReady}
           testID="leaf-vehicle-campaign-image"
         />
       ) : (
@@ -1150,13 +1161,15 @@ const VehicleMarkerContent = React.memo(function VehicleMarkerContent({
 
 // Keep visual frames inside the marker. Updating MapLayer here would reconcile
 // every route/traffic polyline for each interpolated position.
-function useDriverMarkerMotion({ coordinate, heading, routeMeters, routeMetrics, enabled, reduceMotion, predict = true, onFrame = null, visualHeadingOffset = 0 }) {
+function useDriverMarkerMotion({ coordinate, heading, routeMeters, routeMetrics, enabled, reduceMotion, predict = true, onFrame = null, visualHeadingOffset = 0, staticArtwork = false }) {
   const [pose, setPose] = useState(() => ({ coordinate, heading }));
   const poseRef = useRef(pose);
   const frameHandlerRef = useRef(onFrame);
   const headingOffsetRef = useRef(visualHeadingOffset);
+  const staticArtworkRef = useRef(staticArtwork);
   frameHandlerRef.current = onFrame;
   headingOffsetRef.current = visualHeadingOffset;
+  staticArtworkRef.current = staticArtwork;
   const sampleRef = useRef(null);
   const wasEnabledRef = useRef(false);
   useEffect(() => {
@@ -1167,9 +1180,9 @@ function useDriverMarkerMotion({ coordinate, heading, routeMeters, routeMetrics,
       poseRef.current = next;
       const nativeApplied = frameHandlerRef.current?.(next) === true;
       setPose(previous => {
-        if (nativeApplied && !forceRender &&
+        if (nativeApplied && !forceRender && (staticArtworkRef.current ||
             resolveVehicleArtworkPose(previous.heading - headingOffsetRef.current).heading ===
-              resolveVehicleArtworkPose(next.heading - headingOffsetRef.current).heading) return previous;
+              resolveVehicleArtworkPose(next.heading - headingOffsetRef.current).heading)) return previous;
         return previous.coordinate?.latitude === next.coordinate?.latitude &&
           previous.coordinate?.longitude === next.coordinate?.longitude &&
           previous.heading === next.heading ? previous : next;
@@ -1253,7 +1266,7 @@ function useDriverMarkerMotion({ coordinate, heading, routeMeters, routeMetrics,
 
 const MovingVehicleMarker = React.memo(function MovingVehicleMarker({
   coordinate, heading, routeMetrics, enabled, reduceMotion, cameraHeading,
-  source, colorToken, shapeKey, testID,
+  source, colorToken, shapeKey, testID, driverView = false,
 }) {
   const projection = useMemo(() => findNearestRouteProjection(coordinate, routeMetrics),
     [coordinate?.latitude, coordinate?.longitude, routeMetrics]);
@@ -1263,6 +1276,37 @@ const MovingVehicleMarker = React.memo(function MovingVehicleMarker({
     routeMetrics, startMeters: routeMeters, endMeters: routeMeters, progress: 1,
   })?.heading : null, [routeMeters, routeMetrics]);
   const markerRef = useRef(null);
+  const bitmapViewRef = useRef(null);
+  const bitmapTimerRef = useRef(null);
+  const bitmapGenerationRef = useRef(0);
+  const useDriverBitmap = driverView && Platform.OS === 'android';
+  const bitmapKey = `${colorToken}|${shapeKey}|${source?.uri || source || ''}`;
+  const [bitmap, setBitmap] = useState(null);
+  const bitmapUri = bitmap?.key === bitmapKey ? bitmap.uri : null;
+  useEffect(() => {
+    bitmapGenerationRef.current += 1;
+    return () => {
+      bitmapGenerationRef.current += 1;
+      clearTimeout(bitmapTimerRef.current);
+    };
+  }, [bitmapKey, useDriverBitmap]);
+  const captureDriverBitmap = useCallback(() => {
+    if (!useDriverBitmap) return;
+    clearTimeout(bitmapTimerRef.current);
+    // Snapshot only when artwork mounts/loads, never on GPS or animation frames.
+    // Fabric's legacy Maps marker can keep its 100 px custom-view bitmap even
+    // when the child is 56 dp. A full native image avoids that crop and anchor drift.
+    bitmapTimerRef.current = setTimeout(() => {
+      if (!bitmapViewRef.current) return;
+      const generation = bitmapGenerationRef.current;
+      const pixels = PixelRatio.getPixelSizeForLayoutSize(ACTIVE_VEHICLE_MARKER_SIZE);
+      captureRef(bitmapViewRef, { format: 'png', result: 'data-uri', width: pixels, height: pixels })
+        .then(uri => {
+          if (generation === bitmapGenerationRef.current && uri) setBitmap({ key: bitmapKey, uri });
+        })
+        .catch(() => {}); // Keep the existing marker if a snapshot is unavailable.
+    }, 80);
+  }, [useDriverBitmap, bitmapKey]);
   const applyNativePose = useCallback(next => {
     if (typeof markerRef.current?.setNativeProps !== 'function') return false;
     try {
@@ -1277,6 +1321,7 @@ const MovingVehicleMarker = React.memo(function MovingVehicleMarker({
     coordinate: snapsToRoute ? projection.coordinate : coordinate,
     heading: routeHeading ?? heading, routeMeters, routeMetrics, enabled, reduceMotion,
     onFrame: applyNativePose, visualHeadingOffset: cameraHeading,
+    staticArtwork: Boolean(useDriverBitmap && bitmapUri),
   });
   const screenHeading = resolveScreenRelativeVehicleHeading(pose.heading, cameraHeading);
   const poseBucket = resolveVehicleArtworkPose(screenHeading).heading;
@@ -1290,10 +1335,21 @@ const MovingVehicleMarker = React.memo(function MovingVehicleMarker({
   if (!pose.coordinate) return null;
   return (
     <Marker ref={markerRef} testID={testID} coordinate={pose.coordinate} zIndex={19}
+      style={driverView ? styles.activeVehicleNativeFrame : undefined}
+      image={useDriverBitmap && bitmapUri ? { uri: bitmapUri } : undefined}
       anchor={{ x: 0.5, y: 0.5 }} flat rotation={pose.heading}
       tracksViewChanges={tracking} pinColor={undefined}>
-      <VehicleMarkerContent source={source} colorToken={colorToken} shapeKey={shapeKey}
-        screenHeading={screenHeading} size={ACTIVE_VEHICLE_MARKER_SIZE} />
+      {useDriverBitmap ? (bitmapUri ? null : (
+        <View ref={bitmapViewRef} collapsable={false} style={styles.activeVehicleNativeFrame}
+          testID="driver-vehicle-bitmap-source"
+          onLayout={captureDriverBitmap}>
+          <VehicleMarkerContent source={source} colorToken={colorToken} shapeKey={shapeKey}
+            screenHeading={0} size={ACTIVE_VEHICLE_MARKER_SIZE} onImageReady={captureDriverBitmap} />
+        </View>
+      )) : (
+        <VehicleMarkerContent source={source} colorToken={colorToken} shapeKey={shapeKey}
+          screenHeading={screenHeading} size={ACTIVE_VEHICLE_MARKER_SIZE} />
+      )}
     </Marker>
   );
 });
@@ -1577,11 +1633,13 @@ function PrototypeMapLayer({
   destinationMarkerMode = 'place',
   destinationMarkerLetter = 'P',
   viewportPadding = null,
+  navigationCameraPadding = null,
   routeViewportRegion = null,
   forceRegionUpdate = false,
   manualCameraHoldMs = 0,
   mapCameraHeading = 0,
   motionEnabled = true,
+  mapSafetyProfile = 'default',
 }) {
   const { preferences } = useMobilePreferences();
   const showTraffic = Boolean(requestedTraffic && preferences.trafficLayerEnabled);
@@ -1621,9 +1679,13 @@ function PrototypeMapLayer({
   );
   // routeViewportRegion already accounts for the bottomsheet. Applying native
   // map padding as well would shift the camera twice on Google Maps.
-  const resolvedMapPadding = resolvedRouteViewportRegion
+  const resolvedNavigationCameraPadding = useMemo(() => (
+    mapSafetyProfile === 'driver' && navigationCameraPadding
+      ? normalizeViewportPadding(navigationCameraPadding, windowLayout, 80) : null
+  ), [mapSafetyProfile, navigationCameraPadding, windowLayout.height, windowLayout.width]);
+  const resolvedMapPadding = resolvedNavigationCameraPadding || (resolvedRouteViewportRegion
     ? ZERO_VIEWPORT_PADDING
-    : resolvedViewportPadding;
+    : resolvedViewportPadding);
   const markerCoordinate = userCoordinate || region;
   const normalizedManualCameraHoldMs = Math.max(0, Number(manualCameraHoldMs) || 0);
   const manualCameraHoldUntilRef = useRef(0);
@@ -2094,10 +2156,12 @@ function PrototypeMapLayer({
   const markNativeMapReady = useCallback(() => {
     setNativeMapReadyVersion(previous => previous + 1);
   }, []);
+  const navigationOwnsCameraRef = useRef(false);
+  navigationOwnsCameraRef.current = Boolean(resolvedNavigationCameraPadding);
 
   const applyForcedRegionUpdate = useCallback((duration = Platform.OS === 'android' ? 0 : 180) => {
     const targetViewportRegion = resolvedRouteViewportRegion || region;
-    if (!forceRegionUpdate || !mapRef?.current || !isValidMapRegion(targetViewportRegion)) {
+    if (navigationOwnsCameraRef.current || !forceRegionUpdate || !mapRef?.current || !isValidMapRegion(targetViewportRegion)) {
       return false;
     }
 
@@ -2162,6 +2226,9 @@ function PrototypeMapLayer({
   useEffect(() => {
     const had = hadRouteViewportRef.current;
     hadRouteViewportRef.current = Boolean(resolvedRouteViewportRegion);
+    // Guidance owns the camera. Preview cleanup must not overwrite its native
+    // heading/pitch/zoom when a ride resumes or its initial reveal finishes.
+    if (resolvedNavigationCameraPadding) return;
     if (Date.now() < manualCameraHoldUntilRef.current) return;
     // Prévia nova com o mesmo enquadramento da anterior (oferta reenviada): os valores
     // não mudam, então nada reposicionava a câmera e a rota ficava fora da tela.
@@ -2171,7 +2238,7 @@ function PrototypeMapLayer({
     }
     if (!had || resolvedRouteViewportRegion || !isValidMapRegion(region)) return;
     mapRef?.current?.animateToRegion?.(region, 420);
-  }, [mapRef, region, resolvedRouteViewportRegion]);
+  }, [mapRef, region, resolvedRouteViewportRegion, resolvedNavigationCameraPadding]);
 
   // Glass lens backdrop (Android + Skia): snapshot the settled map so floating
   // glass can refract it; any camera motion drops the snapshot immediately.
@@ -3015,7 +3082,7 @@ function PrototypeMapLayer({
           testID="prototype-map-view"
           accessibilityLabel="Mapa"
           style={StyleSheet.absoluteFillObject}
-          mapPadding={iosControlledRegion ? ZERO_VIEWPORT_PADDING : resolvedMapPadding}
+          mapPadding={resolvedNavigationCameraPadding || (iosControlledRegion ? ZERO_VIEWPORT_PADDING : resolvedMapPadding)}
           // Keep Google's attribution inside the device safe area. Pickup camera
           // anchoring explicitly accounts for this additional native offset.
           paddingAdjustmentBehavior="automatic"
@@ -3032,17 +3099,18 @@ function PrototypeMapLayer({
           }}
           onPanDrag={interactionEnabled ? handleMapPanDrag : undefined}
           provider={mapProvider}
+          showsBuildings={!resolvedNavigationCameraPadding}
           initialRegion={region}
           region={iosNativeRegion}
           mapType="standard"
-          customMapStyle={mapStyleAppleLike}
+          customMapStyle={resolvedNavigationCameraPadding ? DRIVER_GUIDANCE_MAP_STYLE : mapStyleAppleLike}
           onMapLoaded={handleNativeMapLoaded}
           onMapReady={handleNativeMapReady}
           scrollEnabled={interactionEnabled}
           zoomEnabled={interactionEnabled}
           rotateEnabled={interactionEnabled}
-          // Keep the product map top-down; navigation may rotate/zoom, but
-          // users should never enter the legacy isometric pitch view.
+          // Lock pitch gestures; driver guidance controls perspective
+          // programmatically while the other map surfaces stay top-down.
           pitchEnabled={false}
           toolbarEnabled={false}
           showsCompass={false}
@@ -3166,6 +3234,7 @@ function PrototypeMapLayer({
               <MovingVehicleMarker
                 key={`driver-marker-${driverVehicleMarkerColorToken}-${driverMarkerShapeKey}-${driverMarkerAssetUrl}`}
                 testID="map-driver-vehicle-marker"
+                driverView={mapSafetyProfile === 'driver'}
                 coordinate={normalizedDriverCoordinate}
                 heading={normalizedDriverHeading ?? normalizedUserHeading}
                 routeMetrics={routeMotionMetrics}
@@ -3268,6 +3337,7 @@ function PrototypeMapLayer({
             <MovingVehicleMarker
               key={`user-vehicle-marker-${driverVehicleMarkerColorToken}-${driverMarkerShapeKey}-${driverMarkerAssetUrl}`}
               testID="map-user-vehicle-marker"
+              driverView
               coordinate={markerCoordinate}
               heading={targetDriverHeading ?? normalizedUserHeading}
               routeMetrics={routeMotionMetrics}
@@ -3797,6 +3867,12 @@ const styles = StyleSheet.create({
   vehicleMarkerImage: {
     width: 38,
     height: 38,
+  },
+  // Match the snapshot and child bounds so the centred anchor remains centred
+  // on the entire vehicle, including on high-density Android displays.
+  activeVehicleNativeFrame: {
+    width: ACTIVE_VEHICLE_MARKER_SIZE,
+    height: ACTIVE_VEHICLE_MARKER_SIZE,
   },
   androidDriverVehicleOverlayLayer: {
     ...StyleSheet.absoluteFillObject,

@@ -1,0 +1,123 @@
+{
+  "bookingId": "booking_1792945342893_3tEQ8pQ2QzeWbMKhLGsXHHhnOGL2",
+  "apkSha256": "9c7fba631f386b13c660a52139c088c7c7d8ce2adb43e019d0d34213b4d95b56",
+  "metrics": [
+    {
+      "label": "pickup-01",
+      "startedAt": "2026-10-25T16:22:48.975192+00:00",
+      "elapsedSeconds": 20.347051874967292,
+      "gfxSummary": {
+        "totalFrames": 981,
+        "jankyFrames": 100,
+        "p95Ms": 20
+      },
+      "mainProcessCpuPercentOneCore": 151.0292507673149
+    },
+    {
+      "label": "trip-moving-01",
+      "startedAt": "2026-10-25T16:25:43.182262+00:00",
+      "elapsedSeconds": 20.34347920800792,
+      "gfxSummary": {
+        "totalFrames": 966,
+        "jankyFrames": 81,
+        "p95Ms": 19
+      },
+      "mainProcessCpuPercentOneCore": 159.26479275603066
+    },
+    {
+      "label": "trip-moving-02",
+      "startedAt": "2026-10-25T16:27:07.513171+00:00",
+      "elapsedSeconds": 20.305138166004326,
+      "gfxSummary": {
+        "totalFrames": 1025,
+        "jankyFrames": 121,
+        "p95Ms": 21
+      },
+      "mainProcessCpuPercentOneCore": 170.99120289725292
+    },
+    {
+      "label": "trip-moving-03",
+      "startedAt": "2026-10-25T16:27:32.230124+00:00",
+      "elapsedSeconds": 20.320027875015512,
+      "gfxSummary": {
+        "totalFrames": 1023,
+        "jankyFrames": 125,
+        "p95Ms": 21
+      },
+      "mainProcessCpuPercentOneCore": 168.5037058541627
+    },
+    {
+      "label": "trip-middle-01",
+      "startedAt": "2026-10-25T16:30:03.417277+00:00",
+      "elapsedSeconds": 20.3344550000038,
+      "gfxSummary": {
+        "totalFrames": 1128,
+        "jankyFrames": 97,
+        "p95Ms": 20
+      },
+      "mainProcessCpuPercentOneCore": 176.99023652216533
+    }
+  ],
+  "completion": {
+    "qualified": true,
+    "reviewRequired": false,
+    "reason": "SERVER_DESTINATION_COMPLETION",
+    "telemetryReceivedAtMs": 1792946881755
+  },
+  "financialSnapshot": {
+    "version": "ride_financial_snapshot_v1",
+    "driverIntroFee": {
+      "policyId": "driver_first_25_destination_completions_v1",
+      "namespace": "sandbox",
+      "driverId": "DV4cwZvql3T3pI3lnKYQwQVALKZ2",
+      "qualifiedCompletedRides": 8,
+      "historyVerified": true,
+      "historySnapshotId": "auth-registration:DV4cwZvql3T3pI3lnKYQwQVALKZ2:2026-05-07T00:07:00.000Z",
+      "eligible": true,
+      "operationalFeeCents": 99
+    },
+    "currency": "BRL",
+    "authoritativeSnapshot": true,
+    "financialSnapshotSource": "backend_final",
+    "passengerPaidCents": 4290,
+    "grossFareCents": 3295,
+    "tollFeeCents": 995,
+    "driverTollPassThroughCents": 995,
+    "operationalFeeCents": 99,
+    "paymentIntermediationFeeCents": 50,
+    "subscriptionRetainedFeeCents": 0,
+    "retainedTotalCents": 149,
+    "driverNetAmountCents": 4141,
+    "allocatedTotalCents": 4290,
+    "balanced": true
+  },
+  "ledger": {
+    "eventType": "ride_settlement",
+    "status": "posted",
+    "totalDebitCents": 4290,
+    "totalCreditCents": 4290,
+    "balanced": true
+  },
+  "counter": {
+    "sandboxRedis": 9,
+    "sandboxDurable": 9,
+    "bookingOccurrences": 1,
+    "operationalRedis": 0,
+    "operationalDurable": 0
+  },
+  "cleanup": {
+    "at": "2026-10-25T16:49:11.531Z",
+    "activeTripId": null,
+    "activeBookingId": null,
+    "driverOnline": "false",
+    "ownWindowRemoved": true,
+    "windowAbsent": true,
+    "otherWindowPreserved": false
+  },
+  "limitations": [
+    "No controlled baseline; cannot infer performance improvement",
+    "gfxinfo omits full Maps GPU/surface work",
+    "QA simulated GPS; not a real passenger or commercial payment",
+    "Interrupted trip-01 sample discarded before motion; recordings outside metrics windows"
+  ]
+}

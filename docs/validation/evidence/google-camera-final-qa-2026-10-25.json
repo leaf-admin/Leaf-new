@@ -1,0 +1,120 @@
+{
+  "bookingId": "booking_1792973559814_3tEQ8pQ2QzeWbMKhLGsXHHhnOGL2",
+  "apkSha256": "9c3010c74bc7a4f254ed9799bf6a6f1477bfc81d00c9bf8452abe81d7b1203e6",
+  "functionalSourceCommit": "e938c7e9f",
+  "finalReadAt": "2026-10-26T00:18:08.161Z",
+  "status": "COMPLETED",
+  "qualification": {
+    "qualified": true,
+    "reviewRequired": false,
+    "reason": "SERVER_DESTINATION_COMPLETION",
+    "telemetryReceivedAtMs": 1792973870120
+  },
+  "amountsCents": {
+    "passengerPaidCents": 4319,
+    "driverNetAmountCents": 4170,
+    "operationalFeeCents": 99,
+    "paymentIntermediationFeeCents": 50,
+    "tollFeeCents": 995
+  },
+  "ledger": {
+    "eventType": "ride_settlement",
+    "status": "posted",
+    "totalDebitCents": 4319,
+    "totalCreditCents": 4319,
+    "balanced": true
+  },
+  "counterBefore": 10,
+  "sandboxRedis": 11,
+  "sandboxFirestore": 11,
+  "countedOnce": true,
+  "operationalRedis": 0,
+  "operationalFirestore": 0,
+  "cleanup": {
+    "at": "2026-10-26T00:18:34.981Z",
+    "activeTripId": null,
+    "activeBookingId": null,
+    "driverOnline": "false",
+    "ownWindowRemoved": true,
+    "windowAbsent": true,
+    "otherWindowPreserved": false
+  },
+  "mockServiceAbsent": true,
+  "GPSStopped": true,
+  "additionalMetrics": {
+    "label": "final-trip-clean",
+    "startedAt": "2026-10-26T00:15:03.127155+00:00",
+    "package": "br.com.leaf.ride",
+    "pid": "10335",
+    "elapsedSeconds": 20.295669916959014,
+    "gfxSummary": {
+      "totalFrames": 1077,
+      "jankyFrames": 26,
+      "p95Ms": 16
+    },
+    "mainProcessCpuPercentOneCore": 140.81821451046866,
+    "cpuUserHzVerified": 100,
+    "samples": [
+      {
+        "atMonotonic": 366977.997723833,
+        "cpuTicks": 8403,
+        "VmSize": 54448104,
+        "VmHWM": 571960,
+        "VmRSS": 452520
+      },
+      {
+        "atMonotonic": 366983.368709375,
+        "cpuTicks": 9218,
+        "VmSize": 54398864,
+        "VmHWM": 571960,
+        "VmRSS": 477316
+      },
+      {
+        "atMonotonic": 366988.703706958,
+        "cpuTicks": 9947,
+        "VmSize": 54400168,
+        "VmHWM": 571960,
+        "VmRSS": 473316
+      },
+      {
+        "atMonotonic": 366994.022110458,
+        "cpuTicks": 10681,
+        "VmSize": 54400740,
+        "VmHWM": 571960,
+        "VmRSS": 468700
+      },
+      {
+        "atMonotonic": 366998.29339375,
+        "cpuTicks": 11261,
+        "VmSize": 54393592,
+        "VmHWM": 571960,
+        "VmRSS": 467912
+      }
+    ],
+    "framestatsRingBufferCount": 0,
+    "framestatsRingBufferP95Ms": null,
+    "limitations": [
+      "gfxinfo framestats is a ring buffer, not the entire window; use summary counts too",
+      "Google Maps native surface/GPU is not fully measured by app gfxinfo",
+      "main-process CPU only; no battery or temperature inference from a short window",
+      "record exact APK hash, scenario, route and foreground state separately"
+    ]
+  },
+  "visualChecks": {
+    "pickupReopen": 1,
+    "tripReopens": 2,
+    "tripCloseFramingObservedBoth": true,
+    "wholeCarVisibleOnRoute": true,
+    "routeAheadObserved": true,
+    "productOwnerVisualApproval": false
+  },
+  "limits": [
+    "QA GPS short approach~100m, route prefix1074m and tail456m, not full continuous commercial traversal",
+    "First unpaid intent expired and confirmation409; second intent confirmed200 once",
+    "First20s metric sample overlapped recording and excluded, raw saved locally",
+    "20s clean metric window is not a baseline comparison, 60fps or battery proof",
+    "Source unchanged during run; photos after settle do not prove absence of transient opening jumps",
+    "Google Maps framing is design reference; no claim of pixel parity or use of Navigation SDK",
+    "Existing paymentStatus in_holding is not payout evidence"
+  ]
+}

@@ -5,16 +5,36 @@ const DEFAULT_OFF_ROUTE_THRESHOLD_METERS = 100;
 export const PICKUP_ARRIVAL_METERS = 20;
 const DESTINATION_ARRIVAL_BANNER_METERS = 80;
 const EARTH_RADIUS_METERS = 6371000;
-const CAMERA_LOOK_AHEAD_METERS = 55;
-export const NAVIGATION_CAMERA_ANCHOR_Y = 0.68;
+const CAMERA_LOOK_AHEAD_METERS = 25;
+export const NAVIGATION_CAMERA_ANCHOR_Y = 0.72;
 export const NAVIGATION_CAMERA_ANIMATION_MS = 800;
-// Keep the Leaf map in the standard top-down presentation. Route heading and
-// zoom still follow navigation, but the camera must never tilt into the old
-// isometric view during an active driver trip.
-export const NAVIGATION_CAMERA_TOP_DOWN_PITCH = 0;
-const NAVIGATION_CAMERA_MAX_ROUTE_ZOOM = 15.8;
+// Fixed perspective during driver guidance: no speed-driven pitch oscillation.
+export const NAVIGATION_CAMERA_FOLLOW_PITCH = 50;
+const NAVIGATION_CAMERA_MAX_ROUTE_ZOOM = 16.5;
 // Chegou ao destino: mesmo zoom da navegação, sem fechar de repente no ponto final.
 const NAVIGATION_CAMERA_ARRIVAL_ZOOM = NAVIGATION_CAMERA_MAX_ROUTE_ZOOM;
+
+// Only retain immutable geometry. Mutable input must be read again so route
+// replacements/edits cannot leave stale distances or instructions in the cache.
+const normalizedRouteCache = new WeakMap();
+const ownedRouteCoordinates = new WeakSet();
+const routeMeasureCache = new WeakMap();
+
+function normalizeRouteCoordinates(routeCoordinates) {
+  if (!Array.isArray(routeCoordinates)) return [];
+  if (ownedRouteCoordinates.has(routeCoordinates)) return routeCoordinates;
+  const cached = normalizedRouteCache.get(routeCoordinates);
+  if (cached) return cached;
+  const coordinates = routeCoordinates.map(normalizeNavigationCoordinate).filter(Boolean);
+  coordinates.forEach(Object.freeze);
+  Object.freeze(coordinates);
+  ownedRouteCoordinates.add(coordinates);
+  if (Object.isFrozen(routeCoordinates) && routeCoordinates.every(point =>
+    point && typeof point === 'object' && Object.isFrozen(point))) {
+    normalizedRouteCache.set(routeCoordinates, coordinates);
+  }
+  return coordinates;
+}
 
 function toFiniteNumber(value) {
   const numeric = Number(value);
@@ -79,23 +99,20 @@ function normalizeNavigationSpeedKmh({
   return 0;
 }
 
-// Zoom estável, só pela velocidade. A rampa pela distância restante (15,2 longe do
-// ponto até 17,3 perto, 18,6 na chegada) fechava o mapa a cada poucos metros e dava
-// um salto ao tocar "Cheguei", quando a câmera de espera volta a 15,8. A partir de ~16
-// o mapa base do Android escurece as quadras (visto no Xiaomi de QA a 16,3), então o
-// teto é o mesmo 15,8 da espera.
+// Closer road-level guidance, widening gradually with speed. Keep the same
+// framing near arrival instead of zooming into the final point.
 export function resolveNavigationCameraZoom(speedKmh = 0) {
   const normalizedSpeed = Math.max(0, Number(speedKmh) || 0);
   if (normalizedSpeed <= 25) {
     return NAVIGATION_CAMERA_MAX_ROUTE_ZOOM;
   }
   if (normalizedSpeed <= 50) {
-    return 15.5;
+    return 16.2;
   }
   if (normalizedSpeed <= 80) {
-    return 15.2;
+    return 15.9;
   }
-  return 14.9;
+  return 15.6;
 }
 
 // A small speed dead band prevents repeated zoom changes around each boundary.
@@ -104,10 +121,10 @@ export function resolveStableNavigationCameraZoom(speedKmh, previousZoom, reques
   const speed = Math.max(0, Number(speedKmh) || 0);
   if (requestedZoom !== resolveNavigationCameraZoom(speed)) return requestedZoom;
   const bands = [
-    { zoom: 15.8, min: 0, max: 28 },
-    { zoom: 15.5, min: 22, max: 53 },
-    { zoom: 15.2, min: 47, max: 83 },
-    { zoom: 14.9, min: 77, max: Infinity },
+    { zoom: 16.5, min: 0, max: 28 },
+    { zoom: 16.2, min: 22, max: 53 },
+    { zoom: 15.9, min: 47, max: 83 },
+    { zoom: 15.6, min: 77, max: Infinity },
   ];
   const previousBand = bands.find(band => band.zoom === previousZoom);
   return previousBand && speed >= previousBand.min && speed <= previousBand.max
@@ -135,7 +152,29 @@ export function shouldRevealNavigationRoute({
 }
 
 export function resolveNavigationCameraPitch() {
-  return NAVIGATION_CAMERA_TOP_DOWN_PITCH;
+  return NAVIGATION_CAMERA_FOLLOW_PITCH;
+}
+
+// Google positions camera.center in the centre of its padded viewport, even
+// with pitch. Add virtual space above that centre to leave the car lower in
+// the *visible* map. Unlike a flat metres-per-pixel offset, this stays correct
+// when the perspective changes, without querying screen points every frame.
+export function resolveNavigationCameraPadding({
+  mapHeight, occludedTop = 0, occludedBottom = 0,
+  anchorY = NAVIGATION_CAMERA_ANCHOR_Y,
+} = {}) {
+  const height = toFiniteNumber(mapHeight);
+  if (height === null || height < 180) return null;
+  const top = Math.min(height - 120, Math.max(0, toFiniteNumber(occludedTop) || 0));
+  const bottom = Math.min(height - top - 120, Math.max(0, toFiniteNumber(occludedBottom) || 0));
+  const visibleHeight = height - top - bottom;
+  const anchor = Math.max(0.5, Math.min(0.8, toFiniteNumber(anchorY) || NAVIGATION_CAMERA_ANCHOR_Y));
+  return {
+    top: Math.min(height - bottom - 80, top + (2 * anchor - 1) * visibleHeight),
+    bottom,
+    left: 0,
+    right: 0,
+  };
 }
 
 export function calculateNavigationDistanceMeters(left, right) {
@@ -281,9 +320,7 @@ function distancePointToSegmentMeters(point, segmentStart, segmentEnd) {
 
 export function calculateDistanceToRouteMeters(currentCoordinate, routeCoordinates = []) {
   const current = normalizeNavigationCoordinate(currentCoordinate);
-  const coordinates = Array.isArray(routeCoordinates)
-    ? routeCoordinates.map(normalizeNavigationCoordinate).filter(Boolean)
-    : [];
+  const coordinates = normalizeRouteCoordinates(routeCoordinates);
 
   if (!current || coordinates.length < 2) {
     return Number.POSITIVE_INFINITY;
@@ -302,9 +339,7 @@ export function calculateDistanceToRouteMeters(currentCoordinate, routeCoordinat
 
 function findNearestRouteIndex(currentCoordinate, routeCoordinates = []) {
   const current = normalizeNavigationCoordinate(currentCoordinate);
-  const coordinates = Array.isArray(routeCoordinates)
-    ? routeCoordinates.map(normalizeNavigationCoordinate).filter(Boolean)
-    : [];
+  const coordinates = normalizeRouteCoordinates(routeCoordinates);
 
   if (!current || coordinates.length === 0) {
     return -1;
@@ -345,9 +380,7 @@ function interpolateNavigationCoordinate(start, end, ratio) {
 
 function calculateRemainingRouteMeters(currentCoordinate, routeCoordinates = [], fallbackMeters = null) {
   const current = normalizeNavigationCoordinate(currentCoordinate);
-  const coordinates = Array.isArray(routeCoordinates)
-    ? routeCoordinates.map(normalizeNavigationCoordinate).filter(Boolean)
-    : [];
+  const coordinates = normalizeRouteCoordinates(routeCoordinates);
 
   if (!current || coordinates.length < 2) {
     return Number.isFinite(Number(fallbackMeters)) ? Math.max(0, Number(fallbackMeters)) : null;
@@ -383,9 +416,7 @@ function calculateRouteDistanceToCoordinateMeters(
 ) {
   const current = normalizeNavigationCoordinate(currentCoordinate);
   const target = normalizeNavigationCoordinate(targetCoordinate);
-  const coordinates = Array.isArray(routeCoordinates)
-    ? routeCoordinates.map(normalizeNavigationCoordinate).filter(Boolean)
-    : [];
+  const coordinates = normalizeRouteCoordinates(routeCoordinates);
 
   if (!current || !target || coordinates.length < 2) {
     return Number.isFinite(Number(fallbackMeters)) ? Math.max(0, Number(fallbackMeters)) : null;
@@ -437,9 +468,7 @@ function normalizeSignedBearingDeltaDegrees(startBearing, endBearing) {
 }
 
 function calculateRouteDistanceBetweenIndexes(routeCoordinates = [], startIndex = 0, endIndex = 0) {
-  const coordinates = Array.isArray(routeCoordinates)
-    ? routeCoordinates.map(normalizeNavigationCoordinate).filter(Boolean)
-    : [];
+  const coordinates = normalizeRouteCoordinates(routeCoordinates);
   const safeStartIndex = Math.max(0, Math.min(coordinates.length - 1, Number(startIndex) || 0));
   const safeEndIndex = Math.max(safeStartIndex, Math.min(coordinates.length - 1, Number(endIndex) || 0));
 
@@ -456,9 +485,9 @@ function calculateRouteDistanceBetweenIndexes(routeCoordinates = [], startIndex 
 }
 
 function buildRouteMeasureSegments(routeCoordinates = []) {
-  const coordinates = Array.isArray(routeCoordinates)
-    ? routeCoordinates.map(normalizeNavigationCoordinate).filter(Boolean)
-    : [];
+  const cached = routeMeasureCache.get(routeCoordinates);
+  if (cached) return cached;
+  const coordinates = normalizeRouteCoordinates(routeCoordinates);
 
   if (coordinates.length < 2) {
     return null;
@@ -480,6 +509,8 @@ function buildRouteMeasureSegments(routeCoordinates = []) {
     }
 
     segments.push({
+      startCoordinate: start,
+      endCoordinate: end,
       startMeters,
       endMeters,
       routeStartMeters: totalMeters,
@@ -493,7 +524,9 @@ function buildRouteMeasureSegments(routeCoordinates = []) {
     return null;
   }
 
-  return { coordinates, origin, segments, totalMeters };
+  const measure = { coordinates, origin, segments, totalMeters };
+  if (ownedRouteCoordinates.has(routeCoordinates)) routeMeasureCache.set(routeCoordinates, measure);
+  return measure;
 }
 
 function projectCoordinateToRouteMeasure(
@@ -541,6 +574,7 @@ function projectCoordinateToRouteMeasure(
 
     if (!nearest || squaredDistance < nearest.squaredDistance) {
       nearest = {
+        coordinate: interpolateNavigationCoordinate(segment.startCoordinate, segment.endCoordinate, ratio),
         routeMeters,
         squaredDistance,
         totalMeters: routeMeasure.totalMeters,
@@ -557,9 +591,7 @@ function buildSyntheticNavigationStepsFromRoute(
   phase = 'destination',
 ) {
   const targetLabel = phase === 'pickup' ? 'o embarque' : 'o destino';
-  const coordinates = Array.isArray(routeCoordinates)
-    ? routeCoordinates.map(normalizeNavigationCoordinate).filter(Boolean)
-    : [];
+  const coordinates = normalizeRouteCoordinates(routeCoordinates);
 
   if (coordinates.length < 2) {
     return [];
@@ -661,48 +693,20 @@ function buildSyntheticNavigationStepsFromRoute(
 }
 
 function findRouteCoordinateAhead(currentCoordinate, routeCoordinates = [], lookAheadMeters = CAMERA_LOOK_AHEAD_METERS) {
-  const current = normalizeNavigationCoordinate(currentCoordinate);
-  const coordinates = Array.isArray(routeCoordinates)
-    ? routeCoordinates.map(normalizeNavigationCoordinate).filter(Boolean)
-    : [];
-
-  if (!current || coordinates.length < 2) {
-    return null;
-  }
-
-  const nearestIndex = findNearestRouteIndex(current, coordinates);
-  if (nearestIndex < 0) {
-    return null;
-  }
-
-  let cursor = current;
-  let remainingLookAhead = Math.max(12, Number(lookAheadMeters) || CAMERA_LOOK_AHEAD_METERS);
-  for (let index = Math.max(0, nearestIndex); index < coordinates.length; index += 1) {
-    const nextCoordinate = coordinates[index + 1];
-    if (!nextCoordinate) {
-      break;
-    }
-
-    const segmentMeters = calculateNavigationDistanceMeters(cursor, nextCoordinate);
-    if (Number.isFinite(segmentMeters) && segmentMeters >= remainingLookAhead) {
-      return interpolateNavigationCoordinate(
-        cursor,
-        nextCoordinate,
-        remainingLookAhead / segmentMeters,
-      );
-    }
-
-    remainingLookAhead -= Number.isFinite(segmentMeters) ? segmentMeters : 0;
-    cursor = nextCoordinate;
-  }
-
-  return coordinates[coordinates.length - 1] || null;
+  const coordinates = normalizeRouteCoordinates(routeCoordinates);
+  const measure = buildRouteMeasureSegments(coordinates);
+  const projection = projectCoordinateToRouteMeasure(currentCoordinate, coordinates, measure);
+  if (!projection || !measure) return null;
+  const aheadMeters = Math.min(measure.totalMeters,
+    projection.routeMeters + Math.max(12, Number(lookAheadMeters) || CAMERA_LOOK_AHEAD_METERS));
+  const segment = measure.segments.find(item => item.routeEndMeters >= aheadMeters);
+  if (!segment) return coordinates[coordinates.length - 1] || null;
+  return interpolateNavigationCoordinate(segment.startCoordinate, segment.endCoordinate,
+    (aheadMeters - segment.routeStartMeters) / segment.meters);
 }
 
 function buildRouteGeometryCoordinates(routeCoordinates = [], steps = []) {
-  const normalizedRouteCoordinates = Array.isArray(routeCoordinates)
-    ? routeCoordinates.map(normalizeNavigationCoordinate).filter(Boolean)
-    : [];
+  const normalizedRouteCoordinates = normalizeRouteCoordinates(routeCoordinates);
 
   if (normalizedRouteCoordinates.length >= 2) {
     return normalizedRouteCoordinates;
@@ -940,10 +944,16 @@ export function buildLeafNativeNavigationState({
     : calculateNavigationDistanceMeters(current, target);
   const lookAheadCoordinate =
     findRouteCoordinateAhead(current, routeGeometryCoordinates) || target;
-  const cameraHeadingDegrees = calculateNavigationBearingDegrees(
-    current,
-    lookAheadCoordinate,
-  );
+  const cameraProjection = projectCoordinateToRouteMeasure(current, routeGeometryCoordinates);
+  // Use the road tangent rather than GPS lateral noise or the nearest vertex.
+  // At the route end keep the final road bearing instead of pointing backwards
+  // from the raw fix toward an already passed endpoint.
+  const routeMeasure = buildRouteMeasureSegments(routeGeometryCoordinates);
+  const finalSegment = routeMeasure?.segments[routeMeasure.segments.length - 1];
+  const atRouteEnd = cameraProjection && cameraProjection.totalMeters - cameraProjection.routeMeters < 1;
+  const cameraHeadingDegrees = atRouteEnd && finalSegment
+    ? calculateNavigationBearingDegrees(finalSegment.startCoordinate, finalSegment.endCoordinate)
+    : calculateNavigationBearingDegrees(cameraProjection?.coordinate || current, lookAheadCoordinate);
   const normalizedSpeedKmh = normalizeNavigationSpeedKmh({
     speedKmh: currentSpeedKmh,
     speedMetersPerSecond: currentSpeedMetersPerSecond,
