@@ -26,6 +26,7 @@ export default function UsersPage() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
+  const [hasMore, setHasMore] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
   const [type, setType] = useState("all");
   const canReviewDocuments = new Set(["admin", "super-admin", "manager", "development"])
@@ -50,7 +51,11 @@ export default function UsersPage() {
           type: type === "all" ? undefined : type,
         };
         const response = await leafAPI.getUsers(params);
-        if (mounted) setUsers(response?.users || []);
+        if (mounted) {
+          setUsers(response?.users || []);
+          setHasMore(response?.pagination?.mode === "keyset" ? Boolean(response.pagination.hasMore)
+            : response?.pagination?.searchMode === "exact" ? false : (response?.users || []).length >= 20);
+        }
       } catch (err) {
         if (mounted) setError(err?.message || "Falha ao carregar usuarios");
       } finally {
@@ -176,9 +181,9 @@ export default function UsersPage() {
               </table>
             </div>
             <div className="pager">
-              <button onClick={() => setPage((p) => Math.max(1, p - 1))}>Anterior</button>
+              <button disabled={loading || page === 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>Anterior</button>
               <span>Pagina {page}</span>
-              <button onClick={() => setPage((p) => p + 1)}>Proxima</button>
+              <button disabled={loading || !hasMore} onClick={() => setPage((p) => p + 1)}>Proxima</button>
             </div>
           </Panel>
         </section>

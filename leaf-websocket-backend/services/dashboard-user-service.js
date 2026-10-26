@@ -1,3 +1,5 @@
+const { createHash } = require('node:crypto');
+const BoundedTtlCache = require('../utils/bounded-ttl-cache');
 const admin = require('firebase-admin');
 const { logError } = require('../utils/logger');
 const auditService = require('./audit-service');
@@ -6,19 +8,22 @@ const USER_STATS_CACHE_TTL_MS = Math.max(
   15000,
   Number.parseInt(process.env.DASHBOARD_USER_STATS_CACHE_TTL_MS || '60000', 10)
 );
-const USERS_LIST_MAX_LIMIT = Math.max(
+const USERS_LIST_MAX_LIMIT = Math.min(200, Math.max(
   20,
-  Number.parseInt(process.env.DASHBOARD_USERS_LIST_MAX_LIMIT || '100', 10)
-);
+  Number.parseInt(process.env.DASHBOARD_USERS_LIST_MAX_LIMIT || '100', 10) || 100
+));
 const USER_STATS_RECENT_FALLBACK_LIMIT = Math.max(
   100,
   Number.parseInt(process.env.DASHBOARD_USER_STATS_RECENT_FALLBACK_LIMIT || '1000', 10)
 );
 
 let userStatsCache = new Map();
+const createCountCache = () => new BoundedTtlCache({ ttlMs: 60000, maxEntries: 128, maxBytes: 128 * 1024 });
+let listCountCache = createCountCache();
 
 function resetUsersCache() {
   userStatsCache = new Map();
+  listCountCache = createCountCache();
 }
 
 function toIsoString(value) {
@@ -311,52 +316,88 @@ function applyUserFilters(users, params = {}) {
   return rows;
 }
 
-async function listUsers(params = {}) {
-  const {
-    page = 1,
-    limit = 50
-  } = params;
+function userCursorScope(params) {
+  return createHash('sha256').update(JSON.stringify([
+    normalizeUserTypeParam(params.type), normalizeStatusParam(params.status), params.dateRange || null
+  ])).digest('hex');
+}
 
+function decodeUserCursor(raw, scope) {
+  try {
+    if (typeof raw !== 'string' || raw.length > 2048) throw new Error();
+    const value = JSON.parse(Buffer.from(raw, 'base64url').toString('utf8'));
+    if (value.v !== 1 || value.scope !== scope || typeof value.id !== 'string' || !value.id || value.id.length > 256
+        || (value.at !== null && (typeof value.at !== 'string' || value.at.length > 128))) throw new Error();
+    return value;
+  } catch (_) { throw Object.assign(new Error('Cursor de usuários inválido'), { statusCode: 400 }); }
+}
+
+async function listUsers(params = {}) {
   if (params.searchTerm) {
     const exactSearch = await searchUsersByExactFields(params);
     if (exactSearch) return exactSearch;
   }
-
-  const safePage = parsePositiveInt(page, 1);
-  const safeLimit = parsePositiveInt(limit, 50, USERS_LIST_MAX_LIMIT);
+  const safePage = parsePositiveInt(params.page, 1);
+  const safeLimit = parsePositiveInt(params.limit, 50, USERS_LIST_MAX_LIMIT);
   const start = (safePage - 1) * safeLimit;
+  const cursorMode = process.env.ENABLE_ADMIN_USER_CURSOR_READS === 'true'
+    && (params.pagination === 'cursor' || Boolean(params.cursor) || Boolean(params.before));
+  if ((params.cursor || params.before) && !cursorMode) throw Object.assign(new Error('Atualize a listagem para continuar'), { statusCode: 409 });
+  if (!cursorMode && start > 1000) throw Object.assign(new Error('Refine os filtros ou use paginação por cursor'), { statusCode: 400 });
+  if (cursorMode && safePage > 1 && !params.cursor && !params.before) throw Object.assign(new Error('Use o cursor da página anterior'), { statusCode: 409 });
   const safeStatus = normalizeStatusParam(params.status);
   const queryBase = buildBaseUsersQuery(params);
   let query = queryBase;
-
-  if (start > 0) {
-    query = query.offset(start);
-  }
-  query = query.limit(safeLimit);
-
-  const snapshot = await query.get();
-  let rows = snapshot.docs.map(normalizeUserRecord);
-
-  if (safeStatus) {
-    rows = rows.filter((user) => String(user.status || '').toLowerCase() === safeStatus);
-  }
-
-  const canUseAggregateTotal = !safeStatus;
-  const total = canUseAggregateTotal
-    ? await runCountAggregate(queryBase, { source: 'listUsers' })
-    : start + rows.length;
-
-  return {
-    users: rows,
-    pagination: {
-      page: safePage,
-      limit: safeLimit,
-      total,
-      pages: Math.ceil(total / safeLimit),
-      maxLimit: USERS_LIST_MAX_LIMIT,
-      totalMode: canUseAggregateTotal ? 'aggregate' : 'page-estimate'
+  const scope = userCursorScope(params);
+  const window = parseDateRange(params.dateRange);
+  const windowed = Boolean(window.start || window.end);
+  if (cursorMode) {
+    if (windowed) query = query.orderBy('createdAt', 'asc');
+    query = query.orderBy('__name__', 'asc');
+    if (params.cursor && params.before) throw Object.assign(new Error('Use apenas uma direção de paginação'), { statusCode: 400 });
+    if (params.cursor || params.before) {
+      const cursor = decodeUserCursor(params.cursor || params.before, scope);
+      if (windowed && cursor.at === null) throw Object.assign(new Error('Cursor incompatível com período'), { statusCode: 400 });
+      const method = params.before ? 'endBefore' : 'startAfter';
+      query = windowed ? query[method](cursor.at, cursor.id) : query[method](cursor.id);
     }
-  };
+  } else if (start > 0) query = query.offset(start);
+  const snapshot = await query[cursorMode && params.before ? 'limitToLast' : 'limit'](safeLimit + (cursorMode ? 1 : 0)).get();
+  const docs = cursorMode ? params.before ? snapshot.docs.slice(-safeLimit) : snapshot.docs.slice(0, safeLimit) : snapshot.docs;
+  let rows = docs.map(normalizeUserRecord);
+  if (safeStatus) rows = rows.filter(user => String(user.status || '').toLowerCase() === safeStatus);
+  if (cursorMode) {
+    const last = docs[docs.length - 1];
+    const at = windowed && last ? last.data().createdAt : null;
+    if (windowed && last && typeof at !== 'string') throw Object.assign(new Error('Datas do cadastro requerem conciliação'), { statusCode: 503 });
+    const hasMore = params.before ? true : snapshot.docs.length > safeLimit;
+    const first = docs[0];
+    const encode = doc => Buffer.from(JSON.stringify({ v: 1, scope, id: doc.id, at: windowed ? doc.data().createdAt : null })).toString('base64url');
+    return { users: rows, pagination: { page: safePage, limit: safeLimit, total: null, pages: null,
+      maxLimit: USERS_LIST_MAX_LIMIT, totalMode: 'unknown', mode: 'keyset', hasMore,
+      filteredAfterPage: Boolean(safeStatus),
+      nextCursor: last ? encode(last) : null, prevCursor: first ? encode(first) : null } };
+  }
+  const canUseAggregateTotal = !safeStatus;
+  let total = start + rows.length;
+  let countGeneratedAt = null;
+  if (canUseAggregateTotal) {
+    const cache = listCountCache;
+    const cached = cache.get(scope);
+    if (cached) { total = cached.total; countGeneratedAt = cached.generatedAt; }
+    else {
+      // Count queries also have an index-entry budget; never count an arbitrary
+      // entire database solely to render pagination. No truncation called total.
+      const count = await runCountAggregate(queryBase.limit(10001), { source: 'listUsers', fallback: null });
+      total = Number.isSafeInteger(count) && count >= 0 && count <= 10000 ? count : null;
+      countGeneratedAt = new Date().toISOString();
+      cache.set(scope, { total, generatedAt: countGeneratedAt });
+    }
+  }
+  return { users: rows, pagination: { page: safePage, limit: safeLimit, total,
+    pages: total === null ? null : Math.ceil(total / safeLimit), maxLimit: USERS_LIST_MAX_LIMIT,
+    totalMode: !canUseAggregateTotal ? 'page-estimate' : total === null ? 'bounded-unknown' : 'aggregate-cached',
+    totalGeneratedAt: countGeneratedAt } };
 }
 
 async function countUsersByType(collection, userType, context = {}) {

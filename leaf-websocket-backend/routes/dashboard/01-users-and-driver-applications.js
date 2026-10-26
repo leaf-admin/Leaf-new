@@ -75,16 +75,18 @@ router.get('/api/users/stats', async (req, res) => {
   }
 });
 
+const adminReadBudget = require('../../utils/admin-read-budget');
+
 // 👥 Enhanced User Management - GESTÃO AVANÇADA
-router.get('/api/users', async (req, res) => {
+router.get('/api/users', authenticateJWT, requireRole(DASHBOARD_OPERATION_ROLES), adminReadBudget.rateLimiter, adminReadBudget.run(async (req, res) => {
   try {
     const response = await listUsers(req.query || {});
     res.json(response);
   } catch (error) {
     logError(error, 'Erro ao buscar usuários:', { service: 'dashboard-routes' });
-    res.status(500).json({ error: 'Erro interno do servidor' });
+    res.status(error.statusCode || 500).json({ error: error.statusCode && error.statusCode < 500 ? error.message : 'Erro interno do servidor' });
   }
-});
+}));
 
 router.get('/api/users/:userId', authenticateJWT, requireRole(DASHBOARD_OPERATION_ROLES), async (req, res) => {
   try {

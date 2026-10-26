@@ -41,6 +41,9 @@ const {
   updateUserOperationalStatus
 } = require('./shared');
 
+const driverListData = require('../../services/dashboard-driver-list-data');
+const adminReadBudget = require('../../utils/admin-read-budget');
+
 // ==================== GESTÃO COMPLETA DE MOTORISTAS ====================
 
 /**
@@ -48,7 +51,7 @@ const {
  * GET /api/drivers/complete
  * Query params: status, planType, approvalStatus, search, page, limit
  */
-router.get('/api/drivers/complete', authenticateJWT, requireRole(DASHBOARD_OPERATION_ROLES), async (req, res) => {
+router.get('/api/drivers/complete', authenticateJWT, requireRole(DASHBOARD_OPERATION_ROLES), adminReadBudget.rateLimiter, adminReadBudget.run(async (req, res) => {
   try {
     const {
       status, // 'active', 'pending', 'suspended', 'expired'
@@ -66,17 +69,10 @@ router.get('/api/drivers/complete', authenticateJWT, requireRole(DASHBOARD_OPERA
     const db = firebaseConfig.getRealtimeDB();
     const promotionService = require('../../services/promotion-service');
 
-    // Buscar todos os motoristas
-    const usersSnapshot = await db.ref('users').orderByChild('usertype').equalTo('driver').once('value');
-    const users = usersSnapshot.val() || {};
-
-    // Buscar veículos
-    const carsSnapshot = await db.ref('cars').once('value');
-    const cars = carsSnapshot.val() || {};
-
-    // Buscar corridas para estatísticas
-    const bookingsSnapshot = await db.ref('bookings').once('value');
-    const bookings = bookingsSnapshot.val() || {};
+    const listData = await driverListData.readPage({ db, getFirestore: () => firebaseConfig.getFirestore?.(),
+      params: req.query || {}, resolveNet: resolveRideDriverNetAmount });
+    const { users, carsByDriver, statsByDriver } = listData;
+    const modernPage = listData.mode === 'firestore-keyset';
 
     const now = new Date();
     const drivers = [];
@@ -84,13 +80,10 @@ router.get('/api/drivers/complete', authenticateJWT, requireRole(DASHBOARD_OPERA
     for (const driverId of Object.keys(users)) {
       const driver = users[driverId];
 
-      // Buscar veículo do motorista
-      const driverCar = Object.values(cars).find(car => car.driver === driverId);
-
-      // Calcular estatísticas de corridas
-      const driverBookings = Object.values(bookings).filter(b => b.driver === driverId);
-      const completedBookings = driverBookings.filter(b => b.status === 'COMPLETED');
-      const totalEarnings = completedBookings.reduce((sum, b) => sum + resolveRideDriverNetAmount(b), 0);
+      const driverCar = carsByDriver.get(driverId) || null;
+      const driverStats = statsByDriver.get(driverId) || (modernPage
+        ? { totalTrips: null, completedTrips: null, totalEarnings: null, source: 'unavailable' }
+        : { totalTrips: 0, completedTrips: 0, totalEarnings: 0 });
 
       // Determinar plano
       let driverPlanType = 'none';
@@ -229,11 +222,12 @@ router.get('/api/drivers/complete', authenticateJWT, requireRole(DASHBOARD_OPERA
 
         // Estatísticas
         stats: {
-          totalTrips: driverBookings.length,
-          completedTrips: completedBookings.length,
-          totalEarnings: totalEarnings.toFixed(2),
+          totalTrips: driverStats.totalTrips,
+          completedTrips: driverStats.completedTrips,
+          totalEarnings: Number.isFinite(driverStats.totalEarnings) ? driverStats.totalEarnings.toFixed(2) : null,
+          source: driverStats.source || listData.mode,
           averageRating: parseFloat(driver.driverRating || 0).toFixed(1),
-          walletBalance: parseFloat(driver.walletBalance || 0).toFixed(2)
+          walletBalance: modernPage ? null : parseFloat(driver.walletBalance || 0).toFixed(2)
         },
 
         // Status online
@@ -250,7 +244,7 @@ router.get('/api/drivers/complete', authenticateJWT, requireRole(DASHBOARD_OPERA
       // Aplicar filtros
       if (status && status !== 'all' && driverData.status !== status) continue;
       if (planType && planType !== 'all' && driverData.plan.type !== planType) continue;
-      if (approvalStatus && approvalStatus !== 'all' && driverData.approvalStatus !== approvalStatus) continue;
+      if (req.query.approvalStatus && req.query.approvalStatus !== 'all' && driverData.approvalStatus !== req.query.approvalStatus) continue;
       if (search) {
         const searchLower = search.toLowerCase();
         if (
@@ -268,45 +262,45 @@ router.get('/api/drivers/complete', authenticateJWT, requireRole(DASHBOARD_OPERA
     drivers.sort((a, b) => {
       const dateA = a.registrationDate ? new Date(a.registrationDate) : new Date(0);
       const dateB = b.registrationDate ? new Date(b.registrationDate) : new Date(0);
-      return dateB - dateA;
+      return dateB - dateA || (modernPage ? (a.id < b.id ? 1 : a.id > b.id ? -1 : 0) : 0);
     });
 
     // Paginação
     const total = drivers.length;
-    const startIndex = (page - 1) * limit;
-    const endIndex = startIndex + parseInt(limit);
-    const paginatedDrivers = drivers.slice(startIndex, endIndex);
+    const safePage = Math.max(1, Number.parseInt(page, 10) || 1);
+    const safeLimit = Math.min(200, Math.max(1, Number.parseInt(limit, 10) || 50));
+    const startIndex = modernPage ? 0 : (safePage - 1) * safeLimit;
+    const paginatedDrivers = drivers.slice(startIndex, startIndex + safeLimit);
 
     res.json({
       success: true,
       drivers: paginatedDrivers,
-      pagination: {
-        page: parseInt(page),
-        limit: parseInt(limit),
-        total,
-        totalPages: Math.ceil(total / limit)
+      source: listData.mode,
+      pagination: listData.pagination || {
+        page: safePage, limit: safeLimit, total,
+        totalPages: Math.ceil(total / safeLimit)
       }
     });
 
   } catch (error) {
     logger.error('❌ Erro ao buscar lista completa de motoristas:', error);
-    res.status(500).json({
+    res.status(error.statusCode || 500).json({
       error: 'Erro interno do servidor',
       message: error.message
     });
   }
-});
+}));
 
 /**
  * Detalhes completos de um motorista específico
  * GET /api/drivers/:driverId/complete
  */
-router.get('/api/drivers/:driverId/complete', authenticateJWT, requireRole(DASHBOARD_OPERATION_ROLES), async (req, res) => {
+router.get('/api/drivers/:driverId/complete', authenticateJWT, requireRole(DASHBOARD_OPERATION_ROLES), adminReadBudget.rateLimiter, adminReadBudget.run(async (req, res) => {
   try {
     const { driverId } = req.params;
 
     if (!firebaseConfig || !firebaseConfig.getRealtimeDB) {
-      return res.status(500).json({ error: 'Firebase não disponível' });
+      return res.status(error.statusCode || 500).json({ error: 'Firebase não disponível' });
     }
 
     const db = firebaseConfig.getRealtimeDB();
@@ -320,17 +314,17 @@ router.get('/api/drivers/:driverId/complete', authenticateJWT, requireRole(DASHB
     }
 
     // Buscar veículo
-    const carsSnapshot = await db.ref('cars').once('value');
-    const cars = carsSnapshot.val() || {};
+    const carsSnapshot = await db.ref('cars').orderByChild('driver').equalTo(driverId).limitToFirst(201).once('value');
+    const cars = driverListData.boundedValue(carsSnapshot, 200, 'veículos do motorista');
     const driverCar = Object.values(cars).find(car => car.driver === driverId);
 
     // Buscar corridas
-    const bookingsSnapshot = await db.ref('bookings').orderByChild('driver').equalTo(driverId).once('value');
-    const bookings = bookingsSnapshot.val() || {};
+    const bookingsSnapshot = await db.ref('bookings').orderByChild('driver').equalTo(driverId).limitToFirst(2001).once('value');
+    const bookings = driverListData.boundedValue(bookingsSnapshot, 2000, 'corridas do motorista');
 
     // Buscar histórico de pagamentos de assinatura
-    const paymentsSnapshot = await db.ref('payments').orderByChild('driverId').equalTo(driverId).once('value');
-    const payments = paymentsSnapshot.val() || {};
+    const paymentsSnapshot = await db.ref('payments').orderByChild('driverId').equalTo(driverId).limitToFirst(2001).once('value');
+    const payments = driverListData.boundedValue(paymentsSnapshot, 2000, 'pagamentos do motorista');
 
     // Calcular todas as informações
     const now = new Date();
@@ -511,12 +505,12 @@ router.get('/api/drivers/:driverId/complete', authenticateJWT, requireRole(DASHB
 
   } catch (error) {
     logger.error(`❌ Erro ao buscar detalhes do motorista ${req.params.driverId}:`, error);
-    res.status(500).json({
+    res.status(error.statusCode || 500).json({
       error: 'Erro interno do servidor',
       message: error.message
     });
   }
-});
+}));
 
 /**
  * Atualizar plano do motorista

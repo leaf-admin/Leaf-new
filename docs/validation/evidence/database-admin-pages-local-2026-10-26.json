@@ -1,0 +1,76 @@
+{
+  "environment": "Private Firestore1.19.8 and RTDB4.11.2 emulators,256MiB heap each, loopback; no ADC or providers",
+  "cpuRows": [
+    {
+      "drivers": 100,
+      "trips": 1000,
+      "before": {
+        "ms": 21.433666999999996,
+        "driverFieldReads": 105050
+      },
+      "after": {
+        "ms": 1.3691249999999968,
+        "driverFieldReads": 3300
+      }
+    },
+    {
+      "drivers": 1000,
+      "trips": 10000,
+      "before": {
+        "ms": 1914.8203330000001,
+        "driverFieldReads": 10500500
+      },
+      "after": {
+        "ms": 5.798250000000053,
+        "driverFieldReads": 33000
+      }
+    },
+    {
+      "drivers": 10000,
+      "trips": 100000,
+      "before": null,
+      "after": {
+        "ms": 57.25983300000007,
+        "driverFieldReads": 330000
+      }
+    }
+  ],
+  "queryRows": [
+    {
+      "totalDrivers": 100,
+      "page": 20,
+      "firestoreRecords": 42,
+      "realtimeRecords": 20,
+      "realtimeQueries": 20,
+      "globalRideReads": 0
+    },
+    {
+      "totalDrivers": 1000,
+      "page": 20,
+      "firestoreRecords": 42,
+      "realtimeRecords": 20,
+      "realtimeQueries": 20,
+      "globalRideReads": 0
+    },
+    {
+      "totalDrivers": 10000,
+      "page": 20,
+      "firestoreRecords": 42,
+      "realtimeRecords": 20,
+      "realtimeQueries": 20,
+      "globalRideReads": 0
+    }
+  ],
+  "checks": [
+    "Equal-date cursor pages do not repeat drivers",
+    "Only requested profile fields returned",
+    "No global ride read in cursor mode",
+    "Primary user list uses scoped cursor and rejects deep offsets",
+    "Legacy aggregate total is unknown above10000 instead of counting an arbitrary database"
+  ],
+  "limitations": [
+    "Legacy CPU is a local synthetic microbenchmark; largest baseline skipped to respect lab budget",
+    "Emulator queries validate SDK/limits, not production composite indexes, billing, latency or host capacity",
+    "Synthetic aggregate fixtures do not prove the finalization projection writer"
+  ]
+}

@@ -1,0 +1,118 @@
+'use strict';
+const { createHash } = require('node:crypto');
+const mapWithConcurrency = require('../utils/map-with-concurrency');
+const hash = value => createHash('sha256').update(String(value)).digest('hex');
+const error = (code, message, statusCode = 503) => Object.assign(new Error(message), { code, statusCode });
+const PROFILE_FIELDS = ['usertype', 'firstName', 'lastName', 'email', 'mobile', 'profile_image', 'createdAt', 'lastLogin',
+  'planType', 'free_trial_end', 'free_months_end', 'promotion_free_end', 'billing_status', 'approved', 'suspended',
+  'licenseImage', 'kyc_status', 'driverRating', 'driverActiveStatus', 'lastLocationUpdate'];
+
+function boundedValue(snapshot, limit, label) {
+  const value = snapshot.val() || {};
+  if (Object.keys(value).length > limit || Buffer.byteLength(JSON.stringify(value)) > 4 * 1024 * 1024) {
+    throw error('DASHBOARD_LEGACY_BUDGET', `Consulta de ${label} excede orçamento legado`);
+  }
+  return value;
+}
+
+function aggregateLegacy(cars, bookings, resolveNet) {
+  const carsByDriver = new Map();
+  const statsByDriver = new Map();
+  for (const car of Object.values(cars)) if (typeof car.driver === 'string' && !carsByDriver.has(car.driver)) carsByDriver.set(car.driver, car);
+  for (const booking of Object.values(bookings)) {
+    if (typeof booking.driver !== 'string') continue;
+    const stats = statsByDriver.get(booking.driver) || { totalTrips: 0, completedTrips: 0, totalEarnings: 0 };
+    stats.totalTrips++;
+    if (booking.status === 'COMPLETED') { stats.completedTrips++; stats.totalEarnings += resolveNet(booking); }
+    statsByDriver.set(booking.driver, stats);
+  }
+  return { carsByDriver, statsByDriver };
+}
+
+async function readLegacy(db, resolveNet) {
+  const users = boundedValue(await db.ref('users').orderByChild('usertype').equalTo('driver').limitToFirst(201).once('value'), 200, 'motoristas');
+  if (!Object.keys(users).length) return { users, carsByDriver: new Map(), statsByDriver: new Map(), mode: 'legacy-bounded' };
+  const results = await Promise.allSettled([
+    db.ref('cars').limitToFirst(2001).once('value'),
+    db.ref('bookings').limitToFirst(2001).once('value')
+  ]);
+  const failed = results.find(result => result.status === 'rejected');
+  if (failed) throw failed.reason;
+  const cars = boundedValue(results[0].value, 2000, 'veículos');
+  const bookings = boundedValue(results[1].value, 2000, 'corridas');
+  return { users, ...aggregateLegacy(cars, bookings, resolveNet), mode: 'legacy-bounded' };
+}
+
+function decodeCursor(raw) {
+  try {
+    if (typeof raw !== 'string' || raw.length > 2048) throw new Error();
+    const value = JSON.parse(Buffer.from(raw, 'base64url').toString('utf8'));
+    if (value.v !== 1 || value.scope !== 'dashboard-drivers-iso-v1' || typeof value.id !== 'string'
+      || !value.id || value.id.length > 256 || new Date(value.at).toISOString() !== value.at) throw new Error();
+    return value;
+  } catch (_) { throw error('DASHBOARD_CURSOR_INVALID', 'Cursor de motoristas inválido', 400); }
+}
+
+async function readPage({ db, firestore: providedFirestore, getFirestore, params, resolveNet }) {
+  const wantsCursor = params.pagination === 'cursor' || Boolean(params.cursor);
+  const complexFilter = ['status', 'planType', 'approvalStatus', 'search'].some(key => params[key] && params[key] !== 'all');
+  if (!wantsCursor || process.env.ENABLE_ADMIN_DRIVER_CURSOR_READS !== 'true' || complexFilter) {
+    if (params.cursor) throw error('DASHBOARD_CURSOR_REFRESH', 'Atualize os filtros para continuar', 409);
+    // Legacy substring/derived subscription filters remain exact only in their
+    // controlled dataset; never scan a large database to emulate them.
+    return readLegacy(db, resolveNet);
+  }
+  const firestore = providedFirestore || getFirestore?.();
+  if (!firestore) throw error('DASHBOARD_CURSOR_UNAVAILABLE', 'Listagem temporariamente indisponível');
+  if (Number(params.page || 1) !== 1) throw error('DASHBOARD_CURSOR_REFRESH', 'Use o cursor para continuar', 409);
+  const cursor = params.cursor ? decodeCursor(params.cursor) : null;
+  const readiness = await firestore.collection('ops_read_models').doc('driver_directory_v1').get()
+    .catch(error => { error.statusCode = 503; throw error; });
+  const attestation = readiness.exists ? readiness.data() : null;
+  if (attestation?.schema !== 1 || attestation?.ready !== true || attestation?.createdAtStorage !== 'iso') {
+    throw error('DASHBOARD_DIRECTORY_NOT_READY', 'Cadastro de motoristas aguardando conciliação');
+  }
+  const limit = Math.min(200, Math.max(1, Number.parseInt(params.limit, 10) || 50));
+  let query = firestore.collection('users').where('usertype', '==', 'driver')
+    .orderBy('createdAt', 'desc').orderBy('__name__', 'desc');
+  if (cursor) query = query.startAfter(cursor.at, cursor.id);
+  const snapshot = await query.select(...PROFILE_FIELDS).limit(limit + 1).get()
+    .catch(error => { error.statusCode = 503; throw error; });
+  const docs = snapshot.docs.slice(0, limit);
+  const users = {};
+  for (const doc of docs) {
+    const raw = doc.data();
+    if (typeof raw.createdAt !== 'string' || !Number.isFinite(Date.parse(raw.createdAt)) || new Date(raw.createdAt).toISOString() !== raw.createdAt) {
+      throw error('DASHBOARD_DIRECTORY_SCHEMA', 'Cadastro de motoristas requer conciliação');
+    }
+    users[doc.id] = raw;
+  }
+  if (Buffer.byteLength(JSON.stringify(users)) > 4 * 1024 * 1024) throw error('DASHBOARD_PAGE_BYTES', 'Página excede orçamento');
+  const ids = Object.keys(users);
+  const cars = await mapWithConcurrency(ids, 4, async id => {
+    const value = (await db.ref('cars').orderByChild('driver').equalTo(id).limitToFirst(1).once('value')).val() || {};
+    return [id, Object.values(value)[0] || null];
+  });
+  const statsByDriver = new Map();
+  if (ids.length) {
+    const refs = ids.map(id => firestore.collection('ops_driver_stats_v1').doc(hash(id)));
+    const snapshots = await firestore.getAll(...refs, { fieldMask: ['driverId', 'namespace', 'schema', 'complete', 'source', 'completedTrips', 'driverNetMinor', 'updatedAt'] });
+    if (snapshots.length !== ids.length) throw error('DASHBOARD_STATS_INCOMPLETE', 'Estatísticas indisponíveis');
+    snapshots.forEach((doc, i) => {
+      const data = doc.exists ? doc.data() : null;
+      const valid = data?.schema === 1 && data?.complete === true && data?.namespace === 'operational'
+        && data?.driverId === ids[i] && data?.source === 'ride_finalization_v1'
+        && Number.isSafeInteger(data.completedTrips) && Number.isSafeInteger(data.driverNetMinor);
+      statsByDriver.set(ids[i], { totalTrips: null, completedTrips: valid ? data.completedTrips : null,
+        totalEarnings: valid ? data.driverNetMinor / 100 : null, source: valid ? 'aggregate-v1' : 'unavailable' });
+    });
+  }
+  const last = docs[docs.length - 1];
+  const hasMore = snapshot.docs.length > limit;
+  return { users, carsByDriver: new Map(cars), statsByDriver, mode: 'firestore-keyset', pagination: {
+    page: 1, limit, total: null, totalPages: null, hasMore,
+    nextCursor: hasMore ? Buffer.from(JSON.stringify({ v: 1, scope: 'dashboard-drivers-iso-v1', id: last.id, at: users[last.id].createdAt })).toString('base64url') : null
+  } };
+}
+
+module.exports = { readPage, readLegacy, aggregateLegacy, decodeCursor, boundedValue, PROFILE_FIELDS };
