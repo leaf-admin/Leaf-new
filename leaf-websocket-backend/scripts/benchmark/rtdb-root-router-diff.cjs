@@ -9,7 +9,7 @@ const withPrivateRealtime = require('./private-rtdb.cjs');
 const withPrivateFirestore = require('./private-firestore.cjs');
 const { createRouter } = require('../../services/rtdb-root-router');
 
-const ROOTS = 'vehicles,user_vehicles,vehicle_plate_index,driver_activation,driver_documents_index_stats,driver_document_mutation_locks';
+const ROOTS = 'vehicles,user_vehicles,vehicle_plate_index,driver_activation,driver_documents_index_stats,driver_document_mutation_locks,users,subscriptions';
 const quiet = () => {};
 
 async function operations(db) {
@@ -49,6 +49,24 @@ async function operations(db) {
     'users/u1/driverActivationStatus': 'approved'
   });
   await db.ref('driver_activation/u1/consent/backgroundCheck').set({ accepted: true, at: 'c1' });
+  await db.ref().update({
+    'users/u1/usertype': 'driver', 'users/u2': { usertype: 'customer', name: 'P' },
+    'users/u3': { usertype: 'driver', identityReverification: { challengeId: 'ch1', status: 'pending' } },
+    'subscriptions/u1': { planType: 'plus', status: 'active', dailyCents: 1490 }
+  });
+  // KYC-style transaction on the user record (challenge must match). As in
+  // kyc-policy-service: on plain RTDB a value listener pins the cache before
+  // the transaction; a Firestore-served root reads the stored value directly.
+  const userRef = db.ref('users/u3');
+  const pin = () => {};
+  const servedUsers = db.__rtdbRootRouter?.servedByFirestore?.('users') === true;
+  if (!servedUsers) { userRef.on('value', pin); await userRef.once('value'); }
+  await userRef.transaction(current => (
+    current?.identityReverification?.challengeId === 'ch1'
+      ? { ...current, identityReverification: { ...current.identityReverification, status: 'passed' } } : undefined
+  ), undefined, false);
+  if (!servedUsers) userRef.off('value', pin);
+  await db.ref('subscriptions/u1').update({ status: 'paused', 'history/p1': 'x' });
   await db.ref('driver_activation/u1/documents/cnh').update({ reviewedAt: null, note: 'ok' });
   const release = await lock.transaction(current => (current?.token === 't1' ? null : undefined), undefined, false);
   for (const delta of [1, 1, -1, 5]) {
@@ -88,7 +106,9 @@ async function readAll(db) {
     history: await value('driver_activation/u1/documents_history'),
     embedding: await value('driver_activation/u1/biometrics/cnhFace/embedding'),
     locks: await value('driver_document_mutation_locks'),
-    stats: await value('driver_documents_index_stats')
+    stats: await value('driver_documents_index_stats'),
+    drivers: await keys(db.ref('users').orderByChild('usertype').equalTo('driver')),
+    subscriptions: await value('subscriptions')
   };
 }
 

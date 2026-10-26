@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 'use strict';
 
-// RTDB exit safety check: for every driver with vehicle links, resolve the
+// RTDB exit safety check: for every driver (vehicle links, activation or a
+// driver profile in users), resolve the
 // canonical activation state (the gate used to go online) reading plain RTDB
 // and reading through the root router with the given roots served by
 // Firestore. Any difference blocks the read switch. Read-only.
@@ -59,7 +60,11 @@ if (require.main === module) {
       env: { RTDB_FIRESTORE_WRITE_ROOTS: roots, RTDB_FIRESTORE_READ_ROOTS: roots } });
     const linked = Object.keys((await rawDb.ref('user_vehicles').once('value')).val() || {});
     const activated = Object.keys((await rawDb.ref('driver_activation').once('value')).val() || {});
-    const driverIds = [...new Set([...linked, ...activated])];
+    const users = (await rawDb.ref('users').once('value')).val() || {};
+    const driverUsers = Object.entries(users)
+      .filter(([, user]) => String(user?.usertype || user?.userType || '').toLowerCase() === 'driver')
+      .map(([id]) => id);
+    const driverIds = [...new Set([...linked, ...activated, ...driverUsers])];
     const result = await run(args, { rawDb, routedDb, resolve: resolveDriverActivationState, driverIds });
     process.exit(result.different || result.errors ? 2 : 0);
   })().catch(error => { console.error(error.message); process.exit(1); });
