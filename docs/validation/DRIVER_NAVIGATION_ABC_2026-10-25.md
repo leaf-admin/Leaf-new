@@ -1,5 +1,7 @@
 # Comparativo A/B/C da navegação — 25/10/2026
 
+Validação posterior do mesmo APK final: [GOOGLE_CAMERA_FINAL_QA_2026-10-25.md](GOOGLE_CAMERA_FINAL_QA_2026-10-25.md). Duas novas reaberturas parado durante viagem terminaram no enquadramento próximo, com vídeos/capturas e limpeza confirmada. Isso complementa a pendência de repetibilidade descrita abaixo sem alterar os resultados A/B/C ou constituir aprovação visual de Izaak.
+
 ## Objetivo e escopo
 Medir o custo no Xiaomi físico com a mesma corrida sandbox e corrigir a perspectiva de condução do motorista. A autorização cobriu uma corrida, um Pix sandbox, os dois perfis QA, alternância local A/B/C, replay do mesmo trecho e limpeza final. Sem publicação.
 
