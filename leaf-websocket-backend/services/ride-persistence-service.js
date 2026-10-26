@@ -585,9 +585,13 @@ class RidePersistenceService {
                     continue;
                 }
 
-                const rideId = payload?.rideId || outboxEntryId;
+                if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+                    failed += 1;
+                    continue;
+                }
+                const rideId = payload.rideId || outboxEntryId;
 
-                if (!payload || payload.status === 'completed') {
+                if (payload.status === 'completed') {
                     await compareAndSet(outboxEntryId, raw);
                     continue;
                 }

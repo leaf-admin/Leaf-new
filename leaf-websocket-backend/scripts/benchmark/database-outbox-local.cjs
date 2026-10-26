@@ -54,6 +54,12 @@ withRedis(async redis => {
   await redis.hset(key, 'invalid', '{corrupt');
   await service.processFinalizationOutboxBatch(20);
   assert.equal(await redis.hget(key, 'invalid'), '{corrupt', 'Malformed financial work is preserved');
+  await redis.hset(key, 'null-json', 'null', 'array-json', '[]', 'scalar-json', '42');
+  service.outboxScanPage = []; service.outboxScanCursor = '0';
+  for (let i = 0; i < 5; i++) await service.processFinalizationOutboxBatch(20);
+  for (const [id, value] of [['null-json', 'null'], ['array-json', '[]'], ['scalar-json', '42']]) {
+    assert.equal(await redis.hget(key, id), value, 'Structurally invalid work is preserved for reconciliation');
+  }
   await redis.del(key); service.outboxScanPage = [];
   await redis.hset(key, 'held', JSON.stringify({ rideId: 'held', status: 'pending', finalData: {} }));
   let release; service.saveFinalRideData = () => new Promise(resolve => { release = resolve; });

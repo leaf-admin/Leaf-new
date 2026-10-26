@@ -3,13 +3,13 @@
   "rows": [
     {
       "pending": 201,
-      "cycles": 13,
+      "cycles": 15,
       "maximumSelectedPerCycle": 20,
       "maximumHscanPerCycle": 1
     },
     {
       "pending": 1000,
-      "cycles": 72,
+      "cycles": 70,
       "maximumSelectedPerCycle": 20,
       "maximumHscanPerCycle": 1
     }
