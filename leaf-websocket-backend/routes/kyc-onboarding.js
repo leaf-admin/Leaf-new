@@ -89,8 +89,9 @@ router.post(
 
       // Persistir âncora do device para verificações futuras (assinatura, não imagem)
       try {
-        if (firebaseConfig && firebaseConfig.updateRealtimeDB) {
-          await firebaseConfig.updateRealtimeDB(`users/${driverId}`, {
+        {
+          const userStore = require('../services/user-store');
+          await userStore.updateUser(userStore.resolveFirestore(), driverId, {
             kycDeviceAnchorSignature: req.body?.selfieSignature || null,
             kycDeviceAnchorAlgorithm: req.body?.signatureAlgorithm || 'simhash-base64-v1',
             kycDeviceAnchorUpdatedAt: new Date().toISOString(),

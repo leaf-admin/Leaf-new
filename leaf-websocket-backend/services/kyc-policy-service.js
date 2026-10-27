@@ -1,6 +1,8 @@
 const admin = require('firebase-admin');
 const crypto = require('crypto');
 const firebaseConfig = require('../firebase-config');
+const userStore = require('./user-store');
+const { docView } = require('./rtdb-root-router');
 const redisPool = require('../utils/redis-pool');
 const IntegratedKYCService = require('./IntegratedKYCService');
 const KYCNotificationService = require('./KYCNotificationService');
@@ -159,6 +161,17 @@ function normalizeText(value) {
     .trim();
 }
 
+// Critical KYC fields on users/{uid}: true only when the write committed.
+async function persistUserFields(driverId, patch) {
+  try {
+    await userStore.updateUser(userStore.resolveFirestore(), driverId, patch);
+    return true;
+  } catch (error) {
+    logError(error, 'Falha ao persistir campos KYC do usuário', { service: 'kyc-policy-service', driverId });
+    return false;
+  }
+}
+
 function pickKycPolicyFields(source = {}) {
   return KYC_POLICY_FIELDS.reduce((acc, field) => {
     if (Object.prototype.hasOwnProperty.call(source, field)) {
@@ -185,24 +198,6 @@ function canApplyApprovedIdentityResult(source = {}) {
     && !isTrueFlag(source.blocked)
     && APPROVABLE_IDENTITY_KYC_STATUSES.has(kycStatus)
     && !TERMINAL_KYC_STATUSES.has(accountStatus);
-}
-
-async function readRealtimeKycPolicyFields(driverId) {
-  const entries = await Promise.all(
-    KYC_POLICY_FIELDS.map(async (field) => {
-      const value = await firebaseConfig
-        .getFromRealtimeDB(`users/${driverId}/${field}`)
-        .catch(() => undefined);
-      return [field, value];
-    })
-  );
-
-  return entries.reduce((acc, [field, value]) => {
-    if (value !== undefined && value !== null) {
-      acc[field] = value;
-    }
-    return acc;
-  }, {});
 }
 
 class KYCPolicyService {
@@ -293,19 +288,18 @@ class KYCPolicyService {
     }
   }
 
-  getStrictRealtimeDatabase() {
-    const database = firebaseConfig.getRealtimeDB?.();
-    if (!database || typeof database.ref !== 'function') {
-      const error = new Error('Realtime Database indisponivel para politica KYC critica');
+  getStrictFirestore() {
+    const firestore = userStore.resolveFirestore();
+    if (!firestore) {
+      const error = new Error('Firestore indisponivel para politica KYC critica');
       error.code = 'KYC_REVERIFY_STATE_UNAVAILABLE';
       throw error;
     }
-    return database;
+    return firestore;
   }
 
-  async readRealtimeStrict(path) {
-    const snapshot = await this.getStrictRealtimeDatabase().ref(path).once('value');
-    return snapshot?.exists?.() ? snapshot.val() : null;
+  async readIdentityReverificationStrict(driverId) {
+    return userStore.readUserField(this.getStrictFirestore(), driverId, 'identityReverification');
   }
 
   async syncDriverActivationProjection(driverId) {
@@ -334,143 +328,87 @@ class KYCPolicyService {
       };
     }
 
-    const database = this.getStrictRealtimeDatabase();
-    const userRef = database.ref(`users/${driverId}`);
-    // RTDB exit: with users served by Firestore the transaction reads the
-    // stored value directly, so the RTDB cache pin below is not needed.
-    const usersServedByFirestore = database.__rtdbRootRouter?.servedByFirestore?.('users') === true;
     const stateUnavailableError = (error, message) => {
       const normalized = error instanceof Error ? error : new Error(message);
       normalized.code = 'KYC_REVERIFY_STATE_UNAVAILABLE';
       return normalized;
     };
+    let firestore;
+    try {
+      firestore = this.getStrictFirestore();
+    } catch (error) {
+      throw stateUnavailableError(error, 'Firestore indisponivel para o challenge KYC');
+    }
     const readCurrentUser = async () => {
       try {
-        const snapshot = await userRef.once('value');
-        return snapshot?.exists?.() ? snapshot.val() : null;
+        return await userStore.readUser(firestore, driverId);
       } catch (error) {
-        throw stateUnavailableError(
-          error,
-          'RTDB nao confirmou o estado autoritativo do challenge KYC'
-        );
+        throw stateUnavailableError(error, 'Firestore nao confirmou o estado autoritativo do challenge KYC');
       }
     };
     const hasCurrentChallenge = (currentUser) => (
       String(currentUser?.identityReverification?.challengeId || '') === String(challengeId)
     );
-    const cachePinListener = () => {};
-    let cachePinAttached = false;
-    let cachePinError = null;
 
-    // Firebase Admin invokes a transaction updater immediately with its local
-    // cache. On a cold gateway that value can be null even when RTDB has data;
-    // returning undefined there aborts locally before any server round-trip.
-    // Pinning a read listener prevents once() from pruning the authoritative
-    // cache before transaction() starts.
-    // applyLocally=false prevents an uncommitted mutation from being projected.
-    try {
-      if (!usersServedByFirestore && (typeof userRef.on !== 'function' || typeof userRef.off !== 'function')) {
-        throw stateUnavailableError(
-          null,
-          'RTDB nao oferece listener autoritativo para o challenge KYC'
-        );
-      }
-      if (!usersServedByFirestore) {
-        try {
-          userRef.on('value', cachePinListener, (error) => {
-            cachePinError = stateUnavailableError(
-              error,
-              'Listener RTDB do challenge KYC foi cancelado'
-            );
-          });
-          cachePinAttached = true;
-        } catch (error) {
-          throw stateUnavailableError(
-            error,
-            'RTDB nao iniciou o listener autoritativo do challenge KYC'
-          );
-        }
-      }
-
-      const preflightUser = await readCurrentUser();
-      if (cachePinError) throw cachePinError;
-      if (!hasCurrentChallenge(preflightUser)) {
-        return {
-          committed: false,
-          stale: true,
-          code: 'KYC_IDENTITY_REVERIFY_CHALLENGE_STALE'
-        };
-      }
-
-      let matchedCurrentChallenge = false;
-      let mutationRejected = false;
-      let transaction = null;
-      try {
-        transaction = await userRef.transaction((currentUser) => {
-          matchedCurrentChallenge = false;
-          mutationRejected = false;
-          const currentState = currentUser?.identityReverification;
-          if (!currentState || String(currentState.challengeId || '') !== String(challengeId)) {
-            return undefined;
-          }
-          matchedCurrentChallenge = true;
-          const nextUser = mutateUser(currentUser || {}, currentState);
-          if (nextUser === undefined) {
-            mutationRejected = true;
-          }
-          return nextUser;
-        }, undefined, false);
-      } catch (error) {
-        throw stateUnavailableError(
-          error,
-          'RTDB nao confirmou a transacao do challenge KYC atual'
-        );
-      }
-
-      if (cachePinError) throw cachePinError;
-      if (transaction?.committed === true && matchedCurrentChallenge) {
-        await this.syncDriverActivationProjection(driverId);
-        return {
-          committed: true,
-          stale: false,
-          snapshot: transaction.snapshot?.val?.() || null
-        };
-      }
-      if (mutationRejected) {
-        return {
-          committed: false,
-          stale: true,
-          code: 'KYC_IDENTITY_REVERIFY_CHALLENGE_STALE'
-        };
-      }
-
-      const latestUser = await readCurrentUser();
-      if (cachePinError) throw cachePinError;
-      if (!hasCurrentChallenge(latestUser)) {
-        return {
-          committed: false,
-          stale: true,
-          code: 'KYC_IDENTITY_REVERIFY_CHALLENGE_STALE'
-        };
-      }
-
-      throw stateUnavailableError(
-        null,
-        'RTDB nao confirmou a transacao do challenge KYC atual'
-      );
-    } finally {
-      if (cachePinAttached) {
-        try {
-          userRef.off('value', cachePinListener);
-        } catch (_error) {
-          logStructured('warn', 'Falha ao remover listener RTDB autoritativo', {
-            service: 'kyc-policy-service',
-            driverId,
-            challengeId
-          });
-        }
-      }
+    const preflightUser = await readCurrentUser();
+    if (!hasCurrentChallenge(preflightUser)) {
+      return {
+        committed: false,
+        stale: true,
+        code: 'KYC_IDENTITY_REVERIFY_CHALLENGE_STALE'
+      };
     }
+
+    // The transaction reads the stored record, so the challenge is checked
+    // against the authoritative value on every attempt.
+    let matchedCurrentChallenge = false;
+    let mutationRejected = false;
+    let transaction = null;
+    try {
+      transaction = await userStore.transactUser(firestore, driverId, (currentUser) => {
+        matchedCurrentChallenge = false;
+        mutationRejected = false;
+        const currentState = currentUser?.identityReverification;
+        if (!currentState || String(currentState.challengeId || '') !== String(challengeId)) {
+          return undefined;
+        }
+        matchedCurrentChallenge = true;
+        const nextUser = mutateUser(currentUser || {}, currentState);
+        if (nextUser === undefined) {
+          mutationRejected = true;
+        }
+        return nextUser;
+      });
+    } catch (error) {
+      throw stateUnavailableError(error, 'Firestore nao confirmou a transacao do challenge KYC atual');
+    }
+
+    if (transaction?.committed === true && matchedCurrentChallenge) {
+      await this.syncDriverActivationProjection(driverId);
+      return {
+        committed: true,
+        stale: false,
+        snapshot: transaction.value || null
+      };
+    }
+    if (mutationRejected) {
+      return {
+        committed: false,
+        stale: true,
+        code: 'KYC_IDENTITY_REVERIFY_CHALLENGE_STALE'
+      };
+    }
+
+    const latestUser = await readCurrentUser();
+    if (!hasCurrentChallenge(latestUser)) {
+      return {
+        committed: false,
+        stale: true,
+        code: 'KYC_IDENTITY_REVERIFY_CHALLENGE_STALE'
+      };
+    }
+
+    throw stateUnavailableError(null, 'Firestore nao confirmou a transacao do challenge KYC atual');
   }
 
   async persistCurrentIdentityFirestore(
@@ -565,9 +503,10 @@ class KYCPolicyService {
 
       usersDoc = usersSnap.exists ? usersSnap.data() : {};
       driversDoc = driversSnap.exists ? driversSnap.data() : {};
+      // The record the RTDB mirrored is this same users/{uid} document, in the
+      // JSON view (Timestamps as ISO strings) the policy compares.
+      realtimeUser = usersSnap.exists ? docView(usersSnap.data()) || {} : {};
     }
-
-    realtimeUser = await readRealtimeKycPolicyFields(driverId);
     if (this.redis && typeof this.redis.hgetall === 'function') {
       redisDriver = await this.redis.hgetall(`driver:${driverId}`) || {};
     }
@@ -1504,8 +1443,8 @@ class KYCPolicyService {
       }
     }
 
-    await firebaseConfig.updateRealtimeDB(`users/${driverId}`, realtimePayload).catch((error) => {
-      logError(error, 'Falha ao atualizar status KYC no Realtime DB', {
+    await userStore.updateUser(userStore.resolveFirestore(), driverId, realtimePayload).catch((error) => {
+      logError(error, 'Falha ao atualizar status KYC no cadastro do usuário', {
         service: 'kyc-policy-service',
         driverId
       });
@@ -1677,7 +1616,7 @@ class KYCPolicyService {
       }
     };
 
-    const realtimePersisted = await firebaseConfig.updateRealtimeDB(`users/${driverId}`, {
+    const realtimePersisted = await persistUserFields(driverId, {
       identityReverification,
       kycReverifyPendingAfterTrip: status === 'deferred_until_trip_end',
       kycRecheckPendingAfterTrip: status === 'deferred_until_trip_end',
@@ -1785,7 +1724,7 @@ class KYCPolicyService {
       });
     }
 
-    const realtimeGatePersisted = await firebaseConfig.updateRealtimeDB(`users/${driverId}`, {
+    const realtimeGatePersisted = await persistUserFields(driverId, {
       kycReverifyRequired: true,
       kycReverifyReason: reason,
       kycReverifySource: reasonCode,
@@ -1868,9 +1807,7 @@ class KYCPolicyService {
     }
 
     if (challengeId) {
-      const currentIdentityState = await this.readRealtimeStrict(
-        `users/${driverId}/identityReverification`
-      ).catch(() => null);
+      const currentIdentityState = await this.readIdentityReverificationStrict(driverId).catch(() => null);
       if (
         currentIdentityState?.challengeId
         && currentIdentityState.challengeId !== challengeId
@@ -2085,7 +2022,7 @@ class KYCPolicyService {
 
     let state = null;
     try {
-      state = await this.readRealtimeStrict(`users/${driverId}/identityReverification`);
+      state = await this.readIdentityReverificationStrict(driverId);
     } catch (error) {
       logStructured('warn', 'Revalidacao KYC mantida adiada: estado duravel indisponivel', {
         service: 'kyc-policy-service',
@@ -2139,7 +2076,7 @@ class KYCPolicyService {
     try {
       let lockedState = null;
       try {
-        lockedState = await this.readRealtimeStrict(`users/${driverId}/identityReverification`);
+        lockedState = await this.readIdentityReverificationStrict(driverId);
       } catch (error) {
         return {
           success: true,
@@ -2671,9 +2608,7 @@ class KYCPolicyService {
       identity_reverification_validation_started_at: nowIso
     });
     if (!redisCommitted) {
-      const latestIdentityState = await this.readRealtimeStrict(
-        `users/${driverId}/identityReverification`
-      );
+      const latestIdentityState = await this.readIdentityReverificationStrict(driverId);
       if (
         String(latestIdentityState?.challengeId || '') !== String(challengeId)
       ) {
