@@ -142,32 +142,11 @@ async function resolveDriverAuthProfile(uid, decoded) {
   const claimsUserType = resolveClaimsUserType(decoded);
   const userType = firestoreUserType || claimsUserType;
 
-  // O RTDB legado pode complementar dados de exibição quando o documento canônico
-  // ainda não existe, mas nunca participa da decisão de autorização.
-  let compatibilityProfile = null;
-  if (!firestoreProfile) {
-    try {
-      const db = firebaseConfig?.getRealtimeDB?.();
-      if (db) {
-        const userSnapshot = await db.ref(`users/${uid}`).once('value');
-        compatibilityProfile = userSnapshot?.val?.() || null;
-      }
-    } catch (error) {
-      logStructured('warn', 'Perfil legado indisponível durante autenticação de ativação', {
-        service: 'driver-activation-routes',
-        driverId: uid,
-        error: error?.message || String(error)
-      });
-    }
-  }
-
   return {
-    profile: firestoreProfile || compatibilityProfile || {},
-    profileSource: firestoreProfile
-      ? 'firestore'
-      : compatibilityProfile
-        ? 'rtdb_compatibility'
-        : 'claims',
+    // users/{uid} is the only profile record (the RTDB copy it could fall
+    // back to was the same document).
+    profile: firestoreProfile || {},
+    profileSource: firestoreProfile ? 'firestore' : 'claims',
     userType
   };
 }

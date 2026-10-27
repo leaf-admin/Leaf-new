@@ -937,13 +937,12 @@ class DailySubscriptionService {
         return { success: false, error: 'Realtime DB não disponível' };
       }
 
-      const [usersSnapshot, subscriptionsSnapshot, billingConfig] = await Promise.all([
-        db.ref('users').once('value'),
+      const [users, subscriptionsSnapshot, billingConfig] = await Promise.all([
+        require('./user-store').listUsers(firebaseConfig.getFirestore()),
         db.ref('subscriptions').once('value'),
         this.loadBillingConfig()
       ]);
 
-      const users = usersSnapshot.val() || {};
       const subscriptions = subscriptionsSnapshot.val() || {};
 
       const results = {

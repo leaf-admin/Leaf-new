@@ -1,5 +1,6 @@
 const readBudget = require('../utils/metrics-read-budget');
 const { toView } = require('../services/rtdb-root-router');
+const userStore = require('../services/user-store');
 const express = require('express');
 const admin = require('firebase-admin');
 const { logger, logStructured, logError } = require('../utils/logger');
@@ -305,17 +306,16 @@ router.get('/api/metrics/maps/demand-by-region', async (req, res) => {
   try {
     let regions = {};
 
-    if (!firebaseConfig || !firebaseConfig.getRealtimeDB) {
+    const firestore = firebaseConfig?.getFirestore?.();
+    if (!firestore) {
       return res.json({ regions: {} });
     }
 
-    const db = firebaseConfig.getRealtimeDB();
     const redis = redisPool.getConnection();
 
     try {
       // Buscar usuários
-      const usersSnapshot = await readBudget.realtimeSnapshot(db.ref('users'));
-      const users = usersSnapshot.val() || {};
+      const users = await readBudget.recordsSnapshot(limit => userStore.listUsers(firestore, { limit }));
 
       // Buscar localizações ativas (do Redis ou Firebase)
       const onlineUsersSet = await redis.smembers('online_users').catch(() => []);
@@ -978,11 +978,10 @@ router.get('/api/metrics/marketplace', async (req, res) => {
       }
     };
 
-    if (!firebaseConfig || !firebaseConfig.getRealtimeDB) {
+    if (!firebaseConfig?.getFirestore?.()) {
       return res.json(response);
     }
 
-    const db = firebaseConfig.getRealtimeDB();
     const { current, previous } = getWindow(period, startDate, endDate);
     response.window = {
       current: {
@@ -1010,14 +1009,13 @@ router.get('/api/metrics/marketplace', async (req, res) => {
     const ridesQuery = firebaseConfig.getFirestore().collection('rides')
       .where('createdAt', '>=', previous.start)
       .where('createdAt', '<=', current.end);
-    const [ridesSnapshot, usersSnapshot, supportSummary] = await Promise.all([
+    const [ridesSnapshot, users, supportSummary] = await Promise.all([
       readBudget.firestoreSnapshot(ridesQuery),
-      readBudget.realtimeSnapshot(db.ref('users')),
+      readBudget.recordsSnapshot(limit => userStore.listUsers(firebaseConfig.getFirestore(), { limit })),
       supportSummaryPromise
     ]);
 
     const bookings = Object.fromEntries(ridesSnapshot.docs.map((doc) => [doc.id, toView(doc.data())]));
-    const users = usersSnapshot.val() || {};
 
     const normalizedBookings = Object.keys(bookings).map((id) => {
       const b = bookings[id] || {};

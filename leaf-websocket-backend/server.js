@@ -141,6 +141,7 @@ const {
     shouldBlockOnlineForIdentityReviewHold
 } = require('./services/driver-online-authorized-identity-retry-gate');
 const kycPolicyService = require('./services/kyc-policy-service');
+const userStore = require('./services/user-store');
 const { recordIngest, getStatus: getOtelIngestStatus } = require('./utils/otel-ingest-monitor');
 // ============================================================================================
 
@@ -573,9 +574,7 @@ async function enforceDailyKYCForOnline(driverId) {
         )
     ) {
         const identityState = await Promise.resolve(
-            firebaseConfig?.getFromRealtimeDB?.(
-                `users/${driverId}/identityReverification`
-            )
+            userStore.readUserField(userStore.resolveFirestore(), driverId, 'identityReverification')
         ).catch(() => null);
         const authorizedRetryGate = buildAuthorizedIdentityRetryOnlineGate({
             identityReviewGate,
@@ -602,9 +601,7 @@ async function enforceDailyKYCForOnline(driverId) {
     ) {
         const identityState = kycRuntime.namespace === 'operational'
             ? await Promise.resolve(
-                firebaseConfig?.getFromRealtimeDB?.(
-                    `users/${driverId}/identityReverification`
-                )
+                userStore.readUserField(userStore.resolveFirestore(), driverId, 'identityReverification')
             ).catch(() => null)
             : await kycRuntime.policy
                 .getStepUpChallenge(null, driverId)

@@ -45,7 +45,7 @@ describe('KYC runtime scope wiring', () => {
     expect(onlineGate).toContain('buildAuthorizedIdentityRetryOnlineGate({');
     expect(onlineGate).toContain('shouldBlockOnlineForIdentityReviewHold(identityReviewGate)');
     expect(onlineGate).toContain('bindIdentityReverificationChallengeToOnlineGate({');
-    expect(onlineGate).toContain('`users/${driverId}/identityReverification`');
+    expect(onlineGate).toContain("userStore.readUserField(userStore.resolveFirestore(), driverId, 'identityReverification')");
     expect(onlineGate).toContain(
       'const trustGate = await kycRuntime.trust.evaluateOnlineGate(driverId);'
     );

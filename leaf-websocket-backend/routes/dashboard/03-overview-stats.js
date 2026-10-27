@@ -3,6 +3,7 @@ const readBudget = require('../../utils/metrics-read-budget');
 // Assinaturas, listas ativas e indicadores do painel
 
 const {
+  userStore,
   RedisScan,
   buildRecentRideActivities,
   calculateAverageTripTime,
@@ -299,11 +300,10 @@ router.get('/api/kyc-analytics/stats', async (req, res) => {
     };
 
     try {
-      // Usar Realtime Database onde os dados de drivers estão
-      if (firebaseConfig && firebaseConfig.getRealtimeDB) {
-        const db = firebaseConfig.getRealtimeDB();
-        const usersSnapshot = await readBudget.realtimeSnapshot(db.ref('users').orderByChild('usertype').equalTo('driver'));
-        const drivers = usersSnapshot.val() || {};
+      // Motoristas em users/{uid} no Firestore
+      const firestore = firebaseConfig?.getFirestore?.();
+      if (firestore) {
+        const drivers = await readBudget.recordsSnapshot(limit => userStore.queryUsers(firestore, 'usertype', 'driver', { limit }));
 
         let approved = 0;
         let pending = 0;

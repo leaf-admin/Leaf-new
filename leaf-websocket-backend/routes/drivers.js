@@ -25,6 +25,7 @@ const {
 } = require('../services/sandbox-persistence-context');
 const { authenticateJWT, requireRole } = require('../middleware/jwt-auth');
 const { logger, logStructured, logError } = require('../utils/logger');
+const userStore = require('../services/user-store');
 const DRIVER_APPLICATION_ADMIN_ROLES = ['admin', 'super-admin', 'manager', 'support', 'development'];
 const requireDriverApplicationAdmin = [authenticateJWT, requireRole(DRIVER_APPLICATION_ADMIN_ROLES)];
 // Dado pessoal do motorista: exige ID token do Firebase e só o próprio motorista (uid do token == :id) acessa.
@@ -50,41 +51,9 @@ const requireFirebase = (req, res, next) => {
   next();
 };
 
-async function runRealtimeDbQuery(executor) {
-  if (!firebaseConfig || typeof firebaseConfig.getRealtimeDB !== 'function') {
-    return null;
-  }
-
-  return executor(firebaseConfig.getRealtimeDB());
-}
-
-async function readRealtime(path) {
-  if (firebaseConfig && typeof firebaseConfig.getFromRealtimeDB === 'function') {
-    return firebaseConfig.getFromRealtimeDB(path);
-  }
-
-  const snapshot = await runRealtimeDbQuery((db) => db.ref(path).once('value'));
-  if (!snapshot || !snapshot.exists()) {
-    return null;
-  }
-
-  return snapshot.val();
-}
-
-async function updateRealtime(path, payload) {
-  if (firebaseConfig && typeof firebaseConfig.updateRealtimeDB === 'function') {
-    return firebaseConfig.updateRealtimeDB(path, payload);
-  }
-
-  return runRealtimeDbQuery((db) => db.ref(path).update(payload));
-}
-
-async function updateRealtimeRoot(updates) {
-  if (firebaseConfig && typeof firebaseConfig.updateRealtimeDBRoot === 'function') {
-    return firebaseConfig.updateRealtimeDBRoot(updates);
-  }
-
-  return runRealtimeDbQuery((db) => db.ref().update(updates));
+// Cadastro dos motoristas na coleção nativa `users` (services/user-store).
+function usersFirestore() {
+  return firebaseConfig?.getFirestore?.() || null;
 }
 
 function parseObjectCandidate(value) {
@@ -570,7 +539,7 @@ router.get('/api/drivers/applications', requireDriverApplicationAdmin, requireFi
     const storage = firebaseConfig.getStorage();
 
     // Buscar usuários do Firebase
-    const users = await readRealtime('users') || {};
+    const users = await userStore.listUsers(usersFirestore());
 
     // Filtrar apenas motoristas
     let driverApplications = Object.keys(users)
@@ -610,10 +579,10 @@ router.get('/api/drivers/applications', requireDriverApplicationAdmin, requireFi
       paginatedApplications.map(async (driver) => {
         try {
           // Buscar documentos do usuário
-          const documents = await readRealtime(`users/${driver.uid}/documents`) || {};
+          const documents = await userStore.readUserField(usersFirestore(), driver.uid, 'documents') || {};
 
           // Buscar dados do veículo
-          const vehicle = await readRealtime(`users/${driver.uid}/vehicles/current`) || {};
+          const vehicle = await userStore.readUserField(usersFirestore(), driver.uid, 'vehicles/current') || {};
 
           // Determinar status da aplicação
           let applicationStatus = 'pending';
@@ -741,7 +710,7 @@ router.post('/api/drivers/applications/:id/approve', requireDriverApplicationAdm
     logStructured('info', `✅ Aprovando motorista ${id}:`, { notes, adminNotes }, { service: 'drivers-routes' });
 
     // Atualizar status do motorista
-    await updateRealtime(`users/${id}`, {
+    await userStore.updateUser(usersFirestore(), id, {
       isApproved: true,
       isRejected: false,
       reviewDate: new Date().toISOString(),
@@ -751,27 +720,27 @@ router.post('/api/drivers/applications/:id/approve', requireDriverApplicationAdm
     });
 
     // Atualizar status dos documentos para aprovados
-    const documents = await readRealtime(`users/${id}/documents`) || {};
+    const documents = await userStore.readUserField(usersFirestore(), id, 'documents') || {};
 
     const documentUpdates = {};
     Object.keys(documents).forEach(docType => {
-      documentUpdates[`users/${id}/documents/${docType}/status`] = 'approved';
-      documentUpdates[`users/${id}/documents/${docType}/reviewedAt`] = new Date().toISOString();
-      documentUpdates[`users/${id}/documents/${docType}/reviewedBy`] = 'admin';
+      documentUpdates[`documents/${docType}/status`] = 'approved';
+      documentUpdates[`documents/${docType}/reviewedAt`] = new Date().toISOString();
+      documentUpdates[`documents/${docType}/reviewedBy`] = 'admin';
     });
 
     if (Object.keys(documentUpdates).length > 0) {
-      await updateRealtimeRoot(documentUpdates);
+      await userStore.updateUser(usersFirestore(), id, documentUpdates);
     }
 
     // Atualizar status do veículo se existir
-    const vehicle = await readRealtime(`users/${id}/vehicles/current`);
+    const vehicle = await userStore.readUserField(usersFirestore(), id, 'vehicles/current');
     if (vehicle) {
-      await updateRealtime(`users/${id}/vehicles/current`, {
+      await userStore.updateUser(usersFirestore(), id, {
         status: 'approved',
         reviewedAt: new Date().toISOString(),
         reviewedBy: 'admin'
-      });
+      }, 'vehicles/current');
     }
 
     logStructured('info', `✅ Motorista ${id} aprovado com sucesso`, { service: 'drivers-routes' });
@@ -819,7 +788,7 @@ router.post('/api/drivers/applications/:id/reject', requireDriverApplicationAdmi
     logStructured('info', `❌ Rejeitando motorista ${id}:`, { notes, rejectionReasons, adminNotes }, { service: 'drivers-routes' });
 
     // Atualizar status do motorista
-    await updateRealtime(`users/${id}`, {
+    await userStore.updateUser(usersFirestore(), id, {
       isApproved: false,
       isRejected: true,
       reviewDate: new Date().toISOString(),
@@ -830,29 +799,29 @@ router.post('/api/drivers/applications/:id/reject', requireDriverApplicationAdmi
     });
 
     // Atualizar status dos documentos para rejeitados
-    const documents = await readRealtime(`users/${id}/documents`) || {};
+    const documents = await userStore.readUserField(usersFirestore(), id, 'documents') || {};
 
     const documentUpdates = {};
     Object.keys(documents).forEach(docType => {
-      documentUpdates[`users/${id}/documents/${docType}/status`] = 'rejected';
-      documentUpdates[`users/${id}/documents/${docType}/reviewedAt`] = new Date().toISOString();
-      documentUpdates[`users/${id}/documents/${docType}/reviewedBy`] = 'admin';
-      documentUpdates[`users/${id}/documents/${docType}/rejectionReason`] = rejectionReasons?.join(', ') || 'Documento rejeitado';
+      documentUpdates[`documents/${docType}/status`] = 'rejected';
+      documentUpdates[`documents/${docType}/reviewedAt`] = new Date().toISOString();
+      documentUpdates[`documents/${docType}/reviewedBy`] = 'admin';
+      documentUpdates[`documents/${docType}/rejectionReason`] = rejectionReasons?.join(', ') || 'Documento rejeitado';
     });
 
     if (Object.keys(documentUpdates).length > 0) {
-      await updateRealtimeRoot(documentUpdates);
+      await userStore.updateUser(usersFirestore(), id, documentUpdates);
     }
 
     // Atualizar status do veículo se existir
-    const vehicle = await readRealtime(`users/${id}/vehicles/current`);
+    const vehicle = await userStore.readUserField(usersFirestore(), id, 'vehicles/current');
     if (vehicle) {
-      await updateRealtime(`users/${id}/vehicles/current`, {
+      await userStore.updateUser(usersFirestore(), id, {
         status: 'rejected',
         reviewedAt: new Date().toISOString(),
         reviewedBy: 'admin',
         rejectionReason: rejectionReasons?.join(', ') || 'Veículo rejeitado'
-      });
+      }, 'vehicles/current');
     }
 
     logStructured('info', `✅ Motorista ${id} rejeitado com sucesso`, { service: 'drivers-routes' });
@@ -892,7 +861,7 @@ router.get('/api/drivers/applications/:id', requireDriverApplicationAdmin, requi
     logStructured('info', `📋 Buscando aplicação do motorista ${id}`, { service: 'drivers-routes' });
 
     // Buscar dados do motorista
-    const user = await readRealtime(`users/${id}`);
+    const user = await userStore.readUser(usersFirestore(), id);
     if (!user) {
       return res.status(404).json({
         error: 'Motorista não encontrado',
@@ -901,10 +870,10 @@ router.get('/api/drivers/applications/:id', requireDriverApplicationAdmin, requi
     }
 
     // Buscar documentos
-    const documents = await readRealtime(`users/${id}/documents`) || {};
+    const documents = await userStore.readUserField(usersFirestore(), id, 'documents') || {};
 
     // Buscar veículo
-    const vehicle = await readRealtime(`users/${id}/vehicles/current`) || {};
+    const vehicle = await userStore.readUserField(usersFirestore(), id, 'vehicles/current') || {};
 
     // Determinar status
     let applicationStatus = 'pending';
@@ -1146,7 +1115,7 @@ router.get('/api/drivers/nearby', requireNearbyDriversAuth, async (req, res) => 
         logger.debug(`⚠️ [DriversRoute] Driver ${driverId} não tem dados no Redis, buscando Firebase...`);
         if (firebaseConfig) {
           try {
-            const user = await readRealtime(`users/${driverId}`);
+            const user = await userStore.readUser(usersFirestore(), driverId);
             if (user) {
               driverInfo = {
                 id: driverId,
@@ -1271,19 +1240,17 @@ router.get('/api/drivers/nearby', requireNearbyDriversAuth, async (req, res) => 
 router.get('/api/drivers/:id/earnings', requireDriverSelf, requireFirebase, async (req, res) => {
   try {
     const { id } = req.params;
-    const db = firebaseConfig.getRealtimeDB();
+    const firestore = usersFirestore();
 
     // 1. Buscar usuário
-    const userSnapshot = await db.ref(`users/${id}`).once('value');
-    if (!userSnapshot.exists()) {
+    const user = firestore ? await userStore.readUser(firestore, id) : null;
+    if (firestore && !user) {
       return res.status(404).json({ success: false, message: 'Motorista não encontrado' });
     }
-    const user = userSnapshot.val();
 
     // 2. Namespace financeiro do motorista (operacional ou sandbox), como na lista de
     // recibos da Atividade. Sem classificação segura o relatório não responde: zeros
     // aqui seriam lidos pelo app como ganho real.
-    const firestore = typeof firebaseConfig.getFirestore === 'function' ? firebaseConfig.getFirestore() : null;
     let persistenceScope = null;
     if (firestore) {
       try {

@@ -42,9 +42,6 @@ function snapshot(value, exists = value !== null && value !== undefined) {
 
 const mockRef = jest.fn((path) => ({
   once: jest.fn(async () => {
-    if (path === 'users/driver-1') {
-      return snapshot({ approved: true, carType: 'Leaf Plus' });
-    }
     if (path === 'user_vehicles/driver-1') {
       return snapshot({
         'link-1': {
@@ -81,8 +78,18 @@ const mockRef = jest.fn((path) => ({
 
 const mockDb = { ref: mockRef };
 
+const mockUsers = { 'driver-1': { approved: true, carType: 'Leaf Plus' } };
+const mockFirestore = {
+  collection: () => ({
+    doc: (id) => ({
+      get: async () => ({ exists: Boolean(mockUsers[id]), data: () => mockUsers[id] }),
+    }),
+  }),
+};
+
 jest.mock('../../../firebase-config', () => ({
   getRealtimeDB: jest.fn(() => mockDb),
+  getFirestore: jest.fn(() => mockFirestore),
 }));
 
 jest.mock('../../../middleware/jwt-auth', () => ({

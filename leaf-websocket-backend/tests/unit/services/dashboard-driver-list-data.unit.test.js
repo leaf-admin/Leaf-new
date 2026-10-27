@@ -5,16 +5,16 @@ describe('driver list budgets', () => {
   test('legacy read only loads bounded drivers and rejects overflow rather than truncating', async () => {
     const limits = [];
     let size = 1;
-    const db = { ref: key => {
-      const query = { orderByChild: () => query, equalTo: () => query, limitToFirst: count => { limits.push([key, count]); return query; },
-        once: async () => ({ val: () => Object.fromEntries(Array.from({ length: size }, (_, i) => [`d${i}`, { usertype: 'driver' }])) }) };
+    const firestore = { collection: name => {
+      const query = { where: () => query, limit: count => { limits.push([name, count]); return query; },
+        get: async () => ({ docs: Array.from({ length: size }, (_, i) => ({ id: `d${i}`, data: () => ({ usertype: 'driver' }) })) }) };
       return query;
     } };
-    const page = await readLegacy(db);
+    const page = await readLegacy(firestore);
     expect(page).toMatchObject({ users: { d0: { usertype: 'driver' } }, mode: 'legacy-bounded' });
     expect(page.statsByDriver.size + page.carsByDriver.size).toBe(0);
     size = 201;
-    await expect(readLegacy(db)).rejects.toMatchObject({ code: 'DASHBOARD_LEGACY_BUDGET' });
+    await expect(readLegacy(firestore)).rejects.toMatchObject({ code: 'DASHBOARD_LEGACY_BUDGET' });
     expect(limits).toEqual([['users', 201], ['users', 201]]);
   });
 

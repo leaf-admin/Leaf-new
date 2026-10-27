@@ -11,6 +11,15 @@ const mockRealtimeDb = {
     once: jest.fn(async () => ({ val: () => mockRealtimeData[path] || null }))
   }))
 };
+// users/{uid} lives in Firestore; the rest of the report still reads the router.
+const mockFirestore = {
+  collection: jest.fn((name) => ({
+    get: jest.fn(async () => ({
+      docs: Object.entries(name === 'users' ? mockRealtimeData.users || {} : {})
+        .map(([id, data]) => ({ id, data: () => data }))
+    }))
+  }))
+};
 const mockLogStructured = jest.fn();
 
 jest.mock('../../../middleware/jwt-auth', () => ({
@@ -46,7 +55,7 @@ jest.mock('../../../utils/redis-pool', () => ({
 
 jest.mock('../../../firebase-config', () => ({
   getRealtimeDB: jest.fn(() => mockRealtimeDb),
-  getFirestore: jest.fn(),
+  getFirestore: jest.fn(() => mockFirestore),
   initializeFirebase: jest.fn()
 }));
 

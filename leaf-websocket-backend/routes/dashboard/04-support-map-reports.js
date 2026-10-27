@@ -2,6 +2,7 @@
 // Suporte, mapa e relatórios
 
 const {
+  userStore,
   DASHBOARD_FINANCIAL_ROLES,
   DASHBOARD_MONITORING_ROLES,
   DASHBOARD_SUPPORT_ROLES,
@@ -265,15 +266,14 @@ router.get('/api/reports/comprehensive', authenticateJWT, requireRole(DASHBOARD_
         }
 
         // Buscar dados base
-        const [bookingsSnapshot, usersSnapshot, carsSnapshot] = await Promise.all([
+        // The legacy `cars` root never existed here: no cars, as before.
+        const [bookingsSnapshot, users] = await Promise.all([
           db.ref('bookings').once('value'),
-          db.ref('users').once('value'),
-          db.ref('cars').once('value')
+          userStore.listUsers(firebaseConfig.getFirestore())
         ]);
 
         const bookings = bookingsSnapshot.val() || {};
-        const users = usersSnapshot.val() || {};
-        const cars = carsSnapshot.val() || {};
+        const cars = {};
 
         // Filtrar bookings por período
         const periodBookings = Object.keys(bookings).filter(bookingId => {

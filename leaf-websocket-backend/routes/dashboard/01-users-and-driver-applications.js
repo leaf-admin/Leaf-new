@@ -1056,9 +1056,8 @@ router.post('/api/drivers/:driverId/vehicle/config', authenticateJWT, requireRol
     }
 
     const db = firebaseConfig.getRealtimeDB();
-    const userRef = db.ref(`users/${driverId}`);
-    const userSnapshot = await userRef.once('value');
-    if (!userSnapshot.exists()) {
+    const driverRecord = await userStore.readUser(firebaseConfig.getFirestore(), driverId);
+    if (!driverRecord) {
       return res.status(404).json({ success: false, message: 'Motorista não encontrado.' });
     }
 
@@ -1403,7 +1402,7 @@ router.post('/api/drivers/:driverId/vehicle/config', authenticateJWT, requireRol
     try {
       const redis = redisPool.getConnection();
       await redisPool.ensureConnection();
-      const userData = (await userRef.once('value')).val() || {};
+      const userData = await userStore.readUser(firebaseConfig.getFirestore(), driverId) || {};
       const selectedVehicleSnapshot = !canonicalSelectedVehicleData && selected.vehicleId
         ? await db.ref(`vehicles/${selected.vehicleId}`).once('value')
         : null;
