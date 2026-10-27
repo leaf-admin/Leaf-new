@@ -18,6 +18,11 @@
 //   canonical collections (fields that only Firestore has must survive):
 //   mirror copies only RTDB's fields and a whole-record set is refused.
 // - json (transitional, not native): `rtdb_<root>/<key>` = { schema, json }.
+//
+// RTDB retirement: RTDB_MIRROR_WRITES=false stops the RTDB mirror of the
+// Firestore-served roots. Any access to a root that is not routed is logged
+// (`rtdb_unrouted_access`, at most once per root every 10 minutes) so the
+// remaining RTDB traffic is visible before RTDB is switched off.
 const { FieldPath, FieldValue, Timestamp } = require('@google-cloud/firestore');
 const { isDeepStrictEqual } = require('node:util');
 const { logStructured } = require('../utils/logger');
@@ -232,9 +237,22 @@ function snapshot(key, value, ordered = null) {
   };
 }
 
+const mirrorWritesEnabled = (env = process.env) => env.RTDB_MIRROR_WRITES !== 'false';
+const UNROUTED_LOG_INTERVAL_MS = 10 * 60 * 1000;
+
 function createRouter(rawDb, { getFirestore, env = process.env, log = logStructured } = {}) {
   const config = readConfig(env);
   if (!config.writes.size) return rawDb;
+  const mirrorWrites = mirrorWritesEnabled(env);
+  const unroutedSeen = new Map();
+  const noteUnrouted = (root, op) => {
+    if (!root || root === '.info') return;
+    const key = `${root}:${op}`;
+    const now = Date.now();
+    if (now - (unroutedSeen.get(key) || 0) < UNROUTED_LOG_INTERVAL_MS) return;
+    unroutedSeen.set(key, now);
+    log('warn', 'rtdb_unrouted_access', { service: 'rtdb-root-router', root, op });
+  };
 
   const firestore = () => {
     const instance = getFirestore?.();
@@ -377,6 +395,7 @@ function createRouter(rawDb, { getFirestore, env = process.env, log = logStructu
   }
 
   async function replayOnRtdb(apply, context) {
+    if (!mirrorWrites) return;
     try { await apply(); } catch (error) {
       log('warn', 'Espelho RTDB falhou para raiz servida pelo Firestore', { service: 'rtdb-root-router', ...context, error: error.message });
     }
@@ -521,8 +540,11 @@ function createRouter(rawDb, { getFirestore, env = process.env, log = logStructu
           if (served.length) await writeFirestore(served);
           // One RTDB update keeps the payload atomic on RTDB: it is the source
           // for unrouted roots (errors propagate) and a mirror for served ones.
-          const hasRtdbSource = entries.some(([path]) => modeOf(segmentsOf(path)[0]) !== 'firestore');
-          if (hasRtdbSource || !served.length) await target.update(values);
+          const unserved = entries.filter(([path]) => modeOf(segmentsOf(path)[0]) !== 'firestore');
+          unserved.forEach(([path]) => { const root = segmentsOf(path)[0]; if (modeOf(root) === 'rtdb') noteUnrouted(root, 'root_update'); });
+          if (!mirrorWrites) {
+            if (unserved.length) await target.update(Object.fromEntries(unserved));
+          } else if (unserved.length || !served.length) await target.update(values);
           else await replayOnRtdb(() => target.update(values), { op: 'root_update' });
           const mirrorTargets = new Map();
           for (const [path] of entries) {
@@ -544,7 +566,9 @@ function createRouter(rawDb, { getFirestore, env = process.env, log = logStructu
         return path => {
           const segments = segmentsOf(path);
           if (!segments.length) return rootRef();
-          return modeOf(segments[0]) === 'rtdb' ? target.ref(path) : routedRef(path);
+          if (modeOf(segments[0]) !== 'rtdb') return routedRef(path);
+          noteUnrouted(segments[0], 'ref');
+          return target.ref(path);
         };
       }
       if (property === '__rtdbRootRouter') {
@@ -557,4 +581,4 @@ function createRouter(rawDb, { getFirestore, env = process.env, log = logStructu
   });
 }
 
-module.exports = { createRouter, readConfig, normalize, setIn, getIn, applyQuery, collectionFor, toView, fromView, docView };
+module.exports = { createRouter, readConfig, mirrorWritesEnabled, normalize, setIn, getIn, applyQuery, collectionFor, toView, fromView, docView };

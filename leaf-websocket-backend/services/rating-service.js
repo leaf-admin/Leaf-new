@@ -2,6 +2,7 @@ const firebaseConfig = require('../firebase-config');
 const { logStructured } = require('../utils/logger');
 const kycPolicyService = require('./kyc-policy-service');
 const ratingFirestoreStore = require('./rating-firestore-store');
+const { mirrorWritesEnabled } = require('./rtdb-root-router');
 const {
   resolveRidePersistenceScope,
   resolvePersistenceScope,
@@ -366,7 +367,13 @@ class RatingService {
         }
         return this._resolveExistingRatingReplay(committed.collision, persistenceScope);
       }
-      const mirrored = await Promise.resolve(firebaseConfig.updateRealtimeDBRoot?.(updates)).catch(() => false);
+      // With the RTDB mirror off only the ride annotation (`bookings`, served
+      // from Firestore by the router) is kept; the RTDB rating fan-out stops.
+      const bookingsPrefix = `${persistenceScope.collections.bookings}/`;
+      const mirrorUpdates = mirrorWritesEnabled()
+        ? updates
+        : Object.fromEntries(Object.entries(updates).filter(([path]) => path.startsWith(bookingsPrefix)));
+      const mirrored = await Promise.resolve(firebaseConfig.updateRealtimeDBRoot?.(mirrorUpdates)).catch(() => false);
       if (!mirrored) {
         logStructured('warn', 'Espelho RTDB da avaliação falhou', { service: 'rating-service', tripId, ratingId });
       }

@@ -115,6 +115,22 @@ describe('ratings in Firestore (RTDB exit, domain 3)', () => {
     expect(mockGetFromRealtimeDB).not.toHaveBeenCalled();
   });
 
+  it('with the RTDB mirror off keeps only the ride annotation, not the RTDB rating fan-out', async () => {
+    process.env.ENABLE_RATINGS_FIRESTORE_WRITES = 'true';
+    process.env.ENABLE_RATINGS_FIRESTORE_READS = 'true';
+    process.env.RTDB_MIRROR_WRITES = 'false';
+    try {
+      const result = await ratingService.submitRating(payload, context);
+      expect(result.success).toBe(true);
+      const updates = mockUpdateRealtimeDBRoot.mock.calls[0][0];
+      expect(Object.keys(updates).length).toBeGreaterThan(0);
+      expect(Object.keys(updates).every(path => path.startsWith('bookings/booking_1/'))).toBe(true);
+      expect(mockFirestore.docs.get(`ratings/${result.ratingId}`)).toMatchObject({ tripId: 'booking_1', rating: 5 });
+    } finally {
+      delete process.env.RTDB_MIRROR_WRITES;
+    }
+  });
+
   it('a Firestore failure after the switch rejects the rating instead of writing only RTDB', async () => {
     process.env.ENABLE_RATINGS_FIRESTORE_WRITES = 'true';
     process.env.ENABLE_RATINGS_FIRESTORE_READS = 'true';

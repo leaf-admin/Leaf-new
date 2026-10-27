@@ -15,6 +15,7 @@ const PDFDocument = require('pdfkit');
 const PaymentService = require('./payment-service');
 const receiptHistoryIndex = require('./receipt-history-index');
 const receiptFirestoreStore = require('./receipt-firestore-store');
+const { mirrorWritesEnabled } = require('./rtdb-root-router');
 // Legacy (pre-index) listing reads at most this many recent receipts.
 const LEGACY_RECEIPT_WINDOW = 200;
 const { acceptedContext } = require('./driver-intro-fee-service');
@@ -1070,6 +1071,31 @@ class ReceiptService {
                 savedTimestamp: Date.now()
             };
 
+            const receiptPointer = {
+                receiptId: receipt.receiptId,
+                hash: receipt.hash,
+                savedAt: receiptData.savedAt,
+                financialContext,
+                financialNamespace: financialContext.namespace,
+                financialContextId: financialContext.contextId
+            };
+
+            // RTDB retirement: with the RTDB mirror off, the Firestore receipt
+            // store is the only copy, so a failed write fails the save. The
+            // pointer on the ride goes to `bookings`, which the router serves
+            // from Firestore (ride annotations).
+            if (receiptFirestoreStore.enabledReads() && !mirrorWritesEnabled()) {
+                await receiptFirestoreStore.mirror(this.getReceiptFirestore(), receiptData, persistenceScope, {
+                    ownerOf: this.resolveStoredReceiptOwnerId.bind(this),
+                    timestampOf: this.resolveStoredReceiptTimestamp.bind(this)
+                });
+                await firebaseDb
+                    .ref(`${persistenceScope.collections.bookings}/${receipt.rideId}/receipt`)
+                    .set(receiptPointer);
+                logger.info(`✅ Recibo salvo no Firestore: ${receipt.receiptId}`);
+                return true;
+            }
+
             if (receiptHistoryIndex.enabledWrites()) {
                 const options = { ownerOf: this.resolveStoredReceiptOwnerId.bind(this), timestampOf: this.resolveStoredReceiptTimestamp.bind(this) };
                 const previous = (await firebaseDb.ref(`${persistenceScope.collections.receipts}/${receipt.rideId}`).once('value')).val();
@@ -1084,10 +1110,7 @@ class ReceiptService {
                 await receiptHistoryIndex.claimIdentity(firebaseDb, receiptData, persistenceScope, options);
                 await firebaseDb.ref().update({
                     [`${persistenceScope.collections.receipts}/${receipt.rideId}`]: receiptData,
-                    [`${persistenceScope.collections.bookings}/${receipt.rideId}/receipt`]: {
-                        receiptId: receipt.receiptId, hash: receipt.hash, savedAt: receiptData.savedAt,
-                        financialContext, financialNamespace: financialContext.namespace, financialContextId: financialContext.contextId
-                    },
+                    [`${persistenceScope.collections.bookings}/${receipt.rideId}/receipt`]: receiptPointer,
                     ...receiptHistoryIndex.buildUpdates(receiptData, persistenceScope, options)
                 });
                 await this.mirrorReceiptToFirestoreStore(receiptData, persistenceScope);
@@ -1102,14 +1125,7 @@ class ReceiptService {
             // Também salvar referência na corrida para fácil acesso
             await firebaseDb
                 .ref(`${persistenceScope.collections.bookings}/${receipt.rideId}/receipt`)
-                .set({
-                    receiptId: receipt.receiptId,
-                    hash: receipt.hash,
-                    savedAt: receiptData.savedAt,
-                    financialContext,
-                    financialNamespace: financialContext.namespace,
-                    financialContextId: financialContext.contextId
-                });
+                .set(receiptPointer);
 
             logger.info(`✅ Recibo salvo no Firestore: ${receipt.receiptId}`);
             await this.mirrorReceiptToFirestoreStore(receiptData, persistenceScope);
@@ -1145,6 +1161,7 @@ class ReceiptService {
             if (receiptFirestoreStore.enabledReads()) {
                 value = await receiptFirestoreStore.getByRideId(this.getReceiptFirestore(), persistenceScope, rideId);
                 // Until RTDB writes stop, a receipt missing here still falls back.
+                if (!value && !mirrorWritesEnabled()) return null;
                 if (!value) logger.warn('⚠️ Recibo ausente no Firestore; lendo do RTDB', { rideId });
             }
             if (!value) {

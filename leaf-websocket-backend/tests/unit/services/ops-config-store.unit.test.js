@@ -77,6 +77,21 @@ describe('ops config store (RTDB exit, domain 2)', () => {
     await expect(store.persist(rtdbDown, 'cityActivation', config)).resolves.toBeUndefined();
   });
 
+  it('with the RTDB mirror off neither reads nor writes RTDB', async () => {
+    process.env.ENABLE_OPS_CONFIG_FIRESTORE_WRITES = 'true';
+    process.env.ENABLE_OPS_CONFIG_FIRESTORE_READS = 'true';
+    process.env.RTDB_MIRROR_WRITES = 'false';
+    try {
+      const missing = fakeConfig({ rtdb: { [CITY_PATH]: { version: 1 } } });
+      await expect(store.load(missing, 'cityActivation')).resolves.toEqual({ raw: null, source: 'firestore' });
+      expect(missing.getFromRealtimeDB).not.toHaveBeenCalled();
+      await store.persist(missing, 'cityActivation', config);
+      expect(missing.calls).toEqual([`firestore:${CITY_DOC}`]);
+    } finally {
+      delete process.env.RTDB_MIRROR_WRITES;
+    }
+  });
+
   it('backfill copies only on --apply and reports parity per config', async () => {
     expect(() => backfill.parseArgs(['--apply'])).toThrow('--ref');
     const fake = fakeConfig({
