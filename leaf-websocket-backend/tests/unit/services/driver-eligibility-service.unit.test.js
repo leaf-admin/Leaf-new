@@ -3,8 +3,14 @@ jest.mock('../../../utils/redis-pool', () => ({
   getConnection: jest.fn()
 }));
 
+// users/{id} is read from native Firestore, served from the same path fixtures.
+let mockDataByPath = {};
 jest.mock('../../../firebase-config', () => ({
-  getRealtimeDB: jest.fn()
+  getRealtimeDB: jest.fn(),
+  getFirestore: jest.fn(() => require('../../helpers/rtdb-tree-firestore').createTreeFirestore({
+    read: path => (mockDataByPath[path] === undefined ? null : JSON.parse(JSON.stringify(mockDataByPath[path]))),
+    write() {}
+  }))
 }));
 
 jest.mock('../../../utils/logger', () => ({
@@ -19,6 +25,7 @@ function createSnapshot(value) {
 }
 
 function createRealtimeDB(dataByPath) {
+  mockDataByPath = dataByPath;
   return {
     ref: jest.fn((path) => ({
       once: jest.fn(async () => createSnapshot(dataByPath[path]))

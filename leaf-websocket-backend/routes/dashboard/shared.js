@@ -108,6 +108,7 @@ const {
 } = require('../../services/driver-online-projection-service');
 
 const driverDocumentStore = require('../../services/driver-document-store');
+const userStore = require('../../services/user-store');
 
 // Firebase integration
 let firebaseConfig = null;
@@ -603,17 +604,17 @@ async function applyConfirmedIdentityFraudBlock({ driverId, enforcement, reviewe
   );
 
   const firestore = firebaseConfig?.getFirestore?.();
-  const realtimeDb = firebaseConfig?.getRealtimeDB?.();
-  if (!firestore || !realtimeDb) {
+  if (!firestore) {
     const error = new Error('Firebase indisponivel para espelhar o bloqueio permanente.');
     error.code = 'KYC_IDENTITY_BLOCK_MIRROR_UNAVAILABLE';
     throw error;
   }
 
+  // users/{id} is one native record: a single field update (each top-level
+  // field replaced, as the former RTDB mirror did) instead of two racing writes.
   await Promise.all([
-    firestore.collection('users').doc(driverId).set(projection.users, { merge: true }),
-    firestore.collection('drivers').doc(driverId).set(projection.drivers, { merge: true }),
-    realtimeDb.ref(`users/${driverId}`).update(projection.users)
+    userStore.updateUser(firestore, driverId, projection.users),
+    firestore.collection('drivers').doc(driverId).set(projection.drivers, { merge: true })
   ]);
 
   try {
@@ -2625,6 +2626,7 @@ module.exports = {
   adjustDocumentIndexCounters,
   getDocumentFirestore,
   driverDocumentStore,
+  userStore,
   admin,
   adminDocumentUpload,
   analyzeDriverGrowth,

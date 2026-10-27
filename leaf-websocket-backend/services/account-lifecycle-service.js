@@ -73,9 +73,12 @@ async function runAccountDeletion({ userId, metadata, purge, immediate = true, r
       return { deleted: false };
     }
     // With users served by Firestore the canonical profile is purged by the
-    // Firestore step below; only the RTDB mirror is wiped here.
-    const realtimeTarget = db.__rtdbRootRouter?.servedByFirestore?.('users') ? db.__rtdbRootRouter.raw : db;
-    await realtimeTarget.ref(`users/${userId}`).set({ status: 'deleted', accountDisabled: true });
+    // Firestore step below and there is no RTDB copy left to wipe (RTDB is
+    // retired: writing there was dropped and logged as rtdb_retired_write).
+    // A plain, unrouted RTDB client still gets its record wiped.
+    if (!db.__rtdbRootRouter?.servedByFirestore?.('users')) {
+      await db.ref(`users/${userId}`).set({ status: 'deleted', accountDisabled: true });
+    }
     await checkpoint('realtime_purged');
     await userRef.set(purge, { merge: true });
     await checkpoint('profile_purged');

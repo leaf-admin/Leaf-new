@@ -1,3 +1,12 @@
+// users/driver_activation are read from native Firestore; the tree adapter
+// serves them from the same path fixtures as the router-backed reads.
+let mockCurrentFirestore = null;
+jest.mock('../../../firebase-config', () => ({
+  getRealtimeDB: () => null,
+  getFirestore: () => mockCurrentFirestore
+}));
+
+const { createTreeFirestore } = require('../../helpers/rtdb-tree-firestore');
 const {
   resolveDriverActivationState,
   DRIVER_ACTIVATION_STATES
@@ -5,6 +14,13 @@ const {
 
 function createMockDb(dataByPath = {}, errorPaths = []) {
   const failingPaths = new Set(errorPaths);
+  mockCurrentFirestore = createTreeFirestore({
+    read(path) {
+      if (failingPaths.has(path)) throw new Error(`read_failed:${path}`);
+      return dataByPath[path] ? JSON.parse(JSON.stringify(dataByPath[path])) : null;
+    },
+    write() {}
+  });
 
   return {
     ref(path) {

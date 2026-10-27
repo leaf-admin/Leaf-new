@@ -1,6 +1,7 @@
 const redisPool = require('../utils/redis-pool');
 const firebaseConfig = require('../firebase-config');
 const { logStructured } = require('../utils/logger');
+const userStore = require('./user-store');
 const {
     normalizeOperationalCarType,
     resolveOperationalCarTypeLabel
@@ -231,12 +232,12 @@ class DriverEligibilityService {
             timer.unref?.();
         });
 
-        let userSnapshot;
+        let userRecord;
         let userVehiclesSnapshot;
         try {
-            [userSnapshot, userVehiclesSnapshot] = await Promise.race([
+            [userRecord, userVehiclesSnapshot] = await Promise.race([
                 Promise.all([
-                    db.ref(`users/${driverId}`).once('value'),
+                    userStore.readUser(firebaseConfig?.getFirestore?.(), driverId),
                     db.ref(`user_vehicles/${driverId}`).once('value')
                 ]),
                 timeoutPromise('user_and_user_vehicles')
@@ -252,11 +253,11 @@ class DriverEligibilityService {
             return null;
         }
 
-        if (!userSnapshot?.exists?.() && !userVehiclesSnapshot?.exists?.()) {
+        if (!userRecord && !userVehiclesSnapshot?.exists?.()) {
             return null;
         }
 
-        const user = userSnapshot?.val() || {};
+        const user = userRecord || {};
         const userVehicles = userVehiclesSnapshot?.val() || {};
 
         let activeUserVehicle = null;

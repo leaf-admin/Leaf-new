@@ -72,3 +72,12 @@ test('recovers a legacy random-ID deletion only after validating its owner and p
   expect(f.firestore.records.get('account_deletions/old')).toMatchObject({ status: 'completed', legacyDeletionId: 'legacy-id' });
   expect(f.firestore.records.get('account_deletions/legacy-id')).toEqual({ userId: 'old', status: 'error' });
 });
+
+test('does not write the retired RTDB when users is served by Firestore', async () => {
+  const f = fixture();
+  const db = { ...f.db, __rtdbRootRouter: { servedByFirestore: root => root === 'users' } };
+  await expect(runAccountDeletion({ ...f.options, db })).resolves.toEqual({ deleted: true });
+  expect(f.ref.set).not.toHaveBeenCalled();
+  expect(f.firestore.records.get('users/old')).toMatchObject({ status: 'deleted', accountDisabled: true });
+  expect(f.firestore.records.get('account_deletions/old').status).toBe('completed');
+});

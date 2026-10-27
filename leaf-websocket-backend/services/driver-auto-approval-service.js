@@ -1,4 +1,5 @@
 const { logStructured } = require('../utils/logger');
+const userStore = require('./user-store');
 
 // Aprovação automática do motorista: quando o estado canônico de ativação fica ACTIVE (CNH e
 // CRLV aprovados pela análise, veículo ativo, KYC, validação facial e consentimentos), a conta
@@ -29,9 +30,9 @@ function createDriverAutoApprovalService({
   getFirestore,
   now = () => new Date().toISOString()
 } = {}) {
-  async function recordNeedsReview(db, driverId, reason, details = {}) {
+  async function recordNeedsReview(driverId, reason, details = {}) {
     const at = now();
-    await db.ref(`users/${driverId}/autoApproval`).set({ status: 'needs_review', reason, ...details, updatedAt: at });
+    await userStore.setUserField(getFirestore(), driverId, ['autoApproval'], { status: 'needs_review', reason, ...details, updatedAt: at });
     logStructured('warn', 'Aprovação automática do motorista precisa de revisão', {
       service: 'driver-auto-approval', driverId, reason
     });
@@ -42,7 +43,7 @@ function createDriverAutoApprovalService({
     if (!isAutoApprovalEnabled(env)) return { approved: false, status: 'disabled' };
     if (!db || !driverId || canonicalState?.canGoOnline !== true) return { approved: false, status: 'not_eligible' };
 
-    const user = (await db.ref(`users/${driverId}`).once('value')).val() || {};
+    const user = await userStore.readUser(getFirestore(), driverId) || {};
     if (isAlreadyApproved(user)) return { approved: false, status: 'already_approved' };
     if (BLOCKING_MANUAL_STATUSES.has(String(user.manualReviewStatus || user.status || '').toLowerCase())) {
       return { approved: false, status: 'manual_decision' };
@@ -51,15 +52,15 @@ function createDriverAutoApprovalService({
     try {
       await assertNotPermanentlyBlocked(driverId);
     } catch (error) {
-      return recordNeedsReview(db, driverId, 'identity_enforcement', { code: error?.code || null });
+      return recordNeedsReview(driverId, 'identity_enforcement', { code: error?.code || null });
     }
 
     const cpf = resolveDriverCpf(user);
-    if (!cpf) return recordNeedsReview(db, driverId, 'cpf_missing');
+    if (!cpf) return recordNeedsReview(driverId, 'cpf_missing');
     try {
       await claimCpf({ firestore: getFirestore(), realtimeDb: db, userId: driverId, cpf });
     } catch (error) {
-      return recordNeedsReview(db, driverId, 'cpf_uniqueness', { code: error?.code || null });
+      return recordNeedsReview(driverId, 'cpf_uniqueness', { code: error?.code || null });
     }
 
     const at = now();
@@ -78,7 +79,7 @@ function createDriverAutoApprovalService({
       previousState: { approved: user.approved ?? null, status: user.status || null },
       createdAt: at
     };
-    await db.ref(`users/${driverId}`).update({
+    await userStore.updateUser(getFirestore(), driverId, {
       approved: true,
       approvedAt: at,
       approvedBy: AUTO_APPROVAL_ACTOR,

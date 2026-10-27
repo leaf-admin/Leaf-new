@@ -2,6 +2,7 @@ const admin = require('firebase-admin');
 const firebaseConfig = require('../firebase-config');
 const driverSubscriptionService = require('./driver-subscription-service');
 const { logStructured } = require('../utils/logger');
+const userStore = require('./user-store');
 
 const COLLECTION = 'subscriptions';
 const GATE_CACHE_PREFIX = 'subscription:online-gate:v1:';
@@ -220,14 +221,15 @@ class SubscriptionStateService {
       return { subscription: {}, userData: {} };
     }
 
-    const [subscriptionSnapshot, userSnapshot] = await Promise.all([
+    const firestore = this.getFirestore();
+    const [subscriptionSnapshot, userData] = await Promise.all([
       realtimeDb.ref(`subscriptions/${driverId}`).once('value'),
-      realtimeDb.ref(`users/${driverId}`).once('value')
+      firestore ? userStore.readUser(firestore, driverId) : null
     ]);
 
     return {
       subscription: subscriptionSnapshot.val() || {},
-      userData: userSnapshot.val() || {}
+      userData: userData || {}
     };
   }
 
@@ -318,8 +320,9 @@ class SubscriptionStateService {
       await realtimeDb.ref(`subscriptions/${driverId}`).update(subscriptionPatch);
 
       const shadowPatch = this.buildUserShadowPatch(sanitizedSubscription, userData || {});
-      if (Object.keys(shadowPatch).length > 0) {
-        await realtimeDb.ref(`users/${driverId}`).update(shadowPatch);
+      const firestore = this.getFirestore();
+      if (Object.keys(shadowPatch).length > 0 && firestore) {
+        await userStore.updateUser(firestore, driverId, shadowPatch);
       }
     }
 
