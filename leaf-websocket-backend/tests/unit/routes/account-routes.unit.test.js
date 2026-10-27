@@ -81,21 +81,24 @@ jest.mock('firebase-admin', () => ({
     deleteUser: mockDeleteUser,
   })),
   firestore: firestoreFn,
-  database: jest.fn(() => ({
-    ref: jest.fn(() => ({
-      once: mockDatabaseOnce,
-      remove: mockDatabaseRemove,
-      set: mockDatabaseRemove,
-      transaction: async callback => {
-        const value = callback(null);
-        if (value === undefined) return { committed: false };
-        await mockDatabaseUpdate(value);
-        return { committed: true };
-      },
-      update: mockDatabaseUpdate,
-    })),
-  })),
 }));
+
+// Vehicle records come from the native vehicle store. Each read takes the next
+// mockDatabaseOnce snapshot in call order (as the router reads did); a commit
+// reaches mockDatabaseUpdate with the multi-root update.
+jest.mock('../../../services/vehicle-store', () => {
+  const read = async () => {
+    const snapshot = await mockDatabaseOnce();
+    return snapshot?.exists?.() ? snapshot.val() : null;
+  };
+  return {
+    readVehicleLinks: read,
+    readVehicle: read,
+    readPlateIndex: read,
+    listVehicles: async () => (await read()) || {},
+    commitUpdates: async (_firestore, updates) => mockDatabaseUpdate(updates),
+  };
+});
 
 jest.mock('../../../middleware/support-auth', () => ({
   authenticateSupport: (req, res, next) => {

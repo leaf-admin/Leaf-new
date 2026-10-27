@@ -1,15 +1,12 @@
 'use strict';
 
+const vehicleStore = require('./vehicle-store');
 const {
   buildVehicleOcrUpdates,
   normalizeVehicleOcrPayload
 } = require('../utils/vehicle-ocr-data');
 
 const MAX_VEHICLES_PER_PROFILE = 4;
-
-function snapshotValue(snapshot) {
-  return snapshot && typeof snapshot.val === 'function' ? snapshot.val() : null;
-}
 
 function normalizeRecordPlate(record = {}) {
   return normalizeVehicleOcrPayload({
@@ -32,30 +29,28 @@ function deterministicUserVehicleId(plate) {
   return `crlv_${plate}`;
 }
 
-async function readCatalogRecord(db, vehicleId) {
+async function readCatalogRecord(firestore, vehicleId) {
   if (!vehicleId) return null;
-  const snapshot = await db.ref(`vehicles/${vehicleId}`).once('value');
-  const value = snapshotValue(snapshot);
+  const value = await vehicleStore.readVehicle(firestore, vehicleId);
   return value && typeof value === 'object'
     ? { id: vehicleId, ...value }
     : null;
 }
 
-async function findCatalogRecordByPlate(db, plate) {
-  const snapshot = await db.ref('vehicles').once('value');
-  const records = snapshotValue(snapshot) || {};
+async function findCatalogRecordByPlate(firestore, plate) {
+  const records = await vehicleStore.listVehicles(firestore);
   const match = Object.entries(records).find(([, record]) => normalizeRecordPlate(record) === plate);
   return match ? { id: match[0], ...(match[1] || {}) } : null;
 }
 
 /**
- * Builds the atomic RTDB patch that materializes an approved CRLV as a
+ * Builds the atomic multi-root patch (vehicle-store.commitUpdates) that materializes an approved CRLV as a
  * canonical vehicle and links it to the driver. The link intentionally starts
  * pending/inactive: document analysis may prove the vehicle identity, but only
  * the operational review flow can approve its category and activate it.
  */
 async function buildApprovedCrlvVehicleLinkUpdates({
-  db,
+  firestore,
   driverId,
   crlvData,
   submissionId,
@@ -64,7 +59,7 @@ async function buildApprovedCrlvVehicleLinkUpdates({
   updatedAt = new Date().toISOString()
 } = {}) {
   const safeDriverId = String(driverId || '').trim();
-  if (!db?.ref || !safeDriverId) {
+  if (!firestore?.collection || !safeDriverId) {
     throw new Error('CRLV_VEHICLE_LINK_INPUT_INVALID');
   }
 
@@ -73,15 +68,14 @@ async function buildApprovedCrlvVehicleLinkUpdates({
     throw new Error('CRLV_VEHICLE_IDENTITY_INCOMPLETE');
   }
 
-  const [indexSnapshot, userVehiclesSnapshot] = await Promise.all([
-    db.ref(`vehicle_plate_index/${normalized.plate}`).once('value'),
-    db.ref(`user_vehicles/${safeDriverId}`).once('value')
+  const [rawIndexedVehicleId, linkedVehicles] = await Promise.all([
+    vehicleStore.readPlateIndex(firestore, normalized.plate),
+    vehicleStore.readVehicleLinks(firestore, safeDriverId)
   ]);
-  const rawIndexedVehicleId = snapshotValue(indexSnapshot);
   const indexedVehicleId = typeof rawIndexedVehicleId === 'string' || typeof rawIndexedVehicleId === 'number'
     ? String(rawIndexedVehicleId).trim()
     : '';
-  const userVehicles = snapshotValue(userVehiclesSnapshot) || {};
+  const userVehicles = linkedVehicles || {};
   const userVehicleEntries = Object.entries(userVehicles).map(([id, record]) => ({
     id,
     ...(record || {})
@@ -92,7 +86,7 @@ async function buildApprovedCrlvVehicleLinkUpdates({
   let vehicleId = '';
 
   if (indexedVehicleId) {
-    catalog = await readCatalogRecord(db, indexedVehicleId);
+    catalog = await readCatalogRecord(firestore, indexedVehicleId);
     const indexedPlate = normalizeRecordPlate(catalog || {});
     if (indexedPlate && indexedPlate !== normalized.plate) {
       throw new Error('CRLV_VEHICLE_INDEX_CONFLICT');
@@ -100,7 +94,7 @@ async function buildApprovedCrlvVehicleLinkUpdates({
     vehicleId = indexedVehicleId;
   } else if (directPlateLink?.vehicleId) {
     vehicleId = String(directPlateLink.vehicleId).trim();
-    catalog = await readCatalogRecord(db, vehicleId);
+    catalog = await readCatalogRecord(firestore, vehicleId);
     const linkedCatalogPlate = normalizeRecordPlate(catalog || {});
     if (linkedCatalogPlate && linkedCatalogPlate !== normalized.plate) {
       throw new Error('CRLV_VEHICLE_LINK_CONFLICT');
@@ -109,7 +103,7 @@ async function buildApprovedCrlvVehicleLinkUpdates({
     // Legacy catalogs may predate vehicle_plate_index. Scan only when neither
     // the canonical index nor this driver's existing same-plate link can route
     // the write safely.
-    catalog = await findCatalogRecordByPlate(db, normalized.plate);
+    catalog = await findCatalogRecordByPlate(firestore, normalized.plate);
     vehicleId = String(catalog?.id || deterministicVehicleId(normalized.plate));
   }
 
@@ -173,7 +167,7 @@ async function buildApprovedCrlvVehicleLinkUpdates({
 
 async function materializeApprovedCrlvVehicleLink(options = {}) {
   const result = await buildApprovedCrlvVehicleLinkUpdates(options);
-  await options.db.ref().update(result.updates);
+  await vehicleStore.commitUpdates(options.firestore, result.updates);
   return result;
 }
 

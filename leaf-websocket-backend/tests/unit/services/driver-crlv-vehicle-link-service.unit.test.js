@@ -4,29 +4,34 @@ const {
   buildApprovedCrlvVehicleLinkUpdates,
   materializeApprovedCrlvVehicleLink
 } = require('../../../services/driver-crlv-vehicle-link-service');
+const { createTreeFirestore } = require('../../helpers/rtdb-tree-firestore');
 
-function snapshot(value) {
-  return { val: () => value };
-}
-
+// Firestore over an RTDB-shaped tree built from { 'root/key': value } fixtures;
+// `reads` lists each document (or whole collection) read, by RTDB path.
 function createDb(dataByPath = {}) {
+  const tree = {};
+  for (const [path, value] of Object.entries(dataByPath)) {
+    const parts = path.split('/');
+    let cursor = tree;
+    parts.slice(0, -1).forEach((part) => { cursor = cursor[part] || (cursor[part] = {}); });
+    cursor[parts[parts.length - 1]] = value;
+  }
   const reads = [];
-  const rootUpdates = [];
-  return {
-    reads,
-    rootUpdates,
-    ref(path) {
-      return {
-        update: async (payload) => {
-          rootUpdates.push(payload);
-        },
-        once: async () => {
-          reads.push(path);
-          return snapshot(Object.prototype.hasOwnProperty.call(dataByPath, path) ? dataByPath[path] : null);
-        }
-      };
+  const access = {
+    read(path) {
+      reads.push(path);
+      const value = path.split('/').reduce((cursor, part) => cursor?.[part], tree);
+      return value === undefined ? null : JSON.parse(JSON.stringify(value));
+    },
+    write(path, value) {
+      const parts = path.split('/');
+      let cursor = tree;
+      parts.slice(0, -1).forEach((part) => { cursor = cursor[part] || (cursor[part] = {}); });
+      if (value === null) delete cursor[parts[parts.length - 1]];
+      else cursor[parts[parts.length - 1]] = value;
     }
   };
+  return Object.assign(createTreeFirestore(access), { reads, tree });
 }
 
 const approvedCrlv = {
@@ -42,7 +47,7 @@ describe('driver-crlv-vehicle-link-service', () => {
     const db = createDb();
 
     const result = await buildApprovedCrlvVehicleLinkUpdates({
-      db,
+      firestore: db,
       driverId: 'driver_1',
       crlvData: approvedCrlv,
       submissionId: 'submission_1',
@@ -74,14 +79,14 @@ describe('driver-crlv-vehicle-link-service', () => {
     const db = createDb();
 
     const result = await materializeApprovedCrlvVehicleLink({
-      db,
+      firestore: db,
       driverId: 'driver_1',
       crlvData: approvedCrlv,
       submissionId: 'submission_1'
     });
 
-    expect(db.rootUpdates).toHaveLength(1);
-    expect(db.rootUpdates[0]).toBe(result.updates);
+    expect(db.commits).toHaveLength(1);
+    expect(db.commits[0]).toEqual(result.updates);
     expect(Object.keys(result.updates).some((path) => path.startsWith('driver_activation/'))).toBe(false);
     expect(Object.keys(result.updates).some((path) => path.startsWith('users/driver_1/documents/'))).toBe(false);
   });
@@ -99,7 +104,7 @@ describe('driver-crlv-vehicle-link-service', () => {
     });
 
     const result = await buildApprovedCrlvVehicleLinkUpdates({
-      db,
+      firestore: db,
       driverId: 'driver_2',
       crlvData: approvedCrlv
     });
@@ -139,7 +144,7 @@ describe('driver-crlv-vehicle-link-service', () => {
     });
 
     const result = await buildApprovedCrlvVehicleLinkUpdates({
-      db,
+      firestore: db,
       driverId: 'driver_1',
       crlvData: approvedCrlv
     });
@@ -170,7 +175,7 @@ describe('driver-crlv-vehicle-link-service', () => {
     });
 
     const result = await buildApprovedCrlvVehicleLinkUpdates({
-      db,
+      firestore: db,
       driverId: 'driver_1',
       crlvData: approvedCrlv
     });
@@ -197,7 +202,7 @@ describe('driver-crlv-vehicle-link-service', () => {
     });
 
     await expect(buildApprovedCrlvVehicleLinkUpdates({
-      db,
+      firestore: db,
       driverId: 'driver_1',
       crlvData: approvedCrlv
     })).rejects.toThrow('CRLV_VEHICLE_INDEX_CONFLICT');
@@ -224,7 +229,7 @@ describe('driver-crlv-vehicle-link-service', () => {
     });
 
     await expect(buildApprovedCrlvVehicleLinkUpdates({
-      db,
+      firestore: db,
       driverId: 'driver_1',
       crlvData: approvedCrlv
     })).rejects.toThrow('CRLV_VEHICLE_LINK_CONFLICT');
@@ -241,7 +246,7 @@ describe('driver-crlv-vehicle-link-service', () => {
     });
 
     await expect(buildApprovedCrlvVehicleLinkUpdates({
-      db,
+      firestore: db,
       driverId: 'driver_1',
       crlvData: approvedCrlv
     })).rejects.toThrow('CRLV_VEHICLE_PROFILE_LIMIT_REACHED');

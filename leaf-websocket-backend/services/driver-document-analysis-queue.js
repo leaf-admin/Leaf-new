@@ -102,14 +102,6 @@ function hasRequiredCrlvVehicleIdentity(data = {}) {
     Boolean(String(data?.color || data?.cor || data?.vehicleColor || data?.carColor || '').trim());
 }
 
-function getDbOrThrow() {
-  const db = firebaseConfig?.getRealtimeDB?.();
-  if (!db) {
-    throw new Error('FIREBASE_RTDB_UNAVAILABLE');
-  }
-  return db;
-}
-
 function getFirestoreOrThrow() {
   const firestore = firebaseConfig?.getFirestore?.();
   if (!firestore) {
@@ -271,7 +263,6 @@ async function acquireDocumentMutationLease({ firestore, driverId, documentType,
 }
 
 async function runWithDocumentMutationLease({
-  db = null,
   driverId,
   documentType,
   scope
@@ -282,9 +273,6 @@ async function runWithDocumentMutationLease({
       'Callback obrigatorio para mutacao documental serializada'
     );
   }
-  // The lease lives in Firestore; `db` is still handed to callbacks whose own
-  // writes have not moved to native repositories yet.
-  const realtimeDb = db || getDbOrThrow();
   const firestore = getFirestoreOrThrow();
   const lease = await acquireDocumentMutationLease({
     firestore,
@@ -294,14 +282,13 @@ async function runWithDocumentMutationLease({
   });
   try {
     await lease.assertHeld();
-    return await callback({ db: realtimeDb, firestore, lease });
+    return await callback({ firestore, lease });
   } finally {
     await lease.release();
   }
 }
 
 async function commitDocumentSubmissionState({
-  db = null,
   driverId,
   documentType,
   activationDocument,
@@ -323,7 +310,6 @@ async function commitDocumentSubmissionState({
   }
 
   return runWithDocumentMutationLease({
-    db,
     driverId: safeDriverId,
     documentType: safeType,
     scope: `submission_commit_${binding.submissionId}`
@@ -340,7 +326,6 @@ async function commitDocumentSubmissionState({
 }
 
 async function runWithCurrentDocumentBinding({
-  db = null,
   driverId,
   documentType,
   expectedBinding,
@@ -365,11 +350,10 @@ async function runWithCurrentDocumentBinding({
   }
 
   return runWithDocumentMutationLease({
-    db,
     driverId: safeDriverId,
     documentType: safeType,
     scope: `${scope}_${binding.submissionId}`
-  }, async ({ db: realtimeDb, firestore, lease }) => {
+  }, async ({ firestore, lease }) => {
     const {
       activationDocument,
       userDocument,
@@ -391,7 +375,6 @@ async function runWithCurrentDocumentBinding({
     }
 
     return callback({
-      db: realtimeDb,
       firestore,
       lease,
       binding,
@@ -688,7 +671,6 @@ async function recomputeDriverActivationStatus(driverId) {
     throw new Error('DRIVER_ID_REQUIRED');
   }
 
-  const db = getDbOrThrow();
   const firestore = getFirestoreOrThrow();
   const activationNode = await driverDocumentStore.readActivation(firestore, safeDriverId) || {};
   const documents = activationNode.documents || {};
@@ -723,7 +705,6 @@ async function recomputeDriverActivationStatus(driverId) {
 
   const canonicalState = await driverActivationStateService.resolveDriverActivationState({
     driverId: safeDriverId,
-    db,
     activationNode
   });
   const storedStatus = activationNode?.status || {};
@@ -757,7 +738,6 @@ async function recomputeDriverActivationStatus(driverId) {
       // Carregado sob demanda para não criar ciclo de inicialização.
       const { getDefaultDriverAutoApprovalService } = require('./driver-auto-approval-service');
       await getDefaultDriverAutoApprovalService().maybeAutoApprove({
-        db,
         driverId: safeDriverId,
         canonicalState
       });
@@ -788,12 +768,11 @@ async function recomputeDriverActivationStatus(driverId) {
   };
 }
 
-async function syncDriverApplicationMirror(driverId, db) {
+async function syncDriverApplicationMirror(driverId) {
   try {
     // Resolve lazily so document analysis never creates an initialization cycle.
     const driverApplicationService = require('./driver-application-service');
     await driverApplicationService.syncDriverApplication(driverId, {
-      db,
       includeRatings: false
     });
   } catch (error) {
@@ -828,7 +807,6 @@ async function updateDocumentState({
 
   let normalizedStatus = String(status || 'pending').trim().toLowerCase();
   const statusUpdatedAt = nowIso();
-  const db = getDbOrThrow();
   const expectedBinding = requireCompleteDocumentBinding({
     ...metadata,
     submissionId: safeSubmissionId
@@ -850,11 +828,10 @@ async function updateDocumentState({
   const reviewStatus = toReviewQueueStatus(normalizedStatus);
 
   return runWithDocumentMutationLease({
-    db,
     driverId: safeDriverId,
     documentType: safeType,
     scope: `analysis_result_${safeSubmissionId}`
-  }, async ({ db: realtimeDb, firestore, lease }) => {
+  }, async ({ firestore, lease }) => {
     const {
       activationDocument: currentDocument,
       userDocument: previousUserDocument,
@@ -964,7 +941,7 @@ async function updateDocumentState({
 
     const crlvVehicleLink = safeType === 'crlv' && normalizedStatus === 'approved'
       ? await buildApprovedCrlvVehicleLinkUpdates({
-        db: realtimeDb,
+        firestore,
         driverId: safeDriverId,
         crlvData: normalizedDocumentData,
         submissionId: safeSubmissionId,
@@ -1022,7 +999,7 @@ async function updateDocumentState({
     }
 
     const aggregatedStatus = await recomputeDriverActivationStatus(safeDriverId);
-    await syncDriverApplicationMirror(safeDriverId, realtimeDb);
+    await syncDriverApplicationMirror(safeDriverId);
 
     const eventPayload = {
       driverId: safeDriverId,
@@ -1413,8 +1390,7 @@ class DriverDocumentAnalysisQueue {
       throw new Error('DRIVER_ID_REQUIRED');
     }
 
-    const db = getDbOrThrow();
-    const firestore = getFirestoreOrThrow();
+      const firestore = getFirestoreOrThrow();
     const [activationNode, userData] = await Promise.all([
       driverDocumentStore.readActivation(firestore, safeDriverId).then(value => value || {}),
       driverDocumentStore.readUser(firestore, safeDriverId).then(value => value || {})
@@ -1460,7 +1436,6 @@ class DriverDocumentAnalysisQueue {
     try {
       canonicalState = await driverActivationStateService.resolveDriverActivationState({
         driverId: safeDriverId,
-        db,
         activationNode,
         userData
       });

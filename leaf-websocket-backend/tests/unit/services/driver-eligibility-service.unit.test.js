@@ -504,13 +504,18 @@ describe('driver-eligibility-service', () => {
   });
 
   it('fails closed when the canonical activation state cannot be resolved', async () => {
-    firebaseConfig.getRealtimeDB.mockReturnValue(null);
-
-    const eligibility = await driverEligibilityService.isDriverEligibleForRide(
-      'driver_unavailable_state',
-      'Leaf Plus',
-      { carType: 'Leaf Plus' }
-    );
+    const firestoreImpl = firebaseConfig.getFirestore.getMockImplementation();
+    firebaseConfig.getFirestore.mockReturnValue(null);
+    let eligibility;
+    try {
+      eligibility = await driverEligibilityService.isDriverEligibleForRide(
+        'driver_unavailable_state',
+        'Leaf Plus',
+        { carType: 'Leaf Plus' }
+      );
+    } finally {
+      firebaseConfig.getFirestore.mockImplementation(firestoreImpl);
+    }
 
     expect(eligibility.eligible).toBe(false);
     expect(eligibility.code).toBe('DRIVER_ACTIVATION_STATE_UNAVAILABLE');

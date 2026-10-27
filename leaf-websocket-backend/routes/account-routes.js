@@ -1,10 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const admin = require('firebase-admin');
-const { createRouter: createRtdbRootRouter, realtimeClient } = require('../services/rtdb-root-router');
-// RTDB exit: roots routed to Firestore are honored here as in firebase-config;
-// with no roots configured this is the plain RTDB client (or the retired stand-in).
-const realtimeDb = () => createRtdbRootRouter(realtimeClient(admin), { getFirestore: () => admin.firestore() });
+const vehicleStore = require('../services/vehicle-store');
 const { logger } = require('../utils/logger');
 const { assertAccountWritable, saveAccountProfile, projectRealtimeProfile, runAccountDeletion } = require('../services/account-lifecycle-service');
 const { readPlaces, mutatePlaces, normalizePlace, validatePlaceId } = require('../services/account-saved-places');
@@ -441,40 +438,28 @@ function sanitizePreferencePatch(input = {}) {
 }
 
 async function readUserVehicles(userId) {
-  const snapshot = await realtimeDb().ref(`user_vehicles/${userId}`).once('value');
-  if (!snapshot.exists()) return [];
-  const records = [];
-  snapshot.forEach((childSnapshot) => {
-    records.push({ userVehicleId: childSnapshot.key, ...(childSnapshot.val() || {}) });
-  });
-  return records;
+  const links = await vehicleStore.readVehicleLinks(admin.firestore(), userId) || {};
+  return Object.entries(links).map(([userVehicleId, link]) => ({ userVehicleId, ...(link || {}) }));
 }
 
 async function readVehicleCatalogRecord(vehicleId) {
-  const snapshot = await realtimeDb().ref(`vehicles/${vehicleId}`).once('value');
-  return snapshot.exists() ? { id: vehicleId, ...(snapshot.val() || {}) } : null;
+  const vehicle = await vehicleStore.readVehicle(admin.firestore(), vehicleId);
+  return vehicle ? { id: vehicleId, ...vehicle } : null;
 }
 
 async function findVehicleCatalogRecordByPlate(plate) {
-  const indexed = await realtimeDb().ref(`vehicle_plate_index/${plate}`).once('value');
-  const indexedVehicleId = indexed.exists() ? String(indexed.val() || '').trim() : '';
+  const indexed = await vehicleStore.readPlateIndex(admin.firestore(), plate);
+  const indexedVehicleId = indexed === null ? '' : String(indexed).trim();
   if (indexedVehicleId) {
     const indexedVehicle = await readVehicleCatalogRecord(indexedVehicleId);
     if (indexedVehicle) return indexedVehicle;
   }
 
-  const catalogSnapshot = await realtimeDb().ref('vehicles').once('value');
-  if (!catalogSnapshot.exists()) return null;
-  let match = null;
-  catalogSnapshot.forEach((childSnapshot) => {
-    const vehicle = childSnapshot.val() || {};
-    if (normalizeVehiclePlate(vehicle.plateNormalized || vehicle.plate) === plate) {
-      match = { id: childSnapshot.key, ...vehicle };
-      return true;
-    }
-    return false;
-  });
-  return match;
+  const catalog = await vehicleStore.listVehicles(admin.firestore());
+  const match = Object.entries(catalog).find(([, vehicle]) =>
+    normalizeVehiclePlate(vehicle?.plateNormalized || vehicle?.plate) === plate
+  );
+  return match ? { id: match[0], ...(match[1] || {}) } : null;
 }
 
 async function requireDriverOffline(req, res, next) {
@@ -536,24 +521,13 @@ async function requireDriverAccount(req, res, next) {
 }
 
 async function findUserVehicleIdForVehicle(userId, vehicleId) {
-  const snapshot = await realtimeDb().ref(`user_vehicles/${userId}`).once('value');
-  if (!snapshot.exists()) return null;
-
-  let matchedUserVehicleId = null;
-  snapshot.forEach((childSnapshot) => {
-    const record = childSnapshot.val() || {};
-    if (
-      record.vehicleId === vehicleId ||
-      record.id === vehicleId ||
-      childSnapshot.key === vehicleId
-    ) {
-      matchedUserVehicleId = childSnapshot.key;
-      return true;
-    }
-    return false;
-  });
-
-  return matchedUserVehicleId;
+  const links = await vehicleStore.readVehicleLinks(admin.firestore(), userId) || {};
+  const match = Object.entries(links).find(([userVehicleId, record]) =>
+    record?.vehicleId === vehicleId ||
+    record?.id === vehicleId ||
+    userVehicleId === vehicleId
+  );
+  return match ? match[0] : null;
 }
 
 async function invalidateDriverEligibilityCache(userId) {
@@ -1083,7 +1057,7 @@ router.post('/api/account/vehicles', requireFirebase, requireDriverAccount, requ
       createdAt: nowIso,
       updatedAt: nowIso
     };
-    await realtimeDb().ref().update(updates);
+    await vehicleStore.commitUpdates(admin.firestore(), updates);
     await invalidateDriverEligibilityCache(userId);
 
     return res.status(201).json({
@@ -1175,7 +1149,7 @@ router.patch('/api/account/vehicles/:vehicleId', requireFirebase, requireDriverA
       updates[`users/${userId}/activeVehicleId`] = '';
     }
 
-    await realtimeDb().ref().update(updates);
+    await vehicleStore.commitUpdates(admin.firestore(), updates);
     await invalidateDriverEligibilityCache(userId);
 
     return res.json({
@@ -1233,7 +1207,7 @@ router.patch('/api/account/vehicles/:vehicleId/active', requireFirebase, require
     });
     updates[`users/${userId}/activeVehicleId`] = canonicalVehicleId;
     updates[`users/${userId}/updatedAt`] = nowIso;
-    await realtimeDb().ref().update(updates);
+    await vehicleStore.commitUpdates(admin.firestore(), updates);
     await invalidateDriverEligibilityCache(userId);
 
     return res.json({ success: true, activeVehicleId: canonicalVehicleId });
@@ -1260,7 +1234,7 @@ router.delete('/api/account/vehicles/:vehicleId', requireFirebase, requireDriver
     if (target.isActive === true) {
       updates[`users/${userId}/activeVehicleId`] = '';
     }
-    await realtimeDb().ref().update(updates);
+    await vehicleStore.commitUpdates(admin.firestore(), updates);
     await invalidateDriverEligibilityCache(userId);
 
     return res.json({ success: true, removedVehicleId: vehicleId });
@@ -1335,7 +1309,7 @@ router.post('/api/vehicles/ocr-data', requireFirebase, async (req, res) => {
       nowIso
     });
 
-    await realtimeDb().ref().update(updates);
+    await vehicleStore.commitUpdates(admin.firestore(), updates);
 
     await admin.firestore()
       .collection('vehicle_ocr_data')
