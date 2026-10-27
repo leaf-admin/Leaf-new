@@ -614,9 +614,7 @@ class PromotionService {
 
       await this.mergeUserProfile(driverId, updates);
 
-      const subscriptionState = await subscriptionStateService.getState(driverId, {
-        syncIfMissing: false
-      });
+      const subscriptionState = await subscriptionStateService.getState(driverId);
       if (subscriptionState.exists) {
         await subscriptionStateService.runTransaction(driverId, (state) => ({
           ...state,

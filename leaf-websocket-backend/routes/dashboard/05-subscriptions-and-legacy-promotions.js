@@ -42,23 +42,22 @@ router.get('/api/subscriptions/drivers', authenticateJWT, requireRole(DASHBOARD_
       });
       return res.json(data);
     } catch (modernError) {
-      logStructured('warn', 'Fallback RTDB em /api/subscriptions/drivers', {
+      logStructured('warn', 'Fallback de varredura em /api/subscriptions/drivers', {
         service: 'dashboard-routes',
         reason: modernError.message
       });
     }
 
-    if (!firebaseConfig || !firebaseConfig.getRealtimeDB) {
+    if (!firebaseConfig || !firebaseConfig.getFirestore) {
       return res.status(503).json({ error: 'Firebase não disponível' });
     }
 
-    const db = firebaseConfig.getRealtimeDB();
-    const [users, subscriptionsSnapshot] = await Promise.all([
-      userStore.queryUsers(firebaseConfig.getFirestore(), 'usertype', 'driver'),
-      db.ref('subscriptions').once('value')
+    const firestore = firebaseConfig.getFirestore();
+    const [users, subscriptionsData] = await Promise.all([
+      userStore.queryUsers(firestore, 'usertype', 'driver'),
+      subscriptionStateService.listSubscriptions({ firestore })
     ]);
 
-    const subscriptionsData = subscriptionsSnapshot.val() || {};
     const now = new Date();
 
     const plusDefaultDailyCents = Number.parseInt(process.env.SUBSCRIPTION_PLUS_DAILY_CENTS || '1490', 10);
@@ -212,9 +211,7 @@ router.patch('/api/subscriptions/:driverId', authenticateJWT, requireRole(DASHBO
     const { weeklyFee, status, notes, adminId = 'admin1' } = req.body;
 
     try {
-      if (firebaseConfig && firebaseConfig.getRealtimeDB) {
-        const db = firebaseConfig.getRealtimeDB();
-
+      if (firebaseConfig && firebaseConfig.getFirestore) {
         // Verificar se o motorista existe
         const driver = await userStore.readUser(getDocumentFirestore(), driverId);
         if (!driver) {
@@ -245,7 +242,7 @@ router.patch('/api/subscriptions/:driverId', authenticateJWT, requireRole(DASHBO
           createdBy: state.createdBy || adminId,
           createdAt: state.createdAt || new Date().toISOString(),
           ...updates
-        }), { db });
+        }));
         if (!subscriptionWrite.success) {
           throw new Error(subscriptionWrite.error || 'Falha ao atualizar assinatura');
         }

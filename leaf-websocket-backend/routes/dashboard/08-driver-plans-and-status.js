@@ -576,11 +576,10 @@ router.patch('/api/drivers/:driverId/subscription', authenticateJWT, requireRole
       collectionMode
     } = req.body || {};
 
-    if (!firebaseConfig || !firebaseConfig.getRealtimeDB) {
+    if (!firebaseConfig || !firebaseConfig.getFirestore) {
       return res.status(500).json({ error: 'Firebase não disponível' });
     }
 
-    const db = firebaseConfig.getRealtimeDB();
     const nowIso = new Date().toISOString();
 
     const subscriptionPatch = {};
@@ -654,7 +653,7 @@ router.patch('/api/drivers/:driverId/subscription', authenticateJWT, requireRole
     const subscriptionWrite = await subscriptionStateService.runTransaction(driverId, (state) => ({
       ...state,
       ...subscriptionPatch
-    }), { db });
+    }));
     if (!subscriptionWrite.success) {
       throw new Error(subscriptionWrite.error || 'Falha ao atualizar assinatura');
     }

@@ -4,8 +4,7 @@ jest.mock('firebase-admin', () => {
   return { apps: [], firestore, database: jest.fn() };
 });
 jest.mock('../../../firebase-config', () => ({
-  getFirestore: jest.fn(() => null),
-  getRealtimeDB: jest.fn(() => null)
+  getFirestore: jest.fn(() => null)
 }));
 jest.mock('../../../services/driver-subscription-service', () => ({
   syncDriverSubscription: jest.fn()
@@ -101,18 +100,50 @@ describe('subscription-state-service authority and cache contract', () => {
     );
   });
 
-  it('does not consult RTDB when the authoritative Firestore document exists', async () => {
+  it('reads the subscription from the Firestore record only', async () => {
     const service = new SubscriptionStateService();
-    const realtimeDb = { ref: jest.fn() };
     const { firestore } = firestoreWithDocument({ status: 'active' });
 
-    await expect(service.getState('driver-1', { db: realtimeDb, firestore })).resolves.toMatchObject({
+    await expect(service.getState('driver-1', { firestore })).resolves.toMatchObject({
       exists: true,
       source: 'firestore',
       subscription: { driverId: 'driver-1', status: 'active' },
       userData: {}
     });
-    expect(realtimeDb.ref).not.toHaveBeenCalled();
+  });
+
+  it('reports a missing Firestore record as none without writing a migrated copy', async () => {
+    const service = new SubscriptionStateService();
+    const { firestore, docRef } = firestoreWithDocument(undefined, { exists: false });
+
+    await expect(service.getState('driver-1', { firestore })).resolves.toEqual({
+      exists: false,
+      source: 'none',
+      subscription: { driverId: 'driver-1' },
+      userData: {}
+    });
+    expect(docRef.set).not.toHaveBeenCalled();
+  });
+
+  it('lists subscriptions in the record view (Timestamps as ISO, no nulls)', async () => {
+    const { Timestamp } = require('@google-cloud/firestore');
+    const service = new SubscriptionStateService();
+    const firestore = {
+      collection: jest.fn(() => ({
+        get: jest.fn().mockResolvedValue({
+          docs: [
+            { id: 'driver-1', data: () => ({ status: 'active', syncedAt: Timestamp.fromMillis(Date.UTC(2026, 9, 27)), note: null }) },
+            { id: 'driver-2', data: () => ({ pendingFeeCents: 490 }) }
+          ]
+        })
+      }))
+    };
+
+    await expect(service.listSubscriptions({ firestore })).resolves.toEqual({
+      'driver-1': { status: 'active', syncedAt: '2026-10-27T00:00:00.000Z' },
+      'driver-2': { pendingFeeCents: 490 }
+    });
+    expect(firestore.collection).toHaveBeenCalledWith('subscriptions');
   });
 
   it('rejects a cold cache miss when Firestore authority is unavailable', async () => {
@@ -125,7 +156,7 @@ describe('subscription-state-service authority and cache contract', () => {
       .rejects.toThrow('firestore unavailable');
   });
 
-  it('does not let an RTDB user shadow override an existing Firestore subscription', async () => {
+  it('does not let the users/{id} shadow fields override an existing Firestore subscription', async () => {
     const service = new SubscriptionStateService();
     jest.spyOn(service, 'getState').mockResolvedValue({
       source: 'firestore',
@@ -144,24 +175,21 @@ describe('subscription-state-service authority and cache contract', () => {
     });
   });
 
-  it('never falls back to an RTDB transaction when the Firestore transaction fails', async () => {
+  it('fails closed when the Firestore transaction fails', async () => {
     const service = new SubscriptionStateService();
     jest.spyOn(service, 'getState').mockResolvedValue({
       source: 'firestore',
       subscription: { status: 'active' },
       userData: {}
     });
-    const transaction = jest.fn();
-    const db = { ref: jest.fn(() => ({ transaction })) };
     const { firestore } = firestoreWithDocument({ status: 'active' });
     firestore.runTransaction = jest.fn().mockRejectedValue(new Error('transaction unavailable'));
 
-    await expect(service.runTransaction('driver-1', () => ({ status: 'blocked' }), { db, firestore }))
+    await expect(service.runTransaction('driver-1', () => ({ status: 'blocked' }), { firestore }))
       .resolves.toEqual({ success: false, error: 'Falha na autoridade Firestore de assinatura' });
-    expect(transaction).not.toHaveBeenCalled();
   });
 
-  it('keeps a committed Firestore update successful when the RTDB mirror fails', async () => {
+  it('keeps a committed Firestore update successful when a projection fails', async () => {
     const service = new SubscriptionStateService();
     jest.spyOn(service, 'getState').mockResolvedValue({
       source: 'firestore',
@@ -169,7 +197,7 @@ describe('subscription-state-service authority and cache contract', () => {
       userData: {}
     });
     jest.spyOn(service, 'writeGateCache').mockResolvedValue({});
-    jest.spyOn(service, 'syncMirrors').mockRejectedValue(new Error('RTDB unavailable'));
+    jest.spyOn(service, 'syncMirrors').mockRejectedValue(new Error('users projection unavailable'));
     const { firestore } = firestoreWithDocument({ status: 'active' });
     firestore.runTransaction = jest.fn(async (callback) => callback({
       get: jest.fn().mockResolvedValue({

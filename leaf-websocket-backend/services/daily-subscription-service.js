@@ -693,12 +693,11 @@ class DailySubscriptionService {
   }
 
   async updateRealtimeSubscriptionAndBilling(driverId, updater) {
-    const db = firebaseConfig.getRealtimeDB();
     return subscriptionStateService.runTransaction(driverId, (state) => ({
       ...state,
       ...(updater({ ...(state || {}) }) || {}),
       updatedAt: this.nowIso()
-    }), { db, syncReadModel: true });
+    }), { syncReadModel: true });
   }
 
   buildPolicyStateFields(policy = {}) {
@@ -721,7 +720,6 @@ class DailySubscriptionService {
 
   async processDailyCharge(driverId, driverData, options = {}) {
     try {
-      const db = options.db || firebaseConfig.getRealtimeDB();
       const currentSubscription = options.currentSubscription || {};
       const now = options.now || new Date();
       const nowIso = now.toISOString();
@@ -932,18 +930,16 @@ class DailySubscriptionService {
         };
       }
 
-      const db = firebaseConfig.getRealtimeDB();
-      if (!db) {
-        return { success: false, error: 'Realtime DB não disponível' };
+      const firestore = firebaseConfig.getFirestore();
+      if (!firestore) {
+        return { success: false, error: 'Firestore não disponível' };
       }
 
-      const [users, subscriptionsSnapshot, billingConfig] = await Promise.all([
-        require('./user-store').listUsers(firebaseConfig.getFirestore()),
-        db.ref('subscriptions').once('value'),
+      const [users, subscriptions, billingConfig] = await Promise.all([
+        require('./user-store').listUsers(firestore),
+        subscriptionStateService.listSubscriptions({ firestore }),
         this.loadBillingConfig()
       ]);
-
-      const subscriptions = subscriptionsSnapshot.val() || {};
 
       const results = {
         total: 0,
@@ -959,7 +955,6 @@ class DailySubscriptionService {
 
         results.total += 1;
         const chargeResult = await this.processDailyCharge(driverId, driverData, {
-          db,
           billingConfig,
           currentSubscription: subscriptions[driverId] || {}
         });
