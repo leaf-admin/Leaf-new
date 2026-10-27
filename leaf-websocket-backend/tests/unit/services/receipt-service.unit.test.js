@@ -609,7 +609,8 @@ describe('ReceiptService financial snapshot', () => {
 
     await expect(service.getReceiptByRideId('ride_missing', redis, firebaseDb)).resolves.toBeNull();
     expect(firebaseDb.ref).toHaveBeenCalledWith('receipts/ride_missing');
-    expect(firebaseDb.ref).toHaveBeenCalledWith('bookings/ride_missing');
+    // The ride annotation is native Firestore now; never read through the RTDB client.
+    expect(firebaseDb.ref).not.toHaveBeenCalledWith('bookings/ride_missing');
   });
 
   it('uses passenger and driver ids as receipt owners when legacy customer/driver fields are absent', async () => {

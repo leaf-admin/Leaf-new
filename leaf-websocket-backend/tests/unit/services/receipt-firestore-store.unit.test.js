@@ -1,6 +1,7 @@
 const admin = require('firebase-admin');
 const ReceiptService = require('../../../services/receipt-service');
 const store = require('../../../services/receipt-firestore-store');
+const rideAnnotationStore = require('../../../services/ride-annotation-store');
 
 const scope = { namespace: 'operational', financialContextId: 'operational', collections: { receipts: 'receipts', bookings: 'bookings' } };
 const options = {
@@ -107,16 +108,21 @@ describe('receipt Firestore mirror', () => {
       const order = [];
       const firebaseDb = { ref: jest.fn(path => ({ set: jest.fn(async () => { order.push(`rtdb:${path}`); }) })) };
       const mirror = jest.spyOn(store, 'mirror').mockImplementation(async () => { order.push('firestore'); return { mirrored: true }; });
+      const pointer = jest.spyOn(rideAnnotationStore, 'updateAnnotation').mockImplementation(async (_firestore, root, id, patch) => {
+        order.push(`annotation:${root}/${id}/${Object.keys(patch).join(',')}`);
+      });
       service.getReceiptFirestore = () => ({});
       const operational = { rideId: 'booking_1792947972712_owner', receiptId: 'LEAF-1', hash: 'h',
         customer: { id: 'customer_1' }, driver: { id: 'driver_1' } };
 
       await expect(service.saveReceiptToFirestore(operational, firebaseDb)).resolves.toBe(true);
-      expect(order).toEqual(['firestore', 'rtdb:bookings/booking_1792947972712_owner/receipt']);
+      expect(order).toEqual(['firestore', 'annotation:bookings/booking_1792947972712_owner/receipt']);
+      expect(firebaseDb.ref).not.toHaveBeenCalled();
 
       mirror.mockRejectedValueOnce(Object.assign(new Error('firestore down'), { code: 'unavailable' }));
       await expect(service.saveReceiptToFirestore(operational, firebaseDb)).rejects.toMatchObject({ code: 'RECEIPT_PERSIST_FAILED' });
       mirror.mockRestore();
+      pointer.mockRestore();
 
       const getByRideId = jest.spyOn(store, 'getByRideId').mockResolvedValue(null);
       firebaseDb.ref.mockClear();

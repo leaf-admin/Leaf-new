@@ -8,6 +8,7 @@ const express = require('express');
 const router = express.Router();
 const ReceiptService = require('../services/receipt-service');
 const firebaseConfig = require('../firebase-config');
+const rideAnnotationStore = require('../services/ride-annotation-store');
 const {
     resolveUserPersistenceScope,
     assertStoredRecordMatchesScope
@@ -414,11 +415,13 @@ router.get('/api/receipts/:rideId/map', authenticateSupport, async (req, res) =>
         }
 
         // Buscar no Firebase se não encontrou no Redis
-        if (!rideData && firebaseDb) {
-            const snapshot = await firebaseDb
-                .ref(`${persistenceScope.collections.bookings}/${rideId}`)
-                .once('value');
-            rideData = snapshot.val();
+        const annotationFirestore = rideData ? null : rideAnnotationStore.resolveFirestore();
+        if (!rideData && annotationFirestore) {
+            rideData = await rideAnnotationStore.readAnnotation(
+                annotationFirestore,
+                persistenceScope.collections.bookings,
+                rideId
+            );
             if (rideData) {
                 assertStoredRecordMatchesScope(rideData, persistenceScope);
             }
