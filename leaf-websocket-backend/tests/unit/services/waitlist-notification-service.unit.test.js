@@ -102,8 +102,8 @@ describe('waitlist-notification-service', () => {
       }),
       { merge: true }
     );
-    expect(realtime.ref).toHaveBeenCalledWith(expect.stringMatching(/^notifications\/driver_1\/waitlist_/));
-    expect(realtime.set).toHaveBeenCalled();
+    // A notificação vive só no Firestore; o nó `notifications` do RTDB não recebe mais cópia.
+    expect(realtime.ref).not.toHaveBeenCalled();
   });
 
   it('keeps the persistent notification even when push delivery fails', async () => {

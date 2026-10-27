@@ -24,7 +24,10 @@ class SupportDriverIdentityReverificationService {
     const bookingId = firstString(metadata.bookingId, metadata.tripId, metadata.rideId);
     if (!bookingId) return null;
 
-    const booking = await firebaseConfig.getFromRealtimeDB(`bookings/${bookingId}`).catch(() => null);
+    // A corrida (com o motorista) vive em `rides` no Firestore.
+    const booking = await firebaseConfig.getFirestore().collection('rides').doc(String(bookingId)).get()
+      .then((doc) => (doc.exists ? doc.data() : null))
+      .catch(() => null);
     return firstString(
       booking?.driverId,
       booking?.driver_id,

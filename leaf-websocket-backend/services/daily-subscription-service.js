@@ -14,8 +14,9 @@ const subscriptionStateService = require('./subscription-state-service');
 
 class DailySubscriptionService {
   constructor() {
-    this.BILLING_CONFIG_PATH =
-      String(process.env.SUBSCRIPTION_BILLING_CONFIG_PATH || 'subscription_billing/config').trim();
+    // Ajuste opcional do billing: documento `operational_configs/subscription_billing`
+    // no Firestore (o caminho antigo no RTDB nunca foi criado; sem documento, vale o padrão).
+    this.BILLING_CONFIG_DOC = 'operational_configs/subscription_billing';
     this.COLLECTION_MODE = 'withdrawal';
     this.DAILY_BILLING_ENABLED =
       String(process.env.SUBSCRIPTION_DAILY_BILLING_ENABLED || 'false').toLowerCase() === 'true';
@@ -41,7 +42,7 @@ class DailySubscriptionService {
     this.DEFAULT_ELIGIBLE_CITIES = this.parseCsv(process.env.SUBSCRIPTION_DAILY_ELIGIBLE_CITIES);
 
     logger.info('DailySubscriptionService inicializado', {
-      billingConfigPath: this.BILLING_CONFIG_PATH,
+      billingConfigDoc: this.BILLING_CONFIG_DOC,
       collectionMode: this.COLLECTION_MODE,
       dailyBillingEnabled: this.DAILY_BILLING_ENABLED,
       defaults: {
@@ -276,20 +277,21 @@ class DailySubscriptionService {
     return merged;
   }
 
-  async loadBillingConfig(db) {
+  async loadBillingConfig() {
     const fallback = this.getDefaultBillingConfig();
-    if (!db) {
+    const firestore = firebaseConfig.getFirestore?.();
+    if (!firestore) {
       return fallback;
     }
 
     try {
-      const configSnapshot = await db.ref(this.BILLING_CONFIG_PATH).once('value');
-      const config = configSnapshot.val() || {};
+      const configSnapshot = await firestore.doc(this.BILLING_CONFIG_DOC).get();
+      const config = configSnapshot.exists ? configSnapshot.data() || {} : {};
       return this.mergeBillingConfig(config);
     } catch (error) {
       logger.warn('Falha ao carregar config de billing, usando padrão', {
         error: error.message,
-        path: this.BILLING_CONFIG_PATH
+        doc: this.BILLING_CONFIG_DOC
       });
       return fallback;
     }
@@ -728,7 +730,7 @@ class DailySubscriptionService {
         return { success: true, skipped: true, reason: 'not_approved' };
       }
 
-      const billingConfig = options.billingConfig || await this.loadBillingConfig(db);
+      const billingConfig = options.billingConfig || await this.loadBillingConfig();
       const planType = this.resolvePlanType(driverData, currentSubscription);
       const chargeDateKey = this.getDayKey(now);
       const policy = this.resolveDailyFeePolicy({
@@ -938,7 +940,7 @@ class DailySubscriptionService {
       const [usersSnapshot, subscriptionsSnapshot, billingConfig] = await Promise.all([
         db.ref('users').once('value'),
         db.ref('subscriptions').once('value'),
-        this.loadBillingConfig(db)
+        this.loadBillingConfig()
       ]);
 
       const users = usersSnapshot.val() || {};

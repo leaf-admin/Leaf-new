@@ -14,8 +14,19 @@ jest.mock('../../../services/kyc-policy-service', () => ({
   markDriverForPhotoMismatch: (...args) => mockMarkDriverForPhotoMismatch(...args)
 }));
 
+const mockRideDocs = {};
 jest.mock('../../../firebase-config', () => ({
-  getFromRealtimeDB: jest.fn()
+  getFromRealtimeDB: jest.fn(),
+  getFirestore: () => ({
+    collection: (name) => ({
+      doc: (id) => ({
+        get: async () => {
+          const data = name === 'rides' ? mockRideDocs[id] : undefined;
+          return { exists: data !== undefined, data: () => data };
+        }
+      })
+    })
+  })
 }));
 
 describe('support-driver-identity-reverification-service', () => {
@@ -71,5 +82,23 @@ describe('support-driver-identity-reverification-service', () => {
       reason: 'no_identity_mismatch_signal'
     });
     expect(mockMarkDriverForPhotoMismatch).not.toHaveBeenCalled();
+  });
+
+  test('resolves the reported driver from the ride document in Firestore', async () => {
+    mockRideDocs.booking_42 = { driverId: 'driver_from_ride' };
+    const firebaseConfig = require('../../../firebase-config');
+    const service = require('../../../services/support-driver-identity-reverification-service');
+
+    await service.handleTicket({
+      id: 'ticket_ride',
+      userId: 'passenger_1',
+      userType: 'passenger',
+      subject: 'Motorista diferente do cadastro',
+      description: 'O motorista diferente da foto chegou no carro.',
+      metadata: { bookingId: 'booking_42' }
+    });
+
+    expect(mockMarkDriverForPhotoMismatch).toHaveBeenCalledWith(expect.objectContaining({ driverId: 'driver_from_ride', tripId: 'booking_42' }));
+    expect(firebaseConfig.getFromRealtimeDB).not.toHaveBeenCalled();
   });
 });

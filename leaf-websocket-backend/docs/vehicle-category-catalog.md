@@ -10,10 +10,11 @@ O backend já está pronto para consumir catálogo oficial de veículos para cla
 ## Feature flag
 
 - `ENABLE_VEHICLE_CATALOG_POLICY=true` ativa o uso do catálogo.
-- `VEHICLE_CATEGORY_CATALOG_PATH` define o path no Realtime DB.
-  - Padrão: `vehicle_category_catalog`
+- O catálogo fica no Firestore, documento `operational_configs/vehicle_category_catalog` (o Realtime DB foi aposentado).
 
-## Formato esperado no Realtime DB
+## Formato esperado no documento
+
+Cada campo do documento é uma entrada do catálogo.
 
 Chave:
 
@@ -44,6 +45,6 @@ Valor:
 
 Quando você subir a tabela oficial:
 
-1. Popular `vehicle_category_catalog` no Realtime DB.
+1. Popular o documento `operational_configs/vehicle_category_catalog` no Firestore.
 2. Habilitar `ENABLE_VEHICLE_CATALOG_POLICY=true`.
 3. Validar com script `scripts/tests/test-driver-eligibility-rules.js`.

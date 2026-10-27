@@ -43,6 +43,13 @@ jest.mock('../../../services/sandbox-persistence-context', () => ({
     namespace: 'operational',
     financialContextId: 'operational-test-context'
   }))
+,
+  resolvePersistenceScope: jest.fn(() => ({ namespace: 'operational', collections: { ratings: 'ratings' } }))
+}));
+
+const mockListByTarget = jest.fn();
+jest.mock('../../../services/rating-firestore-store', () => ({
+  listByTarget: (...args) => mockListByTarget(...args)
 }));
 
 function mockFirestoreApplications(applications = []) {
@@ -67,7 +74,6 @@ describe('driver-application-service', () => {
   it('does not mark applications with only MEI documents as in_review while MEI is not required', async () => {
     const application = await service.buildApplication('driver_mei', {
       db: {},
-      carsByDriverId: {},
       userVehiclesRaw: {},
       vehiclesRaw: {},
       userData: {
@@ -230,17 +236,9 @@ describe('driver-application-service', () => {
     });
   });
 
-  it('prefers the active canonical CRLV vehicle over the legacy cars mirror', async () => {
+  it('takes the vehicle from the active canonical CRLV link', async () => {
     const application = await service.buildApplication('driver_vehicle', {
       db: {},
-      carsByDriverId: {
-        driver_vehicle: [{
-          carMake: 'Legacy',
-          carModel: 'Car',
-          carNumber: 'OLD0001',
-          carColor: 'Cinza',
-        }],
-      },
       userVehiclesRaw: {
         uv_1: {
           vehicleId: 'vehicle_1',
@@ -285,7 +283,6 @@ describe('driver-application-service', () => {
   it('exposes a pending profile vehicle submission without mutating the shared catalog', async () => {
     const application = await service.buildApplication('driver_vehicle_edit', {
       db: {},
-      carsByDriverId: {},
       userVehiclesRaw: {
         link_1: {
           vehicleId: 'vehicle_1',
@@ -362,7 +359,6 @@ describe('driver-application-service', () => {
           driverActivation: { activationState: 'APPROVED_NEEDS_LIVENESS' },
         }),
       })
-      .mockResolvedValueOnce({ val: () => ({}) })
       .mockResolvedValueOnce({ val: () => ({}) });
 
     const application = await service.syncDriverApplication('driver_partial', {
@@ -392,5 +388,23 @@ describe('driver-application-service', () => {
       }),
       { merge: true },
     );
+  });
+
+  it('reads driver ratings from the Firestore ratings store, not the RTDB fan-out', async () => {
+    mockListByTarget.mockResolvedValue([
+      { id: 'r1', tripId: 't1', reviewerId: 'p1', rating: 4, createdAt: '2026-10-01T10:00:00.000Z' },
+      { id: 'r2', tripId: 't2', reviewerId: 'p2', rating: 5, createdAt: '2026-10-02T10:00:00.000Z' }
+    ]);
+    mockCollectionDocGet.mockResolvedValue({ exists: false });
+    mockRealtimeOnce
+      .mockResolvedValueOnce({ val: () => ({}) })
+      .mockResolvedValueOnce({ val: () => ({ usertype: 'driver', firstName: 'Ana' }) })
+      .mockResolvedValueOnce({ val: () => ({}) });
+
+    const application = await service.syncDriverApplication('driver_rated', { includeRatings: true });
+
+    expect(mockListByTarget).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ namespace: 'operational' }), 'driver_rated');
+    expect(mockRealtimeRef).not.toHaveBeenCalledWith(expect.stringMatching(/^user_ratings\//));
+    expect(application.ratingInsights).toMatchObject({ averageRating: '4.5', totalRatings: 2 });
   });
 });

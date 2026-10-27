@@ -1,7 +1,8 @@
 const admin = require('firebase-admin');
 const firebaseConfig = require('../firebase-config');
 const { logStructured } = require('../utils/logger');
-const { resolveUserPersistenceScope } = require('./sandbox-persistence-context');
+const { resolveUserPersistenceScope, resolvePersistenceScope } = require('./sandbox-persistence-context');
+const ratingFirestoreStore = require('./rating-firestore-store');
 
 const COLLECTION = 'driver_applications';
 const REVIEWABLE_DOCUMENT_TYPES = new Set(['cnh', 'crlv', 'antecedentes_criminais']);
@@ -302,20 +303,6 @@ function resolveDriverIdentityData(userData = {}, documents = {}) {
   };
 }
 
-function buildCarsByDriverId(cars = {}) {
-  const carsByDriverId = {};
-  Object.entries(cars || {}).forEach(([carId, carValue]) => {
-    if (!carValue || typeof carValue !== 'object') return;
-    const ownerId = String(carValue.driver || carValue.userId || '').trim();
-    if (!ownerId) return;
-    if (!Array.isArray(carsByDriverId[ownerId])) {
-      carsByDriverId[ownerId] = [];
-    }
-    carsByDriverId[ownerId].push({ id: carId, ...carValue });
-  });
-  return carsByDriverId;
-}
-
 function sortApplications(applications, sortBy = 'submissionDate', sortOrder = 'desc') {
   const sortDirection = String(sortOrder).toLowerCase() === 'asc' ? 1 : -1;
   const normalizedSortBy = String(sortBy || 'submissionDate').toLowerCase();
@@ -423,7 +410,6 @@ class DriverApplicationService {
     userData = null,
     canonicalProfileData = null,
     canonicalCnhData = null,
-    carsByDriverId = null,
     userVehiclesRaw = null,
     vehiclesRaw = null,
     ratingsRaw = null
@@ -440,13 +426,6 @@ class DriverApplicationService {
     const userType = normalizeProfileUserType(canonicalProfile) || normalizeProfileUserType(user);
     if (userType !== 'driver') return null;
 
-    let carsIndex = carsByDriverId;
-    if (!carsIndex) {
-      const carsSnapshot = await realtimeDb.ref('cars').once('value');
-      carsIndex = buildCarsByDriverId(carsSnapshot.val() || {});
-    }
-
-    const userCar = (carsIndex[safeDriverId] && carsIndex[safeDriverId][0]) || null;
     const documents = user?.documents && typeof user.documents === 'object' ? user.documents : {};
 
     let resolvedUserVehiclesRaw = userVehiclesRaw;
@@ -514,12 +493,10 @@ class DriverApplicationService {
         type: documents.comprovante_residencia?.fileType || null
       },
       vehicle: {
-        registration: documents.crlv?.fileUrl || userCar?.vehicleRegistration || null,
-        insurance: documents.seguro?.fileUrl || userCar?.vehicleInsurance || null,
-        photos: userCar?.carImage || null,
-        status: documents.crlv
-          ? documents.crlv.status
-          : (userCar ? (user.approved ? 'approved' : 'pending') : 'missing'),
+        registration: documents.crlv?.fileUrl || null,
+        insurance: documents.seguro?.fileUrl || null,
+        photos: null,
+        status: documents.crlv ? documents.crlv.status : 'missing',
         uploadedAt: documents.crlv?.uploadedAt || null,
         type: documents.crlv?.fileType || null
       },
@@ -606,16 +583,7 @@ class DriverApplicationService {
           color: activeUserVehicle.color || '',
           identitySource: activeUserVehicle.identitySource || 'user_vehicles'
         }
-      : userCar
-        ? {
-            make: userCar.carMake || '',
-            model: userCar.carModel || '',
-            year: userCar.carYear || '',
-            plate: userCar.carNumber || '',
-            color: userCar.carColor || '',
-            identitySource: 'cars_legacy'
-          }
-        : null;
+      : null;
     const normalizedKycStatus = user.kycStatus ||
       user.kycOnboarding?.status ||
       (user.kycBlocked === true ? 'blocked' : null) ||
@@ -728,9 +696,10 @@ class DriverApplicationService {
     const safeDriverId = normalizeId(driverId);
     if (!safeDriverId) return null;
 
-    const [ratingsSnapshot, canonicalProfileSnapshot, canonicalCnhSnapshot] = await Promise.all([
+    // Avaliações vivem no Firestore (`ratings`, por targetUserId).
+    const [ratingRows, canonicalProfileSnapshot, canonicalCnhSnapshot] = await Promise.all([
       includeRatings
-        ? realtimeDb.ref(`user_ratings/${safeDriverId}`).once('value')
+        ? ratingFirestoreStore.listByTarget(this.getFirestore(), resolvePersistenceScope({}, { allowLegacyOperational: true }), safeDriverId)
         : Promise.resolve(null),
       this.getFirestore().collection('users').doc(safeDriverId).get(),
       realtimeDb.ref(`driver_activation/${safeDriverId}/documents/cnh`).once('value')
@@ -738,7 +707,7 @@ class DriverApplicationService {
     const canonicalCnhNode = canonicalCnhSnapshot?.val?.() || {};
     const application = await this.buildApplication(safeDriverId, {
       db: realtimeDb,
-      ratingsRaw: ratingsSnapshot?.val?.() || null,
+      ratingsRaw: ratingRows ? Object.fromEntries(ratingRows.map((rating) => [rating.id, rating])) : null,
       canonicalProfileData: canonicalProfileSnapshot?.exists
         ? canonicalProfileSnapshot.data() || {}
         : null,
@@ -756,15 +725,13 @@ class DriverApplicationService {
 
   async syncAllDriverApplications({ db = null } = {}) {
     const realtimeDb = db || this.getRealtimeDb();
-    const [usersSnapshot, carsSnapshot, userVehiclesSnapshot, vehiclesSnapshot] = await Promise.all([
+    const [usersSnapshot, userVehiclesSnapshot, vehiclesSnapshot] = await Promise.all([
       realtimeDb.ref('users').orderByChild('usertype').equalTo('driver').once('value'),
-      realtimeDb.ref('cars').once('value'),
       realtimeDb.ref('user_vehicles').once('value'),
       realtimeDb.ref('vehicles').once('value')
     ]);
 
     const users = usersSnapshot.val() || {};
-    const carsByDriverId = buildCarsByDriverId(carsSnapshot.val() || {});
     const allUserVehicles = userVehiclesSnapshot.val() || {};
     const allVehicles = vehiclesSnapshot.val() || {};
 
@@ -773,7 +740,6 @@ class DriverApplicationService {
       const application = await this.buildApplication(driverId, {
         db: realtimeDb,
         userData: users[driverId],
-        carsByDriverId,
         userVehiclesRaw: allUserVehicles[driverId] || {},
         vehiclesRaw: allVehicles
       });
