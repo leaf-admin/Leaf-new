@@ -11,7 +11,6 @@ function buildEnvironment(overrides = {}) {
     [CANARY_CONFIRMATION]: 'true',
     FIREBASE_PROJECT_ID: 'leaf-test-project',
     FIREBASE_STORAGE_BUCKET: 'leaf-test-project.firebasestorage.app',
-    FIREBASE_DATABASE_URL: 'https://leaf-test-project-default-rtdb.firebaseio.com',
     FIREBASE_SERVICE_ACCOUNT_JSON: JSON.stringify({
       project_id: 'leaf-test-project',
       client_email: 'runtime@example.invalid'
@@ -28,14 +27,6 @@ function buildAdminMock({ storageBytes = Buffer.from(RUN_ID), cleanupFailure = n
     update: jest.fn().mockResolvedValue(undefined),
     delete: jest.fn().mockImplementation(async () => {
       if (cleanupFailure === 'firestore') throw new Error('firestore cleanup failed');
-    })
-  };
-  const realtimeReference = {
-    set: jest.fn().mockResolvedValue(undefined),
-    once: jest.fn().mockResolvedValue({ val: () => ({ runId: RUN_ID }) }),
-    update: jest.fn().mockResolvedValue(undefined),
-    remove: jest.fn().mockImplementation(async () => {
-      if (cleanupFailure === 'rtdb') throw new Error('rtdb cleanup failed');
     })
   };
   const storageFile = {
@@ -65,9 +56,8 @@ function buildAdminMock({ storageBytes = Buffer.from(RUN_ID), cleanupFailure = n
     firestore: jest.fn().mockReturnValue({
       collection: jest.fn().mockReturnValue({ doc: jest.fn().mockReturnValue(firestoreDocument) })
     }),
-    database: jest.fn().mockReturnValue({
-      ref: jest.fn().mockReturnValue(realtimeReference)
-    }),
+    // The Realtime Database is retired: the canary must never open it.
+    database: jest.fn(() => { throw new Error('realtime database must not be opened'); }),
     storage: jest.fn().mockReturnValue({
       bucket: jest.fn().mockReturnValue({ file: jest.fn().mockReturnValue(storageFile) })
     }),
@@ -78,7 +68,6 @@ function buildAdminMock({ storageBytes = Buffer.from(RUN_ID), cleanupFailure = n
     app,
     authClient,
     firestoreDocument,
-    realtimeReference,
     storageFile
   };
 }
@@ -97,10 +86,10 @@ describe('Firebase runtime data-plane canary', () => {
   it('rejects unscoped identifiers before touching the data plane', async () => {
     const { adminImpl } = buildAdminMock();
     await expect(runCanary({
-      environment: buildEnvironment({ FIREBASE_DATABASE_URL: 'https://example.com' }),
+      environment: buildEnvironment(),
       adminImpl,
-      runIdFactory: () => RUN_ID
-    })).rejects.toThrow('FIREBASE_DATABASE_URL inválida');
+      runIdFactory: () => '../operational'
+    })).rejects.toThrow('Run ID inválido');
     expect(() => validateRunId('../operational')).toThrow('Run ID inválido');
     expect(adminImpl.initializeApp).not.toHaveBeenCalled();
   });
@@ -118,15 +107,14 @@ describe('Firebase runtime data-plane canary', () => {
       runId: RUN_ID,
       projectId: 'leaf-test-project',
       bucketName: 'leaf-test-project.firebasestorage.app',
-      checks: ['firestore', 'realtime_database', 'storage', 'firebase_auth'],
+      checks: ['firestore', 'storage', 'firebase_auth'],
       fcm: 'covered_by_live_iam_preflight_without_sending_message'
     });
     expect(mocks.firestoreDocument.set).toHaveBeenCalled();
     expect(mocks.firestoreDocument.get).toHaveBeenCalled();
     expect(mocks.firestoreDocument.update).toHaveBeenCalled();
-    expect(mocks.realtimeReference.set).toHaveBeenCalled();
-    expect(mocks.realtimeReference.once).toHaveBeenCalledWith('value');
-    expect(mocks.realtimeReference.update).toHaveBeenCalled();
+    expect(mocks.adminImpl.database).not.toHaveBeenCalled();
+    expect(mocks.adminImpl.initializeApp.mock.calls[0][0]).not.toHaveProperty('databaseURL');
     expect(mocks.storageFile.save).toHaveBeenCalled();
     expect(mocks.storageFile.download).toHaveBeenCalled();
     expect(mocks.storageFile.setMetadata).toHaveBeenCalled();
@@ -135,7 +123,6 @@ describe('Firebase runtime data-plane canary', () => {
     expect(mocks.authClient.updateUser).toHaveBeenCalled();
     expect(mocks.authClient.deleteUser).toHaveBeenCalled();
     expect(mocks.storageFile.delete).toHaveBeenCalledWith({ ignoreNotFound: true });
-    expect(mocks.realtimeReference.remove).toHaveBeenCalled();
     expect(mocks.firestoreDocument.delete).toHaveBeenCalled();
     expect(mocks.app.delete).toHaveBeenCalled();
     expect(JSON.stringify(report)).not.toContain('runtime@example.invalid');
@@ -151,7 +138,6 @@ describe('Firebase runtime data-plane canary', () => {
 
     expect(mocks.authClient.deleteUser).not.toHaveBeenCalled();
     expect(mocks.storageFile.delete).toHaveBeenCalled();
-    expect(mocks.realtimeReference.remove).toHaveBeenCalled();
     expect(mocks.firestoreDocument.delete).toHaveBeenCalled();
     expect(mocks.app.delete).toHaveBeenCalled();
   });

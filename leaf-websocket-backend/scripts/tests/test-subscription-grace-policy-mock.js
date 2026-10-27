@@ -181,7 +181,6 @@ async function run() {
   const fakeFirestore = new FakeFirestore(fakeState.firestore);
 
   const firebaseConfig = require(path.join(__dirname, '..', '..', 'firebase-config'));
-  firebaseConfig.getRealtimeDB = () => fakeRealtime;
   firebaseConfig.getFirestore = () => fakeFirestore;
 
   const admin = require('firebase-admin');

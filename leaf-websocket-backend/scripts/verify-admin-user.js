@@ -13,8 +13,7 @@ const serviceAccountPath = path.join(__dirname, '..', 'leaf-reactnative-firebase
 let firebaseApp;
 try {
   firebaseApp = admin.initializeApp({
-    credential: admin.credential.cert(serviceAccountPath),
-    databaseURL: 'https://leaf-reactnative-default-rtdb.firebaseio.com'
+    credential: admin.credential.cert(serviceAccountPath)
   });
   console.log('✅ Firebase Admin inicializado');
 } catch (error) {

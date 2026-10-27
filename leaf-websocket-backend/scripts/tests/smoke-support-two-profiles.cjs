@@ -43,15 +43,13 @@ function statusError(label, response) {
 function ensureAdminInitialized() {
   if (admin.apps.length > 0) return admin.app();
 
-  const databaseURL = process.env.FIREBASE_DATABASE_URL || 'https://leaf-reactnative-default-rtdb.firebaseio.com';
   const serviceAccountJson =
     process.env.FIREBASE_SERVICE_ACCOUNT_JSON ||
     process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON;
 
   if (serviceAccountJson) {
     return admin.initializeApp({
-      credential: admin.credential.cert(JSON.parse(serviceAccountJson)),
-      databaseURL
+      credential: admin.credential.cert(JSON.parse(serviceAccountJson))
     });
   }
 
@@ -61,8 +59,7 @@ function ensureAdminInitialized() {
   }
 
   return admin.initializeApp({
-    credential: admin.credential.cert(serviceAccountPath),
-    databaseURL
+    credential: admin.credential.cert(serviceAccountPath)
   });
 }
 

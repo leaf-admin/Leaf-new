@@ -30,11 +30,6 @@ async function runCanary({
   if (!readBooleanLike(environment[CANARY_CONFIRMATION], false)) {
     throw new Error(`${CANARY_CONFIRMATION}=true é obrigatório`);
   }
-  const databaseURL = String(environment.FIREBASE_DATABASE_URL || '').trim();
-  if (!/^https:\/\/[a-z0-9.-]+(?:\.firebasedatabase\.app|\.firebaseio\.com)\/?$/.test(databaseURL)) {
-    throw new Error('FIREBASE_DATABASE_URL inválida para o canário Firebase runtime');
-  }
-
   const credentialJson = resolveCredentialJson(environment);
   const { projectId, bucketName } = resolveAuditTarget(credentialJson, environment);
   const runId = validateRunId(runIdFactory());
@@ -43,15 +38,12 @@ async function runCanary({
   const app = adminImpl.initializeApp({
     credential,
     projectId,
-    databaseURL,
     storageBucket: bucketName
   }, appName);
 
   const firestoreDocument = adminImpl.firestore(app)
     .collection('_ops_runtime_canary')
     .doc(runId);
-  const realtimeReference = adminImpl.database(app)
-    .ref(`__ops_runtime_canary/${runId}`);
   const storageFile = adminImpl.storage(app)
     .bucket(bucketName)
     .file(`__ops_runtime_canary/${runId}.txt`);
@@ -59,7 +51,6 @@ async function runCanary({
   const authUid = `ops-canary-${runId}`;
   const created = {
     firestore: false,
-    realtimeDatabase: false,
     storage: false,
     auth: false
   };
@@ -73,14 +64,6 @@ async function runCanary({
       throw new Error('Firestore não confirmou a leitura do canário');
     }
     await firestoreDocument.update({ state: 'updated' });
-
-    await realtimeReference.set({ runId, state: 'created' });
-    created.realtimeDatabase = true;
-    const realtimeSnapshot = await realtimeReference.once('value');
-    if (realtimeSnapshot.val()?.runId !== runId) {
-      throw new Error('Realtime Database não confirmou a leitura do canário');
-    }
-    await realtimeReference.update({ state: 'updated' });
 
     await storageFile.save(Buffer.from(runId, 'utf8'), {
       contentType: 'text/plain',
@@ -107,7 +90,8 @@ async function runCanary({
       runId,
       projectId,
       bucketName,
-      checks: ['firestore', 'realtime_database', 'storage', 'firebase_auth'],
+      // The Realtime Database is retired: Firestore, Storage and Auth are the data plane.
+      checks: ['firestore', 'storage', 'firebase_auth'],
       fcm: 'covered_by_live_iam_preflight_without_sending_message'
     };
   } finally {
@@ -116,9 +100,6 @@ async function runCanary({
     }
     if (created.storage) {
       try { await storageFile.delete({ ignoreNotFound: true }); } catch (error) { cleanupErrors.push(`storage:${error.message}`); }
-    }
-    if (created.realtimeDatabase) {
-      try { await realtimeReference.remove(); } catch (error) { cleanupErrors.push(`rtdb:${error.message}`); }
     }
     if (created.firestore) {
       try { await firestoreDocument.delete(); } catch (error) { cleanupErrors.push(`firestore:${error.message}`); }

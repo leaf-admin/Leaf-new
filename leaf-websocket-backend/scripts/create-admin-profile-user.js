@@ -55,8 +55,7 @@ function loadServiceAccount() {
 try {
   if (!admin.apps.length) {
     admin.initializeApp({
-      credential: admin.credential.cert(loadServiceAccount()),
-      databaseURL: process.env.FIREBASE_DATABASE_URL || 'https://leaf-reactnative-default-rtdb.firebaseio.com'
+      credential: admin.credential.cert(loadServiceAccount())
     });
   }
   console.log('✅ Firebase inicializado');
