@@ -87,6 +87,15 @@ describe('health-check-service firebase checks', () => {
     expect(result.cache.status).toBe('MISS');
   });
 
+  test('checkFirebase não espera conexão do RTDB aposentado', async () => {
+    process.env.RTDB_RETIRED = 'true';
+    const result = await healthCheckService.checkFirebase();
+
+    expect(realtimeOnMock).not.toHaveBeenCalled();
+    expect(result.components.realtimeDB.status).toBe('healthy');
+    expect(result.status).toBe('healthy');
+  });
+
   test('checkFirebase marca RTDB ausente como unhealthy', async () => {
     getRealtimeDBMock.mockReturnValueOnce(null);
 

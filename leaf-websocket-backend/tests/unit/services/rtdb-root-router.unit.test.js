@@ -98,3 +98,32 @@ describe('native migration merge rule (RTDB exit)', () => {
     expect(router.toView(stored)).toEqual(value);
   });
 });
+
+describe('retired RTDB stand-in (RTDB exit, domain 8)', () => {
+  it('reads an empty database, drops writes with an error log and never opens RTDB', async () => {
+    const logged = [];
+    const db = router.createRetiredRtdb({ log: (level, message, meta) => logged.push(`${level}:${message}:${meta.root}`) });
+    expect((await db.ref('receipts/r1').once('value')).val()).toBeNull();
+    expect((await db.ref('receipts').orderByChild('owner').equalTo('u1').limitToLast(5).once('value')).exists()).toBe(false);
+    await db.ref('receipts/r1').set({ ok: true });
+    await db.ref().update({ 'ratings/a': 1, 'trip_ratings/t/a': 1 });
+    await expect(db.ref('ratings/a').transaction(() => 1)).resolves.toMatchObject({ committed: false });
+    expect((await db.ref('.info/connected').once('value')).val()).toBeNull();
+    expect([...new Set(logged)]).toEqual([
+      'warn:rtdb_retired_read:receipts', 'error:rtdb_retired_write:receipts',
+      'error:rtdb_retired_write:ratings', 'error:rtdb_retired_write:trip_ratings'
+    ]);
+    const child = db.ref('ratings').push();
+    expect(child.key).toMatch(/^[-0-9A-Za-z_]{20}$/);
+    expect(router.pushId(1000) < router.pushId(2000)).toBe(true);
+  });
+
+  it('retired implies no RTDB mirror and swaps the client behind the router', () => {
+    expect(router.mirrorWritesEnabled({ RTDB_RETIRED: 'true' })).toBe(false);
+    expect(router.mirrorWritesEnabled({})).toBe(true);
+    const admin = { database: jest.fn(() => ({ real: true })) };
+    expect(router.realtimeClient(admin, { RTDB_RETIRED: 'true' }).__rtdbRetired).toBe(true);
+    expect(admin.database).not.toHaveBeenCalled();
+    expect(router.realtimeClient(admin, {})).toEqual({ real: true });
+  });
+});

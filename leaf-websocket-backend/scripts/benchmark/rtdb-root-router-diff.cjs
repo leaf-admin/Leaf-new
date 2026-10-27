@@ -7,7 +7,7 @@
 const assert = require('node:assert/strict');
 const withPrivateRealtime = require('./private-rtdb.cjs');
 const withPrivateFirestore = require('./private-firestore.cjs');
-const { createRouter } = require('../../services/rtdb-root-router');
+const { createRouter, createRetiredRtdb } = require('../../services/rtdb-root-router');
 
 const ROOTS = 'vehicles,user_vehicles,vehicle_plate_index,driver_activation,driver_documents_index_stats,driver_document_mutation_locks,users,subscriptions,bookings,sandbox_bookings';
 const NATIVE = 'vehicles:vehicle_catalog,user_vehicles:driver_vehicle_links,vehicle_plate_index:vehicle_plate_index,'
@@ -201,6 +201,23 @@ async function readAll(db) {
       results.retiringRawRoots = Object.keys(rawTop).sort();
       results.retiringLogged = logged.filter(([message]) => message === 'rtdb_unrouted_access').map(([, root]) => root);
     });
+    // RTDB retired: no RTDB client at all. Reads and transactions still match
+    // RTDB; the only RTDB traffic left (the unrouted probe) is dropped and logged.
+    {
+      for (const entry of NATIVE.split(',')) {
+        for (const doc of (await firestore.collection(entry.split(':')[1]).get()).docs) await doc.ref.delete();
+      }
+      const logged = [];
+      const log = (level, message, meta) => logged.push([level, message, meta?.root]);
+      const retired = createRouter(createRetiredRtdb({ log }), { getFirestore: () => firestore, log,
+        env: { RTDB_FIRESTORE_WRITE_ROOTS: ROOTS, RTDB_FIRESTORE_READ_ROOTS: ROOTS, RTDB_FIRESTORE_NATIVE_COLLECTIONS: NATIVE, RTDB_RETIRED: 'true' } });
+      results.retiredTx = await operations(retired);
+      results.retired = await readAll(retired);
+      results.retiredLogged = logged.filter(([, message]) => message !== 'rtdb_unrouted_access').map(([level, message, root]) => `${level}:${message}:${root}`);
+      const pushed = await retired.ref('vehicles').push({ id: 'pushed', status: 'idle' });
+      results.retiredPushKey = pushed.key;
+      results.retiredPushed = (await retired.ref(`vehicles/${pushed.key}`).once('value')).val();
+    }
   });
   // `users` is not routed: through the served router it must still be plain RTDB.
   // Known RTDB quirk, not reproduced: RTDB runs the update first with a null
@@ -225,6 +242,11 @@ async function readAll(db) {
   assert.deepEqual(withoutRelease(results.retiringTx), withoutRelease(results.controlTx), 'Mirror-off transaction outcomes differ');
   assert.deepEqual(results.retiringRawRoots, ['receipts_probe'], 'Mirror off still wrote served roots to RTDB');
   assert.deepEqual([...new Set(results.retiringLogged)], ['receipts_probe'], 'Unrouted access was not logged');
+  assert.deepEqual(withoutLocks(results.retired), withoutLocks(results.control), 'Retired reads differ from RTDB');
+  assert.deepEqual(withoutRelease(results.retiredTx), withoutRelease(results.controlTx), 'Retired transaction outcomes differ');
+  assert.deepEqual([...new Set(results.retiredLogged)], ['error:rtdb_retired_write:receipts_probe'], 'Retired stand-in saw traffic other than the unrouted probe');
+  assert.match(results.retiredPushKey, /^[-0-9A-Za-z_]{20}$/, 'Push key is not a Firebase push id');
+  assert.deepEqual(results.retiredPushed, { id: 'pushed', status: 'idle' }, 'Push through the retired router did not land in Firestore');
   console.log(JSON.stringify({ ok: true, checks: Object.keys(results.control).length, transactions: results.controlTx, control: results.control }));
   process.exit(0);
 })().catch(error => { console.error(error); process.exit(1); });

@@ -128,7 +128,9 @@ function initializeFirebase() {
         // módulo. Se um deles falhar, a próxima tentativa reutiliza o app
         // default e refaz a inicialização completa.
         const firestoreCandidate = admin.firestore();
-        const realtimeDBCandidate = admin.database();
+        // RTDB_RETIRED=true: RTDB is never opened; the router serves every
+        // routed root from Firestore over a retired stand-in.
+        const realtimeDBCandidate = require('./services/rtdb-root-router').realtimeClient(admin);
         const storageCandidate = admin.storage();
 
         firebaseApp = appCandidate;
@@ -150,7 +152,7 @@ function initializeFirebase() {
             service: 'firebase',
             operation: 'firestore_connect'
         });
-        logStructured('info', 'Realtime Database conectado', {
+        logStructured('info', realtimeDBCandidate.__rtdbRetired ? 'Realtime Database aposentado (API servida pelo Firestore)' : 'Realtime Database conectado', {
             service: 'firebase',
             operation: 'realtime_connect'
         });

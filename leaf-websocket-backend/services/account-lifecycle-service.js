@@ -1,7 +1,7 @@
 const admin = require('firebase-admin');
-const { createRouter: createRtdbRootRouter } = require('./rtdb-root-router');
+const { createRouter: createRtdbRootRouter, realtimeClient } = require('./rtdb-root-router');
 // RTDB exit: roots routed to Firestore are honored; plain client otherwise.
-const routedRealtimeDb = () => createRtdbRootRouter(admin.database(), { getFirestore: () => admin.firestore() });
+const routedRealtimeDb = () => createRtdbRootRouter(realtimeClient(admin), { getFirestore: () => admin.firestore() });
 
 function assertAccountWritable(data = {}) {
   if (data.accountDisabled === true || ['deletion_pending', 'deleted'].includes(data.status)) {

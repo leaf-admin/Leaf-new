@@ -28,7 +28,8 @@ class SubscriptionStateService {
 
   getRealtimeDB() {
     try {
-      return firebaseConfig?.getRealtimeDB?.() || (admin.apps.length > 0 ? admin.database() : null);
+      // Only the routed client: `subscriptions` is served from Firestore, never raw RTDB.
+      return firebaseConfig?.getRealtimeDB?.() || null;
     } catch (_) {
       return null;
     }
