@@ -10,6 +10,7 @@ const {
   adjustDocumentIndexCounters,
   getDocumentFirestore,
   driverDocumentStore,
+  userStore,
   admin,
   adminDocumentUpload,
   assertCurrentCrlvReviewBinding,
@@ -1532,18 +1533,17 @@ router.post('/api/drivers/applications/:id/approve', authenticateJWT, requireRol
         const db = firebaseConfig.getRealtimeDB();
 
         // Verificar se o usuário existe
-        const userSnapshot = await db.ref(`users/${id}`).once('value');
-        if (!userSnapshot.exists()) {
+        const firestore = getDocumentFirestore();
+        const user = await userStore.readUser(firestore, id);
+        if (!user) {
           return res.status(404).json({ error: 'Motorista não encontrado' });
         }
 
-        const user = userSnapshot.val();
         if (user.usertype !== 'driver') {
           return res.status(400).json({ error: 'Usuário não é um motorista' });
         }
 
-        const firestore = getDocumentFirestore();
-        const documents = (await driverDocumentStore.readUser(firestore, id))?.documents || {};
+        const documents = (await userStore.readUser(firestore, id))?.documents || {};
         const manualApprovalEvidence = Object.entries(documents).map(([docType, doc]) => ({
           type: sanitizeDocumentType(docType) || docType,
           status: doc?.status || null,
@@ -1587,7 +1587,7 @@ router.post('/api/drivers/applications/:id/approve', authenticateJWT, requireRol
         };
 
         // ✅ Salvar no Firebase Realtime Database
-        await db.ref(`users/${id}`).update(updates);
+        await userStore.updateUser(firestore, id, updates);
 
         // ✅ Atualizar também todos os documentos para aprovados
         const documentUpdates = [];
@@ -1701,12 +1701,12 @@ router.post('/api/drivers/applications/:id/reject', authenticateJWT, requireRole
         const db = firebaseConfig.getRealtimeDB();
 
         // Verificar se o usuário existe
-        const userSnapshot = await db.ref(`users/${id}`).once('value');
-        if (!userSnapshot.exists()) {
+        const firestore = getDocumentFirestore();
+        const user = await userStore.readUser(firestore, id);
+        if (!user) {
           return res.status(404).json({ error: 'Motorista não encontrado' });
         }
 
-        const user = userSnapshot.val();
         if (user.usertype !== 'driver') {
           return res.status(400).json({ error: 'Usuário não é um motorista' });
         }
@@ -1727,11 +1727,10 @@ router.post('/api/drivers/applications/:id/reject', authenticateJWT, requireRole
         };
 
         // ✅ Salvar no Firebase Realtime Database
-        await db.ref(`users/${id}`).update(updates);
+        await userStore.updateUser(firestore, id, updates);
 
         // ✅ Atualizar também todos os documentos para rejeitados
-        const firestore = getDocumentFirestore();
-        const documents = (await driverDocumentStore.readUser(firestore, id))?.documents || {};
+        const documents = (await userStore.readUser(firestore, id))?.documents || {};
         const documentUpdates = [];
         const counterTransitions = [];
         const reviewedAtIso = new Date().toISOString();

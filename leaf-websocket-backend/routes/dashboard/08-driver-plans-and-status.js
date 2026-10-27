@@ -38,7 +38,9 @@ const {
   sha256Buffer,
   subscriptionStateService,
   supportTicketService,
-  updateUserOperationalStatus
+  updateUserOperationalStatus,
+  getDocumentFirestore,
+  userStore
 } = require('./shared');
 
 const driverListData = require('../../services/dashboard-driver-list-data');
@@ -304,11 +306,8 @@ router.get('/api/drivers/:driverId/complete', authenticateJWT, requireRole(DASHB
       return res.status(error.statusCode || 500).json({ error: 'Firebase não disponível' });
     }
 
-    const db = firebaseConfig.getRealtimeDB();
-
     // Buscar motorista
-    const driverSnapshot = await db.ref(`users/${driverId}`).once('value');
-    const driver = driverSnapshot.val();
+    const driver = await userStore.readUser(getDocumentFirestore(), driverId);
 
     if (!driver || driver.usertype !== 'driver') {
       return res.status(404).json({ error: 'Motorista não encontrado' });
@@ -534,10 +533,8 @@ router.patch('/api/drivers/:driverId/plan', authenticateJWT, requireRole(DASHBOA
       return res.status(500).json({ error: 'Firebase não disponível' });
     }
 
-    const db = firebaseConfig.getRealtimeDB();
-
     // Atualizar plano
-    await db.ref(`users/${driverId}/planType`).set(planType);
+    await userStore.setUserField(getDocumentFirestore(), driverId, ['planType'], planType);
 
     logger.info(`✅ Plano do motorista ${driverId} atualizado para ${planType}`);
 
@@ -715,8 +712,6 @@ router.post('/api/drivers/:driverId/extend-free', authenticateJWT, requireRole(D
       return res.status(500).json({ error: 'Firebase não disponível' });
     }
 
-    const db = firebaseConfig.getRealtimeDB();
-
     const now = new Date();
     const newEndDate = new Date(now.getTime() + days * 24 * 60 * 60 * 1000);
 
@@ -725,7 +720,7 @@ router.post('/api/drivers/:driverId/extend-free', authenticateJWT, requireRole(D
     else if (type === 'months') fieldName = 'free_months_end';
     else if (type === 'promotion') fieldName = 'promotion_free_end';
 
-    await db.ref(`users/${driverId}/${fieldName}`).set(newEndDate.toISOString());
+    await userStore.setUserField(getDocumentFirestore(), driverId, [fieldName], newEndDate.toISOString());
 
     logger.info(`✅ Período grátis do motorista ${driverId} estendido: ${type} até ${newEndDate.toISOString()}`);
 
@@ -1251,10 +1246,8 @@ router.post('/api/drivers/:driverId/approve', authenticateJWT, requireRole(DASHB
       return res.status(500).json({ error: 'Firebase não disponível' });
     }
 
-    const db = firebaseConfig.getRealtimeDB();
     const nowIso = new Date().toISOString();
-	    const userSnapshot = await db.ref(`users/${driverId}`).once('value');
-	    const currentUser = userSnapshot.val() || {};
+	    const currentUser = await userStore.readUser(getDocumentFirestore(), driverId) || {};
 	    let activationStatus = null;
 	    try {
 	      activationStatus = await recomputeDriverActivationStatus(driverId);
@@ -1309,7 +1302,7 @@ router.post('/api/drivers/:driverId/approve', authenticateJWT, requireRole(DASHB
 	      approvalUpdate.status = 'approved';
 	    }
 
-	    await db.ref(`users/${driverId}`).update(approvalUpdate);
+	    await userStore.updateUser(getDocumentFirestore(), driverId, approvalUpdate);
 
     await auditService.logEvent({
       userId: req.user?.id || req.user?.userId || req.user?.email || 'dashboard',

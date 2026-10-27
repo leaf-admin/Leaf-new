@@ -1,5 +1,6 @@
 const admin = require('firebase-admin');
 const { logStructured } = require('../utils/logger');
+const userStore = require('./user-store');
 
 let firebaseConfig = null;
 try {
@@ -154,18 +155,18 @@ class DriverSubscriptionService {
     const realtimeDb = db || getRealtimeDB();
     const firestore = getFirestore();
 
-    const [driverSnapshot, rawSubscriptionSnapshot, subscriptionSnapshot] = await Promise.all([
-      realtimeDb.ref(`users/${driverId}`).once('value'),
+    const [driverRecord, rawSubscriptionSnapshot, subscriptionSnapshot] = await Promise.all([
+      userStore.readUser(firestore, driverId),
       firestore.collection(RAW_COLLECTION).doc(driverId).get().catch(() => null),
       realtimeDb.ref(`subscriptions/${driverId}`).once('value')
     ]);
 
-    if (!driverSnapshot.exists()) {
+    if (!driverRecord) {
       await firestore.collection(COLLECTION).doc(driverId).delete().catch(() => {});
       return null;
     }
 
-    const driver = driverSnapshot.val() || {};
+    const driver = driverRecord;
     if (String(driver.usertype || driver.userType || '').toLowerCase() !== 'driver') {
       await firestore.collection(COLLECTION).doc(driverId).delete().catch(() => {});
       return null;

@@ -332,6 +332,16 @@ describe('driver-application-service', () => {
         cpf: '00000000000',
         createdAt: '2026-07-14T18:00:00.000Z',
         internalOnlyMarker: 'do-not-project',
+        // Fields the activation pipeline writes on the same users/{id} record.
+        userType: 'driver',
+        role: 'driver',
+        documents: {
+          cnh: {
+            status: 'approved',
+            fileUrl: 'https://storage.test/cnh.pdf',
+          },
+        },
+        driverActivation: { activationState: 'APPROVED_NEEDS_LIVENESS' },
       }),
     });
     mockRealtimeOnce
@@ -343,20 +353,6 @@ describe('driver-application-service', () => {
             cpf: '11111111111',
             dataNascimento: '01/02/1990',
           },
-        }),
-      })
-      .mockResolvedValueOnce({
-        val: () => ({
-          usertype: 'driver',
-          userType: 'driver',
-          role: 'driver',
-          documents: {
-            cnh: {
-              status: 'approved',
-              fileUrl: 'https://storage.test/cnh.pdf',
-            },
-          },
-          driverActivation: { activationState: 'APPROVED_NEEDS_LIVENESS' },
         }),
       })
       .mockResolvedValueOnce({ val: () => ({}) });
@@ -395,10 +391,9 @@ describe('driver-application-service', () => {
       { id: 'r1', tripId: 't1', reviewerId: 'p1', rating: 4, createdAt: '2026-10-01T10:00:00.000Z' },
       { id: 'r2', tripId: 't2', reviewerId: 'p2', rating: 5, createdAt: '2026-10-02T10:00:00.000Z' }
     ]);
-    mockCollectionDocGet.mockResolvedValue({ exists: false });
+    mockCollectionDocGet.mockResolvedValue({ exists: true, data: () => ({ usertype: 'driver', firstName: 'Ana' }) });
     mockRealtimeOnce
       .mockResolvedValueOnce({ val: () => ({}) })
-      .mockResolvedValueOnce({ val: () => ({ usertype: 'driver', firstName: 'Ana' }) })
       .mockResolvedValueOnce({ val: () => ({}) });
 
     const application = await service.syncDriverApplication('driver_rated', { includeRatings: true });

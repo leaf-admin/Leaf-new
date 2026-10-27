@@ -3,6 +3,7 @@ const firebaseConfig = require('../firebase-config');
 const { logStructured } = require('../utils/logger');
 const { resolveUserPersistenceScope, resolvePersistenceScope } = require('./sandbox-persistence-context');
 const ratingFirestoreStore = require('./rating-firestore-store');
+const userStore = require('./user-store');
 
 const COLLECTION = 'driver_applications';
 const REVIEWABLE_DOCUMENT_TYPES = new Set(['cnh', 'crlv', 'antecedentes_criminais']);
@@ -418,7 +419,7 @@ class DriverApplicationService {
     const safeDriverId = normalizeId(driverId);
     if (!safeDriverId) return null;
 
-    const user = userData || (await realtimeDb.ref(`users/${safeDriverId}`).once('value')).val();
+    const user = userData || await userStore.readUser(this.getFirestore(), safeDriverId);
     if (!user || typeof user !== 'object') return null;
     const canonicalProfile = canonicalProfileData && typeof canonicalProfileData === 'object'
       ? canonicalProfileData

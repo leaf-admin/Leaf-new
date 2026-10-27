@@ -18,7 +18,9 @@ const {
   requireAdminMutationsEnabled,
   requireRole,
   router,
-  subscriptionStateService
+  subscriptionStateService,
+  getDocumentFirestore,
+  userStore
 } = require('./shared');
 
 // 💳 Subscription Management - MODELO DIÁRIO (cobrança no saque)
@@ -215,12 +217,11 @@ router.patch('/api/subscriptions/:driverId', authenticateJWT, requireRole(DASHBO
         const db = firebaseConfig.getRealtimeDB();
 
         // Verificar se o motorista existe
-        const driverSnapshot = await db.ref(`users/${driverId}`).once('value');
-        if (!driverSnapshot.exists()) {
+        const driver = await userStore.readUser(getDocumentFirestore(), driverId);
+        if (!driver) {
           return res.status(404).json({ error: 'Motorista não encontrado' });
         }
 
-        const driver = driverSnapshot.val();
         if (driver.usertype !== 'driver') {
           return res.status(400).json({ error: 'Usuário não é um motorista' });
         }

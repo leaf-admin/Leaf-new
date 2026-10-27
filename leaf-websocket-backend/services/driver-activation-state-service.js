@@ -1,5 +1,7 @@
 const firebaseConfig = require('../firebase-config');
 const { logStructured } = require('../utils/logger');
+const userStore = require('./user-store');
+const driverDocumentStore = require('./driver-document-store');
 const { normalizeVehicleOcrPayload } = require('../utils/vehicle-ocr-data');
 
 const DRIVER_ACTIVATION_STATES = Object.freeze({
@@ -396,7 +398,8 @@ async function resolveDriverActivationState({
   db = null,
   activationNode = null,
   userData = null,
-  vehicleIdHint = null
+  vehicleIdHint = null,
+  firestore = null
 } = {}) {
   const safeDriverId = String(driverId || '').trim();
   if (!safeDriverId) {
@@ -407,6 +410,13 @@ async function resolveDriverActivationState({
   if (!realtimeDb) {
     throw new Error('FIREBASE_RTDB_UNAVAILABLE');
   }
+  // users and driver_activation are native Firestore records; vehicles still
+  // go through the router (`realtimeDb`).
+  const nativeStore = () => {
+    const store = userStore.resolveFirestore({ firestore });
+    if (!store) throw new Error('FIREBASE_FIRESTORE_UNAVAILABLE');
+    return store;
+  };
 
   // Independent reads go out together: one round trip instead of two before
   // the active vehicle record (which depends on user_vehicles).
@@ -421,13 +431,13 @@ async function resolveDriverActivationState({
     : null;
   prefetchedVehicle?.snapshot?.catch?.(() => {});
   const [resolvedActivationSnapshot, resolvedUserSnapshot, vehicles] = await Promise.all([
-    activationNode ? Promise.resolve(null) : realtimeDb.ref(`driver_activation/${safeDriverId}`).once('value'),
-    userData ? Promise.resolve(null) : realtimeDb.ref(`users/${safeDriverId}`).once('value'),
+    activationNode ? Promise.resolve(null) : driverDocumentStore.readActivation(nativeStore(), safeDriverId),
+    userData ? Promise.resolve(null) : userStore.readUser(nativeStore(), safeDriverId),
     readUserVehicles(realtimeDb, safeDriverId)
   ]);
 
-  const resolvedActivationNode = activationNode || resolvedActivationSnapshot?.val?.() || {};
-  const resolvedUserData = userData || resolvedUserSnapshot?.val?.() || {};
+  const resolvedActivationNode = activationNode || resolvedActivationSnapshot || {};
+  const resolvedUserData = userData || resolvedUserSnapshot || {};
   const activeVehicleRead = await readActiveVehicleRecord(realtimeDb, safeDriverId, vehicles, prefetchedVehicle);
   const canonicalCrlvNode = resolvedActivationNode?.documents?.crlv || null;
   const crlvPresent = Boolean(canonicalCrlvNode);

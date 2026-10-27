@@ -1,15 +1,17 @@
 const { createDriverAutoApprovalService, resolveDriverCpf } = require('../../../services/driver-auto-approval-service');
+const { createTreeFirestore } = require('../../helpers/rtdb-tree-firestore');
 
+// The user record lives in the native users collection; `db` is only handed
+// through to the CPF registry.
+let currentFirestore = null;
 function fakeDb(user) {
-  const writes = [];
+  const state = { users: { d1: JSON.parse(JSON.stringify(user)) } };
+  currentFirestore = createTreeFirestore(state);
+  const firestore = currentFirestore;
   return {
-    writes,
-    ref(path) {
-      return {
-        once: async () => ({ val: () => (path.endsWith('/autoApproval') ? null : user) }),
-        set: async (value) => writes.push({ op: 'set', path, value }),
-        update: async (value) => writes.push({ op: 'update', path, value })
-      };
+    state,
+    get writes() {
+      return firestore.commits;
     }
   };
 }
@@ -20,7 +22,7 @@ function build(overrides = {}) {
     claimCpf: jest.fn().mockResolvedValue({ digits: '12345678909' }),
     assertNotPermanentlyBlocked: jest.fn().mockResolvedValue(undefined),
     auditService: { logEvent: jest.fn().mockResolvedValue(undefined) },
-    getFirestore: () => ({}),
+    getFirestore: () => currentFirestore,
     now: () => '2026-10-14T12:00:00.000Z',
     ...overrides
   };
@@ -53,8 +55,8 @@ describe('driver auto approval', () => {
 
     expect(result).toEqual({ approved: true, status: 'approved' });
     expect(deps.claimCpf).toHaveBeenCalledWith(expect.objectContaining({ userId: 'd1', cpf: '123.456.789-09' }));
-    const update = db.writes.find((w) => w.op === 'update' && w.path === 'users/d1');
-    expect(update.value).toEqual(expect.objectContaining({ approved: true, status: 'approved', approvedBy: 'system:auto_canonical_evidence' }));
+    expect(db.state.users.d1).toEqual(expect.objectContaining({ approved: true, status: 'approved', approvedBy: 'system:auto_canonical_evidence' }));
+    expect(db.state.users.d1.documents.cnh.extractedData.cpf).toBe('123.456.789-09');
     expect(deps.auditService.logEvent).toHaveBeenCalledWith(expect.objectContaining({ action: 'driver.auto_approval' }));
   });
 
@@ -68,7 +70,8 @@ describe('driver auto approval', () => {
     const taken = build({ claimCpf: jest.fn().mockRejectedValue(Object.assign(new Error('x'), { code: 'PROFILE_CPF_ALREADY_REGISTERED' })) });
     const db1 = fakeDb(driver);
     expect(await taken.service.maybeAutoApprove({ db: db1, driverId: 'd1', canonicalState: ACTIVE })).toEqual({ approved: false, status: 'needs_review', reason: 'cpf_uniqueness' });
-    expect(db1.writes.some((w) => w.path === 'users/d1' && w.value.approved)).toBe(false);
+    expect(db1.state.users.d1.approved).toBeUndefined();
+    expect(db1.state.users.d1.autoApproval).toEqual(expect.objectContaining({ status: 'needs_review', reason: 'cpf_uniqueness' }));
 
     const blocked = build({ assertNotPermanentlyBlocked: jest.fn().mockRejectedValue(new Error('blocked')) });
     expect((await blocked.service.maybeAutoApprove({ db: fakeDb(driver), driverId: 'd1', canonicalState: ACTIVE })).reason).toBe('identity_enforcement');
