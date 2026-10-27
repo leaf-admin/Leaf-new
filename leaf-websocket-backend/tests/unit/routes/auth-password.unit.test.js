@@ -40,6 +40,20 @@ jest.mock('firebase-admin', () => ({
   }
 }));
 
+// users/{uid} goes through services/user-store; mockRealtimeUsers holds the records.
+jest.mock('../../../services/user-store', () => ({
+  resolveFirestore: jest.fn(() => ({})),
+  readUser: jest.fn(async (_firestore, uid) => mockRealtimeUsers.get(uid) ?? null),
+  createUserIfMissing: jest.fn(async (_firestore, uid, profile) => {
+    if (mockRealtimeUsers.has(uid)) return { created: false, value: mockRealtimeUsers.get(uid) };
+    mockRealtimeUsers.set(uid, profile);
+    return { created: true, value: profile };
+  }),
+  updateUser: jest.fn(async (_firestore, uid, patch) => {
+    mockRealtimeUsers.set(uid, { ...(mockRealtimeUsers.get(uid) || {}), ...patch });
+  })
+}));
+
 jest.mock('../../../firebase-config', () => ({
   getFirestore: jest.fn(() => ({
     collection: jest.fn(() => ({

@@ -1,7 +1,5 @@
 const admin = require('firebase-admin');
-const { createRouter: createRtdbRootRouter, realtimeClient } = require('./rtdb-root-router');
-// RTDB exit: roots routed to Firestore are honored; plain client otherwise.
-const routedRealtimeDb = () => createRtdbRootRouter(realtimeClient(admin), { getFirestore: () => admin.firestore() });
+const userStore = require('./user-store');
 
 function assertAccountWritable(data = {}) {
   if (data.accountDisabled === true || ['deletion_pending', 'deleted'].includes(data.status)) {
@@ -22,8 +20,8 @@ async function saveAccountProfile({ firestore = admin.firestore(), userId, profi
 }
 
 // A tombstone makes delayed projections abort atomically, including after Auth removal.
-async function projectRealtimeProfile(userId, profile, db = routedRealtimeDb()) {
-  const result = await db.ref(`users/${userId}`).transaction(current => {
+async function projectRealtimeProfile(userId, profile, firestore = admin.firestore()) {
+  const result = await userStore.transactUser(firestore, userId, current => {
     if (current?.accountDisabled || ['deleted', 'deletion_pending'].includes(current?.status)) return;
     return { ...current, ...profile };
   });
@@ -31,7 +29,7 @@ async function projectRealtimeProfile(userId, profile, db = routedRealtimeDb()) 
 }
 
 async function runAccountDeletion({ userId, metadata, purge, immediate = true, removeAuth = true,
-  recoveryActor = null, recoverySourceRef = null, firestore = admin.firestore(), db = routedRealtimeDb(), auth = admin.auth(),
+  recoveryActor = null, recoverySourceRef = null, firestore = admin.firestore(), auth = admin.auth(),
   releaseCpf }) {
   const userRef = firestore.collection('users').doc(userId);
   const jobRef = firestore.collection('account_deletions').doc(userId);
@@ -72,13 +70,8 @@ async function runAccountDeletion({ userId, metadata, purge, immediate = true, r
       await checkpoint('queued', { status: 'queued' });
       return { deleted: false };
     }
-    // With users served by Firestore the canonical profile is purged by the
-    // Firestore step below and there is no RTDB copy left to wipe (RTDB is
-    // retired: writing there was dropped and logged as rtdb_retired_write).
-    // A plain, unrouted RTDB client still gets its record wiped.
-    if (!db.__rtdbRootRouter?.servedByFirestore?.('users')) {
-      await db.ref(`users/${userId}`).set({ status: 'deleted', accountDisabled: true });
-    }
+    // The profile lives only in Firestore (RTDB retired) and is purged by the
+    // next step; the checkpoint name is kept for jobs already in progress.
     await checkpoint('realtime_purged');
     await userRef.set(purge, { merge: true });
     await checkpoint('profile_purged');

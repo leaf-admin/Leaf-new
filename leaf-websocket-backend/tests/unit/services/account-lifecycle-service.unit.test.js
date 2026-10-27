@@ -6,16 +6,10 @@ const { claimCpf, releaseCpfsForDeletedAccount } = require('../../../services/cp
 function fixture() {
   const firestore = memoryFirestore({ 'users/old': { status: 'active' },
     'cpf_identity_index/12345678909': { uid: 'old' } });
-  let realtime = { cpf: '12345678909' };
-  const ref = { set: jest.fn(async value => { realtime = value; }),
-    transaction: async callback => { const value = callback(realtime);
-      if (value === undefined) return { committed: false };
-      realtime = value; return { committed: true }; } };
-  const db = { ref: () => ref };
   const auth = { updateUser: jest.fn().mockResolvedValue(), deleteUser: jest.fn().mockResolvedValue() };
-  const options = { firestore, db, auth, userId: 'old', metadata: { reason: 'user_request' },
+  const options = { firestore, auth, userId: 'old', metadata: { reason: 'user_request' },
     purge: { status: 'deleted', accountDisabled: true }, releaseCpf: releaseCpfsForDeletedAccount };
-  return { firestore, ref, db, auth, options, getRealtime: () => realtime };
+  return { firestore, auth, options };
 }
 
 test.each(['profile-first', 'delete-first'])('concurrent profile/CPF writes cannot resurrect deletion: %s', async order => {
@@ -29,14 +23,14 @@ test.each(['profile-first', 'delete-first'])('concurrent profile/CPF writes cann
   await expect(saveAccountProfile({ firestore: f.firestore, userId: 'old', profile: { status: 'active' } }))
     .rejects.toMatchObject({ code: 'ACCOUNT_DELETION_IN_PROGRESS' });
   await expect(profile()).rejects.toMatchObject({ code: 'ACCOUNT_DELETION_IN_PROGRESS' });
-  await expect(projectRealtimeProfile('old', { cpf: '12345678909' }, f.db)).rejects.toThrow();
-  expect(f.getRealtime()).toEqual({ status: 'deleted', accountDisabled: true });
+  // The profile projection hits the same tombstoned record and aborts.
+  await expect(projectRealtimeProfile('old', { cpf: '12345678909' }, f.firestore)).rejects.toThrow();
+  expect(f.firestore.records.get('users/old')).toMatchObject({ status: 'deleted', accountDisabled: true });
 });
 
-test.each(['auth', 'rtdb', 'index'])('manual recovery completes after %s failure without user login', async step => {
+test.each(['auth', 'index'])('manual recovery completes after %s failure without user login', async step => {
   const f = fixture();
   if (step === 'auth') f.auth.deleteUser.mockRejectedValueOnce(new Error('outage'));
-  if (step === 'rtdb') f.ref.set.mockRejectedValueOnce(new Error('outage'));
   if (step === 'index') f.options.releaseCpf = jest.fn().mockRejectedValueOnce(new Error('outage')).mockImplementation(releaseCpfsForDeletedAccount);
   await expect(runAccountDeletion(f.options)).rejects.toThrow();
   expect(f.firestore.records.get('account_deletions/old').status).toBe('error');
@@ -73,11 +67,9 @@ test('recovers a legacy random-ID deletion only after validating its owner and p
   expect(f.firestore.records.get('account_deletions/legacy-id')).toEqual({ userId: 'old', status: 'error' });
 });
 
-test('does not write the retired RTDB when users is served by Firestore', async () => {
+test('projects the profile into a live record and keeps Firestore-only fields', async () => {
   const f = fixture();
-  const db = { ...f.db, __rtdbRootRouter: { servedByFirestore: root => root === 'users' } };
-  await expect(runAccountDeletion({ ...f.options, db })).resolves.toEqual({ deleted: true });
-  expect(f.ref.set).not.toHaveBeenCalled();
-  expect(f.firestore.records.get('users/old')).toMatchObject({ status: 'deleted', accountDisabled: true });
-  expect(f.firestore.records.get('account_deletions/old').status).toBe('completed');
+  f.firestore.records.set('users/live', { status: 'active', name: 'Ana', onlyFirestore: 'keep' });
+  await projectRealtimeProfile('live', { usertype: 'driver', role: 'driver' }, f.firestore);
+  expect(f.firestore.records.get('users/live')).toEqual({ status: 'active', name: 'Ana', onlyFirestore: 'keep', usertype: 'driver', role: 'driver' });
 });

@@ -22,9 +22,6 @@ const {
   normalizeCpfForComparison
 } = require('../services/cpf-identity-registry-service');
 
-const legacyProfileMirrorDefault = process.env.NODE_ENV === 'production' ? 'false' : 'true';
-const legacyProfileRtdbMirrorEnabled =
-  String(process.env.ENABLE_LEGACY_PROFILE_RTDB_MIRROR ?? legacyProfileMirrorDefault).toLowerCase() === 'true';
 const DEFAULT_DELETION_REASON = 'user_requested_mobile_app';
 const legacyDeleteDataRoutesEnabled =
   String(process.env.ENABLE_LEGACY_ACCOUNT_DELETE_ROUTES || 'false').toLowerCase() === 'true';
@@ -667,35 +664,6 @@ function composeProfileRecord(userId, existingProfile = {}, incomingProfile = {}
   return record;
 }
 
-async function getRealtimeProfile(userId) {
-  try {
-    const db = realtimeDb();
-    const snapshot = await db.ref(`users/${userId}`).once('value');
-    return snapshot.exists() ? snapshot.val() || {} : null;
-  } catch (error) {
-    logger.warn(`Falha ao obter perfil legado do RTDB para ${userId}: ${error.message}`);
-    return null;
-  }
-}
-
-async function mirrorProfileToRealtimeDB(userId, profile) {
-  if (!legacyProfileRtdbMirrorEnabled) {
-    return;
-  }
-
-  try {
-    const db = realtimeDb();
-    const serialized = serializeForClient(profile);
-    await projectRealtimeProfile(userId, {
-      ...serialized,
-      uid: userId,
-      updatedAt: serialized.updatedAt || new Date().toISOString()
-    });
-  } catch (error) {
-    logger.warn(`Falha ao espelhar perfil no RTDB para ${userId}: ${error.message}`);
-  }
-}
-
 async function projectCanonicalDriverRoleToRealtimeDB(userId, profile) {
   const canonicalRole = normalizeUserType(
     profile?.usertype ||
@@ -730,26 +698,11 @@ async function resolveAccountProfile(userId, tokenClaims) {
     };
   }
 
-  const legacyProfile = await getRealtimeProfile(userId);
-  if (!legacyProfile) {
-    return {
-      profile: null,
-      source: 'missing'
-    };
-  }
-
-  const migratedProfile = composeProfileRecord(userId, {}, legacyProfile, tokenClaims, {
-    trustIncomingStatus: true
-  });
-
-  await saveAccountProfile({ userId, profile: migratedProfile });
-
+  // users/{uid} is the only profile record (the RTDB copy it used to migrate
+  // from is gone).
   return {
-    profile: composeProfileRecord(userId, {}, legacyProfile, tokenClaims, {
-      trustIncomingStatus: true,
-      useServerTimestamps: false
-    }),
-    source: 'rtdb_migrated'
+    profile: null,
+    source: 'missing'
   };
 }
 
@@ -920,7 +873,6 @@ router.put('/api/account/profile', requireFirebase, async (req, res) => {
     if (normalizedCpf) {
       await claimCpf({
         firestore: admin.firestore(),
-        realtimeDb: realtimeDb(),
         userId,
         cpf: normalizedCpf.digits,
         profile: nextProfile
@@ -929,7 +881,6 @@ router.put('/api/account/profile', requireFirebase, async (req, res) => {
       await saveAccountProfile({ userId, profile: nextProfile });
     }
     await projectCanonicalDriverRoleToRealtimeDB(userId, nextProfile);
-    await mirrorProfileToRealtimeDB(userId, nextProfile);
     const storedDoc = await admin.firestore().collection('users').doc(userId).get();
     const responseProfile = composeProfileRecord(
       userId,
@@ -942,8 +893,7 @@ router.put('/api/account/profile', requireFirebase, async (req, res) => {
     return res.json({
       success: true,
       source: 'firestore',
-      profile: serializeForClient(responseProfile),
-      mirroredToRealtimeDb: legacyProfileRtdbMirrorEnabled
+      profile: serializeForClient(responseProfile)
     });
   } catch (error) {
     if (error instanceof CpfIdentityError || ['ACCOUNT_DELETION_IN_PROGRESS', 'PROFILE_CPF_REVIEW_REQUIRED', 'CPF_REVIEW_CONFIG_UNAVAILABLE'].includes(error.code)) {

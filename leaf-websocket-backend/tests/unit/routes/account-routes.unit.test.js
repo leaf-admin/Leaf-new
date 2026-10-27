@@ -458,11 +458,11 @@ describe('account deletion route', () => {
       }),
       { merge: true },
     );
-    expect(mockDatabaseUpdate).toHaveBeenCalledWith({
-      usertype: 'driver',
-      userType: 'driver',
-      role: 'driver',
-    });
+    // The canonical role is projected into users/{uid} in a Firestore transaction.
+    expect(mockUserDocSet).toHaveBeenCalledWith(
+      expect.objectContaining({ usertype: 'driver', userType: 'driver', role: 'driver' }),
+      expect.objectContaining({ mergeFields: expect.any(Array) })
+    );
   });
 
   it('requires a CPF when a new driver profile is completed', async () => {
@@ -532,7 +532,7 @@ describe('account deletion route', () => {
     expect(mockRunTransaction).not.toHaveBeenCalled();
   });
 
-  it('projects the immutable canonical role into the RTDB user node', async () => {
+  it('projects the immutable canonical role into the user record', async () => {
     mockUserDocGet.mockResolvedValue({
       exists: true,
       data: () => ({
@@ -553,11 +553,11 @@ describe('account deletion route', () => {
       .send({ name: 'Motorista Canônico Atualizado' });
 
     expect(response.status).toBe(200);
-    expect(mockDatabaseUpdate).toHaveBeenCalledWith({
-      usertype: 'driver',
-      userType: 'driver',
-      role: 'driver',
-    });
+    // usertype/userType were already canonical: the transaction writes only role.
+    expect(mockUserDocSet).toHaveBeenCalledWith(
+      { role: 'driver' },
+      expect.objectContaining({ mergeFields: expect.any(Array) })
+    );
   });
 
   it.each([
@@ -645,7 +645,7 @@ describe('account deletion route', () => {
       });
 
     expect(response.status).toBe(200);
-    expect(mockUserDocSet).toHaveBeenLastCalledWith(
+    expect(mockUserDocSet).toHaveBeenCalledWith(
       expect.objectContaining({
         name: 'Motorista OTP',
         usertype: 'driver',
@@ -985,7 +985,7 @@ describe('account deletion route', () => {
     );
   });
 
-  it('releases the owned index after removing the legacy profile and Auth user', async () => {
+  it('releases the owned index after removing the Auth user', async () => {
     const ref = { id: 'cpf-index' };
     mockCpfReleaseQueryGet.mockResolvedValue({ docs: [{ ref }] });
     mockCpfTransactionGet.mockResolvedValue({ exists: true, data: () => ({ uid: 'review-user' }) });
@@ -993,19 +993,7 @@ describe('account deletion route', () => {
       .set('Authorization', 'Bearer firebase-token').send({});
     expect(response.status).toBe(200);
     expect(mockCpfTransactionDelete).toHaveBeenCalledWith(ref);
-    expect(mockDatabaseRemove.mock.invocationCallOrder[0]).toBeLessThan(mockCpfReleaseQueryGet.mock.invocationCallOrder[0]);
     expect(mockDeleteUser.mock.invocationCallOrder[0]).toBeLessThan(mockCpfReleaseQueryGet.mock.invocationCallOrder[0]);
-  });
-
-  it('does not release CPF or report success when RTDB cleanup fails', async () => {
-    mockDatabaseRemove.mockRejectedValueOnce(new Error('RTDB unavailable'));
-    const response = await request(createApp()).post('/api/account/delete')
-      .set('Authorization', 'Bearer firebase-token').send({});
-    expect(response.status).toBe(500);
-    expect(mockCpfReleaseQueryGet).not.toHaveBeenCalled();
-    expect(mockUserDocSet).toHaveBeenCalledWith(expect.objectContaining({
-      status: 'deletion_pending', accountDisabled: true
-    }), { merge: true });
   });
 
   it('retries index cleanup after a partial purge, even without CPF or an Auth user', async () => {
@@ -1024,35 +1012,6 @@ describe('account deletion route', () => {
       .set('Authorization', 'Bearer firebase-token').send({});
     expect(response.status).toBe(500);
     expect(mockDeletionLogUpdate).not.toHaveBeenCalledWith(expect.objectContaining({ status: 'completed' }));
-  });
-
-  it('migrates and removes the legacy Realtime DB profile during deletion', async () => {
-    mockDatabaseOnce.mockResolvedValue({
-      exists: () => true,
-      val: () => ({
-        name: 'Leaf Passageiro Teste',
-        phone: '+5521102938475',
-        usertype: 'customer',
-      }),
-    });
-
-    const response = await request(createApp())
-      .post('/api/account/delete')
-      .set('Authorization', 'Bearer firebase-token')
-      .send({
-        phone: '+5521102938475',
-        source: 'unit-test',
-      });
-
-    expect(response.status).toBe(200);
-    expect(mockUserDocSet).toHaveBeenCalledWith(
-      expect.objectContaining({
-        uid: 'review-user',
-        name: 'Leaf Passageiro Teste',
-      }),
-      { merge: true }
-    );
-    expect(mockDatabaseRemove).toHaveBeenCalled();
   });
 
   it('returns success without reprocessing a completed deletion job', async () => {

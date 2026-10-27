@@ -2,7 +2,7 @@ const express = require('express');
 const admin = require('firebase-admin');
 const redisPool = require('../utils/redis-pool');
 const { logger } = require('../utils/logger');
-const firebaseConfig = require('../firebase-config');
+const userStore = require('../services/user-store');
 const { getBypassOtpCode, isOtpBypassPhone, isReviewOtpBypassEnabled } = require('../utils/test-auth-bypass');
 
 const router = express.Router();
@@ -109,19 +109,12 @@ function buildDefaultRealtimeProfile({ uid, normalizedPhone }) {
 async function ensureRealtimeProfileForOtpUser({ uid, normalizedPhone }) {
     try {
         if (!uid) return;
-        const realtimeDB =
-            typeof firebaseConfig.getRealtimeDB === 'function'
-                ? firebaseConfig.getRealtimeDB()
-                : null;
-        if (!realtimeDB) return;
+        const firestore = userStore.resolveFirestore();
+        if (!firestore) return;
 
-        const userRef = realtimeDB.ref(`users/${uid}`);
-        const snapshot = await userRef.once('value');
-        if (snapshot.exists()) {
-            return;
-        }
-
-        await userRef.set(buildDefaultRealtimeProfile({ uid, normalizedPhone }));
+        // users/{uid} is created here only for a brand-new account; an
+        // existing record is left as it is.
+        await userStore.createUserIfMissing(firestore, uid, buildDefaultRealtimeProfile({ uid, normalizedPhone }));
     } catch (error) {
         logger.warn(
             `[CUSTOM OTP] Failed to ensure realtime profile for uid=${uid}: ${error?.message || error}`

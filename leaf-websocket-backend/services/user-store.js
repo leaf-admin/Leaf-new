@@ -110,8 +110,26 @@ async function transactUser(firestore, uid, updater) {
   });
 }
 
+// Create users/{uid} with `profile` only when the record does not exist yet
+// (account creation). An existing record is never replaced. Returns
+// { created, value } with the stored record.
+async function createUserIfMissing(firestore, uid, profile) {
+  const ref = userRef(firestore, uid);
+  const next = normalize(clone(profile));
+  if (next === null || typeof next !== 'object' || Array.isArray(next)) {
+    throw fail('USER_STORE_INVALID_PROFILE', 'Perfil inicial do usuário inválido');
+  }
+  return firestore.runTransaction(async (tx) => {
+    const snapshot = await tx.get(ref);
+    if (snapshot.exists) return { created: false, value: docView(snapshot.data()) };
+    tx.set(ref, fromView(next, undefined));
+    return { created: true, value: next };
+  });
+}
+
 module.exports = {
   COLLECTION,
+  createUserIfMissing,
   resolveFirestore,
   readUser,
   readUserField,

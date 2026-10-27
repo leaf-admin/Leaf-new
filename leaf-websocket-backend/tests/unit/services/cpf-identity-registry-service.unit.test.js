@@ -118,25 +118,6 @@ describe('cpf identity registry', () => {
       .resolves.toMatchObject({ digits: '12345678909' });
   });
 
-  test('rejects a CPF owned only by a legacy RTDB profile', async () => {
-    const firestore = createFirestoreMock();
-    const once = jest.fn().mockResolvedValue({
-      val: () => ({ legacy_driver: { cpf: '123.456.789-09' } })
-    });
-    const realtimeDb = { ref: () => ({ orderByChild: () => ({ equalTo: () => ({ once }) }) }) };
-    await expect(claimCpf({ firestore, realtimeDb, userId: 'driver_1', cpf: '12345678909' }))
-      .rejects.toMatchObject({ code: 'PROFILE_CPF_ALREADY_REGISTERED', status: 409 });
-    expect(firestore.runTransaction).not.toHaveBeenCalled();
-  });
-
-  test('does not claim a CPF when the legacy RTDB lookup fails', async () => {
-    const firestore = createFirestoreMock();
-    const once = jest.fn().mockRejectedValue(new Error('lookup unavailable'));
-    const realtimeDb = { ref: () => ({ orderByChild: () => ({ equalTo: () => ({ once }) }) }) };
-    await expect(claimCpf({ firestore, realtimeDb, userId: 'driver_1', cpf: '12345678909' }))
-      .rejects.toMatchObject({ code: 'PROFILE_CPF_UNIQUENESS_UNAVAILABLE', status: 503 });
-    expect(firestore.runTransaction).not.toHaveBeenCalled();
-  });
 });
 
 describe('CPF release after deletion', () => {

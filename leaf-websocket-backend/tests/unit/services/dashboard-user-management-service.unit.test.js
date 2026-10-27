@@ -52,6 +52,15 @@ jest.mock('firebase-admin', () => ({
   }))
 }));
 
+// users/{uid} writes now go through services/user-store (one write, RTDB
+// update semantics); they are recorded in mockRealtimeUpdates as before.
+jest.mock('../../../services/user-store', () => ({
+  readUserField: jest.fn(async (_firestore, uid, field) => mockRealtimeSnapshots.get(`users/${uid}/${field}`) ?? null),
+  updateUser: jest.fn(async (_firestore, uid, patch) => {
+    mockRealtimeUpdates.push({ path: `users/${uid}`, payload: patch });
+  })
+}));
+
 jest.mock('../../../firebase-config', () => ({
   getRealtimeDB: jest.fn(() => mockRealtimeDb)
 }));
@@ -125,15 +134,17 @@ describe('dashboard-user-management-service', () => {
     );
 
     expect(result).toMatchObject({ success: true, userId: 'driver_1', userType: 'driver', status: 'blocked' });
-    expect(mockMakeFirestoreUserRef('driver_1').set).toHaveBeenCalledWith(
+    expect(mockRealtimeUpdates).toEqual(expect.arrayContaining([
       expect.objectContaining({
-        status: 'blocked',
-        accountStatus: 'blocked',
-        operationalBlocked: true,
-        blockedReason: 'Risco operacional'
-      }),
-      { merge: true }
-    );
+        path: 'users/driver_1',
+        payload: expect.objectContaining({
+          status: 'blocked',
+          accountStatus: 'blocked',
+          operationalBlocked: true,
+          blockedReason: 'Risco operacional'
+        })
+      })
+    ]));
     expect(mockRealtimeUpdates).toEqual(expect.arrayContaining([
       expect.objectContaining({
         path: 'users/driver_1',
@@ -201,16 +212,18 @@ describe('dashboard-user-management-service', () => {
       reason: 'Revisao de seguranca'
     });
     expect(result.expiresAt).toEqual(expect.any(String));
-    expect(mockMakeFirestoreUserRef('driver_suspended').set).toHaveBeenCalledWith(
+    expect(mockRealtimeUpdates).toEqual(expect.arrayContaining([
       expect.objectContaining({
-        status: 'suspended',
-        accountStatus: 'suspended',
-        operationalBlocked: true,
-        suspended: true,
-        suspendedUntil: result.expiresAt
-      }),
-      { merge: true }
-    );
+        path: 'users/driver_suspended',
+        payload: expect.objectContaining({
+          status: 'suspended',
+          accountStatus: 'suspended',
+          operationalBlocked: true,
+          suspended: true,
+          suspendedUntil: result.expiresAt
+        })
+      })
+    ]));
     expect(mockCommitDriverOnlineProjection).toHaveBeenCalledWith(
       mockRedis,
       expect.objectContaining({
@@ -279,14 +292,16 @@ describe('dashboard-user-management-service', () => {
     );
 
     expect(result).toMatchObject({ success: true, userId: 'customer_1', userType: 'customer', status: 'active' });
-    expect(mockMakeFirestoreUserRef('customer_1').set).toHaveBeenCalledWith(
+    expect(mockRealtimeUpdates).toEqual(expect.arrayContaining([
       expect.objectContaining({
-        status: 'active',
-        accountStatus: 'active',
-        operationalBlocked: false
-      }),
-      { merge: true }
-    );
+        path: 'users/customer_1',
+        payload: expect.objectContaining({
+          status: 'active',
+          accountStatus: 'active',
+          operationalBlocked: false
+        })
+      })
+    ]));
     expect(mockPassengerUnblock).toHaveBeenCalledWith('customer_1', expect.objectContaining({
       operatorId: 'support_1',
       reasonCode: 'dashboard_reactivation'
@@ -326,14 +341,16 @@ describe('dashboard-user-management-service', () => {
       userType: 'driver',
       status: 'active'
     });
-    expect(mockMakeFirestoreUserRef('driver_pending').set).toHaveBeenCalledWith(
+    expect(mockRealtimeUpdates).toEqual(expect.arrayContaining([
       expect.objectContaining({
-        status: 'pending_review',
-        accountStatus: 'pending_review',
-        operationalBlocked: false
-      }),
-      { merge: true }
-    );
+        path: 'users/driver_pending',
+        payload: expect.objectContaining({
+          status: 'pending_review',
+          accountStatus: 'pending_review',
+          operationalBlocked: false
+        })
+      })
+    ]));
   });
 
   it('requests driver documents without moving approved documents back to the review queue', async () => {
@@ -374,9 +391,9 @@ describe('dashboard-user-management-service', () => {
     });
     expect(mockRealtimeUpdates).toEqual(expect.arrayContaining([
       expect.objectContaining({
-        path: '',
+        path: 'users/driver_2',
         payload: expect.objectContaining({
-          'users/driver_2/documents/cnh': expect.objectContaining({
+          'documents/cnh': expect.objectContaining({
             status: 'approved',
             requestStatus: 'requested',
             requiredUpdate: true,

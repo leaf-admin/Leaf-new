@@ -23,7 +23,6 @@ router.post('/driver/create-client', ...DRIVER_ROUTE_MIDDLEWARE, async (req, res
 
     await claimCpf({
       firestore: firebaseConfig.getFirestore(),
-      realtimeDb: firebaseConfig.getRealtimeDB?.() || null,
       userId: driverId,
       cpf
     });
