@@ -370,6 +370,9 @@ function registerSocketDriverHeartbeatHandler({
 
                 // Heartbeat também precisa recuperar elegibilidade quando o driver ficou preso em estado residual
                 // (ex.: IN_TRIP/AWAITING_LOCATION_SYNC) sem depender exclusivamente do updateLocation.
+                // STALE_HEARTBEAT é inferido pela limpeza (ex.: socket reautenticando após reinício do
+                // gateway), nunca escolha do motorista: um heartbeat autenticado prova que ele voltou e,
+                // como passou pelos gates de assinatura e KYC acima, a elegibilidade é revalidada.
                 if (!isInTripState && !shouldBeEligible) {
                     const recheckCandidates = new Set([
                         '',
@@ -377,7 +380,8 @@ function registerSocketDriverHeartbeatHandler({
                         'CACHED',
                         'IN_TRIP',
                         'IN_TRIP_KYC_DEFERRED',
-                        'AWAITING_LOCATION_SYNC'
+                        'AWAITING_LOCATION_SYNC',
+                        'STALE_HEARTBEAT'
                     ]);
                     const lastCheckedAtMs = parseTimestampMs(existingData.dispatchEligibilityCheckedAt);
                     const canRecheckNow = (Date.now() - lastCheckedAtMs) >= DISPATCH_ELIGIBILITY_RECHECK_MIN_MS;
