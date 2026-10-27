@@ -18,8 +18,8 @@ try {
 
 const ADMIN_ROLES = ['admin', 'super-admin', 'manager', 'development'];
 const opsConfigStore = require('../services/ops-config-store');
-const CITY_ACTIVATION_DB_PATH = opsConfigStore.CONFIGS.cityActivation.rtdbPath;
-const GEOFENCE_ADMIN_DB_PATH = opsConfigStore.CONFIGS.geofenceAdmin.rtdbPath;
+const CITY_ACTIVATION_DB_PATH = `${opsConfigStore.COLLECTION}/${opsConfigStore.CONFIGS.cityActivation.docId}`;
+const GEOFENCE_ADMIN_DB_PATH = `${opsConfigStore.COLLECTION}/${opsConfigStore.CONFIGS.geofenceAdmin.docId}`;
 const DEFAULT_MAX_ACTIVE_DRIVERS_PER_CITY = Number.parseInt(
     process.env.DEFAULT_MAX_ACTIVE_DRIVERS_PER_CITY || '300',
     10
@@ -41,12 +41,10 @@ const DEFAULT_RJ_CITIES = [
 let inMemoryCityActivationConfig = null;
 let inMemoryGeofenceAdminConfig = null;
 
-function hasRealtimeConfigAccess() {
-    return !!(
-        firebaseConfig
-        && typeof firebaseConfig.getFromRealtimeDB === 'function'
-        && typeof firebaseConfig.setRealtimeDB === 'function'
-    );
+// The admin configs live in Firestore operational_configs; without Firestore
+// (local dev) they are kept in memory.
+function hasConfigStoreAccess() {
+    return Boolean(firebaseConfig && typeof firebaseConfig.getFirestore === 'function' && firebaseConfig.getFirestore());
 }
 
 function normalizeStateCode(value) {
@@ -300,7 +298,7 @@ function buildConfigResponse(cityActivationConfig) {
 }
 
 async function loadCityActivationConfig() {
-    if (!hasRealtimeConfigAccess()) {
+    if (!hasConfigStoreAccess()) {
         if (!inMemoryCityActivationConfig) {
             inMemoryCityActivationConfig = normalizeConfig(null);
         }
@@ -327,7 +325,7 @@ async function persistCityActivationConfig(configToPersist, storage) {
         return;
     }
 
-    if (!hasRealtimeConfigAccess()) {
+    if (!hasConfigStoreAccess()) {
         throw new Error('Firebase Realtime DB indisponivel');
     }
 
@@ -335,7 +333,7 @@ async function persistCityActivationConfig(configToPersist, storage) {
 }
 
 async function loadGeofenceAdminConfig() {
-    if (!hasRealtimeConfigAccess()) {
+    if (!hasConfigStoreAccess()) {
         if (!inMemoryGeofenceAdminConfig) {
             inMemoryGeofenceAdminConfig = applyGeofenceAdminConfig(normalizeGeofenceAdminConfig(null));
         } else {
@@ -365,7 +363,7 @@ async function persistGeofenceAdminConfig(configToPersist, storage) {
         return;
     }
 
-    if (!hasRealtimeConfigAccess()) {
+    if (!hasConfigStoreAccess()) {
         throw new Error('Firebase Realtime DB indisponivel');
     }
 
