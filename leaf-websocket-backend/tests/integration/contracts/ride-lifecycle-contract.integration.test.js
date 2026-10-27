@@ -40,7 +40,8 @@ describe('Ride lifecycle source contract audit', () => {
     expect(completeTripHandler).toContain('driverNetAmount: fareBreakdown.driverNetAmount');
     expect(completeTripHandler).toContain("financialSnapshotSource: result.data?.financialSnapshotSource || 'backend_final'");
     expect(completeTripHandler).toContain('authoritativeSnapshot: result.data?.authoritativeSnapshot === true');
-    expect(completeTripHandler).toContain("const firebaseConfig = require('../firebase-config');");
+    // The receipt is persisted in Firestore by the receipt service (no RTDB client).
+    expect(completeTripHandler).toContain('await receiptService.generateAndSaveReceipt(bookingId, receiptData);');
     expect(confirmPaymentHandler).toContain("socket.on('confirmPayment'");
     expect(confirmPaymentHandler).toContain("socket.emit('paymentConfirmed'");
     expect(updateLocationHandler).toContain("socket.on('updateLocation'");
