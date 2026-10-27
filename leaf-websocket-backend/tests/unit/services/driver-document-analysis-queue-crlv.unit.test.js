@@ -1,7 +1,8 @@
 'use strict';
 
 jest.mock('../../../firebase-config', () => ({
-  getRealtimeDB: jest.fn()
+  getRealtimeDB: jest.fn(),
+  getFirestore: jest.fn()
 }));
 
 jest.mock('../../../services/driver-activation-state-service', () => ({
@@ -109,7 +110,9 @@ function createDb(initialState = {}) {
   return {
     rootUpdates,
     transactions,
+    firestoreCommits: [],
     read,
+    write,
     ref(path = '') {
       return {
         once: async () => snapshot(path),
@@ -140,6 +143,93 @@ function createDb(initialState = {}) {
       };
     }
   };
+}
+
+// Firestore over the same RTDB-shaped state: each native collection is the
+// root the router used to serve, so assertions read the same paths. Commits
+// are recorded as path maps in db.rootUpdates; every transaction is serialized.
+const COLLECTION_ROOTS = {
+  driver_activation: 'driver_activation',
+  driver_document_locks: 'driver_document_mutation_locks',
+  driver_document_stats: 'driver_documents_index_stats',
+  users: 'users',
+  vehicle_catalog: 'vehicles',
+  driver_vehicle_links: 'user_vehicles',
+  vehicle_plate_index: 'vehicle_plate_index'
+};
+
+function createFirestore(db) {
+  const { FieldValue } = require('@google-cloud/firestore');
+  const isDelete = value => typeof value?.isEqual === 'function' && value.isEqual(FieldValue.delete());
+  let chain = Promise.resolve();
+  const docPath = ref => `${COLLECTION_ROOTS[ref.collection]}/${ref.id}`;
+  const readDoc = (ref) => {
+    const value = db.read(docPath(ref));
+    if (value === null) return { exists: false, data: () => undefined };
+    return { exists: true, data: () => (typeof value === 'object' ? value : { rtdbValue: value }) };
+  };
+  const pick = (data, segments) => segments.reduce((cursor, segment) => cursor?.[segment], data);
+  const doc = (collection, id) => ({ collection, id, get: async () => readDoc({ collection, id }) });
+  return {
+    collection: name => {
+      if (!COLLECTION_ROOTS[name]) throw new Error(`unexpected collection ${name}`);
+      return { doc: id => doc(name, id) };
+    },
+    runTransaction(work) {
+      const run = chain.then(async () => {
+        const writes = [];
+        const tx = {
+          get: async ref => readDoc(ref),
+          set: (ref, data, options = {}) => writes.push(['set', ref, data, options]),
+          update: (ref, field, value) => writes.push(['update', ref, field, value]),
+          delete: ref => writes.push(['delete', ref])
+        };
+        const result = await work(tx);
+        const committed = {};
+        for (const [op, ref, data, options] of writes) {
+          const base = docPath(ref);
+          if (op === 'delete') {
+            db.write(base, null);
+            committed[base] = null;
+          } else if (op === 'update') {
+            const path = `${base}/${data.segments.join('/')}`;
+            db.write(path, null);
+            committed[path] = null;
+          } else if (options.mergeFields) {
+            for (const field of options.mergeFields) {
+              const value = pick(data, field.segments);
+              const path = `${base}/${field.segments.join('/')}`;
+              committed[path] = isDelete(value) ? null : value;
+              db.write(path, committed[path]);
+            }
+          } else if (options.merge) {
+            for (const [field, value] of Object.entries(data)) {
+              db.write(`${base}/${field}`, value);
+              committed[`${base}/${field}`] = value;
+            }
+          } else {
+            const value = Object.keys(data).length === 1 && 'rtdbValue' in data ? data.rtdbValue : data;
+            db.write(base, value);
+            committed[base] = value;
+          }
+        }
+        if (writes.length) db.firestoreCommits.push(committed);
+        return result;
+      });
+      chain = run.catch(() => undefined);
+      return run;
+    }
+  };
+}
+
+function documentCommits(db, documentType) {
+  return db.firestoreCommits.filter(commit => `driver_activation/driver_1/documents/${documentType}` in commit);
+}
+
+function useState(db) {
+  firebaseConfig.getRealtimeDB.mockReturnValue(db);
+  firebaseConfig.getFirestore.mockReturnValue(createFirestore(db));
+  return db;
 }
 
 function documentMetadata(submissionId, documentType, marker) {
@@ -233,7 +323,7 @@ describe('driver-document-analysis-queue CRLV persistence', () => {
         driver_1: {}
       }
     });
-    firebaseConfig.getRealtimeDB.mockReturnValue(db);
+    useState(db);
     driverActivationStateService.resolveDriverActivationState.mockResolvedValueOnce({
       state: 'REJECTED',
       label: 'Rejeitado',
@@ -294,7 +384,7 @@ describe('driver-document-analysis-queue CRLV persistence', () => {
         driver_1: {}
       }
     });
-    firebaseConfig.getRealtimeDB.mockReturnValue(db);
+    useState(db);
     driverActivationStateService.resolveDriverActivationState.mockResolvedValueOnce({
       state: 'REJECTED',
       label: 'Rejeitado',
@@ -358,7 +448,7 @@ describe('driver-document-analysis-queue CRLV persistence', () => {
         driver_1: {}
       }
     });
-    firebaseConfig.getRealtimeDB.mockReturnValue(db);
+    useState(db);
     driverActivationStateService.resolveDriverActivationState.mockRejectedValueOnce(
       new Error('temporary-resolution-failure')
     );
@@ -375,7 +465,7 @@ describe('driver-document-analysis-queue CRLV persistence', () => {
   it('persists a normalized CRLV identity in both activation and dashboard document projections', async () => {
     const metadata = documentMetadata('submission_1', 'crlv', 'a');
     const db = createDbWithCurrentDocument('crlv', metadata, [metadata]);
-    firebaseConfig.getRealtimeDB.mockReturnValue(db);
+    useState(db);
 
     await updateDocumentState({
       driverId: 'driver_1',
@@ -395,7 +485,7 @@ describe('driver-document-analysis-queue CRLV persistence', () => {
       metadata
     });
 
-    const documentUpdate = db.rootUpdates[0];
+    const [documentUpdate] = documentCommits(db, 'crlv');
     expect(documentUpdate['driver_activation/driver_1/documents/crlv'].data).toEqual(
       expect.objectContaining({
         plate: 'RJA2D41',
@@ -418,7 +508,7 @@ describe('driver-document-analysis-queue CRLV persistence', () => {
   it('fails an approved CRLV update when extracted vehicle model or color is missing', async () => {
     const metadata = documentMetadata('submission_missing_color', 'crlv', 'a');
     const db = createDbWithCurrentDocument('crlv', metadata, [metadata]);
-    firebaseConfig.getRealtimeDB.mockReturnValue(db);
+    useState(db);
 
     await updateDocumentState({
       driverId: 'driver_1',
@@ -435,7 +525,7 @@ describe('driver-document-analysis-queue CRLV persistence', () => {
       metadata
     });
 
-    const documentUpdate = db.rootUpdates[0];
+    const [documentUpdate] = documentCommits(db, 'crlv');
     expect(documentUpdate['driver_activation/driver_1/documents/crlv']).toMatchObject({
       status: 'failed',
       reason: 'CRLV sem dados obrigatórios de veículo (placa, RENAVAM, modelo e cor).'
@@ -445,21 +535,15 @@ describe('driver-document-analysis-queue CRLV persistence', () => {
       analysisStatus: 'failed',
       rejectionReason: 'CRLV sem dados obrigatórios de veículo (placa, RENAVAM, modelo e cor).'
     });
-    expect(documentUpdate['driver_documents_index/crlv/approved/driver_1']).toBeNull();
-    expect(documentUpdate['driver_documents_index/crlv/rejected/driver_1']).toEqual(
-      expect.objectContaining({
-        driverId: 'driver_1',
-        documentType: 'crlv',
-        status: 'rejected'
-      })
-    );
+    expect(db.read('driver_documents_index')).toBeNull();
+    expect(db.read('driver_documents_index_stats/crlv')).toEqual({ pending: 0, approved: 0, rejected: 1 });
   });
 
   it('keeps a concurrent stale CNH result only as superseded history', async () => {
     const staleMetadata = documentMetadata('cnh_submission_a', 'cnh', 'a');
     const currentMetadata = documentMetadata('cnh_submission_b', 'cnh', 'b');
     const db = createDbWithCurrentDocument('cnh', currentMetadata, [staleMetadata, currentMetadata]);
-    firebaseConfig.getRealtimeDB.mockReturnValue(db);
+    useState(db);
 
     const [staleResult, currentResult] = await Promise.all([
       updateDocumentState({
@@ -518,10 +602,7 @@ describe('driver-document-analysis-queue CRLV persistence', () => {
         })
       })
     );
-    expect(db.read('driver_documents_index/cnh/rejected/driver_1')).toBeNull();
-    expect(db.read('driver_documents_index/cnh/approved/driver_1')).toEqual(expect.objectContaining({
-      submissionId: currentMetadata.submissionId
-    }));
+    expect(db.read('driver_documents_index')).toBeNull();
     expect(db.read('users/driver_1/biometrics/cnhFace')).toEqual({
       submissionId: currentMetadata.submissionId,
       embedding: [0.2]
@@ -530,17 +611,19 @@ describe('driver-document-analysis-queue CRLV persistence', () => {
       submissionId: currentMetadata.submissionId,
       status: 'generated'
     });
-    expect(db.rootUpdates).toHaveLength(1);
+    expect(documentCommits(db, 'cnh')).toHaveLength(1);
     expect(driverApplicationService.syncDriverApplication).toHaveBeenCalledTimes(1);
-    expect(db.transactions.filter(({ path }) => path.startsWith('driver_documents_index_stats/')))
-      .toHaveLength(2);
+    expect(db.read('driver_documents_index_stats/cnh')).toEqual({ pending: 0, approved: 1, rejected: 0 });
+    expect(db.read('driver_document_mutation_locks/driver_1')).toBeNull();
+    expect(db.rootUpdates).toHaveLength(0);
+    expect(db.transactions).toHaveLength(0);
   });
 
   it('never materializes the vehicle from a concurrent stale CRLV result', async () => {
     const staleMetadata = documentMetadata('crlv_submission_a', 'crlv', 'a');
     const currentMetadata = documentMetadata('crlv_submission_b', 'crlv', 'b');
     const db = createDbWithCurrentDocument('crlv', currentMetadata, [staleMetadata, currentMetadata]);
-    firebaseConfig.getRealtimeDB.mockReturnValue(db);
+    useState(db);
 
     const [staleResult, currentResult] = await Promise.all([
       updateDocumentState({
@@ -596,20 +679,20 @@ describe('driver-document-analysis-queue CRLV persistence', () => {
     expect(db.read('vehicles/vehicle_crlv_AAA1A11')).toBeNull();
     expect(db.read('user_vehicles/driver_1/crlv_AAA1A11')).toBeNull();
     expect(db.read('vehicle_plate_index/BBB2B22')).toBe('vehicle_crlv_BBB2B22');
-    expect(db.read('driver_documents_index/crlv/approved/driver_1')).toEqual(expect.objectContaining({
-      submissionId: currentMetadata.submissionId
-    }));
-    expect(db.rootUpdates).toHaveLength(1);
+    expect(db.read('driver_documents_index')).toBeNull();
+    expect(documentCommits(db, 'crlv')).toHaveLength(1);
     expect(driverApplicationService.syncDriverApplication).toHaveBeenCalledTimes(1);
-    expect(db.transactions.filter(({ path }) => path.startsWith('driver_documents_index_stats/')))
-      .toHaveLength(2);
+    expect(db.read('driver_documents_index_stats/crlv')).toEqual({ pending: 0, approved: 1, rejected: 0 });
+    expect(db.read('driver_document_mutation_locks/driver_1')).toBeNull();
+    expect(db.rootUpdates).toHaveLength(0);
+    expect(db.transactions).toHaveLength(0);
   });
 
   it('rejects a stale CNH review racing a newer upload commit', async () => {
     const reviewedMetadata = documentMetadata('cnh_review_a', 'cnh', 'a');
     const uploadedMetadata = documentMetadata('cnh_upload_b', 'cnh', 'b');
     const db = createDbWithCurrentDocument('cnh', reviewedMetadata, [reviewedMetadata]);
-    firebaseConfig.getRealtimeDB.mockReturnValue(db);
+    useState(db);
     const staleReviewMutation = jest.fn(async ({ db: mutationDb, lease }) => {
       await lease.assertHeld();
       await mutationDb.ref().update({
@@ -656,7 +739,7 @@ describe('driver-document-analysis-queue CRLV persistence', () => {
     const reviewedMetadata = documentMetadata('crlv_review_a', 'crlv', 'a');
     const currentMetadata = documentMetadata('crlv_ocr_b', 'crlv', 'b');
     const db = createDbWithCurrentDocument('crlv', currentMetadata, [reviewedMetadata, currentMetadata]);
-    firebaseConfig.getRealtimeDB.mockReturnValue(db);
+    useState(db);
     const staleReviewMutation = jest.fn(async ({ db: mutationDb, lease }) => {
       await lease.assertHeld();
       await mutationDb.ref().update({

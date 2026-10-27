@@ -7,6 +7,7 @@ const { validateCnhDocumentIdentity } = require('./cnh-document-identity-validat
 const { logStructured, logError } = require('../utils/logger');
 const { metrics: runtimeMetrics } = require('../utils/prometheus-metrics');
 const driverActivationStateService = require('./driver-activation-state-service');
+const driverDocumentStore = require('./driver-document-store');
 const { normalizeVehicleOcrPayload } = require('../utils/vehicle-ocr-data');
 const {
   buildApprovedCrlvVehicleLinkUpdates
@@ -24,7 +25,6 @@ const SERIALIZABLE_DRIVER_DOCUMENT_TYPES = Object.freeze([
   'antecedentes_criminais'
 ]);
 const REVIEWABLE_INDEX_STATUSES = Object.freeze(['pending', 'approved', 'rejected']);
-const DOCUMENT_MUTATION_LOCK_ROOT = 'driver_document_mutation_locks';
 const DOCUMENT_MUTATION_LOCK_TTL_MS = Math.max(
   30 * 1000,
   Number.parseInt(process.env.DRIVER_DOCUMENT_MUTATION_LOCK_TTL_MS || `${2 * 60 * 1000}`, 10) || 2 * 60 * 1000
@@ -110,6 +110,18 @@ function getDbOrThrow() {
   return db;
 }
 
+function getFirestoreOrThrow() {
+  const firestore = firebaseConfig?.getFirestore?.();
+  if (!firestore) {
+    throw new Error('FIREBASE_FIRESTORE_UNAVAILABLE');
+  }
+  return firestore;
+}
+
+const { COLLECTIONS } = driverDocumentStore;
+const activationWrite = (driverId, field, value) => ({ collection: COLLECTIONS.activation, id: driverId, field, value });
+const userWrite = (driverId, field, value) => ({ collection: COLLECTIONS.users, id: driverId, field, value });
+
 function nowIso() {
   return new Date().toISOString();
 }
@@ -154,14 +166,10 @@ function documentBindingsMatch(left = {}, right = {}) {
     && normalizedLeft.storageGeneration === normalizedRight.storageGeneration;
 }
 
-function documentMutationLockPath(driverId, documentType) {
-  return `${DOCUMENT_MUTATION_LOCK_ROOT}/${driverId}/${documentType}`;
-}
-
-async function acquireDocumentMutationLease({ db, driverId, documentType, scope }) {
+async function acquireDocumentMutationLease({ firestore, driverId, documentType, scope }) {
   const safeDriverId = String(driverId || '').trim();
   const safeType = sanitizeDocumentMutationType(documentType);
-  if (!db?.ref || !safeDriverId || !safeType) {
+  if (!firestore || !safeDriverId || !safeType) {
     throw documentBindingError(
       'DRIVER_DOCUMENT_MUTATION_INPUT_INVALID',
       'Motorista e tipo sao obrigatorios para serializar a mutacao documental'
@@ -169,12 +177,12 @@ async function acquireDocumentMutationLease({ db, driverId, documentType, scope 
   }
 
   const token = crypto.randomUUID();
-  const lockRef = db.ref(documentMutationLockPath(safeDriverId, safeType));
+  const lockKey = { driverId: safeDriverId, documentType: safeType };
   const deadline = Date.now() + DOCUMENT_MUTATION_LOCK_WAIT_MS;
 
   while (Date.now() <= deadline) {
     const acquiredAtMs = Date.now();
-    const result = await lockRef.transaction((current) => {
+    const result = await driverDocumentStore.transactLock(firestore, lockKey, (current) => {
       const currentExpiresAtMs = Number(current?.expiresAtMs || 0);
       if (
         current?.token
@@ -192,8 +200,8 @@ async function acquireDocumentMutationLease({ db, driverId, documentType, scope 
         acquiredAtMs,
         expiresAtMs: acquiredAtMs + DOCUMENT_MUTATION_LOCK_TTL_MS
       };
-    }, undefined, false);
-    const stored = result?.snapshot?.val?.() || null;
+    });
+    const stored = result?.value || null;
     if (result?.committed === true && stored?.token === token) {
       let released = false;
       let lost = false;
@@ -203,7 +211,7 @@ async function acquireDocumentMutationLease({ db, driverId, documentType, scope 
         if (released || lost) return false;
         if (renewalInFlight) return renewalInFlight;
         const renewedAtMs = Date.now();
-        renewalInFlight = lockRef.transaction((current) => {
+        renewalInFlight = driverDocumentStore.transactLock(firestore, lockKey, (current) => {
           if (current?.token !== token) return undefined;
           return {
             ...current,
@@ -211,9 +219,9 @@ async function acquireDocumentMutationLease({ db, driverId, documentType, scope 
             renewedAtMs,
             expiresAtMs: renewedAtMs + DOCUMENT_MUTATION_LOCK_TTL_MS
           };
-        }, undefined, false)
+        })
           .then((renewal) => {
-            const value = renewal?.snapshot?.val?.() || null;
+            const value = renewal?.value || null;
             const held = renewal?.committed === true && value?.token === token;
             if (!held) lost = true;
             return held;
@@ -248,9 +256,9 @@ async function acquireDocumentMutationLease({ db, driverId, documentType, scope 
           if (released) return;
           released = true;
           clearInterval(heartbeat);
-          await lockRef.transaction((current) => (
+          await driverDocumentStore.transactLock(firestore, lockKey, (current) => (
             current?.token === token ? null : undefined
-          ), undefined, false).catch(() => null);
+          )).catch(() => null);
         }
       };
     }
@@ -276,16 +284,19 @@ async function runWithDocumentMutationLease({
       'Callback obrigatorio para mutacao documental serializada'
     );
   }
+  // The lease lives in Firestore; `db` is still handed to callbacks whose own
+  // writes have not moved to native repositories yet.
   const realtimeDb = db || getDbOrThrow();
+  const firestore = getFirestoreOrThrow();
   const lease = await acquireDocumentMutationLease({
-    db: realtimeDb,
+    firestore,
     driverId,
     documentType,
     scope
   });
   try {
     await lease.assertHeld();
-    return await callback({ db: realtimeDb, lease });
+    return await callback({ db: realtimeDb, firestore, lease });
   } finally {
     await lease.release();
   }
@@ -318,14 +329,14 @@ async function commitDocumentSubmissionState({
     driverId: safeDriverId,
     documentType: safeType,
     scope: `submission_commit_${binding.submissionId}`
-  }, async ({ db: realtimeDb, lease }) => {
+  }, async ({ firestore, lease }) => {
     await lease.assertHeld();
-    await realtimeDb.ref().update({
-      [`driver_activation/${safeDriverId}/documents/${safeType}`]: activationDocument,
-      [`driver_activation/${safeDriverId}/documents_history/${binding.submissionId}`]: activationDocument,
-      [`driver_activation/${safeDriverId}/updatedAt`]: updatedAt,
-      [`users/${safeDriverId}/documents/${safeType}`]: userDocument
-    });
+    await driverDocumentStore.commit(firestore, [
+      activationWrite(safeDriverId, ['documents', safeType], activationDocument),
+      activationWrite(safeDriverId, ['documents_history', binding.submissionId], activationDocument),
+      activationWrite(safeDriverId, ['updatedAt'], updatedAt),
+      userWrite(safeDriverId, ['documents', safeType], userDocument)
+    ]);
     return { binding };
   });
 }
@@ -360,15 +371,16 @@ async function runWithCurrentDocumentBinding({
     driverId: safeDriverId,
     documentType: safeType,
     scope: `${scope}_${binding.submissionId}`
-  }, async ({ db: realtimeDb, lease }) => {
-    const [activationSnapshot, userSnapshot, historySnapshot] = await Promise.all([
-      realtimeDb.ref(`driver_activation/${safeDriverId}/documents/${safeType}`).once('value'),
-      realtimeDb.ref(`users/${safeDriverId}/documents/${safeType}`).once('value'),
-      realtimeDb.ref(`driver_activation/${safeDriverId}/documents_history/${binding.submissionId}`).once('value')
-    ]);
-    const activationDocument = activationSnapshot.val() || {};
-    const userDocument = userSnapshot.val() || {};
-    const historyDocument = historySnapshot.val() || {};
+  }, async ({ db: realtimeDb, firestore, lease }) => {
+    const {
+      activationDocument,
+      userDocument,
+      historyDocument
+    } = await driverDocumentStore.readDocumentBinding(firestore, {
+      driverId: safeDriverId,
+      documentType: safeType,
+      submissionId: binding.submissionId
+    });
     if (
       !documentBindingsMatch(binding, activationDocument)
       || !documentBindingsMatch(binding, userDocument)
@@ -382,6 +394,7 @@ async function runWithCurrentDocumentBinding({
 
     return callback({
       db: realtimeDb,
+      firestore,
       lease,
       binding,
       activationDocument,
@@ -640,7 +653,7 @@ function toReviewQueueStatus(documentStatus) {
   return 'pending';
 }
 
-async function adjustDocumentIndexCounters(db, documentType, previousStatus, nextStatus) {
+async function adjustDocumentIndexCounters(firestore, documentType, previousStatus, nextStatus) {
   const safeDocumentType = sanitizeDocumentType(documentType);
   if (!safeDocumentType) {
     return;
@@ -668,16 +681,7 @@ async function adjustDocumentIndexCounters(db, documentType, previousStatus, nex
     deltas[toStatus] = (deltas[toStatus] || 0) + 1;
   }
 
-  await Promise.all(
-    Object.entries(deltas).map(([status, delta]) =>
-      db.ref(`driver_documents_index_stats/${safeDocumentType}/${status}`).transaction(current => {
-        const currentNumber = Number.parseInt(current, 10);
-        const safeCurrent = Number.isFinite(currentNumber) ? currentNumber : 0;
-        const nextValue = safeCurrent + delta;
-        return nextValue > 0 ? nextValue : 0;
-      })
-    )
-  );
+  await driverDocumentStore.adjustStats(firestore, safeDocumentType, deltas);
 }
 
 async function recomputeDriverActivationStatus(driverId) {
@@ -687,9 +691,8 @@ async function recomputeDriverActivationStatus(driverId) {
   }
 
   const db = getDbOrThrow();
-  const activationPath = `driver_activation/${safeDriverId}`;
-  const activationSnapshot = await db.ref(activationPath).once('value');
-  const activationNode = activationSnapshot.val() || {};
+  const firestore = getFirestoreOrThrow();
+  const activationNode = await driverDocumentStore.readActivation(firestore, safeDriverId) || {};
   const documents = activationNode.documents || {};
   const consent = activationNode.consent || {};
 
@@ -744,12 +747,12 @@ async function recomputeDriverActivationStatus(driverId) {
     updatedAt
   };
 
-  await db.ref(`${activationPath}/status`).set(statusPayload);
-
-  await db.ref(`users/${safeDriverId}/driverActivation`).update({
-    ...statusPayload,
-    source: 'driver_activation_pipeline'
-  });
+  await driverDocumentStore.commit(firestore, [
+    activationWrite(safeDriverId, ['status'], statusPayload),
+    // RTDB `update` semantics: only these keys of driverActivation change.
+    ...Object.entries({ ...statusPayload, source: 'driver_activation_pipeline' })
+      .map(([field, value]) => userWrite(safeDriverId, ['driverActivation', field], value))
+  ]);
 
   if (canGoOnline) {
     try {
@@ -833,9 +836,9 @@ async function updateDocumentState({
     submissionId: safeSubmissionId
   });
 
-  const activationDocPath = `driver_activation/${safeDriverId}/documents/${safeType}`;
-  const activationHistoryPath = `driver_activation/${safeDriverId}/documents_history/${safeSubmissionId}`;
-  const userDocumentPath = `users/${safeDriverId}/documents/${safeType}`;
+  const activationDocField = ['documents', safeType];
+  const activationHistoryField = ['documents_history', safeSubmissionId];
+  const userDocumentField = ['documents', safeType];
 
   const normalizedDocumentData = safeType === 'crlv' && data
     ? normalizeVehicleOcrPayload(data)
@@ -853,14 +856,19 @@ async function updateDocumentState({
     driverId: safeDriverId,
     documentType: safeType,
     scope: `analysis_result_${safeSubmissionId}`
-  }, async ({ db: realtimeDb, lease }) => {
-    const currentDocumentSnapshot = await realtimeDb.ref(activationDocPath).once('value');
-    const currentDocument = currentDocumentSnapshot.val() || {};
+  }, async ({ db: realtimeDb, firestore, lease }) => {
+    const {
+      activationDocument: currentDocument,
+      userDocument: previousUserDocument,
+      historyDocument: existingHistory
+    } = await driverDocumentStore.readDocumentBinding(firestore, {
+      driverId: safeDriverId,
+      documentType: safeType,
+      submissionId: safeSubmissionId
+    });
     const currentBinding = normalizeDocumentBinding(currentDocument);
 
     if (!documentBindingsMatch(expectedBinding, currentBinding)) {
-      const historySnapshot = await realtimeDb.ref(activationHistoryPath).once('value');
-      const existingHistory = historySnapshot.val() || {};
       const supersededReason = 'Resultado ignorado porque uma submissao mais recente substituiu este documento.';
       const supersededPayload = {
         ...existingHistory,
@@ -890,7 +898,9 @@ async function updateDocumentState({
       };
 
       await lease.assertHeld();
-      await realtimeDb.ref(activationHistoryPath).set(supersededPayload);
+      await driverDocumentStore.commit(firestore, [
+        activationWrite(safeDriverId, activationHistoryField, supersededPayload)
+      ]);
       runtimeMetrics.recordRealtimeUpdate('driver_activation_queue', 'result_superseded');
       logStructured('info', 'Resultado documental antigo preservado apenas no historico', {
         service: 'driver-activation-queue',
@@ -910,8 +920,6 @@ async function updateDocumentState({
       };
     }
 
-    const previousUserDocumentSnapshot = await realtimeDb.ref(userDocumentPath).once('value');
-    const previousUserDocument = previousUserDocumentSnapshot.val() || {};
     const previousReviewStatus = String(previousUserDocument?.status || '').toLowerCase();
 
     const basePayload = {
@@ -956,21 +964,6 @@ async function updateDocumentState({
       extractionSource: extractionSource || null
     };
 
-    const indexPayload = {
-      driverId: safeDriverId,
-      documentType: safeType,
-      submissionId: safeSubmissionId,
-      filePath: expectedBinding.filePath,
-      documentSha256: expectedBinding.documentSha256,
-      storageGeneration: expectedBinding.storageGeneration,
-      status: reviewStatus,
-      uploadedAt: userDocumentPayload.uploadedAt || metadata?.createdAt || statusUpdatedAt,
-      reviewedAt: userDocumentPayload.reviewedAt || null,
-      updatedAt: statusUpdatedAt,
-      fileName: userDocumentPayload.fileName || metadata?.fileName || null,
-      fileType: userDocumentPayload.fileType || metadata?.fileType || null
-    };
-
     const crlvVehicleLink = safeType === 'crlv' && normalizedStatus === 'approved'
       ? await buildApprovedCrlvVehicleLinkUpdates({
         db: realtimeDb,
@@ -984,22 +977,21 @@ async function updateDocumentState({
       : null;
 
     await lease.assertHeld();
-    await realtimeDb.ref().update({
-      ...(crlvVehicleLink?.updates || {}),
+    // driver_documents_index is no longer written: nothing reads it and it is
+    // not served by Firestore (writes were dropped once RTDB was retired).
+    await driverDocumentStore.commit(firestore, [
+      ...driverDocumentStore.vehicleLinkWrites(crlvVehicleLink?.updates || {}),
       ...(safeType === 'cnh' && biometricState?.userPayload
-        ? { [`users/${safeDriverId}/biometrics/cnhFace`]: biometricState.userPayload }
-        : {}),
+        ? [userWrite(safeDriverId, ['biometrics', 'cnhFace'], biometricState.userPayload)]
+        : []),
       ...(safeType === 'cnh' && biometricState?.activationPayload
-        ? { [`driver_activation/${safeDriverId}/biometrics/cnhFace`]: biometricState.activationPayload }
-        : {}),
-      [activationDocPath]: basePayload,
-      [activationHistoryPath]: historyPayload,
-      [userDocumentPath]: userDocumentPayload,
-      [`driver_documents_index/${safeType}/pending/${safeDriverId}`]: reviewStatus === 'pending' ? indexPayload : null,
-      [`driver_documents_index/${safeType}/approved/${safeDriverId}`]: reviewStatus === 'approved' ? indexPayload : null,
-      [`driver_documents_index/${safeType}/rejected/${safeDriverId}`]: reviewStatus === 'rejected' ? indexPayload : null,
-      [`driver_activation/${safeDriverId}/updatedAt`]: statusUpdatedAt
-    });
+        ? [activationWrite(safeDriverId, ['biometrics', 'cnhFace'], biometricState.activationPayload)]
+        : []),
+      activationWrite(safeDriverId, activationDocField, basePayload),
+      activationWrite(safeDriverId, activationHistoryField, historyPayload),
+      userWrite(safeDriverId, userDocumentField, userDocumentPayload),
+      activationWrite(safeDriverId, ['updatedAt'], statusUpdatedAt)
+    ]);
 
     if (crlvVehicleLink) {
       runtimeMetrics.recordRealtimeUpdate(
@@ -1017,7 +1009,7 @@ async function updateDocumentState({
       });
     }
 
-    await adjustDocumentIndexCounters(realtimeDb, safeType, previousReviewStatus, reviewStatus);
+    await adjustDocumentIndexCounters(firestore, safeType, previousReviewStatus, reviewStatus);
 
     runtimeMetrics.recordRealtimeUpdate(
       'driver_activation',
@@ -1388,20 +1380,18 @@ class DriverDocumentAnalysisQueue {
       throw new Error('DRIVER_ID_REQUIRED');
     }
 
-    const db = getDbOrThrow();
     const acceptedNow = Boolean(accepted);
     const updatedAt = nowIso();
 
-    await db.ref(`driver_activation/${safeDriverId}/consent/backgroundCheck`).set({
-      acceptedAt: acceptedNow ? updatedAt : null,
-      accepted: acceptedNow,
-      updatedAt
-    });
-
-    await db.ref(`users/${safeDriverId}/driverActivationConsent`).update({
-      backgroundCheck: acceptedNow,
-      updatedAt
-    });
+    await driverDocumentStore.commit(getFirestoreOrThrow(), [
+      activationWrite(safeDriverId, ['consent', 'backgroundCheck'], {
+        acceptedAt: acceptedNow ? updatedAt : null,
+        accepted: acceptedNow,
+        updatedAt
+      }),
+      userWrite(safeDriverId, ['driverActivationConsent', 'backgroundCheck'], acceptedNow),
+      userWrite(safeDriverId, ['driverActivationConsent', 'updatedAt'], updatedAt)
+    ]);
 
     const aggregatedStatus = await recomputeDriverActivationStatus(safeDriverId);
 
@@ -1426,12 +1416,11 @@ class DriverDocumentAnalysisQueue {
     }
 
     const db = getDbOrThrow();
-    const [activationSnapshot, userSnapshot] = await Promise.all([
-      db.ref(`driver_activation/${safeDriverId}`).once('value'),
-      db.ref(`users/${safeDriverId}`).once('value')
+    const firestore = getFirestoreOrThrow();
+    const [activationNode, userData] = await Promise.all([
+      driverDocumentStore.readActivation(firestore, safeDriverId).then(value => value || {}),
+      driverDocumentStore.readUser(firestore, safeDriverId).then(value => value || {})
     ]);
-    const activationNode = activationSnapshot.val() || {};
-    const userData = userSnapshot.val() || {};
     const docs = activationNode?.documents || {};
     const consentAcceptedAt = activationNode?.consent?.backgroundCheck?.acceptedAt || null;
 
@@ -1550,9 +1539,8 @@ class DriverDocumentAnalysisQueue {
       throw new Error('DRIVER_ID_REQUIRED');
     }
 
-    const db = getDbOrThrow();
-    const historySnapshot = await db.ref(`driver_activation/${safeDriverId}/documents_history`).once('value');
-    const historyMap = historySnapshot.val() || {};
+    const activationNode = await driverDocumentStore.readActivation(getFirestoreOrThrow(), safeDriverId);
+    const historyMap = activationNode?.documents_history || {};
 
     const items = Object.entries(historyMap)
       .map(([submissionId, payload]) => ({
