@@ -37,6 +37,10 @@ const VEHICLE_LINK_ROOTS = Object.freeze({
   vehicle_plate_index: COLLECTIONS.plateIndex
 });
 
+// Field writes on the activation record and on the canonical user record.
+const activationField = (driverId, field, value) => ({ collection: COLLECTIONS.activation, id: driverId, field, value });
+const userField = (driverId, field, value) => ({ collection: COLLECTIONS.users, id: driverId, field, value });
+
 // Records that hold a single primitive (the plate index) store it here.
 const PRIMITIVE_FIELD = 'rtdbValue';
 
@@ -199,6 +203,8 @@ async function adjustStats(firestore, documentType, deltas) {
 
 module.exports = {
   COLLECTIONS,
+  activationField,
+  userField,
   readActivation,
   readUser,
   readDocumentBinding,

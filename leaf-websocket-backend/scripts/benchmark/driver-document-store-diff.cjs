@@ -43,6 +43,7 @@ async function seed(firestore) {
   await firestore.collection('driver_activation').doc('u1').set({ documents: { crlv: { status: 'approved' } } });
   await firestore.collection('driver_document_stats').doc('cnh').set({ pending: 1, approved: 0 });
   await firestore.collection('driver_document_locks').doc('u1').set({ crlv: { token: 'other' } });
+  await firestore.collection('users').doc('u2').set({ name: 'Driver 2', createdAt: Timestamp.fromMillis(1_700_000_000_000) });
 }
 
 async function viaRouter(db) {
@@ -71,6 +72,29 @@ async function viaRouter(db) {
   await db.ref('users/u1/driverActivationConsent').update({ backgroundCheck: false, updatedAt: 't3' });
   await db.ref('driver_document_mutation_locks/u1/cnh').transaction(current => (current?.token === 't1' ? null : undefined));
   await db.ref('driver_document_mutation_locks/u1/crlv').transaction(() => null);
+  // Dashboard: review (deep field paths), upload of a new type, bulk approval
+  // consent on a record whose consent map does not exist yet.
+  await db.ref().update({
+    'users/u1/documents/crlv/status': 'approved',
+    'users/u1/documents/crlv/rejectionReason': null,
+    'users/u1/documents/crlv/reviewedAt': '2026-10-27T13:00:00.000Z',
+    'driver_activation/u1/documents/crlv/reason': '',
+    'driver_activation/u1/documents/crlv/reviewedBy': 'admin',
+    'driver_activation/u1/documents_history/s9/status': 'approved',
+    'driver_activation/u1/updatedAt': 't4'
+  });
+  await db.ref().update({
+    'users/u2/documents/antecedentes_criminais': { status: 'pending', fileName: 'a.pdf' },
+    'driver_activation/u2/documents/antecedentes_criminais': { status: 'pending', reason: '' },
+    'driver_activation/u2/updatedAt': 't5'
+  });
+  await db.ref('driver_documents_index_stats/antecedentes_criminais/pending').transaction(current => Math.max(0, (Number(current) || 0) + 1));
+  await db.ref().update({
+    'users/u2/driverActivationConsent/backgroundCheck': true,
+    'users/u2/driverActivationConsent/updatedAt': 't6',
+    'driver_activation/u2/consent/backgroundCheck/accepted': true,
+    'driver_activation/u2/consent/backgroundCheck/acceptedAt': 't6'
+  });
 }
 
 async function viaStore(firestore) {
@@ -106,6 +130,27 @@ async function viaStore(firestore) {
   ]);
   await store.transactLock(firestore, lock, current => (current?.token === 't1' ? null : undefined));
   await store.transactLock(firestore, { driverId: 'u1', documentType: 'crlv' }, () => null);
+  await store.commit(firestore, [
+    user(['documents', 'crlv', 'status'], 'approved'),
+    user(['documents', 'crlv', 'rejectionReason'], null),
+    user(['documents', 'crlv', 'reviewedAt'], '2026-10-27T13:00:00.000Z'),
+    activation(['documents', 'crlv', 'reason'], ''),
+    activation(['documents', 'crlv', 'reviewedBy'], 'admin'),
+    activation(['documents_history', 's9', 'status'], 'approved'),
+    activation(['updatedAt'], 't4')
+  ]);
+  await store.commit(firestore, [
+    store.userField('u2', ['documents', 'antecedentes_criminais'], { status: 'pending', fileName: 'a.pdf' }),
+    store.activationField('u2', ['documents', 'antecedentes_criminais'], { status: 'pending', reason: '' }),
+    store.activationField('u2', ['updatedAt'], 't5')
+  ]);
+  await store.adjustStats(firestore, 'antecedentes_criminais', { pending: 1 });
+  await store.commit(firestore, [
+    store.userField('u2', ['driverActivationConsent', 'backgroundCheck'], true),
+    store.userField('u2', ['driverActivationConsent', 'updatedAt'], 't6'),
+    store.activationField('u2', ['consent', 'backgroundCheck', 'accepted'], true),
+    store.activationField('u2', ['consent', 'backgroundCheck', 'acceptedAt'], 't6')
+  ]);
 }
 
 const raw = value => {

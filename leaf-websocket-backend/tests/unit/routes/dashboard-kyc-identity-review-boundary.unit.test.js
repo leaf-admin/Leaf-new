@@ -141,7 +141,7 @@ describe('dashboard KYC identity review boundary', () => {
     expect(source).toContain("const DASHBOARD_REVIEWABLE_DOCUMENT_TYPES = new Set(['cnh', 'crlv', 'antecedentes_criminais'])");
     expect(source).toContain('async function assertCurrentCrlvReviewBinding');
     expect(source).toContain("const fields = ['submissionId', 'filePath', 'documentSha256', 'storageGeneration']");
-    expect(source).toContain('driver_activation/${driverId}/documents_history/${submissionId}');
+    expect(source).toContain("driverDocumentStore.readDocumentBinding(firestore, { driverId, documentType: 'crlv', submissionId })");
     expect(source).toContain("DRIVER_ACTIVATION_DOCUMENT_ANALYSIS_NOT_APPROVED");
     expect(source.match(/assertCurrentCrlvReviewBinding\(\{/g)).toHaveLength(2);
     expect(source).toContain('runWithCurrentDocumentBinding');

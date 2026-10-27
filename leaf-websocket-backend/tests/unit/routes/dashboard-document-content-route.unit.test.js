@@ -9,9 +9,14 @@ const request = require('supertest');
 const mockDownloadStoragePath = jest.fn();
 const mockRequireAuditEvent = jest.fn();
 const mockResolveRuntimeForUser = jest.fn();
-const mockRealtimeOnce = jest.fn();
-const mockRealtimeRef = jest.fn(() => ({ once: mockRealtimeOnce }));
-const mockRealtimeDb = { ref: mockRealtimeRef };
+const mockRealtimeDb = { ref: jest.fn() };
+// Driver documents are read from the native users/{driverId} document.
+const mockUserGet = jest.fn();
+const mockFirestoreDoc = jest.fn(() => ({ get: mockUserGet }));
+const mockFirestore = {
+  collection: jest.fn(() => ({ doc: mockFirestoreDoc })),
+  runTransaction: jest.fn()
+};
 
 jest.mock('../../../middleware/jwt-auth', () => ({
   authenticateJWT(req, res, next) {
@@ -54,7 +59,7 @@ jest.mock('../../../utils/redis-pool', () => ({
 
 jest.mock('../../../firebase-config', () => ({
   getRealtimeDB: jest.fn(() => mockRealtimeDb),
-  getFirestore: jest.fn(),
+  getFirestore: jest.fn(() => mockFirestore),
   initializeFirebase: jest.fn()
 }));
 
@@ -137,9 +142,9 @@ function canonicalDocument(overrides = {}) {
 }
 
 function setDocument(document = canonicalDocument()) {
-  mockRealtimeOnce.mockResolvedValue({
-    exists: () => true,
-    val: () => document
+  mockUserGet.mockResolvedValue({
+    exists: true,
+    data: () => ({ documents: { cnh: document, crlv: document } })
   });
 }
 
@@ -193,7 +198,7 @@ describe('GET /api/drivers/:driverId/documents/:documentType/content', () => {
 
     expect(response.status).toBe(401);
     expect(mockResolveRuntimeForUser).not.toHaveBeenCalled();
-    expect(mockRealtimeRef).not.toHaveBeenCalled();
+    expect(mockFirestoreDoc).not.toHaveBeenCalled();
     expect(mockDownloadStoragePath).not.toHaveBeenCalled();
   });
 
@@ -202,7 +207,7 @@ describe('GET /api/drivers/:driverId/documents/:documentType/content', () => {
 
     expect(response.status).toBe(403);
     expect(mockResolveRuntimeForUser).not.toHaveBeenCalled();
-    expect(mockRealtimeRef).not.toHaveBeenCalled();
+    expect(mockFirestoreDoc).not.toHaveBeenCalled();
     expect(mockDownloadStoragePath).not.toHaveBeenCalled();
   });
 
@@ -216,7 +221,7 @@ describe('GET /api/drivers/:driverId/documents/:documentType/content', () => {
       success: false,
       code: 'KYC_DASHBOARD_SCOPE_USER_MISMATCH'
     });
-    expect(mockRealtimeRef).not.toHaveBeenCalled();
+    expect(mockFirestoreDoc).not.toHaveBeenCalled();
     expect(mockDownloadStoragePath).not.toHaveBeenCalled();
   });
 
@@ -231,7 +236,7 @@ describe('GET /api/drivers/:driverId/documents/:documentType/content', () => {
       code: 'KYC_DASHBOARD_SANDBOX_ACCESS_DENIED',
       message: 'Você não tem permissão para abrir este documento.'
     });
-    expect(mockRealtimeRef).not.toHaveBeenCalled();
+    expect(mockFirestoreDoc).not.toHaveBeenCalled();
     expect(mockDownloadStoragePath).not.toHaveBeenCalled();
   });
 
@@ -261,7 +266,7 @@ describe('GET /api/drivers/:driverId/documents/:documentType/content', () => {
     expect(response.status).toBe(400);
     expect(response.body.code).toBe('DRIVER_DOCUMENT_TYPE_INVALID');
     expect(mockResolveRuntimeForUser).not.toHaveBeenCalled();
-    expect(mockRealtimeRef).not.toHaveBeenCalled();
+    expect(mockFirestoreDoc).not.toHaveBeenCalled();
     expect(mockDownloadStoragePath).not.toHaveBeenCalled();
   });
 
