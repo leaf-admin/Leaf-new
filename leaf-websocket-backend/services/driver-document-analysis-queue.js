@@ -118,9 +118,7 @@ function getFirestoreOrThrow() {
   return firestore;
 }
 
-const { COLLECTIONS } = driverDocumentStore;
-const activationWrite = (driverId, field, value) => ({ collection: COLLECTIONS.activation, id: driverId, field, value });
-const userWrite = (driverId, field, value) => ({ collection: COLLECTIONS.users, id: driverId, field, value });
+const { activationField: activationWrite, userField: userWrite } = driverDocumentStore;
 
 function nowIso() {
   return new Date().toISOString();

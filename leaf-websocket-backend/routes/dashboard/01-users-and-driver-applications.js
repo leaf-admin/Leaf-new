@@ -8,6 +8,8 @@ const {
   DASHBOARD_REVIEWABLE_DOCUMENT_TYPES,
   LEGACY_DRIVER_APPLICATION_MUTATIONS_ENABLED,
   adjustDocumentIndexCounters,
+  getDocumentFirestore,
+  driverDocumentStore,
   admin,
   adminDocumentUpload,
   assertCurrentCrlvReviewBinding,
@@ -260,19 +262,20 @@ router.post(
     try {
       if (firebaseConfig && firebaseConfig.getRealtimeDB) {
         const db = firebaseConfig.getRealtimeDB();
+        const firestore = getDocumentFirestore();
 
         // Verificar se o documento existe
-        const documentRef = db.ref(`users/${driverId}/documents/${normalizedDocumentType}`);
-        const documentSnapshot = await documentRef.once('value');
+        const driverUser = await driverDocumentStore.readUser(firestore, driverId);
+        const storedDocument = driverUser?.documents?.[normalizedDocumentType] || null;
 
-        if (!documentSnapshot.exists()) {
+        if (!storedDocument) {
           return res.status(404).json({
             success: false,
             message: 'Documento não encontrado.'
           });
         }
 
-        let existingDocument = documentSnapshot.val() || {};
+        let existingDocument = storedDocument;
         const nextStatus = action === 'approve' ? 'approved' : 'rejected';
         const canonicalActivationStatus = action === 'approve' ? 'approved' : 'failed';
         let reviewAtIso = null;
@@ -306,7 +309,6 @@ router.post(
         });
 
         const applyReviewMutation = async ({
-          mutationDb,
           documentLease = null,
           currentUserDocument = existingDocument
         }) => {
@@ -314,7 +316,7 @@ router.post(
 
           if (normalizedDocumentType === 'crlv') {
             await assertCurrentCrlvReviewBinding({
-              db: mutationDb,
+              firestore,
               driverId,
               document: documentForReview,
               action
@@ -358,57 +360,47 @@ router.post(
             rejectionReason: action === 'reject' ? rejectionReason : null
           };
 
-          // Índice denormalizado para consultas rápidas por tipo/status.
-          const statusIndexPath = `driver_documents_index/${normalizedDocumentType}`;
-          const statusBuckets = ['pending', 'approved', 'rejected'];
-          const indexUpdates = {};
-          Object.entries(reviewData).forEach(([field, value]) => {
-            indexUpdates[`users/${driverId}/documents/${normalizedDocumentType}/${field}`] = value;
-          });
-          indexUpdates[`users/${driverId}/documents/${normalizedDocumentType}/analysisStatus`] = canonicalActivationStatus;
-          indexUpdates[`driver_activation/${driverId}/documents/${normalizedDocumentType}/status`] = canonicalActivationStatus;
-          indexUpdates[`driver_activation/${driverId}/documents/${normalizedDocumentType}/reason`] =
-            action === 'reject' ? rejectionReason : '';
-          indexUpdates[`driver_activation/${driverId}/documents/${normalizedDocumentType}/reviewedAt`] = reviewAtIso;
-          indexUpdates[`driver_activation/${driverId}/documents/${normalizedDocumentType}/reviewedBy`] = reviewedBy;
-          indexUpdates[`driver_activation/${driverId}/documents/${normalizedDocumentType}/reviewedByEmail`] = req.user.email || null;
-          indexUpdates[`driver_activation/${driverId}/documents/${normalizedDocumentType}/updatedAt`] = reviewAtIso;
-          indexUpdates[`driver_activation/${driverId}/updatedAt`] = reviewAtIso;
+          // driver_documents_index is no longer written: nothing reads it and it
+          // is not served by Firestore (writes were dropped after RTDB retired).
+          const reviewReason = action === 'reject' ? rejectionReason : '';
+          const reviewWrites = [
+            ...Object.entries(reviewData).map(([field, value]) =>
+              driverDocumentStore.userField(driverId, ['documents', normalizedDocumentType, field], value)),
+            driverDocumentStore.userField(driverId, ['documents', normalizedDocumentType, 'analysisStatus'], canonicalActivationStatus),
+            ...Object.entries({
+              status: canonicalActivationStatus,
+              reason: reviewReason,
+              reviewedAt: reviewAtIso,
+              reviewedBy,
+              reviewedByEmail: req.user.email || null,
+              updatedAt: reviewAtIso
+            }).map(([field, value]) =>
+              driverDocumentStore.activationField(driverId, ['documents', normalizedDocumentType, field], value)),
+            driverDocumentStore.activationField(driverId, ['updatedAt'], reviewAtIso)
+          ];
           const reviewSubmissionId = documentForReview.lastSubmissionId || documentForReview.submissionId;
           if (reviewSubmissionId) {
-            indexUpdates[`driver_activation/${driverId}/documents_history/${reviewSubmissionId}/status`] = canonicalActivationStatus;
-            indexUpdates[`driver_activation/${driverId}/documents_history/${reviewSubmissionId}/reason`] =
-              action === 'reject' ? rejectionReason : '';
-            indexUpdates[`driver_activation/${driverId}/documents_history/${reviewSubmissionId}/reviewedAt`] = reviewAtIso;
-            indexUpdates[`driver_activation/${driverId}/documents_history/${reviewSubmissionId}/reviewedBy`] = reviewedBy;
-            indexUpdates[`driver_activation/${driverId}/documents_history/${reviewSubmissionId}/reviewedByEmail`] = req.user.email || null;
-            indexUpdates[`driver_activation/${driverId}/documents_history/${reviewSubmissionId}/reviewAuditIntentId`] = reviewAuditIntent.logId;
-            indexUpdates[`driver_activation/${driverId}/documents_history/${reviewSubmissionId}/reviewMutationId`] = reviewMutationId;
-            indexUpdates[`driver_activation/${driverId}/documents_history/${reviewSubmissionId}/updatedAt`] = reviewAtIso;
+            Object.entries({
+              status: canonicalActivationStatus,
+              reason: reviewReason,
+              reviewedAt: reviewAtIso,
+              reviewedBy,
+              reviewedByEmail: req.user.email || null,
+              reviewAuditIntentId: reviewAuditIntent.logId,
+              reviewMutationId,
+              updatedAt: reviewAtIso
+            }).forEach(([field, value]) => {
+              reviewWrites.push(driverDocumentStore.activationField(
+                driverId, ['documents_history', reviewSubmissionId, field], value
+              ));
+            });
           }
-          statusBuckets.forEach((bucket) => {
-            indexUpdates[`${statusIndexPath}/${bucket}/${driverId}`] = null;
-          });
-          indexUpdates[`${statusIndexPath}/${nextStatus}/${driverId}`] = {
-            driverId,
-            documentType: normalizedDocumentType,
-            submissionId: documentForReview.lastSubmissionId || documentForReview.submissionId || null,
-            filePath: documentForReview.filePath || null,
-            documentSha256: documentForReview.documentSha256 || null,
-            storageGeneration: documentForReview.storageGeneration || null,
-            status: nextStatus,
-            uploadedAt: documentForReview.uploadedAt || null,
-            reviewedAt: reviewAtIso,
-            updatedAt: reviewAtIso,
-            fileName: documentForReview.fileName || null,
-            fileType: documentForReview.fileType || null
-          };
 
           if (normalizedDocumentType === 'cnh') {
             await assertDashboardCnhMutationWindowHeld(req, driverId);
           }
           await documentLease?.assertHeld();
-          await mutationDb.ref().update(indexUpdates);
+          await driverDocumentStore.commit(firestore, reviewWrites);
 
           if (normalizedDocumentType === 'cnh') {
             await assertDashboardCnhMutationWindowHeld(req, driverId);
@@ -425,7 +417,7 @@ router.post(
 
           await documentLease?.assertHeld();
           await adjustDocumentIndexCounters(
-            mutationDb,
+            firestore,
             normalizedDocumentType,
             documentForReview.status || null,
             nextStatus
@@ -441,13 +433,12 @@ router.post(
             documentType: normalizedDocumentType,
             expectedBinding: expectedReviewBinding,
             scope: 'dashboard_document_review'
-          }, async ({ db: mutationDb, lease, userDocument }) => applyReviewMutation({
-            mutationDb,
+          }, async ({ lease, userDocument }) => applyReviewMutation({
             documentLease: lease,
             currentUserDocument: userDocument
           }));
         } else {
-          existingDocument = await applyReviewMutation({ mutationDb: db });
+          existingDocument = await applyReviewMutation({});
         }
 
         await auditService.requireEvent({
@@ -629,20 +620,20 @@ router.get(
       }
       const kycRuntime = await resolveDashboardKycRuntime(req, driverId);
 
-      const db = firebaseConfig?.getRealtimeDB?.();
-      if (!db) {
+      const firestore = firebaseConfig?.getFirestore?.();
+      if (!firestore) {
         throw dashboardKycBoundaryError(
           'DRIVER_DOCUMENT_STORE_UNAVAILABLE',
           'Armazenamento de documentos indisponível.'
         );
       }
 
-      const snapshot = await db.ref(`users/${driverId}/documents/${documentType}`).once('value');
-      if (!snapshot.exists()) {
+      const driverUser = await driverDocumentStore.readUser(firestore, driverId);
+      const document = driverUser?.documents?.[documentType] || null;
+      if (!document) {
         throw dashboardKycBoundaryError('DRIVER_DOCUMENT_NOT_FOUND', 'Documento não encontrado.');
       }
 
-      const document = snapshot.val() || {};
       const filePath = String(document.filePath || '').trim();
       if (!isCanonicalDashboardDocumentPath(driverId, documentType, filePath)) {
         throw dashboardKycBoundaryError(
@@ -823,8 +814,8 @@ router.post(
       }
 
       const db = firebaseConfig.getRealtimeDB();
-      const userSnapshot = await db.ref(`users/${driverId}`).once('value');
-      if (!userSnapshot.exists()) {
+      const firestore = getDocumentFirestore();
+      if (!(await driverDocumentStore.readUser(firestore, driverId))) {
         return res.status(404).json({
           success: false,
           message: 'Motorista não encontrado.'
@@ -909,31 +900,16 @@ router.post(
         updatedAt: nowIso
       };
 
-      const documentPath = `users/${driverId}/documents/${documentType}`;
-      const statusIndexPath = `driver_documents_index/${documentType}`;
-      const indexPayload = {
-        driverId,
-        documentType,
-        submissionId,
-        filePath: objectPath,
-        documentSha256: documentPayload.documentSha256,
-        storageGeneration,
-        status: 'pending',
-        uploadedAt: nowIso,
-        reviewedAt: null,
-        updatedAt: nowIso,
-        fileName,
-        fileType: req.file.mimetype
-      };
-
       await runWithDocumentMutationLease({
         db,
         driverId,
         documentType,
         scope: `dashboard_upload_${submissionId}`
-      }, async ({ db: mutationDb, lease }) => {
-        const previousDocumentSnapshot = await mutationDb.ref(documentPath).once('value');
-        const previousDocument = previousDocumentSnapshot.val() || {};
+      }, async ({ lease }) => {
+        const { userDocument: previousDocument } = await driverDocumentStore.readDocumentBinding(firestore, {
+          driverId,
+          documentType
+        });
         const activationPayload = {
           ...documentPayload,
           lastSubmissionId: null,
@@ -941,20 +917,17 @@ router.post(
           source: 'dashboard_document_upload'
         };
         await lease.assertHeld();
-        await mutationDb.ref().update({
-          [documentPath]: documentPayload,
-          [`driver_activation/${driverId}/documents/${documentType}`]: activationPayload,
-          [`driver_activation/${driverId}/documents_history/${submissionId}`]: activationPayload,
-          [`driver_activation/${driverId}/updatedAt`]: nowIso,
-          [`${statusIndexPath}/pending/${driverId}`]: indexPayload,
-          [`${statusIndexPath}/approved/${driverId}`]: null,
-          [`${statusIndexPath}/rejected/${driverId}`]: null
-        });
+        await driverDocumentStore.commit(firestore, [
+          driverDocumentStore.userField(driverId, ['documents', documentType], documentPayload),
+          driverDocumentStore.activationField(driverId, ['documents', documentType], activationPayload),
+          driverDocumentStore.activationField(driverId, ['documents_history', submissionId], activationPayload),
+          driverDocumentStore.activationField(driverId, ['updatedAt'], nowIso)
+        ]);
         documentCommitted = true;
         await lease.assertHeld();
         try {
           await adjustDocumentIndexCounters(
-            mutationDb,
+            firestore,
             documentType,
             previousDocument?.status || null,
             'pending'
@@ -1569,8 +1542,8 @@ router.post('/api/drivers/applications/:id/approve', authenticateJWT, requireRol
           return res.status(400).json({ error: 'Usuário não é um motorista' });
         }
 
-        const documentsSnapshot = await db.ref(`users/${id}/documents`).once('value');
-        const documents = documentsSnapshot.val() || {};
+        const firestore = getDocumentFirestore();
+        const documents = (await driverDocumentStore.readUser(firestore, id))?.documents || {};
         const manualApprovalEvidence = Object.entries(documents).map(([docType, doc]) => ({
           type: sanitizeDocumentType(docType) || docType,
           status: doc?.status || null,
@@ -1617,7 +1590,7 @@ router.post('/api/drivers/applications/:id/approve', authenticateJWT, requireRol
         await db.ref(`users/${id}`).update(updates);
 
         // ✅ Atualizar também todos os documentos para aprovados
-        const documentUpdates = {};
+        const documentUpdates = [];
         const counterTransitions = [];
         const reviewedAtIso = new Date().toISOString();
         Object.keys(documents).forEach(docType => {
@@ -1625,47 +1598,35 @@ router.post('/api/drivers/applications/:id/approve', authenticateJWT, requireRol
           if (!normalizedDocType) return;
           const existingDoc = documents[docType] || {};
           const previousStatus = existingDoc.status || null;
-          documentUpdates[`users/${id}/documents/${normalizedDocType}/status`] = 'approved';
-          documentUpdates[`users/${id}/documents/${normalizedDocType}/reviewedAt`] = reviewedAtIso;
-          documentUpdates[`users/${id}/documents/${normalizedDocType}/reviewedBy`] = adminId;
-          documentUpdates[`users/${id}/documents/${normalizedDocType}/updatedAt`] = reviewedAtIso;
-          documentUpdates[`users/${id}/documents/${normalizedDocType}/rejectionReason`] = null;
-          documentUpdates[`driver_documents_index/${normalizedDocType}/pending/${id}`] = null;
-          documentUpdates[`driver_documents_index/${normalizedDocType}/rejected/${id}`] = null;
-          documentUpdates[`driver_documents_index/${normalizedDocType}/approved/${id}`] = {
-            driverId: id,
-            documentType: normalizedDocType,
+          Object.entries({
             status: 'approved',
-            uploadedAt: existingDoc.uploadedAt || null,
             reviewedAt: reviewedAtIso,
+            reviewedBy: adminId,
             updatedAt: reviewedAtIso,
-            fileName: existingDoc.fileName || null,
-            fileType: existingDoc.fileType || null
-          };
+            rejectionReason: null
+          }).forEach(([field, value]) => {
+            documentUpdates.push(driverDocumentStore.userField(id, ['documents', normalizedDocType, field], value));
+          });
           counterTransitions.push({ documentType: normalizedDocType, previousStatus, nextStatus: 'approved' });
         });
-        if (Object.keys(documentUpdates).length > 0) {
-          await db.ref().update(documentUpdates);
+        if (documentUpdates.length > 0) {
+          await driverDocumentStore.commit(firestore, documentUpdates);
           if (counterTransitions.length > 0) {
             await Promise.all(
               counterTransitions.map((entry) =>
-                adjustDocumentIndexCounters(db, entry.documentType, entry.previousStatus, entry.nextStatus)
+                adjustDocumentIndexCounters(firestore, entry.documentType, entry.previousStatus, entry.nextStatus)
               )
             );
           }
         }
 
         const activationUpdatedAt = new Date().toISOString();
-        await Promise.all([
-          db.ref(`users/${id}/driverActivationConsent`).update({
-            backgroundCheck: true,
-            updatedAt: activationUpdatedAt
-          }),
-          db.ref(`driver_activation/${id}/consent/backgroundCheck`).update({
-            accepted: true,
-            acceptedAt: activationUpdatedAt,
-            updatedAt: activationUpdatedAt
-          })
+        await driverDocumentStore.commit(firestore, [
+          driverDocumentStore.userField(id, ['driverActivationConsent', 'backgroundCheck'], true),
+          driverDocumentStore.userField(id, ['driverActivationConsent', 'updatedAt'], activationUpdatedAt),
+          driverDocumentStore.activationField(id, ['consent', 'backgroundCheck', 'accepted'], true),
+          driverDocumentStore.activationField(id, ['consent', 'backgroundCheck', 'acceptedAt'], activationUpdatedAt),
+          driverDocumentStore.activationField(id, ['consent', 'backgroundCheck', 'updatedAt'], activationUpdatedAt)
         ]);
 
         try {
@@ -1769,9 +1730,9 @@ router.post('/api/drivers/applications/:id/reject', authenticateJWT, requireRole
         await db.ref(`users/${id}`).update(updates);
 
         // ✅ Atualizar também todos os documentos para rejeitados
-        const documentsSnapshot = await db.ref(`users/${id}/documents`).once('value');
-        const documents = documentsSnapshot.val() || {};
-        const documentUpdates = {};
+        const firestore = getDocumentFirestore();
+        const documents = (await driverDocumentStore.readUser(firestore, id))?.documents || {};
+        const documentUpdates = [];
         const counterTransitions = [];
         const reviewedAtIso = new Date().toISOString();
         Object.keys(documents).forEach(docType => {
@@ -1779,31 +1740,23 @@ router.post('/api/drivers/applications/:id/reject', authenticateJWT, requireRole
           if (!normalizedDocType) return;
           const existingDoc = documents[docType] || {};
           const previousStatus = existingDoc.status || null;
-          documentUpdates[`users/${id}/documents/${normalizedDocType}/status`] = 'rejected';
-          documentUpdates[`users/${id}/documents/${normalizedDocType}/reviewedAt`] = reviewedAtIso;
-          documentUpdates[`users/${id}/documents/${normalizedDocType}/reviewedBy`] = adminId;
-          documentUpdates[`users/${id}/documents/${normalizedDocType}/updatedAt`] = reviewedAtIso;
-          documentUpdates[`users/${id}/documents/${normalizedDocType}/rejectionReason`] = rejectionReasons?.join(', ') || 'Aplicação rejeitada';
-          documentUpdates[`driver_documents_index/${normalizedDocType}/pending/${id}`] = null;
-          documentUpdates[`driver_documents_index/${normalizedDocType}/approved/${id}`] = null;
-          documentUpdates[`driver_documents_index/${normalizedDocType}/rejected/${id}`] = {
-            driverId: id,
-            documentType: normalizedDocType,
+          Object.entries({
             status: 'rejected',
-            uploadedAt: existingDoc.uploadedAt || null,
             reviewedAt: reviewedAtIso,
+            reviewedBy: adminId,
             updatedAt: reviewedAtIso,
-            fileName: existingDoc.fileName || null,
-            fileType: existingDoc.fileType || null
-          };
+            rejectionReason: rejectionReasons?.join(', ') || 'Aplicação rejeitada'
+          }).forEach(([field, value]) => {
+            documentUpdates.push(driverDocumentStore.userField(id, ['documents', normalizedDocType, field], value));
+          });
           counterTransitions.push({ documentType: normalizedDocType, previousStatus, nextStatus: 'rejected' });
         });
-        if (Object.keys(documentUpdates).length > 0) {
-          await db.ref().update(documentUpdates);
+        if (documentUpdates.length > 0) {
+          await driverDocumentStore.commit(firestore, documentUpdates);
           if (counterTransitions.length > 0) {
             await Promise.all(
               counterTransitions.map((entry) =>
-                adjustDocumentIndexCounters(db, entry.documentType, entry.previousStatus, entry.nextStatus)
+                adjustDocumentIndexCounters(firestore, entry.documentType, entry.previousStatus, entry.nextStatus)
               )
             );
           }

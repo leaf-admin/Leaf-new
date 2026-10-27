@@ -107,6 +107,8 @@ const {
   commitDriverOnlineProjection
 } = require('../../services/driver-online-projection-service');
 
+const driverDocumentStore = require('../../services/driver-document-store');
+
 // Firebase integration
 let firebaseConfig = null;
 
@@ -1242,7 +1244,7 @@ function assertMatchingDocumentBinding(expected = {}, actual = {}) {
   }
 }
 
-async function assertCurrentCrlvReviewBinding({ db, driverId, document, action }) {
+async function assertCurrentCrlvReviewBinding({ firestore, driverId, document, action }) {
   const submissionId = normalizedDocumentBindingValue(
     document?.lastSubmissionId || document?.submissionId
   );
@@ -1259,21 +1261,18 @@ async function assertCurrentCrlvReviewBinding({ db, driverId, document, action }
     );
   }
 
-  const [currentSnapshot, activationSnapshot, historySnapshot] = await Promise.all([
-    db.ref(`users/${driverId}/documents/crlv`).once('value'),
-    db.ref(`driver_activation/${driverId}/documents/crlv`).once('value'),
-    db.ref(`driver_activation/${driverId}/documents_history/${submissionId}`).once('value')
-  ]);
-  if (!currentSnapshot.exists() || !activationSnapshot.exists() || !historySnapshot.exists()) {
+  const {
+    userDocument: currentDocument,
+    activationDocument,
+    historyDocument
+  } = await driverDocumentStore.readDocumentBinding(firestore, { driverId, documentType: 'crlv', submissionId });
+  if (![currentDocument, activationDocument, historyDocument].every(value => Object.keys(value).length > 0)) {
     throw dashboardActivationDocumentReviewError(
       'DRIVER_ACTIVATION_DOCUMENT_REUPLOAD_REQUIRED',
       'O vínculo atual do CRLV não está completo. Solicite um novo envio pelo app.'
     );
   }
 
-  const currentDocument = currentSnapshot.val() || {};
-  const activationDocument = activationSnapshot.val() || {};
-  const historyDocument = historySnapshot.val() || {};
   assertMatchingDocumentBinding(expectedBinding, {
     submissionId: currentDocument.lastSubmissionId || currentDocument.submissionId,
     filePath: currentDocument.filePath,
@@ -1374,7 +1373,7 @@ function normalizeIndexStatus(value) {
   return REVIEWABLE_DOCUMENT_STATUSES.includes(normalized) ? normalized : null;
 }
 
-async function adjustDocumentIndexCounters(db, documentType, previousStatus, nextStatus) {
+async function adjustDocumentIndexCounters(firestore, documentType, previousStatus, nextStatus) {
   const safeDocumentType = sanitizeDocumentType(documentType);
   if (!safeDocumentType) return;
 
@@ -1388,16 +1387,19 @@ async function adjustDocumentIndexCounters(db, documentType, previousStatus, nex
   if (fromStatus) deltas[fromStatus] = (deltas[fromStatus] || 0) - 1;
   if (toStatus) deltas[toStatus] = (deltas[toStatus] || 0) + 1;
 
-  await Promise.all(
-    Object.entries(deltas).map(([status, delta]) =>
-      db.ref(`driver_documents_index_stats/${safeDocumentType}/${status}`).transaction((current) => {
-        const currentNumber = Number.parseInt(current, 10);
-        const safeCurrent = Number.isFinite(currentNumber) ? currentNumber : 0;
-        const nextValue = safeCurrent + delta;
-        return nextValue > 0 ? nextValue : 0;
-      })
-    )
-  );
+  await driverDocumentStore.adjustStats(firestore, safeDocumentType, deltas);
+}
+
+// Firestore for the driver document repository (dashboard document routes).
+function getDocumentFirestore() {
+  const firestore = firebaseConfig?.getFirestore?.();
+  if (!firestore) {
+    const error = new Error('Armazenamento de documentos indisponível.');
+    error.code = 'DRIVER_DOCUMENT_STORE_UNAVAILABLE';
+    error.status = 503;
+    throw error;
+  }
+  return firestore;
 }
 
 // Funções auxiliares para relatórios
@@ -2621,6 +2623,8 @@ module.exports = {
   REVIEWABLE_DOCUMENT_TYPES,
   RedisScan,
   adjustDocumentIndexCounters,
+  getDocumentFirestore,
+  driverDocumentStore,
   admin,
   adminDocumentUpload,
   analyzeDriverGrowth,
