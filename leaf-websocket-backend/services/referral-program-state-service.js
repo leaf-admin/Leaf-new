@@ -8,23 +8,6 @@ const INVITES_COLLECTION = 'referral_invites';
 const INVITE_CODES_COLLECTION = 'referral_invite_codes';
 const PASSENGER_BENEFITS_COLLECTION = 'passenger_discount_benefits';
 
-const LEGACY_CONFIG_PATH = 'operations/programs/referrals/config';
-const LEGACY_CAMPAIGNS_PATH = 'operations/programs/referrals/campaigns';
-const LEGACY_INVITES_PATH = 'operations/programs/referrals/invites';
-
-const LEGACY_IMPORT_ENABLED = String(
-  process.env.REFERRAL_PROGRAMS_ENABLE_LEGACY_IMPORT ?? 'false'
-).toLowerCase() !== 'false';
-const LEGACY_MIRROR_ENABLED = String(
-  process.env.REFERRAL_PROGRAMS_ENABLE_LEGACY_RTDB_MIRROR ?? 'false'
-).toLowerCase() === 'true';
-
-logStructured('info', 'Referral compatibility mode', {
-  service: 'referral-program-state-service',
-  legacyImportEnabled: LEGACY_IMPORT_ENABLED,
-  legacyMirrorEnabled: LEGACY_MIRROR_ENABLED
-});
-
 function nowIso() {
   return new Date().toISOString();
 }
@@ -138,7 +121,6 @@ function inviteIsExpired(invite, nowTs = Date.now()) {
 class ReferralProgramStateService {
   constructor() {
     this.firestore = null;
-    this.legacyDb = null;
   }
 
   getFirestore() {
@@ -146,13 +128,6 @@ class ReferralProgramStateService {
       this.firestore = firebaseConfig.getFirestore();
     }
     return this.firestore;
-  }
-
-  getLegacyDb() {
-    if (!this.legacyDb && firebaseConfig?.getRealtimeDB) {
-      this.legacyDb = firebaseConfig.getRealtimeDB();
-    }
-    return this.legacyDb;
   }
 
   configDoc() {
@@ -185,36 +160,6 @@ class ReferralProgramStateService {
     return firestore.collection(PASSENGER_BENEFITS_COLLECTION);
   }
 
-  async mirrorConfigToLegacy(config) {
-    if (!LEGACY_MIRROR_ENABLED) return;
-    const db = this.getLegacyDb();
-    if (!db) return;
-    await db.ref(LEGACY_CONFIG_PATH).set({
-      ...config,
-      source: 'firestore_mirror'
-    });
-  }
-
-  async mirrorCampaignToLegacy(campaign) {
-    if (!LEGACY_MIRROR_ENABLED) return;
-    const db = this.getLegacyDb();
-    if (!db) return;
-    await db.ref(`${LEGACY_CAMPAIGNS_PATH}/${campaign.id}`).set({
-      ...campaign,
-      source: 'firestore_mirror'
-    });
-  }
-
-  async mirrorInviteToLegacy(invite) {
-    if (!LEGACY_MIRROR_ENABLED) return;
-    const db = this.getLegacyDb();
-    if (!db) return;
-    await db.ref(`${LEGACY_INVITES_PATH}/${invite.id}`).set({
-      ...invite,
-      source: 'firestore_mirror'
-    });
-  }
-
   async getUserProfile(userId) {
     const safeUserId = normalizeId(userId);
     if (!safeUserId) return null;
@@ -227,14 +172,10 @@ class ReferralProgramStateService {
       }
     }
 
-    const db = this.getLegacyDb();
-    if (!db) return null;
-    const snapshot = await db.ref(`users/${safeUserId}`).once('value');
-    if (!snapshot.exists()) return null;
-    return { id: safeUserId, ...(snapshot.val() || {}) };
+    return null;
   }
 
-  async updateUserProfile(userId, patch = {}, { legacyDb = null } = {}) {
+  async updateUserProfile(userId, patch = {}) {
     const safeUserId = normalizeId(userId);
     if (!safeUserId) return;
 
@@ -244,16 +185,6 @@ class ReferralProgramStateService {
         ...patch,
         updatedAt: patch.updatedAt || nowIso()
       }, { merge: true });
-    }
-
-    if (LEGACY_MIRROR_ENABLED) {
-      const db = legacyDb || this.getLegacyDb();
-      if (db) {
-        await db.ref(`users/${safeUserId}`).update({
-          ...patch,
-          updatedAt: patch.updatedAt || nowIso()
-        });
-      }
     }
   }
 
@@ -272,16 +203,6 @@ class ReferralProgramStateService {
     };
 
     await this.passengerBenefitsCollection().doc(docId).set(normalized, { merge: true });
-
-    if (LEGACY_MIRROR_ENABLED) {
-      const db = this.getLegacyDb();
-      if (db) {
-        await db.ref(`users/${safeUserId}/passengerDiscountBenefits/${safeInviteId}`).set({
-          ...normalized,
-          source: 'firestore_mirror'
-        });
-      }
-    }
 
     return normalized;
   }
@@ -319,33 +240,12 @@ class ReferralProgramStateService {
     return nextEnd.toISOString();
   }
 
-  async importLegacyConfig(defaults) {
-    if (!LEGACY_IMPORT_ENABLED) return defaults;
-    const db = this.getLegacyDb();
-    if (!db) {
-      await this.configDoc().set(defaults, { merge: true });
-      return defaults;
-    }
-
-    const snapshot = await db.ref(LEGACY_CONFIG_PATH).once('value');
-    const existing = snapshot.val();
-    const config = existing ? { ...defaults, ...existing } : defaults;
-    await this.configDoc().set({
-      ...config,
-      source: existing ? 'rtdb_import' : 'firestore'
-    }, { merge: true });
-    if (!existing) {
-      await this.mirrorConfigToLegacy(config);
-    }
-    return config;
-  }
-
   async getConfig(defaults) {
     const doc = await this.configDoc().get();
     if (doc.exists) {
       return { ...defaults, ...(doc.data() || {}) };
     }
-    return this.importLegacyConfig(defaults);
+    return defaults;
   }
 
   async saveConfig(config, defaults = {}) {
@@ -356,39 +256,12 @@ class ReferralProgramStateService {
       source: 'firestore'
     };
     await this.configDoc().set(normalized, { merge: true });
-    await this.mirrorConfigToLegacy(normalized);
     return normalized;
   }
 
-  async importLegacyCampaigns() {
-    if (!LEGACY_IMPORT_ENABLED) return [];
-    const db = this.getLegacyDb();
-    if (!db) return [];
-
-    const snapshot = await db.ref(LEGACY_CAMPAIGNS_PATH).once('value');
-    const raw = snapshot.val() || {};
-    const rows = Object.entries(raw).map(([id, value]) => normalizeCampaign({
-      ...(value || {}),
-      source: 'rtdb_import'
-    }, id));
-
-    for (let index = 0; index < rows.length; index += 400) {
-      const batch = this.getFirestore().batch();
-      rows.slice(index, index + 400).forEach((campaign) => {
-        batch.set(this.campaignsCollection().doc(campaign.id), campaign, { merge: true });
-      });
-      await batch.commit();
-    }
-
-    return rows;
-  }
-
   async listCampaigns() {
-    let snapshot = await this.campaignsCollection().get();
-    let campaigns = snapshot.docs.map((doc) => normalizeCampaign(doc.data(), doc.id));
-    if (campaigns.length === 0) {
-      campaigns = await this.importLegacyCampaigns();
-    }
+    const snapshot = await this.campaignsCollection().get();
+    const campaigns = snapshot.docs.map((doc) => normalizeCampaign(doc.data(), doc.id));
     return sortByCreatedAtDesc(campaigns);
   }
 
@@ -401,18 +274,7 @@ class ReferralProgramStateService {
       return normalizeCampaign(doc.data(), doc.id);
     }
 
-    if (!LEGACY_IMPORT_ENABLED) return null;
-    const db = this.getLegacyDb();
-    if (!db) return null;
-    const snapshot = await db.ref(`${LEGACY_CAMPAIGNS_PATH}/${safeCampaignId}`).once('value');
-    if (!snapshot.exists()) return null;
-
-    const normalized = normalizeCampaign({
-      ...(snapshot.val() || {}),
-      source: 'rtdb_import'
-    }, safeCampaignId);
-    await this.campaignsCollection().doc(normalized.id).set(normalized, { merge: true });
-    return normalized;
+    return null;
   }
 
   async createCampaign(payload) {
@@ -423,7 +285,6 @@ class ReferralProgramStateService {
       updatedAt: nowIso()
     }, payload?.id);
     await this.campaignsCollection().doc(normalized.id).set(normalized, { merge: true });
-    await this.mirrorCampaignToLegacy(normalized);
     return normalized;
   }
 
@@ -441,39 +302,12 @@ class ReferralProgramStateService {
       source: 'firestore'
     }, current.id);
     await this.campaignsCollection().doc(normalized.id).set(normalized, { merge: true });
-    await this.mirrorCampaignToLegacy(normalized);
     return normalized;
   }
 
-  async importLegacyInvites() {
-    if (!LEGACY_IMPORT_ENABLED) return [];
-    const db = this.getLegacyDb();
-    if (!db) return [];
-
-    const snapshot = await db.ref(LEGACY_INVITES_PATH).once('value');
-    const raw = snapshot.val() || {};
-    const rows = Object.entries(raw).map(([id, value]) => normalizeInvite({
-      ...(value || {}),
-      source: 'rtdb_import'
-    }, id));
-
-    for (let index = 0; index < rows.length; index += 400) {
-      const batch = this.getFirestore().batch();
-      rows.slice(index, index + 400).forEach((invite) => {
-        batch.set(this.invitesCollection().doc(invite.id), invite, { merge: true });
-      });
-      await batch.commit();
-    }
-
-    return rows;
-  }
-
   async listInvites() {
-    let snapshot = await this.invitesCollection().get();
-    let invites = snapshot.docs.map((doc) => normalizeInvite(doc.data(), doc.id));
-    if (invites.length === 0) {
-      invites = await this.importLegacyInvites();
-    }
+    const snapshot = await this.invitesCollection().get();
+    const invites = snapshot.docs.map((doc) => normalizeInvite(doc.data(), doc.id));
     return sortByCreatedAtDesc(invites);
   }
 
@@ -486,29 +320,14 @@ class ReferralProgramStateService {
       return normalizeInvite(doc.data(), doc.id);
     }
 
-    if (!LEGACY_IMPORT_ENABLED) return null;
-    const db = this.getLegacyDb();
-    if (!db) return null;
-    const snapshot = await db.ref(`${LEGACY_INVITES_PATH}/${safeInviteId}`).once('value');
-    if (!snapshot.exists()) return null;
-
-    const normalized = normalizeInvite({
-      ...(snapshot.val() || {}),
-      source: 'rtdb_import'
-    }, safeInviteId);
-    await this.invitesCollection().doc(normalized.id).set(normalized, { merge: true });
-    return normalized;
+    return null;
   }
 
   async findInviteByCode(code) {
     const safeCode = String(code || '').trim().toUpperCase();
     if (!safeCode) return null;
 
-    let snapshot = await this.invitesCollection().where('code', '==', safeCode).limit(1).get();
-    if (snapshot.empty) {
-      await this.importLegacyInvites();
-      snapshot = await this.invitesCollection().where('code', '==', safeCode).limit(1).get();
-    }
+    const snapshot = await this.invitesCollection().where('code', '==', safeCode).limit(1).get();
     if (snapshot.empty) return null;
     const doc = snapshot.docs[0];
     return normalizeInvite(doc.data(), doc.id);
@@ -522,7 +341,6 @@ class ReferralProgramStateService {
       updatedAt: nowIso()
     }, payload?.id);
     await this.invitesCollection().doc(normalized.id).set(normalized, { merge: true });
-    await this.mirrorInviteToLegacy(normalized);
     return normalized;
   }
 
@@ -574,7 +392,6 @@ class ReferralProgramStateService {
       }, { merge: false });
     });
 
-    await this.mirrorInviteToLegacy(normalized);
     return normalized;
   }
 
@@ -607,7 +424,6 @@ class ReferralProgramStateService {
         source: 'firestore'
       }, { merge: true });
     }
-    await this.mirrorInviteToLegacy(normalized);
     return normalized;
   }
 
@@ -669,7 +485,6 @@ class ReferralProgramStateService {
       }
     });
 
-    await this.mirrorInviteToLegacy(acceptedInvite);
     return acceptedInvite;
   }
 }

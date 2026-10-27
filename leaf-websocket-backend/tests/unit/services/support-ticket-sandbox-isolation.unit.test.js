@@ -109,7 +109,6 @@ describe('support ticket sandbox persistence isolation', () => {
     store.clear();
     collectionCalls.length = 0;
     supportTicketService.firestore = null;
-    supportTicketService.legacyRepository = null;
     sandboxContext = sealFinancialContext({
       providerEnvironment: 'sandbox',
       paymentProfileId: 'qa-test-users-sandbox-durable',

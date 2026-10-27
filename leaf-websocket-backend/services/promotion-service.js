@@ -13,16 +13,6 @@ const subscriptionStateService = require('./subscription-state-service');
 
 const PROMOTIONS_COLLECTION = 'promotions';
 const PROMOTION_REDEMPTIONS_COLLECTION = 'promotion_redemptions';
-const LEGACY_PROMOTIONS_PATH = 'promotions';
-const LEGACY_DRIVER_PROMOTIONS_PATH = 'driver_promotions';
-const LEGACY_IMPORT_ENABLED = String(
-  process.env.PROMOTIONS_ENABLE_LEGACY_IMPORT ?? 'true'
-).toLowerCase() !== 'false';
-const LEGACY_MIRROR_ENABLED = String(
-  process.env.PROMOTIONS_ENABLE_LEGACY_RTDB_MIRROR ?? 'false'
-).toLowerCase() === 'true';
-
-logger.info(`ℹ️ [PROMOTIONS] compat mode - import=${LEGACY_IMPORT_ENABLED} mirror=${LEGACY_MIRROR_ENABLED}`);
 
 function nowIso() {
   return new Date().toISOString();
@@ -113,7 +103,6 @@ function normalizeRedemptionRecord(record = {}, fallback = {}) {
 class PromotionService {
   constructor() {
     this.firestore = null;
-    this.legacyDb = null;
   }
 
   getFirestore() {
@@ -121,13 +110,6 @@ class PromotionService {
       this.firestore = firebaseConfig.getFirestore();
     }
     return this.firestore;
-  }
-
-  getLegacyDb() {
-    if (!this.legacyDb && firebaseConfig?.getRealtimeDB) {
-      this.legacyDb = firebaseConfig.getRealtimeDB();
-    }
-    return this.legacyDb;
   }
 
   promotionsCollection() {
@@ -142,27 +124,7 @@ class PromotionService {
     return firestore.collection(PROMOTION_REDEMPTIONS_COLLECTION);
   }
 
-  async mirrorPromotionToLegacy(promotion) {
-    if (!LEGACY_MIRROR_ENABLED) return;
-    const db = this.getLegacyDb();
-    if (!db) return;
-    await db.ref(`${LEGACY_PROMOTIONS_PATH}/${promotion.id}`).set({
-      ...promotion,
-      source: 'firestore_mirror'
-    });
-  }
-
-  async mirrorRedemptionToLegacy(redemption) {
-    if (!LEGACY_MIRROR_ENABLED) return;
-    const db = this.getLegacyDb();
-    if (!db) return;
-    await db.ref(`${LEGACY_DRIVER_PROMOTIONS_PATH}/${redemption.driverId}/${redemption.promotionId}`).set({
-      ...redemption,
-      source: 'firestore_mirror'
-    });
-  }
-
-  async mergeUserProfile(driverId, patch = {}, { legacyDb = null } = {}) {
+  async mergeUserProfile(driverId, patch = {}) {
     const safeDriverId = normalizeId(driverId);
     if (!safeDriverId) return;
 
@@ -172,16 +134,6 @@ class PromotionService {
         ...patch,
         updatedAt: patch.updatedAt || nowIso()
       }, { merge: true });
-    }
-
-    if (LEGACY_MIRROR_ENABLED) {
-      const db = legacyDb || this.getLegacyDb();
-      if (db) {
-        await db.ref(`users/${safeDriverId}`).update({
-          ...patch,
-          updatedAt: patch.updatedAt || nowIso()
-        });
-      }
     }
   }
 
@@ -197,11 +149,7 @@ class PromotionService {
       }
     }
 
-    const db = this.getLegacyDb();
-    if (!db) return null;
-    const snapshot = await db.ref(`users/${safeDriverId}`).once('value');
-    if (!snapshot.exists()) return null;
-    return { id: safeDriverId, ...(snapshot.val() || {}) };
+    return null;
   }
 
   async loadAllDriverProfiles() {
@@ -211,118 +159,9 @@ class PromotionService {
         .collection('users')
         .where('usertype', '==', 'driver')
         .get();
-      const drivers = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
-      if (drivers.length > 0) {
-        return drivers;
-      }
+      return snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
     }
-
-    const db = this.getLegacyDb();
-    if (!db) return [];
-    const snapshot = await db.ref('users').orderByChild('usertype').equalTo('driver').once('value');
-    const raw = snapshot.val() || {};
-    return Object.entries(raw).map(([id, value]) => ({ id, ...(value || {}) }));
-  }
-
-  async importPromotionFromLegacy(promotionId) {
-    if (!LEGACY_IMPORT_ENABLED) return null;
-    const db = this.getLegacyDb();
-    if (!db) return null;
-
-    const safePromotionId = promotionDocId(promotionId);
-    const snapshot = await db.ref(`${LEGACY_PROMOTIONS_PATH}/${safePromotionId}`).once('value');
-    if (!snapshot.exists()) return null;
-
-    const normalized = normalizePromotionRecord({
-      ...(snapshot.val() || {}),
-      source: 'rtdb_import'
-    }, safePromotionId);
-
-    await this.promotionsCollection().doc(safePromotionId).set(normalized, { merge: true });
-    return normalized;
-  }
-
-  async importAllPromotionsFromLegacy() {
-    if (!LEGACY_IMPORT_ENABLED) return [];
-    const db = this.getLegacyDb();
-    if (!db) return [];
-
-    const snapshot = await db.ref(LEGACY_PROMOTIONS_PATH).once('value');
-    const raw = snapshot.val() || {};
-    const rows = Object.entries(raw).map(([id, value]) => normalizePromotionRecord({
-      ...(value || {}),
-      source: 'rtdb_import'
-    }, id));
-
-    if (rows.length === 0) return [];
-
-    for (let index = 0; index < rows.length; index += 400) {
-      const batch = this.getFirestore().batch();
-      rows.slice(index, index + 400).forEach((promotion) => {
-        batch.set(this.promotionsCollection().doc(promotion.id), promotion, { merge: true });
-      });
-      await batch.commit();
-    }
-
-    return rows;
-  }
-
-  async importRedemptionFromLegacy(driverId, promotionId) {
-    if (!LEGACY_IMPORT_ENABLED) return null;
-    const db = this.getLegacyDb();
-    if (!db) return null;
-
-    const safeDriverId = normalizeId(driverId);
-    const safePromotionId = normalizeId(promotionId);
-    const snapshot = await db.ref(`${LEGACY_DRIVER_PROMOTIONS_PATH}/${safeDriverId}/${safePromotionId}`).once('value');
-    if (!snapshot.exists()) return null;
-
-    const normalized = normalizeRedemptionRecord({
-      ...(snapshot.val() || {}),
-      source: 'rtdb_import'
-    }, {
-      id: redemptionDocId(safeDriverId, safePromotionId),
-      driverId: safeDriverId,
-      promotionId: safePromotionId
-    });
-
-    await this.redemptionsCollection().doc(normalized.id).set(normalized, { merge: true });
-    return normalized;
-  }
-
-  async importAllRedemptionsFromLegacy() {
-    if (!LEGACY_IMPORT_ENABLED) return [];
-    const db = this.getLegacyDb();
-    if (!db) return [];
-
-    const snapshot = await db.ref(LEGACY_DRIVER_PROMOTIONS_PATH).once('value');
-    const raw = snapshot.val() || {};
-    const rows = [];
-
-    Object.entries(raw).forEach(([driverId, promotions]) => {
-      Object.entries(promotions || {}).forEach(([promotionId, value]) => {
-        rows.push(normalizeRedemptionRecord({
-          ...(value || {}),
-          source: 'rtdb_import'
-        }, {
-          id: redemptionDocId(driverId, promotionId),
-          driverId,
-          promotionId
-        }));
-      });
-    });
-
-    if (rows.length === 0) return [];
-
-    for (let index = 0; index < rows.length; index += 400) {
-      const batch = this.getFirestore().batch();
-      rows.slice(index, index + 400).forEach((redemption) => {
-        batch.set(this.redemptionsCollection().doc(redemption.id), redemption, { merge: true });
-      });
-      await batch.commit();
-    }
-
-    return rows;
+    return [];
   }
 
   async fetchPromotion(promotionId) {
@@ -334,7 +173,7 @@ class PromotionService {
       return normalizePromotionRecord(doc.data(), doc.id);
     }
 
-    return this.importPromotionFromLegacy(safePromotionId);
+    return null;
   }
 
   async fetchRedemption(driverId, promotionId) {
@@ -352,7 +191,7 @@ class PromotionService {
       });
     }
 
-    return this.importRedemptionFromLegacy(safeDriverId, safePromotionId);
+    return null;
   }
 
   async listRedemptionsByPromotion(promotionId) {
@@ -361,24 +200,12 @@ class PromotionService {
       .where('promotionId', '==', safePromotionId)
       .get();
 
-    let rows = snapshot.docs.map((doc) => normalizeRedemptionRecord(doc.data(), { id: doc.id, promotionId: safePromotionId }));
-    if (rows.length === 0) {
-      await this.importAllRedemptionsFromLegacy();
-      const imported = await this.redemptionsCollection()
-        .where('promotionId', '==', safePromotionId)
-        .get();
-      rows = imported.docs.map((doc) => normalizeRedemptionRecord(doc.data(), { id: doc.id, promotionId: safePromotionId }));
-    }
-    return rows;
+    return snapshot.docs.map((doc) => normalizeRedemptionRecord(doc.data(), { id: doc.id, promotionId: safePromotionId }));
   }
 
   async listAllRedemptions() {
-    let snapshot = await this.redemptionsCollection().get();
-    let rows = snapshot.docs.map((doc) => normalizeRedemptionRecord(doc.data(), { id: doc.id }));
-    if (rows.length === 0) {
-      rows = await this.importAllRedemptionsFromLegacy();
-    }
-    return rows;
+    const snapshot = await this.redemptionsCollection().get();
+    return snapshot.docs.map((doc) => normalizeRedemptionRecord(doc.data(), { id: doc.id }));
   }
 
   async createPromotion(promotionData) {
@@ -420,7 +247,6 @@ class PromotionService {
       }, promotionId);
 
       await this.promotionsCollection().doc(promotionId).set(promotion, { merge: true });
-      await this.mirrorPromotionToLegacy(promotion);
 
       logger.info(`✅ Promoção criada: ${promotionId} - ${promotion.name}`);
       return { success: true, promotion };
@@ -473,7 +299,6 @@ class PromotionService {
 
     const normalized = normalizePromotionRecord(next, current.id);
     await this.promotionsCollection().doc(normalized.id).set(normalized, { merge: true });
-    await this.mirrorPromotionToLegacy(normalized);
 
     return {
       success: true,
@@ -484,11 +309,8 @@ class PromotionService {
 
   async listPromotions(filters = {}) {
     try {
-      let snapshot = await this.promotionsCollection().get();
-      let promotions = snapshot.docs.map((doc) => normalizePromotionRecord(doc.data(), doc.id));
-      if (promotions.length === 0) {
-        promotions = await this.importAllPromotionsFromLegacy();
-      }
+      const snapshot = await this.promotionsCollection().get();
+      const promotions = snapshot.docs.map((doc) => normalizePromotionRecord(doc.data(), doc.id));
 
       let result = promotions.slice();
       if (filters.status) {
@@ -709,7 +531,6 @@ class PromotionService {
       });
 
       await this.redemptionsCollection().doc(redemption.id).set(redemption, { merge: true });
-      await this.mirrorRedemptionToLegacy(redemption);
 
       const nextRedemptions = (promotion.currentRedemptions || 0) + 1;
       const nextStatus = promotion.maxRedemptions && nextRedemptions >= promotion.maxRedemptions
@@ -725,7 +546,6 @@ class PromotionService {
       }, promotion.id);
 
       await this.promotionsCollection().doc(updatedPromotion.id).set(updatedPromotion, { merge: true });
-      await this.mirrorPromotionToLegacy(updatedPromotion);
 
       logger.info(`✅ Promoção aplicada: ${promotion.id} para motorista ${driverId}`);
       return {
@@ -759,7 +579,6 @@ class PromotionService {
 
   async applyFreeSubscription(driverId, benefit = {}) {
     try {
-      const db = this.getLegacyDb();
       const driver = await this.getDriverProfile(driverId);
       if (!driver) {
         return { success: false, error: 'Motorista não encontrado' };
@@ -793,10 +612,9 @@ class PromotionService {
         updatedAt: now.toISOString()
       };
 
-      await this.mergeUserProfile(driverId, updates, { legacyDb: db });
+      await this.mergeUserProfile(driverId, updates);
 
       const subscriptionState = await subscriptionStateService.getState(driverId, {
-        db,
         syncIfMissing: false
       });
       if (subscriptionState.exists) {
@@ -804,7 +622,7 @@ class PromotionService {
           ...state,
           promotionFreeUntil: endDate.toISOString(),
           updatedAt: now.toISOString()
-        }), { db });
+        }));
       }
 
       logger.info(`✅ Assinatura grátis aplicada: ${driverId} até ${endDate.toISOString()}`);
@@ -836,7 +654,6 @@ class PromotionService {
 
   async applyTrialExtension(driverId, benefit = {}) {
     try {
-      const db = this.getLegacyDb();
       const driver = await this.getDriverProfile(driverId);
       if (!driver) {
         return { success: false, error: 'Motorista não encontrado' };
@@ -859,7 +676,7 @@ class PromotionService {
       await this.mergeUserProfile(driverId, {
         free_trial_end: newEndDate.toISOString(),
         updatedAt: now.toISOString()
-      }, { legacyDb: db });
+      });
 
       return {
         success: true,

@@ -87,9 +87,7 @@ function createInMemoryFirestore() {
 
 function resetServiceWithFirestore(firestore) {
   firebaseConfig.getFirestore.mockReturnValue(firestore);
-  firebaseConfig.getRealtimeDB.mockReturnValue(null);
   referralProgramStateService.firestore = null;
-  referralProgramStateService.legacyDb = null;
 }
 
 describe('referral-program-state-service production guards', () => {

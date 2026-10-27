@@ -1222,12 +1222,6 @@ function main() {
     blockers.push(...biometricReadiness.blockers);
     warnings.push(...biometricReadiness.warnings);
 
-    if (boolEnv('PROMOTIONS_ENABLE_LEGACY_RTDB_MIRROR')) {
-      warnings.push('PROMOTIONS_ENABLE_LEGACY_RTDB_MIRROR=true mantém dual-write legado em produção');
-    }
-    if (boolEnv('REFERRAL_PROGRAMS_ENABLE_LEGACY_RTDB_MIRROR')) {
-      warnings.push('REFERRAL_PROGRAMS_ENABLE_LEGACY_RTDB_MIRROR=true mantém dual-write legado em produção');
-    }
     if (boolEnv('ENABLE_LEGACY_PROFILE_RTDB_MIRROR')) {
       warnings.push('ENABLE_LEGACY_PROFILE_RTDB_MIRROR=true mantém espelho de perfil no RTDB em produção');
     }

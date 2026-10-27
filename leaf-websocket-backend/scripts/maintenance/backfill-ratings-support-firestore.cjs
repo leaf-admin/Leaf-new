@@ -31,7 +31,7 @@ const byId = (a, b) => String(a.id).localeCompare(String(b.id));
 async function run({ apply, ref }, { config, firestore, store, supportService, collectionsFor, scopeOf, log = console.log }) {
   const stats = { apply, ref: ref || null, ratingsEqual: 0, ratingsWritten: 0, ratingsToWrite: 0,
     indexEqual: 0, indexWritten: 0, indexToWrite: 0, viewsEqual: 0, viewMismatch: 0,
-    supportRtdb: 0, supportPresent: 0, supportImported: 0, supportMissing: 0, problems: [] };
+    supportRtdb: 0, supportPresent: 0, supportMissing: 0, problems: [] };
 
   for (const namespace of NAMESPACES) {
     const collections = collectionsFor(namespace);
@@ -75,21 +75,18 @@ async function run({ apply, ref }, { config, firestore, store, supportService, c
   for (const ticketId of Object.keys(tickets)) {
     stats.supportRtdb += 1;
     if ((await supportService.ticketDoc(ticketId).get()).exists) { stats.supportPresent += 1; continue; }
-    if (!apply) { stats.supportMissing += 1; continue; }
-    const imported = await supportService.importLegacyTicket(ticketId, { includeMessages: true });
-    if (imported && (await supportService.ticketDoc(ticketId).get()).exists) stats.supportImported += 1;
-    else { stats.supportMissing += 1; stats.problems.push({ ticketId, problem: 'support_import_failed' }); }
+    // The legacy importer is gone (all tickets are in Firestore); only verify.
+    stats.supportMissing += 1;
+    stats.problems.push({ ticketId, problem: 'support_ticket_missing' });
   }
 
   // Writes are verified by a second dry-run (everything equal, nothing to write).
-  stats.parityMismatch = stats.viewMismatch + (apply ? stats.supportMissing : 0);
+  stats.parityMismatch = stats.viewMismatch + stats.supportMissing;
   log(JSON.stringify(stats));
   return stats;
 }
 
 if (require.main === module) {
-  // Legacy import is enabled for this maintenance process only.
-  process.env.SUPPORT_TICKETS_ENABLE_LEGACY_IMPORT = 'true';
   (async () => {
     const args = parseArgs(process.argv.slice(2));
     const firebaseConfig = require('../../firebase-config');
