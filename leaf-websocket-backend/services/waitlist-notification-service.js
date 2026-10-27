@@ -4,11 +4,6 @@ const FCMService = require('./fcm-service');
 const redisPool = require('../utils/redis-pool');
 const { logger, logStructured } = require('../utils/logger');
 
-let firebaseConfig = null;
-try {
-  firebaseConfig = require('../firebase-config');
-} catch (_error) {}
-
 const DEFAULT_WAITLIST_ROUTE = 'RobotaxiPrototypeDriverWaitlistStatus';
 const WAITLIST_NOTIFICATION_TYPE = 'driver_waitlist_update';
 
@@ -142,7 +137,6 @@ class WaitlistNotificationService {
     this.admin = options.adminModule || admin;
     this.fcmService = options.fcmService || new FCMService(options.redis || null);
     this.firestore = options.firestore || null;
-    this.realtimeDB = options.realtimeDB || null;
     this.now = options.now || (() => new Date());
     this.logger = options.logger || logger;
     this.initialized = Boolean(options.fcmService);
@@ -177,19 +171,6 @@ class WaitlistNotificationService {
     return null;
   }
 
-  getRealtimeDB() {
-    if (this.realtimeDB) return this.realtimeDB;
-    if (firebaseConfig?.getRealtimeDB) {
-      this.realtimeDB = firebaseConfig.getRealtimeDB();
-      return this.realtimeDB;
-    }
-    if (this.admin?.apps?.length > 0 && typeof this.admin.database === 'function') {
-      this.realtimeDB = this.admin.database();
-      return this.realtimeDB;
-    }
-    return null;
-  }
-
   serverTimestamp() {
     return this.admin?.firestore?.FieldValue?.serverTimestamp?.() || this.now().toISOString();
   }
@@ -218,7 +199,6 @@ class WaitlistNotificationService {
 
     const result = {
       firestore: false,
-      realtimeDB: false,
       notificationId: notification.id,
     };
 
@@ -230,15 +210,6 @@ class WaitlistNotificationService {
         updatedAt: this.serverTimestamp(),
       }, { merge: true });
       result.firestore = true;
-    }
-
-    const realtimeDB = this.getRealtimeDB();
-    if (realtimeDB) {
-      await realtimeDB.ref(`notifications/${driverId}/${notification.id}`).set({
-        ...baseRecord,
-        createdAt,
-      });
-      result.realtimeDB = true;
     }
 
     return result;
@@ -262,11 +233,6 @@ class WaitlistNotificationService {
         sentAt: pushResult.success ? this.serverTimestamp() : null,
         updatedAt: this.serverTimestamp(),
       }, { merge: true });
-    }
-
-    const realtimeDB = this.getRealtimeDB();
-    if (realtimeDB) {
-      await realtimeDB.ref(`notifications/${driverId}/${notification.id}/delivery`).set(delivery);
     }
 
     return delivery;

@@ -40,7 +40,8 @@ const FIREBASE_PROFILE_TIMEOUT_MS = Math.max(
 const ELITE_MIN_RATING = 4.8;
 const ELITE_RECOVERY_MIN_GOOD_RIDES = 10;
 const ELITE_RECOVERY_MIN_RATING = 4.0;
-const VEHICLE_CATALOG_PATH = process.env.VEHICLE_CATEGORY_CATALOG_PATH || 'vehicle_category_catalog';
+// Catálogo opcional de categorias: documento `operational_configs/vehicle_category_catalog`.
+const VEHICLE_CATALOG_DOC = 'operational_configs/vehicle_category_catalog';
 const ENABLE_VEHICLE_CATALOG_POLICY = process.env.ENABLE_VEHICLE_CATALOG_POLICY === 'true';
 
 function normalizeCategory(value) {
@@ -184,11 +185,11 @@ class DriverEligibilityService {
             return this.catalogCache;
         }
 
-        const db = firebaseConfig?.getRealtimeDB?.();
-        if (!db) return null;
+        const firestore = firebaseConfig?.getFirestore?.();
+        if (!firestore) return null;
 
-        const snapshot = await db.ref(VEHICLE_CATALOG_PATH).once('value');
-        const rawCatalog = snapshot?.val() || {};
+        const snapshot = await firestore.doc(VEHICLE_CATALOG_DOC).get();
+        const rawCatalog = snapshot?.exists ? snapshot.data() || {} : {};
         this.catalogCache = rawCatalog;
         this.catalogLoadedAt = now;
         return rawCatalog;

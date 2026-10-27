@@ -270,94 +270,6 @@ async function syncToFirestore(collection, documentId, data) {
     );
 }
 
-// Sincronizar dados do Redis para Realtime Database
-async function syncToRealtimeDB(path, data) {
-    try {
-        if (!realtimeDB) {
-            recordRealtimeDbMetric('write', 'unavailable');
-            logStructured('warn', 'Realtime Database não disponível', {
-                service: 'firebase',
-                operation: 'syncToRealtimeDB',
-                path: path
-            });
-            return false;
-        }
-
-        const ref = realtimeDB.ref(path);
-        await ref.set({
-            ...data,
-            synced_at: admin.database.ServerValue.TIMESTAMP,
-            source: 'redis-backend'
-        });
-        recordRealtimeDbMetric('write', 'success');
-
-        logStructured('info', 'Dados sincronizados para Realtime DB', {
-            service: 'firebase',
-            operation: 'syncToRealtimeDB',
-            path
-        });
-        return true;
-
-    } catch (error) {
-        recordRealtimeDbMetric('write', 'failure');
-        logStructured('error', 'Erro ao sincronizar para Realtime DB', {
-            service: 'firebase',
-            operation: 'syncToRealtimeDB',
-            path,
-            error: error.message
-        });
-        return false;
-    }
-}
-
-// Sincronizar localização para ambos os bancos
-async function syncLocation(uid, locationData) {
-    const promises = [];
-
-    // Sincronizar para Firestore
-    promises.push(syncToFirestore('user_locations', uid, {
-        ...locationData,
-        last_updated: new Date().toISOString()
-    }));
-
-    // Sincronizar para Realtime Database
-    promises.push(syncToRealtimeDB(`locations/${uid}`, {
-        ...locationData,
-        last_updated: new Date().toISOString()
-    }));
-
-    const results = await Promise.allSettled(promises);
-
-    const firestoreSuccess = results[0].status === 'fulfilled' && results[0].value;
-    const realtimeSuccess = results[1].status === 'fulfilled' && results[1].value;
-
-    return { firestoreSuccess, realtimeSuccess };
-}
-
-// Sincronizar status do motorista
-async function syncDriverStatus(uid, statusData) {
-    const promises = [];
-
-    // Sincronizar para Firestore
-    promises.push(syncToFirestore('driver_status', uid, {
-        ...statusData,
-        last_updated: new Date().toISOString()
-    }));
-
-    // Sincronizar para Realtime Database
-    promises.push(syncToRealtimeDB(`drivers/${uid}/status`, {
-        ...statusData,
-        last_updated: new Date().toISOString()
-    }));
-
-    const results = await Promise.allSettled(promises);
-
-    const firestoreSuccess = results[0].status === 'fulfilled' && results[0].value;
-    const realtimeSuccess = results[1].status === 'fulfilled' && results[1].value;
-
-    return { firestoreSuccess, realtimeSuccess };
-}
-
 // Sincronizar dados de viagem
 async function syncTripData(tripId, tripData) {
     try {
@@ -576,9 +488,6 @@ module.exports = {
     isRealtimeDBAvailable,
     getStorage,
     syncToFirestore,
-    syncToRealtimeDB,
-    syncLocation,
-    syncDriverStatus,
     syncTripData,
     getFromFirestore,
     getFromRealtimeDB,

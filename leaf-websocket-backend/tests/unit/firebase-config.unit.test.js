@@ -242,14 +242,14 @@ describe('firebase-config legacy metrics', () => {
     const firebaseConfig = loadModule();
     firebaseConfig.getRealtimeDB();
 
-    const result = await firebaseConfig.syncToRealtimeDB('drivers/test/status', { online: true });
+    const result = await firebaseConfig.setRealtimeDB('vehicles/test/status', { online: true });
 
     expect(result).toBe(true);
-    expect(refMock).toHaveBeenCalledWith('drivers/test/status');
+    expect(refMock).toHaveBeenCalledWith('vehicles/test/status');
     expect(setMock).toHaveBeenCalled();
     expect(metricsMock.recordLegacyDependencyAccess).toHaveBeenCalledWith(expect.objectContaining({
       dependency: 'realtime_db',
-      operation: 'write',
+      operation: 'set',
       result: 'success'
     }));
   });
