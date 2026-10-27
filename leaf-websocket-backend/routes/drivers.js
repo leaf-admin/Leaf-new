@@ -220,7 +220,7 @@ function isMissingFirestoreIndexError(error) {
 
 // Corridas do motorista na coleção de corridas do namespace dele (`rides` ou
 // `sandbox_rides`): é onde a finalização grava status, completedAt e o snapshot
-// financeiro final. O nó `bookings` do Realtime Database não recebe essas corridas.
+// financeiro final.
 //
 // A consulta usa só o índice automático de `driverId`. O recorte de tempo vem do ID do
 // documento (`booking_<epoch ms>_<passageiro>`), com um dia de folga antes da janela;
@@ -1304,22 +1304,12 @@ router.get('/api/drivers/:id/earnings', requireDriverSelf, requireFirebase, asyn
       });
     }
 
-    // 3. Buscar carro ativo (consulta indexada por motorista, não o nó inteiro)
-    const carsSnapshot = await db.ref('cars').orderByChild('driver').equalTo(id).once('value');
-    const cars = carsSnapshot.val() || {};
-    const driverCar = Object.values(cars).find(car => car.driver === id);
+    // 3. O nó legado `cars` do RTDB nunca existiu nesta base: sem carro, como já era.
+    const driverCar = null;
 
     // 4. Buscar viagens na fonte que recebe as corridas liquidadas
     const dailyWindowDays = EARNINGS_REPORT_WINDOW_DAYS;
-    let allDriverBookings = await loadDriverRidesForEarningsReport(firestore, persistenceScope, id, dailyWindowDays);
-
-    // Legado: motoristas antigos com corridas só no nó `bookings` do Realtime Database.
-    // Vale apenas quando a fonte acima não tem nada, e nunca é somado a ela. O sandbox
-    // não tem legado.
-    if (allDriverBookings.length === 0 && persistenceScope.namespace === 'operational') {
-      const bookingsSnapshot = await db.ref('bookings').orderByChild('driver').equalTo(id).once('value');
-      allDriverBookings = Object.values(bookingsSnapshot.val() || {});
-    }
+    const allDriverBookings = await loadDriverRidesForEarningsReport(firestore, persistenceScope, id, dailyWindowDays);
 
     // Multas de cancelamento/no-show creditadas ao motorista. Se o extrato não responder,
     // o relatório segue com as corridas e avisa em `cancellationCreditsAvailable`.

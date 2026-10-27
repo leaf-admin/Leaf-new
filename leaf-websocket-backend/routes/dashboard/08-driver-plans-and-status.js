@@ -42,6 +42,7 @@ const {
 } = require('./shared');
 
 const driverListData = require('../../services/dashboard-driver-list-data');
+const { toView } = require('../../services/rtdb-root-router');
 const adminReadBudget = require('../../utils/admin-read-budget');
 
 // ==================== GESTÃO COMPLETA DE MOTORISTAS ====================
@@ -313,18 +314,21 @@ router.get('/api/drivers/:driverId/complete', authenticateJWT, requireRole(DASHB
       return res.status(404).json({ error: 'Motorista não encontrado' });
     }
 
-    // Buscar veículo
-    const carsSnapshot = await db.ref('cars').orderByChild('driver').equalTo(driverId).limitToFirst(201).once('value');
-    const cars = driverListData.boundedValue(carsSnapshot, 200, 'veículos do motorista');
-    const driverCar = Object.values(cars).find(car => car.driver === driverId);
+    // Os nós legados `cars` e `payments` do RTDB nunca existiram nesta base:
+    // veículo e pagamentos de assinatura ficam vazios, como já ficavam.
+    const driverCar = null;
+    const payments = {};
 
-    // Buscar corridas
-    const bookingsSnapshot = await db.ref('bookings').orderByChild('driver').equalTo(driverId).limitToFirst(2001).once('value');
-    const bookings = driverListData.boundedValue(bookingsSnapshot, 2000, 'corridas do motorista');
-
-    // Buscar histórico de pagamentos de assinatura
-    const paymentsSnapshot = await db.ref('payments').orderByChild('driverId').equalTo(driverId).limitToFirst(2001).once('value');
-    const payments = driverListData.boundedValue(paymentsSnapshot, 2000, 'pagamentos do motorista');
+    // Corridas do motorista em `rides` (Firestore), pelo índice automático de driverId.
+    const ridesSnapshot = await firebaseConfig.getFirestore().collection('rides')
+      .where('driverId', '==', driverId).limit(2001).get();
+    if (ridesSnapshot.size > 2000) {
+      throw Object.assign(new Error('Consulta excede o limite de corridas do motorista'), { statusCode: 503 });
+    }
+    const bookings = Object.fromEntries(ridesSnapshot.docs.map(doc => {
+      const ride = toView(doc.data());
+      return [doc.id, { ...ride, status: String(ride.status || '').toUpperCase() }];
+    }));
 
     // Calcular todas as informações
     const now = new Date();
@@ -467,7 +471,7 @@ router.get('/api/drivers/:driverId/complete', authenticateJWT, requireRole(DASHB
       stats: {
         totalTrips: driverBookings.length,
         completedTrips: completedBookings.length,
-        cancelledTrips: driverBookings.filter(b => b.status === 'CANCELED').length,
+        cancelledTrips: driverBookings.filter(b => b.status === 'CANCELED' || b.status === 'CANCELLED').length,
         totalEarnings: totalEarnings.toFixed(2),
         averageRating: parseFloat(driver.driverRating || 0).toFixed(1),
         walletBalance: parseFloat(driver.walletBalance || 0).toFixed(2),
