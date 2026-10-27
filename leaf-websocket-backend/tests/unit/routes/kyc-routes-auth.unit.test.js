@@ -72,6 +72,14 @@ jest.mock('firebase-admin', () => ({
   }))
 }));
 
+// users/{uid} reads go through services/user-store; the scenarios keep
+// describing them per path through mockGetFromRealtimeDB.
+jest.mock('../../../services/user-store', () => ({
+  resolveFirestore: jest.fn(() => ({})),
+  readUser: jest.fn(async (_firestore, uid) => (await mockGetFromRealtimeDB(`users/${uid}`)) ?? null),
+  readUserField: jest.fn(async (_firestore, uid, field) => (await mockGetFromRealtimeDB(`users/${uid}/${field}`)) ?? null)
+}));
+
 jest.mock('../../../firebase-config', () => ({
   initializeFirebase: jest.fn(),
   getFirestore: (...args) => mockGetFirestore(...args),

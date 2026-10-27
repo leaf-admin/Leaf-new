@@ -31,11 +31,13 @@ class KYCRoutesAnchorsEncodingsStatus {
           return sendSandboxLegacyRouteDisabled(res);
         }
 
-        if (!firebaseConfig || !firebaseConfig.getFromRealtimeDB) {
+        const userStore = require('../../services/user-store');
+        const firestore = userStore.resolveFirestore();
+        if (!firestore) {
           return res.status(503).json({ success: false, error: 'Firebase não configurado' });
         }
 
-        const user = (await firebaseConfig.getFromRealtimeDB(`users/${userId}`)) || {};
+        const user = (await userStore.readUser(firestore, userId)) || {};
 
         res.json({
           success: true,

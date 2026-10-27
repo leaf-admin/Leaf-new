@@ -13,16 +13,23 @@ describe('firebase-storage-service', () => {
     jest.clearAllMocks();
   });
 
-  test('usa helper centralizado do RTDB para fallback da CNH', async () => {
-    const getFromRealtimeDBMock = jest
-      .fn()
-      .mockResolvedValueOnce({ fileUrl: 'https://files.example/cnh-front.png' });
-
+  test('lê a CNH do documento no próprio cadastro do usuário no Firestore', async () => {
+    const docs = {
+      'users/driver-1': { documents: { cnh: { fileUrl: 'https://files.example/cnh-front.png' } } }
+    };
+    const firestore = {
+      collection: (name) => ({
+        doc: (id) => ({
+          get: async () => ({ exists: Boolean(docs[`${name}/${id}`]), data: () => docs[`${name}/${id}`] }),
+          collection: () => ({ doc: () => ({ get: async () => ({ exists: false }) }) })
+        })
+      }),
+      runTransaction: jest.fn()
+    };
     jest.doMock('../../../firebase-config', () => ({
       initializeFirebase: jest.fn(),
       getStorage: jest.fn(() => ({})),
-      getFirestore: jest.fn(() => null),
-      getFromRealtimeDB: (...args) => getFromRealtimeDBMock(...args)
+      getFirestore: jest.fn(() => firestore)
     }));
 
     const FirebaseStorageService = require('../../../services/firebase-storage-service');
@@ -30,7 +37,6 @@ describe('firebase-storage-service', () => {
     const result = await service.getCNHUrl('driver-1');
 
     expect(result).toBe('https://files.example/cnh-front.png');
-    expect(getFromRealtimeDBMock).toHaveBeenCalledWith('users/driver-1/documents/cnh');
   });
 
   test('falls back to a direct HTTP download when the Admin SDK download fails', async () => {
