@@ -300,10 +300,23 @@ function createRouter(rawDb, { getFirestore, env = process.env, log = logStructu
     if (updates.length) tx.update(ref, ...updates);
   }
 
+  // orderByChild(c).equalTo(primitive) on a native collection becomes a
+  // single-field Firestore query (automatic index) instead of a full scan;
+  // applyQuery still orders and limits the result. Not for `merge`
+  // collections, where a field may hold a Timestamp that RTDB sees as ISO.
+  function rootQuery(root, query) {
+    const collection = firestore().collection(collectionName(root));
+    const native = nativeOf(root);
+    const child = query?.orderBy === 'child' ? segmentsOf(query.child) : [];
+    const primitive = ['string', 'number', 'boolean'].includes(typeof query?.equalTo);
+    if (!native || native.merge || !primitive || !child.length || child.some(part => /^\d+$/.test(part))) return collection;
+    return collection.where(new FieldPath(...child), '==', query.equalTo);
+  }
+
   async function readFirestore(segments, query) {
     const [root, key, ...rest] = segments;
     if (!key) {
-      const docs = await firestore().collection(collectionName(root)).get();
+      const docs = await rootQuery(root, query).get();
       const value = {};
       docs.docs.forEach(doc => { value[doc.id] = decode(root, doc.data()); });
       return applyQuery(normalize(value), query);

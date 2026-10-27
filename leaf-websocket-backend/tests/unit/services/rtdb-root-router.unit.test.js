@@ -34,6 +34,25 @@ describe('rtdb root router (RTDB exit)', () => {
     expect(router.applyQuery([[1, 2]], {})).toEqual([[1, 2]]);
   });
 
+  it('pushes orderByChild().equalTo() down to a Firestore query on native collections', async () => {
+    const calls = [];
+    const docs = [{ id: 'b4', data: () => ({ driver: 'd1', status: 'COMPLETED' }) }];
+    const collection = name => ({
+      where: (field, op, value) => { calls.push([name, String(field), op, value]); return { get: async () => ({ docs }) }; },
+      get: async () => { calls.push([name, 'scan']); return { docs }; }
+    });
+    const env = {
+      RTDB_FIRESTORE_WRITE_ROOTS: 'bookings,users', RTDB_FIRESTORE_READ_ROOTS: 'bookings,users',
+      RTDB_FIRESTORE_NATIVE_COLLECTIONS: 'bookings:ride_annotations,users:users:merge'
+    };
+    const db = router.createRouter({ ref: jest.fn() }, { getFirestore: () => ({ collection }), env, log: () => {} });
+    const found = await db.ref('bookings').orderByChild('driver').equalTo('d1').once('value');
+    expect(found.val()).toEqual({ b4: { driver: 'd1', status: 'COMPLETED' } });
+    await db.ref('bookings').orderByChild('driver').once('value');
+    await db.ref('users').orderByChild('usertype').equalTo('driver').once('value');
+    expect(calls).toEqual([['ride_annotations', 'driver', '==', 'd1'], ['ride_annotations', 'scan'], ['users', 'scan']]);
+  });
+
   it('backfill copies roots record by record, deletes extras and verifies', async () => {
     expect(() => backfill.parseArgs(['--roots', 'vehicles', '--apply'])).toThrow('--ref');
     expect(() => backfill.parseArgs(['--roots', '../x'])).toThrow('nomes de raiz');
