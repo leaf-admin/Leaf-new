@@ -210,13 +210,11 @@ class SupportQueueService {
   }
 
   async decorateTicket(ticket, now = new Date(), {
-    importLegacyMessages = false,
     loadMessages = false,
     persistenceContext = null
   } = {}) {
     const messages = loadMessages
       ? await this.ticketService.listMessages(ticket.id, {
-        importLegacy: importLegacyMessages,
         persistenceContext
       })
       : [];

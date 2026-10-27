@@ -109,7 +109,6 @@ describe('support tickets wake the support bot', () => {
     store.clear();
     mockEmit.mockClear();
     supportTicketService.firestore = null;
-    supportTicketService.legacyRepository = null;
   });
 
   it('emits ticket_created with the classification and the money flag, never the text or the user', async () => {

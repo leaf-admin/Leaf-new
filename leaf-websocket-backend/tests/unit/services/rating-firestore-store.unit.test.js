@@ -134,15 +134,16 @@ describe('ratings in Firestore (RTDB exit, domain 3)', () => {
     const scope = { namespace: 'operational', collections: { ratings: 'ratings', ratingTripIndex: 'rating_trip_index', tripRatings: 'trip_ratings', userRatings: 'user_ratings' } };
     const supportDocs = new Set();
     const supportService = {
-      ticketDoc: id => ({ get: async () => ({ exists: supportDocs.has(id) }) }),
-      importLegacyTicket: async id => { supportDocs.add(id); return { id }; }
+      ticketDoc: id => ({ get: async () => ({ exists: supportDocs.has(id) }) })
     };
     const deps = { config, firestore: mockFirestore, store, supportService, collectionsFor: ns => (ns === 'operational' ? scope.collections : {}), scopeOf: () => scope, log: () => {} };
 
     const dry = await backfill.run({ apply: false }, deps);
     expect(dry).toMatchObject({ ratingsToWrite: 1, indexToWrite: 1, viewMismatch: 2, supportMissing: 1 });
     const applied = await backfill.run({ apply: true, ref: 'test' }, deps);
-    expect(applied).toMatchObject({ ratingsWritten: 1, indexWritten: 1, viewsEqual: 2, viewMismatch: 0, supportImported: 1, parityMismatch: 0 });
+    // Support is verify-only: a ticket missing in Firestore stays a mismatch.
+    expect(applied).toMatchObject({ ratingsWritten: 1, indexWritten: 1, viewsEqual: 2, viewMismatch: 0, supportMissing: 1, parityMismatch: 1 });
+    supportDocs.add('T1');
     const again = await backfill.run({ apply: false }, deps);
     expect(again).toMatchObject({ ratingsEqual: 1, indexEqual: 1, ratingsToWrite: 0, indexToWrite: 0, supportPresent: 1 });
   });

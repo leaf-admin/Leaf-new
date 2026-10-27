@@ -1,13 +1,10 @@
-const admin = require('firebase-admin');
 const firebaseConfig = require('../firebase-config');
-const SupportLegacyRtdbRepository = require('../repositories/support-legacy-rtdb-repository');
 const { logStructured, logError } = require('../utils/logger');
 const {
   resolvePersistenceScope,
   assertStoredRecordMatchesScope
 } = require('./sandbox-persistence-context');
 
-const LEGACY_TICKETS_PATH = 'support_tickets';
 const MONEY_REASONS = new Set(['payment_category_is_money', 'money_dispute', 'balance_dispute']);
 const BOT_MESSAGE_COALESCE_MS = 5 * 60 * 1000;
 
@@ -27,11 +24,8 @@ function notifySupportBot(type, ticket = {}, { dedupeKey, senderType = null } = 
     senderType
   }, { dedupeKey, severity: ticket.priority, money }).catch(() => null);
 }
-const LEGACY_MESSAGES_PATH = 'support_messages';
 const MESSAGES_SUBCOLLECTION = 'messages';
 const OPEN_TICKET_STATUSES = new Set(['open', 'assigned', 'in_progress', 'escalated']);
-const LEGACY_IMPORT_ENABLED = process.env.SUPPORT_TICKETS_ENABLE_LEGACY_IMPORT === 'true';
-const LEGACY_MIRROR_ENABLED = process.env.SUPPORT_TICKETS_ENABLE_LEGACY_RTDB_MIRROR === 'true';
 
 function getFirestoreOrThrow() {
   const firestore = firebaseConfig?.getFirestore ? firebaseConfig.getFirestore() : null;
@@ -39,10 +33,6 @@ function getFirestoreOrThrow() {
     throw new Error('Firestore indisponível para support tickets');
   }
   return firestore;
-}
-
-function getLegacyDb() {
-  return firebaseConfig?.getRealtimeDB ? firebaseConfig.getRealtimeDB() : null;
 }
 
 function toIso(value, fallback = null) {
@@ -149,35 +139,14 @@ function filterTickets(tickets, { status, priority, category, userId, agent, isA
   return next;
 }
 
-async function chunkedBatchWrite(items, writer) {
-  const firestore = getFirestoreOrThrow();
-  for (let index = 0; index < items.length; index += 400) {
-    const batch = firestore.batch();
-    const slice = items.slice(index, index + 400);
-    slice.forEach((item) => writer(batch, item));
-    await batch.commit();
-  }
-}
-
 class SupportTicketService {
   constructor() {
     this.firestore = null;
-    this.legacyRepository = null;
   }
 
   getFirestore() {
     if (!this.firestore) this.firestore = getFirestoreOrThrow();
     return this.firestore;
-  }
-
-  getLegacyRepository() {
-    if (!this.legacyRepository) {
-      this.legacyRepository = new SupportLegacyRtdbRepository(getLegacyDb(), {
-        ticketsPath: LEGACY_TICKETS_PATH,
-        messagesPath: LEGACY_MESSAGES_PATH
-      });
-    }
-    return this.legacyRepository;
   }
 
   resolveScope(persistenceContext = null) {
@@ -194,95 +163,6 @@ class SupportTicketService {
 
   ticketMessagesCollection(ticketId, persistenceContext = null) {
     return this.ticketDoc(ticketId, persistenceContext).collection(MESSAGES_SUBCOLLECTION);
-  }
-
-  async importLegacyTicket(ticketId, {
-    includeMessages = true,
-    persistenceContext = null
-  } = {}) {
-    const persistenceScope = this.resolveScope(persistenceContext);
-    if (persistenceScope.namespace === 'sandbox') return null;
-    if (!LEGACY_IMPORT_ENABLED) return null;
-    const legacyRepository = this.getLegacyRepository();
-    if (!legacyRepository.isAvailable()) return null;
-
-    const rawTicket = await legacyRepository.getTicket(ticketId);
-    if (!rawTicket) return null;
-    const ticket = normalizeTicket(ticketId, { ...rawTicket, source: 'rtdb_migrated' });
-
-    await this.ticketDoc(ticketId, persistenceScope).set({
-      ...ticket,
-      migratedFrom: 'rtdb',
-      migratedAt: admin.firestore.FieldValue.serverTimestamp()
-    }, { merge: true });
-
-    if (includeMessages) {
-      const rawMessages = await legacyRepository.getMessages(ticketId);
-      const normalizedMessages = Object.entries(rawMessages).map(([messageId, value]) =>
-        normalizeMessage(ticketId, messageId, value)
-      );
-
-      await chunkedBatchWrite(normalizedMessages, (batch, message) => {
-        batch.set(
-          this.ticketMessagesCollection(ticketId, persistenceScope).doc(message.id),
-          {
-            ...message,
-            migratedFrom: 'rtdb',
-            migratedAt: admin.firestore.FieldValue.serverTimestamp()
-          },
-          { merge: true }
-        );
-      });
-    }
-
-    logStructured('info', 'Support ticket legado migrado sob demanda', {
-      service: 'support-ticket-service',
-      ticketId
-    });
-
-    return ticket;
-  }
-
-  async importLegacyTicketsForQuery({
-    userId,
-    isAgent,
-    status,
-    priority,
-    category,
-    agent,
-    persistenceContext = null
-  }) {
-    const persistenceScope = this.resolveScope(persistenceContext);
-    if (persistenceScope.namespace === 'sandbox') return [];
-    if (!LEGACY_IMPORT_ENABLED) return [];
-    const legacyRepository = this.getLegacyRepository();
-    if (!legacyRepository.isAvailable()) return [];
-
-    const rawTickets = !isAgent && userId
-      ? await legacyRepository.listTicketsByUser(userId)
-      : await legacyRepository.listTickets();
-    const filtered = filterTickets(
-      Object.entries(rawTickets).map(([ticketId, value]) =>
-        normalizeTicket(ticketId, { ...value, source: 'rtdb_migrated' })
-      ),
-      { status, priority, category, userId, agent, isAgent }
-    );
-
-    if (filtered.length === 0) return [];
-
-    await chunkedBatchWrite(filtered, (batch, ticket) => {
-      batch.set(
-        this.ticketDoc(ticket.id, persistenceScope),
-        {
-          ...ticket,
-          migratedFrom: 'rtdb',
-          migratedAt: admin.firestore.FieldValue.serverTimestamp()
-        },
-        { merge: true }
-      );
-    });
-
-    return filtered;
   }
 
   async listTicketsByStatuses(statuses = [], {
@@ -360,21 +240,6 @@ class SupportTicketService {
     });
     tickets = filterTickets(tickets, { status, priority, category, userId, agent, isAgent });
 
-    if (tickets.length === 0) {
-      const imported = await this.importLegacyTicketsForQuery({
-        status,
-        priority,
-        category,
-        userId,
-        agent,
-        isAgent,
-        persistenceContext: persistenceScope
-      });
-      if (imported.length > 0) {
-        tickets = imported;
-      }
-    }
-
     const numericOffset = Number.parseInt(offset, 10) || 0;
     const numericLimit = Number.parseInt(limit, 10) || 50;
     return {
@@ -392,12 +257,6 @@ class SupportTicketService {
       assertStoredRecordMatchesScope(raw, persistenceScope);
       return normalizeTicket(doc.id, raw);
     }
-
-    const imported = await this.importLegacyTicket(ticketId, {
-      includeMessages: false,
-      persistenceContext: persistenceScope
-    });
-    if (imported) return imported;
     return null;
   }
 
@@ -421,52 +280,22 @@ class SupportTicketService {
       metadata: updatedTicket.metadata,
       updatedAt
     }, { merge: true });
-    await this.mirrorLegacyTicket(updatedTicket, persistenceScope);
     return updatedTicket;
   }
 
   async listMessages(ticketId, {
-    importLegacy = true,
     persistenceContext = null
   } = {}) {
     const persistenceScope = this.resolveScope(persistenceContext);
-    let snapshot = await this.ticketMessagesCollection(ticketId, persistenceScope).get();
-    let messages = snapshot.docs.map((doc) => {
+    const snapshot = await this.ticketMessagesCollection(ticketId, persistenceScope).get();
+    const messages = snapshot.docs.map((doc) => {
       const raw = doc.data();
       assertStoredRecordMatchesScope(raw, persistenceScope);
       return normalizeMessage(ticketId, doc.id, raw);
     });
     messages.sort((a, b) => new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime());
 
-    if (messages.length === 0 && importLegacy) {
-      const imported = await this.importLegacyTicket(ticketId, {
-        includeMessages: true,
-        persistenceContext: persistenceScope
-      });
-      if (imported) {
-        snapshot = await this.ticketMessagesCollection(ticketId, persistenceScope).get();
-        messages = snapshot.docs.map((doc) => normalizeMessage(ticketId, doc.id, doc.data()));
-        messages.sort((a, b) => new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime());
-      }
-    }
-
     return messages;
-  }
-
-  async mirrorLegacyTicket(ticket, persistenceContext = null) {
-    const persistenceScope = this.resolveScope(persistenceContext);
-    if (persistenceScope.namespace === 'sandbox') return;
-    if (!LEGACY_MIRROR_ENABLED) return;
-    const legacyRepository = this.getLegacyRepository();
-    await legacyRepository.updateTicket(ticket.id, ticket);
-  }
-
-  async mirrorLegacyMessage(ticketId, message, persistenceContext = null) {
-    const persistenceScope = this.resolveScope(persistenceContext);
-    if (persistenceScope.namespace === 'sandbox') return;
-    if (!LEGACY_MIRROR_ENABLED) return;
-    const legacyRepository = this.getLegacyRepository();
-    await legacyRepository.setMessage(ticketId, message.id, message);
   }
 
   async createTicket({
@@ -545,11 +374,6 @@ class SupportTicketService {
     );
     await batch.commit();
 
-    await Promise.all([
-      this.mirrorLegacyTicket(ticket, persistenceScope),
-      this.mirrorLegacyMessage(ticketId, initialMessage, persistenceScope)
-    ]);
-
     notifySupportBot('support.ticket_created', ticket, { dedupeKey: ticketId });
 
     return { ticket, initialMessage };
@@ -617,11 +441,6 @@ class SupportTicketService {
       updatedAt: now
     };
 
-    await Promise.all([
-      this.mirrorLegacyMessage(ticketId, newMessage, persistenceScope),
-      this.mirrorLegacyTicket(ticket, persistenceScope)
-    ]);
-
     // Só mensagem do usuário acorda o bot, no máximo uma vez a cada 5 min por chamado.
     if (senderType === 'user' && isInternal !== true) {
       notifySupportBot('support.message_created', ticket, {
@@ -649,7 +468,6 @@ class SupportTicketService {
     };
 
     await this.ticketDoc(ticketId, persistenceScope).set(updates, { merge: true });
-    await this.mirrorLegacyTicket({ ...ticket, ...updates }, persistenceScope);
 
     return this.addMessage(ticketId, {
       senderId: actorId,
@@ -686,7 +504,6 @@ class SupportTicketService {
     };
 
     await this.ticketDoc(ticketId, persistenceScope).set(updates, { merge: true });
-    await this.mirrorLegacyTicket({ ...ticket, ...updates }, persistenceScope);
 
     await this.addMessage(ticketId, {
       senderId: actorId,
@@ -714,7 +531,6 @@ class SupportTicketService {
     };
 
     await this.ticketDoc(ticketId, persistenceScope).set(updates, { merge: true });
-    await this.mirrorLegacyTicket({ ...ticket, ...updates }, persistenceScope);
 
     await this.addMessage(ticketId, {
       senderId: actorId,

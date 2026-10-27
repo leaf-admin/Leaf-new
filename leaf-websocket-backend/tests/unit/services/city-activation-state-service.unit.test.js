@@ -49,46 +49,21 @@ describe('city-activation-state-service', () => {
     expect(firestoreDoc.get).toHaveBeenCalledTimes(1);
   });
 
-  it('importa do RTDB legado para Firestore quando o documento ainda não existe', async () => {
+  it('não consulta o RTDB quando o documento ainda não existe', async () => {
     const firebaseConfig = require('../../../firebase-config');
-    const legacyConfig = {
-      states: {
-        RJ: {
-          enabled: true,
-          cities: {
-            rio: { active: true }
-          }
-        }
-      }
-    };
-
-    const firestoreSet = jest.fn().mockResolvedValue(undefined);
     const firestoreDoc = {
-      get: jest.fn().mockResolvedValue({
-        exists: false
-      }),
-      set: firestoreSet
+      get: jest.fn().mockResolvedValue({ exists: false }),
+      set: jest.fn()
     };
-    const firestore = {
-      collection: jest.fn().mockReturnValue({
-        doc: jest.fn().mockReturnValue(firestoreDoc)
-      })
-    };
-    firebaseConfig.getFirestore.mockReturnValue(firestore);
-    firebaseConfig.getFromRealtimeDB.mockResolvedValue(legacyConfig);
+    firebaseConfig.getFirestore.mockReturnValue({
+      collection: jest.fn().mockReturnValue({ doc: jest.fn().mockReturnValue(firestoreDoc) })
+    });
 
     const service = require('../../../services/city-activation-state-service');
     const result = await service.getConfig();
 
-    expect(result).toEqual(legacyConfig);
-    expect(firebaseConfig.getFromRealtimeDB).toHaveBeenCalledWith('operations/geography/cityActivation');
-    expect(firestoreSet).toHaveBeenCalledWith(
-      expect.objectContaining({
-        ...legacyConfig,
-        source: 'legacy_rtdb_import',
-        importedAt: expect.any(String)
-      }),
-      { merge: true }
-    );
+    expect(result).toBeNull();
+    expect(firebaseConfig.getFromRealtimeDB).not.toHaveBeenCalled();
+    expect(firestoreDoc.set).not.toHaveBeenCalled();
   });
 });

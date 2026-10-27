@@ -1,4 +1,3 @@
-const firebaseConfig = require('../firebase-config');
 const chatPersistenceService = require('../services/chat-persistence-service');
 const promotionService = require('../services/promotion-service');
 const ratingService = require('../services/rating-service');
@@ -604,13 +603,10 @@ function registerSocketLegacyBridgeHandler({
                 return;
             }
 
-            if (!firebaseConfig || typeof firebaseConfig.getFromRealtimeDB !== 'function') {
-                socket.emit('user_promos_loaded', { success: true, promos: [] });
-                return;
-            }
-
-            const raw = await firebaseConfig.getFromRealtimeDB(`driver_promotions/${userId}`) || {};
-            const promos = Object.values(raw).sort((a, b) => {
+            const snapshot = await promotionService.redemptionsCollection()
+                .where('driverId', '==', String(userId))
+                .get();
+            const promos = snapshot.docs.map((doc) => doc.data()).sort((a, b) => {
                 return new Date(b.redeemedAt || 0).getTime() - new Date(a.redeemedAt || 0).getTime();
             });
 
