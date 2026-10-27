@@ -502,6 +502,8 @@ class HealthCheckService {
   }
 
   waitForRealtimeConnection(realtimeDB, timeoutMs) {
+    // Retired RTDB: there is no connection to wait for; the API is served by Firestore.
+    if (realtimeDB?.__rtdbRetired || require('./rtdb-root-router').rtdbRetired()) return Promise.resolve(true);
     return new Promise((resolve, reject) => {
       const connectedRef = realtimeDB.ref('.info/connected');
       let settled = false;

@@ -1,10 +1,10 @@
 const express = require('express');
 const router = express.Router();
 const admin = require('firebase-admin');
-const { createRouter: createRtdbRootRouter } = require('../services/rtdb-root-router');
+const { createRouter: createRtdbRootRouter, realtimeClient } = require('../services/rtdb-root-router');
 // RTDB exit: roots routed to Firestore are honored here as in firebase-config;
-// with no roots configured this is the plain admin.database() client.
-const realtimeDb = () => createRtdbRootRouter(admin.database(), { getFirestore: () => admin.firestore() });
+// with no roots configured this is the plain RTDB client (or the retired stand-in).
+const realtimeDb = () => createRtdbRootRouter(realtimeClient(admin), { getFirestore: () => admin.firestore() });
 const { logger } = require('../utils/logger');
 const { assertAccountWritable, saveAccountProfile, projectRealtimeProfile, runAccountDeletion } = require('../services/account-lifecycle-service');
 const { readPlaces, mutatePlaces, normalizePlace, validatePlaceId } = require('../services/account-saved-places');

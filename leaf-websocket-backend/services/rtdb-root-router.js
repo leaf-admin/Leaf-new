@@ -237,8 +237,73 @@ function snapshot(key, value, ordered = null) {
   };
 }
 
-const mirrorWritesEnabled = (env = process.env) => env.RTDB_MIRROR_WRITES !== 'false';
+const rtdbRetired = (env = process.env) => env.RTDB_RETIRED === 'true';
+const mirrorWritesEnabled = (env = process.env) => !rtdbRetired(env) && env.RTDB_MIRROR_WRITES !== 'false';
 const UNROUTED_LOG_INTERVAL_MS = 10 * 60 * 1000;
+
+// Firebase-style push id: 8 chars of time + 12 random, sorting by creation.
+const PUSH_CHARS = '-0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz';
+function pushId(now = Date.now()) {
+  let time = '';
+  for (let i = 0; i < 8; i += 1) { time = PUSH_CHARS.charAt(now % 64) + time; now = Math.floor(now / 64); }
+  let random = '';
+  for (let i = 0; i < 12; i += 1) random += PUSH_CHARS.charAt(Math.floor(Math.random() * 64));
+  return time + random;
+}
+
+// Stand-in for the Admin RTDB client once RTDB_RETIRED=true: nothing reaches
+// RTDB anymore. Reads see an empty database; writes are dropped and logged as
+// errors (`rtdb_retired_write`) so a missed writer shows up in Sentry without
+// breaking the flow that called it. Every served root goes through the router
+// to Firestore before it gets here.
+function createRetiredRtdb({ log = logStructured } = {}) {
+  const seen = new Map();
+  const note = (level, message, path) => {
+    const key = `${message}:${segmentsOf(path)[0] || '<root>'}`;
+    const now = Date.now();
+    if (now - (seen.get(key) || 0) < UNROUTED_LOG_INTERVAL_MS) return;
+    seen.set(key, now);
+    log(level, message, { service: 'rtdb-root-router', root: segmentsOf(path)[0] || null });
+  };
+  const empty = path => snapshot(segmentsOf(path).pop() || null, null);
+  const ref = (path = '') => {
+    const read = async () => { if (!String(path).startsWith('.info')) note('warn', 'rtdb_retired_read', path); return empty(path); };
+    const write = async values => {
+      const paths = !segmentsOf(path).length && values && typeof values === 'object' ? Object.keys(values) : [path];
+      paths.forEach(target => note('error', 'rtdb_retired_write', target));
+    };
+    const query = {
+      orderByChild: () => query, orderByKey: () => query, orderByValue: () => query,
+      equalTo: () => query, startAt: () => query, startAfter: () => query, endAt: () => query, endBefore: () => query,
+      limitToFirst: () => query, limitToLast: () => query,
+      once: async (_event, callback) => { const result = await read(); if (typeof callback === 'function') callback(result); return result; },
+      get: read,
+      on: (_event, callback) => { Promise.resolve().then(() => callback?.(empty(path))); return callback; },
+      off: () => {}
+    };
+    return {
+      ...query,
+      key: segmentsOf(path).pop() || null,
+      toString: () => `rtdb-retired://${path}`,
+      child: childPath => ref(`${segmentsOf(path).join('/')}/${childPath}`),
+      push: value => {
+        const childPath = `${segmentsOf(path).join('/')}/${pushId()}`;
+        const child = ref(childPath);
+        if (value === undefined) return child;
+        const promise = child.set(value).then(() => ref(childPath));
+        return Object.assign(child, { then: promise.then.bind(promise), catch: promise.catch.bind(promise) });
+      },
+      set: write, update: write, remove: write,
+      transaction: async () => { await write(); return { committed: false, snapshot: empty(path) }; }
+    };
+  };
+  return { ref, __rtdbRetired: true };
+}
+
+// The RTDB client behind the router: the real one, or the retired stand-in.
+function realtimeClient(admin, env = process.env) {
+  return rtdbRetired(env) ? createRetiredRtdb() : admin.database();
+}
 
 function createRouter(rawDb, { getFirestore, env = process.env, log = logStructured } = {}) {
   const config = readConfig(env);
@@ -465,9 +530,12 @@ function createRouter(rawDb, { getFirestore, env = process.env, log = logStructu
       child: childPath => routedRef(`${segments.join('/')}/${childPath}`),
       push: value => {
         const generated = rawDb.ref(path).push().key;
-        const child = routedRef(`${segments.join('/')}/${generated}`);
+        const childPath = `${segments.join('/')}/${generated}`;
+        const child = routedRef(childPath);
         if (value === undefined) return child;
-        const promise = child.set(value).then(() => child);
+        // Resolve with a fresh, non-thenable ref (as the SDK does); resolving
+        // with `child` itself would adopt its own `then` forever.
+        const promise = child.set(value).then(() => routedRef(childPath));
         return Object.assign(child, { then: promise.then.bind(promise), catch: promise.catch.bind(promise) });
       },
       set: async value => {
@@ -581,4 +649,4 @@ function createRouter(rawDb, { getFirestore, env = process.env, log = logStructu
   });
 }
 
-module.exports = { createRouter, readConfig, mirrorWritesEnabled, normalize, setIn, getIn, applyQuery, collectionFor, toView, fromView, docView };
+module.exports = { createRouter, readConfig, mirrorWritesEnabled, rtdbRetired, createRetiredRtdb, realtimeClient, pushId, normalize, setIn, getIn, applyQuery, collectionFor, toView, fromView, docView };
