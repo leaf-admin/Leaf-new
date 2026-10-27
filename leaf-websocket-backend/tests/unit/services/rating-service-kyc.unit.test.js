@@ -1,6 +1,7 @@
 const mockMarkDriverForPhotoMismatch = jest.fn().mockResolvedValue({ success: true });
 const mockIsPhotoMismatchReport = jest.fn();
 const { sealFinancialContext } = require('../../../services/financial-runtime-context');
+const { fakeRatingsFirestore } = require('../../helpers/fake-ratings-firestore');
 
 jest.mock('../../../services/kyc-policy-service', () => ({
   isPhotoMismatchReport: (...args) => mockIsPhotoMismatchReport(...args),
@@ -13,8 +14,8 @@ jest.mock('../../../utils/logger', () => ({
 
 describe('rating-service KYC escalation', () => {
   let ratingService;
-  let mockGetFromRealtimeDB;
-  let mockUpdateRealtimeDBRoot;
+  let mockFirestore;
+  let mockAnnotations;
 
   beforeEach(() => {
     jest.resetModules();
@@ -22,34 +23,15 @@ describe('rating-service KYC escalation', () => {
     mockMarkDriverForPhotoMismatch.mockResolvedValue({ success: true });
     mockIsPhotoMismatchReport.mockReturnValue(false);
 
-    mockGetFromRealtimeDB = jest.fn().mockResolvedValue(null);
-    mockUpdateRealtimeDBRoot = jest.fn().mockResolvedValue(true);
-    const ratingIndexByPath = new Map();
-    const realtimeDb = {
-      ref: jest.fn((path) => ({
-        transaction: jest.fn(async (update) => {
-          const current = ratingIndexByPath.get(path) || null;
-          const next = update(current);
-          if (next === undefined) {
-            return {
-              committed: false,
-              snapshot: { val: () => current }
-            };
-          }
-          ratingIndexByPath.set(path, next);
-          return {
-            committed: true,
-            snapshot: { val: () => next }
-          };
-        })
-      }))
-    };
-
+    mockFirestore = fakeRatingsFirestore();
+    mockAnnotations = [];
     jest.doMock('../../../firebase-config', () => ({
-      isRealtimeDBAvailable: jest.fn(() => true),
-      getFromRealtimeDB: (...args) => mockGetFromRealtimeDB(...args),
-      updateRealtimeDBRoot: (...args) => mockUpdateRealtimeDBRoot(...args),
-      getRealtimeDB: jest.fn(() => realtimeDb)
+      getFirestore: () => mockFirestore
+    }));
+    jest.doMock('../../../services/ride-annotation-store', () => ({
+      updateAnnotation: jest.fn(async (_firestore, root, id, patch) => {
+        mockAnnotations.push({ root, id, patch });
+      })
     }));
 
     ratingService = require('../../../services/rating-service');
@@ -85,7 +67,7 @@ describe('rating-service KYC escalation', () => {
         reporterType: 'passenger'
       })
     );
-    expect(mockUpdateRealtimeDBRoot).toHaveBeenCalled();
+    expect(mockFirestore.paths().some(path => path.startsWith('ratings/'))).toBe(true);
     expect(result.kycEscalation).toEqual({ success: true });
   });
 
@@ -135,9 +117,7 @@ describe('rating-service KYC escalation', () => {
     });
 
     expect(result.success).toBe(true);
-    const updates = mockUpdateRealtimeDBRoot.mock.calls[0][0];
-    const ratingKey = Object.keys(updates).find((key) => key.startsWith('ratings/'));
-    expect(updates[ratingKey]).toMatchObject({
+    expect(mockFirestore.docs.get(`ratings/${result.ratingId}`)).toMatchObject({
       reviewerId: 'passenger-1',
       reviewerType: 'passenger',
       targetUserId: 'driver-1'
@@ -177,7 +157,7 @@ describe('rating-service KYC escalation', () => {
 
     expect(result.success).toBe(true);
     expect(mockMarkDriverForPhotoMismatch).not.toHaveBeenCalled();
-    const updates = mockUpdateRealtimeDBRoot.mock.calls[0][0];
-    expect(Object.keys(updates).every((path) => path.startsWith('sandbox_'))).toBe(true);
+    expect(mockFirestore.paths().every((path) => path.startsWith('sandbox_'))).toBe(true);
+    expect(mockAnnotations.every(({ root }) => root === 'sandbox_bookings')).toBe(true);
   });
 });

@@ -2,7 +2,7 @@ const firebaseConfig = require('../firebase-config');
 const { logStructured } = require('../utils/logger');
 const kycPolicyService = require('./kyc-policy-service');
 const ratingFirestoreStore = require('./rating-firestore-store');
-const { mirrorWritesEnabled } = require('./rtdb-root-router');
+const rideAnnotationStore = require('./ride-annotation-store');
 const {
   resolveRidePersistenceScope,
   resolvePersistenceScope,
@@ -160,60 +160,6 @@ class RatingService {
     };
   }
 
-  async _reserveRatingIndex({ tripId, reviewerId, reservation, persistenceScope }) {
-    const realtimeDb = firebaseConfig.getRealtimeDB?.();
-    const indexRef = realtimeDb?.ref?.(
-      `${persistenceScope.collections.ratingTripIndex}/${tripId}/${reviewerId}`
-    );
-    if (!indexRef || typeof indexRef.transaction !== 'function') {
-      return {
-        success: false,
-        code: 'RATING_INDEX_UNAVAILABLE',
-        error: 'Não foi possível reservar a avaliação agora'
-      };
-    }
-
-    let collision = null;
-    try {
-      const transaction = await indexRef.transaction((current) => {
-        if (current) {
-          collision = current;
-          return undefined;
-        }
-        return reservation;
-      });
-
-      if (!transaction?.committed) {
-        return {
-          success: false,
-          collision: transaction?.snapshot?.val?.() || collision || null
-        };
-      }
-
-      return { success: true, indexRef };
-    } catch (_error) {
-      return {
-        success: false,
-        code: 'RATING_INDEX_UNAVAILABLE',
-        error: 'Não foi possível reservar a avaliação agora'
-      };
-    }
-  }
-
-  async _releaseRatingReservation(indexRef, reservationId) {
-    if (!indexRef || typeof indexRef.transaction !== 'function') return;
-    try {
-      await indexRef.transaction((current) => {
-        if (current?.reservationId === reservationId && current?.status === 'pending') {
-          return null;
-        }
-        return undefined;
-      });
-    } catch (_error) {
-      // A reservation left behind is still safer than overwriting another evaluator.
-    }
-  }
-
   async _resolveExistingRatingReplay(collision = {}, persistenceScope) {
     const ratingId = String(collision?.ratingId || '').trim();
     if (!ratingId) {
@@ -226,9 +172,7 @@ class RatingService {
       };
     }
 
-    const persistedRating = ratingFirestoreStore.enabledReads()
-      ? await ratingFirestoreStore.getRating(firebaseConfig.getFirestore?.(), persistenceScope, ratingId)
-      : await firebaseConfig.getFromRealtimeDB(`${persistenceScope.collections.ratings}/${ratingId}`);
+    const persistedRating = await ratingFirestoreStore.getRating(firebaseConfig.getFirestore?.(), persistenceScope, ratingId);
     if (persistedRating) {
       try {
         assertStoredRecordMatchesScope(persistedRating, persistenceScope);
@@ -254,7 +198,7 @@ class RatingService {
   }
 
   async submitRating(payload = {}, context = {}) {
-    if (!ratingFirestoreStore.enabledReads() && !firebaseConfig.isRealtimeDBAvailable()) {
+    if (!firebaseConfig.getFirestore?.()) {
       return { success: false, error: 'Firebase não disponível' };
     }
 
@@ -296,7 +240,6 @@ class RatingService {
 
     const ratingId = `rating_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
     const now = new Date().toISOString();
-    const reservationId = `rating_reservation_${Math.random().toString(36).slice(2, 10)}`;
     const rating = {
       id: ratingId,
       tripId,
@@ -312,29 +255,15 @@ class RatingService {
       financialContextId: persistenceScope.financialContextId
     };
 
-    const updates = {};
-    updates[`${persistenceScope.collections.ratings}/${ratingId}`] = rating;
-    updates[`${persistenceScope.collections.tripRatings}/${tripId}/${ratingId}`] = rating;
-    updates[`${persistenceScope.collections.ratingTripIndex}/${tripId}/${reviewerId}`] = {
-      ratingId,
-      reviewerType,
-      createdAt: now,
-      status: 'committed',
-      financialContext: persistenceScope.financialContext,
-      financialNamespace: persistenceScope.namespace,
-      financialContextId: persistenceScope.financialContextId
-    };
-
-    if (targetUserId) {
-      updates[`${persistenceScope.collections.userRatings}/${targetUserId}/${ratingId}`] = rating;
-    }
-
+    // The rating, its trip/user views and the per-reviewer index live in the
+    // Firestore ratings store; the ride annotation keeps the booking summary.
+    const bookingAnnotation = {};
     if (reviewerType === 'passenger') {
-      updates[`${persistenceScope.collections.bookings}/${tripId}/rating`] = ratingValue;
-      updates[`${persistenceScope.collections.bookings}/${tripId}/feedback`] = comment || null;
+      bookingAnnotation.rating = ratingValue;
+      bookingAnnotation.feedback = comment || null;
     } else if (reviewerType === 'driver') {
-      updates[`${persistenceScope.collections.bookings}/${tripId}/driver_rating`] = ratingValue;
-      updates[`${persistenceScope.collections.bookings}/${tripId}/driver_feedback`] = comment || null;
+      bookingAnnotation.driver_rating = ratingValue;
+      bookingAnnotation.driver_feedback = comment || null;
     }
 
     const committedIndex = {
@@ -347,79 +276,31 @@ class RatingService {
       financialContextId: persistenceScope.financialContextId
     };
 
-    if (ratingFirestoreStore.enabledReads()) {
-      // Firestore is the source: reserve and commit in one transaction, then
-      // keep the RTDB fan-out (including the booking rating) as a mirror.
-      let committed;
-      try {
-        committed = await ratingFirestoreStore.commit(firebaseConfig.getFirestore?.(), persistenceScope, {
-          rating, index: committedIndex
-        });
-      } catch (error) {
-        logStructured('warn', 'Falha ao gravar avaliação no Firestore', { service: 'rating-service', tripId, error: error.message });
-        return { success: false, code: 'RATING_INDEX_UNAVAILABLE', error: 'Não foi possível reservar a avaliação agora' };
-      }
-      if (!committed.committed) {
-        try {
-          assertStoredRecordMatchesScope(committed.collision, persistenceScope);
-        } catch (error) {
-          return this._persistenceError(error);
-        }
-        return this._resolveExistingRatingReplay(committed.collision, persistenceScope);
-      }
-      // With the RTDB mirror off only the ride annotation (`bookings`, served
-      // from Firestore by the router) is kept; the RTDB rating fan-out stops.
-      const bookingsPrefix = `${persistenceScope.collections.bookings}/`;
-      const mirrorUpdates = mirrorWritesEnabled()
-        ? updates
-        : Object.fromEntries(Object.entries(updates).filter(([path]) => path.startsWith(bookingsPrefix)));
-      const mirrored = await Promise.resolve(firebaseConfig.updateRealtimeDBRoot?.(mirrorUpdates)).catch(() => false);
-      if (!mirrored) {
-        logStructured('warn', 'Espelho RTDB da avaliação falhou', { service: 'rating-service', tripId, ratingId });
-      }
-    } else {
-      const reservation = await this._reserveRatingIndex({
-        tripId,
-        reviewerId,
-        reservation: {
-          ratingId,
-          reviewerType,
-          createdAt: now,
-          reservationId,
-          status: 'pending',
-          financialContext: persistenceScope.financialContext,
-          financialNamespace: persistenceScope.namespace,
-          financialContextId: persistenceScope.financialContextId
-        },
-        persistenceScope
+    // Reserve and commit in one Firestore transaction; a second rating for the
+    // same trip and reviewer finds the committed index and replays it.
+    let committed;
+    try {
+      committed = await ratingFirestoreStore.commit(firebaseConfig.getFirestore?.(), persistenceScope, {
+        rating, index: committedIndex
       });
-      if (!reservation.success) {
-        if (reservation.collision) {
-          try {
-            assertStoredRecordMatchesScope(reservation.collision, persistenceScope);
-          } catch (error) {
-            return this._persistenceError(error);
-          }
-          return this._resolveExistingRatingReplay(reservation.collision, persistenceScope);
-        }
-        return {
-          success: false,
-          code: reservation.code || 'RATING_INDEX_UNAVAILABLE',
-          error: reservation.error || 'Não foi possível reservar a avaliação agora'
-        };
+    } catch (error) {
+      logStructured('warn', 'Falha ao gravar avaliação no Firestore', { service: 'rating-service', tripId, error: error.message });
+      return { success: false, code: 'RATING_INDEX_UNAVAILABLE', error: 'Não foi possível reservar a avaliação agora' };
+    }
+    if (!committed.committed) {
+      try {
+        assertStoredRecordMatchesScope(committed.collision, persistenceScope);
+      } catch (error) {
+        return this._persistenceError(error);
       }
-
-      const writeSucceeded = await firebaseConfig.updateRealtimeDBRoot(updates);
-      if (!writeSucceeded) {
-        await this._releaseRatingReservation(reservation.indexRef, reservationId);
-        return { success: false, error: 'Firebase não disponível' };
-      }
-      if (ratingFirestoreStore.enabledWrites()) {
-        await ratingFirestoreStore.mirror(firebaseConfig.getFirestore?.(), persistenceScope, { rating, index: committedIndex })
-          .catch(error => logStructured('warn', 'Cópia Firestore da avaliação falhou; será reparada pela cópia com paridade', {
-            service: 'rating-service', tripId, ratingId, error: error.message
-          }));
-      }
+      return this._resolveExistingRatingReplay(committed.collision, persistenceScope);
+    }
+    if (Object.keys(bookingAnnotation).length) {
+      await rideAnnotationStore.updateAnnotation(
+        firebaseConfig.getFirestore?.(), persistenceScope.collections.bookings, tripId, bookingAnnotation
+      ).catch(error => logStructured('warn', 'Resumo da avaliação na anotação da corrida falhou', {
+        service: 'rating-service', tripId, ratingId, error: error.message
+      }));
     }
 
     let kycEscalation = null;
@@ -475,7 +356,7 @@ class RatingService {
   }
 
   async getTripRatings(tripId, scopeInput = {}) {
-    if (!ratingFirestoreStore.enabledReads() && !firebaseConfig.isRealtimeDBAvailable()) return { success: false, error: 'Firebase não disponível' };
+    if (!firebaseConfig.getFirestore?.()) return { success: false, error: 'Firebase não disponível' };
     if (!tripId) return { success: false, error: 'tripId é obrigatório' };
 
     let persistenceScope;
@@ -484,9 +365,7 @@ class RatingService {
     } catch (error) {
       return this._persistenceError(error);
     }
-    const raw = ratingFirestoreStore.enabledReads()
-      ? await ratingFirestoreStore.listByTrip(firebaseConfig.getFirestore?.(), persistenceScope, tripId)
-      : (await firebaseConfig.getFromRealtimeDB(`${persistenceScope.collections.tripRatings}/${tripId}`)) || {};
+    const raw = await ratingFirestoreStore.listByTrip(firebaseConfig.getFirestore?.(), persistenceScope, tripId);
     try {
       Object.values(raw).forEach((rating) => {
         assertStoredRecordMatchesScope(rating, persistenceScope);
@@ -507,7 +386,7 @@ class RatingService {
   }
 
   async hasUserRatedTrip(tripId, reviewerId, scopeInput = {}) {
-    if (!ratingFirestoreStore.enabledReads() && !firebaseConfig.isRealtimeDBAvailable()) return { success: false, error: 'Firebase não disponível' };
+    if (!firebaseConfig.getFirestore?.()) return { success: false, error: 'Firebase não disponível' };
     if (!tripId || !reviewerId) {
       return { success: false, error: 'tripId e reviewerId são obrigatórios' };
     }
@@ -518,9 +397,7 @@ class RatingService {
     } catch (error) {
       return this._persistenceError(error);
     }
-    const value = ratingFirestoreStore.enabledReads()
-      ? await ratingFirestoreStore.getIndex(firebaseConfig.getFirestore?.(), persistenceScope, tripId, reviewerId)
-      : await firebaseConfig.getFromRealtimeDB(`${persistenceScope.collections.ratingTripIndex}/${tripId}/${reviewerId}`);
+    const value = await ratingFirestoreStore.getIndex(firebaseConfig.getFirestore?.(), persistenceScope, tripId, reviewerId);
     if (value) {
       try {
         assertStoredRecordMatchesScope(value, persistenceScope);
@@ -538,7 +415,7 @@ class RatingService {
   }
 
   async getUserRatings(targetUserId, scopeInput = {}) {
-    if (!ratingFirestoreStore.enabledReads() && !firebaseConfig.isRealtimeDBAvailable()) return { success: false, error: 'Firebase não disponível' };
+    if (!firebaseConfig.getFirestore?.()) return { success: false, error: 'Firebase não disponível' };
     if (!targetUserId) return { success: false, error: 'targetUserId é obrigatório' };
 
     let persistenceScope;
@@ -547,9 +424,7 @@ class RatingService {
     } catch (error) {
       return this._persistenceError(error);
     }
-    const raw = ratingFirestoreStore.enabledReads()
-      ? await ratingFirestoreStore.listByTarget(firebaseConfig.getFirestore?.(), persistenceScope, targetUserId)
-      : (await firebaseConfig.getFromRealtimeDB(`${persistenceScope.collections.userRatings}/${targetUserId}`)) || {};
+    const raw = await ratingFirestoreStore.listByTarget(firebaseConfig.getFirestore?.(), persistenceScope, targetUserId);
     try {
       Object.values(raw).forEach((rating) => {
         assertStoredRecordMatchesScope(rating, persistenceScope);

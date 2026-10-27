@@ -1,12 +1,10 @@
 'use strict';
 
-// Ratings moving from RTDB to Firestore (RTDB exit, domain 3).
+// Ratings in Firestore (RTDB exit, domain 3; RTDB retired).
 // - `<ratings>/{ratingId}`: the rating body, as stored in RTDB.
 // - `<rating_trip_index>/{tripId}__{reviewerId}`: one entry per reviewer and
 //   trip; it is what prevents a second rating for the same trip.
 // trip_ratings/user_ratings are RTDB fan-out views; here they are queries.
-const enabledWrites = () => process.env.ENABLE_RATINGS_FIRESTORE_WRITES === 'true';
-const enabledReads = () => enabledWrites() && process.env.ENABLE_RATINGS_FIRESTORE_READS === 'true';
 
 function fail(code, message) {
   return Object.assign(new Error(message), { code });
@@ -44,18 +42,7 @@ function indexEntry(data) {
   return entry;
 }
 
-// Copy of an already committed RTDB rating (before the read switch).
-async function mirror(firestore, scope, { rating, index }) {
-  if (!enabledWrites()) return { mirrored: false, reason: 'disabled' };
-  const target = refs(firestore, scope, { ratingId: rating.id, tripId: rating.tripId, reviewerId: rating.reviewerId });
-  const batch = firestore.batch();
-  batch.set(target.rating, clean(rating));
-  batch.set(target.index, indexBody(index, rating.tripId, rating.reviewerId));
-  await batch.commit();
-  return { mirrored: true };
-}
-
-// Source-of-truth write after the switch: reserve and commit atomically.
+// Reserve and commit atomically.
 async function commit(firestore, scope, { rating, index }) {
   const target = refs(firestore, scope, { ratingId: rating.id, tripId: rating.tripId, reviewerId: rating.reviewerId });
   return firestore.runTransaction(async tx => {
@@ -87,7 +74,7 @@ async function listBy(firestore, scope, field, value) {
 }
 
 module.exports = {
-  enabledWrites, enabledReads, indexId, indexBody, indexEntry, mirror, commit, getRating, getIndex,
+  indexId, indexBody, indexEntry, commit, getRating, getIndex,
   listByTrip: (firestore, scope, tripId) => listBy(firestore, scope, 'tripId', tripId),
   listByTarget: (firestore, scope, targetUserId) => listBy(firestore, scope, 'targetUserId', targetUserId)
 };
