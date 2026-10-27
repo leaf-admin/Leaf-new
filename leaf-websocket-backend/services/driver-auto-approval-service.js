@@ -58,7 +58,7 @@ function createDriverAutoApprovalService({
     const cpf = resolveDriverCpf(user);
     if (!cpf) return recordNeedsReview(driverId, 'cpf_missing');
     try {
-      await claimCpf({ firestore: getFirestore(), realtimeDb: db, userId: driverId, cpf });
+      await claimCpf({ firestore: getFirestore(), userId: driverId, cpf });
     } catch (error) {
       return recordNeedsReview(driverId, 'cpf_uniqueness', { code: error?.code || null });
     }

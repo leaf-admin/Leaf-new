@@ -34,7 +34,6 @@ const {
   isDashboardCnhMutationGuardError,
   isSafeFirebasePathSegment,
   kycDriverStatusService,
-  legacyDashboardUsersMirrorEnabled,
   listUsers,
   logError,
   logStructured,
@@ -113,10 +112,7 @@ router.patch('/api/users/:userId', authenticateJWT, requireRole(DASHBOARD_OPERAT
     if (!safeUserId) {
       return res.status(400).json({ error: 'userId inválido' });
     }
-    const legacyDb = firebaseConfig?.getRealtimeDB ? firebaseConfig.getRealtimeDB() : null;
     const updatedUser = await updateUserProfile(safeUserId, req.body || {}, {
-      mirrorToLegacyRtdb: legacyDashboardUsersMirrorEnabled,
-      legacyDb,
       operator: {
         id: req.user?.id || req.user?.userId || null,
         email: req.user?.email || null,

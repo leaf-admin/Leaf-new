@@ -106,45 +106,7 @@ async function findExistingCpfOwnerIds(firestore, cpfDigits) {
   }
 }
 
-async function findRealtimeCpfOwnerIds(realtimeDb, cpfDigits) {
-  const usersRef = realtimeDb?.ref?.('users');
-  if (typeof usersRef?.orderByChild !== 'function') {
-    return [];
-  }
-
-  const queries = [
-    ['cpf', cpfDigits],
-    ['cpf', formatCpf(cpfDigits)],
-    ['cpfNormalized', cpfDigits]
-  ];
-
-  try {
-    const snapshots = await Promise.all(
-      queries.map(([field, value]) => (
-        usersRef.orderByChild(field).equalTo(value).once('value')
-      ))
-    );
-
-    return [...new Set(
-      snapshots.flatMap((snapshot) => {
-        const records = snapshot?.val?.() || {};
-        return Object.entries(records)
-          .filter(([, record]) => (
-            normalizeCpfForComparison(record?.cpf || record?.cpfNormalized) === cpfDigits
-          ))
-          .map(([uid]) => uid);
-      })
-    )];
-  } catch (error) {
-    throw new CpfIdentityError(
-      'PROFILE_CPF_UNIQUENESS_UNAVAILABLE',
-      CPF_ERROR_MESSAGES.PROFILE_CPF_UNIQUENESS_UNAVAILABLE,
-      503
-    );
-  }
-}
-
-async function claimCpf({ firestore = admin.firestore(), realtimeDb = null, userId, cpf, profile }) {
+async function claimCpf({ firestore = admin.firestore(), userId, cpf, profile }) {
   const normalized = normalizeCpf(cpf, { required: true });
   const ownerId = String(userId || '').trim();
 
@@ -156,11 +118,8 @@ async function claimCpf({ firestore = admin.firestore(), realtimeDb = null, user
     );
   }
 
-  const [firestoreOwnerIds, realtimeOwnerIds] = await Promise.all([
-    findExistingCpfOwnerIds(firestore, normalized.digits),
-    findRealtimeCpfOwnerIds(realtimeDb, normalized.digits)
-  ]);
-  const legacyOwnerIds = [...new Set([...firestoreOwnerIds, ...realtimeOwnerIds])];
+  // users/{uid} lives only in Firestore: one query covers every profile.
+  const legacyOwnerIds = await findExistingCpfOwnerIds(firestore, normalized.digits);
   if (legacyOwnerIds.some((candidateId) => candidateId !== ownerId)) {
     throw new CpfIdentityError('PROFILE_CPF_ALREADY_REGISTERED');
   }
@@ -233,7 +192,6 @@ module.exports = {
   claimCpf,
   releaseCpfsForDeletedAccount,
   digitsOnly,
-  findRealtimeCpfOwnerIds,
   findExistingCpfOwnerIds,
   formatCpf,
   isValidCpfDigits,

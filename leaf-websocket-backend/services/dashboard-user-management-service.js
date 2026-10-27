@@ -1,5 +1,5 @@
 const admin = require('firebase-admin');
-const firebaseConfig = require('../firebase-config');
+const userStore = require('./user-store');
 const redisPool = require('../utils/redis-pool');
 const { logError, logStructured } = require('../utils/logger');
 const passengerTrustService = require('./passenger-trust-service');
@@ -72,53 +72,27 @@ function resolveDriverReactivationState(currentData = {}) {
   };
 }
 
-async function readRealtimeUser(userId) {
-  if (!firebaseConfig?.getRealtimeDB) return { exists: false, data: null, db: null };
-  const db = firebaseConfig.getRealtimeDB();
-  const snapshot = await db.ref(`users/${userId}`).once('value');
-  return {
-    exists: Boolean(snapshot?.exists?.()),
-    data: snapshot?.val?.() || null,
-    db
-  };
-}
-
 async function readUser(userId) {
   const safeUserId = normalizeId(userId);
   if (!safeUserId) {
     throw new DashboardUserManagementError('userId invalido', 400, 'INVALID_USER_ID');
   }
 
+  // users/{uid} is the one record (the RTDB copy it used to merge is gone).
   const firestore = admin.firestore();
   const userRef = firestore.collection('users').doc(safeUserId);
-  const [firestoreDoc, realtime] = await Promise.all([
-    userRef.get(),
-    readRealtimeUser(safeUserId).catch((error) => {
-      logError(error, 'Erro ao ler usuario no RTDB para gestao operacional', {
-        service: 'dashboard-user-management-service',
-        userId: safeUserId
-      });
-      return { exists: false, data: null, db: null };
-    })
-  ]);
-
-  const firestoreData = firestoreDoc.exists ? (firestoreDoc.data() || {}) : null;
-  const realtimeData = realtime.data || null;
-  const merged = {
-    ...(realtimeData || {}),
-    ...(firestoreData || {})
-  };
-
-  if (!firestoreDoc.exists && !realtime.exists) {
+  const firestoreDoc = await userRef.get();
+  if (!firestoreDoc.exists) {
     throw new DashboardUserManagementError('Usuario nao encontrado', 404, 'USER_NOT_FOUND');
   }
+  const data = firestoreDoc.data() || {};
 
   return {
     userId: safeUserId,
     userRef,
-    realtimeDb: realtime.db,
-    data: merged,
-    userType: normalizeUserType(merged)
+    firestore,
+    data,
+    userType: normalizeUserType(data)
   };
 }
 
@@ -361,10 +335,8 @@ async function updateUserOperationalStatus(userId, payload = {}, options = {}) {
     operator
   });
 
-  await record.userRef.set(updates, { merge: true });
-  if (record.realtimeDb) {
-    await record.realtimeDb.ref(`users/${record.userId}`).update(updates);
-  }
+  // RTDB update semantics: each field replaced, null removes it.
+  await userStore.updateUser(record.firestore, record.userId, updates);
 
   if (record.userType === 'driver') {
     await clearDriverRuntimeState(record.userId, status, reasonCode);
@@ -467,16 +439,10 @@ async function requestDriverDocument(driverId, documentType, payload = {}, optio
   if (record.userType !== 'driver') {
     throw new DashboardUserManagementError('Usuario nao e motorista', 400, 'USER_IS_NOT_DRIVER');
   }
-  if (!record.realtimeDb) {
-    throw new DashboardUserManagementError('Realtime Database nao configurado', 503, 'RTDB_UNAVAILABLE');
-  }
-
   const nowIso = new Date().toISOString();
   const operator = options.operator || {};
   const reason = String(payload.reason || '').trim();
-  const documentRef = record.realtimeDb.ref(`users/${safeDriverId}/documents/${safeDocumentType}`);
-  const previousSnapshot = await documentRef.once('value');
-  const previousDocument = previousSnapshot.val() || {};
+  const previousDocument = (await userStore.readUserField(record.firestore, safeDriverId, `documents/${safeDocumentType}`)) || {};
   const previousStatus = String(previousDocument.status || '').trim().toLowerCase();
   const requestStatus = 'requested';
 
@@ -495,11 +461,7 @@ async function requestDriverDocument(driverId, documentType, payload = {}, optio
     updatedAt: nowIso
   };
 
-  const updates = {
-    [`users/${safeDriverId}/documents/${safeDocumentType}`]: documentPayload
-  };
-
-  await record.realtimeDb.ref().update(updates);
+  await userStore.updateUser(record.firestore, safeDriverId, { [`documents/${safeDocumentType}`]: documentPayload });
 
   await record.userRef.set({
     documentRequests: {

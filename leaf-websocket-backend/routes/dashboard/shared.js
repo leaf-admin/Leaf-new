@@ -122,8 +122,6 @@ try {
 const legacyPromotionsRoutesEnabled =
   String(process.env.ENABLE_LEGACY_PROMOTIONS_ROUTES || 'false').toLowerCase() === 'true';
 
-const legacyDashboardUsersMirrorEnabled =
-  String(process.env.ENABLE_LEGACY_DASHBOARD_USERS_RTDB_MIRROR || 'false').toLowerCase() === 'true';
 
 const DASHBOARD_OPERATION_ROLES = ['admin', 'super-admin', 'manager', 'support', 'development'];
 
@@ -2737,7 +2735,6 @@ module.exports = {
   kycFailedBiometricEvidenceService,
   kycPolicyService,
   kycRuntimeScopeService,
-  legacyDashboardUsersMirrorEnabled,
   legacyPromotionsRoutesEnabled,
   listUsers,
   loadBookingHashes,

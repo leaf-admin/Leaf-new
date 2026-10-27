@@ -28,7 +28,6 @@ class DriverApprovalService {
 
       const normalized = await claimCpf({
         firestore,
-        realtimeDb: firebaseConfig.getRealtimeDB?.() || null,
         userId: driverData.id,
         cpf: driverData.cpf
       });

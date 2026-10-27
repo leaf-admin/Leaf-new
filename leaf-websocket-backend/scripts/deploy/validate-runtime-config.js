@@ -1222,9 +1222,6 @@ function main() {
     blockers.push(...biometricReadiness.blockers);
     warnings.push(...biometricReadiness.warnings);
 
-    if (boolEnv('ENABLE_LEGACY_PROFILE_RTDB_MIRROR')) {
-      warnings.push('ENABLE_LEGACY_PROFILE_RTDB_MIRROR=true mantém espelho de perfil no RTDB em produção');
-    }
   }
 
   const report = {

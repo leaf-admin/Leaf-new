@@ -609,23 +609,11 @@ async function updateUserProfile(userId, payload = {}, options = {}) {
     details: {
       targetUserId: safeUserId,
       fieldsChanged: Object.keys(updates).filter((field) => field !== 'updatedAt').sort(),
-      mirroredToLegacyRtdb: Boolean(options.mirrorToLegacyRtdb && options.legacyDb),
       operatorEmail: operator.email || null,
       operatorRole: operator.role || null
     },
     success: true
   });
-
-  if (options.mirrorToLegacyRtdb && options.legacyDb) {
-    try {
-      await options.legacyDb.ref(`users/${safeUserId}`).update(updates);
-    } catch (error) {
-      logError(error, 'Erro ao espelhar atualizacao de usuario no RTDB legado', {
-        service: 'dashboard-user-service',
-        userId: safeUserId
-      });
-    }
-  }
 
   resetUsersCache();
   const updatedDoc = await userRef.get();

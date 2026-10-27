@@ -4,6 +4,7 @@ const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
 const redisPool = require('../utils/redis-pool');
 const firebaseConfig = require('../firebase-config');
+const userStore = require('../services/user-store');
 const { logStructured, logError } = require('../utils/logger');
 const {
   getBypassOtpCode,
@@ -168,17 +169,13 @@ async function lookupFirebaseAuthUserByPhone(phoneDigits) {
 
 async function getRealtimeUserByUid(uid) {
   if (!uid) return null;
-  const realtimeDB =
-    typeof firebaseConfig.getRealtimeDB === 'function'
-      ? firebaseConfig.getRealtimeDB()
-      : null;
-  if (!realtimeDB) return null;
+  const firestore = userStore.resolveFirestore();
+  if (!firestore) return null;
 
   try {
-    const snapshot = await realtimeDB.ref(`users/${uid}`).once('value');
-    return snapshot?.exists() ? snapshot.val() : null;
+    return await userStore.readUser(firestore, uid);
   } catch (error) {
-    logStructured('warn', 'Falha ao consultar perfil no Realtime DB para resolver fluxo de autenticação', {
+    logStructured('warn', 'Falha ao consultar perfil do usuário para resolver fluxo de autenticação', {
       service: 'auth-password-routes',
       uid,
       error: error?.message || String(error)
@@ -220,20 +217,16 @@ function buildDefaultRealtimeProfile({ uid, phoneDigits, userType }) {
 
 async function ensureRealtimeProfileForPasswordAuth({ uid, phoneDigits, userType }) {
   if (!uid) return;
-  const realtimeDB =
-    typeof firebaseConfig.getRealtimeDB === 'function'
-      ? firebaseConfig.getRealtimeDB()
-      : null;
-  if (!realtimeDB) return;
+  const firestore = userStore.resolveFirestore();
+  if (!firestore) return;
 
-  const userRef = realtimeDB.ref(`users/${uid}`);
-  const existingSnapshot = await userRef.once('value');
-  const existing = existingSnapshot?.exists() ? existingSnapshot.val() : null;
-
-  if (!existing) {
-    await userRef.set(buildDefaultRealtimeProfile({ uid, phoneDigits, userType }));
-    return;
-  }
+  // A brand-new account gets the default record; an existing one is patched.
+  const { created, value: existing } = await userStore.createUserIfMissing(
+    firestore,
+    uid,
+    buildDefaultRealtimeProfile({ uid, phoneDigits, userType })
+  );
+  if (created) return;
 
   const nowIso = new Date().toISOString();
   const phoneE164 = formatPhoneE164(phoneDigits);
@@ -252,7 +245,7 @@ async function ensureRealtimeProfileForPasswordAuth({ uid, phoneDigits, userType
   if (existing.phoneValidated !== true) patch.phoneValidated = true;
 
   if (Object.keys(patch).length > 1) {
-    await userRef.update(patch);
+    await userStore.updateUser(firestore, uid, patch);
   }
 }
 
