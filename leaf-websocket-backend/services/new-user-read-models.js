@@ -1,6 +1,4 @@
 'use strict';
-const { randomUUID } = require('node:crypto');
-const receipts = require('./receipt-history-index');
 const projections = require('./metrics-projection-store');
 const { hash } = require('./metrics-projection-summary');
 
@@ -14,16 +12,6 @@ async function initialize(userRecord, adapters = {}) {
   }
   const config = adapters.config || require('../firebase-config');
   const work = [];
-  if (receipts.enabledWrites()) {
-    for (const role of ['customer', 'driver']) {
-      const base = receipts.ownerBase({ namespace: 'operational' }, role, userRecord.uid);
-      work.push(Promise.resolve().then(() => config.getRealtimeDB().ref(`${base}/meta`).transaction(current => {
-        if (current && current.schema !== 1) return undefined;
-        return { ...(current || {}), schema: 1, ready: true, revision: current?.revision || randomUUID(),
-          initializationSource: 'admin_auth_create_user', authCreatedAt: new Date(createdAt).toISOString() };
-      }, undefined, false)).then(result => { if (!result.committed) throw new Error('Receipt initialization conflict'); }));
-    }
-  }
   if (projections.enabled()) {
     work.push(Promise.resolve().then(() => {
       const firestore = config.getFirestore();

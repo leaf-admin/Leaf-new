@@ -12,7 +12,6 @@ describe('maintenance boundaries', () => {
 
   test('write mode requires an explicit maintenance reference before any database call', async () => {
     await expect(migration.metricBatch({ firestore: {}, collection: 'rides', apply: true })).rejects.toThrow('authorization');
-    await expect(migration.receiptBatch({ db: {}, apply: true })).rejects.toThrow('authorization');
   });
 
   test('streaming parity is insensitive to ordering and sensitive to duplicates', () => {
@@ -42,10 +41,10 @@ describe('maintenance boundaries', () => {
   });
 
   test('missing adapters fail conservatively and are settled without rejecting auth flow', async () => {
-    process.env.ENABLE_NEW_USER_READ_MODEL_INIT = 'true'; process.env.ENABLE_RECEIPT_HISTORY_WRITES = 'true';
+    process.env.ENABLE_NEW_USER_READ_MODEL_INIT = 'true';
     process.env.ENABLE_OPS_METRIC_WRITES = 'true';
     const result = await newUsers.initialize({ uid: 'fresh', metadata: { creationTime: new Date().toISOString() } },
       { config: { getFirestore: () => null, getRealtimeDB: () => null } });
-    expect(result).toEqual({ initialized: 0, failed: 3 });
+    expect(result).toEqual({ initialized: 0, failed: 1 });
   });
 });

@@ -2,7 +2,6 @@
 // Offline/explicit maintenance library. No credentials, provider clients,
 // endpoints, scheduler or automatic readiness changes.
 const { createHash } = require('node:crypto');
-const receipts = require('../../services/receipt-history-index');
 const projections = require('../../services/metrics-projection-store');
 const budget = require('../../utils/metrics-read-budget');
 const mapWithConcurrency = require('../../utils/map-with-concurrency');
@@ -48,46 +47,6 @@ async function metricBatch({ firestore, collection, checkpoint, limit, apply = f
   if (apply) await mapWithConcurrency(rows, 4, doc => projections.project(firestore, `${collection}/${doc.id}`, { backfill: true }));
   return { dryRun: !apply, rows: rows.length, estimatedProjectionTransactions: rows.length,
     checkpoint: checkpointFor(collection, rows, snapshot.docs.length > size, position), readinessChanged: false };
-}
-
-async function receiptBatch({ db, collection = 'receipts', checkpoint, limit, apply = false, authorization,
-  resolveScope, assertRecord, ownerOf, timestampOf }) {
-  if (!['receipts', 'sandbox_receipts'].includes(collection)) throw new Error('Unsupported receipt migration source');
-  assertWrite(apply, authorization);
-  if (apply && !receipts.enabledWrites()) throw new Error('Receipt shadow writers must be enabled before backfill');
-  if (apply && receipts.enabledReads()) throw new Error('Disable receipt readers during backfill');
-  const position = cursorFor(checkpoint, collection); const size = limitOf(limit);
-  let query = db.ref(collection).orderByKey();
-  if (position) query = query.startAfter(position);
-  const snapshot = await query.limitToFirst(size + 1).once('value');
-  const raw = snapshot.val() || {};
-  budget.assertPayload(raw, Object.keys(raw).length, size + 1);
-  const ordered = []; snapshot.forEach(child => { ordered.push([child.key, child.val()]); });
-  const entries = ordered.slice(0, size);
-  const options = { ownerOf, timestampOf };
-  await mapWithConcurrency(entries, 4, async ([id, original]) => {
-    if (original.rideId && String(original.rideId) !== id) throw new Error('Canonical receipt ID mismatch requires reconciliation');
-    const receipt = { ...original, rideId: id };
-    const scope = resolveScope(receipt);
-    if (scope.collections.receipts !== collection) throw new Error('Receipt migration namespace mismatch');
-    assertRecord(receipt, scope);
-    const updates = receipts.buildUpdates(receipt, scope, options);
-    if (!Object.keys(updates).length) throw new Error('Receipt owner missing; reconciliation required');
-    for (const role of ['customer', 'driver']) {
-      const owner = ownerOf(receipt, role);
-      if (owner) updates[`${receipts.ownerBase(scope, role, owner)}/meta/ready`] = false;
-    }
-    if (!apply) return;
-    const source = db.ref(`${collection}/${id}`);
-    if (digest((await source.once('value')).val()) !== digest(original)) throw new Error('Receipt changed before migration; retry this batch');
-    await receipts.claimIdentity(db, receipt, scope, options);
-    // Derived keys only; original financial receipt/reference is untouched.
-    await db.ref().update(updates);
-    if (digest((await source.once('value')).val()) !== digest(original)) throw new Error('Receipt changed during migration; readiness remains false');
-  });
-  return { dryRun: !apply, rows: entries.length, estimatedApply: { canonicalReads: entries.length * 2,
-    identityTransactions: entries.length, projectionRootUpdates: entries.length },
-    checkpoint: checkpointFor(collection, entries.map(([id]) => ({ id })), Object.keys(raw).length > size, position), readinessChanged: apply ? 'invalidated-only' : false };
 }
 
 async function directoryBatch({ firestore, checkpoint, limit }) {
@@ -150,4 +109,4 @@ function parityAccumulator() {
     result() { return { count, xor: xor.toString(16).padStart(64, '0'), sum: sum.toString(16).padStart(64, '0') }; } };
 }
 
-module.exports = { metricBatch, receiptBatch, directoryBatch, regionalBatch, parityAccumulator, normalizeRealtimeValue, cursorFor, digest };
+module.exports = { metricBatch, directoryBatch, regionalBatch, parityAccumulator, normalizeRealtimeValue, cursorFor, digest };

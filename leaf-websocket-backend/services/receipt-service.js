@@ -13,12 +13,9 @@ const { logger } = require('../utils/logger');
 const crypto = require('crypto');
 const PDFDocument = require('pdfkit');
 const PaymentService = require('./payment-service');
-const receiptHistoryIndex = require('./receipt-history-index');
 const receiptFirestoreStore = require('./receipt-firestore-store');
 const rideAnnotationStore = require('./ride-annotation-store');
-const { mirrorWritesEnabled } = require('./rtdb-root-router');
 // Legacy (pre-index) listing reads at most this many recent receipts.
-const LEGACY_RECEIPT_WINDOW = 200;
 const { acceptedContext } = require('./driver-intro-fee-service');
 const {
     resolveFinancialContext
@@ -799,16 +796,12 @@ class ReceiptService {
     /**
      * Busca e gera recibo para uma corrida específica
      */
-    async getReceiptByRideId(rideId, redis, firebaseDb, scopeInput = {}) {
+    async getReceiptByRideId(rideId, redis, scopeInput = {}) {
         try {
             logger.info(`🔍 Buscando dados da corrida: ${rideId}`);
 
             const persistenceScope = resolveRidePersistenceScope(scopeInput);
-            const storedReceipt = await this.getReceiptFromFirestore(
-                rideId,
-                firebaseDb,
-                persistenceScope
-            );
+            const storedReceipt = await this.getReceiptFromFirestore(rideId, persistenceScope);
             if (storedReceipt) {
                 return storedReceipt;
             }
@@ -889,7 +882,6 @@ class ReceiptService {
      * Não consulta nem regenera dados a partir de bookings.
      */
     async listStoredReceiptsByUser({
-        firebaseDb,
         userId,
         role = 'customer',
         financialContext,
@@ -898,7 +890,8 @@ class ReceiptService {
         cursor = null,
         pagination = null
     } = {}) {
-        if (!firebaseDb) {
+        const firestore = this.getReceiptFirestore();
+        if (!firestore) {
             const error = new Error('Serviço de database não disponível');
             error.code = 'RECEIPT_DATABASE_UNAVAILABLE';
             error.statusCode = 503;
@@ -933,118 +926,26 @@ class ReceiptService {
         const ownerPath = role === 'driver' ? 'driver/id' : 'customer/id';
         const safeLimit = Math.min(50, Math.max(1, Number.parseInt(limit, 10) || 10));
         const safeOffset = Math.max(0, Number.parseInt(offset, 10) || 0);
-        if (receiptFirestoreStore.enabledReads()) {
-            return receiptFirestoreStore.listPage(this.getReceiptFirestore(), {
-                scope: persistenceScope, role, userId: normalizedUserId, limit: safeLimit,
-                offset: safeOffset, cursor, assertRecord: assertStoredRecordMatchesScope,
-                ownerOf: this.resolveStoredReceiptOwnerId.bind(this)
-            });
-        }
-        if (pagination === 'cursor' || cursor) {
-            const indexed = await receiptHistoryIndex.readPage({ db: firebaseDb, scope: persistenceScope,
-                role, userId: normalizedUserId, limit: safeLimit, cursor,
-                ownerOf: this.resolveStoredReceiptOwnerId.bind(this), assertRecord: assertStoredRecordMatchesScope });
-            if (indexed) {
-                if (safeOffset) throw Object.assign(new Error('Atualize o histórico para usar paginação por cursor'), { statusCode: 409 });
-                return indexed;
-            }
-        }
-        if (safeOffset >= LEGACY_RECEIPT_WINDOW) {
-            throw Object.assign(new Error('Histórico requer migração para continuar'), { statusCode: 503, code: 'RECEIPT_HISTORY_MIGRATION_REQUIRED' });
-        }
-        // Equal owner values are ordered by key, and ride keys carry their
-        // creation time (booking_<ms>_...). The last keys are the newest rides,
-        // so the legacy path serves the recent window instead of failing once a
-        // driver passes the window. Older pages wait for the cursor index.
-        const snapshot = await firebaseDb
-            .ref(persistenceScope.collections.receipts)
-            .orderByChild(ownerPath)
-            .equalTo(normalizedUserId)
-            .limitToLast(LEGACY_RECEIPT_WINDOW + 1)
-            .once('value');
-
-        const rawReceipts = snapshot.val() || {};
-        if (Buffer.byteLength(JSON.stringify(rawReceipts)) > 2 * 1024 * 1024) {
-            throw Object.assign(new Error('Histórico requer migração para continuar'), { statusCode: 503, code: 'RECEIPT_HISTORY_MIGRATION_REQUIRED' });
-        }
-        const windowTruncated = Object.keys(rawReceipts).length > LEGACY_RECEIPT_WINDOW;
-
-        const sortedReceipts = Object.entries(rawReceipts)
-            .map(([rideId, receipt]) => ({
-                ...(receipt || {}),
-                rideId: receipt?.rideId || rideId
-            }))
-            .filter((receipt) => {
-                if (this.resolveStoredReceiptOwnerId(receipt, role) !== normalizedUserId) {
-                    return false;
-                }
-
-                // Legado operacional permanece legível apenas dentro de `receipts`.
-                // Sandbox exige o mesmo contexto selado, nunca apenas o mesmo namespace.
-                try {
-                    assertStoredRecordMatchesScope(receipt, persistenceScope);
-                    return true;
-                } catch (_error) {
-                    return false;
-                }
-            })
-            .sort((left, right) =>
-                this.resolveStoredReceiptTimestamp(right) - this.resolveStoredReceiptTimestamp(left)
-            );
-        // The extra record only signals that older receipts exist.
-        const receipts = windowTruncated ? sortedReceipts.slice(0, LEGACY_RECEIPT_WINDOW) : sortedReceipts;
-        const page = receipts.slice(safeOffset, safeOffset + safeLimit);
-
-        return {
-            receipts: page,
-            // Unknown beyond the recent window; clients treat null as unknown.
-            total: windowTruncated ? null : receipts.length,
-            limit: safeLimit,
-            offset: safeOffset,
-            nextOffset: safeOffset + page.length,
-            hasMore: safeOffset + page.length < receipts.length,
-            ...(windowTruncated ? { historyWindow: 'recent', historyWindowSize: LEGACY_RECEIPT_WINDOW } : {}),
-            nextCursor: null,
-            pagination: 'legacy-offset',
-            financialNamespace: requestedContext.namespace
-        };
+        return receiptFirestoreStore.listPage(firestore, {
+            scope: persistenceScope, role, userId: normalizedUserId, limit: safeLimit,
+            offset: safeOffset, cursor, assertRecord: assertStoredRecordMatchesScope,
+            ownerOf: this.resolveStoredReceiptOwnerId.bind(this)
+        });
     }
 
     getReceiptFirestore() {
-        return require('../firebase-config').getFirestore();
+        return require('../firebase-config').getFirestore?.() || null;
     }
 
     /**
-     * Copia o recibo já salvo no RTDB para o Firestore (saída do RTDB, etapa 1).
-     * O RTDB segue como fonte: uma falha aqui não desfaz nem bloqueia o recibo;
-     * a cópia do histórico com conferência repara o que faltar.
-     */
-    async mirrorReceiptToFirestoreStore(receiptData, persistenceScope) {
-        if (!receiptFirestoreStore.enabledWrites()) return { mirrored: false, reason: 'disabled' };
-        try {
-            return await receiptFirestoreStore.mirror(this.getReceiptFirestore(), receiptData, persistenceScope, {
-                ownerOf: this.resolveStoredReceiptOwnerId.bind(this),
-                timestampOf: this.resolveStoredReceiptTimestamp.bind(this)
-            });
-        } catch (error) {
-            logger.warn('⚠️ Recibo não espelhado no Firestore; será reparado pela cópia do histórico', {
-                rideId: receiptData?.rideId || null,
-                code: error?.code || null,
-                error: error?.message
-            });
-            return { mirrored: false, reason: error?.code || 'mirror_failed' };
-        }
-    }
-
-    /**
-     * Salva recibo no Firestore
+     * Salva recibo no Firestore (única cópia) e o ponteiro na anotação da corrida
      * @param {Object} receipt - Recibo gerado
-     * @param {Object} firebaseDb - Instância do Firebase Database
      * @returns {Promise<boolean>} - true se salvo com sucesso
      */
-    async saveReceiptToFirestore(receipt, firebaseDb) {
+    async saveReceiptToFirestore(receipt) {
         try {
-            if (!firebaseDb) {
+            const firestore = this.getReceiptFirestore();
+            if (!firestore) {
                 throw new ReceiptPersistenceError(
                     'Firebase Database não disponível para salvar recibo',
                     { rideId: receipt?.rideId || null, stage: 'database_unavailable' }
@@ -1083,58 +984,19 @@ class ReceiptService {
                 financialContextId: financialContext.contextId
             };
 
-            // RTDB retirement: with the RTDB mirror off, the Firestore receipt
-            // store is the only copy, so a failed write fails the save. The
-            // pointer on the ride goes to `bookings`, which the router serves
-            // from Firestore (ride annotations).
-            if (receiptFirestoreStore.enabledReads() && !mirrorWritesEnabled()) {
-                await receiptFirestoreStore.mirror(this.getReceiptFirestore(), receiptData, persistenceScope, {
-                    ownerOf: this.resolveStoredReceiptOwnerId.bind(this),
-                    timestampOf: this.resolveStoredReceiptTimestamp.bind(this)
-                });
-                await rideAnnotationStore.updateAnnotation(
-                    this.getReceiptFirestore(),
-                    persistenceScope.collections.bookings,
-                    receipt.rideId,
-                    { receipt: receiptPointer }
-                );
-                logger.info(`✅ Recibo salvo no Firestore: ${receipt.receiptId}`);
-                return true;
-            }
-
-            if (receiptHistoryIndex.enabledWrites()) {
-                const options = { ownerOf: this.resolveStoredReceiptOwnerId.bind(this), timestampOf: this.resolveStoredReceiptTimestamp.bind(this) };
-                const previous = (await firebaseDb.ref(`${persistenceScope.collections.receipts}/${receipt.rideId}`).once('value')).val();
-                if (previous) {
-                    assertStoredRecordMatchesScope(previous, persistenceScope);
-                    for (const role of ['customer', 'driver']) {
-                        if (options.ownerOf(previous, role) !== options.ownerOf(receiptData, role)) {
-                            throw new Error('Alteração de proprietário do recibo requer conciliação');
-                        }
-                    }
-                }
-                await receiptHistoryIndex.claimIdentity(firebaseDb, receiptData, persistenceScope, options);
-                await firebaseDb.ref().update({
-                    [`${persistenceScope.collections.receipts}/${receipt.rideId}`]: receiptData,
-                    [`${persistenceScope.collections.bookings}/${receipt.rideId}/receipt`]: receiptPointer,
-                    ...receiptHistoryIndex.buildUpdates(receiptData, persistenceScope, options)
-                });
-                await this.mirrorReceiptToFirestoreStore(receiptData, persistenceScope);
-                return true;
-            }
-
-            // Salvar na coleção receipts
-            await firebaseDb
-                .ref(`${persistenceScope.collections.receipts}/${receipt.rideId}`)
-                .set(receiptData);
-
-            // Também salvar referência na corrida para fácil acesso
-            await firebaseDb
-                .ref(`${persistenceScope.collections.bookings}/${receipt.rideId}/receipt`)
-                .set(receiptPointer);
-
+            // The Firestore receipt store is the only copy: a failed write fails
+            // the save. The ride annotation keeps the pointer to the receipt.
+            await receiptFirestoreStore.write(firestore, receiptData, persistenceScope, {
+                ownerOf: this.resolveStoredReceiptOwnerId.bind(this),
+                timestampOf: this.resolveStoredReceiptTimestamp.bind(this)
+            });
+            await rideAnnotationStore.updateAnnotation(
+                firestore,
+                persistenceScope.collections.bookings,
+                receipt.rideId,
+                { receipt: receiptPointer }
+            );
             logger.info(`✅ Recibo salvo no Firestore: ${receipt.receiptId}`);
-            await this.mirrorReceiptToFirestoreStore(receiptData, persistenceScope);
             return true;
 
         } catch (error) {
@@ -1153,30 +1015,17 @@ class ReceiptService {
     /**
      * Busca recibo do Firestore
      * @param {string} rideId - ID da corrida
-     * @param {Object} firebaseDb - Instância do Firebase Database
      * @returns {Promise<Object|null>} - Recibo encontrado ou null
      */
-    async getReceiptFromFirestore(rideId, firebaseDb, scopeInput = {}) {
+    async getReceiptFromFirestore(rideId, scopeInput = {}) {
         try {
-            if (!firebaseDb && !receiptFirestoreStore.enabledReads()) {
+            const firestore = this.getReceiptFirestore();
+            if (!firestore) {
                 return null;
             }
 
             const persistenceScope = resolveRidePersistenceScope(scopeInput);
-            let value = null;
-            if (receiptFirestoreStore.enabledReads()) {
-                value = await receiptFirestoreStore.getByRideId(this.getReceiptFirestore(), persistenceScope, rideId);
-                // Until RTDB writes stop, a receipt missing here still falls back.
-                if (!value && !mirrorWritesEnabled()) return null;
-                if (!value) logger.warn('⚠️ Recibo ausente no Firestore; lendo do RTDB', { rideId });
-            }
-            if (!value) {
-                if (!firebaseDb) return null;
-                const snapshot = await firebaseDb
-                    .ref(`${persistenceScope.collections.receipts}/${rideId}`)
-                    .once('value');
-                value = snapshot.val();
-            }
+            const value = await receiptFirestoreStore.getByRideId(firestore, persistenceScope, rideId);
             if (!value) return null;
 
             const financialContext = assertStoredRecordMatchesScope(value, persistenceScope);
@@ -1201,10 +1050,9 @@ class ReceiptService {
      * Gera e salva recibo completo
      * @param {string} rideId - ID da corrida
      * @param {Object} rideData - Dados da corrida
-     * @param {Object} firebaseDb - Instância do Firebase Database (opcional)
      * @returns {Promise<Object>} - Recibo gerado
      */
-    async generateAndSaveReceipt(rideId, rideData, firebaseDb = null) {
+    async generateAndSaveReceipt(rideId, rideData) {
         try {
             // Gerar recibo
             const receipt = await this.generateReceipt(rideId, rideData);
@@ -1217,7 +1065,7 @@ class ReceiptService {
 
             // O método possui semântica de geração + persistência: ausência/falha de
             // database deve propagar erro tipado, nunca parecer sucesso parcial.
-            await this.saveReceiptToFirestore(receipt, firebaseDb);
+            await this.saveReceiptToFirestore(receipt);
 
             Object.defineProperty(receipt, '__telemetry', {
                 value: receiptTelemetry,

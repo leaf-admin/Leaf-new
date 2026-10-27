@@ -7,7 +7,6 @@
 const express = require('express');
 const router = express.Router();
 const ReceiptService = require('../services/receipt-service');
-const firebaseConfig = require('../firebase-config');
 const rideAnnotationStore = require('../services/ride-annotation-store');
 const {
     resolveUserPersistenceScope,
@@ -28,18 +27,6 @@ const RECEIPT_ADMIN_ROLES = ['admin', 'manager', 'super-admin', 'support', 'deve
 
 function normalizeId(value) {
     return String(value || '').trim();
-}
-
-function resolveRealtimeDb(req) {
-    if (req.app?.locals?.firebaseDb) {
-        return req.app.locals.firebaseDb;
-    }
-
-    if (typeof firebaseConfig?.getRealtimeDB === 'function') {
-        return firebaseConfig.getRealtimeDB();
-    }
-
-    return null;
 }
 
 function collectRideOwnerIds(rideData = {}) {
@@ -243,7 +230,6 @@ router.get('/api/receipts/:rideId', authenticateSupport, async (req, res) => {
         const receipt = await receiptService.getReceiptByRideId(
             rideId,
             req.app.locals.redis,
-            resolveRealtimeDb(req),
             persistenceScope.financialContext
         );
 
@@ -344,17 +330,8 @@ router.get('/api/receipts/user/:userId', authenticateSupport, requireReceiptUser
 
         logger.info(`📋 Listando recibos do usuário: ${userId} (${role})`);
 
-        const firebaseDb = resolveRealtimeDb(req);
-        if (!firebaseDb) {
-            return res.status(503).json({
-                success: false,
-                error: 'Serviço de database não disponível'
-            });
-        }
-
         const persistenceScope = await resolveAuthenticatedReceiptScope(req, userId);
         const result = await receiptService.listStoredReceiptsByUser({
-            firebaseDb,
             userId,
             role,
             financialContext: persistenceScope.financialContext,
@@ -399,7 +376,6 @@ router.get('/api/receipts/:rideId/map', authenticateSupport, async (req, res) =>
         logger.info(`🗺️ Solicitação de mapa para corrida: ${rideId}`);
 
         // Buscar dados da corrida
-        const firebaseDb = resolveRealtimeDb(req);
         const redis = req.app.locals.redis;
         const persistenceScope = await resolveAuthenticatedReceiptScope(req);
 
