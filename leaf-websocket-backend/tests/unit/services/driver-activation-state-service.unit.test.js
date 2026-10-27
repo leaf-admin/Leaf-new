@@ -1,5 +1,5 @@
-// users/driver_activation are read from native Firestore; the tree adapter
-// serves them from the same path fixtures as the router-backed reads.
+// users, driver_activation and the vehicle collections are read from native
+// Firestore; the tree adapter serves them from the RTDB-path fixtures.
 let mockCurrentFirestore = null;
 jest.mock('../../../firebase-config', () => ({
   getRealtimeDB: () => null,
@@ -12,31 +12,19 @@ const {
   DRIVER_ACTIVATION_STATES
 } = require('../../../services/driver-activation-state-service');
 
+// Installs the Firestore for one resolution; returns the paths it read.
 function createMockDb(dataByPath = {}, errorPaths = []) {
   const failingPaths = new Set(errorPaths);
+  const reads = [];
   mockCurrentFirestore = createTreeFirestore({
     read(path) {
+      reads.push(path);
       if (failingPaths.has(path)) throw new Error(`read_failed:${path}`);
       return dataByPath[path] ? JSON.parse(JSON.stringify(dataByPath[path])) : null;
     },
     write() {}
   });
-
-  return {
-    ref(path) {
-      return {
-        once: async () => {
-          if (failingPaths.has(path)) {
-            throw new Error(`read_failed:${path}`);
-          }
-
-          return {
-            val: () => dataByPath[path] || null
-          };
-        }
-      };
-    }
-  };
+  return { reads };
 }
 
 function createApprovedVehicle(overrides = {}) {
@@ -88,7 +76,7 @@ function createApprovedActivation(overrides = {}) {
 describe('driver-activation-state-service', () => {
   it('nao libera motorista aprovado no fluxo legado sem documentos canonicos', async () => {
     const driverId = 'driver_legacy_approved';
-    const db = createMockDb({
+    createMockDb({
       [`user_vehicles/${driverId}`]: {
         vehicleA: {
           id: 'vehicleA',
@@ -102,7 +90,6 @@ describe('driver-activation-state-service', () => {
 
     const result = await resolveDriverActivationState({
       driverId,
-      db,
       activationNode: {},
       userData: {
         approved: true,
@@ -121,9 +108,9 @@ describe('driver-activation-state-service', () => {
 
   it('classifica conta nova sem KYC como pre-cadastro, sem confundir ausencia com rejeicao', async () => {
     const driverId = 'driver_auth_only';
+    createMockDb();
     const result = await resolveDriverActivationState({
       driverId,
-      db: createMockDb(),
       activationNode: {},
       userData: {}
     });
@@ -144,7 +131,7 @@ describe('driver-activation-state-service', () => {
 
   it('mantem bloqueio quando existe documento rejeitado mesmo com approved=true', async () => {
     const driverId = 'driver_rejected_doc';
-    const db = createMockDb({
+    createMockDb({
       [`user_vehicles/${driverId}`]: {
         vehicleA: {
           id: 'vehicleA',
@@ -158,7 +145,6 @@ describe('driver-activation-state-service', () => {
 
     const result = await resolveDriverActivationState({
       driverId,
-      db,
       activationNode: {
         documents: {
           cnh: { status: 'failed' }
@@ -186,7 +172,7 @@ describe('driver-activation-state-service', () => {
     'mantem KYC terminal %s como rejeicao mesmo com documentos e veiculo aprovados',
     async (_label, kycData, expectedStatus) => {
       const driverId = `driver_kyc_${expectedStatus}`;
-      const db = createMockDb({
+      createMockDb({
         [`user_vehicles/${driverId}`]: {
           vehicleA: createApprovedVehicle()
         },
@@ -195,7 +181,6 @@ describe('driver-activation-state-service', () => {
 
       const result = await resolveDriverActivationState({
         driverId,
-        db,
         activationNode: createApprovedActivation(),
         userData: {
           approved: true,
@@ -230,7 +215,7 @@ describe('driver-activation-state-service', () => {
     'mantem KYC nao terminal %s em analise e impede veiculo, liveness ou ACTIVE',
     async (_label, kycData, expectedStatus) => {
       const driverId = `driver_kyc_non_terminal_${expectedStatus}`;
-      const db = createMockDb({
+      createMockDb({
         [`user_vehicles/${driverId}`]: {
           vehicleA: createApprovedVehicle()
         },
@@ -239,7 +224,6 @@ describe('driver-activation-state-service', () => {
 
       const result = await resolveDriverActivationState({
         driverId,
-        db,
         activationNode: createApprovedActivation(),
         userData: {
           status: 'approved',
@@ -265,7 +249,7 @@ describe('driver-activation-state-service', () => {
 
   it('permite iniciar somente a revalidacao facial com flag canonica e gates anteriores aprovados', async () => {
     const driverId = 'driver_kyc_reverification_required';
-    const db = createMockDb({
+    createMockDb({
       [`user_vehicles/${driverId}`]: {
         vehicleA: createApprovedVehicle()
       },
@@ -274,7 +258,6 @@ describe('driver-activation-state-service', () => {
 
     const result = await resolveDriverActivationState({
       driverId,
-      db,
       activationNode: createApprovedActivation(),
       userData: {
         status: 'approved',
@@ -304,13 +287,12 @@ describe('driver-activation-state-service', () => {
 
   it('nao permite iniciar a revalidacao antes da aprovacao canonica do veiculo', async () => {
     const driverId = 'driver_kyc_reverification_vehicle_pending';
-    const db = createMockDb({
+    createMockDb({
       [`user_vehicles/${driverId}`]: {}
     });
 
     const result = await resolveDriverActivationState({
       driverId,
-      db,
       activationNode: createApprovedActivation(),
       userData: {
         status: 'approved',
@@ -328,13 +310,12 @@ describe('driver-activation-state-service', () => {
 
   it('expõe a identidade normalizada do CRLV sem liberar operação sem veículo aprovado', async () => {
     const driverId = 'driver_crlv_identity';
-    const db = createMockDb({
+    createMockDb({
       [`user_vehicles/${driverId}`]: {}
     });
 
     const result = await resolveDriverActivationState({
       driverId,
-      db,
       activationNode: {
         documents: {
           cnh: { status: 'approved' },
@@ -378,7 +359,7 @@ describe('driver-activation-state-service', () => {
 
   it('nao avanca para liveness enquanto o CRLV nao estiver aprovado', async () => {
     const driverId = 'driver_crlv_in_review';
-    const db = createMockDb({
+    createMockDb({
       [`user_vehicles/${driverId}`]: {
         vehicleA: createApprovedVehicle()
       },
@@ -387,7 +368,6 @@ describe('driver-activation-state-service', () => {
 
     const result = await resolveDriverActivationState({
       driverId,
-      db,
       activationNode: createApprovedActivation({
         documents: {
           crlv: {
@@ -415,7 +395,7 @@ describe('driver-activation-state-service', () => {
 
   it('nao avanca para liveness com veiculo aprovado mas inativo', async () => {
     const driverId = 'driver_vehicle_inactive';
-    const db = createMockDb({
+    createMockDb({
       [`user_vehicles/${driverId}`]: {
         vehicleA: createApprovedVehicle({ isActive: false })
       }
@@ -423,7 +403,6 @@ describe('driver-activation-state-service', () => {
 
     const result = await resolveDriverActivationState({
       driverId,
-      db,
       activationNode: createApprovedActivation(),
       userData: { kycStatus: 'approved' }
     });
@@ -441,7 +420,7 @@ describe('driver-activation-state-service', () => {
 
   it('nao avanca para liveness sem identidade completa do veiculo', async () => {
     const driverId = 'driver_vehicle_identity_incomplete';
-    const db = createMockDb({
+    createMockDb({
       [`user_vehicles/${driverId}`]: {
         vehicleA: createApprovedVehicle({ color: undefined })
       }
@@ -449,7 +428,6 @@ describe('driver-activation-state-service', () => {
 
     const result = await resolveDriverActivationState({
       driverId,
-      db,
       activationNode: createApprovedActivation({
         documents: {
           crlv: {
@@ -476,13 +454,12 @@ describe('driver-activation-state-service', () => {
 
   it('nao presume aprovacao de veiculo legado apenas por existir placa no perfil', async () => {
     const driverId = 'driver_legacy_vehicle_without_approval';
-    const db = createMockDb({
+    createMockDb({
       [`user_vehicles/${driverId}`]: {}
     });
 
     const result = await resolveDriverActivationState({
       driverId,
-      db,
       activationNode: createApprovedActivation(),
       userData: {
         kycStatus: 'approved',
@@ -507,13 +484,12 @@ describe('driver-activation-state-service', () => {
 
   it('nao aceita vehicleApproved legado sem entrada canonica em user_vehicles', async () => {
     const driverId = 'driver_legacy_vehicle_approved_bypass';
-    const db = createMockDb({
+    createMockDb({
       [`user_vehicles/${driverId}`]: {}
     });
 
     const result = await resolveDriverActivationState({
       driverId,
-      db,
       activationNode: createApprovedActivation(),
       userData: {
         kycStatus: 'approved',
@@ -540,7 +516,7 @@ describe('driver-activation-state-service', () => {
 
   it('bloqueia quando a placa do CRLV aprovado diverge do veiculo canonico ativo', async () => {
     const driverId = 'driver_crlv_vehicle_plate_mismatch';
-    const db = createMockDb({
+    createMockDb({
       [`user_vehicles/${driverId}`]: {
         vehicleA: createApprovedVehicle()
       },
@@ -553,7 +529,6 @@ describe('driver-activation-state-service', () => {
 
     const result = await resolveDriverActivationState({
       driverId,
-      db,
       activationNode: createApprovedActivation(),
       userData: {
         kycStatus: 'approved',
@@ -574,7 +549,7 @@ describe('driver-activation-state-service', () => {
     'exige status approved exato no CRLV canonico e rejeita %s',
     async (crlvStatus) => {
       const driverId = `driver_crlv_status_${crlvStatus}`;
-      const db = createMockDb({
+      createMockDb({
         [`user_vehicles/${driverId}`]: {
           vehicleA: createApprovedVehicle()
         }
@@ -582,7 +557,6 @@ describe('driver-activation-state-service', () => {
 
       const result = await resolveDriverActivationState({
         driverId,
-        db,
         activationNode: createApprovedActivation({
           documents: {
             crlv: {
@@ -611,7 +585,7 @@ describe('driver-activation-state-service', () => {
 
   it('classifica CRLV ausente como pendente e nao como enviado para analise', async () => {
     const driverId = 'driver_missing_crlv';
-    const db = createMockDb({
+    createMockDb({
       [`user_vehicles/${driverId}`]: {
         vehicleA: createApprovedVehicle()
       }
@@ -619,7 +593,6 @@ describe('driver-activation-state-service', () => {
 
     const result = await resolveDriverActivationState({
       driverId,
-      db,
       activationNode: {
         documents: {
           cnh: { status: 'approved' }
@@ -653,7 +626,7 @@ describe('driver-activation-state-service', () => {
 
   it('vincula o CRLV ao catalogo do veiculo ativo quando o link nao duplica a placa', async () => {
     const driverId = 'driver_catalog_vehicle_match';
-    const db = createMockDb({
+    createMockDb({
       [`user_vehicles/${driverId}`]: {
         vehicleA: createApprovedVehicle({
           plate: undefined,
@@ -670,7 +643,6 @@ describe('driver-activation-state-service', () => {
 
     const result = await resolveDriverActivationState({
       driverId,
-      db,
       activationNode: createApprovedActivation(),
       userData: {
         kycStatus: 'approved',
@@ -693,7 +665,7 @@ describe('driver-activation-state-service', () => {
 
   it('usa identidade do link somente depois de confirmar que o catalogo existe', async () => {
     const driverId = 'driver_link_identity_after_catalog_confirmation';
-    const db = createMockDb({
+    createMockDb({
       [`user_vehicles/${driverId}`]: {
         vehicleA: createApprovedVehicle()
       },
@@ -704,7 +676,6 @@ describe('driver-activation-state-service', () => {
 
     const result = await resolveDriverActivationState({
       driverId,
-      db,
       activationNode: createApprovedActivation(),
       userData: {
         kycStatus: 'approved',
@@ -725,7 +696,7 @@ describe('driver-activation-state-service', () => {
 
   it('falha fechado quando o catalogo do veiculo ativo nao existe', async () => {
     const driverId = 'driver_missing_vehicle_catalog';
-    const db = createMockDb({
+    createMockDb({
       [`user_vehicles/${driverId}`]: {
         vehicleA: createApprovedVehicle()
       }
@@ -733,7 +704,6 @@ describe('driver-activation-state-service', () => {
 
     const result = await resolveDriverActivationState({
       driverId,
-      db,
       activationNode: createApprovedActivation(),
       userData: {
         kycStatus: 'approved',
@@ -757,7 +727,7 @@ describe('driver-activation-state-service', () => {
 
   it('falha fechado quando a leitura do catalogo do veiculo ativo falha', async () => {
     const driverId = 'driver_vehicle_catalog_read_error';
-    const db = createMockDb({
+    createMockDb({
       [`user_vehicles/${driverId}`]: {
         vehicleA: createApprovedVehicle()
       }
@@ -765,7 +735,6 @@ describe('driver-activation-state-service', () => {
 
     const result = await resolveDriverActivationState({
       driverId,
-      db,
       activationNode: createApprovedActivation(),
       userData: {
         kycStatus: 'approved',
@@ -788,7 +757,7 @@ describe('driver-activation-state-service', () => {
 
   it('rejeita link ativo sem vehicleId canonico', async () => {
     const driverId = 'driver_active_link_without_vehicle_id';
-    const db = createMockDb({
+    createMockDb({
       [`user_vehicles/${driverId}`]: {
         legacyLink: createApprovedVehicle({ vehicleId: undefined })
       }
@@ -796,7 +765,6 @@ describe('driver-activation-state-service', () => {
 
     const result = await resolveDriverActivationState({
       driverId,
-      db,
       activationNode: createApprovedActivation(),
       userData: {
         kycStatus: 'approved',
@@ -820,7 +788,7 @@ describe('driver-activation-state-service', () => {
     { label: 'com status pending', status: 'pending' }
   ])('rejeita link legado aprovado apenas por boolean $label', async ({ label, status }) => {
     const driverId = `driver_bool_only_${label.replace(/\s+/g, '_')}`;
-    const db = createMockDb({
+    createMockDb({
       [`user_vehicles/${driverId}`]: {
         vehicleA: createApprovedVehicle({ status })
       },
@@ -829,7 +797,6 @@ describe('driver-activation-state-service', () => {
 
     const result = await resolveDriverActivationState({
       driverId,
-      db,
       activationNode: createApprovedActivation(),
       userData: {
         kycStatus: 'approved',
@@ -862,7 +829,7 @@ describe('driver-activation-state-service', () => {
     }
   ])('$label somente com gate veicular completo', async ({ userData, expectedState, canGoOnline }) => {
     const driverId = `driver_complete_${expectedState.toLowerCase()}`;
-    const db = createMockDb({
+    createMockDb({
       [`user_vehicles/${driverId}`]: {
         vehicleA: createApprovedVehicle()
       },
@@ -871,7 +838,6 @@ describe('driver-activation-state-service', () => {
 
     const result = await resolveDriverActivationState({
       driverId,
-      db,
       activationNode: createApprovedActivation(),
       userData
     });
@@ -888,21 +854,6 @@ describe('driver-activation-state-service', () => {
   });
 
   describe('vehicle id hint', () => {
-    function createTrackingDb(dataByPath) {
-      const reads = [];
-      return {
-        reads,
-        ref(path) {
-          return {
-            once: async () => {
-              reads.push(path);
-              return { val: () => dataByPath[path] || null };
-            }
-          };
-        }
-      };
-    }
-
     // updatedAt is a wall-clock stamp; compare everything else.
     const withoutClock = ({ updatedAt, ...rest }) => rest;
     const driverId = 'driver_hint';
@@ -918,11 +869,10 @@ describe('driver-activation-state-service', () => {
     };
 
     it('reads the hinted vehicle in the first round and gives the same result', async () => {
-      const plainDb = createTrackingDb(data);
-      const hintedDb = createTrackingDb(data);
-
-      const plain = await resolveDriverActivationState({ driverId, db: plainDb });
-      const hinted = await resolveDriverActivationState({ driverId, db: hintedDb, vehicleIdHint: 'vehicleA' });
+      createMockDb(data);
+      const plain = await resolveDriverActivationState({ driverId });
+      const hintedDb = createMockDb(data);
+      const hinted = await resolveDriverActivationState({ driverId, vehicleIdHint: 'vehicleA' });
 
       expect(withoutClock(hinted)).toEqual(withoutClock(plain));
       expect(hintedDb.reads.filter((path) => path === 'vehicles/vehicleA')).toHaveLength(1);
@@ -931,11 +881,10 @@ describe('driver-activation-state-service', () => {
     });
 
     it('ignores a stale hint and reads the active vehicle', async () => {
-      const plainDb = createTrackingDb(data);
-      const hintedDb = createTrackingDb(data);
-
-      const plain = await resolveDriverActivationState({ driverId, db: plainDb });
-      const hinted = await resolveDriverActivationState({ driverId, db: hintedDb, vehicleIdHint: 'vehicleB' });
+      createMockDb(data);
+      const plain = await resolveDriverActivationState({ driverId });
+      const hintedDb = createMockDb(data);
+      const hinted = await resolveDriverActivationState({ driverId, vehicleIdHint: 'vehicleB' });
 
       expect(withoutClock(hinted)).toEqual(withoutClock(plain));
       expect(hintedDb.reads).toContain('vehicles/vehicleA');

@@ -2,6 +2,7 @@ const redisPool = require('../utils/redis-pool');
 const firebaseConfig = require('../firebase-config');
 const { logStructured } = require('../utils/logger');
 const userStore = require('./user-store');
+const vehicleStore = require('./vehicle-store');
 const {
     normalizeOperationalCarType,
     resolveOperationalCarTypeLabel
@@ -220,8 +221,8 @@ class DriverEligibilityService {
             return null;
         }
 
-        const db = firebaseConfig?.getRealtimeDB?.();
-        if (!db) {
+        const firestore = firebaseConfig?.getFirestore?.();
+        if (!firestore) {
             return null;
         }
 
@@ -233,12 +234,12 @@ class DriverEligibilityService {
         });
 
         let userRecord;
-        let userVehiclesSnapshot;
+        let userVehiclesRecord;
         try {
-            [userRecord, userVehiclesSnapshot] = await Promise.race([
+            [userRecord, userVehiclesRecord] = await Promise.race([
                 Promise.all([
-                    userStore.readUser(firebaseConfig?.getFirestore?.(), driverId),
-                    db.ref(`user_vehicles/${driverId}`).once('value')
+                    userStore.readUser(firestore, driverId),
+                    vehicleStore.readVehicleLinks(firestore, driverId)
                 ]),
                 timeoutPromise('user_and_user_vehicles')
             ]);
@@ -253,12 +254,12 @@ class DriverEligibilityService {
             return null;
         }
 
-        if (!userRecord && !userVehiclesSnapshot?.exists?.()) {
+        if (!userRecord && !userVehiclesRecord) {
             return null;
         }
 
         const user = userRecord || {};
-        const userVehicles = userVehiclesSnapshot?.val() || {};
+        const userVehicles = userVehiclesRecord || {};
 
         let activeUserVehicle = null;
         Object.keys(userVehicles).some((userVehicleId) => {
@@ -275,13 +276,10 @@ class DriverEligibilityService {
         let vehicle = null;
         if (activeUserVehicle?.vehicleId) {
             try {
-                const vehicleSnapshot = await Promise.race([
-                    db.ref(`vehicles/${activeUserVehicle.vehicleId}`).once('value'),
+                vehicle = await Promise.race([
+                    vehicleStore.readVehicle(firestore, activeUserVehicle.vehicleId),
                     timeoutPromise('vehicle')
                 ]);
-                if (vehicleSnapshot?.exists()) {
-                    vehicle = vehicleSnapshot.val();
-                }
             } catch (error) {
                 logStructured('warn', 'DriverEligibility: timeout/falha ao consultar veículo no Firebase (fallback local)', {
                     service: 'driver-eligibility-service',

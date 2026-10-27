@@ -460,7 +460,6 @@ describe('driver activation routes document upload storage boundary', () => {
       })
     );
     expect(mockCommitDocumentSubmissionState).toHaveBeenCalledWith(expect.objectContaining({
-      db: mockRealtimeDb,
       driverId: 'driver-1',
       documentType: 'crlv',
       activationDocument: expect.objectContaining({

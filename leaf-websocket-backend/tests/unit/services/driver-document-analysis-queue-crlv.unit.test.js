@@ -173,7 +173,12 @@ function createFirestore(db) {
   return {
     collection: name => {
       if (!COLLECTION_ROOTS[name]) throw new Error(`unexpected collection ${name}`);
-      return { doc: id => doc(name, id) };
+      return {
+        doc: id => doc(name, id),
+        get: async () => ({
+          docs: Object.keys(db.read(COLLECTION_ROOTS[name]) || {}).map(id => ({ id, ...readDoc({ collection: name, id }) }))
+        })
+      };
     },
     runTransaction(work) {
       const run = chain.then(async () => {
@@ -500,7 +505,6 @@ describe('driver-document-analysis-queue CRLV persistence', () => {
       documentUpdate['users/driver_1/documents/crlv'].extractedData
     );
     expect(driverApplicationService.syncDriverApplication).toHaveBeenCalledWith('driver_1', {
-      db,
       includeRatings: false
     });
   });
@@ -702,7 +706,6 @@ describe('driver-document-analysis-queue CRLV persistence', () => {
     });
 
     const uploadPromise = commitDocumentSubmissionState({
-      db,
       driverId: 'driver_1',
       documentType: 'cnh',
       activationDocument: currentDocument('cnh', uploadedMetadata),
@@ -710,7 +713,6 @@ describe('driver-document-analysis-queue CRLV persistence', () => {
       updatedAt: '2026-07-21T11:00:00.000Z'
     });
     const staleReviewPromise = runWithCurrentDocumentBinding({
-      db,
       driverId: 'driver_1',
       documentType: 'cnh',
       expectedBinding: reviewedMetadata,
@@ -764,7 +766,6 @@ describe('driver-document-analysis-queue CRLV persistence', () => {
       metadata: currentMetadata
     });
     const staleReviewPromise = runWithCurrentDocumentBinding({
-      db,
       driverId: 'driver_1',
       documentType: 'crlv',
       expectedBinding: reviewedMetadata,

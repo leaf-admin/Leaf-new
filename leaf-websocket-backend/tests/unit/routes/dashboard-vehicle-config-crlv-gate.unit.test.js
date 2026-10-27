@@ -33,62 +33,77 @@ let mockVehicleReadError = null;
 let mockActiveTripId = null;
 let mockActiveTripReadError = null;
 
-function snapshot(value, exists = value !== null && value !== undefined) {
-  return {
-    exists: () => exists,
-    val: () => value,
-  };
-}
+// Native Firestore records, by the RTDB path each collection used to serve.
+const mockReadPath = jest.fn((path) => {
+  if (path === 'users/driver-1') {
+    return { approved: true, carType: 'Leaf Plus' };
+  }
+  if (path === 'user_vehicles/driver-1') {
+    return {
+      'link-1': {
+        id: 'link-1',
+        vehicleId: 'vehicle-1',
+        status: 'pending',
+        approved: false,
+        isActive: false,
+      },
+    };
+  }
+  if (path === 'driver_activation/driver-1') {
+    if (mockCrlvReadError) throw mockCrlvReadError;
+    return mockCrlvStatus
+      ? { documents: { crlv: { status: mockCrlvStatus, data: mockCrlvPlate ? { plate: mockCrlvPlate } : {} } } }
+      : null;
+  }
+  if (path === 'vehicles/vehicle-1') {
+    if (mockVehicleReadError) throw mockVehicleReadError;
+    return {
+      plate: mockVehiclePlate,
+      brand: 'Nissan',
+      model: 'Leaf',
+      color: 'BRANCO',
+      year: 2025,
+      category: 'plus',
+    };
+  }
+  return null;
+});
 
-const mockRef = jest.fn((path) => ({
-  once: jest.fn(async () => {
-    if (path === 'user_vehicles/driver-1') {
-      return snapshot({
-        'link-1': {
-          id: 'link-1',
-          vehicleId: 'vehicle-1',
-          status: 'pending',
-          approved: false,
-          isActive: false,
+// Each committed transaction reaches mockRootUpdate as the RTDB-style
+// multi-path update ({ 'root/key/field': value }) before it applies.
+const mockFirestore = (() => {
+  const { DEFAULT_COLLECTIONS } = require('../../helpers/rtdb-tree-firestore');
+  const { FieldValue } = require('@google-cloud/firestore');
+  const docSnapshot = (name, id) => {
+    const value = mockReadPath(`${DEFAULT_COLLECTIONS[name]}/${id}`);
+    return { id, exists: value !== null, data: () => value };
+  };
+  const ref = (name, id) => ({ name, id, get: async () => docSnapshot(name, id) });
+  return {
+    collection: (name) => ({ doc: (id) => ref(name, id) }),
+    runTransaction: async (work) => {
+      const updates = {};
+      await work({
+        get: async (docRef) => docSnapshot(docRef.name, docRef.id),
+        set: (docRef, data, options = {}) => {
+          const base = `${DEFAULT_COLLECTIONS[docRef.name]}/${docRef.id}`;
+          if (!options.mergeFields) {
+            updates[base] = data;
+            return;
+          }
+          for (const field of options.mergeFields) {
+            const value = field.segments.reduce((cursor, segment) => cursor?.[segment], data);
+            updates[`${base}/${field.segments.join('/')}`] = value?.isEqual?.(FieldValue.delete()) ? null : value;
+          }
         },
       });
-    }
-    if (path === 'driver_activation/driver-1/documents/crlv') {
-      if (mockCrlvReadError) throw mockCrlvReadError;
-      return snapshot({
-        status: mockCrlvStatus,
-        data: mockCrlvPlate ? { plate: mockCrlvPlate } : {},
-      }, Boolean(mockCrlvStatus));
-    }
-    if (path === 'vehicles/vehicle-1') {
-      if (mockVehicleReadError) throw mockVehicleReadError;
-      return snapshot({
-        plate: mockVehiclePlate,
-        brand: 'Nissan',
-        model: 'Leaf',
-        color: 'BRANCO',
-        year: 2025,
-        category: 'plus',
-      });
-    }
-    return snapshot(null, false);
-  }),
-  update: path === undefined ? mockRootUpdate : jest.fn(),
-}));
-
-const mockDb = { ref: mockRef };
-
-const mockUsers = { 'driver-1': { approved: true, carType: 'Leaf Plus' } };
-const mockFirestore = {
-  collection: () => ({
-    doc: (id) => ({
-      get: async () => ({ exists: Boolean(mockUsers[id]), data: () => mockUsers[id] }),
-    }),
-  }),
-};
+      if (Object.keys(updates).length) await mockRootUpdate(updates);
+    },
+  };
+})();
 
 jest.mock('../../../firebase-config', () => ({
-  getRealtimeDB: jest.fn(() => mockDb),
+  getRealtimeDB: jest.fn(),
   getFirestore: jest.fn(() => mockFirestore),
 }));
 
@@ -223,7 +238,7 @@ describe('dashboard vehicle configuration canonical CRLV gate', () => {
     const response = await configureVehicle({ setActive: true, vehicleStatus: 'pending' });
 
     expect(response.status).toBe(200);
-    expect(mockRef).not.toHaveBeenCalledWith('driver_activation/driver-1/documents/crlv');
+    expect(mockReadPath).not.toHaveBeenCalledWith('driver_activation/driver-1');
     expect(response.body.data).toMatchObject({
       setActive: false,
       requestedSetActive: true,
@@ -383,7 +398,7 @@ describe('dashboard vehicle configuration canonical CRLV gate', () => {
     });
 
     expect(response.status).toBe(200);
-    expect(mockRef).not.toHaveBeenCalledWith('driver_activation/driver-1/documents/crlv');
+    expect(mockReadPath).not.toHaveBeenCalledWith('driver_activation/driver-1');
     expect(mockRootUpdate).toHaveBeenCalledWith(expect.objectContaining({
       'user_vehicles/driver-1/link-1/isActive': false,
       'user_vehicles/driver-1/link-1/status': 'pending',
@@ -429,7 +444,7 @@ describe('dashboard vehicle configuration canonical CRLV gate', () => {
     });
 
     expect(response.status).toBe(200);
-    expect(mockRef).not.toHaveBeenCalledWith('driver_activation/driver-1/documents/crlv');
+    expect(mockReadPath).not.toHaveBeenCalledWith('driver_activation/driver-1');
     expect(response.body.data).toMatchObject({
       setActive: false,
       requestedSetActive: false,

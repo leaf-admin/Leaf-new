@@ -109,6 +109,7 @@ const {
 
 const driverDocumentStore = require('../../services/driver-document-store');
 const userStore = require('../../services/user-store');
+const vehicleStore = require('../../services/vehicle-store');
 
 // Firebase integration
 let firebaseConfig = null;
@@ -2624,6 +2625,7 @@ module.exports = {
   adjustDocumentIndexCounters,
   getDocumentFirestore,
   driverDocumentStore,
+  vehicleStore,
   userStore,
   admin,
   adminDocumentUpload,

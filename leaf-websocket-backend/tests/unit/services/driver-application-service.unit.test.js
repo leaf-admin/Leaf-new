@@ -1,17 +1,23 @@
 const mockCollectionGet = jest.fn();
 const mockCollectionDocSet = jest.fn();
 const mockCollectionDocGet = jest.fn();
-const mockRealtimeOnce = jest.fn();
-const mockRealtimeRef = jest.fn(() => ({
-  once: mockRealtimeOnce
-}));
-const mockFirestoreCollection = jest.fn(() => ({
-  get: mockCollectionGet,
-  doc: jest.fn(() => ({
-    get: mockCollectionDocGet,
-    set: mockCollectionDocSet
-  }))
-}));
+// Native records the service reads besides users/driver_applications:
+// { collection: { id: data } } (driver_activation, vehicle links/catalog, stats).
+let mockNativeDocs = {};
+const NATIVE_COLLECTIONS = ['driver_activation', 'driver_vehicle_links', 'vehicle_catalog', 'driver_document_stats'];
+const nativeDoc = (name, id) => ({ id, exists: mockNativeDocs[name]?.[id] !== undefined, data: () => mockNativeDocs[name]?.[id] });
+const mockFirestoreCollection = jest.fn((name) => (NATIVE_COLLECTIONS.includes(name)
+  ? {
+    get: async () => ({ docs: Object.keys(mockNativeDocs[name] || {}).map(id => nativeDoc(name, id)) }),
+    doc: jest.fn((id) => ({ get: async () => nativeDoc(name, id) }))
+  }
+  : {
+    get: mockCollectionGet,
+    doc: jest.fn(() => ({
+      get: mockCollectionDocGet,
+      set: mockCollectionDocSet
+    }))
+  }));
 
 jest.mock('firebase-admin', () => ({
   firestore: {
@@ -24,14 +30,13 @@ jest.mock('firebase-admin', () => ({
 jest.mock('../../../firebase-config', () => ({
   getFirestore: jest.fn(() => ({
     collection: mockFirestoreCollection,
+    runTransaction: jest.fn(),
     batch: jest.fn(() => ({
       set: jest.fn(),
       commit: jest.fn().mockResolvedValue(undefined)
     }))
   })),
-  getRealtimeDB: jest.fn(() => ({
-    ref: mockRealtimeRef
-  }))
+  getRealtimeDB: jest.fn()
 }));
 
 jest.mock('../../../utils/logger', () => ({
@@ -67,13 +72,12 @@ describe('driver-application-service', () => {
     jest.clearAllMocks();
     jest.resetModules();
     mockFirestoreApplications([]);
-    mockRealtimeOnce.mockResolvedValue({ val: () => ({}) });
+    mockNativeDocs = {};
     service = require('../../../services/driver-application-service');
   });
 
   it('does not mark applications with only MEI documents as in_review while MEI is not required', async () => {
     const application = await service.buildApplication('driver_mei', {
-      db: {},
       userVehiclesRaw: {},
       vehiclesRaw: {},
       userData: {
@@ -207,22 +211,20 @@ describe('driver-application-service', () => {
   });
 
   it('builds a lightweight review queue summary from denormalized counters', async () => {
-    mockRealtimeOnce.mockResolvedValue({
-      val: () => ({
-        cnh: {
-          pending: 2,
-          approved: 4
-        },
-        crlv: {
-          pending: '3',
-          rejected: 1
-        }
-      })
-    });
+    mockNativeDocs.driver_document_stats = {
+      cnh: {
+        pending: 2,
+        approved: 4
+      },
+      crlv: {
+        pending: '3',
+        rejected: 1
+      }
+    };
 
     const result = await service.getReviewQueueSummary();
 
-    expect(mockRealtimeRef).toHaveBeenCalledWith('driver_documents_index_stats');
+    expect(mockFirestoreCollection).toHaveBeenCalledWith('driver_document_stats');
     expect(result).toMatchObject({
       source: 'driver_documents_index_stats',
       summary: {
@@ -238,7 +240,6 @@ describe('driver-application-service', () => {
 
   it('takes the vehicle from the active canonical CRLV link', async () => {
     const application = await service.buildApplication('driver_vehicle', {
-      db: {},
       userVehiclesRaw: {
         uv_1: {
           vehicleId: 'vehicle_1',
@@ -282,7 +283,6 @@ describe('driver-application-service', () => {
 
   it('exposes a pending profile vehicle submission without mutating the shared catalog', async () => {
     const application = await service.buildApplication('driver_vehicle_edit', {
-      db: {},
       userVehiclesRaw: {
         link_1: {
           vehicleId: 'vehicle_1',
@@ -344,18 +344,20 @@ describe('driver-application-service', () => {
         driverActivation: { activationState: 'APPROVED_NEEDS_LIVENESS' },
       }),
     });
-    mockRealtimeOnce
-      .mockResolvedValueOnce({
-        val: () => ({
-          status: 'approved',
-          data: {
-            nome: 'Nome CNH',
-            cpf: '11111111111',
-            dataNascimento: '01/02/1990',
+    mockNativeDocs.driver_activation = {
+      driver_partial: {
+        documents: {
+          cnh: {
+            status: 'approved',
+            data: {
+              nome: 'Nome CNH',
+              cpf: '11111111111',
+              dataNascimento: '01/02/1990',
+            },
           },
-        }),
-      })
-      .mockResolvedValueOnce({ val: () => ({}) });
+        },
+      },
+    };
 
     const application = await service.syncDriverApplication('driver_partial', {
       includeRatings: false,
@@ -392,14 +394,10 @@ describe('driver-application-service', () => {
       { id: 'r2', tripId: 't2', reviewerId: 'p2', rating: 5, createdAt: '2026-10-02T10:00:00.000Z' }
     ]);
     mockCollectionDocGet.mockResolvedValue({ exists: true, data: () => ({ usertype: 'driver', firstName: 'Ana' }) });
-    mockRealtimeOnce
-      .mockResolvedValueOnce({ val: () => ({}) })
-      .mockResolvedValueOnce({ val: () => ({}) });
-
     const application = await service.syncDriverApplication('driver_rated', { includeRatings: true });
 
     expect(mockListByTarget).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ namespace: 'operational' }), 'driver_rated');
-    expect(mockRealtimeRef).not.toHaveBeenCalledWith(expect.stringMatching(/^user_ratings\//));
+    expect(require('../../../firebase-config').getRealtimeDB).not.toHaveBeenCalled();
     expect(application.ratingInsights).toMatchObject({ averageRating: '4.5', totalRatings: 2 });
   });
 });

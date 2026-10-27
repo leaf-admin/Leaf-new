@@ -5,8 +5,9 @@
 // reads and writes the root the RTDB router used to serve, so existing
 // fixtures and path assertions keep working after a service moves from
 // `db.ref(...)` to a native repository. Transactions run one at a time.
-// Supports what the native repositories use: doc().get(), runTransaction()
-// with get/set (plain, merge, mergeFields)/update(FieldPath, delete)/delete.
+// Supports what the native repositories use: doc().get(), collection().get()
+// (whole-collection listing), runTransaction() with get/set (plain, merge,
+// mergeFields)/update(FieldPath, delete)/delete.
 const { FieldValue } = require('@google-cloud/firestore');
 
 const DEFAULT_COLLECTIONS = Object.freeze({
@@ -102,8 +103,13 @@ function createTreeFirestore(source, { collections = DEFAULT_COLLECTIONS } = {})
   return {
     commits,
     collection: (name) => {
-      rootOf(name);
-      return { doc: id => doc(name, id) };
+      const root = rootOf(name);
+      return {
+        doc: id => doc(name, id),
+        get: async () => ({
+          docs: Object.keys(access.read(root) || {}).map(id => readDoc({ collection: name, id }))
+        })
+      };
     },
     runTransaction(work) {
       const run = chain.then(async () => {

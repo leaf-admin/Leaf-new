@@ -4,6 +4,8 @@ const { logStructured } = require('../utils/logger');
 const { resolveUserPersistenceScope, resolvePersistenceScope } = require('./sandbox-persistence-context');
 const ratingFirestoreStore = require('./rating-firestore-store');
 const userStore = require('./user-store');
+const vehicleStore = require('./vehicle-store');
+const driverDocumentStore = require('./driver-document-store');
 
 const COLLECTION = 'driver_applications';
 const REVIEWABLE_DOCUMENT_TYPES = new Set(['cnh', 'crlv', 'antecedentes_criminais']);
@@ -57,14 +59,6 @@ function getFirestoreOrThrow() {
     throw new Error('Firestore indisponível para driver applications');
   }
   return firestore;
-}
-
-function getRealtimeDbOrThrow() {
-  const db = firebaseConfig?.getRealtimeDB ? firebaseConfig.getRealtimeDB() : null;
-  if (!db) {
-    throw new Error('Realtime Database indisponível para driver applications');
-  }
-  return db;
 }
 
 function parseRatingValue(value) {
@@ -365,17 +359,11 @@ function parseTimestampValue(value) {
 class DriverApplicationService {
   constructor() {
     this.firestore = null;
-    this.realtimeDb = null;
   }
 
   getFirestore() {
     if (!this.firestore) this.firestore = getFirestoreOrThrow();
     return this.firestore;
-  }
-
-  getRealtimeDb() {
-    if (!this.realtimeDb) this.realtimeDb = getRealtimeDbOrThrow();
-    return this.realtimeDb;
   }
 
   collection() {
@@ -407,7 +395,6 @@ class DriverApplicationService {
   }
 
   async buildApplication(driverId, {
-    db = null,
     userData = null,
     canonicalProfileData = null,
     canonicalCnhData = null,
@@ -415,7 +402,6 @@ class DriverApplicationService {
     vehiclesRaw = null,
     ratingsRaw = null
   } = {}) {
-    const realtimeDb = db || this.getRealtimeDb();
     const safeDriverId = normalizeId(driverId);
     if (!safeDriverId) return null;
 
@@ -432,8 +418,7 @@ class DriverApplicationService {
     let resolvedUserVehiclesRaw = userVehiclesRaw;
     let resolvedVehiclesRaw = vehiclesRaw;
     if (!resolvedUserVehiclesRaw) {
-      const snapshot = await realtimeDb.ref(`user_vehicles/${safeDriverId}`).once('value');
-      resolvedUserVehiclesRaw = snapshot.val() || {};
+      resolvedUserVehiclesRaw = await vehicleStore.readVehicleLinks(this.getFirestore(), safeDriverId) || {};
     }
     if (!resolvedVehiclesRaw) {
       const linkedVehicleIds = [...new Set(
@@ -442,13 +427,13 @@ class DriverApplicationService {
           .filter(Boolean)
           .map((value) => String(value))
       )];
-      const vehicleSnapshots = await Promise.all(
-        linkedVehicleIds.map((vehicleId) => realtimeDb.ref(`vehicles/${vehicleId}`).once('value'))
+      const vehicles = await Promise.all(
+        linkedVehicleIds.map((vehicleId) => vehicleStore.readVehicle(this.getFirestore(), vehicleId))
       );
       resolvedVehiclesRaw = {};
-      vehicleSnapshots.forEach((snapshot, index) => {
-        if (!snapshot?.exists()) return;
-        resolvedVehiclesRaw[linkedVehicleIds[index]] = snapshot.val() || {};
+      vehicles.forEach((vehicle, index) => {
+        if (vehicle === null) return;
+        resolvedVehiclesRaw[linkedVehicleIds[index]] = vehicle;
       });
     }
 
@@ -692,22 +677,20 @@ class DriverApplicationService {
     };
   }
 
-  async syncDriverApplication(driverId, { db = null, includeRatings = false } = {}) {
-    const realtimeDb = db || this.getRealtimeDb();
+  async syncDriverApplication(driverId, { includeRatings = false } = {}) {
     const safeDriverId = normalizeId(driverId);
     if (!safeDriverId) return null;
 
     // Avaliações vivem no Firestore (`ratings`, por targetUserId).
-    const [ratingRows, canonicalProfileSnapshot, canonicalCnhSnapshot] = await Promise.all([
+    const [ratingRows, canonicalProfileSnapshot, activation] = await Promise.all([
       includeRatings
         ? ratingFirestoreStore.listByTarget(this.getFirestore(), resolvePersistenceScope({}, { allowLegacyOperational: true }), safeDriverId)
         : Promise.resolve(null),
       this.getFirestore().collection('users').doc(safeDriverId).get(),
-      realtimeDb.ref(`driver_activation/${safeDriverId}/documents/cnh`).once('value')
+      driverDocumentStore.readActivation(this.getFirestore(), safeDriverId)
     ]);
-    const canonicalCnhNode = canonicalCnhSnapshot?.val?.() || {};
+    const canonicalCnhNode = activation?.documents?.cnh || {};
     const application = await this.buildApplication(safeDriverId, {
-      db: realtimeDb,
       ratingsRaw: ratingRows ? Object.fromEntries(ratingRows.map((rating) => [rating.id, rating])) : null,
       canonicalProfileData: canonicalProfileSnapshot?.exists
         ? canonicalProfileSnapshot.data() || {}
@@ -724,21 +707,16 @@ class DriverApplicationService {
     return application;
   }
 
-  async syncAllDriverApplications({ db = null } = {}) {
-    const realtimeDb = db || this.getRealtimeDb();
-    const [users, userVehiclesSnapshot, vehiclesSnapshot] = await Promise.all([
-      require('./user-store').queryUsers(this.getFirestore(), 'usertype', 'driver'),
-      realtimeDb.ref('user_vehicles').once('value'),
-      realtimeDb.ref('vehicles').once('value')
+  async syncAllDriverApplications() {
+    const [users, allUserVehicles, allVehicles] = await Promise.all([
+      userStore.queryUsers(this.getFirestore(), 'usertype', 'driver'),
+      vehicleStore.listVehicleLinks(this.getFirestore()),
+      vehicleStore.listVehicles(this.getFirestore())
     ]);
-
-    const allUserVehicles = userVehiclesSnapshot.val() || {};
-    const allVehicles = vehiclesSnapshot.val() || {};
 
     const applications = [];
     for (const driverId of Object.keys(users)) {
       const application = await this.buildApplication(driverId, {
-        db: realtimeDb,
         userData: users[driverId],
         userVehiclesRaw: allUserVehicles[driverId] || {},
         vehiclesRaw: allVehicles
@@ -783,7 +761,7 @@ class DriverApplicationService {
     let applications = snapshot.docs.map((doc) => doc.data() || {});
 
     if (applications.length === 0) {
-      applications = await this.syncAllDriverApplications({});
+      applications = await this.syncAllDriverApplications();
     }
     const requestedPersistenceScope = String(persistenceScope || '').trim().toLowerCase();
     if (!['operational', 'sandbox'].includes(requestedPersistenceScope)) {
@@ -849,7 +827,7 @@ class DriverApplicationService {
     let applications = snapshot.docs.map((doc) => doc.data() || {});
 
     if (applications.length === 0) {
-      applications = await this.syncAllDriverApplications({});
+      applications = await this.syncAllDriverApplications();
     }
     const requestedPersistenceScope = String(persistenceScope || '').trim().toLowerCase();
     if (!['operational', 'sandbox'].includes(requestedPersistenceScope)) {
@@ -979,9 +957,7 @@ class DriverApplicationService {
   }
 
   async getReviewQueueSummary() {
-    const db = this.getRealtimeDb();
-    const snapshot = await db.ref('driver_documents_index_stats').once('value');
-    const statsByType = snapshot.val() || {};
+    const statsByType = await driverDocumentStore.listStats(this.getFirestore());
     const byStatus = {
       pending: 0,
       approved: 0,

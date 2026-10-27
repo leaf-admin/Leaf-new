@@ -11,6 +11,7 @@ const {
   getDocumentFirestore,
   driverDocumentStore,
   userStore,
+  vehicleStore,
   admin,
   adminDocumentUpload,
   assertCurrentCrlvReviewBinding,
@@ -257,8 +258,7 @@ router.post(
     }
 
     try {
-      if (firebaseConfig && firebaseConfig.getRealtimeDB) {
-        const db = firebaseConfig.getRealtimeDB();
+      if (firebaseConfig && firebaseConfig.getFirestore) {
         const firestore = getDocumentFirestore();
 
         // Verificar se o documento existe
@@ -425,7 +425,6 @@ router.post(
 
         if (DASHBOARD_REVIEWABLE_DOCUMENT_TYPES.has(normalizedDocumentType)) {
           existingDocument = await runWithCurrentDocumentBinding({
-            db,
             driverId,
             documentType: normalizedDocumentType,
             expectedBinding: expectedReviewBinding,
@@ -489,7 +488,6 @@ router.post(
 
         try {
           await driverApplicationService.syncDriverApplication(driverId, {
-            db,
             includeRatings: false
           });
         } catch (syncError) {
@@ -803,14 +801,13 @@ router.post(
         });
       }
 
-      if (!firebaseConfig || !firebaseConfig.getRealtimeDB) {
+      if (!firebaseConfig || !firebaseConfig.getFirestore) {
         return res.status(503).json({
           success: false,
           message: 'Firebase não configurado.'
         });
       }
 
-      const db = firebaseConfig.getRealtimeDB();
       const firestore = getDocumentFirestore();
       if (!(await driverDocumentStore.readUser(firestore, driverId))) {
         return res.status(404).json({
@@ -898,7 +895,6 @@ router.post(
       };
 
       await runWithDocumentMutationLease({
-        db,
         driverId,
         documentType,
         scope: `dashboard_upload_${submissionId}`
@@ -941,7 +937,6 @@ router.post(
 
       try {
         await driverApplicationService.syncDriverApplication(driverId, {
-          db,
           includeRatings: false
         });
       } catch (syncError) {
@@ -1048,22 +1043,20 @@ router.post('/api/drivers/:driverId/vehicle/config', authenticateJWT, requireRol
       });
     }
 
-    if (!firebaseConfig || !firebaseConfig.getRealtimeDB) {
+    if (!firebaseConfig || !firebaseConfig.getFirestore) {
       return res.status(503).json({
         success: false,
         message: 'Firebase não configurado.'
       });
     }
 
-    const db = firebaseConfig.getRealtimeDB();
-    const driverRecord = await userStore.readUser(firebaseConfig.getFirestore(), driverId);
+    const firestore = firebaseConfig.getFirestore();
+    const driverRecord = await userStore.readUser(firestore, driverId);
     if (!driverRecord) {
       return res.status(404).json({ success: false, message: 'Motorista não encontrado.' });
     }
 
-    const userVehiclesRef = db.ref(`user_vehicles/${driverId}`);
-    const userVehiclesSnapshot = await userVehiclesRef.once('value');
-    const userVehicles = userVehiclesSnapshot.val() || {};
+    const userVehicles = await vehicleStore.readVehicleLinks(firestore, driverId) || {};
     const selected = userVehicles[userVehicleId];
 
     if (!selected) {
@@ -1093,10 +1086,8 @@ router.post('/api/drivers/:driverId/vehicle/config', authenticateJWT, requireRol
     if (requestsOperationalVehicleConfig) {
       let canonicalCrlvNode;
       try {
-        const crlvSnapshot = await db
-          .ref(`driver_activation/${driverId}/documents/crlv`)
-          .once('value');
-        canonicalCrlvNode = crlvSnapshot.val() || {};
+        const activation = await driverDocumentStore.readActivation(firestore, driverId);
+        canonicalCrlvNode = activation?.documents?.crlv || {};
       } catch (crlvReadError) {
         logStructured('error', 'Falha ao ler CRLV canônico antes da configuração operacional do veículo', {
           service: 'dashboard-routes',
@@ -1126,10 +1117,7 @@ router.post('/api/drivers/:driverId/vehicle/config', authenticateJWT, requireRol
       }
 
       try {
-        const selectedVehicleSnapshot = await db
-          .ref(`vehicles/${selectedVehicleId}`)
-          .once('value');
-        canonicalSelectedVehicleData = selectedVehicleSnapshot.val() || {};
+        canonicalSelectedVehicleData = await vehicleStore.readVehicle(firestore, selectedVehicleId) || {};
       } catch (vehicleReadError) {
         logStructured('error', 'Falha ao ler identidade canônica do veículo antes da configuração operacional', {
           service: 'dashboard-routes',
@@ -1250,7 +1238,7 @@ router.post('/api/drivers/:driverId/vehicle/config', authenticateJWT, requireRol
       updates[`users/${driverId}/updatedAt`] = nowIso;
     }
 
-    await db.ref().update(updates);
+    await vehicleStore.commitUpdates(firestore, updates);
 
     await auditService.logEvent({
       userId: req.user?.id || req.user?.userId || req.user?.email || 'dashboard',
@@ -1402,11 +1390,11 @@ router.post('/api/drivers/:driverId/vehicle/config', authenticateJWT, requireRol
     try {
       const redis = redisPool.getConnection();
       await redisPool.ensureConnection();
-      const userData = await userStore.readUser(firebaseConfig.getFirestore(), driverId) || {};
-      const selectedVehicleSnapshot = !canonicalSelectedVehicleData && selected.vehicleId
-        ? await db.ref(`vehicles/${selected.vehicleId}`).once('value')
+      const userData = await userStore.readUser(firestore, driverId) || {};
+      const selectedVehicleRecord = !canonicalSelectedVehicleData && selected.vehicleId
+        ? await vehicleStore.readVehicle(firestore, selected.vehicleId)
         : null;
-      const selectedVehicleData = canonicalSelectedVehicleData || selectedVehicleSnapshot?.val() || {};
+      const selectedVehicleData = canonicalSelectedVehicleData || selectedVehicleRecord || {};
       const plate = selectedVehicleData.plate || selectedVehicleData.vehicleNumber || userData.vehicleNumber || userData.carPlate || '';
       const resolvedCategory = normalizedCategory ||
         selectedVehicleData.manualCategory ||
@@ -1524,8 +1512,7 @@ router.post('/api/drivers/applications/:id/approve', authenticateJWT, requireRol
     const adminId = req.user.id; // ✅ ID do admin logado
 
     try {
-      if (firebaseConfig && firebaseConfig.getRealtimeDB) {
-        const db = firebaseConfig.getRealtimeDB();
+      if (firebaseConfig && firebaseConfig.getFirestore) {
 
         // Verificar se o usuário existe
         const firestore = getDocumentFirestore();
@@ -1566,7 +1553,7 @@ router.post('/api/drivers/applications/:id/approve', authenticateJWT, requireRol
           }
         });
 
-        // ✅ Atualizar status de aprovação no Firebase Realtime Database
+        // ✅ Atualizar status de aprovação em users/{id}
         const updates = {
           approved: true,
           approvedAt: new Date().toISOString(),
@@ -1581,7 +1568,7 @@ router.post('/api/drivers/applications/:id/approve', authenticateJWT, requireRol
           updatedAt: new Date().toISOString()
         };
 
-        // ✅ Salvar no Firebase Realtime Database
+        // ✅ Salvar em users/{id} (Firestore)
         await userStore.updateUser(firestore, id, updates);
 
         // ✅ Atualizar também todos os documentos para aprovados
@@ -1640,7 +1627,6 @@ router.post('/api/drivers/applications/:id/approve', authenticateJWT, requireRol
 
         try {
           await driverApplicationService.syncDriverApplication(id, {
-            db,
             includeRatings: false
           });
         } catch (syncError) {
@@ -1692,8 +1678,7 @@ router.post('/api/drivers/applications/:id/reject', authenticateJWT, requireRole
     }
 
     try {
-      if (firebaseConfig && firebaseConfig.getRealtimeDB) {
-        const db = firebaseConfig.getRealtimeDB();
+      if (firebaseConfig && firebaseConfig.getFirestore) {
 
         // Verificar se o usuário existe
         const firestore = getDocumentFirestore();
@@ -1706,7 +1691,7 @@ router.post('/api/drivers/applications/:id/reject', authenticateJWT, requireRole
           return res.status(400).json({ error: 'Usuário não é um motorista' });
         }
 
-        // ✅ Atualizar status de rejeição no Firebase Realtime Database
+        // ✅ Atualizar status de rejeição em users/{id}
         const updates = {
           approved: false,
           rejectedAt: new Date().toISOString(),
@@ -1721,7 +1706,7 @@ router.post('/api/drivers/applications/:id/reject', authenticateJWT, requireRole
           updatedAt: new Date().toISOString()
         };
 
-        // ✅ Salvar no Firebase Realtime Database
+        // ✅ Salvar em users/{id} (Firestore)
         await userStore.updateUser(firestore, id, updates);
 
         // ✅ Atualizar também todos os documentos para rejeitados
@@ -1773,7 +1758,6 @@ router.post('/api/drivers/applications/:id/reject', authenticateJWT, requireRole
 
         try {
           await driverApplicationService.syncDriverApplication(id, {
-            db,
             includeRatings: false
           });
         } catch (syncError) {

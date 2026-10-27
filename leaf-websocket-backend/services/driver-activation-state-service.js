@@ -1,7 +1,7 @@
-const firebaseConfig = require('../firebase-config');
 const { logStructured } = require('../utils/logger');
 const userStore = require('./user-store');
 const driverDocumentStore = require('./driver-document-store');
+const vehicleStore = require('./vehicle-store');
 const { normalizeVehicleOcrPayload } = require('../utils/vehicle-ocr-data');
 
 const DRIVER_ACTIVATION_STATES = Object.freeze({
@@ -165,10 +165,9 @@ function resolveLivenessEvidence(userData = {}) {
   };
 }
 
-async function readUserVehicles(db, driverId) {
+async function readUserVehicles(firestore, driverId) {
   try {
-    const snapshot = await db.ref(`user_vehicles/${driverId}`).once('value');
-    const raw = snapshot.val() || {};
+    const raw = await vehicleStore.readVehicleLinks(firestore, driverId) || {};
     return Object.entries(raw).map(([id, value]) => ({
       id,
       ...(value || {})
@@ -190,7 +189,7 @@ function isCanonicalVehicleApproved(vehicle = {}) {
     (status === 'approved' || status === 'active');
 }
 
-async function readActiveVehicleRecord(db, driverId, entries = [], prefetched = null) {
+async function readActiveVehicleRecord(firestore, driverId, entries = [], prefetched = null) {
   const activeEntry = entries.find((vehicle) =>
     vehicle?.isActive === true && isCanonicalVehicleApproved(vehicle)
   );
@@ -209,10 +208,9 @@ async function readActiveVehicleRecord(db, driverId, entries = [], prefetched = 
   try {
     // A read of the same vehicle started alongside the first round is just as
     // fresh; any other vehicle is read now, as before.
-    const snapshot = prefetched?.vehicleId === vehicleId && prefetched.snapshot
-      ? await prefetched.snapshot
-      : await db.ref(`vehicles/${vehicleId}`).once('value');
-    const data = snapshot.val();
+    const data = prefetched?.vehicleId === vehicleId && prefetched.vehicle
+      ? await prefetched.vehicle
+      : await vehicleStore.readVehicle(firestore, vehicleId);
     return {
       attempted: true,
       resolved: true,
@@ -395,7 +393,6 @@ function resolveVehicleStatusFromEntries(
 
 async function resolveDriverActivationState({
   driverId,
-  db = null,
   activationNode = null,
   userData = null,
   vehicleIdHint = null,
@@ -406,12 +403,7 @@ async function resolveDriverActivationState({
     throw new Error('DRIVER_ID_REQUIRED');
   }
 
-  const realtimeDb = db || firebaseConfig?.getRealtimeDB?.();
-  if (!realtimeDb) {
-    throw new Error('FIREBASE_RTDB_UNAVAILABLE');
-  }
-  // users and driver_activation are native Firestore records; vehicles still
-  // go through the router (`realtimeDb`).
+  // users, driver_activation and the vehicle collections are native Firestore records.
   const nativeStore = () => {
     const store = userStore.resolveFirestore({ firestore });
     if (!store) throw new Error('FIREBASE_FIRESTORE_UNAVAILABLE');
@@ -426,19 +418,19 @@ async function resolveDriverActivationState({
   const prefetchedVehicle = safeVehicleIdHint
     ? {
       vehicleId: safeVehicleIdHint,
-      snapshot: realtimeDb.ref(`vehicles/${safeVehicleIdHint}`).once('value')
+      vehicle: vehicleStore.readVehicle(nativeStore(), safeVehicleIdHint)
     }
     : null;
-  prefetchedVehicle?.snapshot?.catch?.(() => {});
+  prefetchedVehicle?.vehicle?.catch?.(() => {});
   const [resolvedActivationSnapshot, resolvedUserSnapshot, vehicles] = await Promise.all([
     activationNode ? Promise.resolve(null) : driverDocumentStore.readActivation(nativeStore(), safeDriverId),
     userData ? Promise.resolve(null) : userStore.readUser(nativeStore(), safeDriverId),
-    readUserVehicles(realtimeDb, safeDriverId)
+    readUserVehicles(nativeStore(), safeDriverId)
   ]);
 
   const resolvedActivationNode = activationNode || resolvedActivationSnapshot || {};
   const resolvedUserData = userData || resolvedUserSnapshot || {};
-  const activeVehicleRead = await readActiveVehicleRecord(realtimeDb, safeDriverId, vehicles, prefetchedVehicle);
+  const activeVehicleRead = await readActiveVehicleRecord(nativeStore(), safeDriverId, vehicles, prefetchedVehicle);
   const canonicalCrlvNode = resolvedActivationNode?.documents?.crlv || null;
   const crlvPresent = Boolean(canonicalCrlvNode);
   const crlvStatus = normalizeStatus(canonicalCrlvNode?.status || 'pending');

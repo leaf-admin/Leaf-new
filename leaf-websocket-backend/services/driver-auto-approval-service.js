@@ -39,9 +39,9 @@ function createDriverAutoApprovalService({
     return { approved: false, status: 'needs_review', reason };
   }
 
-  async function maybeAutoApprove({ db, driverId, canonicalState }) {
+  async function maybeAutoApprove({ driverId, canonicalState }) {
     if (!isAutoApprovalEnabled(env)) return { approved: false, status: 'disabled' };
-    if (!db || !driverId || canonicalState?.canGoOnline !== true) return { approved: false, status: 'not_eligible' };
+    if (!driverId || canonicalState?.canGoOnline !== true) return { approved: false, status: 'not_eligible' };
 
     const user = await userStore.readUser(getFirestore(), driverId) || {};
     if (isAlreadyApproved(user)) return { approved: false, status: 'already_approved' };

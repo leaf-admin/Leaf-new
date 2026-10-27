@@ -18,7 +18,7 @@
 // Writes replace exactly the given field paths (RTDB `set` semantics at that
 // path) inside one transaction; null or an empty object deletes the field.
 const { FieldPath, FieldValue } = require('@google-cloud/firestore');
-const { docView, fromView, getIn, normalize } = require('./rtdb-root-router');
+const { docView, fromView, getIn, normalize, setIn } = require('./rtdb-root-router');
 
 const COLLECTIONS = Object.freeze({
   activation: 'driver_activation',
@@ -30,11 +30,12 @@ const COLLECTIONS = Object.freeze({
   plateIndex: 'vehicle_plate_index'
 });
 
-// RTDB roots the CRLV vehicle link service still names in its updates.
+// RTDB-style roots the vehicle updates still name ({ 'root/key/a': value }).
 const VEHICLE_LINK_ROOTS = Object.freeze({
   vehicles: COLLECTIONS.vehicles,
   user_vehicles: COLLECTIONS.vehicleLinks,
-  vehicle_plate_index: COLLECTIONS.plateIndex
+  vehicle_plate_index: COLLECTIONS.plateIndex,
+  users: COLLECTIONS.users
 });
 
 // Field writes on the activation record and on the canonical user record.
@@ -83,6 +84,12 @@ async function readView(firestore, collection, id) {
 const readActivation = (firestore, driverId) => readView(firestore, COLLECTIONS.activation, driverId);
 const readUser = (firestore, driverId) => readView(firestore, COLLECTIONS.users, driverId);
 
+// { documentType: { pending, approved, rejected } } for the review queue.
+async function listStats(firestore) {
+  const snapshot = await requireFirestore(firestore).collection(COLLECTIONS.stats).get();
+  return Object.fromEntries((snapshot?.docs || []).map(doc => [doc.id, docView(doc.data()) || {}]));
+}
+
 // Current document, user projection and history entry for one submission.
 async function readDocumentBinding(firestore, { driverId, documentType, submissionId }) {
   const [activation, user] = await Promise.all([
@@ -97,15 +104,16 @@ async function readDocumentBinding(firestore, { driverId, documentType, submissi
 }
 
 // Apply field writes ({ collection, id, field, value }) atomically. `field` is a
-// path inside the document; an empty field means the whole record is one
-// primitive (the plate index).
+// path inside the document; an empty field replaces the whole record (a
+// primitive such as the plate index is stored in PRIMITIVE_FIELD). The
+// canonical users record only takes field writes.
 async function commit(firestore, writes) {
   const store = requireFirestore(firestore);
   const byDoc = new Map();
   for (const write of writes) {
     const id = docId(write.id);
     const key = `${write.collection}/${id}`;
-    if (!byDoc.has(key)) byDoc.set(key, { ref: store.collection(write.collection).doc(id), fields: [] });
+    if (!byDoc.has(key)) byDoc.set(key, { collection: write.collection, ref: store.collection(write.collection).doc(id), fields: [] });
     const field = write.field === undefined || write.field === null || (Array.isArray(write.field) && !write.field.length)
       ? []
       : fieldSegments(write.field);
@@ -122,14 +130,26 @@ async function commit(firestore, writes) {
       if (whole) {
         if (doc.fields.length > 1) throw fail('DRIVER_DOCUMENT_STORE_FIELD_CONFLICT', 'Registro primitivo com campos');
         const value = normalize(clone(whole[1]));
+        if (doc.collection === COLLECTIONS.users) {
+          throw fail('DRIVER_DOCUMENT_STORE_CANONICAL_SET', 'Gravação do registro inteiro do usuário não suportada');
+        }
         if (value === null) tx.delete(doc.ref);
-        else if (typeof value === 'object') throw fail('DRIVER_DOCUMENT_STORE_INVALID_FIELD', 'Registro inteiro precisa de campos');
+        else if (typeof value === 'object' && !Array.isArray(value)) tx.set(doc.ref, fromView(value, raw ?? undefined));
         else tx.set(doc.ref, { [PRIMITIVE_FIELD]: value });
         return;
       }
       const paths = doc.fields.map(([field]) => field.join('\u0000'));
       if (paths.some((path, i) => paths.some((other, j) => i !== j && (other === path || other.startsWith(`${path}\u0000`))))) {
         throw fail('DRIVER_DOCUMENT_STORE_FIELD_CONFLICT', 'Campos sobrepostos na mesma gravação');
+      }
+      // A record left with no fields is deleted, as RTDB (and the router) did;
+      // the canonical users record is never deleted here.
+      if (doc.collection !== COLLECTIONS.users) {
+        const next = doc.fields.reduce((view, [field, value]) => setIn(view, field, value), docView(raw));
+        if (next === null || typeof next !== 'object') {
+          if (raw) tx.delete(doc.ref);
+          return;
+        }
       }
       const data = {};
       const mergeFields = [];
@@ -207,6 +227,7 @@ module.exports = {
   userField,
   readActivation,
   readUser,
+  listStats,
   readDocumentBinding,
   commit,
   vehicleLinkWrites,

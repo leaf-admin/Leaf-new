@@ -494,11 +494,10 @@ router.post(
         });
       }
 
-      const db = firebaseConfig?.getRealtimeDB?.();
-      if (!db) {
+      if (!firebaseConfig?.getFirestore?.()) {
         return res.status(503).json({
           success: false,
-          message: 'Realtime Database indisponível.'
+          message: 'Banco de dados indisponível.'
         });
       }
 
@@ -597,7 +596,6 @@ router.post(
       };
 
       await commitDocumentSubmissionState({
-        db,
         driverId,
         documentType,
         activationDocument: activationDocPayload,
@@ -606,7 +604,6 @@ router.post(
       });
       try {
         await driverApplicationService.syncDriverApplication(driverId, {
-          db,
           includeRatings: false
         });
       } catch (syncError) {
