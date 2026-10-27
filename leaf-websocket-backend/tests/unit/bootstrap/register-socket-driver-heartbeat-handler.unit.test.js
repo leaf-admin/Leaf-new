@@ -988,4 +988,63 @@ describe('register-socket-driver-heartbeat-handler', () => {
       })
     );
   });
+
+  it('recovers a driver that the cleanup marked STALE_HEARTBEAT once an authenticated heartbeat arrives', async () => {
+    const socket = createSocket();
+    const redis = {
+      hgetall: jest.fn(async (key) => {
+        if (String(key).startsWith('driver_online_daily:')) {
+          return { totalMs: '0', sessionStartedAtMs: String(Date.now() - 1000) };
+        }
+        return {
+          id: 'driver_1',
+          isOnline: 'false',
+          status: 'OFFLINE',
+          dispatchEligible: 'false',
+          dispatchEligibilityCode: 'STALE_HEARTBEAT',
+          dispatchEligibilityCheckedAt: new Date(Date.now() - 60000).toISOString(),
+          lat: '-22.9',
+          lng: '-43.2'
+        };
+      }),
+      hset: jest.fn().mockResolvedValue(1),
+      expire: jest.fn().mockResolvedValue(1),
+      zscore: jest.fn().mockResolvedValue('1'),
+      geoadd: jest.fn().mockResolvedValue(1),
+      zrem: jest.fn().mockResolvedValue(1),
+      sadd: jest.fn().mockResolvedValue(1),
+      srem: jest.fn().mockResolvedValue(1)
+    };
+    const enforceSubscriptionForOnline = jest.fn().mockResolvedValue({ allowed: true });
+    const enforceDailyKYCForOnline = jest.fn().mockResolvedValue({ allowed: true });
+
+    registerSocketDriverHeartbeatHandler({
+      socket,
+      redisPool: { getConnection: jest.fn(() => redis) },
+      logStructured: jest.fn(),
+      enforceSubscriptionForOnline,
+      enforceDailyKYCForOnline,
+      saveDriverLocation: jest.fn(),
+      vehicleLockManager: { renewLock: jest.fn() }
+    });
+
+    await socket.trigger('driverHeartbeat', { lat: -22.9, lng: -43.2, tripStatus: 'available', isInTrip: false });
+
+    // Recovery still goes through the online gates before eligibility is restored.
+    expect(enforceSubscriptionForOnline).toHaveBeenCalledWith('driver_1');
+    expect(enforceDailyKYCForOnline).toHaveBeenCalledWith('driver_1');
+    expect(driverEligibilityService.isDriverEligibleForRide).toHaveBeenCalledWith(
+      'driver_1',
+      null,
+      expect.objectContaining({ dispatchEligibilityCode: 'STALE_HEARTBEAT' })
+    );
+    expect(commitDriverOnlineProjection).toHaveBeenCalledWith(
+      redis,
+      expect.objectContaining({
+        isOnline: true,
+        dispatchEligible: true,
+        fields: expect.objectContaining({ dispatchEligible: 'true', dispatchEligibilityCode: 'ELIGIBLE' })
+      })
+    );
+  });
 });
